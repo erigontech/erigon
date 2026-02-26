@@ -17,12 +17,10 @@
 package kv
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
 	"maps"
-	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -30,12 +28,9 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/mdbx-go/mdbx"
+	"github.com/erigontech/erigon/common/hexutil"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
-
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 )
 
 // Adapts an RoDB to the RwDB interface (invoking write operations results in error)
@@ -54,17 +49,6 @@ func (w RwWrapper) BeginRw(ctx context.Context) (RwTx, error) {
 }
 func (w RwWrapper) BeginRwNosync(ctx context.Context) (RwTx, error) {
 	return nil, errors.New("BeginRwNosync not implemented")
-}
-
-func DefaultPageSize() datasize.ByteSize {
-	osPageSize := os.Getpagesize()
-	if osPageSize < 4096 { // reduce further may lead to errors (because some data is just big)
-		osPageSize = 4096
-	} else if osPageSize > mdbx.MaxPageSize {
-		osPageSize = mdbx.MaxPageSize
-	}
-	osPageSize = osPageSize / 4096 * 4096 // ensure it's rounded
-	return datasize.ByteSize(osPageSize)
 }
 
 // BigChunks - read `table` by big chunks - restart read transaction after each 1 minutes
@@ -130,8 +114,6 @@ func bytes2bool(in []byte) bool {
 	}
 	return in[0] == 1
 }
-
-var ErrChanged = errors.New("key must not change")
 
 // EnsureNotChangedBool - used to store immutable config flags in db. protects from human mistakes
 func EnsureNotChangedBool(tx GetPut, bucket string, k []byte, value bool) (notChanged, enabled bool, err error) {
@@ -264,49 +246,50 @@ func IncrementKey(tx RwTx, table string, k []byte) error {
 }
 
 type DomainEntryDiff struct {
-	Key           string
-	Value         []byte
-	PrevStepBytes []byte
+	Key   string
+	Value []byte // nil means "delete only" (prev value was at a different step), non-nil means "restore this value"
 }
 
 // DomainDiff represents a domain of state changes.
 type DomainDiff struct {
 	// We can probably flatten these into single slices for GC/cache optimization
-	keys          map[string][]byte
 	prevValues    map[string][]byte
 	prevValsSlice []DomainEntryDiff
 
-	prevStepBuf, currentStepBuf, keyBuf []byte
+	currentStepBuf, keyBuf []byte
 }
 
 func (d *DomainDiff) Copy() *DomainDiff {
-	return &DomainDiff{keys: maps.Clone(d.keys), prevValues: maps.Clone(d.prevValues)}
+	return &DomainDiff{prevValues: maps.Clone(d.prevValues)}
+}
+
+func (d *DomainDiff) Len() int {
+	if d == nil {
+		return 0
+	}
+	return len(d.prevValues)
 }
 
 // RecordDelta records a state change.
-func (d *DomainDiff) DomainUpdate(k []byte, step Step, prevValue []byte, prevStep Step) {
-	if d.keys == nil {
-		d.keys = make(map[string][]byte, 16)
+// prevValue is the previous value at the key. If prevStep != step, the previous value lives
+// at a different step position in the DB and doesn't need restoring on unwind (just delete current).
+// We encode this as nil in prevValues. If prevStep == step, we store the actual prevValue.
+func (d *DomainDiff) DomainUpdate(k []byte, step Step, prevValue []byte) {
+	if d.prevValues == nil {
 		d.prevValues = make(map[string][]byte, 16)
-		d.prevStepBuf = make([]byte, 8)
 		d.currentStepBuf = make([]byte, 8)
 	}
-	binary.BigEndian.PutUint64(d.prevStepBuf, ^uint64(prevStep))
 	binary.BigEndian.PutUint64(d.currentStepBuf, ^uint64(step))
 
 	d.keyBuf = append(append(d.keyBuf[:0], k...), d.currentStepBuf...)
-	key := toStringZeroCopy(d.keyBuf[:len(k)])
-	if _, ok := d.keys[key]; !ok {
-		d.keys[strings.Clone(key)] = common.Copy(d.prevStepBuf)
-	}
 
 	valsKey := toStringZeroCopy(d.keyBuf)
 	if _, ok := d.prevValues[valsKey]; !ok {
 		valsKeySCopy := strings.Clone(valsKey)
-		if bytes.Equal(d.currentStepBuf, d.prevStepBuf) {
-			d.prevValues[valsKeySCopy] = common.Copy(prevValue)
+		if prevValue == nil {
+			d.prevValues[valsKeySCopy] = []byte{} // no previous value (new key)
 		} else {
-			d.prevValues[valsKeySCopy] = []byte{} // We need to delete the current step but restore the previous one
+			d.prevValues[valsKeySCopy] = common.Copy(prevValue)
 		}
 		d.prevValsSlice = nil
 	}
@@ -321,7 +304,6 @@ func (d *DomainDiff) GetDiffSet() (keysToValue []DomainEntryDiff) {
 	for k, v := range d.prevValues {
 		d.prevValsSlice[i].Key = k
 		d.prevValsSlice[i].Value = v
-		d.prevValsSlice[i].PrevStepBytes = d.keys[k[:len(k)-8]]
 		i++
 	}
 	sort.Slice(d.prevValsSlice, func(i, j int) bool {

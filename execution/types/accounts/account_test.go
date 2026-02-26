@@ -21,19 +21,18 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/empty"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/empty"
 )
 
 func TestEmptyAccount(t *testing.T) {
 	t.Parallel()
 	a := Account{
-		Initialised: true,
 		Nonce:       100,
-		Balance:     *new(uint256.Int),
+		Balance:     uint256.Int{},
 		Root:        empty.RootHash, // extAccount doesn't have Root value
-		CodeHash:    empty.CodeHash, // extAccount doesn't have CodeHash value
+		CodeHash:    EmptyCodeHash,  // extAccount doesn't have CodeHash value
 		Incarnation: 5,
 	}
 
@@ -80,11 +79,10 @@ func TestEmptyAccount_BufferStrangeBehaviour(t *testing.T) {
 func TestAccountEncodeWithCode(t *testing.T) {
 	t.Parallel()
 	a := Account{
-		Initialised: true,
 		Nonce:       2,
-		Balance:     *new(uint256.Int).SetUint64(1000),
+		Balance:     *uint256.NewInt(0).SetUint64(1000),
 		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-		CodeHash:    common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
+		CodeHash:    InternCodeHash(common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3}))),
 		Incarnation: 4,
 	}
 
@@ -101,11 +99,10 @@ func TestAccountEncodeWithCode(t *testing.T) {
 func TestAccountEncodeWithCodeWithStorageSizeHack(t *testing.T) {
 	t.Parallel()
 	a := Account{
-		Initialised: true,
 		Nonce:       2,
-		Balance:     *new(uint256.Int).SetUint64(1000),
+		Balance:     *uint256.NewInt(0).SetUint64(1000),
 		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-		CodeHash:    common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
+		CodeHash:    InternCodeHash(common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3}))),
 		Incarnation: 5,
 	}
 
@@ -122,11 +119,10 @@ func TestAccountEncodeWithCodeWithStorageSizeHack(t *testing.T) {
 func TestAccountEncodeWithoutCode(t *testing.T) {
 	t.Parallel()
 	a := Account{
-		Initialised: true,
 		Nonce:       2,
-		Balance:     *new(uint256.Int).SetUint64(1000),
+		Balance:     *uint256.NewInt(0).SetUint64(1000),
 		Root:        empty.RootHash, // extAccount doesn't have Root value
-		CodeHash:    empty.CodeHash, // extAccount doesn't have CodeHash value
+		CodeHash:    EmptyCodeHash,  // extAccount doesn't have CodeHash value
 		Incarnation: 5,
 	}
 
@@ -143,11 +139,10 @@ func TestAccountEncodeWithoutCode(t *testing.T) {
 func TestEncodeAccountWithEmptyBalanceNonNilContractAndNotZeroIncarnation(t *testing.T) {
 	t.Parallel()
 	a := Account{
-		Initialised: true,
 		Nonce:       0,
-		Balance:     *uint256.NewInt(0),
+		Balance:     uint256.Int{},
 		Root:        common.HexToHash("123"),
-		CodeHash:    common.HexToHash("123"),
+		CodeHash:    InternCodeHash(common.HexToHash("123")),
 		Incarnation: 1,
 	}
 	encodedAccount := SerialiseV3(&a)
@@ -162,9 +157,8 @@ func TestEncodeAccountWithEmptyBalanceNonNilContractAndNotZeroIncarnation(t *tes
 func TestEncodeAccountWithEmptyBalanceAndNotZeroIncarnation(t *testing.T) {
 	t.Parallel()
 	a := Account{
-		Initialised: true,
 		Nonce:       0,
-		Balance:     *uint256.NewInt(0),
+		Balance:     uint256.Int{},
 		Incarnation: 1,
 	}
 	encodedAccount := SerialiseV3(&a)
@@ -187,9 +181,6 @@ func TestEncodeAccountWithEmptyBalanceAndNotZeroIncarnation(t *testing.T) {
 
 func isAccountsEqual(t *testing.T, src, dst Account) {
 	t.Helper()
-	if dst.Initialised != src.Initialised {
-		t.Fatal("cant decode the account Initialised", src.Initialised, dst.Initialised)
-	}
 
 	if dst.CodeHash != src.CodeHash {
 		t.Fatal("cant decode the account CodeHash", src.CodeHash, dst.CodeHash)
@@ -210,11 +201,10 @@ func isAccountsEqual(t *testing.T, src, dst Account) {
 func TestIncarnationForEmptyAccount(t *testing.T) {
 	t.Parallel()
 	a := Account{
-		Initialised: true,
 		Nonce:       100,
-		Balance:     *new(uint256.Int),
+		Balance:     uint256.Int{},
 		Root:        empty.RootHash,
-		CodeHash:    empty.CodeHash,
+		CodeHash:    EmptyCodeHash,
 		Incarnation: 4,
 	}
 
@@ -246,11 +236,10 @@ func TestEmptyIncarnationForEmptyAccount2(t *testing.T) {
 func TestIncarnationWithNonEmptyAccount(t *testing.T) {
 	t.Parallel()
 	a := Account{
-		Initialised: true,
 		Nonce:       2,
-		Balance:     *new(uint256.Int).SetUint64(1000),
+		Balance:     *uint256.NewInt(0).SetUint64(1000),
 		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-		CodeHash:    common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
+		CodeHash:    InternCodeHash(common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3}))),
 		Incarnation: 4,
 	}
 
@@ -267,11 +256,10 @@ func TestIncarnationWithNonEmptyAccount(t *testing.T) {
 func TestIncarnationWithNoIncarnation(t *testing.T) {
 	t.Parallel()
 	a := Account{
-		Initialised: true,
 		Nonce:       2,
-		Balance:     *new(uint256.Int).SetUint64(1000),
+		Balance:     *uint256.NewInt(0).SetUint64(1000),
 		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-		CodeHash:    common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
+		CodeHash:    InternCodeHash(common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3}))),
 		Incarnation: 0,
 	}
 

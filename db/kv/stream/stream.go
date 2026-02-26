@@ -23,7 +23,7 @@ import (
 
 	"golang.org/x/exp/constraints"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/order"
 )
 
@@ -31,6 +31,11 @@ type (
 	Empty[T any]             struct{}
 	EmptyDuo[K, V any]       struct{}
 	EmptyTrio[K, V1, V2 any] struct{}
+	SingleDuo[K, V any]      struct {
+		k       K
+		v       V
+		hasNext bool
+	}
 )
 
 func (Empty[T]) HasNext() bool                                    { return false }
@@ -42,6 +47,19 @@ func (EmptyDuo[K, V]) Close()                                     {}
 func (EmptyTrio[K, V1, v2]) HasNext() bool                        { return false }
 func (EmptyTrio[K, V1, V2]) Next() (k K, v1 V1, v2 V2, err error) { return k, v1, v2, err }
 func (EmptyTrio[K, V1, V2]) Close()                               {}
+
+func NewSingleDuo[K, V any](k K, v V) *SingleDuo[K, V] {
+	return &SingleDuo[K, V]{k: k, v: v, hasNext: true}
+}
+func (s *SingleDuo[K, V]) HasNext() bool { return s.hasNext }
+func (s *SingleDuo[K, V]) Next() (k K, v V, err error) {
+	if !s.hasNext {
+		return k, v, fmt.Errorf("no more elements")
+	}
+	s.hasNext = false
+	return s.k, s.v, nil
+}
+func (s *SingleDuo[K, V]) Close() {}
 
 type ArrStream[V any] struct {
 	arr []V
@@ -312,6 +330,29 @@ func (m *TransformedDuo[K, v]) Close() {
 	}
 }
 
+// TransformedDuoV - analog `map` (in terms of map-filter-reduce pattern) but with different value type
+type TransformedDuoV[K, V, VR any] struct {
+	it        Duo[K, V]
+	transform func(K, V) (K, VR, error)
+}
+
+func TransformDuoV[K, V, VR any](it Duo[K, V], transform func(K, V) (K, VR, error)) *TransformedDuoV[K, V, VR] {
+	return &TransformedDuoV[K, V, VR]{it: it, transform: transform}
+}
+func (m *TransformedDuoV[K, V, VR]) HasNext() bool { return m.it.HasNext() }
+func (m *TransformedDuoV[K, V, VR]) Next() (k K, vr VR, err error) {
+	k, v, err := m.it.Next()
+	if err != nil {
+		return k, vr, err
+	}
+	return m.transform(k, v)
+}
+func (m *TransformedDuoV[K, V, VR]) Close() {
+	if x, ok := m.it.(Closer); ok {
+		x.Close()
+	}
+}
+
 // FilteredDuo - analog `map` (in terms of map-filter-reduce pattern)
 // please avoid reading from Disk/DB more elements and then filter them. Better
 // push-down filter conditions to lower-level iterator to reduce disk reads amount.
@@ -539,5 +580,104 @@ func (m *TracedDuo[K, V]) Next() (k K, v V, err error) {
 func (m *TracedDuo[K, V]) Close() {
 	if x, ok := m.it.(Closer); ok {
 		x.Close()
+	}
+}
+
+// Union Duo
+type UnionDuo[K cmp.Ordered, V any] struct {
+	x, y           Duo[K, V]
+	asc            bool
+	xHas, yHas     bool
+	xNextK, yNextK K
+	xNextV, yNextV V
+	err            error
+	limit          int
+}
+
+// Union - returns all elements that are in A, or in B, or in both. When duplicate elements - first stream (x) takes precedence.
+// in Set Theory: A ∪ B = {x | x ∈ A ∨ x ∈ B}
+func Union2[K cmp.Ordered, V any](x, y Duo[K, V], asc order.By, limit int) Duo[K, V] {
+	if x == nil && y == nil {
+		return &EmptyDuo[K, V]{}
+	}
+	if x == nil {
+		return y
+	}
+	if y == nil {
+		return x
+	}
+	if !x.HasNext() {
+		return y
+	}
+	if !y.HasNext() {
+		return x
+	}
+	m := &UnionDuo[K, V]{x: x, y: y, asc: bool(asc), limit: limit}
+	m.advanceX()
+	m.advanceY()
+	return m
+}
+
+func (m *UnionDuo[K, V]) HasNext() bool {
+	return m.err != nil || (m.limit != 0 && m.xHas) || (m.limit != 0 && m.yHas)
+}
+func (m *UnionDuo[K, V]) advanceX() {
+	if m.err != nil {
+		return
+	}
+	m.xHas = m.x.HasNext()
+	if m.xHas {
+		m.xNextK, m.xNextV, m.err = m.x.Next()
+	}
+}
+func (m *UnionDuo[K, V]) advanceY() {
+	if m.err != nil {
+		return
+	}
+	m.yHas = m.y.HasNext()
+	if m.yHas {
+		m.yNextK, m.yNextV, m.err = m.y.Next()
+	}
+}
+
+func (m *UnionDuo[K, V]) less() bool {
+	return (m.asc && m.xNextK < m.yNextK) || (!m.asc && m.xNextK > m.yNextK)
+}
+
+func (m *UnionDuo[K, V]) Next() (res K, resV V, err error) {
+	if m.err != nil {
+		return res, resV, m.err
+	}
+	m.limit--
+	if m.xHas && m.yHas {
+		if m.less() {
+			k, v, err := m.xNextK, m.xNextV, m.err
+			m.advanceX()
+			return k, v, err
+		} else if m.xNextK == m.yNextK {
+			k, v, err := m.xNextK, m.xNextV, m.err
+			m.advanceX()
+			m.advanceY()
+			return k, v, err
+		}
+		k, v, err := m.yNextK, m.yNextV, m.err
+		m.advanceY()
+		return k, v, err
+	}
+	if m.xHas {
+		k, v, err := m.xNextK, m.xNextV, m.err
+		m.advanceX()
+		return k, v, err
+	}
+	k, v, err := m.yNextK, m.yNextV, m.err
+	m.advanceY()
+	return k, v, err
+}
+func (m *UnionDuo[K, V]) Close() {
+	if x, ok := m.x.(Closer); ok {
+		x.Close()
+	}
+	if y, ok := m.y.(Closer); ok {
+		y.Close()
 	}
 }

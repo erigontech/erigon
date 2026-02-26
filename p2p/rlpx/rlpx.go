@@ -25,7 +25,6 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/hmac"
 	"crypto/rand"
 	"encoding/binary"
@@ -37,11 +36,11 @@ import (
 	"net"
 	"time"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/golang/snappy"
-	"golang.org/x/crypto/sha3"
 
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/crypto/ecies"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/crypto/ecies"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -490,10 +489,10 @@ func (h *handshakeState) secrets(auth, authResp []byte) (Secrets, error) {
 	}
 
 	// setup sha3 instances for the MACs
-	mac1 := sha3.NewLegacyKeccak256()
+	mac1 := keccak.NewFastKeccak()
 	mac1.Write(xor(s.MAC, h.respNonce))
 	mac1.Write(auth)
-	mac2 := sha3.NewLegacyKeccak256()
+	mac2 := keccak.NewFastKeccak()
 	mac2.Write(xor(s.MAC, h.initNonce))
 	mac2.Write(authResp)
 	if h.initiator {
@@ -598,7 +597,7 @@ func (h *handshakeState) makeAuthResp() (msg *authRespV4, err error) {
 }
 
 // readMsg reads an encrypted handshake message, decoding it into msg.
-func (h *handshakeState) readMsg(msg interface{}, prv *ecdsa.PrivateKey, r io.Reader) ([]byte, error) {
+func (h *handshakeState) readMsg(msg any, prv *ecdsa.PrivateKey, r io.Reader) ([]byte, error) {
 	h.rbuf.reset()
 	h.rbuf.grow(512)
 
@@ -626,7 +625,7 @@ func (h *handshakeState) readMsg(msg interface{}, prv *ecdsa.PrivateKey, r io.Re
 }
 
 // sealEIP8 encrypts a handshake message.
-func (h *handshakeState) sealEIP8(msg interface{}) ([]byte, error) {
+func (h *handshakeState) sealEIP8(msg any) ([]byte, error) {
 	h.wbuf.reset()
 
 	// Write the message plaintext.
@@ -666,7 +665,10 @@ func exportPubkey(pub *ecies.PublicKey) []byte {
 	if pub == nil {
 		panic("nil pubkey")
 	}
-	return elliptic.Marshal(pub.Curve, pub.X, pub.Y)[1:]
+	if curve, ok := pub.Curve.(crypto.EllipticCurve); ok {
+		return curve.Marshal(pub.X, pub.Y)[1:]
+	}
+	return []byte{}
 }
 
 func xor(one, other []byte) (xor []byte) {

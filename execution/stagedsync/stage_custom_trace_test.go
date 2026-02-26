@@ -18,7 +18,6 @@ package stagedsync_test
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -32,12 +31,14 @@ import (
 )
 
 func TestCustomTraceReceiptDomain(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	require := require.New(t)
 	assert := assert.New(t)
 	ctx := context.Background()
 
-	os.Setenv("MOCK_SENTRY_LOG_LEVEL", "info")
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 
 	stageCfg := stagedsync.StageCustomTraceCfg([]string{"receipt"}, m.DB, m.Dirs, m.BlockReader, m.ChainConfig, m.Engine, m.Cfg().Genesis, m.Cfg().Sync)
 	err := stagedsync.StageCustomTraceReset(ctx, m.DB, stageCfg.Produce)
@@ -87,12 +88,14 @@ func TestCustomTraceInvalidProduceMode(t *testing.T) {
 }
 
 func TestCustomTraceDomainProgressConsistency(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	require := require.New(t)
 	assert := assert.New(t)
 	ctx := context.Background()
 
-	os.Setenv("MOCK_SENTRY_LOG_LEVEL", "info")
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 
 	require.NoError(m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
 		return kvcfg.PersistReceipts.ForceWrite(tx, true)

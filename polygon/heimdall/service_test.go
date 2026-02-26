@@ -34,11 +34,12 @@ import (
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/testlog"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	polychain "github.com/erigontech/erigon/polygon/chain"
 )
@@ -220,6 +221,7 @@ func (suite *ServiceTestSuite) TearDownSuite() {
 	err := suite.eg.Wait()
 	suite.logger.Info("test has been torn down")
 	suite.Require().ErrorIs(err, context.Canceled)
+	suite.service.store.Close()
 }
 
 func (suite *ServiceTestSuite) TestMilestones() {
@@ -345,15 +347,15 @@ func (suite *ServiceTestSuite) producersSubTest(blockNum uint64) {
 		haveProducers, err := svc.Producers(ctx, blockNum)
 		require.NoError(t, err)
 
-		errInfoMsgArgs := []interface{}{"wantProducers: %v\nhaveProducers: %v\n", wantProducers, haveProducers}
+		errInfoMsgArgs := []any{"wantProducers: %v\nhaveProducers: %v\n", wantProducers, haveProducers}
 		require.Len(t, haveProducers.Validators, len(wantProducers.Signers), errInfoMsgArgs...)
 		for _, signer := range wantProducers.Signers {
 			wantDifficulty := signer.Difficulty
-			_, producer := haveProducers.GetByAddress(signer.Signer)
-			haveDifficulty, err := haveProducers.Difficulty(producer.Address)
+			_, producer := haveProducers.GetByAddress(accounts.InternAddress(signer.Signer))
+			haveDifficulty, err := haveProducers.Difficulty(accounts.InternAddress(producer.Address))
 			require.NoError(t, err)
 
-			errInfoMsgArgs = []interface{}{
+			errInfoMsgArgs = []any{
 				"signer:%v\nwantDifficulty: %v\nhaveDifficulty: %v\nwantProducers: %v\nhaveProducers: %v",
 				signer,
 				wantDifficulty,
@@ -530,10 +532,6 @@ type difficultiesKV struct {
 }
 
 func TestIsCatchingUp(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	ctrl := gomock.NewController(t)
 	mockClient := NewMockClient(ctrl)
 
@@ -556,10 +554,6 @@ func TestIsCatchingUp(t *testing.T) {
 }
 
 func TestIsCatchingUpLateBlock(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	ctrl := gomock.NewController(t)
 	mockClient := NewMockClient(ctrl)
 

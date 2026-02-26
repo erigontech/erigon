@@ -30,13 +30,14 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/protolambda/ztyp/codec"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/math"
-	libcrypto "github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	libcrypto "github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 var (
@@ -44,6 +45,7 @@ var (
 	ErrUnexpectedProtection = errors.New("transaction type does not supported EIP-155 protected signatures")
 	ErrInvalidTxType        = errors.New("transaction type not valid in this context")
 	ErrTxTypeNotSupported   = errors.New("transaction type not supported")
+	errTrailingBytes        = errors.New("trailing bytes after rlp encoded transaction")
 )
 
 // Transaction types.
@@ -69,7 +71,7 @@ type Transaction interface {
 	GetBlobGas() uint64
 	GetValue() *uint256.Int
 	GetTo() *common.Address
-	AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error)
+	AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules) (*Message, error)
 	WithSignature(signer Signer, sig []byte) (Transaction, error)
 	Hash() common.Hash
 	SigningHash(chainID *big.Int) common.Hash
@@ -89,10 +91,10 @@ type Transaction interface {
 	// Sender may cache the address, allowing it to be used regardless of
 	// signing method. The cache is invalidated if the cached signer does
 	// not match the signer used in the current call.
-	Sender(Signer) (common.Address, error)
-	cachedSender() (common.Address, bool)
-	GetSender() (common.Address, bool)
-	SetSender(common.Address)
+	Sender(Signer) (accounts.Address, error)
+	cachedSender() (accounts.Address, bool)
+	GetSender() (accounts.Address, bool)
+	SetSender(accounts.Address)
 	IsContractDeploy() bool
 	Unwrap() Transaction // If this is a network wrapper, returns the unwrapped txn. Otherwise returns itself.
 }
@@ -102,7 +104,7 @@ type Transaction interface {
 type TransactionMisc struct {
 	// caches
 	hash atomic.Pointer[common.Hash]
-	from atomic.Pointer[common.Address]
+	from accounts.Address
 }
 
 // RLP-marshalled legacy transactions and binary-marshalled (not wrapped into an RLP string) typed (EIP-2718) transactions
@@ -117,29 +119,46 @@ func (t BinaryTransactions) EncodeIndex(i int, w *bytes.Buffer) {
 }
 
 func DecodeRLPTransaction(s *rlp.Stream, blobTxnsAreWrappedWithBlobs bool) (Transaction, error) {
+	// if the stream is in an enclosing RLP list (transactions list inside a block)
+	inBlock := s.MoreDataInList()
 	kind, _, err := s.Kind()
 	if err != nil {
 		return nil, err
 	}
-	if rlp.List == kind {
-		txn := &LegacyTx{}
-		if err = txn.DecodeRLP(s); err != nil {
+
+	var txn Transaction
+	switch kind {
+	case rlp.List:
+		legacy := &LegacyTx{}
+		if err := legacy.DecodeRLP(s); err != nil {
 			return nil, err
 		}
-		return txn, nil
-	}
-	if rlp.String != kind {
+		txn = legacy
+	case rlp.String:
+		// Decode the EIP-2718 typed txn envelope.
+		var b []byte
+		if b, err = s.Bytes(); err != nil {
+			return nil, err
+		}
+		if len(b) == 0 {
+			return nil, rlp.EOL
+		}
+		if txn, err = UnmarshalTransactionFromBinary(b, blobTxnsAreWrappedWithBlobs); err != nil {
+			return nil, err
+		}
+	default:
 		return nil, fmt.Errorf("not an RLP encoded transaction. If this is a canonical encoded transaction, use UnmarshalTransactionFromBinary instead. Got %v for kind, expected String", kind)
 	}
-	// Decode the EIP-2718 typed txn envelope.
-	var b []byte
-	if b, err = s.Bytes(); err != nil {
-		return nil, err
+
+	if !inBlock {
+		if _, _, peekErr := s.Kind(); peekErr == nil {
+			return nil, errTrailingBytes
+		} else if !errors.Is(peekErr, io.EOF) && !errors.Is(peekErr, rlp.EOL) {
+			return nil, peekErr
+		}
 	}
-	if len(b) == 0 {
-		return nil, rlp.EOL
-	}
-	return UnmarshalTransactionFromBinary(b, blobTxnsAreWrappedWithBlobs)
+
+	return txn, nil
 }
 
 // DecodeWrappedTransaction as similar to DecodeTransaction,
@@ -172,9 +191,6 @@ func DecodeTransaction(data []byte) (Transaction, error) {
 	tx, err := DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs)
 	if err != nil {
 		return nil, err
-	}
-	if s.Remaining() != 0 {
-		return nil, errors.New("trailing bytes after rlp encoded transaction")
 	}
 	return tx, nil
 }
@@ -213,7 +229,7 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 		return nil, err
 	}
 	if s.Remaining() != 0 {
-		return nil, errors.New("trailing bytes after rlp encoded transaction")
+		return nil, errTrailingBytes
 	}
 	return t, nil
 }
@@ -258,7 +274,7 @@ func MarshalTransactionsBinary(txs Transactions) ([][]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		result[i] = common.CopyBytes(buf.Bytes())
+		result[i] = common.Copy(buf.Bytes())
 	}
 	return result, nil
 }
@@ -362,8 +378,8 @@ func (s TxByNonce) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
 // Message is a fully derived transaction and implements core.Message
 type Message struct {
-	to               *common.Address
-	from             common.Address
+	to               accounts.Address
+	from             accounts.Address
 	nonce            uint64
 	amount           uint256.Int
 	gasLimit         uint64
@@ -374,27 +390,29 @@ type Message struct {
 	data             []byte
 	accessList       AccessList
 	checkNonce       bool
+	checkTransaction bool
 	checkGas         bool
 	isFree           bool
 	blobHashes       []common.Hash
 	authorizations   []Authorization
 }
 
-func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
+func NewMessage(from accounts.Address, to accounts.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
 	gasPrice *uint256.Int, feeCap, tipCap *uint256.Int, data []byte, accessList AccessList, checkNonce bool,
-	checkGas bool, isFree bool, maxFeePerBlobGas *uint256.Int,
+	checkTransaction bool, checkGas bool, isFree bool, maxFeePerBlobGas *uint256.Int,
 ) *Message {
 	m := Message{
-		from:       from,
-		to:         to,
-		nonce:      nonce,
-		amount:     *amount,
-		gasLimit:   gasLimit,
-		data:       data,
-		accessList: accessList,
-		checkNonce: checkNonce,
-		checkGas:   checkGas,
-		isFree:     isFree,
+		from:             from,
+		to:               to,
+		nonce:            nonce,
+		amount:           *amount,
+		gasLimit:         gasLimit,
+		data:             data,
+		accessList:       accessList,
+		checkNonce:       checkNonce,
+		checkTransaction: checkTransaction,
+		checkGas:         checkGas,
+		isFree:           isFree,
 	}
 	if gasPrice != nil {
 		m.gasPrice.Set(gasPrice)
@@ -411,8 +429,8 @@ func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *u
 	return &m
 }
 
-func (m *Message) From() common.Address            { return m.from }
-func (m *Message) To() *common.Address             { return m.to }
+func (m *Message) From() accounts.Address          { return m.from }
+func (m *Message) To() accounts.Address            { return m.to }
 func (m *Message) GasPrice() *uint256.Int          { return &m.gasPrice }
 func (m *Message) FeeCap() *uint256.Int            { return &m.feeCap }
 func (m *Message) TipCap() *uint256.Int            { return &m.tipCap }
@@ -431,6 +449,10 @@ func (m *Message) SetAuthorizations(authorizations []Authorization) {
 func (m *Message) CheckNonce() bool { return m.checkNonce }
 func (m *Message) SetCheckNonce(checkNonce bool) {
 	m.checkNonce = checkNonce
+}
+func (m *Message) CheckTransaction() bool { return m.checkTransaction }
+func (m *Message) SetCheckTransaction(checkTransaction bool) {
+	m.checkTransaction = checkTransaction
 }
 func (m *Message) CheckGas() bool { return m.checkGas }
 func (m *Message) SetCheckGas(checkGas bool) {

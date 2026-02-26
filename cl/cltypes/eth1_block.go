@@ -19,19 +19,17 @@ package cltypes
 import (
 	"encoding/json"
 	"fmt"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/empty"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
-	"github.com/erigontech/erigon/cl/utils"
-	"github.com/erigontech/erigon/execution/consensus/merge"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -115,6 +113,8 @@ func (*Eth1Block) Static() bool {
 }
 
 func (b *Eth1Block) MarshalJSON() ([]byte, error) {
+	baseFeePerGas := uint256.NewInt(0).SetBytes32(b.BaseFeePerGas[:])
+	baseFeePerGas.ReverseBytes(baseFeePerGas)
 	return json.Marshal(struct {
 		ParentHash    common.Hash                 `json:"parent_hash"`
 		FeeRecipient  common.Address              `json:"fee_recipient"`
@@ -145,7 +145,7 @@ func (b *Eth1Block) MarshalJSON() ([]byte, error) {
 		GasUsed:       b.GasUsed,
 		Time:          b.Time,
 		Extra:         b.Extra,
-		BaseFeePerGas: uint256.NewInt(0).SetBytes32(utils.ReverseOfByteSlice(b.BaseFeePerGas[:])).Dec(),
+		BaseFeePerGas: baseFeePerGas.Dec(),
 		BlockHash:     b.BlockHash,
 		Transactions:  b.Transactions,
 		Withdrawals:   b.Withdrawals,
@@ -193,9 +193,8 @@ func (b *Eth1Block) UnmarshalJSON(data []byte) error {
 	if err := tmp.SetFromDecimal(aux.BaseFeePerGas); err != nil {
 		return err
 	}
-	tmpBaseFee := tmp.Bytes32()
-	b.BaseFeePerGas = common.Hash{}
-	copy(b.BaseFeePerGas[:], utils.ReverseOfByteSlice(tmpBaseFee[:]))
+	tmp.ReverseBytes(tmp)
+	tmp.WriteToArray32((*[32]byte)(&b.BaseFeePerGas))
 	b.BlockHash = aux.BlockHash
 	b.Transactions = aux.Transactions
 	b.Withdrawals = aux.Withdrawals
@@ -293,8 +292,8 @@ func (b *Eth1Block) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(b.getSchema()...)
 }
 
-func (b *Eth1Block) getSchema() []interface{} {
-	s := []interface{}{b.ParentHash[:], b.FeeRecipient[:], b.StateRoot[:], b.ReceiptsRoot[:], b.LogsBloom[:],
+func (b *Eth1Block) getSchema() []any {
+	s := []any{b.ParentHash[:], b.FeeRecipient[:], b.StateRoot[:], b.ReceiptsRoot[:], b.LogsBloom[:],
 		b.PrevRandao[:], &b.BlockNumber, &b.GasLimit, &b.GasUsed, &b.Time, b.Extra, b.BaseFeePerGas[:], b.BlockHash[:], b.Transactions}
 	if b.version >= clparams.CapellaVersion {
 		s = append(s, b.Withdrawals)
@@ -312,7 +311,7 @@ func (b *Eth1Block) RlpHeader(parentRoot *common.Hash, executionReqHash common.H
 	for i, j := 0, len(reversedBaseFeePerGas)-1; i < j; i, j = i+1, j-1 {
 		reversedBaseFeePerGas[i], reversedBaseFeePerGas[j] = reversedBaseFeePerGas[j], reversedBaseFeePerGas[i]
 	}
-	baseFee := new(big.Int).SetBytes(reversedBaseFeePerGas)
+	baseFee := new(uint256.Int).SetBytes(reversedBaseFeePerGas)
 	// If the block version is Capella or later, calculate the withdrawals hash.
 	var withdrawalsHash *common.Hash
 	if b.version >= clparams.CapellaVersion {
@@ -338,8 +337,7 @@ func (b *Eth1Block) RlpHeader(parentRoot *common.Hash, executionReqHash common.H
 		TxHash:                types.DeriveSha(types.BinaryTransactions(b.Transactions.UnderlyngReference())),
 		ReceiptHash:           b.ReceiptsRoot,
 		Bloom:                 b.LogsBloom,
-		Difficulty:            merge.ProofOfStakeDifficulty,
-		Number:                new(big.Int).SetUint64(b.BlockNumber),
+		Difficulty:            *merge.ProofOfStakeDifficulty,
 		GasLimit:              b.GasLimit,
 		GasUsed:               b.GasUsed,
 		Time:                  b.Time,
@@ -350,6 +348,7 @@ func (b *Eth1Block) RlpHeader(parentRoot *common.Hash, executionReqHash common.H
 		WithdrawalsHash:       withdrawalsHash,
 		ParentBeaconBlockRoot: parentRoot,
 	}
+	header.Number.SetUint64(b.BlockNumber)
 
 	if b.version >= clparams.DenebVersion {
 		blobGasUsed := b.BlobGasUsed
@@ -383,6 +382,6 @@ func (b *Eth1Block) Body() *types.RawBody {
 	})
 	return &types.RawBody{
 		Transactions: b.Transactions.UnderlyngReference(),
-		Withdrawals:  types.Withdrawals(withdrawals),
+		Withdrawals:  withdrawals,
 	}
 }

@@ -61,6 +61,8 @@ const (
 	HeaderTD        = "HeadersTotalDifficulty" // block_num_u64 + hash -> td (RLP)
 
 	BlockBody = "BlockBody" // block_num_u64 + hash -> block body
+	// BlockAccessList stores RLP-encoded block access lists, keyed by block_num_u64 + hash.
+	BlockAccessList = "BlockAccessList"
 
 	// Naming:
 	//  TxNum - Ethereum canonical transaction number - same across all nodes.
@@ -187,6 +189,8 @@ const (
 	// corresponding history tables `Tbl{Account,Storage,Code,Commitment}HistoryKeys` for history
 	// and `Tbl{Account,Storage,Code,Commitment}Idx` for inverted indices
 	TblPruningProgress = "PruningProgress"
+	// tableName -> txTo;last pruned val
+	TblPruningValsProg = "PruningValsProgress"
 
 	// Erigon-CL Objects
 
@@ -303,6 +307,7 @@ var ChaindataTables = []string{
 	HeaderNumber,
 	BadHeaderNumber,
 	BlockBody,
+	BlockAccessList,
 	TxLookup,
 	ConfigTable,
 	DatabaseInfo,
@@ -377,6 +382,7 @@ var ChaindataTables = []string{
 	TblTracesToIdx,
 
 	TblPruningProgress,
+	TblPruningValsProg,
 
 	MaxTxNum,
 
@@ -582,11 +588,14 @@ var DownloaderTablesCfg = TableCfg{}
 var DiagnosticsTablesCfg = TableCfg{}
 var HeimdallTablesCfg = TableCfg{}
 var PolygonBridgeTablesCfg = TableCfg{}
+var MigrationsTablesCfg = TableCfg{Migrations: {}}
 
 func TablesCfgByLabel(label Label) TableCfg {
 	switch label {
 	case dbcfg.ChainDB, dbcfg.TemporaryDB, dbcfg.CaplinDB: //TODO: move caplindb tables to own table config
 		return ChaindataTablesCfg
+	case dbcfg.MigrationsDB:
+		return MigrationsTablesCfg
 	case dbcfg.TxPoolDB:
 		return TxpoolTablesCfg
 	case dbcfg.SentryDB:
@@ -740,7 +749,7 @@ func (idx InvertedIdx) String() string {
 }
 
 func String2InvertedIdx(in string) (InvertedIdx, error) {
-	switch in {
+	switch strings.ToLower(in) {
 	case "accounts":
 		return AccountsHistoryIdx, nil
 	case "storage":
@@ -802,7 +811,7 @@ func (d Domain) String() string {
 }
 
 func String2Domain(in string) (Domain, error) {
-	switch in {
+	switch strings.ToLower(in) {
 	case "accounts":
 		return AccountsDomain, nil
 	case "storage":
@@ -817,6 +826,13 @@ func String2Domain(in string) (Domain, error) {
 		return RCacheDomain, nil
 	default:
 		return Domain(MaxUint16), fmt.Errorf("unknown name: %s", in)
+	}
+}
+
+func String2Forkable(in string) (ForkableId, error) {
+	switch in {
+	default:
+		return ForkableId(MaxUint16), fmt.Errorf("unknown forkable name: %s", in)
 	}
 }
 
@@ -903,7 +919,7 @@ const (
 	   1. what is smallest block number >= X where account A changed
 	   2. get last shard of A - to append there new block numbers
 
-	   Task 1. is part of "get historical state" operation (see `core/state:DomainGetAsOf`):
+	   Task 1. is part of "get historical state" operation (see `db/state:DomainGetAsOf`):
 	   If `db.seekInFiles(A+bigEndian(X))` returns non-last shard -
 
 	   	then get block number from shard value Y := RoaringBitmap(shard_value).GetGte(X)

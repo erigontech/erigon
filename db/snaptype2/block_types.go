@@ -23,15 +23,16 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
@@ -46,8 +47,8 @@ func init() {
 	snapcfg.RegisterKnownTypes(networkname.Sepolia, ethereumTypes)
 	snapcfg.RegisterKnownTypes(networkname.Gnosis, ethereumTypes)
 	snapcfg.RegisterKnownTypes(networkname.Chiado, ethereumTypes)
-	snapcfg.RegisterKnownTypes(networkname.Holesky, ethereumTypes)
 	snapcfg.RegisterKnownTypes(networkname.Hoodi, ethereumTypes)
+	snapcfg.RegisterKnownTypes(networkname.Bloatnet, ethereumTypes)
 }
 
 var Enums = struct {
@@ -80,15 +81,15 @@ var Indexes = struct {
 	TxnHash,
 	TxnHash2BlockNum snaptype.Index
 }{
-	HeaderHash:       snaptype.Index{Name: "headers"},
-	BodyHash:         snaptype.Index{Name: "bodies"},
-	TxnHash:          snaptype.Index{Name: "transactions"},
-	TxnHash2BlockNum: snaptype.Index{Name: "transactions-to-block", Offset: 1},
+	HeaderHash:       snaptype.Index{Name: statecfg.HeadersIdx, Version: statecfg.Schema.HeadersBlock.FileVersion.AccessorIdx},
+	BodyHash:         snaptype.Index{Name: statecfg.BodiesIdx, Version: statecfg.Schema.BodiesBlock.FileVersion.AccessorIdx},
+	TxnHash:          snaptype.Index{Name: statecfg.TransactionsIdx, Version: statecfg.Schema.TransactionsBlock.FileVersion.AccessorIdx},
+	TxnHash2BlockNum: snaptype.Index{Name: statecfg.TransactionsToBlockIdx, Version: statecfg.Schema.TxnHash2BlockNumBlock.FileVersion.AccessorIdx, Offset: 1},
 }
 
 var (
 	Salt = snaptype.RegisterType(
-		Enums.Domains,
+		Enums.Salt,
 		"salt",
 		snaptype.Versions{
 			Current:      version.ZeroVersion, //2,
@@ -100,8 +101,8 @@ var (
 	)
 	Headers = snaptype.RegisterType(
 		Enums.Headers,
-		"headers",
-		version.V1_1_standart,
+		statecfg.Headers,
+		statecfg.Schema.HeadersBlock.FileVersion.DataSeg,
 		nil,
 		[]snaptype.Index{Indexes.HeaderHash},
 		snaptype.IndexBuilderFunc(
@@ -119,7 +120,7 @@ var (
 					BaseDataID:         info.From,
 					LessFalsePositives: true,
 				}
-				if err := snaptype.BuildIndex(ctx, info, cfg, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+				if err := snaptype.BuildIndex(ctx, info, Indexes.HeaderHash.Version, cfg, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 					if p != nil {
 						p.Processed.Add(1)
 					}
@@ -141,8 +142,8 @@ var (
 
 	Bodies = snaptype.RegisterType(
 		Enums.Bodies,
-		"bodies",
-		version.V1_1_standart,
+		statecfg.Bodies,
+		statecfg.Schema.BodiesBlock.FileVersion.DataSeg,
 		nil,
 		[]snaptype.Index{Indexes.BodyHash},
 		snaptype.IndexBuilderFunc(
@@ -157,7 +158,7 @@ var (
 					Salt:       &salt,
 					BaseDataID: info.From,
 				}
-				if err := snaptype.BuildIndex(ctx, info, cfg, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, _ []byte) error {
+				if err := snaptype.BuildIndex(ctx, info, Indexes.BodyHash.Version, cfg, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, _ []byte) error {
 					if p != nil {
 						p.Processed.Add(1)
 					}
@@ -175,8 +176,8 @@ var (
 
 	Transactions = snaptype.RegisterType(
 		Enums.Transactions,
-		"transactions",
-		version.V1_1_standart,
+		statecfg.Transactions,
+		statecfg.Schema.TransactionsBlock.FileVersion.DataSeg,
 		nil,
 		[]snaptype.Index{Indexes.TxnHash, Indexes.TxnHash2BlockNum},
 		snaptype.IndexBuilderFunc(
@@ -187,10 +188,27 @@ var (
 					}
 				}()
 				firstBlockNum := sn.From
-
-				bodiesSegment, err := seg.NewDecompressor(sn.As(Bodies).Path)
+				bodiesPathPattern, err := version.ReplaceVersionWithMask(sn.As(Bodies).Path)
 				if err != nil {
-					return fmt.Errorf("can't open %s for indexing: %w", sn.As(Bodies).Name(), err)
+					return fmt.Errorf("can't replace path with mask %s for indexing in bodies: %w", sn.As(Bodies).Path, err)
+				}
+				bodiesPath, bVer, ok, err := version.FindFilesWithVersionsByPattern(bodiesPathPattern)
+				if err != nil {
+					return fmt.Errorf("can't find files with vers by pattern due to err %s for indexing in bodies: %w", bodiesPathPattern, err)
+				}
+				if !ok {
+					return fmt.Errorf("can't find files with vers by pattern %s for indexing in bodies", bodiesPathPattern)
+				}
+				if bVer.Less(statecfg.Schema.BodiesBlock.FileVersion.DataSeg.MinSupported) {
+					verToPanic := version.Versions{
+						Current:      bVer,
+						MinSupported: statecfg.Schema.BodiesBlock.FileVersion.DataSeg.MinSupported,
+					}
+					version.VersionTooLowPanic(filepath.Base(bodiesPath), verToPanic)
+				}
+				bodiesSegment, err := seg.NewDecompressor(bodiesPath)
+				if err != nil {
+					return fmt.Errorf("can't open %s for indexing in bodies: %w", sn.As(Bodies).Path, err)
 				}
 				defer bodiesSegment.Close()
 
@@ -199,9 +217,27 @@ var (
 					return err
 				}
 
-				d, err := seg.NewDecompressor(sn.Path)
+				txPathPattern, err := version.ReplaceVersionWithMask(sn.Path)
 				if err != nil {
-					return fmt.Errorf("can't open %s for indexing: %w", sn.Path, err)
+					return fmt.Errorf("can't replace path with mask %s for indexing in txs: %w", sn.Path, err)
+				}
+				txPath, tVer, ok, err := version.FindFilesWithVersionsByPattern(txPathPattern)
+				if err != nil {
+					return fmt.Errorf("can't find files with vers by pattern due to err %s for indexing in txs: %w", txPathPattern, err)
+				}
+				if !ok {
+					return fmt.Errorf("can't find files with vers by pattern %s for indexing in txs", txPathPattern)
+				}
+				if tVer.Less(statecfg.Schema.TransactionsBlock.FileVersion.DataSeg.MinSupported) {
+					verToPanic := version.Versions{
+						Current:      tVer,
+						MinSupported: statecfg.Schema.TransactionsBlock.FileVersion.DataSeg.MinSupported,
+					}
+					version.VersionTooLowPanic(filepath.Base(txPath), verToPanic)
+				}
+				d, err := seg.NewDecompressor(txPath)
+				if err != nil {
+					return fmt.Errorf("can't open %s for indexing in transactions: %w", sn.Path, err)
 				}
 				defer d.Close()
 				if d.Count() != expectedCount {
@@ -223,7 +259,7 @@ var (
 					BucketSize: recsplit.DefaultBucketSize,
 					LeafSize:   recsplit.DefaultLeafSize,
 					TmpDir:     tmpDir,
-					IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.Version, sn.From, sn.To)),
+					IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(Indexes.TxnHash.Version.Current, sn.From, sn.To)),
 					BaseDataID: baseTxnID.U64(),
 				}, logger)
 				if err != nil {
@@ -237,7 +273,9 @@ var (
 					BucketSize: recsplit.DefaultBucketSize,
 					LeafSize:   recsplit.DefaultLeafSize,
 					TmpDir:     tmpDir,
-					IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.Version, sn.From, sn.To, Indexes.TxnHash2BlockNum)),
+					IndexFile: filepath.Join(sn.Dir(),
+						sn.Type.IdxFileName(Indexes.TxnHash2BlockNum.Version.Current,
+							sn.From, sn.To, Indexes.TxnHash2BlockNum)),
 					BaseDataID: firstBlockNum,
 				}, logger)
 				if err != nil {

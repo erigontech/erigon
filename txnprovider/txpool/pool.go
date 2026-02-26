@@ -35,22 +35,22 @@ import (
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/assert"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/u256"
-	libkzg "github.com/erigontech/erigon-lib/crypto/kzg"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/assert"
+	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
-	"github.com/erigontech/erigon/diagnostics/diaglib"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/chain/params"
-	"github.com/erigontech/erigon/execution/fixedgas"
+	"github.com/erigontech/erigon/execution/protocol/fixedgas"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
@@ -329,8 +329,6 @@ func (p *TxPool) start(ctx context.Context) error {
 func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) error {
 	defer newBlockTimer.ObserveDuration(time.Now())
 
-	sendNewBlockEventToDiagnostics(unwindTxns, unwindBlobTxns, minedTxns, stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockHeight, stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockTime)
-
 	coreDB, cache := p.chainDB()
 	cache.OnNewBlock(stateChanges)
 	coreTx, err := coreDB.BeginTemporalRo(ctx)
@@ -380,12 +378,14 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	pendingBaseFee, baseFeeChanged := p.setBaseFee(baseFee)
 	// Update pendingBase for all pool queues and slices
 	if baseFeeChanged {
-		p.pending.best.pendingBaseFee = pendingBaseFee
-		p.pending.worst.pendingBaseFee = pendingBaseFee
-		p.baseFee.best.pendingBastFee = pendingBaseFee
-		p.baseFee.worst.pendingBaseFee = pendingBaseFee
-		p.queued.best.pendingBastFee = pendingBaseFee
-		p.queued.worst.pendingBaseFee = pendingBaseFee
+		var pendingBaseFee256 uint256.Int
+		pendingBaseFee256.SetUint64(pendingBaseFee)
+		p.pending.best.pendingBaseFee = pendingBaseFee256
+		p.pending.worst.pendingBaseFee = pendingBaseFee256
+		p.baseFee.best.pendingBaseFee = pendingBaseFee256
+		p.baseFee.worst.pendingBaseFee = pendingBaseFee256
+		p.queued.best.pendingBaseFee = pendingBaseFee256
+		p.queued.worst.pendingBaseFee = pendingBaseFee256
 	}
 
 	pendingBlobFee := stateChanges.PendingBlobFeePerGas
@@ -530,8 +530,6 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 		return err
 	}
 
-	diagTxns := make([]diaglib.DiagTxn, 0, len(newTxns.Txns))
-
 	announcements, reasons, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, p.senders, newTxns,
 		p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), p.blockGasLimit.Load(), true, p.logger)
 	if err != nil {
@@ -541,39 +539,9 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 	p.promoted.Reset()
 	p.promoted.AppendOther(announcements)
 
-	isDiagEnabled := diaglib.Client().Connected()
-
 	reasons = fillDiscardReasons(reasons, newTxns, p.discardReasonsLRU)
 	for i, reason := range reasons {
 		txn := newTxns.Txns[i]
-
-		if isDiagEnabled {
-			subpool := "Unknown"
-			orderMarker := SubPoolMarker(0)
-			found := p.all.get(txn.SenderID, txn.Nonce)
-			if found != nil {
-				subpool = found.currentSubPool.String()
-				orderMarker = found.subPool
-			}
-
-			diagTxn := diaglib.DiagTxn{
-				IDHash:              hex.EncodeToString(txn.IDHash[:]),
-				SenderID:            txn.SenderID,
-				Size:                txn.Size,
-				Creation:            txn.Creation,
-				DataLen:             txn.DataLen,
-				AccessListAddrCount: txn.AccessListAddrCount,
-				AccessListStorCount: txn.AccessListStorCount,
-				BlobHashes:          txn.BlobHashes,
-				IsLocal:             false,
-				DiscardReason:       reason.String(),
-				Pool:                subpool,
-				OrderMarker:         uint8(orderMarker),
-				RLP:                 txn.Rlp,
-			}
-
-			diagTxns = append(diagTxns, diagTxn)
-		}
 
 		if reason == txpoolcfg.Success {
 
@@ -584,13 +552,6 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 		}
 	}
 
-	if isDiagEnabled {
-		diaglib.Send(diaglib.IncomingTxnUpdate{
-			Txns:    diagTxns,
-			Updates: map[string][][32]byte{},
-		})
-	}
-
 	if p.promoted.Len() > 0 {
 		copied := p.promoted.Copy()
 		select {
@@ -598,26 +559,6 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 			return nil
 		case p.newPendingTxns <- copied:
 		default:
-		}
-
-		if isDiagEnabled {
-			pendingTransactions := make([]diaglib.TxnHashOrder, 0)
-			for i := 0; i < len(copied.hashes); i += 32 {
-				var txnHash [32]byte
-				copy(txnHash[:], copied.hashes[i:i+32])
-				orderMarker := SubPoolMarker(0)
-				byHash, ok := p.byHash[string(copied.hashes[i:i+32])]
-				if ok {
-					orderMarker = byHash.subPool
-				}
-
-				pendingTransactions = append(pendingTransactions, diaglib.TxnHashOrder{
-					OrderMarker: uint8(orderMarker),
-					Hash:        txnHash,
-				})
-			}
-
-			sendChangeBatchEventToDiagnostics("Pending", "add", pendingTransactions)
 		}
 	}
 
@@ -877,9 +818,22 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 		// this stage
 		isAATxn := mt.TxnSlot.Type == types.AccountAbstractionTxType
 		authorizationLen := uint64(len(mt.TxnSlot.AuthAndNonces))
-		intrinsicGas, floorGas, _ := fixedgas.CalcIntrinsicGas(uint64(mt.TxnSlot.DataLen), uint64(mt.TxnSlot.DataNonZeroLen), authorizationLen, uint64(mt.TxnSlot.AccessListAddrCount), uint64(mt.TxnSlot.AccessListStorCount), mt.TxnSlot.Creation, true, true, isEIP3860, isEIP7623, isAATxn)
-		if isEIP7623 && floorGas > intrinsicGas {
-			intrinsicGas = floorGas
+		intrinsicGasResult, _ := fixedgas.CalcIntrinsicGas(fixedgas.IntrinsicGasCalcArgs{
+			Data:               make([]byte, mt.TxnSlot.DataLen),
+			DataNonZeroLen:     uint64(mt.TxnSlot.DataNonZeroLen),
+			AuthorizationsLen:  authorizationLen,
+			AccessListLen:      uint64(mt.TxnSlot.AccessListAddrCount),
+			StorageKeysLen:     uint64(mt.TxnSlot.AccessListStorCount),
+			IsContractCreation: mt.TxnSlot.Creation,
+			IsEIP2:             true,
+			IsEIP2028:          true,
+			IsEIP3860:          isEIP3860,
+			IsEIP7623:          isEIP7623,
+			IsAATxn:            isAATxn,
+		})
+		intrinsicGas := intrinsicGasResult.RegularGas
+		if isEIP7623 && intrinsicGasResult.FloorGasCost > intrinsicGas {
+			intrinsicGas = intrinsicGasResult.FloorGasCost
 		}
 		if intrinsicGas > availableGas {
 			// we might find another txn with a low enough intrinsic gas to include so carry on
@@ -897,18 +851,12 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 	}
 
 	txns.Resize(uint(count))
-	toRemoveTransactions := make([]diaglib.TxnHashOrder, 0)
 	if len(toRemove) > 0 {
 		for _, mt := range toRemove {
 			p.pending.Remove(mt, "best", p.logger)
-			toRemoveTransactions = append(toRemoveTransactions, diaglib.TxnHashOrder{
-				OrderMarker: uint8(mt.subPool),
-				Hash:        mt.TxnSlot.IDHash,
-			})
 		}
 	}
 
-	sendChangeBatchEventToDiagnostics("Pending", "remove", toRemoveTransactions)
 	return true, count, nil
 }
 
@@ -938,7 +886,7 @@ func (p *TxPool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOpt
 
 		var sender common.Address
 		copy(sender[:], txnsRlp.Senders.At(i))
-		txn.SetSender(sender)
+		txn.SetSender(accounts.InternAddress(sender))
 		txns = append(txns, txn)
 	}
 
@@ -994,7 +942,6 @@ func toBlobs(_blobs [][]byte) []*goethkzg.Blob {
 func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView) txpoolcfg.DiscardReason {
 	isEIP3860 := p.isShanghai() || p.isAgra()
 	isPrague := p.isPrague() || p.isBhilai()
-	isEIP7825 := p.isOsaka()
 	if isEIP3860 && txn.Creation && txn.DataLen > params.MaxInitCodeSize {
 		return txpoolcfg.InitCodeTooLarge // EIP-3860
 	}
@@ -1035,9 +982,22 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 	}
 
 	isAATxn := txn.Type == types.AccountAbstractionTxType
-	gas, floorGas, overflow := fixedgas.CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), uint64(authorizationLen), uint64(txn.AccessListAddrCount), uint64(txn.AccessListStorCount), txn.Creation, true, true, isEIP3860, isPrague, isAATxn)
-	if isPrague && floorGas > gas {
-		gas = floorGas
+	intrinsicGasResult, overflow := fixedgas.CalcIntrinsicGas(fixedgas.IntrinsicGasCalcArgs{
+		Data:               make([]byte, txn.DataLen),
+		DataNonZeroLen:     uint64(txn.DataNonZeroLen),
+		AuthorizationsLen:  uint64(authorizationLen),
+		AccessListLen:      uint64(txn.AccessListAddrCount),
+		StorageKeysLen:     uint64(txn.AccessListStorCount),
+		IsContractCreation: txn.Creation,
+		IsEIP2:             true,
+		IsEIP2028:          true,
+		IsEIP3860:          isEIP3860,
+		IsEIP7623:          isPrague,
+		IsAATxn:            isAATxn,
+	})
+	gas := intrinsicGasResult.RegularGas
+	if isPrague && intrinsicGasResult.FloorGasCost > gas {
+		gas = intrinsicGasResult.FloorGasCost
 	}
 
 	if txn.Traced {
@@ -1061,7 +1021,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		}
 		return txpoolcfg.GasLimitTooHigh
 	}
-	if isEIP7825 && txn.Gas > params.MaxTxnGasLimit {
+	if txn.Gas > params.MaxTxnGasLimit {
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx txn.gas > max gas limit idHash=%x gas=%d", txn.IDHash, txn.Gas))
 		}
@@ -1114,7 +1074,7 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 	}
 
 	if blobCount != len(txn.BlobBundles) {
-		p.logger.Debug(fmt.Sprintf("blobCount %d != len(txn.BlobBundles) %d", blobCount, len(txn.BlobBundles)))
+		p.logger.Debug(fmt.Sprintf("TX POOL: blobCount %d != len(txn.BlobBundles) %d", blobCount, len(txn.BlobBundles)))
 		return txpoolcfg.UnequalBlobTxExt
 	}
 	blobs := txn.Blobs()
@@ -1122,7 +1082,7 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 	proofs := txn.Proofs()
 
 	if len(blobs) != len(commitments) {
-		log.Error(fmt.Sprintf("len(blobs) %d != len(commitments) %d", len(blobs), len(commitments)))
+		p.logger.Debug(fmt.Sprintf("TX POOL: len(blobs) %d != len(commitments) %d", len(blobs), len(commitments)))
 		return txpoolcfg.UnequalBlobTxExt
 	}
 	if p.isOsaka() {
@@ -1131,7 +1091,7 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 		}
 	} else {
 		if len(commitments) != len(proofs) {
-			log.Error(fmt.Sprintf("NOT OSAKA len(commitments) %d != len(proofs) %d", len(commitments), len(proofs)))
+			p.logger.Debug(fmt.Sprintf("TX POOL: NOT OSAKA len(commitments) %d != len(proofs) %d", len(commitments), len(proofs)))
 			return txpoolcfg.UnequalBlobTxExt
 		}
 	}
@@ -1309,7 +1269,7 @@ func (p *TxPool) ValidateSerializedTxn(serializedTxn []byte) error {
 		txnMaxSize = 4 * txnSlotSize // 128KB
 
 		// Should be enough for a transaction with 6 blobs
-		blobTxnMaxSize = 800_000
+		blobTxnMaxSize = 1024 * 1024
 	)
 	txnType, err := PeekTransactionType(serializedTxn)
 	if err != nil {
@@ -1320,7 +1280,7 @@ func (p *TxPool) ValidateSerializedTxn(serializedTxn []byte) error {
 		maxSize = blobTxnMaxSize
 	}
 	if len(serializedTxn) > maxSize {
-		return ErrRlpTooBig
+		return fmt.Errorf("%w: type=%d", ErrRlpTooBig, txnType)
 	}
 	return nil
 }
@@ -1373,40 +1333,20 @@ func (p *TxPool) punishSpammer(spammer uint64) {
 			return count > 0
 		})
 
-		pendingTransactions := make([]diaglib.TxnHashOrder, 0)
-		baseFeeTransactions := make([]diaglib.TxnHashOrder, 0)
-		queuedTransactions := make([]diaglib.TxnHashOrder, 0)
-
 		for _, mt := range txnsToDelete {
 			switch mt.currentSubPool {
 			case PendingSubPool:
 				p.pending.Remove(mt, "punishSpammer", p.logger)
-				pendingTransactions = append(pendingTransactions, diaglib.TxnHashOrder{
-					OrderMarker: uint8(mt.subPool),
-					Hash:        mt.TxnSlot.IDHash,
-				})
 			case BaseFeeSubPool:
 				p.baseFee.Remove(mt, "punishSpammer", p.logger)
-				baseFeeTransactions = append(baseFeeTransactions, diaglib.TxnHashOrder{
-					OrderMarker: uint8(mt.subPool),
-					Hash:        mt.TxnSlot.IDHash,
-				})
 			case QueuedSubPool:
 				p.queued.Remove(mt, "punishSpammer", p.logger)
-				queuedTransactions = append(queuedTransactions, diaglib.TxnHashOrder{
-					OrderMarker: uint8(mt.subPool),
-					Hash:        mt.TxnSlot.IDHash,
-				})
 			default:
 				//already removed
 			}
 
 			p.discardLocked(mt, txpoolcfg.Spammer) // can't call it while iterating by all
 		}
-
-		sendChangeBatchEventToDiagnostics("Pending", "remove", pendingTransactions)
-		sendChangeBatchEventToDiagnostics("BaseFee", "remove", baseFeeTransactions)
-		sendChangeBatchEventToDiagnostics("Queued", "remove", queuedTransactions)
 	}
 }
 
@@ -1651,10 +1591,10 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		//Regular txn threshold checks
 		tipThreshold := uint256.NewInt(0)
 		tipThreshold = tipThreshold.Mul(&found.TxnSlot.Tip, uint256.NewInt(100+priceBump))
-		tipThreshold.Div(tipThreshold, u256.N100)
+		tipThreshold.Div(tipThreshold, &u256.N100)
 		feecapThreshold := uint256.NewInt(0)
 		feecapThreshold.Mul(&found.TxnSlot.FeeCap, uint256.NewInt(100+priceBump))
-		feecapThreshold.Div(feecapThreshold, u256.N100)
+		feecapThreshold.Div(feecapThreshold, &u256.N100)
 
 		if mt.TxnSlot.Value.Cmp(&found.TxnSlot.Value) > 0 {
 			//Potential latent overdraft attack
@@ -1675,28 +1615,10 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		switch found.currentSubPool {
 		case PendingSubPool:
 			p.pending.Remove(found, "add", p.logger)
-			sendChangeBatchEventToDiagnostics("Pending", "remove", []diaglib.TxnHashOrder{
-				{
-					OrderMarker: uint8(found.subPool),
-					Hash:        found.TxnSlot.IDHash,
-				},
-			})
 		case BaseFeeSubPool:
 			p.baseFee.Remove(found, "add", p.logger)
-			sendChangeBatchEventToDiagnostics("BaseFee", "remove", []diaglib.TxnHashOrder{
-				{
-					OrderMarker: uint8(found.subPool),
-					Hash:        found.TxnSlot.IDHash,
-				},
-			})
 		case QueuedSubPool:
 			p.queued.Remove(found, "add", p.logger)
-			sendChangeBatchEventToDiagnostics("Queued", "remove", []diaglib.TxnHashOrder{
-				{
-					OrderMarker: uint8(found.subPool),
-					Hash:        found.TxnSlot.IDHash,
-				},
-			})
 		default:
 			//already removed
 		}
@@ -1715,7 +1637,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		p.logger.Info("senderID not registered, discarding transaction for safety")
 		return txpoolcfg.InvalidSender
 	}
-	if _, ok := p.auths[AuthAndNonce{senderAddr.String(), mt.TxnSlot.Nonce}]; ok {
+	if _, ok := p.auths[AuthAndNonce{senderAddr, mt.TxnSlot.Nonce}]; ok {
 		return txpoolcfg.ErrAuthorityReserved
 	}
 
@@ -1723,7 +1645,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 	if mt.TxnSlot.Type == SetCodeTxnType {
 		for _, a := range mt.TxnSlot.AuthAndNonces {
 			// Self authorization nonce should be senderNonce + 1
-			if a.authority == senderAddr.String() && a.nonce != mt.TxnSlot.Nonce+1 {
+			if a.authority == senderAddr && a.nonce != mt.TxnSlot.Nonce+1 {
 				p.logger.Debug("Self authorization nonce should be senderNonce + 1", "authority", a.authority, "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
 				return txpoolcfg.NonceTooLow
 			}
@@ -1751,12 +1673,6 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 	}
 	// All transactions are first added to the queued pool and then immediately promoted from there if required
 	p.queued.Add(mt, "addLocked", p.logger)
-	sendChangeBatchEventToDiagnostics("Queued", "add", []diaglib.TxnHashOrder{
-		{
-			OrderMarker: uint8(mt.subPool),
-			Hash:        mt.TxnSlot.IDHash,
-		},
-	})
 	if mt.TxnSlot.Type == BlobTxnType {
 		t := p.totalBlobsInPool.Load()
 		p.totalBlobsInPool.Store(t + (uint64(len(mt.TxnSlot.BlobHashes))))
@@ -1890,10 +1806,6 @@ func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxns []*TxnSlot) er
 	baseFeeRemoved := 0
 	queuedRemoved := 0
 
-	pendingHashes := make([]diaglib.TxnHashOrder, 0)
-	baseFeeHashes := make([]diaglib.TxnHashOrder, 0)
-	queuedHashes := make([]diaglib.TxnHashOrder, 0)
-
 	for senderID, nonce := range noncesToRemove {
 		byNonce.ascend(senderID, func(mt *metaTxn) bool {
 			if mt.TxnSlot.Nonce > nonce {
@@ -1914,24 +1826,12 @@ func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxns []*TxnSlot) er
 			case PendingSubPool:
 				pendingRemoved++
 				p.pending.Remove(mt, "remove-mined", p.logger)
-				pendingHashes = append(pendingHashes, diaglib.TxnHashOrder{
-					OrderMarker: uint8(mt.subPool),
-					Hash:        mt.TxnSlot.IDHash,
-				})
 			case BaseFeeSubPool:
 				baseFeeRemoved++
 				p.baseFee.Remove(mt, "remove-mined", p.logger)
-				baseFeeHashes = append(baseFeeHashes, diaglib.TxnHashOrder{
-					OrderMarker: uint8(mt.subPool),
-					Hash:        mt.TxnSlot.IDHash,
-				})
 			case QueuedSubPool:
 				queuedRemoved++
 				p.queued.Remove(mt, "remove-mined", p.logger)
-				queuedHashes = append(queuedHashes, diaglib.TxnHashOrder{
-					OrderMarker: uint8(mt.subPool),
-					Hash:        mt.TxnSlot.IDHash,
-				})
 			default:
 				//already removed
 			}
@@ -1946,10 +1846,6 @@ func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxns []*TxnSlot) er
 		toDel = toDel[:0]
 	}
 
-	sendChangeBatchEventToDiagnostics("Pending", "remove", pendingHashes)
-	sendChangeBatchEventToDiagnostics("BaseFee", "remove", baseFeeHashes)
-	sendChangeBatchEventToDiagnostics("Queued", "remove", queuedHashes)
-
 	if discarded > 0 {
 		p.logger.Debug("Discarded transactions", "count", discarded, "pending", pendingRemoved, "baseFee", baseFeeRemoved, "queued", queuedRemoved)
 	}
@@ -1962,8 +1858,6 @@ func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxns []*TxnSlot) er
 // nonces, and also affect other transactions from the same sender with higher nonce, it loops through all transactions
 // for a given senderID
 func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, senderBalance uint256.Int, blockGasLimit uint64, logger log.Logger) {
-
-	sendSenderInfoUpdateToDiagnostics(senderID, senderNonce, senderBalance, blockGasLimit)
 
 	noGapsNonce := senderNonce
 	cumulativeRequiredBalance := uint256.NewInt(0)
@@ -1986,28 +1880,10 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 			switch mt.currentSubPool {
 			case PendingSubPool:
 				p.pending.Remove(mt, deleteAndContinueReasonLog, p.logger)
-				sendChangeBatchEventToDiagnostics("Pending", "remove", []diaglib.TxnHashOrder{
-					{
-						OrderMarker: uint8(mt.subPool),
-						Hash:        mt.TxnSlot.IDHash,
-					},
-				})
 			case BaseFeeSubPool:
 				p.baseFee.Remove(mt, deleteAndContinueReasonLog, p.logger)
-				sendChangeBatchEventToDiagnostics("BaseFee", "remove", []diaglib.TxnHashOrder{
-					{
-						OrderMarker: uint8(mt.subPool),
-						Hash:        mt.TxnSlot.IDHash,
-					},
-				})
 			case QueuedSubPool:
 				p.queued.Remove(mt, deleteAndContinueReasonLog, p.logger)
-				sendChangeBatchEventToDiagnostics("Queued", "remove", []diaglib.TxnHashOrder{
-					{
-						OrderMarker: uint8(mt.subPool),
-						Hash:        mt.TxnSlot.IDHash,
-					},
-				})
 			default:
 				//already removed
 			}
@@ -2095,20 +1971,8 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 		tx := p.pending.PopWorst()
 		if worst.subPool >= BaseFeePoolBits {
 			p.baseFee.Add(tx, "demote-pending", logger)
-			sendChangeBatchEventToDiagnostics("BaseFee", "add", []diaglib.TxnHashOrder{
-				{
-					OrderMarker: uint8(tx.subPool),
-					Hash:        tx.TxnSlot.IDHash,
-				},
-			})
 		} else {
 			p.queued.Add(tx, "demote-pending", logger)
-			sendChangeBatchEventToDiagnostics("Queued", "add", []diaglib.TxnHashOrder{
-				{
-					OrderMarker: uint8(tx.subPool),
-					Hash:        tx.TxnSlot.IDHash,
-				},
-			})
 		}
 	}
 
@@ -2123,12 +1987,6 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 	for worst := p.baseFee.Worst(); p.baseFee.Len() > 0 && worst.subPool < BaseFeePoolBits; worst = p.baseFee.Worst() {
 		tx := p.baseFee.PopWorst()
 		p.queued.Add(tx, "demote-base", logger)
-		sendChangeBatchEventToDiagnostics("Queued", "add", []diaglib.TxnHashOrder{
-			{
-				OrderMarker: uint8(tx.subPool),
-				Hash:        tx.TxnSlot.IDHash,
-			},
-		})
 	}
 
 	// Promote best transactions from the queued pool to either pending or base fee pool, while they qualify
@@ -2139,12 +1997,6 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 			p.pending.Add(tx, logger)
 		} else {
 			p.baseFee.Add(tx, "promote-queued", logger)
-			sendChangeBatchEventToDiagnostics("BaseFee", "add", []diaglib.TxnHashOrder{
-				{
-					OrderMarker: uint8(tx.subPool),
-					Hash:        tx.TxnSlot.IDHash,
-				},
-			})
 		}
 	}
 
@@ -2154,37 +2006,19 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 	// Discard worst transactions from pending pool until it is within capacity limit
 	for p.pending.Len() > p.pending.limit {
 		tx := p.pending.PopWorst()
-		p.discardLocked(p.pending.PopWorst(), txpoolcfg.PendingPoolOverflow)
-		sendChangeBatchEventToDiagnostics("Pending", "remove", []diaglib.TxnHashOrder{
-			{
-				OrderMarker: uint8(tx.subPool),
-				Hash:        tx.TxnSlot.IDHash,
-			},
-		})
+		p.discardLocked(tx, txpoolcfg.PendingPoolOverflow)
 	}
 
 	// Discard worst transactions from pending sub pool until it is within capacity limits
 	for p.baseFee.Len() > p.baseFee.limit {
 		tx := p.baseFee.PopWorst()
 		p.discardLocked(tx, txpoolcfg.BaseFeePoolOverflow)
-		sendChangeBatchEventToDiagnostics("BaseFee", "remove", []diaglib.TxnHashOrder{
-			{
-				OrderMarker: uint8(tx.subPool),
-				Hash:        tx.TxnSlot.IDHash,
-			},
-		})
 	}
 
 	// Discard worst transactions from the queued sub pool until it is within its capacity limits
-	for _ = p.queued.Worst(); p.queued.Len() > p.queued.limit; _ = p.queued.Worst() {
+	for p.queued.Len() > p.queued.limit {
 		tx := p.queued.PopWorst()
 		p.discardLocked(tx, txpoolcfg.QueuedPoolOverflow)
-		sendChangeBatchEventToDiagnostics("Queued", "remove", []diaglib.TxnHashOrder{
-			{
-				OrderMarker: uint8(tx.subPool),
-				Hash:        tx.TxnSlot.IDHash,
-			},
-		})
 	}
 }
 
@@ -2280,7 +2114,7 @@ func (p *TxPool) Run(ctx context.Context) error {
 					// drain newTxns for emptying newTxn channel
 					// newTxn channel will be filled only with local transactions
 					// early return to avoid outbound transaction propagation
-					log.Debug("[txpool] txn gossip disabled", "state", "drain new transactions")
+					p.logger.Debug("[txpool] txn gossip disabled", "state", "drain new transactions")
 					return
 				}
 
@@ -2367,7 +2201,7 @@ func (p *TxPool) Run(ctx context.Context) error {
 			}
 			if p.cfg.NoGossip {
 				// avoid transaction gossiping for new peers
-				log.Debug("[txpool] txn gossip disabled", "state", "sync new peers")
+				p.logger.Debug("[txpool] txn gossip disabled", "state", "sync new peers")
 				continue
 			}
 			t := time.Now()
@@ -2644,6 +2478,16 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.TemporalTx) err
 		pendingBaseFee, pendingBlobFee, blockGasLimit, false, p.logger); err != nil {
 		return err
 	}
+	// Initialise cached pendingBaseFee values in all queues so that their
+	// comparators use the correct base fee even before the first OnNewBlock.
+	var pendingBaseFee256 uint256.Int
+	pendingBaseFee256.SetUint64(pendingBaseFee)
+	p.pending.best.pendingBaseFee = pendingBaseFee256
+	p.pending.worst.pendingBaseFee = pendingBaseFee256
+	p.baseFee.best.pendingBaseFee = pendingBaseFee256
+	p.baseFee.worst.pendingBaseFee = pendingBaseFee256
+	p.queued.best.pendingBaseFee = pendingBaseFee256
+	p.queued.worst.pendingBaseFee = pendingBaseFee256
 	p.pendingBaseFee.Store(pendingBaseFee)
 	p.pendingBlobFee.Store(pendingBlobFee)
 	p.blockGasLimit.Store(blockGasLimit)
@@ -2676,7 +2520,7 @@ func (p *TxPool) logStats() {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	ctx := []interface{}{
+	ctx := []any{
 		"pending", p.pending.Len(),
 		"baseFee", p.baseFee.Len(),
 		"queued", p.queued.Len(),
@@ -2692,9 +2536,11 @@ func (p *TxPool) logStats() {
 }
 
 // Deprecated need switch to streaming-like
-func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp []byte, sender common.Address, t SubPoolType), tx kv.Tx) {
+func (p *TxPool) deprecatedForEach(f func(rlp []byte, sender common.Address, t SubPoolType), tx kv.Tx) {
 	var txns []*metaTxn
 	var senders []common.Address
+	var subPoolTypes []SubPoolType
+	var rlpValues [][]byte
 
 	p.lock.Lock()
 
@@ -2702,6 +2548,8 @@ func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp []byte, sender 
 		if sender, found := p.senders.senderID2Addr[mt.TxnSlot.SenderID]; found {
 			txns = append(txns, mt)
 			senders = append(senders, sender)
+			subPoolTypes = append(subPoolTypes, mt.currentSubPool)
+			rlpValues = append(rlpValues, mt.TxnSlot.Rlp)
 		}
 
 		return true
@@ -2710,7 +2558,7 @@ func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp []byte, sender 
 	p.lock.Unlock()
 
 	for i := range txns {
-		slotRlp := txns[i].TxnSlot.Rlp
+		slotRlp := rlpValues[i]
 		if slotRlp == nil {
 			v, err := tx.GetOne(kv.PoolTransaction, txns[i].TxnSlot.IDHash[:])
 			if err != nil {
@@ -2724,109 +2572,6 @@ func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp []byte, sender 
 			slotRlp = v[20:]
 		}
 
-		f(slotRlp, senders[i], txns[i].currentSubPool)
+		f(slotRlp, senders[i], subPoolTypes[i])
 	}
-}
-
-func sendChangeBatchEventToDiagnostics(pool string, event string, orderHashes []diaglib.TxnHashOrder) {
-	//Not sending empty events or diagnostics disabled
-	if len(orderHashes) == 0 || !diaglib.Client().Connected() {
-		return
-	}
-
-	toRemoveBatch := make([]diaglib.PoolChangeBatch, 0)
-	toRemoveBatch = append(toRemoveBatch, diaglib.PoolChangeBatch{
-		Pool:         pool,
-		Event:        event,
-		TxnHashOrder: orderHashes,
-	})
-
-	diaglib.Send(diaglib.PoolChangeBatchEvent{
-		Changes: toRemoveBatch,
-	})
-}
-
-func sendSenderInfoUpdateToDiagnostics(senderID uint64, senderNonce uint64, senderBalance uint256.Int, blockGasLimit uint64) {
-	if !diaglib.Client().Connected() {
-		return
-	}
-
-	// Send sender info update to diagnostics
-	diaglib.Send(diaglib.SenderInfoUpdate{
-		SenderId:      senderID,
-		SenderNonce:   senderNonce,
-		SenderBalance: senderBalance,
-		BlockGasLimit: blockGasLimit,
-	})
-}
-
-func sendNewBlockEventToDiagnostics(unwindTxns, unwindBlobTxns, minedTxns TxnSlots, blockNum uint64, blkTime uint64) {
-	if !diaglib.Client().Connected() {
-		return
-	}
-
-	blockUpdate := diaglib.BlockUpdate{
-		MinedTxns:       []diaglib.DiagTxn{},
-		UnwoundTxns:     []diaglib.DiagTxn{},
-		UnwoundBlobTxns: []diaglib.DiagTxn{},
-		BlockNum:        blockNum,
-		BlkTime:         blkTime,
-	}
-
-	minedDiagTxns := make([]diaglib.DiagTxn, 0)
-	unwindDiagTxns := make([]diaglib.DiagTxn, 0)
-	unwindBlobDiagTxns := make([]diaglib.DiagTxn, 0)
-
-	for _, txn := range minedTxns.Txns {
-		minedDiagTxns = append(minedDiagTxns, diaglib.DiagTxn{
-			IDHash:              hex.EncodeToString(txn.IDHash[:]),
-			SenderID:            txn.SenderID,
-			Size:                txn.Size,
-			Creation:            txn.Creation,
-			DataLen:             txn.DataLen,
-			AccessListAddrCount: txn.AccessListAddrCount,
-			AccessListStorCount: txn.AccessListStorCount,
-			BlobHashes:          txn.BlobHashes,
-			IsLocal:             false,
-			RLP:                 txn.Rlp,
-		})
-	}
-
-	for _, txn := range unwindTxns.Txns {
-		unwindDiagTxns = append(unwindDiagTxns, diaglib.DiagTxn{
-			IDHash:              hex.EncodeToString(txn.IDHash[:]),
-			SenderID:            txn.SenderID,
-			Size:                txn.Size,
-			Creation:            txn.Creation,
-			DataLen:             txn.DataLen,
-			AccessListAddrCount: txn.AccessListAddrCount,
-			AccessListStorCount: txn.AccessListStorCount,
-			BlobHashes:          txn.BlobHashes,
-			IsLocal:             false,
-			RLP:                 txn.Rlp,
-		})
-	}
-
-	for _, txn := range unwindBlobTxns.Txns {
-		unwindBlobDiagTxns = append(unwindBlobDiagTxns, diaglib.DiagTxn{
-			IDHash:              hex.EncodeToString(txn.IDHash[:]),
-			SenderID:            txn.SenderID,
-			Size:                txn.Size,
-			Creation:            txn.Creation,
-			DataLen:             txn.DataLen,
-			AccessListAddrCount: txn.AccessListAddrCount,
-			AccessListStorCount: txn.AccessListStorCount,
-			BlobHashes:          txn.BlobHashes,
-			IsLocal:             false,
-			RLP:                 txn.Rlp,
-		})
-	}
-
-	blockUpdate.MinedTxns = minedDiagTxns
-	blockUpdate.UnwoundTxns = unwindDiagTxns
-	blockUpdate.UnwoundBlobTxns = unwindBlobDiagTxns
-	blockUpdate.BlockNum = blockNum
-	blockUpdate.BlkTime = blkTime
-
-	diaglib.Send(blockUpdate)
 }

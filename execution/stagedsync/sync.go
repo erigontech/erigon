@@ -20,17 +20,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"runtime/debug"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
-	"github.com/erigontech/erigon/db/wrap"
-	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 type Sync struct {
@@ -82,27 +83,11 @@ func (s *Sync) NewUnwindState(id stages.SyncStage, unwindPoint, currentProgress 
 }
 
 // PruneStageState Get the current prune status from the DB
-func (s *Sync) PruneStageState(id stages.SyncStage, forwardProgress uint64, tx kv.Tx, db kv.RwDB, initialCycle bool) (*PruneState, error) {
-	var pruneProgress uint64
-	var err error
-	useExternalTx := tx != nil
-	if useExternalTx {
-		pruneProgress, err = stages.GetStagePruneProgress(tx, id)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		if err = db.View(context.Background(), func(tx kv.Tx) error {
-			pruneProgress, err = stages.GetStagePruneProgress(tx, id)
-			if err != nil {
-				return err
-			}
-			return nil
-		}); err != nil {
-			return nil, err
-		}
+func (s *Sync) PruneStageState(id stages.SyncStage, forwardProgress uint64, tx kv.Tx, initialCycle bool) (*PruneState, error) {
+	pruneProgress, err := stages.GetStagePruneProgress(tx, id)
+	if err != nil {
+		return nil, err
 	}
-
 	return &PruneState{id, forwardProgress, pruneProgress, s, CurrentSyncCycleInfo{initialCycle, false}}, nil
 }
 
@@ -260,31 +245,25 @@ func New(cfg ethconfig.Sync, stagesList []*Stage, unwindOrder UnwindOrder, prune
 	}
 }
 
-func (s *Sync) StageState(stage stages.SyncStage, tx kv.Tx, db kv.RoDB, initialCycle, firstCycle bool) (*StageState, error) {
-	var blockNum uint64
-	var err error
-	useExternalTx := tx != nil
-	if useExternalTx {
-		blockNum, err = stages.GetStageProgress(tx, stage)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		if err = db.View(context.Background(), func(tx kv.Tx) error {
-			blockNum, err = stages.GetStageProgress(tx, stage)
-			if err != nil {
-				return err
-			}
-			return nil
-		}); err != nil {
-			return nil, err
-		}
+func (s *Sync) StageState(stage stages.SyncStage, tx kv.Tx, initialCycle, firstCycle bool) (*StageState, error) {
+	blockNum, err := stages.GetStageProgress(tx, stage)
+	if err != nil {
+		return nil, err
 	}
-
 	return &StageState{s, stage, blockNum, CurrentSyncCycleInfo{initialCycle, firstCycle}}, nil
 }
 
-func (s *Sync) RunUnwind(db kv.RwDB, txc wrap.TxContainer) error {
+func (s *Sync) RunSnapshots(sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
+	for _, stage := range s.stages {
+		if stage.ID == stages.Snapshots {
+			_, err := s.runStage(stage, sd, tx, true, true, false)
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Sync) RunUnwind(sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
 	if s.unwindPoint == nil {
 		return nil
 	}
@@ -292,7 +271,7 @@ func (s *Sync) RunUnwind(db kv.RwDB, txc wrap.TxContainer) error {
 		if s.unwindOrder[j] == nil || s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
 			continue
 		}
-		if err := s.unwindStage(false, s.unwindOrder[j], db, txc); err != nil {
+		if err := s.unwindStage(false, s.unwindOrder[j], sd, tx); err != nil {
 			return err
 		}
 	}
@@ -305,7 +284,7 @@ func (s *Sync) RunUnwind(db kv.RwDB, txc wrap.TxContainer) error {
 	return nil
 }
 
-func (s *Sync) RunNoInterrupt(db kv.RwDB, txc wrap.TxContainer) (bool, error) {
+func (s *Sync) RunNoInterrupt(sd *execctx.SharedDomains, tx kv.TemporalRwTx) (bool, error) {
 	var hasMore bool
 	initialCycle, firstCycle := false, false
 	s.prevUnwindPoint = nil
@@ -319,7 +298,7 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, txc wrap.TxContainer) (bool, error) {
 				if s.unwindOrder[j] == nil || s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
 					continue
 				}
-				if err := s.unwindStage(initialCycle, s.unwindOrder[j], db, txc); err != nil {
+				if err := s.unwindStage(initialCycle, s.unwindOrder[j], sd, tx); err != nil {
 					return false, err
 				}
 			}
@@ -340,10 +319,7 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, txc wrap.TxContainer) (bool, error) {
 
 		stage := s.stages[s.currentStage]
 
-		if string(stage.ID) == dbg.StopBeforeStage() { // stop process for debugging reasons
-			s.logger.Warn("STOP_BEFORE_STAGE env flag forced to stop app")
-			return false, common.ErrStopped
-		}
+		s.checkStopBeforeStage(stage)
 
 		if stage.Disabled || stage.Forward == nil {
 			s.logger.Trace(fmt.Sprintf("%s disabled. %s", stage.ID, stage.DisabledDescription))
@@ -352,7 +328,7 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, txc wrap.TxContainer) (bool, error) {
 			continue
 		}
 
-		stageHasMore, err := s.runStage(stage, db, txc, initialCycle, firstCycle, badBlockUnwind)
+		stageHasMore, err := s.runStage(stage, sd, tx, initialCycle, firstCycle, badBlockUnwind)
 		if err != nil {
 			return false, err
 		}
@@ -360,10 +336,7 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, txc wrap.TxContainer) (bool, error) {
 			hasMore = true
 		}
 
-		if string(stage.ID) == dbg.StopAfterStage() { // stop process for debugging reasons
-			s.logger.Warn("STOP_AFTER_STAGE env flag forced to stop app")
-			return false, common.ErrStopped
-		}
+		s.checkStopAfterStage(stage)
 
 		if string(stage.ID) == s.cfg.BreakAfterStage { // break process loop
 			s.logger.Warn("--sync.loop.break.after caused stage break")
@@ -398,12 +371,11 @@ func (e *ErrLoopExhausted) Is(err error) bool {
 	return errors.As(err, &errExhausted)
 }
 
-func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bool) (bool, error) {
+func (s *Sync) Run(sd *execctx.SharedDomains, tx kv.TemporalRwTx, initialCycle, firstCycle bool) (more bool, err error) {
 	s.prevUnwindPoint = nil
 	s.timings = s.timings[:0]
 
 	var errBadBlock error
-	hasMore := false
 	for !s.IsDone() {
 		var badBlockUnwind bool
 		if s.unwindPoint != nil {
@@ -411,7 +383,7 @@ func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bo
 				if s.unwindOrder[j] == nil || s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
 					continue
 				}
-				if err := s.unwindStage(initialCycle, s.unwindOrder[j], db, txc); err != nil {
+				if err := s.unwindStage(initialCycle, s.unwindOrder[j], sd, tx); err != nil {
 					return false, err
 				}
 			}
@@ -437,48 +409,31 @@ func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bo
 
 		stage := s.stages[s.currentStage]
 
-		if string(stage.ID) == dbg.StopBeforeStage() { // stop process for debugging reasons
-			s.logger.Warn("STOP_BEFORE_STAGE env flag forced to stop app")
-			return false, common.ErrStopped
-		}
+		s.checkStopBeforeStage(stage)
 
 		if stage.Disabled || stage.Forward == nil {
 			s.logger.Trace(fmt.Sprintf("%s disabled. %s", stage.ID, stage.DisabledDescription))
 			s.NextStage()
 			continue
 		}
-		stageHasMore, err := s.runStage(stage, db, txc, initialCycle, firstCycle, badBlockUnwind)
+		stageHasMore, err := s.runStage(stage, sd, tx, initialCycle, firstCycle, badBlockUnwind)
 		if err != nil {
 			return false, err
 		}
 		if stageHasMore {
-			hasMore = true
+			more = true
 		}
 
-		if string(stage.ID) == dbg.StopAfterStage() { // stop process for debugging reasons
-			s.logger.Warn("STOP_AFTER_STAGE env flag forced to stop app")
-			return false, common.ErrStopped
-		}
+		s.checkStopAfterStage(stage)
 
 		if string(stage.ID) == s.cfg.BreakAfterStage { // break process loop
 			s.logger.Warn("--sync.loop.break.after caused stage break")
 			if s.posTransition != nil {
-				ptx := txc.Tx
-
-				if ptx == nil {
-					if tx, err := db.BeginRw(context.Background()); err == nil {
-						ptx = tx
-						defer tx.Rollback()
-					}
-				}
-
-				if ptx != nil {
-					if progress, err := stages.GetStageProgress(ptx, stage.ID); err == nil {
-						hasMore = progress < *s.posTransition
-					}
+				if progress, err := stages.GetStageProgress(tx, stage.ID); err == nil {
+					more = progress < *s.posTransition
 				}
 			} else {
-				hasMore = true
+				more = true
 			}
 			break
 		}
@@ -491,17 +446,17 @@ func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bo
 	}
 
 	s.currentStage = 0
-	return hasMore, errBadBlock
+	return more, errBadBlock
 }
 
 // RunPrune pruning for stages as per the defined pruning order, if enabled for that stage
-func (s *Sync) RunPrune(db kv.RwDB, tx kv.RwTx, initialCycle bool) error {
+func (s *Sync) RunPrune(ctx context.Context, tx kv.RwTx, initialCycle bool, timeout time.Duration) error {
 	s.timings = s.timings[:0]
 	for i := 0; i < len(s.pruningOrder); i++ {
 		if s.pruningOrder[i] == nil || s.pruningOrder[i].Disabled || s.pruningOrder[i].Prune == nil {
 			continue
 		}
-		if err := s.pruneStage(initialCycle, s.pruningOrder[i], db, tx); err != nil {
+		if err := s.pruneStage(ctx, initialCycle, s.pruningOrder[i], tx, timeout); err != nil {
 			return err
 		}
 	}
@@ -512,8 +467,8 @@ func (s *Sync) RunPrune(db kv.RwDB, tx kv.RwTx, initialCycle bool) error {
 	return nil
 }
 
-func (s *Sync) PrintTimings() []interface{} {
-	var logCtx []interface{}
+func (s *Sync) PrintTimings() []any {
+	var logCtx []any
 	count := 0
 	for i := range s.timings {
 		if s.timings[i].took < 100*time.Millisecond {
@@ -524,9 +479,9 @@ func (s *Sync) PrintTimings() []interface{} {
 			break
 		}
 		if s.timings[i].isUnwind {
-			logCtx = append(logCtx, "Unwind "+string(s.timings[i].stage), s.timings[i].took.Truncate(time.Millisecond).String())
+			logCtx = append(logCtx, "unwind "+string(s.timings[i].stage), s.timings[i].took.Truncate(time.Millisecond).String())
 		} else if s.timings[i].isPrune {
-			logCtx = append(logCtx, "Prune "+string(s.timings[i].stage), s.timings[i].took.Truncate(time.Millisecond).String())
+			logCtx = append(logCtx, "prune "+string(s.timings[i].stage), s.timings[i].took.Truncate(time.Millisecond).String())
 		} else {
 			logCtx = append(logCtx, string(s.timings[i].stage), s.timings[i].took.Truncate(time.Millisecond).String())
 		}
@@ -534,15 +489,15 @@ func (s *Sync) PrintTimings() []interface{} {
 	return logCtx
 }
 
-func (s *Sync) runStage(stage *Stage, db kv.RwDB, txc wrap.TxContainer, initialCycle, firstCycle bool, badBlockUnwind bool) (bool, error) {
+func (s *Sync) runStage(stage *Stage, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, initialCycle, firstCycle bool, badBlockUnwind bool) (bool, error) {
 	start := time.Now()
-	s.logger.Debug(fmt.Sprintf("[%s] Starting Stage run", s.LogPrefix()))
-	stageState, err := s.StageState(stage.ID, txc.Tx, db, initialCycle, firstCycle)
+	//s.logger.Debug(fmt.Sprintf("[%s] Starting Stage run", s.LogPrefix()))
+	stageState, err := s.StageState(stage.ID, rwTx, initialCycle, firstCycle)
 	if err != nil {
 		return false, err
 	}
 
-	if err = stage.Forward(badBlockUnwind, stageState, s, txc, s.logger); err != nil {
+	if err = stage.Forward(badBlockUnwind, stageState, s, doms, rwTx, s.logger); err != nil {
 		var errExhausted *ErrLoopExhausted
 		if errors.As(err, &errExhausted) {
 			s.logger.Debug(fmt.Sprintf("[%s] loop exhausted", s.LogPrefix()), "msg", err.Error())
@@ -569,9 +524,9 @@ func (s *Sync) logRunStageDone(stageState *StageState, start time.Time) {
 	s.metricsCache.stageRunDurationSummary(stageState.ID).Observe(took.Seconds())
 }
 
-func (s *Sync) unwindStage(initialCycle bool, stage *Stage, db kv.RwDB, txc wrap.TxContainer) error {
+func (s *Sync) unwindStage(initialCycle bool, stage *Stage, sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
 	start := time.Now()
-	stageState, err := s.StageState(stage.ID, txc.Tx, db, initialCycle, false)
+	stageState, err := s.StageState(stage.ID, tx, initialCycle, false)
 	if err != nil {
 		return err
 	}
@@ -587,7 +542,7 @@ func (s *Sync) unwindStage(initialCycle bool, stage *Stage, db kv.RwDB, txc wrap
 		return err
 	}
 
-	err = stage.Unwind(unwind, stageState, txc, s.logger)
+	err = stage.Unwind(unwind, stageState, sd, tx, s.logger)
 	if err != nil {
 		return fmt.Errorf("[%s] %w", s.LogPrefix(), err)
 	}
@@ -603,15 +558,15 @@ func (s *Sync) unwindStage(initialCycle bool, stage *Stage, db kv.RwDB, txc wrap
 }
 
 // Run the pruning function for the given stage
-func (s *Sync) pruneStage(initialCycle bool, stage *Stage, db kv.RwDB, tx kv.RwTx) error {
+func (s *Sync) pruneStage(ctx context.Context, initialCycle bool, stage *Stage, tx kv.RwTx, timeout time.Duration) error {
 	start := time.Now()
 
-	stageState, err := s.StageState(stage.ID, tx, db, initialCycle, false)
+	stageState, err := s.StageState(stage.ID, tx, initialCycle, false)
 	if err != nil {
 		return err
 	}
 
-	pruneState, err := s.PruneStageState(stage.ID, stageState.BlockNumber, tx, db, initialCycle)
+	pruneState, err := s.PruneStageState(stage.ID, stageState.BlockNumber, tx, initialCycle)
 	if err != nil {
 		return err
 	}
@@ -619,7 +574,7 @@ func (s *Sync) pruneStage(initialCycle bool, stage *Stage, db kv.RwDB, tx kv.RwT
 		return err
 	}
 
-	err = stage.Prune(pruneState, tx, s.logger)
+	err = stage.Prune(ctx, pruneState, tx, timeout, s.logger)
 	if err != nil {
 		return fmt.Errorf("[%s] %w", s.LogPrefix(), err)
 	}
@@ -676,5 +631,24 @@ func (s *Sync) MockExecFunc(id stages.SyncStage, f ExecFunc) {
 		if s.stages[i].ID == id {
 			s.stages[i].Forward = f
 		}
+	}
+}
+
+// We're duplicating constants around env naming, and it isn't 100% because there can be ERIGON_
+// prefixing applied in dbg, but this is a minor feature. Abstracted out to avoid drifting on
+// implementation in separate areas.
+
+func (s *Sync) checkStopBeforeStage(stage *Stage) {
+	s.checkStopStage(stage, "STOP_BEFORE_STAGE", dbg.StopBeforeStage())
+}
+func (s *Sync) checkStopAfterStage(stage *Stage) {
+	s.checkStopStage(stage, "STOP_AFTER_STAGE", dbg.StopAfterStage())
+}
+func (s *Sync) checkStopStage(stage *Stage, envName, value string) {
+	if string(stage.ID) == value { // stop process for debugging reasons
+		s.logger.Warn("env flag forced to stop app", "env", envName, "value", value)
+		// None of the wrappers check the stop error reason anymore, and so they ignore this.
+		debug.PrintStack()
+		os.Exit(0)
 	}
 }

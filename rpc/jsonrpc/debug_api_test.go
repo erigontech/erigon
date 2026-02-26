@@ -20,28 +20,26 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"math/big"
 	"reflect"
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	tracersConfig "github.com/erigontech/erigon/eth/tracers/config"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -74,11 +72,14 @@ var debugTraceTransactionNoRefundTests = []struct {
 }
 
 func TestTraceBlockByNumber(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil)
-	ethApi := NewEthAPI(baseApi, m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
-	api := NewPrivateDebugAPI(baseApi, m.DB, 0)
+	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0)
+	ethApi := newEthApiForTest(baseApi, m.DB, nil, nil)
+	api := NewPrivateDebugAPI(baseApi, m.DB, 0, false)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
@@ -127,9 +128,9 @@ func TestTraceBlockByNumber(t *testing.T) {
 }
 
 func TestTraceBlockByHash(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	ethApi := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ethApi := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0, false)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
@@ -159,8 +160,8 @@ func TestTraceBlockByHash(t *testing.T) {
 }
 
 func TestTraceTransaction(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0, false)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
@@ -188,8 +189,8 @@ func TestTraceTransaction(t *testing.T) {
 }
 
 func TestTraceTransactionNoRefund(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0, false)
 	for _, tt := range debugTraceTransactionNoRefundTests {
 		var buf bytes.Buffer
 		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
@@ -218,8 +219,8 @@ func TestTraceTransactionNoRefund(t *testing.T) {
 }
 
 func TestStorageRangeAt(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0, false)
 	t.Run("invalid addr", func(t *testing.T) {
 		var block4 *types.Block
 		var err error
@@ -292,7 +293,7 @@ func TestStorageRangeAt(t *testing.T) {
 			t.Fatalf("wrong result:\ngot %s\nwant %s", dumper.Sdump(result), dumper.Sdump(&expect))
 		}
 
-		// limited
+		// limited — default Erigon mode returns nextKey as raw key
 		result, err = api.StorageRangeAt(m.Ctx, latestBlock.Hash(), 0, addr, nil, 2)
 		require.NoError(t, err)
 		expect = StorageRangeResult{storageMap{keys[0]: storage[keys[0]], keys[2]: storage[keys[2]]}, &keys[5]}
@@ -311,9 +312,68 @@ func TestStorageRangeAt(t *testing.T) {
 
 }
 
+func TestStorageRangeAtGethCompat(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0, true) // gethCompatibility=true
+	t.Run("block latest, addr 1", func(t *testing.T) {
+		var latestBlock *types.Block
+		err := m.DB.View(m.Ctx, func(tx kv.Tx) (err error) {
+			latestBlock, err = m.BlockReader.CurrentBlock(tx)
+			return err
+		})
+		require.NoError(t, err)
+		addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf44")
+		keys := []common.Hash{ // pairs: (seckey, rawkey) — ordered by seckey (keccak256 hash)
+			common.HexToHash("0x290decd9548b62a8d60345a988386fc84ba6bc95484008f6362f93160ef3e563"),
+			common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
+
+			common.HexToHash("0x405787fa12a823e0f2b7631cc41b3ba8828b3321ca811111fa75cd3aa3bb5ace"),
+			common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000002"),
+
+			common.HexToHash("0xb077f7530a1364c54ee00cf94ba99175db81e7e002c97e344aa5d3c4908617c4"),
+			common.HexToHash("0x9541d803110b392ecde8e03af7ae34d4457eb4934dac09903ccee819bec4a355"),
+
+			common.HexToHash("0xb6b80924ee71b506e16a000e00b0f8f3a82f53791c6b87f5958fdf562f3d12c8"),
+			common.HexToHash("0xf41f8421ae8c8d7bb78783a0bdadb801a5f895bea868c1d867ae007558809ef1"),
+		}
+		storage := storageMap{
+			keys[0]: {Key: &keys[1], Value: common.HexToHash("0x000000000000000000000000000000000000000000000000000000000000000a")},
+			keys[2]: {Key: &keys[3], Value: common.HexToHash("0x0000000000000000000000000d3ab14bbad3d99f4203bd7a11acb94882050e7e")},
+			keys[4]: {Key: &keys[5], Value: common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000003")},
+			keys[6]: {Key: &keys[7], Value: common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000007")},
+		}
+
+		// all entries
+		expect := StorageRangeResult{
+			storageMap{keys[0]: storage[keys[0]], keys[2]: storage[keys[2]], keys[4]: storage[keys[4]], keys[6]: storage[keys[6]]},
+			nil}
+		result, err := api.StorageRangeAt(m.Ctx, latestBlock.Hash(), 0, addr, nil, 100)
+		require.NoError(t, err)
+		if !reflect.DeepEqual(result, expect) {
+			t.Fatalf("wrong result:\ngot %s\nwant %s", dumper.Sdump(result), dumper.Sdump(&expect))
+		}
+
+		// limited — geth-compat mode returns nextKey as hashed key (seckey)
+		result, err = api.StorageRangeAt(m.Ctx, latestBlock.Hash(), 0, addr, nil, 2)
+		require.NoError(t, err)
+		expect = StorageRangeResult{storageMap{keys[0]: storage[keys[0]], keys[2]: storage[keys[2]]}, &keys[4]}
+		if !reflect.DeepEqual(result, expect) {
+			t.Fatalf("wrong result:\ngot %s\nwant %s", dumper.Sdump(result), dumper.Sdump(&expect))
+		}
+
+		// start from nextKey (hashed), limited — pagination
+		result, err = api.StorageRangeAt(m.Ctx, latestBlock.Hash(), 0, addr, expect.NextKey.Bytes(), 2)
+		require.NoError(t, err)
+		expect = StorageRangeResult{storageMap{keys[4]: storage[keys[4]], keys[6]: storage[keys[6]]}, nil}
+		if !reflect.DeepEqual(result, expect) {
+			t.Fatalf("wrong result:\ngot %s\nwant %s", dumper.Sdump(result), dumper.Sdump(&expect))
+		}
+	})
+}
+
 func TestAccountRange(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0, false)
 
 	t.Run("valid account", func(t *testing.T) {
 		addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf55")
@@ -371,8 +431,8 @@ func TestAccountRange(t *testing.T) {
 }
 
 func TestGetModifiedAccountsByNumber(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0, false)
 
 	t.Run("correct input", func(t *testing.T) {
 		n, n2 := rpc.BlockNumber(1), rpc.BlockNumber(2)
@@ -380,12 +440,12 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, result, 3)
 
-		n, n2 = rpc.BlockNumber(5), rpc.BlockNumber(7)
+		n, n2 = rpc.BlockNumber(5), rpc.BlockNumber(8)
 		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
 		require.NoError(t, err)
-		require.Len(t, result, 38)
+		require.Len(t, result, 37)
 
-		n, n2 = rpc.BlockNumber(0), rpc.BlockNumber(9)
+		n, n2 = rpc.BlockNumber(0), rpc.BlockNumber(10)
 		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
 		require.NoError(t, err)
 		require.Len(t, result, 40)
@@ -395,29 +455,29 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, nil)
 		require.NoError(t, err)
 		require.Len(t, result, 3)
-	})
-	t.Run("invalid input", func(t *testing.T) {
-		n, n2 := rpc.BlockNumber(0), rpc.BlockNumber(11)
-		_, err := api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
-		require.Error(t, err)
 
-		n, n2 = rpc.BlockNumber(0), rpc.BlockNumber(1_000_000)
-		_, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
-		require.Error(t, err)
-
-		n = rpc.BlockNumber(0)
-		result, err := api.GetModifiedAccountsByNumber(m.Ctx, n, nil)
+		// latest block is 11, should work both ways: [11,12) and [11,nil)
+		n2 = rpc.BlockNumber(12)
+		_, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.BlockNumber(11), &n2)
 		require.NoError(t, err)
 		require.Len(t, result, 3)
+		_, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.BlockNumber(11), nil)
+		require.NoError(t, err)
+		require.Len(t, result, 3)
+	})
+	t.Run("invalid input", func(t *testing.T) {
+		n := rpc.BlockNumber(1_000_000)
+		_, err := api.GetModifiedAccountsByNumber(m.Ctx, n, nil)
+		require.Error(t, err)
 
-		n = rpc.BlockNumber(1_000_000)
-		_, err = api.GetModifiedAccountsByNumber(m.Ctx, n, nil)
+		n = rpc.BlockNumber(11)
+		_, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &n)
 		require.Error(t, err)
 	})
 }
 
 func TestMapTxNum2BlockNum(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	if !m.HistoryV3 {
 		t.Skip()
 	}
@@ -438,7 +498,7 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 
 		txNums, err := tx.IndexRange(kv.LogAddrIdx, addr[:], 1024, -1, order.Desc, kv.Unlim)
 		require.NoError(t, err)
-		txNumsIter := rawdbv3.TxNums2BlockNums(tx, rawdbv3.TxNums, txNums, order.Desc)
+		txNumsIter := rawdbv3.TxNums2BlockNums(m.Ctx, tx, rawdbv3.TxNums, txNums, order.Desc)
 		expectTxNums, err := tx.IndexRange(kv.LogAddrIdx, addr[:], 1024, -1, order.Desc, kv.Unlim)
 		require.NoError(t, err)
 		checkIter(t, expectTxNums, txNumsIter)
@@ -450,7 +510,7 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 
 		txNums, err := tx.IndexRange(kv.LogAddrIdx, addr[:], 0, 1024, order.Asc, kv.Unlim)
 		require.NoError(t, err)
-		txNumsIter := rawdbv3.TxNums2BlockNums(tx, rawdbv3.TxNums, txNums, order.Desc)
+		txNumsIter := rawdbv3.TxNums2BlockNums(m.Ctx, tx, rawdbv3.TxNums, txNums, order.Desc)
 		expectTxNums, err := tx.IndexRange(kv.LogAddrIdx, addr[:], 0, 1024, order.Asc, kv.Unlim)
 		require.NoError(t, err)
 		checkIter(t, expectTxNums, txNumsIter)
@@ -462,7 +522,7 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 
 		txNums, err := tx.IndexRange(kv.LogAddrIdx, addr[:], 0, 1024, order.Asc, 2)
 		require.NoError(t, err)
-		txNumsIter := rawdbv3.TxNums2BlockNums(tx, rawdbv3.TxNums, txNums, order.Desc)
+		txNumsIter := rawdbv3.TxNums2BlockNums(m.Ctx, tx, rawdbv3.TxNums, txNums, order.Desc)
 		expectTxNums, err := tx.IndexRange(kv.LogAddrIdx, addr[:], 0, 1024, order.Asc, 2)
 		require.NoError(t, err)
 		checkIter(t, expectTxNums, txNumsIter)
@@ -470,8 +530,8 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 }
 
 func TestAccountAt(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0, false)
 
 	var blockHash0, blockHash1, blockHash3, blockHash10, blockHash12 common.Hash
 	_ = m.DB.View(m.Ctx, func(tx kv.Tx) error {
@@ -533,8 +593,8 @@ func TestAccountAt(t *testing.T) {
 }
 
 func TestGetBadBlocks(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 5000000)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 5000000, false)
 	ctx := context.Background()
 
 	require := require.New(t)
@@ -551,19 +611,20 @@ func TestGetBadBlocks(t *testing.T) {
 	if err != nil {
 		t.Errorf("could not begin read write transaction: %s", err)
 	}
+	defer tx.Rollback()
 
 	putBlock := func(number uint64) common.Hash {
 		// prepare db so it works with our test
 		signer1 := types.MakeSigner(chainspec.Mainnet.Config, number, number-1)
 		body := &types.Body{
 			Transactions: []types.Transaction{
-				mustSign(types.NewTransaction(number, testAddr, u256.Num1, 1, u256.Num1, nil), *signer1),
-				mustSign(types.NewTransaction(number+1, testAddr, u256.Num1, 2, u256.Num1, nil), *signer1),
+				mustSign(types.NewTransaction(number, testAddr, &u256.Num1, 1, &u256.Num1, nil), *signer1),
+				mustSign(types.NewTransaction(number+1, testAddr, &u256.Num1, 2, &u256.Num1, nil), *signer1),
 			},
 			Uncles: []*types.Header{{Extra: []byte("test header")}},
 		}
 
-		header := &types.Header{Number: big.NewInt(int64(number))}
+		header := &types.Header{Number: *uint256.NewInt(number)}
 		require.NoError(rawdb.WriteCanonicalHash(tx, header.Hash(), number))
 		require.NoError(rawdb.WriteHeader(tx, header))
 		require.NoError(rawdb.WriteBody(tx, header.Hash(), number, body))
@@ -587,6 +648,13 @@ func TestGetBadBlocks(t *testing.T) {
 
 	tx.Commit()
 
+	// Reset the global bad block cache so it reads only from this test's DB
+	tx2, err := m.DB.BeginRo(ctx)
+	require.NoError(err)
+	defer tx2.Rollback()
+	require.NoError(rawdb.ResetBadBlockCache(tx2, 100))
+	tx2.Rollback()
+
 	data, err := api.GetBadBlocks(ctx)
 	require.NoError(err)
 
@@ -598,8 +666,8 @@ func TestGetBadBlocks(t *testing.T) {
 }
 
 func TestGetRawTransaction(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 5000000)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 5000000, false)
 	ctx := context.Background()
 
 	require := require.New(t)
@@ -607,6 +675,7 @@ func TestGetRawTransaction(t *testing.T) {
 	if err != nil {
 		t.Errorf("could not begin read transaction: %s", err)
 	}
+	defer tx.Rollback()
 	number := *rawdb.ReadCurrentBlockNumber(tx)
 	tx.Commit()
 
@@ -617,9 +686,9 @@ func TestGetRawTransaction(t *testing.T) {
 	for i := uint64(0); i < number; i++ {
 		tx, err := m.DB.BeginRo(ctx)
 		require.NoError(err)
+		defer tx.Rollback()
 		block, err := api._blockReader.BlockByNumber(ctx, tx, i)
 		require.NoError(err)
-		tx.Rollback()
 		txns := block.Transactions()
 
 		for _, txn := range txns {

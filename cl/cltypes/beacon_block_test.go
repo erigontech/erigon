@@ -19,16 +19,15 @@ package cltypes
 import (
 	_ "embed"
 	"encoding/json"
-	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/common"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -54,7 +53,7 @@ func TestBeaconBody(t *testing.T) {
 	blobKzgCommitments := solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48)
 	version := clparams.DenebVersion
 	block := types.NewBlock(&types.Header{
-		BaseFee: big.NewInt(1),
+		BaseFee: uint256.NewInt(1),
 	}, []types.Transaction{types.NewTransaction(1, [20]byte{}, uint256.NewInt(1), 5, uint256.NewInt(2), nil)}, nil, nil, types.Withdrawals{&types.Withdrawal{
 		Index: 69,
 	}})
@@ -119,8 +118,8 @@ func TestBeaconBlockJson(t *testing.T) {
 	block.Block.Body.Version = clparams.DenebVersion
 	err := json.Unmarshal(beaconBodyJSON, block)
 	require.NoError(t, err)
-	map1 := make(map[string]interface{})
-	map2 := make(map[string]interface{})
+	map1 := make(map[string]any)
+	map2 := make(map[string]any)
 	err = json.Unmarshal(beaconBodyJSON, &map1)
 	require.NoError(t, err)
 	out, err := json.Marshal(block)

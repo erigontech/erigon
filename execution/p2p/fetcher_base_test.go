@@ -30,9 +30,9 @@ import (
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/testlog"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
@@ -529,8 +529,8 @@ func TestFetcherFetchBodies(t *testing.T) {
 	requestId1 := uint64(1234)
 	requestId2 := uint64(1235)
 	mockHeaders := []*types.Header{
-		{Number: big.NewInt(1)},
-		{Number: big.NewInt(2)},
+		{Number: *uint256.NewInt(1)},
+		{Number: *uint256.NewInt(2)},
 	}
 	mockHashes := []common.Hash{
 		mockHeaders[0].Hash(),
@@ -612,7 +612,7 @@ func TestFetcherFetchBodiesResponseTimeout(t *testing.T) {
 	peerId := PeerIdFromUint64(1)
 	requestId1 := uint64(1234)
 	requestId2 := uint64(1235)
-	mockHeaders := []*types.Header{{Number: big.NewInt(1)}}
+	mockHeaders := []*types.Header{{Number: *uint256.NewInt(1)}}
 	mockHashes := []common.Hash{mockHeaders[0].Hash()}
 	mockInboundMessages := []*sentryproto.InboundMessage{
 		{
@@ -655,7 +655,7 @@ func TestFetcherFetchBodiesResponseTimeoutRetrySuccess(t *testing.T) {
 	peerId := PeerIdFromUint64(1)
 	requestId1 := uint64(1234)
 	requestId2 := uint64(1235)
-	mockHeaders := []*types.Header{{Number: big.NewInt(1)}}
+	mockHeaders := []*types.Header{{Number: *uint256.NewInt(1)}}
 	mockHashes := []common.Hash{mockHeaders[0].Hash()}
 	mockInboundMessages1 := []*sentryproto.InboundMessage{
 		{
@@ -713,7 +713,7 @@ func TestFetcherFetchBodiesErrMissingBodies(t *testing.T) {
 
 	peerId := PeerIdFromUint64(1)
 	requestId := uint64(1234)
-	mockHeaders := []*types.Header{{Number: big.NewInt(1)}}
+	mockHeaders := []*types.Header{{Number: *uint256.NewInt(1)}}
 	mockHashes := []common.Hash{mockHeaders[0].Hash()}
 	mockInboundMessages := []*sentryproto.InboundMessage{
 		{

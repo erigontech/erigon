@@ -13,6 +13,8 @@ DISABLED_TEST_LIST=(
   net_listening/test_1.json
   # Erigon2 and Erigon3 never supported this api methods
   trace_rawTransaction
+  # Temporary disable required block 24298763
+  debug_traceBlockByNumber/test_51.json
   # to investigate
   engine_exchangeCapabilities/test_1.json
   engine_exchangeTransitionConfigurationV1/test_01.json
@@ -23,9 +25,6 @@ DISABLED_TEST_LIST=(
   erigon_nodeInfo/test_1.json
   eth_coinbase/test_01.json
   eth_createAccessList/test_16.json
-  eth_getProof/test_04.json
-  eth_getProof/test_08.json
-  eth_getProof/test_09.json
   eth_getTransactionByHash/test_02.json
   # Small prune issue that leads to wrong ReceiptDomain data at 16999999 (probably at every million) block: https://github.com/erigontech/erigon/issues/13050
   ots_searchTransactionsBefore/test_04.tar
@@ -44,4 +43,4 @@ DISABLED_TEST_LIST=(
 DISABLED_TESTS=$(IFS=,; echo "${DISABLED_TEST_LIST[*]}")
 
 # Call the main test runner script with the required and optional parameters
-"$(dirname "$0")/run_rpc_tests.sh" mainnet v1.91.0 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR"
+"$(dirname "$0")/run_rpc_tests.sh" mainnet v1.119.0 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR"

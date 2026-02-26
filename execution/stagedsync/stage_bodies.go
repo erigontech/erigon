@@ -22,52 +22,50 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/metrics"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/dataflow"
+	"github.com/erigontech/erigon/execution/metrics"
+	"github.com/erigontech/erigon/execution/stagedsync/bodydownload"
+	"github.com/erigontech/erigon/execution/stagedsync/dataflow"
+	"github.com/erigontech/erigon/execution/stagedsync/headerdownload"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
-	"github.com/erigontech/erigon/execution/stages/bodydownload"
-	"github.com/erigontech/erigon/execution/stages/headerdownload"
-	"github.com/erigontech/erigon/turbo/adapter"
-	"github.com/erigontech/erigon/turbo/services"
 )
 
 const requestLoopCutOff int = 1
 
 type BodiesCfg struct {
-	db              kv.RwDB
 	bd              *bodydownload.BodyDownload
 	bodyReqSend     func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool)
 	penalise        func(context.Context, []headerdownload.PenaltyItem)
-	blockPropagator adapter.BlockPropagator
+	blockPropagator bodydownload.BlockPropagator
 	timeout         int
 	chanConfig      *chain.Config
 	blockReader     services.FullBlockReader
 	blockWriter     *blockio.BlockWriter
 }
 
-func StageBodiesCfg(db kv.RwDB, bd *bodydownload.BodyDownload,
+func StageBodiesCfg(bd *bodydownload.BodyDownload,
 	bodyReqSend func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool), penalise func(context.Context, []headerdownload.PenaltyItem),
-	blockPropagator adapter.BlockPropagator, timeout int,
+	blockPropagator bodydownload.BlockPropagator, timeout int,
 	chanConfig *chain.Config,
 	blockReader services.FullBlockReader,
 	blockWriter *blockio.BlockWriter,
 ) BodiesCfg {
 	return BodiesCfg{
-		db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator,
+		bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator,
 		timeout: timeout, chanConfig: chanConfig, blockReader: blockReader,
 		blockWriter: blockWriter}
 }
 
 // BodiesForward progresses Bodies stage in the forward direction
-func BodiesForward(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg BodiesCfg, test bool, logger log.Logger) error {
+func BodiesForward(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg BodiesCfg, logger log.Logger) error {
 	var doUpdate bool
 
 	startTime := time.Now()
@@ -79,14 +77,6 @@ func BodiesForward(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, c
 
 	var d1, d2, d3, d4, d5, d6 time.Duration
 	var err error
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(context.Background())
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
 	timeout := cfg.timeout
 
 	// this update is required, because cfg.bd.UpdateFromDb(tx) below reads it and initialises requestedLow accordingly
@@ -267,10 +257,6 @@ func BodiesForward(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, c
 		if bodyProgress == headerProgress {
 			return true, nil
 		}
-		if test {
-			stopped = true
-			return true, nil
-		}
 		firstCycle := s.CurrentSyncCycle.IsInitialCycle
 		if !firstCycle && s.BlockNumber > 0 && noProgressCount >= 5 {
 			return true, nil
@@ -310,14 +296,6 @@ func BodiesForward(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, c
 			return err
 		}
 	}
-
-	// remove the temporary bucket for bodies stage
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
-
 	if stopped {
 		return common.ErrStopped
 	}
@@ -395,32 +373,11 @@ func logWritingBodies(logPrefix string, committed, headerProgress uint64, logger
 	)
 }
 
-func UnwindBodiesStage(u *UnwindState, tx kv.RwTx, cfg BodiesCfg, ctx context.Context) (err error) {
+func UnwindBodiesStage(u *UnwindState, tx kv.RwTx, cfg BodiesCfg) error {
 	u.UnwindPoint = max(u.UnwindPoint, cfg.blockReader.FrozenBlocks()) // protect from unwind behind files
-
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
-
-	if err := cfg.blockWriter.MakeBodiesNonCanonical(tx, u.UnwindPoint+1); err != nil {
+	err := cfg.blockWriter.MakeBodiesNonCanonical(tx, u.UnwindPoint+1)
+	if err != nil {
 		return err
 	}
-
-	if err = u.Done(tx); err != nil {
-		return err
-	}
-	if !useExternalTx {
-		if err = tx.Commit(); err != nil {
-			return err
-		}
-	}
-	return nil
+	return u.Done(tx)
 }

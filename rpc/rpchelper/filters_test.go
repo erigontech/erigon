@@ -22,13 +22,13 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/eth/filters"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/rpc/filters"
 )
 
 func createLog() *remoteproto.SubscribeLogsReply {
@@ -340,10 +340,10 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 	// specifies a topic.  All addresses should be present still.  The state should represent the single
 	// subscription in step 3
 	f.UnsubscribeLogs(id2)
-	if lastFilterRequest.AllAddresses == false {
+	if !lastFilterRequest.AllAddresses {
 		t.Error("5: expected all addresses to be true")
 	}
-	if lastFilterRequest.AllTopics == true {
+	if lastFilterRequest.AllTopics {
 		t.Error("5: expected all topics to be false")
 	}
 	if len(lastFilterRequest.Addresses) != 0 {
@@ -356,10 +356,10 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 	// unsubscribing the last filter should leave us with false for the all addresses and all topics
 	// and nothing in the address or topics lists
 	f.UnsubscribeLogs(id3)
-	if lastFilterRequest.AllAddresses == true {
+	if lastFilterRequest.AllAddresses {
 		t.Error("6: expected all addresses to be false")
 	}
-	if lastFilterRequest.AllTopics == true {
+	if lastFilterRequest.AllTopics {
 		t.Error("6: expected all topics to be false")
 	}
 	if len(lastFilterRequest.Addresses) != 0 {
@@ -502,5 +502,277 @@ func TestFilters_AddPendingTxs(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func createReceipt(txHash common.Hash) *remoteproto.SubscribeReceiptsReply {
+	return &remoteproto.SubscribeReceiptsReply{
+		BlockHash:         gointerfaces.ConvertHashToH256([32]byte{1}),
+		BlockNumber:       100,
+		TransactionHash:   gointerfaces.ConvertHashToH256(txHash),
+		TransactionIndex:  0,
+		Type:              0,
+		Status:            1,
+		CumulativeGasUsed: 21000,
+		GasUsed:           21000,
+		ContractAddress:   nil,
+		Logs:              []*remoteproto.SubscribeLogsReply{},
+		LogsBloom:         make([]byte, 256),
+		From:              gointerfaces.ConvertAddressToH160([20]byte{2}),
+		To:                gointerfaces.ConvertAddressToH160([20]byte{3}),
+	}
+}
+
+var (
+	txHash1 = common.HexToHash("0xffc4978dfe7ab496f0158ae8916adae6ffd0c1fca4f09f7a7134556011357424")
+	txHash2 = common.HexToHash("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
+	txHash3 = common.HexToHash("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+)
+
+func TestFilters_SingleReceiptsSubscription_OnlyTransactionHashesSubscribedAreBroadcast(t *testing.T) {
+	t.Parallel()
+	config := FiltersConfig{}
+	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
+
+	criteria := filters.ReceiptsFilterCriteria{
+		TransactionHashes: []common.Hash{txHash1},
+	}
+
+	outChan, _ := f.SubscribeReceipts(10, criteria)
+
+	// Create a receipt for a different transaction hash
+	receipt := createReceipt(txHash2)
+
+	f.OnReceipts(receipt)
+
+	if len(outChan) != 0 {
+		t.Error("expected the subscription channel to be empty for non-matching txHash")
+	}
+
+	// Now a receipt that the subscription cares about
+	receipt = createReceipt(txHash1)
+
+	f.OnReceipts(receipt)
+
+	if len(outChan) != 1 {
+		t.Error("expected a message in the channel for the subscribed transaction hash")
+	}
+}
+
+func TestFilters_ReceiptsSubscription_EmptyFilterSubscribesToAll(t *testing.T) {
+	t.Parallel()
+	config := FiltersConfig{}
+	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
+
+	// Empty TransactionHashes means subscribe to all receipts
+	criteria := filters.ReceiptsFilterCriteria{
+		TransactionHashes: []common.Hash{},
+	}
+
+	outChan, _ := f.SubscribeReceipts(10, criteria)
+
+	// Any receipt should be received
+	receipt1 := createReceipt(txHash1)
+	f.OnReceipts(receipt1)
+
+	if len(outChan) != 1 {
+		t.Error("expected empty filter to receive all receipts")
+	}
+
+	receipt2 := createReceipt(txHash2)
+	f.OnReceipts(receipt2)
+
+	if len(outChan) != 2 {
+		t.Error("expected empty filter to receive all receipts")
+	}
+}
+
+func TestFilters_TwoReceiptsSubscriptionsWithDifferentCriteria(t *testing.T) {
+	t.Parallel()
+	config := FiltersConfig{}
+	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
+
+	// First subscription: all receipts
+	criteria1 := filters.ReceiptsFilterCriteria{
+		TransactionHashes: []common.Hash{},
+	}
+	// Second subscription: specific transaction hash
+	criteria2 := filters.ReceiptsFilterCriteria{
+		TransactionHashes: []common.Hash{txHash1},
+	}
+
+	chan1, _ := f.SubscribeReceipts(256, criteria1)
+	chan2, _ := f.SubscribeReceipts(256, criteria2)
+
+	// Create a receipt for txHash2
+	receipt := createReceipt(txHash2)
+
+	f.OnReceipts(receipt)
+
+	if len(chan1) != 1 {
+		t.Error("expected channel 1 to receive the receipt, no filters")
+	}
+	if len(chan2) != 0 {
+		t.Error("expected channel 2 to be empty, it has a transaction hash filter")
+	}
+
+	// Now a receipt that the second subscription cares about
+	receipt = createReceipt(txHash1)
+
+	f.OnReceipts(receipt)
+
+	if len(chan1) != 2 {
+		t.Error("expected the second receipt to be in the channel with no filters")
+	}
+	if len(chan2) != 1 {
+		t.Error("expected the channel with filters to receive the message as the filter matches")
+	}
+}
+
+func TestFilters_ThreeReceiptsSubscriptionsWithDifferentCriteria(t *testing.T) {
+	t.Parallel()
+	config := FiltersConfig{}
+	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
+
+	criteria1 := filters.ReceiptsFilterCriteria{
+		TransactionHashes: []common.Hash{},
+	}
+	criteria2 := filters.ReceiptsFilterCriteria{
+		TransactionHashes: []common.Hash{txHash1},
+	}
+	criteria3 := filters.ReceiptsFilterCriteria{
+		TransactionHashes: []common.Hash{txHash1, txHash2},
+	}
+
+	chan1, _ := f.SubscribeReceipts(256, criteria1)
+	chan2, _ := f.SubscribeReceipts(256, criteria2)
+	chan3, _ := f.SubscribeReceipts(256, criteria3)
+
+	// Receipt for txHash3 (not subscribed by chan2 or chan3)
+	receipt := createReceipt(txHash3)
+
+	f.OnReceipts(receipt)
+
+	if len(chan1) != 1 {
+		t.Error("expected channel 1 to receive the receipt, no filters")
+	}
+	if len(chan2) != 0 {
+		t.Error("expected channel 2 to be empty, txHash doesn't match")
+	}
+	if len(chan3) != 0 {
+		t.Error("expected channel 3 to be empty, txHash doesn't match")
+	}
+
+	// Receipt for txHash1 (subscribed by chan2 and chan3)
+	receipt = createReceipt(txHash1)
+
+	f.OnReceipts(receipt)
+
+	if len(chan1) != 2 {
+		t.Error("expected the second receipt to be in channel 1 with no filters")
+	}
+	if len(chan2) != 1 {
+		t.Error("expected channel 2 to contain a receipt as txHash matched")
+	}
+	if len(chan3) != 1 {
+		t.Error("expected channel 3 to contain a receipt as txHash matched")
+	}
+
+	// Receipt for txHash2 (subscribed by chan3 only)
+	receipt = createReceipt(txHash2)
+
+	f.OnReceipts(receipt)
+
+	if len(chan1) != 3 {
+		t.Error("expected the third receipt to be in channel 1 with no filters")
+	}
+	if len(chan2) != 1 {
+		t.Error("expected channel 2 to still have 1 as txHash2 doesn't match")
+	}
+	if len(chan3) != 2 {
+		t.Error("expected channel 3 to have 2 receipts as txHash2 matched")
+	}
+}
+
+func TestFilters_SubscribeReceiptsGeneratesCorrectReceiptsFilterRequest(t *testing.T) {
+	t.Parallel()
+	var lastFilterRequest *remoteproto.ReceiptsFilterRequest
+	loadRequester := func(r *remoteproto.ReceiptsFilterRequest) error {
+		lastFilterRequest = r
+		return nil
+	}
+
+	config := FiltersConfig{}
+	f := New(context.TODO(), config, nil, nil, nil, func() {}, log.New())
+	f.receiptsRequestor.Store(loadRequester)
+
+	// First request: subscribe to all receipts
+	criteria1 := filters.ReceiptsFilterCriteria{
+		TransactionHashes: []common.Hash{},
+	}
+	_, id1 := f.SubscribeReceipts(1, criteria1)
+
+	// Request should have AllTransactions=true and empty TransactionHashes
+	if !lastFilterRequest.AllTransactions {
+		t.Error("1: expected AllTransactions to be true for subscribe-all")
+	}
+	if len(lastFilterRequest.TransactionHashes) != 0 {
+		t.Error("1: expected transaction hashes to be empty for subscribe-all")
+	}
+
+	// Second request: filter on a specific transaction hash
+	criteria2 := filters.ReceiptsFilterCriteria{
+		TransactionHashes: []common.Hash{txHash1},
+	}
+	_, id2 := f.SubscribeReceipts(1, criteria2)
+
+	// Request should have AllTransactions=true and include txHash1
+	// Backend uses OR logic: send if (AllTransactions OR hash matches)
+	if !lastFilterRequest.AllTransactions {
+		t.Error("2: expected AllTransactions to be true")
+	}
+	if len(lastFilterRequest.TransactionHashes) != 1 {
+		t.Errorf("2: expected 1 transaction hash, got %d", len(lastFilterRequest.TransactionHashes))
+	}
+	if gointerfaces.ConvertH256ToHash(lastFilterRequest.TransactionHashes[0]) != txHash1 {
+		t.Error("2: expected transaction hash to match txHash1")
+	}
+
+	// Unsubscribe the first filter (subscribe-all)
+	f.UnsubscribeReceipts(id1)
+
+	// Now request should only have txHash1
+	if len(lastFilterRequest.TransactionHashes) != 1 {
+		t.Errorf("3: expected 1 transaction hash, got %d", len(lastFilterRequest.TransactionHashes))
+	}
+	if gointerfaces.ConvertH256ToHash(lastFilterRequest.TransactionHashes[0]) != txHash1 {
+		t.Error("3: expected transaction hash to match txHash1")
+	}
+
+	// Third request: filter on multiple transaction hashes
+	criteria3 := filters.ReceiptsFilterCriteria{
+		TransactionHashes: []common.Hash{txHash2, txHash3},
+	}
+	_, id3 := f.SubscribeReceipts(1, criteria3)
+
+	// Request should have all three transaction hashes
+	if len(lastFilterRequest.TransactionHashes) != 3 {
+		t.Errorf("4: expected 3 transaction hashes, got %d", len(lastFilterRequest.TransactionHashes))
+	}
+
+	// Unsubscribe the second filter
+	f.UnsubscribeReceipts(id2)
+
+	// Request should have only txHash2 and txHash3
+	if len(lastFilterRequest.TransactionHashes) != 2 {
+		t.Errorf("5: expected 2 transaction hashes, got %d", len(lastFilterRequest.TransactionHashes))
+	}
+
+	// Unsubscribe the last filter
+	f.UnsubscribeReceipts(id3)
+
+	// Request should be nil (no active subscriptions)
+	if lastFilterRequest.TransactionHashes != nil {
+		t.Error("6: expected transaction hashes to be nil with no subscriptions")
 	}
 }

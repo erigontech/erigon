@@ -93,8 +93,8 @@ func (msg *jsonrpcMessage) isUnsubscribe() bool {
 }
 
 func (msg *jsonrpcMessage) namespace() string {
-	elem := strings.SplitN(msg.Method, serviceMethodSeparator, 2)
-	return elem[0]
+	ns, _, _ := strings.Cut(msg.Method, serviceMethodSeparator)
+	return ns
 }
 
 func (msg *jsonrpcMessage) String() string {
@@ -142,16 +142,16 @@ func (err *jsonError) ErrorData() any {
 	return err.Data
 }
 
-func NewJsonError(code int, message string, data interface{}) interface{} {
+func NewJsonError(code int, message string, data any) any {
 	return &jsonError{Code: code, Message: message, Data: data}
 }
 
-func NewJsonErrorFromErr(err error) interface{} {
+func NewJsonErrorFromErr(err error) any {
 	return newJsonError(err)
 }
 
 func newJsonError(err error) *jsonError {
-	jsonErr := &jsonError{Code: defaultErrorCode, Message: err.Error()}
+	jsonErr := &jsonError{Code: ErrCodeDefault, Message: err.Error()}
 	var ec Error
 	ok := errors.As(err, &ec)
 	if ok {
@@ -332,7 +332,7 @@ func parsePositionalArguments(rawArgs json.RawMessage, types []reflect.Type) ([]
 	}
 	// Set any missing args to nil.
 	for i := len(args); i < len(types); i++ {
-		if types[i].Kind() != reflect.Ptr {
+		if types[i].Kind() != reflect.Pointer {
 			return nil, fmt.Errorf("missing value for required argument %d", i)
 		}
 		args = append(args, reflect.Zero(types[i]))
@@ -350,7 +350,7 @@ func parseArgumentArray(dec *json.Decoder, types []reflect.Type) ([]reflect.Valu
 		if err := dec.Decode(argval.Interface()); err != nil {
 			return args, fmt.Errorf("invalid argument %d: %w", i, err)
 		}
-		if argval.IsNil() && types[i].Kind() != reflect.Ptr {
+		if argval.IsNil() && types[i].Kind() != reflect.Pointer {
 			return args, fmt.Errorf("missing value for required argument %d", i)
 		}
 		args = append(args, argval.Elem())

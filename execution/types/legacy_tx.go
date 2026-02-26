@@ -20,16 +20,16 @@
 package types
 
 import (
-	"encoding/binary"
 	"fmt"
 	"io"
 	"math/big"
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type CommonTx struct {
@@ -41,6 +41,23 @@ type CommonTx struct {
 	Value    *uint256.Int    // wei amount
 	Data     []byte          // contract invocation input data
 	V, R, S  uint256.Int     // signature values
+}
+
+// copyData returns a copy of CommonTx where the TransactionMisc cache fields
+// (hash, from) are not copied directly but rebuilt field-by-field, avoiding
+// go vet copylocks warnings on the embedded sync/atomic.Pointer.
+// The caches will be recomputed on demand if needed (both are deterministic).
+func (ct *CommonTx) copyData() CommonTx {
+	return CommonTx{
+		Nonce:    ct.Nonce,
+		GasLimit: ct.GasLimit,
+		To:       ct.To,
+		Value:    ct.Value,
+		Data:     ct.Data,
+		V:        ct.V,
+		R:        ct.R,
+		S:        ct.S,
+	}
 }
 
 func (ct *CommonTx) GetNonce() uint64 {
@@ -67,15 +84,15 @@ func (ct *CommonTx) GetData() []byte {
 	return ct.Data
 }
 
-func (ct *CommonTx) GetSender() (common.Address, bool) {
-	if sc := ct.from.Load(); sc != nil {
-		return *sc, true
+func (ct *CommonTx) GetSender() (accounts.Address, bool) {
+	if sc := ct.from; !sc.IsNil() {
+		return sc, true
 	}
-	return common.Address{}, false
+	return accounts.NilAddress, false
 }
 
-func (ct *CommonTx) SetSender(addr common.Address) {
-	ct.from.Store(&addr)
+func (ct *CommonTx) SetSender(addr accounts.Address) {
+	ct.from = addr
 }
 
 func (ct *CommonTx) Protected() bool {
@@ -133,6 +150,7 @@ func (tx *LegacyTx) Unwrap() Transaction {
 }
 
 // NewTransaction creates an unsigned legacy transaction.
+//
 // Deprecated: use NewTx instead.
 func NewTransaction(nonce uint64, to common.Address, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, data []byte) *LegacyTx {
 	return &LegacyTx{
@@ -148,6 +166,7 @@ func NewTransaction(nonce uint64, to common.Address, amount *uint256.Int, gasLim
 }
 
 // NewContractCreation creates an unsigned legacy transaction.
+//
 // Deprecated: use NewTx instead.
 func NewContractCreation(nonce uint64, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, data []byte) *LegacyTx {
 	return &LegacyTx{
@@ -168,7 +187,7 @@ func (tx *LegacyTx) copy() *LegacyTx {
 			TransactionMisc: TransactionMisc{},
 			Nonce:           tx.Nonce,
 			To:              tx.To, // TODO: copy pointed-to address
-			Data:            common.CopyBytes(tx.Data),
+			Data:            common.Copy(tx.Data),
 			GasLimit:        tx.GasLimit,
 			// These are initialized below.
 			Value: new(uint256.Int),
@@ -188,96 +207,65 @@ func (tx *LegacyTx) copy() *LegacyTx {
 }
 
 func (tx *LegacyTx) EncodingSize() int {
-	payloadSize, _, _ := tx.payloadSize()
-	return payloadSize
+	return tx.payloadSize()
 }
 
-func (tx *LegacyTx) payloadSize() (payloadSize int, nonceLen, gasLen int) {
-	payloadSize++
-	nonceLen = rlp.IntLenExcludingHead(tx.Nonce)
-	payloadSize += nonceLen
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(tx.GasPrice)
-	payloadSize++
-	gasLen = rlp.IntLenExcludingHead(tx.GasLimit)
-	payloadSize += gasLen
+func (tx *LegacyTx) payloadSize() (payloadSize int) {
+	payloadSize += rlp.U64Len(tx.Nonce)
+	payloadSize += rlp.Uint256Len(*tx.GasPrice)
+	payloadSize += rlp.U64Len(tx.GasLimit)
 	payloadSize++
 	if tx.To != nil {
 		payloadSize += 20
 	}
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(tx.Value)
-	// size of Data
+	payloadSize += rlp.Uint256Len(*tx.Value)
 	payloadSize += rlp.StringLen(tx.Data)
-	// size of V
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(&tx.V)
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(&tx.R)
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(&tx.S)
-	return payloadSize, nonceLen, gasLen
+	payloadSize += rlp.Uint256Len(tx.V)
+	payloadSize += rlp.Uint256Len(tx.R)
+	payloadSize += rlp.Uint256Len(tx.S)
+	return payloadSize
 }
 
 func (tx *LegacyTx) MarshalBinary(w io.Writer) error {
-	payloadSize, nonceLen, gasLen := tx.payloadSize()
+	payloadSize := tx.payloadSize()
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
-	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen); err != nil {
+	if err := tx.encodePayload(w, b[:], payloadSize); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen int) error {
+func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize int) error {
 	// prefix
 	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
 	}
-	if tx.Nonce > 0 && tx.Nonce < 128 {
-		b[0] = byte(tx.Nonce)
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
-	} else {
-		binary.BigEndian.PutUint64(b[1:], tx.Nonce)
-		b[8-nonceLen] = 128 + byte(nonceLen)
-		if _, err := w.Write(b[8-nonceLen : 9]); err != nil {
-			return err
-		}
+	if err := rlp.EncodeInt(tx.Nonce, w, b); err != nil {
+		return err
 	}
-	if err := rlp.EncodeUint256(tx.GasPrice, w, b); err != nil {
+	if err := rlp.EncodeUint256(*tx.GasPrice, w, b); err != nil {
 		return err
 	}
 	if err := rlp.EncodeInt(tx.GasLimit, w, b); err != nil {
 		return err
 	}
-	if tx.To == nil {
-		b[0] = 128
-	} else {
-		b[0] = 128 + 20
-	}
-	if _, err := w.Write(b[:1]); err != nil {
+	if err := rlp.EncodeOptionalAddress(tx.To, w, b); err != nil {
 		return err
 	}
-	if tx.To != nil {
-		if _, err := w.Write(tx.To[:]); err != nil {
-			return err
-		}
-	}
-	if err := rlp.EncodeUint256(tx.Value, w, b); err != nil {
+	if err := rlp.EncodeUint256(*tx.Value, w, b); err != nil {
 		return err
 	}
 	if err := rlp.EncodeString(tx.Data, w, b); err != nil {
 		return err
 	}
-	if err := rlp.EncodeUint256(&tx.V, w, b); err != nil {
+	if err := rlp.EncodeUint256(tx.V, w, b); err != nil {
 		return err
 	}
-	if err := rlp.EncodeUint256(&tx.R, w, b); err != nil {
+	if err := rlp.EncodeUint256(tx.R, w, b); err != nil {
 		return err
 	}
-	if err := rlp.EncodeUint256(&tx.S, w, b); err != nil {
+	if err := rlp.EncodeUint256(tx.S, w, b); err != nil {
 		return err
 	}
 	return nil
@@ -285,10 +273,10 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, 
 }
 
 func (tx *LegacyTx) EncodeRLP(w io.Writer) error {
-	payloadSize, nonceLen, gasLen := tx.payloadSize()
+	payloadSize := tx.payloadSize()
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
-	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen); err != nil {
+	if err := tx.encodePayload(w, b[:], payloadSize); err != nil {
 		return err
 	}
 	return nil
@@ -346,19 +334,26 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream) error {
 }
 
 // AsMessage returns the transaction as a core.Message.
-func (tx *LegacyTx) AsMessage(s Signer, _ *big.Int, _ *chain.Rules) (*Message, error) {
+func (tx *LegacyTx) AsMessage(s Signer, _ *uint256.Int, _ *chain.Rules) (*Message, error) {
+	var to accounts.Address
+	if tx.To == nil {
+		to = accounts.NilAddress
+	} else {
+		to = accounts.InternAddress(*tx.To)
+	}
 	msg := Message{
-		nonce:      tx.Nonce,
-		gasLimit:   tx.GasLimit,
-		gasPrice:   *tx.GasPrice,
-		tipCap:     *tx.GasPrice,
-		feeCap:     *tx.GasPrice,
-		to:         tx.To,
-		amount:     *tx.Value,
-		data:       tx.Data,
-		accessList: nil,
-		checkNonce: true,
-		checkGas:   true,
+		nonce:            tx.Nonce,
+		gasLimit:         tx.GasLimit,
+		gasPrice:         *tx.GasPrice,
+		tipCap:           *tx.GasPrice,
+		feeCap:           *tx.GasPrice,
+		to:               to,
+		amount:           *tx.Value,
+		data:             tx.Data,
+		accessList:       nil,
+		checkNonce:       true,
+		checkTransaction: true,
+		checkGas:         true,
 	}
 
 	var err error
@@ -383,7 +378,7 @@ func (tx *LegacyTx) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := rlpHash([]interface{}{
+	hash := rlpHash([]any{
 		tx.Nonce,
 		tx.GasPrice,
 		tx.GasLimit,
@@ -396,19 +391,33 @@ func (tx *LegacyTx) Hash() common.Hash {
 	return hash
 }
 
+type legacyTxSigHash struct {
+	Nonce    uint64
+	GasPrice *uint256.Int
+	Gas      uint64
+	To       *common.Address `rlp:"nil"`
+	Value    *uint256.Int
+	Data     []byte
+	ChainID  *big.Int
+	V        uint
+	R        uint
+}
+
 func (tx *LegacyTx) SigningHash(chainID *big.Int) common.Hash {
 	if chainID != nil && chainID.Sign() != 0 {
-		return rlpHash([]interface{}{
-			tx.Nonce,
-			tx.GasPrice,
-			tx.GasLimit,
-			tx.To,
-			tx.Value,
-			tx.Data,
-			chainID, uint(0), uint(0),
+		return rlpHash(&legacyTxSigHash{
+			Nonce:    tx.Nonce,
+			GasPrice: tx.GasPrice,
+			Gas:      tx.GasLimit,
+			To:       tx.To,
+			Value:    tx.Value,
+			Data:     tx.Data,
+			ChainID:  chainID,
+			V:        uint(0),
+			R:        uint(0),
 		})
 	}
-	return rlpHash([]interface{}{
+	return rlpHash([]any{
 		tx.Nonce,
 		tx.GasPrice,
 		tx.GasLimit,
@@ -428,24 +437,23 @@ func (tx *LegacyTx) GetChainID() *uint256.Int {
 	return DeriveChainId(&tx.V)
 }
 
-func (tx *LegacyTx) cachedSender() (sender common.Address, ok bool) {
-	s := tx.from.Load()
-	if s == nil {
+func (tx *LegacyTx) cachedSender() (sender accounts.Address, ok bool) {
+	s := tx.from
+	if s.IsNil() {
 		return sender, false
 	}
-	return *s, true
+	return s, true
 }
-func (tx *LegacyTx) Sender(signer Signer) (common.Address, error) {
-	if from := tx.from.Load(); from != nil {
-		if *from != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
-			return *from, nil
-		}
+func (tx *LegacyTx) Sender(signer Signer) (accounts.Address, error) {
+	if from := tx.from; !from.IsNil() && !from.IsZero() {
+		// Sender address can never be zero in a transaction with a valid signer
+		return from, nil
 	}
 
 	addr, err := signer.Sender(tx)
 	if err != nil {
-		return common.Address{}, err
+		return accounts.ZeroAddress, err
 	}
-	tx.from.Store(&addr)
+	tx.from = addr
 	return addr, nil
 }

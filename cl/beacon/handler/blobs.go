@@ -21,14 +21,14 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 var blobSidecarSSZLenght = (*cltypes.BlobSidecar)(nil).EncodingSizeSSZ()
@@ -55,11 +55,6 @@ func (a *ApiHandler) GetEthV1BeaconBlobSidecars(w http.ResponseWriter, r *http.R
 	}
 	if slot == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("block not found"))
-	}
-
-	// reject after fulu fork
-	if a.beaconChainCfg.GetCurrentStateVersion(*slot/a.beaconChainCfg.SlotsPerEpoch) >= clparams.FuluVersion {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("blobs are not supported after fulu fork"))
 	}
 
 	if a.caplinSnapshots != nil && *slot <= a.caplinSnapshots.FrozenBlobs() {
@@ -168,6 +163,8 @@ func (a *ApiHandler) GetEthV1DebugBeaconDataColumnSidecars(w http.ResponseWriter
 			return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 		}
 		if sidecar != nil {
+			sidecar.BlockRoot = blockRoot
+			sidecar.Slot = *slot
 			dataColumnSidecars = append(dataColumnSidecars, sidecar)
 		}
 	}

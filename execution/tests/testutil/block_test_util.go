@@ -23,41 +23,42 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
-	"reflect"
 	"testing"
 
 	"github.com/holiman/uint256"
+	jsoniter "github.com/json-iterator/go"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/eth/ethconsensusconfig"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/rulesconfig"
 )
 
 // A BlockTest checks handling of entire blocks.
 type BlockTest struct {
-	json btJSON
-	br   services.FullBlockReader
+	json            btJSON
+	br              services.FullBlockReader
+	ExperimentalBAL bool
 }
 
 // UnmarshalJSON implements json.Unmarshaler interface.
 func (bt *BlockTest) UnmarshalJSON(in []byte) error {
-	return json.Unmarshal(in, &bt.json)
+	return jsoniter.ConfigFastest.Unmarshal(in, &bt.json)
 }
 
 type btJSON struct {
@@ -75,6 +76,97 @@ type btBlock struct {
 	ExpectException string
 	Rlp             string
 	UncleHeaders    []*btHeader
+	BlockAccessList btBlockAccessList `json:"blockAccessList"`
+}
+
+// btBlockAccessList and related types for parsing block access list data from test JSON.
+type btBlockAccessList []btAccountChanges
+
+type btAccountChanges struct {
+	Address        common.Address    `json:"address"`
+	StorageChanges []btSlotChanges   `json:"storageChanges"`
+	StorageReads   []hexutil.Bytes   `json:"storageReads"`
+	BalanceChanges []btBalanceChange `json:"balanceChanges"`
+	NonceChanges   []btNonceChange   `json:"nonceChanges"`
+	CodeChanges    []btCodeChange    `json:"codeChanges"`
+}
+
+type btSlotChanges struct {
+	Slot        hexutil.Bytes     `json:"slot"`
+	SlotChanges []btStorageChange `json:"slotChanges"`
+}
+
+type btStorageChange struct {
+	BlockAccessIndex hexutil.Uint16       `json:"blockAccessIndex"`
+	PostValue        math.HexOrDecimal256 `json:"postValue"`
+}
+
+type btBalanceChange struct {
+	BlockAccessIndex hexutil.Uint16       `json:"blockAccessIndex"`
+	PostBalance      math.HexOrDecimal256 `json:"postBalance"`
+}
+
+type btNonceChange struct {
+	BlockAccessIndex hexutil.Uint16      `json:"blockAccessIndex"`
+	PostNonce        math.HexOrDecimal64 `json:"postNonce"`
+}
+
+type btCodeChange struct {
+	BlockAccessIndex hexutil.Uint16 `json:"blockAccessIndex"`
+	NewCode          hexutil.Bytes  `json:"newCode"`
+}
+
+func (bal btBlockAccessList) toBAL() types.BlockAccessList {
+	if len(bal) == 0 {
+		return nil
+	}
+	result := make(types.BlockAccessList, len(bal))
+	for i, ac := range bal {
+		entry := &types.AccountChanges{
+			Address:        accounts.InternAddress(ac.Address),
+			StorageChanges: make([]*types.SlotChanges, 0, len(ac.StorageChanges)),
+			StorageReads:   make([]accounts.StorageKey, 0, len(ac.StorageReads)),
+			BalanceChanges: make([]*types.BalanceChange, 0, len(ac.BalanceChanges)),
+			NonceChanges:   make([]*types.NonceChange, 0, len(ac.NonceChanges)),
+			CodeChanges:    make([]*types.CodeChange, 0, len(ac.CodeChanges)),
+		}
+		for _, sc := range ac.StorageChanges {
+			slotChanges := &types.SlotChanges{
+				Slot:    accounts.InternKey(common.BytesToHash(sc.Slot)),
+				Changes: make([]*types.StorageChange, 0, len(sc.SlotChanges)),
+			}
+			for _, change := range sc.SlotChanges {
+				slotChanges.Changes = append(slotChanges.Changes, &types.StorageChange{
+					Index: uint16(change.BlockAccessIndex),
+					Value: *uint256.MustFromBig((*big.Int)(&change.PostValue)),
+				})
+			}
+			entry.StorageChanges = append(entry.StorageChanges, slotChanges)
+		}
+		for _, sr := range ac.StorageReads {
+			entry.StorageReads = append(entry.StorageReads, accounts.InternKey(common.BytesToHash(sr)))
+		}
+		for _, bc := range ac.BalanceChanges {
+			entry.BalanceChanges = append(entry.BalanceChanges, &types.BalanceChange{
+				Index: uint16(bc.BlockAccessIndex),
+				Value: *uint256.MustFromBig((*big.Int)(&bc.PostBalance)),
+			})
+		}
+		for _, nc := range ac.NonceChanges {
+			entry.NonceChanges = append(entry.NonceChanges, &types.NonceChange{
+				Index: uint16(nc.BlockAccessIndex),
+				Value: uint64(nc.PostNonce),
+			})
+		}
+		for _, cc := range ac.CodeChanges {
+			entry.CodeChanges = append(entry.CodeChanges, &types.CodeChange{
+				Index:    uint16(cc.BlockAccessIndex),
+				Bytecode: cc.NewCode,
+			})
+		}
+		result[i] = entry
+	}
+	return result
 }
 
 //go:generate gencodec -type btHeader -field-override btHeaderMarshaling -out gen_btheader.go
@@ -84,7 +176,7 @@ type btHeader struct {
 	Coinbase              common.Address
 	MixHash               common.Hash
 	Nonce                 types.BlockNonce
-	Number                *big.Int
+	Number                *uint256.Int
 	Hash                  common.Hash
 	ParentHash            common.Hash
 	ReceiptTrie           common.Hash
@@ -92,16 +184,18 @@ type btHeader struct {
 	TransactionsTrie      common.Hash
 	UncleHash             common.Hash
 	ExtraData             []byte
-	Difficulty            *big.Int
+	Difficulty            *uint256.Int
 	GasLimit              uint64
 	GasUsed               uint64
 	Timestamp             uint64
-	BaseFeePerGas         *big.Int
+	BaseFeePerGas         *uint256.Int
 	WithdrawalsRoot       *common.Hash
 	BlobGasUsed           *uint64
 	ExcessBlobGas         *uint64
 	ParentBeaconBlockRoot *common.Hash
 	RequestsHash          *common.Hash
+	BlockAccessListHash   *common.Hash
+	SlotNumber            *uint64
 }
 
 type btHeaderMarshaling struct {
@@ -114,6 +208,7 @@ type btHeaderMarshaling struct {
 	BaseFeePerGas *math.HexOrDecimal256
 	BlobGasUsed   *math.HexOrDecimal64
 	ExcessBlobGas *math.HexOrDecimal64
+	SlotNumber    *math.HexOrDecimal64
 }
 
 func (bt *BlockTest) Run(t *testing.T) error {
@@ -121,8 +216,57 @@ func (bt *BlockTest) Run(t *testing.T) error {
 	if !ok {
 		return testforks.UnsupportedForkError{Name: bt.json.Network}
 	}
-	engine := ethconsensusconfig.CreateConsensusEngineBareBones(context.Background(), config, log.New())
-	m := mock.MockWithGenesisEngine(t, bt.genesis(config), engine, false)
+	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
+	mOpts := []execmoduletester.Option{
+		execmoduletester.WithGenesisSpec(bt.genesis(config)),
+		execmoduletester.WithEngine(engine),
+	}
+	if bt.ExperimentalBAL {
+		mOpts = append(mOpts, execmoduletester.WithExperimentalBAL())
+	}
+	m := execmoduletester.New(t, mOpts...)
+
+	bt.br = m.BlockReader
+	// import pre accounts & construct test genesis block & state root
+	if m.Genesis.Hash() != bt.json.Genesis.Hash {
+		return fmt.Errorf("genesis block hash doesn't match test: computed=%x, test=%x", m.Genesis.Hash().Bytes()[:6], bt.json.Genesis.Hash[:6])
+	}
+	if m.Genesis.Root() != bt.json.Genesis.StateRoot {
+		return fmt.Errorf("genesis block state root does not match test: computed=%x, test=%x", m.Genesis.Root().Bytes()[:6], bt.json.Genesis.StateRoot[:6])
+	}
+
+	validBlocks, err := bt.insertBlocks(m)
+	if err != nil {
+		return err
+	}
+
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	cmlast := rawdb.ReadHeadBlockHash(tx)
+	if common.Hash(bt.json.BestBlock) != cmlast {
+		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", bt.json.BestBlock, cmlast)
+	}
+	newDB := state.New(m.NewStateReader(tx))
+	if err := bt.validatePostState(newDB); err != nil {
+		return fmt.Errorf("post state validation failed: %w", err)
+	}
+
+	return bt.validateImportedHeaders(tx, validBlocks, m)
+}
+
+// RunCLI executes the test without requiring a testing.T context, suitable for CLI usage.
+func (bt *BlockTest) RunCLI() error {
+	config, ok := testforks.Forks[bt.json.Network]
+	if !ok {
+		return testforks.UnsupportedForkError{Name: bt.json.Network}
+	}
+	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
+	m := execmoduletester.New(nil, execmoduletester.WithGenesisSpec(bt.genesis(config)), execmoduletester.WithEngine(engine))
+	defer m.DB.Close()
 
 	bt.br = m.BlockReader
 	// import pre accounts & construct test genesis block & state root
@@ -174,6 +318,8 @@ func (bt *BlockTest) genesis(config *chain.Config) *types.Genesis {
 		ExcessBlobGas:         bt.json.Genesis.ExcessBlobGas,
 		ParentBeaconBlockRoot: bt.json.Genesis.ParentBeaconBlockRoot,
 		RequestsHash:          bt.json.Genesis.RequestsHash,
+		BlockAccessListHash:   bt.json.Genesis.BlockAccessListHash,
+		SlotNumber:            bt.json.Genesis.SlotNumber,
 	}
 }
 
@@ -190,7 +336,7 @@ See https://github.com/ethereum/tests/wiki/Blockchain-Tests-II
 	expected we are expected to ignore it and continue processing and then validate the
 	post state.
 */
-func (bt *BlockTest) insertBlocks(m *mock.MockSentry) ([]btBlock, error) {
+func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) ([]btBlock, error) {
 	validBlocks := make([]btBlock, 0)
 	// insert the test blocks, which will execute all transaction
 	for bi, b := range bt.json.Blocks {
@@ -202,8 +348,16 @@ func (bt *BlockTest) insertBlocks(m *mock.MockSentry) ([]btBlock, error) {
 				return nil, fmt.Errorf("block RLP decoding failed when expected to succeed: %w", err)
 			}
 		}
+		var balBytes []byte
+		if len(b.BlockAccessList) > 0 {
+			bal := b.BlockAccessList.toBAL()
+			balBytes, err = types.EncodeBlockAccessListBytes(bal)
+			if err != nil {
+				return nil, fmt.Errorf("block #%v encode block access list: %w", cb.Number(), err)
+			}
+		}
 		// RLP decoding worked, try to insert into chain:
-		chain := &core.ChainPack{Blocks: []*types.Block{cb}, Headers: []*types.Header{cb.Header()}, TopBlock: cb}
+		chain := &blockgen.ChainPack{Blocks: []*types.Block{cb}, Headers: []*types.Header{cb.Header()}, TopBlock: cb, BlockAccessLists: [][]byte{balBytes}}
 
 		err1 := m.InsertChain(chain)
 		if err1 != nil {
@@ -213,30 +367,46 @@ func (bt *BlockTest) insertBlocks(m *mock.MockSentry) ([]btBlock, error) {
 				return nil, fmt.Errorf("block #%v insertion into chain failed: %w", cb.Number(), err1)
 			}
 		} else if b.BlockHeader == nil {
-			roTx, err := m.DB.BeginRo(m.Ctx)
+			isCanonical, err := bt.isCanonical(m, cb)
 			if err != nil {
 				return nil, err
 			}
-			defer roTx.Rollback()
-			canonical, _, cErr := bt.br.CanonicalHash(context.Background(), roTx, cb.NumberU64())
-			if cErr != nil {
-				return nil, cErr
-			}
-			if canonical == cb.Hash() {
+			if isCanonical {
 				return nil, fmt.Errorf("block (index %d) insertion should have failed due to: %v", bi, b.ExpectException)
 			}
-			roTx.Rollback()
 		}
 		if b.BlockHeader == nil {
 			continue
 		}
 		// validate RLP decoding by checking all values against test file JSON
-		if err = validateHeader(b.BlockHeader, cb.Header()); err != nil {
+		if err = validateHeader(b.BlockHeader, cb.HeaderNoCopy()); err != nil {
 			return nil, fmt.Errorf("deserialised block header validation failed: %w", err)
 		}
 		validBlocks = append(validBlocks, b)
 	}
 	return validBlocks, nil
+}
+
+// isCanonical reports whether block is the canonical block at its height.
+func (bt *BlockTest) isCanonical(m *execmoduletester.ExecModuleTester, block *types.Block) (bool, error) {
+	roTx, err := m.DB.BeginRo(m.Ctx)
+	if err != nil {
+		return false, err
+	}
+	defer roTx.Rollback()
+	canonical, _, err := bt.br.CanonicalHash(context.Background(), roTx, block.NumberU64())
+	if err != nil {
+		return false, err
+	}
+	return canonical == block.Hash(), nil
+}
+
+// equalPtr reports whether two optional pointers point to equal values.
+func equalPtr[T comparable](a, b *T) bool {
+	if a == nil {
+		return b == nil
+	}
+	return b != nil && *a == *b
 }
 
 func validateHeader(h *btHeader, h2 *types.Header) error {
@@ -258,8 +428,8 @@ func validateHeader(h *btHeader, h2 *types.Header) error {
 	if h.Nonce != h2.Nonce {
 		return fmt.Errorf("nonce: want: %x have: %x", h.Nonce, h2.Nonce)
 	}
-	if h.Number.Cmp(h2.Number) != 0 {
-		return fmt.Errorf("number: want: %v have: %v", h.Number, h2.Number)
+	if !h.Number.Eq(&h2.Number) {
+		return fmt.Errorf("number: want: %s have: %s", h.Number, &h2.Number)
 	}
 	if h.ParentHash != h2.ParentHash {
 		return fmt.Errorf("parent hash: want: %x have: %x", h.ParentHash, h2.ParentHash)
@@ -279,7 +449,7 @@ func validateHeader(h *btHeader, h2 *types.Header) error {
 	if !bytes.Equal(h.ExtraData, h2.Extra) {
 		return fmt.Errorf("extra data: want: %x have: %x", h.ExtraData, h2.Extra)
 	}
-	if h.Difficulty.Cmp(h2.Difficulty) != 0 {
+	if !h.Difficulty.Eq(&h2.Difficulty) {
 		return fmt.Errorf("difficulty: want: %v have: %v", h.Difficulty, h2.Difficulty)
 	}
 	if h.GasLimit != h2.GasLimit {
@@ -291,23 +461,29 @@ func validateHeader(h *btHeader, h2 *types.Header) error {
 	if h.Timestamp != h2.Time {
 		return fmt.Errorf("timestamp: want: %v have: %v", h.Timestamp, h2.Time)
 	}
-	if !reflect.DeepEqual(h.BaseFeePerGas, h2.BaseFee) {
+	if !equalPtr(h.BaseFeePerGas, h2.BaseFee) {
 		return fmt.Errorf("baseFeePerGas: want: %v have: %v", h.BaseFeePerGas, h2.BaseFee)
 	}
-	if !reflect.DeepEqual(h.WithdrawalsRoot, h2.WithdrawalsHash) {
+	if !equalPtr(h.WithdrawalsRoot, h2.WithdrawalsHash) {
 		return fmt.Errorf("withdrawalsRoot: want: %v have: %v", h.WithdrawalsRoot, h2.WithdrawalsHash)
 	}
-	if !reflect.DeepEqual(h.BlobGasUsed, h2.BlobGasUsed) {
+	if !equalPtr(h.BlobGasUsed, h2.BlobGasUsed) {
 		return fmt.Errorf("blobGasUsed: want: %v have: %v", h.BlobGasUsed, h2.BlobGasUsed)
 	}
-	if !reflect.DeepEqual(h.ExcessBlobGas, h2.ExcessBlobGas) {
+	if !equalPtr(h.ExcessBlobGas, h2.ExcessBlobGas) {
 		return fmt.Errorf("excessBlobGas: want: %v have: %v", h.ExcessBlobGas, h2.ExcessBlobGas)
 	}
-	if !reflect.DeepEqual(h.ParentBeaconBlockRoot, h2.ParentBeaconBlockRoot) {
+	if !equalPtr(h.ParentBeaconBlockRoot, h2.ParentBeaconBlockRoot) {
 		return fmt.Errorf("parentBeaconBlockRoot: want: %v have: %v", h.ParentBeaconBlockRoot, h2.ParentBeaconBlockRoot)
 	}
-	if !reflect.DeepEqual(h.RequestsHash, h2.RequestsHash) {
+	if !equalPtr(h.RequestsHash, h2.RequestsHash) {
 		return fmt.Errorf("requestsHash: want: %v have: %v", h.RequestsHash, h2.RequestsHash)
+	}
+	if !equalPtr(h.BlockAccessListHash, h2.BlockAccessListHash) {
+		return fmt.Errorf("blockAccessListHash: want: %v have: %v", h.BlockAccessListHash, h2.BlockAccessListHash)
+	}
+	if !equalPtr(h.SlotNumber, h2.SlotNumber) {
+		return fmt.Errorf("slotNumber: want: %v have: %v", h.SlotNumber, h2.SlotNumber)
 	}
 	return nil
 }
@@ -316,15 +492,16 @@ func (bt *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 	// validate post state accounts in test file against what we have in state db
 	for addr, acct := range bt.json.Post {
 		// address is indirectly verified by the other fields, as it's the db key
-		code2, err := statedb.GetCode(addr)
+		address := accounts.InternAddress(addr)
+		code2, err := statedb.GetCode(address)
 		if err != nil {
 			return err
 		}
-		balance2, err := statedb.GetBalance(addr)
+		balance2, err := statedb.GetBalance(address)
 		if err != nil {
 			return err
 		}
-		nonce2, err := statedb.GetNonce(addr)
+		nonce2, err := statedb.GetNonce(address)
 		if err != nil {
 			return err
 		}
@@ -335,21 +512,20 @@ func (bt *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 			return fmt.Errorf("account code mismatch for addr: %x want: %v have: %s", addr, acct.Code, hex.EncodeToString(code2))
 		}
 		if balance2.ToBig().Cmp(acct.Balance) != 0 {
-			return fmt.Errorf("account balance mismatch for addr: %x, want: %d, have: %d", addr, acct.Balance, balance2)
+			return fmt.Errorf("account balance mismatch for addr: %x, want: %d, have: %d", addr, acct.Balance, &balance2)
 		}
 		for loc, val := range acct.Storage {
 			val1 := uint256.NewInt(0).SetBytes(val.Bytes())
-			val2 := uint256.NewInt(0)
-			statedb.GetState(addr, loc, val2)
-			if !val1.Eq(val2) {
-				return fmt.Errorf("storage mismatch for addr: %x loc: %x want: %d have: %d", addr, loc, val1, val2)
+			val2, _ := statedb.GetState(address, accounts.InternKey(loc))
+			if !val1.Eq(&val2) {
+				return fmt.Errorf("storage mismatch for addr: %x loc: %x want: %d have: %d", addr, loc, val1, &val2)
 			}
 		}
 	}
 	return nil
 }
 
-func (bt *BlockTest) validateImportedHeaders(tx kv.Tx, validBlocks []btBlock, m *mock.MockSentry) error {
+func (bt *BlockTest) validateImportedHeaders(tx kv.Tx, validBlocks []btBlock, m *execmoduletester.ExecModuleTester) error {
 	// to get constant lookup when verifying block headers by hash (some tests have many blocks)
 	bmap := make(map[common.Hash]btBlock, len(bt.json.Blocks))
 	for _, b := range validBlocks {
@@ -361,7 +537,7 @@ func (bt *BlockTest) validateImportedHeaders(tx kv.Tx, validBlocks []btBlock, m 
 	// all blocks have been processed by BlockChain, as they may not
 	// be part of the longest chain until last block is imported.
 	for b, _ := m.BlockReader.CurrentBlock(tx); b != nil && b.NumberU64() != 0; {
-		if err := validateHeader(bmap[b.Hash()].BlockHeader, b.Header()); err != nil {
+		if err := validateHeader(bmap[b.Hash()].BlockHeader, b.HeaderNoCopy()); err != nil {
 			return fmt.Errorf("imported block header validation failed: %w", err)
 		}
 		number := rawdb.ReadHeaderNumber(tx, b.ParentHash())

@@ -3,9 +3,9 @@ package rpc
 import (
 	"context"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/common"
 )
 
 var _ BeaconRpc = (*BeaconRpcP2P)(nil)

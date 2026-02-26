@@ -18,10 +18,10 @@ package jsonrpc
 
 import (
 	"fmt"
+	"strings"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 )
 
 // TODO:(tjayrush)
@@ -53,11 +53,11 @@ type GethTraces []*GethTrace
 // ParityTrace A trace in the desired format (Parity/OpenEthereum) See: https://openethereum.github.io/JSONRPC-trace-module
 type ParityTrace struct {
 	// Do not change the ordering of these fields -- allows for easier comparison with other clients
-	Action              interface{}  `json:"action"` // Can be either CallTraceAction or CreateTraceAction
+	Action              any          `json:"action"` // Can be either CallTraceAction or CreateTraceAction
 	BlockHash           *common.Hash `json:"blockHash,omitempty"`
 	BlockNumber         *uint64      `json:"blockNumber,omitempty"`
 	Error               string       `json:"error,omitempty"`
-	Result              interface{}  `json:"result"`
+	Result              any          `json:"result"`
 	Subtraces           int          `json:"subtraces"`
 	TraceAddress        []int        `json:"traceAddress"`
 	TransactionHash     *common.Hash `json:"transactionHash,omitempty"`
@@ -130,48 +130,41 @@ type TraceResult struct {
 
 // Allows for easy printing of a geth trace for debugging
 func (p GethTrace) String() string {
-	var ret string
-	ret += fmt.Sprintf("Type: %s\n", p.Type)
-	ret += fmt.Sprintf("From: %s\n", p.From)
-	ret += fmt.Sprintf("To: %s\n", p.To)
-	ret += fmt.Sprintf("Value: %s\n", p.Value)
-	ret += fmt.Sprintf("Gas: %s\n", p.Gas)
-	ret += fmt.Sprintf("GasUsed: %s\n", p.GasUsed)
-	ret += fmt.Sprintf("Input: %s\n", p.Input)
-	ret += fmt.Sprintf("Output: %s\n", p.Output)
-	return ret
+	var ret strings.Builder
+	ret.WriteString(fmt.Sprintf("Type: %s\n", p.Type))
+	ret.WriteString(fmt.Sprintf("From: %s\n", p.From))
+	ret.WriteString(fmt.Sprintf("To: %s\n", p.To))
+	ret.WriteString(fmt.Sprintf("Value: %s\n", p.Value))
+	ret.WriteString(fmt.Sprintf("Gas: %s\n", p.Gas))
+	ret.WriteString(fmt.Sprintf("GasUsed: %s\n", p.GasUsed))
+	ret.WriteString(fmt.Sprintf("Input: %s\n", p.Input))
+	ret.WriteString(fmt.Sprintf("Output: %s\n", p.Output))
+	return ret.String()
 }
 
 // Allows for easy printing of a parity trace for debugging
 func (t ParityTrace) String() string {
-	var ret string
-	//ret += fmt.Sprintf("Action.SelfDestructed: %s\n", t.Action.SelfDestructed)
-	//ret += fmt.Sprintf("Action.Balance: %s\n", t.Action.Balance)
-	//ret += fmt.Sprintf("Action.CallType: %s\n", t.Action.CallType)
-	//ret += fmt.Sprintf("Action.From: %s\n", t.Action.From)
-	//ret += fmt.Sprintf("Action.Gas: %d\n", t.Action.Gas.ToInt())
-	//ret += fmt.Sprintf("Action.Init: %s\n", t.Action.Init)
-	//ret += fmt.Sprintf("Action.Input: %s\n", t.Action.Input)
-	//ret += fmt.Sprintf("Action.RefundAddress: %s\n", t.Action.RefundAddress)
-	//ret += fmt.Sprintf("Action.To: %s\n", t.Action.To)
-	//ret += fmt.Sprintf("Action.Value: %s\n", t.Action.Value)
-	ret += fmt.Sprintf("BlockHash: %v\n", t.BlockHash)
-	ret += fmt.Sprintf("BlockNumber: %d\n", t.BlockNumber)
-	//ret += fmt.Sprintf("Result.Address: %s\n", t.Result.Address)
-	//ret += fmt.Sprintf("Result.Code: %s\n", t.Result.Code)
-	//ret += fmt.Sprintf("Result.GasUsed: %s\n", t.Result.GasUsed)
-	//ret += fmt.Sprintf("Result.Output: %s\n", t.Result.Output)
-	ret += fmt.Sprintf("Subtraces: %d\n", t.Subtraces)
-	ret += fmt.Sprintf("TraceAddress: %v\n", t.TraceAddress)
-	ret += fmt.Sprintf("TransactionHash: %v\n", t.TransactionHash)
-	ret += fmt.Sprintf("TransactionPosition: %d\n", t.TransactionPosition)
-	ret += fmt.Sprintf("Type: %s\n", t.Type)
-	return ret
-}
-
-// Takes a hierarchical Geth trace with fields of different meaning stored in the same named fields depending on 'type'. Parity traces
-// are flattened depth first and each field is put in its proper place
-func (api *TraceAPIImpl) convertToParityTrace(gethTrace GethTrace, blockHash common.Hash, blockNumber uint64, txn types.Transaction, txIndex uint64, depth []int) ParityTraces { //nolint: unused
-	var traces ParityTraces // nolint prealloc
-	return traces
+	var ret strings.Builder
+	//ret.WriteString(fmt.Sprintf("Action.SelfDestructed: %s\n", t.Action.SelfDestructed))
+	//ret.WriteString(fmt.Sprintf("Action.Balance: %s\n", t.Action.Balance))
+	//ret.WriteString(fmt.Sprintf("Action.CallType: %s\n", t.Action.CallType))
+	//ret.WriteString(fmt.Sprintf("Action.From: %s\n", t.Action.From))
+	//ret.WriteString(fmt.Sprintf("Action.Gas: %d\n", t.Action.Gas.ToInt()))
+	//ret.WriteString(fmt.Sprintf("Action.Init: %s\n", t.Action.Init))
+	//ret.WriteString(fmt.Sprintf("Action.Input: %s\n", t.Action.Input))
+	//ret.WriteString(fmt.Sprintf("Action.RefundAddress: %s\n", t.Action.RefundAddress))
+	//ret.WriteString(fmt.Sprintf("Action.To: %s\n", t.Action.To))
+	//ret.WriteString(fmt.Sprintf("Action.Value: %s\n", t.Action.Value))
+	ret.WriteString(fmt.Sprintf("BlockHash: %v\n", t.BlockHash))
+	ret.WriteString(fmt.Sprintf("BlockNumber: %d\n", t.BlockNumber))
+	//ret.WriteString(fmt.Sprintf("Result.Address: %s\n", t.Result.Address))
+	//ret.WriteString(fmt.Sprintf("Result.Code: %s\n", t.Result.Code))
+	//ret.WriteString(fmt.Sprintf("Result.GasUsed: %s\n", t.Result.GasUsed))
+	//ret.WriteString(fmt.Sprintf("Result.Output: %s\n", t.Result.Output))
+	ret.WriteString(fmt.Sprintf("Subtraces: %d\n", t.Subtraces))
+	ret.WriteString(fmt.Sprintf("TraceAddress: %v\n", t.TraceAddress))
+	ret.WriteString(fmt.Sprintf("TransactionHash: %v\n", t.TransactionHash))
+	ret.WriteString(fmt.Sprintf("TransactionPosition: %d\n", t.TransactionPosition))
+	ret.WriteString(fmt.Sprintf("Type: %s\n", t.Type))
+	return ret.String()
 }

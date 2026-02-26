@@ -30,9 +30,9 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/node/paths"
@@ -338,7 +338,7 @@ func (c *Config) parsePersistentNodes(w *bool, path string, logger log.Logger) [
 
 var warnLock sync.Mutex
 
-func (c *Config) warnOnce(logger log.Logger, w *bool, format string, args ...interface{}) {
+func (c *Config) warnOnce(logger log.Logger, w *bool, format string, args ...any) {
 	warnLock.Lock()
 	defer warnLock.Unlock()
 

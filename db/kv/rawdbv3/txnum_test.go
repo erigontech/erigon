@@ -22,7 +22,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -40,30 +40,30 @@ func TestTxNum(t *testing.T) {
 		require.NoError(TxNums.Append(tx, 1, 99))
 		require.NoError(TxNums.Append(tx, 2, 100))
 
-		n, _, err := TxNums.FindBlockNum(tx, 10)
+		n, _, err := TxNums.FindBlockNum(context.Background(), tx, 10)
 		require.NoError(err)
 		require.Equal(1, int(n))
 
-		n, _, err = TxNums.FindBlockNum(tx, 0)
+		n, _, err = TxNums.FindBlockNum(context.Background(), tx, 0)
 		require.NoError(err)
 		require.Equal(0, int(n))
 
-		n, _, err = TxNums.FindBlockNum(tx, 3)
+		n, _, err = TxNums.FindBlockNum(context.Background(), tx, 3)
 		require.NoError(err)
 		require.Equal(0, int(n))
-		n, _, err = TxNums.FindBlockNum(tx, 4)
+		n, _, err = TxNums.FindBlockNum(context.Background(), tx, 4)
 		require.NoError(err)
 		require.Equal(1, int(n))
 
-		n, _, err = TxNums.FindBlockNum(tx, 99)
+		n, _, err = TxNums.FindBlockNum(context.Background(), tx, 99)
 		require.NoError(err)
 		require.Equal(1, int(n))
 
-		n, _, err = TxNums.FindBlockNum(tx, 100)
+		n, _, err = TxNums.FindBlockNum(context.Background(), tx, 100)
 		require.NoError(err)
 		require.Equal(2, int(n))
 
-		_, ok, err := TxNums.FindBlockNum(tx, 101)
+		_, ok, err := TxNums.FindBlockNum(context.Background(), tx, 101)
 		require.NoError(err)
 		require.False(ok)
 		return nil

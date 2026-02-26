@@ -24,11 +24,11 @@ import (
 	"github.com/erigontech/erigon/rpc"
 )
 
-func checkBlockNumber(blockNumber rpc.BlockNumber, api EthAPI) error {
+func checkBlockNumber(ctx context.Context, blockNumber rpc.BlockNumber, api EthAPI) error {
 	if api == nil {
 		return errors.New("no connection to the Erigon server or `eth` namespace isn't enabled")
 	}
-	data, err := api.GetBlockByNumber(context.TODO(), blockNumber, false)
+	data, err := api.GetBlockByNumber(ctx, blockNumber, false)
 	if err != nil {
 		return err
 	}

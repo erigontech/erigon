@@ -20,8 +20,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
@@ -29,11 +30,11 @@ import (
 
 type wiggleCalc struct {
 	borConfig            *borcfg.BorConfig
-	signaturesCache      *lru.ARCCache[common.Hash, common.Address]
+	signaturesCache      *lru.ARCCache[common.Hash, accounts.Address]
 	blockProducersReader blockProducersReader
 }
 
-func NewWiggleCalculator(borConfig *borcfg.BorConfig, signaturesCache *lru.ARCCache[common.Hash, common.Address], blockProducersReader blockProducersReader) *wiggleCalc {
+func NewWiggleCalculator(borConfig *borcfg.BorConfig, signaturesCache *lru.ARCCache[common.Hash, accounts.Address], blockProducersReader blockProducersReader) *wiggleCalc {
 	return &wiggleCalc{
 		borConfig:            borConfig,
 		signaturesCache:      signaturesCache,

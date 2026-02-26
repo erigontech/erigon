@@ -53,6 +53,9 @@ var gnosisStateSSZ []byte
 //go:embed chiado.state.ssz
 var chiadoStateSSZ []byte
 
+//go:embed bloatnet.state.ssz
+var bloatnetStateSSZ []byte
+
 // Return genesis state
 func GetGenesisState(network clparams.NetworkType) (*state.CachingBeaconState, error) {
 	_, config := clparams.GetConfigsByNetwork(network)
@@ -75,15 +78,6 @@ func GetGenesisState(network clparams.NetworkType) (*state.CachingBeaconState, e
 		if err := returnState.DecodeSSZ(chiadoStateSSZ, int(clparams.Phase0Version)); err != nil {
 			return nil, err
 		}
-	case chainspec.HoleskyChainID:
-		// Download genesis state by wget the url
-		encodedState, err := downloadGenesisState("https://github.com/eth-clients/holesky/raw/main/metadata/genesis.ssz")
-		if err != nil {
-			return nil, err
-		}
-		if err := returnState.DecodeSSZ(encodedState, int(clparams.BellatrixVersion)); err != nil {
-			return nil, err
-		}
 	case chainspec.HoodiChainID:
 		// Download genesis state by wget the url
 		encodedState, err := downloadGenesisState("https://github.com/eth-clients/hoodi/raw/main/metadata/genesis.ssz")
@@ -93,6 +87,10 @@ func GetGenesisState(network clparams.NetworkType) (*state.CachingBeaconState, e
 		if err := returnState.DecodeSSZ(encodedState, int(clparams.DenebVersion)); err != nil {
 			return nil, err
 		}
+	case chainspec.BloatnetNetworkID:
+		if err := returnState.DecodeSSZ(bloatnetStateSSZ, int(clparams.DenebVersion)); err != nil {
+			return nil, err
+		}
 	default:
 		return nil, nil
 	}
@@ -100,5 +98,10 @@ func GetGenesisState(network clparams.NetworkType) (*state.CachingBeaconState, e
 }
 
 func IsGenesisStateSupported(network clparams.NetworkType) bool {
-	return network == chainspec.MainnetChainID || network == chainspec.SepoliaChainID || network == chainspec.GnosisChainID || network == chainspec.ChiadoChainID || network == chainspec.HoleskyChainID || network == chainspec.HoodiChainID
+	return network == chainspec.MainnetChainID ||
+		network == chainspec.SepoliaChainID ||
+		network == chainspec.GnosisChainID ||
+		network == chainspec.ChiadoChainID ||
+		network == chainspec.HoodiChainID ||
+		network == chainspec.BloatnetNetworkID
 }

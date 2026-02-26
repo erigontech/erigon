@@ -21,43 +21,43 @@ package testutil
 
 import (
 	"fmt"
-	"math/big"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/empty"
-	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus/ethash"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/types"
 )
 
 //go:generate gencodec -type DifficultyTest -field-override difficultyTestMarshaling -out gen_difficultytest.go
 
 type DifficultyTest struct {
-	ParentTimestamp    uint64   `json:"parentTimestamp"`
-	ParentDifficulty   *big.Int `json:"parentDifficulty"`
-	ParentUncles       uint64   `json:"parentUncles"`
-	CurrentTimestamp   uint64   `json:"currentTimestamp"`
-	CurrentBlockNumber uint64   `json:"currentBlockNumber"`
-	CurrentDifficulty  *big.Int `json:"currentDifficulty"`
+	ParentTimestamp    uint64      `json:"parentTimestamp"`
+	ParentDifficulty   uint256.Int `json:"parentDifficulty"`
+	ParentUncles       uint64      `json:"parentUncles"`
+	CurrentTimestamp   uint64      `json:"currentTimestamp"`
+	CurrentBlockNumber uint64      `json:"currentBlockNumber"`
+	CurrentDifficulty  uint256.Int `json:"currentDifficulty"`
 }
 
 type difficultyTestMarshaling struct {
 	ParentTimestamp    math.HexOrDecimal64
-	ParentDifficulty   *math.HexOrDecimal256
+	ParentDifficulty   math.HexOrDecimal256
 	CurrentTimestamp   math.HexOrDecimal64
-	CurrentDifficulty  *math.HexOrDecimal256
+	CurrentDifficulty  math.HexOrDecimal256
 	ParentUncles       math.HexOrDecimal64
 	CurrentBlockNumber math.HexOrDecimal64
 }
 
 func (test *DifficultyTest) Run(config *chain.Config) error {
-	parentNumber := new(big.Int).SetUint64(test.CurrentBlockNumber - 1)
 	parent := &types.Header{
 		Difficulty: test.ParentDifficulty,
 		Time:       test.ParentTimestamp,
-		Number:     parentNumber,
 	}
+	parent.Number.SetUint64(test.CurrentBlockNumber - 1)
 
 	if test.ParentUncles == 0 {
 		parent.UncleHash = empty.UncleHash
@@ -68,11 +68,10 @@ func (test *DifficultyTest) Run(config *chain.Config) error {
 	actual := ethash.CalcDifficulty(config, test.CurrentTimestamp, parent.Time, parent.Difficulty, parent.Number.Uint64(), parent.UncleHash)
 	exp := test.CurrentDifficulty
 
-	if actual.Cmp(exp) != 0 {
+	if actual.Cmp(&exp) != 0 {
 		return fmt.Errorf("parent[time %v diff %v unclehash:%x] child[time %v number %v] diff %v != expected %v",
 			test.ParentTimestamp, test.ParentDifficulty, test.ParentUncles,
-			test.CurrentTimestamp, test.CurrentBlockNumber, actual, exp)
+			test.CurrentTimestamp, test.CurrentBlockNumber, &actual, &exp)
 	}
 	return nil
-
 }

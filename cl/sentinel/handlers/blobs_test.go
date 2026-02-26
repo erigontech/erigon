@@ -32,7 +32,6 @@ import (
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -43,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 )
@@ -66,13 +66,13 @@ func getTestBlobSidecars(blockHeader *cltypes.SignedBeaconBlockHeader) []*cltype
 func TestBlobsByRangeHandler(t *testing.T) {
 	ctx := context.Background()
 
-	listenAddrHost := "/ip4/127.0.0.1/tcp/6121"
-	host, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost))
+	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
+	t.Cleanup(func() { host.Close() })
 
-	listenAddrHost1 := "/ip4/127.0.0.1/tcp/6358"
-	host1, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost1))
+	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
+	t.Cleanup(func() { host1.Close() })
 
 	err = host.Connect(ctx, peer.AddrInfo{
 		ID:    host1.ID(),
@@ -86,7 +86,9 @@ func TestBlobsByRangeHandler(t *testing.T) {
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
 
-	tx, _ := indiciesDB.BeginRw(ctx)
+	tx, err := indiciesDB.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
 
 	startSlot := uint64(100)
 	count := uint64(10)
@@ -99,7 +101,7 @@ func TestBlobsByRangeHandler(t *testing.T) {
 	r, _ := h.Header.HashSSZ()
 	require.NoError(t, blobStorage.WriteBlobSidecars(ctx, r, sidecars))
 
-	tx.Commit()
+	require.NoError(t, tx.Commit())
 
 	ethClock := getEthClock(t)
 	c := NewConsensusHandlers(
@@ -125,7 +127,7 @@ func TestBlobsByRangeHandler(t *testing.T) {
 		return
 	}
 
-	reqData := common.CopyBytes(reqBuf.Bytes())
+	reqData := common.Copy(reqBuf.Bytes())
 	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.BlobSidecarByRangeProtocolV1))
 	require.NoError(t, err)
 
@@ -188,13 +190,13 @@ func TestBlobsByRangeHandler(t *testing.T) {
 func TestBlobsByIdentifiersHandler(t *testing.T) {
 	ctx := context.Background()
 
-	listenAddrHost := "/ip4/127.0.0.1/tcp/6125"
-	host, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost))
+	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
+	t.Cleanup(func() { host.Close() })
 
-	listenAddrHost1 := "/ip4/127.0.0.1/tcp/6350"
-	host1, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost1))
+	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
+	t.Cleanup(func() { host1.Close() })
 
 	err = host.Connect(ctx, peer.AddrInfo{
 		ID:    host1.ID(),
@@ -207,7 +209,9 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
 
-	tx, _ := indiciesDB.BeginRw(ctx)
+	tx, err := indiciesDB.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
 
 	startSlot := uint64(100)
 	count := uint64(10)
@@ -221,7 +225,7 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 	r, _ := h.Header.HashSSZ()
 	require.NoError(t, blobStorage.WriteBlobSidecars(ctx, r, sidecars))
 
-	tx.Commit()
+	require.NoError(t, tx.Commit())
 
 	c := NewConsensusHandlers(
 		ctx,
@@ -247,7 +251,7 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 		return
 	}
 
-	reqData := common.CopyBytes(reqBuf.Bytes())
+	reqData := common.Copy(reqBuf.Bytes())
 	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.BlobSidecarByRootProtocolV1))
 	require.NoError(t, err)
 

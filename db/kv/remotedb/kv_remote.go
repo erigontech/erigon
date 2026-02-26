@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"runtime"
 	"unsafe"
 
@@ -29,7 +30,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
@@ -108,9 +109,8 @@ func (opts remoteOpts) Open() (*DB, error) {
 		roTxsLimiter: semaphore.NewWeighted(targetSemCount), // 1 less than max to allow unlocking
 	}
 	customBuckets := opts.bucketsCfg
-	for name, cfg := range customBuckets { // copy map to avoid changing global variable
-		db.buckets[name] = cfg
-	}
+	// copy map to avoid changing global variable
+	maps.Copy(db.buckets, customBuckets)
 
 	return db, nil
 }
@@ -131,6 +131,7 @@ func NewRemote(v gointerfaces.Version, logger log.Logger, remoteKV remoteproto.K
 }
 
 func (db *DB) PageSize() datasize.ByteSize { panic("not implemented") }
+func (db *DB) Path() string                { panic("not implemented") }
 func (db *DB) ReadOnly() bool              { return true }
 func (db *DB) AllTables() kv.TableCfg      { return db.buckets }
 
@@ -188,8 +189,10 @@ func (db *DB) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	return &tx{ctx: ctx, db: db, stream: stream, streamCancelFn: streamCancelFn, viewID: msg.ViewId, id: msg.TxId}, nil
 }
 func (db *DB) Debug() kv.TemporalDebugDB                           { return kv.TemporalDebugDB(db) }
+func (db *DB) NewMemBatch(ioMetrics any) kv.TemporalMemBatch       { panic("not implemented") }
 func (db *DB) DomainTables(domain ...kv.Domain) []string           { panic("not implemented") }
 func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string { panic("not implemented") }
+func (db *DB) ForkableTables(domain ...kv.ForkableId) []string     { panic("not implemented") }
 func (db *DB) ReloadFiles() error                                  { panic("not implemented") }
 func (db *DB) BuildMissedAccessors(_ context.Context, _ int) error { panic("not implemented") }
 func (db *DB) EnableReadAhead() kv.TemporalDebugDB                 { panic("not implemented") }
@@ -240,25 +243,28 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) (err e
 	return errors.New("remote db provider doesn't support .UpdateNosync method")
 }
 
-func (tx *tx) AggTx() any                                  { panic("not implemented") }
-func (tx *tx) Debug() kv.TemporalDebugTx                   { return kv.TemporalDebugTx(tx) }
-func (tx *tx) FreezeInfo() kv.FreezeInfo                   { panic("not implemented") }
-func (tx *tx) StepsInFiles(entitySet ...kv.Domain) kv.Step { panic("not implemented") }
+func (tx *tx) NewMemBatch(ioMetrics any) kv.TemporalMemBatch { panic("not implemented") }
 
-func (tx *tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles       { panic("not implemented") }
-func (tx *tx) CurrentDomainVersion(domain kv.Domain) version.Version { panic("not implemented") }
-func (tx *tx) DomainProgress(domain kv.Domain) uint64                { panic("not implemented") }
+func (tx *tx) AggTx() any                                      { panic("not implemented") }
+func (tx *tx) Debug() kv.TemporalDebugTx                       { return kv.TemporalDebugTx(tx) }
+func (tx *tx) FreezeInfo() kv.FreezeInfo                       { panic("not implemented") }
+func (tx *tx) AllForkableIds() (ids []kv.ForkableId)           { panic("not implemented") }
+func (tx *tx) StepsInFiles(entitySet ...kv.Domain) kv.Step     { panic("not implemented") }
+func (tx *tx) DomainFiles(domain ...kv.Domain) kv.VisibleFiles { panic("not implemented") }
+func (tx *tx) DomainProgress(domain kv.Domain) uint64          { panic("not implemented") }
 func (tx *tx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step kv.Step, found bool, err error) {
 	panic("not implemented")
 }
 func (tx *tx) GetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
 	panic("not implemented")
 }
+func (tx *tx) TraceKey(domain kv.Domain, k []byte, fromTxNum, toTxNum uint64) (stream.U64V, error) {
+	panic("not implemented")
+}
 func (tx *tx) IIProgress(domain kv.InvertedIdx) uint64 { panic("not implemented") }
 func (tx *tx) RangeLatest(domain kv.Domain, from, to []byte, limit int) (stream.KV, error) {
 	panic("not implemented")
 }
-func (tx *tx) StepSize() uint64                                     { panic("not implemented") }
 func (tx *tx) Dirs() datadir.Dirs                                   { panic("not implemented") }
 func (tx *tx) TxNumsInFiles(domains ...kv.Domain) (minTxNum uint64) { panic("not implemented") }
 
@@ -686,6 +692,25 @@ func (tx *tx) HistoryStartFrom(name kv.Domain) uint64 {
 		return 0
 	}
 	return reply.StartFrom
+}
+
+func (tx *tx) StepSize() uint64 {
+	reply, err := tx.db.remoteKV.StepSize(tx.ctx, &remoteproto.StepSizeReq{TxId: tx.id})
+	if err != nil {
+		return 0
+	}
+	return reply.Step
+}
+
+func (tx *tx) CurrentDomainVersion(name kv.Domain) version.Version {
+	reply, err := tx.db.remoteKV.CurrentDomainVersion(tx.ctx, &remoteproto.CurrentDomainVersionReq{TxId: tx.id, Domain: uint32(name)})
+	if err != nil {
+		return version.Version{}
+	}
+	var v version.Version
+	v.Major = reply.Major
+	v.Minor = reply.Minor
+	return v
 }
 
 func (tx *tx) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {

@@ -21,10 +21,11 @@ package eth
 
 import (
 	"bytes"
-	"math/big"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -78,7 +79,7 @@ func TestEth66EmptyMessages(t *testing.T) {
 	// All empty messages encodes to the same format
 	want := common.FromHex("c4820457c0")
 
-	for i, msg := range []interface{}{
+	for i, msg := range []any{
 		// Headers
 		GetBlockHeadersPacket66{1111, nil},
 		BlockHeadersPacket66{1111, nil},
@@ -123,8 +124,8 @@ func TestEth66Messages(t *testing.T) {
 		err error
 	)
 	header = &types.Header{
-		Difficulty: big.NewInt(2222),
-		Number:     big.NewInt(3333),
+		Difficulty: *uint256.NewInt(2222),
+		Number:     *uint256.NewInt(3333),
 		GasLimit:   4444,
 		GasUsed:    5555,
 		Time:       6666,
@@ -185,7 +186,7 @@ func TestEth66Messages(t *testing.T) {
 	}
 
 	for i, tc := range []struct {
-		message interface{}
+		message any
 		want    []byte
 	}{
 		{

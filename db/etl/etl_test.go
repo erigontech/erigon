@@ -24,15 +24,15 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/memdb"
 )
@@ -123,8 +123,8 @@ func TestWriteAndReadBufferEntry(t *testing.T) {
 
 	entries := make([]sortableBufferEntry, 100)
 	for i := range entries {
-		entries[i].key = []byte(fmt.Sprintf("key-%d", i))
-		entries[i].value = []byte(fmt.Sprintf("value-%d", i))
+		entries[i].key = fmt.Appendf(nil, "key-%d", i)
+		entries[i].value = fmt.Appendf(nil, "value-%d", i)
 		b.Put(entries[i].key, entries[i].value)
 	}
 
@@ -287,11 +287,11 @@ func TestTransformExtractStartKey(t *testing.T) {
 		"", // temp dir
 		testExtractToMapFunc,
 		testLoadFromMapFunc,
-		TransformArgs{ExtractStartKey: []byte(fmt.Sprintf("%10d-key-%010d", 5, 5))},
+		TransformArgs{ExtractStartKey: fmt.Appendf(nil, "%10d-key-%010d", 5, 5)},
 		logger,
 	)
 	require.NoError(t, err)
-	compareBuckets(t, tx, sourceBucket, destBucket, []byte(fmt.Sprintf("%10d-key-%010d", 5, 5)))
+	compareBuckets(t, tx, sourceBucket, destBucket, fmt.Appendf(nil, "%10d-key-%010d", 5, 5))
 }
 
 func TestTransformThroughFiles(t *testing.T) {
@@ -365,8 +365,8 @@ func TestTransformDoubleOnLoad(t *testing.T) {
 func generateTestData(t *testing.T, db kv.Putter, bucket string, count int) {
 	t.Helper()
 	for i := 0; i < count; i++ {
-		k := []byte(fmt.Sprintf("%10d-key-%010d", i, i))
-		v := []byte(fmt.Sprintf("val-%099d", i))
+		k := fmt.Appendf(nil, "%10d-key-%010d", i, i)
+		v := fmt.Appendf(nil, "val-%099d", i)
 		err := db.Put(bucket, k, v)
 		require.NoError(t, err)
 	}
@@ -484,11 +484,9 @@ func TestReuseCollectorAfterLoad(t *testing.T) {
 
 	// buffers are not lost
 	require.Empty(t, buf.data)
-	require.Empty(t, buf.lens)
-	require.Empty(t, buf.offsets)
+	require.Empty(t, buf.entries)
 	require.NotZero(t, cap(buf.data))
-	require.NotZero(t, cap(buf.lens))
-	require.NotZero(t, cap(buf.offsets))
+	require.NotZero(t, cap(buf.entries))
 
 	// teset that no data visible
 	see = 0
@@ -539,7 +537,7 @@ func TestAppendAndSortPrefixes(t *testing.T) {
 		require.NoError(collector.Collect(key1[:kl], key1[len(key):]))
 	}
 
-	sort.Strings(keys)
+	slices.Sort(keys)
 	i := 0
 
 	err := collector.Load(nil, "", func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error {
@@ -631,4 +629,50 @@ func TestSortable(t *testing.T) {
 	require.Equal([][]byte{{1}, {1}, {1}, {1}, {1}, {1}, {1}, {2}, {2}, {2}}, keys)
 	require.Equal([][]byte{{1}, {2}, {3}, {4}, {5}, {6}, {7}, {1}, {20}, nil}, vals)
 
+}
+
+func BenchmarkSortableBufferSort(b *testing.B) {
+	const keyLen = 32
+	const valLen = 64
+
+	makeBuffer := func(n int, sorted bool) *sortableBuffer {
+		buf := NewSortableBuffer(256 * 1024 * 1024)
+		buf.Prealloc(n, n*(keyLen+valLen))
+		key := make([]byte, keyLen)
+		val := make([]byte, valLen)
+		for i := range n {
+			if sorted {
+				binary.BigEndian.PutUint64(key, uint64(i))
+			} else {
+				// deterministic pseudo-random: mix the index
+				x := uint64(i) * 6364136223846793005
+				binary.BigEndian.PutUint64(key, x)
+				binary.BigEndian.PutUint64(key[8:], x^0xdeadbeef)
+			}
+			binary.BigEndian.PutUint64(val, uint64(i))
+			buf.Put(key, val)
+		}
+		return buf
+	}
+
+	for _, tc := range []struct {
+		name   string
+		count  int
+		sorted bool
+	}{
+		{"random_100k", 100_000, false},
+		{"random_500k", 500_000, false},
+		{"sorted_100k", 100_000, true},
+		{"sorted_500k", 500_000, true},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				b.StopTimer()
+				ref := makeBuffer(tc.count, tc.sorted)
+				b.StartTimer()
+				ref.Sort()
+			}
+		})
+	}
 }

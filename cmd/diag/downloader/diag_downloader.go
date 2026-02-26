@@ -24,9 +24,9 @@ import (
 	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cmd/diag/flags"
 	"github.com/erigontech/erigon/cmd/diag/util"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 )
 
@@ -295,7 +295,7 @@ func getFileRow(file diaglib.SegmentDownloadStatistics) table.Row {
 }
 
 func getPeersRows(peers []diaglib.SegmentPeer) []table.Row {
-	rows := make([]table.Row, 0)
+	rows := make([]table.Row, 0, len(peers))
 
 	for _, peer := range peers {
 		row := table.Row{

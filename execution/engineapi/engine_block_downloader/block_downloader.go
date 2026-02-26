@@ -18,307 +18,252 @@ package engine_block_downloader
 
 import (
 	"context"
-	"encoding/binary"
+	"errors"
 	"fmt"
-	"math/big"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
-	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/etl"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
+	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/p2p"
-	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/stages/bodydownload"
-	"github.com/erigontech/erigon/execution/stages/headerdownload"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
-	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon/p2p/sentry"
-	"github.com/erigontech/erigon/turbo/adapter"
-	"github.com/erigontech/erigon/turbo/services"
 )
+
+type Status int
 
 const (
-	logInterval                 = 30 * time.Second
-	requestLoopCutOff       int = 1
-	forkchoiceTimeoutMillis     = 5000
+	Idle Status = iota
+	Syncing
+	Synced
 )
-
-type RequestBodyFunction func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool)
 
 // EngineBlockDownloader is responsible to download blocks in reverse, and then insert them in the database.
 type EngineBlockDownloader struct {
-	bacgroundCtx context.Context
-
-	// downloaders
-	hd          *headerdownload.HeaderDownload
-	bd          *bodydownload.BodyDownload
-	bodyReqSend RequestBodyFunction
-
-	// current status of the downloading process, aka: is it doing anything?
-	status atomic.Value // it is a Status
-
-	// data reader
-	blockPropagator adapter.BlockPropagator
-	blockReader     services.FullBlockReader
-	db              kv.RoDB
-
-	// Execution module
-	chainRW eth1_chain_reader.ChainReaderWriterEth1
-
-	// Misc
-	tmpdir  string
-	timeout int
-	config  *chain.Config
-	syncCfg ethconfig.Sync
-
-	// lock
-	lock sync.Mutex
-
-	// logs
-	logger log.Logger
-
-	// V2 downloader
-	v2              bool
-	bbdV2           *p2p.BackwardBlockDownloader
-	badHeadersV2    *lru.Cache[common.Hash, common.Hash]
-	messageListener *p2p.MessageListener
-	peerTracker     *p2p.PeerTracker
-	stopped         atomic.Bool
+	backgroundCtx context.Context
+	status        atomic.Value // current Status of the downloading process, aka: is it doing anything
+	blockReader   services.FullBlockReader
+	db            kv.RoDB
+	chainRW       chainreader.ChainReaderWriterEth1
+	syncCfg       ethconfig.Sync
+	lock          sync.Mutex
+	logger        log.Logger
+	bbd           *p2p.BackwardBlockDownloader
+	badHeaders    *lru.Cache[common.Hash, common.Hash]
 }
 
-func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, hd *headerdownload.HeaderDownload, executionClient executionproto.ExecutionClient,
-	bd *bodydownload.BodyDownload, blockPropagator adapter.BlockPropagator,
-	bodyReqSend RequestBodyFunction, blockReader services.FullBlockReader, db kv.RoDB, config *chain.Config,
-	tmpdir string, syncCfg ethconfig.Sync,
-	v2 bool,
-	sentryClient sentryproto.SentryClient,
-	statusDataProvider *sentry.StatusDataProvider,
+func NewEngineBlockDownloader(
+	ctx context.Context,
+	logger log.Logger,
+	executionClient executionproto.ExecutionClient,
+	blockReader services.FullBlockReader,
+	db kv.RoDB,
+	config *chain.Config,
+	syncCfg ethconfig.Sync,
+	bbd *p2p.BackwardBlockDownloader,
 ) *EngineBlockDownloader {
-	timeout := syncCfg.BodyDownloadTimeoutSeconds
 	var s atomic.Value
 	s.Store(Idle)
-	var bbdV2 *p2p.BackwardBlockDownloader
-	var badHeadersV2 *lru.Cache[common.Hash, common.Hash]
-	var messageListener *p2p.MessageListener
-	var peerTracker *p2p.PeerTracker
-	if v2 {
-		peerPenalizer := p2p.NewPeerPenalizer(sentryClient)
-		messageListener = p2p.NewMessageListener(logger, sentryClient, statusDataProvider.GetStatusData, peerPenalizer)
-		messageSender := p2p.NewMessageSender(sentryClient)
-		peerTracker = p2p.NewPeerTracker(logger, messageListener)
-		var fetcher p2p.Fetcher
-		fetcher = p2p.NewFetcher(logger, messageListener, messageSender)
-		fetcher = p2p.NewPenalizingFetcher(logger, fetcher, peerPenalizer)
-		fetcher = p2p.NewTrackingFetcher(fetcher, peerTracker)
-		bbdV2 = p2p.NewBackwardBlockDownloader(logger, fetcher, peerPenalizer, peerTracker, tmpdir)
-		var err error
-		badHeadersV2, err = lru.New[common.Hash, common.Hash](1_000_000) // 64mb
-		if err != nil {
-			panic(fmt.Errorf("failed to create badHeaders cache: %w", err))
-		}
+	badHeaders, err := lru.New[common.Hash, common.Hash](10_000) // 640kb
+	if err != nil {
+		panic(fmt.Errorf("failed to create badHeaders cache: %w", err))
 	}
+	// the block downloader has fcuTimeout=0 to avoid having to deal with async fcu
+	chainRW := chainreader.NewChainReaderEth1(config, executionClient, 0 /* fcuTimeout */)
 	return &EngineBlockDownloader{
-		bacgroundCtx:    ctx,
-		hd:              hd,
-		bd:              bd,
-		db:              db,
-		status:          s,
-		config:          config,
-		syncCfg:         syncCfg,
-		tmpdir:          tmpdir,
-		logger:          logger,
-		blockReader:     blockReader,
-		blockPropagator: blockPropagator,
-		timeout:         timeout,
-		bodyReqSend:     bodyReqSend,
-		chainRW:         eth1_chain_reader.NewChainReaderEth1(config, executionClient, forkchoiceTimeoutMillis),
-		v2:              v2,
-		bbdV2:           bbdV2,
-		badHeadersV2:    badHeadersV2,
-		messageListener: messageListener,
-		peerTracker:     peerTracker,
+		backgroundCtx: ctx,
+		db:            db,
+		status:        s,
+		syncCfg:       syncCfg,
+		logger:        logger,
+		blockReader:   blockReader,
+		chainRW:       chainRW,
+		bbd:           bbd,
+		badHeaders:    badHeaders,
 	}
-}
-
-func (e *EngineBlockDownloader) Run(ctx context.Context) error {
-	if e.v2 {
-		e.logger.Info("[EngineBlockDownloader] running")
-		defer func() {
-			e.logger.Info("[EngineBlockDownloader] stopped")
-			e.stopped.Store(true)
-		}()
-		eg, ctx := errgroup.WithContext(ctx)
-		eg.Go(func() error {
-			err := e.peerTracker.Run(ctx)
-			if err != nil {
-				return fmt.Errorf("engine block downloader peer tracker failed: %w", err)
-			}
-			return nil
-		})
-		eg.Go(func() error {
-			err := e.messageListener.Run(ctx)
-			if err != nil {
-				return fmt.Errorf("engine block downloader message listener failed: %w", err)
-			}
-			return nil
-		})
-		return eg.Wait()
-	}
-	<-ctx.Done()
-	return ctx.Err()
 }
 
 func (e *EngineBlockDownloader) ReportBadHeader(badHeader, lastValidAncestor common.Hash) {
-	if e.v2 {
-		e.badHeadersV2.Add(badHeader, lastValidAncestor)
-	} else {
-		e.hd.ReportBadHeaderPoS(badHeader, lastValidAncestor)
-	}
+	e.badHeaders.Add(badHeader, lastValidAncestor)
 }
 
-func (s *EngineBlockDownloader) IsBadHeader(h common.Hash) (bad bool, lastValidAncestor common.Hash) {
-	if s.v2 {
-		lastValidAncestor, bad = s.badHeadersV2.Get(h)
-		return bad, lastValidAncestor
-	} else {
-		return s.hd.IsBadHeaderPoS(h)
-	}
+func (e *EngineBlockDownloader) IsBadHeader(h common.Hash) (bad bool, lastValidAncestor common.Hash) {
+	lastValidAncestor, bad = e.badHeaders.Get(h)
+	return bad, lastValidAncestor
 }
 
-func (e *EngineBlockDownloader) scheduleHeadersDownload(
-	requestId int,
-	hashToDownload common.Hash,
-	heightToDownload uint64,
-) bool {
-	if e.hd.PosStatus() != headerdownload.Idle {
-		e.logger.Info("[EngineBlockDownloader] Postponing PoS download since another one is in progress", "height", heightToDownload, "hash", hashToDownload)
+func (e *EngineBlockDownloader) Status() Status {
+	return e.status.Load().(Status)
+}
+
+// StartDownloading triggers the download process and returns true if the process started or false if it could not.
+// chainTip is optional and should be the block tip of the download request, which will be inserted at the end of the procedure if specified.
+func (e *EngineBlockDownloader) StartDownloading(hashToDownload common.Hash, chainTip *types.Block, trigger Trigger) bool {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	if e.status.Load() == Syncing {
 		return false
 	}
-
-	if heightToDownload == 0 {
-		e.logger.Info("[EngineBlockDownloader] Downloading PoS headers...", "hash", hashToDownload, "requestId", requestId)
-	} else {
-		e.logger.Info("[EngineBlockDownloader] Downloading PoS headers...", "hash", hashToDownload, "requestId", requestId, "height", heightToDownload)
-	}
-
-	e.hd.SetRequestId(requestId)
-	e.hd.SetHeaderToDownloadPoS(hashToDownload, heightToDownload)
-	e.hd.SetPOSSync(true) // This needs to be called after SetHeaderToDownloadPOS because SetHeaderToDownloadPOS sets `posAnchor` member field which is used by ProcessHeadersPOS
-
-	//nolint
-	e.hd.SetHeadersCollector(etl.NewCollector("EngineBlockDownloader", e.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize/2), e.logger))
-
-	e.hd.SetPosStatus(headerdownload.Syncing)
-
+	e.status.Store(Syncing)
+	go e.download(e.backgroundCtx, BackwardDownloadRequest{
+		MissingHash:      hashToDownload,
+		Trigger:          trigger,
+		ValidateChainTip: chainTip,
+	})
 	return true
 }
 
-// waitForEndOfHeadersDownload waits until the download of headers ends and returns the outcome.
-func (e *EngineBlockDownloader) waitForEndOfHeadersDownload(ctx context.Context) (headerdownload.SyncStatus, error) {
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
-
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			if e.hd.PosStatus() != headerdownload.Syncing {
-				return e.hd.PosStatus(), nil
-			}
-		case <-ctx.Done():
-			return e.hd.PosStatus(), ctx.Err()
-		case <-logEvery.C:
-			e.logger.Info("[EngineBlockDownloader] Waiting for headers download to finish")
-		}
+// download is the process that reverse download a specific block hash.
+// chainTip is optional and should be the block tip of the download request, which will be inserted at the end of the procedure if specified.
+func (e *EngineBlockDownloader) download(ctx context.Context, req BackwardDownloadRequest) {
+	err := e.processReq(ctx, req)
+	if err != nil {
+		args := append(req.LogArgs(), "err", err)
+		e.logger.Warn("[EngineBlockDownloader] could not process backward download request", args...)
+		e.status.Store(Idle)
+		return
 	}
+	e.logger.Info("[EngineBlockDownloader] backward download request successfully processed", req.LogArgs()...)
+	e.status.Store(Synced)
 }
 
-// waitForEndOfHeadersDownload waits until the download of headers ends and returns the outcome.
-func (e *EngineBlockDownloader) loadDownloadedHeaders(tx kv.RwTx) (fromBlock uint64, toBlock uint64, err error) {
-	var lastValidHash common.Hash
-	var badChainError error // TODO(yperbasis): this is not set anywhere
-	var foundPow bool
-	var found bool
+func (e *EngineBlockDownloader) processReq(ctx context.Context, req BackwardDownloadRequest) error {
+	err := e.downloadBlocks(ctx, req)
+	if err != nil {
+		return fmt.Errorf("could not process backward download of blocks: %w", err)
+	}
+	e.logger.Info("[EngineBlockDownloader] backward download of blocks finished successfully", req.LogArgs()...)
+	if req.ValidateChainTip == nil {
+		return nil
+	}
+	tip := req.ValidateChainTip
+	err = e.chainRW.InsertBlockAndWait(ctx, tip)
+	if err != nil {
+		return fmt.Errorf("could not insert request chain tip for validation: %w", err)
+	}
+	status, _, latestValidHash, err := e.chainRW.ValidateChain(ctx, tip.Hash(), tip.NumberU64())
+	if err != nil {
+		return fmt.Errorf("request chain tip validation failed: %w", err)
+	}
+	if status == executionproto.ExecutionStatus_TooFarAway || status == executionproto.ExecutionStatus_Busy {
+		e.logger.Info("[EngineBlockDownloader] block verification skipped")
+		return nil
+	}
+	if status == executionproto.ExecutionStatus_BadBlock {
+		e.ReportBadHeader(tip.Hash(), latestValidHash)
+		return errors.New("block segments downloaded are invalid")
+	}
+	e.logger.Info("[EngineBlockDownloader] blocks verification successful")
+	return nil
+}
 
-	headerLoadFunc := func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		var h types.Header
-		// no header to process
-		if value == nil {
-			return nil
+func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req BackwardDownloadRequest) error {
+	e.logger.Info("[EngineBlockDownloader] processing backward download of blocks", req.LogArgs()...)
+	blocksBatchSize := min(500, uint64(e.syncCfg.LoopBlockLimit))
+	opts := []p2p.BbdOption{p2p.WithBlocksBatchSize(blocksBatchSize)}
+	if req.Trigger == NewPayloadTrigger {
+		opts = append(opts, p2p.WithChainLengthLimit(e.syncCfg.MaxReorgDepth))
+		currentHeader := e.chainRW.CurrentHeader(ctx)
+		if currentHeader != nil {
+			opts = append(opts, p2p.WithChainLengthCurrentHead(currentHeader.Number.Uint64()))
 		}
-		if err := rlp.DecodeBytes(value, &h); err != nil {
+	}
+	if req.Trigger == SegmentRecoveryTrigger {
+		opts = append(opts, p2p.WithChainLengthLimit(uint64(e.syncCfg.LoopBlockLimit)))
+	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel() // need to cancel the ctx so that we cancel the download request processing if we err out prematurely
+	hr := headerReader{db: e.db, blockReader: e.blockReader}
+	feed, err := e.bbd.DownloadBlocksBackwards(ctx, req.MissingHash, hr, opts...)
+	if err != nil {
+		return err
+	}
+
+	logProgressTicker := time.NewTicker(30 * time.Second)
+	defer logProgressTicker.Stop()
+
+	var blocks []*types.Block
+	var insertedBlocksWithoutExec int
+	for blocks, err = feed.Next(ctx); err == nil && len(blocks) > 0; blocks, err = feed.Next(ctx) {
+		progressLogArgs := []any{
+			"from", blocks[0].NumberU64(),
+			"fromHash", blocks[0].Hash(),
+			"to", blocks[len(blocks)-1].NumberU64(),
+			"toHash", blocks[len(blocks)-1].Hash(),
+		}
+		select {
+		case <-logProgressTicker.C:
+			e.logger.Info("[EngineBlockDownloader] processing downloaded blocks periodic progress", progressLogArgs...)
+		default:
+			e.logger.Trace("[EngineBlockDownloader] processing downloaded blocks", progressLogArgs...)
+		}
+		err := e.chainRW.InsertBlocksAndWait(ctx, blocks)
+		if err != nil {
 			return err
 		}
-		if badChainError != nil {
-			e.ReportBadHeader(h.Hash(), lastValidHash)
-			return nil
-		}
-		lastValidHash = h.ParentHash
-		// If we are in PoW range then block validation is not required anymore.
-		if foundPow {
-			if !found {
-				found = true
-				fromBlock = h.Number.Uint64()
+		insertedBlocksWithoutExec += len(blocks)
+		if req.Trigger == FcuTrigger && uint(insertedBlocksWithoutExec) >= e.syncCfg.LoopBlockLimit {
+			tip := blocks[len(blocks)-1]
+			e.logger.Info(
+				"[EngineBlockDownloader] executing downloaded batch as it reached sync loop block limit",
+				"to", tip.NumberU64(),
+				"toHash", tip.Hash(),
+			)
+			err = e.execDownloadedBatch(ctx, tip, req.MissingHash)
+			if err != nil {
+				return err
 			}
-			toBlock = h.Number.Uint64()
-			return saveHeader(tx, &h, h.Hash())
+			insertedBlocksWithoutExec = 0
 		}
-
-		foundPow = h.Difficulty.Sign() != 0
-		if foundPow {
-			if !found {
-				found = true
-				fromBlock = h.Number.Uint64()
-			}
-			toBlock = h.Number.Uint64()
-			return saveHeader(tx, &h, h.Hash())
-		}
-		if !found {
-			found = true
-			fromBlock = h.Number.Uint64()
-		}
-		toBlock = h.Number.Uint64()
-		// Validate state if possible (bodies will be retrieved through body download)
-		return saveHeader(tx, &h, h.Hash())
 	}
-
-	err = e.hd.HeadersCollector().Load(tx, kv.Headers, headerLoadFunc, etl.TransformArgs{
-		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
-			return []interface{}{"block", binary.BigEndian.Uint64(k)}
-		},
-	})
-	return
+	return err
 }
 
-func saveHeader(db kv.RwTx, header *types.Header, hash common.Hash) error {
-	blockHeight := header.Number.Uint64()
-	// TODO(yperbasis): do we need to check if the header is already inserted (oldH)?
-	parentTd, err := rawdb.ReadTd(db, header.ParentHash, blockHeight-1)
-	if err != nil || parentTd == nil {
-		return fmt.Errorf("[saveHeader] parent's total difficulty not found with hash %x and height %d for header %x %d: %v", header.ParentHash, blockHeight-1, hash, blockHeight, err)
+func (e *EngineBlockDownloader) execDownloadedBatch(ctx context.Context, block *types.Block, requested common.Hash) error {
+	status, _, lastValidHash, err := e.chainRW.ValidateChain(ctx, block.Hash(), block.NumberU64())
+	if err != nil {
+		return err
 	}
-	td := new(big.Int).Add(parentTd, header.Difficulty)
-	if err = rawdb.WriteHeader(db, header); err != nil {
-		return fmt.Errorf("[saveHeader] failed to WriteHeader: %w", err)
+	switch status {
+	case executionproto.ExecutionStatus_BadBlock:
+		e.ReportBadHeader(block.Hash(), lastValidHash)
+		e.ReportBadHeader(requested, lastValidHash)
+		return fmt.Errorf("bad block when validating batch download: tip=%s, latestValidHash=%s", block.Hash(), lastValidHash)
+	case executionproto.ExecutionStatus_TooFarAway:
+		e.logger.Debug(
+			"[EngineBlockDownloader] skipping validation of block batch download due to exec status too far away",
+			"tip", block.Hash(),
+			"latestValidHash", lastValidHash,
+		)
+	case executionproto.ExecutionStatus_Success: // proceed to UpdateForkChoice
+	default:
+		return fmt.Errorf(
+			"unsuccessful status when validating batch download: status=%s, tip=%s, latestValidHash=%s",
+			status,
+			block.Hash(),
+			lastValidHash,
+		)
 	}
-	if err = rawdb.WriteTd(db, hash, blockHeight, td); err != nil {
-		return fmt.Errorf("[saveHeader] failed to WriteTd: %w", err)
+	fcuStatus, _, lastValidHash, err := e.chainRW.UpdateForkChoice(ctx, block.Hash(), common.Hash{}, common.Hash{}, 0)
+	if err != nil {
+		return err
 	}
-	if err = rawdb.WriteCanonicalHash(db, hash, blockHeight); err != nil {
-		return fmt.Errorf("[saveHeader] failed to save canonical hash: %w", err)
+	if fcuStatus != executionproto.ExecutionStatus_Success {
+		return fmt.Errorf(
+			"unsuccessful status when updating fork choice for batch download: status=%s, tip=%s, latestValidHash=%s",
+			fcuStatus,
+			block.Hash(),
+			lastValidHash,
+		)
 	}
 	return nil
 }

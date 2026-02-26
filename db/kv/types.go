@@ -76,5 +76,4 @@ const (
 		and so unwind doesn't need to be very performant.
 	*/
 	Unmarked
-	Buffered
 )

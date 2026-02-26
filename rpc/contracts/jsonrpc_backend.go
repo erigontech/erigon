@@ -20,9 +20,11 @@ import (
 	"context"
 	"math/big"
 
+	"github.com/holiman/uint256"
+
 	ethereum "github.com/erigontech/erigon"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/requests"
@@ -38,11 +40,11 @@ type JsonRpcBackend struct {
 	client requests.RequestGenerator
 }
 
-func (b JsonRpcBackend) CodeAt(ctx context.Context, contract common.Address, blockNum *big.Int) ([]byte, error) {
+func (b JsonRpcBackend) CodeAt(ctx context.Context, contract common.Address, blockNum *uint256.Int) ([]byte, error) {
 	return b.client.GetCode(contract, rpc.BlockReference(BlockNumArg(blockNum)))
 }
 
-func (b JsonRpcBackend) CallContract(ctx context.Context, call ethereum.CallMsg, blockNum *big.Int) ([]byte, error) {
+func (b JsonRpcBackend) CallContract(ctx context.Context, call ethereum.CallMsg, blockNum *uint256.Int) ([]byte, error) {
 	return b.client.Call(CallArgsFromCallMsg(call), rpc.BlockReference(BlockNumArg(blockNum)), nil)
 }
 

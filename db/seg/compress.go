@@ -35,10 +35,10 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dir"
-	dir2 "github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
+	dir2 "github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 )
 
@@ -74,6 +74,17 @@ type Cfg struct {
 	SamplingFactor uint64
 
 	Workers int
+
+	// arbitrary bytes set by user at start of the file
+	ExpectMetadata bool
+
+	// number of values on compressed page. if > 0 then page level compression is enabled
+	ValuesOnCompressedPage int
+}
+
+func (c Cfg) WithValuesOnCompressedPage(n int) Cfg {
+	c.ValuesOnCompressedPage = n
+	return c
 }
 
 var DefaultCfg = Cfg{
@@ -111,14 +122,30 @@ type Compressor struct {
 	// is turned into 2 bytes, 0x01 and b, and two zero bytes 0x00 0x00 are inserted after each word
 	// this is needed for using ordinary (one string) suffix sorting algorithm instead of a generalised (many superstrings) suffix
 	// sorting algorithm
-	superstring      []byte
-	wordsCount       uint64
-	superstringCount uint64
-	Ratio            CompressionRatio
-	lvl              log.Lvl
-	trace            bool
-	logger           log.Logger
-	noFsync          bool // fsync is enabled by default, but tests can manually disable
+	superstring       []byte
+	wordsCount        uint64
+	superstringCount  uint64
+	uncompressedBytes int
+	Ratio             CompressionRatio
+	lvl               log.Lvl
+	trace             bool
+	logger            log.Logger
+
+	noFsync bool // fsync is enabled by default, but tests can manually disable
+	timings Timings
+
+	version             uint8
+	featureFlagBitmask  FeatureFlagBitmask
+	compPageValuesCount uint8
+	metadata            []byte
+}
+
+type Timings struct {
+	Enabled       bool
+	AddStart      time.Time
+	AddTook       time.Duration
+	CompressStart time.Time
+	CompressTook  time.Duration
 }
 
 func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cfg Cfg, lvl log.Lvl, logger log.Logger) (*Compressor, error) {
@@ -139,14 +166,14 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cf
 	suffixCollectors := make([]*etl.Collector, workers)
 	for i := 0; i < workers; i++ {
 		collector := etl.NewCollectorWithAllocator(logPrefix+"_dict", tmpDir, etl.SmallSortableBuffers, logger) //nolint:gocritic
-		collector.SortAndFlushInBackground(true)
+		collector.SortAndFlushInBackground(false)
 		collector.LogLvl(lvl)
 
 		suffixCollectors[i] = collector
 		go extractPatternsInSuperstrings(ctx, superstrings, collector, cfg, wg, logger)
 	}
 	_, outputFileName := filepath.Split(outputFile)
-	return &Compressor{
+	cc := &Compressor{
 		Cfg:              cfg,
 		uncompressedFile: uncompressedFile,
 		outputFile:       outputFile,
@@ -159,7 +186,15 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cf
 		lvl:              lvl,
 		wg:               wg,
 		logger:           logger,
-	}, nil
+		version:          FileCompressionFormatV1,
+	}
+
+	if cfg.ValuesOnCompressedPage > 0 {
+		cc.featureFlagBitmask.Set(PageLevelCompressionEnabled)
+		cc.compPageValuesCount = uint8(cfg.ValuesOnCompressedPage)
+	}
+
+	return cc, nil
 }
 
 func (c *Compressor) Close() {
@@ -170,11 +205,44 @@ func (c *Compressor) Close() {
 	c.suffixCollectors = nil
 }
 
-func (c *Compressor) SetTrace(trace bool) { c.trace = trace }
-func (c *Compressor) FileName() string    { return c.outputFileName }
-func (c *Compressor) WorkersAmount() int  { return c.Workers }
+func (c *Compressor) SetTrace(trace bool)            { c.trace = trace }
+func (c *Compressor) FileName() string               { return c.outputFileName }
+func (c *Compressor) WorkersAmount() int             { return c.Workers }
+func (c *Compressor) GetValuesOnCompressedPage() int { return int(c.ValuesOnCompressedPage) }
+func (c *Compressor) SetMetadata(metadata []byte) {
+	if !c.ExpectMetadata {
+		panic("metadata not expected in compressor")
+	}
+	c.metadata = metadata
+}
 
 func (c *Compressor) Count() int { return int(c.wordsCount) }
+
+// Erigon doesn't create tons of bufio readers/writers, but it has tons of
+// parallel small unit-tests which each create many small files and bufio
+// readers/writers — pooling avoids the allocation pressure in that scenario.
+var (
+	bufioWriterPool = sync.Pool{New: func() any { return bufio.NewWriterSize(nil, int(128*datasize.KB)) }}
+	bufioReaderPool = sync.Pool{New: func() any { return bufio.NewReaderSize(nil, int(128*datasize.KB)) }}
+)
+
+func getBufioWriter(w io.Writer) *bufio.Writer {
+	bw := bufioWriterPool.Get().(*bufio.Writer)
+	bw.Reset(w)
+	return bw
+}
+
+// Reset(nil) before Put is required: without it the pool entry retains a
+// reference to the underlying io.Writer/io.Reader, keeping it alive until the
+// next GC cycle or until the entry is reused — whichever comes first.
+func putBufioWriter(w *bufio.Writer) { w.Reset(nil); bufioWriterPool.Put(w) }
+
+func getBufioReader(r io.Reader) *bufio.Reader {
+	br := bufioReaderPool.Get().(*bufio.Reader)
+	br.Reset(r)
+	return br
+}
+func putBufioReader(r *bufio.Reader) { r.Reset(nil); bufioReaderPool.Put(r) }
 
 func (c *Compressor) ReadFrom(g *Getter) error {
 	var v []byte
@@ -215,6 +283,7 @@ func (c *Compressor) AddWord(word []byte) error {
 		c.superstring = append(c.superstring, 0, 0)
 	}
 
+	c.uncompressedBytes += len(word)
 	return c.uncompressedFile.Append(word)
 }
 
@@ -228,6 +297,7 @@ func (c *Compressor) AddUncompressedWord(word []byte) error {
 		}
 	}
 
+	c.uncompressedBytes += len(word)
 	return c.uncompressedFile.AppendUncompressed(word)
 }
 
@@ -235,28 +305,23 @@ func (c *Compressor) Compress() error {
 	if err := c.uncompressedFile.Flush(); err != nil {
 		return err
 	}
+	if c.timings.Enabled {
+		c.timings.AddTook = time.Since(c.timings.AddStart) // assume Adding data into compressor complete
+		c.timings.CompressStart = time.Now()
+		defer func() { c.timings.CompressTook = time.Since(c.timings.CompressStart) }()
+	}
 
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
+	// Detect the fast path before sending the last superstring: if no superstrings were
+	// ever produced (neither overflow nor the current partial one), then no words were
+	// submitted for word-level compression, so the pattern dictionary will always be empty.
+	noWordPatterns := c.superstringCount == 0 && len(c.superstring) == 0
 	if len(c.superstring) > 0 {
 		c.superstrings <- c.superstring
 	}
 	close(c.superstrings)
 	c.wg.Wait()
-
-	if c.lvl < log.LvlTrace {
-		c.logger.Log(c.lvl, fmt.Sprintf("[%s] BuildDict start", c.logPrefix), "workers", c.Workers)
-	}
-	db, err := DictionaryBuilderFromCollectors(c.ctx, c.Cfg, c.logPrefix, c.tmpDir, c.suffixCollectors, c.lvl, c.logger)
-	if err != nil {
-		return err
-	}
-	if c.trace {
-		_, fileName := filepath.Split(c.outputFile)
-		if err := PersistDictionary(filepath.Join(c.tmpDir, fileName)+".dictionary.txt", db); err != nil {
-			return err
-		}
-	}
 
 	cf, err := dir.CreateTemp(c.outputFile)
 	if err != nil {
@@ -265,9 +330,60 @@ func (c *Compressor) Compress() error {
 	tmpFileName := cf.Name()
 	defer dir.RemoveFile(tmpFileName)
 	defer cf.Close()
+
+	if c.version == FileCompressionFormatV1 {
+		if _, err := cf.Write([]byte{c.version, byte(c.featureFlagBitmask)}); err != nil {
+			return err
+		}
+
+		if c.featureFlagBitmask.Has(PageLevelCompressionEnabled) {
+			if _, err := cf.Write([]byte{c.compPageValuesCount}); err != nil {
+				return err
+			}
+		}
+	}
+
+	if c.ExpectMetadata {
+		dataLen := uint32(len(c.metadata))
+		var dataLenB [4]byte
+		binary.BigEndian.PutUint32(dataLenB[:], dataLen)
+		if _, err := cf.Write(dataLenB[:]); err != nil {
+			return err
+		}
+		if _, err := cf.Write(c.metadata); err != nil {
+			return err
+		}
+	}
+
 	t := time.Now()
-	if err := compressWithPatternCandidates(c.ctx, c.trace, c.Cfg, c.logPrefix, tmpFileName, cf, c.uncompressedFile, db, c.lvl, c.logger); err != nil {
-		return err
+	if noWordPatterns {
+		// Fast path: no words were fed to the pattern-dictionary pipeline (e.g. history .v
+		// files with CompressNone). Skip dictionary building and the intermediate file entirely.
+		for _, coll := range c.suffixCollectors {
+			coll.Close()
+		}
+		c.suffixCollectors = nil
+		if err = compressNoWordPatterns(c.logPrefix, cf, c.uncompressedFile, c.lvl, c.logger); err != nil {
+			return err
+		}
+	} else {
+		if c.lvl < log.LvlTrace {
+			c.logger.Log(c.lvl, fmt.Sprintf("[%s] BuildDict start", c.logPrefix), "workers", c.Workers)
+		}
+		var db *DictionaryBuilder
+		db, err = DictionaryBuilderFromCollectors(c.ctx, c.Cfg, c.logPrefix, c.tmpDir, c.suffixCollectors, c.lvl, c.logger)
+		if err != nil {
+			return err
+		}
+		if c.trace {
+			_, fileName := filepath.Split(c.outputFile)
+			if err := PersistDictionary(filepath.Join(c.tmpDir, fileName)+".dictionary.txt", db); err != nil {
+				return err
+			}
+		}
+		if err = compressWithPatternCandidates(c.ctx, c.trace, c.Cfg, c.logPrefix, tmpFileName, cf, c.uncompressedFile, db, c.lvl, c.logger); err != nil {
+			return err
+		}
 	}
 	if err = c.fsync(cf); err != nil {
 		return err
@@ -279,9 +395,13 @@ func (c *Compressor) Compress() error {
 		return fmt.Errorf("renaming: %w", err)
 	}
 
-	c.Ratio, err = Ratio(c.uncompressedFile.filePath, c.outputFile)
+	var outputStat os.FileInfo
+	outputStat, err = os.Stat(c.outputFile)
 	if err != nil {
 		return fmt.Errorf("ratio: %w", err)
+	}
+	if outputStat.Size() > 0 {
+		c.Ratio = CompressionRatio(float64(c.uncompressedBytes) / float64(outputStat.Size()))
 	}
 
 	_, fName := filepath.Split(c.outputFile)
@@ -291,7 +411,12 @@ func (c *Compressor) Compress() error {
 	return nil
 }
 
-func (c *Compressor) DisableFsync() { c.noFsync = true }
+func (c *Compressor) DisableFsync()    { c.noFsync = true }
+func (c *Compressor) Timings() Timings { return c.timings }
+
+func (c *Compressor) CollectTimings() {
+	c.timings.Enabled, c.timings.AddStart = true, time.Now() // assume Adding data into compressor starting
+}
 
 // fsync - other processes/goroutines must see only "fully-complete" (valid) files. No partial-writes.
 // To achieve it: write to .tmp file then `rename` when file is ready.
@@ -344,11 +469,11 @@ func (db *DictionaryBuilder) Swap(i, j int) {
 }
 func (db *DictionaryBuilder) Sort() { slices.SortFunc(db.items, dictionaryBuilderCmp) }
 
-func (db *DictionaryBuilder) Push(x interface{}) {
+func (db *DictionaryBuilder) Push(x any) {
 	db.items = append(db.items, x.(*Pattern))
 }
 
-func (db *DictionaryBuilder) Pop() interface{} {
+func (db *DictionaryBuilder) Pop() any {
 	old := db.items
 	n := len(old)
 	x := old[n-1]
@@ -372,7 +497,6 @@ func (db *DictionaryBuilder) processWord(chars []byte, score uint64) {
 	elem.word = append(elem.word[:0], chars...)
 	elem.score = score
 	heap.Push(db, elem)
-	return
 }
 
 func (db *DictionaryBuilder) loadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
@@ -519,11 +643,11 @@ func (ph *PatternHeap) Swap(i, j int) {
 	(*ph)[i], (*ph)[j] = (*ph)[j], (*ph)[i]
 }
 
-func (ph *PatternHeap) Push(x interface{}) {
+func (ph *PatternHeap) Push(x any) {
 	*ph = append(*ph, x.(*PatternHuff))
 }
 
-func (ph *PatternHeap) Pop() interface{} {
+func (ph *PatternHeap) Pop() any {
 	old := *ph
 	n := len(old)
 	x := old[n-1]
@@ -630,11 +754,11 @@ func (ph *PositionHeap) Swap(i, j int) {
 	(*ph)[i], (*ph)[j] = (*ph)[j], (*ph)[i]
 }
 
-func (ph *PositionHeap) Push(x interface{}) {
+func (ph *PositionHeap) Push(x any) {
 	*ph = append(*ph, x.(*PositionHuff))
 }
 
-func (ph *PositionHeap) Pop() interface{} {
+func (ph *PositionHeap) Pop() any {
 	old := *ph
 	n := len(old)
 	x := old[n-1]
@@ -819,19 +943,9 @@ type CompressionRatio float64
 
 func (r CompressionRatio) String() string { return fmt.Sprintf("%.2f", r) }
 
-func Ratio(f1, f2 string) (CompressionRatio, error) {
-	s1, err := os.Stat(f1)
-	if err != nil {
-		return 0, err
-	}
-	s2, err := os.Stat(f2)
-	if err != nil {
-		return 0, err
-	}
-	return CompressionRatio(float64(s1.Size()) / float64(s2.Size())), nil
-}
-
 // RawWordsFile - .idt file format - simple format for temporary data store
+// PerfCritical: Used to speedup foreground processes by moving heavy compression to background
+// or outside of critical sections (e.g., outside of database.RoTx)
 type RawWordsFile struct {
 	f        *os.File
 	w        *bufio.Writer
@@ -845,23 +959,26 @@ func NewRawWordsFile(filePath string) (*RawWordsFile, error) {
 	if err != nil {
 		return nil, err
 	}
-	w := bufio.NewWriterSize(f, 2*etl.BufIOSize)
-	return &RawWordsFile{filePath: filePath, f: f, w: w, buf: make([]byte, 128)}, nil
+	return &RawWordsFile{filePath: filePath, f: f, w: getBufioWriter(f), buf: make([]byte, 128)}, nil
 }
 func OpenRawWordsFile(filePath string) (*RawWordsFile, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
 	}
-	w := bufio.NewWriterSize(f, 2*etl.BufIOSize)
-	return &RawWordsFile{filePath: filePath, f: f, w: w, buf: make([]byte, 128)}, nil
+	return &RawWordsFile{filePath: filePath, f: f, w: getBufioWriter(f), buf: make([]byte, 128)}, nil
 }
 func (f *RawWordsFile) Flush() error {
 	return f.w.Flush()
 }
 func (f *RawWordsFile) Close() {
-	f.w.Flush()
-	f.f.Close()
+	if f.w != nil {
+		f.w.Flush()
+		f.f.Close()
+		putBufioWriter(f.w)
+		f.w = nil
+		f.f = nil
+	}
 }
 func (f *RawWordsFile) CloseAndRemove() {
 	f.Close()
@@ -896,14 +1013,14 @@ func (f *RawWordsFile) AppendUncompressed(v []byte) error {
 	return nil
 }
 
-// ForEach - Read keys from the file and generate superstring (with extra byte 0x1 prepended to each character, and with 0x0 0x0 pair inserted between keys and values)
-// We only consider values with length > 2, because smaller values are not compressible without going into bits
+// ForEach reads words from the file and calls walker for each one.
 func (f *RawWordsFile) ForEach(walker func(v []byte, compressed bool) error) error {
 	_, err := f.f.Seek(0, 0)
 	if err != nil {
 		return err
 	}
-	r := bufio.NewReaderSize(f.f, int(8*datasize.MB))
+	r := getBufioReader(f.f)
+	defer putBufioReader(r)
 	buf := make([]byte, 16*1024)
 	l, e := binary.ReadUvarint(r)
 	for ; e == nil; l, e = binary.ReadUvarint(r) {

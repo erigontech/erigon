@@ -20,20 +20,21 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/eth/ethutils"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/types/ethutils"
+	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
-func (api *OtterscanAPIImpl) searchTraceBlock(ctx context.Context, addr common.Address, chainConfig *chain.Config, idx int, bNum uint64, results []*TransactionsWithReceipts) {
+func (api *OtterscanAPIImpl) searchTraceBlock(ctx context.Context, addr common.Address, chainConfig *chain.Config, idx int, blockNumber uint64, results []*TransactionsWithReceipts) {
 	// Trace block for Txs
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -43,7 +44,12 @@ func (api *OtterscanAPIImpl) searchTraceBlock(ctx context.Context, addr common.A
 	}
 	defer tx.Rollback()
 
-	_, result, err := api.traceBlock(tx, ctx, bNum, addr, chainConfig)
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	if err != nil {
+		return
+	}
+
+	_, result, err := api.traceBlock(tx, ctx, blockNumber, addr, chainConfig)
 	if err != nil {
 		log.Error("Search trace error", "err", err)
 		results[idx] = nil
@@ -54,7 +60,7 @@ func (api *OtterscanAPIImpl) searchTraceBlock(ctx context.Context, addr common.A
 
 func (api *OtterscanAPIImpl) traceBlock(dbtx kv.TemporalTx, ctx context.Context, blockNum uint64, searchAddr common.Address, chainConfig *chain.Config) (bool, *TransactionsWithReceipts, error) {
 	rpcTxs := make([]*ethapi.RPCTransaction, 0)
-	receipts := make([]map[string]interface{}, 0)
+	receipts := make([]map[string]any, 0)
 
 	// Retrieve the transaction and assemble its EVM context
 	blockHash, ok, err := api._blockReader.CanonicalHash(ctx, dbtx, blockNum)
@@ -73,7 +79,12 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.TemporalTx, ctx context.Context,
 		return false, nil, nil
 	}
 
-	reader, err := rpchelper.CreateHistoryStateReader(dbtx, blockNum, 0, api._txNumReader)
+	err = rpchelper.CheckBlockExecuted(dbtx, blockNum)
+	if err != nil {
+		return false, nil, err
+	}
+
+	reader, err := rpchelper.CreateHistoryStateReader(ctx, dbtx, blockNum, 0, api._txNumReader)
 	if err != nil {
 		return false, nil, err
 	}
@@ -97,7 +108,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.TemporalTx, ctx context.Context,
 		return false, nil, err
 	}
 	header := block.Header()
-	blockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil, chainConfig)
+	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, getHeader), engine, accounts.NilAddress, chainConfig)
 	rules := blockContext.Rules(chainConfig)
 	found := false
 	for idx, txn := range block.Transactions() {
@@ -110,9 +121,9 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.TemporalTx, ctx context.Context,
 
 		msg, _ := txn.AsMessage(*signer, header.BaseFee, rules)
 
-		tracer := NewTouchTracer(searchAddr)
+		tracer := NewTouchTracer(accounts.InternAddress(searchAddr))
 		ibs.SetHooks(tracer.TracingHooks())
-		txContext := core.NewEVMTxContext(msg)
+		txContext := protocol.NewEVMTxContext(msg)
 
 		vmenv := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vm.Config{Tracer: tracer.TracingHooks()})
 		// FIXME (tracing): Geth has a new method ApplyEVMMessage or something like this that does the OnTxStart/OnTxEnd wrapping, let's port it too
@@ -120,7 +131,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.TemporalTx, ctx context.Context,
 			tracer.TracingHooks().OnTxStart(vmenv.GetVMContext(), txn, msg.From())
 		}
 
-		res, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(txn.GetGasLimit()).AddBlobGas(txn.GetBlobGas()), true /* refunds */, false /* gasBailout */, engine)
+		res, err := protocol.ApplyMessage(vmenv, msg, new(protocol.GasPool).AddGas(txn.GetGasLimit()).AddBlobGas(txn.GetBlobGas()), true /* refunds */, false /* gasBailout */, engine)
 		if err != nil {
 			if tracer != nil && tracer.TracingHooks().OnTxEnd != nil {
 				tracer.TracingHooks().OnTxEnd(nil, err)
@@ -129,7 +140,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.TemporalTx, ctx context.Context,
 		}
 
 		if tracer != nil && tracer.TracingHooks().OnTxEnd != nil {
-			tracer.TracingHooks().OnTxEnd(&types.Receipt{GasUsed: res.GasUsed}, nil)
+			tracer.TracingHooks().OnTxEnd(&types.Receipt{GasUsed: res.ReceiptGasUsed}, nil)
 		}
 		_ = ibs.FinalizeTx(rules, cachedWriter)
 
@@ -142,7 +153,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.TemporalTx, ctx context.Context,
 				}
 				return false, nil, fmt.Errorf("requested receipt idx %d, but have only %d", idx, len(blockReceipts)) // otherwise return some error for debugging
 			}
-			rpcTx := ethapi.NewRPCTransaction(txn, block.Hash(), blockNum, uint64(idx), block.BaseFee())
+			rpcTx := ethapi.NewRPCTransaction(txn, block.Hash(), block.Time(), blockNum, uint64(idx), block.BaseFee())
 			mReceipt := ethutils.MarshalReceipt(blockReceipts[idx], txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true, false)
 			mReceipt["timestamp"] = block.Time()
 			rpcTxs = append(rpcTxs, rpcTx)

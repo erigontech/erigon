@@ -26,10 +26,26 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common"
-
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
 )
+
+// noopPatriciaContext is a mock PatriciaContext for testing warmup.
+type noopPatriciaContext struct{}
+
+func (n *noopPatriciaContext) Branch(prefix []byte) ([]byte, kv.Step, error) { return nil, 0, nil }
+func (n *noopPatriciaContext) PutBranch(prefix, data, prevData []byte) error {
+	return nil
+}
+func (n *noopPatriciaContext) Account(plainKey []byte) (*Update, error) { return nil, nil }
+func (n *noopPatriciaContext) Storage(plainKey []byte) (*Update, error) { return nil, nil }
+func (n *noopPatriciaContext) TxNum() uint64                            { return 0 }
+
+func noopCtxFactory() (PatriciaContext, func()) {
+	return &noopPatriciaContext{}, nil
+}
 
 func generateCellRow(tb testing.TB, size int) (row []*cell, bitmap uint16) {
 	tb.Helper()
@@ -41,21 +57,21 @@ func generateCellRow(tb testing.TB, size int) (row []*cell, bitmap uint16) {
 		row[i].hashLen = 32
 		n, err := rand.Read(row[i].hash[:])
 		require.NoError(tb, err)
-		require.Equal(tb, row[i].hashLen, n)
+		require.Equal(tb, int(row[i].hashLen), n)
 
 		th := rand.Intn(120)
 		switch {
 		case th > 70:
 			n, err = rand.Read(row[i].accountAddr[:])
 			require.NoError(tb, err)
-			row[i].accountAddrLen = n
+			row[i].accountAddrLen = int16(n)
 		case th > 20 && th <= 70:
 			n, err = rand.Read(row[i].storageAddr[:])
 			require.NoError(tb, err)
-			row[i].storageAddrLen = n
+			row[i].storageAddrLen = int16(n)
 		case th <= 20:
 			n, err = rand.Read(row[i].extension[:th])
-			row[i].extLen = n
+			row[i].extLen = int16(n)
 			require.NoError(tb, err)
 			require.Equal(tb, th, n)
 		}
@@ -378,9 +394,20 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 	sz = utDirect.Size()
 	require.EqualValues(t, len(uniqUpds), sz)
 
+	ctx := context.Background()
+	cfg := WarmupConfig{
+		Enabled:    true,
+		CtxFactory: noopCtxFactory,
+		NumWorkers: 2,
+		MaxDepth:   64,
+		LogPrefix:  "test",
+	}
+	warmuper := NewWarmuper(ctx, cfg)
+	warmuper.Start()
+
 	i := 0
 	// keyHasherNoop is used so ordering is going by plainKey
-	err := utUpdate.HashSort(context.Background(), func(hk, pk []byte, upd *Update) error {
+	err := utUpdate.HashSort(ctx, warmuper, func(hk, pk []byte, upd *Update) error {
 		require.Equal(t, sortedUniqUpds[i].key, pk)
 		require.Equal(t, sortedUniqUpds[i].val, upd.Storage[:upd.StorageLen])
 		i++
@@ -389,12 +416,29 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, len(uniqUpds), i)
 
+	err = warmuper.Wait()
+	require.NoError(t, err)
+
+	// Create a new warmuper for the second test
+	cfg2 := WarmupConfig{
+		Enabled:    true,
+		CtxFactory: noopCtxFactory,
+		NumWorkers: 2,
+		MaxDepth:   64,
+		LogPrefix:  "test",
+	}
+	warmuper2 := NewWarmuper(ctx, cfg2)
+	warmuper2.Start()
+
 	i = 0
-	err = utDirect.HashSort(context.Background(), func(hk, pk []byte, _ *Update) error {
+	err = utDirect.HashSort(ctx, warmuper2, func(hk, pk []byte, _ *Update) error {
 		require.Equal(t, sortedUniqUpds[i].key, pk)
 		i++
 		return nil
 	})
 	require.NoError(t, err)
 	require.Equal(t, len(uniqUpds), i)
+
+	err = warmuper2.Wait()
+	require.NoError(t, err)
 }

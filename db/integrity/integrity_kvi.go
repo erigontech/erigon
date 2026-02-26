@@ -1,0 +1,203 @@
+// Copyright 2025 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package integrity
+
+import (
+	"bytes"
+	"context"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon/common/estimate"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/recsplit"
+	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
+)
+
+// ErrIntegrity is useful to differentiate integrity errors from program errors.
+var ErrIntegrity = errors.New("integrity error")
+
+// CheckKvis checks all kvi index files for a domain sequentially (one file at a time),
+// parallelizing the lookup work inside each file.
+func CheckKvis(ctx context.Context, tx kv.TemporalTx, domain kv.Domain, failFast bool, logger log.Logger) error {
+	start := time.Now()
+	aggTx := state.AggTx(tx)
+	files := aggTx.Files(domain)
+	kvCompression := statecfg.Schema.GetDomainCfg(domain).Compression
+	var keyCount uint64
+	for _, file := range files {
+		if !strings.HasSuffix(file.Fullpath(), ".kv") {
+			continue
+		}
+		kvPath := file.Fullpath()
+		kviPath := kvPath + "i"
+		var err error
+		kviPath, err = version.ReplaceVersionWithMask(kviPath)
+		if err != nil {
+			return err
+		}
+		var ok bool
+		kviPath, _, ok, err = version.FindFilesWithVersionsByPattern(kviPath)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("kvi not found for %s", kvPath)
+		}
+		keys, err := CheckKvi(ctx, kviPath, kvPath, kvCompression, failFast, logger)
+		keyCount += keys
+		if err != nil {
+			if failFast {
+				return err
+			}
+			logger.Warn(err.Error())
+		}
+	}
+	logger.Info("checked kvi files in", "dur", time.Since(start), "files", len(files), "keys", keyCount)
+	return nil
+}
+
+type kviWorkItem struct {
+	key    []byte
+	offset uint64
+}
+
+func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression seg.FileCompression, failFast bool, logger log.Logger) (uint64, error) {
+	kviFileName := filepath.Base(kviPath)
+	kvFileName := filepath.Base(kvPath)
+	logger.Info("[integrity] checking kvi", "kvi", kviFileName, "kv", kvFileName)
+	start := time.Now()
+	kvi, err := recsplit.OpenIndex(kviPath)
+	if err != nil {
+		return 0, err
+	}
+	defer kvi.Close()
+	kvDecompressor, err := seg.NewDecompressor(kvPath)
+	if err != nil {
+		return 0, err
+	}
+	defer kvDecompressor.Close()
+	kvReader := seg.NewReader(kvDecompressor.MakeGetter(), kvCompression)
+
+	var firstErr error
+	if kvKeyCount := uint64(kvReader.Count()) / 2; kvKeyCount != kvi.KeyCount() {
+		err = fmt.Errorf("kv key count %d != kvi key count %d in %s", kvKeyCount, kvi.KeyCount(), kviFileName)
+		if failFast {
+			return 0, err
+		}
+		logger.Warn(err.Error())
+		firstErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
+	}
+
+	trace := logger.Enabled(ctx, log.LvlTrace)
+	checkOne := func(kviReader *recsplit.IndexReader, work kviWorkItem) error {
+		if trace {
+			logger.Trace("[integrity] checking kvi for", "key", hex.EncodeToString(work.key), "offset", work.offset, "kvi", kviFileName)
+		}
+		kviOffset, found := kviReader.Lookup(work.key)
+		if !found {
+			return fmt.Errorf("%w: key %x not found in %s", ErrIntegrity, work.key, kviFileName)
+		}
+		if kviOffset != work.offset {
+			return fmt.Errorf("%w: key %x offset mismatch %d != %d in %s", ErrIntegrity, work.key, work.offset, kviOffset, kviFileName)
+		}
+		return nil
+	}
+
+	var keyCount uint64
+	eg, ctx := errgroup.WithContext(ctx)
+	numWorkers := estimate.AlmostAllCPUs()
+	workCh := make(chan kviWorkItem, numWorkers*4)
+
+	for range numWorkers {
+		eg.Go(func() error {
+			kviReader := kvi.GetReaderFromPool()
+			defer kviReader.Close()
+			for {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case work, ok := <-workCh:
+					if !ok {
+						return nil
+					}
+					if err := checkOne(kviReader, work); err != nil {
+						if !failFast {
+							logger.Warn(err.Error())
+						}
+						return err
+					}
+				}
+			}
+		})
+	}
+
+	// Producer: scan kv file sequentially, emit (key, offset) pairs to workers.
+	eg.Go(func() error {
+		defer close(workCh)
+		logTicker := time.NewTicker(30 * time.Second)
+		defer logTicker.Stop()
+		var keyBuf []byte
+		var keyOffset uint64
+		var atValue bool
+		for kvReader.HasNext() {
+			if atValue {
+				keyOffset, _ = kvReader.Skip()
+				atValue = false
+				continue
+			}
+			keyBuf, _ = kvReader.Next(keyBuf[:0])
+			keyCount++
+			atValue = true
+
+			select {
+			case <-ctx.Done():
+				return nil
+			case workCh <- kviWorkItem{key: bytes.Clone(keyBuf), offset: keyOffset}:
+			}
+
+			select {
+			case <-logTicker.C:
+				at := fmt.Sprintf("%d/%d", keyCount, kvi.KeyCount())
+				percent := fmt.Sprintf("%.1f%%", float64(keyCount)/float64(kvi.KeyCount())*100)
+				rate := float64(keyCount) / time.Since(start).Seconds()
+				eta := time.Duration(float64(kvi.KeyCount()-keyCount)/rate) * time.Second
+				logger.Info("[integrity] kvi progress", "at", at, "p", percent, "k/s", rate, "eta", eta, "kvi", kviFileName)
+			default:
+			}
+		}
+		return nil
+	})
+
+	if err := eg.Wait(); err != nil {
+		return keyCount, err
+	}
+	duration := time.Since(start)
+	rate := float64(keyCount) / duration.Seconds()
+	logger.Info("checked kvi in", "dur", duration, "keys", keyCount, "k/s", rate, "kvi", kviFileName, "kv", kvFileName)
+	return keyCount, firstErr
+}

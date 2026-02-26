@@ -21,11 +21,12 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
@@ -194,7 +195,7 @@ func TestMessageSenderSendNewBlockHashesErrPeerNotFound(t *testing.T) {
 func TestMessageSenderSendNewBlock(t *testing.T) {
 	ctx := context.Background()
 	ctrl := gomock.NewController(t)
-	header := &types.Header{Number: big.NewInt(123)}
+	header := &types.Header{Number: *uint256.NewInt(123)}
 	sentryClient := direct.NewMockSentryClient(ctrl)
 	sentryClient.EXPECT().
 		SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).
@@ -225,7 +226,7 @@ func TestMessageSenderSendNewBlock(t *testing.T) {
 func TestMessageSenderSendNewBlockErrPeerNotFound(t *testing.T) {
 	ctx := context.Background()
 	ctrl := gomock.NewController(t)
-	header := &types.Header{Number: big.NewInt(123)}
+	header := &types.Header{Number: *uint256.NewInt(123)}
 	sentryClient := direct.NewMockSentryClient(ctrl)
 	sentryClient.EXPECT().
 		SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).

@@ -28,17 +28,22 @@ import (
 	"math/bits"
 	"os"
 	"path/filepath"
+	"sync"
+	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/spaolacci/murmur3"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/assert"
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/assert"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/datastruct/fusefilter"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano16"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
+	"github.com/erigontech/erigon/db/version"
 )
 
 var ErrCollision = errors.New("duplicate key")
@@ -68,7 +73,7 @@ func remix(z uint64) uint64 {
 type RecSplit struct {
 	// v=0 falsePositeves=true - as array of hashedKeys[0]. Requires `enum=true`. Problem: requires key number - which recsplit has but expensive to encode (~5bytes/key)
 	// v=1 falsePositeves=true - as fuse filter (%9 bits/key). Doesn't require `enum=true`
-	version uint8
+	dataStructureVersion version.DataStructureVersion
 
 	//v0 fields
 	existenceFV0 *os.File
@@ -77,7 +82,8 @@ type RecSplit struct {
 	//v1 fields
 	existenceFV1 *fusefilter.WriterOffHeap
 
-	offsetCollector *etl.Collector // Collector that sorts by offsets
+	offsetFile   *os.File      // Temp file for offsets (already sorted, no need for etl.Collector)
+	offsetWriter *bufio.Writer // Buffered writer for offset file
 
 	indexW          *bufio.Writer
 	indexF          *os.File
@@ -126,6 +132,9 @@ type RecSplit struct {
 	logger             log.Logger
 
 	noFsync bool // fsync is enabled by default, but tests can manually disable
+	timings Timings
+
+	unaryBuf []uint64 // `recsplit` func returning `unary` array. re-using it between buckets
 }
 
 type RecSplitArgs struct {
@@ -146,6 +155,14 @@ type RecSplitArgs struct {
 	LeafSize   uint16
 
 	NoFsync bool // fsync is enabled by default, but tests can manually disable
+}
+
+type Timings struct {
+	Enabled    bool
+	AddStart   time.Time
+	AddTook    time.Duration
+	BuildStart time.Time
+	BuildTook  time.Duration
 }
 
 // DefaultLeafSize - LeafSize=8 and BucketSize=100, use about 1.8 bits per key. Increasing the leaf and bucket
@@ -169,8 +186,8 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	}
 	bucketCount := (args.KeyCount + args.BucketSize - 1) / args.BucketSize
 	rs := &RecSplit{
-		version:    args.Version,
-		bucketSize: args.BucketSize, keyExpectedCount: uint64(args.KeyCount), bucketCount: uint64(bucketCount),
+		dataStructureVersion: version.DataStructureVersion(args.Version),
+		bucketSize:           args.BucketSize, keyExpectedCount: uint64(args.KeyCount), bucketCount: uint64(bucketCount),
 		tmpDir: args.TmpDir, filePath: args.IndexFile,
 		enums:              args.Enums,
 		baseDataID:         args.BaseDataID,
@@ -196,25 +213,27 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 		rs.salt = *args.Salt
 	}
 	rs.bucketCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.SmallSortableBuffers, logger)
-	rs.bucketCollector.SortAndFlushInBackground(true)
+	rs.bucketCollector.SortAndFlushInBackground(false)
 	rs.bucketCollector.LogLvl(log.LvlDebug)
-	if args.Enums {
-		rs.offsetCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.SmallSortableBuffers, logger)
-		rs.bucketCollector.SortAndFlushInBackground(true)
-		rs.offsetCollector.LogLvl(log.LvlDebug)
-	}
 	var err error
+	if args.Enums {
+		rs.offsetFile, err = os.CreateTemp(rs.tmpDir, "recsplit-offsets-")
+		if err != nil {
+			return nil, err
+		}
+		rs.offsetWriter = getBufioWriter(rs.offsetFile)
+	}
 	if rs.enums && args.KeyCount > 0 && rs.lessFalsePositives {
-		if rs.version == 0 {
+		if rs.dataStructureVersion == 0 {
 			rs.existenceFV0, err = os.CreateTemp(rs.tmpDir, "erigon-lfp-buf-")
 			if err != nil {
 				return nil, err
 			}
-			rs.existenceWV0 = bufio.NewWriter(rs.existenceFV0)
+			rs.existenceWV0 = getBufioWriter(rs.existenceFV0)
 		}
 
 	}
-	if args.KeyCount > 0 && rs.lessFalsePositives && rs.version >= 1 {
+	if args.KeyCount > 0 && rs.lessFalsePositives && rs.dataStructureVersion >= 1 {
 		rs.existenceFV1, err = fusefilter.NewWriterOffHeap(rs.filePath)
 		if err != nil {
 			return nil, err
@@ -243,19 +262,23 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	return rs, nil
 }
 
-func (rs *RecSplit) FileName() string    { return rs.fileName }
-func (rs *RecSplit) MajorVersion() uint8 { return rs.version }
-func (rs *RecSplit) Salt() uint32        { return rs.salt }
+func (rs *RecSplit) FileName() string                           { return rs.fileName }
+func (rs *RecSplit) MajorVersion() version.DataStructureVersion { return rs.dataStructureVersion }
+func (rs *RecSplit) Salt() uint32                               { return rs.salt }
 func (rs *RecSplit) Close() {
 	if rs.indexF != nil {
-		rs.indexF.Close()
+		_ = rs.indexF.Close()
 		_ = dir.RemoveFile(rs.indexF.Name())
 		rs.indexF = nil
 	}
 	if rs.existenceFV0 != nil {
-		rs.existenceFV0.Close()
+		_ = rs.existenceFV0.Close()
 		_ = dir.RemoveFile(rs.existenceFV0.Name())
 		rs.existenceFV0 = nil
+	}
+	if rs.existenceWV0 != nil {
+		putBufioWriter(rs.existenceWV0)
+		rs.existenceWV0 = nil
 	}
 	if rs.existenceFV1 != nil {
 		rs.existenceFV1.Close()
@@ -264,8 +287,14 @@ func (rs *RecSplit) Close() {
 	if rs.bucketCollector != nil {
 		rs.bucketCollector.Close()
 	}
-	if rs.offsetCollector != nil {
-		rs.offsetCollector.Close()
+	if rs.offsetFile != nil {
+		_ = rs.offsetFile.Close()
+		_ = dir.RemoveFile(rs.offsetFile.Name())
+		rs.offsetFile = nil
+	}
+	if rs.offsetWriter != nil {
+		putBufioWriter(rs.offsetWriter)
+		rs.offsetWriter = nil
 	}
 }
 
@@ -301,13 +330,12 @@ func (rs *RecSplit) ResetNextSalt() {
 		rs.bucketCollector.Close()
 	}
 	rs.bucketCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+rs.fileName, rs.tmpDir, etl.SmallSortableBuffers, rs.logger)
-	rs.bucketCollector.SortAndFlushInBackground(true)
+	rs.bucketCollector.SortAndFlushInBackground(false)
 	rs.bucketCollector.LogLvl(log.LvlDebug)
-	if rs.offsetCollector != nil {
-		rs.offsetCollector.Close()
-		rs.offsetCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+rs.fileName, rs.tmpDir, etl.SmallSortableBuffers, rs.logger)
-		rs.offsetCollector.SortAndFlushInBackground(true)
-		rs.bucketCollector.LogLvl(log.LvlDebug)
+	if rs.offsetFile != nil {
+		_ = rs.offsetFile.Truncate(0)
+		_, _ = rs.offsetFile.Seek(0, 0)
+		rs.offsetWriter.Reset(rs.offsetFile)
 	}
 	rs.currentBucket = rs.currentBucket[:0]
 	rs.currentBucketOffs = rs.currentBucketOffs[:0]
@@ -407,7 +435,10 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 	}
 
 	if rs.enums {
-		if err := rs.offsetCollector.Collect(rs.numBuf[:], nil); err != nil {
+		if rs.keysAdded > 0 && offset < rs.prevOffset {
+			panic(fmt.Sprintf("recsplit: AddKey offsets must be monotonically increasing: prev=%d, cur=%d", rs.prevOffset, offset))
+		}
+		if _, err := rs.offsetWriter.Write(rs.numBuf[:]); err != nil {
 			return err
 		}
 		binary.BigEndian.PutUint64(rs.numBuf[:], rs.keysAdded)
@@ -415,7 +446,7 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 			return err
 		}
 		if rs.lessFalsePositives {
-			if rs.version == 0 {
+			if rs.dataStructureVersion == 0 {
 				//1 byte from each hashed key
 				if err := rs.existenceWV0.WriteByte(byte(hi)); err != nil {
 					return err
@@ -428,7 +459,7 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 		}
 	}
 
-	if rs.lessFalsePositives && rs.version >= 1 {
+	if rs.lessFalsePositives && rs.dataStructureVersion >= 1 {
 		if err := rs.existenceFV1.AddHash(hi); err != nil {
 			return err
 		}
@@ -441,8 +472,11 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 
 func (rs *RecSplit) AddOffset(offset uint64) error {
 	if rs.enums {
+		if rs.keysAdded > 0 && offset < rs.prevOffset {
+			panic(fmt.Sprintf("recsplit: AddOffset offsets must be monotonically increasing: prev=%d, cur=%d", rs.prevOffset, offset))
+		}
 		binary.BigEndian.PutUint64(rs.numBuf[:], offset)
-		if err := rs.offsetCollector.Collect(rs.numBuf[:], nil); err != nil {
+		if _, err := rs.offsetWriter.Write(rs.numBuf[:]); err != nil {
 			return err
 		}
 	}
@@ -473,11 +507,12 @@ func (rs *RecSplit) recsplitCurrentBucket() error {
 				rs.offsetBuffer = append(rs.offsetBuffer, 0)
 			}
 		}
-		unary, err := rs.recsplit(0 /* level */, rs.currentBucket, rs.currentBucketOffs, nil /* unary */)
+		var err error
+		rs.unaryBuf, err = rs.recsplit(0 /* level */, rs.currentBucket, rs.currentBucketOffs, rs.unaryBuf[:0])
 		if err != nil {
 			return err
 		}
-		rs.gr.appendUnaryAll(unary)
+		rs.gr.appendUnaryAll(rs.unaryBuf)
 		if rs.trace {
 			fmt.Printf("recsplitBucket(%d, %d, bitsize = %d)\n", rs.currentBucketIdx, len(rs.currentBucket), rs.gr.bitCount-bitPos)
 		}
@@ -500,6 +535,125 @@ func (rs *RecSplit) recsplitCurrentBucket() error {
 	return nil
 }
 
+// findSplit finds a salt value such that keys in bucket are evenly distributed
+// into fanout partitions of size unit each (based on remap16(remix(key+salt), m) / unit).
+// Uses 8-way salt parallelism with 8 independent count arrays carved from the
+// count slice (which must have len >= 8*fanout).
+func findSplit(bucket []uint64, salt uint64, fanout, unit uint16, count []uint16) uint64 {
+	m := uint16(len(bucket))
+	c0 := count[0*fanout : 1*fanout : 1*fanout]
+	c1 := count[1*fanout : 2*fanout : 2*fanout]
+	c2 := count[2*fanout : 3*fanout : 3*fanout]
+	c3 := count[3*fanout : 4*fanout : 4*fanout]
+	c4 := count[4*fanout : 5*fanout : 5*fanout]
+	c5 := count[5*fanout : 6*fanout : 6*fanout]
+	c6 := count[6*fanout : 7*fanout : 7*fanout]
+	c7 := count[7*fanout : 8*fanout : 8*fanout]
+	for {
+		clear(count[:8*fanout])
+		for i := uint16(0); i < m; i++ {
+			key := bucket[i]
+			c0[remap16(remix(key+salt), m)/unit]++
+			c1[remap16(remix(key+salt+1), m)/unit]++
+			c2[remap16(remix(key+salt+2), m)/unit]++
+			c3[remap16(remix(key+salt+3), m)/unit]++
+			c4[remap16(remix(key+salt+4), m)/unit]++
+			c5[remap16(remix(key+salt+5), m)/unit]++
+			c6[remap16(remix(key+salt+6), m)/unit]++
+			c7[remap16(remix(key+salt+7), m)/unit]++
+		}
+		// Branchless validation: XOR each count with expected value,
+		// OR-accumulate to detect any mismatch.
+		var bad0, bad1, bad2, bad3, bad4, bad5, bad6, bad7 uint16
+		for i := uint16(0); i < fanout-1; i++ {
+			bad0 |= c0[i] ^ unit
+			bad1 |= c1[i] ^ unit
+			bad2 |= c2[i] ^ unit
+			bad3 |= c3[i] ^ unit
+			bad4 |= c4[i] ^ unit
+			bad5 |= c5[i] ^ unit
+			bad6 |= c6[i] ^ unit
+			bad7 |= c7[i] ^ unit
+		}
+		if bad0 == 0 {
+			return salt
+		}
+		if bad1 == 0 {
+			return salt + 1
+		}
+		if bad2 == 0 {
+			return salt + 2
+		}
+		if bad3 == 0 {
+			return salt + 3
+		}
+		if bad4 == 0 {
+			return salt + 4
+		}
+		if bad5 == 0 {
+			return salt + 5
+		}
+		if bad6 == 0 {
+			return salt + 6
+		}
+		if bad7 == 0 {
+			return salt + 7
+		}
+		salt += 8
+	}
+}
+
+// findBijection finds a salt value such that all keys in bucket hash to distinct
+// positions in [0, m).
+// Uses 8-way salt parallelism with branchless OR-accumulate
+// to exploit CPU instruction-level parallelism and avoid branch mispredictions.
+func findBijection(bucket []uint64, salt uint64) uint64 {
+	m := uint16(len(bucket))
+	fullMask := uint32((1 << m) - 1)
+	for {
+		var mask0, mask1, mask2, mask3, mask4, mask5, mask6, mask7 uint32
+		for i := uint16(0); i < m; i++ {
+			key := bucket[i]
+			// adding `& 31` - it doesn't have runtime overhead, but it tells for compiler that shift can't overflow
+			// and compiler generating less assembly checks: ~10% perf.
+			// it's safe because: len(bucket) <= leafSize <= 24
+			mask0 |= uint32(1) << remap16(remix(key+salt), m&31)
+			mask1 |= uint32(1) << remap16(remix(key+salt+1), m&31)
+			mask2 |= uint32(1) << remap16(remix(key+salt+2), m&31)
+			mask3 |= uint32(1) << remap16(remix(key+salt+3), m&31)
+			mask4 |= uint32(1) << remap16(remix(key+salt+4), m&31)
+			mask5 |= uint32(1) << remap16(remix(key+salt+5), m&31)
+			mask6 |= uint32(1) << remap16(remix(key+salt+6), m&31)
+			mask7 |= uint32(1) << remap16(remix(key+salt+7), m&31)
+		}
+		if mask0 == fullMask {
+			return salt
+		}
+		if mask1 == fullMask {
+			return salt + 1
+		}
+		if mask2 == fullMask {
+			return salt + 2
+		}
+		if mask3 == fullMask {
+			return salt + 3
+		}
+		if mask4 == fullMask {
+			return salt + 4
+		}
+		if mask5 == fullMask {
+			return salt + 5
+		}
+		if mask6 == fullMask {
+			return salt + 6
+		}
+		if mask7 == fullMask {
+			return salt + 7
+		}
+		salt += 8
+	}
+}
+
 // recsplit applies recSplit algorithm to the given bucket
 func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary []uint64) ([]uint64, error) {
 	if rs.trace {
@@ -509,24 +663,7 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 	salt := rs.startSeed[level]
 	m := uint16(len(bucket))
 	if m <= rs.leafSize {
-		// No need to build aggregation levels - just find bijection
-		var mask uint32
-		for {
-			mask = 0
-			var fail bool
-			for i := uint16(0); !fail && i < m; i++ {
-				bit := uint32(1) << remap16(remix(bucket[i]+salt), m)
-				if mask&bit != 0 {
-					fail = true
-				} else {
-					mask |= bit
-				}
-			}
-			if !fail {
-				break
-			}
-			salt++
-		}
+		salt = findBijection(bucket, salt)
 		for i := uint16(0); i < m; i++ {
 			j := remap16(remix(bucket[i]+salt), m)
 			rs.offsetBuffer[j] = offsets[i]
@@ -547,22 +684,7 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 	} else {
 		fanout, unit := splitParams(m, rs.leafSize, rs.primaryAggrBound, rs.secondaryAggrBound)
 		count := rs.count
-		for {
-			for i := uint16(0); i < fanout-1; i++ {
-				count[i] = 0
-			}
-			var fail bool
-			for i := uint16(0); i < m; i++ {
-				count[remap16(remix(bucket[i]+salt), m)/unit]++
-			}
-			for i := uint16(0); i < fanout-1; i++ {
-				fail = fail || (count[i] != unit)
-			}
-			if !fail {
-				break
-			}
-			salt++
-		}
+		salt = findSplit(bucket, salt, fanout, unit, count)
 		for i, c := uint16(0), uint16(0); i < fanout; i++ {
 			count[i] = c
 			c += unit
@@ -620,9 +742,25 @@ func (rs *RecSplit) loadFuncBucket(k, v []byte, _ etl.CurrentTableReader, _ etl.
 	return nil
 }
 
-func (rs *RecSplit) loadFuncOffset(k, _ []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-	offset := binary.BigEndian.Uint64(k)
-	rs.offsetEf.AddOffset(offset)
+// buildOffsetEf mmaps the offset temp file and builds the Elias-Fano encoding.
+func (rs *RecSplit) buildOffsetEf() error {
+	rs.offsetEf = eliasfano32.NewEliasFano(rs.keysAdded, rs.maxOffset)
+	if err := rs.offsetWriter.Flush(); err != nil {
+		return fmt.Errorf("flush offset writer: %w", err)
+	}
+
+	mmapSize := int(rs.keysAdded * 8)
+	mmapHandle1, mmapHandle2, err := mmap.Mmap(rs.offsetFile, mmapSize)
+	if err != nil {
+		return fmt.Errorf("mmap offset file: %w", err)
+	}
+	defer mmap.Munmap(mmapHandle1, mmapHandle2)
+
+	data := mmapHandle1[:mmapSize]
+	for i := uint64(0); i < rs.keysAdded; i++ {
+		rs.offsetEf.AddOffset(binary.BigEndian.Uint64(data[i*8:]))
+	}
+	rs.offsetEf.Build()
 	return nil
 }
 
@@ -635,16 +773,23 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	if rs.keysAdded != rs.keyExpectedCount {
 		return fmt.Errorf("rs %s expected keys %d, got %d", rs.fileName, rs.keyExpectedCount, rs.keysAdded)
 	}
+	if rs.timings.Enabled {
+		rs.timings.AddTook = time.Since(rs.timings.AddStart) // assume Adding data into compressor complete
+		rs.timings.BuildStart = time.Now()
+		defer func() { rs.timings.BuildTook = time.Since(rs.timings.BuildStart) }()
+	}
+
 	var err error
 	if rs.indexF, err = dir.CreateTemp(rs.filePath); err != nil {
 		return fmt.Errorf("create index file %s: %w", rs.filePath, err)
 	}
 
 	defer rs.indexF.Close()
-	rs.indexW = bufio.NewWriterSize(rs.indexF, etl.BufIOSize)
-	// 1 byte: version, 7 bytes: app-specific minimal dataID (of current shard)
+	rs.indexW = getBufioWriter(rs.indexF)
+	defer putBufioWriter(rs.indexW)
+	// 1 byte: dataStructureVersion, 7 bytes: app-specific minimal dataID (of current shard)
 	binary.BigEndian.PutUint64(rs.numBuf[:], rs.baseDataID)
-	rs.numBuf[0] = rs.version
+	rs.numBuf[0] = uint8(rs.dataStructureVersion)
 	if _, err = rs.indexW.Write(rs.numBuf[:]); err != nil {
 		return fmt.Errorf("write number of keys: %w", err)
 	}
@@ -679,7 +824,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	}
 
 	if assert.Enable {
-		rs.indexW.Flush()
+		_ = rs.indexW.Flush()
 		rs.indexF.Seek(0, 0)
 		b, _ := io.ReadAll(rs.indexF)
 		if len(b) != 9+int(rs.keysAdded)*rs.bytesPerRec {
@@ -690,12 +835,9 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		log.Log(rs.lvl, "[index] write", "file", rs.fileName)
 	}
 	if rs.enums && rs.keysAdded > 0 {
-		rs.offsetEf = eliasfano32.NewEliasFano(rs.keysAdded, rs.maxOffset)
-		defer rs.offsetCollector.Close()
-		if err := rs.offsetCollector.Load(nil, "", rs.loadFuncOffset, etl.TransformArgs{}); err != nil {
+		if err := rs.buildOffsetEf(); err != nil {
 			return err
 		}
-		rs.offsetEf.Build()
 	}
 	rs.gr.appendFixed(1, 1) // Sentinel (avoids checking for parts of size 1)
 	// Construct Elias Fano index
@@ -784,7 +926,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 }
 
 func (rs *RecSplit) flushExistenceFilter() error {
-	if rs.version == 0 && rs.enums && rs.keysAdded > 0 && rs.lessFalsePositives {
+	if rs.dataStructureVersion == 0 && rs.enums && rs.keysAdded > 0 && rs.lessFalsePositives {
 		defer rs.existenceFV0.Close()
 
 		//Write len of array
@@ -800,12 +942,15 @@ func (rs *RecSplit) flushExistenceFilter() error {
 		if _, err := rs.existenceFV0.Seek(0, io.SeekStart); err != nil {
 			return err
 		}
-		if _, err := io.CopyN(rs.indexW, rs.existenceFV0, int64(rs.keysAdded)); err != nil {
-			return err
+		r := getBufioReader(rs.existenceFV0)
+		_, copyErr := io.CopyN(rs.indexW, r, int64(rs.keysAdded))
+		putBufioReader(r)
+		if copyErr != nil {
+			return copyErr
 		}
 	}
 
-	if rs.version >= 1 && rs.keysAdded > 0 && rs.lessFalsePositives {
+	if rs.dataStructureVersion >= 1 && rs.keysAdded > 0 && rs.lessFalsePositives {
 		_, err := rs.existenceFV1.BuildTo(rs.indexW)
 		if err != nil {
 			return err
@@ -814,7 +959,12 @@ func (rs *RecSplit) flushExistenceFilter() error {
 	return nil
 }
 
-func (rs *RecSplit) DisableFsync() { rs.noFsync = true }
+func (rs *RecSplit) DisableFsync()    { rs.noFsync = true }
+func (rs *RecSplit) Timings() Timings { return rs.timings }
+
+func (rs *RecSplit) CollectTimings() {
+	rs.timings.Enabled, rs.timings.AddStart = true, time.Now() // assume Adding data into compressor starting
+}
 
 // Fsync - other processes/goroutines must see only "fully-complete" (valid) files. No partial-writes.
 // To achieve it: write to .tmp file then `rename` when file is ready.
@@ -841,3 +991,29 @@ func (rs *RecSplit) Stats() (int, int) {
 func (rs *RecSplit) Collision() bool {
 	return rs.collision
 }
+
+// Erigon doesn't create tons of bufio readers/writers, but it has tons of
+// parallel small unit-tests which each create many small files and bufio
+// readers/writers — pooling avoids the allocation pressure in that scenario.
+var (
+	bufioWriterPool = sync.Pool{New: func() any { return bufio.NewWriterSize(nil, int(512*datasize.KB)) }}
+	bufioReaderPool = sync.Pool{New: func() any { return bufio.NewReaderSize(nil, int(512*datasize.KB)) }}
+)
+
+func getBufioWriter(w io.Writer) *bufio.Writer {
+	bw := bufioWriterPool.Get().(*bufio.Writer)
+	bw.Reset(w)
+	return bw
+}
+
+// Reset(nil) before Put is required: without it the pool entry retains a
+// reference to the underlying io.Writer/io.Reader, keeping it alive until the
+// next GC cycle or until the entry is reused — whichever comes first.
+func putBufioWriter(w *bufio.Writer) { w.Reset(nil); bufioWriterPool.Put(w) }
+
+func getBufioReader(r io.Reader) *bufio.Reader {
+	br := bufioReaderPool.Get().(*bufio.Reader)
+	br.Reset(r)
+	return br
+}
+func putBufioReader(r *bufio.Reader) { r.Reset(nil); bufioReaderPool.Put(r) }

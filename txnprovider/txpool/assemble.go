@@ -22,7 +22,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/kvcache"
@@ -51,7 +51,7 @@ func Assemble(
 		return nil, nil, err
 	}
 
-	chainConfig, _, err := SaveChainConfigIfNeed(ctx, chainDB, poolDB, true, logger)
+	chainConfig, _, err := SaveChainConfigIfNeed(ctx, chainDB, poolDB, logger)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -19,7 +19,11 @@
 
 package rpc
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/erigontech/erigon/common"
+)
 
 var (
 	_ Error = new(methodNotFoundError)
@@ -44,11 +48,11 @@ const (
 	ErrCodeClientLimitExceeded     = -38026
 	ErrCodeInternalError           = -32603
 	ErrCodeInvalidParams           = -32602
-	ErrCodeReverted                = -32000
+	ErrCodeDefault                 = -32000
 	ErrCodeVMError                 = -32015
-)
 
-const defaultErrorCode = ErrCodeReverted
+	ErrCodeTxSyncTimeout = 4
+)
 
 type methodNotFoundError struct{ method string }
 
@@ -100,6 +104,25 @@ type UnsupportedForkError struct{ Message string }
 func (e *UnsupportedForkError) ErrorCode() int { return -38005 }
 
 func (e *UnsupportedForkError) Error() string { return e.Message }
+
+type BlockNotFoundErr struct {
+	BlockId string
+}
+
+func (e BlockNotFoundErr) ErrorCode() int { return -32000 }
+
+func (e BlockNotFoundErr) Error() string {
+	return fmt.Sprintf("block not found: %s", e.BlockId)
+}
+
+type TxSyncTimeoutError struct {
+	Msg  string
+	Hash common.Hash
+}
+
+func (e *TxSyncTimeoutError) Error() string  { return e.Msg }
+func (e *TxSyncTimeoutError) ErrorCode() int { return ErrCodeTxSyncTimeout }
+func (e *TxSyncTimeoutError) ErrorData() any { return e.Hash.Hex() }
 
 type CustomError struct {
 	Code    int

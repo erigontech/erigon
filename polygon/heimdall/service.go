@@ -25,9 +25,9 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/event"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/event"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
@@ -80,7 +80,8 @@ func NewService(config ServiceConfig) *Service {
 	// case where FetchFirstMilestoneNum returned 10 but by the time our request reaches heimdall milestone=10
 	// has been already pruned. Additionally, we've been observing this error happening sporadically for the
 	// latest milestone.
-	milestoneScraperTransientErrors := []error{ErrNotInMilestoneList}
+	milestoneScraperTransientErrors := make([]error, 0, 1+len(poshttp.TransientErrors))
+	milestoneScraperTransientErrors = append(milestoneScraperTransientErrors, ErrNotInMilestoneList)
 	milestoneScraperTransientErrors = append(milestoneScraperTransientErrors, poshttp.TransientErrors...)
 	milestoneScraper := NewScraper(
 		"milestones",

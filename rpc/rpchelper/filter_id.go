@@ -31,6 +31,7 @@ type (
 	PendingBlockSubID SubscriptionID
 	PendingTxsSubID   SubscriptionID
 	LogsSubID         SubscriptionID
+	ReceiptsSubID     SubscriptionID
 )
 
 var globalSubscriptionId uint64

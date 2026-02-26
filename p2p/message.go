@@ -24,11 +24,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/event"
@@ -56,7 +56,7 @@ type Msg struct {
 // the given value, which must be a pointer.
 //
 // For the decoding rules, please see package rlp.
-func (msg Msg) Decode(val interface{}) error {
+func (msg Msg) Decode(val any) error {
 	s := rlp.NewStream(msg.Payload, uint64(msg.Size))
 	if err := s.Decode(val); err != nil {
 		return NewPeerError(PeerErrorInvalidMessage, DiscProtocolError, err, fmt.Sprintf("(code %x) (size %d)", msg.Code, msg.Size))
@@ -72,7 +72,7 @@ func (msg Msg) String() string {
 func (msg Msg) Discard() {
 	_, err := io.Copy(io.Discard, msg.Payload)
 	if err != nil {
-		log.Fatal(err)
+		log.Error("[p2p] discard msg", "code", msg.Code, "size", msg.Size, "err", err)
 	}
 }
 
@@ -103,7 +103,7 @@ type MsgReadWriter interface {
 
 // Send writes an RLP-encoded message with the given code.
 // data should encode as an RLP list.
-func Send(w MsgWriter, msgcode uint64, data interface{}) error {
+func Send(w MsgWriter, msgcode uint64, data any) error {
 	size, r, err := rlp.EncodeToReader(data)
 	if err != nil {
 		return err
@@ -119,7 +119,7 @@ func Send(w MsgWriter, msgcode uint64, data interface{}) error {
 // the message payload will be an RLP list containing the items:
 //
 //	[e1, e2, e3]
-func SendItems(w MsgWriter, msgcode uint64, elems ...interface{}) error {
+func SendItems(w MsgWriter, msgcode uint64, elems ...any) error {
 	defer dbg.LogPanic()
 	return Send(w, msgcode, elems)
 }
@@ -144,10 +144,7 @@ func (r *eofSignal) Read(buf []byte) (int, error) {
 		return 0, io.EOF
 	}
 
-	max := len(buf)
-	if int(r.count) < len(buf) {
-		max = int(r.count)
-	}
+	max := min(int(r.count), len(buf))
 	n, err := r.wrapped.Read(buf[:max])
 	r.count -= uint32(n)
 	if (err != nil || r.count == 0) && r.eof != nil {
@@ -164,7 +161,7 @@ func MsgPipe() (*MsgPipeRW, *MsgPipeRW) {
 	var (
 		c1, c2  = make(chan Msg), make(chan Msg)
 		closing = make(chan struct{})
-		closed  = new(int32)
+		closed  = new(atomic.Bool)
 		rw1     = &MsgPipeRW{c1, c2, closing, closed}
 		rw2     = &MsgPipeRW{c2, c1, closing, closed}
 	)
@@ -180,13 +177,13 @@ type MsgPipeRW struct {
 	w       chan<- Msg
 	r       <-chan Msg
 	closing chan struct{}
-	closed  *int32
+	closed  *atomic.Bool
 }
 
 // WriteMsg sends a message on the pipe.
 // It blocks until the receiver has consumed the message payload.
 func (p *MsgPipeRW) WriteMsg(msg Msg) error {
-	if atomic.LoadInt32(p.closed) == 0 {
+	if !p.closed.Load() {
 		consumed := make(chan struct{}, 1)
 		msg.Payload = &eofSignal{msg.Payload, msg.Size, consumed}
 		select {
@@ -207,7 +204,7 @@ func (p *MsgPipeRW) WriteMsg(msg Msg) error {
 
 // ReadMsg returns a message sent on the other end of the pipe.
 func (p *MsgPipeRW) ReadMsg() (Msg, error) {
-	if atomic.LoadInt32(p.closed) == 0 {
+	if !p.closed.Load() {
 		select {
 		case msg := <-p.r:
 			return msg, nil
@@ -221,9 +218,8 @@ func (p *MsgPipeRW) ReadMsg() (Msg, error) {
 // of the pipe. They will return ErrPipeClosed. Close also
 // interrupts any reads from a message payload.
 func (p *MsgPipeRW) Close() error {
-	if atomic.AddInt32(p.closed, 1) != 1 {
+	if !p.closed.CompareAndSwap(false, true) {
 		// someone else is already closing
-		atomic.StoreInt32(p.closed, 1) // avoid overflow
 		return nil
 	}
 	close(p.closing)
@@ -233,7 +229,7 @@ func (p *MsgPipeRW) Close() error {
 // ExpectMsg reads a message from r and verifies that its
 // code and encoded RLP content match the provided values.
 // If content is nil, the payload is discarded and not verified.
-func ExpectMsg(r MsgReader, code uint64, content interface{}) error {
+func ExpectMsg(r MsgReader, code uint64, content any) error {
 	msg, err := r.ReadMsg()
 	if err != nil {
 		return err

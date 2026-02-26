@@ -7,14 +7,15 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 )
 
 func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
@@ -35,7 +36,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTtx1.Rollback()
 
-	sd, err := state.NewSharedDomains(rwTtx1, log.Root())
+	sd, err := execctx.NewSharedDomains(ctx, rwTtx1, log.Root())
 	require.NoError(t, err)
 	defer sd.Close()
 
@@ -58,7 +59,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 	// --- check 2: storage exists in DB - TemporalTx.HasPrefix should catch this ---
 	{
 		// write to storage
-		err = sd.DomainPut(kv.StorageDomain, rwTtx1, storageK1, []byte{1}, 1, nil, 0)
+		err = sd.DomainPut(kv.StorageDomain, rwTtx1, storageK1, []byte{1}, 1, nil)
 		require.NoError(t, err)
 		err = sd.Flush(ctx, rwTtx1)
 		require.NoError(t, err)
@@ -114,7 +115,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		rwTtx2, err := temporalDb.BeginTemporalRw(ctx)
 		require.NoError(t, err)
 		defer rwTtx2.Rollback()
-		err = sd.DomainPut(kv.StorageDomain, rwTtx2, storageK2, []byte{2}, 2, nil, 0)
+		err = sd.DomainPut(kv.StorageDomain, rwTtx2, storageK2, []byte{2}, 2, nil)
 		require.NoError(t, err)
 		err = sd.Flush(ctx, rwTtx2)
 		require.NoError(t, err)
@@ -196,7 +197,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		rwTtx5, err := temporalDb.BeginTemporalRw(ctx)
 		require.NoError(t, err)
 		defer rwTtx5.Rollback()
-		err = sd.DomainPut(kv.StorageDomain, rwTtx5, storageK1, []byte{3}, 4, nil, 0)
+		err = sd.DomainPut(kv.StorageDomain, rwTtx5, storageK1, []byte{3}, 4, nil)
 		require.NoError(t, err)
 		err = sd.Flush(ctx, rwTtx5)
 		require.NoError(t, err)
@@ -240,11 +241,11 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	rwTtx1, err := temporalDb.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer rwTtx1.Rollback()
-	sd, err := state.NewSharedDomains(rwTtx1, log.Root())
+	sd, err := execctx.NewSharedDomains(ctx, rwTtx1, log.Root())
 	require.NoError(t, err)
 	defer sd.Close()
 
-	err = sd.DomainPut(kv.StorageDomain, rwTtx1, storageK1, []byte{1}, 1, nil, 0)
+	err = sd.DomainPut(kv.StorageDomain, rwTtx1, storageK1, []byte{1}, 1, nil)
 	require.NoError(t, err)
 	err = sd.Flush(ctx, rwTtx1)
 	require.NoError(t, err)
@@ -254,7 +255,7 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	rwTtx2, err := temporalDb.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer rwTtx2.Rollback()
-	err = sd.DomainPut(kv.StorageDomain, rwTtx2, storageK1, []byte{2}, 2, nil, 0)
+	err = sd.DomainPut(kv.StorageDomain, rwTtx2, storageK1, []byte{2}, 2, nil)
 	require.NoError(t, err)
 	err = sd.Flush(ctx, rwTtx2)
 	require.NoError(t, err)
@@ -275,7 +276,7 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTtx4.Rollback()
 
-	err = sd.DomainPut(kv.StorageDomain, rwTtx4, storageK1, []byte{3}, 4, nil, 0)
+	err = sd.DomainPut(kv.StorageDomain, rwTtx4, storageK1, []byte{3}, 4, nil)
 	require.NoError(t, err)
 	err = sd.Flush(ctx, rwTtx4)
 	require.NoError(t, err)

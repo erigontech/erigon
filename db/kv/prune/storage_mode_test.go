@@ -22,7 +22,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv/memdb"
 )
 

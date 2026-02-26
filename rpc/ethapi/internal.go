@@ -18,34 +18,32 @@ package ethapi
 
 // This file stores proxy-objects for `internal` package
 import (
-	"github.com/erigontech/erigon-lib/common"
+	"maps"
+
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
 )
 
 // nolint
-func RPCMarshalBlock(b *types.Block, inclTx bool, fullTx bool, additional map[string]interface{}) (map[string]interface{}, error) {
+func RPCMarshalBlock(b *types.Block, inclTx bool, fullTx bool, additional map[string]any) (map[string]any, error) {
 	fields, err := RPCMarshalBlockDeprecated(b, inclTx, fullTx)
 	if err != nil {
 		return nil, err
 	}
 
-	for k, v := range additional {
-		fields[k] = v
-	}
+	maps.Copy(fields, additional)
 
 	return fields, err
 }
 
 // nolint
-func RPCMarshalBlockEx(b *types.Block, inclTx bool, fullTx bool, borTx types.Transaction, borTxHash common.Hash, additional map[string]interface{}) (map[string]interface{}, error) {
+func RPCMarshalBlockEx(b *types.Block, inclTx bool, fullTx bool, borTx types.Transaction, borTxHash common.Hash, additional map[string]any) (map[string]any, error) {
 	fields, err := RPCMarshalBlockExDeprecated(b, inclTx, fullTx, borTx, borTxHash)
 	if err != nil {
 		return nil, err
 	}
 
-	for k, v := range additional {
-		fields[k] = v
-	}
+	maps.Copy(fields, additional)
 
 	return fields, err
 }

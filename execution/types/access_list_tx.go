@@ -27,9 +27,10 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // AccessTuple is the element type of an access list.
@@ -65,7 +66,7 @@ func (tx *AccessListTx) copy() *AccessListTx {
 				TransactionMisc: TransactionMisc{},
 				Nonce:           tx.Nonce,
 				To:              tx.To, // TODO: copy pointed-to address
-				Data:            common.CopyBytes(tx.Data),
+				Data:            common.Copy(tx.Data),
 				GasLimit:        tx.GasLimit,
 				// These are copied below.
 				Value: new(uint256.Int),
@@ -109,50 +110,35 @@ func (tx *AccessListTx) Unwrap() Transaction {
 
 // EncodingSize returns the RLP encoding size of the whole transaction envelope
 func (tx *AccessListTx) EncodingSize() int {
-	payloadSize, _, _, _ := tx.payloadSize()
+	payloadSize, _ := tx.payloadSize()
 	// Add envelope size and type size
 	return 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 }
 
 // payloadSize calculates the RLP encoding size of transaction, without TxType and envelope
-func (tx *AccessListTx) payloadSize() (payloadSize int, nonceLen, gasLen, accessListLen int) {
-	// size of ChainID
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(tx.ChainID)
-	// size of Nonce
-	payloadSize++
-	nonceLen = rlp.IntLenExcludingHead(tx.Nonce)
-	payloadSize += nonceLen
-	// size of GasPrice
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(tx.GasPrice)
-	// size of GasLimit
-	payloadSize++
-	gasLen = rlp.IntLenExcludingHead(tx.GasLimit)
-	payloadSize += gasLen
+func (tx *AccessListTx) payloadSize() (payloadSize int, accessListLen int) {
+	payloadSize += rlp.Uint256Len(*tx.ChainID)
+	payloadSize += rlp.U64Len(tx.Nonce)
+	payloadSize += rlp.Uint256Len(*tx.GasPrice)
+	payloadSize += rlp.U64Len(tx.GasLimit)
+
 	// size of To
 	payloadSize++
 	if tx.To != nil {
 		payloadSize += 20
 	}
-	// size of Value
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(tx.Value)
-	// size of Data
+
+	payloadSize += rlp.Uint256Len(*tx.Value)
 	payloadSize += rlp.StringLen(tx.Data)
+
 	// size of AccessList
 	accessListLen = accessListSize(tx.AccessList)
 	payloadSize += rlp.ListPrefixLen(accessListLen) + accessListLen
-	// size of V
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(&tx.V)
-	// size of R
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(&tx.R)
-	// size of S
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(&tx.S)
-	return payloadSize, nonceLen, gasLen, accessListLen
+
+	payloadSize += rlp.Uint256Len(tx.V)
+	payloadSize += rlp.Uint256Len(tx.R)
+	payloadSize += rlp.Uint256Len(tx.S)
+	return payloadSize, accessListLen
 }
 
 func accessListSize(al AccessList) int {
@@ -200,7 +186,7 @@ func encodeAccessList(al AccessList, w io.Writer, b []byte) error {
 // For legacy transactions, it returns the RLP encoding. For EIP-2718 typed
 // transactions, it returns the type and payload.
 func (tx *AccessListTx) MarshalBinary(w io.Writer) error {
-	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize()
+	payloadSize, accessListLen := tx.payloadSize()
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
 	// encode TxType
@@ -208,19 +194,19 @@ func (tx *AccessListTx) MarshalBinary(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, accessListLen); err != nil {
+	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen, accessListLen int) error {
+func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen int) error {
 	// prefix
 	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
 	}
 	// encode ChainID
-	if err := rlp.EncodeUint256(tx.ChainID, w, b); err != nil {
+	if err := rlp.EncodeUint256(*tx.ChainID, w, b); err != nil {
 		return err
 	}
 	// encode Nonce
@@ -228,7 +214,7 @@ func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceL
 		return err
 	}
 	// encode GasPrice
-	if err := rlp.EncodeUint256(tx.GasPrice, w, b); err != nil {
+	if err := rlp.EncodeUint256(*tx.GasPrice, w, b); err != nil {
 		return err
 	}
 	// encode GasLimit
@@ -236,21 +222,11 @@ func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceL
 		return err
 	}
 	// encode To
-	if tx.To == nil {
-		b[0] = 128
-	} else {
-		b[0] = 128 + 20
-	}
-	if _, err := w.Write(b[:1]); err != nil {
+	if err := rlp.EncodeOptionalAddress(tx.To, w, b); err != nil {
 		return err
 	}
-	if tx.To != nil {
-		if _, err := w.Write(tx.To[:]); err != nil {
-			return err
-		}
-	}
 	// encode Value
-	if err := rlp.EncodeUint256(tx.Value, w, b); err != nil {
+	if err := rlp.EncodeUint256(*tx.Value, w, b); err != nil {
 		return err
 	}
 	// encode Data
@@ -266,15 +242,15 @@ func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceL
 		return err
 	}
 	// encode V
-	if err := rlp.EncodeUint256(&tx.V, w, b); err != nil {
+	if err := rlp.EncodeUint256(tx.V, w, b); err != nil {
 		return err
 	}
 	// encode R
-	if err := rlp.EncodeUint256(&tx.R, w, b); err != nil {
+	if err := rlp.EncodeUint256(tx.R, w, b); err != nil {
 		return err
 	}
 	// encode S
-	if err := rlp.EncodeUint256(&tx.S, w, b); err != nil {
+	if err := rlp.EncodeUint256(tx.S, w, b); err != nil {
 		return err
 	}
 	return nil
@@ -283,7 +259,7 @@ func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceL
 
 // EncodeRLP implements rlp.Encoder
 func (tx *AccessListTx) EncodeRLP(w io.Writer) error {
-	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize()
+	payloadSize, accessListLen := tx.payloadSize()
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 	b := newEncodingBuf()
@@ -297,7 +273,7 @@ func (tx *AccessListTx) EncodeRLP(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, accessListLen); err != nil {
+	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen); err != nil {
 		return err
 	}
 	return nil
@@ -411,19 +387,27 @@ func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
 }
 
 // AsMessage returns the transaction as a core.Message.
-func (tx *AccessListTx) AsMessage(s Signer, _ *big.Int, rules *chain.Rules) (*Message, error) {
+func (tx *AccessListTx) AsMessage(s Signer, _ *uint256.Int, rules *chain.Rules) (*Message, error) {
+	var txTo accounts.Address
+	if tx.To == nil {
+		txTo = accounts.NilAddress
+	} else {
+		txTo = accounts.InternAddress(*tx.To)
+	}
+
 	msg := Message{
-		nonce:      tx.Nonce,
-		gasLimit:   tx.GasLimit,
-		gasPrice:   *tx.GasPrice,
-		tipCap:     *tx.GasPrice,
-		feeCap:     *tx.GasPrice,
-		to:         tx.To,
-		amount:     *tx.Value,
-		data:       tx.Data,
-		accessList: tx.AccessList,
-		checkNonce: true,
-		checkGas:   true,
+		nonce:            tx.Nonce,
+		gasLimit:         tx.GasLimit,
+		gasPrice:         *tx.GasPrice,
+		tipCap:           *tx.GasPrice,
+		feeCap:           *tx.GasPrice,
+		to:               txTo,
+		amount:           *tx.Value,
+		data:             tx.Data,
+		accessList:       tx.AccessList,
+		checkNonce:       true,
+		checkTransaction: true,
+		checkGas:         true,
 	}
 
 	if !rules.IsBerlin {
@@ -453,7 +437,7 @@ func (tx *AccessListTx) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := prefixedRlpHash(AccessListTxType, []interface{}{
+	hash := prefixedRlpHash(AccessListTxType, []any{
 		tx.ChainID,
 		tx.Nonce,
 		tx.GasPrice,
@@ -468,18 +452,29 @@ func (tx *AccessListTx) Hash() common.Hash {
 	return hash
 }
 
+type accessListTxSigHash struct {
+	ChainID    *big.Int
+	Nonce      uint64
+	GasPrice   *uint256.Int
+	Gas        uint64
+	To         *common.Address `rlp:"nil"`
+	Value      *uint256.Int
+	Data       []byte
+	AccessList AccessList
+}
+
 func (tx *AccessListTx) SigningHash(chainID *big.Int) common.Hash {
 	return prefixedRlpHash(
 		AccessListTxType,
-		[]interface{}{
-			chainID,
-			tx.Nonce,
-			tx.GasPrice,
-			tx.GasLimit,
-			tx.To,
-			tx.Value,
-			tx.Data,
-			tx.AccessList,
+		&accessListTxSigHash{
+			ChainID:    chainID,
+			Nonce:      tx.Nonce,
+			GasPrice:   tx.GasPrice,
+			Gas:        tx.GasLimit,
+			To:         tx.To,
+			Value:      tx.Value,
+			Data:       tx.Data,
+			AccessList: tx.AccessList,
 		})
 }
 
@@ -493,27 +488,25 @@ func (tx *AccessListTx) GetChainID() *uint256.Int {
 	return tx.ChainID
 }
 
-func (tx *AccessListTx) cachedSender() (sender common.Address, ok bool) {
-	s := tx.from.Load()
-	if s == nil {
+func (tx *AccessListTx) cachedSender() (sender accounts.Address, ok bool) {
+	s := tx.from
+	if s.IsNil() {
 		return sender, false
 	}
-	return *s, true
+	return s, true
 }
 
-var zeroAddr = common.Address{}
-
-func (tx *AccessListTx) Sender(signer Signer) (common.Address, error) {
-	if from := tx.from.Load(); from != nil {
-		if *from != zeroAddr { // Sender address can never be zero in a transaction with a valid signer
-			return *from, nil
+func (tx *AccessListTx) Sender(signer Signer) (accounts.Address, error) {
+	if from := tx.from; !from.IsNil() {
+		if !from.IsZero() { // Sender address can never be zero in a transaction with a valid signer
+			return from, nil
 		}
 	}
 
 	addr, err := signer.Sender(tx)
 	if err != nil {
-		return common.Address{}, err
+		return accounts.ZeroAddress, err
 	}
-	tx.from.Store(&addr)
+	tx.from = addr
 	return addr, nil
 }

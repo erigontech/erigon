@@ -21,11 +21,14 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/state"
@@ -73,28 +76,28 @@ var ( // Compile time interface checks
 
 type DB struct {
 	kv.RwDB
-	stateFiles      *state.Aggregator
-	forkaggs        []*state.ForkableAgg
-	forkaggsEnabled bool
+	stateFiles *state.Aggregator
+	forkaggs   []*state.ForkableAgg
 }
 
 func New(db kv.RwDB, agg *state.Aggregator, forkaggs ...*state.ForkableAgg) (*DB, error) {
 	tdb := &DB{RwDB: db, stateFiles: agg}
 	if len(forkaggs) > 0 {
-		tdb.forkaggs = make([]*state.ForkableAgg, len(forkaggs))
-		for i, forkagg := range forkaggs {
-			if tdb.forkaggs[i] != nil {
-				panic("forkaggs already set")
+		arr := make([]*state.ForkableAgg, 0)
+		for _, forkagg := range forkaggs {
+			if forkagg == nil {
+				continue
 			}
-			tdb.forkaggs[i] = forkagg
+			arr = append(arr, forkagg)
 		}
+		tdb.forkaggs = arr
 	}
 	return tdb, nil
 }
-func (db *DB) EnableForkable()           { db.forkaggsEnabled = true }
-func (db *DB) Agg() any                  { return db.stateFiles }
-func (db *DB) InternalDB() kv.RwDB       { return db.RwDB }
-func (db *DB) Debug() kv.TemporalDebugDB { return kv.TemporalDebugDB(db) }
+func (db *DB) Agg() any                         { return db.stateFiles }
+func (db *DB) ForkableAgg(id kv.ForkableId) any { return db.forkaggs[db.searchForkableAggIdx(id)] }
+func (db *DB) InternalDB() kv.RwDB              { return db.RwDB }
+func (db *DB) Debug() kv.TemporalDebugDB        { return kv.TemporalDebugDB(db) }
 
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	kvTx, err := db.RwDB.BeginRo(ctx) //nolint:gocritic
@@ -105,7 +108,7 @@ func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 
 	tx.aggtx = db.stateFiles.BeginFilesRo()
 
-	if db.forkaggsEnabled {
+	if len(db.forkaggs) > 0 {
 		tx.forkaggs = make([]*state.ForkableAggTemporalTx, len(db.forkaggs))
 		for i, forkagg := range db.forkaggs {
 			tx.forkaggs[i] = forkagg.BeginTemporalTx()
@@ -141,8 +144,13 @@ func (db *DB) BeginTemporalRw(ctx context.Context) (kv.TemporalRwTx, error) {
 		return nil, err
 	}
 	tx := &RwTx{RwTx: kvTx, tx: tx{db: db, ctx: ctx}}
-
 	tx.aggtx = db.stateFiles.BeginFilesRo()
+	if len(db.forkaggs) > 0 {
+		tx.forkaggs = make([]*state.ForkableAggTemporalTx, len(db.forkaggs))
+		for i, forkagg := range db.forkaggs {
+			tx.forkaggs[i] = forkagg.BeginTemporalTx()
+		}
+	}
 	return tx, nil
 }
 func (db *DB) BeginRw(ctx context.Context) (kv.RwTx, error) {
@@ -172,14 +180,19 @@ func (db *DB) UpdateTemporal(ctx context.Context, f func(tx kv.TemporalRwTx) err
 	return tx.Commit()
 }
 
-func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.RwTx, error) {
+func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.TemporalRwTx, error) {
 	kvTx, err := db.RwDB.BeginRwNosync(ctx) //nolint:gocritic
 	if err != nil {
 		return nil, err
 	}
 	tx := &RwTx{RwTx: kvTx, tx: tx{db: db, ctx: ctx}}
-
 	tx.aggtx = db.stateFiles.BeginFilesRo()
+	if len(db.forkaggs) > 0 {
+		tx.forkaggs = make([]*state.ForkableAggTemporalTx, len(db.forkaggs))
+		for i, forkagg := range db.forkaggs {
+			tx.forkaggs[i] = forkagg.BeginTemporalTx()
+		}
+	}
 	return tx, nil
 }
 func (db *DB) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
@@ -200,10 +213,43 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error 
 func (db *DB) Close() {
 	//db.stateFiles.Close()
 	db.RwDB.Close()
+	for _, forkagg := range db.forkaggs {
+		forkagg.Close()
+	}
 }
 
 func (db *DB) OnFilesChange(onChange, onDel kv.OnFilesChange) {
 	db.stateFiles.OnFilesChange(onChange, onDel)
+}
+
+func (db *DB) searchForkableAggIdx(forkableId kv.ForkableId) int {
+	for i, forkagg := range db.forkaggs {
+		if forkagg.IsForkablePresent(forkableId) {
+			return i
+		}
+	}
+	panic(fmt.Sprintf("forkable not found: %d", forkableId))
+}
+
+func NewTestDB(tb testing.TB, label kv.Label) kv.TemporalRwDB {
+	tb.Helper()
+	db := memdb.NewTestDB(tb, label)
+	dirs := datadir.New(tb.TempDir())
+	agg := state.NewTest(dirs).DisableHistory().MustOpen(context.Background(), db)
+	tb.Cleanup(agg.Close)
+	tdb, _ := New(db, agg)
+	return tdb
+}
+
+func NewTestTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx) {
+	tb.Helper()
+	db := NewTestDB(tb, dbcfg.ChainDB)
+	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
+	if err != nil {
+		tb.Fatal(err)
+	}
+	tb.Cleanup(tx.Rollback)
+	return db, tx
 }
 
 type tx struct {
@@ -240,15 +286,6 @@ func (tx *tx) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 func (tx *tx) Rollback() {
 	tx.autoClose()
 }
-func (tx *tx) searchForkableAggIdx(forkableId kv.ForkableId) int {
-	for i, forkagg := range tx.forkaggs {
-		if forkagg.IsForkablePresent(forkableId) {
-			return i
-		}
-	}
-	panic(fmt.Sprintf("forkable not found: %d", forkableId))
-}
-
 func (tx *Tx) Rollback() {
 	if tx == nil {
 		return
@@ -288,6 +325,15 @@ func (tx *Tx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
 	return applyTx.Apply(ctx, f)
 }
 
+func (tx *tx) searchForkableAggIdx(forkableId kv.ForkableId) int {
+	for i, forkagg := range tx.forkaggs {
+		if forkagg.IsForkablePresent(forkableId) {
+			return i
+		}
+	}
+	panic(fmt.Sprintf("forkable not found: %d", forkableId))
+}
+
 func (tx *Tx) AggForkablesTx(id kv.ForkableId) any {
 	return tx.forkaggs[tx.searchForkableAggIdx(id)]
 }
@@ -324,6 +370,13 @@ func (tx *RwTx) LockDBInRam() error {
 
 func (tx *RwTx) Debug() kv.TemporalDebugTx { return tx }
 func (tx *Tx) Debug() kv.TemporalDebugTx   { return tx }
+
+func (tx *RwTx) NewMemBatch(ioMetrics any) kv.TemporalMemBatch {
+	return state.NewTemporalMemBatch(tx, ioMetrics)
+}
+func (tx *Tx) NewMemBatch(ioMetrics any) kv.TemporalMemBatch {
+	return state.NewTemporalMemBatch(tx, ioMetrics)
+}
 
 func (tx *RwTx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
 	tx.tx.mu.RLock()
@@ -392,6 +445,9 @@ func (tx *tx) autoClose() {
 		closer.Close()
 	}
 	tx.aggtx.Close()
+	for _, f := range tx.forkaggs {
+		f.Close()
+	}
 }
 
 func (tx *RwTx) Commit() error {
@@ -535,10 +591,10 @@ func (tx *RwTx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, lim
 
 // Write methods
 
-func (tx *tx) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
+func (tx *tx) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte) error {
 	panic("implement me pls. or use SharedDomains")
 }
-func (tx *tx) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
+func (tx *tx) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte) error {
 	panic("implement me pls. or use SharedDomains")
 }
 func (tx *tx) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uint64) error {
@@ -567,6 +623,10 @@ func (tx *RwTx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step kv.S
 	return tx.getLatestFromDB(domain, tx.RwTx, k)
 }
 
+func (tx *RwTx) TraceKey(domain kv.Domain, k []byte, fromTxNum, toTxNum uint64) (stream.U64V, error) {
+	return tx.aggtx.DebugTraceKey(tx.ctx, domain, k, fromTxNum, toTxNum, tx.RwTx)
+}
+
 func (tx *tx) getLatestFromDB(domain kv.Domain, dbTx kv.Tx, k []byte) (v []byte, step kv.Step, found bool, err error) {
 	return tx.aggtx.DebugGetLatestFromDB(domain, k, dbTx)
 }
@@ -575,15 +635,37 @@ func (tx *tx) GetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v
 	return tx.aggtx.DebugGetLatestFromFiles(domain, k, maxTxNum)
 }
 
+func (tx *Tx) TraceKey(domain kv.Domain, k []byte, fromTxNum, toTxNum uint64) (stream.U64V, error) {
+	return tx.aggtx.DebugTraceKey(tx.ctx, domain, k, fromTxNum, toTxNum, tx.Tx)
+}
+
 func (db *DB) DomainTables(domain ...kv.Domain) []string {
 	return db.stateFiles.DomainTables(domain...)
 }
 func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string {
 	return db.stateFiles.InvertedIdxTables(domain...)
 }
+func (db *DB) ForkableTables(names ...kv.ForkableId) (tables []string) {
+	for _, name := range names {
+		tables = append(tables, db.forkaggs[db.searchForkableAggIdx(name)].Tables()...)
+
+	}
+	return
+}
 func (db *DB) ReloadFiles() error { return db.stateFiles.ReloadFiles() }
-func (db *DB) BuildMissedAccessors(ctx context.Context, workers int) error {
-	return db.stateFiles.BuildMissedAccessors(ctx, workers)
+func (db *DB) BuildMissedAccessors(ctx context.Context, workers int) (err error) {
+	if err = db.stateFiles.BuildMissedAccessors(ctx, workers); err != nil {
+		return
+	}
+
+	if len(db.forkaggs) > 0 {
+		for _, forkagg := range db.forkaggs {
+			if err = forkagg.BuildMissedAccessors(ctx, workers); err != nil {
+				return
+			}
+		}
+	}
+	return
 }
 func (db *DB) EnableReadAhead() kv.TemporalDebugDB {
 	db.stateFiles.MadvNormal()
@@ -619,10 +701,26 @@ func (tx *RwTx) CurrentDomainVersion(domain kv.Domain) version.Version {
 	return tx.aggtx.CurrentDomainVersion(domain)
 }
 func (tx *RwTx) PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error) {
-	return tx.aggtx.PruneSmallBatches(ctx, timeout, tx.RwTx)
-}
-func (tx *RwTx) GreedyPruneHistory(ctx context.Context, domain kv.Domain) error {
-	return tx.aggtx.GreedyPruneHistory(ctx, domain, tx.RwTx)
+	if len(tx.forkaggs) > 0 {
+		timeTaken := time.Now()
+		for i := 0; i < len(tx.forkaggs); i++ {
+			hasMore, err := tx.forkaggs[i].PruneSmallBatches(ctx, timeout, tx.RwTx)
+			if err != nil {
+				return true, err
+			}
+			if time.Since(timeTaken) > timeout {
+				return true, nil
+			}
+			haveMore = haveMore || hasMore
+		}
+		timeout -= time.Since(timeTaken)
+	}
+
+	hasMore, err := tx.aggtx.PruneSmallBatches(ctx, timeout, tx.RwTx)
+	if err != nil {
+		return
+	}
+	return haveMore || hasMore, nil
 }
 func (tx *RwTx) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
 	return tx.aggtx.Unwind(ctx, tx.RwTx, txNumUnwindTo, changeset)
@@ -663,4 +761,16 @@ func (tx *tx) stepSize() uint64 {
 func (tx *Tx) StepSize() uint64 { return tx.stepSize() }
 func (tx *RwTx) StepSize() uint64 {
 	return tx.stepSize()
+}
+func (tx *Tx) AllForkableIds() (ids []kv.ForkableId) {
+	for _, forkagg := range tx.tx.forkaggs {
+		ids = append(ids, forkagg.Ids()...)
+	}
+	return
+}
+func (tx *RwTx) AllForkableIds() (ids []kv.ForkableId) {
+	for _, forkagg := range tx.tx.forkaggs {
+		ids = append(ids, forkagg.Ids()...)
+	}
+	return
 }

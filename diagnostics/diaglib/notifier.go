@@ -3,13 +3,13 @@ package diaglib
 import (
 	"net/http"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/gorilla/websocket"
 )
 
 type DiagMessages struct {
-	MessageType string      `json:"messageType"`
-	Message     interface{} `json:"message"`
+	MessageType string `json:"messageType"`
+	Message     any    `json:"message"`
 }
 
 var upgrader = websocket.Upgrader{

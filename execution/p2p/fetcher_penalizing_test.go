@@ -18,12 +18,12 @@ package p2p
 
 import (
 	"context"
-	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 )
@@ -109,7 +109,7 @@ func TestPenalizingFetcherFetchHeadersShouldPenalizePeerWhenErrNonSequentialHead
 	requestId := uint64(1234)
 	disconnectedHeaders := newMockBlockHeaders(2)
 	disconnectedHeaders[0] = &types.Header{
-		Number:   big.NewInt(1),
+		Number:   *uint256.NewInt(1),
 		GasLimit: 1234, // change a random value in order to change the header Hash
 	}
 	mockInboundMessages := []*sentryproto.InboundMessage{
@@ -386,7 +386,7 @@ func TestPenalizingFetcherFetchBodiesShouldPenalizePeerWhenErrTooManyBodies(t *t
 
 	peerId := PeerIdFromUint64(1)
 	requestId := uint64(1234)
-	headers := []*types.Header{{Number: big.NewInt(1)}}
+	headers := []*types.Header{{Number: *uint256.NewInt(1)}}
 	hashes := []common.Hash{headers[0].Hash()}
 	mockInboundMessages := []*sentryproto.InboundMessage{
 		{
@@ -421,7 +421,7 @@ func TestPenalizingFetcherFetchBodiesShouldPenalizePeerWhenErrMissingBodies(t *t
 
 	peerId := PeerIdFromUint64(1)
 	requestId := uint64(1234)
-	headers := []*types.Header{{Number: big.NewInt(1)}}
+	headers := []*types.Header{{Number: *uint256.NewInt(1)}}
 	hashes := []common.Hash{headers[0].Hash()}
 	mockInboundMessages := []*sentryproto.InboundMessage{
 		{
@@ -674,7 +674,7 @@ func TestPenalizingFetcherFetchBlocksBackwardsByHashShouldPenalizePeerWhenErrNon
 	headers := newMockBlockHeaders(2)
 	hash := headers[1].Hash()
 	incorrectHeader := &types.Header{
-		Number:   big.NewInt(1),
+		Number:   *uint256.NewInt(1),
 		GasLimit: 1234,
 	}
 	incorrectHeader.Hash()

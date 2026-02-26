@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"slices"
 
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/p2p/enode"
-	ckzg "github.com/ethereum/c-kzg-4844/v2/bindings/go"
-	"github.com/holiman/uint256"
 )
 
 // CustodyIndex represents the index of a custody group
@@ -150,22 +152,22 @@ func RecoverMatrix(partialMatrix []cltypes.MatrixEntry, blobCount uint64) ([][]c
 	return matrix, nil
 }
 
-// RecoverCellsAndKZGProofs uses the c-kzg-4844 library to recover the cells and proofs.
+// RecoverCellsAndKZGProofs uses the go-eth-kzg library to recover the cells and proofs.
 func RecoverCellsAndKZGProofs(cellIndices []ColumnIndex, cells []cltypes.Cell) ([]cltypes.Cell, []cltypes.KZGProof, error) {
-	ckzgCells := make([]ckzg.Cell, len(cells))
-	for i, cell := range cells {
-		ckzgCells[i] = ckzg.Cell(cell)
+	ckzgCells := make([]*goethkzg.Cell, len(cells))
+	for i := range cells {
+		ckzgCells[i] = (*goethkzg.Cell)(&cells[i])
 	}
 
 	// recover cells and proofs
-	recoveredCells, recoveredProofs, err := ckzg.RecoverCellsAndKZGProofs(cellIndices, ckzgCells)
+	recoveredCells, recoveredProofs, err := kzg.Ctx().RecoverCellsAndComputeKZGProofs(cellIndices, ckzgCells, 0 /* numGoRoutines */)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to recover cells and proofs: %w", err)
 	}
 
 	convertCells := make([]cltypes.Cell, len(recoveredCells))
 	for i := range recoveredCells {
-		convertCells[i] = cltypes.Cell(recoveredCells[i])
+		convertCells[i] = cltypes.Cell(*recoveredCells[i])
 	}
 
 	convertProofs := make([]cltypes.KZGProof, len(recoveredProofs))
@@ -175,21 +177,21 @@ func RecoverCellsAndKZGProofs(cellIndices []ColumnIndex, cells []cltypes.Cell) (
 	return convertCells, convertProofs, nil
 }
 
-// ComputeCellsAndKZGProofs uses the c-kzg-4844 library to compute the cells and proofs.
+// ComputeCellsAndKZGProofs uses the go-eth-kzg library to compute the cells and proofs.
 func ComputeCellsAndKZGProofs(blob []byte) ([]cltypes.Cell, []cltypes.KZGProof, error) {
-	ckzgBlob := ckzg.Blob{}
+	ckzgBlob := goethkzg.Blob{}
 	if len(blob) != len(ckzgBlob) {
 		return nil, nil, fmt.Errorf("blob length mismatch: %d != %d", len(blob), len(ckzgBlob))
 	}
 	copy(ckzgBlob[:], blob)
-	cells, proofs, err := ckzg.ComputeCellsAndKZGProofs(&ckzgBlob)
+	cells, proofs, err := kzg.Ctx().ComputeCellsAndKZGProofs(&ckzgBlob, 0 /* numGoRoutines */)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to compute cells and proofs: %w", err)
 	}
 
 	convertCells := make([]cltypes.Cell, len(cells))
 	for i := range cells {
-		convertCells[i] = cltypes.Cell(cells[i])
+		convertCells[i] = cltypes.Cell(*cells[i])
 	}
 
 	convertProofs := make([]cltypes.KZGProof, len(proofs))

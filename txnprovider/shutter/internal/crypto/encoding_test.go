@@ -25,7 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 	blst "github.com/supranational/blst/bindings/go"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 )
 
 func encryptedMessage() *EncryptedMessage {
@@ -68,7 +68,7 @@ func TestUnmarshalBroken(t *testing.T) {
 	err = m.Unmarshal(d[:len(d)-1])
 	assert.True(t, err != nil)
 
-	v := d[:]
+	v := d
 	v[0]++
 	err = m.Unmarshal(v)
 	assert.True(t, err != nil)

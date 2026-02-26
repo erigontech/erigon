@@ -18,35 +18,36 @@ package jsonrpc
 
 import (
 	"context"
+	"fmt"
 	"slices"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
-	"github.com/erigontech/erigon/eth/ethutils"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
 
-type txNumsIterFactory func(tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, addr common.Address, fromTxNum int) (*rawdbv3.MapTxNum2BlockNumIter, error)
+type txNumsIterFactory func(ctx context.Context, tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, addr common.Address, fromTxNum int) (*rawdbv3.MapTxNum2BlockNumIter, error)
 
-func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, iterFactory txNumsIterFactory, addr common.Address, fromTxNum int, pageSize uint16) ([]*ethapi.RPCTransaction, []map[string]interface{}, bool, error) {
+func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, iterFactory txNumsIterFactory, addr common.Address, fromTxNum int, pageSize uint16) ([]*ethapi.RPCTransaction, []map[string]any, bool, error) {
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, nil, false, err
 	}
 
-	txNumsIter, err := iterFactory(tx, txNumsReader, addr, fromTxNum)
+	txNumsIter, err := iterFactory(ctx, tx, txNumsReader, addr, fromTxNum)
 	if err != nil {
 		return nil, nil, false, err
 	}
 
 	var block *types.Block
 	txs := make([]*ethapi.RPCTransaction, 0, pageSize)
-	receipts := make([]map[string]interface{}, 0, pageSize)
+	receipts := make([]map[string]any, 0, pageSize)
 	resultCount := uint16(0)
 
 	mustReadBlock := true
@@ -82,6 +83,9 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 			if err != nil {
 				return nil, nil, false, err
 			}
+			if block == nil {
+				return nil, nil, false, fmt.Errorf("block not found: %d", blockNum)
+			}
 			mustReadBlock = false
 		}
 
@@ -93,10 +97,10 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 			log.Warn("[rpc] txn not found", "blockNum", blockNum, "txIndex", txIndex)
 			continue
 		}
-		rpcTx := ethapi.NewRPCTransaction(txn, block.Hash(), blockNum, uint64(txIndex), block.BaseFee())
+		rpcTx := ethapi.NewRPCTransaction(txn, block.Hash(), block.Time(), blockNum, uint64(txIndex), block.BaseFee())
 		txs = append(txs, rpcTx)
 
-		receipt, err := api.receiptsGenerator.GetReceipt(ctx, chainConfig, tx, block.HeaderNoCopy(), txn, txIndex, txNum)
+		receipt, err := api.receiptsGenerator.GetReceipt(ctx, chainConfig, tx, block.HeaderNoCopy(), txn, txIndex, txNum, nil)
 		if err != nil {
 			return nil, nil, false, err
 		}
@@ -114,7 +118,7 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 	return txs, receipts, hasMore, nil
 }
 
-func createBackwardTxNumIter(tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, addr common.Address, fromTxNum int) (*rawdbv3.MapTxNum2BlockNumIter, error) {
+func createBackwardTxNumIter(ctx context.Context, tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, addr common.Address, fromTxNum int) (*rawdbv3.MapTxNum2BlockNumIter, error) {
 	// unbounded limit on purpose, since there could be e.g. block rewards system txs, we limit
 	// results later
 	itTo, err := tx.IndexRange(kv.TracesToIdx, addr[:], fromTxNum, -1, order.Desc, kv.Unlim)
@@ -126,7 +130,7 @@ func createBackwardTxNumIter(tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader
 		return nil, err
 	}
 	txNums := stream.Union[uint64](itFrom, itTo, order.Desc, kv.Unlim)
-	return rawdbv3.TxNums2BlockNums(tx, txNumsReader, txNums, order.Desc), nil
+	return rawdbv3.TxNums2BlockNums(ctx, tx, txNumsReader, txNums, order.Desc), nil
 }
 
 func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx context.Context, addr common.Address, fromBlockNum uint64, pageSize uint16) (*TransactionsWithReceipts, error) {
@@ -142,7 +146,7 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 	if fromBlockNum != 0 {
 		// from == 0 == magic number which means last; reproduce bug-compatibility for == 1
 		// with e2 for now
-		_txNum, err := api._txNumReader.Max(tx, fromBlockNum)
+		_txNum, err := api._txNumReader.Max(ctx, tx, fromBlockNum)
 		if err != nil {
 			return nil, err
 		}
@@ -157,7 +161,7 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 	return &TransactionsWithReceipts{txs, receipts, isFirstPage, !hasMore}, nil
 }
 
-func createForwardTxNumIter(tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, addr common.Address, fromTxNum int) (*rawdbv3.MapTxNum2BlockNumIter, error) {
+func createForwardTxNumIter(ctx context.Context, tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, addr common.Address, fromTxNum int) (*rawdbv3.MapTxNum2BlockNumIter, error) {
 	// unbounded limit on purpose, since there could be e.g. block rewards system txs, we limit
 	// results later
 	itTo, err := tx.IndexRange(kv.TracesToIdx, addr[:], fromTxNum, -1, order.Asc, kv.Unlim)
@@ -169,7 +173,7 @@ func createForwardTxNumIter(tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader,
 		return nil, err
 	}
 	txNums := stream.Union[uint64](itFrom, itTo, order.Asc, kv.Unlim)
-	return rawdbv3.TxNums2BlockNums(tx, txNumsReader, txNums, order.Asc), nil
+	return rawdbv3.TxNums2BlockNums(ctx, tx, txNumsReader, txNums, order.Asc), nil
 }
 
 func (api *OtterscanAPIImpl) searchTransactionsAfterV3(tx kv.TemporalTx, ctx context.Context, addr common.Address, fromBlockNum uint64, pageSize uint16) (*TransactionsWithReceipts, error) {
@@ -180,7 +184,7 @@ func (api *OtterscanAPIImpl) searchTransactionsAfterV3(tx kv.TemporalTx, ctx con
 		isLastPage = true
 	} else {
 		// Internal search code considers blockNum [including], so adjust the value
-		_txNum, err := api._txNumReader.Min(tx, fromBlockNum+1)
+		_txNum, err := api._txNumReader.Min(ctx, tx, fromBlockNum+1)
 		if err != nil {
 			return nil, err
 		}

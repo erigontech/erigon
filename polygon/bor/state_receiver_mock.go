@@ -12,7 +12,7 @@ package bor
 import (
 	reflect "reflect"
 
-	consensus "github.com/erigontech/erigon/execution/consensus"
+	rules "github.com/erigontech/erigon/execution/protocol/rules"
 	rlp "github.com/erigontech/erigon/execution/rlp"
 	gomock "go.uber.org/mock/gomock"
 )
@@ -42,7 +42,7 @@ func (m *MockStateReceiver) EXPECT() *MockStateReceiverMockRecorder {
 }
 
 // CommitState mocks base method.
-func (m *MockStateReceiver) CommitState(event rlp.RawValue, syscall consensus.SystemCall) error {
+func (m *MockStateReceiver) CommitState(event rlp.RawValue, syscall rules.SystemCall) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "CommitState", event, syscall)
 	ret0, _ := ret[0].(error)
@@ -68,13 +68,13 @@ func (c *MockStateReceiverCommitStateCall) Return(arg0 error) *MockStateReceiver
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockStateReceiverCommitStateCall) Do(f func(rlp.RawValue, consensus.SystemCall) error) *MockStateReceiverCommitStateCall {
+func (c *MockStateReceiverCommitStateCall) Do(f func(rlp.RawValue, rules.SystemCall) error) *MockStateReceiverCommitStateCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockStateReceiverCommitStateCall) DoAndReturn(f func(rlp.RawValue, consensus.SystemCall) error) *MockStateReceiverCommitStateCall {
+func (c *MockStateReceiverCommitStateCall) DoAndReturn(f func(rlp.RawValue, rules.SystemCall) error) *MockStateReceiverCommitStateCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

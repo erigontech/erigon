@@ -19,14 +19,12 @@ package raw
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon/cl/cltypes/solid"
-	ssz2 "github.com/erigontech/erigon/cl/ssz"
-
-	"github.com/erigontech/erigon-lib/types/clonable"
-	"github.com/erigontech/erigon-lib/types/ssz"
-
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 // BlockRoot computes the block root for the state.
@@ -71,8 +69,8 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 // getSchema gives the schema for the current beacon state version according to ETH 2.0 specs.
-func (b *BeaconState) getSchema() []interface{} {
-	s := []interface{}{&b.genesisTime, b.genesisValidatorsRoot[:], &b.slot, b.fork, b.latestBlockHeader, b.blockRoots, b.stateRoots, b.historicalRoots,
+func (b *BeaconState) getSchema() []any {
+	s := []any{&b.genesisTime, b.genesisValidatorsRoot[:], &b.slot, b.fork, b.latestBlockHeader, b.blockRoots, b.stateRoots, b.historicalRoots,
 		b.eth1Data, b.eth1DataVotes, &b.eth1DepositIndex, b.validators, b.balances, b.randaoMixes, b.slashings}
 	if b.version == clparams.Phase0Version {
 		return append(s, b.previousEpochAttestations, b.currentEpochAttestations, &b.justificationBits, &b.previousJustifiedCheckpoint, &b.currentJustifiedCheckpoint,

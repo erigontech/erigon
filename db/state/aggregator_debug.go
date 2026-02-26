@@ -257,6 +257,19 @@ type MissedAccessorAggFiles struct {
 	ii     map[kv.InvertedIdx]*MissedAccessorIIFiles
 }
 
+func (m MissedFilesMap) IsEmpty() bool {
+	for _, v := range m {
+		if len(v) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func (m MissedFilesMap) Get(accessor statecfg.Accessors) []*FilesItem {
+	return m[accessor]
+}
+
 func (m *MissedAccessorAggFiles) IsEmpty() bool {
 	if m == nil {
 		return true
@@ -292,12 +305,7 @@ func (m *MissedAccessorDomainFiles) IsEmpty() bool {
 	if m == nil {
 		return true
 	}
-	for _, v := range m.files {
-		if len(v) > 0 {
-			return false
-		}
-	}
-	return m.history.IsEmpty()
+	return m.files.IsEmpty() && m.history.IsEmpty()
 }
 
 type MissedAccessorHistoryFiles struct {
@@ -333,12 +341,7 @@ func (m *MissedAccessorIIFiles) IsEmpty() bool {
 	if m == nil {
 		return true
 	}
-	for _, v := range m.files {
-		if len(v) > 0 {
-			return false
-		}
-	}
-	return true
+	return m.files.IsEmpty()
 }
 
 func (at *AggregatorRoTx) DbgDomain(idx kv.Domain) *DomainRoTx         { return at.d[idx] }

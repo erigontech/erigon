@@ -27,7 +27,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/txnprovider"
@@ -86,7 +86,7 @@ func NewPool(
 		decryptionKeysSource = NewPubSubDecryptionKeysSource(logger, config.P2pConfig, decryptionKeysValidator)
 	}
 
-	decryptionKeysListener := NewDecryptionKeysListener(logger, config, decryptionKeysSource)
+	decryptionKeysListener := NewDecryptionKeysListener(logger, decryptionKeysSource)
 	encryptedTxnsPool := NewEncryptedTxnsPool(logger, config, contractBackend, blockListener)
 	decryptedTxnsPool := NewDecryptedTxnsPool()
 	decryptionKeysProcessor := NewDecryptionKeysProcessor(

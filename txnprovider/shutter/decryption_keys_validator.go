@@ -27,7 +27,7 @@ import (
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/peer"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/crypto"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/proto"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
@@ -169,6 +169,8 @@ func (v DecryptionKeysValidator) validateSignatures(msg *proto.DecryptionKeys, e
 		identityPreimages[i] = ip
 	}
 
+	identityPreimagesSSZ := identityPreimages.ToListSSZ()
+
 	for i, sig := range extraData.Signatures {
 		signerIdx := extraData.SignerIndices[i]
 		signer, err := eon.KeyperAt(signerIdx)
@@ -181,7 +183,7 @@ func (v DecryptionKeysValidator) validateSignatures(msg *proto.DecryptionKeys, e
 			Eon:               EonIndex(msg.Eon),
 			Slot:              extraData.Slot,
 			TxnPointer:        extraData.TxPointer,
-			IdentityPreimages: identityPreimages.ToListSSZ(),
+			IdentityPreimages: identityPreimagesSSZ,
 		}
 
 		ok, err := signatureData.Verify(sig, signer)

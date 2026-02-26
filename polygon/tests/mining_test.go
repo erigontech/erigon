@@ -31,23 +31,23 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/race"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/testlog"
-	"github.com/erigontech/erigon/eth"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/race"
+	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
-	"github.com/erigontech/erigon/execution/chain/params"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node"
+	"github.com/erigontech/erigon/node/debug"
+	"github.com/erigontech/erigon/node/eth"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/polygon/tests/helper"
-	"github.com/erigontech/erigon/turbo/debug"
 )
 
 const (
@@ -90,6 +90,7 @@ func TestMiningBenchmark(t *testing.T) {
 	defer clean()
 
 	logger := testlog.Logger(t, log.LvlDebug)
+	// TODO: Use goroutine leak checker in Go 1.26.
 	goroutineDumpTimer := time.NewTimer(timeout - 5*time.Second)
 	defer goroutineDumpTimer.Stop()
 	go func() {
@@ -140,6 +141,7 @@ func TestMiningBenchmark(t *testing.T) {
 		t.Cleanup(func() {
 			err := stack.Close()
 			require.NoError(t, err)
+			ethBackend.Stop()
 		})
 
 		if err := stack.Start(); err != nil {

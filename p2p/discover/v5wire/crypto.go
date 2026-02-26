@@ -28,11 +28,10 @@ import (
 	"fmt"
 	"hash"
 
-	"golang.org/x/crypto/hkdf"
-
-	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/p2p/enode"
+	"golang.org/x/crypto/hkdf"
 )
 
 const (
@@ -70,10 +69,10 @@ func DecodePubkey(curve elliptic.Curve, e []byte) (*ecdsa.PublicKey, error) {
 // idNonceHash computes the ID signature hash used in the handshake.
 func idNonceHash(h hash.Hash, challenge, ephkey []byte, destID enode.ID) []byte {
 	h.Reset()
-	h.Write([]byte("discovery v5 identity proof")) //nolint:errcheck
-	h.Write(challenge)                             //nolint:errcheck
-	h.Write(ephkey)                                //nolint:errcheck
-	h.Write(destID[:])                             //nolint:errcheck
+	h.Write([]byte("discovery v5 identity proof"))
+	h.Write(challenge)
+	h.Write(ephkey)
+	h.Write(destID[:])
 	return h.Sum(nil)
 }
 
@@ -131,8 +130,8 @@ func deriveKeys(hash hashFn, priv *ecdsa.PrivateKey, pub *ecdsa.PublicKey, n1, n
 	}
 	kdf := hkdf.New(hash, eph, challenge, info)
 	sec := session{writeKey: make([]byte, aesKeySize), readKey: make([]byte, aesKeySize)}
-	kdf.Read(sec.writeKey) //nolint:errcheck
-	kdf.Read(sec.readKey)  //nolint:errcheck
+	kdf.Read(sec.writeKey)
+	kdf.Read(sec.readKey)
 	clear(eph)
 	return &sec
 }
@@ -152,15 +151,14 @@ func ecdh(privkey *ecdsa.PrivateKey, pubkey *ecdsa.PublicKey) []byte {
 // encryptGCM encrypts pt using AES-GCM with the given key and nonce. The ciphertext is
 // appended to dest, which must not overlap with plaintext. The resulting ciphertext is 16
 // bytes longer than plaintext because it contains an authentication tag.
-// nolint:unparam
 func encryptGCM(dest, key, nonce, plaintext, authData []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		panic(fmt.Errorf("can't create block cipher: %w", err))
+		panic(fmt.Errorf("can't create block cipher: %v", err))
 	}
 	aesgcm, err := cipher.NewGCMWithNonceSize(block, gcmNonceSize)
 	if err != nil {
-		panic(fmt.Errorf("can't create GCM: %w", err))
+		panic(fmt.Errorf("can't create GCM: %v", err))
 	}
 	return aesgcm.Seal(dest, nonce, plaintext, authData), nil
 }

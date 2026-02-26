@@ -20,12 +20,12 @@ import (
 	"context"
 	"errors"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/execution/trie"
-	"github.com/erigontech/erigon/turbo/services"
+	"github.com/erigontech/erigon/execution/commitment/trie"
 )
 
 type TrieCfg struct {
@@ -51,7 +51,7 @@ func StageTrieCfg(db kv.TemporalRwDB, checkRoot, saveNewHashesToDB bool, tmpDir 
 var ErrInvalidStateRootHash = errors.New("invalid state root hash")
 
 func RebuildPatriciaTrieBasedOnFiles(ctx context.Context, cfg TrieCfg, squeeze bool) (common.Hash, error) {
-	txNumsReader := cfg.blockReader.TxnumReader(ctx)
+	txNumsReader := cfg.blockReader.TxnumReader()
 	rh, err := state.RebuildCommitmentFiles(ctx, cfg.db, &txNumsReader, log.New(), squeeze)
 	if err != nil {
 		return trie.EmptyRoot, err

@@ -30,8 +30,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/node/direct"
@@ -42,7 +42,11 @@ import (
 )
 
 func TestFetch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	ctx := t.Context()
+	t.Parallel()
 
 	ctrl := gomock.NewController(t)
 	remoteKvClient := remoteproto.NewMockKVClient(ctrl)
@@ -54,7 +58,7 @@ func TestFetch(t *testing.T) {
 	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
 	require.NoError(t, err)
 	var wg sync.WaitGroup
-	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, remoteKvClient, nil, *u256.N1, log.New(), WithP2PFetcherWg(&wg))
+	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, remoteKvClient, nil, u256.N1, log.New(), WithP2PFetcherWg(&wg))
 	m.StreamWg.Add(2)
 	fetch.ConnectSentries()
 	m.StreamWg.Wait()
@@ -137,7 +141,7 @@ func TestSendTxnPropagate(t *testing.T) {
 		send := NewSend(ctx, []sentryproto.SentryClient{sentryClient}, log.New())
 		list := make(Hashes, p2pTxPacketLimit*3)
 		for i := 0; i < len(list); i += 32 {
-			b := []byte(fmt.Sprintf("%x", i))
+			b := fmt.Appendf(nil, "%x", i)
 			copy(list[i:i+32], b)
 		}
 		send.BroadcastPooledTxns(testRlps(len(list)/32), 100)
@@ -235,6 +239,7 @@ func decodeHex(in string) []byte {
 }
 
 func TestOnNewBlock(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	_, db := memdb.NewTestDB(t, dbcfg.ChainDB), memdb.NewTestDB(t, dbcfg.TxPoolDB)
 	ctrl := gomock.NewController(t)
@@ -291,7 +296,7 @@ func TestOnNewBlock(t *testing.T) {
 		}).
 		Times(1)
 
-	fetch := NewFetch(ctx, nil, pool, stateChanges, db, *u256.N1, log.New())
+	fetch := NewFetch(ctx, nil, pool, stateChanges, db, u256.N1, log.New())
 	err := fetch.handleStateChanges(ctx, stateChanges)
 	assert.ErrorIs(t, io.EOF, err)
 	assert.Len(t, minedTxns.Txns, 3)

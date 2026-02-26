@@ -19,12 +19,14 @@ package testhelpers
 import (
 	"context"
 	"crypto/ecdsa"
+	"fmt"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/abi/bind"
-	executiontests "github.com/erigontech/erigon/execution/tests"
+	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 	shuttercontracts "github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
 )
 
@@ -34,7 +36,7 @@ type ContractsDeployer struct {
 	contractBackend      bind.ContractBackend
 	cl                   *MockCl
 	chainId              *big.Int
-	txnInclusionVerifier executiontests.TxnInclusionVerifier
+	txnInclusionVerifier engineapitester.TxnInclusionVerifier
 }
 
 func NewContractsDeployer(
@@ -42,7 +44,7 @@ func NewContractsDeployer(
 	cb bind.ContractBackend,
 	cl *MockCl,
 	chainId *big.Int,
-	txnInclusionVerifier executiontests.TxnInclusionVerifier,
+	txnInclusionVerifier engineapitester.TxnInclusionVerifier,
 ) ContractsDeployer {
 	return ContractsDeployer{
 		key:                  key,
@@ -54,7 +56,12 @@ func NewContractsDeployer(
 	}
 }
 
-func (d ContractsDeployer) DeployCore(ctx context.Context) (ContractsDeployment, error) {
+func (d ContractsDeployer) DeployCore(ctx context.Context) (_ ContractsDeployment, err error) {
+	defer func() {
+		if err != nil {
+			fmt.Println("DEPLOY ERR", err, dbg.Stack())
+		}
+	}()
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(d.key, d.chainId)
 	if err != nil {
 		return ContractsDeployment{}, err

@@ -9,23 +9,20 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 )
 
 func (obj *TestingStruct) EncodingSize() (size int) {
-	size += rlp.IntLenExcludingHead(uint64(obj.a)) + 1
+	size += rlp.U64Len(uint64(obj.a))
 	if obj.aa != nil {
-		size += rlp.IntLenExcludingHead(uint64(*obj.aa)) + 1
+		size += rlp.U64Len(uint64(*obj.aa))
 	}
-	size += rlp.BigIntLenExcludingHead(&obj.b) + 1
-	size += 1
-	if obj.bb != nil {
-		size += rlp.BigIntLenExcludingHead(obj.bb)
-	}
-	size += rlp.Uint256LenExcludingHead(&obj.c) + 1
-	size += rlp.Uint256LenExcludingHead(obj.cc) + 1
+	size += rlp.BigIntLen(&obj.b)
+	size += rlp.BigIntLen(obj.bb)
+	size += rlp.Uint256Len(obj.c)
+	size += rlp.Uint256Len(*obj.cc)
 	size += 8 + 1
 	size += 1
 	if obj.dd != nil {
@@ -116,10 +113,10 @@ func (obj *TestingStruct) EncodeRLP(w io.Writer) error {
 	if err := rlp.EncodeBigInt(obj.bb, w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeUint256(&obj.c, w, b[:]); err != nil {
+	if err := rlp.EncodeUint256(obj.c, w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeUint256(obj.cc, w, b[:]); err != nil {
+	if err := rlp.EncodeUint256(*obj.cc, w, b[:]); err != nil {
 		return err
 	}
 	b[0] = 128 + 8

@@ -3,8 +3,9 @@ package commitment
 import (
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/hexutil"
 )
 
 // 20 bytes account key -> 32 bytes keccak -> 64 bytes nibblelized
@@ -26,4 +27,16 @@ func TestStorageKey(t *testing.T) {
 	require.Equal(t, hexutil.MustDecode(
 		"0x0b070f0f040d05000b0d01080705010601060800020a0400060c09040b0109000f010a030f0d040f0c08020b00060d0b04000904030e000101090c050e080b0c"+
 			"020d040906010f0e0803000401080b02000a070601050b0d060003030f0e01040100060a090303090500060c0c0905020c0b0b040e0d0007030a03000807030c"), nibblizedHashedKey)
+}
+
+// BenchmarkKeyToHexNibbleHash benchmarks the key-to-nibble hashing used in commitment (uses fastkeccak).
+func BenchmarkKeyToHexNibbleHash(b *testing.B) {
+	key := make([]byte, 20) // account key
+	for i := range key {
+		key[i] = byte(i)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		KeyToHexNibbleHash(key)
+	}
 }

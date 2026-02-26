@@ -5,18 +5,20 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/das"
+	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	st "github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 var (
@@ -61,6 +63,26 @@ func NewDataColumnSidecarService(
 	}
 }
 
+func (s *dataColumnSidecarService) Names() []string {
+	names := make([]string, 0, s.cfg.DataColumnSidecarSubnetCount)
+	for i := 0; i < int(s.cfg.DataColumnSidecarSubnetCount); i++ {
+		names = append(names, gossip.TopicNameDataColumnSidecar(uint64(i)))
+	}
+	return names
+}
+
+func (s *dataColumnSidecarService) IsMyGossipMessage(name string) bool {
+	return gossip.IsTopicDataColumnSidecar(name)
+}
+
+func (s *dataColumnSidecarService) DecodeGossipMessage(_ peer.ID, data []byte, version clparams.StateVersion) (*cltypes.DataColumnSidecar, error) {
+	obj := &cltypes.DataColumnSidecar{}
+	if err := obj.DecodeSSZ(data, int(version)); err != nil {
+		return nil, err
+	}
+	return obj, nil
+}
+
 type seenSidecarKey struct {
 	slot          uint64
 	proposerIndex uint64
@@ -83,7 +105,7 @@ func (s *dataColumnSidecarService) ProcessMessage(ctx context.Context, subnet *u
 
 	// [IGNORE] The sidecar is the first sidecar for the tuple (block_header.slot, block_header.proposer_index, sidecar.index) with valid header signature, sidecar inclusion proof, and kzg proof.
 	if _, ok := s.seenSidecar.Get(seenKey); ok {
-		return ErrIgnore
+		return nil
 	}
 
 	blockRoot, err := msg.SignedBlockHeader.Header.HashSSZ()

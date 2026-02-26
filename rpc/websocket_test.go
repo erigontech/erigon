@@ -31,7 +31,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 func TestWebsocketClientHeaders(t *testing.T) {
@@ -71,7 +71,7 @@ func TestWebsocketOriginCheck(t *testing.T) {
 		t.Fatal("no error for wrong origin")
 	}
 	wantErr := wsHandshakeError{websocket.ErrBadHandshake, "403 Forbidden"}
-	if err != nil && err.Error() != wantErr.Error() {
+	if err.Error() != wantErr.Error() {
 		t.Fatalf("wrong error for wrong origin: %q", err)
 	}
 
@@ -85,10 +85,6 @@ func TestWebsocketOriginCheck(t *testing.T) {
 
 // This test checks whether calls exceeding the request size limit are rejected.
 func TestWebsocketLargeCall(t *testing.T) {
-	//if runtime.GOOS == "darwin" {
-	t.Skip("issue #16875")
-	//}
-
 	if testing.Short() {
 		t.Skip()
 	}

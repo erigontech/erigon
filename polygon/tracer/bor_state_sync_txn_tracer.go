@@ -21,18 +21,18 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/eth/tracers"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 )
 
 func NewBorStateSyncTxnTracer(
 	tracer *tracers.Tracer,
-	stateReceiverContractAddress common.Address,
+	stateReceiverContractAddress accounts.Address,
 ) *tracers.Tracer {
 	l := &borStateSyncTxnTracer{
 		Tracer:                       tracer,
@@ -69,11 +69,11 @@ func NewBorStateSyncTxnTracer(
 // state sync events bor transaction.
 type borStateSyncTxnTracer struct { /// LOOKS WRONG
 	Tracer                       *tracers.Tracer
-	stateReceiverContractAddress common.Address
+	stateReceiverContractAddress accounts.Address
 	createdTopLevel              bool
 }
 
-func (bsstt *borStateSyncTxnTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from common.Address) {
+func (bsstt *borStateSyncTxnTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
 	if bsstt.Tracer.OnTxStart != nil {
 		bsstt.Tracer.OnTxStart(env, tx, from)
 	}
@@ -96,10 +96,10 @@ func (bsstt *borStateSyncTxnTracer) OnExit(depth int, output []byte, gasUsed uin
 	}
 }
 
-func (bsstt *borStateSyncTxnTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (bsstt *borStateSyncTxnTracer) OnEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
 	if bsstt.Tracer.OnEnter != nil {
 		if !bsstt.createdTopLevel {
-			bsstt.Tracer.OnEnter(0, byte(vm.CALL), state.SystemAddress, bsstt.stateReceiverContractAddress, false, nil, 0, u256.N0, nil)
+			bsstt.Tracer.OnEnter(0, byte(vm.CALL), params.SystemAddress, bsstt.stateReceiverContractAddress, false, nil, 0, u256.N0, nil)
 			bsstt.createdTopLevel = true
 		}
 
@@ -159,25 +159,25 @@ func (bsstt *borStateSyncTxnTracer) OnGenesisBlock(b *types.Block, alloc types.G
 	}
 }
 
-func (bsstt *borStateSyncTxnTracer) OnBalanceChange(a common.Address, prev, new uint256.Int, reason tracing.BalanceChangeReason) {
+func (bsstt *borStateSyncTxnTracer) OnBalanceChange(a accounts.Address, prev, new uint256.Int, reason tracing.BalanceChangeReason) {
 	if bsstt.Tracer.OnBalanceChange != nil {
 		bsstt.Tracer.OnBalanceChange(a, prev, new, reason)
 	}
 }
 
-func (bsstt *borStateSyncTxnTracer) OnNonceChange(a common.Address, prev, new uint64) {
+func (bsstt *borStateSyncTxnTracer) OnNonceChange(a accounts.Address, prev, new uint64) {
 	if bsstt.Tracer.OnNonceChange != nil {
 		bsstt.Tracer.OnNonceChange(a, prev, new)
 	}
 }
 
-func (bsstt *borStateSyncTxnTracer) OnCodeChange(a common.Address, prevCodeHash common.Hash, prev []byte, codeHash common.Hash, code []byte) {
+func (bsstt *borStateSyncTxnTracer) OnCodeChange(a accounts.Address, prevCodeHash accounts.CodeHash, prev []byte, codeHash accounts.CodeHash, code []byte) {
 	if bsstt.Tracer.OnCodeChange != nil {
 		bsstt.Tracer.OnCodeChange(a, prevCodeHash, prev, codeHash, code)
 	}
 }
 
-func (bsstt *borStateSyncTxnTracer) OnStorageChange(a common.Address, k common.Hash, prev, new uint256.Int) {
+func (bsstt *borStateSyncTxnTracer) OnStorageChange(a accounts.Address, k accounts.StorageKey, prev, new uint256.Int) {
 	if bsstt.Tracer.OnStorageChange != nil {
 		bsstt.Tracer.OnStorageChange(a, k, prev, new)
 	}

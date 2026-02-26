@@ -22,26 +22,27 @@ package testforks
 import (
 	"fmt"
 	"math/big"
-	"sort"
+	"slices"
 
 	"github.com/jinzhu/copier"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/protocol/params"
 )
 
-// See https://github.com/ethereum/execution-spec-tests/pull/2050
+// See BPO1 and so on in
+// https://github.com/ethereum/execution-spec-tests/blob/main/src/ethereum_test_forks/forks/forks.py
 var blobSchedule = map[string]*params.BlobConfig{
 	"bpo1": {
-		Target:                9,
-		Max:                   14,
-		BaseFeeUpdateFraction: 8832827,
+		Target:                10,
+		Max:                   15,
+		BaseFeeUpdateFraction: 8346193,
 	},
 	"bpo2": {
 		Target:                14,
 		Max:                   21,
-		BaseFeeUpdateFraction: 13739630,
+		BaseFeeUpdateFraction: 11684671,
 	},
 	"bpo3": {
 		Target:                21,
@@ -205,6 +206,18 @@ func init() {
 	c.Bpo2Time = big.NewInt(0)
 	Forks["BPO2"] = c
 
+	// Amsterdam branches from BPO2 (not BPO3/BPO4).
+	// In EEST, Amsterdam inherits Osaka blob params; the devnet test fixtures
+	// were generated with BPO2's blob schedule (target=14, max=21, fraction=11684671).
+	cAms := configCopy(c)
+	cAms.AmsterdamTime = big.NewInt(15_000)
+	Forks["BPO2ToAmsterdamAtTime15k"] = cAms
+
+	cAms = configCopy(cAms)
+	cAms.AmsterdamTime = big.NewInt(0)
+	Forks["Amsterdam"] = cAms
+
+	// BPO3/BPO4 continue from BPO2 as a separate chain
 	c = configCopy(c)
 	c.Bpo3Time = big.NewInt(15_000)
 	Forks["BPO2ToBPO3AtTime15k"] = c
@@ -234,7 +247,7 @@ func AvailableForks() []string {
 	for k := range Forks {
 		availableForks = append(availableForks, k)
 	}
-	sort.Strings(availableForks)
+	slices.Sort(availableForks)
 	return availableForks
 }
 

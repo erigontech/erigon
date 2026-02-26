@@ -19,11 +19,10 @@ package sync
 import (
 	"context"
 	"testing"
+	"testing/synctest"
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
-
-	"github.com/erigontech/erigon-lib/synctest"
 )
 
 func TestEventChannel(t *testing.T) {

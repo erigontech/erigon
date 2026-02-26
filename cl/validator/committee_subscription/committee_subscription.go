@@ -23,7 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/aggregation"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -31,11 +30,11 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	gossipMgr "github.com/erigontech/erigon/cl/phase1/network/gossip"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 var (
@@ -49,13 +48,12 @@ var (
 )
 
 type CommitteeSubscribeMgmt struct {
-	indiciesDB   kv.RoDB
-	ethClock     eth_clock.EthereumClock
-	beaconConfig *clparams.BeaconChainConfig
-	netConfig    *clparams.NetworkConfig
-	sentinel     sentinelproto.SentinelClient
-	state        *state.CachingBeaconState
-	syncedData   *synced_data.SyncedDataManager
+	ethClock      eth_clock.EthereumClock
+	beaconConfig  *clparams.BeaconChainConfig
+	netConfig     *clparams.NetworkConfig
+	state         *state.CachingBeaconState
+	syncedData    *synced_data.SyncedDataManager
+	gossipManager *gossipMgr.GossipManager
 	// subscriptions
 	aggregationPool    aggregation.AggregationPool
 	validatorSubsMutex sync.RWMutex
@@ -64,22 +62,20 @@ type CommitteeSubscribeMgmt struct {
 
 func NewCommitteeSubscribeManagement(
 	ctx context.Context,
-	indiciesDB kv.RoDB,
 	beaconConfig *clparams.BeaconChainConfig,
 	netConfig *clparams.NetworkConfig,
 	ethClock eth_clock.EthereumClock,
-	sentinel sentinelproto.SentinelClient,
 	aggregationPool aggregation.AggregationPool,
 	syncedData *synced_data.SyncedDataManager,
+	gossipManager *gossipMgr.GossipManager,
 ) *CommitteeSubscribeMgmt {
 	c := &CommitteeSubscribeMgmt{
-		indiciesDB:      indiciesDB,
 		beaconConfig:    beaconConfig,
 		netConfig:       netConfig,
 		ethClock:        ethClock,
-		sentinel:        sentinel,
 		aggregationPool: aggregationPool,
 		syncedData:      syncedData,
+		gossipManager:   gossipManager,
 		validatorSubs:   make(map[uint64]*validatorSub),
 	}
 	go c.sweepByStaleSlots(ctx)
@@ -122,13 +118,17 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 	}
 	c.validatorSubsMutex.Unlock()
 
-	epochDuration := time.Duration(c.beaconConfig.SlotsPerEpoch) * time.Duration(c.beaconConfig.SecondsPerSlot) * time.Second
+	epochDuration := 2 * time.Duration(c.beaconConfig.SlotsPerEpoch) * time.Duration(c.beaconConfig.SecondsPerSlot) * time.Second
 	// set sentinel gossip expiration by subnet id
-	request := sentinelproto.RequestSubscribeExpiry{
+	/*request := sentinelproto.RequestSubscribeExpiry{
 		Topic:          gossip.TopicNameBeaconAttestation(subnetId),
 		ExpiryUnixSecs: uint64(time.Now().Add(epochDuration).Unix()), // expire after epoch
 	}
 	if _, err := c.sentinel.SetSubscribeExpiry(ctx, &request); err != nil {
+		return err
+	}*/
+	expiry := time.Now().Add(epochDuration)
+	if err := c.gossipManager.SubscribeWithExpiry(gossip.TopicNameBeaconAttestation(subnetId), expiry); err != nil {
 		return err
 	}
 	return nil

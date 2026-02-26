@@ -1,0 +1,20 @@
+[book]
+title = "Erigon 3 Docs"
+authors = ["Erigon"]
+description = "Erigon 3 documentation!"
+language = "en"
+multilingual = false
+src = "src"
+
+[output.html]
+git-repository-url = "https://github.com/erigontech/erigon"
+default-theme = "Ayu"
+preferred-dark-theme = "Ayu"
+
+[output.html.fold]
+enable = true    # whether or not to enable section folding
+level = 1         # the depth to start folding
+
+# [output.linkcheck]
+# Enable this section only with the appropriate plugin installed
+

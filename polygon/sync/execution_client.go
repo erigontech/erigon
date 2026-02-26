@@ -26,9 +26,9 @@ import (
 	"github.com/cenkalti/backoff/v4"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
-	eth1utils "github.com/erigontech/erigon/execution/eth1/eth1_utils"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/execmodule/moduleutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
@@ -80,7 +80,7 @@ func (e *executionClient) Prepare(ctx context.Context) error {
 
 func (e *executionClient) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
 	request := &executionproto.InsertBlocksRequest{
-		Blocks: eth1utils.ConvertBlocksToRPC(blocks),
+		Blocks: moduleutil.ConvertBlocksToRPC(blocks),
 	}
 
 	return e.retryBusy(ctx, "insertBlocks", func() error {
@@ -145,7 +145,7 @@ func (e *executionClient) CurrentHeader(ctx context.Context) (*types.Header, err
 		return nil, err
 	}
 
-	return eth1utils.HeaderRpcToHeader(response.Header)
+	return moduleutil.HeaderRpcToHeader(response.Header)
 }
 
 func (e *executionClient) GetHeader(ctx context.Context, blockNum uint64) (*types.Header, error) {
@@ -161,7 +161,7 @@ func (e *executionClient) GetHeader(ctx context.Context, blockNum uint64) (*type
 		return nil, nil
 	}
 
-	header, err := eth1utils.HeaderRpcToHeader(headerRpc)
+	header, err := moduleutil.HeaderRpcToHeader(headerRpc)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +178,7 @@ func (e *executionClient) GetTd(ctx context.Context, blockNum uint64, blockHash 
 		return nil, err
 	}
 
-	return eth1utils.ConvertBigIntFromRpc(response.GetTd()), nil
+	return moduleutil.ConvertBigIntFromRpc(response.GetTd()), nil
 }
 
 func (e *executionClient) retryBusy(ctx context.Context, label string, f func() error) error {

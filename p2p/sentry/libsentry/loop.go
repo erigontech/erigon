@@ -27,8 +27,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 )
@@ -40,7 +40,17 @@ type (
 	MessageHandler[T any] func(context.Context, T, sentryproto.SentryClient) error
 )
 
-func ReconnectAndPumpStreamLoop[TMessage interface{}](
+// contextSleep sleeps for the given duration but returns early if ctx is cancelled.
+func contextSleep(ctx context.Context, d time.Duration) {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+	case <-timer.C:
+	}
+}
+
+func ReconnectAndPumpStreamLoop[TMessage any](
 	ctx context.Context,
 	sentryClient sentryproto.SentryClient,
 	statusDataFactory StatusDataFactory,
@@ -57,11 +67,11 @@ func ReconnectAndPumpStreamLoop[TMessage interface{}](
 				continue
 			}
 			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-				time.Sleep(3 * time.Second)
+				contextSleep(ctx, 3*time.Second)
 				continue
 			}
 			logger.Warn("HandShake error, sentry not ready yet", "stream", streamName, "err", err)
-			time.Sleep(time.Second)
+			contextSleep(ctx, time.Second)
 			continue
 		}
 
@@ -69,7 +79,7 @@ func ReconnectAndPumpStreamLoop[TMessage interface{}](
 
 		if err != nil {
 			logger.Error("SentryReconnectAndPumpStreamLoop: statusDataFactory error", "stream", streamName, "err", err)
-			time.Sleep(time.Second)
+			contextSleep(ctx, time.Second)
 			continue
 		}
 
@@ -78,11 +88,11 @@ func ReconnectAndPumpStreamLoop[TMessage interface{}](
 				continue
 			}
 			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-				time.Sleep(3 * time.Second)
+				contextSleep(ctx, 3*time.Second)
 				continue
 			}
 			logger.Warn("Status error, sentry not ready yet", "stream", streamName, "err", err)
-			time.Sleep(time.Second)
+			contextSleep(ctx, time.Second)
 			continue
 		}
 
@@ -94,7 +104,7 @@ func ReconnectAndPumpStreamLoop[TMessage interface{}](
 				continue
 			}
 			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-				time.Sleep(3 * time.Second)
+				contextSleep(ctx, 3*time.Second)
 				continue
 			}
 			logger.Warn("pumpStreamLoop failure", "stream", streamName, "err", err)
@@ -107,7 +117,7 @@ func ReconnectAndPumpStreamLoop[TMessage interface{}](
 // It only exists until there are no more messages
 // to be received (end of process, or interruption, or end of test).
 // wg is used only in tests to avoid using waits, which is brittle. For non-test code wg == nil.
-func pumpStreamLoop[TMessage interface{}](
+func pumpStreamLoop[TMessage any](
 	ctx context.Context,
 	sentry sentryproto.SentryClient,
 	streamName string,

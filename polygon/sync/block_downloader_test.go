@@ -29,9 +29,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/testlog"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -147,7 +147,7 @@ func (hdt blockDownloaderTest) fakeCheckpoints(count int) []*heimdall.Checkpoint
 			Fields: heimdall.WaypointFields{
 				StartBlock: big.NewInt(int64(start)),
 				EndBlock:   big.NewInt(int64(end)),
-				RootHash:   common.BytesToHash([]byte(fmt.Sprintf("0x%d", i+1))),
+				RootHash:   common.BytesToHash(fmt.Appendf(nil, "0x%d", i+1)),
 			},
 		}
 	}
@@ -164,7 +164,7 @@ func (hdt blockDownloaderTest) fakeMilestones(count int) []*heimdall.Milestone {
 			Fields: heimdall.WaypointFields{
 				StartBlock: big.NewInt(int64(start)),
 				EndBlock:   big.NewInt(int64(end)),
-				RootHash:   common.BytesToHash([]byte(fmt.Sprintf("0x%d", i+1))),
+				RootHash:   common.BytesToHash(fmt.Appendf(nil, "0x%d", i+1)),
 			},
 		}
 	}
@@ -198,7 +198,7 @@ func (hdt blockDownloaderTest) defaultFetchHeadersMock() fetchHeadersMock {
 		size := 0
 		for num := start; num < end; num++ {
 			header := &types.Header{
-				Number: new(big.Int).SetUint64(num),
+				Number: *uint256.NewInt(num),
 			}
 			res[num-start] = header
 			size += header.EncodingSize()

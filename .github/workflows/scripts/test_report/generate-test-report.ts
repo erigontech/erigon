@@ -13,17 +13,17 @@ const acceptedWorkflows = [
     '.github/workflows/qa-rpc-integration-tests-polygon.yml',
     '.github/workflows/qa-rpc-integration-tests.yml',
     '.github/workflows/qa-rpc-performance-tests.yml',
+    '.github/workflows/qa-rpc-performance-comparison-tests.yml',
     '.github/workflows/qa-snap-download.yml',
     '.github/workflows/qa-sync-from-scratch-minimal-node.yml',
     '.github/workflows/qa-sync-from-scratch.yml',
     '.github/workflows/qa-sync-with-externalcl.yml',
     '.github/workflows/qa-tip-tracking-gnosis.yml',
-    '.github/workflows/qa-tip-tracking-polygon.yml',
     '.github/workflows/qa-tip-tracking.yml',
+    '.github/workflows/qa-tip-tracking-with-load.yml',
     '.github/workflows/qa-txpool-performance-test.yml',
     '.github/workflows/test-all-erigon-race.yml',
     //'.github/workflows/test-all-erigon.yml',
-    //'.github/workflows/test-erigon-is-library.yml',
     '.github/workflows/test-hive-eest.yml',
     '.github/workflows/test-hive.yml',
     '.github/workflows/test-integration-caplin.yml',
@@ -148,7 +148,6 @@ function mapChain(chain: string | null): string {
     if (chainLowerCaseString.includes('mainnet')) return '⬢ ethereum';
     if (chainLowerCaseString.includes('ethereum')) return '⬢ ethereum';
     if (chainLowerCaseString.includes('sepolia')) return '🔹 sepolia';
-    if (chainLowerCaseString.includes('holesky')) return '🔸 holesky';
     if (chainLowerCaseString.includes('hoodi')) return '🔸 hoodi';
     if (chainLowerCaseString.includes('amoy')) return '🟣 amoy';
     if (chainLowerCaseString.includes('chiado')) return '🟢 chiado';
@@ -165,7 +164,6 @@ function cleanJobName(jobName: string): string {
         .replace(/\s*\(Gnosis\)/i, '')
         .replace(/\s*\(Mainnet\)/i, '')
         .replace(/\s*\(Ethereum\)/i, '')
-        .replace(/\s*\(Holesky\)/i, '')
         .replace(/\s*\(Hoodi\)/i, '')
         .replace(/\s*\(Sepolia\)/i, '')
         .replace(/\s*\(Amoy\)/i, '')

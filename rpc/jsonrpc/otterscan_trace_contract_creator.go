@@ -21,22 +21,22 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/vm"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 )
 
 type CreateTracer struct {
 	ctx     context.Context
-	target  common.Address
+	target  accounts.Address
 	found   bool
-	Creator common.Address
+	Creator accounts.Address
 	Tx      types.Transaction
 	hooks   *tracing.Hooks
 }
 
-func NewCreateTracer(ctx context.Context, target common.Address) *CreateTracer {
+func NewCreateTracer(ctx context.Context, target accounts.Address) *CreateTracer {
 	tracer := &CreateTracer{
 		ctx:    ctx,
 		target: target,
@@ -61,7 +61,7 @@ func (t *CreateTracer) Found() bool {
 	return t.found
 }
 
-func (t *CreateTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *CreateTracer) OnEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
 	if t.found {
 		return
 	}

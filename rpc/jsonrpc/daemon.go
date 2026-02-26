@@ -17,34 +17,46 @@
 package jsonrpc
 
 import (
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/consensus/clique"
+	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/clique"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/turbo/services"
 )
+
+func NewEthApiConfig(cfg *httpcfg.HttpCfg) *EthApiConfig {
+	return &EthApiConfig{
+		GasCap:                      cfg.Gascap,
+		FeeCap:                      cfg.Feecap,
+		ReturnDataLimit:             cfg.ReturnDataLimit,
+		AllowUnprotectedTxs:         cfg.AllowUnprotectedTxs,
+		MaxGetProofRewindBlockCount: cfg.MaxGetProofRewindBlockCount,
+		SubscribeLogsChannelSize:    cfg.WebsocketSubscribeLogsChannelSize,
+		RpcTxSyncDefaultTimeout:     cfg.RpcTxSyncDefaultTimeout,
+		RpcTxSyncMaxTimeout:         cfg.RpcTxSyncMaxTimeout,
+	}
+}
 
 // APIList describes the list of available RPC apis
 func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient,
 	filters *rpchelper.Filters, stateCache kvcache.Cache,
-	blockReader services.FullBlockReader, cfg *httpcfg.HttpCfg, engine consensus.EngineReader,
+	blockReader services.FullBlockReader, cfg *httpcfg.HttpCfg, engine rules.EngineReader,
 	logger log.Logger, bridgeReader bridgeReader, spanProducersReader spanProducersReader,
 ) (list []rpc.API) {
-	base := NewBaseApi(filters, stateCache, blockReader, cfg.WithDatadir, cfg.EvmCallTimeout, engine, cfg.Dirs, bridgeReader)
-	ethImpl := NewEthAPI(base, db, eth, txPool, mining, cfg.Gascap, cfg.Feecap, cfg.ReturnDataLimit, cfg.AllowUnprotectedTxs, cfg.MaxGetProofRewindBlockCount, cfg.WebsocketSubscribeLogsChannelSize, logger)
+	base := NewBaseApi(filters, stateCache, blockReader, cfg.WithDatadir, cfg.EvmCallTimeout, engine, cfg.Dirs, bridgeReader, cfg.RangeLimit)
+	ethImpl := NewEthAPI(base, db, eth, txPool, mining, NewEthApiConfig(cfg), logger)
 	erigonImpl := NewErigonAPI(base, db, eth)
 	txpoolImpl := NewTxPoolAPI(base, db, txPool)
 	netImpl := NewNetAPIImpl(eth)
-	debugImpl := NewPrivateDebugAPI(base, db, cfg.Gascap)
+	debugImpl := NewPrivateDebugAPI(base, db, cfg.Gascap, cfg.GethCompatibility)
 	traceImpl := NewTraceAPI(base, db, cfg)
 	web3Impl := NewWeb3APIImpl(eth)
-	dbImpl := NewDBAPIImpl() /* deprecated */
 	adminImpl := NewAdminAPI(eth)
 	parityImpl := NewParityAPIImpl(base, db)
 
@@ -52,7 +64,7 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 
 	type lazy interface {
 		HasEngine() bool
-		Engine() consensus.EngineReader
+		Engine() rules.EngineReader
 	}
 
 	switch engine := engine.(type) {
@@ -123,6 +135,7 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 				Version:   "1.0",
 			})
 		case "db": /* Deprecated */
+			dbImpl := NewDBAPIImpl() /* deprecated */
 			list = append(list, rpc.API{
 				Namespace: "db",
 				Public:    true,

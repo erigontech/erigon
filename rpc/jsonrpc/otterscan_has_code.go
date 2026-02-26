@@ -20,7 +20,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -37,11 +38,21 @@ func (api *OtterscanAPIImpl) HasCode(ctx context.Context, address common.Address
 		return false, err
 	}
 
-	reader, err := rpchelper.CreateHistoryStateReader(tx, blockNumber, 0, api._txNumReader)
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
 	if err != nil {
 		return false, err
 	}
-	acc, err := reader.ReadAccountData(address)
+
+	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
+	if err != nil {
+		return false, err
+	}
+
+	reader, err := rpchelper.CreateHistoryStateReader(ctx, tx, blockNumber, 0, api._txNumReader)
+	if err != nil {
+		return false, err
+	}
+	acc, err := reader.ReadAccountData(accounts.InternAddress(address))
 	if acc == nil || err != nil {
 		return false, err
 	}

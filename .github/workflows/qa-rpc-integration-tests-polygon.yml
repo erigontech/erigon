@@ -38,7 +38,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Clean Erigon Build Directory
         run: |
@@ -125,8 +125,9 @@ jobs:
             echo "RPC tests completed successfully"
             echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
           else
-            echo "Error detected during RPC tests"
+            echo "::error::Error detected during RPC tests: some tests failed, check the logs or the artifacts for more details"
             echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
+            exit 1
           fi
 
       - name: Stop Erigon RpcDaemon
@@ -158,7 +159,7 @@ jobs:
 
       - name: Upload test results
         if: steps.test_step.outputs.test_executed == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: test-results
           path: |
@@ -189,10 +190,4 @@ jobs:
       - name: Action for Success
         if: steps.test_step.outputs.TEST_RESULT == 'success'
         run: echo "::notice::Tests completed successfully"
-
-      - name: Action for Failure
-        if: steps.test_step.outputs.TEST_RESULT != 'success'
-        run: |
-          echo "::error::Error detected during tests: some tests failed, check the logs or the artifacts for more details"
-          exit 1
 

@@ -30,9 +30,9 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
@@ -159,7 +159,7 @@ func (s *KvServer) renew(ctx context.Context, id uint64) (err error) {
 	}
 	newTx, errBegin := s.kv.BeginTemporalRo(ctx) //nolint:gocritic
 	if errBegin != nil {
-		return fmt.Errorf("kvserver: %w", err)
+		return fmt.Errorf("kvserver: %w", errBegin)
 	}
 	s.txs[id] = &threadSafeTx{TemporalTx: newTx}
 	return nil
@@ -260,8 +260,8 @@ func (s *KvServer) Tx(stream remoteproto.KV_TxServer) error {
 				if err != nil {
 					return fmt.Errorf("kvserver: %w", err)
 				}
-				c.k = common.CopyBytes(k)
-				c.v = common.CopyBytes(v)
+				c.k = common.Copy(k)
+				c.v = common.Copy(v)
 			}
 
 			if err := s.renew(stream.Context(), id); err != nil {
@@ -421,9 +421,20 @@ func handleOp(c kv.Cursor, stream remoteproto.KV_TxServer, in *remoteproto.Curso
 	return nil
 }
 
+// SubscriptionReadyNotifier is an optional interface that KV_StateChangesServer
+// implementations can satisfy to be notified when their pub/sub subscription
+// is fully registered. This eliminates the timing hole between starting the
+// server goroutine and the subscription becoming active.
+type SubscriptionReadyNotifier interface {
+	NotifySubscribed()
+}
+
 func (s *KvServer) StateChanges(_ *remoteproto.StateChangeRequest, server remoteproto.KV_StateChangesServer) error {
 	ch, remove := s.stateChangeStreams.Sub()
 	defer remove()
+	if n, ok := server.(SubscriptionReadyNotifier); ok {
+		n.NotifySubscribed()
+	}
 	for {
 		select {
 		case reply := <-ch:
@@ -656,8 +667,8 @@ func (s *KvServer) HistoryRange(_ context.Context, req *remoteproto.HistoryRange
 			if err != nil {
 				return err
 			}
-			key := common.CopyBytes(k)
-			value := common.CopyBytes(v)
+			key := common.Copy(k)
+			value := common.Copy(v)
 			reply.Keys = append(reply.Keys, key)
 			reply.Values = append(reply.Values, value)
 		}
@@ -697,8 +708,8 @@ func (s *KvServer) RangeAsOf(_ context.Context, req *remoteproto.RangeAsOfReq) (
 			if err != nil {
 				return err
 			}
-			key := common.CopyBytes(k)
-			value := common.CopyBytes(v)
+			key := common.Copy(k)
+			value := common.Copy(v)
 			reply.Keys = append(reply.Keys, key)
 			reply.Values = append(reply.Values, value)
 			limit--
@@ -769,6 +780,32 @@ func (s *KvServer) HistoryStartFrom(_ context.Context, req *remoteproto.HistoryS
 	reply = &remoteproto.HistoryStartFromReply{}
 	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
 		reply.StartFrom = tx.Debug().HistoryStartFrom(kv.Domain(req.Domain))
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	return reply, nil
+}
+
+func (s *KvServer) CurrentDomainVersion(_ context.Context, req *remoteproto.CurrentDomainVersionReq) (reply *remoteproto.CurrentDomainVersionReply, err error) {
+	reply = &remoteproto.CurrentDomainVersionReply{}
+	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
+		version := tx.Debug().CurrentDomainVersion(kv.Domain(req.Domain))
+		reply.Major = version.Major
+		reply.Minor = version.Minor
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	return reply, nil
+}
+
+func (s *KvServer) StepSize(_ context.Context, req *remoteproto.StepSizeReq) (reply *remoteproto.StepSizeReply, err error) {
+	reply = &remoteproto.StepSizeReply{}
+	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
+		reply.Step = tx.Debug().StepSize()
 		return nil
 	}); err != nil {
 		return nil, err

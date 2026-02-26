@@ -28,29 +28,29 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon/db/datadir"
 	"golang.org/x/sync/semaphore"
-	"google.golang.org/protobuf/types/known/emptypb"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
-	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync"
-	"github.com/erigontech/erigon/execution/stages/bodydownload"
-	"github.com/erigontech/erigon/execution/stages/headerdownload"
+	"github.com/erigontech/erigon/execution/stagedsync/bodydownload"
+	"github.com/erigontech/erigon/execution/stagedsync/headerdownload"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
@@ -59,7 +59,6 @@ import (
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
-	"github.com/erigontech/erigon/turbo/services"
 )
 
 // StartStreamLoops starts message processing loops for all sentries.
@@ -71,7 +70,6 @@ import (
 // AnnounceBlockRangeLoop - announces available block range to all peers every epoch
 func (cs *MultiClient) StartStreamLoops(ctx context.Context) {
 	sentries := cs.Sentries()
-	go cs.AnnounceBlockRangeLoop(ctx)
 	for i := range sentries {
 		sentry := sentries[i]
 		go cs.RecvMessageLoop(ctx, sentry, nil)
@@ -133,80 +131,6 @@ func (cs *MultiClient) RecvMessageLoop(
 	}
 
 	libsentry.ReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "RecvMessage", streamFactory, MakeInboundMessage, cs.HandleInboundMessage, wg, cs.logger)
-}
-
-func (cs *MultiClient) AnnounceBlockRangeLoop(ctx context.Context) {
-	frequency := cs.ChainConfig.EpochDuration()
-
-	headerInDB := func() bool {
-		var done bool
-		_ = cs.db.View(ctx, func(tx kv.Tx) error {
-			header := rawdb.ReadCurrentHeaderHavingBody(tx)
-			done = header != nil
-			return nil
-		})
-		return done
-	}
-
-	if err := cs.waitForPrerequisites(ctx, frequency, headerInDB); err != nil {
-		return
-	}
-
-	broadcastEvery := time.NewTicker(frequency)
-	defer broadcastEvery.Stop()
-
-	for {
-		select {
-		case <-broadcastEvery.C:
-			cs.doAnnounceBlockRange(ctx)
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
-func (cs *MultiClient) doAnnounceBlockRange(ctx context.Context) {
-	sentries := cs.Sentries()
-	status, err := cs.statusDataProvider.GetStatusData(ctx)
-	if err != nil {
-		cs.logger.Error("blockRangeUpdate", "err", err)
-		return
-	}
-
-	bestHash := gointerfaces.ConvertH256ToHash(status.BestHash)
-	cs.logger.Debug("sending status data", "start", status.MinimumBlockHeight, "end", status.MaxBlockHeight, "hash", hex.EncodeToString(bestHash[:]))
-
-	request := eth.BlockRangeUpdatePacket{
-		Earliest:   status.MinimumBlockHeight,
-		Latest:     status.MaxBlockHeight,
-		LatestHash: gointerfaces.ConvertH256ToHash(status.BestHash),
-	}
-
-	data, err := rlp.EncodeToBytes(&request)
-	if err != nil {
-		cs.logger.Error("blockRangeUpdate", "err", err)
-		return
-	}
-
-	for _, s := range sentries {
-		handshake, err := s.HandShake(ctx, &emptypb.Empty{})
-		if err != nil {
-			cs.logger.Error("blockRangeUpdate", "err", err)
-			continue // continue sending message to other sentries
-		}
-
-		version := direct.ProtocolToUintMap[handshake.Protocol]
-		if version >= direct.ETH69 {
-			_, err := s.SendMessageToAll(ctx, &sentryproto.OutboundMessageData{
-				Id:   sentryproto.MessageId_BLOCK_RANGE_UPDATE_69,
-				Data: data,
-			})
-			if err != nil {
-				cs.logger.Error("blockRangeUpdate", "err", err)
-				continue // continue sending message to other sentries
-			}
-		}
-	}
 }
 
 // waitForPrerequisites handles waiting for the blockReader to be ready and for a header to be available.
@@ -276,7 +200,7 @@ type MultiClient struct {
 	ChainConfig                       *chain.Config
 	db                                kv.TemporalRoDB
 	WitnessBuffer                     *stagedsync.WitnessBuffer
-	Engine                            consensus.Engine
+	Engine                            rules.Engine
 	blockReader                       services.FullBlockReader
 	statusDataProvider                StatusGetter
 	logPeerInfo                       bool
@@ -295,9 +219,10 @@ type MultiClient struct {
 var _ eth.ReceiptsGetter = new(receipts.Generator) // compile-time interface-check
 
 func NewMultiClient(
+	dirs datadir.Dirs,
 	db kv.TemporalRoDB,
 	chainConfig *chain.Config,
-	engine consensus.Engine,
+	engine rules.Engine,
 	sentries []sentryproto.SentryClient,
 	syncCfg ethconfig.Sync,
 	blockReader services.FullBlockReader,
@@ -364,7 +289,7 @@ func NewMultiClient(
 		disableBlockDownload:              disableBlockDownload,
 		logger:                            logger,
 		getReceiptsActiveGoroutineNumber:  semaphore.NewWeighted(1),
-		ethApiWrapper:                     receipts.NewGenerator(blockReader, engine, 5*time.Minute),
+		ethApiWrapper:                     receipts.NewGenerator(dirs, blockReader, engine, nil, 5*time.Minute),
 	}
 
 	return cs, nil
@@ -463,7 +388,8 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 		if err != nil {
 			return fmt.Errorf("decode 3 BlockHeadersPacket66: %w", err)
 		}
-		hRaw := append([]byte{}, headerRaw...)
+		hRaw := make([]byte, len(headerRaw))
+		copy(hRaw, headerRaw)
 		number := header.Number.Uint64()
 		if number > highestBlock {
 			highestBlock = number
@@ -842,14 +768,8 @@ func (cs *MultiClient) getBlockWitnesses(ctx context.Context, inreq *sentryproto
 				totalCached += len(queriedBytes)
 			}
 
-			start := wit.PageSize * witnessPage.Page
-			if start > uint64(len(witnessBytes)) {
-				start = uint64(len(witnessBytes))
-			}
-			end := start + wit.PageSize
-			if end > uint64(len(witnessBytes)) {
-				end = uint64(len(witnessBytes))
-			}
+			start := min(wit.PageSize*witnessPage.Page, uint64(len(witnessBytes)))
+			end := min(start+wit.PageSize, uint64(len(witnessBytes)))
 			witnessPageResponse.Data = witnessBytes[start:end]
 			totalResponsePayloadDataAmount += len(witnessPageResponse.Data)
 		}
@@ -1047,6 +967,9 @@ func (cs *MultiClient) blockRange69(ctx context.Context, inreq *sentryproto.Inbo
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding blockRange69: %w, data: %x", err, inreq.Data)
 	}
+	if err := query.Validate(); err != nil {
+		return err
+	}
 
 	go func() {
 		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -1161,18 +1084,17 @@ func (cs *MultiClient) makeStatusData(ctx context.Context) (*sentryproto.StatusD
 
 func GrpcClient(ctx context.Context, sentryAddr string) (*direct.SentryClientRemote, error) {
 	// creating grpc client connection
-	var dialOpts []grpc.DialOption
-
 	backoffCfg := backoff.DefaultConfig
 	backoffCfg.BaseDelay = 500 * time.Millisecond
 	backoffCfg.MaxDelay = 10 * time.Second
-	dialOpts = []grpc.DialOption{
+	dialOpts := make([]grpc.DialOption, 0, 4)
+	dialOpts = append(dialOpts,
 		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoffCfg, MinConnectTimeout: 10 * time.Minute}),
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(16 * datasize.MB))),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(16*datasize.MB))),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{}),
-	}
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
 
-	dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	conn, err := grpc.DialContext(ctx, sentryAddr, dialOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("creating client connection to sentry P2P: %w", err)

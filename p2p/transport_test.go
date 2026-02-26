@@ -28,7 +28,7 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/p2p/pipes"
 )
@@ -113,7 +113,7 @@ func TestProtocolHandshake(t *testing.T) {
 func TestProtocolHandshakeErrors(t *testing.T) {
 	tests := []struct {
 		code uint64
-		msg  interface{}
+		msg  any
 		err  error
 	}{
 		{
@@ -134,7 +134,7 @@ func TestProtocolHandshakeErrors(t *testing.T) {
 		{
 			code: handshakeMsg,
 			msg:  []byte{1, 2, 3},
-			err:  NewPeerError(PeerErrorInvalidMessage, DiscProtocolError, rlp.WrapStreamError(rlp.ErrExpectedList, reflect.TypeOf(protoHandshake{})), "(code 0) (size 4)"),
+			err:  NewPeerError(PeerErrorInvalidMessage, DiscProtocolError, rlp.WrapStreamError(rlp.ErrExpectedList, reflect.TypeFor[protoHandshake]()), "(code 0) (size 4)"),
 		},
 		{
 			code: handshakeMsg,

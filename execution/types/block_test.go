@@ -32,14 +32,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -96,7 +96,7 @@ func TestTxDependencyBlockDecoding(t *testing.T) {
 	if err := rlp.DecodeBytes(blockEnc, &block); err != nil {
 		t.Fatal("decode error: ", err)
 	}
-	check := func(f string, got, want interface{}) {
+	check := func(f string, got, want any) {
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%s mismatch: got %v, want %v", f, got, want)
 		}
@@ -132,12 +132,12 @@ func TestBlockEncoding(t *testing.T) {
 		t.Fatal("decode error: ", err)
 	}
 
-	check := func(f string, got, want interface{}) {
+	check := func(f string, got, want any) {
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%s mismatch: got %v, want %v", f, got, want)
 		}
 	}
-	check("Difficulty", block.Difficulty(), big.NewInt(131072))
+	check("Difficulty", block.Difficulty(), *uint256.NewInt(131072))
 	check("GasLimit", block.GasLimit(), uint64(3141592))
 	check("GasUsed", block.GasUsed(), uint64(21000))
 	check("Coinbase", block.Coinbase(), common.HexToAddress("8888f1f195afa192cfee860698584c030f4c9db1"))
@@ -169,13 +169,13 @@ func TestEIP1559BlockEncoding(t *testing.T) {
 		t.Fatal("decode error: ", err)
 	}
 
-	check := func(f string, got, want interface{}) {
+	check := func(f string, got, want any) {
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%s mismatch: got %v, want %v", f, got, want)
 		}
 	}
 
-	check("Difficulty", block.Difficulty(), big.NewInt(131072))
+	check("Difficulty", block.Difficulty(), *uint256.NewInt(131072))
 	check("GasLimit", block.GasLimit(), uint64(3141592))
 	check("GasUsed", block.GasUsed(), uint64(21000))
 	check("Coinbase", block.Coinbase(), common.HexToAddress("8888f1f195afa192cfee860698584c030f4c9db1"))
@@ -185,7 +185,7 @@ func TestEIP1559BlockEncoding(t *testing.T) {
 	check("Nonce", block.NonceU64(), uint64(0xa13a5a8c8f2bb1c4))
 	check("Time", block.Time(), uint64(1426516743))
 	check("Size", block.Size(), common.StorageSize(len(blockEnc)))
-	check("BaseFee", block.BaseFee(), new(big.Int).SetUint64(params.InitialBaseFee))
+	check("BaseFee", block.BaseFee(), uint256.NewInt(params.InitialBaseFee))
 
 	var tx1 Transaction = NewTransaction(0, common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87"), new(uint256.Int).SetUint64(10), 50000, new(uint256.Int).SetUint64(10), nil)
 	tx1, _ = tx1.WithSignature(*LatestSignerForChainID(nil), common.Hex2Bytes("9bea4c4daac7c7c52e093e6a4c35dbbcf8856f1af7b059ba20253e70848d094f8a8fae537ce25ed8cb5af9adac3f141af69bd515bd2ba031522df09b97dd72b100"))
@@ -198,7 +198,7 @@ func TestEIP1559BlockEncoding(t *testing.T) {
 		},
 	}}
 	to := common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87")
-	feeCap, _ := uint256.FromBig(block.BaseFee())
+	feeCap := block.BaseFee()
 	var tx2 Transaction = &DynamicFeeTransaction{
 		CommonTx: CommonTx{
 			Nonce:    0,
@@ -206,9 +206,9 @@ func TestEIP1559BlockEncoding(t *testing.T) {
 			GasLimit: 123457,
 			Data:     []byte{},
 		},
-		ChainID:    u256.Num1,
+		ChainID:    &u256.Num1,
 		FeeCap:     feeCap,
-		TipCap:     u256.Num0,
+		TipCap:     &u256.Num0,
 		AccessList: accesses,
 	}
 	tx2, err := tx2.WithSignature(*LatestSignerForChainID(big.NewInt(1)), common.Hex2Bytes("fe38ca4e44a30002ac54af7cf922a6ac2ba11b7d22f548e8ecb3f51f41cb31b06de6a5cbae13c0c856e33acf021b51819636cfc009d39eafb9f606d546e305a800"))
@@ -237,12 +237,12 @@ func TestEIP2718BlockEncoding(t *testing.T) {
 		t.Fatal("decode error: ", err)
 	}
 
-	check := func(f string, got, want interface{}) {
+	check := func(f string, got, want any) {
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%s mismatch: got %v, want %v", f, got, want)
 		}
 	}
-	check("Difficulty", block.Difficulty(), big.NewInt(131072))
+	check("Difficulty", block.Difficulty(), *uint256.NewInt(131072))
 	check("GasLimit", block.GasLimit(), uint64(3141592))
 	check("GasUsed", block.GasUsed(), uint64(42000))
 	check("Coinbase", block.Coinbase(), common.HexToAddress("8888f1f195afa192cfee860698584c030f4c9db1"))
@@ -313,9 +313,8 @@ var benchBuffer = bytes.NewBuffer(make([]byte, 0, 32000))
 
 func BenchmarkEncodeBlock(b *testing.B) {
 	block := makeBenchBlock()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		benchBuffer.Reset()
 		if err := rlp.Encode(benchBuffer, block); err != nil {
 			b.Fatal(err)
@@ -332,8 +331,8 @@ func makeBenchBlock() *Block {
 		uncles   = make([]*Header, 3)
 	)
 	header := &Header{
-		Difficulty: math.BigPow(11, 11),
-		Number:     math.BigPow(2, 9),
+		Difficulty: *uint256.NewInt(285311670611), // 11^11
+		Number:     *uint256.NewInt(0x200),        // 2^9
 		GasLimit:   12345678,
 		GasUsed:    1476322,
 		Time:       9876543,
@@ -353,8 +352,8 @@ func makeBenchBlock() *Block {
 	}
 	for i := range uncles {
 		uncles[i] = &Header{
-			Difficulty: math.BigPow(11, 11),
-			Number:     math.BigPow(2, 9),
+			Difficulty: *uint256.NewInt(285311670611), // 11^11
+			Number:     *uint256.NewInt(0x200),        // 2^9
 			GasLimit:   12345678,
 			GasUsed:    1476322,
 			Time:       9876543,
@@ -376,8 +375,8 @@ func TestCanEncodeAndDecodeRawBody(t *testing.T) {
 				TxHash:      common.Hash{},
 				ReceiptHash: common.Hash{},
 				Bloom:       Bloom{},
-				Difficulty:  big.NewInt(100),
-				Number:      big.NewInt(1000),
+				Difficulty:  *uint256.NewInt(100),
+				Number:      *uint256.NewInt(1000),
 				GasLimit:    50,
 				GasUsed:     60,
 				Time:        90,
@@ -386,8 +385,8 @@ func TestCanEncodeAndDecodeRawBody(t *testing.T) {
 			{
 				GasUsed:    108,
 				GasLimit:   100,
-				Difficulty: big.NewInt(99),
-				Number:     big.NewInt(1000),
+				Difficulty: *uint256.NewInt(99),
+				Number:     *uint256.NewInt(1000),
 			},
 		},
 		Transactions: [][]byte{
@@ -408,12 +407,12 @@ func TestCanEncodeAndDecodeRawBody(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rlpBytes := common.CopyBytes(writer.Bytes())
+	rlpBytes := common.Copy(writer.Bytes())
 	writer.Reset()
 	writer.WriteString(hexutil.Encode(rlpBytes))
 
 	var rawBody RawBody
-	fromHex := common.CopyBytes(common.FromHex(writer.String()))
+	fromHex := common.Copy(common.FromHex(writer.String()))
 	bodyReader := bytes.NewReader(fromHex)
 	stream := rlp.NewStream(bodyReader, 0)
 
@@ -442,15 +441,15 @@ func TestCanEncodeAndDecodeRawBody(t *testing.T) {
 	if rawBody.Uncles[1].GasLimit != 100 {
 		t.Fatal("expected gas limit of 2nd uncle to be 100")
 	}
-	if string(resultJson) != string(expectedJson) {
+	if !bytes.Equal(resultJson, expectedJson) {
 		t.Fatalf("encoded and decoded json do not match, got\n%s\nwant\n%s", resultJson, expectedJson)
 	}
 }
 
 func TestAuRaHeaderEncoding(t *testing.T) {
 	t.Parallel()
-	difficulty, ok := new(big.Int).SetString("8398142613866510000000000000000000000000000000", 10)
-	require.True(t, ok)
+	difficulty, err := uint256.FromDecimal("8398142613866510000000000000000000000000000000")
+	require.NoError(t, err)
 
 	header := Header{
 		ParentHash:  common.HexToHash("0x8b00fcf1e541d371a3a1b79cc999a85cc3db5ee5637b5159646e1acd3613fd15"),
@@ -459,13 +458,13 @@ func TestAuRaHeaderEncoding(t *testing.T) {
 		Root:        common.HexToHash("0x351780124dae86b84998c6d4fe9a88acfb41b4856b4f2c56767b51a4e2f94dd4"),
 		TxHash:      common.HexToHash("0x6a35133fbff7ea2cb5ee7635c9fb623f96d31d689d806a2bfe40a2b1d90ee99c"),
 		ReceiptHash: common.HexToHash("0x324f54860e214ea896ea7a05bda30f85541be3157de77a9059a04fdb1e86badd"),
-		Difficulty:  difficulty,
-		Number:      big.NewInt(24679923),
+		Difficulty:  *difficulty,
+		Number:      *uint256.NewInt(24679923),
 		GasLimit:    30_000_000,
 		GasUsed:     3_074_345,
 		Time:        1666343339,
 		Extra:       common.FromHex("0x1234"),
-		BaseFee:     big.NewInt(7_000_000_000),
+		BaseFee:     uint256.NewInt(7_000_000_000),
 		AuRaStep:    13078,
 		AuRaSeal:    common.FromHex("0x75bda30f85541be059646e1acd3613fd100846e42308df2dad8ed79b9a9e91c9db994386599a683820a1394684d41fc139c4805684142e6b15a722a2e9cc51f7ee"),
 	}
@@ -486,14 +485,14 @@ func TestWithdrawalsEncoding(t *testing.T) {
 		ParentHash: common.HexToHash("0x8b00fcf1e541d371a3a1b79cc999a85cc3db5ee5637b5159646e1acd3613fd15"),
 		Coinbase:   common.HexToAddress("0x571846e42308df2dad8ed792f44a8bfddf0acb4d"),
 		Root:       common.HexToHash("0x351780124dae86b84998c6d4fe9a88acfb41b4856b4f2c56767b51a4e2f94dd4"),
-		Difficulty: common.Big0,
-		Number:     big.NewInt(20_000_000),
+		Difficulty: *common.Num0,
+		Number:     *uint256.NewInt(20_000_000),
 		GasLimit:   30_000_000,
 		GasUsed:    3_074_345,
 		Time:       1666343339,
 		Extra:      make([]byte, 0),
 		MixDigest:  common.HexToHash("0x7f04e338b206ef863a1fad30e082bbb61571c74e135df8d1677e3f8b8171a09b"),
-		BaseFee:    big.NewInt(7_000_000_000),
+		BaseFee:    uint256.NewInt(7_000_000_000),
 	}
 
 	withdrawals := make([]*Withdrawal, 2)
@@ -538,7 +537,7 @@ func TestBlockRawBodyPreShanghai(t *testing.T) {
 	t.Parallel()
 	require := require.New(t)
 
-	const rawBodyForStorageRlp = "f901f4c0f901f0f901eda00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000808080808080a00000000000000000000000000000000000000000000000000000000000000000880000000000000000"
+	const rawBodyForStorageRlp = "f901f4c0f901f0f901eda00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000808080808080a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0"
 	bstring, _ := hex.DecodeString(rawBodyForStorageRlp)
 
 	body := new(RawBody)
@@ -553,7 +552,7 @@ func TestBlockRawBodyPostShanghaiNoWithdrawals(t *testing.T) {
 	t.Parallel()
 	require := require.New(t)
 
-	const rawBodyForStorageRlp = "f901f5c0f901f0f901eda00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000808080808080a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0"
+	const rawBodyForStorageRlp = "f901f5c0f901f0f901eda00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000808080808080a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0"
 	bstring, _ := hex.DecodeString(rawBodyForStorageRlp)
 
 	body := new(RawBody)
@@ -569,7 +568,7 @@ func TestBlockRawBodyPostShanghaiWithdrawals(t *testing.T) {
 	t.Parallel()
 	require := require.New(t)
 
-	const rawBodyForStorageRlp = "f90230c0f901f0f901eda00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000808080808080a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f83adc0f82157c94ff000000000000000000000000000000000000008203e8dc1082157d94ff000000000000000000000000000000000000008203e9"
+	const rawBodyForStorageRlp = "f90230c0f901f0f901eda00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000808080808080a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f83adc0f82157c94ff000000000000000000000000000000000000008203e8dc1082157d94ff000000000000000000000000000000000000008203e9c0"
 
 	bstring, _ := hex.DecodeString(rawBodyForStorageRlp)
 
@@ -615,4 +614,31 @@ func TestCopyHeader(t *testing.T) {
 		h2 := CopyHeader(h1)
 		require.Equal(t, h1, h2)
 	}
+}
+
+func TestEncodeBigIntBufferOverflowPrevention(t *testing.T) {
+	// Covers an EncodeBigInt() panic that can happen if a malicious peer sends a header with a big.Int with a 32-byte value
+	// Create a 249-bit base fee value (32 bytes in big-endian)
+	// This is the minimum bit length that requires 32 bytes of storage
+	maliciousBaseFee := new(uint256.Int).Lsh(uint256.NewInt(1), 248) // 2^248, BitLen() = 249
+	// Create a header with the malicious difficulty
+	header := &Header{
+		ParentHash:  common.Hash{},
+		UncleHash:   common.Hash{},
+		Coinbase:    common.Address{},
+		Root:        common.Hash{},
+		TxHash:      common.Hash{},
+		ReceiptHash: common.Hash{},
+		Bloom:       Bloom{},
+		BaseFee:     maliciousBaseFee,
+		Number:      *uint256.NewInt(1),
+		GasLimit:    8000000,
+		GasUsed:     0,
+		Time:        1234567890,
+		Extra:       []byte{},
+		MixDigest:   common.Hash{},
+		Nonce:       BlockNonce{},
+	}
+	// Calling Hash() will trigger Header.EncodeRLP() -> EncodeBigInt() -> panic
+	_ = header.Hash()
 }

@@ -20,20 +20,20 @@ import (
 	"context"
 	"errors"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
-	executiontests "github.com/erigontech/erigon/execution/tests"
+	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 )
 
 type MockCl struct {
 	logger         log.Logger
-	base           *executiontests.MockCl
+	base           *engineapitester.MockCl
 	slotCalculator shutter.SlotCalculator
 	initialised    bool
 }
 
-func NewMockCl(logger log.Logger, base *executiontests.MockCl, sc shutter.SlotCalculator) *MockCl {
+func NewMockCl(logger log.Logger, base *engineapitester.MockCl, sc shutter.SlotCalculator) *MockCl {
 	return &MockCl{logger: logger, base: base, slotCalculator: sc}
 }
 
@@ -47,8 +47,8 @@ func (cl *MockCl) Initialise(ctx context.Context) error {
 	slot := cl.slotCalculator.CalcCurrentSlot() + 2
 	payloadRes, err := cl.base.BuildCanonicalBlock(
 		ctx,
-		executiontests.WithTimestamp(cl.slotCalculator.CalcSlotStartTimestamp(slot)),
-		executiontests.WithWaitUntilTimestamp(),
+		engineapitester.WithTimestamp(cl.slotCalculator.CalcSlotStartTimestamp(slot)),
+		engineapitester.WithWaitUntilTimestamp(),
 	)
 	if err != nil {
 		return err
@@ -69,8 +69,8 @@ func (cl *MockCl) BuildBlock(ctx context.Context, opts ...BlockBuildingOption) (
 	cl.logger.Debug("[shutter-mock-cl] building block", "slot", options.slot, "timestamp", timestamp)
 	payloadRes, err := cl.base.BuildCanonicalBlock(
 		ctx,
-		executiontests.WithTimestamp(timestamp),
-		executiontests.WithWaitUntilTimestamp(),
+		engineapitester.WithTimestamp(timestamp),
+		engineapitester.WithWaitUntilTimestamp(),
 	)
 	if err != nil {
 		return nil, err

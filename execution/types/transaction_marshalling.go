@@ -28,8 +28,8 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/valyala/fastjson"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 )
 
 // txJSON is the JSON representation of transactions.
@@ -612,8 +612,7 @@ func UnmarshalBlobTxJSON(input []byte) (Transaction, error) {
 	}
 
 	btx := BlobTxWrapper{
-		// it's ok to copy here - because it's constructor of object - no parallel access yet
-		Tx:          tx, //nolint
+		Tx:          tx.copyData(),
 		Commitments: dec.Commitments,
 		Blobs:       dec.Blobs,
 		Proofs:      dec.Proofs,

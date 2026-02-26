@@ -22,7 +22,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 )
 
 func TestSyncCommittee(t *testing.T) {
@@ -79,7 +79,7 @@ func TestSyncCommittee(t *testing.T) {
 	// Test Equal
 	otherSyncCommittee := &SyncCommittee{}
 	assert.False(t, syncCommittee.Equal(otherSyncCommittee))
-	assert.True(t, syncCommittee.Equal(syncCommittee))
+	assert.True(t, syncCommittee.Equal(syncCommittee)) //nolint:gocritic
 
 	// Test HashSSZ
 	expectedRoot := common.HexToHash("28628f3f10fa1070f2a42aeeeae792cd6ded1ef81030104e765e1498a1cfcfbd") // Example expected root

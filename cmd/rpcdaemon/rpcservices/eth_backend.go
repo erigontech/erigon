@@ -28,21 +28,20 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/snapshotsync"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snaptype"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/privateapi"
 	"github.com/erigontech/erigon/p2p"
-	"github.com/erigontech/erigon/turbo/privateapi"
-	"github.com/erigontech/erigon/turbo/services"
 )
 
 var _ services.FullBlockReader = &RemoteBackend{}
@@ -110,10 +109,10 @@ func (back *RemoteBackend) BlockByHash(ctx context.Context, db kv.Tx, hash commo
 	return block, err
 }
 func (back *RemoteBackend) TxsV3Enabled() bool { panic("not implemented") }
-func (back *RemoteBackend) Snapshots() snapshotsync.BlockSnapshots {
+func (back *RemoteBackend) Snapshots() services.BlockSnapshots {
 	return back.blockReader.Snapshots()
 }
-func (back *RemoteBackend) BorSnapshots() snapshotsync.BlockSnapshots { panic("not implemented") }
+func (back *RemoteBackend) BorSnapshots() services.BlockSnapshots { panic("not implemented") }
 
 func (back *RemoteBackend) Ready(ctx context.Context) <-chan error {
 	return back.blockReader.Ready(ctx)
@@ -284,6 +283,31 @@ func (back *RemoteBackend) SubscribeLogs(ctx context.Context, onNewLogs func(rep
 	return nil
 }
 
+func (back *RemoteBackend) SubscribeReceipts(ctx context.Context, onNewReceipts func(reply *remoteproto.SubscribeReceiptsReply), onReady func(func(*remoteproto.ReceiptsFilterRequest) error)) error {
+	subscription, err := back.remoteEthBackend.SubscribeReceipts(ctx, grpc.WaitForReady(true))
+	if err != nil {
+		if s, ok := status.FromError(err); ok {
+			return errors.New(s.Message())
+		}
+		return err
+	}
+	if onReady != nil {
+		onReady(subscription.Send)
+	}
+	for {
+		receipts, err := subscription.Recv()
+		if errors.Is(err, io.EOF) {
+			log.Info("rpcdaemon: the receipts subscription channel was closed")
+			break
+		}
+		if err != nil {
+			return err
+		}
+		onNewReceipts(receipts)
+	}
+	return nil
+}
+
 func (back *RemoteBackend) TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, uint64, bool, error) {
 	return back.blockReader.TxnLookup(ctx, tx, txnHash)
 }
@@ -349,7 +373,7 @@ func (back *RemoteBackend) NodeInfo(ctx context.Context, limit uint32) ([]p2p.No
 			return nil, fmt.Errorf("cannot decode protocols metadata: %w", err)
 		}
 
-		protocols := make(map[string]interface{}, len(rawProtocols))
+		protocols := make(map[string]any, len(rawProtocols))
 		for k, v := range rawProtocols {
 			protocols[k] = v
 		}
@@ -428,8 +452,8 @@ func (back *RemoteBackend) Peers(ctx context.Context) ([]*p2p.PeerInfo, error) {
 	return peers, nil
 }
 
-func (back *RemoteBackend) TxnumReader(ctx context.Context) rawdbv3.TxNumsReader {
-	return back.blockReader.TxnumReader(ctx)
+func (back *RemoteBackend) TxnumReader() rawdbv3.TxNumsReader {
+	return back.blockReader.TxnumReader()
 }
 
 func (back *RemoteBackend) BlockForTxNum(ctx context.Context, tx kv.Tx, txNum uint64) (uint64, bool, error) {

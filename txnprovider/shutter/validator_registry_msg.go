@@ -20,7 +20,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 )
 
 const (
@@ -39,7 +39,9 @@ type AggregateRegistrationMessage struct {
 }
 
 func (m *AggregateRegistrationMessage) Marshal() []byte {
-	b := make([]byte, 0)
+	// Fixed-size message: preallocate to avoid growth reallocations during appends.
+	expectedLength := 1 + 8 + 20 + 8 + 4 + 4 + 1
+	b := make([]byte, 0, expectedLength)
 	b = append(b, m.Version)
 	b = binary.BigEndian.AppendUint64(b, m.ChainId)
 	b = append(b, m.ValidatorRegistryAddress.Bytes()...)
@@ -98,7 +100,9 @@ type LegacyRegistrationMessage struct {
 }
 
 func (m *LegacyRegistrationMessage) Marshal() []byte {
-	b := make([]byte, 0)
+	// Fixed-size message: preallocate to avoid growth reallocations during appends.
+	expectedLength := 1 + 8 + 20 + 8 + 8 + 1
+	b := make([]byte, 0, expectedLength)
 	b = append(b, m.Version)
 	b = binary.BigEndian.AppendUint64(b, m.ChainId)
 	b = append(b, m.ValidatorRegistryAddress.Bytes()...)

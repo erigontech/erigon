@@ -12,8 +12,8 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/edsrzf/mmap-go"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-	mm "github.com/erigontech/erigon-lib/mmap"
+	"github.com/erigontech/erigon/common/dbg"
+	mm "github.com/erigontech/erigon/common/mmap"
 )
 
 type Features uint32

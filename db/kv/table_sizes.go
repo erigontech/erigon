@@ -1,15 +1,16 @@
 package kv
 
 import (
+	"cmp"
 	"context"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 var (
@@ -65,8 +66,8 @@ func CollectTableSizes(ctx context.Context, db RoDB) ([]TableSize, error) {
 		Size: amountOfFreePagesInDb * db.PageSize().Bytes(),
 	})
 
-	sort.Slice(tableSizes, func(i, j int) bool {
-		return tableSizes[i].Size > tableSizes[j].Size
+	slices.SortFunc(tableSizes, func(a, b TableSize) int {
+		return cmp.Compare(b.Size, a.Size)
 	})
 
 	return tableSizes, nil

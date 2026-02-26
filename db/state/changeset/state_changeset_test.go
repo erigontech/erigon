@@ -18,18 +18,20 @@ package changeset_test
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/state/changeset"
-	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 func TestNoOverflowPages(t *testing.T) {
@@ -58,12 +60,12 @@ func TestNoOverflowPages(t *testing.T) {
 func TestSerializeDeserializeDiff(t *testing.T) {
 	t.Parallel()
 
-	var d []kv.DomainEntryDiff
-	step1, step2, step3 := [8]byte{1}, [8]byte{2}, [8]byte{3}
-	d = append(d, kv.DomainEntryDiff{Key: "key188888888", Value: []byte("value1"), PrevStepBytes: step1[:]})
-	d = append(d, kv.DomainEntryDiff{Key: "key288888888", Value: []byte("value2"), PrevStepBytes: step2[:]})
-	d = append(d, kv.DomainEntryDiff{Key: "key388888888", Value: []byte("value3"), PrevStepBytes: step3[:]})
-	d = append(d, kv.DomainEntryDiff{Key: "key388888888", Value: []byte("value3"), PrevStepBytes: step1[:]})
+	d := []kv.DomainEntryDiff{
+		{Key: "key188888888", Value: []byte("value1")},
+		{Key: "key288888888", Value: []byte("value2")},
+		{Key: "key388888888", Value: []byte("value3")},
+		{Key: "key388888888", Value: []byte("value3")},
+	}
 
 	serialized := changeset.SerializeDiffSet(d, nil)
 	fmt.Println(len(serialized))
@@ -72,20 +74,111 @@ func TestSerializeDeserializeDiff(t *testing.T) {
 	require.Equal(t, d, deserialized)
 }
 
+func TestSerializeDeserializeDiffEmpty(t *testing.T) {
+	t.Parallel()
+
+	var empty []kv.DomainEntryDiff
+	serialized := changeset.SerializeDiffSet(empty, nil)
+	require.Equal(t, []byte{0, 1, 0, 0, 0, 0}, serialized) // version [0,1] + count (4 bytes, zero entries)
+	deserialized := changeset.DeserializeDiffSet(serialized)
+	require.Empty(t, deserialized)
+}
+
+func TestDeserializeOldFormatEmpty(t *testing.T) {
+	t.Parallel()
+
+	// Old empty format: dictLen=0, diffSetLen=0
+	oldEmpty := []byte{0, 0, 0, 0, 0}
+	deserialized := changeset.DeserializeDiffSet(oldEmpty)
+	require.Empty(t, deserialized)
+}
+
+func TestDeserializeOldFormatNonEmpty(t *testing.T) {
+	t.Parallel()
+
+	// Construct old dictionary-based format bytes:
+	// dictLen(1) = 1
+	// dict entry: 8 bytes step + 1 byte (unused) = 9 bytes
+	// diffSetLen(4) = 2
+	// entry 1: keyLen(4) + key + valLen(4) + val + dictIdx(1)
+	// entry 2: keyLen(4) + key + valLen(4=0) + dictIdx(1) (valueLen=0 → nil)
+
+	var buf []byte
+	// dictLen = 1
+	buf = append(buf, 1)
+	// dict entry: step=42 (8 bytes big-endian) + 1 byte unused
+	step := make([]byte, 8)
+	binary.BigEndian.PutUint64(step, 42)
+	buf = append(buf, step...)
+	buf = append(buf, 0) // unused byte
+
+	// diffSetLen = 2
+	diffSetLen := make([]byte, 4)
+	binary.BigEndian.PutUint32(diffSetLen, 2)
+	buf = append(buf, diffSetLen...)
+
+	// entry 1: key="abc", value="xyz", dictIdx=0
+	keyLen := make([]byte, 4)
+	binary.BigEndian.PutUint32(keyLen, 3)
+	buf = append(buf, keyLen...)
+	buf = append(buf, "abc"...)
+	valLen := make([]byte, 4)
+	binary.BigEndian.PutUint32(valLen, 3)
+	buf = append(buf, valLen...)
+	buf = append(buf, "xyz"...)
+	buf = append(buf, 0) // dictIdx
+
+	// entry 2: key="def", valueLen=0 (→ nil), dictIdx=0
+	binary.BigEndian.PutUint32(keyLen, 3)
+	buf = append(buf, keyLen...)
+	buf = append(buf, "def"...)
+	binary.BigEndian.PutUint32(valLen, 0)
+	buf = append(buf, valLen...)
+	buf = append(buf, 0) // dictIdx
+
+	deserialized := changeset.DeserializeDiffSet(buf)
+	require.Len(t, deserialized, 2)
+	require.Equal(t, "abc", deserialized[0].Key)
+	require.Equal(t, []byte("xyz"), deserialized[0].Value)
+	require.Equal(t, "def", deserialized[1].Key)
+	require.Nil(t, deserialized[1].Value)
+}
+
+func TestDeserializeNilValue(t *testing.T) {
+	t.Parallel()
+
+	d := []kv.DomainEntryDiff{
+		{Key: "key1_padding", Value: []byte("value1")},
+		{Key: "key2_padding", Value: nil},
+		{Key: "key3_padding", Value: []byte{}},
+	}
+
+	serialized := changeset.SerializeDiffSet(d, nil)
+	deserialized := changeset.DeserializeDiffSet(serialized)
+
+	require.Len(t, deserialized, 3)
+	require.Equal(t, "key1_padding", deserialized[0].Key)
+	require.Equal(t, []byte("value1"), deserialized[0].Value)
+	require.Equal(t, "key2_padding", deserialized[1].Key)
+	require.Nil(t, deserialized[1].Value)
+	require.Equal(t, "key3_padding", deserialized[2].Key)
+	require.Equal(t, []byte{}, deserialized[2].Value)
+}
+
 func TestMergeDiffSet(t *testing.T) {
 	t.Parallel()
 
-	var d1 []kv.DomainEntryDiff
-	step1, step2, step3 := [8]byte{1}, [8]byte{2}, [8]byte{3}
-	d1 = append(d1, kv.DomainEntryDiff{Key: "key188888888", Value: []byte("value1"), PrevStepBytes: step1[:]})
-	d1 = append(d1, kv.DomainEntryDiff{Key: "key288888888", Value: []byte("value2"), PrevStepBytes: step2[:]})
-	d1 = append(d1, kv.DomainEntryDiff{Key: "key388888888", Value: []byte("value3"), PrevStepBytes: step3[:]})
+	d1 := []kv.DomainEntryDiff{
+		{Key: "key188888888", Value: []byte("value1")},
+		{Key: "key288888888", Value: []byte("value2")},
+		{Key: "key388888888", Value: []byte("value3")},
+	}
 
-	var d2 []kv.DomainEntryDiff
-	step4, step5, step6 := [8]byte{4}, [8]byte{5}, [8]byte{6}
-	d2 = append(d2, kv.DomainEntryDiff{Key: "key188888888", Value: []byte("value5"), PrevStepBytes: step5[:]})
-	d2 = append(d2, kv.DomainEntryDiff{Key: "key388888888", Value: []byte("value6"), PrevStepBytes: step6[:]})
-	d2 = append(d2, kv.DomainEntryDiff{Key: "key488888888", Value: []byte("value4"), PrevStepBytes: step4[:]})
+	d2 := []kv.DomainEntryDiff{
+		{Key: "key188888888", Value: []byte("value5")},
+		{Key: "key388888888", Value: []byte("value6")},
+		{Key: "key488888888", Value: []byte("value4")},
+	}
 
 	merged := changeset.MergeDiffSets(d1, d2)
 	require.Len(t, merged, 4)
@@ -94,4 +187,127 @@ func TestMergeDiffSet(t *testing.T) {
 	require.Equal(t, d1[1], merged[1])
 	require.Equal(t, d2[1], merged[2])
 	require.Equal(t, d2[2], merged[3])
+}
+
+func BenchmarkSerializeDiffSet(b *testing.B) {
+	// Create a realistic diffSet with varying sizes
+	var d []kv.DomainEntryDiff
+	for i := 0; i < 1000; i++ {
+		key := fmt.Sprintf("key%08d_padding", i)
+		value := make([]byte, 32+i%64) // varying value sizes
+		d = append(d, kv.DomainEntryDiff{
+			Key:   key,
+			Value: value,
+		})
+	}
+
+	out := make([]byte, 0, 128*1024)
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for b.Loop() {
+		out = changeset.SerializeDiffSet(d, out[:0])
+	}
+}
+
+func BenchmarkWriteDiffSet(b *testing.B) {
+	dirs := datadir.New(b.TempDir())
+	db := mdbx.New(dbcfg.ChainDB, log.Root()).InMem(b, dirs.Chaindata).PageSize(ethconfig.DefaultChainDBPageSize).MustOpen()
+	b.Cleanup(db.Close)
+
+	// Create a realistic StateChangeSet
+	diffSet := createTestDiffSet(b, 10, 100, 10, 100)
+
+	blockHash := common.Hash{0x01, 0x02, 0x03}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; b.Loop(); i++ {
+		ctx := context.Background()
+		tx, err := db.BeginRw(ctx)
+		if err != nil {
+			b.Fatal(err)
+		}
+		defer tx.Rollback()
+		if err := changeset.WriteDiffSet(tx, uint64(i), blockHash, diffSet); err != nil {
+			tx.Rollback()
+			b.Fatal(err)
+		}
+		tx.Rollback() // Don't commit to avoid filling up the DB
+	}
+}
+
+func BenchmarkWriteDiffSetLarge(b *testing.B) {
+	dirs := datadir.New(b.TempDir())
+	db := mdbx.New(dbcfg.ChainDB, log.Root()).InMem(b, dirs.Chaindata).PageSize(ethconfig.DefaultChainDBPageSize).MustOpen()
+	b.Cleanup(db.Close)
+
+	// Create a large StateChangeSet (simulating a heavy block)
+	diffSet := createTestDiffSet(b, 1000, 5000, 10, 10_000)
+
+	blockHash := common.Hash{0x01, 0x02, 0x03}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; b.Loop(); i++ {
+		ctx := context.Background()
+		tx, err := db.BeginRw(ctx)
+		if err != nil {
+			b.Fatal(err)
+		}
+		defer tx.Rollback()
+		if err := changeset.WriteDiffSet(tx, uint64(i), blockHash, diffSet); err != nil {
+			tx.Rollback()
+			b.Fatal(err)
+		}
+		tx.Rollback()
+	}
+}
+
+// createTestDiffSet creates a StateChangeSet with realistic data
+func createTestDiffSet(tb testing.TB, numAccounts, numStorage, numCode, numCommitment int) *changeset.StateChangeSet {
+	tb.Helper()
+
+	diffSet := &changeset.StateChangeSet{}
+
+	// Accounts domain - 20 byte addresses with account data
+	for i := 0; i < numAccounts; i++ {
+		key := make([]byte, 20)
+		key[0] = byte(i >> 8)
+		key[1] = byte(i)
+		value := make([]byte, 70) // typical account encoding size
+		diffSet.Diffs[kv.AccountsDomain].DomainUpdate(key, kv.Step(100), value)
+	}
+
+	// Storage domain - 20 byte address + 32 byte location
+	for i := 0; i < numStorage; i++ {
+		key := make([]byte, 52)
+		key[0] = byte(i >> 16)
+		key[1] = byte(i >> 8)
+		key[2] = byte(i)
+		value := make([]byte, 32) // storage value
+		diffSet.Diffs[kv.StorageDomain].DomainUpdate(key, kv.Step(100), value)
+	}
+
+	// Code domain - 20 byte address with code hash
+	for i := 0; i < numCode; i++ {
+		key := make([]byte, 20)
+		key[0] = byte(i >> 8)
+		key[1] = byte(i)
+		value := make([]byte, 32) // code hash
+		diffSet.Diffs[kv.CodeDomain].DomainUpdate(key, kv.Step(100), value)
+	}
+
+	// Commitment domain - variable key with trie node data
+	for i := 0; i < numCommitment; i++ {
+		key := make([]byte, 8+i%32) // variable length keys
+		key[0] = byte(i >> 8)
+		key[1] = byte(i)
+		value := make([]byte, 64+i%64) // variable length values
+		diffSet.Diffs[kv.CommitmentDomain].DomainUpdate(key, kv.Step(100), value)
+	}
+
+	return diffSet
 }

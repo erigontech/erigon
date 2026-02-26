@@ -13,7 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 
-	common "github.com/erigontech/erigon-lib/common"
+	common "github.com/erigontech/erigon/common"
 	kv "github.com/erigontech/erigon/db/kv"
 	remoteproto "github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	txpoolcfg "github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"

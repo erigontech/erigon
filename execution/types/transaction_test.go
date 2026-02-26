@@ -35,10 +35,10 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -59,7 +59,7 @@ var (
 		testAddr,
 		uint256.NewInt(10),
 		2000,
-		u256.Num1,
+		&u256.Num1,
 		common.FromHex("5544"),
 	).WithSignature(
 		*LatestSignerForChainID(nil),
@@ -67,7 +67,7 @@ var (
 	)
 
 	emptyEip2718Tx = &AccessListTx{
-		ChainID: u256.Num1,
+		ChainID: &u256.Num1,
 		LegacyTx: LegacyTx{
 			CommonTx: CommonTx{
 				Nonce:    3,
@@ -93,7 +93,7 @@ var (
 			GasLimit: 25000,
 			Data:     common.FromHex("5544"),
 		},
-		ChainID: u256.Num1,
+		ChainID: &u256.Num1,
 		TipCap:  uint256.NewInt(1),
 		FeeCap:  uint256.NewInt(1),
 	}
@@ -119,6 +119,71 @@ func TestDecodeEmptyTypedTx(t *testing.T) {
 	_, err := DecodeTransaction(input)
 	if !errors.Is(err, rlp.EOL) {
 		t.Fatal("wrong error:", err)
+	}
+}
+
+func TestDecodeRLPTransactionRejectsTrailingBytes(t *testing.T) {
+	t.Parallel()
+	input := []byte{248, 99, 128, 2, 1, 148, 9, 94, 123, 174, 166, 166, 199, 196, 194, 223, 235, 151, 126, 250, 195, 38, 175, 85, 45, 135, 128, 134, 97, 98, 99, 100, 101, 102, 37, 160, 142, 183, 96, 239, 234, 152, 124, 9, 98, 209, 245, 242, 175, 209, 122, 221, 51, 54, 23, 237, 233, 142, 83, 7, 50, 17, 119, 99, 15, 34, 57, 125, 160, 21, 141, 44, 195, 195, 220, 247, 64, 91, 79, 6, 37, 93, 226, 96, 69, 227, 240, 8, 168, 169, 112, 118, 124, 14, 250, 73, 19, 190, 7, 104, 57, 1}
+
+	stream := rlp.NewStream(bytes.NewReader(input), uint64(len(input)))
+	if _, err := DecodeRLPTransaction(stream, false); !errors.Is(err, errTrailingBytes) {
+		t.Fatalf("expected trailing bytes error from DecodeRLPTransaction, got %v", err)
+	}
+
+	if _, err := DecodeTransaction(input); !errors.Is(err, errTrailingBytes) {
+		t.Fatalf("expected trailing bytes error from DecodeTransaction, got %v", err)
+	}
+
+	if _, err := DecodeWrappedTransaction(input); !errors.Is(err, errTrailingBytes) {
+		t.Fatalf("expected trailing bytes error from DecodeWrappedTransaction, got %v", err)
+	}
+}
+
+func TestDecodeRLPTransactionRejectsTrailingBytesTyped(t *testing.T) {
+	t.Parallel()
+	encoded, err := rlp.EncodeToBytes(signedDynFeeTx)
+	if err != nil {
+		t.Fatalf("failed to encode typed tx: %v", err)
+	}
+	input := append(append([]byte{}, encoded...), 0x01)
+
+	stream := rlp.NewStream(bytes.NewReader(input), uint64(len(input)))
+	if _, err := DecodeRLPTransaction(stream, false); !errors.Is(err, errTrailingBytes) {
+		t.Fatalf("expected trailing bytes error from DecodeRLPTransaction, got %v", err)
+	}
+
+	if _, err := DecodeTransaction(input); !errors.Is(err, errTrailingBytes) {
+		t.Fatalf("expected trailing bytes error from DecodeTransaction, got %v", err)
+	}
+
+	if _, err := DecodeWrappedTransaction(input); !errors.Is(err, errTrailingBytes) {
+		t.Fatalf("expected trailing bytes error from DecodeWrappedTransaction, got %v", err)
+	}
+}
+
+func TestDecodeRLPTransactionInsideListAllowsIteration(t *testing.T) {
+	t.Parallel()
+	txBytes, err := rlp.EncodeToBytes(rightvrsTx)
+	if err != nil {
+		t.Fatalf("encode tx: %v", err)
+	}
+	listBytes, err := rlp.EncodeToBytes([]rlp.RawValue{txBytes, txBytes})
+	if err != nil {
+		t.Fatalf("encode tx list: %v", err)
+	}
+	stream := rlp.NewStream(bytes.NewReader(listBytes), uint64(len(listBytes)))
+	if _, err := stream.List(); err != nil {
+		t.Fatalf("list header: %v", err)
+	}
+	if _, err := DecodeRLPTransaction(stream, false); err != nil {
+		t.Fatalf("first tx decode failed: %v", err)
+	}
+	if _, err := DecodeRLPTransaction(stream, false); err != nil {
+		t.Fatalf("second tx decode failed: %v", err)
+	}
+	if _, err := DecodeRLPTransaction(stream, false); !errors.Is(err, rlp.EOL) {
+		t.Fatalf("expected EOL after list, got %v", err)
 	}
 }
 
@@ -164,8 +229,8 @@ func TestEIP2930Signer(t *testing.T) {
 		signer1 = LatestSignerForChainID(big.NewInt(1))
 		signer2 = LatestSignerForChainID(big.NewInt(2))
 		tx0     = &AccessListTx{LegacyTx: LegacyTx{CommonTx: CommonTx{Nonce: 1}}}
-		tx1     = &AccessListTx{ChainID: u256.Num1, LegacyTx: LegacyTx{CommonTx: CommonTx{Nonce: 1}}}
-		tx2, _  = SignNewTx(key, *signer2, &AccessListTx{ChainID: u256.Num2, LegacyTx: LegacyTx{CommonTx: CommonTx{Nonce: 1}}})
+		tx1     = &AccessListTx{ChainID: &u256.Num1, LegacyTx: LegacyTx{CommonTx: CommonTx{Nonce: 1}}}
+		tx2, _  = SignNewTx(key, *signer2, &AccessListTx{ChainID: &u256.Num2, LegacyTx: LegacyTx{CommonTx: CommonTx{Nonce: 1}}})
 	)
 
 	tests := []struct {
@@ -222,7 +287,7 @@ func TestEIP2930Signer(t *testing.T) {
 		if !errors.Is(err, test.wantSenderErr) {
 			t.Errorf("test %d: wrong Sender error %q", i, err)
 		}
-		if err == nil && sender != keyAddr {
+		if err == nil && sender.Value() != keyAddr {
 			t.Errorf("test %d: wrong sender address %x", i, sender)
 		}
 		signedTx, err := SignTx(test.tx, *test.signer, key)
@@ -307,7 +372,7 @@ func TestRecipientEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if addr != from {
+	if addr != from.Value() {
 		t.Fatal("derived address doesn't match")
 	}
 }
@@ -325,7 +390,7 @@ func TestRecipientNormal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if addr != from {
+	if addr != from.Value() {
 		t.Fatal("derived address doesn't match")
 	}
 }
@@ -386,7 +451,7 @@ func TestTransactionCoding(t *testing.T) {
 					GasLimit: 1,
 					Data:     []byte("abcdef"),
 				},
-				GasPrice: u256.Num2,
+				GasPrice: &u256.Num2,
 			}
 		case 1:
 			// Legacy txn contract creation.
@@ -396,7 +461,7 @@ func TestTransactionCoding(t *testing.T) {
 					GasLimit: 1,
 					Data:     []byte("abcdef"),
 				},
-				GasPrice: u256.Num2,
+				GasPrice: &u256.Num2,
 			}
 		case 2:
 			// txn with non-zero access list.
@@ -600,7 +665,7 @@ func newRandBlobTx() *BlobTx {
 			To:       randAddr(),
 			Value:    uint256.NewInt(rand.Uint64()),
 			Data:     randData(),
-			V:        *uint256.NewInt(0),
+			V:        uint256.Int{},
 			R:        *uint256.NewInt(rand.Uint64()),
 			S:        *uint256.NewInt(rand.Uint64()),
 		},
@@ -613,35 +678,6 @@ func newRandBlobTx() *BlobTx {
 		BlobVersionedHashes: randHashes(randIntInRange(1, 6)),
 	}
 	return stx
-}
-
-func printSTX(stx *BlobTx) {
-	fmt.Println("--BlobTx")
-	fmt.Printf("ChainID: %v\n", stx.ChainID)
-	fmt.Printf("Nonce: %v\n", stx.Nonce)
-	fmt.Printf("MaxPriorityFeePerGas: %v\n", stx.TipCap)
-	fmt.Printf("MaxFeePerGas: %v\n", stx.FeeCap)
-	fmt.Printf("Gas: %v\n", stx.GasLimit)
-	fmt.Printf("To: %v\n", stx.To)
-	fmt.Printf("Value: %v\n", stx.Value)
-	fmt.Printf("Data: %v\n", stx.Data)
-	fmt.Printf("AccessList: %v\n", stx.AccessList)
-	fmt.Printf("MaxFeePerBlobGas: %v\n", stx.MaxFeePerBlobGas)
-	fmt.Printf("BlobVersionedHashes: %v\n", stx.BlobVersionedHashes)
-	fmt.Printf("V: %v\n", stx.V)
-	fmt.Printf("R: %v\n", stx.R)
-	fmt.Printf("S: %v\n", stx.S)
-	fmt.Println("-----")
-	fmt.Println()
-}
-
-func printSTXW(txw *BlobTxWrapper) {
-	fmt.Println("--BlobTxWrapper")
-	printSTX(&txw.Tx)
-	fmt.Printf("Commitments LEN: %v\n", txw.Commitments)
-	fmt.Printf("Proofs LEN: %v\n", txw.Proofs)
-	fmt.Println("-----")
-	fmt.Println()
 }
 
 func randByte() byte {
@@ -688,7 +724,7 @@ func newRandBlobWrapper() *BlobTxWrapper {
 	btxw := newRandBlobTx()
 	l := len(btxw.BlobVersionedHashes)
 	return &BlobTxWrapper{
-		Tx:          *btxw, //nolint
+		Tx:          btxw.copyData(),
 		Commitments: newRandCommitments(l),
 		Blobs:       newRandBlobs(l),
 		Proofs:      newRandProofs(l),
@@ -730,6 +766,9 @@ func TestBlobTxEncodeDecode(t *testing.T) {
 }
 
 func TestShortUnwrap(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	blobTxRlp, _ := MakeBlobTxnRlp()
 	shortRlp, err := UnwrapTxPlayloadRlp(blobTxRlp)
 	if err != nil {
@@ -752,6 +791,9 @@ func TestShortUnwrap(t *testing.T) {
 }
 
 func TestV1BlobTxnUnwrap(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	blobTxRlp, _ := MakeV1WrappedBlobTxnRlp()
 	shortRlp, err := UnwrapTxPlayloadRlp(blobTxRlp)
 	if err != nil {

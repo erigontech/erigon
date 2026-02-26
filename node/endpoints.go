@@ -31,8 +31,8 @@ import (
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
@@ -158,15 +158,27 @@ func checkModuleAvailability(modules []string, apis []rpc.API) (bad, available [
 // CheckTimeouts ensures that timeout values are meaningful
 func CheckTimeouts(timeouts *rpccfg.HTTPTimeouts) {
 	if timeouts.ReadTimeout < time.Second {
-		log.Warn("Sanitizing invalid HTTP read timeout", "provided", timeouts.ReadTimeout, "updated", rpccfg.DefaultHTTPTimeouts.ReadTimeout)
+		if timeouts.ReadTimeout > 0 {
+			log.Warn("Sanitizing invalid HTTP read timeout", "provided", timeouts.ReadTimeout, "updated", rpccfg.DefaultHTTPTimeouts.ReadTimeout)
+		} else {
+			log.Debug("Sanitizing invalid HTTP read timeout", "provided", timeouts.ReadTimeout, "updated", rpccfg.DefaultHTTPTimeouts.ReadTimeout)
+		}
 		timeouts.ReadTimeout = rpccfg.DefaultHTTPTimeouts.ReadTimeout
 	}
 	if timeouts.WriteTimeout < time.Second {
-		log.Warn("Sanitizing invalid HTTP write timeout", "provided", timeouts.WriteTimeout, "updated", rpccfg.DefaultHTTPTimeouts.WriteTimeout)
+		if timeouts.WriteTimeout > 0 {
+			log.Warn("Sanitizing invalid HTTP write timeout", "provided", timeouts.WriteTimeout, "updated", rpccfg.DefaultHTTPTimeouts.WriteTimeout)
+		} else {
+			log.Debug("Sanitizing invalid HTTP write timeout", "provided", timeouts.WriteTimeout, "updated", rpccfg.DefaultHTTPTimeouts.WriteTimeout)
+		}
 		timeouts.WriteTimeout = rpccfg.DefaultHTTPTimeouts.WriteTimeout
 	}
 	if timeouts.IdleTimeout < time.Second {
-		log.Warn("Sanitizing invalid HTTP idle timeout", "provided", timeouts.IdleTimeout, "updated", rpccfg.DefaultHTTPTimeouts.IdleTimeout)
+		if timeouts.IdleTimeout > 0 {
+			log.Warn("Sanitizing invalid HTTP idle timeout", "provided", timeouts.IdleTimeout, "updated", rpccfg.DefaultHTTPTimeouts.IdleTimeout)
+		} else {
+			log.Debug("Sanitizing invalid HTTP idle timeout", "provided", timeouts.IdleTimeout, "updated", rpccfg.DefaultHTTPTimeouts.IdleTimeout)
+		}
 		timeouts.IdleTimeout = rpccfg.DefaultHTTPTimeouts.IdleTimeout
 	}
 }

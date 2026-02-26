@@ -20,7 +20,7 @@ import (
 	"io/fs"
 	"testing"
 
-	"github.com/erigontech/erigon/spectest"
+	"github.com/erigontech/erigon/cl/spectest/spectest"
 )
 
 type RewardsCore struct {

@@ -33,9 +33,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/testlog"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
@@ -296,7 +296,7 @@ func TestAllowList(t *testing.T) {
 }
 
 func testCustomRequest(t *testing.T, srv *httpServer, method string) bool {
-	body := bytes.NewReader([]byte(fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"%s"}`, method)))
+	body := bytes.NewReader(fmt.Appendf(nil, `{"jsonrpc":"2.0","id":1,"method":"%s"}`, method))
 	req, _ := http.NewRequest("POST", "http://"+srv.listenAddr(), body)
 	req.Header.Set("content-type", "application/json")
 
@@ -344,4 +344,34 @@ func rpcRequest(t *testing.T, url string, extraHeaders ...string) *http.Response
 		t.Fatal(err)
 	}
 	return resp
+}
+
+func TestHTTP2H2C(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	srv := createAndStartServer(t, &httpConfig{}, false, &wsConfig{})
+	defer srv.stop()
+
+	// Create an HTTP/2 cleartext client.
+	transport := &http.Transport{}
+	transport.Protocols = new(http.Protocols)
+	transport.Protocols.SetUnencryptedHTTP2(true)
+	client := &http.Client{Transport: transport}
+
+	body := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"rpc_modules","params":[]}`)
+	resp, err := client.Post("http://"+srv.listenAddr(), "application/json", body)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	// Validate protocol
+	assert.Equal(t, "HTTP/2.0", resp.Proto, "expected HTTP/2.0 protocol")
+
+	// Validate status
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// Validate response body
+	result, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Contains(t, string(result), "jsonrpc", "expected JSON-RPC response")
 }

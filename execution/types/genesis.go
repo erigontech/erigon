@@ -27,9 +27,11 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/math"
+	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
 )
 
@@ -47,10 +49,10 @@ type Genesis struct {
 	Timestamp  uint64         `json:"timestamp"`
 	ExtraData  []byte         `json:"extraData"`
 	GasLimit   uint64         `json:"gasLimit"   gencodec:"required"`
-	Difficulty *big.Int       `json:"difficulty" gencodec:"required"`
+	Difficulty *uint256.Int   `json:"difficulty" gencodec:"required"`
 	Mixhash    common.Hash    `json:"mixHash"`
 	Coinbase   common.Address `json:"coinbase"`
-	Alloc      GenesisAlloc   `json:"alloc"      gencodec:"required"`
+	Alloc      GenesisAlloc   `json:"alloc"`
 
 	AuRaSeal *AuRaSeal `json:"seal"`
 
@@ -61,11 +63,13 @@ type Genesis struct {
 	ParentHash common.Hash `json:"parentHash"`
 
 	// Header fields added in London and later hard forks
-	BaseFee               *big.Int     `json:"baseFeePerGas"`         // EIP-1559
+	BaseFee               *uint256.Int `json:"baseFeePerGas"`         // EIP-1559
 	BlobGasUsed           *uint64      `json:"blobGasUsed"`           // EIP-4844
 	ExcessBlobGas         *uint64      `json:"excessBlobGas"`         // EIP-4844
 	ParentBeaconBlockRoot *common.Hash `json:"parentBeaconBlockRoot"` // EIP-4788
 	RequestsHash          *common.Hash `json:"requestsHash"`          // EIP-7685
+	BlockAccessListHash   *common.Hash `json:"blockAccessListHash"`   // EIP-7928
+	SlotNumber            *uint64      `json:"slotNumber"`            // EIP-7843
 }
 
 type AuRaSeal struct {
@@ -97,7 +101,7 @@ func (ga *GenesisAlloc) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func DecodeGenesisAlloc(i interface{}) (GenesisAlloc, error) {
+func DecodeGenesisAlloc(i any) (GenesisAlloc, error) {
 	var alloc GenesisAlloc
 
 	b, err := json.Marshal(i)
@@ -135,6 +139,7 @@ type genesisSpecMarshaling struct {
 	BaseFee       *math.HexOrDecimal256
 	BlobGasUsed   *math.HexOrDecimal64
 	ExcessBlobGas *math.HexOrDecimal64
+	SlotNumber    *math.HexOrDecimal64
 	Alloc         map[common.UnprefixedAddress]GenesisAccount
 }
 

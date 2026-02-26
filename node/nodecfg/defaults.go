@@ -48,9 +48,11 @@ var DefaultConfig = Config{
 	WSModules:        []string{"net", "web3"},
 	P2P: p2p.Config{
 		ListenAddr:      ":30303",
-		ProtocolVersion: []uint{direct.ETH68, direct.ETH69}, // Keep eth/68 in first index for Hive tests
+		ProtocolVersion: []uint{direct.ETH69, direct.ETH68},
 		MaxPeers:        32,
 		MaxPendingPeers: 1000,
 		NAT:             nat.Any(),
+		DiscoveryV4:     false,
+		DiscoveryV5:     true,
 	},
 }

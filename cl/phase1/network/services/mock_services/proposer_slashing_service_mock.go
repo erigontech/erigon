@@ -13,7 +13,9 @@ import (
 	context "context"
 	reflect "reflect"
 
+	clparams "github.com/erigontech/erigon/cl/clparams"
 	cltypes "github.com/erigontech/erigon/cl/cltypes"
+	peer "github.com/libp2p/go-libp2p/core/peer"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -39,6 +41,83 @@ func NewMockProposerSlashingService(ctrl *gomock.Controller) *MockProposerSlashi
 // EXPECT returns an object that allows the caller to indicate expected use.
 func (m *MockProposerSlashingService) EXPECT() *MockProposerSlashingServiceMockRecorder {
 	return m.recorder
+}
+
+// DecodeGossipMessage mocks base method.
+func (m *MockProposerSlashingService) DecodeGossipMessage(pid peer.ID, data []byte, version clparams.StateVersion) (*cltypes.ProposerSlashing, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DecodeGossipMessage", pid, data, version)
+	ret0, _ := ret[0].(*cltypes.ProposerSlashing)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DecodeGossipMessage indicates an expected call of DecodeGossipMessage.
+func (mr *MockProposerSlashingServiceMockRecorder) DecodeGossipMessage(pid, data, version any) *MockProposerSlashingServiceDecodeGossipMessageCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DecodeGossipMessage", reflect.TypeOf((*MockProposerSlashingService)(nil).DecodeGossipMessage), pid, data, version)
+	return &MockProposerSlashingServiceDecodeGossipMessageCall{Call: call}
+}
+
+// MockProposerSlashingServiceDecodeGossipMessageCall wrap *gomock.Call
+type MockProposerSlashingServiceDecodeGossipMessageCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockProposerSlashingServiceDecodeGossipMessageCall) Return(arg0 *cltypes.ProposerSlashing, arg1 error) *MockProposerSlashingServiceDecodeGossipMessageCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockProposerSlashingServiceDecodeGossipMessageCall) Do(f func(peer.ID, []byte, clparams.StateVersion) (*cltypes.ProposerSlashing, error)) *MockProposerSlashingServiceDecodeGossipMessageCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockProposerSlashingServiceDecodeGossipMessageCall) DoAndReturn(f func(peer.ID, []byte, clparams.StateVersion) (*cltypes.ProposerSlashing, error)) *MockProposerSlashingServiceDecodeGossipMessageCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// Names mocks base method.
+func (m *MockProposerSlashingService) Names() []string {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Names")
+	ret0, _ := ret[0].([]string)
+	return ret0
+}
+
+// Names indicates an expected call of Names.
+func (mr *MockProposerSlashingServiceMockRecorder) Names() *MockProposerSlashingServiceNamesCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Names", reflect.TypeOf((*MockProposerSlashingService)(nil).Names))
+	return &MockProposerSlashingServiceNamesCall{Call: call}
+}
+
+// MockProposerSlashingServiceNamesCall wrap *gomock.Call
+type MockProposerSlashingServiceNamesCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockProposerSlashingServiceNamesCall) Return(arg0 []string) *MockProposerSlashingServiceNamesCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockProposerSlashingServiceNamesCall) Do(f func() []string) *MockProposerSlashingServiceNamesCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockProposerSlashingServiceNamesCall) DoAndReturn(f func() []string) *MockProposerSlashingServiceNamesCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
 }
 
 // ProcessMessage mocks base method.

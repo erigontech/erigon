@@ -28,7 +28,7 @@ import (
 	"github.com/holiman/uint256"
 
 	ethereum "github.com/erigontech/erigon"
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p/event"
@@ -42,7 +42,7 @@ type SignerFn func(common.Address, types.Transaction) (types.Transaction, error)
 type CallOpts struct {
 	Pending     bool            // Whether to operate on the pending state or the last known one
 	From        common.Address  // Optional the sender address, otherwise the first account is used
-	BlockNumber *big.Int        // Optional the block number on which the call should be performed
+	BlockNumber *uint256.Int    // Optional the block number on which the call should be performed
 	Context     context.Context // Network context to support cancellation and timeouts (nil = no timeout)
 }
 
@@ -101,7 +101,7 @@ func NewBoundContract(address common.Address, abi abi.ABI, caller ContractCaller
 
 // DeployContract deploys a contract onto the Ethereum blockchain and binds the
 // deployment address with a Go wrapper.
-func DeployContract(opts *TransactOpts, abi abi.ABI, bytecode []byte, backend ContractBackend, params ...interface{}) (common.Address, types.Transaction, *BoundContract, error) {
+func DeployContract(opts *TransactOpts, abi abi.ABI, bytecode []byte, backend ContractBackend, params ...any) (common.Address, types.Transaction, *BoundContract, error) {
 	// Otherwise try to deploy the contract
 	c := NewBoundContract(common.Address{}, abi, backend, backend, backend)
 
@@ -121,13 +121,13 @@ func DeployContract(opts *TransactOpts, abi abi.ABI, bytecode []byte, backend Co
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (c *BoundContract) Call(opts *CallOpts, results *[]interface{}, method string, params ...interface{}) error {
+func (c *BoundContract) Call(opts *CallOpts, results *[]any, method string, params ...any) error {
 	// Don't crash on a lazy user
 	if opts == nil {
 		opts = new(CallOpts)
 	}
 	if results == nil {
-		results = new([]interface{})
+		results = new([]any)
 	}
 	// Pack the input, call and unpack the results
 	input, err := c.abi.Pack(method, params...)
@@ -179,7 +179,7 @@ func (c *BoundContract) Call(opts *CallOpts, results *[]interface{}, method stri
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (c *BoundContract) Transact(opts *TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
+func (c *BoundContract) Transact(opts *TransactOpts, method string, params ...any) (types.Transaction, error) {
 	// Otherwise pack up the parameters and invoke the contract
 	input, err := c.abi.Pack(method, params...)
 	if err != nil {
@@ -279,13 +279,13 @@ func (c *BoundContract) transact(opts *TransactOpts, contract *common.Address, i
 
 // FilterLogs filters contract logs for past blocks, returning the necessary
 // channels to construct a strongly typed bound iterator on top of them.
-func (c *BoundContract) FilterLogs(opts *FilterOpts, name string, query ...[]interface{}) (chan types.Log, event.Subscription, error) {
+func (c *BoundContract) FilterLogs(opts *FilterOpts, name string, query ...[]any) (chan types.Log, event.Subscription, error) {
 	// Don't crash on a lazy user
 	if opts == nil {
 		opts = new(FilterOpts)
 	}
 	// Append the event selector to the query parameters and construct the topic set
-	query = append([][]interface{}{{c.abi.Events[name].ID}}, query...)
+	query = append([][]any{{c.abi.Events[name].ID}}, query...)
 
 	topics, err := abi.MakeTopics(query...)
 	if err != nil {
@@ -325,13 +325,13 @@ func (c *BoundContract) FilterLogs(opts *FilterOpts, name string, query ...[]int
 
 // WatchLogs filters subscribes to contract logs for future blocks, returning a
 // subscription object that can be used to tear down the watcher.
-func (c *BoundContract) WatchLogs(opts *WatchOpts, name string, query ...[]interface{}) (chan types.Log, event.Subscription, error) {
+func (c *BoundContract) WatchLogs(opts *WatchOpts, name string, query ...[]any) (chan types.Log, event.Subscription, error) {
 	// Don't crash on a lazy user
 	if opts == nil {
 		opts = new(WatchOpts)
 	}
 	// Append the event selector to the query parameters and construct the topic set
-	query = append([][]interface{}{{c.abi.Events[name].ID}}, query...)
+	query = append([][]any{{c.abi.Events[name].ID}}, query...)
 
 	topics, err := abi.MakeTopics(query...)
 	if err != nil {
@@ -355,7 +355,7 @@ func (c *BoundContract) WatchLogs(opts *WatchOpts, name string, query ...[]inter
 }
 
 // UnpackLog unpacks a retrieved log into the provided output structure.
-func (c *BoundContract) UnpackLog(out interface{}, event string, log types.Log) error {
+func (c *BoundContract) UnpackLog(out any, event string, log types.Log) error {
 	if len(log.Data) > 0 {
 		if err := c.abi.UnpackIntoInterface(out, event, log.Data); err != nil {
 			return err
@@ -371,7 +371,7 @@ func (c *BoundContract) UnpackLog(out interface{}, event string, log types.Log) 
 }
 
 // UnpackLogIntoMap unpacks a retrieved log into the provided map.
-func (c *BoundContract) UnpackLogIntoMap(out map[string]interface{}, event string, log types.Log) error {
+func (c *BoundContract) UnpackLogIntoMap(out map[string]any, event string, log types.Log) error {
 	if len(log.Data) > 0 {
 		if err := c.abi.UnpackIntoMap(out, event, log.Data); err != nil {
 			return err
@@ -390,7 +390,7 @@ func (c *BoundContract) UnpackLogIntoMap(out map[string]interface{}, event strin
 // user specified it as such.
 func ensureContext(ctx context.Context) context.Context {
 	if ctx == nil {
-		return context.TODO()
+		return context.Background()
 	}
 	return ctx
 }

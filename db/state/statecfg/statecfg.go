@@ -20,7 +20,7 @@ type DomainCfg struct {
 	// for commitment domain only
 	ReplaceKeysInValues bool
 
-	Version DomainVersionTypes
+	FileVersion DomainVersionTypes
 }
 
 func (d DomainCfg) Tables() []string {
@@ -29,9 +29,9 @@ func (d DomainCfg) Tables() []string {
 
 func (d DomainCfg) GetVersions() VersionTypes {
 	return VersionTypes{
-		Domain: &d.Version,
-		Hist:   &d.Hist.Version,
-		II:     &d.Hist.IiCfg.Version,
+		Domain: &d.FileVersion,
+		Hist:   &d.Hist.FileVersion,
+		II:     &d.Hist.IiCfg.FileVersion,
 	}
 }
 
@@ -57,27 +57,27 @@ type HistCfg struct {
 	SnapshotsDisabled  bool // don't produce .v and .ef files, keep in db table. old data will be pruned anyway.
 	HistoryDisabled    bool // skip all write operations to this History (even in DB)
 
-	HistoryValuesOnCompressedPage int // when collating .v files: concat 16 values and snappy them
+	HistoryValuesOnCompressedPage int // deprecated, it is only for ver.0 snapshots backward compatibility
 
 	Accessors     Accessors
 	CompressorCfg seg.Cfg             // Compression settings for history files
 	Compression   seg.FileCompression // defines type of Compression for history files
 	HistoryIdx    kv.InvertedIdx
 
-	Version HistVersionTypes
+	FileVersion HistVersionTypes
 }
 
 func (h HistCfg) GetVersions() VersionTypes {
 	return VersionTypes{
-		Hist: &h.Version,
-		II:   &h.IiCfg.Version,
+		Hist: &h.FileVersion,
+		II:   &h.IiCfg.FileVersion,
 	}
 }
 
 type InvIdxCfg struct {
 	Disable bool // totally disable Domain/History/InvertedIndex - ignore all writes, don't produce files
 
-	Version IIVersionTypes
+	FileVersion IIVersionTypes
 
 	FilenameBase string // filename base for all files of this inverted index
 	KeysTable    string // bucket name for index keys;    txnNum_u64 -> key (k+auto_increment)
@@ -90,10 +90,33 @@ type InvIdxCfg struct {
 	Accessors Accessors
 }
 
+type BlockDataFilesCfg struct {
+	FileVersion BlockDataVersionTypes
+	Name        string
+}
+
+type BlockIdxFilesCfg struct {
+	FileVersion BlockIdxVersionTypes
+	Name        string
+}
+
 func (ii InvIdxCfg) GetVersions() VersionTypes {
 	return VersionTypes{
-		II: &ii.Version,
+		II: &ii.FileVersion,
 	}
+}
+
+type ForkableCfg struct {
+	Name string
+
+	canonicalTbl           string // for marked structures
+	ValsTbl                string
+	updateCanonical        bool
+	pruneFrom              kv.Num
+	Accessors              Accessors
+	Compression            seg.FileCompression
+	ValuesOnCompressedPage int // when collating .v files: concat 16 values and snappy them
+	Enabled                bool
 }
 
 type DomainVersionTypes struct {
@@ -113,8 +136,34 @@ type IIVersionTypes struct {
 	AccessorEFI version.Versions
 }
 
+type BlockDataVersionTypes struct {
+	AccessorIdx version.Versions
+	DataSeg     version.Versions
+}
+
+type BlockIdxVersionTypes struct {
+	AccessorIdx version.Versions
+}
+
+func (b BlockDataFilesCfg) GetVersions() VersionTypes {
+	return VersionTypes{
+		BlockData: &b.FileVersion,
+		BlockIdx: &BlockIdxVersionTypes{
+			b.FileVersion.AccessorIdx,
+		},
+	}
+}
+
+func (b BlockIdxFilesCfg) GetVersions() VersionTypes {
+	return VersionTypes{
+		BlockIdx: &b.FileVersion,
+	}
+}
+
 type VersionTypes struct {
-	Hist   *HistVersionTypes
-	Domain *DomainVersionTypes
-	II     *IIVersionTypes
+	Hist      *HistVersionTypes
+	Domain    *DomainVersionTypes
+	II        *IIVersionTypes
+	BlockData *BlockDataVersionTypes
+	BlockIdx  *BlockIdxVersionTypes
 }

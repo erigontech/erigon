@@ -27,8 +27,8 @@ import (
 	"io/fs"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/empty"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/types"
@@ -38,10 +38,10 @@ func init() {
 	RegisterChainSpec(networkname.Mainnet, Mainnet)
 	RegisterChainSpec(networkname.Sepolia, Sepolia)
 	RegisterChainSpec(networkname.Hoodi, Hoodi)
-	RegisterChainSpec(networkname.Holesky, Holesky)
 	RegisterChainSpec(networkname.Gnosis, Gnosis)
 	RegisterChainSpec(networkname.Chiado, Chiado)
 	RegisterChainSpec(networkname.Test, Test)
+	RegisterChainSpec(networkname.Bloatnet, Bloatnet)
 
 	// verify registered chains
 	for _, spec := range registeredChainsByName {
@@ -119,7 +119,13 @@ func ChainSpecByGenesisHash(genesisHash common.Hash) (Spec, error) {
 // If the name already exists, it will be overwritten.
 func RegisterChainSpec(name string, spec Spec) {
 	registeredChainsByName[name] = spec
-	NetworkNameByID[spec.Config.ChainID.Uint64()] = name
+
+	// Use custom NetworkID if specified, otherwise use ChainID
+	networkID := spec.NetworkID
+	if networkID == 0 {
+		networkID = spec.Config.ChainID.Uint64()
+	}
+	NetworkNameByID[networkID] = name
 
 	if spec.GenesisHash != (common.Hash{}) {
 		registeredChainsByGenesisHash[spec.GenesisHash] = spec
@@ -134,6 +140,7 @@ type Spec struct {
 	Config           *chain.Config
 	Bootnodes        []string // list of bootnodes for the chain, if any
 	DNSNetwork       string   // address of a public DNS-based node list. See https://github.com/ethereum/discv4-dns-lists for more information.
+	NetworkID        uint64   // Optional custom network ID (defaults to ChainID if 0)
 }
 
 func (cs Spec) IsEmpty() bool {
@@ -159,15 +166,6 @@ var (
 		Config:      ReadChainConfig(chainspecs, "chainspecs/mainnet.json"),
 		Genesis:     MainnetGenesisBlock(),
 		DNSNetwork:  dnsPrefix + "all.mainnet.ethdisco.net",
-	}
-
-	Holesky = Spec{
-		Name:        networkname.Holesky,
-		GenesisHash: common.HexToHash("0xb5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4"),
-		Bootnodes:   holeskyBootnodes,
-		Config:      ReadChainConfig(chainspecs, "chainspecs/holesky.json"),
-		Genesis:     HoleskyGenesisBlock(),
-		DNSNetwork:  dnsPrefix + "all.holesky.ethdisco.net",
 	}
 
 	Sepolia = Spec{
@@ -214,15 +212,25 @@ var (
 		//Bootnodes:   TestBootnodes,
 		Genesis: TestGenesisBlock(),
 	}
+
+	Bloatnet = Spec{
+		Name:        networkname.Bloatnet,
+		GenesisHash: common.HexToHash("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"), // Same as mainnet
+		Bootnodes:   bloatnetBootnodes,
+		Config:      ReadChainConfig(chainspecs, "chainspecs/bloatnet.json"),
+		Genesis:     BloatnetGenesisBlock(),
+		DNSNetwork:  "", // No DNS discovery
+		NetworkID:   12159,
+	}
 )
 
 var chainNamesPoS = []string{
 	networkname.Mainnet,
-	networkname.Holesky,
 	networkname.Sepolia,
 	networkname.Hoodi,
 	networkname.Gnosis,
 	networkname.Chiado,
+	networkname.Bloatnet,
 }
 
 func IsChainPoS(chainConfig *chain.Config, currentTDProvider func() *big.Int) bool {

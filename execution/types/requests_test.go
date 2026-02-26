@@ -19,7 +19,7 @@ package types
 import (
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common/empty"
+	"github.com/erigontech/erigon/common/empty"
 )
 
 func TestEmptyRequestsHashCalculation(t *testing.T) {

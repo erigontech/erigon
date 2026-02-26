@@ -617,10 +617,10 @@ Object - An object of type TransactionReceipt or ``null`` when no receipt was fo
      - Bloom filter for light clients to quickly retrieve related logs.
    * - ``DATA 32 BYTES``
      - ``root``
-     - post-transaction stateroot (if the block is pre-Byzantium)
+     - post-transaction state root (if the block is pre-Byzantium)
    * - ``QUANTITY``
      - ``status``
-     - either 1 = success or 0 = failure (if block is Byzatnium or later)
+     - either 1 = success or 0 = failure (if block is Byzantium or later)
 
 --------------
 
@@ -1568,6 +1568,76 @@ Creates new message call transaction or a contract creation for previously-signe
      - Description
    * - ``DATA, 32 BYTES``
      - The transaction hash, or the zero hash if the transaction is not yet available
+
+--------------
+
+eth_sendRawTransactionSync
+--------------------------
+
+Like ``eth_sendRawTransaction`` but waits for the transaction to be included in a block and returns the receipt.
+
+**Parameters**
+
+.. list-table::
+   :widths: 25 75
+   :header-rows: 1
+
+   * - Type
+     - Description
+   * - ``DATA``
+     - The signed transaction data
+   * - ``QUANTITY``
+     - (optional, default ) The timeout to wait for the transaction to be included in a block (milliseconds)
+
+
+**Example**
+
+::
+
+   curl -s --data '{"jsonrpc":"2.0","method":"eth_sendRawTransactionSync","params":["0xd46e8dd67c5d32be8d46e8dd67c5d32be8058bb8eb970870f072445675058bb8eb970870f072445675"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
+
+**Returns**
+
+.. list-table::
+   :widths: 15 15 70
+   :header-rows: 1
+
+   * - Type
+     - Name
+     - Description
+   * - ``DATA, 32 BYTES``
+     - ``transactionHash``
+     - hash of the transaction
+   * - ``QUANTITY``
+     - ``transactionIndex``
+     - Integer of the transactions index position in the block
+   * - ``DATA, 32 BYTES``
+     - ``blockHash``
+     - hash of the block where this transaction was in
+   * - ``QUANTITY``
+     - ``blockNumber``
+     - block number where this transaction was in
+   * - ``QUANTITY``
+     - ``cumulativeGasUsed``
+     - The total amount of gas used when this transaction was executed in the block
+   * - ``QUANTITY``
+     - ``gasUsed``
+     - The amount of gas used by this specific transaction alone
+   * - ``DATA, 20 BYTES``
+     - ``contractAddress``
+     - The contract address created, if the transaction was a contract creation, null otherwise
+   * - ``ARRAY``
+     - ``logs``
+     - Array of log objects, which this transaction generated
+   * - ``DATA, 256 BYTES``
+     - ``logsBloom``
+     - Bloom filter for light clients to quickly retrieve related logs.
+   * - ``DATA 32 BYTES``
+     - ``root``
+     - post-transaction state root (if the block is pre-Byzantium)
+   * - ``QUANTITY``
+     - ``status``
+     - either 1 = success or 0 = failure (if block is Byzantium or later)
 
 --------------
 

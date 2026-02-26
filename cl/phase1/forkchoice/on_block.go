@@ -23,9 +23,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -37,7 +34,10 @@ import (
 	"github.com/erigontech/erigon/cl/transition/impl/eth2/statechange"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/erigontech/erigon/eth/ethutils"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -71,7 +71,7 @@ func verifyKzgCommitmentsAgainstTransactions(cfg *clparams.BeaconChainConfig, bl
 	if block.Version() >= clparams.FuluVersion {
 		maxBlobsPerBlock = cfg.GetBlobParameters(block.Slot / cfg.SlotsPerEpoch).MaxBlobsPerBlock
 	}
-	return ethutils.ValidateBlobs(block.Body.ExecutionPayload.BlobGasUsed, cfg.MaxBlobGasPerBlock, maxBlobsPerBlock, expectedBlobHashes, &transactions)
+	return misc.ValidateBlobs(block.Body.ExecutionPayload.BlobGasUsed, cfg.MaxBlobGasPerBlock, maxBlobsPerBlock, expectedBlobHashes, &transactions)
 }
 
 func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot uint64) {
@@ -115,15 +115,28 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		})
 	}
 
-	// Check if blob data is available
-	if checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 {
+	elHasBlobs := false
+	if f.engine != nil && checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 && !f.peerDas.IsArchivedMode() {
+		blobsWithProof, proofs := f.engine.GetBlobs(ctx, versionedHashes)
+		elHasBlobs = len(blobsWithProof) == len(versionedHashes) && len(proofs) == len(versionedHashes)
+		log.Debug("OnBlock: EL blob data availability", "blockRoot", common.Hash(blockRoot), "elHasBlobs", elHasBlobs)
+	}
+
+	// Check if blob data is available (skip if blobs are in txpool)
+	if checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 && !elHasBlobs {
 		if block.Version() >= clparams.FuluVersion {
 			available, err := f.peerDas.IsDataAvailable(block.Block.Slot, blockRoot)
 			if err != nil {
 				return err
 			}
 			if !available {
-				return ErrEIP7594ColumnDataNotAvailable
+				if f.syncedDataManager.Syncing() {
+					return ErrEIP7594ColumnDataNotAvailable
+				} else {
+					if err := f.peerDas.SyncColumnDataLater(block); err != nil {
+						log.Warn("failed to schedule deferred column data sync", "slot", block.Block.Slot, "blockRoot", blockRoot, "err", err)
+					}
+				}
 			}
 		} else if block.Version() >= clparams.DenebVersion {
 			if err := f.isDataAvailable(ctx, block.Block.Slot, blockRoot, block.Block.Body.BlobKzgCommitments); err != nil {
@@ -239,10 +252,18 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		previousJustifiedCheckpoint: lastProcessedState.PreviousJustifiedCheckpoint(),
 	})
 
-	f.addPendingConsolidations(blockRoot, lastProcessedState.PendingConsolidations())
-	f.addPendingDeposits(blockRoot, lastProcessedState.PendingDeposits())
-	f.addPendingPartialWithdrawals(blockRoot, lastProcessedState.PendingPartialWithdrawals())
-	f.addProposerLookahead(block.Block.Slot, lastProcessedState.ProposerLookahead())
+	if err := f.addPendingConsolidations(blockRoot, lastProcessedState.PendingConsolidations()); err != nil {
+		return err
+	}
+	if err := f.addPendingDeposits(blockRoot, lastProcessedState.PendingDeposits()); err != nil {
+		return err
+	}
+	if err := f.addPendingPartialWithdrawals(blockRoot, lastProcessedState.PendingPartialWithdrawals()); err != nil {
+		return err
+	}
+	if err := f.addProposerLookahead(block.Block.Slot, lastProcessedState.ProposerLookahead()); err != nil {
+		return err
+	}
 
 	f.totalActiveBalances.Add(blockRoot, lastProcessedState.GetTotalActiveBalance())
 	// Update checkpoints
@@ -266,16 +287,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	lastProcessedState.SetCurrentJustifiedCheckpoint(currentJustifiedCheckpoint)
 	lastProcessedState.SetFinalizedCheckpoint(finalizedCheckpoint)
 	lastProcessedState.SetJustificationBits(justificationBits)
-	// Load next proposer indicies for the parent root
-	idxs := make([]uint64, 0, foreseenProposers)
-	for i := lastProcessedState.Slot() + 1; i < f.beaconCfg.SlotsPerEpoch; i++ {
-		idx, err := lastProcessedState.GetBeaconProposerIndexForSlot(i)
-		if err != nil {
-			return err
-		}
-		idxs = append(idxs, idx)
-	}
-	f.nextBlockProposers.Add(blockRoot, idxs)
+
 	// If the block is from a prior epoch, apply the realized values
 	blockEpoch := f.computeEpochAtSlot(block.Block.Slot)
 	currentEpoch := f.computeEpochAtSlot(f.Slot())

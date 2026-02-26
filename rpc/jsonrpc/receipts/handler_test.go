@@ -28,14 +28,14 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
@@ -135,23 +135,23 @@ func TestGetBlockHeaders(t *testing.T) {
 			[]common.Hash{blocks[0].Hash()},
 		},
 		{
-			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: currentBlock.Number().Uint64()}, Amount: 1},
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: currentBlock.NumberU64()}, Amount: 1},
 			[]common.Hash{currentBlock.Hash()},
 		},
 		{ // If the peer requests a bit into the future, we deliver what we have
-			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: currentBlock.Number().Uint64()}, Amount: 10},
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: currentBlock.NumberU64()}, Amount: 10},
 			[]common.Hash{currentBlock.Hash()},
 		},
 		// Ensure protocol limits are honored
 		{
-			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: currentBlock.Number().Uint64() - 1}, Amount: limit + 10, Reverse: true},
-			getHashes(currentBlock.Number().Uint64(), limit),
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: currentBlock.NumberU64() - 1}, Amount: limit + 10, Reverse: true},
+			getHashes(currentBlock.NumberU64(), limit),
 		},
 		// Check that requesting more than available is handled gracefully
 		{
-			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: currentBlock.Number().Uint64() - 4}, Skip: 3, Amount: 3},
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: currentBlock.NumberU64() - 4}, Skip: 3, Amount: 3},
 			[]common.Hash{
-				blocks[currentBlock.Number().Uint64()-4].Hash(),
+				blocks[currentBlock.NumberU64()-4].Hash(),
 				currentBlock.Hash(),
 			},
 		},
@@ -164,10 +164,10 @@ func TestGetBlockHeaders(t *testing.T) {
 		},
 		// Check that requesting more than available is handled gracefully, even if mid skip
 		{
-			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: currentBlock.Number().Uint64() - 4}, Skip: 2, Amount: 3},
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: currentBlock.NumberU64() - 4}, Skip: 2, Amount: 3},
 			[]common.Hash{
-				blocks[currentBlock.Number().Uint64()-4].Hash(),
-				blocks[currentBlock.Number().Uint64()-1].Hash(),
+				blocks[currentBlock.NumberU64()-4].Hash(),
+				blocks[currentBlock.NumberU64()-1].Hash(),
 			},
 		}, {
 			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: 4}, Skip: 2, Amount: 3, Reverse: true},
@@ -232,7 +232,7 @@ func TestGetBlockHeaders(t *testing.T) {
 			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Hash: unknown}, Amount: 1},
 			[]common.Hash{},
 		}, {
-			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: currentBlock.Number().Uint64() + 1}, Amount: 1},
+			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: currentBlock.NumberU64() + 1}, Amount: 1},
 			[]common.Hash{},
 		},
 	}
@@ -254,7 +254,8 @@ func TestGetBlockHeaders(t *testing.T) {
 		expect, err := rlp.EncodeToBytes(eth.BlockHeadersPacket66{RequestId: 1, BlockHeadersPacket: expectedHeaders})
 		require.NoError(t, err)
 		backend.ReceiveWg.Wait()
-		sentMessage := backend.SentMessage(i)
+		sentMessage, err := backend.SentMessage(i)
+		require.NoError(t, err)
 		require.Equal(t, eth.ToProto[backend.SentryClient.Protocol()][eth.BlockHeadersMsg], sentMessage.Id)
 		require.Equal(t, expect, sentMessage.Data)
 	}
@@ -269,7 +270,7 @@ func TestGetBlockReceipts(t *testing.T) {
 
 	signer := types.LatestSignerForChainID(nil)
 	// Create a chain generator with some simple transactions (blatantly stolen from @fjl/chain_markets_test)
-	generator := func(i int, block *core.BlockGen) {
+	generator := func(i int, block *blockgen.BlockGen) {
 		switch i {
 		case 0:
 			// In block 1, the test bank sends account #1 some ether.
@@ -298,7 +299,7 @@ func TestGetBlockReceipts(t *testing.T) {
 	}
 	// Assemble the test environment
 	m := mockWithGenerator(t, 4, generator)
-	receiptsGetter := receipts.NewGenerator(m.BlockReader, m.Engine, time.Minute)
+	receiptsGetter := receipts.NewGenerator(m.Dirs, m.BlockReader, m.Engine, nil, time.Minute)
 	// Collect the hashes to request, and the response to expect
 	var (
 		hashes   []common.Hash
@@ -337,20 +338,25 @@ func TestGetBlockReceipts(t *testing.T) {
 	expect, err := rlp.EncodeToBytes(eth.ReceiptsRLPPacket66{RequestId: 1, ReceiptsRLPPacket: receipts})
 	require.NoError(t, err)
 	m.ReceiveWg.Wait()
-	sent := m.SentMessage(0)
+	sent, err := m.SentMessage(0)
+	require.NoError(t, err)
 	require.Equal(t, eth.ToProto[m.SentryClient.Protocol()][eth.ReceiptsMsg], sent.Id)
 	require.Equal(t, expect, sent.Data)
 }
 
 // newTestBackend creates a chain with a number of explicitly defined blocks and
 // wraps it into a mock backend.
-func mockWithGenerator(t *testing.T, blocks int, generator func(int, *core.BlockGen)) *mock.MockSentry {
-	m := mock.MockWithGenesis(t, &types.Genesis{
-		Config: chain.TestChainConfig,
-		Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
-	}, testKey, false)
+func mockWithGenerator(t *testing.T, blocks int, generator func(int, *blockgen.BlockGen)) *execmoduletester.ExecModuleTester {
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.TestChainConfig,
+			Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
+		}),
+		execmoduletester.WithKey(testKey),
+	)
 	if blocks > 0 {
-		chain, _ := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, blocks, generator)
+		chain, _ := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, blocks, generator)
 		err := m.InsertChain(chain)
 		require.NoError(t, err)
 	}

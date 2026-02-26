@@ -50,7 +50,7 @@ func (a *ApiHandler) getDepositContract(w http.ResponseWriter, r *http.Request) 
 }
 
 func (a *ApiHandler) getForkSchedule(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
-	response := []cltypes.Fork{}
+	response := make([]cltypes.Fork, 0, len(a.beaconChainCfg.ForkVersionSchedule))
 	// create first response (unordered and incomplete)
 	for currentVersion, entry := range a.beaconChainCfg.ForkVersionSchedule {
 		response = append(response, cltypes.Fork{

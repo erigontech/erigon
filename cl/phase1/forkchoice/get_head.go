@@ -23,10 +23,10 @@ import (
 	"sort"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/common"
 )
 
 // accountWeights updates the weights of the validators, given the vote and given an head leaf.
@@ -43,7 +43,6 @@ func (f *ForkChoiceStore) accountWeights(votes, weights map[common.Hash]uint64, 
 		}
 		curr = header.ParentRoot
 	}
-	return
 }
 
 const (

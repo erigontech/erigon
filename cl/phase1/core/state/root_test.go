@@ -25,7 +25,7 @@ import (
 
 // Curr: 4358340
 func BenchmarkStateRootNonCached(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		base := state.New(&clparams.MainnetBeaconConfig)
 		base.HashSSZ()
 	}
@@ -36,7 +36,7 @@ func BenchmarkStateRootNonCached(b *testing.B) {
 func BenchmarkStateRootCached(b *testing.B) {
 	// Re-use same fields
 	base := state.New(&clparams.MainnetBeaconConfig)
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		base.HashSSZ()
 	}
 }

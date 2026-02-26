@@ -24,7 +24,7 @@ import (
 	"io"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
@@ -235,17 +235,9 @@ func (nbp NewBlockPacket) EncodeRLP(w io.Writer) error {
 	blockLen := nbp.Block.EncodingSize()
 	encodingSize += rlp.ListPrefixLen(blockLen) + blockLen
 	// size of TD
-	encodingSize++
-	var tdBitLen, tdLen int
-	if nbp.TD != nil {
-		tdBitLen = nbp.TD.BitLen()
-		if tdBitLen >= 8 {
-			tdLen = common.BitLenToByteLen(tdBitLen)
-		}
-	}
-	encodingSize += tdLen
-	var b [33]byte
+	encodingSize += rlp.BigIntLen(nbp.TD)
 	// prefix
+	var b [32]byte
 	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
@@ -254,21 +246,8 @@ func (nbp NewBlockPacket) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	// encode TD
-	if tdBitLen < 8 {
-		if tdBitLen > 0 {
-			b[0] = byte(nbp.TD.Uint64())
-		} else {
-			b[0] = 128
-		}
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
-	} else {
-		b[0] = 128 + byte(tdLen)
-		nbp.TD.FillBytes(b[1 : 1+tdLen])
-		if _, err := w.Write(b[:1+tdLen]); err != nil {
-			return err
-		}
+	if err := rlp.EncodeBigInt(nbp.TD, w, b[:]); err != nil {
+		return err
 	}
 	return nil
 }
@@ -381,6 +360,16 @@ type ReceiptsRLPPacket66 struct {
 type BlockRangeUpdatePacket struct {
 	Earliest, Latest uint64
 	LatestHash       common.Hash
+}
+
+func (packet *BlockRangeUpdatePacket) Validate() error {
+	if packet.Earliest > packet.Latest {
+		return fmt.Errorf("invalid block range: earliest (%d) > latest (%d)", packet.Earliest, packet.Latest)
+	}
+	if packet.LatestHash == (common.Hash{}) {
+		return fmt.Errorf("invalid block range: latest block hash is zero")
+	}
+	return nil
 }
 
 func (*StatusPacket) Name() string { return "Status" }

@@ -8,6 +8,8 @@ on:
     branches:
       - main
       - 'release/**'
+      - performance
+      - performance-stable
     types:
       - opened
       - reopened
@@ -19,25 +21,30 @@ jobs:
     strategy:
       matrix:
         #        disable macos-15 until https://github.com/erigontech/erigon/issues/8789
-        os: [ ubuntu-24.04 ] # list of os: https://github.com/actions/virtual-environments
+        os: [ ubuntu-24.04 ] # required check includes runner version. Do not change it only here.
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.24'
-          cache: ${{ contains(fromJSON('[
-            "refs/heads/release/2.60",
-            "refs/heads/release/2.61",
-            "refs/heads/main"
-            ]'), github.ref) }}
+          go-version: '1.25'
+          cache: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') }}
 
       - name: Install dependencies on Linux
         if: runner.os == 'Linux'
-        run: sudo apt update && sudo apt install build-essential
+        run: sudo apt update -y && sudo apt install -y build-essential
 
-      - name: test-integration-caplin
+      - name: Download consensus spec tests
+        id: download-spec-tests
+        continue-on-error: true
+        run: cd cl/spectest && make download-spec
+
+      - name: Run consensus spec tests
+        if: steps.download-spec-tests.outcome == 'success'
         run: cd cl/spectest && make tests && make mainnet
 
   tests-windows:
@@ -47,25 +54,18 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.24'
-          cache: ${{ contains(fromJSON('[
-            "refs/heads/release/2.60",
-            "refs/heads/release/2.61",
-            "refs/heads/main"
-            ]'), github.ref) }}          
+          go-version: '1.25'
+          cache: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') }}
 
-      - uses: actions/cache@v4
-        with:
-          path: |
-            C:\ProgramData\chocolatey\lib\mingw
-            C:\ProgramData\chocolatey\lib\cmake
-          key: chocolatey-${{ matrix.os }}
-      - name: Install dependencies
-        run: |
-          choco upgrade mingw -y --no-progress --version 13.2.0
+      - name: Install make
+        run: choco install make -y
 
       - name: test-integration-caplin
-        run: cd ./cl/spectest/ && .\wmake.ps1 Tests Mainnet
+        shell: bash
+        run: cd cl/spectest && make tests mainnet

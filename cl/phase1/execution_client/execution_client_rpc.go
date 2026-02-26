@@ -25,13 +25,15 @@ import (
 	"strings"
 	"time"
 
-	common "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/jwt"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/execution_client/rpc_helper"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/jwt"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
@@ -85,7 +87,7 @@ func (cc *ExecutionClientRpc) NewPayload(
 	for i, j := 0, len(reversedBaseFeePerGas)-1; i < j; i, j = i+1, j-1 {
 		reversedBaseFeePerGas[i], reversedBaseFeePerGas[j] = reversedBaseFeePerGas[j], reversedBaseFeePerGas[i]
 	}
-	baseFee := new(big.Int).SetBytes(reversedBaseFeePerGas)
+	baseFee := new(uint256.Int).SetBytes(reversedBaseFeePerGas)
 	var engineMethod string
 	// determine the engine method
 	switch payload.Version() {
@@ -117,8 +119,7 @@ func (cc *ExecutionClientRpc) NewPayload(
 		BlockHash:    payload.BlockHash,
 	}
 
-	request.BaseFeePerGas = new(hexutil.Big)
-	*request.BaseFeePerGas = hexutil.Big(*baseFee)
+	request.BaseFeePerGas = (*hexutil.Big)(baseFee.ToBig())
 	payloadBody := payload.Body()
 	// Setup transactionbody
 	request.Withdrawals = payloadBody.Withdrawals
@@ -136,7 +137,7 @@ func (cc *ExecutionClientRpc) NewPayload(
 
 	payloadStatus := &engine_types.PayloadStatus{} // As it is done in the rpcdaemon
 	log.Debug("[ExecutionClientRpc] Calling EL", "method", engineMethod)
-	args := []interface{}{request}
+	args := []any{request}
 	if versionedHashes != nil {
 		args = append(args, versionedHashes, *beaconParentRoot)
 	}
@@ -162,7 +163,7 @@ func (cc *ExecutionClientRpc) ForkChoiceUpdate(ctx context.Context, finalized, s
 	}
 	forkChoiceResp := &engine_types.ForkChoiceUpdatedResponse{}
 	log.Debug("[ExecutionClientRpc] Calling EL", "method", rpc_helper.ForkChoiceUpdatedV1)
-	args := []interface{}{forkChoiceRequest}
+	args := []any{forkChoiceRequest}
 	if attributes != nil {
 		args = append(args, attributes)
 	}
@@ -280,4 +281,8 @@ func (cc *ExecutionClientRpc) GetAssembledBlock(ctx context.Context, id []byte) 
 
 func (cc *ExecutionClientRpc) HasGapInSnapshots(ctx context.Context) bool {
 	panic("unimplemented")
+}
+
+func (cc *ExecutionClientRpc) GetBlobs(ctx context.Context, versionedHashes []common.Hash) (blobs [][]byte, proofs [][][]byte) {
+	return nil, nil
 }

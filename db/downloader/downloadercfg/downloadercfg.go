@@ -20,13 +20,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
-	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anacrolix/torrent/metainfo"
@@ -38,8 +39,8 @@ import (
 	"github.com/anacrolix/torrent"
 	pp "github.com/anacrolix/torrent/peer_protocol"
 
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/snapcfg"
 )
@@ -63,6 +64,31 @@ func init() {
 	NetworkChunkSize = pp.Integer(i64)
 }
 
+// safeWriter wraps an io.WriteCloser and silently discards writes after Close.
+// This prevents panics from the torrent client's background goroutines (e.g.
+// forwardPort) that may attempt to log after the file has been closed.
+type safeWriter struct {
+	mu     sync.Mutex
+	w      io.WriteCloser
+	closed bool
+}
+
+func (s *safeWriter) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return len(p), nil
+	}
+	return s.w.Write(p)
+}
+
+func (s *safeWriter) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closed = true
+	return s.w.Close()
+}
+
 type Cfg struct {
 	Dirs datadir.Dirs
 	// Separate rate limit for webseeds.
@@ -73,12 +99,8 @@ type Cfg struct {
 	// TODO: Can we get rid of this?
 	ChainName string
 
-	ClientConfig *torrent.ClientConfig
-
-	// Deprecated: Call Downloader.AddTorrentsFromDisk or add them yourself. TODO: RemoveFile this.
-	// Check with @mh0lt for best way to do this. I couldn't find the GitHub issue for cleaning up
-	// the Downloader API and responsibilities.
-	AddTorrentsFromDisk bool
+	ClientConfig   *torrent.ClientConfig
+	TorrentLogFile io.Closer
 
 	MdbxWriteMap bool
 	// Don't trust any existing piece completion. Revalidate all pieces when added.
@@ -86,6 +108,15 @@ type Cfg struct {
 	// Disable automatic data verification in the torrent client. We want to call VerifyData
 	// ourselves.
 	ManualDataVerification bool
+
+	LogPrefix string
+}
+
+func (cfg *Cfg) CloseTorrentLogFile() error {
+	if cfg.TorrentLogFile != nil {
+		return cfg.TorrentLogFile.Close()
+	}
+	return nil
 }
 
 // Before options/flags applied.
@@ -161,14 +192,13 @@ func New(
 	if opts.UploadRateLimit.Ok {
 		torrentConfig.UploadRateLimiter = rate.NewLimiter(opts.UploadRateLimit.Value, 0)
 	}
-	for value := range opts.DownloadRateLimit.Iter() {
+	for value := range opts.DownloadRateLimit.Iter {
 		switch value {
 		case rate.Inf:
 			torrentConfig.DownloadRateLimiter = nil
 		case 0:
 			torrentConfig.DialForPeerConns = false
 			torrentConfig.AcceptPeerConnections = false
-			torrentConfig.DisableTrackers = true
 			fallthrough
 		default:
 			torrentConfig.DownloadRateLimiter = rate.NewLimiter(value, 0)
@@ -176,7 +206,7 @@ func New(
 	}
 
 	// Override value set by download rate-limit.
-	for value := range opts.DisableTrackers.Iter() {
+	for value := range opts.DisableTrackers.Iter {
 		torrentConfig.DisableTrackers = value
 	}
 
@@ -205,13 +235,16 @@ func New(
 
 	torrentSloggerHandlers := multiHandler{&torrentSlogToErigonHandler}
 
+	var torrentLogCloser io.Closer
 	torrentLogFile, err := os.OpenFile(
 		filepath.Join(dirs.DataDir, "logs", "torrent.log"),
 		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err == nil {
+		sw := &safeWriter{w: torrentLogFile}
+		torrentLogCloser = sw
 		torrentSloggerHandlers = append(
 			torrentSloggerHandlers,
-			slog.NewJSONHandler(torrentLogFile, &slog.HandlerOptions{
+			slog.NewJSONHandler(sw, &slog.HandlerOptions{
 				AddSource:   true,
 				Level:       min(erigonToSlogLevel(verbosity), slog.LevelWarn),
 				ReplaceAttr: nil,
@@ -236,61 +269,36 @@ func New(
 	}
 	// Previously this used a logger passed to the callers of this function. Do we need it here?
 	log.Info(
-		"torrent verbosity",
+		"Downloader torrent verbosity",
 		"erigon", verbosity,
 		// Only for deprecated analog.Logger stuff, if it comes up.
 		"anacrolix", analogLevel.LogString(),
 		// This should be the one applied to more modern logging in anacrolix/torrent.
 		"slog", slogLevel)
 
-	webseedUrlsOrFiles := webseeds
-	webseedHttpProviders := make([]*url.URL, 0, len(webseedUrlsOrFiles))
-	for _, webseed := range webseedUrlsOrFiles {
-		if !strings.HasPrefix(webseed, "v") { // has marker v1/v2/...
-			uri, err := url.ParseRequestURI(webseed)
-			if err != nil {
-				log.Warn("[webseed]", "can't parse url", "err", err, "url", webseed)
-				continue
-			}
-			webseedHttpProviders = append(webseedHttpProviders, uri)
-			continue
-		}
-
-		if strings.HasPrefix(webseed, "v1:") {
-			withoutVersionPrefix := webseed[3:]
-			if !strings.HasPrefix(withoutVersionPrefix, "https:") {
-				continue
-			}
-			uri, err := url.ParseRequestURI(withoutVersionPrefix)
-			if err != nil {
-				log.Warn("[webseed] can't parse url", "err", err, "url", withoutVersionPrefix)
-				continue
-			}
-			webseedHttpProviders = append(webseedHttpProviders, uri)
-		} else {
-			continue
-		}
-	}
-
-	log.Info("processed webseed configuration",
-		"webseedHttpProviders", webseedHttpProviders,
-		"webseedUrlsOrFiles", webseedUrlsOrFiles)
-
 	cfg := Cfg{
-		Dirs:                dirs,
-		ChainName:           chainName,
-		ClientConfig:        torrentConfig,
-		AddTorrentsFromDisk: true,
-		MdbxWriteMap:        mdbxWriteMap,
-		VerifyTorrentData:   opts.Verify,
-	}
-	for _, s := range webseedHttpProviders {
-		// WebSeed URLs must have a trailing slash if the implementation should append the file
-		// name.
-		cfg.WebSeedUrls = append(cfg.WebSeedUrls, s.String()+"/")
+		Dirs:              dirs,
+		ChainName:         chainName,
+		ClientConfig:      torrentConfig,
+		TorrentLogFile:    torrentLogCloser,
+		MdbxWriteMap:      mdbxWriteMap,
+		VerifyTorrentData: opts.Verify,
+		LogPrefix:         "[Downloader] ",
 	}
 
-	for value := range opts.WebseedDownloadRateLimit.Iter() {
+	cfg.WebSeedUrls = make([]string, 0, len(webseeds))
+	for _, webseed := range webseeds {
+		var after string
+		after, err = snapcfg.WebseedToUrl(webseed)
+		if err != nil {
+			return
+		}
+		// WebSeed URLs must have a trailing slash if the implementation should append the file
+		// name. In Erigon they don't, in anacrolix/torrent they do for our use case.
+		cfg.WebSeedUrls = append(cfg.WebSeedUrls, after+"/")
+	}
+
+	for value := range opts.WebseedDownloadRateLimit.Iter {
 		cfg.SeparateWebseedDownloadRateLimit.Set(value)
 	}
 

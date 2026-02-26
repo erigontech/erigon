@@ -24,13 +24,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/testlog"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
@@ -63,7 +64,7 @@ func getBlocks(t *testing.T, numBlocks int) []*types.Block {
 	for i := 1; i <= numBlocks; i++ {
 		rawBlocks = append(rawBlocks, &types.RawBlock{
 			Header: &types.Header{
-				Number: big.NewInt(int64(i)),
+				Number: *uint256.NewInt(uint64(i)),
 				Time:   uint64(50 * i),
 			},
 			Body: &types.RawBody{},
@@ -161,7 +162,7 @@ func TestService(t *testing.T) {
 	require.True(t, replayNeeded)
 	require.Equal(t, uint64(0), replayBlockNum)
 
-	genesis := types.NewBlockWithHeader(&types.Header{Time: 1, Number: big.NewInt(0)})
+	genesis := types.NewBlockWithHeader(&types.Header{Time: 1, Number: *uint256.NewInt(0)})
 	err = b.ReplayInitialBlock(ctx, genesis)
 	require.NoError(t, err)
 
@@ -273,7 +274,7 @@ func TestService_Unwind(t *testing.T) {
 	err := b.store.Prepare(ctx)
 	require.NoError(t, err)
 
-	genesis := types.NewBlockWithHeader(&types.Header{Time: 1, Number: big.NewInt(0)})
+	genesis := types.NewBlockWithHeader(&types.Header{Time: 1, Number: *uint256.NewInt(0)})
 	err = b.ReplayInitialBlock(ctx, genesis)
 	require.NoError(t, err)
 
@@ -392,7 +393,7 @@ func setupOverrideTest(t *testing.T, ctx context.Context, borConfig borcfg.BorCo
 	require.True(t, replayNeeded)
 	require.Equal(t, uint64(0), replayBlockNum)
 
-	genesis := types.NewBlockWithHeader(&types.Header{Time: 1, Number: big.NewInt(0)})
+	genesis := types.NewBlockWithHeader(&types.Header{Time: 1, Number: *uint256.NewInt(0)})
 	err = b.ReplayInitialBlock(ctx, genesis)
 	require.NoError(t, err)
 
@@ -541,7 +542,7 @@ func TestReaderEventsWithinTime(t *testing.T) {
 	require.True(t, replayNeeded)
 	require.Equal(t, uint64(0), replayBlockNum)
 
-	genesis := types.NewBlockWithHeader(&types.Header{Time: 1, Number: big.NewInt(0)})
+	genesis := types.NewBlockWithHeader(&types.Header{Time: 1, Number: *uint256.NewInt(0)})
 	err = b.ReplayInitialBlock(ctx, genesis)
 	require.NoError(t, err)
 

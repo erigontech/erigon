@@ -22,8 +22,8 @@ import (
 	"math/big"
 
 	ethereum "github.com/erigontech/erigon"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/rpc"
@@ -83,7 +83,7 @@ func (n NopRequestGenerator) SubscribeFilterLogs(ctx context.Context, query ethe
 	return nil, ErrNotImplemented
 }
 
-func (n NopRequestGenerator) Subscribe(ctx context.Context, method SubMethod, subChan interface{}, args ...interface{}) (ethereum.Subscription, error) {
+func (n NopRequestGenerator) Subscribe(ctx context.Context, method SubMethod, subChan any, args ...any) (ethereum.Subscription, error) {
 	return nil, ErrNotImplemented
 }
 
@@ -112,6 +112,10 @@ func (n NopRequestGenerator) EstimateGas(args ethereum.CallMsg, blockNum BlockNu
 }
 
 func (n NopRequestGenerator) GasPrice() (*big.Int, error) {
+	return nil, ErrNotImplemented
+}
+
+func (n NopRequestGenerator) GetBlockReceipts(ctx context.Context, blockRef rpc.BlockNumberOrHash) (types.Receipts, error) {
 	return nil, ErrNotImplemented
 }
 

@@ -24,27 +24,24 @@ import (
 	"path/filepath"
 	"syscall"
 
+	cli2 "github.com/erigontech/erigon/node/cli"
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/diag/db"
 	"github.com/erigontech/erigon/cmd/diag/downloader"
 	"github.com/erigontech/erigon/cmd/diag/stages"
 	sinfo "github.com/erigontech/erigon/cmd/diag/sysinfo"
 	"github.com/erigontech/erigon/cmd/diag/ui"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/db/version"
-	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/node/logging"
 )
 
 func main() {
 	logging.LogVerbosityFlag.Value = log.LvlError.String()
 	logging.LogConsoleVerbosityFlag.Value = log.LvlError.String()
 
-	app := cli.NewApp()
-	app.Name = "diagnostics"
-	app.Version = version.VersionWithCommit(version.GitCommit)
-	app.EnableBashCompletion = true
+	app := cli2.NewApp("Display diagnostic output for a running erigon node")
 
 	app.Commands = []*cli.Command{
 		&downloader.Command,
@@ -57,18 +54,15 @@ func main() {
 	app.Flags = []cli.Flag{}
 
 	app.HelpName = `Erigon Diagnostics`
-	app.Usage = "Display diagnostic output for a running erigon node"
 	app.UsageText = `diag [command] [flags]`
 
 	app.Action = func(context *cli.Context) error {
-		var goodNames []string
+		goodNames := make([]string, 0, len(app.VisibleCommands()))
 		for _, c := range app.VisibleCommands() {
 			goodNames = append(goodNames, c.Name)
 		}
 		_, _ = fmt.Fprintf(os.Stderr, "Command '%s' not found. Available commands: %s\n", context.Args().First(), goodNames)
-		cli.ShowAppHelpAndExit(context, 1)
-
-		return nil
+		return cli.Exit("", 1) // Exit with error code but no additional output
 	}
 
 	for _, command := range app.Commands {

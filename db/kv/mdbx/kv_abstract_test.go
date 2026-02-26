@@ -28,7 +28,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/test/bufconn"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
@@ -48,7 +48,6 @@ func TestSequence(t *testing.T) {
 	ctx := context.Background()
 
 	for _, db := range writeDBs {
-		db := db
 		tx, err := db.BeginRw(ctx)
 		require.NoError(t, err)
 		defer tx.Rollback()
@@ -101,14 +100,13 @@ func TestManagedTx(t *testing.T) {
 	ctx := context.Background()
 
 	for _, db := range writeDBs {
-		db := db
 		tx, err := db.BeginRw(ctx)
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		c, err := tx.RwCursor(bucket1)
+		c, err := tx.RwCursor(bucket1) //nolint:gocritic
 		require.NoError(t, err)
-		c1, err := tx.RwCursor(bucket2)
+		c1, err := tx.RwCursor(bucket2) //nolint:gocritic
 		require.NoError(t, err)
 		require.NoError(t, c.Append([]byte{0}, []byte{1}))
 		require.NoError(t, c1.Append([]byte{0}, []byte{1}))
@@ -124,12 +122,13 @@ func TestManagedTx(t *testing.T) {
 		}
 		require.NoError(t, c.Put([]byte{0, 0, 0, 0, 0, 1}, []byte{2}))
 		require.NoError(t, c1.Put([]byte{0, 0, 0, 0, 0, 1}, []byte{2}))
+		c.Close()
+		c1.Close()
 		err = tx.Commit()
 		require.NoError(t, err)
 	}
 
 	for _, db := range readDBs {
-		db := db
 		msg := fmt.Sprintf("%T", db)
 		switch db.(type) {
 		case *remotedb.DB:
@@ -217,6 +216,7 @@ func TestRemoteKvRange(t *testing.T) {
 	require.NoError(writeDB.Update(ctx, func(tx kv.RwTx) error {
 		wc, err := tx.RwCursorDupSort(kv.TblAccountVals)
 		require.NoError(err)
+		defer wc.Close()
 		require.NoError(wc.Append([]byte{1}, []byte{1}))
 		require.NoError(wc.Append([]byte{1}, []byte{2}))
 		require.NoError(wc.Append([]byte{2}, []byte{1}))
@@ -227,6 +227,7 @@ func TestRemoteKvRange(t *testing.T) {
 	require.NoError(db.View(ctx, func(tx kv.Tx) error {
 		c, err := tx.Cursor(kv.TblAccountVals)
 		require.NoError(err)
+		defer c.Close()
 
 		k, v, err := c.First()
 		require.NoError(err)
@@ -384,10 +385,12 @@ func testMultiCursor(t *testing.T, db kv.RwDB, bucket1, bucket2 string) {
 		if err != nil {
 			return err
 		}
+		defer c1.Close()
 		c2, err := tx.Cursor(bucket2)
 		if err != nil {
 			return err
 		}
+		defer c2.Close()
 
 		k1, v1, err := c1.First()
 		require.NoError(err)

@@ -32,19 +32,19 @@ import (
 
 	"github.com/tidwall/btree"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/version"
-	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 func BeaconSimpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
@@ -57,7 +57,10 @@ func BeaconSimpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmp
 		Salt:       &salt,
 		BaseDataID: sn.From,
 	}
-	if err := snaptype.BuildIndex(ctx, sn, cfg, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+	if err := snaptype.BuildIndex(ctx, sn, version.Versions{
+		Current:      sn.Version,
+		MinSupported: sn.Version,
+	}, cfg, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		if i%20_000 == 0 {
 			logger.Log(lvl, "Generating idx for "+sn.Type.Name(), "progress", i)
 		}
@@ -441,7 +444,7 @@ func (s *CaplinStateSnapshots) recalcVisibleFiles() {
 	// for k := range s.visible {
 	// 	s.visible[k] = getNewVisibleSegments(s.dirty[k])
 	// }
-	s.visible.Range(func(k, v interface{}) bool {
+	s.visible.Range(func(k, v any) bool {
 		s.visible.Store(k, getNewVisibleSegments(s.dirty[k.(string)]))
 		return true
 	})
@@ -460,7 +463,7 @@ func (s *CaplinStateSnapshots) idxAvailability() uint64 {
 	// 		min = segs[len(segs)-1].to
 	// 	}
 	// }
-	s.visible.Range(func(_, v interface{}) bool {
+	s.visible.Range(func(_, v any) bool {
 		segs := v.([]*VisibleSegment)
 		if len(segs) == 0 {
 			min = 0
@@ -549,7 +552,7 @@ func (s *CaplinStateSnapshots) View() *CaplinStateView {
 	// for k, segments := range s.visible {
 	// 	v.roTxs[k] = segments.BeginRo()
 	// }
-	s.visible.Range(func(k, val interface{}) bool {
+	s.visible.Range(func(k, val any) bool {
 		v.roTxs[k.(string)] = VisibleSegments(val.([]*VisibleSegment)).BeginRo()
 		return true
 	})
@@ -700,24 +703,37 @@ func (s *CaplinStateSnapshots) BuildMissingIndices(ctx context.Context, logger l
 	// }
 
 	// wait for Downloader service to download all expected snapshots
-	segments, _, err := SegmentsCaplin(s.dir)
-	if err != nil {
-		return err
-	}
+
 	noneDone := true
-	for index := range segments {
-		segment := segments[index]
-		// The same slot=>offset mapping is used for both beacon blocks and blob sidecars.
-		if segment.Type.Enum() != snaptype.CaplinEnums.BeaconBlocks && segment.Type.Enum() != snaptype.CaplinEnums.BlobSidecars {
+
+	for caplinType, filesTree := range s.dirty {
+		files := filesTree.Items()
+		_, ok := s.snapshotTypes.KeyValueGetters[caplinType]
+		if !ok {
+			s.logger.Warn("no kv getter for caplin state snapshot type", "type", caplinType)
 			continue
 		}
-		if segment.Type.HasIndexFiles(segment, logger) {
-			continue
-		}
-		p := &background.Progress{}
-		noneDone = false
-		if err := BeaconSimpleIdx(ctx, segment, s.Salt, s.tmpdir, p, log.LvlDebug, logger); err != nil {
-			return err
+		for _, df := range files {
+			if df.Decompressor == nil {
+				return fmt.Errorf("segment %s is not opened", df.FilePath())
+			}
+			if isIndexed(df) {
+				continue
+			}
+			sn, _, _ := snaptype.ParseFileName(s.dir, filepath.Base(df.FilePath()))
+
+			indexFile := filepath.Join(sn.Dir(), snaptype.IdxFileName(sn.Version, sn.From, sn.To, sn.CaplinTypeString))
+			if _, err := os.Stat(indexFile); err == nil {
+				logger.Info("index file already exists, yet dirtyFile didn't have it opened", "seg", sn.Name())
+				continue
+			}
+			logger.Info("building index file", "seg", sn.Name())
+			p := &background.Progress{}
+			noneDone = false
+
+			if err := simpleIdx(ctx, sn, s.Salt, s.tmpdir, p, log.LvlDebug, logger); err != nil {
+				return err
+			}
 		}
 	}
 	if noneDone {

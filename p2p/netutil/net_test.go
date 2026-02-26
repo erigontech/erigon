@@ -22,6 +22,7 @@ package netutil
 import (
 	"fmt"
 	"net"
+	"net/netip"
 	"reflect"
 	"testing"
 	"testing/quick"
@@ -32,7 +33,7 @@ import (
 func TestParseNetlist(t *testing.T) {
 	var tests = []struct {
 		input    string
-		wantErr  error
+		wantErr  bool
 		wantList *Netlist
 	}{
 		{
@@ -41,26 +42,25 @@ func TestParseNetlist(t *testing.T) {
 		},
 		{
 			input:    "127.0.0.0/8",
-			wantErr:  nil,
-			wantList: &Netlist{{IP: net.IP{127, 0, 0, 0}, Mask: net.CIDRMask(8, 32)}},
+			wantList: &Netlist{netip.MustParsePrefix("127.0.0.0/8")},
 		},
 		{
 			input:   "127.0.0.0/44",
-			wantErr: &net.ParseError{Type: "CIDR address", Text: "127.0.0.0/44"},
+			wantErr: true,
 		},
 		{
 			input: "127.0.0.0/16, 23.23.23.23/24,",
 			wantList: &Netlist{
-				{IP: net.IP{127, 0, 0, 0}, Mask: net.CIDRMask(16, 32)},
-				{IP: net.IP{23, 23, 23, 0}, Mask: net.CIDRMask(24, 32)},
+				netip.MustParsePrefix("127.0.0.0/16"),
+				netip.MustParsePrefix("23.23.23.23/24"),
 			},
 		},
 	}
 
 	for _, test := range tests {
 		l, err := ParseNetlist(test.input)
-		if !reflect.DeepEqual(err, test.wantErr) {
-			t.Errorf("%q: got error %q, want %q", test.input, err, test.wantErr)
+		if (err != nil) != test.wantErr {
+			t.Errorf("%q: got error %q, wantErr=%v", test.input, err, test.wantErr)
 			continue
 		}
 		if !reflect.DeepEqual(l, test.wantList) {
@@ -79,8 +79,6 @@ func TestNilNetListContains(t *testing.T) {
 func TestIsLAN(t *testing.T) {
 	checkContains(t, IsLAN,
 		[]string{ // included
-			"0.0.0.0",
-			"0.2.0.8",
 			"127.0.0.1",
 			"10.0.1.1",
 			"10.22.0.3",
@@ -89,12 +87,15 @@ func TestIsLAN(t *testing.T) {
 			"fe80::f4a1:8eff:fec5:9d9d",
 			"febf::ab32:2233",
 			"fc00::4",
+			"::ffff:127.0.0.1",
+			"::ffff:10.10.0.2",
 		},
 		[]string{ // excluded
 			"192.0.2.1",
 			"1.0.0.0",
 			"172.32.0.1",
 			"fec0::2233",
+			"::ffff:88.99.100.2",
 		},
 	)
 }
@@ -172,7 +173,7 @@ func TestCheckRelayIP(t *testing.T) {
 func BenchmarkCheckRelayIP(b *testing.B) {
 	sender := parseIP("23.55.1.242")
 	addr := parseIP("23.55.1.2")
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		CheckRelayIP(sender, addr)
 	}
 }

@@ -30,9 +30,9 @@ import (
 	"slices"
 	"strings"
 
-	"golang.org/x/crypto/sha3"
+	keccak "github.com/erigontech/fastkeccak"
 
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
@@ -175,10 +175,7 @@ func (t *Tree) build(entries []entry) entry {
 	}
 	var subtrees []entry
 	for len(entries) > 0 {
-		n := maxChildren
-		if len(entries) < n {
-			n = len(entries)
-		}
+		n := min(len(entries), maxChildren)
 		sub := t.build(entries[:n])
 		entries = entries[n:]
 		subtrees = append(subtrees, sub)
@@ -233,7 +230,7 @@ const (
 )
 
 func subdomain(e entry) string {
-	h := sha3.NewLegacyKeccak256()
+	h := keccak.NewFastKeccak()
 	io.WriteString(h, e.String())
 	return b32format.EncodeToString(h.Sum(nil)[:16])
 }
@@ -243,7 +240,7 @@ func (e *rootEntry) String() string {
 }
 
 func (e *rootEntry) sigHash() []byte {
-	h := sha3.NewLegacyKeccak256()
+	h := keccak.NewFastKeccak()
 	fmt.Fprintf(h, rootPrefix+" e=%s l=%s seq=%d", e.eroot, e.lroot, e.seq)
 	return h.Sum(nil)
 }
@@ -338,7 +335,7 @@ func parseBranch(e string) (entry, error) {
 		return &branchEntry{}, nil // empty entry is OK
 	}
 	hashes := make([]string, 0, strings.Count(e, ","))
-	for _, c := range strings.Split(e, ",") {
+	for c := range strings.SplitSeq(e, ",") {
 		if !isValidHash(c) {
 			return nil, entryError{"branch", errInvalidChild}
 		}

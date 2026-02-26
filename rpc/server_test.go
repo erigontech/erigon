@@ -32,8 +32,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 func TestServerRegisterName(t *testing.T) {
@@ -89,7 +89,7 @@ func runTestScript(t *testing.T, file string, logger log.Logger) {
 	defer clientConn.Close()
 	go server.ServeCodec(NewCodec(serverConn), 0)
 	readbuf := bufio.NewReader(clientConn)
-	for _, line := range strings.Split(string(content), "\n") {
+	for line := range strings.SplitSeq(string(content), "\n") {
 		line = strings.TrimSpace(line)
 		switch {
 		case len(line) == 0 || strings.HasPrefix(line, "//"):
@@ -165,7 +165,6 @@ func TestServerShortLivedConn(t *testing.T) {
 		if err != nil {
 			t.Fatal("can't dial:", err)
 		}
-		defer conn.Close()
 		conn.SetDeadline(deadline)
 		// Write the request, then half-close the connection so the server stops reading.
 		conn.Write([]byte(request))
@@ -174,10 +173,13 @@ func TestServerShortLivedConn(t *testing.T) {
 		buf := make([]byte, 2000)
 		n, err := conn.Read(buf)
 		if err != nil {
+			conn.Close()
 			t.Fatal("read error:", err)
 		}
 		if !bytes.Equal(buf[:n], []byte(wantResp)) {
+			conn.Close()
 			t.Fatalf("wrong response: %s", buf[:n])
 		}
+		conn.Close()
 	}
 }

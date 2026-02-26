@@ -21,17 +21,19 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 type voluntaryExitService struct {
@@ -68,13 +70,32 @@ func NewVoluntaryExitService(
 	}
 }
 
+func (s *voluntaryExitService) Names() []string {
+	return []string{gossip.TopicNameVoluntaryExit}
+}
+
+func (s *voluntaryExitService) IsMyGossipMessage(name string) bool {
+	return name == gossip.TopicNameVoluntaryExit
+}
+
+func (s *voluntaryExitService) DecodeGossipMessage(pid peer.ID, data []byte, version clparams.StateVersion) (*SignedVoluntaryExitForGossip, error) {
+	obj := &SignedVoluntaryExitForGossip{
+		Receiver:            &sentinelproto.Peer{Pid: pid.String()},
+		SignedVoluntaryExit: &cltypes.SignedVoluntaryExit{},
+	}
+	if err := obj.SignedVoluntaryExit.DecodeSSZ(data, int(version)); err != nil {
+		return nil, err
+	}
+	return obj, nil
+}
+
 func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint64, msg *SignedVoluntaryExitForGossip) error {
 	// ref: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#voluntary_exit
 	voluntaryExit := msg.SignedVoluntaryExit.VoluntaryExit
 
 	// [IGNORE] The voluntary exit is the first valid voluntary exit received for the validator with index signed_voluntary_exit.message.validator_index.
 	if s.operationsPool.VoluntaryExitsPool.Has(voluntaryExit.ValidatorIndex) {
-		return ErrIgnore
+		return nil
 	}
 
 	var (
@@ -162,5 +183,5 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 	// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves
 	// in BatchSignatureVerifier service. After validating signatures, if they are valid we will publish the
 	// gossip ourselves or ban the peer which sent that particular invalid signature.
-	return ErrIgnore
+	return nil
 }

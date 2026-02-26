@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/btree"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
@@ -23,7 +23,7 @@ func TestDependency(t *testing.T) {
 
 	dirs := datadir.New(t.TempDir())
 	logger := log.New()
-	dfs := btree.NewBTreeGOptions[*FilesItem](filesItemLess, btree.Options{Degree: 128, NoLocks: false})
+	dfs := btree.NewBTreeGOptions(filesItemLess, btree.Options{Degree: 128, NoLocks: false})
 	df1 := getPopulatedCommitmentFilesItem(t, dirs, 0, 1, false, logger)
 	df2 := getPopulatedCommitmentFilesItem(t, dirs, 1, 2, false, logger)
 	dfs.Set(df1)
@@ -63,7 +63,7 @@ func TestDependency_UnindexedMerged(t *testing.T) {
 
 	dirs := datadir.New(t.TempDir())
 	logger := log.New()
-	dfs := btree.NewBTreeGOptions[*FilesItem](filesItemLess, btree.Options{Degree: 128, NoLocks: false})
+	dfs := btree.NewBTreeGOptions(filesItemLess, btree.Options{Degree: 128, NoLocks: false})
 	df1 := getPopulatedCommitmentFilesItem(t, dirs, 0, 1, false, logger)
 	df2 := getPopulatedCommitmentFilesItem(t, dirs, 1, 2, false, logger)
 	df3 := getPopulatedCommitmentFilesItem(t, dirs, 0, 2, true, logger)
@@ -104,6 +104,7 @@ func getPopulatedCommitmentFilesItem(t *testing.T, dirs datadir.Dirs, startTxNum
 	comp, err := seg.NewCompressor(context.Background(), "", base+"data", dirs.Tmp, seg.DefaultCfg, log.LvlInfo, logger)
 	require.NoError(t, err)
 	require.NotNil(t, comp)
+	defer comp.Close()
 
 	err = comp.Compress()
 	require.NoError(t, err)
@@ -111,6 +112,7 @@ func getPopulatedCommitmentFilesItem(t *testing.T, dirs datadir.Dirs, startTxNum
 	decomp, err := seg.NewDecompressor(base + "data")
 	require.NoError(t, err)
 	require.NotNil(t, decomp)
+	t.Cleanup(decomp.Close)
 
 	salt := uint32(1)
 	var idx0 *recsplit.Index
@@ -125,19 +127,13 @@ func getPopulatedCommitmentFilesItem(t *testing.T, dirs datadir.Dirs, startTxNum
 		}, logger)
 		require.NoError(t, err)
 		require.NotNil(t, index)
+		defer index.Close()
 
 		require.NoError(t, index.Build(context.Background()))
 
 		idx0 = recsplit.MustOpen(base + "index")
+		t.Cleanup(idx0.Close)
 	}
-
-	t.Cleanup(func() {
-		comp.Close()
-		decomp.Close()
-		if idx0 != nil {
-			idx0.Close()
-		}
-	})
 
 	return &FilesItem{decompressor: decomp, index: idx0, startTxNum: startTxNum, endTxNum: endTxNum}
 }

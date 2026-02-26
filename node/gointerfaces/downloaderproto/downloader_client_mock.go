@@ -42,94 +42,6 @@ func (m *MockDownloaderClient) EXPECT() *MockDownloaderClientMockRecorder {
 	return m.recorder
 }
 
-// Add mocks base method.
-func (m *MockDownloaderClient) Add(ctx context.Context, in *AddRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
-	m.ctrl.T.Helper()
-	varargs := []any{ctx, in}
-	for _, a := range opts {
-		varargs = append(varargs, a)
-	}
-	ret := m.ctrl.Call(m, "Add", varargs...)
-	ret0, _ := ret[0].(*emptypb.Empty)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// Add indicates an expected call of Add.
-func (mr *MockDownloaderClientMockRecorder) Add(ctx, in any, opts ...any) *MockDownloaderClientAddCall {
-	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{ctx, in}, opts...)
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Add", reflect.TypeOf((*MockDownloaderClient)(nil).Add), varargs...)
-	return &MockDownloaderClientAddCall{Call: call}
-}
-
-// MockDownloaderClientAddCall wrap *gomock.Call
-type MockDownloaderClientAddCall struct {
-	*gomock.Call
-}
-
-// Return rewrite *gomock.Call.Return
-func (c *MockDownloaderClientAddCall) Return(arg0 *emptypb.Empty, arg1 error) *MockDownloaderClientAddCall {
-	c.Call = c.Call.Return(arg0, arg1)
-	return c
-}
-
-// Do rewrite *gomock.Call.Do
-func (c *MockDownloaderClientAddCall) Do(f func(context.Context, *AddRequest, ...grpc.CallOption) (*emptypb.Empty, error)) *MockDownloaderClientAddCall {
-	c.Call = c.Call.Do(f)
-	return c
-}
-
-// DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockDownloaderClientAddCall) DoAndReturn(f func(context.Context, *AddRequest, ...grpc.CallOption) (*emptypb.Empty, error)) *MockDownloaderClientAddCall {
-	c.Call = c.Call.DoAndReturn(f)
-	return c
-}
-
-// Completed mocks base method.
-func (m *MockDownloaderClient) Completed(ctx context.Context, in *CompletedRequest, opts ...grpc.CallOption) (*CompletedReply, error) {
-	m.ctrl.T.Helper()
-	varargs := []any{ctx, in}
-	for _, a := range opts {
-		varargs = append(varargs, a)
-	}
-	ret := m.ctrl.Call(m, "Completed", varargs...)
-	ret0, _ := ret[0].(*CompletedReply)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// Completed indicates an expected call of Completed.
-func (mr *MockDownloaderClientMockRecorder) Completed(ctx, in any, opts ...any) *MockDownloaderClientCompletedCall {
-	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{ctx, in}, opts...)
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Completed", reflect.TypeOf((*MockDownloaderClient)(nil).Completed), varargs...)
-	return &MockDownloaderClientCompletedCall{Call: call}
-}
-
-// MockDownloaderClientCompletedCall wrap *gomock.Call
-type MockDownloaderClientCompletedCall struct {
-	*gomock.Call
-}
-
-// Return rewrite *gomock.Call.Return
-func (c *MockDownloaderClientCompletedCall) Return(arg0 *CompletedReply, arg1 error) *MockDownloaderClientCompletedCall {
-	c.Call = c.Call.Return(arg0, arg1)
-	return c
-}
-
-// Do rewrite *gomock.Call.Do
-func (c *MockDownloaderClientCompletedCall) Do(f func(context.Context, *CompletedRequest, ...grpc.CallOption) (*CompletedReply, error)) *MockDownloaderClientCompletedCall {
-	c.Call = c.Call.Do(f)
-	return c
-}
-
-// DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockDownloaderClientCompletedCall) DoAndReturn(f func(context.Context, *CompletedRequest, ...grpc.CallOption) (*CompletedReply, error)) *MockDownloaderClientCompletedCall {
-	c.Call = c.Call.DoAndReturn(f)
-	return c
-}
-
 // Delete mocks base method.
 func (m *MockDownloaderClient) Delete(ctx context.Context, in *DeleteRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	m.ctrl.T.Helper()
@@ -174,46 +86,90 @@ func (c *MockDownloaderClientDeleteCall) DoAndReturn(f func(context.Context, *De
 	return c
 }
 
-// SetLogPrefix mocks base method.
-func (m *MockDownloaderClient) SetLogPrefix(ctx context.Context, in *SetLogPrefixRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+// Download mocks base method.
+func (m *MockDownloaderClient) Download(ctx context.Context, in *DownloadRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	m.ctrl.T.Helper()
 	varargs := []any{ctx, in}
 	for _, a := range opts {
 		varargs = append(varargs, a)
 	}
-	ret := m.ctrl.Call(m, "SetLogPrefix", varargs...)
+	ret := m.ctrl.Call(m, "Download", varargs...)
 	ret0, _ := ret[0].(*emptypb.Empty)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// SetLogPrefix indicates an expected call of SetLogPrefix.
-func (mr *MockDownloaderClientMockRecorder) SetLogPrefix(ctx, in any, opts ...any) *MockDownloaderClientSetLogPrefixCall {
+// Download indicates an expected call of Download.
+func (mr *MockDownloaderClientMockRecorder) Download(ctx, in any, opts ...any) *MockDownloaderClientDownloadCall {
 	mr.mock.ctrl.T.Helper()
 	varargs := append([]any{ctx, in}, opts...)
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetLogPrefix", reflect.TypeOf((*MockDownloaderClient)(nil).SetLogPrefix), varargs...)
-	return &MockDownloaderClientSetLogPrefixCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Download", reflect.TypeOf((*MockDownloaderClient)(nil).Download), varargs...)
+	return &MockDownloaderClientDownloadCall{Call: call}
 }
 
-// MockDownloaderClientSetLogPrefixCall wrap *gomock.Call
-type MockDownloaderClientSetLogPrefixCall struct {
+// MockDownloaderClientDownloadCall wrap *gomock.Call
+type MockDownloaderClientDownloadCall struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockDownloaderClientSetLogPrefixCall) Return(arg0 *emptypb.Empty, arg1 error) *MockDownloaderClientSetLogPrefixCall {
+func (c *MockDownloaderClientDownloadCall) Return(arg0 *emptypb.Empty, arg1 error) *MockDownloaderClientDownloadCall {
 	c.Call = c.Call.Return(arg0, arg1)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockDownloaderClientSetLogPrefixCall) Do(f func(context.Context, *SetLogPrefixRequest, ...grpc.CallOption) (*emptypb.Empty, error)) *MockDownloaderClientSetLogPrefixCall {
+func (c *MockDownloaderClientDownloadCall) Do(f func(context.Context, *DownloadRequest, ...grpc.CallOption) (*emptypb.Empty, error)) *MockDownloaderClientDownloadCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockDownloaderClientSetLogPrefixCall) DoAndReturn(f func(context.Context, *SetLogPrefixRequest, ...grpc.CallOption) (*emptypb.Empty, error)) *MockDownloaderClientSetLogPrefixCall {
+func (c *MockDownloaderClientDownloadCall) DoAndReturn(f func(context.Context, *DownloadRequest, ...grpc.CallOption) (*emptypb.Empty, error)) *MockDownloaderClientDownloadCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// Seed mocks base method.
+func (m *MockDownloaderClient) Seed(ctx context.Context, in *SeedRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	m.ctrl.T.Helper()
+	varargs := []any{ctx, in}
+	for _, a := range opts {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "Seed", varargs...)
+	ret0, _ := ret[0].(*emptypb.Empty)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Seed indicates an expected call of Seed.
+func (mr *MockDownloaderClientMockRecorder) Seed(ctx, in any, opts ...any) *MockDownloaderClientSeedCall {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{ctx, in}, opts...)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Seed", reflect.TypeOf((*MockDownloaderClient)(nil).Seed), varargs...)
+	return &MockDownloaderClientSeedCall{Call: call}
+}
+
+// MockDownloaderClientSeedCall wrap *gomock.Call
+type MockDownloaderClientSeedCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockDownloaderClientSeedCall) Return(arg0 *emptypb.Empty, arg1 error) *MockDownloaderClientSeedCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockDownloaderClientSeedCall) Do(f func(context.Context, *SeedRequest, ...grpc.CallOption) (*emptypb.Empty, error)) *MockDownloaderClientSeedCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockDownloaderClientSeedCall) DoAndReturn(f func(context.Context, *SeedRequest, ...grpc.CallOption) (*emptypb.Empty, error)) *MockDownloaderClientSeedCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

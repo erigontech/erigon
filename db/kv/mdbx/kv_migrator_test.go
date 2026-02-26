@@ -26,7 +26,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
@@ -76,6 +76,7 @@ func TestBucketCRUD(t *testing.T) {
 
 	c, err := tx.RwCursor(deprecatedBucket)
 	require.NoError(err)
+	defer c.Close()
 	err = c.Put([]byte{1}, []byte{1})
 	require.NoError(err)
 	v, err := tx.GetOne(deprecatedBucket, []byte{1})

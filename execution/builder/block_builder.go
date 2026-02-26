@@ -17,47 +17,59 @@
 package builder
 
 import (
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/types"
 )
 
-type BlockBuilderFunc func(param *core.BlockBuilderParameters, interrupt *int32) (*types.BlockWithReceipts, error)
+type BlockBuilderFunc func(param *Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error)
 
 // BlockBuilder wraps a goroutine that builds Proof-of-Stake payloads (PoS "mining")
 type BlockBuilder struct {
-	interrupt int32
+	interrupt atomic.Bool
 	syncCond  *sync.Cond
 	result    *types.BlockWithReceipts
 	err       error
 }
 
-func NewBlockBuilder(build BlockBuilderFunc, param *core.BlockBuilderParameters, maxBuildTimeSecs uint64) *BlockBuilder {
+func NewBlockBuilder(build BlockBuilderFunc, param *Parameters, maxBuildTimeSecs uint64) *BlockBuilder {
 	builder := new(BlockBuilder)
 	builder.syncCond = sync.NewCond(new(sync.Mutex))
 	terminated := make(chan struct{})
 
 	go func() {
 		defer close(terminated)
+		var result *types.BlockWithReceipts
+		var err error
+
+		defer func() {
+			if rec := recover(); rec != nil {
+				err = fmt.Errorf("block builder panic: %+v, trace: %s", rec, dbg.Stack())
+				log.Warn("Block builder panicked", "err", err)
+				result = nil
+			}
+
+			builder.syncCond.L.Lock()
+			defer builder.syncCond.L.Unlock()
+			builder.result = result
+			builder.err = err
+			builder.syncCond.Broadcast()
+		}()
+
 		log.Info("Building block...")
 		t := time.Now()
-		result, err := build(param, &builder.interrupt)
+		result, err = build(param, &builder.interrupt)
 		if err != nil {
 			log.Warn("Failed to build a block", "err", err)
 		} else {
 			block := result.Block
 			log.Info("Built block", "hash", block.Hash(), "height", block.NumberU64(), "txs", len(block.Transactions()), "executionRequests", len(result.Requests), "gas used %", 100*float64(block.GasUsed())/float64(block.GasLimit()), "time", time.Since(t))
 		}
-
-		builder.syncCond.L.Lock()
-		defer builder.syncCond.L.Unlock()
-		builder.result = result
-		builder.err = err
-		builder.syncCond.Broadcast()
 	}()
 
 	go func() {
@@ -78,7 +90,7 @@ func NewBlockBuilder(build BlockBuilderFunc, param *core.BlockBuilderParameters,
 }
 
 func (b *BlockBuilder) Stop() (*types.BlockWithReceipts, error) {
-	atomic.StoreInt32(&b.interrupt, 1)
+	b.interrupt.Store(true)
 
 	b.syncCond.L.Lock()
 	defer b.syncCond.L.Unlock()

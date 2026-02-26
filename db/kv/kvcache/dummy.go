@@ -19,7 +19,7 @@ package kvcache
 import (
 	"context"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
@@ -59,7 +59,10 @@ type DummyView struct {
 	tx    kv.TemporalTx
 }
 
-func (c *DummyView) Get(k []byte) ([]byte, error)     { return c.cache.Get(k, c.tx, 0) }
+func (c *DummyView) Get(k []byte) ([]byte, error) { return c.cache.Get(k, c.tx, 0) }
+func (c *DummyView) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error) {
+	return nil, false, nil
+}
 func (c *DummyView) GetCode(k []byte) ([]byte, error) { return c.cache.GetCode(k, c.tx, 0) }
 func (c *DummyView) HasStorage(address common.Address) (bool, error) {
 	_, _, hasStorage, err := c.tx.HasPrefix(kv.StorageDomain, address[:])

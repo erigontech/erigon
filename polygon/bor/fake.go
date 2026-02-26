@@ -17,11 +17,11 @@
 package bor
 
 import (
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/consensus/ethash"
+	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -29,7 +29,7 @@ type FakeBor struct {
 	*ethash.FakeEthash
 }
 
-// NewFaker creates a bor consensus engine with a FakeEthash
+// NewFaker creates a bor rules engine with a FakeEthash
 func NewFaker() *FakeBor {
 	return &FakeBor{
 		FakeEthash: ethash.NewFaker(),
@@ -37,8 +37,8 @@ func NewFaker() *FakeBor {
 }
 
 func (f *FakeBor) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
-	chain consensus.ChainReader, syscall consensus.SystemCall, skipReceiptsEval bool, logger log.Logger,
+	uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
+	chain rules.ChainReader, syscall rules.SystemCall, skipReceiptsEval bool, logger log.Logger,
 ) (types.FlatRequests, error) {
-	return f.FakeEthash.Finalize(config, header, state, txs, uncles, r, withdrawals, chain, syscall, skipReceiptsEval, logger)
+	return f.FakeEthash.Finalize(config, header, state, uncles, r, withdrawals, chain, syscall, skipReceiptsEval, logger)
 }

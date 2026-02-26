@@ -21,12 +21,15 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"strings"
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/generics"
-	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/generics"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // Config is the core config which determines the blockchain settings.
@@ -40,7 +43,7 @@ type Config struct {
 	ChainName string   `json:"chainName"` // chain name, eg: mainnet, sepolia, bor-mainnet
 	ChainID   *big.Int `json:"chainId"`   // chainId identifies the current chain and is used for replay protection
 
-	Consensus ConsensusName `json:"consensus,omitempty"` // aura, ethash or clique
+	Rules RulesName `json:"consensus,omitempty"` // aura, ethash or clique
 
 	// *Block fields activate the corresponding hard fork at a certain block number,
 	// while *Time fields do so based on the block's time stamp.
@@ -70,10 +73,11 @@ type Config struct {
 	MergeHeight                   *big.Int `json:"mergeBlock,omitempty"`                    // The Merge block number
 
 	// Mainnet fork scheduling switched from block numbers to timestamps after The Merge
-	ShanghaiTime *big.Int `json:"shanghaiTime,omitempty"`
-	CancunTime   *big.Int `json:"cancunTime,omitempty"`
-	PragueTime   *big.Int `json:"pragueTime,omitempty"`
-	OsakaTime    *big.Int `json:"osakaTime,omitempty"`
+	ShanghaiTime  *big.Int `json:"shanghaiTime,omitempty"`
+	CancunTime    *big.Int `json:"cancunTime,omitempty"`
+	PragueTime    *big.Int `json:"pragueTime,omitempty"`
+	OsakaTime     *big.Int `json:"osakaTime,omitempty"`
+	AmsterdamTime *big.Int `json:"amsterdamTime,omitempty"`
 
 	// Optional EIP-4844 parameters (see also EIP-7691, EIP-7840, EIP-7892)
 	MinBlobGasPrice       *uint64                       `json:"minBlobGasPrice,omitempty"`
@@ -85,6 +89,10 @@ type Config struct {
 	Bpo5Time              *big.Int                      `json:"bpo5Time,omitempty"`
 	parseBlobScheduleOnce sync.Once                     `copier:"-"`
 	parsedBlobSchedule    map[uint64]*params.BlobConfig
+
+	// Balancer fork (Gnosis Chain). See https://hackmd.io/@filoozom/rycoQITlWl
+	BalancerTime            *big.Int                         `json:"balancerTime,omitempty"`
+	BalancerRewriteBytecode map[common.Address]hexutil.Bytes `json:"balancerRewriteBytecode,omitempty"`
 
 	// (Optional) governance contract where EIP-1559 fees will be sent to, which otherwise would be burnt since the London fork.
 	// A key corresponds to the block number, starting from which the fees are sent to the address (map value).
@@ -98,7 +106,7 @@ type Config struct {
 
 	DefaultBlockGasLimit *uint64 `json:"defaultBlockGasLimit,omitempty"`
 
-	// Various consensus engines
+	// Various rules engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`
 	Clique *CliqueConfig `json:"clique,omitempty"`
 	Aura   *AuRaConfig   `json:"aura,omitempty"`
@@ -113,7 +121,7 @@ type Config struct {
 var (
 	TestChainConfig = &Config{
 		ChainID:               big.NewInt(1337),
-		Consensus:             EtHashConsensus,
+		Rules:                 EtHashRules,
 		HomesteadBlock:        big.NewInt(0),
 		TangerineWhistleBlock: big.NewInt(0),
 		SpuriousDragonBlock:   big.NewInt(0),
@@ -128,7 +136,7 @@ var (
 
 	TestChainAuraConfig = &Config{
 		ChainID:               big.NewInt(1),
-		Consensus:             AuRaConsensus,
+		Rules:                 AuRaRules,
 		HomesteadBlock:        big.NewInt(0),
 		TangerineWhistleBlock: big.NewInt(0),
 		SpuriousDragonBlock:   big.NewInt(0),
@@ -146,7 +154,7 @@ var (
 	// and accepted by the Ethereum core developers into the main net protocol.
 	AllProtocolChanges = &Config{
 		ChainID:                       big.NewInt(1337),
-		Consensus:                     EtHashConsensus,
+		Rules:                         EtHashRules,
 		HomesteadBlock:                big.NewInt(0),
 		TangerineWhistleBlock:         big.NewInt(0),
 		SpuriousDragonBlock:           big.NewInt(0),
@@ -164,6 +172,8 @@ var (
 		ShanghaiTime:                  big.NewInt(0),
 		CancunTime:                    big.NewInt(0),
 		PragueTime:                    big.NewInt(0),
+		OsakaTime:                     big.NewInt(0),
+		AmsterdamTime:                 big.NewInt(0),
 		DepositContract:               common.HexToAddress("0x00000000219ab540356cBB839Cbe05303d7705Fa"),
 		Ethash:                        new(EthashConfig),
 	}
@@ -181,17 +191,14 @@ type BorConfig interface {
 	GetBhilaiBlock() *big.Int
 	IsRio(num uint64) bool
 	GetRioBlock() *big.Int
-	StateReceiverContractAddress() common.Address
+	StateReceiverContractAddress() accounts.Address
 	CalculateSprintNumber(number uint64) uint64
 	CalculateSprintLength(number uint64) uint64
-	CalculateCoinbase(number uint64) common.Address
+	CalculateCoinbase(number uint64) accounts.Address
 }
 
-func timestampToTime(unixTime *big.Int) *time.Time {
-	if unixTime == nil {
-		return nil
-	}
-	t := time.Unix(unixTime.Int64(), 0).UTC()
+func timestampToTime(unixSec int64) *time.Time {
+	t := time.Unix(unixSec, 0).UTC()
 	return &t
 }
 
@@ -210,20 +217,43 @@ func (c *Config) String() string {
 		)
 	}
 
-	return fmt.Sprintf("{ChainID: %v, Terminal Total Difficulty: %v, Shapella: %v, Dencun: %v, Pectra: %v, Fusaka: %v, BPO1: %v, BPO2: %v, BPO3: %v, BPO4: %v, BPO5: %v, Engine: %v}",
-		c.ChainID,
-		c.TerminalTotalDifficulty,
-		timestampToTime(c.ShanghaiTime),
-		timestampToTime(c.CancunTime),
-		timestampToTime(c.PragueTime),
-		timestampToTime(c.OsakaTime),
-		timestampToTime(c.Bpo1Time),
-		timestampToTime(c.Bpo2Time),
-		timestampToTime(c.Bpo3Time),
-		timestampToTime(c.Bpo4Time),
-		timestampToTime(c.Bpo5Time),
-		engine,
-	)
+	var b strings.Builder
+	fmt.Fprintf(&b, "{ChainID: %v, Terminal Total Difficulty: %v", c.ChainID, c.TerminalTotalDifficulty)
+	if c.ShanghaiTime != nil {
+		fmt.Fprintf(&b, ", Shapella: %v", timestampToTime(c.ShanghaiTime.Int64()))
+	}
+	if c.CancunTime != nil {
+		fmt.Fprintf(&b, ", Dencun: %v", timestampToTime(c.CancunTime.Int64()))
+	}
+	if c.PragueTime != nil {
+		fmt.Fprintf(&b, ", Pectra: %v", timestampToTime(c.PragueTime.Int64()))
+	}
+	if c.OsakaTime != nil {
+		fmt.Fprintf(&b, ", Fusaka: %v", timestampToTime(c.OsakaTime.Int64()))
+	}
+	if c.Bpo1Time != nil {
+		fmt.Fprintf(&b, ", BPO1: %v", timestampToTime(c.Bpo1Time.Int64()))
+	}
+	if c.Bpo2Time != nil {
+		fmt.Fprintf(&b, ", BPO2: %v", timestampToTime(c.Bpo2Time.Int64()))
+	}
+	if c.Bpo3Time != nil {
+		fmt.Fprintf(&b, ", BPO3: %v", timestampToTime(c.Bpo3Time.Int64()))
+	}
+	if c.Bpo4Time != nil {
+		fmt.Fprintf(&b, ", BPO4: %v", timestampToTime(c.Bpo4Time.Int64()))
+	}
+	if c.Bpo5Time != nil {
+		fmt.Fprintf(&b, ", BPO5: %v", timestampToTime(c.Bpo5Time.Int64()))
+	}
+	if c.BalancerTime != nil {
+		fmt.Fprintf(&b, ", Balancer: %v", timestampToTime(c.BalancerTime.Int64()))
+	}
+	if c.AmsterdamTime != nil {
+		fmt.Fprintf(&b, ", Glamsterdam: %v", timestampToTime(c.AmsterdamTime.Int64()))
+	}
+	fmt.Fprintf(&b, ", Engine: %v}", engine)
+	return b.String()
 }
 
 func (c *Config) getEngine() string {
@@ -336,6 +366,11 @@ func (c *Config) IsCancun(time uint64) bool {
 	return isForked(c.CancunTime, time)
 }
 
+// IsAmsterdam returns whether time is either equal to the Amsterdam fork time or greater.
+func (c *Config) IsAmsterdam(time uint64) bool {
+	return isForked(c.AmsterdamTime, time)
+}
+
 // IsPrague returns whether time is either equal to the Prague fork time or greater.
 func (c *Config) IsPrague(time uint64) bool {
 	return isForked(c.PragueTime, time)
@@ -346,12 +381,12 @@ func (c *Config) IsOsaka(time uint64) bool {
 	return isForked(c.OsakaTime, time)
 }
 
-func (c *Config) GetBurntContract(num uint64) *common.Address {
+func (c *Config) GetBurntContract(num uint64) accounts.Address {
 	if len(c.BurntContract) == 0 {
-		return nil
+		return accounts.NilAddress
 	}
 	addr := ConfigValueLookup(common.ParseMapKeysIntoUint64(c.BurntContract), num)
-	return &addr
+	return accounts.InternAddress(addr)
 }
 
 func (c *Config) GetMinBlobGasPrice() uint64 {
@@ -364,17 +399,12 @@ func (c *Config) GetMinBlobGasPrice() uint64 {
 func (c *Config) GetBlobConfig(time uint64) *params.BlobConfig {
 	c.parseBlobScheduleOnce.Do(func() {
 		// Populate with default values
-		c.parsedBlobSchedule = map[uint64]*params.BlobConfig{
-			0: {},
-		}
+		c.parsedBlobSchedule = make(map[uint64]*params.BlobConfig)
 		if c.CancunTime != nil {
 			c.parsedBlobSchedule[c.CancunTime.Uint64()] = &params.DefaultCancunBlobConfig
 		}
 		if c.PragueTime != nil {
 			c.parsedBlobSchedule[c.PragueTime.Uint64()] = &params.DefaultPragueBlobConfig
-		}
-		if c.OsakaTime != nil {
-			c.parsedBlobSchedule[c.OsakaTime.Uint64()] = &params.DefaultOsakaBlobConfig
 		}
 
 		// Override with supplied values
@@ -389,6 +419,10 @@ func (c *Config) GetBlobConfig(time uint64) *params.BlobConfig {
 		val, ok = c.BlobSchedule["osaka"]
 		if ok && c.OsakaTime != nil {
 			c.parsedBlobSchedule[c.OsakaTime.Uint64()] = val
+		}
+		val, ok = c.BlobSchedule["gloas"]
+		if ok && c.AmsterdamTime != nil {
+			c.parsedBlobSchedule[c.AmsterdamTime.Uint64()] = val
 		}
 		val, ok = c.BlobSchedule["bpo1"]
 		if ok && c.Bpo1Time != nil {
@@ -416,7 +450,10 @@ func (c *Config) GetBlobConfig(time uint64) *params.BlobConfig {
 }
 
 func (c *Config) GetMaxBlobsPerBlock(time uint64) uint64 {
-	return c.GetBlobConfig(time).Max
+	if blobConfig := c.GetBlobConfig(time); blobConfig != nil {
+		return blobConfig.Max
+	}
+	return 0
 }
 
 func (c *Config) GetMaxBlobGasPerBlock(time uint64) uint64 {
@@ -424,11 +461,17 @@ func (c *Config) GetMaxBlobGasPerBlock(time uint64) uint64 {
 }
 
 func (c *Config) GetTargetBlobsPerBlock(time uint64) uint64 {
-	return c.GetBlobConfig(time).Target
+	if blobConfig := c.GetBlobConfig(time); blobConfig != nil {
+		return blobConfig.Target
+	}
+	return 0
 }
 
 func (c *Config) GetBlobGasPriceUpdateFraction(time uint64) uint64 {
-	return c.GetBlobConfig(time).BaseFeeUpdateFraction
+	if blobConfig := c.GetBlobConfig(time); blobConfig != nil {
+		return blobConfig.BaseFeeUpdateFraction
+	}
+	return 0
 }
 
 func (c *Config) GetMaxRlpBlockSize(time uint64) int {
@@ -448,30 +491,14 @@ func (c *Config) SecondsPerSlot() uint64 {
 	return 12 // Ethereum
 }
 
-func (c *Config) SlotsPerEpoch() uint64 {
-	if c.Bor != nil {
-		// Polygon does not have slots, this is such that block range is updated ~5 minutes similar to Ethereum
-		return 192
-	}
-	if c.Aura != nil {
-		return 16 // Gnosis
-	}
-	return 32 // Ethereum
-}
-
-// EpochDuration returns the duration of one epoch in seconds
-func (c *Config) EpochDuration() time.Duration {
-	return time.Duration(c.SecondsPerSlot()*c.SlotsPerEpoch()) * time.Second
-}
-
-func (c *Config) SystemContracts(time uint64) map[string]common.Address {
-	contracts := map[string]common.Address{}
+func (c *Config) SystemContracts(time uint64) map[string]accounts.Address {
+	contracts := map[string]accounts.Address{}
 	if c.IsCancun(time) {
 		contracts["BEACON_ROOTS_ADDRESS"] = params.BeaconRootsAddress
 	}
 	if c.IsPrague(time) {
 		contracts["CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS"] = params.ConsolidationRequestAddress
-		contracts["DEPOSIT_CONTRACT_ADDRESS"] = c.DepositContract
+		contracts["DEPOSIT_CONTRACT_ADDRESS"] = accounts.InternAddress(c.DepositContract)
 		contracts["HISTORY_STORAGE_ADDRESS"] = params.HistoryStorageAddress
 		contracts["WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS"] = params.WithdrawalRequestAddress
 	}
@@ -652,21 +679,21 @@ func (err *ConfigCompatError) Error() string {
 	return fmt.Sprintf("mismatching %s in database (have %d, want %d, rewindto %d)", err.What, err.StoredConfig, err.NewConfig, err.RewindTo)
 }
 
-// EthashConfig is the consensus engine configs for proof-of-work based sealing.
+// EthashConfig is the rules engine configs for proof-of-work based sealing.
 type EthashConfig struct{}
 
-// String implements the stringer interface, returning the consensus engine details.
+// String implements the stringer interface, returning the rules engine details.
 func (c *EthashConfig) String() string {
 	return "ethash"
 }
 
-// CliqueConfig is the consensus engine configs for proof-of-authority based sealing.
+// CliqueConfig is the rules engine configs for proof-of-authority based sealing.
 type CliqueConfig struct {
 	Period uint64 `json:"period"` // Number of seconds between blocks to enforce
 	Epoch  uint64 `json:"epoch"`  // Epoch length to reset votes and checkpoint
 }
 
-// String implements the stringer interface, returning the consensus engine details.
+// String implements the stringer interface, returning the rules engine details.
 func (c *CliqueConfig) String() string {
 	return "clique"
 }
@@ -679,7 +706,7 @@ func (c *CliqueConfig) String() string {
 // For blocks 0–4 an empty string will be returned.
 func ConfigValueLookup[T any](field map[uint64]T, number uint64) T {
 	keys := common.SortedKeys(field)
-	if number < keys[0] {
+	if len(keys) == 0 || number < keys[0] {
 		return generics.Zero[T]()
 	}
 	for i := 0; i < len(keys)-1; i++ {
@@ -701,7 +728,7 @@ type Rules struct {
 	IsByzantium, IsConstantinople, IsPetersburg       bool
 	IsIstanbul, IsBerlin, IsLondon, IsShanghai        bool
 	IsCancun, IsNapoli, IsBhilai                      bool
-	IsPrague, IsOsaka                                 bool
+	IsPrague, IsOsaka, IsAmsterdam                    bool
 	IsAura                                            bool
 }
 

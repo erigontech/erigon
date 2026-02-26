@@ -12,7 +12,7 @@ package bor
 import (
 	reflect "reflect"
 
-	consensus "github.com/erigontech/erigon/execution/consensus"
+	rules "github.com/erigontech/erigon/execution/protocol/rules"
 	heimdall "github.com/erigontech/erigon/polygon/heimdall"
 	gomock "go.uber.org/mock/gomock"
 )
@@ -42,7 +42,7 @@ func (m *MockSpanner) EXPECT() *MockSpannerMockRecorder {
 }
 
 // CommitSpan mocks base method.
-func (m *MockSpanner) CommitSpan(heimdallSpan heimdall.Span, syscall consensus.SystemCall) error {
+func (m *MockSpanner) CommitSpan(heimdallSpan heimdall.Span, syscall rules.SystemCall) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "CommitSpan", heimdallSpan, syscall)
 	ret0, _ := ret[0].(error)
@@ -68,19 +68,19 @@ func (c *MockSpannerCommitSpanCall) Return(arg0 error) *MockSpannerCommitSpanCal
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockSpannerCommitSpanCall) Do(f func(heimdall.Span, consensus.SystemCall) error) *MockSpannerCommitSpanCall {
+func (c *MockSpannerCommitSpanCall) Do(f func(heimdall.Span, rules.SystemCall) error) *MockSpannerCommitSpanCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockSpannerCommitSpanCall) DoAndReturn(f func(heimdall.Span, consensus.SystemCall) error) *MockSpannerCommitSpanCall {
+func (c *MockSpannerCommitSpanCall) DoAndReturn(f func(heimdall.Span, rules.SystemCall) error) *MockSpannerCommitSpanCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // GetCurrentSpan mocks base method.
-func (m *MockSpanner) GetCurrentSpan(syscall consensus.SystemCall) (*heimdall.Span, error) {
+func (m *MockSpanner) GetCurrentSpan(syscall rules.SystemCall) (*heimdall.Span, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetCurrentSpan", syscall)
 	ret0, _ := ret[0].(*heimdall.Span)
@@ -107,13 +107,13 @@ func (c *MockSpannerGetCurrentSpanCall) Return(arg0 *heimdall.Span, arg1 error) 
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockSpannerGetCurrentSpanCall) Do(f func(consensus.SystemCall) (*heimdall.Span, error)) *MockSpannerGetCurrentSpanCall {
+func (c *MockSpannerGetCurrentSpanCall) Do(f func(rules.SystemCall) (*heimdall.Span, error)) *MockSpannerGetCurrentSpanCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockSpannerGetCurrentSpanCall) DoAndReturn(f func(consensus.SystemCall) (*heimdall.Span, error)) *MockSpannerGetCurrentSpanCall {
+func (c *MockSpannerGetCurrentSpanCall) DoAndReturn(f func(rules.SystemCall) (*heimdall.Span, error)) *MockSpannerGetCurrentSpanCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

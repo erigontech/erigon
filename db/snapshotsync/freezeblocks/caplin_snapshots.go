@@ -31,15 +31,15 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/tidwall/btree"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/background"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
@@ -48,7 +48,7 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/version"
-	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 var sidecarSSZSize = (&cltypes.BlobSidecar{}).EncodingSizeSSZ()
@@ -161,6 +161,17 @@ func (s *CaplinSnapshots) OpenList(fileNames []string, optimistic bool) error {
 	defer s.dirtyLock.Unlock()
 
 	s.closeWhatNotInList(fileNames)
+
+	// Get idx files for efficient index file lookups
+	idxFiles, err := snaptype.IdxFiles(s.dir)
+	if err != nil {
+		return fmt.Errorf("read idx files %s: %w", s.dir, err)
+	}
+	dirEntries := make([]string, 0, len(idxFiles))
+	for _, f := range idxFiles {
+		dirEntries = append(dirEntries, f.Name())
+	}
+
 	var segmentsMax uint64
 	var segmentsMaxSet bool
 Loop:
@@ -215,7 +226,7 @@ Loop:
 				// then make segment available even if index open may fail
 				s.dirty[snaptype.BeaconBlocks.Enum()].Set(sn)
 			}
-			if err := sn.OpenIdxIfNeed(s.dir, optimistic); err != nil {
+			if err := sn.OpenIdxIfNeed(s.dir, optimistic, dirEntries); err != nil {
 				return err
 			}
 			// Only bob sidecars count for progression
@@ -271,7 +282,7 @@ Loop:
 				// then make segment available even if index open may fail
 				s.dirty[snaptype.BlobSidecars.Enum()].Set(sn)
 			}
-			if err := sn.OpenIdxIfNeed(s.dir, optimistic); err != nil {
+			if err := sn.OpenIdxIfNeed(s.dir, optimistic, dirEntries); err != nil {
 				return err
 			}
 		}

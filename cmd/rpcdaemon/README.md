@@ -295,6 +295,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 |                                            |         |                                                       |
 | eth_accounts                               | No      | deprecated                                            |
 | eth_sendRawTransaction                     | Yes     | `remote`.                                             |
+| eth_sendRawTransactionSync                 | Yes     | `remote`.                                             |
 | eth_sendTransaction                        | -       | not yet implemented                                   |
 | eth_sign                                   | No      | deprecated                                            |
 | eth_signTransaction                        | -       | not yet implemented                                   |
@@ -323,6 +324,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | engine_forkchoiceUpdatedV1                 | Yes     |                                                       |
 | engine_forkchoiceUpdatedV2                 | Yes     |                                                       |
 | engine_forkchoiceUpdatedV3                 | Yes     |                                                       |
+| engine_forkchoiceUpdatedV4                 | Yes     | Added in Amsterdam                                    |
 | engine_getPayloadV1                        | Yes     |                                                       |
 | engine_getPayloadV2                        | Yes     |                                                       |
 | engine_getPayloadV3                        | Yes     |                                                       |
@@ -331,6 +333,8 @@ The following table shows the current implementation status of Erigon's RPC daem
 | engine_getPayloadBodiesByRangeV1           | Yes     |                                                       |
 | engine_getClientVersionV1                  | Yes     |                                                       |
 | engine_getBlobsV1                          | Yes     |                                                       |
+| engine_getBlobsV2                          | Yes     | Added in Fusaka                                       |
+| engine_getBlobsV3                          | Yes     | Added with BPO3                                       |
 |                                            |         |                                                       |
 | debug_getRawReceipts                       | Yes     | `debug_` expected to be private                       |
 | debug_accountRange                         | Yes     |                                                       |
@@ -598,3 +602,20 @@ processed sequentially (on 1 goroutine).
 
 `go.mod` stores right version of generators, use `make grpc` to install it and generate code (it also installs protoc
 into ./build/bin folder).
+
+### Historical blocks exec perf test
+
+```sh
+# start RPCD on datadir. Disable: receipts LRU. Disable: json marshaling of response. Disable: http compression.  
+RPC_DROP_RESPONSE=true RPC_DISABLE_RCACHE=true RPC_DISABLE_RLRU=true go run ./cmd/rpcdaemon --datadir /erigon-data/mainnet_full/ --http.compression=false --pprof --pprof.port=6062 --private.api.addr=127.0.0.1:0
+
+echo '{"method":"eth_getLogs","params":[{"fromBlock":"0x16E3600","toBlock":"0x16E3610"}],"id":1,"jsonrpc":"2.0"}' > body.json
+
+cat > getLogs.http << 'EOF'
+POST http://localhost:8545
+Content-Type: application/json
+@body.json
+EOF
+
+vegeta attack -targets=getLogs.http -rate=16 -duration=10s -timeout=300s | vegeta report
+```

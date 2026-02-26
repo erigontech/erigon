@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/config3"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -19,14 +19,17 @@ import (
 
 // AggOpts is an Aggregator builder and contains only runtime-changeable configs (which may vary between Erigon nodes)
 type AggOpts struct { //nolint:gocritic
-	schema   statecfg.SchemaGen // biz-logic
-	dirs     datadir.Dirs
-	logger   log.Logger
-	stepSize uint64
+	schema            statecfg.SchemaGen // biz-logic
+	dirs              datadir.Dirs
+	logger            log.Logger
+	stepSize          uint64 // != 0 mean override erigondb.toml settings
+	stepsInFrozenFile uint64 // != 0 mean override erigondb.toml settings
+	reorgBlockDepth   uint64
 
 	genSaltIfNeed   bool
 	sanityOldNaming bool // prevent start directory with old file names
 	disableFsync    bool // for tests speed
+	disableHistory  bool // for temp/inmem aggregator instances
 }
 
 func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
@@ -34,7 +37,7 @@ func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
 		logger:          log.Root(),
 		schema:          statecfg.Schema,
 		dirs:            dirs,
-		stepSize:        config3.DefaultStepSize,
+		reorgBlockDepth: dbg.MaxReorgDepth,
 		genSaltIfNeed:   false,
 		sanityOldNaming: false,
 		disableFsync:    false,
@@ -42,7 +45,7 @@ func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
 }
 
 func NewTest(dirs datadir.Dirs) AggOpts { //nolint:gocritic
-	return New(dirs).DisableFsync().GenSaltIfNeed(true)
+	return New(dirs).DisableFsync().GenSaltIfNeed(true).ReorgBlockDepth(0)
 }
 
 func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) { //nolint:gocritic
@@ -58,10 +61,24 @@ func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) {
 		return nil, err
 	}
 
-	a, err := newAggregator(ctx, opts.dirs, opts.stepSize, db, opts.logger)
+	a, err := newAggregator(ctx, opts.dirs, opts.reorgBlockDepth, db, opts.logger)
 	if err != nil {
 		return nil, err
 	}
+
+	// Read DB settings from erigondb.toml first; it assumes default or legacy settings if not present; then
+	// allow override from opts
+	if err := a.reloadErigonDBSettings(); err != nil {
+		return nil, err
+	}
+	if opts.stepSize != 0 {
+		a.stepSize = opts.stepSize
+	}
+	if opts.stepsInFrozenFile != 0 {
+		a.stepsInFrozenFile = opts.stepsInFrozenFile
+	}
+
+	a.disableHistory = opts.disableHistory
 	if err := statecfg.AdjustReceiptCurrentVersionIfNeeded(opts.dirs, opts.logger); err != nil {
 		return nil, err
 	}
@@ -98,10 +115,19 @@ func (opts AggOpts) MustOpen(ctx context.Context, db kv.RoDB) *Aggregator { //no
 
 // Setters
 
-func (opts AggOpts) StepSize(s uint64) AggOpts    { opts.stepSize = s; return opts }        //nolint:gocritic
-func (opts AggOpts) GenSaltIfNeed(v bool) AggOpts { opts.genSaltIfNeed = v; return opts }   //nolint:gocritic
-func (opts AggOpts) Logger(l log.Logger) AggOpts  { opts.logger = l; return opts }          //nolint:gocritic
-func (opts AggOpts) DisableFsync() AggOpts        { opts.disableFsync = true; return opts } //nolint:gocritic
+func (opts AggOpts) StepSize(s uint64) AggOpts { opts.stepSize = s; return opts } //nolint:gocritic
+func (opts AggOpts) StepsInFrozenFile(steps uint64) AggOpts { //nolint:gocritic
+	opts.stepsInFrozenFile = steps
+	return opts
+}
+func (opts AggOpts) ReorgBlockDepth(d uint64) AggOpts { //nolint:gocritic
+	opts.reorgBlockDepth = d
+	return opts
+}
+func (opts AggOpts) GenSaltIfNeed(v bool) AggOpts { opts.genSaltIfNeed = v; return opts }     //nolint:gocritic
+func (opts AggOpts) Logger(l log.Logger) AggOpts  { opts.logger = l; return opts }            //nolint:gocritic
+func (opts AggOpts) DisableFsync() AggOpts        { opts.disableFsync = true; return opts }   //nolint:gocritic
+func (opts AggOpts) DisableHistory() AggOpts      { opts.disableHistory = true; return opts } //nolint:gocritic
 func (opts AggOpts) SanityOldNaming() AggOpts { //nolint:gocritic
 	opts.sanityOldNaming = true
 	return opts

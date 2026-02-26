@@ -22,12 +22,11 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
-	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/p2p/protocols/wit"
@@ -74,20 +73,18 @@ func (wb *WitnessBuffer) DrainWitnesses() []WitnessData {
 }
 
 type WitnessProcessingCfg struct {
-	db            kv.RwDB
 	witnessBuffer *WitnessBuffer
 }
 
-func NewWitnessProcessingCfg(db kv.RwDB, witnessBuffer *WitnessBuffer) WitnessProcessingCfg {
+func NewWitnessProcessingCfg(witnessBuffer *WitnessBuffer) WitnessProcessingCfg {
 	return WitnessProcessingCfg{
-		db:            db,
 		witnessBuffer: witnessBuffer,
 	}
 }
 
-func StageWitnessProcessingCfg(db kv.RwDB, chainConfig *chain.Config, witnessBuffer *WitnessBuffer) *WitnessProcessingCfg {
+func StageWitnessProcessingCfg(chainConfig *chain.Config, witnessBuffer *WitnessBuffer) *WitnessProcessingCfg {
 	if chainConfig.Bor != nil && witnessBuffer != nil {
-		cfg := NewWitnessProcessingCfg(db, witnessBuffer)
+		cfg := NewWitnessProcessingCfg(witnessBuffer)
 		return &cfg
 	}
 
@@ -95,19 +92,9 @@ func StageWitnessProcessingCfg(db kv.RwDB, chainConfig *chain.Config, witnessBuf
 }
 
 // SpawnStageWitnessProcessing processes buffered witness data and stores it in the database
-func SpawnStageWitnessProcessing(s *StageState, tx kv.RwTx, cfg WitnessProcessingCfg, ctx context.Context, logger log.Logger) error {
+func SpawnStageWitnessProcessing(tx kv.RwTx, cfg WitnessProcessingCfg, logger log.Logger) error {
 	if cfg.witnessBuffer == nil {
 		return nil
-	}
-
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		var err error
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
 	}
 
 	// Drain all buffered witnesses
@@ -147,76 +134,31 @@ func SpawnStageWitnessProcessing(s *StageState, tx kv.RwTx, cfg WitnessProcessin
 		}
 	}
 
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
-
 	logger.Info("[WitnessProcessing] completed witness processing", "processed", len(witnesses))
 	return nil
 }
 
 // UnwindWitnessProcessingStage handles unwind operations for witness processing
-func UnwindWitnessProcessingStage(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx context.Context, cfg WitnessProcessingCfg, logger log.Logger) error {
-	var tx kv.RwTx
-	useExternalTx := txc.Tx != nil
-	if !useExternalTx {
-		var err error
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	} else {
-		tx = txc.Tx
-	}
-
+func UnwindWitnessProcessingStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, cfg WitnessProcessingCfg, logger log.Logger) error {
 	if err := cleanupWitnessesForUnwind(tx, u.UnwindPoint+1); err != nil {
 		logger.Warn("failed to cleanup witnesses during witness stage unwind", "err", err, "unwind_point", u.UnwindPoint)
 		return err
 	}
-
 	if err := u.Done(tx); err != nil {
 		return err
 	}
-
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 
 // PruneWitnessProcessingStage handles pruning for witness processing
 func PruneWitnessProcessingStage(p *PruneState, tx kv.RwTx, cfg WitnessProcessingCfg, ctx context.Context, logger log.Logger) error {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		var err error
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-
 	// Prune old witness data based on retention policy
 	if err := cleanupOldWitnesses(tx, p.ForwardProgress, logger); err != nil {
 		return err
 	}
-
 	if err := p.Done(tx); err != nil {
 		return err
 	}
-
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 

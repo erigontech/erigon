@@ -9,7 +9,7 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/abi"
 )
 
@@ -30,7 +30,7 @@ var AccountAbstractionABI = func() abi.ABI {
 
 const PaymasterMaxContextSize = 65536
 
-func decodeMethodParamsToInterface(output interface{}, methodName string, input []byte) error {
+func decodeMethodParamsToInterface(output any, methodName string, input []byte) error {
 	m, err := AccountAbstractionABI.MethodById(input)
 	if err != nil {
 		return fmt.Errorf("unable to decode %s: %w", methodName, err)

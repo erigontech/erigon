@@ -22,12 +22,12 @@ package abi
 import (
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 )
 
 type packUnpackTest struct {
 	def      string
-	unpacked interface{}
+	unpacked any
 	packed   string
 }
 

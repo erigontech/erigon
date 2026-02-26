@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
@@ -22,6 +21,7 @@ import (
 	forkchoice_mock "github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common"
 )
 
 var (
@@ -135,10 +135,6 @@ func createMockDataColumnSidecar(slot uint64, index uint64) *cltypes.DataColumnS
 }
 
 func TestDataColumnSidecarService(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	suite.Run(t, &dataColumnSidecarTestSuite{})
 }
 
@@ -186,9 +182,9 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenAlreadySeen_ReturnsE
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
 	t.NoError(err)
 
-	// Second call with same sidecar should return ErrIgnore
+	// Second call with same sidecar should return nil (silent ignore)
 	err = t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
-	t.Equal(ErrIgnore, err)
+	t.NoError(err)
 }
 
 // TestProcessMessage_WhenInvalidDataColumnSidecar_ReturnsError tests validation failure

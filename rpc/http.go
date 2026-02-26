@@ -37,9 +37,9 @@ import (
 
 	"github.com/golang-jwt/jwt/v4"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -116,7 +116,8 @@ func DialHTTPWithClient(endpoint string, client *http.Client, logger log.Logger)
 
 // DialHTTP creates a new RPC client that connects to an RPC server over HTTP.
 func DialHTTP(endpoint string, logger log.Logger) (*Client, error) {
-	return DialHTTPWithClient(endpoint, new(http.Client), logger)
+	client := &http.Client{Timeout: 30 * time.Second}
+	return DialHTTPWithClient(endpoint, client, logger)
 }
 
 func (c *Client) sendHTTP(ctx context.Context, op *requestOp, msg any) error {
@@ -125,11 +126,11 @@ func (c *Client) sendHTTP(ctx context.Context, op *requestOp, msg any) error {
 	if err != nil {
 		return err
 	}
-	var respmsg jsonrpcMessage
-	if err := json.Unmarshal(respBody, &respmsg); err != nil {
+	var respMsg jsonrpcMessage
+	if err := json.Unmarshal(respBody, &respMsg); err != nil {
 		return err
 	}
-	op.resp <- &respmsg
+	op.resp <- []*jsonrpcMessage{&respMsg}
 	return nil
 }
 
@@ -139,13 +140,11 @@ func (c *Client) sendBatchHTTP(ctx context.Context, op *requestOp, msgs []*jsonr
 	if err != nil {
 		return err
 	}
-	var respmsgs []jsonrpcMessage
-	if err := json.Unmarshal(respBody, &respmsgs); err != nil {
+	var respMsgs []*jsonrpcMessage
+	if err := json.Unmarshal(respBody, &respMsgs); err != nil {
 		return err
 	}
-	for i := 0; i < len(respmsgs); i++ {
-		op.resp <- &respmsgs[i]
-	}
+	op.resp <- respMsgs
 	return nil
 }
 
@@ -180,6 +179,10 @@ func (hc *httpConn) doRequest(ctx context.Context, msg any) ([]byte, error) {
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("%s: %s", resp.Status, string(respBody))
+	}
+
+	if len(respBody) == 0 {
+		return nil, errors.New("empty response from JSON-RPC server")
 	}
 
 	return respBody, nil
@@ -247,6 +250,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Don't serve if server is stopped.
+	if !s.run.Load() {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		return
+	}
+
 	// Create request-scoped context.
 	connInfo := PeerInfo{Transport: "http", RemoteAddr: r.RemoteAddr}
 	connInfo.HTTP.Version = r.Proto
@@ -270,8 +279,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if s.debugSingleRequest {
 		if v := r.Header.Get(dbg.HTTPHeader); v == "true" {
-			ctx = dbg.ContextWithDebug(ctx, true)
-
+			ctx = dbg.WithDebug(ctx, true)
 		}
 	}
 
@@ -287,6 +295,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if errorMsg != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		codec.WriteJSON(ctx, errorMsg)
+	}
+
+	if !s.disableStreaming {
+		stream.Flush()
 	}
 }
 

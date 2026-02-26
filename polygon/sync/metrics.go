@@ -19,7 +19,7 @@ package sync
 import (
 	"time"
 
-	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 var (

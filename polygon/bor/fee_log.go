@@ -19,9 +19,10 @@ package bor
 import (
 	"github.com/holiman/uint256"
 
-	common "github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 var transferLogSig = common.HexToHash("0xe6497e3ee548a3372136af2fcb0696db31fc6cf20260707645068bd3fe97f3c4")
@@ -34,7 +35,7 @@ func addTransferLog(
 	eventSig common.Hash,
 
 	sender,
-	recipient common.Address,
+	recipient accounts.Address,
 
 	amount,
 	input1,
@@ -60,8 +61,8 @@ func addTransferLog(
 		Topics: []common.Hash{
 			eventSig,
 			feeAddress.Hash(),
-			sender.Hash(),
-			recipient.Hash(),
+			sender.Value().Hash(),
+			recipient.Value().Hash(),
 		},
 		Data: data,
 	})

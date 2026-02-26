@@ -23,9 +23,9 @@ import (
 	"crypto/rand"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/abi/bind"
-	executiontests "github.com/erigontech/erigon/execution/tests"
+	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/txnprovider/shutter"
@@ -34,13 +34,13 @@ import (
 )
 
 type EncryptedTransactor struct {
-	base             executiontests.Transactor
+	base             engineapitester.Transactor
 	encryptorPrivKey *ecdsa.PrivateKey
 	sequencer        *shuttercontracts.Sequencer
 }
 
 func NewEncryptedTransactor(
-	base executiontests.Transactor,
+	base engineapitester.Transactor,
 	encryptorPrivKey *ecdsa.PrivateKey,
 	sequencerAddr string,
 	cb bind.ContractBackend,
@@ -95,7 +95,7 @@ func (et EncryptedTransactor) SubmitEncryptedTransfer(
 		return EncryptedSubmission{}, err
 	}
 
-	opts.Value = new(big.Int).Mul(block.BaseFee, gasLimit)
+	opts.Value = new(big.Int).Mul(block.BaseFee.ToBig(), gasLimit)
 	sigma, err := shuttercrypto.RandomSigma(rand.Reader)
 	if err != nil {
 		return EncryptedSubmission{}, err

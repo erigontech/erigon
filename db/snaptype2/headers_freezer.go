@@ -7,11 +7,13 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	keccak "github.com/erigontech/fastkeccak"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -29,17 +31,23 @@ func NewHeaderFreezer(canonicalTbl, valsTbl string, logger log.Logger) *HeaderFr
 	return &HeaderFreezer{canonicalTbl, valsTbl, logger}
 }
 
-func (f *HeaderFreezer) Freeze(ctx context.Context, blockFrom, blockTo state.RootNum, coll state.Collector, db kv.RoDB) error {
+func (f *HeaderFreezer) Freeze(ctx context.Context, blockFrom, blockTo state.RootNum, coll state.Collector, db kv.RoDB) (state.NumMetadata, error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
 	key := make([]byte, 8+32)
 	from := hexutil.EncodeTs(uint64(blockFrom))
-	return kv.BigChunks(db, f.canonicalTbl, from, func(tx kv.Tx, k, v []byte) (bool, error) {
+	m := state.NumMetadata{}
+	err := kv.BigChunks(db, f.canonicalTbl, from, func(tx kv.Tx, k, v []byte) (bool, error) {
 		blockNum := binary.BigEndian.Uint64(k)
 		if blockNum >= uint64(blockTo) {
 			return false, nil
 		}
+		if m.Count == 0 {
+			m.First = state.Num(blockNum)
+		}
+		m.Last = state.Num(blockNum)
+		m.Count++
 		copy(key, k)
 		copy(key[8:], v)
 		dataRLP, err := tx.GetOne(f.valsTbl, key)
@@ -57,7 +65,7 @@ func (f *HeaderFreezer) Freeze(ctx context.Context, blockFrom, blockTo state.Roo
 		value := make([]byte, len(dataRLP)+1) // first_byte_of_header_hash + header_rlp
 		value[0] = h.Hash()[0]
 		copy(value[1:], dataRLP)
-		if err := coll(value); err != nil {
+		if err := coll.Add(k, value); err != nil {
 			return false, err
 		}
 
@@ -74,12 +82,17 @@ func (f *HeaderFreezer) Freeze(ctx context.Context, blockFrom, blockTo state.Roo
 		}
 		return true, nil
 	})
+	if err != nil {
+		return m, err
+	}
+
+	return m, nil
 }
 
 var _ state.IndexKeyFactory = (*HeaderAccessorIndexKeyFactory)(nil)
 
 type HeaderAccessorIndexKeyFactory struct {
-	s crypto.KeccakState
+	s keccak.KeccakState
 	h common.Hash
 }
 

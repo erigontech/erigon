@@ -27,8 +27,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"net"
+	"net/netip"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -36,11 +36,11 @@ import (
 
 	"golang.org/x/sync/semaphore"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/mclock"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mclock"
 	"github.com/erigontech/erigon/p2p/discover"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
@@ -75,129 +75,6 @@ const (
 
 var errServerStopped = errors.New("server stopped")
 
-// Config holds Server options.
-type Config struct {
-	// This field must be set to a valid secp256k1 private key.
-	PrivateKey *ecdsa.PrivateKey `toml:"-"`
-
-	// MaxPeers is the maximum number of peers that can be
-	// connected. It must be greater than zero.
-	MaxPeers int
-
-	// MaxPendingPeers is the maximum number of peers that can be pending in the
-	// handshake phase, counted separately for inbound and outbound connections.
-	// It must be greater than zero.
-	MaxPendingPeers int `toml:",omitempty"`
-
-	// DialRatio controls the ratio of inbound to dialed connections.
-	// Example: a DialRatio of 2 allows 1/2 of connections to be dialed.
-	// Setting DialRatio to zero defaults it to 3.
-	DialRatio int `toml:",omitempty"`
-
-	// NoDiscovery can be used to disable the peer discovery mechanism.
-	// Disabling is useful for protocol debugging (manual topology).
-	NoDiscovery bool
-
-	// DiscoveryV5 specifies whether the new topic-discovery based V5 discovery
-	// protocol should be started or not.
-	DiscoveryV5 bool `toml:",omitempty"`
-
-	// Name sets the node name of this server.
-	// Use common.MakeName to create a name that follows existing conventions.
-	Name string `toml:"-"`
-
-	// BootstrapNodes are used to establish connectivity
-	// with the rest of the network.
-	BootstrapNodes []*enode.Node
-
-	// BootstrapNodesV5 are used to establish connectivity
-	// with the rest of the network using the V5 discovery
-	// protocol.
-	BootstrapNodesV5 []*enode.Node `toml:",omitempty"`
-
-	// Static nodes are used as pre-configured connections which are always
-	// maintained and re-connected on disconnects.
-	StaticNodes []*enode.Node
-
-	// Trusted nodes are used as pre-configured connections which are always
-	// allowed to connect, even above the peer limit.
-	TrustedNodes []*enode.Node
-
-	// Connectivity can be restricted to certain IP networks.
-	// If this option is set to a non-nil value, only hosts which match one of the
-	// IP networks contained in the list are considered.
-	NetRestrict *netutil.Netlist `toml:",omitempty"`
-
-	// NodeDatabase is the path to the database containing the previously seen
-	// live nodes in the network.
-	NodeDatabase string `toml:",omitempty"`
-
-	// Protocols should contain the protocols supported
-	// by the server. Matching protocols are launched for
-	// each peer.
-	Protocols []Protocol `toml:"-"`
-
-	// If ListenAddr is set to a non-nil address, the server
-	// will listen for incoming connections.
-	//
-	// If the port is zero, the operating system will pick a port. The
-	// ListenAddr field will be updated with the actual address when
-	// the server is started.
-	ListenAddr string
-
-	// AllowedPorts is list of ports allowed to pick to create Listener on it (see ListenAddr)
-	// for different protocol versions
-	AllowedPorts []uint
-
-	// eth/66, eth/67, etc
-	ProtocolVersion []uint
-
-	SentryAddr []string
-
-	// If set to a non-nil value, the given NAT port mapper
-	// is used to make the listening port available to the
-	// Internet.
-	NAT nat.Interface `toml:",omitempty"`
-
-	// NAT interface description (see NAT.Parse()).
-	NATSpec string
-
-	// If Dialer is set to a non-nil value, the given Dialer
-	// is used to dial outbound peer connections.
-	Dialer NodeDialer `toml:"-"`
-
-	// If NoDial is true, the server will not dial any peers.
-	NoDial bool `toml:",omitempty"`
-
-	// If EnableMsgEvents is set then the server will emit PeerEvents
-	// whenever a message is sent to or received from a peer
-	EnableMsgEvents bool
-
-	// it is actually used but a linter got confused
-	clock mclock.Clock //nolint:structcheck
-
-	TmpDir string
-
-	MetricsEnabled bool
-
-	DiscoveryDNS []string
-
-	// Enable WIT protocol for stateless witness data exchange
-	EnableWitProtocol bool
-}
-
-func (config *Config) ListenPort() int {
-	_, portStr, err := net.SplitHostPort(config.ListenAddr)
-	if err != nil {
-		return 0
-	}
-	port, err := strconv.Atoi(portStr)
-	if err != nil {
-		return 0
-	}
-	return port
-}
-
 // Server manages all peer connections.
 type Server struct {
 	// Config fields may not be modified while the server is running.
@@ -221,8 +98,8 @@ type Server struct {
 	nodedb             *enode.DB
 	localnode          *enode.LocalNode
 	localnodeAddrCache atomic.Pointer[string]
-	ntab               *discover.UDPv4
-	DiscV5             *discover.UDPv5
+	discv4             *discover.UDPv4
+	discv5             *discover.UDPv5
 	discmix            *enode.FairMix
 	dialsched          *dialScheduler
 
@@ -289,32 +166,36 @@ type transport interface {
 }
 
 func (c *conn) String() string {
-	s := c.flags.String()
+	var s strings.Builder
+	s.WriteString(c.flags.String())
 	if (c.node.ID() != enode.ID{}) {
-		s += " " + c.node.ID().String()
+		s.WriteString(" ")
+		s.WriteString(c.node.ID().String())
 	}
-	s += " " + c.fd.RemoteAddr().String()
-	return s
+	s.WriteString(" ")
+	s.WriteString(c.fd.RemoteAddr().String())
+	return s.String()
 }
 
 func (f connFlag) String() string {
-	s := ""
+	var s strings.Builder
 	if f&trustedConn != 0 {
-		s += "-trusted"
+		s.WriteString("-trusted")
 	}
 	if f&dynDialedConn != 0 {
-		s += "-dyndial"
+		s.WriteString("-dyndial")
 	}
 	if f&staticDialedConn != 0 {
-		s += "-staticdial"
+		s.WriteString("-staticdial")
 	}
 	if f&inboundConn != 0 {
-		s += "-inbound"
+		s.WriteString("-inbound")
 	}
-	if s != "" {
-		s = s[1:]
+	str := s.String()
+	if str != "" {
+		return str[1:]
 	}
-	return s
+	return str
 }
 
 func (c *conn) is(f connFlag) bool {
@@ -464,16 +345,13 @@ type sharedUDPConn struct {
 	unhandled chan discover.ReadPacket
 }
 
-// ReadFromUDP implements discover.UDPConn
-func (s *sharedUDPConn) ReadFromUDP(b []byte) (n int, addr *net.UDPAddr, err error) {
+// ReadFromUDPAddrPort implements discover.UDPConn
+func (s *sharedUDPConn) ReadFromUDPAddrPort(b []byte) (n int, addr netip.AddrPort, err error) {
 	packet, ok := <-s.unhandled
 	if !ok {
-		return 0, nil, errors.New("connection was closed")
+		return 0, netip.AddrPort{}, errors.New("connection was closed")
 	}
-	l := len(packet.Data)
-	if l > len(b) {
-		l = len(b)
-	}
+	l := min(len(packet.Data), len(b))
 	copy(b[:l], packet.Data[:l])
 	return l, packet.Addr, nil
 }
@@ -534,6 +412,7 @@ func (srv *Server) Start(ctx context.Context, logger log.Logger) error {
 	if err := srv.setupDiscovery(srv.quitCtx); err != nil {
 		return err
 	}
+	srv.logger.Info("Setup P2P discovery", "v4", srv.discv4 != nil, "v5", srv.discv5 != nil)
 	srv.setupDialScheduler()
 
 	srv.running.Store(true)
@@ -556,13 +435,13 @@ func (srv *Server) setupLocalNode() error {
 	}
 	sort.Sort(capsByNameAndVersion(srv.ourHandshake.Caps))
 	// Create the local node
-	db, err := enode.OpenDB(srv.quitCtx, srv.Config.NodeDatabase, srv.Config.TmpDir, srv.logger)
+	db, err := enode.OpenDBEx(srv.quitCtx, srv.Config.NodeDatabase, srv.Config.TmpDir, srv.logger)
 	if err != nil {
 		return err
 	}
 	srv.nodedb = db
 
-	srv.localnode = enode.NewLocalNode(db, srv.PrivateKey, srv.logger)
+	srv.localnode = enode.NewLocalNode(db, srv.PrivateKey)
 	srv.localnode.SetFallbackIP(net.IP{127, 0, 0, 1})
 
 	// TODO: check conflicts
@@ -604,17 +483,8 @@ func (srv *Server) setupLocalNode() error {
 func (srv *Server) setupDiscovery(ctx context.Context) error {
 	srv.discmix = enode.NewFairMix(discmixTimeout)
 
-	// Add protocol-specific discovery sources.
-	added := make(map[string]bool)
-	for _, proto := range srv.Protocols {
-		if proto.DialCandidates != nil && !added[proto.Name] {
-			srv.discmix.AddSource(proto.DialCandidates)
-			added[proto.Name] = true
-		}
-	}
-
 	// Don't listen on UDP endpoint if DHT is disabled.
-	if srv.NoDiscovery && !srv.DiscoveryV5 {
+	if srv.NoDiscovery {
 		return nil
 	}
 
@@ -626,6 +496,18 @@ func (srv *Server) setupDiscovery(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	var (
+		sconn     discover.UDPConn = conn
+		unhandled chan discover.ReadPacket
+	)
+	// If both versions of discovery are running, set up a shared
+	// connection, so v5 can read unhandled messages from v4.
+	if srv.Config.DiscoveryV4 && srv.Config.DiscoveryV5 {
+		unhandled = make(chan discover.ReadPacket, 100)
+		sconn = &sharedUDPConn{conn, unhandled}
+	}
+
 	realaddr := conn.LocalAddr().(*net.UDPAddr)
 	srv.logger.Trace("UDP listener up", "addr", realaddr)
 	if srv.NAT != nil {
@@ -641,14 +523,8 @@ func (srv *Server) setupDiscovery(ctx context.Context) error {
 	srv.localnode.SetFallbackUDP(realaddr.Port)
 	srv.updateLocalNodeStaticAddrCache()
 
-	// Discovery V4
-	var unhandled chan discover.ReadPacket
-	var sconn *sharedUDPConn
-	if !srv.NoDiscovery {
-		if srv.DiscoveryV5 {
-			unhandled = make(chan discover.ReadPacket, 100)
-			sconn = &sharedUDPConn{conn, unhandled}
-		}
+	// Start discovery services.
+	if srv.Config.DiscoveryV4 {
 		cfg := discover.Config{
 			PrivateKey:  srv.PrivateKey,
 			NetRestrict: srv.NetRestrict,
@@ -656,31 +532,54 @@ func (srv *Server) setupDiscovery(ctx context.Context) error {
 			Unhandled:   unhandled,
 			Log:         srv.logger,
 		}
-		ntab, err := discover.ListenV4(ctx, strconv.FormatUint(uint64(srv.Config.Protocols[0].Version), 10), conn, srv.localnode, cfg)
+		ntab, err := discover.ListenV4(conn, srv.localnode, cfg)
 		if err != nil {
 			return err
 		}
-		srv.ntab = ntab
-		srv.discmix.AddSource(ntab.RandomNodes())
+		srv.discv4 = ntab
 	}
-
-	// Discovery V5
-	if srv.DiscoveryV5 {
+	if srv.Config.DiscoveryV5 {
 		cfg := discover.Config{
 			PrivateKey:  srv.PrivateKey,
 			NetRestrict: srv.NetRestrict,
 			Bootnodes:   srv.BootstrapNodesV5,
 			Log:         srv.logger,
 		}
-		version := uint64(srv.Config.Protocols[0].Version)
 		var err error
 		if sconn != nil {
-			srv.DiscV5, err = discover.ListenV5(ctx, strconv.FormatUint(version, 10), sconn, srv.localnode, cfg)
+			srv.discv5, err = discover.ListenV5(sconn, srv.localnode, cfg)
 		} else {
-			srv.DiscV5, err = discover.ListenV5(ctx, strconv.FormatUint(version, 10), conn, srv.localnode, cfg)
+			srv.discv5, err = discover.ListenV5(conn, srv.localnode, cfg)
 		}
 		if err != nil {
+			// Clean up v4 if v5 setup fails.
+			if srv.discv4 != nil {
+				srv.discv4.Close()
+				srv.discv4 = nil
+			}
 			return err
+		}
+	}
+
+	// Add protocol-specific discovery sources.
+	added := make(map[string]bool)
+	for _, proto := range srv.Protocols {
+		if proto.DialCandidates != nil && !added[proto.Name] {
+			srv.discmix.AddSource(proto.DialCandidates)
+			added[proto.Name] = true
+		}
+	}
+
+	// Set up default non-protocol-specific discovery feeds if no protocol
+	// has configured discovery.
+	if len(added) == 0 {
+		if srv.discv4 != nil {
+			it := srv.discv4.RandomNodes()
+			srv.discmix.AddSource(it)
+		}
+		if srv.discv5 != nil {
+			it := srv.discv5.RandomNodes()
+			srv.discmix.AddSource(it)
 		}
 	}
 	return nil
@@ -696,8 +595,12 @@ func (srv *Server) setupDialScheduler() {
 		dialer:         srv.Dialer,
 		clock:          srv.clock,
 	}
-	if srv.ntab != nil {
-		config.resolver = srv.ntab
+	// NOTE: cmp.Or cannot be used here because wrapping a nil concrete pointer
+	// in an interface produces a non-nil interface value (Go nil interface trap).
+	if srv.discv5 != nil {
+		config.resolver = srv.discv5
+	} else if srv.discv4 != nil {
+		config.resolver = srv.discv4
 	}
 	if config.dialer == nil {
 		config.dialer = tcpDialer{&net.Dialer{Timeout: defaultDialTimeout}}
@@ -862,7 +765,7 @@ running:
 				inboundCount--
 			}
 		case <-logTimer.C:
-			vals := []interface{}{"protocol", srv.Config.Protocols[0].Version, "peers", len(peers), "trusted", len(trusted), "inbound", inboundCount}
+			vals := []any{"protocol", srv.Config.Protocols[0].Version, "peers", len(peers), "trusted", len(trusted), "inbound", inboundCount}
 			vals = append(vals, srv.listErrors()...)
 
 			srv.logger.Debug("[p2p] Server", vals...)
@@ -872,11 +775,11 @@ running:
 	srv.logger.Trace("P2P networking is spinning down")
 
 	// Terminate discovery. If there is a running lookup it will terminate soon.
-	if srv.ntab != nil {
-		srv.ntab.Close()
+	if srv.discv4 != nil {
+		srv.discv4.Close()
 	}
-	if srv.DiscV5 != nil {
-		srv.DiscV5.Close()
+	if srv.discv5 != nil {
+		srv.discv5.Close()
 	}
 	// Disconnect all peers.
 	for _, p := range peers {
@@ -961,14 +864,14 @@ func (srv *Server) listenLoop(ctx context.Context) {
 			break
 		}
 
-		remoteIP := netutil.AddrIP(fd.RemoteAddr())
+		remoteIP := netutil.AddrAddr(fd.RemoteAddr())
 		if err := srv.checkInboundConn(fd, remoteIP); err != nil {
 			srv.logger.Trace("Rejected inbound connection", "addr", fd.RemoteAddr(), "err", err)
 			_ = fd.Close()
 			slots.Release(1)
 			continue
 		}
-		if remoteIP != nil {
+		if remoteIP.IsValid() {
 			var addr *net.TCPAddr
 			if tcp, ok := fd.RemoteAddr().(*net.TCPAddr); ok {
 				addr = tcp
@@ -985,18 +888,18 @@ func (srv *Server) listenLoop(ctx context.Context) {
 	}
 }
 
-func (srv *Server) checkInboundConn(fd net.Conn, remoteIP net.IP) error {
-	if remoteIP == nil {
+func (srv *Server) checkInboundConn(fd net.Conn, remoteIP netip.Addr) error {
+	if !remoteIP.IsValid() {
 		return nil
 	}
 	// Reject connections that do not match NetRestrict.
-	if srv.NetRestrict != nil && !srv.NetRestrict.Contains(remoteIP) {
+	if srv.NetRestrict != nil && !srv.NetRestrict.ContainsAddr(remoteIP) {
 		return errors.New("not whitelisted in NetRestrict")
 	}
 	// Reject Internet peers that try too often.
 	now := srv.clock.Now()
 	srv.inboundHistory.expire(now, nil)
-	if !netutil.IsLAN(remoteIP) && srv.inboundHistory.contains(remoteIP.String()) {
+	if !netutil.AddrIsLAN(remoteIP) && srv.inboundHistory.contains(remoteIP.String()) {
 		return errors.New("too many attempts")
 	}
 	srv.inboundHistory.add(remoteIP.String(), now.Add(inboundThrottleTime))
@@ -1156,8 +1059,8 @@ type NodeInfo struct {
 		Discovery int `json:"discovery"` // UDP listening port for discovery protocol
 		Listener  int `json:"listener"`  // TCP listening port for RLPx
 	} `json:"ports"`
-	ListenAddr string                 `json:"listenAddr"`
-	Protocols  map[string]interface{} `json:"protocols"`
+	ListenAddr string         `json:"listenAddr"`
+	Protocols  map[string]any `json:"protocols"`
 }
 
 // NodeInfo gathers and returns a collection of metadata known about the host.
@@ -1170,7 +1073,7 @@ func (srv *Server) NodeInfo() *NodeInfo {
 		ID:         node.ID().String(),
 		IP:         node.IP().String(),
 		ListenAddr: srv.ListenAddr,
-		Protocols:  make(map[string]interface{}),
+		Protocols:  make(map[string]any),
 	}
 	info.Ports.Discovery = node.UDP()
 	info.Ports.Listener = node.TCP()
@@ -1179,7 +1082,7 @@ func (srv *Server) NodeInfo() *NodeInfo {
 	// Gather all the running protocol infos (only once per protocol type)
 	for _, proto := range srv.Protocols {
 		if _, ok := info.Protocols[proto.Name]; !ok {
-			nodeInfo := interface{}("unknown")
+			nodeInfo := any("unknown")
 			if query := proto.NodeInfo; query != nil {
 				nodeInfo = proto.NodeInfo()
 			}
@@ -1227,11 +1130,11 @@ func (srv *Server) resetErrors() {
 	srv.errorsMu.Unlock()
 }
 
-func (srv *Server) listErrors() []interface{} {
+func (srv *Server) listErrors() []any {
 	srv.errorsMu.Lock()
 	defer srv.errorsMu.Unlock()
 
-	list := make([]interface{}, 0, len(srv.errors)*2)
+	list := make([]any, 0, len(srv.errors)*2)
 	for err, count := range srv.errors {
 		list = append(list, err, count)
 	}

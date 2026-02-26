@@ -19,19 +19,19 @@ package p2p
 import (
 	"context"
 	"encoding/binary"
-	"math/big"
 	"sort"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/event"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/testlog"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/event"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
@@ -224,7 +224,7 @@ func TestPeerTrackerNewBlocksObserver(t *testing.T) {
 			EventId: sentryproto.PeerEvent_Connect,
 		})
 
-		header := &types.Header{Number: big.NewInt(123)}
+		header := &types.Header{Number: *uint256.NewInt(123)}
 		var peerIds []*PeerId
 		waitCond := func(wantPeerIdsLen int) func() bool {
 			return func() bool {

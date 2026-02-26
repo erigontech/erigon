@@ -24,8 +24,8 @@ import (
 	"math/big"
 
 	ethereum "github.com/erigontech/erigon"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -159,6 +159,21 @@ func (reqGen *requestGenerator) SendTransaction(signedTx types.Transaction) (com
 	return result, nil
 }
 
+func (reqGen *requestGenerator) SendRawTransactionSync(signedTx types.Transaction, timeoutMs *uint64) (*types.Receipt, error) {
+	var result *types.Receipt
+
+	var buf bytes.Buffer
+	if err := signedTx.MarshalBinary(&buf); err != nil {
+		return nil, fmt.Errorf("failed to marshal binary: %v", err)
+	}
+
+	if err := reqGen.rpcCallOnce(context.Background(), &result, Methods.ETHSendRawTransactionSync, hexutil.Bytes(buf.Bytes()), timeoutMs); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
 func (req *requestGenerator) GetTransactionByHash(hash common.Hash) (*ethapi.RPCTransaction, error) {
 	var result ethapi.RPCTransaction
 
@@ -177,4 +192,14 @@ func (req *requestGenerator) GetTransactionReceipt(ctx context.Context, hash com
 	}
 
 	return &result, nil
+}
+
+func (req *requestGenerator) GetBlockReceipts(ctx context.Context, blockRef rpc.BlockNumberOrHash) (types.Receipts, error) {
+	var result types.Receipts
+
+	if err := req.rpcCall(ctx, &result, Methods.ETHGetBlockReceipts, blockRef); err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }

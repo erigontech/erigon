@@ -26,16 +26,12 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/seg"
 )
 
 func TestArchiveWriter(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	tmp := t.TempDir()
 	logger := log.New()
 
@@ -48,7 +44,9 @@ func TestArchiveWriter(t *testing.T) {
 		compressCfg.MinPatternScore = 8
 		comp, err := seg.NewCompressor(context.Background(), "", file, tmp, compressCfg, log.LvlDebug, logger)
 		require.NoError(tb, err)
-		return seg.NewWriter(comp, compFlags)
+		w := seg.NewWriter(comp, compFlags)
+		tb.Cleanup(w.Close)
+		return w
 	}
 	keys := make([][]byte, 0, len(td))
 	for k := range td {

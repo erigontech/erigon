@@ -22,12 +22,12 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-
-	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/eth/tracers"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/tracing/tracers"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 )
 
 func (api *OtterscanAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash) ([]*TraceEntry, error) {
@@ -83,42 +83,34 @@ func (t *TransactionTracer) TracingHooks() *tracing.Hooks {
 	return t.hooks
 }
 
-func (t *TransactionTracer) captureStartOrEnter(typ vm.OpCode, from, to common.Address, precompile bool, input []byte, value *uint256.Int) {
-
-}
-
-func (t *TransactionTracer) OnEnter(depth int, typRaw byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *TransactionTracer) OnEnter(depth int, typRaw byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
 	t.depth = depth
 	typ := vm.OpCode(typRaw)
-	// t.captureStartOrEnter(vm.OpCode(typ), from, to, precompile, input, value)
 
-	inputCopy := make([]byte, len(input))
-	copy(inputCopy, input)
+	inputCopy := common.Copy(input)
 	_value := new(big.Int)
-	if value != nil {
-		_value.Set(value.ToBig())
-	}
+	_value.Set(value.ToBig())
 
 	var entry *TraceEntry
 	if typ == vm.CALL {
-		entry = &TraceEntry{"CALL", t.depth, from, to, (*hexutil.Big)(_value), inputCopy, nil}
+		entry = &TraceEntry{"CALL", t.depth, from.Value(), to.Value(), (*hexutil.Big)(_value), inputCopy, nil}
 	} else if typ == vm.STATICCALL {
-		entry = &TraceEntry{"STATICCALL", t.depth, from, to, nil, inputCopy, nil}
+		entry = &TraceEntry{"STATICCALL", t.depth, from.Value(), to.Value(), nil, inputCopy, nil}
 	} else if typ == vm.DELEGATECALL {
-		entry = &TraceEntry{"DELEGATECALL", t.depth, from, to, nil, inputCopy, nil}
+		entry = &TraceEntry{"DELEGATECALL", t.depth, from.Value(), to.Value(), nil, inputCopy, nil}
 	} else if typ == vm.CALLCODE {
-		entry = &TraceEntry{"CALLCODE", t.depth, from, to, (*hexutil.Big)(_value), inputCopy, nil}
+		entry = &TraceEntry{"CALLCODE", t.depth, from.Value(), to.Value(), (*hexutil.Big)(_value), inputCopy, nil}
 	} else if typ == vm.CREATE {
-		entry = &TraceEntry{"CREATE", t.depth, from, to, (*hexutil.Big)(value.ToBig()), inputCopy, nil}
+		entry = &TraceEntry{"CREATE", t.depth, from.Value(), to.Value(), (*hexutil.Big)(value.ToBig()), inputCopy, nil}
 	} else if typ == vm.CREATE2 {
-		entry = &TraceEntry{"CREATE2", t.depth, from, to, (*hexutil.Big)(value.ToBig()), inputCopy, nil}
+		entry = &TraceEntry{"CREATE2", t.depth, from.Value(), to.Value(), (*hexutil.Big)(value.ToBig()), inputCopy, nil}
 	} else if typ == vm.SELFDESTRUCT {
 		last := t.Results[len(t.Results)-1]
-		entry = &TraceEntry{"SELFDESTRUCT", last.Depth + 1, from, to, (*hexutil.Big)(value.ToBig()), nil, nil}
+		entry = &TraceEntry{"SELFDESTRUCT", last.Depth + 1, from.Value(), to.Value(), (*hexutil.Big)(value.ToBig()), nil, nil}
 	} else {
 		// safeguard in case new CALL-like opcodes are introduced but not handled,
 		// otherwise CaptureExit/stack will get out of sync
-		entry = &TraceEntry{"UNKNOWN", t.depth, from, to, (*hexutil.Big)(value.ToBig()), inputCopy, nil}
+		entry = &TraceEntry{"UNKNOWN", t.depth, from.Value(), to.Value(), (*hexutil.Big)(value.ToBig()), inputCopy, nil}
 	}
 
 	// Ignore precompiles in the returned trace (maybe we shouldn't?)
@@ -137,7 +129,5 @@ func (t *TransactionTracer) OnExit(depth int, output []byte, gasUsed uint64, err
 	pop := t.stack[lastIdx]
 	t.stack = t.stack[:lastIdx]
 
-	outputCopy := make([]byte, len(output))
-	copy(outputCopy, output)
-	pop.Output = outputCopy
+	pop.Output = common.Copy(output)
 }

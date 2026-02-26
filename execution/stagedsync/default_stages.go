@@ -18,15 +18,17 @@ package stagedsync
 
 import (
 	"context"
+	"time"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/wrap"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
 
-func DefaultStages(ctx context.Context,
+func DefaultStages(
+	ctx context.Context,
 	snapshots SnapshotsCfg,
 	headers HeadersCfg,
 	blockHashCfg BlockHashesCfg,
@@ -35,76 +37,76 @@ func DefaultStages(ctx context.Context,
 	exec ExecuteBlockCfg,
 	txLookup TxLookupCfg,
 	finish FinishCfg,
-	test bool) []*Stage {
+) []*Stage {
 	return []*Stage{
 		{
 			ID:          stages.Snapshots,
 			Description: "Download snapshots",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
 				if badBlockUnwind {
 					return nil
 				}
-				return SpawnStageSnapshots(s, ctx, txc.Tx, snapshots, logger)
+				return SpawnStageSnapshots(s, ctx, tx, snapshots, logger)
 			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
+			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
 				return nil
 			},
-			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
+			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
 				return SnapshotsPrune(p, snapshots, ctx, tx, logger)
 			},
 		},
 		{
 			ID:          stages.Headers,
 			Description: "Download headers",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
 				if badBlockUnwind {
 					return nil
 				}
-				return SpawnStageHeaders(s, u, ctx, txc.Tx, headers, test, logger)
+				return SpawnStageHeaders(s, u, ctx, tx, headers, logger)
 			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return HeadersUnwind(ctx, u, s, txc.Tx, headers, test)
+			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return HeadersUnwind(ctx, u, s, tx, headers)
 			},
-			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
+			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
 				return nil
 			},
 		},
 		{
 			ID:          stages.BlockHashes,
 			Description: "Write block hashes",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return SpawnBlockHashStage(s, txc.Tx, blockHashCfg, ctx, logger)
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return SpawnBlockHashStage(s, tx, blockHashCfg, ctx, logger)
 			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindBlockHashStage(u, txc.Tx, blockHashCfg, ctx)
+			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return UnwindBlockHashStage(u, tx)
 			},
-			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
+			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
 				return nil
 			},
 		},
 		{
 			ID:          stages.Bodies,
 			Description: "Download block bodies",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return BodiesForward(s, u, ctx, txc.Tx, bodies, test, logger)
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return BodiesForward(s, u, ctx, tx, bodies, logger)
 			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindBodiesStage(u, txc.Tx, bodies, ctx)
+			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return UnwindBodiesStage(u, tx, bodies)
 			},
-			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
+			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
 				return nil
 			},
 		},
 		{
 			ID:          stages.Senders,
 			Description: "Recover senders from txn signatures",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return SpawnRecoverSendersStage(senders, s, u, txc.Tx, 0, ctx, logger)
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return SpawnRecoverSendersStage(senders, s, u, tx, 0, ctx, logger)
 			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindSendersStage(u, txc.Tx, senders, ctx)
+			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return UnwindSendersStage(u, tx, senders, ctx)
 			},
-			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
+			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
 				return nil
 			},
 		},
@@ -112,25 +114,25 @@ func DefaultStages(ctx context.Context,
 			ID:          stages.Execution,
 			Description: "Execute blocks w/o hash checks",
 			Disabled:    dbg.StagesOnlyBlocks,
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return SpawnExecuteBlocksStage(s, u, txc, 0, ctx, exec, logger)
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return SpawnExecuteBlocksStage(s, u, sd, tx, 0, ctx, exec, logger)
 			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindExecutionStage(u, s, txc, ctx, exec, logger)
+			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return UnwindExecutionStage(u, s, sd, tx, ctx, exec, logger)
 			},
-			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneExecutionStage(p, tx, exec, ctx, logger)
+			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
+				return PruneExecutionStage(ctx, p, tx, exec, timeout, logger)
 			},
 		},
 		//{
 		//	ID:          stages.CustomTrace,
 		//	Description: "Re-Execute blocks on history state - with custom tracer",
 		//	Disabled:    dbg.StagesOnlyBlocks,
-		//	Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+		//	Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, execctx *state.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
 		//		cfg := StageCustomTraceCfg(exec.db, exec.prune, exec.dirs, exec.blockReader, exec.chainConfig, exec.engine, exec.genesis, &exec.syncCfg)
 		//		return SpawnCustomTrace(s, txc, cfg, ctx, 0, logger)
 		//	},
-		//	Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
+		//	Unwind: func(u *UnwindState, s *StageState, execctx *state.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
 		//		cfg := StageCustomTraceCfg(exec.db, exec.prune, exec.dirs, exec.blockReader, exec.chainConfig, exec.engine, exec.genesis, &exec.syncCfg)
 		//		return UnwindCustomTrace(u, s, txc, cfg, ctx, logger)
 		//	},
@@ -143,27 +145,27 @@ func DefaultStages(ctx context.Context,
 			ID:          stages.TxLookup,
 			Description: "Generate txn lookup index",
 			Disabled:    dbg.StagesOnlyBlocks,
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return SpawnTxLookup(s, txc.Tx, 0 /* toBlock */, txLookup, ctx, logger)
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return SpawnTxLookup(s, tx, 0 /* toBlock */, txLookup, ctx, logger)
 			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindTxLookup(u, s, txc.Tx, txLookup, ctx, logger)
+			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return UnwindTxLookup(u, s, tx, txLookup, ctx, logger)
 			},
-			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
+			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
 				return PruneTxLookup(p, tx, txLookup, ctx, logger)
 			},
 		},
 		{
 			ID:          stages.Finish,
 			Description: "Final: update current block for the RPC API",
-			Forward: func(badBlockUnwind bool, s *StageState, _ Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return FinishForward(s, txc.Tx, finish)
+			Forward: func(badBlockUnwind bool, s *StageState, _ Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return FinishForward(s, tx, finish)
 			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindFinish(u, txc.Tx, finish, ctx)
+			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return UnwindFinish(u, tx)
 			},
-			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneFinish(p, tx, finish, ctx)
+			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
+				return nil
 			},
 		},
 	}
@@ -174,56 +176,56 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 		{
 			ID:          stages.Snapshots,
 			Description: "Download snapshots",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
 				if badBlockUnwind {
 					return nil
 				}
-				return SpawnStageSnapshots(s, ctx, txc.Tx, snapshots, logger)
+				return SpawnStageSnapshots(s, ctx, tx, snapshots, logger)
 			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
+			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
 				return nil
 			},
-			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
+			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
 				return SnapshotsPrune(p, snapshots, ctx, tx, logger)
 			},
 		},
 		{
 			ID:          stages.BlockHashes,
 			Description: "Write block hashes",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return SpawnBlockHashStage(s, txc.Tx, blockHashCfg, ctx, logger)
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return SpawnBlockHashStage(s, tx, blockHashCfg, ctx, logger)
 			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindBlockHashStage(u, txc.Tx, blockHashCfg, ctx)
+			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return UnwindBlockHashStage(u, tx)
 			},
-			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
+			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
 				return nil
 			},
 		},
 		{
 			ID:          stages.Senders,
 			Description: "Recover senders from txn signatures",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return SpawnRecoverSendersStage(senders, s, u, txc.Tx, 0, ctx, logger)
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return SpawnRecoverSendersStage(senders, s, u, tx, 0, ctx, logger)
 			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindSendersStage(u, txc.Tx, senders, ctx)
+			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return UnwindSendersStage(u, tx, senders, ctx)
 			},
-			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
+			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
 				return nil
 			},
 		},
 		{
 			ID:          stages.Execution,
 			Description: "Execute blocks w/o hash checks",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return SpawnExecuteBlocksStage(s, u, txc, 0, ctx, exec, logger)
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return SpawnExecuteBlocksStage(s, u, sd, tx, 0, ctx, exec, logger)
 			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindExecutionStage(u, s, txc, ctx, exec, logger)
+			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return UnwindExecutionStage(u, s, sd, tx, ctx, exec, logger)
 			},
-			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneExecutionStage(p, tx, exec, ctx, logger)
+			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
+				return PruneExecutionStage(ctx, p, tx, exec, timeout, logger)
 			},
 		},
 	}
@@ -232,13 +234,13 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 		stageList = append(stageList, &Stage{
 			ID:          stages.WitnessProcessing,
 			Description: "Process buffered witness data",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return SpawnStageWitnessProcessing(s, txc.Tx, *witnessProcessing, ctx, logger)
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return SpawnStageWitnessProcessing(tx, *witnessProcessing, logger)
 			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindWitnessProcessingStage(u, s, txc, ctx, *witnessProcessing, logger)
+			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return UnwindWitnessProcessingStage(u, s, tx, ctx, *witnessProcessing, logger)
 			},
-			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
+			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
 				return PruneWitnessProcessingStage(p, tx, *witnessProcessing, ctx, logger)
 			},
 		})
@@ -248,27 +250,27 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 		&Stage{
 			ID:          stages.TxLookup,
 			Description: "Generate txn lookup index",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return SpawnTxLookup(s, txc.Tx, 0 /* toBlock */, txLookup, ctx, logger)
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return SpawnTxLookup(s, tx, 0 /* toBlock */, txLookup, ctx, logger)
 			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindTxLookup(u, s, txc.Tx, txLookup, ctx, logger)
+			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return UnwindTxLookup(u, s, tx, txLookup, ctx, logger)
 			},
-			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
+			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
 				return PruneTxLookup(p, tx, txLookup, ctx, logger)
 			},
 		},
 		&Stage{
 			ID:          stages.Finish,
 			Description: "Final: update current block for the RPC API",
-			Forward: func(badBlockUnwind bool, s *StageState, _ Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return FinishForward(s, txc.Tx, finish)
+			Forward: func(badBlockUnwind bool, s *StageState, _ Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return FinishForward(s, tx, finish)
 			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindFinish(u, txc.Tx, finish, ctx)
+			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return UnwindFinish(u, tx)
 			},
-			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
-				return PruneFinish(p, tx, finish, ctx)
+			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
+				return nil
 			},
 		},
 	)
@@ -282,51 +284,51 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 		{
 			ID:          stages.Headers,
 			Description: "Download headers",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
 				return nil
 			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return HeadersUnwind(ctx, u, s, txc.Tx, headers, false)
+			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return HeadersUnwind(ctx, u, s, tx, headers)
 			},
 		},
 		{
 			ID:          stages.Bodies,
 			Description: "Download block bodies",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
 				return nil
 			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindBodiesStage(u, txc.Tx, bodies, ctx)
+			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return UnwindBodiesStage(u, tx, bodies)
 			},
 		},
 		{
 			ID:          stages.BlockHashes,
 			Description: "Write block hashes",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return SpawnBlockHashStage(s, txc.Tx, blockHashCfg, ctx, logger)
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return SpawnBlockHashStage(s, tx, blockHashCfg, ctx, logger)
 			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindBlockHashStage(u, txc.Tx, blockHashCfg, ctx)
+			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return UnwindBlockHashStage(u, tx)
 			},
 		},
 		{
 			ID:          stages.Senders,
 			Description: "Recover senders from txn signatures",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return SpawnRecoverSendersStage(senders, s, u, txc.Tx, 0, ctx, logger)
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return SpawnRecoverSendersStage(senders, s, u, tx, 0, ctx, logger)
 			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindSendersStage(u, txc.Tx, senders, ctx)
+			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return UnwindSendersStage(u, tx, senders, ctx)
 			},
 		},
 		{
 			ID:          stages.Execution,
 			Description: "Execute blocks w/o hash checks",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				return SpawnExecuteBlocksStage(s, u, txc, 0, ctx, exec, logger)
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return SpawnExecuteBlocksStage(s, u, sd, tx, 0, ctx, exec, logger)
 			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				return UnwindExecutionStage(u, s, txc, ctx, exec, logger)
+			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return UnwindExecutionStage(u, s, sd, tx, ctx, exec, logger)
 			},
 		},
 	}
@@ -340,16 +342,16 @@ func DownloadSyncStages(
 		{
 			ID:          stages.Snapshots,
 			Description: "Download snapshots",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
 				if badBlockUnwind {
 					return nil
 				}
-				return SpawnStageSnapshots(s, ctx, txc.Tx, snapshots, logger)
+				return SpawnStageSnapshots(s, ctx, tx, snapshots, logger)
 			},
-			Unwind: func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
+			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
 				return nil
 			},
-			Prune: func(p *PruneState, tx kv.RwTx, logger log.Logger) error {
+			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
 				return nil
 			},
 		},
@@ -433,6 +435,3 @@ var PipelinePruneOrder = PruneOrder{
 	stages.BlockHashes,
 	stages.Snapshots,
 }
-
-var MiningUnwindOrder = UnwindOrder{} // nothing to unwind in mining - because mining does not commit db changes
-var MiningPruneOrder = PruneOrder{}   // nothing to unwind in mining - because mining does not commit db changes

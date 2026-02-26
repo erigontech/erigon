@@ -23,8 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -37,15 +35,16 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
-	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
 
 // pool for buffers
 var bufferPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &bytes.Buffer{}
 	},
 }
@@ -370,7 +369,6 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 					return err
 				}
 				if s.currentState.Version() >= clparams.ElectraVersion {
-					fmt.Println("not-found dumping electra queues", "slot", slot, "pendingDeposits", s.currentState.PendingDeposits().Len(), "pendingConsolidations", s.currentState.PendingConsolidations().Len(), "pendingWithdrawals", s.currentState.PendingPartialWithdrawals().Len())
 					if err := stateAntiquaryCollector.collectPendingDepositsDump(slot, s.currentState.PendingDeposits()); err != nil {
 						return err
 					}
@@ -435,7 +433,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 				return err
 			}
 			if s.currentState.Version() >= clparams.ElectraVersion {
-				fmt.Println("not-found dumping electra queues", "slot", slot, "pendingDeposits", s.currentState.PendingDeposits().Len(), "pendingConsolidations", s.currentState.PendingConsolidations().Len(), "pendingWithdrawals", s.currentState.PendingPartialWithdrawals().Len())
+				log.Debug("not-found dumping electra queues", "slot", slot, "pendingDeposits", s.currentState.PendingDeposits().Len(), "pendingConsolidations", s.currentState.PendingConsolidations().Len(), "pendingWithdrawals", s.currentState.PendingPartialWithdrawals().Len())
 				if err := stateAntiquaryCollector.collectPendingDepositsDump(slot, s.currentState.PendingDeposits()); err != nil {
 					return err
 				}
@@ -568,15 +566,9 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			return err
 		}
 		paths := s.stateSn.SegFileNames(from, to)
-		downloadItems := make([]*downloaderproto.AddItem, len(paths))
-		for i, path := range paths {
-			downloadItems[i] = &downloaderproto.AddItem{
-				Path: path,
-			}
-		}
 		if s.downloader != nil {
 			// Notify bittorent to seed the new snapshots
-			if _, err := s.downloader.Add(s.ctx, &downloaderproto.AddRequest{Items: downloadItems}); err != nil {
+			if err := s.downloader.Seed(s.ctx, paths); err != nil {
 				s.logger.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
 			}
 		}

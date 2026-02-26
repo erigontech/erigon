@@ -24,7 +24,7 @@ import (
 	"math/big"
 	"strconv"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 )
 
 type CheckpointId uint64
@@ -257,7 +257,6 @@ func (v *CheckpointListResponseV2) ToList() ([]*Checkpoint, error) {
 		}
 
 		r.Id = CheckpointId(id)
-		r.Fields.RootHash = common.BytesToHash(decoded)
 		r.Fields.RootHash = common.BytesToHash(decoded)
 		r.Fields.StartBlock = big.NewInt(int64(startBlock))
 		r.Fields.EndBlock = big.NewInt(int64(endBlock))

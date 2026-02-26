@@ -34,9 +34,9 @@ import (
 	"github.com/gofrs/flock"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -45,8 +45,8 @@ import (
 	"github.com/erigontech/erigon/db/migrations"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/nodecfg"
-	"github.com/erigontech/erigon/turbo/debug"
 )
 
 // Node is a container on which services can be registered.
@@ -367,11 +367,17 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 	}
 
 	if label == dbcfg.ChainDB {
+		migrationsDB, err := migrations.OpenMigrationsDB(config.Dirs.Migrations, logger)
+		if err != nil {
+			return nil, fmt.Errorf("open migrations db: %w", err)
+		}
+		defer migrationsDB.Close()
+
 		migrator := migrations.NewMigrator(label)
 		if err := migrator.VerifyVersion(db, dbPath); err != nil {
 			return nil, err
 		}
-		has, err := migrator.HasPendingMigrations(db)
+		has, err := migrator.HasPendingMigrations(migrationsDB)
 		if err != nil {
 			return nil, err
 		}
@@ -382,7 +388,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 			if err != nil {
 				return nil, err
 			}
-			if err = migrator.Apply(db, config.Dirs.DataDir, dbPath, logger); err != nil {
+			if err = migrator.Apply(db, migrationsDB, config.Dirs.DataDir, dbPath, logger); err != nil {
 				return nil, err
 			}
 			db.Close()
@@ -411,5 +417,5 @@ func StartNode(stack *Node) {
 		utils.Fatalf("Error starting protocol stack: %v", err)
 	}
 
-	go debug.ListenSignals(stack, stack.logger)
+	go debug.ListenSignals(func() { stack.Close() }, stack.logger)
 }

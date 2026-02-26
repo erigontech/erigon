@@ -19,7 +19,6 @@ package jsonrpc
 import (
 	"context"
 	"encoding/json"
-	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,26 +27,27 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/eth/tracers/config"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/tests/testutil"
+	"github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
 )
 
 func TestEmptyQuery(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 	// Call GetTransactionReceipt for transaction which is not in the database
 	var latest = rpc.LatestBlockNumber
@@ -63,7 +63,7 @@ func TestEmptyQuery(t *testing.T) {
 	}
 }
 func TestCoinbaseBalance(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 	// Call GetTransactionReceipt for transaction which is not in the database
 	var latest = rpc.LatestBlockNumber
@@ -83,13 +83,17 @@ func TestCoinbaseBalance(t *testing.T) {
 		t.Errorf("expected array with 2 elements, got %d elements", len(results))
 	}
 	// Expect balance increase of the coinbase (zero address)
-	if _, ok := results[1].StateDiff[common.Address{}]; !ok {
+	if _, ok := results[1].StateDiff[accounts.ZeroAddress]; !ok {
 		t.Errorf("expected balance increase for coinbase (zero address)")
 	}
 }
 
+func internedAddress(addr string) accounts.Address {
+	return accounts.InternAddress(common.HexToAddress(addr))
+}
+
 func TestSwapBalance(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 	// Call GetTransactionReceipt for transaction which is not in the database
 	var latest = rpc.LatestBlockNumber
@@ -120,7 +124,7 @@ func TestSwapBalance(t *testing.T) {
 	}
 
 	// Checking state diff
-	if res, ok := results[0].StateDiff[common.HexToAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
+	if res, ok := results[0].StateDiff[internedAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
 		t.Errorf("don't found B in first tx")
 	} else {
 		b, okConv := res.Balance.(map[string]*hexutil.Big)
@@ -132,7 +136,7 @@ func TestSwapBalance(t *testing.T) {
 		}
 	}
 
-	if res, ok := results[0].StateDiff[common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")]; !ok {
+	if res, ok := results[0].StateDiff[internedAddress("0x71562b71999873db5b286df957af199ec94617f7")]; !ok {
 		t.Errorf("don't found A in first tx")
 	} else {
 		b, okConv := res.Balance.(map[string]*StateDiffBalance)
@@ -144,7 +148,7 @@ func TestSwapBalance(t *testing.T) {
 		}
 	}
 
-	if res, ok := results[1].StateDiff[common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")]; !ok {
+	if res, ok := results[1].StateDiff[internedAddress("0x71562b71999873db5b286df957af199ec94617f7")]; !ok {
 		t.Errorf("don't found A in second tx")
 	} else {
 		b, okConv := res.Balance.(map[string]*StateDiffBalance)
@@ -156,7 +160,7 @@ func TestSwapBalance(t *testing.T) {
 		}
 	}
 
-	if res, ok := results[1].StateDiff[common.HexToAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
+	if res, ok := results[1].StateDiff[internedAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
 		t.Errorf("don't found B in second tx")
 	} else {
 		b, okConv := res.Balance.(map[string]*hexutil.Big)
@@ -174,7 +178,7 @@ func TestSwapBalance(t *testing.T) {
 }
 
 func TestCorrectStateDiff(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 	// Call GetTransactionReceipt for transaction which is not in the database
 	var latest = rpc.LatestBlockNumber
@@ -203,14 +207,14 @@ func TestCorrectStateDiff(t *testing.T) {
 	}
 
 	// Checking state diff
-	if _, ok := results[0].StateDiff[common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")]; ok {
+	if _, ok := results[0].StateDiff[internedAddress("0x71562b71999873db5b286df957af199ec94617f7")]; ok {
 		t.Errorf("A shouldn't be in first sd")
 	}
-	if _, ok := results[0].StateDiff[common.HexToAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; ok {
+	if _, ok := results[0].StateDiff[internedAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; ok {
 		t.Errorf("B shouldn't be in first sd")
 	}
 
-	if res, ok := results[0].StateDiff[common.HexToAddress("0x703c4b2bD70c169f5717101CaeE543299Fc946C7")]; !ok {
+	if res, ok := results[0].StateDiff[internedAddress("0x703c4b2bD70c169f5717101CaeE543299Fc946C7")]; !ok {
 		t.Errorf("don't found C in first tx")
 	} else {
 		b, okConv := res.Balance.(map[string]*hexutil.Big)
@@ -226,7 +230,7 @@ func TestCorrectStateDiff(t *testing.T) {
 		}
 	}
 
-	if res, ok := results[0].StateDiff[common.HexToAddress("0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e")]; !ok {
+	if res, ok := results[0].StateDiff[internedAddress("0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e")]; !ok {
 		t.Errorf("don't found C in first tx")
 	} else {
 		b, okConv := res.Balance.(map[string]*StateDiffBalance)
@@ -238,14 +242,14 @@ func TestCorrectStateDiff(t *testing.T) {
 		}
 	}
 
-	if _, ok := results[1].StateDiff[common.HexToAddress("0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e")]; ok {
+	if _, ok := results[1].StateDiff[internedAddress("0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e")]; ok {
 		t.Errorf("C shouldn't be in second sd")
 	}
-	if _, ok := results[1].StateDiff[common.HexToAddress("0x703c4b2bD70c169f5717101CaeE543299Fc946C7")]; ok {
+	if _, ok := results[1].StateDiff[internedAddress("0x703c4b2bD70c169f5717101CaeE543299Fc946C7")]; ok {
 		t.Errorf("D shouldn't be in second sd")
 	}
 
-	if res, ok := results[1].StateDiff[common.HexToAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
+	if res, ok := results[1].StateDiff[internedAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
 		t.Errorf("don't found B in first tx")
 	} else {
 		b, okConv := res.Balance.(map[string]*hexutil.Big)
@@ -257,7 +261,7 @@ func TestCorrectStateDiff(t *testing.T) {
 		}
 	}
 
-	if res, ok := results[1].StateDiff[common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")]; !ok {
+	if res, ok := results[1].StateDiff[internedAddress("0x71562b71999873db5b286df957af199ec94617f7")]; !ok {
 		t.Errorf("don't found A in first tx")
 	} else {
 		b, okConv := res.Balance.(map[string]*StateDiffBalance)
@@ -269,14 +273,14 @@ func TestCorrectStateDiff(t *testing.T) {
 		}
 	}
 
-	if _, ok := results[2].StateDiff[common.HexToAddress("0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e")]; ok {
+	if _, ok := results[2].StateDiff[internedAddress("0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e")]; ok {
 		t.Errorf("C shouldn't be in third sd")
 	}
-	if _, ok := results[2].StateDiff[common.HexToAddress("0x703c4b2bD70c169f5717101CaeE543299Fc946C7")]; ok {
+	if _, ok := results[2].StateDiff[internedAddress("0x703c4b2bD70c169f5717101CaeE543299Fc946C7")]; ok {
 		t.Errorf("D shouldn't be in third sd")
 	}
 
-	if res, ok := results[2].StateDiff[common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")]; !ok {
+	if res, ok := results[2].StateDiff[internedAddress("0x71562b71999873db5b286df957af199ec94617f7")]; !ok {
 		t.Errorf("don't found A in second tx")
 	} else {
 		b, okConv := res.Balance.(map[string]*StateDiffBalance)
@@ -288,7 +292,7 @@ func TestCorrectStateDiff(t *testing.T) {
 		}
 	}
 
-	if res, ok := results[2].StateDiff[common.HexToAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
+	if res, ok := results[2].StateDiff[internedAddress("0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b")]; !ok {
 		t.Errorf("don't found B in second tx")
 	} else {
 		b, okConv := res.Balance.(map[string]*hexutil.Big)
@@ -306,7 +310,7 @@ func TestCorrectStateDiff(t *testing.T) {
 }
 
 func TestReplayTransaction(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 	var txnHash common.Hash
 	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
@@ -327,13 +331,13 @@ func TestReplayTransaction(t *testing.T) {
 	}
 	require.NotNil(t, results)
 	require.NotNil(t, results.StateDiff)
-	addrDiff := results.StateDiff[common.HexToAddress("0x0000000000000006000000000000000000000000")]
+	addrDiff := results.StateDiff[internedAddress("0x0000000000000006000000000000000000000000")]
 	v := addrDiff.Balance.(map[string]*hexutil.Big)["+"].ToInt().Uint64()
 	require.Equal(t, uint64(1_000_000_000_000_000), v)
 }
 
 func TestReplayBlockTransactions(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 
 	// Call GetTransactionReceipt for transaction which is not in the database
@@ -344,22 +348,22 @@ func TestReplayBlockTransactions(t *testing.T) {
 	}
 	require.NotNil(t, results)
 	require.NotNil(t, results[0].StateDiff)
-	addrDiff := results[0].StateDiff[common.HexToAddress("0x0000000000000001000000000000000000000000")]
+	addrDiff := results[0].StateDiff[internedAddress("0x0000000000000001000000000000000000000000")]
 	v := addrDiff.Balance.(map[string]*hexutil.Big)["+"].ToInt().Uint64()
 	require.Equal(t, uint64(1_000_000_000_000_000), v)
 }
 
 func TestOeTracer(t *testing.T) {
 	type callContext struct {
-		Number              math.HexOrDecimal64   `json:"number"`
-		Hash                common.Hash           `json:"hash"`
-		Difficulty          *math.HexOrDecimal256 `json:"difficulty"`
-		Time                math.HexOrDecimal64   `json:"timestamp"`
-		GasLimit            math.HexOrDecimal64   `json:"gasLimit"`
-		BaseFee             *math.HexOrDecimal256 `json:"baseFeePerGas"`
-		Miner               common.Address        `json:"miner"`
-		TransactionHash     common.Hash           `json:"transactionHash"`
-		TransactionPosition uint64                `json:"transactionPosition"`
+		Number              math.HexOrDecimal64 `json:"number"`
+		Hash                common.Hash         `json:"hash"`
+		Difficulty          *uint256.Int        `json:"difficulty"`
+		Time                math.HexOrDecimal64 `json:"timestamp"`
+		GasLimit            math.HexOrDecimal64 `json:"gasLimit"`
+		BaseFee             *uint256.Int        `json:"baseFeePerGas"`
+		Miner               common.Address      `json:"miner"`
+		TransactionHash     common.Hash         `json:"transactionHash"`
+		TransactionPosition uint64              `json:"transactionPosition"`
 	}
 
 	type testcase struct {
@@ -392,28 +396,31 @@ func TestOeTracer(t *testing.T) {
 			// Configure a blockchain with the given prestate
 			signer := types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number), uint64(test.Context.Time))
 			context := evmtypes.BlockContext{
-				CanTransfer: core.CanTransfer,
-				Transfer:    consensus.Transfer,
-				Coinbase:    test.Context.Miner,
+				CanTransfer: protocol.CanTransfer,
+				Transfer:    misc.Transfer,
+				Coinbase:    accounts.InternAddress(test.Context.Miner),
 				BlockNumber: uint64(test.Context.Number),
 				Time:        uint64(test.Context.Time),
-				Difficulty:  (*big.Int)(test.Context.Difficulty),
 				GasLimit:    uint64(test.Context.GasLimit),
 			}
+			if test.Context.Difficulty != nil {
+				context.Difficulty = *test.Context.Difficulty
+			}
 			if test.Context.BaseFee != nil {
-				context.BaseFee, _ = uint256.FromBig((*big.Int)(test.Context.BaseFee))
+				baseFee := test.Context.BaseFee
+				context.BaseFee = *baseFee
 			}
 			rules := context.Rules(test.Genesis.Config)
 
-			m := mock.Mock(t)
+			m := execmoduletester.New(t)
 			dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 			require.NoError(t, err)
 			defer dbTx.Rollback()
 
 			statedb, _ := testutil.MakePreState(rules, dbTx, test.Genesis.Alloc, context.BlockNumber)
-			msg, err := tx.AsMessage(*signer, (*big.Int)(test.Context.BaseFee), rules)
+			msg, err := tx.AsMessage(*signer, test.Context.BaseFee, rules)
 			require.NoError(t, err)
-			txContext := core.NewEVMTxContext(msg)
+			txContext := protocol.NewEVMTxContext(msg)
 
 			traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
 			tracer := OeTracer{}
@@ -422,7 +429,7 @@ func TestOeTracer(t *testing.T) {
 			require.NoError(t, err)
 			evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Tracer: tracer.Tracer().Hooks})
 
-			st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()))
+			st := protocol.NewStateTransition(evm, msg, new(protocol.GasPool).AddGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()))
 			_, err = st.TransitionDb(true /* refunds */, false /* gasBailout */)
 			require.NoError(t, err)
 

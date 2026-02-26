@@ -20,13 +20,12 @@ import (
 	"encoding/json"
 	"strconv"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/types/clonable"
-	"github.com/erigontech/erigon-lib/types/ssz"
-
 	"github.com/erigontech/erigon/cl/clparams"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 type Metadata struct {
@@ -37,7 +36,7 @@ type Metadata struct {
 }
 
 func (m *Metadata) EncodeSSZ(buf []byte) ([]byte, error) {
-	schema := []interface{}{
+	schema := []any{
 		m.SeqNumber,
 		m.Attnets[:],
 	}
@@ -84,7 +83,7 @@ func (m *Metadata) DecodeSSZ(buf []byte, _ int) error {
 }
 
 func (m *Metadata) MarshalJSON() ([]byte, error) {
-	out := map[string]interface{}{
+	out := map[string]any{
 		"seq_number": strconv.FormatUint(m.SeqNumber, 10),
 		"attnets":    hexutil.Bytes(m.Attnets[:]),
 	}
@@ -113,6 +112,9 @@ func (p *Ping) EncodingSizeSSZ() int {
 }
 
 func (p *Ping) DecodeSSZ(buf []byte, _ int) error {
+	if len(buf) < 8 {
+		return ssz.ErrLowBufferSize
+	}
 	p.Id = ssz.UnmarshalUint64SSZ(buf)
 	return nil
 }
@@ -195,7 +197,7 @@ func (s *Status) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (s *Status) DecodeSSZ(buf []byte, version int) error {
-	schema := []interface{}{
+	schema := []any{
 		s.ForkDigest[:],
 		s.FinalizedRoot[:],
 		&s.FinalizedEpoch,
@@ -211,8 +213,8 @@ func (s *Status) DecodeSSZ(buf []byte, version int) error {
 	return ssz2.UnmarshalSSZ(buf, version, schema...)
 }
 
-func (s *Status) schema() []interface{} {
-	schema := []interface{}{
+func (s *Status) schema() []any {
+	schema := []any{
 		s.ForkDigest[:],
 		s.FinalizedRoot[:],
 		&s.FinalizedEpoch,

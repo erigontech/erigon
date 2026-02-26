@@ -21,14 +21,13 @@ package rpc
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"sync/atomic"
 	"time"
 
-	mapset "github.com/deckarep/golang-set"
+	mapset "github.com/deckarep/golang-set/v2"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -52,8 +51,8 @@ type Server struct {
 	services        serviceRegistry
 	methodAllowList AllowList
 	idgen           func() ID
-	run             int32
-	codecs          mapset.Set // mapset.Set[ServerCodec] requires go 1.20
+	run             atomic.Bool
+	codecs          mapset.Set[ServerCodec]
 
 	batchConcurrency    uint
 	disableStreaming    bool
@@ -66,8 +65,9 @@ type Server struct {
 
 // NewServer creates a new server instance with no registered handlers.
 func NewServer(batchConcurrency uint, traceRequests, debugSingleRequest, disableStreaming bool, logger log.Logger, rpcSlowLogThreshold time.Duration) *Server {
-	server := &Server{services: serviceRegistry{logger: logger}, idgen: randomIDGenerator(), codecs: mapset.NewSet(), run: 1, batchConcurrency: batchConcurrency,
+	server := &Server{services: serviceRegistry{logger: logger}, idgen: randomIDGenerator(), codecs: mapset.NewSet[ServerCodec](), batchConcurrency: batchConcurrency,
 		disableStreaming: disableStreaming, traceRequests: traceRequests, debugSingleRequest: debugSingleRequest, logger: logger, rpcSlowLogThreshold: rpcSlowLogThreshold}
+	server.run.Store(true)
 	// Register the default service providing meta information about the RPC service such
 	// as the services and methods it offers.
 	rpcService := &RPCService{server: server}
@@ -102,7 +102,7 @@ func (s *Server) ServeCodec(codec ServerCodec, options CodecOption) {
 	defer codec.Close()
 
 	// Don't serve if server is stopped.
-	if atomic.LoadInt32(&s.run) == 0 {
+	if !s.run.Load() {
 		return
 	}
 
@@ -120,11 +120,11 @@ func (s *Server) ServeCodec(codec ServerCodec, options CodecOption) {
 // this mode.
 func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stream jsonstream.Stream) *jsonrpcMessage {
 	// Don't serve if server is stopped.
-	if atomic.LoadInt32(&s.run) == 0 {
+	if !s.run.Load() {
 		return nil
 	}
 
-	h := newHandler(ctx, codec, s.idgen, &s.services, s.methodAllowList, s.batchConcurrency, s.traceRequests, s.logger, s.rpcSlowLogThreshold)
+	h := newHandler(ctx, codec, s.idgen, &s.services, s.batchLimit, s.methodAllowList, s.batchConcurrency, s.traceRequests, s.logger, s.rpcSlowLogThreshold)
 	h.allowSubscribe = false
 	defer h.close(io.EOF, nil)
 
@@ -136,11 +136,7 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stre
 		return nil
 	}
 	if batch {
-		if s.batchLimit > 0 && len(reqs) > s.batchLimit {
-			return errorMessage(fmt.Errorf("batch limit %d exceeded (can increase by --rpc.batch.limit). Requested batch of size: %d", s.batchLimit, len(reqs)))
-		} else {
-			h.handleBatch(reqs)
-		}
+		h.handleBatch(reqs)
 	} else {
 		h.handleMsg(reqs[0], stream)
 	}
@@ -151,10 +147,10 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stre
 // requests to finish, then closes all codecs which will cancel pending requests and
 // subscriptions.
 func (s *Server) Stop() {
-	if atomic.CompareAndSwapInt32(&s.run, 1, 0) {
+	if s.run.CompareAndSwap(true, false) {
 		s.logger.Info("RPC server shutting down")
-		s.codecs.Each(func(c any) bool {
-			c.(ServerCodec).Close()
+		s.codecs.Each(func(c ServerCodec) bool {
+			c.Close()
 			return true
 		})
 	}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/version"
 )
 
 // 1. safety margin is respected
@@ -150,6 +151,7 @@ func createConfig(t *testing.T) *SnapshotConfig {
 	t.Helper()
 	dirs := datadir.New(t.TempDir())
 	stepSize := uint64(1000)
+	ver := version.V1_0_standart
 
 	return NewSnapshotConfig(
 		&SnapshotCreationConfig{
@@ -158,6 +160,6 @@ func createConfig(t *testing.T) *SnapshotConfig {
 			MinimumSize:    stepSize,
 			SafetyMargin:   5,
 		},
-		NewE2SnapSchema(dirs, "bodies"),
+		NewE2SnapSchema(dirs, "bodies", NewE2SnapSchemaVersion(ver, ver)),
 	)
 }

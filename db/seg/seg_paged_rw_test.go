@@ -23,10 +23,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 func prepareLoremDictOnPagedWriter(t *testing.T, pageSize int, pageCompression bool) *Decompressor {
@@ -35,14 +35,14 @@ func prepareLoremDictOnPagedWriter(t *testing.T, pageSize int, pageCompression b
 	logger, require := log.New(), require.New(t)
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed1")
-	cfg := DefaultCfg
+	cfg := DefaultCfg.WithValuesOnCompressedPage(pageSize)
 	cfg.MinPatternScore = 1
 	cfg.Workers = 1
 	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
 	require.NoError(err)
 	defer c.Close()
 
-	p := NewPagedWriter(NewWriter(c, CompressNone), pageSize, pageCompression)
+	p := NewPagedWriter(NewWriter(c, CompressNone), pageCompression)
 	for k, w := range loremStrings {
 		key := fmt.Sprintf("key %d", k)
 		val := fmt.Sprintf("%s %d", w, k)
@@ -75,10 +75,12 @@ func TestPagedReader(t *testing.T) {
 	i := 0
 	for g.HasNext() {
 		w := loremStrings[i]
-		var word []byte
-		_, word, buf, _ = g.Next2(buf[:0])
+		var key, word []byte
+		key, word, buf, _ = g.Next2(buf[:0])
 		expected := fmt.Sprintf("%s %d", w, i)
+		expectedK := fmt.Sprintf("key %d", i)
 		require.Equal(expected, string(word))
+		require.Equal(expectedK, string(key))
 		i++
 	}
 
@@ -95,24 +97,27 @@ func TestPagedReader(t *testing.T) {
 
 // multyBytesWriter is a writer for [][]byte, similar to bytes.Writer.
 type multyBytesWriter struct {
-	buffer [][]byte
+	buffer   [][]byte
+	pageSize int
 }
 
 func (w *multyBytesWriter) Write(p []byte) (n int, err error) {
 	w.buffer = append(w.buffer, common.Copy(p))
 	return len(p), nil
 }
-func (w *multyBytesWriter) Bytes() [][]byte  { return w.buffer }
-func (w *multyBytesWriter) FileName() string { return "" }
-func (w *multyBytesWriter) Count() int       { return 0 }
-func (w *multyBytesWriter) Close()           {}
-func (w *multyBytesWriter) Compress() error  { return nil }
-func (w *multyBytesWriter) Reset()           { w.buffer = nil }
+func (w *multyBytesWriter) Bytes() [][]byte                { return w.buffer }
+func (w *multyBytesWriter) FileName() string               { return "" }
+func (w *multyBytesWriter) Count() int                     { return 0 }
+func (w *multyBytesWriter) Close()                         {}
+func (w *multyBytesWriter) Compress() error                { return nil }
+func (w *multyBytesWriter) Reset()                         { w.buffer = nil }
+func (w *multyBytesWriter) SetMetadata([]byte)             {}
+func (w *multyBytesWriter) GetValuesOnCompressedPage() int { return w.pageSize }
 
 func TestPage(t *testing.T) {
-	buf, require := &multyBytesWriter{}, require.New(t)
 	sampling := 2
-	w := NewPagedWriter(buf, sampling, false)
+	buf, require := &multyBytesWriter{pageSize: sampling}, require.New(t)
+	w := NewPagedWriter(buf, false)
 	for i := 0; i < sampling+1; i++ {
 		k, v := fmt.Sprintf("k %d", i), fmt.Sprintf("v %d", i)
 		require.NoError(w.Add([]byte(k), []byte(v)))
@@ -143,9 +148,32 @@ func TestPage(t *testing.T) {
 	}
 }
 
+func TestPagedReaderWithCompression(t *testing.T) {
+	var loremStrings = append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
+
+	require := require.New(t)
+	d := prepareLoremDictOnPagedWriter(t, 2, true) // Enable page-level compression
+	defer d.Close()
+
+	g := NewPagedReader(d.MakeGetter(), 2, true) // Read with compression enabled
+	var buf []byte
+	i := 0
+	for g.HasNext() {
+		w := loremStrings[i]
+		var key, word []byte
+		key, word, buf, _ = g.Next2(buf[:0])
+		expected := fmt.Sprintf("%s %d", w, i)
+		expectedK := fmt.Sprintf("key %d", i)
+		require.Equal(expected, string(word), "mismatch at index %d", i)
+		require.Equal(expectedK, string(key), "key mismatch at index %d", i)
+		i++
+	}
+	require.Equal(len(loremStrings), i, "should have read all entries")
+}
+
 func BenchmarkName(b *testing.B) {
-	buf := &multyBytesWriter{}
-	w := NewPagedWriter(buf, 16, false)
+	buf := &multyBytesWriter{pageSize: 16}
+	w := NewPagedWriter(buf, false)
 	for i := 0; i < 16; i++ {
 		w.Add([]byte{byte(i)}, []byte{10 + byte(i)})
 	}
@@ -154,7 +182,7 @@ func BenchmarkName(b *testing.B) {
 	k := []byte{15}
 
 	b.Run("1", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			GetFromPage(k, bts, nil, false)
 		}
 	})

@@ -17,6 +17,7 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
@@ -30,13 +31,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/estimate"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/estimate"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
@@ -45,12 +45,17 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	downloadertype "github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/db/version"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	erigoncli "github.com/erigontech/erigon/node/cli"
+	"github.com/erigontech/erigon/node/debug"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/nodecfg"
-	erigoncli "github.com/erigontech/erigon/turbo/cli"
-	"github.com/erigontech/erigon/turbo/debug"
 
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
@@ -131,7 +136,7 @@ var readDomains = &cobra.Command{
 		}
 
 		dirs := datadir.New(datadirCli)
-		chainDb, err := openDB(dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, logger)
+		chainDb, err := openDB(dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -171,7 +176,7 @@ var compactDomains = &cobra.Command{
 			panic("can't build index when replace-in-datadir=false (consider removing --build-idx)")
 		}
 
-		chainDb, err := openDB(dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, logger)
+		chainDb, err := openDB(dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -206,7 +211,7 @@ var compactDomains = &cobra.Command{
 			logger.Error("No domains specified")
 			return
 		}
-		supportedDomain := []kv.Domain{kv.CommitmentDomain, kv.AccountsDomain, kv.StorageDomain, kv.CommitmentDomain}
+		supportedDomain := []kv.Domain{kv.CommitmentDomain, kv.AccountsDomain, kv.StorageDomain}
 		var compactionDomains []kv.Domain
 
 		for _, domain := range domainsStr {
@@ -391,6 +396,7 @@ func makeCompactDomains(ctx context.Context, db kv.RwDB, files []string, dirs da
 	}
 	defer tx.Rollback()
 	outD := datadir.New(outDatadir)
+	accessors := statecfg.Schema.GetDomainCfg(domain).Accessors
 
 	// now start the file indexing
 	for currentLayer, fileInfo := range fileInfos {
@@ -433,7 +439,7 @@ func makeCompactDomains(ctx context.Context, db kv.RwDB, files []string, dirs da
 			if len(layerBytes) == 4 {
 				layer = binary.BigEndian.Uint32(layerBytes)
 			}
-			if layer != uint32(currentLayer) {
+			if layer != uint32(currentLayer) && !(domain == kv.CommitmentDomain && bytes.Equal(k, commitmentdb.KeyCommitmentState)) {
 				skipped++
 				continue
 			}
@@ -466,19 +472,53 @@ func makeCompactDomains(ctx context.Context, db kv.RwDB, files []string, dirs da
 			if err := os.Rename(outputFilePath, fileInfo.Path); err != nil {
 				return false, fmt.Errorf("failed to replace the file %s: %w", baseFileName, err)
 			}
-			kveiFile := strings.ReplaceAll(baseFileName, ".kv", ".kvei")
-			btFile := strings.ReplaceAll(baseFileName, ".kv", ".bt")
-			kviFile := strings.ReplaceAll(baseFileName, ".kv", ".kvi")
-			removeManyIgnoreError(
-				filepath.Join(dirs.SnapDomain, baseFileName+".torrent"),
-				filepath.Join(dirs.SnapDomain, btFile),
-				filepath.Join(dirs.SnapDomain, btFile+".torrent"),
-				filepath.Join(dirs.SnapDomain, kveiFile),
-				filepath.Join(dirs.SnapDomain, kveiFile+".torrent"),
-				filepath.Join(dirs.SnapDomain, kviFile),
-				filepath.Join(dirs.SnapDomain, kviFile+".torrent"),
-			)
-			logger.Info(fmt.Sprintf("Removed the files %s and %s", kveiFile, btFile))
+
+			maskedBaseFileName, err := version.ReplaceVersionWithMask(baseFileName)
+			if err != nil {
+				return false, err
+			}
+
+			if accessors.Has(statecfg.AccessorExistence) {
+				kveiFile := strings.ReplaceAll(maskedBaseFileName, ".kv", ".kvei")
+				kveiFile2, _, found, err := version.FindFilesWithVersionsByPattern(filepath.Join(dirs.SnapDomain, kveiFile))
+				if err != nil {
+					return false, err
+				}
+				if !found {
+					return false, fmt.Errorf("missing file %s at path %s", kveiFile, kveiFile2)
+				}
+				log.Info("Removing the file", "file", filepath.Base(kveiFile2))
+				dir.RemoveFile(kveiFile2)
+				dir.RemoveFile(kveiFile2 + ".torrent")
+			}
+
+			if accessors.Has(statecfg.AccessorBTree) {
+				btFile := strings.ReplaceAll(maskedBaseFileName, ".kv", ".bt")
+				btFile2, _, found, err := version.FindFilesWithVersionsByPattern(filepath.Join(dirs.SnapDomain, btFile))
+				if err != nil {
+					return false, err
+				}
+				if !found {
+					return false, fmt.Errorf("missing file %s at path %s", btFile, btFile2)
+				}
+				log.Info("Removing the file", "file", filepath.Base(btFile2))
+				dir.RemoveFile(btFile2)
+				dir.RemoveFile(btFile2 + ".torrent")
+			}
+
+			if accessors.Has(statecfg.AccessorHashMap) {
+				kviFile := strings.ReplaceAll(maskedBaseFileName, ".kv", ".kvi")
+				kviFile2, _, found, err := version.FindFilesWithVersionsByPattern(filepath.Join(dirs.SnapDomain, kviFile))
+				if err != nil {
+					return false, err
+				}
+				if !found {
+					return false, fmt.Errorf("missing file %s at path %s", kviFile, kviFile2)
+				}
+				log.Info("Removing the file", "file", filepath.Base(kviFile2))
+				dir.RemoveFile(kviFile2)
+				dir.RemoveFile(kviFile2 + ".torrent")
+			}
 		}
 		somethingCompacted = true
 	}
@@ -494,26 +534,26 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	if !ok {
 		return errors.New("stateDb transaction is not a temporal transaction")
 	}
-	domains, err := dbstate.NewSharedDomains(temporalTx, logger)
+	domains, err := execctx.NewSharedDomains(ctx, temporalTx, logger)
 	if err != nil {
 		return err
 	}
 
 	r := state.NewReaderV3(domains.AsGetter(temporalTx))
-	if startTxNum != 0 {
+	latestTx, latestBlock, err := domains.SeekCommitment(ctx, temporalTx)
+	if err != nil {
 		return fmt.Errorf("failed to seek commitment to txn %d: %w", startTxNum, err)
 	}
-	latestTx := domains.TxNum()
 	if latestTx < startTxNum {
 		return fmt.Errorf("latest available txn to start is  %d and its less than start txn %d", latestTx, startTxNum)
 	}
-	logger.Info("seek commitment", "block", domains.BlockNum(), "tx", latestTx)
+	logger.Info("seek commitment", "block", latestBlock, "tx", latestTx)
 
 	switch readDomain {
 	case kv.AccountsDomain.String():
 		for _, addr := range addrs {
 
-			acc, err := r.ReadAccountData(common.BytesToAddress(addr))
+			acc, err := r.ReadAccountData(accounts.InternAddress(common.BytesToAddress(addr)))
 			if err != nil {
 				logger.Error("failed to read account", "addr", addr, "err", err)
 				continue
@@ -522,7 +562,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 		}
 	case kv.StorageDomain.String():
 		for _, addr := range addrs {
-			a, s := common.BytesToAddress(addr[:length.Addr]), common.BytesToHash(addr[length.Addr:])
+			a, s := accounts.InternAddress(common.BytesToAddress(addr[:length.Addr])), accounts.InternKey(common.BytesToHash(addr[length.Addr:]))
 			st, _, err := r.ReadAccountStorage(a, s)
 			if err != nil {
 				logger.Error("failed to read storage", "addr", a.String(), "key", s.String(), "err", err)
@@ -532,7 +572,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 		}
 	case kv.CodeDomain.String():
 		for _, addr := range addrs {
-			code, err := r.ReadAccountCode(common.BytesToAddress(addr))
+			code, err := r.ReadAccountCode(accounts.InternAddress(common.BytesToAddress(addr)))
 			if err != nil {
 				logger.Error("failed to read code", "addr", addr, "err", err)
 				continue

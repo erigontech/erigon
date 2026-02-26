@@ -2,24 +2,25 @@ package sentry_multi_client
 
 import (
 	"context"
-	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/stateless"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/stateless"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
@@ -34,7 +35,7 @@ func addTestWitnessData(db kv.TemporalRwDB, hash common.Hash, witnessData []byte
 	defer tx.Rollback()
 
 	header := &types.Header{
-		Number: big.NewInt(int64(blockNumber)),
+		Number: *uint256.NewInt(blockNumber),
 	}
 
 	headerBytes, err := rlp.EncodeToBytes(header)
@@ -42,8 +43,7 @@ func addTestWitnessData(db kv.TemporalRwDB, hash common.Hash, witnessData []byte
 		return err
 	}
 
-	blockNumberBytes := dbutils.EncodeBlockNumber(blockNumber)
-	err = tx.Put(kv.HeaderNumber, hash.Bytes(), blockNumberBytes)
+	err = rawdb.WriteHeaderNumber(tx, hash, blockNumber)
 	if err != nil {
 		return err
 	}
@@ -190,7 +190,7 @@ func TestNewWitnessFunction(t *testing.T) {
 
 	t.Run("Valid RLP Stores Data in Buffer", func(t *testing.T) {
 		testHeader := &types.Header{
-			Number:     big.NewInt(200),
+			Number:     *uint256.NewInt(200),
 			ParentHash: common.HexToHash("0xparent"),
 			Root:       common.HexToHash("0xroot"),
 		}
@@ -272,7 +272,7 @@ func TestWitnessFunctionsThroughMessageHandler(t *testing.T) {
 
 	t.Run("Message Handler Routes to newWitness", func(t *testing.T) {
 		testHeader := &types.Header{
-			Number:     big.NewInt(200),
+			Number:     *uint256.NewInt(200),
 			ParentHash: common.HexToHash("0xparent456"),
 			Root:       common.HexToHash("0xroot456"),
 		}

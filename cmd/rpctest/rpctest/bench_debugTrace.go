@@ -214,8 +214,7 @@ func BenchDebugTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blo
 			}
 			nTransactions++
 
-			var request string
-			request = reqGen.debugTraceTransaction(txn.Hash, additionalParams)
+			request := reqGen.debugTraceTransaction(txn.Hash, additionalParams)
 			errCtx := fmt.Sprintf("bn=%d hash=%s", bn, txn.Hash)
 
 			if err := requestAndCompare(request, "debug_traceTransaction", errCtx, reqGen, needCompare, rec, errs, resultsCh,

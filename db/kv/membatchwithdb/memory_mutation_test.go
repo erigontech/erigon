@@ -23,7 +23,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
@@ -79,6 +79,7 @@ func TestLastMiningDB(t *testing.T) {
 
 	cursor, err := batch.Cursor(kv.HeaderNumber)
 	require.NoError(t, err)
+	defer cursor.Close()
 
 	key, value, err := cursor.Last()
 	require.NoError(t, err)
@@ -103,6 +104,7 @@ func TestLastMiningMem(t *testing.T) {
 
 	cursor, err := batch.Cursor(kv.HeaderNumber)
 	require.NoError(t, err)
+	defer cursor.Close()
 
 	key, value, err := cursor.Last()
 	require.NoError(t, err)
@@ -130,6 +132,7 @@ func TestDeleteMining(t *testing.T) {
 
 	cursor, err := batch.Cursor(kv.HeaderNumber)
 	require.NoError(t, err)
+	defer cursor.Close()
 
 	key, value, err := cursor.SeekExact([]byte("BAAA"))
 	require.NoError(t, err)
@@ -204,7 +207,7 @@ func TestForEach(t *testing.T) {
 	require.Equal(t, []string{"value", "value1", "value2", "value3", "value5"}, values1)
 }
 
-func newTestTx(tb testing.TB) (kv.RwDB, kv.RwTx) {
+func newTestTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx) {
 	tb.Helper()
 	dirs := datadir.New(tb.TempDir())
 	stepSize := uint64(16)
@@ -328,6 +331,7 @@ func TestSeekExactAfterClearBucket(t *testing.T) {
 
 	cursor, err := batch.RwCursor(kv.HeaderNumber)
 	require.NoError(t, err)
+	defer cursor.Close()
 
 	key, val, err := cursor.SeekExact([]byte("AAAA"))
 	require.NoError(t, err)
@@ -364,6 +368,7 @@ func TestFirstAfterClearBucket(t *testing.T) {
 
 	cursor, err := batch.Cursor(kv.HeaderNumber)
 	require.NoError(t, err)
+	defer cursor.Close()
 
 	key, val, err := cursor.First()
 	require.NoError(t, err)
@@ -411,6 +416,7 @@ func TestNext(t *testing.T) {
 
 	cursor, err := batch.CursorDupSort(kv.TblAccountVals)
 	require.NoError(t, err)
+	defer cursor.Close()
 
 	k, v, err := cursor.First()
 	require.NoError(t, err)
@@ -456,6 +462,7 @@ func TestNextNoDup(t *testing.T) {
 
 	cursor, err := batch.CursorDupSort(kv.TblAccountVals)
 	require.NoError(t, err)
+	defer cursor.Close()
 
 	k, _, err := cursor.First()
 	require.NoError(t, err)
@@ -480,6 +487,7 @@ func TestDeleteCurrentDuplicates(t *testing.T) {
 
 	cursor, err := batch.RwCursorDupSort(kv.TblAccountVals)
 	require.NoError(t, err)
+	defer cursor.Close()
 
 	require.NoError(t, cursor.Put([]byte("key3"), []byte("value3.2")))
 
@@ -515,6 +523,7 @@ func TestSeekBothRange(t *testing.T) {
 
 	cursor, err := batch.RwCursorDupSort(kv.TblAccountVals)
 	require.NoError(t, err)
+	defer cursor.Close()
 
 	require.NoError(t, cursor.Put([]byte("key3"), []byte("value3.1")))
 	require.NoError(t, cursor.Put([]byte("key1"), []byte("value1.3")))

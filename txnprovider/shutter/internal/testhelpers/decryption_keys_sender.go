@@ -18,6 +18,7 @@ package testhelpers
 
 import (
 	"context"
+	"slices"
 	"strconv"
 	"time"
 
@@ -28,7 +29,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	shutterproto "github.com/erigontech/erigon/txnprovider/shutter/internal/proto"
 )
@@ -86,10 +87,8 @@ func (dks DecryptionKeysSender) WaitExternalPeerConnection(ctx context.Context, 
 			return ctx.Err()
 		case <-ticker.C:
 			peers := dks.host.Network().Peers()
-			for _, p := range peers {
-				if p == peerId {
-					return nil
-				}
+			if slices.Contains(peers, peerId) {
+				return nil
 			}
 		}
 	}

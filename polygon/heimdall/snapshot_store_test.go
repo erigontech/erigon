@@ -10,17 +10,17 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	dir2 "github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/testlog"
+	dir2 "github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/version"
-	"github.com/erigontech/erigon/eth/ethconfig"
 	"github.com/erigontech/erigon/execution/chain/networkname"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 // Span tests
@@ -72,6 +72,9 @@ func TestHeimdallStoreLastFrozenSpanIdWhenSegmentFilesAreNotPresent(t *testing.T
 	require.Equal(t, uint64(0), lastFrozenSpanId)
 }
 func TestHeimdallStoreLastFrozenSpanIdReturnsLastSegWithIdx(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 
 	logger := testlog.Logger(t, log.LvlInfo)
@@ -105,6 +108,9 @@ func TestHeimdallStoreLastFrozenSpanIdReturnsLastSegWithIdx(t *testing.T) {
 }
 
 func TestHeimdallStoreEntity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 
 	logger := testlog.Logger(t, log.LvlInfo)
@@ -138,6 +144,9 @@ func TestHeimdallStoreEntity(t *testing.T) {
 }
 
 func TestHeimdallStoreLastFrozenIdWithSpanRotations(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 
 	logger := testlog.Logger(t, log.LvlInfo)
@@ -166,6 +175,9 @@ func TestHeimdallStoreLastFrozenIdWithSpanRotations(t *testing.T) {
 }
 
 func TestHeimdallStoreEntityWithSpanRotations(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 
 	logger := testlog.Logger(t, log.LvlInfo)

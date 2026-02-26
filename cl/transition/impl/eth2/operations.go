@@ -28,13 +28,13 @@ import (
 
 	"github.com/erigontech/erigon/cl/transition/impl/eth2/statechange"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/common"
 
 	"github.com/erigontech/erigon/cl/utils/bls"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -610,7 +610,7 @@ func (I *impl) processAttestationPostAltair(
 		committeeOffset := 0
 		for _, committeeIndex := range committeeIndices {
 			// assert committee_index < get_committee_count_per_slot(state, data.target.epoch)
-			if uint64(committeeIndex) >= s.CommitteeCount(currentEpoch) {
+			if uint64(committeeIndex) >= s.CommitteeCount(data.Target.Epoch) {
 				return nil, errors.New("processAttestationPostAltair: committee index out of bounds")
 			}
 			committee, err := s.GetBeaconCommitee(data.Slot, uint64(committeeIndex))
@@ -1154,7 +1154,7 @@ func (I *impl) ProcessConsolidationRequest(s abstract.BeaconState, consolidation
 		// source index
 		sourceIndex, exist := s.ValidatorIndexByPubkey(consolidationRequest.SourcePubKey)
 		if !exist {
-			log.Warn("Validator index not found for source pubkey", "pubkey", consolidationRequest.SourcePubKey)
+			log.Debug("Validator index not found for source pubkey", "pubkey", consolidationRequest.SourcePubKey)
 			return nil
 		}
 		if err := switchToCompoundingValidator(s, sourceIndex); err != nil {
@@ -1177,12 +1177,12 @@ func (I *impl) ProcessConsolidationRequest(s abstract.BeaconState, consolidation
 	// source/target index and validator
 	sourceIndex, exist := s.ValidatorIndexByPubkey(consolidationRequest.SourcePubKey)
 	if !exist {
-		log.Warn("Validator index not found for source pubkey", "pubkey", consolidationRequest.SourcePubKey)
+		log.Debug("Validator index not found for source pubkey", "pubkey", consolidationRequest.SourcePubKey)
 		return nil
 	}
 	targetIndex, exist := s.ValidatorIndexByPubkey(consolidationRequest.TargetPubKey)
 	if !exist {
-		log.Warn("Validator index not found for target pubkey", "pubkey", consolidationRequest.TargetPubKey)
+		log.Debug("Validator index not found for target pubkey", "pubkey", consolidationRequest.TargetPubKey)
 		return nil
 	}
 	sourceValidator, err := s.ValidatorForValidatorIndex(int(sourceIndex))

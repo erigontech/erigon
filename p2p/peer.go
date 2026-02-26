@@ -25,15 +25,15 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"slices"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/mclock"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/metrics"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mclock"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
@@ -171,15 +171,20 @@ func (p *Peer) Caps() []Cap {
 	return p.rw.caps
 }
 
+// RunningProtocol returns true if the peer is actively connected using the
+// specified protocol, regardless of version.
+func (p *Peer) RunningProtocol(protocol string) bool {
+	_, ok := p.running[protocol]
+	return ok
+}
+
 // RunningCap returns true if the peer is actively connected using any of the
 // enumerated versions of a specific protocol, meaning that at least one of the
 // versions is supported by both this node and the peer p.
 func (p *Peer) RunningCap(protocol string, versions []uint) bool {
 	if proto, ok := p.running[protocol]; ok {
-		for _, ver := range versions {
-			if proto.Version == ver {
-				return true
-			}
+		if slices.Contains(versions, proto.Version) {
+			return true
 		}
 	}
 	return false
@@ -236,31 +241,6 @@ func newPeer(logger log.Logger, conn *conn, protocols []Protocol, pubkey [64]byt
 
 func (p *Peer) Log() log.Logger {
 	return p.log
-}
-
-func makeFirstCharCap(input string) string {
-	// Convert the entire string to lowercase
-	input = strings.ToLower(input)
-	// Use strings.Title to capitalize the first letter of each word
-	input = strings.ToUpper(input[:1]) + input[1:]
-	return input
-}
-
-func convertToCamelCase(input string) string {
-	parts := strings.Split(input, "_")
-	if len(parts) == 1 {
-		return input
-	}
-
-	var result string
-
-	for _, part := range parts {
-		if len(part) > 0 && part != parts[len(parts)-1] {
-			result += makeFirstCharCap(part)
-		}
-	}
-
-	return result
 }
 
 func (p *Peer) run() (peerErr *PeerError) {
@@ -430,7 +410,6 @@ outer:
 func (p *Peer) startProtocols(writeStart <-chan struct{}, writeErr chan<- error) {
 	p.wg.Add(len(p.running))
 	for _, proto := range p.running {
-		proto := proto
 		proto.closed = p.closed
 		proto.wstart = writeStart
 		proto.werr = writeErr
@@ -538,7 +517,7 @@ type PeerInfo struct {
 		Trusted       bool   `json:"trusted"`
 		Static        bool   `json:"static"`
 	} `json:"network"`
-	Protocols map[string]interface{} `json:"protocols"` // Sub-protocol specific metadata fields
+	Protocols map[string]any `json:"protocols"` // Sub-protocol specific metadata fields
 }
 
 // Info gathers and returns a collection of metadata known about a peer.
@@ -554,7 +533,7 @@ func (p *Peer) Info() *PeerInfo {
 		ID:        hex.EncodeToString(p.pubkey[:]),
 		Name:      p.Fullname(),
 		Caps:      caps,
-		Protocols: make(map[string]interface{}),
+		Protocols: make(map[string]any),
 	}
 	if p.Node().Seq() > 0 {
 		info.ENR = p.Node().String()
@@ -567,7 +546,7 @@ func (p *Peer) Info() *PeerInfo {
 
 	// Gather all the running protocol infos
 	for _, proto := range p.running {
-		protoInfo := interface{}("unknown")
+		protoInfo := any("unknown")
 		if query := proto.Protocol.PeerInfo; query != nil {
 			if metadata := query(p.Pubkey()); metadata != nil {
 				protoInfo = metadata

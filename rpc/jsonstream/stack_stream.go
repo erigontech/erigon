@@ -19,6 +19,7 @@ package jsonstream
 import (
 	"fmt"
 	"io"
+	"strings"
 
 	jsoniter "github.com/json-iterator/go"
 )
@@ -263,20 +264,20 @@ func (s *StackStream) StackSummary() string {
 		return "Empty"
 	}
 
-	result := ""
+	var result strings.Builder
 	for i, item := range s.stack {
 		switch item {
 		case ItemObject:
-			result += fmt.Sprintf("[%d] Object\n", i)
+			result.WriteString(fmt.Sprintf("[%d] Object\n", i))
 		case ItemArray:
-			result += fmt.Sprintf("[%d] Array\n", i)
+			result.WriteString(fmt.Sprintf("[%d] Array\n", i))
 		case ItemField:
-			result += fmt.Sprintf("[%d] Field\n", i)
+			result.WriteString(fmt.Sprintf("[%d] Field\n", i))
 		case ItemComma:
-			result += fmt.Sprintf("[%d] Comma\n", i)
+			result.WriteString(fmt.Sprintf("[%d] Comma\n", i))
 		}
 	}
-	return result
+	return result.String()
 }
 
 // ClosePending properly closes all pending JSON elements on the stack to ensure validity even when an error occurs.

@@ -26,19 +26,20 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"net"
+	"net/netip"
 	"sync"
 	"time"
 
 	"github.com/c2h5oh/datasize"
 	mdbx1 "github.com/erigontech/mdbx-go/mdbx"
 
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/p2p/enr"
 )
 
 // Keys in the node database.
@@ -61,19 +62,20 @@ const (
 	// Use localItemKey to create those keys.
 	dbLocalSeq = "seq"
 )
-
 const (
-	dbNodeExpiration     = 24 * time.Hour // Time after which an unseen node should be dropped.
-	dbCleanupCycle       = time.Hour      // Time period for running the expiration task.
-	dbVersion            = 10
-	dbSyncBytesThreshold = 20_000 // if we have about 20kb of dirty data , then flush to disk
+	dbNodeExpiration = 24 * time.Hour // Time after which an unseen node should be dropped.
+	dbCleanupCycle   = time.Hour      // Time period for running the expiration task.
+	dbVersion        = 10
+
+	dbSyncBytesThreshold = 5 * datasize.MB // see BenchmarkNodeDBGeometry
+	dbSyncPeriod         = 2 * time.Second // see BenchmarkNodeDBGeometry
 )
 
 var (
 	errInvalidIP = errors.New("invalid IP")
 )
 
-var zeroIP = make(net.IP, 16)
+var zeroIP = netip.IPv6Unspecified()
 
 // DB is the node database, storing previously seen nodes and any collected metadata about
 // them for QoS purposes.
@@ -85,9 +87,14 @@ type DB struct {
 	ctxCancel func()
 }
 
+// Deprecated: Use OpenDBEx. Wraps OpenDBEx for compatibility with geth code.
+func OpenDB(path string) (*DB, error) {
+	return OpenDBEx(context.Background(), path, "", log.Root())
+}
+
 // OpenDB opens a node database for storing and retrieving infos about known peers in the
 // network. If no path is given an in-memory, temporary database is constructed.
-func OpenDB(ctx context.Context, path string, tmpDir string, logger log.Logger) (*DB, error) {
+func OpenDBEx(ctx context.Context, path string, tmpDir string, logger log.Logger) (*DB, error) {
 	if path == "" {
 		return newMemoryDB(ctx, logger, tmpDir)
 	}
@@ -106,6 +113,7 @@ func newMemoryDB(ctx context.Context, logger log.Logger, tmpDir string) (*DB, er
 	db, err := mdbx.New(dbcfg.SentryDB, logger).
 		InMem(nil, tmpDir).
 		WithTableCfg(bucketsConfig).
+		PageSize(4 * datasize.KB).
 		MapSize(1 * datasize.GB).
 		Open(ctx)
 	if err != nil {
@@ -121,14 +129,16 @@ func newMemoryDB(ctx context.Context, logger log.Logger, tmpDir string) (*DB, er
 // newPersistentDB creates/opens a persistent node database,
 // also flushing its contents in case of a version mismatch.
 func newPersistentDB(ctx context.Context, logger log.Logger, path string) (*DB, error) {
+	// see `BenchmarkNodeDBGeometry`
 	db, err := mdbx.New(dbcfg.SentryDB, logger).
 		Path(path).
 		WithTableCfg(bucketsConfig).
+		PageSize(4 * datasize.KB).
 		MapSize(8 * datasize.GB).
-		GrowthStep(16 * datasize.MB).
-		Flags(func(f uint) uint { return f&^mdbx1.Durable | mdbx1.SafeNoSync }).
+		GrowthStep(2 * datasize.MB).
+		Flags(func(f uint) uint { return f&^mdbx1.Durable | mdbx1.SafeNoSync | mdbx1.WriteMap }).
 		SyncBytes(dbSyncBytesThreshold).
-		SyncPeriod(2 * time.Second).
+		SyncPeriod(dbSyncPeriod).
 		DirtySpace(uint64(32 * datasize.MB)).
 		// WithMetrics().
 		Open(ctx)
@@ -196,39 +206,38 @@ func splitNodeKey(key []byte) (id ID, rest []byte) {
 }
 
 // nodeItemKey returns the database key for a node metadata field.
-func nodeItemKey(id ID, ip net.IP, field string) []byte {
-	ip16 := ip.To16()
-	if ip16 == nil {
-		panic(fmt.Errorf("invalid IP (length %d)", len(ip)))
+func nodeItemKey(id ID, ip netip.Addr, field string) []byte {
+	if !ip.IsValid() {
+		panic("invalid IP")
 	}
-	return bytes.Join([][]byte{nodeKey(id), ip16, []byte(field)}, []byte{':'})
+	ip16 := ip.As16()
+	return bytes.Join([][]byte{nodeKey(id), ip16[:], []byte(field)}, []byte{':'})
 }
 
 // splitNodeItemKey returns the components of a key created by nodeItemKey.
-func splitNodeItemKey(key []byte) (id ID, ip net.IP, field string) {
+func splitNodeItemKey(key []byte) (id ID, ip netip.Addr, field string) {
 	id, key = splitNodeKey(key)
 	// Skip discover root.
 	if string(key) == dbDiscoverRoot {
-		return id, nil, ""
+		return id, netip.Addr{}, ""
 	}
 	key = key[len(dbDiscoverRoot)+1:]
 	// Split out the IP.
-	ip = key[:16]
-	if ip4 := ip.To4(); ip4 != nil {
-		ip = ip4
-	}
+	ip, _ = netip.AddrFromSlice(key[:16])
+	ip = ip.Unmap()
 	key = key[16+1:]
 	// Field is the remainder of key.
 	field = string(key)
 	return id, ip, field
 }
 
-func v5Key(id ID, ip net.IP, field string) []byte {
+func v5Key(id ID, ip netip.Addr, field string) []byte {
+	ip16 := ip.As16()
 	return bytes.Join([][]byte{
 		[]byte(dbNodePrefix),
 		id[:],
 		[]byte(dbDiscv5Root),
-		ip.To16(),
+		ip16[:],
 		[]byte(field),
 	}, []byte{':'})
 }
@@ -324,13 +333,13 @@ func (db *DB) Node(id ID) *Node {
 }
 
 func mustDecodeNode(id, data []byte) *Node {
-	node := new(Node)
-	if err := rlp.DecodeBytes(data, &node.r); err != nil {
+	var r enr.Record
+	if err := rlp.DecodeBytes(data, &r); err != nil {
 		panic(fmt.Errorf("p2p/enode: can't decode node %x in DB: %w", id, err))
 	}
-	// Restore node id cache.
-	copy(node.id[:], id)
-	return node
+	var nodeID ID
+	copy(nodeID[:], id)
+	return newNodeWithID(&r, nodeID)
 }
 
 // UpdateNode inserts - potentially overwriting - a node into the peer database.
@@ -484,24 +493,24 @@ func (db *DB) expireNodes() {
 
 // LastPingReceived retrieves the time of the last ping packet received from
 // a remote node.
-func (db *DB) LastPingReceived(id ID, ip net.IP) time.Time {
-	if ip = ip.To16(); ip == nil {
+func (db *DB) LastPingReceived(id ID, ip netip.Addr) time.Time {
+	if !ip.IsValid() {
 		return time.Time{}
 	}
 	return time.Unix(db.fetchInt64(nodeItemKey(id, ip, dbNodePing)), 0)
 }
 
 // UpdateLastPingReceived updates the last time we tried contacting a remote node.
-func (db *DB) UpdateLastPingReceived(id ID, ip net.IP, instance time.Time) error {
-	if ip = ip.To16(); ip == nil {
+func (db *DB) UpdateLastPingReceived(id ID, ip netip.Addr, instance time.Time) error {
+	if !ip.IsValid() {
 		return errInvalidIP
 	}
 	return db.storeInt64(nodeItemKey(id, ip, dbNodePing), instance.Unix())
 }
 
 // LastPongReceived retrieves the time of the last successful pong from remote node.
-func (db *DB) LastPongReceived(id ID, ip net.IP) time.Time {
-	if ip = ip.To16(); ip == nil {
+func (db *DB) LastPongReceived(id ID, ip netip.Addr) time.Time {
+	if !ip.IsValid() {
 		return time.Time{}
 	}
 	// Launch expirer
@@ -510,48 +519,53 @@ func (db *DB) LastPongReceived(id ID, ip net.IP) time.Time {
 }
 
 // UpdateLastPongReceived updates the last pong time of a node.
-func (db *DB) UpdateLastPongReceived(id ID, ip net.IP, instance time.Time) error {
-	if ip = ip.To16(); ip == nil {
+func (db *DB) UpdateLastPongReceived(id ID, ip netip.Addr, instance time.Time) error {
+	if !ip.IsValid() {
 		return errInvalidIP
 	}
 	return db.storeInt64(nodeItemKey(id, ip, dbNodePong), instance.Unix())
 }
 
 // FindFails retrieves the number of findnode failures since bonding.
-func (db *DB) FindFails(id ID, ip net.IP) int {
-	if ip = ip.To16(); ip == nil {
+func (db *DB) FindFails(id ID, ip netip.Addr) int {
+	if !ip.IsValid() {
 		return 0
 	}
 	return int(db.fetchInt64(nodeItemKey(id, ip, dbNodeFindFails)))
 }
 
 // UpdateFindFails updates the number of findnode failures since bonding.
-func (db *DB) UpdateFindFails(id ID, ip net.IP, fails int) error {
-	if ip = ip.To16(); ip == nil {
+func (db *DB) UpdateFindFails(id ID, ip netip.Addr, fails int) error {
+	if !ip.IsValid() {
 		return errInvalidIP
 	}
 	return db.storeInt64(nodeItemKey(id, ip, dbNodeFindFails), int64(fails))
 }
 
 // FindFailsV5 retrieves the discv5 findnode failure counter.
-func (db *DB) FindFailsV5(id ID, ip net.IP) int {
-	if ip = ip.To16(); ip == nil {
+func (db *DB) FindFailsV5(id ID, ip netip.Addr) int {
+	if !ip.IsValid() {
 		return 0
 	}
 	return int(db.fetchInt64(v5Key(id, ip, dbNodeFindFails)))
 }
 
 // UpdateFindFailsV5 stores the discv5 findnode failure counter.
-func (db *DB) UpdateFindFailsV5(id ID, ip net.IP, fails int) error {
-	if ip = ip.To16(); ip == nil {
+func (db *DB) UpdateFindFailsV5(id ID, ip netip.Addr, fails int) error {
+	if !ip.IsValid() {
 		return errInvalidIP
 	}
 	return db.storeInt64(v5Key(id, ip, dbNodeFindFails), int64(fails))
 }
 
-// LocalSeq retrieves the local record sequence counter.
+// localSeq retrieves the local record sequence counter, defaulting to the current
+// timestamp if no previous exists. This ensures that wiping all data associated
+// with a node (apart from its key) will not generate already used sequence nums.
 func (db *DB) localSeq(id ID) uint64 {
-	return db.fetchUint64(localItemKey(id, dbLocalSeq))
+	if seq := db.fetchUint64(localItemKey(id, dbLocalSeq)); seq > 0 {
+		return seq
+	}
+	return uint64(time.Now().UnixMilli())
 }
 
 // storeLocalSeq stores the local record sequence counter.
@@ -597,7 +611,7 @@ func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
 				continue // iterator exhausted
 			}
 			db.ensureExpirer()
-			pongKey := nodeItemKey(n.ID(), n.IP(), dbNodePong)
+			pongKey := nodeItemKey(n.ID(), n.IPAddr(), dbNodePong)
 			var lastPongReceived int64
 			blob, errGet := tx.GetOne(kv.Inodes, pongKey)
 			if errGet != nil {

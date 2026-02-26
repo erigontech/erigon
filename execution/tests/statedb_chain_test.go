@@ -27,24 +27,25 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/contracts"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestSelfDestructReceive(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-		address = crypto.PubkeyToAddress(key.PublicKey)
+		address = accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey))
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
 			Config: &chain.Config{
@@ -56,14 +57,14 @@ func TestSelfDestructReceive(t *testing.T) {
 				SpuriousDragonBlock:   new(big.Int),
 			},
 			Alloc: types.GenesisAlloc{
-				address: {Balance: funds},
+				address.Value(): {Balance: funds},
 			},
 		}
 		// this code generates a log
 		signer = types.LatestSignerForChainID(nil)
 	)
 
-	m := mock.MockWithGenesis(t, gspec, key, false)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
@@ -77,7 +78,7 @@ func TestSelfDestructReceive(t *testing.T) {
 	// effectively turning it from contract account to a non-contract account
 	// The second block is empty and is only used to force the newly created blockchain object to reload the trie
 	// from the database.
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, block *core.BlockGen) {
+	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, block *blockgen.BlockGen) {
 		var txn types.Transaction
 
 		switch i {
@@ -93,7 +94,7 @@ func TestSelfDestructReceive(t *testing.T) {
 			}
 			block.AddTx(txn)
 			// Send 1 wei to contract after self-destruction
-			txn, err = types.SignTx(types.NewTransaction(block.TxNonce(address), contractAddress, uint256.NewInt(1000), 21000, uint256.NewInt(1), nil), *signer, key)
+			txn, err = types.SignTx(types.NewTransaction(block.TxNonce(address.Value()), contractAddress, uint256.NewInt(1000), 21000, uint256.NewInt(1), nil), *signer, key)
 			block.AddTx(txn)
 		}
 		contractBackend.Commit()
@@ -111,7 +112,7 @@ func TestSelfDestructReceive(t *testing.T) {
 		if !exist {
 			t.Error("expected account to exist")
 		}
-		exist, err = st.Exist(contractAddress)
+		exist, err = st.Exist(accounts.InternAddress(contractAddress))
 		if err != nil {
 			return err
 		}
@@ -145,14 +146,14 @@ func TestSelfDestructReceive(t *testing.T) {
 		if !exist {
 			t.Error("expected account to exist")
 		}
-		exist, err = st.Exist(contractAddress)
+		exist, err = st.Exist(accounts.InternAddress(contractAddress))
 		if err != nil {
 			t.Error(err)
 		}
 		if !exist {
 			t.Error("expected contractAddress to exist at the block 2", contractAddress.String())
 		}
-		code, err := st.GetCode(contractAddress)
+		code, err := st.GetCode(accounts.InternAddress(contractAddress))
 		if err != nil {
 			t.Error(err)
 		}

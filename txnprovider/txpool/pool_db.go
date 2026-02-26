@@ -25,8 +25,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
@@ -69,11 +69,7 @@ func LastSeenBlock(tx kv.Getter) (uint64, error) {
 func PutLastSeenBlock(tx kv.Putter, n uint64, buf []byte) error {
 	buf = common.EnsureEnoughSize(buf, 8)
 	binary.BigEndian.PutUint64(buf, n)
-	err := tx.Put(kv.PoolInfo, PoolLastSeenBlockKey, buf)
-	if err != nil {
-		return err
-	}
-	return nil
+	return tx.Put(kv.PoolInfo, PoolLastSeenBlockKey, buf)
 }
 
 func ChainConfig(tx kv.Getter) (*chain.Config, error) {
@@ -96,10 +92,7 @@ func PutChainConfig(tx kv.Putter, cc *chain.Config, buf []byte) error {
 	if err := json.NewEncoder(wr).Encode(cc); err != nil {
 		return fmt.Errorf("invalid chain config JSON in pool db: %w", err)
 	}
-	if err := tx.Put(kv.PoolInfo, PoolChainConfigKey, wr.Bytes()); err != nil {
-		return err
-	}
-	return nil
+	return tx.Put(kv.PoolInfo, PoolChainConfigKey, wr.Bytes())
 }
 
 func initBor(cc *chain.Config) *chain.Config {
@@ -118,7 +111,6 @@ func SaveChainConfigIfNeed(
 	ctx context.Context,
 	coreDB kv.RoDB,
 	poolDB kv.RwDB,
-	force bool,
 	logger log.Logger,
 ) (cc *chain.Config, blockNum uint64, err error) {
 	if err = poolDB.View(ctx, func(tx kv.Tx) error {
@@ -133,13 +125,6 @@ func SaveChainConfigIfNeed(
 		return nil
 	}); err != nil {
 		return nil, 0, err
-	}
-
-	if cc != nil && !force {
-		if cc.ChainID.Uint64() == 0 {
-			return nil, 0, errors.New("wrong chain config")
-		}
-		return initBor(cc), blockNum, nil
 	}
 
 	for {
@@ -179,7 +164,7 @@ func SaveChainConfigIfNeed(
 	}); err != nil {
 		return nil, 0, err
 	}
-	if cc.ChainID.Uint64() == 0 {
+	if cc.ChainID.Sign() == 0 {
 		return nil, 0, errors.New("wrong chain config")
 	}
 	return initBor(cc), blockNum, nil

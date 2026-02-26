@@ -26,13 +26,13 @@ import (
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/eth/ethconfig"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/turbo/shards"
 )
 
 // If there are no waypoints from Heimdall (including in our local database), we won't be able to rely on the last received waypoint
@@ -221,7 +221,7 @@ func (s *Sync) handleMilestoneTipMismatch(ctx context.Context, ccb *CanonicalCha
 
 	if s.config.PolygonPosSingleSlotFinality {
 		for i := range blocks {
-			if blocks[i].Number().Uint64() > s.config.PolygonPosSingleSlotFinalityBlockAt {
+			if blocks[i].NumberU64() > s.config.PolygonPosSingleSlotFinalityBlockAt {
 				blocks = blocks[:i]
 				break
 			}
@@ -502,7 +502,7 @@ func (s *Sync) applyNewBlockBatchOnTip(ctx context.Context, event EventNewBlockB
 		s.logger.Debug(syncLogPrefix("applying new empty block batch event"))
 		return nil
 	} else {
-		s.logger.Debug(syncLogPrefix("applying new block batch event"), "startBlock", event.NewBlocks[0].Number().Uint64(), "endBlock", event.NewBlocks[numBlocks-1].Number().Uint64())
+		s.logger.Debug(syncLogPrefix("applying new block batch event"), "startBlock", event.NewBlocks[0].NumberU64(), "endBlock", event.NewBlocks[numBlocks-1].NumberU64())
 	}
 	blockChain := event.NewBlocks
 	newBlockHeader := blockChain[len(blockChain)-1].HeaderNoCopy()

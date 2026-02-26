@@ -22,12 +22,11 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-
-	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/eth/tracers"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/tracing/tracers"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 )
 
 type OperationType int
@@ -40,10 +39,10 @@ const (
 )
 
 type InternalOperation struct {
-	Type  OperationType  `json:"type"`
-	From  common.Address `json:"from"`
-	To    common.Address `json:"to"`
-	Value *hexutil.Big   `json:"value"`
+	Type  OperationType    `json:"type"`
+	From  accounts.Address `json:"from"`
+	To    accounts.Address `json:"to"`
+	Value *hexutil.Big     `json:"value"`
 }
 
 type OperationsTracer struct {
@@ -68,7 +67,7 @@ func (t *OperationsTracer) Tracer() *tracers.Tracer {
 	}
 }
 
-func (t *OperationsTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *OperationsTracer) OnEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
 	if depth == 0 {
 		return
 	}

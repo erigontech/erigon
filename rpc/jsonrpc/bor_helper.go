@@ -18,13 +18,14 @@ package jsonrpc
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/bor"
@@ -173,8 +174,8 @@ func rankMapDifficulties(values map[common.Address]uint64) []difficultiesKV {
 		ss = append(ss, difficultiesKV{k, v})
 	}
 
-	sort.Slice(ss, func(i, j int) bool {
-		return ss[i].Difficulty > ss[j].Difficulty
+	slices.SortFunc(ss, func(a, b difficultiesKV) int {
+		return cmp.Compare(b.Difficulty, a.Difficulty)
 	})
 
 	return ss

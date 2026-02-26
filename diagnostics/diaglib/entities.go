@@ -272,7 +272,7 @@ type ResourcesUsage struct {
 type MemoryStats struct {
 	Alloc       uint64 `json:"alloc"`
 	Sys         uint64 `json:"sys"`
-	OtherFields []interface{}
+	OtherFields []any
 	Timestamp   time.Time             `json:"timestamp"`
 	StageIndex  CurrentSyncStagesIdxs `json:"stageIndex"`
 }
