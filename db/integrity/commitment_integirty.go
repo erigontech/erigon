@@ -850,12 +850,19 @@ func CheckStateVerify(ctx context.Context, db kv.TemporalRoDB, failFast bool, fr
 	aggTx := state.AggTx(tx)
 	files := aggTx.Files(kv.CommitmentDomain)
 	stepSize := aggTx.StepSize()
+	// Pre-filter to .kv files and build a start→file map for O(1) nextFile lookup.
+	kvFiles := make([]state.VisibleFile, 0, len(files))
+	fileByStart := make(map[uint64]state.VisibleFile, len(files))
+	for _, f := range files {
+		if strings.HasSuffix(f.Fullpath(), ".kv") {
+			kvFiles = append(kvFiles, f)
+			fileByStart[f.StartRootNum()] = f
+		}
+	}
+
 	var integrityErr error
 	var totalFiles int
-	for _, file := range files {
-		if !strings.HasSuffix(file.Fullpath(), ".kv") {
-			continue
-		}
+	for i, file := range kvFiles {
 		startTxNum := file.StartRootNum()
 		fileStep := startTxNum / stepSize
 		if fileStep < fromStep {
@@ -872,18 +879,9 @@ func CheckStateVerify(ctx context.Context, db kv.TemporalRoDB, failFast bool, fr
 			// Include the next commitment file's refs to handle step boundary effects:
 			// accounts written near the end of a step may have their commitment branch
 			// data in the next step's file.
-			// Collect all previous files for no-op write detection.
-			var nextFile state.VisibleFile
-			var prevFiles []state.VisibleFile
-			for j := 0; j < len(files); j++ {
-				if files[j].StartRootNum() == file.EndRootNum() && strings.HasSuffix(files[j].Fullpath(), ".kv") {
-					nextFile = files[j]
-				}
-				if files[j].EndRootNum() <= file.StartRootNum() && strings.HasSuffix(files[j].Fullpath(), ".kv") {
-					prevFiles = append(prevFiles, files[j])
-				}
-			}
-			checkErr = checkStateCorrespondenceReverse(ctx, file, nextFile, prevFiles, stepSize, failFast, logger)
+			// kvFiles is sorted by start; kvFiles[:i] are all files with EndRootNum <= startTxNum.
+			nextFile := fileByStart[file.EndRootNum()] // nil if no next file
+			checkErr = checkStateCorrespondenceReverse(ctx, file, nextFile, kvFiles[:i], stepSize, failFast, logger)
 		}
 		if checkErr != nil {
 			if !errors.Is(checkErr, ErrIntegrity) {
