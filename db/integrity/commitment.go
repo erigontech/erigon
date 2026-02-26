@@ -850,7 +850,9 @@ func CheckStateVerify(ctx context.Context, db kv.TemporalRoDB, failFast bool, fr
 	files := aggTx.Files(kv.CommitmentDomain)
 	stepSize := aggTx.StepSize()
 
-	// Pre-filter files to check
+	// Pre-filter files to check, sorted by size (largest first) for load balancing.
+	// Large old files block CPU progress, so process them first with parallelism.
+	// Small new files will naturally distribute across idle workers.
 	var filesToCheck []state.VisibleFile
 	for _, file := range files {
 		if !strings.HasSuffix(file.Fullpath(), ".kv") {
@@ -863,8 +865,14 @@ func CheckStateVerify(ctx context.Context, db kv.TemporalRoDB, failFast bool, fr
 		}
 		filesToCheck = append(filesToCheck, file)
 	}
+	// Sort by size descending (largest files first for better CPU utilization)
+	sort.Slice(filesToCheck, func(i, j int) bool {
+		return filesToCheck[i].EndRootNum()-filesToCheck[i].StartRootNum() > filesToCheck[j].EndRootNum()-filesToCheck[j].StartRootNum()
+	})
 
-	// Parallel file checking with controlled concurrency
+	// Parallel file checking with controlled concurrency.
+	// When failFast=true: Use errgroup.WithContext to cancel all goroutines on first error.
+	// When failFast=false: Use regular errgroup to continue checking all files and collect all errors.
 	var eg *errgroup.Group
 	if failFast {
 		eg, ctx = errgroup.WithContext(ctx)
