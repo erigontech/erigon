@@ -99,7 +99,7 @@ func CheckKvis(ctx context.Context, tx kv.TemporalTx, domain kv.Domain, failFast
 func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression seg.FileCompression, failFast bool, logger log.Logger) (uint64, error) {
 	kviFileName := filepath.Base(kviPath)
 	kvFileName := filepath.Base(kvPath)
-	logger.Info("checking kvi", "kvi", kviFileName, "kv", kvFileName)
+	logger.Info("[integrity] checking kvi", "kvi", kviFileName, "kv", kvFileName)
 	start := time.Now()
 	kvi, err := recsplit.OpenIndex(kviPath)
 	if err != nil {
