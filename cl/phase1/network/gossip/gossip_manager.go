@@ -101,6 +101,10 @@ func (g *GossipManager) Close() error {
 }
 
 func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], conditions ...ConditionFunc) pubsub.ValidatorEx {
+	var selfID peer.ID
+	if h := g.p2p.Host(); h != nil {
+		selfID = h.ID()
+	}
 	return func(ctx context.Context, pid peer.ID, msg *pubsub.Message) (result pubsub.ValidationResult) {
 		defer func() {
 			if r := recover(); r != nil {
@@ -108,6 +112,11 @@ func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], con
 				result = pubsub.ValidationReject
 			}
 		}()
+		// Skip validation for self-published messages: they were already validated
+		// by ProcessMessage before Publish was called.
+		if selfID != "" && pid == selfID {
+			return pubsub.ValidationAccept
+		}
 		curVersion := g.beaconConfig.GetCurrentStateVersion(g.ethClock.GetCurrentEpoch())
 		// parse the topic and subnet
 		topic := msg.GetTopic()

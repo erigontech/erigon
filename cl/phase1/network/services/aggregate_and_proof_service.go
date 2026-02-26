@@ -210,7 +210,6 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		attestingIndices          []uint64
 		seenIndex                 seenAggregateIndex
 		localValidatorIsProposer  bool
-		seen                      bool
 	)
 	if err := a.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		// [IGNORE] the epoch of aggregate.data.slot is either the current or previous epoch (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) -- i.e. compute_epoch_at_slot(aggregate.data.slot) in (get_previous_epoch(state), get_current_epoch(state))
@@ -248,8 +247,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 			index: aggregateAndProof.SignedAggregateAndProof.Message.AggregatorIndex,
 		}
 		if a.seenAggreatorIndexes.Contains(seenIndex) {
-			seen = true
-			return nil
+			return fmt.Errorf("%w: aggregator already seen", ErrIgnore)
 		}
 
 		committee, err := headState.GetBeaconCommitee(slot, committeeIndex)
@@ -308,9 +306,6 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		return nil
 	}); err != nil {
 		return err
-	}
-	if seen {
-		return nil
 	}
 	if a.test {
 		return nil

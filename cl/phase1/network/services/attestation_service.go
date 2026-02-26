@@ -193,7 +193,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		domain      []byte
 		pubKey      common.Bytes48
 		attestation *solid.Attestation // SingleAttestation will be transformed to Attestation struct with given member index in committee
-		seen        bool
 	)
 	if err := s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		// [REJECT] The committee index is within the expected range
@@ -264,8 +263,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		// mark the validator as seen
 		epochLastTime, ok := s.validatorAttestationSeen.Get(vIndex)
 		if ok && epochLastTime == targetEpoch {
-			seen = true
-			return nil
+			return fmt.Errorf("validator already seen in target epoch %w", ErrIgnore)
 		}
 		s.validatorAttestationSeen.Add(vIndex, targetEpoch)
 
@@ -281,9 +279,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		return nil
 	}); err != nil {
 		return err
-	}
-	if seen {
-		return nil
 	}
 	signingRoot, err := computeSigningRoot(data, domain)
 	if err != nil {
