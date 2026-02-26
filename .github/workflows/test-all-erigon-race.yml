@@ -38,12 +38,23 @@ jobs:
               - 'dashboards/**'
               # - '**/.github/workflows/**'
               - '**/.github/workflows/backups-dashboards.yml'
+  load-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      test-groups: ${{ steps.load.outputs.groups }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+      - id: load
+        run: echo "groups=$(./tools/write-test-groups --json)" >> $GITHUB_OUTPUT
+
   tests-linux:
-    needs: source-of-changes
+    needs: [source-of-changes, load-matrix]
     timeout-minutes: 90
     concurrency:
-      # concurrency group: there can be at most one running and one pending job in a 
-      # concurrency group at any time. So for commits on main/release, we use different 
+      # concurrency group: there can be at most one running and one pending job in a
+      # concurrency group at any time. So for commits on main/release, we use different
       # concurrency group per commit; for other branches, we use a branch-level CG.
       group: >-
         ${{
@@ -57,16 +68,7 @@ jobs:
       matrix:
         os:
           - ubuntu-latest
-        test-group:
-          - execution-tests
-          - eest-frontier-scenarios
-          - eest-osaka-clz
-          - eest-prague-calldata
-          - eest-cancun-blobs
-          - execution-other
-          - consensus
-          - core-rpc
-          - other
+        test-group: ${{ fromJson(needs.load-matrix.outputs.test-groups) }}
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -98,7 +100,9 @@ jobs:
           CGO_CFLAGS: -D__BLST_PORTABLE__
           GOFLAGS: -race
         if: needs.source-of-changes.outputs.changed_files != 'true'
-        run: ./tools/run-test-group ${{ matrix.test-group }}
+        run: |
+          make write-test-groups
+          make test-group TEST_GROUP=${{ matrix.test-group }}
 
       - uses: ./.github/actions/cleanup-erigon
         if: always()

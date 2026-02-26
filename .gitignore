@@ -116,3 +116,6 @@ mdbx.lck
 *.prof
 
 .claude/settings.local.json
+
+tools/test-groups/
+tools/test-groups.json

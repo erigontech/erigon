@@ -217,22 +217,21 @@ endif
 test-filtered:
 	(set -o pipefail && $(GOTEST) | ./tools/filter-test-output | tee run.log)
 
-test-short:
-	$(GO_BUILD_ENV) GODEBUG=$(GODEBUG) GOTRACEBACK=1 GOFLAGS="-short -failfast" ./tools/run-test-group
+test-short: override GO_FLAGS += -short -failfast
+test-short: test-filtered
 
-test-all:
-	$(GO_BUILD_ENV) GODEBUG=$(GODEBUG) GOTRACEBACK=1 ./tools/run-test-group
+test-all: test-filtered
 
-test-all-race:
-	$(GO_BUILD_ENV) GODEBUG=$(GODEBUG) GOTRACEBACK=1 GOFLAGS="-race" ./tools/run-test-group
+test-all-race: override GO_FLAGS += -race
+test-all-race: test-filtered
 
-## test-group TEST_GROUP=<name>			run a named CI test group (e.g. consensus, core-rpc, other)
-test-group:
-	$(GO_BUILD_ENV) GODEBUG=$(GODEBUG) GOTRACEBACK=1 ./tools/run-test-group $(TEST_GROUP)
+## write-test-groups:                        regenerate tools/test-groups/* and tools/test-groups.json
+write-test-groups:
+	go list ./... | ./tools/write-test-groups
 
-## check-test-groups:                        validate test group partitioning (no overlaps or gaps)
-check-test-groups:
-	./tools/run-test-group --check
+## test-group TEST_GROUP=<name>			run a named CI test group using its package file
+test-group: tools/test-groups/$(TEST_GROUP)
+	(set -o pipefail && $(GO_BUILD_ENV) GODEBUG=$(GODEBUG) GOTRACEBACK=1 go test $(GO_FLAGS) $$(cat tools/test-groups/$(TEST_GROUP)) 2>&1 | ./tools/filter-test-output | tee -a run.log)
 
 test-sonar-coverage: override GO_FLAGS += --timeout 60m -coverprofile=coverage-test-all.out
 test-sonar-coverage: test-filtered
