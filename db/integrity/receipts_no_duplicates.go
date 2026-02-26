@@ -54,17 +54,20 @@ func checkCumGas(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalR
 	if toBlock > 0 {
 		toBlock-- // [fromBlock,toBlock)
 	}
-
-	toTxNum, err := txNumsReader.Max(ctx, tx, toBlock)
+	if toBlock < fromBlock {
+		return nil
+	}
+	blockMaxTxNums, err := buildBlockMaxTxNums(tx, fromBlock, toBlock)
 	if err != nil {
 		return err
 	}
+	toTxNum := blockMaxTxNums[toBlock-fromBlock]
 
 	prevCumGasUsed := -1
 	blockNum := fromBlock
 	var _min, _max uint64
 	_min = fromTxNum
-	_max, _ = txNumsReader.Max(ctx, tx, fromBlock)
+	_max = blockMaxTxNums[0]
 
 	cumGasTx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -88,7 +91,7 @@ func checkCumGas(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalR
 		for txNum >= _max {
 			blockNum++
 			_min = _max + 1
-			_max, _ = txNumsReader.Max(ctx, tx, blockNum)
+			_max = blockMaxTxNums[blockNum-fromBlock]
 			blockChanged = true
 		}
 		//fmt.Println("txNum:", txNum, "cumGasUsed:", cumGasUsed)
@@ -135,17 +138,20 @@ func checkLogIdx(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalR
 	if toBlock > 0 {
 		toBlock-- // [fromBlock,toBlock)
 	}
-
-	toTxNum, err := txNumsReader.Max(ctx, tx, toBlock)
+	if toBlock < fromBlock {
+		return nil
+	}
+	blockMaxTxNums, err := buildBlockMaxTxNums(tx, fromBlock, toBlock)
 	if err != nil {
 		return err
 	}
+	toTxNum := blockMaxTxNums[toBlock-fromBlock]
 
 	prevLogIdxAfterTx := uint32(0)
 	blockNum := fromBlock
 	var _min, _max uint64
 	_min = fromTxNum
-	_max, _ = txNumsReader.Max(ctx, tx, fromBlock)
+	_max = blockMaxTxNums[0]
 
 	logIdxTx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -168,8 +174,8 @@ func checkLogIdx(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalR
 
 		for txNum >= _max {
 			blockNum++
-			_min, _ = txNumsReader.Min(ctx, tx, blockNum)
-			_max, _ = txNumsReader.Max(ctx, tx, blockNum)
+			_min = blockMaxTxNums[blockNum-1-fromBlock] + 1
+			_max = blockMaxTxNums[blockNum-fromBlock]
 			blockChanged = true
 		}
 
@@ -245,6 +251,33 @@ func ValidateDomainProgress(ctx context.Context, db kv.TemporalRoDB, domain kv.D
 
 	// }
 	return nil
+}
+
+// buildBlockMaxTxNums pre-fetches maxTxNum for each block in [fromBlock, toBlock]
+// using a single sequential cursor scan of the MaxTxNum table.
+// Returns a slice s where s[blockNum-fromBlock] = maxTxNum for that block.
+func buildBlockMaxTxNums(tx kv.Tx, fromBlock, toBlock uint64) ([]uint64, error) {
+	c, err := tx.Cursor(kv.MaxTxNum)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+	result := make([]uint64, toBlock-fromBlock+1)
+	var k [8]byte
+	binary.BigEndian.PutUint64(k[:], fromBlock)
+	for bk, bv, err := c.Seek(k[:]); bk != nil; bk, bv, err = c.Next() {
+		if err != nil {
+			return nil, err
+		}
+		bn := binary.BigEndian.Uint64(bk)
+		if bn > toBlock {
+			break
+		}
+		if len(bv) == 8 {
+			result[bn-fromBlock] = binary.BigEndian.Uint64(bv)
+		}
+	}
+	return result, nil
 }
 
 func uvarint(in []byte) (res uint64) {

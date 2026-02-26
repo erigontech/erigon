@@ -55,18 +55,21 @@ func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.Tem
 	if toBlock > 0 {
 		toBlock-- // [fromBlock,toBlock)
 	}
-
-	toTxNum, err := txNumsReader.Max(ctx, tx, toBlock)
+	if toBlock < fromBlock {
+		return nil
+	}
+	blockMaxTxNums, err := buildBlockMaxTxNums(tx, fromBlock, toBlock)
 	if err != nil {
 		return err
 	}
+	toTxNum := blockMaxTxNums[toBlock-fromBlock]
 
 	prevCumUsedGas := -1
 	expectedFirstLogIdx := uint32(0)
 	blockNum := fromBlock
 	var _min, _max uint64
 	_min = fromTxNum
-	_max, _ = txNumsReader.Max(ctx, tx, fromBlock)
+	_max = blockMaxTxNums[0]
 
 	it, err := rawdb.ReceiptCacheV2Stream(tx, fromTxNum, toTxNum)
 	if err != nil {
@@ -87,7 +90,7 @@ func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.Tem
 		for txNum > _max {
 			blockNum++
 			_min = _max + 1
-			_max, _ = txNumsReader.Max(ctx, tx, blockNum)
+			_max = blockMaxTxNums[blockNum-fromBlock]
 			expectedFirstLogIdx = 0
 			prevCumUsedGas = -1
 		}
