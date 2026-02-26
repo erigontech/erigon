@@ -85,9 +85,9 @@ func checkCumGas(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalR
 		cumGasUsed := uvarint(v)
 		blockChanged := false
 
-		for txNum >= _max {
-			blockNum++
-			_min = _max + 1
+		if txNum >= _max {
+			blockNum, _, _ = txNumsReader.FindBlockNum(ctx, tx, txNum)
+			_min, _ = txNumsReader.Min(ctx, tx, blockNum)
 			_max, _ = txNumsReader.Max(ctx, tx, blockNum)
 			blockChanged = true
 		}
@@ -166,11 +166,13 @@ func checkLogIdx(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalR
 		logIdxAfterTx := uint32(uvarint(v))
 		blockChanged := false
 
-		for txNum >= _max {
-			blockNum++
+		if txNum >= _max {
+			fmt.Printf("[dbg] b: txNum=%d, _max=%d\n", txNum, _max)
+			blockNum, _, _ = txNumsReader.FindBlockNum(ctx, tx, txNum)
 			_min, _ = txNumsReader.Min(ctx, tx, blockNum)
 			_max, _ = txNumsReader.Max(ctx, tx, blockNum)
 			blockChanged = true
+			fmt.Printf("[dbg] a: txNum=%d, _max=%d, blockNum=%d\n", txNum, _max, blockNum)
 		}
 
 		if blockChanged {
