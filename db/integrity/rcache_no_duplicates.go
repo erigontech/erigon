@@ -143,7 +143,7 @@ func parallelChunkCheck(ctx context.Context, fromBlock, toBlock uint64, db kv.Te
 	g.SetLimit(numWorkers)
 	var completedChunks atomic.Uint64
 	var totalChunks uint64 = (blockRange + chunkSize - 1) / chunkSize
-	log.Info("[integrity] parallel processing", "workers", numWorkers, "chunkSize", chunkSize, "blockRange", blockRange)
+	log.Info("[integrity] CheckRCacheNoDups", "workers", numWorkers, "chunkSize", chunkSize, "blockRange", blockRange)
 
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
