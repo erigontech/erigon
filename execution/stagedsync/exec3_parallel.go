@@ -371,6 +371,11 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							// Warmup is enabled via EnableTrieWarmup at executor init
 							rh, err := pe.doms.ComputeCommitment(ctx, rwTx, true, applyResult.BlockNum, applyResult.lastTxNum, pe.logPrefix, commitProgress)
 							close(commitProgress)
+							// Wait for the logging goroutine to finish before any early returns below:
+							// func1.2 writes lastProgress; outer exec() reads lastProgress after pe.wait().
+							// Moving this wait here (vs. after root-hash check) ensures ALL exit paths
+							// (err != nil, root mismatch, normal) are race-free on lastProgress.
+							<-LogCommitmentsDone
 							captured := pe.doms.SetTrace(false, false)
 							if err != nil {
 								return err
@@ -403,8 +408,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 									applyResult.BlockNum, applyResult.BlockHash, applyResult.ParentHash,
 									rwTx, pe.cfg, execStage, pe.logger, u)
 							}
-
-							<-LogCommitmentsDone // make sure no async mutations by LogCommitments can happen at this point
 							// fix these here - they will contain estimates after commit logging
 							pe.txExecutor.lastCommittedBlockNum.Store(lastBlockResult.BlockNum)
 							pe.txExecutor.lastCommittedTxNum.Store(lastBlockResult.lastTxNum)
