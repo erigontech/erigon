@@ -1603,7 +1603,7 @@ func extractCommitmentRefsToCollectors(ctx context.Context, file state.VisibleFi
 			continue
 		}
 
-		branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) { //nolint:gocritic
+		if _, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) { //nolint:gocritic
 			if isStorage {
 				plainKey := key
 				if len(key) != length.Addr+length.Hash {
@@ -1615,7 +1615,9 @@ func extractCommitmentRefsToCollectors(ctx context.Context, file state.VisibleFi
 					plainKey, _ = nextStoReader.Next(plainKeyBuf[:0])
 				}
 				if len(plainKey) == length.Addr+length.Hash {
-					stoCollector.Collect(plainKey, nil) //nolint:errcheck
+					if err := stoCollector.Collect(plainKey, nil); err != nil {
+						return nil, err
+					}
 				}
 				return plainKey, nil
 			}
@@ -1629,10 +1631,14 @@ func extractCommitmentRefsToCollectors(ctx context.Context, file state.VisibleFi
 				plainKey, _ = nextAccReader.Next(plainKeyBuf[:0])
 			}
 			if len(plainKey) == length.Addr {
-				accCollector.Collect(plainKey, nil) //nolint:errcheck
+				if err := accCollector.Collect(plainKey, nil); err != nil {
+					return nil, err
+				}
 			}
 			return plainKey, nil
-		})
+		}); err != nil {
+			return err
+		}
 	}
 	return nil
 }
