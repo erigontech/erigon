@@ -1,7 +1,5 @@
 version: "2"
 run:
-  build-tags:
-    - goexperiment.synctest
 linters:
   enable:
     - asasalint

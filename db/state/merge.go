@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/recsplit"
@@ -118,11 +119,8 @@ func (iit *InvertedIndexRoTx) FirstStepNotInFiles() kv.Step {
 // make merge determenistic across nodes: even if Node has much small files - do earliest-first merges
 // As any other methods of DomainRoTx - it can't see any files overlaps or garbage
 func (dt *DomainRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
-	hr := dt.ht.findMergeRange(maxEndTxNum, maxSpan)
-
 	r := DomainRanges{
 		name:    dt.name,
-		history: hr,
 		aggStep: dt.stepSize,
 	}
 	for _, item := range dt.files {
@@ -142,6 +140,13 @@ func (dt *DomainRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 
 		r.values = MergeRange{"", true, fromTxNum, item.endTxNum}
 	}
+
+	// merge History only if nothing to merge in Domain. to minimize amount of Domain files:
+	//  - to prioritize blocks execution perf (which needs only LatestState - Domains)
+	if !r.any() {
+		r.history = dt.ht.findMergeRange(maxEndTxNum, maxSpan)
+	}
+
 	return r
 }
 
@@ -531,11 +536,11 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 
 	if dt.d.Accessors.Has(statecfg.AccessorBTree) {
 		btPath := dt.d.kvBtAccessorNewFilePath(fromStep, toStep)
-		btM := DefaultBtreeM
+		btM := btindex.DefaultBtreeM
 		if toStep == 0 && dt.d.FilenameBase == "commitment" {
 			btM = 128
 		}
-		valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, btM, dt.dataReader(valuesIn.decompressor), *dt.salt, ps, dt.d.dirs.Tmp, dt.d.logger, dt.d.noFsync, dt.d.Accessors)
+		valuesIn.bindex, err = btindex.CreateBtreeIndexWithDecompressor(btPath, btM, dt.dataReader(valuesIn.decompressor), *dt.salt, ps, dt.d.dirs.Tmp, dt.d.logger, dt.d.noFsync, dt.d.Accessors)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", dt.d.FilenameBase, r.values.from, r.values.to, err)
 		}

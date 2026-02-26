@@ -23,13 +23,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
+	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -58,7 +58,7 @@ type BlockTest struct {
 
 // UnmarshalJSON implements json.Unmarshaler interface.
 func (bt *BlockTest) UnmarshalJSON(in []byte) error {
-	return json.Unmarshal(in, &bt.json)
+	return jsoniter.ConfigFastest.Unmarshal(in, &bt.json)
 }
 
 type btJSON struct {
@@ -217,11 +217,14 @@ func (bt *BlockTest) Run(t *testing.T) error {
 		return testforks.UnsupportedForkError{Name: bt.json.Network}
 	}
 	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
-	var mOpts []execmoduletester.Option
+	mOpts := []execmoduletester.Option{
+		execmoduletester.WithGenesisSpec(bt.genesis(config)),
+		execmoduletester.WithEngine(engine),
+	}
 	if bt.ExperimentalBAL {
 		mOpts = append(mOpts, execmoduletester.WithExperimentalBAL())
 	}
-	m := execmoduletester.NewWithGenesisEngine(t, bt.genesis(config), engine, mOpts...)
+	m := execmoduletester.New(t, mOpts...)
 
 	bt.br = m.BlockReader
 	// import pre accounts & construct test genesis block & state root
@@ -262,7 +265,7 @@ func (bt *BlockTest) RunCLI() error {
 		return testforks.UnsupportedForkError{Name: bt.json.Network}
 	}
 	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
-	m := execmoduletester.NewWithGenesisEngine(nil, bt.genesis(config), engine)
+	m := execmoduletester.New(nil, execmoduletester.WithGenesisSpec(bt.genesis(config)), execmoduletester.WithEngine(engine))
 	defer m.DB.Close()
 
 	bt.br = m.BlockReader
