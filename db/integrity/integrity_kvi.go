@@ -113,8 +113,9 @@ func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression 
 		firstErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
 	}
 
+	trace := logger.Enabled(ctx, log.LvlTrace)
 	checkOne := func(kviReader *recsplit.IndexReader, work kviWorkItem) error {
-		if logger.Enabled(ctx, log.LvlTrace) {
+		if trace {
 			logger.Trace("[integrity] checking kvi for", "key", hex.EncodeToString(work.key), "offset", work.offset, "kvi", kviFileName)
 		}
 		kviOffset, found := kviReader.Lookup(work.key)
