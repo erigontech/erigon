@@ -73,14 +73,14 @@ func (b *singleBatchBackend) ReadDelayedInbox(seqNum uint64) (*arbostypes.L1Inco
 }
 
 // UnpackBatch takes serialized batch data and extracts all MessageWithMetadata from it
-func UnpackBatch(ctx context.Context, seqNum uint64, data []byte, blockHash common.Hash, dapReaders []daprovider.Reader, db kv.RwDB) ([]*arbostypes.MessageWithMetadata, error) {
+func UnpackBatch(ctx context.Context, seqNum uint64, data []byte, blockHash common.Hash, dapReaders []daprovider.Reader, db kv.RwDB, delayedMessagesRead uint64) ([]*arbostypes.MessageWithMetadata, error) {
 	backend := &singleBatchBackend{
 		data:      data,
 		blockHash: blockHash,
 		seqNum:    seqNum,
 		db:        db,
 	}
-	multiplexer := arbstate.NewInboxMultiplexer(backend, 0, dapReaders, daprovider.KeysetValidate)
+	multiplexer := arbstate.NewInboxMultiplexer(backend, delayedMessagesRead, dapReaders, daprovider.KeysetValidate)
 
 	var messages []*arbostypes.MessageWithMetadata
 	for !backend.consumed {
@@ -95,7 +95,7 @@ func UnpackBatch(ctx context.Context, seqNum uint64, data []byte, blockHash comm
 
 // ProcessBatch unpacks a batch into messages, stores everything in DB, and executes L2 blocks via DigestMessage
 func (s *L1SyncService) ProcessBatch(ctx context.Context, seqNum uint64, data []byte, blockHash common.Hash, l1BlockNumber uint64) error {
-	messages, err := UnpackBatch(ctx, seqNum, data, blockHash, s.dapReaders, s.db)
+	messages, err := UnpackBatch(ctx, seqNum, data, blockHash, s.dapReaders, s.db, s.delayedMessagesRead)
 	if err != nil {
 		return err
 	}
@@ -152,8 +152,48 @@ func (s *L1SyncService) ProcessBatch(ctx context.Context, seqNum uint64, data []
 		return fmt.Errorf("failed to commit batch %d: %w", seqNum, err)
 	}
 
+	// Update in-memory delayedMessagesRead from the last message of this batch
+	if len(messages) > 0 {
+		s.delayedMessagesRead = messages[len(messages)-1].DelayedMessagesRead
+	}
+
 	s.logger.Info("batch processed and stored", "batchSeqNum", seqNum, "messages", len(messages), "l1Block", l1BlockNumber)
 	return nil
+}
+
+// getLastDelayedMessagesRead returns the DelayedMessagesRead from the last message
+// of the given batch
+func (s *L1SyncService) getLastDelayedMessagesRead(ctx context.Context, batchSeqNum uint64) (uint64, error) {
+	var result uint64
+	err := s.db.View(ctx, func(tx kv.Tx) error {
+		// Get msg count from the batch entry
+		val, e := tx.GetOne(kv.ArbL1SyncBatch, uint64Key(batchSeqNum))
+		if e != nil {
+			return e
+		}
+		if val == nil || len(val) < 8 {
+			return nil
+		}
+		msgCount := binary.BigEndian.Uint64(val[:8])
+		if msgCount == 0 {
+			return nil
+		}
+		// Read the last message of this batch
+		lastMsgData, e := tx.GetOne(kv.ArbL1SyncMsg, msgKey(batchSeqNum, msgCount-1))
+		if e != nil {
+			return e
+		}
+		if lastMsgData == nil {
+			return nil
+		}
+		var msg arbostypes.MessageWithMetadata
+		if e := json.Unmarshal(lastMsgData, &msg); e != nil {
+			return e
+		}
+		result = msg.DelayedMessagesRead
+		return nil
+	})
+	return result, err
 }
 
 // GetProgress reads the last processed batch sequence number and L1 block from DB

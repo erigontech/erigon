@@ -25,6 +25,8 @@ type L1SyncService struct {
 	db             kv.RwDB
 	logger         log.Logger
 
+	delayedMessagesRead uint64
+
 	ctx    context.Context
 	cancel context.CancelFunc
 }
@@ -102,6 +104,16 @@ func (s *L1SyncService) fetchDelayedMessagesInRange(ctx context.Context, fromL1B
 
 func (s *L1SyncService) Start(ctx context.Context) {
 	s.ctx, s.cancel = context.WithCancel(ctx)
+
+	// Load delayedMessagesRead from DB (from the last message of the last processed batch)
+	lastBatch, _, err := s.GetProgress(ctx)
+	if err == nil && lastBatch > 0 {
+		dmr, err := s.getLastDelayedMessagesRead(ctx, lastBatch)
+		if err == nil {
+			s.delayedMessagesRead = dmr
+		}
+	}
+
 	go s.pollLoop()
 }
 
