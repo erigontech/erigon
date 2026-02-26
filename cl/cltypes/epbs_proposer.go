@@ -11,6 +11,7 @@ import (
 
 var (
 	_ ssz.HashableSSZ = (*ProposerPreferences)(nil)
+	_ ssz.HashableSSZ = (*SignedProposerPreferences)(nil)
 
 	_ ssz2.SizedObjectSSZ = (*ProposerPreferences)(nil)
 	_ ssz2.SizedObjectSSZ = (*SignedProposerPreferences)(nil)
@@ -85,6 +86,10 @@ func (s *SignedProposerPreferences) EncodeSSZ(buf []byte) ([]byte, error) {
 func (s *SignedProposerPreferences) DecodeSSZ(buf []byte, version int) error {
 	s.Message = new(ProposerPreferences)
 	return ssz2.UnmarshalSSZ(buf, version, s.Message, s.Signature[:])
+}
+
+func (s *SignedProposerPreferences) HashSSZ() ([32]byte, error) {
+	return merkle_tree.HashTreeRoot(s.Message, s.Signature[:])
 }
 
 func (s *SignedProposerPreferences) Clone() clonable.Clonable {

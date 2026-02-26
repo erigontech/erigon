@@ -265,9 +265,10 @@ func ComputeTimestampAtSlot(b abstract.BeaconState, slot uint64) uint64 {
 // respecting the combined limit of prior withdrawals + MAX_PENDING_PARTIALS_PER_WITHDRAWALS_SWEEP
 // and MAX_WITHDRAWALS_PER_PAYLOAD - 1.
 // Returns the new withdrawals, updated withdrawal index, and the number of processed entries.
-func GetPendingPartialWithdrawals(b abstract.BeaconState, withdrawalIndex uint64, priorWithdrawals []*cltypes.Withdrawal) ([]*cltypes.Withdrawal, uint64, uint64) {
+func GetPendingPartialWithdrawals(b abstract.BeaconState, withdrawalIndex uint64, priorWithdrawals []*cltypes.Withdrawal) ([]*cltypes.Withdrawal, uint64, uint64, error) {
 	epoch := Epoch(b)
 	cfg := b.BeaconConfig()
+	validatorSetLen := b.ValidatorLength()
 
 	withdrawalsLimit := min(
 		len(priorWithdrawals)+int(cfg.MaxPendingPartialsPerWithdrawalsSweep),
@@ -276,11 +277,17 @@ func GetPendingPartialWithdrawals(b abstract.BeaconState, withdrawalIndex uint64
 
 	var processedCount uint64
 	var withdrawals []*cltypes.Withdrawal
+	var rangeErr error
 
 	b.GetPendingPartialWithdrawals().Range(func(_ int, w *solid.PendingPartialWithdrawal, _ int) bool {
 		isWithdrawable := w.WithdrawableEpoch <= epoch
 		hasReachedLimit := len(priorWithdrawals)+len(withdrawals) >= withdrawalsLimit
 		if !isWithdrawable || hasReachedLimit {
+			return false
+		}
+
+		if int(w.ValidatorIndex) >= validatorSetLen {
+			rangeErr = fmt.Errorf("GetPendingPartialWithdrawals: validator_index %d out of range (validators length %d)", w.ValidatorIndex, validatorSetLen)
 			return false
 		}
 
@@ -306,7 +313,10 @@ func GetPendingPartialWithdrawals(b abstract.BeaconState, withdrawalIndex uint64
 		return true
 	})
 
-	return withdrawals, withdrawalIndex, processedCount
+	if rangeErr != nil {
+		return nil, withdrawalIndex, 0, rangeErr
+	}
+	return withdrawals, withdrawalIndex, processedCount, nil
 }
 
 // getBalanceAfterWithdrawals returns a validator's balance minus the total amount
@@ -332,7 +342,7 @@ func getBalanceAfterWithdrawals(b abstract.BeaconState, validatorIndex uint64, w
 }
 
 // GetExpectedWithdrawals calculates the expected withdrawals that can be made by validators in the current epoch
-func GetExpectedWithdrawals(b abstract.BeaconState, currentEpoch uint64) *cltypes.ExpectedWithdrawals {
+func GetExpectedWithdrawals(b abstract.BeaconState, currentEpoch uint64) (*cltypes.ExpectedWithdrawals, error) {
 	nextWithdrawalIndex := b.NextWithdrawalIndex()
 	expWithdrawals := &cltypes.ExpectedWithdrawals{
 		Withdrawals: []*cltypes.Withdrawal{},
@@ -348,7 +358,10 @@ func GetExpectedWithdrawals(b abstract.BeaconState, currentEpoch uint64) *cltype
 
 	// [New in Electra:EIP7251] Consume pending partial withdrawals
 	if b.Version() >= clparams.ElectraVersion {
-		partialWithdrawals, nextIdx, count := GetPendingPartialWithdrawals(b, nextWithdrawalIndex, expWithdrawals.Withdrawals)
+		partialWithdrawals, nextIdx, count, err := GetPendingPartialWithdrawals(b, nextWithdrawalIndex, expWithdrawals.Withdrawals)
+		if err != nil {
+			return nil, err
+		}
 		expWithdrawals.Withdrawals = append(expWithdrawals.Withdrawals, partialWithdrawals...)
 		nextWithdrawalIndex = nextIdx
 		expWithdrawals.ProcessedPartialWithdrawalsCount = count
@@ -356,40 +369,55 @@ func GetExpectedWithdrawals(b abstract.BeaconState, currentEpoch uint64) *cltype
 
 	// [New in Gloas:EIP7732] Get builders sweep withdrawals
 	if b.Version() >= clparams.GloasVersion {
-		buildersSweepWithdrawals, nextIdx, processedBuildersSweepCount := GetBuildersSweepWithdrawals(b, nextWithdrawalIndex, expWithdrawals.Withdrawals)
+		buildersSweepWithdrawals, nextIdx, processedBuildersSweepCount, err := GetBuildersSweepWithdrawals(b, nextWithdrawalIndex, expWithdrawals.Withdrawals)
+		if err != nil {
+			return nil, err
+		}
 		expWithdrawals.Withdrawals = append(expWithdrawals.Withdrawals, buildersSweepWithdrawals...)
 		nextWithdrawalIndex = nextIdx
 		expWithdrawals.ProcessedBuildersSweepCount = processedBuildersSweepCount
 	}
 
 	// Sweep for remaining withdrawals
-	sweepWithdrawals, nextIdx, processedValidatorsSweepCount := GetValidatorsSweepWithdrawals(b, nextWithdrawalIndex, currentEpoch, expWithdrawals.Withdrawals)
+	sweepWithdrawals, nextIdx, processedValidatorsSweepCount, err := GetValidatorsSweepWithdrawals(b, nextWithdrawalIndex, currentEpoch, expWithdrawals.Withdrawals)
+	if err != nil {
+		return nil, err
+	}
 	expWithdrawals.Withdrawals = append(expWithdrawals.Withdrawals, sweepWithdrawals...)
 	_ = nextIdx
 
 	expWithdrawals.ProcessedSweepWithdrawalsCount = processedValidatorsSweepCount
-	return expWithdrawals
+	return expWithdrawals, nil
 }
 
 // GetValidatorsSweepWithdrawals sweeps through validators starting from next_withdrawal_validator_index,
 // collecting full and partial withdrawals.
 // Returns the new withdrawals, updated withdrawal index, and the number of processed validators.
-func GetValidatorsSweepWithdrawals(b abstract.BeaconState, withdrawalIndex uint64, epoch uint64, priorWithdrawals []*cltypes.Withdrawal) ([]*cltypes.Withdrawal, uint64, uint64) {
+func GetValidatorsSweepWithdrawals(b abstract.BeaconState, withdrawalIndex uint64, epoch uint64, priorWithdrawals []*cltypes.Withdrawal) ([]*cltypes.Withdrawal, uint64, uint64, error) {
 	cfg := b.BeaconConfig()
 	maxValidators := uint64(b.ValidatorLength())
+	if maxValidators == 0 {
+		return nil, withdrawalIndex, 0, nil
+	}
 	validatorsLimit := min(maxValidators, cfg.MaxValidatorsPerWithdrawalsSweep)
 	withdrawalsLimit := int(cfg.MaxWithdrawalsPerPayload)
 
 	var processedCount uint64
 	var withdrawals []*cltypes.Withdrawal
 	validatorIndex := b.NextWithdrawalValidatorIndex()
+	if validatorIndex >= maxValidators {
+		return nil, withdrawalIndex, 0, fmt.Errorf("GetValidatorsSweepWithdrawals: next_withdrawal_validator_index %d out of range (validators length %d)", validatorIndex, maxValidators)
+	}
 
 	for range validatorsLimit {
 		if len(priorWithdrawals)+len(withdrawals) >= withdrawalsLimit {
 			break
 		}
 
-		validator, _ := b.ValidatorForValidatorIndex(int(validatorIndex))
+		validator, err := b.ValidatorForValidatorIndex(int(validatorIndex))
+		if err != nil {
+			return nil, withdrawalIndex, 0, fmt.Errorf("GetValidatorsSweepWithdrawals: %w", err)
+		}
 		var balance uint64
 		if b.Version() >= clparams.ElectraVersion {
 			balance = getBalanceAfterWithdrawals(b, validatorIndex, priorWithdrawals, withdrawals)
@@ -422,7 +450,7 @@ func GetValidatorsSweepWithdrawals(b abstract.BeaconState, withdrawalIndex uint6
 		processedCount++
 	}
 
-	return withdrawals, withdrawalIndex, processedCount
+	return withdrawals, withdrawalIndex, processedCount, nil
 }
 
 // GetBuilderWithdrawals constructs withdrawal entries from builder pending withdrawals,
@@ -465,27 +493,33 @@ func GetBuilderWithdrawals(b abstract.BeaconState, withdrawalIndex uint64, prior
 // GetBuildersSweepWithdrawals sweeps through builders starting from next_withdrawal_builder_index,
 // collecting withdrawals for builders whose withdrawable_epoch has passed and have a positive balance.
 // Returns the new withdrawals, updated withdrawal index, and the number of processed builders.
-func GetBuildersSweepWithdrawals(b abstract.BeaconState, withdrawalIndex uint64, priorWithdrawals []*cltypes.Withdrawal) ([]*cltypes.Withdrawal, uint64, uint64) {
+func GetBuildersSweepWithdrawals(b abstract.BeaconState, withdrawalIndex uint64, priorWithdrawals []*cltypes.Withdrawal) ([]*cltypes.Withdrawal, uint64, uint64, error) {
 	epoch := Epoch(b)
 	cfg := b.BeaconConfig()
 
 	builders := b.GetBuilders()
 	if builders == nil {
 		log.Warn("GetBuildersSweepWithdrawals: builders is nil")
-		return nil, withdrawalIndex, 0
+		return nil, withdrawalIndex, 0, nil
 	}
 
 	buildersLen := builders.Len()
+	if buildersLen == 0 {
+		return nil, withdrawalIndex, 0, nil
+	}
 	buildersLimit := min(buildersLen, int(cfg.MaxBuildersPerWithdrawalsSweep))
 	withdrawalsLimit := int(cfg.MaxWithdrawalsPerPayload) - 1
 	if len(priorWithdrawals) > withdrawalsLimit {
 		log.Warn("GetBuildersSweepWithdrawals: prior withdrawals exceed limit", "prior", len(priorWithdrawals), "limit", withdrawalsLimit)
-		return []*cltypes.Withdrawal{}, withdrawalIndex, 0
+		return []*cltypes.Withdrawal{}, withdrawalIndex, 0, nil
 	}
 
 	var processedCount uint64
 	var withdrawals []*cltypes.Withdrawal
 	builderIndex := b.GetNextWithdrawalBuilderIndex()
+	if builderIndex >= uint64(buildersLen) {
+		return nil, withdrawalIndex, 0, fmt.Errorf("GetBuildersSweepWithdrawals: next_withdrawal_builder_index %d out of range (builders length %d)", builderIndex, buildersLen)
+	}
 
 	for range buildersLimit {
 		if len(priorWithdrawals)+len(withdrawals) >= withdrawalsLimit {
@@ -507,7 +541,7 @@ func GetBuildersSweepWithdrawals(b abstract.BeaconState, withdrawalIndex uint64,
 		processedCount++
 	}
 
-	return withdrawals, withdrawalIndex, processedCount
+	return withdrawals, withdrawalIndex, processedCount, nil
 }
 
 // GetNextSyncCommitteeIndices returns the sync committee indices, with possible duplicates,

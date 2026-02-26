@@ -51,7 +51,9 @@ func init() {
 		With("participation_record_updates", participationRecordUpdatesTest).
 		With("pending_deposits", pendingDepositTest).
 		With("pending_consolidations", PendingConsolidationTest).
-		With("proposer_lookahead", ProposerLookaheadTest)
+		With("proposer_lookahead", ProposerLookaheadTest).
+		With("historical_summaries_update", historicalSummariesUpdateTest).
+		With("builder_pending_payments", builderPendingPaymentsTest)
 	TestFormats.Add("finality").
 		With("finality", FinalityFinality)
 	TestFormats.Add("fork_choice").
@@ -82,7 +84,9 @@ func init() {
 		WithFn("bls_to_execution_change", operationSignedBlsChangeHandler).
 		WithFn("consolidation_request", operationConsolidationRequestHandler).
 		WithFn("deposit_request", operationDepositRequstHandler).
-		WithFn("withdrawal_request", operationWithdrawalRequstHandler)
+		WithFn("withdrawal_request", operationWithdrawalRequstHandler).
+		WithFn("execution_payload_bid", operationExecutionPayloadBidHandler).
+		WithFn("payload_attestation", operationPayloadAttestationHandler)
 	TestFormats.Add("random").
 		With("random", SanityBlocks)
 	TestFormats.Add("rewards").
@@ -203,5 +207,45 @@ func addSszTests() {
 		With("PendingPartialWithdrawal", sszStaticTestByEmptyObject(&solid.PendingPartialWithdrawal{}, runAfterVersion(clparams.ElectraVersion))). // no need json test
 		With("DataColumnsByRootIdentifier", sszStaticTestByEmptyObject(&cltypes.DataColumnsByRootIdentifier{}, runAfterVersion(clparams.FuluVersion))).
 		With("MatrixEntry", sszStaticTestByEmptyObject(&cltypes.MatrixEntry{}, withTestJson(), runAfterVersion(clparams.FuluVersion))).
-		With("DataColumnSidecar", sszStaticTestByEmptyObject(&cltypes.DataColumnSidecar{}, withTestJson(), runAfterVersion(clparams.FuluVersion)))
+		With("DataColumnSidecar", sszStaticTestNewObjectByFunc(
+			func(v clparams.StateVersion) *cltypes.DataColumnSidecar {
+				return cltypes.NewDataColumnSidecarWithVersion(v)
+			}, withTestJson(), runAfterVersion(clparams.FuluVersion))).
+		// [New in Gloas:EIP7732] GLOAS SSZ types
+		With("Builder", sszStaticTestByEmptyObject(&cltypes.Builder{}, runAfterVersion(clparams.GloasVersion))).
+		With("BuilderPendingPayment", sszStaticTestByEmptyObject(&cltypes.BuilderPendingPayment{
+			Withdrawal: &cltypes.BuilderPendingWithdrawal{},
+		}, runAfterVersion(clparams.GloasVersion))).
+		With("BuilderPendingWithdrawal", sszStaticTestByEmptyObject(&cltypes.BuilderPendingWithdrawal{}, runAfterVersion(clparams.GloasVersion))).
+		With("ExecutionPayloadBid", sszStaticTestByEmptyObject(&cltypes.ExecutionPayloadBid{
+			BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
+		}, runAfterVersion(clparams.GloasVersion))).
+		With("ExecutionPayloadEnvelope", sszStaticTestNewObjectByFunc(
+			func(v clparams.StateVersion) *cltypes.ExecutionPayloadEnvelope {
+				return cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)
+			}, runAfterVersion(clparams.GloasVersion))).
+		With("IndexedPayloadAttestation", sszStaticTestNewObjectByFunc(
+			func(v clparams.StateVersion) *cltypes.IndexedPayloadAttestation {
+				return cltypes.NewIndexedPayloadAttestation()
+			}, runAfterVersion(clparams.GloasVersion))).
+		With("PayloadAttestation", sszStaticTestByEmptyObject(&cltypes.PayloadAttestation{}, runAfterVersion(clparams.GloasVersion))).
+		With("PayloadAttestationData", sszStaticTestByEmptyObject(&cltypes.PayloadAttestationData{}, runAfterVersion(clparams.GloasVersion))).
+		With("PayloadAttestationMessage", sszStaticTestByEmptyObject(&cltypes.PayloadAttestationMessage{
+			Data: &cltypes.PayloadAttestationData{},
+		}, runAfterVersion(clparams.GloasVersion))).
+		With("ProposerPreferences", sszStaticTestByEmptyObject(&cltypes.ProposerPreferences{}, runAfterVersion(clparams.GloasVersion))).
+		With("SignedExecutionPayloadBid", sszStaticTestByEmptyObject(&cltypes.SignedExecutionPayloadBid{
+			Message: &cltypes.ExecutionPayloadBid{
+				BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
+			},
+		}, runAfterVersion(clparams.GloasVersion))).
+		With("SignedExecutionPayloadEnvelope", sszStaticTestNewObjectByFunc(
+			func(v clparams.StateVersion) *cltypes.SignedExecutionPayloadEnvelope {
+				return &cltypes.SignedExecutionPayloadEnvelope{
+					Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig),
+				}
+			}, runAfterVersion(clparams.GloasVersion))).
+		With("SignedProposerPreferences", sszStaticTestByEmptyObject(&cltypes.SignedProposerPreferences{
+			Message: &cltypes.ProposerPreferences{},
+		}, runAfterVersion(clparams.GloasVersion)))
 }
