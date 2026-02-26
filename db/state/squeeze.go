@@ -450,7 +450,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	if err != nil {
 		return nil, err
 	}
-	defer rwTx.Rollback()
+	defer func() { rwTx.Rollback() }()
 	{
 		execProgress, err = stages.GetStageProgress(rwTx, stages.Execution)
 		if err != nil {
@@ -481,6 +481,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	if err != nil {
 		return nil, err
 	}
+	defer func() { domains.Close() }()
 	domains.DiscardWrites(kv.AccountsDomain)
 	domains.DiscardWrites(kv.StorageDomain)
 	domains.DiscardWrites(kv.CodeDomain)
@@ -689,6 +690,8 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		var blockKeyCount uint64
 		err = batch.Load(ctx, func(blockNum uint64, rawKey []byte) error {
 			if blockNum != curBlock {
+				// Finalize the previous keyed block (or, on first key, start from blockFrom).
+				prevEnd := blockFrom
 				if curBlock != ^uint64(0) {
 					if debugBlock > 0 && curBlock >= debugBlock-5 && curBlock <= debugBlock+5 {
 						logger.Info("[rebuild_debug] finalizing block from Load",
@@ -697,14 +700,15 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 					if err := finalizeBlock(curBlock, batch.TxNum(curBlock)); err != nil {
 						return err
 					}
-					for b := curBlock + 1; b < blockNum; b++ {
-						if debugBlock > 0 && b >= debugBlock-5 && b <= debugBlock+5 {
-							logger.Info("[rebuild_debug] finalizing empty block from Load",
-								"block", b, "toTxNum", batch.TxNum(b))
-						}
-						if err := finalizeBlock(b, batch.TxNum(b)); err != nil {
-							return err
-						}
+					prevEnd = curBlock + 1
+				}
+				for b := prevEnd; b < blockNum; b++ {
+					if debugBlock > 0 && b >= debugBlock-5 && b <= debugBlock+5 {
+						logger.Info("[rebuild_debug] finalizing empty block from Load",
+							"block", b, "toTxNum", batch.TxNum(b))
+					}
+					if err := finalizeBlock(b, batch.TxNum(b)); err != nil {
+						return err
 					}
 				}
 				blockKeyCount = 0
