@@ -380,9 +380,6 @@ func checkDerefBranch(
 			offset := state.DecodeReferenceKey(key)
 			if offset >= uint64(storageReader.Size()) {
 				err := fmt.Errorf("storage reference key %x out of bounds for branch %x in %s: %d vs %d", key, branchKey, fileName, offset, storageReader.Size())
-				if failFast {
-					return nil, err
-				}
 				logger.Warn(err.Error())
 				return key, nil
 			}
@@ -390,9 +387,6 @@ func checkDerefBranch(
 			plainKey, _ := storageReader.Next(plainKeyBuf[:0])
 			if len(plainKey) != length.Addr+length.Hash {
 				err := fmt.Errorf("storage reference key %x has invalid plainKey for branch %x in %s", key, branchKey, fileName)
-				if failFast {
-					return nil, err
-				}
 				logger.Warn(err.Error())
 				integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
 				return key, nil
@@ -426,9 +420,6 @@ func checkDerefBranch(
 		offset := state.DecodeReferenceKey(key)
 		if offset >= uint64(accReader.Size()) {
 			err := fmt.Errorf("account reference key %x out of bounds for branch %x in %s: %d vs %d", key, branchKey, fileName, offset, accReader.Size())
-			if failFast {
-				return nil, err
-			}
 			logger.Warn(err.Error())
 			return key, nil
 		}
@@ -436,9 +427,6 @@ func checkDerefBranch(
 		plainKey, _ := accReader.Next(plainKeyBuf[:0])
 		if len(plainKey) != length.Addr {
 			err := fmt.Errorf("account reference key %x has invalid plainKey for branch %x in %s", key, branchKey, fileName)
-			if failFast {
-				return nil, err
-			}
 			logger.Warn(err.Error())
 			integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
 			return key, nil
@@ -455,14 +443,8 @@ func checkDerefBranch(
 		}
 		return plainKey, nil
 	})
-	if err != nil {
-		return dc, nil, err
-	}
 	if err := newBranchData.Validate(branchKey); err != nil {
 		err = fmt.Errorf("branch data validation failure for branch key %x in %s: %w", branchKey, fileName, err)
-		if failFast {
-			return dc, nil, err
-		}
 		logger.Warn(err.Error())
 		integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
 	}
@@ -529,7 +511,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 			continue
 		}
 		counts.branchKeys++
-		dc, _, err := checkDerefBranch(branchKey, branchValue, newBranchValueBuf, plainKeyBuf, accReader, storageReader, fileName, failFast, trace, logger)
+		dc, _, err := checkDerefBranch(branchKey, branchValue, newBranchValueBuf, plainKeyBuf, accReader, storageReader, fileName, trace, logger)
 		counts.referencedAccounts += dc.referencedAccounts
 		counts.plainAccounts += dc.plainAccounts
 		counts.referencedStorages += dc.referencedStorages
