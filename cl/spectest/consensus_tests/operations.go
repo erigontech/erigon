@@ -320,12 +320,19 @@ func operationWithdrawalHandler(t *testing.T, root fs.FS, c spectest.TestCase) e
 	if err != nil && !expectedError {
 		return err
 	}
-	executionPayload := cltypes.NewEth1Block(c.Version(), &clparams.MainnetBeaconConfig)
-	if err := spectest.ReadSszOld(root, executionPayload, c.Version(), executionPayloadFileName); err != nil {
-		return err
+
+	// [Modified in Gloas:EIP7732] In GLOAS, withdrawals are computed from state
+	// rather than extracted from an execution payload.
+	var withdrawals *solid.ListSSZ[*cltypes.Withdrawal]
+	if c.Version() < clparams.GloasVersion {
+		executionPayload := cltypes.NewEth1Block(c.Version(), &clparams.MainnetBeaconConfig)
+		if err := spectest.ReadSszOld(root, executionPayload, c.Version(), executionPayloadFileName); err != nil {
+			return err
+		}
+		withdrawals = executionPayload.Withdrawals
 	}
 
-	if err := c.Machine.ProcessWithdrawals(preState, executionPayload.Withdrawals); err != nil {
+	if err := c.Machine.ProcessWithdrawals(preState, withdrawals); err != nil {
 		if expectedError {
 			return nil
 		}
@@ -475,11 +482,91 @@ func operationExecutionPayloadHandler(t *testing.T, root fs.FS, c spectest.TestC
 	if err != nil && !expectedError {
 		return err
 	}
-	body := cltypes.NewBeaconBody(&clparams.MainnetBeaconConfig, c.Version())
-	if err := spectest.ReadSszOld(root, body, c.Version(), "body.ssz_snappy"); err != nil {
+
+	if c.Version() >= clparams.GloasVersion {
+		// [New in Gloas:EIP7732] execution_payload tests use signed_envelope.ssz_snappy
+		envelope := &cltypes.SignedExecutionPayloadEnvelope{
+			Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig),
+		}
+		if err := spectest.ReadSszOld(root, envelope, c.Version(), "signed_envelope.ssz_snappy"); err != nil {
+			return err
+		}
+		if err := c.Machine.ProcessExecutionPayloadEnvelope(preState, envelope); err != nil {
+			if expectedError {
+				return nil
+			}
+			return err
+		}
+	} else {
+		body := cltypes.NewBeaconBody(&clparams.MainnetBeaconConfig, c.Version())
+		if err := spectest.ReadSszOld(root, body, c.Version(), "body.ssz_snappy"); err != nil {
+			return err
+		}
+		if err := c.Machine.ProcessExecutionPayload(preState, body); err != nil {
+			if expectedError {
+				return nil
+			}
+			return err
+		}
+	}
+
+	if expectedError {
+		return errors.New("expected error")
+	}
+	haveRoot, err := preState.HashSSZ()
+	require.NoError(t, err)
+
+	expectedRoot, err := postState.HashSSZ()
+	require.NoError(t, err)
+
+	assert.EqualValues(t, expectedRoot, haveRoot)
+	return nil
+}
+
+func operationExecutionPayloadBidHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
+	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
+	require.NoError(t, err)
+	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
+	expectedError := os.IsNotExist(err)
+	if err != nil && !expectedError {
 		return err
 	}
-	if err := c.Machine.ProcessExecutionPayload(preState, body); err != nil {
+	block := cltypes.NewBeaconBlock(&clparams.MainnetBeaconConfig, c.Version())
+	if err := spectest.ReadSszOld(root, block, c.Version(), blockFileName); err != nil {
+		return err
+	}
+	if err := c.Machine.ProcessExecutionPayloadBid(preState, block); err != nil {
+		if expectedError {
+			return nil
+		}
+		return err
+	}
+	if expectedError {
+		return errors.New("expected error")
+	}
+	haveRoot, err := preState.HashSSZ()
+	require.NoError(t, err)
+
+	expectedRoot, err := postState.HashSSZ()
+	require.NoError(t, err)
+
+	assert.EqualValues(t, expectedRoot, haveRoot)
+	return nil
+}
+
+func operationPayloadAttestationHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
+	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
+	require.NoError(t, err)
+	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
+	expectedError := os.IsNotExist(err)
+	if err != nil && !expectedError {
+		return err
+	}
+	att := &cltypes.PayloadAttestation{}
+	if err := spectest.ReadSszOld(root, att, c.Version(), "payload_attestation.ssz_snappy"); err != nil {
+		return err
+	}
+	if err := c.Machine.ProcessPayloadAttestation(preState, att); err != nil {
 		if expectedError {
 			return nil
 		}

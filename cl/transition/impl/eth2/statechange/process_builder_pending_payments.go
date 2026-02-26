@@ -27,7 +27,9 @@ func ProcessBuilderPendingPayments(s abstract.BeaconState) {
 		pendingPayments.Set(i, pendingPayments.Get(i+slotsPerEpoch))
 	}
 	for i := totalLen - slotsPerEpoch; i < totalLen; i++ {
-		pendingPayments.Set(i, &cltypes.BuilderPendingPayment{})
+		pendingPayments.Set(i, &cltypes.BuilderPendingPayment{
+			Withdrawal: &cltypes.BuilderPendingWithdrawal{},
+		})
 	}
 	s.SetBuilderPendingPayments(pendingPayments)
 }
