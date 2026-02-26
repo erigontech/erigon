@@ -1103,7 +1103,7 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 			"dur", dur)
 
 		// Phase 2: Hash verification — only runs if key correspondence passes.
-		numWorkers := dbg.EnvInt("CHECK_VERIFY_STATE_WORKERS", runtime.NumCPU())
+		numWorkers := dbg.EnvInt("CHECK_VERIFY_STATE_WORKERS", estimate.AlmostAllCPUs())
 		hashErr := checkHashVerification(ctx, file, stepSize, failFast, numWorkers, logger)
 		if hashErr != nil {
 			integrityErr = hashErr
@@ -1348,7 +1348,7 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 			"dur", dur)
 
 		// Phase 2: Hash verification — only runs if key correspondence passes.
-		numWorkers := dbg.EnvInt("CHECK_VERIFY_STATE_WORKERS", runtime.NumCPU())
+		numWorkers := dbg.EnvInt("CHECK_VERIFY_STATE_WORKERS", estimate.AlmostAllCPUs())
 		hashErr := checkHashVerification(ctx, file, stepSize, failFast, numWorkers, logger)
 		if hashErr != nil {
 			integrityErr = hashErr
