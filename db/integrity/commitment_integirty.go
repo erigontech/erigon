@@ -1060,11 +1060,10 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 								ErrIntegrity, kind, key, item.key, fileName, offset, reader.Size())
 						}
 						reader.Reset(offset)
-						var keyLen uint64
-						plainKey, keyLen = reader.Next(plainKeyBuf[:0])
-						if int(keyLen) != expectedLen {
+						plainKey, _ = reader.Next(plainKeyBuf[:0])
+						if len(plainKey) != expectedLen {
 							return nil, fmt.Errorf("%w: %s reference key %x has invalid plainKey len=%d for branch %x in %s",
-								ErrIntegrity, kind, key, keyLen, item.key, fileName)
+								ErrIntegrity, kind, key, len(plainKey), item.key, fileName)
 						}
 					}
 					collectMu.Lock()
