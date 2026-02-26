@@ -1936,11 +1936,13 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 			}
 			select {
 			case <-logTicker.C:
+				var m runtime.MemStats
+				dbg.ReadMemStats(&m)
 				logger.Info("[verify-state] hash verification progress",
 					"produced", produced,
 					"checked", hashChecked.Load(),
 					"mismatches", hashMismatches.Load(),
-					"kv", fileName)
+					"kv", fileName, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 			default:
 			}
 		}
