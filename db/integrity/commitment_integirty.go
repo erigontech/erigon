@@ -1092,7 +1092,18 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 		workerAccReader := seg.NewReader(accDecomp.MakeGetter(), accCompression)
 		workerStoReader := seg.NewReader(stoDecomp.MakeGetter(), stoCompression)
 		g.Go(func() error {
-			return processBranchWorker(ch, w, workerAccReader, workerStoReader, isReferencing, fileName, failFast, logger)
+			for item := range ch {
+				if err := processBranch(item.key, commitment.BranchData(item.value),
+					workerAccReader, workerStoReader, isReferencing, fileName, failFast,
+					w.accountOffsets, w.storageOffsets, w.accountPlain, w.storagePlain); err != nil {
+					if failFast {
+						return err
+					}
+					logger.Warn(err.Error())
+					w.integrityErr = err
+				}
+			}
+			return nil
 		})
 	}
 
@@ -1644,12 +1655,9 @@ func extractCommitmentRefsToTempFiles(ctx context.Context, file state.VisibleFil
 	plainKeyBuf := make([]byte, 0, length.Addr+length.Hash)
 
 	for commReader.HasNext() {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+		if err := ctx.Err(); err != nil {
+			return err
 		}
-
 		branchKey, _ := commReader.Next(branchKeyBuf[:0])
 		if !commReader.HasNext() {
 			break
@@ -1721,55 +1729,36 @@ func verifyHashItem(
 	accountValues := make(map[string][]byte, 8)
 	storageValues := make(map[string][]byte, 8)
 
-	resolvedBranchData, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
-		if isStorage {
-			plainKey := key
-			if len(key) != length.Addr+length.Hash {
-				if !isReferencing {
-					return key, nil
-				}
-				offset := state.DecodeReferenceKey(key)
-				if offset >= uint64(stoReader.Size()) {
-					return key, nil
-				}
-				stoReader.Reset(offset)
-				plainKey, _ = stoReader.Next(plainKeyBuf[:0])
-				if len(plainKey) != length.Addr+length.Hash {
-					return key, nil
-				}
-				val, _ := stoReader.Next(valBuf[:0])
-				storageValues[string(plainKey)] = common.Copy(val)
-			} else if preloadedStoValues != nil {
-				strKey := string(plainKey)
-				if val, ok := preloadedStoValues[strKey]; ok {
-					storageValues[strKey] = val
-				}
-			}
-			return plainKey, nil
-		}
+	resolveKey := func(key []byte, reader *seg.Reader, expectedLen int, values map[string][]byte, preloaded map[string][]byte) []byte {
 		plainKey := key
-		if len(key) != length.Addr {
+		if len(key) != expectedLen {
 			if !isReferencing {
-				return key, nil
+				return key
 			}
 			offset := state.DecodeReferenceKey(key)
-			if offset >= uint64(accReader.Size()) {
-				return key, nil
+			if offset >= uint64(reader.Size()) {
+				return key
 			}
-			accReader.Reset(offset)
-			plainKey, _ = accReader.Next(plainKeyBuf[:0])
-			if len(plainKey) != length.Addr {
-				return key, nil
+			reader.Reset(offset)
+			plainKey, _ = reader.Next(plainKeyBuf[:0])
+			if len(plainKey) != expectedLen {
+				return key
 			}
-			val, _ := accReader.Next(valBuf[:0])
-			accountValues[string(plainKey)] = common.Copy(val)
-		} else if preloadedAccValues != nil {
-			strKey := string(plainKey)
-			if val, ok := preloadedAccValues[strKey]; ok {
-				accountValues[strKey] = val
+			val, _ := reader.Next(valBuf[:0])
+			values[string(plainKey)] = common.Copy(val)
+		} else if preloaded != nil {
+			if val, ok := preloaded[string(plainKey)]; ok {
+				values[string(plainKey)] = val
 			}
 		}
-		return plainKey, nil
+		return plainKey
+	}
+
+	resolvedBranchData, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+		if isStorage {
+			return resolveKey(key, stoReader, length.Addr+length.Hash, storageValues, preloadedStoValues), nil
+		}
+		return resolveKey(key, accReader, length.Addr, accountValues, preloadedAccValues), nil
 	})
 	if err != nil {
 		return err
