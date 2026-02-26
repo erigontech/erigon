@@ -849,8 +849,9 @@ func CheckStateVerify(ctx context.Context, db kv.TemporalRoDB, failFast bool, fr
 	aggTx := state.AggTx(tx)
 	files := aggTx.Files(kv.CommitmentDomain)
 	stepSize := aggTx.StepSize()
-	var integrityErr error
-	var totalFiles int
+
+	// Pre-filter files to check
+	var filesToCheck []state.VisibleFile
 	for _, file := range files {
 		if !strings.HasSuffix(file.Fullpath(), ".kv") {
 			continue
@@ -860,44 +861,74 @@ func CheckStateVerify(ctx context.Context, db kv.TemporalRoDB, failFast bool, fr
 		if fileStep < fromStep {
 			continue
 		}
-		totalFiles++
+		filesToCheck = append(filesToCheck, file)
+	}
 
-		var checkErr error
-		if startTxNum == 0 {
-			// Base file: forward check (commitment refs count <= domain entries count)
-			checkErr = checkStateCorrespondenceBase(ctx, file, stepSize, failFast, logger)
-		} else {
-			// Non-base file: reverse check (every domain key is in commitment refs)
-			// Include the next commitment file's refs to handle step boundary effects:
-			// accounts written near the end of a step may have their commitment branch
-			// data in the next step's file.
-			// Collect all previous files for no-op write detection.
-			var nextFile state.VisibleFile
-			var prevFiles []state.VisibleFile
-			for j := 0; j < len(files); j++ {
-				if files[j].StartRootNum() == file.EndRootNum() && strings.HasSuffix(files[j].Fullpath(), ".kv") {
-					nextFile = files[j]
+	// Parallel file checking with controlled concurrency
+	var eg *errgroup.Group
+	if failFast {
+		eg, ctx = errgroup.WithContext(ctx)
+	} else {
+		eg = &errgroup.Group{}
+	}
+	// Limit to prevent resource exhaustion when reading multiple large files
+	eg.SetLimit(dbg.EnvInt("CHECK_STATE_VERIFY_WORKERS", estimate.AlmostAllCPUs()))
+
+	var integrityErr atomic.Value // *error
+	for _, file := range filesToCheck {
+		file := file // Capture for closure
+		eg.Go(func() error {
+			err := checkStateCorrespondenceFile(ctx, file, files, stepSize, failFast, logger)
+			if err != nil {
+				if !errors.Is(err, ErrIntegrity) {
+					return err
 				}
-				if files[j].EndRootNum() <= file.StartRootNum() && strings.HasSuffix(files[j].Fullpath(), ".kv") {
-					prevFiles = append(prevFiles, files[j])
+				if failFast {
+					return err
 				}
+				logger.Warn(err.Error())
+				integrityErr.Store(err)
+				return nil
 			}
-			checkErr = checkStateCorrespondenceReverse(ctx, file, nextFile, prevFiles, stepSize, failFast, logger)
+			return nil
+		})
+	}
+
+	if err := eg.Wait(); err != nil {
+		return err
+	}
+
+	if v := integrityErr.Load(); v != nil {
+		return v.(error)
+	}
+
+	logger.Info("[verify-state] done", "dur", time.Since(start), "files", len(filesToCheck))
+	return nil
+}
+
+// checkStateCorrespondenceFile validates a single commitment file against accounts/storage domains.
+// Dispatches to either base or reverse correspondence check based on file position.
+func checkStateCorrespondenceFile(ctx context.Context, file state.VisibleFile, allFiles []state.VisibleFile, stepSize uint64, failFast bool, logger log.Logger) error {
+	startTxNum := file.StartRootNum()
+
+	if startTxNum == 0 {
+		// Base file: forward check (commitment refs count <= domain entries count)
+		return checkStateCorrespondenceBase(ctx, file, stepSize, failFast, logger)
+	}
+
+	// Non-base file: reverse check (every domain key is in commitment refs)
+	// Collect next file (for step boundary effects) and previous files (for no-op detection)
+	var nextFile state.VisibleFile
+	var prevFiles []state.VisibleFile
+	for j := 0; j < len(allFiles); j++ {
+		if allFiles[j].StartRootNum() == file.EndRootNum() && strings.HasSuffix(allFiles[j].Fullpath(), ".kv") {
+			nextFile = allFiles[j]
 		}
-		if checkErr != nil {
-			if !errors.Is(checkErr, ErrIntegrity) {
-				return checkErr
-			}
-			if failFast {
-				return checkErr
-			}
-			logger.Warn(checkErr.Error())
-			integrityErr = checkErr
-			continue
+		if allFiles[j].EndRootNum() <= file.StartRootNum() && strings.HasSuffix(allFiles[j].Fullpath(), ".kv") {
+			prevFiles = append(prevFiles, allFiles[j])
 		}
 	}
-	logger.Info("[verify-state] done", "dur", time.Since(start), "files", totalFiles)
-	return integrityErr
+	return checkStateCorrespondenceReverse(ctx, file, nextFile, prevFiles, stepSize, failFast, logger)
 }
 
 // checkStateCorrespondenceBase verifies base files (startTxNum==0) where commitment
