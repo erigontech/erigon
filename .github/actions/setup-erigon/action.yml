@@ -60,7 +60,7 @@ runs:
     # disk ceiling. If space is tight, first check whether caches have blown
     # out in size before turning this on.
     - name: Cleanup space
-      if: ${{ inputs.cleanup-space == 'true' && runner.os == 'Linux' }}
+      if: ${{ inputs.cleanup-space == 'true' && runner.os != 'Windows' }}
       shell: bash
       run: |
         time rm -fr /opt/az \
