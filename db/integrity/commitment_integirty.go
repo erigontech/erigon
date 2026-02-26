@@ -381,31 +381,6 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 	var counts derefCounts
 	var integrityErr error
 	for i := 0; commReader.HasNext(); i++ {
-		if i%1024 == 0 {
-			select {
-			case <-ctx.Done():
-				return derefCounts{}, ctx.Err()
-			case <-logTicker.C:
-				at := fmt.Sprintf("%d/%d", counts.branchKeys, totalKeys)
-				percent := fmt.Sprintf("%.1f%%", float64(counts.branchKeys)/float64(totalKeys)*100)
-				rate := float64(counts.branchKeys) / time.Since(start).Seconds()
-				eta := time.Duration(float64(totalKeys-counts.branchKeys)/rate) * time.Second
-				logger.Info(
-					"[integrity] commitment deref",
-					"at", at,
-					"p", percent,
-					"k/s", rate,
-					"eta", eta,
-					"referencedAccounts", counts.referencedAccounts,
-					"plainAccounts", counts.plainAccounts,
-					"referencedStorages", counts.referencedStorages,
-					"plainStorages", counts.plainStorages,
-					"kv", fileName,
-				)
-			default: // proceed
-			}
-		}
-
 		branchKey, _ := commReader.Next(branchKeyBuf[:0])
 		if !commReader.HasNext() {
 			err = errors.New("invalid key/value pair during decompression")
@@ -538,6 +513,30 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 			logger.Warn(err.Error())
 			integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
 		}
+		if i%1024 == 0 {
+			select {
+			case <-ctx.Done():
+				return derefCounts{}, ctx.Err()
+			case <-logTicker.C:
+				at := fmt.Sprintf("%d/%d", counts.branchKeys, totalKeys)
+				percent := fmt.Sprintf("%.1f%%", float64(counts.branchKeys)/float64(totalKeys)*100)
+				rate := float64(counts.branchKeys) / time.Since(start).Seconds()
+				eta := time.Duration(float64(totalKeys-counts.branchKeys)/rate) * time.Second
+				logger.Info(
+					"[integrity] commitment deref",
+					"at", at,
+					"p", percent,
+					"k/s", rate,
+					"eta", eta,
+					"referencedAccounts", counts.referencedAccounts,
+					"plainAccounts", counts.plainAccounts,
+					"referencedStorages", counts.referencedStorages,
+					"plainStorages", counts.plainStorages,
+					"kv", fileName,
+				)
+			default: // proceed
+			}
+		}
 	}
 	logger.Info(
 		"checked commitment kv dereference in",
@@ -663,15 +662,6 @@ func checkCommitmentHistVal(ctx context.Context, tx kv.TemporalTx, br services.F
 	var total uint64
 	var integrityErr error
 	for it.HasNext() {
-		select {
-		case <-ctx.Done():
-			return 0, ctx.Err()
-		case <-logTicker.C:
-			rate := float64(total) / time.Since(start).Seconds()
-			logger.Info("checking commitment hist vals progress", "at", total, "vals/s", rate, "v", fileName)
-		default:
-			// no-op
-		}
 		k, v, err := it.Next()
 		if err != nil {
 			return 0, err
@@ -723,6 +713,15 @@ func checkCommitmentHistVal(ctx context.Context, tx kv.TemporalTx, br services.F
 			}
 		}
 		total++
+		select {
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		case <-logTicker.C:
+			rate := float64(total) / time.Since(start).Seconds()
+			logger.Info("checking commitment hist vals progress", "at", total, "vals/s", rate, "v", fileName)
+		default:
+			// no-op
+		}
 	}
 	dur := time.Since(start)
 	rate := float64(total) / dur.Seconds()
@@ -903,9 +902,87 @@ func CheckStateVerify(ctx context.Context, db kv.TemporalRoDB, failFast bool, fr
 	return integrityErr
 }
 
+// processBranch validates a single commitment branch and accumulates found keys into the provided sets.
+// accReader and storageReader must not be shared across goroutines — each caller must use its own instances.
+// This is the per-branch unit of work, extracted to enable future parallelization.
+func processBranch(
+	branchKey []byte, branchData commitment.BranchData,
+	accReader, storageReader *seg.Reader,
+	isReferencing bool, fileName string, failFast bool,
+	accountOffsets, storageOffsets map[uint64]struct{},
+	accountPlain, storagePlain map[string]struct{},
+) error {
+	if !branchData.IsComplete() {
+		touchMap := uint16(0)
+		afterMap := uint16(0)
+		if len(branchData) >= 4 {
+			touchMap = binary.BigEndian.Uint16(branchData[0:])
+			afterMap = binary.BigEndian.Uint16(branchData[2:])
+		}
+		return fmt.Errorf("%w: incomplete branch at key=%x (touchMap=0x%04x afterMap=0x%04x) in %s", ErrIntegrity, branchKey, touchMap, afterMap, fileName)
+	}
+
+	// checkKey counts plain keys and validates reference key offsets/lengths.
+	checkKey := func(key []byte, plainSet map[string]struct{}, offsetSet map[uint64]struct{}, reader *seg.Reader, expectedLen int, kind string) error {
+		if len(key) == expectedLen {
+			plainSet[string(key)] = struct{}{}
+			return nil
+		}
+		if !isReferencing {
+			return fmt.Errorf("%w: unexpected %s key len=%d for branch %x in %s", ErrIntegrity, kind, len(key), branchKey, fileName)
+		}
+		offset := state.DecodeReferenceKey(key)
+		if offset >= uint64(reader.Size()) {
+			return fmt.Errorf("%w: %s reference key %x out of bounds for branch %x in %s: %d vs %d", ErrIntegrity, kind, key, branchKey, fileName, offset, reader.Size())
+		}
+		if _, alreadySeen := offsetSet[offset]; !alreadySeen {
+			offsetSet[offset] = struct{}{}
+			reader.Reset(offset)
+			// Skip (single Huffman pass) — we only need the key length, not the key itself
+			if _, keyLen := reader.Skip(); keyLen != expectedLen {
+				return fmt.Errorf("%w: %s reference key %x has invalid plainKey len=%d for branch %x in %s", ErrIntegrity, kind, key, keyLen, branchKey, fileName)
+			}
+		}
+		return nil
+	}
+
+	// The callback returns nil (keep original key in output) because the result of ReplacePlainKeys
+	// is discarded (_): all side-effects happen before the return.
+	_, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+		if isStorage {
+			return nil, checkKey(key, storagePlain, storageOffsets, storageReader, length.Addr+length.Hash, "storage")
+		}
+		return nil, checkKey(key, accountPlain, accountOffsets, accReader, length.Addr, "account")
+	})
+	return err
+}
+
 // checkStateCorrespondenceBase verifies base files (startTxNum==0) where commitment
 // branches reference ALL keys in the trie, and the accounts/storage files contain
 // all those keys. Forward check: commitment ref count <= domain entry count.
+type branchItem struct{ key, value []byte }
+
+type workerState struct {
+	accountOffsets, storageOffsets map[uint64]struct{}
+	accountPlain, storagePlain     map[string]struct{}
+	integrityErr                   error
+}
+
+func processBranchWorker(ch <-chan branchItem, w *workerState, accReader, stoReader *seg.Reader, isReferencing bool, fileName string, failFast bool, logger log.Logger) error {
+	for item := range ch {
+		if err := processBranch(item.key, commitment.BranchData(item.value),
+			accReader, stoReader, isReferencing, fileName, failFast,
+			w.accountOffsets, w.storageOffsets, w.accountPlain, w.storagePlain); err != nil {
+			if failFast {
+				return err
+			}
+			logger.Warn(err.Error())
+			w.integrityErr = err
+		}
+	}
+	return nil
+}
+
 func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, stepSize uint64, failFast bool, logger log.Logger) error {
 	start := time.Now()
 	fileName := filepath.Base(file.Fullpath())
@@ -914,149 +991,135 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 
 	logger.Info("[verify-state] checking base file", "kv", fileName, "startTxNum", startTxNum, "endTxNum", endTxNum)
 
-	// Open commitment decompressor + reader
+	// Open commitment decompressor + reader (producer reads it sequentially)
 	commDecomp, err := seg.NewDecompressor(file.Fullpath())
 	if err != nil {
 		return err
 	}
 	defer commDecomp.Close()
+	commDecomp.MadvSequential()
 	commCompression := statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).Compression
 	commReader := seg.NewReader(commDecomp.MakeGetter(), commCompression)
 
-	// Open accounts decompressor + reader
-	accDecomp, accReader, accClose, err := deriveDecompAndReaderForOtherDomain(file.Fullpath(), kv.CommitmentDomain, kv.AccountsDomain)
+	// Open accounts and storage decompressors.
+	// Workers each call MakeGetter() to get an independent Getter (shared mmap, separate position state).
+	accDecomp, _, accClose, err := deriveDecompAndReaderForOtherDomain(file.Fullpath(), kv.CommitmentDomain, kv.AccountsDomain)
 	if err != nil {
 		return err
 	}
 	defer accClose()
-
-	// Open storage decompressor + reader
-	stoDecomp, storageReader, storageClose, err := deriveDecompAndReaderForOtherDomain(file.Fullpath(), kv.CommitmentDomain, kv.StorageDomain)
+	stoDecomp, _, stoClose, err := deriveDecompAndReaderForOtherDomain(file.Fullpath(), kv.CommitmentDomain, kv.StorageDomain)
 	if err != nil {
 		return err
 	}
-	defer storageClose()
+	defer stoClose()
 
-	// Count domain entries (key/value pairs, so divide by 2)
 	expectedAccounts := uint64(accDecomp.Count()) / 2
 	expectedStorages := uint64(stoDecomp.Count()) / 2
-
 	isReferencing := state.MayContainValuesPlainKeyReferencing(stepSize, startTxNum, endTxNum)
-
-	// Track unique keys found in commitment branches
-	accountOffsets := make(map[uint64]struct{}, 1*1024*1024) // for referenced files
-	storageOffsets := make(map[uint64]struct{}, 1*1024*1024) // for referenced files
-	accountPlain := make(map[string]struct{}, 1*1024*1024)   // for plain key files
-	storagePlain := make(map[string]struct{}, 1*1024*1024)   // for plain key files
+	accCompression := statecfg.Schema.GetDomainCfg(kv.AccountsDomain).Compression
+	stoCompression := statecfg.Schema.GetDomainCfg(kv.StorageDomain).Compression
 
 	totalKeys := uint64(commDecomp.Count()) / 2
-	logTicker := time.NewTicker(30 * time.Second)
-	defer logTicker.Stop()
-	branchKeyBuf := make([]byte, 0, 128)
-	branchValueBuf := make([]byte, 0, datasize.MB.Bytes())
-	var branchKeys uint64
-	var integrityErr error
+	numWorkers := dbg.EnvInt("CHECK_VERIFY_STATE_WORKERS", runtime.NumCPU())
 
-	for i := 0; commReader.HasNext(); i++ {
-		if i%1024 == 0 {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-logTicker.C:
-				at := fmt.Sprintf("%d/%d", branchKeys, totalKeys)
-				percent := fmt.Sprintf("%.1f%%", float64(branchKeys)/float64(totalKeys)*100)
-				logger.Info("[verify-state] progress", "at", at, "p", percent, "kv", fileName)
-			default:
-			}
-		}
-
-		branchKey, _ := commReader.Next(branchKeyBuf[:0])
-		if !commReader.HasNext() {
-			err = errors.New("invalid key/value pair during decompression")
-			if failFast {
-				return fmt.Errorf("%w: %s in %s", ErrIntegrity, err, fileName)
-			}
-			integrityErr = fmt.Errorf("%w: %s in %s", ErrIntegrity, err, fileName)
-			logger.Warn(err.Error())
-			continue
-		}
-		branchValue, _ := commReader.Next(branchValueBuf[:0])
-
-		if bytes.Equal(branchKey, commitmentdb.KeyCommitmentState) {
-			continue
-		}
-		branchKeys++
-
-		branchData := commitment.BranchData(branchValue)
-
-		// Check completeness
-		if !branchData.IsComplete() {
-			touchMap := uint16(0)
-			afterMap := uint16(0)
-			if len(branchData) >= 4 {
-				touchMap = binary.BigEndian.Uint16(branchData[0:])
-				afterMap = binary.BigEndian.Uint16(branchData[2:])
-			}
-			err := fmt.Errorf("%w: incomplete branch at key=%x (touchMap=0x%04x afterMap=0x%04x) in %s", ErrIntegrity, branchKey, touchMap, afterMap, fileName)
-			if failFast {
-				return err
-			}
-			logger.Warn(err.Error())
-			integrityErr = err
-			continue
-		}
-
-		// Walk the branch to extract all referenced keys.
-		// checkKey handles both account and storage: counts plain keys, validates reference key offsets/lengths.
-		// Returns nil error on success (or non-failFast integrity violation logged inline).
-		checkKey := func(key []byte, plainSet map[string]struct{}, offsetSet map[uint64]struct{}, reader *seg.Reader, expectedLen int, kind string) error {
-			if len(key) == expectedLen {
-				plainSet[string(key)] = struct{}{}
-				return nil
-			}
-			if !isReferencing {
-				return fmt.Errorf("%w: unexpected %s key len=%d for branch %x in %s", ErrIntegrity, kind, len(key), branchKey, fileName)
-			}
-			offset := state.DecodeReferenceKey(key)
-			if offset >= uint64(reader.Size()) {
-				return fmt.Errorf("%w: %s reference key %x out of bounds for branch %x in %s: %d vs %d", ErrIntegrity, kind, key, branchKey, fileName, offset, reader.Size())
-			}
-			if _, alreadySeen := offsetSet[offset]; !alreadySeen {
-				offsetSet[offset] = struct{}{}
-				reader.Reset(offset)
-				// Skip (single Huffman pass) — we only need the key length, not the key itself
-				if _, keyLen := reader.Skip(); keyLen != expectedLen {
-					return fmt.Errorf("%w: %s reference key %x has invalid plainKey len=%d for branch %x in %s", ErrIntegrity, kind, key, keyLen, branchKey, fileName)
-				}
-			}
-			return nil
-		}
-		// The callback returns nil (keep original key in output) because the result of ReplacePlainKeys
-		// is discarded (_): all side-effects happen before the return.
-		_, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
-			var checkErr error
-			if isStorage {
-				checkErr = checkKey(key, storagePlain, storageOffsets, storageReader, length.Addr+length.Hash, "storage")
-			} else {
-				checkErr = checkKey(key, accountPlain, accountOffsets, accReader, length.Addr, "account")
-			}
-			if checkErr != nil {
-				if failFast {
-					return nil, checkErr
-				}
-				logger.Warn(checkErr.Error())
-				integrityErr = checkErr
-			}
-			return nil, nil // safe: result of ReplacePlainKeys is discarded (_)
-		})
-		if err != nil {
-			if failFast {
-				return err
-			}
-			logger.Warn(err.Error())
-			integrityErr = err
+	workers := make([]workerState, numWorkers)
+	for i := range workers {
+		workers[i] = workerState{
+			accountOffsets: make(map[uint64]struct{}),
+			storageOffsets: make(map[uint64]struct{}),
+			accountPlain:   make(map[string]struct{}),
+			storagePlain:   make(map[string]struct{}),
 		}
 	}
+
+	ch := make(chan branchItem, numWorkers*4)
+	var branchKeys atomic.Uint64
+	var producerIntegrityErr error
+
+	g, gCtx := errgroup.WithContext(ctx)
+
+	// Producer: reads commitment file sequentially and sends branches to workers.
+	g.Go(func() error {
+		defer close(ch)
+		branchKeyBuf := make([]byte, 0, 128)
+		branchValueBuf := make([]byte, 0, datasize.MB.Bytes())
+		logTicker := time.NewTicker(30 * time.Second)
+		defer logTicker.Stop()
+		for i := 0; commReader.HasNext(); i++ {
+			branchKey, _ := commReader.Next(branchKeyBuf[:0])
+			if !commReader.HasNext() {
+				e := fmt.Errorf("%w: invalid key/value pair in %s", ErrIntegrity, fileName)
+				logger.Warn(e.Error())
+				if failFast {
+					return e
+				}
+				producerIntegrityErr = e
+				break
+			}
+			branchValue, _ := commReader.Next(branchValueBuf[:0])
+			if bytes.Equal(branchKey, commitmentdb.KeyCommitmentState) {
+				continue
+			}
+			branchKeys.Add(1)
+			select {
+			case ch <- branchItem{key: bytes.Clone(branchKey), value: bytes.Clone(branchValue)}:
+			case <-gCtx.Done():
+				return gCtx.Err()
+			}
+			if i%1024 == 0 {
+				select {
+				case <-gCtx.Done():
+					return gCtx.Err()
+				case <-logTicker.C:
+					n := branchKeys.Load()
+					logger.Info("[verify-state] progress",
+						"at", fmt.Sprintf("%d/%d", n, totalKeys),
+						"p", fmt.Sprintf("%.1f%%", float64(n)/float64(totalKeys)*100),
+						"kv", fileName)
+				default:
+				}
+			}
+		}
+		return nil
+	})
+
+	// Workers: each gets its own Reader (independent Getter, shared mmap data).
+	for i := range workers {
+		w := &workers[i]
+		workerAccReader := seg.NewReader(accDecomp.MakeGetter(), accCompression)
+		workerStoReader := seg.NewReader(stoDecomp.MakeGetter(), stoCompression)
+		g.Go(func() error {
+			return processBranchWorker(ch, w, workerAccReader, workerStoReader, isReferencing, fileName, failFast, logger)
+		})
+	}
+
+	var integrityErr error
+	if err := g.Wait(); err != nil {
+		if failFast {
+			return err
+		}
+		integrityErr = err
+	}
+
+	// Merge per-worker results into final sets.
+	accountOffsets := make(map[uint64]struct{})
+	storageOffsets := make(map[uint64]struct{})
+	accountPlain := make(map[string]struct{})
+	storagePlain := make(map[string]struct{})
+	for _, w := range workers {
+		for k := range w.accountOffsets { accountOffsets[k] = struct{}{} }
+		for k := range w.storageOffsets { storageOffsets[k] = struct{}{} }
+		for k := range w.accountPlain   { accountPlain[k] = struct{}{} }
+		for k := range w.storagePlain   { storagePlain[k] = struct{}{} }
+		if w.integrityErr != nil {
+			integrityErr = w.integrityErr
+		}
+	}
+	if producerIntegrityErr != nil {
+		integrityErr = producerIntegrityErr
+	}
+
 
 	// Compare counts
 	var foundAccounts, foundStorages uint64
@@ -1179,19 +1242,6 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 
 	// Phase 1: Walk commitment branches, write extracted plain keys to temp files
 	for i := 0; commReader.HasNext(); i++ {
-		if i%1024 == 0 {
-			select {
-			case <-ctx.Done():
-				accKeysFile.Close()
-				stoKeysFile.Close()
-				return ctx.Err()
-			case <-logTicker.C:
-				logger.Info("[verify-state] extracting refs", "at", fmt.Sprintf("%d/%d", branchKeys, totalKeys),
-					"p", fmt.Sprintf("%.1f%%", float64(branchKeys)/float64(totalKeys)*100), "kv", fileName)
-			default:
-			}
-		}
-
 		branchKey, _ := commReader.Next(branchKeyBuf[:0])
 		if !commReader.HasNext() {
 			break
@@ -1277,6 +1327,18 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 				return err
 			}
 			integrityErr = err
+		}
+		if i%1024 == 0 {
+			select {
+			case <-ctx.Done():
+				accKeysFile.Close()
+				stoKeysFile.Close()
+				return ctx.Err()
+			case <-logTicker.C:
+				logger.Info("[verify-state] extracting refs", "at", fmt.Sprintf("%d/%d", branchKeys, totalKeys),
+					"p", fmt.Sprintf("%.1f%%", float64(branchKeys)/float64(totalKeys)*100), "kv", fileName)
+			default:
+			}
 		}
 	}
 
@@ -1847,18 +1909,6 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 		var produced uint64
 
 		for commReader.HasNext() {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-logTicker.C:
-				logger.Info("[verify-state] hash verification progress",
-					"produced", produced,
-					"checked", hashChecked.Load(),
-					"mismatches", hashMismatches.Load(),
-					"kv", fileName)
-			default:
-			}
-
 			branchKey, _ := commReader.Next(branchKeyBuf[:0])
 			if !commReader.HasNext() {
 				break
@@ -1886,6 +1936,17 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 			case workCh <- item:
 			case <-ctx.Done():
 				return ctx.Err()
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-logTicker.C:
+				logger.Info("[verify-state] hash verification progress",
+					"produced", produced,
+					"checked", hashChecked.Load(),
+					"mismatches", hashMismatches.Load(),
+					"kv", fileName)
+			default:
 			}
 		}
 		return nil
