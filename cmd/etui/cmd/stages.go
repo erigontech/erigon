@@ -1,12 +1,16 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
+	"time"
 
-	"github.com/erigontech/erigon/cmd/etui/internals/tui"
+	"github.com/spf13/cobra"
+
+	"github.com/erigontech/erigon/cmd/etui/app"
 	"github.com/erigontech/erigon/cmd/integration/commands"
 	log "github.com/erigontech/erigon/common/log/v3"
-	"github.com/spf13/cobra"
+	"github.com/erigontech/erigon/db/state"
 )
 
 var (
@@ -31,20 +35,30 @@ var infoCmd = &cobra.Command{
 					println("recovered from panic: ", r)
 				}
 			}()
-			err := commands.InfoAllStages(cmd.Context(), logger, datadirCli, infoCh)
-			if err != nil {
+			backoff := 5 * time.Second
+			for {
+				err := commands.InfoAllStages(cmd.Context(), logger, datadirCli, infoCh)
+				if err == nil {
+					return
+				}
+				// Salt files missing means OtterSync is still downloading — retry
+				if !errors.Is(err, state.ErrCannotStartWithoutSaltFiles) {
+					select {
+					case errCh <- err:
+					default:
+					}
+					return
+				}
+				// Don't report to errCh — the downloader widget already shows progress.
 				select {
-				case errCh <- err:
-				default:
+				case <-cmd.Context().Done():
+					return
+				case <-time.After(backoff):
 				}
 			}
 		}()
-		tuiApp := tui.NewTUI(datadirCli)
-		err := tuiApp.Run(infoCh, errCh)
-		if err != nil {
-			return err
-		}
-		return nil
+		tuiApp := app.New(datadirCli)
+		return tuiApp.Run(cmd.Context(), infoCh, errCh)
 	},
 }
 
