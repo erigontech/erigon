@@ -1459,6 +1459,8 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 		}
 	}()
 
+	t := time.Now()
+
 	at.a.logger.Info("[snapshots] merge state " + r.String())
 	commitmentUseReferencedBranches := at.a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues
 
@@ -1480,7 +1482,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 
 		g.Go(func() (err error) {
 			var vt valueTransformer
-			if commitmentUseReferencedBranches && kid == kv.CommitmentDomain {
+			if commitmentUseReferencedBranches && kid == kv.CommitmentDomain && r.domain[kid].values.needMerge {
 				accStorageMerged.Wait()
 
 				// prepare transformer callback to correctly dereference previously merged accounts/storage plain keys
@@ -1522,7 +1524,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 	err = g.Wait()
 	if err == nil {
 		closeFiles = false
-		at.a.logger.Info("[snapshots] state merge done " + r.String())
+		at.a.logger.Info("[snapshots] state merge done "+r.String(), "in", time.Since(t))
 	} else if !errors.Is(err, context.Canceled) {
 		at.a.logger.Warn(fmt.Sprintf("[snapshots] state merge failed err=%v %s", err, r.String()))
 	}

@@ -63,7 +63,7 @@ jobs:
 
     steps:
       - name: Cleanup space on Linux runner
-        if: runner.os == 'Linux' && needs.source-of-changes.outputs.changed_files != 'true'
+        if: needs.source-of-changes.outputs.changed_files != 'true'
         run: |
           rm -fr /opt/az \
                  /opt/microsoft \

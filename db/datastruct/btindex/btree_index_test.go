@@ -275,6 +275,7 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 			require.Equalf(t, cur.Value(), curS.Value(), "i=%d", i)
 			require.Equal(t, cur.d, curS.d)
 			require.Equal(t, cur.getter, curS.getter)
+			curS.Close()
 		}
 	})
 
@@ -282,6 +283,7 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 		cur, err := bt.Seek(getter, keys[i])
 		require.NoError(t, err)
 		require.Equal(t, keys[i], cur.Key())
+		cur.Close()
 	}
 }
 
@@ -342,6 +344,7 @@ func TestBpsTree_Seek(t *testing.T) {
 		//k, _, err := it.KVFromGetter(g)
 		//require.NoError(t, err)
 		require.Equal(t, keys[i], c.Key())
+		c.Close()
 	}
 }
 

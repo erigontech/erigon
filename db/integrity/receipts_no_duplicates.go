@@ -36,7 +36,7 @@ func CheckReceiptsNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader se
 	toBlock, _, _ := txNumsReader.FindBlockNum(ctx, tx, receiptProgress)
 
 	log.Info("[integrity] ReceiptsNoDups starting", "fromBlock", fromBlock, "toBlock", toBlock)
-	return parallelChunkCheck(ctx, fromBlock, toBlock, db, blockReader, failFast, ReceiptsNoDupsRange)
+	return parallelChunkCheck(ctx, fromBlock, toBlock, db, blockReader, failFast, "CheckReceiptsNoDups", ReceiptsNoDupsRange)
 }
 
 func checkCumGas(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
