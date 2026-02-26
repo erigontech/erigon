@@ -357,15 +357,7 @@ func TestHistoryAfterPrune(t *testing.T) {
 		err = writer.Flush(ctx, tx)
 		require.NoError(err)
 
-		c, err := h.collate(ctx, 0, 0, 16, tx)
-		require.NoError(err)
-
-		sf, err := h.buildFiles(ctx, 0, c, background.NewProgressSet())
-		c.Close()
-		require.NoError(err)
-
-		h.integrateDirtyFiles(sf, 0, 16)
-		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
+		require.NoError(h.collateBuildIntegrate(ctx, 0, tx, background.NewProgressSet()))
 		hc.Close()
 
 		hc = h.BeginFilesRo()
@@ -1011,6 +1003,24 @@ func TestHistoryHistory(t *testing.T) {
 
 }
 
+// collateBuildIntegrate collates, builds files and integrates them for the given step.
+// It is a test helper that combines the common collate→buildFiles→integrateDirtyFiles pattern.
+func (h *History) collateBuildIntegrate(ctx context.Context, step kv.Step, tx kv.Tx, ps *background.ProgressSet) error {
+	txFrom, txTo := step.ToTxNum(h.stepSize), (step + 1).ToTxNum(h.stepSize)
+	c, err := h.collate(ctx, step, txFrom, txTo, tx)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	sf, err := h.buildFiles(ctx, step, c, ps)
+	if err != nil {
+		return err
+	}
+	h.integrateDirtyFiles(sf, txFrom, txTo)
+	h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
+	return nil
+}
+
 func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, doPrune bool) {
 	tb.Helper()
 	require := require.New(tb)
@@ -1024,13 +1034,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 
 	// Leave the last 2 aggregation steps un-collated
 	for step := kv.Step(0); step < kv.Step(txs/h.stepSize)-1; step++ {
-		c, err := h.collate(ctx, step, step.ToTxNum(h.stepSize), (step + 1).ToTxNum(h.stepSize), tx)
-		require.NoError(err)
-		sf, err := h.buildFiles(ctx, step, c, background.NewProgressSet())
-		c.Close()
-		require.NoError(err)
-		h.integrateDirtyFiles(sf, step.ToTxNum(h.stepSize), (step + 1).ToTxNum(h.stepSize))
-		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
+		require.NoError(h.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
 
 		if doPrune {
 			hc := h.BeginFilesRo()
