@@ -338,6 +338,139 @@ type derefCounts struct {
 	plainStorages      uint64
 }
 
+// checkDerefBranch resolves all reference keys in a single commitment branch to plain
+// keys via accReader/storageReader, then validates the resulting branch data.
+// Returns incremental counts, the resolved branch data, and any error.
+// A non-ErrIntegrity error is fatal (out-of-bounds or failFast). An ErrIntegrity-wrapped
+// error is a non-fatal integrity violation (caller should accumulate, not stop).
+func checkDerefBranch(
+	branchKey, branchValue []byte,
+	newBranchValueBuf, plainKeyBuf []byte,
+	accReader, storageReader *seg.Reader,
+	fileName string,
+	failFast, trace bool,
+	logger log.Logger,
+) (dc derefCounts, newBranchData commitment.BranchData, retErr error) {
+	branchData := commitment.BranchData(branchValue)
+	var integrityErr error
+
+	newBranchData, err := branchData.ReplacePlainKeys(newBranchValueBuf[:0], func(key []byte, isStorage bool) ([]byte, error) {
+		if trace {
+			logger.Trace(
+				"checking commitment deref for branch",
+				"branchKey", hex.EncodeToString(branchKey),
+				"key", hex.EncodeToString(key),
+				"isStorage", isStorage,
+				"kv", fileName,
+			)
+		}
+		if isStorage {
+			if len(key) == length.Addr+length.Hash {
+				if trace {
+					logger.Trace(
+						"skipping, not a storage reference",
+						"branchKey", hex.EncodeToString(branchKey),
+						"addr", common.BytesToAddress(key[:length.Addr]),
+						"hash", common.BytesToHash(key[length.Addr:]),
+						"kv", fileName,
+					)
+				}
+				dc.plainStorages++
+				return key, nil // not a referenced key, nothing to check
+			}
+			dc.referencedStorages++
+			offset := state.DecodeReferenceKey(key)
+			if offset >= uint64(storageReader.Size()) {
+				err := fmt.Errorf("storage reference key %x out of bounds for branch %x in %s: %d vs %d", key, branchKey, fileName, offset, storageReader.Size())
+				if failFast {
+					return nil, err
+				}
+				logger.Warn(err.Error())
+				return key, nil
+			}
+			storageReader.Reset(offset)
+			plainKey, _ := storageReader.Next(plainKeyBuf[:0])
+			if len(plainKey) != length.Addr+length.Hash {
+				err := fmt.Errorf("storage reference key %x has invalid plainKey for branch %x in %s", key, branchKey, fileName)
+				if failFast {
+					return nil, err
+				}
+				logger.Warn(err.Error())
+				integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
+				return key, nil
+			}
+			if trace {
+				logger.Trace(
+					"dereferenced storage key",
+					"branchKey", hex.EncodeToString(branchKey),
+					"key", hex.EncodeToString(key),
+					"offset", offset,
+					"addr", common.BytesToAddress(plainKey[:length.Addr]),
+					"hash", common.BytesToHash(plainKey[length.Addr:]),
+					"kv", fileName,
+				)
+			}
+			return plainKey, nil
+		}
+		if len(key) == length.Addr {
+			if trace {
+				logger.Trace(
+					"skipping, not an account reference",
+					"branchKey", hex.EncodeToString(branchKey),
+					"addr", common.BytesToAddress(key[:length.Addr]),
+					"kv", fileName,
+				)
+			}
+			dc.plainAccounts++
+			return key, nil // not a referenced key, nothing to check
+		}
+		dc.referencedAccounts++
+		offset := state.DecodeReferenceKey(key)
+		if offset >= uint64(accReader.Size()) {
+			err := fmt.Errorf("account reference key %x out of bounds for branch %x in %s: %d vs %d", key, branchKey, fileName, offset, accReader.Size())
+			if failFast {
+				return nil, err
+			}
+			logger.Warn(err.Error())
+			return key, nil
+		}
+		accReader.Reset(offset)
+		plainKey, _ := accReader.Next(plainKeyBuf[:0])
+		if len(plainKey) != length.Addr {
+			err := fmt.Errorf("account reference key %x has invalid plainKey for branch %x in %s", key, branchKey, fileName)
+			if failFast {
+				return nil, err
+			}
+			logger.Warn(err.Error())
+			integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
+			return key, nil
+		}
+		if trace {
+			logger.Trace(
+				"dereferenced account key",
+				"branchKey", hex.EncodeToString(branchKey),
+				"key", hex.EncodeToString(key),
+				"offset", offset,
+				"addr", common.BytesToAddress(plainKey),
+				"kv", fileName,
+			)
+		}
+		return plainKey, nil
+	})
+	if err != nil {
+		return dc, nil, err
+	}
+	if err := newBranchData.Validate(branchKey); err != nil {
+		err = fmt.Errorf("branch data validation failure for branch key %x in %s: %w", branchKey, fileName, err)
+		if failFast {
+			return dc, nil, err
+		}
+		logger.Warn(err.Error())
+		integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
+	}
+	return dc, newBranchData, integrityErr
+}
+
 func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSize uint64, failFast bool, logger log.Logger) (derefCounts, error) {
 	start := time.Now()
 	fileName := filepath.Base(file.Fullpath())
@@ -398,121 +531,17 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 			continue
 		}
 		counts.branchKeys++
-		branchData := commitment.BranchData(branchValue)
-		newBranchData, err := branchData.ReplacePlainKeys(newBranchValueBuf[:0], func(key []byte, isStorage bool) ([]byte, error) {
-			if trace {
-				logger.Trace(
-					"checking commitment deref for branch",
-					"branchKey", hex.EncodeToString(branchKey),
-					"key", hex.EncodeToString(key),
-					"isStorage", isStorage,
-					"kv", fileName,
-				)
-			}
-			if isStorage {
-				if len(key) == length.Addr+length.Hash {
-					if trace {
-						logger.Trace(
-							"skipping, not a storage reference",
-							"branchKey", hex.EncodeToString(branchKey),
-							"addr", common.BytesToAddress(key[:length.Addr]),
-							"hash", common.BytesToHash(key[length.Addr:]),
-							"kv", fileName,
-						)
-					}
-					counts.plainStorages++
-					return key, nil // not a referenced key, nothing to check
-				}
-				counts.referencedStorages++
-				offset := state.DecodeReferenceKey(key)
-				if offset >= uint64(storageReader.Size()) {
-					err = fmt.Errorf("storage reference key %x out of bounds for branch %x in %s: %d vs %d", key, branchKey, fileName, offset, storageReader.Size())
-					if failFast {
-						return nil, err
-					}
-					logger.Warn(err.Error())
-					return key, nil
-				}
-				storageReader.Reset(offset)
-				plainKey, _ := storageReader.Next(plainKeyBuf[:0])
-				if len(plainKey) != length.Addr+length.Hash {
-					err = fmt.Errorf("storage reference key %x has invalid plainKey for branch %x in %s", key, branchKey, fileName)
-					if failFast {
-						return nil, err
-					}
-					logger.Warn(err.Error())
-					integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
-					return key, nil
-				}
-				if trace {
-					logger.Trace(
-						"dereferenced storage key",
-						"branchKey", hex.EncodeToString(branchKey),
-						"key", hex.EncodeToString(key),
-						"offset", offset,
-						"addr", common.BytesToAddress(plainKey[:length.Addr]),
-						"hash", common.BytesToHash(plainKey[length.Addr:]),
-						"kv", fileName,
-					)
-				}
-				return plainKey, nil
-			}
-			if len(key) == length.Addr {
-				if trace {
-					logger.Trace(
-						"skipping, not an account reference",
-						"branchKey", hex.EncodeToString(branchKey),
-						"addr", common.BytesToAddress(key[:length.Addr]),
-						"kv", fileName,
-					)
-				}
-				counts.plainAccounts++
-				return key, nil // not a referenced key, nothing to check
-			}
-			counts.referencedAccounts++
-			offset := state.DecodeReferenceKey(key)
-			if offset >= uint64(accReader.Size()) {
-				err = fmt.Errorf("account reference key %x out of bounds for branch %x in %s: %d vs %d", key, branchKey, fileName, offset, accReader.Size())
-				if failFast {
-					return nil, err
-				}
-				logger.Warn(err.Error())
-				return key, nil
-			}
-			accReader.Reset(offset)
-			plainKey, _ := accReader.Next(plainKeyBuf[:0])
-			if len(plainKey) != length.Addr {
-				err = fmt.Errorf("account reference key %x has invalid plainKey for branch %x in %s", key, branchKey, fileName)
-				if failFast {
-					return nil, err
-				}
-				logger.Warn(err.Error())
-				integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
-				return key, nil
-			}
-			if trace {
-				logger.Trace(
-					"dereferenced account key",
-					"branchKey", hex.EncodeToString(branchKey),
-					"key", hex.EncodeToString(key),
-					"offset", offset,
-					"addr", common.BytesToAddress(plainKey),
-					"kv", fileName,
-				)
-			}
-			return plainKey, nil
-		})
+		dc, _, err := checkDerefBranch(branchKey, branchValue, newBranchValueBuf, plainKeyBuf, accReader, storageReader, fileName, failFast, trace, logger)
+		counts.referencedAccounts += dc.referencedAccounts
+		counts.plainAccounts += dc.plainAccounts
+		counts.referencedStorages += dc.referencedStorages
+		counts.plainStorages += dc.plainStorages
 		if err != nil {
-			return derefCounts{}, err
-		}
-		err = newBranchData.Validate(branchKey)
-		if err != nil {
-			err = fmt.Errorf("branch data validation failure for branch key %x in %s: %w", branchKey, fileName, err)
-			if failFast {
+			if errors.Is(err, ErrIntegrity) {
+				integrityErr = err
+			} else {
 				return derefCounts{}, err
 			}
-			logger.Warn(err.Error())
-			integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
 		}
 		if i%1024 == 0 {
 			select {
