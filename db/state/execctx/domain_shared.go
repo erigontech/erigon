@@ -89,10 +89,6 @@ type SharedDomains struct {
 
 	logger log.Logger
 
-<<<<<<< HEAD
-	txNum             uint64
-=======
->>>>>>> main
 	trace             bool //nolint
 	commitmentCapture bool
 	mem               kv.TemporalMemBatch
@@ -170,10 +166,6 @@ func (sd *SharedDomains) Merge(sdTxNum uint64, other *SharedDomains, otherTxNum 
 		sd.sdCtx.SetPendingUpdate(otherUpd)
 	}
 
-<<<<<<< HEAD
-	sd.txNum = otherTxNum
-=======
->>>>>>> main
 	return nil
 }
 
@@ -224,13 +216,12 @@ func (sd *SharedDomains) FlushPendingUpdates(ctx context.Context, tx kv.Temporal
 }
 
 type temporalGetter struct {
-	sd   *SharedDomains
-	tx   kv.TemporalTx
-	step kv.Step // snapshotted at construction to avoid racing with SetTxNum
+	sd *SharedDomains
+	tx kv.TemporalTx
 }
 
 func (gt *temporalGetter) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
-	return gt.sd.getLatest(name, gt.tx, k, gt.step)
+	return gt.sd.GetLatest(name, gt.tx, k)
 }
 
 func (gt *temporalGetter) HasPrefix(name kv.Domain, prefix []byte) (firstKey []byte, firstVal []byte, ok bool, err error) {
@@ -255,7 +246,7 @@ func (up *unmarkedPutter) Put(num kv.Num, v []byte) error {
 }
 
 func (sd *SharedDomains) AsGetter(tx kv.TemporalTx) kv.TemporalGetter {
-	return &temporalGetter{sd, tx, kv.Step(sd.txNum / sd.stepSize)}
+	return &temporalGetter{sd, tx}
 }
 
 func (sd *SharedDomains) SetChangesetAccumulator(acc *changeset.StateChangeSet) {
@@ -317,17 +308,6 @@ func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64
 
 func (sd *SharedDomains) StepSize() uint64 { return sd.stepSize }
 
-// SetTxNum sets txNum for all domains as well as common txNum for all domains
-// Requires for sd.rwTx because of commitment evaluation in shared domains if stepSize is reached
-<<<<<<< HEAD
-func (sd *SharedDomains) SetTxNum(txNum uint64) {
-	sd.txNum = txNum
-}
-
-func (sd *SharedDomains) TxNum() uint64 { return sd.txNum }
-
-=======
->>>>>>> main
 func (sd *SharedDomains) SetTrace(b, capture bool) []string {
 	sd.trace = b
 	sd.commitmentCapture = capture
@@ -365,14 +345,6 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 
 // TemporalDomain satisfaction
 func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte) (v []byte, step kv.Step, err error) {
-	return sd.getLatest(domain, tx, k, kv.Step(sd.txNum/sd.stepSize))
-}
-
-// getLatest is the internal implementation of GetLatest. The cacheStep parameter
-// is used for state cache hits instead of reading sd.currentStep, allowing
-// temporalGetter to snapshot the step at construction time and avoid racing
-// with concurrent SetTxNum calls from the apply goroutine.
-func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte, cacheStep kv.Step) (v []byte, step kv.Step, err error) {
 	if tx == nil {
 		return nil, 0, errors.New("sd.GetLatest: unexpected nil tx")
 	}
@@ -404,7 +376,7 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	// callers no longer require an accurate step from this path.
 	if sd.stateCache != nil {
 		if v, ok := sd.stateCache.Get(domain, k); ok {
-			return v, cacheStep, nil
+			return v, 0, nil
 		}
 	}
 
