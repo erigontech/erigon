@@ -192,6 +192,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 
 	if opts.metrics {
 		kv.InitSummaries(opts.label)
+		kv.InitGCSummaries(opts.label)
 	}
 	if opts.HasFlag(mdbx.Accede) || opts.HasFlag(mdbx.Readonly) {
 		for retry := 0; ; retry++ {
@@ -1025,10 +1026,21 @@ func (tx *MdbxTx) Commit() error {
 			tx.db.opts.log.Error("failed to record mdbx summaries", "err", err)
 		}
 
-		kv.MDBXGauges.GCMaxRetainedPages.WithLabelValues(string(dbLabel)).SetUint64(uint64(latency.GCDetails.MaxRetainedPages))
-		kv.MDBXGauges.GCMaxReaderLag.WithLabelValues(string(dbLabel)).SetUint64(uint64(latency.GCDetails.MaxReaderLag))
+		// Record GC stats as Summary metrics to capture spike distribution
+		// Summary naturally aggregates all observations over time windows, showing when spikes happened
+		pages := float64(latency.GCDetails.MaxRetainedPages)
+		lag := float64(latency.GCDetails.MaxReaderLag)
+
+		// Get GC summaries for this DB instance
+		gcSummariesIface, ok := kv.MDBXGCSummaries.Load(string(dbLabel))
+		if ok {
+			gcSummaries := gcSummariesIface.(*kv.GCSummaries)
+			gcSummaries.GCMaxRetainedPages.Observe(pages)
+			gcSummaries.GCMaxReaderLag.Observe(lag)
+		}
+
 		if latency.GCDetails.MaxRetainedPages > 0 || latency.GCDetails.MaxReaderLag > 0 {
-			log.Warn("[dbg] latency.GCDetails", "MaxRetainedPages", latency.GCDetails.MaxRetainedPages, "MaxRetainedPages", latency.GCDetails.MaxRetainedPages)
+			log.Warn("[dbg] latency.GCDetails", "MaxRetainedPages", latency.GCDetails.MaxRetainedPages, "MaxReaderLag", latency.GCDetails.MaxReaderLag)
 		}
 
 		//kv.DbGcWorkPnlMergeTime.Update(latency.GCDetails.WorkPnlMergeTime.Seconds())
