@@ -1094,7 +1094,7 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 	var segmentsMaxSet bool
 
 	wg := &errgroup.Group{}
-	wg.SetLimit(64)
+	wg.SetLimit(estimate.HalfCPUs())
 	//fmt.Println("RS", s)
 	//defer fmt.Println("Done RS", s)
 
