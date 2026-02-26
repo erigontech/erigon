@@ -30,7 +30,7 @@ import (
 
 func TestLegacyBlockchain(t *testing.T) {
 	if testing.Short() {
-		t.Skip("slow test")
+		t.Skip()
 	}
 	t.Parallel()
 
@@ -96,10 +96,6 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 
 // Only runs EEST tests for current devnet - can "skip" on off-seasons
 func TestExecutionSpecBlockchainDevnet(t *testing.T) {
-	const offSeason = false
-	if offSeason {
-		t.Skip("devnet off-season")
-	}
 	if testing.Short() {
 		t.Skip()
 	}
