@@ -17,7 +17,6 @@
 package commitment
 
 import (
-	"encoding/hex"
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
@@ -31,8 +30,8 @@ import (
 //
 // branchKey: compacted trie path from commitment.kv
 // branchData: raw branch data (with PLAIN keys, already dereferenced)
-// accountValues: plainKey(hex) → serialised account value (V3 format)
-// storageValues: plainKey(hex) → raw storage value
+// accountValues: string(plainKey) → serialised account value (V3 format)
+// storageValues: string(plainKey) → raw storage value
 //
 // Returns nil if all hashes match, or an error listing mismatches.
 func VerifyBranchHashes(
@@ -76,7 +75,7 @@ func VerifyBranchHashes(
 		// If a value is missing or empty (deletion), skip this cell — it's not verifiable.
 		canVerify := true
 		if c.storageAddrLen > 0 {
-			stoKey := hex.EncodeToString(c.storageAddr[:c.storageAddrLen])
+			stoKey := string(c.storageAddr[:c.storageAddrLen])
 			stoVal, ok := storageValues[stoKey]
 			if !ok || len(stoVal) == 0 {
 				canVerify = false
@@ -88,7 +87,7 @@ func VerifyBranchHashes(
 			}
 		}
 		if c.accountAddrLen > 0 && canVerify {
-			accKey := hex.EncodeToString(c.accountAddr[:c.accountAddrLen])
+			accKey := string(c.accountAddr[:c.accountAddrLen])
 			accVal, ok := accountValues[accKey]
 			if !ok || len(accVal) == 0 {
 				canVerify = false

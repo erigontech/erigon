@@ -31,6 +31,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -942,10 +943,10 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 	isReferencing := state.MayContainValuesPlainKeyReferencing(stepSize, startTxNum, endTxNum)
 
 	// Track unique keys found in commitment branches
-	accountOffsets := make(map[uint64]struct{}) // for referenced files
-	storageOffsets := make(map[uint64]struct{}) // for referenced files
-	accountPlain := make(map[string]struct{})   // for plain key files
-	storagePlain := make(map[string]struct{})   // for plain key files
+	accountOffsets := make(map[uint64]struct{}, 1*1024*1024) // for referenced files
+	storageOffsets := make(map[uint64]struct{}, 1*1024*1024) // for referenced files
+	accountPlain := make(map[string]struct{}, 1*1024*1024)   // for plain key files
+	storagePlain := make(map[string]struct{}, 1*1024*1024)   // for plain key files
 
 	totalKeys := uint64(commDecomp.Count()) / 2
 	logTicker := time.NewTicker(30 * time.Second)
@@ -956,15 +957,17 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 	var branchKeys uint64
 	var integrityErr error
 
-	for commReader.HasNext() {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-logTicker.C:
-			at := fmt.Sprintf("%d/%d", branchKeys, totalKeys)
-			percent := fmt.Sprintf("%.1f%%", float64(branchKeys)/float64(totalKeys)*100)
-			logger.Info("[verify-state] progress", "at", at, "p", percent, "kv", fileName)
-		default:
+	for i := 0; commReader.HasNext(); i++ {
+		if i%1024 == 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-logTicker.C:
+				at := fmt.Sprintf("%d/%d", branchKeys, totalKeys)
+				percent := fmt.Sprintf("%.1f%%", float64(branchKeys)/float64(totalKeys)*100)
+				logger.Info("[verify-state] progress", "at", at, "p", percent, "kv", fileName)
+			default:
+			}
 		}
 
 		branchKey, _ := commReader.Next(branchKeyBuf[:0])
@@ -1729,6 +1732,10 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 	var hashMismatches atomic.Uint64
 	var hashChecked atomic.Uint64
 
+	// Pool to reuse per-item value maps and reduce GC pressure.
+	var valMapPool sync.Pool
+	valMapPool.New = func() any { return make(map[string][]byte, 8) }
+
 	// Set up errgroup with context for cancellation on failure.
 	var eg *errgroup.Group
 	if failFast {
@@ -1771,8 +1778,8 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 
 				// Build maps of accountValues and storageValues by resolving
 				// keys/values from domain files.
-				accountValues := make(map[string][]byte)
-				storageValues := make(map[string][]byte)
+				accountValues := valMapPool.Get().(map[string][]byte)
+				storageValues := valMapPool.Get().(map[string][]byte)
 
 				// We need branch data with plain keys for VerifyBranchHashes.
 				// Walk the branch to extract + resolve all keys and read values.
@@ -1794,7 +1801,7 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 								return key, nil
 							}
 							val, _ := stoReader.Next(valBuf[:0])
-							storageValues[hex.EncodeToString(plainKey)] = common.Copy(val)
+							storageValues[string(plainKey)] = common.Copy(val)
 						} else if preloadedStoValues != nil {
 							hexKey := hex.EncodeToString(plainKey)
 							if val, ok := preloadedStoValues[hexKey]; ok {
@@ -1821,11 +1828,11 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 							return key, nil
 						}
 						val, _ := accReader.Next(valBuf[:0])
-						accountValues[hex.EncodeToString(plainKey)] = common.Copy(val)
+						accountValues[string(plainKey)] = common.Copy(val)
 					} else if preloadedAccValues != nil {
-						hexKey := hex.EncodeToString(plainKey)
-						if val, ok := preloadedAccValues[hexKey]; ok {
-							accountValues[hexKey] = val
+						strKey := string(plainKey)
+						if val, ok := preloadedAccValues[strKey]; ok {
+							accountValues[strKey] = val
 						}
 					}
 					return plainKey, nil
@@ -1959,7 +1966,7 @@ func preloadDomainValues(commitmentFile string, oldDomain, newDomain kv.Domain, 
 		}
 		val, _ := reader.Next(valBuf[:0])
 		if len(key) == expectedKeyLen {
-			values[hex.EncodeToString(key)] = common.Copy(val)
+			values[string(key)] = common.Copy(val)
 		}
 	}
 	return values, nil
