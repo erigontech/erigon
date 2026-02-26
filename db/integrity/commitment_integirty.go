@@ -391,7 +391,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 			rate := float64(counts.branchKeys) / time.Since(start).Seconds()
 			eta := time.Duration(float64(totalKeys-counts.branchKeys)/rate) * time.Second
 			logger.Info(
-				"checking commitment deref progress",
+				"[integrity] commitment deref",
 				"at", at,
 				"p", percent,
 				"k/s", rate,
