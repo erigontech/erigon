@@ -1354,7 +1354,6 @@ func reverseCheckDomainKeys(ctx context.Context, decomp *seg.Decompressor, domai
 	refCh := make(chan []byte, 256)
 	errCh := make(chan error, 1)
 	loadCtx, cancelLoad := context.WithCancel(ctx)
-	defer cancelLoad()
 	go func() {
 		defer close(refCh)
 		errCh <- sortedKeys.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error { //nolint:gocritic
@@ -1365,6 +1364,12 @@ func reverseCheckDomainKeys(ctx context.Context, decomp *seg.Decompressor, domai
 				return loadCtx.Err()
 			}
 		}, etl.TransformArgs{Quit: loadCtx.Done()})
+	}()
+	defer func() {
+		cancelLoad()
+		if loadErr := <-errCh; loadErr != nil && !errors.Is(loadErr, context.Canceled) && retErr == nil {
+			retErr = loadErr
+		}
 	}()
 
 	// Advance to first ref key.
