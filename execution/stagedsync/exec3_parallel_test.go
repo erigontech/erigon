@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -490,7 +491,7 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, met
 	if err != nil {
 		tb.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer dir.RemoveAll(tmpDir)
 
 	dirs := datadir.New(tmpDir)
 	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).MustOpen()
@@ -617,7 +618,7 @@ func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propert
 	if err != nil {
 		tb.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer dir.RemoveAll(tmpDir)
 
 	dirs := datadir.New(tmpDir)
 	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).MustOpen()
