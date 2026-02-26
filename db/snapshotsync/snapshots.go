@@ -504,6 +504,9 @@ type VisibleSegments []*VisibleSegment
 
 func (s VisibleSegments) BeginRo() *RoTx {
 	for _, seg := range s {
+		if seg.src == nil {
+			continue
+		}
 		if seg.src.frozen {
 			continue
 		}
@@ -526,6 +529,9 @@ func (s *RoTx) Close() {
 	for i := range VisibleSegments {
 		src := VisibleSegments[i].src
 		if src == nil {
+			continue
+		}
+		if src.frozen {
 			continue
 		}
 
