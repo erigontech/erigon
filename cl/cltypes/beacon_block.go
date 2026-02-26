@@ -297,7 +297,7 @@ func NewBeaconBody(beaconCfg *clparams.BeaconChainConfig, version clparams.State
 				BlobKzgCommitments: *solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48),
 			},
 		}
-		body.PayloadAttestations = solid.NewStaticListSSZ[*PayloadAttestation](int(beaconCfg.MaxPayloadAttestations), 0)
+		body.PayloadAttestations = solid.NewStaticListSSZ[*PayloadAttestation](int(beaconCfg.MaxPayloadAttestations), PayloadAttestationSSZSize)
 	}
 
 	return body
@@ -360,7 +360,7 @@ func (b *BeaconBody) EncodingSizeSSZ() (size int) {
 			}
 		}
 		if b.PayloadAttestations == nil {
-			b.PayloadAttestations = solid.NewStaticListSSZ[*PayloadAttestation](int(b.beaconCfg.MaxPayloadAttestations), 0)
+			b.PayloadAttestations = solid.NewStaticListSSZ[*PayloadAttestation](int(b.beaconCfg.MaxPayloadAttestations), PayloadAttestationSSZSize)
 		}
 	}
 
@@ -413,7 +413,7 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version int) error {
 				BlobKzgCommitments: *solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48),
 			},
 		}
-		b.PayloadAttestations = solid.NewStaticListSSZ[*PayloadAttestation](int(b.beaconCfg.MaxPayloadAttestations), 0)
+		b.PayloadAttestations = solid.NewStaticListSSZ[*PayloadAttestation](int(b.beaconCfg.MaxPayloadAttestations), PayloadAttestationSSZSize)
 	}
 	err := ssz2.UnmarshalSSZ(buf, version, b.getSchema(false)...)
 	return err
@@ -558,7 +558,12 @@ func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 	}
 	// [New in Gloas:EIP7732] Initialize GLOAS fields
 	if b.Version >= clparams.GloasVersion {
-		tmp.PayloadAttestations = solid.NewStaticListSSZ[*PayloadAttestation](int(b.beaconCfg.MaxPayloadAttestations), 0)
+		tmp.SignedExecutionPayloadBid = &SignedExecutionPayloadBid{
+			Message: &ExecutionPayloadBid{
+				BlobKzgCommitments: *solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48),
+			},
+		}
+		tmp.PayloadAttestations = solid.NewStaticListSSZ[*PayloadAttestation](int(b.beaconCfg.MaxPayloadAttestations), PayloadAttestationSSZSize)
 	}
 
 	if err := json.Unmarshal(buf, &tmp); err != nil {

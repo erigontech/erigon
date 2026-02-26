@@ -69,8 +69,9 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWr
 	if root == headRoot {
 		var expectedWithdrawals *cltypes.ExpectedWithdrawals
 		if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
-			expectedWithdrawals = state.GetExpectedWithdrawals(headState, state.Epoch(headState))
-			return nil
+			var err error
+			expectedWithdrawals, err = state.GetExpectedWithdrawals(headState, state.Epoch(headState))
+			return err
 		}); err != nil {
 			return nil, err
 		}
