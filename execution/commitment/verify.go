@@ -75,8 +75,8 @@ func VerifyBranchHashes(
 		// If a value is missing or empty (deletion), skip this cell — it's not verifiable.
 		canVerify := true
 		if c.storageAddrLen > 0 {
-			stoKey := string(c.storageAddr[:c.storageAddrLen])
-			stoVal, ok := storageValues[stoKey]
+			stoKeyBytes := c.storageAddr[:c.storageAddrLen]
+			stoVal, ok := storageValues[string(stoKeyBytes)]
 			if !ok || len(stoVal) == 0 {
 				canVerify = false
 			} else {
@@ -87,15 +87,15 @@ func VerifyBranchHashes(
 			}
 		}
 		if c.accountAddrLen > 0 && canVerify {
-			accKey := string(c.accountAddr[:c.accountAddrLen])
-			accVal, ok := accountValues[accKey]
+			accKeyBytes := c.accountAddr[:c.accountAddrLen]
+			accVal, ok := accountValues[string(accKeyBytes)]
 			if !ok || len(accVal) == 0 {
 				canVerify = false
 			} else {
 				var acc accounts.Account
 				if err := accounts.DeserialiseV3(&acc, accVal); err != nil {
 					mismatches = append(mismatches, fmt.Sprintf(
-						"nibble %x: failed to deserialise account %s: %v", nibble, accKey, err))
+						"nibble %x: failed to deserialise account %x: %v", nibble, accKeyBytes, err))
 					continue
 				}
 				c.Nonce = acc.Nonce
