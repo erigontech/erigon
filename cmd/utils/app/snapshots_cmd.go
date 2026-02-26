@@ -1077,7 +1077,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 		}
 
 		for _, check := range requestedChecks {
-			if slices.Contains(integrity.FastChecks, check) || slices.Contains(integrity.SlowChecks, check) {
+			if slices.Contains(integrity.AllChecks, check) {
 				continue
 			}
 
