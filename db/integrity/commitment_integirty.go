@@ -340,21 +340,19 @@ type derefCounts struct {
 
 // checkDerefBranch resolves all reference keys in a single commitment branch to plain
 // keys via accReader/storageReader, then validates the resulting branch data.
-// Returns incremental counts, the resolved branch data, and any error.
-// A non-ErrIntegrity error is fatal (out-of-bounds or failFast). An ErrIntegrity-wrapped
-// error is a non-fatal integrity violation (caller should accumulate, not stop).
+// All issues are non-fatal: logged as warnings and accumulated into retErr (ErrIntegrity-wrapped).
 func checkDerefBranch(
 	branchKey, branchValue []byte,
 	newBranchValueBuf, plainKeyBuf []byte,
 	accReader, storageReader *seg.Reader,
 	fileName string,
-	failFast, trace bool,
+	trace bool,
 	logger log.Logger,
 ) (dc derefCounts, newBranchData commitment.BranchData, retErr error) {
 	branchData := commitment.BranchData(branchValue)
 	var integrityErr error
 
-	newBranchData, err := branchData.ReplacePlainKeys(newBranchValueBuf[:0], func(key []byte, isStorage bool) ([]byte, error) {
+	newBranchData, _ = branchData.ReplacePlainKeys(newBranchValueBuf[:0], func(key []byte, isStorage bool) ([]byte, error) {
 		if trace {
 			logger.Trace(
 				"checking commitment deref for branch",
