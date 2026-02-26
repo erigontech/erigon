@@ -156,7 +156,7 @@ func parallelChunkCheck(ctx context.Context, fromBlock, toBlock uint64, db kv.Te
 			case <-logEvery.C:
 				completed := completedChunks.Load()
 				progress := float64(completed) / float64(totalChunks) * 100
-				log.Info("[integrity] progress", "progress", fmt.Sprintf("%.1f%%", progress))
+				log.Info("[integrity] CheckRCacheNoDups", "progress", fmt.Sprintf("%.1f%%", progress))
 			}
 		}
 	}()
