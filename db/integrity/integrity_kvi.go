@@ -118,84 +118,81 @@ func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression 
 	workCh := make(chan kviWorkItem, numWorkers*4)
 
 	var keyCount uint64
-	eg, egCtx := errgroup.WithContext(ctx)
-	{
-		ctx := egCtx
+	eg, ctx := errgroup.WithContext(ctx)
 
-		checkOne := func(kviReader *recsplit.IndexReader, work kviWorkItem) error {
-			if logger.Enabled(ctx, log.LvlTrace) {
-				logger.Trace("checking kvi for", "key", hex.EncodeToString(work.key), "offset", work.offset, "kvi", kviFileName)
-			}
-			kviOffset, found := kviReader.Lookup(work.key)
-			if !found {
-				return fmt.Errorf("%w: key %x not found in %s", ErrIntegrity, work.key, kviFileName)
-			}
-			if kviOffset != work.offset {
-				return fmt.Errorf("%w: key %x offset mismatch %d != %d in %s", ErrIntegrity, work.key, work.offset, kviOffset, kviFileName)
-			}
-			return nil
+	checkOne := func(kviReader *recsplit.IndexReader, work kviWorkItem) error {
+		if logger.Enabled(ctx, log.LvlTrace) {
+			logger.Trace("checking kvi for", "key", hex.EncodeToString(work.key), "offset", work.offset, "kvi", kviFileName)
 		}
-
-		for range numWorkers {
-			eg.Go(func() error {
-				kviReader := kvi.GetReaderFromPool()
-				defer kviReader.Close()
-				for {
-					select {
-					case <-ctx.Done():
-						return ctx.Err()
-					case work, ok := <-workCh:
-						if !ok {
-							return nil
-						}
-						if err := checkOne(kviReader, work); err != nil {
-							if !failFast {
-								logger.Warn(err.Error())
-							}
-							return err
-						}
-					}
-				}
-			})
+		kviOffset, found := kviReader.Lookup(work.key)
+		if !found {
+			return fmt.Errorf("%w: key %x not found in %s", ErrIntegrity, work.key, kviFileName)
 		}
+		if kviOffset != work.offset {
+			return fmt.Errorf("%w: key %x offset mismatch %d != %d in %s", ErrIntegrity, work.key, work.offset, kviOffset, kviFileName)
+		}
+		return nil
+	}
 
-		// Producer: scan kv file sequentially, emit (key, offset) pairs to workers.
+	for range numWorkers {
 		eg.Go(func() error {
-			defer close(workCh)
-			logTicker := time.NewTicker(30 * time.Second)
-			defer logTicker.Stop()
-			var keyBuf []byte
-			var keyOffset uint64
-			var atValue bool
-			for kvReader.HasNext() {
-				if atValue {
-					keyOffset, _ = kvReader.Skip()
-					atValue = false
-					continue
-				}
-				keyBuf, _ = kvReader.Next(keyBuf[:0])
-				keyCount++
-				atValue = true
-
+			kviReader := kvi.GetReaderFromPool()
+			defer kviReader.Close()
+			for {
 				select {
 				case <-ctx.Done():
-					return nil
-				case workCh <- kviWorkItem{key: bytes.Clone(keyBuf), offset: keyOffset}:
-				}
-
-				select {
-				case <-logTicker.C:
-					at := fmt.Sprintf("%d/%d", keyCount, kvi.KeyCount())
-					percent := fmt.Sprintf("%.1f%%", float64(keyCount)/float64(kvi.KeyCount())*100)
-					rate := float64(keyCount) / time.Since(start).Seconds()
-					eta := time.Duration(float64(kvi.KeyCount()-keyCount)/rate) * time.Second
-					logger.Info("checking kvi progress", "at", at, "p", percent, "k/s", rate, "eta", eta, "kvi", kviFileName)
-				default:
+					return ctx.Err()
+				case work, ok := <-workCh:
+					if !ok {
+						return nil
+					}
+					if err := checkOne(kviReader, work); err != nil {
+						if !failFast {
+							logger.Warn(err.Error())
+						}
+						return err
+					}
 				}
 			}
-			return nil
 		})
 	}
+
+	// Producer: scan kv file sequentially, emit (key, offset) pairs to workers.
+	eg.Go(func() error {
+		defer close(workCh)
+		logTicker := time.NewTicker(30 * time.Second)
+		defer logTicker.Stop()
+		var keyBuf []byte
+		var keyOffset uint64
+		var atValue bool
+		for kvReader.HasNext() {
+			if atValue {
+				keyOffset, _ = kvReader.Skip()
+				atValue = false
+				continue
+			}
+			keyBuf, _ = kvReader.Next(keyBuf[:0])
+			keyCount++
+			atValue = true
+
+			select {
+			case <-ctx.Done():
+				return nil
+			case workCh <- kviWorkItem{key: bytes.Clone(keyBuf), offset: keyOffset}:
+			}
+
+			select {
+			case <-logTicker.C:
+				at := fmt.Sprintf("%d/%d", keyCount, kvi.KeyCount())
+				percent := fmt.Sprintf("%.1f%%", float64(keyCount)/float64(kvi.KeyCount())*100)
+				rate := float64(keyCount) / time.Since(start).Seconds()
+				eta := time.Duration(float64(kvi.KeyCount()-keyCount)/rate) * time.Second
+				logger.Info("checking kvi progress", "at", at, "p", percent, "k/s", rate, "eta", eta, "kvi", kviFileName)
+			default:
+			}
+		}
+		return nil
+	})
 
 	if workerErr := eg.Wait(); workerErr != nil {
 		return keyCount, workerErr
