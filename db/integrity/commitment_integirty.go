@@ -29,7 +29,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -821,7 +820,6 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, db kv.TemporalRoDB, br s
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(estimate.AlmostAllCPUs())
 	for blockNum := from; blockNum < to; blockNum++ {
-		blockNum := blockNum
 		g.Go(func() error {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -905,7 +903,6 @@ func CheckStateVerify(ctx context.Context, db kv.TemporalRoDB, failFast bool, fr
 
 // processBranch validates a single commitment branch and accumulates found keys into the provided sets.
 // accReader and storageReader must not be shared across goroutines — each caller must use its own instances.
-// This is the per-branch unit of work, extracted to enable future parallelization.
 func processBranch(
 	branchKey []byte, branchData commitment.BranchData,
 	accReader, storageReader *seg.Reader,
@@ -1402,8 +1399,7 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 			"dur", dur)
 
 		// Phase 2: Hash verification — only runs if key correspondence passes.
-		numWorkers := dbg.EnvInt("CHECK_VERIFY_STATE_WORKERS", runtime.NumCPU())
-		hashErr := checkHashVerification(ctx, file, stepSize, failFast, numWorkers, logger)
+		hashErr := checkHashVerification(ctx, file, stepSize, failFast, dbg.EnvInt("CHECK_VERIFY_STATE_WORKERS", estimate.AlmostAllCPUs()), logger)
 		if hashErr != nil {
 			integrityErr = hashErr
 		}
@@ -1542,8 +1538,6 @@ func verifyMissingAgainstPrevFiles(entries []missingEntry, domain kv.Domain, pre
 	confirmed := make([]bool, len(entries))
 	remaining := len(entries)
 
-	compression := statecfg.Schema.GetDomainCfg(domain).Compression
-
 	for _, prevCommitPath := range prevCommitmentPaths {
 		if remaining == 0 {
 			break
@@ -1558,7 +1552,6 @@ func verifyMissingAgainstPrevFiles(entries []missingEntry, domain kv.Domain, pre
 		}
 
 		// Merge-join: walk the previous file and check all unconfirmed entries.
-		_ = compression // reader already has compression configured
 		keyBuf := make([]byte, 0, length.Addr+length.Hash)
 		valBuf := make([]byte, 0, 128)
 		ei := 0 // index into sorted entries
@@ -1937,8 +1930,6 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 				return ctx.Err()
 			}
 			select {
-			case <-ctx.Done():
-				return ctx.Err()
 			case <-logTicker.C:
 				logger.Info("[verify-state] hash verification progress",
 					"produced", produced,

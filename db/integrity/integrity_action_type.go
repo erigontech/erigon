@@ -72,12 +72,6 @@ const (
 	// the root to verify it matches stored values. Ensures commitment snapshots have valid roots.
 	CommitmentRoot Check = "CommitmentRoot"
 
-	// CommitmentKvi validates KVI index files for commitment domain. Checks that the KVI
-	// index files (.kvi) match their corresponding KV files (.kv): same key count and
-	// correct offset mappings. Different from CommitmentKvDeref in that it only validates
-	// the index structure itself.
-	CommitmentKvi Check = "CommitmentKvi"
-
 	// CommitmentKvDeref validates commitment branch key references. Checks that every
 	// reference from commitment branch keys (in commitment domain) to account/storage domain
 	// keys can be dereferenced correctly. Detects missing accounts or storage entries that
@@ -110,11 +104,23 @@ const (
 	Publishable Check = "Publishable"
 )
 
+const (
+	// CommitmentKvi validates KVI index files for commitment domain. Checks that the KVI
+	// index files (.kvi) match their corresponding KV files (.kv): same key count and
+	// correct offset mappings. Different from CommitmentKvDeref in that it only validates
+	// the index structure itself.
+	CommitmentKvi Check = "CommitmentKvi"
+)
+
 var FastChecks = []Check{
 	Blocks, HeaderNoGaps, BlocksTxnID, InvertedIndex, StateProgress, Publishable, HistoryNoSystemTxs,
 	BorEvents, BorSpans, BorCheckpoints, ReceiptsNoDups, RCacheNoDups, CommitmentRoot,
-	CommitmentKvi, CommitmentKvDeref,
+	StateVerify, CommitmentKvDeref,
 }
 
 var SlowChecks = []Check{CommitmentHistVal, StateVerify}
-var AllChecks = append(append([]Check{}, FastChecks...), SlowChecks...)
+var DeprecatedChecks = []Check{
+	CommitmentKvi, // super-passed by `StateVerify`
+}
+
+var AllChecks = append(append(append([]Check{}, FastChecks...), SlowChecks...), DeprecatedChecks...)
