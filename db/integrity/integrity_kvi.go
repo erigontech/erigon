@@ -193,8 +193,8 @@ func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression 
 		return nil
 	})
 
-	if workerErr := eg.Wait(); workerErr != nil {
-		return keyCount, workerErr
+	if err := eg.Wait(); err != nil {
+		return keyCount, err
 	}
 	duration := time.Since(start)
 	rate := float64(keyCount) / duration.Seconds()
