@@ -499,6 +499,7 @@ func collateAndMerge(t *testing.T, tx kv.RwTx, d *Domain, txs uint64) {
 		c, err := d.collate(ctx, step, uint64(step)*d.stepSize, uint64(step+1)*d.stepSize, tx)
 		require.NoError(t, err)
 		sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
+		c.Close()
 		require.NoError(t, err)
 		d.integrateDirtyFiles(sf, uint64(step)*d.stepSize, uint64(step+1)*d.stepSize)
 		d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
@@ -546,6 +547,7 @@ func collateAndMergeOnceWithScanPrune(t *testing.T, d *Domain, tx kv.RwTx, step 
 	require.NoError(t, err)
 
 	sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
+	c.Close()
 	require.NoError(t, err)
 	d.integrateDirtyFiles(sf, txFrom, txTo)
 	d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
@@ -591,6 +593,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step kv.Step, prun
 	require.NoError(t, err)
 
 	sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
+	c.Close()
 	require.NoError(t, err)
 	d.integrateDirtyFiles(sf, txFrom, txTo)
 	d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
@@ -1026,6 +1029,7 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 			c, err := dom.collate(ctx, step, s, ns, tx)
 			require.NoError(t, err)
 			sf, err := dom.buildFiles(ctx, step, c, background.NewProgressSet())
+			c.Close()
 			require.NoError(t, err)
 			dom.integrateDirtyFiles(sf, s, ns)
 			dom.reCalcVisibleFiles(dom.dirtyFilesEndTxNumMinimax())
@@ -1511,7 +1515,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	d.FilenameBase = kv.CommitmentDomain.String()
 
 	domainRoTx := d.BeginFilesRo()
-	defer d.Close()
+	defer domainRoTx.Close()
 	writer := domainRoTx.NewWriter()
 	defer writer.Close()
 
@@ -1586,7 +1590,7 @@ func TestDomainRange(t *testing.T) {
 	d.FilenameBase = kv.AccountsDomain.String()
 
 	domainRoTx := d.BeginFilesRo()
-	defer d.Close()
+	defer domainRoTx.Close()
 	writer := domainRoTx.NewWriter()
 	defer writer.Close()
 

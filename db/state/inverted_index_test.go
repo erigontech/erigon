@@ -498,6 +498,7 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	require.NoError(t, err)
 
 	sf, err := ii.buildFiles(ctx, 0, bs, background.NewProgressSet())
+	bs.Close()
 	require.NoError(t, err)
 	defer sf.CleanupOnError()
 
@@ -521,7 +522,6 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	require.Equal(t, []string{"key1", "key2", "key3"}, words)
 	require.Equal(t, [][]uint64{{2, 6}, {3}, {6}}, intArrs)
 	r := recsplit.NewIndexReader(sf.index)
-	defer r.Close()
 	defer r.Close()
 	for i := 0; i < len(words); i++ {
 		offset, _ := r.TwoLayerLookup([]byte(words[i]))
@@ -573,6 +573,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	require.NoError(t, err)
 
 	sf, err := ii.buildFiles(ctx, 0, bs, background.NewProgressSet())
+	bs.Close()
 	require.NoError(t, err)
 
 	ii.integrateDirtyFiles(sf, 0, 16)
@@ -598,14 +599,14 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	defer tx.Rollback()
 
 	for _, table := range []string{ii.KeysTable, ii.ValuesTable} {
-		var cur kv.Cursor
-		cur, err = tx.Cursor(table)
-		require.NoError(t, err)
-		defer cur.Close()
-		var k []byte
-		k, _, err = cur.First()
-		require.NoError(t, err)
-		require.Nil(t, k, table)
+		func() {
+			cur, err := tx.Cursor(table)
+			require.NoError(t, err)
+			defer cur.Close()
+			k, _, err := cur.First()
+			require.NoError(t, err)
+			require.Nil(t, k, table)
+		}()
 	}
 
 	from, to := ic.stepsRangeInDB(tx)
@@ -768,6 +769,7 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 			bs, err := ii.collate(ctx, step, tx)
 			require.NoError(tb, err)
 			sf, err := ii.buildFiles(ctx, step, bs, background.NewProgressSet())
+			bs.Close()
 			require.NoError(tb, err)
 			ii.integrateDirtyFiles(sf, step.ToTxNum(ii.stepSize), (step + 1).ToTxNum(ii.stepSize))
 			ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
@@ -827,6 +829,7 @@ func TestInvIndexRanges(t *testing.T) {
 			bs, err := ii.collate(ctx, step, tx)
 			require.NoError(t, err)
 			sf, err := ii.buildFiles(ctx, step, bs, background.NewProgressSet())
+			bs.Close()
 			require.NoError(t, err)
 			ii.integrateDirtyFiles(sf, step.ToTxNum(ii.stepSize), (step + 1).ToTxNum(ii.stepSize))
 			ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())

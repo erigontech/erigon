@@ -101,7 +101,6 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 		for i := uint64(0); i+h.stepSize < totalTx; i += h.stepSize {
 			collation, err := h.collate(ctx, kv.Step(i/h.stepSize), i, i+h.stepSize, rwtx)
 			require.NoError(t, err)
-			defer collation.Close()
 
 			require.NotEmptyf(t, collation.historyPath, "collation.historyPath is empty")
 			require.NotNil(t, collation.historyComp)
@@ -109,6 +108,7 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 			require.NotNil(t, collation.efHistoryComp)
 
 			sf, err := h.buildFiles(ctx, kv.Step(i/h.stepSize), collation, background.NewProgressSet())
+			collation.Close()
 			require.NoError(t, err)
 			require.NotNil(t, sf)
 			defer sf.CleanupOnError()
@@ -230,6 +230,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 
 		c, err := h.collate(ctx, 0, 0, 8, tx)
 		require.NoError(err)
+		defer c.Close()
 
 		require.True(strings.HasSuffix(c.historyPath, h.vFileName(0, 1)))
 		require.Equal(3, c.efHistoryComp.Count()/2)
@@ -360,6 +361,7 @@ func TestHistoryAfterPrune(t *testing.T) {
 		require.NoError(err)
 
 		sf, err := h.buildFiles(ctx, 0, c, background.NewProgressSet())
+		c.Close()
 		require.NoError(err)
 
 		h.integrateDirtyFiles(sf, 0, 16)
@@ -373,14 +375,14 @@ func TestHistoryAfterPrune(t *testing.T) {
 		require.NoError(err)
 
 		for _, table := range []string{h.KeysTable, h.ValuesTable, h.ValuesTable} {
-			var cur kv.Cursor
-			cur, err = tx.Cursor(table)
-			require.NoError(err)
-			defer cur.Close()
-			var k []byte
-			k, _, err = cur.First()
-			require.NoError(err)
-			require.Nilf(k, "table=%s", table)
+			func() {
+				cur, err := tx.Cursor(table)
+				require.NoError(err)
+				defer cur.Close()
+				k, _, err := cur.First()
+				require.NoError(err)
+				require.Nilf(k, "table=%s", table)
+			}()
 		}
 	}
 	t.Run("large_values", func(t *testing.T) {
@@ -1025,14 +1027,15 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 		c, err := h.collate(ctx, step, step.ToTxNum(h.stepSize), (step + 1).ToTxNum(h.stepSize), tx)
 		require.NoError(err)
 		sf, err := h.buildFiles(ctx, step, c, background.NewProgressSet())
+		c.Close()
 		require.NoError(err)
 		h.integrateDirtyFiles(sf, step.ToTxNum(h.stepSize), (step + 1).ToTxNum(h.stepSize))
 		h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 
 		if doPrune {
 			hc := h.BeginFilesRo()
-			defer hc.Close()
 			_, err = hc.Prune(ctx, tx, step.ToTxNum(h.stepSize), (step + 1).ToTxNum(h.stepSize), math.MaxUint64, false, logEvery)
+			hc.Close()
 			require.NoError(err)
 		}
 	}
