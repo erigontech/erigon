@@ -33,7 +33,6 @@ import (
 	"runtime"
 	"sort"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -1710,6 +1709,125 @@ type hashWorkItem struct {
 	branchValue []byte
 }
 
+func verifyHashItem(
+	item hashWorkItem,
+	accReader, stoReader *seg.Reader,
+	isReferencing bool,
+	preloadedAccValues, preloadedStoValues map[string][]byte,
+	plainKeyBuf, valBuf []byte,
+	hashChecked, hashMismatches *atomic.Uint64,
+) error {
+	branchData := commitment.BranchData(item.branchValue)
+	accountValues := make(map[string][]byte, 8)
+	storageValues := make(map[string][]byte, 8)
+
+	resolvedBranchData, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+		if isStorage {
+			plainKey := key
+			if len(key) != length.Addr+length.Hash {
+				if !isReferencing {
+					return key, nil
+				}
+				offset := state.DecodeReferenceKey(key)
+				if offset >= uint64(stoReader.Size()) {
+					return key, nil
+				}
+				stoReader.Reset(offset)
+				plainKey, _ = stoReader.Next(plainKeyBuf[:0])
+				if len(plainKey) != length.Addr+length.Hash {
+					return key, nil
+				}
+				val, _ := stoReader.Next(valBuf[:0])
+				storageValues[string(plainKey)] = common.Copy(val)
+			} else if preloadedStoValues != nil {
+				strKey := string(plainKey)
+				if val, ok := preloadedStoValues[strKey]; ok {
+					storageValues[strKey] = val
+				}
+			}
+			return plainKey, nil
+		}
+		plainKey := key
+		if len(key) != length.Addr {
+			if !isReferencing {
+				return key, nil
+			}
+			offset := state.DecodeReferenceKey(key)
+			if offset >= uint64(accReader.Size()) {
+				return key, nil
+			}
+			accReader.Reset(offset)
+			plainKey, _ = accReader.Next(plainKeyBuf[:0])
+			if len(plainKey) != length.Addr {
+				return key, nil
+			}
+			val, _ := accReader.Next(valBuf[:0])
+			accountValues[string(plainKey)] = common.Copy(val)
+		} else if preloadedAccValues != nil {
+			strKey := string(plainKey)
+			if val, ok := preloadedAccValues[strKey]; ok {
+				accountValues[strKey] = val
+			}
+		}
+		return plainKey, nil
+	})
+	if err != nil {
+		return err
+	}
+	if len(accountValues) == 0 && len(storageValues) == 0 {
+		return nil
+	}
+	hashChecked.Add(1)
+	if err = commitment.VerifyBranchHashes(item.branchKey, resolvedBranchData, accountValues, storageValues); err != nil {
+		hashMismatches.Add(1)
+		return fmt.Errorf("%w: %w", ErrIntegrity, err)
+	}
+	return nil
+}
+
+func hashVerificationWorker(ctx context.Context, workCh <-chan hashWorkItem, filePath string, isReferencing bool, preloadedAccValues, preloadedStoValues map[string][]byte, hashChecked, hashMismatches *atomic.Uint64, failFast bool, fileName string, logger log.Logger) error {
+	var accReader, stoReader *seg.Reader
+	var accClose, stoClose func()
+	if isReferencing {
+		var err error
+		accReader, accClose, err = deriveReaderForOtherDomain(filePath, kv.CommitmentDomain, kv.AccountsDomain)
+		if err != nil {
+			return fmt.Errorf("worker: open accounts reader: %w", err)
+		}
+		defer accClose()
+		stoReader, stoClose, err = deriveReaderForOtherDomain(filePath, kv.CommitmentDomain, kv.StorageDomain)
+		if err != nil {
+			return fmt.Errorf("worker: open storage reader: %w", err)
+		}
+		defer stoClose()
+	}
+
+	plainKeyBuf := make([]byte, 0, length.Addr+length.Hash)
+	valBuf := make([]byte, 0, 128)
+
+	for item := range workCh {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		if err := verifyHashItem(item, accReader, stoReader, isReferencing, preloadedAccValues, preloadedStoValues, plainKeyBuf, valBuf, hashChecked, hashMismatches); err != nil {
+			if errors.Is(err, ErrIntegrity) {
+				if failFast {
+					return fmt.Errorf("%w in %s", err, fileName)
+				}
+				logger.Warn("[verify-state] hash mismatch", "err", err, "kv", fileName)
+			} else {
+				if failFast {
+					return err
+				}
+				logger.Warn("[verify-state] hash: ReplacePlainKeys error", "err", err, "kv", fileName)
+			}
+		}
+	}
+	return nil
+}
+
 // checkHashVerification verifies that stateHash stored in each commitment branch cell
 // matches the hash recomputed from the actual domain values. Uses a producer-consumer
 // pattern: 1 producer reads the commitment file sequentially, N workers each open their
@@ -1751,10 +1869,6 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 	var hashMismatches atomic.Uint64
 	var hashChecked atomic.Uint64
 
-	// Pool to reuse per-item value maps and reduce GC pressure.
-	var valMapPool sync.Pool
-	valMapPool.New = func() any { return make(map[string][]byte, 8) }
-
 	// Set up errgroup with context for cancellation on failure.
 	var eg *errgroup.Group
 	if failFast {
@@ -1764,122 +1878,9 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 	}
 
 	// Launch N worker goroutines.
-	for w := 0; w < numWorkers; w++ {
+	for range numWorkers {
 		eg.Go(func() error {
-			// Each worker opens its own domain readers for referencing files.
-			var accReader, stoReader *seg.Reader
-			var accClose, stoClose func()
-			if isReferencing {
-				var err error
-				accReader, accClose, err = deriveReaderForOtherDomain(file.Fullpath(), kv.CommitmentDomain, kv.AccountsDomain)
-				if err != nil {
-					return fmt.Errorf("worker: open accounts reader: %w", err)
-				}
-				defer accClose()
-				stoReader, stoClose, err = deriveReaderForOtherDomain(file.Fullpath(), kv.CommitmentDomain, kv.StorageDomain)
-				if err != nil {
-					return fmt.Errorf("worker: open storage reader: %w", err)
-				}
-				defer stoClose()
-			}
-
-			plainKeyBuf := make([]byte, 0, length.Addr+length.Hash)
-			valBuf := make([]byte, 0, 128)
-
-			for item := range workCh {
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				default:
-				}
-
-				branchData := commitment.BranchData(item.branchValue)
-
-				// Build maps of accountValues and storageValues by resolving
-				// keys/values from domain files.
-				accountValues := valMapPool.Get().(map[string][]byte)
-				storageValues := valMapPool.Get().(map[string][]byte)
-
-				// We need branch data with plain keys for VerifyBranchHashes.
-				// Walk the branch to extract + resolve all keys and read values.
-				resolvedBranchData, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
-					if isStorage {
-						plainKey := key
-						isRef := len(key) != length.Addr+length.Hash
-						if isRef {
-							if !isReferencing {
-								return key, nil
-							}
-							offset := state.DecodeReferenceKey(key)
-							if offset >= uint64(stoReader.Size()) {
-								return key, nil
-							}
-							stoReader.Reset(offset)
-							plainKey, _ = stoReader.Next(plainKeyBuf[:0])
-							if len(plainKey) != length.Addr+length.Hash {
-								return key, nil
-							}
-							val, _ := stoReader.Next(valBuf[:0])
-							storageValues[string(plainKey)] = common.Copy(val)
-						} else if preloadedStoValues != nil {
-							strKey := string(plainKey)
-							if val, ok := preloadedStoValues[strKey]; ok {
-								storageValues[strKey] = val
-							}
-						}
-						return plainKey, nil
-					}
-
-					// Account key
-					plainKey := key
-					isRef := len(key) != length.Addr
-					if isRef {
-						if !isReferencing {
-							return key, nil
-						}
-						offset := state.DecodeReferenceKey(key)
-						if offset >= uint64(accReader.Size()) {
-							return key, nil
-						}
-						accReader.Reset(offset)
-						plainKey, _ = accReader.Next(plainKeyBuf[:0])
-						if len(plainKey) != length.Addr {
-							return key, nil
-						}
-						val, _ := accReader.Next(valBuf[:0])
-						accountValues[string(plainKey)] = common.Copy(val)
-					} else if preloadedAccValues != nil {
-						strKey := string(plainKey)
-						if val, ok := preloadedAccValues[strKey]; ok {
-							accountValues[strKey] = val
-						}
-					}
-					return plainKey, nil
-				})
-				if err != nil {
-					if failFast {
-						return err
-					}
-					logger.Warn("[verify-state] hash: ReplacePlainKeys error", "err", err, "kv", fileName)
-					continue
-				}
-
-				// Only verify if we have at least one value to check.
-				if len(accountValues) == 0 && len(storageValues) == 0 {
-					continue
-				}
-
-				err = commitment.VerifyBranchHashes(item.branchKey, resolvedBranchData, accountValues, storageValues)
-				if err != nil {
-					hashMismatches.Add(1)
-					if failFast {
-						return fmt.Errorf("%w: %s in %s", ErrIntegrity, err.Error(), fileName)
-					}
-					logger.Warn("[verify-state] hash mismatch", "err", err, "kv", fileName)
-				}
-				hashChecked.Add(1)
-			}
-			return nil
+			return hashVerificationWorker(ctx, workCh, file.Fullpath(), isReferencing, preloadedAccValues, preloadedStoValues, &hashChecked, &hashMismatches, failFast, fileName, logger)
 		})
 	}
 
