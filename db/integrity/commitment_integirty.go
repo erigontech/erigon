@@ -1803,9 +1803,9 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 							val, _ := stoReader.Next(valBuf[:0])
 							storageValues[string(plainKey)] = common.Copy(val)
 						} else if preloadedStoValues != nil {
-							hexKey := hex.EncodeToString(plainKey)
-							if val, ok := preloadedStoValues[hexKey]; ok {
-								storageValues[hexKey] = val
+							strKey := string(plainKey)
+							if val, ok := preloadedStoValues[strKey]; ok {
+								storageValues[strKey] = val
 							}
 						}
 						return plainKey, nil
