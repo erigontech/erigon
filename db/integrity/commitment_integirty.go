@@ -1043,7 +1043,13 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 		// and collects keys into the ETL collector for deduplication and counting.
 		checkKey := func(key []byte, collector *etl.Collector, reader *seg.Reader, expectedLen int, kind string) error {
 			if len(key) == expectedLen {
-				return collector.Collect(key, nil)
+				// Plain key: collect for counting only when not referencing.
+				// In referencing files, plain-length keys are pass-through and not counted
+				// (only offset-encoded refs contribute to the forward count).
+				if !isReferencing {
+					return collector.Collect(key, nil)
+				}
+				return nil
 			}
 			if !isReferencing {
 				return fmt.Errorf("%w: unexpected %s key len=%d for branch %x in %s", ErrIntegrity, kind, len(key), branchKey, fileName)
