@@ -278,7 +278,8 @@ func InfoAllStages(ctx context.Context, logger log.Logger, dataDirPath string, i
 
 	opts := kv2.New(dbcfg.ChainDB, logger).
 		Path(chainDataPath).
-		Accede(true) // open read-only, don't create
+		Accede(true).
+		Readonly(true) // open read-only so etui can coexist with running erigon
 
 	db, err := openDB(opts, false, "", logger)
 	if err != nil {

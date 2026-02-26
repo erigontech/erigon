@@ -1,8 +1,10 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"runtime/debug"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -10,7 +12,6 @@ import (
 	"github.com/erigontech/erigon/cmd/etui/app"
 	"github.com/erigontech/erigon/cmd/integration/commands"
 	log "github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/state"
 )
 
 var (
@@ -32,28 +33,26 @@ var infoCmd = &cobra.Command{
 			defer close(infoCh)
 			defer func() {
 				if r := recover(); r != nil {
-					println("recovered from panic: ", r)
+					msg := fmt.Sprintf("panic in InfoAllStages: %v\n%s", r, debug.Stack())
+					writeCrashLog(datadirCli, msg)
+					select {
+					case errCh <- fmt.Errorf("panic: %v (see etui-crash.log)", r):
+					default:
+					}
 				}
 			}()
-			backoff := 5 * time.Second
+			const retryInterval = 5 * time.Second
 			for {
 				err := commands.InfoAllStages(cmd.Context(), logger, datadirCli, infoCh)
 				if err == nil {
 					return
 				}
-				// Salt files missing means OtterSync is still downloading — retry
-				if !errors.Is(err, state.ErrCannotStartWithoutSaltFiles) {
-					select {
-					case errCh <- err:
-					default:
-					}
-					return
-				}
-				// Don't report to errCh — the downloader widget already shows progress.
+				// All errors are transient for etui: DB locked, salt files
+				// missing, chaindata not yet created, etc. Always retry.
 				select {
 				case <-cmd.Context().Done():
 					return
-				case <-time.After(backoff):
+				case <-time.After(retryInterval):
 				}
 			}
 		}()
@@ -64,4 +63,16 @@ var infoCmd = &cobra.Command{
 
 func init() {
 	infoCmd.Flags().StringVar(&datadirCli, "datadir", "", "Directory containing versioned files")
+}
+
+// writeCrashLog appends a panic message with stack trace to etui-crash.log in the datadir.
+func writeCrashLog(datadir, msg string) {
+	logPath := filepath.Join(datadir, "etui-crash.log")
+	entry := fmt.Sprintf("[%s] %s\n\n", time.Now().Format(time.RFC3339), msg)
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	f.WriteString(entry)
 }

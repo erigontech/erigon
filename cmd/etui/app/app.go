@@ -3,6 +3,9 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"runtime/debug"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -54,10 +57,10 @@ func (a *App) Run(parent context.Context, infoCh <-chan *commands.StagesInfo, er
 		AddItem(footer, 2, 1, false)
 
 	// Start background goroutines
-	go a.fillStagesInfo(ctx, nodeView, infoCh)
-	go a.runClock(ctx, nodeView.Clock)
-	go a.handleErrors(ctx, errCh, footer)
-	go a.pollDownloader(ctx, nodeView.Downloader, errCh)
+	go a.safeGo("fillStagesInfo", errCh, func() { a.fillStagesInfo(ctx, nodeView, infoCh) })
+	go a.safeGo("runClock", errCh, func() { a.runClock(ctx, nodeView.Clock) })
+	go a.handleErrors(ctx, errCh, footer) // not wrapped — it drains errCh itself
+	go a.safeGo("pollDownloader", errCh, func() { a.pollDownloader(ctx, nodeView.Downloader, errCh) })
 
 	// Page navigation
 	currentPage, pagesCount := 0, 2
@@ -83,6 +86,33 @@ func (a *App) Run(parent context.Context, infoCh <-chan *commands.StagesInfo, er
 		return err
 	}
 	return nil
+}
+
+// safeGo wraps a function with panic recovery, logging the stack to etui-crash.log
+// and sending the error to errCh for display in the TUI footer.
+func (a *App) safeGo(name string, errCh chan error, fn func()) {
+	defer func() {
+		if r := recover(); r != nil {
+			msg := fmt.Sprintf("panic in %s: %v\n%s", name, r, debug.Stack())
+			a.writeCrashLog(msg)
+			select {
+			case errCh <- fmt.Errorf("panic in %s: %v (see etui-crash.log)", name, r):
+			default:
+			}
+		}
+	}()
+	fn()
+}
+
+func (a *App) writeCrashLog(msg string) {
+	logPath := filepath.Join(a.datadir, "etui-crash.log")
+	entry := fmt.Sprintf("[%s] %s\n\n", time.Now().Format(time.RFC3339), msg)
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	f.WriteString(entry)
 }
 
 // fillStagesInfo reads StagesInfo from the channel and updates the node-info view.
