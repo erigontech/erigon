@@ -108,11 +108,16 @@ func queueKeys(ctx context.Context, seed, ofSize uint64) <-chan []byte {
 }
 
 func Benchmark_BtreeIndex_Search(b *testing.B) {
+	dataPath := "../../data/storage.256-288.kv"
+	f, err := os.Stat(dataPath)
+	if err != nil || f.IsDir() {
+		b.Skip("requires existing KV file at ../../data/storage.256-288.kv")
+	}
+
 	logger := log.New()
 	rnd := newRnd(uint64(time.Now().UnixNano()))
 	tmp := b.TempDir()
 	defer dir.RemoveAll(tmp)
-	dataPath := "../../data/storage.256-288.kv"
 
 	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
 	comp := seg.CompressKeys | seg.CompressVals
