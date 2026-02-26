@@ -114,12 +114,6 @@ func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression 
 		firstErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
 	}
 
-	numWorkers := estimate.AlmostAllCPUs()
-	workCh := make(chan kviWorkItem, numWorkers*4)
-
-	var keyCount uint64
-	eg, ctx := errgroup.WithContext(ctx)
-
 	checkOne := func(kviReader *recsplit.IndexReader, work kviWorkItem) error {
 		if logger.Enabled(ctx, log.LvlTrace) {
 			logger.Trace("checking kvi for", "key", hex.EncodeToString(work.key), "offset", work.offset, "kvi", kviFileName)
@@ -133,6 +127,11 @@ func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression 
 		}
 		return nil
 	}
+
+	var keyCount uint64
+	eg, ctx := errgroup.WithContext(ctx)
+	numWorkers := estimate.AlmostAllCPUs()
+	workCh := make(chan kviWorkItem, numWorkers*4)
 
 	for range numWorkers {
 		eg.Go(func() error {
