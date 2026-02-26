@@ -23,13 +23,12 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/recsplit"
@@ -115,10 +114,7 @@ func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression 
 		firstErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
 	}
 
-	numWorkers := runtime.GOMAXPROCS(0)
-	if dbg.EnvBool("CHECK_KVIS_SEQUENTIAL", false) {
-		numWorkers = 1
-	}
+	numWorkers := estimate.AlmostAllCPUs()
 	workCh := make(chan kviWorkItem, numWorkers*4)
 
 	var keyCount uint64
@@ -201,6 +197,9 @@ func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression 
 		workerErr = eg.Wait()
 	}
 
+	if workerErr != nil {
+		return keyCount, workerErr
+	}
 	duration := time.Since(start)
 	rate := float64(keyCount) / duration.Seconds()
 	logger.Info("checked kvi in", "dur", duration, "keys", keyCount, "k/s", rate, "kvi", kviFileName, "kv", kvFileName)
