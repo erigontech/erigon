@@ -671,429 +671,405 @@ func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propert
 
 var discardLogging = true
 
-func TestLessConflicts(t *testing.T) {
-	if testing.Short() || runtime.GOOS == "windows" {
-		t.Skip()
+// lessConflictsSender returns a sender function that distributes txs across many addresses (low contention).
+func lessConflictsSender(rng *rand.Rand) Sender {
+	return func(i int) accounts.Address {
+		randomness := rng.Intn(10) + 10
+		return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i % randomness))))
 	}
-	//t.Parallel()
-	rand := rand.New(rand.NewSource(0))
-
-	logger := logger(discardLogging)
-
-	totalTxs := []int{10, 50, 100, 200, 300}
-	numReads := []int{20, 100, 200}
-	numWrites := []int{20, 100, 200}
-	numNonIO := []int{100, 500}
-
-	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
-
-	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration) {
-		sender := func(i int) accounts.Address {
-			randomness := rand.Intn(10) + 10
-			return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i % randomness))))
-		}
-		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
-
-		return runParallel(t, tasks, checks, false, logger), serialDuration
-	}
-
-	testExecutorComb(t, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
 }
 
-func TestLessConflictsWithMetadata(t *testing.T) {
-	if testing.Short() || runtime.GOOS == "windows" {
-		t.Skip()
+// moreConflictsSender returns a sender function that clusters txs onto fewer addresses (high contention).
+func moreConflictsSender(rng *rand.Rand) Sender {
+	return func(i int) accounts.Address {
+		randomness := rng.Intn(10) + 10
+		return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i / randomness))))
 	}
-	//t.Parallel()
-	rand := rand.New(rand.NewSource(0))
-
-	logger := logger(discardLogging)
-
-	totalTxs := []int{300}
-	numReads := []int{100, 200}
-	numWrites := []int{100, 200}
-	numNonIOs := []int{100, 500}
-
-	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
-
-	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration, time.Duration) {
-		sender := func(i int) accounts.Address {
-			randomness := rand.Intn(10) + 10
-			return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i % randomness))))
-		}
-		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
-
-		parallelDuration := runParallel(t, tasks, checks, false, logger)
-
-		allDeps := runParallelGetMetadata(t, tasks, checks)
-
-		newTasks := make([]exec.Task, 0, len(tasks))
-
-		for _, t := range tasks {
-			temp := t.(*testExecTask)
-
-			keys := make([]int, len(allDeps[temp.Version().TxIndex]))
-
-			i := 0
-
-			for k := range allDeps[temp.Version().TxIndex] {
-				keys[i] = k
-				i++
-			}
-
-			temp.dependencies = keys
-			newTasks = append(newTasks, temp)
-		}
-
-		return parallelDuration, runParallel(t, newTasks, checks, true, logger), serialDuration
-	}
-
-	testExecutorCombWithMetadata(t, totalTxs, numReads, numWrites, numNonIOs, taskRunner, logger)
 }
 
+// randomSender returns a sender function that randomly assigns txs to one of 10 addresses.
+func randomSender(rng *rand.Rand) Sender {
+	return func(i int) accounts.Address {
+		return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(rng.Intn(10)))))
+	}
+}
+
+// applyDeps enriches tasks with dependency metadata from a prior profiling run.
+func applyDeps(tasks []exec.Task, allDeps map[int]map[int]bool) []exec.Task {
+	newTasks := make([]exec.Task, 0, len(tasks))
+	for _, task := range tasks {
+		temp := task.(*testExecTask)
+		keys := make([]int, 0, len(allDeps[temp.Version().TxIndex]))
+		for k := range allDeps[temp.Version().TxIndex] {
+			keys = append(keys, k)
+		}
+		temp.dependencies = keys
+		newTasks = append(newTasks, temp)
+	}
+	return newTasks
+}
+
+var defaultChecks = composeValidations([]propertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
+
+// --- Simple correctness tests (single run, small params) ---
+
+// TestZeroTx verifies the parallel executor handles an empty transaction list.
 func TestZeroTx(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip()
 	}
-	//t.Parallel()
-	logger := logger(discardLogging)
-
-	totalTxs := []int{0}
-	numReads := []int{20}
-	numWrites := []int{20}
-	numNonIO := []int{100}
-
-	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
-
-	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration) {
-		sender := func(i int) accounts.Address { return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(1)))) }
-		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
-
-		return runParallel(t, tasks, checks, false, logger), serialDuration
-	}
-
-	testExecutorComb(t, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
+	sender := func(i int) accounts.Address { return accounts.InternAddress(common.BigToAddress(big.NewInt(1))) }
+	tasks, _ := taskFactory(0, sender, 5, 5, 10, randomPathGenerator, readTime, writeTime, nonIOTime)
+	runParallel(t, tasks, defaultChecks, false, log.New())
 }
 
+// TestLessConflicts verifies correctness with low-contention sender distribution.
+// Use BenchmarkLessConflicts for the full parameter sweep.
+func TestLessConflicts(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip()
+	}
+	rng := rand.New(rand.NewSource(0))
+	tasks, _ := taskFactory(10, lessConflictsSender(rng), 5, 5, 10, randomPathGenerator, readTime, writeTime, nonIOTime)
+	runParallel(t, tasks, defaultChecks, false, log.New())
+}
+
+// TestMoreConflicts verifies correctness with high-contention sender distribution.
+// Use BenchmarkMoreConflicts for the full parameter sweep.
+func TestMoreConflicts(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip()
+	}
+	rng := rand.New(rand.NewSource(0))
+	tasks, _ := taskFactory(10, moreConflictsSender(rng), 5, 5, 10, randomPathGenerator, readTime, writeTime, nonIOTime)
+	runParallel(t, tasks, defaultChecks, false, log.New())
+}
+
+// TestRandomTx verifies correctness with fully random sender assignment.
+// Use BenchmarkRandomTx for the full parameter sweep.
+func TestRandomTx(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip()
+	}
+	rng := rand.New(rand.NewSource(0))
+	tasks, _ := taskFactory(10, randomSender(rng), 5, 5, 10, randomPathGenerator, readTime, writeTime, nonIOTime)
+	runParallel(t, tasks, defaultChecks, false, log.New())
+}
+
+// TestAlternatingTx verifies correctness when txs alternate between two senders.
 func TestAlternatingTx(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip()
 	}
-	//t.Parallel()
-
-	logger := logger(discardLogging)
-
-	totalTxs := []int{200}
-	numReads := []int{20}
-	numWrites := []int{20}
-	numNonIO := []int{100}
-
-	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
-
-	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration) {
-		sender := func(i int) accounts.Address {
-			return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i % 2))))
-		}
-		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
-
-		return runParallel(t, tasks, checks, false, logger), serialDuration
+	sender := func(i int) accounts.Address {
+		return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i % 2))))
 	}
-
-	testExecutorComb(t, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
+	tasks, _ := taskFactory(10, sender, 5, 5, 10, randomPathGenerator, readTime, writeTime, nonIOTime)
+	runParallel(t, tasks, defaultChecks, false, log.New())
 }
 
+// TestTxWithLongTailRead verifies correctness when occasional reads have 100x latency spikes.
+// Use BenchmarkTxWithLongTailRead for the full parameter sweep.
+func TestTxWithLongTailRead(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip()
+	}
+	rng := rand.New(rand.NewSource(0))
+	longTailReadTimer := longTailTimeGenerator(4*time.Microsecond, 12*time.Microsecond, 7, 10)
+	tasks, _ := taskFactory(10, moreConflictsSender(rng), 5, 5, 10, randomPathGenerator, longTailReadTimer, writeTime, nonIOTime)
+	runParallel(t, tasks, defaultChecks, false, log.New())
+}
+
+// --- Simple correctness tests with metadata ---
+
+// TestAlternatingTxWithMetadata verifies correctness with pre-computed dependency metadata
+// when txs alternate between two senders.
 func TestAlternatingTxWithMetadata(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip()
 	}
-	//t.Parallel()
-	logger := logger(discardLogging)
+	sender := func(i int) accounts.Address {
+		return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i % 2))))
+	}
+	tasks, _ := taskFactory(10, sender, 5, 5, 10, randomPathGenerator, readTime, writeTime, nonIOTime)
+	allDeps := runParallelGetMetadata(t, tasks, defaultChecks)
+	runParallel(t, applyDeps(tasks, allDeps), defaultChecks, true, log.New())
+}
 
+// --- Benchmarks (full parameter sweeps, only run with -bench) ---
+
+// BenchmarkLessConflicts runs the full low-contention parameter sweep.
+// Run with: go test -run='^$' -bench=BenchmarkLessConflicts -benchtime=1x
+func BenchmarkLessConflicts(b *testing.B) {
+	if runtime.GOOS == "windows" {
+		b.Skip()
+	}
+	logger := logger(discardLogging)
+	totalTxs := []int{10, 50, 100, 200, 300}
+	numReads := []int{20, 100, 200}
+	numWrites := []int{20, 100, 200}
+	numNonIO := []int{100, 500}
+
+	for _, numTx := range totalTxs {
+		for _, numRead := range numReads {
+			for _, numWrite := range numWrites {
+				for _, numNonIO := range numNonIO {
+					numTx, numRead, numWrite, numNonIO := numTx, numRead, numWrite, numNonIO
+					name := fmt.Sprintf("txs=%d/reads=%d/writes=%d/nonIO=%d", numTx, numRead, numWrite, numNonIO)
+					b.Run(name, func(b *testing.B) {
+						rng := rand.New(rand.NewSource(0))
+						tasks, serialDuration := taskFactory(numTx, lessConflictsSender(rng), numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
+						b.ResetTimer()
+						parallelDuration := runParallel(b, tasks, defaultChecks, false, logger)
+						if parallelDuration > 0 {
+							b.ReportMetric(float64(serialDuration)/float64(parallelDuration), "speedup")
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
+// BenchmarkLessConflictsWithMetadata runs the low-contention parameter sweep with dependency metadata.
+// Run with: go test -run='^$' -bench=BenchmarkLessConflictsWithMetadata -benchtime=1x
+func BenchmarkLessConflictsWithMetadata(b *testing.B) {
+	if runtime.GOOS == "windows" {
+		b.Skip()
+	}
+	logger := logger(discardLogging)
+	totalTxs := []int{300}
+	numReads := []int{100, 200}
+	numWrites := []int{100, 200}
+	numNonIO := []int{100, 500}
+
+	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration, time.Duration) {
+		rng := rand.New(rand.NewSource(0))
+		tasks, serialDuration := taskFactory(numTx, lessConflictsSender(rng), numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
+		parallelDuration := runParallel(b, tasks, defaultChecks, false, logger)
+		allDeps := runParallelGetMetadata(b, tasks, defaultChecks)
+		return parallelDuration, runParallel(b, applyDeps(tasks, allDeps), defaultChecks, true, logger), serialDuration
+	}
+
+	testExecutorCombWithMetadata(b, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
+}
+
+// BenchmarkMoreConflicts runs the full high-contention parameter sweep.
+// Run with: go test -run='^$' -bench=BenchmarkMoreConflicts -benchtime=1x
+func BenchmarkMoreConflicts(b *testing.B) {
+	if runtime.GOOS == "windows" {
+		b.Skip()
+	}
+	logger := logger(discardLogging)
+	totalTxs := []int{10, 50, 100, 200, 300}
+	numReads := []int{20, 100, 200}
+	numWrites := []int{20, 100, 200}
+	numNonIO := []int{100, 500}
+
+	for _, numTx := range totalTxs {
+		for _, numRead := range numReads {
+			for _, numWrite := range numWrites {
+				for _, numNonIO := range numNonIO {
+					numTx, numRead, numWrite, numNonIO := numTx, numRead, numWrite, numNonIO
+					name := fmt.Sprintf("txs=%d/reads=%d/writes=%d/nonIO=%d", numTx, numRead, numWrite, numNonIO)
+					b.Run(name, func(b *testing.B) {
+						rng := rand.New(rand.NewSource(0))
+						tasks, serialDuration := taskFactory(numTx, moreConflictsSender(rng), numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
+						b.ResetTimer()
+						parallelDuration := runParallel(b, tasks, defaultChecks, false, logger)
+						if parallelDuration > 0 {
+							b.ReportMetric(float64(serialDuration)/float64(parallelDuration), "speedup")
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
+// BenchmarkMoreConflictsWithMetadata runs the high-contention parameter sweep with dependency metadata.
+// Run with: go test -run='^$' -bench=BenchmarkMoreConflictsWithMetadata -benchtime=1x
+func BenchmarkMoreConflictsWithMetadata(b *testing.B) {
+	if runtime.GOOS == "windows" {
+		b.Skip()
+	}
+	logger := logger(discardLogging)
+	totalTxs := []int{300}
+	numReads := []int{100, 200}
+	numWrites := []int{100, 200}
+	numNonIO := []int{100, 500}
+
+	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration, time.Duration) {
+		rng := rand.New(rand.NewSource(0))
+		tasks, serialDuration := taskFactory(numTx, moreConflictsSender(rng), numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
+		parallelDuration := runParallel(b, tasks, defaultChecks, false, logger)
+		allDeps := runParallelGetMetadata(b, tasks, defaultChecks)
+		return parallelDuration, runParallel(b, applyDeps(tasks, allDeps), defaultChecks, true, logger), serialDuration
+	}
+
+	testExecutorCombWithMetadata(b, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
+}
+
+// BenchmarkRandomTx runs the full random-sender parameter sweep.
+// Run with: go test -run='^$' -bench=BenchmarkRandomTx -benchtime=1x
+func BenchmarkRandomTx(b *testing.B) {
+	if runtime.GOOS == "windows" {
+		b.Skip()
+	}
+	logger := logger(discardLogging)
+	totalTxs := []int{10, 50, 100, 200, 300}
+	numReads := []int{20, 100, 200}
+	numWrites := []int{20, 100, 200}
+	numNonIO := []int{100, 500}
+
+	for _, numTx := range totalTxs {
+		for _, numRead := range numReads {
+			for _, numWrite := range numWrites {
+				for _, numNonIO := range numNonIO {
+					numTx, numRead, numWrite, numNonIO := numTx, numRead, numWrite, numNonIO
+					name := fmt.Sprintf("txs=%d/reads=%d/writes=%d/nonIO=%d", numTx, numRead, numWrite, numNonIO)
+					b.Run(name, func(b *testing.B) {
+						rng := rand.New(rand.NewSource(0))
+						tasks, serialDuration := taskFactory(numTx, randomSender(rng), numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
+						b.ResetTimer()
+						parallelDuration := runParallel(b, tasks, defaultChecks, false, logger)
+						if parallelDuration > 0 {
+							b.ReportMetric(float64(serialDuration)/float64(parallelDuration), "speedup")
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
+// BenchmarkRandomTxWithMetadata runs the random-sender parameter sweep with dependency metadata.
+// Run with: go test -run='^$' -bench=BenchmarkRandomTxWithMetadata -benchtime=1x
+func BenchmarkRandomTxWithMetadata(b *testing.B) {
+	if runtime.GOOS == "windows" {
+		b.Skip()
+	}
+	logger := logger(discardLogging)
+	totalTxs := []int{300}
+	numReads := []int{100, 200}
+	numWrites := []int{100, 200}
+	numNonIO := []int{100, 500}
+
+	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration, time.Duration) {
+		rng := rand.New(rand.NewSource(0))
+		tasks, serialDuration := taskFactory(numTx, randomSender(rng), numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
+		parallelDuration := runParallel(b, tasks, defaultChecks, false, logger)
+		allDeps := runParallelGetMetadata(b, tasks, defaultChecks)
+		return parallelDuration, runParallel(b, applyDeps(tasks, allDeps), defaultChecks, true, logger), serialDuration
+	}
+
+	testExecutorCombWithMetadata(b, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
+}
+
+// BenchmarkTxWithLongTailRead runs the full parameter sweep with occasional 100x read latency spikes.
+// Run with: go test -run='^$' -bench=BenchmarkTxWithLongTailRead -benchtime=1x
+func BenchmarkTxWithLongTailRead(b *testing.B) {
+	if runtime.GOOS == "windows" {
+		b.Skip()
+	}
+	logger := logger(discardLogging)
+	totalTxs := []int{10, 50, 100, 200, 300}
+	numReads := []int{20, 100, 200}
+	numWrites := []int{20, 100, 200}
+	numNonIO := []int{100, 500}
+
+	for _, numTx := range totalTxs {
+		for _, numRead := range numReads {
+			for _, numWrite := range numWrites {
+				for _, numNonIO := range numNonIO {
+					numTx, numRead, numWrite, numNonIO := numTx, numRead, numWrite, numNonIO
+					name := fmt.Sprintf("txs=%d/reads=%d/writes=%d/nonIO=%d", numTx, numRead, numWrite, numNonIO)
+					b.Run(name, func(b *testing.B) {
+						rng := rand.New(rand.NewSource(0))
+						longTailReadTimer := longTailTimeGenerator(4*time.Microsecond, 12*time.Microsecond, 7, 10)
+						tasks, serialDuration := taskFactory(numTx, moreConflictsSender(rng), numRead, numWrite, numNonIO, randomPathGenerator, longTailReadTimer, writeTime, nonIOTime)
+						b.ResetTimer()
+						parallelDuration := runParallel(b, tasks, defaultChecks, false, logger)
+						if parallelDuration > 0 {
+							b.ReportMetric(float64(serialDuration)/float64(parallelDuration), "speedup")
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
+// BenchmarkTxWithLongTailReadWithMetadata runs the long-tail-read parameter sweep with dependency metadata.
+// Run with: go test -run='^$' -bench=BenchmarkTxWithLongTailReadWithMetadata -benchtime=1x
+func BenchmarkTxWithLongTailReadWithMetadata(b *testing.B) {
+	if runtime.GOOS == "windows" {
+		b.Skip()
+	}
+	logger := logger(discardLogging)
+	totalTxs := []int{300}
+	numReads := []int{100, 200}
+	numWrites := []int{100, 200}
+	numNonIO := []int{100, 500}
+
+	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration, time.Duration) {
+		rng := rand.New(rand.NewSource(0))
+		longTailReadTimer := longTailTimeGenerator(4*time.Microsecond, 12*time.Microsecond, 7, 10)
+		tasks, serialDuration := taskFactory(numTx, moreConflictsSender(rng), numRead, numWrite, numNonIO, randomPathGenerator, longTailReadTimer, writeTime, nonIOTime)
+		parallelDuration := runParallel(b, tasks, defaultChecks, false, logger)
+		allDeps := runParallelGetMetadata(b, tasks, defaultChecks)
+		return parallelDuration, runParallel(b, applyDeps(tasks, allDeps), defaultChecks, true, logger), serialDuration
+	}
+
+	testExecutorCombWithMetadata(b, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
+}
+
+// BenchmarkAlternatingTx runs the alternating-sender parameter sweep.
+// Run with: go test -run='^$' -bench=BenchmarkAlternatingTx -benchtime=1x
+func BenchmarkAlternatingTx(b *testing.B) {
+	if runtime.GOOS == "windows" {
+		b.Skip()
+	}
+	logger := logger(discardLogging)
 	totalTxs := []int{200}
 	numReads := []int{20}
 	numWrites := []int{20}
 	numNonIO := []int{100}
 
-	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
+	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration) {
+		sender := func(i int) accounts.Address {
+			return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i % 2))))
+		}
+		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
+		return runParallel(b, tasks, defaultChecks, false, logger), serialDuration
+	}
+
+	testExecutorComb(b, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
+}
+
+// BenchmarkAlternatingTxWithMetadata runs the alternating-sender parameter sweep with dependency metadata.
+// Run with: go test -run='^$' -bench=BenchmarkAlternatingTxWithMetadata -benchtime=1x
+func BenchmarkAlternatingTxWithMetadata(b *testing.B) {
+	if runtime.GOOS == "windows" {
+		b.Skip()
+	}
+	logger := logger(discardLogging)
+	totalTxs := []int{200}
+	numReads := []int{20}
+	numWrites := []int{20}
+	numNonIO := []int{100}
 
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration, time.Duration) {
 		sender := func(i int) accounts.Address {
 			return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i % 2))))
 		}
 		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
-
-		parallelDuration := runParallel(t, tasks, checks, false, logger)
-
-		allDeps := runParallelGetMetadata(t, tasks, checks)
-
-		newTasks := make([]exec.Task, 0, len(tasks))
-
-		for _, t := range tasks {
-			temp := t.(*testExecTask)
-
-			keys := make([]int, len(allDeps[temp.Version().TxIndex]))
-
-			i := 0
-
-			for k := range allDeps[temp.Version().TxIndex] {
-				keys[i] = k
-				i++
-			}
-
-			temp.dependencies = keys
-			newTasks = append(newTasks, temp)
-		}
-
-		return parallelDuration, runParallel(t, newTasks, checks, true, logger), serialDuration
+		parallelDuration := runParallel(b, tasks, defaultChecks, false, logger)
+		allDeps := runParallelGetMetadata(b, tasks, defaultChecks)
+		return parallelDuration, runParallel(b, applyDeps(tasks, allDeps), defaultChecks, true, logger), serialDuration
 	}
 
-	testExecutorCombWithMetadata(t, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
-}
-
-func TestMoreConflicts(t *testing.T) {
-	if testing.Short() || runtime.GOOS == "windows" {
-		t.Skip()
-	}
-	//t.Parallel()
-	rand := rand.New(rand.NewSource(0))
-
-	logger := logger(discardLogging)
-
-	totalTxs := []int{10, 50, 100, 200, 300}
-	numReads := []int{20, 100, 200}
-	numWrites := []int{20, 100, 200}
-	numNonIO := []int{100, 500}
-
-	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
-
-	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration) {
-		sender := func(i int) accounts.Address {
-			randomness := rand.Intn(10) + 10
-			return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i / randomness))))
-		}
-		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
-
-		return runParallel(t, tasks, checks, false, logger), serialDuration
-	}
-
-	testExecutorComb(t, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
-}
-
-func TestMoreConflictsWithMetadata(t *testing.T) {
-	if testing.Short() || runtime.GOOS == "windows" {
-		t.Skip()
-	}
-	//t.Parallel()
-	rand := rand.New(rand.NewSource(0))
-
-	logger := logger(discardLogging)
-
-	totalTxs := []int{300}
-	numReads := []int{100, 200}
-	numWrites := []int{100, 200}
-	numNonIO := []int{100, 500}
-
-	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
-
-	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration, time.Duration) {
-		sender := func(i int) accounts.Address {
-			randomness := rand.Intn(10) + 10
-			return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i / randomness))))
-		}
-		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
-
-		parallelDuration := runParallel(t, tasks, checks, false, logger)
-
-		allDeps := runParallelGetMetadata(t, tasks, checks)
-
-		newTasks := make([]exec.Task, 0, len(tasks))
-
-		for _, t := range tasks {
-			temp := t.(*testExecTask)
-
-			keys := make([]int, len(allDeps[temp.Version().TxIndex]))
-
-			i := 0
-
-			for k := range allDeps[temp.Version().TxIndex] {
-				keys[i] = k
-				i++
-			}
-
-			temp.dependencies = keys
-			newTasks = append(newTasks, temp)
-		}
-
-		return parallelDuration, runParallel(t, newTasks, checks, true, logger), serialDuration
-	}
-
-	testExecutorCombWithMetadata(t, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
-}
-
-func TestRandomTx(t *testing.T) {
-	if testing.Short() || runtime.GOOS == "windows" {
-		t.Skip()
-	}
-	//t.Parallel()
-	rand := rand.New(rand.NewSource(0))
-
-	logger := logger(discardLogging)
-
-	totalTxs := []int{10, 50, 100, 200, 300}
-	numReads := []int{20, 100, 200}
-	numWrites := []int{20, 100, 200}
-	numNonIO := []int{100, 500}
-
-	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
-
-	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration) {
-		// Randomly assign this tx to one of 10 senders
-		sender := func(i int) accounts.Address {
-			return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(rand.Intn(10)))))
-		}
-		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
-
-		return runParallel(t, tasks, checks, false, logger), serialDuration
-	}
-
-	testExecutorComb(t, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
-}
-
-func TestRandomTxWithMetadata(t *testing.T) {
-	if testing.Short() || runtime.GOOS == "windows" {
-		t.Skip()
-	}
-	//t.Parallel()
-	rand := rand.New(rand.NewSource(0))
-
-	logger := logger(discardLogging)
-
-	totalTxs := []int{300}
-	numReads := []int{100, 200}
-	numWrites := []int{100, 200}
-	numNonIO := []int{100, 500}
-
-	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
-
-	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration, time.Duration) {
-		// Randomly assign this tx to one of 10 senders
-		sender := func(i int) accounts.Address {
-			return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(rand.Intn(10)))))
-		}
-		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, randomPathGenerator, readTime, writeTime, nonIOTime)
-
-		parallelDuration := runParallel(t, tasks, checks, false, logger)
-
-		allDeps := runParallelGetMetadata(t, tasks, checks)
-
-		newTasks := make([]exec.Task, 0, len(tasks))
-
-		for _, t := range tasks {
-			temp := t.(*testExecTask)
-
-			keys := make([]int, len(allDeps[temp.Version().TxIndex]))
-
-			i := 0
-
-			for k := range allDeps[temp.Version().TxIndex] {
-				keys[i] = k
-				i++
-			}
-
-			temp.dependencies = keys
-			newTasks = append(newTasks, temp)
-		}
-
-		return parallelDuration, runParallel(t, newTasks, checks, true, logger), serialDuration
-	}
-
-	testExecutorCombWithMetadata(t, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
-}
-
-func TestTxWithLongTailRead(t *testing.T) {
-	if testing.Short() || runtime.GOOS == "windows" {
-		t.Skip()
-	}
-	//t.Parallel()
-	rand := rand.New(rand.NewSource(0))
-
-	logger := logger(discardLogging)
-
-	totalTxs := []int{10, 50, 100, 200, 300}
-	numReads := []int{20, 100, 200}
-	numWrites := []int{20, 100, 200}
-	numNonIO := []int{100, 500}
-
-	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
-
-	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration) {
-		sender := func(i int) accounts.Address {
-			randomness := rand.Intn(10) + 10
-			return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i / randomness))))
-		}
-
-		longTailReadTimer := longTailTimeGenerator(4*time.Microsecond, 12*time.Microsecond, 7, 10)
-
-		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, randomPathGenerator, longTailReadTimer, writeTime, nonIOTime)
-
-		return runParallel(t, tasks, checks, false, logger), serialDuration
-	}
-
-	testExecutorComb(t, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
-}
-
-func TestTxWithLongTailReadWithMetadata(t *testing.T) {
-	if testing.Short() || runtime.GOOS == "windows" {
-		t.Skip()
-	}
-	//t.Parallel()
-	rand := rand.New(rand.NewSource(0))
-
-	logger := logger(discardLogging)
-
-	totalTxs := []int{300}
-	numReads := []int{100, 200}
-	numWrites := []int{100, 200}
-	numNonIO := []int{100, 500}
-
-	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, checkNoDroppedTx})
-
-	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration, time.Duration) {
-		sender := func(i int) accounts.Address {
-			randomness := rand.Intn(10) + 10
-			return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i / randomness))))
-		}
-
-		longTailReadTimer := longTailTimeGenerator(4*time.Microsecond, 12*time.Microsecond, 7, 10)
-
-		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, randomPathGenerator, longTailReadTimer, writeTime, nonIOTime)
-
-		parallelDuration := runParallel(t, tasks, checks, false, logger)
-
-		allDeps := runParallelGetMetadata(t, tasks, checks)
-
-		newTasks := make([]exec.Task, 0, len(tasks))
-
-		for _, t := range tasks {
-			temp := t.(*testExecTask)
-
-			keys := make([]int, len(allDeps[temp.Version().TxIndex]))
-
-			i := 0
-
-			for k := range allDeps[temp.Version().TxIndex] {
-				keys[i] = k
-				i++
-			}
-
-			temp.dependencies = keys
-			newTasks = append(newTasks, temp)
-		}
-
-		return parallelDuration, runParallel(t, newTasks, checks, true, logger), serialDuration
-	}
-
-	testExecutorCombWithMetadata(t, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
+	testExecutorCombWithMetadata(b, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
 }
 
 // dexPostValidation checks that each tx correctly depends on the immediately preceding writer.
@@ -1172,9 +1148,6 @@ func BenchmarkDexScenario(b *testing.B) {
 	}
 }
 
-// TestDexScenarioWithMetadata verifies correctness of the parallel executor with pre-computed
-// dependency metadata under a DEX-like access pattern. Runs a single representative combination
-// for fast CI execution. Use BenchmarkDexScenarioWithMetadata for the full parameter sweep.
 // TestDexScenarioWithMetadata verifies correctness of the parallel executor with pre-computed
 // dependency metadata under a DEX-like access pattern.
 // Use BenchmarkDexScenarioWithMetadata for the full parameter sweep.
