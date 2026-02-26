@@ -106,14 +106,12 @@ func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression 
 		return 0, err
 	}
 	defer kvi.Close()
-	kvi.MadvSequential()
 	kviReader := kvi.GetReaderFromPool()
 	kvDecompressor, err := seg.NewDecompressor(kvPath)
 	if err != nil {
 		return 0, err
 	}
 	defer kvDecompressor.Close()
-	kvDecompressor.MadvSequential()
 	kvReader := seg.NewReader(kvDecompressor.MakeGetter(), kvCompression)
 	var integrityErr error
 	if kvKeyCount := uint64(kvReader.Count()) / 2; kvKeyCount != kvi.KeyCount() {

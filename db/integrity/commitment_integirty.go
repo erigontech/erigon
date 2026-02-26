@@ -359,7 +359,6 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 		return derefCounts{}, err
 	}
 	defer commDecomp.Close()
-	commDecomp.MadvSequential()
 	commCompression := statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).Compression
 	commReader := seg.NewReader(commDecomp.MakeGetter(), commCompression)
 	accReader, accDecompClose, err := deriveReaderForOtherDomain(file.Fullpath(), kv.CommitmentDomain, kv.AccountsDomain)
@@ -921,7 +920,6 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 		return err
 	}
 	defer commDecomp.Close()
-	commDecomp.MadvSequential()
 	commCompression := statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).Compression
 	commReader := seg.NewReader(commDecomp.MakeGetter(), commCompression)
 
@@ -1170,7 +1168,6 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 		return err
 	}
 	defer commDecomp.Close()
-	commDecomp.MadvSequential()
 	commCompression := statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).Compression
 	commReader := seg.NewReader(commDecomp.MakeGetter(), commCompression)
 
@@ -1612,7 +1609,6 @@ func extractCommitmentRefsToTempFiles(ctx context.Context, file state.VisibleFil
 		return err
 	}
 	defer commDecomp.Close()
-	commDecomp.MadvSequential()
 	commCompression := statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).Compression
 	commReader := seg.NewReader(commDecomp.MakeGetter(), commCompression)
 
@@ -1881,7 +1877,6 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 			return err
 		}
 		defer commDecomp.Close()
-		commDecomp.MadvSequential()
 		commCompression := statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).Compression
 		commReader := seg.NewReader(commDecomp.MakeGetter(), commCompression)
 
