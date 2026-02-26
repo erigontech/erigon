@@ -339,15 +339,7 @@ func TestDomain_AfterPrune(t *testing.T) {
 	err = writer.Flush(ctx, tx)
 	require.NoError(t, err)
 
-	c, err := d.collate(ctx, 0, 0, 16, tx)
-	require.NoError(t, err)
-
-	sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
-	require.NoError(t, err)
-	c.Close()
-
-	d.integrateDirtyFiles(sf, 0, 16)
-	d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
+	require.NoError(t, d.collateBuildIntegrate(ctx, 0, tx, background.NewProgressSet()))
 	var v []byte
 	domainRoTx = d.BeginFilesRo()
 	defer domainRoTx.Close()
@@ -489,6 +481,24 @@ func TestHistory(t *testing.T) {
 	checkHistory(t, db, d, txs)
 }
 
+// collateBuildIntegrate collates, builds files and integrates them for the given step.
+// It is a test helper that combines the common collate→buildFiles→integrateDirtyFiles pattern.
+func (d *Domain) collateBuildIntegrate(ctx context.Context, step kv.Step, tx kv.Tx, ps *background.ProgressSet) error {
+	txFrom, txTo := step.ToTxNum(d.stepSize), (step + 1).ToTxNum(d.stepSize)
+	c, err := d.collate(ctx, step, txFrom, txTo, tx)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	sf, err := d.buildFiles(ctx, step, c, ps)
+	if err != nil {
+		return err
+	}
+	d.integrateDirtyFiles(sf, txFrom, txTo)
+	d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
+	return nil
+}
+
 func collateAndMerge(t *testing.T, tx kv.RwTx, d *Domain, txs uint64) {
 	t.Helper()
 	logEvery := time.NewTicker(30 * time.Second)
@@ -496,17 +506,11 @@ func collateAndMerge(t *testing.T, tx kv.RwTx, d *Domain, txs uint64) {
 	ctx := context.Background()
 	// Leave the last 2 aggregation steps un-collated
 	for step := kv.Step(0); step < kv.Step(txs/d.stepSize)-1; step++ {
-		c, err := d.collate(ctx, step, uint64(step)*d.stepSize, uint64(step+1)*d.stepSize, tx)
-		require.NoError(t, err)
-		sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
-		c.Close()
-		require.NoError(t, err)
-		d.integrateDirtyFiles(sf, uint64(step)*d.stepSize, uint64(step+1)*d.stepSize)
-		d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
+		require.NoError(t, d.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
 		require.Greater(t, len(d._visible.files), 0, d.dirtyFilesEndTxNumMinimax())
 
 		domainRoTx := d.BeginFilesRo()
-		_, err = domainRoTx.Prune(ctx, tx, step, uint64(step)*d.stepSize, uint64(step+1)*d.stepSize, math.MaxUint64, logEvery)
+		_, err := domainRoTx.Prune(ctx, tx, step, uint64(step)*d.stepSize, uint64(step+1)*d.stepSize, math.MaxUint64, logEvery)
 		domainRoTx.Close()
 		require.NoError(t, err)
 	}
@@ -541,18 +545,10 @@ func collateAndMergeOnceWithScanPrune(t *testing.T, d *Domain, tx kv.RwTx, step 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	ctx := context.Background()
-	txFrom, txTo := uint64(step)*d.stepSize, uint64(step+1)*d.stepSize
-
-	c, err := d.collate(ctx, step, txFrom, txTo, tx)
-	require.NoError(t, err)
-
-	sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
-	c.Close()
-	require.NoError(t, err)
-	d.integrateDirtyFiles(sf, txFrom, txTo)
-	d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
+	require.NoError(t, d.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
 
 	if prune {
+		txFrom, txTo := step.ToTxNum(d.stepSize), (step + 1).ToTxNum(d.stepSize)
 		domainRoTx := d.BeginFilesRo()
 		defer domainRoTx.Close()
 		stat, err := domainRoTx.Prune(ctx, tx, step, txFrom, txTo, math.MaxUint64, logEvery)
@@ -587,18 +583,11 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step kv.Step, prun
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	ctx := context.Background()
-	txFrom, txTo := uint64(step)*d.stepSize, uint64(step+1)*d.stepSize
 
-	c, err := d.collate(ctx, step, txFrom, txTo, tx)
-	require.NoError(t, err)
-
-	sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
-	c.Close()
-	require.NoError(t, err)
-	d.integrateDirtyFiles(sf, txFrom, txTo)
-	d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
+	require.NoError(t, d.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
 
 	if prune {
+		txFrom, txTo := step.ToTxNum(d.stepSize), (step + 1).ToTxNum(d.stepSize)
 		domainRoTx := d.BeginFilesRo()
 		defer domainRoTx.Close()
 		stat, err := domainRoTx.OldPrune(ctx, tx, step, txFrom, txTo, math.MaxUint64, logEvery)
@@ -1025,19 +1014,12 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 
 	err := db.Update(ctx, func(tx kv.RwTx) error {
 		for step := kv.Step(0); step < kv.Step(txCount/dom.stepSize)-1; step++ {
-			s, ns := uint64(step)*dom.stepSize, uint64(step+1)*dom.stepSize
-			c, err := dom.collate(ctx, step, s, ns, tx)
-			require.NoError(t, err)
-			sf, err := dom.buildFiles(ctx, step, c, background.NewProgressSet())
-			c.Close()
-			require.NoError(t, err)
-			dom.integrateDirtyFiles(sf, s, ns)
-			dom.reCalcVisibleFiles(dom.dirtyFilesEndTxNumMinimax())
-
+			require.NoError(t, dom.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
+			s, ns := step.ToTxNum(dom.stepSize), (step + 1).ToTxNum(dom.stepSize)
 			domainRoTx := dom.BeginFilesRo()
-			_, err = domainRoTx.Prune(ctx, tx, step, s, ns, math.MaxUint64, logEvery)
+			_, pruneErr := domainRoTx.Prune(ctx, tx, step, s, ns, math.MaxUint64, logEvery)
 			domainRoTx.Close()
-			require.NoError(t, err)
+			require.NoError(t, pruneErr)
 		}
 		return nil
 	})
@@ -1307,21 +1289,11 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 		domainRoTx := d.BeginFilesRo()
 		defer domainRoTx.Close()
 
-		txFrom := uint64(step) * d.stepSize
-		txTo := uint64(step+1) * d.stepSize
-
 		//fmt.Printf("Step %d [%d,%d)\n", step, txFrom, txTo)
 
-		collation, err := d.collate(ctx, step, txFrom, txTo, tx)
-		require.NoError(t, err)
+		require.NoError(t, d.collateBuildIntegrate(ctx, step, tx, ps))
 
-		sf, err := d.buildFiles(ctx, step, collation, ps)
-		require.NoError(t, err)
-
-		d.integrateDirtyFiles(sf, txFrom, txTo)
-		d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
-		collation.Close()
-
+		txFrom, txTo := step.ToTxNum(d.stepSize), (step + 1).ToTxNum(d.stepSize)
 		logEvery := time.NewTicker(time.Second * 30)
 
 		_, err = domainRoTx.Prune(ctx, tx, step, txFrom, txTo, math.MaxUint64, logEvery)
@@ -2078,16 +2050,7 @@ func TestDomain_PruneProgress(t *testing.T) {
 	// aggregate
 	for step := kv.Step(0); step < kv.Step(totalTx/stepSize); step++ {
 		ctx := context.Background()
-		txFrom, txTo := uint64(step)*d.stepSize, uint64(step+1)*d.stepSize
-
-		c, err := d.collate(ctx, step, txFrom, txTo, rwTx)
-		require.NoError(t, err)
-
-		sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
-		require.NoError(t, err)
-		c.Close()
-		d.integrateDirtyFiles(sf, txFrom, txTo)
-		d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
+		require.NoError(t, d.collateBuildIntegrate(ctx, step, rwTx, background.NewProgressSet()))
 	}
 	require.NoError(t, rwTx.Commit())
 

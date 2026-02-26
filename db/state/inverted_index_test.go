@@ -569,15 +569,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	bs, err := ii.collate(ctx, 0, roTx)
-	require.NoError(t, err)
-
-	sf, err := ii.buildFiles(ctx, 0, bs, background.NewProgressSet())
-	bs.Close()
-	require.NoError(t, err)
-
-	ii.integrateDirtyFiles(sf, 0, 16)
-	ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
+	require.NoError(t, ii.collateBuildIntegrate(ctx, 0, roTx, background.NewProgressSet()))
 
 	err = db.Update(ctx, func(tx kv.RwTx) error {
 		from, to := ic.stepsRangeInDB(tx)
@@ -753,6 +745,23 @@ func checkRanges(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 	}
 }
 
+// collateBuildIntegrate collates, builds files and integrates them for the given step.
+// It is a test helper that combines the common collate→buildFiles→integrateDirtyFiles pattern.
+func (ii *InvertedIndex) collateBuildIntegrate(ctx context.Context, step kv.Step, tx kv.Tx, ps *background.ProgressSet) error {
+	bs, err := ii.collate(ctx, step, tx)
+	if err != nil {
+		return err
+	}
+	defer bs.Close()
+	sf, err := ii.buildFiles(ctx, step, bs, ps)
+	if err != nil {
+		return err
+	}
+	ii.integrateDirtyFiles(sf, step.ToTxNum(ii.stepSize), (step + 1).ToTxNum(ii.stepSize))
+	ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
+	return nil
+}
+
 func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 	tb.Helper()
 	logEvery := time.NewTicker(30 * time.Second)
@@ -766,13 +775,7 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 	// Leave the last 2 aggregation steps un-collated
 	for step := kv.Step(0); step < kv.Step(txs/ii.stepSize)-1; step++ {
 		func() {
-			bs, err := ii.collate(ctx, step, tx)
-			require.NoError(tb, err)
-			sf, err := ii.buildFiles(ctx, step, bs, background.NewProgressSet())
-			bs.Close()
-			require.NoError(tb, err)
-			ii.integrateDirtyFiles(sf, step.ToTxNum(ii.stepSize), (step + 1).ToTxNum(ii.stepSize))
-			ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
+			require.NoError(tb, ii.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
 			ic := ii.BeginFilesRo()
 			defer ic.Close()
 			_, err = ic.TableScanningPrune(ctx, tx, step.ToTxNum(ii.stepSize), (step + 1).ToTxNum(ii.stepSize), math.MaxUint64, logEvery, false, nil, nil, mxPruneSizeIndex, prune.DefaultStorageMode)
@@ -826,13 +829,7 @@ func TestInvIndexRanges(t *testing.T) {
 	// Leave the last 2 aggregation steps un-collated
 	for step := kv.Step(0); step < kv.Step(txs/ii.stepSize)-1; step++ {
 		func() {
-			bs, err := ii.collate(ctx, step, tx)
-			require.NoError(t, err)
-			sf, err := ii.buildFiles(ctx, step, bs, background.NewProgressSet())
-			bs.Close()
-			require.NoError(t, err)
-			ii.integrateDirtyFiles(sf, step.ToTxNum(ii.stepSize), (step + 1).ToTxNum(ii.stepSize))
-			ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
+			require.NoError(t, ii.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
 			ic := ii.BeginFilesRo()
 			defer ic.Close()
 			_, err = ic.TableScanningPrune(ctx, tx, step.ToTxNum(ii.stepSize), (step + 1).ToTxNum(ii.stepSize), math.MaxUint64, logEvery, false, nil, nil, mxPruneSizeIndex, prune.DefaultStorageMode)
