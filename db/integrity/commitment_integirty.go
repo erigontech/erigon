@@ -876,12 +876,7 @@ func CheckStateVerify(ctx context.Context, db kv.TemporalRoDB, failFast bool, fr
 
 		var checkErr error
 		if startTxNum == 0 {
-			// Base file: forward check (commitment refs count <= domain entries count)
-			// Hash verification runs after, so large worker maps are GC'd first.
-			checkErr = checkStateCorrespondenceBase(ctx, file, stepSize, failFast, logger)
-			if checkErr == nil {
-				checkErr = checkHashVerification(ctx, file, stepSize, failFast, dbg.EnvInt("CHECK_VERIFY_STATE_WORKERS", estimate.AlmostAllCPUs()), logger)
-			}
+			checkErr = checkStateCorrespondenceBaseAndHash(ctx, file, stepSize, failFast, logger)
 		} else {
 			// Non-base file: reverse check (every domain key is in commitment refs)
 			// Include the next commitment file's refs to handle step boundary effects:
@@ -892,15 +887,10 @@ func CheckStateVerify(ctx context.Context, db kv.TemporalRoDB, failFast bool, fr
 			checkErr = checkStateCorrespondenceReverse(ctx, file, nextFile, kvFiles[:i], stepSize, failFast, logger)
 		}
 		if checkErr != nil {
-			if !errors.Is(checkErr, ErrIntegrity) {
+			if !errors.Is(checkErr, ErrIntegrity) || failFast {
 				return checkErr
 			}
-			if failFast {
-				return checkErr
-			}
-			logger.Warn(checkErr.Error())
 			integrityErr = checkErr
-			continue
 		}
 	}
 	logger.Info("[verify-state] done", "dur", time.Since(start), "files", totalFiles)
@@ -982,6 +972,15 @@ func processBranchWorker(ch <-chan branchItem, w *workerState, accReader, stoRea
 		}
 	}
 	return nil
+}
+
+func checkStateCorrespondenceBaseAndHash(ctx context.Context, file state.VisibleFile, stepSize uint64, failFast bool, logger log.Logger) error {
+	if err := checkStateCorrespondenceBase(ctx, file, stepSize, failFast, logger); err != nil {
+		return err
+	}
+	// GC large worker maps before hash verification.
+	runtime.GC()
+	return checkHashVerification(ctx, file, stepSize, failFast, dbg.EnvInt("CHECK_VERIFY_STATE_WORKERS", estimate.AlmostAllCPUs()), logger)
 }
 
 // checkStateCorrespondenceBase verifies base files (startTxNum==0) where commitment
@@ -1154,9 +1153,8 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 		integrityErr = err
 	}
 
-	dur := time.Since(start)
 	if integrityErr == nil {
-		runtime.GC()
+		dur := time.Since(start)
 		var m runtime.MemStats
 		dbg.ReadMemStats(&m)
 		logger.Info("[verify-state] key correspondence PASS (base)", "kv", fileName,
