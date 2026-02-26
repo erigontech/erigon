@@ -20,7 +20,8 @@ import (
 	"context"
 	"errors"
 	"math"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -122,7 +123,7 @@ func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
 	defer tx.Rollback()
 	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(tx, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache, api.logger.New("app", "gasPriceOracle"))
 	tipcap, err := oracle.SuggestTipCap(ctx)
-	gasResult := big.NewInt(0)
+	gasResult := uint256.NewInt(0)
 
 	gasResult.Set(tipcap)
 	if err != nil {
@@ -132,7 +133,7 @@ func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
 		gasResult.Add(tipcap, head.BaseFee)
 	}
 
-	return (*hexutil.Big)(gasResult), err
+	return (*hexutil.Big)(gasResult.ToBig()), err
 }
 
 // MaxPriorityFeePerGas returns a suggestion for a gas tip cap for dynamic fee transactions.
@@ -147,7 +148,7 @@ func (api *APIImpl) MaxPriorityFeePerGas(ctx context.Context) (*hexutil.Big, err
 	if err != nil {
 		return nil, err
 	}
-	return (*hexutil.Big)(tipcap), err
+	return (*hexutil.Big)(tipcap.ToBig()), err
 }
 
 type feeHistoryResult struct {
@@ -187,13 +188,13 @@ func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex,
 	if baseFee != nil {
 		results.BaseFee = make([]*hexutil.Big, len(baseFee))
 		for i, v := range baseFee {
-			results.BaseFee[i] = (*hexutil.Big)(v)
+			results.BaseFee[i] = (*hexutil.Big)(v.ToBig())
 		}
 	}
 	if blobBaseFee != nil {
 		results.BlobBaseFee = make([]*hexutil.Big, len(blobBaseFee))
 		for i, v := range blobBaseFee {
-			results.BlobBaseFee[i] = (*hexutil.Big)(v)
+			results.BlobBaseFee[i] = (*hexutil.Big)(v.ToBig())
 		}
 	}
 	if blobGasUsedRatio != nil {
@@ -251,7 +252,8 @@ func (api *APIImpl) BaseFee(ctx context.Context) (*hexutil.Big, error) {
 	if !config.IsLondon(header.Number.Uint64() + 1) {
 		return (*hexutil.Big)(common.Big0), nil
 	}
-	return (*hexutil.Big)(misc.CalcBaseFee(config, header)), nil
+	baseFee := misc.CalcBaseFee(config, header)
+	return (*hexutil.Big)(baseFee.ToBig()), nil
 }
 
 // EthHardForkConfig represents config of a hard-fork
@@ -388,8 +390,34 @@ func (b *GasPriceOracleBackend) GetReceipts(ctx context.Context, block *types.Bl
 	return b.baseApi.getReceipts(ctx, b.tx, block)
 }
 
+// PendingBlockAndReceipts returns the pending block and its receipts.
+// It first tries the real pending block from the mining client (cached in filters),
+// which is a block built on top of the current head and not yet finalised.
+// When available, receipts are nil because the block has not been executed yet;
+// callers that request reward percentiles will receive an empty entry for the
+// pending slot, which is acceptable.
+// If no pending block is available (e.g. no mining client configured), it falls
+// back to the latest confirmed block with its receipts. This is a pragmatic
+// workaround to avoid returning N-1 blocks instead of N when the caller requests
+// "pending": baseFee and gasUsedRatio from the latest block are the best available
+// approximation for the next block.
 func (b *GasPriceOracleBackend) PendingBlockAndReceipts() (*types.Block, types.Receipts) {
-	return nil, nil
+	if block := b.baseApi.pendingBlock(); block != nil {
+		return block, nil
+	}
+	latestNum, err := rpchelper.GetLatestBlockNumber(b.tx)
+	if err != nil {
+		return nil, nil
+	}
+	block, err := b.baseApi.blockByNumberWithSenders(context.Background(), b.tx, latestNum)
+	if err != nil || block == nil {
+		return nil, nil
+	}
+	receipts, err := b.baseApi.getReceipts(context.Background(), b.tx, block)
+	if err != nil {
+		return nil, nil
+	}
+	return block, receipts
 }
 
 func (b *GasPriceOracleBackend) GetReceiptsGasUsed(ctx context.Context, block *types.Block) (types.Receipts, error) {

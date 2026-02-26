@@ -19,7 +19,6 @@ package jsonrpc
 import (
 	"context"
 	"encoding/json"
-	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,9 +34,9 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/misc"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
@@ -48,7 +47,7 @@ import (
 )
 
 func TestEmptyQuery(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 	// Call GetTransactionReceipt for transaction which is not in the database
 	var latest = rpc.LatestBlockNumber
@@ -64,7 +63,7 @@ func TestEmptyQuery(t *testing.T) {
 	}
 }
 func TestCoinbaseBalance(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 	// Call GetTransactionReceipt for transaction which is not in the database
 	var latest = rpc.LatestBlockNumber
@@ -94,7 +93,7 @@ func internedAddress(addr string) accounts.Address {
 }
 
 func TestSwapBalance(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 	// Call GetTransactionReceipt for transaction which is not in the database
 	var latest = rpc.LatestBlockNumber
@@ -179,7 +178,7 @@ func TestSwapBalance(t *testing.T) {
 }
 
 func TestCorrectStateDiff(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 	// Call GetTransactionReceipt for transaction which is not in the database
 	var latest = rpc.LatestBlockNumber
@@ -311,7 +310,7 @@ func TestCorrectStateDiff(t *testing.T) {
 }
 
 func TestReplayTransaction(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 	var txnHash common.Hash
 	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
@@ -338,7 +337,7 @@ func TestReplayTransaction(t *testing.T) {
 }
 
 func TestReplayBlockTransactions(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 
 	// Call GetTransactionReceipt for transaction which is not in the database
@@ -356,15 +355,15 @@ func TestReplayBlockTransactions(t *testing.T) {
 
 func TestOeTracer(t *testing.T) {
 	type callContext struct {
-		Number              math.HexOrDecimal64   `json:"number"`
-		Hash                common.Hash           `json:"hash"`
-		Difficulty          *math.HexOrDecimal256 `json:"difficulty"`
-		Time                math.HexOrDecimal64   `json:"timestamp"`
-		GasLimit            math.HexOrDecimal64   `json:"gasLimit"`
-		BaseFee             *math.HexOrDecimal256 `json:"baseFeePerGas"`
-		Miner               common.Address        `json:"miner"`
-		TransactionHash     common.Hash           `json:"transactionHash"`
-		TransactionPosition uint64                `json:"transactionPosition"`
+		Number              math.HexOrDecimal64 `json:"number"`
+		Hash                common.Hash         `json:"hash"`
+		Difficulty          *uint256.Int        `json:"difficulty"`
+		Time                math.HexOrDecimal64 `json:"timestamp"`
+		GasLimit            math.HexOrDecimal64 `json:"gasLimit"`
+		BaseFee             *uint256.Int        `json:"baseFeePerGas"`
+		Miner               common.Address      `json:"miner"`
+		TransactionHash     common.Hash         `json:"transactionHash"`
+		TransactionPosition uint64              `json:"transactionPosition"`
 	}
 
 	type testcase struct {
@@ -402,22 +401,24 @@ func TestOeTracer(t *testing.T) {
 				Coinbase:    accounts.InternAddress(test.Context.Miner),
 				BlockNumber: uint64(test.Context.Number),
 				Time:        uint64(test.Context.Time),
-				Difficulty:  (*big.Int)(test.Context.Difficulty),
 				GasLimit:    uint64(test.Context.GasLimit),
 			}
+			if test.Context.Difficulty != nil {
+				context.Difficulty = *test.Context.Difficulty
+			}
 			if test.Context.BaseFee != nil {
-				baseFee, _ := uint256.FromBig((*big.Int)(test.Context.BaseFee))
+				baseFee := test.Context.BaseFee
 				context.BaseFee = *baseFee
 			}
 			rules := context.Rules(test.Genesis.Config)
 
-			m := mock.Mock(t)
+			m := execmoduletester.New(t)
 			dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 			require.NoError(t, err)
 			defer dbTx.Rollback()
 
 			statedb, _ := testutil.MakePreState(rules, dbTx, test.Genesis.Alloc, context.BlockNumber)
-			msg, err := tx.AsMessage(*signer, (*big.Int)(test.Context.BaseFee), rules)
+			msg, err := tx.AsMessage(*signer, test.Context.BaseFee, rules)
 			require.NoError(t, err)
 			txContext := protocol.NewEVMTxContext(msg)
 

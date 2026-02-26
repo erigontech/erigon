@@ -21,6 +21,7 @@
 package state
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"slices"
@@ -360,7 +361,14 @@ func (sdb *IntraBlockState) AddLog(log *types.Log) {
 	log.TxIndex = uint(sdb.txIndex)
 	log.Index = sdb.logSize
 	if dbg.TraceLogs && (sdb.trace || dbg.TraceAccount(accounts.InternAddress(log.Address).Handle())) {
-		fmt.Printf("%d (%d.%d) Log: Index:%d Account:%x Data:%x\n", sdb.blockNum, sdb.txIndex, sdb.version, log.Index, log.Address, log.Data)
+		var topics string
+		for i := 0; i < 4 && i < len(log.Topics); i++ {
+			topics += "[" + hex.EncodeToString(log.Topics[i][:]) + "]"
+		}
+		if topics == "" {
+			topics = "[]"
+		}
+		fmt.Printf("%d (%d.%d) Log: Index:%d Account:%x Topics: %s Data:%x\n", sdb.blockNum, sdb.txIndex, sdb.version, log.Index, log.Address, topics, log.Data)
 	}
 	if sdb.tracingHooks != nil && sdb.tracingHooks.OnLog != nil {
 		sdb.tracingHooks.OnLog(log)
@@ -444,12 +452,9 @@ func (sdb *IntraBlockState) Exist(addr accounts.Address) (exists bool, err error
 		return false, err
 	}
 
-	destructed, _, _, err := versionedRead(sdb, addr, SelfDestructPath, accounts.NilKey, false, false, nil, nil)
-	if err != nil {
-		return false, err
-	}
-
-	return readAccount != nil && !destructed, nil
+	// Same-tx self-destruct: the account is still alive (EIP-6780).
+	// Cross-tx self-destruct: getVersionedAccount returns nil.
+	return readAccount != nil, nil
 }
 
 var emptyAccount = accounts.NewAccount()
@@ -478,15 +483,17 @@ func (sdb *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error)
 	if err != nil {
 		return false, err
 	}
-	destructed, _, _, err := versionedRead(sdb, addr, SelfDestructPath, accounts.NilKey, false, false, nil, nil)
-	if err != nil {
-		return false, err
-	}
-	if account == nil && !destructed {
+	if account == nil {
 		sdb.touchAccount(addr)
 		sdb.accountRead(addr, &emptyAccount, accountSource, accountVersion)
 	}
-	return account == nil || destructed || account.Empty(), nil
+	// Do not use SelfDestructPath here: a self-destructed account is still
+	// "alive" during the same tx (EIP-6780) and should not appear empty
+	// until end-of-tx cleanup.  Cross-tx destructs are already handled by
+	// getVersionedAccount returning nil (the versionedRead short-circuit
+	// returns default values for all paths when a previous tx destroyed the
+	// account).
+	return account == nil || account.Empty(), nil
 }
 
 // GetBalance retrieves the balance from the given address or 0 if object not found
@@ -589,6 +596,15 @@ func (sdb *IntraBlockState) getCode(addr accounts.Address, commited bool) ([]byt
 			fmt.Printf("%d (%d.%d) GetCode (%s) %x: size: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, StorageRead, addr, 0)
 		}
 		return nil, nil
+	}
+	// When commited=true (used by ResolveCode for EIP-7702 delegation),
+	// versionedRead skips local versionedWrites and may return a stale
+	// ReadSet value. If the current tx has set this account's code (e.g.,
+	// via EIP-7702 authorization processing), return the dirty code directly.
+	if commited {
+		if so, ok := sdb.stateObjects[addr]; ok && so.dirtyCode {
+			return so.code, nil
+		}
 	}
 	code, source, _, err := versionedRead(sdb, addr, CodePath, accounts.NilKey, commited, nil,
 		func(v []byte) []byte {
@@ -1509,6 +1525,11 @@ func (sdb *IntraBlockState) createObject(addr accounts.Address, previous *stateO
 	sdb.setStateObject(addr, newobj)
 	data := newobj.data
 	versionWritten(sdb, addr, AddressPath, accounts.NilKey, &data)
+	// Write CodeHashPath so that any stale versionedReads cache entry
+	// (e.g. from the pre-creation GetCodeHash check in EVM create()) is
+	// invalidated.  newObject normalises the zero-value CodeHash to
+	// EmptyCodeHash, so this records keccak256("") for a fresh account.
+	versionWritten(sdb, addr, CodeHashPath, accounts.NilKey, newobj.data.CodeHash)
 	return newobj
 }
 
@@ -2153,8 +2174,13 @@ func (sdb *IntraBlockState) VersionedWrites(checkDirty bool) VersionedWrites {
 				}
 			}
 
-			// if an account has been destructed remove any additional
-			// writes apart from the zero balance to avoid ambiguity
+			// If an account was selfdestructed, strip all writes except
+			// SelfDestructPath itself (and any zero-balance BalancePath writes).
+			// Non-zero BalancePath writes after selfdestruct represent residual ETH
+			// (EIP-7708 case 2); these are carried via
+			// ExecutionResult.SelfDestructedWithBalance captured before SoftFinalise
+			// clears the journal, and must NOT appear here to avoid polluting the
+			// EIP-7928 block access list.
 			var appends = make(VersionedWrites, 0, len(vwrites))
 			var selfDestructed bool
 			for _, v := range vwrites {
@@ -2219,14 +2245,41 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 				}
 			case CodePath:
 				code := val.([]byte)
-				if err := sdb.SetCode(addr, code); err != nil {
+				stateObject, err := sdb.GetOrNewStateObject(addr)
+				if err != nil {
 					return err
 				}
+				codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
+				// Force-set code bypassing stateObject.SetCode's equality check.
+				// The finalize IBS uses a VersionedStateReader whose ReadSet may
+				// contain the post-write code value (when the worker read the code
+				// after a SetCodeTx modified it), causing SetCode's bytes.Equal
+				// comparison to incorrectly skip the update and leave dirtyCode unset.
+				sdb.journal.append(codeChange{
+					account:     addr,
+					prevhash:    stateObject.data.CodeHash,
+					prevcode:    stateObject.code,
+					wasCommited: !sdb.hasWrite(addr, CodePath, accounts.NilKey),
+				})
+				stateObject.setCode(codeHash, code)
+				versionWritten(sdb, addr, CodePath, accounts.NilKey, code)
+				versionWritten(sdb, addr, CodeHashPath, accounts.NilKey, codeHash)
+				versionWritten(sdb, addr, CodeSizePath, accounts.NilKey, len(code))
 			case CodeHashPath, CodeSizePath:
-				// set by SetCode
+				// set by CodePath case above
 			case SelfDestructPath:
 				deleted := val.(bool)
 				if deleted {
+					// Ensure the state object exists before calling Selfdestruct.
+					// For newly-created accounts (e.g. coinbase born via CREATE in the
+					// same transaction, with no pre-block DB entry), getStateObject
+					// returns nil and Selfdestruct silently no-ops.  This matters for
+					// the EIP-7708 finalize IBS: without a stateObject, the account will
+					// not be marked as selfdestructed and GetRemovedAccountsWithBalance
+					// will miss it, omitting the residual-balance burn log.
+					if _, err := sdb.GetOrNewStateObject(addr); err != nil {
+						return err
+					}
 					if _, err := sdb.Selfdestruct(addr); err != nil {
 						return err
 					}

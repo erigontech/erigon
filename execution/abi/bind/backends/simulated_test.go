@@ -149,7 +149,7 @@ func TestNewSimulatedBackend(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	statedb := sim.stateByBlockNumber(tx, new(big.Int).SetUint64(num+1))
+	statedb := sim.stateByBlockNumber(tx, uint256.NewInt(num+1))
 	bal, err := statedb.GetBalance(testAddr)
 	if err != nil {
 		t.Fatal(err)
@@ -279,7 +279,7 @@ func TestSimulatedBackend_BlockByNumber(t *testing.T) {
 		t.Errorf("did not get most recent block, instead got block number %v", block.NumberU64())
 	}
 
-	blockByNumber, err := sim.BlockByNumber(bgCtx, big.NewInt(1))
+	blockByNumber, err := sim.BlockByNumber(bgCtx, uint256.NewInt(1))
 	if err != nil {
 		t.Errorf("could not get block by number: %v", err)
 	}
@@ -294,7 +294,7 @@ func TestSimulatedBackend_NonceAt(t *testing.T) {
 	sim := simTestBackend(t, testAddr)
 	bgCtx := context.Background()
 
-	nonce, err := sim.NonceAt(bgCtx, testAddr, big.NewInt(0))
+	nonce, err := sim.NonceAt(bgCtx, testAddr, uint256.NewInt(0))
 	if err != nil {
 		t.Errorf("could not get nonce for test addr: %v", err)
 	}
@@ -318,7 +318,7 @@ func TestSimulatedBackend_NonceAt(t *testing.T) {
 	}
 	sim.Commit()
 
-	newNonce, err := sim.NonceAt(bgCtx, testAddr, big.NewInt(1))
+	newNonce, err := sim.NonceAt(bgCtx, testAddr, uint256.NewInt(1))
 	if err != nil {
 		t.Errorf("could not get nonce for test addr: %v", err)
 	}
@@ -329,7 +329,7 @@ func TestSimulatedBackend_NonceAt(t *testing.T) {
 	// create some more blocks
 	sim.Commit()
 	// Check that we can get data for an older block/state
-	newNonce, err = sim.NonceAt(bgCtx, testAddr, big.NewInt(1))
+	newNonce, err = sim.NonceAt(bgCtx, testAddr, uint256.NewInt(1))
 	if err != nil {
 		t.Fatalf("could not get nonce for test addr: %v", err)
 	}
@@ -359,7 +359,7 @@ func TestSimulatedBackend_SendTransaction(t *testing.T) {
 	}
 	sim.Commit()
 
-	block, err := sim.BlockByNumber(bgCtx, big.NewInt(1))
+	block, err := sim.BlockByNumber(bgCtx, uint256.NewInt(1))
 	if err != nil {
 		t.Errorf("could not get block at height 1: %v", err)
 	}
@@ -634,8 +634,8 @@ func TestSimulatedBackend_HeaderByNumber(t *testing.T) {
 	}
 	if latestBlockHeader == nil {
 		t.Errorf("received a nil block header")
-	} else if latestBlockHeader.Number.Uint64() != uint64(0) {
-		t.Errorf("expected block header number 0, instead got %v", latestBlockHeader.Number.Uint64())
+	} else if !latestBlockHeader.Number.IsZero() {
+		t.Errorf("expected block header number 0, instead got %v", &latestBlockHeader.Number)
 	}
 
 	sim.Commit()
@@ -645,7 +645,7 @@ func TestSimulatedBackend_HeaderByNumber(t *testing.T) {
 		t.Errorf("could not get header for blockheight of 1: %v", err)
 	}
 
-	blockHeader, err := sim.HeaderByNumber(bgCtx, big.NewInt(1))
+	blockHeader, err := sim.HeaderByNumber(bgCtx, uint256.NewInt(1))
 	if err != nil {
 		t.Errorf("could not get header for blockheight of 1: %v", err)
 	}
@@ -653,11 +653,11 @@ func TestSimulatedBackend_HeaderByNumber(t *testing.T) {
 	if blockHeader.Hash() != latestBlockHeader.Hash() {
 		t.Errorf("block header and latest block header are not the same")
 	}
-	if blockHeader.Number.Int64() != int64(1) {
-		t.Errorf("did not get blockheader for block 1. instead got block %v", blockHeader.Number.Int64())
+	if blockHeader.Number.CmpUint64(1) != 0 {
+		t.Errorf("did not get blockheader for block 1. instead got block %v", &blockHeader.Number)
 	}
 
-	block, err := sim.BlockByNumber(bgCtx, big.NewInt(1))
+	block, err := sim.BlockByNumber(bgCtx, uint256.NewInt(1))
 	if err != nil {
 		t.Errorf("could not get block for blockheight of 1: %v", err)
 	}

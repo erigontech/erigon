@@ -41,8 +41,8 @@ import (
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -289,7 +289,7 @@ func initialState1() error {
 		// this code generates a log
 		signer = types.MakeSigner(chain.AllProtocolChanges, 1, 0)
 	)
-	m := mock.MockWithGenesis(nil, gspec, key)
+	m := execmoduletester.New(nil, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 	defer m.DB.Close()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(nil, gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -418,7 +418,7 @@ func initialState1() error {
 	if err != nil {
 		return err
 	}
-	m2 := mock.MockWithGenesis(nil, gspec, key)
+	m2 := execmoduletester.New(nil, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 	defer m2.DB.Close()
 
 	if err = hexPalette(); err != nil {

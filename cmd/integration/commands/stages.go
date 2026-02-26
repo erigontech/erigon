@@ -331,13 +331,14 @@ var cmdPrintMigrations = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), false, chain, logger)
+		dirs := datadir.New(datadirCli)
+		migrationsDB, err := migrations.OpenMigrationsDB(dirs.Migrations, logger)
 		if err != nil {
-			logger.Error("Opening DB", "error", err)
+			logger.Error("Opening migrations DB", "error", err)
 			return
 		}
-		defer db.Close()
-		if err := printAppliedMigrations(db, cmd.Context(), logger); err != nil {
+		defer migrationsDB.Close()
+		if err := printAppliedMigrations(migrationsDB, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -351,13 +352,14 @@ var cmdRemoveMigration = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), false, chain, logger)
+		dirs := datadir.New(datadirCli)
+		migrationsDB, err := migrations.OpenMigrationsDB(dirs.Migrations, logger)
 		if err != nil {
-			logger.Error("Opening DB", "error", err)
+			logger.Error("Opening migrations DB", "error", err)
 			return
 		}
-		defer db.Close()
-		if err := removeMigration(db, cmd.Context()); err != nil {
+		defer migrationsDB.Close()
+		if err := removeMigration(migrationsDB, cmd.Context()); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -542,8 +544,10 @@ func stageSnapshots(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 		return err
 	}
 	defer domains.Close()
-	//txnUm := domains.TxNum()
-	blockNum := domains.BlockNum()
+	_, blockNum, err := domains.SeekCommitment(ctx, tx)
+	if err != nil {
+		return err
+	}
 
 	// stagedsync.SpawnStageSnapshots(s, ctx, rwTx, logger)
 	progress, err := stages.GetStageProgress(tx, stages.Snapshots)
@@ -839,13 +843,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		return err
 	}
 
-	defer func() {
-		if noCommit {
-			tx.Rollback()
-		} else {
-			tx.Commit()
-		}
-	}()
+	defer tx.Rollback()
 
 	if pruneTo > 0 {
 		p, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, true)
@@ -856,7 +854,10 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		if err != nil {
 			return err
 		}
-		return nil
+		if noCommit {
+			return nil
+		}
+		return tx.Commit()
 	}
 
 	var sendersProgress, execProgress uint64
@@ -869,7 +870,10 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		if err != nil {
 			panic(err)
 		}
-		execProgress = doms.BlockNum()
+		_, execProgress, err = doms.SeekCommitment(ctx, tx)
+		if err != nil {
+			panic(err)
+		}
 		doms.Close()
 	}
 	if sendersProgress, err = stages.GetStageProgress(tx, stages.Senders); err != nil {
@@ -923,8 +927,16 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			return err
 		}
 		doms.ClearRam(true)
-		return nil
+		return tx.Commit()
 	}
+	agg := (db.(dbstate.HasAgg).Agg()).(*dbstate.Aggregator)
+	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
+	agg.SetSnapshotBuildSema(blockSnapBuildSema)
+	agg.SetCollateAndBuildWorkers(min(4, estimate.StateV3Collate.Workers()))
+	agg.SetMergeWorkers(min(4, estimate.StateV3Collate.Workers()))
+	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+	agg.PeriodicalyPrintProcessSet(ctx)
+	agg.LockWorkersEditing()
 
 	for {
 		if err := stagedsync.SpawnExecuteBlocksStage(s, sync, doms, tx, block, ctx, cfg, logger); err != nil {
@@ -1069,8 +1081,8 @@ func printAllStages(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 	return db.ViewTemporal(ctx, func(tx kv.TemporalTx) error { return printStages(tx, sn, borSn) })
 }
 
-func printAppliedMigrations(db kv.RwDB, ctx context.Context, logger log.Logger) error {
-	return db.View(ctx, func(tx kv.Tx) error {
+func printAppliedMigrations(migrationsDB kv.RwDB, ctx context.Context, logger log.Logger) error {
+	return migrationsDB.View(ctx, func(tx kv.Tx) error {
 		applied, err := migrations.AppliedMigrations(tx, false /* withPayload */)
 		if err != nil {
 			return err
@@ -1087,8 +1099,8 @@ func printAppliedMigrations(db kv.RwDB, ctx context.Context, logger log.Logger) 
 	})
 }
 
-func removeMigration(db kv.RwDB, ctx context.Context) error {
-	return db.Update(ctx, func(tx kv.RwTx) error {
+func removeMigration(migrationsDB kv.RwDB, ctx context.Context) error {
+	return migrationsDB.Update(ctx, func(tx kv.RwTx) error {
 		return tx.Delete(kv.Migrations, []byte(migration))
 	})
 }
@@ -1200,7 +1212,7 @@ func blocksIO(db kv.RoDB, logger log.Logger) (services.FullBlockReader, *blockio
 
 const blockBufferSize = 128
 
-func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *buildercfg.MiningConfig, logger log.Logger) (
+func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.BuilderConfig, logger log.Logger) (
 	services.BlockRetire, rules.Engine, *vm.Config, *stagedsync.Sync,
 ) {
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
@@ -1234,8 +1246,8 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *buildercfg.M
 	cfg.BatchSize = batchSize
 	cfg.TxPool.Disable = true
 	cfg.Genesis = genesis
-	if miningConfig != nil {
-		cfg.Miner = *miningConfig
+	if builderConfig != nil {
+		cfg.Builder = *builderConfig
 	}
 	cfg.Dirs = dirs
 	dbReadConcurrency := runtime.GOMAXPROCS(-1) * 16
@@ -1321,7 +1333,7 @@ func initRulesEngine(ctx context.Context, cc *chain2.Config, dir string, db kv.R
 			heimdallClient = heimdall.NewHttpClient(config.HeimdallURL, logger, poshttp.WithApiVersioner(ctx))
 			bridgeClient = bridge.NewHttpClient(config.HeimdallURL, logger, poshttp.WithApiVersioner(ctx))
 		} else {
-			heimdallClient = heimdall.NewIdleClient(config.Miner)
+			heimdallClient = heimdall.NewIdleClient(config.Builder)
 			bridgeClient = bridge.NewIdleClient()
 		}
 		borConfig := rulesConfig.(*borcfg.BorConfig)

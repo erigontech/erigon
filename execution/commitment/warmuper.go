@@ -107,16 +107,16 @@ func (w *Warmuper) Cache() *WarmupCache {
 // branchFromCacheOrDB reads branch data from cache if available, otherwise from DB and caches it.
 func (w *Warmuper) branchFromCacheOrDB(trieCtx PatriciaContext, prefix []byte) ([]byte, error) {
 	if w.cache != nil {
-		if data, _, found := w.cache.GetBranch(prefix); found {
+		if data, found := w.cache.GetBranch(prefix); found {
 			return data, nil
 		}
 	}
-	branchData, step, err := trieCtx.Branch(prefix)
+	branchData, _, err := trieCtx.Branch(prefix)
 	if err != nil {
 		return nil, err
 	}
 	if w.cache != nil && len(branchData) > 0 {
-		w.cache.PutBranch(prefix, branchData, step)
+		w.cache.PutBranch(prefix, branchData)
 	}
 	return branchData, nil
 }
@@ -164,8 +164,7 @@ func (w *Warmuper) Start() {
 		return
 	}
 
-	w.startTime = time.Now()
-	w.work = make(chan warmupWorkItem, 50_000)
+	w.work = make(chan warmupWorkItem, w.numWorkers*64)
 	w.g, w.ctx = errgroup.WithContext(w.ctx)
 
 	for i := 0; i < w.numWorkers; i++ {
@@ -275,6 +274,7 @@ func (w *Warmuper) WarmKey(hashedKey []byte, startDepth int) {
 	select {
 	case w.work <- warmupWorkItem{hashedKey: hashedKey, startDepth: startDepth}:
 	case <-w.ctx.Done():
+	default: // non-blocking
 	}
 }
 
@@ -286,16 +286,9 @@ func (w *Warmuper) Wait() error {
 
 	// Only close the channel once
 	close(w.work)
-	err := w.g.Wait()
+	w.g.Wait()
 
-	log.Debug(fmt.Sprintf("[%s][warmup] completed", w.logPrefix),
-		"keys", common.PrettyCounter(int(w.keysProcessed.Load())),
-		"maxDepth", w.maxDepth,
-		"workers", w.numWorkers,
-		"spent", time.Since(w.startTime),
-	)
-
-	return err
+	return nil
 }
 
 // Stats returns statistics about the warmup.
@@ -325,10 +318,12 @@ func (w *Warmuper) DrainPending() {
 }
 
 // WaitAndClose waits for all warmup work to complete and then closes the warmuper.
-func (w *Warmuper) WaitAndClose() error {
-	err := w.Wait()
+func (w *Warmuper) WaitAndClose() {
+	if w.closed.Swap(true) {
+		return // Already closed
+	}
+	w.Wait()
 	w.Close()
-	return err
 }
 
 // Close cancels all warmup work and releases resources.

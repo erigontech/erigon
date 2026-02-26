@@ -23,7 +23,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
@@ -96,7 +95,7 @@ type parallelExecutor struct {
 func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
 	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
-	accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
+	stepsInDb float64, accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
 
 	var asyncTxChan mdbx.TxApplyChan
 	var asyncTx kv.TemporalTx
@@ -146,7 +145,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	var hasLoggedCommittments atomic.Bool
 	var commitStart time.Time
 
-	var stepsInDb = rawdbhelpers.IdxStepsCountV3(rwTx, pe.agg.StepSize())
 	var lastProgress commitment.CommitProgress
 
 	execErr := func() (err error) {
@@ -178,7 +176,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 				case *txResult:
 					uncommittedGas += applyResult.blockGasUsed
 					uncommittedTransactions++
-					pe.rs.SetTxNum(applyResult.blockNum, applyResult.txNum)
 					if dbg.TraceApply && dbg.TraceBlock(applyResult.blockNum) {
 						pe.rs.SetTrace(true)
 						fmt.Println(applyResult.blockNum, "apply", applyResult.txNum, applyResult.stateUpdates.UpdateCount())
@@ -202,6 +199,9 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 						if err != nil {
 							return fmt.Errorf("can't retrieve block %d: for post validation: %w", applyResult.BlockNum, err)
+						}
+						if b == nil {
+							return fmt.Errorf("nil block %d (hash %x)", applyResult.BlockNum, applyResult.BlockHash)
 						}
 
 						lastHeader = b.HeaderNoCopy()
@@ -235,17 +235,22 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 									if err != nil {
 										return fmt.Errorf("block %d: read stored block access list: %w", applyResult.BlockNum, err)
 									}
-									dbBAL, err := types.DecodeBlockAccessListBytes(dbBALBytes)
-									if err != nil {
-										return fmt.Errorf("block %d: read stored block access list: %w", applyResult.BlockNum, err)
-									}
-									if err = dbBAL.Validate(); err != nil {
-										return fmt.Errorf("block %d: db block access list is invalid: %w", applyResult.BlockNum, err)
-									}
+									// BAL data may not be stored for blocks downloaded via backward
+									// block downloader (p2p sync) since it does not carry BAL sidecars.
+									// Remove after eth/71 has been implemented.
+									if dbBALBytes != nil {
+										dbBAL, err := types.DecodeBlockAccessListBytes(dbBALBytes)
+										if err != nil {
+											return fmt.Errorf("block %d: read stored block access list: %w", applyResult.BlockNum, err)
+										}
+										if err = dbBAL.Validate(); err != nil {
+											return fmt.Errorf("block %d: db block access list is invalid: %w", applyResult.BlockNum, err)
+										}
 
-									if headerBALHash != dbBAL.Hash() {
-										log.Info(fmt.Sprintf("bal from block: %s", dbBAL.DebugString()))
-										return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", applyResult.BlockNum, dbBAL.Hash(), headerBALHash)
+										if headerBALHash != dbBAL.Hash() {
+											log.Info(fmt.Sprintf("bal from block: %s", dbBAL.DebugString()))
+											return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", applyResult.BlockNum, dbBAL.Hash(), headerBALHash)
+										}
 									}
 									if headerBALHash != bal.Hash() {
 										log.Info(fmt.Sprintf("computed bal: %s", bal.DebugString()))
@@ -269,7 +274,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					if applyResult.BlockNum > lastBlockResult.BlockNum {
 						uncommittedBlocks++
 						pe.doms.SetTxNum(applyResult.lastTxNum)
-						pe.doms.SetBlockNum(applyResult.BlockNum)
 						lastBlockResult = *applyResult
 					}
 
@@ -344,8 +348,9 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 											if !hasLoggedCommittments.Load() || time.Since(lastCommitedLog) > logInterval/20 {
 												hasLoggedCommittments.Store(true)
 												pe.LogCommitments(commitStart,
-													uint64(uncommittedBlocks), uncommittedTransactions,
-													uint64(uncommittedGas), stepsInDb, lastProgress)
+													uint64(uncommittedBlocks)-prevCommitedBlocks,
+													uncommittedTransactions-prevCommittedTransactions,
+													uint64(uncommittedGas)-prevCommitedGas, stepsInDb, lastProgress)
 											}
 											return
 										}
@@ -462,7 +467,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	}
 
 	if !hasLoggedCommittments.Load() && !commitStart.IsZero() {
-		pe.LogCommitments(commitStart, pe.txExecutor.lastCommittedBlockNum.Load(), uncommittedTransactions, uint64(uncommittedGas), stepsInDb, lastProgress)
+		pe.LogCommitments(commitStart, 0, 0, 0, stepsInDb, lastProgress)
 	}
 
 	if execErr != nil {
@@ -638,7 +643,6 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 							reader = state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx))
 						}
 						ibs := state.New(state.NewBufferedReader(pe.rs, reader))
-						defer ibs.Release(true)
 						ibs.SetVersion(finalVersion.Incarnation)
 						localVersionMap := state.NewVersionMap(nil)
 						ibs.SetVersionMap(localVersionMap)
@@ -1486,7 +1490,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				txResult := be.results[tx]
 
 				if err := be.gasPool.SubGas(txResult.ExecutionResult.BlockGasUsed); err != nil {
-					return nil, err
+					return nil, fmt.Errorf("%w, block=%d: block gas used overflow", rules.ErrInvalidBlock, be.blockNum)
 				}
 
 				txTask := be.tasks[tx].Task
@@ -1494,7 +1498,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				if txTask.Tx() != nil {
 					blobGasUsed := txTask.Tx().GetBlobGas()
 					if err := be.gasPool.SubBlobGas(blobGasUsed); err != nil {
-						return nil, err
+						return nil, fmt.Errorf("%w, block=%d blob gas used overflow: %w", rules.ErrInvalidBlock, be.blockNum, err)
 					}
 					be.blobGasUsed += blobGasUsed
 				}
@@ -1517,7 +1521,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				// Merge any additional reads/writes produced during finalize (fee calc, post apply, etc)
 				if addReads != nil {
-					mergedReads := mergeReadSets(be.blockIO.ReadSet(txVersion.TxIndex), addReads)
+					mergedReads := MergeReadSets(be.blockIO.ReadSet(txVersion.TxIndex), addReads)
 					be.blockIO.RecordReads(txVersion, mergedReads)
 				}
 				if len(addWrites) > 0 {
@@ -1587,8 +1591,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			if result.Receipt != nil {
 				applyResult.blockGasUsed = int64(result.ExecutionResult.BlockGasUsed)
 				be.blockGasUsed += result.ExecutionResult.BlockGasUsed
-				applyResult.receipt = result.Receipt
-				applyResult.logs = append(applyResult.logs, result.Receipt.Logs...)
+				receipt := *result.Receipt
+				applyResult.receipt = &receipt
+				applyResult.receipt.Logs = append([]*types.Log{}, result.Receipt.Logs...)
+				applyResult.logs = applyResult.receipt.Logs
 				pe.executedGas.Add(int64(applyResult.blockGasUsed))
 			}
 
@@ -1746,7 +1752,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 	}
 }
 
-func mergeReadSets(a state.ReadSet, b state.ReadSet) state.ReadSet {
+func MergeReadSets(a state.ReadSet, b state.ReadSet) state.ReadSet {
 	if a == nil && b == nil {
 		return nil
 	}
@@ -1766,7 +1772,7 @@ func mergeReadSets(a state.ReadSet, b state.ReadSet) state.ReadSet {
 	return out
 }
 
-func mergeVersionedWrites(prev, next state.VersionedWrites) state.VersionedWrites {
+func MergeVersionedWrites(prev, next state.VersionedWrites) state.VersionedWrites {
 	if len(prev) == 0 {
 		return next
 	}
@@ -1788,7 +1794,7 @@ func mergeVersionedWrites(prev, next state.VersionedWrites) state.VersionedWrite
 	return out
 }
 
-func mergeAccessedAddresses(dst, src map[accounts.Address]struct{}) map[accounts.Address]struct{} {
+func MergeAccessedAddresses(dst, src map[accounts.Address]struct{}) map[accounts.Address]struct{} {
 	if len(src) == 0 {
 		return dst
 	}

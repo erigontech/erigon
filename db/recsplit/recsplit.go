@@ -28,9 +28,10 @@ import (
 	"math/bits"
 	"os"
 	"path/filepath"
+	"sync"
+	"time"
 
-	"github.com/erigontech/erigon/db/version"
-
+	"github.com/c2h5oh/datasize"
 	"github.com/spaolacci/murmur3"
 
 	"github.com/erigontech/erigon/common"
@@ -42,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano16"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
+	"github.com/erigontech/erigon/db/version"
 )
 
 var ErrCollision = errors.New("duplicate key")
@@ -130,6 +132,7 @@ type RecSplit struct {
 	logger             log.Logger
 
 	noFsync bool // fsync is enabled by default, but tests can manually disable
+	timings Timings
 
 	unaryBuf []uint64 // `recsplit` func returning `unary` array. re-using it between buckets
 }
@@ -152,6 +155,14 @@ type RecSplitArgs struct {
 	LeafSize   uint16
 
 	NoFsync bool // fsync is enabled by default, but tests can manually disable
+}
+
+type Timings struct {
+	Enabled    bool
+	AddStart   time.Time
+	AddTook    time.Duration
+	BuildStart time.Time
+	BuildTook  time.Duration
 }
 
 // DefaultLeafSize - LeafSize=8 and BucketSize=100, use about 1.8 bits per key. Increasing the leaf and bucket
@@ -210,7 +221,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 		if err != nil {
 			return nil, err
 		}
-		rs.offsetWriter = bufio.NewWriterSize(rs.offsetFile, 8*4096)
+		rs.offsetWriter = getBufioWriter(rs.offsetFile)
 	}
 	if rs.enums && args.KeyCount > 0 && rs.lessFalsePositives {
 		if rs.dataStructureVersion == 0 {
@@ -218,7 +229,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 			if err != nil {
 				return nil, err
 			}
-			rs.existenceWV0 = bufio.NewWriter(rs.existenceFV0)
+			rs.existenceWV0 = getBufioWriter(rs.existenceFV0)
 		}
 
 	}
@@ -265,6 +276,10 @@ func (rs *RecSplit) Close() {
 		_ = dir.RemoveFile(rs.existenceFV0.Name())
 		rs.existenceFV0 = nil
 	}
+	if rs.existenceWV0 != nil {
+		putBufioWriter(rs.existenceWV0)
+		rs.existenceWV0 = nil
+	}
 	if rs.existenceFV1 != nil {
 		rs.existenceFV1.Close()
 		rs.existenceFV1 = nil
@@ -276,6 +291,10 @@ func (rs *RecSplit) Close() {
 		_ = rs.offsetFile.Close()
 		_ = dir.RemoveFile(rs.offsetFile.Name())
 		rs.offsetFile = nil
+	}
+	if rs.offsetWriter != nil {
+		putBufioWriter(rs.offsetWriter)
+		rs.offsetWriter = nil
 	}
 }
 
@@ -754,13 +773,20 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	if rs.keysAdded != rs.keyExpectedCount {
 		return fmt.Errorf("rs %s expected keys %d, got %d", rs.fileName, rs.keyExpectedCount, rs.keysAdded)
 	}
+	if rs.timings.Enabled {
+		rs.timings.AddTook = time.Since(rs.timings.AddStart) // assume Adding data into compressor complete
+		rs.timings.BuildStart = time.Now()
+		defer func() { rs.timings.BuildTook = time.Since(rs.timings.BuildStart) }()
+	}
+
 	var err error
 	if rs.indexF, err = dir.CreateTemp(rs.filePath); err != nil {
 		return fmt.Errorf("create index file %s: %w", rs.filePath, err)
 	}
 
 	defer rs.indexF.Close()
-	rs.indexW = bufio.NewWriterSize(rs.indexF, etl.BufIOSize)
+	rs.indexW = getBufioWriter(rs.indexF)
+	defer putBufioWriter(rs.indexW)
 	// 1 byte: dataStructureVersion, 7 bytes: app-specific minimal dataID (of current shard)
 	binary.BigEndian.PutUint64(rs.numBuf[:], rs.baseDataID)
 	rs.numBuf[0] = uint8(rs.dataStructureVersion)
@@ -916,8 +942,11 @@ func (rs *RecSplit) flushExistenceFilter() error {
 		if _, err := rs.existenceFV0.Seek(0, io.SeekStart); err != nil {
 			return err
 		}
-		if _, err := io.CopyN(rs.indexW, rs.existenceFV0, int64(rs.keysAdded)); err != nil {
-			return err
+		r := getBufioReader(rs.existenceFV0)
+		_, copyErr := io.CopyN(rs.indexW, r, int64(rs.keysAdded))
+		putBufioReader(r)
+		if copyErr != nil {
+			return copyErr
 		}
 	}
 
@@ -930,7 +959,12 @@ func (rs *RecSplit) flushExistenceFilter() error {
 	return nil
 }
 
-func (rs *RecSplit) DisableFsync() { rs.noFsync = true }
+func (rs *RecSplit) DisableFsync()    { rs.noFsync = true }
+func (rs *RecSplit) Timings() Timings { return rs.timings }
+
+func (rs *RecSplit) CollectTimings() {
+	rs.timings.Enabled, rs.timings.AddStart = true, time.Now() // assume Adding data into compressor starting
+}
 
 // Fsync - other processes/goroutines must see only "fully-complete" (valid) files. No partial-writes.
 // To achieve it: write to .tmp file then `rename` when file is ready.
@@ -957,3 +991,29 @@ func (rs *RecSplit) Stats() (int, int) {
 func (rs *RecSplit) Collision() bool {
 	return rs.collision
 }
+
+// Erigon doesn't create tons of bufio readers/writers, but it has tons of
+// parallel small unit-tests which each create many small files and bufio
+// readers/writers — pooling avoids the allocation pressure in that scenario.
+var (
+	bufioWriterPool = sync.Pool{New: func() any { return bufio.NewWriterSize(nil, int(512*datasize.KB)) }}
+	bufioReaderPool = sync.Pool{New: func() any { return bufio.NewReaderSize(nil, int(512*datasize.KB)) }}
+)
+
+func getBufioWriter(w io.Writer) *bufio.Writer {
+	bw := bufioWriterPool.Get().(*bufio.Writer)
+	bw.Reset(w)
+	return bw
+}
+
+// Reset(nil) before Put is required: without it the pool entry retains a
+// reference to the underlying io.Writer/io.Reader, keeping it alive until the
+// next GC cycle or until the entry is reused — whichever comes first.
+func putBufioWriter(w *bufio.Writer) { w.Reset(nil); bufioWriterPool.Put(w) }
+
+func getBufioReader(r io.Reader) *bufio.Reader {
+	br := bufioReaderPool.Get().(*bufio.Reader)
+	br.Reset(r)
+	return br
+}
+func putBufioReader(r *bufio.Reader) { r.Reset(nil); bufioReaderPool.Put(r) }

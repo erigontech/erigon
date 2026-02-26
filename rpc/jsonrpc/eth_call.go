@@ -24,7 +24,6 @@ import (
 	"math/big"
 	"unsafe"
 
-	"github.com/holiman/uint256"
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/common"
@@ -170,7 +169,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		return 0, fmt.Errorf("could not find the header %s in cache or db", blockNrOrHash.String())
 	}
 
-	blockNum := *(header.Number)
+	blockNum := header.Number
 
 	err = api.BaseAPI.checkPruneHistory(ctx, dbtx, blockNum.Uint64())
 	if err != nil {
@@ -330,13 +329,11 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		if float64(hi-lo)/float64(hi) < estimateGasErrorRatio {
 			break
 		}
-		mid := (hi + lo) / 2
-		if mid > lo*2 {
+		mid := min((hi+lo)/2,
 			// Most txs don't need much higher gas limit than their gas used, and most txs don't
 			// require near the full block limit of gas, so the selection of where to bisect the
 			// range here is skewed to favor the low side.
-			mid = lo * 2
-		}
+			lo*2)
 		failed, _, err := doCall(ctx, caller, mid, engine)
 		// If the error is not nil(consensus error), it means the provided message
 		// call or transaction will never be accepted no matter how much gas it is
@@ -460,7 +457,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 
 		sdCtx.SetHistoryStateReader(roTx, lastTxnInBlock)
 		//domains.SetTrace(true)
-		if err := domains.SeekCommitment(context.Background(), roTx); err != nil {
+		if _, _, err := domains.SeekCommitment(context.Background(), roTx); err != nil {
 			return nil, err
 		}
 		domains.SetTrace(false, false)
@@ -950,13 +947,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		// Set the accesslist to the last al
 		args.AccessList = &accessList
 
-		var baseFee *uint256.Int = nil
-		// check if EIP-1559
-		if header.BaseFee != nil {
-			baseFee, _ = uint256.FromBig(header.BaseFee)
-		}
-
-		msg, err := args.ToMessage(api.GasCap, baseFee)
+		msg, err := args.ToMessage(api.GasCap, header.BaseFee)
 		if err != nil {
 			return nil, err
 		}
