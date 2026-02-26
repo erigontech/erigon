@@ -19,6 +19,8 @@ package integrity_test
 import (
 	"context"
 	"math/rand"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -32,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -335,4 +338,125 @@ func TestVerifyBranchHashesFromDB(t *testing.T) {
 
 	t.Logf("Checked %d branches: %d passed, %d failed", checked, passed, failed)
 	require.Zero(t, failed, "expected all branch hashes to verify")
+}
+
+// TestCheckStateVerify_TruncatedAccounts is a negative test: it builds snapshot files
+// normally (which should pass verification), then removes the last KV pair from the
+// base accounts.kv file so that commitment references more accounts than exist in the
+// file. CheckStateVerify must return ErrIntegrity.
+func TestCheckStateVerify_TruncatedAccounts(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	logger := log.New()
+	ctx := context.Background()
+	// Use stepSize=100 with 4 steps (400 txNums).
+	// 4 steps merge into a single 0-4 file.
+	// ValuesPlainKeyReferencingThresholdReached(100,0,400)=true AND
+	// MayContainValuesPlainKeyReferencing(100,0,400)=true — build and check agree:
+	// commitment stores offset-reference keys and the check correctly dereferences them.
+	stepSize := uint64(100)
+
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDBWithStepSize(t, dirs, stepSize)
+	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
+
+	tx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	domains, err := execctx.NewSharedDomains(ctx, tx, logger)
+	require.NoError(t, err)
+	defer domains.Close()
+
+	txs := stepSize * 4
+	rnd := rand.New(rand.NewSource(42))
+	for txNum := uint64(1); txNum <= txs; txNum++ {
+		addr := make([]byte, length.Addr)
+		loc := make([]byte, length.Hash)
+		rnd.Read(addr)
+		rnd.Read(loc)
+
+		acc := accounts.Account{
+			Nonce:    txNum,
+			Balance:  *uint256.NewInt(txNum * 1000),
+			CodeHash: accounts.EmptyCodeHash,
+		}
+		buf := accounts.SerialiseV3(&acc)
+		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf, txNum, nil)
+		require.NoError(t, err)
+
+		storageKey := append(common.Copy(addr), loc...)
+		err = domains.DomainPut(kv.StorageDomain, tx, storageKey, []byte{addr[0], loc[0]}, txNum, nil)
+		require.NoError(t, err)
+
+		_, err = domains.ComputeCommitment(ctx, tx, true, txNum, txNum, "test", nil)
+		require.NoError(t, err)
+	}
+
+	err = domains.Flush(ctx, tx)
+	require.NoError(t, err)
+	err = tx.Commit()
+	require.NoError(t, err)
+
+	err = agg.BuildFiles(txs)
+	require.NoError(t, err)
+
+	endTxNum := agg.EndTxNumMinimax()
+	require.Greater(t, endTxNum, uint64(0))
+
+	// Sanity check: clean data must pass.
+	err = integrity.CheckStateVerify(ctx, db, dirs.Tmp, true, 0, logger)
+	require.NoError(t, err)
+
+	// Find all base accounts.kv files (step range starts at 0). Truncate each so that
+	// at least the visible one (used by CheckStateVerify) has fewer entries than commitment
+	// references. deriveDecompAndReaderForOtherDomain opens files directly from disk,
+	// so replacing the file on disk is visible to the next CheckStateVerify call.
+	accFiles, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-accounts.0-*.kv"))
+	require.NoError(t, err)
+	require.NotEmpty(t, accFiles, "expected at least one base accounts.kv file after BuildFiles")
+
+	for _, f := range accFiles {
+		removeLastKVPairFromSegFile(t, f, dirs.Tmp, logger)
+	}
+
+	// The truncated file must cause an integrity error.
+	err = integrity.CheckStateVerify(ctx, db, dirs.Tmp, true, 0, logger)
+	require.Error(t, err)
+	require.ErrorIs(t, err, integrity.ErrIntegrity)
+}
+
+// removeLastKVPairFromSegFile rewrites kvPath omitting the last KV pair (2 words).
+// It uses CompressNone (the compression type for accounts/storage domains) so the
+// new file is readable by the same seg.Reader that CheckStateVerify uses.
+func removeLastKVPairFromSegFile(t *testing.T, kvPath, tmpdir string, logger log.Logger) {
+	t.Helper()
+
+	d, err := seg.NewDecompressor(kvPath)
+	require.NoError(t, err)
+	totalWords := d.Count()
+	require.GreaterOrEqualf(t, totalWords, 2, "need at least one KV pair in %s", kvPath)
+
+	// Write totalWords-2 words (= drop the last KV pair) to a sibling file.
+	newPath := kvPath + ".new"
+	comp, err := seg.NewCompressor(context.Background(), "test", newPath, tmpdir, seg.DefaultCfg, log.LvlDebug, logger)
+	require.NoError(t, err)
+
+	w := seg.NewWriter(comp, seg.CompressNone)
+	r := seg.NewReader(d.MakeGetter(), seg.CompressNone)
+	for i := 0; i < totalWords-2; i++ {
+		word, _ := r.Next(nil)
+		_, err = w.Write(word)
+		require.NoError(t, err)
+	}
+	d.Close() // release mmap before renaming over the path
+
+	compressErr := w.Compress()
+	w.Close()
+	require.NoError(t, compressErr)
+
+	require.NoError(t, os.Rename(newPath, kvPath))
 }
