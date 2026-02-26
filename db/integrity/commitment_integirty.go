@@ -1280,7 +1280,7 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 
 	// Also extract refs from the next commitment file (handles step boundary effects)
 	if nextFile != nil {
-		if err := extractCommitmentRefsToCollectors(ctx, nextFile, stepSize, accCollector, stoCollector, logger); err != nil {
+		if err := extractCommitmentRefsToCollectors(ctx, nextFile, accCollector, stoCollector, logger); err != nil {
 			logger.Warn("[verify-state] failed to extract refs from next file", "err", err)
 			// Non-fatal: proceed with what we have
 		}
@@ -1352,11 +1352,12 @@ func reverseCheckDomainKeys(ctx context.Context, decomp *seg.Decompressor, domai
 
 	// Stream sorted commitment refs via goroutine+channel for O(1) memory merge-join.
 	refCh := make(chan []byte, 256)
+	errCh := make(chan error, 1)
 	loadCtx, cancelLoad := context.WithCancel(ctx)
 	defer cancelLoad()
 	go func() {
 		defer close(refCh)
-		sortedKeys.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error { //nolint:gocritic
+		errCh <- sortedKeys.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error { //nolint:gocritic
 			select {
 			case refCh <- common.Copy(k):
 				return nil
@@ -1532,7 +1533,7 @@ func verifyMissingAgainstPrevFiles(entries []missingEntry, domain kv.Domain, pre
 // include refs from the "next" commitment file for boundary coverage.
 // Opens its own domain readers for dereferencing (the next file's offsets point
 // into its own domain files, not the current file's).
-func extractCommitmentRefsToCollectors(ctx context.Context, file state.VisibleFile, stepSize uint64, accCollector, stoCollector *etl.Collector, logger log.Logger) error {
+func extractCommitmentRefsToCollectors(ctx context.Context, file state.VisibleFile, accCollector, stoCollector *etl.Collector, logger log.Logger) error {
 	nextFileName := filepath.Base(file.Fullpath())
 	logger.Info("[verify-state] also extracting refs from next file", "kv", nextFileName)
 
