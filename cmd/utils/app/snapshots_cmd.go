@@ -52,6 +52,7 @@ import (
 	"github.com/erigontech/erigon/db/compress"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/webseeds"
 	"github.com/erigontech/erigon/db/etl"
@@ -636,15 +637,15 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, err err
 	if !ok {
 		return false, false, fmt.Errorf("can't find accessor for %s", filePath)
 	}
-	rd, btindex, err := state.OpenBtreeIndexAndDataFile(bt, filePath, state.DefaultBtreeM, statecfg.Schema.CommitmentDomain.Compression, false)
+	rd, bti, err := btindex.OpenBtreeIndexAndDataFile(bt, filePath, btindex.DefaultBtreeM, statecfg.Schema.CommitmentDomain.Compression, false)
 	if err != nil {
 		return false, false, err
 	}
 	defer rd.Close()
-	defer btindex.Close()
+	defer bti.Close()
 
 	getter := seg.NewReader(rd.MakeGetter(), statecfg.Schema.CommitmentDomain.Compression)
-	c, err := btindex.Seek(getter, []byte(stateKey))
+	c, err := bti.Seek(getter, []byte(stateKey))
 	if err != nil {
 		return false, false, err
 	}
@@ -982,7 +983,7 @@ func doBtSearch(cliCtx *cli.Context) error {
 	dbg.ReadMemStats(&m)
 	logger.Info("before open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 	compress := seg.CompressKeys | seg.CompressVals
-	kv, idx, err := state.OpenBtreeIndexAndDataFile(srcF, dataFilePath, state.DefaultBtreeM, compress, false)
+	kv, idx, err := btindex.OpenBtreeIndexAndDataFile(srcF, dataFilePath, btindex.DefaultBtreeM, compress, false)
 	if err != nil {
 		return err
 	}
@@ -1334,10 +1335,7 @@ func doVerifyHistory(cliCtx *cli.Context, logger log.Logger) error {
 	fromStep := cliCtx.Uint64("from-step")
 	workers := cliCtx.Int("workers")
 	if workers <= 0 {
-		workers = runtime.NumCPU() / 2
-		if workers < 1 {
-			workers = 1
-		}
+		workers = max(runtime.NumCPU()/2, 1)
 	}
 
 	verifier := verify.NewHistoryVerifier(blockReader, chainConfig, engine, workers, logger)
@@ -2103,7 +2101,7 @@ func doMeta(cliCtx *cli.Context) error {
 			panic(err)
 		}
 		defer src.Close()
-		bt, err := state.OpenBtreeIndexWithDecompressor(fname, state.DefaultBtreeM, seg.NewReader(src.MakeGetter(), seg.CompressNone))
+		bt, err := btindex.OpenBtreeIndexWithDecompressor(fname, btindex.DefaultBtreeM, seg.NewReader(src.MakeGetter(), seg.CompressNone))
 		if err != nil {
 			return err
 		}

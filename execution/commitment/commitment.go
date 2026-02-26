@@ -112,6 +112,10 @@ type Trie interface {
 
 	// Process updates. If warmup.Enabled is true, pre-warms MDBX page cache in parallel.
 	Process(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress, warmup WarmupConfig) (rootHash []byte, err error)
+
+	// Release returns the trie to a pool for reuse. After calling Release,
+	// the caller must not use the trie.
+	Release()
 }
 
 type CommitProgress struct {
@@ -429,6 +433,12 @@ func (be *BranchEncoder) ApplyDeferredUpdates(
 	return nil
 }
 
+// Pools for worker encoders/mergers to avoid per-call allocations.
+var (
+	workerEncoderPool = sync.Pool{New: func() any { return NewBranchEncoder(1024) }}
+	workerMergerPool  = sync.Pool{New: func() any { return NewHexBranchMerger(512) }}
+)
+
 // ApplyDeferredBranchUpdates encodes deferred branch updates concurrently and writes them.
 // Returns the number of updates successfully written.
 func ApplyDeferredBranchUpdates(
@@ -443,22 +453,49 @@ func ApplyDeferredBranchUpdates(
 		numWorkers = 1
 	}
 
-	// Pipeline: workers encode in parallel, results sent to channel, main goroutine writes sequentially
+	// Sequential fast path: avoids goroutine and channel overhead for small batches.
+	if numWorkers == 1 || len(deferred) <= numWorkers {
+		encoder := workerEncoderPool.Get().(*BranchEncoder)
+		merger := workerMergerPool.Get().(*BranchMerger)
+		defer workerEncoderPool.Put(encoder)
+		defer workerMergerPool.Put(merger)
+
+		var written int
+		for _, upd := range deferred {
+			if err := encodeDeferredUpdate(upd, encoder, merger); err != nil {
+				return written, err
+			}
+			if upd.encoded == nil {
+				continue
+			}
+			if err := putBranch(upd.prefix, upd.encoded, upd.prev); err != nil {
+				return written, err
+			}
+			mxTrieBranchesUpdated.Inc()
+			written++
+		}
+		return written, nil
+	}
+
+	// Pipeline: workers encode in parallel, results sent to channel, main goroutine writes sequentially.
 	type result struct {
 		upd *DeferredBranchUpdate
 		err error
 	}
-	resultCh := make(chan result, maxDeferredUpdates)
-	workCh := make(chan *DeferredBranchUpdate, maxDeferredUpdates)
+	// Size channels to actual batch length, not the 50K max.
+	resultCh := make(chan result, len(deferred))
+	workCh := make(chan *DeferredBranchUpdate, len(deferred))
 
-	// Start workers - each with its own encoder and merger
+	// Start workers with pooled encoders/mergers.
 	var wg sync.WaitGroup
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			encoder := NewBranchEncoder(1024)
-			merger := NewHexBranchMerger(512)
+			encoder := workerEncoderPool.Get().(*BranchEncoder)
+			merger := workerMergerPool.Get().(*BranchMerger)
+			defer workerEncoderPool.Put(encoder)
+			defer workerMergerPool.Put(merger)
 
 			for upd := range workCh {
 				err := encodeDeferredUpdate(upd, encoder, merger)
