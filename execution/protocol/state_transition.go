@@ -392,11 +392,11 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
-	st.gasRemaining, err = ComputeMdGas(st.msg.Gas(), intrinsicGasResult, rules, st.evm.Config().Tracer)
-	if err != nil {
-		return nil, err
-	}
-	st.initialGas = st.gasRemaining
+	st.gasRemaining = NonIntrinsicMdGas(st.msg.Gas(), intrinsicGasResult, rules, st.evm.Config().Tracer)
+	st.initialGas = st.gasRemaining.Plus(evmtypes.MdGas{
+		Regular: intrinsicGasResult.RegularGas,
+		State:   intrinsicGasResult.StateGas,
+	})
 
 	// Execute the preparatory steps for state transition which includes:
 	// - prepare accessList(post-berlin; eip-7702)
@@ -524,11 +524,14 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
-	st.gasRemaining, err = ComputeMdGas(st.msg.Gas(), intrinsicGasResult, rules, st.evm.Config().Tracer)
-	if err != nil {
-		return nil, err
+	if st.msg.Gas() < intrinsicGasResult.RegularGas || st.msg.Gas() < intrinsicGasResult.FloorGasCost {
+		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.msg.Gas(), max(intrinsicGasResult.RegularGas, intrinsicGasResult.FloorGasCost))
 	}
-	st.initialGas = st.gasRemaining
+	st.gasRemaining = NonIntrinsicMdGas(st.msg.Gas(), intrinsicGasResult, rules, st.evm.Config().Tracer)
+	st.initialGas = st.gasRemaining.Plus(evmtypes.MdGas{
+		Regular: intrinsicGasResult.RegularGas,
+		State:   intrinsicGasResult.StateGas,
+	})
 
 	verifiedAuthorities, err := st.verifyAuthorities(auths, contractCreation, rules.ChainID.String())
 	if err != nil {
@@ -578,8 +581,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		if rules.IsLondon {
 			refundQuotient = params.RefundQuotientEIP3529
 		}
-		gasUsed := st.gasUsed()
-		st.blockGasUsed = gasUsed
+		mdGasUsed := st.mdGasUsed()
+		gasUsed := mdGasUsed.Total()
 		refund := min(gasUsed/refundQuotient, st.state.GetRefund())
 		gasUsed = gasUsed - refund
 		if rules.IsPrague {
@@ -587,12 +590,18 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		}
 		if rules.IsAmsterdam {
 			// EIP-7778: Block Gas Accounting without Refunds
-			st.blockGasUsed = max(intrinsicGasResult.FloorGasCost, st.blockGasUsed)
+			mdGasUsed.Regular = max(mdGasUsed.Regular, intrinsicGasResult.FloorGasCost)
+			// EIP-8037
+			st.blockGasUsed = mdGasUsed.Bottleneck()
 		} else {
 			st.blockGasUsed = gasUsed
 		}
 		st.gasRemaining.Regular = st.initialGas.Regular - gasUsed
 		st.refundGas()
+	} else if rules.IsAmsterdam {
+		mdGasUsed := st.mdGasUsed()
+		mdGasUsed.Regular = max(mdGasUsed.Regular, intrinsicGasResult.FloorGasCost)
+		st.blockGasUsed = mdGasUsed.Bottleneck()
 	} else if rules.IsPrague {
 		st.blockGasUsed = max(intrinsicGasResult.FloorGasCost, st.gasUsed())
 		st.gasRemaining.Regular = st.initialGas.Regular - st.blockGasUsed
@@ -765,5 +774,9 @@ func (st *StateTransition) refundGas() {
 
 // Gas used by the transaction with refunds (what the user pays) - see EIP-7778
 func (st *StateTransition) gasUsed() uint64 {
-	return st.initialGas.Regular - st.gasRemaining.Regular
+	return st.mdGasUsed().Total()
+}
+
+func (st *StateTransition) mdGasUsed() evmtypes.MdGas {
+	return st.initialGas.Minus(st.gasRemaining)
 }

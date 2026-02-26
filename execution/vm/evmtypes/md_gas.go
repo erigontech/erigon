@@ -22,7 +22,24 @@ type MdGas struct {
 	State   uint64
 }
 
-func (g *MdGas) Sub(other MdGas) {
-	g.Regular -= other.Regular
-	g.State -= other.State
+func (g MdGas) Minus(other MdGas) MdGas {
+	return MdGas{
+		Regular: g.Regular - other.Regular,
+		State:   g.State - other.State,
+	}
+}
+
+func (g MdGas) Plus(other MdGas) MdGas {
+	return MdGas{
+		Regular: g.Regular + other.Regular,
+		State:   g.State + other.State,
+	}
+}
+
+func (g MdGas) Total() uint64 {
+	return g.Regular + g.State
+}
+
+func (g MdGas) Bottleneck() uint64 {
+	return max(g.Regular, g.State)
 }
