@@ -89,7 +89,7 @@ type kviWorkItem struct {
 func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression seg.FileCompression, failFast bool, logger log.Logger) (uint64, error) {
 	kviFileName := filepath.Base(kviPath)
 	kvFileName := filepath.Base(kvPath)
-	logger.Info("checking kvi", "kvi", kviFileName, "kv", kvFileName)
+	logger.Info("[integrity] checking kvi", "kvi", kviFileName, "kv", kvFileName)
 	start := time.Now()
 	kvi, err := recsplit.OpenIndex(kviPath)
 	if err != nil {
@@ -101,7 +101,6 @@ func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression 
 		return 0, err
 	}
 	defer kvDecompressor.Close()
-	kvDecompressor.MadvSequential()
 	kvReader := seg.NewReader(kvDecompressor.MakeGetter(), kvCompression)
 
 	var firstErr error
@@ -116,7 +115,7 @@ func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression 
 
 	checkOne := func(kviReader *recsplit.IndexReader, work kviWorkItem) error {
 		if logger.Enabled(ctx, log.LvlTrace) {
-			logger.Trace("checking kvi for", "key", hex.EncodeToString(work.key), "offset", work.offset, "kvi", kviFileName)
+			logger.Trace("[integrity] checking kvi for", "key", hex.EncodeToString(work.key), "offset", work.offset, "kvi", kviFileName)
 		}
 		kviOffset, found := kviReader.Lookup(work.key)
 		if !found {
@@ -186,7 +185,7 @@ func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression 
 				percent := fmt.Sprintf("%.1f%%", float64(keyCount)/float64(kvi.KeyCount())*100)
 				rate := float64(keyCount) / time.Since(start).Seconds()
 				eta := time.Duration(float64(kvi.KeyCount()-keyCount)/rate) * time.Second
-				logger.Info("checking kvi progress", "at", at, "p", percent, "k/s", rate, "eta", eta, "kvi", kviFileName)
+				logger.Info("[integrity] kvi progress", "at", at, "p", percent, "k/s", rate, "eta", eta, "kvi", kviFileName)
 			default:
 			}
 		}
