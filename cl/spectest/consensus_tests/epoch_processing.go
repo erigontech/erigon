@@ -137,3 +137,10 @@ var ProposerLookaheadTest = NewEpochProcessing(func(s abstract.BeaconState) erro
 	statechange.ProcessProposerLookahead(s)
 	return nil
 })
+
+var historicalSummariesUpdateTest = NewEpochProcessing(statechange.ProcessHistoricalRootsUpdate)
+
+var builderPendingPaymentsTest = NewEpochProcessing(func(s abstract.BeaconState) error {
+	statechange.ProcessBuilderPendingPayments(s)
+	return nil
+})
