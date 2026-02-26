@@ -63,3 +63,8 @@ runs:
         path: ${{ inputs.gocache }}
         key: gocache|${{ inputs.workflow }}|${{ github.job }}|${{ inputs.goversion }}|${{ runner.os }}|${{ runner.arch }}|${{ inputs.extra-key }}|${{ github.head_ref || github.ref_name }}|${{ github.sha }}|${{ github.run_attempt }}
         restore-keys: ${{ steps.keys.outputs.restore-keys }}
+
+    - name: Warn on build cache miss
+      if: ${{ steps.restore.outputs.cache-matched-key == '' }}
+      shell: bash
+      run: echo "::warning::Go build cache miss — no matching key found"

@@ -60,3 +60,8 @@ runs:
       with:
         path: ${{ inputs.gocache }}
         key: gocache|${{ inputs.workflow }}|${{ github.job }}|${{ inputs.goversion }}|${{ runner.os }}|${{ runner.arch }}|${{ inputs.extra-key }}|${{ github.head_ref || github.ref_name }}|${{ github.sha }}|${{ github.run_attempt }}
+
+    - name: Notice on build cache save
+      if: ${{ always() && steps.check.outputs.skip != 'true' }}
+      shell: bash
+      run: echo "::notice::Go build cache saved — new key gocache|${{ inputs.workflow }}|${{ github.job }}|${{ inputs.goversion }}|${{ runner.os }}|${{ runner.arch }}|${{ inputs.extra-key }}|${{ github.head_ref || github.ref_name }}|${{ github.sha }}|${{ github.run_attempt }}"
