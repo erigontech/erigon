@@ -166,8 +166,8 @@ func checkLogIdx(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalR
 		logIdxAfterTx := uint32(uvarint(v))
 		blockChanged := false
 
-		if txNum >= _max {
-			blockNum, _, _ = txNumsReader.FindBlockNum(ctx, tx, txNum)
+		for txNum >= _max {
+			blockNum++
 			_min, _ = txNumsReader.Min(ctx, tx, blockNum)
 			_max, _ = txNumsReader.Max(ctx, tx, blockNum)
 			blockChanged = true
