@@ -1215,16 +1215,18 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 	var extractedAccKeys, extractedStoKeys, skippedAccKeys, skippedStoKeys uint64
 
 	// Phase 1: Walk commitment branches, write extracted plain keys to temp files
-	for commReader.HasNext() {
-		select {
-		case <-ctx.Done():
-			accKeysFile.Close()
-			stoKeysFile.Close()
-			return ctx.Err()
-		case <-logTicker.C:
-			logger.Info("[verify-state] extracting refs", "at", fmt.Sprintf("%d/%d", branchKeys, totalKeys),
-				"p", fmt.Sprintf("%.1f%%", float64(branchKeys)/float64(totalKeys)*100), "kv", fileName)
-		default:
+	for i := 0; commReader.HasNext(); i++ {
+		if i%1024 == 0 {
+			select {
+			case <-ctx.Done():
+				accKeysFile.Close()
+				stoKeysFile.Close()
+				return ctx.Err()
+			case <-logTicker.C:
+				logger.Info("[verify-state] extracting refs", "at", fmt.Sprintf("%d/%d", branchKeys, totalKeys),
+					"p", fmt.Sprintf("%.1f%%", float64(branchKeys)/float64(totalKeys)*100), "kv", fileName)
+			default:
+			}
 		}
 
 		branchKey, _ := commReader.Next(branchKeyBuf[:0])
