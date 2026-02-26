@@ -927,15 +927,10 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 				return nil, err
 			}
 			if newKey == nil {
+				// invariant: fn returns nil (keep original) only for plain addr keys (length.Addr bytes)
 				newData = append(newData, branchData[pos-int(l)-n:pos]...)
-				//if l != length.Addr {
-				//	fmt.Printf("COPY %x LEN %d\n", []byte(branchData[pos-int(l):pos]), l)
-				//}
 			} else {
-				//if len(newKey) > 8 && len(newKey) != length.Addr {
-				//	fmt.Printf("SHORT %x LEN %d\n", newKey, len(newKey))
-				//}
-
+				// invariant: newKey is a short reference (≤8 bytes) or full plain addr (length.Addr bytes)
 				n = binary.PutUvarint(numBuf[:], uint64(len(newKey)))
 				newData = append(newData, numBuf[:n]...)
 				newData = append(newData, newKey...)
@@ -960,15 +955,10 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 				return nil, err
 			}
 			if newKey == nil {
+				// invariant: fn returns nil (keep original) only for plain storage keys (length.Addr+length.Hash bytes)
 				newData = append(newData, branchData[pos-int(l)-n:pos]...) // -n to include length
-				if l != length.Addr+length.Hash {
-					fmt.Printf("COPY %x LEN %d\n", []byte(branchData[pos-int(l):pos]), l)
-				}
 			} else {
-				if len(newKey) > 8 && len(newKey) != length.Addr+length.Hash {
-					fmt.Printf("SHORT %x LEN %d\n", newKey, len(newKey))
-				}
-
+				// invariant: newKey is a short reference (≤8 bytes) or full plain storage key (length.Addr+length.Hash bytes)
 				n = binary.PutUvarint(numBuf[:], uint64(len(newKey)))
 				newData = append(newData, numBuf[:n]...)
 				newData = append(newData, newKey...)
