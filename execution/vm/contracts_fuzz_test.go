@@ -23,8 +23,6 @@ import (
 	"maps"
 	"slices"
 	"testing"
-
-	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 func FuzzPrecompiledContracts(f *testing.F) {
@@ -33,10 +31,8 @@ func FuzzPrecompiledContracts(f *testing.F) {
 	f.Fuzz(func(t *testing.T, addr uint8, input []byte) {
 		a := addrs[int(addr)%len(addrs)]
 		p := allPrecompiles[a]
-		gas := evmtypes.MdGas{
-			Regular: p.RequiredGas(input),
-		}
-		if gas.Regular > 10_000_000 {
+		gas := p.RequiredGas(input)
+		if gas > 10_000_000 {
 			return
 		}
 		inWant := string(input)
