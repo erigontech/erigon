@@ -18,7 +18,6 @@ import (
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/chain/networkname"
 )
 
 type Merger struct {
@@ -33,10 +32,7 @@ type Merger struct {
 }
 
 func NewMerger(tmpDir string, compressWorkers int, lvl log.Lvl, chainDB kv.RoDB, chainConfig *chain.Config, logger log.Logger) *Merger {
-	snCfg, ok := snapcfg.KnownCfg(chainConfig.ChainName)
-	if !ok {
-		snCfg, _ = snapcfg.KnownCfg(networkname.Mainnet)
-	}
+	snCfg := snapcfg.KnownCfgOrDevnet(chainConfig.ChainName)
 	return &Merger{tmpDir: tmpDir, compressWorkers: compressWorkers, lvl: lvl, chainDB: chainDB, chainConfig: chainConfig, logger: logger, snCfg: snCfg}
 }
 func (m *Merger) DisableFsync() { m.noFsync = true }

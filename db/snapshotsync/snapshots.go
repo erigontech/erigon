@@ -190,7 +190,7 @@ func FindOverlaps(in []snaptype.FileInfo) (res []snaptype.FileInfo, overlapped [
 	return res, overlapped
 }
 
-func CanRetire(from, to uint64, snapType snaptype.Enum, chainConfig *chain.Config) (blockFrom, blockTo uint64, can bool) {
+func CanRetire(from, to uint64, snapType snaptype.Enum, snCfg *snapcfg.Cfg) (blockFrom, blockTo uint64, can bool) {
 	if to <= from {
 		return
 	}
@@ -198,14 +198,7 @@ func CanRetire(from, to uint64, snapType snaptype.Enum, chainConfig *chain.Confi
 	roundedTo1K := (to / 1_000) * 1_000
 	var maxJump uint64 = 1_000
 
-	var chainName string
-
-	if chainConfig != nil {
-		chainName = chainConfig.ChainName
-	}
-
-	snapCfg, _ := snapcfg.KnownCfg(chainName)
-	mergeLimit := snapcfg.MergeLimitFromCfg(snapCfg, snapType, blockFrom)
+	mergeLimit := snapcfg.MergeLimitFromCfg(snCfg, snapType, blockFrom)
 
 	if blockFrom%mergeLimit == 0 {
 		maxJump = mergeLimit
@@ -592,7 +585,7 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	for i, t := range types {
 		enums[i] = t.Enum()
 	}
-	snCfg, _ := snapcfg.KnownCfg(cfg.ChainName)
+	snCfg := snapcfg.KnownCfgOrDevnet(cfg.ChainName)
 	s := &RoSnapshots{dir: snapDir, cfg: cfg, snCfg: snCfg, logger: logger,
 		types: types, enums: enums,
 		dirty:             make([]*btree.BTreeG[*DirtySegment], snaptype.MaxEnum),
