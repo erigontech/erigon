@@ -353,6 +353,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 		)
 		return derefCounts{}, nil
 	}
+	trace := logger.Enabled(ctx, log.LvlTrace)
 	logger.Info("[integrity] commitment deref in", "kv", fileName, "startTxNum", startTxNum, "endTxNum", endTxNum)
 	commDecomp, err := seg.NewDecompressor(file.Fullpath())
 	if err != nil {
@@ -424,7 +425,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 		counts.branchKeys++
 		branchData := commitment.BranchData(branchValue)
 		newBranchData, err := branchData.ReplacePlainKeys(newBranchValueBuf[:0], func(key []byte, isStorage bool) ([]byte, error) {
-			if logger.Enabled(ctx, log.LvlTrace) {
+			if trace {
 				logger.Trace(
 					"checking commitment deref for branch",
 					"branchKey", hex.EncodeToString(branchKey),
@@ -435,7 +436,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 			}
 			if isStorage {
 				if len(key) == length.Addr+length.Hash {
-					if logger.Enabled(ctx, log.LvlTrace) {
+					if trace {
 						logger.Trace(
 							"skipping, not a storage reference",
 							"branchKey", hex.EncodeToString(branchKey),
@@ -468,7 +469,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 					integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
 					return key, nil
 				}
-				if logger.Enabled(ctx, log.LvlTrace) {
+				if trace {
 					logger.Trace(
 						"dereferenced storage key",
 						"branchKey", hex.EncodeToString(branchKey),
@@ -482,7 +483,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 				return plainKey, nil
 			}
 			if len(key) == length.Addr {
-				if logger.Enabled(ctx, log.LvlTrace) {
+				if trace {
 					logger.Trace(
 						"skipping, not an account reference",
 						"branchKey", hex.EncodeToString(branchKey),
@@ -514,7 +515,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 				integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
 				return key, nil
 			}
-			if logger.Enabled(ctx, log.LvlTrace) {
+			if trace {
 				logger.Trace(
 					"dereferenced account key",
 					"branchKey", hex.EncodeToString(branchKey),
