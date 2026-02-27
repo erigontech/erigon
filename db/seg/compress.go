@@ -193,7 +193,7 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cf
 		lvl:              lvl,
 		wg:               wg,
 		logger:           logger,
-		version:          FileCompressionFormatV1,
+		version:          FileCompressionFormatV2,
 	}
 
 	if cfg.ValuesOnCompressedPage > 0 {
@@ -343,7 +343,7 @@ func (c *Compressor) Compress() error {
 	defer dir.RemoveFile(tmpFileName)
 	defer cf.Close()
 
-	if c.version == FileCompressionFormatV1 {
+	if c.version == FileCompressionFormatV1 || c.version == FileCompressionFormatV2 {
 		if _, err := cf.Write([]byte{c.version, byte(c.featureFlagBitmask)}); err != nil {
 			return err
 		}

@@ -27,6 +27,10 @@ const (
 const (
 	FileCompressionFormatV0 = uint8(0)
 	FileCompressionFormatV1 = uint8(1)
+	// FileCompressionFormatV2 is like V1 but the featureFlagBitmask is fully
+	// populated, including KeyCompressionEnabled / ValCompressionEnabled bits.
+	// Files at V1 may have those bits unset even when keys/vals are compressed.
+	FileCompressionFormatV2 = uint8(2)
 )
 
 type FeatureFlag uint8
