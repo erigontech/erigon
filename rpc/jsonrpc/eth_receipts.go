@@ -607,6 +607,14 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 		return nil, err
 	}
 	defer tx.Rollback()
+
+	// Pending block receipts are only available if the miner has a pending block
+	// with executed transactions. Erigon receives only header+txs from the miner
+	// and cannot compute receipts on-the-fly.
+	if numberOrHash.BlockNumber != nil && *numberOrHash.BlockNumber == rpc.PendingBlockNumber {
+		return nil, errors.New("pending receipts are not available")
+	}
+
 	blockNum, blockHash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, numberOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
