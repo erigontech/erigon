@@ -898,7 +898,8 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	defer rs.bucketCollector.Close()
 
 	// Pre-compute golombRice table up to max bucket size (for efficient lookup)
-	maxM := uint16(rs.bucketSize)
+	// Add some buffer to account for hash distribution variance
+	maxM := uint16(rs.bucketSize) + uint16(rs.bucketSize/10) // 10% buffer
 	if rs.secondaryAggrBound > maxM {
 		maxM = rs.secondaryAggrBound
 	}
