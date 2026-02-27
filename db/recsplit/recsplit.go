@@ -128,14 +128,6 @@ type recsplitScratch struct {
 	bytesPerRec        int // Bytes per record in offset encoding
 }
 
-// workerState carries per-goroutine state for parallel execution.
-type workerState struct {
-	scratch    *recsplitScratch // Scratch buffers (per-worker copy)
-	unaryBuf   []uint64
-	gr         GolombRice // Local output Golomb-Rice for this bucket
-	offsetData []byte     // Local output: serialized offset bytes
-}
-
 // RecSplit is the implementation of Recursive Split algorithm for constructing perfect hash mapping, described in
 // https://arxiv.org/pdf/1910.06416.pdf Emmanuel Esposito, Thomas Mueller Graf, and Sebastiano Vigna.
 // Recsplit: Minimal perfect hashing via recursive splitting. In 2020 Proceedings of the Symposium on Algorithm Engineering and Experiments (ALENEX),
@@ -197,7 +189,6 @@ type RecSplit struct {
 	lessFalsePositives bool
 	built              bool // Flag indicating that the hash function has been built and no more keys can be added
 	trace              bool
-	workers            int // Number of worker goroutines for parallel bucket processing
 	logger             log.Logger
 
 	noFsync bool // fsync is enabled by default, but tests can manually disable
@@ -222,7 +213,6 @@ type RecSplitArgs struct {
 	BaseDataID uint64
 	Salt       *uint32 // Hash seed (salt) for the hash function used for allocating the initial buckets - need to be generated randomly
 	LeafSize   uint16
-	Workers    int // Number of worker goroutines for parallel bucket processing (0 or 1 = single-threaded)
 
 	NoFsync bool // fsync is enabled by default, but tests can manually disable
 }
@@ -255,10 +245,6 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 			0x4ef95e25f4b4983d, 0x81175195173b92d3, 0x4e50927d8dd15978, 0x1ea2099d1fafae7f, 0x425c8a06fbaaa815, 0xcd4216006c74052a}
 	}
 	bucketCount := (args.KeyCount + args.BucketSize - 1) / args.BucketSize
-	workers := args.Workers
-	if workers <= 0 {
-		workers = 1
-	}
 	rs := &RecSplit{
 		dataStructureVersion: version.DataStructureVersion(args.Version),
 		bucketSize:           args.BucketSize, keyExpectedCount: uint64(args.KeyCount), bucketCount: uint64(bucketCount),
@@ -267,7 +253,6 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 		baseDataID:         args.BaseDataID,
 		lessFalsePositives: args.LessFalsePositives,
 		startSeed:          args.StartSeed,
-		workers:            workers,
 		lvl:                log.LvlDebug, logger: logger,
 	}
 	closeFiles := true
@@ -763,25 +748,6 @@ func getBucketResult() *bucketResult {
 // putBucketResult returns a bucketResult to the pool for reuse.
 func putBucketResult(r *bucketResult) {
 	bucketResultPool.Put(r)
-}
-
-// newWorkerState creates a new workerState for a worker goroutine.
-func (rs *RecSplit) newWorkerState() *workerState {
-	return &workerState{
-		scratch: &recsplitScratch{
-			count:              make([]uint16, rs.secondaryAggrBound),
-			buffer:             make([]uint64, rs.secondaryAggrBound),
-			offsetBuffer:       make([]uint64, rs.secondaryAggrBound),
-			trace:              rs.trace,
-			startSeed:          rs.startSeed,
-			golombRice:         rs.golombRice,
-			leafSize:           rs.leafSize,
-			primaryAggrBound:   rs.primaryAggrBound,
-			secondaryAggrBound: rs.secondaryAggrBound,
-			bytesPerRec:        rs.bytesPerRec,
-		},
-		unaryBuf: make([]uint64, 0, rs.secondaryAggrBound),
-	}
 }
 
 // recsplitBucketWorker processes buckets from input channel and writes results to output channel.
