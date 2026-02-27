@@ -229,10 +229,8 @@ runs:
         workflow=$(basename "${GITHUB_WORKFLOW_REF%%@*}" .yml)
         echo "workflow=$workflow" >> "$GITHUB_OUTPUT"
         echo "ERIGON_CI_GOCACHE_PATH=$(go env GOCACHE)" >> "$GITHUB_ENV"
-        echo "ERIGON_CI_GOVERSION=$(go env GOVERSION)" >> "$GITHUB_ENV"
         echo "ERIGON_CI_MODCACHE=$(go env GOMODCACHE)" >> "$GITHUB_ENV"
         echo "ERIGON_CI_MODCACHE_MODE=${{ inputs.modcache }}" >> "$GITHUB_ENV"
-        echo "ERIGON_CI_WORKFLOW=$workflow" >> "$GITHUB_ENV"
 
     # Note we only cache $(go env GOMODCACHE)/cache/download, the rest is derived from that part.
 

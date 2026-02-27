@@ -16,28 +16,6 @@ defaults:
     shell: bash
 
 jobs:
-  # 
-  # This first job is used to determine if changes are within out-of-scope dirs or files (in such case the tests are not run because they would be meaningless)
-  # NOTE: this logic is needed because the simple 'paths-ignore:' doesn't work since this workflow is set as a mandatory/required check for this repo
-  # - '**/.github/workflows/**' is currently commented to avoid unintended freeze in case of concurrent changes outside the excluded paths (further development will be done in due course)
-  # 
-  source-of-changes:
-    runs-on: ubuntu-latest
-    outputs:
-      changed_files: ${{ steps.filter.outputs.changed_files }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Check for changes within out-of-scope dirs or files
-        id: filter
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            changed_files:
-              - 'dashboards/**'
-              # - '**/.github/workflows/**'
-              - '**/.github/workflows/backups-dashboards.yml'
   load-matrix:
     runs-on: ubuntu-latest
     outputs:
@@ -50,7 +28,7 @@ jobs:
         run: echo "groups=$(./tools/write-test-groups --json)" >> $GITHUB_OUTPUT
 
   tests-linux:
-    needs: [source-of-changes, load-matrix]
+    needs: load-matrix
     timeout-minutes: 90
     concurrency:
       # concurrency group: there can be at most one running and one pending job in a
@@ -73,18 +51,16 @@ jobs:
 
     steps:
       - name: Declare runners
-        if: needs.source-of-changes.outputs.changed_files != 'true'
         run: |
           set +x
           echo "This workflow is being executed by this runner: $RUNNER_NAME"
-          
+
       - name: Checkout custom actions
         uses: actions/checkout@v6
         with:
           fetch-depth: 1
 
-      - if: needs.source-of-changes.outputs.changed_files != 'true'
-        uses: ./.github/actions/setup-erigon
+      - uses: ./.github/actions/setup-erigon
         id: erigon
         with:
           submodules: true
@@ -99,14 +75,9 @@ jobs:
           GOGC: 80
           CGO_CFLAGS: -D__BLST_PORTABLE__
           GOFLAGS: -race
-        if: needs.source-of-changes.outputs.changed_files != 'true'
         run: |
           make write-test-groups
           make test-group TEST_GROUP=${{ matrix.test-group }}
 
       - uses: ./.github/actions/cleanup-erigon
         if: always()
-
-      - name: This ${{ matrix.os }} check does not make sense for changes within out-of-scope directories
-        if: needs.source-of-changes.outputs.changed_files == 'true'
-        run: echo "This check does not make sense for changes within out-of-scope directories"
