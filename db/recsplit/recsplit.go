@@ -82,6 +82,14 @@ type bucketResult struct {
 	bucketSize int        // Number of keys in this bucket
 }
 
+// Reset clears the bucketResult for reuse from the pool.
+func (br *bucketResult) Reset() {
+	br.offsetData = br.offsetData[:0]
+	br.gr = GolombRice{}
+	br.bucketSize = 0
+	br.order = 0
+}
+
 // bucketResultQueue is a min-heap of *bucketResult ordered by .order
 type bucketResultQueue []*bucketResult
 
@@ -566,7 +574,13 @@ func (rs *RecSplit) recsplitCurrentBucket() error {
 		rs.bucketSizeAcc = append(rs.bucketSizeAcc, rs.bucketSizeAcc[len(rs.bucketSizeAcc)-1])
 	}
 	rs.bucketSizeAcc[int(rs.currentBucketIdx)+1] += uint64(len(rs.currentBucket))
-	// Sets of size 0 and 1 are not further processed, just write them to index
+
+	// Create result for accumulating this bucket's data
+	result := &bucketResult{
+		order: rs.currentBucketIdx,
+	}
+
+	// Sets of size 0 and 1 are not further processed, just accumulate them
 	if len(rs.currentBucket) > 1 {
 		for i, key := range rs.currentBucket[1:] {
 			if key == rs.currentBucket[i] {
@@ -585,10 +599,12 @@ func (rs *RecSplit) recsplitCurrentBucket() error {
 			}
 		}
 		var err error
-		rs.unaryBuf, err = rs.recsplit(0 /* level */, rs.currentBucket, rs.currentBucketOffs, rs.unaryBuf[:0], rs.scratch)
+		rs.unaryBuf, err = rs.recsplit(0 /* level */, rs.currentBucket, rs.currentBucketOffs, rs.unaryBuf[:0], rs.scratch, result)
 		if err != nil {
 			return err
 		}
+		// Merge per-bucket GolombRice into global GolombRice
+		rs.gr.Append(&result.gr)
 		rs.gr.appendUnaryAll(rs.unaryBuf)
 		if rs.trace {
 			fmt.Printf("recsplitBucket(%d, %d, bitsize = %d)\n", rs.currentBucketIdx, len(rs.currentBucket), rs.gr.bitCount-bitPos)
@@ -596,11 +612,15 @@ func (rs *RecSplit) recsplitCurrentBucket() error {
 	} else {
 		for _, offset := range rs.currentBucketOffs {
 			binary.BigEndian.PutUint64(rs.numBuf[:], offset)
-			if _, err := rs.indexW.Write(rs.numBuf[8-rs.bytesPerRec:]); err != nil {
-				return err
-			}
+			result.offsetData = append(result.offsetData, rs.numBuf[8-rs.bytesPerRec:]...)
 		}
 	}
+
+	// Write accumulated offset data to indexW
+	if _, err := rs.indexW.Write(result.offsetData); err != nil {
+		return err
+	}
+
 	// Extend rs.bucketPosAcc to accommodate the current bucket index + 1
 	for len(rs.bucketPosAcc) <= int(rs.currentBucketIdx)+1 {
 		rs.bucketPosAcc = append(rs.bucketPosAcc, rs.bucketPosAcc[len(rs.bucketPosAcc)-1])
@@ -734,10 +754,7 @@ func findBijection(bucket []uint64, salt uint64) uint64 {
 // getBucketResult gets a bucketResult from the pool or creates a new one.
 func (rs *RecSplit) getBucketResult() *bucketResult {
 	r := rs.scratch.resultPool.Get().(*bucketResult)
-	r.offsetData = r.offsetData[:0] // Reset slice
-	r.gr = GolombRice{}             // Reset Golomb-Rice
-	r.bucketSize = 0
-	r.order = 0
+	r.Reset()
 	return r
 }
 
@@ -884,8 +901,8 @@ func recsplitWorkerFunc(ws *workerState, level int, bucket []uint64, offsets []u
 	return unary, nil
 }
 
-// recsplit applies recSplit algorithm to the given bucket
-func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary []uint64, scratch *recsplitScratch) ([]uint64, error) {
+// recsplit applies recSplit algorithm to the given bucket and accumulates into result
+func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary []uint64, scratch *recsplitScratch, result *bucketResult) ([]uint64, error) {
 	if scratch.trace {
 		fmt.Printf("recsplit(%d, %d, %x)\n", level, len(bucket), bucket)
 	}
@@ -900,16 +917,14 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 		}
 		for _, offset := range scratch.offsetBuffer[:m] {
 			binary.BigEndian.PutUint64(scratch.numBuf[:], offset)
-			if _, err := rs.indexW.Write(scratch.numBuf[8-rs.bytesPerRec:]); err != nil {
-				return nil, err
-			}
+			result.offsetData = append(result.offsetData, scratch.numBuf[8-rs.bytesPerRec:]...)
 		}
 		salt -= scratch.startSeed[level]
 		log2golomb := golombParamValue(rs.golombRice, m)
 		if scratch.trace {
-			fmt.Printf("encode bij %d with log2golomn %d at p = %d\n", salt, log2golomb, rs.gr.bitCount)
+			fmt.Printf("encode bij %d with log2golomn %d at p = %d\n", salt, log2golomb, result.gr.bitCount)
 		}
-		rs.gr.appendFixed(salt, log2golomb)
+		result.gr.appendFixed(salt, log2golomb)
 		unary = append(unary, salt>>log2golomb)
 	} else {
 		fanout, unit := splitParams(m, rs.leafSize, rs.primaryAggrBound, rs.secondaryAggrBound)
@@ -930,26 +945,24 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 		salt -= scratch.startSeed[level]
 		log2golomb := golombParamValue(rs.golombRice, m)
 		if scratch.trace {
-			fmt.Printf("encode fanout %d: %d with log2golomn %d at p = %d\n", fanout, salt, log2golomb, rs.gr.bitCount)
+			fmt.Printf("encode fanout %d: %d with log2golomn %d at p = %d\n", fanout, salt, log2golomb, result.gr.bitCount)
 		}
-		rs.gr.appendFixed(salt, log2golomb)
+		result.gr.appendFixed(salt, log2golomb)
 		unary = append(unary, salt>>log2golomb)
 		var err error
 		var i uint16
 		for i = 0; i < m-unit; i += unit {
-			if unary, err = rs.recsplit(level+1, bucket[i:i+unit], offsets[i:i+unit], unary, scratch); err != nil {
+			if unary, err = rs.recsplit(level+1, bucket[i:i+unit], offsets[i:i+unit], unary, scratch, result); err != nil {
 				return nil, err
 			}
 		}
 		if m-i > 1 {
-			if unary, err = rs.recsplit(level+1, bucket[i:], offsets[i:], unary, scratch); err != nil {
+			if unary, err = rs.recsplit(level+1, bucket[i:], offsets[i:], unary, scratch, result); err != nil {
 				return nil, err
 			}
 		} else if m-i == 1 {
 			binary.BigEndian.PutUint64(scratch.numBuf[:], offsets[i])
-			if _, err := rs.indexW.Write(scratch.numBuf[8-rs.bytesPerRec:]); err != nil {
-				return nil, err
-			}
+			result.offsetData = append(result.offsetData, scratch.numBuf[8-rs.bytesPerRec:]...)
 		}
 	}
 	return unary, nil
