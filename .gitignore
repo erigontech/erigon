@@ -118,6 +118,5 @@ mdbx.lck
 .claude/settings.local.json
 
 tools/test-groups/
-tools/test-groups.json
 # Prevent accidental commit of locally-built binaries
 /erigon

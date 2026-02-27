@@ -25,7 +25,7 @@ jobs:
         with:
           fetch-depth: 1
       - id: load
-        run: echo "groups=$(./tools/write-test-groups --json)" >> $GITHUB_OUTPUT
+        run: echo "groups=$(cat tools/test-groups.json)" >> $GITHUB_OUTPUT
 
   tests-linux:
     needs: load-matrix

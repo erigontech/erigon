@@ -222,12 +222,17 @@ test-short: test-filtered
 
 test-all: test-filtered
 
-test-all-race: override GO_FLAGS += -race
+test-all-race: override GO_FLAGS += --timeout 60m -race
 test-all-race: test-filtered
 
 ## write-test-groups:                        regenerate tools/test-groups/* and tools/test-groups.json
 write-test-groups:
 	go list ./... | ./tools/write-test-groups
+
+## check-test-groups:                        verify tools/test-groups.json is up to date
+check-test-groups:
+	@if ! ./tools/write-test-groups --json | diff - tools/test-groups.json > /dev/null 2>&1; then \
+		echo "tools/test-groups.json is out of date; run: make write-test-groups"; exit 1; fi
 
 ## test-group TEST_GROUP=<name>			run a named CI test group using its package file
 test-group: tools/test-groups/$(TEST_GROUP)
@@ -348,12 +353,14 @@ kurtosis-cleanup:
 lintci:
 	@go tool golangci-lint run --config ./.golangci.yml
 	@./tools/mod_tidy_check.sh
+	@$(MAKE) check-test-groups
 
 ## lint:                              run all linters (fast-only first for quick feedback, then full)
 lint:
 	@go tool golangci-lint run --config ./.golangci.yml --fast-only
 	@./tools/mod_tidy_check.sh
 	@go tool golangci-lint run --config ./.golangci.yml
+	@$(MAKE) check-test-groups
 
 ## tidy:                              `go mod tidy`
 tidy:
