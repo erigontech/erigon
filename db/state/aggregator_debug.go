@@ -94,15 +94,16 @@ func (ac *aggDirtyFilesRoTx) FilesWithMissedAccessors() (mf *MissedAccessorAggFi
 		domain: make(map[kv.Domain]*MissedAccessorDomainFiles),
 		ii:     make(map[kv.InvertedIdx]*MissedAccessorIIFiles),
 	}
-
+	domainDir := ac.agg.dirs.SnapDomain
+	accessorDir := ac.agg.dirs.SnapAccessors
+	domainNames := readDirNames(domainDir)
+	accessorNames := readDirNames(accessorDir)
 	for _, d := range ac.domain {
-		mf.domain[d.d.Name] = d.FilesWithMissedAccessors()
+		mf.domain[d.d.Name] = d.filesWithMissedAccessors(domainNames, domainDir, accessorNames, accessorDir)
 	}
-
 	for _, ii := range ac.ii {
-		mf.ii[ii.ii.Name] = ii.FilesWithMissedAccessors()
+		mf.ii[ii.ii.Name] = ii.filesWithMissedAccessors(accessorNames, accessorDir)
 	}
-
 	return
 }
 
@@ -140,15 +141,13 @@ func (d *Domain) DebugBeginDirtyFilesRo() *domainDirtyFilesRoTx {
 	}
 }
 
-func (d *domainDirtyFilesRoTx) FilesWithMissedAccessors() (mf *MissedAccessorDomainFiles) {
-	snapDir := d.d.dirs.SnapDomain
-	names := readDirNames(snapDir)
+func (d *domainDirtyFilesRoTx) filesWithMissedAccessors(domainNames []string, domainDir string, accessorNames []string, accessorDir string) *MissedAccessorDomainFiles {
 	return &MissedAccessorDomainFiles{
 		files: map[statecfg.Accessors][]*FilesItem{
-			statecfg.AccessorBTree:   d.d.missedBtreeAccessors(d.files, names, snapDir),
-			statecfg.AccessorHashMap: d.d.missedMapAccessors(d.files, names, snapDir),
+			statecfg.AccessorBTree:   d.d.missedBtreeAccessors(d.files, domainNames, domainDir),
+			statecfg.AccessorHashMap: d.d.missedMapAccessors(d.files, domainNames, domainDir),
 		},
-		history: d.history.FilesWithMissedAccessors(),
+		history: d.history.filesWithMissedAccessors(accessorNames, accessorDir),
 	}
 }
 
@@ -180,9 +179,7 @@ func (h *History) DebugBeginDirtyFilesRo() *historyDirtyFilesRoTx {
 	}
 }
 
-func (f *historyDirtyFilesRoTx) FilesWithMissedAccessors() (mf *MissedAccessorHistoryFiles) {
-	snapDir := f.h.dirs.SnapAccessors
-	names := readDirNames(snapDir)
+func (f *historyDirtyFilesRoTx) filesWithMissedAccessors(names []string, snapDir string) *MissedAccessorHistoryFiles {
 	return &MissedAccessorHistoryFiles{
 		ii: f.ii.filesWithMissedAccessors(names, snapDir),
 		files: map[statecfg.Accessors][]*FilesItem{
@@ -216,11 +213,6 @@ func (ii *InvertedIndex) DebugBeginDirtyFilesRo() *iiDirtyFilesRoTx {
 		ii:    ii,
 		files: files,
 	}
-}
-
-func (f *iiDirtyFilesRoTx) FilesWithMissedAccessors() (mf *MissedAccessorIIFiles) {
-	snapDir := f.ii.dirs.SnapAccessors
-	return f.filesWithMissedAccessors(readDirNames(snapDir), snapDir)
 }
 
 func (f *iiDirtyFilesRoTx) filesWithMissedAccessors(names []string, snapDir string) (mf *MissedAccessorIIFiles) {
