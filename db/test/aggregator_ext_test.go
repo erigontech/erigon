@@ -408,7 +408,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
 	require.Equal(t, 3, onChangeCalls)
-	require.Equal(t, 4, onDelCalls)
+	require.Equal(t, 7, onDelCalls)
 
 	{ //prune
 		rwTx, err = db.BeginTemporalRw(context.Background())

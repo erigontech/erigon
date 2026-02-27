@@ -16,10 +16,13 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/changeset"
+	"os"
+
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/seboost"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/types"
@@ -35,6 +38,8 @@ type serialExecutor struct {
 	blobGasUsed     uint64
 	lastBlockResult *blockResult
 	worker          *exec.Worker
+	seboostWriter   *seboost.Writer
+	seboostReader   *seboost.Reader
 }
 
 func warmTxsHashes(block *types.Block) {
@@ -137,6 +142,12 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 		var txTasks []exec.Task
 
+		// load seboost txdeps for this block if available
+		var blockDeps [][]int
+		if se.seboostReader != nil {
+			blockDeps, _ = se.seboostReader.GetDeps(blockNum)
+		}
+
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &exec.TxTask{
@@ -158,6 +169,15 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				havePartialBlock = true
 				inputTxNum++
 				continue
+			}
+
+			// inject seboost txdeps if available
+			if blockDeps != nil {
+				depIndex := txIndex + 1 // 0=system tx, 1=user tx 0, etc.
+				if depIndex >= 0 && depIndex < len(blockDeps) && len(blockDeps[depIndex]) > 0 {
+					txTask.SetDependencies(blockDeps[depIndex])
+					se.logger.Trace("seboost: injecting deps", "block", blockNum, "txIndex", txIndex, "depCount", len(blockDeps[depIndex]))
+				}
 			}
 
 			txTasks = append(txTasks, txTask)
@@ -334,6 +354,20 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 		startTxIndex = max(tasks[0].(*exec.TxTask).TxIndex, 0)
 	}
 
+	// seboost: track per-transaction addresses for dependency generation.
+	// We compute RAW (read-after-write) + WAW (write-after-write) deps only —
+	// no read-read false deps.
+	generateTxDeps := se.seboostWriter != nil && os.Getenv("SEBOOST_GENERATE") == "txdeps"
+	// txAccessed[i]: all addresses accessed (read or write) by tx i — used to
+	//   find whether tx i is affected by an earlier write.
+	// txWritten[i]:  addresses written by tx i — used to build writersByAddr.
+	var txAccessed []state.AccessSet
+	var txWritten []map[accounts.Address]struct{}
+	if generateTxDeps {
+		txAccessed = make([]state.AccessSet, 0, len(tasks))
+		txWritten = make([]map[accounts.Address]struct{}, 0, len(tasks))
+	}
+
 	var gasPool *protocol.GasPool
 	for _, task := range tasks {
 		txTask := task.(*exec.TxTask)
@@ -347,6 +381,22 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 		txTask.Engine = se.cfg.engine
 
 		result := se.worker.RunTxTask(txTask)
+
+		// seboost: collect accessed+written addresses for this transaction.
+		// accessed = all reads+writes (used to detect if tx i is affected by an earlier write)
+		// written  = only writes (used to build writersByAddr — no read-read false deps)
+		if generateTxDeps {
+			accessed := result.AccessedAddresses
+			if accessed == nil {
+				accessed = state.AccessSet{}
+			}
+			written := result.WrittenAddresses
+			if written == nil {
+				written = map[accounts.Address]struct{}{}
+			}
+			txAccessed = append(txAccessed, accessed)
+			txWritten = append(txWritten, written)
+		}
 
 		if err := func() error {
 			if errors.Is(result.Err, context.Canceled) {
@@ -540,6 +590,51 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			se.blockGasUsed = 0
 			se.blobGasUsed = 0
 			gasPool = nil
+		}
+	}
+
+	// seboost: compute RAW+WAW dependencies and write txdeps for this block.
+	// dep(i,j) is set iff j < i and tx j WROTE an address that tx i accesses
+	// (read or write). This eliminates read-read false dependencies.
+	//
+	// Block-level system addresses (coinbase, zero address) are excluded from
+	// dependency tracking: every tx pays fees to coinbase and accesses it via
+	// EIP-3651, which would otherwise create a false linear chain.
+	if generateTxDeps && se.seboostWriter != nil && len(tasks) > 0 && len(txAccessed) > 0 {
+		blockNum := tasks[0].BlockNumber()
+
+		// Build exclusion set: addresses touched by block-level mechanism,
+		// not user-to-user data flow.
+		blockSysAddrs := map[accounts.Address]struct{}{
+			accounts.InternAddress(tasks[0].(*exec.TxTask).Header.Coinbase): {}, // fee recipient (EIP-3651 warm)
+			accounts.ZeroAddress: {}, // zero address (system txs)
+		}
+
+		deps := make(map[int]map[int]bool)
+		// writersByAddr[addr] = list of tx indices that WROTE addr (excl. system addrs)
+		writersByAddr := make(map[accounts.Address][]int)
+		for i := range txAccessed {
+			deps[i] = map[int]bool{}
+			// For each address tx i accessed, check if an earlier tx wrote it.
+			for addr := range txAccessed[i] {
+				if _, sys := blockSysAddrs[addr]; sys {
+					continue // skip system addresses
+				}
+				for _, j := range writersByAddr[addr] {
+					deps[i][j] = true
+				}
+			}
+			// Register tx i as a writer, excluding system addresses.
+			for addr := range txWritten[i] {
+				if _, sys := blockSysAddrs[addr]; sys {
+					continue
+				}
+				writersByAddr[addr] = append(writersByAddr[addr], i)
+			}
+		}
+		txCount := len(tasks)
+		if err := se.seboostWriter.WriteBlock(blockNum, deps, txCount); err != nil {
+			se.logger.Warn("seboost: failed to write txdeps", "block", blockNum, "err", err)
 		}
 	}
 

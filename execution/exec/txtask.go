@@ -110,7 +110,8 @@ type TxResult struct {
 
 	TraceFroms        map[accounts.Address]struct{}
 	TraceTos          map[accounts.Address]struct{}
-	AccessedAddresses map[accounts.Address]struct{}
+	AccessedAddresses state.AccessSet
+	WrittenAddresses  map[accounts.Address]struct{}
 }
 
 func (r *TxResult) compare(other *TxResult) int {
@@ -382,9 +383,17 @@ func (t *TxTask) Version() state.Version {
 	return state.Version{BlockNum: t.BlockNumber(), TxNum: t.TxNum, TxIndex: t.TxIndex}
 }
 
+func (t *TxTask) SetDependencies(deps []int) {
+	t.dependencies = deps
+}
+
 func (t *TxTask) Dependencies() []int {
+	if t.dependencies != nil {
+		return t.dependencies
+	}
+
 	if dbg.UseTxDependencies {
-		if t.dependencies == nil && t.Engine != nil {
+		if t.Engine != nil {
 			t.dependencies = []int{}
 
 			blockDependencies := t.Engine.TxDependencies(t.Header)
@@ -572,6 +581,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		}
 
 		result.AccessedAddresses = ibs.AccessedAddresses()
+		result.WrittenAddresses = ibs.DirtyAddresses()
 		result.TxIn = txTask.VersionedReads(ibs)
 		result.TxOut = txTask.VersionedWrites(ibs)
 	}

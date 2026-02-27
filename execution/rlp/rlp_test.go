@@ -54,7 +54,7 @@ func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir 
 			Alloc:  types.GenesisAlloc{address: {Balance: funds}},
 		}
 	)
-	m := execmoduletester.NewWithGenesis(tb, gspec, key)
+	m := execmoduletester.New(tb, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 	genesis := m.Genesis
 	db := m.DB
 
