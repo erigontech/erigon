@@ -18,7 +18,10 @@ package recsplit
 
 import (
 	"context"
+	"crypto/md5"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -479,4 +482,99 @@ func TestTwoLayerIndex(t *testing.T) {
 		cfg.Version = 1
 		test(t, cfg)
 	})
+}
+
+// TestSequentialVsParallel compares output files created with sequential (Workers=1) vs parallel (Workers>1) processing.
+// Both should produce byte-for-byte identical index files (verified via MD5 hash).
+func TestSequentialVsParallel(t *testing.T) {
+	logger := log.New()
+	tmpDir := t.TempDir()
+
+	// Configuration for the test
+	const numKeys = 200
+	const bucketSize = 50
+	const leafSize = 8
+	salt := uint32(42)
+
+	// Helper to build index and return MD5 hash of the file
+	buildAndHash := func(workers int) string {
+		indexFile := filepath.Join(tmpDir, fmt.Sprintf("index_workers_%d", workers))
+
+		rs, err := NewRecSplit(RecSplitArgs{
+			KeyCount:   numKeys,
+			BucketSize: bucketSize,
+			Salt:       &salt,
+			TmpDir:     tmpDir,
+			IndexFile:  indexFile,
+			LeafSize:   leafSize,
+			Workers:    workers,
+		}, logger)
+		if err != nil {
+			t.Fatalf("Failed to create RecSplit with workers=%d: %v", workers, err)
+		}
+		defer rs.Close()
+
+		// Add keys to the index
+		for i := 0; i < numKeys; i++ {
+			key := fmt.Appendf(nil, "test_key_%d", i)
+			offset := uint64(i * 17) // Use non-sequential offsets
+			if err := rs.AddKey(key, offset); err != nil {
+				t.Fatalf("Failed to add key %d: %v", i, err)
+			}
+		}
+
+		// Build the index
+		if err := rs.Build(context.Background()); err != nil {
+			t.Fatalf("Failed to build RecSplit with workers=%d: %v", workers, err)
+		}
+
+		// Compute MD5 hash of the index file
+		file, err := os.Open(indexFile)
+		if err != nil {
+			t.Fatalf("Failed to open index file: %v", err)
+		}
+		defer file.Close()
+
+		hash := md5.New()
+		if _, err := io.Copy(hash, file); err != nil {
+			t.Fatalf("Failed to hash file: %v", err)
+		}
+
+		return fmt.Sprintf("%x", hash.Sum(nil))
+	}
+
+	// Build with sequential processing
+	t.Logf("Building index with sequential (Workers=1) processing...")
+	seqHash := buildAndHash(1)
+	t.Logf("Sequential MD5: %s", seqHash)
+
+	// Build with parallel processing (2 workers)
+	t.Logf("Building index with parallel (Workers=2) processing...")
+	par2Hash := buildAndHash(2)
+	t.Logf("Parallel (2) MD5:  %s", par2Hash)
+
+	// Build with parallel processing (4 workers)
+	t.Logf("Building index with parallel (Workers=4) processing...")
+	par4Hash := buildAndHash(4)
+	t.Logf("Parallel (4) MD5:  %s", par4Hash)
+
+	// All hashes should match - proving byte-for-byte identical output
+	assert.Equal(t, seqHash, par2Hash, "Sequential and parallel (2 workers) produced different outputs")
+	assert.Equal(t, seqHash, par4Hash, "Sequential and parallel (4 workers) produced different outputs")
+
+	// Verify the index can be read and produces correct lookups
+	indexFile := filepath.Join(tmpDir, "index_workers_1")
+	idx := MustOpen(indexFile)
+	defer idx.Close()
+
+	reader := NewIndexReader(idx)
+	for i := 0; i < numKeys; i++ {
+		key := fmt.Appendf(nil, "test_key_%d", i)
+		offset, ok := reader.Lookup(key)
+		assert.True(t, ok, "Failed to lookup key %d", i)
+		expectedOffset := uint64(i * 17)
+		assert.Equal(t, expectedOffset, offset, "Key %d has wrong offset", i)
+	}
+
+	t.Log("✓ Sequential and parallel processing produce identical results")
 }
