@@ -354,12 +354,18 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 		startTxIndex = max(tasks[0].(*exec.TxTask).TxIndex, 0)
 	}
 
-	// seboost: track per-transaction accessed addresses for dependency generation
+	// seboost: track per-transaction addresses for dependency generation.
+	// We compute RAW (read-after-write) + WAW (write-after-write) deps only —
+	// no read-read false deps.
 	generateTxDeps := se.seboostWriter != nil && os.Getenv("SEBOOST_GENERATE") == "txdeps"
-	// txAccessed[i] stores the set of addresses accessed by task at index i
+	// txAccessed[i]: all addresses accessed (read or write) by tx i — used to
+	//   find whether tx i is affected by an earlier write.
+	// txWritten[i]:  addresses written by tx i — used to build writersByAddr.
 	var txAccessed []state.AccessSet
+	var txWritten []map[accounts.Address]struct{}
 	if generateTxDeps {
 		txAccessed = make([]state.AccessSet, 0, len(tasks))
+		txWritten = make([]map[accounts.Address]struct{}, 0, len(tasks))
 	}
 
 	var gasPool *protocol.GasPool
@@ -376,13 +382,20 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 
 		result := se.worker.RunTxTask(txTask)
 
-		// seboost: collect accessed addresses for this transaction
+		// seboost: collect accessed+written addresses for this transaction.
+		// accessed = all reads+writes (used to detect if tx i is affected by an earlier write)
+		// written  = only writes (used to build writersByAddr — no read-read false deps)
 		if generateTxDeps {
-			addrs := result.AccessedAddresses
-			if addrs == nil {
-				addrs = state.AccessSet{}
+			accessed := result.AccessedAddresses
+			if accessed == nil {
+				accessed = state.AccessSet{}
 			}
-			txAccessed = append(txAccessed, addrs)
+			written := result.WrittenAddresses
+			if written == nil {
+				written = map[accounts.Address]struct{}{}
+			}
+			txAccessed = append(txAccessed, accessed)
+			txWritten = append(txWritten, written)
 		}
 
 		if err := func() error {
@@ -580,26 +593,25 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 		}
 	}
 
-	// seboost: compute address-level dependencies and write txdeps for this block
-	if generateTxDeps && se.seboostWriter != nil && len(tasks) > 0 {
+	// seboost: compute RAW+WAW dependencies and write txdeps for this block.
+	// dep(i,j) is set iff j < i and tx j WROTE an address that tx i accesses
+	// (read or write). This eliminates read-read false dependencies.
+	if generateTxDeps && se.seboostWriter != nil && len(tasks) > 0 && len(txAccessed) > 0 {
 		blockNum := tasks[0].BlockNumber()
-		// Build dependency map: for each tx i, find which earlier txs j
-		// modified addresses that tx i also accesses
 		deps := make(map[int]map[int]bool)
-		// writersByAddr tracks which tx indices wrote to each address
+		// writersByAddr[addr] = list of tx indices that WROTE addr
 		writersByAddr := make(map[accounts.Address][]int)
-		for i, addrs := range txAccessed {
+		for i := range txAccessed {
 			deps[i] = map[int]bool{}
-			// Check if this tx accesses any address that a previous tx also accessed
-			for addr := range addrs {
-				if writers, ok := writersByAddr[addr]; ok {
-					for _, j := range writers {
-						deps[i][j] = true
-					}
+			// For each address tx i accessed (read or write), find earlier txs
+			// that WROTE it — those are true RAW or WAW dependencies.
+			for addr := range txAccessed[i] {
+				for _, j := range writersByAddr[addr] {
+					deps[i][j] = true
 				}
 			}
-			// Record this tx as a writer for all its accessed addresses
-			for addr := range addrs {
+			// Register tx i as a writer for addresses it actually wrote.
+			for addr := range txWritten[i] {
 				writersByAddr[addr] = append(writersByAddr[addr], i)
 			}
 		}

@@ -111,6 +111,7 @@ type TxResult struct {
 	TraceFroms        map[accounts.Address]struct{}
 	TraceTos          map[accounts.Address]struct{}
 	AccessedAddresses state.AccessSet
+	WrittenAddresses  map[accounts.Address]struct{}
 }
 
 func (r *TxResult) compare(other *TxResult) int {
@@ -580,6 +581,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		}
 
 		result.AccessedAddresses = ibs.AccessedAddresses()
+		result.WrittenAddresses = ibs.DirtyAddresses()
 		result.TxIn = txTask.VersionedReads(ibs)
 		result.TxOut = txTask.VersionedWrites(ibs)
 	}

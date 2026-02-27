@@ -2195,6 +2195,20 @@ func (sdb *IntraBlockState) AccessedAddresses() AccessSet {
 	return out
 }
 
+// DirtyAddresses returns the set of addresses that were written (dirtied) during
+// the current transaction. Unlike AccessedAddresses, this excludes read-only accesses,
+// giving true write-write / read-write dependency edges.
+func (sdb *IntraBlockState) DirtyAddresses() map[accounts.Address]struct{} {
+	if len(sdb.stateObjectsDirty) == 0 {
+		return nil
+	}
+	out := make(map[accounts.Address]struct{}, len(sdb.stateObjectsDirty))
+	for addr := range sdb.stateObjectsDirty {
+		out[addr] = struct{}{}
+	}
+	return out
+}
+
 func (sdb *IntraBlockState) accountRead(addr accounts.Address, account *accounts.Account, source ReadSource, version Version) {
 	if sdb.versionMap != nil {
 		data := *account
