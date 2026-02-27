@@ -100,11 +100,12 @@ func (q *bucketResultQueue) Pop() interface{} {
 
 // recsplitScratch holds per-execution scratch buffers and configuration (shared by sequential and worker paths).
 type recsplitScratch struct {
-	count  []uint16 // Size = secondaryAggrBound (for findSplit 8-way)
-	buffer []uint64
+	count        []uint16 // Size = secondaryAggrBound (for findSplit 8-way)
+	buffer       []uint64
 	offsetBuffer []uint64
-	numBuf [8]byte
-	trace  bool // Enable tracing output
+	numBuf       [8]byte
+	trace        bool     // Enable tracing output
+	startSeed    []uint64 // Hash seeds for each level of recursive split
 }
 
 // workerState carries per-goroutine state for parallel execution.
@@ -116,7 +117,6 @@ type workerState struct {
 
 	// Read-only shared fields (set once before workers start)
 	golombRice         []uint32
-	startSeed          []uint64
 	leafSize           uint16
 	primaryAggrBound   uint16
 	secondaryAggrBound uint16
@@ -317,7 +317,9 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 		rs.secondaryAggrBound = rs.primaryAggrBound * uint16(math.Ceil(0.21*float64(rs.leafSize)+9./10.))
 	}
 	rs.scratch = &recsplitScratch{
-		count: make([]uint16, rs.secondaryAggrBound),
+		count:     make([]uint16, rs.secondaryAggrBound),
+		trace:     rs.trace,
+		startSeed: args.StartSeed,
 	}
 	if args.NoFsync {
 		rs.DisableFsync()
@@ -730,15 +732,15 @@ func (rs *RecSplit) newWorkerState() *workerState {
 			count:        make([]uint16, rs.secondaryAggrBound),
 			buffer:       make([]uint64, rs.secondaryAggrBound),
 			offsetBuffer: make([]uint64, rs.secondaryAggrBound),
+			trace:        rs.trace,
+			startSeed:    rs.startSeed,
 		},
 		unaryBuf:           make([]uint64, 0, rs.secondaryAggrBound),
 		golombRice:         rs.golombRice,
-		startSeed:          rs.startSeed,
 		leafSize:           rs.leafSize,
 		primaryAggrBound:   rs.primaryAggrBound,
 		secondaryAggrBound: rs.secondaryAggrBound,
 		bytesPerRec:        rs.bytesPerRec,
-		trace:              rs.trace,
 	}
 }
 
@@ -795,11 +797,11 @@ func recsplitBucketWorker(inCh <-chan *bucketTask, outCh chan<- *bucketResult, w
 // recsplitWorkerFunc applies recsplit algorithm to the given bucket using per-worker state.
 // This is the worker-safe version that accumulates results without writing to indexW.
 func recsplitWorkerFunc(ws *workerState, level int, bucket []uint64, offsets []uint64, unary []uint64, scratch *recsplitScratch) ([]uint64, error) {
-	if ws.trace {
+	if scratch.trace {
 		fmt.Printf("recsplit(%d, %d, %x)\n", level, len(bucket), bucket)
 	}
 	// Pick initial salt for this level of recursive split
-	salt := ws.startSeed[level]
+	salt := scratch.startSeed[level]
 	m := uint16(len(bucket))
 	if m <= ws.leafSize {
 		salt = findBijection(bucket, salt)
@@ -812,9 +814,9 @@ func recsplitWorkerFunc(ws *workerState, level int, bucket []uint64, offsets []u
 			binary.BigEndian.PutUint64(scratch.numBuf[:], offset)
 			ws.offsetData = append(ws.offsetData, scratch.numBuf[8-ws.bytesPerRec:]...)
 		}
-		salt -= ws.startSeed[level]
+		salt -= scratch.startSeed[level]
 		log2golomb := golombParamValue(ws.golombRice, m)
-		if ws.trace {
+		if scratch.trace {
 			fmt.Printf("encode bij %d with log2golomn %d at p = %d\n", salt, log2golomb, ws.gr.Bits())
 		}
 		ws.gr.appendFixed(salt, log2golomb)
@@ -835,9 +837,9 @@ func recsplitWorkerFunc(ws *workerState, level int, bucket []uint64, offsets []u
 		}
 		copy(bucket, scratch.buffer)
 		copy(offsets, scratch.offsetBuffer)
-		salt -= ws.startSeed[level]
+		salt -= scratch.startSeed[level]
 		log2golomb := golombParamValue(ws.golombRice, m)
-		if ws.trace {
+		if scratch.trace {
 			fmt.Printf("encode fanout %d: %d with log2golomn %d at p = %d\n", fanout, salt, log2golomb, ws.gr.Bits())
 		}
 		ws.gr.appendFixed(salt, log2golomb)
@@ -863,11 +865,11 @@ func recsplitWorkerFunc(ws *workerState, level int, bucket []uint64, offsets []u
 
 // recsplit applies recSplit algorithm to the given bucket
 func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary []uint64, scratch *recsplitScratch) ([]uint64, error) {
-	if rs.trace {
+	if scratch.trace {
 		fmt.Printf("recsplit(%d, %d, %x)\n", level, len(bucket), bucket)
 	}
 	// Pick initial salt for this level of recursive split
-	salt := rs.startSeed[level]
+	salt := scratch.startSeed[level]
 	m := uint16(len(bucket))
 	if m <= rs.leafSize {
 		salt = findBijection(bucket, salt)
@@ -881,9 +883,9 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 				return nil, err
 			}
 		}
-		salt -= rs.startSeed[level]
+		salt -= scratch.startSeed[level]
 		log2golomb := golombParamValue(rs.golombRice, m)
-		if rs.trace {
+		if scratch.trace {
 			fmt.Printf("encode bij %d with log2golomn %d at p = %d\n", salt, log2golomb, rs.gr.bitCount)
 		}
 		rs.gr.appendFixed(salt, log2golomb)
@@ -904,9 +906,9 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 		}
 		copy(bucket, scratch.buffer)
 		copy(offsets, scratch.offsetBuffer)
-		salt -= rs.startSeed[level]
+		salt -= scratch.startSeed[level]
 		log2golomb := golombParamValue(rs.golombRice, m)
-		if rs.trace {
+		if scratch.trace {
 			fmt.Printf("encode fanout %d: %d with log2golomn %d at p = %d\n", fanout, salt, log2golomb, rs.gr.bitCount)
 		}
 		rs.gr.appendFixed(salt, log2golomb)
@@ -995,7 +997,7 @@ func (rs *RecSplit) buildWithWorkers(ctx context.Context) error {
 			if rs.currentBucketIdx != bucketIdx {
 				if rs.currentBucketIdx != math.MaxUint64 {
 					// Send current bucket as a task
-					:= &bucketTask{
+					task := &bucketTask{
 						order:   rs.currentBucketIdx,
 						keys:    rs.currentBucket,
 						offsets: rs.currentBucketOffs,
