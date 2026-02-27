@@ -1,15 +1,12 @@
 name: Save Go module cache
-description: Hash and save the Go module download cache
+description: Save Go module download cache using the provided key
 
 inputs:
   modcache-path:
-    description: "Path to the Go module download cache"
+    description: "GOMODCACHE path"
     required: true
-  tag:
-    description: "Tag included in the cache key after go.sum hash"
-    required: true
-  restored-key:
-    description: "The cache key that was restored (from actions/cache/restore output cache-matched-key). If the save key matches, the save is skipped."
+  key:
+    description: "Cache key to save under (from restore-mod-cache outputs.primary-key)"
     required: true
 
 runs:
@@ -18,26 +15,10 @@ runs:
     - name: Show module cache size
       if: ${{ always() }}
       shell: bash
-      run: du -hs '${{ inputs.modcache-path }}' '${{ inputs.modcache-path }}/cache/download' || true
+      run: du -hs "${{ inputs.modcache-path }}" "${{ inputs.modcache-path }}/cache/download" || true
 
-    - name: Hash module cache contents
-      id: mod-hash
+    - uses: actions/cache/save@v4
       if: ${{ always() }}
-      shell: bash
-      run: |
-        hash=$(cd '${{ inputs.modcache-path }}/cache/download' && find . -type d -name '*@*' | sort | sha256sum | cut -d' ' -f1)
-        echo "hash=$hash" >> "$GITHUB_OUTPUT"
-        tag='${{ inputs.tag }}'
-        if [[ -n "$tag" ]]; then
-          save_key='gomodcache|${{ runner.os }}|${{ hashFiles('go.sum') }}|'"${tag}|${hash}"
-        else
-          save_key='gomodcache|${{ runner.os }}|${{ hashFiles('go.sum') }}|'"${hash}"
-        fi
-        echo "save-key=$save_key" >> "$GITHUB_OUTPUT"
-
-    - name: Save Go module cache
-      if: ${{ always() && steps.mod-hash.outputs.save-key != inputs.restored-key }}
-      uses: actions/cache/save@v4
       with:
         path: ${{ inputs.modcache-path }}/cache/download
-        key: ${{ steps.mod-hash.outputs.save-key }}
+        key: ${{ inputs.key }}

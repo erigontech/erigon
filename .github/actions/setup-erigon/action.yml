@@ -25,10 +25,6 @@ inputs:
     description: "Remove large pre-installed packages to free disk space (Linux only)"
     required: false
     default: 'false'
-  modcache:
-    description: "'download' to restore/download/save module cache, 'false' to skip, other values restore only (save deferred to cleanup-erigon)"
-    required: false
-    default: 'download'
   build-cache-extra-key:
     description: "Extra segment appended to build cache key (e.g. matrix.test-group)"
     required: false
@@ -230,39 +226,17 @@ runs:
         echo "workflow=$workflow" >> "$GITHUB_OUTPUT"
         echo "ERIGON_CI_GOCACHE_PATH=$(go env GOCACHE)" >> "$GITHUB_ENV"
         echo "ERIGON_CI_MODCACHE=$(go env GOMODCACHE)" >> "$GITHUB_ENV"
-        echo "ERIGON_CI_MODCACHE_MODE=${{ inputs.modcache }}" >> "$GITHUB_ENV"
 
-    # Note we only cache $(go env GOMODCACHE)/cache/download, the rest is derived from that part.
-
-    - name: Restore Go module cache
-      id: restore-modcache
-      if: ${{ inputs.modcache != 'false' }}
-      uses: actions/cache/restore@v4
+    - id: restore-mod-cache
+      uses: ./.github/actions/restore-mod-cache
       with:
-        path: ${{ steps.go-env.outputs.modcache }}/cache/download
-        key: gomodcache|${{ runner.os }}|${{ hashFiles('go.sum') }}|${{ inputs.modcache }}
-        restore-keys: |
-          gomodcache|${{ runner.os }}|${{ hashFiles('go.sum') }}|${{ inputs.modcache }}
-          gomodcache|${{ runner.os }}|${{ hashFiles('go.sum') }}|
-          gomodcache|${{ runner.os }}|
+        modcache-path: ${{ steps.go-env.outputs.modcache }}
+        workflow-id: ${{ steps.go-env.outputs.workflow }}
+        matrix-key: ${{ inputs.build-cache-extra-key }}
 
-    - name: Export modcache restored key
-      if: ${{ inputs.modcache != 'false' }}
+    - name: Export modcache key
       shell: bash
-      run: echo "ERIGON_CI_MODCACHE_RESTORED_KEY=${{ steps.restore-modcache.outputs.cache-matched-key }}" >> "$GITHUB_ENV"
-
-    - name: Download Go modules
-      if: ${{ inputs.modcache == 'download' }}
-      shell: bash
-      # -x because it doesn't log what it's doing otherwise, unlike if a download occurs during another tool call.
-      run: time go mod download
-
-    - name: Save Go module cache
-      if: ${{ inputs.modcache == 'download' && steps.restore-modcache.outputs.cache-hit != 'true' }}
-      uses: actions/cache/save@v4
-      with:
-        path: ${{ steps.go-env.outputs.modcache }}/cache/download
-        key: gomodcache|${{ runner.os }}|${{ hashFiles('go.sum') }}|${{ inputs.modcache }}
+      run: echo "ERIGON_CI_MODCACHE_KEY=${{ steps.restore-mod-cache.outputs.primary-key }}" >> "$GITHUB_ENV"
 
     - id: restore-build-cache
       uses: ./.github/actions/restore-build-cache

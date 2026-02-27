@@ -1,15 +1,5 @@
 name: Cleanup Erigon
-description: Save module cache (when not handled by setup-erigon) and warn about uncached tests
-
-inputs:
-  tag:
-    description: "Optional tag for the modcache key (e.g. 'lint'). Defaults to ERIGON_CI_MODCACHE_MODE env var."
-    required: false
-    default: ""
-  modcache-restored-key:
-    description: "Override for the restored modcache key. Falls back to ERIGON_CI_MODCACHE_RESTORED_KEY env var."
-    required: false
-    default: ""
+description: Save build and module caches, and warn about uncached tests
 
 runs:
   using: composite
@@ -21,11 +11,10 @@ runs:
         key: ${{ env.ERIGON_CI_GOCACHE_KEY }}
 
     - uses: ./.github/actions/save-mod-cache
-      if: ${{ always() && env.ERIGON_CI_MODCACHE_MODE != 'download' }}
+      if: ${{ always() && env.ERIGON_CI_MODCACHE != '' }}
       with:
         modcache-path: ${{ env.ERIGON_CI_MODCACHE }}
-        tag: ${{ inputs.tag || env.ERIGON_CI_MODCACHE_MODE }}
-        restored-key: ${{ inputs.modcache-restored-key || env.ERIGON_CI_MODCACHE_RESTORED_KEY }}
+        key: ${{ env.ERIGON_CI_MODCACHE_KEY }}
 
     - name: Save submodule git objects cache
       if: >-

@@ -28,8 +28,6 @@ jobs:
 
       - uses: ./.github/actions/setup-erigon
         id: erigon
-        with:
-          modcache: lint
 
       - name: Restore golangci-lint cache
         uses: actions/cache/restore@v4

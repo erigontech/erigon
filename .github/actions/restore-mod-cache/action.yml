@@ -1,0 +1,40 @@
+name: Restore Go module cache
+description: Restore Go module cache keyed by workflow, job, and run
+
+inputs:
+  modcache-path:
+    description: "GOMODCACHE path"
+    required: true
+  workflow-id:
+    description: "Workflow name for cache key namespacing"
+    required: true
+  matrix-key:
+    description: "Extra segment in the cache key (e.g. matrix value)"
+    required: false
+    default: ''
+
+outputs:
+  restored-key:
+    description: "The cache key that was restored (empty if miss)"
+    value: ${{ steps.restore.outputs.cache-matched-key }}
+  primary-key:
+    description: "The primary cache key (for use by save-mod-cache)"
+    value: gomodcache|${{ inputs.workflow-id }}|${{ github.job }}|${{ inputs.matrix-key }}|${{ runner.os }}|${{ hashFiles('go.sum') }}|${{ github.run_id }}|${{ github.run_attempt }}
+
+runs:
+  using: composite
+  steps:
+    - id: restore
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ inputs.modcache-path }}/cache/download
+        key: gomodcache|${{ inputs.workflow-id }}|${{ github.job }}|${{ inputs.matrix-key }}|${{ runner.os }}|${{ hashFiles('go.sum') }}|${{ github.run_id }}|${{ github.run_attempt }}
+        restore-keys: |
+          gomodcache|${{ inputs.workflow-id }}|${{ github.job }}|${{ inputs.matrix-key }}|${{ runner.os }}|${{ hashFiles('go.sum') }}|${{ github.run_id }}|
+          gomodcache|${{ inputs.workflow-id }}|${{ github.job }}|${{ inputs.matrix-key }}|${{ runner.os }}|${{ hashFiles('go.sum') }}|
+          gomodcache|${{ inputs.workflow-id }}|${{ github.job }}|${{ inputs.matrix-key }}|${{ runner.os }}|
+
+    - name: Warn on module cache miss
+      if: ${{ steps.restore.outputs.cache-matched-key == '' }}
+      shell: bash
+      run: echo "::warning::Go module cache miss — no matching key found"
