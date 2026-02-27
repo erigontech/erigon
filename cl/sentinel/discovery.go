@@ -40,7 +40,7 @@ const (
 	peerSubnetTarget                 = 4
 	goRoutinesOpeningPeerConnections = 4
 	attestationSubnetCount           = 64
-	minimumPeersPerSubnet            = 4  // Minimum peers needed per subnet before proactive search stops
+	minimumPeersPerSubnet            = 4 // Minimum peers needed per subnet before proactive search stops
 	subnetSearchTimeout              = 30 * time.Second
 	subnetSearchInterval             = 12 * time.Second // Check every slot
 	peerPruneInterval                = 60 * time.Second // How often to check for excess peers
@@ -201,7 +201,7 @@ func (s *Sentinel) proactiveSubnetPeerSearch() {
 
 			// Collect underserved subnets with their peer counts
 			var underserved []subnetSearchState
-			for i, count := range coverage {
+			for i, count := range &coverage {
 				if count < minimumPeersPerSubnet {
 					underserved = append(underserved, subnetSearchState{
 						idx:    i,
@@ -245,7 +245,7 @@ func (s *Sentinel) proactiveSubnetPeerSearch() {
 			postCoverage := s.getSubnetCoverage()
 			stillUnderserved := []int{}
 			atMin := 0
-			for i, count := range postCoverage {
+			for i, count := range &postCoverage {
 				if count >= minimumPeersPerSubnet {
 					atMin++
 				} else {

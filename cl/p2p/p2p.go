@@ -216,4 +216,3 @@ func (s *p2pManager) updateSubnetENR(subnetKey string, subnetIndex int, on bool)
 	s.udpv5.LocalNode().Set(enr.WithEntry(subnetKey, &subnetField))
 	log.Info("[Sentinel] Updated subnet", "subnetKey", subnetKey, "subnetIndex", subnetIndex, "on", on)
 }
-

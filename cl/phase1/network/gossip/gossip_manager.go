@@ -459,4 +459,3 @@ func (g *GossipManager) observeBandwidth(ctx context.Context, maxInboundTrafficP
 func composeTopic(forkDigest common.Bytes4, name string) string {
 	return fmt.Sprintf("/eth2/%x/%s/%s", forkDigest, name, gossip.SSZSnappyCodec)
 }
-
