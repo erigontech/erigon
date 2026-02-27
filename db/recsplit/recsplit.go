@@ -865,7 +865,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 
 	// Pre-populate golombRice table for all potential bucket sizes
 	// In practice, buckets can exceed bucketSize due to hash distribution
-	maxM := uint16(rs.bucketSize + rs.bucketSize/2) // Add 50% safety margin
+	maxM := uint16(rs.bucketSize * 2) // Add 100% safety margin for hash distribution variance
 	if rs.secondaryAggrBound > maxM {
 		maxM = rs.secondaryAggrBound
 	}
