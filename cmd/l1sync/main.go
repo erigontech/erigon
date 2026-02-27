@@ -14,6 +14,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/turbo/logging"
 	"github.com/erigontech/nitro-erigon/execution/erigon/ethclient"
 )
 
@@ -41,15 +42,18 @@ var (
 )
 
 func main() {
+	flags := []cli.Flag{
+		l1RpcFlag,
+		beaconUrlFlag,
+		dataDirFlag,
+		chainFlag,
+	}
+	flags = append(flags, logging.Flags...)
+
 	app := &cli.App{
-		Name:  "l1sync",
-		Usage: "Fetch and store L1 sequencer batches for Arbitrum",
-		Flags: []cli.Flag{
-			l1RpcFlag,
-			beaconUrlFlag,
-			dataDirFlag,
-			chainFlag,
-		},
+		Name:   "l1sync",
+		Usage:  "Fetch and store L1 sequencer batches for Arbitrum",
+		Flags:  flags,
 		Action: run,
 	}
 
@@ -60,7 +64,7 @@ func main() {
 }
 
 func run(cliCtx *cli.Context) error {
-	logger := log.New()
+	logger := logging.SetupLoggerCtx("l1sync", cliCtx, log.LvlInfo, log.LvlInfo, true)
 
 	// Select chain preset
 	var cfg l1sync.Config
@@ -111,6 +115,7 @@ func run(cliCtx *cli.Context) error {
 		blobL1Client,
 		nil, // no execution sequencer for now
 		db,
+		logger,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create l1sync service: %w", err)

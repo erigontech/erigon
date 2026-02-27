@@ -38,6 +38,7 @@ func New(
 	blobL1Client *ethclient.Client,
 	exec execution.ExecutionSequencer,
 	db kv.RwDB,
+	logger log.Logger,
 ) (*L1SyncService, error) {
 	seqInbox, err := arbnode.NewSequencerInbox(l1Client, config.SequencerInboxAddr, int64(config.StartL1Block))
 	if err != nil {
@@ -62,7 +63,7 @@ func New(
 		dapReaders:     []daprovider.Reader{daprovider.NewReaderForBlobReader(blobClient)},
 		exec:           exec,
 		db:             db,
-		logger:         log.New("module", "l1sync"),
+		logger:         logger,
 	}, nil
 }
 
