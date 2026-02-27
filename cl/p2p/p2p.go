@@ -217,12 +217,3 @@ func (s *p2pManager) updateSubnetENR(subnetKey string, subnetIndex int, on bool)
 	log.Info("[Sentinel] Updated subnet", "subnetKey", subnetKey, "subnetIndex", subnetIndex, "on", on)
 }
 
-// GetSubscribedAttSubnets returns the current attestation subnets we are subscribed to (from local ENR)
-func (s *p2pManager) GetSubscribedAttSubnets() []byte {
-	subnetField := bitfield.NewBitvector64()
-	if err := s.udpv5.LocalNode().Node().Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &subnetField)); err != nil {
-		log.Debug("[P2P] Could not load attnets from ENR", "err", err)
-		return make([]byte, 8)
-	}
-	return common.Copy(subnetField)
-}

@@ -15,6 +15,4 @@ type P2PManager interface {
 	UDPv5Listener() *discover.UDPv5
 	UpdateENRAttSubnets(subnetIndex int, on bool)
 	UpdateENRSyncNets(subnetIndex int, on bool)
-	// GetSubscribedAttSubnets returns the current attestation subnets we are subscribed to (from local ENR)
-	GetSubscribedAttSubnets() []byte
 }

@@ -123,16 +123,3 @@ func (mr *MockP2PManagerMockRecorder) UpdateENRSyncNets(subnetIndex, on any) *go
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateENRSyncNets", reflect.TypeOf((*MockP2PManager)(nil).UpdateENRSyncNets), subnetIndex, on)
 }
 
-// GetSubscribedAttSubnets mocks base method.
-func (m *MockP2PManager) GetSubscribedAttSubnets() []byte {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetSubscribedAttSubnets")
-	ret0, _ := ret[0].([]byte)
-	return ret0
-}
-
-// GetSubscribedAttSubnets indicates an expected call of GetSubscribedAttSubnets.
-func (mr *MockP2PManagerMockRecorder) GetSubscribedAttSubnets() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSubscribedAttSubnets", reflect.TypeOf((*MockP2PManager)(nil).GetSubscribedAttSubnets))
-}

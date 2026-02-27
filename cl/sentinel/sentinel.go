@@ -22,9 +22,7 @@ import (
 	"net/http"
 	"os/signal"
 	"sync"
-	"sync/atomic"
 	"syscall"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/libp2p/go-libp2p/core/host"
@@ -52,12 +50,6 @@ import (
 	"github.com/erigontech/erigon/p2p/enr"
 )
 
-// emptySubnetsCacheEntry holds cached empty subnets with timestamp
-type emptySubnetsCacheEntry struct {
-	subnets []int
-	time    time.Time
-}
-
 type Sentinel struct {
 	started  bool
 	listener *discover.UDPv5 // this is us in the network.
@@ -83,7 +75,6 @@ type Sentinel struct {
 	forkChoiceReader   forkchoice.ForkChoiceStorageReader
 	pidToEnr           sync.Map
 	pidToEnodeId       sync.Map
-	emptySubnetsCache atomic.Pointer[emptySubnetsCacheEntry] // cached empty subnets (TTL ~2s)
 	ethClock           eth_clock.EthereumClock
 	peerDasStateReader peerdasstate.PeerDasStateReader
 

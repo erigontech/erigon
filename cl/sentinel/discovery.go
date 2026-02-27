@@ -52,35 +52,6 @@ func (s *Sentinel) getSubnetCoverage() [attestationSubnetCount]int {
 	return coverage
 }
 
-const emptySubnetsCacheTTL = 2 * time.Second // Cache empty subnets for 2 seconds
-
-// getEmptySubnets returns a list of subnet indices that have no peers (cached)
-func (s *Sentinel) getEmptySubnets() []int {
-	// Check cache first
-	if cached := s.emptySubnetsCache.Load(); cached != nil {
-		if time.Since(cached.time) < emptySubnetsCacheTTL {
-			return cached.subnets
-		}
-	}
-
-	// Recalculate
-	coverage := s.getSubnetCoverage()
-	var empty []int
-	for i, count := range coverage {
-		if count == 0 {
-			empty = append(empty, i)
-		}
-	}
-
-	// Update cache
-	s.emptySubnetsCache.Store(&emptySubnetsCacheEntry{
-		subnets: empty,
-		time:    time.Now(),
-	})
-
-	return empty
-}
-
 // subnetSearchState tracks progress for finding peers for multiple subnets
 type subnetSearchState struct {
 	idx    int // subnet index
@@ -418,61 +389,6 @@ func (s *Sentinel) pruneExcessPeers() {
 	log.Info("[Sentinel] Peer pruning complete", "removed", removed, "remaining", peerCount-removed)
 }
 
-// getFilledSubnets returns which empty subnets a peer would fill (based on ENR)
-func (s *Sentinel) getFilledSubnets(node *enode.Node, emptySubnets []int) []int {
-	if len(emptySubnets) == 0 {
-		return nil
-	}
-
-	var peerSubnets bitfield.Bitvector64
-	if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &peerSubnets)); err != nil {
-		return nil
-	}
-
-	var filled []int
-	for _, subnetIdx := range emptySubnets {
-		if peerSubnets[subnetIdx/8]&(1<<(subnetIdx%8)) != 0 {
-			filled = append(filled, subnetIdx)
-		}
-	}
-	return filled
-}
-
-// isPeerUsefulForAnySubnet checks if a peer's ENR advertises any attestation subnets
-// that overlap with our currently subscribed subnets
-func (s *Sentinel) isPeerUsefulForAnySubnet(node *enode.Node) bool {
-	// Get our subscribed subnets from ENR
-	ourSubnets := s.p2p.GetSubscribedAttSubnets()
-
-	// Check if we have any subnets subscribed
-	hasAnySubscription := false
-	for _, b := range ourSubnets {
-		if b != 0 {
-			hasAnySubscription = true
-			break
-		}
-	}
-	// If we don't have any subnet subscriptions, all peers are equally useful
-	if !hasAnySubscription {
-		return false
-	}
-
-	// Get peer's attnets from their ENR
-	var peerSubnets bitfield.Bitvector64
-	if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &peerSubnets)); err != nil {
-		// Peer doesn't advertise attnets, not specifically useful for subnets
-		return false
-	}
-
-	// Check for overlap between our subnets and peer's subnets
-	for i := 0; i < len(ourSubnets) && i < len(peerSubnets); i++ {
-		if ourSubnets[i]&peerSubnets[i] != 0 {
-			return true
-		}
-	}
-	return false
-}
-
 // ConnectWithPeer is used to attempt to connect and add the peer to our pool
 // it errors when if fail to connect with the peer, for instance, if it fails the handshake
 // if it does not return an error, the peer is attempted to be added to the pool
@@ -553,12 +469,6 @@ func (s *Sentinel) listenForPeers() {
 
 	iterator := s.listener.RandomNodes()
 	defer iterator.Close()
-
-	// Track empty subnets, refresh every 6 seconds (half slot) to ensure quick coverage
-	var emptySubnets []int
-	lastEmptySubnetCheck := time.Time{}
-	const emptySubnetCheckInterval = 6 * time.Second // Check every half slot
-
 	for {
 		if err := s.ctx.Err(); err != nil {
 			log.Debug("Stopping Ethereum 2.0 peer discovery", "err", err)
@@ -571,34 +481,10 @@ func (s *Sentinel) listenForPeers() {
 		}
 		node := iterator.Node()
 
-		// Refresh empty subnets list every slot (12 seconds)
-		if time.Since(lastEmptySubnetCheck) > emptySubnetCheckInterval {
-			emptySubnets = s.getEmptySubnets()
-			lastEmptySubnetCheck = time.Now()
-			if len(emptySubnets) > 0 {
-				log.Info("[Sentinel] Subnets without peers", "count", len(emptySubnets), "subnets", emptySubnets)
-			}
-		}
-
-		// Check if peer is useful for any of our subscribed subnets
-		peerUsefulForSubnets := s.isPeerUsefulForAnySubnet(node)
-		// Check which empty subnets this peer can fill (based on ENR)
-		filledSubnets := s.getFilledSubnets(node, emptySubnets)
-		peerFillsEmptySubnet := len(filledSubnets) > 0
-
-		// If we have too many peers, only connect if peer is useful
 		if s.HasTooManyPeers() {
-			if !peerUsefulForSubnets && !peerFillsEmptySubnet {
-				log.Trace("[Sentinel] Not looking for peers, at peer limit")
-				time.Sleep(100 * time.Millisecond)
-				continue
-			}
-			// Peer is useful for subnets or fills an empty subnet, allow connection
-			if peerFillsEmptySubnet {
-				log.Debug("[Sentinel] Connecting to peer that fills empty subnet despite peer limit", "subnets", filledSubnets)
-			} else {
-				log.Debug("[Sentinel] Connecting to subnet-useful peer despite peer limit")
-			}
+			log.Trace("[Sentinel] Not looking for peers, at peer limit")
+			time.Sleep(100 * time.Millisecond)
+			continue
 		}
 
 		peerInfo, _, err := convertToAddrInfo(node)
