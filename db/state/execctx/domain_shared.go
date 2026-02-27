@@ -308,8 +308,6 @@ func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64
 
 func (sd *SharedDomains) StepSize() uint64 { return sd.stepSize }
 
-// SetTxNum sets txNum for all domains as well as common txNum for all domains
-// Requires for sd.rwTx because of commitment evaluation in shared domains if stepSize is reached
 func (sd *SharedDomains) SetTrace(b, capture bool) []string {
 	sd.trace = b
 	sd.commitmentCapture = capture

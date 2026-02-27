@@ -65,7 +65,6 @@ func TestDump(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-
 	type test struct {
 		chainConfig *chain.Config
 		chainSize   int

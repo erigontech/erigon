@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"sort"
 	"strings"
 
 	"github.com/holiman/uint256"
@@ -176,6 +177,39 @@ func (ac *AccountChanges) DecodeRLP(s *rlp.Stream) error {
 	}
 
 	return s.ListEnd()
+}
+
+func (ac *AccountChanges) Normalize() {
+	if len(ac.StorageChanges) > 1 {
+		sort.Slice(ac.StorageChanges, func(i, j int) bool {
+			return ac.StorageChanges[i].Slot.Cmp(ac.StorageChanges[j].Slot) < 0
+		})
+	}
+
+	for _, slotChange := range ac.StorageChanges {
+		if len(slotChange.Changes) > 1 {
+			sortByIndex(slotChange.Changes)
+			slotChange.Changes = dedupByIndex(slotChange.Changes)
+		}
+	}
+
+	if len(ac.StorageReads) > 1 {
+		sortHashes(ac.StorageReads)
+		ac.StorageReads = dedupByEquality(ac.StorageReads)
+	}
+
+	if len(ac.BalanceChanges) > 1 {
+		sortByIndex(ac.BalanceChanges)
+		ac.BalanceChanges = dedupByIndex(ac.BalanceChanges)
+	}
+	if len(ac.NonceChanges) > 1 {
+		sortByIndex(ac.NonceChanges)
+		ac.NonceChanges = dedupByIndex(ac.NonceChanges)
+	}
+	if len(ac.CodeChanges) > 1 {
+		sortByIndex(ac.CodeChanges)
+		ac.CodeChanges = dedupByIndex(ac.CodeChanges)
+	}
 }
 
 func (sc *SlotChanges) EncodingSize() int {
@@ -393,6 +427,53 @@ func (cc *CodeChange) DecodeRLP(s *rlp.Stream) error {
 	}
 	cc.Bytecode = data
 	return s.ListEnd()
+}
+
+func dedupByIndex[T interface{ GetIndex() uint16 }](changes []T) []T {
+	if len(changes) == 0 {
+		return changes
+	}
+	out := changes[:1]
+	for i := 1; i < len(changes); i++ {
+		if changes[i].GetIndex() == out[len(out)-1].GetIndex() {
+			out[len(out)-1] = changes[i]
+			continue
+		}
+		out = append(out, changes[i])
+	}
+	return out
+}
+
+func dedupByEquality[T comparable](items []T) []T {
+	if len(items) == 0 {
+		return items
+	}
+	out := items[:1]
+	for i := 1; i < len(items); i++ {
+		if items[i] == out[len(out)-1] {
+			continue
+		}
+		out = append(out, items[i])
+	}
+	return out
+}
+
+func sortByIndex[T interface{ GetIndex() uint16 }](changes []T) {
+	sort.Slice(changes, func(i, j int) bool {
+		return changes[i].GetIndex() < changes[j].GetIndex()
+	})
+}
+
+func sortByBytes[T interface{ GetBytes() []byte }](items []T) {
+	sort.Slice(items, func(i, j int) bool {
+		return bytes.Compare(items[i].GetBytes(), items[j].GetBytes()) < 0
+	})
+}
+
+func sortHashes(hashes []accounts.StorageKey) {
+	sort.Slice(hashes, func(i, j int) bool {
+		return hashes[i].Cmp(hashes[j]) < 0
+	})
 }
 
 func encodeBlockAccessList[T rlpEncodable](items []T, w io.Writer, buf []byte) error {
@@ -914,86 +995,90 @@ func validateSlotChangeList(slots []*SlotChanges) error {
 // DebugString renders the block access list into a human-readable multiline string.
 func (bal BlockAccessList) DebugString() string {
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "accounts=%d", len(bal))
+	bal.DebugPrint(&sb)
+	return sb.String()
+}
+
+func (bal BlockAccessList) DebugPrint(w io.Writer) {
+	fmt.Fprintf(w, "accounts=%d", len(bal))
 	for i, account := range bal {
 		if account == nil {
-			fmt.Fprintf(&sb, "\n[%d] <nil>", i)
+			fmt.Fprintf(w, "\n[%d] <nil>", i)
 			continue
 		}
-		fmt.Fprintf(&sb, "\n[%d] addr=%s", i, account.Address.Value().Hex())
+		fmt.Fprintf(w, "\n[%d] addr=%s", i, account.Address.Value().Hex())
 		if len(account.StorageChanges) > 0 {
-			sb.WriteString("\n  storageChanges:")
+			fmt.Fprint(w, "\n  storageChanges:")
 			for _, slotChange := range account.StorageChanges {
-				sb.WriteString("\n    - slot=")
-				sb.WriteString(slotChange.Slot.Value().Hex())
-				sb.WriteString(" changes=[")
+				fmt.Fprint(w, "\n    - slot=")
+				fmt.Fprint(w, slotChange.Slot.Value().Hex())
+				fmt.Fprint(w, " changes=[")
 				for j, change := range slotChange.Changes {
 					if j > 0 {
-						sb.WriteString(" ")
+						fmt.Fprint(w, " ")
 					}
 					if change == nil {
-						sb.WriteString("<nil>")
+						fmt.Fprint(w, "<nil>")
 						continue
 					}
-					fmt.Fprintf(&sb, "%d:%s", change.Index, change.Value.Hex())
+					fmt.Fprintf(w, "%d:%s", change.Index, change.Value.Hex())
 				}
-				sb.WriteString("]")
+				fmt.Fprint(w, "]")
 			}
 		}
 		if len(account.StorageReads) > 0 {
-			sb.WriteString("\n  storageReads=[")
+			fmt.Fprint(w, "\n  storageReads=[")
 			for j, read := range account.StorageReads {
 				if j > 0 {
-					sb.WriteString(" ")
+					fmt.Fprint(w, " ")
 				}
-				sb.WriteString(read.Value().Hex())
+				fmt.Fprint(w, read.Value().Hex())
 			}
-			sb.WriteString("]")
+			fmt.Fprint(w, "]")
 		}
 		if len(account.BalanceChanges) > 0 {
-			sb.WriteString("\n  balanceChanges=[")
+			fmt.Fprint(w, "\n  balanceChanges=[")
 			for j, change := range account.BalanceChanges {
 				if j > 0 {
-					sb.WriteString(" ")
+					fmt.Fprint(w, " ")
 				}
 				if change == nil {
-					sb.WriteString("<nil>")
+					fmt.Fprint(w, "<nil>")
 					continue
 				}
-				fmt.Fprintf(&sb, "%d:%s", change.Index, change.Value.Hex())
+				fmt.Fprintf(w, "%d:%s", change.Index, change.Value.Hex())
 			}
-			sb.WriteString("]")
+			fmt.Fprint(w, "]")
 		}
 		if len(account.NonceChanges) > 0 {
-			sb.WriteString("\n  nonceChanges=[")
+			fmt.Fprint(w, "\n  nonceChanges=[")
 			for j, change := range account.NonceChanges {
 				if j > 0 {
-					sb.WriteString(" ")
+					fmt.Fprint(w, " ")
 				}
 				if change == nil {
-					sb.WriteString("<nil>")
+					fmt.Fprint(w, "<nil>")
 					continue
 				}
-				fmt.Fprintf(&sb, "%d:%d", change.Index, change.Value)
+				fmt.Fprintf(w, "%d:%d", change.Index, change.Value)
 			}
-			sb.WriteString("]")
+			fmt.Fprint(w, "]")
 		}
 		if len(account.CodeChanges) > 0 {
-			sb.WriteString("\n  codeChanges=[")
+			fmt.Fprint(w, "\n  codeChanges=[")
 			for j, change := range account.CodeChanges {
 				if j > 0 {
-					sb.WriteString(" ")
+					fmt.Fprint(w, " ")
 				}
 				if change == nil {
-					sb.WriteString("<nil>")
+					fmt.Fprint(w, "<nil>")
 					continue
 				}
-				fmt.Fprintf(&sb, "%d:len(%d)", change.Index, len(change.Bytecode))
+				fmt.Fprintf(w, "%d:len(%d)", change.Index, len(change.Bytecode))
 			}
-			sb.WriteString("]")
+			fmt.Fprint(w, "]")
 		}
 	}
-	return sb.String()
 }
 
 func ConvertBlockAccessListFromTypesProto(protoList []*typesproto.BlockAccessListAccount) hexutil.Bytes {
