@@ -213,10 +213,10 @@ func (ii *InvertedIndex) DebugBeginDirtyFilesRo() *iiDirtyFilesRoTx {
 	}
 }
 
-func (f *iiDirtyFilesRoTx) filesWithMissedAccessors(names []string, snapDir string) (mf *MissedAccessorIIFiles) {
+func (f *iiDirtyFilesRoTx) filesWithMissedAccessors(dl dirListing) (mf *MissedAccessorIIFiles) {
 	return &MissedAccessorIIFiles{
 		files: map[statecfg.Accessors][]*FilesItem{
-			statecfg.AccessorHashMap: f.ii.missedMapAccessors(f.files, names, snapDir),
+			statecfg.AccessorHashMap: f.ii.missedMapAccessors(f.files, dl),
 		},
 	}
 }
