@@ -1,5 +1,5 @@
 name: Restore Go build cache
-description: Restore Go build cache keyed by workflow, job, and branch
+description: Restore Go build cache keyed by workflow, job, and run
 
 inputs:
   gocache:
@@ -20,49 +20,21 @@ outputs:
   cache-matched-key:
     description: "The cache key that was restored (empty if miss)"
     value: ${{ steps.restore.outputs.cache-matched-key }}
+  cache-key:
+    description: "The primary cache key (for use by save-build-cache)"
+    value: gocache|${{ inputs.workflow }}|${{ github.job }}|${{ inputs.extra-key }}|${{ inputs.goversion }}|${{ runner.os }}|${{ runner.arch }}|${{ github.run_id }}|${{ github.run_attempt }}
 
 runs:
   using: composite
   steps:
-    - name: Compute restore keys
-      id: keys
-      shell: bash
-      env:
-        PREFIX: gocache|${{ inputs.workflow }}|${{ github.job }}|${{ inputs.goversion }}|${{ runner.os }}|${{ runner.arch }}|${{ inputs.extra-key }}
-        BRANCH: ${{ github.head_ref || github.ref_name }}
-        SHA: ${{ github.sha }}
-        BASE_REF: ${{ github.base_ref }}
-      run: |
-        PARENT=$(git rev-parse HEAD~1 2>/dev/null || true)
-        keys=""
-        # Tier 1: current commit, previous run
-        keys+="${PREFIX}|${BRANCH}|${SHA}|"$'\n'
-        # Tier 2: parent commit on this branch
-        if [[ -n "$PARENT" ]]; then
-          keys+="${PREFIX}|${BRANCH}|${PARENT}|"$'\n'
-        fi
-        # Tier 3: any commit on this branch
-        keys+="${PREFIX}|${BRANCH}|"$'\n'
-        # Tier 4: parent commit on base branch (PRs only)
-        if [[ -n "$BASE_REF" && -n "$PARENT" ]]; then
-          keys+="${PREFIX}|${BASE_REF}|${PARENT}|"$'\n'
-        fi
-        # Tier 5: any commit on base branch (PRs only)
-        if [[ -n "$BASE_REF" ]]; then
-          keys+="${PREFIX}|${BASE_REF}|"$'\n'
-        fi
-        {
-          echo 'restore-keys<<RESTORE_KEYS_EOF'
-          printf '%s' "$keys"
-          echo 'RESTORE_KEYS_EOF'
-        } >> "$GITHUB_OUTPUT"
-
     - id: restore
       uses: actions/cache/restore@v4
       with:
         path: ${{ inputs.gocache }}
-        key: gocache|${{ inputs.workflow }}|${{ github.job }}|${{ inputs.goversion }}|${{ runner.os }}|${{ runner.arch }}|${{ inputs.extra-key }}|${{ github.head_ref || github.ref_name }}|${{ github.sha }}|${{ github.run_attempt }}
-        restore-keys: ${{ steps.keys.outputs.restore-keys }}
+        key: gocache|${{ inputs.workflow }}|${{ github.job }}|${{ inputs.extra-key }}|${{ inputs.goversion }}|${{ runner.os }}|${{ runner.arch }}|${{ github.run_id }}|${{ github.run_attempt }}
+        restore-keys: |
+          gocache|${{ inputs.workflow }}|${{ github.job }}|${{ inputs.extra-key }}|${{ inputs.goversion }}|${{ runner.os }}|${{ runner.arch }}|${{ github.run_id }}|
+          gocache|${{ inputs.workflow }}|${{ github.job }}|${{ inputs.extra-key }}|${{ inputs.goversion }}|${{ runner.os }}|${{ runner.arch }}|
 
     - name: Warn on build cache miss
       if: ${{ steps.restore.outputs.cache-matched-key == '' }}

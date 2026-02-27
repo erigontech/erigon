@@ -1,22 +1,12 @@
 name: Save Go build cache
-description: Save Go build cache keyed by workflow, job, and branch
+description: Save Go build cache using the provided key
 
 inputs:
   gocache:
     description: "GOCACHE path"
     required: true
-  goversion:
-    description: "Full Go version string (e.g. go1.25.7)"
-    required: true
-  workflow:
-    description: "Workflow name for cache key namespacing"
-    required: true
-  extra-key:
-    description: "Extra segment appended after runner.arch in the cache key (e.g. matrix value)"
-    required: false
-    default: ''
-  restored-key:
-    description: "The cache key that was restored (used to skip redundant saves on re-runs)"
+  key:
+    description: "Cache key to save under (from restore-build-cache outputs.cache-key)"
     required: true
 
 runs:
@@ -32,36 +22,8 @@ runs:
       shell: bash
       run: go clean -fuzzcache
 
-    - name: Normalize non-deterministic cache metadata
-      if: ${{ always() }}
-      shell: bash
-      run: |
-        # trim.txt format is Unix epoch seconds as a plain integer
-        printf '%d' "$(date +%s)" > "${{ inputs.gocache }}/trim.txt"
-        rm -f "${{ inputs.gocache }}/testexpire.txt"
-
-    - name: Compute base key and check for skip
-      id: check
-      if: ${{ always() }}
-      shell: bash
-      env:
-        BASE_KEY: gocache|${{ inputs.workflow }}|${{ github.job }}|${{ inputs.goversion }}|${{ runner.os }}|${{ runner.arch }}|${{ inputs.extra-key }}|${{ github.head_ref || github.ref_name }}|${{ github.sha }}|
-        RESTORED_KEY: ${{ inputs.restored-key }}
-      run: |
-        if [[ -n "$RESTORED_KEY" && "$RESTORED_KEY" == "$BASE_KEY"* ]]; then
-          echo "skip=true" >> "$GITHUB_OUTPUT"
-          echo "Skipping save: restored from same commit (restored key starts with base key)"
-        else
-          echo "skip=false" >> "$GITHUB_OUTPUT"
-        fi
-
     - uses: actions/cache/save@v4
-      if: ${{ always() && steps.check.outputs.skip != 'true' }}
+      if: ${{ always() }}
       with:
         path: ${{ inputs.gocache }}
-        key: gocache|${{ inputs.workflow }}|${{ github.job }}|${{ inputs.goversion }}|${{ runner.os }}|${{ runner.arch }}|${{ inputs.extra-key }}|${{ github.head_ref || github.ref_name }}|${{ github.sha }}|${{ github.run_attempt }}
-
-    - name: Notice on build cache save
-      if: ${{ always() && steps.check.outputs.skip != 'true' }}
-      shell: bash
-      run: echo "::notice::Go build cache saved — new key gocache|${{ inputs.workflow }}|${{ github.job }}|${{ inputs.goversion }}|${{ runner.os }}|${{ runner.arch }}|${{ inputs.extra-key }}|${{ github.head_ref || github.ref_name }}|${{ github.sha }}|${{ github.run_attempt }}"
+        key: ${{ inputs.key }}
