@@ -35,8 +35,11 @@ import (
 * to analyze and manipulate the state of the blockchain.
  */
 type ForkGraph interface {
-	AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool) (*state.CachingBeaconState, ChainSegmentInsertionResult, error)
+	// AddChainSegment processes a new block and returns the post-state.
+	// parentFullState: if non-nil, use this as the starting state (for GLOAS when parent is FULL).
+	AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool, parentFullState *state.CachingBeaconState) (*state.CachingBeaconState, ChainSegmentInsertionResult, error)
 	GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHeader, bool)
+	GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool)
 	GetState(blockRoot common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error)
 	GetCurrentJustifiedCheckpoint(blockRoot common.Hash) (solid.Checkpoint, bool)
 	GetFinalizedCheckpoint(blockRoot common.Hash) (solid.Checkpoint, bool)
@@ -55,4 +58,10 @@ type ForkGraph interface {
 	GetCurrentParticipationIndicies(epoch uint64) (*solid.ParticipationBitList, error)
 	GetPreviousParticipationIndicies(epoch uint64) (*solid.ParticipationBitList, error)
 	DumpBeaconStateOnDisk(blockRoot common.Hash, state *state.CachingBeaconState, forced bool) error
+	// [New in Gloas:EIP7732] Execution payload envelope persistence and state reconstruction
+	DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) error
+	ReadEnvelopeFromDisk(blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error)
+	HasEnvelope(blockRoot common.Hash) bool
+	// GetExecutionPayloadState reconstructs the post-execution-payload state by replaying the envelope.
+	GetExecutionPayloadState(blockRoot common.Hash) (*state.CachingBeaconState, error)
 }

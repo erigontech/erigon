@@ -34,7 +34,8 @@ type ForkChoiceStorage interface {
 }
 
 type ForkChoiceStorageReader interface {
-	Ancestor(root common.Hash, slot uint64) common.Hash
+	// [Modified in Gloas:EIP7732] Returns ForkChoiceNode with payload status.
+	Ancestor(root common.Hash, slot uint64) ForkChoiceNode
 	AnchorSlot() uint64
 	Engine() execution_client.ExecutionEngine
 	FinalizedCheckpoint() solid.Checkpoint
@@ -67,6 +68,12 @@ type ForkChoiceStorageReader interface {
 	NewestLightClientUpdate() *cltypes.LightClientUpdate
 	GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool)
 	GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHeader, bool)
+	// [New in Gloas:EIP7732] GetBlock returns the full block for a given block root.
+	GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool)
+	// [New in Gloas:EIP7732] HasEnvelope checks if a signed execution payload envelope exists.
+	HasEnvelope(blockRoot common.Hash) bool
+	// [New in Gloas:EIP7732] ReadEnvelopeFromDisk reads a signed execution payload envelope from disk.
+	ReadEnvelopeFromDisk(blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error)
 
 	GetBalances(blockRoot common.Hash) (solid.Uint64ListSSZ, error)
 	GetInactivitiesScores(blockRoot common.Hash) (solid.Uint64ListSSZ, error)
@@ -84,6 +91,10 @@ type ForkChoiceStorageReader interface {
 	IsRootOptimistic(root common.Hash) bool
 	IsHeadOptimistic() bool
 	GetPeerDas() das.PeerDas
+	// [New in Gloas:EIP7732] GetRecentExecutionPayloadStatus returns the validation status of a recently
+	// validated execution payload by its execution block hash. Used for parent payload validation in gossip.
+	// Note: This is an LRU cache lookup; older payloads may not be found.
+	GetRecentExecutionPayloadStatus(executionBlockHash common.Hash) (execution_client.PayloadStatus, bool)
 }
 
 type ForkChoiceStorageWriter interface {
@@ -96,6 +107,13 @@ type ForkChoiceStorageWriter interface {
 		fullValidation bool,
 		checkDataAvaibility bool,
 	) error
+	// [New in Gloas:EIP7732] OnExecutionPayload processes an execution payload envelope from the builder.
+	// checkBlobData: verify blob data availability via PeerDAS
+	// validatePayload: call engine.NewPayload() to validate with EL
+	OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error
+	// [New in Gloas:EIP7732] OnPayloadAttestationMessage processes a PTC attestation message from gossip.
+	// Returns error if validation fails (REJECT), nil if accepted or ignored.
+	OnPayloadAttestationMessage(msg *cltypes.PayloadAttestationMessage, isFromBlock bool) error
 	AddPreverifiedBlobSidecar(blobSidecar *cltypes.BlobSidecar) error
 	OnTick(time uint64)
 	SetSynced(synced bool)

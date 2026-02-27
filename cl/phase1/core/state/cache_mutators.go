@@ -22,6 +22,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 )
 
@@ -160,4 +161,25 @@ func (b *CachingBeaconState) ComputeExitEpochAndUpdateChurn(exitBalance uint64) 
 	b.SetExitBalanceToConsume(exitBalanceToConsume - exitBalance)
 	b.SetEarliestExitEpoch(earliestExitEpoch)
 	return earliestExitEpoch
+}
+
+// InitiateBuilderExit initiates the exit of a builder by setting its withdrawable epoch.
+// If the builder has already initiated exit (withdrawable_epoch != FAR_FUTURE_EPOCH), this is a no-op.
+func (b *CachingBeaconState) InitiateBuilderExit(builderIndex uint64) {
+	builders := b.GetBuilders()
+	if builders == nil {
+		log.Warn("builders is nil")
+		return
+	}
+	builder := builders.Get(int(builderIndex))
+	if builder == nil {
+		log.Warn("builder is nil", "builderIndex", builderIndex)
+		return
+	}
+	if builder.WithdrawableEpoch != b.BeaconConfig().FarFutureEpoch {
+		return
+	}
+	builder.WithdrawableEpoch = Epoch(b) + b.BeaconConfig().MinBuilderWithdrawabilityDelay
+	builders.Set(int(builderIndex), builder)
+	b.SetBuilders(builders)
 }

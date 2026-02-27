@@ -610,12 +610,16 @@ func (a *ApiHandler) produceBeaconBody(
 		retryTime := 10 * time.Millisecond
 		secsDiff := (targetSlot - baseBlock.Slot) * a.beaconChainCfg.SecondsPerSlot
 		feeRecipient, _ := a.validatorParams.GetFeeRecipient(proposerIndex)
-		clWithdrawals, _ := state.ExpectedWithdrawals(
+		clWithdrawals, err := state.GetExpectedWithdrawals(
 			baseState,
 			targetSlot/a.beaconChainCfg.SlotsPerEpoch,
 		)
-		withdrawals := make([]*types.Withdrawal, 0, len(clWithdrawals))
-		for _, w := range clWithdrawals {
+		if err != nil {
+			log.Error("BlockProduction: GetExpectedWithdrawals failed", "err", err)
+			return
+		}
+		withdrawals := make([]*types.Withdrawal, 0, len(clWithdrawals.Withdrawals))
+		for _, w := range clWithdrawals.Withdrawals {
 			withdrawals = append(withdrawals, &types.Withdrawal{
 				Index:     w.Index,
 				Amount:    w.Amount,
@@ -1225,47 +1229,71 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		}
 	}
 
-	if blk.Version() >= clparams.FuluVersion && blk.Block.Body.BlobKzgCommitments.Len() > 0 {
-		kzgCommitmentsCopy := solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, length.Bytes48)
-		for i := 0; i < blk.Block.Body.BlobKzgCommitments.Len(); i++ {
-			kzgCommitmentsCopy.Append(blk.Block.Body.BlobKzgCommitments.Get(i))
+	// Handle Fulu+ data column sidecars
+	if blk.Version() >= clparams.FuluVersion {
+		// Get kzgCommitments based on version
+		var kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]
+		isGloas := blk.Version() >= clparams.GloasVersion
+
+		if isGloas {
+			// [New in Gloas:EIP7732] Get from signed_execution_payload_bid
+			if bid := blk.Block.Body.GetSignedExecutionPayloadBid(); bid != nil && bid.Message != nil {
+				kzgCommitments = &bid.Message.BlobKzgCommitments
+			}
+		} else {
+			// Fulu: Get from BlobKzgCommitments
+			kzgCommitments = blk.Block.Body.BlobKzgCommitments
 		}
 
-		// Assemble inclusion proof
-		inclusionProofRaw, err := blk.Block.Body.KzgCommitmentsInclusionProof()
-		if err != nil {
-			return err
-		}
-		commitmentInclusionProof := solid.NewHashVector(cltypes.CommitmentBranchSize)
-		for i, h := range inclusionProofRaw {
-			commitmentInclusionProof.Set(i, h)
-		}
+		if kzgCommitments != nil && kzgCommitments.Len() > 0 {
+			// Build cellsAndProofsPerBlob (common logic)
+			cellsAndProofsPerBlob := make([]peerdasutils.CellsAndKZGProofs, 0, kzgCommitments.Len())
+			for i := 0; i < kzgCommitments.Len(); i++ {
+				commitment := kzgCommitments.Get(i)
+				bundle, has := a.blobBundles.Get(common.Bytes48(*commitment))
+				if !has {
+					return fmt.Errorf("missing blob bundle for commitment %x", commitment)
+				}
+				cells, err := das.ComputeCells(bundle.Blob)
+				if err != nil {
+					return err
+				}
 
-		cellsAndProofsPerBlob := make([]peerdasutils.CellsAndKZGProofs, 0, kzgCommitmentsCopy.Len())
-		for i := 0; i < kzgCommitmentsCopy.Len(); i++ {
-			commitment := kzgCommitmentsCopy.Get(i)
-			bundle, has := a.blobBundles.Get(common.Bytes48(*commitment))
-			if !has {
-				return fmt.Errorf("missing blob bundle for commitment %x", commitment)
-			}
-			cells, err := das.ComputeCells(bundle.Blob)
-			if err != nil {
-				return err
-			}
-
-			cellsAndProof := peerdasutils.CellsAndKZGProofs{}
-			for i := 0; i < len(cells); i++ {
-				cellsAndProof.Blobs = append(cellsAndProof.Blobs, cells[i])
+				cellsAndProof := peerdasutils.CellsAndKZGProofs{}
+				for i := 0; i < len(cells); i++ {
+					cellsAndProof.Blobs = append(cellsAndProof.Blobs, cells[i])
+				}
+				for j := 0; j < len(bundle.KzgProofs); j++ {
+					cellsAndProof.Proofs = append(cellsAndProof.Proofs, cltypes.KZGProof(bundle.KzgProofs[j]))
+				}
+				cellsAndProofsPerBlob = append(cellsAndProofsPerBlob, cellsAndProof)
 			}
 
-			for j := 0; j < len(bundle.KzgProofs); j++ {
-				cellsAndProof.Proofs = append(cellsAndProof.Proofs, cltypes.KZGProof(bundle.KzgProofs[j]))
+			// Create sidecars based on version
+			if isGloas {
+				blockRoot, err := blk.Block.HashSSZ()
+				if err != nil {
+					return fmt.Errorf("failed to compute block root: %w", err)
+				}
+				columnsSidecars, err = peerdasutils.GetDataColumnSidecarsGloas(blk.Block.Slot, blockRoot, cellsAndProofsPerBlob)
+				if err != nil {
+					return fmt.Errorf("failed to get data column sidecars: %w", err)
+				}
+			} else {
+				// Fulu needs inclusion proof
+				inclusionProofRaw, err := blk.Block.Body.KzgCommitmentsInclusionProof()
+				if err != nil {
+					return err
+				}
+				commitmentInclusionProof := solid.NewHashVector(cltypes.CommitmentBranchSize)
+				for i, h := range inclusionProofRaw {
+					commitmentInclusionProof.Set(i, h)
+				}
+				columnsSidecars, err = peerdasutils.GetDataColumnSidecars(header, kzgCommitments, commitmentInclusionProof, cellsAndProofsPerBlob)
+				if err != nil {
+					return fmt.Errorf("failed to get data column sidecars: %w", err)
+				}
 			}
-			cellsAndProofsPerBlob = append(cellsAndProofsPerBlob, cellsAndProof)
-		}
-		columnsSidecars, err = peerdasutils.GetDataColumnSidecars(header, kzgCommitmentsCopy, commitmentInclusionProof, cellsAndProofsPerBlob)
-		if err != nil {
-			return fmt.Errorf("failed to get data column sidecars: %w", err)
 		}
 	}
 

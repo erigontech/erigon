@@ -48,9 +48,12 @@ type BlockHeaderProcessor interface {
 	ProcessBlockHeader(s abstract.BeaconState, slot, proposerIndex uint64, parentRoot common.Hash, bodyRoot [32]byte) error
 	ProcessWithdrawals(s abstract.BeaconState, withdrawals *solid.ListSSZ[*cltypes.Withdrawal]) error
 	ProcessExecutionPayload(s abstract.BeaconState, body cltypes.GenericBeaconBody) error
+	ProcessExecutionPayloadBid(s abstract.BeaconState, block cltypes.GenericBeaconBlock) error
 	ProcessRandao(s abstract.BeaconState, randao [96]byte, proposerIndex uint64) error
 	ProcessEth1Data(state abstract.BeaconState, eth1Data *cltypes.Eth1Data) error
 	ProcessSyncAggregate(s abstract.BeaconState, sync *cltypes.SyncAggregate) error
+	// [New in Gloas:EIP7732] ProcessExecutionPayloadEnvelope processes the execution payload envelope, which includes the payload header and the randao reveal
+	ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error
 }
 
 type BlockOperationProcessor interface {
@@ -63,5 +66,6 @@ type BlockOperationProcessor interface {
 	ProcessDepositRequest(s abstract.BeaconState, depositRequest *solid.DepositRequest) error
 	ProcessWithdrawalRequest(s abstract.BeaconState, withdrawalRequest *solid.WithdrawalRequest) error
 	ProcessConsolidationRequest(s abstract.BeaconState, consolidationRequest *solid.ConsolidationRequest) error
+	ProcessPayloadAttestation(s abstract.BeaconState, payloadAttestation *cltypes.PayloadAttestation) error
 	FullValidate() bool
 }

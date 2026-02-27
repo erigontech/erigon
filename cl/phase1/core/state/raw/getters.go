@@ -383,3 +383,80 @@ func (b *BeaconState) DebugPrint(prefix string) {
 func (b *BeaconState) GetPendingPartialWithdrawals() *solid.ListSSZ[*solid.PendingPartialWithdrawal] {
 	return b.pendingPartialWithdrawals
 }
+
+func (b *BeaconState) EarliestExitEpoch() uint64 {
+	return b.earliestExitEpoch
+}
+
+func (b *BeaconState) ExitBalanceToConsume() uint64 {
+	return b.exitBalanceToConsume
+}
+
+func (b *BeaconState) GetDepositBalanceToConsume() uint64 {
+	return b.depositBalanceToConsume
+}
+
+func (b *BeaconState) GetPendingDeposits() *solid.ListSSZ[*solid.PendingDeposit] {
+	return b.pendingDeposits
+}
+
+func (b *BeaconState) GetDepositRequestsStartIndex() uint64 {
+	return b.depositRequestsStartIndex
+}
+
+func (b *BeaconState) GetPendingConsolidations() *solid.ListSSZ[*solid.PendingConsolidation] {
+	return b.pendingConsolidations
+}
+
+func (b *BeaconState) GetEarlistConsolidationEpoch() uint64 {
+	return b.earliestConsolidationEpoch
+}
+
+func (b *BeaconState) GetEarlistExitEpoch() uint64 {
+	return b.earliestExitEpoch
+}
+
+func (b *BeaconState) GetExitBalanceToConsume() uint64 {
+	return b.exitBalanceToConsume
+}
+
+func (b *BeaconState) GetConsolidationBalanceToConsume() uint64 {
+	return b.consolidationBalanceToConsume
+}
+
+func (b *BeaconState) GetProposerLookahead() solid.Uint64VectorSSZ {
+	return b.proposerLookahead
+}
+
+// Gloas
+func (b *BeaconState) GetLatestExecutionPayloadBid() *cltypes.ExecutionPayloadBid {
+	return b.latestExecutionPayloadBid
+}
+
+func (b *BeaconState) GetBuilders() *solid.ListSSZ[*cltypes.Builder] {
+	return b.builders
+}
+
+func (b *BeaconState) GetNextWithdrawalBuilderIndex() uint64 {
+	return b.nextWithdrawalBuilderIndex
+}
+
+func (b *BeaconState) GetExecutionPayloadAvailability() *solid.BitVector {
+	return b.executionPayloadAvailability
+}
+
+func (b *BeaconState) GetBuilderPendingPayments() *solid.VectorSSZ[*cltypes.BuilderPendingPayment] {
+	return b.builderPendingPayments
+}
+
+func (b *BeaconState) GetBuilderPendingWithdrawals() *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal] {
+	return b.builderPendingWithdrawals
+}
+
+func (b *BeaconState) GetLatestBlockHash() common.Hash {
+	return b.latestBlockHash
+}
+
+func (b *BeaconState) GetPayloadExpectedWithdrawals() *solid.ListSSZ[*cltypes.Withdrawal] {
+	return b.payloadExpectedWithdrawals
+}

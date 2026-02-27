@@ -192,3 +192,22 @@ func GetValidatorsCustodyRequirement(s abstract.BeaconState, validatorIndices []
 		s.BeaconConfig().NumberOfCustodyGroups,
 	)
 }
+
+// IsAttestationSameSlot checks if the attestation is for the block proposed at the attestation slot.
+func IsAttestationSameSlot(s abstract.BeaconState, data *solid.AttestationData) (bool, error) {
+	if data.Slot == 0 {
+		return true, nil
+	}
+
+	blockRoot := data.BeaconBlockRoot
+	slotBlockRoot, err := s.GetBlockRootAtSlot(data.Slot)
+	if err != nil {
+		return false, err
+	}
+	prevBlockRoot, err := s.GetBlockRootAtSlot(data.Slot - 1)
+	if err != nil {
+		return false, err
+	}
+
+	return blockRoot == slotBlockRoot && blockRoot != prevBlockRoot, nil
+}

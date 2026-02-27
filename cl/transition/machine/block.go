@@ -39,15 +39,13 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 		version = s.Version()
 		body    = block.GetBody()
 	)
-	payloadHeader, err := body.GetPayloadHeader()
-	if err != nil {
-		return fmt.Errorf("processBlock: failed to extract execution payload header: %w", err)
-	}
 
 	// Check the state version is correct.
 	if block.Version() != version {
 		return fmt.Errorf("processBlock: wrong state version for block at slot %d. state version %v. block version %v", block.GetSlot(), version, block.Version())
 	}
+
+	// 1. process_block_header
 	bodyRoot, err := body.HashSSZ()
 	if err != nil {
 		return fmt.Errorf("processBlock: failed to hash block body: %w", err)
@@ -55,42 +53,59 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 	if err := impl.ProcessBlockHeader(s, block.GetSlot(), block.GetProposerIndex(), block.GetParentRoot(), bodyRoot); err != nil {
 		return fmt.Errorf("processBlock: failed to process block header: %v", err)
 	}
-	// Process execution payload if enabled.
-	if version >= clparams.BellatrixVersion && executionEnabled(s, payloadHeader.BlockHash) {
-		if s.Version() >= clparams.CapellaVersion {
-			// Process withdrawals in the execution payload.
-			expect, _ := state.ExpectedWithdrawals(s, state.Epoch(s))
-			expectWithdrawals := solid.NewStaticListSSZ[*cltypes.Withdrawal](int(s.BeaconConfig().MaxWithdrawalsPerPayload), 44)
-			for i := range expect {
-				expectWithdrawals.Append(expect[i])
-			}
-			if err := impl.ProcessWithdrawals(s, expectWithdrawals); err != nil {
-				return fmt.Errorf("processBlock: failed to process withdrawals: %v", err)
-			}
+
+	if version >= clparams.GloasVersion {
+		// 2. [Modified in Gloas:EIP7732] process_withdrawals(state)
+		if err := impl.ProcessWithdrawals(s, nil); err != nil {
+			return fmt.Errorf("processBlock: failed to process withdrawals: %v", err)
 		}
-		if err := impl.ProcessExecutionPayload(s, body); err != nil {
-			return fmt.Errorf("processBlock: failed to process execution payload: %v", err)
+		// 3. [New in Gloas:EIP7732] process_execution_payload_bid(state, block)
+		if err := impl.ProcessExecutionPayloadBid(s, block); err != nil {
+			return fmt.Errorf("processBlock: failed to process execution payload bid: %v", err)
+		}
+	} else if version >= clparams.BellatrixVersion {
+		// Pre-Gloas: process execution payload if enabled
+		payloadHeader, err := body.GetPayloadHeader()
+		if err != nil {
+			return fmt.Errorf("processBlock: failed to extract execution payload header: %w", err)
+		}
+		if executionEnabled(s, payloadHeader.BlockHash) {
+			if version >= clparams.CapellaVersion {
+				expect, err := state.GetExpectedWithdrawals(s, state.Epoch(s))
+				if err != nil {
+					return fmt.Errorf("processBlock: failed to get expected withdrawals: %v", err)
+				}
+				expectWithdrawals := solid.NewStaticListSSZ[*cltypes.Withdrawal](int(s.BeaconConfig().MaxWithdrawalsPerPayload), 44)
+				for i := range expect.Withdrawals {
+					expectWithdrawals.Append(expect.Withdrawals[i])
+				}
+				if err := impl.ProcessWithdrawals(s, expectWithdrawals); err != nil {
+					return fmt.Errorf("processBlock: failed to process withdrawals: %v", err)
+				}
+			}
+			if err := impl.ProcessExecutionPayload(s, body); err != nil {
+				return fmt.Errorf("processBlock: failed to process execution payload: %v", err)
+			}
 		}
 	}
-	var signatures, messages, publicKeys [][]byte
 
-	// Process each proposer slashing
+	// 4. process_randao
+	var signatures, messages, publicKeys [][]byte
 	sigs, msgs, pubKeys, err := processRandao(impl, s, body, block)
 	if err != nil {
 		return err
 	}
 	signatures, messages, publicKeys = append(signatures, sigs...), append(messages, msgs...), append(publicKeys, pubKeys...)
 
-	// Process Eth1 data.
+	// 5. process_eth1_data
 	if err := impl.ProcessEth1Data(s, body.GetEth1Data()); err != nil {
 		return fmt.Errorf("processBlock: failed to process Eth1 data: %v", err)
 	}
 
-	// Process block body operations.
+	// 6. process_operations
 	sigs, msgs, pubKeys, err = ProcessOperations(impl, s, body)
 	if err != nil {
 		return fmt.Errorf("processBlock: failed to process block body operations: %v", err)
-
 	}
 	signatures, messages, publicKeys = append(signatures, sigs...), append(messages, msgs...), append(publicKeys, pubKeys...)
 
@@ -105,7 +120,7 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 		}
 	}
 
-	// Process sync aggregate in case of Altair version.
+	// 7. process_sync_aggregate
 	if version >= clparams.AltairVersion {
 		if err := impl.ProcessSyncAggregate(s, body.GetSyncAggregate()); err != nil {
 			return fmt.Errorf("processBlock: failed to process sync aggregate: %v", err)
@@ -175,7 +190,7 @@ func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blo
 	}
 	signatures, messages, publicKeys = append(signatures, sigs...), append(messages, msgs...), append(publicKeys, pubKeys...)
 
-	if s.Version() >= clparams.ElectraVersion {
+	if clparams.ElectraVersion <= s.Version() && s.Version() < clparams.GloasVersion {
 		if err := forEachProcess(s, blockBody.GetExecutionRequests().Deposits, impl.ProcessDepositRequest); err != nil {
 			return nil, nil, nil, fmt.Errorf("ProcessDepositRequest: %s", err)
 		}
@@ -184,6 +199,13 @@ func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blo
 		}
 		if err := forEachProcess(s, blockBody.GetExecutionRequests().Consolidations, impl.ProcessConsolidationRequest); err != nil {
 			return nil, nil, nil, fmt.Errorf("ProcessConsolidationRequest: %s", err)
+		}
+	}
+
+	// [New in Gloas:EIP7732] Process payload attestations
+	if s.Version() >= clparams.GloasVersion {
+		if err := forEachProcess(s, blockBody.GetPayloadAttestations(), impl.ProcessPayloadAttestation); err != nil {
+			return nil, nil, nil, fmt.Errorf("ProcessPayloadAttestation: %s", err)
 		}
 	}
 
@@ -261,20 +283,18 @@ func processProposerSlashings(impl BlockOperationProcessor, s abstract.BeaconSta
 }
 
 func processVoluntaryExits(impl BlockOperationProcessor, s abstract.BeaconState, blockBody cltypes.GenericBeaconBody) (sigs [][]byte, msgs [][]byte, pubKeys [][]byte, err error) {
+	// TODO: Refactor the batch signature verification
 	// Process each voluntary exit.
 	err = solid.RangeErr[*cltypes.SignedVoluntaryExit](blockBody.GetVoluntaryExits(), func(index int, exit *cltypes.SignedVoluntaryExit, length int) error {
 		voluntaryExit := exit.VoluntaryExit
-		validator, err := s.ValidatorForValidatorIndex(int(voluntaryExit.ValidatorIndex))
-		if err != nil {
-			return err
-		}
 
 		// We can skip it in some instances if we want to optimistically sync up.
 		if impl.FullValidate() {
+			// Domain is always computed with CAPELLA_FORK_VERSION for >= Deneb
 			var domain []byte
 			if s.Version() < clparams.DenebVersion {
 				domain, err = s.GetDomain(s.BeaconConfig().DomainVoluntaryExit, voluntaryExit.Epoch)
-			} else if s.Version() >= clparams.DenebVersion {
+			} else {
 				domain, err = fork.ComputeDomain(s.BeaconConfig().DomainVoluntaryExit[:], utils.Uint32ToBytes4(uint32(s.BeaconConfig().CapellaForkVersion)), s.GenesisValidatorsRoot())
 			}
 			if err != nil {
@@ -284,7 +304,23 @@ func processVoluntaryExits(impl BlockOperationProcessor, s abstract.BeaconState,
 			if err != nil {
 				return err
 			}
-			pk := validator.PublicKey()
+
+			// [New in Gloas:EIP7732] Get pubkey from builders for builder indices
+			var pk [48]byte
+			if s.Version() >= clparams.GloasVersion && state.IsBuilderIndex(voluntaryExit.ValidatorIndex) {
+				builderIndex := state.ConvertValidatorIndexToBuilderIndex(voluntaryExit.ValidatorIndex)
+				builders := s.GetBuilders()
+				if builders == nil || int(builderIndex) >= builders.Len() {
+					return fmt.Errorf("ProcessVoluntaryExit: invalid builder index %d", builderIndex)
+				}
+				pk = builders.Get(int(builderIndex)).Pubkey
+			} else {
+				validator, err := s.ValidatorForValidatorIndex(int(voluntaryExit.ValidatorIndex))
+				if err != nil {
+					return err
+				}
+				pk = validator.PublicKey()
+			}
 			sigs, msgs, pubKeys = append(sigs, exit.Signature[:]), append(msgs, signingRoot[:]), append(pubKeys, pk[:])
 		}
 

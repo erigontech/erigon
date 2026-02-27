@@ -67,13 +67,26 @@ func dataColumnFilePath(slot uint64, blockRoot common.Hash, columnIndex uint64) 
 }
 
 func (s *dataColumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, columnData *cltypes.DataColumnSidecar) error {
-	// Ensure BlockRoot and Slot are set (they're not part of SSZ schema)
+	// Get slot from sidecar - version-aware handling
+	// For Fulu: slot is in SignedBlockHeader.Header.Slot
+	// For GLOAS: slot is directly in Slot field
+	var slot uint64
+	if columnData.Version() >= clparams.GloasVersion {
+		slot = columnData.Slot
+	} else if columnData.SignedBlockHeader != nil {
+		slot = columnData.SignedBlockHeader.Header.Slot
+	} else {
+		slot = columnData.Slot // fallback
+	}
+
+	// Ensure BlockRoot and Slot are set
 	columnData.BlockRoot = blockRoot
-	columnData.Slot = columnData.SignedBlockHeader.Header.Slot
-	lock := s.acquireLock(columnData.SignedBlockHeader.Header.Slot)
+	columnData.Slot = slot
+
+	lock := s.acquireLock(slot)
 	lock.Lock()
 	defer lock.Unlock()
-	dir, filepath := dataColumnFilePath(columnData.SignedBlockHeader.Header.Slot, blockRoot, uint64(columnIndex))
+	dir, filepath := dataColumnFilePath(slot, blockRoot, uint64(columnIndex))
 	if err := s.fs.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
@@ -99,7 +112,7 @@ func (s *dataColumnStorageImpl) WriteColumnSidecars(ctx context.Context, blockRo
 
 	fh.Close()
 	s.emitters.Operation().SendDataColumnSidecar(beaconevents.NewDataColumnSidecarData(columnData))
-	log.Trace("wrote data column sidecar", "slot", columnData.SignedBlockHeader.Header.Slot, "block_root", blockRoot.String(), "column_index", columnIndex)
+	log.Trace("wrote data column sidecar", "slot", slot, "block_root", blockRoot.String(), "column_index", columnIndex)
 	return nil
 }
 

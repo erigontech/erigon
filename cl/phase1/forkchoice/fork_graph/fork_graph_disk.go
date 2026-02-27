@@ -181,7 +181,9 @@ func (f *forkGraphDisk) isBlockRootTheCurrentState(blockRoot common.Hash) bool {
 }
 
 // Add a new node and edge to the graph
-func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool) (*state.CachingBeaconState, ChainSegmentInsertionResult, error) {
+// parentFullState: if non-nil, use this as the starting state instead of looking up from block_states.
+// [Modified in Gloas:EIP7732] Allows passing execution_payload_states when parent is FULL.
+func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool, parentFullState *state.CachingBeaconState) (*state.CachingBeaconState, ChainSegmentInsertionResult, error) {
 	block := signedBlock.Block
 	blockRoot, err := block.HashSSZ()
 	if err != nil {
@@ -200,7 +202,10 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 
 	isBlockRootTheCurrentState := f.isBlockRootTheCurrentState(blockRoot)
 	var newState *state.CachingBeaconState
-	if isBlockRootTheCurrentState {
+	if parentFullState != nil {
+		// [New in Gloas:EIP7732] Use provided parent state (from execution_payload_states)
+		newState = parentFullState
+	} else if isBlockRootTheCurrentState {
 		newState = f.currentState
 	} else {
 		newState, err = f.getState(block.ParentRoot, false, true)
@@ -213,8 +218,8 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		log.Debug("AddChainSegment: missing segment", "block", common.Hash(blockRoot), "slot", block.Slot, "parentRoot", block.ParentRoot)
 		return nil, MissingSegment, nil
 	}
-	finalizedBlock, hasFinalized := f.getBlock(newState.FinalizedCheckpoint().Root)
-	parentBlock, hasParentBlock := f.getBlock(block.ParentRoot)
+	finalizedBlock, hasFinalized := f.GetBlock(newState.FinalizedCheckpoint().Root)
+	parentBlock, hasParentBlock := f.GetBlock(block.ParentRoot)
 
 	// Before processing the state: update the newest lightclient update.
 	if block.Version() >= clparams.AltairVersion && hasParentBlock && fullValidation && hasFinalized && f.rcfg.Beacon && !isBlockRootTheCurrentState {
@@ -328,7 +333,7 @@ func (f *forkGraphDisk) GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHe
 	return obj.(*cltypes.BeaconBlockHeader), true
 }
 
-func (f *forkGraphDisk) getBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+func (f *forkGraphDisk) GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool) {
 	obj, has := f.blocks.Load(blockRoot)
 	if !has {
 		return nil, false
@@ -425,7 +430,7 @@ func (f *forkGraphDisk) getState(blockRoot common.Hash, alwaysCopy bool, addChai
 
 	// try and find the point of recconnection
 	for copyReferencedState == nil {
-		block, isSegmentPresent := f.getBlock(currentIteratorRoot)
+		block, isSegmentPresent := f.GetBlock(currentIteratorRoot)
 		if !isSegmentPresent {
 			// check if it is in the header
 			bHeader, ok := f.GetHeader(currentIteratorRoot)
@@ -490,6 +495,109 @@ func (f *forkGraphDisk) hasBeaconState(blockRoot common.Hash) bool {
 	return err == nil && exists
 }
 
+// GetExecutionPayloadState reconstructs the post-execution-payload state by replaying.
+// Similar to getState() but handles GLOAS FULL/EMPTY paths.
+// [New in Gloas:EIP7732]
+func (f *forkGraphDisk) GetExecutionPayloadState(blockRoot common.Hash) (*state.CachingBeaconState, error) {
+	// 1. Read target envelope
+	targetEnvelope, err := f.ReadEnvelopeFromDisk(blockRoot)
+	if err != nil {
+		return nil, fmt.Errorf("GetExecutionPayloadState: failed to read envelope: %w", err)
+	}
+
+	// 2. Get block_state for the target block (handles FULL/EMPTY paths)
+	blockState, err := f.getStateWithEnvelopes(blockRoot)
+	if err != nil {
+		return nil, fmt.Errorf("GetExecutionPayloadState: failed to get block state: %w", err)
+	}
+
+	// 3. Apply target envelope to get exec_payload_state
+	if err := transition.DefaultMachine.ProcessExecutionPayloadEnvelope(blockState, targetEnvelope); err != nil {
+		return nil, fmt.Errorf("GetExecutionPayloadState: failed to process envelope: %w", err)
+	}
+
+	return blockState, nil
+}
+
+// getStateWithEnvelopes is like getState but handles GLOAS FULL/EMPTY parent paths.
+// When replaying blocks, if a block was built on parent's FULL path, applies parent's envelope first.
+// [New in Gloas:EIP7732]
+func (f *forkGraphDisk) getStateWithEnvelopes(blockRoot common.Hash) (*state.CachingBeaconState, error) {
+	// Collect blocks with their parent path info
+	type blockInfo struct {
+		block          *cltypes.SignedBeaconBlock
+		parentWasFull  bool
+		parentEnvelope *cltypes.SignedExecutionPayloadEnvelope
+	}
+	blocksInTheWay := []blockInfo{}
+	currentRoot := blockRoot
+	var checkpointState *state.CachingBeaconState
+
+	// Walk back to find checkpoint
+	for checkpointState == nil {
+		block, ok := f.GetBlock(currentRoot)
+		if !ok {
+			// Check if it's a header-only checkpoint
+			bHeader, headerOk := f.GetHeader(currentRoot)
+			if headerOk && bHeader.Slot%dumpSlotFrequency == 0 {
+				checkpointState, _ = f.readBeaconStateFromDisk(currentRoot)
+			}
+			if checkpointState != nil {
+				break
+			}
+			return nil, fmt.Errorf("getStateWithEnvelopes: block not found: %x", currentRoot)
+		}
+
+		// Try to read checkpoint state
+		if block.Block.Slot%dumpSlotFrequency == 0 {
+			checkpointState, _ = f.readBeaconStateFromDisk(currentRoot)
+			if checkpointState != nil {
+				break
+			}
+		}
+
+		// Check if this block was built on parent's FULL path
+		parentRoot := block.Block.ParentRoot
+		parentEnvelope, _ := f.ReadEnvelopeFromDisk(parentRoot)
+		parentWasFull := false
+		if parentEnvelope != nil && block.Block.Body.SignedExecutionPayloadBid != nil &&
+			block.Block.Body.SignedExecutionPayloadBid.Message != nil {
+			// Compare block's bid.ParentBlockHash with parent envelope's payload.BlockHash
+			bidHash := block.Block.Body.SignedExecutionPayloadBid.Message.ParentBlockHash
+			envHash := parentEnvelope.Message.Payload.BlockHash
+			parentWasFull = (bidHash == envHash)
+		}
+
+		blocksInTheWay = append(blocksInTheWay, blockInfo{
+			block:          block,
+			parentWasFull:  parentWasFull,
+			parentEnvelope: parentEnvelope,
+		})
+		currentRoot = parentRoot
+	}
+
+	// Replay forward from checkpoint
+	// Note: checkpointState is always a block_state (from DumpBeaconStateOnDisk)
+	replayState := checkpointState
+	for i := len(blocksInTheWay) - 1; i >= 0; i-- {
+		bi := blocksInTheWay[i]
+
+		// If this block was built on parent's FULL path, apply parent envelope first
+		if bi.parentWasFull && bi.parentEnvelope != nil {
+			if err := transition.DefaultMachine.ProcessExecutionPayloadEnvelope(replayState, bi.parentEnvelope); err != nil {
+				return nil, fmt.Errorf("getStateWithEnvelopes: failed to process parent envelope: %w", err)
+			}
+		}
+
+		// Apply process_block to get this block's block_state
+		if err := transition.TransitionState(replayState, bi.block, nil, false); err != nil {
+			return nil, fmt.Errorf("getStateWithEnvelopes: failed to transition state: %w", err)
+		}
+	}
+
+	return replayState, nil
+}
+
 func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 	oldRoots := make([]common.Hash, 0, f.beaconCfg.SlotsPerEpoch)
 	highestStoredBeaconStateSlot := uint64(0)
@@ -524,6 +632,8 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		f.headers.Delete(root)
 		f.blockRewards.Delete(root)
 		f.fs.Remove(getBeaconStateFilename(root))
+		// [New in Gloas:EIP7732] Also remove envelope files
+		f.fs.Remove(getEnvelopeFilename(root))
 	}
 	log.Debug("Pruned old blocks", "pruneSlot", pruneSlot)
 	return

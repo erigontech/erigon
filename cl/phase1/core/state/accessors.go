@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"runtime"
 
+	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -260,118 +261,301 @@ func ComputeTimestampAtSlot(b abstract.BeaconState, slot uint64) uint64 {
 	return b.GenesisTime() + (slot-b.BeaconConfig().GenesisSlot)*b.BeaconConfig().SecondsPerSlot
 }
 
-// ExpectedWithdrawals calculates the expected withdrawals that can be made by validators in the current epoch
-func ExpectedWithdrawals(b abstract.BeaconState, currentEpoch uint64) ([]*cltypes.Withdrawal, uint64) {
+// GetPendingPartialWithdrawals processes pending partial withdrawals for validators,
+// respecting the combined limit of prior withdrawals + MAX_PENDING_PARTIALS_PER_WITHDRAWALS_SWEEP
+// and MAX_WITHDRAWALS_PER_PAYLOAD - 1.
+// Returns the new withdrawals, updated withdrawal index, and the number of processed entries.
+func GetPendingPartialWithdrawals(b abstract.BeaconState, withdrawalIndex uint64, priorWithdrawals []*cltypes.Withdrawal) ([]*cltypes.Withdrawal, uint64, uint64, error) {
+	epoch := Epoch(b)
+	cfg := b.BeaconConfig()
+	validatorSetLen := b.ValidatorLength()
+
+	withdrawalsLimit := min(
+		len(priorWithdrawals)+int(cfg.MaxPendingPartialsPerWithdrawalsSweep),
+		int(cfg.MaxWithdrawalsPerPayload)-1,
+	)
+
+	var processedCount uint64
+	var withdrawals []*cltypes.Withdrawal
+	var rangeErr error
+
+	b.GetPendingPartialWithdrawals().Range(func(_ int, w *solid.PendingPartialWithdrawal, _ int) bool {
+		isWithdrawable := w.WithdrawableEpoch <= epoch
+		hasReachedLimit := len(priorWithdrawals)+len(withdrawals) >= withdrawalsLimit
+		if !isWithdrawable || hasReachedLimit {
+			return false
+		}
+
+		if int(w.ValidatorIndex) >= validatorSetLen {
+			rangeErr = fmt.Errorf("GetPendingPartialWithdrawals: validator_index %d out of range (validators length %d)", w.ValidatorIndex, validatorSetLen)
+			return false
+		}
+
+		validator := b.ValidatorSet().Get(int(w.ValidatorIndex))
+		balance := getBalanceAfterWithdrawals(b, w.ValidatorIndex, priorWithdrawals, withdrawals)
+
+		if validator.ExitEpoch() == cfg.FarFutureEpoch &&
+			validator.EffectiveBalance() >= cfg.MinActivationBalance &&
+			balance > cfg.MinActivationBalance {
+
+			withdrawalAmount := min(balance-cfg.MinActivationBalance, w.Amount)
+			wd := validator.WithdrawalCredentials()
+			withdrawals = append(withdrawals, &cltypes.Withdrawal{
+				Index:     withdrawalIndex,
+				Validator: w.ValidatorIndex,
+				Address:   common.BytesToAddress(wd[12:]),
+				Amount:    withdrawalAmount,
+			})
+			withdrawalIndex++
+		}
+
+		processedCount++
+		return true
+	})
+
+	if rangeErr != nil {
+		return nil, withdrawalIndex, 0, rangeErr
+	}
+	return withdrawals, withdrawalIndex, processedCount, nil
+}
+
+// getBalanceAfterWithdrawals returns a validator's balance minus the total amount
+// already withdrawn across all provided withdrawal slices.
+func getBalanceAfterWithdrawals(b abstract.BeaconState, validatorIndex uint64, withdrawalSets ...[]*cltypes.Withdrawal) uint64 {
+	balance, err := b.ValidatorBalance(int(validatorIndex))
+	if err != nil {
+		log.Warn("Failed to get validator balance", "index", validatorIndex, "error", err)
+		return 0
+	}
+	var totalWithdrawn uint64
+	for _, set := range withdrawalSets {
+		for _, w := range set {
+			if w.Validator == validatorIndex {
+				totalWithdrawn += w.Amount
+			}
+		}
+	}
+	if balance > totalWithdrawn {
+		return balance - totalWithdrawn
+	}
+	return 0
+}
+
+// GetExpectedWithdrawals calculates the expected withdrawals that can be made by validators in the current epoch
+func GetExpectedWithdrawals(b abstract.BeaconState, currentEpoch uint64) (*cltypes.ExpectedWithdrawals, error) {
 	nextWithdrawalIndex := b.NextWithdrawalIndex()
-	nextWithdrawalValidatorIndex := b.NextWithdrawalValidatorIndex()
-	withdrawals := make([]*cltypes.Withdrawal, 0)
-	partialWithdrawalsCount := uint64(0)
+	expWithdrawals := &cltypes.ExpectedWithdrawals{
+		Withdrawals: []*cltypes.Withdrawal{},
+	}
+
+	// [New in Gloas:EIP7732] Get builder withdrawals
+	if b.Version() >= clparams.GloasVersion {
+		builderWithdrawals, nextIdx, processedBuilderWithdrawalsCount := GetBuilderWithdrawals(b, nextWithdrawalIndex, expWithdrawals.Withdrawals)
+		expWithdrawals.Withdrawals = append(expWithdrawals.Withdrawals, builderWithdrawals...)
+		nextWithdrawalIndex = nextIdx
+		expWithdrawals.ProcessedBuilderWithdrawalsCount = processedBuilderWithdrawalsCount
+	}
 
 	// [New in Electra:EIP7251] Consume pending partial withdrawals
-	cfg := b.BeaconConfig()
 	if b.Version() >= clparams.ElectraVersion {
-		b.GetPendingPartialWithdrawals().Range(func(index int, w *solid.PendingPartialWithdrawal, length int) bool {
-			if w.WithdrawableEpoch > currentEpoch || len(withdrawals) == int(cfg.MaxPendingPartialsPerWithdrawalsSweep) {
-				return false
-			}
+		partialWithdrawals, nextIdx, count, err := GetPendingPartialWithdrawals(b, nextWithdrawalIndex, expWithdrawals.Withdrawals)
+		if err != nil {
+			return nil, err
+		}
+		expWithdrawals.Withdrawals = append(expWithdrawals.Withdrawals, partialWithdrawals...)
+		nextWithdrawalIndex = nextIdx
+		expWithdrawals.ProcessedPartialWithdrawalsCount = count
+	}
 
-			validator := b.ValidatorSet().Get(int(w.ValidatorIndex))
-			hasSufficientEffectiveBalance := validator.EffectiveBalance() >= cfg.MinActivationBalance
-
-			// Calculate total withdrawn amount for this validator from previous withdrawals
-			totalWithdrawn := uint64(0)
-			for _, withdrawal := range withdrawals {
-				if withdrawal.Validator == w.ValidatorIndex {
-					totalWithdrawn += withdrawal.Amount
-				}
-			}
-
-			balance, err := b.ValidatorBalance(int(w.ValidatorIndex))
-			if err != nil {
-				log.Warn("Failed to get validator balance", "index", w.ValidatorIndex, "error", err)
-				return false
-			}
-			if balance > totalWithdrawn {
-				balance -= totalWithdrawn
-			} else {
-				balance = 0
-			}
-
-			hasExcessBalance := balance > cfg.MinActivationBalance
-
-			if validator.ExitEpoch() == cfg.FarFutureEpoch &&
-				hasSufficientEffectiveBalance &&
-				hasExcessBalance {
-
-				wd := validator.WithdrawalCredentials()
-				withdrawableBalance := min(balance-cfg.MinActivationBalance, w.Amount)
-				withdrawals = append(withdrawals, &cltypes.Withdrawal{
-					Index:     nextWithdrawalIndex,
-					Validator: w.ValidatorIndex,
-					Address:   common.BytesToAddress(wd[12:]),
-					Amount:    withdrawableBalance,
-				})
-				nextWithdrawalIndex++
-			}
-			partialWithdrawalsCount++
-			return true
-		})
+	// [New in Gloas:EIP7732] Get builders sweep withdrawals
+	if b.Version() >= clparams.GloasVersion {
+		buildersSweepWithdrawals, nextIdx, processedBuildersSweepCount, err := GetBuildersSweepWithdrawals(b, nextWithdrawalIndex, expWithdrawals.Withdrawals)
+		if err != nil {
+			return nil, err
+		}
+		expWithdrawals.Withdrawals = append(expWithdrawals.Withdrawals, buildersSweepWithdrawals...)
+		nextWithdrawalIndex = nextIdx
+		expWithdrawals.ProcessedBuildersSweepCount = processedBuildersSweepCount
 	}
 
 	// Sweep for remaining withdrawals
+	sweepWithdrawals, nextIdx, processedValidatorsSweepCount, err := GetValidatorsSweepWithdrawals(b, nextWithdrawalIndex, currentEpoch, expWithdrawals.Withdrawals)
+	if err != nil {
+		return nil, err
+	}
+	expWithdrawals.Withdrawals = append(expWithdrawals.Withdrawals, sweepWithdrawals...)
+	_ = nextIdx
+
+	expWithdrawals.ProcessedSweepWithdrawalsCount = processedValidatorsSweepCount
+	return expWithdrawals, nil
+}
+
+// GetValidatorsSweepWithdrawals sweeps through validators starting from next_withdrawal_validator_index,
+// collecting full and partial withdrawals.
+// Returns the new withdrawals, updated withdrawal index, and the number of processed validators.
+func GetValidatorsSweepWithdrawals(b abstract.BeaconState, withdrawalIndex uint64, epoch uint64, priorWithdrawals []*cltypes.Withdrawal) ([]*cltypes.Withdrawal, uint64, uint64, error) {
+	cfg := b.BeaconConfig()
 	maxValidators := uint64(b.ValidatorLength())
-	maxValidatorsPerWithdrawalsSweep := b.BeaconConfig().MaxValidatorsPerWithdrawalsSweep
-	bound := min(maxValidators, maxValidatorsPerWithdrawalsSweep)
+	if maxValidators == 0 {
+		return nil, withdrawalIndex, 0, nil
+	}
+	validatorsLimit := min(maxValidators, cfg.MaxValidatorsPerWithdrawalsSweep)
+	withdrawalsLimit := int(cfg.MaxWithdrawalsPerPayload)
 
-	for validatorCount := uint64(0); validatorCount < bound && len(withdrawals) != int(b.BeaconConfig().MaxWithdrawalsPerPayload); validatorCount++ {
-		currentValidator, _ := b.ValidatorForValidatorIndex(int(nextWithdrawalValidatorIndex))
-
-		// Calculate total withdrawn amount for this validator from previous withdrawals
-		totalWithdrawn := uint64(0)
-		if b.Version() >= clparams.ElectraVersion {
-			for _, w := range withdrawals {
-				if w.Validator == nextWithdrawalValidatorIndex {
-					totalWithdrawn += w.Amount
-				}
-			}
-		}
-
-		currentBalance, err := b.ValidatorBalance(int(nextWithdrawalValidatorIndex))
-		if err != nil {
-			log.Warn("Failed to get validator balance", "index", nextWithdrawalValidatorIndex, "error", err)
-		}
-		if currentBalance > totalWithdrawn {
-			currentBalance -= totalWithdrawn
-		} else {
-			currentBalance = 0
-		}
-
-		wd := currentValidator.WithdrawalCredentials()
-
-		if isFullyWithdrawableValidator(b, currentValidator, currentBalance, currentEpoch) {
-			withdrawals = append(withdrawals, &cltypes.Withdrawal{
-				Index:     nextWithdrawalIndex,
-				Validator: nextWithdrawalValidatorIndex,
-				Address:   common.BytesToAddress(wd[12:]),
-				Amount:    currentBalance,
-			})
-			nextWithdrawalIndex++
-		} else if isPartiallyWithdrawableValidator(b, currentValidator, currentBalance) {
-			maxEffectiveBalance := b.BeaconConfig().MaxEffectiveBalance
-			if b.Version() >= clparams.ElectraVersion {
-				maxEffectiveBalance = getMaxEffectiveBalanceElectra(currentValidator, b.BeaconConfig())
-			}
-			withdrawals = append(withdrawals, &cltypes.Withdrawal{
-				Index:     nextWithdrawalIndex,
-				Validator: nextWithdrawalValidatorIndex,
-				Address:   common.BytesToAddress(wd[12:]),
-				Amount:    currentBalance - maxEffectiveBalance,
-			})
-			nextWithdrawalIndex++
-		}
-
-		nextWithdrawalValidatorIndex = (nextWithdrawalValidatorIndex + 1) % maxValidators
+	var processedCount uint64
+	var withdrawals []*cltypes.Withdrawal
+	validatorIndex := b.NextWithdrawalValidatorIndex()
+	if validatorIndex >= maxValidators {
+		return nil, withdrawalIndex, 0, fmt.Errorf("GetValidatorsSweepWithdrawals: next_withdrawal_validator_index %d out of range (validators length %d)", validatorIndex, maxValidators)
 	}
 
-	return withdrawals, partialWithdrawalsCount
+	for range validatorsLimit {
+		if len(priorWithdrawals)+len(withdrawals) >= withdrawalsLimit {
+			break
+		}
+
+		validator, err := b.ValidatorForValidatorIndex(int(validatorIndex))
+		if err != nil {
+			return nil, withdrawalIndex, 0, fmt.Errorf("GetValidatorsSweepWithdrawals: %w", err)
+		}
+		var balance uint64
+		if b.Version() >= clparams.ElectraVersion {
+			balance = getBalanceAfterWithdrawals(b, validatorIndex, priorWithdrawals, withdrawals)
+		} else {
+			balance, _ = b.ValidatorBalance(int(validatorIndex))
+		}
+		wd := validator.WithdrawalCredentials()
+
+		if isFullyWithdrawableValidator(b, validator, balance, epoch) {
+			withdrawals = append(withdrawals, &cltypes.Withdrawal{
+				Index:     withdrawalIndex,
+				Validator: validatorIndex,
+				Address:   common.BytesToAddress(wd[12:]),
+				Amount:    balance,
+			})
+			withdrawalIndex++
+		} else if isPartiallyWithdrawableValidator(b, validator, balance) {
+			// [Modified in Electra:EIP7251]
+			maxEffectiveBalance := GetMaxEffectiveBalanceByVersion(validator, cfg, b.Version())
+			withdrawals = append(withdrawals, &cltypes.Withdrawal{
+				Index:     withdrawalIndex,
+				Validator: validatorIndex,
+				Address:   common.BytesToAddress(wd[12:]),
+				Amount:    balance - maxEffectiveBalance,
+			})
+			withdrawalIndex++
+		}
+
+		validatorIndex = (validatorIndex + 1) % maxValidators
+		processedCount++
+	}
+
+	return withdrawals, withdrawalIndex, processedCount, nil
+}
+
+// GetBuilderWithdrawals constructs withdrawal entries from builder pending withdrawals,
+// respecting the MAX_WITHDRAWALS_PER_PAYLOAD - 1 limit combined with prior withdrawals.
+// Returns the new withdrawals, updated withdrawal index, and the number of processed entries.
+func GetBuilderWithdrawals(b abstract.BeaconState, withdrawalIndex uint64, priorWithdrawals []*cltypes.Withdrawal) ([]*cltypes.Withdrawal, uint64, uint64) {
+	withdrawalsLimit := int(b.BeaconConfig().MaxWithdrawalsPerPayload) - 1
+	if len(priorWithdrawals) > withdrawalsLimit {
+		log.Warn("GetBuilderWithdrawals: prior withdrawals exceed limit", "prior", len(priorWithdrawals), "limit", withdrawalsLimit)
+		return []*cltypes.Withdrawal{}, withdrawalIndex, 0
+	}
+
+	var processedCount uint64
+	var withdrawals []*cltypes.Withdrawal
+
+	pendingWithdrawals := b.GetBuilderPendingWithdrawals()
+	if pendingWithdrawals == nil {
+		log.Warn("GetBuilderWithdrawals: builder_pending_withdrawals is nil")
+		return withdrawals, withdrawalIndex, processedCount
+	}
+
+	pendingWithdrawals.Range(func(_ int, w *cltypes.BuilderPendingWithdrawal, _ int) bool {
+		if len(priorWithdrawals)+len(withdrawals) >= withdrawalsLimit {
+			return false
+		}
+		withdrawals = append(withdrawals, &cltypes.Withdrawal{
+			Index:     withdrawalIndex,
+			Validator: ConvertBuilderIndexToValidatorIndex(w.BuilderIndex),
+			Address:   w.FeeRecipient,
+			Amount:    w.Amount,
+		})
+		withdrawalIndex++
+		processedCount++
+		return true
+	})
+
+	return withdrawals, withdrawalIndex, processedCount
+}
+
+// GetBuildersSweepWithdrawals sweeps through builders starting from next_withdrawal_builder_index,
+// collecting withdrawals for builders whose withdrawable_epoch has passed and have a positive balance.
+// Returns the new withdrawals, updated withdrawal index, and the number of processed builders.
+func GetBuildersSweepWithdrawals(b abstract.BeaconState, withdrawalIndex uint64, priorWithdrawals []*cltypes.Withdrawal) ([]*cltypes.Withdrawal, uint64, uint64, error) {
+	epoch := Epoch(b)
+	cfg := b.BeaconConfig()
+
+	builders := b.GetBuilders()
+	if builders == nil {
+		log.Warn("GetBuildersSweepWithdrawals: builders is nil")
+		return nil, withdrawalIndex, 0, nil
+	}
+
+	buildersLen := builders.Len()
+	if buildersLen == 0 {
+		return nil, withdrawalIndex, 0, nil
+	}
+	buildersLimit := min(buildersLen, int(cfg.MaxBuildersPerWithdrawalsSweep))
+	withdrawalsLimit := int(cfg.MaxWithdrawalsPerPayload) - 1
+	if len(priorWithdrawals) > withdrawalsLimit {
+		log.Warn("GetBuildersSweepWithdrawals: prior withdrawals exceed limit", "prior", len(priorWithdrawals), "limit", withdrawalsLimit)
+		return []*cltypes.Withdrawal{}, withdrawalIndex, 0, nil
+	}
+
+	var processedCount uint64
+	var withdrawals []*cltypes.Withdrawal
+	builderIndex := b.GetNextWithdrawalBuilderIndex()
+	if builderIndex >= uint64(buildersLen) {
+		return nil, withdrawalIndex, 0, fmt.Errorf("GetBuildersSweepWithdrawals: next_withdrawal_builder_index %d out of range (builders length %d)", builderIndex, buildersLen)
+	}
+
+	for range buildersLimit {
+		if len(priorWithdrawals)+len(withdrawals) >= withdrawalsLimit {
+			break
+		}
+
+		builder := builders.Get(int(builderIndex))
+		if builder != nil && builder.WithdrawableEpoch <= epoch && builder.Balance > 0 {
+			withdrawals = append(withdrawals, &cltypes.Withdrawal{
+				Index:     withdrawalIndex,
+				Validator: ConvertBuilderIndexToValidatorIndex(builderIndex),
+				Address:   builder.ExecutionAddress,
+				Amount:    builder.Balance,
+			})
+			withdrawalIndex++
+		}
+
+		builderIndex = (builderIndex + 1) % uint64(buildersLen)
+		processedCount++
+	}
+
+	return withdrawals, withdrawalIndex, processedCount, nil
+}
+
+// GetNextSyncCommitteeIndices returns the sync committee indices, with possible duplicates,
+// for the next sync committee.
+// [Modified in Gloas:EIP7732]
+func GetNextSyncCommitteeIndices(b *CachingBeaconState) ([]uint64, error) {
+	conf := b.BeaconConfig()
+	epoch := Epoch(b) + 1
+
+	mixPosition := (epoch + conf.EpochsPerHistoricalVector - conf.MinSeedLookahead - 1) %
+		conf.EpochsPerHistoricalVector
+	mix := b.GetRandaoMix(int(mixPosition))
+	seed := shuffling.GetSeed(conf, mix, epoch, conf.DomainSyncCommittee)
+
+	indices := b.GetActiveValidatorsIndices(epoch)
+	return shuffling.ComputeBalanceWeightedSelection(b.BeaconState, indices, seed, conf.SyncCommitteeSize, true)
 }

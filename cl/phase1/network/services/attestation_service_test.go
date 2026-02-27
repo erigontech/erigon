@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	mockCommittee "github.com/erigontech/erigon/cl/validator/committee_subscription/mock_services"
@@ -294,8 +295,8 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 					att.Data.BeaconBlockRoot: {},
 				}
 				mockFinalizedCheckPoint := &solid.Checkpoint{Root: [32]byte{1, 0}, Epoch: 1}
-				t.mockForkChoice.Ancestors = map[uint64]common.Hash{
-					mockEpoch * mockSlotsPerEpoch:                     att.Data.Target.Root,
+				t.mockForkChoice.Ancestors = map[uint64]forkchoice.ForkChoiceNode{
+					mockEpoch * mockSlotsPerEpoch:                     {Root: att.Data.Target.Root},
 					mockFinalizedCheckPoint.Epoch * mockSlotsPerEpoch: {}, // wrong block root
 				}
 				t.mockForkChoice.FinalizedCheckpointVal = *mockFinalizedCheckPoint
@@ -329,9 +330,9 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				}
 
 				mockFinalizedCheckPoint := &solid.Checkpoint{Root: [32]byte{1, 0}, Epoch: 1}
-				t.mockForkChoice.Ancestors = map[uint64]common.Hash{
-					mockEpoch * mockSlotsPerEpoch:                     att.Data.Target.Root,
-					mockFinalizedCheckPoint.Epoch * mockSlotsPerEpoch: mockFinalizedCheckPoint.Root,
+				t.mockForkChoice.Ancestors = map[uint64]forkchoice.ForkChoiceNode{
+					mockEpoch * mockSlotsPerEpoch:                     {Root: att.Data.Target.Root},
+					mockFinalizedCheckPoint.Epoch * mockSlotsPerEpoch: {Root: mockFinalizedCheckPoint.Root},
 				}
 				t.mockForkChoice.FinalizedCheckpointVal = *mockFinalizedCheckPoint
 				//t.committeeSubscibe.EXPECT().NeedToAggregate(att).Return(true).Times(1)
@@ -360,6 +361,161 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 			t.Require().NoError(err)
 		}
 
+		t.True(t.gomockCtrl.Satisfied())
+	}
+}
+
+func (t *attestationTestSuite) TestGloasAttestationIndexValidation() {
+	// Override beacon config to enable Gloas version
+	gloasConfig := &clparams.BeaconChainConfig{
+		SlotsPerEpoch:      mockSlotsPerEpoch,
+		AltairForkEpoch:    0,
+		BellatrixForkEpoch: 0,
+		CapellaForkEpoch:   0,
+		DenebForkEpoch:     0,
+		ElectraForkEpoch:   0,
+		FuluForkEpoch:      0,
+		GloasForkEpoch:     0,
+	}
+
+	type args struct {
+		ctx    context.Context
+		subnet *uint64
+		msg    *solid.SingleAttestation
+	}
+	tests := []struct {
+		name    string
+		wantErr bool
+		errMsg  string
+		mock    func()
+		args    args
+	}{
+		{
+			name: "Gloas: reject attestation data index >= 2",
+			mock: func() {
+				computeCommitteeCountPerSlot = func(_ abstract.BeaconStateReader, _, _ uint64) uint64 {
+					return 8
+				}
+				computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
+					return 1
+				}
+				t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).Times(1)
+				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
+			},
+			args: args{
+				ctx:    context.Background(),
+				subnet: uint64Ptr(1),
+				msg: &solid.SingleAttestation{
+					CommitteeIndex: 0,
+					AttesterIndex:  0,
+					Data: &solid.AttestationData{
+						Slot:            mockSlot,
+						CommitteeIndex:  2, // index >= 2 should be rejected
+						BeaconBlockRoot: [32]byte{0, 4, 2, 6},
+						Source:          solid.Checkpoint{Epoch: mockEpoch, Root: [32]byte{1, 0}},
+						Target:          solid.Checkpoint{Epoch: mockEpoch, Root: [32]byte{1, 0}},
+					},
+					Signature: [96]byte{'a', 'b', 'c', 'd', 'e', 'f'},
+				},
+			},
+			wantErr: true,
+			errMsg:  "attestation data index must be less than 2",
+		},
+		{
+			name: "Gloas: accept attestation data index 0",
+			mock: func() {
+				computeCommitteeCountPerSlot = func(_ abstract.BeaconStateReader, _, _ uint64) uint64 {
+					return 8
+				}
+				computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
+					return 1
+				}
+				t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).Times(1)
+				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
+			},
+			args: args{
+				ctx:    context.Background(),
+				subnet: uint64Ptr(1),
+				msg: &solid.SingleAttestation{
+					CommitteeIndex: 0,
+					AttesterIndex:  0,
+					Data: &solid.AttestationData{
+						Slot:            mockSlot,
+						CommitteeIndex:  0, // index 0 should pass this check
+						BeaconBlockRoot: [32]byte{0, 4, 2, 6},
+						Source:          solid.Checkpoint{Epoch: mockEpoch, Root: [32]byte{1, 0}},
+						Target:          solid.Checkpoint{Epoch: mockEpoch, Root: [32]byte{1, 0}},
+					},
+					Signature: [96]byte{'a', 'b', 'c', 'd', 'e', 'f'},
+				},
+			},
+			// Will fail later (attester not in committee or block not found), but NOT due to index check
+			wantErr: true,
+			errMsg:  "", // any error other than "attestation data index must be less than 2"
+		},
+		{
+			name: "Gloas: accept attestation data index 1",
+			mock: func() {
+				computeCommitteeCountPerSlot = func(_ abstract.BeaconStateReader, _, _ uint64) uint64 {
+					return 8
+				}
+				computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
+					return 1
+				}
+				t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).Times(1)
+				t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
+			},
+			args: args{
+				ctx:    context.Background(),
+				subnet: uint64Ptr(1),
+				msg: &solid.SingleAttestation{
+					CommitteeIndex: 0,
+					AttesterIndex:  0,
+					Data: &solid.AttestationData{
+						Slot:            mockSlot,
+						CommitteeIndex:  1, // index 1 should pass this check
+						BeaconBlockRoot: [32]byte{0, 4, 2, 6},
+						Source:          solid.Checkpoint{Epoch: mockEpoch, Root: [32]byte{1, 0}},
+						Target:          solid.Checkpoint{Epoch: mockEpoch, Root: [32]byte{1, 0}},
+					},
+					Signature: [96]byte{'a', 'b', 'c', 'd', 'e', 'f'},
+				},
+			},
+			// Will fail later (attester not in committee or block not found), but NOT due to index check
+			wantErr: true,
+			errMsg:  "", // any error other than "attestation data index must be less than 2"
+		},
+	}
+
+	for _, tt := range tests {
+		log.Printf("test case: %s", tt.name)
+		t.SetupTest()
+		t.beaconConfig = gloasConfig
+		netConfig := &clparams.NetworkConfig{}
+		emitters := beaconevents.NewEventEmitter()
+		computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) { return [32]byte{}, nil }
+		batchSignatureVerifier := NewBatchSignatureVerifier(context.TODO(), nil)
+		go batchSignatureVerifier.Start()
+		ctx, cn := context.WithCancel(context.Background())
+		cn()
+		t.attService = NewAttestationService(ctx, t.mockForkChoice, t.committeeSubscibe, t.ethClock, t.syncedData, gloasConfig, netConfig, emitters, batchSignatureVerifier)
+
+		tt.mock()
+		err := t.attService.ProcessMessage(tt.args.ctx, tt.args.subnet, &AttestationForGossip{
+			SingleAttestation: tt.args.msg,
+			ImmediateProcess:  true,
+		})
+		if tt.wantErr {
+			t.Require().Error(err, "test case: %s", tt.name)
+			if tt.errMsg != "" {
+				t.Require().Contains(err.Error(), tt.errMsg, "test case: %s", tt.name)
+			} else {
+				// Should NOT be the index check error
+				t.Require().NotContains(err.Error(), "attestation data index must be less than 2", "test case: %s", tt.name)
+			}
+		} else {
+			t.Require().NoError(err, "test case: %s", tt.name)
+		}
 		t.True(t.gomockCtrl.Satisfied())
 	}
 }

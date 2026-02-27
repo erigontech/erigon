@@ -345,8 +345,16 @@ func (b *BeaconState) SetNextSyncCommittee(nextSyncCommittee *solid.SyncCommitte
 }
 
 func (b *BeaconState) SetLatestExecutionPayloadHeader(header *cltypes.Eth1Header) {
+	if b.version >= clparams.GloasVersion {
+		return
+	}
 	b.latestExecutionPayloadHeader = header
 	b.markLeaf(LatestExecutionPayloadHeaderLeafIndex)
+}
+
+func (b *BeaconState) SetLatestExecutionPayloadBid(bid *cltypes.ExecutionPayloadBid) {
+	b.latestExecutionPayloadBid = bid
+	b.markLeaf(LatestExecutionPayloadBidLeafIndex)
 }
 
 func (b *BeaconState) SetNextWithdrawalIndex(index uint64) {
@@ -578,4 +586,39 @@ func (b *BeaconState) SetEarlistConsolidationEpoch(epoch uint64) {
 func (b *BeaconState) SetProposerLookahead(proposerLookahead solid.Uint64VectorSSZ) {
 	b.proposerLookahead = proposerLookahead
 	b.markLeaf(ProposerLookaheadLeafIndex)
+}
+
+func (b *BeaconState) SetExecutionPayloadAvailability(slot uint64, available bool) {
+	b.executionPayloadAvailability.SetBitAt(int(slot%b.beaconConfig.SlotsPerHistoricalRoot), available)
+	b.markLeaf(ExecutionPayloadAvailabilityLeafIndex)
+}
+
+func (b *BeaconState) SetBuilderPendingPayments(payments *solid.VectorSSZ[*cltypes.BuilderPendingPayment]) {
+	b.builderPendingPayments = payments
+	b.markLeaf(BuilderPendingPaymentsLeafIndex)
+}
+
+func (b *BeaconState) SetBuilderPendingWithdrawals(withdrawals *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal]) {
+	b.builderPendingWithdrawals = withdrawals
+	b.markLeaf(BuilderPendingWithdrawalsLeafIndex)
+}
+
+func (b *BeaconState) SetLatestBlockHash(hash common.Hash) {
+	b.latestBlockHash = hash
+	b.markLeaf(LatestBlockHashLeafIndex)
+}
+
+func (b *BeaconState) SetPayloadExpectedWithdrawals(withdrawals *solid.ListSSZ[*cltypes.Withdrawal]) {
+	b.payloadExpectedWithdrawals = withdrawals
+	b.markLeaf(PayloadExpectedWithdrawalsLeafIndex)
+}
+
+func (b *BeaconState) SetNextWithdrawalBuilderIndex(index uint64) {
+	b.nextWithdrawalBuilderIndex = index
+	b.markLeaf(NextWithdrawalBuilderIndexLeafIndex)
+}
+
+func (b *BeaconState) SetBuilders(builders *solid.ListSSZ[*cltypes.Builder]) {
+	b.builders = builders
+	b.markLeaf(BuildersLeafIndex)
 }

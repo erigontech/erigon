@@ -67,15 +67,15 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWr
 		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("beacon node is syncing"))
 	}
 	if root == headRoot {
-		var expectedWithdrawals []*cltypes.Withdrawal
-
+		var expectedWithdrawals *cltypes.ExpectedWithdrawals
 		if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
-			expectedWithdrawals, _ = state.ExpectedWithdrawals(headState, state.Epoch(headState))
-			return nil
+			var err error
+			expectedWithdrawals, err = state.GetExpectedWithdrawals(headState, state.Epoch(headState))
+			return err
 		}); err != nil {
 			return nil, err
 		}
-		return newBeaconResponse(expectedWithdrawals).WithFinalized(false), nil
+		return newBeaconResponse(expectedWithdrawals.Withdrawals).WithFinalized(false), nil
 	}
 	lookAhead := 1024
 	for currSlot := *slot + 1; currSlot < *slot+uint64(lookAhead); currSlot++ {
