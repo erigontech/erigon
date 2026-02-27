@@ -18,33 +18,25 @@ package protocol
 
 import (
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/protocol/fixedgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
-	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
-func NonIntrinsicMdGas(txnGasLimit uint64, igas fixedgas.IntrinsicGasCalcResult, rules *chain.Rules, tracer *tracing.Hooks) evmtypes.MdGas {
+func SplitIntoMdGas(txnGasLimit uint64, intrinsicGas evmtypes.MdGas, rules *chain.Rules) evmtypes.MdGas {
 	if rules.IsAmsterdam {
 		//intrinsic_gas = intrinsic_regular_gas + intrinsic_state_gas
 		//execution_gas = tx.gas - intrinsic_gas
 		//regular_gas_budget = TX_MAX_GAS_LIMIT - intrinsic_regular_gas
 		//gas_left = min(regular_gas_budget, execution_gas)
 		//state_gas_reservoir = execution_gas - gas_left
-		intrinsicGas := igas.RegularGas + igas.StateGas
+		intrinsicGas := intrinsicGas.Regular + intrinsicGas.State
 		executionGas := txnGasLimit - intrinsicGas
 		regularGasBudget := params.MaxTxnGasLimit - intrinsicGas
 		gasLeft := min(regularGasBudget, executionGas)
 		stateGasReservoir := executionGas - gasLeft
-		if tracer != nil && tracer.OnGasChange != nil {
-			tracer.OnGasChange(txnGasLimit, executionGas, tracing.GasChangeTxIntrinsicGas)
-		}
 		return evmtypes.MdGas{Regular: gasLeft, State: stateGasReservoir}
 	}
 	gas := evmtypes.MdGas{Regular: txnGasLimit}
-	if tracer != nil && tracer.OnGasChange != nil {
-		tracer.OnGasChange(gas.Regular, gas.Regular-igas.RegularGas, tracing.GasChangeTxIntrinsicGas)
-	}
-	gas.Regular -= igas.RegularGas
+	gas.Regular -= intrinsicGas.Regular
 	return gas
 }

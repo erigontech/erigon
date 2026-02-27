@@ -156,7 +156,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 		sender,
 		contractAsAddress,
 		input,
-		protocol.NonIntrinsicMdGas(cfg.GasLimit, fixedgas.IntrinsicGasCalcResult{}, rules, cfg.EVMConfig.Tracer),
+		protocol.SplitIntoMdGas(cfg.GasLimit, fixedgas.IntrinsicGasCalcResult{}, rules, cfg.EVMConfig.Tracer),
 		cfg.Value,
 		false, /* bailout */
 	)
@@ -209,7 +209,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 	code, address, leftOverGas, err := vmenv.Create(
 		sender,
 		input,
-		protocol.NonIntrinsicMdGas(cfg.GasLimit, fixedgas.IntrinsicGasCalcResult{}, rules, cfg.EVMConfig.Tracer),
+		protocol.SplitIntoMdGas(cfg.GasLimit, fixedgas.IntrinsicGasCalcResult{}, rules, cfg.EVMConfig.Tracer),
 		cfg.Value,
 		false,
 	)
@@ -243,7 +243,7 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, evmtypes
 		sender.Address(),
 		address,
 		input,
-		protocol.NonIntrinsicMdGas(cfg.GasLimit, fixedgas.IntrinsicGasCalcResult{}, rules, cfg.EVMConfig.Tracer),
+		protocol.SplitIntoMdGas(cfg.GasLimit, fixedgas.IntrinsicGasCalcResult{}, rules, cfg.EVMConfig.Tracer),
 		cfg.Value,
 		false, /* bailout */
 	)

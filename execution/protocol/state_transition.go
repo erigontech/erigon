@@ -392,11 +392,12 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
-	st.gasRemaining = NonIntrinsicMdGas(st.msg.Gas(), intrinsicGasResult, rules, st.evm.Config().Tracer)
-	st.initialGas = st.gasRemaining.Plus(evmtypes.MdGas{
+	imdGas := evmtypes.MdGas{
 		Regular: intrinsicGasResult.RegularGas,
 		State:   intrinsicGasResult.StateGas,
-	})
+	}
+	st.gasRemaining = SplitIntoMdGas(st.msg.Gas(), imdGas, rules)
+	st.initialGas = st.gasRemaining.Plus(imdGas)
 
 	// Execute the preparatory steps for state transition which includes:
 	// - prepare accessList(post-berlin; eip-7702)
@@ -527,15 +528,20 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	if st.msg.Gas() < intrinsicGasResult.RegularGas || st.msg.Gas() < intrinsicGasResult.FloorGasCost {
 		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.msg.Gas(), max(intrinsicGasResult.RegularGas, intrinsicGasResult.FloorGasCost))
 	}
-	st.gasRemaining = NonIntrinsicMdGas(st.msg.Gas(), intrinsicGasResult, rules, st.evm.Config().Tracer)
-	st.initialGas = st.gasRemaining.Plus(evmtypes.MdGas{
+	imdGas := evmtypes.MdGas{
 		Regular: intrinsicGasResult.RegularGas,
 		State:   intrinsicGasResult.StateGas,
-	})
+	}
+	st.gasRemaining = SplitIntoMdGas(st.msg.Gas(), imdGas, rules)
+	st.initialGas = st.gasRemaining.Plus(imdGas)
 
 	verifiedAuthorities, err := st.verifyAuthorities(auths, contractCreation, rules.ChainID.String())
 	if err != nil {
 		return nil, err
+	}
+
+	if t := st.evm.Config().Tracer; t != nil && t.OnGasChange != nil {
+		t.OnGasChange(st.initialGas.Total(), st.gasRemaining.Total(), tracing.GasChangeTxIntrinsicGas)
 	}
 
 	var bailout bool
