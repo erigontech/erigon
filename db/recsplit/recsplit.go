@@ -968,6 +968,15 @@ func (rs *RecSplit) buildWithWorkers(ctx context.Context) error {
 		go recsplitBucketWorker(taskCh, resultCh, ws, &wg)
 	}
 
+	// Collector goroutine that receives results and writes them in order
+	// MUST be spawned before producer to avoid deadlock (collector drains results while producer sends tasks)
+	var resultErr error
+	collectorDone := make(chan struct{})
+	go func() {
+		defer close(collectorDone)
+		resultErr = rs.collectAndWriteResults(resultCh)
+	}()
+
 	// Producer goroutine that loads buckets and sends tasks
 	var producerErr error
 	producerDone := make(chan struct{})
@@ -1017,14 +1026,6 @@ func (rs *RecSplit) buildWithWorkers(ctx context.Context) error {
 		taskCh <- task
 	}
 	close(taskCh)
-
-	// Collector goroutine that receives results and writes them in order
-	var resultErr error
-	collectorDone := make(chan struct{})
-	go func() {
-		defer close(collectorDone)
-		resultErr = rs.collectAndWriteResults(resultCh)
-	}()
 
 	// Wait for workers to finish
 	wg.Wait()
