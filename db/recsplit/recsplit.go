@@ -242,7 +242,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 		rs.salt = *args.Salt
 	}
 	rs.bucketCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.SmallSortableBuffers, logger)
-	rs.bucketCollector.SortAndFlushInBackground(false)
+	rs.bucketCollector.SortAndFlushInBackground(true)
 	rs.bucketCollector.LogLvl(log.LvlDebug)
 	var err error
 	if args.Enums {
