@@ -18,9 +18,7 @@ package recsplit
 
 import (
 	"context"
-	"crypto/md5"
 	"fmt"
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -482,4 +480,3 @@ func TestTwoLayerIndex(t *testing.T) {
 		test(t, cfg)
 	})
 }
-
