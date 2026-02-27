@@ -778,11 +778,17 @@ func putBucketResult(r *bucketResult) {
 
 // newWorkerState creates a new workerState for a worker goroutine.
 func (rs *RecSplit) newWorkerState() *workerState {
+	// Allocate buffers large enough for largest possible bucket
+	// Add 50% margin to bucketSize to handle hash distribution variance
+	bufferSize := rs.bucketSize + rs.bucketSize/2
+	if int(rs.secondaryAggrBound) > bufferSize {
+		bufferSize = int(rs.secondaryAggrBound)
+	}
 	return &workerState{
 		scratch: &recsplitScratch{
-			count:              make([]uint16, rs.secondaryAggrBound),
-			buffer:             make([]uint64, rs.secondaryAggrBound),
-			offsetBuffer:       make([]uint64, rs.secondaryAggrBound),
+			count:              make([]uint16, bufferSize),
+			buffer:             make([]uint64, bufferSize),
+			offsetBuffer:       make([]uint64, bufferSize),
 			trace:              rs.trace,
 			startSeed:          rs.startSeed,
 			golombRice:         rs.golombRice,
