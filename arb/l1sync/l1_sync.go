@@ -201,6 +201,7 @@ func (s *L1SyncService) pollOnce(ctx context.Context) (pollMore bool, err error)
 		// Fetch delayed messages for this chunk and accumulate them
 		if err := s.fetchDelayedMessagesInRange(ctx, fromL1Block, toL1Block); err != nil {
 			s.logger.Warn("failed to fetch delayed messages for chunk", "fromL1Block", fromL1Block, "toL1Block", toL1Block, "err", err)
+			continue
 		}
 
 		batches, err := s.FetchBatchesInRange(ctx, fromL1Block, toL1Block)
@@ -212,7 +213,7 @@ func (s *L1SyncService) pollOnce(ctx context.Context) (pollMore bool, err error)
 			if ctx.Err() != nil {
 				return false, ctx.Err()
 			}
-			
+
 			// skip batches we already processed
 			if batch.SequenceNumber <= lastBatchSeqNum && lastBatchSeqNum > 0 {
 				continue

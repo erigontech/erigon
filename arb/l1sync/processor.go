@@ -129,7 +129,7 @@ func (s *L1SyncService) ProcessBatch(ctx context.Context, seqNum uint64, data []
 		if err != nil {
 			fmt.Println("err", err)
 		} else if block.Number() != nil && block.NumberU64()%1000 == 0 {
-			fmt.Println("lol")
+			// fmt.Println("lol")
 		}
 		// // Execute L2 block
 		// result, err := s.exec.DigestMessage(msgNum, msg, nil)
