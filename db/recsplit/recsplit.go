@@ -104,8 +104,9 @@ type recsplitScratch struct {
 	buffer       []uint64
 	offsetBuffer []uint64
 	numBuf       [8]byte
-	trace        bool     // Enable tracing output
-	startSeed    []uint64 // Hash seeds for each level of recursive split
+	trace        bool       // Enable tracing output
+	startSeed    []uint64   // Hash seeds for each level of recursive split
+	resultPool   *sync.Pool // Pool for reusing bucketResult instances
 }
 
 // workerState carries per-goroutine state for parallel execution.
@@ -320,6 +321,11 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 		count:     make([]uint16, rs.secondaryAggrBound),
 		trace:     rs.trace,
 		startSeed: args.StartSeed,
+		resultPool: &sync.Pool{
+			New: func() interface{} {
+				return &bucketResult{}
+			},
+		},
 	}
 	if args.NoFsync {
 		rs.DisableFsync()
@@ -725,6 +731,21 @@ func findBijection(bucket []uint64, salt uint64) uint64 {
 	}
 }
 
+// getBucketResult gets a bucketResult from the pool or creates a new one.
+func (rs *RecSplit) getBucketResult() *bucketResult {
+	r := rs.scratch.resultPool.Get().(*bucketResult)
+	r.offsetData = r.offsetData[:0] // Reset slice
+	r.gr = GolombRice{}             // Reset Golomb-Rice
+	r.bucketSize = 0
+	r.order = 0
+	return r
+}
+
+// putBucketResult returns a bucketResult to the pool for reuse.
+func (rs *RecSplit) putBucketResult(r *bucketResult) {
+	rs.scratch.resultPool.Put(r)
+}
+
 // newWorkerState creates a new workerState for a worker goroutine.
 func (rs *RecSplit) newWorkerState() *workerState {
 	return &workerState{
@@ -734,6 +755,7 @@ func (rs *RecSplit) newWorkerState() *workerState {
 			offsetBuffer: make([]uint64, rs.secondaryAggrBound),
 			trace:        rs.trace,
 			startSeed:    rs.startSeed,
+			resultPool:   rs.scratch.resultPool, // Share the pool
 		},
 		unaryBuf:           make([]uint64, 0, rs.secondaryAggrBound),
 		golombRice:         rs.golombRice,
@@ -783,13 +805,12 @@ func recsplitBucketWorker(inCh <-chan *bucketTask, outCh chan<- *bucketResult, w
 			}
 		}
 
-		// Send result (copy data to avoid use-after-free)
-		result := &bucketResult{
-			order:      task.order,
-			offsetData: append([]byte{}, ws.offsetData...), // Copy out
-			gr:         ws.gr,                              // Copy out (value type)
-			bucketSize: len(task.keys),
-		}
+		// Get result from pool and populate it
+		result := ws.scratch.resultPool.Get().(*bucketResult)
+		result.order = task.order
+		result.offsetData = append(result.offsetData[:0], ws.offsetData...) // Copy out
+		result.gr = ws.gr                                                   // Copy out (value type)
+		result.bucketSize = len(task.keys)
 		outCh <- result
 	}
 }
