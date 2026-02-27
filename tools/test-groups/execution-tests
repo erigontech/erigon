@@ -1,0 +1,6 @@
+github.com/erigontech/erigon/execution/tests
+github.com/erigontech/erigon/execution/tests/blockgen
+github.com/erigontech/erigon/execution/tests/chaos_monkey
+github.com/erigontech/erigon/execution/tests/contracts
+github.com/erigontech/erigon/execution/tests/testforks
+github.com/erigontech/erigon/execution/tests/testutil

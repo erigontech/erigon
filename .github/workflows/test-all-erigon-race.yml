@@ -75,9 +75,7 @@ jobs:
           GOGC: 80
           CGO_CFLAGS: -D__BLST_PORTABLE__
           GOFLAGS: -race
-        run: |
-          make write-test-groups
-          make test-group TEST_GROUP=${{ matrix.test-group }}
+        run: make test-group TEST_GROUP=${{ matrix.test-group }}
 
       - uses: ./.github/actions/cleanup-erigon
         if: always()

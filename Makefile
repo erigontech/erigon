@@ -229,10 +229,12 @@ test-all-race: test-filtered
 write-test-groups:
 	go list ./... | ./tools/write-test-groups
 
-## check-test-groups:                        verify tools/test-groups.json is up to date
-check-test-groups:
-	@if ! ./tools/write-test-groups --json | diff - tools/test-groups.json > /dev/null 2>&1; then \
-		echo "tools/test-groups.json is out of date; run: make write-test-groups"; exit 1; fi
+## check-generated:                     verify generated files are up to date
+check-generated:
+	@go mod tidy
+	@go list ./... | ./tools/write-test-groups
+	@if ! git diff --exit-code -- go.mod go.sum tools/test-groups/ tools/test-groups.json; then \
+		echo "ERROR: generated files are out of date. Run 'go mod tidy' and 'make write-test-groups', then commit."; exit 1; fi
 
 ## test-group TEST_GROUP=<name>			run a named CI test group using its package file
 test-group: tools/test-groups/$(TEST_GROUP)
@@ -352,15 +354,13 @@ kurtosis-cleanup:
 ## lintci:                            run golangci-lint linters (full run, used in CI; skips fast-only and mod tidy)
 lintci:
 	@go tool golangci-lint run --config ./.golangci.yml
-	@./tools/mod_tidy_check.sh
-	@$(MAKE) check-test-groups
+	@$(MAKE) check-generated
 
 ## lint:                              run all linters (fast-only first for quick feedback, then full)
 lint:
 	@go tool golangci-lint run --config ./.golangci.yml --fast-only
-	@./tools/mod_tidy_check.sh
 	@go tool golangci-lint run --config ./.golangci.yml
-	@$(MAKE) check-test-groups
+	@$(MAKE) check-generated
 
 ## tidy:                              `go mod tidy`
 tidy:
