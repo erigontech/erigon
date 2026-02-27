@@ -302,9 +302,14 @@ func (rs *RecSplit) FileName() string                           { return rs.file
 func (rs *RecSplit) MajorVersion() version.DataStructureVersion { return rs.dataStructureVersion }
 func (rs *RecSplit) Salt() uint32                               { return rs.salt }
 
-// golombParamValue extracts the golomb parameter from pre-computed table
+// golombParamValue extracts the golomb parameter from table
+// Since table is extended on-demand during Build(), all accessed values should be present
 func golombParamValue(golombRice []uint32, m uint16) int {
-	return int(golombRice[m] >> 27)
+	if m < uint16(len(golombRice)) {
+		return int(golombRice[m] >> 27)
+	}
+	// This should not happen if golombRice was properly extended during Build()
+	panic(fmt.Sprintf("golombParam not computed for bucket size %d (table size: %d)", m, len(golombRice)))
 }
 func (rs *RecSplit) Close() {
 	if rs.indexF != nil {
@@ -863,17 +868,13 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	rs.currentBucketIdx = math.MaxUint64 // To make sure 0 bucket is detected
 	defer rs.bucketCollector.Close()
 
-	// Pre-populate golombRice table for all potential bucket sizes
-	// In practice, buckets can exceed bucketSize due to hash distribution
-	maxM := uint16(rs.bucketSize * 2) // Add 100% safety margin for hash distribution variance
-	if rs.secondaryAggrBound > maxM {
-		maxM = rs.secondaryAggrBound
-	}
-	for m := uint16(len(rs.golombRice)); m <= maxM; m++ {
-		rs.golombParam(m) // Populate table entry
+	// Ensure golombRice table is extended for common bucket sizes
+	// This matches the main branch approach: compute on-demand as needed
+	for m := uint16(len(rs.golombRice)); m <= rs.secondaryAggrBound; m++ {
+		rs.golombParam(m)
 	}
 
-	// Set golombRice and bytesPerRec in scratch (will be used for lookup)
+	// Set golombRice and bytesPerRec in scratch
 	rs.scratch.golombRice = rs.golombRice
 	rs.scratch.bytesPerRec = rs.bytesPerRec
 
