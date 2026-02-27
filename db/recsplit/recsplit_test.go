@@ -514,3 +514,48 @@ func TestSequentialVsParallel(t *testing.T) {
 	assert.Equal(t, h1, h2)
 	assert.Equal(t, h1, h4)
 }
+
+// TestLargeBucketWithWorkers tests golombRice pre-population with large buckets and multiple workers
+func TestLargeBucketWithWorkers(t *testing.T) {
+	logger := log.New()
+	tmpDir := t.TempDir()
+	salt := uint32(123)
+
+	// Test with large bucket size that can exceed size due to hash distribution
+	indexFile := filepath.Join(tmpDir, "large_bucket_index")
+	rs, err := NewRecSplit(RecSplitArgs{
+		KeyCount:   100_000,
+		BucketSize: 2000, // Large bucket size
+		Salt:       &salt,
+		TmpDir:     tmpDir,
+		IndexFile:  indexFile,
+		LeafSize:   8,
+		Workers:    2, // Use multiple workers
+	}, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rs.Close()
+
+	// Add many keys to ensure hash distribution creates various bucket sizes
+	for i := 0; i < 100_000; i++ {
+		key := fmt.Appendf(nil, "key_%d_%d_%d", i, i*13, i*17)
+		if err := rs.AddKey(key, uint64(i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// This should not panic due to golombRice index out of range
+	if err := rs.Build(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify the index was created
+	data, err := os.ReadFile(indexFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) == 0 {
+		t.Fatal("index file is empty")
+	}
+}
