@@ -98,12 +98,13 @@ func (q *bucketResultQueue) Pop() interface{} {
 	return x
 }
 
-// recsplitScratch holds per-execution scratch buffers (shared by sequential and worker paths).
+// recsplitScratch holds per-execution scratch buffers and configuration (shared by sequential and worker paths).
 type recsplitScratch struct {
-	count        []uint16 // Size = secondaryAggrBound (for findSplit 8-way)
-	buffer       []uint64
+	count  []uint16 // Size = secondaryAggrBound (for findSplit 8-way)
+	buffer []uint64
 	offsetBuffer []uint64
-	numBuf       [8]byte
+	numBuf [8]byte
+	trace  bool // Enable tracing output
 }
 
 // workerState carries per-goroutine state for parallel execution.
@@ -120,7 +121,6 @@ type workerState struct {
 	primaryAggrBound   uint16
 	secondaryAggrBound uint16
 	bytesPerRec        int
-	trace              bool
 }
 
 // RecSplit is the implementation of Recursive Split algorithm for constructing perfect hash mapping, described in
@@ -995,7 +995,7 @@ func (rs *RecSplit) buildWithWorkers(ctx context.Context) error {
 			if rs.currentBucketIdx != bucketIdx {
 				if rs.currentBucketIdx != math.MaxUint64 {
 					// Send current bucket as a task
-					task := &bucketTask{
+					:= &bucketTask{
 						order:   rs.currentBucketIdx,
 						keys:    rs.currentBucket,
 						offsets: rs.currentBucketOffs,
