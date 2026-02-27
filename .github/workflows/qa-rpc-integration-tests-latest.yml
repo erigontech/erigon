@@ -1,24 +1,13 @@
 name: QA - RPC Integration Tests Latest
 
 on:
-  workflow_dispatch:     # Run manually
+  workflow_dispatch:     # Run manually only (disabled from CI until infra is updated to support separate dbs for main vs branches)
     inputs:
       force_dump_response:
         description: 'Force dump results even if they match (by default only if actual != expected)'
         type: boolean
         required: false
         default: false
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
-    types:
-      - opened
-      - reopened
-      - synchronize
-      - ready_for_review
 
 
 jobs:
