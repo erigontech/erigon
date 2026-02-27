@@ -122,7 +122,7 @@ func ExecV3(ctx context.Context,
 	initialCycle := execStage.CurrentSyncCycle.IsInitialCycle
 	hooks := cfg.vmConfig.Tracer
 	applyTx := rwTx
-	_, _, err := doms.SeekCommitment(ctx, applyTx)
+	initialTxNum, blockNum, err := doms.SeekCommitment(ctx, applyTx)
 	if err != nil {
 		return err
 	}
@@ -139,11 +139,6 @@ func ExecV3(ctx context.Context,
 			agg.SetMergeWorkers(dbg.MergeWorkers) //TODO: Need always set to CollateWorkers=2 (on ChainTip too). But need more tests first
 		}
 	}
-
-	var (
-		blockNum     = doms.BlockNum()
-		initialTxNum = doms.TxNum()
-	)
 
 	if maxBlockNum < blockNum {
 		return nil
@@ -191,7 +186,6 @@ func ExecV3(ctx context.Context,
 	defer resetDomainGauges(ctx)
 
 	stepsInDb := rawdbhelpers.IdxStepsCountV3(applyTx, applyTx.Debug().StepSize())
-	blockNum = doms.BlockNum()
 
 	if maxBlockNum < blockNum {
 		return nil

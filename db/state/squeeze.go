@@ -485,7 +485,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 				return nil, err
 			}
 
-			domains.SetBlockNum(blockNum)
 			domains.SetTxNum(lastTxnumInShard - 1)
 			currentTxNum := lastTxnumInShard - 1
 			domains.GetCommitmentCtx().SetLimitedHistoryStateReader(rwTx, lastTxnumInShard) // this helps to read state from correct file during commitment
