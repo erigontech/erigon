@@ -98,16 +98,20 @@ func (q *bucketResultQueue) Pop() interface{} {
 	return x
 }
 
-// workerState carries per-goroutine scratch space and read-only shared references.
-type workerState struct {
-	// Per-worker scratch (heap-allocated once per worker goroutine)
+// recsplitScratch holds per-execution scratch buffers (shared by sequential and worker paths).
+type recsplitScratch struct {
 	count        []uint16 // Size = secondaryAggrBound (for findSplit 8-way)
 	buffer       []uint64
 	offsetBuffer []uint64
-	unaryBuf     []uint64
 	numBuf       [8]byte
-	gr           GolombRice // Local output GolombRice for this bucket
-	offsetData   []byte     // Local output: serialized offset bytes
+}
+
+// workerState carries per-goroutine state for parallel execution.
+type workerState struct {
+	scratch    *recsplitScratch // Scratch buffers (per-worker copy)
+	unaryBuf   []uint64
+	gr         GolombRice // Local output Golomb-Rice for this bucket
+	offsetData []byte     // Local output: serialized offset bytes
 
 	// Read-only shared fields (set once before workers start)
 	golombRice         []uint32
@@ -147,14 +151,12 @@ type RecSplit struct {
 	filePath string
 
 	tmpDir            string
-	gr                GolombRice // Helper object to encode the tree of hash function salts using Golomb-Rice code.
-	bucketPosAcc      []uint64   // Accumulator for position of every bucket in the encoding of the hash function
+	scratch           *recsplitScratch // Working buffers
+	gr                GolombRice       // Helper object to encode the tree of hash function salts using Golomb-Rice code.
+	bucketPosAcc      []uint64         // Accumulator for position of every bucket in the encoding of the hash function
 	startSeed         []uint64
-	count             []uint16
 	currentBucket     []uint64 // 64-bit fingerprints of keys in the current bucket accumulated before the recsplit is performed for that bucket
 	currentBucketOffs []uint64 // Index offsets for the current bucket
-	offsetBuffer      []uint64
-	buffer            []uint64
 	golombRice        []uint32
 	bucketSizeAcc     []uint64 // Bucket size accumulator
 	// Helper object to encode the sequence of cumulative number of keys in the buckets
@@ -314,7 +316,9 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	} else {
 		rs.secondaryAggrBound = rs.primaryAggrBound * uint16(math.Ceil(0.21*float64(rs.leafSize)+9./10.))
 	}
-	rs.count = make([]uint16, rs.secondaryAggrBound)
+	rs.scratch = &recsplitScratch{
+		count: make([]uint16, rs.secondaryAggrBound),
+	}
 	if args.NoFsync {
 		rs.DisableFsync()
 	}
@@ -558,17 +562,17 @@ func (rs *RecSplit) recsplitCurrentBucket() error {
 			}
 		}
 		bitPos := rs.gr.bitCount
-		if rs.buffer == nil {
-			rs.buffer = make([]uint64, len(rs.currentBucket))
-			rs.offsetBuffer = make([]uint64, len(rs.currentBucketOffs))
+		if rs.scratch.buffer == nil {
+			rs.scratch.buffer = make([]uint64, len(rs.currentBucket))
+			rs.scratch.offsetBuffer = make([]uint64, len(rs.currentBucketOffs))
 		} else {
-			for len(rs.buffer) < len(rs.currentBucket) {
-				rs.buffer = append(rs.buffer, 0)
-				rs.offsetBuffer = append(rs.offsetBuffer, 0)
+			for len(rs.scratch.buffer) < len(rs.currentBucket) {
+				rs.scratch.buffer = append(rs.scratch.buffer, 0)
+				rs.scratch.offsetBuffer = append(rs.scratch.offsetBuffer, 0)
 			}
 		}
 		var err error
-		rs.unaryBuf, err = rs.recsplit(0 /* level */, rs.currentBucket, rs.currentBucketOffs, rs.unaryBuf[:0])
+		rs.unaryBuf, err = rs.recsplit(0 /* level */, rs.currentBucket, rs.currentBucketOffs, rs.unaryBuf[:0], rs.scratch)
 		if err != nil {
 			return err
 		}
@@ -717,9 +721,11 @@ func findBijection(bucket []uint64, salt uint64) uint64 {
 // newWorkerState creates a new workerState for a worker goroutine.
 func (rs *RecSplit) newWorkerState() *workerState {
 	return &workerState{
-		count:              make([]uint16, rs.secondaryAggrBound),
-		buffer:             make([]uint64, rs.secondaryAggrBound),
-		offsetBuffer:       make([]uint64, rs.secondaryAggrBound),
+		scratch: &recsplitScratch{
+			count:        make([]uint16, rs.secondaryAggrBound),
+			buffer:       make([]uint64, rs.secondaryAggrBound),
+			offsetBuffer: make([]uint64, rs.secondaryAggrBound),
+		},
 		unaryBuf:           make([]uint64, 0, rs.secondaryAggrBound),
 		golombRice:         rs.golombRice,
 		startSeed:          rs.startSeed,
@@ -754,7 +760,7 @@ func recsplitBucketWorker(inCh <-chan *bucketTask, outCh chan<- *bucketResult, w
 
 			// Process the bucket recursively
 			var err error
-			ws.unaryBuf, err = recsplitWorkerFunc(ws, 0, task.keys, task.offsets, ws.unaryBuf[:0])
+			ws.unaryBuf, err = recsplitWorkerFunc(ws, 0, task.keys, task.offsets, ws.unaryBuf[:0], ws.scratch)
 			if err != nil {
 				outCh <- &bucketResult{
 					order: 0xffffffffffffffff, // Special marker for error
@@ -765,8 +771,8 @@ func recsplitBucketWorker(inCh <-chan *bucketTask, outCh chan<- *bucketResult, w
 		} else {
 			// Size 0 or 1: write offsets directly
 			for _, off := range task.offsets {
-				binary.BigEndian.PutUint64(ws.numBuf[:], off)
-				ws.offsetData = append(ws.offsetData, ws.numBuf[8-ws.bytesPerRec:]...)
+				binary.BigEndian.PutUint64(ws.scratch.numBuf[:], off)
+				ws.offsetData = append(ws.offsetData, ws.scratch.numBuf[8-ws.bytesPerRec:]...)
 			}
 		}
 
@@ -783,7 +789,7 @@ func recsplitBucketWorker(inCh <-chan *bucketTask, outCh chan<- *bucketResult, w
 
 // recsplitWorkerFunc applies recsplit algorithm to the given bucket using per-worker state.
 // This is the worker-safe version that accumulates results without writing to indexW.
-func recsplitWorkerFunc(ws *workerState, level int, bucket []uint64, offsets []uint64, unary []uint64) ([]uint64, error) {
+func recsplitWorkerFunc(ws *workerState, level int, bucket []uint64, offsets []uint64, unary []uint64, scratch *recsplitScratch) ([]uint64, error) {
 	if ws.trace {
 		fmt.Printf("recsplit(%d, %d, %x)\n", level, len(bucket), bucket)
 	}
@@ -794,12 +800,12 @@ func recsplitWorkerFunc(ws *workerState, level int, bucket []uint64, offsets []u
 		salt = findBijection(bucket, salt)
 		for i := uint16(0); i < m; i++ {
 			j := remap16(remix(bucket[i]+salt), m)
-			ws.offsetBuffer[j] = offsets[i]
+			scratch.offsetBuffer[j] = offsets[i]
 		}
 		// Write offsets to local offsetData buffer instead of to file
-		for _, offset := range ws.offsetBuffer[:m] {
-			binary.BigEndian.PutUint64(ws.numBuf[:], offset)
-			ws.offsetData = append(ws.offsetData, ws.numBuf[8-ws.bytesPerRec:]...)
+		for _, offset := range scratch.offsetBuffer[:m] {
+			binary.BigEndian.PutUint64(scratch.numBuf[:], offset)
+			ws.offsetData = append(ws.offsetData, scratch.numBuf[8-ws.bytesPerRec:]...)
 		}
 		salt -= ws.startSeed[level]
 		log2golomb := int(ws.golombRice[m] >> 27)
@@ -810,7 +816,7 @@ func recsplitWorkerFunc(ws *workerState, level int, bucket []uint64, offsets []u
 		unary = append(unary, salt>>log2golomb)
 	} else {
 		fanout, unit := splitParams(m, ws.leafSize, ws.primaryAggrBound, ws.secondaryAggrBound)
-		count := ws.count
+		count := scratch.count
 		salt = findSplit(bucket, salt, fanout, unit, count)
 		for i, c := uint16(0), uint16(0); i < fanout; i++ {
 			count[i] = c
@@ -818,12 +824,12 @@ func recsplitWorkerFunc(ws *workerState, level int, bucket []uint64, offsets []u
 		}
 		for i := uint16(0); i < m; i++ {
 			j := remap16(remix(bucket[i]+salt), m) / unit
-			ws.buffer[count[j]] = bucket[i]
-			ws.offsetBuffer[count[j]] = offsets[i]
+			scratch.buffer[count[j]] = bucket[i]
+			scratch.offsetBuffer[count[j]] = offsets[i]
 			count[j]++
 		}
-		copy(bucket, ws.buffer)
-		copy(offsets, ws.offsetBuffer)
+		copy(bucket, scratch.buffer)
+		copy(offsets, scratch.offsetBuffer)
 		salt -= ws.startSeed[level]
 		log2golomb := int(ws.golombRice[m] >> 27)
 		if ws.trace {
@@ -834,24 +840,24 @@ func recsplitWorkerFunc(ws *workerState, level int, bucket []uint64, offsets []u
 		var err error
 		var i uint16
 		for i = 0; i < m-unit; i += unit {
-			if unary, err = recsplitWorkerFunc(ws, level+1, bucket[i:i+unit], offsets[i:i+unit], unary); err != nil {
+			if unary, err = recsplitWorkerFunc(ws, level+1, bucket[i:i+unit], offsets[i:i+unit], unary, scratch); err != nil {
 				return nil, err
 			}
 		}
 		if m-i > 1 {
-			if unary, err = recsplitWorkerFunc(ws, level+1, bucket[i:], offsets[i:], unary); err != nil {
+			if unary, err = recsplitWorkerFunc(ws, level+1, bucket[i:], offsets[i:], unary, scratch); err != nil {
 				return nil, err
 			}
 		} else if m-i == 1 {
-			binary.BigEndian.PutUint64(ws.numBuf[:], offsets[i])
-			ws.offsetData = append(ws.offsetData, ws.numBuf[8-ws.bytesPerRec:]...)
+			binary.BigEndian.PutUint64(scratch.numBuf[:], offsets[i])
+			ws.offsetData = append(ws.offsetData, scratch.numBuf[8-ws.bytesPerRec:]...)
 		}
 	}
 	return unary, nil
 }
 
 // recsplit applies recSplit algorithm to the given bucket
-func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary []uint64) ([]uint64, error) {
+func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary []uint64, scratch *recsplitScratch) ([]uint64, error) {
 	if rs.trace {
 		fmt.Printf("recsplit(%d, %d, %x)\n", level, len(bucket), bucket)
 	}
@@ -862,11 +868,11 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 		salt = findBijection(bucket, salt)
 		for i := uint16(0); i < m; i++ {
 			j := remap16(remix(bucket[i]+salt), m)
-			rs.offsetBuffer[j] = offsets[i]
+			scratch.offsetBuffer[j] = offsets[i]
 		}
-		for _, offset := range rs.offsetBuffer[:m] {
-			binary.BigEndian.PutUint64(rs.numBuf[:], offset)
-			if _, err := rs.indexW.Write(rs.numBuf[8-rs.bytesPerRec:]); err != nil {
+		for _, offset := range scratch.offsetBuffer[:m] {
+			binary.BigEndian.PutUint64(scratch.numBuf[:], offset)
+			if _, err := rs.indexW.Write(scratch.numBuf[8-rs.bytesPerRec:]); err != nil {
 				return nil, err
 			}
 		}
@@ -879,7 +885,7 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 		unary = append(unary, salt>>log2golomb)
 	} else {
 		fanout, unit := splitParams(m, rs.leafSize, rs.primaryAggrBound, rs.secondaryAggrBound)
-		count := rs.count
+		count := scratch.count
 		salt = findSplit(bucket, salt, fanout, unit, count)
 		for i, c := uint16(0), uint16(0); i < fanout; i++ {
 			count[i] = c
@@ -887,12 +893,12 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 		}
 		for i := uint16(0); i < m; i++ {
 			j := remap16(remix(bucket[i]+salt), m) / unit
-			rs.buffer[count[j]] = bucket[i]
-			rs.offsetBuffer[count[j]] = offsets[i]
+			scratch.buffer[count[j]] = bucket[i]
+			scratch.offsetBuffer[count[j]] = offsets[i]
 			count[j]++
 		}
-		copy(bucket, rs.buffer)
-		copy(offsets, rs.offsetBuffer)
+		copy(bucket, scratch.buffer)
+		copy(offsets, scratch.offsetBuffer)
 		salt -= rs.startSeed[level]
 		log2golomb := rs.golombParam(m)
 		if rs.trace {
@@ -903,17 +909,17 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 		var err error
 		var i uint16
 		for i = 0; i < m-unit; i += unit {
-			if unary, err = rs.recsplit(level+1, bucket[i:i+unit], offsets[i:i+unit], unary); err != nil {
+			if unary, err = rs.recsplit(level+1, bucket[i:i+unit], offsets[i:i+unit], unary, scratch); err != nil {
 				return nil, err
 			}
 		}
 		if m-i > 1 {
-			if unary, err = rs.recsplit(level+1, bucket[i:], offsets[i:], unary); err != nil {
+			if unary, err = rs.recsplit(level+1, bucket[i:], offsets[i:], unary, scratch); err != nil {
 				return nil, err
 			}
 		} else if m-i == 1 {
-			binary.BigEndian.PutUint64(rs.numBuf[:], offsets[i])
-			if _, err := rs.indexW.Write(rs.numBuf[8-rs.bytesPerRec:]); err != nil {
+			binary.BigEndian.PutUint64(scratch.numBuf[:], offsets[i])
+			if _, err := rs.indexW.Write(scratch.numBuf[8-rs.bytesPerRec:]); err != nil {
 				return nil, err
 			}
 		}
