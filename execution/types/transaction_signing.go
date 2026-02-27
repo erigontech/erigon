@@ -52,14 +52,6 @@ func MakeSigner(config *chain.Config, blockNumber uint64, blockTime uint64) *Sig
 		}
 		signer.unprotected = true
 		switch {
-		case config.IsAmsterdam(blockTime):
-			signer.protected = true
-			signer.accessList = true
-			signer.dynamicFee = true
-			signer.blob = true
-			signer.setCode = true
-			signer.chainID.Set(&chainId)
-			signer.chainIDMul.Lsh(&chainId, 1) // ×2
 		case config.IsPrague(blockTime):
 			signer.protected = true
 			signer.accessList = true
@@ -132,7 +124,7 @@ func LatestSigner(config *chain.Config) *Signer {
 	signer.chainID.Set(chainId)
 	signer.chainIDMul.Lsh(chainId, 1) // ×2
 	if config.ChainID != nil {
-		if config.CancunTime != nil || config.AmsterdamTime != nil {
+		if config.CancunTime != nil {
 			signer.blob = true
 		}
 		if config.LondonBlock != nil {
@@ -144,7 +136,7 @@ func LatestSigner(config *chain.Config) *Signer {
 		if config.SpuriousDragonBlock != nil {
 			signer.protected = true
 		}
-		if config.PragueTime != nil || config.AmsterdamTime != nil {
+		if config.PragueTime != nil {
 			signer.setCode = true
 		}
 		if config.Bor != nil && config.Bor.GetBhilaiBlock() != nil {
