@@ -108,13 +108,17 @@ func (q *bucketResultQueue) Pop() interface{} {
 
 // recsplitScratch holds per-execution scratch buffers and configuration (shared by sequential and worker paths).
 type recsplitScratch struct {
-	count        []uint16 // Size = secondaryAggrBound (for findSplit 8-way)
-	buffer       []uint64
-	offsetBuffer []uint64
-	numBuf       [8]byte
-	trace        bool       // Enable tracing output
-	startSeed    []uint64   // Hash seeds for each level of recursive split
-	resultPool   *sync.Pool // Pool for reusing bucketResult instances
+	count              []uint16 // Size = secondaryAggrBound (for findSplit 8-way)
+	buffer             []uint64
+	offsetBuffer       []uint64
+	numBuf             [8]byte
+	trace              bool     // Enable tracing output
+	startSeed          []uint64 // Hash seeds for each level of recursive split
+	golombRice         []uint32 // Pre-computed Golomb-Rice parameters
+	leafSize           uint16
+	primaryAggrBound   uint16
+	secondaryAggrBound uint16
+	resultPool         *sync.Pool // Pool for reusing bucketResult instances
 }
 
 // workerState carries per-goroutine state for parallel execution.
@@ -125,7 +129,6 @@ type workerState struct {
 	offsetData []byte     // Local output: serialized offset bytes
 
 	// Read-only shared fields (set once before workers start)
-	golombRice         []uint32
 	leafSize           uint16
 	primaryAggrBound   uint16
 	secondaryAggrBound uint16
@@ -772,10 +775,10 @@ func (rs *RecSplit) newWorkerState() *workerState {
 			offsetBuffer: make([]uint64, rs.secondaryAggrBound),
 			trace:        rs.trace,
 			startSeed:    rs.startSeed,
+			golombRice:   rs.golombRice,
 			resultPool:   rs.scratch.resultPool, // Share the pool
 		},
 		unaryBuf:           make([]uint64, 0, rs.secondaryAggrBound),
-		golombRice:         rs.golombRice,
 		leafSize:           rs.leafSize,
 		primaryAggrBound:   rs.primaryAggrBound,
 		secondaryAggrBound: rs.secondaryAggrBound,
@@ -853,7 +856,7 @@ func recsplitWorkerFunc(ws *workerState, level int, bucket []uint64, offsets []u
 			ws.offsetData = append(ws.offsetData, scratch.numBuf[8-ws.bytesPerRec:]...)
 		}
 		salt -= scratch.startSeed[level]
-		log2golomb := golombParamValue(ws.golombRice, m)
+		log2golomb := golombParamValue(scratch.golombRice, m)
 		if scratch.trace {
 			fmt.Printf("encode bij %d with log2golomn %d at p = %d\n", salt, log2golomb, ws.gr.Bits())
 		}
@@ -876,7 +879,7 @@ func recsplitWorkerFunc(ws *workerState, level int, bucket []uint64, offsets []u
 		copy(bucket, scratch.buffer)
 		copy(offsets, scratch.offsetBuffer)
 		salt -= scratch.startSeed[level]
-		log2golomb := golombParamValue(ws.golombRice, m)
+		log2golomb := golombParamValue(scratch.golombRice, m)
 		if scratch.trace {
 			fmt.Printf("encode fanout %d: %d with log2golomn %d at p = %d\n", fanout, salt, log2golomb, ws.gr.Bits())
 		}
@@ -920,7 +923,7 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 			result.offsetData = append(result.offsetData, scratch.numBuf[8-rs.bytesPerRec:]...)
 		}
 		salt -= scratch.startSeed[level]
-		log2golomb := golombParamValue(rs.golombRice, m)
+		log2golomb := golombParamValue(scratch.golombRice, m)
 		if scratch.trace {
 			fmt.Printf("encode bij %d with log2golomn %d at p = %d\n", salt, log2golomb, result.gr.bitCount)
 		}
@@ -943,7 +946,7 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 		copy(bucket, scratch.buffer)
 		copy(offsets, scratch.offsetBuffer)
 		salt -= scratch.startSeed[level]
-		log2golomb := golombParamValue(rs.golombRice, m)
+		log2golomb := golombParamValue(scratch.golombRice, m)
 		if scratch.trace {
 			fmt.Printf("encode fanout %d: %d with log2golomn %d at p = %d\n", fanout, salt, log2golomb, result.gr.bitCount)
 		}
@@ -1215,6 +1218,8 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	for m := uint16(0); m <= maxM; m++ {
 		rs.golombParam(m)
 	}
+	// Set golombRice in scratch after table is populated
+	rs.scratch.golombRice = rs.golombRice
 
 	if rs.lvl < log.LvlTrace {
 		log.Log(rs.lvl, "[index] calculating", "file", rs.fileName)
