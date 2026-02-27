@@ -1551,6 +1551,17 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 	obj := newObject(sdb, addr, account, account)
 	if code != nil {
 		obj.code = code
+		// When code is loaded from the version map (written by a prior tx),
+		// synchronise the stateObject's CodeHash with the actual code.
+		// Without this fix, the stale CodeHash causes the "revert to original"
+		// optimisation in SetCode to incorrectly delete code writes when
+		// clearing a delegation that was set by a prior transaction in the
+		// same block.
+		codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
+		if codeHash != obj.data.CodeHash {
+			obj.data.CodeHash = codeHash
+			obj.original.CodeHash = codeHash
+		}
 	}
 	sdb.setStateObject(addr, obj)
 	return obj, nil
@@ -2360,6 +2371,23 @@ func (sdb *IntraBlockState) VersionedWrites(checkDirty bool) VersionedWrites {
 // Apply entries in a given write set to StateDB. Note that this function does not change MVHashMap nor write set
 // of the current StateDB.
 func (sdb *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
+	// Sort writes by (Address, Path, Key) to ensure deterministic processing
+	// order. VersionedWrites come from WriteSet map iteration (Go maps have
+	// non-deterministic order). Processing order matters because some paths
+	// (CodePath, SelfDestructPath) call GetOrNewStateObject which triggers a
+	// read from the stateReader. If a BalancePath write for the same address
+	// has already been processed, the state object is already loaded and no
+	// read occurs; otherwise an extra read is recorded. Different reads
+	// produce different EIP-7928 BAL hashes.
+	sort.Slice(writes, func(i, j int) bool {
+		if c := writes[i].Address.Cmp(writes[j].Address); c != 0 {
+			return c < 0
+		}
+		if writes[i].Path != writes[j].Path {
+			return writes[i].Path < writes[j].Path
+		}
+		return writes[i].Key.Cmp(writes[j].Key) < 0
+	})
 	for i := range writes {
 		path := writes[i].Path
 		val := writes[i].Val

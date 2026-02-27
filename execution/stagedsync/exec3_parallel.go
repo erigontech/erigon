@@ -262,7 +262,9 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 										}
 									}
 									if headerBALHash != bal.Hash() {
-										log.Info(fmt.Sprintf("computed bal: %s", bal.DebugString()))
+										fmt.Println("\n=== COMPUTED BAL (block", applyResult.BlockNum, ") ===")
+										fmt.Println(bal.DebugString())
+										fmt.Println("=== END COMPUTED BAL ===")
 										return fmt.Errorf("%w, block=%d: block access list mismatch: got %s expected %s", rules.ErrInvalidBlock, applyResult.BlockNum, bal.Hash(), headerBALHash)
 									}
 								}
@@ -1094,7 +1096,13 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 		if engine != nil {
 			if postApplyMessageFunc := engine.GetPostApplyMessageFunc(); postApplyMessageFunc != nil {
 				execResult := result.ExecutionResult
-				coinbase, err := stateReader.ReadAccountData(result.Coinbase) // to generate logs we want the initial balance
+				// Use a versionedStateReader to get the coinbase balance
+				// deterministically from the block's version map (which
+				// includes fee-calc writes from prior txs) instead of
+				// reading from stateReader whose content depends on
+				// apply-loop timing.
+				cbReader := state.NewVersionedStateReader(txIndex, nil, vm, stateReader)
+				coinbase, err := cbReader.ReadAccountData(result.Coinbase) // to generate logs we want the initial balance
 
 				if err != nil {
 					return nil, nil, nil, err
@@ -1569,15 +1577,17 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					be.blockIO.RecordReads(txVersion, mergedReads)
 				}
 				if len(addWrites) > 0 {
-					existing := be.blockIO.WriteSet(txVersion.TxIndex)
-					if len(existing) > 0 {
-						combined := append(state.VersionedWrites{}, existing...)
-						combined = append(combined, addWrites...)
-						be.blockIO.RecordWrites(txVersion, combined)
-					} else {
-						log.Info(fmt.Sprintf("writing %d, a: %v", len(addWrites), addWrites))
-						be.blockIO.RecordWrites(txVersion, addWrites)
-					}
+					// Merge finalization writes with existing execution writes.
+					existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
+					merged := MergeVersionedWrites(existingWrites, addWrites)
+					be.blockIO.RecordWrites(txVersion, merged)
+
+					// Flush the merged writes (including fee calc changes)
+					// to the version map so that subsequent per-tx
+					// finalizations see the full post-tx state (execution
+					// + fees) when reading via the version map fallback
+					// chain.
+					be.versionMap.FlushVersionedWrites(merged, true, "")
 				}
 
 				stateUpdates := stateWriter.WriteSet()
