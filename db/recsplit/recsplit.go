@@ -956,8 +956,9 @@ func (rs *RecSplit) buildOffsetEf() error {
 // buildWithWorkers implements the producer-consumer pattern for parallel bucket processing.
 func (rs *RecSplit) buildWithWorkers(ctx context.Context) error {
 	// Create channels for task distribution and result collection
+	// Use larger buffer for results to prevent deadlock when workers produce faster than collector consumes
 	taskCh := make(chan *bucketTask, rs.workers*2)
-	resultCh := make(chan *bucketResult, rs.workers*2)
+	resultCh := make(chan *bucketResult, rs.workers*16)
 
 	// Spawn worker goroutines
 	var wg sync.WaitGroup
