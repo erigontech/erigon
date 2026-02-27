@@ -508,9 +508,6 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	if blockFrom > 0 {
 		blockFrom++ // SeekCommitment returns last committed block; start from next
 	}
-	// flushEveryBlocks is separate from batchBlockCount because empty blocks produce no ETL
-	// keys — without an independent flush counter, progress is never committed during long
-	// stretches of empty blocks.
 	const minBatchBlockCount uint64 = 500
 	const maxBatchBlockCount uint64 = 100_000
 	batchBlockCount := minBatchBlockCount
@@ -531,8 +528,6 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	flushAtBlock := uint64(dbg.EnvInt("ERIGON_REBUILD_FLUSH_AT", 0))
 
 	var totalKeysProcessed uint64
-	var blocksProcessed uint64
-	const flushEveryBlocks = 1
 	var rh []byte
 	var lastToTxNum uint64
 	lastLogTime := time.Now()
@@ -628,7 +623,6 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 			return err
 		}
 		lastToTxNum = toTxNum
-		blocksProcessed++
 
 		header, err := blockReader.HeaderByNumber(ctx, rwTx, blockNum)
 		if err != nil {
@@ -781,16 +775,12 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 
 		blockFrom = batchEnd + 1
 
-		if blocksProcessed >= flushEveryBlocks || blockFrom > blockTo || domains.Size() > uint64(batchSize) ||
-			(flushAtBlock > 0 && blockFrom > flushAtBlock) {
-			if err := flushDomainsAndRebuild(); err != nil {
-				return nil, err
-			}
-			blocksProcessed = 0
-			if flushAtBlock > 0 && blockFrom > flushAtBlock {
-				logger.Info("[rebuild_commitment_history] stopping at flush-at block", "flushAtBlock", flushAtBlock, "nextBlockFrom", blockFrom)
-				return rh, nil
-			}
+		if err := flushDomainsAndRebuild(); err != nil {
+			return nil, err
+		}
+		if flushAtBlock > 0 && blockFrom > flushAtBlock {
+			logger.Info("[rebuild_commitment_history] stopping at flush-at block", "flushAtBlock", flushAtBlock, "nextBlockFrom", blockFrom)
+			return rh, nil
 		}
 	}
 
