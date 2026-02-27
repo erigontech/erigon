@@ -1145,8 +1145,15 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	if rs.secondaryAggrBound > maxM {
 		maxM = rs.secondaryAggrBound
 	}
-	for m := uint16(len(rs.golombRice)); m <= maxM; m++ {
-		rs.golombParam(m) // Populate table entry
+	// Pre-allocate the slice to final size to avoid reallocation after workers capture it
+	if cap(rs.golombRice) <= int(maxM) {
+		newRice := make([]uint32, int(maxM)+1)
+		copy(newRice, rs.golombRice)
+		rs.golombRice = newRice
+	}
+	// Now populate entries
+	for m := uint16(0); m <= maxM; m++ {
+		rs.golombParam(m)
 	}
 	// Set golombRice and bytesPerRec in scratch after they are computed
 	rs.scratch.golombRice = rs.golombRice
