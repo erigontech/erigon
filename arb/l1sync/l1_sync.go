@@ -185,6 +185,8 @@ func (s *L1SyncService) pollOnce(ctx context.Context) (pollMore bool, err error)
 	s.logger.Info("polling L1 for batches", "fromL1Block", fromL1Block, "currentL1Block", currentL1Block, "lastBatchSeqNum", lastBatchSeqNum)
 
 	// Process in chunks
+	pollStart := time.Now()
+	startL1Block := fromL1Block
 	batchesProcessed := uint64(0)
 	for fromL1Block <= currentL1Block {
 		if ctx.Err() != nil {
@@ -227,7 +229,15 @@ func (s *L1SyncService) pollOnce(ctx context.Context) (pollMore bool, err error)
 
 			batchesProcessed++
 			if s.config.MaxBatchesPerPoll > 0 && batchesProcessed >= s.config.MaxBatchesPerPoll {
-				s.logger.Info("reached max batches per poll", "processed", batchesProcessed)
+				elapsed := time.Since(pollStart)
+				l1Blocks := fromL1Block - startL1Block + 1
+				s.logger.Info("reached max batches per poll",
+					"processed", batchesProcessed,
+					"l1Blocks", l1Blocks,
+					"elapsed", elapsed,
+					"l1Blk/s", fmt.Sprintf("%.1f", float64(l1Blocks)/elapsed.Seconds()),
+					"batch/s", fmt.Sprintf("%.1f", float64(batchesProcessed)/elapsed.Seconds()),
+				)
 				return true, nil // need to poll more to sync up to chain tip
 			}
 		}
@@ -236,7 +246,15 @@ func (s *L1SyncService) pollOnce(ctx context.Context) (pollMore bool, err error)
 	}
 
 	if batchesProcessed > 0 {
-		s.logger.Info("poll cycle complete", "batchesProcessed", batchesProcessed)
+		elapsed := time.Since(pollStart)
+		l1Blocks := currentL1Block - startL1Block + 1
+		s.logger.Info("poll cycle complete",
+			"batchesProcessed", batchesProcessed,
+			"l1Blocks", l1Blocks,
+			"elapsed", elapsed,
+			"l1Blk/s", fmt.Sprintf("%.1f", float64(l1Blocks)/elapsed.Seconds()),
+			"batch/s", fmt.Sprintf("%.1f", float64(batchesProcessed)/elapsed.Seconds()),
+		)
 	}
 	return false, nil // processed everything up to current L1 chain tip
 }
