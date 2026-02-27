@@ -52,13 +52,6 @@ const RecSplitLogPrefix = "recsplit"
 
 const MaxLeafSize = 24
 
-// bucketResultPool is a package-level sync.Pool for reusing bucketResult instances
-var bucketResultPool = &sync.Pool{
-	New: func() interface{} {
-		return &bucketResult{}
-	},
-}
-
 /** David Stafford's (http://zimbry.blogspot.com/2011/09/better-bit-mixing-improving-on.html)
  * 13th variant of the 64-bit finalizer function in Austin Appleby's
  * MurmurHash3 (https://github.com/aappleby/smhasher).
@@ -714,18 +707,6 @@ func findBijection(bucket []uint64, salt uint64) uint64 {
 	}
 }
 
-// getBucketResult gets a bucketResult from the pool or creates a new one.
-func getBucketResult() *bucketResult {
-	r := bucketResultPool.Get().(*bucketResult)
-	r.Reset()
-	return r
-}
-
-// putBucketResult returns a bucketResult to the pool for reuse.
-func putBucketResult(r *bucketResult) {
-	bucketResultPool.Put(r)
-}
-
 // recsplit applies recSplit algorithm to the given bucket and accumulates into result.
 // Pure function - stateless and independent of RecSplit class.
 func recsplit(level int, bucket []uint64, offsets []uint64, unary []uint64, scratch *recsplitScratch, result *bucketResult) ([]uint64, error) {
@@ -1075,6 +1056,25 @@ func (rs *RecSplit) Stats() (int, int) {
 // RecSplit needs to be reset, re-populated with keys, and rebuilt
 func (rs *RecSplit) Collision() bool {
 	return rs.collision
+}
+
+// bucketResultPool is a package-level sync.Pool for reusing bucketResult instances
+var bucketResultPool = &sync.Pool{
+	New: func() interface{} {
+		return &bucketResult{}
+	},
+}
+
+// getBucketResult gets a bucketResult from the pool or creates a new one.
+func getBucketResult() *bucketResult {
+	r := bucketResultPool.Get().(*bucketResult)
+	r.Reset()
+	return r
+}
+
+// putBucketResult returns a bucketResult to the pool for reuse.
+func putBucketResult(r *bucketResult) {
+	bucketResultPool.Put(r)
 }
 
 // Erigon doesn't create tons of bufio readers/writers, but it has tons of
