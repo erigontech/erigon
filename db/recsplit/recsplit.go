@@ -329,6 +329,11 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 func (rs *RecSplit) FileName() string                           { return rs.fileName }
 func (rs *RecSplit) MajorVersion() version.DataStructureVersion { return rs.dataStructureVersion }
 func (rs *RecSplit) Salt() uint32                               { return rs.salt }
+
+// golombParamValue extracts the golomb parameter from pre-computed table
+func golombParamValue(golombRice []uint32, m uint16) int {
+	return int(golombRice[m] >> 27)
+}
 func (rs *RecSplit) Close() {
 	if rs.indexF != nil {
 		_ = rs.indexF.Close()
@@ -808,7 +813,7 @@ func recsplitWorkerFunc(ws *workerState, level int, bucket []uint64, offsets []u
 			ws.offsetData = append(ws.offsetData, scratch.numBuf[8-ws.bytesPerRec:]...)
 		}
 		salt -= ws.startSeed[level]
-		log2golomb := int(ws.golombRice[m] >> 27)
+		log2golomb := golombParamValue(ws.golombRice, m)
 		if ws.trace {
 			fmt.Printf("encode bij %d with log2golomn %d at p = %d\n", salt, log2golomb, ws.gr.Bits())
 		}
@@ -831,7 +836,7 @@ func recsplitWorkerFunc(ws *workerState, level int, bucket []uint64, offsets []u
 		copy(bucket, scratch.buffer)
 		copy(offsets, scratch.offsetBuffer)
 		salt -= ws.startSeed[level]
-		log2golomb := int(ws.golombRice[m] >> 27)
+		log2golomb := golombParamValue(ws.golombRice, m)
 		if ws.trace {
 			fmt.Printf("encode fanout %d: %d with log2golomn %d at p = %d\n", fanout, salt, log2golomb, ws.gr.Bits())
 		}
@@ -877,7 +882,7 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 			}
 		}
 		salt -= rs.startSeed[level]
-		log2golomb := rs.golombParam(m)
+		log2golomb := golombParamValue(rs.golombRice, m)
 		if rs.trace {
 			fmt.Printf("encode bij %d with log2golomn %d at p = %d\n", salt, log2golomb, rs.gr.bitCount)
 		}
@@ -900,7 +905,7 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 		copy(bucket, scratch.buffer)
 		copy(offsets, scratch.offsetBuffer)
 		salt -= rs.startSeed[level]
-		log2golomb := rs.golombParam(m)
+		log2golomb := golombParamValue(rs.golombRice, m)
 		if rs.trace {
 			fmt.Printf("encode fanout %d: %d with log2golomn %d at p = %d\n", fanout, salt, log2golomb, rs.gr.bitCount)
 		}
