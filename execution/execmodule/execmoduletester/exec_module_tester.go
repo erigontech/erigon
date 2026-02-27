@@ -62,7 +62,6 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
-	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/bodydownload"
 	"github.com/erigontech/erigon/execution/stagedsync/headerdownload"
@@ -330,7 +329,7 @@ func applyOptions(opts []Option) options {
 		pruneMode:       &defaultPruneMode,
 		blockBufferSize: 128,
 		chainConfig:     chain.TestChainConfig,
-		experimentalBAL: true,
+		experimentalBAL: false,
 	}
 	for _, o := range opts {
 		o(&opt)
@@ -351,7 +350,7 @@ func applyOptions(opts []Option) options {
 		case opt.genesis.Config.Bor != nil:
 			opt.engine = bor.NewFaker()
 		case opt.genesis.Config.TerminalTotalDifficultyPassed:
-			opt.engine = merge.NewFaker(ethash.NewFaker())
+			opt.engine = ethash.NewFaker() //merge.NewFaker(ethash.NewFaker())
 		default:
 			opt.engine = ethash.NewFaker()
 		}
