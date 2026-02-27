@@ -19,17 +19,21 @@ import (
 
 // App is the top-level TUI application.
 type App struct {
-	tview   *tview.Application
-	dp      *datasource.DownloaderPinger
-	datadir string
+	tview     *tview.Application
+	dp        *datasource.DownloaderPinger
+	sysColl   *datasource.SystemCollector
+	iopsTrack *datasource.DiskIOPSTracker
+	datadir   string
 }
 
 // New creates an App that reads from the given datadir.
 func New(datadir string) *App {
 	return &App{
-		datadir: datadir,
-		tview:   tview.NewApplication(),
-		dp:      datasource.NewDownloaderPinger(config.DefaultDownloaderURL),
+		datadir:   datadir,
+		tview:     tview.NewApplication(),
+		dp:        datasource.NewDownloaderPinger(config.DefaultDownloaderURL),
+		sysColl:   datasource.NewSystemCollector(datadir),
+		iopsTrack: datasource.NewDiskIOPSTracker(),
 	}
 }
 
@@ -61,6 +65,7 @@ func (a *App) Run(parent context.Context, infoCh <-chan *commands.StagesInfo, er
 	go a.safeGo("runClock", errCh, func() { a.runClock(ctx, nodeView.Clock) })
 	go a.handleErrors(ctx, errCh, footer) // not wrapped — it drains errCh itself
 	go a.safeGo("pollDownloader", errCh, func() { a.pollDownloader(ctx, nodeView.Downloader, errCh) })
+	go a.safeGo("pollSystemHealth", errCh, func() { a.pollSystemHealth(ctx, nodeView.SystemHealth) })
 
 	// Page navigation
 	currentPage, pagesCount := 0, 2
@@ -231,6 +236,32 @@ func (a *App) pollDownloader(ctx context.Context, view *tview.TextView, errCh ch
 		case <-ctx.Done():
 			return
 		case <-time.After(pollInterval):
+		}
+	}
+}
+
+// pollSystemHealth periodically collects system metrics and updates the widget.
+func (a *App) pollSystemHealth(ctx context.Context, view *widgets.SystemHealthView) {
+	ticker := time.NewTicker(datasource.SystemPollInterval)
+	defer ticker.Stop()
+
+	// Collect once immediately so the widget isn't empty for 5 seconds
+	stats := a.sysColl.CollectSystemStats()
+	iops := a.iopsTrack.Update(stats.DiskIOPS_R, stats.DiskIOPS_W)
+	a.tview.QueueUpdateDraw(func() {
+		view.UpdateSystemHealth(stats, iops)
+	})
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			stats := a.sysColl.CollectSystemStats()
+			iops := a.iopsTrack.Update(stats.DiskIOPS_R, stats.DiskIOPS_W)
+			a.tview.QueueUpdateDraw(func() {
+				view.UpdateSystemHealth(stats, iops)
+			})
 		}
 	}
 }
