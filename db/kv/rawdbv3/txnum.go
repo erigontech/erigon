@@ -243,7 +243,7 @@ func (t TxNumsReader) Append(tx kv.RwTx, blockNum, maxTxNum uint64) (err error) 
 	}
 	if len(lastK) != 0 {
 		lastBlockNum := binary.BigEndian.Uint64(lastK)
-		if lastBlockNum > 1 && lastBlockNum+1 != blockNum { //allow genesis
+		if lastBlockNum > 1 && lastBlockNum+1 != blockNum { // allow genesis
 			return ErrTxNumsAppendWithGap{appendBlockNum: blockNum, lastBlockNum: lastBlockNum, stack: dbg.Stack()}
 		}
 	}
@@ -285,6 +285,7 @@ func (TxNumsReader) Truncate(tx kv.RwTx, blockNum uint64) (err error) {
 	}
 	return nil
 }
+
 func (t TxNumsReader) FindBlockNum(ctx context.Context, tx kv.Tx, endTxNumMinimax uint64) (blockNum uint64, ok bool, err error) {
 	return t.index.BlockNumber(ctx, tx, endTxNumMinimax)
 }
@@ -305,6 +306,7 @@ func (TxNumsReader) Last(tx kv.Tx) (blockNum, txNum uint64, err error) {
 	}
 	return binary.BigEndian.Uint64(k), binary.BigEndian.Uint64(v), nil
 }
+
 func (TxNumsReader) First(tx kv.Tx) (blockNum, txNum uint64, err error) {
 	c, err := tx.Cursor(kv.MaxTxNum)
 	if err != nil {
@@ -320,6 +322,17 @@ func (TxNumsReader) First(tx kv.Tx) (blockNum, txNum uint64, err error) {
 		return 0, 0, nil
 	}
 	return binary.BigEndian.Uint64(k), binary.BigEndian.Uint64(v), nil
+}
+
+func (t TxNumsReader) IsMaxTxNumPopulated(ctx context.Context, tx kv.Tx, domainProgress uint64) (bool, error) {
+	_, maxTxNum, err := t.Last(tx)
+	if err != nil {
+		return false, err
+	}
+	if maxTxNum < domainProgress {
+		return false, nil
+	}
+	return true, nil
 }
 
 // LastKey
@@ -396,6 +409,7 @@ type MapTxNum2BlockNumIter struct {
 func TxNums2BlockNums(ctx context.Context, tx kv.Tx, txNumsReader TxNumsReader, it stream.U64, by order.By) *MapTxNum2BlockNumIter {
 	return &MapTxNum2BlockNumIter{ctx: ctx, tx: tx, txNumsReader: txNumsReader, it: it, orderAscend: bool(by)}
 }
+
 func (i *MapTxNum2BlockNumIter) Close() {
 	if i.it != nil {
 		i.it.Close()

@@ -659,7 +659,7 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, err err
 	return false, false, nil
 }
 
-func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelete, dryRun bool, stepRange string, domainNames ...string) error {
+func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelete, dryRun bool, stepRange string, onlyDomain bool, domainNames ...string) error {
 	_maxFrom := uint64(0)
 	_maxTo := uint64(0)
 	files := make([]snaptype.FileInfo, 0)
@@ -671,7 +671,12 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 		dirPath  string
 		filePath string
 	}, 0)
-	for _, dirPath := range []string{dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapForkable} {
+
+	scanDirs := []string{dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapForkable}
+	if onlyDomain {
+		scanDirs = []string{dirs.SnapDomain}
+	}
+	for _, dirPath := range scanDirs {
 		filePaths, err := dir2.ListFiles(dirPath)
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
@@ -882,7 +887,7 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 	domainNames := cliCtx.StringSlice("domain")
 	dryRun := cliCtx.Bool("dry-run")
 	promptUser := true // CLI should always prompt the user
-	return DeleteStateSnapshots(dirs, removeLatest, promptUser, dryRun, stepRange, domainNames...)
+	return DeleteStateSnapshots(dirs, removeLatest, promptUser, dryRun, stepRange, false, domainNames...)
 }
 
 func doRollbackSnapshotsToBlock(ctx context.Context, blockNum uint64, prompt bool, dataDir string, logger log.Logger) error {

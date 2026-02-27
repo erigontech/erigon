@@ -2542,3 +2542,80 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		buildTrieAndWitness(t, builder, keysToProve, keyExists)
 	})
 }
+
+// Test_HexPatriciaHashed_PhantomKeys verifies that TouchKey for keys that have
+// never existed (phantom keys) does not alter the commitment root. This
+// reproduces the scenario seen during RebuildCommitmentFilesWithHistory where
+// HistoryKeyTxNumRange returns creation-event entries (empty→empty) for storage
+// slots that were written inside a reverted internal call.
+func Test_HexPatriciaHashed_PhantomKeys(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	// Helper: build initial state, apply one real update, then optionally
+	// add phantom deletes, and return the resulting root hash.
+	computeRoot := func(t *testing.T, includePhantoms bool) []byte {
+		t.Helper()
+		ms := NewMockState(t)
+		hph := NewHexPatriciaHashed(1, ms)
+		hph.SetTrace(false)
+
+		// Block 0: initial state — a few accounts with storage
+		plainKeys, updates := NewUpdateBuilder().
+			Balance("f1", 100).
+			Nonce("f1", 1).
+			Balance("f2", 200).
+			Nonce("f2", 5).
+			Storage("f1", "01", "aa").
+			Storage("f1", "02", "bb").
+			Storage("f2", "01", "cc").
+			Build()
+
+		err := ms.applyPlainUpdates(plainKeys, updates)
+		require.NoError(t, err)
+
+		upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+		defer upds.Close()
+
+		rootBlock0, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
+		require.NoError(t, err)
+		require.NotEmpty(t, rootBlock0)
+		t.Logf("block0 root: %x", rootBlock0)
+
+		// Block 1: one real change + optional phantoms
+		hph.Reset()
+
+		builder := NewUpdateBuilder().
+			Balance("f1", 150).       // real change
+			Storage("f1", "01", "dd") // real storage change
+
+		if includePhantoms {
+			// Phantom account: address never existed
+			builder.Delete("aa")
+			// Phantom storage: address exists but slot never existed
+			builder.DeleteStorage("f1", "99")
+			// Phantom storage: address never existed
+			builder.DeleteStorage("bb", "06")
+			// Another phantom storage slot on existing address
+			builder.DeleteStorage("f2", "ff")
+		}
+
+		plainKeys, updates = builder.Build()
+		err = ms.applyPlainUpdates(plainKeys, updates)
+		require.NoError(t, err)
+
+		WrapKeyUpdatesInto(t, upds, plainKeys, updates)
+
+		root, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
+		require.NoError(t, err)
+		require.NotEmpty(t, root)
+		return root
+	}
+
+	rootWithout := computeRoot(t, false)
+	rootWith := computeRoot(t, true)
+
+	t.Logf("root without phantoms: %x", rootWithout)
+	t.Logf("root with phantoms:    %x", rootWith)
+	require.Equal(t, rootWithout, rootWith, "phantom keys (delete of non-existent keys) should not affect commitment root")
+}
