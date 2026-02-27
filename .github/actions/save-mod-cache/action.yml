@@ -15,7 +15,9 @@ runs:
     - name: Show module cache size
       if: ${{ always() }}
       shell: bash
-      run: du -hs "${{ inputs.modcache-path }}" "${{ inputs.modcache-path }}/cache/download" || true
+      run: |
+        time du -hs "${{ inputs.modcache-path }}" || true
+        time du -hs "${{ inputs.modcache-path }}/cache/download" || true
 
     - uses: actions/cache/save@v4
       if: ${{ always() }}

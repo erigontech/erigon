@@ -1,7 +1,4 @@
 - extract useful info from .github/*.md files
-- generate content and mtime cache for build cache defer trim
-- make sure the race tests matrix can be invoked locally to reproduce.
-- split tests into files, and balance them by run time. simplifies dupe checking etc.
 
 deferred:
 - Set installing Linux build essentials to default off, to find out which workflows actually need it.
