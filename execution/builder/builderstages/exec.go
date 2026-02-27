@@ -290,7 +290,7 @@ func SpawnBuilderExecStage(ctx context0.Context, s *stagedsync.StageState, sd *e
 
 	// This flag will skip checking the state root
 	execS := &stagedsync.StageState{State: s.State, ID: stages.Execution, BlockNumber: blockHeight - 1}
-	forceParallel := dbg.Exec3Parallel /*|| cfg.chainConfig.IsAmsterdam(current.Header.Time)*/ // TODO Re-enable after bals testing
+	forceParallel := dbg.Exec3Parallel || cfg.chainConfig.IsAmsterdam(current.Header.Time)
 	execTx := tx
 	execSd := sd
 	var execCleanup func()
