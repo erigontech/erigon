@@ -18,7 +18,6 @@ package integrity_test
 
 import (
 	"context"
-	"encoding/hex"
 	"math/rand"
 	"testing"
 
@@ -301,8 +300,8 @@ func TestVerifyBranchHashesFromDB(t *testing.T) {
 	storageValues := make(map[string][]byte)
 	for _, e := range entries {
 		accBuf := accounts.SerialiseV3(&e.acc)
-		accountValues[hex.EncodeToString(e.addr)] = accBuf
-		storageValues[hex.EncodeToString(e.storageKey)] = e.storageVal
+		accountValues[string(e.addr)] = accBuf
+		storageValues[string(e.storageKey)] = e.storageVal
 	}
 
 	// Read commitment branch entries from DB using RangeAsOf

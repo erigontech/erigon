@@ -128,14 +128,8 @@ func SegmentsCaplin(dir string, minBlock uint64) (res []snaptype.FileInfo, missi
 	return res, missingSnapshots, nil
 }
 
-func chooseSegmentEnd(from, to uint64, snapType snaptype.Enum, chainConfig *chain.Config) uint64 {
-	var chainName string
-
-	if chainConfig != nil {
-		chainName = chainConfig.ChainName
-	}
-	snapCfg, _ := snapcfg.KnownCfg(chainName)
-	blocksPerFile := snapcfg.MergeLimitFromCfg(snapCfg, snapType, from)
+func chooseSegmentEnd(from, to uint64, snapType snaptype.Enum, snCfg *snapcfg.Cfg) uint64 {
+	blocksPerFile := snapcfg.MergeLimitFromCfg(snCfg, snapType, from)
 
 	next := (from/blocksPerFile + 1) * blocksPerFile
 	to = min(next, to)
@@ -166,6 +160,8 @@ type BlockRetire struct {
 	chainConfig *chain.Config
 	config      *ethconfig.Config
 
+	snCfg *snapcfg.Cfg
+
 	heimdallStore         heimdall.Store
 	bridgeStore           bridge.Store
 	borDataNotReadyBefore time.Time
@@ -185,6 +181,11 @@ func NewBlockRetire(
 	snBuildAllowed *semaphore.Weighted,
 	logger log.Logger,
 ) *BlockRetire {
+	var chainName string
+	if chainConfig != nil {
+		chainName = chainConfig.ChainName
+	}
+	snCfg := snapcfg.KnownCfgOrDevnet(chainName)
 	r := &BlockRetire{
 		tmpDir:                dirs.Tmp,
 		dirs:                  dirs,
@@ -194,6 +195,7 @@ func NewBlockRetire(
 		snBuildAllowed:        snBuildAllowed,
 		chainConfig:           chainConfig,
 		config:                config,
+		snCfg:                 snCfg,
 		notifier:              notifier,
 		logger:                logger,
 		heimdallStore:         heimdallStore,
@@ -223,13 +225,13 @@ func (br *BlockRetire) borSnapshots() *heimdall.RoSnapshots {
 	return br.blockReader.BorSnapshots().(*heimdall.RoSnapshots)
 }
 
-func CanRetire(curBlockNum uint64, blocksInSnapshots uint64, snapType snaptype.Enum, chainConfig *chain.Config) (blockFrom, blockTo uint64, can bool) {
+func CanRetire(curBlockNum uint64, blocksInSnapshots uint64, snapType snaptype.Enum, snCfg *snapcfg.Cfg) (blockFrom, blockTo uint64, can bool) {
 	var keep uint64 = 1024 //TODO: we will increase it to params.FullImmutabilityThreshold after some db optimizations
 	if curBlockNum <= keep {
 		return
 	}
 	blockFrom = blocksInSnapshots + 1
-	return snapshotsync.CanRetire(blockFrom, curBlockNum-keep, snapType, chainConfig)
+	return snapshotsync.CanRetire(blockFrom, curBlockNum-keep, snapType, snCfg)
 }
 
 func CanDeleteTo(curBlockNum uint64, blocksInSnapshots uint64) (blockTo uint64) {
@@ -285,7 +287,7 @@ func (br *BlockRetire) retireBlocks(
 	notifier, logger, blockReader, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers.Load()
 	snapshots := br.snapshots()
 
-	blockFrom, blockTo, ok := CanRetire(maxBlockNum, minBlockNum, snaptype.Unknown, br.chainConfig)
+	blockFrom, blockTo, ok := CanRetire(maxBlockNum, minBlockNum, snaptype.Unknown, br.snCfg)
 
 	if ok {
 		if has, err := br.dbHasEnoughDataForBlocksRetire(ctx); err != nil {
@@ -296,7 +298,7 @@ func (br *BlockRetire) retireBlocks(
 		logger.Log(lvl, "[snapshots] Retire Blocks", "range",
 			fmt.Sprintf("%s-%s", common.PrettyCounter(blockFrom), common.PrettyCounter(blockTo)))
 		// in future we will do it in background
-		if err := DumpBlocks(ctx, blockFrom, blockTo, br.chainConfig, tmpDir, snapshots.Dir(), db, int(workers), lvl, logger, blockReader); err != nil {
+		if err := DumpBlocks(ctx, blockFrom, blockTo, br.chainConfig, tmpDir, snapshots.Dir(), db, int(workers), lvl, logger, blockReader, br.snCfg); err != nil {
 			return ok, fmt.Errorf("DumpBlocks: %w", err)
 		}
 
@@ -562,10 +564,10 @@ func (br *BlockRetire) DisableReadAhead() {
 	}
 }
 
-func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *chain.Config, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
+func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *chain.Config, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader, snCfg *snapcfg.Cfg) error {
 	firstTxNum := blockReader.FirstTxnNumNotInSnapshots()
-	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, snaptype2.Enums.Headers, chainConfig) {
-		lastTxNum, err := dumpBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, snaptype2.Enums.Headers, chainConfig), tmpDir, snapDir, firstTxNum, chainDB, chainConfig, workers, lvl, logger)
+	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, snaptype2.Enums.Headers, snCfg) {
+		lastTxNum, err := dumpBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, snaptype2.Enums.Headers, snCfg), tmpDir, snapDir, firstTxNum, chainDB, chainConfig, workers, lvl, logger)
 		if err != nil {
 			return err
 		}

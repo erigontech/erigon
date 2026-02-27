@@ -110,10 +110,14 @@ const (
 	Publishable Check = "Publishable"
 )
 
-var AllChecks = []Check{
+var FastChecks = []Check{
 	Blocks, HeaderNoGaps, BlocksTxnID, InvertedIndex, StateProgress, Publishable, HistoryNoSystemTxs,
 	BorEvents, BorSpans, BorCheckpoints, ReceiptsNoDups, RCacheNoDups, CommitmentRoot,
-	CommitmentKvi, CommitmentKvDeref, StateVerify,
+	CommitmentKvi,
 }
 
-var NonDefaultChecks = []Check{CommitmentHistVal}
+var SlowChecks = []Check{CommitmentHistVal, StateVerify}
+var DeprecatedChecks = []Check{
+	CommitmentKvDeref, //StateVerify - will overcome
+}
+var AllChecks = append(append(append([]Check{}, FastChecks...), SlowChecks...), DeprecatedChecks...)
