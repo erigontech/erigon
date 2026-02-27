@@ -241,21 +241,13 @@ func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
 }
 
 func (ii *InvertedIndex) MissedMapAccessors() (l []*FilesItem) {
-	return ii.missedMapAccessors(ii.dirtyFiles.Items())
+	snapDir := ii.dirs.SnapAccessors
+	return ii.missedMapAccessors(ii.dirtyFiles.Items(), readDirNames(snapDir), snapDir)
 }
 
-func (ii *InvertedIndex) missedMapAccessors(source []*FilesItem) (l []*FilesItem) {
+func (ii *InvertedIndex) missedMapAccessors(source []*FilesItem, names []string, snapDir string) (l []*FilesItem) {
 	if !ii.Accessors.Has(statecfg.AccessorHashMap) {
 		return nil
-	}
-	snapDir := ii.dirs.SnapAccessors
-	entries, err := os.ReadDir(snapDir)
-	if err != nil {
-		panic(err)
-	}
-	names := make([]string, len(entries))
-	for i, e := range entries {
-		names[i] = e.Name()
 	}
 	return fileItemsWithMissedAccessors(source, ii.stepSize, func(fromStep, toStep kv.Step) []string {
 		fPath, _, _, err := version.MatchVersionedFile(ii.efAccessorFileNameMask(fromStep, toStep), names, snapDir)

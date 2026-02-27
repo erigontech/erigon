@@ -23,7 +23,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -193,21 +192,13 @@ func (ht *HistoryRoTx) Files() (res VisibleFiles) {
 }
 
 func (h *History) MissedMapAccessors() (l []*FilesItem) {
-	return h.missedMapAccessors(h.dirtyFiles.Items())
+	snapDir := h.dirs.SnapAccessors
+	return h.missedMapAccessors(h.dirtyFiles.Items(), readDirNames(snapDir), snapDir)
 }
 
-func (h *History) missedMapAccessors(source []*FilesItem) (l []*FilesItem) {
+func (h *History) missedMapAccessors(source []*FilesItem, names []string, snapDir string) (l []*FilesItem) {
 	if !h.Accessors.Has(statecfg.AccessorHashMap) {
 		return nil
-	}
-	snapDir := h.dirs.SnapAccessors
-	entries, err := os.ReadDir(snapDir)
-	if err != nil {
-		panic(err)
-	}
-	names := make([]string, len(entries))
-	for i, e := range entries {
-		names[i] = e.Name()
 	}
 	return fileItemsWithMissedAccessors(source, h.stepSize, func(fromStep, toStep kv.Step) []string {
 		fPath, _, _, err := version.MatchVersionedFile(h.vAccessorFileNameMask(fromStep, toStep), names, snapDir)

@@ -141,10 +141,12 @@ func (d *Domain) DebugBeginDirtyFilesRo() *domainDirtyFilesRoTx {
 }
 
 func (d *domainDirtyFilesRoTx) FilesWithMissedAccessors() (mf *MissedAccessorDomainFiles) {
+	snapDir := d.d.dirs.SnapDomain
+	names := readDirNames(snapDir)
 	return &MissedAccessorDomainFiles{
 		files: map[statecfg.Accessors][]*FilesItem{
-			statecfg.AccessorBTree:   d.d.missedBtreeAccessors(d.files),
-			statecfg.AccessorHashMap: d.d.missedMapAccessors(d.files),
+			statecfg.AccessorBTree:   d.d.missedBtreeAccessors(d.files, names, snapDir),
+			statecfg.AccessorHashMap: d.d.missedMapAccessors(d.files, names, snapDir),
 		},
 		history: d.history.FilesWithMissedAccessors(),
 	}
@@ -179,10 +181,12 @@ func (h *History) DebugBeginDirtyFilesRo() *historyDirtyFilesRoTx {
 }
 
 func (f *historyDirtyFilesRoTx) FilesWithMissedAccessors() (mf *MissedAccessorHistoryFiles) {
+	snapDir := f.h.dirs.SnapAccessors
+	names := readDirNames(snapDir)
 	return &MissedAccessorHistoryFiles{
-		ii: f.ii.FilesWithMissedAccessors(),
+		ii: f.ii.filesWithMissedAccessors(names, snapDir),
 		files: map[statecfg.Accessors][]*FilesItem{
-			statecfg.AccessorHashMap: f.h.missedMapAccessors(f.files),
+			statecfg.AccessorHashMap: f.h.missedMapAccessors(f.files, names, snapDir),
 		},
 	}
 }
@@ -215,9 +219,14 @@ func (ii *InvertedIndex) DebugBeginDirtyFilesRo() *iiDirtyFilesRoTx {
 }
 
 func (f *iiDirtyFilesRoTx) FilesWithMissedAccessors() (mf *MissedAccessorIIFiles) {
+	snapDir := f.ii.dirs.SnapAccessors
+	return f.filesWithMissedAccessors(readDirNames(snapDir), snapDir)
+}
+
+func (f *iiDirtyFilesRoTx) filesWithMissedAccessors(names []string, snapDir string) (mf *MissedAccessorIIFiles) {
 	return &MissedAccessorIIFiles{
 		files: map[statecfg.Accessors][]*FilesItem{
-			statecfg.AccessorHashMap: f.ii.missedMapAccessors(f.files),
+			statecfg.AccessorHashMap: f.ii.missedMapAccessors(f.files, names, snapDir),
 		},
 	}
 }

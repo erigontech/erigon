@@ -19,6 +19,7 @@ package state
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -771,6 +772,19 @@ func (files visibleFiles) VisibleFiles() []VisibleFile {
 		res = append(res, file)
 	}
 	return res
+}
+
+// readDirNames reads a directory and returns only the file/entry names (not full paths).
+func readDirNames(dir string) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		panic(err)
+	}
+	names := make([]string, len(entries))
+	for i, e := range entries {
+		names[i] = e.Name()
+	}
+	return names
 }
 
 // fileItemsWithMissedAccessors returns list of files with missed accessors

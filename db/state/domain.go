@@ -23,7 +23,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -1112,22 +1111,9 @@ func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep kv.S
 	return buildHashMapAccessor(ctx, data, idxPath, false, cfg, ps, d.logger)
 }
 
-func (d *Domain) MissedBtreeAccessors() (l []*FilesItem) {
-	return d.missedBtreeAccessors(d.dirtyFiles.Items())
-}
-
-func (d *Domain) missedBtreeAccessors(source []*FilesItem) (l []*FilesItem) {
+func (d *Domain) missedBtreeAccessors(source []*FilesItem, names []string, snapDir string) (l []*FilesItem) {
 	if !d.Accessors.Has(statecfg.AccessorBTree) {
 		return nil
-	}
-	snapDir := d.dirs.SnapDomain
-	entries, err := os.ReadDir(snapDir)
-	if err != nil {
-		panic(err)
-	}
-	names := make([]string, len(entries))
-	for i, e := range entries {
-		names[i] = e.Name()
 	}
 	return fileItemsWithMissedAccessors(source, d.stepSize, func(fromStep, toStep kv.Step) []string {
 		exF, _, _, err := version.MatchVersionedFile(d.kvExistenceIdxFileNameMask(fromStep, toStep), names, snapDir)
@@ -1143,21 +1129,13 @@ func (d *Domain) missedBtreeAccessors(source []*FilesItem) (l []*FilesItem) {
 }
 
 func (d *Domain) MissedMapAccessors() (l []*FilesItem) {
-	return d.missedMapAccessors(d.dirtyFiles.Items())
+	snapDir := d.dirs.SnapDomain
+	return d.missedMapAccessors(d.dirtyFiles.Items(), readDirNames(snapDir), snapDir)
 }
 
-func (d *Domain) missedMapAccessors(source []*FilesItem) (l []*FilesItem) {
+func (d *Domain) missedMapAccessors(source []*FilesItem, names []string, snapDir string) (l []*FilesItem) {
 	if !d.Accessors.Has(statecfg.AccessorHashMap) {
 		return nil
-	}
-	snapDir := d.dirs.SnapDomain
-	entries, err := os.ReadDir(snapDir)
-	if err != nil {
-		panic(err)
-	}
-	names := make([]string, len(entries))
-	for i, e := range entries {
-		names[i] = e.Name()
 	}
 	return fileItemsWithMissedAccessors(source, d.stepSize, func(fromStep, toStep kv.Step) []string {
 		fPath, _, _, err := version.MatchVersionedFile(d.kviAccessorFileNameMask(fromStep, toStep), names, snapDir)
