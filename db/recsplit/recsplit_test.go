@@ -483,34 +483,3 @@ func TestTwoLayerIndex(t *testing.T) {
 	})
 }
 
-// TestSequentialVsParallel verifies parallel and sequential processing produce identical output.
-func TestSequentialVsParallel(t *testing.T) {
-	logger := log.New()
-	tmpDir := t.TempDir()
-	salt := uint32(42)
-
-	build := func(workers int) string {
-		indexFile := filepath.Join(tmpDir, fmt.Sprintf("idx_%d", workers))
-		rs, err := NewRecSplit(RecSplitArgs{
-			KeyCount: 100, BucketSize: 50, LeafSize: 8, Salt: &salt,
-			TmpDir: tmpDir, IndexFile: indexFile, Workers: workers,
-		}, logger)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for i := 0; i < 100; i++ {
-			rs.AddKey(fmt.Appendf(nil, "k%d", i), uint64(i*17))
-		}
-		rs.Build(context.Background())
-		rs.Close()
-
-		data, _ := os.ReadFile(indexFile)
-		return fmt.Sprintf("%x", md5.Sum(data))
-	}
-
-	h1 := build(1)
-	h2 := build(2)
-	h4 := build(4)
-	assert.Equal(t, h1, h2)
-	assert.Equal(t, h1, h4)
-}

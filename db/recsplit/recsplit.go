@@ -742,7 +742,6 @@ func putBucketResult(r *bucketResult) {
 	bucketResultPool.Put(r)
 }
 
-// recsplitBucketWorker processes buckets from input channel and writes results to output channel.
 // recsplit applies recSplit algorithm to the given bucket and accumulates into result.
 // Pure function - stateless and independent of RecSplit class.
 func recsplit(level int, bucket []uint64, offsets []uint64, unary []uint64, scratch *recsplitScratch, result *bucketResult) ([]uint64, error) {
@@ -898,7 +897,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	rs.currentBucketIdx = math.MaxUint64 // To make sure 0 bucket is detected
 	defer rs.bucketCollector.Close()
 
-	// Pre-compute golombRice table up to max bucket size (for workers to use without locking)
+	// Pre-compute golombRice table up to max bucket size (for efficient lookup)
 	maxM := uint16(rs.bucketSize)
 	if rs.secondaryAggrBound > maxM {
 		maxM = rs.secondaryAggrBound
