@@ -44,7 +44,6 @@ type fileDataProvider struct {
 	mmapData    []byte                 // mmap'd file content
 	mmapHandle2 *[mmap.MaxMapSize]byte // pointer handle for cleanup
 	wg          *errgroup.Group
-	disposed    bool // mark once disposed to prevent double cleanup
 }
 
 // mmapBytesReader tracks position for reading from mmap'd data
@@ -149,7 +148,7 @@ func (p *fileDataProvider) Next(keyBuf, valBuf []byte) ([]byte, []byte, error) {
 		// Create zero-copy reader over mmap'd data
 		p.mmapReader = &mmapBytesReader{data: p.mmapData, pos: 0}
 	}
-	return readElementFromDiskZeroCopy(p.mmapReader, keyBuf, valBuf)
+	return readElementFromDiskZeroCopy(p.mmapReader)
 }
 
 // ReadVarint decodes a signed varint directly from mmap data
@@ -178,23 +177,21 @@ func (m *mmapBytesReader) ReadAt(length int) ([]byte, error) {
 
 func (p *fileDataProvider) Wait() error { return p.wg.Wait() }
 func (p *fileDataProvider) Dispose() {
-	if p.disposed {
+	if p.file == nil {
 		return
 	}
-	p.disposed = true
 
-	if p.file != nil {
-		p.Wait()
+	p.Wait()
 
-		filePath := p.file.Name()
-		p.file.Close()
-		_ = dir.RemoveFile(filePath)
+	filePath := p.file.Name()
+	p.file.Close()
+	p.file = nil
+	_ = dir.RemoveFile(filePath)
 
-		// Note: We intentionally do NOT munmap here. The mmap'd memory remains mapped
-		// and valid for zero-copy slices returned to callers. The OS will unmap when
-		// the process exits or memory pressure requires it. This is safe for the ETL
-		// use case where data is consumed immediately before Close() is called.
-	}
+	// Note: We intentionally do NOT munmap here. The mmap'd memory remains mapped
+	// and valid for zero-copy slices returned to callers. The OS will unmap when
+	// the process exits or memory pressure requires it. This is safe for the ETL
+	// use case where data is consumed immediately before Close() is called.
 }
 
 func (p *fileDataProvider) String() string {
@@ -233,8 +230,7 @@ func readElementFromDisk(r io.Reader, br io.ByteReader, keyBuf, valBuf []byte) (
 }
 
 // readElementFromDiskZeroCopy reads key-value pairs directly from mmap'd data
-// Returns slices directly from mmap memory (true zero-copy, no copying)
-func readElementFromDiskZeroCopy(m *mmapBytesReader, _, _ []byte) ([]byte, []byte, error) {
+func readElementFromDiskZeroCopy(m *mmapBytesReader) ([]byte, []byte, error) {
 	keyLen, err := m.ReadVarint()
 	if err != nil {
 		return nil, nil, err
