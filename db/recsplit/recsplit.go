@@ -302,9 +302,14 @@ func (rs *RecSplit) FileName() string                           { return rs.file
 func (rs *RecSplit) MajorVersion() version.DataStructureVersion { return rs.dataStructureVersion }
 func (rs *RecSplit) Salt() uint32                               { return rs.salt }
 
-// golombParamValue extracts the golomb parameter from pre-computed table
+// golombParamValue extracts the golomb parameter from table
+// Since table is extended on-demand during Build(), all accessed values should be present
 func golombParamValue(golombRice []uint32, m uint16) int {
-	return int(golombRice[m] >> 27)
+	if m < uint16(len(golombRice)) {
+		return int(golombRice[m] >> 27)
+	}
+	// This should not happen if golombRice was properly extended during Build()
+	panic(fmt.Sprintf("golombParam not computed for bucket size %d (table size: %d)", m, len(golombRice)))
 }
 func (rs *RecSplit) Close() {
 	if rs.indexF != nil {
