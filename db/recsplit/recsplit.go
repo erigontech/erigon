@@ -1145,14 +1145,11 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	if rs.secondaryAggrBound > maxM {
 		maxM = rs.secondaryAggrBound
 	}
-	// Pre-allocate capacity to final size to avoid reallocation after workers capture it
-	// Only allocate capacity, not length, so golombParam can populate the entries
-	if cap(rs.golombRice) <= int(maxM) {
-		newRice := make([]uint32, len(rs.golombRice), int(maxM)+1)
-		copy(newRice, rs.golombRice)
-		rs.golombRice = newRice
+	// Ensure golombRice has length up to maxM before workers use it
+	for len(rs.golombRice) <= int(maxM) {
+		rs.golombRice = append(rs.golombRice, 0)
 	}
-	// Now populate entries (golombParam will extend length as needed)
+	// Now compute entries
 	for m := uint16(0); m <= maxM; m++ {
 		rs.golombParam(m)
 	}
