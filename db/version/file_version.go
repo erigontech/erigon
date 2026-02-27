@@ -234,13 +234,14 @@ func MatchVersionedFile(filePattern string, dirEntries []string, dir string) (st
 	if strings.HasPrefix(filePattern, "*") && !strings.ContainsAny(filePattern[1:], "*?[") {
 		suffix := filePattern[1:]
 		for _, name := range dirEntries {
-			if strings.HasSuffix(name, suffix) {
-				ver, _ := ParseVersion(name)
-				if !found || ver.Greater(bestVersion) {
-					bestVersion = ver
-					bestMatch = name
-					found = true
-				}
+			if !strings.HasSuffix(name, suffix) {
+				continue
+			}
+			ver, _ := ParseVersion(name)
+			if !found || ver.Greater(bestVersion) {
+				bestVersion = ver
+				bestMatch = name
+				found = true
 			}
 		}
 	} else {
