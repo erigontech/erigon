@@ -513,6 +513,16 @@ func (d *Decompressor) DictWords() int                  { return d.dictWords }
 func (d *Decompressor) DictLens() int                   { return d.dictLens }
 func (d *Decompressor) CompressedPageValuesCount() int  { return int(d.compPageValuesCount) }
 func (d *Decompressor) CompressionFormatVersion() uint8 { return d.version }
+func (d *Decompressor) FileCompression() FileCompression {
+	c := CompressNone
+	if d.featureFlagBitmask.Has(KeyCompressionEnabled) {
+		c |= CompressKeys
+	}
+	if d.featureFlagBitmask.Has(ValCompressionEnabled) {
+		c |= CompressVals
+	}
+	return c
+}
 
 func (d *Decompressor) Size() int64 {
 	return d.size

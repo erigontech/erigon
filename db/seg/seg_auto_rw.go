@@ -104,6 +104,12 @@ type Writer struct {
 }
 
 func NewWriter(kv *Compressor, compress FileCompression) *Writer {
+	if compress.Has(CompressKeys) {
+		kv.featureFlagBitmask.Set(KeyCompressionEnabled)
+	}
+	if compress.Has(CompressVals) {
+		kv.featureFlagBitmask.Set(ValCompressionEnabled)
+	}
 	return &Writer{kv, false, compress}
 }
 
