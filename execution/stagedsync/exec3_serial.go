@@ -16,10 +16,13 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/changeset"
+	"os"
+
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/seboost"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/types"
@@ -35,6 +38,8 @@ type serialExecutor struct {
 	blobGasUsed     uint64
 	lastBlockResult *blockResult
 	worker          *exec.Worker
+	seboostWriter   *seboost.Writer
+	seboostReader   *seboost.Reader
 }
 
 func warmTxsHashes(block *types.Block) {
@@ -137,6 +142,12 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 		var txTasks []exec.Task
 
+		// load seboost txdeps for this block if available
+		var blockDeps [][]int
+		if se.seboostReader != nil {
+			blockDeps, _ = se.seboostReader.GetDeps(blockNum)
+		}
+
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &exec.TxTask{
@@ -158,6 +169,15 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				havePartialBlock = true
 				inputTxNum++
 				continue
+			}
+
+			// inject seboost txdeps if available
+			if blockDeps != nil {
+				depIndex := txIndex + 1 // 0=system tx, 1=user tx 0, etc.
+				if depIndex >= 0 && depIndex < len(blockDeps) && len(blockDeps[depIndex]) > 0 {
+					txTask.SetDependencies(blockDeps[depIndex])
+					se.logger.Trace("seboost: injecting deps", "block", blockNum, "txIndex", txIndex, "depCount", len(blockDeps[depIndex]))
+				}
 			}
 
 			txTasks = append(txTasks, txTask)
@@ -334,6 +354,14 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 		startTxIndex = max(tasks[0].(*exec.TxTask).TxIndex, 0)
 	}
 
+	// seboost: track per-transaction accessed addresses for dependency generation
+	generateTxDeps := se.seboostWriter != nil && os.Getenv("SEBOOST_GENERATE") == "txdeps"
+	// txAccessed[i] stores the set of addresses accessed by task at index i
+	var txAccessed []state.AccessSet
+	if generateTxDeps {
+		txAccessed = make([]state.AccessSet, 0, len(tasks))
+	}
+
 	var gasPool *protocol.GasPool
 	for _, task := range tasks {
 		txTask := task.(*exec.TxTask)
@@ -347,6 +375,15 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 		txTask.Engine = se.cfg.engine
 
 		result := se.worker.RunTxTask(txTask)
+
+		// seboost: collect accessed addresses for this transaction
+		if generateTxDeps {
+			addrs := result.AccessedAddresses
+			if addrs == nil {
+				addrs = state.AccessSet{}
+			}
+			txAccessed = append(txAccessed, addrs)
+		}
 
 		if err := func() error {
 			if errors.Is(result.Err, context.Canceled) {
@@ -540,6 +577,35 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			se.blockGasUsed = 0
 			se.blobGasUsed = 0
 			gasPool = nil
+		}
+	}
+
+	// seboost: compute address-level dependencies and write txdeps for this block
+	if generateTxDeps && se.seboostWriter != nil && len(tasks) > 0 {
+		blockNum := tasks[0].BlockNumber()
+		// Build dependency map: for each tx i, find which earlier txs j
+		// modified addresses that tx i also accesses
+		deps := make(map[int]map[int]bool)
+		// writersByAddr tracks which tx indices wrote to each address
+		writersByAddr := make(map[accounts.Address][]int)
+		for i, addrs := range txAccessed {
+			deps[i] = map[int]bool{}
+			// Check if this tx accesses any address that a previous tx also accessed
+			for addr := range addrs {
+				if writers, ok := writersByAddr[addr]; ok {
+					for _, j := range writers {
+						deps[i][j] = true
+					}
+				}
+			}
+			// Record this tx as a writer for all its accessed addresses
+			for addr := range addrs {
+				writersByAddr[addr] = append(writersByAddr[addr], i)
+			}
+		}
+		txCount := len(tasks)
+		if err := se.seboostWriter.WriteBlock(blockNum, deps, txCount); err != nil {
+			se.logger.Warn("seboost: failed to write txdeps", "block", blockNum, "err", err)
 		}
 	}
 

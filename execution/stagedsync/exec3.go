@@ -319,6 +319,36 @@ func ExecV3(ctx context.Context,
 		se.lastCommittedTxNum.Store(inputTxNum)
 		se.lastCommittedBlockNum.Store(blockNum)
 
+		// seboost txdeps consumption (serial)
+		if os.Getenv("SEBOOST_LOAD") == "txdeps" {
+			seboostDir := os.Getenv("SEBOOST_DIR")
+			if seboostDir == "" {
+				seboostDir = filepath.Join(cfg.dirs.DataDir, "seboost_txdeps")
+			}
+			sr := seboost.NewReader(seboostDir, logger)
+			se.seboostReader = sr
+			defer sr.Close()
+			logger.Info("seboost: consumption enabled (serial)", "dir", seboostDir)
+		}
+
+		// seboost txdeps generation (serial)
+		if os.Getenv("SEBOOST_GENERATE") == "txdeps" {
+			seboostDir := os.Getenv("SEBOOST_DIR")
+			if seboostDir == "" {
+				seboostDir = filepath.Join(cfg.dirs.DataDir, "seboost_txdeps")
+			}
+			homeDir, _ := os.UserHomeDir()
+			csvPath := filepath.Join(homeDir, "seboost-stats", "txdeps-sizes.csv")
+			sw, err := seboost.NewWriter(seboostDir, csvPath, logger)
+			if err != nil {
+				logger.Warn("seboost: failed to create writer", "err", err)
+			} else {
+				se.seboostWriter = sw
+				defer sw.Close()
+				logger.Info("seboost: generation enabled (serial)", "dir", seboostDir, "csv", csvPath)
+			}
+		}
+
 		defer func() {
 			if !isChainTip {
 				se.LogComplete(stepsInDb)
