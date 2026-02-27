@@ -21,7 +21,6 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/stretchr/testify/require"
 )
 
@@ -159,13 +158,13 @@ func BenchmarkGetDeferredUpdate(b *testing.B) {
 	afterMap := bitmap
 	prefix := []byte{0x01, 0x02, 0x03}
 	prev := []byte{0x04, 0x05, 0x06}
-	var prevStep kv.Step = 100
+	// prevStep removed
 
 	b.ResetTimer()
 	b.ReportAllocs()
 
 	for b.Loop() {
-		upd := getDeferredUpdate(prefix, bitmap, touchMap, afterMap, &cells, 5, prev, prevStep)
+		upd := getDeferredUpdate(prefix, bitmap, touchMap, afterMap, &cells, 5, prev)
 		putDeferredUpdate(upd)
 	}
 }
@@ -193,13 +192,13 @@ func BenchmarkGetDeferredUpdate_FewCells(b *testing.B) {
 	afterMap := bitmap
 	prefix := []byte{0x01, 0x02, 0x03}
 	prev := []byte{0x04, 0x05, 0x06}
-	var prevStep kv.Step = 100
+	// prevStep removed
 
 	b.ResetTimer()
 	b.ReportAllocs()
 
 	for b.Loop() {
-		upd := getDeferredUpdate(prefix, bitmap, touchMap, afterMap, &cells, 5, prev, prevStep)
+		upd := getDeferredUpdate(prefix, bitmap, touchMap, afterMap, &cells, 5, prev)
 		putDeferredUpdate(upd)
 	}
 }

@@ -390,8 +390,34 @@ func (b *GasPriceOracleBackend) GetReceipts(ctx context.Context, block *types.Bl
 	return b.baseApi.getReceipts(ctx, b.tx, block)
 }
 
+// PendingBlockAndReceipts returns the pending block and its receipts.
+// It first tries the real pending block from the mining client (cached in filters),
+// which is a block built on top of the current head and not yet finalised.
+// When available, receipts are nil because the block has not been executed yet;
+// callers that request reward percentiles will receive an empty entry for the
+// pending slot, which is acceptable.
+// If no pending block is available (e.g. no mining client configured), it falls
+// back to the latest confirmed block with its receipts. This is a pragmatic
+// workaround to avoid returning N-1 blocks instead of N when the caller requests
+// "pending": baseFee and gasUsedRatio from the latest block are the best available
+// approximation for the next block.
 func (b *GasPriceOracleBackend) PendingBlockAndReceipts() (*types.Block, types.Receipts) {
-	return nil, nil
+	if block := b.baseApi.pendingBlock(); block != nil {
+		return block, nil
+	}
+	latestNum, err := rpchelper.GetLatestBlockNumber(b.tx)
+	if err != nil {
+		return nil, nil
+	}
+	block, err := b.baseApi.blockByNumberWithSenders(context.Background(), b.tx, latestNum)
+	if err != nil || block == nil {
+		return nil, nil
+	}
+	receipts, err := b.baseApi.getReceipts(context.Background(), b.tx, block)
+	if err != nil {
+		return nil, nil
+	}
+	return block, receipts
 }
 
 func (b *GasPriceOracleBackend) GetReceiptsGasUsed(ctx context.Context, block *types.Block) (types.Receipts, error) {

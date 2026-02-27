@@ -938,7 +938,7 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			sndr := accounts3.Account{Nonce: 0, Balance: *uint256.NewInt(math.MaxUint64)}
 			sndrBytes := accounts3.SerialiseV3(&sndr)
 			txNum := uint64(0)
-			err = sd.DomainPut(kv.AccountsDomain, tx, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, sndrBytes, txNum, nil, 0)
+			err = sd.DomainPut(kv.AccountsDomain, tx, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, sndrBytes, txNum, nil)
 			asrt.NoError(err)
 
 			err = sd.Flush(ctx, tx)
@@ -1059,7 +1059,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	sndr := accounts3.Account{Nonce: 0, Balance: *uint256.NewInt(math.MaxUint64)}
 	sndrBytes := accounts3.SerialiseV3(&sndr)
 	txNum := uint64(0)
-	err = sd.DomainPut(kv.AccountsDomain, tx, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, sndrBytes, txNum, nil, 0)
+	err = sd.DomainPut(kv.AccountsDomain, tx, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, sndrBytes, txNum, nil)
 	require.NoError(t, err)
 
 	err = sd.Flush(ctx, tx)

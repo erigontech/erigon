@@ -348,7 +348,7 @@ func SyncSnapshots(
 	if blockReader.FreezingCfg().NoDownloader || snapshotDownloader == nil {
 		return nil
 	}
-	snapCfg, _ := snapcfg.KnownCfg(cc.ChainName)
+	snapCfg := snapcfg.KnownCfgOrDevnet(cc.ChainName)
 	// Skip getMinimumBlocksToDownload if we can because it's slow.
 	if snapCfg.Local {
 		// This belongs higher up the call chain.
