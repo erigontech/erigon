@@ -89,22 +89,6 @@ func (br *bucketResult) Reset() {
 	br.order = 0
 }
 
-// bucketResultQueue is a min-heap of *bucketResult ordered by .order
-type bucketResultQueue []*bucketResult
-
-func (q bucketResultQueue) Len() int            { return len(q) }
-func (q bucketResultQueue) Less(i, j int) bool  { return q[i].order < q[j].order }
-func (q bucketResultQueue) Swap(i, j int)       { q[i], q[j] = q[j], q[i] }
-func (q *bucketResultQueue) Push(x interface{}) { *q = append(*q, x.(*bucketResult)) }
-func (q *bucketResultQueue) Pop() interface{} {
-	old := *q
-	n := len(old)
-	x := old[n-1]
-	old[n-1] = nil
-	*q = old[:n-1]
-	return x
-}
-
 // recsplitScratch holds per-execution scratch buffers and configuration (shared by sequential and worker paths).
 type recsplitScratch struct {
 	count              []uint16 // Size = secondaryAggrBound (for findSplit 8-way)
