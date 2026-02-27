@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/assert"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/datastruct/fusefilter"
@@ -258,6 +259,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	workers := args.Workers
 	if workers <= 0 {
 		workers = 1
+		workers = estimate.AlmostAllCPUs()
 	}
 	rs := &RecSplit{
 		dataStructureVersion: version.DataStructureVersion(args.Version),
