@@ -1675,6 +1675,36 @@ func (ss *GrpcServer) RemovePeer(_ context.Context, req *sentryproto.RemovePeerR
 	return &sentryproto.RemovePeerReply{Success: true}, nil
 }
 
+func (ss *GrpcServer) AddTrustedPeer(_ context.Context, req *sentryproto.AddPeerRequest) (*sentryproto.AddPeerReply, error) {
+	node, err := enode.Parse(enode.ValidSchemes, req.Url)
+	if err != nil {
+		return nil, err
+	}
+
+	p2pServer := ss.getP2PServer()
+	if p2pServer == nil {
+		return nil, errors.New("p2p server was not started")
+	}
+	p2pServer.AddTrustedPeer(node)
+
+	return &sentryproto.AddPeerReply{Success: true}, nil
+}
+
+func (ss *GrpcServer) RemoveTrustedPeer(_ context.Context, req *sentryproto.RemovePeerRequest) (*sentryproto.RemovePeerReply, error) {
+	node, err := enode.Parse(enode.ValidSchemes, req.Url)
+	if err != nil {
+		return nil, err
+	}
+
+	p2pServer := ss.getP2PServer()
+	if p2pServer == nil {
+		return nil, errors.New("p2p server was not started")
+	}
+	p2pServer.RemoveTrustedPeer(node)
+
+	return &sentryproto.RemovePeerReply{Success: true}, nil
+}
+
 func (ss *GrpcServer) NodeInfo(_ context.Context, _ *emptypb.Empty) (*typesproto.NodeInfoReply, error) {
 	p2pServer := ss.getP2PServer()
 	if p2pServer == nil {
