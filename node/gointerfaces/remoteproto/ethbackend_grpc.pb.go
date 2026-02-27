@@ -40,12 +40,15 @@ const (
 	ETHBACKEND_Peers_FullMethodName                   = "/remote.ETHBACKEND/Peers"
 	ETHBACKEND_AddPeer_FullMethodName                 = "/remote.ETHBACKEND/AddPeer"
 	ETHBACKEND_RemovePeer_FullMethodName              = "/remote.ETHBACKEND/RemovePeer"
+	ETHBACKEND_AddTrustedPeer_FullMethodName          = "/remote.ETHBACKEND/AddTrustedPeer"
+	ETHBACKEND_RemoveTrustedPeer_FullMethodName       = "/remote.ETHBACKEND/RemoveTrustedPeer"
 	ETHBACKEND_PendingBlock_FullMethodName            = "/remote.ETHBACKEND/PendingBlock"
 	ETHBACKEND_BorTxnLookup_FullMethodName            = "/remote.ETHBACKEND/BorTxnLookup"
 	ETHBACKEND_BorEvents_FullMethodName               = "/remote.ETHBACKEND/BorEvents"
 	ETHBACKEND_AAValidation_FullMethodName            = "/remote.ETHBACKEND/AAValidation"
 	ETHBACKEND_BlockForTxNum_FullMethodName           = "/remote.ETHBACKEND/BlockForTxNum"
 	ETHBACKEND_MinimumBlockAvailable_FullMethodName   = "/remote.ETHBACKEND/MinimumBlockAvailable"
+	ETHBACKEND_SetHead_FullMethodName                 = "/remote.ETHBACKEND/SetHead"
 )
 
 // ETHBACKENDClient is the client API for ETHBACKEND service.
@@ -87,6 +90,8 @@ type ETHBACKENDClient interface {
 	Peers(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*PeersReply, error)
 	AddPeer(ctx context.Context, in *AddPeerRequest, opts ...grpc.CallOption) (*AddPeerReply, error)
 	RemovePeer(ctx context.Context, in *RemovePeerRequest, opts ...grpc.CallOption) (*RemovePeerReply, error)
+	AddTrustedPeer(ctx context.Context, in *AddPeerRequest, opts ...grpc.CallOption) (*AddPeerReply, error)
+	RemoveTrustedPeer(ctx context.Context, in *RemovePeerRequest, opts ...grpc.CallOption) (*RemovePeerReply, error)
 	// PendingBlock returns latest built block.
 	PendingBlock(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*PendingBlockReply, error)
 	BorTxnLookup(ctx context.Context, in *BorTxnLookupRequest, opts ...grpc.CallOption) (*BorTxnLookupReply, error)
@@ -94,6 +99,7 @@ type ETHBACKENDClient interface {
 	AAValidation(ctx context.Context, in *AAValidationRequest, opts ...grpc.CallOption) (*AAValidationReply, error)
 	BlockForTxNum(ctx context.Context, in *BlockForTxNumRequest, opts ...grpc.CallOption) (*BlockForTxNumResponse, error)
 	MinimumBlockAvailable(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*MinimumBlockAvailableReply, error)
+	SetHead(ctx context.Context, in *SetHeadRequest, opts ...grpc.CallOption) (*SetHeadReply, error)
 }
 
 type eTHBACKENDClient struct {
@@ -309,6 +315,26 @@ func (c *eTHBACKENDClient) RemovePeer(ctx context.Context, in *RemovePeerRequest
 	return out, nil
 }
 
+func (c *eTHBACKENDClient) AddTrustedPeer(ctx context.Context, in *AddPeerRequest, opts ...grpc.CallOption) (*AddPeerReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AddPeerReply)
+	err := c.cc.Invoke(ctx, ETHBACKEND_AddTrustedPeer_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *eTHBACKENDClient) RemoveTrustedPeer(ctx context.Context, in *RemovePeerRequest, opts ...grpc.CallOption) (*RemovePeerReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RemovePeerReply)
+	err := c.cc.Invoke(ctx, ETHBACKEND_RemoveTrustedPeer_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *eTHBACKENDClient) PendingBlock(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*PendingBlockReply, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(PendingBlockReply)
@@ -369,6 +395,16 @@ func (c *eTHBACKENDClient) MinimumBlockAvailable(ctx context.Context, in *emptyp
 	return out, nil
 }
 
+func (c *eTHBACKENDClient) SetHead(ctx context.Context, in *SetHeadRequest, opts ...grpc.CallOption) (*SetHeadReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetHeadReply)
+	err := c.cc.Invoke(ctx, ETHBACKEND_SetHead_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ETHBACKENDServer is the server API for ETHBACKEND service.
 // All implementations must embed UnimplementedETHBACKENDServer
 // for forward compatibility.
@@ -408,6 +444,8 @@ type ETHBACKENDServer interface {
 	Peers(context.Context, *emptypb.Empty) (*PeersReply, error)
 	AddPeer(context.Context, *AddPeerRequest) (*AddPeerReply, error)
 	RemovePeer(context.Context, *RemovePeerRequest) (*RemovePeerReply, error)
+	AddTrustedPeer(context.Context, *AddPeerRequest) (*AddPeerReply, error)
+	RemoveTrustedPeer(context.Context, *RemovePeerRequest) (*RemovePeerReply, error)
 	// PendingBlock returns latest built block.
 	PendingBlock(context.Context, *emptypb.Empty) (*PendingBlockReply, error)
 	BorTxnLookup(context.Context, *BorTxnLookupRequest) (*BorTxnLookupReply, error)
@@ -415,6 +453,7 @@ type ETHBACKENDServer interface {
 	AAValidation(context.Context, *AAValidationRequest) (*AAValidationReply, error)
 	BlockForTxNum(context.Context, *BlockForTxNumRequest) (*BlockForTxNumResponse, error)
 	MinimumBlockAvailable(context.Context, *emptypb.Empty) (*MinimumBlockAvailableReply, error)
+	SetHead(context.Context, *SetHeadRequest) (*SetHeadReply, error)
 	mustEmbedUnimplementedETHBACKENDServer()
 }
 
@@ -482,6 +521,12 @@ func (UnimplementedETHBACKENDServer) AddPeer(context.Context, *AddPeerRequest) (
 func (UnimplementedETHBACKENDServer) RemovePeer(context.Context, *RemovePeerRequest) (*RemovePeerReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method RemovePeer not implemented")
 }
+func (UnimplementedETHBACKENDServer) AddTrustedPeer(context.Context, *AddPeerRequest) (*AddPeerReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method AddTrustedPeer not implemented")
+}
+func (UnimplementedETHBACKENDServer) RemoveTrustedPeer(context.Context, *RemovePeerRequest) (*RemovePeerReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method RemoveTrustedPeer not implemented")
+}
 func (UnimplementedETHBACKENDServer) PendingBlock(context.Context, *emptypb.Empty) (*PendingBlockReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method PendingBlock not implemented")
 }
@@ -499,6 +544,9 @@ func (UnimplementedETHBACKENDServer) BlockForTxNum(context.Context, *BlockForTxN
 }
 func (UnimplementedETHBACKENDServer) MinimumBlockAvailable(context.Context, *emptypb.Empty) (*MinimumBlockAvailableReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method MinimumBlockAvailable not implemented")
+}
+func (UnimplementedETHBACKENDServer) SetHead(context.Context, *SetHeadRequest) (*SetHeadReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetHead not implemented")
 }
 func (UnimplementedETHBACKENDServer) mustEmbedUnimplementedETHBACKENDServer() {}
 func (UnimplementedETHBACKENDServer) testEmbeddedByValue()                    {}
@@ -834,6 +882,42 @@ func _ETHBACKEND_RemovePeer_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ETHBACKEND_AddTrustedPeer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AddPeerRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ETHBACKENDServer).AddTrustedPeer(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ETHBACKEND_AddTrustedPeer_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ETHBACKENDServer).AddTrustedPeer(ctx, req.(*AddPeerRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ETHBACKEND_RemoveTrustedPeer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RemovePeerRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ETHBACKENDServer).RemoveTrustedPeer(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ETHBACKEND_RemoveTrustedPeer_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ETHBACKENDServer).RemoveTrustedPeer(ctx, req.(*RemovePeerRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ETHBACKEND_PendingBlock_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(emptypb.Empty)
 	if err := dec(in); err != nil {
@@ -942,6 +1026,24 @@ func _ETHBACKEND_MinimumBlockAvailable_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ETHBACKEND_SetHead_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetHeadRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ETHBACKENDServer).SetHead(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ETHBACKEND_SetHead_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ETHBACKENDServer).SetHead(ctx, req.(*SetHeadRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ETHBACKEND_ServiceDesc is the grpc.ServiceDesc for ETHBACKEND service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1014,6 +1116,14 @@ var ETHBACKEND_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _ETHBACKEND_RemovePeer_Handler,
 		},
 		{
+			MethodName: "AddTrustedPeer",
+			Handler:    _ETHBACKEND_AddTrustedPeer_Handler,
+		},
+		{
+			MethodName: "RemoveTrustedPeer",
+			Handler:    _ETHBACKEND_RemoveTrustedPeer_Handler,
+		},
+		{
 			MethodName: "PendingBlock",
 			Handler:    _ETHBACKEND_PendingBlock_Handler,
 		},
@@ -1036,6 +1146,10 @@ var ETHBACKEND_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "MinimumBlockAvailable",
 			Handler:    _ETHBACKEND_MinimumBlockAvailable_Handler,
+		},
+		{
+			MethodName: "SetHead",
+			Handler:    _ETHBACKEND_SetHead_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
