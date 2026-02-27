@@ -342,4 +342,3 @@ func (s *Sentinel) PeersList() []peer.AddrInfo {
 	}
 	return infos
 }
-
