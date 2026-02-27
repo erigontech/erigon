@@ -53,6 +53,13 @@ const RecSplitLogPrefix = "recsplit"
 
 const MaxLeafSize = 24
 
+// bucketResultPool is a package-level sync.Pool for reusing bucketResult instances
+var bucketResultPool = &sync.Pool{
+	New: func() interface{} {
+		return &bucketResult{}
+	},
+}
+
 /** David Stafford's (http://zimbry.blogspot.com/2011/09/better-bit-mixing-improving-on.html)
  * 13th variant of the 64-bit finalizer function in Austin Appleby's
  * MurmurHash3 (https://github.com/aappleby/smhasher).
@@ -118,8 +125,7 @@ type recsplitScratch struct {
 	leafSize           uint16
 	primaryAggrBound   uint16
 	secondaryAggrBound uint16
-	bytesPerRec        int        // Bytes per record in offset encoding
-	resultPool         *sync.Pool // Pool for reusing bucketResult instances
+	bytesPerRec        int // Bytes per record in offset encoding
 }
 
 // workerState carries per-goroutine state for parallel execution.
@@ -330,11 +336,6 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 		leafSize:           rs.leafSize,
 		primaryAggrBound:   rs.primaryAggrBound,
 		secondaryAggrBound: rs.secondaryAggrBound,
-		resultPool: &sync.Pool{
-			New: func() interface{} {
-				return &bucketResult{}
-			},
-		},
 	}
 	if args.NoFsync {
 		rs.DisableFsync()
@@ -753,15 +754,15 @@ func findBijection(bucket []uint64, salt uint64) uint64 {
 }
 
 // getBucketResult gets a bucketResult from the pool or creates a new one.
-func (rs *RecSplit) getBucketResult() *bucketResult {
-	r := rs.scratch.resultPool.Get().(*bucketResult)
+func getBucketResult() *bucketResult {
+	r := bucketResultPool.Get().(*bucketResult)
 	r.Reset()
 	return r
 }
 
 // putBucketResult returns a bucketResult to the pool for reuse.
-func (rs *RecSplit) putBucketResult(r *bucketResult) {
-	rs.scratch.resultPool.Put(r)
+func putBucketResult(r *bucketResult) {
+	bucketResultPool.Put(r)
 }
 
 // newWorkerState creates a new workerState for a worker goroutine.
@@ -778,7 +779,6 @@ func (rs *RecSplit) newWorkerState() *workerState {
 			primaryAggrBound:   rs.primaryAggrBound,
 			secondaryAggrBound: rs.secondaryAggrBound,
 			bytesPerRec:        rs.bytesPerRec,
-			resultPool:         rs.scratch.resultPool, // Share the pool
 		},
 		unaryBuf: make([]uint64, 0, rs.secondaryAggrBound),
 	}
@@ -792,7 +792,7 @@ func recsplitBucketWorker(inCh <-chan *bucketTask, outCh chan<- *bucketResult, w
 		ws.unaryBuf = ws.unaryBuf[:0]
 
 		// Get result from pool for this bucket
-		result := ws.scratch.resultPool.Get().(*bucketResult)
+		result := bucketResultPool.Get().(*bucketResult)
 		result.Reset()
 		result.order = task.order
 		result.bucketSize = len(task.keys)
