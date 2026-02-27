@@ -6,7 +6,7 @@ inputs:
     description: "GOCACHE path"
     required: true
   key:
-    description: "Cache key to save under (from restore-build-cache outputs.cache-key)"
+    description: "Cache key to save under (from restore-build-cache outputs.primary-key)"
     required: true
 
 runs:

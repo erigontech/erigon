@@ -267,14 +267,14 @@ runs:
     - id: restore-build-cache
       uses: ./.github/actions/restore-build-cache
       with:
-        gocache: ${{ steps.go-env.outputs.build }}
+        gocache-path: ${{ steps.go-env.outputs.build }}
         goversion: ${{ steps.go-env.outputs.goversion }}
-        workflow: ${{ steps.go-env.outputs.workflow }}
-        extra-key: ${{ inputs.build-cache-extra-key }}
+        workflow-id: ${{ steps.go-env.outputs.workflow }}
+        matrix-key: ${{ inputs.build-cache-extra-key }}
 
     - name: Export build cache key
       shell: bash
-      run: echo "ERIGON_CI_GOCACHE_KEY=${{ steps.restore-build-cache.outputs.cache-key }}" >> "$GITHUB_ENV"
+      run: echo "ERIGON_CI_GOCACHE_KEY=${{ steps.restore-build-cache.outputs.primary-key }}" >> "$GITHUB_ENV"
 
     - name: Export submodule cache keys
       if: ${{ inputs.submodules == 'true' }}
