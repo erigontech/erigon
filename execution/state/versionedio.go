@@ -421,6 +421,22 @@ func (vr versionedStateReader) ReadAccountIncarnation(address accounts.Address) 
 
 type VersionedWrites []*VersionedWrite
 
+// sortVersionedWrites sorts a VersionedWrites slice by (Address, Path, Key)
+// to ensure deterministic processing order. VersionedWrites originate from
+// WriteSet map iteration which has non-deterministic order in Go.
+// The sort relies on the AccountPath enum ordering defined in versionmap.go.
+func sortVersionedWrites(writes VersionedWrites) {
+	sort.Slice(writes, func(i, j int) bool {
+		if c := writes[i].Address.Cmp(writes[j].Address); c != 0 {
+			return c < 0
+		}
+		if writes[i].Path != writes[j].Path {
+			return writes[i].Path < writes[j].Path
+		}
+		return writes[i].Key.Cmp(writes[j].Key) < 0
+	})
+}
+
 func (prev VersionedWrites) Merge(next VersionedWrites) VersionedWrites {
 	if len(prev) == 0 {
 		return next
@@ -1021,6 +1037,7 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 		})
 
 		writes := io.WriteSet(txIndex)
+		sortVersionedWrites(writes)
 		for _, vw := range writes {
 			if vw.Address.IsNil() {
 				continue
