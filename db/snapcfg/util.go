@@ -487,6 +487,16 @@ func KnownCfg(networkName string) (*Cfg, bool) {
 	return registry.Get(networkName)
 }
 
+// KnownCfgOrDevnet returns the known config for networkName, falling back to
+// the Mainnet config when the network is not recognised.
+func KnownCfgOrDevnet(networkName string) *Cfg {
+	if cfg, ok := registry.Get(networkName); ok {
+		return cfg
+	}
+	cfg, _ := registry.Get(networkname.Dev)
+	return cfg
+}
+
 var KnownWebseeds = map[string][]string{
 	networkname.Mainnet:    webseedsParse(webseed.Mainnet),
 	networkname.Sepolia:    webseedsParse(webseed.Sepolia),
