@@ -143,6 +143,8 @@ func boolPtrHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName str
 func uint64CastTo(kind types.BasicKind) string {
 	var cast string
 	switch kind {
+	case types.Int8:
+		cast = "int8"
 	case types.Int16:
 		cast = "int16"
 	case types.Int32:
@@ -151,6 +153,8 @@ func uint64CastTo(kind types.BasicKind) string {
 		cast = "int"
 	case types.Int64:
 		cast = "int64"
+	case types.Uint8:
+		cast = "uint8"
 	case types.Uint16:
 		cast = "uint16"
 	case types.Uint32:
@@ -345,15 +349,10 @@ func _shortArrayHandle(b1, b2, b3 *bytes.Buffer, fieldName string, size int) { /
 	fmt.Fprintf(b2, "        return err\n")
 	fmt.Fprintf(b2, "    }\n")
 
-	// decode
-	addDecodeBuf(b3)
-	fmt.Fprintf(b3, "    if b, err = s.Bytes(); err != nil {\n")
-	fmt.Fprintf(b3, "        %s\n", decodeErrorMsg(fieldName))
+	// decode - optimized: use s.ReadBytes() directly into fixed-size array
+	fmt.Fprintf(b3, "    if err = s.ReadBytes(obj.%s[:]); err != nil {\n", fieldName)
+	fmt.Fprintf(b3, "        return fmt.Errorf(\"error decoding field %s, err: %%w\", err)\n", fieldName)
 	fmt.Fprintf(b3, "    }\n")
-	fmt.Fprintf(b3, "    if len(b) > 0 && len(b) != %d {\n", size)
-	fmt.Fprintf(b3, "        %s\n", decodeLenMismatch(size))
-	fmt.Fprintf(b3, "    }\n")
-	fmt.Fprintf(b3, "    copy(obj.%s[:], b)\n", fieldName)
 }
 
 func _shortArrayPtrHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName string, size int) error {
@@ -390,16 +389,11 @@ func _shortArrayPtrHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldN
 	fmt.Fprintf(b2, "        }\n")
 	fmt.Fprintf(b2, "    }\n")
 
-	// decode
-	addDecodeBuf(b3)
-	fmt.Fprintf(b3, "    if b, err = s.Bytes(); err != nil {\n")
-	fmt.Fprintf(b3, "        %s\n", decodeErrorMsg(fieldName))
-	fmt.Fprintf(b3, "    }\n")
-	fmt.Fprintf(b3, "    if len(b) > 0 && len(b) != %d {\n", size)
-	fmt.Fprintf(b3, "        %s\n", decodeLenMismatch(size))
-	fmt.Fprintf(b3, "    }\n")
+	// decode - optimized: use s.ReadBytes() directly
 	fmt.Fprintf(b3, "    obj.%s = &%s{}\n", fieldName, typ)
-	fmt.Fprintf(b3, "    copy((*obj.%s)[:], b)\n", fieldName)
+	fmt.Fprintf(b3, "    if err = s.ReadBytes((*obj.%s)[:]); err != nil {\n", fieldName)
+	fmt.Fprintf(b3, "        return fmt.Errorf(\"error decoding field %s, err: %%w\", err)\n", fieldName)
+	fmt.Fprintf(b3, "    }\n")
 
 	return nil
 }
@@ -746,11 +740,14 @@ func hashSliceHandleOptimized(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fi
 
 	// decode - with pre-allocation optimization
 	addDecodeBuf(b3)
-	startListDecode(b3, fieldName)
 
 	// Calculate expected list length and apply hard limit of 128 to prevent DoS
+	// Only call s.List() ONCE to get size
 	fmt.Fprintf(b3, "    l, err := s.List()\n")
-	fmt.Fprintf(b3, "    if err == nil && l > 0 {\n")
+	fmt.Fprintf(b3, "    if err != nil {\n")
+	fmt.Fprintf(b3, "        return fmt.Errorf(\"error decoding field %s - expected list start, err: %%w\", err)\n", fieldName)
+	fmt.Fprintf(b3, "    }\n")
+	fmt.Fprintf(b3, "    if l > 0 {\n")
 	fmt.Fprintf(b3, "        listLen := int(l / (1 + 32))  // Each hash: 1-byte RLP prefix + 32-byte hash\n")
 	fmt.Fprintf(b3, "        preAlloc := min(128, listLen) // Hard limit against DoS\n")
 	fmt.Fprintf(b3, "        obj.%s = make([]%s, 0, preAlloc)\n", fieldName, typ)
