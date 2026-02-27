@@ -98,7 +98,7 @@ type execStats struct {
 	GasUsed        uint64        `json:"gasUsed"`        // the amount of gas used during execution
 }
 
-func timedExec(bench bool, execFunc func() ([]byte, evmtypes.MdGas, error)) (output []byte, stats execStats, err error) {
+func timedExec(bench bool, execFunc func() ([]byte, uint64, error)) (output []byte, stats execStats, err error) {
 	if bench {
 		// Do one warm-up run
 		output, gasUsed, err := execFunc()
@@ -309,7 +309,7 @@ func runCmd(ctx *cli.Context) error {
 		input = append(code, input...)
 		execFunc = func() ([]byte, uint64, error) {
 			output, _, gasLeft, err := runtime.Create(input, &runtimeConfig, 0)
-			return output, gasLeft, err
+			return output, gasLeft.Total(), err
 		}
 	} else {
 		if len(code) > 0 {
@@ -317,7 +317,7 @@ func runCmd(ctx *cli.Context) error {
 		}
 		execFunc = func() ([]byte, uint64, error) {
 			output, gasLeft, err := runtime.Call(receiver, input, &runtimeConfig)
-			return output, initialGas - gasLeft, err
+			return output, initialGas - gasLeft.Total(), err
 		}
 	}
 
