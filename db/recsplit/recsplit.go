@@ -290,7 +290,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 		rs.salt = *args.Salt
 	}
 	rs.bucketCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.SmallSortableBuffers, logger)
-	rs.bucketCollector.SortAndFlushInBackground(false)
+	rs.bucketCollector.SortAndFlushInBackground(workers > 1)
 	rs.bucketCollector.LogLvl(log.LvlDebug)
 	var err error
 	if args.Enums {
@@ -1138,15 +1138,15 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	rs.currentBucketIdx = math.MaxUint64 // To make sure 0 bucket is detected
 	defer rs.bucketCollector.Close()
 
-	// Pre-compute golombRice table up to max bucket size (for workers to use without locking)
-	// Note: Workers capture golombRice reference before pre-population completes,
-	// so we compute up to exact bounds to avoid array reallocation
-	maxM := uint16(rs.bucketSize)
+	// Pre-compute golombRice table for all potential bucket sizes
+	// In practice, buckets can exceed bucketSize due to hash distribution
+	// Add 50% safety margin to handle variance
+	maxM := uint16(rs.bucketSize) + uint16(rs.bucketSize/2)
 	if rs.secondaryAggrBound > maxM {
 		maxM = rs.secondaryAggrBound
 	}
-	for m := uint16(0); m <= maxM; m++ {
-		rs.golombParam(m)
+	for m := uint16(len(rs.golombRice)); m <= maxM; m++ {
+		rs.golombParam(m) // Populate table entry
 	}
 	// Set golombRice and bytesPerRec in scratch after they are computed
 	rs.scratch.golombRice = rs.golombRice
