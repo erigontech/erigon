@@ -1138,13 +1138,14 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	rs.currentBucketIdx = math.MaxUint64 // To make sure 0 bucket is detected
 	defer rs.bucketCollector.Close()
 
-	// Pre-compute golombRice table up to max bucket size (for workers to use without locking)
-	maxM := uint16(rs.bucketSize)
+	// Pre-populate golombRice table for all potential bucket sizes
+	// In practice, buckets can exceed bucketSize due to hash distribution
+	maxM := uint16(rs.bucketSize + rs.bucketSize/2) // Add 50% safety margin
 	if rs.secondaryAggrBound > maxM {
 		maxM = rs.secondaryAggrBound
 	}
-	for m := uint16(0); m <= maxM; m++ {
-		rs.golombParam(m)
+	for m := uint16(len(rs.golombRice)); m <= maxM; m++ {
+		rs.golombParam(m) // Populate table entry
 	}
 	// Set golombRice and bytesPerRec in scratch after they are computed
 	rs.scratch.golombRice = rs.golombRice
