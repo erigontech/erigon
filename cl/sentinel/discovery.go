@@ -170,10 +170,15 @@ func (s *Sentinel) findPeersForSubnets(subnets []subnetSearchState) {
 	}
 
 	// Log final results
+	satisfied, totalFound := 0, 0
 	for _, info := range subnets {
-		log.Debug("[Sentinel] Subnet peer search result", "subnet", info.idx, "found", info.found, "wanted", info.wanted)
+		log.Trace("[Sentinel] Subnet peer search result", "subnet", info.idx, "found", info.found, "wanted", info.wanted)
+		totalFound += info.found
+		if info.found >= info.wanted {
+			satisfied++
+		}
 	}
-	log.Debug("[Sentinel] Subnet peer search completed", "totalChecked", checked)
+	log.Debug("[Sentinel] Subnet peer search completed", "nodesChecked", checked, "subnetsReachedMinPeers", satisfied, "subnetsSearched", len(subnets), "peersFound", totalFound)
 }
 
 // proactiveSubnetPeerSearch is a goroutine that monitors subnet coverage
@@ -207,7 +212,7 @@ func (s *Sentinel) proactiveSubnetPeerSearch() {
 			}
 
 			if len(underserved) == 0 {
-				log.Debug("[Sentinel] All subnets have sufficient peers")
+				log.Trace("[Sentinel] All subnets have sufficient peers")
 				continue
 			}
 
@@ -222,7 +227,7 @@ func (s *Sentinel) proactiveSubnetPeerSearch() {
 				underservedIdxs[i] = info.idx
 			}
 
-			log.Info("[Sentinel] Proactive subnet search starting",
+			log.Debug("[Sentinel] Proactive subnet search starting",
 				"underservedCount", len(underserved),
 				"threshold", minimumPeersPerSubnet,
 				"subnets", underservedIdxs)
@@ -235,6 +240,22 @@ func (s *Sentinel) proactiveSubnetPeerSearch() {
 
 			// Find peers for all underserved subnets in one pass
 			s.findPeersForSubnets(underserved)
+
+			// Log post-search global coverage
+			postCoverage := s.getSubnetCoverage()
+			stillUnderserved := []int{}
+			atMin := 0
+			for i, count := range postCoverage {
+				if count >= minimumPeersPerSubnet {
+					atMin++
+				} else {
+					stillUnderserved = append(stillUnderserved, i)
+				}
+			}
+			log.Debug("[Sentinel] Subnet coverage after search",
+				"subnetsAtMinPeers", atMin,
+				"minPeersPerSubnet", minimumPeersPerSubnet,
+				"stillUnderserved", stillUnderserved)
 		}
 	}
 }
@@ -383,7 +404,7 @@ func (s *Sentinel) pruneExcessPeers() {
 		s.peers.RemovePeer(info.pid)
 		removed++
 
-		log.Debug("[Sentinel] Pruned excess peer", "peer", info.pid, "subnetsCount", info.subnetsCount)
+		log.Trace("[Sentinel] Pruned excess peer", "peer", info.pid, "subnetsCount", info.subnetsCount)
 	}
 
 	log.Info("[Sentinel] Peer pruning complete", "removed", removed, "remaining", peerCount-removed)
@@ -552,7 +573,7 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 		}
 
 		if !valid {
-			log.Debug("[Sentinel] Handshake failed, disconnecting peer", "peer", peerId)
+			log.Trace("[Sentinel] Handshake failed, disconnecting peer", "peer", peerId)
 			// on handshake fail, we disconnect with said peer, and remove them from our pool
 			s.p2p.Host().Peerstore().RemovePeer(peerId)
 			s.p2p.Host().Network().ClosePeer(peerId)
@@ -561,7 +582,7 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 			// we were able to succesfully connect, so add this peer to our pool
 			s.peers.AddPeer(peerId)
 
-			log.Debug("[Sentinel] Peer validated and added", "peer", peerId)
+			log.Trace("[Sentinel] Peer validated and added", "peer", peerId)
 		}
 	}()
 }
