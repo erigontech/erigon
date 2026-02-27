@@ -4,9 +4,10 @@ package types
 
 import (
 	"fmt"
+	"io"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/rlp"
-	"io"
 )
 
 func (obj *LogForStorageGen) EncodingSize() (size int) {
@@ -54,10 +55,9 @@ func (obj *LogForStorageGen) DecodeRLP(s *rlp.Stream) error {
 	if err = s.ReadBytes(obj.Address[:]); err != nil {
 		return fmt.Errorf("error decoding field Address, err: %w", err)
 	}
-	var b []byte
 	l, err := s.List()
 	if err != nil {
-		return fmt.Errorf("error decoding field Topics - expected list start, err: %w", err)
+		return err
 	}
 	if l > 0 {
 		listLen := int(l / (1 + 32))  // Each hash: 1-byte RLP prefix + 32-byte hash
@@ -66,13 +66,12 @@ func (obj *LogForStorageGen) DecodeRLP(s *rlp.Stream) error {
 	} else {
 		obj.Topics = []common.Hash{}
 	}
-	for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
-		if len(b) > 0 && len(b) != 32 {
-			return fmt.Errorf("error decoded length mismatch, expected: 32, got: %d", len(b))
+	var h common.Hash
+	for s.MoreDataInList() {
+		if err = s.ReadBytes(h[:]); err != nil {
+			return err
 		}
-		var s common.Hash
-		copy(s[:], b)
-		obj.Topics = append(obj.Topics, s)
+		obj.Topics = append(obj.Topics, h)
 	}
 	if err = s.ListEnd(); err != nil {
 		return fmt.Errorf("error decoding field Topics - fail to close list, err: %w", err)

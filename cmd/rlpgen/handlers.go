@@ -508,8 +508,7 @@ func byteSliceHandle(b1, b2, b3 *bytes.Buffer, _ types.Type, fieldName string) {
 	fmt.Fprintf(b2, "        return err\n")
 	fmt.Fprintf(b2, "    }\n")
 
-	// decode
-	addDecodeBuf(b3)
+	// decode - no buffer needed, s.Bytes() returns directly
 	fmt.Fprintf(b3, "    if obj.%s, err = s.Bytes(); err != nil {\n", fieldName)
 	fmt.Fprintf(b3, "        %s\n", decodeErrorMsg(fieldName))
 	fmt.Fprintf(b3, "    }\n")
@@ -739,13 +738,13 @@ func hashSliceHandleOptimized(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fi
 	fmt.Fprintf(b2, "    }\n")
 
 	// decode - with pre-allocation optimization
-	addDecodeBuf(b3)
+	// No buffer var since we use direct ReadBytes
 
 	// Calculate expected list length and apply hard limit of 128 to prevent DoS
 	// Only call s.List() ONCE to get size
 	fmt.Fprintf(b3, "    l, err := s.List()\n")
 	fmt.Fprintf(b3, "    if err != nil {\n")
-	fmt.Fprintf(b3, "        return fmt.Errorf(\"error decoding field %s - expected list start, err: %%w\", err)\n", fieldName)
+	fmt.Fprintf(b3, "        return err\n")
 	fmt.Fprintf(b3, "    }\n")
 	fmt.Fprintf(b3, "    if l > 0 {\n")
 	fmt.Fprintf(b3, "        listLen := int(l / (1 + 32))  // Each hash: 1-byte RLP prefix + 32-byte hash\n")
@@ -754,13 +753,13 @@ func hashSliceHandleOptimized(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fi
 	fmt.Fprintf(b3, "    } else {\n")
 	fmt.Fprintf(b3, "        obj.%s = []%s{}\n", fieldName, typ)
 	fmt.Fprintf(b3, "    }\n")
-	fmt.Fprintf(b3, "    for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {\n")
-	fmt.Fprintf(b3, "        if len(b) > 0 && len(b) != 32 {\n")
-	fmt.Fprintf(b3, "            return fmt.Errorf(\"error decoded length mismatch, expected: 32, got: %%d\", len(b))\n")
+	// Optimized: Use MoreDataInList() with direct ReadBytes - zero-copy, zero-alloc
+	fmt.Fprintf(b3, "    var h %s\n", typ)
+	fmt.Fprintf(b3, "    for s.MoreDataInList() {\n")
+	fmt.Fprintf(b3, "        if err = s.ReadBytes(h[:]); err != nil {\n")
+	fmt.Fprintf(b3, "            return err\n")
 	fmt.Fprintf(b3, "        }\n")
-	fmt.Fprintf(b3, "        var s %s\n", typ)
-	fmt.Fprintf(b3, "        copy(s[:], b)\n")
-	fmt.Fprintf(b3, "        obj.%s = append(obj.%s, s)\n", fieldName, fieldName)
+	fmt.Fprintf(b3, "        obj.%s = append(obj.%s, h)\n", fieldName, fieldName)
 	fmt.Fprintf(b3, "    }\n")
 
 	endListDecode(b3, fieldName)
