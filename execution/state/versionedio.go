@@ -1045,6 +1045,7 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 		})
 
 		writes := io.WriteSet(txIndex)
+		sortVersionedWrites(writes)
 		for _, vw := range writes {
 			if vw.Address.IsNil() {
 				continue
@@ -1059,7 +1060,7 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 				continue
 			}
 
-			account := ensureAccountState(ac, addr)
+			ensureAccountState(ac, addr)
 		}
 	}
 
