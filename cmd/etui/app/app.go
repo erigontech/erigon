@@ -19,21 +19,23 @@ import (
 
 // App is the top-level TUI application.
 type App struct {
-	tview     *tview.Application
-	dp        *datasource.DownloaderPinger
-	sysColl   *datasource.SystemCollector
-	iopsTrack *datasource.DiskIOPSTracker
-	datadir   string
+	tview       *tview.Application
+	dp          *datasource.DownloaderPinger
+	sysColl     *datasource.SystemCollector
+	iopsTrack   *datasource.DiskIOPSTracker
+	syncTracker *datasource.SyncTracker
+	datadir     string
 }
 
 // New creates an App that reads from the given datadir.
 func New(datadir string) *App {
 	return &App{
-		datadir:   datadir,
-		tview:     tview.NewApplication(),
-		dp:        datasource.NewDownloaderPinger(config.DefaultDownloaderURL),
-		sysColl:   datasource.NewSystemCollector(datadir),
-		iopsTrack: datasource.NewDiskIOPSTracker(),
+		datadir:     datadir,
+		tview:       tview.NewApplication(),
+		dp:          datasource.NewDownloaderPinger(config.DefaultDownloaderURL),
+		sysColl:     datasource.NewSystemCollector(datadir),
+		iopsTrack:   datasource.NewDiskIOPSTracker(),
+		syncTracker: datasource.NewSyncTracker(),
 	}
 }
 
@@ -130,9 +132,10 @@ func (a *App) fillStagesInfo(ctx context.Context, view *widgets.NodeInfoView, in
 			if !ok {
 				return
 			}
+			metrics := a.syncTracker.Update(info)
+			currentStage := leadingStageName(info)
 			a.tview.QueueUpdateDraw(func() {
-				view.Overview.Clear()
-				view.Overview.SetText(info.OverviewTUI())
+				view.SyncStatus.UpdateSyncStatus(metrics, currentStage)
 				view.Stages.Clear()
 				view.Stages.SetText(info.Stages())
 				view.DomainII.Clear()
@@ -140,6 +143,22 @@ func (a *App) fillStagesInfo(ctx context.Context, view *widgets.NodeInfoView, in
 			})
 		}
 	}
+}
+
+// leadingStageName returns the last stage in pipeline order that has non-zero
+// progress. This is the furthest stage the sync has reached, giving a reliable
+// indicator of current sync position regardless of early-sync zero values.
+func leadingStageName(info *commands.StagesInfo) string {
+	if len(info.StagesProgress) == 0 {
+		return "—"
+	}
+	last := "—"
+	for _, sp := range info.StagesProgress {
+		if sp.Progress > 0 {
+			last = string(sp.Stage)
+		}
+	}
+	return last
 }
 
 // runClock updates the clock widget every second.

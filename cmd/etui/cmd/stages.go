@@ -45,10 +45,15 @@ var infoCmd = &cobra.Command{
 			for {
 				err := commands.InfoAllStages(cmd.Context(), logger, datadirCli, infoCh)
 				if err == nil {
-					return
+					return // context cancelled or clean exit
 				}
-				// All errors are transient for etui: DB locked, salt files
+				// DB open errors are transient: DB locked, salt files
 				// missing, chaindata not yet created, etc. Always retry.
+				logger.Warn("InfoAllStages failed, retrying", "err", err)
+				select {
+				case errCh <- fmt.Errorf("InfoAllStages: %v (retrying in %v)", err, retryInterval):
+				default:
+				}
 				select {
 				case <-cmd.Context().Done():
 					return

@@ -130,16 +130,77 @@ type DomainIIProgress struct {
 
 // InfoStages collects stage progress and domain/index info from a temporal transaction.
 func InfoStages(tx kv.TemporalTx, snapshots *freezeblocks.RoSnapshots, borSn *heimdall.RoSnapshots) (info *StagesInfo, err error) {
+	info, err = InfoStagesLite(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Snapshot info (requires snapshot objects)
+	if snapshots != nil {
+		info.SnapshotInfo = Snapshot{
+			SegMax: snapshots.SegmentsMax(),
+			IndMax: snapshots.IndicesMax(),
+		}
+	}
+	if borSn != nil {
+		info.BorSnapshotInfo = Snapshot{
+			SegMax: borSn.SegmentsMax(),
+			IndMax: borSn.IndicesMax(),
+		}
+	}
+
+	// Domain/II progress (requires TemporalTx)
+	dbg := tx.Debug()
+	stepSize := dbg.StepSize()
+	if stepSize > 0 {
+		info.LastInfo.IdxSteps = rawdbhelpers.IdxStepsCountV3(tx, stepSize)
+
+		info.DomainIIProgress = make([]DomainIIProgress, 0, kv.DomainLen+4)
+		for i := 0; i < int(kv.DomainLen); i++ {
+			d := kv.Domain(i)
+			txNum := dbg.DomainProgress(d)
+			step := txNum / stepSize
+			if d == kv.CommitmentDomain {
+				info.DomainIIProgress = append(info.DomainIIProgress, DomainIIProgress{
+					Name: d.String(),
+					Step: step,
+				})
+				continue
+			}
+			info.DomainIIProgress = append(info.DomainIIProgress, DomainIIProgress{
+				Name:             d.String(),
+				HistoryStartFrom: dbg.HistoryStartFrom(d),
+				TxNum:            txNum,
+				Step:             step,
+			})
+		}
+		for _, ii := range []kv.InvertedIdx{kv.LogTopicIdx, kv.LogAddrIdx, kv.TracesFromIdx, kv.TracesToIdx} {
+			txNum := dbg.IIProgress(ii)
+			step := txNum / stepSize
+			info.DomainIIProgress = append(info.DomainIIProgress, DomainIIProgress{
+				Name:  ii.String(),
+				TxNum: txNum,
+				Step:  step,
+			})
+		}
+	}
+
+	return info, nil
+}
+
+// InfoStagesLite collects stage progress from a plain kv.Tx (no aggregator needed).
+// Used by etui to avoid the heavy openDB/temporal path.
+func InfoStagesLite(tx kv.Tx) (info *StagesInfo, err error) {
 	defer func() {
-		recovered := recover()
-		if recovered != nil {
-			err = fmt.Errorf("recovered from panic: %v", recovered)
+		if r := recover(); r != nil {
+			err = fmt.Errorf("recovered from panic: %v", r)
 		}
 	}()
+
 	var progress uint64
 	info = &StagesInfo{}
 
-	// Read chain config without ChainConfigWithErr (which doesn't exist in main)
+	// Chain config
 	genesisHash, hashErr := rawdb.ReadCanonicalHash(tx, 0)
 	if hashErr == nil {
 		cfg, cfgErr := rawdb.ReadChainConfig(tx, genesisHash)
@@ -151,6 +212,7 @@ func InfoStages(tx kv.TemporalTx, snapshots *freezeblocks.RoSnapshots, borSn *he
 		}
 	}
 
+	// Stage progress
 	info.StagesProgress = make([]StageProgress, 0, len(stages.AllStages))
 	for _, stage := range stages.AllStages {
 		if progress, err = stages.GetStageProgress(tx, stage); err != nil {
@@ -166,96 +228,50 @@ func InfoStages(tx kv.TemporalTx, snapshots *freezeblocks.RoSnapshots, borSn *he
 			Progress: progress,
 		})
 	}
+
+	// Prune mode
 	pm, err := prune.Get(tx)
 	if err != nil {
 		return nil, err
 	}
 	info.PruneDistance = pm
-	if snapshots != nil {
-		info.SnapshotInfo = Snapshot{
-			SegMax: snapshots.SegmentsMax(),
-			IndMax: snapshots.IndicesMax(),
-		}
-	}
-	if borSn != nil {
-		info.BorSnapshotInfo = Snapshot{
-			SegMax: borSn.SegmentsMax(),
-			IndMax: borSn.IndicesMax(),
-		}
-	}
 
+	// TxNums
 	_lb, _lt, _ := rawdbv3.TxNums.Last(tx)
-
-	dbg := tx.Debug()
-	stepSize := dbg.StepSize()
-
 	info.LastInfo = Last{
 		TxNum:    _lt,
 		BlockNum: _lb,
-		IdxSteps: rawdbhelpers.IdxStepsCountV3(tx, stepSize),
 	}
+
+	// EthTx sequence
 	ethTxSequence, err := tx.ReadSequence(kv.EthTx)
 	if err != nil {
 		return nil, err
 	}
 	info.EthTxSequence = ethTxSequence
 
-	{
-		firstNonGenesisHeader, err := rawdbv3.SecondKey(tx, kv.Headers)
-		if err != nil {
-			return nil, err
-		}
-		lastHeaders, err := rawdbv3.LastKey(tx, kv.Headers)
-		if err != nil {
-			return nil, err
-		}
-		firstNonGenesisBody, err := rawdbv3.SecondKey(tx, kv.BlockBody)
-		if err != nil {
-			return nil, err
-		}
-		lastBody, err := rawdbv3.LastKey(tx, kv.BlockBody)
-		if err != nil {
-			return nil, err
-		}
-		fstHeader := infoU64or0(firstNonGenesisHeader)
-		lstHeader := infoU64or0(lastHeaders)
-		fstBody := infoU64or0(firstNonGenesisBody)
-		lstBody := infoU64or0(lastBody)
-		info.DB = DB{
-			FirstHeader: fstHeader,
-			LastHeader:  lstHeader,
-			FirstBody:   fstBody,
-			LastBody:    lstBody,
-		}
+	// DB key ranges
+	firstNonGenesisHeader, err := rawdbv3.SecondKey(tx, kv.Headers)
+	if err != nil {
+		return nil, err
 	}
-
-	info.DomainIIProgress = make([]DomainIIProgress, 0, kv.DomainLen+4)
-	for i := 0; i < int(kv.DomainLen); i++ {
-		d := kv.Domain(i)
-		txNum := dbg.DomainProgress(d)
-		step := txNum / stepSize
-		if d == kv.CommitmentDomain {
-			info.DomainIIProgress = append(info.DomainIIProgress, DomainIIProgress{
-				Name: d.String(),
-				Step: step,
-			})
-			continue
-		}
-		info.DomainIIProgress = append(info.DomainIIProgress, DomainIIProgress{
-			Name:             d.String(),
-			HistoryStartFrom: dbg.HistoryStartFrom(d),
-			TxNum:            txNum,
-			Step:             step,
-		})
+	lastHeaders, err := rawdbv3.LastKey(tx, kv.Headers)
+	if err != nil {
+		return nil, err
 	}
-	for _, ii := range []kv.InvertedIdx{kv.LogTopicIdx, kv.LogAddrIdx, kv.TracesFromIdx, kv.TracesToIdx} {
-		txNum := dbg.IIProgress(ii)
-		step := txNum / stepSize
-		info.DomainIIProgress = append(info.DomainIIProgress, DomainIIProgress{
-			Name:  ii.String(),
-			TxNum: txNum,
-			Step:  step,
-		})
+	firstNonGenesisBody, err := rawdbv3.SecondKey(tx, kv.BlockBody)
+	if err != nil {
+		return nil, err
+	}
+	lastBody, err := rawdbv3.LastKey(tx, kv.BlockBody)
+	if err != nil {
+		return nil, err
+	}
+	info.DB = DB{
+		FirstHeader: infoU64or0(firstNonGenesisHeader),
+		LastHeader:  infoU64or0(lastHeaders),
+		FirstBody:   infoU64or0(firstNonGenesisBody),
+		LastBody:    infoU64or0(lastBody),
 	}
 
 	return info, nil
@@ -270,42 +286,47 @@ func infoU64or0(in []byte) (v uint64) {
 	return v
 }
 
-// InfoAllStages opens the datadir DB read-only and streams StagesInfo to infoCh.
+// InfoAllStages opens the chaindata DB read-only (lightweight, no aggregator/salt)
+// and polls stage progress in a loop until the context is cancelled.
 // It is the entry point called by the etui TUI.
 func InfoAllStages(ctx context.Context, logger log.Logger, dataDirPath string, infoCh chan<- *StagesInfo) error {
 	dirs := datadir.New(dataDirPath)
-	chainDataPath := dirs.Chaindata
 
-	opts := kv2.New(dbcfg.ChainDB, logger).
-		Path(chainDataPath).
+	db, err := kv2.New(dbcfg.ChainDB, logger).
+		Path(dirs.Chaindata).
 		Accede(true).
-		Readonly(true) // open read-only so etui can coexist with running erigon
-
-	db, err := openDB(opts, false, "", logger)
+		Readonly(true).
+		Open(ctx)
 	if err != nil {
-		return fmt.Errorf("open db: %w", err)
+		return fmt.Errorf("open chaindata: %w", err)
 	}
 	defer db.Close()
 
-	sn, borSn, _, _, _, _, _ := allSnapshots(ctx, db, logger) // ignore error to get partial stat
-	if sn != nil {
-		defer sn.Close()
-	}
-	if borSn != nil {
-		defer borSn.Close()
-	}
+	const pollInterval = 5 * time.Second
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
 
-	// Single read then close
-	return db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		info, err := InfoStages(tx, sn, borSn)
+	for {
+		err := db.View(ctx, func(tx kv.Tx) error {
+			info, err := InfoStagesLite(tx)
+			if err != nil {
+				return err
+			}
+			select {
+			case infoCh <- info:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			return nil
+		})
 		if err != nil {
-			return err
+			logger.Warn("InfoAllStages poll failed", "err", err)
 		}
+
 		select {
-		case infoCh <- info:
 		case <-ctx.Done():
-			return ctx.Err()
+			return nil
+		case <-ticker.C:
 		}
-		return nil
-	})
+	}
 }
