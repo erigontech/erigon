@@ -574,10 +574,10 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 
 		if !valid {
 			log.Trace("[Sentinel] Handshake failed, disconnecting peer", "peer", peerId)
-			// on handshake fail, we disconnect with said peer, and remove them from our pool
 			s.p2p.Host().Peerstore().RemovePeer(peerId)
 			s.p2p.Host().Network().ClosePeer(peerId)
 			s.peers.RemovePeer(peerId)
+			s.peers.RecordHandshakeFailure(peerId)
 		} else {
 			// we were able to succesfully connect, so add this peer to our pool
 			s.peers.AddPeer(peerId)
