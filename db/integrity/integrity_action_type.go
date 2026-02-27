@@ -113,8 +113,11 @@ const (
 var FastChecks = []Check{
 	Blocks, HeaderNoGaps, BlocksTxnID, InvertedIndex, StateProgress, Publishable, HistoryNoSystemTxs,
 	BorEvents, BorSpans, BorCheckpoints, ReceiptsNoDups, RCacheNoDups, CommitmentRoot,
-	CommitmentKvi, CommitmentKvDeref,
+	CommitmentKvi,
 }
 
 var SlowChecks = []Check{CommitmentHistVal, StateVerify}
-var AllChecks = append(append([]Check{}, FastChecks...), SlowChecks...)
+var DeprecatedChecks = []Check{
+	CommitmentKvDeref, //StateVerify - will overcome
+}
+var AllChecks = append(append(append([]Check{}, FastChecks...), SlowChecks...), DeprecatedChecks...)
