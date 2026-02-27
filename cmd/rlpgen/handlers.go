@@ -89,6 +89,57 @@ func addToImports(named *types.Named) (typ string) {
 	return
 }
 
+func boolHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName string) {
+	// size - bool encoded as 0 or 1 (1 byte)
+	fmt.Fprintf(b1, "    size += 1\n")
+
+	// encode - bool encoded as 0 or 1
+	fmt.Fprintf(b2, "    var bval uint64\n")
+	fmt.Fprintf(b2, "    if obj.%s {\n", fieldName)
+	fmt.Fprintf(b2, "        bval = 1\n")
+	fmt.Fprintf(b2, "    }\n")
+	fmt.Fprintf(b2, "    if err := rlp.EncodeInt(bval, w, b[:]); err != nil {\n")
+	fmt.Fprintf(b2, "        return err\n")
+	fmt.Fprintf(b2, "    }\n")
+
+	// decode
+	fmt.Fprintf(b3, "    if n, err := s.Uint(); err != nil {\n")
+	fmt.Fprintf(b3, "        %s\n", decodeErrorMsg(fieldName))
+	fmt.Fprintf(b3, "    } else {\n")
+	fmt.Fprintf(b3, "        obj.%s = n != 0\n", fieldName)
+	fmt.Fprintf(b3, "    }\n")
+}
+
+func boolPtrHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName string) {
+	// size - bool encoded as 0 or 1 (1 byte) or empty if nil
+	fmt.Fprintf(b1, "    if obj.%s != nil {\n", fieldName)
+	fmt.Fprintf(b1, "        size += 1\n")
+	fmt.Fprintf(b1, "    }\n")
+
+	// encode - bool encoded as 0 or 1, or empty if nil
+	fmt.Fprintf(b2, "    var bval uint64\n")
+	fmt.Fprintf(b2, "    if obj.%s != nil {\n", fieldName)
+	fmt.Fprintf(b2, "        if *obj.%s {\n", fieldName)
+	fmt.Fprintf(b2, "            bval = 1\n")
+	fmt.Fprintf(b2, "        }\n")
+	fmt.Fprintf(b2, "        if err := rlp.EncodeInt(bval, w, b[:]); err != nil {\n")
+	fmt.Fprintf(b2, "            return err\n")
+	fmt.Fprintf(b2, "        }\n")
+	fmt.Fprintf(b2, "    } else {\n")
+	fmt.Fprintf(b2, "        if err := rlp.EncodeInt(0, w, b[:]); err != nil {\n")
+	fmt.Fprintf(b2, "            return err\n")
+	fmt.Fprintf(b2, "        }\n")
+	fmt.Fprintf(b2, "    }\n")
+
+	// decode
+	fmt.Fprintf(b3, "    if n, err := s.Uint(); err != nil {\n")
+	fmt.Fprintf(b3, "        %s\n", decodeErrorMsg(fieldName))
+	fmt.Fprintf(b3, "    } else {\n")
+	fmt.Fprintf(b3, "        bval := n != 0\n")
+	fmt.Fprintf(b3, "        obj.%s = &bval\n", fieldName)
+	fmt.Fprintf(b3, "    }\n")
+}
+
 func uint64CastTo(kind types.BasicKind) string {
 	var cast string
 	switch kind {
@@ -659,6 +710,63 @@ func addressPtrSliceHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, field
 
 func hashSliceHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName string) {
 	_shortArraySliceHandle(b1, b2, b3, fieldType, fieldName, 32)
+}
+
+func hashSliceHandleOptimized(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName string) {
+	// Optimized handler for []common.Hash with pre-allocation limit to prevent DoS attacks
+	// Similar to decodeTopics2 in log.go - limits pre-allocation to 128 elements
+
+	var typ string
+	if slc, ok := fieldType.(*types.Slice); !ok {
+		_exit("hashSliceHandleOptimized: expected fieldType to be Slice")
+	} else {
+		if named, ok := slc.Elem().(*types.Named); !ok {
+			_exit("hashSliceHandleOptimized: expected fieldType to be Slice Named")
+		} else {
+			typ = addToImports(named)
+		}
+	}
+
+	// size
+	addIntSize(b1)
+	fmt.Fprintf(b1, "    gidx = (32 + 1) * len(obj.%s)\n", fieldName)
+	fmt.Fprintf(b1, "    size += rlp.ListPrefixLen(gidx) + gidx\n")
+
+	// encode
+	addIntEncode(b2)
+	fmt.Fprintf(b2, "    gidx = (32 + 1) * len(obj.%s)\n", fieldName)
+	fmt.Fprintf(b2, "    if err := rlp.EncodeStructSizePrefix(gidx, w, b[:]); err != nil {\n")
+	fmt.Fprintf(b2, "        return err\n")
+	fmt.Fprintf(b2, "    }\n")
+	fmt.Fprintf(b2, "    for i := 0; i < len(obj.%s); i++ {\n", fieldName)
+	fmt.Fprintf(b2, "        if err := rlp.EncodeString(obj.%s[i][:], w, b[:]); err != nil {\n", fieldName)
+	fmt.Fprintf(b2, "            return err\n")
+	fmt.Fprintf(b2, "        }\n")
+	fmt.Fprintf(b2, "    }\n")
+
+	// decode - with pre-allocation optimization
+	addDecodeBuf(b3)
+	startListDecode(b3, fieldName)
+
+	// Calculate expected list length and apply hard limit of 128 to prevent DoS
+	fmt.Fprintf(b3, "    l, err := s.List()\n")
+	fmt.Fprintf(b3, "    if err == nil && l > 0 {\n")
+	fmt.Fprintf(b3, "        listLen := int(l / (1 + 32))  // Each hash: 1-byte RLP prefix + 32-byte hash\n")
+	fmt.Fprintf(b3, "        preAlloc := min(128, listLen) // Hard limit against DoS\n")
+	fmt.Fprintf(b3, "        obj.%s = make([]%s, 0, preAlloc)\n", fieldName, typ)
+	fmt.Fprintf(b3, "    } else {\n")
+	fmt.Fprintf(b3, "        obj.%s = []%s{}\n", fieldName, typ)
+	fmt.Fprintf(b3, "    }\n")
+	fmt.Fprintf(b3, "    for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {\n")
+	fmt.Fprintf(b3, "        if len(b) > 0 && len(b) != 32 {\n")
+	fmt.Fprintf(b3, "            return fmt.Errorf(\"error decoded length mismatch, expected: 32, got: %%d\", len(b))\n")
+	fmt.Fprintf(b3, "        }\n")
+	fmt.Fprintf(b3, "        var s %s\n", typ)
+	fmt.Fprintf(b3, "        copy(s[:], b)\n")
+	fmt.Fprintf(b3, "        obj.%s = append(obj.%s, s)\n", fieldName, fieldName)
+	fmt.Fprintf(b3, "    }\n")
+
+	endListDecode(b3, fieldName)
 }
 
 func hashPtrSliceHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName string) {
