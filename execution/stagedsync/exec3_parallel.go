@@ -195,16 +195,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							pe.cfg.chainConfig.IsByzantium(applyResult.BlockNum) &&
 							!pe.cfg.vmConfig.NoReceipts && !pe.isBlockProduction
 
-						b, err := pe.cfg.blockReader.BlockByHash(ctx, rwTx, applyResult.BlockHash)
-
-						if err != nil {
-							return fmt.Errorf("can't retrieve block %d: for post validation: %w", applyResult.BlockNum, err)
-						}
-						if b == nil {
-							return fmt.Errorf("nil block %d (hash %x)", applyResult.BlockNum, applyResult.BlockHash)
-						}
-
-						lastHeader = b.HeaderNoCopy()
+						lastHeader = applyResult.Header
 
 						if lastHeader.Number.Uint64() != applyResult.BlockNum {
 							return fmt.Errorf("block numbers don't match expected: %d: got: %d for hash %x", applyResult.BlockNum, lastHeader.Number.Uint64(), applyResult.BlockHash)
@@ -261,13 +252,13 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						}
 
 						if err := pe.getPostValidator().Process(applyResult.BlockGasUsed, applyResult.BlobGasUsed, checkReceipts, applyResult.Receipts,
-							lastHeader, pe.isBlockProduction, b.Transactions(), pe.cfg.chainConfig, pe.logger); err != nil {
+							lastHeader, pe.isBlockProduction, applyResult.Txs, pe.cfg.chainConfig, pe.logger); err != nil {
 							dumpTxIODebug(applyResult.BlockNum, applyResult.TxIO)
 							return fmt.Errorf("%w, block=%d, %v", rules.ErrInvalidBlock, applyResult.BlockNum, err) //same as in stage_exec.go
 						}
 
 						if !pe.isBlockProduction && !applyResult.isPartial && !execStage.CurrentSyncCycle.IsInitialCycle {
-							pe.cfg.notifications.RecentReceipts.Add(applyResult.Receipts, b.Transactions(), lastHeader)
+							pe.cfg.notifications.RecentReceipts.Add(applyResult.Receipts, applyResult.Txs, lastHeader)
 						}
 					}
 
@@ -958,6 +949,8 @@ type blockResult struct {
 	Deps         *state.DAG
 	AllDeps      map[int]map[int]bool
 	Exhausted    *ErrLoopExhausted
+	Header       *types.Header
+	Txs          types.Transactions
 }
 
 type txResult struct {
@@ -1659,6 +1652,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			&deps,
 			allDeps,
 			be.exhausted,
+			txTask.BlockHeader(),
+			txTask.BlockTxs(),
 		}
 		return be.result, nil
 	}
@@ -1690,6 +1685,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		nil,
 		nil,
 		be.exhausted,
+		txTask.BlockHeader(),
+		txTask.BlockTxs(),
 	}, nil
 }
 
