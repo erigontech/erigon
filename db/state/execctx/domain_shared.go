@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"math"
 	"runtime"
-	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/common"

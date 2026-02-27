@@ -57,21 +57,32 @@ func (obj *LogForStorageGen) DecodeRLP(s *rlp.Stream) error {
 	}
 	l, err := s.List()
 	if err != nil {
-		return err
+		return fmt.Errorf("error decoding field Topics - expected list start, err: %w", err)
 	}
+	var listLen int
 	if l > 0 {
-		listLen := int(l / (1 + 32))  // Each hash: 1-byte RLP prefix + 32-byte hash
+		listLen = int(l / (1 + 32))   // Each hash: 1-byte RLP prefix + 32-byte hash
 		preAlloc := min(128, listLen) // Hard limit against DoS
 		obj.Topics = make([]common.Hash, 0, preAlloc)
 	} else {
 		obj.Topics = []common.Hash{}
 	}
-	var h common.Hash
-	for s.MoreDataInList() {
-		if err = s.ReadBytes(h[:]); err != nil {
-			return err
+	if listLen <= 128 {
+		// Fast-path: within pre-alloc limit, use pre-allocated buffer
+		obj.Topics = obj.Topics[:listLen]
+		for i := 0; i < listLen; i++ {
+			if err = s.ReadBytes(obj.Topics[i][:]); err != nil {
+				return err
+			}
 		}
-		obj.Topics = append(obj.Topics, h)
+	} else if listLen > 128 {
+		// Slow-path: exceeded pre-alloc limit, allocate exact size and use direct ReadBytes
+		obj.Topics = make([]common.Hash, listLen)
+		for i := 0; i < listLen; i++ {
+			if err = s.ReadBytes(obj.Topics[i][:]); err != nil {
+				return err
+			}
+		}
 	}
 	if err = s.ListEnd(); err != nil {
 		return fmt.Errorf("error decoding field Topics - fail to close list, err: %w", err)
