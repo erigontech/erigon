@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/rpc/gasprice"
 	ethapi2 "github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/filters"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
@@ -421,6 +422,7 @@ type APIImpl struct {
 	txPool                      txpoolproto.TxpoolClient
 	mining                      txpoolproto.MiningClient
 	gasCache                    *GasPriceCache
+	feeHistoryCache             *gasprice.FeeHistoryCache
 	db                          kv.TemporalRoDB
 	GasCap                      uint64
 	FeeCap                      float64
@@ -459,6 +461,7 @@ func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPo
 		txPool:                      txPool,
 		mining:                      mining,
 		gasCache:                    NewGasPriceCache(),
+		feeHistoryCache:             gasprice.NewFeeHistoryCache(),
 		GasCap:                      gascap,
 		FeeCap:                      cfg.FeeCap,
 		AllowUnprotectedTxs:         cfg.AllowUnprotectedTxs,
