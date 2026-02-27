@@ -589,7 +589,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		}
 		mdGasUsed := st.mdGasUsed()
 		gasUsed := mdGasUsed.Total()
-		refund := min(gasUsed/refundQuotient, st.state.GetRefund())
+		refund := min(gasUsed/refundQuotient, st.state.GetRefund().Total())
 		gasUsed = gasUsed - refund
 		if rules.IsPrague {
 			gasUsed = max(intrinsicGasResult.FloorGasCost, gasUsed)

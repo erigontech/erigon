@@ -160,7 +160,7 @@ type IntraBlockState struct {
 	nilAccounts map[accounts.Address]struct{} // Remember non-existent account to avoid reading them again
 
 	// The refund counter, also used by state transitioning.
-	refund uint64
+	refund evmtypes.MdGas
 
 	txIndex  int
 	blockNum uint64
@@ -358,7 +358,7 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.balanceInc = map[accounts.Address]*BalanceIncrease{}
 	sdb.journal.Reset()
 	sdb.revisions = sdb.revisions.put()
-	sdb.refund = 0
+	sdb.refund = evmtypes.MdGas{}
 	sdb.txIndex = 0
 	sdb.logSize = 0
 	sdb.versionMap = nil
@@ -455,17 +455,31 @@ func (sdb *IntraBlockState) Logs() types.Logs {
 // AddRefund adds gas to the refund counter
 func (sdb *IntraBlockState) AddRefund(gas uint64) {
 	sdb.journal.append(refundChange{prev: sdb.refund})
-	sdb.refund += gas
+	sdb.refund.Regular += gas
 }
 
 // SubRefund removes gas from the refund counter.
 // This method will panic if the refund counter goes below zero
 func (sdb *IntraBlockState) SubRefund(gas uint64) error {
 	sdb.journal.append(refundChange{prev: sdb.refund})
-	if gas > sdb.refund {
+	if gas > sdb.refund.Regular {
 		return errors.New("refund counter below zero")
 	}
-	sdb.refund -= gas
+	sdb.refund.Regular -= gas
+	return nil
+}
+
+func (sdb *IntraBlockState) AddStateRefund(gas uint64) {
+	sdb.journal.append(refundChange{prev: sdb.refund})
+	sdb.refund.State += gas
+}
+
+func (sdb *IntraBlockState) SubStateRefund(gas uint64) error {
+	sdb.journal.append(refundChange{prev: sdb.refund})
+	if gas > sdb.refund.State {
+		return errors.New("state gas refund counter below zero")
+	}
+	sdb.refund.State -= gas
 	return nil
 }
 
@@ -1806,7 +1820,7 @@ func (sdb *IntraBlockState) RevertToSnapshot(revid int, err error) {
 }
 
 // GetRefund returns the current value of the refund counter.
-func (sdb *IntraBlockState) GetRefund() uint64 {
+func (sdb *IntraBlockState) GetRefund() evmtypes.MdGas {
 	return sdb.refund
 }
 
@@ -2055,7 +2069,7 @@ func (sdb *IntraBlockState) SetTxContext(bn uint64, ti int) {
 func (sdb *IntraBlockState) clearJournalAndRefund() {
 	sdb.journal.Reset()
 	sdb.revisions = sdb.revisions.put()
-	sdb.refund = 0
+	sdb.refund = evmtypes.MdGas{}
 }
 
 // Prepare handles the preparatory steps for executing a state transition.

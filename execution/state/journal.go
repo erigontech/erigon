@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 var journalPool = sync.Pool{
@@ -162,7 +163,7 @@ type (
 
 	// Changes to other state values.
 	refundChange struct {
-		prev uint64
+		prev evmtypes.MdGas
 	}
 	addLogChange struct {
 		txIndex int
