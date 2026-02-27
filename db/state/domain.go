@@ -1111,16 +1111,16 @@ func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep kv.S
 	return buildHashMapAccessor(ctx, data, idxPath, false, cfg, ps, d.logger)
 }
 
-func (d *Domain) missedBtreeAccessors(source []*FilesItem, names []string, snapDir string) (l []*FilesItem) {
+func (d *Domain) missedBtreeAccessors(source []*FilesItem, dl dirListing) (l []*FilesItem) {
 	if !d.Accessors.Has(statecfg.AccessorBTree) {
 		return nil
 	}
 	return fileItemsWithMissedAccessors(source, d.stepSize, func(fromStep, toStep kv.Step) []string {
-		exF, _, _, err := version.MatchVersionedFile(d.kvExistenceIdxFileNameMask(fromStep, toStep), names, snapDir)
+		exF, _, _, err := version.MatchVersionedFile(d.kvExistenceIdxFileNameMask(fromStep, toStep), dl.names, dl.dir)
 		if err != nil {
 			panic(err)
 		}
-		btF, _, _, err := version.MatchVersionedFile(d.kvBtAccessorFileNameMask(fromStep, toStep), names, snapDir)
+		btF, _, _, err := version.MatchVersionedFile(d.kvBtAccessorFileNameMask(fromStep, toStep), dl.names, dl.dir)
 		if err != nil {
 			panic(err)
 		}
@@ -1129,16 +1129,15 @@ func (d *Domain) missedBtreeAccessors(source []*FilesItem, names []string, snapD
 }
 
 func (d *Domain) MissedMapAccessors() (l []*FilesItem) {
-	snapDir := d.dirs.SnapDomain
-	return d.missedMapAccessors(d.dirtyFiles.Items(), readDirNames(snapDir), snapDir)
+	return d.missedMapAccessors(d.dirtyFiles.Items(), readDirNames(d.dirs.SnapDomain))
 }
 
-func (d *Domain) missedMapAccessors(source []*FilesItem, names []string, snapDir string) (l []*FilesItem) {
+func (d *Domain) missedMapAccessors(source []*FilesItem, dl dirListing) (l []*FilesItem) {
 	if !d.Accessors.Has(statecfg.AccessorHashMap) {
 		return nil
 	}
 	return fileItemsWithMissedAccessors(source, d.stepSize, func(fromStep, toStep kv.Step) []string {
-		fPath, _, _, err := version.MatchVersionedFile(d.kviAccessorFileNameMask(fromStep, toStep), names, snapDir)
+		fPath, _, _, err := version.MatchVersionedFile(d.kviAccessorFileNameMask(fromStep, toStep), dl.names, dl.dir)
 		if err != nil {
 			panic(err)
 		}

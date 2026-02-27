@@ -192,16 +192,15 @@ func (ht *HistoryRoTx) Files() (res VisibleFiles) {
 }
 
 func (h *History) MissedMapAccessors() (l []*FilesItem) {
-	snapDir := h.dirs.SnapAccessors
-	return h.missedMapAccessors(h.dirtyFiles.Items(), readDirNames(snapDir), snapDir)
+	return h.missedMapAccessors(h.dirtyFiles.Items(), readDirNames(h.dirs.SnapAccessors))
 }
 
-func (h *History) missedMapAccessors(source []*FilesItem, names []string, snapDir string) (l []*FilesItem) {
+func (h *History) missedMapAccessors(source []*FilesItem, dl dirListing) (l []*FilesItem) {
 	if !h.Accessors.Has(statecfg.AccessorHashMap) {
 		return nil
 	}
 	return fileItemsWithMissedAccessors(source, h.stepSize, func(fromStep, toStep kv.Step) []string {
-		fPath, _, _, err := version.MatchVersionedFile(h.vAccessorFileNameMask(fromStep, toStep), names, snapDir)
+		fPath, _, _, err := version.MatchVersionedFile(h.vAccessorFileNameMask(fromStep, toStep), dl.names, dl.dir)
 		if err != nil {
 			panic(err)
 		}
