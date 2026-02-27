@@ -42,6 +42,9 @@ func CheckRCacheNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader serv
 }
 
 func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
+	if fromBlock > toBlock {
+		panic(fmt.Sprintf("fromBlock(%d) > toBlock(%d)", fromBlock, toBlock))
+	}
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
@@ -140,7 +143,7 @@ func parallelChunkCheck(ctx context.Context, fromBlock, toBlock uint64, db kv.Te
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(numWorkers)
 	var completedChunks atomic.Uint64
-	var totalChunks uint64 = (blockRange + chunkSize - 1) / chunkSize
+	totalChunks := (blockRange + chunkSize - 1) / chunkSize
 	log.Info("[integrity] CheckRCacheNoDups", "workers", numWorkers, "chunkSize", chunkSize, "blockRange", blockRange)
 
 	logEvery := time.NewTicker(20 * time.Second)
