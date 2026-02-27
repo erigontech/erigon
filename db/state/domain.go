@@ -1111,20 +1111,16 @@ func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep kv.S
 	return buildHashMapAccessor(ctx, data, d.Compression, idxPath, false, cfg, ps, d.logger)
 }
 
-func (d *Domain) MissedBtreeAccessors() (l []*FilesItem) {
-	return d.missedBtreeAccessors(d.dirtyFiles.Items())
-}
-
-func (d *Domain) missedBtreeAccessors(source []*FilesItem) (l []*FilesItem) {
+func (d *Domain) missedBtreeAccessors(source []*FilesItem, dl dirListing) (l []*FilesItem) {
 	if !d.Accessors.Has(statecfg.AccessorBTree) {
 		return nil
 	}
 	return fileItemsWithMissedAccessors(source, d.stepSize, func(fromStep, toStep kv.Step) []string {
-		exF, _, _, err := version.FindFilesWithVersionsByPattern(d.kvExistenceIdxFilePathMask(fromStep, toStep))
+		exF, _, _, err := version.MatchVersionedFile(d.kvExistenceIdxFileNameMask(fromStep, toStep), dl.names, dl.dir)
 		if err != nil {
 			panic(err)
 		}
-		btF, _, _, err := version.FindFilesWithVersionsByPattern(d.kvBtAccessorFilePathMask(fromStep, toStep))
+		btF, _, _, err := version.MatchVersionedFile(d.kvBtAccessorFileNameMask(fromStep, toStep), dl.names, dl.dir)
 		if err != nil {
 			panic(err)
 		}
@@ -1133,15 +1129,15 @@ func (d *Domain) missedBtreeAccessors(source []*FilesItem) (l []*FilesItem) {
 }
 
 func (d *Domain) MissedMapAccessors() (l []*FilesItem) {
-	return d.missedMapAccessors(d.dirtyFiles.Items())
+	return d.missedMapAccessors(d.dirtyFiles.Items(), readDirNames(d.dirs.SnapDomain))
 }
 
-func (d *Domain) missedMapAccessors(source []*FilesItem) (l []*FilesItem) {
+func (d *Domain) missedMapAccessors(source []*FilesItem, dl dirListing) (l []*FilesItem) {
 	if !d.Accessors.Has(statecfg.AccessorHashMap) {
 		return nil
 	}
 	return fileItemsWithMissedAccessors(source, d.stepSize, func(fromStep, toStep kv.Step) []string {
-		fPath, _, _, err := version.FindFilesWithVersionsByPattern(d.kviAccessorFilePathMask(fromStep, toStep))
+		fPath, _, _, err := version.MatchVersionedFile(d.kviAccessorFileNameMask(fromStep, toStep), dl.names, dl.dir)
 		if err != nil {
 			panic(err)
 		}
