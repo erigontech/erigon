@@ -3,85 +3,85 @@
 package types
 
 import (
-    "fmt"
-    "io"
-    "github.com/erigontech/erigon/execution/rlp"
-    "github.com/erigontech/erigon/common"
+	"fmt"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/rlp"
+	"io"
 )
 
 func (obj *LogForStorageGen) EncodingSize() (size int) {
-    size += 20 + 1
-    gidx := 0
-    gidx = (32 + 1) * len(obj.Topics)
-    size += rlp.ListPrefixLen(gidx) + gidx
-    size += rlp.StringLen(obj.Data)
-    return
+	size += 20 + 1
+	gidx := 0
+	gidx = (32 + 1) * len(obj.Topics)
+	size += rlp.ListPrefixLen(gidx) + gidx
+	size += rlp.StringLen(obj.Data)
+	return
 }
 
 func (obj *LogForStorageGen) EncodeRLP(w io.Writer) error {
-    var b [32]byte
-    if err := rlp.EncodeStructSizePrefix(obj.EncodingSize(), w, b[:]); err != nil {
-        return err
-    }
-    b[0] = 128 + 20
-    if _, err := w.Write(b[:1]); err != nil {
-        return err
-    }
-    if _, err := w.Write(obj.Address[:]); err != nil {
-        return err
-    }
-    gidx := 0
-    gidx = (32 + 1) * len(obj.Topics)
-    if err := rlp.EncodeStructSizePrefix(gidx, w, b[:]); err != nil {
-        return err
-    }
-    for i := 0; i < len(obj.Topics); i++ {
-        if err := rlp.EncodeString(obj.Topics[i][:], w, b[:]); err != nil {
-            return err
-        }
-    }
-    if err := rlp.EncodeString(obj.Data, w, b[:]); err != nil {
-        return err
-    }
-    return nil
+	var b [32]byte
+	if err := rlp.EncodeStructSizePrefix(obj.EncodingSize(), w, b[:]); err != nil {
+		return err
+	}
+	b[0] = 128 + 20
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if _, err := w.Write(obj.Address[:]); err != nil {
+		return err
+	}
+	gidx := 0
+	gidx = (32 + 1) * len(obj.Topics)
+	if err := rlp.EncodeStructSizePrefix(gidx, w, b[:]); err != nil {
+		return err
+	}
+	for i := 0; i < len(obj.Topics); i++ {
+		if err := rlp.EncodeString(obj.Topics[i][:], w, b[:]); err != nil {
+			return err
+		}
+	}
+	if err := rlp.EncodeString(obj.Data, w, b[:]); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (obj *LogForStorageGen) DecodeRLP(s *rlp.Stream) error {
-    _, err := s.List()
-    if err != nil {
-        return err
-    }
-    if err = s.ReadBytes(obj.Address[:]); err != nil {
-        return fmt.Errorf("error decoding field Address, err: %w", err)
-    }
-    var b []byte
-    l, err := s.List()
-    if err != nil {
-        return fmt.Errorf("error decoding field Topics - expected list start, err: %w", err)
-    }
-    if l > 0 {
-        listLen := int(l / (1 + 32))  // Each hash: 1-byte RLP prefix + 32-byte hash
-        preAlloc := min(128, listLen) // Hard limit against DoS
-        obj.Topics = make([]common.Hash, 0, preAlloc)
-    } else {
-        obj.Topics = []common.Hash{}
-    }
-    for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
-        if len(b) > 0 && len(b) != 32 {
-            return fmt.Errorf("error decoded length mismatch, expected: 32, got: %d", len(b))
-        }
-        var s common.Hash
-        copy(s[:], b)
-        obj.Topics = append(obj.Topics, s)
-    }
-    if err = s.ListEnd(); err != nil {
-        return fmt.Errorf("error decoding field Topics - fail to close list, err: %w", err)
-    }
-    if obj.Data, err = s.Bytes(); err != nil {
-        return fmt.Errorf("error decoding field Data, err: %w", err)
-    }
-    if err = s.ListEnd(); err != nil {
-        return fmt.Errorf("error closing LogForStorageGen, err: %w", err)
-    }
-    return nil
+	_, err := s.List()
+	if err != nil {
+		return err
+	}
+	if err = s.ReadBytes(obj.Address[:]); err != nil {
+		return fmt.Errorf("error decoding field Address, err: %w", err)
+	}
+	var b []byte
+	l, err := s.List()
+	if err != nil {
+		return fmt.Errorf("error decoding field Topics - expected list start, err: %w", err)
+	}
+	if l > 0 {
+		listLen := int(l / (1 + 32))  // Each hash: 1-byte RLP prefix + 32-byte hash
+		preAlloc := min(128, listLen) // Hard limit against DoS
+		obj.Topics = make([]common.Hash, 0, preAlloc)
+	} else {
+		obj.Topics = []common.Hash{}
+	}
+	for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
+		if len(b) > 0 && len(b) != 32 {
+			return fmt.Errorf("error decoded length mismatch, expected: 32, got: %d", len(b))
+		}
+		var s common.Hash
+		copy(s[:], b)
+		obj.Topics = append(obj.Topics, s)
+	}
+	if err = s.ListEnd(); err != nil {
+		return fmt.Errorf("error decoding field Topics - fail to close list, err: %w", err)
+	}
+	if obj.Data, err = s.Bytes(); err != nil {
+		return fmt.Errorf("error decoding field Data, err: %w", err)
+	}
+	if err = s.ListEnd(); err != nil {
+		return fmt.Errorf("error closing LogForStorageGen, err: %w", err)
+	}
+	return nil
 }
