@@ -257,14 +257,6 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 	// Check version map for AddressPath — handles accounts created by
 	// prior transactions in the same block that aren't in the read set.
 	if vr.versionMap != nil {
-		// A prior tx may have self-destructed this account. If so, the
-		// account must be treated as non-existent even if the version map
-		// still holds the pre-destruct AddressPath entry.
-		if res := vr.versionMap.Read(address, SelfDestructPath, accounts.NilKey, vr.txIndex); res.Status() == MVReadResultDone {
-			if destructed, ok := res.Value().(bool); ok && destructed {
-				return nil, nil
-			}
-		}
 		if acc, ok := versionedUpdate[*accounts.Account](vr.versionMap, address, AddressPath, accounts.NilKey, vr.txIndex); ok && acc != nil {
 			updated := vr.applyVersionedUpdates(address, *acc)
 			return &updated, nil
@@ -346,11 +338,6 @@ func (vr versionedStateReader) ReadAccountStorage(address accounts.Address, key 
 
 	// Check version map for storage written by prior transactions.
 	if vr.versionMap != nil {
-		if res := vr.versionMap.Read(address, SelfDestructPath, accounts.NilKey, vr.txIndex); res.Status() == MVReadResultDone {
-			if destructed, ok := res.Value().(bool); ok && destructed {
-				return uint256.Int{}, false, nil
-			}
-		}
 		if val, ok := versionedUpdate[uint256.Int](vr.versionMap, address, StoragePath, key, vr.txIndex); ok {
 			return val, true, nil
 		}
@@ -389,11 +376,6 @@ func (vr versionedStateReader) ReadAccountCode(address accounts.Address) ([]byte
 	// Check version map for CodePath entries written by prior transactions
 	// (e.g. EIP-7702 delegation set by an earlier tx in the same block).
 	if vr.versionMap != nil {
-		if res := vr.versionMap.Read(address, SelfDestructPath, accounts.NilKey, vr.txIndex); res.Status() == MVReadResultDone {
-			if destructed, ok := res.Value().(bool); ok && destructed {
-				return nil, nil
-			}
-		}
 		if code, ok := versionedUpdate[[]byte](vr.versionMap, address, CodePath, accounts.NilKey, vr.txIndex); ok {
 			return code, nil
 		}
@@ -414,11 +396,6 @@ func (vr versionedStateReader) ReadAccountCodeSize(address accounts.Address) (in
 	}
 
 	if vr.versionMap != nil {
-		if res := vr.versionMap.Read(address, SelfDestructPath, accounts.NilKey, vr.txIndex); res.Status() == MVReadResultDone {
-			if destructed, ok := res.Value().(bool); ok && destructed {
-				return 0, nil
-			}
-		}
 		if code, ok := versionedUpdate[[]byte](vr.versionMap, address, CodePath, accounts.NilKey, vr.txIndex); ok {
 			return len(code), nil
 		}
@@ -1068,7 +1045,6 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 		})
 
 		writes := io.WriteSet(txIndex)
-		sortVersionedWrites(writes)
 		for _, vw := range writes {
 			if vw.Address.IsNil() {
 				continue
@@ -1078,22 +1054,12 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 			account.updateWrite(vw, accessIndex)
 		}
 
-		isUserTx := txIndex >= 0
-		for addr, opts := range io.AccessedAddresses(txIndex) {
+		for addr := range io.AccessedAddresses(txIndex) {
 			if addr.IsNil() {
 				continue
 			}
 
 			account := ensureAccountState(ac, addr)
-			// A non-revertable access means the address was the target of
-			// an actual EVM operation (evm.Call, evm.Create, SELFDESTRUCT
-			// with non-zero balance, BALANCE, EXTCODESIZE, etc.) — not just
-			// a gas-calculation read. This is used to distinguish real state
-			// access from incidental reads (e.g. Empty() in gas calc) for
-			// the system address filter.
-			if isUserTx && opts != nil && !opts.revertable {
-				account.nonRevertableUserAccess = true
-			}
 		}
 	}
 
@@ -1101,15 +1067,13 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 	for _, account := range ac {
 		account.finalize()
 		account.changes.Normalize()
-		// The system address (0xff...fe) is touched during every block's system
-		// call (EIP-4788 beacon root) because it is msg.sender. Per EIP-7928,
-		// "SYSTEM_ADDRESS MUST NOT be included unless it experiences state access
-		// itself." We use the non-revertable access flag from MarkAddressAccess
-		// to distinguish real state access (evm.Call target, SELFDESTRUCT
-		// beneficiary, BALANCE opcode, etc.) from incidental gas-calculation
-		// reads (Empty() in statefulGasCall). Keep it when it has actual state
-		// changes or when a user tx performed a non-revertable access to it.
-		if account.changes.Address == params.SystemAddress && !hasAccountChanges(account.changes) && !account.nonRevertableUserAccess {
+		// The system address (0xff...fe) is touched during system calls (EIP-4788
+		// beacon root) because it is msg.sender. Exclude it when it has no actual
+		// state changes, but keep it when a user tx sends real ETH to it
+		// (e.g. SELFDESTRUCT to the system address or a plain value transfer).
+		// System contracts (BeaconRoots, HistoryStorage, etc.) are NOT excluded
+		// because they have real state changes that belong in the BAL.
+		if account.changes.Address == params.SystemAddress && !hasAccountChanges(account.changes) {
 			continue
 		}
 		bal = append(bal, account.changes)
@@ -1123,16 +1087,14 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 }
 
 type accountState struct {
-	changes                 *types.AccountChanges
-	balance                 *fieldTracker[uint256.Int]
-	nonce                   *fieldTracker[uint64]
-	code                    *fieldTracker[[]byte]
-	balanceValue            *uint256.Int                        // tracks latest seen balance
-	initialBalanceValue     *uint256.Int                        // tracks pre-block balance for net-zero detection
-	selfDestructed          bool                                //
-	selfDestructedAt        uint16                              // access index of the selfdestruct
-	storageReadValues       map[accounts.StorageKey]uint256.Int // original read values for net-zero detection
-	nonRevertableUserAccess bool                                // true if a user tx (txIndex >= 0) has non-revertable access
+	changes           *types.AccountChanges
+	balance           *fieldTracker[uint256.Int]
+	nonce             *fieldTracker[uint64]
+	code              *fieldTracker[[]byte]
+	balanceValue      *uint256.Int // tracks latest seen balance
+	selfDestructed    bool
+	selfDestructedAt  uint16                              // access index of the selfdestruct
+	storageReadValues map[accounts.StorageKey]uint256.Int // original read values for net-zero detection
 }
 
 // check pre- and post-values, add to BAL if different
@@ -1268,24 +1230,11 @@ func (account *accountState) updateWrite(vw *VersionedWrite, accessIndex uint16)
 		}
 		// If we haven't seen a balance and the first write is zero, treat it as a touch only.
 		if account.balanceValue == nil && val.IsZero() {
-			if account.initialBalanceValue == nil {
-				v := val
-				account.initialBalanceValue = &v
-			}
 			account.setBalanceValue(val)
 			return
 		}
 		// Skip no-op writes.
 		if account.balanceValue != nil && val.Eq(account.balanceValue) {
-			account.setBalanceValue(val)
-			return
-		}
-		// Skip balance writes that match the pre-block (initial) balance,
-		// but ONLY when no intermediate balance changes have been recorded.
-		// If intermediate changes exist (e.g. tx58 sets balance=0xa141,
-		// tx78 restores initial 0x16ffd), the restoring write MUST be
-		// recorded so parallel executors see the correct value at tx78.
-		if account.initialBalanceValue != nil && val.Eq(account.initialBalanceValue) && len(account.balance.changes.entries) == 0 {
 			account.setBalanceValue(val)
 			return
 		}
@@ -1332,19 +1281,7 @@ func (account *accountState) updateRead(vr *VersionedRead) {
 			account.changes.StorageReads = append(account.changes.StorageReads, vr.Key)
 		case BalancePath:
 			if val, ok := vr.Val.(uint256.Int); ok {
-				// Record the initial (pre-block) balance for net-zero detection.
-				// Only the first read is the original pre-block value.
-				if account.initialBalanceValue == nil {
-					v := val
-					account.initialBalanceValue = &v
-				}
-				// Only update balanceValue from reads when no writes have been
-				// recorded yet. After a write, balanceValue tracks the written
-				// state; a stale read from the DB must not override it, or the
-				// no-op check in updateWrite will incorrectly skip a real write.
-				if len(account.balance.changes.entries) == 0 {
-					account.setBalanceValue(val)
-				}
+				account.setBalanceValue(val)
 			}
 		default:
 			// Only track storage reads for BAL. Balance/nonce/code changes are tracked via writes, others are ignored
