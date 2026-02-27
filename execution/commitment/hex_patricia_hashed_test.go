@@ -1988,12 +1988,12 @@ func sortUpdatesByHashIncrease(t *testing.T, hph *HexPatriciaHashed, plainKeys [
 		ku[i] = &KeyUpdate{plainKey: string(pk), hashedKey: KeyToHexNibbleHash(pk), update: &updates[i]}
 	}
 
-	sort.Slice(updates, func(i, j int) bool {
+	sort.Slice(ku, func(i, j int) bool {
 		return bytes.Compare(ku[i].hashedKey, ku[j].hashedKey) < 0
 	})
 
-	pks := make([][]byte, len(updates))
-	upds := make([]Update, len(updates))
+	pks := make([][]byte, len(ku))
+	upds := make([]Update, len(ku))
 	for i, u := range ku {
 		pks[i] = []byte(u.plainKey)
 		upds[i] = *u.update

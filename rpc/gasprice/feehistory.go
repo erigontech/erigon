@@ -181,7 +181,11 @@ func (oracle *Oracle) resolveBlockRange(ctx context.Context, lastBlock rpc.Block
 			lastBlock = rpc.BlockNumber(pendingBlock.NumberU64())
 			headBlock = lastBlock - 1
 		} else {
-			// pending block not supported by backend, process until latest block
+			// Pending block not supported by backend, process until latest block.
+			// blocks is decremented to preserve the same oldestBlock (= lastBlock+1-blocks)
+			// regardless of whether the pending block is available or not: without this
+			// adjustment, the absence of the pending block would shift the window one block
+			// further back in history, returning a different oldestBlock to the caller.
 			lastBlock = rpc.LatestBlockNumber
 			blocks--
 			if blocks == 0 {

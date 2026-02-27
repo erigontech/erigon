@@ -34,8 +34,10 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -87,6 +89,11 @@ func (c Cfg) WithValuesOnCompressedPage(n int) Cfg {
 	return c
 }
 
+// WorkersLimiter is a caps global active compression workers
+// across all compressor instances in the app. Each worker goroutine acquires 1 from
+// this semaphore before doing CPU-heavy work.
+var WorkersLimiter = semaphore.NewWeighted(int64(dbg.CompressWorkers))
+
 var DefaultCfg = Cfg{
 	MinPatternScore: 1024,
 	MinPatternLen:   5,
@@ -122,13 +129,14 @@ type Compressor struct {
 	// is turned into 2 bytes, 0x01 and b, and two zero bytes 0x00 0x00 are inserted after each word
 	// this is needed for using ordinary (one string) suffix sorting algorithm instead of a generalised (many superstrings) suffix
 	// sorting algorithm
-	superstring      []byte
-	wordsCount       uint64
-	superstringCount uint64
-	Ratio            CompressionRatio
-	lvl              log.Lvl
-	trace            bool
-	logger           log.Logger
+	superstring       []byte
+	wordsCount        uint64
+	superstringCount  uint64
+	uncompressedBytes int
+	Ratio             CompressionRatio
+	lvl               log.Lvl
+	trace             bool
+	logger            log.Logger
 
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 	timings Timings
@@ -282,6 +290,7 @@ func (c *Compressor) AddWord(word []byte) error {
 		c.superstring = append(c.superstring, 0, 0)
 	}
 
+	c.uncompressedBytes += len(word)
 	return c.uncompressedFile.Append(word)
 }
 
@@ -295,10 +304,16 @@ func (c *Compressor) AddUncompressedWord(word []byte) error {
 		}
 	}
 
+	c.uncompressedBytes += len(word)
 	return c.uncompressedFile.AppendUncompressed(word)
 }
 
 func (c *Compressor) Compress() error {
+	if err := WorkersLimiter.Acquire(c.ctx, 1); err != nil {
+		return err
+	}
+	defer WorkersLimiter.Release(1)
+
 	if err := c.uncompressedFile.Flush(); err != nil {
 		return err
 	}
@@ -310,25 +325,15 @@ func (c *Compressor) Compress() error {
 
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
+	// Detect the fast path before sending the last superstring: if no superstrings were
+	// ever produced (neither overflow nor the current partial one), then no words were
+	// submitted for word-level compression, so the pattern dictionary will always be empty.
+	noWordPatterns := c.superstringCount == 0 && len(c.superstring) == 0
 	if len(c.superstring) > 0 {
 		c.superstrings <- c.superstring
 	}
 	close(c.superstrings)
 	c.wg.Wait()
-
-	if c.lvl < log.LvlTrace {
-		c.logger.Log(c.lvl, fmt.Sprintf("[%s] BuildDict start", c.logPrefix), "workers", c.Workers)
-	}
-	db, err := DictionaryBuilderFromCollectors(c.ctx, c.Cfg, c.logPrefix, c.tmpDir, c.suffixCollectors, c.lvl, c.logger)
-	if err != nil {
-		return err
-	}
-	if c.trace {
-		_, fileName := filepath.Split(c.outputFile)
-		if err := PersistDictionary(filepath.Join(c.tmpDir, fileName)+".dictionary.txt", db); err != nil {
-			return err
-		}
-	}
 
 	cf, err := dir.CreateTemp(c.outputFile)
 	if err != nil {
@@ -363,8 +368,34 @@ func (c *Compressor) Compress() error {
 	}
 
 	t := time.Now()
-	if err := compressWithPatternCandidates(c.ctx, c.trace, c.Cfg, c.logPrefix, tmpFileName, cf, c.uncompressedFile, db, c.lvl, c.logger); err != nil {
-		return err
+	if noWordPatterns {
+		// Fast path: no words were fed to the pattern-dictionary pipeline (e.g. history .v
+		// files with CompressNone). Skip dictionary building and the intermediate file entirely.
+		for _, coll := range c.suffixCollectors {
+			coll.Close()
+		}
+		c.suffixCollectors = nil
+		if err = compressNoWordPatterns(c.logPrefix, cf, c.uncompressedFile, c.lvl, c.logger); err != nil {
+			return err
+		}
+	} else {
+		if c.lvl < log.LvlTrace {
+			c.logger.Log(c.lvl, fmt.Sprintf("[%s] BuildDict start", c.logPrefix), "workers", c.Workers)
+		}
+		var db *DictionaryBuilder
+		db, err = DictionaryBuilderFromCollectors(c.ctx, c.Cfg, c.logPrefix, c.tmpDir, c.suffixCollectors, c.lvl, c.logger)
+		if err != nil {
+			return err
+		}
+		if c.trace {
+			_, fileName := filepath.Split(c.outputFile)
+			if err := PersistDictionary(filepath.Join(c.tmpDir, fileName)+".dictionary.txt", db); err != nil {
+				return err
+			}
+		}
+		if err = compressWithPatternCandidates(c.ctx, c.trace, c.Cfg, c.logPrefix, tmpFileName, cf, c.uncompressedFile, db, c.lvl, c.logger); err != nil {
+			return err
+		}
 	}
 	if err = c.fsync(cf); err != nil {
 		return err
@@ -376,9 +407,13 @@ func (c *Compressor) Compress() error {
 		return fmt.Errorf("renaming: %w", err)
 	}
 
-	c.Ratio, err = Ratio(c.uncompressedFile.filePath, c.outputFile)
+	var outputStat os.FileInfo
+	outputStat, err = os.Stat(c.outputFile)
 	if err != nil {
 		return fmt.Errorf("ratio: %w", err)
+	}
+	if outputStat.Size() > 0 {
+		c.Ratio = CompressionRatio(float64(c.uncompressedBytes) / float64(outputStat.Size()))
 	}
 
 	_, fName := filepath.Split(c.outputFile)
@@ -919,18 +954,6 @@ func (da *DictAggregator) finish() error {
 type CompressionRatio float64
 
 func (r CompressionRatio) String() string { return fmt.Sprintf("%.2f", r) }
-
-func Ratio(f1, f2 string) (CompressionRatio, error) {
-	s1, err := os.Stat(f1)
-	if err != nil {
-		return 0, err
-	}
-	s2, err := os.Stat(f2)
-	if err != nil {
-		return 0, err
-	}
-	return CompressionRatio(float64(s1.Size()) / float64(s2.Size())), nil
-}
 
 // RawWordsFile - .idt file format - simple format for temporary data store
 // PerfCritical: Used to speedup foreground processes by moving heavy compression to background
