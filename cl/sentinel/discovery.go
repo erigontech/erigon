@@ -81,27 +81,6 @@ func (s *Sentinel) getEmptySubnets() []int {
 	return empty
 }
 
-// getUnderservedSubnets returns subnets that have fewer than minimumPeersPerSubnet peers
-func (s *Sentinel) getUnderservedSubnets() []int {
-	coverage := s.getSubnetCoverage()
-	var underserved []int
-	for i, count := range coverage {
-		if count < minimumPeersPerSubnet {
-			underserved = append(underserved, i)
-		}
-	}
-	return underserved
-}
-
-// nodeAdvertisesSubnet checks if a node's ENR advertises a specific subnet
-func (s *Sentinel) nodeAdvertisesSubnet(node *enode.Node, subnetIdx int) bool {
-	var peerSubnets bitfield.Bitvector64
-	if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &peerSubnets)); err != nil {
-		return false
-	}
-	return peerSubnets[subnetIdx/8]&(1<<(subnetIdx%8)) != 0
-}
-
 // subnetSearchState tracks progress for finding peers for multiple subnets
 type subnetSearchState struct {
 	idx    int // subnet index
@@ -437,11 +416,6 @@ func (s *Sentinel) pruneExcessPeers() {
 	}
 
 	log.Info("[Sentinel] Peer pruning complete", "removed", removed, "remaining", peerCount-removed)
-}
-
-// isPeerUsefulForEmptySubnets checks if a peer covers any subnet that currently has no peers
-func (s *Sentinel) isPeerUsefulForEmptySubnets(node *enode.Node, emptySubnets []int) bool {
-	return len(s.getFilledSubnets(node, emptySubnets)) > 0
 }
 
 // getFilledSubnets returns which empty subnets a peer would fill (based on ENR)
