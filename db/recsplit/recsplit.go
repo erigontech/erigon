@@ -532,9 +532,10 @@ func (rs *RecSplit) recsplitCurrentBucket() error {
 	rs.bucketSizeAcc[int(rs.currentBucketIdx)+1] += uint64(len(rs.currentBucket))
 
 	// Create result for accumulating this bucket's data
-	result := &bucketResult{
-		order: rs.currentBucketIdx,
-	}
+	result := getBucketResult()
+	defer putBucketResult(result)
+
+	result.order = rs.currentBucketIdx
 
 	// Sets of size 0 and 1 are not further processed, just accumulate them
 	if len(rs.currentBucket) > 1 {
