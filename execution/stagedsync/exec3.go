@@ -813,11 +813,13 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 		return true, times, nil
 	}
 
-	if doms.BlockNum() != header.Number.Uint64() {
-		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
+	// Get current txNum from the block being committed
+	txNumsReader := cfg.blockReader.TxnumReader()
+	blockTxNum, err := txNumsReader.Max(ctx, applyTx, header.Number.Uint64())
+	if err != nil {
+		return false, times, err
 	}
-
-	computedRootHash, err := doms.ComputeCommitment(ctx, applyTx, true, header.Number.Uint64(), doms.TxNum(), e.LogPrefix(), nil)
+	computedRootHash, err := doms.ComputeCommitment(ctx, applyTx, true, header.Number.Uint64(), blockTxNum, e.LogPrefix(), nil)
 
 	times.ComputeCommitment = time.Since(start)
 	if err != nil {
