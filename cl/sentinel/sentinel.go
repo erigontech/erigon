@@ -17,7 +17,6 @@
 package sentinel
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -33,15 +32,11 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/prysmaticlabs/go-bitfield"
 
-	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	"github.com/erigontech/erigon/cl/p2p"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
-	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
-	"github.com/erigontech/erigon/cl/sentinel/communication"
-	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/sentinel/handlers"
 	"github.com/erigontech/erigon/cl/sentinel/handshake"
 	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
@@ -56,12 +51,6 @@ import (
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
 )
-
-// peerAttnetsKey is the cache key for peer attnets, keyed by (peer.ID, epoch)
-type peerAttnetsKey struct {
-	pid   peer.ID
-	epoch uint64
-}
 
 // emptySubnetsCacheEntry holds cached empty subnets with timestamp
 type emptySubnetsCacheEntry struct {
@@ -94,8 +83,7 @@ type Sentinel struct {
 	forkChoiceReader   forkchoice.ForkChoiceStorageReader
 	pidToEnr           sync.Map
 	pidToEnodeId       sync.Map
-	peerAttnetsCache   *lru.CacheWithTTL[peerAttnetsKey, [8]byte] // (peer.ID, epoch) -> attnets
-	emptySubnetsCache  atomic.Pointer[emptySubnetsCacheEntry]     // cached empty subnets (TTL ~2s)
+	emptySubnetsCache atomic.Pointer[emptySubnetsCacheEntry] // cached empty subnets (TTL ~2s)
 	ethClock           eth_clock.EthereumClock
 	peerDasStateReader peerdasstate.PeerDasStateReader
 
@@ -156,10 +144,6 @@ func New(
 	signal.Reset(syscall.SIGINT)
 	s.peers = peers.NewPool(s.p2p.Host())
 
-	// Initialize peer attnets cache with TTL = 1 epoch
-	epochDuration := time.Duration(cfg.BeaconConfig.SlotsPerEpoch) * time.Duration(cfg.BeaconConfig.SecondsPerSlot) * time.Second
-	s.peerAttnetsCache = lru.NewWithTTL[peerAttnetsKey, [8]byte]("peer-attnets", 1000, epochDuration)
-
 	mux := chi.NewRouter()
 	mux.Get("/", httpreqresp.NewRequestHandler(s.p2p.Host()))
 	s.httpApi = mux
@@ -203,8 +187,6 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 		DisconnectedF: func(n network.Network, c network.Conn) {
 			peerId := c.RemotePeer()
 			s.peers.RemovePeer(peerId)
-			//log.Debug("[Sentinel] Peer disconnected", "peer", peerId)
-			// peerAttnetsCache uses TTL, no manual cleanup needed
 		},
 	})
 	s.subManager = NewGossipManager(s.ctx)
@@ -370,57 +352,3 @@ func (s *Sentinel) PeersList() []peer.AddrInfo {
 	return infos
 }
 
-// requestPeerMetadata requests metadata from a peer and returns it
-func (s *Sentinel) requestPeerMetadata(pid peer.ID) (*cltypes.Metadata, error) {
-	// Determine which metadata protocol to use based on current epoch
-	topic := communication.MetadataProtocolV2
-	if s.ethClock.GetCurrentEpoch() >= s.cfg.BeaconConfig.FuluForkEpoch {
-		topic = communication.MetadataProtocolV3
-	}
-
-	// Metadata request has empty body
-	req, err := http.NewRequest("GET", "http://service.internal/", bytes.NewReader(nil))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("REQRESP-PEER-ID", pid.String())
-	req.Header.Set("REQRESP-TOPIC", topic)
-
-	resp, err := httpreqresp.Do(s.httpApi, req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.Header.Get("REQRESP-RESPONSE-CODE") != "0" {
-		return nil, fmt.Errorf("metadata request failed: %s", resp.Header.Get("REQRESP-RESPONSE-CODE"))
-	}
-
-	metadata := &cltypes.Metadata{}
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(resp.Body, metadata, clparams.Phase0Version); err != nil {
-		return nil, err
-	}
-	return metadata, nil
-}
-
-// GetPeerAttnets returns the attnets for a peer, using cache keyed by (pid, epoch)
-func (s *Sentinel) GetPeerAttnets(pid peer.ID) ([8]byte, bool) {
-	currentEpoch := s.ethClock.GetCurrentEpoch()
-	key := peerAttnetsKey{pid: pid, epoch: currentEpoch}
-
-	// Check cache first (keyed by epoch, so guaranteed fresh for current epoch)
-	if attnets, ok := s.peerAttnetsCache.Get(key); ok {
-		return attnets, true
-	}
-
-	// Not in cache for this epoch, query metadata
-	metadata, err := s.requestPeerMetadata(pid)
-	if err != nil {
-		log.Trace("[Sentinel] Failed to get peer metadata", "peer", pid, "err", err)
-		return [8]byte{}, false
-	}
-
-	// Store in cache with current epoch key
-	s.peerAttnetsCache.Add(key, metadata.Attnets)
-	return metadata.Attnets, true
-}
