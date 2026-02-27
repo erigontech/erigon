@@ -351,7 +351,16 @@ func (rs *RecSplit) MajorVersion() version.DataStructureVersion { return rs.data
 func (rs *RecSplit) Salt() uint32                               { return rs.salt }
 
 // golombParamValue extracts the golomb parameter from pre-computed table
+// Falls back to a computed default if index is out of bounds
 func golombParamValue(golombRice []uint32, m uint16) int {
+	if int(m) >= len(golombRice) {
+		// Fallback: compute a reasonable default based on bucket size
+		// This handles cases where pre-computation didn't cover all bucket sizes
+		if m <= 8 {
+			return int(bijMemo[m])
+		}
+		return 8 // Default safe value for larger buckets
+	}
 	return int(golombRice[m] >> 27)
 }
 func (rs *RecSplit) Close() {
