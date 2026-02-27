@@ -248,14 +248,21 @@ func (ii *InvertedIndex) missedMapAccessors(source []*FilesItem) (l []*FilesItem
 	if !ii.Accessors.Has(statecfg.AccessorHashMap) {
 		return nil
 	}
+	snapDir := ii.dirs.SnapAccessors
+	entries, err := os.ReadDir(snapDir)
+	if err != nil {
+		panic(err)
+	}
+	names := make([]string, len(entries))
+	for i, e := range entries {
+		names[i] = e.Name()
+	}
 	return fileItemsWithMissedAccessors(source, ii.stepSize, func(fromStep, toStep kv.Step) []string {
-		fPath, _, _, err := version.FindFilesWithVersionsByPattern(ii.efAccessorFilePathMask(fromStep, toStep))
+		fPath, _, _, err := version.MatchVersionedFile(ii.efAccessorFileNameMask(fromStep, toStep), names, snapDir)
 		if err != nil {
 			panic(err)
 		}
-		return []string{
-			fPath,
-		}
+		return []string{fPath}
 	})
 }
 
