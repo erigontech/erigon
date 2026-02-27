@@ -596,22 +596,39 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 	// seboost: compute RAW+WAW dependencies and write txdeps for this block.
 	// dep(i,j) is set iff j < i and tx j WROTE an address that tx i accesses
 	// (read or write). This eliminates read-read false dependencies.
+	//
+	// Block-level system addresses (coinbase, zero address) are excluded from
+	// dependency tracking: every tx pays fees to coinbase and accesses it via
+	// EIP-3651, which would otherwise create a false linear chain.
 	if generateTxDeps && se.seboostWriter != nil && len(tasks) > 0 && len(txAccessed) > 0 {
 		blockNum := tasks[0].BlockNumber()
+
+		// Build exclusion set: addresses touched by block-level mechanism,
+		// not user-to-user data flow.
+		blockSysAddrs := map[accounts.Address]struct{}{
+			accounts.InternAddress(tasks[0].(*exec.TxTask).Header.Coinbase): {}, // fee recipient (EIP-3651 warm)
+			accounts.ZeroAddress: {}, // zero address (system txs)
+		}
+
 		deps := make(map[int]map[int]bool)
-		// writersByAddr[addr] = list of tx indices that WROTE addr
+		// writersByAddr[addr] = list of tx indices that WROTE addr (excl. system addrs)
 		writersByAddr := make(map[accounts.Address][]int)
 		for i := range txAccessed {
 			deps[i] = map[int]bool{}
-			// For each address tx i accessed (read or write), find earlier txs
-			// that WROTE it — those are true RAW or WAW dependencies.
+			// For each address tx i accessed, check if an earlier tx wrote it.
 			for addr := range txAccessed[i] {
+				if _, sys := blockSysAddrs[addr]; sys {
+					continue // skip system addresses
+				}
 				for _, j := range writersByAddr[addr] {
 					deps[i][j] = true
 				}
 			}
-			// Register tx i as a writer for addresses it actually wrote.
+			// Register tx i as a writer, excluding system addresses.
 			for addr := range txWritten[i] {
+				if _, sys := blockSysAddrs[addr]; sys {
+					continue
+				}
 				writersByAddr[addr] = append(writersByAddr[addr], i)
 			}
 		}
