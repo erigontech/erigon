@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -1119,12 +1120,21 @@ func (d *Domain) missedBtreeAccessors(source []*FilesItem) (l []*FilesItem) {
 	if !d.Accessors.Has(statecfg.AccessorBTree) {
 		return nil
 	}
+	snapDir := d.dirs.SnapDomain
+	entries, err := os.ReadDir(snapDir)
+	if err != nil {
+		panic(err)
+	}
+	names := make([]string, len(entries))
+	for i, e := range entries {
+		names[i] = e.Name()
+	}
 	return fileItemsWithMissedAccessors(source, d.stepSize, func(fromStep, toStep kv.Step) []string {
-		exF, _, _, err := version.FindFilesWithVersionsByPattern(d.kvExistenceIdxFilePathMask(fromStep, toStep))
+		exF, _, _, err := version.MatchVersionedFile(d.kvExistenceIdxFileNameMask(fromStep, toStep), names, snapDir)
 		if err != nil {
 			panic(err)
 		}
-		btF, _, _, err := version.FindFilesWithVersionsByPattern(d.kvBtAccessorFilePathMask(fromStep, toStep))
+		btF, _, _, err := version.MatchVersionedFile(d.kvBtAccessorFileNameMask(fromStep, toStep), names, snapDir)
 		if err != nil {
 			panic(err)
 		}
@@ -1140,8 +1150,17 @@ func (d *Domain) missedMapAccessors(source []*FilesItem) (l []*FilesItem) {
 	if !d.Accessors.Has(statecfg.AccessorHashMap) {
 		return nil
 	}
+	snapDir := d.dirs.SnapDomain
+	entries, err := os.ReadDir(snapDir)
+	if err != nil {
+		panic(err)
+	}
+	names := make([]string, len(entries))
+	for i, e := range entries {
+		names[i] = e.Name()
+	}
 	return fileItemsWithMissedAccessors(source, d.stepSize, func(fromStep, toStep kv.Step) []string {
-		fPath, _, _, err := version.FindFilesWithVersionsByPattern(d.kviAccessorFilePathMask(fromStep, toStep))
+		fPath, _, _, err := version.MatchVersionedFile(d.kviAccessorFileNameMask(fromStep, toStep), names, snapDir)
 		if err != nil {
 			panic(err)
 		}
