@@ -824,3 +824,55 @@ func BenchmarkReceiptRLP(b *testing.B) {
 		}
 	})
 }
+
+// Comparison: Custom vs Generated Code
+func BenchmarkLogCustomVsGenerated(b *testing.B) {
+	tr := NewTRand()
+	logData := tr.RandLog()
+	var buf bytes.Buffer
+
+	b.Run(`Custom/Encode`, func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			buf.Reset()
+			logStorage := (*LogForStorage)(logData)
+			logStorage.EncodeRLP(&buf)
+		}
+	})
+
+	b.Run(`Custom/Decode`, func(b *testing.B) {
+		b.ReportAllocs()
+		buf.Reset()
+		logStorage := (*LogForStorage)(logData)
+		logStorage.EncodeRLP(&buf)
+		var decoded LogForStorage
+		for i := 0; i < b.N; i++ {
+			rlp.DecodeBytes(buf.Bytes(), &decoded)
+		}
+	})
+
+	// Generated code comparison
+	genLog := &LogForStorageGen{
+		Address: logData.Address,
+		Topics:  logData.Topics,
+		Data:    logData.Data,
+	}
+
+	b.Run(`Generated/Encode`, func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			buf.Reset()
+			genLog.EncodeRLP(&buf)
+		}
+	})
+
+	b.Run(`Generated/Decode`, func(b *testing.B) {
+		b.ReportAllocs()
+		buf.Reset()
+		genLog.EncodeRLP(&buf)
+		var decoded LogForStorageGen
+		for i := 0; i < b.N; i++ {
+			rlp.DecodeBytes(buf.Bytes(), &decoded)
+		}
+	})
+}

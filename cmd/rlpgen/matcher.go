@@ -82,9 +82,9 @@ func matchStrTypeToFunc(strType string) handle {
 		return handlers["bool"]
 	case "*bool":
 		return handlers["*bool"]
-	case "int16", "int32", "int", "int64", "uint16", "uint32", "uint", "uint64":
+	case "int8", "int16", "int32", "int", "int64", "uint8", "uint16", "uint32", "uint", "uint64":
 		return handlers["uint64"]
-	case "*int16", "*int32", "*int", "*int64", "*uint16", "*uint32", "*uint", "*uint64":
+	case "*int8", "*int16", "*int32", "*int", "*int64", "*uint8", "*uint16", "*uint32", "*uint", "*uint64":
 		return handlers["*uint64"]
 	default:
 		if fn, ok := handlers[strType]; ok {
