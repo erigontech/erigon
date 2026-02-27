@@ -23,6 +23,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -199,8 +200,17 @@ func (h *History) missedMapAccessors(source []*FilesItem) (l []*FilesItem) {
 	if !h.Accessors.Has(statecfg.AccessorHashMap) {
 		return nil
 	}
+	snapDir := h.dirs.SnapAccessors
+	entries, err := os.ReadDir(snapDir)
+	if err != nil {
+		panic(err)
+	}
+	names := make([]string, len(entries))
+	for i, e := range entries {
+		names[i] = e.Name()
+	}
 	return fileItemsWithMissedAccessors(source, h.stepSize, func(fromStep, toStep kv.Step) []string {
-		fPath, _, _, err := version.FindFilesWithVersionsByPattern(h.vAccessorFilePathMask(fromStep, toStep))
+		fPath, _, _, err := version.MatchVersionedFile(h.vAccessorFileNameMask(fromStep, toStep), names, snapDir)
 		if err != nil {
 			panic(err)
 		}
