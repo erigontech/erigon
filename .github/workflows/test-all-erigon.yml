@@ -7,49 +7,29 @@ on:
       - 'release/**'
   pull_request:
     branches:
-      - main 
+      - main
     types:
       - opened
       - reopened
       - synchronize
       - ready_for_review
   schedule:
-    - cron: '20 16 * * *' # daily at 16:20 UTC
+    - cron: '20 16 * * *' # daily at 16:20 UTC 😙🤌
   workflow_dispatch:
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
-  # 
-  # This first job is used to determine if changes are within out-of-scope dirs or files (in such case the tests are not run because they would be meaningless)
-  # NOTE: this logic is needed because the simple 'paths-ignore:' doesn't work since this workflow is set as a mandatory/required check for this repo
-  # - '**/.github/workflows/**' is currently commented to avoid unintended freeze in case of concurrent changes outside the excluded paths (further development will be done in due course)
-  # 
-  source-of-changes:
-    runs-on: ubuntu-latest
-    outputs:
-      changed_files: ${{ steps.filter.outputs.changed_files }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Check for changes within out-of-scope dirs or files
-        id: filter
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            changed_files:
-              - 'dashboards/**'
-              # - '**/.github/workflows/**'
-              - '**/.github/workflows/backups-dashboards.yml'
-
-  tests-mac-linux:
-    needs: source-of-changes
+  tests:
     concurrency:
-      # concurrency group: there can be at most one running and one pending job in a 
-      # concurrency group at any time. So for commits on main/release, we use different 
+      # concurrency group: there can be at most one running and one pending job in a
+      # concurrency group at any time. So for commits on main/release, we use different
       # concurrency group per commit; for other branches, we use a branch-level CG.
       group: >-
         ${{
-          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) &&
           format('{0}-{1}-{2}', github.workflow, matrix.os, github.run_id) ||
           format('{0}-{1}-{2}', github.workflow, matrix.os, github.ref)
         }}
@@ -62,64 +42,44 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - name: Cleanup space on Linux runner
-        if: needs.source-of-changes.outputs.changed_files != 'true'
-        run: |
-          rm -fr /opt/az \
-                 /opt/microsoft \
-                 /usr/share/dotnet \
-                 /usr/share/miniconda \
-                 /usr/share/swift
-
       - name: Declare runners
-        if: needs.source-of-changes.outputs.changed_files != 'true'
         run: |
           set +x
           echo "This workflow is being executed by this runner: $RUNNER_NAME"
-          
-      - name: "Checkout code and submodules with large files (lfs)"
-        if: needs.source-of-changes.outputs.changed_files != 'true'
+
+      - name: Checkout custom actions
         uses: actions/checkout@v6
         with:
-          submodules: recursive
-          lfs: true
-        
-      - name: Setup Go environment
-        if: needs.source-of-changes.outputs.changed_files != 'true'
-        uses: actions/setup-go@v6
-        with:
-          go-version: '1.25'
-          cache: true
+          fetch-depth: 1
 
-      - name: Install dependencies on Linux
-        if: runner.os == 'Linux' && needs.source-of-changes.outputs.changed_files != 'true'
-        run: sudo apt update -y && sudo apt install -y build-essential
-        
+      - uses: ./.github/actions/setup-erigon
+        id: erigon
+        with:
+          submodules: true
+          lfs: tests
+
       - name: Run all tests on ${{ matrix.os }}
         env:
           SKIP_FLAKY_TESTS: 'true'
-        if: needs.source-of-changes.outputs.changed_files != 'true'
-        run: GOGC=80 make test-all
+        run: make test-all
 
-      - name: SonarCloud scan in case OS Linux and changed_files is not true
-        if: runner.os == 'Linux' && needs.source-of-changes.outputs.changed_files != 'true'
+      - name: SonarCloud scan in case OS Linux
+        if: runner.os == 'Linux'
         uses: SonarSource/sonarqube-scan-action@v7
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         continue-on-error: true
 
-      - name: This ${{ matrix.os }} check does not make sense for changes within out-of-scope directories
-        if: needs.source-of-changes.outputs.changed_files == 'true'
-        run: echo "This check does not make sense for changes within out-of-scope directories"
+      - uses: ./.github/actions/cleanup-erigon
+        if: always()
 
 
   tests-windows:
-    needs: source-of-changes
     concurrency:
       group: >-
         ${{
-          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) &&
           format('{0}-{1}-{2}', github.workflow, matrix.os, github.run_id) ||
           format('{0}-{1}-{2}', github.workflow, matrix.os, github.ref)
         }}
@@ -139,7 +99,6 @@ jobs:
       #    disk-root: "C:"
 
       - name: "Checkout code with submodules and large files (lfs) on ${{ matrix.os }}"
-        if: needs.source-of-changes.outputs.changed_files != 'true'
         uses: actions/checkout@v6
         with:
           fetch-depth: 1
@@ -148,7 +107,6 @@ jobs:
           clean: true
 
       - name: Setup Go environment on ${{ matrix.os }}
-        if: needs.source-of-changes.outputs.changed_files != 'true'
         uses: actions/setup-go@v6
         with:
           go-version: '>=1.25'
@@ -159,7 +117,6 @@ jobs:
       #  run: choco install make -y
 
       - name: Run all tests on ${{ matrix.os }}
-        if: needs.source-of-changes.outputs.changed_files != 'true'
         shell: bash
         env:
           GOMODCACHE: C:\go-cache\mod
@@ -170,7 +127,3 @@ jobs:
         if: always()
         run: |
           Remove-Item -Path "$env:TEMP\*" -Recurse -Force -ErrorAction SilentlyContinue
-
-      - name: This ${{ matrix.os }} check does not make sense for changes within out-of-scope directories
-        if: needs.source-of-changes.outputs.changed_files == 'true'
-        run: echo "This check does not make sense for changes within out-of-scope directories"

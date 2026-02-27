@@ -1,0 +1,29 @@
+name: Save Go build cache
+description: Save Go build cache using the provided key
+
+inputs:
+  gocache:
+    description: "GOCACHE path"
+    required: true
+  key:
+    description: "Cache key to save under (from restore-build-cache outputs.primary-key)"
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Show build cache size
+      if: ${{ always() }}
+      shell: bash
+      run: du -hs "${{ inputs.gocache }}" || true
+
+    - name: Clean fuzz cache
+      if: ${{ always() }}
+      shell: bash
+      run: go clean -fuzzcache
+
+    - uses: actions/cache/save@v4
+      if: ${{ always() }}
+      with:
+        path: ${{ inputs.gocache }}
+        key: ${{ inputs.key }}

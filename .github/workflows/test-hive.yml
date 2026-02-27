@@ -26,7 +26,10 @@ concurrency:
 
 jobs:
   test-hive:
-    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
+    if: >-
+      ${{ github.event_name == 'push'
+      || (!github.event.pull_request.draft
+      && !contains(github.event.pull_request.labels.*.name, 'skip-uncaching')) }}
     runs-on:
       group: hive
     strategy:

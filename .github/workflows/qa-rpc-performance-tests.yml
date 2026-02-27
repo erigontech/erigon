@@ -101,6 +101,7 @@ jobs:
         with:
           submodules: recursive
           fetch-depth: "0"
+          filter: blob:none
 
       - name: Checkout RPC Tests Repository
         if: matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true'

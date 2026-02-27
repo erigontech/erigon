@@ -1,0 +1,26 @@
+name: Save Go module cache
+description: Save Go module download cache using the provided key
+
+inputs:
+  modcache-path:
+    description: "GOMODCACHE path"
+    required: true
+  key:
+    description: "Cache key to save under (from restore-mod-cache outputs.primary-key)"
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Show module cache size
+      if: ${{ always() }}
+      shell: bash
+      run: |
+        time du -hs "${{ inputs.modcache-path }}" || true
+        time du -hs "${{ inputs.modcache-path }}/cache/download" || true
+
+    - uses: actions/cache/save@v4
+      if: ${{ always() }}
+      with:
+        path: ${{ inputs.modcache-path }}/cache/download
+        key: ${{ inputs.key }}

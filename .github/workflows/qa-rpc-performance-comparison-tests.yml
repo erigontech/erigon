@@ -110,6 +110,7 @@ jobs:
         with:
           submodules: recursive
           fetch-depth: "0"
+          filter: blob:none
 
       - name: Sanity check Redis config
         if: needs.setup.outputs.run_geth == 'true'

@@ -1,0 +1,101 @@
+#!/usr/bin/env python3
+"""Partition packages (from stdin) into test groups and write one file per group.
+
+Usage: go list ./... | tools/write-test-groups
+"""
+
+import json
+import sys
+from collections import OrderedDict
+from collections.abc import Iterator
+from pathlib import Path
+
+OUT_DIR = Path(__file__).parent / "test-groups"
+MODULE = "github.com/erigontech/erigon"
+
+GROUPS: OrderedDict[str, set[str]] = OrderedDict([
+    ("eest-frontier-scenarios", {"./execution/tests/eest_frontier_scenarios/..."}),
+    ("eest-osaka-clz",          {"./execution/tests/eest_osaka_clz/..."}),
+    ("eest-prague-calldata",    {"./execution/tests/eest_prague_calldata/..."}),
+    ("eest-cancun-blobs",       {"./execution/tests/eest_cancun_blobs/..."}),
+    ("execution-tests",         {"./execution/tests/..."}),
+    ("execution-other",         {"./execution/..."}),
+    ("consensus",               {"./cl/..."}),
+    ("core-rpc",                {"./db/...", "./node/...", "./txnprovider/...", "./p2p/...", "./rpc/..."}),
+    ("other",                   {"./..."}),
+])
+
+
+def pkg_match(pkg: str, spec: str) -> bool:
+    """Match a package import path against a Go package spec.
+
+    If spec starts with "./", pkg must start with MODULE; both prefixes are
+    stripped before matching. Otherwise the full import path is matched from
+    the start. In both cases a trailing /... matches the root and all children.
+    """
+    if spec.startswith("./"):
+        if pkg == MODULE:
+            target = ""
+        elif pkg.startswith(MODULE + "/"):
+            target = pkg[len(MODULE) + 1:]
+        else:
+            raise ValueError(f"package {pkg!r} does not have required prefix {MODULE!r}")
+        path = spec[2:]
+    else:
+        target = pkg
+        path = spec
+
+    if path == "...":
+        return True
+    if path.endswith("/..."):
+        root = path[:-4]
+        return target == root or target.startswith(root + "/")
+    return target == path
+
+
+def partition(packages: list[str], groups: OrderedDict[str, set[str]]) -> Iterator[tuple[str, list[str]]]:
+    all_pkgs = set(packages)
+    remaining = set(packages)
+
+    def claim(specs: set[str]) -> list[str]:
+        nonlocal remaining
+        out: list[str] = []
+        claimed: set[str] = set()
+        for spec in sorted(specs):
+            spec_all = {p for p in all_pkgs if pkg_match(p, spec)}
+            spec_now = spec_all & remaining
+            if not spec_now:
+                continue
+            if spec_all == spec_now:
+                out.append(spec)
+            else:
+                out.extend(sorted(spec_now))
+            claimed |= spec_now
+        remaining -= claimed
+        return out
+
+    for group, specs in groups.items():
+        yield group, claim(specs)
+
+
+def main() -> int:
+    if len(sys.argv) == 2 and sys.argv[1] == "--json":
+        print(json.dumps(list(GROUPS.keys())))
+        return 0
+
+    packages = [p for p in sys.stdin.read().splitlines() if p]
+
+    OUT_DIR.mkdir(exist_ok=True)
+    for group, pkgs in partition(packages, GROUPS):
+        out = OUT_DIR / group
+        out.write_text("".join(p + "\n" for p in pkgs))
+        print(f"  {group}: {len(pkgs)} items")
+
+    json_out = OUT_DIR.parent / "test-groups.json"
+    json_out.write_text(json.dumps(list(GROUPS.keys())) + "\n")
+    print(f"  test-groups.json: {len(GROUPS)} groups")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

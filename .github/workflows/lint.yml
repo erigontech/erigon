@@ -1,51 +1,49 @@
 name: Lint
 on:
-  push:
-    branches:
-      - main
-      - 'release/**'
+  workflow_dispatch:
   pull_request:
     branches:
       - main
       - 'release/**'
       - performance
       - performance-stable
-    types:
-      - opened
-      - reopened
-      - synchronize
-      - ready_for_review
-  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
   lint:
-    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     concurrency:
-      group: >-
-        ${{
-          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) &&
-          format('{0}-{1}', github.workflow, github.run_id) ||
-          format('{0}-{1}', github.workflow, github.ref)
-        }}
+      group: ${{ format('{0}-{1}', github.workflow, github.ref) }}
       cancel-in-progress: true
 
     steps:
-      - name: Cleanup space
-        run: |
-          rm -fr /opt/az \
-                 /opt/microsoft \
-                 /usr/share/dotnet \
-                 /usr/share/miniconda \
-                 /usr/share/swift
-
-      - run: df -h
-
-      - uses: actions/checkout@v6
+      - name: Checkout custom actions
+        uses: actions/checkout@v6
         with:
-          fetch-depth: 0
-      - uses: actions/setup-go@v6
-        with:
-          go-version: '1.25'
+          fetch-depth: 1
 
-      - run: make lint
+      - uses: ./.github/actions/setup-erigon
+        id: erigon
+
+      - name: Restore golangci-lint cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/golangci-lint
+          key: golangci-lint|${{ runner.os }}|${{ hashFiles('go.mod') }}
+          restore-keys: golangci-lint|${{ runner.os }}|
+
+      - run: make lintci
+
+      - uses: ./.github/actions/cleanup-erigon
+        if: always()
+
+      - name: Save golangci-lint cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/golangci-lint
+          key: golangci-lint|${{ runner.os }}|${{ hashFiles('go.mod') }}

@@ -40,15 +40,15 @@ func TestLegacyBlockchain(t *testing.T) {
 		t.Skip("fix me on win please") // after remove ChainReader from rules engine - this test can be changed to create less databases, then can enable on win. now timeout after 20min
 	}
 
-	bt := new(testMatcher)
+	bt := new(testutil.TestMatcher)
 	dir := filepath.Join(legacyDir, "BlockchainTests")
 
 	// This directory contains no tests
-	bt.skipLoad(`.*\.meta/.*`)
+	bt.SkipLoad(`.*\.meta/.*`)
 
-	bt.walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
+	bt.Walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root
-		if err := bt.checkFailure(t, test.Run(t)); err != nil {
+		if err := bt.CheckFailure(t, test.Run(t)); err != nil {
 			t.Error(err)
 		}
 	})
@@ -66,29 +66,29 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
-	bt := new(testMatcher)
+	bt := new(testutil.TestMatcher)
 	dir := filepath.Join(eestDir, "blockchain_tests")
 
-	// Slow tests
-	bt.slow(`^cancun/eip4844_blobs/test_invalid_negative_excess_blob_gas.json`)
-	bt.slow(`^frontier/scenarios/test_scenarios.json`)
-	bt.slow(`^osaka/eip7939_count_leading_zeros/test_clz_opcode_scenarios.json`)
-	bt.slow(`^prague/eip7623_increase_calldata_cost/test_transaction_validity_type_1_type_2.json`)
+	// Slow tests — split into their own packages for parallelism
+	bt.SkipLoad(`^cancun/eip4844_blobs/test_invalid_negative_excess_blob_gas.json`)
+	bt.SkipLoad(`^frontier/scenarios/test_scenarios.json`)
+	bt.SkipLoad(`^osaka/eip7939_count_leading_zeros/test_clz_opcode_scenarios.json`)
+	bt.SkipLoad(`^prague/eip7623_increase_calldata_cost/test_transaction_validity_type_1_type_2.json`)
 
 	// Very slow tests
-	bt.skipLoad(`^berlin/eip2930_access_list/test_tx_intrinsic_gas.json`)
-	bt.skipLoad(`^cancun/eip4844_blobs/test_sufficient_balance_blob_tx`)
-	bt.skipLoad(`^cancun/eip4844_blobs/test_valid_blob_tx_combinations.json`)
-	bt.skipLoad(`^frontier/opcodes/test_stack_overflow.json`)
-	bt.skipLoad(`^prague/eip2537_bls_12_381_precompiles/test_invalid.json`)
-	bt.skipLoad(`^prague/eip2537_bls_12_381_precompiles/test_valid.json`)
+	bt.SkipLoad(`^berlin/eip2930_access_list/test_tx_intrinsic_gas.json`)
+	bt.SkipLoad(`^cancun/eip4844_blobs/test_sufficient_balance_blob_tx`)
+	bt.SkipLoad(`^cancun/eip4844_blobs/test_valid_blob_tx_combinations.json`)
+	bt.SkipLoad(`^frontier/opcodes/test_stack_overflow.json`)
+	bt.SkipLoad(`^prague/eip2537_bls_12_381_precompiles/test_invalid.json`)
+	bt.SkipLoad(`^prague/eip2537_bls_12_381_precompiles/test_valid.json`)
 
 	// Tested in the state test format by TestState
-	bt.skipLoad(`^static/state_tests/`)
+	bt.SkipLoad(`^static/state_tests/`)
 
-	bt.walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
+	bt.Walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root
-		if err := bt.checkFailure(t, test.Run(t)); err != nil {
+		if err := bt.CheckFailure(t, test.Run(t)); err != nil {
 			t.Error(err)
 		}
 	})
@@ -108,17 +108,17 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 	dir := filepath.Join(eestDir, "blockchain_tests_devnet")
-	bt := new(testMatcher)
+	bt := new(testutil.TestMatcher)
 	// to run only tests for 1 eip do:
-	//bt.whitelist(`.*amsterdam/eip8024_dupn_swapn_exchange.*`)
+	//bt.Whitelist(`.*amsterdam/eip8024_dupn_swapn_exchange.*`)
 
 	// static — tested in state test format by TestState
-	bt.skipLoad(`^static/state_tests/`)
+	bt.SkipLoad(`^static/state_tests/`)
 
-	bt.walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
+	bt.Walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root
 		test.ExperimentalBAL = true // TODO eventually remove this from BlockTest and run normally
-		if err := bt.checkFailure(t, test.Run(t)); err != nil {
+		if err := bt.CheckFailure(t, test.Run(t)); err != nil {
 			t.Error(err)
 		}
 	})
