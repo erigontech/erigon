@@ -788,8 +788,7 @@ func (g *Getter) nextPos() uint64 {
 		return g.nextPosSubtable(g.posDict, code)
 	}
 	dataBit += l
-	dataP += uint64(dataBit >> 3)
-	g.dataP = dataP
+	g.dataP = dataP + uint64(dataBit>>3)
 	g.dataBit = int(dataBit & 7)
 	return uint64(entry.pos)
 }
