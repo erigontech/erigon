@@ -1734,7 +1734,156 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 }
 
 // RawTransaction implements trace_rawTransaction.
-func (api *TraceAPIImpl) RawTransaction(ctx context.Context, txHash common.Hash, traceTypes []string) ([]any, error) {
-	var stub []any
-	return stub, fmt.Errorf(NotImplemented, "trace_rawTransaction")
+func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.Bytes, traceTypes []string) (*TraceCallResult, error) {
+	txn, err := types.DecodeWrappedTransaction(encodedTx)
+	if err != nil {
+		return nil, err
+	}
+
+	dbtx, err := api.kv.BeginTemporalRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer dbtx.Rollback()
+
+	chainConfig, err := api.chainConfig(ctx, dbtx)
+	if err != nil {
+		return nil, err
+	}
+	engine := api.engine()
+
+	var num = rpc.LatestBlockNumber
+	blockNrOrHash := rpc.BlockNumberOrHash{BlockNumber: &num}
+
+	blockNumber, hash, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, dbtx, api._blockReader, api.filters)
+	if err != nil {
+		return nil, err
+	}
+
+	err = api.BaseAPI.checkPruneHistory(ctx, dbtx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	header, err := api.headerByNumber(ctx, rpc.BlockNumber(blockNumber), dbtx)
+	if err != nil {
+		return nil, err
+	}
+	if header == nil {
+		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
+	}
+
+	err = rpchelper.CheckBlockExecuted(dbtx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, dbtx, blockNumber, latest, 0, api.stateCache, api._txNumReader)
+	if err != nil {
+		return nil, err
+	}
+
+	ibs := state.New(stateReader)
+
+	var cancel context.CancelFunc
+	if api.evmCallTimeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, api.evmCallTimeout)
+	} else {
+		ctx, cancel = context.WithCancel(ctx)
+	}
+	defer cancel()
+
+	traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
+	var traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace bool
+	for _, traceType := range traceTypes {
+		switch traceType {
+		case TraceTypeTrace:
+			traceTypeTrace = true
+		case TraceTypeStateDiff:
+			traceTypeStateDiff = true
+		case TraceTypeVmTrace:
+			traceTypeVmTrace = true
+		default:
+			return nil, fmt.Errorf("unrecognized trace type: %s", traceType)
+		}
+	}
+	if traceTypeVmTrace {
+		traceResult.VmTrace = &VmTrace{Ops: []*VmTraceOp{}}
+	}
+
+	var ot OeTracer
+	ot.config, err = parseOeTracerConfig(nil)
+	if err != nil {
+		return nil, err
+	}
+	ot.compat = api.compatibility
+	if traceTypeTrace || traceTypeVmTrace || traceTypeStateDiff {
+		ot.r = traceResult
+		ot.traceAddr = []int{}
+	}
+
+	signer := types.MakeSigner(chainConfig, header.Number.Uint64(), header.Time)
+	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
+	rules := blockCtx.Rules(chainConfig)
+
+	msg, err := txn.AsMessage(*signer, header.BaseFee, rules)
+	if err != nil {
+		return nil, err
+	}
+	msg.SetCheckNonce(false)
+	msg.SetCheckTransaction(false)
+	msg.SetCheckGas(false)
+
+	txCtx := protocol.NewEVMTxContext(msg)
+
+	blockCtx.GasLimit = math.MaxUint64
+	blockCtx.MaxGasLimit = true
+
+	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Tracer: ot.Tracer().Hooks})
+
+	go func() {
+		<-ctx.Done()
+		evm.Cancel()
+	}()
+
+	gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
+	var execResult *evmtypes.ExecutionResult
+	ibs.SetTxContext(blockCtx.BlockNumber, 0)
+	ibs.SetHooks(ot.Tracer().Hooks)
+
+	if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxStart != nil {
+		ot.Tracer().OnTxStart(evm.GetVMContext(), txn, msg.From())
+	}
+	execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, engine)
+	if err != nil {
+		if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
+			ot.Tracer().OnTxEnd(nil, err)
+		}
+		return nil, err
+	}
+	if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
+		ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, nil)
+	}
+
+	traceResult.Output = common.Copy(execResult.ReturnData)
+	if traceTypeStateDiff {
+		sdMap := make(map[accounts.Address]*StateDiffAccount)
+		traceResult.StateDiff = sdMap
+		sd := &StateDiff{sdMap: sdMap}
+		if err = ibs.FinalizeTx(evm.ChainRules(), sd); err != nil {
+			return nil, err
+		}
+		initialIbs := state.New(stateReader)
+		sd.CompareStates(initialIbs, ibs)
+	}
+
+	if evm.Cancelled() {
+		return nil, fmt.Errorf("execution aborted (timeout = %v)", api.evmCallTimeout)
+	}
+
+	if !traceTypeTrace {
+		traceResult.Trace = []*ParityTrace{}
+	}
+
+	return traceResult, nil
 }
