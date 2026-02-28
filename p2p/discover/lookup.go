@@ -138,7 +138,7 @@ func (it *lookup) query(n *enode.Node, reply chan<- []*enode.Node) {
 		success := len(r) > 0
 		it.tab.trackRequest(n, success, r)
 		if err != nil {
-			it.tab.log.Trace("FINDNODE failed", "id", n.ID(), "err", err)
+			it.tab.log.Trace("[p2p] FINDNODE failed", "id", n.ID(), "err", err)
 		}
 	}
 	reply <- r
