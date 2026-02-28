@@ -308,7 +308,7 @@ func gasCreate2(_ *EVM, callContext *CallContext, availableGas uint64, memorySiz
 	return gas, nil
 }
 
-func gasCreateEip3860(_ *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
+func gasCreateEip3860(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
 	gas, err := memoryGasCost(callContext, memorySize)
 	if err != nil {
 		return 0, err
@@ -317,11 +317,11 @@ func gasCreateEip3860(_ *EVM, callContext *CallContext, availableGas uint64, mem
 	if overflow {
 		return 0, ErrGasUintOverflow
 	}
-	if size > params.MaxInitCodeSize {
-		return 0, fmt.Errorf("%w: size %d", ErrMaxInitCodeSizeExceeded, size)
+	if err := CheckMaxInitCodeSize(evm.ChainRules().IsAmsterdam, evm.ChainRules().IsShanghai, size); err != nil {
+		return 0, err
 	}
 	numWords := ToWordSize(size)
-	// Since size <= params.MaxInitCodeSize, this multiplication cannot overflow
+	// Since size <= the protocol-defined maximum initcode size limit, this multiplication cannot overflow
 	wordGas := params.InitCodeWordGas * numWords
 	gas, overflow = math.SafeAdd(gas, wordGas)
 	if overflow {
@@ -330,7 +330,7 @@ func gasCreateEip3860(_ *EVM, callContext *CallContext, availableGas uint64, mem
 	return gas, nil
 }
 
-func gasCreate2Eip3860(_ *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
+func gasCreate2Eip3860(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
 	gas, err := memoryGasCost(callContext, memorySize)
 	if err != nil {
 		return 0, err
@@ -339,11 +339,11 @@ func gasCreate2Eip3860(_ *EVM, callContext *CallContext, availableGas uint64, me
 	if overflow {
 		return 0, ErrGasUintOverflow
 	}
-	if size > params.MaxInitCodeSize {
-		return 0, fmt.Errorf("%w: size %d", ErrMaxInitCodeSizeExceeded, size)
+	if err := CheckMaxInitCodeSize(evm.ChainRules().IsAmsterdam, evm.ChainRules().IsShanghai, size); err != nil {
+		return 0, err
 	}
 	numWords := ToWordSize(size)
-	// Since size <= params.MaxInitCodeSize, this multiplication cannot overflow
+	// Since size <= the protocol-defined maximum initcode size limit, this multiplication cannot overflow
 	wordGas := (params.InitCodeWordGas + params.Keccak256WordGas) * numWords
 	gas, overflow = math.SafeAdd(gas, wordGas)
 	if overflow {
