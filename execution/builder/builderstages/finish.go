@@ -69,7 +69,10 @@ func SpawnBuilderFinishStage(s *stagedsync.StageState, sd *execctx.SharedDomains
 	//}
 
 	block := types.NewBlockForAsembling(current.Header, current.Txns, current.Uncles, current.Receipts, current.Withdrawals)
-	if current.BlockAccessList != nil {
+	// Only embed the BAL hash in the header for Amsterdam+ chains.
+	// For pre-Amsterdam chains with ExperimentalBAL, the BAL is computed
+	// and validated but NOT included in the block header.
+	if current.BlockAccessList != nil && cfg.chainConfig.IsAmsterdam(current.Header.Time) {
 		hash := current.BlockAccessList.Hash()
 		block.HeaderNoCopy().BlockAccessListHash = &hash
 	}

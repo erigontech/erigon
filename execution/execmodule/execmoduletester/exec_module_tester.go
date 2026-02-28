@@ -329,6 +329,7 @@ func applyOptions(opts []Option) options {
 		pruneMode:       &defaultPruneMode,
 		blockBufferSize: 128,
 		chainConfig:     chain.TestChainConfig,
+		experimentalBAL: false,
 	}
 	for _, o := range opts {
 		o(&opt)
@@ -348,6 +349,8 @@ func applyOptions(opts []Option) options {
 		switch {
 		case opt.genesis.Config.Bor != nil:
 			opt.engine = bor.NewFaker()
+		case opt.genesis.Config.TerminalTotalDifficultyPassed:
+			opt.engine = ethash.NewFaker() //merge.NewFaker(ethash.NewFaker())
 		default:
 			opt.engine = ethash.NewFaker()
 		}
@@ -461,6 +464,19 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			tb.Fatal(err)
 		} else {
 			panic(err)
+		}
+	}
+
+	// Deploy Prague system contracts (EIP-7002, EIP-7251) when Prague is active.
+	// These are required for the Merge engine's FinalizeAndAssemble to process
+	// withdrawal and consolidation requests.
+	if gspec.Config.IsPrague(0) {
+		if err := blockgen.InitPraguePreDeploys(mock.DB, mock.Log); err != nil {
+			if tb != nil {
+				tb.Fatal(err)
+			} else {
+				panic(err)
+			}
 		}
 	}
 
