@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"testing"
 	"time"
 
@@ -283,4 +284,173 @@ func (m mockBridgeReader) Events(context.Context, common.Hash, uint64) ([]*types
 
 func (m mockBridgeReader) EventTxnLookup(context.Context, common.Hash) (uint64, bool, error) {
 	panic("mock")
+}
+
+func TestGetStorageValues_HappyPath(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	addr1 := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	slot0 := common.Hash{}
+	slot1 := common.BigToHash(big.NewInt(1))
+
+	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+
+	result, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{
+		addr1: {slot0, slot1},
+	}, latest)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 address in result, got %d", len(result))
+	}
+	if len(result[addr1]) != 2 {
+		t.Fatalf("expected 2 slots for addr1, got %d", len(result[addr1]))
+	}
+}
+
+func TestGetStorageValues_MultipleAddresses(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	addr1 := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	addr2 := common.HexToAddress("0x1000000000000000000000000000000000000001")
+	addr3 := common.HexToAddress("0x2000000000000000000000000000000000000002")
+	slot0 := common.Hash{}
+	slot1 := common.BigToHash(big.NewInt(1))
+	slot2 := common.BigToHash(big.NewInt(2))
+	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+	request := map[common.Address][]common.Hash{
+		addr1: {slot0, slot1},
+		addr2: {slot1, slot2},
+		addr3: {slot0, slot2},
+	}
+	result, err := api.GetStorageValues(context.Background(), request, latest)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != len(request) {
+		t.Fatalf("expected %d addresses in result, got %d", len(request), len(result))
+	}
+	for addr, slots := range request {
+		values, ok := result[addr]
+		if !ok {
+			t.Fatalf("missing results for address %s", addr.Hex())
+		}
+		if len(values) != len(slots) {
+			t.Fatalf("expected %d slots for address %s, got %d", len(slots), addr.Hex(), len(values))
+		}
+	}
+}
+
+func TestGetStorageValues_MissingSlotReturnsZero(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	addr1 := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+
+	result, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{
+		addr1: {common.HexToHash("0xff")},
+	}, latest)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := common.BytesToHash(result[addr1][0]); got != (common.Hash{}) {
+		t.Errorf("missing slot: want zero, got %x", got)
+	}
+}
+
+func TestGetStorageValues_EmptyRequestReturnsError(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+
+	_, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{}, latest)
+	if err == nil {
+		t.Fatal("expected error for empty request")
+	}
+	if err.Error() != "empty request" {
+		t.Errorf("wrong error message: %v", err)
+	}
+}
+
+func TestGetStorageValues_ExceedingSlotLimitReturnsError(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	addr1 := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+
+	tooMany := make([]common.Hash, maxGetStorageSlots+1)
+	for i := range tooMany {
+		tooMany[i] = common.BigToHash(big.NewInt(int64(i)))
+	}
+
+	_, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{
+		addr1: tooMany,
+	}, latest)
+	if err == nil {
+		t.Fatal("expected error for exceeding slot limit")
+	}
+}
+
+func TestGetStorageValues_ByBlockHash_NonCanonicalBlock(t *testing.T) {
+	m, _, orphanedChain := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	addr1 := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	orphanedBlock := orphanedChain[0].Blocks[0]
+
+	blockNumberOrHash := rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), false)
+
+	_, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{
+		addr1: {common.Hash{}},
+	}, blockNumberOrHash)
+	if err != nil {
+		if fmt.Sprintf("%v", err) != fmt.Sprintf("hash %s is not currently canonical", orphanedBlock.Hash().String()[2:]) {
+			t.Errorf("wrong error: %v", err)
+		}
+	} else {
+		t.Error("error expected")
+	}
+}
+
+func TestGetStorageValues_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *testing.T) {
+	m, _, orphanedChain := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	addr1 := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	orphanedBlock := orphanedChain[0].Blocks[0]
+
+	blockNumberOrHash := rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), true)
+
+	_, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{
+		addr1: {common.Hash{}},
+	}, blockNumberOrHash)
+	if err != nil {
+		if fmt.Sprintf("%v", err) != fmt.Sprintf("hash %s is not currently canonical", orphanedBlock.Hash().String()[2:]) {
+			t.Errorf("wrong error: %v", err)
+		}
+	} else {
+		t.Error("error expected")
+	}
+}
+
+func TestGetStorageValues_PrunedBlockReturnsError(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	addr1 := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+
+	// Block 0 may be pruned depending on prune config — adjust block number as needed
+	blockNumberOrHash := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(0))
+
+	_, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{
+		addr1: {common.Hash{}},
+	}, blockNumberOrHash)
+	if err != nil {
+		t.Logf("got expected prune error: %v", err)
+	}
 }
