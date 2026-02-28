@@ -228,7 +228,6 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 			0x4ef95e25f4b4983d, 0x81175195173b92d3, 0x4e50927d8dd15978, 0x1ea2099d1fafae7f, 0x425c8a06fbaaa815, 0xcd4216006c74052a}
 	}
 	bucketCount := (args.KeyCount + args.BucketSize - 1) / args.BucketSize
-	log.Warn("[dbg] workers", "workers", args.Workers)
 	rs := &RecSplit{
 		dataStructureVersion: version.DataStructureVersion(args.Version),
 		bucketSize:           args.BucketSize, keyExpectedCount: uint64(args.KeyCount), bucketCount: uint64(bucketCount),
@@ -247,6 +246,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	}()
 	_, fname := filepath.Split(rs.filePath)
 	rs.fileName = fname
+	log.Warn("[dbg] workers", "workers", args.Workers, "f", rs.fileName)
 	if args.Salt == nil {
 		seedBytes := make([]byte, 4)
 		if _, err := rand.Read(seedBytes); err != nil {
