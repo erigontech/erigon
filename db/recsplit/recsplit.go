@@ -93,7 +93,8 @@ type bucketResult struct {
 // Reset clears the bucketResult for reuse from the pool.
 func (br *bucketResult) Reset() {
 	br.offsetData = br.offsetData[:0]
-	br.gr = GolombRice{}
+	br.gr.data = br.gr.data[:0]
+	br.gr.bitCount = 0
 	br.bucketSize = 0
 	br.bucketIdx = 0
 }
