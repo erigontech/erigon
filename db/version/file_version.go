@@ -229,17 +229,34 @@ func MatchVersionedFile(filePattern string, dirEntries []string, dir string) (st
 	var bestVersion Version
 	found := false
 
-	for _, name := range dirEntries {
-		matched, err := filepath.Match(filePattern, name)
-		if err != nil {
-			return "", Version{}, false, fmt.Errorf("invalid pattern: %w", err)
-		}
-		if matched {
+	// Optimization: patterns like "*-accounts.0-1.kv" are common — a single leading wildcard
+	// followed by a literal suffix. Use HasSuffix instead of filepath.Match (which is ~50x slower).
+	if strings.HasPrefix(filePattern, "*") && !strings.ContainsAny(filePattern[1:], "*?[") {
+		suffix := filePattern[1:]
+		for _, name := range dirEntries {
+			if !strings.HasSuffix(name, suffix) {
+				continue
+			}
 			ver, _ := ParseVersion(name)
 			if !found || ver.Greater(bestVersion) {
 				bestVersion = ver
 				bestMatch = name
 				found = true
+			}
+		}
+	} else {
+		for _, name := range dirEntries {
+			matched, err := filepath.Match(filePattern, name)
+			if err != nil {
+				return "", Version{}, false, fmt.Errorf("invalid pattern: %w", err)
+			}
+			if matched {
+				ver, _ := ParseVersion(name)
+				if !found || ver.Greater(bestVersion) {
+					bestVersion = ver
+					bestMatch = name
+					found = true
+				}
 			}
 		}
 	}

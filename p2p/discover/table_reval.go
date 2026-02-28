@@ -124,7 +124,7 @@ func (tab *Table) doRevalidate(resp revalidationResponse, node *enode.Node) {
 	if remoteSeq > node.Seq() {
 		newrec, err := tab.net.RequestENR(node)
 		if err != nil {
-			tab.log.Debug("ENR request failed", "id", node.ID(), "err", err)
+			tab.log.Debug("[p2p] ENR request failed", "id", node.ID(), "err", err)
 		} else {
 			resp.newRecord = newrec
 		}
