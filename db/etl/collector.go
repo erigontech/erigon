@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 
 	"github.com/c2h5oh/datasize"
 
@@ -112,6 +113,8 @@ func (c *Collector) Allocator(a *Allocator) *Collector {
 	c.allocator = a
 	return c
 }
+
+var inProgress atomic.Int32
 
 func (c *Collector) flushBuffer(canStoreInRam bool) error {
 	if c.buf.Len() == 0 {

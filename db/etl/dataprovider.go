@@ -20,10 +20,11 @@ import (
 	"bufio"
 	"encoding/binary"
 	"fmt"
-	"github.com/erigontech/erigon/common/dir"
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/erigontech/erigon/common/dir"
 
 	"golang.org/x/sync/errgroup"
 
@@ -55,11 +56,15 @@ func FlushToDiskAsync(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl, al
 
 	provider := &fileDataProvider{reader: nil, wg: &errgroup.Group{}}
 	provider.wg.Go(func() (err error) {
+		inProgress.Add(1)
 		defer func() {
+			inProgress.Add(-1)
 			if allocator != nil {
 				allocator.Put(b)
 			}
 		}()
+		log.Warn("etl bg jobs amount", "bg_josb", inProgress.Load())
+
 		provider.file, err = sortAndFlush(b, tmpdir)
 		if err != nil {
 			return err
