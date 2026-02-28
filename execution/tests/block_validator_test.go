@@ -37,6 +37,9 @@ import (
 
 // Tests that simple header verification works, for both good and bad blocks.
 func TestHeaderVerification(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	// Create a simple chain to verify
 	var (
@@ -44,7 +47,7 @@ func TestHeaderVerification(t *testing.T) {
 		engine = ethash.NewFaker()
 	)
 	logger := testlog.Logger(t, log.LvlInfo)
-	m := execmoduletester.NewWithGenesisEngine(t, gspec, engine)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithEngine(engine))
 
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, nil)
 	if err != nil {
@@ -85,6 +88,9 @@ func TestHeaderVerification(t *testing.T) {
 
 // Tests that simple header with seal verification works, for both good and bad blocks.
 func TestHeaderWithSealVerification(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	// Create a simple chain to verify
 	var (
@@ -92,7 +98,7 @@ func TestHeaderWithSealVerification(t *testing.T) {
 		engine = ethash.NewFaker()
 	)
 	logger := testlog.Logger(t, log.LvlInfo)
-	m := execmoduletester.NewWithGenesisEngine(t, gspec, engine)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithEngine(engine))
 
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, nil)
 	if err != nil {

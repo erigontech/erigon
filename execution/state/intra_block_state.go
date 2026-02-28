@@ -131,6 +131,22 @@ type accessOptions struct {
 	revertable bool
 }
 
+type AccessSet map[accounts.Address]*accessOptions
+
+func (aa AccessSet) Merge(other AccessSet) AccessSet {
+	if len(other) == 0 {
+		return aa
+	}
+	dst := make(AccessSet, len(aa)+len(other))
+	for addr, opt := range aa {
+		dst[addr] = opt
+	}
+	for addr, opt := range other {
+		dst[addr] = opt
+	}
+	return dst
+}
+
 // IntraBlockState is responsible for caching and managing state changes
 // that occur during block's execution.
 // NOT THREAD SAFE!
@@ -164,7 +180,7 @@ type IntraBlockState struct {
 	trace         bool
 	tracingHooks  *tracing.Hooks
 	balanceInc    map[accounts.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
-	addressAccess map[accounts.Address]*accessOptions
+	addressAccess AccessSet
 	recordAccess  bool
 
 	// Versioned storage used for parallel tx processing, versions
@@ -296,8 +312,34 @@ func (sdb *IntraBlockState) HasStorage(addr accounts.Address) (bool, error) {
 		}
 	}
 
+	// In parallel execution mode, check if a prior TX wrote IncarnationPath.
+	// IncarnationPath is written ONLY by CreateAccount and Selfdestruct —
+	// both operations that clear all storage.  If a prior TX wrote it, the
+	// account was created or destroyed in this block and HasStorage should
+	// return false.  This mirrors the same check in versionedRead for
+	// StoragePath (versionedio.go:660-703).
+	if sdb.versionMap != nil {
+		incRes := sdb.versionMap.Read(addr, IncarnationPath, accounts.NilKey, sdb.txIndex)
+		if incRes.Status() == MVReadResultDone {
+			// Record IncarnationPath dependency for validation.
+			if sdb.versionedReads == nil {
+				sdb.versionedReads = ReadSet{}
+			}
+			sdb.versionedReads.Set(VersionedRead{
+				Address: addr,
+				Path:    IncarnationPath,
+				Key:     accounts.NilKey,
+				Source:  MapRead,
+				Version: Version{TxIndex: incRes.DepIdx(), Incarnation: incRes.Incarnation()},
+				Val:     incRes.Value(),
+			})
+			return false, nil
+		}
+	}
+
 	// Otherwise check in the DB
-	return sdb.stateReader.HasStorage(addr)
+	result, err := sdb.stateReader.HasStorage(addr)
+	return result, err
 }
 
 // Reset clears out all ephemeral state objects from the state db, but keeps
@@ -452,12 +494,9 @@ func (sdb *IntraBlockState) Exist(addr accounts.Address) (exists bool, err error
 		return false, err
 	}
 
-	destructed, _, _, err := versionedRead(sdb, addr, SelfDestructPath, accounts.NilKey, false, false, nil, nil)
-	if err != nil {
-		return false, err
-	}
-
-	return readAccount != nil && !destructed, nil
+	// Same-tx self-destruct: the account is still alive (EIP-6780).
+	// Cross-tx self-destruct: getVersionedAccount returns nil.
+	return readAccount != nil, nil
 }
 
 var emptyAccount = accounts.NewAccount()
@@ -486,15 +525,17 @@ func (sdb *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error)
 	if err != nil {
 		return false, err
 	}
-	destructed, _, _, err := versionedRead(sdb, addr, SelfDestructPath, accounts.NilKey, false, false, nil, nil)
-	if err != nil {
-		return false, err
-	}
-	if account == nil && !destructed {
+	if account == nil {
 		sdb.touchAccount(addr)
 		sdb.accountRead(addr, &emptyAccount, accountSource, accountVersion)
 	}
-	return account == nil || destructed || account.Empty(), nil
+	// Do not use SelfDestructPath here: a self-destructed account is still
+	// "alive" during the same tx (EIP-6780) and should not appear empty
+	// until end-of-tx cleanup.  Cross-tx destructs are already handled by
+	// getVersionedAccount returning nil (the versionedRead short-circuit
+	// returns default values for all paths when a previous tx destroyed the
+	// account).
+	return account == nil || account.Empty(), nil
 }
 
 // GetBalance retrieves the balance from the given address or 0 if object not found
@@ -597,6 +638,17 @@ func (sdb *IntraBlockState) getCode(addr accounts.Address, commited bool) ([]byt
 			fmt.Printf("%d (%d.%d) GetCode (%s) %x: size: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, StorageRead, addr, 0)
 		}
 		return nil, nil
+	}
+	// When commited=true (used by ResolveCode for EIP-7702 delegation),
+	// versionedRead skips local versionedWrites and may return a stale
+	// ReadSet value. If the CURRENT tx has set this account's code (e.g.,
+	// via EIP-7702 authorization processing), return the dirty code directly.
+	// We must also check hasWrite to ensure the code was set in this tx,
+	// not in a previous tx sharing the same IBS (block generator reuses IBS).
+	if commited {
+		if so, ok := sdb.stateObjects[addr]; ok && so.dirtyCode && sdb.hasWrite(addr, CodePath, accounts.NilKey) {
+			return so.code, nil
+		}
 	}
 	code, source, _, err := versionedRead(sdb, addr, CodePath, accounts.NilKey, commited, nil,
 		func(v []byte) []byte {
@@ -718,10 +770,14 @@ func (sdb *IntraBlockState) ResolveCodeHash(addr accounts.Address) (accounts.Cod
 }
 
 func (sdb *IntraBlockState) ResolveCode(addr accounts.Address) ([]byte, error) {
-	code, err := sdb.getCode(addr, true)
+	// committed=false so the tx's own writes (e.g. from EIP-7702 authorization
+	// list) are visible. With committed=true the parallel executor reads stale
+	// delegation code from the version map instead of the current tx's SetCode.
+	// CodePath exemptions in versionedRead already handle SelfDestruct cases.
+	code, err := sdb.getCode(addr, false)
 	// eip-7702
 	if delegation, ok := types.ParseDelegation(code); ok {
-		return sdb.getCode(delegation, true)
+		return sdb.getCode(delegation, false)
 	}
 	if err != nil {
 		return nil, err
@@ -1009,7 +1065,7 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readA
 		}
 	}
 
-	incarnation, isource, iversion, err := versionedRead(sdb, addr, IncarnationPath, accounts.NilKey, false, account.Nonce, nil, nil)
+	incarnation, isource, iversion, err := versionedRead(sdb, addr, IncarnationPath, accounts.NilKey, false, account.Incarnation, nil, nil)
 	if err != nil {
 		return nil, UnknownSource, UnknownVersion, err
 	}
@@ -1211,13 +1267,11 @@ func (sdb *IntraBlockState) setState(addr accounts.Address, key accounts.Storage
 		return err
 	}
 	if set {
-		storageKey := AccountKey{Path: StoragePath, Key: key}
-		if _, ok := sdb.versionedWrites[addr][storageKey]; ok {
-			if origin, ok := stateObject.GetOriginState(key); ok && value == origin {
-				sdb.versionedWrites.Delete(addr, storageKey)
-				return nil
-			}
-		}
+		// Always record the write even when the value equals the origin.
+		// Deleting the write entry when value == origin broke revert semantics:
+		// if a nested call writes a value and the outer call reverts, the journal
+		// must restore the previous write entry. With the deletion optimization,
+		// the entry was gone and the revert had nothing to restore.
 		versionWritten(sdb, addr, StoragePath, key, value)
 	}
 	return nil
@@ -1313,6 +1367,7 @@ func (sdb *IntraBlockState) Selfdestruct(addr accounts.Address) (bool, error) {
 	stateObject.createdContract = false
 	stateObject.data.Balance.Clear()
 
+	versionWritten(sdb, addr, IncarnationPath, accounts.NilKey, stateObject.data.Incarnation)
 	versionWritten(sdb, addr, SelfDestructPath, accounts.NilKey, stateObject.selfdestructed)
 	versionWritten(sdb, addr, BalancePath, accounts.NilKey, uint256.Int{})
 
@@ -1454,6 +1509,34 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 		if err != nil {
 			return nil, err
 		}
+
+		// Check if a prior tx selfdestructed this account. The AddressPath
+		// versionedRead above returned nil (SelfDestructPath early-exit), but
+		// stateReader returned a committed value from SharedDomains. Read
+		// SelfDestructPath directly from the versionMap (not via versionedRead
+		// which itself short-circuits on the same flag). Use the same pattern
+		// as CreateAccount (line 1628).
+		if res := sdb.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, sdb.txIndex); res.Status() == MVReadResultDone {
+			if destructed, ok := res.Value().(bool); ok && destructed {
+				// Only honour if the current tx hasn't already resurrected.
+				localResurrected := false
+				if vw, ok := sdb.versionedWrite(addr, SelfDestructPath, accounts.NilKey); ok {
+					if v, ok := vw.Val.(bool); ok && !v {
+						localResurrected = true
+					}
+				}
+				if !localResurrected {
+					so := stateObjectPool.Get().(*stateObject)
+					so.db = sdb
+					so.address = addr
+					so.selfdestructed = true
+					so.deleted = true
+					sdb.setStateObject(addr, so)
+					return nil, nil
+				}
+			}
+		}
+
 		code, _, _, err = versionedRead[[]byte](sdb, addr, CodePath, accounts.NilKey, false, nil, nil, nil)
 		if err != nil {
 			return nil, err
@@ -1517,6 +1600,11 @@ func (sdb *IntraBlockState) createObject(addr accounts.Address, previous *stateO
 	sdb.setStateObject(addr, newobj)
 	data := newobj.data
 	versionWritten(sdb, addr, AddressPath, accounts.NilKey, &data)
+	// Write CodeHashPath so that any stale versionedReads cache entry
+	// (e.g. from the pre-creation GetCodeHash check in EVM create()) is
+	// invalidated.  newObject normalises the zero-value CodeHash to
+	// EmptyCodeHash, so this records keccak256("") for a fresh account.
+	versionWritten(sdb, addr, CodeHashPath, accounts.NilKey, newobj.data.CodeHash)
 	return newobj
 }
 
@@ -1577,10 +1665,44 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 				return err
 			}
 
-			previous = newObject(sdb, addr, account, account)
-			previous.selfdestructed = destructed
-			source = accountSource
-			version = accountVersion
+			// Reuse the cached stateObject directly `previous` so that (a) selfdestructed=true is captured,
+			// (b) the accumulated incarnation is used for the new object's PrevIncarnation (important when the
+			// account was created and destroyed multiple times within the same block), and
+			// (c) after a REVERT CommitBlock can still emit DeleteAccount for it.
+			if !destructed {
+				if so, ok := sdb.stateObjects[addr]; ok && so.selfdestructed {
+					// Accumulated-IBS path (e.g. GenerateChain): stateObjects cache marks the
+					// account as selfdestructed but versionedRead returned false due to the
+					// so.deleted early exit.  Reuse the cached stateObject to preserve the
+					// correct selfdestructed flag and accumulated incarnation.
+					previous = so
+					source = accountSource
+					version = accountVersion
+				} else if sdb.versionMap != nil {
+					// Fresh-IBS worker path (e.g. InsertChain parallel executor): no stateObjects
+					// cache, but the versionMap may have SelfDestructPath=true from a prior tx.
+					// versionedRead returns false for SelfDestructPath via the early-exit at
+					// lines 459-462 — bypass it here so we correctly set selfdestructed=true.
+					if res := sdb.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, sdb.txIndex); res.Status() == MVReadResultDone && res.value.(bool) {
+						destructed = true
+					}
+				}
+			}
+
+			if previous == nil {
+				previous = newObject(sdb, addr, account, account)
+				previous.selfdestructed = destructed
+				source = accountSource
+				version = accountVersion
+			}
+		} else if so, ok := sdb.stateObjects[addr]; ok && so.deleted {
+			// The account was selfdestructed in an earlier transaction within the
+			// same block (accumulated IBS, e.g. GenerateChain) AND the underlying
+			// storage has no record of it (e.g. it was created within this block).
+			// getVersionedAccount returned nil; preserve the deleted stateObject as
+			// `previous` so that after a REVERT CommitBlock can still emit
+			// DeleteAccount for it.
+			previous = so
 		}
 	}
 
@@ -1594,6 +1716,27 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	}
 	if previous != nil && prevInc < previous.data.PrevIncarnation {
 		prevInc = previous.data.PrevIncarnation
+	}
+	// Read IncarnationPath directly from the versionMap to get the
+	// incarnation written by the prior CreateAccount, giving the correct prevInc.
+	if sdb.versionMap != nil && (previous == nil || previous.selfdestructed) {
+		if res := sdb.versionMap.Read(addr, IncarnationPath, accounts.NilKey, sdb.txIndex); res.Status() == MVReadResultDone {
+			if inc, ok := res.value.(uint64); ok && inc > prevInc {
+				prevInc = inc
+			}
+		}
+	}
+	// Writer.DeleteAccount stores the selfdestructed incarnation in rs.selfdestructedByTx.
+	// Recover it here so that CreateAccount in the next tx computes newInc = prevInc+1 correctly.
+	if sdb.versionMap == nil && previous == nil {
+		type deletedIncReader interface {
+			ReadDeletedIncarnation(accounts.Address) (uint64, bool)
+		}
+		if r, ok := sdb.stateReader.(deletedIncReader); ok {
+			if inc, ok2 := r.ReadDeletedIncarnation(addr); ok2 && inc > prevInc {
+				prevInc = inc
+			}
+		}
 	}
 
 	newObj := sdb.createObject(addr, previous)
@@ -1872,6 +2015,15 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 	return nil
 }
 
+func (sdb *IntraBlockState) TxIO() *VersionedIO {
+	var io VersionedIO
+	version := Version{BlockNum: sdb.blockNum, TxIndex: sdb.txIndex, Incarnation: sdb.version}
+	io.RecordReads(version, sdb.versionedReads)
+	io.RecordWrites(version, sdb.VersionedWrites(false))
+	io.RecordAccesses(version, sdb.addressAccess)
+	return &io
+}
+
 func (sdb *IntraBlockState) Print(chainRules chain.Rules, all bool) {
 	for addr, stateObject := range sdb.stateObjects {
 		_, isDirty := sdb.stateObjectsDirty[addr]
@@ -2028,15 +2180,15 @@ func (sdb *IntraBlockState) MarkAddressAccess(addr accounts.Address, revertable 
 }
 
 // AccessedAddresses returns and resets the set of addresses touched during the current transaction.
-func (sdb *IntraBlockState) AccessedAddresses() map[accounts.Address]struct{} {
+func (sdb *IntraBlockState) AccessedAddresses() AccessSet {
 	if len(sdb.addressAccess) == 0 {
 		sdb.recordAccess = false
 		sdb.addressAccess = nil
 		return nil
 	}
-	out := make(map[accounts.Address]struct{}, len(sdb.addressAccess))
+	out := make(AccessSet, len(sdb.addressAccess))
 	for addr := range sdb.addressAccess {
-		out[addr] = struct{}{}
+		out[addr] = nil
 	}
 	sdb.recordAccess = false
 	sdb.addressAccess = nil
@@ -2139,6 +2291,8 @@ func (sdb *IntraBlockState) ResetVersionedIO() {
 	sdb.versionedReads = nil
 	sdb.versionedWrites = nil
 	sdb.dep = UnknownDep
+	sdb.recordAccess = false
+	sdb.addressAccess = nil
 }
 
 // VersionedWrites returns the current versioned write set if this block
@@ -2178,11 +2332,17 @@ func (sdb *IntraBlockState) VersionedWrites(checkDirty bool) VersionedWrites {
 					for _, prev := range prevs {
 						if prev.Path == BalancePath && prev.Val.(uint256.Int) == (uint256.Int{}) {
 							appends = append(appends, prev)
+						} else if prev.Path == IncarnationPath {
+							// Preserve incarnation so resurrection txs can find the prior incarnation
+							appends = append(appends, prev)
 						}
 					}
 				} else {
 					if selfDestructed {
 						if v.Path == BalancePath && v.Val.(uint256.Int) == (uint256.Int{}) {
+							appends = append(appends, v)
+						} else if v.Path == IncarnationPath {
+							// Preserve incarnation so resurrection txs can find the prior incarnation
 							appends = append(appends, v)
 						}
 					} else {
@@ -2230,13 +2390,33 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 				if err := sdb.SetIncarnation(addr, incarnation); err != nil {
 					return err
 				}
+				// Re-emit the IncarnationPath write into versionedWrites so that the
+				// finalize IBS's writes are correctly flushed to the global versionMap.
+				versionWritten(sdb, addr, IncarnationPath, accounts.NilKey, incarnation)
 			case CodePath:
 				code := val.([]byte)
-				if err := sdb.SetCode(addr, code); err != nil {
+				stateObject, err := sdb.GetOrNewStateObject(addr)
+				if err != nil {
 					return err
 				}
+				codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
+				// Force-set code bypassing stateObject.SetCode's equality check.
+				// The finalize IBS uses a VersionedStateReader whose ReadSet may
+				// contain the post-write code value (when the worker read the code
+				// after a SetCodeTx modified it), causing SetCode's bytes.Equal
+				// comparison to incorrectly skip the update and leave dirtyCode unset.
+				sdb.journal.append(codeChange{
+					account:     addr,
+					prevhash:    stateObject.data.CodeHash,
+					prevcode:    stateObject.code,
+					wasCommited: !sdb.hasWrite(addr, CodePath, accounts.NilKey),
+				})
+				stateObject.setCode(codeHash, code)
+				versionWritten(sdb, addr, CodePath, accounts.NilKey, code)
+				versionWritten(sdb, addr, CodeHashPath, accounts.NilKey, codeHash)
+				versionWritten(sdb, addr, CodeSizePath, accounts.NilKey, len(code))
 			case CodeHashPath, CodeSizePath:
-				// set by SetCode
+				// set by CodePath case above
 			case SelfDestructPath:
 				deleted := val.(bool)
 				if deleted {
@@ -2253,6 +2433,23 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 					if _, err := sdb.Selfdestruct(addr); err != nil {
 						return err
 					}
+				} else {
+					// SelfDestructPath=false indicates account resurrection in this block.
+					// The worker IBS set createdContract=true (ensuring CreateContract is called
+					// during commit to clear old storage), but that flag is not a versioned write
+					// path and is lost in the finalize IBS.
+					so, err := sdb.GetOrNewStateObject(addr)
+					if err != nil {
+						return err
+					}
+					if so != nil {
+						so.selfdestructed = false
+						so.createdContract = true
+					}
+					// Re-emit SelfDestructPath=false so the global versionMap reflects the
+					// resurrection; subsequent workers reading SelfDestructPath will see the
+					// updated value and not mistake the account for still being selfdestructed.
+					versionWritten(sdb, addr, SelfDestructPath, accounts.NilKey, false)
 				}
 			default:
 				return fmt.Errorf("unknown key type: %d", path)

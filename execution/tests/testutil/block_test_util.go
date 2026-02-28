@@ -23,13 +23,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
+	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -58,7 +58,7 @@ type BlockTest struct {
 
 // UnmarshalJSON implements json.Unmarshaler interface.
 func (bt *BlockTest) UnmarshalJSON(in []byte) error {
-	return json.Unmarshal(in, &bt.json)
+	return jsoniter.ConfigFastest.Unmarshal(in, &bt.json)
 }
 
 type btJSON struct {
@@ -176,7 +176,7 @@ type btHeader struct {
 	Coinbase              common.Address
 	MixHash               common.Hash
 	Nonce                 types.BlockNonce
-	Number                *big.Int
+	Number                *uint256.Int
 	Hash                  common.Hash
 	ParentHash            common.Hash
 	ReceiptTrie           common.Hash
@@ -184,11 +184,11 @@ type btHeader struct {
 	TransactionsTrie      common.Hash
 	UncleHash             common.Hash
 	ExtraData             []byte
-	Difficulty            *big.Int
+	Difficulty            *uint256.Int
 	GasLimit              uint64
 	GasUsed               uint64
 	Timestamp             uint64
-	BaseFeePerGas         *big.Int
+	BaseFeePerGas         *uint256.Int
 	WithdrawalsRoot       *common.Hash
 	BlobGasUsed           *uint64
 	ExcessBlobGas         *uint64
@@ -217,11 +217,14 @@ func (bt *BlockTest) Run(t *testing.T) error {
 		return testforks.UnsupportedForkError{Name: bt.json.Network}
 	}
 	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
-	var mOpts []execmoduletester.Option
+	mOpts := []execmoduletester.Option{
+		execmoduletester.WithGenesisSpec(bt.genesis(config)),
+		execmoduletester.WithEngine(engine),
+	}
 	if bt.ExperimentalBAL {
 		mOpts = append(mOpts, execmoduletester.WithExperimentalBAL())
 	}
-	m := execmoduletester.NewWithGenesisEngine(t, bt.genesis(config), engine, mOpts...)
+	m := execmoduletester.New(t, mOpts...)
 
 	bt.br = m.BlockReader
 	// import pre accounts & construct test genesis block & state root
@@ -262,7 +265,7 @@ func (bt *BlockTest) RunCLI() error {
 		return testforks.UnsupportedForkError{Name: bt.json.Network}
 	}
 	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
-	m := execmoduletester.NewWithGenesisEngine(nil, bt.genesis(config), engine)
+	m := execmoduletester.New(nil, execmoduletester.WithGenesisSpec(bt.genesis(config)), execmoduletester.WithEngine(engine))
 	defer m.DB.Close()
 
 	bt.br = m.BlockReader
@@ -406,14 +409,6 @@ func equalPtr[T comparable](a, b *T) bool {
 	return b != nil && *a == *b
 }
 
-// equalPtrBigInt reports whether two optional *big.Int pointers point to equal values.
-func equalPtrBigInt(a, b *big.Int) bool {
-	if a == nil {
-		return b == nil
-	}
-	return b != nil && a.Cmp(b) == 0
-}
-
 func validateHeader(h *btHeader, h2 *types.Header) error {
 	if h == nil {
 		return errors.New("validateHeader: h == nil")
@@ -433,8 +428,8 @@ func validateHeader(h *btHeader, h2 *types.Header) error {
 	if h.Nonce != h2.Nonce {
 		return fmt.Errorf("nonce: want: %x have: %x", h.Nonce, h2.Nonce)
 	}
-	if h.Number.Cmp(h2.Number) != 0 {
-		return fmt.Errorf("number: want: %v have: %v", h.Number, h2.Number)
+	if !h.Number.Eq(&h2.Number) {
+		return fmt.Errorf("number: want: %s have: %s", h.Number, &h2.Number)
 	}
 	if h.ParentHash != h2.ParentHash {
 		return fmt.Errorf("parent hash: want: %x have: %x", h.ParentHash, h2.ParentHash)
@@ -454,7 +449,7 @@ func validateHeader(h *btHeader, h2 *types.Header) error {
 	if !bytes.Equal(h.ExtraData, h2.Extra) {
 		return fmt.Errorf("extra data: want: %x have: %x", h.ExtraData, h2.Extra)
 	}
-	if h.Difficulty.Cmp(h2.Difficulty) != 0 {
+	if !h.Difficulty.Eq(&h2.Difficulty) {
 		return fmt.Errorf("difficulty: want: %v have: %v", h.Difficulty, h2.Difficulty)
 	}
 	if h.GasLimit != h2.GasLimit {
@@ -466,7 +461,7 @@ func validateHeader(h *btHeader, h2 *types.Header) error {
 	if h.Timestamp != h2.Time {
 		return fmt.Errorf("timestamp: want: %v have: %v", h.Timestamp, h2.Time)
 	}
-	if !equalPtrBigInt(h.BaseFeePerGas, h2.BaseFee) {
+	if !equalPtr(h.BaseFeePerGas, h2.BaseFee) {
 		return fmt.Errorf("baseFeePerGas: want: %v have: %v", h.BaseFeePerGas, h2.BaseFee)
 	}
 	if !equalPtr(h.WithdrawalsRoot, h2.WithdrawalsHash) {

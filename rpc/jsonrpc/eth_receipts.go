@@ -194,6 +194,10 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		return nil, fmt.Errorf("node is still initializing")
 	}
 
+	if err = api.BaseAPI.checkReceiptsAvailable(ctx, tx, begin); err != nil {
+		return nil, err
+	}
+
 	erigonLogs, err := api.getLogsV3(ctx, tx, begin, end, crit, api.BaseAPI.rangeLimit)
 	if err != nil {
 		return nil, err
@@ -246,9 +250,6 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 	if begin > 0 {
 		fromTxNum, err = txNumsReader.Min(context.Background(), tx, begin)
 		if err != nil {
-			return out, err
-		}
-		if err := assertReceiptsAvailable(context.Background(), txNumsReader, begin, fromTxNum, tx); err != nil {
 			return out, err
 		}
 	}
@@ -503,7 +504,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, nil
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkReceiptsAvailable(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -614,7 +615,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkReceiptsAvailable(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}

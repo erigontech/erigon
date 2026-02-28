@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"math/big"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -226,7 +225,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			blockCtx.Coinbase = accounts.InternAddress(*bundle.BlockOverride.Coinbase)
 		}
 		if bundle.BlockOverride.Difficulty != nil {
-			blockCtx.Difficulty = new(big.Int).SetUint64(uint64(*bundle.BlockOverride.Difficulty))
+			blockCtx.Difficulty.SetUint64(uint64(*bundle.BlockOverride.Difficulty))
 		}
 		if bundle.BlockOverride.Timestamp != nil {
 			blockCtx.Time = uint64(*bundle.BlockOverride.Timestamp)

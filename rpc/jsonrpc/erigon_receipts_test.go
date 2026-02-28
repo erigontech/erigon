@@ -71,6 +71,9 @@ func TestGetLogs(t *testing.T) {
 }
 
 func TestErigonGetLatestLogs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	assert := assert.New(t)
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	db := m.DB
@@ -237,10 +240,14 @@ func TestGetBlockReceiptsByBlockHash(t *testing.T) {
 // newTestBackend creates a chain with a number of explicitly defined blocks and
 // wraps it into a mock backend.
 func mockWithGenerator(t *testing.T, blocks int, generator func(int, *blockgen.BlockGen)) *execmoduletester.ExecModuleTester {
-	m := execmoduletester.NewWithGenesis(t, &types.Genesis{
-		Config: chain.TestChainConfig,
-		Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
-	}, testKey)
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.TestChainConfig,
+			Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
+		}),
+		execmoduletester.WithKey(testKey),
+	)
 	if blocks > 0 {
 		chain, _ := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, blocks, generator)
 		err := m.InsertChain(chain)

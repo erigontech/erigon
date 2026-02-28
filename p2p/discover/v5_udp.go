@@ -459,7 +459,7 @@ func (t *UDPv5) waitForNodes(c *callV5, distances []uint) ([]*enode.Node, error)
 			for _, record := range response.Nodes {
 				node, err := t.verifyResponseNode(c, record, distances, seen)
 				if err != nil {
-					t.log.Debug("Invalid record in "+response.Name(), "id", c.node.ID(), "err", err)
+					t.log.Debug("[p2p] Invalid record in "+response.Name(), "id", c.node.ID(), "err", err)
 					continue
 				}
 				nodes = append(nodes, node)
@@ -695,12 +695,12 @@ func (t *UDPv5) send(toID enode.ID, toAddr netip.AddrPort, packet v5wire.Packet,
 	enc, nonce, err := t.codec.Encode(toID, addr, packet, c)
 	if err != nil {
 		t.logcontext = append(t.logcontext, "err", err)
-		t.log.Warn(">> "+packet.Name(), t.logcontext...)
+		t.log.Warn("[p2p] >> "+packet.Name(), t.logcontext...)
 		return nonce, err
 	}
 
 	_, err = t.conn.WriteToUDPAddrPort(enc, toAddr)
-	t.log.Trace(">> "+packet.Name(), t.logcontext...)
+	t.log.Trace("[p2p] >> "+packet.Name(), t.logcontext...)
 	return nonce, err
 }
 
@@ -713,12 +713,12 @@ func (t *UDPv5) readLoop() {
 		nbytes, from, err := t.conn.ReadFromUDPAddrPort(buf)
 		if netutil.IsTemporaryError(err) {
 			// Ignore temporary read errors.
-			t.log.Debug("Temporary UDP read error", "err", err)
+			t.log.Debug("[p2p] Temporary UDP read error", "err", err)
 			continue
 		} else if err != nil {
 			// Shut down the loop for permanent errors.
 			if !errors.Is(err, io.EOF) {
-				t.log.Debug("UDP read error", "err", err)
+				t.log.Debug("[p2p] UDP read error", "err", err)
 			}
 			return
 		}
@@ -753,7 +753,7 @@ func (t *UDPv5) handlePacket(rawpacket []byte, fromAddr netip.AddrPort) error {
 			t.unhandled <- up
 			return nil
 		}
-		t.log.Debug("Bad discv5 packet", "id", fromID, "addr", addr, "err", err)
+		t.log.Trace("[p2p] Bad discv5 packet", "id", fromID, "addr", addr, "err", err)
 		return err
 	}
 	if fromNode != nil {
@@ -764,7 +764,7 @@ func (t *UDPv5) handlePacket(rawpacket []byte, fromAddr netip.AddrPort) error {
 		// WHOAREYOU logged separately to report errors.
 		t.logcontext = append(t.logcontext[:0], "id", fromID, "addr", addr)
 		t.logcontext = packet.AppendLogInfo(t.logcontext)
-		t.log.Trace("<< "+packet.Name(), t.logcontext...)
+		t.log.Trace("[p2p] << "+packet.Name(), t.logcontext...)
 	}
 	t.handle(packet, fromID, fromAddr)
 	return nil
@@ -774,15 +774,15 @@ func (t *UDPv5) handlePacket(rawpacket []byte, fromAddr netip.AddrPort) error {
 func (t *UDPv5) handleCallResponse(fromID enode.ID, fromAddr netip.AddrPort, p v5wire.Packet) bool {
 	ac := t.activeCallByNode[fromID]
 	if ac == nil || !bytes.Equal(p.RequestID(), ac.reqid) {
-		t.log.Debug(fmt.Sprintf("Unsolicited/late %s response", p.Name()), "id", fromID, "addr", fromAddr)
+		t.log.Debug(fmt.Sprintf("[p2p] Unsolicited/late %s response", p.Name()), "id", fromID, "addr", fromAddr)
 		return false
 	}
 	if fromAddr != ac.addr {
-		t.log.Debug(fmt.Sprintf("%s from wrong endpoint", p.Name()), "id", fromID, "addr", fromAddr)
+		t.log.Debug(fmt.Sprintf("[p2p] %s from wrong endpoint", p.Name()), "id", fromID, "addr", fromAddr)
 		return false
 	}
 	if p.Kind() != ac.responseType {
-		t.log.Debug(fmt.Sprintf("Wrong discv5 response type %s", p.Name()), "id", fromID, "addr", fromAddr)
+		t.log.Debug(fmt.Sprintf("[p2p] Wrong discv5 response type %s", p.Name()), "id", fromID, "addr", fromAddr)
 		return false
 	}
 	t.startResponseTimeout(ac)
@@ -840,7 +840,7 @@ func (t *UDPv5) handleUnknown(p *v5wire.Unknown, fromID enode.ID, fromAddr netip
 		// them which handshake attempt they need to complete. We tell them to use the
 		// existing handshake attempt since the response to that one might still be in
 		// transit.
-		t.log.Debug("Repeating discv5 handshake challenge", "id", fromID, "addr", fromAddr)
+		t.log.Debug("[p2p] Repeating discv5 handshake challenge", "id", fromID, "addr", fromAddr)
 		t.sendResponse(fromID, fromAddr, currentChallenge)
 		return
 	}
@@ -864,18 +864,18 @@ var (
 func (t *UDPv5) handleWhoareyou(p *v5wire.Whoareyou, fromID enode.ID, fromAddr netip.AddrPort) {
 	c, err := t.matchWithCall(fromID, p.Nonce)
 	if err != nil {
-		t.log.Debug("Invalid "+p.Name(), "addr", fromAddr, "err", err)
+		t.log.Trace("[p2p] Invalid "+p.Name(), "addr", fromAddr, "err", err)
 		return
 	}
 
 	if c.node == nil {
 		// Can't perform handshake because we don't have the ENR.
-		t.log.Debug("Can't handle "+p.Name(), "addr", fromAddr, "err", "call has no ENR")
+		t.log.Debug("[p2p] Can't handle "+p.Name(), "addr", fromAddr, "err", "call has no ENR")
 		c.err <- errors.New("remote wants handshake, but call has no ENR")
 		return
 	}
 	// Resend the call that was answered by WHOAREYOU.
-	t.log.Trace("<< "+p.Name(), "id", c.node.ID(), "addr", fromAddr)
+	t.log.Trace("[p2p] << "+p.Name(), "id", c.node.ID(), "addr", fromAddr)
 	c.handshakeCount++
 	c.challenge = p
 	p.Node = c.node

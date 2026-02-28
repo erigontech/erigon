@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package state
+package btindex
 
 import (
 	"bytes"
@@ -141,9 +141,8 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 
 func Test_BtreeIndex_Build(t *testing.T) {
 	if testing.Short() {
-		t.Skip()
+		t.Skip("slow test")
 	}
-
 	t.Parallel()
 
 	tmp := t.TempDir()
@@ -276,6 +275,7 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 			require.Equalf(t, cur.Value(), curS.Value(), "i=%d", i)
 			require.Equal(t, cur.d, curS.d)
 			require.Equal(t, cur.getter, curS.getter)
+			curS.Close()
 		}
 	})
 
@@ -283,6 +283,7 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 		cur, err := bt.Seek(getter, keys[i])
 		require.NoError(t, err)
 		require.Equal(t, keys[i], cur.Key())
+		cur.Close()
 	}
 }
 
@@ -343,6 +344,7 @@ func TestBpsTree_Seek(t *testing.T) {
 		//k, _, err := it.KVFromGetter(g)
 		//require.NoError(t, err)
 		require.Equal(t, keys[i], c.Key())
+		c.Close()
 	}
 }
 

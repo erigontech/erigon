@@ -21,6 +21,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -56,7 +57,7 @@ func TestEmptyBlock(t *testing.T) {
 	auraDB := memdb.NewTestDB(t, dbcfg.ChainDB)
 	engine, err := aura.NewAuRa(chainConfig.Aura, auraDB)
 	require.NoError(err)
-	m := execmoduletester.NewWithGenesisEngine(t, genesis, engine)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithEngine(engine))
 
 	time := uint64(1539016985)
 	header := builder.MakeEmptyHeader(genesisBlock.Header(), chainConfig, time, nil)
@@ -94,9 +95,9 @@ func TestAuRaSkipGasLimit(t *testing.T) {
 	auraDB := memdb.NewTestDB(t, dbcfg.ChainDB)
 	engine, err := aura.NewAuRa(chainConfig.Aura, auraDB)
 	require.NoError(err)
-	m := execmoduletester.NewWithGenesisEngine(t, genesis, engine)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithEngine(engine))
 
-	difficlty, _ := new(big.Int).SetString("340282366920938463463374607431768211454", 10)
+	difficulty := uint256.MustFromDecimal("340282366920938463463374607431768211454")
 	//Populate a sample valid header for a Pre-merge block
 	// - actually sampled from 5000th block in chiado
 	validPreMergeHeader := &types.Header{
@@ -107,8 +108,8 @@ func TestAuRaSkipGasLimit(t *testing.T) {
 		TxHash:      common.HexToHash("0x0"),
 		ReceiptHash: common.HexToHash("0x0"),
 		Bloom:       types.BytesToBloom(nil),
-		Difficulty:  difficlty,
-		Number:      big.NewInt(5000),
+		Difficulty:  *difficulty,
+		Number:      *uint256.NewInt(5000),
 		GasLimit:    12500000,
 		GasUsed:     0,
 		Time:        1664049551,
@@ -132,6 +133,6 @@ func TestAuRaSkipGasLimit(t *testing.T) {
 	require.Error(m.Engine.Initialize(chainConfig, &blockgen.FakeChainReader{}, invalidPreMergeHeader, nil, syscallCustom, nil, nil))
 
 	invalidPostMergeHeader := invalidPreMergeHeader
-	invalidPostMergeHeader.Difficulty = big.NewInt(0) //zero difficulty detected as PoS
+	invalidPostMergeHeader.Difficulty.Clear() //zero difficulty detected as PoS
 	require.NoError(m.Engine.Initialize(chainConfig, &blockgen.FakeChainReader{}, invalidPostMergeHeader, nil, syscallCustom, nil, nil))
 }

@@ -50,9 +50,6 @@ import (
 )
 
 func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping test in short mode")
-	}
 	// See https://github.com/erigontech/erigon/issues/18823
 	ctx := t.Context()
 	privKey, err := crypto.GenerateKey()
@@ -66,7 +63,12 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 		},
 	}
 	stepSize := uint64(5) // 2 for block 0 (0,1) and 3 for block 1 (2,3,4)
-	m := execmoduletester.NewWithGenesis(t, genesis, privKey, execmoduletester.WithStepSize(stepSize))
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(genesis),
+		execmoduletester.WithKey(privKey),
+		execmoduletester.WithStepSize(stepSize),
+	)
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(0, senderAddr, uint256.NewInt(0), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
@@ -108,9 +110,6 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 }
 
 func TestValidateChainAndUpdateForkChoiceWithSideForksThatGoBackAndForwardInHeight(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping test in short mode")
-	}
 	// This was caught by some of the gas-benchmark tests which run a series of new payloads and FCUs
 	// for forks with different lengths, and they jump from one fork to another.
 	// The issue was that we were not calling TruncateCanonicalHash for heights after the new FCU head number.
@@ -135,7 +134,7 @@ func TestValidateChainAndUpdateForkChoiceWithSideForksThatGoBackAndForwardInHeig
 			senderAddr2: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.NewWithGenesis(t, genesis, privKey)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
 	longerFork, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
@@ -203,12 +202,9 @@ func addTwoTxnsToPool(ctx context.Context, startingNonce uint64, t *testing.T, m
 }
 
 func TestAssembleBlock(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping test in short mode")
-	}
 	t.Parallel()
 	ctx := t.Context()
-	m := execmoduletester.NewWithTxPoolAllProtocolChanges(t)
+	m := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
 	exec := m.ExecModule
 	txpool := m.TxPoolGrpcServer
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
@@ -246,11 +242,11 @@ func TestAssembleBlock(t *testing.T) {
 
 func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping test in short mode")
+		t.Skip("slow test")
 	}
 	t.Parallel()
 	ctx := t.Context()
-	m := execmoduletester.NewWithTxPoolAllProtocolChanges(t)
+	m := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
 	exec := m.ExecModule
 	txpool := m.TxPoolGrpcServer
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {

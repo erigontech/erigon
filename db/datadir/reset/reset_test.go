@@ -1,5 +1,3 @@
-//go:build go1.25
-
 package reset
 
 import (
@@ -12,16 +10,16 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strings"
 	"syscall"
 	"testing"
 
 	g "github.com/anacrolix/generics"
+	"github.com/go-quicktest/qt"
+
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/preverified"
-	"github.com/go-quicktest/qt"
 )
 
 func haveDir(name string) fsChecker {
@@ -191,18 +189,11 @@ func (me fsEntry) readData(fsys fs.FS) (data string, err error) {
 }
 
 func withOsRoot(t *testing.T, with func(root *os.Root)) {
-	dir, err := os.MkdirTemp("", strings.ReplaceAll(t.Name(), "/", "_"))
-	if err != nil {
-		t.Fatalf("cannot create temporary directory: %v", err)
-	}
+	dir := t.TempDir()
 	osRoot, err := os.OpenRoot(dir)
 	qt.Assert(t, qt.IsNil(err))
+	defer osRoot.Close()
 	t.Log("rootfs is at", osRoot.Name())
-	defer func() {
-		if !t.Failed() {
-			osRoot.RemoveAll(".")
-		}
-	}()
 	defer func() {
 		if t.Failed() {
 			t.Log("fs state at failure")
@@ -411,6 +402,7 @@ func makeTestingReset(
 		var err error
 		removeRoot, err = osRoot.OpenRoot(jailPath)
 		qt.Assert(t, qt.IsNil(err))
+		t.Cleanup(func() { removeRoot.Close() })
 		osRootPath = osRootPath.Join(OsFilePath(jailPath))
 	}
 

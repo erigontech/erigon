@@ -18,10 +18,8 @@ package transactions
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"maps"
-	"math/big"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -48,7 +46,7 @@ type BlockOverrides struct {
 	Coinbase    *common.Address         `json:"feeRecipient"`
 	Timestamp   *hexutil.Uint64         `json:"time"`
 	GasLimit    *hexutil.Uint           `json:"gasLimit"`
-	Difficulty  *hexutil.Uint           `json:"difficulty"`
+	Difficulty  *hexutil.Uint64         `json:"difficulty"`
 	BaseFee     *uint256.Int            `json:"baseFeePerGas"`
 	BlobBaseFee *hexutil.Big            `json:"blobBaseFee"`
 	BlockHash   *map[uint64]common.Hash `json:"blockHash"`
@@ -62,10 +60,10 @@ type BlockHashOverrides map[uint64]common.Hash
 func (o *BlockOverrides) OverrideHeader(header *types.Header) *types.Header {
 	h := types.CopyHeader(header)
 	if o.BlockNumber != nil {
-		h.Number = new(big.Int).SetUint64(uint64(*o.BlockNumber))
+		h.Number.SetUint64(uint64(*o.BlockNumber))
 	}
 	if o.Difficulty != nil {
-		h.Difficulty = new(big.Int).SetUint64(uint64(*o.Difficulty))
+		h.Difficulty.SetUint64(uint64(*o.Difficulty))
 	}
 	if o.Timestamp != nil {
 		h.Time = o.Timestamp.Uint64()
@@ -77,7 +75,7 @@ func (o *BlockOverrides) OverrideHeader(header *types.Header) *types.Header {
 		h.Coinbase = *o.Coinbase
 	}
 	if o.BaseFee != nil {
-		h.BaseFee = o.BaseFee.ToBig()
+		h.BaseFee = o.BaseFee
 	}
 	if o.PrevRandao != nil {
 		h.MixDigest = *o.PrevRandao
@@ -96,7 +94,7 @@ func (o *BlockOverrides) OverrideBlockContext(blockCtx *evmtypes.BlockContext, o
 		blockCtx.Coinbase = accounts.InternAddress(*o.Coinbase)
 	}
 	if o.Difficulty != nil {
-		blockCtx.Difficulty = new(big.Int).SetUint64(uint64(*o.Difficulty))
+		blockCtx.Difficulty = *uint256.NewInt(uint64(*o.Difficulty))
 	}
 	if o.Timestamp != nil {
 		blockCtx.Time = uint64(*o.Timestamp)
@@ -148,15 +146,7 @@ func DoCall(
 	defer cancel()
 
 	// Get a new instance of the EVM.
-	var baseFee *uint256.Int
-	if header != nil && header.BaseFee != nil {
-		var overflow bool
-		baseFee, overflow = uint256.FromBig(header.BaseFee)
-		if overflow {
-			return nil, fmt.Errorf("header.BaseFee uint256 overflow")
-		}
-	}
-	msg, err := args.ToMessage(gasCap, baseFee)
+	msg, err := args.ToMessage(gasCap, header.BaseFee)
 	if err != nil {
 		return nil, err
 	}
@@ -320,14 +310,7 @@ func NewReusableCaller(
 
 	ibs := state.New(stateReader)
 
-	var baseFee *uint256.Int
-	if header != nil && header.BaseFee != nil {
-		var overflow bool
-		baseFee, overflow = uint256.FromBig(header.BaseFee)
-		if overflow {
-			return nil, errors.New("header.BaseFee uint256 overflow")
-		}
-	}
+	baseFee := header.BaseFee
 
 	msg, err := initialArgs.ToMessage(gasCap, baseFee)
 	if err != nil {

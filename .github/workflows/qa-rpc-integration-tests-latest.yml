@@ -56,6 +56,7 @@ jobs:
         working-directory: ${{ github.workspace }}
 
       - name: Wait for current Erigon instance to reach the tip
+        id: preparing_step
         run: |
           ERIGON_PID=$(pgrep -x erigon | head -1)
           if [ -z "$ERIGON_PID" ]; then
@@ -67,6 +68,14 @@ jobs:
               --stop-erigon=False \
               --erigon-pid=$ERIGON_PID
           fi
+
+      - name: Upload preparing-step logs on failure
+        if: failure() && steps.preparing_step.outcome == 'failure'
+        uses: actions/upload-artifact@v6
+        with:
+          name: preparing-step-logs
+          path: ${{ env.ERIGON_REFERENCE_DATA_DIR }}/logs/
+
       - name: Pause the Erigon instance dedicated to db maintenance
         run: |
           python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
@@ -107,9 +116,6 @@ jobs:
           # Capture monitoring script exit status
           test_exit_status=$?
           
-          # Save the subsection reached status
-          echo "test_executed=true" >> $GITHUB_OUTPUT
-          
           # Check test runner script exit status
           if [ $test_exit_status -eq 0 ]; then
              echo "Tip-chasing completed successfully"
@@ -119,6 +125,13 @@ jobs:
              echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
              exit 1
           fi
+
+      - name: Upload pre-test logs on failure
+        if: failure() && steps.pre_test_step.outcome == 'failure'
+        uses: actions/upload-artifact@v6
+        with:
+          name: pre-test-logs
+          path: ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/
 
       - name: Run RPC Integration Tests
         id: test_step
@@ -210,7 +223,7 @@ jobs:
             db_version="no-version"
           fi
           
-          python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py --repo erigon --commit $(git rev-parse HEAD) --branch ${{ github.ref_name }} --test_name rpc-integration-tests --chain $CHAIN --runner ${{ runner.name }} --db_version $db_version --outcome $TEST_RESULT #--result_file ${{ github.workspace }}/result-$CHAIN.json
+          python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py --repo erigon --commit $(git rev-parse HEAD) --branch ${{ github.ref_name }} --test_name rpc-integration-tests-latest --chain $CHAIN --runner ${{ runner.name }} --db_version $db_version --outcome $TEST_RESULT #--result_file ${{ github.workspace }}/result-$CHAIN.json
 
       - name: Delete Erigon Testbed Data Directory
         if: always() && steps.save_datadir_step.outputs.datadir_saved == 'true'

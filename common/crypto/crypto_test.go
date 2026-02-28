@@ -22,17 +22,17 @@ package crypto
 import (
 	"bytes"
 	"crypto/ecdsa"
+	"crypto/sha3"
 	"encoding/hex"
 	"errors"
+	"hash"
 	"os"
 	"reflect"
 	"testing"
 
 	"github.com/holiman/uint256"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/u256"
 )
@@ -60,7 +60,7 @@ func TestKeccak256Hasher(t *testing.T) {
 func TestKeccak256HasherNew(t *testing.T) {
 	msg := []byte("abc")
 	exp, _ := hex.DecodeString("3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532")
-	hasher := sha3.New256()
+	hasher := hash.Hash(sha3.New256())
 	hasher.Write(msg)
 	var h common.Hash
 	if !bytes.Equal(exp, hasher.Sum(h[:0])) {
@@ -221,8 +221,9 @@ func TestLoadECDSA(t *testing.T) {
 		},
 	}
 
+	tempdir := t.TempDir()
 	for _, test := range tests {
-		f, err := os.CreateTemp("", "loadecdsa_test.*.txt")
+		f, err := os.CreateTemp(tempdir, "loadecdsa_test.*.txt")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -243,13 +244,12 @@ func TestLoadECDSA(t *testing.T) {
 }
 
 func TestSaveECDSA(t *testing.T) {
-	f, err := os.CreateTemp("", "saveecdsa_test.*.txt")
+	f, err := os.CreateTemp(t.TempDir(), "saveecdsa_test.*.txt")
 	if err != nil {
 		t.Fatal(err)
 	}
 	file := f.Name()
 	f.Close()
-	defer dir.RemoveFile(file)
 
 	key, _ := HexToECDSA(testPrivHex)
 	if e := SaveECDSA(file, key); e != nil {

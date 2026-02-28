@@ -18,9 +18,9 @@ package jsonrpc
 
 import (
 	"context"
-	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -80,7 +80,7 @@ func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
 }
 
 func TestGetBlockByNumberWithPendingTag(t *testing.T) {
-	m := execmoduletester.NewWithTxPool(t)
+	m := execmoduletester.New(t, execmoduletester.WithTxPool())
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
@@ -89,7 +89,7 @@ func TestGetBlockByNumberWithPendingTag(t *testing.T) {
 
 	expected := 1
 	header := &types.Header{
-		Number: big.NewInt(int64(expected)),
+		Number: *uint256.NewInt(uint64(expected)),
 	}
 
 	rlpBlock, err := rlp.EncodeToBytes(types.NewBlockWithHeader(header))
@@ -105,7 +105,8 @@ func TestGetBlockByNumberWithPendingTag(t *testing.T) {
 	if err != nil {
 		t.Errorf("error getting block number with pending tag: %s", err)
 	}
-	assert.Equal(t, (*hexutil.Big)(big.NewInt(int64(expected))), b["number"])
+	expectedNum := (*hexutil.Big)(uint256.NewInt(uint64(expected)).ToBig())
+	assert.Equal(t, expectedNum, b["number"])
 }
 
 func TestGetBlockByNumber_WithFinalizedTag_NoFinalizedBlockInDb(t *testing.T) {

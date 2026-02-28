@@ -22,6 +22,8 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/chain"
@@ -44,7 +46,7 @@ func TestSideChainInsert(t *testing.T) {
 			address: {Balance: funds},
 		},
 	}
-	m := execmoduletester.NewWithGenesis(t, gspec, key)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 	db := m.DB
 	genesis := m.Genesis
 	tx, err := db.BeginRw(context.Background())
@@ -114,16 +116,16 @@ func TestSideChainInsert(t *testing.T) {
 	}
 }
 
-func createTestChain(length int64, parent common.Hash, diff int64, extra []byte) []*types.Header {
+func createTestChain(length uint64, parent common.Hash, diff uint64, extra []byte) []*types.Header {
 	var (
-		i       int64
+		i       uint64
 		headers []*types.Header
 	)
 
 	for i = 0; i < length; i++ {
 		h := &types.Header{
-			Number:     big.NewInt(i + 1),
-			Difficulty: big.NewInt(diff),
+			Number:     *uint256.NewInt(i + 1),
+			Difficulty: *uint256.NewInt(diff),
 			ParentHash: parent,
 			Extra:      extra,
 		}

@@ -46,10 +46,7 @@ func oneBlockStep(m *execmoduletester.ExecModuleTester, require *require.Asserti
 }
 
 func TestSendRawTransaction(t *testing.T) {
-	if testing.Short() {
-		t.Skip("too slow for testing.Short")
-	}
-	m := execmoduletester.NewWithTxPool(t)
+	m := execmoduletester.New(t, execmoduletester.WithTxPool())
 	require := require.New(t)
 	oneBlockStep(m, require)
 	expectedValue := uint64(1234)
@@ -88,10 +85,7 @@ func TestSendRawTransaction(t *testing.T) {
 }
 
 func TestSendRawTransactionUnprotected(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-	m := execmoduletester.NewWithTxPool(t)
+	m := execmoduletester.New(t, execmoduletester.WithTxPool())
 	require := require.New(t)
 	oneBlockStep(m, require)
 	expectedTxValue := uint64(4444)
