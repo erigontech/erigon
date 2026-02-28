@@ -129,7 +129,7 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 	} else {
 		var err error
 
-		if c.sortAndFlushInBackground {
+		if c.sortAndFlushInBackground && inProgress.Load() < 4 {
 			fullBuf := c.buf // can't `.Reset()` because this `buf` will move to another goroutine
 			if c.allocator != nil {
 				c.buf = c.allocator.Get()
