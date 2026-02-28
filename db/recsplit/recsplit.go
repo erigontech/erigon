@@ -90,7 +90,7 @@ type recsplitScratch struct {
 	numBuf             [8]byte
 	trace              bool     // Enable tracing output
 	startSeed          []uint64 // Hash seeds for each level of recursive split
-	golombRice         []uint32 // Pre-computed Golomb-Rice parameters
+	golombRice         []uint32 // Lazily filled by golombParam(); mutable and NOT thread-safe — each worker must own its own recsplitScratch
 	leafSize           uint16
 	primaryAggrBound   uint16
 	secondaryAggrBound uint16
@@ -131,7 +131,6 @@ type RecSplit struct {
 	startSeed         []uint64
 	currentBucket     []uint64 // 64-bit fingerprints of keys in the current bucket accumulated before the recsplit is performed for that bucket
 	currentBucketOffs []uint64 // Index offsets for the current bucket
-	golombRice        []uint32
 	bucketSizeAcc     []uint64 // Bucket size accumulator
 	// Helper object to encode the sequence of cumulative number of keys in the buckets
 	// and the sequence of cumulative bit offsets of buckets in the Golomb-Rice code.
@@ -302,14 +301,21 @@ func (rs *RecSplit) FileName() string                           { return rs.file
 func (rs *RecSplit) MajorVersion() version.DataStructureVersion { return rs.dataStructureVersion }
 func (rs *RecSplit) Salt() uint32                               { return rs.salt }
 
-// golombParamValue extracts the golomb parameter from table
-// Since table is extended on-demand during Build(), all accessed values should be present
-func golombParamValue(golombRice []uint32, m uint16) int {
-	if m < uint16(len(golombRice)) {
-		return int(golombRice[m] >> 27)
+// golombParam lazily extends the scratch's local golombRice table and returns
+// the Golomb parameter for m. Each scratch owns its own slice, so this is safe
+// to call concurrently from different workers without any locking.
+func (sc *recsplitScratch) golombParam(m uint16) int {
+	for s := uint16(len(sc.golombRice)); m >= s; s++ {
+		sc.golombRice = append(sc.golombRice, 0)
+		if s == 0 {
+			sc.golombRice[0] = (bijMemo[0] << 27) | bijMemo[0]
+		} else if s <= sc.leafSize {
+			sc.golombRice[s] = (bijMemo[s] << 27) | (uint32(1) << 16) | bijMemo[s]
+		} else {
+			computeGolombRice(s, sc.golombRice, sc.leafSize, sc.primaryAggrBound, sc.secondaryAggrBound)
+		}
 	}
-	// This should not happen if golombRice was properly extended during Build()
-	panic(fmt.Sprintf("golombParam not computed for bucket size %d (table size: %d)", m, len(golombRice)))
+	return int(sc.golombRice[m] >> 27)
 }
 func (rs *RecSplit) Close() {
 	if rs.indexF != nil {
@@ -439,24 +445,6 @@ func computeGolombRice(m uint16, table []uint32, leafSize, primaryAggrBound, sec
 		panic("rs.leafSize >= 3 && nodes > 0x7FF")
 	}
 	table[m] |= nodes << 16
-}
-
-// golombParam returns the optimal Golomb parameter to use for encoding
-// salt for the part of the hash function separating m elements. It is based on
-// calculations with assumptions that we draw hash functions at random
-func (rs *RecSplit) golombParam(m uint16) int {
-	for s := uint16(len(rs.golombRice)); m >= s; s++ {
-		rs.golombRice = append(rs.golombRice, 0)
-		// For the case where bucket is larger than planned
-		if s == 0 {
-			rs.golombRice[0] = (bijMemo[0] << 27) | bijMemo[0]
-		} else if s <= rs.leafSize {
-			rs.golombRice[s] = (bijMemo[s] << 27) | (uint32(1) << 16) | bijMemo[s]
-		} else {
-			computeGolombRice(s, rs.golombRice, rs.leafSize, rs.primaryAggrBound, rs.secondaryAggrBound)
-		}
-	}
-	return int(rs.golombRice[m] >> 27)
 }
 
 // Add key to the RecSplit. There can be many more keys than what fits in RAM, and RecSplit
@@ -733,7 +721,7 @@ func recsplit(level int, bucket []uint64, offsets []uint64, unary []uint64, scra
 			result.offsetData = append(result.offsetData, scratch.numBuf[8-scratch.bytesPerRec:]...)
 		}
 		salt -= scratch.startSeed[level]
-		log2golomb := golombParamValue(scratch.golombRice, m)
+		log2golomb := scratch.golombParam(m)
 		if scratch.trace {
 			fmt.Printf("encode bij %d with log2golomn %d at p = %d\n", salt, log2golomb, result.gr.bitCount)
 		}
@@ -756,7 +744,7 @@ func recsplit(level int, bucket []uint64, offsets []uint64, unary []uint64, scra
 		copy(bucket, scratch.buffer)
 		copy(offsets, scratch.offsetBuffer)
 		salt -= scratch.startSeed[level]
-		log2golomb := golombParamValue(scratch.golombRice, m)
+		log2golomb := scratch.golombParam(m)
 		if scratch.trace {
 			fmt.Printf("encode fanout %d: %d with log2golomn %d at p = %d\n", fanout, salt, log2golomb, result.gr.bitCount)
 		}
@@ -868,18 +856,6 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	rs.currentBucketIdx = math.MaxUint64 // To make sure 0 bucket is detected
 	defer rs.bucketCollector.Close()
 
-	// Pre-populate golombRice table for all potential bucket sizes
-	// In practice, buckets can exceed bucketSize due to hash distribution
-	maxM := uint16(rs.bucketSize + rs.bucketSize/2) // Add 50% safety margin
-	if rs.secondaryAggrBound > maxM {
-		maxM = rs.secondaryAggrBound
-	}
-	for m := uint16(len(rs.golombRice)); m <= maxM; m++ {
-		rs.golombParam(m) // Populate table entry
-	}
-
-	// Set golombRice and bytesPerRec in scratch (will be used for lookup)
-	rs.scratch.golombRice = rs.golombRice
 	rs.scratch.bytesPerRec = rs.bytesPerRec
 
 	if rs.lvl < log.LvlTrace {
@@ -965,7 +941,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		return err
 	}
 	// Write out the size of golomb rice params
-	binary.BigEndian.PutUint16(rs.numBuf[:], uint16(len(rs.golombRice)))
+	binary.BigEndian.PutUint16(rs.numBuf[:], uint16(len(rs.scratch.golombRice)))
 	if _, err := rs.indexW.Write(rs.numBuf[:4]); err != nil {
 		return fmt.Errorf("writing golomb rice param size: %w", err)
 	}
