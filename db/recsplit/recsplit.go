@@ -472,7 +472,8 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 		return errors.New("cannot add keys after perfect hash function had been built")
 	}
 	hi, lo := murmur3.Sum128WithSeed(key, rs.salt)
-	binary.BigEndian.PutUint32(rs.bucketKeyBuf[:], uint32(remap(hi, rs.bucketCount)))
+	bucketIdx := uint32(remap(hi, rs.bucketCount))
+	binary.BigEndian.PutUint32(rs.bucketKeyBuf[:], bucketIdx)
 	binary.BigEndian.PutUint64(rs.bucketKeyBuf[4:], lo)
 	binary.BigEndian.PutUint64(rs.numBuf[:], offset)
 	if offset > rs.maxOffset {
