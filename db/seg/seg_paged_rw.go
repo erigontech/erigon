@@ -22,9 +22,9 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"runtime"
 	"sync"
 
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/db/compress"
 )
 
@@ -263,7 +263,7 @@ func NewPagedWriter(parent CompressorI, compressionEnabled bool) *PagedWriter {
 		numWorkers:         1,
 	}
 	if compressionEnabled && pw.pageSize > 1 {
-		pw.numWorkers = runtime.GOMAXPROCS(-1)
+		pw.numWorkers = estimate.AlmostAllCPUs()
 		if pw.numWorkers > 1 {
 			pw.initWorkers()
 		}
