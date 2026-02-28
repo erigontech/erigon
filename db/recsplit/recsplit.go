@@ -154,7 +154,7 @@ type RecSplit struct {
 	baseDataID         uint64 // Minimal app-specific ID of entries of this index - helps app understand what data stored in given shard - persistent field
 	bucketCount        uint64 // Number of buckets
 	salt               uint32 // Murmur3 hash used for converting keys to 64-bit values and assigning to buckets
-	bucketKeyBuf       [16]byte
+	bucketKeyBuf       [12]byte
 	numBuf             [8]byte
 	collision          bool
 	enums              bool // Whether to build two level index with perfect hash table pointing to enumeration and enumeration pointing to offsets
@@ -214,6 +214,9 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 			0x4ef95e25f4b4983d, 0x81175195173b92d3, 0x4e50927d8dd15978, 0x1ea2099d1fafae7f, 0x425c8a06fbaaa815, 0xcd4216006c74052a}
 	}
 	bucketCount := (args.KeyCount + args.BucketSize - 1) / args.BucketSize
+	if bucketCount > math.MaxUint32 {
+		return nil, fmt.Errorf("recsplit: bucketCount %d exceeds uint32 max (too many keys for bucketSize=%d)", bucketCount, args.BucketSize)
+	}
 	rs := &RecSplit{
 		dataStructureVersion: version.DataStructureVersion(args.Version),
 		bucketSize:           args.BucketSize, keyExpectedCount: uint64(args.KeyCount), bucketCount: uint64(bucketCount),
@@ -469,8 +472,8 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 		return errors.New("cannot add keys after perfect hash function had been built")
 	}
 	hi, lo := murmur3.Sum128WithSeed(key, rs.salt)
-	binary.BigEndian.PutUint64(rs.bucketKeyBuf[:], remap(hi, rs.bucketCount))
-	binary.BigEndian.PutUint64(rs.bucketKeyBuf[8:], lo)
+	binary.BigEndian.PutUint32(rs.bucketKeyBuf[:], uint32(remap(hi, rs.bucketCount)))
+	binary.BigEndian.PutUint64(rs.bucketKeyBuf[4:], lo)
 	binary.BigEndian.PutUint64(rs.numBuf[:], offset)
 	if offset > rs.maxOffset {
 		rs.maxOffset = offset
@@ -778,8 +781,9 @@ func recsplit(level int, bucket []uint64, offsets []uint64, unary []uint64, rs *
 
 // loadFuncBucket is required to satisfy the type etl.LoadFunc type, to use with collector.Load
 func (rs *RecSplit) loadFuncBucket(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-	// k is the BigEndian encoding of the bucket number, and the v is the key that is assigned into that bucket
-	bucketIdx := binary.BigEndian.Uint64(k)
+	// k is the BigEndian encoding of the bucket number (4 bytes) + fingerprint (8 bytes),
+	// and v is the offset/enum value assigned into that bucket
+	bucketIdx := uint64(binary.BigEndian.Uint32(k))
 	if rs.currentBucketIdx != bucketIdx {
 		if rs.currentBucketIdx != math.MaxUint64 {
 			if err := rs.recsplitCurrentBucket(); err != nil {
@@ -788,7 +792,7 @@ func (rs *RecSplit) loadFuncBucket(k, v []byte, _ etl.CurrentTableReader, _ etl.
 		}
 		rs.currentBucketIdx = bucketIdx
 	}
-	rs.currentBucket = append(rs.currentBucket, binary.BigEndian.Uint64(k[8:]))
+	rs.currentBucket = append(rs.currentBucket, binary.BigEndian.Uint64(k[4:]))
 	rs.currentBucketOffs = append(rs.currentBucketOffs, binary.BigEndian.Uint64(v))
 	return nil
 }
