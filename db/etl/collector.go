@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 
 	"github.com/c2h5oh/datasize"
 
@@ -66,6 +67,8 @@ type Collector struct {
 	bufType       int
 	allFlushed    bool
 	logger        log.Logger
+
+	backgroundSortInProgress atomic.Bool
 
 	// sortAndFlushInBackground increase insert performance, but make RAM use less-predictable:
 	//   - if disk is over-loaded - app may have much background threads which waiting for flush - and each thread whill hold own `buf` (can't free RAM until flush is done)
@@ -118,38 +121,39 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 		return nil
 	}
 
-	var provider dataProvider
 	if canStoreInRam && len(c.dataProviders) == 0 {
 		c.buf.Sort()
-		provider = KeepInRAM(c.buf)
+		provider := KeepInRAM(c.buf)
 		c.allFlushed = true
-	} else {
-		var err error
-
-		if c.sortAndFlushInBackground {
-			fullBuf := c.buf // can't `.Reset()` because this `buf` will move to another goroutine
-			if c.allocator != nil {
-				c.buf = c.allocator.Get()
-			} else {
-				prevLen, prevSize := fullBuf.Len(), fullBuf.SizeLimit()
-				c.buf = getBufferByType(c.bufType, datasize.ByteSize(fullBuf.SizeLimit()))
-				c.buf.Prealloc(prevLen/8, prevSize/8)
-			}
-			provider, err = FlushToDiskAsync(c.logPrefix, fullBuf, c.tmpdir, c.logLvl, c.allocator)
-			if err != nil {
-				return err
-			}
-		} else {
-			provider, err = FlushToDisk(c.logPrefix, c.buf, c.tmpdir, c.logLvl)
-			if err != nil {
-				return err
-			}
-			c.buf.Reset()
-		}
-	}
-	if provider != nil {
 		c.dataProviders = append(c.dataProviders, provider)
+		return nil
 	}
+
+	// go bg - but without server overloading
+	doInBackground := c.sortAndFlushInBackground && c.backgroundSortInProgress.CompareAndSwap(false, true)
+	if !doInBackground {
+		provider, err := FlushToDisk(c.logPrefix, c.buf, c.tmpdir, c.logLvl)
+		if err != nil {
+			return err
+		}
+		c.dataProviders = append(c.dataProviders, provider)
+		c.buf.Reset()
+		return nil
+	}
+
+	fullBuf := c.buf // can't `.Reset()` because this `buf` will move to another goroutine
+	if c.allocator != nil {
+		c.buf = c.allocator.Get()
+	} else {
+		prevLen, prevSize := fullBuf.Len(), fullBuf.SizeLimit()
+		c.buf = getBufferByType(c.bufType, datasize.ByteSize(fullBuf.SizeLimit()))
+		c.buf.Prealloc(prevLen/8, prevSize/8)
+	}
+	provider, err := FlushToDiskAsync(c.logPrefix, fullBuf, c.tmpdir, c.logLvl, c.allocator, &c.backgroundSortInProgress)
+	if err != nil {
+		return err
+	}
+	c.dataProviders = append(c.dataProviders, provider)
 	return nil
 }
 
