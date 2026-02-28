@@ -68,13 +68,13 @@ type Collector struct {
 	allFlushed    bool
 	logger        log.Logger
 
-	backgroundSortInProgress atomic.Bool
-
 	// sortAndFlushInBackground increase insert performance, but make RAM use less-predictable:
 	//   - if disk is over-loaded - app may have much background threads which waiting for flush - and each thread whill hold own `buf` (can't free RAM until flush is done)
 	//   - enable it only when writing to `etl` is a bottleneck and unlikely to have many parallel collectors (to not overload CPU/Disk)
-	sortAndFlushInBackground bool
-	allocator                *Allocator
+	sortAndFlushInBackground       bool
+	sortAndFlushInBackgroundActive atomic.Bool // allow only 1 bg sort per Collector
+
+	allocator *Allocator
 }
 
 func NewCollectorWithAllocator(logPrefix, tmpdir string, allocator *Allocator, logger log.Logger) *Collector {
@@ -130,7 +130,7 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 	}
 
 	// go bg - but without server overloading
-	doInBackground := c.sortAndFlushInBackground && c.backgroundSortInProgress.CompareAndSwap(false, true)
+	doInBackground := c.sortAndFlushInBackground && c.sortAndFlushInBackgroundActive.CompareAndSwap(false, true)
 	if !doInBackground {
 		provider, err := FlushToDisk(c.logPrefix, c.buf, c.tmpdir, c.logLvl)
 		if err != nil {
@@ -149,7 +149,7 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 		c.buf = getBufferByType(c.bufType, datasize.ByteSize(fullBuf.SizeLimit()))
 		c.buf.Prealloc(prevLen/8, prevSize/8)
 	}
-	provider, err := FlushToDiskAsync(c.logPrefix, fullBuf, c.tmpdir, c.logLvl, c.allocator, &c.backgroundSortInProgress)
+	provider, err := FlushToDiskAsync(c.logPrefix, fullBuf, c.tmpdir, c.logLvl, c.allocator, &c.sortAndFlushInBackgroundActive)
 	if err != nil {
 		return err
 	}
