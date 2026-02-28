@@ -254,12 +254,12 @@ func (g *PagedReader) Skip() (uint64, int) {
 	return offset, len(v)
 }
 
-func NewPagedWriter(parent CompressorI, compressionEnabled bool) *PagedWriter {
+func NewPagedWriter(ctx context.Context, parent CompressorI, compressionEnabled bool) *PagedWriter {
 	pw := &PagedWriter{
 		parent:             parent,
 		pageSize:           parent.GetValuesOnCompressedPage(),
 		compressionEnabled: compressionEnabled,
-		ctx:                context.Background(),
+		ctx:                ctx,
 		numWorkers:         1,
 	}
 	if compressionEnabled && pw.pageSize > 1 {
@@ -269,12 +269,6 @@ func NewPagedWriter(parent CompressorI, compressionEnabled bool) *PagedWriter {
 		}
 	}
 	return pw
-}
-
-// WithContext sets the context for cancellation support
-func (c *PagedWriter) WithContext(ctx context.Context) *PagedWriter {
-	c.ctx = ctx
-	return c
 }
 
 type CompressorI interface {

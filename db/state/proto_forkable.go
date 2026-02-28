@@ -121,7 +121,7 @@ func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.R
 		// TODO: fsync params?
 
 		compress := a.isCompressionUsed(calcFrom, calcTo)
-		writer := a.DataWriter(sn, compress)
+		writer := a.DataWriter(ctx, sn, compress)
 		defer writer.Close()
 		meta, err := a.freezer.Freeze(ctx, calcFrom, calcTo, writer, db)
 		if err != nil {
@@ -164,8 +164,8 @@ func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.R
 	return df, true, nil
 }
 
-func (a *ProtoForkable) DataWriter(f *seg.Compressor, compress bool) *seg.PagedWriter {
-	return seg.NewPagedWriter(seg.NewWriter(f, a.cfg.Compression), compress)
+func (a *ProtoForkable) DataWriter(ctx context.Context, f *seg.Compressor, compress bool) *seg.PagedWriter {
+	return seg.NewPagedWriter(ctx, seg.NewWriter(f, a.cfg.Compression), compress)
 }
 
 func (a *ProtoForkable) DataReader(f *seg.Decompressor, compress bool) *seg.Reader {

@@ -784,7 +784,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 			comp.DisableFsync()
 		}
 
-		pagedWr := ht.dataWriter(comp)
+		pagedWr := ht.dataWriter(ctx, comp)
 		p := ps.AddNew(path.Base(datPath), 1)
 		defer ps.Delete(p)
 
