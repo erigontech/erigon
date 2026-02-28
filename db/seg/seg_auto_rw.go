@@ -139,6 +139,8 @@ func (c *Writer) ReadFrom(r *Reader) error {
 	return nil
 }
 
+func (c *Writer) SetPairsCount(n uint64) { c.Compressor.SetPairsCount(n) }
+
 func (c *Writer) Close() {
 	if c.Compressor != nil {
 		c.Compressor.Close()

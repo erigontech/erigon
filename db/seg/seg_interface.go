@@ -36,9 +36,10 @@ const (
 type FeatureFlag uint8
 
 const (
-	PageLevelCompressionEnabled FeatureFlag = 1 << iota // 0b001
-	KeyCompressionEnabled                               // 0b010
-	ValCompressionEnabled                               // 0b100
+	PageLevelCompressionEnabled FeatureFlag = 1 << iota // 0b0001
+	KeyCompressionEnabled                               // 0b0010
+	ValCompressionEnabled                               // 0b0100
+	PairsCountEnabled                                   // 0b1000 — total key-value pair count follows compPageValuesCount in the header (V2+ only)
 )
 
 type FeatureFlagBitmask uint8

@@ -260,10 +260,19 @@ func (c *PagedWriter) Empty() bool { return c.pairs == 0 }
 func (c *PagedWriter) Close() {
 	c.parent.Close()
 }
+type pairsCountSetter interface {
+	SetPairsCount(n uint64)
+}
+
 func (c *PagedWriter) Compress() error {
 	// Flush any remaining unwritten page data
 	if err := c.Flush(); err != nil {
 		return err
+	}
+	if c.pageSize > 1 {
+		if setter, ok := c.parent.(pairsCountSetter); ok {
+			setter.SetPairsCount(uint64(c.pairs))
+		}
 	}
 	return c.parent.Compress()
 }
