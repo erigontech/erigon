@@ -308,7 +308,8 @@ func New(
 // LoadSnapshotsHashes checks local preverified.toml. If file exists, used local hashes.
 // If there are no such file, try to fetch hashes from the web and create local file.
 func LoadSnapshotsHashes(ctx context.Context, dirs datadir.Dirs, chainName string) error {
-	if _, known := snapcfg.KnownCfg(chainName); !known {
+	cfg, known := snapcfg.KnownCfg(chainName)
+	if !known {
 		log.Root().Warn("No snapshot hashes for chain", "chain", chainName)
 		return nil
 	}
@@ -333,7 +334,6 @@ func LoadSnapshotsHashes(ctx context.Context, dirs datadir.Dirs, chainName strin
 			return fmt.Errorf("failed to fetch remote snapshot hashes for chain %s", chainName)
 		}
 	}
-	cfg, _ := snapcfg.KnownCfg(chainName)
 	cfg.Local = exists
 	return nil
 }
