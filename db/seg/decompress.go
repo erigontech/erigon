@@ -717,6 +717,7 @@ func (v *SequentialView) MakeGetter() *Getter {
 	}
 	if v.d.posDict != nil {
 		g.posMask = v.d.posDict.mask
+		g.posEntries = v.d.posDict.entries
 	}
 	return g
 }
@@ -733,13 +734,14 @@ func (v *SequentialView) Close() {
 // Getter represent "reader" or "iterator" that can move across the data of the decompressor
 // The full state of the getter can be captured by saving dataP, and dataBit
 type Getter struct {
-	dataP   uint64    // current byte offset in data
-	dataLen uint64    // u64-typed len(data) to reduce amount of type-casting
-	dataBit int       // bit offset within current byte (0-7)
-	posMask uint16    // cached posDict.mask, avoids pointer chain
-	posDict *posTable // Huffman table for positions
-	data    []byte
+	dataP      uint64     // current byte offset in data
+	dataLen    uint64     // u64-typed len(data) to reduce amount of type-casting
+	dataBit    int        // bit offset within current byte (0-7)
+	posMask    uint16     // cached posDict.mask, avoids pointer chain
+	posEntries []posEntry // cached posDict.entries, avoids pointer-chase through posDict
+	data       []byte
 	//less hot fields
+	posDict     *posTable // Huffman table for positions (only used for subtable path)
 	patternDict *patternTable
 	d           *Decompressor
 	fName       string
@@ -769,8 +771,8 @@ func (g *Getter) nextPosClean() uint64 {
 // It is structured to be inlinable: the subtable (deep-tree) case is pushed
 // into a separate //go:noinline helper so this function stays small.
 func (g *Getter) nextPos() uint64 {
-	if g.posDict.bitLen == 0 {
-		return uint64(g.posDict.entries[0].pos)
+	if g.posMask == 0 {
+		return uint64(g.posEntries[0].pos)
 	}
 	dataP := g.dataP
 	dataBit := g.dataBit
@@ -780,7 +782,7 @@ func (g *Getter) nextPos() uint64 {
 		code |= uint16(data[dataP+1]) << (8 - dataBit)
 	}
 	code &= g.posMask
-	entry := g.posDict.entries[code]
+	entry := g.posEntries[code]
 	l := int(entry.bits)
 	if l == 0 {
 		return g.nextPosSubtable(g.posDict, code)
@@ -877,6 +879,7 @@ func (d *Decompressor) MakeGetter() *Getter {
 	}
 	if d.posDict != nil {
 		g.posMask = d.posDict.mask
+		g.posEntries = d.posDict.entries
 	}
 	return g
 }
