@@ -90,6 +90,13 @@ type bucketResult struct {
 	bucketSize int        // Number of keys in this bucket
 }
 
+// preAlloc ensures offsetData has capacity for n keys of bytesPerRec bytes each.
+func (br *bucketResult) preAlloc(n, bytesPerRec int) {
+	if needed := n * bytesPerRec; cap(br.offsetData) < needed {
+		br.offsetData = make([]byte, 0, needed)
+	}
+}
+
 // Reset clears the bucketResult for reuse from the pool.
 func (br *bucketResult) Reset() {
 	br.offsetData = br.offsetData[:0]
@@ -536,6 +543,7 @@ func (rs *RecSplit) recsplitCurrentBucket() error {
 	defer putBucketResult(result)
 
 	result.bucketIdx = rs.currentBucketIdx
+	result.preAlloc(len(rs.currentBucket), rs.scratch.bytesPerRec)
 
 	// Sets of size 0 and 1 are not further processed, just accumulate them
 	if len(rs.currentBucket) > 1 {
