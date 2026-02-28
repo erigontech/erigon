@@ -148,8 +148,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return nil
 	}
 
-	diaglib.Send(diaglib.CurrentSyncStage{Stage: string(stages.Snapshots)})
-
 	cstate := snapshotsync.NoCaplin
 	if cfg.caplin {
 		cstate = snapshotsync.AlsoCaplin
