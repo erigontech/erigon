@@ -61,7 +61,7 @@ func (overrides *BlockOverrides) Override(context *evmtypes.BlockContext) error 
 		return errors.New(`block override "beaconRoot" is not supported for this RPC method`)
 	}
 	if overrides.Withdrawals != nil {
-		return errors.New(`BlockOverrides.Withdrawals not supported`)
+		return errors.New(`block override "withdrawals" is not supported for this RPC method`)
 	}
 	if overrides.Number != nil {
 		context.BlockNumber = overrides.Number.Uint64()
