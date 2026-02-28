@@ -164,10 +164,10 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			inputTxNum++
 		}
 
-		start := time.Now()
+		//start := time.Now()
 		continueLoop, err := se.executeBlock(ctx, txTasks, execStage.CurrentSyncCycle.IsInitialCycle, false)
 
-		log.Debug(fmt.Sprintf("[%s] executed block %d in %s", se.logPrefix, blockNum, time.Since(start)))
+		//log.Debug(fmt.Sprintf("[%s] executed block %d in %s", se.logPrefix, blockNum, time.Since(start)))
 		if err != nil {
 			return nil, rwTx, err
 		}
