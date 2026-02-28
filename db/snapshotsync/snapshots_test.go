@@ -481,8 +481,9 @@ func TestCanRetire(t *testing.T) {
 		{2_500_000, 2_500_100, 2_500_000, 2_500_000, false},
 		{1_001_000, 2_000_000, 1_001_000, 1_002_000, true},
 	}
+	snCfg := snapcfg.KnownCfgOrDevnet(networkname.Mainnet)
 	for i, tc := range cases {
-		from, to, can := CanRetire(tc.inFrom, tc.inTo, snaptype.Unknown, nil)
+		from, to, can := CanRetire(tc.inFrom, tc.inTo, snaptype.Unknown, snCfg)
 		require.Equal(int(tc.outFrom), int(from), i)
 		require.Equal(int(tc.outTo), int(to), i)
 		require.Equal(tc.can, can, tc.inFrom, tc.inTo, i)

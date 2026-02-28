@@ -1077,7 +1077,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 		}
 
 		for _, check := range requestedChecks {
-			if slices.Contains(integrity.FastChecks, check) || slices.Contains(integrity.SlowChecks, check) {
+			if slices.Contains(integrity.AllChecks, check) {
 				continue
 			}
 
@@ -1136,7 +1136,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 	heimdallStore, _ := blockRetire.BorStore()
 
 	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(4)
+	g.SetLimit(2)
 	for _, chk := range requestedChecks {
 		chk := chk
 		g.Go(func() error {

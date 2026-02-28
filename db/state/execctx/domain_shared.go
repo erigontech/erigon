@@ -89,6 +89,8 @@ type SharedDomains struct {
 
 	logger log.Logger
 
+	txNum             uint64
+	currentStep       kv.Step
 	trace             bool //nolint
 	commitmentCapture bool
 	mem               kv.TemporalMemBatch
@@ -166,6 +168,8 @@ func (sd *SharedDomains) Merge(sdTxNum uint64, other *SharedDomains, otherTxNum 
 		sd.sdCtx.SetPendingUpdate(otherUpd)
 	}
 
+	sd.txNum = otherTxNum
+	sd.currentStep = kv.Step(otherTxNum / sd.stepSize)
 	return nil
 }
 
@@ -310,6 +314,13 @@ func (sd *SharedDomains) StepSize() uint64 { return sd.stepSize }
 
 // SetTxNum sets txNum for all domains as well as common txNum for all domains
 // Requires for sd.rwTx because of commitment evaluation in shared domains if stepSize is reached
+func (sd *SharedDomains) SetTxNum(txNum uint64) {
+	sd.txNum = txNum
+	sd.currentStep = kv.Step(txNum / sd.stepSize)
+}
+
+func (sd *SharedDomains) TxNum() uint64 { return sd.txNum }
+
 func (sd *SharedDomains) SetTrace(b, capture bool) []string {
 	sd.trace = b
 	sd.commitmentCapture = capture
@@ -329,6 +340,7 @@ func (sd *SharedDomains) Close() {
 		return
 	}
 
+	sd.SetTxNum(0)
 	sd.ResetPendingUpdates()
 
 	//sd.walLock.Lock()
@@ -614,6 +626,7 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (
 	if err != nil {
 		return 0, 0, err
 	}
+	sd.SetTxNum(txNum)
 	return txNum, blockNum, nil
 }
 

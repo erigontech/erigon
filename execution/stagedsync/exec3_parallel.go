@@ -118,6 +118,13 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 			"isForkValidation", pe.isForkValidation, "isBlockProduction", pe.isBlockProduction, "isApplyingBlocks", pe.isApplyingBlocks)
 	}
 
+	// restoreTxNum must run before pe.run() so that doms.SetTxNum() completes
+	// before any goroutine reads txNum (via AsGetter/GetLatest).
+	restoredTxNum, _, _, _, err := restoreTxNum(ctx, &pe.cfg, rwTx, inputTxNum, maxBlockNum)
+	if err != nil {
+		return nil, rwTx, err
+	}
+
 	executorContext, executorCancel, err := pe.run(ctx)
 	defer executorCancel()
 
@@ -129,7 +136,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 		return nil, rwTx, err
 	}
 
-	if err := pe.executeBlocks(executorContext, asyncTx, startBlockNum, maxBlockNum, blockLimit, initialTxNum, readAhead, initialCycle, applyResults); err != nil {
+	if err := pe.executeBlocks(executorContext, asyncTx, startBlockNum, maxBlockNum, blockLimit, initialTxNum, restoredTxNum, readAhead, initialCycle, applyResults); err != nil {
 		return nil, rwTx, err
 	}
 
@@ -214,7 +221,9 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							return fmt.Errorf("block %d: applyCount mismatch: got: %d expected %d", applyResult.BlockNum, blockUpdateCount, applyResult.ApplyCount)
 						}
 
-						if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) || pe.cfg.experimentalBAL {
+						// pe.cfg.chainConfig.AmsterdamTime != nil && pe.cfg.chainConfig.AmsterdamTime.Uint64() > 0 is
+						// temporary to allow for initial non bals amsterdam testing before parallel exec is live by default
+						if (pe.cfg.chainConfig.AmsterdamTime != nil && pe.cfg.chainConfig.AmsterdamTime.Uint64() > 0 && pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime)) || pe.cfg.experimentalBAL {
 							bal := CreateBAL(applyResult.BlockNum, applyResult.TxIO, pe.cfg.dirs.DataDir)
 							if err := bal.Validate(); err != nil {
 								return fmt.Errorf("block %d: invalid computed block access list: %w", applyResult.BlockNum, err)
@@ -273,6 +282,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 					if applyResult.BlockNum > lastBlockResult.BlockNum {
 						uncommittedBlocks++
+						pe.doms.SetTxNum(applyResult.lastTxNum)
 						lastBlockResult = *applyResult
 					}
 
@@ -371,6 +381,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							// Warmup is enabled via EnableTrieWarmup at executor init
 							rh, err := pe.doms.ComputeCommitment(ctx, rwTx, true, applyResult.BlockNum, applyResult.lastTxNum, pe.logPrefix, commitProgress)
 							close(commitProgress)
+							<-LogCommitmentsDone // wait for logging goroutine before any early returns
 							captured := pe.doms.SetTrace(false, false)
 							if err != nil {
 								return err
@@ -389,7 +400,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							}
 							pe.domains().SetChangesetAccumulator(nil)
 
-							if !bytes.Equal(rh, applyResult.StateRoot.Bytes()) {
+							if !pe.isBlockProduction && !bytes.Equal(rh, applyResult.StateRoot.Bytes()) {
 								pe.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", pe.logPrefix, applyResult.BlockNum, rh, applyResult.StateRoot.Bytes(), applyResult.BlockHash))
 								if !dbg.BatchCommitments {
 									for _, line := range captured {
@@ -404,7 +415,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 									rwTx, pe.cfg, execStage, pe.logger, u)
 							}
 
-							<-LogCommitmentsDone // make sure no async mutations by LogCommitments can happen at this point
 							// fix these here - they will contain estimates after commit logging
 							pe.txExecutor.lastCommittedBlockNum.Store(lastBlockResult.BlockNum)
 							pe.txExecutor.lastCommittedTxNum.Store(lastBlockResult.lastTxNum)
@@ -1005,8 +1015,20 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 		defer fmt.Println(tracePrefix, "done finalize")
 	}
 
-	// we want to force a re-read of the conbiase & burnt contract address
-	// if thay where referenced by the tx
+	// Strip stale coinbase/burnt-contract balance writes from TxOut and
+	// compute the TX's net balance delta BEFORE deleting from TxIn.
+	// During parallel execution with delayed fee calc, the TX's speculative
+	// execution may have read/written these addresses with a stale base
+	// (missing prior TXs' fees). We strip the stale absolute write so
+	// ApplyVersionedWrites doesn't cache it, and apply the delta + fee
+	// on top of the correct base from the VersionedStateReader.
+	txOut, coinbaseDelta, coinbaseDeltaIncrease, hasCoinbaseDelta := result.TxOut.StripBalanceWrite(result.Coinbase, result.TxIn)
+	result.TxOut = txOut
+	txOut, burntDelta, burntDeltaIncrease, hasBurntDelta := result.TxOut.StripBalanceWrite(result.ExecutionResult.BurntContractAddress, result.TxIn)
+	result.TxOut = txOut
+
+	// Force a re-read of the coinbase & burnt contract address
+	// so the VersionedStateReader provides the correct base values.
 	delete(result.TxIn, result.Coinbase)
 	delete(result.TxIn, result.ExecutionResult.BurntContractAddress)
 
@@ -1036,12 +1058,36 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 	}
 
 	if task.shouldDelayFeeCalc {
+		// Apply the TX's net balance effect on burnt contract (re-based on correct base)
+		if hasBurntDelta {
+			if burntDeltaIncrease {
+				if err := ibs.AddBalance(result.ExecutionResult.BurntContractAddress, burntDelta, tracing.BalanceChangeTransfer); err != nil {
+					return nil, nil, nil, err
+				}
+			} else {
+				if err := ibs.SubBalance(result.ExecutionResult.BurntContractAddress, burntDelta, tracing.BalanceChangeTransfer); err != nil {
+					return nil, nil, nil, err
+				}
+			}
+		}
 		if !result.ExecutionResult.BurntContractAddress.IsNil() && txTask.Config.IsLondon(blockNum) {
 			if err := ibs.AddBalance(result.ExecutionResult.BurntContractAddress, result.ExecutionResult.FeeBurnt, tracing.BalanceDecreaseGasBuy); err != nil {
 				return nil, nil, nil, err
 			}
 		}
 
+		// Apply the TX's net balance effect on coinbase (re-based on correct base)
+		if hasCoinbaseDelta {
+			if coinbaseDeltaIncrease {
+				if err := ibs.AddBalance(result.Coinbase, coinbaseDelta, tracing.BalanceChangeTransfer); err != nil {
+					return nil, nil, nil, err
+				}
+			} else {
+				if err := ibs.SubBalance(result.Coinbase, coinbaseDelta, tracing.BalanceChangeTransfer); err != nil {
+					return nil, nil, nil, err
+				}
+			}
+		}
 		if err := ibs.AddBalance(result.Coinbase, result.ExecutionResult.FeeTipped, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
 			return nil, nil, nil, err
 		}
@@ -1308,7 +1354,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				// If the transaction failed when we know it should not fail, this means the transaction itself is
 				// bad (e.g. wrong nonce), and we should exit the execution immediately
 				version := res.Version()
-				return nil, fmt.Errorf("could not apply tx %d:%d [%d:%v]: %w", be.blockNum, version.TxIndex, version.TxNum, task.TxHash(), execErr.OriginError)
+				return nil, fmt.Errorf("%w: could not apply tx %d:%d [%d:%v]: %w", rules.ErrInvalidBlock, be.blockNum, version.TxIndex, version.TxNum, task.TxHash(), execErr.OriginError)
 			}
 
 			if res.Version().Incarnation > len(be.tasks) {
