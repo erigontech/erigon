@@ -888,6 +888,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	if err != nil {
 		return err
 	}
+	doms.SetInMemHistoryReads(false)
 
 	if chainTipMode {
 		//if chainTip = true, forced noCommit = false
