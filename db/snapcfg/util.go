@@ -444,30 +444,8 @@ func RegisterKnownTypes(networkName string, types []snaptype.Type) {
 
 var knownTypes = map[string][]snaptype.Type{}
 
-func Seedable(networkName string, info snaptype.FileInfo) bool {
-	if networkName == "" {
-		return false
-	}
-	snapCfg, _ := KnownCfg(networkName)
-	return snapCfg.Seedable(info)
-}
-
 func MergeLimitFromCfg(cfg *Cfg, snapType snaptype.Enum, fromBlock uint64) uint64 {
 	return cfg.MergeLimit(snapType, fromBlock)
-}
-
-func MaxSeedableSegment(chain string, dir string) uint64 {
-	var _max uint64
-	segConfig, _ := KnownCfg(chain)
-	if list, err := snaptype.Segments(dir); err == nil {
-		for _, info := range list {
-			if segConfig.Seedable(info) && info.Type.Enum() == snaptype.MinCoreEnum && info.To > _max {
-				_max = info.To
-			}
-		}
-	}
-
-	return _max
 }
 
 var oldMergeSteps = append([]uint64{snaptype.Erigon2OldMergeLimit}, snaptype.MergeSteps...)
