@@ -194,7 +194,6 @@ func NewLatestStateWriter(tx kv.TemporalTx, domains *execctx.SharedDomains, bloc
 		panic(err)
 	}
 	txNum := uint64(int(minTxNum) + /* 1 system txNum in beginning of block */ 1)
-	domains.SetTxNum(txNum)
 	return state.NewWriter(domains.AsPutDel(tx), nil, txNum)
 }
 
@@ -256,6 +255,9 @@ func (hr *cachedHistoryReaderV3) ReadAccountData(address accounts.Address) (*acc
 	}
 
 	if ok {
+		if len(enc) == 0 {
+			return nil, nil
+		}
 		var a accounts.Account
 		if err := accounts.DeserialiseV3(&a, enc); err != nil {
 			return nil, fmt.Errorf("%sread account data (cache)(%x): %w", hr.TracePrefix(), address, err)

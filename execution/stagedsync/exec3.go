@@ -54,12 +54,12 @@ import (
 // Cases:
 //  1. Snapshots > ExecutionStage: snapshots can have half-block data `10.4`. Get right txNum from SharedDomains (after SeekCommitment)
 //  2. ExecutionStage > Snapshots: no half-block data possible. Rely on DB.
-func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms *execctx.SharedDomains, maxBlockNum uint64) (
+func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, currentTxNum uint64, maxBlockNum uint64) (
 	inputTxNum uint64, maxTxNum uint64, offsetFromBlockBeginning uint64, blockNum uint64, err error) {
 
 	txNumsReader := cfg.blockReader.TxnumReader()
 
-	inputTxNum = doms.TxNum()
+	inputTxNum = currentTxNum
 
 	lastBlockNum, lastTxNum, err := txNumsReader.Last(applyTx)
 	if err != nil {
@@ -75,7 +75,7 @@ func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms
 		return 0, 0, 0, 0, err
 	}
 
-	blockNum, ok, err := txNumsReader.FindBlockNum(ctx, applyTx, doms.TxNum())
+	blockNum, ok, err := txNumsReader.FindBlockNum(ctx, applyTx, currentTxNum)
 	if err != nil {
 		return 0, 0, 0, 0, err
 	}
@@ -86,7 +86,7 @@ func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms
 	}
 	{
 		max, _ := txNumsReader.Max(ctx, applyTx, blockNum)
-		if doms.TxNum() == max {
+		if currentTxNum == max {
 			blockNum++
 		}
 	}
@@ -96,17 +96,16 @@ func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms
 		return 0, 0, 0, 0, err
 	}
 
-	if doms.TxNum() > min {
+	if currentTxNum > min {
 		// if stopped in the middle of the block: start from beginning of block.
 		// first part will be executed in HistoryExecution mode
-		offsetFromBlockBeginning = doms.TxNum() - min
+		offsetFromBlockBeginning = currentTxNum - min
 	}
 
 	inputTxNum = min
 
 	//_max, _ := txNumsReader.Max(applyTx, blockNum)
-	//fmt.Printf("[commitment] found domain.txn %d, inputTxn %d, offset %d. DB found block %d {%d, %d}\n", doms.TxNum(), inputTxNum, offsetFromBlockBeginning, blockNum, _min, _max)
-	doms.SetTxNum(inputTxNum)
+	//fmt.Printf("[commitment] found domain.txn %d, inputTxn %d, offset %d. DB found block %d {%d, %d}\n", currentTxNum, inputTxNum, offsetFromBlockBeginning, blockNum, _min, _max)
 	return inputTxNum, maxTxNum, offsetFromBlockBeginning, blockNum, nil
 }
 
@@ -146,7 +145,7 @@ func ExecV3(ctx context.Context,
 	}
 
 	if execStage.SyncMode() == stages.ModeApplyingBlocks {
-		agg.BuildFilesInBackground(doms.TxNum())
+		agg.BuildFilesInBackground(initialTxNum)
 	}
 
 	var (
@@ -155,7 +154,7 @@ func ExecV3(ctx context.Context,
 		maxTxNum                 uint64
 	)
 
-	if inputTxNum, maxTxNum, offsetFromBlockBeginning, blockNum, err = restoreTxNum(ctx, &cfg, applyTx, doms, maxBlockNum); err != nil {
+	if inputTxNum, maxTxNum, offsetFromBlockBeginning, blockNum, err = restoreTxNum(ctx, &cfg, applyTx, initialTxNum, maxBlockNum); err != nil {
 		return err
 	}
 
@@ -212,11 +211,12 @@ func ExecV3(ctx context.Context,
 	doms.SetDeferCommitmentUpdates(false)
 	if isChainTip {
 		postValidator = newParallelBlockPostExecutionValidator()
-		// Only defer branch updates in fork validation mode (engine API flow)
-		// where MergeExtendingFork will flush the pending updates
-		if isForkValidation {
-			doms.SetDeferCommitmentUpdates(true)
-		}
+	}
+	// Enable deferred commitment updates only for serial execution (fork validation).
+	// The parallel executor has a subtle interaction with deferred updates that causes
+	// intermittent trie root mismatches during re-org validation.
+	if !parallel && isForkValidation {
+		doms.SetDeferCommitmentUpdates(true)
 	}
 	defer doms.SetDeferCommitmentUpdates(false)
 	// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
@@ -247,7 +247,7 @@ func ExecV3(ctx context.Context,
 			},
 			workerCount: cfg.syncCfg.ExecWorkerCount,
 		}
-		pe.lastCommittedTxNum.Store(doms.TxNum())
+		pe.lastCommittedTxNum.Store(inputTxNum)
 		// blockNum is the next block to execute (from doms.BlockNum()), so the last
 		// committed block is blockNum-1. LogCommitments uses Add to accumulate deltas
 		// on top of this value, so initializing to blockNum would double-count.
@@ -256,9 +256,7 @@ func ExecV3(ctx context.Context,
 		}
 
 		defer func() {
-			if !isChainTip {
-				pe.LogComplete(stepsInDb)
-			}
+			pe.LogComplete(stepsInDb)
 		}()
 
 		lastHeader, applyTx, execErr = pe.exec(ctx, execStage, u, startBlockNum, offsetFromBlockBeginning, maxBlockNum, blockLimit,
@@ -285,7 +283,7 @@ func ExecV3(ctx context.Context,
 				hooks:             hooks,
 				postValidator:     postValidator,
 			}}
-		se.lastCommittedTxNum.Store(doms.TxNum())
+		se.lastCommittedTxNum.Store(inputTxNum)
 		se.lastCommittedBlockNum.Store(blockNum)
 
 		defer func() {
@@ -311,8 +309,13 @@ func ExecV3(ctx context.Context,
 					}
 
 					se.lastCommittedBlockNum.Store(lastHeader.Number.Uint64())
-					committedTransactions := se.domains().TxNum() - se.lastCommittedTxNum.Load()
-					se.lastCommittedTxNum.Store(se.domains().TxNum())
+					// Get current txNum from the last executed block
+					currentTxNum, err := cfg.blockReader.TxnumReader().Max(ctx, applyTx, lastHeader.Number.Uint64())
+					if err != nil {
+						return err
+					}
+					committedTransactions := currentTxNum - se.lastCommittedTxNum.Load()
+					se.lastCommittedTxNum.Store(currentTxNum)
 
 					commitStart := time.Now()
 					stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx, applyTx.Debug().StepSize())
@@ -359,10 +362,6 @@ func ExecV3(ctx context.Context,
 			"lastFrozenStep", lastFrozenStep, "lastFrozenTxNum", ((lastFrozenStep+1)*kv.Step(doms.StepSize()))-1)
 		return fmt.Errorf("can't persist comittement for blockNum %d, txNum %d: step %d is frozen",
 			lastCommittedBlockNum, lastCommittedTxNum, lastCommitedStep)
-	}
-
-	if execStage.SyncMode() == stages.ModeApplyingBlocks {
-		agg.BuildFilesInBackground(doms.TxNum())
 	}
 
 	if !shouldReportToTxPool && cfg.notifications != nil && cfg.notifications.Accumulator != nil && !isBlockProduction && lastHeader != nil {
@@ -527,7 +526,7 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 				if err != nil {
 					return err
 				}
-				chainReader := NewChainReaderImpl(te.cfg.chainConfig, te.applyTx, te.cfg.blockReader, te.logger)
+				chainReader := exec.NewChainReader(te.cfg.chainConfig, te.applyTx, te.cfg.blockReader, te.logger)
 				td = chainReader.GetTd(b.ParentHash(), b.NumberU64()-1)
 				finalized = chainReader.CurrentFinalizedHeader()
 				safe = chainReader.CurrentSafeHeader()
@@ -546,13 +545,7 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 	}
 }
 
-func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, readAhead chan uint64, initialCycle bool, applyResults chan applyResult) error {
-	inputTxNum, _, offsetFromBlockBeginning, _, err := restoreTxNum(ctx, &te.cfg, tx, te.doms, maxBlockNum)
-
-	if err != nil {
-		return err
-	}
-
+func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, inputTxNum uint64, readAhead chan uint64, initialCycle bool, applyResults chan applyResult) error {
 	if te.execLoopGroup == nil {
 		return errors.New("no exec group")
 	}
@@ -581,8 +574,12 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 			default:
 			}
 
-			canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
-			if err != nil {
+			var canonicalHash common.Hash
+			if err = tx.Apply(ctx, func(applyTx kv.Tx) error {
+				var e error
+				canonicalHash, e = rawdb.ReadCanonicalHash(applyTx, blockNum)
+				return e
+			}); err != nil {
 				return err
 			}
 			b, ok := exec.ReadBlockWithSendersFromGlobalReadAheader(canonicalHash)
@@ -601,8 +598,12 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 			go warmTxsHashes(b)
 
 			var dbBAL types.BlockAccessList
-			data, err := rawdb.ReadBlockAccessListBytes(tx, b.Hash(), blockNum)
-			if err != nil {
+			var data []byte
+			if err = tx.Apply(ctx, func(applyTx kv.Tx) error {
+				var e error
+				data, e = rawdb.ReadBlockAccessListBytes(applyTx, b.Hash(), blockNum)
+				return e
+			}); err != nil {
 				return err
 			}
 			if len(data) > 0 {
@@ -683,10 +684,6 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 
 			mxExecBlocks.Add(1)
 
-			if offsetFromBlockBeginning > 0 {
-				// after history execution no offset will be required
-				offsetFromBlockBeginning = 0
-			}
 			if exhausted != nil {
 				break
 			}
@@ -816,7 +813,13 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 		return true, times, nil
 	}
 
-	computedRootHash, err := doms.ComputeCommitment(ctx, applyTx, true, header.Number.Uint64(), doms.TxNum(), e.LogPrefix(), nil)
+	// Get current txNum from the block being committed
+	txNumsReader := cfg.blockReader.TxnumReader()
+	blockTxNum, err := txNumsReader.Max(ctx, applyTx, header.Number.Uint64())
+	if err != nil {
+		return false, times, err
+	}
+	computedRootHash, err := doms.ComputeCommitment(ctx, applyTx, true, header.Number.Uint64(), blockTxNum, e.LogPrefix(), nil)
 
 	times.ComputeCommitment = time.Since(start)
 	if err != nil {

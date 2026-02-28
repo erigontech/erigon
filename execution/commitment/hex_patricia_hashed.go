@@ -23,16 +23,16 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"hash"
 	"io"
 	"math/bits"
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
-	"golang.org/x/crypto/sha3"
+	keccak "github.com/erigontech/fastkeccak"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -40,21 +40,12 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/stateifs"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
-
-// keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
-// Read to get a variable amount of data from the hash state. Read is faster than Sum
-// because it doesn't copy the internal state, but also modifies the internal state.
-type keccakState interface {
-	hash.Hash
-	Read([]byte) (int, error)
-}
 
 // DomainPutter is an interface for putting data into domains.
 // Used by commitment to write branch data.
@@ -82,8 +73,8 @@ type HexPatriciaHashed struct {
 	branchBefore  [128]bool     // For each row, whether there was a branch node in the database loaded in unfold
 	touchMap      [128]uint16   // For each row, bitmap of cells that were either present before modification, or modified or deleted
 	afterMap      [128]uint16   // For each row, bitmap of cells that were present after modification
-	keccak        keccakState
-	keccak2       keccakState
+	keccak        keccak.KeccakState
+	keccak2       keccak.KeccakState
 	rootChecked   bool // Set to false if it is not known whether the root is empty, set to true if it is checked
 	rootTouched   bool
 	rootPresent   bool
@@ -130,12 +121,23 @@ func (hph *HexPatriciaHashed) SpawnSubTrie(ctx PatriciaContext, forNibble int) *
 	return subTrie
 }
 
+var hphPool sync.Pool
+
 func NewHexPatriciaHashed(accountKeyLen int16, ctx PatriciaContext) *HexPatriciaHashed {
+	hph, ok := hphPool.Get().(*HexPatriciaHashed)
+	if !ok {
+		hph = newHexPatriciaHashed()
+	}
+	hph.resetForReuse()
+	hph.accountKeyLen = accountKeyLen
+	hph.ctx = ctx
+	return hph
+}
+
+func newHexPatriciaHashed() *HexPatriciaHashed {
 	hph := &HexPatriciaHashed{
-		ctx:           ctx,
-		keccak:        sha3.NewLegacyKeccak256().(keccakState),
-		keccak2:       sha3.NewLegacyKeccak256().(keccakState),
-		accountKeyLen: accountKeyLen,
+		keccak:        keccak.NewFastKeccak(),
+		keccak2:       keccak.NewFastKeccak(),
 		auxBuffer:     bytes.NewBuffer(make([]byte, 8192)),
 		hadToLoadL:    make(map[uint64]skipStat),
 		accValBuf:     make(rlp.RlpEncodedBytes, 128),
@@ -146,6 +148,72 @@ func NewHexPatriciaHashed(accountKeyLen int16, ctx PatriciaContext) *HexPatricia
 	hph.branchEncoder.setMetrics(hph.metrics)
 	hph.branchEncoder.SetDeferUpdates(true) // Enable deferred branch updates by default
 	return hph
+}
+
+// resetForReuse resets all mutable state so a pooled HexPatriciaHashed is safe to reuse.
+// The large grid array is NOT zeroed — activeRows=0 means no cells are live,
+// and cells are properly initialized via cell.reset() during unfold/fold.
+func (hph *HexPatriciaHashed) resetForReuse() {
+	// SetState(nil) resets: root, rootTouched, rootChecked, rootPresent,
+	// currentKeyLen, activeRows, depths, branchBefore, touchMap, afterMap.
+	hph.root.reset()
+	hph.rootTouched = false
+	hph.rootChecked = false
+	hph.rootPresent = false
+	hph.currentKeyLen = 0
+	hph.activeRows = 0
+	for i := range hph.depths {
+		hph.depths[i] = 0
+		hph.branchBefore[i] = false
+		hph.touchMap[i] = 0
+		hph.afterMap[i] = 0
+	}
+
+	// ctx — set by caller after pool get
+	hph.ctx = nil
+
+	// reuse map, don't reallocate
+	clear(hph.hadToLoadL)
+
+	// reuse slice backing
+	hph.mountedTries = hph.mountedTries[:0]
+	hph.mounted = false
+	hph.mountedNib = 0
+
+	// warmup cache
+	hph.cache = nil
+	hph.enableWarmupCache = false
+
+	// tracing / capture
+	hph.capture = nil
+	hph.trace = false
+	hph.traceDomain = false
+
+	// flags
+	hph.memoizationOff = false
+	hph.leaveDeferredForCaller = false
+
+	// auxiliary buffer
+	hph.auxBuffer.Reset()
+
+	// branch encoder: clear deferred updates, reset buffer, nil cache, re-enable deferred
+	hph.branchEncoder.ClearDeferred()
+	hph.branchEncoder.buf.Reset()
+	hph.branchEncoder.cache = nil
+	hph.branchEncoder.SetDeferUpdates(true)
+
+	// depth-to-txnum mapping
+	clear(hph.depthsToTxNum[:])
+}
+
+// Release returns this HexPatriciaHashed to the pool for reuse.
+// After calling Release, the caller must not use the struct.
+func (hph *HexPatriciaHashed) Release() {
+	hph.ctx = nil
+	hph.cache = nil
+	hph.mountedTries = nil
+	hph.capture = nil
+	hphPool.Put(hph)
 }
 
 type cell struct {
@@ -207,11 +275,11 @@ var (
 	emptyRootHashBytes = empty.RootHash.Bytes()
 )
 
-func (cell *cell) hashAccKey(keccak keccakState, depth int16, hashBuf []byte) error {
+func (cell *cell) hashAccKey(keccak keccak.KeccakState, depth int16, hashBuf []byte) error {
 	return hashKey(keccak, cell.accountAddr[:cell.accountAddrLen], cell.hashedExtension[:], depth, hashBuf)
 }
 
-func (cell *cell) hashStorageKey(keccak keccakState, accountKeyLen, downOffset int16, hashedKeyOffset int16, hashBuf []byte) error {
+func (cell *cell) hashStorageKey(keccak keccak.KeccakState, accountKeyLen, downOffset int16, hashedKeyOffset int16, hashBuf []byte) error {
 	return hashKey(keccak, cell.storageAddr[accountKeyLen:cell.storageAddrLen], cell.hashedExtension[downOffset:], hashedKeyOffset, hashBuf)
 }
 
@@ -376,7 +444,7 @@ func (cell *cell) fillFromLowerCell(lowCell *cell, lowDepth int16, preExtension 
 	cell.loaded = lowCell.loaded
 }
 
-func (cell *cell) deriveHashedKeys(depth int16, keccak keccakState, accountKeyLen int16, hashBuf []byte) error {
+func (cell *cell) deriveHashedKeys(depth int16, keccak keccak.KeccakState, accountKeyLen int16, hashBuf []byte) error {
 	extraLen := int16(0)
 	if cell.accountAddrLen > 0 {
 		if depth > 64 {
@@ -1687,11 +1755,11 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 
 // readBranchAndCheckForFlushing reads a branch from ctx, flushing deferred updates first if the prefix is pending.
 // This ensures we read fresh data when a prefix has been modified but not yet written.
-func (hph *HexPatriciaHashed) readBranchAndCheckForFlushing(prefix []byte) ([]byte, kv.Step, error) {
+func (hph *HexPatriciaHashed) readBranchAndCheckForFlushing(prefix []byte) ([]byte, error) {
 	be := hph.branchEncoder
 	if be.DeferUpdatesEnabled() && be.HasPendingPrefix(prefix) {
 		if err := be.ApplyDeferredUpdates(16, hph.ctx.PutBranch); err != nil {
-			return nil, 0, err
+			return nil, err
 		}
 		be.ClearDeferred()
 	}
@@ -1703,13 +1771,14 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 	key := HexNibblesToCompactBytes(hph.currentKey[:hph.currentKeyLen])
 	hph.metrics.BranchLoad(hph.currentKey[:hph.currentKeyLen])
 
-	branchData, step, err := hph.readBranchAndCheckForFlushing(key)
+	branchData, err := hph.readBranchAndCheckForFlushing(key)
 	if err != nil {
 		return err
 	}
 
-	fileEndTxNum := uint64(step) // TODO: investigate why we cast step to txNum!
-	hph.depthsToTxNum[depth] = fileEndTxNum
+	// depthsToTxNum is used for per-file metrics; step is no longer available
+	// from the cache-or-DB helper (cache never had a meaningful step anyway).
+	hph.depthsToTxNum[depth] = 0
 
 	if len(branchData) >= 2 {
 		branchData = branchData[2:] // skip touch map and keep the rest
@@ -1726,7 +1795,7 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 	if len(branchData) == 0 {
 		log.Warn("got empty branch data during unfold", "key", hex.EncodeToString(key), "row", row, "depth", depth, "deleted", deleted)
 		if hph.trace {
-			branchData, _, _ = hph.branchFromCacheOrDB(key)
+			branchData, _ = hph.branchFromCacheOrDB(key)
 			fmt.Printf("unfoldBranchNode prefix '%x', nibbles [%x] depth %d row %d '%x' %s\n", key, hph.currentKey[:hph.currentKeyLen], depth, row, branchData, BranchData(branchData).String())
 		}
 		return fmt.Errorf("empty branch data read during unfold, compact prefix %x nibbles %x", key, hph.currentKey[:hph.currentKeyLen])
@@ -2806,13 +2875,14 @@ func (hph *HexPatriciaHashed) ResetContext(ctx PatriciaContext) {
 }
 
 // branchFromCacheOrDB reads branch data from cache if available, otherwise from DB.
-func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, kv.Step, error) {
+func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 	if hph.cache != nil {
-		if data, step, found := hph.cache.GetBranch(key); found {
-			return data, step, nil
+		if data, found := hph.cache.GetBranch(key); found {
+			return data, nil
 		}
 	}
-	return hph.ctx.Branch(key)
+	data, _, err := hph.ctx.Branch(key)
+	return data, err
 }
 
 // accountFromCacheOrDB reads account data from cache if available, otherwise from DB.

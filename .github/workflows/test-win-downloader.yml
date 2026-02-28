@@ -40,6 +40,4 @@ jobs:
           cache: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') }}
 
       - name: Test downloader package
-        env:
-          GOEXPERIMENT: synctest
         run: go test -v -short -failfast -count=1 ./db/downloader/...

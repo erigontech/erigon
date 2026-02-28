@@ -30,9 +30,9 @@ import (
 	"sync/atomic"
 	"unsafe"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -112,6 +112,10 @@ type Trie interface {
 
 	// Process updates. If warmup.Enabled is true, pre-warms MDBX page cache in parallel.
 	Process(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress, warmup WarmupConfig) (rootHash []byte, err error)
+
+	// Release returns the trie to a pool for reuse. After calling Release,
+	// the caller must not use the trie.
+	Release()
 }
 
 type CommitProgress struct {
@@ -126,7 +130,7 @@ type PatriciaContext interface {
 	// and for the extension, account, and leaf type, the `l` and `k`
 	Branch(prefix []byte) ([]byte, kv.Step, error)
 	// store branch data
-	PutBranch(prefix []byte, data []byte, prevData []byte, prevStep kv.Step) error
+	PutBranch(prefix []byte, data []byte, prevData []byte) error
 	// fetch account with given plain key
 	Account(plainKey []byte) (*Update, error)
 	// fetch storage with given plain key
@@ -228,9 +232,7 @@ type DeferredBranchUpdate struct {
 	depth int16
 
 	// Previous data from ctx.Branch (for merging)
-	prev     []byte
-	prevStep kv.Step
-
+	prev []byte
 	// Result after encoding (filled by parallel workers)
 	encoded BranchData
 }
@@ -267,7 +269,6 @@ func getDeferredUpdate(
 	cells *[16]cell,
 	depth int16,
 	prev []byte,
-	prevStep kv.Step,
 ) *DeferredBranchUpdate {
 	getDeferredUpdateCount.Add(1)
 	upd := deferredUpdatePool.Get().(*DeferredBranchUpdate)
@@ -302,7 +303,6 @@ func getDeferredUpdate(
 	}
 
 	upd.prev = prev
-	upd.prevStep = prevStep
 	upd.encoded = nil
 
 	return upd
@@ -421,7 +421,7 @@ func encodeDeferredUpdate(
 // ApplyDeferredUpdates encodes branch updates concurrently and writes them.
 func (be *BranchEncoder) ApplyDeferredUpdates(
 	numWorkers int,
-	putBranch func(prefix []byte, data []byte, prevData []byte, prevStep kv.Step) error,
+	putBranch func(prefix []byte, data []byte, prevData []byte) error,
 ) error {
 	written, err := ApplyDeferredBranchUpdates(be.deferred, numWorkers, putBranch)
 	if err != nil {
@@ -433,12 +433,18 @@ func (be *BranchEncoder) ApplyDeferredUpdates(
 	return nil
 }
 
+// Pools for worker encoders/mergers to avoid per-call allocations.
+var (
+	workerEncoderPool = sync.Pool{New: func() any { return NewBranchEncoder(1024) }}
+	workerMergerPool  = sync.Pool{New: func() any { return NewHexBranchMerger(512) }}
+)
+
 // ApplyDeferredBranchUpdates encodes deferred branch updates concurrently and writes them.
 // Returns the number of updates successfully written.
 func ApplyDeferredBranchUpdates(
 	deferred []*DeferredBranchUpdate,
 	numWorkers int,
-	putBranch func(prefix []byte, data []byte, prevData []byte, prevStep kv.Step) error,
+	putBranch func(prefix []byte, data []byte, prevData []byte) error,
 ) (int, error) {
 	if len(deferred) == 0 {
 		return 0, nil
@@ -447,22 +453,49 @@ func ApplyDeferredBranchUpdates(
 		numWorkers = 1
 	}
 
-	// Pipeline: workers encode in parallel, results sent to channel, main goroutine writes sequentially
+	// Sequential fast path: avoids goroutine and channel overhead for small batches.
+	if numWorkers == 1 || len(deferred) <= numWorkers {
+		encoder := workerEncoderPool.Get().(*BranchEncoder)
+		merger := workerMergerPool.Get().(*BranchMerger)
+		defer workerEncoderPool.Put(encoder)
+		defer workerMergerPool.Put(merger)
+
+		var written int
+		for _, upd := range deferred {
+			if err := encodeDeferredUpdate(upd, encoder, merger); err != nil {
+				return written, err
+			}
+			if upd.encoded == nil {
+				continue
+			}
+			if err := putBranch(upd.prefix, upd.encoded, upd.prev); err != nil {
+				return written, err
+			}
+			mxTrieBranchesUpdated.Inc()
+			written++
+		}
+		return written, nil
+	}
+
+	// Pipeline: workers encode in parallel, results sent to channel, main goroutine writes sequentially.
 	type result struct {
 		upd *DeferredBranchUpdate
 		err error
 	}
-	resultCh := make(chan result, maxDeferredUpdates)
-	workCh := make(chan *DeferredBranchUpdate, maxDeferredUpdates)
+	// Size channels to actual batch length, not the 50K max.
+	resultCh := make(chan result, len(deferred))
+	workCh := make(chan *DeferredBranchUpdate, len(deferred))
 
-	// Start workers - each with its own encoder and merger
+	// Start workers with pooled encoders/mergers.
 	var wg sync.WaitGroup
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			encoder := NewBranchEncoder(1024)
-			merger := NewHexBranchMerger(512)
+			encoder := workerEncoderPool.Get().(*BranchEncoder)
+			merger := workerMergerPool.Get().(*BranchMerger)
+			defer workerEncoderPool.Put(encoder)
+			defer workerMergerPool.Put(merger)
 
 			for upd := range workCh {
 				err := encodeDeferredUpdate(upd, encoder, merger)
@@ -501,7 +534,7 @@ func ApplyDeferredBranchUpdates(
 		if firstErr != nil {
 			continue // drain channel but don't write after error
 		}
-		if err := putBranch(res.upd.prefix, res.upd.encoded, res.upd.prev, res.upd.prevStep); err != nil {
+		if err := putBranch(res.upd.prefix, res.upd.encoded, res.upd.prev); err != nil {
 			firstErr = err
 			continue
 		}
@@ -527,14 +560,13 @@ func (be *BranchEncoder) CollectUpdate(
 	readCell func(nibble int, skip bool) (*cell, error),
 ) (lastNibble int, err error) {
 	var prev []byte
-	var prevStep kv.Step
 	var foundInCache bool
 
 	if be.cache != nil {
-		prev, prevStep, foundInCache = be.cache.GetAndEvictBranch(prefix)
+		prev, foundInCache = be.cache.GetAndEvictBranch(prefix)
 	}
 	if !foundInCache {
-		prev, prevStep, err = ctx.Branch(prefix)
+		prev, _, err = ctx.Branch(prefix)
 		if err != nil {
 			return 0, err
 		}
@@ -560,12 +592,12 @@ func (be *BranchEncoder) CollectUpdate(
 	// has to copy :(
 	prefixCopy := common.Copy(prefix)
 	updateCopy := common.Copy(update)
-	if err = ctx.PutBranch(prefixCopy, updateCopy, prev, prevStep); err != nil {
+	if err = ctx.PutBranch(prefixCopy, updateCopy, prev); err != nil {
 		return 0, err
 	}
 	// Update cache with the new branch data
 	if be.cache != nil {
-		be.cache.PutBranch(prefixCopy, updateCopy, prevStep)
+		be.cache.PutBranch(prefixCopy, updateCopy)
 	}
 	if be.metrics != nil {
 		be.metrics.updateBranch.Add(1)
@@ -604,16 +636,15 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	// try to get previous data from cache
 	var (
 		prev         []byte
-		prevStep     kv.Step
 		foundInCache bool
 		err          error
 	)
 
 	if be.cache != nil {
-		prev, prevStep, foundInCache = be.cache.GetAndEvictBranch(prefix)
+		prev, foundInCache = be.cache.GetAndEvictBranch(prefix)
 	}
 	if !foundInCache {
-		prev, prevStep, err = ctx.Branch(prefix)
+		prev, _, err = ctx.Branch(prefix)
 	}
 	if err != nil {
 		return err
@@ -623,7 +654,7 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	be.pendingPrefixes.Set(prefix, struct{}{})
 
 	// Get a pooled DeferredBranchUpdate and copy all fields
-	upd := getDeferredUpdate(prefix, bitmap, touchMap, afterMap, cells, depth, prev, prevStep)
+	upd := getDeferredUpdate(prefix, bitmap, touchMap, afterMap, cells, depth, prev)
 	be.deferred = append(be.deferred, upd)
 	return nil
 }
@@ -896,15 +927,10 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 				return nil, err
 			}
 			if newKey == nil {
+				// invariant: fn returns nil (keep original) only for plain addr keys (length.Addr bytes)
 				newData = append(newData, branchData[pos-int(l)-n:pos]...)
-				//if l != length.Addr {
-				//	fmt.Printf("COPY %x LEN %d\n", []byte(branchData[pos-int(l):pos]), l)
-				//}
 			} else {
-				//if len(newKey) > 8 && len(newKey) != length.Addr {
-				//	fmt.Printf("SHORT %x LEN %d\n", newKey, len(newKey))
-				//}
-
+				// invariant: newKey is a short reference (≤8 bytes) or full plain addr (length.Addr bytes)
 				n = binary.PutUvarint(numBuf[:], uint64(len(newKey)))
 				newData = append(newData, numBuf[:n]...)
 				newData = append(newData, newKey...)
@@ -929,15 +955,10 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 				return nil, err
 			}
 			if newKey == nil {
+				// invariant: fn returns nil (keep original) only for plain storage keys (length.Addr+length.Hash bytes)
 				newData = append(newData, branchData[pos-int(l)-n:pos]...) // -n to include length
-				if l != length.Addr+length.Hash {
-					fmt.Printf("COPY %x LEN %d\n", []byte(branchData[pos-int(l):pos]), l)
-				}
 			} else {
-				if len(newKey) > 8 && len(newKey) != length.Addr+length.Hash {
-					fmt.Printf("SHORT %x LEN %d\n", newKey, len(newKey))
-				}
-
+				// invariant: newKey is a short reference (≤8 bytes) or full plain storage key (length.Addr+length.Hash bytes)
 				n = binary.PutUvarint(numBuf[:], uint64(len(newKey)))
 				newData = append(newData, numBuf[:n]...)
 				newData = append(newData, newKey...)
@@ -1106,7 +1127,7 @@ func (branchData BranchData) Validate(branchKey []byte) error {
 	if err = validateAfterMap(afterMap, row); err != nil {
 		return err
 	}
-	if err = validatePlainKeys(branchKey, row, sha3.NewLegacyKeccak256().(keccakState)); err != nil {
+	if err = validatePlainKeys(branchKey, row, keccak.NewFastKeccak()); err != nil {
 		return err
 	}
 	return nil
@@ -1126,7 +1147,7 @@ func validateAfterMap(afterMap uint16, row [16]*cell) error {
 	return nil
 }
 
-func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccakState) error {
+func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccak.KeccakState) error {
 	uncompactedBranchKey := uncompactNibbles(branchKey)
 	if HasTerm(uncompactedBranchKey) {
 		uncompactedBranchKey = uncompactedBranchKey[:len(uncompactedBranchKey)-1]

@@ -56,7 +56,8 @@ var (
 
 	//state v3
 	noPrune              = EnvBool("NO_PRUNE", false)
-	noMerge              = EnvBool("NO_MERGE", false)
+	noMerge              = EnvBool("NO_MERGE", false)         // don't merge Domain/Hist/II
+	noMergeHistory       = EnvBool("NO_MERGE_HISTORY", false) // don't merge Hist/II but still merge Domain
 	discardCommitment    = EnvBool("DISCARD_COMMITMENT", false)
 	pruneTotalDifficulty = EnvBool("PRUNE_TOTAL_DIFFICULTY", true)
 
@@ -79,30 +80,30 @@ var (
 	numWorkers           = runtime.NumCPU() / 2
 	Exec3Workers         = EnvInt("EXEC3_WORKERS", numWorkers)
 	ExecTerseLoggerLevel = EnvInt("EXEC_TERSE_LOGGER_LEVEL", int(log.LvlWarn))
+	CompressWorkers      = EnvInt("COMPRESS_WORKERS", 1)
+	MergeWorkers         = EnvInt("MERGE_WORKERS", 1)
+	CollateWorkers       = EnvInt("COLLATE_WORKERS", 2)
 
-	CompressWorkers = EnvInt("COMPRESS_WORKERS", 1)
-	MergeWorkers    = EnvInt("MERGE_WORKERS", 1)
-	CollateWorkers  = EnvInt("COLLATE_WORKERS", 2)
-
-	TraceAccounts        = EnvStrings("TRACE_ACCOUNTS", ",", nil)
-	TraceStateKeys       = EnvStrings("TRACE_STATE_KEYS", ",", nil)
-	TraceInstructions    = EnvBool("TRACE_INSTRUCTIONS", false)
-	TraceTransactionIO   = EnvBool("TRACE_TRANSACTION_IO", false)
-	TraceDomainIO        = EnvBool("TRACE_DOMAIN_IO", false)
-	TraceNoopIO          = EnvBool("TRACE_NOOP_IO", false)
-	TraceLogs            = EnvBool("TRACE_LOGS", false)
-	TraceGas             = EnvBool("TRACE_GAS", false)
-	TraceDynamicGas      = EnvBool("TRACE_DYNAMIC_GAS", false)
-	TraceApply           = EnvBool("TRACE_APPLY", false)
-	TraceBlocks          = EnvUints("TRACE_BLOCKS", ",", nil)
-	TraceTxIndexes       = EnvInts("TRACE_TXINDEXES", ",", nil)
-	TraceUnwinds         = EnvBool("TRACE_UNWINDS", false)
-	traceDomains         = EnvStrings("TRACE_DOMAINS", ",", nil)
-	StopAfterBlock       = EnvUint("STOP_AFTER_BLOCK", 0)
-	BatchCommitments     = EnvBool("BATCH_COMMITMENTS", true)
-	CaplinEfficientReorg = EnvBool("CAPLIN_EFFICIENT_REORG", true)
-	UseTxDependencies    = EnvBool("USE_TX_DEPENDENCIES", false)
-	UseStateCache        = EnvBool("USE_STATE_CACHE", true)
+	TraceAccounts         = EnvStrings("TRACE_ACCOUNTS", ",", nil)
+	TraceStateKeys        = EnvStrings("TRACE_STATE_KEYS", ",", nil)
+	TraceInstructions     = EnvBool("TRACE_INSTRUCTIONS", false)
+	TraceTransactionIO    = EnvBool("TRACE_TRANSACTION_IO", false)
+	TraceDomainIO         = EnvBool("TRACE_DOMAIN_IO", false)
+	TraceNoopIO           = EnvBool("TRACE_NOOP_IO", false)
+	TraceLogs             = EnvBool("TRACE_LOGS", false)
+	TraceGas              = EnvBool("TRACE_GAS", false)
+	TraceDynamicGas       = EnvBool("TRACE_DYNAMIC_GAS", false)
+	TraceApply            = EnvBool("TRACE_APPLY", false)
+	TraceBlockAccessLists = EnvBool("TRACE_BLOCK_ACCESS_LISTS", false)
+	TraceBlocks           = EnvUints("TRACE_BLOCKS", ",", nil)
+	TraceTxIndexes        = EnvInts("TRACE_TXINDEXES", ",", nil)
+	TraceUnwinds          = EnvBool("TRACE_UNWINDS", false)
+	traceDomains          = EnvStrings("TRACE_DOMAINS", ",", nil)
+	StopAfterBlock        = EnvUint("STOP_AFTER_BLOCK", 0)
+	BatchCommitments      = EnvBool("BATCH_COMMITMENTS", true)
+	CaplinEfficientReorg  = EnvBool("CAPLIN_EFFICIENT_REORG", true)
+	UseTxDependencies     = EnvBool("USE_TX_DEPENDENCIES", false)
+	UseStateCache         = EnvBool("USE_STATE_CACHE", true)
 
 	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
 	TraceDeletion         = EnvBool("TRACE_DELETION", false)
@@ -120,6 +121,7 @@ func ReadMemStats(m *runtime.MemStats) {
 func DiscardCommitment() bool    { return discardCommitment }
 func NoPrune() bool              { return noPrune }
 func NoMerge() bool              { return noMerge }
+func NoMergeHistory() bool       { return noMergeHistory }
 func PruneTotalDifficulty() bool { return pruneTotalDifficulty }
 
 var (

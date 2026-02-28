@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package state
+package btindex
 
 import (
 	"bufio"
@@ -173,7 +173,6 @@ type BtIndexWriter struct {
 	maxOffset  uint64
 	prevOffset uint64
 	minDelta   uint64
-	indexW     *bufio.Writer
 	indexF     *os.File
 	ef         *eliasfano32.EliasFano
 	collector  *etl.Collector
@@ -267,7 +266,7 @@ func (btw *BtIndexWriter) Build() error {
 		return fmt.Errorf("create temp index file for %s: %w", btw.args.IndexFile, err)
 	}
 	defer btw.indexF.Close()
-	btw.indexW = bufio.NewWriterSize(btw.indexF, etl.BufIOSize)
+	indexW := bufio.NewWriterSize(btw.indexF, etl.BufIOSize)
 
 	defer btw.collector.Close()
 	log.Log(btw.args.Lvl, "[index] calculating", "file", btw.indexFileName)
@@ -290,10 +289,10 @@ func (btw *BtIndexWriter) Build() error {
 		}
 		btw.ef.Build()
 
-		if err := btw.ef.Write(btw.indexW); err != nil {
+		if err := btw.ef.Write(indexW); err != nil {
 			return fmt.Errorf("[index] write ef: %w", err)
 		}
-		if err = encodeListNodes(nodes, btw.indexW); err != nil {
+		if err = encodeListNodes(nodes, indexW); err != nil {
 			return fmt.Errorf("[index] write nodes: %w", err)
 		}
 	}
@@ -301,7 +300,7 @@ func (btw *BtIndexWriter) Build() error {
 	btw.logger.Log(btw.args.Lvl, "[index] write", "file", btw.indexFileName)
 	btw.built = true
 
-	if err = btw.indexW.Flush(); err != nil {
+	if err = indexW.Flush(); err != nil {
 		return err
 	}
 	if err = btw.fsync(); err != nil {
