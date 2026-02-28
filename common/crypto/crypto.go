@@ -187,8 +187,10 @@ func MarshalPubkeyStd(pub *ecdsa.PublicKey) []byte {
 // The input slice must be 64 bytes long and have this format: [X..., Y...]
 // See MarshalPubkey.
 func UnmarshalPubkey(keyBytes []byte) (*ecdsa.PublicKey, error) {
-	keyBytes = append([]byte{0x4}, keyBytes...)
-	return UnmarshalPubkeyStd(keyBytes)
+	buf := make([]byte, 1+len(keyBytes))
+	buf[0] = 0x4
+	copy(buf[1:], keyBytes)
+	return UnmarshalPubkeyStd(buf)
 }
 
 // MarshalPubkey converts a public key into a 64 bytes "uncompressed" format.
