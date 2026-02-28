@@ -43,7 +43,7 @@ func (cs *MultiClient) PropagateNewBlockHashes(ctx context.Context, announces []
 
 	data, err := rlp.EncodeToBytes(&typedRequest)
 	if err != nil {
-		log.Error("propagateNewBlockHashes", "err", err)
+		log.Error("[p2p] propagateNewBlockHashes", "err", err)
 		return
 	}
 
@@ -59,7 +59,7 @@ func (cs *MultiClient) PropagateNewBlockHashes(ctx context.Context, announces []
 
 		_, err = sentry.SendMessageToAll(ctx, &req66, &grpc.EmptyCallOption{})
 		if err != nil {
-			log.Error("propagateNewBlockHashes", "err", err)
+			log.Error("[p2p] propagateNewBlockHashes", "err", err)
 		}
 	}
 }
@@ -68,7 +68,7 @@ func (cs *MultiClient) BroadcastNewBlock(ctx context.Context, header *types.Head
 	block, err := types.RawBlock{Header: header, Body: body}.AsBlock()
 
 	if err != nil {
-		log.Error("broadcastNewBlock", "err", err)
+		log.Error("[p2p] broadcastNewBlock", "err", err)
 	}
 
 	data, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
@@ -77,7 +77,7 @@ func (cs *MultiClient) BroadcastNewBlock(ctx context.Context, header *types.Head
 	})
 
 	if err != nil {
-		log.Error("broadcastNewBlock", "err", err)
+		log.Error("[p2p] broadcastNewBlock", "err", err)
 		return
 	}
 
@@ -97,10 +97,10 @@ func (cs *MultiClient) BroadcastNewBlock(ctx context.Context, header *types.Head
 		_, err = sentry.SendMessageToRandomPeers(ctx, &req66, &grpc.EmptyCallOption{})
 		if err != nil {
 			if libsentry.IsPeerNotFoundErr(err) || networkTemporaryErr(err) {
-				log.Debug("broadcastNewBlock", "err", err)
+				log.Debug("[p2p] broadcastNewBlock", "err", err)
 				continue
 			}
-			log.Error("broadcastNewBlock", "err", err)
+			log.Error("[p2p] broadcastNewBlock", "err", err)
 		}
 	}
 }
