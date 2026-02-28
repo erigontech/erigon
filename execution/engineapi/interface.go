@@ -46,4 +46,5 @@ type EngineAPI interface {
 	GetBlobsV1(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV1, error)
 	GetBlobsV2(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV2, error)
 	GetBlobsV3(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV2, error)
+	ExchangeTransitionConfigurationV1(ctx context.Context, transitionConfiguration *engine_types.TransitionConfiguration) (*engine_types.TransitionConfiguration, error)
 }

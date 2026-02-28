@@ -284,3 +284,20 @@ func (e *EngineServer) GetBlobsV3(ctx context.Context, blobHashes []common.Hash)
 	}
 	return nil, err
 }
+
+func (e *EngineServer) ExchangeTransitionConfigurationV1(ctx context.Context, beaconConfig *engine_types.TransitionConfiguration) (*engine_types.TransitionConfiguration, error) {
+	terminalTotalDifficulty := e.config.TerminalTotalDifficulty
+	if terminalTotalDifficulty == nil {
+		return nil, fmt.Errorf("the execution layer doesn't have a terminal total difficulty. expected: %v", beaconConfig.TerminalTotalDifficulty)
+	}
+
+	if terminalTotalDifficulty.Cmp(beaconConfig.TerminalTotalDifficulty.ToInt()) != 0 {
+		return nil, fmt.Errorf("the execution layer has a wrong terminal total difficulty. expected %v, but instead got: %d", beaconConfig.TerminalTotalDifficulty, terminalTotalDifficulty)
+	}
+
+	return &engine_types.TransitionConfiguration{
+		TerminalTotalDifficulty: (*hexutil.Big)(terminalTotalDifficulty),
+		TerminalBlockHash:       common.Hash{},
+		TerminalBlockNumber:     (*hexutil.Big)(common.Big0),
+	}, nil
+}
