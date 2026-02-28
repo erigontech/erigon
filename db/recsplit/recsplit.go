@@ -71,6 +71,7 @@ type recsplitScratch struct {
 	count              []uint16 // Size = secondaryAggrBound (for findSplit 8-way)
 	buffer             []uint64
 	offsetBuffer       []uint64
+	unaryBuf           []uint64 // reused across buckets to avoid allocation
 	numBuf             [8]byte
 	trace              bool     // Enable tracing output
 	startSeed          []uint64 // Hash seeds for each level of recursive split
@@ -86,7 +87,6 @@ type bucketResult struct {
 	bucketIdx  uint64
 	offsetData []byte     // Serialized leaf-offset bytes
 	gr         GolombRice // Per-bucket Golomb-Rice encoding
-	unaryBuf   []uint64   // Unary codes accumulated during recsplit; reused across pool cycles
 	bucketSize int        // Number of keys in this bucket
 }
 
@@ -94,7 +94,6 @@ type bucketResult struct {
 func (br *bucketResult) Reset() {
 	br.offsetData = br.offsetData[:0]
 	br.gr = GolombRice{}
-	br.unaryBuf = br.unaryBuf[:0]
 	br.bucketSize = 0
 	br.bucketIdx = 0
 }
@@ -130,15 +129,13 @@ type RecSplit struct {
 	scratch           *recsplitScratch // Working buffers
 	gr                GolombRice       // Helper object to encode the tree of hash function salts using Golomb-Rice code.
 	bucketPosAcc      []uint64         // Accumulator for position of every bucket in the encoding of the hash function
-	startSeed         []uint64
-	currentBucket     []uint64 // 64-bit fingerprints of keys in the current bucket accumulated before the recsplit is performed for that bucket
-	currentBucketOffs []uint64 // Index offsets for the current bucket
-	bucketSizeAcc     []uint64 // Bucket size accumulator
+	currentBucket     []uint64         // 64-bit fingerprints of keys in the current bucket accumulated before the recsplit is performed for that bucket
+	currentBucketOffs []uint64         // Index offsets for the current bucket
+	bucketSizeAcc     []uint64         // Bucket size accumulator
 	// Helper object to encode the sequence of cumulative number of keys in the buckets
 	// and the sequence of cumulative bit offsets of buckets in the Golomb-Rice code.
 	ef                 eliasfano16.DoubleEliasFano
 	lvl                log.Lvl
-	bytesPerRec        int
 	minDelta           uint64 // minDelta for Elias Fano encoding of "enum -> offset" index
 	prevOffset         uint64 // Previously added offset (for calculating minDelta for Elias Fano encoding of "enum -> offset" index)
 	bucketSize         int
@@ -149,16 +146,12 @@ type RecSplit struct {
 	baseDataID         uint64 // Minimal app-specific ID of entries of this index - helps app understand what data stored in given shard - persistent field
 	bucketCount        uint64 // Number of buckets
 	salt               uint32 // Murmur3 hash used for converting keys to 64-bit values and assigning to buckets
-	leafSize           uint16 // Leaf size for recursive split algorithm
-	secondaryAggrBound uint16 // The lower bound for secondary key aggregation (computed from leadSize)
-	primaryAggrBound   uint16 // The lower bound for primary key aggregation (computed from leafSize)
 	bucketKeyBuf       [16]byte
 	numBuf             [8]byte
 	collision          bool
 	enums              bool // Whether to build two level index with perfect hash table pointing to enumeration and enumeration pointing to offsets
 	lessFalsePositives bool
 	built              bool // Flag indicating that the hash function has been built and no more keys can be added
-	trace              bool
 	logger             log.Logger
 
 	noFsync bool // fsync is enabled by default, but tests can manually disable
@@ -220,7 +213,6 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 		enums:              args.Enums,
 		baseDataID:         args.BaseDataID,
 		lessFalsePositives: args.LessFalsePositives,
-		startSeed:          args.StartSeed,
 		lvl:                log.LvlDebug, logger: logger,
 	}
 	closeFiles := true
@@ -275,20 +267,20 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	if args.LeafSize > MaxLeafSize {
 		return nil, fmt.Errorf("exceeded max leaf size %d: %d", MaxLeafSize, args.LeafSize)
 	}
-	rs.leafSize = args.LeafSize
-	rs.primaryAggrBound = rs.leafSize * uint16(math.Max(2, math.Ceil(0.35*float64(rs.leafSize)+1./2.)))
-	if rs.leafSize < 7 {
-		rs.secondaryAggrBound = rs.primaryAggrBound * 2
+	leafSize := args.LeafSize
+	primaryAggrBound := leafSize * uint16(math.Max(2, math.Ceil(0.35*float64(leafSize)+1./2.)))
+	var secondaryAggrBound uint16
+	if leafSize < 7 {
+		secondaryAggrBound = primaryAggrBound * 2
 	} else {
-		rs.secondaryAggrBound = rs.primaryAggrBound * uint16(math.Ceil(0.21*float64(rs.leafSize)+9./10.))
+		secondaryAggrBound = primaryAggrBound * uint16(math.Ceil(0.21*float64(leafSize)+9./10.))
 	}
 	rs.scratch = &recsplitScratch{
-		count:              make([]uint16, rs.secondaryAggrBound),
-		trace:              rs.trace,
+		count:              make([]uint16, secondaryAggrBound),
 		startSeed:          args.StartSeed,
-		leafSize:           rs.leafSize,
-		primaryAggrBound:   rs.primaryAggrBound,
-		secondaryAggrBound: rs.secondaryAggrBound,
+		leafSize:           leafSize,
+		primaryAggrBound:   primaryAggrBound,
+		secondaryAggrBound: secondaryAggrBound,
 	}
 	if args.NoFsync {
 		rs.DisableFsync()
@@ -300,6 +292,20 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 func (rs *RecSplit) FileName() string                           { return rs.fileName }
 func (rs *RecSplit) MajorVersion() version.DataStructureVersion { return rs.dataStructureVersion }
 func (rs *RecSplit) Salt() uint32                               { return rs.salt }
+
+// preAlloc ensures buffer and offsetBuffer are at least n elements long.
+func (sc *recsplitScratch) preAlloc(n int) {
+	if cap(sc.buffer) < n {
+		sc.buffer = make([]uint64, n)
+	} else {
+		sc.buffer = sc.buffer[:n]
+	}
+	if cap(sc.offsetBuffer) < n {
+		sc.offsetBuffer = make([]uint64, n)
+	} else {
+		sc.offsetBuffer = sc.offsetBuffer[:n]
+	}
+}
 
 // golombParam lazily extends the scratch's local golombRice table and returns
 // the Golomb parameter for m. Each scratch owns its own slice, so this is safe
@@ -353,7 +359,7 @@ func (rs *RecSplit) Close() {
 func (rs *RecSplit) LogLvl(lvl log.Lvl) { rs.lvl = lvl }
 
 func (rs *RecSplit) SetTrace(trace bool) {
-	rs.trace = trace
+	rs.scratch.trace = trace
 }
 
 // remap converts the number x which is assumed to be uniformly distributed over the range [0..2^64) to the number that is uniformly
@@ -539,30 +545,22 @@ func (rs *RecSplit) recsplitCurrentBucket() error {
 			}
 		}
 		bitPos := rs.gr.bitCount
-		if rs.scratch.buffer == nil {
-			rs.scratch.buffer = make([]uint64, len(rs.currentBucket))
-			rs.scratch.offsetBuffer = make([]uint64, len(rs.currentBucketOffs))
-		} else {
-			for len(rs.scratch.buffer) < len(rs.currentBucket) {
-				rs.scratch.buffer = append(rs.scratch.buffer, 0)
-				rs.scratch.offsetBuffer = append(rs.scratch.offsetBuffer, 0)
-			}
-		}
+		rs.scratch.preAlloc(len(rs.currentBucket))
 		var err error
-		result.unaryBuf, err = recsplit(0 /* level */, rs.currentBucket, rs.currentBucketOffs, result.unaryBuf[:0], rs.scratch, result)
+		rs.scratch.unaryBuf, err = recsplit(0 /* level */, rs.currentBucket, rs.currentBucketOffs, rs.scratch.unaryBuf[:0], rs.scratch, result)
 		if err != nil {
 			return err
 		}
 		// Merge per-bucket GolombRice into global GolombRice
 		rs.gr.Append(&result.gr)
-		rs.gr.appendUnaryAll(result.unaryBuf)
-		if rs.trace {
+		rs.gr.appendUnaryAll(rs.scratch.unaryBuf)
+		if rs.scratch.trace {
 			fmt.Printf("recsplitBucket(%d, %d, bitsize = %d)\n", rs.currentBucketIdx, len(rs.currentBucket), rs.gr.bitCount-bitPos)
 		}
 	} else {
 		for _, offset := range rs.currentBucketOffs {
 			binary.BigEndian.PutUint64(rs.numBuf[:], offset)
-			result.offsetData = append(result.offsetData, rs.numBuf[8-rs.bytesPerRec:]...)
+			result.offsetData = append(result.offsetData, rs.numBuf[8-rs.scratch.bytesPerRec:]...)
 		}
 	}
 
@@ -845,18 +843,16 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	}
 	// Write number of bytes per index record
 	if rs.enums {
-		rs.bytesPerRec = common.BitLenToByteLen(bits.Len64(rs.keysAdded + 1))
+		rs.scratch.bytesPerRec = common.BitLenToByteLen(bits.Len64(rs.keysAdded + 1))
 	} else {
-		rs.bytesPerRec = common.BitLenToByteLen(bits.Len64(rs.maxOffset))
+		rs.scratch.bytesPerRec = common.BitLenToByteLen(bits.Len64(rs.maxOffset))
 	}
-	if err = rs.indexW.WriteByte(byte(rs.bytesPerRec)); err != nil {
+	if err = rs.indexW.WriteByte(byte(rs.scratch.bytesPerRec)); err != nil {
 		return fmt.Errorf("write bytes per record: %w", err)
 	}
 
 	rs.currentBucketIdx = math.MaxUint64 // To make sure 0 bucket is detected
 	defer rs.bucketCollector.Close()
-
-	rs.scratch.bytesPerRec = rs.bytesPerRec
 
 	if rs.lvl < log.LvlTrace {
 		log.Log(rs.lvl, "[index] calculating", "file", rs.fileName)
@@ -875,8 +871,8 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		_ = rs.indexW.Flush()
 		rs.indexF.Seek(0, 0)
 		b, _ := io.ReadAll(rs.indexF)
-		if len(b) != 9+int(rs.keysAdded)*rs.bytesPerRec {
-			panic(fmt.Errorf("expected: %d, got: %d; rs.keysAdded=%d, rs.bytesPerRec=%d, %s", 9+int(rs.keysAdded)*rs.bytesPerRec, len(b), rs.keysAdded, rs.bytesPerRec, rs.filePath))
+		if len(b) != 9+int(rs.keysAdded)*rs.scratch.bytesPerRec {
+			panic(fmt.Errorf("expected: %d, got: %d; rs.keysAdded=%d, rs.bytesPerRec=%d, %s", 9+int(rs.keysAdded)*rs.scratch.bytesPerRec, len(b), rs.keysAdded, rs.scratch.bytesPerRec, rs.filePath))
 		}
 	}
 	if rs.lvl < log.LvlTrace {
@@ -901,7 +897,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	if _, err := rs.indexW.Write(rs.numBuf[:2]); err != nil {
 		return fmt.Errorf("writing bucketSize: %w", err)
 	}
-	binary.BigEndian.PutUint16(rs.numBuf[:], rs.leafSize)
+	binary.BigEndian.PutUint16(rs.numBuf[:], rs.scratch.leafSize)
 	if _, err := rs.indexW.Write(rs.numBuf[:2]); err != nil {
 		return fmt.Errorf("writing leafSize: %w", err)
 	}
@@ -911,10 +907,10 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		return fmt.Errorf("writing salt: %w", err)
 	}
 	// Write out start seeds
-	if err := rs.indexW.WriteByte(byte(len(rs.startSeed))); err != nil {
+	if err := rs.indexW.WriteByte(byte(len(rs.scratch.startSeed))); err != nil {
 		return fmt.Errorf("writing len of start seeds: %w", err)
 	}
-	for _, s := range rs.startSeed {
+	for _, s := range rs.scratch.startSeed {
 		binary.BigEndian.PutUint64(rs.numBuf[:], s)
 		if _, err := rs.indexW.Write(rs.numBuf[:8]); err != nil {
 			return fmt.Errorf("writing start seed: %w", err)
