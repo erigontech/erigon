@@ -116,7 +116,7 @@ func (c *Collector) Allocator(a *Allocator) *Collector {
 	return c
 }
 
-var inProgress atomic.Int32
+var inProgress2 atomic.Int32
 
 func (c *Collector) flushBuffer(canStoreInRam bool) error {
 	if c.buf.Len() == 0 {

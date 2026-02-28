@@ -57,13 +57,15 @@ func FlushToDiskAsync(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl, al
 
 	provider := &fileDataProvider{reader: nil, wg: &errgroup.Group{}}
 	provider.wg.Go(func() (err error) {
+		inProgress2.Add(1)
 		defer func() {
+			inProgress2.Add(-1)
 			if allocator != nil {
 				allocator.Put(b)
 			}
 			inProgress.Store(false)
 		}()
-		log.Warn("etl bg jobs amount", "bg_josb", inProgress.Load())
+		log.Warn("etl bg jobs amount", "bg_josb", inProgress2.Load())
 
 		provider.file, err = sortAndFlush(b, tmpdir)
 		if err != nil {
