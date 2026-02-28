@@ -13,7 +13,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/execution/chain/spec"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/filters"
@@ -165,6 +165,13 @@ func (e *ErigonMCPServer) registerTools() {
 		mcp.WithString("position", mcp.Required(), mcp.Description("Storage position")),
 		mcp.WithString("blockNumber", mcp.Description("Block number")),
 	), e.handleGetStorageAt)
+
+	// eth_getStorageValues
+	e.mcpServer.AddTool(mcp.NewTool("eth_getStorageValues",
+		mcp.WithDescription("Get multiple storage slot values for multiple accounts in a single request"),
+		mcp.WithString("requests", mcp.Required(), mcp.Description("JSON object mapping addresses to arrays of storage slot keys")),
+		mcp.WithString("blockNumber", mcp.Description("Block number or tag (latest, earliest, pending)")),
+	), e.handleGetStorageValues)
 
 	// eth_getTransactionCount
 	e.mcpServer.AddTool(mcp.NewTool("eth_getTransactionCount",
@@ -627,6 +634,43 @@ func (e *ErigonMCPServer) handleGetStorageAt(ctx context.Context, req mcp.CallTo
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("Storage: %s", result)), nil
+}
+
+func (e *ErigonMCPServer) handleGetStorageValues(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	rawRequests := req.GetString("requests", "{}")
+	blockNumOrHash, _ := parseBlockNumberOrHash(req.GetString("blockNumber", "latest"))
+
+	// Parse the JSON requests map
+	var parsed map[string][]string
+	if err := json.Unmarshal([]byte(rawRequests), &parsed); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("invalid requests format: %v", err)), nil
+	}
+
+	// Convert to map[common.Address][]common.Hash
+	requests := make(map[common.Address][]common.Hash, len(parsed))
+	for addrStr, keys := range parsed {
+		addr := common.HexToAddress(addrStr)
+		hashes := make([]common.Hash, len(keys))
+		for i, k := range keys {
+			hashes[i] = common.HexToHash(k)
+		}
+		requests[addr] = hashes
+	}
+
+	result, err := e.ethAPI.GetStorageValues(ctx, requests, blockNumOrHash)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	// Format output
+	var sb strings.Builder
+	for addr, vals := range result {
+		sb.WriteString(fmt.Sprintf("Address: %s\n", addr.Hex()))
+		for i, v := range vals {
+			sb.WriteString(fmt.Sprintf("  Slot %d: %s\n", i, common.BytesToHash(v).Hex()))
+		}
+	}
+	return mcp.NewToolResultText(sb.String()), nil
 }
 
 func (e *ErigonMCPServer) handleGetTransactionCount(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
