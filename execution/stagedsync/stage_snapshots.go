@@ -155,16 +155,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cstate = snapshotsync.AlsoCaplin
 	}
 
-	subStages := diaglib.InitSubStagesFromList([]string{"Download header-chain", "Download snapshots", "E2 Indexing", "E3 Indexing", "Fill DB"})
-	diaglib.Send(diaglib.SetSyncSubStageList{
-		Stage: string(stages.Snapshots),
-		List:  subStages,
-	})
-
 	log.Info("[OtterSync] Starting Ottersync")
-	log.Info(snapshotsync.GreatOtterBanner)
 
-	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "Download header-chain"})
 	agg := cfg.db.(*temporal.DB).Agg().(*state.Aggregator)
 	// Download only the snapshots that are for the header chain.
 
