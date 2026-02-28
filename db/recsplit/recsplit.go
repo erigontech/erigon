@@ -71,6 +71,7 @@ type recsplitScratch struct {
 	count              []uint16 // Size = secondaryAggrBound (for findSplit 8-way)
 	buffer             []uint64
 	offsetBuffer       []uint64
+	unaryBuf           []uint64 // reused across buckets to avoid allocation
 	numBuf             [8]byte
 	trace              bool     // Enable tracing output
 	startSeed          []uint64 // Hash seeds for each level of recursive split
@@ -161,8 +162,6 @@ type RecSplit struct {
 
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 	timings Timings
-
-	unaryBuf []uint64 // `recsplit` func returning `unary` array. re-using it between buckets
 }
 
 type RecSplitArgs struct {
@@ -549,13 +548,13 @@ func (rs *RecSplit) recsplitCurrentBucket() error {
 			}
 		}
 		var err error
-		rs.unaryBuf, err = recsplit(0 /* level */, rs.currentBucket, rs.currentBucketOffs, rs.unaryBuf[:0], rs.scratch, result)
+		rs.scratch.unaryBuf, err = recsplit(0 /* level */, rs.currentBucket, rs.currentBucketOffs, rs.scratch.unaryBuf[:0], rs.scratch, result)
 		if err != nil {
 			return err
 		}
 		// Merge per-bucket GolombRice into global GolombRice
 		rs.gr.Append(&result.gr)
-		rs.gr.appendUnaryAll(rs.unaryBuf)
+		rs.gr.appendUnaryAll(rs.scratch.unaryBuf)
 		if rs.trace {
 			fmt.Printf("recsplitBucket(%d, %d, bitsize = %d)\n", rs.currentBucketIdx, len(rs.currentBucket), rs.gr.bitCount-bitPos)
 		}
@@ -703,33 +702,33 @@ func findBijection(bucket []uint64, salt uint64) uint64 {
 
 // recsplit applies recSplit algorithm to the given bucket and accumulates into result.
 // Pure function - stateless and independent of RecSplit class.
-func recsplit(level int, bucket []uint64, offsets []uint64, unary []uint64, scratch *recsplitScratch, result *bucketResult) ([]uint64, error) {
-	if scratch.trace {
+func recsplit(level int, bucket []uint64, offsets []uint64, unary []uint64, rs *recsplitScratch, result *bucketResult) ([]uint64, error) {
+	if rs.trace {
 		fmt.Printf("recsplit(%d, %d, %x)\n", level, len(bucket), bucket)
 	}
 	// Pick initial salt for this level of recursive split
-	salt := scratch.startSeed[level]
+	salt := rs.startSeed[level]
 	m := uint16(len(bucket))
-	if m <= scratch.leafSize {
+	if m <= rs.leafSize {
 		salt = findBijection(bucket, salt)
 		for i := uint16(0); i < m; i++ {
 			j := remap16(remix(bucket[i]+salt), m)
-			scratch.offsetBuffer[j] = offsets[i]
+			rs.offsetBuffer[j] = offsets[i]
 		}
-		for _, offset := range scratch.offsetBuffer[:m] {
-			binary.BigEndian.PutUint64(scratch.numBuf[:], offset)
-			result.offsetData = append(result.offsetData, scratch.numBuf[8-scratch.bytesPerRec:]...)
+		for _, offset := range rs.offsetBuffer[:m] {
+			binary.BigEndian.PutUint64(rs.numBuf[:], offset)
+			result.offsetData = append(result.offsetData, rs.numBuf[8-rs.bytesPerRec:]...)
 		}
-		salt -= scratch.startSeed[level]
-		log2golomb := scratch.golombParam(m)
-		if scratch.trace {
+		salt -= rs.startSeed[level]
+		log2golomb := rs.golombParam(m)
+		if rs.trace {
 			fmt.Printf("encode bij %d with log2golomn %d at p = %d\n", salt, log2golomb, result.gr.bitCount)
 		}
 		result.gr.appendFixed(salt, log2golomb)
 		unary = append(unary, salt>>log2golomb)
 	} else {
-		fanout, unit := splitParams(m, scratch.leafSize, scratch.primaryAggrBound, scratch.secondaryAggrBound)
-		count := scratch.count
+		fanout, unit := splitParams(m, rs.leafSize, rs.primaryAggrBound, rs.secondaryAggrBound)
+		count := rs.count
 		salt = findSplit(bucket, salt, fanout, unit, count)
 		for i, c := uint16(0), uint16(0); i < fanout; i++ {
 			count[i] = c
@@ -737,15 +736,15 @@ func recsplit(level int, bucket []uint64, offsets []uint64, unary []uint64, scra
 		}
 		for i := uint16(0); i < m; i++ {
 			j := remap16(remix(bucket[i]+salt), m) / unit
-			scratch.buffer[count[j]] = bucket[i]
-			scratch.offsetBuffer[count[j]] = offsets[i]
+			rs.buffer[count[j]] = bucket[i]
+			rs.offsetBuffer[count[j]] = offsets[i]
 			count[j]++
 		}
-		copy(bucket, scratch.buffer)
-		copy(offsets, scratch.offsetBuffer)
-		salt -= scratch.startSeed[level]
-		log2golomb := scratch.golombParam(m)
-		if scratch.trace {
+		copy(bucket, rs.buffer)
+		copy(offsets, rs.offsetBuffer)
+		salt -= rs.startSeed[level]
+		log2golomb := rs.golombParam(m)
+		if rs.trace {
 			fmt.Printf("encode fanout %d: %d with log2golomn %d at p = %d\n", fanout, salt, log2golomb, result.gr.bitCount)
 		}
 		result.gr.appendFixed(salt, log2golomb)
@@ -753,17 +752,17 @@ func recsplit(level int, bucket []uint64, offsets []uint64, unary []uint64, scra
 		var err error
 		var i uint16
 		for i = 0; i < m-unit; i += unit {
-			if unary, err = recsplit(level+1, bucket[i:i+unit], offsets[i:i+unit], unary, scratch, result); err != nil {
+			if unary, err = recsplit(level+1, bucket[i:i+unit], offsets[i:i+unit], unary, rs, result); err != nil {
 				return nil, err
 			}
 		}
 		if m-i > 1 {
-			if unary, err = recsplit(level+1, bucket[i:], offsets[i:], unary, scratch, result); err != nil {
+			if unary, err = recsplit(level+1, bucket[i:], offsets[i:], unary, rs, result); err != nil {
 				return nil, err
 			}
 		} else if m-i == 1 {
-			binary.BigEndian.PutUint64(scratch.numBuf[:], offsets[i])
-			result.offsetData = append(result.offsetData, scratch.numBuf[8-scratch.bytesPerRec:]...)
+			binary.BigEndian.PutUint64(rs.numBuf[:], offsets[i])
+			result.offsetData = append(result.offsetData, rs.numBuf[8-rs.bytesPerRec:]...)
 		}
 	}
 	return unary, nil
