@@ -193,7 +193,7 @@ func newFilter(heightForks, timeForks []uint64, genesis common.Hash, headHeight,
 			// No exact, subset or superset match. We are on differing chains, reject.
 			return ErrLocalIncompatibleOrStale
 		}
-		log.Error("Impossible fork ID validation", "id", id)
+		log.Error("[p2p] Impossible fork ID validation", "id", id)
 		return nil // Something's very wrong, accept rather than reject
 	}
 }
