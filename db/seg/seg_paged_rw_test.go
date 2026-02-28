@@ -43,7 +43,7 @@ func prepareLoremDictOnPagedWriter(t *testing.T, pageSize int, pageCompression b
 	require.NoError(err)
 	defer c.Close()
 
-	p := NewPagedWriter(context.Background(), NewWriter(c, CompressNone), pageCompression)
+	p := NewPagedWriter(t.Context(), NewWriter(c, CompressNone), pageCompression)
 	for k, w := range loremStrings {
 		key := fmt.Sprintf("key %d", k)
 		val := fmt.Sprintf("%s %d", w, k)
@@ -118,7 +118,7 @@ func (w *multyBytesWriter) GetValuesOnCompressedPage() int { return w.pageSize }
 func TestPage(t *testing.T) {
 	sampling := 2
 	buf, require := &multyBytesWriter{pageSize: sampling}, require.New(t)
-	w := NewPagedWriter(context.Background(), buf, false)
+	w := NewPagedWriter(t.Context(), buf, false)
 	for i := 0; i < sampling+1; i++ {
 		k, v := fmt.Sprintf("k %d", i), fmt.Sprintf("v %d", i)
 		require.NoError(w.Add([]byte(k), []byte(v)))
@@ -175,7 +175,7 @@ func TestPagedReaderWithCompression(t *testing.T) {
 func TestPagedWriterCRC32Sequential(t *testing.T) {
 	// Test that we can compute CRC32 of written pages
 	mock := &multyBytesWriter{pageSize: 4}
-	pw := NewPagedWriter(context.Background(), mock, true)
+	pw := NewPagedWriter(t.Context(), mock, true)
 
 	// Add test data
 	testData := []struct{ k, v string }{
@@ -202,7 +202,7 @@ func TestPagedWriterCRC32Sequential(t *testing.T) {
 
 	// Now test parallel compression produces same CRC32
 	mock2 := &multyBytesWriter{pageSize: 4}
-	pw2 := NewPagedWriter(context.Background(), mock2, true)
+	pw2 := NewPagedWriter(t.Context(), mock2, true)
 
 	for _, kv := range testData {
 		if err := pw2.Add([]byte(kv.k), []byte(kv.v)); err != nil {
@@ -228,7 +228,7 @@ func TestPagedWriterCRC32Sequential(t *testing.T) {
 
 func BenchmarkName(b *testing.B) {
 	buf := &multyBytesWriter{pageSize: 16}
-	w := NewPagedWriter(context.Background(), buf, false)
+	w := NewPagedWriter(b.Context(), buf, false)
 	for i := 0; i < 16; i++ {
 		w.Add([]byte{byte(i)}, []byte{10 + byte(i)})
 	}
