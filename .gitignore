@@ -116,3 +116,6 @@ mdbx.lck
 *.prof
 
 .claude/settings.local.json
+
+# Prevent accidental commit of locally-built binaries
+/erigon
