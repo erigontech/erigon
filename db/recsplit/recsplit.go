@@ -66,6 +66,21 @@ func remix(z uint64) uint64 {
 	return z ^ (z >> 31)
 }
 
+// recsplitScratch holds per-execution scratch buffers and configuration (shared by sequential and worker paths).
+type recsplitScratch struct {
+	count              []uint16 // Size = secondaryAggrBound (for findSplit 8-way)
+	buffer             []uint64
+	offsetBuffer       []uint64
+	numBuf             [8]byte
+	trace              bool     // Enable tracing output
+	startSeed          []uint64 // Hash seeds for each level of recursive split
+	golombRice         []uint32 // Lazily filled by golombParam(); mutable and NOT thread-safe — each worker must own its own recsplitScratch
+	leafSize           uint16
+	primaryAggrBound   uint16
+	secondaryAggrBound uint16
+	bytesPerRec        int // Bytes per record in offset encoding
+}
+
 // bucketResult contains the output of processing a single bucket.
 type bucketResult struct {
 	order      uint64     // Bucket index (for ordering results)
@@ -80,21 +95,6 @@ func (br *bucketResult) Reset() {
 	br.gr = GolombRice{}
 	br.bucketSize = 0
 	br.order = 0
-}
-
-// recsplitScratch holds per-execution scratch buffers and configuration (shared by sequential and worker paths).
-type recsplitScratch struct {
-	count              []uint16 // Size = secondaryAggrBound (for findSplit 8-way)
-	buffer             []uint64
-	offsetBuffer       []uint64
-	numBuf             [8]byte
-	trace              bool     // Enable tracing output
-	startSeed          []uint64 // Hash seeds for each level of recursive split
-	golombRice         []uint32 // Lazily filled by golombParam(); mutable and NOT thread-safe — each worker must own its own recsplitScratch
-	leafSize           uint16
-	primaryAggrBound   uint16
-	secondaryAggrBound uint16
-	bytesPerRec        int // Bytes per record in offset encoding
 }
 
 // RecSplit is the implementation of Recursive Split algorithm for constructing perfect hash mapping, described in
