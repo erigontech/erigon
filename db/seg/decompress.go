@@ -775,7 +775,7 @@ func (g *Getter) nextPos() uint64 {
 		return uint64(g.posEntries[0].pos)
 	}
 	dataP := g.dataP
-	dataBit := g.dataBit
+	dataBit := uint(g.dataBit) & 7 // & 7 proves to compiler: 0 ≤ dataBit < 8, eliminating shift guards
 	data := g.data
 	code := uint16(data[dataP]) >> dataBit
 	if dataP+1 < g.dataLen {
@@ -783,14 +783,14 @@ func (g *Getter) nextPos() uint64 {
 	}
 	code &= g.posMask
 	entry := g.posEntries[code]
-	l := int(entry.bits)
+	l := uint(entry.bits)
 	if l == 0 {
 		return g.nextPosSubtable(g.posDict, code)
 	}
 	dataBit += l
 	dataP += uint64(dataBit >> 3)
 	g.dataP = dataP
-	g.dataBit = dataBit & 7
+	g.dataBit = int(dataBit & 7)
 	return uint64(entry.pos)
 }
 
@@ -801,23 +801,23 @@ func (g *Getter) nextPos() uint64 {
 func (g *Getter) nextPosSubtable(table *posTable, code uint16) uint64 {
 	data := g.data
 	dataP := g.dataP
-	dataBit := g.dataBit
+	dataBit := uint(g.dataBit) & 7
 	for {
 		table = table.ptrs[code]
 		dataBit += 9
 		dataP += uint64(dataBit >> 3)
 		dataBit &= 7
 		code = uint16(data[dataP]) >> dataBit
-		if 8-dataBit < table.bitLen && dataP+1 < g.dataLen {
+		if 8-dataBit < uint(table.bitLen) && dataP+1 < g.dataLen {
 			code |= uint16(data[dataP+1]) << (8 - dataBit)
 		}
 		code &= table.mask
 		entry := table.entries[code]
 		if entry.bits != 0 {
-			dataBit += int(entry.bits)
+			dataBit += uint(entry.bits)
 			dataP += uint64(dataBit >> 3)
 			g.dataP = dataP
-			g.dataBit = dataBit & 7
+			g.dataBit = int(dataBit & 7)
 			return uint64(entry.pos)
 		}
 	}
@@ -831,11 +831,11 @@ func (g *Getter) nextPattern() []byte {
 
 	data := g.data
 	dataP := g.dataP
-	dataBit := g.dataBit
+	dataBit := uint(g.dataBit) & 7
 
 	for {
 		code := uint16(data[dataP]) >> dataBit
-		if 8-dataBit < table.bitLen && dataP+1 < g.dataLen {
+		if 8-dataBit < uint(table.bitLen) && dataP+1 < g.dataLen {
 			code |= uint16(data[dataP+1]) << (8 - dataBit)
 		}
 		code &= (uint16(1) << table.bitLen) - 1
@@ -845,13 +845,13 @@ func (g *Getter) nextPattern() []byte {
 			table = cw.ptr
 			dataBit += 9
 		} else {
-			dataBit += int(cw.len)
+			dataBit += uint(cw.len)
 		}
 		dataP += uint64(dataBit >> 3)
 		dataBit &= 7
 		if cw.len != 0 {
 			g.dataP = dataP
-			g.dataBit = dataBit
+			g.dataBit = int(dataBit)
 			return cw.pattern
 		}
 	}
