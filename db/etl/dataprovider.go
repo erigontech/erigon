@@ -23,6 +23,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon/common/dir"
 
@@ -46,7 +47,7 @@ type fileDataProvider struct {
 }
 
 // FlushToDiskAsync - `doFsync` is true only for 'critical' collectors (which should not loose).
-func FlushToDiskAsync(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl, allocator *Allocator) (dataProvider, error) {
+func FlushToDiskAsync(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl, allocator *Allocator, inProgress *atomic.Bool) (dataProvider, error) {
 	if b.Len() == 0 {
 		if allocator != nil {
 			allocator.Put(b)
@@ -62,6 +63,7 @@ func FlushToDiskAsync(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl, al
 			if allocator != nil {
 				allocator.Put(b)
 			}
+			inProgress.Store(false)
 		}()
 		log.Warn("etl bg jobs amount", "bg_josb", inProgress.Load())
 
