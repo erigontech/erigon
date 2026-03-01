@@ -243,12 +243,13 @@ type appendSortableBuffer struct {
 }
 
 func (b *appendSortableBuffer) Put(k, v []byte) {
-	stored, ok := b.entries[string(k)]
+	s := string(k)
+	stored, ok := b.entries[s]
 	if !ok {
 		b.size += len(k)
 	}
 	b.size += len(v)
-	b.entries[string(k)] = append(stored, v...)
+	b.entries[s] = append(stored, v...)
 }
 
 func (b *appendSortableBuffer) Size() int      { return b.size }
@@ -342,14 +343,15 @@ type oldestEntrySortableBuffer struct {
 }
 
 func (b *oldestEntrySortableBuffer) Put(k, v []byte) {
-	_, ok := b.entries[string(k)]
+	s := string(k)
+	_, ok := b.entries[s]
 	if ok {
 		// if we already had this entry, we are going to keep it and ignore new value
 		return
 	}
 
 	b.size += len(k)*2 + len(v)
-	b.entries[string(k)] = common.Copy(v)
+	b.entries[s] = common.Copy(v)
 }
 
 func (b *oldestEntrySortableBuffer) Size() int      { return b.size }
