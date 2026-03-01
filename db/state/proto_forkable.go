@@ -173,7 +173,7 @@ func (a *ProtoForkable) DataReader(f *seg.Decompressor, compress bool) *seg.Read
 }
 
 func (a *ProtoForkable) PagedDataReader(f *seg.Decompressor, compress bool) *seg.PagedReader {
-	return seg.NewPagedReader(a.DataReader(f, compress), a.cfg.ValuesOnCompressedPage, compress)
+	return seg.NewPagedReader(a.DataReader(f, compress), compress)
 }
 
 func (a *ProtoForkable) BuildIndexes(ctx context.Context, decomp *seg.Decompressor, from, to RootNum, ps *background.ProgressSet) (indexes []*recsplit.Index, err error) {

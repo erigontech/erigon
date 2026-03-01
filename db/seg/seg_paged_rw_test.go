@@ -62,7 +62,7 @@ func TestPagedReader(t *testing.T) {
 	require := require.New(t)
 	d := prepareLoremDictOnPagedWriter(t, 2, false)
 	defer d.Close()
-	g1 := NewPagedReader(d.MakeGetter(), 2, false)
+	g1 := NewPagedReader(d.MakeGetter(), false)
 	var buf []byte
 	_, _, buf, o1 := g1.Next2(buf[:0])
 	require.Zero(o1)
@@ -71,7 +71,7 @@ func TestPagedReader(t *testing.T) {
 	_, _, buf, o1 = g1.Next2(buf[:0])
 	require.NotZero(o1)
 
-	g := NewPagedReader(d.MakeGetter(), 2, false)
+	g := NewPagedReader(d.MakeGetter(), false)
 	i := 0
 	for g.HasNext() {
 		w := loremStrings[i]
@@ -155,7 +155,7 @@ func TestPagedReaderWithCompression(t *testing.T) {
 	d := prepareLoremDictOnPagedWriter(t, 2, true) // Enable page-level compression
 	defer d.Close()
 
-	g := NewPagedReader(d.MakeGetter(), 2, true) // Read with compression enabled
+	g := NewPagedReader(d.MakeGetter(), true) // Read with compression enabled
 	var buf []byte
 	i := 0
 	for g.HasNext() {
