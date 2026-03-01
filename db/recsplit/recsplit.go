@@ -1251,7 +1251,8 @@ func (rs *RecSplit) buildWithWorkers(ctx context.Context) error {
 		var curBucketIdx uint64 = math.MaxUint64
 		var bucket, offsets []uint64
 		err := rs.bucketCollector.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-			bucketIdx := binary.BigEndian.Uint64(k)
+			// k is 4-byte BigEndian bucketIdx (uint32) + 8-byte fingerprint; v is the offset.
+			bucketIdx := uint64(binary.BigEndian.Uint32(k))
 			if curBucketIdx != bucketIdx {
 				if curBucketIdx != math.MaxUint64 {
 					select {
@@ -1264,7 +1265,7 @@ func (rs *RecSplit) buildWithWorkers(ctx context.Context) error {
 				}
 				curBucketIdx = bucketIdx
 			}
-			bucket = append(bucket, binary.BigEndian.Uint64(k[8:]))
+			bucket = append(bucket, binary.BigEndian.Uint64(k[4:]))
 			offsets = append(offsets, binary.BigEndian.Uint64(v))
 			return nil
 		}, etl.TransformArgs{Quit: ctx.Done()})
@@ -1279,7 +1280,7 @@ func (rs *RecSplit) buildWithWorkers(ctx context.Context) error {
 	}()
 
 	// Consumer: collect results, order with min-heap, write in sequence.
-	var resultQueue bucketResultHeap
+	resultQueue := make(bucketResultHeap, 0, numWorkers*2)
 	heap.Init(&resultQueue)
 	nextWrite := uint64(0)
 
@@ -1296,6 +1297,17 @@ func (rs *RecSplit) buildWithWorkers(ctx context.Context) error {
 		return nil
 	}
 
+	// drainAll cancels and returns all in-flight results (heap + channel) to the pool.
+	drainAll := func() {
+		cancel()
+		for resultQueue.Len() > 0 {
+			putBucketResult(heap.Pop(&resultQueue).(*bucketResult))
+		}
+		for r := range resultCh { //nolint:gocritic
+			putBucketResult(r)
+		}
+	}
+
 	var consumerErr error
 	for r := range resultCh {
 		if r.err != nil {
@@ -1303,20 +1315,14 @@ func (rs *RecSplit) buildWithWorkers(ctx context.Context) error {
 				rs.collision = true
 			}
 			consumerErr = r.err
-			cancel()
 			putBucketResult(r)
-			for r := range resultCh { //nolint:gocritic
-				putBucketResult(r)
-			}
+			drainAll()
 			break
 		}
 		heap.Push(&resultQueue, r)
 		if err := writeOrdered(); err != nil {
 			consumerErr = err
-			cancel()
-			for r := range resultCh { //nolint:gocritic
-				putBucketResult(r)
-			}
+			drainAll()
 			break
 		}
 	}
