@@ -166,8 +166,7 @@ type RecSplit struct {
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 	timings Timings
 
-	addProgress   *background.Progress // If set, tracks per-key progress during AddKey
-	buildProgress *background.Progress // If set, tracks bucket-level progress during Build
+	progress *background.Progress // If set, tracks 0-100%: add-keys fills 0-50%, build fills 50-100%
 }
 
 type RecSplitArgs struct {
@@ -399,11 +398,8 @@ func (rs *RecSplit) ResetNextSalt() {
 	rs.collision = false
 	rs.keysAdded = 0
 	rs.salt++
-	if rs.addProgress != nil {
-		rs.addProgress.Processed.Store(0)
-	}
-	if rs.buildProgress != nil {
-		rs.buildProgress.Processed.Store(0)
+	if rs.progress != nil {
+		rs.progress.Processed.Store(0)
 	}
 	if rs.bucketCollector != nil {
 		rs.bucketCollector.Close()
@@ -529,8 +525,8 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 
 	rs.keysAdded++
 	rs.prevOffset = offset
-	if rs.addProgress != nil {
-		rs.addProgress.Processed.Add(1)
+	if rs.progress != nil {
+		rs.progress.Processed.Add(1)
 	}
 	return nil
 }
@@ -803,8 +799,9 @@ func (rs *RecSplit) loadFuncBucket(k, v []byte, _ etl.CurrentTableReader, _ etl.
 			if err := rs.recsplitCurrentBucket(); err != nil {
 				return err
 			}
-			if rs.buildProgress != nil {
-				rs.buildProgress.Processed.Add(1)
+			if rs.progress != nil {
+				// Build phase fills the 50–100% half: each bucket ≈ bucketSize keys worth.
+				rs.progress.Processed.Add(uint64(rs.bucketSize))
 			}
 		}
 		rs.currentBucketIdx = bucketIdx
@@ -842,32 +839,18 @@ func (rs *RecSplit) KeyCount() uint64 { return rs.keysAdded }
 // BucketCount returns the number of buckets.
 func (rs *RecSplit) BucketCount() uint64 { return rs.bucketCount }
 
-// SetAddProgress wires progress tracking for the AddKey phase.
-// Sets Total to keyExpectedCount and increments Processed per AddKey call.
+// SetProgress wires a single progress tracker covering the full build lifecycle.
+// Total = 2*keyExpectedCount; AddKey fills 0→keyExpectedCount (0–50%) and
+// the bucket-building phase fills keyExpectedCount→2*keyExpectedCount (50–100%).
 // Progress is automatically reset on ResetNextSalt (collision retry).
-func (rs *RecSplit) SetAddProgress(p *background.Progress) {
+func (rs *RecSplit) SetProgress(p *background.Progress) {
 	if p == nil {
 		return
 	}
 	p.Name.Store(&rs.fileName)
 	p.Processed.Store(0)
-	p.Total.Store(rs.keyExpectedCount)
-	rs.addProgress = p
-}
-
-// SetBuildProgress wires progress tracking for the Build phase.
-// Uses rs.fileName for the display name, sets Total to BucketCount,
-// and increments Processed per bucket completed.
-// Progress is automatically reset on ResetNextSalt (collision retry).
-func (rs *RecSplit) SetBuildProgress(p *background.Progress) {
-	if p == nil {
-		return
-	}
-	buildingName := rs.fileName + " (building)"
-	p.Name.Store(&buildingName)
-	p.Processed.Store(0)
-	p.Total.Store(rs.bucketCount)
-	rs.buildProgress = p
+	p.Total.Store(2 * rs.keyExpectedCount)
+	rs.progress = p
 }
 
 // Build has to be called after all the keys have been added, and it initiates the process

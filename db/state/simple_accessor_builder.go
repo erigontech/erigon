@@ -192,7 +192,7 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, decomp *seg.Decompres
 
 	defer iidq.reader.MadvNormal().DisableReadAhead()
 	for {
-		rs.SetAddProgress(p)
+		rs.SetProgress(p)
 		stream := iidq.GetStream(ctx)
 		defer stream.Close()
 		for stream.HasNext() {
@@ -212,8 +212,6 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, decomp *seg.Decompres
 			}
 		}
 		stream.Close()
-		rs.SetBuildProgress(p)
-
 		if err = rs.Build(ctx); err != nil {
 			// collision handling
 			if rs.Collision() {

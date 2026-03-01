@@ -1220,7 +1220,7 @@ func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, va
 			return err
 		}
 		g.Reset(0)
-		rs.SetAddProgress(p)
+		rs.SetProgress(p)
 		for g.HasNext() {
 			word, valPos = g.Next(word[:0])
 			if values {
@@ -1236,8 +1236,6 @@ func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, va
 			// Skip value
 			keyPos, _ = g.Skip()
 		}
-		rs.SetBuildProgress(p)
-
 		if err = rs.Build(ctx); err != nil {
 			if rs.Collision() {
 				logger.Info("Building recsplit. Collision happened. It's ok. Restarting...")

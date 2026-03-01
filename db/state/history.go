@@ -283,15 +283,12 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	for {
 		histReader.Reset(0)
 		iiReader.Reset(0)
-		p.Name.Store(&fName)
-		p.Processed.Store(0)
-		p.Total.Store(uint64(efHist.Count()) / 2)
+		rs.SetProgress(p)
 
 		valOffset = 0
 		for iiReader.HasNext() {
 			keyBuf, _ = iiReader.Next(keyBuf[:0])
 			valBuf, _ = iiReader.Next(valBuf[:0])
-			p.Processed.Add(1)
 
 			// fmt.Printf("ef key %x\n", keyBuf)
 
@@ -330,8 +327,6 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 			default:
 			}
 		}
-
-		rs.SetBuildProgress(p)
 
 		if err = rs.Build(ctx); err != nil {
 			if rs.Collision() {

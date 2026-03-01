@@ -528,7 +528,7 @@ func buildValueIndex(ctx context.Context, version version.Versions, sn snaptype.
 	defer d.MadvSequential().DisableReadAhead()
 
 	for {
-		rs.SetAddProgress(p)
+		rs.SetProgress(p)
 		g := d.MakeGetter()
 		var i, offset, nextPos uint64
 		var key [8]byte
@@ -546,8 +546,6 @@ func buildValueIndex(ctx context.Context, version version.Versions, sn snaptype.
 			}
 			offset = nextPos
 		}
-		rs.SetBuildProgress(p)
-
 		if err = rs.Build(ctx); err != nil {
 			if errors.Is(err, recsplit.ErrCollision) {
 				logger.Info("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)

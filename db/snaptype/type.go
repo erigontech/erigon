@@ -510,7 +510,7 @@ func BuildIndex(ctx context.Context, info FileInfo, indexVersion version.Version
 	defer d.MadvSequential().DisableReadAhead()
 
 	for {
-		rs.SetAddProgress(p)
+		rs.SetProgress(p)
 		g := d.MakeGetter()
 		var i, offset, nextPos uint64
 		word := make([]byte, 0, 4096)
@@ -529,8 +529,6 @@ func BuildIndex(ctx context.Context, info FileInfo, indexVersion version.Version
 			default:
 			}
 		}
-
-		rs.SetBuildProgress(p)
 
 		if err = rs.Build(ctx); err != nil {
 			if errors.Is(err, recsplit.ErrCollision) {
@@ -570,7 +568,7 @@ func BuildIndexWithSnapName(ctx context.Context, info FileInfo, cfg recsplit.Rec
 	defer d.MadvSequential().DisableReadAhead()
 
 	for {
-		rs.SetAddProgress(p)
+		rs.SetProgress(p)
 		g := d.MakeGetter()
 		var i, offset, nextPos uint64
 		word := make([]byte, 0, 4096)
@@ -589,8 +587,6 @@ func BuildIndexWithSnapName(ctx context.Context, info FileInfo, cfg recsplit.Rec
 			default:
 			}
 		}
-
-		rs.SetBuildProgress(p)
 
 		if err = rs.Build(ctx); err != nil {
 			if errors.Is(err, recsplit.ErrCollision) {
