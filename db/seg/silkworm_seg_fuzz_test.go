@@ -80,9 +80,8 @@ func SegUnzip(path string) error {
 		return err
 	}
 
-	err = decompressor.WithReadAhead(func() error {
+	err = decompressor.WithReadAhead(func(getter *Getter) error {
 		word := make([]byte, 0)
-		getter := decompressor.MakeGetter()
 		for getter.HasNext() {
 			word, _ = getter.Next(word[:0])
 			appendErr := words.Append(word)
