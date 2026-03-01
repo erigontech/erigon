@@ -638,6 +638,7 @@ func TestParseCompressedFileName(t *testing.T) {
 	require.Equal(21200000, int(f.To))
 	require.Equal("BlockRoot", f.TypeString)
 	require.Equal("BlockRoot", f.CaplinTypeString)
+	require.NotNil(f.Type)
 
 	f, e3, ok = snaptype.ParseFileName("", "caplin/v1.1-013050-013100-ValidatorEffectiveBalance.seg")
 	require.True(ok)
@@ -646,6 +647,7 @@ func TestParseCompressedFileName(t *testing.T) {
 	require.Equal(13100000, int(f.To))
 	require.Equal("ValidatorEffectiveBalance", f.TypeString)
 	require.Equal("ValidatorEffectiveBalance", f.CaplinTypeString)
+	require.NotNil(f.Type)
 
 	f, e3, ok = snaptype.ParseFileName("caplin", "v1.1-013050-013100-ValidatorEffectiveBalance.seg")
 	require.True(ok)
@@ -654,6 +656,7 @@ func TestParseCompressedFileName(t *testing.T) {
 	require.Equal(13100000, int(f.To))
 	require.Equal("ValidatorEffectiveBalance", f.TypeString)
 	require.Equal("ValidatorEffectiveBalance", f.CaplinTypeString)
+	require.NotNil(f.Type)
 
 	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-022695-022696-transactions-to-block.idx"))
 	require.True(ok)
