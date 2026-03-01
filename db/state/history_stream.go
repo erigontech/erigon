@@ -145,10 +145,6 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 
 		compressedPageValuesCount := historyItem.src.decompressor.CompressedPageValuesCount()
 
-		if historyItem.src.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
-			compressedPageValuesCount = hi.hc.h.HistoryValuesOnCompressedPage
-		}
-
 		if compressedPageValuesCount <= 1 {
 			g := hi.hc.statelessGetter(historyItem.i)
 			g.Reset(offset)
@@ -448,10 +444,6 @@ func (hi *HistoryChangesIterFiles) advance() error {
 		}
 
 		compressedPageValuesCount := historyItem.src.decompressor.CompressedPageValuesCount()
-
-		if historyItem.src.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
-			compressedPageValuesCount = hi.hc.h.HistoryValuesOnCompressedPage
-		}
 
 		if compressedPageValuesCount <= 1 {
 			g := hi.hc.statelessGetter(historyItem.i)
@@ -786,10 +778,6 @@ func (ht *HistoryTraceKeyFiles) advance() error {
 		ht.txNum = txNum
 
 		compressedPageValuesCount := historyItem.src.decompressor.CompressedPageValuesCount()
-
-		if historyItem.src.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
-			compressedPageValuesCount = ht.hc.h.HistoryValuesOnCompressedPage
-		}
 
 		if ht.histReader == nil {
 			idxReader := ht.hc.statelessIdxReader(ht.fileIdx)

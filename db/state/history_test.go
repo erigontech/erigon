@@ -115,10 +115,6 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 
 			compressedPageValuesCount := sf.historyDecomp.CompressedPageValuesCount()
 
-			if sf.historyDecomp.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
-				compressedPageValuesCount = h.HistoryValuesOnCompressedPage
-			}
-
 			efReader := h.InvertedIndex.dataReader(sf.efHistoryDecomp)
 			hReader := seg.NewPagedReader(h.dataReader(sf.historyDecomp), compressedPageValuesCount, true)
 
@@ -243,10 +239,6 @@ func TestHistoryCollationBuild(t *testing.T) {
 		var valWords []string
 
 		compressedPageValuesCount := sf.historyDecomp.CompressedPageValuesCount()
-
-		if sf.historyDecomp.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
-			compressedPageValuesCount = h.HistoryValuesOnCompressedPage
-		}
 
 		gh := seg.NewPagedReader(h.dataReader(sf.historyDecomp), compressedPageValuesCount, true)
 		gh.Reset(0)

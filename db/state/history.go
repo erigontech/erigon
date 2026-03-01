@@ -307,10 +307,6 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 				// file not the config is the source of truth for the .v file compression state
 				compressedPageValuesCount := hist.CompressedPageValuesCount()
 
-				if hist.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
-					compressedPageValuesCount = h.HistoryValuesOnCompressedPage
-				}
-
 				if compressedPageValuesCount == 0 {
 					valOffset, _ = histReader.Skip()
 				} else {
@@ -827,6 +823,7 @@ func (h *History) buildFiles(ctx context.Context, step kv.Step, collation Histor
 	if err != nil {
 		return HistoryFiles{}, fmt.Errorf("open %s v history decompressor: %w", h.FilenameBase, err)
 	}
+	historyDecomp.BackfillV0PageValuesCount(h.HistoryValuesOnCompressedPage)
 
 	historyIdxPath := h.vAccessorNewFilePath(step, step+1)
 	err = h.buildVI(ctx, historyIdxPath, historyDecomp, efHistoryDecomp, collation.efBaseTxNum, ps)
@@ -1263,10 +1260,6 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 
 	compressedPageValuesCount := historyItem.src.decompressor.CompressedPageValuesCount()
 
-	if historyItem.src.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
-		compressedPageValuesCount = ht.h.HistoryValuesOnCompressedPage
-	}
-
 	if compressedPageValuesCount > 1 {
 		v, ht.snappyReadBuffer = seg.GetFromPage(historyKey, v, ht.snappyReadBuffer, true)
 	}
@@ -1558,10 +1551,6 @@ func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, du
 				}
 
 				compressedPageValuesCount := viFile.src.decompressor.CompressedPageValuesCount()
-
-				if viFile.src.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
-					compressedPageValuesCount = ht.h.HistoryValuesOnCompressedPage
-				}
 
 				vReader := ht.statelessGetter(viFile.i)
 				vReader.Reset(vOffset)
