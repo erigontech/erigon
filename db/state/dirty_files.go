@@ -493,6 +493,7 @@ func (h *History) openDirtyFiles(dataEntries, accessorEntries []string) error {
 					// don't interrupt on error. other files may be good. but skip indices open.
 					continue
 				}
+				item.decompressor.BackfillV0PageValuesCount(h.HistoryValuesOnCompressedPage)
 			}
 
 			if item.index == nil {
