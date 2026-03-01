@@ -57,6 +57,7 @@ const (
 	PrefixValStorageMode //TODO: change name
 	StepValueStorageMode
 	StepKeyStorageMode
+	ValueOffset8StorageMode // txNum at val[8:16], used by TxLookup
 )
 
 func HashSeekingPrune(
@@ -228,12 +229,14 @@ func TableScanningPrune(
 		valCursorPosition.StartVal, valCursorPosition.StartKey, err = valDelCursor.First()
 	}
 
-	if prevStat.KeyProgress == InProgress {
-		keyCursorPosition.StartKey, keyCursorPosition.StartVal, err = keysCursor.Seek(prevStat.LastPrunedKey) //nolint:govet
-	} else if prevStat.KeyProgress == First {
-		var txKey [8]byte
-		binary.BigEndian.PutUint64(txKey[:], txFrom)
-		keyCursorPosition.StartKey, _, err = keysCursor.Seek(txKey[:])
+	if keysCursor != nil {
+		if prevStat.KeyProgress == InProgress {
+			keyCursorPosition.StartKey, keyCursorPosition.StartVal, err = keysCursor.Seek(prevStat.LastPrunedKey) //nolint:govet
+		} else if prevStat.KeyProgress == First {
+			var txKey [8]byte
+			binary.BigEndian.PutUint64(txKey[:], txFrom)
+			keyCursorPosition.StartKey, _, err = keysCursor.Seek(txKey[:])
+		}
 	}
 
 	if prevStat.KeyProgress != Done {
@@ -284,7 +287,8 @@ func TableScanningPrune(
 			return kv.Step(^binary.BigEndian.Uint64(key[len(key)-8:])).ToTxNum(stepSize)
 		case DefaultStorageMode:
 			return binary.BigEndian.Uint64(val)
-
+		case ValueOffset8StorageMode:
+			return binary.BigEndian.Uint64(val[8:])
 		default:
 			return 0
 		}
@@ -378,12 +382,12 @@ func TableScanningPrune(
 
 		select {
 		case <-logEvery.C:
-			if len(txNumBytes) >= 8 {
-				txNum = txNumGetter(val, txNumBytes)
+			args := []interface{}{"name", filenameBase, "pruned values", stat.PruneCountValues}
+			if keysCursor != nil {
+				args = append(args, "pruned tx", stat.PruneCountTx)
 			}
-			logger.Info("[snapshots] prune index", "name", filenameBase, "pruned tx", stat.PruneCountTx,
-				"pruned values", stat.PruneCountValues,
-				"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(stepSize), float64(txNum)/float64(stepSize)))
+			args = append(args, "val status", stat.ValueProgress.String())
+			logger.Info("[snapshots] prune index", args...)
 		default:
 		}
 
