@@ -82,6 +82,11 @@ type recsplitScratch struct {
 	primaryAggrBound   uint16
 	secondaryAggrBound uint16
 	bytesPerRec        int // Bytes per record in offset encoding
+
+	// Input fields used by the parallel path: producer fills these, worker reads them.
+	bucketIdx uint64
+	bucket    []uint64
+	offsets   []uint64
 }
 
 // bucketResult contains the output of processing a single bucket.
@@ -110,13 +115,6 @@ func (br *bucketResult) Reset() {
 	br.bucketSize = 0
 	br.bucketIdx = 0
 	br.err = nil
-}
-
-// bucketTask is a unit of work sent to a parallel worker.
-type bucketTask struct {
-	bucketIdx uint64
-	bucket    []uint64 // worker takes ownership and may modify in-place
-	offsets   []uint64 // worker takes ownership and may modify in-place
 }
 
 // RecSplit is the implementation of Recursive Split algorithm for constructing perfect hash mapping, described in
@@ -1151,22 +1149,32 @@ func newWorkerScratch(rs *RecSplit) *recsplitScratch {
 		secondaryAggrBound: rs.scratch.secondaryAggrBound,
 		bytesPerRec:        rs.scratch.bytesPerRec,
 		trace:              rs.scratch.trace,
+		bucket:             make([]uint64, 0, rs.bucketSize),
+		offsets:            make([]uint64, 0, rs.bucketSize),
 	}
 }
 
 // recsplitBucketWorker is the goroutine body for parallel bucket processing.
 // It consumes bucketTask values from tasks, computes the recsplit encoding, and
 // sends *bucketResult values (in any order) to results.
-func recsplitBucketWorker(ctx context.Context, tasks <-chan *bucketTask, results chan<- *bucketResult, sc *recsplitScratch) {
-	for task := range tasks {
+// The scratch sc carries the input bucket data (sc.bucket, sc.offsets, sc.bucketIdx) as well
+// as the per-worker computation buffers. After processing, sc is returned to free for reuse.
+func recsplitBucketWorker(ctx context.Context, tasks <-chan *recsplitScratch, results chan<- *bucketResult, free chan<- *recsplitScratch) {
+	for sc := range tasks {
 		result := getBucketResult()
-		result.bucketIdx = task.bucketIdx
-		result.bucketSize = len(task.bucket)
+		result.bucketIdx = sc.bucketIdx
+		result.bucketSize = len(sc.bucket)
 
-		if len(task.bucket) > 1 {
-			for i, key := range task.bucket[1:] {
-				if key == task.bucket[i] {
+		if len(sc.bucket) > 1 {
+			for i, key := range sc.bucket[1:] {
+				if key == sc.bucket[i] {
 					result.err = fmt.Errorf("%w: %x", ErrCollision, key)
+					sc.bucket = sc.bucket[:0]
+					sc.offsets = sc.offsets[:0]
+					select {
+					case free <- sc:
+					case <-ctx.Done():
+					}
 					select {
 					case results <- result:
 					case <-ctx.Done():
@@ -1175,10 +1183,17 @@ func recsplitBucketWorker(ctx context.Context, tasks <-chan *bucketTask, results
 					return
 				}
 			}
-			result.preAlloc(len(task.bucket), sc.bytesPerRec)
-			sc.preAlloc(len(task.bucket))
+			result.preAlloc(len(sc.bucket), sc.bytesPerRec)
+			sc.preAlloc(len(sc.bucket))
 			var err error
-			sc.unaryBuf, err = recsplit(0, task.bucket, task.offsets, sc.unaryBuf[:0], sc, result)
+			sc.unaryBuf, err = recsplit(0, sc.bucket, sc.offsets, sc.unaryBuf[:0], sc, result)
+			result.unaryBuf = append(result.unaryBuf[:0], sc.unaryBuf...)
+			sc.bucket = sc.bucket[:0]
+			sc.offsets = sc.offsets[:0]
+			select {
+			case free <- sc:
+			case <-ctx.Done():
+			}
 			if err != nil {
 				result.err = err
 				select {
@@ -1188,12 +1203,17 @@ func recsplitBucketWorker(ctx context.Context, tasks <-chan *bucketTask, results
 				}
 				return
 			}
-			result.unaryBuf = append(result.unaryBuf[:0], sc.unaryBuf...)
 		} else {
-			result.preAlloc(len(task.bucket), sc.bytesPerRec)
-			for _, offset := range task.offsets {
+			result.preAlloc(len(sc.bucket), sc.bytesPerRec)
+			for _, offset := range sc.offsets {
 				binary.BigEndian.PutUint64(sc.numBuf[:], offset)
 				result.offsetData = append(result.offsetData, sc.numBuf[8-sc.bytesPerRec:]...)
+			}
+			sc.bucket = sc.bucket[:0]
+			sc.offsets = sc.offsets[:0]
+			select {
+			case free <- sc:
+			case <-ctx.Done():
 			}
 		}
 
@@ -1245,23 +1265,24 @@ func (rs *RecSplit) buildWithWorkers(ctx context.Context) error {
 	defer cancel()
 
 	numWorkers := rs.workers
-	taskCh := make(chan *bucketTask, numWorkers*2)
-	resultCh := make(chan *bucketResult, numWorkers*2)
-
-	// Keep worker scratches so we can harvest their golombRice tables after they finish.
-	// Workers lazily extend golombRice as they encounter different bucket sizes;
-	// the longest table covers the highest m seen by any worker.
+	// freeScratchCh acts as a pool: N scratches circulate between producer and workers.
+	// Each scratch carries both the input bucket data and the per-worker computation buffers,
+	// so no separate bucketTask allocation is needed.
+	freeScratchCh := make(chan *recsplitScratch, numWorkers)
 	workerScratches := make([]*recsplitScratch, numWorkers)
 	for i := range workerScratches {
 		workerScratches[i] = newWorkerScratch(rs)
+		freeScratchCh <- workerScratches[i]
 	}
+	taskCh := make(chan *recsplitScratch, numWorkers)
+	resultCh := make(chan *bucketResult, numWorkers*2)
+
 	var wg sync.WaitGroup
-	for _, sc := range workerScratches {
-		sc := sc
+	for range numWorkers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			recsplitBucketWorker(ctx, taskCh, resultCh, sc)
+			recsplitBucketWorker(ctx, taskCh, resultCh, freeScratchCh)
 		}()
 	}
 	go func() {
@@ -1279,34 +1300,42 @@ func (rs *RecSplit) buildWithWorkers(ctx context.Context) error {
 		rs.scratch.golombRice = best
 	}()
 
-	// Producer: iterate ETL collector, send one task per bucket.
+	// Producer: iterate ETL collector, send one scratch per bucket.
 	producerErrCh := make(chan error, 1)
 	go func() {
 		defer close(taskCh)
 		var curBucketIdx uint64 = math.MaxUint64
-		var bucket, offsets []uint64
+		var sc *recsplitScratch
 		err := rs.bucketCollector.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 			// k is 4-byte BigEndian bucketIdx (uint32) + 8-byte fingerprint; v is the offset.
 			bucketIdx := uint64(binary.BigEndian.Uint32(k))
 			if curBucketIdx != bucketIdx {
 				if curBucketIdx != math.MaxUint64 {
+					sc.bucketIdx = curBucketIdx
 					select {
-					case taskCh <- &bucketTask{bucketIdx: curBucketIdx, bucket: bucket, offsets: offsets}:
+					case taskCh <- sc:
 					case <-ctx.Done():
 						return ctx.Err()
 					}
-					bucket = nil
-					offsets = nil
+					sc = nil
 				}
 				curBucketIdx = bucketIdx
 			}
-			bucket = append(bucket, binary.BigEndian.Uint64(k[4:]))
-			offsets = append(offsets, binary.BigEndian.Uint64(v))
+			if sc == nil {
+				select {
+				case sc = <-freeScratchCh:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+			sc.bucket = append(sc.bucket, binary.BigEndian.Uint64(k[4:]))
+			sc.offsets = append(sc.offsets, binary.BigEndian.Uint64(v))
 			return nil
 		}, etl.TransformArgs{Quit: ctx.Done()})
-		if err == nil && len(bucket) > 0 {
+		if err == nil && sc != nil && len(sc.bucket) > 0 {
+			sc.bucketIdx = curBucketIdx
 			select {
-			case taskCh <- &bucketTask{bucketIdx: curBucketIdx, bucket: bucket, offsets: offsets}:
+			case taskCh <- sc:
 			case <-ctx.Done():
 				err = ctx.Err()
 			}
