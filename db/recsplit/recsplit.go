@@ -525,8 +525,8 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 
 	rs.keysAdded++
 	rs.prevOffset = offset
-	if rs.progress != nil {
-		rs.progress.Processed.Add(1)
+	if rs.progress != nil && rs.keysAdded%1024 == 0 {
+		rs.progress.Processed.Add(1024)
 	}
 	return nil
 }
