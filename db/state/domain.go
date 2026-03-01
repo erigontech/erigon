@@ -1107,7 +1107,7 @@ func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep kv.S
 		IndexFile:  idxPath,
 		Salt:       d.salt.Load(),
 		NoFsync:    d.noFsync,
-		//Workers:    d.CompressorCfg.Workers,
+		Workers:    d.CompressorCfg.Workers,
 	}
 	return buildHashMapAccessor(ctx, data, idxPath, false, cfg, ps, d.logger)
 }
