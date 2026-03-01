@@ -613,6 +613,11 @@ type DBSummaries struct { // the summaries are particular to a DB instance
 	DbCommitTotal       metrics.Summary
 }
 
+type GCSummaries struct { // GC metric summaries for each DB instance
+	GCMaxRetainedPages metrics.Summary
+	GCMaxReaderLag     metrics.Summary
+}
+
 // InitMDBXMGauges this only needs to be called once during startup
 func InitMDBXMGauges() *DBGauges {
 	return &DBGauges{
@@ -652,8 +657,20 @@ func InitSummaries(dbLabel Label) {
 	}
 }
 
+func InitGCSummaries(dbLabel Label) {
+	_, ok := MDBXGCSummaries.Load(dbLabel)
+	if !ok {
+		dbName := string(dbLabel)
+		MDBXGCSummaries.Store(dbName, &GCSummaries{
+			GCMaxRetainedPages: metrics.GetOrCreateSummaryWithLabels(`db_gc_max_retained_pages`, []string{dbLabelName}, []string{dbName}),
+			GCMaxReaderLag:     metrics.GetOrCreateSummaryWithLabels(`db_gc_max_reader_lag`, []string{dbLabelName}, []string{dbName}),
+		})
+	}
+}
+
 var MDBXGauges = InitMDBXMGauges() // global mdbx gauges. each gauge can be filtered by db name
 var MDBXSummaries sync.Map         // dbName => Summaries mapping
+var MDBXGCSummaries sync.Map       // dbName => GCSummaries mapping
 
 var (
 	ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.ChaindataDeprecatedTables can be deleted")

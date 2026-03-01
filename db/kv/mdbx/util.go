@@ -21,10 +21,11 @@ import (
 	"os"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/mdbx-go/mdbx"
+
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/mdbx-go/mdbx"
 )
 
 func MustOpen(path string) kv.RwDB {
