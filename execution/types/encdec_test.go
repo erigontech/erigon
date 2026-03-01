@@ -744,3 +744,196 @@ func BenchmarkWithdrawalRLP(b *testing.B) {
 		w.EncodeRLP(&buf)
 	}
 }
+
+func (tr *TRand) RandLog() *Log {
+	return &Log{
+		Address: tr.RandAddress(),
+		Topics:  tr.RandHashes(tr.RandIntInRange(0, 5)),
+		Data:    tr.RandBytes(tr.RandIntInRange(0, 128)),
+	}
+}
+
+// RandLogFixed creates a Log with fixed topic count and data size for deterministic benchmarking
+func (tr *TRand) RandLogFixed() *Log {
+	return &Log{
+		Address: tr.RandAddress(),
+		Topics:  tr.RandHashes(3), // Fixed: 3 topics (fast-path for decode)
+		Data:    tr.RandBytes(32), // Fixed: 32 bytes of data
+	}
+}
+
+func (tr *TRand) RandReceipt() *Receipt {
+	numLogs := tr.RandIntInRange(1, 5)
+	logs := make(Logs, numLogs)
+	for i := 0; i < numLogs; i++ {
+		logs[i] = tr.RandLog()
+	}
+	return &Receipt{
+		Type:              LegacyTxType,
+		PostState:         tr.RandBytes(32),
+		Status:            0,
+		CumulativeGasUsed: *tr.RandUint64(),
+		Bloom:             tr.RandBloom(),
+		Logs:              logs,
+		GasUsed:           *tr.RandUint64(),
+		ContractAddress:   tr.RandAddress(),
+		TransactionIndex:  uint(tr.RandIntInRange(0, 100)),
+		TxHash:            tr.RandHash(),
+	}
+}
+
+func BenchmarkLogRLP(b *testing.B) {
+	tr := NewTRand()
+	log := tr.RandLog()
+	var buf bytes.Buffer
+
+	b.Run(`Encode`, func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			buf.Reset()
+			logStorage := (*LogForStorage)(log)
+			logStorage.EncodeRLP(&buf)
+		}
+	})
+
+	b.Run(`Decode`, func(b *testing.B) {
+		b.ReportAllocs()
+		buf.Reset()
+		logStorage := (*LogForStorage)(log)
+		logStorage.EncodeRLP(&buf)
+		var decoded LogForStorage
+		for i := 0; i < b.N; i++ {
+			rlp.DecodeBytes(buf.Bytes(), &decoded)
+		}
+	})
+}
+
+func BenchmarkReceiptRLP(b *testing.B) {
+	tr := NewTRand()
+	receipt := tr.RandReceipt()
+	var buf bytes.Buffer
+
+	b.Run(`Encode`, func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			buf.Reset()
+			receiptStorage := (*ReceiptForStorage)(receipt)
+			receiptStorage.EncodeRLP(&buf)
+		}
+	})
+
+	b.Run(`Decode`, func(b *testing.B) {
+		b.ReportAllocs()
+		buf.Reset()
+		receiptStorage := (*ReceiptForStorage)(receipt)
+		receiptStorage.EncodeRLP(&buf)
+		var decoded ReceiptForStorage
+		for i := 0; i < b.N; i++ {
+			rlp.DecodeBytes(buf.Bytes(), &decoded)
+		}
+	})
+}
+
+// Comparison: Custom vs Generated Code
+func BenchmarkLogCustomVsGenerated(b *testing.B) {
+	tr := NewTRand()
+	logData := tr.RandLog()
+	var buf bytes.Buffer
+
+	b.Run(`Custom/Encode`, func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			buf.Reset()
+			logStorage := (*LogForStorage)(logData)
+			logStorage.EncodeRLP(&buf)
+		}
+	})
+
+	b.Run(`Custom/Decode`, func(b *testing.B) {
+		b.ReportAllocs()
+		buf.Reset()
+		logStorage := (*LogForStorage)(logData)
+		logStorage.EncodeRLP(&buf)
+		var decoded LogForStorage
+		for i := 0; i < b.N; i++ {
+			rlp.DecodeBytes(buf.Bytes(), &decoded)
+		}
+	})
+
+	// Generated code comparison
+	genLog := &LogForStorageGen{
+		Address: logData.Address,
+		Topics:  logData.Topics,
+		Data:    logData.Data,
+	}
+
+	b.Run(`Generated/Encode`, func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			buf.Reset()
+			genLog.EncodeRLP(&buf)
+		}
+	})
+
+	b.Run(`Generated/Decode`, func(b *testing.B) {
+		b.ReportAllocs()
+		buf.Reset()
+		genLog.EncodeRLP(&buf)
+		var decoded LogForStorageGen
+		for i := 0; i < b.N; i++ {
+			rlp.DecodeBytes(buf.Bytes(), &decoded)
+		}
+	})
+}
+
+// BenchmarkLogCustomVsGeneratedFixed uses fixed data for deterministic results
+func BenchmarkLogCustomVsGeneratedFixed(b *testing.B) {
+	tr := NewTRand()
+	logData := tr.RandLogFixed() // Fixed: 3 topics, 32 bytes data
+	var buf bytes.Buffer
+
+	b.Run(`Custom/Encode`, func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			buf.Reset()
+			logStorage := (*LogForStorage)(logData)
+			logStorage.EncodeRLP(&buf)
+		}
+	})
+
+	b.Run(`Custom/Decode`, func(b *testing.B) {
+		b.ReportAllocs()
+		buf.Reset()
+		logStorage := (*LogForStorage)(logData)
+		logStorage.EncodeRLP(&buf)
+		var decoded LogForStorage
+		for i := 0; i < b.N; i++ {
+			rlp.DecodeBytes(buf.Bytes(), &decoded)
+		}
+	})
+
+	// Generated code comparison
+	genLog := &LogForStorageGen{
+		Address: logData.Address,
+		Topics:  logData.Topics,
+		Data:    logData.Data,
+	}
+
+	b.Run(`Generated/Encode`, func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			buf.Reset()
+			genLog.EncodeRLP(&buf)
+		}
+	})
+
+	b.Run(`Generated/Decode`, func(b *testing.B) {
+		b.ReportAllocs()
+		buf.Reset()
+		genLog.EncodeRLP(&buf)
+		var decoded LogForStorageGen
+		for i := 0; i < b.N; i++ {
+			rlp.DecodeBytes(buf.Bytes(), &decoded)
+		}
+	})
+}
