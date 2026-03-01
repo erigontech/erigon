@@ -21,7 +21,10 @@ import (
 	"container/heap"
 	"context"
 	"fmt"
+	"hash/crc32"
+	"io"
 	"math"
+	"os"
 	"path"
 	"path/filepath"
 	"strings"
@@ -42,6 +45,19 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
+
+// crc32cFile computes a CRC32C (Castagnoli) checksum of a file on disk.
+// Uses hardware-accelerated CRC32C when available. Intended for debugging only.
+func crc32cFile(filePath string) uint32 {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+	h := crc32.New(crc32.MakeTable(crc32.Castagnoli))
+	_, _ = io.Copy(h, f)
+	return h.Sum32()
+}
 
 func (d *Domain) dirtyFilesEndTxNumMinimax() uint64 {
 	if d == nil {
@@ -430,7 +446,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	}
 
 	defer func() {
-		log.Debug("[merge] timings", "name", path.Base(kvFilePath), "tAdd", tAdd, "tCompress", tCompress, "tIndex", tIndex)
+		log.Debug("[merge] timings", "name", path.Base(kvFilePath), "tAdd", tAdd, "tCompress", tCompress, "tIndex", tIndex, "cksum", fmt.Sprintf("%08x", crc32cFile(kvFilePath)))
 	}()
 
 	cnt := 0
@@ -800,7 +816,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 
 		var tAdd, tCompress, tIndex time.Time
 		defer func() {
-			log.Debug("[merge] timings", "name", path.Base(datPath), "tAdd", time.Since(tAdd), "tCompress", time.Since(tCompress), "tIndex", time.Since(tIndex))
+			log.Debug("[merge] timings", "name", path.Base(datPath), "tAdd", time.Since(tAdd), "tCompress", time.Since(tCompress), "tIndex", time.Since(tIndex), "cksum", fmt.Sprintf("%08x", crc32cFile(datPath)))
 		}()
 		tAdd = time.Now()
 
