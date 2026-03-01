@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/assert"
 	"github.com/erigontech/erigon/common/dir"
-	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/datastruct/fusefilter"
@@ -228,7 +227,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 			0x082f20e10092a9a3, 0x2ada2ce68d21defc, 0xe33cb4f3e7c6466b, 0x3980be458c509c59, 0xc466fd9584828e8c, 0x45f0aabe1a61ede6, 0xf6e7b8b33ad9b98d,
 			0x4ef95e25f4b4983d, 0x81175195173b92d3, 0x4e50927d8dd15978, 0x1ea2099d1fafae7f, 0x425c8a06fbaaa815, 0xcd4216006c74052a}
 	}
-	args.Workers = estimate.AlmostAllCPUs()
+	//args.Workers = estimate.AlmostAllCPUs()
 	bucketCount := (args.KeyCount + args.BucketSize - 1) / args.BucketSize
 	if bucketCount > math.MaxUint32 {
 		return nil, fmt.Errorf("recsplit: bucketCount %d exceeds uint32 max (too many keys for bucketSize=%d)", bucketCount, args.BucketSize)
