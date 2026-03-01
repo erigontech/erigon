@@ -144,6 +144,7 @@ type Compressor struct {
 	version             uint8
 	featureFlagBitmask  FeatureFlagBitmask
 	compPageValuesCount uint8
+	totalPairsCount     uint64
 	metadata            []byte
 }
 
@@ -193,7 +194,7 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cf
 		lvl:              lvl,
 		wg:               wg,
 		logger:           logger,
-		version:          FileCompressionFormatV1,
+		version:          FileCompressionFormatV2,
 	}
 
 	if cfg.ValuesOnCompressedPage > 0 {
@@ -216,6 +217,13 @@ func (c *Compressor) SetTrace(trace bool)            { c.trace = trace }
 func (c *Compressor) FileName() string               { return c.outputFileName }
 func (c *Compressor) WorkersAmount() int             { return c.Workers }
 func (c *Compressor) GetValuesOnCompressedPage() int { return int(c.ValuesOnCompressedPage) }
+// SetPairsCount stores the total number of key-value pairs in the file header
+// (V2+, PairsCountEnabled).  Must be called before Compress().
+func (c *Compressor) SetPairsCount(n uint64) {
+	c.totalPairsCount = n
+	c.featureFlagBitmask.Set(PairsCountEnabled)
+}
+
 func (c *Compressor) SetMetadata(metadata []byte) {
 	if !c.ExpectMetadata {
 		panic("metadata not expected in compressor")
@@ -343,13 +351,20 @@ func (c *Compressor) Compress() error {
 	defer dir.RemoveFile(tmpFileName)
 	defer cf.Close()
 
-	if c.version == FileCompressionFormatV1 {
+	if c.version == FileCompressionFormatV1 || c.version == FileCompressionFormatV2 {
 		if _, err := cf.Write([]byte{c.version, byte(c.featureFlagBitmask)}); err != nil {
 			return err
 		}
 
 		if c.featureFlagBitmask.Has(PageLevelCompressionEnabled) {
 			if _, err := cf.Write([]byte{c.compPageValuesCount}); err != nil {
+				return err
+			}
+		}
+		if c.featureFlagBitmask.Has(PairsCountEnabled) {
+			var buf [8]byte
+			binary.BigEndian.PutUint64(buf[:], c.totalPairsCount)
+			if _, err := cf.Write(buf[:]); err != nil {
 				return err
 			}
 		}

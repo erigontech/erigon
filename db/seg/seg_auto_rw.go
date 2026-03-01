@@ -104,6 +104,12 @@ type Writer struct {
 }
 
 func NewWriter(kv *Compressor, compress FileCompression) *Writer {
+	if compress.Has(CompressKeys) {
+		kv.featureFlagBitmask.Set(KeyCompressionEnabled)
+	}
+	if compress.Has(CompressVals) {
+		kv.featureFlagBitmask.Set(ValCompressionEnabled)
+	}
 	return &Writer{kv, false, compress}
 }
 
@@ -132,6 +138,8 @@ func (c *Writer) ReadFrom(r *Reader) error {
 	}
 	return nil
 }
+
+func (c *Writer) SetPairsCount(n uint64) { c.Compressor.SetPairsCount(n) }
 
 func (c *Writer) Close() {
 	if c.Compressor != nil {
