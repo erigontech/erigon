@@ -72,9 +72,9 @@ type SimulationRequest struct {
 
 // SimulatedBlock defines the simulation for a single block.
 type SimulatedBlock struct {
-	BlockOverrides *transactions.BlockOverrides `json:"blockOverrides,omitempty"`
-	StateOverrides *ethapi.StateOverrides       `json:"stateOverrides,omitempty"`
-	Calls          []ethapi.CallArgs            `json:"calls"`
+	BlockOverrides *ethapi.BlockOverrides `json:"blockOverrides,omitempty"`
+	StateOverrides *ethapi.StateOverrides `json:"stateOverrides,omitempty"`
+	Calls          []ethapi.CallArgs      `json:"calls"`
 }
 
 // CallResult represents the result of a single call in the simulation.
@@ -233,13 +233,13 @@ func (s *simulator) sanitizeSimulatedBlocks(blocks []SimulatedBlock) ([]Simulate
 	prevTimestamp := s.base.Time
 	for _, block := range blocks {
 		if block.BlockOverrides == nil {
-			block.BlockOverrides = &transactions.BlockOverrides{}
+			block.BlockOverrides = &ethapi.BlockOverrides{}
 		}
-		if block.BlockOverrides.BlockNumber == nil {
+		if block.BlockOverrides.Number == nil {
 			nextNumber := prevNumber + 1
-			block.BlockOverrides.BlockNumber = (*hexutil.Uint64)(&nextNumber)
+			block.BlockOverrides.Number = (*hexutil.Big)(new(big.Int).SetUint64(nextNumber))
 		}
-		blockNumber := block.BlockOverrides.BlockNumber.Uint64()
+		blockNumber := block.BlockOverrides.Number.Uint64()
 		if blockNumber <= prevNumber {
 			return nil, invalidBlockNumberError(fmt.Sprintf("block numbers must be in order: %d <= %d", blockNumber, prevNumber))
 		}
@@ -255,9 +255,9 @@ func (s *simulator) sanitizeSimulatedBlocks(blocks []SimulatedBlock) ([]Simulate
 				n := prevNumber + i + 1
 				t := prevTimestamp + timestampIncrement
 				b := SimulatedBlock{
-					BlockOverrides: &transactions.BlockOverrides{
-						BlockNumber: (*hexutil.Uint64)(&n),
-						Timestamp:   (*hexutil.Uint64)(&t),
+					BlockOverrides: &ethapi.BlockOverrides{
+						Number: (*hexutil.Big)(new(big.Int).SetUint64(n)),
+						Time:   (*hexutil.Uint64)(&t),
 					},
 				}
 				prevTimestamp = t
@@ -267,11 +267,11 @@ func (s *simulator) sanitizeSimulatedBlocks(blocks []SimulatedBlock) ([]Simulate
 		// Only append block after filling a potential gap.
 		prevNumber = blockNumber
 		var timestamp uint64
-		if block.BlockOverrides.Timestamp == nil {
+		if block.BlockOverrides.Time == nil {
 			timestamp = prevTimestamp + timestampIncrement
-			block.BlockOverrides.Timestamp = (*hexutil.Uint64)(&timestamp)
+			block.BlockOverrides.Time = (*hexutil.Uint64)(&timestamp)
 		} else {
-			timestamp = block.BlockOverrides.Timestamp.Uint64()
+			timestamp = block.BlockOverrides.Time.Uint64()
 			if timestamp <= prevTimestamp {
 				return nil, invalidBlockTimestampError(fmt.Sprintf("block timestamps must be in order: %d <= %d", timestamp, prevTimestamp))
 			}
@@ -290,17 +290,17 @@ func (s *simulator) makeHeaders(blocks []SimulatedBlock) ([]*types.Header, error
 	header := s.base
 	headers := make([]*types.Header, len(blocks))
 	for bi, block := range blocks {
-		if block.BlockOverrides == nil || block.BlockOverrides.BlockNumber == nil {
+		if block.BlockOverrides == nil || block.BlockOverrides.Number == nil {
 			return nil, errors.New("empty block number")
 		}
 		overrides := block.BlockOverrides
 
 		var withdrawalsHash *common.Hash
-		if s.chainConfig.IsShanghai((uint64)(*overrides.Timestamp)) {
+		if s.chainConfig.IsShanghai((uint64)(*overrides.Time)) {
 			withdrawalsHash = &empty.WithdrawalsHash
 		}
 		var parentBeaconRoot *common.Hash
-		if s.chainConfig.IsCancun((uint64)(*overrides.Timestamp)) {
+		if s.chainConfig.IsCancun((uint64)(*overrides.Time)) {
 			parentBeaconRoot = &common.Hash{}
 			if overrides.BeaconRoot != nil {
 				parentBeaconRoot = overrides.BeaconRoot
@@ -490,7 +490,7 @@ func (s *simulator) simulateBlock(
 
 	blockNumber := header.Number.Uint64()
 
-	blockHashOverrides := transactions.BlockHashOverrides{}
+	blockHashOverrides := ethapi.BlockHashOverrides{}
 	txnList := make([]types.Transaction, 0, len(bsc.Calls))
 	receiptList := make(types.Receipts, 0, len(bsc.Calls))
 	tracer := rpchelper.NewLogTracer(s.traceTransfers, blockNumber, common.Hash{}, common.Hash{}, 0)
@@ -521,9 +521,6 @@ func (s *simulator) simulateBlock(
 	// Create a custom block context and apply any custom block overrides
 	blockCtx := transactions.NewEVMBlockContextWithOverrides(ctx, s.engine, header, tx, s.newSimulatedCanonicalReader(ancestors), s.chainConfig,
 		bsc.BlockOverrides, blockHashOverrides)
-	if bsc.BlockOverrides.BlobBaseFee != nil {
-		blockCtx.BlobBaseFee = *bsc.BlockOverrides.BlobBaseFee.ToUint256()
-	}
 	rules := blockCtx.Rules(s.chainConfig)
 
 	// Determine the active precompiled contracts for this block.
