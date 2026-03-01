@@ -528,6 +528,7 @@ func buildValueIndex(ctx context.Context, version version.Versions, sn snaptype.
 	defer d.MadvSequential().DisableReadAhead()
 
 	for {
+		rs.SetAddProgress(p)
 		g := d.MakeGetter()
 		var i, offset, nextPos uint64
 		var key [8]byte

@@ -166,6 +166,7 @@ type RecSplit struct {
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 	timings Timings
 
+	addProgress   *background.Progress // If set, tracks per-key progress during AddKey
 	buildProgress *background.Progress // If set, tracks bucket-level progress during Build
 }
 
@@ -398,6 +399,9 @@ func (rs *RecSplit) ResetNextSalt() {
 	rs.collision = false
 	rs.keysAdded = 0
 	rs.salt++
+	if rs.addProgress != nil {
+		rs.addProgress.Processed.Store(0)
+	}
 	if rs.buildProgress != nil {
 		rs.buildProgress.Processed.Store(0)
 	}
@@ -525,6 +529,9 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 
 	rs.keysAdded++
 	rs.prevOffset = offset
+	if rs.addProgress != nil {
+		rs.addProgress.Processed.Add(1)
+	}
 	return nil
 }
 
@@ -834,6 +841,19 @@ func (rs *RecSplit) KeyCount() uint64 { return rs.keysAdded }
 
 // BucketCount returns the number of buckets.
 func (rs *RecSplit) BucketCount() uint64 { return rs.bucketCount }
+
+// SetAddProgress wires progress tracking for the AddKey phase.
+// Sets Total to keyExpectedCount and increments Processed per AddKey call.
+// Progress is automatically reset on ResetNextSalt (collision retry).
+func (rs *RecSplit) SetAddProgress(p *background.Progress) {
+	if p == nil {
+		return
+	}
+	p.Name.Store(&rs.fileName)
+	p.Processed.Store(0)
+	p.Total.Store(rs.keyExpectedCount)
+	rs.addProgress = p
+}
 
 // SetBuildProgress wires progress tracking for the Build phase.
 // Uses rs.fileName for the display name, sets Total to BucketCount,

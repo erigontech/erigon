@@ -164,11 +164,6 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, decomp *seg.Decompres
 	idxFile, _ := s.parser.AccessorIdxFile(version.V1_0, from, to, uint16(s.indexPos))
 
 	keyCount := iidq.Count()
-	if p != nil {
-		baseFileName := filepath.Base(idxFile)
-		p.Name.Store(&baseFileName)
-		p.Total.Store(keyCount)
-	}
 	salt, err := Registry.Salt(s.id)
 	if err != nil {
 		return nil, err
@@ -197,15 +192,13 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, decomp *seg.Decompres
 
 	defer iidq.reader.MadvNormal().DisableReadAhead()
 	for {
+		rs.SetAddProgress(p)
 		stream := iidq.GetStream(ctx)
 		defer stream.Close()
 		for stream.HasNext() {
 			word, index, offset, err := stream.Next()
 			if err != nil {
 				return nil, err
-			}
-			if p != nil {
-				p.Processed.Add(1)
 			}
 			key := s.kf.Make(word, index)
 			if err = rs.AddKey(key, offset); err != nil {

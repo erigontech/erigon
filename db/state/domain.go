@@ -1220,9 +1220,7 @@ func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, va
 			return err
 		}
 		g.Reset(0)
-		p.Name.Store(&fileName)
-		p.Processed.Store(0)
-		p.Total.Store(uint64(count))
+		rs.SetAddProgress(p)
 		for g.HasNext() {
 			word, valPos = g.Next(word[:0])
 			if values {
@@ -1237,8 +1235,6 @@ func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, va
 
 			// Skip value
 			keyPos, _ = g.Skip()
-
-			p.Processed.Add(1)
 		}
 		rs.SetBuildProgress(p)
 
