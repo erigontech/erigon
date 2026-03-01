@@ -7,6 +7,7 @@ const (
 	ModeBlockProduction
 	ModeForkValidation
 	ModeApplyingBlocks
+	ModeApplyingBlocksOffline // offline integration tools (always use high workers)
 )
 
 func (m Mode) String() string {
@@ -17,9 +18,19 @@ func (m Mode) String() string {
 		return "ModeForkValidation"
 	case ModeApplyingBlocks:
 		return "ModeApplyingBlocks"
+	case ModeApplyingBlocksOffline:
+		return "ModeApplyingBlocksOffline"
 	default:
 		return "UnknownMode"
 	}
+}
+
+func (m Mode) IsApplyingBlocks() bool {
+	return m == ModeApplyingBlocks || m == ModeApplyingBlocksOffline
+}
+
+func (m Mode) IsOffline() bool {
+	return m == ModeApplyingBlocksOffline
 }
 
 func ModeFromString(s string) Mode { //nolint
@@ -30,6 +41,8 @@ func ModeFromString(s string) Mode { //nolint
 		return ModeForkValidation
 	case "ModeApplyingBlocks":
 		return ModeApplyingBlocks
+	case "ModeApplyingBlocksOffline":
+		return ModeApplyingBlocksOffline
 	case "UnknownMode":
 		return ModeUnknown
 	default:

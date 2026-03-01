@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/cmp"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -115,10 +116,13 @@ func ExecV3(ctx context.Context,
 	parallel bool, //nolint
 	maxBlockNum uint64,
 	logger log.Logger) (execErr error) {
-	isBlockProduction := execStage.SyncMode() == stages.ModeBlockProduction
-	isForkValidation := execStage.SyncMode() == stages.ModeForkValidation
-
-	isApplyingBlocks := execStage.SyncMode() == stages.ModeApplyingBlocks
+	syncMode := execStage.SyncMode()
+	var (
+		isBlockProduction = syncMode == stages.ModeBlockProduction
+		isForkValidation  = syncMode == stages.ModeForkValidation
+		isApplyingBlocks  = syncMode.IsApplyingBlocks()
+		isOffline         = syncMode.IsOffline()
+	)
 	initialCycle := execStage.CurrentSyncCycle.IsInitialCycle
 	hooks := cfg.vmConfig.Tracer
 	applyTx := rwTx
@@ -128,7 +132,12 @@ func ExecV3(ctx context.Context,
 	}
 
 	agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
-	if isApplyingBlocks {
+	if isOffline {
+		// offline commands: always use high workers (no cycle-based reduction)
+		agg.SetCollateAndBuildWorkers(min(4, estimate.StateV3Collate.Workers()))
+		agg.SetMergeWorkers(min(4, estimate.StateV3Collate.Workers()))
+		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+	} else if isApplyingBlocks {
 		if initialCycle {
 			agg.SetCollateAndBuildWorkers(dbg.CollateWorkers) //TODO: Need always set to CollateWorkers=2 (on ChainTip too). But need more tests first
 			agg.SetCompressWorkers(dbg.CompressWorkers)
@@ -144,7 +153,7 @@ func ExecV3(ctx context.Context,
 		return nil
 	}
 
-	if execStage.SyncMode() == stages.ModeApplyingBlocks {
+	if isApplyingBlocks {
 		agg.BuildFilesInBackground(initialTxNum)
 	}
 
