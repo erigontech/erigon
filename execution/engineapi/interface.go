@@ -47,4 +47,5 @@ type EngineAPI interface {
 	GetBlobsV2(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV2, error)
 	GetBlobsV3(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV2, error)
 	GetClientCommunicationChannelsV1(ctx context.Context) ([]engine_types.CommunicationChannel, error)
+	ExchangeCapabilitiesV2(fromCl []string) *engine_types.ExchangeCapabilitiesV2Response
 }

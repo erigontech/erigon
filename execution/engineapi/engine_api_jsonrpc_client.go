@@ -407,6 +407,11 @@ func (c *JsonRpcClient) GetClientCommunicationChannelsV1(ctx context.Context) ([
 	}, c.backOff(ctx))
 }
 
+func (c *JsonRpcClient) ExchangeCapabilitiesV2(fromCl []string) *enginetypes.ExchangeCapabilitiesV2Response {
+	// JSON-RPC client doesn't implement V2 directly; the server-side handles this.
+	return nil
+}
+
 func (c *JsonRpcClient) backOff(ctx context.Context) backoff.BackOff {
 	var backOff backoff.BackOff
 	backOff = backoff.NewConstantBackOff(c.retryBackOff)

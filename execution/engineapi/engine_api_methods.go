@@ -55,6 +55,7 @@ var ourCapabilities = []string{
 	"engine_getBlobsV2",
 	"engine_getBlobsV3",
 	"engine_getClientCommunicationChannelsV1",
+	"engine_exchangeCapabilitiesV2",
 }
 
 // Returns the most recent version of the payload(for the payloadID) at the time of receiving the call
@@ -248,6 +249,46 @@ func (e *EngineServer) ExchangeCapabilities(fromCl []string) []string {
 	return ourCapabilities
 }
 
+// ExchangeCapabilitiesV2 extends ExchangeCapabilities with supportedProtocols (EIP-8160).
+func (e *EngineServer) ExchangeCapabilitiesV2(fromCl []string) *engine_types.ExchangeCapabilitiesV2Response {
+	capabilities := e.ExchangeCapabilities(fromCl)
+	return &engine_types.ExchangeCapabilitiesV2Response{
+		Capabilities:       capabilities,
+		SupportedProtocols: e.getSupportedProtocols(),
+	}
+}
+
+// getSupportedProtocols returns the list of communication protocols supported by the EL.
+func (e *EngineServer) getSupportedProtocols() []engine_types.CommunicationChannel {
+	addr := "localhost"
+	port := 8551
+	if e.httpConfig != nil {
+		if e.httpConfig.AuthRpcHTTPListenAddress != "" {
+			addr = e.httpConfig.AuthRpcHTTPListenAddress
+		}
+		if e.httpConfig.AuthRpcPort != 0 {
+			port = e.httpConfig.AuthRpcPort
+		}
+	}
+
+	channels := []engine_types.CommunicationChannel{
+		{
+			Protocol: "json_rpc",
+			URL:      fmt.Sprintf("%s:%d", addr, port),
+		},
+	}
+
+	// EIP-8161: Advertise the SSZ-REST channel if the server is running
+	if e.httpConfig != nil && e.httpConfig.SszRestEnabled && e.sszRestPort > 0 {
+		channels = append(channels, engine_types.CommunicationChannel{
+			Protocol: "ssz_rest",
+			URL:      fmt.Sprintf("http://%s:%d", addr, e.sszRestPort),
+		})
+	}
+
+	return channels
+}
+
 func (e *EngineServer) GetBlobsV1(ctx context.Context, blobHashes []common.Hash) ([]*engine_types.BlobAndProofV1, error) {
 	e.logger.Debug("[GetBlobsV1] Received Request", "hashes", len(blobHashes))
 	resp, err := e.getBlobs(ctx, blobHashes, clparams.DenebVersion)
@@ -287,35 +328,8 @@ func (e *EngineServer) GetBlobsV3(ctx context.Context, blobHashes []common.Hash)
 }
 
 // GetClientCommunicationChannelsV1 returns the communication protocols and endpoints supported by the EL.
-// See EIP-8160 and EIP-8161
+// Deprecated: Use ExchangeCapabilitiesV2 instead. Kept for backward compatibility.
 func (e *EngineServer) GetClientCommunicationChannelsV1(ctx context.Context) ([]engine_types.CommunicationChannel, error) {
 	e.engineLogSpamer.RecordRequest()
-
-	addr := "localhost"
-	port := 8551
-	if e.httpConfig != nil {
-		if e.httpConfig.AuthRpcHTTPListenAddress != "" {
-			addr = e.httpConfig.AuthRpcHTTPListenAddress
-		}
-		if e.httpConfig.AuthRpcPort != 0 {
-			port = e.httpConfig.AuthRpcPort
-		}
-	}
-
-	channels := []engine_types.CommunicationChannel{
-		{
-			Protocol: "json_rpc",
-			URL:      fmt.Sprintf("%s:%d", addr, port),
-		},
-	}
-
-	// EIP-8161: Advertise the SSZ-REST channel if the server is running
-	if e.httpConfig != nil && e.httpConfig.SszRestEnabled && e.sszRestPort > 0 {
-		channels = append(channels, engine_types.CommunicationChannel{
-			Protocol: "ssz_rest",
-			URL:      fmt.Sprintf("http://%s:%d", addr, e.sszRestPort),
-		})
-	}
-
-	return channels, nil
+	return e.getSupportedProtocols(), nil
 }
