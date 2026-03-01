@@ -87,6 +87,8 @@ type EngineServer struct {
 	// TODO Remove this on next release
 	printPectraBanner bool
 	maxReorgDepth     uint64
+	httpConfig        *httpcfg.HttpCfg
+	sszRestPort       int // EIP-8161: port the SSZ-REST server is listening on
 }
 
 func NewEngineServer(
@@ -140,6 +142,7 @@ func (e *EngineServer) Start(
 			return nil
 		})
 	}
+	e.httpConfig = httpConfig
 	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, httpConfig.WithDatadir, httpConfig.EvmCallTimeout, engineReader, httpConfig.Dirs, nil, httpConfig.RangeLimit)
 	ethImpl := jsonrpc.NewEthAPI(base, db, eth, e.txpool, mining, jsonrpc.NewEthApiConfig(httpConfig), e.logger)
 
@@ -164,6 +167,39 @@ func (e *EngineServer) Start(
 		}
 		return err
 	})
+
+	// EIP-8161: Start SSZ-REST Engine API server if enabled
+	if httpConfig.SszRestEnabled {
+		eg.Go(func() error {
+			defer e.logger.Debug("[EngineServer] SSZ-REST server goroutine terminated")
+			jwtSecret, err := cli.ObtainJWTSecret(httpConfig, e.logger)
+			if err != nil {
+				e.logger.Error("[EngineServer] failed to obtain JWT secret for SSZ-REST server", "err", err)
+				return err
+			}
+
+			addr := httpConfig.AuthRpcHTTPListenAddress
+			if addr == "" {
+				addr = "127.0.0.1"
+			}
+			port := httpConfig.SszRestPort
+			if port == 0 {
+				port = httpConfig.AuthRpcPort + 1
+				if httpConfig.AuthRpcPort == 0 {
+					port = 8552
+				}
+			}
+			e.sszRestPort = port
+
+			sszServer := NewSszRestServer(e, e.logger, jwtSecret, addr, port)
+			err = sszServer.Start(ctx)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				e.logger.Error("[EngineServer] SSZ-REST server background goroutine failed", "err", err)
+			}
+			return err
+		})
+	}
+
 	return eg.Wait()
 }
 

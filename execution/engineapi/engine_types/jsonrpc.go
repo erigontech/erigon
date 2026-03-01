@@ -136,6 +136,13 @@ type ClientVersionV1 struct {
 	Commit  string `json:"commit" gencodec:"required"`
 }
 
+// CommunicationChannel describes a protocol and endpoint supported by the EL.
+// See EIP-8160: engine_getClientCommunicationChannelsV1
+type CommunicationChannel struct {
+	Protocol string `json:"protocol" gencodec:"required"`
+	URL      string `json:"url"      gencodec:"required"`
+}
+
 func (c ClientVersionV1) String() string {
 	return fmt.Sprintf("ClientCode: %s, %s-%s-%s", c.Code, c.Name, c.Version, c.Commit)
 }

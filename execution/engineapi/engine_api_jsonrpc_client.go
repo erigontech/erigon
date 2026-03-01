@@ -396,6 +396,17 @@ func (c *JsonRpcClient) GetClientVersionV1(ctx context.Context, callerVersion *e
 	}, c.backOff(ctx))
 }
 
+func (c *JsonRpcClient) GetClientCommunicationChannelsV1(ctx context.Context) ([]enginetypes.CommunicationChannel, error) {
+	return backoff.RetryWithData(func() ([]enginetypes.CommunicationChannel, error) {
+		var result []enginetypes.CommunicationChannel
+		err := c.rpcClient.CallContext(ctx, &result, "engine_getClientCommunicationChannelsV1")
+		if err != nil {
+			return nil, c.maybeMakePermanent(err)
+		}
+		return result, nil
+	}, c.backOff(ctx))
+}
+
 func (c *JsonRpcClient) backOff(ctx context.Context) backoff.BackOff {
 	var backOff backoff.BackOff
 	backOff = backoff.NewConstantBackOff(c.retryBackOff)

@@ -326,6 +326,16 @@ var (
 		Value: "",
 	}
 
+	SszRestEnabledFlag = cli.BoolFlag{
+		Name:  "authrpc.ssz-rest",
+		Usage: "Enable the SSZ-REST Engine API transport (EIP-8161) alongside JSON-RPC",
+	}
+	SszRestPortFlag = cli.UintFlag{
+		Name:  "authrpc.ssz-rest-port",
+		Usage: "HTTP port for the SSZ-REST Engine API server (default: authrpc.port + 1)",
+		Value: 0,
+	}
+
 	HttpCompressionFlag = cli.BoolFlag{
 		Name:  "http.compression",
 		Usage: "Enable compression over HTTP-RPC. Use --http.compression=false to disable it",
