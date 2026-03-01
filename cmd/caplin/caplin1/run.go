@@ -524,6 +524,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		syncedDataManager,
 		emitters,
 		blobStorage,
+		columnStorage,
 		attestationProducer,
 		peerDas,
 	)

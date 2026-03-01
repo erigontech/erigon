@@ -56,12 +56,12 @@ type StageHistoryReconstructionCfg struct {
 	blockReader              freezeblocks.BeaconSnapshotReader
 	blobStorage              blob_storage.BlobStorage
 	forkchoiceStore          forkchoice.ForkChoiceStorage
-	blobDownloader           *network.BlobHistoryDownloader
+	blobBackfiller           network.BlobBackfiller
 }
 
 const logIntervalTime = 30 * time.Second
 
-func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, antiquary *antiquary.Antiquary, sn *freezeblocks.CaplinSnapshots, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, beaconCfg *clparams.BeaconChainConfig, caplinConfig clparams.CaplinConfig, waitForAllRoutines bool, startingRoot common.Hash, startinSlot uint64, tmpdir string, backfillingThrottling time.Duration, executionBlocksCollector block_collector.BlockCollector, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, logger log.Logger, forkchoiceStore forkchoice.ForkChoiceStorage, blobDownloader *network.BlobHistoryDownloader) StageHistoryReconstructionCfg {
+func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, antiquary *antiquary.Antiquary, sn *freezeblocks.CaplinSnapshots, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, beaconCfg *clparams.BeaconChainConfig, caplinConfig clparams.CaplinConfig, waitForAllRoutines bool, startingRoot common.Hash, startinSlot uint64, tmpdir string, backfillingThrottling time.Duration, executionBlocksCollector block_collector.BlockCollector, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, logger log.Logger, forkchoiceStore forkchoice.ForkChoiceStorage, blobBackfiller network.BlobBackfiller) StageHistoryReconstructionCfg {
 	return StageHistoryReconstructionCfg{
 		beaconCfg:                beaconCfg,
 		downloader:               downloader,
@@ -80,7 +80,7 @@ func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, an
 		blockReader:              blockReader,
 		blobStorage:              blobStorage,
 		forkchoiceStore:          forkchoiceStore,
-		blobDownloader:           blobDownloader,
+		blobBackfiller:           blobBackfiller,
 	}
 }
 
@@ -297,10 +297,10 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		}
 
 		close(finishCh)
-		if cfg.blobDownloader != nil {
-			cfg.blobDownloader.SetHeadSlot(cfg.startingSlot + 1)
-			cfg.blobDownloader.SetNotifyBlobBackfilled(cfg.antiquary.NotifyBlobBackfilled)
-			cfg.blobDownloader.Start()
+		if cfg.blobBackfiller != nil {
+			cfg.blobBackfiller.SetHeadSlot(cfg.startingSlot + 1)
+			cfg.blobBackfiller.SetNotifyBlobBackfilled(cfg.antiquary.NotifyBlobBackfilled)
+			cfg.blobBackfiller.Start()
 		}
 	}()
 	// We block until we are done with the EL side of the backfilling with 2000 blocks of safety margin.

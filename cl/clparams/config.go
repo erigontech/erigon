@@ -51,6 +51,8 @@ type CaplinConfig struct {
 	ImmediateBlobsBackfilling bool
 	BlobPruningDisabled       bool
 	SnapshotGenerationEnabled bool
+	// BlobBackfillerUrl is the URL of a remote beacon API to use for blob backfilling
+	BlobBackfillerUrl string
 	// Network related config
 	NetworkId NetworkType
 	// DisableCheckpointSync is optional and is used to disable checkpoint sync used by default in the node

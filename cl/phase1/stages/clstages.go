@@ -60,7 +60,7 @@ type Cfg struct {
 	sn                      *freezeblocks.CaplinSnapshots
 	blobStore               blob_storage.BlobStorage
 	peerDas                 das.PeerDas
-	blobDownloader          *network2.BlobHistoryDownloader
+	blobBackfiller          network2.BlobBackfiller
 	attestationDataProducer attestation_producer.AttestationDataProducer
 	caplinConfig            clparams.CaplinConfig
 	hasDownloaded           bool
@@ -93,23 +93,43 @@ func ClStagesCfg(
 	syncedData *synced_data.SyncedDataManager,
 	emitters *beaconevents.EventEmitter,
 	blobStore blob_storage.BlobStorage,
+	columnStore blob_storage.DataColumnStorage,
 	attestationDataProducer attestation_producer.AttestationDataProducer,
 	peerDas das.PeerDas,
 ) *Cfg {
-	blobDownloader := network2.NewBlobHistoryDownloader(
-		ctx,
-		beaconCfg,
-		rpc,
-		indiciesDB,
-		blobStore,
-		blockReader,
-		sn,
-		forkChoice,
-		forkChoice,
-		caplinConfig.ArchiveBlobs,
-		caplinConfig.ImmediateBlobsBackfilling,
-		log.Root(),
-	)
+	// Select blob backfiller: use beacon API if URL is configured, otherwise use P2P
+	var blobBackfiller network2.BlobBackfiller
+	if caplinConfig.BlobBackfillerUrl != "" {
+		blobBackfiller = network2.NewBeaconApiBlobDownloader(
+			ctx,
+			beaconCfg,
+			caplinConfig.BlobBackfillerUrl,
+			indiciesDB,
+			blobStore,
+			columnStore,
+			blockReader,
+			sn,
+			forkChoice,
+			peerDas,
+			caplinConfig.ArchiveBlobs || caplinConfig.ImmediateBlobsBackfilling,
+			log.Root(),
+		)
+	} else {
+		blobBackfiller = network2.NewBlobHistoryDownloader(
+			ctx,
+			beaconCfg,
+			rpc,
+			indiciesDB,
+			blobStore,
+			blockReader,
+			sn,
+			forkChoice,
+			forkChoice,
+			caplinConfig.ArchiveBlobs,
+			caplinConfig.ImmediateBlobsBackfilling,
+			log.Root(),
+		)
+	}
 
 	return &Cfg{
 		rpc:                     rpc,
@@ -125,7 +145,7 @@ func ClStagesCfg(
 		sn:                      sn,
 		blockReader:             blockReader,
 		peerDas:                 peerDas,
-		blobDownloader:          blobDownloader,
+		blobBackfiller:          blobBackfiller,
 		syncedData:              syncedData,
 		emitter:                 emitters,
 		blobStore:               blobStore,
@@ -265,7 +285,7 @@ func ConsensusClStages(ctx context.Context,
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc, cfg.sn, cfg.executionClient, cfg.indiciesDB)
 
-					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.beaconCfg, cfg.caplinConfig, false, startingRoot, startingSlot, cfg.dirs.Tmp, 600*time.Millisecond, cfg.blockCollector, cfg.blockReader, cfg.blobStore, logger, cfg.forkChoice, cfg.blobDownloader), context.Background(), logger); err != nil {
+					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.beaconCfg, cfg.caplinConfig, false, startingRoot, startingSlot, cfg.dirs.Tmp, 600*time.Millisecond, cfg.blockCollector, cfg.blockReader, cfg.blobStore, logger, cfg.forkChoice, cfg.blobBackfiller), context.Background(), logger); err != nil {
 						cfg.hasDownloaded = false
 						return err
 					}
