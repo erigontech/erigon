@@ -325,15 +325,22 @@ func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path Acco
 			valid = VersionInvalid
 		} else {
 			if valid = checkVersion(version, version); valid == VersionValid {
-				if path == BalancePath || path == NoncePath || path == IncarnationPath || path == CodeHashPath {
+				// Cross-validate any account property read against AddressPath
+				// and SelfDestructPath.  A prior tx may have created or
+				// self-destructed the account, invalidating storage reads of
+				// any property (code, storage slots, balance, nonce, etc.).
+				if path != AddressPath && path != SelfDestructPath {
 					if valid = vm.validateRead(txIndex, addr, AddressPath, accounts.StorageKey{}, source,
 						version, checkVersion, traceInvalid, tracePrefix); valid == VersionValid {
 						valid = vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
 							version, checkVersion, traceInvalid, tracePrefix)
 					} else {
-						valid = vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
+						vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
 							version, checkVersion, traceInvalid, tracePrefix)
 					}
+				} else if path == AddressPath {
+					valid = vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
+						version, checkVersion, traceInvalid, tracePrefix)
 				}
 			}
 		}
@@ -393,6 +400,10 @@ type Version struct {
 }
 
 var UnknownVersion = Version{TxIndex: UnknownDep, Incarnation: -1}
+
+func (v Version) blockAccessIndex() uint16 {
+	return uint16(v.TxIndex + 1)
+}
 
 const (
 	MVReadResultDone       = 0

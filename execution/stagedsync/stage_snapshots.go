@@ -148,23 +148,13 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return nil
 	}
 
-	diaglib.Send(diaglib.CurrentSyncStage{Stage: string(stages.Snapshots)})
-
 	cstate := snapshotsync.NoCaplin
 	if cfg.caplin {
 		cstate = snapshotsync.AlsoCaplin
 	}
 
-	subStages := diaglib.InitSubStagesFromList([]string{"Download header-chain", "Download snapshots", "E2 Indexing", "E3 Indexing", "Fill DB"})
-	diaglib.Send(diaglib.SetSyncSubStageList{
-		Stage: string(stages.Snapshots),
-		List:  subStages,
-	})
-
 	log.Info("[OtterSync] Starting Ottersync")
-	log.Info(snapshotsync.GreatOtterBanner)
 
-	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "Download header-chain"})
 	agg := cfg.db.(*temporal.DB).Agg().(*state.Aggregator)
 	// Download only the snapshots that are for the header chain.
 
@@ -251,8 +241,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cfg.notifier.Events.OnNewSnapshot()
 	}
 
-	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "E2 Indexing"})
-	if err := cfg.blockRetire.BuildMissedIndicesIfNeed(ctx, s.LogPrefix(), cfg.notifier.Events); err != nil {
+	if err := buildOrDeferE2Indices(ctx, tx, s, cfg); err != nil {
 		return err
 	}
 
@@ -310,6 +299,33 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		})
 	}
 
+	return nil
+}
+
+// buildOrDeferE2Indices decides whether to build E2 block snapshot indices synchronously
+// or defer them to background processing.
+// On restart (headersProgress > 0), E2 indexing is skipped at startup. Missing indices
+// will be built in the background via RetireBlocksInBackground (called from SnapshotsPrune
+// on every sync cycle).
+// Exception: Bor chains always index synchronously because RetireBlocks has an early-exit
+// guard for Bor data readiness that may skip BuildMissedIndicesIfNeed.
+func buildOrDeferE2Indices(ctx context.Context, tx kv.RwTx, s *StageState, cfg SnapshotsCfg) error {
+	headersProgress, err := stages.GetStageProgress(tx, stages.Headers)
+	if err != nil {
+		return fmt.Errorf("getting headers progress for indexing decision: %w", err)
+	}
+
+	isBor := cfg.chainConfig.Bor != nil
+	canDefer := headersProgress > 0 && !isBor
+
+	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "E2 Indexing"})
+	if !canDefer {
+		if err := cfg.blockRetire.BuildMissedIndicesIfNeed(ctx, s.LogPrefix(), cfg.notifier.Events); err != nil {
+			return err
+		}
+	} else {
+		log.Info(fmt.Sprintf("[%s] Deferring E2 indexing to background", s.LogPrefix()), "reason", "restart", "headersProgress", headersProgress)
+	}
 	return nil
 }
 

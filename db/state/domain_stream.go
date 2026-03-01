@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
@@ -52,7 +53,7 @@ type CursorItem struct {
 	iter         btree2.MapIter[string, []dataWithTxNum]
 	kvReader     *seg.Reader
 	hist         *seg.PagedReader
-	btCursor     *Cursor
+	btCursor     *btindex.Cursor
 	key          []byte
 	val          []byte
 	step         kv.Step

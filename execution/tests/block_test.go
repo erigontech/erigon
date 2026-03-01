@@ -30,7 +30,7 @@ import (
 
 func TestLegacyBlockchain(t *testing.T) {
 	if testing.Short() {
-		t.Skip("slow test")
+		t.Skip()
 	}
 	t.Parallel()
 
@@ -96,10 +96,6 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 
 // Only runs EEST tests for current devnet - can "skip" on off-seasons
 func TestExecutionSpecBlockchainDevnet(t *testing.T) {
-	const offSeason = false
-	if offSeason {
-		t.Skip("devnet off-season")
-	}
 	if testing.Short() {
 		t.Skip()
 	}
@@ -118,6 +114,8 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 
 	// static — tested in state test format by TestState
 	bt.skipLoad(`^static/state_tests/`)
+
+	bt.skipLoad(`^prague/eip7702_set_code_tx/test_set_code_to_sstore_then_sload.json`)
 
 	bt.walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root

@@ -32,6 +32,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -39,7 +41,6 @@ import (
 	"github.com/erigontech/erigon/p2p/discover/v5wire"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
-	"github.com/stretchr/testify/require"
 )
 
 // Real sockets, real crypto: this test checks end-to-end connectivity for UDPv5.
@@ -56,7 +57,7 @@ func TestUDPv5_lookupE2E(t *testing.T) {
 		}
 		node := startLocalhostV5(t, cfg)
 		nodes = append(nodes, node)
-		defer node.Close()
+		t.Cleanup(node.Close)
 	}
 	last := nodes[N-1]
 	target := nodes[rand.Intn(N-2)].Self()

@@ -329,13 +329,11 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		if float64(hi-lo)/float64(hi) < estimateGasErrorRatio {
 			break
 		}
-		mid := (hi + lo) / 2
-		if mid > lo*2 {
+		mid := min((hi+lo)/2,
 			// Most txs don't need much higher gas limit than their gas used, and most txs don't
 			// require near the full block limit of gas, so the selection of where to bisect the
 			// range here is skewed to favor the low side.
-			mid = lo * 2
-		}
+			lo*2)
 		failed, _, err := doCall(ctx, caller, mid, engine)
 		// If the error is not nil(consensus error), it means the provided message
 		// call or transaction will never be accepted no matter how much gas it is

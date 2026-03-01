@@ -27,7 +27,7 @@ import (
 
 var be = binary.BigEndian
 
-func GetFromPage(key, compressedPage []byte, compressionBuf []byte, compressionEnabled bool) (v []byte, ok bool, compressionBufOut []byte) {
+func GetFromPage(key, compressedPage []byte, compressionBuf []byte, compressionEnabled bool) (v []byte, compressionBufOut []byte) {
 	var err error
 	var page []byte
 	compressionBuf, page, err = compress.DecodeZstdIfNeed(compressionBuf[:0], compressedPage, compressionEnabled)
@@ -37,7 +37,7 @@ func GetFromPage(key, compressedPage []byte, compressionBuf []byte, compressionE
 
 	cnt := int(page[0])
 	if cnt == 0 {
-		return nil, false, compressionBuf
+		return nil, compressionBuf
 	}
 	meta, data := page[1:1+cnt*4*2], page[1+cnt*4*2:]
 	kLens, vLens := meta[:cnt*4], meta[cnt*4:]
@@ -53,14 +53,14 @@ func GetFromPage(key, compressedPage []byte, compressionBuf []byte, compressionE
 		kLen, vLen := be.Uint32(kLens[i:]), be.Uint32(vLens[i:])
 		foundKey := keys[kOffset : kOffset+kLen]
 		if bytes.Equal(key, foundKey) {
-			return vals[vOffset : vOffset+vLen], true, compressionBuf
+			return vals[vOffset : vOffset+vLen], compressionBuf
 		} else {
 			_ = data
 		}
 		kOffset += kLen
 		vOffset += vLen
 	}
-	return nil, false, compressionBuf
+	return nil, compressionBuf
 }
 
 type Page struct {

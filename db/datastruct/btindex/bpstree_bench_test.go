@@ -1,4 +1,4 @@
-package state
+package btindex
 
 import (
 	"path/filepath"

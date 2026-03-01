@@ -151,6 +151,11 @@ func (s *SequenceReader) Seek(v uint64) (uint64, bool) {
 	panic(fmt.Sprintf("unknown sequence encoding: %d", s.currentEnc))
 }
 
+func (s *SequenceReader) Has(v uint64) bool {
+	n, ok := s.Seek(v)
+	return ok && n == v
+}
+
 func (s *SequenceReader) Iterator(from int) stream.U64 {
 	switch s.currentEnc {
 	case SimpleEncoding:

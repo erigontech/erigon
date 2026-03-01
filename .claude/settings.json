@@ -4,7 +4,7 @@
       "Bash(make test-all:*)",
       "Bash(go test:*)",
       "Bash(go get:*)",
-      "Bash(GOEXPERIMENT=synctest go vet:*)",
+      "Bash(go vet:*)",
       "Bash(make lint:*)",
       "Bash(git fetch:*)",
       "Bash(go mod tidy:*)"

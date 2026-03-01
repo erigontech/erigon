@@ -36,7 +36,7 @@ import (
 type noopPatriciaContext struct{}
 
 func (n *noopPatriciaContext) Branch(prefix []byte) ([]byte, kv.Step, error) { return nil, 0, nil }
-func (n *noopPatriciaContext) PutBranch(prefix, data, prevData []byte, prevStep kv.Step) error {
+func (n *noopPatriciaContext) PutBranch(prefix, data, prevData []byte) error {
 	return nil
 }
 func (n *noopPatriciaContext) Account(plainKey []byte) (*Update, error) { return nil, nil }
