@@ -269,6 +269,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		IndexFile:  historyIdxPath,
 		Salt:       h.salt.Load(),
 		NoFsync:    h.noFsync,
+		//Workers:    h.CompressorCfg.Workers,
 	}, h.logger)
 	if err != nil {
 		return fmt.Errorf("create recsplit: %w", err)
@@ -283,12 +284,12 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	for {
 		histReader.Reset(0)
 		iiReader.Reset(0)
+		rs.SetProgress(p)
 
 		valOffset = 0
 		for iiReader.HasNext() {
 			keyBuf, _ = iiReader.Next(keyBuf[:0])
 			valBuf, _ = iiReader.Next(valBuf[:0])
-			p.Processed.Add(1)
 
 			// fmt.Printf("ef key %x\n", keyBuf)
 

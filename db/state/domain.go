@@ -1107,6 +1107,7 @@ func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep kv.S
 		IndexFile:  idxPath,
 		Salt:       d.salt.Load(),
 		NoFsync:    d.noFsync,
+		//Workers:    d.CompressorCfg.Workers,
 	}
 	return buildHashMapAccessor(ctx, data, idxPath, false, cfg, ps, d.logger)
 }
@@ -1220,6 +1221,7 @@ func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, va
 			return err
 		}
 		g.Reset(0)
+		rs.SetProgress(p)
 		for g.HasNext() {
 			word, valPos = g.Next(word[:0])
 			if values {
@@ -1234,8 +1236,6 @@ func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, va
 
 			// Skip value
 			keyPos, _ = g.Skip()
-
-			p.Processed.Add(1)
 		}
 		if err = rs.Build(ctx); err != nil {
 			if rs.Collision() {

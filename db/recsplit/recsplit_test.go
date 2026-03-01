@@ -480,3 +480,96 @@ func TestTwoLayerIndex(t *testing.T) {
 		test(t, cfg)
 	})
 }
+
+func TestIndexLookupParallel(t *testing.T) {
+	logger := log.New()
+	tmpDir := t.TempDir()
+	salt := uint32(1)
+	const N = 1000
+
+	for _, workers := range []int{2, 4, 8} {
+		t.Run(fmt.Sprintf("workers=%d", workers), func(t *testing.T) {
+			indexFile := filepath.Join(tmpDir, fmt.Sprintf("index_w%d", workers))
+			rs, err := NewRecSplit(RecSplitArgs{
+				KeyCount:   N,
+				BucketSize: 10,
+				Salt:       &salt,
+				TmpDir:     tmpDir,
+				IndexFile:  indexFile,
+				LeafSize:   8,
+				Workers:    workers,
+				NoFsync:    true,
+			}, logger)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rs.Close()
+			for i := 0; i < N; i++ {
+				if err = rs.AddKey(fmt.Appendf(nil, "key %d", i), uint64(i*17)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := rs.Build(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			idx := MustOpen(indexFile)
+			defer idx.Close()
+			for i := 0; i < N; i++ {
+				reader := NewIndexReader(idx)
+				offset, ok := reader.Lookup(fmt.Appendf(nil, "key %d", i))
+				assert.True(t, ok)
+				if offset != uint64(i*17) {
+					t.Errorf("workers=%d key %d: expected offset %d, got %d", workers, i, i*17, offset)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkBuildParallel(b *testing.B) {
+	b.ReportAllocs()
+	logger := log.New()
+	tmpDir := b.TempDir()
+	salt := uint32(1)
+	const KeysN = 1_000_000
+
+	keys := make([][]byte, KeysN)
+	for j := 0; j < KeysN; j++ {
+		keys[j] = fmt.Appendf(nil, "key %d", j)
+	}
+
+	for _, workers := range []int{1, 2, 4, 8} {
+		b.Run(fmt.Sprintf("workers=%d", workers), func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; b.Loop(); i++ {
+				b.StopTimer()
+				indexFile := filepath.Join(tmpDir, fmt.Sprintf("index_par_%d_w%d", i, workers))
+				rs, err := NewRecSplit(RecSplitArgs{
+					KeyCount:   KeysN,
+					BucketSize: 2000,
+					Salt:       &salt,
+					TmpDir:     tmpDir,
+					IndexFile:  indexFile,
+					LeafSize:   8,
+					NoFsync:    true,
+					Workers:    workers,
+				}, logger)
+				if err != nil {
+					b.Fatal(err)
+				}
+				for j := 0; j < KeysN; j++ {
+					if err = rs.AddKey(keys[j], uint64(j*17)); err != nil {
+						b.Fatal(err)
+					}
+				}
+				b.StartTimer()
+				if err := rs.Build(context.Background()); err != nil {
+					b.Fatal(err)
+				}
+				b.StopTimer()
+				rs.Close()
+				b.StartTimer()
+			}
+		})
+	}
+}
