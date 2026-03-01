@@ -30,19 +30,15 @@ jobs:
     steps:
       - name: Clean docker system
         run: |
-          echo "Force stopping and removing all containers..."
-          if [ -n "$(docker ps -aq)" ]; then
-            docker kill $(docker ps -aq) || true
-            docker rm -f $(docker ps -aq) || true
-          fi
-          echo "Pruning all images..."
-          docker image prune -af || true
-          if [ -n "$(docker images -aq)" ]; then
-            echo "Force removing all images..."
-            docker rmi -f $(docker images -aq) || true
-          fi
-          echo "Pruning docker system..."
-          docker system prune -af --volumes
+          echo "Stopping and removing non-hive containers..."
+          for id in $(docker ps -aq); do
+            if ! docker inspect "$id" --format '{{index .Config.Labels "hive.type"}}' 2>/dev/null | grep -q .; then
+              docker kill "$id" || true
+              docker rm -f "$id" || true
+            fi
+          done
+          echo "Pruning dangling images (preserving layer cache and hive images)..."
+          docker image prune -f || true
       - name: Checkout Erigon go.mod
         uses: actions/checkout@v6
         with:
@@ -73,6 +69,9 @@ jobs:
           username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
           password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
     
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Setup go env and cache
         uses: actions/setup-go@v6
         with:
@@ -105,7 +104,7 @@ jobs:
             echo -e "\n\n============================================================"
             echo "Running test: ${1}"
             echo -e "\n"
-            ./hive -docker.output -docker.auth --sim ethereum/eels/"${1}" --sim.limit="${2}" --sim.parallelism=12 --client erigon  --docker.nocache=true --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/${{ env.EEST_VERSION }}/fixtures_develop.tar.gz 2>&1 | tee output.log || {
+            ./hive -docker.output -docker.auth --sim ethereum/eels/"${1}" --sim.limit="${2}" --sim.parallelism=12 --client erigon --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/${{ env.EEST_VERSION }}/fixtures_develop.tar.gz 2>&1 | tee output.log || {
               if [ $? -gt 0 ]; then
                 echo "Exitcode gt 0"
               fi
@@ -168,11 +167,14 @@ jobs:
       # So it is good to PROACTIVELY run it (it should not cause any issues within github-managed runners either)  
       - name: Prune docker
         run: |
-          echo "Stopping and removing all containers..."
-          docker rm -f $(docker ps -aq) || true
-          echo "Removing all images..."
-          docker rmi -f $(docker images -aq) || true
-          echo "Pruning docker..."
-          docker system prune -af --volumes
+          echo "Stopping and removing non-hive containers..."
+          for id in $(docker ps -aq); do
+            if ! docker inspect "$id" --format '{{index .Config.Labels "hive.type"}}' 2>/dev/null | grep -q .; then
+              docker rm -f "$id" || true
+            fi
+          done
+          echo "Pruning dangling images (preserving hive client image layer cache)..."
+          docker image prune -f || true
+          docker volume prune -f || true
         if: always()
 
