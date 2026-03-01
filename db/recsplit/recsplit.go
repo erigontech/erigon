@@ -1231,6 +1231,7 @@ func (rs *RecSplit) buildWithWorkers(ctx context.Context) error {
 		}()
 	}
 	go func() {
+		defer close(resultCh)
 		wg.Wait()
 		// Harvest the longest golombRice table from all workers into rs.scratch.
 		// Since golombRice[i] is deterministic, the longest table covers all m
@@ -1242,7 +1243,6 @@ func (rs *RecSplit) buildWithWorkers(ctx context.Context) error {
 			}
 		}
 		rs.scratch.golombRice = best
-		close(resultCh)
 	}()
 
 	// Producer: iterate ETL collector, send one task per bucket.
