@@ -43,29 +43,49 @@ func NewReader(config *chain.Config, tx kv.Tx, blockReader services.FullBlockRea
 func (cr Reader) Config() *chain.Config { return cr.config }
 func (cr Reader) CurrentHeader() *types.Header {
 	hash := rawdb.ReadHeadHeaderHash(cr.tx)
-	h, _ := cr.blockReader.HeaderByHash(context.TODO(), cr.tx, hash)
+	h, _ := cr.blockReader.HeaderByHash(ctx, cr.tx, hash)
+	if err != nil {
+		cr.logger.Warn("CurrentHeader lookup failed", "err", err)
+		return nil
+	}
 	return h
 }
 func (cr Reader) CurrentFinalizedHeader() *types.Header {
 	hash := rawdb.ReadForkchoiceFinalized(cr.tx)
-	h, _ := cr.blockReader.HeaderByHash(context.Background(), cr.tx, hash)
+	h, err := cr.blockReader.HeaderByHash(context.Background(), cr.tx, hash)
+	if err != nil {
+		cr.logger.Warn("CurrentFinalizedHeader lookup failed", "err", err)
+		return nil
+	}
 	return h
 }
 func (cr Reader) CurrentSafeHeader() *types.Header {
 	hash := rawdb.ReadForkchoiceSafe(cr.tx)
-	h, _ := cr.blockReader.HeaderByHash(context.Background(), cr.tx, hash)
+	h, err := cr.blockReader.HeaderByHash(context.Background(), cr.tx, hash)
+	if err != nil {
+		cr.logger.Warn("CurrentSafeHeader lookup failed", "err", err)
+		return nil
+	}
 	return h
 }
 func (cr Reader) GetHeader(hash common.Hash, number uint64) *types.Header {
 	if cr.blockReader != nil {
-		h, _ := cr.blockReader.Header(context.Background(), cr.tx, hash, number)
+		h, err := cr.blockReader.Header(context.Background(), cr.tx, hash, number)
+		if err != nil {
+			cr.logger.Warn("GetHeader lookup failed", "err", err, "hash", hash, "number", number)
+			return nil
+		}
 		return h
 	}
 	return rawdb.ReadHeader(cr.tx, hash, number)
 }
 func (cr Reader) GetHeaderByNumber(number uint64) *types.Header {
 	if cr.blockReader != nil {
-		h, _ := cr.blockReader.HeaderByNumber(context.Background(), cr.tx, number)
+		h, err := cr.blockReader.HeaderByNumber(context.Background(), cr.tx, number)
+		if err != nil {
+			cr.logger.Warn("GetHeaderByNumber lookup failed", "err", err, "number", number)
+			return nil
+		}
 		return h
 	}
 	return rawdb.ReadHeaderByNumber(cr.tx, number)
@@ -73,7 +93,11 @@ func (cr Reader) GetHeaderByNumber(number uint64) *types.Header {
 }
 func (cr Reader) GetHeaderByHash(hash common.Hash) *types.Header {
 	if cr.blockReader != nil {
-		h, _ := cr.blockReader.HeaderByHash(context.Background(), cr.tx, hash)
+		h, err := cr.blockReader.HeaderByHash(context.Background(), cr.tx, hash)
+		if err != nil {
+			cr.logger.Warn("GetHeaderByHash lookup failed", "err", err, "hash", hash)
+			return nil
+		}
 		return h
 	}
 	h, _ := rawdb.ReadHeaderByHash(cr.tx, hash)
