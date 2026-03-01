@@ -367,7 +367,7 @@ func (b *GasPriceOracleBackend) Fork(ctx context.Context) (gasprice.OracleBacken
 	if b.db == nil {
 		return nil, nil, nil // Fork not supported; caller falls back to sequential
 	}
-	tx, err := b.db.BeginTemporalRo(ctx)
+	tx, err := b.db.BeginTemporalRo(ctx) //nolint:gocritic
 	if err != nil {
 		return nil, nil, err
 	}
