@@ -471,9 +471,9 @@ func ApplyDeferredBranchUpdates(
 			if err := putBranch(upd.prefix, upd.encoded, upd.prev); err != nil {
 				return written, err
 			}
-			mxTrieBranchesUpdated.Inc()
 			written++
 		}
+		mxTrieBranchesUpdated.AddInt(written)
 		return written, nil
 	}
 
@@ -538,10 +538,9 @@ func ApplyDeferredBranchUpdates(
 			firstErr = err
 			continue
 		}
-		mxTrieBranchesUpdated.Inc()
 		written++
 	}
-
+	mxTrieBranchesUpdated.AddInt(written)
 	return written, firstErr
 }
 
