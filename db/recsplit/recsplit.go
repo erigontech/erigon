@@ -37,6 +37,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/assert"
+	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mmap"
@@ -177,6 +178,8 @@ type RecSplit struct {
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 	workers int  // Number of parallel goroutines for Build(); 0 or 1 = sequential
 	timings Timings
+
+	progress *background.Progress // If set, tracks 0-100%: add-keys fills 0-50%, build fills 50-100%
 }
 
 type RecSplitArgs struct {
@@ -411,11 +414,14 @@ func (rs *RecSplit) ResetNextSalt() {
 	rs.collision = false
 	rs.keysAdded = 0
 	rs.salt++
+	if rs.progress != nil {
+		rs.progress.Processed.Store(0)
+	}
 	if rs.bucketCollector != nil {
 		rs.bucketCollector.Close()
 	}
 	rs.bucketCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+rs.fileName, rs.tmpDir, etl.SmallSortableBuffers, rs.logger)
-	rs.bucketCollector.SortAndFlushInBackground(false)
+	rs.bucketCollector.SortAndFlushInBackground(rs.workers > 1)
 	rs.bucketCollector.LogLvl(log.LvlDebug)
 	if rs.offsetFile != nil {
 		_ = rs.offsetFile.Truncate(0)
@@ -535,6 +541,9 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 
 	rs.keysAdded++
 	rs.prevOffset = offset
+	if rs.progress != nil && rs.keysAdded%1024 == 0 {
+		rs.progress.Processed.Add(1024)
+	}
 	return nil
 }
 
@@ -806,6 +815,10 @@ func (rs *RecSplit) loadFuncBucket(k, v []byte, _ etl.CurrentTableReader, _ etl.
 			if err := rs.recsplitCurrentBucket(); err != nil {
 				return err
 			}
+			if rs.progress != nil {
+				// Build phase fills the 50–100% half: each bucket ≈ bucketSize keys worth.
+				rs.progress.Processed.Add(uint64(rs.bucketSize))
+			}
 		}
 		rs.currentBucketIdx = bucketIdx
 	}
@@ -834,6 +847,26 @@ func (rs *RecSplit) buildOffsetEf() error {
 	}
 	rs.offsetEf.Build()
 	return nil
+}
+
+// KeyCount returns the number of keys added to the RecSplit.
+func (rs *RecSplit) KeyCount() uint64 { return rs.keysAdded }
+
+// BucketCount returns the number of buckets.
+func (rs *RecSplit) BucketCount() uint64 { return rs.bucketCount }
+
+// SetProgress wires a single progress tracker covering the full build lifecycle.
+// Total = 2*keyExpectedCount; AddKey fills 0→keyExpectedCount (0–50%) and
+// the bucket-building phase fills keyExpectedCount→2*keyExpectedCount (50–100%).
+// Progress is automatically reset on ResetNextSalt (collision retry).
+func (rs *RecSplit) SetProgress(p *background.Progress) {
+	if p == nil {
+		return
+	}
+	p.Name.Store(&rs.fileName)
+	p.Processed.Store(0)
+	p.Total.Store(2 * rs.keyExpectedCount)
+	rs.progress = p
 }
 
 // Build has to be called after all the keys have been added, and it initiates the process
@@ -1199,6 +1232,9 @@ func (rs *RecSplit) writeResult(r *bucketResult) error {
 		rs.bucketPosAcc = append(rs.bucketPosAcc, rs.bucketPosAcc[len(rs.bucketPosAcc)-1])
 	}
 	rs.bucketPosAcc[int(r.bucketIdx)+1] = uint64(rs.gr.Bits())
+	if rs.progress != nil {
+		rs.progress.Processed.Add(uint64(r.bucketSize))
+	}
 	return nil
 }
 
@@ -1251,7 +1287,8 @@ func (rs *RecSplit) buildWithWorkers(ctx context.Context) error {
 		var curBucketIdx uint64 = math.MaxUint64
 		var bucket, offsets []uint64
 		err := rs.bucketCollector.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-			bucketIdx := binary.BigEndian.Uint64(k)
+			// k is 4-byte BigEndian bucketIdx (uint32) + 8-byte fingerprint; v is the offset.
+			bucketIdx := uint64(binary.BigEndian.Uint32(k))
 			if curBucketIdx != bucketIdx {
 				if curBucketIdx != math.MaxUint64 {
 					select {
@@ -1264,7 +1301,7 @@ func (rs *RecSplit) buildWithWorkers(ctx context.Context) error {
 				}
 				curBucketIdx = bucketIdx
 			}
-			bucket = append(bucket, binary.BigEndian.Uint64(k[8:]))
+			bucket = append(bucket, binary.BigEndian.Uint64(k[4:]))
 			offsets = append(offsets, binary.BigEndian.Uint64(v))
 			return nil
 		}, etl.TransformArgs{Quit: ctx.Done()})
@@ -1279,7 +1316,7 @@ func (rs *RecSplit) buildWithWorkers(ctx context.Context) error {
 	}()
 
 	// Consumer: collect results, order with min-heap, write in sequence.
-	var resultQueue bucketResultHeap
+	resultQueue := make(bucketResultHeap, 0, numWorkers*2)
 	heap.Init(&resultQueue)
 	nextWrite := uint64(0)
 
@@ -1296,6 +1333,17 @@ func (rs *RecSplit) buildWithWorkers(ctx context.Context) error {
 		return nil
 	}
 
+	// drainAll cancels and returns all in-flight results (heap + channel) to the pool.
+	drainAll := func() {
+		cancel()
+		for resultQueue.Len() > 0 {
+			putBucketResult(heap.Pop(&resultQueue).(*bucketResult))
+		}
+		for r := range resultCh { //nolint:gocritic
+			putBucketResult(r)
+		}
+	}
+
 	var consumerErr error
 	for r := range resultCh {
 		if r.err != nil {
@@ -1303,20 +1351,14 @@ func (rs *RecSplit) buildWithWorkers(ctx context.Context) error {
 				rs.collision = true
 			}
 			consumerErr = r.err
-			cancel()
 			putBucketResult(r)
-			for r := range resultCh { //nolint:gocritic
-				putBucketResult(r)
-			}
+			drainAll()
 			break
 		}
 		heap.Push(&resultQueue, r)
 		if err := writeOrdered(); err != nil {
 			consumerErr = err
-			cancel()
-			for r := range resultCh { //nolint:gocritic
-				putBucketResult(r)
-			}
+			drainAll()
 			break
 		}
 	}
