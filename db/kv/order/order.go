@@ -41,6 +41,10 @@ func (asc By) Assert(k1, k2 []byte) {
 	if !dbg.AssertEnabled {
 		return
 	}
+	asc.assert(k1, k2)
+}
+
+func (asc By) assert(k1, k2 []byte) {
 	if k1 == nil || k2 == nil {
 		return
 	}
@@ -59,10 +63,14 @@ func (asc By) AssertList(keys [][]byte) {
 	if !dbg.AssertEnabled {
 		return
 	}
+	asc.assertList(keys)
+}
+
+func (asc By) assertList(keys [][]byte) {
 	if len(keys) < 2 {
 		return
 	}
-	for i := 0; i < len(keys)-2; i++ {
-		asc.Assert(keys[i], keys[i+1])
+	for i := 0; i < len(keys)-1; i++ {
+		asc.assert(keys[i], keys[i+1])
 	}
 }
