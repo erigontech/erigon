@@ -29,6 +29,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -164,6 +165,8 @@ type RecSplit struct {
 
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 	timings Timings
+
+	BuildBucketsProcessed *atomic.Uint64 // If set, incremented per bucket completed during Build
 }
 
 type RecSplitArgs struct {
@@ -790,6 +793,9 @@ func (rs *RecSplit) loadFuncBucket(k, v []byte, _ etl.CurrentTableReader, _ etl.
 			if err := rs.recsplitCurrentBucket(); err != nil {
 				return err
 			}
+			if rs.BuildBucketsProcessed != nil {
+				rs.BuildBucketsProcessed.Add(1)
+			}
 		}
 		rs.currentBucketIdx = bucketIdx
 	}
@@ -819,6 +825,12 @@ func (rs *RecSplit) buildOffsetEf() error {
 	rs.offsetEf.Build()
 	return nil
 }
+
+// KeyCount returns the number of keys added to the RecSplit.
+func (rs *RecSplit) KeyCount() uint64 { return rs.keysAdded }
+
+// BucketCount returns the number of buckets.
+func (rs *RecSplit) BucketCount() uint64 { return rs.bucketCount }
 
 // Build has to be called after all the keys have been added, and it initiates the process
 // of building the perfect hash function and writing index into a file

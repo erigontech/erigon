@@ -219,10 +219,20 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, decomp *seg.Decompres
 			}
 		}
 		stream.Close()
+		if p != nil {
+			buildingName := filepath.Base(idxFile) + " (building)"
+			p.Name.Store(&buildingName)
+			p.Processed.Store(0)
+			p.Total.Store(rs.BucketCount())
+			rs.BuildBucketsProcessed = &p.Processed
+		}
+
 		if err = rs.Build(ctx); err != nil {
 			// collision handling
 			if rs.Collision() {
-				p.Processed.Store(0)
+				if p != nil {
+					p.Processed.Store(0)
+				}
 				s.logger.Debug("found collision, trying again", "file", filepath.Base(idxFile), "salt", rs.Salt(), "err", err)
 				rs.ResetNextSalt()
 				continue

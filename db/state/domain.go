@@ -1220,6 +1220,9 @@ func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, va
 			return err
 		}
 		g.Reset(0)
+		p.Name.Store(&fileName)
+		p.Processed.Store(0)
+		p.Total.Store(uint64(count))
 		for g.HasNext() {
 			word, valPos = g.Next(word[:0])
 			if values {
@@ -1237,6 +1240,12 @@ func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, va
 
 			p.Processed.Add(1)
 		}
+		buildingName := fileName + " (building)"
+		p.Name.Store(&buildingName)
+		p.Processed.Store(0)
+		p.Total.Store(rs.BucketCount())
+		rs.BuildBucketsProcessed = &p.Processed
+
 		if err = rs.Build(ctx); err != nil {
 			if rs.Collision() {
 				logger.Info("Building recsplit. Collision happened. It's ok. Restarting...")

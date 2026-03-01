@@ -283,6 +283,9 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	for {
 		histReader.Reset(0)
 		iiReader.Reset(0)
+		p.Name.Store(&fName)
+		p.Processed.Store(0)
+		p.Total.Store(uint64(efHist.Count()) / 2)
 
 		valOffset = 0
 		for iiReader.HasNext() {
@@ -327,6 +330,12 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 			default:
 			}
 		}
+
+		buildingName := fName + " (building)"
+		p.Name.Store(&buildingName)
+		p.Processed.Store(0)
+		p.Total.Store(rs.BucketCount())
+		rs.BuildBucketsProcessed = &p.Processed
 
 		if err = rs.Build(ctx); err != nil {
 			if rs.Collision() {
