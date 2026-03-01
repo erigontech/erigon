@@ -72,6 +72,7 @@ type ReaderI interface {
 	GetMetadata() []byte
 	MadvNormal() MadvDisabler
 	DisableReadAhead()
+	CompressedPageValuesCount() int
 }
 
 type MadvDisabler interface {

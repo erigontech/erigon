@@ -762,10 +762,11 @@ func (g *Getter) MadvNormal() MadvDisabler {
 	g.d.MadvNormal()
 	return g
 }
-func (g *Getter) DisableReadAhead()   { g.d.DisableReadAhead() }
-func (g *Getter) Trace(t bool)        { g.trace = t }
-func (g *Getter) Count() int          { return g.d.Count() }
-func (g *Getter) FileName() string    { return g.fName }
+func (g *Getter) DisableReadAhead()          { g.d.DisableReadAhead() }
+func (g *Getter) Trace(t bool)               { g.trace = t }
+func (g *Getter) Count() int                 { return g.d.Count() }
+func (g *Getter) FileName() string           { return g.fName }
+func (g *Getter) CompressedPageValuesCount() int { return g.d.CompressedPageValuesCount() }
 func (g *Getter) GetMetadata() []byte { return g.d.GetMetadata() }
 
 // nextPosClean aligns to the next byte boundary then reads the next position.
