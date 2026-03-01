@@ -743,6 +743,7 @@ func (v *SequentialView) MakeGetter() *Getter {
 	}
 	if v.d.posDict != nil {
 		g.posMask = v.d.posDict.mask
+		g.posEntries = v.d.posDict.entries
 	}
 	return g
 }
@@ -759,13 +760,14 @@ func (v *SequentialView) Close() {
 // Getter represent "reader" or "iterator" that can move across the data of the decompressor
 // The full state of the getter can be captured by saving dataP, and dataBit
 type Getter struct {
-	dataP   uint64    // current byte offset in data
-	dataLen uint64    // u64-typed len(data) to reduce amount of type-casting
-	dataBit int       // bit offset within current byte (0-7)
-	posMask uint16    // cached posDict.mask, avoids pointer chain
-	posDict *posTable // Huffman table for positions
-	data    []byte
+	dataP      uint64     // current byte offset in data
+	dataLen    uint64     // u64-typed len(data) to reduce amount of type-casting
+	dataBit    int        // bit offset within current byte (0-7)
+	posMask    uint16     // cached posDict.mask, avoids pointer chain
+	posEntries []posEntry // cached posDict.entries, avoids pointer-chase through posDict
+	data       []byte
 	//less hot fields
+	posDict     *posTable // Huffman table for positions (only used for subtable path)
 	patternDict *patternTable
 	d           *Decompressor
 	fName       string
@@ -795,26 +797,26 @@ func (g *Getter) nextPosClean() uint64 {
 // It is structured to be inlinable: the subtable (deep-tree) case is pushed
 // into a separate //go:noinline helper so this function stays small.
 func (g *Getter) nextPos() uint64 {
-	if g.posDict.bitLen == 0 {
-		return uint64(g.posDict.entries[0].pos)
+	if g.posMask == 0 {
+		return uint64(g.posEntries[0].pos)
 	}
 	dataP := g.dataP
-	dataBit := g.dataBit
+	dataBit := uint(g.dataBit) & 7 // & 7 proves to compiler: 0 ≤ dataBit < 8, eliminating shift guards
 	data := g.data
 	code := uint16(data[dataP]) >> dataBit
 	if dataP+1 < g.dataLen {
 		code |= uint16(data[dataP+1]) << (8 - dataBit)
 	}
 	code &= g.posMask
-	entry := g.posDict.entries[code]
-	l := int(entry.bits)
+	entry := g.posEntries[code]
+	l := uint(entry.bits)
 	if l == 0 {
 		return g.nextPosSubtable(g.posDict, code)
 	}
 	dataBit += l
 	dataP += uint64(dataBit >> 3)
 	g.dataP = dataP
-	g.dataBit = dataBit & 7
+	g.dataBit = int(dataBit & 7)
 	return uint64(entry.pos)
 }
 
@@ -825,23 +827,23 @@ func (g *Getter) nextPos() uint64 {
 func (g *Getter) nextPosSubtable(table *posTable, code uint16) uint64 {
 	data := g.data
 	dataP := g.dataP
-	dataBit := g.dataBit
+	dataBit := uint(g.dataBit) & 7
 	for {
 		table = table.ptrs[code]
 		dataBit += 9
 		dataP += uint64(dataBit >> 3)
 		dataBit &= 7
 		code = uint16(data[dataP]) >> dataBit
-		if 8-dataBit < table.bitLen && dataP+1 < g.dataLen {
+		if 8-dataBit < uint(table.bitLen) && dataP+1 < g.dataLen {
 			code |= uint16(data[dataP+1]) << (8 - dataBit)
 		}
 		code &= table.mask
 		entry := table.entries[code]
 		if entry.bits != 0 {
-			dataBit += int(entry.bits)
+			dataBit += uint(entry.bits)
 			dataP += uint64(dataBit >> 3)
 			g.dataP = dataP
-			g.dataBit = dataBit & 7
+			g.dataBit = int(dataBit & 7)
 			return uint64(entry.pos)
 		}
 	}
@@ -855,11 +857,11 @@ func (g *Getter) nextPattern() []byte {
 
 	data := g.data
 	dataP := g.dataP
-	dataBit := g.dataBit
+	dataBit := uint(g.dataBit) & 7
 
 	for {
 		code := uint16(data[dataP]) >> dataBit
-		if 8-dataBit < table.bitLen && dataP+1 < g.dataLen {
+		if 8-dataBit < uint(table.bitLen) && dataP+1 < g.dataLen {
 			code |= uint16(data[dataP+1]) << (8 - dataBit)
 		}
 		code &= (uint16(1) << table.bitLen) - 1
@@ -869,13 +871,13 @@ func (g *Getter) nextPattern() []byte {
 			table = cw.ptr
 			dataBit += 9
 		} else {
-			dataBit += int(cw.len)
+			dataBit += uint(cw.len)
 		}
 		dataP += uint64(dataBit >> 3)
 		dataBit &= 7
 		if cw.len != 0 {
 			g.dataP = dataP
-			g.dataBit = dataBit
+			g.dataBit = int(dataBit)
 			return cw.pattern
 		}
 	}
@@ -903,6 +905,7 @@ func (d *Decompressor) MakeGetter() *Getter {
 	}
 	if d.posDict != nil {
 		g.posMask = d.posDict.mask
+		g.posEntries = d.posDict.entries
 	}
 	return g
 }
