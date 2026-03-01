@@ -949,7 +949,7 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, c
 	}
 
 	if d.Accessors.Has(statecfg.AccessorHashMap) {
-		if err = d.buildHashMapAccessor(ctx, stepFrom, stepTo, d.dataReader(valuesDecomp), ps); err != nil {
+		if err = d.buildHashMapAccessor(ctx, stepFrom, stepTo, valuesDecomp, ps); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.FilenameBase, err)
 		}
 		valuesIdx, err = d.openHashMapAccessor(d.kviAccessorNewFilePath(stepFrom, stepTo))
@@ -1051,7 +1051,7 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 	}
 
 	if d.Accessors.Has(statecfg.AccessorHashMap) {
-		if err = d.buildHashMapAccessor(ctx, step, step+1, d.dataReader(valuesDecomp), ps); err != nil {
+		if err = d.buildHashMapAccessor(ctx, step, step+1, valuesDecomp, ps); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.FilenameBase, err)
 		}
 		valuesIdx, err = d.openHashMapAccessor(d.kviAccessorNewFilePath(step, step+1))
@@ -1090,7 +1090,7 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 	}, nil
 }
 
-func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep kv.Step, data *seg.Reader, ps *background.ProgressSet) error {
+func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep kv.Step, data *seg.Decompressor, ps *background.ProgressSet) error {
 	idxPath := d.kviAccessorNewFilePath(fromStep, toStep)
 	versionOfRs := uint8(0)
 	if !d.FileVersion.AccessorKVI.Current.Eq(version.V1_0) { // inner version=1 incompatible with .efi v1.0
@@ -1108,7 +1108,7 @@ func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep kv.S
 		Salt:       d.salt.Load(),
 		NoFsync:    d.noFsync,
 	}
-	return buildHashMapAccessor(ctx, data, idxPath, false, cfg, ps, d.logger)
+	return buildHashMapAccessor(ctx, data, d.Compression, idxPath, false, cfg, ps, d.logger)
 }
 
 func (d *Domain) missedBtreeAccessors(source []*FilesItem, dl dirListing) (l []*FilesItem) {
@@ -1179,7 +1179,7 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 		item := item
 		g.Go(func() error {
 			fromStep, toStep := item.StepRange(d.stepSize)
-			err := d.buildHashMapAccessor(ctx, fromStep, toStep, d.dataReader(item.decompressor), ps)
+			err := d.buildHashMapAccessor(ctx, fromStep, toStep, item.decompressor, ps)
 			if err != nil {
 				return fmt.Errorf("build %s values recsplit index: %w", d.FilenameBase, err)
 			}
@@ -1188,7 +1188,14 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 	}
 }
 
-func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) (err error) {
+func buildHashMapAccessor(ctx context.Context, decomp *seg.Decompressor, compression seg.FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) (err error) {
+	seqView, err := decomp.OpenSequentialView()
+	if err != nil {
+		return err
+	}
+	defer seqView.Close()
+	g := seg.NewReader(seqView.MakeGetter(), compression)
+
 	_, fileName := filepath.Split(idxPath)
 	count := g.Count()
 	if !values {
@@ -1196,8 +1203,6 @@ func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, va
 	}
 	p := ps.AddNew(fileName, uint64(count))
 	defer ps.Delete(p)
-
-	defer g.MadvNormal().DisableReadAhead()
 
 	var rs *recsplit.RecSplit
 	cfg.KeyCount = count
@@ -1356,7 +1361,8 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 		maxTxNum = math.MaxUint64
 	}
 	useExistenceFilter := dt.d.Accessors.Has(statecfg.AccessorExistence)
-	useCache := dt.name != kv.CommitmentDomain && maxTxNum == math.MaxUint64
+	//useCache := dt.name != kv.CommitmentDomain && maxTxNum == math.MaxUint64
+	useCache := maxTxNum == math.MaxUint64
 
 	hi, lo := dt.ht.iit.hashKey(k)
 
@@ -1413,6 +1419,9 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 			fmt.Printf("GetLatest(%s, %x) -> found in file %s\n", dt.name.String(), k, dt.files[i].src.decompressor.FileName())
 		}
 
+		if dt.files[i].endTxNum-dt.files[i].startTxNum == dt.stepSize {
+			useCache = false
+		}
 		if dt.getFromFileCache != nil && useCache {
 			dt.getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: uint8(i), v: v})
 		}

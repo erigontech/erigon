@@ -571,13 +571,19 @@ func (d *Decompressor) GetMetadata() []byte {
 	return d.metadata
 }
 
-// WithReadAhead - Expect read in sequential order. (Hence, pages in the given range can be aggressively read ahead, and may be freed soon after they are accessed.)
-func (d *Decompressor) WithReadAhead(f func() error) error {
+// WithReadAhead - Expect read in sequential order. Creates a separate mmap with MADV_SEQUENTIAL
+// so the shared mmap (used by concurrent random readers) is not affected.
+// The getter backed by the sequential view is passed to f.
+func (d *Decompressor) WithReadAhead(f func(*Getter) error) error {
 	if d == nil || d.mmapHandle1 == nil {
 		return nil
 	}
-	defer d.MadvSequential().DisableReadAhead()
-	return f()
+	v, err := d.OpenSequentialView()
+	if err != nil {
+		return err
+	}
+	defer v.Close()
+	return f(v.MakeGetter())
 }
 
 // DisableReadAhead - usage: `defer d.EnableReadAhead().DisableReadAhead()`. Please don't use this funcs without `defer` to avoid leak.
@@ -694,7 +700,23 @@ func (d *Decompressor) OpenSequentialView() (*SequentialView, error) {
 	if err != nil {
 		return nil, err
 	}
-	_ = mmap.MadviseSequential(h1)
+	if dbg.SnapshotOwnMmapMadvNormal {
+		if err := mmap.MadviseNormal(h1); err != nil {
+			return nil, err
+		}
+	} else if dbg.SnapshotOwnMmapMadvRnd {
+		if err := mmap.MadviseRandom(h1); err != nil {
+			return nil, err
+		}
+	} else if dbg.SnapshotOwnMmapMadvSequential {
+		if err := mmap.MadviseSequential(h1); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := mmap.MadviseSequential(h1); err != nil {
+			return nil, err
+		}
+	}
 	// d.data is a sub-slice of d.mmapHandle1 starting after file headers
 	// (version, feature flags, metadata). wordsStart is relative to d.data,
 	// so the file offset is: headerSize + wordsStart.

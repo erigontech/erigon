@@ -311,17 +311,17 @@ func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, ta
 	m.logger.Debug("[snapshots] merge", "file", targetFile.Name())
 
 	for _, d := range cList {
-		if err := d.WithReadAhead(func() error {
-			g := d.MakeGetter()
-			for g.HasNext() {
-				word, _ = g.Next(word[:0])
-				if err := f.AddWord(word); err != nil {
-					return err
-				}
-			}
-			return nil
-		}); err != nil {
+		view, err := d.OpenSequentialView()
+		if err != nil {
 			return nil, err
+		}
+		defer view.Close()
+		g := view.MakeGetter()
+		for g.HasNext() {
+			word, _ = g.Next(word[:0])
+			if err := f.AddWord(word); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if f.Count() != expectedTotal {
