@@ -29,7 +29,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -37,6 +36,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/assert"
+	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mmap"
@@ -166,7 +166,7 @@ type RecSplit struct {
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 	timings Timings
 
-	BuildBucketsProcessed *atomic.Uint64 // If set, incremented per bucket completed during Build
+	buildProgress *background.Progress // If set, tracks bucket-level progress during Build
 }
 
 type RecSplitArgs struct {
@@ -398,6 +398,9 @@ func (rs *RecSplit) ResetNextSalt() {
 	rs.collision = false
 	rs.keysAdded = 0
 	rs.salt++
+	if rs.buildProgress != nil {
+		rs.buildProgress.Processed.Store(0)
+	}
 	if rs.bucketCollector != nil {
 		rs.bucketCollector.Close()
 	}
@@ -793,8 +796,8 @@ func (rs *RecSplit) loadFuncBucket(k, v []byte, _ etl.CurrentTableReader, _ etl.
 			if err := rs.recsplitCurrentBucket(); err != nil {
 				return err
 			}
-			if rs.BuildBucketsProcessed != nil {
-				rs.BuildBucketsProcessed.Add(1)
+			if rs.buildProgress != nil {
+				rs.buildProgress.Processed.Add(1)
 			}
 		}
 		rs.currentBucketIdx = bucketIdx
@@ -831,6 +834,21 @@ func (rs *RecSplit) KeyCount() uint64 { return rs.keysAdded }
 
 // BucketCount returns the number of buckets.
 func (rs *RecSplit) BucketCount() uint64 { return rs.bucketCount }
+
+// SetBuildProgress wires progress tracking for the Build phase.
+// Uses rs.fileName for the display name, sets Total to BucketCount,
+// and increments Processed per bucket completed.
+// Progress is automatically reset on ResetNextSalt (collision retry).
+func (rs *RecSplit) SetBuildProgress(p *background.Progress) {
+	if p == nil {
+		return
+	}
+	buildingName := rs.fileName + " (building)"
+	p.Name.Store(&buildingName)
+	p.Processed.Store(0)
+	p.Total.Store(rs.bucketCount)
+	rs.buildProgress = p
+}
 
 // Build has to be called after all the keys have been added, and it initiates the process
 // of building the perfect hash function and writing index into a file

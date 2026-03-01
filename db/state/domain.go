@@ -1240,11 +1240,7 @@ func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, va
 
 			p.Processed.Add(1)
 		}
-		buildingName := fileName + " (building)"
-		p.Name.Store(&buildingName)
-		p.Processed.Store(0)
-		p.Total.Store(rs.BucketCount())
-		rs.BuildBucketsProcessed = &p.Processed
+		rs.SetBuildProgress(p)
 
 		if err = rs.Build(ctx); err != nil {
 			if rs.Collision() {

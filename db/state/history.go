@@ -331,11 +331,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 			}
 		}
 
-		buildingName := fName + " (building)"
-		p.Name.Store(&buildingName)
-		p.Processed.Store(0)
-		p.Total.Store(rs.BucketCount())
-		rs.BuildBucketsProcessed = &p.Processed
+		rs.SetBuildProgress(p)
 
 		if err = rs.Build(ctx); err != nil {
 			if rs.Collision() {
