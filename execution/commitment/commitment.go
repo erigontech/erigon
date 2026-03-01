@@ -538,10 +538,9 @@ func ApplyDeferredBranchUpdates(
 			firstErr = err
 			continue
 		}
-		mxTrieBranchesUpdated.Inc()
 		written++
 	}
-
+	mxTrieBranchesUpdated.AddInt(written)
 	return written, firstErr
 }
 
