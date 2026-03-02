@@ -56,17 +56,6 @@ func putPageResult(r *pageResult) {
 	pageResultPool.Put(r)
 }
 
-func drainWorkCh(ch chan *pageWorkItem) {
-	for {
-		select {
-		case item := <-ch:
-			putPageWorkItem(item)
-		default:
-			return
-		}
-	}
-}
-
 func drainResultCh(ch chan *pageResult) {
 	for {
 		select {
@@ -336,7 +325,9 @@ type PagedWriter struct {
 	numWorkers      int
 	workCh          chan *pageWorkItem
 	resultCh        chan *pageResult
-	eg              *errgroup.Group     // tracks live worker goroutines; cancels all on first error
+	eg              *errgroup.Group     // tracks workers + reducer; cancels all on first error
+	egCtx           context.Context     // cancelled on first worker/reducer error or on Flush exit
+	egCancel        context.CancelFunc  // cancels egCtx to unblock goroutines on shutdown
 	seqIn           int                 // next seq to assign to work item
 	seqOut          int                 // next seq to write to parent
 	workersShutdown bool                // tracks if workers have been shut down
@@ -352,11 +343,20 @@ func (c *PagedWriter) initWorkers() {
 	c.workCh = make(chan *pageWorkItem, queueDepth)
 	c.resultCh = make(chan *pageResult, queueDepth)
 	c.pendingResults = make(map[int]*pageResult, queueDepth)
-	var egCtx context.Context
-	c.eg, egCtx = errgroup.WithContext(c.ctx)
+	cancelCtx, cancel := context.WithCancel(c.ctx)
+	c.egCancel = cancel
+	c.eg, c.egCtx = errgroup.WithContext(cancelCtx)
+
+	var workerWg sync.WaitGroup
+	workerWg.Add(c.numWorkers)
 	for range c.numWorkers {
-		c.eg.Go(func() error { return c.compressionWorker(egCtx) })
+		c.eg.Go(func() error {
+			defer workerWg.Done()
+			return c.compressionWorker(c.egCtx)
+		})
 	}
+	go func() { workerWg.Wait(); close(c.resultCh) }()
+	c.eg.Go(c.reducer)
 }
 
 func (c *PagedWriter) compressionWorker(ctx context.Context) error {
@@ -389,6 +389,18 @@ func (c *PagedWriter) compressionWorker(ctx context.Context) error {
 			return ctx.Err()
 		}
 	}
+}
+
+func (c *PagedWriter) reducer() error {
+	for r := range c.resultCh {
+		c.pendingResults[r.seq] = r
+		if err := c.writeInOrder(); err != nil {
+			drainResultCh(c.resultCh)
+			drainPendingResults(c.pendingResults)
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *PagedWriter) writeInOrder() error {
@@ -482,26 +494,13 @@ func (c *PagedWriter) writePage() error {
 	item.seq = c.seqIn
 	c.seqIn++
 
-	// Send to workers; if workCh is full, drain resultCh to unblock a worker first
-	for {
-		select {
-		case c.workCh <- item:
-			sent = true
-			// Non-blocking drain of any ready results
-			for {
-				select {
-				case r := <-c.resultCh:
-					c.pendingResults[r.seq] = r
-				default:
-					return c.writeInOrder()
-				}
-			}
-		case r := <-c.resultCh:
-			c.pendingResults[r.seq] = r
-		case <-c.ctx.Done():
-			return c.ctx.Err()
-		}
+	select {
+	case c.workCh <- item:
+		sent = true
+	case <-c.egCtx.Done():
+		return c.egCtx.Err()
 	}
+	return nil
 }
 
 func (c *PagedWriter) Add(k, v []byte) (err error) {
@@ -538,32 +537,16 @@ func (c *PagedWriter) Flush() (err error) {
 		c.resetPage()
 		return nil
 	}
-	// Signal workers to exit, then drain all pending results in order
+	// Signal workers to stop; reducer drains resultCh and writes in order
 	if !c.workersShutdown {
 		close(c.workCh)
 		c.workersShutdown = true
 	}
 	defer func() {
-		c.eg.Wait() //nolint:errcheck // ensure all worker goroutines have exited, even on error
-		if err != nil {
-			drainWorkCh(c.workCh)
-			drainResultCh(c.resultCh)
-			drainPendingResults(c.pendingResults)
-		}
+		c.egCancel()
+		c.eg.Wait() //nolint:errcheck
 		c.resetPage()
 	}()
-
-	for c.seqOut < c.seqIn {
-		select {
-		case r := <-c.resultCh:
-			c.pendingResults[r.seq] = r
-			if err = c.writeInOrder(); err != nil {
-				return
-			}
-		case <-c.ctx.Done():
-			return c.eg.Wait()
-		}
-	}
 	return c.eg.Wait()
 }
 
