@@ -440,8 +440,7 @@ func (tx *ArbitrumUnsignedTx) IsContractDeploy() bool {
 }
 
 func (tx *ArbitrumUnsignedTx) Unwrap() Transaction {
-	//TODO implement me
-	panic("implement me")
+	return tx
 }
 
 // func (tx *ArbitrumUnsignedTx) gas() uint64         {  }

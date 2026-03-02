@@ -26,6 +26,7 @@ type L1SyncService struct {
 	logger         log.Logger
 
 	delayedMessagesRead uint64
+	chunkSize           uint64
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -64,6 +65,7 @@ func New(
 		exec:           exec,
 		db:             db,
 		logger:         logger,
+		chunkSize:      config.L1BlocksPerRequest,
 	}, nil
 }
 
@@ -193,15 +195,24 @@ func (s *L1SyncService) pollOnce(ctx context.Context) (pollMore bool, err error)
 			return false, ctx.Err()
 		}
 
-		toL1Block := fromL1Block + s.config.L1BlocksPerRequest - 1
+		toL1Block := fromL1Block + s.chunkSize - 1
 		if toL1Block > currentL1Block {
 			toL1Block = currentL1Block
 		}
 
-		// Fetch delayed messages for this chunk and accumulate them
 		if err := s.fetchDelayedMessagesInRange(ctx, fromL1Block, toL1Block); err != nil {
-			s.logger.Warn("failed to fetch delayed messages for chunk", "fromL1Block", fromL1Block, "toL1Block", toL1Block, "err", err)
+			s.logger.Warn("failed to fetch delayed messages, reducing chunk size",
+				"fromL1Block", fromL1Block, "toL1Block", toL1Block, "chunkSize", s.chunkSize, "err", err)
+			s.chunkSize = s.chunkSize / 2
+			if s.chunkSize < 1 {
+				s.chunkSize = 1
+			}
 			continue
+		}
+
+		s.chunkSize = s.chunkSize * 2
+		if s.chunkSize > s.config.L1BlocksPerRequest {
+			s.chunkSize = s.config.L1BlocksPerRequest
 		}
 
 		batches, err := s.FetchBatchesInRange(ctx, fromL1Block, toL1Block)
@@ -238,6 +249,7 @@ func (s *L1SyncService) pollOnce(ctx context.Context) (pollMore bool, err error)
 					"elapsed", elapsed,
 					"l1Blk/s", fmt.Sprintf("%.1f", float64(l1Blocks)/elapsed.Seconds()),
 					"batch/s", fmt.Sprintf("%.1f", float64(batchesProcessed)/elapsed.Seconds()),
+					"chunkSize", s.chunkSize,
 				)
 				return true, nil // need to poll more to sync up to chain tip
 			}
@@ -255,6 +267,7 @@ func (s *L1SyncService) pollOnce(ctx context.Context) (pollMore bool, err error)
 			"elapsed", elapsed,
 			"l1Blk/s", fmt.Sprintf("%.1f", float64(l1Blocks)/elapsed.Seconds()),
 			"batch/s", fmt.Sprintf("%.1f", float64(batchesProcessed)/elapsed.Seconds()),
+			"chunkSize", s.chunkSize,
 		)
 	}
 	return false, nil // processed everything up to current L1 chain tip
