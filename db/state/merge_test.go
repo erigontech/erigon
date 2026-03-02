@@ -748,11 +748,10 @@ func Test_mergeEliasFano(t *testing.T) {
 	}
 
 	var seq1, seq2 multiencseq.SequenceReader
-	var it1, it2 multiencseq.SequenceIterator
 	seq1.Reset(0, firstBytes)
 	seq2.Reset(0, secondBytes)
 	var mergedSeq multiencseq.SequenceBuilder
-	err := mergedSeq.Merge(&seq1, &seq2, 0, &it1, &it2)
+	err := mergedSeq.Merge(&seq1, &seq2, 0)
 	require.NoError(t, err)
 	menc := mergedSeq.AppendBytes(nil)
 

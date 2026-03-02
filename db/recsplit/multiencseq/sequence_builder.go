@@ -31,6 +31,8 @@ const SIMPLE_SEQUENCE_MAX_THRESHOLD = 16
 type SequenceBuilder struct {
 	baseNum uint64
 	ef      *eliasfano32.EliasFano
+	it1     SequenceIterator
+	it2     SequenceIterator
 }
 
 // Creates a new builder. The builder is not meant to be reused. The construction
@@ -109,19 +111,19 @@ func (b *SequenceBuilder) simpleEncoding(buf []byte) []byte {
 // Merge merges s1 and s2 into this builder, resetting it first.
 // s1 and s2 must be pre-sorted with s1.Max() <= s2.Min().
 // Call AppendBytes on the builder to serialize.
-func (b *SequenceBuilder) Merge(s1, s2 *SequenceReader, outBaseNum uint64, it1, it2 *SequenceIterator) error {
+func (b *SequenceBuilder) Merge(s1, s2 *SequenceReader, outBaseNum uint64) error {
 	b.Reset(outBaseNum, s1.Count()+s2.Count(), s2.Max())
-	it1.Reset(s1, 0)
-	it2.Reset(s2, 0)
-	for it1.HasNext() {
-		v, err := it1.Next()
+	b.it1.Reset(s1, 0)
+	b.it2.Reset(s2, 0)
+	for b.it1.HasNext() {
+		v, err := b.it1.Next()
 		if err != nil {
 			return err
 		}
 		b.AddOffset(v)
 	}
-	for it2.HasNext() {
-		v, err := it2.Next()
+	for b.it2.HasNext() {
+		v, err := b.it2.Next()
 		if err != nil {
 			return err
 		}

@@ -645,7 +645,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 	var keyBuf, valBuf []byte
 	var lastKey, lastVal []byte
 	preSeq, mergeSeq := &multiencseq.SequenceReader{}, &multiencseq.SequenceReader{}
-	preIt, mergeIt := &multiencseq.SequenceIterator{}, &multiencseq.SequenceIterator{}
+	preIt := &multiencseq.SequenceIterator{}
 	builder := &multiencseq.SequenceBuilder{}
 	for cp.Len() > 0 {
 		lastKey = append(lastKey[:0], cp[0].key...)
@@ -672,7 +672,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 			if mergedOnce {
 				mergeSeq.Reset(ci1.startTxNum, ci1.val)
 				preSeq.Reset(startTxNum, lastVal)
-				if mergeErr := builder.Merge(mergeSeq, preSeq, startTxNum, mergeIt, preIt); mergeErr != nil {
+				if mergeErr := builder.Merge(mergeSeq, preSeq, startTxNum); mergeErr != nil {
 					return nil, fmt.Errorf("merge %s inverted index: %w", iit.ii.FilenameBase, mergeErr)
 				}
 				lastVal = builder.AppendBytes(lastVal[:0])
