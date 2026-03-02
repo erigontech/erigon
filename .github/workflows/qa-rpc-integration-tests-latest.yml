@@ -9,7 +9,7 @@ on:
         required: false
         default: false
   schedule:
-    - cron: '0 0 * * 0'  # Run on Sunday at 00:00 AM UTC
+    - cron: '0 0 * * *'  # Run nightly at 00:00 AM UTC
   push:
     branches:
       - 'release/3.*'
