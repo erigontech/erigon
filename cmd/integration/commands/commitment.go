@@ -19,6 +19,7 @@ package commands
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -145,6 +146,12 @@ func init() {
 	cmdCommitmentBenchHistoryLookup.Flags().Float64Var(&benchHistorySamplePct, "sample-percentage", 10.0, "percentage of txnums to sample from each history file's range or from MDBX (0-100)")
 	cmdCommitmentBenchHistoryLookup.Flags().Int64Var(&benchHistorySeed, "seed", 0, "random seed for sampling (0 = use current time)")
 	commitmentCmd.AddCommand(cmdCommitmentBenchHistoryLookup)
+
+	// commitment print-state
+	withDataDir(cmdCommitmentPrintState)
+	withChain(cmdCommitmentPrintState)
+	withConfig(cmdCommitmentPrintState)
+	commitmentCmd.AddCommand(cmdCommitmentPrintState)
 
 	rootCmd.AddCommand(commitmentCmd)
 
@@ -371,6 +378,88 @@ func printCommitment(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 	}
 	fmt.Printf("\n%s", str)
 
+	return nil
+}
+
+// integration commitment print-state
+var cmdCommitmentPrintState = &cobra.Command{
+	Use:   "print-state",
+	Short: "Print all historical commitment state entries with block/tx numbers and root hashes",
+	Long: `Iterates over all commitment history files and prints every "state" key entry
+in human-readable form showing block number, transaction number, and state root hash.
+
+Examples:
+  integration commitment print-state --chain=mainnet --datadir ~/data/eth-mainnet
+  integration commitment print-state --datadir /path/to/datadir`,
+	Run: func(cmd *cobra.Command, args []string) {
+		logger := debug.SetupCobra(cmd, "integration")
+
+		dirs, l, err := datadir.New(datadirCli).MustFlock()
+		if err != nil {
+			logger.Error("Opening Datadir", "error", err)
+			return
+		}
+		defer l.Unlock()
+
+		if err := printCommitmentState(dirs, logger); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				logger.Error(err.Error())
+			}
+			return
+		}
+	},
+}
+
+func printCommitmentState(dirs datadir.Dirs, logger log.Logger) error {
+	history, err := dbstate.NewHistory(
+		statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).Hist,
+		config3.DefaultStepSize,
+		config3.DefaultStepsInFrozenFile,
+		dirs,
+		logger,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to init commitment history: %w", err)
+	}
+	if err := history.Scan(math.MaxUint64); err != nil {
+		return fmt.Errorf("failed to scan commitment history files: %w", err)
+	}
+
+	roTx := history.BeginFilesRo()
+	defer roTx.Close()
+
+	stateKey := commitmentdb.KeyCommitmentState
+	count := 0
+
+	err = roTx.HistoryDump(
+		-1, // fromTxNum: beginning
+		-1, // toTxNum: unlimited
+		&stateKey,
+		func(key []byte, txNum uint64, val []byte) {
+			count++
+			if len(val) < 18 {
+				fmt.Printf("historyTxNum=%d (invalid value: %d bytes)\n", txNum, len(val))
+				return
+			}
+
+			encodedTxNum := binary.BigEndian.Uint64(val[0:8])
+			blockNum := binary.BigEndian.Uint64(val[8:16])
+			trieStateLen := binary.BigEndian.Uint16(val[16:18])
+
+			rootStr, err := commitment.HexTrieStateToShortString(val)
+			if err != nil {
+				fmt.Printf("block: %d txn: %d trieStateLen: %d (decode error: %v)\n",
+					blockNum, encodedTxNum, trieStateLen, err)
+				return
+			}
+			fmt.Printf("%s trieStateLen: %d\n", rootStr, trieStateLen)
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("failed to dump commitment history: %w", err)
+	}
+
+	fmt.Printf("\nTotal state entries: %d\n", count)
 	return nil
 }
 
