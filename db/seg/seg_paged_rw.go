@@ -52,7 +52,6 @@ func getPageResult() *pageResult { return pageResultPool.Get().(*pageResult) }
 func putPageResult(r *pageResult) {
 	r.seq = 0
 	r.data = r.data[:0]
-	r.err = nil
 	pageResultPool.Put(r)
 }
 
@@ -171,7 +170,6 @@ type pageWorkItem struct {
 type pageResult struct {
 	seq  int
 	data []byte // compressed page; returned to pool after write
-	err  error
 }
 
 type PagedReader struct {
