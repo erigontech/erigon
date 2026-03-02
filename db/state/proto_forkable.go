@@ -3,7 +3,6 @@ package state
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 
 	"golang.org/x/sync/errgroup"
 
@@ -133,18 +132,14 @@ func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.R
 		}
 		writer.SetMetadata(mbytes)
 
-		p := ps.AddNew(filepath.Base(path), 1)
-		defer ps.Delete(p)
 		if err := writer.Flush(); err != nil {
 			return nil, false, err
 		}
 		if err := writer.Compress(); err != nil {
 			return nil, false, err
 		}
-		p.Processed.Store(1)
 		writer.Close()
 		sn.Close()
-		ps.Delete(p)
 	}
 
 	valuesDecomp, err := seg.NewDecompressorWithMetadata(path, cfg.HasMetadata)
