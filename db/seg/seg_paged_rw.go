@@ -326,8 +326,7 @@ type PagedWriter struct {
 	workCh          chan *pageWorkItem
 	resultCh        chan *pageResult
 	eg              *errgroup.Group     // tracks workers + reducer; cancels all on first error
-	egCtx           context.Context     // cancelled on first worker/reducer error or on Flush exit
-	egCancel        context.CancelFunc  // cancels egCtx to unblock goroutines on shutdown
+	egCtx           context.Context     // cancelled on first worker/reducer error
 	seqIn           int                 // next seq to assign to work item
 	seqOut          int                 // next seq to write to parent
 	workersShutdown bool                // tracks if workers have been shut down
@@ -343,9 +342,7 @@ func (c *PagedWriter) initWorkers() {
 	c.workCh = make(chan *pageWorkItem, queueDepth)
 	c.resultCh = make(chan *pageResult, queueDepth)
 	c.pendingResults = make(map[int]*pageResult, queueDepth)
-	cancelCtx, cancel := context.WithCancel(c.ctx)
-	c.egCancel = cancel
-	c.eg, c.egCtx = errgroup.WithContext(cancelCtx)
+	c.eg, c.egCtx = errgroup.WithContext(c.ctx)
 
 	var workerWg sync.WaitGroup
 	workerWg.Add(c.numWorkers)
@@ -543,7 +540,6 @@ func (c *PagedWriter) Flush() (err error) {
 		c.workersShutdown = true
 	}
 	defer func() {
-		c.egCancel()
 		c.eg.Wait() //nolint:errcheck
 		c.resetPage()
 	}()
