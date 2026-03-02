@@ -23,8 +23,12 @@ import (
 	"fmt"
 	"math/big"
 	"runtime"
+	"sync"
 	"time"
 
+	"golang.org/x/time/rate"
+
+	"github.com/erigontech/erigon/cmd/snapshots/genfromrpc"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -36,13 +40,18 @@ import (
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/stagedsync/bodydownload"
 	"github.com/erigontech/erigon/execution/stagedsync/headerdownload"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/rpc"
 )
 
 type HeadersCfg struct {
+	db                kv.RwDB
 	hd                *headerdownload.HeaderDownload
+	bodyDownload      *bodydownload.BodyDownload
 	chainConfig       *chain.Config
 	headerReqSend     func(context.Context, *headerdownload.HeaderRequest) ([64]byte, bool)
 	announceNewHashes func(context.Context, []headerdownload.Announce)
@@ -50,10 +59,13 @@ type HeadersCfg struct {
 	noP2PDiscovery    bool
 	blockReader       services.FullBlockReader
 	syncConfig        ethconfig.Sync
+	l2rpc             ethconfig.L2RPCConfig
 }
 
 func StageHeadersCfg(
+	db kv.RwDB,
 	headerDownload *headerdownload.HeaderDownload,
+	bodyDownload *bodydownload.BodyDownload,
 	chainConfig *chain.Config,
 	syncConfig ethconfig.Sync,
 	headerReqSend func(context.Context, *headerdownload.HeaderRequest) ([64]byte, bool),
@@ -61,9 +73,12 @@ func StageHeadersCfg(
 	penalize func(context.Context, []headerdownload.PenaltyItem),
 	noP2PDiscovery bool,
 	blockReader services.FullBlockReader,
+	l2rpc ethconfig.L2RPCConfig,
 ) HeadersCfg {
 	return HeadersCfg{
+		db:                db,
 		hd:                headerDownload,
+		bodyDownload:      bodyDownload,
 		chainConfig:       chainConfig,
 		syncConfig:        syncConfig,
 		headerReqSend:     headerReqSend,
@@ -71,6 +86,7 @@ func StageHeadersCfg(
 		penalize:          penalize,
 		noP2PDiscovery:    noP2PDiscovery,
 		blockReader:       blockReader,
+		l2rpc:             l2rpc,
 	}
 }
 
@@ -80,9 +96,204 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 			return err
 		}
 	}
+
+	if cfg.chainConfig.IsArbitrum() {
+		return headersArbitrum(s, ctx, tx, cfg, logger)
+	}
+
 	cfg.hd.Progress()
 	return HeadersPOW(s, u, ctx, tx, cfg, logger)
+}
 
+var (
+	l2RPCHealthCheckOnce sync.Once
+	headersLimiter       = rate.NewLimiter(rate.Every(time.Millisecond*124), 1)
+)
+
+const chainTipThreshold = 20
+
+var publicReceiptFeeds = map[uint64]string{
+	421614: "https://sepolia-rollup.arbitrum.io/rpc",
+	42161:  "https://arb1.arbitrum.io/rpc",
+	42170:  "https://nova.arbitrum.io/rpc",
+}
+
+func getPublicReceiptFeed(chainID uint64) string {
+	return publicReceiptFeeds[chainID]
+}
+
+func headersArbitrum(s *StageState, ctx context.Context, tx kv.RwTx, cfg HeadersCfg, logger log.Logger) error {
+	if !headersLimiter.Allow() {
+		return nil
+	}
+
+	logPrefix := s.LogPrefix()
+
+	l2rpcAddr := cfg.l2rpc.Addr
+	if l2rpcAddr == "" {
+		logger.Warn(fmt.Sprintf("[%s] L2 RPC address not configured, skipping Arbitrum header fetch", logPrefix))
+		return nil
+	}
+
+	client, err := rpc.Dial(l2rpcAddr, logger)
+	if err != nil {
+		return fmt.Errorf("[%s] failed to connect to L2 RPC at %s: %w", logPrefix, l2rpcAddr, err)
+	}
+	defer client.Close()
+
+	receiptAddr := cfg.l2rpc.ReceiptAddr
+	if receiptAddr == "" {
+		receiptAddr = l2rpcAddr
+	}
+	var receiptClient *rpc.Client
+	if receiptAddr == l2rpcAddr {
+		receiptClient = client
+	} else {
+		receiptClient, err = rpc.Dial(receiptAddr, logger)
+		if err != nil {
+			return fmt.Errorf("[%s] failed to connect to L2 RPC receipt endpoint at %s: %w", logPrefix, receiptAddr, err)
+		}
+		defer receiptClient.Close()
+	}
+
+	progress, err := stages.GetStageProgress(tx, stages.Headers)
+	if err != nil {
+		return fmt.Errorf("[%s] getting Headers stage progress: %w", logPrefix, err)
+	}
+
+	var latestRemoteHex string
+	if err := client.CallContext(ctx, &latestRemoteHex, "eth_blockNumber"); err != nil {
+		return fmt.Errorf("[%s] eth_blockNumber: %w", logPrefix, err)
+	}
+	latestRemote, err := hexutil.DecodeUint64(latestRemoteHex)
+	if err != nil {
+		return fmt.Errorf("[%s] parsing block number %q: %w", logPrefix, latestRemoteHex, err)
+	}
+
+	if progress >= latestRemote {
+		return nil
+	}
+
+	// Near chain tip, use public receipt feed if available
+	activeReceiptClient := receiptClient
+	activeReceiptAddr := receiptAddr
+	if latestRemote-progress < chainTipThreshold {
+		chainID := cfg.chainConfig.ChainID.Uint64()
+		if feed := getPublicReceiptFeed(chainID); feed != "" {
+			feedClient, err := rpc.Dial(feed, logger)
+			if err != nil {
+				logger.Warn(fmt.Sprintf("[%s] failed to connect to public receipt feed at %s, using configured endpoint", logPrefix, feed), "err", err)
+			} else {
+				defer feedClient.Close()
+				activeReceiptClient = feedClient
+				activeReceiptAddr = feed
+			}
+		}
+	}
+
+	l2RPCHealthCheckOnce.Do(func() {
+		if healthErr := checkL2RPCEndpointsHealth(ctx, client, activeReceiptClient, progress+1, l2rpcAddr, activeReceiptAddr); healthErr != nil {
+			logger.Warn(fmt.Sprintf("[%s] L2 RPC health check failed", logPrefix), "err", healthErr)
+		} else {
+			logger.Info(fmt.Sprintf("[%s] L2 RPC health check passed", logPrefix))
+		}
+	})
+
+	firstBlock := progress + 1
+	loopBlockLimit := uint64(cfg.syncConfig.LoopBlockLimit)
+	stopBlock := latestRemote
+	if loopBlockLimit > 0 && stopBlock > progress+loopBlockLimit {
+		stopBlock = progress + loopBlockLimit
+	}
+
+	logger.Info(fmt.Sprintf("[%s] Fetching Arbitrum blocks from L2 RPC", logPrefix),
+		"from", firstBlock, "to", stopBlock, "latest", latestRemote)
+
+	finaliseState := func(rwTx kv.RwTx, lastBlockNum uint64) error {
+		if err := stages.SaveStageProgress(rwTx, stages.Headers, lastBlockNum); err != nil {
+			return err
+		}
+		if err := stages.SaveStageProgress(rwTx, stages.Bodies, lastBlockNum); err != nil {
+			return err
+		}
+		if cfg.bodyDownload != nil {
+			if err := cfg.bodyDownload.UpdateFromDb(rwTx); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	_, err = genfromrpc.GetAndCommitBlocks(
+		ctx,
+		cfg.db,
+		tx,
+		client,
+		activeReceiptClient,
+		firstBlock,
+		stopBlock,
+		false,
+		true,
+		false,
+		finaliseState,
+		cfg.l2rpc.BlockRPS,
+		cfg.l2rpc.BlockBurst,
+		cfg.l2rpc.ReceiptRPS,
+		cfg.l2rpc.ReceiptBurst,
+	)
+	if err != nil {
+		return fmt.Errorf("[%s] GetAndCommitBlocks: %w", logPrefix, err)
+	}
+
+	return nil
+}
+
+func checkL2RPCEndpointsHealth(ctx context.Context, blockClient *rpc.Client, receiptClient *rpc.Client, blockNum uint64, blockEndpoint string, receiptEndpoint string) error {
+	if blockClient == nil && receiptClient == nil {
+		return nil
+	}
+
+	if blockClient != nil {
+		blockNumHex := hexutil.EncodeUint64(blockNum)
+		var block map[string]interface{}
+		if err := blockClient.CallContext(ctx, &block, "eth_getBlockByNumber", blockNumHex, true); err != nil {
+			return fmt.Errorf("block endpoint %s: eth_getBlockByNumber: %w", blockEndpoint, err)
+		}
+		if block == nil {
+			return fmt.Errorf("block endpoint %s returned nil for block %d", blockEndpoint, blockNum)
+		}
+
+		// Check arb_getRawBlockMetadata support
+		var metadata interface{}
+		if err := blockClient.CallContext(ctx, &metadata, "arb_getRawBlockMetadata", blockNumHex, blockNumHex); err != nil {
+			return fmt.Errorf("block endpoint %s: arb_getRawBlockMetadata not supported: %w", blockEndpoint, err)
+		}
+
+		if receiptClient != nil {
+			txs, _ := block["transactions"].([]interface{})
+			if len(txs) > 0 {
+				txMap, _ := txs[0].(map[string]interface{})
+				if txMap != nil {
+					txHash, _ := txMap["hash"].(string)
+					if txHash != "" {
+						var receipt map[string]interface{}
+						if err := receiptClient.CallContext(ctx, &receipt, "eth_getTransactionReceipt", txHash); err != nil {
+							return fmt.Errorf("receipt endpoint %s: eth_getTransactionReceipt: %w", receiptEndpoint, err)
+						}
+						if receipt == nil {
+							return fmt.Errorf("receipt endpoint %s returned nil for tx %s", receiptEndpoint, txHash)
+						}
+						receiptTxHash, _ := receipt["transactionHash"].(string)
+						if receiptTxHash != txHash {
+							return fmt.Errorf("receipt endpoint %s returned mismatched receipt: expected tx %s, got %s", receiptEndpoint, txHash, receiptTxHash)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 // HeadersPOW progresses Headers stage for Proof-of-Work headers
