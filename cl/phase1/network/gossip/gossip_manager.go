@@ -261,8 +261,18 @@ func (g *GossipManager) Publish(ctx context.Context, name string, data []byte) e
 	if topicHandle == nil {
 		return fmt.Errorf("topic not found: %s", topic)
 	}
+	// Log peer count for attestation topics to help diagnose propagation issues
+	if gossip.IsTopicBeaconAttestation(name) {
+		peerCount := len(g.p2p.Pubsub().ListPeers(topic))
+		if peerCount == 0 {
+			log.Warn("[Gossip] Publishing attestation with NO peers on subnet", "topic", name, "peerCount", peerCount)
+		} else if peerCount < 3 {
+			log.Debug("[Gossip] Publishing attestation with low peer count", "topic", name, "peerCount", peerCount)
+		}
+	}
 	// Note: before publishing the message to the network, Publish() internally runs the validator function.
-	return topicHandle.topic.Publish(ctx, compressedData, pubsub.WithReadiness(pubsub.MinTopicSize(1)))
+	// Removed MinTopicSize(1) - don't fail if no peers on subnet, message will propagate when peers join
+	return topicHandle.topic.Publish(ctx, compressedData)
 }
 
 func (g *GossipManager) goCheckForkAndResubscribe(ctx context.Context) {
