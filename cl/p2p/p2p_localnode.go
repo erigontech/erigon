@@ -26,16 +26,19 @@ func newLocalNode(
 	}
 	localNode := enode.NewLocalNode(db, privKey)
 
-	ipEntry := enr.IP(ipAddr)
 	udpEntry := enr.UDP(udpPort)
 	tcpEntry := enr.TCP(tcpPort)
 
-	localNode.Set(ipEntry)
 	localNode.Set(udpEntry)
 	localNode.Set(tcpEntry)
-
-	localNode.SetFallbackIP(ipAddr)
 	localNode.SetFallbackUDP(udpPort)
+
+	if ipAddr.IsUnspecified() {
+		logger.Warn("[Caplin] Discovery address is unspecified (0.0.0.0 or ::), ENR will have no IP until peers report it back. Set caplin.discovery.addr to your public IP for immediate discoverability")
+	} else {
+		localNode.Set(enr.IP(ipAddr))
+		localNode.SetFallbackIP(ipAddr)
+	}
 
 	return localNode, nil
 }
