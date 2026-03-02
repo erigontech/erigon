@@ -181,6 +181,14 @@ func TestPagedWriterCRC32Sequential(t *testing.T) {
 	testData := []struct{ k, v string }{
 		{"k1", "v1"}, {"k2", "v2"}, {"k3", "v3"},
 		{"k4", "v4"}, {"k5", "v5"}, {"k6", "v6"},
+		{"k7", "v7"}, {"k8", "v8"}, {"k9", "v9"},
+		{"k10", "v10"}, {"k11", "v11"}, {"k12", "v12"},
+		{"k13", "longer_value_here"}, {"k14", "another_longer_value"},
+		{"k15", ""}, // empty value
+		{"key_with_spaces", "value with spaces"},
+		{"unicode_key_αβγ", "unicode_value_δεζ"},
+		{"binary_like", "\x00\x01\x02\x03\x04\x05\x06\x07"},
+		{"repeated", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 	}
 
 	for _, kv := range testData {

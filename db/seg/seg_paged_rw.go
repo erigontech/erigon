@@ -43,6 +43,9 @@ func returnIfNotNil(item *pageWorkItem) {
 	}
 }
 
+func getPageResult() *pageResult  { return pageResultPool.Get().(*pageResult) }
+func putPageResult(r *pageResult) { pageResultPool.Put(r) }
+
 func GetFromPage(key, compressedPage []byte, compressionBuf []byte, compressionEnabled bool) (v []byte, compressionBufOut []byte) {
 	var err error
 	var page []byte
@@ -328,7 +331,7 @@ func (c *PagedWriter) compressionWorker() {
 			func() {
 				defer pageWorkItemPool.Put(item)
 
-				result := pageResultPool.Get().(*pageResult)
+				result := getPageResult()
 				result.seq = item.seq
 				result.err = nil
 
@@ -339,7 +342,7 @@ func (c *PagedWriter) compressionWorker() {
 				select {
 				case c.resultCh <- result:
 				case <-c.ctx.Done():
-					pageResultPool.Put(result) // return result to pool if context cancelled
+					putPageResult(result) // return result to pool if context cancelled
 				}
 			}()
 
@@ -362,7 +365,7 @@ func (c *PagedWriter) writeInOrder() error {
 			return err
 		}
 		delete(c.pendingResults, c.seqOut)
-		pageResultPool.Put(r)
+		putPageResult(r)
 		c.seqOut++
 		if c.numWorkers > 1 {
 			c.pagesCompressed++
