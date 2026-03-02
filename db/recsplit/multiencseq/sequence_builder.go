@@ -106,6 +106,31 @@ func (b *SequenceBuilder) simpleEncoding(buf []byte) []byte {
 	return buf
 }
 
+// Merge merges s1 and s2 into this builder, resetting it first.
+// s1 and s2 must be pre-sorted with s1.Max() <= s2.Min().
+// Call AppendBytes on the builder to serialize.
+func (b *SequenceBuilder) Merge(s1, s2 *SequenceReader, outBaseNum uint64, it1, it2 *SequenceIterator) error {
+	b.Reset(outBaseNum, s1.Count()+s2.Count(), s2.Max())
+	it1.Reset(s1, 0)
+	it2.Reset(s2, 0)
+	for it1.HasNext() {
+		v, err := it1.Next()
+		if err != nil {
+			return err
+		}
+		b.AddOffset(v)
+	}
+	for it2.HasNext() {
+		v, err := it2.Next()
+		if err != nil {
+			return err
+		}
+		b.AddOffset(v)
+	}
+	b.Build()
+	return nil
+}
+
 func (b *SequenceBuilder) rebasedEliasFano(buf []byte) []byte {
 	// Reserved encoding type 0x90 == rebased elias fano
 	buf = append(buf, byte(RebasedEliasFano))

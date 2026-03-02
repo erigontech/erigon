@@ -672,11 +672,10 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 			if mergedOnce {
 				mergeSeq.Reset(ci1.startTxNum, ci1.val)
 				preSeq.Reset(startTxNum, lastVal)
-				merged, mergeErr := mergeSeq.Merge(preSeq, startTxNum, mergeIt, preIt)
-				if mergeErr != nil {
+				if mergeErr := builder.Merge(mergeSeq, preSeq, startTxNum, mergeIt, preIt); mergeErr != nil {
 					return nil, fmt.Errorf("merge %s inverted index: %w", iit.ii.FilenameBase, mergeErr)
 				}
-				lastVal = merged.AppendBytes(lastVal[:0])
+				lastVal = builder.AppendBytes(lastVal[:0])
 			} else {
 				mergedOnce = true
 			}
