@@ -169,6 +169,108 @@ func TestMerge(t *testing.T) {
 	})
 }
 
+func TestMergeEncodingBoundary(t *testing.T) {
+	buildSeq := func(baseNum uint64, vals ...uint64) []byte {
+		b := NewBuilder(baseNum, uint64(len(vals)), vals[len(vals)-1])
+		for _, v := range vals {
+			b.AddOffset(v)
+		}
+		b.Build()
+		return b.AppendBytes(nil)
+	}
+	merge := func(baseNum uint64, raw1, raw2 []byte) []byte {
+		s1 := ReadMultiEncSeq(baseNum, raw1)
+		s2 := ReadMultiEncSeq(baseNum, raw2)
+		var it1, it2 SequenceIterator
+		merged, err := s1.Merge(s2, baseNum, &it1, &it2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return merged.AppendBytes(nil)
+	}
+
+	// 8+8=16: must stay simple encoding
+	raw16 := merge(1000,
+		buildSeq(1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008),
+		buildSeq(1000, 1009, 1010, 1011, 1012, 1013, 1014, 1015, 1016),
+	)
+	require.Equal(t, byte(SimpleEncoding)|15, raw16[0], "8+8=16 must use simple encoding")
+
+	// 8+9=17: must flip to rebased EF
+	raw17 := merge(1000,
+		buildSeq(1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008),
+		buildSeq(1000, 1009, 1010, 1011, 1012, 1013, 1014, 1015, 1016, 1017),
+	)
+	require.Equal(t, byte(RebasedEliasFano), raw17[0], "8+9=17 must use rebased EF")
+}
+
+func TestMergeSeek(t *testing.T) {
+	buildSeq := func(baseNum uint64, vals ...uint64) []byte {
+		b := NewBuilder(baseNum, uint64(len(vals)), vals[len(vals)-1])
+		for _, v := range vals {
+			b.AddOffset(v)
+		}
+		b.Build()
+		return b.AppendBytes(nil)
+	}
+
+	// merge two large sequences so output uses rebased EF
+	vals1 := make([]uint64, 10)
+	vals2 := make([]uint64, 10)
+	for i := range vals1 {
+		vals1[i] = 1000 + uint64(i)*2 // 1000,1002,...,1018
+		vals2[i] = 1020 + uint64(i)*2 // 1020,1022,...,1038
+	}
+	s1 := ReadMultiEncSeq(1000, buildSeq(1000, vals1...))
+	s2 := ReadMultiEncSeq(1000, buildSeq(1000, vals2...))
+	var it1, it2 SequenceIterator
+	merged, err := s1.Merge(s2, 1000, &it1, &it2)
+	require.NoError(t, err)
+	result := ReadMultiEncSeq(1000, merged.AppendBytes(nil))
+
+	// Seek to existing value
+	n, ok := result.Seek(1010)
+	require.True(t, ok)
+	require.Equal(t, uint64(1010), n)
+
+	// Seek to gap — returns next
+	n, ok = result.Seek(1011)
+	require.True(t, ok)
+	require.Equal(t, uint64(1012), n)
+
+	// Seek past end
+	_, ok = result.Seek(1039)
+	require.False(t, ok)
+
+	// Has
+	require.True(t, result.Has(1020))
+	require.False(t, result.Has(1021))
+}
+
+func TestBuilderFreeFunctions(t *testing.T) {
+	const baseNum = uint64(5000)
+	vals := []uint64{5003, 5007, 5015}
+	b := NewBuilder(baseNum, uint64(len(vals)), vals[len(vals)-1])
+	for _, v := range vals {
+		b.AddOffset(v)
+	}
+	b.Build()
+	raw := b.AppendBytes(nil)
+
+	require.Equal(t, uint64(3), Count(baseNum, raw))
+
+	n, ok := Seek(baseNum, raw, 5006)
+	require.True(t, ok)
+	require.Equal(t, uint64(5007), n)
+
+	n, ok = Seek(baseNum, raw, 5007)
+	require.True(t, ok)
+	require.Equal(t, uint64(5007), n)
+
+	_, ok = Seek(baseNum, raw, 5016)
+	require.False(t, ok)
+}
+
 func BenchmarkMerge(b *testing.B) {
 	const baseNum = 1_000_000
 	const n = 500 // elements per sequence
