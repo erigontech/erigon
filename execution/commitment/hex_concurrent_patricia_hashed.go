@@ -315,20 +315,36 @@ func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates
 	return rootHash, nil
 }
 
+// CanDoConcurrentNext returns true when the trie is wide enough at the root to benefit
+// from parallel commitment on the next call. It checks whether the root has no extension
+// (i.e. it is a branch node) AND that at least minNibblesForConcurrent distinct first-nibble
+// sub-tries have stored branch data.
+//
+// Checking a single nibble (e.g. nibble 0) is fragile: with a randomly-distributed key set,
+// any particular nibble may happen to be empty, producing a spurious false negative. Requiring
+// a count threshold makes the decision robust: 150 random keys reliably fill ≥ 14 of 16
+// nibbles, whereas a small key set (e.g. 2 keys) fills at most 2.
 func (p *ConcurrentPatriciaHashed) CanDoConcurrentNext() (bool, error) {
-	if p.root.root.extLen == 0 {
-		zeroPrefixBranch, _, err := p.root.ctx.Branch(HexNibblesToCompactBytes([]byte{0}))
-		if err != nil {
-			return false, fmt.Errorf("checking shortes prefix branch failed: %w", err)
-		}
-		if len(zeroPrefixBranch) > 4 { // tm+am+cells
-			// if root has no extension and there is a branch of zero prefix, can use parallel commitment next time
-			// fmt.Printf("use concurrent next\n")
-			return true, nil
-		}
-		// fmt.Printf(" 00 [branch %x len %d]\n", zeroPrefixBranch, len(zeroPrefixBranch))
+	if p.root.root.extLen != 0 {
+		// root has an extension prefix → single subtrie, no benefit from parallelism
+		return false, nil
 	}
-	// fmt.Printf("use seq trie next [root extLen=%d][ext '%x']\n", p.root.root.extLen, p.root.root.extension[:p.root.root.extLen])
+	// Count distinct first-nibble positions that have stored branch data.
+	// We need at least this many to justify spawning 16 parallel goroutines.
+	const minNibblesForConcurrent = 4
+	nibbleCount := 0
+	for nib := 0; nib < 16; nib++ {
+		branch, _, err := p.root.ctx.Branch(HexNibblesToCompactBytes([]byte{byte(nib)}))
+		if err != nil {
+			return false, fmt.Errorf("checking prefix branch for nibble %d failed: %w", nib, err)
+		}
+		if len(branch) > 4 { // tm + am + at least one cell
+			nibbleCount++
+			if nibbleCount >= minNibblesForConcurrent {
+				return true, nil
+			}
+		}
+	}
 	return false, nil
 }
 
