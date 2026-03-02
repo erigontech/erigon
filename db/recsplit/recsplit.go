@@ -36,6 +36,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/assert"
+	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mmap"
@@ -154,7 +155,7 @@ type RecSplit struct {
 	baseDataID         uint64 // Minimal app-specific ID of entries of this index - helps app understand what data stored in given shard - persistent field
 	bucketCount        uint64 // Number of buckets
 	salt               uint32 // Murmur3 hash used for converting keys to 64-bit values and assigning to buckets
-	bucketKeyBuf       [16]byte
+	bucketKeyBuf       [12]byte
 	numBuf             [8]byte
 	collision          bool
 	enums              bool // Whether to build two level index with perfect hash table pointing to enumeration and enumeration pointing to offsets
@@ -164,6 +165,8 @@ type RecSplit struct {
 
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 	timings Timings
+
+	progress *background.Progress // If set, tracks 0-100%: add-keys fills 0-50%, build fills 50-100%
 }
 
 type RecSplitArgs struct {
@@ -214,6 +217,9 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 			0x4ef95e25f4b4983d, 0x81175195173b92d3, 0x4e50927d8dd15978, 0x1ea2099d1fafae7f, 0x425c8a06fbaaa815, 0xcd4216006c74052a}
 	}
 	bucketCount := (args.KeyCount + args.BucketSize - 1) / args.BucketSize
+	if bucketCount > math.MaxUint32 {
+		return nil, fmt.Errorf("recsplit: bucketCount %d exceeds uint32 max (too many keys for bucketSize=%d)", bucketCount, args.BucketSize)
+	}
 	rs := &RecSplit{
 		dataStructureVersion: version.DataStructureVersion(args.Version),
 		bucketSize:           args.BucketSize, keyExpectedCount: uint64(args.KeyCount), bucketCount: uint64(bucketCount),
@@ -392,6 +398,9 @@ func (rs *RecSplit) ResetNextSalt() {
 	rs.collision = false
 	rs.keysAdded = 0
 	rs.salt++
+	if rs.progress != nil {
+		rs.progress.Processed.Store(0)
+	}
 	if rs.bucketCollector != nil {
 		rs.bucketCollector.Close()
 	}
@@ -469,8 +478,9 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 		return errors.New("cannot add keys after perfect hash function had been built")
 	}
 	hi, lo := murmur3.Sum128WithSeed(key, rs.salt)
-	binary.BigEndian.PutUint64(rs.bucketKeyBuf[:], remap(hi, rs.bucketCount))
-	binary.BigEndian.PutUint64(rs.bucketKeyBuf[8:], lo)
+	bucketIdx := uint32(remap(hi, rs.bucketCount))
+	binary.BigEndian.PutUint32(rs.bucketKeyBuf[:], bucketIdx)
+	binary.BigEndian.PutUint64(rs.bucketKeyBuf[4:], lo)
 	binary.BigEndian.PutUint64(rs.numBuf[:], offset)
 	if offset > rs.maxOffset {
 		rs.maxOffset = offset
@@ -515,6 +525,9 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 
 	rs.keysAdded++
 	rs.prevOffset = offset
+	if rs.progress != nil && rs.keysAdded%1024 == 0 {
+		rs.progress.Processed.Add(1024)
+	}
 	return nil
 }
 
@@ -778,17 +791,22 @@ func recsplit(level int, bucket []uint64, offsets []uint64, unary []uint64, rs *
 
 // loadFuncBucket is required to satisfy the type etl.LoadFunc type, to use with collector.Load
 func (rs *RecSplit) loadFuncBucket(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-	// k is the BigEndian encoding of the bucket number, and the v is the key that is assigned into that bucket
-	bucketIdx := binary.BigEndian.Uint64(k)
+	// k is the BigEndian encoding of the bucket number (4 bytes) + fingerprint (8 bytes),
+	// and v is the offset/enum value assigned into that bucket
+	bucketIdx := uint64(binary.BigEndian.Uint32(k))
 	if rs.currentBucketIdx != bucketIdx {
 		if rs.currentBucketIdx != math.MaxUint64 {
 			if err := rs.recsplitCurrentBucket(); err != nil {
 				return err
 			}
+			if rs.progress != nil {
+				// Build phase fills the 50–100% half: each bucket ≈ bucketSize keys worth.
+				rs.progress.Processed.Add(uint64(rs.bucketSize))
+			}
 		}
 		rs.currentBucketIdx = bucketIdx
 	}
-	rs.currentBucket = append(rs.currentBucket, binary.BigEndian.Uint64(k[8:]))
+	rs.currentBucket = append(rs.currentBucket, binary.BigEndian.Uint64(k[4:]))
 	rs.currentBucketOffs = append(rs.currentBucketOffs, binary.BigEndian.Uint64(v))
 	return nil
 }
@@ -813,6 +831,26 @@ func (rs *RecSplit) buildOffsetEf() error {
 	}
 	rs.offsetEf.Build()
 	return nil
+}
+
+// KeyCount returns the number of keys added to the RecSplit.
+func (rs *RecSplit) KeyCount() uint64 { return rs.keysAdded }
+
+// BucketCount returns the number of buckets.
+func (rs *RecSplit) BucketCount() uint64 { return rs.bucketCount }
+
+// SetProgress wires a single progress tracker covering the full build lifecycle.
+// Total = 2*keyExpectedCount; AddKey fills 0→keyExpectedCount (0–50%) and
+// the bucket-building phase fills keyExpectedCount→2*keyExpectedCount (50–100%).
+// Progress is automatically reset on ResetNextSalt (collision retry).
+func (rs *RecSplit) SetProgress(p *background.Progress) {
+	if p == nil {
+		return
+	}
+	p.Name.Store(&rs.fileName)
+	p.Processed.Store(0)
+	p.Total.Store(2 * rs.keyExpectedCount)
+	rs.progress = p
 }
 
 // Build has to be called after all the keys have been added, and it initiates the process
