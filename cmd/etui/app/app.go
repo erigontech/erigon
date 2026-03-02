@@ -25,6 +25,7 @@ type App struct {
 	sysColl     *datasource.SystemCollector
 	iopsTrack   *datasource.DiskIOPSTracker
 	syncTracker *datasource.SyncTracker
+	alertMgr    *datasource.AlertManager
 	datadir     string
 }
 
@@ -38,6 +39,7 @@ func New(datadir string) *App {
 		sysColl:     datasource.NewSystemCollector(datadir),
 		iopsTrack:   datasource.NewDiskIOPSTracker(),
 		syncTracker: datasource.NewSyncTracker(),
+		alertMgr:    datasource.NewAlertManager(),
 	}
 }
 
@@ -50,7 +52,7 @@ func (a *App) Run(parent context.Context, infoCh <-chan *commands.StagesInfo, er
 	// Build pages
 	pages := tview.NewPages()
 
-	nodeInfoBody, nodeView := widgets.NewNodeInfoPage()
+	nodeInfoBody, nodeView := widgets.NewNodeInfoPage(a.datadir)
 	footer := widgets.Footer()
 
 	startPageBody, _ := widgets.NewStartPage(nodeView.Clock, a.datadir)
@@ -70,6 +72,8 @@ func (a *App) Run(parent context.Context, infoCh <-chan *commands.StagesInfo, er
 	go a.handleErrors(ctx, errCh, footer) // not wrapped — it drains errCh itself
 	go a.safeGo("pollDownloader", errCh, func() { a.pollDownloader(ctx, nodeView.Downloader, errCh) })
 	go a.safeGo("pollSystemHealth", errCh, func() { a.pollSystemHealth(ctx, nodeView.SystemHealth) })
+	go a.safeGo("pollAlerts", errCh, func() { a.pollAlerts(ctx, nodeView.Alerts) })
+	go a.safeGo("pollLogTail", errCh, func() { a.pollLogTail(ctx, nodeView.LogTail) })
 
 	// Page navigation
 	currentPage, pagesCount := 0, 2
@@ -135,6 +139,7 @@ func (a *App) fillStagesInfo(ctx context.Context, view *widgets.NodeInfoView, in
 				return
 			}
 			metrics := a.syncTracker.Update(info)
+			a.alertMgr.CheckSyncMetrics(metrics)
 			currentStage := leadingStageName(info)
 			a.tview.QueueUpdateDraw(func() {
 				view.SyncStatus.UpdateSyncStatus(metrics, currentStage)
@@ -225,6 +230,7 @@ func (a *App) pollDownloader(ctx context.Context, view *widgets.DownloaderView, 
 			if ctx.Err() != nil {
 				return // shutting down
 			}
+			a.alertMgr.CheckDownloaderError(err)
 			errMsg := err.Error()
 			a.tview.QueueUpdateDraw(func() {
 				view.SetError(errMsg)
@@ -241,8 +247,9 @@ func (a *App) pollDownloader(ctx context.Context, view *widgets.DownloaderView, 
 			continue
 		}
 
-		// Successful response — reset backoff
+		// Successful response — reset backoff and clear downloader alert
 		backoff = minBackoff
+		a.alertMgr.CheckDownloaderError(nil)
 
 		stats := a.dlTracker.Update(res)
 		a.tview.QueueUpdateDraw(func() {
@@ -265,6 +272,7 @@ func (a *App) pollSystemHealth(ctx context.Context, view *widgets.SystemHealthVi
 	// Collect once immediately so the widget isn't empty for 5 seconds
 	stats := a.sysColl.CollectSystemStats()
 	iops := a.iopsTrack.Update(stats.DiskIOPS_R, stats.DiskIOPS_W)
+	a.alertMgr.CheckSystemStats(stats)
 	a.tview.QueueUpdateDraw(func() {
 		view.UpdateSystemHealth(stats, iops)
 	})
@@ -276,8 +284,64 @@ func (a *App) pollSystemHealth(ctx context.Context, view *widgets.SystemHealthVi
 		case <-ticker.C:
 			stats := a.sysColl.CollectSystemStats()
 			iops := a.iopsTrack.Update(stats.DiskIOPS_R, stats.DiskIOPS_W)
+			a.alertMgr.CheckSystemStats(stats)
 			a.tview.QueueUpdateDraw(func() {
 				view.UpdateSystemHealth(stats, iops)
+			})
+		}
+	}
+}
+
+// pollAlerts periodically refreshes the alerts widget from the AlertManager.
+func (a *App) pollAlerts(ctx context.Context, view *widgets.AlertsView) {
+	const pollInterval = 1 * time.Second
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	var lastVersion int64
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			v := a.alertMgr.Version()
+			if v == lastVersion {
+				continue // no new alerts — skip redraw
+			}
+			lastVersion = v
+			// The alerts panel is 5 rows with a border → 3 visible content lines.
+			alerts := a.alertMgr.Recent(3)
+			a.tview.QueueUpdateDraw(func() {
+				view.UpdateAlerts(alerts)
+			})
+		}
+	}
+}
+
+// pollLogTail periodically reads the Erigon log file and updates the widget.
+// File I/O runs in this goroutine; only the cheap SetText call is queued
+// onto the tview event loop.
+func (a *App) pollLogTail(ctx context.Context, view *widgets.LogTailView) {
+	const pollInterval = 500 * time.Millisecond
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	// Read once immediately.
+	text := view.ReadLogTail()
+	a.tview.QueueUpdateDraw(func() {
+		view.SetText(text)
+		view.ScrollToEnd()
+	})
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			text := view.ReadLogTail()
+			a.tview.QueueUpdateDraw(func() {
+				view.SetText(text)
+				view.ScrollToEnd()
 			})
 		}
 	}
