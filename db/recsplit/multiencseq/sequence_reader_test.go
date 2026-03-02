@@ -9,6 +9,15 @@ import (
 	"github.com/erigontech/erigon/db/recsplit/simpleseq"
 )
 
+func buildTestSeq(baseNum uint64, vals ...uint64) []byte {
+	b := NewBuilder(baseNum, uint64(len(vals)), vals[len(vals)-1])
+	for _, v := range vals {
+		b.AddOffset(v)
+	}
+	b.Build()
+	return b.AppendBytes(nil)
+}
+
 func TestMultiEncSeq(t *testing.T) {
 
 	t.Run("plain elias fano", func(t *testing.T) {
@@ -113,19 +122,10 @@ func TestMultiEncSeq(t *testing.T) {
 }
 
 func TestMerge(t *testing.T) {
-	buildSeq := func(baseNum uint64, vals ...uint64) []byte {
-		b := NewBuilder(baseNum, uint64(len(vals)), vals[len(vals)-1])
-		for _, v := range vals {
-			b.AddOffset(v)
-		}
-		b.Build()
-		return b.AppendBytes(nil)
-	}
-
 	t.Run("small sequences (simple encoding path)", func(t *testing.T) {
 		// 3 + 3 = 6 elements: stays within SIMPLE_SEQUENCE_MAX_THRESHOLD
-		s1 := ReadMultiEncSeq(1000, buildSeq(1000, 1001, 1003, 1005))
-		s2 := ReadMultiEncSeq(1000, buildSeq(1000, 1007, 1009, 1011))
+		s1 := ReadMultiEncSeq(1000, buildTestSeq(1000, 1001, 1003, 1005))
+		s2 := ReadMultiEncSeq(1000, buildTestSeq(1000, 1007, 1009, 1011))
 
 		var it1, it2 SequenceIterator
 		merged, err := s1.Merge(s2, 1000, &it1, &it2)
@@ -149,8 +149,8 @@ func TestMerge(t *testing.T) {
 			vals1[i] = 1000 + uint64(i)*2
 			vals2[i] = 1020 + uint64(i)*2
 		}
-		s1 := ReadMultiEncSeq(1000, buildSeq(1000, vals1...))
-		s2 := ReadMultiEncSeq(1000, buildSeq(1000, vals2...))
+		s1 := ReadMultiEncSeq(1000, buildTestSeq(1000, vals1...))
+		s2 := ReadMultiEncSeq(1000, buildTestSeq(1000, vals2...))
 
 		var it1, it2 SequenceIterator
 		merged, err := s1.Merge(s2, 1000, &it1, &it2)
@@ -170,14 +170,6 @@ func TestMerge(t *testing.T) {
 }
 
 func TestMergeEncodingBoundary(t *testing.T) {
-	buildSeq := func(baseNum uint64, vals ...uint64) []byte {
-		b := NewBuilder(baseNum, uint64(len(vals)), vals[len(vals)-1])
-		for _, v := range vals {
-			b.AddOffset(v)
-		}
-		b.Build()
-		return b.AppendBytes(nil)
-	}
 	merge := func(baseNum uint64, raw1, raw2 []byte) []byte {
 		s1 := ReadMultiEncSeq(baseNum, raw1)
 		s2 := ReadMultiEncSeq(baseNum, raw2)
@@ -191,29 +183,20 @@ func TestMergeEncodingBoundary(t *testing.T) {
 
 	// 8+8=16: must stay simple encoding
 	raw16 := merge(1000,
-		buildSeq(1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008),
-		buildSeq(1000, 1009, 1010, 1011, 1012, 1013, 1014, 1015, 1016),
+		buildTestSeq(1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008),
+		buildTestSeq(1000, 1009, 1010, 1011, 1012, 1013, 1014, 1015, 1016),
 	)
 	require.Equal(t, byte(SimpleEncoding)|15, raw16[0], "8+8=16 must use simple encoding")
 
 	// 8+9=17: must flip to rebased EF
 	raw17 := merge(1000,
-		buildSeq(1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008),
-		buildSeq(1000, 1009, 1010, 1011, 1012, 1013, 1014, 1015, 1016, 1017),
+		buildTestSeq(1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008),
+		buildTestSeq(1000, 1009, 1010, 1011, 1012, 1013, 1014, 1015, 1016, 1017),
 	)
 	require.Equal(t, byte(RebasedEliasFano), raw17[0], "8+9=17 must use rebased EF")
 }
 
 func TestMergeSeek(t *testing.T) {
-	buildSeq := func(baseNum uint64, vals ...uint64) []byte {
-		b := NewBuilder(baseNum, uint64(len(vals)), vals[len(vals)-1])
-		for _, v := range vals {
-			b.AddOffset(v)
-		}
-		b.Build()
-		return b.AppendBytes(nil)
-	}
-
 	// merge two large sequences so output uses rebased EF
 	vals1 := make([]uint64, 10)
 	vals2 := make([]uint64, 10)
@@ -221,8 +204,8 @@ func TestMergeSeek(t *testing.T) {
 		vals1[i] = 1000 + uint64(i)*2 // 1000,1002,...,1018
 		vals2[i] = 1020 + uint64(i)*2 // 1020,1022,...,1038
 	}
-	s1 := ReadMultiEncSeq(1000, buildSeq(1000, vals1...))
-	s2 := ReadMultiEncSeq(1000, buildSeq(1000, vals2...))
+	s1 := ReadMultiEncSeq(1000, buildTestSeq(1000, vals1...))
+	s2 := ReadMultiEncSeq(1000, buildTestSeq(1000, vals2...))
 	var it1, it2 SequenceIterator
 	merged, err := s1.Merge(s2, 1000, &it1, &it2)
 	require.NoError(t, err)
