@@ -147,10 +147,9 @@ func TestArbitrumSubmitRetryableTxGasUsed(t *testing.T) {
 		decoded, err := types.DecodeRLPTransaction(stream, false)
 		require.NoError(t, err)
 
-		tx2, ok := decoded.(*ArbitrumSubmitRetryableTx)
-		require.True(t, ok, "decoded type should be *ArbitrumSubmitRetryableTx")
+		tx2, ok := decoded.(*types.ArbitrumSubmitRetryableTx)
+		require.True(t, ok, "decoded type should be *types.ArbitrumSubmitRetryableTx")
 
-		// Field-by-field equality
 		require.EqualValues(t, tx.ChainId, tx2.ChainId)
 		require.EqualValues(t, tx.RequestId, tx2.RequestId)
 		require.EqualValues(t, tx.From, tx2.From)
@@ -165,8 +164,6 @@ func TestArbitrumSubmitRetryableTxGasUsed(t *testing.T) {
 		require.EqualValues(t, tx.FeeRefundAddr, tx2.FeeRefundAddr)
 		require.EqualValues(t, tx.RetryData, tx2.RetryData)
 		require.EqualValues(t, tx.EffectiveGasUsed, tx2.EffectiveGasUsed)
-
-		// With NoTimeBoosted embedded, IsTimeBoosted returns nil.
 		require.Nil(t, tx2.IsTimeBoosted())
 	}
 }

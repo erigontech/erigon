@@ -220,6 +220,9 @@ func (tx *LegacyTx) payloadSize() (payloadSize int) {
 	payloadSize += rlp.Uint256Len(tx.V)
 	payloadSize += rlp.Uint256Len(tx.R)
 	payloadSize += rlp.Uint256Len(tx.S)
+	if tx.Timeboosted != nil {
+		payloadSize++ // bool is 1 byte in RLP
+	}
 	return payloadSize
 }
 
@@ -265,8 +268,12 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize int) error 
 	if err := rlp.EncodeUint256(tx.S, w, b); err != nil {
 		return err
 	}
+	if tx.Timeboosted != nil {
+		if err := rlp.EncodeBool(*tx.Timeboosted, w, b); err != nil {
+			return err
+		}
+	}
 	return nil
-
 }
 
 func (tx *LegacyTx) EncodeRLP(w io.Writer) error {
@@ -324,6 +331,13 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("read S: %w", err)
 	}
 	tx.S.SetBytes(b)
+	if s.MoreDataInList() {
+		boolVal, err := s.Bool()
+		if err != nil {
+			return fmt.Errorf("read Timeboosted: %w", err)
+		}
+		tx.Timeboosted = &boolVal
+	}
 	if err = s.ListEnd(); err != nil {
 		return fmt.Errorf("close txn struct: %w", err)
 	}

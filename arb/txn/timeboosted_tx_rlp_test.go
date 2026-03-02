@@ -291,7 +291,7 @@ func Test_ArbRetryTx_Timeboosted(t *testing.T) {
 		decoded, err := types.DecodeRLPTransaction(stream, false)
 		require.NoError(t, err)
 
-		tx2, ok := decoded.(*ArbitrumRetryTx)
+		tx2, ok := decoded.(*types.ArbitrumRetryTx)
 		require.True(t, ok)
 
 		require.EqualValues(t, tx.Timeboosted, tx2.Timeboosted)
@@ -307,7 +307,7 @@ func Test_ArbRetryTx_Timeboosted(t *testing.T) {
 		require.EqualValues(t, tx.RefundTo, tx2.RefundTo)
 		require.EqualValues(t, tx.MaxRefund, tx2.MaxRefund)
 		require.EqualValues(t, tx.SubmissionFeeRefund, tx2.SubmissionFeeRefund)
-		require.EqualValues(t, timeboostedVals[i], *tx.IsTimeBoosted())
+		require.EqualValues(t, timeboostedVals[i], *tx2.IsTimeBoosted())
 
 	}
 }

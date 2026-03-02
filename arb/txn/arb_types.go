@@ -1594,9 +1594,10 @@ func (tx *ArbitrumSubmitRetryableTx) payloadSize(hashingOnly bool) (payloadSize 
 	if hashingOnly {
 		return size, gasLen
 	}
-	// effective gas used is only included in non-hashing RLP encodings
-	size++
-	size += rlp.IntLenExcludingHead(tx.EffectiveGasUsed)
+	if tx.EffectiveGasUsed > 0 {
+		size++
+		size += rlp.IntLenExcludingHead(tx.EffectiveGasUsed)
+	}
 
 	return size, gasLen
 }
@@ -1688,8 +1689,10 @@ func (tx *ArbitrumSubmitRetryableTx) encodePayload(w io.Writer, b []byte, payloa
 	if hashingOnly {
 		return nil
 	}
-	if err := rlp.EncodeInt(tx.EffectiveGasUsed, w, b); err != nil {
-		return err
+	if tx.EffectiveGasUsed > 0 {
+		if err := rlp.EncodeInt(tx.EffectiveGasUsed, w, b); err != nil {
+			return err
+		}
 	}
 
 	return nil

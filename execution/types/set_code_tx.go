@@ -311,6 +311,13 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	tx.S.SetBytes(b)
+	if s.MoreDataInList() {
+		boolVal, err := s.Bool()
+		if err != nil {
+			return fmt.Errorf("read Timeboosted: %w", err)
+		}
+		tx.Timeboosted = &boolVal
+	}
 	return s.ListEnd()
 }
 
@@ -378,6 +385,11 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 	// encode S
 	if err := rlp.EncodeUint256(tx.S, w, b); err != nil {
 		return err
+	}
+	if tx.Timeboosted != nil {
+		if err := rlp.EncodeBool(*tx.Timeboosted, w, b); err != nil {
+			return err
+		}
 	}
 	return nil
 
