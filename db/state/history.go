@@ -815,6 +815,7 @@ func (h *History) buildFiles(ctx context.Context, step kv.Step, collation Histor
 		if err = collation.historyComp.Compress(); err != nil {
 			return HistoryFiles{}, fmt.Errorf("compress %s .v history: %w", h.FilenameBase, err)
 		}
+		p.Processed.Store(1)
 		ps.Delete(p)
 	}
 	collation.Close()

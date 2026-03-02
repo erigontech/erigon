@@ -1106,6 +1106,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step kv.Step, coll Inve
 			ps.Delete(p)
 			return InvertedFiles{}, fmt.Errorf("compress %s: %w", ii.FilenameBase, err)
 		}
+		p.Processed.Store(1)
 		coll.Close()
 		ps.Delete(p)
 	}
