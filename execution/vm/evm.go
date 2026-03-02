@@ -513,8 +513,11 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 }
 
 func (evm *EVM) maxCodeSize() int {
+	if evm.chainConfig.IsAmsterdam(evm.Context.Time) {
+		return params.MaxCodeSizeAmsterdam
+	}
 	if evm.chainConfig.Bor != nil && evm.chainConfig.Bor.IsAhmedabad(evm.Context.BlockNumber) {
-		return params.MaxCodeSizePostAhmedabad
+		return params.MaxCodeSizeAhmedabad
 	}
 	return params.MaxCodeSize
 }
