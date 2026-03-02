@@ -905,15 +905,17 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 
 	pe.execLoopGroup.Go(func() error {
 		defer pe.rws.Close()
-		defer pe.in.Close()
+		defer execLoopCtxCancel() // cancel workers' context when exec loop exits
 		pe.resetWorkers(execLoopCtx, pe.rs, nil)
 		return pe.execLoop(execLoopCtx)
 	})
 
 	return execLoopCtx, func() {
 		execLoopCtxCancel()
-		defer pe.stopWorkers()
-		defer pe.in.Close()
+		defer func() {
+			pe.stopWorkers()
+			pe.in.Release()
+		}()
 
 		if err := pe.wait(ctx); err != nil {
 			pe.logger.Debug("exec loop cancel failed", "err", err)
