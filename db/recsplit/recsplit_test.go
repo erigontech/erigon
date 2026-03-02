@@ -18,12 +18,16 @@ package recsplit
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/spaolacci/murmur3"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
 )
@@ -522,6 +526,65 @@ func TestIndexLookupParallel(t *testing.T) {
 					t.Errorf("workers=%d key %d: expected offset %d, got %d", workers, i, i*17, offset)
 				}
 			}
+		})
+	}
+}
+
+// TestParallelMatchesSequential checks that the index file produced by the parallel
+// build path is byte-for-byte identical to the one produced by the sequential path.
+func TestParallelMatchesSequential(t *testing.T) {
+	logger := log.New()
+	tmpDir := t.TempDir()
+	salt := uint32(42)
+	const N = 10_000
+
+	keys := make([][]byte, N)
+	for i := range keys {
+		keys[i] = fmt.Appendf(nil, "key-%d", i)
+	}
+
+	fileChecksum := func(path string) []byte {
+		t.Helper()
+		f, err := os.Open(path)
+		require.NoError(t, err)
+		defer f.Close()
+		h := sha256.New()
+		_, err = io.Copy(h, f)
+		require.NoError(t, err)
+		return h.Sum(nil)
+	}
+
+	build := func(workers int, indexFile string) {
+		t.Helper()
+		rs, err := NewRecSplit(RecSplitArgs{
+			KeyCount:   N,
+			BucketSize: 100,
+			Salt:       &salt,
+			TmpDir:     tmpDir,
+			IndexFile:  indexFile,
+			LeafSize:   8,
+			NoFsync:    true,
+			Workers:    workers,
+		}, logger)
+		require.NoError(t, err)
+		defer rs.Close()
+		for i, k := range keys {
+			require.NoError(t, rs.AddKey(k, uint64(i*17)))
+		}
+		require.NoError(t, rs.Build(context.Background()))
+	}
+
+	seqFile := filepath.Join(tmpDir, "seq.idx")
+	build(1, seqFile)
+	seqSum := fileChecksum(seqFile)
+
+	for _, workers := range []int{2, 4, 8} {
+		workers := workers
+		t.Run(fmt.Sprintf("workers=%d", workers), func(t *testing.T) {
+			parFile := filepath.Join(tmpDir, fmt.Sprintf("par_w%d.idx", workers))
+			build(workers, parFile)
+			assert.Equal(t, seqSum, fileChecksum(parFile),
+				"parallel (workers=%d) index file differs from sequential", workers)
 		})
 	}
 }
