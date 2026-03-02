@@ -88,6 +88,7 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Addr
 			reply.Nonce++
 			return (*hexutil.Uint64)(&reply.Nonce), nil
 		}
+		// txpool doesn't know about this address yet: fall through to DB lookup
 	}
 	tx, err1 := api.db.BeginTemporalRo(ctx)
 	if err1 != nil {
