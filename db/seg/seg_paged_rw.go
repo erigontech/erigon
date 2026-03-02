@@ -322,30 +322,32 @@ func (c *PagedWriter) initWorkers() {
 
 func (c *PagedWriter) compressionWorker() {
 	defer c.wg.Done()
+
+	processItem := func(item *pageWorkItem) {
+		defer pageWorkItemPool.Put(item)
+
+		result := getPageResult()
+		result.seq = item.seq
+		result.err = nil
+
+		// Compress directly into result.data (no extra copy, each result owns its buffer)
+		result.data, _ = compress.EncodeZstdIfNeed(result.data[:0], item.uncompressedData, c.compressionEnabled)
+
+		// Send result, respecting context cancellation
+		select {
+		case c.resultCh <- result:
+		case <-c.ctx.Done():
+			putPageResult(result) // return result to pool if context cancelled
+		}
+	}
+
 	for {
 		select {
 		case item, ok := <-c.workCh:
 			if !ok {
 				return // channel closed
 			}
-			// Ensure work item is returned to pool even if compression panics
-			func() {
-				defer pageWorkItemPool.Put(item)
-
-				result := getPageResult()
-				result.seq = item.seq
-				result.err = nil
-
-				// Compress directly into result.data (no extra copy, each result owns its buffer)
-				result.data, _ = compress.EncodeZstdIfNeed(result.data[:0], item.uncompressedData, c.compressionEnabled)
-
-				// Send result, respecting context cancellation
-				select {
-				case c.resultCh <- result:
-				case <-c.ctx.Done():
-					putPageResult(result) // return result to pool if context cancelled
-				}
-			}()
+			processItem(item)
 
 		case <-c.ctx.Done():
 			return // context cancelled
