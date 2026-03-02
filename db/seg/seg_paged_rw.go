@@ -56,6 +56,34 @@ func putPageResult(r *pageResult) {
 	pageResultPool.Put(r)
 }
 
+func drainWorkCh(ch chan *pageWorkItem) {
+	for {
+		select {
+		case item := <-ch:
+			putPageWorkItem(item)
+		default:
+			return
+		}
+	}
+}
+
+func drainResultCh(ch chan *pageResult) {
+	for {
+		select {
+		case r := <-ch:
+			putPageResult(r)
+		default:
+			return
+		}
+	}
+}
+
+func drainPendingResults(m map[int]*pageResult) {
+	for _, r := range m {
+		putPageResult(r)
+	}
+}
+
 func GetFromPage(key, compressedPage []byte, compressionBuf []byte, compressionEnabled bool) (v []byte, compressionBufOut []byte) {
 	var err error
 	var page []byte
@@ -498,7 +526,7 @@ func (c *PagedWriter) resetPage() {
 	c.kLengths, c.vLengths = c.kLengths[:0], c.vLengths[:0]
 	c.keys, c.vals = c.keys[:0], c.vals[:0]
 }
-func (c *PagedWriter) Flush() error {
+func (c *PagedWriter) Flush() (err error) {
 	if c.pageSize <= 1 {
 		return nil
 	}
@@ -517,8 +545,10 @@ func (c *PagedWriter) Flush() error {
 	}
 	defer func() {
 		c.eg.Wait() //nolint:errcheck // ensure all worker goroutines have exited, even on error
-		for _, r := range c.pendingResults {
-			putPageResult(r)
+		if err != nil {
+			drainWorkCh(c.workCh)
+			drainResultCh(c.resultCh)
+			drainPendingResults(c.pendingResults)
 		}
 		c.resetPage()
 	}()
@@ -527,8 +557,8 @@ func (c *PagedWriter) Flush() error {
 		select {
 		case r := <-c.resultCh:
 			c.pendingResults[r.seq] = r
-			if err := c.writeInOrder(); err != nil {
-				return err
+			if err = c.writeInOrder(); err != nil {
+				return
 			}
 		case <-c.ctx.Done():
 			return c.eg.Wait()
