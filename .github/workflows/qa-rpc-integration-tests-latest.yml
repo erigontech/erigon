@@ -33,7 +33,7 @@ jobs:
       cancel-in-progress: true
     runs-on: [ self-hosted, qa, Ethereum, rpc-latest-erigon ]
     env:
-      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
+      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version-3.4/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TOTAL_TIME_SECONDS: 900 # 15 minutes

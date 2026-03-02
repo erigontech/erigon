@@ -97,7 +97,7 @@ jobs:
       RUN_ID: ${{ needs.setup.outputs.run_id }}
       NETWORK: ${{ needs.setup.outputs.network }}
       ERIGON_REFERENCE_DIR: /opt/erigon-versions/reference-version
-      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
+      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version-3.4/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
       TOTAL_TIME_SECONDS: 1200 # 20 minutes
       GETH_INSTALL_DIR: /opt/go-ethereum
