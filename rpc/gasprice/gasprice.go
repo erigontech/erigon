@@ -45,6 +45,12 @@ type OracleBackend interface {
 
 	GetReceiptsGasUsed(ctx context.Context, block *types.Block) (types.Receipts, error)
 	PendingBlockAndReceipts() (*types.Block, types.Receipts)
+
+	// Fork opens a new TemporalTx and returns a goroutine-local backend together
+	// with a cleanup function (call via defer cleanup()).
+	// If the backend does not support forking, it returns (nil, nil, nil) and
+	// the caller should fall back to using the main backend sequentially.
+	Fork(ctx context.Context) (OracleBackend, func(), error)
 }
 
 type Cache interface {
@@ -55,10 +61,11 @@ type Cache interface {
 // Oracle recommends gas prices based on the content of recent
 // blocks. Suitable for both light and full clients.
 type Oracle struct {
-	backend     OracleBackend
-	maxPrice    *uint256.Int
-	ignorePrice *uint256.Int
-	cache       Cache
+	backend      OracleBackend
+	maxPrice     *uint256.Int
+	ignorePrice  *uint256.Int
+	cache        Cache
+	historyCache *FeeHistoryCache
 
 	checkBlocks                       int
 	percentile                        int
@@ -69,7 +76,7 @@ type Oracle struct {
 
 // NewOracle returns a new gasprice oracle which can recommend suitable
 // gasprice for newly created transaction.
-func NewOracle(backend OracleBackend, params gaspricecfg.Config, cache Cache, log log.Logger) *Oracle {
+func NewOracle(backend OracleBackend, params gaspricecfg.Config, cache Cache, historyCache *FeeHistoryCache, log log.Logger) *Oracle {
 	blocks := params.Blocks
 	if blocks < 1 {
 		blocks = 1
@@ -104,6 +111,7 @@ func NewOracle(backend OracleBackend, params gaspricecfg.Config, cache Cache, lo
 		checkBlocks:      blocks,
 		percentile:       percent,
 		cache:            cache,
+		historyCache:     historyCache,
 		maxHeaderHistory: params.MaxHeaderHistory,
 		maxBlockHistory:  params.MaxBlockHistory,
 		log:              log,
