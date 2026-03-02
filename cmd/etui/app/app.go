@@ -29,6 +29,7 @@ type App struct {
 	logTailer   *datasource.LogTailer
 	nodeMgr     *datasource.NodeManager
 	log         *datasource.TUILog
+	tuiCfg      config.TUIConfig
 	datadir     string
 }
 
@@ -37,18 +38,33 @@ func New(datadir string) *App {
 	logPath := filepath.Join(datadir, "logs", "erigon.log")
 	tuiLog := datasource.NewTUILog(datadir)
 	tuiLog.Info("etui starting, datadir=%s", datadir)
+
+	// Load persisted TUI configuration (or defaults on first run).
+	tuiCfg, err := config.Load(datadir)
+	if err != nil {
+		tuiLog.Warn("loading config: %v (using defaults)", err)
+		tuiCfg = config.Defaults()
+		tuiCfg.DataDir = datadir
+	}
+
+	diagURL := tuiCfg.DiagnosticsURL
+	if diagURL == "" {
+		diagURL = config.DefaultDownloaderURL
+	}
+
 	return &App{
 		datadir:     datadir,
 		tview:       tview.NewApplication(),
-		dp:          datasource.NewDownloaderPinger(config.DefaultDownloaderURL),
+		dp:          datasource.NewDownloaderPinger(diagURL),
 		dlTracker:   datasource.NewDownloaderTracker(),
 		sysColl:     datasource.NewSystemCollector(datadir),
 		iopsTrack:   datasource.NewDiskIOPSTracker(),
 		syncTracker: datasource.NewSyncTracker(),
 		alertMgr:    datasource.NewAlertManager(),
 		logTailer:   datasource.NewLogTailer(logPath),
-		nodeMgr:     datasource.NewNodeManager(datadir, ""),
+		nodeMgr:     datasource.NewNodeManager(datadir, tuiCfg.Chain),
 		log:         tuiLog,
+		tuiCfg:      tuiCfg,
 	}
 }
 
@@ -57,6 +73,8 @@ const (
 	pageStart    = "start"
 	pageNodeInfo = "nodeInfo"
 	pageLogs     = "logs"
+	pageConfig   = "config"
+	pageWizard   = "wizard"
 )
 
 // Run starts the TUI event loop. It blocks until the user quits or the parent
@@ -135,9 +153,96 @@ func (a *App) Run(parent context.Context, infoCh <-chan *commands.StagesInfo, er
 	pages.AddPage(pageNodeInfo, nodeInfoPage, true, false)
 	pages.AddPage(pageLogs, logsPage, true, false)
 
+	// Track whether a modal overlay (config/wizard) is showing.
+	// When true, global keybindings are suppressed to avoid conflicts with form input.
+	modalActive := false
+
+	// openConfigModal opens the config editor as an overlay page.
+	openConfigModal := func() {
+		if modalActive {
+			return
+		}
+		modalActive = true
+		a.log.Info("opening config modal")
+		configModal := widgets.NewConfigureModal(a.tuiCfg,
+			func(newCfg config.TUIConfig) {
+				// Save callback.
+				if err := newCfg.Validate(); err != nil {
+					a.log.Error("config validation: %v", err)
+					// Stay in the modal — don't close on error.
+					return
+				}
+				if err := newCfg.Save(); err != nil {
+					a.log.Error("config save: %v", err)
+				} else {
+					a.log.Info("config saved to %s", config.ConfigPath(newCfg.DataDir))
+					a.tuiCfg = newCfg
+				}
+				pages.RemovePage(pageConfig)
+				pages.SwitchToPage(dashPages[currentPage])
+				a.tview.SetFocus(pages)
+				modalActive = false
+			},
+			func() {
+				// Cancel callback.
+				pages.RemovePage(pageConfig)
+				pages.SwitchToPage(dashPages[currentPage])
+				a.tview.SetFocus(pages)
+				modalActive = false
+			},
+		)
+		pages.AddPage(pageConfig, configModal.Root, true, true)
+		a.tview.SetFocus(configModal.Form())
+	}
+
+	// Check for first-run: if no etui.toml exists, show the install wizard.
+	if _, err := os.Stat(config.ConfigPath(a.datadir)); os.IsNotExist(err) {
+		modalActive = true
+		a.log.Info("first run detected — launching install wizard")
+		wizard := widgets.NewInstallWizard(a.datadir,
+			func(newCfg config.TUIConfig) {
+				// Wizard complete.
+				if err := newCfg.Save(); err != nil {
+					a.log.Error("wizard config save: %v", err)
+				} else {
+					a.log.Info("wizard config saved to %s", config.ConfigPath(newCfg.DataDir))
+					a.tuiCfg = newCfg
+				}
+				pages.RemovePage(pageWizard)
+				pages.SwitchToPage(pageStart)
+				a.tview.SetFocus(pages)
+				modalActive = false
+			},
+			func() {
+				// Wizard cancelled — proceed with defaults.
+				a.log.Info("wizard cancelled, using defaults")
+				pages.RemovePage(pageWizard)
+				pages.SwitchToPage(pageStart)
+				a.tview.SetFocus(pages)
+				modalActive = false
+			},
+		)
+		pages.AddPage(pageWizard, wizard.Root, true, true)
+		// SetFocus for the wizard must happen after SetRoot, handled below.
+		defer func() {
+			a.tview.SetFocus(wizard.Focusable())
+		}()
+	}
+
 	if err := a.tview.SetRoot(pages, true).EnableMouse(true).SetInputCapture(
 		func(event *tcell.EventKey) *tcell.EventKey {
 			currentFront, _ := pages.GetFrontPage()
+
+			// --- Modal overlay active: only allow Ctrl+C/q to quit ---
+			// Config and wizard pages handle their own Escape/Enter/Tab internally.
+			if modalActive {
+				if event.Key() == tcell.KeyCtrlC {
+					cancel()
+					a.tview.Stop()
+					return nil
+				}
+				return event // let the modal form handle all other input
+			}
 
 			// --- Log viewer search mode: capture all input ---
 			if currentFront == pageLogs && logViewer.IsSearching() {
@@ -172,6 +277,11 @@ func (a *App) Run(parent context.Context, infoCh <-chan *commands.StagesInfo, er
 			// Quick jump to logs page.
 			case event.Key() == tcell.KeyF2 || event.Rune() == 'L':
 				navigateToPage(logsPageIdx)
+				return nil
+
+			// Open configuration modal.
+			case event.Rune() == 'C':
+				openConfigModal()
 				return nil
 
 			// Node toggle (works from any page).
