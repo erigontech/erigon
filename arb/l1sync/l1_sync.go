@@ -188,6 +188,7 @@ func (s *L1SyncService) pollOnce(ctx context.Context) (pollMore bool, err error)
 
 	// Process in chunks
 	pollStart := time.Now()
+	lastLogTime := pollStart
 	startL1Block := fromL1Block
 	batchesProcessed := uint64(0)
 	for fromL1Block <= currentL1Block {
@@ -240,37 +241,28 @@ func (s *L1SyncService) pollOnce(ctx context.Context) (pollMore bool, err error)
 			}
 
 			batchesProcessed++
-			if s.config.MaxBatchesPerPoll > 0 && batchesProcessed >= s.config.MaxBatchesPerPoll {
-				elapsed := time.Since(pollStart)
-				l1Blocks := fromL1Block - startL1Block + 1
-				s.logger.Info("reached max batches per poll",
-					"processed", batchesProcessed,
-					"l1Blocks", l1Blocks,
-					"elapsed", elapsed,
-					"l1Blk/s", fmt.Sprintf("%.1f", float64(l1Blocks)/elapsed.Seconds()),
-					"batch/s", fmt.Sprintf("%.1f", float64(batchesProcessed)/elapsed.Seconds()),
-					"chunkSize", s.chunkSize,
-				)
-				return true, nil // need to poll more to sync up to chain tip
-			}
 		}
 
 		fromL1Block = toL1Block + 1
-	}
 
-	if batchesProcessed > 0 {
-		elapsed := time.Since(pollStart)
-		l1Blocks := currentL1Block - startL1Block + 1
-		s.logger.Info("poll cycle complete",
-			"batchesProcessed", batchesProcessed,
-			"l1Blocks", l1Blocks,
-			"elapsed", elapsed,
-			"l1Blk/s", fmt.Sprintf("%.1f", float64(l1Blocks)/elapsed.Seconds()),
-			"batch/s", fmt.Sprintf("%.1f", float64(batchesProcessed)/elapsed.Seconds()),
-			"chunkSize", s.chunkSize,
-		)
+		// Log progress every 10 seconds
+		if time.Since(lastLogTime) > 10*time.Second {
+			elapsed := time.Since(pollStart)
+			l1Blocks := fromL1Block - startL1Block
+			s.logger.Info("sync progress",
+				"batchesProcessed", batchesProcessed,
+				"l1Block", fromL1Block,
+				"remaining", currentL1Block-fromL1Block,
+				"l1Blocks", l1Blocks,
+				"elapsed", elapsed,
+				"l1Blk/s", fmt.Sprintf("%.1f", float64(l1Blocks)/elapsed.Seconds()),
+				"batch/s", fmt.Sprintf("%.1f", float64(batchesProcessed)/elapsed.Seconds()),
+				"chunkSize", s.chunkSize,
+			)
+			lastLogTime = time.Now()
+		}
 	}
-	return false, nil // processed everything up to current L1 chain tip
+	return false, nil
 }
 
 // FetchAndProcessRange fetches and processes all batches in the given L1 block range (manual call, not continuous polling)
