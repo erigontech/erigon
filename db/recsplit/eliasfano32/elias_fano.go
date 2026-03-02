@@ -108,7 +108,7 @@ func (ef *EliasFano) deriveFields() int {
 	jumpWords := ef.jumpSizeWords()
 	totalWords := wordsLowerBits + wordsUpperBits + jumpWords
 	//fmt.Printf("EF: %d, %d,%d,%d\n", totalWords, wordsLowerBits, wordsUpperBits, jumpWords)
-	if ef.data == nil {
+	if cap(ef.data) < totalWords {
 		ef.data = make([]uint64, totalWords)
 	} else {
 		ef.data = ef.data[:totalWords]
@@ -118,6 +118,20 @@ func (ef *EliasFano) deriveFields() int {
 	ef.upperBits = ef.data[wordsLowerBits : wordsLowerBits+wordsUpperBits]
 	ef.jump = ef.data[wordsLowerBits+wordsUpperBits:]
 	return wordsUpperBits
+}
+
+// ResetForWrite reinitializes the EliasFano for writing a new sequence, reusing
+// the existing data slice if it has sufficient capacity (avoiding allocation).
+// The caller must call Build() after all AddOffset calls, same as with NewEliasFano.
+func (ef *EliasFano) ResetForWrite(count, maxOffset uint64) {
+	ef.count = count - 1
+	ef.maxOffset = maxOffset
+	ef.u = maxOffset + 1
+	ef.i = 0
+	ef.wordsUpperBits = ef.deriveFields()
+	// Zero out the backing array so OR-style setBits starts from a clean slate.
+	// deriveFields() may have resliced ef.data without zeroing it.
+	clear(ef.data)
 }
 
 // Build construct Elias Fano index for a given sequences

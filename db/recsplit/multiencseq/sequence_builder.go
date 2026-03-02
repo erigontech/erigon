@@ -53,6 +53,18 @@ func NewBuilder(baseNum, count, maxOffset uint64) *SequenceBuilder {
 	}
 }
 
+// Reset reinitializes the builder for a new sequence, reusing the existing object
+// and its internal EliasFano allocation where possible.
+// Same parameter semantics as NewBuilder.
+func (b *SequenceBuilder) Reset(baseNum, count, maxOffset uint64) {
+	b.baseNum = baseNum
+	if b.ef != nil {
+		b.ef.ResetForWrite(count, maxOffset)
+	} else {
+		b.ef = eliasfano32.NewEliasFano(count, maxOffset)
+	}
+}
+
 func (b *SequenceBuilder) AddOffset(offset uint64) {
 	// TODO: write offset already subtracting baseNum now that PlainEF is gone
 	b.ef.AddOffset(offset)
