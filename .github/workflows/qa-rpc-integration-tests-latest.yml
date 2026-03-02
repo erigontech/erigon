@@ -8,18 +8,11 @@ on:
         type: boolean
         required: false
         default: false
+  schedule:
+    - cron: '0 0 * * 0'  # Run on Sunday at 00:00 AM UTC
   push:
     branches:
-      - main
-  pull_request:
-    branches:
-      - main
-    types:
-      - opened
-      - reopened
-      - synchronize
-      - ready_for_review
-
+      - 'release/3.*'
 
 jobs:
   mainnet-rpc-integ-tests-latest:
@@ -36,7 +29,7 @@ jobs:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
-      TOTAL_TIME_SECONDS: 900 # 15 minutes
+      TOTAL_TIME_SECONDS: 1800 # 30 minutes
       REFERENCE_SYSTEM_HOST_ADDRESS: 157.180.55.78:8545
       ERIGON_ASSERT: true
       RPC_PAST_TEST_DIR: /opt/rpc-past-tests
