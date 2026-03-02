@@ -125,18 +125,9 @@ func BenchmarkBuilder(b *testing.B) {
 // TestBuilderRoundTrip verifies that serialized output can be read back correctly via
 // SequenceReader for both encoding paths, including the direct-rebased-EF path (count > 16).
 func TestBuilderRoundTrip(t *testing.T) {
-	build := func(baseNum uint64, vals []uint64) []byte {
-		b := NewBuilder(baseNum, uint64(len(vals)), vals[len(vals)-1])
-		for _, v := range vals {
-			b.AddOffset(v)
-		}
-		b.Build()
-		return b.AppendBytes(nil)
-	}
-
 	check := func(t *testing.T, baseNum uint64, vals []uint64) {
 		t.Helper()
-		raw := build(baseNum, vals)
+		raw := buildTestSeq(baseNum, vals...)
 		s := ReadMultiEncSeq(baseNum, raw)
 		require.Equal(t, uint64(len(vals)), s.Count())
 		require.Equal(t, vals[0], s.Min())
@@ -158,7 +149,7 @@ func TestBuilderRoundTrip(t *testing.T) {
 		for i := range vals {
 			vals[i] = 5000 + uint64(i)*3
 		}
-		raw := build(5000, vals)
+		raw := buildTestSeq(5000, vals...)
 		require.Equal(t, byte(SimpleEncoding)|15, raw[0])
 		check(t, 5000, vals)
 	})
@@ -168,7 +159,7 @@ func TestBuilderRoundTrip(t *testing.T) {
 		for i := range vals {
 			vals[i] = 5000 + uint64(i)*3
 		}
-		raw := build(5000, vals)
+		raw := buildTestSeq(5000, vals...)
 		require.Equal(t, byte(RebasedEliasFano), raw[0])
 		check(t, 5000, vals)
 	})
@@ -179,7 +170,7 @@ func TestBuilderRoundTrip(t *testing.T) {
 		for i := range vals {
 			vals[i] = baseNum + uint64(i)*7
 		}
-		raw := build(baseNum, vals)
+		raw := buildTestSeq(baseNum, vals...)
 		require.Equal(t, byte(RebasedEliasFano), raw[0])
 		check(t, baseNum, vals)
 	})
