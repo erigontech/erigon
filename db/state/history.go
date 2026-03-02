@@ -798,25 +798,14 @@ func (h *History) buildFiles(ctx context.Context, step kv.Step, collation Histor
 	}
 
 	{
-		ps := background.NewProgressSet()
-		_, efHistoryFileName := filepath.Split(collation.efHistoryPath)
-		p := ps.AddNew(efHistoryFileName, 1)
-		defer ps.Delete(p)
-
 		if err = collation.efHistoryComp.Compress(); err != nil {
 			return HistoryFiles{}, fmt.Errorf("compress %s .ef history: %w", h.FilenameBase, err)
 		}
-		ps.Delete(p)
 	}
 	{
-		_, historyFileName := filepath.Split(collation.historyPath)
-		p := ps.AddNew(historyFileName, 1)
-		defer ps.Delete(p)
 		if err = collation.historyComp.Compress(); err != nil {
 			return HistoryFiles{}, fmt.Errorf("compress %s .v history: %w", h.FilenameBase, err)
 		}
-		p.Processed.Store(1)
-		ps.Delete(p)
 	}
 	collation.Close()
 
