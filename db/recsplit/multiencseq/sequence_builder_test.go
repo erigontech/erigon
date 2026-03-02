@@ -101,3 +101,86 @@ func TestMultiEncodingSeqBuilder(t *testing.T) {
 		}
 	})
 }
+
+func BenchmarkBuilder(b *testing.B) {
+	const baseNum = 1_000_000
+	const n = 500
+
+	vals := make([]uint64, n)
+	for i := range vals {
+		vals[i] = baseNum + uint64(i)*2
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		sb := NewBuilder(baseNum, n, vals[n-1])
+		for _, v := range vals {
+			sb.AddOffset(v)
+		}
+		sb.Build()
+		_ = sb.AppendBytes(nil)
+	}
+}
+
+// TestBuilderRoundTrip verifies that serialized output can be read back correctly via
+// SequenceReader for both encoding paths, including the direct-rebased-EF path (count > 16).
+func TestBuilderRoundTrip(t *testing.T) {
+	build := func(baseNum uint64, vals []uint64) []byte {
+		b := NewBuilder(baseNum, uint64(len(vals)), vals[len(vals)-1])
+		for _, v := range vals {
+			b.AddOffset(v)
+		}
+		b.Build()
+		return b.AppendBytes(nil)
+	}
+
+	check := func(t *testing.T, baseNum uint64, vals []uint64) {
+		t.Helper()
+		raw := build(baseNum, vals)
+		s := ReadMultiEncSeq(baseNum, raw)
+		require.Equal(t, uint64(len(vals)), s.Count())
+		require.Equal(t, vals[0], s.Min())
+		require.Equal(t, vals[len(vals)-1], s.Max())
+		for i, want := range vals {
+			require.Equal(t, want, s.Get(uint64(i)), "index %d", i)
+		}
+		var it SequenceIterator
+		it.Reset(s, 0)
+		for i := 0; it.HasNext(); i++ {
+			v, err := it.Next()
+			require.NoError(t, err)
+			require.Equal(t, vals[i], v, "iterator index %d", i)
+		}
+	}
+
+	t.Run("boundary: 16 elements uses simple encoding", func(t *testing.T) {
+		vals := make([]uint64, 16)
+		for i := range vals {
+			vals[i] = 5000 + uint64(i)*3
+		}
+		raw := build(5000, vals)
+		require.Equal(t, byte(SimpleEncoding)|15, raw[0])
+		check(t, 5000, vals)
+	})
+
+	t.Run("boundary: 17 elements uses rebased EF", func(t *testing.T) {
+		vals := make([]uint64, 17)
+		for i := range vals {
+			vals[i] = 5000 + uint64(i)*3
+		}
+		raw := build(5000, vals)
+		require.Equal(t, byte(RebasedEliasFano), raw[0])
+		check(t, 5000, vals)
+	})
+
+	t.Run("large sequence with high baseNum", func(t *testing.T) {
+		const baseNum = 1_000_000_000
+		vals := make([]uint64, 100)
+		for i := range vals {
+			vals[i] = baseNum + uint64(i)*7
+		}
+		raw := build(baseNum, vals)
+		require.Equal(t, byte(RebasedEliasFano), raw[0])
+		check(t, baseNum, vals)
+	})
+}

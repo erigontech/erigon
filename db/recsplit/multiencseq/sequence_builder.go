@@ -29,8 +29,9 @@ const SIMPLE_SEQUENCE_MAX_THRESHOLD = 16
 //
 // This is the "writer" counterpart of SequenceReader.
 type SequenceBuilder struct {
-	baseNum uint64
-	ef      *eliasfano32.EliasFano
+	baseNum   uint64
+	ef        *eliasfano32.EliasFano // intermediate EF for simple encoding (count <= 16)
+	rebasedEf *eliasfano32.EliasFano // direct rebased EF for large sequences (count > 16)
 }
 
 // Creates a new builder. The builder is not meant to be reused. The construction
@@ -47,6 +48,14 @@ type SequenceBuilder struct {
 // count: this is the number of elements in the sequence, used in case of elias fano
 // maxOffset: this is maximum value in the sequence, used in case of elias fano
 func NewBuilder(baseNum, count, maxOffset uint64) *SequenceBuilder {
+	if count > SIMPLE_SEQUENCE_MAX_THRESHOLD {
+		// For large sequences, target rebased EF directly. AddOffset subtracts baseNum
+		// on the fly, so AppendBytes can serialize without a second pass.
+		return &SequenceBuilder{
+			baseNum:   baseNum,
+			rebasedEf: eliasfano32.NewEliasFano(count, maxOffset-baseNum),
+		}
+	}
 	return &SequenceBuilder{
 		baseNum: baseNum,
 		ef:      eliasfano32.NewEliasFano(count, maxOffset),
@@ -54,20 +63,27 @@ func NewBuilder(baseNum, count, maxOffset uint64) *SequenceBuilder {
 }
 
 func (b *SequenceBuilder) AddOffset(offset uint64) {
-	// TODO: write offset already subtracting baseNum now that PlainEF is gone
+	if b.rebasedEf != nil {
+		b.rebasedEf.AddOffset(offset - b.baseNum)
+		return
+	}
 	b.ef.AddOffset(offset)
 }
 
 func (b *SequenceBuilder) Build() {
+	if b.rebasedEf != nil {
+		b.rebasedEf.Build()
+		return
+	}
 	b.ef.Build()
 }
 
 func (b *SequenceBuilder) AppendBytes(buf []byte) []byte {
-	if b.ef.Count() <= SIMPLE_SEQUENCE_MAX_THRESHOLD {
-		return b.simpleEncoding(buf)
+	if b.rebasedEf != nil {
+		buf = append(buf, byte(RebasedEliasFano))
+		return b.rebasedEf.AppendBytes(buf)
 	}
-
-	return b.rebasedEliasFano(buf)
+	return b.simpleEncoding(buf)
 }
 
 func (b *SequenceBuilder) simpleEncoding(buf []byte) []byte {
@@ -92,22 +108,4 @@ func (b *SequenceBuilder) simpleEncoding(buf []byte) []byte {
 	}
 
 	return buf
-}
-
-func (b *SequenceBuilder) rebasedEliasFano(buf []byte) []byte {
-	// Reserved encoding type 0x90 == rebased elias fano
-	buf = append(buf, byte(RebasedEliasFano))
-
-	// Rebased ef
-	rbef := eliasfano32.NewEliasFano(b.ef.Count(), b.ef.Max()-b.baseNum)
-	for it := b.ef.Iterator(); it.HasNext(); {
-		n, err := it.Next()
-		if err != nil {
-			panic(err)
-		}
-
-		rbef.AddOffset(n - b.baseNum)
-	}
-	rbef.Build()
-	return rbef.AppendBytes(buf)
 }
