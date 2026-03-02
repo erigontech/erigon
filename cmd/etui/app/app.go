@@ -26,11 +26,13 @@ type App struct {
 	iopsTrack   *datasource.DiskIOPSTracker
 	syncTracker *datasource.SyncTracker
 	alertMgr    *datasource.AlertManager
+	logTailer   *datasource.LogTailer
 	datadir     string
 }
 
 // New creates an App that reads from the given datadir.
 func New(datadir string) *App {
+	logPath := filepath.Join(datadir, "logs", "erigon.log")
 	return &App{
 		datadir:     datadir,
 		tview:       tview.NewApplication(),
@@ -40,8 +42,16 @@ func New(datadir string) *App {
 		iopsTrack:   datasource.NewDiskIOPSTracker(),
 		syncTracker: datasource.NewSyncTracker(),
 		alertMgr:    datasource.NewAlertManager(),
+		logTailer:   datasource.NewLogTailer(logPath),
 	}
 }
+
+// Page name constants.
+const (
+	pageStart    = "start"
+	pageNodeInfo = "nodeInfo"
+	pageLogs     = "logs"
+)
 
 // Run starts the TUI event loop. It blocks until the user quits or the parent
 // context is cancelled (e.g. by an OS signal).
@@ -66,6 +76,25 @@ func (a *App) Run(parent context.Context, infoCh <-chan *commands.StagesInfo, er
 		AddItem(nodeInfoBody, 0, 5, false).
 		AddItem(footer, 2, 1, false)
 
+	// Log viewer page (full-screen)
+	// currentPage is captured by the closures below, so declare it here.
+	dashPages := []string{pageStart, pageNodeInfo}
+	currentPage := 0
+
+	var logViewer *widgets.LogViewerPage
+	switchToDashboard := func() {
+		currentPage = 1 // nodeInfo
+		pages.SwitchToPage(pageNodeInfo)
+		a.tview.SetFocus(pages)
+	}
+	logViewer = widgets.NewLogViewerPage(switchToDashboard)
+	logsPage := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(widgets.Header(), 1, 1, false).
+		AddItem(logViewer.Root, 0, 1, true)
+
+	// Seed the log tailer so the viewer has content immediately.
+	a.logTailer.SeedFromEnd()
+
 	// Start background goroutines
 	go a.safeGo("fillStagesInfo", errCh, func() { a.fillStagesInfo(ctx, nodeView, infoCh) })
 	go a.safeGo("runClock", errCh, func() { a.runClock(ctx, nodeView.Clock) })
@@ -74,25 +103,65 @@ func (a *App) Run(parent context.Context, infoCh <-chan *commands.StagesInfo, er
 	go a.safeGo("pollSystemHealth", errCh, func() { a.pollSystemHealth(ctx, nodeView.SystemHealth) })
 	go a.safeGo("pollAlerts", errCh, func() { a.pollAlerts(ctx, nodeView.Alerts) })
 	go a.safeGo("pollLogTail", errCh, func() { a.pollLogTail(ctx, nodeView.LogTail) })
+	go a.safeGo("pollLogViewer", errCh, func() { a.pollLogViewer(ctx, logViewer) })
 
-	// Page navigation
-	currentPage, pagesCount := 0, 2
-	names := []string{"start", "nodeInfo"}
-	pages.AddPage(names[0], startPage, true, true)
-	pages.AddPage(names[1], nodeInfoPage, true, false)
+	pages.AddPage(pageStart, startPage, true, true)
+	pages.AddPage(pageNodeInfo, nodeInfoPage, true, false)
+	pages.AddPage(pageLogs, logsPage, true, false)
 
 	if err := a.tview.SetRoot(pages, true).EnableMouse(true).SetInputCapture(
 		func(event *tcell.EventKey) *tcell.EventKey {
+			currentFront, _ := pages.GetFrontPage()
+
+			// --- Log viewer page input handling ---
+			if currentFront == pageLogs {
+				// When search bar is focused, let it handle all input except Escape.
+				if logViewer.IsSearching() {
+					if event.Key() == tcell.KeyEscape {
+						logViewer.DismissSearch()
+						a.tview.SetFocus(logViewer.Content())
+						return nil
+					}
+					if event.Key() == tcell.KeyEnter {
+						logViewer.DismissSearch()
+						a.tview.SetFocus(logViewer.Content())
+						return nil
+					}
+					return event // let InputField handle typing
+				}
+
+				switch {
+				case event.Key() == tcell.KeyCtrlC || event.Rune() == 'q':
+					cancel()
+					a.tview.Stop()
+					return nil
+				case event.Key() == tcell.KeyEscape || event.Key() == tcell.KeyF1:
+					switchToDashboard()
+					return nil
+				case event.Rune() == '/':
+					logViewer.EnterSearchMode()
+					a.tview.SetFocus(logViewer.SearchBar())
+					return nil
+				}
+				// Remaining keys (1-4, Space, arrows) handled by content's InputCapture.
+				return event
+			}
+
+			// --- Dashboard pages input handling ---
 			switch {
 			case event.Key() == tcell.KeyCtrlC || event.Rune() == 'q':
 				cancel()
 				a.tview.Stop()
+			case event.Key() == tcell.KeyF2 || event.Rune() == 'L':
+				pages.SwitchToPage(pageLogs)
+				a.tview.SetFocus(logViewer.Content())
+				return nil
 			case event.Key() == tcell.KeyRight:
-				currentPage = (currentPage + 1 + pagesCount) % pagesCount
-				pages.SwitchToPage(names[currentPage])
+				currentPage = (currentPage + 1) % len(dashPages)
+				pages.SwitchToPage(dashPages[currentPage])
 			case event.Key() == tcell.KeyLeft:
-				currentPage = (currentPage - 1 + pagesCount) % pagesCount
-				pages.SwitchToPage(names[currentPage])
+				currentPage = (currentPage - 1 + len(dashPages)) % len(dashPages)
+				pages.SwitchToPage(dashPages[currentPage])
 			}
 			return event
 		}).Run(); err != nil {
@@ -346,3 +415,44 @@ func (a *App) pollLogTail(ctx context.Context, view *widgets.LogTailView) {
 		}
 	}
 }
+
+// pollLogViewer periodically tails the log file via LogTailer and updates
+// the full-screen log viewer widget.
+func (a *App) pollLogViewer(ctx context.Context, viewer *widgets.LogViewerPage) {
+	const pollInterval = 500 * time.Millisecond
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	var lastVersion int64
+
+	// Initial render from seeded data.
+	lines := a.logTailer.Recent(logRingSize, viewer.FilterLevel())
+	a.tview.QueueUpdateDraw(func() {
+		viewer.UpdateContent(lines)
+	})
+	lastVersion = a.logTailer.Version()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			// Poll for new file content (I/O happens here, not on event loop).
+			a.logTailer.Poll()
+
+			v := a.logTailer.Version()
+			if v == lastVersion {
+				continue
+			}
+			lastVersion = v
+
+			lines := a.logTailer.Recent(logRingSize, viewer.FilterLevel())
+			a.tview.QueueUpdateDraw(func() {
+				viewer.UpdateContent(lines)
+			})
+		}
+	}
+}
+
+// logRingSize matches the datasource ring buffer size for the full viewer.
+const logRingSize = 1000

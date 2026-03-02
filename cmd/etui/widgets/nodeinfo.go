@@ -19,9 +19,9 @@ type NodeInfoView struct {
 }
 
 // NewNodeInfoPage builds the node-info page layout and returns it with its backing view.
-// datadir is used to derive the default log path (datadir/erigon.log).
+// datadir is used to derive the default log path (datadir/logs/erigon.log).
 func NewNodeInfoPage(datadir string) (*tview.Flex, *NodeInfoView) {
-	logPath := filepath.Join(datadir, "erigon.log")
+	logPath := filepath.Join(datadir, "logs", "erigon.log")
 
 	view := &NodeInfoView{
 		SyncStatus: NewSyncStatusView(),

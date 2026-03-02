@@ -19,5 +19,5 @@ func Header() tview.Primitive {
 func Footer() *tview.TextView {
 	return tview.NewTextView().SetDynamicColors(true).
 		SetTextAlign(tview.AlignCenter).
-		SetText("[green]navigation left right arrows [yellow]Press [red]q [yellow]or [red]Ctrl+C [yellow]to quit")
+		SetText("[green]◄ ► [-]navigate  [green]F2/L [-]logs  [yellow]Press [red]q [yellow]or [red]Ctrl+C [yellow]to quit")
 }
