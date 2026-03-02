@@ -256,7 +256,7 @@ func NewMultiClient(
 			0, /* linkLimit */
 			nil,
 			nil,
-			nil,
+			logger,
 		)
 	}
 
