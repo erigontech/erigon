@@ -141,6 +141,7 @@ func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.R
 		if err := writer.Compress(); err != nil {
 			return nil, false, err
 		}
+		p.Processed.Store(1)
 		writer.Close()
 		sn.Close()
 		ps.Delete(p)
