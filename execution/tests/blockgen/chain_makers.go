@@ -514,13 +514,15 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 				return nil, nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
 			}
 
-			if config.IsPrague(b.header.Time) {
-				b.header.RequestsHash = requests.Hash()
+			if config.IsCancun(b.header.Time) {
 				var beaconBlockRoot common.Hash
 				if _, err := rand.Read(beaconBlockRoot[:]); err != nil {
 					return nil, nil, nil, fmt.Errorf("can't create beacon block root: %w", err)
 				}
 				b.header.ParentBeaconBlockRoot = &beaconBlockRoot
+			}
+			if config.IsPrague(b.header.Time) {
+				b.header.RequestsHash = requests.Hash()
 			}
 
 			var bal types.BlockAccessList
