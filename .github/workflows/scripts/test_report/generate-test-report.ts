@@ -186,8 +186,6 @@ export async function run() {
 
         endDate.setUTCHours(23, 59, 59, 999);
 
-        const created = `${startDate.toISOString().split('T')[0]}..${endDate.toISOString().split('T')[0]}`;
-
         // Log the inputs
         core.info(`Generating test report for branch: ${branch}`);
         core.info(`Date range: ${startDate.toISOString()} to ${endDate.toISOString()}`);
@@ -198,89 +196,92 @@ export async function run() {
 
         const summaries: WorkflowRunSummary[] = [];
 
+        // Generate days list upfront — used both for fetching (one day at a time to stay
+        // under GitHub API's 1000-result hard cap) and for building the report table.
+        const days = getDateStringsBetween(new Date(startDate), new Date(endDate));
+
         // Fetch workflow runs for the specified repository, branch, and date range and process them
-        let page = 1;
+        // Query one day at a time so each request stays well under the 1000-result API limit.
         const per_page = 100;
-        while (true) {
-            const {data: {workflow_runs}} = await octokit.rest.actions.listWorkflowRunsForRepo({
-                owner,
-                repo,
-                branch,
-                per_page,
-                page,
-                created,
-            });
-
-            if (!workflow_runs.length) break;
-
-            // Iterate through the current page of workflow runs
-            for (const run of workflow_runs) {
-                const runDate = new Date(run.created_at);
-                if (runDate < startDate || runDate > endDate) continue;
-
-                // Include only tests
-                if (!acceptedWorkflows.includes(run.path ?? '')) {
-                    core.info(`Skipping workflow run: ${run.name} (${run.id})`);
-                    continue;
-                }
-
-                core.info(`Processing workflow run: ${run.name} (${run.id}) - status=${run.status}, conclusion=${run.conclusion}`);
-
-                const {data: jobsData} = await octokit.rest.actions.listJobsForWorkflowRun({
+        for (const day of days) {
+            let page = 1;
+            while (true) {
+                const {data: {workflow_runs}} = await octokit.rest.actions.listWorkflowRunsForRepo({
                     owner,
                     repo,
-                    run_id: run.id,
+                    branch,
+                    per_page,
+                    page,
+                    created: day,
                 });
 
-                // Iterate through the jobs in the workflow run
-                if (!jobsData.jobs || !jobsData.jobs.length) {
-                    core.info(`No jobs found for workflow run: ${run.name} (${run.id})`);
-                    continue;
-                }
-                for (const job of jobsData.jobs) {
+                if (!workflow_runs.length) break;
 
-                    const workflowName = run.name ?? run.id.toString();
-                    const jobName = job.name;
+                // Iterate through the current page of workflow runs
+                for (const run of workflow_runs) {
+                    const runDate = new Date(run.created_at);
+                    if (runDate < startDate || runDate > endDate) continue;
 
-                    // Map the job conclusion to an icon
-                    let conclusion = mapConclusionToIcon(job.conclusion, job.status);
-
-                    // Correction to treat 'cancelled' with steps differently than 'cancelled' without steps
-                    if (job.conclusion === 'cancelled' && job.steps && job.steps.length > 0)
-                        conclusion = mapConclusionToIcon('cancelled_after_start', job.status);
-
-                    // Find or create the workflow summary
-                    let workflowSummary = summaries.find(w => w.name === workflowName);
-                    if (!workflowSummary) {
-                        workflowSummary = {name: workflowName, jobs: []};
-                        summaries.push(workflowSummary);
+                    // Include only tests
+                    if (!acceptedWorkflows.includes(run.path ?? '')) {
+                        core.info(`Skipping workflow run: ${run.name} (${run.id})`);
+                        continue;
                     }
 
-                    // Find or create the job summary
-                    let jobSummary = workflowSummary.jobs.find(j => j.name === jobName);
-                    if (!jobSummary) {
-                        jobSummary = {name: jobName, results: []};
-                        workflowSummary.jobs.push(jobSummary);
-                    }
+                    core.info(`Processing workflow run: ${run.name} (${run.id}) - status=${run.status}, conclusion=${run.conclusion}`);
 
-                    // Add the job result to the job summary
-                    jobSummary.results.push({
-                        date: runDate.toISOString().split('T')[0],
-                        sha: run.head_sha,
-                        conclusion,
-                        runId: run.id,
-                        jobId: job.id,
+                    const {data: jobsData} = await octokit.rest.actions.listJobsForWorkflowRun({
+                        owner,
+                        repo,
+                        run_id: run.id,
                     });
+
+                    // Iterate through the jobs in the workflow run
+                    if (!jobsData.jobs || !jobsData.jobs.length) {
+                        core.info(`No jobs found for workflow run: ${run.name} (${run.id})`);
+                        continue;
+                    }
+                    for (const job of jobsData.jobs) {
+
+                        const workflowName = run.name ?? run.id.toString();
+                        const jobName = job.name;
+
+                        // Map the job conclusion to an icon
+                        let conclusion = mapConclusionToIcon(job.conclusion, job.status);
+
+                        // Correction to treat 'cancelled' with steps differently than 'cancelled' without steps
+                        if (job.conclusion === 'cancelled' && job.steps && job.steps.length > 0)
+                            conclusion = mapConclusionToIcon('cancelled_after_start', job.status);
+
+                        // Find or create the workflow summary
+                        let workflowSummary = summaries.find(w => w.name === workflowName);
+                        if (!workflowSummary) {
+                            workflowSummary = {name: workflowName, jobs: []};
+                            summaries.push(workflowSummary);
+                        }
+
+                        // Find or create the job summary
+                        let jobSummary = workflowSummary.jobs.find(j => j.name === jobName);
+                        if (!jobSummary) {
+                            jobSummary = {name: jobName, results: []};
+                            workflowSummary.jobs.push(jobSummary);
+                        }
+
+                        // Add the job result to the job summary
+                        jobSummary.results.push({
+                            date: runDate.toISOString().split('T')[0],
+                            sha: run.head_sha,
+                            conclusion,
+                            runId: run.id,
+                            jobId: job.id,
+                        });
+                    }
                 }
+
+                if (workflow_runs.length < per_page) break;
+                page++;
             }
-
-            if (workflow_runs.length < per_page) break;
-            page++;
         }
-
-        const start = new Date(startDate);
-        const end = new Date(endDate);
-        const days = getDateStringsBetween(start, end);
 
         // Prepare the summary table header
         const table: SummaryRow[] = [  // format: [Test, Job, Date1, Date2, ...]
