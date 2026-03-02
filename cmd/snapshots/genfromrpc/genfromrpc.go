@@ -865,8 +865,11 @@ func commitUpdate(tx kv.RwTx, blocks []*types.Block) error {
 		td := new(big.Int).Set(blk.Difficulty())
 		if blockNum > 0 {
 			parentTd, err := rawdb.ReadTd(tx, blk.Header().ParentHash, blockNum-1)
-			if err != nil || parentTd == nil {
+			if err != nil {
 				return fmt.Errorf("failed to read parent total difficulty for block %d: %w", blockNum, err)
+			}
+			if parentTd == nil {
+				return fmt.Errorf("parent total difficulty not found for block %d (parent hash: %x)", blockNum, blk.Header().ParentHash)
 			}
 			td.Add(td, parentTd)
 		}
@@ -1135,7 +1138,8 @@ func FetchBlocksBatch(client, receiptClient *rpc.Client, startBlock, endBlock, b
 	var err error
 	metadataMap, err = FetchBlockMetadataBatch(context.Background(), client, startBlock, startBlock+actualBatchSize)
 	if err != nil {
-		log.Crit("Failed to fetch block metadata batch", "err", err)
+		log.Warn("Failed to fetch block metadata batch, continuing without timeboost data", "err", err)
+		metadataMap = nil
 	}
 
 	blocks := make([]*types.Block, actualBatchSize)

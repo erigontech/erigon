@@ -200,9 +200,9 @@ func headersArbitrum(s *StageState, ctx context.Context, tx kv.RwTx, cfg Headers
 
 	firstBlock := progress + 1
 	loopBlockLimit := uint64(cfg.syncConfig.LoopBlockLimit)
-	stopBlock := latestRemote
-	if loopBlockLimit > 0 && stopBlock > progress+loopBlockLimit {
-		stopBlock = progress + loopBlockLimit
+	stopBlock := latestRemote + 1 // endBlockNum is exclusive in GetAndCommitBlocks
+	if loopBlockLimit > 0 && stopBlock > firstBlock+loopBlockLimit {
+		stopBlock = firstBlock + loopBlockLimit
 	}
 
 	logger.Info(fmt.Sprintf("[%s] Fetching Arbitrum blocks from L2 RPC", logPrefix),
