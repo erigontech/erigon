@@ -123,8 +123,10 @@ func (ef *EliasFano) deriveFields() int {
 // Build construct Elias Fano index for a given sequences
 func (ef *EliasFano) Build() {
 	for i, c, lastSuperQ := uint64(0), uint64(0), uint64(0); i < uint64(ef.wordsUpperBits); i++ {
-		for word := ef.upperBits[i]; word != 0; word &= word - 1 { // iterate over set bits only; word &= word-1 clears the lowest set bit
-			b := uint64(bits.TrailingZeros64(word))
+		for b := uint64(0); b < 64; b++ {
+			if ef.upperBits[i]&(uint64(1)<<b) == 0 {
+				continue
+			}
 			if (c & superQMask) == 0 {
 				// When c is multiple of 2^14 (4096)
 				lastSuperQ = i*64 + b
