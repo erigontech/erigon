@@ -27,12 +27,16 @@ type App struct {
 	syncTracker *datasource.SyncTracker
 	alertMgr    *datasource.AlertManager
 	logTailer   *datasource.LogTailer
+	nodeMgr     *datasource.NodeManager
+	log         *datasource.TUILog
 	datadir     string
 }
 
 // New creates an App that reads from the given datadir.
 func New(datadir string) *App {
 	logPath := filepath.Join(datadir, "logs", "erigon.log")
+	tuiLog := datasource.NewTUILog(datadir)
+	tuiLog.Info("etui starting, datadir=%s", datadir)
 	return &App{
 		datadir:     datadir,
 		tview:       tview.NewApplication(),
@@ -43,6 +47,8 @@ func New(datadir string) *App {
 		syncTracker: datasource.NewSyncTracker(),
 		alertMgr:    datasource.NewAlertManager(),
 		logTailer:   datasource.NewLogTailer(logPath),
+		nodeMgr:     datasource.NewNodeManager(datadir, ""),
+		log:         tuiLog,
 	}
 }
 
@@ -58,6 +64,7 @@ const (
 func (a *App) Run(parent context.Context, infoCh <-chan *commands.StagesInfo, errCh chan error) error {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
+	defer a.log.Close()
 
 	// Build pages
 	pages := tview.NewPages()
@@ -76,16 +83,29 @@ func (a *App) Run(parent context.Context, infoCh <-chan *commands.StagesInfo, er
 		AddItem(nodeInfoBody, 0, 5, false).
 		AddItem(footer, 2, 1, false)
 
-	// Log viewer page (full-screen)
-	// currentPage is captured by the closures below, so declare it here.
-	dashPages := []string{pageStart, pageNodeInfo}
+	// All navigable pages, including the full-screen log viewer.
+	// ◄ ► cycles through them; F2/L jumps directly to logs.
+	dashPages := []string{pageStart, pageNodeInfo, pageLogs}
 	currentPage := 0
+	const logsPageIdx = 2 // index of pageLogs in dashPages
 
+	// Declare logViewer before closures that reference it.
 	var logViewer *widgets.LogViewerPage
+
+	// navigateToPage switches to the page at idx and sets focus correctly.
+	// Must only be called from the tview event loop (InputCapture).
+	navigateToPage := func(idx int) {
+		currentPage = idx
+		pages.SwitchToPage(dashPages[idx])
+		if dashPages[idx] == pageLogs {
+			a.tview.SetFocus(logViewer.Content())
+		} else {
+			a.tview.SetFocus(pages)
+		}
+	}
+
 	switchToDashboard := func() {
-		currentPage = 1 // nodeInfo
-		pages.SwitchToPage(pageNodeInfo)
-		a.tview.SetFocus(pages)
+		navigateToPage(1) // nodeInfo
 	}
 	logViewer = widgets.NewLogViewerPage(switchToDashboard)
 	logsPage := tview.NewFlex().SetDirection(tview.FlexRow).
@@ -94,6 +114,11 @@ func (a *App) Run(parent context.Context, infoCh <-chan *commands.StagesInfo, er
 
 	// Seed the log tailer so the viewer has content immediately.
 	a.logTailer.SeedFromEnd()
+
+	// Detect if an external node is already running.
+	a.nodeMgr.DetectExternal()
+	initStatus := a.nodeMgr.Status()
+	a.log.Info("initial node state: %s pid=%d", initStatus.State, initStatus.PID)
 
 	// Start background goroutines
 	go a.safeGo("fillStagesInfo", errCh, func() { a.fillStagesInfo(ctx, nodeView, infoCh) })
@@ -104,6 +129,7 @@ func (a *App) Run(parent context.Context, infoCh <-chan *commands.StagesInfo, er
 	go a.safeGo("pollAlerts", errCh, func() { a.pollAlerts(ctx, nodeView.Alerts) })
 	go a.safeGo("pollLogTail", errCh, func() { a.pollLogTail(ctx, nodeView.LogTail) })
 	go a.safeGo("pollLogViewer", errCh, func() { a.pollLogViewer(ctx, logViewer) })
+	go a.safeGo("pollNodeStatus", errCh, func() { a.pollNodeStatus(ctx, nodeView.NodeControl) })
 
 	pages.AddPage(pageStart, startPage, true, true)
 	pages.AddPage(pageNodeInfo, nodeInfoPage, true, false)
@@ -113,28 +139,50 @@ func (a *App) Run(parent context.Context, infoCh <-chan *commands.StagesInfo, er
 		func(event *tcell.EventKey) *tcell.EventKey {
 			currentFront, _ := pages.GetFrontPage()
 
-			// --- Log viewer page input handling ---
-			if currentFront == pageLogs {
-				// When search bar is focused, let it handle all input except Escape.
-				if logViewer.IsSearching() {
-					if event.Key() == tcell.KeyEscape {
-						logViewer.DismissSearch()
-						a.tview.SetFocus(logViewer.Content())
-						return nil
-					}
-					if event.Key() == tcell.KeyEnter {
-						logViewer.DismissSearch()
-						a.tview.SetFocus(logViewer.Content())
-						return nil
-					}
-					return event // let InputField handle typing
-				}
-
-				switch {
-				case event.Key() == tcell.KeyCtrlC || event.Rune() == 'q':
-					cancel()
-					a.tview.Stop()
+			// --- Log viewer search mode: capture all input ---
+			if currentFront == pageLogs && logViewer.IsSearching() {
+				if event.Key() == tcell.KeyEscape {
+					logViewer.DismissSearch()
+					a.tview.SetFocus(logViewer.Content())
 					return nil
+				}
+				if event.Key() == tcell.KeyEnter {
+					logViewer.DismissSearch()
+					a.tview.SetFocus(logViewer.Content())
+					return nil
+				}
+				return event // let InputField handle typing
+			}
+
+			// --- Global keys (all pages) ---
+			switch {
+			case event.Key() == tcell.KeyCtrlC || event.Rune() == 'q':
+				cancel()
+				a.tview.Stop()
+				return nil
+
+			// Navigation: ◄ ► cycles through all pages including logs.
+			case event.Key() == tcell.KeyRight:
+				navigateToPage((currentPage + 1) % len(dashPages))
+				return nil
+			case event.Key() == tcell.KeyLeft:
+				navigateToPage((currentPage - 1 + len(dashPages)) % len(dashPages))
+				return nil
+
+			// Quick jump to logs page.
+			case event.Key() == tcell.KeyF2 || event.Rune() == 'L':
+				navigateToPage(logsPageIdx)
+				return nil
+
+			// Node toggle (works from any page).
+			case event.Rune() == 'R':
+				a.handleNodeToggle(ctx, pages, a.nodeMgr, nodeView.NodeControl, dashPages[currentPage])
+				return nil
+			}
+
+			// --- Log viewer page-specific keys ---
+			if currentFront == pageLogs {
+				switch {
 				case event.Key() == tcell.KeyEscape || event.Key() == tcell.KeyF1:
 					switchToDashboard()
 					return nil
@@ -143,26 +191,9 @@ func (a *App) Run(parent context.Context, infoCh <-chan *commands.StagesInfo, er
 					a.tview.SetFocus(logViewer.SearchBar())
 					return nil
 				}
-				// Remaining keys (1-4, Space, arrows) handled by content's InputCapture.
-				return event
+				// 1-4, Space, Up/Down handled by content's InputCapture.
 			}
 
-			// --- Dashboard pages input handling ---
-			switch {
-			case event.Key() == tcell.KeyCtrlC || event.Rune() == 'q':
-				cancel()
-				a.tview.Stop()
-			case event.Key() == tcell.KeyF2 || event.Rune() == 'L':
-				pages.SwitchToPage(pageLogs)
-				a.tview.SetFocus(logViewer.Content())
-				return nil
-			case event.Key() == tcell.KeyRight:
-				currentPage = (currentPage + 1) % len(dashPages)
-				pages.SwitchToPage(dashPages[currentPage])
-			case event.Key() == tcell.KeyLeft:
-				currentPage = (currentPage - 1 + len(dashPages)) % len(dashPages)
-				pages.SwitchToPage(dashPages[currentPage])
-			}
 			return event
 		}).Run(); err != nil {
 		return err
@@ -177,6 +208,7 @@ func (a *App) safeGo(name string, errCh chan error, fn func()) {
 		if r := recover(); r != nil {
 			msg := fmt.Sprintf("panic in %s: %v\n%s", name, r, debug.Stack())
 			a.writeCrashLog(msg)
+			a.log.Error("panic in %s: %v", name, r)
 			select {
 			case errCh <- fmt.Errorf("panic in %s: %v (see etui-crash.log)", name, r):
 			default:
@@ -265,6 +297,7 @@ func (a *App) handleErrors(ctx context.Context, errCh <-chan error, view *tview.
 				return
 			}
 			if err != nil {
+				a.log.Error("errCh: %v", err)
 				a.tview.QueueUpdateDraw(func() {
 					view.SetDynamicColors(true)
 					view.SetText(
@@ -449,6 +482,43 @@ func (a *App) pollLogViewer(ctx context.Context, viewer *widgets.LogViewerPage) 
 			lines := a.logTailer.Recent(logRingSize, viewer.FilterLevel())
 			a.tview.QueueUpdateDraw(func() {
 				viewer.UpdateContent(lines)
+			})
+		}
+	}
+}
+
+// pollNodeStatus periodically checks the node state and updates the widget.
+func (a *App) pollNodeStatus(ctx context.Context, view *widgets.NodeControlView) {
+	const pollInterval = 2 * time.Second
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	var lastVersion int64
+
+	// Initial render.
+	a.nodeMgr.DetectExternal()
+	status := a.nodeMgr.Status()
+	a.tview.QueueUpdateDraw(func() {
+		view.UpdateNodeStatus(status)
+	})
+	lastVersion = a.nodeMgr.Version()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			a.nodeMgr.DetectExternal()
+
+			v := a.nodeMgr.Version()
+			if v == lastVersion {
+				continue
+			}
+			lastVersion = v
+
+			status := a.nodeMgr.Status()
+			a.tview.QueueUpdateDraw(func() {
+				view.UpdateNodeStatus(status)
 			})
 		}
 	}

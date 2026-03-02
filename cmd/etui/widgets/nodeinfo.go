@@ -16,6 +16,7 @@ type NodeInfoView struct {
 	SystemHealth *SystemHealthView
 	Alerts       *AlertsView
 	LogTail      *LogTailView
+	NodeControl  *NodeControlView
 }
 
 // NewNodeInfoPage builds the node-info page layout and returns it with its backing view.
@@ -24,23 +25,25 @@ func NewNodeInfoPage(datadir string) (*tview.Flex, *NodeInfoView) {
 	logPath := filepath.Join(datadir, "logs", "erigon.log")
 
 	view := &NodeInfoView{
-		SyncStatus: NewSyncStatusView(),
-		Stages:     tview.NewTextView().SetDynamicColors(true),
-		DomainII:   tview.NewTextView().SetDynamicColors(true),
-		Clock:      tview.NewTextView().SetTextAlign(tview.AlignRight).SetDynamicColors(true),
-		Downloader: NewDownloaderView(),
-		Alerts:     NewAlertsView(),
-		LogTail:    NewLogTailView(logPath, 20),
+		SyncStatus:  NewSyncStatusView(),
+		Stages:      tview.NewTextView().SetDynamicColors(true),
+		DomainII:    tview.NewTextView().SetDynamicColors(true),
+		Clock:       tview.NewTextView().SetTextAlign(tview.AlignRight).SetDynamicColors(true),
+		Downloader:  NewDownloaderView(),
+		Alerts:      NewAlertsView(),
+		LogTail:     NewLogTailView(logPath, 20),
+		NodeControl: NewNodeControlView(),
 	}
 
 	sysHealthFlex, sysHealthView := NewSystemHealthWidget()
 	view.SystemHealth = sysHealthView
 
-	// Top: SyncStatus | Clock + Downloader
+	// Top: SyncStatus | Clock + NodeControl + Downloader
 	topPanel := tview.NewFlex().
 		AddItem(view.SyncStatus.TextView, 0, 1, false).
 		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
 			AddItem(view.Clock, 1, 1, false).
+			AddItem(view.NodeControl.TextView, 3, 0, false).
 			AddItem(view.Downloader.TextView, 0, 5, false), 0, 1, false)
 
 	// Middle: Stages | Domain/II
@@ -53,9 +56,9 @@ func NewNodeInfoPage(datadir string) (*tview.Flex, *NodeInfoView) {
 		AddItem(sysHealthFlex, 0, 1, false).
 		AddItem(view.Alerts.TextView, 0, 1, false)
 
-	// Layout: top(9) + middle(flex) + bottom(5) + log_tail(4)
+	// Layout: top(12) + middle(flex) + bottom(5) + log_tail(4)
 	flex := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(topPanel, 9, 1, false).
+		AddItem(topPanel, 12, 1, false).
 		AddItem(middlePanel, 0, 1, false).
 		AddItem(bottomPanel, 5, 0, false).
 		AddItem(view.LogTail.TextView, 4, 0, false)
