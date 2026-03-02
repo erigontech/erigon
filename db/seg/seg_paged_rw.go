@@ -265,10 +265,10 @@ func NewPagedWriter(ctx context.Context, parent CompressorI, compressionEnabled 
 		pageSize:           parent.GetValuesOnCompressedPage(),
 		compressionEnabled: compressionEnabled,
 		ctx:                ctx,
-		numWorkers:         workers, //TODO: accept it as a parameter in next PR
+		workers:            workers, //TODO: accept it as a parameter in next PR
 	}
 	if compressionEnabled && pw.pageSize > 1 {
-		if pw.numWorkers > 1 {
+		if pw.workers > 1 {
 			pw.initWorkers()
 		}
 	}
@@ -295,7 +295,7 @@ type PagedWriter struct {
 
 	pairs int
 
-	numWorkers      int
+	workers         int
 	workCh          chan *pageWorkItem
 	resultCh        chan *pageResult
 	wg              sync.WaitGroup      // tracks live worker goroutines
@@ -310,12 +310,12 @@ type PagedWriter struct {
 }
 
 func (c *PagedWriter) initWorkers() {
-	queueDepth := c.numWorkers * 2
+	queueDepth := c.workers * 2
 	c.workCh = make(chan *pageWorkItem, queueDepth)
 	c.resultCh = make(chan *pageResult, queueDepth)
 	c.pendingResults = make(map[int]*pageResult, queueDepth)
-	c.wg.Add(c.numWorkers)
-	for range c.numWorkers {
+	c.wg.Add(c.workers)
+	for range c.workers {
 		go c.compressionWorker()
 	}
 }
@@ -368,14 +368,14 @@ func (c *PagedWriter) writeInOrder() error {
 		delete(c.pendingResults, c.seqOut)
 		putPageResult(r)
 		c.seqOut++
-		if c.numWorkers > 1 {
+		if c.workers > 1 {
 			c.pagesCompressed++
 		}
 	}
 }
 
 func (c *PagedWriter) Empty() bool              { return c.pairs == 0 }
-func (c *PagedWriter) IsAsyncCompression() bool { return c.numWorkers > 1 }
+func (c *PagedWriter) IsAsyncCompression() bool { return c.workers > 1 }
 func (c *PagedWriter) PagesCompressed() int     { return c.pagesCompressed }
 func (c *PagedWriter) Close() {
 	c.parent.Close()
@@ -410,7 +410,7 @@ func (c *PagedWriter) writePage() error {
 	}
 
 	// Synchronous path (single-threaded or disabled workers)
-	if c.numWorkers <= 1 {
+	if c.workers <= 1 {
 		uncompressedPage, ok := c.bytesUncompressed()
 		c.resetPage()
 		if !ok {
@@ -496,7 +496,7 @@ func (c *PagedWriter) Flush() error {
 	if err := c.writePage(); err != nil {
 		return err
 	}
-	if c.numWorkers <= 1 {
+	if c.workers <= 1 {
 		c.resetPage()
 		return nil
 	}
