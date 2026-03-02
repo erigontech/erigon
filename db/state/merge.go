@@ -692,7 +692,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 			}
 		}
 		if i%1024 == 0 {
-			p.Processed.Add(1)
+			p.Processed.Store(i)
 		}
 		if keyBuf != nil {
 			// fmt.Printf("pput %x->%x\n", keyBuf, valBuf)
