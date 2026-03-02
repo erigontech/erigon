@@ -32,11 +32,9 @@ var (
 )
 
 type sd interface {
-	SetTxNum(blockNum uint64)
 	AsGetter(tx kv.TemporalTx) kv.TemporalGetter
 	AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel
 	StepSize() uint64
-	TxNum() uint64
 
 	Trace() bool
 	CommitmentCapture() bool
