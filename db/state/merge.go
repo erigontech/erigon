@@ -676,8 +676,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 				if mergeErr != nil {
 					return nil, fmt.Errorf("merge %s inverted index: %w", iit.ii.FilenameBase, mergeErr)
 				}
-				lastVal = merged.AppendBytes(seqBuf[:0])
-				seqBuf = lastVal
+				lastVal = merged.AppendBytes(lastVal[:0])
 			} else {
 				mergedOnce = true
 			}
