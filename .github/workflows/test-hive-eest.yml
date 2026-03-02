@@ -139,7 +139,7 @@ jobs:
         continue-on-error: true
       - name: Upload output log
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: hive-workspace-log-${{ matrix.sim }}
           path: hive/workspace/logs
