@@ -29,10 +29,12 @@ const SIMPLE_SEQUENCE_MAX_THRESHOLD = 16
 //
 // This is the "writer" counterpart of SequenceReader.
 type SequenceBuilder struct {
-	baseNum uint64
-	ef      *eliasfano32.EliasFano
-	it1     SequenceIterator
-	it2     SequenceIterator
+	baseNum    uint64
+	smallBuf   [SIMPLE_SEQUENCE_MAX_THRESHOLD]uint32 // rebased values for simple encoding (count <= 16)
+	smallCount uint8
+	rebasedEf  *eliasfano32.EliasFano // direct rebased EF for large sequences (count > 16)
+	it1        SequenceIterator
+	it2        SequenceIterator
 }
 
 // Creates a new builder. The builder is not meant to be reused. The construction
@@ -49,10 +51,15 @@ type SequenceBuilder struct {
 // count: this is the number of elements in the sequence, used in case of elias fano
 // maxOffset: this is maximum value in the sequence, used in case of elias fano
 func NewBuilder(baseNum, count, maxOffset uint64) *SequenceBuilder {
-	return &SequenceBuilder{
-		baseNum: baseNum,
-		ef:      eliasfano32.NewEliasFano(count, maxOffset),
+	if count > SIMPLE_SEQUENCE_MAX_THRESHOLD {
+		// For large sequences, target rebased EF directly. AddOffset subtracts baseNum
+		// on the fly, so AppendBytes can serialize without a second pass.
+		return &SequenceBuilder{
+			baseNum:   baseNum,
+			rebasedEf: eliasfano32.NewEliasFano(count, maxOffset-baseNum),
+		}
 	}
+	return &SequenceBuilder{baseNum: baseNum}
 }
 
 // Reset reinitializes the builder for a new sequence, reusing the existing object
@@ -60,49 +67,43 @@ func NewBuilder(baseNum, count, maxOffset uint64) *SequenceBuilder {
 // Same parameter semantics as NewBuilder.
 func (b *SequenceBuilder) Reset(baseNum, count, maxOffset uint64) {
 	b.baseNum = baseNum
-	if b.ef != nil {
-		b.ef.ResetForWrite(count, maxOffset)
+	if b.rebasedEf != nil {
+		b.rebasedEf.ResetForWrite(count, maxOffset)
 	} else {
-		b.ef = eliasfano32.NewEliasFano(count, maxOffset)
+		b.rebasedEf = eliasfano32.NewEliasFano(count, maxOffset)
 	}
 }
 
 func (b *SequenceBuilder) AddOffset(offset uint64) {
-	// TODO: write offset already subtracting baseNum now that PlainEF is gone
-	b.ef.AddOffset(offset)
+	if b.rebasedEf != nil {
+		b.rebasedEf.AddOffset(offset - b.baseNum)
+		return
+	}
+	b.smallBuf[b.smallCount] = uint32(offset - b.baseNum)
+	b.smallCount++
 }
 
 func (b *SequenceBuilder) Build() {
-	b.ef.Build()
+	if b.rebasedEf != nil {
+		b.rebasedEf.Build()
+	}
 }
 
 func (b *SequenceBuilder) AppendBytes(buf []byte) []byte {
-	if b.ef.Count() <= SIMPLE_SEQUENCE_MAX_THRESHOLD {
-		return b.simpleEncoding(buf)
+	if b.rebasedEf != nil {
+		buf = append(buf, byte(RebasedEliasFano))
+		return b.rebasedEf.AppendBytes(buf)
 	}
-
-	return b.rebasedEliasFano(buf)
+	return b.simpleEncoding(buf)
 }
 
 func (b *SequenceBuilder) simpleEncoding(buf []byte) []byte {
 	// Simple encoding type + size: [0x80, 0x8F]
-	count := b.ef.Count()
-	enc := byte(count-1) & byte(0b00001111)
-	enc |= byte(SimpleEncoding)
+	enc := (b.smallCount-1)&0x0F | byte(SimpleEncoding)
 	buf = append(buf, enc)
 
-	// Encode elems
-	var bn [4]byte
-	for it := b.ef.Iterator(); it.HasNext(); {
-		n, err := it.Next()
-		if err != nil {
-			// TODO: err
-			panic(err)
-		}
-		n -= b.baseNum
-
-		binary.BigEndian.PutUint32(bn[:], uint32(n))
-		buf = append(buf, bn[:]...)
+	for _, v := range b.smallBuf[:b.smallCount] {
+		buf = binary.BigEndian.AppendUint32(buf, v)
 	}
 
 	return buf
@@ -131,22 +132,4 @@ func (b *SequenceBuilder) Merge(s1, s2 *SequenceReader, outBaseNum uint64) error
 	}
 	b.Build()
 	return nil
-}
-
-func (b *SequenceBuilder) rebasedEliasFano(buf []byte) []byte {
-	// Reserved encoding type 0x90 == rebased elias fano
-	buf = append(buf, byte(RebasedEliasFano))
-
-	// Rebased ef
-	rbef := eliasfano32.NewEliasFano(b.ef.Count(), b.ef.Max()-b.baseNum)
-	for it := b.ef.Iterator(); it.HasNext(); {
-		n, err := it.Next()
-		if err != nil {
-			panic(err)
-		}
-
-		rbef.AddOffset(n - b.baseNum)
-	}
-	rbef.Build()
-	return rbef.AppendBytes(buf)
 }

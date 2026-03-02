@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"path"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -1101,13 +1100,10 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step kv.Step, coll Inve
 	}
 
 	{
-		p := ps.AddNew(path.Base(coll.iiPath), 1)
 		if err = coll.writer.Compress(); err != nil {
-			ps.Delete(p)
 			return InvertedFiles{}, fmt.Errorf("compress %s: %w", ii.FilenameBase, err)
 		}
 		coll.Close()
-		ps.Delete(p)
 	}
 
 	if decomp, err = seg.NewDecompressor(coll.iiPath); err != nil {
