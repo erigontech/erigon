@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -125,6 +126,38 @@ func StageLoop(
 	}
 }
 
+func rebuildMaxTxNums(ctx context.Context, tx kv.RwTx, blockReader services.FullBlockReader, logger log.Logger) error {
+	if err := tx.ClearTable(kv.MaxTxNum); err != nil {
+		return fmt.Errorf("clear MaxTxNum: %w", err)
+	}
+	var lastBlockNum uint64
+	if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txCount uint64) error {
+		if baseTxNum+txCount == 0 {
+			return nil
+		}
+		maxTxNum := baseTxNum + txCount - 1
+		if err := rawdbv3.TxNums.Append(tx, blockNum, maxTxNum); err != nil {
+			return fmt.Errorf("append blockNum=%d maxTxNum=%d: %w", blockNum, maxTxNum, err)
+		}
+		lastBlockNum = blockNum
+		return nil
+	}); err != nil {
+		return fmt.Errorf("iterate frozen bodies: %w", err)
+	}
+	frozenBlocks := blockReader.FrozenBlocks()
+	if frozenBlocks > 0 {
+		if err := rawdb.AppendCanonicalTxNums(tx, frozenBlocks+1); err != nil {
+			return fmt.Errorf("append canonical tx nums from block %d: %w", frozenBlocks+1, err)
+		}
+	} else {
+		if err := rawdb.AppendCanonicalTxNums(tx, 0); err != nil {
+			return fmt.Errorf("append canonical tx nums from block 0: %w", err)
+		}
+	}
+	logger.Info("[stageloop] rebuilt MaxTxNum index from frozen bodies", "frozenBlocks", frozenBlocks, "lastBlock", lastBlockNum)
+	return nil
+}
+
 func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader services.FullBlockReader, sync *stagedsync.Sync, hook *Hook, onlySnapDownload bool, logger log.Logger) error {
 	sawZeroBlocksTimes := 0
 	tx, err := db.BeginTemporalRw(ctx)
@@ -144,6 +177,9 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 
 	// after StageSnapshots (files downloading): if domains are ahead of block files, then nothing to execute.
 	if execctx.IsDomainAheadOfBlocks(ctx, tx, logger) {
+		if err := rebuildMaxTxNums(ctx, tx, blockReader, logger); err != nil {
+			return err
+		}
 		return tx.Commit()
 	}
 
@@ -236,6 +272,13 @@ func StageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sync *stagedsyn
 	for hasMore {
 		err = db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
 			sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+			if err != nil && errors.Is(err, commitmentdb.ErrBehindCommitment) {
+				logger.Warn("[stageloop] TxNums index behind commitment, rebuilding from frozen bodies", "err", err)
+				if rebuildErr := rebuildMaxTxNums(ctx, tx, blockReader, logger); rebuildErr != nil {
+					return rebuildErr
+				}
+				sd, err = execctx.NewSharedDomains(ctx, tx, logger)
+			}
 			if err != nil {
 				return err
 			}

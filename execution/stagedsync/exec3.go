@@ -42,6 +42,7 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -109,6 +110,38 @@ func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms
 	return inputTxNum, maxTxNum, offsetFromBlockBeginning, nil
 }
 
+func rebuildMaxTxNumFromFrozenBodies(ctx context.Context, tx kv.RwTx, cfg ExecuteBlockCfg, logger log.Logger) error {
+	if err := tx.ClearTable(kv.MaxTxNum); err != nil {
+		return fmt.Errorf("clear MaxTxNum: %w", err)
+	}
+	var count uint64
+	if err := cfg.blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txCount uint64) error {
+		if baseTxNum+txCount == 0 {
+			return nil
+		}
+		maxTxNum := baseTxNum + txCount - 1
+		if err := rawdbv3.TxNums.Append(tx, blockNum, maxTxNum); err != nil {
+			return fmt.Errorf("append blockNum=%d maxTxNum=%d: %w", blockNum, maxTxNum, err)
+		}
+		count = blockNum
+		return nil
+	}); err != nil {
+		return fmt.Errorf("iterate frozen bodies: %w", err)
+	}
+	frozenBlocks := cfg.blockReader.FrozenBlocks()
+	if frozenBlocks > 0 {
+		if err := rawdb.AppendCanonicalTxNums(tx, frozenBlocks+1); err != nil {
+			return fmt.Errorf("append canonical tx nums from block %d: %w", frozenBlocks+1, err)
+		}
+	} else {
+		if err := rawdb.AppendCanonicalTxNums(tx, 0); err != nil {
+			return fmt.Errorf("append canonical tx nums from block 0: %w", err)
+		}
+	}
+	logger.Info("[exec] rebuilt MaxTxNum index from frozen bodies", "frozenBlocks", frozenBlocks, "indexed", count)
+	return nil
+}
+
 func nothingToExec(applyTx kv.Tx, txNumsReader rawdbv3.TxNumsReader, inputTxNum uint64) (bool, error) {
 	_, lastTxNum, err := txNumsReader.Last(applyTx)
 	if err != nil {
@@ -131,6 +164,13 @@ func ExecV3(ctx context.Context,
 	hooks := cfg.vmConfig.Tracer
 	applyTx := rwTx
 	_, _, err := doms.SeekCommitment(ctx, applyTx)
+	if err != nil && errors.Is(err, commitmentdb.ErrBehindCommitment) {
+		logger.Warn("[exec] TxNums index behind commitment, rebuilding from frozen bodies", "err", err)
+		if err := rebuildMaxTxNumFromFrozenBodies(ctx, applyTx, cfg, logger); err != nil {
+			return fmt.Errorf("failed to rebuild MaxTxNum index: %w", err)
+		}
+		_, _, err = doms.SeekCommitment(ctx, applyTx)
+	}
 	if err != nil {
 		return err
 	}
