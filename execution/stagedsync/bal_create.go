@@ -42,6 +42,17 @@ func CreateBAL(blockNum uint64, txIO *state.VersionedIO, dataDir string) types.B
 		})
 
 		writes := txIO.WriteSet(txIndex)
+		// Sort writes by (Address, Path, Key) to ensure deterministic
+		// processing order regardless of Go map iteration order.
+		sort.Slice(writes, func(i, j int) bool {
+			if c := writes[i].Address.Cmp(writes[j].Address); c != 0 {
+				return c < 0
+			}
+			if writes[i].Path != writes[j].Path {
+				return writes[i].Path < writes[j].Path
+			}
+			return writes[i].Key.Cmp(writes[j].Key) < 0
+		})
 		// First pass: apply SelfDestructPath writes so the selfDestructed flag
 		// is up-to-date before balance/nonce/code writes are processed.
 		// The write slice order is non-deterministic, and a SelfDestructPath=false
