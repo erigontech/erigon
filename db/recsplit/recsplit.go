@@ -1274,6 +1274,10 @@ func (rs *RecSplit) buildWithWorkers(ctx context.Context) error {
 		workerScratches[i] = newWorkerScratch(rs)
 		freeScratchCh <- workerScratches[i]
 	}
+	// taskCh capacity matches the scratch pool size: the same N scratch objects circulate
+	// as both pool items and task payloads, so taskCh can never hold more than N items.
+	// To allow double-buffering (producer assembles bucket N+1 while workers process N),
+	// increase both freeScratchCh and taskCh to numWorkers*2.
 	taskCh := make(chan *recsplitScratch, numWorkers)
 	resultCh := make(chan *bucketResult, numWorkers*2)
 
