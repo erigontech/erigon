@@ -727,7 +727,7 @@ func grpcSentryServer(ctx context.Context, sentryAddr string, ss *GrpcServer, he
 	ss.logger.Info("Starting Sentry gRPC server", "on", sentryAddr)
 	listenConfig := net.ListenConfig{
 		Control: func(network, address string, _ syscall.RawConn) error {
-			log.Info("Sentry gRPC received connection", "via", network, "from", address)
+			log.Info("[p2p] Sentry gRPC received connection", "via", network, "from", address)
 			return nil
 		},
 	}
