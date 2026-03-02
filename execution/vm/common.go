@@ -45,14 +45,14 @@ func CheckMaxInitCodeSize(IsAmsterdam, IsShanghai bool, size uint64) error {
 }
 
 // CheckMaxCodeSize checks the size of contract code against the protocol-defined limit.
-func CheckMaxCodeSize(rules *chain.Rules, size uint64) error {
+func CheckMaxCodeSize(rules *chain.Rules, maxCodeSize, size uint64) error {
 	if rules.IsAmsterdam {
 		if size > params.MaxCodeSizeAmsterdam {
 			return fmt.Errorf("%w: code size %v limit %v", ErrMaxCodeSizeExceeded, size, params.MaxCodeSizeAmsterdam)
 		}
 	} else if rules.IsSpuriousDragon {
-		if size > params.MaxCodeSize {
-			return fmt.Errorf("%w: code size %v limit %v", ErrMaxCodeSizeExceeded, size, params.MaxCodeSize)
+		if size > maxCodeSize {
+			return fmt.Errorf("%w: code size %v limit %v", ErrMaxCodeSizeExceeded, size, maxCodeSize)
 		}
 	}
 	return nil
