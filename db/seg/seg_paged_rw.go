@@ -24,6 +24,8 @@ import (
 	"io"
 	"sync"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/compress"
 )
@@ -43,8 +45,13 @@ func returnIfNotNil(item *pageWorkItem) {
 	}
 }
 
-func getPageResult() *pageResult  { return pageResultPool.Get().(*pageResult) }
-func putPageResult(r *pageResult) { pageResultPool.Put(r) }
+func getPageResult() *pageResult { return pageResultPool.Get().(*pageResult) }
+func putPageResult(r *pageResult) {
+	r.seq = 0
+	r.data = r.data[:0]
+	r.err = nil
+	pageResultPool.Put(r)
+}
 
 func GetFromPage(key, compressedPage []byte, compressionBuf []byte, compressionEnabled bool) (v []byte, compressionBufOut []byte) {
 	var err error
@@ -298,12 +305,12 @@ type PagedWriter struct {
 	numWorkers      int
 	workCh          chan *pageWorkItem
 	resultCh        chan *pageResult
-	wg              sync.WaitGroup      // tracks live worker goroutines
+	eg              *errgroup.Group     // tracks live worker goroutines; cancels all on first error
 	seqIn           int                 // next seq to assign to work item
 	seqOut          int                 // next seq to write to parent
 	workersShutdown bool                // tracks if workers have been shut down
 	pendingResults  map[int]*pageResult // out-of-order results waiting for seqOut
-	ctx             context.Context     // optional context for cancellation
+	ctx             context.Context     // caller context for cancellation
 
 	// Metrics (optional, for diagnostics and testing)
 	pagesCompressed int // number of pages processed through workers
@@ -314,30 +321,28 @@ func (c *PagedWriter) initWorkers() {
 	c.workCh = make(chan *pageWorkItem, queueDepth)
 	c.resultCh = make(chan *pageResult, queueDepth)
 	c.pendingResults = make(map[int]*pageResult, queueDepth)
-	c.wg.Add(c.numWorkers)
+	var egCtx context.Context
+	c.eg, egCtx = errgroup.WithContext(c.ctx)
 	for range c.numWorkers {
-		go c.compressionWorker()
+		c.eg.Go(func() error { return c.compressionWorker(egCtx) })
 	}
 }
 
-func (c *PagedWriter) compressionWorker() {
-	defer c.wg.Done()
-
+func (c *PagedWriter) compressionWorker(ctx context.Context) error {
 	processItem := func(item *pageWorkItem) {
 		defer pageWorkItemPool.Put(item)
 
 		result := getPageResult()
 		result.seq = item.seq
-		result.err = nil
 
 		// Compress directly into result.data (no extra copy, each result owns its buffer)
-		result.data, _ = compress.EncodeZstdIfNeed(result.data[:0], item.uncompressedData, c.compressionEnabled)
+		_, result.data = compress.EncodeZstdIfNeed(result.data[:0], item.uncompressedData, c.compressionEnabled)
 
 		// Send result, respecting context cancellation
 		select {
 		case c.resultCh <- result:
-		case <-c.ctx.Done():
-			putPageResult(result) // return result to pool if context cancelled
+		case <-ctx.Done():
+			putPageResult(result)
 		}
 	}
 
@@ -345,12 +350,12 @@ func (c *PagedWriter) compressionWorker() {
 		select {
 		case item, ok := <-c.workCh:
 			if !ok {
-				return // channel closed
+				return nil // channel closed
 			}
 			processItem(item)
 
-		case <-c.ctx.Done():
-			return // context cancelled
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
 }
@@ -508,7 +513,7 @@ func (c *PagedWriter) Flush() error {
 		c.workersShutdown = true
 	}
 	defer func() {
-		c.wg.Wait() // ensure all worker goroutines have exited, even on error
+		c.eg.Wait() //nolint:errcheck // ensure all worker goroutines have exited, even on error
 		c.resetPage()
 	}()
 
@@ -520,10 +525,10 @@ func (c *PagedWriter) Flush() error {
 				return err
 			}
 		case <-c.ctx.Done():
-			return c.ctx.Err()
+			return c.eg.Wait()
 		}
 	}
-	return nil
+	return c.eg.Wait()
 }
 
 func (c *PagedWriter) bytesUncompressed() (wholePage []byte, notEmpty bool) {
