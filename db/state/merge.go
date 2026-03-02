@@ -807,7 +807,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 			comp.DisableFsync()
 		}
 
-		pagedWr := ht.dataWriter(comp)
+		pagedWr := ht.dataWriter(ctx, comp)
 
 		cnt := 0
 		for _, item := range indexFiles {
