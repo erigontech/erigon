@@ -388,7 +388,7 @@ func (db *DB) deleteRange(prefix []byte) {
 		}
 		return nil
 	}); err != nil {
-		log.Warn("nodeDB.deleteRange failed", "err", err)
+		log.Warn("[p2p] nodeDB.deleteRange failed", "err", err)
 	}
 }
 
@@ -484,7 +484,7 @@ func (db *DB) expireNodes() {
 		}
 		return nil
 	}); err != nil {
-		log.Warn("nodeDB.expireNodes failed", "err", err)
+		log.Warn("[p2p] nodeDB.expireNodes failed", "err", err)
 	}
 	for _, td := range toDelete {
 		db.deleteRange(td)
@@ -634,7 +634,7 @@ func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
 		}
 		return nil
 	}); err != nil && !errors.Is(err, context.Canceled) {
-		log.Warn("nodeDB.QuerySeeds failed", "err", err)
+		log.Warn("[p2p] nodeDB.QuerySeeds failed", "err", err)
 	}
 	return nodes
 }

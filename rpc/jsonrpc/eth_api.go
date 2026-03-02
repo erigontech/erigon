@@ -51,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/rpc/ethapi"
 	ethapi2 "github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/filters"
+	"github.com/erigontech/erigon/rpc/gasprice"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -96,6 +97,7 @@ type EthAPI interface {
 	GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error)
 	GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Uint64, error)
 	GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error)
+	GetStorageValues(ctx context.Context, requests map[common.Address][]common.Hash, blockNrOrHash rpc.BlockNumberOrHash) (map[common.Address][]hexutil.Bytes, error)
 	GetCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error)
 
 	// System related (see ./eth_system.go)
@@ -421,6 +423,7 @@ type APIImpl struct {
 	txPool                      txpoolproto.TxpoolClient
 	mining                      txpoolproto.MiningClient
 	gasCache                    *GasPriceCache
+	feeHistoryCache             *gasprice.FeeHistoryCache
 	db                          kv.TemporalRoDB
 	GasCap                      uint64
 	FeeCap                      float64
@@ -459,6 +462,7 @@ func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPo
 		txPool:                      txPool,
 		mining:                      mining,
 		gasCache:                    NewGasPriceCache(),
+		feeHistoryCache:             gasprice.NewFeeHistoryCache(),
 		GasCap:                      gascap,
 		FeeCap:                      cfg.FeeCap,
 		AllowUnprotectedTxs:         cfg.AllowUnprotectedTxs,

@@ -19,6 +19,7 @@ package state
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -771,6 +772,25 @@ func (files visibleFiles) VisibleFiles() []VisibleFile {
 		res = append(res, file)
 	}
 	return res
+}
+
+// dirListing holds a directory path and its pre-read entry names.
+type dirListing struct {
+	dir   string
+	names []string
+}
+
+// readDirNames reads a directory once and returns a dirListing for reuse.
+func readDirNames(dir string) dirListing {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		panic(err)
+	}
+	names := make([]string, len(entries))
+	for i, e := range entries {
+		names[i] = e.Name()
+	}
+	return dirListing{dir: dir, names: names}
 }
 
 // fileItemsWithMissedAccessors returns list of files with missed accessors

@@ -351,6 +351,7 @@ func unwindExec3State(ctx context.Context,
 	}
 
 	sd.Unwind(txUnwindTo, changeset)
+	sd.SetTxNum(txUnwindTo)
 	return nil
 }
 
