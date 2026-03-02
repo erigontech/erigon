@@ -29,9 +29,10 @@ const SIMPLE_SEQUENCE_MAX_THRESHOLD = 16
 //
 // This is the "writer" counterpart of SequenceReader.
 type SequenceBuilder struct {
-	baseNum   uint64
-	ef        *eliasfano32.EliasFano // intermediate EF for simple encoding (count <= 16)
-	rebasedEf *eliasfano32.EliasFano // direct rebased EF for large sequences (count > 16)
+	baseNum    uint64
+	smallBuf   [SIMPLE_SEQUENCE_MAX_THRESHOLD]uint32 // rebased values for simple encoding (count <= 16)
+	smallCount uint8
+	rebasedEf  *eliasfano32.EliasFano // direct rebased EF for large sequences (count > 16)
 }
 
 // Creates a new builder. The builder is not meant to be reused. The construction
@@ -56,10 +57,7 @@ func NewBuilder(baseNum, count, maxOffset uint64) *SequenceBuilder {
 			rebasedEf: eliasfano32.NewEliasFano(count, maxOffset-baseNum),
 		}
 	}
-	return &SequenceBuilder{
-		baseNum: baseNum,
-		ef:      eliasfano32.NewEliasFano(count, maxOffset),
-	}
+	return &SequenceBuilder{baseNum: baseNum}
 }
 
 func (b *SequenceBuilder) AddOffset(offset uint64) {
@@ -67,15 +65,15 @@ func (b *SequenceBuilder) AddOffset(offset uint64) {
 		b.rebasedEf.AddOffset(offset - b.baseNum)
 		return
 	}
-	b.ef.AddOffset(offset)
+	b.smallBuf[b.smallCount] = uint32(offset - b.baseNum)
+	b.smallCount++
 }
 
 func (b *SequenceBuilder) Build() {
 	if b.rebasedEf != nil {
 		b.rebasedEf.Build()
-		return
 	}
-	b.ef.Build()
+	// small path: no-op
 }
 
 func (b *SequenceBuilder) AppendBytes(buf []byte) []byte {
@@ -88,22 +86,12 @@ func (b *SequenceBuilder) AppendBytes(buf []byte) []byte {
 
 func (b *SequenceBuilder) simpleEncoding(buf []byte) []byte {
 	// Simple encoding type + size: [0x80, 0x8F]
-	count := b.ef.Count()
-	enc := byte(count-1) & byte(0b00001111)
-	enc |= byte(SimpleEncoding)
+	enc := (b.smallCount-1)&0x0F | byte(SimpleEncoding)
 	buf = append(buf, enc)
 
-	// Encode elems
 	var bn [4]byte
-	for it := b.ef.Iterator(); it.HasNext(); {
-		n, err := it.Next()
-		if err != nil {
-			// TODO: err
-			panic(err)
-		}
-		n -= b.baseNum
-
-		binary.BigEndian.PutUint32(bn[:], uint32(n))
+	for _, v := range b.smallBuf[:b.smallCount] {
+		binary.BigEndian.PutUint32(bn[:], v)
 		buf = append(buf, bn[:]...)
 	}
 
