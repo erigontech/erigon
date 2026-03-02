@@ -33,6 +33,8 @@ type SequenceBuilder struct {
 	smallBuf   [SIMPLE_SEQUENCE_MAX_THRESHOLD]uint32 // rebased values for simple encoding (count <= 16)
 	smallCount uint8
 	rebasedEf  *eliasfano32.EliasFano // direct rebased EF for large sequences (count > 16)
+	it1        SequenceIterator
+	it2        SequenceIterator
 }
 
 // Creates a new builder. The builder is not meant to be reused. The construction
@@ -105,4 +107,29 @@ func (b *SequenceBuilder) simpleEncoding(buf []byte) []byte {
 	}
 
 	return buf
+}
+
+// Merge merges s1 and s2 into this builder, resetting it first.
+// s1 and s2 must be pre-sorted with s1.Max() <= s2.Min().
+// Call AppendBytes on the builder to serialize.
+func (b *SequenceBuilder) Merge(s1, s2 *SequenceReader, outBaseNum uint64) error {
+	b.Reset(outBaseNum, s1.Count()+s2.Count(), s2.Max())
+	b.it1.Reset(s1, 0)
+	b.it2.Reset(s2, 0)
+	for b.it1.HasNext() {
+		v, err := b.it1.Next()
+		if err != nil {
+			return err
+		}
+		b.AddOffset(v)
+	}
+	for b.it2.HasNext() {
+		v, err := b.it2.Next()
+		if err != nil {
+			return err
+		}
+		b.AddOffset(v)
+	}
+	b.Build()
+	return nil
 }
