@@ -73,7 +73,6 @@ func (b *SequenceBuilder) Build() {
 	if b.rebasedEf != nil {
 		b.rebasedEf.Build()
 	}
-	// small path: no-op
 }
 
 func (b *SequenceBuilder) AppendBytes(buf []byte) []byte {
@@ -89,10 +88,8 @@ func (b *SequenceBuilder) simpleEncoding(buf []byte) []byte {
 	enc := (b.smallCount-1)&0x0F | byte(SimpleEncoding)
 	buf = append(buf, enc)
 
-	var bn [4]byte
 	for _, v := range b.smallBuf[:b.smallCount] {
-		binary.BigEndian.PutUint32(bn[:], v)
-		buf = append(buf, bn[:]...)
+		buf = binary.BigEndian.AppendUint32(buf, v)
 	}
 
 	return buf
