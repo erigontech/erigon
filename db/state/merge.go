@@ -683,15 +683,17 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 				mergedOnce = true
 			}
 			// fmt.Printf("multi-way %s [%d] %x\n", ii.KeysTable, ci1.endTxNum, ci1.key)
-			i++
 			if ci1.kvReader.HasNext() {
 				ci1.key, _ = ci1.kvReader.Next(ci1.key[:0])
 				ci1.val, _ = ci1.kvReader.Next(ci1.val[:0])
+				i += 2
 				// fmt.Printf("heap next push %s [%d] %x\n", ii.KeysTable, ci1.endTxNum, ci1.key)
 				heap.Push(&cp, ci1)
 			}
 		}
-		p.Processed.Store(i)
+		if i%1024 == 0 {
+			p.Processed.Add(1)
+		}
 		if keyBuf != nil {
 			// fmt.Printf("pput %x->%x\n", keyBuf, valBuf)
 			if _, err = write.Write(keyBuf); err != nil {
@@ -798,7 +800,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		for _, item := range indexFiles {
 			cnt += item.decompressor.Count()
 		}
-		p := ps.AddNew(path.Base(datPath), uint64(cnt))
+		p := ps.AddNew(path.Base(datPath), uint64(cnt/2))
 		defer ps.Delete(p)
 
 		var cp CursorHeap
@@ -845,7 +847,6 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		var lastKey, valBuf, histKeyBuf []byte
 		seq := &multiencseq.SequenceReader{}
 		ss := &multiencseq.SequenceIterator{}
-		i := uint64(0)
 		for cp.Len() > 0 {
 			lastKey = append(lastKey[:0], cp[0].key...)
 			// Advance all the items that have this key (including the top)
@@ -876,14 +877,13 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				}
 
 				// fmt.Printf("fput '%x'->%x\n", lastKey, ci1.val)
-				i++
+				p.Processed.Add(1)
 				if ci1.kvReader.HasNext() {
 					ci1.key, _ = ci1.kvReader.Next(ci1.key[:0])
 					ci1.val, _ = ci1.kvReader.Next(ci1.val[:0])
 					heap.Push(&cp, ci1)
 				}
 			}
-			p.Processed.Store(i)
 		}
 		if err := pagedWr.Compress(); err != nil {
 			return nil, nil, err

@@ -257,7 +257,7 @@ func (iit *InvertedIndexRoTx) deduplicateFiles(ctx context.Context, files []*Fil
 	for _, item := range files {
 		cnt += item.decompressor.Count()
 	}
-	p := ps.AddNew(path.Base(datPath), uint64(cnt))
+	p := ps.AddNew(path.Base(datPath), uint64(cnt/2))
 	defer ps.Delete(p)
 
 	var cp CursorHeap
@@ -340,15 +340,17 @@ func (iit *InvertedIndexRoTx) deduplicateFiles(ctx context.Context, files []*Fil
 				mergedOnce = true
 			}
 			// fmt.Printf("multi-way %s [%d] %x\n", ii.KeysTable, ci1.endTxNum, ci1.key)
-			i++
 			if ci1.kvReader.HasNext() {
 				ci1.key, _ = ci1.kvReader.Next(ci1.key[:0])
 				ci1.val, _ = ci1.kvReader.Next(ci1.val[:0])
+				i += 2
 				// fmt.Printf("heap next push %s [%d] %x\n", ii.KeysTable, ci1.endTxNum, ci1.key)
 				heap.Push(&cp, ci1)
 			}
 		}
-		p.Processed.Store(i)
+		if i%1024 == 0 {
+			p.Processed.Store(i)
+		}
 		if keyBuf != nil {
 			// fmt.Printf("pput %x->%x\n", keyBuf, valBuf)
 			if _, err = write.Write(keyBuf); err != nil {
