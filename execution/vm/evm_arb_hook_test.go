@@ -5,27 +5,27 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/arb/multigas"
-	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/vm/evmtypes"
-	arbtypes "github.com/erigontech/erigon/execution/types"
-	"github.com/stretchr/testify/require"
-
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/chain"
+	arbtypes "github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 )
 
 func newTestEVM() *EVM {
 	blockCtx := evmtypes.BlockContext{
 		BlockNumber: 100,
 		Time:        1000,
-		Coinbase:    common.HexToAddress("0xdead"),
+		Coinbase:    accounts.InternAddress(common.HexToAddress("0xdead")),
 		GasLimit:    30_000_000,
 		GetHash: func(n uint64) (common.Hash, error) {
 			return common.Hash{byte(n)}, nil
 		},
 	}
 	txCtx := evmtypes.TxContext{
-		GasPrice: uint256.NewInt(1),
+		GasPrice: *uint256.NewInt(1),
 	}
 	cfg := &chain.Config{
 		ChainID: big.NewInt(1),
@@ -106,7 +106,7 @@ func TestDefaultTxProcessor_GasPriceOp(t *testing.T) {
 	evm := newTestEVM()
 	p := DefaultTxProcessor{evm: evm}
 	price := p.GasPriceOp(evm)
-	require.Equal(t, evm.GasPrice, price)
+	require.Equal(t, &evm.GasPrice, price)
 }
 
 func TestDefaultTxProcessor_MsgIsNonMutating(t *testing.T) {
@@ -156,7 +156,7 @@ func TestExecutionResult_ArbitrumFields(t *testing.T) {
 	mg := multigas.ComputationGas(500)
 	deployed := common.HexToAddress("0xabcd")
 	result := &evmtypes.ExecutionResult{
-		GasUsed:          21000,
+		ReceiptGasUsed:   21000,
 		UsedMultiGas:     mg,
 		TopLevelDeployed: &deployed,
 		ScheduledTxes:    arbtypes.Transactions{},

@@ -5,11 +5,11 @@ import (
 
 	"github.com/erigontech/erigon/arb/multigas"
 	"github.com/erigontech/erigon/arb/osver"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/stretchr/testify/require"
-
-	"github.com/erigontech/erigon/common"
 )
 
 func arbRules(arbosVersion uint64) *chain.Rules {
@@ -25,7 +25,7 @@ func TestPrecompiles_NonArbitrum(t *testing.T) {
 	rules := &chain.Rules{IsArbitrum: false, IsCancun: true}
 	precompiles := Precompiles(rules)
 
-	_, ok := precompiles[common.BytesToAddress([]byte{1})]
+	_, ok := precompiles[accounts.InternAddress(common.BytesToAddress([]byte{1}))]
 	require.True(t, ok, "ecrecover should exist in standard precompiles")
 }
 
@@ -91,7 +91,7 @@ func TestRunPrecompiledContract_WithTracer(t *testing.T) {
 }
 
 func TestPrecompiledContractsP256Verify(t *testing.T) {
-	addr := common.BytesToAddress([]byte{0x01, 0x00})
+	addr := accounts.InternAddress(common.BytesToAddress([]byte{0x01, 0x00}))
 	p, ok := PrecompiledContractsP256Verify[addr]
 	require.True(t, ok)
 	require.NotNil(t, p)

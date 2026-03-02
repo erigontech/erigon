@@ -4,17 +4,20 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/arb/multigas"
-	"github.com/erigontech/erigon/execution/tracing"
-	"github.com/stretchr/testify/require"
-
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 )
 
 func newTestContract(gas uint64) *Contract {
-	caller := AccountRef(common.HexToAddress("0x1"))
-	addr := common.HexToAddress("0x2")
-	return NewContract(caller, addr, uint256.NewInt(0), gas, NewJumpDestCache(JumpDestCacheLimit))
+	caller := accounts.InternAddress(common.HexToAddress("0x1"))
+	addr := accounts.InternAddress(common.HexToAddress("0x2"))
+	coinbase := accounts.InternAddress(common.HexToAddress("0x0"))
+	c := NewContract(caller, addr, coinbase, *uint256.NewInt(0))
+	c.Gas = gas
+	return c
 }
 
 func TestUseMultiGas_TracksCorrectly(t *testing.T) {
@@ -70,7 +73,7 @@ func TestIsDelegateOrCallcode(t *testing.T) {
 	c := newTestContract(10000)
 	require.False(t, c.IsDelegateOrCallcode())
 
-	c.delegateOrCallcode = true
+	c.DelegateOrCallcode = true
 	require.True(t, c.IsDelegateOrCallcode())
 }
 
