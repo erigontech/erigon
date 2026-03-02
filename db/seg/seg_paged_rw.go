@@ -24,6 +24,7 @@ import (
 	"io"
 	"sync"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/compress"
 )
 
@@ -262,7 +263,7 @@ func NewPagedWriter(ctx context.Context, parent CompressorI, compressionEnabled 
 		pageSize:           parent.GetValuesOnCompressedPage(),
 		compressionEnabled: compressionEnabled,
 		ctx:                ctx,
-		numWorkers:         1,
+		numWorkers:         dbg.EnvInt("PAGED_WRITER_WORKERS", 1), //TODO: accept it as a parameter in next PR
 	}
 	if compressionEnabled && pw.pageSize > 1 {
 		if pw.numWorkers > 1 {
