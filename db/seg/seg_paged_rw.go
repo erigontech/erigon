@@ -24,7 +24,6 @@ import (
 	"io"
 	"sync"
 
-	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/db/compress"
 )
 
@@ -266,7 +265,6 @@ func NewPagedWriter(ctx context.Context, parent CompressorI, compressionEnabled 
 		numWorkers:         1,
 	}
 	if compressionEnabled && pw.pageSize > 1 {
-		pw.numWorkers = estimate.AlmostAllCPUs()
 		if pw.numWorkers > 1 {
 			pw.initWorkers()
 		}
