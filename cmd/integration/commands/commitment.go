@@ -52,6 +52,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/seg"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -385,23 +386,25 @@ func printCommitment(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 var cmdCommitmentPrintState = &cobra.Command{
 	Use:   "print-state",
 	Short: "Print all historical commitment state entries with block/tx numbers and root hashes",
-	Long: `Iterates over all commitment history files and prints every "state" key entry
-in human-readable form showing block number, transaction number, and state root hash.
+	Long: `Iterates over commitment history using the inverted index to find all txnums
+where the "state" key was written, then reads each historical value and prints
+block number, transaction number, state root hash, and trie state size.
 
 Examples:
   integration commitment print-state --chain=mainnet --datadir ~/data/eth-mainnet
   integration commitment print-state --datadir /path/to/datadir`,
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
+		ctx, _ := common.RootContext()
 
-		dirs, l, err := datadir.New(datadirCli).MustFlock()
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
 		if err != nil {
-			logger.Error("Opening Datadir", "error", err)
+			logger.Error("Opening DB", "error", err)
 			return
 		}
-		defer l.Unlock()
+		defer db.Close()
 
-		if err := printCommitmentState(dirs, logger); err != nil {
+		if err := printCommitmentState(ctx, db, logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -410,53 +413,53 @@ Examples:
 	},
 }
 
-func printCommitmentState(dirs datadir.Dirs, logger log.Logger) error {
-	history, err := dbstate.NewHistory(
-		statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).Hist,
-		config3.DefaultStepSize,
-		config3.DefaultStepsInFrozenFile,
-		dirs,
-		logger,
-	)
+func printCommitmentState(ctx context.Context, db kv.TemporalRwDB, logger log.Logger) error {
+	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to init commitment history: %w", err)
+		return fmt.Errorf("failed to begin temporal tx: %w", err)
 	}
-	if err := history.Scan(math.MaxUint64); err != nil {
-		return fmt.Errorf("failed to scan commitment history files: %w", err)
+	defer tx.Rollback()
+
+	// Use the inverted index to find all txnums where "state" key was written
+	timestamps, err := tx.IndexRange(kv.CommitmentHistoryIdx, commitmentdb.KeyCommitmentState, -1, -1, order.Asc, -1)
+	if err != nil {
+		return fmt.Errorf("failed to query commitment history index: %w", err)
 	}
 
-	roTx := history.BeginFilesRo()
-	defer roTx.Close()
-
-	stateKey := commitmentdb.KeyCommitmentState
 	count := 0
+	for timestamps.HasNext() {
+		txNum, err := timestamps.Next()
+		if err != nil {
+			return fmt.Errorf("failed to read next timestamp: %w", err)
+		}
 
-	err = roTx.HistoryDump(
-		-1, // fromTxNum: beginning
-		-1, // toTxNum: unlimited
-		&stateKey,
-		func(key []byte, txNum uint64, val []byte) {
-			count++
-			if len(val) < 18 {
-				fmt.Printf("historyTxNum=%d (invalid value: %d bytes)\n", txNum, len(val))
-				return
-			}
+		val, ok, err := tx.GetAsOf(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, txNum+1)
+		if err != nil {
+			fmt.Printf("txn: %d (GetAsOf error: %v)\n", txNum, err)
+			continue
+		}
+		if !ok || len(val) == 0 {
+			fmt.Printf("txn: %d (no value found)\n", txNum)
+			continue
+		}
 
-			encodedTxNum := binary.BigEndian.Uint64(val[0:8])
-			blockNum := binary.BigEndian.Uint64(val[8:16])
-			trieStateLen := binary.BigEndian.Uint16(val[16:18])
+		count++
+		if len(val) < 18 {
+			fmt.Printf("txn: %d (invalid value: %d bytes)\n", txNum, len(val))
+			continue
+		}
 
-			rootStr, err := commitment.HexTrieStateToShortString(val)
-			if err != nil {
-				fmt.Printf("block: %d txn: %d trieStateLen: %d (decode error: %v)\n",
-					blockNum, encodedTxNum, trieStateLen, err)
-				return
-			}
-			fmt.Printf("%s trieStateLen: %d\n", rootStr, trieStateLen)
-		},
-	)
-	if err != nil {
-		return fmt.Errorf("failed to dump commitment history: %w", err)
+		encodedTxNum := binary.BigEndian.Uint64(val[0:8])
+		blockNum := binary.BigEndian.Uint64(val[8:16])
+		trieStateLen := binary.BigEndian.Uint16(val[16:18])
+
+		rootStr, err := commitment.HexTrieStateToShortString(val)
+		if err != nil {
+			fmt.Printf("block: %d txn: %d trieStateLen: %d (decode error: %v)\n",
+				blockNum, encodedTxNum, trieStateLen, err)
+			continue
+		}
+		fmt.Printf("%s trieStateLen: %d\n", rootStr, trieStateLen)
 	}
 
 	fmt.Printf("\nTotal state entries: %d\n", count)
