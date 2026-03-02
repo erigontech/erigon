@@ -38,11 +38,14 @@ var (
 	pageResultPool   = sync.Pool{New: func() any { return &pageResult{} }}
 )
 
-// returnIfNotNil returns item to pool if it's not nil (helper for deferred cleanup)
-func returnIfNotNil(item *pageWorkItem) {
-	if item != nil {
-		pageWorkItemPool.Put(item)
+func getPageWorkItem() *pageWorkItem { return pageWorkItemPool.Get().(*pageWorkItem) }
+func putPageWorkItem(item *pageWorkItem) {
+	if item == nil {
+		return
 	}
+	item.seq = 0
+	item.uncompressedData = item.uncompressedData[:0]
+	pageWorkItemPool.Put(item)
 }
 
 func getPageResult() *pageResult { return pageResultPool.Get().(*pageResult) }
@@ -330,7 +333,7 @@ func (c *PagedWriter) initWorkers() {
 
 func (c *PagedWriter) compressionWorker(ctx context.Context) error {
 	processItem := func(item *pageWorkItem) {
-		defer pageWorkItemPool.Put(item)
+		defer putPageWorkItem(item)
 
 		result := getPageResult()
 		result.seq = item.seq
@@ -433,11 +436,11 @@ func (c *PagedWriter) writePage() error {
 	}
 
 	// Async path with parallel workers
-	item := pageWorkItemPool.Get().(*pageWorkItem)
+	item := getPageWorkItem()
 	sent := false
 	defer func() {
 		if !sent {
-			pageWorkItemPool.Put(item)
+			putPageWorkItem(item)
 		}
 	}()
 
@@ -514,6 +517,9 @@ func (c *PagedWriter) Flush() error {
 	}
 	defer func() {
 		c.eg.Wait() //nolint:errcheck // ensure all worker goroutines have exited, even on error
+		for _, r := range c.pendingResults {
+			putPageResult(r)
+		}
 		c.resetPage()
 	}()
 
