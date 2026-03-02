@@ -644,6 +644,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 	// (when CursorHeap cp is empty), there is a need to process the last pair `keyBuf=>valBuf`, because it was one step behind
 	var keyBuf, valBuf []byte
 	var lastKey, lastVal []byte
+	var seqBuf []byte
 	preSeq, mergeSeq := &multiencseq.SequenceReader{}, &multiencseq.SequenceReader{}
 	preIt, mergeIt := &multiencseq.SequenceIterator{}, &multiencseq.SequenceIterator{}
 	newSeq := &multiencseq.SequenceBuilder{}
@@ -663,7 +664,8 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 			newSeq.AddOffset(v)
 		}
 		newSeq.Build()
-		lastVal = newSeq.AppendBytes(nil)
+		lastVal = newSeq.AppendBytes(seqBuf[:0])
+		seqBuf = lastVal
 		var mergedOnce bool
 
 		// Advance all the items that have this key (including the top)
@@ -676,7 +678,8 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 				if mergeErr != nil {
 					return nil, fmt.Errorf("merge %s inverted index: %w", iit.ii.FilenameBase, mergeErr)
 				}
-				lastVal = merged.AppendBytes(nil)
+				lastVal = merged.AppendBytes(seqBuf[:0])
+				seqBuf = lastVal
 			} else {
 				mergedOnce = true
 			}
