@@ -10,7 +10,7 @@ type NodeInfoView struct {
 	Stages       *tview.TextView
 	DomainII     *tview.TextView
 	Clock        *tview.TextView
-	Downloader   *tview.TextView
+	Downloader   *DownloaderView
 	SystemHealth *SystemHealthView
 }
 
@@ -21,18 +21,17 @@ func NewNodeInfoPage() (*tview.Flex, *NodeInfoView) {
 		Stages:     tview.NewTextView().SetDynamicColors(true),
 		DomainII:   tview.NewTextView().SetDynamicColors(true),
 		Clock:      tview.NewTextView().SetTextAlign(tview.AlignRight).SetDynamicColors(true),
-		Downloader: tview.NewTextView().SetDynamicColors(true).SetText("downloader: waiting..."),
+		Downloader: NewDownloaderView(),
 	}
 
 	sysHealthFlex, sysHealthView := NewSystemHealthWidget()
 	view.SystemHealth = sysHealthView
 
-	view.Downloader.Box.SetBorder(true)
 	topPanel := tview.NewFlex().
 		AddItem(view.SyncStatus.TextView, 0, 1, false).
 		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
 			AddItem(view.Clock, 1, 1, false).
-			AddItem(view.Downloader, 0, 5, false), 0, 1, false)
+			AddItem(view.Downloader.TextView, 0, 5, false), 0, 1, false)
 
 	middlePanel := tview.NewFlex().
 		AddItem(view.Stages, 0, 1, false).

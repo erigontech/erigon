@@ -21,6 +21,7 @@ import (
 type App struct {
 	tview       *tview.Application
 	dp          *datasource.DownloaderPinger
+	dlTracker   *datasource.DownloaderTracker
 	sysColl     *datasource.SystemCollector
 	iopsTrack   *datasource.DiskIOPSTracker
 	syncTracker *datasource.SyncTracker
@@ -33,6 +34,7 @@ func New(datadir string) *App {
 		datadir:     datadir,
 		tview:       tview.NewApplication(),
 		dp:          datasource.NewDownloaderPinger(config.DefaultDownloaderURL),
+		dlTracker:   datasource.NewDownloaderTracker(),
 		sysColl:     datasource.NewSystemCollector(datadir),
 		iopsTrack:   datasource.NewDiskIOPSTracker(),
 		syncTracker: datasource.NewSyncTracker(),
@@ -200,11 +202,10 @@ func (a *App) handleErrors(ctx context.Context, errCh <-chan error, view *tview.
 	}
 }
 
-// pollDownloader polls the downloader API and renders progress as a text bar
-// directly in a tview.TextView, replacing the progressbar/v3 dependency.
+// pollDownloader polls the downloader API and renders progress with speed/ETA.
 // Transient HTTP errors trigger exponential backoff (up to 30s) rather than
 // a permanent exit, so the widget recovers once the downloader service starts.
-func (a *App) pollDownloader(ctx context.Context, view *tview.TextView, errCh chan error) {
+func (a *App) pollDownloader(ctx context.Context, view *widgets.DownloaderView, errCh chan error) {
 	const (
 		maxBackoff = 30 * time.Second
 		minBackoff = 500 * time.Millisecond
@@ -224,11 +225,9 @@ func (a *App) pollDownloader(ctx context.Context, view *tview.TextView, errCh ch
 			if ctx.Err() != nil {
 				return // shutting down
 			}
-			// Show the error in the widget and retry with backoff
 			errMsg := err.Error()
 			a.tview.QueueUpdateDraw(func() {
-				view.SetDynamicColors(true)
-				view.SetText(fmt.Sprintf("[yellow]Downloader:[-] retrying... (%s)", errMsg))
+				view.SetError(errMsg)
 			})
 			select {
 			case <-ctx.Done():
@@ -245,10 +244,9 @@ func (a *App) pollDownloader(ctx context.Context, view *tview.TextView, errCh ch
 		// Successful response — reset backoff
 		backoff = minBackoff
 
-		text := formatDownloadProgress(res.Complete, res.Total, res.Phase)
+		stats := a.dlTracker.Update(res)
 		a.tview.QueueUpdateDraw(func() {
-			view.SetDynamicColors(true)
-			view.SetText(text)
+			view.UpdateDownloader(stats)
 		})
 
 		select {
@@ -283,39 +281,4 @@ func (a *App) pollSystemHealth(ctx context.Context, view *widgets.SystemHealthVi
 			})
 		}
 	}
-}
-
-// formatDownloadProgress renders a simple text-based progress bar.
-func formatDownloadProgress(complete, total int, phase string) string {
-	if total <= 0 {
-		return "Downloading: waiting for torrents..."
-	}
-
-	if complete >= total {
-		label := "Download complete"
-		if phase != "" {
-			label = fmt.Sprintf("[green]%s[-]: complete", phase)
-		}
-		return label
-	}
-
-	pct := float64(complete) / float64(total) * 100
-	const barWidth = 30
-	filled := int(float64(barWidth) * float64(complete) / float64(total))
-	if filled > barWidth {
-		filled = barWidth
-	}
-	bar := ""
-	for i := 0; i < barWidth; i++ {
-		if i < filled {
-			bar += "█"
-		} else {
-			bar += "░"
-		}
-	}
-	label := "Downloading"
-	if phase != "" {
-		label = phase
-	}
-	return fmt.Sprintf("[yellow]%s[-] %s [cyan]%d/%d[-] (%.1f%%)", label, bar, complete, total, pct)
 }
