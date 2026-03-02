@@ -406,18 +406,13 @@ func (c *PagedWriter) writeInOrder() error {
 		if !ok {
 			return nil
 		}
-		if r.err != nil {
-			return r.err
-		}
 		if _, err := c.parent.Write(r.data); err != nil {
 			return err
 		}
 		delete(c.pendingResults, c.seqOut)
 		putPageResult(r)
 		c.seqOut++
-		if c.numWorkers > 1 {
-			c.pagesCompressed++
-		}
+		c.pagesCompressed++
 	}
 }
 
@@ -474,17 +469,11 @@ func (c *PagedWriter) writePage() error {
 
 	// Async path with parallel workers
 	item := getPageWorkItem()
-	sent := false
-	defer func() {
-		if !sent {
-			putPageWorkItem(item)
-		}
-	}()
-
 	var ok bool
 	item.uncompressedData, ok = c.bytesUncompressedTo(item.uncompressedData)
 	c.resetPage()
 	if !ok {
+		putPageWorkItem(item)
 		return nil
 	}
 
@@ -493,11 +482,11 @@ func (c *PagedWriter) writePage() error {
 
 	select {
 	case c.workCh <- item:
-		sent = true
+		return nil
 	case <-c.egCtx.Done():
+		putPageWorkItem(item)
 		return c.egCtx.Err()
 	}
-	return nil
 }
 
 func (c *PagedWriter) Add(k, v []byte) (err error) {
@@ -522,7 +511,7 @@ func (c *PagedWriter) resetPage() {
 	c.kLengths, c.vLengths = c.kLengths[:0], c.vLengths[:0]
 	c.keys, c.vals = c.keys[:0], c.vals[:0]
 }
-func (c *PagedWriter) Flush() (err error) {
+func (c *PagedWriter) Flush() error {
 	if c.pageSize <= 1 {
 		return nil
 	}
