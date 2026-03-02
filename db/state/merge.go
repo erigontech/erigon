@@ -679,7 +679,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 			newSeq.AddOffset(v)
 		}
 		newSeq.Build()
-		lastVal = newSeq.AppendBytes(nil)
+		lastVal = newSeq.AppendBytes(lastVal[:0])
 		var mergedOnce bool
 
 		// Advance all the items that have this key (including the top)
@@ -692,7 +692,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 				if mergeErr != nil {
 					return nil, fmt.Errorf("merge %s inverted index: %w", iit.ii.FilenameBase, mergeErr)
 				}
-				lastVal = merged.AppendBytes(nil)
+				lastVal = merged.AppendBytes(lastVal[:0])
 			} else {
 				mergedOnce = true
 			}
