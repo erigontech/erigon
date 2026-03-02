@@ -166,8 +166,8 @@ func TestArbitrumSubmitRetryableTxGasUsed(t *testing.T) {
 		require.EqualValues(t, tx.RetryData, tx2.RetryData)
 		require.EqualValues(t, tx.EffectiveGasUsed, tx2.EffectiveGasUsed)
 
-		// With NoTimeBoosted embedded, this should be false.
-		require.False(t, tx2.IsTimeBoosted())
+		// With NoTimeBoosted embedded, IsTimeBoosted returns nil.
+		require.Nil(t, tx2.IsTimeBoosted())
 	}
 }
 

@@ -12,12 +12,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func boolPtr(b bool) *bool { return &b }
+
 func Test_LegacyTx_Timeboosted(t *testing.T) {
 	timeboostedVals := []bool{true, false}
 	for i := 0; i < 2; i++ {
 		two := uint256.NewInt(2)
 		ltx := types.NewTransaction(4, common.HexToAddress("0x2"), two, 21000, two, []byte("data"))
-		ltx.Timeboosted = timeboostedVals[i]
+		ltx.Timeboosted = boolPtr(timeboostedVals[i])
 
 		buf := bytes.NewBuffer(nil)
 		err := ltx.EncodeRLP(buf)
@@ -35,7 +37,7 @@ func Test_LegacyTx_Timeboosted(t *testing.T) {
 		require.EqualValues(t, ltx.Data, ltx2.Data)
 		require.EqualValues(t, ltx.To, ltx2.To)
 
-		require.EqualValues(t, timeboostedVals[i], ltx2.IsTimeBoosted())
+		require.EqualValues(t, timeboostedVals[i], *ltx2.IsTimeBoosted())
 	}
 }
 
@@ -61,7 +63,7 @@ func Test_DynamicFeeTx_Timeboosted(t *testing.T) {
 			TipCap:      two,
 			FeeCap:      three,
 			AccessList:  accessList,
-			Timeboosted: timeboostedVals[i],
+			Timeboosted: boolPtr(timeboostedVals[i]),
 		}
 
 		buf := bytes.NewBuffer(nil)
@@ -85,7 +87,7 @@ func Test_DynamicFeeTx_Timeboosted(t *testing.T) {
 		require.EqualValues(t, tx.To, tx2.To)
 		require.EqualValues(t, tx.ChainID.Bytes(), tx2.ChainID.Bytes())
 		require.EqualValues(t, len(tx.AccessList), len(tx2.AccessList))
-		require.EqualValues(t, timeboostedVals[i], tx.IsTimeBoosted())
+		require.EqualValues(t, timeboostedVals[i], *tx.IsTimeBoosted())
 	}
 }
 
@@ -107,11 +109,11 @@ func Test_AccessListTx_Timeboosted(t *testing.T) {
 					GasLimit: 21000,
 					Data:     []byte("data"),
 				},
-				GasPrice: two,
+				GasPrice:    two,
+				Timeboosted: boolPtr(timeboostedVals[i]),
 			},
-			ChainID:     chainID,
-			AccessList:  accessList,
-			Timeboosted: timeboostedVals[i],
+			ChainID:    chainID,
+			AccessList: accessList,
 		}
 
 		buf := bytes.NewBuffer(nil)
@@ -134,7 +136,7 @@ func Test_AccessListTx_Timeboosted(t *testing.T) {
 		require.EqualValues(t, tx.To, tx2.To)
 		require.EqualValues(t, tx.ChainID.Bytes(), tx2.ChainID.Bytes())
 		require.EqualValues(t, len(tx.AccessList), len(tx2.AccessList))
-		require.EqualValues(t, timeboostedVals[i], tx.IsTimeBoosted())
+		require.EqualValues(t, timeboostedVals[i], *tx.IsTimeBoosted())
 	}
 }
 
@@ -163,7 +165,7 @@ func Test_BlobTx_Timeboosted(t *testing.T) {
 				TipCap:      two,
 				FeeCap:      three,
 				AccessList:  accessList,
-				Timeboosted: timeboostedVals[i],
+				Timeboosted: boolPtr(timeboostedVals[i]),
 			},
 			MaxFeePerBlobGas:    maxFeePerBlobGas,
 			BlobVersionedHashes: blobHashes,
@@ -192,7 +194,7 @@ func Test_BlobTx_Timeboosted(t *testing.T) {
 		require.EqualValues(t, tx.MaxFeePerBlobGas.Bytes(), tx2.MaxFeePerBlobGas.Bytes())
 		require.EqualValues(t, len(tx.AccessList), len(tx2.AccessList))
 		require.EqualValues(t, len(tx.BlobVersionedHashes), len(tx2.BlobVersionedHashes))
-		require.EqualValues(t, timeboostedVals[i], tx.IsTimeBoosted())
+		require.EqualValues(t, timeboostedVals[i], *tx.IsTimeBoosted())
 	}
 }
 
@@ -225,7 +227,7 @@ func Test_SetCodeTx_Timeboosted(t *testing.T) {
 				TipCap:      two,
 				FeeCap:      three,
 				AccessList:  accessList,
-				Timeboosted: timeboostedVals[i],
+				Timeboosted: boolPtr(timeboostedVals[i]),
 			},
 			Authorizations: []types.Authorization{auth},
 		}
@@ -252,7 +254,7 @@ func Test_SetCodeTx_Timeboosted(t *testing.T) {
 		require.EqualValues(t, tx.ChainID.Bytes(), tx2.ChainID.Bytes())
 		require.EqualValues(t, len(tx.AccessList), len(tx2.AccessList))
 		require.EqualValues(t, len(tx.Authorizations), len(tx2.Authorizations))
-		require.EqualValues(t, timeboostedVals[i], tx.IsTimeBoosted())
+		require.EqualValues(t, timeboostedVals[i], *tx.IsTimeBoosted())
 	}
 }
 
@@ -277,7 +279,7 @@ func Test_ArbRetryTx_Timeboosted(t *testing.T) {
 			RefundTo:            common.HexToAddress("0x3"),
 			MaxRefund:           two,
 			SubmissionFeeRefund: two,
-			Timeboosted:         timeboostedVals[i],
+			Timeboosted:         boolPtr(timeboostedVals[i]),
 		}
 
 		buf := bytes.NewBuffer(nil)
@@ -305,7 +307,7 @@ func Test_ArbRetryTx_Timeboosted(t *testing.T) {
 		require.EqualValues(t, tx.RefundTo, tx2.RefundTo)
 		require.EqualValues(t, tx.MaxRefund, tx2.MaxRefund)
 		require.EqualValues(t, tx.SubmissionFeeRefund, tx2.SubmissionFeeRefund)
-		require.EqualValues(t, timeboostedVals[i], tx.IsTimeBoosted())
+		require.EqualValues(t, timeboostedVals[i], *tx.IsTimeBoosted())
 
 	}
 }
