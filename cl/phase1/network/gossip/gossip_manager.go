@@ -101,6 +101,10 @@ func (g *GossipManager) Close() error {
 }
 
 func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], conditions ...ConditionFunc) pubsub.ValidatorEx {
+	var selfID peer.ID
+	if h := g.p2p.Host(); h != nil {
+		selfID = h.ID()
+	}
 	return func(ctx context.Context, pid peer.ID, msg *pubsub.Message) (result pubsub.ValidationResult) {
 		defer func() {
 			if r := recover(); r != nil {
@@ -108,6 +112,11 @@ func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], con
 				result = pubsub.ValidationReject
 			}
 		}()
+		// Skip validation for self-published messages: they were already validated
+		// by ProcessMessage before Publish was called.
+		if selfID != "" && pid == selfID {
+			return pubsub.ValidationAccept
+		}
 		curVersion := g.beaconConfig.GetCurrentStateVersion(g.ethClock.GetCurrentEpoch())
 		// parse the topic and subnet
 		topic := msg.GetTopic()
@@ -252,8 +261,18 @@ func (g *GossipManager) Publish(ctx context.Context, name string, data []byte) e
 	if topicHandle == nil {
 		return fmt.Errorf("topic not found: %s", topic)
 	}
+	// Log peer count for attestation topics to help diagnose propagation issues
+	if gossip.IsTopicBeaconAttestation(name) {
+		peerCount := len(g.p2p.Pubsub().ListPeers(topic))
+		if peerCount == 0 {
+			log.Warn("[Gossip] Publishing attestation with NO peers on subnet", "topic", name, "peerCount", peerCount)
+		} else if peerCount < 3 {
+			log.Debug("[Gossip] Publishing attestation with low peer count", "topic", name, "peerCount", peerCount)
+		}
+	}
 	// Note: before publishing the message to the network, Publish() internally runs the validator function.
-	return topicHandle.topic.Publish(ctx, compressedData, pubsub.WithReadiness(pubsub.MinTopicSize(1)))
+	// Removed MinTopicSize(1) - don't fail if no peers on subnet, message will propagate when peers join
+	return topicHandle.topic.Publish(ctx, compressedData)
 }
 
 func (g *GossipManager) goCheckForkAndResubscribe(ctx context.Context) {

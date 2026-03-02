@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
@@ -527,7 +528,7 @@ type DomainRoTx struct {
 	d *Domain
 
 	dataReaders []*seg.Reader
-	btReaders   []*BtIndex
+	btReaders   []*btindex.BtIndex
 	mapReaders  []*recsplit.IndexReader
 
 	comBuf        []byte
@@ -868,7 +869,7 @@ type StaticFiles struct {
 	HistoryFiles
 	valuesDecomp    *seg.Decompressor
 	valuesIdx       *recsplit.Index
-	valuesBt        *BtIndex
+	valuesBt        *btindex.BtIndex
 	existenceFilter *existence.Filter
 }
 
@@ -910,7 +911,7 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, c
 	var (
 		valuesDecomp    *seg.Decompressor
 		valuesIdx       *recsplit.Index
-		bt              *BtIndex
+		bt              *btindex.BtIndex
 		existenceFilter *existence.Filter
 		err             error
 	)
@@ -959,7 +960,7 @@ func (d *Domain) buildFileRange(ctx context.Context, stepFrom, stepTo kv.Step, c
 
 	if d.Accessors.Has(statecfg.AccessorBTree) {
 		btPath := d.kvBtAccessorNewFilePath(stepFrom, stepTo)
-		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, d.dataReader(valuesDecomp), *d.salt.Load(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
+		bt, err = btindex.CreateBtreeIndexWithDecompressor(btPath, btindex.DefaultBtreeM, d.dataReader(valuesDecomp), *d.salt.Load(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.FilenameBase, err)
 		}
@@ -1013,7 +1014,7 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 	var (
 		valuesDecomp *seg.Decompressor
 		valuesIdx    *recsplit.Index
-		bt           *BtIndex
+		bt           *btindex.BtIndex
 		bloom        *existence.Filter
 	)
 	closeComp := true
@@ -1061,7 +1062,7 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 
 	if d.Accessors.Has(statecfg.AccessorBTree) {
 		btPath := d.kvBtAccessorNewFilePath(step, step+1)
-		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, d.dataReader(valuesDecomp), *d.salt.Load(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
+		bt, err = btindex.CreateBtreeIndexWithDecompressor(btPath, btindex.DefaultBtreeM, d.dataReader(valuesDecomp), *d.salt.Load(), ps, d.dirs.Tmp, d.logger, d.noFsync, d.Accessors)
 		if err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s .bt idx: %w", d.FilenameBase, err)
 		}
@@ -1110,20 +1111,16 @@ func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep kv.S
 	return buildHashMapAccessor(ctx, data, idxPath, false, cfg, ps, d.logger)
 }
 
-func (d *Domain) MissedBtreeAccessors() (l []*FilesItem) {
-	return d.missedBtreeAccessors(d.dirtyFiles.Items())
-}
-
-func (d *Domain) missedBtreeAccessors(source []*FilesItem) (l []*FilesItem) {
+func (d *Domain) missedBtreeAccessors(source []*FilesItem, dl dirListing) (l []*FilesItem) {
 	if !d.Accessors.Has(statecfg.AccessorBTree) {
 		return nil
 	}
 	return fileItemsWithMissedAccessors(source, d.stepSize, func(fromStep, toStep kv.Step) []string {
-		exF, _, _, err := version.FindFilesWithVersionsByPattern(d.kvExistenceIdxFilePathMask(fromStep, toStep))
+		exF, _, _, err := version.MatchVersionedFile(d.kvExistenceIdxFileNameMask(fromStep, toStep), dl.names, dl.dir)
 		if err != nil {
 			panic(err)
 		}
-		btF, _, _, err := version.FindFilesWithVersionsByPattern(d.kvBtAccessorFilePathMask(fromStep, toStep))
+		btF, _, _, err := version.MatchVersionedFile(d.kvBtAccessorFileNameMask(fromStep, toStep), dl.names, dl.dir)
 		if err != nil {
 			panic(err)
 		}
@@ -1132,15 +1129,15 @@ func (d *Domain) missedBtreeAccessors(source []*FilesItem) (l []*FilesItem) {
 }
 
 func (d *Domain) MissedMapAccessors() (l []*FilesItem) {
-	return d.missedMapAccessors(d.dirtyFiles.Items())
+	return d.missedMapAccessors(d.dirtyFiles.Items(), readDirNames(d.dirs.SnapDomain))
 }
 
-func (d *Domain) missedMapAccessors(source []*FilesItem) (l []*FilesItem) {
+func (d *Domain) missedMapAccessors(source []*FilesItem, dl dirListing) (l []*FilesItem) {
 	if !d.Accessors.Has(statecfg.AccessorHashMap) {
 		return nil
 	}
 	return fileItemsWithMissedAccessors(source, d.stepSize, func(fromStep, toStep kv.Step) []string {
-		fPath, _, _, err := version.FindFilesWithVersionsByPattern(d.kviAccessorFilePathMask(fromStep, toStep))
+		fPath, _, _, err := version.MatchVersionedFile(d.kviAccessorFileNameMask(fromStep, toStep), dl.names, dl.dir)
 		if err != nil {
 			panic(err)
 		}
@@ -1168,7 +1165,7 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 
 		g.Go(func() error {
 			idxPath := d.kvBtAccessorNewFilePath(item.StepRange(d.stepSize))
-			if err := BuildBtreeIndexWithDecompressor(idxPath, d.dataReader(item.decompressor), ps, d.dirs.Tmp, *d.salt.Load(), d.logger, d.noFsync, d.Accessors); err != nil {
+			if err := btindex.BuildBtreeIndexWithDecompressor(idxPath, d.dataReader(item.decompressor), ps, d.dirs.Tmp, *d.salt.Load(), d.logger, d.noFsync, d.Accessors); err != nil {
 				return fmt.Errorf("failed to build btree index for %s:  %w", item.decompressor.FileName(), err)
 			}
 			return nil
@@ -1223,6 +1220,7 @@ func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, va
 			return err
 		}
 		g.Reset(0)
+		rs.SetProgress(p)
 		for g.HasNext() {
 			word, valPos = g.Next(word[:0])
 			if values {
@@ -1237,8 +1235,6 @@ func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, va
 
 			// Skip value
 			keyPos, _ = g.Skip()
-
-			p.Processed.Add(1)
 		}
 		if err = rs.Build(ctx); err != nil {
 			if rs.Collision() {
@@ -1551,9 +1547,9 @@ func (dt *DomainRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 	return dt.mapReaders[i]
 }
 
-func (dt *DomainRoTx) statelessBtree(i int) *BtIndex {
+func (dt *DomainRoTx) statelessBtree(i int) *btindex.BtIndex {
 	if dt.btReaders == nil {
-		dt.btReaders = make([]*BtIndex, len(dt.files))
+		dt.btReaders = make([]*btindex.BtIndex, len(dt.files))
 	}
 	if dt.btReaders[i] == nil {
 		dt.btReaders[i] = dt.files[i].src.bindex

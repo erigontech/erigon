@@ -104,7 +104,7 @@ func NewClient(cfg Config) *Client {
 
 	entries, err := lru.New[string, entry](cfg.CacheLimit)
 	if err != nil {
-		log.Warn("can't create lru", "err", err)
+		log.Warn("[p2p] can't create lru", "err", err)
 	}
 	return &Client{
 		cfg:       cfg,

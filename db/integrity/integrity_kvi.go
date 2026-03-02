@@ -17,18 +17,18 @@
 package integrity
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/recsplit"
@@ -41,22 +41,14 @@ import (
 // ErrIntegrity is useful to differentiate integrity errors from program errors.
 var ErrIntegrity = errors.New("integrity error")
 
+// CheckKvis checks all kvi index files for a domain sequentially (one file at a time),
+// parallelizing the lookup work inside each file.
 func CheckKvis(ctx context.Context, tx kv.TemporalTx, domain kv.Domain, failFast bool, logger log.Logger) error {
 	start := time.Now()
 	aggTx := state.AggTx(tx)
 	files := aggTx.Files(domain)
 	kvCompression := statecfg.Schema.GetDomainCfg(domain).Compression
-	var eg *errgroup.Group
-	if failFast {
-		// if 1 goroutine fails, fail others
-		eg, ctx = errgroup.WithContext(ctx)
-	} else {
-		eg = &errgroup.Group{}
-	}
-	if dbg.EnvBool("CHECK_KVIS_SEQUENTIAL", false) {
-		eg.SetLimit(1)
-	}
-	var keyCount atomic.Uint64
+	var keyCount uint64
 	for _, file := range files {
 		if !strings.HasSuffix(file.Fullpath(), ".kv") {
 			continue
@@ -76,103 +68,136 @@ func CheckKvis(ctx context.Context, tx kv.TemporalTx, domain kv.Domain, failFast
 		if !ok {
 			return fmt.Errorf("kvi not found for %s", kvPath)
 		}
-		eg.Go(func() error {
-			keys, err := CheckKvi(ctx, kviPath, kvPath, kvCompression, failFast, logger)
-			if err == nil {
-				keyCount.Add(keys)
-				return nil
+		keys, err := CheckKvi(ctx, kviPath, kvPath, kvCompression, failFast, logger)
+		keyCount += keys
+		if err != nil {
+			if failFast {
+				return err
 			}
-			if !failFast {
-				logger.Warn(err.Error())
-			}
-			return err
-		})
+			logger.Warn(err.Error())
+		}
 	}
-	err := eg.Wait()
-	if err != nil {
-		return err
-	}
-	logger.Info("checked kvi files in", "dur", time.Since(start), "files", len(files), "keys", keyCount.Load())
+	logger.Info("checked kvi files in", "dur", time.Since(start), "files", len(files), "keys", keyCount)
 	return nil
+}
+
+type kviWorkItem struct {
+	key    []byte
+	offset uint64
 }
 
 func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression seg.FileCompression, failFast bool, logger log.Logger) (uint64, error) {
 	kviFileName := filepath.Base(kviPath)
 	kvFileName := filepath.Base(kvPath)
-	logger.Info("checking kvi", "kvi", kviFileName, "kv", kvFileName)
+	logger.Info("[integrity] checking kvi", "kvi", kviFileName, "kv", kvFileName)
 	start := time.Now()
 	kvi, err := recsplit.OpenIndex(kviPath)
 	if err != nil {
 		return 0, err
 	}
 	defer kvi.Close()
-	kvi.MadvSequential()
-	kviReader := kvi.GetReaderFromPool()
 	kvDecompressor, err := seg.NewDecompressor(kvPath)
 	if err != nil {
 		return 0, err
 	}
 	defer kvDecompressor.Close()
-	kvDecompressor.MadvSequential()
 	kvReader := seg.NewReader(kvDecompressor.MakeGetter(), kvCompression)
-	var integrityErr error
+
+	var firstErr error
 	if kvKeyCount := uint64(kvReader.Count()) / 2; kvKeyCount != kvi.KeyCount() {
 		err = fmt.Errorf("kv key count %d != kvi key count %d in %s", kvKeyCount, kvi.KeyCount(), kviFileName)
 		if failFast {
 			return 0, err
 		}
 		logger.Warn(err.Error())
-		integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
+		firstErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
 	}
-	logTicker := time.NewTicker(30 * time.Second)
-	defer logTicker.Stop()
-	var keyBuf []byte
-	var keyOffset, keyCount uint64
-	var atValue bool
-	for kvReader.HasNext() {
-		select {
-		case <-ctx.Done():
-			return 0, ctx.Err()
-		case <-logTicker.C:
-			at := fmt.Sprintf("%d/%d", keyCount, kvi.KeyCount())
-			percent := fmt.Sprintf("%.1f%%", float64(keyCount)/float64(kvi.KeyCount())*100)
-			rate := float64(keyCount) / time.Since(start).Seconds()
-			eta := time.Duration(float64(kvi.KeyCount()-keyCount)/rate) * time.Second
-			logger.Info("checking kvi progress", "at", at, "p", percent, "k/s", rate, "eta", eta, "kvi", kviFileName)
-		default: // proceed
+
+	trace := logger.Enabled(ctx, log.LvlTrace)
+	checkOne := func(kviReader *recsplit.IndexReader, work kviWorkItem) error {
+		if trace {
+			logger.Trace("[integrity] checking kvi for", "key", hex.EncodeToString(work.key), "offset", work.offset, "kvi", kviFileName)
 		}
-		if atValue {
-			keyOffset, _ = kvReader.Skip()
-			atValue = false
-			continue
+		kviOffset, found := kviReader.Lookup(work.key)
+		if !found {
+			return fmt.Errorf("%w: key %x not found in %s", ErrIntegrity, work.key, kviFileName)
 		}
-		keyBuf, _ = kvReader.Next(keyBuf[:0])
-		if logger.Enabled(ctx, log.LvlTrace) {
-			logger.Trace("checking kvi for", "key", hex.EncodeToString(keyBuf), "offset", keyOffset, "kvi", kviFileName)
+		if kviOffset != work.offset {
+			return fmt.Errorf("%w: key %x offset mismatch %d != %d in %s", ErrIntegrity, work.key, work.offset, kviOffset, kviFileName)
 		}
-		keyCount++
-		atValue = true
-		kviOffset, ok := kviReader.Lookup(keyBuf)
-		if !ok {
-			err = fmt.Errorf("key %x not found in %s", keyBuf, kviFileName)
-			if failFast {
-				return 0, err
+		return nil
+	}
+
+	var keyCount uint64
+	eg, ctx := errgroup.WithContext(ctx)
+	numWorkers := estimate.AlmostAllCPUs()
+	workCh := make(chan kviWorkItem, numWorkers*4)
+
+	for range numWorkers {
+		eg.Go(func() error {
+			kviReader := kvi.GetReaderFromPool()
+			defer kviReader.Close()
+			for {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case work, ok := <-workCh:
+					if !ok {
+						return nil
+					}
+					if err := checkOne(kviReader, work); err != nil {
+						if !failFast {
+							logger.Warn(err.Error())
+						}
+						return err
+					}
+				}
 			}
-			logger.Warn(err.Error())
-			integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
-			continue
-		}
-		if kviOffset != keyOffset {
-			err = fmt.Errorf("key %x offset mismatch %d != %d in %s", keyBuf, keyOffset, kviOffset, kviFileName)
-			if failFast {
-				return 0, err
+		})
+	}
+
+	// Producer: scan kv file sequentially, emit (key, offset) pairs to workers.
+	eg.Go(func() error {
+		defer close(workCh)
+		logTicker := time.NewTicker(30 * time.Second)
+		defer logTicker.Stop()
+		var keyBuf []byte
+		var keyOffset uint64
+		var atValue bool
+		for kvReader.HasNext() {
+			if atValue {
+				keyOffset, _ = kvReader.Skip()
+				atValue = false
+				continue
 			}
-			logger.Warn(err.Error())
-			integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
+			keyBuf, _ = kvReader.Next(keyBuf[:0])
+			keyCount++
+			atValue = true
+
+			select {
+			case <-ctx.Done():
+				return nil
+			case workCh <- kviWorkItem{key: bytes.Clone(keyBuf), offset: keyOffset}:
+			}
+
+			select {
+			case <-logTicker.C:
+				at := fmt.Sprintf("%d/%d", keyCount, kvi.KeyCount())
+				percent := fmt.Sprintf("%.1f%%", float64(keyCount)/float64(kvi.KeyCount())*100)
+				rate := float64(keyCount) / time.Since(start).Seconds()
+				eta := time.Duration(float64(kvi.KeyCount()-keyCount)/rate) * time.Second
+				logger.Info("[integrity] kvi progress", "at", at, "p", percent, "k/s", rate, "eta", eta, "kvi", kviFileName)
+			default:
+			}
 		}
+		return nil
+	})
+
+	if err := eg.Wait(); err != nil {
+		return keyCount, err
 	}
 	duration := time.Since(start)
 	rate := float64(keyCount) / duration.Seconds()
 	logger.Info("checked kvi in", "dur", duration, "keys", keyCount, "k/s", rate, "kvi", kviFileName, "kv", kvFileName)
-	return keyCount, integrityErr
+	return keyCount, firstErr
 }

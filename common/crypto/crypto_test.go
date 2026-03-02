@@ -22,14 +22,15 @@ package crypto
 import (
 	"bytes"
 	"crypto/ecdsa"
+	"crypto/sha3"
 	"encoding/hex"
 	"errors"
+	"hash"
 	"os"
 	"reflect"
 	"testing"
 
 	"github.com/holiman/uint256"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -59,7 +60,7 @@ func TestKeccak256Hasher(t *testing.T) {
 func TestKeccak256HasherNew(t *testing.T) {
 	msg := []byte("abc")
 	exp, _ := hex.DecodeString("3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532")
-	hasher := sha3.New256()
+	hasher := hash.Hash(sha3.New256())
 	hasher.Write(msg)
 	var h common.Hash
 	if !bytes.Equal(exp, hasher.Sum(h[:0])) {

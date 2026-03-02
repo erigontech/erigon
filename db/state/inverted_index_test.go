@@ -153,6 +153,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 			collation, err := ii.collate(context.Background(), 0, tx)
 			require.NoError(t, err)
 			sf, _ := ii.buildFiles(context.Background(), 0, collation, background.NewProgressSet())
+			collation.Close()
 			txFrom, txTo := firstTxNumOfStep(0, ii.stepSize), firstTxNumOfStep(1, ii.stepSize)
 			ii.integrateDirtyFiles(sf, txFrom, txTo)
 
@@ -350,6 +351,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 			collation, err := ii.collate(context.Background(), 0, tx)
 			require.NoError(t, err)
 			sf, _ := ii.buildFiles(context.Background(), 0, collation, background.NewProgressSet())
+			collation.Close()
 			txFrom, txTo := firstTxNumOfStep(0, ii.stepSize), firstTxNumOfStep(1, ii.stepSize)
 			ii.integrateDirtyFiles(sf, txFrom, txTo)
 
@@ -496,6 +498,7 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	require.NoError(t, err)
 
 	sf, err := ii.buildFiles(ctx, 0, bs, background.NewProgressSet())
+	bs.Close()
 	require.NoError(t, err)
 	defer sf.CleanupOnError()
 
@@ -519,6 +522,7 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	require.Equal(t, []string{"key1", "key2", "key3"}, words)
 	require.Equal(t, [][]uint64{{2, 6}, {3}, {6}}, intArrs)
 	r := recsplit.NewIndexReader(sf.index)
+	defer r.Close()
 	for i := 0; i < len(words); i++ {
 		offset, _ := r.TwoLayerLookup([]byte(words[i]))
 		g.Reset(offset)
@@ -565,16 +569,8 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	bs, err := ii.collate(ctx, 0, roTx)
-	require.NoError(t, err)
+	require.NoError(t, ii.collateBuildIntegrate(ctx, 0, roTx, background.NewProgressSet()))
 
-	sf, err := ii.buildFiles(ctx, 0, bs, background.NewProgressSet())
-	require.NoError(t, err)
-
-	ii.integrateDirtyFiles(sf, 0, 16)
-	ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
-
-	ic.Close()
 	err = db.Update(ctx, func(tx kv.RwTx) error {
 		from, to := ic.stepsRangeInDB(tx)
 		require.Equal(t, "0.1", fmt.Sprintf("%.1f", from))
@@ -595,14 +591,14 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	defer tx.Rollback()
 
 	for _, table := range []string{ii.KeysTable, ii.ValuesTable} {
-		var cur kv.Cursor
-		cur, err = tx.Cursor(table)
-		require.NoError(t, err)
-		defer cur.Close()
-		var k []byte
-		k, _, err = cur.First()
-		require.NoError(t, err)
-		require.Nil(t, k, table)
+		func() {
+			cur, err := tx.Cursor(table)
+			require.NoError(t, err)
+			defer cur.Close()
+			k, _, err := cur.First()
+			require.NoError(t, err)
+			require.Nil(t, k, table)
+		}()
 	}
 
 	from, to := ic.stepsRangeInDB(tx)
@@ -674,6 +670,7 @@ func checkRanges(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 		t.Run("asc", func(t *testing.T) {
 			it, err := ic.IdxRange(k[:], 0, 976, order.Asc, -1, nil)
 			require.NoError(t, err)
+			defer it.Close()
 			for i := keyNum; i < 976; i += keyNum {
 				label := fmt.Sprintf("keyNum=%d, txNum=%d", keyNum, i)
 				require.True(t, it.HasNext(), label)
@@ -688,27 +685,32 @@ func checkRanges(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 		t.Run("desc", func(t *testing.T) {
 			reverseStream, err := ic.IdxRange(k[:], 976-1, 0, order.Desc, -1, nil)
 			require.NoError(t, err)
+			defer reverseStream.Close()
 			stream.ExpectEqualU64(t, stream.ReverseArray(values), reverseStream)
 		})
 		t.Run("unbounded asc", func(t *testing.T) {
 			forwardLimited, err := ic.IdxRange(k[:], -1, 976, order.Asc, 2, nil)
 			require.NoError(t, err)
+			defer forwardLimited.Close()
 			stream.ExpectEqualU64(t, stream.Array(values[:2]), forwardLimited)
 		})
 		t.Run("unbounded desc", func(t *testing.T) {
 			reverseLimited, err := ic.IdxRange(k[:], 976-1, -1, order.Desc, 2, nil)
 			require.NoError(t, err)
+			defer reverseLimited.Close()
 			stream.ExpectEqualU64(t, stream.ReverseArray(values[len(values)-2:]), reverseLimited)
 		})
 		t.Run("tiny bound asc", func(t *testing.T) {
 			it, err := ic.IdxRange(k[:], 100, 102, order.Asc, -1, nil)
 			require.NoError(t, err)
+			defer it.Close()
 			expect := stream.FilterU64(stream.Array(values), func(k uint64) bool { return k >= 100 && k < 102 })
 			stream.ExpectEqualU64(t, expect, it)
 		})
 		t.Run("tiny bound desc", func(t *testing.T) {
 			it, err := ic.IdxRange(k[:], 102, 100, order.Desc, -1, nil)
 			require.NoError(t, err)
+			defer it.Close()
 			expect := stream.FilterU64(stream.ReverseArray(values), func(k uint64) bool { return k <= 102 && k > 100 })
 			stream.ExpectEqualU64(t, expect, it)
 		})
@@ -732,13 +734,32 @@ func checkRanges(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 			values = append(values, n)
 		}
 		require.False(t, it.HasNext())
+		it.Close()
 
 		reverseStream, err := ic.IdxRange(k[:], 1000-1, 400-1, false, -1, roTx)
 		require.NoError(t, err)
 		arr := stream.ToArrU64Must(reverseStream)
 		expect := stream.ToArrU64Must(stream.ReverseArray(values))
 		require.Equal(t, expect, arr)
+		reverseStream.Close()
 	}
+}
+
+// collateBuildIntegrate collates, builds files and integrates them for the given step.
+// It is a test helper that combines the common collate→buildFiles→integrateDirtyFiles pattern.
+func (ii *InvertedIndex) collateBuildIntegrate(ctx context.Context, step kv.Step, tx kv.Tx, ps *background.ProgressSet) error {
+	bs, err := ii.collate(ctx, step, tx)
+	if err != nil {
+		return err
+	}
+	defer bs.Close()
+	sf, err := ii.buildFiles(ctx, step, bs, ps)
+	if err != nil {
+		return err
+	}
+	ii.integrateDirtyFiles(sf, step.ToTxNum(ii.stepSize), (step + 1).ToTxNum(ii.stepSize))
+	ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
+	return nil
 }
 
 func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
@@ -754,12 +775,7 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 	// Leave the last 2 aggregation steps un-collated
 	for step := kv.Step(0); step < kv.Step(txs/ii.stepSize)-1; step++ {
 		func() {
-			bs, err := ii.collate(ctx, step, tx)
-			require.NoError(tb, err)
-			sf, err := ii.buildFiles(ctx, step, bs, background.NewProgressSet())
-			require.NoError(tb, err)
-			ii.integrateDirtyFiles(sf, step.ToTxNum(ii.stepSize), (step + 1).ToTxNum(ii.stepSize))
-			ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
+			require.NoError(tb, ii.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
 			ic := ii.BeginFilesRo()
 			defer ic.Close()
 			_, err = ic.TableScanningPrune(ctx, tx, step.ToTxNum(ii.stepSize), (step + 1).ToTxNum(ii.stepSize), math.MaxUint64, logEvery, false, nil, nil, mxPruneSizeIndex, prune.DefaultStorageMode)
@@ -813,12 +829,7 @@ func TestInvIndexRanges(t *testing.T) {
 	// Leave the last 2 aggregation steps un-collated
 	for step := kv.Step(0); step < kv.Step(txs/ii.stepSize)-1; step++ {
 		func() {
-			bs, err := ii.collate(ctx, step, tx)
-			require.NoError(t, err)
-			sf, err := ii.buildFiles(ctx, step, bs, background.NewProgressSet())
-			require.NoError(t, err)
-			ii.integrateDirtyFiles(sf, step.ToTxNum(ii.stepSize), (step + 1).ToTxNum(ii.stepSize))
-			ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
+			require.NoError(t, ii.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
 			ic := ii.BeginFilesRo()
 			defer ic.Close()
 			_, err = ic.TableScanningPrune(ctx, tx, step.ToTxNum(ii.stepSize), (step + 1).ToTxNum(ii.stepSize), math.MaxUint64, logEvery, false, nil, nil, mxPruneSizeIndex, prune.DefaultStorageMode)
