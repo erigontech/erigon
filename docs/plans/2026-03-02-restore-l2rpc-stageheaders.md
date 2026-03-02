@@ -1,7 +1,7 @@
 # Restore L2 RPC Block Fetching in StageHeaders
 
 **Date:** 2026-03-02
-**Status:** Planned
+**Status:** Completed
 **Context:** During rebase from `arbitrum` branch, the Arbitrum-specific L2 RPC block-fetching override in `SpawnStageHeaders` was completely removed. Without it, Arbitrum chains sit in `HeadersPOW` "Waiting for headers..." forever since there are no P2P peers for L2 headers.
 
 ## Problem

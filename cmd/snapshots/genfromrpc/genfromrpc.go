@@ -777,10 +777,12 @@ func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, rwTx kv.RwTx, client, r
 
 	defer logEvery.Stop()
 
-	if receiptClient != nil {
+	if receiptClient != nil && receiptRPS > 0 {
 		receiptClient.SetRequestLimit(rate.Limit(receiptRPS), receiptBurst)
 	}
-	client.SetRequestLimit(rate.Limit(blockRPS), blockBurst)
+	if blockRPS > 0 {
+		client.SetRequestLimit(rate.Limit(blockRPS), blockBurst)
+	}
 
 	for prev := startBlockNum; prev < endBlockNum; {
 		blocks, err := FetchBlocksBatch(client, receiptClient, prev, endBlockNum, batchSize, verify, isArbitrum)
@@ -790,6 +792,7 @@ func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, rwTx kv.RwTx, client, r
 		}
 		if len(blocks) == 0 {
 			log.Info("No more blocks fetched, exiting", "latestFetchedBlock", lastBlockNum, "hash", lastBlockHash)
+			break
 		}
 
 		last := blocks[len(blocks)-1]

@@ -236,7 +236,7 @@ func newMockRPCServer(t *testing.T, responses map[string]interface{}) *httptest.
 	}))
 }
 
-func TestGetPublicReceiptFeed(t *testing.T) {
+func TestPublicReceiptFeeds(t *testing.T) {
 	tests := []struct {
 		chainID  uint64
 		expected string
@@ -250,7 +250,7 @@ func TestGetPublicReceiptFeed(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(strconv.FormatUint(tt.chainID, 10), func(t *testing.T) {
-			result := getPublicReceiptFeed(tt.chainID)
+			result := publicReceiptFeeds[tt.chainID]
 			require.Equal(t, tt.expected, result)
 		})
 	}

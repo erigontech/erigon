@@ -107,6 +107,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 
 var (
 	l2RPCHealthCheckOnce sync.Once
+	l2RPCNotConfigured   sync.Once
 	headersLimiter       = rate.NewLimiter(rate.Every(time.Millisecond*124), 1)
 )
 
@@ -118,10 +119,6 @@ var publicReceiptFeeds = map[uint64]string{
 	42170:  "https://nova.arbitrum.io/rpc",
 }
 
-func getPublicReceiptFeed(chainID uint64) string {
-	return publicReceiptFeeds[chainID]
-}
-
 func headersArbitrum(s *StageState, ctx context.Context, tx kv.RwTx, cfg HeadersCfg, logger log.Logger) error {
 	if !headersLimiter.Allow() {
 		return nil
@@ -131,7 +128,9 @@ func headersArbitrum(s *StageState, ctx context.Context, tx kv.RwTx, cfg Headers
 
 	l2rpcAddr := cfg.l2rpc.Addr
 	if l2rpcAddr == "" {
-		logger.Warn(fmt.Sprintf("[%s] L2 RPC address not configured, skipping Arbitrum header fetch", logPrefix))
+		l2RPCNotConfigured.Do(func() {
+			logger.Warn(fmt.Sprintf("[%s] L2 RPC address not configured, skipping Arbitrum header fetch", logPrefix))
+		})
 		return nil
 	}
 
@@ -179,7 +178,7 @@ func headersArbitrum(s *StageState, ctx context.Context, tx kv.RwTx, cfg Headers
 	activeReceiptAddr := receiptAddr
 	if latestRemote-progress < chainTipThreshold {
 		chainID := cfg.chainConfig.ChainID.Uint64()
-		if feed := getPublicReceiptFeed(chainID); feed != "" {
+		if feed := publicReceiptFeeds[chainID]; feed != "" {
 			feedClient, err := rpc.Dial(feed, logger)
 			if err != nil {
 				logger.Warn(fmt.Sprintf("[%s] failed to connect to public receipt feed at %s, using configured endpoint", logPrefix, feed), "err", err)
