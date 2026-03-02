@@ -25,6 +25,7 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
+
 	"github.com/erigontech/erigon/common/bitutil"
 )
 
@@ -408,15 +409,11 @@ func (ef *DoubleEliasFano) Build(cumKeys []uint64, position []uint64) {
 	//fmt.Printf("jump: %x\n", ef.jump)
 }
 
-// setBits assumes that bits are set in monotonic order, so that
-// we can skip the masking for the second word
+// setBits assumes that bits are set in monotonic order (non-overlapping writes),
+// so target positions are always zero at write time — safe to use |= on both words.
 func setBits(bits []uint64, start uint64, width int, value uint64) {
-	shift := int(start & 63)
-	idx64 := start >> 6
-	mask := (uint64(1)<<width - 1) << shift
-	//fmt.Printf("mask = %b, idx64 = %d\n", mask, idx64)
-	bits[idx64] = (bits[idx64] &^ mask) | (value << shift)
-	//fmt.Printf("start = %d, width = %d, shift + width = %d\n", start, width, shift+width)
+	idx64, shift := start>>6, int(start&63)
+	bits[idx64] |= value << shift
 	if shift+width > 64 {
 		// changes two 64-bit words
 		bits[idx64+1] = value >> (64 - shift)
