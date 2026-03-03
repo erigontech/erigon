@@ -1095,7 +1095,13 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 		if engine != nil {
 			if postApplyMessageFunc := engine.GetPostApplyMessageFunc(); postApplyMessageFunc != nil {
 				execResult := result.ExecutionResult
-				coinbase, err := stateReader.ReadAccountData(result.Coinbase) // to generate logs we want the initial balance
+				// Use a versionedStateReader to get the coinbase balance
+				// deterministically from the block's version map (which
+				// includes fee-calc writes from prior txs) instead of
+				// reading from pe.rs whose content depends on apply-loop
+				// timing.
+				cbReader := state.NewVersionedStateReader(txIndex, nil, vm, stateReader)
+				coinbase, err := cbReader.ReadAccountData(result.Coinbase) // to generate logs we want the initial balance
 
 				if err != nil {
 					return nil, nil, nil, err
@@ -1570,15 +1576,29 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					be.blockIO.RecordReads(txVersion, mergedReads)
 				}
 				if len(addWrites) > 0 {
-					existing := be.blockIO.WriteSet(txVersion.TxIndex)
-					if len(existing) > 0 {
-						combined := append(state.VersionedWrites{}, existing...)
-						combined = append(combined, addWrites...)
-						be.blockIO.RecordWrites(txVersion, combined)
-					} else {
-						log.Info(fmt.Sprintf("writing %d, a: %v", len(addWrites), addWrites))
-						be.blockIO.RecordWrites(txVersion, addWrites)
-					}
+					// Merge finalization writes with existing execution writes.
+					// The finalization replays result.TxOut via ApplyVersionedWrites
+					// and adds fee calculation changes, but its VersionedWrites(true)
+					// may omit entries when the optimistic execution ran with stale
+					// state (e.g., an EIP-7702 delegation set by a prior tx was not
+					// visible). In that case the re-execution stored the correct
+					// writes in blockIO, but the finalization—which replays the
+					// potentially incomplete TxOut—drops them. Merging ensures that
+					// entries present in the execution writes but absent from the
+					// finalization writes are preserved, while finalization-only
+					// entries (fee calc, post-apply) are added.
+					existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
+					merged := MergeVersionedWrites(existingWrites, addWrites)
+					be.blockIO.RecordWrites(txVersion, merged)
+
+					// Flush the merged writes (including fee calc changes)
+					// to the version map so that subsequent per-tx
+					// finalizations see the full post-tx state (execution
+					// + fees) when reading via the version map fallback
+					// chain.  Without this, later txs' fee calc reads the
+					// coinbase balance without prior fees, producing
+					// non-deterministic BAL (EIP-7928) hashes.
+					be.versionMap.FlushVersionedWrites(merged, true, "")
 				}
 
 				stateUpdates := stateWriter.WriteSet()

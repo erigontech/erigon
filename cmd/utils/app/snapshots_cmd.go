@@ -866,6 +866,33 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 		removed++
 	}
 	fmt.Printf("removed %d state snapshot segments files\n", removed)
+
+	// Unconditionally remove .tmp files from all snapshot directories.
+	// These are artifacts from incomplete/cancelled operations and should always be cleaned up.
+	var removedTmp uint64
+	for _, dirPath := range []string{dirs.Snap, dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapCaplin, dirs.SnapForkable} {
+		tmpFiles, err := snaptype.TmpFiles(dirPath)
+		if err != nil {
+			return err
+		}
+		for _, tmpFile := range tmpFiles {
+			if dryRun {
+				fmt.Printf("[dry-run] rm %s\n", tmpFile)
+				removedTmp++
+				continue
+			}
+			if err := dir2.RemoveFile(tmpFile); err != nil {
+				if !errors.Is(err, fs.ErrNotExist) {
+					return err
+				}
+			}
+			removedTmp++
+		}
+	}
+	if removedTmp > 0 {
+		fmt.Printf("removed %d .tmp files\n", removedTmp)
+	}
+
 	fmt.Printf("\n\nBefore restarting Erigon, run one of:\n  - `integration stage_custom_trace --reset` if deleted domains are handled by stage_custom_trace\n  - `integration stage_exec --reset` otherwise\nThis prunes DB remnants to avoid gaps between snapshots and DB.\n")
 	return nil
 }
