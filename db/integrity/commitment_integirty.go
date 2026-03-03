@@ -764,9 +764,16 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	if err != nil {
 		return err
 	}
-	// commitment branch data  view: as of beginning of the block
+	// For blockNum==0 there is no prior commitment state (GetAsOf at txNum=0
+	// falls back to latest for the commitment domain). Use commitmentAsOf=toTxNum
+	// so the trie is restored from the committed state at the end of block 0.
+	commitmentAsOf := minTxNum
+	if blockNum == 0 {
+		commitmentAsOf = toTxNum
+	}
+	// commitment branch data view: as of beginning of the block (or end for block 0)
 	// plain state data view: as of end of the block
-	splitStateReader := commitmentdb.NewSplitHistoryReader(tx, minTxNum, toTxNum, true /* withHistory */)
+	splitStateReader := commitmentdb.NewSplitHistoryReader(tx, commitmentAsOf, toTxNum, true /* withHistory */)
 	sd.GetCommitmentCtx().SetStateReader(splitStateReader)
 	sd.GetCommitmentCtx().SetTrace(logger.Enabled(ctx, log.LvlTrace))
 	sd.GetCommitmentContext().SetDeferBranchUpdates(false)
