@@ -2043,6 +2043,7 @@ func (tx *ArbitrumDepositTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.
 		data:       tx.GetData(),
 		amount:     *tx.GetValue(),
 		checkNonce: !skipAccountChecks[tx.Type()],
+		isFree:     true,
 
 		Tx:           tx,
 		TxRunContext: NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
@@ -2345,6 +2346,7 @@ func (tx *ArbitrumInternalTx) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		data:         tx.GetData(),
 		amount:       *tx.GetValue(),
 		checkNonce:   !skipAccountChecks[tx.Type()],
+		isFree:       true,
 		Tx:           tx,
 		TxRunContext: NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
 	}

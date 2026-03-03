@@ -169,6 +169,9 @@ func applyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailou
 		msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 	}
 	st := NewStateTransition(evm, msg, gp)
+	if typedMsg, ok := msg.(*types.Message); ok {
+		st.evm.ProcessingHook.SetMessage(typedMsg, st.state)
+	}
 	st.noFeeBurnAndTip = noFeeBurnAndTip
 	return st.TransitionDb(refunds, gasBailout)
 }
@@ -444,6 +447,18 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 // However if any consensus issue encountered, return the error directly with
 // nil evm execution result.
 func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *evmtypes.ExecutionResult, err error) {
+	endTxNow, startHookUsedMultiGas, err, returnData := st.evm.ProcessingHook.StartTxHook()
+	startHookUsedSingleGas := startHookUsedMultiGas.SingleGas()
+	if endTxNow {
+		return &evmtypes.ExecutionResult{
+			ReceiptGasUsed: startHookUsedSingleGas,
+			Err:            err,
+			ReturnData:     returnData,
+			ScheduledTxes:  st.evm.ProcessingHook.ScheduledTxes(),
+			UsedMultiGas:   startHookUsedMultiGas,
+		}, nil
+	}
+
 	if st.evm.IntraBlockState().IsVersioned() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -530,6 +545,11 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	}
 	st.gasRemaining -= gas
 
+	tipRecipient, _, err := st.evm.ProcessingHook.GasChargingHook(&st.gasRemaining, gas)
+	if err != nil {
+		return nil, err
+	}
+
 	var bailout bool
 	// Gas bailout (for trace_call) should only be applied if there is not sufficient balance to perform value transfer
 	if gasBailout {
@@ -568,6 +588,9 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
 	}
 
+	st.gasRemaining += st.evm.ProcessingHook.ForceRefundGas()
+	nonrefundable := st.evm.ProcessingHook.NonrefundableGas()
+
 	if refunds && !gasBailout {
 		refundQuotient := params.RefundQuotient
 		if rules.IsLondon {
@@ -575,7 +598,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		}
 		gasUsed := st.gasUsed()
 		st.blockGasUsed = gasUsed
-		refund := min(gasUsed/refundQuotient, st.state.GetRefund())
+		refund := min((gasUsed-nonrefundable)/refundQuotient, st.state.GetRefund())
 		gasUsed = gasUsed - refund
 		if rules.IsPrague {
 			gasUsed = max(floorGas7623, gasUsed)
@@ -606,11 +629,14 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 			effectiveTip = u256.Num0
 		}
 	}
+	if st.evm.ProcessingHook.DropTip() {
+		effectiveTip = u256.Num0
+	}
 
 	tipAmount := u256.Mul(u256.U64(st.gasUsed()), effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
 
 	if !st.noFeeBurnAndTip {
-		if err := st.state.AddBalance(coinbase, tipAmount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
+		if err := st.state.AddBalance(tipRecipient, tipAmount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 		}
 	}
@@ -638,6 +664,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		fmt.Printf("%d (%d.%d) Fees %x: tipped: %d, burnt: %d, price: %d, gas: %d\n", st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), &tipAmount, &burnAmount, st.gasPrice, st.gasUsed())
 	}
 
+	st.evm.ProcessingHook.EndTxHook(st.gasUsed(), !errors.Is(vmerr, vm.ErrExecutionReverted))
+
 	result = &evmtypes.ExecutionResult{
 		ReceiptGasUsed:      st.gasUsed(),
 		BlockGasUsed:        st.blockGasUsed,
@@ -648,6 +676,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		CoinbaseInitBalance: coinbaseInitBalance,
 		FeeTipped:           tipAmount,
 		FeeBurnt:            burnAmount,
+		ScheduledTxes:       st.evm.ProcessingHook.ScheduledTxes(),
 	}
 
 	result.BurntContractAddress = burntContractAddress

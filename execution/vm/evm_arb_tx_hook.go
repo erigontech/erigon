@@ -95,5 +95,10 @@ func (d DefaultTxProcessor) IsCalldataPricingIncreaseEnabled() bool {
 	return true
 }
 
+// ReadyEVMForL2 installs an Arbitrum TxProcessor, enabling ArbOS for this
+// state transition. Set by the nitro-erigon gethhook init to create an
+// arbos.NewTxProcessor for Arbitrum chains. No-op (nil) for non-Arbitrum builds.
+var ReadyEVMForL2 func(evm *EVM, msg *types.Message)
+
 func (evm *EVM) IncDepth() { evm.depth++ }
 func (evm *EVM) DecDepth() { evm.depth-- }

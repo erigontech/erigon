@@ -522,6 +522,10 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 				return evmtypes.ExecutionResult{}, protocol.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: err}
 			}
 
+			if vm.ReadyEVMForL2 != nil {
+				vm.ReadyEVMForL2(evm, message)
+			}
+
 			// Apply the transaction to the current state (included in the env).
 			var applyRes *evmtypes.ExecutionResult
 			var applyErr error
