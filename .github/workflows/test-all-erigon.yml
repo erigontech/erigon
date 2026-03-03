@@ -142,14 +142,6 @@ jobs:
       #    minimum-size: 8GB
       #    disk-root: "C:"
 
-      # Clears stale test-result cache so tests always run fresh.
-      # Runs before checkout so it also fires on runs cancelled mid-job,
-      # preventing a dirty build cache from carrying over to the next run.
-      - name: Pre-run Go cache cleanup
-        if: always()
-        shell: bash
-        run: go clean -testcache
-
       - name: "Checkout code with submodules and large files (lfs) on ${{ matrix.os }}"
         if: needs.source-of-changes.outputs.changed_files != 'true'
         uses: actions/checkout@v6
