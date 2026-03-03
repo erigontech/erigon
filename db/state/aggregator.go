@@ -688,18 +688,16 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(a.collateAndBuildWorkers)
 
-	// Acquire read lock to protect BeginFilesRo() calls from concurrent writes
-	// by recalcVisibleFiles() in BuildMissedAccessorsInBackground.
-	a.visibleFilesLock.RLock()
-	for _, d := range a.d {
+	// Use agg.BeginFilesRo() to safely snapshot visible files under visibleFilesLock,
+	// instead of calling individual domain/ii BeginFilesRo() without synchronization.
+	ac := a.BeginFilesRo()
+	for id, d := range a.d {
 		if d.Disable {
 			continue
 		}
 
 		d := d
-		dc := d.BeginFilesRo()
-		firstStepNotInFiles := dc.FirstStepNotInFiles()
-		dc.Close()
+		firstStepNotInFiles := ac.d[id].FirstStepNotInFiles()
 		if step < firstStepNotInFiles {
 			continue
 		}
@@ -743,9 +741,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		}
 
 		ii := ii
-		dc := ii.BeginFilesRo()
-		firstStepNotInFiles := dc.FirstStepNotInFiles()
-		dc.Close()
+		firstStepNotInFiles := ac.iis[iikey].FirstStepNotInFiles()
 		if step < firstStepNotInFiles {
 			continue
 		}
@@ -772,7 +768,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 			return nil
 		})
 	}
-	a.visibleFilesLock.RUnlock()
+	ac.Close()
 	if err := g.Wait(); err != nil {
 		static.CleanupOnError()
 		return fmt.Errorf("domain collate-build: %w", err)
