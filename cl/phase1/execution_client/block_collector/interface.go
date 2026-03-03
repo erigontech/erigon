@@ -31,6 +31,8 @@ var batchSize = 1000
 
 type BlockCollector interface {
 	AddBlock(block *cltypes.BeaconBlock) error
+	// AddGloasBlock adds a GLOAS (EIP-7732) FULL block using its execution payload envelope.
+	AddGloasBlock(block *cltypes.BeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) error
 	Flush(ctx context.Context) error
 	HasBlock(blockNumber uint64) bool
 }
