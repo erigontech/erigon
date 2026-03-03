@@ -754,7 +754,7 @@ func (r *HistoricalStatesReader) readPendingEpochs(tx kv.Tx, slot uint64) (*soli
 
 	for i := beginSlot; i <= slot; i++ {
 		// Read the block
-		block, err := r.blockReader.ReadBlindedBlockBySlot(context.Background(), tx, i)
+		block, err := r.blockReader.ReadBeaconBlockBodyBySlot(context.Background(), tx, i)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -828,7 +828,7 @@ func (r *HistoricalStatesReader) ReadParticipations(tx kv.Tx, kvGetter state_acc
 	// Read the previous idxs
 	for i := beginSlot; i <= slot; i++ {
 		// Read the block
-		block, err := r.blockReader.ReadBlindedBlockBySlot(context.Background(), tx, i)
+		block, err := r.blockReader.ReadBeaconBlockBodyBySlot(context.Background(), tx, i)
 		if err != nil {
 			return nil, nil, err
 		}

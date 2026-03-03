@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 )
@@ -161,6 +162,11 @@ type ForkChoiceStore struct {
 	// When this happens, OnExecutionPayload queues the envelope here (keyed by beacon_block_root).
 	// Later, when OnBlock processes the block, it checks this cache and processes any pending envelope.
 	pendingEnvelopes *lru.Cache[common.Hash, *cltypes.SignedExecutionPayloadEnvelope]
+
+	// db is used to persist execution payload indices (block number/hash) when an envelope
+	// is accepted in OnExecutionPayload. May be nil (e.g. in tests), in which case the
+	// index writes are skipped.
+	db kv.RwDB
 }
 
 type childrens struct {
@@ -181,6 +187,7 @@ func NewForkChoiceStore(
 	publicKeysRegistry public_keys_registry.PublicKeyRegistry,
 	localValidators *validator_params.ValidatorParams,
 	probabilisticHeadGetter bool,
+	db kv.RwDB,
 ) (*ForkChoiceStore, error) {
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
@@ -311,6 +318,7 @@ func NewForkChoiceStore(
 		proposerLookahead:        proposerLookahead,
 		pendingEnvelopes:         pendingEnvelopes,
 		executionPayloadStatus:   executionPayloadStatus,
+		db:                       db,
 	}
 	f.justifiedCheckpoint.Store(anchorCheckpoint)
 	f.finalizedCheckpoint.Store(anchorCheckpoint)

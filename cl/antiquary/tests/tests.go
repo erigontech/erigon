@@ -86,11 +86,8 @@ func (m *MockBlockReader) ReadBlockBySlot(ctx context.Context, tx kv.Tx, slot ui
 	return m.U[slot], nil
 }
 
-func (m *MockBlockReader) ReadBlindedBlockBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBlindedBeaconBlock, error) {
-	if m.U[slot] == nil {
-		return nil, nil
-	}
-	return m.U[slot].Blinded()
+func (m *MockBlockReader) ReadBeaconBlockBodyBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBeaconBlock, error) {
+	return m.U[slot], nil
 }
 
 func (m *MockBlockReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, blockRoot common.Hash) (*cltypes.SignedBeaconBlock, error) {

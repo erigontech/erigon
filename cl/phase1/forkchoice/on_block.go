@@ -265,6 +265,14 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	}
 	if block.Block.Body.ExecutionPayload != nil {
 		f.eth2Roots.Add(blockRoot, block.Block.Body.ExecutionPayload.BlockHash)
+	} else if blockVersion >= clparams.GloasVersion {
+		// [New in Gloas:EIP7732] No ExecutionPayload in beacon block (GLOAS separates them).
+		// Inherit parent's execution head as a placeholder so FCU sends a valid (non-zero) hash.
+		// OnExecutionPayload will overwrite this with the real payload hash if the envelope arrives (FULL path).
+		// If the envelope never arrives (EMPTY path), the parent hash is the correct EL head anyway.
+		if parentHash, ok := f.eth2Roots.Get(block.Block.ParentRoot); ok {
+			f.eth2Roots.Add(blockRoot, parentHash)
+		}
 	}
 
 	if block.Block.Slot > f.highestSeen.Load() {

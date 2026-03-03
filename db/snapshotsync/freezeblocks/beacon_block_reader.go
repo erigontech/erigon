@@ -53,7 +53,10 @@ type BeaconSnapshotReader interface {
 	ReadBlockBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBeaconBlock, error)
 	ReadBlockByRoot(ctx context.Context, tx kv.Tx, blockRoot common.Hash) (*cltypes.SignedBeaconBlock, error)
 	ReadHeaderByRoot(ctx context.Context, tx kv.Tx, blockRoot common.Hash) (*cltypes.SignedBeaconBlockHeader, error)
-	ReadBlindedBlockBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBlindedBeaconBlock, error)
+	// ReadBeaconBlockBodyBySlot reads a block without full execution payload data (no transactions/
+	// withdrawals). Works for both pre- and post-GLOAS blocks. Use ReadBlockBySlot when full EL
+	// data is needed.
+	ReadBeaconBlockBodyBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBeaconBlock, error)
 
 	FrozenSlots() uint64
 }
@@ -135,7 +138,7 @@ func (r *beaconSnapshotReader) ReadBlockBySlot(ctx context.Context, tx kv.Tx, sl
 	return snapshot_format.ReadBlockFromSnapshot(reader, r.eth1Getter, r.cfg)
 }
 
-func (r *beaconSnapshotReader) ReadBlindedBlockBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBlindedBeaconBlock, error) {
+func (r *beaconSnapshotReader) ReadBeaconBlockBodyBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBeaconBlock, error) {
 	view := r.sn.View()
 	defer view.Close()
 
@@ -194,7 +197,7 @@ func (r *beaconSnapshotReader) ReadBlindedBlockBySlot(ctx context.Context, tx kv
 	reader.Reset(buffer)
 
 	// Use pooled buffers and readers to avoid allocations.
-	return snapshot_format.ReadBlindedBlockFromSnapshot(reader, r.cfg)
+	return snapshot_format.ReadBeaconBlockBodyFromSnapshot(reader, r.cfg)
 }
 
 func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, root common.Hash) (*cltypes.SignedBeaconBlock, error) {
@@ -303,7 +306,7 @@ func (r *beaconSnapshotReader) ReadHeaderByRoot(ctx context.Context, tx kv.Tx, r
 		return nil, nil
 	}
 
-	h, _, _, err := r.sn.ReadHeader(*slot)
+	h, _, _, err := r.sn.ReadHeader(*slot, tx)
 	// Use pooled buffers and readers to avoid allocations.
 	return h, err
 }
