@@ -17,6 +17,7 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -458,4 +459,32 @@ func TestOeTracer(t *testing.T) {
 			require.Equal(t, string(want), string(have))
 		})
 	}
+}
+
+func TestRawTransaction(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+
+	// Read a transaction from block 6 and re-encode it as raw bytes.
+	var encodedTx []byte
+	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
+		b, err := m.BlockReader.BlockByNumber(m.Ctx, tx, 6)
+		if err != nil {
+			return err
+		}
+		txn := b.Transactions()[0]
+		var buf bytes.Buffer
+		if err = txn.MarshalBinary(&buf); err != nil {
+			return err
+		}
+		encodedTx = buf.Bytes()
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := api.RawTransaction(context.Background(), encodedTx, []string{"trace"})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotEmpty(t, result.Trace)
 }
