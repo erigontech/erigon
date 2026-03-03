@@ -948,8 +948,6 @@ func (sdb *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 			}
 		}
 
-		// BAL: record coinbase/selfdestruct recipients even with 0 value
-		sdb.MarkAddressAccess(addr, true)
 		return nil
 	}
 

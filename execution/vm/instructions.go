@@ -633,6 +633,11 @@ func opExtCodeHash(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, err
 	slot := scope.Stack.peek()
 	address := accounts.InternAddress(slot.Bytes20())
 
+	// BAL: record address access so non-existent accounts appear in the block
+	// access list.  When Empty() returns true, GetCodeHash is never called,
+	// so no other read (BalancePath, CodePath, etc.) creates a BAL entry.
+	evm.IntraBlockState().MarkAddressAccess(address, true)
+
 	empty, err := evm.IntraBlockState().Empty(address)
 	if err != nil {
 		return pc, nil, err

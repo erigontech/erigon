@@ -246,10 +246,12 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 		if err != nil {
 			return 0, err
 		}
-		// Record the address access for BAL tracking, but only in non-read-only
-		// context. In STATICCALL, SELFDESTRUCT will be rejected by ErrWriteProtection
-		// before it executes, so the beneficiary is never truly accessed.
-		if !evm.readOnly {
+		// Record the beneficiary address access for BAL tracking when the
+		// contract has non-zero balance.  A zero-balance selfdestruct does
+		// not transfer value, so the beneficiary should not appear in the
+		// block access list.  Skip in read-only context (STATICCALL) where
+		// SELFDESTRUCT will be rejected by ErrWriteProtection.
+		if !evm.readOnly && !balance.IsZero() {
 			evm.IntraBlockState().MarkAddressAccess(address, false)
 		}
 		if empty && !balance.IsZero() {
