@@ -195,7 +195,7 @@ func (s *SequenceReader) ReverseIterator(v int) stream.U64 {
 }
 
 // Merge merges the other sequence into this one, returning a built SequenceBuilder
-// with outBaseNum. Both sequences must be pre-sorted.
+// with outBaseNum. Both sequences must be pre-sorted with s.Max() <= other.Min().
 // Call AppendBytes on the result to serialize.
 func (s *SequenceReader) Merge(other *SequenceReader, outBaseNum uint64, it1, it2 *SequenceIterator) (*SequenceBuilder, error) {
 	it1.Reset(s, 0)
