@@ -240,7 +240,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			se.logger.Info(
 				"periodic commit check",
 				"block", b.NumberU64(),
-				"txNum", se.doms.TxNum(),
+				"txNum", inputTxNum,
 				"commitment", times.ComputeCommitment,
 			)
 			if isBatchFull {

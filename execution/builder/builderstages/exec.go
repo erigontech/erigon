@@ -17,6 +17,7 @@
 package builderstages
 
 import (
+	context0 "context"
 	"errors"
 	"fmt"
 	"sync/atomic"
@@ -24,7 +25,6 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/holiman/uint256"
-	"golang.org/x/net/context"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/metrics"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/aa"
@@ -94,7 +95,7 @@ func StageBuilderExecCfg(
 // SpawnBuilderExecStage
 // TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnBuilderExecStage(ctx context.Context, s *stagedsync.StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg BuilderExecCfg, sendersCfg stagedsync.SendersCfg, execCfg stagedsync.ExecuteBlockCfg, logger log.Logger, u stagedsync.Unwinder) (err error) {
+func SpawnBuilderExecStage(ctx context0.Context, s *stagedsync.StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg BuilderExecCfg, sendersCfg stagedsync.SendersCfg, execCfg stagedsync.ExecuteBlockCfg, logger log.Logger, u stagedsync.Unwinder) (err error) {
 	cfg.vmConfig.NoReceipts = false
 	chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 	logPrefix := s.LogPrefix()
@@ -108,7 +109,7 @@ func SpawnBuilderExecStage(ctx context.Context, s *stagedsync.StageState, sd *ex
 	var balIO *state.VersionedIO
 	var systemReads state.ReadSet
 	var systemWrites state.VersionedWrites
-	var systemAccess map[accounts.Address]struct{}
+	var systemAccess state.AccessSet
 	if needBAL {
 		ibs.SetVersionMap(state.NewVersionMap(nil))
 		balIO = &state.VersionedIO{}
@@ -134,15 +135,18 @@ func SpawnBuilderExecStage(ctx context.Context, s *stagedsync.StageState, sd *ex
 	}
 	defer simSd.Close()
 
-	chainReader := stagedsync.NewChainReaderImpl(cfg.chainConfig, tx, cfg.blockReader, logger)
+	chainReader := exec.NewChainReader(cfg.chainConfig, tx, cfg.blockReader, logger)
 
-	txNum := sd.TxNum()
+	txNum, _, err := sd.SeekCommitment(ctx, tx)
+	if err != nil {
+		return err
+	}
 
 	protocol.InitializeBlockExecution(cfg.engine, chainReader, current.Header, cfg.chainConfig, ibs, &state.NoopWriter{}, logger, nil)
 	if needBAL {
 		systemReads = stagedsync.MergeReadSets(systemReads, ibs.VersionedReads())
 		systemWrites = stagedsync.MergeVersionedWrites(systemWrites, ibs.VersionedWrites(false))
-		systemAccess = stagedsync.MergeAccessedAddresses(systemAccess, ibs.AccessedAddresses())
+		systemAccess = systemAccess.Merge(ibs.AccessedAddresses())
 		ibs.ResetVersionedIO()
 	}
 
@@ -230,7 +234,7 @@ func SpawnBuilderExecStage(ctx context.Context, s *stagedsync.StageState, sd *ex
 	if needBAL {
 		systemReads = stagedsync.MergeReadSets(systemReads, ibs.VersionedReads())
 		systemWrites = stagedsync.MergeVersionedWrites(systemWrites, ibs.VersionedWrites(false))
-		systemAccess = stagedsync.MergeAccessedAddresses(systemAccess, ibs.AccessedAddresses())
+		systemAccess = systemAccess.Merge(ibs.AccessedAddresses())
 		ibs.ResetVersionedIO()
 
 		systemVersion := state.Version{BlockNum: blockHeight, TxIndex: -1}
@@ -327,7 +331,10 @@ func SpawnBuilderExecStage(ctx context.Context, s *stagedsync.StageState, sd *ex
 		return err
 	}
 
-	commitmentTxNum := execSd.TxNum()
+	commitmentTxNum, _, err := execSd.SeekCommitment(ctx, execTx)
+	if err != nil {
+		return fmt.Errorf("seek commitment failed: %w", err)
+	}
 	rh, err := execSd.ComputeCommitment(ctx, execTx, true, blockHeight, commitmentTxNum, s.LogPrefix(), nil)
 	if err != nil {
 		return fmt.Errorf("compute commitment failed: %w", err)
@@ -340,7 +347,7 @@ func SpawnBuilderExecStage(ctx context.Context, s *stagedsync.StageState, sd *ex
 }
 
 func getNextTransactions(
-	ctx context.Context,
+	ctx context0.Context,
 	cfg BuilderExecCfg,
 	chainID *uint256.Int,
 	header *types.Header,
@@ -372,15 +379,46 @@ func getNextTransactions(
 		txnprovider.WithAvailableRlpSpace(availableRlpSpace),
 	}
 
-	txns, err := cfg.txnProvider.ProvideTxns(ctx, provideOpts...)
+	allTxns, err := cfg.txnProvider.ProvideTxns(ctx, provideOpts...)
 	if err != nil {
 		return nil, err
 	}
 
 	blockNum := executionAt + 1
-	txns, err = filterBadTransactions(txns, chainID, cfg.chainConfig, blockNum, header, simStateReader, simStateWriter, logger)
+	txns, err := filterBadTransactions(allTxns, chainID, cfg.chainConfig, blockNum, header, simStateReader, simStateWriter, logger)
 	if err != nil {
 		return nil, err
+	}
+
+	// Remove nonce-too-high transactions from alreadyYielded so they can be reconsidered
+	// in subsequent iterations. When best() skips blob TXs that exceed remaining blob gas,
+	// it can create nonce gaps in the returned set. filterBadTransactions rejects the
+	// higher-nonce TXs, but they get stuck in the yielded set and are never returned again.
+	// By removing only nonce-too-high TXs (nonce > sim state nonce), we allow them to be
+	// reconsidered after earlier-nonce TXs are accepted. TXs rejected for other reasons
+	// (nonce-too-low, fee-too-low, etc.) remain yielded to avoid infinite re-evaluation.
+	if len(txns) < len(allTxns) && alreadyYielded != nil {
+		accepted := make(map[[32]byte]struct{}, len(txns))
+		for _, tx := range txns {
+			accepted[tx.Hash()] = struct{}{}
+		}
+		for _, tx := range allTxns {
+			h := tx.Hash()
+			if _, ok := accepted[h]; ok {
+				continue
+			}
+			sender, ok := tx.GetSender()
+			if !ok {
+				continue
+			}
+			account, err := simStateReader.ReadAccountData(sender)
+			if err != nil || account == nil {
+				continue
+			}
+			if tx.GetNonce() > account.Nonce {
+				alreadyYielded.Remove(h)
+			}
+		}
 	}
 
 	return txns, nil
@@ -510,7 +548,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 }
 
 func addTransactionsToBlock(
-	ctx context.Context,
+	ctx context0.Context,
 	logPrefix string,
 	current *BuiltBlock,
 	chainConfig *chain.Config,

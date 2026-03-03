@@ -1,12 +1,11 @@
 package commitment
 
 import (
-	"encoding/hex"
 	"testing"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
@@ -37,7 +36,7 @@ func TestVerifyBranchHashes_RoundTrip(t *testing.T) {
 
 	// Hash the account key to get the hashed extension.
 	// In production, root branch is folded at depth=1 (branchKey has 0 nibbles, depth = 0+1).
-	keccak := sha3.NewLegacyKeccak256().(keccakState)
+	keccak := keccak.NewFastKeccak()
 	depth := int16(1) // root branch fold depth
 	hashBuf := make([]byte, length.Hash)
 	if err := c.hashAccKey(keccak, depth, hashBuf); err != nil {
@@ -79,7 +78,7 @@ func TestVerifyBranchHashes_RoundTrip(t *testing.T) {
 
 	// Verify the branch hashes
 	accountValues := map[string][]byte{
-		hex.EncodeToString(addr[:]): accVal,
+		string(addr[:]): accVal,
 	}
 	storageValues := map[string][]byte{}
 
@@ -94,7 +93,7 @@ func TestVerifyBranchHashes_RoundTrip(t *testing.T) {
 	}
 	corruptedVal := accounts.SerialiseV3(&corruptedAcc)
 	corruptedAccountValues := map[string][]byte{
-		hex.EncodeToString(addr[:]): corruptedVal,
+		string(addr[:]): corruptedVal,
 	}
 
 	err = VerifyBranchHashes(branchKey, BranchData(branchData), corruptedAccountValues, storageValues)
@@ -133,7 +132,7 @@ func TestVerifyBranchHashes_Singleton(t *testing.T) {
 	c.StorageLen = int8(len(storageVal))
 
 	// Hash keys at depth=2
-	keccak := sha3.NewLegacyKeccak256().(keccakState)
+	keccak := keccak.NewFastKeccak()
 	depth := int16(2)
 
 	// First hash storage key
@@ -184,11 +183,10 @@ func TestVerifyBranchHashes_Singleton(t *testing.T) {
 	// Build domain values maps
 	accVal := accounts.SerialiseV3(&acc)
 	accountValues := map[string][]byte{
-		hex.EncodeToString(addr[:]): accVal,
+		string(addr[:]): accVal,
 	}
-	stoKey := hex.EncodeToString(c.storageAddr[:c.storageAddrLen])
 	storageValues := map[string][]byte{
-		stoKey: storageVal,
+		string(c.storageAddr[:c.storageAddrLen]): storageVal,
 	}
 
 	err = VerifyBranchHashes(branchKey, BranchData(branchData), accountValues, storageValues)
@@ -227,7 +225,7 @@ func TestVerifyBranchHashes_SingletonDepth1(t *testing.T) {
 	c.StorageLen = int8(len(storageVal))
 
 	// Root branch is folded at depth=1 (branchKey has 0 nibbles, depth = 0 + 1 = 1)
-	keccak := sha3.NewLegacyKeccak256().(keccakState)
+	keccak := keccak.NewFastKeccak()
 	depth := int16(1)
 
 	// First hash storage key
@@ -270,11 +268,10 @@ func TestVerifyBranchHashes_SingletonDepth1(t *testing.T) {
 	// Build domain values maps
 	accVal := accounts.SerialiseV3(&acc)
 	accountValues := map[string][]byte{
-		hex.EncodeToString(addr[:]): accVal,
+		string(addr[:]): accVal,
 	}
-	stoKey := hex.EncodeToString(c.storageAddr[:c.storageAddrLen])
 	storageValues := map[string][]byte{
-		stoKey: storageVal,
+		string(c.storageAddr[:c.storageAddrLen]): storageVal,
 	}
 
 	err = VerifyBranchHashes(branchKey, BranchData(branchData), accountValues, storageValues)
@@ -300,7 +297,7 @@ func TestVerifyBranchHashes_Storage(t *testing.T) {
 	c.loaded = cellLoadStorage
 
 	// Hash the storage key (depth=65 means non-singleton storage-only cell)
-	keccak := sha3.NewLegacyKeccak256().(keccakState)
+	keccak := keccak.NewFastKeccak()
 	depth := int16(65)
 	hashedKeyOffset := depth - 64
 	hashBuf := make([]byte, length.Hash)
@@ -345,9 +342,8 @@ func TestVerifyBranchHashes_Storage(t *testing.T) {
 	branchKey := HexNibblesToCompactBytes(nibbles[:])
 
 	// Build domain values map
-	stoKey := hex.EncodeToString(c.storageAddr[:c.storageAddrLen])
 	storageValues := map[string][]byte{
-		stoKey: storageVal,
+		string(c.storageAddr[:c.storageAddrLen]): storageVal,
 	}
 
 	err = VerifyBranchHashes(branchKey, BranchData(branchData), map[string][]byte{}, storageValues)

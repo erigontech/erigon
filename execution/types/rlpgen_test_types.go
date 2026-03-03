@@ -1,7 +1,4 @@
-// Copyright 2016 The go-ethereum Authors
-// (original work)
-// Copyright 2024 The Erigon Authors
-// (modifications)
+// Copyright 2025 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -17,18 +14,15 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build !go1.5
+package types
 
-// no-op implementation of tracing methods for Go < 1.5.
+import (
+	"github.com/erigontech/erigon/common"
+)
 
-package debug
-
-import "errors"
-
-func (*HandlerT) StartGoTrace(string) error {
-	return errors.New("tracing is not supported on Go < 1.5")
-}
-
-func (*HandlerT) StopGoTrace() error {
-	return errors.New("tracing is not supported on Go < 1.5")
+// LogForStorageGen - test struct for rlpgen code generation comparison
+type LogForStorageGen struct {
+	Address common.Address
+	Topics  []common.Hash
+	Data    []byte
 }

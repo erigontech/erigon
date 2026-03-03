@@ -31,10 +31,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	keccak "github.com/erigontech/fastkeccak"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/holiman/uint256"
 	"github.com/xsleonard/go-merkle"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -1196,7 +1196,7 @@ func ComputeHeadersRootHash(blockHeaders []*types.Header) ([]byte, error) {
 		headers[i] = arr
 	}
 	tree := merkle.NewTreeWithOpts(merkle.TreeOptions{EnableHashSorting: false, DisableHashLeaves: true})
-	if err := tree.Generate(Convert(headers), sha3.NewLegacyKeccak256()); err != nil {
+	if err := tree.Generate(Convert(headers), keccak.NewFastKeccak()); err != nil {
 		return nil, err
 	}
 

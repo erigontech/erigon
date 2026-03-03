@@ -248,7 +248,10 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.Exe
 			}
 		}
 
-		lastTxNum = doms.TxNum()
+		lastTxNum, _, err = doms.SeekCommitment(ctx, tx)
+		if err != nil {
+			return err
+		}
 		if err := tx.Commit(); err != nil {
 			return err
 		}
@@ -314,7 +317,6 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 				cumulativeBlobGasUsedInBlock += txTask.Tx().GetBlobGas()
 			}
 
-			doms.SetTxNum(txTask.TxNum)
 			putter := doms.AsPutDel(tx)
 
 			if produce.ReceiptDomain {

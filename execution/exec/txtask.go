@@ -110,7 +110,7 @@ type TxResult struct {
 
 	TraceFroms        map[accounts.Address]struct{}
 	TraceTos          map[accounts.Address]struct{}
-	AccessedAddresses map[accounts.Address]struct{}
+	AccessedAddresses state.AccessSet
 }
 
 func (r *TxResult) compare(other *TxResult) int {
@@ -952,6 +952,9 @@ func (q *PriorityQueue[T]) AwaitDrain(ctx context.Context, waitTime time.Duratio
 	q.Unlock()
 
 	if resultCh == nil {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
 		var none T
 		return q.Drain(ctx, none)
 	}

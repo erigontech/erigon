@@ -291,7 +291,14 @@ func newValidator(t *testing.T, testHeimdall *testHeimdall, blocks map[uint64]*t
 	})
 
 	return validator{
-		execmoduletester.NewWithEverything(t, &types.Genesis{Config: testHeimdall.chainConfig}, validatorKey, prune.DefaultMode, bor, 1024, false),
+		execmoduletester.New(
+			t,
+			execmoduletester.WithGenesisSpec(&types.Genesis{Config: testHeimdall.chainConfig}),
+			execmoduletester.WithKey(validatorKey),
+			execmoduletester.WithPruneMode(prune.DefaultMode),
+			execmoduletester.WithEngine(bor),
+			execmoduletester.WithBlockBufferSize(1024),
+		),
 		testHeimdall,
 		blocks,
 	}
