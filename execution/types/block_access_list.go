@@ -821,7 +821,6 @@ func decodeMinimalHash(s *rlp.Stream) (common.Hash, error) {
 	return out, nil
 }
 
-
 func releaseEncodingBuf(buf *encodingBuf) {
 	if buf == nil {
 		return

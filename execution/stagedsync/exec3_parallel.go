@@ -275,7 +275,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 											}
 										}
 										computedBytes, _ := types.EncodeBlockAccessListBytes(bal)
-										os.WriteFile(filepath.Join(balDir, fmt.Sprintf("computed_bal_%d.rlp", applyResult.BlockNum)), computedBytes, 0644)  //nolint:errcheck
+										os.WriteFile(filepath.Join(balDir, fmt.Sprintf("computed_bal_%d.rlp", applyResult.BlockNum)), computedBytes, 0644)             //nolint:errcheck
 										os.WriteFile(filepath.Join(balDir, fmt.Sprintf("computed_bal_%d.txt", applyResult.BlockNum)), []byte(bal.DebugString()), 0644) //nolint:errcheck
 										// TEMPORARY: warn instead of error to allow sync to continue for debugging
 										log.Warn("BAL mismatch (continuing)", "block", applyResult.BlockNum, "computed", bal.Hash(), "expected", headerBALHash, "storedBAL", dbBALBytes != nil)
@@ -1774,7 +1774,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 		execTask := be.tasks[nextTx]
 		if nextTx == maxValidated+1 {
 			be.skipCheck[nextTx] = true
-			} else {
+		} else {
 			txIndex := execTask.Version().TxIndex
 			if be.txIncarnations[nextTx] > 0 &&
 				(be.execAborted[nextTx] > 0 || be.execFailed[nextTx] > 0 || !be.blockIO.HasReads(txIndex) ||
