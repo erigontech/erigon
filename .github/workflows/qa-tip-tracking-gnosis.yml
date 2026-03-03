@@ -37,7 +37,10 @@ jobs:
         fi
         if [[ "$BRANCH" == release/* ]]; then
           VERSION="${BRANCH#release/}"
-          echo "ERIGON_REFERENCE_DATA_DIR=/opt/erigon-versions/gnosis-reference-version-${VERSION}/datadir" >> $GITHUB_ENV
+          MAJOR="${VERSION%.*}"
+          MINOR="${VERSION##*.}"
+          PREV_VERSION="${MAJOR}.$((MINOR - 1))"
+          echo "ERIGON_REFERENCE_DATA_DIR=/opt/erigon-versions/gnosis-reference-version-${PREV_VERSION}/datadir" >> $GITHUB_ENV
         else
           echo "ERIGON_REFERENCE_DATA_DIR=/opt/erigon-versions/gnosis-reference-version/datadir" >> $GITHUB_ENV
         fi
