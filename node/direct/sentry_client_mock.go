@@ -88,6 +88,50 @@ func (c *MockSentryClientAddPeerCall) DoAndReturn(f func(context.Context, *sentr
 	return c
 }
 
+// AddTrustedPeer mocks base method.
+func (m *MockSentryClient) AddTrustedPeer(ctx context.Context, in *sentryproto.AddPeerRequest, opts ...grpc.CallOption) (*sentryproto.AddPeerReply, error) {
+	m.ctrl.T.Helper()
+	varargs := []any{ctx, in}
+	for _, a := range opts {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "AddTrustedPeer", varargs...)
+	ret0, _ := ret[0].(*sentryproto.AddPeerReply)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// AddTrustedPeer indicates an expected call of AddTrustedPeer.
+func (mr *MockSentryClientMockRecorder) AddTrustedPeer(ctx, in any, opts ...any) *MockSentryClientAddTrustedPeerCall {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{ctx, in}, opts...)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddTrustedPeer", reflect.TypeOf((*MockSentryClient)(nil).AddTrustedPeer), varargs...)
+	return &MockSentryClientAddTrustedPeerCall{Call: call}
+}
+
+// MockSentryClientAddTrustedPeerCall wrap *gomock.Call
+type MockSentryClientAddTrustedPeerCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSentryClientAddTrustedPeerCall) Return(arg0 *sentryproto.AddPeerReply, arg1 error) *MockSentryClientAddTrustedPeerCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSentryClientAddTrustedPeerCall) Do(f func(context.Context, *sentryproto.AddPeerRequest, ...grpc.CallOption) (*sentryproto.AddPeerReply, error)) *MockSentryClientAddTrustedPeerCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSentryClientAddTrustedPeerCall) DoAndReturn(f func(context.Context, *sentryproto.AddPeerRequest, ...grpc.CallOption) (*sentryproto.AddPeerReply, error)) *MockSentryClientAddTrustedPeerCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // HandShake mocks base method.
 func (m *MockSentryClient) HandShake(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*sentryproto.HandShakeReply, error) {
 	m.ctrl.T.Helper()
@@ -592,6 +636,50 @@ func (c *MockSentryClientRemovePeerCall) Do(f func(context.Context, *sentryproto
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockSentryClientRemovePeerCall) DoAndReturn(f func(context.Context, *sentryproto.RemovePeerRequest, ...grpc.CallOption) (*sentryproto.RemovePeerReply, error)) *MockSentryClientRemovePeerCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// RemoveTrustedPeer mocks base method.
+func (m *MockSentryClient) RemoveTrustedPeer(ctx context.Context, in *sentryproto.RemovePeerRequest, opts ...grpc.CallOption) (*sentryproto.RemovePeerReply, error) {
+	m.ctrl.T.Helper()
+	varargs := []any{ctx, in}
+	for _, a := range opts {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "RemoveTrustedPeer", varargs...)
+	ret0, _ := ret[0].(*sentryproto.RemovePeerReply)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RemoveTrustedPeer indicates an expected call of RemoveTrustedPeer.
+func (mr *MockSentryClientMockRecorder) RemoveTrustedPeer(ctx, in any, opts ...any) *MockSentryClientRemoveTrustedPeerCall {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{ctx, in}, opts...)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveTrustedPeer", reflect.TypeOf((*MockSentryClient)(nil).RemoveTrustedPeer), varargs...)
+	return &MockSentryClientRemoveTrustedPeerCall{Call: call}
+}
+
+// MockSentryClientRemoveTrustedPeerCall wrap *gomock.Call
+type MockSentryClientRemoveTrustedPeerCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSentryClientRemoveTrustedPeerCall) Return(arg0 *sentryproto.RemovePeerReply, arg1 error) *MockSentryClientRemoveTrustedPeerCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSentryClientRemoveTrustedPeerCall) Do(f func(context.Context, *sentryproto.RemovePeerRequest, ...grpc.CallOption) (*sentryproto.RemovePeerReply, error)) *MockSentryClientRemoveTrustedPeerCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSentryClientRemoveTrustedPeerCall) DoAndReturn(f func(context.Context, *sentryproto.RemovePeerRequest, ...grpc.CallOption) (*sentryproto.RemovePeerReply, error)) *MockSentryClientRemoveTrustedPeerCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

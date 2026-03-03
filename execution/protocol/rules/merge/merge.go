@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"math/big"
 	"sync"
 
 	"github.com/holiman/uint256"
@@ -43,7 +42,7 @@ import (
 
 // Constants for The Merge as specified by EIP-3675: Upgrade consensus to Proof-of-Stake
 var (
-	ProofOfStakeDifficulty = common.Big0        // PoS block's difficulty is always 0
+	ProofOfStakeDifficulty = common.Num0        // PoS block's difficulty is always 0
 	ProofOfStakeNonce      = types.BlockNonce{} // PoS block's have all-zero nonces
 )
 
@@ -141,7 +140,7 @@ func (s *Merge) Prepare(chain rules.ChainHeaderReader, header *types.Header, sta
 	if !reached {
 		return s.eth1Engine.Prepare(chain, header, state)
 	}
-	header.Difficulty = ProofOfStakeDifficulty
+	header.Difficulty = *ProofOfStakeDifficulty
 	header.Nonce = ProofOfStakeNonce
 	return nil
 }
@@ -271,15 +270,15 @@ func (s *Merge) SealHash(header *types.Header) (hash common.Hash) {
 	return s.eth1Engine.SealHash(header)
 }
 
-func (s *Merge) CalcDifficulty(chain rules.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentAuRaStep uint64) *big.Int {
+func (s *Merge) CalcDifficulty(chain rules.ChainHeaderReader, time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentAuRaStep uint64) uint256.Int {
 	reached, err := IsTTDReached(chain, parentHash, parentNumber)
 	if err != nil {
-		return nil
+		return *ProofOfStakeDifficulty
 	}
 	if !reached {
 		return s.eth1Engine.CalcDifficulty(chain, time, parentTime, parentDifficulty, parentNumber, parentHash, parentUncleHash, parentAuRaStep)
 	}
-	return ProofOfStakeDifficulty
+	return *ProofOfStakeDifficulty
 }
 
 func (c *Merge) TxDependencies(h *types.Header) [][]int {
@@ -316,7 +315,7 @@ func (s *Merge) verifyHeader(chain rules.ChainHeaderReader, header, parent *type
 	}
 
 	// Verify that the block number is parent's +1
-	if diff := new(big.Int).Sub(header.Number, parent.Number); diff.Cmp(common.Big1) != 0 {
+	if diff, overflow := new(uint256.Int).SubOverflow(&header.Number, &parent.Number); overflow || diff.CmpUint64(1) != 0 {
 		return rules.ErrInvalidNumber
 	}
 
@@ -410,27 +409,25 @@ func (s *Merge) Initialize(config *chain.Config, chain rules.ChainHeaderReader, 
 		return s.eth1Engine.Initialize(config, chain, header, state, syscall, logger, tracer)
 	}
 
-	cfg := chain.Config()
-
 	// See https://hackmd.io/@filoozom/rycoQITlWl
-	if cfg.BalancerTime != nil && header.Time >= cfg.BalancerTime.Uint64() {
+	if config.BalancerTime != nil && header.Time >= config.BalancerTime.Uint64() {
 		parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
 		if parent == nil {
 			return rules.ErrUnknownAncestor
 		}
-		if parent.Time < cfg.BalancerTime.Uint64() { // first Balancer HF block
-			for address, rewrittenCode := range cfg.BalancerRewriteBytecode {
+		if parent.Time < config.BalancerTime.Uint64() { // first Balancer HF block
+			for address, rewrittenCode := range config.BalancerRewriteBytecode {
 				state.SetCode(accounts.InternAddress(address), rewrittenCode)
 			}
 		}
 	}
 
-	if cfg.IsCancun(header.Time) && header.ParentBeaconBlockRoot != nil {
+	if config.IsCancun(header.Time) && header.ParentBeaconBlockRoot != nil {
 		misc.ApplyBeaconRootEip4788(header.ParentBeaconBlockRoot, func(addr accounts.Address, data []byte) ([]byte, error) {
 			return syscall(addr, data, state, header, false /* constCall */)
 		}, tracer)
 	}
-	if cfg.IsPrague(header.Time) {
+	if config.IsPrague(header.Time) {
 		if err := misc.StoreBlockHashesEip2935(header, state); err != nil {
 			return err
 		}

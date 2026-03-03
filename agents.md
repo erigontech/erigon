@@ -23,8 +23,6 @@ go test ./execution/stagedsync/...
 go test -run TestName ./path/to/package/...
 ```
 
-Build tag required: `goexperiment.synctest` (set automatically by Makefile)
-
 ## Architecture Overview
 
 Erigon is a high-performance Ethereum execution client with embedded consensus layer. Key design principles:

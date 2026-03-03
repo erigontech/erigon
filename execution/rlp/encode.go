@@ -28,9 +28,10 @@ import (
 	"math/bits"
 	"reflect"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/rlp/internal/rlpstruct"
-	"github.com/holiman/uint256"
 )
 
 const (
@@ -160,7 +161,7 @@ func makeWriter(typ reflect.Type, ts rlpstruct.Tags) (writer, error) {
 		return writeU256IntPtr, nil
 	case typ == u256Int:
 		return writeU256IntNoPtr, nil
-	case kind == reflect.Ptr:
+	case kind == reflect.Pointer:
 		return makePtrWriter(typ, ts)
 	case reflect.PointerTo(typ).Implements(encoderInterface):
 		return makeEncoderWriter(typ), nil

@@ -50,7 +50,7 @@ type ExecutionPayload struct {
 	BlobGasUsed     *hexutil.Uint64     `json:"blobGasUsed"`
 	ExcessBlobGas   *hexutil.Uint64     `json:"excessBlobGas"`
 	SlotNumber      *hexutil.Uint64     `json:"slotNumber"`
-	BlockAccessList *hexutil.Bytes      `json:"blockAccessList"`
+	BlockAccessList hexutil.Bytes       `json:"blockAccessList"`
 }
 
 // PayloadAttributes represent the attributes required to start assembling a payload
@@ -101,6 +101,12 @@ type BlobAndProofV2 struct {
 type ExecutionPayloadBody struct {
 	Transactions []hexutil.Bytes     `json:"transactions" gencodec:"required"`
 	Withdrawals  []*types.Withdrawal `json:"withdrawals"  gencodec:"required"`
+}
+
+type ExecutionPayloadBodyV2 struct {
+	Transactions    []hexutil.Bytes     `json:"transactions" gencodec:"required"`
+	Withdrawals     []*types.Withdrawal `json:"withdrawals"  gencodec:"required"`
+	BlockAccessList hexutil.Bytes       `json:"blockAccessList"`
 }
 
 type PayloadStatus struct {
@@ -172,7 +178,7 @@ func ConvertRpcBlockToExecutionPayload(payload *executionproto.Block) *Execution
 	body := payload.Body
 
 	var bloom types.Bloom = gointerfaces.ConvertH2048ToBloom(header.LogsBloom)
-	baseFee := gointerfaces.ConvertH256ToUint256Int(header.BaseFeePerGas).ToBig()
+	baseFee := gointerfaces.ConvertH256ToUint256Int(header.BaseFeePerGas)
 
 	// Convert slice of hexutil.Bytes to a slice of slice of bytes
 	transactions := make([]hexutil.Bytes, len(body.Transactions))
@@ -192,7 +198,7 @@ func ConvertRpcBlockToExecutionPayload(payload *executionproto.Block) *Execution
 		GasUsed:       hexutil.Uint64(header.GasUsed),
 		Timestamp:     hexutil.Uint64(header.Timestamp),
 		ExtraData:     header.ExtraData,
-		BaseFeePerGas: (*hexutil.Big)(baseFee),
+		BaseFeePerGas: (*hexutil.Big)(baseFee.ToBig()),
 		BlockHash:     gointerfaces.ConvertH256ToHash(header.BlockHash),
 		Transactions:  transactions,
 	}
@@ -214,7 +220,7 @@ func ConvertRpcBlockToExecutionPayload(payload *executionproto.Block) *Execution
 
 func ConvertPayloadFromRpc(payload *typesproto.ExecutionPayload) *ExecutionPayload {
 	var bloom types.Bloom = gointerfaces.ConvertH2048ToBloom(payload.LogsBloom)
-	baseFee := gointerfaces.ConvertH256ToUint256Int(payload.BaseFeePerGas).ToBig()
+	baseFee := gointerfaces.ConvertH256ToUint256Int(payload.BaseFeePerGas)
 
 	// Convert slice of hexutil.Bytes to a slice of slice of bytes
 	transactions := make([]hexutil.Bytes, len(payload.Transactions))
@@ -234,7 +240,7 @@ func ConvertPayloadFromRpc(payload *typesproto.ExecutionPayload) *ExecutionPaylo
 		GasUsed:       hexutil.Uint64(payload.GasUsed),
 		Timestamp:     hexutil.Uint64(payload.Timestamp),
 		ExtraData:     payload.ExtraData,
-		BaseFeePerGas: (*hexutil.Big)(baseFee),
+		BaseFeePerGas: (*hexutil.Big)(baseFee.ToBig()),
 		BlockHash:     gointerfaces.ConvertH256ToHash(payload.BlockHash),
 		Transactions:  transactions,
 	}
@@ -252,7 +258,9 @@ func ConvertPayloadFromRpc(payload *typesproto.ExecutionPayload) *ExecutionPaylo
 			slotNumber := *payload.SlotNumber
 			res.SlotNumber = (*hexutil.Uint64)(&slotNumber)
 		}
-		res.BlockAccessList = types.ConvertBlockAccessListFromTypesProto(payload.BlockAccessList)
+		if blockAccessList := types.ConvertBlockAccessListFromTypesProto(payload.BlockAccessList); blockAccessList != nil {
+			res.BlockAccessList = blockAccessList
+		}
 	}
 	return res
 }

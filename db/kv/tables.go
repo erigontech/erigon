@@ -588,11 +588,14 @@ var DownloaderTablesCfg = TableCfg{}
 var DiagnosticsTablesCfg = TableCfg{}
 var HeimdallTablesCfg = TableCfg{}
 var PolygonBridgeTablesCfg = TableCfg{}
+var MigrationsTablesCfg = TableCfg{Migrations: {}}
 
 func TablesCfgByLabel(label Label) TableCfg {
 	switch label {
 	case dbcfg.ChainDB, dbcfg.TemporaryDB, dbcfg.CaplinDB: //TODO: move caplindb tables to own table config
 		return ChaindataTablesCfg
+	case dbcfg.MigrationsDB:
+		return MigrationsTablesCfg
 	case dbcfg.TxPoolDB:
 		return TxpoolTablesCfg
 	case dbcfg.SentryDB:

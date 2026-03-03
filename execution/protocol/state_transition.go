@@ -492,12 +492,22 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	auths := msg.Authorizations()
 
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
-	gas, floorGas7623, overflow := fixedgas.IntrinsicGas(st.data, uint64(len(accessTuples)), uint64(accessTuples.StorageKeys()), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, rules.IsPrague, false, uint64(len(auths)))
+	intrinsicGasResult, overflow := fixedgas.IntrinsicGas(fixedgas.IntrinsicGasCalcArgs{
+		Data:               st.data,
+		AuthorizationsLen:  uint64(len(auths)),
+		AccessListLen:      uint64(len(accessTuples)),
+		StorageKeysLen:     uint64(accessTuples.StorageKeys()),
+		IsContractCreation: contractCreation,
+		IsEIP2:             rules.IsHomestead,
+		IsEIP2028:          rules.IsIstanbul,
+		IsEIP3860:          isEIP3860,
+		IsEIP7623:          rules.IsPrague,
+	})
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
-	if st.gasRemaining < gas || st.gasRemaining < floorGas7623 {
-		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, max(gas, floorGas7623))
+	if st.gasRemaining < intrinsicGasResult.RegularGas || st.gasRemaining < intrinsicGasResult.FloorGasCost {
+		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, max(intrinsicGasResult.RegularGas, intrinsicGasResult.FloorGasCost))
 	}
 
 	verifiedAuthorities, err := st.verifyAuthorities(auths, contractCreation, rules.ChainID.String())
@@ -506,9 +516,9 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	}
 
 	if t := st.evm.Config().Tracer; t != nil && t.OnGasChange != nil {
-		t.OnGasChange(st.gasRemaining, st.gasRemaining-gas, tracing.GasChangeTxIntrinsicGas)
+		t.OnGasChange(st.gasRemaining, st.gasRemaining-intrinsicGasResult.RegularGas, tracing.GasChangeTxIntrinsicGas)
 	}
-	st.gasRemaining -= gas
+	st.gasRemaining -= intrinsicGasResult.RegularGas
 
 	var bailout bool
 	// Gas bailout (for trace_call) should only be applied if there is not sufficient balance to perform value transfer
@@ -558,18 +568,18 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		refund := min(gasUsed/refundQuotient, st.state.GetRefund())
 		gasUsed = gasUsed - refund
 		if rules.IsPrague {
-			gasUsed = max(floorGas7623, gasUsed)
+			gasUsed = max(intrinsicGasResult.FloorGasCost, gasUsed)
 		}
 		if rules.IsAmsterdam {
 			// EIP-7778: Block Gas Accounting without Refunds
-			st.blockGasUsed = max(floorGas7623, st.blockGasUsed)
+			st.blockGasUsed = max(intrinsicGasResult.FloorGasCost, st.blockGasUsed)
 		} else {
 			st.blockGasUsed = gasUsed
 		}
 		st.gasRemaining = st.initialGas - gasUsed
 		st.refundGas()
 	} else if rules.IsPrague {
-		st.blockGasUsed = max(floorGas7623, st.gasUsed())
+		st.blockGasUsed = max(intrinsicGasResult.FloorGasCost, st.gasUsed())
 		st.gasRemaining = st.initialGas - st.blockGasUsed
 	} else {
 		st.blockGasUsed = st.gasUsed()

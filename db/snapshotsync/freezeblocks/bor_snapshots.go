@@ -62,7 +62,7 @@ func (br *BlockRetire) retireBorBlocks(
 			continue
 		}
 
-		blockFrom, blockTo, ok := CanRetire(maxBlockNum, minSnapBlockNum, snap.Enum(), br.chainConfig)
+		blockFrom, blockTo, ok := CanRetire(maxBlockNum, minSnapBlockNum, snap.Enum(), br.snCfg)
 		if ok {
 			blocksRetired = true
 
@@ -86,8 +86,8 @@ func (br *BlockRetire) retireBorBlocks(
 			rangeExtractor := snapshots.RangeExtractor(snap)
 			indexBuilder := snapshots.IndexBuilder(snap)
 
-			for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, snap.Enum(), chainConfig) {
-				end := chooseSegmentEnd(i, blockTo, snap.Enum(), chainConfig)
+			for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, snap.Enum(), br.snCfg) {
+				end := chooseSegmentEnd(i, blockTo, snap.Enum(), br.snCfg)
 				if _, err := snap.ExtractRange(ctx, snap.FileInfo(snapshots.Dir(), i, end), rangeExtractor, indexBuilder, firstKeyGetter, db, chainConfig, tmpDir, workers, lvl, logger, br.blockReader); err != nil {
 					return ok, fmt.Errorf("ExtractRange: %d-%d: %w", i, end, err)
 				}

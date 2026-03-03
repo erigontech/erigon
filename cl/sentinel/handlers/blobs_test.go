@@ -66,13 +66,13 @@ func getTestBlobSidecars(blockHeader *cltypes.SignedBeaconBlockHeader) []*cltype
 func TestBlobsByRangeHandler(t *testing.T) {
 	ctx := context.Background()
 
-	listenAddrHost := "/ip4/127.0.0.1/tcp/6121"
-	host, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost))
+	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
+	t.Cleanup(func() { host.Close() })
 
-	listenAddrHost1 := "/ip4/127.0.0.1/tcp/6358"
-	host1, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost1))
+	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
+	t.Cleanup(func() { host1.Close() })
 
 	err = host.Connect(ctx, peer.AddrInfo{
 		ID:    host1.ID(),
@@ -190,13 +190,13 @@ func TestBlobsByRangeHandler(t *testing.T) {
 func TestBlobsByIdentifiersHandler(t *testing.T) {
 	ctx := context.Background()
 
-	listenAddrHost := "/ip4/127.0.0.1/tcp/6125"
-	host, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost))
+	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
+	t.Cleanup(func() { host.Close() })
 
-	listenAddrHost1 := "/ip4/127.0.0.1/tcp/6350"
-	host1, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost1))
+	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
+	t.Cleanup(func() { host1.Close() })
 
 	err = host.Connect(ctx, peer.AddrInfo{
 		ID:    host1.ID(),

@@ -17,8 +17,6 @@
 package evmtypes
 
 import (
-	"math/big"
-
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -46,7 +44,7 @@ type BlockContext struct {
 	MaxGasLimit bool             // Use GasLimit override for 2^256-1 (to be compatible with OpenEthereum's trace_call)
 	BlockNumber uint64           // Provides information for NUMBER
 	Time        uint64           // Provides information for TIME
-	Difficulty  *big.Int         // Provides information for DIFFICULTY
+	Difficulty  uint256.Int      // Provides information for DIFFICULTY
 	BaseFee     uint256.Int      // Provides information for BASEFEE
 	PrevRanDao  *common.Hash     // Provides information for PREVRANDAO
 	BlobBaseFee uint256.Int      // Provides information for BLOBBASEFEE
@@ -77,6 +75,11 @@ type ExecutionResult struct {
 	FeeTipped            uint256.Int
 	FeeBurnt             uint256.Int
 	BurntContractAddress accounts.Address
+
+	// SelfDestructedWithBalance holds accounts that were selfdestructed during
+	// execution but received ETH after the SELFDESTRUCT opcode ran (EIP-7708).
+	// Captured before SoftFinalise clears the journal.
+	SelfDestructedWithBalance []AddressAndBalance
 }
 
 // Unwrap returns the internal evm error which allows us for further
