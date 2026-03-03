@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"maps"
 	"math"
-	"os"
-	"path/filepath"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -264,21 +262,8 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 										}
 									}
 									if headerBALHash != bal.Hash() {
-										// Dump both computed and stored BAL for comparison
-										balDir := filepath.Join(pe.cfg.dirs.DataDir, "bal")
-										os.MkdirAll(balDir, 0755) //nolint:errcheck
-										if dbBALBytes != nil {
-											os.WriteFile(filepath.Join(balDir, fmt.Sprintf("stored_bal_%d.rlp", applyResult.BlockNum)), dbBALBytes, 0644) //nolint:errcheck
-											storedBAL, decErr := types.DecodeBlockAccessListBytes(dbBALBytes)
-											if decErr == nil && storedBAL != nil {
-												os.WriteFile(filepath.Join(balDir, fmt.Sprintf("stored_bal_%d.txt", applyResult.BlockNum)), []byte(storedBAL.DebugString()), 0644) //nolint:errcheck
-											}
-										}
-										computedBytes, _ := types.EncodeBlockAccessListBytes(bal)
-										os.WriteFile(filepath.Join(balDir, fmt.Sprintf("computed_bal_%d.rlp", applyResult.BlockNum)), computedBytes, 0644)             //nolint:errcheck
-										os.WriteFile(filepath.Join(balDir, fmt.Sprintf("computed_bal_%d.txt", applyResult.BlockNum)), []byte(bal.DebugString()), 0644) //nolint:errcheck
-										// TEMPORARY: warn instead of error to allow sync to continue for debugging
-										log.Warn("BAL mismatch (continuing)", "block", applyResult.BlockNum, "computed", bal.Hash(), "expected", headerBALHash, "storedBAL", dbBALBytes != nil)
+										log.Info(fmt.Sprintf("computed bal: %s", bal.DebugString()))
+										return fmt.Errorf("%w, block=%d: block access list mismatch: got %s expected %s", rules.ErrInvalidBlock, applyResult.BlockNum, bal.Hash(), headerBALHash)
 									}
 								}
 							}
