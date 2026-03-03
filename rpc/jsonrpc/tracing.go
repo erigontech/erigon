@@ -365,7 +365,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 	}
 	engine := api.engine()
 
-	blockNumber, hash, isLatest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, dbtx, api._blockReader, api.filters)
+	blockNumber, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, dbtx, api._blockReader, api.filters)
 	if err != nil {
 		return fmt.Errorf("get block number: %v", err)
 	}
