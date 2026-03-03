@@ -27,8 +27,6 @@ import (
 	"strings"
 	"time"
 
-	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/prune"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -40,7 +38,9 @@ import (
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/bitmapdb"
+	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
@@ -192,15 +192,15 @@ func (ht *HistoryRoTx) Files() (res VisibleFiles) {
 }
 
 func (h *History) MissedMapAccessors() (l []*FilesItem) {
-	return h.missedMapAccessors(h.dirtyFiles.Items())
+	return h.missedMapAccessors(h.dirtyFiles.Items(), readDirNames(h.dirs.SnapAccessors))
 }
 
-func (h *History) missedMapAccessors(source []*FilesItem) (l []*FilesItem) {
+func (h *History) missedMapAccessors(source []*FilesItem, dl dirListing) (l []*FilesItem) {
 	if !h.Accessors.Has(statecfg.AccessorHashMap) {
 		return nil
 	}
 	return fileItemsWithMissedAccessors(source, h.stepSize, func(fromStep, toStep kv.Step) []string {
-		fPath, _, _, err := version.FindFilesWithVersionsByPattern(h.vAccessorFilePathMask(fromStep, toStep))
+		fPath, _, _, err := version.MatchVersionedFile(h.vAccessorFileNameMask(fromStep, toStep), dl.names, dl.dir)
 		if err != nil {
 			panic(err)
 		}
@@ -277,22 +277,23 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	rs.LogLvl(log.LvlTrace)
 
 	seq := &multiencseq.SequenceReader{}
+	it := &multiencseq.SequenceIterator{}
 
 	i := 0
 	for {
 		histReader.Reset(0)
 		iiReader.Reset(0)
+		rs.SetProgress(p)
 
 		valOffset = 0
 		for iiReader.HasNext() {
 			keyBuf, _ = iiReader.Next(keyBuf[:0])
 			valBuf, _ = iiReader.Next(valBuf[:0])
-			p.Processed.Add(1)
 
 			// fmt.Printf("ef key %x\n", keyBuf)
 
 			seq.Reset(efBaseTxNum, valBuf)
-			it := seq.Iterator(0)
+			it.Reset(seq, 0)
 			for it.HasNext() {
 				txNum, err := it.Next()
 				if err != nil {
@@ -788,24 +789,14 @@ func (h *History) buildFiles(ctx context.Context, step kv.Step, collation Histor
 	}
 
 	{
-		ps := background.NewProgressSet()
-		_, efHistoryFileName := filepath.Split(collation.efHistoryPath)
-		p := ps.AddNew(efHistoryFileName, 1)
-		defer ps.Delete(p)
-
 		if err = collation.efHistoryComp.Compress(); err != nil {
 			return HistoryFiles{}, fmt.Errorf("compress %s .ef history: %w", h.FilenameBase, err)
 		}
-		ps.Delete(p)
 	}
 	{
-		_, historyFileName := filepath.Split(collation.historyPath)
-		p := ps.AddNew(historyFileName, 1)
-		defer ps.Delete(p)
 		if err = collation.historyComp.Compress(); err != nil {
 			return HistoryFiles{}, fmt.Errorf("compress %s .v history: %w", h.FilenameBase, err)
 		}
-		ps.Delete(p)
 	}
 	collation.Close()
 
@@ -853,6 +844,9 @@ func (h *History) integrateDirtyFiles(sf HistoryFiles, txNumFrom, txNumTo uint64
 	if txNumFrom == txNumTo {
 		panic(fmt.Sprintf("assert: txNumFrom(%d) == txNumTo(%d)", txNumFrom, txNumTo))
 	}
+	if sf.historyDecomp == nil {
+		return // build was skipped — don't overwrite existing dirty files
+	}
 
 	h.InvertedIndex.integrateDirtyFiles(InvertedFiles{
 		decomp:    sf.efHistoryDecomp,
@@ -876,7 +870,7 @@ func (h *History) dataWriter(f *seg.Compressor) *seg.PagedWriter {
 	if !strings.Contains(f.FileName(), ".v") {
 		panic("assert: miss-use " + f.FileName())
 	}
-	return seg.NewPagedWriter(seg.NewWriter(f, h.Compression), f.GetValuesOnCompressedPage() > 0, h.dirs.Tmp)
+	return seg.NewPagedWriter(seg.NewWriter(f, h.Compression), f.GetValuesOnCompressedPage() > 0)
 }
 func (ht *HistoryRoTx) dataReader(f *seg.Decompressor) *seg.Reader { return ht.h.dataReader(f) }
 func (ht *HistoryRoTx) dataWriter(f *seg.Compressor) *seg.PagedWriter {

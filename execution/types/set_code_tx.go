@@ -115,7 +115,7 @@ func (tx *SetCodeTransaction) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
-func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
+func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules) (*Message, error) {
 	var to accounts.Address
 	if tx.To == nil {
 		to = accounts.NilAddress
@@ -140,10 +140,7 @@ func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		return nil, errors.New("SetCodeTransaction is only supported in Prague")
 	}
 	if baseFee != nil {
-		overflow := msg.gasPrice.SetFromBig(baseFee)
-		if overflow {
-			return nil, errors.New("gasPrice higher than 2^256-1")
-		}
+		msg.gasPrice.Set(baseFee)
 	}
 	msg.gasPrice.Add(&msg.gasPrice, tx.TipCap)
 	if msg.gasPrice.Gt(tx.FeeCap) {

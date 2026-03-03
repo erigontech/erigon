@@ -11,8 +11,6 @@ DISABLED_TEST_LIST=(
   # Failing after the PR https://github.com/erigontech/erigon/pull/13617 that fixed this incompatibility
   # issues https://hive.pectra-devnet-5.ethpandaops.io/suite.html?suiteid=1738266984-51ae1a2f376e5de5e9ba68f034f80e32.json&suitename=rpc-compat
   net_listening/test_1.json
-  # Erigon2 and Erigon3 never supported this api methods
-  trace_rawTransaction
   # Temporary disable required block 24298763
   debug_traceBlockByNumber/test_51.json
   # to investigate
@@ -43,4 +41,4 @@ DISABLED_TEST_LIST=(
 DISABLED_TESTS=$(IFS=,; echo "${DISABLED_TEST_LIST[*]}")
 
 # Call the main test runner script with the required and optional parameters
-"$(dirname "$0")/run_rpc_tests.sh" mainnet v1.118.0 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR"
+"$(dirname "$0")/run_rpc_tests.sh" mainnet v1.120.0 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR"

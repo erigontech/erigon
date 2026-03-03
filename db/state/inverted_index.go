@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"path"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -32,8 +31,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon/db/kv/prune"
-	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
@@ -49,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/bitmapdb"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
@@ -56,6 +54,7 @@ import (
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 type InvertedIndex struct {
@@ -241,21 +240,19 @@ func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
 }
 
 func (ii *InvertedIndex) MissedMapAccessors() (l []*FilesItem) {
-	return ii.missedMapAccessors(ii.dirtyFiles.Items())
+	return ii.missedMapAccessors(ii.dirtyFiles.Items(), readDirNames(ii.dirs.SnapAccessors))
 }
 
-func (ii *InvertedIndex) missedMapAccessors(source []*FilesItem) (l []*FilesItem) {
+func (ii *InvertedIndex) missedMapAccessors(source []*FilesItem, dl dirListing) (l []*FilesItem) {
 	if !ii.Accessors.Has(statecfg.AccessorHashMap) {
 		return nil
 	}
 	return fileItemsWithMissedAccessors(source, ii.stepSize, func(fromStep, toStep kv.Step) []string {
-		fPath, _, _, err := version.FindFilesWithVersionsByPattern(ii.efAccessorFilePathMask(fromStep, toStep))
+		fPath, _, _, err := version.MatchVersionedFile(ii.efAccessorFileNameMask(fromStep, toStep), dl.names, dl.dir)
 		if err != nil {
 			panic(err)
 		}
-		return []string{
-			fPath,
-		}
+		return []string{fPath}
 	})
 }
 
@@ -501,6 +498,8 @@ type InvertedIndexRoTx struct {
 	salt              *uint32
 	stepSize          uint64
 	stepsInFrozenFile uint64
+
+	reUsableSeq multiencseq.SequenceReader // re-usable instance, to reduce allocations
 }
 
 // hashKey - change of salt will require re-gen of indices
@@ -582,12 +581,8 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 		}
 		encodedSeq, _ := g.Next(nil)
 
-		// TODO: implement merge Reset+Seek
-		// if iit.ef == nil {
-		// 	iit.ef = eliasfano32.NewEliasFano(1, 1)
-		// }
-		// equalOrHigherTxNum, found = iit.ef.Reset(encodedSeq).Seek(txNum)
-		equalOrHigherTxNum, found = multiencseq.Seek(iit.files[i].startTxNum, encodedSeq, txNum)
+		iit.reUsableSeq.Reset(iit.files[i].startTxNum, encodedSeq)
+		equalOrHigherTxNum, found = iit.reUsableSeq.Seek(txNum)
 		if !found {
 			continue
 		}
@@ -1105,13 +1100,10 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step kv.Step, coll Inve
 	}
 
 	{
-		p := ps.AddNew(path.Base(coll.iiPath), 1)
 		if err = coll.writer.Compress(); err != nil {
-			ps.Delete(p)
 			return InvertedFiles{}, fmt.Errorf("compress %s: %w", ii.FilenameBase, err)
 		}
 		coll.Close()
-		ps.Delete(p)
 	}
 
 	if decomp, err = seg.NewDecompressor(coll.iiPath); err != nil {
@@ -1186,6 +1178,9 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumTo uint64) {
 	if txNumFrom == txNumTo {
 		panic(fmt.Sprintf("assert: txNumFrom(%d) == txNumTo(%d)", txNumFrom, txNumTo))
+	}
+	if sf.decomp == nil {
+		return // build was skipped — don't overwrite existing dirty files
 	}
 	fi := newFilesItem(txNumFrom, txNumTo, ii.stepSize, ii.stepsInFrozenFile)
 	fi.decompressor = sf.decomp

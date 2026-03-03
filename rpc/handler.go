@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -517,7 +518,7 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream jsons
 			}
 		}
 
-		if resp != nil && resp.Error != nil && resp.Error.Message != "context canceled" {
+		if resp != nil && resp.Error != nil && !errors.Is(ctx.ctx.Err(), context.Canceled) {
 			if resp.Error.Data != nil {
 				h.logger.Warn("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID),
 					"err", resp.Error.Message, "errdata", resp.Error.Data)
@@ -575,8 +576,10 @@ func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage, stream jsonstrea
 		rpcRequestGauge.Inc()
 		if answer != nil && answer.Error != nil {
 			failedReqeustGauge.Inc()
+			callb.timerFailure.ObserveDuration(start)
+		} else {
+			callb.timerSuccess.ObserveDuration(start)
 		}
-		newRPCServingTimerMS(msg.Method, answer == nil || answer.Error == nil).ObserveDuration(start)
 	}
 	return answer
 }
@@ -614,6 +617,45 @@ func (h *handler) handleSubscribe(cp *callProc, msg *jsonrpcMessage, stream json
 	return h.runMethod(ctx, msg, callb, args, stream)
 }
 
+// resultFieldStream lazily writes "result": on first value write.
+// This ensures JSON-RPC 2.0 compliance: if the method errors without
+// writing any data, "result" won't appear in the response.
+type resultFieldStream struct {
+	jsonstream.Stream
+	written bool
+}
+
+func (s *resultFieldStream) ensure() {
+	if !s.written {
+		s.written = true
+		s.Stream.WriteObjectField("result")
+	}
+}
+
+func (s *resultFieldStream) WriteNil()                   { s.ensure(); s.Stream.WriteNil() }
+func (s *resultFieldStream) WriteTrue()                  { s.ensure(); s.Stream.WriteTrue() }
+func (s *resultFieldStream) WriteFalse()                 { s.ensure(); s.Stream.WriteFalse() }
+func (s *resultFieldStream) WriteBool(val bool)          { s.ensure(); s.Stream.WriteBool(val) }
+func (s *resultFieldStream) WriteInt(val int)            { s.ensure(); s.Stream.WriteInt(val) }
+func (s *resultFieldStream) WriteInt8(val int8)          { s.ensure(); s.Stream.WriteInt8(val) }
+func (s *resultFieldStream) WriteInt16(val int16)        { s.ensure(); s.Stream.WriteInt16(val) }
+func (s *resultFieldStream) WriteInt32(val int32)        { s.ensure(); s.Stream.WriteInt32(val) }
+func (s *resultFieldStream) WriteInt64(val int64)        { s.ensure(); s.Stream.WriteInt64(val) }
+func (s *resultFieldStream) WriteUint(val uint)          { s.ensure(); s.Stream.WriteUint(val) }
+func (s *resultFieldStream) WriteUint8(val uint8)        { s.ensure(); s.Stream.WriteUint8(val) }
+func (s *resultFieldStream) WriteUint16(val uint16)      { s.ensure(); s.Stream.WriteUint16(val) }
+func (s *resultFieldStream) WriteUint32(val uint32)      { s.ensure(); s.Stream.WriteUint32(val) }
+func (s *resultFieldStream) WriteUint64(val uint64)      { s.ensure(); s.Stream.WriteUint64(val) }
+func (s *resultFieldStream) WriteFloat32(val float32)    { s.ensure(); s.Stream.WriteFloat32(val) }
+func (s *resultFieldStream) WriteFloat64(val float64)    { s.ensure(); s.Stream.WriteFloat64(val) }
+func (s *resultFieldStream) WriteString(val string)      { s.ensure(); s.Stream.WriteString(val) }
+func (s *resultFieldStream) WriteObjectStart()           { s.ensure(); s.Stream.WriteObjectStart() }
+func (s *resultFieldStream) WriteArrayStart()            { s.ensure(); s.Stream.WriteArrayStart() }
+func (s *resultFieldStream) WriteEmptyArray()            { s.ensure(); s.Stream.WriteEmptyArray() }
+func (s *resultFieldStream) WriteEmptyObject()           { s.ensure(); s.Stream.WriteEmptyObject() }
+func (s *resultFieldStream) Write(p []byte) (int, error) { s.ensure(); return s.Stream.Write(p) }
+func (s *resultFieldStream) WriteRaw(content string)     { s.ensure(); s.Stream.WriteRaw(content) }
+
 // runMethod runs the Go callback for an RPC method.
 func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *callback, args []reflect.Value, stream jsonstream.Stream) *jsonrpcMessage {
 	if !callb.streamable {
@@ -633,11 +675,13 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 		stream.Write(msg.ID)
 		stream.WriteMore()
 	}
-	stream.WriteObjectField("result")
-	_, err := callb.call(ctx, msg.Method, args, stream)
+	rs := &resultFieldStream{Stream: stream}
+	_, err := callb.call(ctx, msg.Method, args, rs)
 	if err != nil {
-		_ = stream.ClosePending(1) // the enclosing JSON object is explicitly handled below
-		stream.WriteMore()
+		if rs.written {
+			_ = stream.ClosePending(1) // the enclosing JSON object is explicitly handled below
+			stream.WriteMore()
+		}
 		HandleError(err, stream)
 	}
 	stream.WriteObjectEnd()

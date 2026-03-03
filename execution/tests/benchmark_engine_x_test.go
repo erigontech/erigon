@@ -31,19 +31,7 @@ func TestBenchmarkEngineXInstruction(t *testing.T) {
 	// if wanting to run only a particular test, pass a whitelist, e.g.
 	//benchmarkCategory(t, "instruction", ".*log\\.json", nil)
 	//benchmarkCategory(t, "instruction", ".*codecopy\\.json", nil)
-	skipload := []string{
-		// TODO for now we need to run blockhash.json tests in its own runner
-		//      we can run it alongside other instruction/ tests once the
-		//      EngineXTestRunner uses debug_setHead(genesis) at beginning of each test
-		".*blockhash\\.json",
-	}
-	whitelist := skipload[0]
-	t.Run("all_without_blockhash", func(t *testing.T) {
-		benchmarkCategory(t, "instruction", "", skipload)
-	})
-	t.Run("only_blockhash", func(t *testing.T) {
-		benchmarkCategory(t, "instruction", whitelist, nil)
-	})
+	benchmarkCategory(t, "instruction", "", nil)
 }
 
 func TestBenchmarkEngineXPrecompile(t *testing.T) {

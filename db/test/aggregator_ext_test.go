@@ -98,10 +98,10 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 			Incarnation: 0,
 		}
 		buf := accounts.SerialiseV3(&acc)
-		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf, txNum, nil, 0)
+		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf, txNum, nil)
 		require.NoError(t, err)
 
-		err = domains.DomainPut(kv.StorageDomain, tx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, nil, 0)
+		err = domains.DomainPut(kv.StorageDomain, tx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, nil)
 		require.NoError(t, err)
 
 		keys[txNum-1] = append(addr, loc...)
@@ -109,10 +109,10 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		if (txNum+1)%stepSize == 0 {
 			trieState, err := hph.EncodeCurrentState(nil)
 			require.NoError(t, err)
-			cs := commitmentdb.NewCommitmentState(domains.TxNum(), 0, trieState)
+			cs := commitmentdb.NewCommitmentState(txNum, 0, trieState)
 			encodedState, err := cs.Encode()
 			require.NoError(t, err)
-			err = domains.DomainPut(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState, encodedState, txNum, nil, 0)
+			err = domains.DomainPut(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState, encodedState, txNum, nil)
 			require.NoError(t, err)
 		}
 	}
@@ -141,6 +141,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	t.Cleanup(newDb.Close)
 
 	newAgg := state.New(agg.Dirs()).StepSize(stepSize).MustOpen(ctx, newDb)
+	t.Cleanup(newAgg.Close)
 	require.NoError(t, newAgg.OpenFolder())
 
 	db, _ = temporal.New(newDb, newAgg)
@@ -153,9 +154,8 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	require.NoError(t, err)
 	defer newDoms.Close()
 
-	err = newDoms.SeekCommitment(ctx, tx)
+	latestTx, _, err := newDoms.SeekCommitment(ctx, tx)
 	require.NoError(t, err)
-	latestTx := newDoms.TxNum()
 	t.Logf("seek to latest_tx=%d", latestTx)
 
 	miss := uint64(0)
@@ -212,6 +212,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 	commit := func(txn uint64) error {
 		err = domains.Flush(ctx, tx)
 		require.NoError(t, err)
+		domains.Close()
 
 		err = tx.Commit()
 		require.NoError(t, err)
@@ -253,11 +254,11 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 		}
 		buf := accounts.SerialiseV3(&acc)
 
-		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf, txNum, prev1, 0)
+		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf, txNum, prev1)
 		require.NoError(t, err)
 		prev1 = buf
 
-		err = domains.DomainPut(kv.StorageDomain, tx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, prev2, 0)
+		err = domains.DomainPut(kv.StorageDomain, tx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, prev2)
 		require.NoError(t, err)
 		prev2 = []byte{addr[0], loc[0]}
 
@@ -268,11 +269,12 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 	for txNum = txNum + 1; txNum <= txs; txNum++ {
 		addr, loc := keys[txNum-1-half][:length.Addr], keys[txNum-1-half][length.Addr:]
 
-		prev, step, err := tx.GetLatest(kv.AccountsDomain, keys[txNum-1-half])
+		prev, _, err := tx.GetLatest(kv.AccountsDomain, keys[txNum-1-half])
 		require.NoError(t, err)
-		err = domains.DomainPut(kv.StorageDomain, tx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, prev, step)
+		err = domains.DomainPut(kv.StorageDomain, tx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, prev)
 		require.NoError(t, err)
 	}
+	domains.Close()
 
 	err = tx.Commit()
 
@@ -336,26 +338,26 @@ func TestAggregatorV3_Merge(t *testing.T) {
 			Incarnation: 0,
 		}
 		buf := accounts.SerialiseV3(&acc)
-		err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, buf, txNum, nil, 0)
+		err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, buf, txNum, nil)
 		require.NoError(t, err)
 
-		err = domains.DomainPut(kv.StorageDomain, rwTx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, nil, 0)
+		err = domains.DomainPut(kv.StorageDomain, rwTx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, nil)
 		require.NoError(t, err)
 
 		var v [8]byte
 		binary.BigEndian.PutUint64(v[:], txNum)
 		if txNum%135 == 0 {
-			pv, step, err := domains.GetLatest(kv.CommitmentDomain, rwTx, commKey2)
+			pv, _, err := domains.GetLatest(kv.CommitmentDomain, rwTx, commKey2)
 			require.NoError(t, err)
 
-			err = domains.DomainPut(kv.CommitmentDomain, rwTx, commKey2, v[:], txNum, pv, step)
+			err = domains.DomainPut(kv.CommitmentDomain, rwTx, commKey2, v[:], txNum, pv)
 			require.NoError(t, err)
 			otherMaxWrite = txNum
 		} else {
-			pv, step, err := domains.GetLatest(kv.CommitmentDomain, rwTx, commKey1)
+			pv, _, err := domains.GetLatest(kv.CommitmentDomain, rwTx, commKey1)
 			require.NoError(t, err)
 
-			err = domains.DomainPut(kv.CommitmentDomain, rwTx, commKey1, v[:], txNum, pv, step)
+			err = domains.DomainPut(kv.CommitmentDomain, rwTx, commKey1, v[:], txNum, pv)
 			require.NoError(t, err)
 			maxWrite = txNum
 		}
@@ -406,7 +408,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
 	require.Equal(t, 3, onChangeCalls)
-	require.Equal(t, 4, onDelCalls)
+	require.Equal(t, 7, onDelCalls)
 
 	{ //prune
 		rwTx, err = db.BeginTemporalRw(context.Background())
@@ -570,6 +572,9 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 }
 
 func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 
 	stepSize := uint64(5)
@@ -600,7 +605,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	for key := range data {
 		removedKey = []byte(key)[:length.Addr]
 		txNum = maxTx + 1
-		err = domains.DomainDel(kv.AccountsDomain, rwTx, removedKey, txNum, nil, 0)
+		err = domains.DomainDel(kv.AccountsDomain, rwTx, removedKey, txNum, nil)
 		require.NoError(t, err)
 		break
 	}
@@ -631,7 +636,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 
 	// 5. delete same key. commitment should be the same
 	txNum = maxTx + 1
-	err = domains.DomainDel(kv.AccountsDomain, rwTx, removedKey, txNum, nil, 0)
+	err = domains.DomainDel(kv.AccountsDomain, rwTx, removedKey, txNum, nil)
 	require.NoError(t, err)
 
 	resultHash, err := domains.ComputeCommitment(context.Background(), rwTx, false, txNum/stepSize, txNum, "", nil)
@@ -684,10 +689,10 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 			Incarnation: 0,
 		}
 		buf := accounts.SerialiseV3(&acc)
-		err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, buf, txNum, nil, 0)
+		err = domains.DomainPut(kv.AccountsDomain, rwTx, addr, buf, txNum, nil)
 		require.NoError(t, err)
 
-		err = domains.DomainPut(kv.StorageDomain, rwTx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, nil, 0)
+		err = domains.DomainPut(kv.StorageDomain, rwTx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, nil)
 		require.NoError(t, err)
 
 		if (txNum+1)%agg.StepSize() == 0 {
@@ -723,6 +728,9 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 }
 
 func TestAggregatorV3_BuildFiles_WithReorgDepth(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	ctx := t.Context()
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
@@ -850,12 +858,12 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execctx.SharedDoma
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
-			prev, step, err := domains.GetLatest(kv.AccountsDomain, tx, key)
+			prev, _, err := domains.GetLatest(kv.AccountsDomain, tx, key)
 			require.NoError(t, err)
 
 			usedKeys[string(key)] = struct{}{}
 
-			err = domains.DomainPut(kv.AccountsDomain, tx, key, buf, txNum, prev, step)
+			err = domains.DomainPut(kv.AccountsDomain, tx, key, buf, txNum, prev)
 			require.NoError(t, err)
 
 		case r > 33 && r <= 66:
@@ -870,10 +878,10 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execctx.SharedDoma
 			}
 			usedKeys[string(key)] = struct{}{}
 
-			prev, step, err := domains.GetLatest(kv.CodeDomain, tx, key)
+			prev, _, err := domains.GetLatest(kv.CodeDomain, tx, key)
 			require.NoError(t, err)
 
-			err = domains.DomainPut(kv.CodeDomain, tx, key, codeUpd, txNum, prev, step)
+			err = domains.DomainPut(kv.CodeDomain, tx, key, codeUpd, txNum, prev)
 			require.NoError(t, err)
 		case r > 80:
 			if !existed {
@@ -881,7 +889,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execctx.SharedDoma
 			}
 			usedKeys[string(key)] = struct{}{}
 
-			err := domains.DomainDel(kv.AccountsDomain, tx, key, txNum, nil, 0)
+			err := domains.DomainDel(kv.AccountsDomain, tx, key, txNum, nil)
 			require.NoError(t, err)
 
 		case r > 66 && r <= 80:
@@ -890,7 +898,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execctx.SharedDoma
 				key = key[:length.Addr]
 			}
 
-			prev, step, err := domains.GetLatest(kv.AccountsDomain, tx, key)
+			prev, _, err := domains.GetLatest(kv.AccountsDomain, tx, key)
 			require.NoError(t, err)
 			if prev == nil {
 				usedKeys[string(key)] = struct{}{}
@@ -901,7 +909,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execctx.SharedDoma
 					Incarnation: 0,
 				}
 				buf := accounts.SerialiseV3(&acc)
-				err = domains.DomainPut(kv.AccountsDomain, tx, key, buf, txNum, prev, step)
+				err = domains.DomainPut(kv.AccountsDomain, tx, key, buf, txNum, prev)
 				require.NoError(t, err)
 			}
 
@@ -913,10 +921,10 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execctx.SharedDoma
 				copy(sk[length.Addr:], loc)
 				usedKeys[string(sk)] = struct{}{}
 
-				prev, step, err := domains.GetLatest(kv.StorageDomain, tx, sk[:length.Addr])
+				prev, _, err := domains.GetLatest(kv.StorageDomain, tx, sk[:length.Addr])
 				require.NoError(t, err)
 
-				err = domains.DomainPut(kv.StorageDomain, tx, sk, uint256.NewInt(txNum).Bytes(), txNum, prev, step)
+				err = domains.DomainPut(kv.StorageDomain, tx, sk, uint256.NewInt(txNum).Bytes(), txNum, prev)
 				require.NoError(t, err)
 			}
 
