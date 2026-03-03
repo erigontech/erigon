@@ -106,6 +106,7 @@ func TestForkChoiceBasic(t *testing.T) {
 		public_keys_registry.NewInMemoryPublicKeysRegistry(),
 		localValidators,
 		false, // probabilisticHeadGetter
+		nil,   // db: no KV persistence in tests
 	)
 	require.NoError(t, err)
 	// first steps
@@ -195,6 +196,7 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 		public_keys_registry.NewInMemoryPublicKeysRegistry(),
 		localValidators,
 		false, // probabilisticHeadGetter
+		nil,   // db: no KV persistence in tests
 	)
 	store.OnTick(2000)
 	require.NoError(t, err)

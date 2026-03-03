@@ -373,8 +373,12 @@ func (a *ApiHandler) produceBlock(
 		beaconBody, localExecValue, localErr = a.produceBeaconBody(ctx, 3, baseBlock, baseState, targetSlot, randaoReveal, graffiti)
 		// collect blobs
 		if beaconBody != nil {
-			for i := 0; i < beaconBody.BlobKzgCommitments.Len(); i++ {
-				c := beaconBody.BlobKzgCommitments.Get(i)
+			commitments := beaconBody.GetBlobKzgCommitments()
+			if commitments == nil {
+				commitments = solid.NewStaticListSSZ[*cltypes.KZGCommitment](0, 48)
+			}
+			for i := 0; i < commitments.Len(); i++ {
+				c := commitments.Get(i)
 				if c == nil {
 					log.Warn("Nil commitment", "slot", targetSlot, "index", i)
 					continue
@@ -725,10 +729,12 @@ func (a *ApiHandler) produceBeaconBody(
 						})
 					}
 
-					// Assemble the KZG commitments list
-					var c cltypes.KZGCommitment
-					copy(c[:], bundles.Commitments[i])
-					beaconBody.BlobKzgCommitments.Append(&c)
+					// Assemble the KZG commitments list (pre-GLOAS only; GLOAS commitments live in the bid)
+					if stateVersion.Before(clparams.GloasVersion) {
+						var c cltypes.KZGCommitment
+						copy(c[:], bundles.Commitments[i])
+						beaconBody.BlobKzgCommitments.Append(&c)
+					}
 				}
 
 				// Add the requests bundle
@@ -1195,8 +1201,13 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 	if err != nil {
 		return err
 	}
-	blobsSidecarsBytes := make([][]byte, 0, blk.Block.Body.BlobKzgCommitments.Len())
-	blobsSidecars := make([]*cltypes.BlobSidecar, 0, blk.Block.Body.BlobKzgCommitments.Len())
+	blkCommitments := blk.Block.Body.GetBlobKzgCommitments()
+	blkCommitmentsLen := 0
+	if blkCommitments != nil {
+		blkCommitmentsLen = blkCommitments.Len()
+	}
+	blobsSidecarsBytes := make([][]byte, 0, blkCommitmentsLen)
+	blobsSidecars := make([]*cltypes.BlobSidecar, 0, blkCommitmentsLen)
 	var columnsSidecars []*cltypes.DataColumnSidecar
 
 	header := blk.SignedBeaconBlockHeader()
@@ -1311,7 +1322,9 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 
 	lenBlobs := 0
 	if blk.Version() >= clparams.DenebVersion {
-		lenBlobs = blk.Block.Body.BlobKzgCommitments.Len()
+		if c := blk.Block.Body.GetBlobKzgCommitments(); c != nil {
+			lenBlobs = c.Len()
+		}
 	}
 
 	log.Info(
