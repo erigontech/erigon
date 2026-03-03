@@ -162,6 +162,20 @@ func WriteExecutionBlockHash(tx kv.RwTx, blockRoot, blockHash common.Hash) error
 	return tx.Put(kv.BlockRootToBlockHash, blockRoot[:], blockHash[:])
 }
 
+// WriteExecutionPayloadEnvelopeIndicies writes execution block number and hash indices
+// for a GLOAS beacon block. In GLOAS (EIP-7732), the execution payload is delivered
+// separately via SignedExecutionPayloadEnvelope, so these indices cannot be written
+// at block arrival time; they are written here when the envelope is processed.
+func WriteExecutionPayloadEnvelopeIndicies(tx kv.RwTx, beaconBlockRoot common.Hash, envelope *cltypes.ExecutionPayloadEnvelope) error {
+	if envelope == nil || envelope.Payload == nil {
+		return nil
+	}
+	if err := WriteExecutionBlockNumber(tx, beaconBlockRoot, envelope.Payload.BlockNumber); err != nil {
+		return err
+	}
+	return WriteExecutionBlockHash(tx, beaconBlockRoot, envelope.Payload.BlockHash)
+}
+
 func ReadExecutionBlockNumber(tx kv.Tx, blockRoot common.Hash) (*uint64, error) {
 	val, err := tx.GetOne(kv.BlockRootToBlockNumber, blockRoot[:])
 	if err != nil {
@@ -351,7 +365,9 @@ func WriteBeaconBlockAndIndicies(ctx context.Context, tx kv.RwTx, block *cltypes
 	if err != nil {
 		return err
 	}
-	if block.Version() >= clparams.BellatrixVersion {
+	// [Modified in Gloas:EIP7732] ExecutionPayload is nil in GLOAS blocks; indices are written
+	// later via WriteExecutionPayloadEnvelopeIndicies when the envelope arrives.
+	if block.Version() >= clparams.BellatrixVersion && block.Version() < clparams.GloasVersion {
 		if err := WriteExecutionBlockNumber(tx, blockRoot, block.Block.Body.ExecutionPayload.BlockNumber); err != nil {
 			return err
 		}
