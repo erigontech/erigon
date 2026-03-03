@@ -130,13 +130,16 @@ func (ba *BlockAssembler) BalIO() *state.VersionedIO {
 	return ba.balIO
 }
 
-func (ba *BlockAssembler) Initialize(ibs *state.IntraBlockState, tx kv.TemporalTx, logger log.Logger) {
-	protocol.InitializeBlockExecution(ba.cfg.Engine,
-		NewChainReader(ba.cfg.ChainConfig, tx, ba.cfg.BlockReader, logger), ba.Header, ba.cfg.ChainConfig, ibs, &state.NoopWriter{}, logger, nil)
+func (ba *BlockAssembler) Initialize(ibs *state.IntraBlockState, tx kv.TemporalTx, logger log.Logger) error {
+	if err := protocol.InitializeBlockExecution(ba.cfg.Engine,
+		NewChainReader(ba.cfg.ChainConfig, tx, ba.cfg.BlockReader, logger), ba.Header, ba.cfg.ChainConfig, ibs, &state.NoopWriter{}, logger, nil); err != nil {
+		return err
+	}
 	if ba.HasBAL() {
 		ba.balIO = ba.balIO.Merge(ibs.TxIO())
 		ibs.ResetVersionedIO()
 	}
+	return nil
 }
 
 func (ba *BlockAssembler) AddTransactions(

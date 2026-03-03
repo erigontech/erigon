@@ -135,7 +135,9 @@ func SpawnBuilderExecStage(ctx context0.Context, s *stagedsync.StageState, sd *e
 		return err
 	}
 
-	ba.Initialize(ibs, tx, logger)
+	if err := ba.Initialize(ibs, tx, logger); err != nil {
+		return err
+	}
 
 	coinbase := accounts.InternAddress(cfg.builderState.BuilderConfig.Etherbase)
 
