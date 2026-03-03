@@ -237,20 +237,16 @@ func TestHandShake69_ETH69ToETH69(t *testing.T) {
 	var reply69_1 *eth.StatusPacket69
 	var peerErr1 *p2p.PeerError
 	wg := sync.WaitGroup{}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		reply69_1, peerErr1 = handShake[eth.StatusPacket69](ctx, sentry1Status, sentry1RW, direct.ETH69, direct.ETH69, encodeStatusPacket69, compatStatusPacket69, handshakeTimeout)
-	}()
+	})
 
 	// Run ETH69 handshake for Sentry 2 in a goroutine
 	var reply69_2 *eth.StatusPacket69
 	var peerErr2 *p2p.PeerError
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		reply69_2, peerErr2 = handShake[eth.StatusPacket69](ctx, sentry2Status, sentry2RW, direct.ETH69, direct.ETH69, encodeStatusPacket69, compatStatusPacket69, handshakeTimeout)
-	}()
+	})
 
 	wg.Wait()
 
