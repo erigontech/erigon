@@ -20,7 +20,6 @@ import (
 
 // AggOpts is an Aggregator builder and contains only runtime-changeable configs (which may vary between Erigon nodes)
 type AggOpts struct { //nolint:gocritic
-	schema            statecfg.SchemaGen // biz-logic
 	dirs              datadir.Dirs
 	logger            log.Logger
 	stepSize          uint64 // != 0 mean override erigondb.toml settings
@@ -36,7 +35,6 @@ type AggOpts struct { //nolint:gocritic
 func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
 	return AggOpts{ //Defaults
 		logger:          log.Root(),
-		schema:          statecfg.Schema,
 		dirs:            dirs,
 		reorgBlockDepth: dbg.MaxReorgDepth,
 		genSaltIfNeed:   false,
@@ -73,14 +71,7 @@ func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) {
 	a.disableHistory = opts.disableHistory
 	a.disableFsync = opts.disableFsync
 
-	// AdjustReceipt mutates the global statecfg.Schema, so run it before
-	// capturing the schema into the Aggregator.
-	if err := statecfg.AdjustReceiptCurrentVersionIfNeeded(opts.dirs, opts.logger); err != nil {
-		return nil, err
-	}
-
 	a.savedSalt = salt
-	a.savedSchema = statecfg.Schema // re-read after adjustment (opts.schema is a stale copy from New() time)
 
 	if err := a.ConfigureDomains(); err != nil {
 		return nil, err

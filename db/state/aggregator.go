@@ -99,10 +99,8 @@ type Aggregator struct {
 	checker *DependencyIntegrityChecker
 
 	// Domain configuration state: ConfigureDomains() is a no-op once configured is true.
-	// savedSalt/savedSchema are preserved for ConfigureDomains() to use.
 	configured   bool
 	savedSalt    *uint32
-	savedSchema  statecfg.SchemaGen
 	disableFsync bool
 }
 
@@ -297,7 +295,11 @@ func (a *Aggregator) ConfigureDomains() error {
 	if a.stepSize == 0 {
 		return fmt.Errorf("cannot configure domains: stepSize is 0")
 	}
-	if err := statecfg.Configure(a.savedSchema, a, a.dirs, a.savedSalt, a.logger); err != nil {
+	// AdjustReceipt mutates the global statecfg.Schema; must run before Configure().
+	if err := statecfg.AdjustReceiptCurrentVersionIfNeeded(a.dirs, a.logger); err != nil {
+		return err
+	}
+	if err := statecfg.Configure(statecfg.Schema, a, a.dirs, a.savedSalt, a.logger); err != nil {
 		return err
 	}
 	a.configured = true
