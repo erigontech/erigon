@@ -655,6 +655,7 @@ func runWitPeer(
 			var query wit.NewWitnessPacket
 			if err := rlp.DecodeBytes(b, &query); err != nil {
 				logger.Error("decoding NewWitnessMsg: %w, data: %x", err, b)
+				return p2p.NewPeerError(p2p.PeerErrorInvalidMessage, p2p.DiscSubprotocolError, err, "decoding NewWitnessMsg")
 			}
 
 			peerInfo.AddKnownWitness(query.Witness.Header().Hash())
@@ -674,6 +675,7 @@ func runWitPeer(
 			var query wit.NewWitnessHashesPacket
 			if err := rlp.DecodeBytes(b, &query); err != nil {
 				logger.Error("decoding NewWitnessHashesMsg: %w, data: %x", err, b)
+				return p2p.NewPeerError(p2p.PeerErrorInvalidMessage, p2p.DiscSubprotocolError, err, "decoding NewWitnessHashesMsg")
 			}
 
 			for _, hash := range query.Hashes {

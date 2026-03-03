@@ -80,8 +80,7 @@ The compose file demonstrates the port allocation strategy:
 For multiple instances, consider adjusting database parameters to reduce resource contention:
 
 ```bash
-# Reduce memory-mapped database growth to minimize disk churn
---db.growth.step=32MB
+# Reduce memory-mapped database size limit
 --db.size.limit=512MB
 ```
 
@@ -129,7 +128,7 @@ If using network-attached storage, apply these optimizations:
 
 ```bash
 # Reduce disk latency impact
-export ERIGON_SNAPSHOT_MADV_RND=false
+export SNAPSHOT_MADV_RND=false
 --db.pagesize=64kb
 
 # For Polygon networks
@@ -168,7 +167,7 @@ What can be done:
   * use latency-critical cloud-drives
   * or attached-NVMe (at least for initial sync)
 * increase RAM
-* if you throw enough RAM, then can set env variable `ERIGON_SNAPSHOT_MADV_RND=false`
+* if you throw enough RAM, then can set env variable `SNAPSHOT_MADV_RND=false`
 * Use `--db.pagesize=64kb` (less fragmentation, more IO)
 * Or use Erigon3 (it also sensitive for disk-latency - but it will download 99% of history)
 
