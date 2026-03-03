@@ -777,7 +777,7 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	if blockNum > 0 && latestBlockNum != blockNum-1 { // commitment domain reads branches at end of blockNum-1
 		return fmt.Errorf("commitment state blockNum doesn't match blockNum-1: %d != %d", latestBlockNum, blockNum-1)
 	}
-	if latestTxNum != minTxNum-1 {
+	if blockNum > 0 && latestTxNum != minTxNum-1 { // commitment state is read as of minTxNum-1
 		return fmt.Errorf("commitment state txNum doesn't match minTxNum-1: %d != %d", latestTxNum, minTxNum-1)
 	}
 	logger.Info("commitment recalc info", "blockNum", blockNum, "minTxNum", minTxNum, "maxTxNum", maxTxNum, "toTxNum", toTxNum)
