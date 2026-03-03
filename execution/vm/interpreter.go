@@ -112,6 +112,10 @@ func (c *CallContext) useMdGas(gas uint64, t evmtypes.MdGasType, tracer *tracing
 	return false
 }
 
+func (c *CallContext) availableStateGas() uint64 {
+	return c.stateGas + c.gas
+}
+
 func useGas(initial uint64, gas uint64, tracer *tracing.Hooks, reason tracing.GasChangeReason) (remaining uint64, ok bool) {
 	if initial < gas {
 		return initial, false
@@ -415,7 +419,7 @@ func (evm *EVM) Run(contract Contract, gas evmtypes.MdGas, input []byte, readOnl
 			}
 		}
 		if operation.stateGas != nil {
-			stateGas, err := operation.stateGas(evm, callContext, callContext.gas, memorySize)
+			stateGas, err := operation.stateGas(evm, callContext, callContext.availableStateGas(), memorySize)
 			if err != nil {
 				return nil, callContext.Gas(), err
 			}
