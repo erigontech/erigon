@@ -102,6 +102,16 @@ func (c *CallContext) useGas(gas uint64, tracer *tracing.Hooks, reason tracing.G
 	return false
 }
 
+func (c *CallContext) useMdGas(gas uint64, t evmtypes.MdGasType, tracer *tracing.Hooks, reason tracing.GasChangeReason) (ok bool) {
+	remaining, ok := useMdGas(c.Gas(), gas, t, tracer, reason)
+	if ok {
+		c.gas = remaining.Regular
+		c.stateGas = remaining.State
+		return true
+	}
+	return false
+}
+
 func useGas(initial uint64, gas uint64, tracer *tracing.Hooks, reason tracing.GasChangeReason) (remaining uint64, ok bool) {
 	if initial < gas {
 		return initial, false
@@ -410,10 +420,9 @@ func (evm *EVM) Run(contract Contract, gas evmtypes.MdGas, input []byte, readOnl
 				return nil, callContext.Gas(), err
 			}
 			cost += stateGas
-			if callContext.stateGas < stateGas {
+			ok := callContext.useMdGas(stateGas, evmtypes.StateGas, nil, tracing.GasChangeIgnored)
+			if !ok {
 				return nil, callContext.Gas(), ErrOutOfGas
-			} else {
-				callContext.stateGas -= stateGas
 			}
 		}
 
