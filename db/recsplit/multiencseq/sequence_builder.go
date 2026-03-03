@@ -67,10 +67,15 @@ func NewBuilder(baseNum, count, maxOffset uint64) *SequenceBuilder {
 // Same parameter semantics as NewBuilder.
 func (b *SequenceBuilder) Reset(baseNum, count, maxOffset uint64) {
 	b.baseNum = baseNum
-	if b.rebasedEf != nil {
-		b.rebasedEf.ResetForWrite(count, maxOffset)
+	b.smallCount = 0
+	if count > SIMPLE_SEQUENCE_MAX_THRESHOLD {
+		if b.rebasedEf != nil {
+			b.rebasedEf.ResetForWrite(count, maxOffset-baseNum)
+		} else {
+			b.rebasedEf = eliasfano32.NewEliasFano(count, maxOffset-baseNum)
+		}
 	} else {
-		b.rebasedEf = eliasfano32.NewEliasFano(count, maxOffset)
+		b.rebasedEf = nil
 	}
 }
 
