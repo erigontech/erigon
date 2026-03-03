@@ -778,7 +778,7 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 		return fmt.Errorf("commitment state blockNum doesn't match blockNum-1: %d != %d", latestBlockNum, blockNum-1)
 	}
 	if latestTxNum != minTxNum {
-		return fmt.Errorf("commitment state txNum doesn't match maxTxNum: %d != %d", latestTxNum, maxTxNum)
+		return fmt.Errorf("commitment state txNum doesn't match minTxNum: %d != %d", latestTxNum, minTxNum)
 	}
 	logger.Info("commitment recalc info", "blockNum", blockNum, "minTxNum", minTxNum, "maxTxNum", maxTxNum, "toTxNum", toTxNum)
 	trace := logger.Enabled(ctx, log.LvlTrace)
