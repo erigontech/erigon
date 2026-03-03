@@ -86,7 +86,7 @@ func TestFeeHistory(t *testing.T) {
 			defer tx.Rollback()
 
 			cache := jsonrpc.NewGasPriceCache()
-			oracle := gasprice.NewOracle(jsonrpc.NewGasPriceOracleBackend(tx, baseApi), config, cache, log.New())
+			oracle := gasprice.NewOracle(jsonrpc.NewGasPriceOracleBackend(m.DB, tx, baseApi), config, cache, gasprice.NewFeeHistoryCache(), log.New())
 
 			first, reward, baseFee, ratio, blobBaseFee, blobBaseFeeRatio, err := oracle.FeeHistory(context.Background(), c.count, c.last, c.percent)
 

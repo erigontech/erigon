@@ -253,6 +253,15 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 		}
 	}
 
+	// Check version map for AddressPath — handles accounts created by
+	// prior transactions in the same block that aren't in the read set.
+	if vr.versionMap != nil {
+		if acc, ok := versionedUpdate[*accounts.Account](vr.versionMap, address, AddressPath, accounts.NilKey, vr.txIndex); ok && acc != nil {
+			updated := vr.applyVersionedUpdates(address, *acc)
+			return &updated, nil
+		}
+	}
+
 	if vr.stateReader != nil {
 		account, err := vr.stateReader.ReadAccountData(address)
 
@@ -326,6 +335,13 @@ func (vr versionedStateReader) ReadAccountStorage(address accounts.Address, key 
 		return val, true, nil
 	}
 
+	// Check version map for storage written by prior transactions.
+	if vr.versionMap != nil {
+		if val, ok := versionedUpdate[uint256.Int](vr.versionMap, address, StoragePath, key, vr.txIndex); ok {
+			return val, true, nil
+		}
+	}
+
 	if vr.stateReader != nil {
 		return vr.stateReader.ReadAccountStorage(address, key)
 	}
@@ -356,6 +372,14 @@ func (vr versionedStateReader) ReadAccountCode(address accounts.Address) ([]byte
 		}
 	}
 
+	// Check version map for CodePath entries written by prior transactions
+	// (e.g. EIP-7702 delegation set by an earlier tx in the same block).
+	if vr.versionMap != nil {
+		if code, ok := versionedUpdate[[]byte](vr.versionMap, address, CodePath, accounts.NilKey, vr.txIndex); ok {
+			return code, nil
+		}
+	}
+
 	if vr.stateReader != nil {
 		return vr.stateReader.ReadAccountCode(address)
 	}
@@ -366,6 +390,12 @@ func (vr versionedStateReader) ReadAccountCode(address accounts.Address) ([]byte
 func (vr versionedStateReader) ReadAccountCodeSize(address accounts.Address) (int, error) {
 	if r, ok := vr.reads[address][AccountKey{Path: CodePath}]; ok && r.Val != nil {
 		if code, ok := r.Val.([]byte); ok {
+			return len(code), nil
+		}
+	}
+
+	if vr.versionMap != nil {
+		if code, ok := versionedUpdate[[]byte](vr.versionMap, address, CodePath, accounts.NilKey, vr.txIndex); ok {
 			return len(code), nil
 		}
 	}

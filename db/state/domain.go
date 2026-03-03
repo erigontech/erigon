@@ -1225,6 +1225,7 @@ func buildHashMapAccessor(ctx context.Context, decomp *seg.Decompressor, compres
 			return err
 		}
 		g.Reset(0)
+		rs.SetProgress(p)
 		for g.HasNext() {
 			word, valPos = g.Next(word[:0])
 			if values {
@@ -1239,8 +1240,6 @@ func buildHashMapAccessor(ctx context.Context, decomp *seg.Decompressor, compres
 
 			// Skip value
 			keyPos, _ = g.Skip()
-
-			p.Processed.Add(1)
 		}
 		if err = rs.Build(ctx); err != nil {
 			if rs.Collision() {

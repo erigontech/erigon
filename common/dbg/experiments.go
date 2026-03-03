@@ -56,8 +56,9 @@ var (
 
 	//state v3
 	noPrune              = EnvBool("NO_PRUNE", false)
-	noMerge              = EnvBool("NO_MERGE", false)         // don't merge Domain/Hist/II
-	noMergeHistory       = EnvBool("NO_MERGE_HISTORY", false) // don't merge Hist/II but still merge Domain
+	noMerge              = EnvBool("NO_MERGE", false)              // don't merge Domain/Hist/II
+	noMergeHistory       = EnvBool("NO_MERGE_HISTORY", false)      // don't merge Hist/II but still merge Domain
+	noDeepMergeHistory   = EnvBool("NO_DEEP_MERGE_HISTORY", false) // merge Hist/II only up to 2 steps (small+fast), skip larger merges
 	discardCommitment    = EnvBool("DISCARD_COMMITMENT", false)
 	pruneTotalDifficulty = EnvBool("PRUNE_TOTAL_DIFFICULTY", true)
 
@@ -127,6 +128,7 @@ func DiscardCommitment() bool    { return discardCommitment }
 func NoPrune() bool              { return noPrune }
 func NoMerge() bool              { return noMerge }
 func NoMergeHistory() bool       { return noMergeHistory }
+func NoDeepMergeHistory() bool   { return noDeepMergeHistory }
 func PruneTotalDifficulty() bool { return pruneTotalDifficulty }
 
 var (
