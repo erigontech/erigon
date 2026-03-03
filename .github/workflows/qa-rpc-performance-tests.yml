@@ -87,7 +87,7 @@ jobs:
     env:
       RUN_ID: ${{ needs.setup.outputs.run_id }}
       NETWORK: ${{ needs.setup.outputs.network }}
-      ERIGON_REFERENCE_DIR: /opt/erigon-versions/reference-version
+      ERIGON_REFERENCE_DIR: /opt/erigon-versions/reference-version-3.4
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version-3.4/datadir
       ERIGON_TESTBED_AREA: /opt/erigon-testbed
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
