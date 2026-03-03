@@ -20,8 +20,9 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
 )
 
 func BenchmarkBranchMerger_Merge(b *testing.B) {
@@ -115,6 +116,42 @@ func BenchmarkBranchData_ReplacePlainKeys(b *testing.B) {
 		require.NoError(b, err)
 		require.EqualValues(b, original, replacedBack)
 	}
+}
+
+// BenchmarkReplacePlainKeys_BufferReuse compares the old pattern (fresh make each call)
+// against the new pattern (reused scratch buffer + bytes.Clone), matching what
+// replaceShortenedKeysInBranch now does on AggregatorRoTx.
+func BenchmarkReplacePlainKeys_BufferReuse(b *testing.B) {
+	row, bm := generateCellRow(b, 16)
+	be := NewBranchEncoder(1024)
+	enc, _, err := be.EncodeBranch(bm, bm, bm, func(nibble int, skip bool) (*cell, error) {
+		return row[nibble], nil
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	replacer := func(key []byte, isStorage bool) ([]byte, error) {
+		if isStorage {
+			return key[:8], nil
+		}
+		return key[:4], nil
+	}
+
+	b.Run("fresh-make", func(b *testing.B) {
+		for b.Loop() {
+			aux := make([]byte, 0, 256)
+			_, _ = enc.ReplacePlainKeys(aux, replacer)
+		}
+	})
+
+	b.Run("reuse-clone", func(b *testing.B) {
+		var buf []byte
+		for b.Loop() {
+			result, _ := enc.ReplacePlainKeys(buf[:0], replacer)
+			buf = result
+			_ = common.Copy(result) // bytes.Clone equivalent
+		}
+	})
 }
 
 func BenchmarkGetDeferredUpdate(b *testing.B) {
