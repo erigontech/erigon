@@ -687,6 +687,10 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(a.collateAndBuildWorkers)
+
+	// Acquire read lock to protect BeginFilesRo() calls from concurrent writes
+	// by recalcVisibleFiles() in BuildMissedAccessorsInBackground.
+	a.visibleFilesLock.RLock()
 	for _, d := range a.d {
 		if d.Disable {
 			continue
@@ -768,6 +772,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 			return nil
 		})
 	}
+	a.visibleFilesLock.RUnlock()
 	if err := g.Wait(); err != nil {
 		static.CleanupOnError()
 		return fmt.Errorf("domain collate-build: %w", err)
