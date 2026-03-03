@@ -7,8 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/linkdata/deadlock"
-
 	"github.com/google/go-cmp/cmp"
 	lru "github.com/hashicorp/golang-lru/v2"
 
@@ -367,7 +365,11 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			var stateRoot []byte
 			if postState.CommitmentHistory {
 				sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, txNum+1)
-				stateRoot, err = sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, sharedDomains.TxNum(), "getReceipt", nil)
+				latestTxNum, _, err := sharedDomains.SeekCommitment(ctx, tx)
+				if err != nil {
+					return nil, err
+				}
+				stateRoot, err = sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, latestTxNum, "getReceipt", nil)
 				if err != nil {
 					return nil, err
 				}
@@ -531,7 +533,11 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 			var stateRoot []byte
 			if commitmentHistory {
 				sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, txNum+1)
-				stateRoot, err = sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, sharedDomains.TxNum(), "getReceipts", nil)
+				latestTxNum, _, err := sharedDomains.SeekCommitment(ctx, tx)
+				if err != nil {
+					return nil, err
+				}
+				stateRoot, err = sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, latestTxNum, "getReceipts", nil)
 				if err != nil {
 					return nil, err
 				}
@@ -644,14 +650,14 @@ type loaderMutex[K comparable] struct {
 	sync.Map
 }
 
-func (m *loaderMutex[K]) lock(key K) *deadlock.Mutex {
-	value, _ := m.LoadOrStore(key, &deadlock.Mutex{})
-	mu := value.(*deadlock.Mutex)
+func (m *loaderMutex[K]) lock(key K) *sync.Mutex {
+	value, _ := m.LoadOrStore(key, &sync.Mutex{})
+	mu := value.(*sync.Mutex)
 	mu.Lock()
 	return mu
 }
 
-func (m *loaderMutex[K]) unlock(mu *deadlock.Mutex, key K) {
+func (m *loaderMutex[K]) unlock(mu *sync.Mutex, key K) {
 	mu.Unlock()
 	m.Delete(key)
 }

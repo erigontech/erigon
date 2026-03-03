@@ -20,8 +20,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -466,8 +464,7 @@ func (r *RecentReceipts) NotifyReceipts(n *Events, from, to uint64, isUnwind boo
 
 			// Add header data
 			if header.BaseFee != nil {
-				baseFee, _ := uint256.FromBig(header.BaseFee)
-				protoReceipt.BaseFee = gointerfaces.ConvertUint256IntToH256(baseFee)
+				protoReceipt.BaseFee = gointerfaces.ConvertUint256IntToH256(header.BaseFee)
 			}
 			protoReceipt.BlockTime = header.Time
 			if header.ExcessBlobGas != nil {

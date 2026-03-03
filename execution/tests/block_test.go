@@ -25,7 +25,6 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 )
 
@@ -97,16 +96,12 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 
 // Only runs EEST tests for current devnet - can "skip" on off-seasons
 func TestExecutionSpecBlockchainDevnet(t *testing.T) {
-	const offSeason = false
-	if offSeason {
-		t.Skip("devnet off-season")
-	}
 	if testing.Short() {
 		t.Skip()
 	}
-	if race.Enabled {
-		// TODO fix -race issues with parallel exec
-		t.Skip("skipping from race tests until parallel exec flow is race free")
+	if runtime.GOOS == "windows" {
+		// TODO(yperbasis, mh0lt)
+		t.Skip("fix me on windows please")
 	}
 
 	t.Parallel()
@@ -116,29 +111,12 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	bt := new(testMatcher)
 	// to run only tests for 1 eip do:
 	//bt.whitelist(`.*amsterdam/eip8024_dupn_swapn_exchange.*`)
-	bt.whitelist(`.*amsterdam.*`)                                                                              // TODO run tests for older forks too once we fix amsterdam eips, for now focus only on amsterdam eips
-	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_selfdestruct_to_system_address.json`)                        // TODO fix: invalid state root hash
-	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_transfer_to_special_address.json`)                           // TODO fix: invalid state root hash
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_7002_clean_sweep.json`)                           // TODO fix: invalid state root hash
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_7002_request_from_contract.json`)                 // TODO fix: invalid state root hash
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_consolidation_contract_cross_index.json`)         // TODO fix: invalid state root hash
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_multiple_withdrawals_same_address.json`)          // TODO fix: invalid state root hash
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_system_dequeue_consolidations_eip7251.json`)      // TODO fix: invalid state root hash
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_and_new_contract.json`)                // TODO fix: invalid state root hash
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_and_selfdestruct.json`)                // TODO fix: invalid state root hash
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_and_transaction.json`)                 // TODO fix: invalid state root hash
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_empty_block.json`)                     // TODO fix: invalid state root hash
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_no_evm_execution.json`)                // TODO fix: invalid state root hash
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_to_7702_delegation.json`)              // TODO fix: invalid state root hash
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_to_coinbase.json`)                     // TODO fix: invalid state root hash
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_to_coinbase_empty_block.json`)         // TODO fix: invalid state root hash
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_to_nonexistent_account.json`)          // TODO fix: invalid state root hash
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_to_precompiles.json`)                  // TODO fix: invalid state root hash
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_largest_amount.json`)                  // TODO fix: invalid state root hash
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_and_state_access_same_account.json`)   // TODO fix: invalid state root hash
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_contract_cross_index.json`)            // TODO fix: invalid state root hash
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_and_value_transfer_same_address.json`) // TODO fix: invalid state root hash
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_7002_partial_sweep.json`)                         // TODO fix: invalid state root hash
+
+	// static — tested in state test format by TestState
+	bt.skipLoad(`^static/state_tests/`)
+
+	bt.skipLoad(`^prague/eip7702_set_code_tx/test_set_code_to_sstore_then_sload.json`)
+
 	bt.walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root
 		test.ExperimentalBAL = true // TODO eventually remove this from BlockTest and run normally

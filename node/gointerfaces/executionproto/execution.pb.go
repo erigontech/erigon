@@ -1920,6 +1920,146 @@ func (x *GetBodiesByRangeRequest) GetCount() uint64 {
 	return 0
 }
 
+type GetPayloadBodiesByHashRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Hashes        []*typesproto.H256     `protobuf:"bytes,1,rep,name=hashes,proto3" json:"hashes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetPayloadBodiesByHashRequest) Reset() {
+	*x = GetPayloadBodiesByHashRequest{}
+	mi := &file_execution_execution_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetPayloadBodiesByHashRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetPayloadBodiesByHashRequest) ProtoMessage() {}
+
+func (x *GetPayloadBodiesByHashRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_execution_execution_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetPayloadBodiesByHashRequest.ProtoReflect.Descriptor instead.
+func (*GetPayloadBodiesByHashRequest) Descriptor() ([]byte, []int) {
+	return file_execution_execution_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *GetPayloadBodiesByHashRequest) GetHashes() []*typesproto.H256 {
+	if x != nil {
+		return x.Hashes
+	}
+	return nil
+}
+
+type GetPayloadBodiesByRangeRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Start         uint64                 `protobuf:"varint,1,opt,name=start,proto3" json:"start,omitempty"`
+	Count         uint64                 `protobuf:"varint,2,opt,name=count,proto3" json:"count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetPayloadBodiesByRangeRequest) Reset() {
+	*x = GetPayloadBodiesByRangeRequest{}
+	mi := &file_execution_execution_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetPayloadBodiesByRangeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetPayloadBodiesByRangeRequest) ProtoMessage() {}
+
+func (x *GetPayloadBodiesByRangeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_execution_execution_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetPayloadBodiesByRangeRequest.ProtoReflect.Descriptor instead.
+func (*GetPayloadBodiesByRangeRequest) Descriptor() ([]byte, []int) {
+	return file_execution_execution_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *GetPayloadBodiesByRangeRequest) GetStart() uint64 {
+	if x != nil {
+		return x.Start
+	}
+	return 0
+}
+
+func (x *GetPayloadBodiesByRangeRequest) GetCount() uint64 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
+}
+
+type GetPayloadBodiesBatchResponse struct {
+	state         protoimpl.MessageState             `protogen:"open.v1"`
+	Bodies        []*typesproto.ExecutionPayloadBody `protobuf:"bytes,1,rep,name=bodies,proto3" json:"bodies,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetPayloadBodiesBatchResponse) Reset() {
+	*x = GetPayloadBodiesBatchResponse{}
+	mi := &file_execution_execution_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetPayloadBodiesBatchResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetPayloadBodiesBatchResponse) ProtoMessage() {}
+
+func (x *GetPayloadBodiesBatchResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_execution_execution_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetPayloadBodiesBatchResponse.ProtoReflect.Descriptor instead.
+func (*GetPayloadBodiesBatchResponse) Descriptor() ([]byte, []int) {
+	return file_execution_execution_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *GetPayloadBodiesBatchResponse) GetBodies() []*typesproto.ExecutionPayloadBody {
+	if x != nil {
+		return x.Bodies
+	}
+	return nil
+}
+
 type ReadyResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Ready         bool                   `protobuf:"varint,1,opt,name=ready,proto3" json:"ready,omitempty"`
@@ -1929,7 +2069,7 @@ type ReadyResponse struct {
 
 func (x *ReadyResponse) Reset() {
 	*x = ReadyResponse{}
-	mi := &file_execution_execution_proto_msgTypes[30]
+	mi := &file_execution_execution_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1941,7 +2081,7 @@ func (x *ReadyResponse) String() string {
 func (*ReadyResponse) ProtoMessage() {}
 
 func (x *ReadyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_execution_execution_proto_msgTypes[30]
+	mi := &file_execution_execution_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1954,7 +2094,7 @@ func (x *ReadyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadyResponse.ProtoReflect.Descriptor instead.
 func (*ReadyResponse) Descriptor() ([]byte, []int) {
-	return file_execution_execution_proto_rawDescGZIP(), []int{30}
+	return file_execution_execution_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *ReadyResponse) GetReady() bool {
@@ -1974,7 +2114,7 @@ type FrozenBlocksResponse struct {
 
 func (x *FrozenBlocksResponse) Reset() {
 	*x = FrozenBlocksResponse{}
-	mi := &file_execution_execution_proto_msgTypes[31]
+	mi := &file_execution_execution_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1986,7 +2126,7 @@ func (x *FrozenBlocksResponse) String() string {
 func (*FrozenBlocksResponse) ProtoMessage() {}
 
 func (x *FrozenBlocksResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_execution_execution_proto_msgTypes[31]
+	mi := &file_execution_execution_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1999,7 +2139,7 @@ func (x *FrozenBlocksResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FrozenBlocksResponse.ProtoReflect.Descriptor instead.
 func (*FrozenBlocksResponse) Descriptor() ([]byte, []int) {
-	return file_execution_execution_proto_rawDescGZIP(), []int{31}
+	return file_execution_execution_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *FrozenBlocksResponse) GetFrozenBlocks() uint64 {
@@ -2025,7 +2165,7 @@ type HasBlockResponse struct {
 
 func (x *HasBlockResponse) Reset() {
 	*x = HasBlockResponse{}
-	mi := &file_execution_execution_proto_msgTypes[32]
+	mi := &file_execution_execution_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2037,7 +2177,7 @@ func (x *HasBlockResponse) String() string {
 func (*HasBlockResponse) ProtoMessage() {}
 
 func (x *HasBlockResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_execution_execution_proto_msgTypes[32]
+	mi := &file_execution_execution_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2050,7 +2190,7 @@ func (x *HasBlockResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HasBlockResponse.ProtoReflect.Descriptor instead.
 func (*HasBlockResponse) Descriptor() ([]byte, []int) {
-	return file_execution_execution_proto_rawDescGZIP(), []int{32}
+	return file_execution_execution_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *HasBlockResponse) GetHasBlock() bool {
@@ -2231,7 +2371,14 @@ const file_execution_execution_proto_rawDesc = "" +
 	"\x06hashes\x18\x01 \x03(\v2\v.types.H256R\x06hashes\"E\n" +
 	"\x17GetBodiesByRangeRequest\x12\x14\n" +
 	"\x05start\x18\x01 \x01(\x04R\x05start\x12\x14\n" +
-	"\x05count\x18\x02 \x01(\x04R\x05count\"%\n" +
+	"\x05count\x18\x02 \x01(\x04R\x05count\"D\n" +
+	"\x1dGetPayloadBodiesByHashRequest\x12#\n" +
+	"\x06hashes\x18\x01 \x03(\v2\v.types.H256R\x06hashes\"L\n" +
+	"\x1eGetPayloadBodiesByRangeRequest\x12\x14\n" +
+	"\x05start\x18\x01 \x01(\x04R\x05start\x12\x14\n" +
+	"\x05count\x18\x02 \x01(\x04R\x05count\"T\n" +
+	"\x1dGetPayloadBodiesBatchResponse\x123\n" +
+	"\x06bodies\x18\x01 \x03(\v2\x1b.types.ExecutionPayloadBodyR\x06bodies\"%\n" +
 	"\rReadyResponse\x12\x14\n" +
 	"\x05ready\x18\x01 \x01(\bR\x05ready\"T\n" +
 	"\x14FrozenBlocksResponse\x12#\n" +
@@ -2246,8 +2393,7 @@ const file_execution_execution_proto_rawDesc = "" +
 	"TooFarAway\x10\x02\x12\x12\n" +
 	"\x0eMissingSegment\x10\x03\x12\x15\n" +
 	"\x11InvalidForkchoice\x10\x04\x12\b\n" +
-	"\x04Busy\x10\x052\x86\n" +
-	"\n" +
+	"\x04Busy\x10\x052\xe4\v\n" +
 	"\tExecution\x12J\n" +
 	"\fInsertBlocks\x12\x1e.execution.InsertBlocksRequest\x1a\x1a.execution.InsertionResult\x12K\n" +
 	"\rValidateChain\x12\x1c.execution.ValidationRequest\x1a\x1c.execution.ValidationReceipt\x12G\n" +
@@ -2260,7 +2406,9 @@ const file_execution_execution_proto_rawDesc = "" +
 	"\aGetBody\x12\x1c.execution.GetSegmentRequest\x1a\x1a.execution.GetBodyResponse\x12E\n" +
 	"\bHasBlock\x12\x1c.execution.GetSegmentRequest\x1a\x1b.execution.HasBlockResponse\x12Y\n" +
 	"\x10GetBodiesByRange\x12\".execution.GetBodiesByRangeRequest\x1a!.execution.GetBodiesBatchResponse\x12[\n" +
-	"\x11GetBodiesByHashes\x12#.execution.GetBodiesByHashesRequest\x1a!.execution.GetBodiesBatchResponse\x12>\n" +
+	"\x11GetBodiesByHashes\x12#.execution.GetBodiesByHashesRequest\x1a!.execution.GetBodiesBatchResponse\x12l\n" +
+	"\x16GetPayloadBodiesByHash\x12(.execution.GetPayloadBodiesByHashRequest\x1a(.execution.GetPayloadBodiesBatchResponse\x12n\n" +
+	"\x17GetPayloadBodiesByRange\x12).execution.GetPayloadBodiesByRangeRequest\x1a(.execution.GetPayloadBodiesBatchResponse\x12>\n" +
 	"\x0fIsCanonicalHash\x12\v.types.H256\x1a\x1e.execution.IsCanonicalResponse\x12J\n" +
 	"\x13GetHeaderHashNumber\x12\v.types.H256\x1a&.execution.GetHeaderHashNumberResponse\x12>\n" +
 	"\rGetForkChoice\x12\x16.google.protobuf.Empty\x1a\x15.execution.ForkChoice\x129\n" +
@@ -2280,149 +2428,159 @@ func file_execution_execution_proto_rawDescGZIP() []byte {
 }
 
 var file_execution_execution_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_execution_execution_proto_msgTypes = make([]protoimpl.MessageInfo, 33)
+var file_execution_execution_proto_msgTypes = make([]protoimpl.MessageInfo, 36)
 var file_execution_execution_proto_goTypes = []any{
-	(ExecutionStatus)(0),                 // 0: execution.ExecutionStatus
-	(*ForkChoiceReceipt)(nil),            // 1: execution.ForkChoiceReceipt
-	(*ValidationReceipt)(nil),            // 2: execution.ValidationReceipt
-	(*IsCanonicalResponse)(nil),          // 3: execution.IsCanonicalResponse
-	(*Header)(nil),                       // 4: execution.Header
-	(*BlockAccessListStorageChange)(nil), // 5: execution.BlockAccessListStorageChange
-	(*BlockAccessListSlotChanges)(nil),   // 6: execution.BlockAccessListSlotChanges
-	(*BlockAccessListBalanceChange)(nil), // 7: execution.BlockAccessListBalanceChange
-	(*BlockAccessListNonceChange)(nil),   // 8: execution.BlockAccessListNonceChange
-	(*BlockAccessListCodeChange)(nil),    // 9: execution.BlockAccessListCodeChange
-	(*BlockAccessListAccount)(nil),       // 10: execution.BlockAccessListAccount
-	(*BlockAccessListEntry)(nil),         // 11: execution.BlockAccessListEntry
-	(*BlockBody)(nil),                    // 12: execution.BlockBody
-	(*Block)(nil),                        // 13: execution.Block
-	(*GetHeaderResponse)(nil),            // 14: execution.GetHeaderResponse
-	(*GetTDResponse)(nil),                // 15: execution.GetTDResponse
-	(*GetBodyResponse)(nil),              // 16: execution.GetBodyResponse
-	(*GetHeaderHashNumberResponse)(nil),  // 17: execution.GetHeaderHashNumberResponse
-	(*GetSegmentRequest)(nil),            // 18: execution.GetSegmentRequest
-	(*InsertBlocksRequest)(nil),          // 19: execution.InsertBlocksRequest
-	(*ForkChoice)(nil),                   // 20: execution.ForkChoice
-	(*InsertionResult)(nil),              // 21: execution.InsertionResult
-	(*ValidationRequest)(nil),            // 22: execution.ValidationRequest
-	(*AssembleBlockRequest)(nil),         // 23: execution.AssembleBlockRequest
-	(*AssembleBlockResponse)(nil),        // 24: execution.AssembleBlockResponse
-	(*GetAssembledBlockRequest)(nil),     // 25: execution.GetAssembledBlockRequest
-	(*AssembledBlockData)(nil),           // 26: execution.AssembledBlockData
-	(*GetAssembledBlockResponse)(nil),    // 27: execution.GetAssembledBlockResponse
-	(*GetBodiesBatchResponse)(nil),       // 28: execution.GetBodiesBatchResponse
-	(*GetBodiesByHashesRequest)(nil),     // 29: execution.GetBodiesByHashesRequest
-	(*GetBodiesByRangeRequest)(nil),      // 30: execution.GetBodiesByRangeRequest
-	(*ReadyResponse)(nil),                // 31: execution.ReadyResponse
-	(*FrozenBlocksResponse)(nil),         // 32: execution.FrozenBlocksResponse
-	(*HasBlockResponse)(nil),             // 33: execution.HasBlockResponse
-	(*typesproto.H256)(nil),              // 34: types.H256
-	(*typesproto.H160)(nil),              // 35: types.H160
-	(*typesproto.H2048)(nil),             // 36: types.H2048
-	(*typesproto.Withdrawal)(nil),        // 37: types.Withdrawal
-	(*typesproto.ExecutionPayload)(nil),  // 38: types.ExecutionPayload
-	(*typesproto.BlobsBundle)(nil),       // 39: types.BlobsBundle
-	(*typesproto.RequestsBundle)(nil),    // 40: types.RequestsBundle
-	(*emptypb.Empty)(nil),                // 41: google.protobuf.Empty
+	(ExecutionStatus)(0),                    // 0: execution.ExecutionStatus
+	(*ForkChoiceReceipt)(nil),               // 1: execution.ForkChoiceReceipt
+	(*ValidationReceipt)(nil),               // 2: execution.ValidationReceipt
+	(*IsCanonicalResponse)(nil),             // 3: execution.IsCanonicalResponse
+	(*Header)(nil),                          // 4: execution.Header
+	(*BlockAccessListStorageChange)(nil),    // 5: execution.BlockAccessListStorageChange
+	(*BlockAccessListSlotChanges)(nil),      // 6: execution.BlockAccessListSlotChanges
+	(*BlockAccessListBalanceChange)(nil),    // 7: execution.BlockAccessListBalanceChange
+	(*BlockAccessListNonceChange)(nil),      // 8: execution.BlockAccessListNonceChange
+	(*BlockAccessListCodeChange)(nil),       // 9: execution.BlockAccessListCodeChange
+	(*BlockAccessListAccount)(nil),          // 10: execution.BlockAccessListAccount
+	(*BlockAccessListEntry)(nil),            // 11: execution.BlockAccessListEntry
+	(*BlockBody)(nil),                       // 12: execution.BlockBody
+	(*Block)(nil),                           // 13: execution.Block
+	(*GetHeaderResponse)(nil),               // 14: execution.GetHeaderResponse
+	(*GetTDResponse)(nil),                   // 15: execution.GetTDResponse
+	(*GetBodyResponse)(nil),                 // 16: execution.GetBodyResponse
+	(*GetHeaderHashNumberResponse)(nil),     // 17: execution.GetHeaderHashNumberResponse
+	(*GetSegmentRequest)(nil),               // 18: execution.GetSegmentRequest
+	(*InsertBlocksRequest)(nil),             // 19: execution.InsertBlocksRequest
+	(*ForkChoice)(nil),                      // 20: execution.ForkChoice
+	(*InsertionResult)(nil),                 // 21: execution.InsertionResult
+	(*ValidationRequest)(nil),               // 22: execution.ValidationRequest
+	(*AssembleBlockRequest)(nil),            // 23: execution.AssembleBlockRequest
+	(*AssembleBlockResponse)(nil),           // 24: execution.AssembleBlockResponse
+	(*GetAssembledBlockRequest)(nil),        // 25: execution.GetAssembledBlockRequest
+	(*AssembledBlockData)(nil),              // 26: execution.AssembledBlockData
+	(*GetAssembledBlockResponse)(nil),       // 27: execution.GetAssembledBlockResponse
+	(*GetBodiesBatchResponse)(nil),          // 28: execution.GetBodiesBatchResponse
+	(*GetBodiesByHashesRequest)(nil),        // 29: execution.GetBodiesByHashesRequest
+	(*GetBodiesByRangeRequest)(nil),         // 30: execution.GetBodiesByRangeRequest
+	(*GetPayloadBodiesByHashRequest)(nil),   // 31: execution.GetPayloadBodiesByHashRequest
+	(*GetPayloadBodiesByRangeRequest)(nil),  // 32: execution.GetPayloadBodiesByRangeRequest
+	(*GetPayloadBodiesBatchResponse)(nil),   // 33: execution.GetPayloadBodiesBatchResponse
+	(*ReadyResponse)(nil),                   // 34: execution.ReadyResponse
+	(*FrozenBlocksResponse)(nil),            // 35: execution.FrozenBlocksResponse
+	(*HasBlockResponse)(nil),                // 36: execution.HasBlockResponse
+	(*typesproto.H256)(nil),                 // 37: types.H256
+	(*typesproto.H160)(nil),                 // 38: types.H160
+	(*typesproto.H2048)(nil),                // 39: types.H2048
+	(*typesproto.Withdrawal)(nil),           // 40: types.Withdrawal
+	(*typesproto.ExecutionPayload)(nil),     // 41: types.ExecutionPayload
+	(*typesproto.BlobsBundle)(nil),          // 42: types.BlobsBundle
+	(*typesproto.RequestsBundle)(nil),       // 43: types.RequestsBundle
+	(*typesproto.ExecutionPayloadBody)(nil), // 44: types.ExecutionPayloadBody
+	(*emptypb.Empty)(nil),                   // 45: google.protobuf.Empty
 }
 var file_execution_execution_proto_depIdxs = []int32{
 	0,  // 0: execution.ForkChoiceReceipt.status:type_name -> execution.ExecutionStatus
-	34, // 1: execution.ForkChoiceReceipt.latest_valid_hash:type_name -> types.H256
+	37, // 1: execution.ForkChoiceReceipt.latest_valid_hash:type_name -> types.H256
 	0,  // 2: execution.ValidationReceipt.validation_status:type_name -> execution.ExecutionStatus
-	34, // 3: execution.ValidationReceipt.latest_valid_hash:type_name -> types.H256
-	34, // 4: execution.Header.parent_hash:type_name -> types.H256
-	35, // 5: execution.Header.coinbase:type_name -> types.H160
-	34, // 6: execution.Header.state_root:type_name -> types.H256
-	34, // 7: execution.Header.receipt_root:type_name -> types.H256
-	36, // 8: execution.Header.logs_bloom:type_name -> types.H2048
-	34, // 9: execution.Header.prev_randao:type_name -> types.H256
-	34, // 10: execution.Header.difficulty:type_name -> types.H256
-	34, // 11: execution.Header.block_hash:type_name -> types.H256
-	34, // 12: execution.Header.ommer_hash:type_name -> types.H256
-	34, // 13: execution.Header.transaction_hash:type_name -> types.H256
-	34, // 14: execution.Header.base_fee_per_gas:type_name -> types.H256
-	34, // 15: execution.Header.withdrawal_hash:type_name -> types.H256
-	34, // 16: execution.Header.parent_beacon_block_root:type_name -> types.H256
-	34, // 17: execution.Header.requests_hash:type_name -> types.H256
-	34, // 18: execution.Header.block_access_list_hash:type_name -> types.H256
-	34, // 19: execution.BlockAccessListStorageChange.value:type_name -> types.H256
-	34, // 20: execution.BlockAccessListSlotChanges.slot:type_name -> types.H256
+	37, // 3: execution.ValidationReceipt.latest_valid_hash:type_name -> types.H256
+	37, // 4: execution.Header.parent_hash:type_name -> types.H256
+	38, // 5: execution.Header.coinbase:type_name -> types.H160
+	37, // 6: execution.Header.state_root:type_name -> types.H256
+	37, // 7: execution.Header.receipt_root:type_name -> types.H256
+	39, // 8: execution.Header.logs_bloom:type_name -> types.H2048
+	37, // 9: execution.Header.prev_randao:type_name -> types.H256
+	37, // 10: execution.Header.difficulty:type_name -> types.H256
+	37, // 11: execution.Header.block_hash:type_name -> types.H256
+	37, // 12: execution.Header.ommer_hash:type_name -> types.H256
+	37, // 13: execution.Header.transaction_hash:type_name -> types.H256
+	37, // 14: execution.Header.base_fee_per_gas:type_name -> types.H256
+	37, // 15: execution.Header.withdrawal_hash:type_name -> types.H256
+	37, // 16: execution.Header.parent_beacon_block_root:type_name -> types.H256
+	37, // 17: execution.Header.requests_hash:type_name -> types.H256
+	37, // 18: execution.Header.block_access_list_hash:type_name -> types.H256
+	37, // 19: execution.BlockAccessListStorageChange.value:type_name -> types.H256
+	37, // 20: execution.BlockAccessListSlotChanges.slot:type_name -> types.H256
 	5,  // 21: execution.BlockAccessListSlotChanges.changes:type_name -> execution.BlockAccessListStorageChange
-	34, // 22: execution.BlockAccessListBalanceChange.value:type_name -> types.H256
-	35, // 23: execution.BlockAccessListAccount.address:type_name -> types.H160
+	37, // 22: execution.BlockAccessListBalanceChange.value:type_name -> types.H256
+	38, // 23: execution.BlockAccessListAccount.address:type_name -> types.H160
 	6,  // 24: execution.BlockAccessListAccount.storage_changes:type_name -> execution.BlockAccessListSlotChanges
-	34, // 25: execution.BlockAccessListAccount.storage_reads:type_name -> types.H256
+	37, // 25: execution.BlockAccessListAccount.storage_reads:type_name -> types.H256
 	7,  // 26: execution.BlockAccessListAccount.balance_changes:type_name -> execution.BlockAccessListBalanceChange
 	8,  // 27: execution.BlockAccessListAccount.nonce_changes:type_name -> execution.BlockAccessListNonceChange
 	9,  // 28: execution.BlockAccessListAccount.code_changes:type_name -> execution.BlockAccessListCodeChange
-	34, // 29: execution.BlockAccessListEntry.block_hash:type_name -> types.H256
-	34, // 30: execution.BlockBody.block_hash:type_name -> types.H256
+	37, // 29: execution.BlockAccessListEntry.block_hash:type_name -> types.H256
+	37, // 30: execution.BlockBody.block_hash:type_name -> types.H256
 	4,  // 31: execution.BlockBody.uncles:type_name -> execution.Header
-	37, // 32: execution.BlockBody.withdrawals:type_name -> types.Withdrawal
+	40, // 32: execution.BlockBody.withdrawals:type_name -> types.Withdrawal
 	4,  // 33: execution.Block.header:type_name -> execution.Header
 	12, // 34: execution.Block.body:type_name -> execution.BlockBody
 	4,  // 35: execution.GetHeaderResponse.header:type_name -> execution.Header
-	34, // 36: execution.GetTDResponse.td:type_name -> types.H256
+	37, // 36: execution.GetTDResponse.td:type_name -> types.H256
 	12, // 37: execution.GetBodyResponse.body:type_name -> execution.BlockBody
-	34, // 38: execution.GetSegmentRequest.block_hash:type_name -> types.H256
+	37, // 38: execution.GetSegmentRequest.block_hash:type_name -> types.H256
 	13, // 39: execution.InsertBlocksRequest.blocks:type_name -> execution.Block
 	11, // 40: execution.InsertBlocksRequest.block_access_lists:type_name -> execution.BlockAccessListEntry
-	34, // 41: execution.ForkChoice.head_block_hash:type_name -> types.H256
-	34, // 42: execution.ForkChoice.finalized_block_hash:type_name -> types.H256
-	34, // 43: execution.ForkChoice.safe_block_hash:type_name -> types.H256
+	37, // 41: execution.ForkChoice.head_block_hash:type_name -> types.H256
+	37, // 42: execution.ForkChoice.finalized_block_hash:type_name -> types.H256
+	37, // 43: execution.ForkChoice.safe_block_hash:type_name -> types.H256
 	0,  // 44: execution.InsertionResult.result:type_name -> execution.ExecutionStatus
-	34, // 45: execution.ValidationRequest.hash:type_name -> types.H256
-	34, // 46: execution.AssembleBlockRequest.parent_hash:type_name -> types.H256
-	34, // 47: execution.AssembleBlockRequest.prev_randao:type_name -> types.H256
-	35, // 48: execution.AssembleBlockRequest.suggested_fee_recipient:type_name -> types.H160
-	37, // 49: execution.AssembleBlockRequest.withdrawals:type_name -> types.Withdrawal
-	34, // 50: execution.AssembleBlockRequest.parent_beacon_block_root:type_name -> types.H256
-	38, // 51: execution.AssembledBlockData.execution_payload:type_name -> types.ExecutionPayload
-	34, // 52: execution.AssembledBlockData.block_value:type_name -> types.H256
-	39, // 53: execution.AssembledBlockData.blobs_bundle:type_name -> types.BlobsBundle
-	40, // 54: execution.AssembledBlockData.requests:type_name -> types.RequestsBundle
+	37, // 45: execution.ValidationRequest.hash:type_name -> types.H256
+	37, // 46: execution.AssembleBlockRequest.parent_hash:type_name -> types.H256
+	37, // 47: execution.AssembleBlockRequest.prev_randao:type_name -> types.H256
+	38, // 48: execution.AssembleBlockRequest.suggested_fee_recipient:type_name -> types.H160
+	40, // 49: execution.AssembleBlockRequest.withdrawals:type_name -> types.Withdrawal
+	37, // 50: execution.AssembleBlockRequest.parent_beacon_block_root:type_name -> types.H256
+	41, // 51: execution.AssembledBlockData.execution_payload:type_name -> types.ExecutionPayload
+	37, // 52: execution.AssembledBlockData.block_value:type_name -> types.H256
+	42, // 53: execution.AssembledBlockData.blobs_bundle:type_name -> types.BlobsBundle
+	43, // 54: execution.AssembledBlockData.requests:type_name -> types.RequestsBundle
 	26, // 55: execution.GetAssembledBlockResponse.data:type_name -> execution.AssembledBlockData
 	12, // 56: execution.GetBodiesBatchResponse.bodies:type_name -> execution.BlockBody
-	34, // 57: execution.GetBodiesByHashesRequest.hashes:type_name -> types.H256
-	19, // 58: execution.Execution.InsertBlocks:input_type -> execution.InsertBlocksRequest
-	22, // 59: execution.Execution.ValidateChain:input_type -> execution.ValidationRequest
-	20, // 60: execution.Execution.UpdateForkChoice:input_type -> execution.ForkChoice
-	23, // 61: execution.Execution.AssembleBlock:input_type -> execution.AssembleBlockRequest
-	25, // 62: execution.Execution.GetAssembledBlock:input_type -> execution.GetAssembledBlockRequest
-	41, // 63: execution.Execution.CurrentHeader:input_type -> google.protobuf.Empty
-	18, // 64: execution.Execution.GetTD:input_type -> execution.GetSegmentRequest
-	18, // 65: execution.Execution.GetHeader:input_type -> execution.GetSegmentRequest
-	18, // 66: execution.Execution.GetBody:input_type -> execution.GetSegmentRequest
-	18, // 67: execution.Execution.HasBlock:input_type -> execution.GetSegmentRequest
-	30, // 68: execution.Execution.GetBodiesByRange:input_type -> execution.GetBodiesByRangeRequest
-	29, // 69: execution.Execution.GetBodiesByHashes:input_type -> execution.GetBodiesByHashesRequest
-	34, // 70: execution.Execution.IsCanonicalHash:input_type -> types.H256
-	34, // 71: execution.Execution.GetHeaderHashNumber:input_type -> types.H256
-	41, // 72: execution.Execution.GetForkChoice:input_type -> google.protobuf.Empty
-	41, // 73: execution.Execution.Ready:input_type -> google.protobuf.Empty
-	41, // 74: execution.Execution.FrozenBlocks:input_type -> google.protobuf.Empty
-	21, // 75: execution.Execution.InsertBlocks:output_type -> execution.InsertionResult
-	2,  // 76: execution.Execution.ValidateChain:output_type -> execution.ValidationReceipt
-	1,  // 77: execution.Execution.UpdateForkChoice:output_type -> execution.ForkChoiceReceipt
-	24, // 78: execution.Execution.AssembleBlock:output_type -> execution.AssembleBlockResponse
-	27, // 79: execution.Execution.GetAssembledBlock:output_type -> execution.GetAssembledBlockResponse
-	14, // 80: execution.Execution.CurrentHeader:output_type -> execution.GetHeaderResponse
-	15, // 81: execution.Execution.GetTD:output_type -> execution.GetTDResponse
-	14, // 82: execution.Execution.GetHeader:output_type -> execution.GetHeaderResponse
-	16, // 83: execution.Execution.GetBody:output_type -> execution.GetBodyResponse
-	33, // 84: execution.Execution.HasBlock:output_type -> execution.HasBlockResponse
-	28, // 85: execution.Execution.GetBodiesByRange:output_type -> execution.GetBodiesBatchResponse
-	28, // 86: execution.Execution.GetBodiesByHashes:output_type -> execution.GetBodiesBatchResponse
-	3,  // 87: execution.Execution.IsCanonicalHash:output_type -> execution.IsCanonicalResponse
-	17, // 88: execution.Execution.GetHeaderHashNumber:output_type -> execution.GetHeaderHashNumberResponse
-	20, // 89: execution.Execution.GetForkChoice:output_type -> execution.ForkChoice
-	31, // 90: execution.Execution.Ready:output_type -> execution.ReadyResponse
-	32, // 91: execution.Execution.FrozenBlocks:output_type -> execution.FrozenBlocksResponse
-	75, // [75:92] is the sub-list for method output_type
-	58, // [58:75] is the sub-list for method input_type
-	58, // [58:58] is the sub-list for extension type_name
-	58, // [58:58] is the sub-list for extension extendee
-	0,  // [0:58] is the sub-list for field type_name
+	37, // 57: execution.GetBodiesByHashesRequest.hashes:type_name -> types.H256
+	37, // 58: execution.GetPayloadBodiesByHashRequest.hashes:type_name -> types.H256
+	44, // 59: execution.GetPayloadBodiesBatchResponse.bodies:type_name -> types.ExecutionPayloadBody
+	19, // 60: execution.Execution.InsertBlocks:input_type -> execution.InsertBlocksRequest
+	22, // 61: execution.Execution.ValidateChain:input_type -> execution.ValidationRequest
+	20, // 62: execution.Execution.UpdateForkChoice:input_type -> execution.ForkChoice
+	23, // 63: execution.Execution.AssembleBlock:input_type -> execution.AssembleBlockRequest
+	25, // 64: execution.Execution.GetAssembledBlock:input_type -> execution.GetAssembledBlockRequest
+	45, // 65: execution.Execution.CurrentHeader:input_type -> google.protobuf.Empty
+	18, // 66: execution.Execution.GetTD:input_type -> execution.GetSegmentRequest
+	18, // 67: execution.Execution.GetHeader:input_type -> execution.GetSegmentRequest
+	18, // 68: execution.Execution.GetBody:input_type -> execution.GetSegmentRequest
+	18, // 69: execution.Execution.HasBlock:input_type -> execution.GetSegmentRequest
+	30, // 70: execution.Execution.GetBodiesByRange:input_type -> execution.GetBodiesByRangeRequest
+	29, // 71: execution.Execution.GetBodiesByHashes:input_type -> execution.GetBodiesByHashesRequest
+	31, // 72: execution.Execution.GetPayloadBodiesByHash:input_type -> execution.GetPayloadBodiesByHashRequest
+	32, // 73: execution.Execution.GetPayloadBodiesByRange:input_type -> execution.GetPayloadBodiesByRangeRequest
+	37, // 74: execution.Execution.IsCanonicalHash:input_type -> types.H256
+	37, // 75: execution.Execution.GetHeaderHashNumber:input_type -> types.H256
+	45, // 76: execution.Execution.GetForkChoice:input_type -> google.protobuf.Empty
+	45, // 77: execution.Execution.Ready:input_type -> google.protobuf.Empty
+	45, // 78: execution.Execution.FrozenBlocks:input_type -> google.protobuf.Empty
+	21, // 79: execution.Execution.InsertBlocks:output_type -> execution.InsertionResult
+	2,  // 80: execution.Execution.ValidateChain:output_type -> execution.ValidationReceipt
+	1,  // 81: execution.Execution.UpdateForkChoice:output_type -> execution.ForkChoiceReceipt
+	24, // 82: execution.Execution.AssembleBlock:output_type -> execution.AssembleBlockResponse
+	27, // 83: execution.Execution.GetAssembledBlock:output_type -> execution.GetAssembledBlockResponse
+	14, // 84: execution.Execution.CurrentHeader:output_type -> execution.GetHeaderResponse
+	15, // 85: execution.Execution.GetTD:output_type -> execution.GetTDResponse
+	14, // 86: execution.Execution.GetHeader:output_type -> execution.GetHeaderResponse
+	16, // 87: execution.Execution.GetBody:output_type -> execution.GetBodyResponse
+	36, // 88: execution.Execution.HasBlock:output_type -> execution.HasBlockResponse
+	28, // 89: execution.Execution.GetBodiesByRange:output_type -> execution.GetBodiesBatchResponse
+	28, // 90: execution.Execution.GetBodiesByHashes:output_type -> execution.GetBodiesBatchResponse
+	33, // 91: execution.Execution.GetPayloadBodiesByHash:output_type -> execution.GetPayloadBodiesBatchResponse
+	33, // 92: execution.Execution.GetPayloadBodiesByRange:output_type -> execution.GetPayloadBodiesBatchResponse
+	3,  // 93: execution.Execution.IsCanonicalHash:output_type -> execution.IsCanonicalResponse
+	17, // 94: execution.Execution.GetHeaderHashNumber:output_type -> execution.GetHeaderHashNumberResponse
+	20, // 95: execution.Execution.GetForkChoice:output_type -> execution.ForkChoice
+	34, // 96: execution.Execution.Ready:output_type -> execution.ReadyResponse
+	35, // 97: execution.Execution.FrozenBlocks:output_type -> execution.FrozenBlocksResponse
+	79, // [79:98] is the sub-list for method output_type
+	60, // [60:79] is the sub-list for method input_type
+	60, // [60:60] is the sub-list for extension type_name
+	60, // [60:60] is the sub-list for extension extendee
+	0,  // [0:60] is the sub-list for field type_name
 }
 
 func init() { file_execution_execution_proto_init() }
@@ -2445,7 +2603,7 @@ func file_execution_execution_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_execution_execution_proto_rawDesc), len(file_execution_execution_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   33,
+			NumMessages:   36,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

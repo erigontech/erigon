@@ -3,12 +3,12 @@ package integrity
 import (
 	"context"
 	"fmt"
-	"runtime"
 	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -38,12 +38,13 @@ func CheckRCacheNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader serv
 
 	log.Info("[integrity] RCacheNoDups starting", "fromBlock", fromBlock, "toBlock", toBlock)
 
-	defer db.Debug().EnableReadAhead().DisableReadAhead()
-
-	return parallelChunkCheck(ctx, fromBlock, toBlock, db, blockReader, failFast, RCacheNoDupsRange)
+	return parallelChunkCheck(ctx, fromBlock, toBlock, db, blockReader, failFast, "CheckRCacheNoDups", RCacheNoDupsRange)
 }
 
 func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
+	if fromBlock > toBlock {
+		panic(fmt.Sprintf("fromBlock(%d) > toBlock(%d)", fromBlock, toBlock))
+	}
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
@@ -130,20 +131,20 @@ func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.Tem
 
 type chunkFn func(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) error
 
-func parallelChunkCheck(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool, fn chunkFn) (err error) {
+func parallelChunkCheck(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool, prefix string, fn chunkFn) (err error) {
 	blockRange := toBlock - fromBlock + 1
 	if blockRange == 0 {
 		return nil
 	}
 
-	numWorkers := runtime.NumCPU() * 5
+	numWorkers := estimate.AlmostAllCPUs()
 	chunkSize := uint64(1000)
 
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(numWorkers)
 	var completedChunks atomic.Uint64
-	var totalChunks uint64 = (blockRange + chunkSize - 1) / chunkSize
-	log.Info("[integrity] parallel processing", "workers", numWorkers, "chunkSize", chunkSize, "blockRange", blockRange)
+	totalChunks := (blockRange + chunkSize - 1) / chunkSize
+	log.Info("[integrity] CheckRCacheNoDups", "workers", numWorkers, "chunkSize", chunkSize, "blockRange", blockRange)
 
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -156,7 +157,7 @@ func parallelChunkCheck(ctx context.Context, fromBlock, toBlock uint64, db kv.Te
 			case <-logEvery.C:
 				completed := completedChunks.Load()
 				progress := float64(completed) / float64(totalChunks) * 100
-				log.Info("[integrity] progress", "progress", fmt.Sprintf("%.1f%%", progress))
+				log.Info("[integrity] "+prefix, "progress", fmt.Sprintf("%.1f%%", progress))
 			}
 		}
 	}()

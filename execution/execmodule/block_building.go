@@ -34,7 +34,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 )
 
-func (e *EthereumExecutionModule) checkWithdrawalsPresence(time uint64, withdrawals []*types.Withdrawal) error {
+func (e *ExecModule) checkWithdrawalsPresence(time uint64, withdrawals []*types.Withdrawal) error {
 	if !e.config.IsShanghai(time) && withdrawals != nil {
 		return &rpc.InvalidParamsError{Message: "withdrawals before shanghai"}
 	}
@@ -44,7 +44,7 @@ func (e *EthereumExecutionModule) checkWithdrawalsPresence(time uint64, withdraw
 	return nil
 }
 
-func (e *EthereumExecutionModule) evictOldBuilders() {
+func (e *ExecModule) evictOldBuilders() {
 	ids := common.SortedKeys(e.builders)
 
 	// remove old builders so that at most MaxBuilders - 1 remain
@@ -54,7 +54,7 @@ func (e *EthereumExecutionModule) evictOldBuilders() {
 }
 
 // Missing: NewPayload, AssembleBlock
-func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *executionproto.AssembleBlockRequest) (*executionproto.AssembleBlockResponse, error) {
+func (e *ExecModule) AssembleBlock(ctx context.Context, req *executionproto.AssembleBlockRequest) (*executionproto.AssembleBlockResponse, error) {
 	if !e.semaphore.TryAcquire(1) {
 		return &executionproto.AssembleBlockResponse{
 			Id:   0,
@@ -121,31 +121,40 @@ func blockValue(br *types.BlockWithReceipts, baseFee *uint256.Int) *uint256.Int 
 	return blockValue
 }
 
-func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *executionproto.GetAssembledBlockRequest) (*executionproto.GetAssembledBlockResponse, error) {
+func (e *ExecModule) GetAssembledBlockWithReceipts(payloadId uint64) (block *types.BlockWithReceipts, busy bool, err error) {
 	if !e.semaphore.TryAcquire(1) {
+		return nil, true, nil
+	}
+	defer e.semaphore.Release(1)
+	builder, ok := e.builders[payloadId]
+	if !ok {
+		return nil, false, nil
+	}
+	blockWithReceipts, err := builder.Stop()
+	return blockWithReceipts, false, err
+}
+
+func (e *ExecModule) GetAssembledBlock(ctx context.Context, req *executionproto.GetAssembledBlockRequest) (*executionproto.GetAssembledBlockResponse, error) {
+	blockWithReceipts, busy, err := e.GetAssembledBlockWithReceipts(req.Id)
+	if err != nil {
+		e.logger.Error("Failed to build PoS block", "err", err)
+		return nil, err
+	}
+	if busy {
 		return &executionproto.GetAssembledBlockResponse{
 			Busy: true,
 		}, nil
 	}
-	defer e.semaphore.Release(1)
-	payloadId := req.Id
-	builder, ok := e.builders[payloadId]
-	if !ok {
+	if blockWithReceipts == nil {
 		return &executionproto.GetAssembledBlockResponse{
 			Busy: false,
 		}, nil
 	}
 
-	blockWithReceipts, err := builder.Stop()
-	if err != nil {
-		e.logger.Error("Failed to build PoS block", "err", err)
-		return nil, err
-	}
 	block := blockWithReceipts.Block
 	header := block.Header()
 
-	baseFee := new(uint256.Int)
-	baseFee.SetFromBig(header.BaseFee)
+	baseFee := header.BaseFee
 
 	encodedTransactions, err := types.MarshalTransactionsBinary(block.Transactions())
 	if err != nil {

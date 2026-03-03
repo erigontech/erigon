@@ -7,6 +7,8 @@ import (
 	"errors"
 	"math/big"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/types"
@@ -37,17 +39,17 @@ func (s stEnv) MarshalJSON() ([]byte, error) {
 	}
 	var enc stEnv
 	enc.Coinbase = common.UnprefixedAddress(s.Coinbase)
-	enc.Difficulty = (*math.HexOrDecimal256)(s.Difficulty)
-	enc.Random = (*math.HexOrDecimal256)(s.Random)
+	enc.Difficulty = (*math.HexOrDecimal256)(s.Difficulty.ToBig())
+	enc.Random = (*math.HexOrDecimal256)(s.Random.ToBig())
 	enc.MixDigest = s.MixDigest
-	enc.ParentDifficulty = (*math.HexOrDecimal256)(s.ParentDifficulty)
+	enc.ParentDifficulty = (*math.HexOrDecimal256)(s.ParentDifficulty.ToBig())
 	enc.GasLimit = math.HexOrDecimal64(s.GasLimit)
 	enc.Number = math.HexOrDecimal64(s.Number)
 	enc.Timestamp = math.HexOrDecimal64(s.Timestamp)
 	enc.ParentTimestamp = math.HexOrDecimal64(s.ParentTimestamp)
 	enc.BlockHashes = s.BlockHashes
 	enc.Ommers = s.Ommers
-	enc.BaseFee = (*math.HexOrDecimal256)(s.BaseFee)
+	enc.BaseFee = (*math.HexOrDecimal256)(s.BaseFee.ToBig())
 	enc.ParentUncleHash = s.ParentUncleHash
 	enc.UncleHash = s.UncleHash
 	enc.Withdrawals = s.Withdrawals
@@ -86,16 +88,16 @@ func (s *stEnv) UnmarshalJSON(input []byte) error {
 	}
 	s.Coinbase = common.Address(*dec.Coinbase)
 	if dec.Difficulty != nil {
-		s.Difficulty = (*big.Int)(dec.Difficulty)
+		s.Difficulty = uint256.MustFromBig((*big.Int)(dec.Difficulty))
 	}
 	if dec.Random != nil {
-		s.Random = (*big.Int)(dec.Random)
+		s.Random = uint256.MustFromBig((*big.Int)(dec.Random))
 	}
 	if dec.MixDigest != nil {
 		s.MixDigest = *dec.MixDigest
 	}
 	if dec.ParentDifficulty != nil {
-		s.ParentDifficulty = (*big.Int)(dec.ParentDifficulty)
+		s.ParentDifficulty = uint256.MustFromBig((*big.Int)(dec.ParentDifficulty))
 	}
 	if dec.GasLimit == nil {
 		return errors.New("missing required field 'currentGasLimit' for stEnv")
@@ -119,7 +121,7 @@ func (s *stEnv) UnmarshalJSON(input []byte) error {
 		s.Ommers = dec.Ommers
 	}
 	if dec.BaseFee != nil {
-		s.BaseFee = (*big.Int)(dec.BaseFee)
+		s.BaseFee = uint256.MustFromBig((*big.Int)(dec.BaseFee))
 	}
 	if dec.ParentUncleHash != nil {
 		s.ParentUncleHash = *dec.ParentUncleHash

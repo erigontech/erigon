@@ -446,6 +446,7 @@ func setupDb(tb testing.TB) (datadir.Dirs, kv.RwDB, log.Logger) {
 	logger := log.New()
 	dirs := datadir.New(tb.TempDir())
 	db := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	tb.Cleanup(db.Close)
 	return dirs, db, logger
 }
 

@@ -6,13 +6,11 @@ toolchain go1.25.7
 
 replace github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.9
 
-replace github.com/holiman/uint256 => github.com/erigontech/uint256 v0.0.0-20260128213548-c9ef4c05bfe3
-
 require (
 	github.com/erigontech/erigon-snapshot v1.3.1-0.20260210221902-e495954c7e78
 	github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116
 	github.com/erigontech/mdbx-go v0.39.12
-	github.com/erigontech/secp256k1 v1.2.0
+	github.com/erigontech/secp256k1 v1.2.1-0.20260218182123-377cc1bd6410
 	github.com/erigontech/silkworm-go v0.24.0
 )
 
@@ -41,10 +39,11 @@ require (
 	github.com/crate-crypto/go-eth-kzg v1.5.0
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
 	github.com/deckarep/golang-set/v2 v2.8.0
-	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0
+	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0
 	github.com/dop251/goja v0.0.0-20230605162241-28ee0ee714f3
 	github.com/edsrzf/mmap-go v1.2.0
 	github.com/elastic/go-freelru v0.16.0
+	github.com/erigontech/fastkeccak v0.1.1-0.20260222164035-95925bf94241
 	github.com/ethereum/go-bigmodexpfix v0.0.0-20250911101455-f9e208c548ab
 	github.com/felixge/fgprof v0.9.5
 	github.com/go-chi/chi/v5 v5.2.3
@@ -70,7 +69,7 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/heimdalr/dag v1.5.0
 	github.com/holiman/bloomfilter/v2 v2.0.3
-	github.com/holiman/uint256 v1.3.2
+	github.com/holiman/uint256 v1.3.3-0.20260228135838-087f4b32f234
 	github.com/huandu/xstrings v1.5.0
 	github.com/huin/goupnp v1.3.0
 	github.com/jackpal/go-nat-pmp v1.0.2
@@ -82,7 +81,6 @@ require (
 	github.com/libp2p/go-libp2p v0.37.2
 	github.com/libp2p/go-libp2p-mplex v0.9.0
 	github.com/libp2p/go-libp2p-pubsub v0.11.0
-	github.com/linkdata/deadlock v0.5.5
 	github.com/mark3labs/mcp-go v0.43.2
 	github.com/mattn/go-colorable v0.1.14
 	github.com/mattn/go-isatty v0.0.20
@@ -362,7 +360,6 @@ require (
 	github.com/nunnatsa/ginkgolinter v0.22.0 // indirect
 	github.com/onsi/ginkgo/v2 v2.27.2 // indirect
 	github.com/opencontainers/runtime-spec v1.2.0 // indirect
-	github.com/petermattis/goid v0.0.0-20250813065127-a731cc31b4fe // indirect
 	github.com/pion/datachannel v1.5.9 // indirect
 	github.com/pion/dtls/v2 v2.2.12 // indirect
 	github.com/pion/dtls/v3 v3.0.11 // indirect

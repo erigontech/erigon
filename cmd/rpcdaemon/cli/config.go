@@ -21,7 +21,6 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
-	"math/big"
 	"net"
 	"net/http"
 	"net/url"
@@ -30,6 +29,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -1128,7 +1128,7 @@ func (e *remoteRulesEngine) SealHash(_ *types.Header) common.Hash {
 	panic("remoteRulesEngine.SealHash not supported")
 }
 
-func (e *remoteRulesEngine) CalcDifficulty(_ rules.ChainHeaderReader, _ uint64, _ uint64, _ *big.Int, _ uint64, _ common.Hash, _ common.Hash, _ uint64) *big.Int {
+func (e *remoteRulesEngine) CalcDifficulty(_ rules.ChainHeaderReader, _ uint64, _ uint64, _ uint256.Int, _ uint64, _ common.Hash, _ common.Hash, _ uint64) uint256.Int {
 	panic("remoteRulesEngine.CalcDifficulty not supported")
 }
 

@@ -98,20 +98,21 @@ func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Ha
 	}
 	defer tx.Rollback()
 
-	number, err := api._blockReader.HeaderNumber(ctx, tx, blockHash)
+	blockNrOrHash := rpc.BlockNumberOrHashWithHash(blockHash, true)
+	blockNumber, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
-		return StorageRangeResult{}, err
-	}
-	if number == nil {
-		return StorageRangeResult{}, nil
-	}
-
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, *number)
-	if err != nil {
+		if errors.As(err, &rpc.BlockNotFoundErr{}) {
+			return StorageRangeResult{}, nil
+		}
 		return StorageRangeResult{}, err
 	}
 
-	minTxNum, err := api._txNumReader.Min(ctx, tx, *number)
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	if err != nil {
+		return StorageRangeResult{}, err
+	}
+
+	minTxNum, err := api._txNumReader.Min(ctx, tx, blockNumber)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
@@ -188,15 +189,12 @@ func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.Blo
 			blockNumber = uint64(number)
 		}
 
-	} else if hash, ok := blockNrOrHash.Hash(); ok {
-		header, err1 := api.headerByHash(ctx, hash, tx)
-		if err1 != nil {
-			return state.IteratorDump{}, err1
+	} else if _, ok := blockNrOrHash.Hash(); ok {
+		bn, _, _, err2 := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+		if err2 != nil {
+			return state.IteratorDump{}, err2
 		}
-		if header == nil {
-			return state.IteratorDump{}, fmt.Errorf("header %s not found", hash.Hex())
-		}
-		blockNumber = header.Number.Uint64()
+		blockNumber = bn
 	}
 
 	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
@@ -365,7 +363,7 @@ func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, t
 	if err != nil {
 		return &AccountResult{}, err
 	}
-	if header == nil || header.Number == nil {
+	if header == nil {
 		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 	}
 	canonicalHash, ok, err := api._blockReader.CanonicalHash(ctx, tx, header.Number.Uint64())

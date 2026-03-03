@@ -246,7 +246,12 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 		if err != nil {
 			return 0, err
 		}
-		evm.IntraBlockState().MarkAddressAccess(address, false)
+		// Record the address access for BAL tracking, but only in non-read-only
+		// context. In STATICCALL, SELFDESTRUCT will be rejected by ErrWriteProtection
+		// before it executes, so the beneficiary is never truly accessed.
+		if !evm.readOnly {
+			evm.IntraBlockState().MarkAddressAccess(address, false)
+		}
 		if empty && !balance.IsZero() {
 			gas += params.CreateBySelfdestructGas
 		}

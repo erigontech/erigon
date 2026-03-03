@@ -26,8 +26,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	sync "github.com/linkdata/deadlock"
 	"github.com/prometheus/client_golang/prometheus"
+	"sync"
 
 	"google.golang.org/grpc"
 

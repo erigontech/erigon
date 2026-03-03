@@ -25,7 +25,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/big"
 	"os"
 	goruntime "runtime"
 	"runtime/pprof"
@@ -40,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -169,11 +169,16 @@ func runCmd(ctx *cli.Context) error {
 	} else {
 		debugLogger = logger.NewStructLogger(logconfig)
 	}
-	db := temporaltest.NewTestDB(nil, datadir.New(os.TempDir()))
+	tmpDir, err := os.MkdirTemp("", "erigon-evm-run-*")
+	if err != nil {
+		return err
+	}
+	defer dir.RemoveAll(tmpDir)
+	db := temporaltest.NewTestDB(nil, datadir.New(tmpDir))
 	defer db.Close()
 	if ctx.String(GenesisFlag.Name) != "" {
 		gen := readGenesis(ctx.String(GenesisFlag.Name))
-		genesiswrite.MustCommitGenesis(gen, db, datadir.New(""), log.Root())
+		genesiswrite.MustCommitGenesis(gen, db, datadir.New(tmpDir), log.Root())
 		genesisConfig = gen
 		chainConfig = gen.Config
 	} else {
@@ -259,9 +264,9 @@ func runCmd(ctx *cli.Context) error {
 		GasPrice:    *gasPrice,
 		Value:       *value,
 		Difficulty:  genesisConfig.Difficulty,
-		Time:        new(big.Int).SetUint64(genesisConfig.Timestamp),
+		Time:        genesisConfig.Timestamp,
 		Coinbase:    accounts.InternAddress(genesisConfig.Coinbase),
-		BlockNumber: new(big.Int).SetUint64(genesisConfig.Number),
+		BlockNumber: genesisConfig.Number,
 	}
 
 	if tracer != nil {
@@ -323,8 +328,8 @@ func runCmd(ctx *cli.Context) error {
 		rules := &chain.Rules{}
 		if chainConfig != nil {
 			blockContext := evmtypes.BlockContext{
-				BlockNumber: runtimeConfig.BlockNumber.Uint64(),
-				Time:        runtimeConfig.Time.Uint64(),
+				BlockNumber: runtimeConfig.BlockNumber,
+				Time:        runtimeConfig.Time,
 			}
 			rules = blockContext.Rules(chainConfig)
 		}
