@@ -246,7 +246,7 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 			continue
 		}
 
-		batch := make([]*cltypes.SignedBlindedBeaconBlock, 0, blocksBatchSize)
+		batch := make([]*cltypes.SignedBeaconBlock, 0, blocksBatchSize)
 		visited := uint64(0)
 		for ; visited < blocksBatchSize; visited++ {
 			if visited >= maxIterations {
@@ -255,7 +255,7 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 			if currentSlot-visited < targetSlot {
 				break
 			}
-			block, err := b.blockReader.ReadBlindedBlockBySlot(b.ctx, tx, currentSlot-visited)
+			block, err := b.blockReader.ReadBeaconBlockBodyBySlot(b.ctx, tx, currentSlot-visited)
 			if err != nil {
 				return err
 			}
@@ -273,8 +273,8 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 			if err != nil {
 				return err
 			}
-
-			if block.Block.Body.BlobKzgCommitments.Len() == int(blobsCount) {
+			commitments := block.Block.Body.GetBlobKzgCommitments()
+			if commitments == nil || commitments.Len() == int(blobsCount) {
 				continue
 			}
 			batch = append(batch, block)
@@ -301,8 +301,8 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 		}
 
 		// Generate the request
-		fuluBlocks := []*cltypes.SignedBlindedBeaconBlock{}
-		denebBlocks := []*cltypes.SignedBlindedBeaconBlock{}
+		fuluBlocks := []*cltypes.SignedBeaconBlock{}
+		denebBlocks := []*cltypes.SignedBeaconBlock{}
 		for _, block := range batch {
 			if block.Version() >= clparams.FuluVersion {
 				fuluBlocks = append(fuluBlocks, block)
@@ -312,7 +312,7 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 		}
 
 		if len(denebBlocks) > 0 {
-			req, err := BlobsIdentifiersFromBlindedBlocks(batch, b.beaconCfg)
+			req, err := BlobsIdentifiersFromBlocks(batch, b.beaconCfg)
 			if err != nil {
 				b.logger.Debug("[BlobHistoryDownloader] Error generating blob identifiers", "err", err)
 				continue

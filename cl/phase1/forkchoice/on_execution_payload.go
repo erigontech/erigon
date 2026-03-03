@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/monitor"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/transition"
@@ -35,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 // validateEnvelopeAgainstBlock validates the envelope against the block and state.
@@ -340,6 +342,17 @@ func (f *ForkChoiceStore) OnExecutionPayload(ctx context.Context, signedEnvelope
 	// HasEnvelope() checks disk for existence, replacing in-memory tracking.
 	if err := f.forkGraph.DumpEnvelopeOnDisk(beaconBlockRoot, signedEnvelope); err != nil {
 		return fmt.Errorf("OnExecutionPayload: failed to dump envelope: %w", err)
+	}
+
+	// [New in Gloas:EIP7732] Persist execution block number/hash indices to the KV store.
+	// For GLOAS blocks, ExecutionPayload is absent from the beacon block, so WriteBeaconBlockAndIndicies
+	// skips these indices. We write them here once the envelope is validated and accepted.
+	if f.db != nil {
+		if err := f.db.Update(ctx, func(tx kv.RwTx) error {
+			return beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, common.Hash(beaconBlockRoot), envelope)
+		}); err != nil {
+			return fmt.Errorf("OnExecutionPayload: failed to write execution payload indices: %w", err)
+		}
 	}
 
 	return nil
