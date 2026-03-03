@@ -20,10 +20,13 @@
 package protocol
 
 import (
+	"sort"
+
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -67,6 +70,7 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 
 	rules := evm.ChainRules()
 	blockNum := header.Number.Uint64()
+	blockTime := header.Time
 	msg, err := txn.AsMessage(*types.MakeSigner(config, blockNum, header.Time), header.BaseFee, rules)
 	if err != nil {
 		return nil, err
@@ -94,6 +98,18 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 	result, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 	if err != nil {
 		return nil, err
+	}
+	if evm.ChainConfig().IsAmsterdam(blockTime) {
+		// Emit Selfdesctruct logs where accounts with non-empty balances have been deleted
+		removedWithBalance := ibs.GetRemovedAccountsWithBalance()
+		if removedWithBalance != nil {
+			sort.Slice(removedWithBalance, func(i, j int) bool {
+				return removedWithBalance[i].Address.Cmp(removedWithBalance[j].Address) < 0
+			})
+			for _, sd := range removedWithBalance {
+				ibs.AddLog(misc.EthSelfDestructLog(sd.Address, sd.Balance))
+			}
+		}
 	}
 	// Update the state with pending changes
 	if err = ibs.FinalizeTx(rules, stateWriter); err != nil {
