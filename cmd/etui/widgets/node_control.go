@@ -23,24 +23,24 @@ func NewNodeControlView() *NodeControlView {
 }
 
 // UpdateNodeStatus renders the current node status.
-func (v *NodeControlView) UpdateNodeStatus(status datasource.NodeStatus) {
+// standalone indicates whether R=start/stop hints should be shown.
+func (v *NodeControlView) UpdateNodeStatus(status datasource.NodeStatus, standalone bool) {
 	var indicator, stateLabel, detail string
 
 	switch status.State {
 	case datasource.NodeRunning:
 		indicator = "[green]●[-]"
 		stateLabel = "[green]Running[-]"
-		detail = fmt.Sprintf(" PID %d  %s  [yellow]R[-]=stop", status.PID, formatUptime(status.Uptime))
-	case datasource.NodeExternal:
-		indicator = "[blue]●[-]"
-		stateLabel = "[blue]Running (external)[-]"
-		if status.PID > 0 {
-			detail = fmt.Sprintf("  PID %d", status.PID)
+		detail = fmt.Sprintf(" PID %d  %s", status.PID, formatUptime(status.Uptime))
+		if standalone {
+			detail += "  [yellow]R[-]=stop"
 		}
 	case datasource.NodeStarting:
 		indicator = "[yellow]●[-]"
 		stateLabel = "[yellow]Starting...[-]"
-		detail = fmt.Sprintf(" PID %d", status.PID)
+		if status.PID > 0 {
+			detail = fmt.Sprintf(" PID %d", status.PID)
+		}
 	case datasource.NodeStopping:
 		indicator = "[yellow]●[-]"
 		stateLabel = "[yellow]Stopping...[-]"
@@ -49,9 +49,10 @@ func (v *NodeControlView) UpdateNodeStatus(status datasource.NodeStatus) {
 		indicator = "[gray]●[-]"
 		stateLabel = "[gray]Stopped[-]"
 		if status.ExitErr != "" {
-			detail = fmt.Sprintf("  [red]%s[-]  [yellow]R[-]=start", status.ExitErr)
-		} else {
-			detail = "  [yellow]R[-]=start"
+			detail = fmt.Sprintf("  [red]%s[-]", status.ExitErr)
+		}
+		if standalone {
+			detail += "  [yellow]R[-]=start"
 		}
 	}
 

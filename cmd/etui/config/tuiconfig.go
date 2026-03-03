@@ -4,9 +4,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
+	"strings"
 
 	"github.com/pelletier/go-toml/v2"
+
+	"github.com/erigontech/erigon/execution/chain/networkname"
 )
 
 // TUIConfig holds all user-configurable settings for the Erigon TUI.
@@ -19,6 +23,12 @@ type TUIConfig struct {
 	RPCPort        int    `toml:"rpc_port"`         // --http.port value
 	PrivateAPIAddr string `toml:"private_api_addr"` // --private.api.addr value
 	DiagnosticsURL string `toml:"diagnostics_url"`  // URL for diagnostics/downloader
+}
+
+// GlobalConfig is the minimal config stored in the user's config directory.
+// It remembers the last-used datadir so `etui` works with no flags.
+type GlobalConfig struct {
+	DataDir string `toml:"datadir"`
 }
 
 // Defaults returns a TUIConfig with sane default values.
@@ -36,6 +46,56 @@ func Defaults() TUIConfig {
 // ConfigPath returns the path to etui.toml inside the given datadir.
 func ConfigPath(datadir string) string {
 	return filepath.Join(datadir, "etui.toml")
+}
+
+// GlobalConfigDir returns the platform-appropriate user config directory
+// for etui (e.g. ~/.config/etui on Linux).
+func GlobalConfigDir() string {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		// Fallback to home directory.
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, ".config", "etui")
+	}
+	return filepath.Join(dir, "etui")
+}
+
+// GlobalConfigPath returns the full path to the global config file.
+func GlobalConfigPath() string {
+	return filepath.Join(GlobalConfigDir(), "etui.toml")
+}
+
+// LoadGlobal reads the global config to discover the last-used datadir.
+// Returns empty string if the file doesn't exist or can't be read.
+func LoadGlobal() string {
+	data, err := os.ReadFile(GlobalConfigPath())
+	if err != nil {
+		return ""
+	}
+	var gc GlobalConfig
+	if err := toml.Unmarshal(data, &gc); err != nil {
+		return ""
+	}
+	return gc.DataDir
+}
+
+// SaveGlobal writes the datadir to the global config file so future
+// bare `etui` invocations find it.
+func SaveGlobal(datadir string) error {
+	dir := GlobalConfigDir()
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("creating config dir %s: %w", dir, err)
+	}
+	gc := GlobalConfig{DataDir: datadir}
+	data, err := toml.Marshal(&gc)
+	if err != nil {
+		return fmt.Errorf("marshalling global config: %w", err)
+	}
+	path := GlobalConfigPath()
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("writing %s: %w", path, err)
+	}
+	return nil
 }
 
 // Load reads etui.toml from the datadir. If the file doesn't exist,
@@ -82,6 +142,14 @@ func (c *TUIConfig) Save() error {
 	return nil
 }
 
+// SaveAll writes both the per-node config and the global pointer config.
+func (c *TUIConfig) SaveAll() error {
+	if err := c.Save(); err != nil {
+		return err
+	}
+	return SaveGlobal(c.DataDir)
+}
+
 // Validate checks that all config values are within acceptable ranges.
 func (c *TUIConfig) Validate() error {
 	switch c.PruneMode {
@@ -96,12 +164,52 @@ func (c *TUIConfig) Validate() error {
 	if c.Chain == "" {
 		return fmt.Errorf("chain cannot be empty")
 	}
+	// Normalise to lowercase — networkname.Supported() is case-insensitive,
+	// but the Erigon binary expects lowercase chain names.
+	c.Chain = strings.ToLower(c.Chain)
+	if !networkname.Supported(c.Chain) {
+		return fmt.Errorf("unsupported chain %q (see --help for valid values)", c.Chain)
+	}
 	return nil
 }
 
-// ValidChains returns the list of supported network chains.
+// ValidChains returns the list of all chain names supported by Erigon,
+// sourced from the canonical networkname.All registry.
 func ValidChains() []string {
-	return []string{"mainnet", "hoodi", "sepolia"}
+	// Return a copy so callers can't modify the original.
+	chains := make([]string, len(networkname.All))
+	copy(chains, networkname.All)
+	return chains
+}
+
+// ChainDescription returns a human-readable description for a chain name.
+func ChainDescription(chain string) string {
+	switch chain {
+	case networkname.Mainnet:
+		return "Ethereum mainnet"
+	case networkname.Sepolia:
+		return "Sepolia testnet"
+	case networkname.Hoodi:
+		return "Hoodi testnet"
+	case networkname.Mumbai:
+		return "Polygon Mumbai testnet (deprecated)"
+	case networkname.Amoy:
+		return "Polygon Amoy testnet"
+	case networkname.BorMainnet:
+		return "Polygon PoS mainnet"
+	case networkname.BorDevnet:
+		return "Polygon devnet"
+	case networkname.Gnosis:
+		return "Gnosis Chain mainnet"
+	case networkname.Chiado:
+		return "Gnosis Chiado testnet"
+	case networkname.Test:
+		return "Internal test chain"
+	case networkname.Bloatnet:
+		return "Bloatnet test chain"
+	default:
+		return ""
+	}
 }
 
 // ValidPruneModes returns the list of supported prune modes.
@@ -120,6 +228,22 @@ func PruneModeDescription(mode string) string {
 		return "Aggressive pruning for minimum storage (~800GB)"
 	default:
 		return ""
+	}
+}
+
+// DefaultDatadir returns a platform-appropriate default data directory for Erigon.
+func DefaultDatadir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(".", "erigon-data")
+	}
+	switch runtime.GOOS {
+	case "darwin":
+		return filepath.Join(home, "Library", "Erigon")
+	case "windows":
+		return filepath.Join(home, "AppData", "Local", "Erigon")
+	default:
+		return filepath.Join(home, ".local", "share", "erigon")
 	}
 }
 

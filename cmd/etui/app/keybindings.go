@@ -1,8 +1,6 @@
 package app
 
 import (
-	"context"
-
 	"github.com/rivo/tview"
 
 	"github.com/erigontech/erigon/cmd/etui/datasource"
@@ -11,11 +9,10 @@ import (
 
 const pageConfirm = "confirm"
 
-// handleNodeToggle is called when the user presses R on a dashboard page.
-// It either starts or stops the Erigon node, showing a confirmation dialog
-// for destructive actions (stop).
+// handleNodeToggle is called when the user presses R on a dashboard page
+// in Standalone mode. It either starts or stops the Erigon node, showing a
+// confirmation dialog for destructive actions (stop).
 func (a *App) handleNodeToggle(
-	ctx context.Context,
 	pages *tview.Pages,
 	nodeMgr *datasource.NodeManager,
 	nodeView *widgets.NodeControlView,
@@ -25,15 +22,6 @@ func (a *App) handleNodeToggle(
 	a.log.Info("R pressed: node state=%s pid=%d", status.State, status.PID)
 
 	switch status.State {
-	case datasource.NodeExternal:
-		// Cannot control an external node — flash a message.
-		// NOTE: We're already on the tview event loop (InputCapture), so we
-		// call SetText directly. QueueUpdateDraw would deadlock because it
-		// blocks until the event loop processes the update, but WE are the
-		// event loop.
-		nodeView.SetText("[blue]●[-] [blue]Running (external)[-] — cannot control from TUI")
-		return
-
 	case datasource.NodeStarting, datasource.NodeStopping:
 		// Already transitioning — ignore.
 		return
@@ -66,7 +54,7 @@ func (a *App) handleNodeToggle(
 		// Start in background — Start() performs blocking syscalls (stat, open,
 		// exec) and must not run on the tview event loop.
 		go func() {
-			if err := nodeMgr.Start(ctx); err != nil {
+			if err := nodeMgr.Start(); err != nil {
 				a.log.Error("node start failed: %v", err)
 				// From a goroutine, QueueUpdateDraw is correct and required.
 				a.tview.QueueUpdateDraw(func() {

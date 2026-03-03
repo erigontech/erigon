@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
@@ -17,24 +18,54 @@ import (
 	"github.com/erigontech/erigon/cmd/integration/commands"
 )
 
+// AppMode represents the operating mode of the TUI.
+type AppMode int
+
+const (
+	// ModeStandalone allows full node management (start/stop via R key).
+	// Active when no node is running, or when etui previously spawned the node.
+	ModeStandalone AppMode = iota
+	// ModeAnalytics provides monitoring only — no node lifecycle control.
+	// Active when an external node is detected (e.g. started via systemd).
+	ModeAnalytics
+)
+
+// String returns the display label for the mode.
+func (m AppMode) String() string {
+	if m == ModeAnalytics {
+		return "Analytics"
+	}
+	return "Standalone"
+}
+
+// Options holds CLI-level overrides that take precedence over config file values.
+type Options struct {
+	ForceAnalytics bool   // --analytics flag
+	DiagnosticsURL string // --diagnostics-url override
+	Chain          string // --chain override
+}
+
 // App is the top-level TUI application.
 type App struct {
-	tview       *tview.Application
-	dp          *datasource.DownloaderPinger
-	dlTracker   *datasource.DownloaderTracker
-	sysColl     *datasource.SystemCollector
-	iopsTrack   *datasource.DiskIOPSTracker
-	syncTracker *datasource.SyncTracker
-	alertMgr    *datasource.AlertManager
-	logTailer   *datasource.LogTailer
-	nodeMgr     *datasource.NodeManager
-	log         *datasource.TUILog
-	tuiCfg      config.TUIConfig
-	datadir     string
+	tview          *tview.Application
+	dp             *datasource.DownloaderPinger
+	dlTracker      *datasource.DownloaderTracker
+	sysColl        *datasource.SystemCollector
+	iopsTrack      *datasource.DiskIOPSTracker
+	syncTracker    *datasource.SyncTracker
+	alertMgr       *datasource.AlertManager
+	logTailer      *datasource.LogTailer
+	nodeMgr        *datasource.NodeManager
+	log            *datasource.TUILog
+	tuiCfg         config.TUIConfig
+	datadir        string
+	mode           AppMode
+	forceAnalytics bool
 }
 
 // New creates an App that reads from the given datadir.
-func New(datadir string) *App {
+// CLI overrides in opts take precedence over values in the config file.
+func New(datadir string, opts Options) *App {
 	logPath := filepath.Join(datadir, "logs", "erigon.log")
 	tuiLog := datasource.NewTUILog(datadir)
 	tuiLog.Info("etui starting, datadir=%s", datadir)
@@ -47,24 +78,33 @@ func New(datadir string) *App {
 		tuiCfg.DataDir = datadir
 	}
 
+	// Apply CLI overrides (highest precedence).
+	if opts.Chain != "" {
+		tuiCfg.Chain = strings.ToLower(opts.Chain)
+	}
+	if opts.DiagnosticsURL != "" {
+		tuiCfg.DiagnosticsURL = opts.DiagnosticsURL
+	}
+
 	diagURL := tuiCfg.DiagnosticsURL
 	if diagURL == "" {
 		diagURL = config.DefaultDownloaderURL
 	}
 
 	return &App{
-		datadir:     datadir,
-		tview:       tview.NewApplication(),
-		dp:          datasource.NewDownloaderPinger(diagURL),
-		dlTracker:   datasource.NewDownloaderTracker(),
-		sysColl:     datasource.NewSystemCollector(datadir),
-		iopsTrack:   datasource.NewDiskIOPSTracker(),
-		syncTracker: datasource.NewSyncTracker(),
-		alertMgr:    datasource.NewAlertManager(),
-		logTailer:   datasource.NewLogTailer(logPath),
-		nodeMgr:     datasource.NewNodeManager(datadir, tuiCfg.Chain),
-		log:         tuiLog,
-		tuiCfg:      tuiCfg,
+		datadir:        datadir,
+		tview:          tview.NewApplication(),
+		dp:             datasource.NewDownloaderPinger(diagURL),
+		dlTracker:      datasource.NewDownloaderTracker(),
+		sysColl:        datasource.NewSystemCollector(datadir),
+		iopsTrack:      datasource.NewDiskIOPSTracker(),
+		syncTracker:    datasource.NewSyncTracker(),
+		alertMgr:       datasource.NewAlertManager(),
+		logTailer:      datasource.NewLogTailer(logPath),
+		nodeMgr:        datasource.NewNodeManager(datadir, tuiCfg.Chain),
+		log:            tuiLog,
+		tuiCfg:         tuiCfg,
+		forceAnalytics: opts.ForceAnalytics,
 	}
 }
 
@@ -84,20 +124,29 @@ func (a *App) Run(parent context.Context, infoCh <-chan *commands.StagesInfo, er
 	defer cancel()
 	defer a.log.Close()
 
+	// Detect if a node is already running and determine the app mode.
+	a.nodeMgr.Detect()
+	initStatus := a.nodeMgr.Status()
+	a.detectMode(initStatus)
+	a.log.Info("initial node state: %s pid=%d mode=%s", initStatus.State, initStatus.PID, a.mode)
+
+	isStandalone := a.mode == ModeStandalone
+	modeLabel := a.mode.String()
+
 	// Build pages
 	pages := tview.NewPages()
 
 	nodeInfoBody, nodeView := widgets.NewNodeInfoPage(a.datadir)
-	footer := widgets.Footer()
+	footer := widgets.Footer(isStandalone)
 
 	startPageBody, _ := widgets.NewStartPage(nodeView.Clock, a.datadir)
 
 	startPage := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(widgets.Header(), 1, 1, false).
+		AddItem(widgets.Header(modeLabel), 1, 1, false).
 		AddItem(startPageBody, 0, 5, false).
 		AddItem(footer, 2, 1, false)
 	nodeInfoPage := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(widgets.Header(), 1, 1, false).
+		AddItem(widgets.Header(modeLabel), 1, 1, false).
 		AddItem(nodeInfoBody, 0, 5, false).
 		AddItem(footer, 2, 1, false)
 
@@ -127,16 +176,11 @@ func (a *App) Run(parent context.Context, infoCh <-chan *commands.StagesInfo, er
 	}
 	logViewer = widgets.NewLogViewerPage(switchToDashboard)
 	logsPage := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(widgets.Header(), 1, 1, false).
+		AddItem(widgets.Header(modeLabel), 1, 1, false).
 		AddItem(logViewer.Root, 0, 1, true)
 
 	// Seed the log tailer so the viewer has content immediately.
 	a.logTailer.SeedFromEnd()
-
-	// Detect if an external node is already running.
-	a.nodeMgr.DetectExternal()
-	initStatus := a.nodeMgr.Status()
-	a.log.Info("initial node state: %s pid=%d", initStatus.State, initStatus.PID)
 
 	// Start background goroutines
 	go a.safeGo("fillStagesInfo", errCh, func() { a.fillStagesInfo(ctx, nodeView, infoCh) })
@@ -166,13 +210,13 @@ func (a *App) Run(parent context.Context, infoCh <-chan *commands.StagesInfo, er
 		a.log.Info("opening config modal")
 		configModal := widgets.NewConfigureModal(a.tuiCfg,
 			func(newCfg config.TUIConfig) {
-				// Save callback.
+				// Save callback — write both per-node and global config.
 				if err := newCfg.Validate(); err != nil {
 					a.log.Error("config validation: %v", err)
 					// Stay in the modal — don't close on error.
 					return
 				}
-				if err := newCfg.Save(); err != nil {
+				if err := newCfg.SaveAll(); err != nil {
 					a.log.Error("config save: %v", err)
 				} else {
 					a.log.Info("config saved to %s", config.ConfigPath(newCfg.DataDir))
@@ -201,8 +245,8 @@ func (a *App) Run(parent context.Context, infoCh <-chan *commands.StagesInfo, er
 		a.log.Info("first run detected — launching install wizard")
 		wizard := widgets.NewInstallWizard(a.datadir,
 			func(newCfg config.TUIConfig) {
-				// Wizard complete.
-				if err := newCfg.Save(); err != nil {
+				// Wizard complete — save both per-node and global config.
+				if err := newCfg.SaveAll(); err != nil {
 					a.log.Error("wizard config save: %v", err)
 				} else {
 					a.log.Info("wizard config saved to %s", config.ConfigPath(newCfg.DataDir))
@@ -262,6 +306,7 @@ func (a *App) Run(parent context.Context, infoCh <-chan *commands.StagesInfo, er
 			// --- Global keys (all pages) ---
 			switch {
 			case event.Key() == tcell.KeyCtrlC || event.Rune() == 'q':
+				// Quit the TUI only — the node keeps running (detached process).
 				cancel()
 				a.tview.Stop()
 				return nil
@@ -284,9 +329,14 @@ func (a *App) Run(parent context.Context, infoCh <-chan *commands.StagesInfo, er
 				openConfigModal()
 				return nil
 
-			// Node toggle (works from any page).
+			// Node toggle (Standalone mode only).
 			case event.Rune() == 'R':
-				a.handleNodeToggle(ctx, pages, a.nodeMgr, nodeView.NodeControl, dashPages[currentPage])
+				if a.mode == ModeAnalytics {
+					// In Analytics mode, R shows an informational message.
+					nodeView.NodeControl.SetText("[blue]●[-] Node managed externally — use systemd/docker to control")
+					return nil
+				}
+				a.handleNodeToggle(pages, a.nodeMgr, nodeView.NodeControl, dashPages[currentPage])
 				return nil
 			}
 
@@ -309,6 +359,23 @@ func (a *App) Run(parent context.Context, infoCh <-chan *commands.StagesInfo, er
 		return err
 	}
 	return nil
+}
+
+// detectMode determines the app mode based on node state and flags.
+func (a *App) detectMode(status datasource.NodeStatus) {
+	if a.forceAnalytics {
+		a.mode = ModeAnalytics
+		return
+	}
+
+	switch {
+	case status.State == datasource.NodeRunning && !a.nodeMgr.HasPIDFile():
+		// External node running (no etui.pid) — Analytics mode.
+		a.mode = ModeAnalytics
+	default:
+		// Node not running, or we previously spawned it (etui.pid exists) — Standalone.
+		a.mode = ModeStandalone
+	}
 }
 
 // safeGo wraps a function with panic recovery, logging the stack to etui-crash.log
@@ -603,13 +670,14 @@ func (a *App) pollNodeStatus(ctx context.Context, view *widgets.NodeControlView)
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 
+	isStandalone := a.mode == ModeStandalone
 	var lastVersion int64
 
 	// Initial render.
-	a.nodeMgr.DetectExternal()
+	a.nodeMgr.Detect()
 	status := a.nodeMgr.Status()
 	a.tview.QueueUpdateDraw(func() {
-		view.UpdateNodeStatus(status)
+		view.UpdateNodeStatus(status, isStandalone)
 	})
 	lastVersion = a.nodeMgr.Version()
 
@@ -618,7 +686,7 @@ func (a *App) pollNodeStatus(ctx context.Context, view *widgets.NodeControlView)
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			a.nodeMgr.DetectExternal()
+			a.nodeMgr.Detect()
 
 			v := a.nodeMgr.Version()
 			if v == lastVersion {
@@ -628,7 +696,7 @@ func (a *App) pollNodeStatus(ctx context.Context, view *widgets.NodeControlView)
 
 			status := a.nodeMgr.Status()
 			a.tview.QueueUpdateDraw(func() {
-				view.UpdateNodeStatus(status)
+				view.UpdateNodeStatus(status, isStandalone)
 			})
 		}
 	}

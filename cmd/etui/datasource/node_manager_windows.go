@@ -14,19 +14,30 @@ func findLockHolderPID(_ string) int {
 	return 0
 }
 
-// setProcessGroup configures the command to run in a new process group
-// using CREATE_NEW_PROCESS_GROUP so the child can be signalled independently.
-func setProcessGroup(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP}
+// spawnDetached configures the command to run in a new process group
+// with DETACHED_PROCESS so the child survives TUI exit.
+func spawnDetached(cmd *exec.Cmd) {
+	const detachedProcess = 0x00000008
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | detachedProcess,
+	}
 }
 
-// terminateGraceful sends an interrupt signal to the process.
+// killByPID sends an interrupt signal to the process.
 // On Windows this sends CTRL_BREAK_EVENT to the process group.
-func terminateGraceful(cmd *exec.Cmd) {
-	cmd.Process.Signal(os.Interrupt) //nolint:errcheck
+func killByPID(pid int) {
+	p, err := os.FindProcess(pid)
+	if err != nil {
+		return
+	}
+	p.Signal(os.Interrupt) //nolint:errcheck
 }
 
-// terminateForce forcefully kills the process.
-func terminateForce(cmd *exec.Cmd) {
-	cmd.Process.Kill() //nolint:errcheck
+// forceKillByPID forcefully kills the process.
+func forceKillByPID(pid int) {
+	p, err := os.FindProcess(pid)
+	if err != nil {
+		return
+	}
+	p.Kill() //nolint:errcheck
 }

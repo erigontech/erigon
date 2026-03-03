@@ -103,10 +103,14 @@ func (w *InstallWizard) navigate(delta int) {
 // --- Step 1: Network Selection ---
 
 func (w *InstallWizard) buildNetworkStep() {
-	w.networkList = tview.NewList().
-		AddItem("mainnet", "Ethereum mainnet", 'm', nil).
-		AddItem("hoodi", "Hoodi testnet", 'h', nil).
-		AddItem("sepolia", "Sepolia testnet", 's', nil)
+	w.networkList = tview.NewList()
+	for _, chain := range config.ValidChains() {
+		desc := config.ChainDescription(chain)
+		if desc == "" {
+			desc = chain
+		}
+		w.networkList.AddItem(chain, desc, 0, nil)
+	}
 	w.networkList.SetBorder(true).SetTitle(" Select Network ")
 	w.networkList.SetCurrentItem(0)
 
@@ -305,7 +309,7 @@ func (w *InstallWizard) wizardFrame(title string, content tview.Primitive, helpT
 		SetText(helpText)
 
 	return tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(Header(), 1, 0, false).
+		AddItem(Header(""), 1, 0, false).
 		AddItem(titleView, 1, 0, false).
 		AddItem(tview.NewBox(), 1, 0, false).
 		AddItem(content, 0, 1, true).

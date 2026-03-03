@@ -80,18 +80,20 @@ func findLockHolderPID(lockPath string) int {
 	return 0
 }
 
-// setProcessGroup configures the command to run in its own process group,
-// so we can signal the entire group on shutdown.
-func setProcessGroup(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+// spawnDetached configures the command to run in a new session (Setsid),
+// so the child process survives TUI exit.
+func spawnDetached(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 }
 
-// terminateGraceful sends SIGTERM to the process group.
-func terminateGraceful(cmd *exec.Cmd) {
-	syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM) //nolint:errcheck
+// killByPID sends SIGTERM to the entire process group led by the given PID.
+// Using -pid signals all processes in the group, preventing orphaned children
+// when the node spawns sub-processes (e.g. miners, p2p listeners).
+func killByPID(pid int) {
+	syscall.Kill(-pid, syscall.SIGTERM) //nolint:errcheck
 }
 
-// terminateForce sends SIGKILL to the process group.
-func terminateForce(cmd *exec.Cmd) {
-	syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) //nolint:errcheck
+// forceKillByPID sends SIGKILL to the entire process group led by the given PID.
+func forceKillByPID(pid int) {
+	syscall.Kill(-pid, syscall.SIGKILL) //nolint:errcheck
 }

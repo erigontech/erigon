@@ -1,13 +1,14 @@
 package datasource
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,10 +20,9 @@ type NodeState int
 
 const (
 	NodeStopped  NodeState = iota // no node running
-	NodeRunning                   // child process managed by this TUI
-	NodeExternal                  // node running externally (detected via lock file)
-	NodeStarting                  // child process recently spawned, not yet confirmed
-	NodeStopping                  // SIGTERM sent, waiting for exit
+	NodeRunning                   // node is running (managed or external — no distinction)
+	NodeStarting                  // just spawned, waiting for LOCK to appear
+	NodeStopping                  // SIGTERM sent, waiting for lock release
 )
 
 // String returns a human-readable label.
@@ -30,8 +30,6 @@ func (s NodeState) String() string {
 	switch s {
 	case NodeRunning:
 		return "Running"
-	case NodeExternal:
-		return "Running (external)"
 	case NodeStarting:
 		return "Starting..."
 	case NodeStopping:
@@ -45,12 +43,14 @@ func (s NodeState) String() string {
 // goroutine boundaries.
 type NodeStatus struct {
 	State   NodeState
-	PID     int // >0 when Running, Stopping, or External (discovered via /proc/locks)
+	PID     int // >0 when Running, Starting, or Stopping
 	Uptime  time.Duration
 	ExitErr string // non-empty if the last run ended in error
 }
 
-// NodeManager manages the lifecycle of an Erigon child process.
+// NodeManager monitors and optionally controls the Erigon node process.
+// Spawned processes are fully detached (new session via Setsid) and survive
+// TUI exit. All interaction with the node is via PID, not *exec.Cmd.
 // It is safe for concurrent use.
 type NodeManager struct {
 	mu sync.Mutex
@@ -59,16 +59,13 @@ type NodeManager struct {
 	binPath  string // resolved absolute path to the erigon binary
 	chain    string
 	lockPath string // <datadir>/LOCK
+	pidPath  string // <datadir>/etui.pid
 
 	state     NodeState
-	cmd       *exec.Cmd
 	pid       int
 	startTime time.Time
 	exitErr   string
 	version   int64 // bumped on every state change
-
-	// done is closed when the child process exits. Re-created on each Start.
-	done chan struct{}
 }
 
 // NewNodeManager creates a NodeManager.
@@ -77,11 +74,13 @@ type NodeManager struct {
 func NewNodeManager(datadir, chain string) *NodeManager {
 	binPath := resolveErigonBinary()
 	lockPath := filepath.Join(datadir, "LOCK")
+	pidPath := filepath.Join(datadir, "etui.pid")
 	return &NodeManager{
 		datadir:  datadir,
 		binPath:  binPath,
 		chain:    chain,
 		lockPath: lockPath,
+		pidPath:  pidPath,
 		state:    NodeStopped,
 	}
 }
@@ -130,17 +129,12 @@ func (nm *NodeManager) Version() int64 {
 	return nm.version
 }
 
-// DetectExternal checks whether an external Erigon process holds the datadir
-// lock. Call this periodically to keep the state up-to-date.
+// Detect checks whether an Erigon process holds the datadir lock.
+// Call this periodically (every 2s) to keep the state up-to-date.
 // The flock probe and PID lookup are performed without holding the mutex.
-func (nm *NodeManager) DetectExternal() {
+func (nm *NodeManager) Detect() {
 	nm.mu.Lock()
-	// Only probe when we don't own a child process ourselves.
-	if nm.state == NodeRunning || nm.state == NodeStarting || nm.state == NodeStopping {
-		nm.mu.Unlock()
-		return
-	}
-	prevState := nm.state
+	prevStartTime := nm.startTime
 	nm.mu.Unlock()
 
 	// Perform the flock probe and PID discovery without holding the lock —
@@ -149,32 +143,149 @@ func (nm *NodeManager) DetectExternal() {
 	pid := 0
 	if locked {
 		pid = findLockHolderPID(nm.lockPath)
+		// Fallback: read etui.pid if /proc/locks didn't find PID.
+		if pid == 0 {
+			pid = nm.readPID()
+		}
 	}
 
 	nm.mu.Lock()
 	defer nm.mu.Unlock()
 
-	// Re-check state: a Start() may have raced in while we were probing.
-	if nm.state == NodeRunning || nm.state == NodeStarting || nm.state == NodeStopping {
-		return
-	}
-
-	if locked {
-		if nm.state != NodeExternal {
-			nm.state = NodeExternal
+	switch {
+	case locked && nm.state == NodeStarting:
+		// Spawned process has taken the lock — confirm running.
+		nm.state = NodeRunning
+		if pid > 0 {
 			nm.pid = pid
-			nm.exitErr = ""
-			nm.version++
-		} else if nm.pid != pid {
-			// Already external — update PID if it changed (process restart).
+		}
+		nm.version++
+
+	case locked && nm.state == NodeStopped:
+		// Node appeared (external or restarted).
+		nm.state = NodeRunning
+		nm.pid = pid
+		nm.exitErr = ""
+		nm.startTime = time.Now() // approximate
+		nm.version++
+
+	case locked && nm.state == NodeRunning:
+		// Still running — update PID if changed.
+		if pid > 0 && nm.pid != pid {
 			nm.pid = pid
 			nm.version++
 		}
-	} else if prevState == NodeExternal && nm.state == NodeExternal {
+
+	case !locked && nm.state == NodeRunning:
+		// Node stopped (externally or crashed).
+		nm.state = NodeStopped
+		nm.pid = 0
+		// If we spawned the node (etui.pid exists), this is a crash —
+		// extract the last error from the log file.
+		if nm.HasPIDFile() {
+			nm.exitErr = nm.lastLogError()
+			nm.removePID()
+		}
+		nm.version++
+
+	case !locked && nm.state == NodeStopping:
+		// Our stop request succeeded.
 		nm.state = NodeStopped
 		nm.pid = 0
 		nm.version++
+
+	case !locked && nm.state == NodeStarting:
+		// Node hasn't taken the lock yet — check timeout.
+		if !prevStartTime.IsZero() && time.Since(prevStartTime) > 10*time.Second {
+			nm.state = NodeStopped
+			nm.pid = 0
+			nm.exitErr = "node failed to start (LOCK not acquired within 10s)"
+			nm.version++
+		}
+		// Otherwise still waiting — do nothing.
 	}
+}
+
+// HasPIDFile returns true if an etui.pid file exists in the datadir,
+// indicating that etui previously spawned the node.
+func (nm *NodeManager) HasPIDFile() bool {
+	_, err := os.Stat(nm.pidPath)
+	return err == nil
+}
+
+// readPID reads the PID from etui.pid. Returns 0 if unreadable.
+func (nm *NodeManager) readPID() int {
+	data, err := os.ReadFile(nm.pidPath)
+	if err != nil {
+		return 0
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || pid <= 0 {
+		return 0
+	}
+	return pid
+}
+
+// writePID writes the PID to etui.pid for reconnection after TUI restart.
+func (nm *NodeManager) writePID(pid int) error {
+	return os.WriteFile(nm.pidPath, []byte(strconv.Itoa(pid)), 0644)
+}
+
+func (nm *NodeManager) removePID() {
+	os.Remove(nm.pidPath) //nolint:errcheck
+}
+
+// lastLogError reads the tail of the Erigon log file and extracts the last
+// error or panic line. Returns a short description for display, or a generic
+// "node exited unexpectedly" if no error line is found.
+func (nm *NodeManager) lastLogError() string {
+	logPath := filepath.Join(nm.datadir, "logs", "erigon.log")
+	f, err := os.Open(logPath)
+	if err != nil {
+		return "node exited unexpectedly"
+	}
+	defer f.Close()
+
+	// Read up to the last 8KB to find the last error line.
+	const tailSize = 8192
+	fi, err := f.Stat()
+	if err != nil {
+		return "node exited unexpectedly"
+	}
+	offset := fi.Size() - tailSize
+	if offset < 0 {
+		offset = 0
+	}
+	if _, err := f.Seek(offset, 0); err != nil {
+		return "node exited unexpectedly"
+	}
+	buf := make([]byte, tailSize)
+	n, _ := f.Read(buf)
+	if n == 0 {
+		return "node exited unexpectedly"
+	}
+
+	// Scan lines in reverse for panic or error indicators.
+	lines := strings.Split(string(buf[:n]), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := lines[i]
+		lower := strings.ToLower(line)
+		if strings.Contains(lower, "panic") || strings.Contains(lower, "fatal") {
+			msg := strings.TrimSpace(line)
+			if len(msg) > 120 {
+				msg = msg[:120] + "…"
+			}
+			return msg
+		}
+		if strings.Contains(lower, "err") && strings.Contains(lower, "lvl=") {
+			msg := strings.TrimSpace(line)
+			if len(msg) > 120 {
+				msg = msg[:120] + "…"
+			}
+			return msg
+		}
+	}
+	return "node exited unexpectedly"
 }
 
 // isLockHeld attempts a non-blocking flock on the datadir LOCK file.
@@ -200,11 +311,12 @@ func isLockHeld(lockPath string) bool {
 	return true
 }
 
-// Start spawns the Erigon binary as a child process.
-// Returns an error if a process is already managed or an external node is detected.
+// Start spawns the Erigon binary as a detached process.
+// The node runs in its own session (Setsid) and survives TUI exit.
+// Returns an error if a process is already running.
 // This method performs blocking syscalls (stat, open, exec); callers on the
 // tview event loop must dispatch it to a background goroutine.
-func (nm *NodeManager) Start(ctx context.Context) error {
+func (nm *NodeManager) Start() error {
 	nm.mu.Lock()
 
 	switch nm.state {
@@ -212,12 +324,14 @@ func (nm *NodeManager) Start(ctx context.Context) error {
 		st, pid := nm.state, nm.pid
 		nm.mu.Unlock()
 		return fmt.Errorf("node already %s (PID %d)", st, pid)
-	case NodeExternal:
-		nm.mu.Unlock()
-		return fmt.Errorf("external node is running — stop it first")
 	}
 
 	nm.mu.Unlock()
+
+	// Check if lock is held — node may be running without our knowledge.
+	if isLockHeld(nm.lockPath) {
+		return fmt.Errorf("datadir is locked — a node is already running")
+	}
 
 	// Resolve and verify the binary outside the lock — involves I/O.
 	absPath, err := filepath.Abs(nm.binPath)
@@ -246,137 +360,96 @@ func (nm *NodeManager) Start(ctx context.Context) error {
 		args = append(args, "--chain", nm.chain)
 	}
 
-	cmd := exec.CommandContext(ctx, absPath, args...)
+	cmd := exec.Command(absPath, args...)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
-	// Set a process group so we can signal the whole group.
-	setProcessGroup(cmd)
+	// Detach: new session so the process survives TUI exit.
+	spawnDetached(cmd)
 
 	if err := cmd.Start(); err != nil {
 		logFile.Close()
 		return fmt.Errorf("starting erigon: %w", err)
 	}
 
-	// Re-acquire lock to update state atomically.
+	// Write PID file for reconnection after TUI restart.
+	pid := cmd.Process.Pid
+	nm.writePID(pid) //nolint:errcheck
+
+	// Release the log file — the child has inherited the fd.
+	// Do NOT call cmd.Wait() — the process is fully detached.
+	logFile.Close()
+
 	nm.mu.Lock()
-	nm.cmd = cmd
-	nm.pid = cmd.Process.Pid
+	nm.pid = pid
 	nm.state = NodeStarting
 	nm.startTime = time.Now()
 	nm.exitErr = ""
 	nm.version++
-	nm.done = make(chan struct{})
-	// Capture done channel as a local so confirmStartup uses the correct one
-	// even if Stop()+Start() is called concurrently.
-	done := nm.done
 	nm.mu.Unlock()
-
-	// Background goroutine to wait for exit and update state.
-	go nm.waitForExit(cmd, logFile)
-
-	// Transition Starting→Running after a brief delay (if still alive).
-	go nm.confirmStartup(done)
 
 	return nil
 }
 
-// waitForExit waits for the child process to finish and updates state.
-func (nm *NodeManager) waitForExit(cmd *exec.Cmd, logFile *os.File) {
-	err := cmd.Wait()
-	logFile.Close()
-
-	nm.mu.Lock()
-	defer nm.mu.Unlock()
-
-	// Only update if this cmd is still the current one (guards against
-	// a rapid Stop()+Start() that replaced nm.cmd).
-	if nm.cmd != cmd {
-		return
-	}
-
-	nm.pid = 0
-	nm.cmd = nil
-	if err != nil {
-		nm.exitErr = err.Error()
-	} else {
-		nm.exitErr = ""
-	}
-	nm.state = NodeStopped
-	nm.version++
-
-	close(nm.done)
-}
-
-// confirmStartup transitions Starting→Running if the process is still alive
-// after 2 seconds. done is the channel from the specific Start() invocation
-// that spawned this goroutine.
-func (nm *NodeManager) confirmStartup(done <-chan struct{}) {
-	timer := time.NewTimer(2 * time.Second)
-	defer timer.Stop()
-
-	select {
-	case <-timer.C:
-		nm.mu.Lock()
-		if nm.state == NodeStarting {
-			nm.state = NodeRunning
-			nm.version++
-		}
-		nm.mu.Unlock()
-	case <-done:
-		// Process exited before confirmation.
-	}
-}
-
-// Stop sends SIGTERM to the child process and waits up to 15 seconds.
-// If the process doesn't exit, it sends SIGKILL.
-// Returns an error if no managed process is running or if the process
-// survives SIGKILL.
+// Stop sends SIGTERM to the node process by PID and waits for the lock
+// to be released. Falls back to SIGKILL after 30 seconds.
+// This method blocks; callers on the tview event loop must dispatch it
+// to a background goroutine.
 func (nm *NodeManager) Stop() error {
 	nm.mu.Lock()
-	if nm.state == NodeExternal {
-		nm.mu.Unlock()
-		return fmt.Errorf("cannot stop external node — stop it outside the TUI")
-	}
 	if nm.state != NodeRunning && nm.state != NodeStarting {
 		nm.mu.Unlock()
-		return fmt.Errorf("no managed node is running")
+		return fmt.Errorf("no node is running")
 	}
 
-	cmd := nm.cmd
-	done := nm.done
+	pid := nm.pid
 	nm.state = NodeStopping
 	nm.version++
 	nm.mu.Unlock()
 
-	// Send SIGTERM (or platform equivalent) to the process group.
-	if cmd != nil && cmd.Process != nil {
-		terminateGraceful(cmd) //nolint:errcheck
+	if pid <= 0 {
+		return fmt.Errorf("no PID known for the running node")
 	}
 
-	// Wait up to 15 seconds for graceful shutdown.
-	select {
-	case <-done:
-		return nil
-	case <-time.After(15 * time.Second):
-	}
+	// Send SIGTERM (or platform equivalent).
+	killByPID(pid)
 
-	// Force kill.
-	if cmd != nil && cmd.Process != nil {
-		terminateForce(cmd) //nolint:errcheck
-	}
+	// Poll for lock release (up to 30s).
+	deadline := time.After(30 * time.Second)
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
 
-	// Wait for the process to actually finish after SIGKILL.
-	select {
-	case <-done:
-		return nil
-	case <-time.After(5 * time.Second):
-		return fmt.Errorf("process (PID %d) did not exit after SIGKILL", cmd.Process.Pid)
+	for {
+		select {
+		case <-deadline:
+			// Force kill.
+			forceKillByPID(pid)
+			// Wait briefly for the forced exit.
+			time.Sleep(2 * time.Second)
+			if !isLockHeld(nm.lockPath) {
+				nm.mu.Lock()
+				nm.state = NodeStopped
+				nm.pid = 0
+				nm.version++
+				nm.mu.Unlock()
+				nm.removePID()
+				return nil
+			}
+			return fmt.Errorf("node (PID %d) did not exit after SIGKILL", pid)
+		case <-ticker.C:
+			if !isLockHeld(nm.lockPath) {
+				nm.mu.Lock()
+				nm.state = NodeStopped
+				nm.pid = 0
+				nm.version++
+				nm.mu.Unlock()
+				nm.removePID()
+				return nil
+			}
+		}
 	}
 }
 
-// IsManaged returns true if the TUI owns the running process (vs external).
+// IsManaged returns true if the TUI spawned the running process (etui.pid exists).
 func (nm *NodeManager) IsManaged() bool {
-	nm.mu.Lock()
-	defer nm.mu.Unlock()
-	return nm.state == NodeRunning || nm.state == NodeStarting || nm.state == NodeStopping
+	return nm.HasPIDFile()
 }
