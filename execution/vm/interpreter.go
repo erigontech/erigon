@@ -114,6 +114,26 @@ func useGas(initial uint64, gas uint64, tracer *tracing.Hooks, reason tracing.Ga
 	return initial - gas, true
 }
 
+func useMdGas(initial evmtypes.MdGas, gas uint64, t evmtypes.MdGasType, tracer *tracing.Hooks, reason tracing.GasChangeReason) (evmtypes.MdGas, bool) {
+	var ok bool
+	switch t {
+	case evmtypes.StateGas:
+		initial.State, ok = useGas(initial.State, gas, tracer, reason)
+		if ok {
+			return initial, true
+		}
+		// otherwise use up all remaining state gas and try to use some from the regular gas
+		gas = gas - initial.State
+		initial.State = 0
+		fallthrough
+	case evmtypes.RegularGas:
+		initial.Regular, ok = useGas(initial.Regular, gas, tracer, reason)
+		return initial, ok
+	default:
+		panic(fmt.Errorf("useMdGas: invalid gas type: %d", t))
+	}
+}
+
 // RefundGas refunds gas to the contract
 func (c *CallContext) refundGas(gas uint64, tracer *tracing.Hooks, reason tracing.GasChangeReason) {
 	// We collect the gas change reason today, future changes will add gas change(s) tracking with reason
@@ -382,6 +402,18 @@ func (evm *EVM) Run(contract Contract, gas evmtypes.MdGas, input []byte, readOnl
 				return nil, callContext.Gas(), ErrOutOfGas
 			} else {
 				callContext.gas -= dynamicCost
+			}
+		}
+		if operation.stateGas != nil {
+			stateGas, err := operation.stateGas(evm, callContext, callContext.gas, memorySize)
+			if err != nil {
+				return nil, callContext.Gas(), err
+			}
+			cost += stateGas
+			if callContext.stateGas < stateGas {
+				return nil, callContext.Gas(), ErrOutOfGas
+			} else {
+				callContext.stateGas -= stateGas
 			}
 		}
 

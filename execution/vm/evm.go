@@ -487,9 +487,24 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	// be stored due to not enough gas, set an error when we're in Homestead and let it be handled
 	// by the error checking condition below.
 	if err == nil {
-		createDataGas := uint64(len(ret)) * params.CreateDataGas
-		var ok bool
-		if gasRemaining.Regular, ok = useGas(gasRemaining.Regular, createDataGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage); ok {
+		var stateGasOk bool
+		var createDataGas uint64
+		if evm.chainRules.IsAmsterdam {
+			// EIP-8037
+			createDataGas = uint64(len(ret)) * evm.Context.CostPerStateByte // state gas cost
+			gasRemaining, stateGasOk = useMdGas(gasRemaining, createDataGas, evmtypes.StateGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage)
+			if stateGasOk {
+				createDataGas = 6 * ((uint64(len(ret)) + 31) / 32) // regular gas cost for hashing
+			}
+		} else {
+			createDataGas = uint64(len(ret)) * params.CreateDataGas
+			stateGasOk = true
+		}
+		var regularGasOk bool
+		if stateGasOk {
+			gasRemaining, regularGasOk = useMdGas(gasRemaining, createDataGas, evmtypes.RegularGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage)
+		}
+		if stateGasOk && regularGasOk {
 			evm.intraBlockState.SetCode(address, ret)
 		} else {
 			// If we run out of gas, we do not store the code: the returned code must be empty.

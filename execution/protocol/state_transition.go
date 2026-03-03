@@ -597,7 +597,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		if rules.IsAmsterdam {
 			// EIP-7778: Block Gas Accounting without Refunds
 			mdGasUsed.Regular = max(mdGasUsed.Regular, intrinsicGasResult.FloorGasCost)
-			// EIP-8037
+			// EIP-8037: State Creation Gas Cost Increase
 			st.blockGasUsed = mdGasUsed.Bottleneck()
 		} else {
 			st.blockGasUsed = gasUsed

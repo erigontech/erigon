@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -308,6 +309,14 @@ func gasCreate2(_ *EVM, callContext *CallContext, availableGas uint64, memorySiz
 	return gas, nil
 }
 
+func stateGasCreate(_ *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
+	return 112 * callContext.stateGas, nil
+}
+
+func stateGasCall(_ *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
+	return 112 * callContext.stateGas, nil
+}
+
 func gasCreateEip3860(_ *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
 	gas, err := memoryGasCost(callContext, memorySize)
 	if err != nil {
@@ -440,13 +449,14 @@ func statelessGasCall(evm *EVM, callContext *CallContext, availableGas uint64, m
 func statefulGasCall(evm *EVM, callContext *CallContext, gas uint64, availableGas uint64, transfersValue bool) (uint64, error) {
 	var accountGas uint64
 	var address = accounts.InternAddress(callContext.Stack.Back(1).Bytes20())
-	if evm.ChainRules().IsSpuriousDragon {
+	rules := evm.ChainRules()
+	if rules.IsSpuriousDragon {
 		empty, err := evm.IntraBlockState().Empty(address)
 		if err != nil {
 			return 0, err
 		}
 		if transfersValue && empty {
-			accountGas = params.CallNewAccountGas
+			accountGas = gasNewAccount(rules)
 			// Record the address access for BAL tracking, but only when the CALL
 			// will actually proceed. In read-only (STATICCALL) context, CALL with
 			// value > 0 will be rejected by ErrWriteProtection before evm.Call()
@@ -461,7 +471,7 @@ func statefulGasCall(evm *EVM, callContext *CallContext, gas uint64, availableGa
 			return 0, err
 		}
 		if !exists {
-			accountGas = params.CallNewAccountGas
+			accountGas = gasNewAccount(rules)
 		}
 	}
 
@@ -476,6 +486,13 @@ func statefulGasCall(evm *EVM, callContext *CallContext, gas uint64, availableGa
 	}
 
 	return gas, nil
+}
+
+func gasNewAccount(rules *chain.Rules) uint64 {
+	if rules.IsAmsterdam {
+		return 0 // EIP-8037: State Creation Gas Cost Increase
+	}
+	return params.CallNewAccountGas
 }
 
 func calcCallGas(evm *EVM, callContext *CallContext, availableGas, baseGas uint64) (uint64, error) {

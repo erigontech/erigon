@@ -16,6 +16,8 @@
 
 package evmtypes
 
+import "fmt"
+
 // MdGas represents multi-dimensional gas
 type MdGas struct {
 	Regular uint64
@@ -42,4 +44,22 @@ func (g MdGas) Total() uint64 {
 
 func (g MdGas) Bottleneck() uint64 {
 	return max(g.Regular, g.State)
+}
+
+type MdGasType uint8
+
+const (
+	RegularGas MdGasType = iota
+	StateGas
+)
+
+func (t MdGasType) String() string {
+	switch t {
+	case RegularGas:
+		return "regularGas"
+	case StateGas:
+		return "stateGas"
+	default:
+		panic(fmt.Errorf("unknown gas type: %d", t))
+	}
 }
