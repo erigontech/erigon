@@ -33,7 +33,6 @@ jobs:
       cancel-in-progress: true
     runs-on: [ self-hosted, qa, Ethereum, rpc-latest-erigon ]
     env:
-      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TOTAL_TIME_SECONDS: 900 # 15 minutes
@@ -45,6 +44,21 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+
+      - name: Set reference data dir based on branch
+        run: |
+          # For pull_request events base_ref is the target branch name; for push/dispatch parse from ref.
+          BRANCH="${{ github.base_ref }}"
+          if [ -z "$BRANCH" ]; then
+            BRANCH="${{ github.ref }}"
+            BRANCH="${BRANCH#refs/heads/}"
+          fi
+          if [[ "$BRANCH" == release/* ]]; then
+            VERSION="${BRANCH#release/}"
+            echo "ERIGON_REFERENCE_DATA_DIR=/opt/erigon-versions/reference-version-${VERSION}/datadir" >> $GITHUB_ENV
+          else
+            echo "ERIGON_REFERENCE_DATA_DIR=/opt/erigon-versions/reference-version/datadir" >> $GITHUB_ENV
+          fi
 
       - name: Clean Erigon Build Directory
         run: |
