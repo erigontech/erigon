@@ -85,8 +85,7 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 		}
 	}
 
-	aux := make([]byte, 0, 256)
-	return branch.ReplacePlainKeys(aux, func(key []byte, isStorage bool) ([]byte, error) {
+	result, err := branch.ReplacePlainKeys(at.branchDerefBuf[:0], func(key []byte, isStorage bool) ([]byte, error) {
 		if isStorage {
 			if len(key) == length.Addr+length.Hash {
 				return nil, nil // save storage key as is
@@ -121,6 +120,11 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 		}
 		return apkBuf, nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	at.branchDerefBuf = result // retain grown backing array for next call
+	return bytes.Clone(result), nil
 }
 
 func DecodeReferenceKey(from []byte) uint64 {
