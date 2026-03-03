@@ -242,7 +242,7 @@ func TestAPI(t *testing.T) {
 			}
 			defer d.Close()
 			txNum := uint64(0)
-			if err := d.DomainPut(kv.AccountsDomain, tx, k, v, txNum, nil, 0); err != nil {
+			if err := d.DomainPut(kv.AccountsDomain, tx, k, v, txNum, nil); err != nil {
 				return err
 			}
 			return d.Flush(ctx, tx)

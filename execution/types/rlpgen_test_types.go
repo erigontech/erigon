@@ -14,13 +14,15 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package synctest
+package types
 
-import "testing/synctest"
+import (
+	"github.com/erigontech/erigon/common"
+)
 
-//
-// NOTE: we can remove this pkg once go1.26 is out, and we've dropped support for go1.25
-//
-
-var Wait = synctest.Wait // nolint:govet
-var Test = synctest.Test // nolint:govet
+// LogForStorageGen - test struct for rlpgen code generation comparison
+type LogForStorageGen struct {
+	Address common.Address
+	Topics  []common.Hash
+	Data    []byte
+}

@@ -35,7 +35,6 @@ import (
 
 	"github.com/erigontech/erigon/db/kv/prune"
 
-	"github.com/RoaringBitmap/roaring/v2/roaring64"
 	"github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -47,7 +46,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/bitmapdb"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
@@ -603,37 +601,6 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int) erro
 		return err
 	}
 	return nil
-}
-
-type AggV3Collation struct {
-	logAddrs   map[string]*roaring64.Bitmap
-	logTopics  map[string]*roaring64.Bitmap
-	tracesFrom map[string]*roaring64.Bitmap
-	tracesTo   map[string]*roaring64.Bitmap
-	accounts   Collation
-	storage    Collation
-	code       Collation
-	commitment Collation
-}
-
-func (c AggV3Collation) Close() {
-	c.accounts.Close()
-	c.storage.Close()
-	c.code.Close()
-	c.commitment.Close()
-
-	for _, b := range c.logAddrs {
-		bitmapdb.ReturnToPool64(b)
-	}
-	for _, b := range c.logTopics {
-		bitmapdb.ReturnToPool64(b)
-	}
-	for _, b := range c.tracesFrom {
-		bitmapdb.ReturnToPool64(b)
-	}
-	for _, b := range c.tracesTo {
-		bitmapdb.ReturnToPool64(b)
-	}
 }
 
 type AggV3StaticFiles struct {
@@ -1459,6 +1426,8 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 		}
 	}()
 
+	t := time.Now()
+
 	at.a.logger.Info("[snapshots] merge state " + r.String())
 	commitmentUseReferencedBranches := at.a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues
 
@@ -1480,7 +1449,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 
 		g.Go(func() (err error) {
 			var vt valueTransformer
-			if commitmentUseReferencedBranches && kid == kv.CommitmentDomain {
+			if commitmentUseReferencedBranches && kid == kv.CommitmentDomain && r.domain[kid].values.needMerge {
 				accStorageMerged.Wait()
 
 				// prepare transformer callback to correctly dereference previously merged accounts/storage plain keys
@@ -1522,7 +1491,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 	err = g.Wait()
 	if err == nil {
 		closeFiles = false
-		at.a.logger.Info("[snapshots] state merge done " + r.String())
+		at.a.logger.Info("[snapshots] state merge done "+r.String(), "in", time.Since(t))
 	} else if !errors.Is(err, context.Canceled) {
 		at.a.logger.Warn(fmt.Sprintf("[snapshots] state merge failed err=%v %s", err, r.String()))
 	}

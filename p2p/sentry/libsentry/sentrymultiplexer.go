@@ -800,6 +800,78 @@ func (m *sentryMultiplexer) RemovePeer(ctx context.Context, in *sentryproto.Remo
 	return &sentryproto.RemovePeerReply{Success: success}, nil
 }
 
+func (m *sentryMultiplexer) AddTrustedPeer(ctx context.Context, in *sentryproto.AddPeerRequest, opts ...grpc.CallOption) (*sentryproto.AddPeerReply, error) {
+	g, gctx := errgroup.WithContext(ctx)
+
+	var success bool
+	var successMutex sync.RWMutex
+
+	for _, client := range m.clients {
+
+		g.Go(func() error {
+			result, err := client.AddTrustedPeer(gctx, in, opts...)
+
+			if err != nil {
+				return err
+			}
+
+			successMutex.Lock()
+			defer successMutex.Unlock()
+
+			// if any client returns success return success
+			if !success && result.GetSuccess() {
+				success = true
+			}
+
+			return nil
+		})
+	}
+
+	err := g.Wait()
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &sentryproto.AddPeerReply{Success: success}, nil
+}
+
+func (m *sentryMultiplexer) RemoveTrustedPeer(ctx context.Context, in *sentryproto.RemovePeerRequest, opts ...grpc.CallOption) (*sentryproto.RemovePeerReply, error) {
+	g, gctx := errgroup.WithContext(ctx)
+
+	var success bool
+	var successMutex sync.RWMutex
+
+	for _, client := range m.clients {
+
+		g.Go(func() error {
+			result, err := client.RemoveTrustedPeer(gctx, in, opts...)
+
+			if err != nil {
+				return err
+			}
+
+			successMutex.Lock()
+			defer successMutex.Unlock()
+
+			// if any client returns success return success
+			if !success && result.GetSuccess() {
+				success = true
+			}
+
+			return nil
+		})
+	}
+
+	err := g.Wait()
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &sentryproto.RemovePeerReply{Success: success}, nil
+}
+
 func (m *sentryMultiplexer) NodeInfo(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*typesproto.NodeInfoReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, `method "NodeInfo" not implemented: use "NodeInfos" instead`)
 }

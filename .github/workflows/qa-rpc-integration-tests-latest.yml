@@ -56,6 +56,7 @@ jobs:
         working-directory: ${{ github.workspace }}
 
       - name: Wait for current Erigon instance to reach the tip
+        id: preparing_step
         run: |
           ERIGON_PID=$(pgrep -x erigon | head -1)
           if [ -z "$ERIGON_PID" ]; then
@@ -67,6 +68,13 @@ jobs:
               --stop-erigon=False \
               --erigon-pid=$ERIGON_PID
           fi
+
+      - name: Upload preparing-step logs on failure
+        if: failure() && steps.preparing_step.outcome == 'failure'
+        uses: actions/upload-artifact@v6
+        with:
+          name: preparing-step-logs
+          path: ${{ env.ERIGON_REFERENCE_DATA_DIR }}/logs/
 
       - name: Pause the Erigon instance dedicated to db maintenance
         run: |
