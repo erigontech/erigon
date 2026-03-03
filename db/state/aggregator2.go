@@ -46,7 +46,7 @@ func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
 }
 
 func NewTest(dirs datadir.Dirs) AggOpts { //nolint:gocritic
-	return New(dirs).DisableFsync().GenSaltIfNeed(true).ReorgBlockDepth(0).StepsInFrozenFile(config3.DefaultStepsInFrozenFile)
+	return New(dirs).DisableFsync().GenSaltIfNeed(true).ReorgBlockDepth(0).StepSize(config3.DefaultStepSize).StepsInFrozenFile(config3.DefaultStepsInFrozenFile)
 }
 
 func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) { //nolint:gocritic
@@ -73,9 +73,14 @@ func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) {
 	a.disableHistory = opts.disableHistory
 	a.disableFsync = opts.disableFsync
 
-	// Save salt and schema for ReloadErigonDBSettings() to use when propagating stepSize changes
+	// AdjustReceipt mutates the global statecfg.Schema, so run it before
+	// capturing the schema into the Aggregator.
+	if err := statecfg.AdjustReceiptCurrentVersionIfNeeded(opts.dirs, opts.logger); err != nil {
+		return nil, err
+	}
+
 	a.savedSalt = salt
-	a.savedSchema = opts.schema
+	a.savedSchema = statecfg.Schema // re-read after adjustment (opts.schema is a stale copy from New() time)
 
 	if err := a.ConfigureDomains(); err != nil {
 		return nil, err

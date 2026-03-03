@@ -297,9 +297,6 @@ func (a *Aggregator) ConfigureDomains() error {
 	if a.stepSize == 0 {
 		return fmt.Errorf("cannot configure domains: stepSize is 0")
 	}
-	if err := statecfg.AdjustReceiptCurrentVersionIfNeeded(a.dirs, a.logger); err != nil {
-		return err
-	}
 	if err := statecfg.Configure(a.savedSchema, a, a.dirs, a.savedSalt, a.logger); err != nil {
 		return err
 	}
@@ -392,12 +389,6 @@ func (a *Aggregator) DisableAllDependencies() {
 }
 
 func (a *Aggregator) OpenFolder() error {
-	if err := a.ReloadErigonDBSettings(false); err != nil {
-		return err
-	}
-	if err := a.ConfigureDomains(); err != nil {
-		return err
-	}
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	if err := a.reloadSalt(); err != nil {
