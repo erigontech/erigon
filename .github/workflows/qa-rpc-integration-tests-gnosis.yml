@@ -29,7 +29,6 @@ jobs:
       cancel-in-progress: true
     runs-on: [ self-hosted, qa, Gnosis, rpc-integration ]
     env:
-      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/gnosis-reference-version-3.4/datadir
       ERIGON_TESTBED_AREA: /opt/erigon-testbed
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       ERIGON_ASSERT: true
@@ -39,6 +38,21 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+
+      - name: Set reference data dir based on branch
+        run: |
+          # For pull_request events base_ref is the target branch name; for push/dispatch parse from ref.
+          BRANCH="${{ github.base_ref }}"
+          if [ -z "$BRANCH" ]; then
+            BRANCH="${{ github.ref }}"
+            BRANCH="${BRANCH#refs/heads/}"
+          fi
+          if [[ "$BRANCH" == release/* ]]; then
+            VERSION="${BRANCH#release/}"
+            echo "ERIGON_REFERENCE_DATA_DIR=/opt/erigon-versions/gnosis-reference-version-${VERSION}/datadir" >> $GITHUB_ENV
+          else
+            echo "ERIGON_REFERENCE_DATA_DIR=/opt/erigon-versions/gnosis-reference-version/datadir" >> $GITHUB_ENV
+          fi
 
       - name: Clean Erigon Build Directory
         run: |
