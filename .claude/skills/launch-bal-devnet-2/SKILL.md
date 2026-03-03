@@ -1,95 +1,15 @@
-# Launch bal-devnet-2 (Erigon + Lighthouse)
+---
+name: launch-bal-devnet-2
+description: Launch erigon + Lighthouse on the bal-devnet-2 ethpandaops devnet (EIP-7928 Block Access Lists). Manages start/stop of both EL and CL clients with proper port offsets and JWT auth.
+allowed-tools: Bash, Read, Write, Edit, Glob
+allowed-prompts:
+  - tool: Bash
+    prompt: start, stop, and manage erigon and lighthouse processes for bal-devnet-2
+---
 
-Run Erigon and Lighthouse for the bal-devnet-2 ethpandaops devnet (EIP-7928 Block Access Lists).
+# Launch bal-devnet-2 (EIP-7928 BAL Devnet)
 
-## Quick Start
-
-```bash
-# 1. Build erigon from bal-devnet-2 branch
-cd ~/mark/hive/clients/erigon/erigon && make erigon
-
-# 2. Initialize (IMPORTANT: --datadir must come BEFORE genesis file)
-./build/bin/erigon init --datadir ~/mark/bal-devnet-2/erigon-data ~/mark/bal-devnet-2/genesis.json
-
-# 3. Start erigon first (creates JWT secret)
-bash ~/mark/bal-devnet-2/start-erigon.sh
-
-# 4. Start lighthouse second (reads JWT from erigon)
-bash ~/mark/bal-devnet-2/start-lighthouse.sh
-```
-
-## Reinitializing (Clean Restart)
-
-When you need to wipe the datadir and start fresh:
-
-```bash
-# Stop both
-pkill -f "erigon.*bal-devnet-2"; docker stop bal-devnet-2-lighthouse
-
-# Clean EVERYTHING in the datadir except jwt.hex and nodekey
-rm -rf ~/mark/bal-devnet-2/erigon-data/{chaindata,snapshots,txpool,nodes,temp,bal,caplin,migrations,downloader,LOCK,logs}
-
-# CRITICAL: --datadir flag MUST come BEFORE the genesis file path!
-# Wrong: erigon init genesis.json --datadir=path  (silently uses default path!)
-# Right: erigon init --datadir path genesis.json
-./build/bin/erigon init --datadir ~/mark/bal-devnet-2/erigon-data ~/mark/bal-devnet-2/genesis.json
-
-# Verify init output says "Writing custom genesis block" (NOT "Writing main-net genesis block")
-# Verify chain config shows ChainID: 7033429093 and Glamsterdam on startup
-```
-
-### Salt files
-
-After a clean wipe, the `snapshots/salt-state.txt` and `snapshots/salt-blocks.txt` files are
-recreated automatically by `erigon init`. If erigon errors with "salt not found on ReloadSalt",
-create them manually:
-
-```bash
-python3 -c "import os; open('$HOME/mark/bal-devnet-2/erigon-data/snapshots/salt-state.txt', 'wb').write(os.urandom(4))"
-python3 -c "import os; open('$HOME/mark/bal-devnet-2/erigon-data/snapshots/salt-blocks.txt', 'wb').write(os.urandom(4))"
-```
-
-## Stopping
-
-```bash
-pkill -f "erigon.*bal-devnet-2"
-docker stop bal-devnet-2-lighthouse
-```
-
-## Checking Status
-
-```bash
-# Erigon block number
-curl -s http://127.0.0.1:8645 -X POST -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
-
-# Lighthouse head slot
-curl -s http://127.0.0.1:5152/eth/v1/beacon/headers/head | python3 -c \
-  "import json,sys; d=json.load(sys.stdin); print('Head slot:', d['data']['header']['message']['slot'])"
-
-# Check erigon logs for errors
-grep -E "WARN|ERR" ~/mark/bal-devnet-2/erigon-data/logs/erigon.log | tail -20
-
-# Check for gas or BAL mismatches
-grep -E "gas mismatch|BAL mismatch" ~/mark/bal-devnet-2/erigon-data/logs/erigon.log | tail -10
-```
-
-## Port Assignments (offset to avoid conflicts)
-
-| Service | Port | Flag |
-|---------|------|------|
-| Erigon HTTP RPC | 8645 | `--http.port` |
-| Erigon Auth RPC | 8651 | `--authrpc.port` |
-| Erigon WebSocket | 8646 | `--ws.port` |
-| Erigon P2P | 30403 | `--port` |
-| Erigon gRPC | 9190 | `--private.api.addr` |
-| Erigon Torrent | 42169 | `--torrent.port` |
-| Erigon pprof | 6160 | `--pprof.port` |
-| Erigon metrics | 6161 | `--metrics.port` |
-| Erigon MCP | 8653 | `--mcp.port` |
-| Lighthouse HTTP | 5152 | `--http-port` |
-| Lighthouse P2P | 9100 | `--port` |
-| Lighthouse metrics | 5264 | `--metrics-port` |
+Run erigon (EL) + Lighthouse (CL) on the bal-devnet-2 ethpandaops devnet for testing EIP-7928 Block Access Lists.
 
 ## Network Details
 
@@ -98,67 +18,168 @@ grep -E "gas mismatch|BAL mismatch" ~/mark/bal-devnet-2/erigon-data/logs/erigon.
 | Chain ID | 7033429093 |
 | Genesis timestamp | 1770388190 |
 | Amsterdam timestamp | 1770400508 (epoch 32) |
-| Seconds per slot | 12 |
-| Gas limit | 60,000,000 |
 | Lighthouse image | `ethpandaops/lighthouse:bal-devnet-2-65bb283` |
-| RPC endpoint | https://rpc.bal-devnet-2.ethpandaops.io |
-| Checkpoint sync | https://checkpoint-sync.bal-devnet-2.ethpandaops.io |
+| Lighthouse version | v8.0.1 (commit 65bb283, branch bal-devnet-2) |
 | Explorer | https://explorer.bal-devnet-2.ethpandaops.io |
 | Faucet | https://faucet.bal-devnet-2.ethpandaops.io |
+| RPC | https://rpc.bal-devnet-2.ethpandaops.io |
+| Checkpoint sync | https://checkpoint-sync.bal-devnet-2.ethpandaops.io |
 
-## Environment Variables
+## Working Directory
+
+Ask the user where they want the working directory. Default suggestion: `~/bal-devnet-2/`.
+Use `$WORKDIR` throughout to refer to the chosen path.
+
+```
+$WORKDIR/
+├── genesis.json              # EL genesis
+├── config.yaml               # CL beacon config
+├── genesis.ssz               # CL genesis state
+├── testnet-config/           # Lighthouse testnet dir (config.yaml + genesis.ssz + deploy files)
+├── start-erigon.sh           # Erigon start script (run FIRST)
+├── start-lighthouse.sh       # Lighthouse start script (run SECOND)
+├── stop.sh                   # Stop both erigon + Lighthouse
+├── clean.sh                  # Stop, wipe data, re-init genesis
+├── erigon-data/              # Erigon datadir (contains jwt.hex)
+├── lighthouse-data/          # Lighthouse datadir
+├── erigon-console.log        # Erigon stdout/stderr
+└── lighthouse-console.log    # Lighthouse stdout/stderr
+```
+
+## Port Assignments (offset +100)
+
+| Service | Port | Protocol |
+|---------|------|----------|
+| Erigon HTTP RPC | 8645 | TCP |
+| Erigon Engine API (authrpc) | 8651 | TCP |
+| Erigon WebSocket | 8646 | TCP |
+| Erigon P2P | 30403 | TCP+UDP |
+| Erigon gRPC | 9190 | TCP |
+| Erigon Torrent | 42169 | TCP+UDP |
+| Erigon pprof | 6160 | TCP |
+| Erigon metrics | 6161 | TCP |
+| Lighthouse P2P | 9100 | TCP+UDP |
+| Lighthouse QUIC | 9101 | UDP |
+| Lighthouse HTTP API | 5152 | TCP |
+| Lighthouse metrics | 5264 | TCP |
+
+## Workflow
+
+### Step 1: Check Prerequisites
+
+1. Verify erigon binary exists at `./build/bin/erigon`. If not, invoke `/erigon-build`.
+2. Verify the Lighthouse Docker image is available:
+   ```bash
+   docker image inspect ethpandaops/lighthouse:bal-devnet-2-65bb283 > /dev/null 2>&1
+   ```
+   If not, pull it:
+   ```bash
+   docker pull ethpandaops/lighthouse:bal-devnet-2-65bb283
+   ```
+3. Verify config files exist in `$WORKDIR` (genesis.json, testnet-config/).
+   If not, download them:
+   ```bash
+   mkdir -p $WORKDIR/testnet-config
+   curl -sL -o $WORKDIR/genesis.json https://config.bal-devnet-2.ethpandaops.io/el/genesis.json
+   curl -sL -o $WORKDIR/testnet-config/config.yaml https://config.bal-devnet-2.ethpandaops.io/cl/config.yaml
+   curl -sL -o $WORKDIR/testnet-config/genesis.ssz https://config.bal-devnet-2.ethpandaops.io/cl/genesis.ssz
+   echo "0" > $WORKDIR/testnet-config/deposit_contract_block.txt
+   echo "0" > $WORKDIR/testnet-config/deploy_block.txt
+   ```
+
+### Step 2: Initialize Datadir (first run only)
+
+If `$WORKDIR/erigon-data/chaindata` does not exist:
+```bash
+./build/bin/erigon init --datadir $WORKDIR/erigon-data $WORKDIR/genesis.json
+```
+
+### Step 3: Create Scripts (first run only)
+
+If the start/stop/clean scripts don't exist yet, generate them. The scripts must use absolute paths based on `$WORKDIR`. Key details:
+
+**start-erigon.sh** — Runs erigon with `--externalcl`. Must start FIRST (creates JWT secret).
+- Env vars: `ERIGON_EXEC3_PARALLEL=true`, `ERIGON_ASSERT=true`, `ERIGON_EXEC3_WORKERS=12`, `LOG_HASH_MISMATCH_REASON=true`
+- Flags: `--datadir=$WORKDIR/erigon-data`, `--externalcl`, `--networkid=7033429093`, all 16 EL bootnodes, erigon static peers, `--prune.mode=minimal`, all offset ports (see port table), `--http.api=eth,erigon,engine,debug`, `--pprof`, `--metrics`
+- EL bootnodes: fetch from `https://config.bal-devnet-2.ethpandaops.io/api/v1/nodes/inventory` (extract enode URLs from `execution.enode` fields)
+
+**start-lighthouse.sh** — Runs Lighthouse via Docker with `--network=host`. Must start SECOND.
+- Checks JWT exists at `$WORKDIR/erigon-data/jwt.hex`
+- Docker container name: `bal-devnet-2-lighthouse`
+- Mounts: `$WORKDIR/testnet-config:/config:ro`, `$WORKDIR/lighthouse-data:/data`, JWT as `/jwt.hex:ro`
+- Flags: `--testnet-dir=/config`, `--execution-endpoint=http://127.0.0.1:8651`, `--execution-jwt=/jwt.hex`, all 15 CL ENR bootnodes, offset ports, `--checkpoint-sync-url=https://checkpoint-sync.bal-devnet-2.ethpandaops.io`
+- CL bootnodes: fetch from same inventory URL (extract ENR entries from `consensus.enr` fields)
+
+**stop.sh** — Stops Lighthouse (`docker stop bal-devnet-2-lighthouse`) then erigon (`pkill -f "datadir.*bal-devnet-2/erigon-data"`).
+
+**clean.sh** — Runs `stop.sh`, removes erigon chain data (chaindata, snapshots, txpool, nodes, temp) and lighthouse data, re-initializes genesis.
+
+### Step 4: Start Erigon (FIRST)
+
+Erigon must start first because it creates the JWT secret that Lighthouse needs.
 
 ```bash
-ERIGON_EXEC3_PARALLEL=true   # Enable parallel execution
-ERIGON_ASSERT=true           # Enable assertions
-ERIGON_EXEC3_WORKERS=12      # Number of parallel workers
-LOG_HASH_MISMATCH_REASON=true # Detailed hash mismatch logging
+cd $WORKDIR && nohup bash start-erigon.sh > erigon-console.log 2>&1 &
 ```
+
+Verify it started:
+- Check `tail $WORKDIR/erigon-console.log` for startup messages
+- Check JWT exists: `ls $WORKDIR/erigon-data/jwt.hex`
+- Check port binding: `ss -tlnp | grep 8651`
+
+### Step 5: Start Lighthouse (SECOND)
+
+After erigon is running and JWT exists:
+
+```bash
+cd $WORKDIR && nohup bash start-lighthouse.sh > lighthouse-console.log 2>&1 &
+```
+
+Verify it started:
+- Check `tail $WORKDIR/lighthouse-console.log` for "Lighthouse started"
+- Look for "Loaded checkpoint block and state" (checkpoint sync)
+- Look for `peers: "N"` showing peer connections
+
+### Step 6: Monitor
+
+```bash
+# Erigon sync progress
+tail -f $WORKDIR/erigon-console.log
+
+# Lighthouse sync progress
+tail -f $WORKDIR/lighthouse-console.log
+
+# Check erigon block height via RPC
+curl -s http://localhost:8645 -X POST -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' | python3 -m json.tool
+
+# Check lighthouse sync status
+curl -s http://localhost:5152/eth/v1/node/syncing | python3 -m json.tool
+```
+
+### Step 7: Stop
+
+```bash
+bash $WORKDIR/stop.sh
+```
+
+This stops Lighthouse (via `docker stop`) then erigon (via `pkill`).
+
+### Step 8: Clean (wipe data and re-init)
+
+```bash
+bash $WORKDIR/clean.sh
+```
+
+This runs `stop.sh`, removes erigon chain data (chaindata, snapshots, txpool, nodes, temp) and lighthouse data, then re-initializes genesis. After clean, start again with Steps 4-5.
 
 ## Troubleshooting
 
-### "Unsupported fork" errors from engine API
-This means the chain config is wrong. Verify:
-1. The erigon init wrote to the CORRECT datadir (check `Opening Database label=chaindata path=...` in init output)
-2. The chain config shows `Glamsterdam: 2026-02-06` (not mainnet dates)
-3. If wrong, re-init with `--datadir` flag BEFORE the genesis file path
-
-### No P2P peers
-The devnet nodes may be at max peer capacity. Wait or restart; peer slots open periodically. Check with:
-```bash
-grep "GoodPeers\|peers=" ~/mark/bal-devnet-2/erigon-data/logs/erigon.log | tail -5
-```
-
-### Gas mismatch at block N (parallel execution)
-Past bugs fixed:
-- **Block 214**: Fixed in versionedio.go (caching all paths except CodePath when readStorage=nil)
-- **Block 8177**: Fixed in versionedio.go (StoragePath MVReadResultNone checks IncarnationPath)
-- **Block 10113**: Fixed in intra_block_state.go (Empty() was calling accountRead(&emptyAccount) for non-existent accounts, overwriting the nil recorded by versionedRead, causing createObject to be skipped for SELFDESTRUCT beneficiaries)
-
-If a new gas mismatch appears, check the erigon logs for the specific block/tx causing it. The root cause is typically a missing version map write that causes stale reads during parallel validation.
-
-## Config Files
-
-All in `~/mark/bal-devnet-2/`:
-- `genesis.json` - EL genesis (from ethpandaops)
-- `testnet-config/config.yaml` - CL beacon config
-- `testnet-config/genesis.ssz` - CL genesis state
-- `start-erigon.sh` - Erigon start script
-- `start-lighthouse.sh` - Lighthouse start script (Docker)
-- `erigon-data/` - Erigon datadir
-- `lighthouse-data/` - Lighthouse datadir (Docker volume)
-
-## Geth Reference Implementation
-
-The geth bal-devnet-2 source is at: https://github.com/ethereum/go-ethereum/tree/bal-devnet-2
-
-Key EIP-7928 implementation files in geth:
-- `core/block_access_list_tracer.go` - BAL tracer hooks
-- `core/types/bal/bal.go` - BAL builder and types
-- `core/state_processor.go` - BAL integration in block processing
-- `core/state/bal_reader.go` - BAL reader for parallel execution
-
-Key differences from erigon:
-- Geth uses `receipt.GasUsed = MaxUsedGas` (pre-refund) for Amsterdam blocks
-- Erigon uses `receipt.GasUsed = ReceiptGasUsed` (post-refund) - potential mismatch
-- Both use pre-refund gas for block header GasUsed (EIP-7778)
+| Problem | Solution |
+|---------|----------|
+| JWT auth fails | Ensure erigon started first and `jwt.hex` exists. Lighthouse must mount the same file. |
+| No EL peers | Check firewall allows port 30403. Try adding `--nat=extip:<your-ip>`. |
+| No CL peers | Check firewall allows port 9100/9101. ENR bootnodes may have changed — re-fetch from inventory. |
+| "Head is optimistic" | Normal during initial sync. Erigon is behind Lighthouse. Will resolve as erigon catches up. |
+| Engine API timeout | Check erigon is running and authrpc port 8651 is accessible. |
+| Port conflict | Check `ss -tlnp | grep <port>`. Kill conflicting process or use higher offset. |
