@@ -94,7 +94,7 @@ func TestSuggestPrice(t *testing.T) {
 	defer tx.Rollback()
 
 	cache := jsonrpc.NewGasPriceCache()
-	oracle := gasprice.NewOracle(jsonrpc.NewGasPriceOracleBackend(tx, baseApi), config, cache, log.New())
+	oracle := gasprice.NewOracle(jsonrpc.NewGasPriceOracleBackend(nil, tx, baseApi), config, cache, nil, log.New())
 
 	// The gas price sampled is: 32G, 31G, 30G, 29G, 28G, 27G
 	got, err := oracle.SuggestTipCap(context.Background())

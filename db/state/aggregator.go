@@ -35,7 +35,6 @@ import (
 
 	"github.com/erigontech/erigon/db/kv/prune"
 
-	"github.com/RoaringBitmap/roaring/v2/roaring64"
 	"github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -47,7 +46,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/bitmapdb"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
@@ -78,8 +76,9 @@ type Aggregator struct {
 
 	// To keep DB small - need move data to small files ASAP.
 	// It means goroutine which creating small files - can't be locked by merge or indexing.
-	buildingFiles atomic.Bool
-	mergingFiles  atomic.Bool
+	buildingFiles       atomic.Bool
+	mergingFiles        atomic.Bool
+	rebuildingAccessors atomic.Bool
 
 	//warmupWorking          atomic.Bool
 	ctx       context.Context
@@ -479,7 +478,7 @@ func (a *Aggregator) LockWorkersEditing()   { a.lockWorkersEditing = true }
 func (a *Aggregator) UnlockWorkersEditing() { a.lockWorkersEditing = false }
 
 func (a *Aggregator) HasBackgroundFilesBuild2() bool {
-	return a.buildingFiles.Load() || a.mergingFiles.Load()
+	return a.buildingFiles.Load() || a.mergingFiles.Load() || a.rebuildingAccessors.Load()
 }
 
 func (a *Aggregator) HasBackgroundFilesBuild() bool { return a.ps.Has() }
@@ -541,14 +540,15 @@ func (a *Aggregator) WaitForBuildAndMerge(ctx context.Context) chan struct{} {
 
 		chkEvery := time.NewTicker(3 * time.Second)
 		defer chkEvery.Stop()
-		for a.buildingFiles.Load() || a.mergingFiles.Load() {
+		for a.buildingFiles.Load() || a.mergingFiles.Load() || a.rebuildingAccessors.Load() {
 			select {
 			case <-ctx.Done():
 				return
 			case <-chkEvery.C:
 				a.logger.Trace("[agg] waiting for files",
 					"building files", a.buildingFiles.Load(),
-					"merging files", a.mergingFiles.Load())
+					"merging files", a.mergingFiles.Load(),
+					"rebuilding accessors", a.rebuildingAccessors.Load())
 			}
 		}
 	}()
@@ -605,35 +605,37 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int) erro
 	return nil
 }
 
-type AggV3Collation struct {
-	logAddrs   map[string]*roaring64.Bitmap
-	logTopics  map[string]*roaring64.Bitmap
-	tracesFrom map[string]*roaring64.Bitmap
-	tracesTo   map[string]*roaring64.Bitmap
-	accounts   Collation
-	storage    Collation
-	code       Collation
-	commitment Collation
-}
+// BuildMissedAccessorsInBackground starts a background goroutine to rebuild
+// any missing E3 state accessors. Returns true if the rebuild was started,
+// false if one is already running.
+// This mirrors RetireBlocksInBackground (which calls BuildMissedIndicesIfNeed)
+// for E2 block indices.
+func (a *Aggregator) BuildMissedAccessorsInBackground(workers int) bool {
+	if !a.rebuildingAccessors.CompareAndSwap(false, true) {
+		return false
+	}
+	a.wg.Add(1)
+	go func() {
+		defer a.wg.Done()
+		defer a.rebuildingAccessors.Store(false)
 
-func (c AggV3Collation) Close() {
-	c.accounts.Close()
-	c.storage.Close()
-	c.code.Close()
-	c.commitment.Close()
+		if a.snapshotBuildSema != nil {
+			// We are inside our own goroutine — it's fine to block here.
+			if err := a.snapshotBuildSema.Acquire(a.ctx, 1); err != nil {
+				a.logger.Warn("[snapshots] BuildMissedAccessors background: sema", "err", err)
+				return
+			}
+			defer a.snapshotBuildSema.Release(1)
+		}
 
-	for _, b := range c.logAddrs {
-		bitmapdb.ReturnToPool64(b)
-	}
-	for _, b := range c.logTopics {
-		bitmapdb.ReturnToPool64(b)
-	}
-	for _, b := range c.tracesFrom {
-		bitmapdb.ReturnToPool64(b)
-	}
-	for _, b := range c.tracesTo {
-		bitmapdb.ReturnToPool64(b)
-	}
+		if err := a.BuildMissedAccessors(a.ctx, workers); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
+				return
+			}
+			a.logger.Warn("[snapshots] BuildMissedAccessors background", "err", err)
+		}
+	}()
+	return true
 }
 
 type AggV3StaticFiles struct {
