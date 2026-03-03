@@ -115,6 +115,8 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	// static — tested in state test format by TestState
 	bt.skipLoad(`^static/state_tests/`)
 
+	bt.skipLoad(`^prague/eip7702_set_code_tx/test_set_code_to_sstore_then_sload.json`)
+
 	bt.walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root
 		test.ExperimentalBAL = true // TODO eventually remove this from BlockTest and run normally

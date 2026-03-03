@@ -82,6 +82,45 @@ func (c *MockSentryServerAddPeerCall) DoAndReturn(f func(context.Context, *AddPe
 	return c
 }
 
+// AddTrustedPeer mocks base method.
+func (m *MockSentryServer) AddTrustedPeer(arg0 context.Context, arg1 *AddPeerRequest) (*AddPeerReply, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AddTrustedPeer", arg0, arg1)
+	ret0, _ := ret[0].(*AddPeerReply)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// AddTrustedPeer indicates an expected call of AddTrustedPeer.
+func (mr *MockSentryServerMockRecorder) AddTrustedPeer(arg0, arg1 any) *MockSentryServerAddTrustedPeerCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddTrustedPeer", reflect.TypeOf((*MockSentryServer)(nil).AddTrustedPeer), arg0, arg1)
+	return &MockSentryServerAddTrustedPeerCall{Call: call}
+}
+
+// MockSentryServerAddTrustedPeerCall wrap *gomock.Call
+type MockSentryServerAddTrustedPeerCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSentryServerAddTrustedPeerCall) Return(arg0 *AddPeerReply, arg1 error) *MockSentryServerAddTrustedPeerCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSentryServerAddTrustedPeerCall) Do(f func(context.Context, *AddPeerRequest) (*AddPeerReply, error)) *MockSentryServerAddTrustedPeerCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSentryServerAddTrustedPeerCall) DoAndReturn(f func(context.Context, *AddPeerRequest) (*AddPeerReply, error)) *MockSentryServerAddTrustedPeerCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // HandShake mocks base method.
 func (m *MockSentryServer) HandShake(arg0 context.Context, arg1 *emptypb.Empty) (*HandShakeReply, error) {
 	m.ctrl.T.Helper()
@@ -427,6 +466,45 @@ func (c *MockSentryServerRemovePeerCall) Do(f func(context.Context, *RemovePeerR
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockSentryServerRemovePeerCall) DoAndReturn(f func(context.Context, *RemovePeerRequest) (*RemovePeerReply, error)) *MockSentryServerRemovePeerCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// RemoveTrustedPeer mocks base method.
+func (m *MockSentryServer) RemoveTrustedPeer(arg0 context.Context, arg1 *RemovePeerRequest) (*RemovePeerReply, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RemoveTrustedPeer", arg0, arg1)
+	ret0, _ := ret[0].(*RemovePeerReply)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RemoveTrustedPeer indicates an expected call of RemoveTrustedPeer.
+func (mr *MockSentryServerMockRecorder) RemoveTrustedPeer(arg0, arg1 any) *MockSentryServerRemoveTrustedPeerCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveTrustedPeer", reflect.TypeOf((*MockSentryServer)(nil).RemoveTrustedPeer), arg0, arg1)
+	return &MockSentryServerRemoveTrustedPeerCall{Call: call}
+}
+
+// MockSentryServerRemoveTrustedPeerCall wrap *gomock.Call
+type MockSentryServerRemoveTrustedPeerCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSentryServerRemoveTrustedPeerCall) Return(arg0 *RemovePeerReply, arg1 error) *MockSentryServerRemoveTrustedPeerCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSentryServerRemoveTrustedPeerCall) Do(f func(context.Context, *RemovePeerRequest) (*RemovePeerReply, error)) *MockSentryServerRemoveTrustedPeerCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSentryServerRemoveTrustedPeerCall) DoAndReturn(f func(context.Context, *RemovePeerRequest) (*RemovePeerReply, error)) *MockSentryServerRemoveTrustedPeerCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
