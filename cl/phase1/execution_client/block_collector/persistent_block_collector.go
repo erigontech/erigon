@@ -124,6 +124,33 @@ func (p *PersistentBlockCollector) AddBlock(block *cltypes.BeaconBlock) error {
 	})
 }
 
+// AddGloasBlock adds a GLOAS (EIP-7732) FULL block with its execution payload envelope to the collector.
+// The execution payload is extracted from the envelope, not the beacon block body.
+func (p *PersistentBlockCollector) AddGloasBlock(block *cltypes.BeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+
+	payload := envelope.Message.Payload
+	executionRequestsList := cltypes.GetExecutionRequestsList(p.beaconChainCfg, envelope.Message.ExecutionRequests)
+	encodedBlock, err := encodeBlock(payload, block.ParentRoot, executionRequestsList)
+	if err != nil {
+		return fmt.Errorf("failed to encode gloas block: %w", err)
+	}
+
+	key, err := payloadKey(payload)
+	if err != nil {
+		return fmt.Errorf("failed to create payload key: %w", err)
+	}
+
+	return p.db.Update(context.Background(), func(tx kv.RwTx) error {
+		return tx.Put(kv.Headers, key, encodedBlock)
+	})
+}
+
 // Flush loads all collected blocks into the execution engine and clears the database
 func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 	p.mu.Lock()
