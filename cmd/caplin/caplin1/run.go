@@ -283,7 +283,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	validatorParameters := validator_params.NewValidatorParams()
 	forkChoice, err := forkchoice.NewForkChoiceStore(
 		ethClock, state, engine, pool, fork_graph.NewForkGraphDisk(state, syncedDataManager, fcuFs, config.BeaconAPIRouter, emitters),
-		emitters, syncedDataManager, blobStorage, pksRegistry, validatorParameters, doLMDSampling)
+		emitters, syncedDataManager, blobStorage, pksRegistry, validatorParameters, doLMDSampling, indexDB)
 	if err != nil {
 		logger.Error("Could not create forkchoice", "err", err)
 		return err

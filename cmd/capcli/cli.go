@@ -186,7 +186,7 @@ func (c *Chain) Run(ctx *Context) error {
 		return err
 	}
 
-	downloader := network.NewBackwardBeaconDownloader(ctx, beacon, nil, nil, db)
+	downloader := network.NewBackwardBeaconDownloader(ctx, beacon, nil, nil, db, beaconConfig)
 	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, nil, dirs, nil, nil, nil, nil, nil, nil, nil, false, false, false, false, nil), csn, db, nil, beaconConfig, clparams.CaplinConfig{}, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, nil, blobStorage, log.Root(), nil, nil)
 	return stages.SpawnStageHistoryDownload(cfg, ctx, log.Root())
 }
@@ -378,7 +378,7 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 		if err := beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, currentBlock, true); err != nil {
 			return false, err
 		}
-		if c.Blobs && currentBlock.Block.Body.BlobKzgCommitments.Len() > 0 {
+		if c.Blobs && currentBlock.Block.Body.GetBlobKzgCommitments() != nil && currentBlock.Block.Body.GetBlobKzgCommitments().Len() > 0 {
 			ids, err := network.BlobsIdentifiersFromBlocks([]*cltypes.SignedBeaconBlock{currentBlock}, beaconConfig)
 			if err != nil {
 				// Return an error if blob identifiers could not be retrieved
@@ -416,20 +416,23 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 				return false, err
 			}
 			if c.Blobs {
-				blindedBlock, err := snr.ReadBlindedBlockBySlot(ctx, tx, *slot)
+				block, err := snr.ReadBeaconBlockBodyBySlot(ctx, tx, *slot)
 				if err != nil {
 					return false, err
 				}
-				if blindedBlock == nil {
+				if block == nil {
 					break
 				}
 
-				blindedBlockRoot, err := blindedBlock.Block.HashSSZ()
+				blindedBlockRoot, err := block.Block.HashSSZ()
 				if err != nil {
 					return false, err
 				}
 				// check if we have all the blobs
-				kzgCommitments := blindedBlock.Block.Body.BlobKzgCommitments.Len()
+				kzgCommitments := 0
+				if c := block.Block.Body.GetBlobKzgCommitments(); c != nil {
+					kzgCommitments = c.Len()
+				}
 				kzgCommitmentsInDB, err := blobDB.KzgCommitmentsCount(ctx, blindedBlockRoot)
 				if err != nil {
 					return false, err
@@ -553,7 +556,7 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 		return err
 	}
 
-	genesisHeader, _, _, err := csn.ReadHeader(0)
+	genesisHeader, _, _, err := csn.ReadHeader(0, nil)
 	if err != nil {
 		return err
 	}
@@ -572,7 +575,7 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 			return fmt.Errorf("snapshot %d has invalid slot", i)
 		}
 		// Checking of snapshots is a chain contiguity problem
-		currentHeader, _, _, err := csn.ReadHeader(i)
+		currentHeader, _, _, err := csn.ReadHeader(i, nil)
 		if err != nil {
 			return err
 		}
@@ -1076,7 +1079,7 @@ func (b *BlobArchiveStoreCheck) Run(ctx *Context) error {
 	}
 	defer tx.Rollback()
 	for i := b.FromSlot; i >= targetSlot; i-- {
-		blk, err := snr.ReadBlindedBlockBySlot(ctx, tx, i)
+		blk, err := snr.ReadBeaconBlockBodyBySlot(ctx, tx, i)
 		if err != nil {
 			return err
 		}
@@ -1098,11 +1101,15 @@ func (b *BlobArchiveStoreCheck) Run(ctx *Context) error {
 		if err != nil {
 			return err
 		}
-		if haveBlobs != uint32(blk.Block.Body.BlobKzgCommitments.Len()) {
+		wantBlobs := 0
+		if c := blk.Block.Body.GetBlobKzgCommitments(); c != nil {
+			wantBlobs = c.Len()
+		}
+		if haveBlobs != uint32(wantBlobs) {
 			if err := blobStorage.RemoveBlobSidecars(ctx, i, blockRoot); err != nil {
 				return err
 			}
-			log.Warn("Slot", "slot", i, "have", haveBlobs, "want", blk.Block.Body.BlobKzgCommitments.Len())
+			log.Warn("Slot", "slot", i, "have", haveBlobs, "want", wantBlobs)
 		}
 	}
 	log.Info("Blob archive store check passed")
@@ -1257,18 +1264,22 @@ func (c *CheckBlobsSnapshotsCount) Run(ctx *Context) error {
 			return err
 		}
 
-		bBlock, err := snr.ReadBlindedBlockBySlot(ctx, tx, i)
+		bBlock, err := snr.ReadBeaconBlockBodyBySlot(ctx, tx, i)
 		if err != nil {
 			return err
 		}
 		if bBlock == nil {
 			continue
 		}
-		if len(sds) != bBlock.Block.Body.BlobKzgCommitments.Len() {
+		wantCommitments := 0
+		if c := bBlock.Block.Body.GetBlobKzgCommitments(); c != nil {
+			wantCommitments = c.Len()
+		}
+		if len(sds) != wantCommitments {
 			if !c.CheckNeedRegen {
-				return fmt.Errorf("slot %d: blob count mismatch, have %d, want %d", i, len(sds), bBlock.Block.Body.BlobKzgCommitments.Len())
+				return fmt.Errorf("slot %d: blob count mismatch, have %d, want %d", i, len(sds), wantCommitments)
 			}
-			log.Warn("Slot", "slot", i, "have", len(sds), "want", bBlock.Block.Body.BlobKzgCommitments.Len())
+			log.Warn("Slot", "slot", i, "have", len(sds), "want", wantCommitments)
 			slotsToRegen[i] = struct{}{}
 		}
 		if i%2000 == 0 {
