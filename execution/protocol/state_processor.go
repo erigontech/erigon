@@ -180,6 +180,9 @@ func applyArbTransaction(config *chain.Config, engine rules.EngineReader, gp *Ga
 
 	// Update the evm with the new transaction context.
 	evm.Reset(txContext, ibs.(*state.IntraBlockState))
+	if vm.ReadyEVMForL2 != nil {
+		vm.ReadyEVMForL2(evm, msg)
+	}
 	result, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 	if err != nil {
 		return nil, nil, err

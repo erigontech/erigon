@@ -226,7 +226,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 			if overflow {
 				return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From())
 			}
-			isCancun := st.evm.ChainRules().IsCancun
+			isCancun := st.evm.ChainRules().IsCancun && !st.evm.ChainRules().IsArbitrum
 			if isCancun {
 				maxBlobFee, overflow := u256.MulOverflow(*st.msg.MaxFeePerBlobGas(), u256.U64(st.msg.BlobGas()))
 				if overflow {
@@ -598,6 +598,9 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		}
 		gasUsed := st.gasUsed()
 		st.blockGasUsed = gasUsed
+		if nonrefundable > gasUsed {
+			nonrefundable = gasUsed
+		}
 		refund := min((gasUsed-nonrefundable)/refundQuotient, st.state.GetRefund())
 		gasUsed = gasUsed - refund
 		if rules.IsPrague {

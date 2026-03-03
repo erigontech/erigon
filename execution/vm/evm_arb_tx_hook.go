@@ -64,7 +64,7 @@ func (p DefaultTxProcessor) DropTip() bool { return false }
 func (p DefaultTxProcessor) EndTxHook(totalGasUsed uint64, evmSuccess bool) {}
 
 func (p DefaultTxProcessor) ScheduledTxes() types.Transactions {
-	return types.Transactions{}
+	return nil
 }
 
 func (p DefaultTxProcessor) L1BlockNumber(blockCtx evmtypes.BlockContext) (uint64, error) {

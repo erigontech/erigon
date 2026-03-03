@@ -69,6 +69,7 @@ var skipAccountChecks = [...]bool{
 	ArbitrumInternalTxType:        true,
 	ArbitrumContractTxType:        true,
 	ArbitrumUnsignedTxType:        false,
+	ArbitrumLegacyTxType:          false,
 }
 
 func init() {

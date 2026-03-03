@@ -81,8 +81,7 @@ func TestDefaultTxProcessor_ScheduledTxes(t *testing.T) {
 	evm := newTestEVM()
 	p := DefaultTxProcessor{evm: evm}
 	txes := p.ScheduledTxes()
-	require.NotNil(t, txes)
-	require.Len(t, txes, 0)
+	require.Nil(t, txes)
 }
 
 func TestDefaultTxProcessor_L1BlockNumber(t *testing.T) {
@@ -132,7 +131,6 @@ func TestNewEVM_SetsDefaultProcessingHook(t *testing.T) {
 	evm := newTestEVM()
 	require.NotNil(t, evm.ProcessingHook)
 	require.False(t, evm.ProcessingHook.IsArbitrum())
-	require.False(t, evm.ProcessingHookSet.Load())
 }
 
 func TestBlockContext_ArbOSVersion(t *testing.T) {

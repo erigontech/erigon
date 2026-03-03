@@ -1377,7 +1377,6 @@ func (sdb *IntraBlockState) Selfdestruct(addr accounts.Address) (bool, error) {
 	stateObject.markSelfdestructed()
 	sdb.arbExtraData.unexpectedBalanceDelta.Sub(sdb.arbExtraData.unexpectedBalanceDelta, &stateObject.data.Balance)
 	if bi, exist := sdb.balanceInc[addr]; exist && bi.isEscrow {
-		fmt.Printf("ESCROW unprotected by selfdestruct %x\n", addr)
 		bi.isEscrow = false
 	}
 
@@ -1919,14 +1918,15 @@ func (sdb *IntraBlockState) BalanceIncreaseSet() map[accounts.Address]BalanceInc
 		if bi.isEscrow {
 			s[addr] = BalanceIncreaseEntry{
 				Amount:   uint256.Int{},
-				IsEscrow: bi.isEscrow,
+				IsEscrow: true,
 			}
+			continue
 		}
 
 		if !bi.transferred {
 			s[addr] = BalanceIncreaseEntry{
 				Amount:   bi.increase,
-				IsEscrow: bi.isEscrow,
+				IsEscrow: false,
 			}
 		}
 	}

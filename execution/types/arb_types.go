@@ -58,6 +58,7 @@ var skipAccountChecks = [...]bool{
 	ArbitrumInternalTxType:        true,
 	ArbitrumContractTxType:        true,
 	ArbitrumUnsignedTxType:        false,
+	ArbitrumLegacyTxType:          false,
 }
 
 // func (tx *LegacyTx) skipAccountChecks() bool                  { return false }
@@ -1664,10 +1665,6 @@ func (tx *ArbitrumSubmitRetryableTx) encodePayload(w io.Writer, b []byte, payloa
 		return err
 	}
 
-	if bytes.Equal(tx.Hash().Bytes()[:], TxHashhh[:]) {
-		fmt.Printf("marshal %x hashingOnly=%t tx: %+v\n", TxHashhh, hashingOnly, tx)
-	}
-
 	if hashingOnly {
 		return nil
 	}
@@ -1900,8 +1897,6 @@ func (tx *ArbitrumSubmitRetryableTx) DecodeRLP(s *rlp.Stream) error {
 	return nil
 }
 
-var TxHashhh = common.HexToHash("0xae75e367d4b38d413a9cc3c0ff825453913e95db0f4089fbfdccae2e77e9cf1c")
-
 func (tx *ArbitrumSubmitRetryableTx) MarshalBinary(w io.Writer) error {
 	hashingOnly := false
 	payloadSize, _ := tx.payloadSize(hashingOnly)
@@ -2001,10 +1996,10 @@ func (tx *ArbitrumDepositTx) copy() *ArbitrumDepositTx {
 		To:          tx.To,
 		Value:       new(big.Int),
 	}
-	if dtx.ChainId != nil {
+	if tx.ChainId != nil {
 		dtx.ChainId.Set(tx.ChainId)
 	}
-	if dtx.Value != nil {
+	if tx.Value != nil {
 		dtx.Value.Set(tx.Value)
 	}
 	return dtx

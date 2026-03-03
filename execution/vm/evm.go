@@ -93,8 +93,7 @@ type EVM struct {
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
 
-	ProcessingHookSet atomic.Bool
-	ProcessingHook    TxProcessingHook
+	ProcessingHook TxProcessingHook
 }
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
