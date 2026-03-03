@@ -147,7 +147,7 @@ jobs:
       # preventing a dirty build cache from carrying over to the next run.
       - name: Pre-run Go cache cleanup
         if: always()
-        shell: pwsh
+        shell: bash
         run: go clean -testcache
 
       - name: "Checkout code with submodules and large files (lfs) on ${{ matrix.os }}"
@@ -187,12 +187,12 @@ jobs:
       # dependency versions and saves re-downloading modules on the next run.
       - name: Post-run cleanup
         if: always()
-        shell: pwsh
+        shell: bash
         run: |
           go clean -cache
-          Remove-Item -Path "coverage-test-all.out"  -Force -ErrorAction SilentlyContinue
-          Remove-Item -Path "$env:TEMP\*"             -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item -Path "$env:RUNNER_TEMP\*"      -Recurse -Force -ErrorAction SilentlyContinue
+          rm -f coverage-test-all.out
+          rm -rf "$TEMP/"* 2>/dev/null || true
+          rm -rf "$RUNNER_TEMP/"* 2>/dev/null || true
 
       - name: This ${{ matrix.os }} check does not make sense for changes within out-of-scope directories
         if: needs.source-of-changes.outputs.changed_files == 'true'
