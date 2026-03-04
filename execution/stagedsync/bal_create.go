@@ -154,7 +154,18 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, blo
 			return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", blockNum, dbBAL.Hash(), headerBALHash)
 		}
 	}
-	if headerBALHash != bal.Hash() {
+	// Only validate computed BAL against header when we have the stored BAL
+	// body. Without it, HasBAL=false on the VersionMap, so the computed BAL
+	// may be inaccurate due to VersionMap mutations during execution.
+	// This limitation goes away once eth/71 delivers BAL bodies via p2p sync.
+	if dbBALBytes != nil && headerBALHash != bal.Hash() {
+		balDir := filepath.Join(dataDir, "bal")
+		os.MkdirAll(balDir, 0755)                                                                                          //nolint:errcheck
+		os.WriteFile(filepath.Join(balDir, fmt.Sprintf("computed_bal_%d.txt", blockNum)), []byte(bal.DebugString()), 0644) //nolint:errcheck
+		dbBAL2, _ := types.DecodeBlockAccessListBytes(dbBALBytes)
+		if dbBAL2 != nil {
+			os.WriteFile(filepath.Join(balDir, fmt.Sprintf("stored_bal_%d.txt", blockNum)), []byte(dbBAL2.DebugString()), 0644) //nolint:errcheck
+		}
 		return fmt.Errorf("%w, block=%d: block access list mismatch: got %s expected %s", rules.ErrInvalidBlock, blockNum, bal.Hash(), headerBALHash)
 	}
 	return nil

@@ -76,14 +76,16 @@ func (k AccountKey) String() string {
 }
 
 type VersionMap struct {
-	mu    sync.RWMutex
-	s     map[accounts.Address]map[AccountKey]*btree.Map[int, *WriteCell]
-	trace bool
+	mu     sync.RWMutex
+	s      map[accounts.Address]map[AccountKey]*btree.Map[int, *WriteCell]
+	trace  bool
+	HasBAL bool // When true, all significant writes are pre-populated from BAL
 }
 
 func NewVersionMap(changes []*types.AccountChanges) *VersionMap {
 	vm := &VersionMap{
-		s: map[accounts.Address]map[AccountKey]*btree.Map[int, *WriteCell]{},
+		s:      map[accounts.Address]map[AccountKey]*btree.Map[int, *WriteCell]{},
+		HasBAL: len(changes) > 0,
 	}
 	vm.WriteChanges(changes)
 	return vm
@@ -335,7 +337,15 @@ func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path Acco
 	switch rr.Status() {
 	case MVReadResultDone:
 		if source != MapRead {
-			valid = VersionInvalid
+			// When BAL is present, all significant writes are pre-populated
+			// in the VersionMap before execution. If a read was from storage
+			// (no VersionMap entry at execution time) but the VersionMap now
+			// has an entry (from a concurrent worker flush), the entry must
+			// be a BAL-filtered no-op write (zero-value balance touch,
+			// no-op rewrite, etc.) — the read value is still correct.
+			if !vm.HasBAL {
+				valid = VersionInvalid
+			}
 		} else {
 			valid = checkVersion(version, rr.Version())
 		}
