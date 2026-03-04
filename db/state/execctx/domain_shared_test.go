@@ -47,7 +47,7 @@ import (
 )
 
 func NewTest(dirs datadir.Dirs) state.AggOpts { //nolint:gocritic
-	return state.New(dirs).DisableFsync().GenSaltIfNeed(true).ReorgBlockDepth(0)
+	return state.NewTest(dirs)
 }
 
 func newTestDb(tb testing.TB, stepSize uint64) kv.TemporalRwDB {

@@ -18,6 +18,7 @@ package recsplit
 
 import (
 	"bufio"
+	"container/heap"
 	"context"
 	"crypto/rand"
 	"encoding/binary"
@@ -81,14 +82,21 @@ type recsplitScratch struct {
 	primaryAggrBound   uint16
 	secondaryAggrBound uint16
 	bytesPerRec        int // Bytes per record in offset encoding
+
+	// Input fields used by the parallel path: producer fills these, worker reads them.
+	bucketIdx uint64
+	bucket    []uint64
+	offsets   []uint64
 }
 
 // bucketResult contains the output of processing a single bucket.
 type bucketResult struct {
 	bucketIdx  uint64
 	offsetData []byte     // Serialized leaf-offset bytes
-	gr         GolombRice // Per-bucket Golomb-Rice encoding
+	gr         GolombRice // Per-bucket Golomb-Rice fixed-length encoding
+	unaryBuf   []uint64   // Per-bucket unary encoding (parallel path only)
 	bucketSize int        // Number of keys in this bucket
+	err        error      // Non-nil if processing failed (e.g. collision)
 }
 
 // preAlloc ensures offsetData has capacity for n keys of bytesPerRec bytes each.
@@ -103,8 +111,10 @@ func (br *bucketResult) Reset() {
 	br.offsetData = br.offsetData[:0]
 	br.gr.data = br.gr.data[:0]
 	br.gr.bitCount = 0
+	br.unaryBuf = br.unaryBuf[:0]
 	br.bucketSize = 0
 	br.bucketIdx = 0
+	br.err = nil
 }
 
 // RecSplit is the implementation of Recursive Split algorithm for constructing perfect hash mapping, described in
@@ -164,6 +174,7 @@ type RecSplit struct {
 	logger             log.Logger
 
 	noFsync bool // fsync is enabled by default, but tests can manually disable
+	workers int  // Number of parallel goroutines for Build(); 0 or 1 = sequential
 	timings Timings
 
 	progress *background.Progress // If set, tracks 0-100%: add-keys fills 0-50%, build fills 50-100%
@@ -187,6 +198,7 @@ type RecSplitArgs struct {
 	LeafSize   uint16
 
 	NoFsync bool // fsync is enabled by default, but tests can manually disable
+	Workers int  // Number of parallel goroutines for Build(); 0 or 1 = sequential
 }
 
 type Timings struct {
@@ -227,6 +239,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 		enums:              args.Enums,
 		baseDataID:         args.BaseDataID,
 		lessFalsePositives: args.LessFalsePositives,
+		workers:            args.Workers,
 		lvl:                log.LvlDebug, logger: logger,
 	}
 	closeFiles := true
@@ -247,7 +260,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 		rs.salt = *args.Salt
 	}
 	rs.bucketCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.SmallSortableBuffers, logger)
-	rs.bucketCollector.SortAndFlushInBackground(false)
+	rs.bucketCollector.SortAndFlushInBackground(rs.workers > 1)
 	rs.bucketCollector.LogLvl(log.LvlDebug)
 	var err error
 	if args.Enums {
@@ -405,7 +418,7 @@ func (rs *RecSplit) ResetNextSalt() {
 		rs.bucketCollector.Close()
 	}
 	rs.bucketCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+rs.fileName, rs.tmpDir, etl.SmallSortableBuffers, rs.logger)
-	rs.bucketCollector.SortAndFlushInBackground(false)
+	rs.bucketCollector.SortAndFlushInBackground(rs.workers > 1)
 	rs.bucketCollector.LogLvl(log.LvlDebug)
 	if rs.offsetFile != nil {
 		_ = rs.offsetFile.Truncate(0)
@@ -905,12 +918,18 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		log.Log(rs.lvl, "[index] calculating", "file", rs.fileName)
 	}
 
-	if err := rs.bucketCollector.Load(nil, "", rs.loadFuncBucket, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
-	}
-	if len(rs.currentBucket) > 0 {
-		if err := rs.recsplitCurrentBucket(); err != nil {
+	if rs.workers > 1 {
+		if err := rs.buildWithWorkers(ctx); err != nil {
 			return err
+		}
+	} else {
+		if err := rs.bucketCollector.Load(nil, "", rs.loadFuncBucket, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+			return err
+		}
+		if len(rs.currentBucket) > 0 {
+			if err := rs.recsplitCurrentBucket(); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -1100,6 +1119,288 @@ func getBucketResult() *bucketResult {
 // putBucketResult returns a bucketResult to the pool for reuse.
 func putBucketResult(r *bucketResult) {
 	bucketResultPool.Put(r)
+}
+
+// bucketResultHeap is a min-heap of *bucketResult ordered by bucketIdx,
+// used in buildWithWorkers to write results in bucket order.
+type bucketResultHeap []*bucketResult
+
+func (h bucketResultHeap) Len() int           { return len(h) }
+func (h bucketResultHeap) Less(i, j int) bool { return h[i].bucketIdx < h[j].bucketIdx }
+func (h bucketResultHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h *bucketResultHeap) Push(x any)        { *h = append(*h, x.(*bucketResult)) }
+func (h *bucketResultHeap) Pop() any {
+	old := *h
+	n := len(old)
+	x := old[n-1]
+	old[n-1] = nil
+	*h = old[:n-1]
+	return x
+}
+
+// newWorkerScratch creates a per-worker recsplitScratch with the same configuration
+// as the main scratch but independent mutable state (golombRice[], buffer, etc.).
+func newWorkerScratch(rs *RecSplit) *recsplitScratch {
+	return &recsplitScratch{
+		count:              make([]uint16, rs.scratch.secondaryAggrBound),
+		startSeed:          rs.scratch.startSeed, // read-only, shared safely
+		leafSize:           rs.scratch.leafSize,
+		primaryAggrBound:   rs.scratch.primaryAggrBound,
+		secondaryAggrBound: rs.scratch.secondaryAggrBound,
+		bytesPerRec:        rs.scratch.bytesPerRec,
+		trace:              rs.scratch.trace,
+		bucket:             make([]uint64, 0, rs.bucketSize),
+		offsets:            make([]uint64, 0, rs.bucketSize),
+	}
+}
+
+// recsplitBucketWorker is the goroutine body for parallel bucket processing.
+// It consumes bucketTask values from tasks, computes the recsplit encoding, and
+// sends *bucketResult values (in any order) to results.
+// The scratch sc carries the input bucket data (sc.bucket, sc.offsets, sc.bucketIdx) as well
+// as the per-worker computation buffers. After processing, sc is returned to free for reuse.
+func recsplitBucketWorker(ctx context.Context, tasks <-chan *recsplitScratch, results chan<- *bucketResult, free chan<- *recsplitScratch) {
+	for sc := range tasks {
+		result := getBucketResult()
+		result.bucketIdx = sc.bucketIdx
+		result.bucketSize = len(sc.bucket)
+
+		if len(sc.bucket) > 1 {
+			for i, key := range sc.bucket[1:] {
+				if key == sc.bucket[i] {
+					result.err = fmt.Errorf("%w: %x", ErrCollision, key)
+					sc.bucket = sc.bucket[:0]
+					sc.offsets = sc.offsets[:0]
+					select {
+					case free <- sc:
+					case <-ctx.Done():
+					}
+					select {
+					case results <- result:
+					case <-ctx.Done():
+						putBucketResult(result)
+					}
+					return
+				}
+			}
+			result.preAlloc(len(sc.bucket), sc.bytesPerRec)
+			sc.preAlloc(len(sc.bucket))
+			var err error
+			sc.unaryBuf, err = recsplit(0, sc.bucket, sc.offsets, sc.unaryBuf[:0], sc, result)
+			result.unaryBuf = append(result.unaryBuf[:0], sc.unaryBuf...)
+			sc.bucket = sc.bucket[:0]
+			sc.offsets = sc.offsets[:0]
+			select {
+			case free <- sc:
+			case <-ctx.Done():
+			}
+			if err != nil {
+				result.err = err
+				select {
+				case results <- result:
+				case <-ctx.Done():
+					putBucketResult(result)
+				}
+				return
+			}
+		} else {
+			result.preAlloc(len(sc.bucket), sc.bytesPerRec)
+			for _, offset := range sc.offsets {
+				binary.BigEndian.PutUint64(sc.numBuf[:], offset)
+				result.offsetData = append(result.offsetData, sc.numBuf[8-sc.bytesPerRec:]...)
+			}
+			sc.bucket = sc.bucket[:0]
+			sc.offsets = sc.offsets[:0]
+			select {
+			case free <- sc:
+			case <-ctx.Done():
+			}
+		}
+
+		select {
+		case results <- result:
+		case <-ctx.Done():
+			putBucketResult(result)
+			return
+		}
+	}
+}
+
+// writeResult writes a single bucket result to the index structures.
+// Must be called with results in ascending bucketIdx order.
+func (rs *RecSplit) writeResult(r *bucketResult) error {
+	for len(rs.bucketSizeAcc) <= int(r.bucketIdx)+1 {
+		rs.bucketSizeAcc = append(rs.bucketSizeAcc, rs.bucketSizeAcc[len(rs.bucketSizeAcc)-1])
+	}
+	rs.bucketSizeAcc[int(r.bucketIdx)+1] += uint64(r.bucketSize)
+
+	if _, err := rs.indexW.Write(r.offsetData); err != nil {
+		return err
+	}
+
+	if r.bucketSize > 1 {
+		bitPos := rs.gr.bitCount
+		rs.gr.Append(&r.gr)
+		rs.gr.appendUnaryAll(r.unaryBuf)
+		if rs.scratch.trace {
+			fmt.Printf("recsplitBucket(%d, %d, bitsize = %d)\n", r.bucketIdx, r.bucketSize, rs.gr.bitCount-bitPos)
+		}
+	}
+
+	for len(rs.bucketPosAcc) <= int(r.bucketIdx)+1 {
+		rs.bucketPosAcc = append(rs.bucketPosAcc, rs.bucketPosAcc[len(rs.bucketPosAcc)-1])
+	}
+	rs.bucketPosAcc[int(r.bucketIdx)+1] = uint64(rs.gr.Bits())
+	if rs.progress != nil {
+		rs.progress.Processed.Add(uint64(r.bucketSize))
+	}
+	return nil
+}
+
+// buildWithWorkers runs the parallel bucket-processing phase of Build.
+// It reads from rs.bucketCollector, dispatches bucket tasks to rs.workers goroutines,
+// collects their results in a min-heap, and writes them to rs.indexW / rs.gr in order.
+func (rs *RecSplit) buildWithWorkers(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	numWorkers := rs.workers
+	// freeScratchCh acts as a pool: N scratches circulate between producer and workers.
+	// Each scratch carries both the input bucket data and the per-worker computation buffers,
+	// so no separate bucketTask allocation is needed.
+	freeScratchCh := make(chan *recsplitScratch, numWorkers)
+	workerScratches := make([]*recsplitScratch, numWorkers)
+	for i := range workerScratches {
+		workerScratches[i] = newWorkerScratch(rs)
+		freeScratchCh <- workerScratches[i]
+	}
+	// taskCh capacity matches the scratch pool size: the same N scratch objects circulate
+	// as both pool items and task payloads, so taskCh can never hold more than N items.
+	taskCh := make(chan *recsplitScratch, numWorkers)
+	resultCh := make(chan *bucketResult, numWorkers*2)
+
+	var wg sync.WaitGroup
+	for range numWorkers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			recsplitBucketWorker(ctx, taskCh, resultCh, freeScratchCh)
+		}()
+	}
+	go func() {
+		defer close(resultCh)
+		wg.Wait()
+		// Harvest the longest golombRice table from all workers into rs.scratch.
+		// Since golombRice[i] is deterministic, the longest table covers all m
+		// values encountered during the parallel phase.
+		best := rs.scratch.golombRice
+		for _, sc := range workerScratches {
+			if len(sc.golombRice) > len(best) {
+				best = sc.golombRice
+			}
+		}
+		rs.scratch.golombRice = best
+	}()
+
+	// Producer: iterate ETL collector, send one scratch per bucket.
+	producerErrCh := make(chan error, 1)
+	go func() {
+		defer close(taskCh)
+		var curBucketIdx uint64 = math.MaxUint64
+		var sc *recsplitScratch
+		err := rs.bucketCollector.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+			// k is 4-byte BigEndian bucketIdx (uint32) + 8-byte fingerprint; v is the offset.
+			bucketIdx := uint64(binary.BigEndian.Uint32(k))
+			if curBucketIdx != bucketIdx {
+				if curBucketIdx != math.MaxUint64 {
+					sc.bucketIdx = curBucketIdx
+					select {
+					case taskCh <- sc:
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+					sc = nil
+				}
+				curBucketIdx = bucketIdx
+			}
+			if sc == nil {
+				select {
+				case sc = <-freeScratchCh:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+			sc.bucket = append(sc.bucket, binary.BigEndian.Uint64(k[4:]))
+			sc.offsets = append(sc.offsets, binary.BigEndian.Uint64(v))
+			return nil
+		}, etl.TransformArgs{Quit: ctx.Done()})
+		if err == nil && sc != nil && len(sc.bucket) > 0 {
+			sc.bucketIdx = curBucketIdx
+			select {
+			case taskCh <- sc:
+			case <-ctx.Done():
+				err = ctx.Err()
+			}
+		}
+		producerErrCh <- err
+	}()
+
+	// Consumer: collect results, order with min-heap, write in sequence.
+	resultQueue := make(bucketResultHeap, 0, numWorkers*2)
+	heap.Init(&resultQueue)
+	nextWrite := uint64(0)
+
+	writeOrdered := func() error {
+		for resultQueue.Len() > 0 && resultQueue[0].bucketIdx == nextWrite {
+			r := heap.Pop(&resultQueue).(*bucketResult)
+			err := rs.writeResult(r)
+			putBucketResult(r)
+			if err != nil {
+				return err
+			}
+			nextWrite++
+		}
+		return nil
+	}
+
+	// drainAll cancels and returns all in-flight results (heap + channel) to the pool.
+	drainAll := func() {
+		cancel()
+		for resultQueue.Len() > 0 {
+			putBucketResult(heap.Pop(&resultQueue).(*bucketResult))
+		}
+		for r := range resultCh { //nolint:gocritic
+			putBucketResult(r)
+		}
+	}
+
+	var consumerErr error
+	for r := range resultCh {
+		if r.err != nil {
+			if errors.Is(r.err, ErrCollision) {
+				rs.collision = true
+			}
+			consumerErr = r.err
+			putBucketResult(r)
+			drainAll()
+			break
+		}
+		heap.Push(&resultQueue, r)
+		if err := writeOrdered(); err != nil {
+			consumerErr = err
+			drainAll()
+			break
+		}
+	}
+
+	producerErr := <-producerErrCh
+	if consumerErr != nil {
+		return consumerErr
+	}
+	if producerErr != nil && !errors.Is(producerErr, context.Canceled) {
+		return producerErr
+	}
+	return nil
 }
 
 // Erigon doesn't create tons of bufio readers/writers, but it has tons of
