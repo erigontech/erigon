@@ -759,7 +759,7 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	if err != nil {
 		return err
 	}
-	if aggMax := db.(state.HasAgg).Agg().(*state.Aggregator).EndTxNumMinimax(); maxTxNum+1 > aggMax {
+	if aggMax := db.(state.HasAgg).Agg().(*state.Aggregator).EndTxNumMinimax(); maxTxNum+1 > aggMax { // don't use .SeekCommitment to check "state progress" - because we are in method which checking "files validity" (can't rely on them here)
 		blockNumOfState, _, _ := txNumsReader.FindBlockNum(ctx, tx, aggMax)
 		return fmt.Errorf("block %d is beyond latest block with state %d", blockNum, blockNumOfState)
 	}
