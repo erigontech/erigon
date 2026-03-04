@@ -50,12 +50,12 @@ Add a feature to capture all data read during trie `Process` (branch nodes, acco
 **Files:**
 - Create: `execution/commitment/trie_trace.go`
 
-- [ ] Define `TrieTrace` struct with TOML tags: `Branches`, `Accounts`, `Storages` (all `map[string]string` hex→hex), `Updates []TraceKeyUpdate`
-- [ ] Define `TraceKeyUpdate` struct: `PlainKey string`, `Update string` (both hex-encoded)
-- [ ] Implement `BuildTrieTrace(rc *RecordingContext, updates *Updates) (*TrieTrace, error)` — converts recorded maps to hex strings, iterates `updates` via `HashSort` to capture input key-update pairs
-- [ ] Implement `(tt *TrieTrace) Save(path string) error` — marshal with `toml.Marshal`, write to file
-- [ ] Implement `LoadTrieTrace(path string) (*TrieTrace, error)` — read file, unmarshal with `toml.Unmarshal`
-- [ ] Verify builds: `go build ./execution/commitment/...`
+- [x] Define `TrieTrace` struct with TOML tags: `Branches`, `Accounts`, `Storages` (all `map[string]string` hex→hex), `Updates []TraceKeyUpdate`
+- [x] Define `TraceKeyUpdate` struct: `PlainKey string`, `Update string` (both hex-encoded)
+- [x] Implement `BuildTrieTrace(rc *RecordingContext, updates *Updates) (*TrieTrace, error)` — converts recorded maps to hex strings, iterates `updates` via `HashSort` to capture input key-update pairs
+- [x] Implement `(tt *TrieTrace) Save(path string) error` — marshal with `toml.Marshal`, write to file
+- [x] Implement `LoadTrieTrace(path string) (*TrieTrace, error)` — read file, unmarshal with `toml.Unmarshal`
+- [x] Verify builds: `go build ./execution/commitment/...`
 
 ### Task 3: Add env var and wire into ComputeCommitment
 
