@@ -113,14 +113,9 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 			require.Nil(lastOnFs.decompressor)
 		})
 	}
-	t.Run("large_values", func(t *testing.T) {
-		db, h, txs := filledHistory(t, true, logger)
-		test(t, h, db, txs)
-	})
-	t.Run("small_values", func(t *testing.T) {
-		db, h, txs := filledHistory(t, false, logger)
-		test(t, h, db, txs)
-	})
+
+	db, h, txs := filledHistory(t, logger)
+	test(t, h, db, txs)
 }
 
 func TestDomainGCReadAfterRemoveFile(t *testing.T) {

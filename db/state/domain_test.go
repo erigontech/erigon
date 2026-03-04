@@ -1481,7 +1481,6 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 
-	d.HistoryLargeValues = false
 	d.History.Compression = seg.CompressNone //seg.CompressKeys | seg.CompressVals
 	d.Compression = seg.CompressNone         //seg.CompressKeys | seg.CompressVals
 	d.FilenameBase = kv.CommitmentDomain.String()
@@ -1556,7 +1555,6 @@ func TestDomainRange(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 
-	d.HistoryLargeValues = false
 	d.History.Compression = seg.CompressNone // seg.CompressKeys | seg.CompressVals
 	d.Compression = seg.CompressNone         // seg.CompressKeys | seg.CompressVals
 	d.FilenameBase = kv.AccountsDomain.String()
@@ -1674,7 +1672,6 @@ func TestDomain_CanScanPruneAfterAggregation(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	d.HistoryLargeValues = false
 	d.History.Compression = seg.CompressKeys | seg.CompressVals
 	d.Compression = seg.CompressKeys | seg.CompressVals
 	d.FilenameBase = kv.CommitmentDomain.String()
@@ -1771,7 +1768,6 @@ func TestDomain_CanHashPruneAfterAggregation(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	d.HistoryLargeValues = false
 	d.History.Compression = seg.CompressKeys | seg.CompressVals
 	d.Compression = seg.CompressKeys | seg.CompressVals
 	d.FilenameBase = kv.CommitmentDomain.String()
@@ -1869,7 +1865,6 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	d.HistoryLargeValues = false
 	d.History.Compression = seg.CompressNone //seg.CompressKeys | seg.CompressVals
 	d.Compression = seg.CompressNone         //seg.CompressKeys | seg.CompressVals
 
@@ -2016,7 +2011,6 @@ func TestDomain_PruneProgress(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	d.HistoryLargeValues = false
 	d.History.Compression = seg.CompressKeys | seg.CompressVals
 	d.Compression = seg.CompressKeys | seg.CompressVals
 
@@ -2542,7 +2536,6 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	d.HistoryLargeValues = true
 	domainRoTx := d.BeginFilesRo()
 	defer domainRoTx.Close()
 	writer := domainRoTx.NewWriter()
@@ -2624,7 +2617,6 @@ func TestCanBuild(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	d.HistoryLargeValues = true
 	domainRoTx := d.BeginFilesRo()
 	defer domainRoTx.Close()
 
@@ -2662,24 +2654,23 @@ func TestTraceKey_SmallVals(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
 	}
-	testTraceKey(t, false)
+	testTraceKey(t)
 }
 
 func TestTraceKey_LargeVals(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
 	}
-	testTraceKey(t, true)
+	testTraceKey(t)
 }
 
-func testTraceKey(t *testing.T, largeVals bool) {
+func testTraceKey(t *testing.T) {
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	ctx := context.Background()
 
 	db, d := testDbAndDomain(t, logger)
-	d.HistoryLargeValues = largeVals
 
 	txs := fillDomain(t, d, db, logger)
 	err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
