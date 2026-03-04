@@ -348,21 +348,32 @@ func (tab *Table) trackRequest(n *enode.Node, success bool, foundNodes []*enode.
 	}
 }
 
+// tableLoopState holds mutable state for the Table.loop goroutine.
+// Keeping this state in a separate struct and passing it to handler methods
+// reduces the stack frame size of the loop's select statement.
+type tableLoopState struct {
+	refresh     *time.Timer
+	refreshDone chan struct{}
+	waiting     []chan struct{}
+}
+
 // loop is the main loop of Table.
 func (tab *Table) loop() {
 	var (
-		refresh         = time.NewTimer(tab.nextRefreshTime())
-		refreshDone     = make(chan struct{})           // where doRefresh reports completion
-		waiting         = []chan struct{}{tab.initDone} // holds waiting callers while doRefresh runs
 		revalTimer      = mclock.NewAlarm(tab.cfg.Clock)
 		reseedRandTimer = time.NewTicker(10 * time.Minute)
+		s               = tableLoopState{
+			refresh:     time.NewTimer(tab.nextRefreshTime()),
+			refreshDone: make(chan struct{}),
+			waiting:     []chan struct{}{tab.initDone},
+		}
 	)
-	defer refresh.Stop()
+	defer s.refresh.Stop()
 	defer revalTimer.Stop()
 	defer reseedRandTimer.Stop()
 
 	// Start initial refresh.
-	go tab.doRefresh(refreshDone)
+	go tab.doRefresh(s.refreshDone)
 
 loop:
 	for {
@@ -379,46 +390,68 @@ loop:
 			tab.revalidation.handleResponse(tab, r)
 
 		case op := <-tab.addNodeCh:
-			tab.mutex.Lock()
-			ok := tab.handleAddNode(op)
-			tab.mutex.Unlock()
-			tab.addNodeHandled <- ok
+			tab.handleAddNodeOp(op)
 
 		case op := <-tab.trackRequestCh:
 			tab.handleTrackRequest(op)
 
-		case <-refresh.C:
-			if refreshDone == nil {
-				refreshDone = make(chan struct{})
-				go tab.doRefresh(refreshDone)
-			}
+		case <-s.refresh.C:
+			tab.handleRefreshTimer(&s)
 
 		case req := <-tab.refreshReq:
-			waiting = append(waiting, req)
-			if refreshDone == nil {
-				refreshDone = make(chan struct{})
-				go tab.doRefresh(refreshDone)
-			}
+			tab.handleRefreshRequest(&s, req)
 
-		case <-refreshDone:
-			for _, ch := range waiting {
-				close(ch)
-			}
-			waiting, refreshDone = nil, nil
-			refresh.Reset(tab.nextRefreshTime())
+		case <-s.refreshDone:
+			tab.handleRefreshDone(&s)
 
 		case <-tab.closeReq:
 			break loop
 		}
 	}
 
-	if refreshDone != nil {
-		<-refreshDone
+	if s.refreshDone != nil {
+		<-s.refreshDone
 	}
-	for _, ch := range waiting {
+	for _, ch := range s.waiting {
 		close(ch)
 	}
 	close(tab.closed)
+}
+
+// handleAddNodeOp processes an add-node operation received on the addNodeCh channel.
+func (tab *Table) handleAddNodeOp(op addNodeOp) {
+	tab.mutex.Lock()
+	ok := tab.handleAddNode(op)
+	tab.mutex.Unlock()
+	tab.addNodeHandled <- ok
+}
+
+// handleRefreshTimer starts a new refresh if one is not already running.
+func (tab *Table) handleRefreshTimer(s *tableLoopState) {
+	if s.refreshDone == nil {
+		s.refreshDone = make(chan struct{})
+		go tab.doRefresh(s.refreshDone)
+	}
+}
+
+// handleRefreshRequest processes an explicit refresh request, adding the caller
+// to the waiting list and starting a refresh if needed.
+func (tab *Table) handleRefreshRequest(s *tableLoopState, req chan struct{}) {
+	s.waiting = append(s.waiting, req)
+	if s.refreshDone == nil {
+		s.refreshDone = make(chan struct{})
+		go tab.doRefresh(s.refreshDone)
+	}
+}
+
+// handleRefreshDone is called when a refresh completes. It notifies all waiting
+// callers and resets the refresh timer.
+func (tab *Table) handleRefreshDone(s *tableLoopState) {
+	for _, ch := range s.waiting {
+		close(ch)
+	}
+	s.waiting, s.refreshDone = nil, nil
+	s.refresh.Reset(tab.nextRefreshTime())
 }
 
 // doRefresh performs a lookup for a random target to keep buckets full. seed nodes are
