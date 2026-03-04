@@ -602,12 +602,13 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	)
 
 	var execMultiGas multigas.MultiGas
+	var deployedContract accounts.Address
 	if contractCreation {
 		// The reason why we don't increment nonce here is that we need the original
 		// nonce to calculate the address of the contract that is being created
 		// It does get incremented inside the `Create` call, after the computation
 		// of the contract's address, but before the execution of the code.
-		ret, _, st.gasRemaining, execMultiGas, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, bailout)
+		ret, deployedContract, st.gasRemaining, execMultiGas, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, bailout)
 	} else {
 		ret, st.gasRemaining, execMultiGas, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
 	}
@@ -684,6 +685,11 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	tipAmount := u256.Mul(u256.U64(st.gasUsed()), effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
 
 	if !st.noFeeBurnAndTip {
+		if rules.IsArbitrum {
+			if err := st.state.AddBalance(coinbase, tipAmount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
+				return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+			}
+		}
 		if err := st.state.AddBalance(tipRecipient, tipAmount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 		}
@@ -691,11 +697,13 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 
 	var burnAmount uint256.Int
 	var burntContractAddress accounts.Address
+	var tracingTipAmount *uint256.Int
 
 	if !msg.IsFree() && rules.IsLondon {
 		burntContractAddress = st.evm.ChainConfig().GetBurntContract(st.evm.Context.BlockNumber)
 		if !burntContractAddress.IsNil() {
 			burnAmount = u256.Mul(u256.U64(st.gasUsed()), st.evm.Context.BaseFee)
+			tracingTipAmount = burnAmount.Clone()
 
 			if rules.IsAura && rules.IsPrague {
 				// https://github.com/gnosischain/specs/blob/master/network-upgrades/pectra.md#eip-4844-pectra
@@ -712,6 +720,13 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		fmt.Printf("%d (%d.%d) Fees %x: tipped: %d, burnt: %d, price: %d, gas: %d\n", st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), &tipAmount, &burnAmount, st.gasPrice, st.gasUsed())
 	}
 
+	if tracer := st.evm.Config().Tracer; tracer != nil && tracer.CaptureArbitrumTransfer != nil && !st.evm.ProcessingHook.DropTip() {
+		if tracingTipAmount != nil && !tracingTipAmount.IsZero() {
+			tipAddr := tipRecipient.Value()
+			tracer.CaptureArbitrumTransfer(nil, &tipAddr, tracingTipAmount, false, "tip")
+		}
+	}
+
 	st.evm.ProcessingHook.EndTxHook(st.gasRemaining, vmerr == nil)
 
 	result = &evmtypes.ExecutionResult{
@@ -724,8 +739,14 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		CoinbaseInitBalance: coinbaseInitBalance,
 		FeeTipped:           tipAmount,
 		FeeBurnt:            burnAmount,
+		EvmRefund:           st.state.GetRefund(),
 		ScheduledTxes:       st.evm.ProcessingHook.ScheduledTxes(),
 		UsedMultiGas:        usedMultiGas,
+	}
+
+	if !deployedContract.IsNil() && !deployedContract.IsZero() {
+		addr := deployedContract.Value()
+		result.TopLevelDeployed = &addr
 	}
 
 	result.BurntContractAddress = burntContractAddress

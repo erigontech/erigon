@@ -569,6 +569,109 @@ func TestTransitionDb_NonArbitrumRefundUnchanged(t *testing.T) {
 		"non-Arbitrum: no refund for simple transfer")
 }
 
+// endTxRecordingHook records the arguments passed to EndTxHook for verification.
+type endTxRecordingHook struct {
+	earlyReturnHook
+	recordedGasRemaining uint64
+	recordedSuccess      bool
+	called               bool
+}
+
+func (h *endTxRecordingHook) EndTxHook(gasRemaining uint64, success bool) {
+	h.recordedGasRemaining = gasRemaining
+	h.recordedSuccess = success
+	h.called = true
+}
+func (h *endTxRecordingHook) StartTxHook() (bool, multigas.MultiGas, error, []byte) {
+	return false, multigas.ZeroGas(), nil, nil
+}
+
+func TestTransitionDb_EndTxHookSignature(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+
+	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(sd.Close)
+
+	r := state.NewReaderV3(sd.AsGetter(tx))
+	s := state.New(r)
+
+	sender := accounts.InternAddress(common.HexToAddress("0xaaaa"))
+	recipient := accounts.InternAddress(common.HexToAddress("0xbbbb"))
+	coinbase := accounts.InternAddress(common.HexToAddress("0xdead"))
+
+	s.CreateAccount(sender, true)
+	s.AddBalance(sender, *uint256.NewInt(1_000_000_000_000_000_000), tracing.BalanceChangeUnspecified)
+	s.SetNonce(sender, 0)
+
+	gasPrice := uint256.NewInt(1)
+	blockCtx := evmtypes.BlockContext{
+		BlockNumber: 1,
+		GasLimit:    30_000_000,
+		Coinbase:    coinbase,
+		GetHash:     func(n uint64) (common.Hash, error) { return common.Hash{}, nil },
+		CanTransfer: func(ibs evmtypes.IntraBlockState, addr accounts.Address, val uint256.Int) (bool, error) {
+			bal, err := ibs.GetBalance(addr)
+			if err != nil {
+				return false, err
+			}
+			return bal.Cmp(&val) >= 0, nil
+		},
+		Transfer: func(ibs evmtypes.IntraBlockState, from, to accounts.Address, val uint256.Int, _ bool, _ *chain.Rules) error {
+			if err := ibs.SubBalance(from, val, tracing.BalanceChangeTransfer); err != nil {
+				return err
+			}
+			return ibs.AddBalance(to, val, tracing.BalanceChangeTransfer)
+		},
+	}
+	txCtx := evmtypes.TxContext{GasPrice: *gasPrice, Origin: sender}
+
+	cfg := &chain.Config{
+		ChainID:               big.NewInt(1),
+		HomesteadBlock:        new(big.Int),
+		TangerineWhistleBlock: new(big.Int),
+		SpuriousDragonBlock:   new(big.Int),
+		ByzantiumBlock:        new(big.Int),
+		ConstantinopleBlock:   new(big.Int),
+		PetersburgBlock:       new(big.Int),
+		IstanbulBlock:         new(big.Int),
+		BerlinBlock:           new(big.Int),
+		LondonBlock:           new(big.Int),
+	}
+
+	hook := &endTxRecordingHook{
+		earlyReturnHook: earlyReturnHook{coinbase: coinbase},
+	}
+	evmInst := vm.NewEVM(blockCtx, txCtx, s, cfg, vm.Config{})
+	evmInst.ProcessingHook = hook
+
+	gasLimit := uint64(50000)
+	msg := types.NewMessage(
+		sender, recipient, 0, uint256.NewInt(0), gasLimit,
+		gasPrice, gasPrice, uint256.NewInt(0),
+		nil, nil, true, false, true, false, nil,
+	)
+
+	gp := new(GasPool).AddGas(30_000_000)
+	st := NewStateTransition(evmInst, msg, gp)
+	result, err := st.TransitionDb(true, false)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, hook.called, "EndTxHook should have been called")
+
+	// EndTxHook should receive gasRemaining (not gasUsed)
+	expectedGasRemaining := gasLimit - result.ReceiptGasUsed
+	require.Equal(t, expectedGasRemaining, hook.recordedGasRemaining,
+		"EndTxHook should receive gasRemaining, not gasUsed")
+
+	// Successful transaction: EndTxHook should receive true (vmerr == nil)
+	require.True(t, hook.recordedSuccess,
+		"EndTxHook should receive true for successful transaction")
+}
+
 // arbIntrinsicGasHook is a mock that returns IsArbitrum()=true and fixes gasRemaining
 // in GasChargingHook to compensate for the skipped intrinsic gas check.
 type arbIntrinsicGasHook struct {

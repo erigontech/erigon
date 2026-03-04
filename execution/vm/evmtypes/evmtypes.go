@@ -91,6 +91,7 @@ type ExecutionResult struct {
 	ScheduledTxes    types.Transactions
 	TopLevelDeployed *common.Address
 	UsedMultiGas     multigas.MultiGas
+	EvmRefund        uint64
 }
 
 // Unwrap returns the internal evm error which allows us for further

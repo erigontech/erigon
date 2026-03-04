@@ -155,13 +155,13 @@ Additionally, several state transition gaps need porting: DropTip pre-preCheck o
 **Files:**
 - Modify: `execution/protocol/state_transition.go`
 
-- [ ] Change EndTxHook call from `EndTxHook(st.gasUsed(), !errors.Is(vmerr, vm.ErrExecutionReverted))` to `EndTxHook(st.gasRemaining, vmerr == nil)` to match arbitrum branch semantics
-- [ ] Add Arbitrum-specific tip payment: when `rules.IsArbitrum`, also pay `coinbase` directly (reference: lines 742-747)
-- [ ] Add tip tracing after burn: `CaptureArbitrumTransfer(nil, &tipRecipient, tracingTipAmount, false, "tip")` (reference: lines 787-791)
-- [ ] Track `TopLevelDeployed` from Create result and set `result.TopLevelDeployed`
-- [ ] Set `result.EvmRefund = st.state.GetRefund()`
-- [ ] Write test: `TestTransitionDb_EndTxHookSignature` — verify EndTxHook receives gasRemaining and success bool
-- [ ] Run `go test ./execution/protocol/... -count=1` — must pass
+- [x] Change EndTxHook call from `EndTxHook(st.gasUsed(), !errors.Is(vmerr, vm.ErrExecutionReverted))` to `EndTxHook(st.gasRemaining, vmerr == nil)` to match arbitrum branch semantics
+- [x] Add Arbitrum-specific tip payment: when `rules.IsArbitrum`, also pay `coinbase` directly (reference: lines 742-747)
+- [x] Add tip tracing after burn: `CaptureArbitrumTransfer(nil, &tipRecipient, tracingTipAmount, false, "tip")` (reference: lines 787-791)
+- [x] Track `TopLevelDeployed` from Create result and set `result.TopLevelDeployed`
+- [x] Set `result.EvmRefund = st.state.GetRefund()`
+- [x] Write test: `TestTransitionDb_EndTxHookSignature` — verify EndTxHook receives gasRemaining and success bool
+- [x] Run `go test ./execution/protocol/... -count=1` — must pass
 
 ### Task 8: Port handleRevertedTx function
 
