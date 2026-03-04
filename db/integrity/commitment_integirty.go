@@ -315,19 +315,10 @@ func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, cache *Inte
 			if err != nil {
 				return err
 			}
-			fpKv, err := fingerprintOf(kvPath)
+			fps, err = fingerprintsOf(kvPath, accPath, stoPath)
 			if err != nil {
 				return err
 			}
-			fpAcc, err := fingerprintOf(accPath)
-			if err != nil {
-				return err
-			}
-			fpSto, err := fingerprintOf(stoPath)
-			if err != nil {
-				return err
-			}
-			fps = []fileFingerprint{fpKv, fpAcc, fpSto}
 			if cache.has(string(CommitmentKvDeref), fps) {
 				logger.Info("skipping (cache hit)", "kv", filepath.Base(kvPath))
 				continue

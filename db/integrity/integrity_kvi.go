@@ -88,15 +88,10 @@ func CheckKvis(ctx context.Context, tx kv.TemporalTx, domain kv.Domain, cache *I
 		}
 		var fps []fileFingerprint
 		if cache != nil {
-			fpKv, err := fingerprintOf(kvPath)
+			fps, err = fingerprintsOf(kvPath, kviPath)
 			if err != nil {
 				return err
 			}
-			fpKvi, err := fingerprintOf(kviPath)
-			if err != nil {
-				return err
-			}
-			fps = []fileFingerprint{fpKv, fpKvi}
 			if cache.has(string(CommitmentKvi), fps) {
 				logger.Info("skipping (cache hit)", "kv", filepath.Base(kvPath))
 				continue

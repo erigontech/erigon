@@ -119,19 +119,22 @@ func (c *IntegrityCache) add(check string, files []fileFingerprint) {
 	c.newlyChecked = append(c.newlyChecked, encodeEntry(check, files))
 }
 
-// fingerprintOf loads the .torrent file for the given path and extracts its InfoHash.
-// Returns an error if the .torrent file does not exist (no fallback).
-func fingerprintOf(path string) (fileFingerprint, error) {
-	torrentPath := path + ".torrent"
-	mi, err := metainfo.LoadFromFile(torrentPath)
-	if err != nil {
-		return fileFingerprint{}, fmt.Errorf("loading torrent file %s: %w", torrentPath, err)
+// fingerprintsOf loads .torrent files for the given paths and extracts their InfoHashes.
+// Returns an error if any .torrent file does not exist (no fallback).
+func fingerprintsOf(paths ...string) ([]fileFingerprint, error) {
+	fps := make([]fileFingerprint, 0, len(paths))
+	for _, path := range paths {
+		torrentPath := path + ".torrent"
+		mi, err := metainfo.LoadFromFile(torrentPath)
+		if err != nil {
+			return nil, fmt.Errorf("loading torrent file %s: %w", torrentPath, err)
+		}
+		fps = append(fps, fileFingerprint{
+			basename: baseName(path),
+			hash:     mi.HashInfoBytes(),
+		})
 	}
-	infoHash := mi.HashInfoBytes()
-	return fileFingerprint{
-		basename: baseName(path),
-		hash:     infoHash,
-	}, nil
+	return fps, nil
 }
 
 // baseName extracts the file name from a path (like filepath.Base but simpler).
