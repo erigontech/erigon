@@ -317,6 +317,24 @@ func stateGasCall(_ *EVM, callContext *CallContext, availableGas uint64, memoryS
 	return 112 * callContext.stateGas, nil
 }
 
+func stateGasSstore(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
+	newValue := callContext.Stack.Back(1)
+	slot := accounts.InternKey(callContext.Stack.Back(0).Bytes32())
+	current, _ := evm.IntraBlockState().GetState(callContext.Address(), slot)
+	original, _ := evm.IntraBlockState().GetCommittedState(callContext.Address(), slot)
+	if original.IsZero() && !current.IsZero() && newValue.IsZero() {
+		// Case 2.2.2.1: reset to inexistent original (0→X→0).
+		// Refund the 32×cpsb charged at slot creation so the net state cost is 0.
+		evm.IntraBlockState().AddRefund(32 * callContext.stateGas)
+		return 0, nil
+	}
+	if !newValue.IsZero() && current.IsZero() && original.IsZero() {
+		// Case 2.1.1: new slot creation.
+		return 32 * callContext.stateGas, nil
+	}
+	return 0, nil
+}
+
 func gasCreateEip3860(_ *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
 	gas, err := memoryGasCost(callContext, memorySize)
 	if err != nil {

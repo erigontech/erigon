@@ -208,10 +208,11 @@ const (
 
 	// EIP-8037: State Creation Gas Cost Increase
 	TargetStateGrowthPerYear uint64 = 107_374_182_400 // 100 × 1024^3 bytes
-	CpsbOffset                      = 9578            // cost_per_state_byte_offset (for quantization)
+	CpsbOffset                      = 9_578           // cost_per_state_byte_offset (for quantization)
 	CpsbSignificantBits             = 5               // cost_per_state_byte_significant_bits (for quantization)
 	CreateGasEIP8037                = CallValueTransferGas
 	Create2GasEIP8037               = CallValueTransferGas
+	SstoreSetGasEIP8037             = 2_900 // SstoreResetGasEIP2200 - ColdSloadCostEIP2929
 )
 
 // EIP-7702: Set EOA account code
