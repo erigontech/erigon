@@ -275,7 +275,7 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 	mdGas := evmtypes.MdGas{
 		Regular: msg.Gas(),
-		State:   math.MaxUint64,
+		State:   0, // state gas reservoir will consume from regular gas for sys calls
 	}
 	ret, _, err := evm.Call(
 		msg.From(),
@@ -316,7 +316,7 @@ func SysCreate(contract accounts.Address, data []byte, chainConfig *chain.Config
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 	mdGas := evmtypes.MdGas{
 		Regular: msg.Gas(),
-		State:   math.MaxUint64,
+		State:   0, // state gas reservoir will consume from regular gas for sys calls
 	}
 	ret, _, err := evm.SysCreate(
 		msg.From(),
