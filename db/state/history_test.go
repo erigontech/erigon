@@ -1695,3 +1695,297 @@ func TestHistory_OpenFolder(t *testing.T) {
 	require.NoError(t, err)
 	h.Close()
 }
+
+// TestHistoryRange_DBOnly verifies HistoryRange when data resides only in DB
+// (no segments collated). This exclusively exercises HistoryChangesIterDB.
+// Results must match those of TestHistoryRange1 which uses segment files.
+func TestHistoryRange_DBOnly(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	logger := log.New()
+	ctx := context.Background()
+
+	test := func(t *testing.T, h *History, db kv.RwDB) {
+		t.Helper()
+		require := require.New(t)
+
+		// Deliberately skip collateAndMergeHistory — all data stays in the DB.
+		tx, err := db.BeginRo(ctx)
+		require.NoError(err)
+		defer tx.Rollback()
+
+		ic := h.BeginFilesRo()
+		defer ic.Close()
+
+		collect := func(it stream.KV) (keys, vals []string) {
+			t.Helper()
+			for it.HasNext() {
+				k, v, err := it.Next()
+				require.NoError(err)
+				keys = append(keys, fmt.Sprintf("%x", k))
+				vals = append(vals, fmt.Sprintf("%x", v))
+			}
+			it.Close()
+			return keys, vals
+		}
+
+		// [2, 20): same 19 keys / values as in the file-backed TestHistoryRange1.
+		it, err := ic.HistoryRange(2, 20, order.Asc, -1, tx)
+		require.NoError(err)
+		keys, vals := collect(it)
+		require.Equal([]string{
+			"0100000000000001", "0100000000000002", "0100000000000003",
+			"0100000000000004", "0100000000000005", "0100000000000006",
+			"0100000000000007", "0100000000000008", "0100000000000009",
+			"010000000000000a", "010000000000000b", "010000000000000c",
+			"010000000000000d", "010000000000000e", "010000000000000f",
+			"0100000000000010", "0100000000000011", "0100000000000012",
+			"0100000000000013",
+		}, keys)
+		require.Equal([]string{
+			"ff00000000000001", "", "", "", "", "", "", "", "",
+			"", "", "", "", "", "", "", "", "", "",
+		}, vals)
+
+		// [995, 1000): same 9 keys / values as in TestHistoryRange1.
+		it, err = ic.HistoryRange(995, 1000, order.Asc, -1, tx)
+		require.NoError(err)
+		keys, vals = collect(it)
+		require.Equal([]string{
+			"0100000000000001", "0100000000000002", "0100000000000003",
+			"0100000000000004", "0100000000000005", "0100000000000006",
+			"0100000000000009", "010000000000000c", "010000000000001b",
+		}, keys)
+		require.Equal([]string{
+			"ff000000000003e2", "ff000000000001f1", "ff0000000000014b",
+			"ff000000000000f8", "ff000000000000c6", "ff000000000000a5",
+			"ff0000000000006e", "ff00000000000052", "ff00000000000024",
+		}, vals)
+
+		// limit=2 with no lower bound.
+		it, err = ic.HistoryRange(-1, 1000, order.Asc, 2, tx)
+		require.NoError(err)
+		keys, vals = collect(it)
+		require.Equal([]string{"0100000000000001", "0100000000000002"}, keys)
+		require.Equal([]string{"ff000000000003cf", "ff000000000001e7"}, vals)
+	}
+
+	t.Run("large_values", func(t *testing.T) {
+		db, h, _ := filledHistory(t, true, logger)
+		test(t, h, db)
+	})
+	t.Run("small_values", func(t *testing.T) {
+		db, h, _ := filledHistory(t, false, logger)
+		test(t, h, db)
+	})
+}
+
+// TestRangeAsOf_ValuesMatchHistorySeek cross-validates RangeAsOf against
+// HistorySeek: for each key returned by RangeAsOf(txNum), the value must equal
+// what HistorySeek(key, txNum) returns for the same key and txNum.
+func TestRangeAsOf_ValuesMatchHistorySeek(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	logger := log.New()
+	ctx := context.Background()
+
+	test := func(t *testing.T, h *History, db kv.RwDB, txs uint64) {
+		t.Helper()
+		require := require.New(t)
+		collateAndMergeHistory(t, db, h, txs, true)
+
+		roTx, err := db.BeginRo(ctx)
+		require.NoError(err)
+		defer roTx.Rollback()
+
+		hc := h.BeginFilesRo()
+		defer hc.Close()
+
+		// Encode keys 1..5 with the same layout used by filledHistory.
+		makeKey := func(keyNum uint64) []byte {
+			var k [8]byte
+			binary.BigEndian.PutUint64(k[:], keyNum)
+			k[0] = 1
+			return k[:]
+		}
+		fromKey := makeKey(1)
+		toKey := makeKey(6) // exclusive upper bound
+
+		checkTxNum := uint64(10)
+
+		// RangeAsOf returns one entry per key; collect them.
+		it, err := hc.RangeAsOf(ctx, checkTxNum, fromKey, toKey, order.Asc, -1, roTx)
+		require.NoError(err)
+		defer it.Close()
+
+		count := 0
+		for it.HasNext() {
+			k, v, err := it.Next()
+			require.NoError(err)
+
+			// Oracle: HistorySeek for the same key and txNum.
+			want, ok, err := hc.HistorySeek(k, checkTxNum, roTx)
+			require.NoError(err)
+			require.True(ok, "HistorySeek returned not-found for key %x at txNum %d", k, checkTxNum)
+			require.Equal(
+				fmt.Sprintf("%x", want),
+				fmt.Sprintf("%x", v),
+				"mismatch for key %x at txNum %d", k, checkTxNum,
+			)
+			count++
+		}
+		require.Equal(5, count, "expected 5 keys (1..5) from RangeAsOf")
+
+		// Spot-check exact values derived from the filledHistory data pattern
+		// (key=N changes at txNums that are multiples of N; prevVal encodes
+		// the change-count with marker byte 0xff).
+		//
+		// key=1 changes every tx; prevVal at tx=10 = 0xff...0009 (count before tx10 = 9).
+		v1, ok, err := hc.HistorySeek(makeKey(1), checkTxNum, roTx)
+		require.NoError(err)
+		require.True(ok)
+		require.Equal("ff00000000000009", fmt.Sprintf("%x", v1))
+
+		// key=2 changes at even txs; prevVal at tx=10 = 0xff...0004 (count before tx10 = 4).
+		v2, ok, err := hc.HistorySeek(makeKey(2), checkTxNum, roTx)
+		require.NoError(err)
+		require.True(ok)
+		require.Equal("ff00000000000004", fmt.Sprintf("%x", v2))
+
+		// key=5 changes at multiples of 5; prevVal at tx=10 = 0xff...0001 (only tx5 before tx10).
+		v5, ok, err := hc.HistorySeek(makeKey(5), checkTxNum, roTx)
+		require.NoError(err)
+		require.True(ok)
+		require.Equal("ff00000000000001", fmt.Sprintf("%x", v5))
+	}
+
+	t.Run("large_values", func(t *testing.T) {
+		db, h, txs := filledHistory(t, true, logger)
+		test(t, h, db, txs)
+	})
+	t.Run("small_values", func(t *testing.T) {
+		db, h, txs := filledHistory(t, false, logger)
+		test(t, h, db, txs)
+	})
+}
+
+// TestHistoryRange_EmptyRange verifies that degenerate ranges (empty, inverted,
+// or beyond the data horizon) produce no results without error.
+func TestHistoryRange_EmptyRange(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	logger := log.New()
+	ctx := context.Background()
+
+	test := func(t *testing.T, h *History, db kv.RwDB, txs uint64) {
+		t.Helper()
+		require := require.New(t)
+		collateAndMergeHistory(t, db, h, txs, true)
+
+		tx, err := db.BeginRo(ctx)
+		require.NoError(err)
+		defer tx.Rollback()
+
+		ic := h.BeginFilesRo()
+		defer ic.Close()
+
+		drain := func(label string, it stream.KV, err error) {
+			t.Helper()
+			require.NoError(err, label)
+			defer it.Close()
+			n, err := stream.CountKV(it)
+			require.NoError(err, label)
+			require.Zero(n, "expected empty result for %s", label)
+		}
+
+		// Equal bounds: [n, n) is empty.
+		it, err := ic.HistoryRange(500, 500, order.Asc, -1, tx)
+		drain("[500,500)", it, err)
+
+		// Inverted bounds: from > to is empty.
+		it, err = ic.HistoryRange(500, 499, order.Asc, -1, tx)
+		drain("[500,499)", it, err)
+
+		// Beyond the data horizon.
+		it, err = ic.HistoryRange(int(txs)+1, int(txs)+1000, order.Asc, -1, tx)
+		drain("beyond horizon", it, err)
+	}
+
+	t.Run("large_values", func(t *testing.T) {
+		db, h, txs := filledHistory(t, true, logger)
+		test(t, h, db, txs)
+	})
+	t.Run("small_values", func(t *testing.T) {
+		db, h, txs := filledHistory(t, false, logger)
+		test(t, h, db, txs)
+	})
+}
+
+// BenchmarkHistoryRange benchmarks the hot path: iterating all changed keys
+// across a wide txNum range from segment files (exercises HistoryChangesIterFiles.advance).
+func BenchmarkHistoryRange(b *testing.B) {
+	logger := log.New()
+	ctx := context.Background()
+
+	db, h, txs := filledHistory(b, true, logger)
+	collateAndMergeHistory(b, db, h, txs, true)
+
+	tx, err := db.BeginRo(ctx)
+	require.NoError(b, err)
+	defer tx.Rollback()
+
+	ic := h.BeginFilesRo()
+	defer ic.Close()
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		it, err := ic.HistoryRange(0, int(txs), order.Asc, -1, tx)
+		require.NoError(b, err)
+		for it.HasNext() {
+			_, _, err := it.Next()
+			require.NoError(b, err)
+		}
+		it.Close()
+	}
+}
+
+// BenchmarkRangeAsOf benchmarks iterating the full key-space at a given txNum
+// from segment files (exercises HistoryRangeAsOfFiles.advanceInFiles).
+func BenchmarkRangeAsOf(b *testing.B) {
+	logger := log.New()
+	ctx := context.Background()
+
+	db, h, txs := filledHistory(b, true, logger)
+	collateAndMergeHistory(b, db, h, txs, true)
+
+	tx, err := db.BeginRo(ctx)
+	require.NoError(b, err)
+	defer tx.Rollback()
+
+	ic := h.BeginFilesRo()
+	defer ic.Close()
+
+	checkTxNum := txs / 2
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		it, err := ic.RangeAsOf(ctx, checkTxNum, nil, nil, order.Asc, -1, tx)
+		require.NoError(b, err)
+		for it.HasNext() {
+			_, _, err := it.Next()
+			require.NoError(b, err)
+		}
+		it.Close()
+	}
+}

@@ -97,21 +97,17 @@ func NewSegReaderWrapper(reader seg.ReaderI) stream.KV {
 	return &SegReaderWrapper{reader: reader}
 }
 
-// Next returns key and value by calling the underlying getter twice
+// Next returns key and value by calling the underlying getter twice.
+// Callers must check HasNext() before calling Next().
 func (w *SegReaderWrapper) Next() ([]byte, []byte, error) {
 	if !w.reader.HasNext() {
 		return nil, nil, stream.ErrIteratorExhausted
 	}
-
-	// First call: get the key
 	key, _ := w.reader.Next(nil)
-
-	// Second call: get the value
 	var value []byte
 	if w.reader.HasNext() {
 		value, _ = w.reader.Next(nil)
 	}
-
 	return key, value, nil
 }
 

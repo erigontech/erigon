@@ -101,7 +101,7 @@ func (hi *HistoryRangeAsOfFiles) Trace(prefix string) *stream.TracedDuo[[]byte, 
 
 func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 	for hi.h.Len() > 0 {
-		top := heap.Pop(&hi.h).(*ReconItem)
+		top := hi.h[0] // peek at minimum without removing
 		key := top.key
 		idxVal := top.val
 
@@ -113,8 +113,12 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 				return err
 			}
 			if hi.toPrefix == nil || bytes.Compare(top.key, hi.toPrefix) < 0 {
-				heap.Push(&hi.h, top)
+				heap.Fix(&hi.h, 0) // sift-down only, O(log n) vs Pop+Push O(2 log n)
+			} else {
+				heap.Pop(&hi.h)
 			}
+		} else {
+			heap.Pop(&hi.h)
 		}
 
 		if hi.from != nil && bytes.Compare(key, hi.from) < 0 { //TODO: replace by seekInFiles()
@@ -411,7 +415,7 @@ func (hi *HistoryChangesIterFiles) Close() {
 
 func (hi *HistoryChangesIterFiles) advance() error {
 	for hi.h.Len() > 0 {
-		top := heap.Pop(&hi.h).(*ReconItem)
+		top := hi.h[0] // peek at minimum without removing
 		key, idxVal := top.key, top.val
 		if top.g.HasNext() {
 			var err error
@@ -419,7 +423,9 @@ func (hi *HistoryChangesIterFiles) advance() error {
 			if err != nil {
 				return err
 			}
-			heap.Push(&hi.h, top)
+			heap.Fix(&hi.h, 0) // sift-down only, O(log n) vs Pop+Push O(2 log n)
+		} else {
+			heap.Pop(&hi.h)
 		}
 
 		if bytes.Equal(key, hi.nextKey) { // deduplication
