@@ -1789,6 +1789,8 @@ type AggregatorRoTx struct {
 	d   [kv.DomainLen]*DomainRoTx
 	iis []*InvertedIndexRoTx
 
+	branchDerefBuf []byte // scratch buffer reused across replaceShortenedKeysInBranch calls
+
 	_leakID uint64 // set only if TRACE_AGG=true
 }
 
