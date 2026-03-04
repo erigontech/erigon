@@ -1865,8 +1865,8 @@ func CheckExclusive(ctx *cli.Context, args ...any) {
 
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.Config, logger log.Logger) {
-	if !ctx.Bool(MCPDisableFlag.Name) && ctx.String(MCPAddrFlag.Name) != "" && ctx.String(MCPPortFlag.Name) != "" {
-		cfg.MCPAddress = fmt.Sprintf("%s:%s", ctx.String(MCPAddrFlag.Name), ctx.String(MCPPortFlag.Name))
+	if !ctx.Bool(MCPDisableFlag.Name) && ctx.String(MCPAddrFlag.Name) != "" {
+		cfg.MCPAddress = fmt.Sprintf("%s:%d", ctx.String(MCPAddrFlag.Name), ctx.Uint(MCPPortFlag.Name))
 	}
 
 	cfg.CaplinConfig.CaplinDiscoveryAddr = ctx.String(CaplinDiscoveryAddrFlag.Name)
