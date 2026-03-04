@@ -89,11 +89,15 @@ import (
 
 // makeStageCmd creates a cobra command that opens the DB, runs stageFn, and handles errors.
 // Set applyMigrations=false for read-only commands. Set timeit=true to log elapsed time.
-func makeStageCmd(use string, stageFn func(kv.TemporalRwDB, context.Context, log.Logger) error, applyMigrations, timeit bool) *cobra.Command {
+// Set debugVerbosity=true to force log verbosity to "debug" before SetupCobra.
+func makeStageCmd(use string, stageFn func(kv.TemporalRwDB, context.Context, log.Logger) error, applyMigrations, timeit, debugVerbosity bool) *cobra.Command {
 	return &cobra.Command{
 		Use:   use,
 		Short: "",
 		Run: func(cmd *cobra.Command, args []string) {
+			if debugVerbosity {
+				cmd.Flags().Set(logging.LogConsoleVerbosityFlag.Name, "debug")
+			}
 			logger := debug.SetupCobra(cmd, "integration")
 			db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), applyMigrations, chain, logger)
 			if err != nil {
@@ -114,36 +118,15 @@ func makeStageCmd(use string, stageFn func(kv.TemporalRwDB, context.Context, log
 }
 
 var (
-	cmdStageSnapshots   = makeStageCmd("stage_snapshots", stageSnapshots, true, false)
-	cmdStageHeaders     = makeStageCmd("stage_headers", stageHeaders, true, false)
-	cmdStageBodies      = makeStageCmd("stage_bodies", stageBodies, true, false)
-	cmdStageSenders     = makeStageCmd("stage_senders", stageSenders, true, false)
-	cmdStageExec        = makeStageCmd("stage_exec", stageExec, true, true)
-	cmdStageCustomTrace = makeStageCmd("stage_custom_trace", stageCustomTrace, true, true)
-	cmdStageTxLookup    = makeStageCmd("stage_tx_lookup", stageTxLookup, true, false)
+	cmdStageSnapshots   = makeStageCmd("stage_snapshots", stageSnapshots, true, false, false)
+	cmdStageHeaders     = makeStageCmd("stage_headers", stageHeaders, true, false, false)
+	cmdStageBodies      = makeStageCmd("stage_bodies", stageBodies, true, false, false)
+	cmdStageSenders     = makeStageCmd("stage_senders", stageSenders, true, false, false)
+	cmdStageExec        = makeStageCmd("stage_exec", stageExec, true, true, false)
+	cmdStageCustomTrace = makeStageCmd("stage_custom_trace", stageCustomTrace, true, true, false)
+	cmdStageTxLookup    = makeStageCmd("stage_tx_lookup", stageTxLookup, true, false, false)
+	cmdPrintStages      = makeStageCmd("print_stages", printAllStages, false, false, true)
 )
-
-var cmdPrintStages = &cobra.Command{
-	Use:   "print_stages",
-	Short: "",
-	Run: func(cmd *cobra.Command, args []string) {
-		cmd.Flags().Set(logging.LogConsoleVerbosityFlag.Name, "debug")
-		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), false, chain, logger)
-		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
-		}
-		defer db.Close()
-
-		if err := printAllStages(db, cmd.Context(), logger); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
-		}
-	},
-}
 
 var cmdAlloc = &cobra.Command{
 	Use:     "alloc",
