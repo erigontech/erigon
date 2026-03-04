@@ -604,20 +604,19 @@ func CheckCommitmentHistVal(ctx context.Context, db kv.TemporalRoDB, br services
 	coverageQuotient := dbg.EnvUint("CHECK_COMMITMENT_HIST_VAL_COVERAGE_QUOTIENT", 20)
 	var totalVals atomic.Uint64
 	var checkedFiles atomic.Int64
+	rng := rand.New(rand.NewPCG(uint64(seed), 0))
 	for _, file := range files {
 		if !strings.HasSuffix(file.Fullpath(), ".v") {
 			continue
 		}
-		// Per-file RNG seeded from (seed, startTxNum): reproducible and independent per file.
-		fileRng := rand.New(rand.NewPCG(uint64(seed), file.StartRootNum()))
-		if sampleRatio < 1.0 && fileRng.Float64() >= sampleRatio {
+		if sampleRatio < 1.0 && rng.Float64() >= sampleRatio {
 			continue
 		}
 		txCount := file.EndRootNum() - file.StartRootNum()
 		if coverageQuotient > txCount {
 			panic(fmt.Errorf("coverage quotient %d is greater than total tx count %d in %s", coverageQuotient, txCount, filepath.Base(file.Fullpath())))
 		}
-		bucket := fileRng.IntN(int(coverageQuotient))
+		bucket := rng.IntN(int(coverageQuotient))
 		checkedFiles.Add(1)
 		eg.Go(func() error {
 			tx, err := db.BeginTemporalRo(ctx) // each worker has its own RoTx

@@ -1145,7 +1145,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 		seed = time.Now().UnixNano()
 	}
 	sampleRatio := cliCtx.Float64("sample")
-	logger.Info("[integrity] sampling config", "seed", seed, "sampleRatio", sampleRatio)
+
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
@@ -1177,7 +1177,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 	for _, chk := range requestedChecks {
 		chk := chk
 		g.Go(func() error {
-			logger.Info("[integrity] starting", "check", chk)
+			logger.Info("[integrity] starting", "check", chk, "seed", seed, "sampleRatio", sampleRatio)
 			switch chk {
 			case integrity.BlocksTxnID:
 				if err := blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(failFast); err != nil {
@@ -1225,11 +1225,11 @@ func doIntegrity(cliCtx *cli.Context) error {
 					return err
 				}
 			case integrity.ReceiptsNoDups:
-				if err := integrity.CheckReceiptsNoDups(ctx, db, blockReader, failFast); err != nil {
+				if err := integrity.CheckReceiptsNoDups(ctx, db, blockReader, failFast, seed, sampleRatio); err != nil {
 					return err
 				}
 			case integrity.RCacheNoDups:
-				if err := integrity.CheckRCacheNoDups(ctx, db, blockReader, failFast); err != nil {
+				if err := integrity.CheckRCacheNoDups(ctx, db, blockReader, failFast, seed, sampleRatio); err != nil {
 					return err
 				}
 			case integrity.StateProgress:
