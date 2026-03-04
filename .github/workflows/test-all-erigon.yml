@@ -164,7 +164,12 @@ jobs:
         env:
           GOMODCACHE: C:\go-cache\mod
           GOCACHE: C:\go-cache\build
-        run: make test-all
+        run: |
+          # p2p/discover goroutines trigger an intermittent Go 1.26 GC crash on
+          # Windows (runtime.(*unwinder).next ACCESS_VIOLATION during stack shrink).
+          # Exclude the p2p package tree until the upstream Go issue is resolved.
+          PKGS=$(go list ./... | grep -v "github.com/erigontech/erigon/p2p")
+          make test-all GOTEST_PKGS="$PKGS"
 
       - name: Cleanup
         if: always()
