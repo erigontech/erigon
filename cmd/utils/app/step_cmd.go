@@ -27,7 +27,7 @@ func stepRebase(cliCtx *cli.Context) error {
 	defer ticker.Stop()
 
 	dirs := datadir.Open(cliCtx.String("datadir"))
-	settings, err := state.CreateOrReadErigonDBSettings(dirs, logger)
+	settings, err := state.ResolveErigonDBSettings(dirs, logger, true)
 	if err != nil {
 		return err
 	}
