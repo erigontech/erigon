@@ -53,7 +53,7 @@ func (c *DomainGetFromFileCache) LogStats(dt kv.Domain) {
 		return
 	}
 	m := c.Metrics()
-	log.Warn("[dbg] DomainGetFromFileCache", "a", dt.String(), "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)), "hit", m.Hits, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", c.limit)
+	log.Warn("[dbg] D_LRU", "a", dt.String(), "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)), "hit", m.Hits, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", c.limit)
 }
 
 func newDomainVisible(name kv.Domain, files []visibleFile) *domainVisible {
