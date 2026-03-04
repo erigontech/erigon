@@ -1991,3 +1991,77 @@ func BenchmarkRangeAsOf(b *testing.B) {
 		it.Close()
 	}
 }
+
+// collateHistory collates all steps into separate per-step files without merging them.
+// This leaves many small files in the heap, exercising heap operations during iteration.
+func collateHistory(b *testing.B, db kv.RwDB, h *History, txs uint64) {
+	b.Helper()
+	ctx := context.Background()
+	tx, err := db.BeginRwNosync(ctx)
+	require.NoError(b, err)
+	defer tx.Rollback()
+	for step := kv.Step(0); step < kv.Step(txs/h.stepSize)-1; step++ {
+		require.NoError(b, h.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
+	}
+	require.NoError(b, tx.Commit())
+}
+
+// BenchmarkHistoryRange_MultiFile is like BenchmarkHistoryRange but keeps all
+// step-files unmerged so the heap has ~60 elements, actually exercising heap ops.
+func BenchmarkHistoryRange_MultiFile(b *testing.B) {
+	logger := log.New()
+	ctx := context.Background()
+
+	db, h, txs := filledHistory(b, true, logger)
+	collateHistory(b, db, h, txs)
+
+	tx, err := db.BeginRo(ctx)
+	require.NoError(b, err)
+	defer tx.Rollback()
+
+	ic := h.BeginFilesRo()
+	defer ic.Close()
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		it, err := ic.HistoryRange(0, int(txs), order.Asc, -1, tx)
+		require.NoError(b, err)
+		for it.HasNext() {
+			_, _, err := it.Next()
+			require.NoError(b, err)
+		}
+		it.Close()
+	}
+}
+
+// BenchmarkRangeAsOf_MultiFile is like BenchmarkRangeAsOf but keeps all
+// step-files unmerged so the heap has ~60 elements, actually exercising heap ops.
+func BenchmarkRangeAsOf_MultiFile(b *testing.B) {
+	logger := log.New()
+	ctx := context.Background()
+
+	db, h, txs := filledHistory(b, true, logger)
+	collateHistory(b, db, h, txs)
+
+	tx, err := db.BeginRo(ctx)
+	require.NoError(b, err)
+	defer tx.Rollback()
+
+	ic := h.BeginFilesRo()
+	defer ic.Close()
+
+	checkTxNum := txs / 2
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		it, err := ic.RangeAsOf(ctx, checkTxNum, nil, nil, order.Asc, -1, tx)
+		require.NoError(b, err)
+		for it.HasNext() {
+			_, _, err := it.Next()
+			require.NoError(b, err)
+		}
+		it.Close()
+	}
+}
