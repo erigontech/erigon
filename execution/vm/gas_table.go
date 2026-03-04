@@ -313,8 +313,14 @@ func stateGasCreate(evm *EVM, _ *CallContext, availableGas uint64, memorySize ui
 	return 112 * evm.Context.CostPerStateByte, nil
 }
 
-func stateGasCall(evm *EVM, _ *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
-	return 112 * evm.Context.CostPerStateByte, nil
+func stateGasCall(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
+	if !callContext.Stack.Back(2).IsZero() { // value > 0
+		addr := accounts.InternAddress(callContext.Stack.Back(1).Bytes20())
+		if empty, _ := evm.IntraBlockState().Empty(addr); empty {
+			return 112 * evm.Context.CostPerStateByte, nil
+		}
+	}
+	return 0, nil
 }
 
 func stateGasSstore(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
