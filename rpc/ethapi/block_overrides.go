@@ -74,7 +74,7 @@ func (overrides *BlockOverrides) Override(context *evmtypes.BlockContext) error 
 	}
 
 	if overrides.Withdrawals != nil {
-		return errors.New("BlockOverrides.Withdrawals not supported")
+		return errors.New(`block override "withdrawals" is not supported for this RPC method`)
 	}
 	return nil
 }

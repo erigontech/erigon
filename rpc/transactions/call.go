@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"sync/atomic"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -167,7 +168,7 @@ func DoCall(
 	if stateOverrides != nil {
 		rules := blockCtx.Rules(chainConfig)
 		precompiles := vm.ActivePrecompiledContracts(rules)
-		if err := stateOverrides.Override(state, precompiles, blockCtx.Rules(chainConfig)); err != nil {
+		if err := stateOverrides.Override(state, precompiles, rules); err != nil {
 			return nil, err
 		}
 		evm.SetPrecompiles(precompiles)
@@ -272,10 +273,19 @@ func (r *ReusableCaller) DoCallWithNewGas(
 	}
 	r.evm.Reset(txCtx, ibs)
 
-	timedOut := false
+	// done is closed on return to stop the watcher goroutine before it can
+	// cancel the shared EVM for a subsequent call.
+	done := make(chan struct{})
+	defer close(done) // runs before cancel() (LIFO), so goroutine exits cleanly on success
+
+	var timedOut atomic.Bool
 	go func() {
-		<-ctx.Done()
-		timedOut = true
+		select {
+		case <-ctx.Done():
+			timedOut.Store(true)
+			r.evm.Cancel()
+		case <-done:
+		}
 	}()
 
 	gp := new(protocol.GasPool).AddGas(r.message.Gas()).AddBlobGas(r.message.BlobGas())
@@ -286,7 +296,7 @@ func (r *ReusableCaller) DoCallWithNewGas(
 	}
 
 	// If the timer caused an abort, return an appropriate error message
-	if timedOut {
+	if timedOut.Load() {
 		return nil, fmt.Errorf("execution aborted (timeout = %v)", r.callTimeout)
 	}
 
