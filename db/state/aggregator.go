@@ -98,6 +98,11 @@ type Aggregator struct {
 	produce bool
 
 	checker *DependencyIntegrityChecker
+
+	// Domain configuration state: ConfigureDomains() is a no-op once configured is true.
+	configured   bool
+	savedSalt    *uint32
+	disableFsync bool
 }
 
 func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
@@ -234,23 +239,90 @@ func (a *Aggregator) reloadSalt() error {
 	}
 
 	for _, d := range a.d {
-		d.salt.Store(salt)
+		if d != nil {
+			d.salt.Store(salt)
+		}
 	}
 
 	for _, ii := range a.iis {
-		ii.salt.Store(salt)
+		if ii != nil {
+			ii.salt.Store(salt)
+		}
 	}
 
 	return nil
 }
 
-func (a *Aggregator) reloadErigonDBSettings() error {
-	settings, err := CreateOrReadErigonDBSettings(a.dirs, a.logger)
+// ReloadErigonDBSettings re-reads erigondb.toml from disk and updates the in-memory stepSize.
+// If domains are already configured and stepSize changed, it propagates the new value to all
+// Domain/InvertedIndex instances.
+func (a *Aggregator) ReloadErigonDBSettings(noDownloader bool) error {
+	oldStepSize := a.stepSize
+	oldStepsInFrozenFile := a.stepsInFrozenFile
+
+	settings, err := ResolveErigonDBSettings(a.dirs, a.logger, noDownloader)
 	if err != nil {
 		return err
 	}
 	a.stepSize = settings.StepSize
 	a.stepsInFrozenFile = settings.StepsInFrozenFile
+
+	if a.configured && (a.stepSize != oldStepSize || a.stepsInFrozenFile != oldStepsInFrozenFile) {
+		a.logger.Info("erigondb stepSize changed, propagating to domains/IIs",
+			"old_step_size", oldStepSize, "new_step_size", a.stepSize,
+			"old_steps_in_frozen_file", oldStepsInFrozenFile, "new_steps_in_frozen_file", a.stepsInFrozenFile)
+		// stepSize lives only on InvertedIndex; Domain and History access it through embedding.
+		// Update the InvertedIndex embedded in each domain's History, plus standalone IIs.
+		for _, d := range a.d {
+			if d != nil && d.History != nil && d.History.InvertedIndex != nil {
+				d.History.InvertedIndex.setStepSize(a.stepSize, a.stepsInFrozenFile)
+			}
+		}
+		for _, ii := range a.iis {
+			if ii != nil {
+				ii.setStepSize(a.stepSize, a.stepsInFrozenFile)
+			}
+		}
+	}
+	return nil
+}
+
+// ConfigureDomains creates all Domain and InvertedIndex instances. This is a no-op if domains
+// are already configured. It requires stepSize > 0 (which NewInvertedIndex enforces via panic).
+func (a *Aggregator) ConfigureDomains() error {
+	if a.configured {
+		return nil
+	}
+	if a.stepSize == 0 {
+		return fmt.Errorf("cannot configure domains: stepSize is 0")
+	}
+	// AdjustReceipt mutates the global statecfg.Schema; must run before Configure().
+	if err := statecfg.AdjustReceiptCurrentVersionIfNeeded(a.dirs, a.logger); err != nil {
+		return err
+	}
+	if err := statecfg.Configure(statecfg.Schema, a, a.dirs, a.savedSalt, a.logger); err != nil {
+		return err
+	}
+	a.configured = true
+
+	if a.disableFsync {
+		for _, d := range a.d {
+			if d != nil {
+				d.DisableFsync()
+			}
+		}
+		for _, ii := range a.iis {
+			if ii != nil {
+				ii.DisableFsync()
+			}
+		}
+	}
+
+	func() {
+		a.dirtyFilesLock.Lock()
+		defer a.dirtyFilesLock.Unlock()
+		a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
+	}()
 	return nil
 }
 
@@ -430,6 +502,9 @@ func (a *Aggregator) Close() {
 func (a *Aggregator) closeDirtyFiles() {
 	wg := &sync.WaitGroup{}
 	for _, d := range a.d {
+		if d == nil {
+			continue
+		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -437,6 +512,9 @@ func (a *Aggregator) closeDirtyFiles() {
 		}()
 	}
 	for _, ii := range a.iis {
+		if ii == nil {
+			continue
+		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -464,6 +542,9 @@ func (a *Aggregator) SetCompressWorkers(i int) {
 		return
 	}
 	for _, d := range a.d {
+		if d == nil {
+			continue
+		}
 		d.CompressCfg.Workers = i
 		if d.History != nil {
 			d.History.CompressorCfg.Workers = i
@@ -687,15 +768,17 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(a.collateAndBuildWorkers)
-	for _, d := range a.d {
+
+	// Use agg.BeginFilesRo() to safely snapshot visible files under visibleFilesLock,
+	// instead of calling individual domain/ii BeginFilesRo() without synchronization.
+	ac := a.BeginFilesRo()
+	for id, d := range a.d {
 		if d.Disable {
 			continue
 		}
 
 		d := d
-		dc := d.BeginFilesRo()
-		firstStepNotInFiles := dc.FirstStepNotInFiles()
-		dc.Close()
+		firstStepNotInFiles := ac.d[id].FirstStepNotInFiles()
 		if step < firstStepNotInFiles {
 			continue
 		}
@@ -739,9 +822,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		}
 
 		ii := ii
-		dc := ii.BeginFilesRo()
-		firstStepNotInFiles := dc.FirstStepNotInFiles()
-		dc.Close()
+		firstStepNotInFiles := ac.iis[iikey].FirstStepNotInFiles()
 		if step < firstStepNotInFiles {
 			continue
 		}
@@ -768,6 +849,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 			return nil
 		})
 	}
+	ac.Close()
 	if err := g.Wait(); err != nil {
 		static.CleanupOnError()
 		return fmt.Errorf("domain collate-build: %w", err)
@@ -1332,6 +1414,9 @@ func (a *Aggregator) FirstTxNumOfStep(step kv.Step) uint64 { // could have some 
 }
 
 func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
+	if a.d[kv.AccountsDomain] == nil || a.d[kv.StorageDomain] == nil || a.d[kv.CodeDomain] == nil {
+		return 0
+	}
 	m := min(
 		a.d[kv.AccountsDomain].dirtyFilesEndTxNumMinimax(),
 		a.d[kv.StorageDomain].dirtyFilesEndTxNumMinimax(),
@@ -1788,6 +1873,8 @@ type AggregatorRoTx struct {
 	a   *Aggregator
 	d   [kv.DomainLen]*DomainRoTx
 	iis []*InvertedIndexRoTx
+
+	branchDerefBuf []byte // scratch buffer reused across replaceShortenedKeysInBranch calls
 
 	_leakID uint64 // set only if TRACE_AGG=true
 }
