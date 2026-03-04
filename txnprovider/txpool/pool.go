@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/fixedgas"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -833,6 +834,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 			AuthorizationsLen:  authorizationLen,
 			AccessListLen:      uint64(mt.TxnSlot.AccessListAddrCount),
 			StorageKeysLen:     uint64(mt.TxnSlot.AccessListStorCount),
+			CostPerStateByte:   misc.CostPerStateByte(p.blockGasLimit.Load()),
 			IsContractCreation: mt.TxnSlot.Creation,
 			IsEIP2:             true,
 			IsEIP2028:          true,
@@ -998,6 +1000,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		AuthorizationsLen:  uint64(authorizationLen),
 		AccessListLen:      uint64(txn.AccessListAddrCount),
 		StorageKeysLen:     uint64(txn.AccessListStorCount),
+		CostPerStateByte:   misc.CostPerStateByte(p.blockGasLimit.Load()),
 		IsContractCreation: txn.Creation,
 		IsEIP2:             true,
 		IsEIP2028:          true,

@@ -362,7 +362,7 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 
 	// set code tx
 	auths := msg.Authorizations()
-	verifiedAuthorities, err := st.verifyAuthorities(auths, contractCreation, rules.ChainID.String())
+	verifiedAuthorities, stateIgasRefund, err := st.verifyAuthorities(auths, contractCreation, rules.ChainID.String())
 	if err != nil {
 		return nil, err
 	}
@@ -377,6 +377,7 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 		AuthorizationsLen:  uint64(len(auths)),
 		AccessListLen:      uint64(len(accessTuples)),
 		StorageKeysLen:     uint64(accessTuples.StorageKeys()),
+		CostPerStateByte:   st.evm.Context.CostPerStateByte,
 		IsContractCreation: contractCreation,
 		IsEIP2:             rules.IsHomestead,
 		IsEIP2028:          rules.IsIstanbul,
@@ -389,7 +390,7 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	}
 	imdGas := evmtypes.MdGas{
 		Regular: intrinsicGasResult.RegularGas,
-		State:   intrinsicGasResult.StateGas,
+		State:   intrinsicGasResult.StateGas - stateIgasRefund,
 	}
 	st.gasRemaining = SplitIntoMdGas(st.msg.Gas(), imdGas, rules)
 	st.initialGas = st.gasRemaining.Plus(imdGas)
@@ -510,6 +511,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		AuthorizationsLen:  uint64(len(auths)),
 		AccessListLen:      uint64(len(accessTuples)),
 		StorageKeysLen:     uint64(accessTuples.StorageKeys()),
+		CostPerStateByte:   st.evm.Context.CostPerStateByte,
 		IsContractCreation: contractCreation,
 		IsEIP2:             rules.IsHomestead,
 		IsEIP2028:          rules.IsIstanbul,
@@ -535,17 +537,18 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 			return nil, fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, sender, gas)
 		}
 	}
-	imdGas := evmtypes.MdGas{
-		Regular: intrinsicGasResult.RegularGas,
-		State:   intrinsicGasResult.StateGas,
-	}
-	st.gasRemaining = SplitIntoMdGas(st.msg.Gas(), imdGas, rules)
-	st.initialGas = st.gasRemaining.Plus(imdGas)
 
-	verifiedAuthorities, err := st.verifyAuthorities(auths, contractCreation, rules.ChainID.String())
+	verifiedAuthorities, stateIgasRefund, err := st.verifyAuthorities(auths, contractCreation, rules.ChainID.String())
 	if err != nil {
 		return nil, err
 	}
+
+	imdGas := evmtypes.MdGas{
+		Regular: intrinsicGasResult.RegularGas,
+		State:   intrinsicGasResult.StateGas - stateIgasRefund,
+	}
+	st.gasRemaining = SplitIntoMdGas(st.msg.Gas(), imdGas, rules)
+	st.initialGas = st.gasRemaining.Plus(imdGas)
 
 	if t := st.evm.Config().Tracer; t != nil && t.OnGasChange != nil {
 		t.OnGasChange(st.initialGas.Total(), st.gasRemaining.Total(), tracing.GasChangeTxIntrinsicGas)
@@ -687,11 +690,16 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	return result, nil
 }
 
-func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contractCreation bool, chainID string) ([]accounts.Address, error) {
+func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contractCreation bool, chainID string) ([]accounts.Address, uint64, error) {
+	var stateIgasRefund uint64
+	var stateIgasRefundInc uint64
+	if st.evm.ChainRules().IsAmsterdam {
+		stateIgasRefundInc = 112 * st.evm.Context.CostPerStateByte
+	}
 	verifiedAuthorities := make([]accounts.Address, 0)
 	if len(auths) > 0 {
 		if contractCreation {
-			return nil, errors.New("contract creation not allowed with type4 txs")
+			return nil, stateIgasRefund, errors.New("contract creation not allowed with type4 txs")
 		}
 		var b [32]byte
 		data := bytes.NewBuffer(nil)
@@ -722,13 +730,13 @@ func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contra
 			// 4. authority code should be empty or already delegated
 			codeHash, err := st.state.GetCodeHash(authority)
 			if err != nil {
-				return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+				return nil, stateIgasRefund, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 			}
 			if !codeHash.IsEmpty() {
 				// check for delegation
 				_, ok, err := st.state.GetDelegatedDesignation(authority)
 				if err != nil {
-					return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+					return nil, stateIgasRefund, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 				}
 				if !ok {
 					log.Debug("authority code is not empty or not delegated, skipping", "auth index", i)
@@ -740,7 +748,7 @@ func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contra
 			// 5. nonce check
 			authorityNonce, err := st.state.GetNonce(authority)
 			if err != nil {
-				return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+				return nil, stateIgasRefund, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 			}
 			if authorityNonce != auth.Nonce {
 				log.Trace("invalid nonce, skipping", "auth index", i)
@@ -750,31 +758,35 @@ func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contra
 			// 6. Add PER_EMPTY_ACCOUNT_COST - PER_AUTH_BASE_COST gas to the global refund counter if authority exists in the trie.
 			exists, err := st.state.Exist(authority)
 			if err != nil {
-				return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+				return nil, stateIgasRefund, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 			}
 			if exists {
-				st.state.AddRefund(params.PerEmptyAccountCost - params.PerAuthBaseCost)
+				if st.evm.ChainRules().IsAmsterdam {
+					stateIgasRefund += stateIgasRefundInc
+				} else {
+					st.state.AddRefund(params.PerEmptyAccountCost - params.PerAuthBaseCost)
+				}
 			}
 
 			// 7. set authority code
 			if auth.Address == (common.Address{}) {
 				if err := st.state.SetCode(authority, nil); err != nil {
-					return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+					return nil, stateIgasRefund, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 				}
 			} else {
 				if err := st.state.SetCode(authority, types.AddressToDelegation(accounts.InternAddress(auth.Address))); err != nil {
-					return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+					return nil, stateIgasRefund, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 				}
 			}
 
 			// 8. increase the nonce of authority
 			if err := st.state.SetNonce(authority, authorityNonce+1); err != nil {
-				return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+				return nil, stateIgasRefund, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 			}
 		}
 	}
 
-	return verifiedAuthorities, nil
+	return verifiedAuthorities, stateIgasRefund, nil
 }
 
 func (st *StateTransition) refundGas() {

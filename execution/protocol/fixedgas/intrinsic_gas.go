@@ -30,6 +30,7 @@ type IntrinsicGasCalcArgs struct {
 	AuthorizationsLen  uint64
 	AccessListLen      uint64
 	StorageKeysLen     uint64
+	CostPerStateByte   uint64
 	IsContractCreation bool
 	IsEIP2             bool
 	IsEIP2028          bool
@@ -149,19 +150,36 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 	}
 
 	// Add the cost of authorizations
-	product, overflow := math.SafeMul(args.AuthorizationsLen, params.PerEmptyAccountCost)
-	if overflow {
-		return IntrinsicGasCalcResult{}, true
-	}
-
-	stateGas, overflow = math.SafeAdd(stateGas, product)
-	if overflow {
-		return IntrinsicGasCalcResult{}, true
-	}
-
 	if args.IsEIP8037 {
-		result.StateGas = stateGas
+		regularCost, overflow := math.SafeMul(args.AuthorizationsLen, params.PerAuthBaseCostEIP8037)
+		if overflow {
+			return IntrinsicGasCalcResult{}, true
+		}
+		result.RegularGas, overflow = math.SafeAdd(result.RegularGas, regularCost)
+		if overflow {
+			return IntrinsicGasCalcResult{}, true
+		}
+		authCost, overflow := math.SafeMul(135, args.CostPerStateByte)
+		if overflow {
+			return IntrinsicGasCalcResult{}, true
+		}
+		authCost, overflow = math.SafeMul(args.AuthorizationsLen, authCost)
+		if overflow {
+			return IntrinsicGasCalcResult{}, true
+		}
+		result.StateGas, overflow = math.SafeAdd(stateGas, authCost)
+		if overflow {
+			return IntrinsicGasCalcResult{}, true
+		}
 	} else {
+		authCost, overflow := math.SafeMul(args.AuthorizationsLen, params.PerEmptyAccountCost)
+		if overflow {
+			return IntrinsicGasCalcResult{}, true
+		}
+		stateGas, overflow = math.SafeAdd(stateGas, authCost)
+		if overflow {
+			return IntrinsicGasCalcResult{}, true
+		}
 		result.RegularGas, overflow = math.SafeAdd(result.RegularGas, stateGas)
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
