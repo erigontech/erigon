@@ -118,8 +118,16 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 		return fmt.Errorf("failed to truncate tx nums: %w", err)
 	}
 
-	// Update the head block hash
+	// Remove stale canonical hashes above the target block
+	if err := rawdb.TruncateCanonicalHash(tx, targetBlock+1, false); err != nil {
+		return fmt.Errorf("failed to truncate canonical hashes: %w", err)
+	}
+
+	// Update the head block hash and head header hash
 	rawdb.WriteHeadBlockHash(tx, targetHash)
+	if err := rawdb.WriteHeadHeaderHash(tx, targetHash); err != nil {
+		return fmt.Errorf("failed to write head header hash: %w", err)
+	}
 
 	// Update stage progress for headers and bodies
 	if err := stages.SaveStageProgress(tx, stages.Headers, targetBlock); err != nil {

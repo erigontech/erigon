@@ -47,6 +47,8 @@ import (
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/privateapi"
 	"github.com/erigontech/erigon/rpc"
@@ -775,6 +777,7 @@ func TestSetHead(t *testing.T) {
 	// Determine the canonical head of the test chain.
 	roTx, err := m.DB.BeginRo(ctx)
 	require.NoError(t, err)
+	defer roTx.Rollback()
 	head, err := rpchelper.GetLatestBlockNumber(roTx)
 	require.NoError(t, err)
 	roTx.Rollback()
@@ -849,4 +852,93 @@ func TestSetHead(t *testing.T) {
 		require.True(t, mock.setHeadCalled)
 		require.Equal(t, uint64(1), mock.setHeadBlock)
 	})
+}
+
+// TestSetHeadCanonicalCleanup verifies that ExecModule.SetHead properly cleans
+// up canonical chain metadata after unwinding. Specifically it checks that:
+//   - Canonical hashes above the target block are removed
+//   - HeadHeaderHash is updated to match the target block
+func TestSetHeadCanonicalCleanup(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx := m.Ctx
+
+	// Snapshot canonical state before the unwind.
+	roTx, err := m.DB.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	head, err := rpchelper.GetLatestBlockNumber(roTx)
+	require.NoError(t, err)
+	require.Greater(t, head, uint64(2), "test chain must have at least 3 blocks")
+
+	targetBlock := head - 2
+
+	// Record canonical hashes that should be removed after unwind.
+	staleHashes := make(map[uint64]common.Hash)
+	for i := targetBlock + 1; i <= head; i++ {
+		h, err := rawdb.ReadCanonicalHash(roTx, i)
+		require.NoError(t, err)
+		require.NotEqual(t, common.Hash{}, h, "block %d must have a canonical hash before unwind", i)
+		staleHashes[i] = h
+	}
+
+	// Record the target block hash (should survive the unwind).
+	targetHash, err := rawdb.ReadCanonicalHash(roTx, targetBlock)
+	require.NoError(t, err)
+	require.NotEqual(t, common.Hash{}, targetHash)
+	roTx.Rollback()
+
+	// --- Perform the unwind ---
+	err = m.ExecModule.SetHead(ctx, targetBlock)
+	require.NoError(t, err)
+
+	// --- Verify DB state after unwind ---
+	roTx, err = m.DB.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	// 1) Canonical hashes above targetBlock must be gone.
+	for blockNum := range staleHashes {
+		h, err := rawdb.ReadCanonicalHash(roTx, blockNum)
+		require.NoError(t, err)
+		require.Equal(t, common.Hash{}, h,
+			"canonical hash at block %d should be removed after SetHead(%d)", blockNum, targetBlock)
+	}
+
+	// 2) The target block's canonical hash must still be intact.
+	h, err := rawdb.ReadCanonicalHash(roTx, targetBlock)
+	require.NoError(t, err)
+	require.Equal(t, targetHash, h, "canonical hash at target block must survive the unwind")
+
+	// 3) HeadHeaderHash must point to the target block.
+	headHeaderHash := rawdb.ReadHeadHeaderHash(roTx)
+	require.Equal(t, targetHash, headHeaderHash,
+		"HeadHeaderHash should equal the target block hash after SetHead")
+
+	// Record the original head hash (before unwind) for the FCU below.
+	originalHeadHash := staleHashes[head]
+	roTx.Rollback()
+
+	// 4) A subsequent UpdateForkChoice back to the original head must succeed,
+	//    proving that SetHead left the DB in a consistent state.
+	headHashH256 := gointerfaces.ConvertHashToH256(originalHeadHash)
+	receipt, err := m.ExecModule.UpdateForkChoice(ctx, &executionproto.ForkChoice{
+		HeadBlockHash:      headHashH256,
+		SafeBlockHash:      headHashH256,
+		FinalizedBlockHash: headHashH256,
+	})
+	require.NoError(t, err)
+	require.Equal(t, executionproto.ExecutionStatus_Success, receipt.Status,
+		"UpdateForkChoice back to original head should succeed after SetHead")
+
+	// Verify the chain is back at the original head.
+	roTx, err = m.DB.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	restoredHead, err := rpchelper.GetLatestBlockNumber(roTx)
+	require.NoError(t, err)
+	require.Equal(t, head, restoredHead, "chain head should be restored after UpdateForkChoice")
 }
