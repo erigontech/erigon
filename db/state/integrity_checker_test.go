@@ -104,6 +104,7 @@ func getPopulatedCommitmentFilesItem(t *testing.T, dirs datadir.Dirs, startTxNum
 	comp, err := seg.NewCompressor(context.Background(), "", base+"data", dirs.Tmp, seg.DefaultCfg, log.LvlInfo, logger)
 	require.NoError(t, err)
 	require.NotNil(t, comp)
+	defer comp.Close()
 
 	err = comp.Compress()
 	require.NoError(t, err)
@@ -111,6 +112,7 @@ func getPopulatedCommitmentFilesItem(t *testing.T, dirs datadir.Dirs, startTxNum
 	decomp, err := seg.NewDecompressor(base + "data")
 	require.NoError(t, err)
 	require.NotNil(t, decomp)
+	t.Cleanup(decomp.Close)
 
 	salt := uint32(1)
 	var idx0 *recsplit.Index
@@ -125,19 +127,13 @@ func getPopulatedCommitmentFilesItem(t *testing.T, dirs datadir.Dirs, startTxNum
 		}, logger)
 		require.NoError(t, err)
 		require.NotNil(t, index)
+		defer index.Close()
 
 		require.NoError(t, index.Build(context.Background()))
 
 		idx0 = recsplit.MustOpen(base + "index")
+		t.Cleanup(idx0.Close)
 	}
-
-	t.Cleanup(func() {
-		comp.Close()
-		decomp.Close()
-		if idx0 != nil {
-			idx0.Close()
-		}
-	})
 
 	return &FilesItem{decompressor: decomp, index: idx0, startTxNum: startTxNum, endTxNum: endTxNum}
 }

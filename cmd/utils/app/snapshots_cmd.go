@@ -37,6 +37,7 @@ import (
 	g "github.com/anacrolix/generics"
 	"github.com/c2h5oh/datasize"
 	"github.com/urfave/cli/v2"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -52,6 +53,7 @@ import (
 	"github.com/erigontech/erigon/db/compress"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/webseeds"
 	"github.com/erigontech/erigon/db/etl"
@@ -314,14 +316,11 @@ var snapshotCommand = cli.Command{
 				"It is useful for shadowforks, recovering broken nodes or chains, and/or for doing experiments that " +
 				"involve replaying certain blocks.",
 			Action: func(cliCtx *cli.Context) error {
-				logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
-				if err != nil {
-					panic(fmt.Errorf("rollback snapshots to block: could not setup logger: %w", err))
-				}
+				logger := log.Root()
 				block := cliCtx.Uint64("block")
 				prompt := cliCtx.Bool("prompt")
 				dataDir := cliCtx.String(utils.DataDirFlag.Name)
-				err = doRollbackSnapshotsToBlock(cliCtx.Context, block, prompt, dataDir, logger)
+				err := doRollbackSnapshotsToBlock(cliCtx.Context, block, prompt, dataDir, logger)
 				if err != nil {
 					logger.Error(err.Error())
 					return err
@@ -391,21 +390,20 @@ var snapshotCommand = cli.Command{
 			Description: "run slow validation of files. use --check to run multiple/single",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
-				&cli.StringFlag{Name: "check", Usage: fmt.Sprintf("comma separated list from: %s", integrity.AllChecks)},
-				&cli.StringFlag{Name: "skip-check", Usage: fmt.Sprintf("comma separated list from: %s", integrity.AllChecks)},
+				&cli.StringFlag{Name: "check", Usage: fmt.Sprintf("comma separated list from: %s", integrity.FastChecks)},
+				&cli.StringFlag{Name: "skip-check", Usage: fmt.Sprintf("comma separated list from: %s", integrity.FastChecks)},
 				&cli.BoolFlag{Name: "failFast", Value: true, Usage: "to stop after 1st problem or print WARN log and continue check"},
 				&cli.Uint64Flag{Name: "fromStep", Value: 0, Usage: "skip files before given step"},
 				&cli.StringFlag{Name: "file-integrity-cache", Usage: "path to integrity check cache file (speeds up repeated runs)"},
+				&cli.Int64Flag{Name: "seed", Usage: "random seed for sampling (auto-generated if not set)"},
+				&cli.Float64Flag{Name: "sample", Usage: "fraction of items to check via pseudo-random sampling (0.0-1.0)", Value: 1.0},
 			}),
 		},
 		{
 			Name: "check-commitment-hist-at-blk",
 			Action: func(cliCtx *cli.Context) error {
-				logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
-				if err != nil {
-					panic(fmt.Errorf("check commitment history at block: could not setup logger: %w", err))
-				}
-				err = doCheckCommitmentHistAtBlk(cliCtx, logger)
+				logger := log.Root()
+				err := doCheckCommitmentHistAtBlk(cliCtx, logger)
 				if err != nil {
 					log.Error("[check-commitment-hist-at-blk] failure", "err", err)
 					return err
@@ -422,11 +420,8 @@ var snapshotCommand = cli.Command{
 		{
 			Name: "check-commitment-hist-at-blk-range",
 			Action: func(cliCtx *cli.Context) error {
-				logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
-				if err != nil {
-					panic(fmt.Errorf("check commitment history at block range: could not setup logger: %w", err))
-				}
-				err = doCheckCommitmentHistAtBlkRange(cliCtx, logger)
+				logger := log.Root()
+				err := doCheckCommitmentHistAtBlkRange(cliCtx, logger)
 				if err != nil {
 					log.Error("[check-commitment-hist-at-blk-range] failure", "err", err)
 					return err
@@ -439,17 +434,16 @@ var snapshotCommand = cli.Command{
 				&utils.DataDirFlag,
 				&cli.Uint64Flag{Name: "from", Usage: "block number from which to start verifying", Required: true},
 				&cli.Uint64Flag{Name: "to", Usage: "block number up to which to verify (exclusive)", Required: true},
+				&cli.Int64Flag{Name: "seed", Usage: "random seed for block sampling (auto-generated if not set)"},
+				&cli.Float64Flag{Name: "sample", Usage: "fraction of blocks to check via pseudo-random sampling (0.0-1.0)", Value: 1.0},
 			}),
 		},
 		{
 			Name:        "verify-state",
 			Description: "verify correspondence between state snapshots (accounts, storage) and commitment snapshots",
 			Action: func(cliCtx *cli.Context) error {
-				logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
-				if err != nil {
-					panic(fmt.Errorf("verify-state: could not setup logger: %w", err))
-				}
-				err = doVerifyState(cliCtx, logger)
+				logger := log.Root()
+				err := doVerifyState(cliCtx, logger)
 				if err != nil {
 					log.Error("[verify-state] failure", "err", err)
 					return err
@@ -467,11 +461,8 @@ var snapshotCommand = cli.Command{
 			Name:        "verify-history",
 			Description: "verify history snapshots by re-executing blocks and comparing state changes",
 			Action: func(cliCtx *cli.Context) error {
-				logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
-				if err != nil {
-					panic(fmt.Errorf("verify-history: could not setup logger: %w", err))
-				}
-				err = doVerifyHistory(cliCtx, logger)
+				logger := log.Root()
+				err := doVerifyHistory(cliCtx, logger)
 				if err != nil {
 					log.Error("[verify-history] failure", "err", err)
 					return err
@@ -652,15 +643,15 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, err err
 	if !ok {
 		return false, false, fmt.Errorf("can't find accessor for %s", filePath)
 	}
-	rd, btindex, err := state.OpenBtreeIndexAndDataFile(bt, filePath, state.DefaultBtreeM, statecfg.Schema.CommitmentDomain.Compression, false)
+	rd, bti, err := btindex.OpenBtreeIndexAndDataFile(bt, filePath, btindex.DefaultBtreeM, statecfg.Schema.CommitmentDomain.Compression, false)
 	if err != nil {
 		return false, false, err
 	}
 	defer rd.Close()
-	defer btindex.Close()
+	defer bti.Close()
 
 	getter := seg.NewReader(rd.MakeGetter(), statecfg.Schema.CommitmentDomain.Compression)
-	c, err := btindex.Seek(getter, []byte(stateKey))
+	c, err := bti.Seek(getter, []byte(stateKey))
 	if err != nil {
 		return false, false, err
 	}
@@ -880,6 +871,33 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 		removed++
 	}
 	fmt.Printf("removed %d state snapshot segments files\n", removed)
+
+	// Unconditionally remove .tmp files from all snapshot directories.
+	// These are artifacts from incomplete/cancelled operations and should always be cleaned up.
+	var removedTmp uint64
+	for _, dirPath := range []string{dirs.Snap, dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapCaplin, dirs.SnapForkable} {
+		tmpFiles, err := snaptype.TmpFiles(dirPath)
+		if err != nil {
+			return err
+		}
+		for _, tmpFile := range tmpFiles {
+			if dryRun {
+				fmt.Printf("[dry-run] rm %s\n", tmpFile)
+				removedTmp++
+				continue
+			}
+			if err := dir2.RemoveFile(tmpFile); err != nil {
+				if !errors.Is(err, fs.ErrNotExist) {
+					return err
+				}
+			}
+			removedTmp++
+		}
+	}
+	if removedTmp > 0 {
+		fmt.Printf("removed %d .tmp files\n", removedTmp)
+	}
+
 	fmt.Printf("\n\nBefore restarting Erigon, run one of:\n  - `integration stage_custom_trace --reset` if deleted domains are handled by stage_custom_trace\n  - `integration stage_exec --reset` otherwise\nThis prunes DB remnants to avoid gaps between snapshots and DB.\n")
 	return nil
 }
@@ -988,10 +1006,7 @@ func doBtSearch(cliCtx *cli.Context) error {
 		return err
 	}
 	defer l.Unlock()
-	logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
-	if err != nil {
-		return err
-	}
+	logger := log.Root()
 
 	srcF := cliCtx.String("src")
 	dataFilePath := strings.TrimRight(srcF, ".bt") + ".kv"
@@ -1001,7 +1016,7 @@ func doBtSearch(cliCtx *cli.Context) error {
 	dbg.ReadMemStats(&m)
 	logger.Info("before open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 	compress := seg.CompressKeys | seg.CompressVals
-	kv, idx, err := state.OpenBtreeIndexAndDataFile(srcF, dataFilePath, state.DefaultBtreeM, compress, false)
+	kv, idx, err := btindex.OpenBtreeIndexAndDataFile(srcF, dataFilePath, btindex.DefaultBtreeM, compress, false)
 	if err != nil {
 		return err
 	}
@@ -1033,10 +1048,7 @@ func doBtSearch(cliCtx *cli.Context) error {
 }
 
 func doDebugKey(cliCtx *cli.Context) error {
-	logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
-	if err != nil {
-		return err
-	}
+	logger := log.Root()
 	key := common.FromHex(cliCtx.String("key"))
 	var domain kv.Domain
 	var idx kv.InvertedIdx
@@ -1086,10 +1098,7 @@ func doDebugKey(cliCtx *cli.Context) error {
 }
 
 func doIntegrity(cliCtx *cli.Context) error {
-	logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
-	if err != nil {
-		return err
-	}
+	logger := log.Root()
 
 	ctx := cliCtx.Context
 	checkStr := cliCtx.String("check")
@@ -1100,31 +1109,29 @@ func doIntegrity(cliCtx *cli.Context) error {
 		}
 
 		for _, check := range requestedChecks {
-			if slices.Contains(integrity.AllChecks, check) || slices.Contains(integrity.NonDefaultChecks, check) {
+			if slices.Contains(integrity.AllChecks, check) {
 				continue
 			}
 
 			return fmt.Errorf("requested check %s not found", check)
 		}
 	} else {
-		requestedChecks = integrity.AllChecks
+		requestedChecks = integrity.FastChecks
 	}
 
 	skipChecks := cliCtx.String("skip-check")
 	if len(skipChecks) > 0 {
-		var finalChecks []integrity.Check
+		skipSet := map[integrity.Check]struct{}{}
 		for skipCheck := range strings.SplitSeq(skipChecks, ",") {
-			found := false
-			for _, chk := range requestedChecks {
-				if chk == integrity.Check(skipCheck) {
-					found = true
-					logger.Info("[integrity] skipping check", "check", chk)
-					break
-				}
+			skipSet[integrity.Check(skipCheck)] = struct{}{}
+		}
+		var finalChecks []integrity.Check
+		for _, chk := range requestedChecks {
+			if _, skip := skipSet[chk]; skip {
+				logger.Info("[integrity] skipping check", "check", chk)
+				continue
 			}
-			if !found {
-				finalChecks = append(finalChecks, integrity.Check(skipCheck))
-			}
+			finalChecks = append(finalChecks, chk)
 		}
 
 		requestedChecks = finalChecks
@@ -1146,6 +1153,14 @@ func doIntegrity(cliCtx *cli.Context) error {
 			}
 		}()
 	}
+
+	var seed int64
+	if cliCtx.IsSet("seed") {
+		seed = cliCtx.Int64("seed")
+	} else {
+		seed = time.Now().UnixNano()
+	}
+	sampleRatio := cliCtx.Float64("sample")
 
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
@@ -1172,96 +1187,103 @@ func doIntegrity(cliCtx *cli.Context) error {
 
 	blockReader, _ := blockRetire.IO()
 	heimdallStore, _ := blockRetire.BorStore()
+
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(2)
 	for _, chk := range requestedChecks {
-		logger.Info("[integrity] starting", "check", chk)
-		switch chk {
-		case integrity.BlocksTxnID:
-			if err := blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(failFast); err != nil {
-				return err
+		chk := chk
+		g.Go(func() error {
+			logger.Info("[integrity] starting", "check", chk, "seed", seed, "sampleRatio", sampleRatio)
+			switch chk {
+			case integrity.BlocksTxnID:
+				if err := blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(failFast); err != nil {
+					return err
+				}
+			case integrity.HeaderNoGaps:
+				if err := integrity.NoGapsInCanonicalHeaders(ctx, db, blockReader, failFast); err != nil {
+					return err
+				}
+			case integrity.Blocks:
+				if err := integrity.SnapBlocksRead(ctx, db, blockReader, 0, 0, failFast); err != nil {
+					return err
+				}
+			case integrity.InvertedIndex:
+				if err := integrity.E3EfFiles(ctx, db, failFast, fromStep); err != nil {
+					return err
+				}
+			case integrity.HistoryNoSystemTxs:
+				if err := integrity.HistoryCheckNoSystemTxs(ctx, db, blockReader); err != nil {
+					return err
+				}
+			case integrity.BorEvents:
+				if !CheckBorChain(chainConfig.ChainName) {
+					logger.Info("BorEvents skipped because not bor chain")
+					return nil
+				}
+				snapshots := blockReader.BorSnapshots().(*heimdall.RoSnapshots)
+				if err := bridge.ValidateBorEvents(ctx, db, blockReader, snapshots, 0, 0, failFast); err != nil {
+					return err
+				}
+			case integrity.BorSpans:
+				if !CheckBorChain(chainConfig.ChainName) {
+					logger.Info("BorSpans skipped because not bor chain")
+					return nil
+				}
+				if err := heimdall.ValidateBorSpans(ctx, logger, dirs, heimdallStore, borSnaps, failFast); err != nil {
+					return err
+				}
+			case integrity.BorCheckpoints:
+				if !CheckBorChain(chainConfig.ChainName) {
+					logger.Info("BorCheckpoints skipped because not bor chain")
+					return nil
+				}
+				if err := heimdall.ValidateBorCheckpoints(ctx, logger, dirs, heimdallStore, borSnaps, failFast); err != nil {
+					return err
+				}
+			case integrity.ReceiptsNoDups:
+				if err := integrity.CheckReceiptsNoDups(ctx, db, blockReader, failFast, seed, sampleRatio); err != nil {
+					return err
+				}
+			case integrity.RCacheNoDups:
+				if err := integrity.CheckRCacheNoDups(ctx, db, blockReader, failFast, seed, sampleRatio); err != nil {
+					return err
+				}
+			case integrity.StateProgress:
+				if err := integrity.CheckStateProgress(ctx, db, blockReader, failFast); err != nil {
+					return err
+				}
+			case integrity.Publishable:
+				if err := doPublishable(cliCtx, chainDB); err != nil {
+					return err
+				}
+			case integrity.CommitmentRoot:
+				if err := integrity.CheckCommitmentRoot(ctx, db, blockReader, failFast, logger); err != nil {
+					return err
+				}
+			case integrity.CommitmentKvi:
+				if err := integrity.CheckCommitmentKvi(ctx, db, cache, failFast, logger); err != nil {
+					return err
+				}
+			case integrity.CommitmentKvDeref:
+				if err := integrity.CheckCommitmentKvDeref(ctx, db, cache, failFast, logger); err != nil {
+					return err
+				}
+			case integrity.CommitmentHistVal:
+				if err := integrity.CheckCommitmentHistVal(ctx, db, blockReader, failFast, seed, sampleRatio, logger); err != nil {
+					return err
+				}
+			case integrity.StateVerify:
+				if err := integrity.CheckStateVerify(ctx, db, failFast, fromStep, logger); err != nil {
+					return err
+				}
+			default:
+				return fmt.Errorf("unknown check: %s", chk)
 			}
-		case integrity.HeaderNoGaps:
-			if err := integrity.NoGapsInCanonicalHeaders(ctx, db, blockReader, failFast); err != nil {
-				return err
-			}
-		case integrity.Blocks:
-			if err := integrity.SnapBlocksRead(ctx, db, blockReader, 0, 0, failFast); err != nil {
-				return err
-			}
-		case integrity.InvertedIndex:
-			if err := integrity.E3EfFiles(ctx, db, failFast, fromStep); err != nil {
-				return err
-			}
-		case integrity.HistoryNoSystemTxs:
-			if err := integrity.HistoryCheckNoSystemTxs(ctx, db, blockReader); err != nil {
-				return err
-			}
-		case integrity.BorEvents:
-			if !CheckBorChain(chainConfig.ChainName) {
-				logger.Info("BorEvents skipped because not bor chain")
-				continue
-			}
-			snapshots := blockReader.BorSnapshots().(*heimdall.RoSnapshots)
-			if err := bridge.ValidateBorEvents(ctx, db, blockReader, snapshots, 0, 0, failFast); err != nil {
-				return err
-			}
-		case integrity.BorSpans:
-			if !CheckBorChain(chainConfig.ChainName) {
-				logger.Info("BorSpans skipped because not bor chain")
-				continue
-			}
-			if err := heimdall.ValidateBorSpans(ctx, logger, dirs, heimdallStore, borSnaps, failFast); err != nil {
-				return err
-			}
-		case integrity.BorCheckpoints:
-			if !CheckBorChain(chainConfig.ChainName) {
-				logger.Info("BorCheckpoints skipped because not bor chain")
-				continue
-			}
-			if err := heimdall.ValidateBorCheckpoints(ctx, logger, dirs, heimdallStore, borSnaps, failFast); err != nil {
-				return err
-			}
-		case integrity.ReceiptsNoDups:
-			if err := integrity.CheckReceiptsNoDups(ctx, db, blockReader, failFast); err != nil {
-				return err
-			}
-		case integrity.RCacheNoDups:
-			if err := integrity.CheckRCacheNoDups(ctx, db, blockReader, failFast); err != nil {
-				return err
-			}
-		case integrity.StateProgress:
-			if err := integrity.CheckStateProgress(ctx, db, blockReader, failFast); err != nil {
-				return err
-			}
-		case integrity.Publishable:
-			if err := doPublishable(cliCtx, chainDB); err != nil {
-				return err
-			}
-		case integrity.CommitmentRoot:
-			if err := integrity.CheckCommitmentRoot(ctx, db, blockReader, failFast, logger); err != nil {
-				return err
-			}
-		case integrity.CommitmentKvi:
-			if err := integrity.CheckCommitmentKvi(ctx, db, cache, failFast, logger); err != nil {
-				return err
-			}
-		case integrity.CommitmentKvDeref:
-			if err := integrity.CheckCommitmentKvDeref(ctx, db, cache, failFast, logger); err != nil {
-				return err
-			}
-		case integrity.CommitmentHistVal:
-			if err := integrity.CheckCommitmentHistVal(ctx, db, blockReader, failFast, logger); err != nil {
-				return err
-			}
-		case integrity.StateVerify:
-			if err := integrity.CheckStateVerify(ctx, db, failFast, fromStep, logger); err != nil {
-				return err
-			}
-		default:
-			return fmt.Errorf("unknown check: %s", chk)
-		}
+			return nil
+		})
 	}
 
-	return nil
+	return g.Wait()
 }
 
 func doCheckCommitmentHistAtBlk(cliCtx *cli.Context, logger log.Logger) error {
@@ -1286,7 +1308,7 @@ func doCheckCommitmentHistAtBlk(cliCtx *cli.Context, logger log.Logger) error {
 	defer db.Close()
 	blockReader, _ := blockRetire.IO()
 	blockNum := cliCtx.Uint64("block")
-	if err = integrity.CheckCommitmentHistAtBlk(ctx, db, blockReader, blockNum, logger); err != nil {
+	if err = integrity.CheckCommitmentHistAtBlk(ctx, db, blockReader, blockNum, log.LvlInfo, logger); err != nil {
 		return fmt.Errorf("checkCommitmentHistAtBlk: %d, %w", blockNum, err)
 	}
 	return nil
@@ -1305,8 +1327,6 @@ func doCheckCommitmentHistAtBlkRange(cliCtx *cli.Context, logger log.Logger) err
 		return err
 	}
 	defer clean()
-	defer blockRetire.MadvNormal().DisableReadAhead()
-	defer agg.MadvNormal().DisableReadAhead()
 	db, err := temporal.New(chainDB, agg)
 	if err != nil {
 		return err
@@ -1315,7 +1335,15 @@ func doCheckCommitmentHistAtBlkRange(cliCtx *cli.Context, logger log.Logger) err
 	blockReader, _ := blockRetire.IO()
 	from := cliCtx.Uint64("from")
 	to := cliCtx.Uint64("to")
-	return integrity.CheckCommitmentHistAtBlkRange(ctx, db, blockReader, from, to, logger)
+	var seed int64
+	if cliCtx.IsSet("seed") {
+		seed = cliCtx.Int64("seed")
+	} else {
+		seed = time.Now().UnixNano()
+	}
+	sampleRatio := cliCtx.Float64("sample")
+	logger.Info("[check-commitment-hist-at-blk-range] sampling config", "seed", seed, "sampleRatio", sampleRatio)
+	return integrity.CheckCommitmentHistAtBlkRange(ctx, db, blockReader, from, to, seed, sampleRatio, logger)
 }
 
 func doVerifyState(cliCtx *cli.Context, logger log.Logger) error {
@@ -1374,10 +1402,7 @@ func doVerifyHistory(cliCtx *cli.Context, logger log.Logger) error {
 	fromStep := cliCtx.Uint64("from-step")
 	workers := cliCtx.Int("workers")
 	if workers <= 0 {
-		workers = runtime.NumCPU() / 2
-		if workers < 1 {
-			workers = 1
-		}
+		workers = max(runtime.NumCPU()/2, 1)
 	}
 
 	verifier := verify.NewHistoryVerifier(blockReader, chainConfig, engine, workers, logger)
@@ -1626,13 +1651,13 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs, chainDB kv.RoDB) error 
 		if err != nil {
 			return fmt.Errorf("failed to read PersistReceipts config: %w", err)
 		}
-		log.Warn("This installation doesn't persist receipts cache; ignoring .rcache checks")
+		log.Warn("[integrity] This installation doesn't persist receipts cache; ignoring .rcache checks")
 
 		commitmentHistory, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
 		if err != nil {
 			return fmt.Errorf("failed to read CommitmentHistory config: %w", err)
 		}
-		log.Warn("This installation doesn't persist commitment history; ignoring commitment history checks")
+		log.Warn("[integrity] This installation doesn't persist commitment history; ignoring commitment history checks")
 
 		return nil
 	}); err != nil {
@@ -2007,10 +2032,7 @@ func deleteFilesWithExtensions(dir string, extensions []string) error {
 }
 
 func doBlkTxNum(cliCtx *cli.Context) error {
-	logger, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
-	if err != nil {
-		return err
-	}
+	logger := log.Root()
 	defer logger.Info("Done")
 
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
@@ -2146,7 +2168,7 @@ func doMeta(cliCtx *cli.Context) error {
 			panic(err)
 		}
 		defer src.Close()
-		bt, err := state.OpenBtreeIndexWithDecompressor(fname, state.DefaultBtreeM, seg.NewReader(src.MakeGetter(), seg.CompressNone))
+		bt, err := btindex.OpenBtreeIndexWithDecompressor(fname, btindex.DefaultBtreeM, seg.NewReader(src.MakeGetter(), seg.CompressNone))
 		if err != nil {
 			return err
 		}
@@ -2179,10 +2201,7 @@ func doMeta(cliCtx *cli.Context) error {
 }
 
 func doDecompressSpeed(cliCtx *cli.Context) error {
-	logger, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
-	if err != nil {
-		return err
-	}
+	logger := log.Root()
 	args := cliCtx.Args()
 	if args.Len() < 1 {
 		return errors.New("expecting file path as a first argument")
@@ -2195,10 +2214,15 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 	}
 	defer decompressor.Close()
 	func() {
-		defer decompressor.MadvSequential().DisableReadAhead()
+		//defer decompressor.MadvSequential().DisableReadAhead()
 
 		t := time.Now()
-		g := decompressor.MakeGetter()
+		view, err := decompressor.OpenSequentialView()
+		if err != nil {
+			panic(err)
+		}
+		defer view.Close()
+		g := view.MakeGetter()
 		buf := make([]byte, 0, 16*etl.BufIOSize)
 		for g.HasNext() {
 			buf, _ = g.Next(buf[:0])
@@ -2206,10 +2230,15 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 		logger.Info("decompress speed", "took", time.Since(t))
 	}()
 	func() {
-		defer decompressor.MadvSequential().DisableReadAhead()
+		//defer decompressor.MadvSequential().DisableReadAhead()
 
 		t := time.Now()
-		g := decompressor.MakeGetter()
+		view, err := decompressor.OpenSequentialView()
+		if err != nil {
+			panic(err)
+		}
+		defer view.Close()
+		g := view.MakeGetter()
 		for g.HasNext() {
 			_, _ = g.Skip()
 		}
@@ -2219,10 +2248,7 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 }
 
 func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
-	logger, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
-	if err != nil {
-		return err
-	}
+	logger := log.Root()
 	defer logger.Info("Done")
 	ctx := cliCtx.Context
 
@@ -2271,10 +2297,7 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	return nil
 }
 func doLS(cliCtx *cli.Context, dirs datadir.Dirs) error {
-	logger, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
-	if err != nil {
-		return err
-	}
+	logger := log.Root()
 	defer logger.Info("Done")
 	ctx := cliCtx.Context
 
@@ -2403,10 +2426,6 @@ func doUncompress(cliCtx *cli.Context) error {
 		return err
 	}
 	defer l.Unlock()
-	if _, err = debug.SetupSimple(cliCtx, true /* rootLogger */); err != nil {
-		return err
-	}
-
 	args := cliCtx.Args()
 	if args.Len() < 1 {
 		return errors.New("expecting file path as a first argument")
@@ -2441,10 +2460,7 @@ func doCompress(cliCtx *cli.Context) error {
 	}
 	defer lck.Unlock()
 
-	logger, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
-	if err != nil {
-		return err
-	}
+	logger := log.Root()
 	ctx := cliCtx.Context
 
 	args := cliCtx.Args()
@@ -2542,10 +2558,7 @@ func doCompress(cliCtx *cli.Context) error {
 }
 
 func doRemoveOverlap(cliCtx *cli.Context, dirs datadir.Dirs) error {
-	logger, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
-	if err != nil {
-		return err
-	}
+	logger := log.Root()
 	defer logger.Info("Done")
 
 	db := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
@@ -2565,10 +2578,7 @@ func doRemoveOverlap(cliCtx *cli.Context, dirs datadir.Dirs) error {
 }
 
 func doUnmerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
-	logger, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
-	if err != nil {
-		return err
-	}
+	logger := log.Root()
 	defer logger.Info("Done")
 
 	ctx := cliCtx.Context
@@ -2700,10 +2710,7 @@ func doUnmerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
 }
 
 func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
-	logger, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
-	if err != nil {
-		return err
-	}
+	logger := log.Root()
 	defer logger.Info("Done")
 	ctx := cliCtx.Context
 
@@ -2834,10 +2841,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 func doCompareIdx(cliCtx *cli.Context) error {
 	// doesn't compare exact hashes offset,
 	// only sizes, counts, offsets, and ordinal lookups.
-	logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
-	if err != nil {
-		return err
-	}
+	logger := log.Root()
 
 	cmpFn := func(f, s uint64, msg string) {
 		if f != s {
@@ -2926,7 +2930,11 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 		Accede(true) // integration tool: open db without creation and without blocking erigon
 }
 func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *state.Aggregator {
-	agg, err := state.New(dirs).SanityOldNaming().Logger(logger).Open(ctx, chainDB)
+	erigonDBSettings, err := state.ResolveErigonDBSettings(dirs, logger, false)
+	if err != nil {
+		panic(err)
+	}
+	agg, err := state.New(dirs).SanityOldNaming().Logger(logger).WithErigonDBSettings(erigonDBSettings).Open(ctx, chainDB)
 	if err != nil {
 		panic(err)
 	}

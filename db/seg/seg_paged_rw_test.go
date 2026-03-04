@@ -19,6 +19,7 @@ package seg
 import (
 	"context"
 	"fmt"
+	"hash/crc32"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -42,7 +43,7 @@ func prepareLoremDictOnPagedWriter(t *testing.T, pageSize int, pageCompression b
 	require.NoError(err)
 	defer c.Close()
 
-	p := NewPagedWriter(NewWriter(c, CompressNone), pageCompression)
+	p := NewPagedWriter(t.Context(), NewWriter(c, CompressNone), pageCompression)
 	for k, w := range loremStrings {
 		key := fmt.Sprintf("key %d", k)
 		val := fmt.Sprintf("%s %d", w, k)
@@ -117,7 +118,7 @@ func (w *multyBytesWriter) GetValuesOnCompressedPage() int { return w.pageSize }
 func TestPage(t *testing.T) {
 	sampling := 2
 	buf, require := &multyBytesWriter{pageSize: sampling}, require.New(t)
-	w := NewPagedWriter(buf, false)
+	w := NewPagedWriter(t.Context(), buf, false)
 	for i := 0; i < sampling+1; i++ {
 		k, v := fmt.Sprintf("k %d", i), fmt.Sprintf("v %d", i)
 		require.NoError(w.Add([]byte(k), []byte(v)))
@@ -132,8 +133,7 @@ func TestPage(t *testing.T) {
 	for i := 0; i < sampling+1; i++ {
 		iter++
 		expectK, expectV := fmt.Sprintf("k %d", i), fmt.Sprintf("v %d", i)
-		v, ok, _ := GetFromPage([]byte(expectK), pages[pageNum], nil, false)
-		require.True(ok)
+		v, _ := GetFromPage([]byte(expectK), pages[pageNum], nil, false)
 		require.Equal(expectV, string(v), i)
 		require.True(p1.HasNext())
 		k, v := p1.Next()
@@ -172,86 +172,71 @@ func TestPagedReaderWithCompression(t *testing.T) {
 	require.Equal(len(loremStrings), i, "should have read all entries")
 }
 
-func TestGetFromPageKeyNotFound(t *testing.T) {
-	require := require.New(t)
+func TestPagedWriterCRC32Sequential(t *testing.T) {
+	// Test that we can compute CRC32 of written pages
+	mock := &multyBytesWriter{pageSize: 4}
+	pw := NewPagedWriter(t.Context(), mock, true)
 
-	// Create a page with 4 key-value pairs
-	pageSize := 4
-	buf := &multyBytesWriter{pageSize: pageSize}
-	w := NewPagedWriter(buf, false)
-	for i := 0; i < pageSize; i++ {
-		k, v := fmt.Sprintf("k %d", i), fmt.Sprintf("v %d", i)
-		require.NoError(w.Add([]byte(k), []byte(v)))
-	}
-	require.NoError(w.Flush())
-	pages := buf.Bytes()
-	require.Len(pages, 1)
-
-	// Existing keys should be found
-	for i := 0; i < pageSize; i++ {
-		k := fmt.Sprintf("k %d", i)
-		v, ok, _ := GetFromPage([]byte(k), pages[0], nil, false)
-		require.True(ok, "key %q should be found", k)
-		require.Equal(fmt.Sprintf("v %d", i), string(v))
+	// Add test data
+	testData := []struct{ k, v string }{
+		{"k1", "v1"}, {"k2", "v2"}, {"k3", "v3"},
+		{"k4", "v4"}, {"k5", "v5"}, {"k6", "v6"},
+		{"k7", "v7"}, {"k8", "v8"}, {"k9", "v9"},
+		{"k10", "v10"}, {"k11", "v11"}, {"k12", "v12"},
+		{"k13", "longer_value_here"}, {"k14", "another_longer_value"},
+		{"k15", ""}, // empty value
+		{"key_with_spaces", "value with spaces"},
+		{"unicode_key_αβγ", "unicode_value_δεζ"},
+		{"binary_like", "\x00\x01\x02\x03\x04\x05\x06\x07"},
+		{"repeated", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 	}
 
-	// Non-existing key should NOT be found
-	v, ok, _ := GetFromPage([]byte("nonexistent"), pages[0], nil, false)
-	require.False(ok, "nonexistent key should not be found")
-	require.Nil(v)
-
-	// Key with similar prefix should NOT be found
-	v, ok, _ = GetFromPage([]byte("k 99"), pages[0], nil, false)
-	require.False(ok, "key 'k 99' should not be found")
-	require.Nil(v)
-}
-
-// TestGetFromPageNonFullPages verifies that when pages have varying numbers
-// of entries (e.g., a last page with fewer entries than the page size),
-// GetFromPage still finds keys correctly. This tests the scenario that
-// caused the .vi index page offset regression.
-func TestGetFromPageNonFullPages(t *testing.T) {
-	require := require.New(t)
-
-	// Create pages with pageSize=4 but 5 entries total
-	// This produces: page0 with 4 entries, page1 with 1 entry
-	pageSize := 4
-	totalEntries := pageSize + 1
-	buf := &multyBytesWriter{pageSize: pageSize}
-	w := NewPagedWriter(buf, false)
-	for i := 0; i < totalEntries; i++ {
-		k, v := fmt.Sprintf("k %d", i), fmt.Sprintf("v %d", i)
-		require.NoError(w.Add([]byte(k), []byte(v)))
+	for _, kv := range testData {
+		if err := pw.Add([]byte(kv.k), []byte(kv.v)); err != nil {
+			t.Fatalf("Add failed: %v", err)
+		}
 	}
-	require.NoError(w.Flush())
-	pages := buf.Bytes()
-	require.Len(pages, 2, "should have 2 pages: one full and one partial")
-
-	// All 4 keys on page 0 should be found on page 0
-	for i := 0; i < pageSize; i++ {
-		k := fmt.Sprintf("k %d", i)
-		v, ok, _ := GetFromPage([]byte(k), pages[0], nil, false)
-		require.True(ok, "key %q should be found on page 0", k)
-		require.Equal(fmt.Sprintf("v %d", i), string(v))
+	if err := pw.Compress(); err != nil {
+		t.Fatalf("Compress failed: %v", err)
 	}
 
-	// The 5th key should NOT be on page 0
-	_, ok, _ := GetFromPage([]byte("k 4"), pages[0], nil, false)
-	require.False(ok, "key 'k 4' should NOT be on page 0")
+	// Compute CRC32 of all pages written
+	hash := crc32.NewIEEE()
+	for _, page := range mock.Bytes() {
+		hash.Write(page)
+	}
+	crc32Sequential := hash.Sum32()
+	t.Logf("Sequential CRC32: 0x%08x", crc32Sequential)
 
-	// The 5th key should be on page 1
-	v, ok, _ := GetFromPage([]byte("k 4"), pages[1], nil, false)
-	require.True(ok, "key 'k 4' should be found on page 1")
-	require.Equal("v 4", string(v))
+	// Now test parallel compression produces same CRC32
+	mock2 := &multyBytesWriter{pageSize: 4}
+	pw2 := NewPagedWriter(t.Context(), mock2, true)
 
-	// Keys from page 0 should NOT be on page 1
-	_, ok, _ = GetFromPage([]byte("k 0"), pages[1], nil, false)
-	require.False(ok, "key 'k 0' should NOT be on page 1")
+	for _, kv := range testData {
+		if err := pw2.Add([]byte(kv.k), []byte(kv.v)); err != nil {
+			t.Fatalf("Add failed: %v", err)
+		}
+	}
+	if err := pw2.Compress(); err != nil {
+		t.Fatalf("Compress failed: %v", err)
+	}
+
+	// Compute CRC32 of parallel compression
+	hash2 := crc32.NewIEEE()
+	for _, page := range mock2.Bytes() {
+		hash2.Write(page)
+	}
+	crc32Parallel := hash2.Sum32()
+	t.Logf("Parallel CRC32:   0x%08x", crc32Parallel)
+
+	if crc32Sequential != crc32Parallel {
+		t.Errorf("CRC32 mismatch: sequential=0x%08x, parallel=0x%08x", crc32Sequential, crc32Parallel)
+	}
 }
 
 func BenchmarkName(b *testing.B) {
 	buf := &multyBytesWriter{pageSize: 16}
-	w := NewPagedWriter(buf, false)
+	w := NewPagedWriter(b.Context(), buf, false)
 	for i := 0; i < 16; i++ {
 		w.Add([]byte{byte(i)}, []byte{10 + byte(i)})
 	}

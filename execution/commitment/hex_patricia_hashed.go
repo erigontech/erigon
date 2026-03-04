@@ -28,6 +28,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -39,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/stateifs"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
@@ -121,12 +121,23 @@ func (hph *HexPatriciaHashed) SpawnSubTrie(ctx PatriciaContext, forNibble int) *
 	return subTrie
 }
 
+var hphPool sync.Pool
+
 func NewHexPatriciaHashed(accountKeyLen int16, ctx PatriciaContext) *HexPatriciaHashed {
+	hph, ok := hphPool.Get().(*HexPatriciaHashed)
+	if !ok {
+		hph = newHexPatriciaHashed()
+	}
+	hph.resetForReuse()
+	hph.accountKeyLen = accountKeyLen
+	hph.ctx = ctx
+	return hph
+}
+
+func newHexPatriciaHashed() *HexPatriciaHashed {
 	hph := &HexPatriciaHashed{
-		ctx:           ctx,
 		keccak:        keccak.NewFastKeccak(),
 		keccak2:       keccak.NewFastKeccak(),
-		accountKeyLen: accountKeyLen,
 		auxBuffer:     bytes.NewBuffer(make([]byte, 8192)),
 		hadToLoadL:    make(map[uint64]skipStat),
 		accValBuf:     make(rlp.RlpEncodedBytes, 128),
@@ -137,6 +148,72 @@ func NewHexPatriciaHashed(accountKeyLen int16, ctx PatriciaContext) *HexPatricia
 	hph.branchEncoder.setMetrics(hph.metrics)
 	hph.branchEncoder.SetDeferUpdates(true) // Enable deferred branch updates by default
 	return hph
+}
+
+// resetForReuse resets all mutable state so a pooled HexPatriciaHashed is safe to reuse.
+// The large grid array is NOT zeroed — activeRows=0 means no cells are live,
+// and cells are properly initialized via cell.reset() during unfold/fold.
+func (hph *HexPatriciaHashed) resetForReuse() {
+	// SetState(nil) resets: root, rootTouched, rootChecked, rootPresent,
+	// currentKeyLen, activeRows, depths, branchBefore, touchMap, afterMap.
+	hph.root.reset()
+	hph.rootTouched = false
+	hph.rootChecked = false
+	hph.rootPresent = false
+	hph.currentKeyLen = 0
+	hph.activeRows = 0
+	for i := range hph.depths {
+		hph.depths[i] = 0
+		hph.branchBefore[i] = false
+		hph.touchMap[i] = 0
+		hph.afterMap[i] = 0
+	}
+
+	// ctx — set by caller after pool get
+	hph.ctx = nil
+
+	// reuse map, don't reallocate
+	clear(hph.hadToLoadL)
+
+	// reuse slice backing
+	hph.mountedTries = hph.mountedTries[:0]
+	hph.mounted = false
+	hph.mountedNib = 0
+
+	// warmup cache
+	hph.cache = nil
+	hph.enableWarmupCache = false
+
+	// tracing / capture
+	hph.capture = nil
+	hph.trace = false
+	hph.traceDomain = false
+
+	// flags
+	hph.memoizationOff = false
+	hph.leaveDeferredForCaller = false
+
+	// auxiliary buffer
+	hph.auxBuffer.Reset()
+
+	// branch encoder: clear deferred updates, reset buffer, nil cache, re-enable deferred
+	hph.branchEncoder.ClearDeferred()
+	hph.branchEncoder.buf.Reset()
+	hph.branchEncoder.cache = nil
+	hph.branchEncoder.SetDeferUpdates(true)
+
+	// depth-to-txnum mapping
+	clear(hph.depthsToTxNum[:])
+}
+
+// Release returns this HexPatriciaHashed to the pool for reuse.
+// After calling Release, the caller must not use the struct.
+func (hph *HexPatriciaHashed) Release() {
+	hph.ctx = nil
+	hph.cache = nil
+	hph.mountedTries = nil
+	hph.capture = nil
+	hphPool.Put(hph)
 }
 
 type cell struct {
@@ -1678,11 +1755,11 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 
 // readBranchAndCheckForFlushing reads a branch from ctx, flushing deferred updates first if the prefix is pending.
 // This ensures we read fresh data when a prefix has been modified but not yet written.
-func (hph *HexPatriciaHashed) readBranchAndCheckForFlushing(prefix []byte) ([]byte, kv.Step, error) {
+func (hph *HexPatriciaHashed) readBranchAndCheckForFlushing(prefix []byte) ([]byte, error) {
 	be := hph.branchEncoder
 	if be.DeferUpdatesEnabled() && be.HasPendingPrefix(prefix) {
 		if err := be.ApplyDeferredUpdates(16, hph.ctx.PutBranch); err != nil {
-			return nil, 0, err
+			return nil, err
 		}
 		be.ClearDeferred()
 	}
@@ -1694,13 +1771,14 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 	key := HexNibblesToCompactBytes(hph.currentKey[:hph.currentKeyLen])
 	hph.metrics.BranchLoad(hph.currentKey[:hph.currentKeyLen])
 
-	branchData, step, err := hph.readBranchAndCheckForFlushing(key)
+	branchData, err := hph.readBranchAndCheckForFlushing(key)
 	if err != nil {
 		return err
 	}
 
-	fileEndTxNum := uint64(step) // TODO: investigate why we cast step to txNum!
-	hph.depthsToTxNum[depth] = fileEndTxNum
+	// depthsToTxNum is used for per-file metrics; step is no longer available
+	// from the cache-or-DB helper (cache never had a meaningful step anyway).
+	hph.depthsToTxNum[depth] = 0
 
 	if len(branchData) >= 2 {
 		branchData = branchData[2:] // skip touch map and keep the rest
@@ -1717,7 +1795,7 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 	if len(branchData) == 0 {
 		log.Warn("got empty branch data during unfold", "key", hex.EncodeToString(key), "row", row, "depth", depth, "deleted", deleted)
 		if hph.trace {
-			branchData, _, _ = hph.branchFromCacheOrDB(key)
+			branchData, _ = hph.branchFromCacheOrDB(key)
 			fmt.Printf("unfoldBranchNode prefix '%x', nibbles [%x] depth %d row %d '%x' %s\n", key, hph.currentKey[:hph.currentKeyLen], depth, row, branchData, BranchData(branchData).String())
 		}
 		return fmt.Errorf("empty branch data read during unfold, compact prefix %x nibbles %x", key, hph.currentKey[:hph.currentKeyLen])
@@ -2797,13 +2875,14 @@ func (hph *HexPatriciaHashed) ResetContext(ctx PatriciaContext) {
 }
 
 // branchFromCacheOrDB reads branch data from cache if available, otherwise from DB.
-func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, kv.Step, error) {
+func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 	if hph.cache != nil {
-		if data, step, found := hph.cache.GetBranch(key); found {
-			return data, step, nil
+		if data, found := hph.cache.GetBranch(key); found {
+			return data, nil
 		}
 	}
-	return hph.ctx.Branch(key)
+	data, _, err := hph.ctx.Branch(key)
+	return data, err
 }
 
 // accountFromCacheOrDB reads account data from cache if available, otherwise from DB.

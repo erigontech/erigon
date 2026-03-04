@@ -192,15 +192,15 @@ func (ht *HistoryRoTx) Files() (res VisibleFiles) {
 }
 
 func (h *History) MissedMapAccessors() (l []*FilesItem) {
-	return h.missedMapAccessors(h.dirtyFiles.Items())
+	return h.missedMapAccessors(h.dirtyFiles.Items(), readDirNames(h.dirs.SnapAccessors))
 }
 
-func (h *History) missedMapAccessors(source []*FilesItem) (l []*FilesItem) {
+func (h *History) missedMapAccessors(source []*FilesItem, dl dirListing) (l []*FilesItem) {
 	if !h.Accessors.Has(statecfg.AccessorHashMap) {
 		return nil
 	}
 	return fileItemsWithMissedAccessors(source, h.stepSize, func(fromStep, toStep kv.Step) []string {
-		fPath, _, _, err := version.FindFilesWithVersionsByPattern(h.vAccessorFilePathMask(fromStep, toStep))
+		fPath, _, _, err := version.MatchVersionedFile(h.vAccessorFileNameMask(fromStep, toStep), dl.names, dl.dir)
 		if err != nil {
 			panic(err)
 		}
@@ -234,104 +234,6 @@ func (h *History) buildVi(ctx context.Context, item *FilesItem, ps *background.P
 }
 
 func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHist *seg.Decompressor, efBaseTxNum uint64, ps *background.ProgressSet) error {
-	// file not the config is the source of truth for the .v file compression state
-	compressedPageValuesCount := hist.CompressedPageValuesCount()
-	if hist.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
-		compressedPageValuesCount = h.HistoryValuesOnCompressedPage
-	}
-
-	if compressedPageValuesCount > 1 {
-		return h.buildVIFromPages(ctx, historyIdxPath, hist, ps)
-	}
-	return h.buildVIFromEF(ctx, historyIdxPath, hist, efHist, efBaseTxNum, ps)
-}
-
-// buildVIFromPages builds the .vi index by reading keys directly from the .v file's pages.
-// This is used for V1 files with page-level compression where each page contains multiple
-// key-value pairs. Reading keys from the pages ensures the index correctly maps each key
-// to its containing page, regardless of whether the .ef file has the same entry ordering.
-func (h *History) buildVIFromPages(ctx context.Context, historyIdxPath string, hist *seg.Decompressor, ps *background.ProgressSet) error {
-	defer hist.MadvSequential().DisableReadAhead()
-
-	histReader := h.dataReader(hist)
-
-	// Count total entries by scanning all pages
-	cnt := 0
-	page := &seg.Page{}
-	histReader.Reset(0)
-	for histReader.HasNext() { //TODO: use vFile.Count()
-		pageData, _ := histReader.Next(nil)
-		page.Reset(pageData, true)
-		for page.HasNext() {
-			page.Next()
-			cnt++
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-	}
-
-	_, fName := filepath.Split(historyIdxPath)
-	p := ps.AddNew(fName, uint64(cnt))
-	defer ps.Delete(p)
-	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   cnt,
-		Enums:      false,
-		BucketSize: recsplit.DefaultBucketSize,
-		LeafSize:   recsplit.DefaultLeafSize,
-		TmpDir:     h.dirs.Tmp,
-		IndexFile:  historyIdxPath,
-		Salt:       h.salt.Load(),
-		NoFsync:    h.noFsync,
-	}, h.logger)
-	if err != nil {
-		return fmt.Errorf("create recsplit: %w", err)
-	}
-	defer rs.Close()
-	rs.LogLvl(log.LvlTrace)
-
-	for {
-		histReader.Reset(0)
-		var valOffset uint64
-
-		for histReader.HasNext() {
-			pageData, nextOffset := histReader.Next(nil)
-			page.Reset(pageData, true)
-			for page.HasNext() {
-				k, _ := page.Next()
-				if err = rs.AddKey(k, valOffset); err != nil {
-					return err
-				}
-			}
-			p.Processed.Add(1)
-			valOffset = nextOffset
-
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
-		}
-
-		if err = rs.Build(ctx); err != nil {
-			if rs.Collision() {
-				log.Info("Building recsplit. Collision happened. It's ok. Restarting...")
-				rs.ResetNextSalt()
-			} else {
-				return fmt.Errorf("build idx: %w", err)
-			}
-		} else {
-			break
-		}
-	}
-	return nil
-}
-
-// buildVIFromEF builds the .vi index using the .ef inverted index file to enumerate keys.
-// This is used for V0 files or files without page-level compression.
-func (h *History) buildVIFromEF(ctx context.Context, historyIdxPath string, hist, efHist *seg.Decompressor, efBaseTxNum uint64, ps *background.ProgressSet) error {
 	var histKey []byte
 	var valOffset uint64
 
@@ -342,8 +244,8 @@ func (h *History) buildVIFromEF(ctx context.Context, historyIdxPath string, hist
 
 	var keyBuf, valBuf []byte
 	cnt := uint64(0)
-	for iiReader.HasNext() { //TODO: use vFile.Count()
-		keyBuf, _ = iiReader.Next(keyBuf[:0])
+	for iiReader.HasNext() {
+		keyBuf, _ = iiReader.Next(keyBuf[:0]) // skip key
 		valBuf, _ = iiReader.Next(valBuf[:0])
 		cnt += multiencseq.Count(efBaseTxNum, valBuf)
 		select {
@@ -367,6 +269,7 @@ func (h *History) buildVIFromEF(ctx context.Context, historyIdxPath string, hist
 		IndexFile:  historyIdxPath,
 		Salt:       h.salt.Load(),
 		NoFsync:    h.noFsync,
+		//Workers:    h.CompressorCfg.Workers,
 	}, h.logger)
 	if err != nil {
 		return fmt.Errorf("create recsplit: %w", err)
@@ -377,15 +280,18 @@ func (h *History) buildVIFromEF(ctx context.Context, historyIdxPath string, hist
 	seq := &multiencseq.SequenceReader{}
 	it := &multiencseq.SequenceIterator{}
 
+	i := 0
 	for {
 		histReader.Reset(0)
 		iiReader.Reset(0)
+		rs.SetProgress(p)
 
 		valOffset = 0
 		for iiReader.HasNext() {
 			keyBuf, _ = iiReader.Next(keyBuf[:0])
 			valBuf, _ = iiReader.Next(valBuf[:0])
-			p.Processed.Add(1)
+
+			// fmt.Printf("ef key %x\n", keyBuf)
 
 			seq.Reset(efBaseTxNum, valBuf)
 			it.Reset(seq, 0)
@@ -398,7 +304,22 @@ func (h *History) buildVIFromEF(ctx context.Context, historyIdxPath string, hist
 				if err = rs.AddKey(histKey, valOffset); err != nil {
 					return err
 				}
-				valOffset, _ = histReader.Skip()
+
+				// file not the config is the source of truth for the .v file compression state
+				compressedPageValuesCount := hist.CompressedPageValuesCount()
+
+				if hist.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
+					compressedPageValuesCount = h.HistoryValuesOnCompressedPage
+				}
+
+				if compressedPageValuesCount == 0 {
+					valOffset, _ = histReader.Skip()
+				} else {
+					i++
+					if i%compressedPageValuesCount == 0 {
+						valOffset, _ = histReader.Skip()
+					}
+				}
 			}
 
 			select {
@@ -627,7 +548,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 	if h.noFsync {
 		_histComp.DisableFsync()
 	}
-	historyWriter := h.dataWriter(_histComp)
+	historyWriter := h.dataWriter(ctx, _histComp)
 
 	_efComp, err = seg.NewCompressor(ctx, "collate idx "+h.FilenameBase, efHistoryPath, h.dirs.Tmp, h.CompressorCfg, log.LvlTrace, h.logger)
 	if err != nil {
@@ -869,24 +790,14 @@ func (h *History) buildFiles(ctx context.Context, step kv.Step, collation Histor
 	}
 
 	{
-		ps := background.NewProgressSet()
-		_, efHistoryFileName := filepath.Split(collation.efHistoryPath)
-		p := ps.AddNew(efHistoryFileName, 1)
-		defer ps.Delete(p)
-
 		if err = collation.efHistoryComp.Compress(); err != nil {
 			return HistoryFiles{}, fmt.Errorf("compress %s .ef history: %w", h.FilenameBase, err)
 		}
-		ps.Delete(p)
 	}
 	{
-		_, historyFileName := filepath.Split(collation.historyPath)
-		p := ps.AddNew(historyFileName, 1)
-		defer ps.Delete(p)
 		if err = collation.historyComp.Compress(); err != nil {
 			return HistoryFiles{}, fmt.Errorf("compress %s .v history: %w", h.FilenameBase, err)
 		}
-		ps.Delete(p)
 	}
 	collation.Close()
 
@@ -956,15 +867,15 @@ func (h *History) dataReader(f *seg.Decompressor) *seg.Reader {
 	}
 	return seg.NewReader(f.MakeGetter(), h.Compression)
 }
-func (h *History) dataWriter(f *seg.Compressor) *seg.PagedWriter {
+func (h *History) dataWriter(ctx context.Context, f *seg.Compressor) *seg.PagedWriter {
 	if !strings.Contains(f.FileName(), ".v") {
 		panic("assert: miss-use " + f.FileName())
 	}
-	return seg.NewPagedWriter(seg.NewWriter(f, h.Compression), f.GetValuesOnCompressedPage() > 0)
+	return seg.NewPagedWriter(ctx, seg.NewWriter(f, h.Compression), f.GetValuesOnCompressedPage() > 0)
 }
 func (ht *HistoryRoTx) dataReader(f *seg.Decompressor) *seg.Reader { return ht.h.dataReader(f) }
-func (ht *HistoryRoTx) dataWriter(f *seg.Compressor) *seg.PagedWriter {
-	return ht.h.dataWriter(f)
+func (ht *HistoryRoTx) dataWriter(ctx context.Context, f *seg.Compressor) *seg.PagedWriter {
+	return ht.h.dataWriter(ctx, f)
 }
 
 func (h *History) isEmpty(tx kv.Tx) (bool, error) {
@@ -1335,6 +1246,7 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	}
 	g := ht.statelessGetter(historyItem.i)
 	g.Reset(offset)
+	//fmt.Printf("[dbg] hist.seek: offset=%d\n", offset)
 	v, _ := g.Next(nil)
 	if traceGetAsOf == ht.h.FilenameBase {
 		fmt.Printf("DomainGetAsOf(%s, %x, %d) -> %s, histTxNum=%d, isNil(v)=%t\n", ht.h.FilenameBase, key, txNum, g.FileName(), histTxNum, v == nil)
@@ -1347,13 +1259,7 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	}
 
 	if compressedPageValuesCount > 1 {
-		v, ok, ht.snappyReadBuffer = seg.GetFromPage(historyKey, v, ht.snappyReadBuffer, true)
-		if !ok {
-			// Key not found in page. The inverted index (.ef) contains a txNum
-			// entry that has no corresponding entry in the history values (.v)
-			// file. Fall back to DB/latest lookup to get the correct value.
-			return nil, false, nil
-		}
+		v, ht.snappyReadBuffer = seg.GetFromPage(historyKey, v, ht.snappyReadBuffer, true)
 	}
 	return v, true, nil
 }
@@ -1513,14 +1419,20 @@ func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By
 		}
 		g := ht.iit.dataReader(item.src.decompressor)
 		g.Reset(0)
-		wrapper := NewSegReaderWrapper(g)
-		if wrapper.HasNext() {
-			key, val, err := wrapper.Next()
-			if err != nil {
-				s.Close()
-				return nil, err
+		if g.HasNext() {
+			key, _ := g.Next(nil)
+			var val []byte
+			if g.HasNext() {
+				val, _ = g.Next(nil)
 			}
-			heap.Push(&s.h, &ReconItem{g: wrapper, key: key, val: val, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum})
+			histFileIdx := -1
+			for j := range ht.files {
+				if ht.files[j].startTxNum == item.startTxNum && ht.files[j].endTxNum == item.endTxNum {
+					histFileIdx = j
+					break
+				}
+			}
+			heap.Push(&s.h, &ReconItem{g: g, key: key, val: val, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, histFileIdx: histFileIdx})
 		}
 	}
 	if err := s.advance(); err != nil {
@@ -1655,10 +1567,7 @@ func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, du
 
 				if compressedPageValuesCount > 0 {
 					histKeyBuf = historyKey(txNum, key, histKeyBuf)
-					val, ok, _ = seg.GetFromPage(histKeyBuf, val, nil, true)
-					if !ok {
-						return fmt.Errorf("HistoryDump: not found key [%x] on compressed page: %s", key, viFile.Fullpath())
-					}
+					val, _ = seg.GetFromPage(histKeyBuf, val, nil, true)
 				}
 
 				dumpTo(key, txNum, val)

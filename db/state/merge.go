@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/recsplit"
@@ -118,11 +119,8 @@ func (iit *InvertedIndexRoTx) FirstStepNotInFiles() kv.Step {
 // make merge determenistic across nodes: even if Node has much small files - do earliest-first merges
 // As any other methods of DomainRoTx - it can't see any files overlaps or garbage
 func (dt *DomainRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
-	hr := dt.ht.findMergeRange(maxEndTxNum, maxSpan)
-
 	r := DomainRanges{
 		name:    dt.name,
-		history: hr,
 		aggStep: dt.stepSize,
 	}
 	for _, item := range dt.files {
@@ -142,11 +140,25 @@ func (dt *DomainRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 
 		r.values = MergeRange{"", true, fromTxNum, item.endTxNum}
 	}
+
+	// merge History only if nothing to merge in Domain. to minimize amount of Domain files:
+	//  - to prioritize blocks execution perf (which needs only LatestState - Domains)
+	if !r.any() {
+		r.history = dt.ht.findMergeRange(maxEndTxNum, maxSpan)
+	}
+
 	return r
 }
 
 func (ht *HistoryRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges {
 	var r HistoryRanges
+	if dbg.NoMergeHistory() {
+		return r
+	}
+	if dbg.NoDeepMergeHistory() {
+		maxSpan = min(maxSpan, 2*ht.stepSize)
+	}
+
 	mr := ht.iit.findMergeRange(maxEndTxNum, maxSpan)
 	r.index = *mr
 
@@ -527,11 +539,11 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 
 	if dt.d.Accessors.Has(statecfg.AccessorBTree) {
 		btPath := dt.d.kvBtAccessorNewFilePath(fromStep, toStep)
-		btM := DefaultBtreeM
+		btM := btindex.DefaultBtreeM
 		if toStep == 0 && dt.d.FilenameBase == "commitment" {
 			btM = 128
 		}
-		valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, btM, dt.dataReader(valuesIn.decompressor), *dt.salt, ps, dt.d.dirs.Tmp, dt.d.logger, dt.d.noFsync, dt.d.Accessors)
+		valuesIn.bindex, err = btindex.CreateBtreeIndexWithDecompressor(btPath, btM, dt.dataReader(valuesIn.decompressor), *dt.salt, ps, dt.d.dirs.Tmp, dt.d.logger, dt.d.noFsync, dt.d.Accessors)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", dt.d.FilenameBase, r.values.from, r.values.to, err)
 		}
@@ -600,7 +612,12 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 	}
 
 	write := iit.dataWriter(comp, false)
-	p := ps.AddNew(path.Base(datPath), 1)
+
+	cnt := 0
+	for _, item := range files {
+		cnt += item.decompressor.Count()
+	}
+	p := ps.AddNew(path.Base(datPath), uint64(cnt))
 	defer ps.Delete(p)
 
 	var cp CursorHeap
@@ -633,7 +650,9 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 	var keyBuf, valBuf []byte
 	var lastKey, lastVal []byte
 	preSeq, mergeSeq := &multiencseq.SequenceReader{}, &multiencseq.SequenceReader{}
-	preIt, mergeIt := &multiencseq.SequenceIterator{}, &multiencseq.SequenceIterator{}
+	preIt := &multiencseq.SequenceIterator{}
+	builder := &multiencseq.SequenceBuilder{}
+	i := uint64(0)
 	for cp.Len() > 0 {
 		lastKey = append(lastKey[:0], cp[0].key...)
 		lastVal = append(lastVal[:0], cp[0].val...)
@@ -641,16 +660,16 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 		// Pre-rebase the first sequence
 		preSeq.Reset(cp[0].startTxNum, lastVal)
 		preIt.Reset(preSeq, 0)
-		newSeq := multiencseq.NewBuilder(startTxNum, preSeq.Count(), preSeq.Max())
+		builder.Reset(startTxNum, preSeq.Count(), preSeq.Max())
 		for preIt.HasNext() {
 			v, err := preIt.Next()
 			if err != nil {
 				return nil, err
 			}
-			newSeq.AddOffset(v)
+			builder.AddOffset(v)
 		}
-		newSeq.Build()
-		lastVal = newSeq.AppendBytes(nil)
+		builder.Build()
+		lastVal = builder.AppendBytes(lastVal[:0])
 		var mergedOnce bool
 
 		// Advance all the items that have this key (including the top)
@@ -659,11 +678,10 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 			if mergedOnce {
 				mergeSeq.Reset(ci1.startTxNum, ci1.val)
 				preSeq.Reset(startTxNum, lastVal)
-				merged, mergeErr := mergeSeq.Merge(preSeq, startTxNum, mergeIt, preIt)
-				if mergeErr != nil {
+				if mergeErr := builder.Merge(mergeSeq, preSeq, startTxNum); mergeErr != nil {
 					return nil, fmt.Errorf("merge %s inverted index: %w", iit.ii.FilenameBase, mergeErr)
 				}
-				lastVal = merged.AppendBytes(nil)
+				lastVal = builder.AppendBytes(lastVal[:0])
 			} else {
 				mergedOnce = true
 			}
@@ -671,9 +689,13 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 			if ci1.kvReader.HasNext() {
 				ci1.key, _ = ci1.kvReader.Next(ci1.key[:0])
 				ci1.val, _ = ci1.kvReader.Next(ci1.val[:0])
+				i += 2
 				// fmt.Printf("heap next push %s [%d] %x\n", ii.KeysTable, ci1.endTxNum, ci1.key)
 				heap.Push(&cp, ci1)
 			}
+		}
+		if i%1024 == 0 {
+			p.Processed.Store(i)
 		}
 		if keyBuf != nil {
 			// fmt.Printf("pput %x->%x\n", keyBuf, valBuf)
@@ -775,8 +797,13 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 			comp.DisableFsync()
 		}
 
-		pagedWr := ht.dataWriter(comp)
-		p := ps.AddNew(path.Base(datPath), 1)
+		pagedWr := ht.dataWriter(ctx, comp)
+
+		cnt := 0
+		for _, item := range indexFiles {
+			cnt += item.decompressor.Count()
+		}
+		p := ps.AddNew(path.Base(datPath), uint64(cnt/2))
 		defer ps.Delete(p)
 
 		var cp CursorHeap
@@ -853,6 +880,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				}
 
 				// fmt.Printf("fput '%x'->%x\n", lastKey, ci1.val)
+				p.Processed.Add(1)
 				if ci1.kvReader.HasNext() {
 					ci1.key, _ = ci1.kvReader.Next(ci1.key[:0])
 					ci1.val, _ = ci1.kvReader.Next(ci1.val[:0])

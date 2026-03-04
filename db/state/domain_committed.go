@@ -85,8 +85,8 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 		}
 	}
 
-	aux := make([]byte, 0, 256)
-	return branch.ReplacePlainKeys(aux, func(key []byte, isStorage bool) ([]byte, error) {
+	var result commitment.BranchData
+	result, at.branchDerefBuf, err = branch.ReplacePlainKeys(at.branchDerefBuf[:0], func(key []byte, isStorage bool) ([]byte, error) {
 		if isStorage {
 			if len(key) == length.Addr+length.Hash {
 				return nil, nil // save storage key as is
@@ -121,6 +121,10 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 		}
 		return apkBuf, nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func DecodeReferenceKey(from []byte) uint64 {
@@ -286,6 +290,9 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter *seg.Reader) 
 // to accounts and storage items, then looks them up in the new, merged files, and replaces them with
 // the updated references
 func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, storage *DomainRoTx, mergedAccount, mergedStorage *FilesItem) (valueTransformer, error) {
+	if !rng.needMerge {
+		panic(fmt.Sprintf("assert: commitmentValTransformDomain called with domain.needMerge=false (from=%d to=%d): caller must guard with values.needMerge", rng.from, rng.to))
+	}
 	var keyBuf [60]byte // 52b key and 8b for inverted step
 	var err error
 	shortened := make([]byte, 16)
@@ -424,12 +431,12 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 			return shortened, nil
 		}
 
-		temp, err := commitment.BranchData(valBuf).ReplacePlainKeys(dt.comBuf[:0], replacer)
+		var branchData commitment.BranchData
+		branchData, dt.comBuf, err = commitment.BranchData(valBuf).ReplacePlainKeys(dt.comBuf[:0], replacer)
 		if err != nil {
 			return nil, err
 		}
-		dt.comBuf = append(dt.comBuf[:0], temp...) // cover branch data case
-		return dt.comBuf, nil
+		return branchData, nil
 	}
 
 	return vt, nil

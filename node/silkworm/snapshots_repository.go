@@ -9,6 +9,7 @@ import (
 	silkworm_go "github.com/erigontech/silkworm-go"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
@@ -48,7 +49,7 @@ type MemoryMappedFile interface {
 
 var _ MemoryMappedFile = (*seg.Decompressor)(nil)
 var _ MemoryMappedFile = (*recsplit.Index)(nil)
-var _ MemoryMappedFile = (*state.BtIndex)(nil)
+var _ MemoryMappedFile = (*btindex.BtIndex)(nil)
 
 func memoryMappedFile(file MemoryMappedFile) silkworm_go.MemoryMappedFile {
 	return silkworm_go.MemoryMappedFile{

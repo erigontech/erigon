@@ -117,6 +117,11 @@ func (s *SimpleSequence) Seek(v uint64) (uint64, bool) {
 	return s.Get(uint64(idx)), true
 }
 
+func (s *SimpleSequence) Has(v uint64) bool {
+	n, ok := s.Seek(v)
+	return ok && n == v
+}
+
 func (s *SimpleSequence) Iterator() *SimpleSequenceIterator {
 	return &SimpleSequenceIterator{
 		seq: s,

@@ -110,7 +110,7 @@ type TxResult struct {
 
 	TraceFroms        map[accounts.Address]struct{}
 	TraceTos          map[accounts.Address]struct{}
-	AccessedAddresses map[accounts.Address]struct{}
+	AccessedAddresses state.AccessSet
 }
 
 func (r *TxResult) compare(other *TxResult) int {
@@ -468,9 +468,11 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		if txTask.BlockNumber() == 0 {
 
 			//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
-			_, ibs, err = genesiswrite.GenesisToBlock(nil, genesis, dirs, txTask.Logger)
-			if err != nil {
-				panic(err)
+			if genesis != nil {
+				_, ibs, err = genesiswrite.GenesisToBlock(nil, genesis, dirs, txTask.Logger)
+				if err != nil {
+					panic(err)
+				}
 			}
 			// For Genesis, rules should be empty, so that empty accounts can be included
 			rules = &chain.Rules{}
@@ -952,6 +954,9 @@ func (q *PriorityQueue[T]) AwaitDrain(ctx context.Context, waitTime time.Duratio
 	q.Unlock()
 
 	if resultCh == nil {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
 		var none T
 		return q.Drain(ctx, none)
 	}

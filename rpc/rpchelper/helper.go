@@ -77,8 +77,14 @@ func GetBlockNumber(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, tx
 }
 
 func GetCanonicalBlockNumber(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br services.FullBlockReader, filters *Filters) (uint64, common.Hash, bool, error) {
-	bn, bh, latest, _, err := _GetBlockNumber(ctx, true, blockNrOrHash, tx, br, filters)
-	return bn, bh, latest, err
+	bn, bh, latest, found, err := _GetBlockNumber(ctx, true, blockNrOrHash, tx, br, filters)
+	if err != nil {
+		return 0, common.Hash{}, false, err
+	}
+	if !found {
+		return bn, bh, latest, rpc.BlockNotFoundErr{BlockId: blockNrOrHash.String()}
+	}
+	return bn, bh, latest, nil
 }
 
 func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br services.FullBlockReader, filters *Filters) (blockNumber uint64, hash common.Hash, latest bool, found bool, err error) {
@@ -255,6 +261,9 @@ func (hr *cachedHistoryReaderV3) ReadAccountData(address accounts.Address) (*acc
 	}
 
 	if ok {
+		if len(enc) == 0 {
+			return nil, nil
+		}
 		var a accounts.Account
 		if err := accounts.DeserialiseV3(&a, enc); err != nil {
 			return nil, fmt.Errorf("%sread account data (cache)(%x): %w", hr.TracePrefix(), address, err)
