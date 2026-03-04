@@ -1,0 +1,56 @@
+# Erigon
+
+> Erigon is a high-performance Ethereum execution client known for its efficiency, modularity, and minimal disk footprint. It features an integrated consensus layer (Caplin), BitTorrent-based historical data distribution, and OtterSync for fast node synchronization.
+
+## Getting Started
+
+- [Introduction](https://docs.erigon.tech/erigon/v3.2): Overview of Erigon's core features and architecture
+- [Why Erigon?](https://docs.erigon.tech/erigon/v3.2/get-started/readme/why-using-erigon): Key advantages over other Ethereum clients
+- [Hardware Requirements](https://docs.erigon.tech/erigon/v3.2/get-started/hardware-requirements): System requirements for running Erigon
+- [Installation](https://docs.erigon.tech/erigon/v3.2/get-started/installation): How to install Erigon from source or Docker
+- [Migrating from Geth](https://docs.erigon.tech/erigon/v3.2/get-started/migrating-from-geth): Guide for users switching from go-ethereum
+
+## Running a Node
+
+- [Basic Usage](https://docs.erigon.tech/erigon/v3.2/fundamentals/basic-usage): Essential commands and options
+- [Sync Modes](https://docs.erigon.tech/erigon/v3.2/fundamentals/sync-modes): Full, archive, and minimal sync options
+- [CLI Reference](https://docs.erigon.tech/erigon/v3.2/fundamentals/configuring-erigon): Complete command-line flag reference
+- [Supported Networks](https://docs.erigon.tech/erigon/v3.2/fundamentals/supported-networks): Ethereum mainnet, testnets, and L2s
+- [Docker Compose](https://docs.erigon.tech/erigon/v3.2/fundamentals/docker-compose): Running Erigon with Docker
+
+## JSON-RPC API
+
+- [RPC Service Overview](https://docs.erigon.tech/erigon/v3.2/interacting-with-erigon): How to interact with Erigon via RPC
+- [eth namespace](https://docs.erigon.tech/erigon/v3.2/interacting-with-erigon/eth): Standard Ethereum JSON-RPC methods
+- [erigon namespace](https://docs.erigon.tech/erigon/v3.2/interacting-with-erigon/erigon): Erigon-specific RPC methods
+- [debug namespace](https://docs.erigon.tech/erigon/v3.2/interacting-with-erigon/debug): Debugging and tracing methods
+- [trace namespace](https://docs.erigon.tech/erigon/v3.2/interacting-with-erigon/trace): OpenEthereum-compatible tracing
+- [txpool namespace](https://docs.erigon.tech/erigon/v3.2/interacting-with-erigon/txpool): Transaction pool inspection
+- [gRPC API](https://docs.erigon.tech/erigon/v3.2/interacting-with-erigon/grpc): Low-level gRPC interface for advanced use
+
+## Architecture & Modules
+
+- [Caplin](https://docs.erigon.tech/erigon/v3.2/fundamentals/caplin): Integrated consensus layer client
+- [RPC Daemon](https://docs.erigon.tech/erigon/v3.2/fundamentals/modules/rpc-daemon): Separate RPC service module
+- [TxPool](https://docs.erigon.tech/erigon/v3.2/fundamentals/modules/txpool): Transaction pool module
+- [Sentry](https://docs.erigon.tech/erigon/v3.2/fundamentals/modules/sentry): P2P networking module
+- [Downloader](https://docs.erigon.tech/erigon/v3.2/fundamentals/modules/downloader): BitTorrent-based data downloader
+
+## Staking
+
+- [Staking with Caplin](https://docs.erigon.tech/erigon/v3.2/staking/caplin): Using the integrated consensus client as validator
+- [External Consensus Client](https://docs.erigon.tech/erigon/v3.2/staking/external-consensus-client-as-validator): Using Lighthouse, Prysm, etc.
+
+## Optional
+
+- [Performance Tricks](https://docs.erigon.tech/erigon/v3.2/fundamentals/performance-tricks): Optimization tips for production
+- [Optimizing Storage](https://docs.erigon.tech/erigon/v3.2/fundamentals/optimizing-storage): Reducing disk usage
+- [Security](https://docs.erigon.tech/erigon/v3.2/fundamentals/security): Security best practices
+- [Otterscan](https://docs.erigon.tech/erigon/v3.2/fundamentals/otterscan): Block explorer for Erigon
+- [Contributing](https://docs.erigon.tech/erigon/v3.2/about/contributing): How to contribute to Erigon
+
+## Source Code
+
+- [GitHub Repository](https://github.com/erigontech/erigon): Main source code repository
+- [Releases](https://github.com/erigontech/erigon/releases): Download binaries and release notes
+- [Docker Hub](https://hub.docker.com/r/erigontech/erigon): Official Docker images
