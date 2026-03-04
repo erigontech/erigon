@@ -837,6 +837,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, db kv.TemporalRoDB, br s
 	start := time.Now()
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(runtime.GOMAXPROCS(-1)) // all cpus, because no producer-worker
+	var blks uint64
 	for blockNum := from; blockNum < to; blockNum++ {
 		if sampleRatio < 1.0 && rng.Float64() >= sampleRatio {
 			continue
