@@ -274,7 +274,13 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 				return err
 			}
 			commitments := block.Block.Body.GetBlobKzgCommitments()
-			if commitments == nil || commitments.Len() == int(blobsCount) {
+			if commitments == nil {
+				// For GLOAS, nil means SignedExecutionPayloadBid is absent — unexpected for a valid block.
+				// For pre-GLOAS this should not happen on Deneb+.
+				b.logger.Warn("[BlobHistoryDownloader] skipping block with nil kzg commitments", "slot", block.Block.Slot, "version", block.Version())
+				continue
+			}
+			if commitments.Len() == int(blobsCount) {
 				continue
 			}
 			batch = append(batch, block)
