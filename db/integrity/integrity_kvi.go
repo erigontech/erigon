@@ -77,7 +77,7 @@ func CheckKvis(ctx context.Context, tx kv.TemporalTx, domain kv.Domain, failFast
 			logger.Warn(err.Error())
 		}
 	}
-	logger.Info("checked kvi files in", "dur", time.Since(start), "files", len(files), "keys", keyCount)
+	logger.Info("[integrity] CommitmentKvi", "dur", time.Since(start), "files", len(files), "keys", keyCount)
 	return nil
 }
 
@@ -89,7 +89,7 @@ type kviWorkItem struct {
 func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression seg.FileCompression, failFast bool, logger log.Logger) (uint64, error) {
 	kviFileName := filepath.Base(kviPath)
 	kvFileName := filepath.Base(kvPath)
-	logger.Info("[integrity] checking kvi", "kvi", kviFileName, "kv", kvFileName)
+	logger.Info("[integrity] CommitmentKvi", "kvi", kviFileName, "kv", kvFileName)
 	start := time.Now()
 	kvi, err := recsplit.OpenIndex(kviPath)
 	if err != nil {
@@ -116,7 +116,7 @@ func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression 
 	trace := logger.Enabled(ctx, log.LvlTrace)
 	checkOne := func(kviReader *recsplit.IndexReader, work kviWorkItem) error {
 		if trace {
-			logger.Trace("[integrity] checking kvi for", "key", hex.EncodeToString(work.key), "offset", work.offset, "kvi", kviFileName)
+			logger.Trace("[integrity] CommitmentKvi", "key", hex.EncodeToString(work.key), "offset", work.offset, "kvi", kviFileName)
 		}
 		kviOffset, found := kviReader.Lookup(work.key)
 		if !found {
@@ -186,7 +186,7 @@ func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression 
 				percent := fmt.Sprintf("%.1f%%", float64(keyCount)/float64(kvi.KeyCount())*100)
 				rate := float64(keyCount) / time.Since(start).Seconds()
 				eta := time.Duration(float64(kvi.KeyCount()-keyCount)/rate) * time.Second
-				logger.Info("[integrity] kvi progress", "at", at, "p", percent, "k/s", rate, "eta", eta, "kvi", kviFileName)
+				logger.Info("[integrity] CommitmentKvi", "at", at, "p", percent, "k/s", rate, "eta", eta, "kvi", kviFileName)
 			default:
 			}
 		}
@@ -198,6 +198,6 @@ func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression 
 	}
 	duration := time.Since(start)
 	rate := float64(keyCount) / duration.Seconds()
-	logger.Info("checked kvi in", "dur", duration, "keys", keyCount, "k/s", rate, "kvi", kviFileName, "kv", kvFileName)
+	logger.Info("[integrity] CommitmentKvi", "dur", duration, "keys", keyCount, "k/s", rate, "kvi", kviFileName, "kv", kvFileName)
 	return keyCount, firstErr
 }
