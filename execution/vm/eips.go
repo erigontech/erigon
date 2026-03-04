@@ -387,6 +387,5 @@ func enable8037(jt *JumpTable) {
 	jt[CREATE2].constantGas = params.Create2GasEIP8037
 	jt[CREATE2].stateGas = stateGasCreate
 	jt[CALL].stateGas = stateGasCall
-	jt[CALLCODE].stateGas = stateGasCall
 	jt[SSTORE].stateGas = stateGasSstore
 }
