@@ -115,7 +115,7 @@ Additionally, several state transition gaps need porting: DropTip pre-preCheck o
 **Files:**
 - Modify: `execution/protocol/state_transition.go`
 
-- [ ] Add DropTip + price override block BEFORE `st.preCheck()` in TransitionDb (reference: /tmp/arb_st.go lines 525-535):
+- [x] Add DropTip + price override block BEFORE `st.preCheck()` in TransitionDb (reference: /tmp/arb_st.go lines 525-535):
   ```
   if st.evm.ProcessingHook.DropTip() && st.msg.GasPrice().Cmp(&st.evm.Context.BaseFee) > 0 {
       mmsg := st.msg.(*types.Message)
@@ -123,9 +123,9 @@ Additionally, several state transition gaps need porting: DropTip pre-preCheck o
       ...
   }
   ```
-- [ ] Keep existing DropTip check at line 635 as fallback (sets effectiveTip to zero)
-- [ ] Write test: `TestTransitionDb_DropTipPrePreCheck` — verify gasPrice is overridden before execution for Arbitrum delayed messages
-- [ ] Run `go test ./execution/protocol/... -count=1` — must pass
+- [x] Keep existing DropTip check at line 635 as fallback (sets effectiveTip to zero)
+- [x] Write test: `TestTransitionDb_DropTipPrePreCheck` — verify gasPrice is overridden before execution for Arbitrum delayed messages
+- [x] Run `go test ./execution/protocol/... -count=1` — must pass
 
 ### Task 5: Gate intrinsic gas check for Arbitrum
 

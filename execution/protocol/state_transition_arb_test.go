@@ -168,6 +168,114 @@ func TestTransitionDb_MultiGasStartHookEarlyReturn(t *testing.T) {
 	require.Equal(t, expectedMultiGas.Get(multigas.ResourceKindL1Calldata), result.UsedMultiGas.Get(multigas.ResourceKindL1Calldata))
 }
 
+// dropTipHook is a mock TxProcessingHook that returns true for DropTip(),
+// allowing tests to verify the pre-preCheck gasPrice override.
+type dropTipHook struct {
+	earlyReturnHook
+}
+
+func (h dropTipHook) DropTip() bool                                            { return true }
+func (h dropTipHook) StartTxHook() (bool, multigas.MultiGas, error, []byte)    { return false, multigas.ZeroGas(), nil, nil }
+
+func TestTransitionDb_DropTipPrePreCheck(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+
+	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(sd.Close)
+
+	r := state.NewReaderV3(sd.AsGetter(tx))
+	s := state.New(r)
+
+	sender := accounts.InternAddress(common.HexToAddress("0xaaaa"))
+	recipient := accounts.InternAddress(common.HexToAddress("0xbbbb"))
+	coinbase := accounts.InternAddress(common.HexToAddress("0xdead"))
+
+	initialBalance := uint256.NewInt(1_000_000_000_000_000_000)
+	s.CreateAccount(sender, true)
+	s.AddBalance(sender, *initialBalance, tracing.BalanceChangeUnspecified)
+	s.SetNonce(sender, 0)
+
+	baseFee := uint256.NewInt(10)
+	originalGasPrice := uint256.NewInt(100) // 10x the baseFee
+
+	blockCtx := evmtypes.BlockContext{
+		BlockNumber: 1,
+		GasLimit:    30_000_000,
+		BaseFee:     *baseFee,
+		Coinbase:    coinbase,
+		GetHash:     func(n uint64) (common.Hash, error) { return common.Hash{}, nil },
+		CanTransfer: func(ibs evmtypes.IntraBlockState, addr accounts.Address, val uint256.Int) (bool, error) {
+			bal, err := ibs.GetBalance(addr)
+			if err != nil {
+				return false, err
+			}
+			return bal.Cmp(&val) >= 0, nil
+		},
+		Transfer: func(ibs evmtypes.IntraBlockState, from, to accounts.Address, val uint256.Int, _ bool, _ *chain.Rules) error {
+			if err := ibs.SubBalance(from, val, tracing.BalanceChangeTransfer); err != nil {
+				return err
+			}
+			return ibs.AddBalance(to, val, tracing.BalanceChangeTransfer)
+		},
+	}
+
+	txCtx := evmtypes.TxContext{
+		GasPrice: *originalGasPrice,
+		Origin:   sender,
+	}
+
+	cfg := &chain.Config{
+		ChainID:               big.NewInt(1),
+		HomesteadBlock:        new(big.Int),
+		TangerineWhistleBlock: new(big.Int),
+		SpuriousDragonBlock:   new(big.Int),
+		ByzantiumBlock:        new(big.Int),
+		ConstantinopleBlock:   new(big.Int),
+		PetersburgBlock:       new(big.Int),
+		IstanbulBlock:         new(big.Int),
+		BerlinBlock:           new(big.Int),
+		LondonBlock:           new(big.Int),
+	}
+
+	evmInst := vm.NewEVM(blockCtx, txCtx, s, cfg, vm.Config{})
+	evmInst.ProcessingHook = dropTipHook{
+		earlyReturnHook: earlyReturnHook{coinbase: coinbase},
+	}
+
+	msg := types.NewMessage(
+		sender, recipient, 0, uint256.NewInt(0), 50000,
+		originalGasPrice, originalGasPrice, originalGasPrice,
+		nil, nil, true, false, true, false, nil,
+	)
+
+	gp := new(GasPool).AddGas(30_000_000)
+	st := NewStateTransition(evmInst, msg, gp)
+
+	result, err := st.TransitionDb(true, false)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	// The sender should have been charged at baseFee rate, not originalGasPrice rate.
+	// buyGas deducts gasLimit * gasPrice (now baseFee) upfront, then refunds (gasLimit - gasUsed) * gasPrice.
+	// Net cost = gasUsed * baseFee.
+	finalBalance, err := s.GetBalance(sender)
+	require.NoError(t, err)
+
+	expectedCost := result.ReceiptGasUsed * baseFee.Uint64()
+	actualCost := new(uint256.Int).Sub(initialBalance, &finalBalance)
+	require.Equal(t, expectedCost, actualCost.Uint64(),
+		"sender should pay gasUsed * baseFee (not gasUsed * originalGasPrice)")
+
+	// Verify the tip paid to coinbase is zero (DropTip zeroes effectiveTip).
+	coinbaseBal, err := s.GetBalance(coinbase)
+	require.NoError(t, err)
+	require.True(t, coinbaseBal.IsZero(), "coinbase should receive zero tip when DropTip is active")
+}
+
 func TestTransitionDb_MultiGasAccumulation(t *testing.T) {
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, err := db.BeginTemporalRw(context.Background())

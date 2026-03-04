@@ -492,6 +492,18 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 			return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 		}
 	}
+	// Arbitrum: drop tip for delayed (and old) messages before preCheck
+	if st.evm.ProcessingHook.DropTip() && st.msg.GasPrice().Cmp(&st.evm.Context.BaseFee) > 0 {
+		mmsg := st.msg.(*types.Message)
+		mmsg.SetGasPrice(&st.evm.Context.BaseFee)
+		zero := u256.Num0
+		mmsg.SetTip(&zero)
+		mmsg.TxRunContext = types.NewMessageCommitContext(nil)
+		st.gasPrice = mmsg.GasPrice()
+		st.tipCap = mmsg.TipCap()
+		st.msg = mmsg
+	}
+
 	// First check this message satisfies all consensus rules before
 	// applying the message. The rules include these clauses
 	//
