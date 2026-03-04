@@ -340,6 +340,22 @@ func stateGasSstore(evm *EVM, callContext *CallContext, availableGas uint64, mem
 	return 0, nil
 }
 
+func stateGasSelfDestruct(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
+	address := accounts.InternAddress(callContext.Stack.peek().Bytes20())
+	empty, err := evm.IntraBlockState().Empty(address)
+	if err != nil {
+		return 0, err
+	}
+	balance, err := evm.IntraBlockState().GetBalance(callContext.Address())
+	if err != nil {
+		return 0, err
+	}
+	if empty && !balance.IsZero() {
+		return 112 * evm.Context.CostPerStateByte, nil
+	}
+	return 0, nil
+}
+
 func gasCreateEip3860(_ *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
 	gas, err := memoryGasCost(callContext, memorySize)
 	if err != nil {

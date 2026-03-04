@@ -388,4 +388,5 @@ func enable8037(jt *JumpTable) {
 	jt[CREATE2].stateGas = stateGasCreate
 	jt[CALL].stateGas = stateGasCall
 	jt[SSTORE].stateGas = stateGasSstore
+	jt[SELFDESTRUCT].stateGas = stateGasSelfDestruct
 }

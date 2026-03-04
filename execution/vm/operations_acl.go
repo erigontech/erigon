@@ -274,7 +274,9 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 			evm.IntraBlockState().MarkReadsInternal(address)
 		}
 		if empty && !balance.IsZero() {
-			gas += params.CreateBySelfdestructGas
+			if !evm.chainRules.IsAmsterdam { // EIP-8037 charges this as state gas instead
+				gas += params.CreateBySelfdestructGas
+			}
 		}
 
 		hasSelfdestructed, err := evm.IntraBlockState().HasSelfdestructed(callContext.Address())
