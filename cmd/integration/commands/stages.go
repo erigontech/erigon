@@ -87,156 +87,41 @@ import (
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
 
-var cmdStageSnapshots = &cobra.Command{
-	Use:   "stage_snapshots",
-	Short: "",
-	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
-		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
-		}
-		defer db.Close()
-
-		if err := stageSnapshots(db, cmd.Context(), logger); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
+// makeStageCmd creates a cobra command that opens the DB, runs stageFn, and handles errors.
+// Set applyMigrations=false for read-only commands. Set timeit=true to log elapsed time.
+func makeStageCmd(use string, stageFn func(kv.TemporalRwDB, context.Context, log.Logger) error, applyMigrations, timeit bool) *cobra.Command {
+	return &cobra.Command{
+		Use:   use,
+		Short: "",
+		Run: func(cmd *cobra.Command, args []string) {
+			logger := debug.SetupCobra(cmd, "integration")
+			db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), applyMigrations, chain, logger)
+			if err != nil {
+				logger.Error("Opening DB", "error", err)
+				return
 			}
-			return
-		}
-	},
+			defer db.Close()
+			if timeit {
+				defer func(t time.Time) { logger.Info("total", "took", time.Since(t)) }(time.Now())
+			}
+			if err := stageFn(db, cmd.Context(), logger); err != nil {
+				if !errors.Is(err, context.Canceled) {
+					logger.Error(err.Error())
+				}
+			}
+		},
+	}
 }
 
-var cmdStageHeaders = &cobra.Command{
-	Use:   "stage_headers",
-	Short: "",
-	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
-		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
-		}
-		defer db.Close()
-
-		if err := stageHeaders(db, cmd.Context(), logger); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
-		}
-	},
-}
-
-var cmdStageBodies = &cobra.Command{
-	Use:   "stage_bodies",
-	Short: "",
-	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
-		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
-		}
-		defer db.Close()
-
-		if err := stageBodies(db, cmd.Context(), logger); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
-		}
-	},
-}
-
-var cmdStageSenders = &cobra.Command{
-	Use:   "stage_senders",
-	Short: "",
-	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
-		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
-		}
-		defer db.Close()
-
-		if err := stageSenders(db, cmd.Context(), logger); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
-		}
-	},
-}
-
-var cmdStageExec = &cobra.Command{
-	Use:   "stage_exec",
-	Short: "",
-	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
-		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
-		}
-		defer db.Close()
-
-		defer func(t time.Time) { logger.Info("total", "took", time.Since(t)) }(time.Now())
-
-		if err := stageExec(db, cmd.Context(), logger); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
-		}
-	},
-}
-
-var cmdStageCustomTrace = &cobra.Command{
-	Use:   "stage_custom_trace",
-	Short: "",
-	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
-		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
-		}
-		defer db.Close()
-
-		defer func(t time.Time) { logger.Info("total", "took", time.Since(t)) }(time.Now())
-
-		if err := stageCustomTrace(db, cmd.Context(), logger); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
-		}
-	},
-}
-
-var cmdStageTxLookup = &cobra.Command{
-	Use:   "stage_tx_lookup",
-	Short: "",
-	Run: func(cmd *cobra.Command, args []string) {
-		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
-		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
-		}
-		defer db.Close()
-
-		if err := stageTxLookup(db, cmd.Context(), logger); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
-		}
-	},
-}
+var (
+	cmdStageSnapshots   = makeStageCmd("stage_snapshots", stageSnapshots, true, false)
+	cmdStageHeaders     = makeStageCmd("stage_headers", stageHeaders, true, false)
+	cmdStageBodies      = makeStageCmd("stage_bodies", stageBodies, true, false)
+	cmdStageSenders     = makeStageCmd("stage_senders", stageSenders, true, false)
+	cmdStageExec        = makeStageCmd("stage_exec", stageExec, true, true)
+	cmdStageCustomTrace = makeStageCmd("stage_custom_trace", stageCustomTrace, true, true)
+	cmdStageTxLookup    = makeStageCmd("stage_tx_lookup", stageTxLookup, true, false)
+)
 
 var cmdPrintStages = &cobra.Command{
 	Use:   "print_stages",
