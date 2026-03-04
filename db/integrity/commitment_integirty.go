@@ -23,7 +23,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -646,7 +646,7 @@ func checkCommitmentHistVal(ctx context.Context, tx kv.TemporalTx, br services.F
 	if coverageQuotient > txCount {
 		panic(fmt.Errorf("coverage quotient %d is greater than total tx count %d", coverageQuotient, txCount))
 	}
-	bucket := rand.Intn(int(coverageQuotient))
+	bucket := rand.IntN(int(coverageQuotient))
 	bucketSize := txCount / coverageQuotient
 	bucketStart := startTxNum + uint64(bucket)*bucketSize
 	bucketEnd := min(bucketStart+bucketSize, endTxNum)
@@ -829,14 +829,20 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	return nil
 }
 
-func CheckCommitmentHistAtBlkRange(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, from, to uint64, logger log.Logger) error {
+func CheckCommitmentHistAtBlkRange(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, from, to uint64, seed int64, sampleRatio float64, logger log.Logger) error {
 	if from >= to {
 		return fmt.Errorf("invalid blk range: %d >= %d", from, to)
 	}
+	rng := rand.New(rand.NewPCG(uint64(seed), 0))
 	start := time.Now()
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(runtime.GOMAXPROCS(-1)) // all cpus, because no producer-worker
+	var blks uint64
 	for blockNum := from; blockNum < to; blockNum++ {
+		if sampleRatio < 1.0 && rng.Float64() >= sampleRatio {
+			continue
+		}
+		blks++
 		blockNum := blockNum
 		g.Go(func() error {
 			if ctx.Err() != nil {
@@ -852,9 +858,8 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, db kv.TemporalRoDB, br s
 		return err
 	}
 	dur := time.Since(start)
-	blks := to - from
 	rate := float64(blks) / dur.Seconds()
-	logger.Info("checked commitment hist at blk range", "dur", dur, "blks", blks, "blks/s", rate, "from", from, "to", to)
+	logger.Info("checked commitment hist at blk range", "dur", dur, "blks", blks, "blks/s", rate, "from", from, "to", to, "seed", seed, "sampleRatio", sampleRatio)
 	return nil
 }
 
