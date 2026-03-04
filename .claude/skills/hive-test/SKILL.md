@@ -60,7 +60,7 @@ The user may specify one or more test suites in any combination:
 | auth | 0 |
 | rpc-compat | 23 |
 | eest (consume-engine) | 0 |
-| eest-bal | 0 |
+| eest-bal | 4 (upstream BPO2ToAmsterdamAtTime15k fork transition) |
 
 ## Procedure
 
@@ -199,8 +199,14 @@ EEST_VERSION=v5.3.0
   --sim.buildarg branch=hive \
   --sim.buildarg branch=tests-bal@v5.1.0 \
   --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/bal%40v5.1.0/fixtures_bal.tar.gz \
+  --sim.buildarg disable_strict_exception_matching=erigon \
   --sim.timelimit 60m
 ```
+
+Note: `disable_strict_exception_matching=erigon` is needed because Erigon's error
+messages don't yet have upstream mappings in the EEST `ErigonExceptionMapper` for
+`BlockException.GAS_USED_OVERFLOW` and some BAL-specific exception types. Without
+this flag, ~38 tests fail due to exception type mismatches (not actual validation bugs).
 
 ### Phase 3: Parse Results
 
