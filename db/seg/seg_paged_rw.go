@@ -260,6 +260,7 @@ func (c *PagedWriter) Empty() bool { return c.pairs == 0 }
 func (c *PagedWriter) Close() {
 	c.parent.Close()
 }
+
 type pairsCountSetter interface {
 	SetPairsCount(n uint64)
 }
