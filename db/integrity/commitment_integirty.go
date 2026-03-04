@@ -833,16 +833,15 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, db kv.TemporalRoDB, br s
 		return fmt.Errorf("invalid blk range: %d >= %d", from, to)
 	}
 	rng := rand.New(rand.NewPCG(uint64(seed), 0))
-	var blocks []uint64
-	for blockNum := from; blockNum < to; blockNum++ {
-		if sampleRatio >= 1.0 || rng.Float64() < sampleRatio {
-			blocks = append(blocks, blockNum)
-		}
-	}
 	start := time.Now()
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(estimate.AlmostAllCPUs())
-	for _, blockNum := range blocks {
+	var blks uint64
+	for blockNum := from; blockNum < to; blockNum++ {
+		if sampleRatio < 1.0 && rng.Float64() >= sampleRatio {
+			continue
+		}
+		blks++
 		blockNum := blockNum
 		g.Go(func() error {
 			if ctx.Err() != nil {
@@ -858,7 +857,6 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, db kv.TemporalRoDB, br s
 		return err
 	}
 	dur := time.Since(start)
-	blks := uint64(len(blocks))
 	rate := float64(blks) / dur.Seconds()
 	logger.Info("checked commitment hist at blk range", "dur", dur, "blks", blks, "blks/s", rate, "from", from, "to", to, "seed", seed, "sampleRatio", sampleRatio)
 	return nil
