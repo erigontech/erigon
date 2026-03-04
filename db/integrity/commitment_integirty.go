@@ -760,8 +760,8 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 		return err
 	}
 	if aggMax := db.(state.HasAgg).Agg().(*state.Aggregator).EndTxNumMinimax(); maxTxNum+1 > aggMax {
-		latestBlock, _, _ := txNumsReader.FindBlockNum(ctx, tx, aggMax)
-		return fmt.Errorf("block %d is beyond latest block with state %d", blockNum, latestBlock)
+		blockNumOfState, _, _ := txNumsReader.FindBlockNum(ctx, tx, aggMax)
+		return fmt.Errorf("block %d is beyond latest block with state %d", blockNum, blockNumOfState)
 	}
 	toTxNum := maxTxNum + 1
 	sd, err := execctx.NewSharedDomains(ctx, tx, logger)
