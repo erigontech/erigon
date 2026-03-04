@@ -383,12 +383,32 @@ func (tx *ArbTx) BlobTxSidecar() *BlobTxWrapper {
 
 // BlobGasFeeCapCmp compares the blob fee cap of two transactions.
 func (tx *ArbTx) BlobGasFeeCapCmp(other *ArbTx) int {
-	return tx.BlobGasFeeCap().Cmp(other.BlobGasFeeCap())
+	a, b := tx.BlobGasFeeCap(), other.BlobGasFeeCap()
+	switch {
+	case a == nil && b == nil:
+		return 0
+	case a == nil:
+		return -1
+	case b == nil:
+		return 1
+	default:
+		return a.Cmp(b)
+	}
 }
 
 // BlobGasFeeCapIntCmp compares the blob fee cap of the transaction against the given blob fee cap.
 func (tx *ArbTx) BlobGasFeeCapIntCmp(other *big.Int) int {
-	return tx.BlobGasFeeCap().Cmp(other)
+	a := tx.BlobGasFeeCap()
+	switch {
+	case a == nil && other == nil:
+		return 0
+	case a == nil:
+		return -1
+	case other == nil:
+		return 1
+	default:
+		return a.Cmp(other)
+	}
 }
 
 //// WithoutBlobTxSidecar returns a copy of tx with the blob sidecar removed.

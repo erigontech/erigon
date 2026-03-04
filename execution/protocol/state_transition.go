@@ -497,10 +497,12 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	if st.evm.ProcessingHook.DropTip() && st.msg.GasPrice().Cmp(&st.evm.Context.BaseFee) > 0 {
 		if mmsg, ok := st.msg.(*types.Message); ok {
 			mmsg.SetGasPrice(&st.evm.Context.BaseFee)
+			mmsg.SetFeeCap(&st.evm.Context.BaseFee)
 			zero := u256.Num0
 			mmsg.SetTip(&zero)
 			mmsg.TxRunContext = types.NewMessageCommitContext(nil)
 			st.gasPrice = mmsg.GasPrice()
+			st.feeCap = mmsg.FeeCap()
 			st.tipCap = mmsg.TipCap()
 			st.msg = mmsg
 		}
