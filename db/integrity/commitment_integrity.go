@@ -327,19 +327,24 @@ func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, cache *Inte
 		works = append(works, workItem{file, fps})
 	}
 
-	successes := make([]bool, len(works))
+	var successMu sync.Mutex
+	var successFps [][]fileFingerprint
 	var branchKeys, referencedAccounts, plainAccounts, referencedStorages, plainStorages atomic.Uint64
-	for i, w := range works {
-		i, w := i, w
+	for _, w := range works {
+		w := w
 		eg.Go(func() error {
 			counts, err := checkCommitmentKvDeref(ctx, w.file, stepSize, failFast, logger)
 			if err == nil {
-				successes[i] = true
 				branchKeys.Add(counts.branchKeys)
 				referencedAccounts.Add(counts.referencedAccounts)
 				plainAccounts.Add(counts.plainAccounts)
 				referencedStorages.Add(counts.referencedStorages)
 				plainStorages.Add(counts.plainStorages)
+				if w.fps != nil {
+					successMu.Lock()
+					successFps = append(successFps, w.fps)
+					successMu.Unlock()
+				}
 				return nil
 			}
 			if !failFast {
@@ -352,10 +357,8 @@ func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, cache *Inte
 	if err != nil {
 		return err
 	}
-	for i, w := range works {
-		if successes[i] {
-			cache.add(string(CommitmentKvDeref), w.fps)
-		}
+	for _, fps := range successFps {
+		cache.add(string(CommitmentKvDeref), fps)
 	}
 	logger.Info(
 		"[integrity] CommitmentKvDeref",

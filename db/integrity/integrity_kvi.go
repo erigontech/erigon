@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -100,15 +101,20 @@ func CheckKvis(ctx context.Context, tx kv.TemporalTx, domain kv.Domain, cache *I
 		works = append(works, workItem{kvPath, kviPath, fps})
 	}
 
-	successes := make([]bool, len(works))
+	var successMu sync.Mutex
+	var successFps [][]fileFingerprint
 	var keyCount atomic.Uint64
-	for i, w := range works {
-		i, w := i, w
+	for _, w := range works {
+		w := w
 		eg.Go(func() error {
 			keys, err := CheckKvi(ctx, w.kviPath, w.kvPath, kvCompression, failFast, logger)
 			if err == nil {
-				successes[i] = true
 				keyCount.Add(keys)
+				if w.fps != nil {
+					successMu.Lock()
+					successFps = append(successFps, w.fps)
+					successMu.Unlock()
+				}
 				return nil
 			}
 			logger.Warn(err.Error())
@@ -119,12 +125,8 @@ func CheckKvis(ctx context.Context, tx kv.TemporalTx, domain kv.Domain, cache *I
 	if err != nil {
 		return err
 	}
-	if cache != nil {
-		for i, w := range works {
-			if successes[i] {
-				cache.add(string(CommitmentKvi), w.fps)
-			}
-		}
+	for _, fps := range successFps {
+		cache.add(string(CommitmentKvi), fps)
 	}
 	logger.Info("[integrity] CommitmentKvi", "dur", time.Since(start), "files", len(files), "keys", keyCount.Load())
 	return nil
