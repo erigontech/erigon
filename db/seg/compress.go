@@ -217,6 +217,7 @@ func (c *Compressor) SetTrace(trace bool)            { c.trace = trace }
 func (c *Compressor) FileName() string               { return c.outputFileName }
 func (c *Compressor) WorkersAmount() int             { return c.Workers }
 func (c *Compressor) GetValuesOnCompressedPage() int { return int(c.ValuesOnCompressedPage) }
+
 // SetPairsCount stores the total number of key-value pairs in the file header
 // (V2+, PairsCountEnabled).  Must be called before Compress().
 func (c *Compressor) SetPairsCount(n uint64) {
