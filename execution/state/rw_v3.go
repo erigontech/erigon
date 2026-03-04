@@ -164,7 +164,7 @@ func (rs *StateV3) applyUpdates(roTx kv.TemporalTx, blockNum, txNum uint64, stat
 		}
 		acc.Balance.Add(&acc.Balance, &increase.Amount)
 		if !increase.IsEscrow && emptyRemoval && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() {
-			log.Warn("escrow protection deleted", "address", addr)
+			log.Debug("escrow protection deleted", "address", addr)
 			addrValue := addr.Value()
 			if err := domains.DomainDel(kv.AccountsDomain, roTx, addrValue[:], txNum, enc0, step0); err != nil {
 				return err
@@ -172,7 +172,7 @@ func (rs *StateV3) applyUpdates(roTx kv.TemporalTx, blockNum, txNum uint64, stat
 		} else {
 			enc1 := accounts.SerialiseV3(&acc)
 			if increase.IsEscrow {
-				log.Warn("escrow protected", "address", addr)
+				log.Debug("escrow protected", "address", addr)
 			}
 			addrValue := addr.Value()
 			if err := domains.DomainPut(kv.AccountsDomain, roTx, addrValue[:], enc1, txNum, enc0, step0); err != nil {

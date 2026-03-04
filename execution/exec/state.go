@@ -40,7 +40,12 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/node/shards"
+	"github.com/erigontech/nitro-erigon/gethhook"
 )
+
+func init() {
+	gethhook.RequireHookedGeth()
+}
 
 var noop = state.NewNoopWriter()
 

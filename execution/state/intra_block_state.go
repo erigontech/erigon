@@ -34,6 +34,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
@@ -866,7 +867,7 @@ func (sdb *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 				sdb.balanceInc[addr] = bi
 			}
 			if sdb.trace && bi.isEscrow {
-				fmt.Printf("protected escrow %x\n", addr)
+				log.Trace("protected escrow", "address", addr)
 			}
 
 			if sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil {
@@ -934,7 +935,7 @@ func (sdb *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 		bi.isEscrow = isEscrow
 		sdb.balanceInc[addr] = bi
 		if sdb.trace && bi.isEscrow {
-			fmt.Printf("protected escrow %x\n", addr)
+			log.Trace("protected escrow", "address", addr)
 		}
 	}
 

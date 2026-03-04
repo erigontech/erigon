@@ -397,7 +397,7 @@ func (c *Config) IsOsaka(num, time, currentArbosVersion uint64) bool {
 	if c.IsArbitrum() {
 		return currentArbosVersion >= osver.ArbosVersion_50
 	}
-	return c.IsLondon(num) && isForked(c.OsakaTime, time)
+	return isForked(c.OsakaTime, time)
 }
 
 func (c *Config) GetBurntContract(num uint64) accounts.Address {
@@ -423,9 +423,7 @@ func (c *Config) GetBlobConfig(time uint64, currentArbosVer uint64) *params.Blob
 			c.parsedBlobSchedule[c.CancunTime.Uint64()] = &params.DefaultCancunBlobConfig
 		}
 		if c.PragueTime != nil {
-			if c.IsPrague(time, currentArbosVer) {
-				c.parsedBlobSchedule[c.PragueTime.Uint64()] = &params.DefaultPragueBlobConfig
-			}
+			c.parsedBlobSchedule[c.PragueTime.Uint64()] = &params.DefaultPragueBlobConfig
 		}
 
 		// Override with supplied values

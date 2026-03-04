@@ -667,7 +667,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		fmt.Printf("%d (%d.%d) Fees %x: tipped: %d, burnt: %d, price: %d, gas: %d\n", st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), &tipAmount, &burnAmount, st.gasPrice, st.gasUsed())
 	}
 
-	st.evm.ProcessingHook.EndTxHook(st.gasUsed(), !errors.Is(vmerr, vm.ErrExecutionReverted))
+	st.evm.ProcessingHook.EndTxHook(st.gasRemaining, vmerr == nil)
 
 	result = &evmtypes.ExecutionResult{
 		ReceiptGasUsed:      st.gasUsed(),

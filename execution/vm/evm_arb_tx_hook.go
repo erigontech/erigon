@@ -1,11 +1,12 @@
 package vm
 
 import (
+	"fmt"
+
 	"github.com/erigontech/erigon/arb/multigas"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -19,7 +20,7 @@ type TxProcessingHook interface {
 
 	StartTxHook() (bool, multigas.MultiGas, error, []byte)
 	ScheduledTxes() types.Transactions
-	EndTxHook(totalGasUsed uint64, evmSuccess bool)
+	EndTxHook(gasRemaining uint64, evmSuccess bool)
 	GasChargingHook(gasRemaining *uint64, intrinsicGas uint64) (accounts.Address, multigas.MultiGas, error)
 	ForceRefundGas() uint64
 	NonrefundableGas() uint64
@@ -87,8 +88,7 @@ func (p DefaultTxProcessor) MsgIsNonMutating() bool {
 }
 
 func (p DefaultTxProcessor) ExecuteWASM(scope *CallContext, input []byte, evm *EVM) ([]byte, error) {
-	log.Crit("tried to execute WASM with default processing hook")
-	return nil, nil
+	return nil, fmt.Errorf("tried to execute WASM with default processing hook")
 }
 
 func (d DefaultTxProcessor) IsCalldataPricingIncreaseEnabled() bool {
