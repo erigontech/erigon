@@ -227,6 +227,10 @@ func (tx *ArbitrumLegacyTxData) UnmarshalJSON(input []byte) error {
 		return err
 	}
 
+	if tx.LegacyTx == nil {
+		tx.LegacyTx = &LegacyTx{}
+	}
+
 	// Validate and set common fields
 	if dec.To != nil {
 		tx.To = dec.To

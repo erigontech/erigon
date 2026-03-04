@@ -17,36 +17,43 @@ func ArbUnmarshalJSON(txType byte, input []byte) (types.Transaction, error) {
 		if err := tx.UnmarshalJSON(input); err != nil {
 			return nil, err
 		}
+		return tx, nil
 	case ArbitrumInternalTxType:
 		tx := new(ArbitrumInternalTx)
 		if err := tx.UnmarshalJSON(input); err != nil {
 			return nil, err
 		}
+		return tx, nil
 	case ArbitrumUnsignedTxType:
 		tx := new(ArbitrumUnsignedTx)
 		if err := tx.UnmarshalJSON(input); err != nil {
 			return nil, err
 		}
+		return tx, nil
 	case ArbitrumContractTxType:
 		tx := new(ArbitrumContractTx)
 		if err := tx.UnmarshalJSON(input); err != nil {
 			return nil, err
 		}
+		return tx, nil
 	case ArbitrumRetryTxType:
 		tx := new(ArbitrumRetryTx)
 		if err := tx.UnmarshalJSON(input); err != nil {
 			return nil, err
 		}
+		return tx, nil
 	case ArbitrumSubmitRetryableTxType:
 		tx := new(ArbitrumSubmitRetryableTx)
 		if err := tx.UnmarshalJSON(input); err != nil {
 			return nil, err
 		}
+		return tx, nil
 	case ArbitrumLegacyTxType:
 		tx := new(ArbitrumLegacyTxData)
 		if err := tx.UnmarshalJSON(input); err != nil {
 			return nil, err
 		}
+		return tx, nil
 	}
 	return nil, nil
 }
