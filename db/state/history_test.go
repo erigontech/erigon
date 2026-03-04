@@ -1765,12 +1765,14 @@ func TestHistoryRange_DBOnly(t *testing.T) {
 			"ff0000000000006e", "ff00000000000052", "ff00000000000024",
 		}, vals)
 
-		// limit=2 with no lower bound.
-		it, err = ic.HistoryRange(-1, 1000, order.Asc, 2, tx)
+		// [5, 6): exactly one txNum — only keys 1 and 5 change at txNum=5.
+		// key=1: prevVal = 0xff...0004 (the value set at txNum=4).
+		// key=5: prevVal = nil (txNum=5 is key=5's first-ever change).
+		it, err = ic.HistoryRange(5, 6, order.Asc, -1, tx)
 		require.NoError(err)
 		keys, vals = collect(it)
-		require.Equal([]string{"0100000000000001", "0100000000000002"}, keys)
-		require.Equal([]string{"ff000000000003cf", "ff000000000001e7"}, vals)
+		require.Equal([]string{"0100000000000001", "0100000000000005"}, keys)
+		require.Equal([]string{"ff00000000000004", ""}, vals)
 	}
 
 	t.Run("large_values", func(t *testing.T) {
