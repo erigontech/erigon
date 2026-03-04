@@ -222,24 +222,28 @@ func BenchmarkWarmupCache_Branch(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 
-	for i := 0; i < b.N; i++ {
+	var i int
+	for b.Loop() {
 		key := keys[i%len(keys)]
 		cache.GetBranch(key)
+		i++
 	}
 }
 
 // BenchmarkWarmupCache_Branch_Put benchmarks Put operations
 func BenchmarkWarmupCache_Branch_Put(b *testing.B) {
 	cache := NewWarmupCache()
-	keys := generateTestKeys(b.N, 52)
+	const keyCount = 10000
+	keys := generateTestKeys(keyCount, 52)
 	data := make([]byte, 100)
 	rand.Read(data)
 
-	b.ResetTimer()
 	b.ReportAllocs()
 
-	for i := 0; i < b.N; i++ {
-		cache.PutBranch(keys[i], data)
+	var i int
+	for b.Loop() {
+		cache.PutBranch(keys[i%keyCount], data)
+		i++
 	}
 }
 
@@ -256,9 +260,11 @@ func BenchmarkWarmupCache_Account(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 
-	for i := 0; i < b.N; i++ {
+	var i int
+	for b.Loop() {
 		key := keys[i%len(keys)]
 		cache.GetAccount(key)
+		i++
 	}
 }
 
@@ -275,9 +281,11 @@ func BenchmarkWarmupCache_Storage(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 
-	for i := 0; i < b.N; i++ {
+	var i int
+	for b.Loop() {
 		key := keys[i%len(keys)]
 		cache.GetStorage(key)
+		i++
 	}
 }
 
