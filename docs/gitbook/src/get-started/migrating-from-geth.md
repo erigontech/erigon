@@ -42,7 +42,9 @@ This path offers the simplest validator configuration by using Erigon's embedded
 **Steps for Minimal Downtime**
 
 1. **Preparation**: [Install](installation/) Erigon.
-2.  **Configuration Check** (No Conflict): Ensure Erigon's standard [ports](../fundamentals/default-ports.md) (JSON-RPC, P2P) are different from Geth's. These ports are configured via the `--port` and `--p2p.allowed-ports` command-line options. For example:
+2. **Configuration Check** (No Conflict): Ensure Erigon's standard [ports](../fundamentals/default-ports.md) (JSON-RPC,
+   P2P) are different from Geth's. These ports are configured via the `--port` and `--p2p.allowed-ports` command-line
+   options. For example:
 
     ```sh
     erigon \
@@ -65,7 +67,9 @@ Switch to an Erigon Execution Layer (EL) while keeping your current external Con
 **Steps for Minimal Downtime**
 
 1. **Preparation**: [Install](installation/) Erigon.
-2.  **Configuration Check**: run Erigon + Caplin simultaneously with Geth (or any other EL) for fast, parallel syncing and assign unique ports for its P2P networking via `--port` and `--p2p.allowed-ports` (check which ports your present EL is using). For example:
+2. **Configuration Check**: run Erigon + Caplin simultaneously with Geth (or any other EL) for fast, parallel syncing
+   and assign unique ports for its P2P networking via `--port` and `--p2p.allowed-ports` (check which ports your present
+   EL is using). For example:
 
     ```sh
     erigon \

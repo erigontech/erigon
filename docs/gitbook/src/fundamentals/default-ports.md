@@ -10,7 +10,7 @@ metaLinks:
 Erigon use the following default port for each service:
 
 | Component | Port    | Protocol  | Purpose                     | Should Expose |
-| --------- | ------- | --------- | --------------------------- | ------------- |
+|-----------|---------|-----------|-----------------------------|---------------|
 | engine    | `9090`  | TCP       | gRPC Server                 | Private       |
 | engine    | `42069` | TCP & UDP | Snap sync (Bittorrent)      | Public        |
 | engine    | `8551`  | TCP       | Engine API (JWT auth)       | Private       |
