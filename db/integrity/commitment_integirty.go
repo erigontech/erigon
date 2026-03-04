@@ -23,6 +23,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"math/rand/v2"
 	"path/filepath"
 	"sort"
@@ -601,30 +602,25 @@ func CheckCommitmentHistVal(ctx context.Context, db kv.TemporalRoDB, br services
 	} else {
 		eg.SetLimit(dbg.EnvInt("CHECK_COMMITMENT_HIST_VAL_WORKERS", 8))
 	}
-	coverageQuotient := dbg.EnvUint("CHECK_COMMITMENT_HIST_VAL_COVERAGE_QUOTIENT", 20)
+	numBuckets := uint64(math.Round(1.0 / sampleRatio))
 	var totalVals atomic.Uint64
-	var checkedFiles atomic.Int64
 	rng := rand.New(rand.NewPCG(uint64(seed), 0))
 	for _, file := range files {
 		if !strings.HasSuffix(file.Fullpath(), ".v") {
 			continue
 		}
-		if sampleRatio < 1.0 && rng.Float64() >= sampleRatio {
-			continue
-		}
 		txCount := file.EndRootNum() - file.StartRootNum()
-		if coverageQuotient > txCount {
-			panic(fmt.Errorf("coverage quotient %d is greater than total tx count %d in %s", coverageQuotient, txCount, filepath.Base(file.Fullpath())))
+		if numBuckets > txCount {
+			panic(fmt.Errorf("numBuckets %d is greater than total tx count %d in %s", numBuckets, txCount, filepath.Base(file.Fullpath())))
 		}
-		bucket := rng.IntN(int(coverageQuotient))
-		checkedFiles.Add(1)
+		bucket := rng.IntN(int(numBuckets))
 		eg.Go(func() error {
 			tx, err := db.BeginTemporalRo(ctx) // each worker has its own RoTx
 			if err != nil {
 				return err
 			}
 			defer tx.Rollback()
-			valCount, err := checkCommitmentHistVal(ctx, tx, br, file, bucket, coverageQuotient, failFast, logger)
+			valCount, err := checkCommitmentHistVal(ctx, tx, br, file, bucket, numBuckets, failFast, logger)
 			if err == nil {
 				totalVals.Add(valCount)
 				return nil
@@ -642,20 +638,20 @@ func CheckCommitmentHistVal(ctx context.Context, db kv.TemporalRoDB, br services
 	dur := time.Since(start)
 	total := totalVals.Load()
 	rate := float64(total) / dur.Seconds()
-	logger.Info("[integrity] CommitmentHistVal", "dur", time.Since(start), "files", checkedFiles.Load(), "vals", total, "vals/s", rate, "seed", seed, "sampleRatio", sampleRatio)
+	logger.Info("[integrity] CommitmentHistVal", "dur", time.Since(start), "files", len(files), "vals", total, "vals/s", rate, "seed", seed, "sampleRatio", sampleRatio)
 	return nil
 }
 
-func checkCommitmentHistVal(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, file state.VisibleFile, bucket int, coverageQuotient uint64, failFast bool, logger log.Logger) (uint64, error) {
+func checkCommitmentHistVal(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, file state.VisibleFile, bucket int, numBuckets uint64, failFast bool, logger log.Logger) (uint64, error) {
 	start := time.Now()
 	fileName := filepath.Base(file.Fullpath())
 	startTxNum := file.StartRootNum()
 	endTxNum := file.EndRootNum()
 	txCount := endTxNum - startTxNum
-	if coverageQuotient > txCount {
-		panic(fmt.Errorf("coverage quotient %d is greater than total tx count %d", coverageQuotient, txCount))
+	if numBuckets > txCount {
+		panic(fmt.Errorf("numBuckets %d is greater than total tx count %d", numBuckets, txCount))
 	}
-	bucketSize := txCount / coverageQuotient
+	bucketSize := txCount / numBuckets
 	bucketStart := startTxNum + uint64(bucket)*bucketSize
 	bucketEnd := min(bucketStart+bucketSize, endTxNum)
 	logger.Info(
@@ -663,7 +659,7 @@ func checkCommitmentHistVal(ctx context.Context, tx kv.TemporalTx, br services.F
 		"v", fileName,
 		"startTxNum", startTxNum,
 		"endTxNum", endTxNum,
-		"coverageQuotient", coverageQuotient,
+		"numBuckets", numBuckets,
 		"bucket", bucket,
 		"bucketSize", bucketSize,
 		"bucketStart", bucketStart,
