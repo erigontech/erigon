@@ -24,6 +24,8 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/params"
 )
 
 // calcMemSize64 calculates the required memory size, and returns
@@ -84,4 +86,14 @@ func ToWordSize(size uint64) uint64 {
 	}
 
 	return (size + 31) / 32
+}
+
+func maxCodeSize(rules *chain.Rules) int {
+	if rules.IsAmsterdam {
+		return params.MaxCodeSizeAmsterdam
+	}
+	if rules.IsAhmedabad {
+		return params.MaxCodeSizeAhmedabad
+	}
+	return params.MaxCodeSize
 }
