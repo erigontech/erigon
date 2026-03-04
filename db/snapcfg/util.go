@@ -154,6 +154,10 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 			bestVersions.Set(p.Name, p)
 			continue
 		}
+		if p.Name == "erigondb.toml" {
+			bestVersions.Set(p.Name, p)
+			continue
+		}
 
 		v, name, ok := strings.Cut(p.Name, "-")
 		if !ok {
