@@ -546,12 +546,14 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	intrinsicMultiGas, floorGas7623, overflow := multigas.IntrinsicMultiGas(st.data, uint64(len(accessTuples)), uint64(accessTuples.StorageKeys()), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, rules.IsPrague, false, uint64(len(auths)))
 	gas := intrinsicMultiGas.SingleGas()
 
-	fixedGas, fixedFloor, fixedOverflow := fixedgas.IntrinsicGas(st.data, uint64(len(accessTuples)), uint64(accessTuples.StorageKeys()), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, rules.IsPrague, false, uint64(len(auths)))
-	if gas != fixedGas || floorGas7623 != fixedFloor || overflow != fixedOverflow {
-		log.Error("[multigas] intrinsic gas mismatch between multigas and fixedgas",
-			"multiGas", gas, "fixedGas", fixedGas,
-			"multiFloor", floorGas7623, "fixedFloor", fixedFloor,
-			"multiOverflow", overflow, "fixedOverflow", fixedOverflow)
+	if dbg.TraceGas {
+		fixedGas, fixedFloor, fixedOverflow := fixedgas.IntrinsicGas(st.data, uint64(len(accessTuples)), uint64(accessTuples.StorageKeys()), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, rules.IsPrague, false, uint64(len(auths)))
+		if gas != fixedGas || floorGas7623 != fixedFloor || overflow != fixedOverflow {
+			log.Error("[multigas] intrinsic gas mismatch between multigas and fixedgas",
+				"multiGas", gas, "fixedGas", fixedGas,
+				"multiFloor", floorGas7623, "fixedFloor", fixedFloor,
+				"multiOverflow", overflow, "fixedOverflow", fixedOverflow)
+		}
 	}
 
 	if overflow {
@@ -656,7 +658,9 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 
 			if rules.IsPrague && st.evm.ProcessingHook.IsCalldataPricingIncreaseEnabled() {
 				if st.gasUsed() < floorGas7623 {
-					usedMultiGas = usedMultiGas.SaturatingIncrement(multigas.ResourceKindL2Calldata, floorGas7623-usedMultiGas.SingleGas())
+					if singleGas := usedMultiGas.SingleGas(); singleGas < floorGas7623 {
+						usedMultiGas = usedMultiGas.SaturatingIncrement(multigas.ResourceKindL2Calldata, floorGas7623-singleGas)
+					}
 					prev := st.gasRemaining
 					st.gasRemaining = st.initialGas - floorGas7623
 					if t := st.evm.Config().Tracer; t != nil && t.OnGasChange != nil {
@@ -673,7 +677,9 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 			usedMultiGas = usedMultiGas.WithRefund(refund)
 			if rules.IsPrague {
 				if gasUsed < floorGas7623 {
-					usedMultiGas = usedMultiGas.SaturatingIncrement(multigas.ResourceKindL2Calldata, floorGas7623-usedMultiGas.SingleGas())
+					if singleGas := usedMultiGas.SingleGas(); singleGas < floorGas7623 {
+						usedMultiGas = usedMultiGas.SaturatingIncrement(multigas.ResourceKindL2Calldata, floorGas7623-singleGas)
+					}
 				}
 				gasUsed = max(floorGas7623, gasUsed)
 			}

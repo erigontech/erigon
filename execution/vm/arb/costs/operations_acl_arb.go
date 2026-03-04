@@ -138,7 +138,9 @@ func WasmCallCost(db evmtypes.IntraBlockState, contract accounts.Address, value 
 	// gasCall()
 	transfersValue := value.Sign() != 0
 	if transfersValue {
-		if empty, _ := db.Empty(contract); empty {
+		if empty, err := db.Empty(contract); err != nil {
+			return total, err
+		} else if empty {
 			// Storage slot writes (zero -> nonzero) considered as storage growth.
 			if apply(multigas.ResourceKindStorageGrowth, params.CallNewAccountGas) {
 				return total, vm.ErrOutOfGas

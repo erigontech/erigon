@@ -150,6 +150,9 @@ func (z MultiGas) Get(kind ResourceKind) uint64 {
 // The total is adjusted accordingly. It returns the updated value and true if an overflow occurred.
 func (z MultiGas) With(kind ResourceKind, amount uint64) (MultiGas, bool) {
 	res := z
+	if z.gas[kind] > z.total {
+		return z, true
+	}
 	newTotal, c := bits.Add64(z.total-z.gas[kind], amount, 0)
 	if c != 0 {
 		return z, true
@@ -424,7 +427,11 @@ func (z *MultiGas) UnmarshalJSON(data []byte) error {
 	z.gas[ResourceKindL2Calldata] = uint64(j.L2Calldata)
 	z.gas[ResourceKindWasmComputation] = uint64(j.WasmComputation)
 	z.refund = uint64(j.Refund)
-	z.total = uint64(j.Total)
+	var total uint64
+	for i := range NumResourceKind {
+		total += z.gas[i]
+	}
+	z.total = total
 	return nil
 }
 
@@ -492,12 +499,24 @@ func IntrinsicMultiGas(data []byte, accessListLen, storageKeysLen uint64, isCont
 		}
 	}
 	if accessListLen > 0 {
-		gas.SaturatingIncrementInto(ResourceKindStorageAccess, accessListLen*params.TxAccessListAddressGas)
-		gas.SaturatingIncrementInto(ResourceKindStorageAccess, storageKeysLen*params.TxAccessListStorageKeyGas)
+		product, ov := math.SafeMul(accessListLen, params.TxAccessListAddressGas)
+		if ov {
+			return ZeroGas(), 0, true
+		}
+		gas.SaturatingIncrementInto(ResourceKindStorageAccess, product)
+		product, ov = math.SafeMul(storageKeysLen, params.TxAccessListStorageKeyGas)
+		if ov {
+			return ZeroGas(), 0, true
+		}
+		gas.SaturatingIncrementInto(ResourceKindStorageAccess, product)
 	}
 
 	if authorizationsLen > 0 {
-		gas.SaturatingIncrementInto(ResourceKindStorageGrowth, authorizationsLen*params.CallNewAccountGas)
+		product, ov := math.SafeMul(authorizationsLen, params.CallNewAccountGas)
+		if ov {
+			return ZeroGas(), 0, true
+		}
+		gas.SaturatingIncrementInto(ResourceKindStorageGrowth, product)
 	}
 
 	return gas, floorGas7623, false
