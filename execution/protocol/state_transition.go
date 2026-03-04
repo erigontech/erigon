@@ -396,7 +396,7 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 		Regular: intrinsicGasResult.RegularGas,
 		State:   intrinsicGasResult.StateGas,
 	}
-	st.gasRemaining = SplitIntoMdGas(st.msg.Gas(), params.MaxTxnGasLimit, imdGas, rules)
+	st.gasRemaining = SplitIntoMdGas(st.msg.Gas(), imdGas, rules)
 	st.initialGas = st.gasRemaining.Plus(imdGas)
 
 	// Execute the preparatory steps for state transition which includes:
@@ -532,7 +532,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		Regular: intrinsicGasResult.RegularGas,
 		State:   intrinsicGasResult.StateGas,
 	}
-	st.gasRemaining = SplitIntoMdGas(st.msg.Gas(), params.MaxTxnGasLimit, imdGas, rules)
+	st.gasRemaining = SplitIntoMdGas(st.msg.Gas(), imdGas, rules)
 	st.initialGas = st.gasRemaining.Plus(imdGas)
 
 	verifiedAuthorities, err := st.verifyAuthorities(auths, contractCreation, rules.ChainID.String())
