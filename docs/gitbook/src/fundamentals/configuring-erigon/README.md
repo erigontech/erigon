@@ -82,7 +82,9 @@ Flags for managing how old chain data is handled and stored.
   * Default: `0`
 * `--prune.distance.blocks value`: Keeps block history for the latest `N` blocks.
   * Default: `0`
-* `--prune.include-commitment-history, --prune.experimental.include-commitment-history, --experimental.commitment-history`: (experimental) Enables blazing fast `eth_getProof` for executed blocks by storing commitment history.
+*
+`--prune.include-commitment-history, --prune.experimental.include-commitment-history, --experimental.commitment-history`: (
+experimental) Enables blazing fast `eth_getProof` for executed blocks by storing commitment history.
   * Default: `false`
 * `--snap.keepblocks`: Keeps ancient blocks in the database for debugging.
   * Default: `false`

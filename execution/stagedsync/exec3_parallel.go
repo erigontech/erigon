@@ -221,9 +221,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							return fmt.Errorf("block %d: applyCount mismatch: got: %d expected %d", applyResult.BlockNum, blockUpdateCount, applyResult.ApplyCount)
 						}
 
-						// pe.cfg.chainConfig.AmsterdamTime != nil && pe.cfg.chainConfig.AmsterdamTime.Uint64() > 0 is
-						// temporary to allow for initial non bals amsterdam testing before parallel exec is live by default
-						if (pe.cfg.chainConfig.AmsterdamTime != nil && pe.cfg.chainConfig.AmsterdamTime.Uint64() > 0 && pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime)) || pe.cfg.experimentalBAL {
+						if (pe.cfg.chainConfig.AmsterdamTime != nil && pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime)) || pe.cfg.experimentalBAL {
 							bal := CreateBAL(applyResult.BlockNum, applyResult.TxIO, pe.cfg.dirs.DataDir)
 							if err := bal.Validate(); err != nil {
 								return fmt.Errorf("block %d: invalid computed block access list: %w", applyResult.BlockNum, err)
@@ -262,7 +260,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 										}
 									}
 									if headerBALHash != bal.Hash() {
-										log.Info(fmt.Sprintf("computed bal: %s", bal.DebugString()))
 										return fmt.Errorf("%w, block=%d: block access list mismatch: got %s expected %s", rules.ErrInvalidBlock, applyResult.BlockNum, bal.Hash(), headerBALHash)
 									}
 								}
@@ -1098,8 +1095,8 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 				// Use a versionedStateReader to get the coinbase balance
 				// deterministically from the block's version map (which
 				// includes fee-calc writes from prior txs) instead of
-				// reading from pe.rs whose content depends on apply-loop
-				// timing.
+				// reading from stateReader whose content depends on
+				// apply-loop timing.
 				cbReader := state.NewVersionedStateReader(txIndex, nil, vm, stateReader)
 				coinbase, err := cbReader.ReadAccountData(result.Coinbase) // to generate logs we want the initial balance
 
@@ -1577,16 +1574,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 				if len(addWrites) > 0 {
 					// Merge finalization writes with existing execution writes.
-					// The finalization replays result.TxOut via ApplyVersionedWrites
-					// and adds fee calculation changes, but its VersionedWrites(true)
-					// may omit entries when the optimistic execution ran with stale
-					// state (e.g., an EIP-7702 delegation set by a prior tx was not
-					// visible). In that case the re-execution stored the correct
-					// writes in blockIO, but the finalization—which replays the
-					// potentially incomplete TxOut—drops them. Merging ensures that
-					// entries present in the execution writes but absent from the
-					// finalization writes are preserved, while finalization-only
-					// entries (fee calc, post-apply) are added.
 					existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
 					merged := MergeVersionedWrites(existingWrites, addWrites)
 					be.blockIO.RecordWrites(txVersion, merged)
@@ -1595,9 +1582,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					// to the version map so that subsequent per-tx
 					// finalizations see the full post-tx state (execution
 					// + fees) when reading via the version map fallback
-					// chain.  Without this, later txs' fee calc reads the
-					// coinbase balance without prior fees, producing
-					// non-deterministic BAL (EIP-7928) hashes.
+					// chain.
 					be.versionMap.FlushVersionedWrites(merged, true, "")
 				}
 
