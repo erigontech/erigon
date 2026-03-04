@@ -28,6 +28,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/arb/multigas"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -527,7 +528,15 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	auths := msg.Authorizations()
 
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
-	gas, floorGas7623, overflow := fixedgas.IntrinsicGas(st.data, uint64(len(accessTuples)), uint64(accessTuples.StorageKeys()), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, rules.IsPrague, false, uint64(len(auths)))
+	usedMultiGas := multigas.ZeroGas()
+	intrinsicMultiGas, floorGas7623, overflow := multigas.IntrinsicMultiGas(st.data, uint64(len(accessTuples)), uint64(accessTuples.StorageKeys()), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, rules.IsPrague, false, uint64(len(auths)))
+	gas := intrinsicMultiGas.SingleGas()
+
+	fixedGas, fixedFloor, fixedOverflow := fixedgas.IntrinsicGas(st.data, uint64(len(accessTuples)), uint64(accessTuples.StorageKeys()), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, rules.IsPrague, false, uint64(len(auths)))
+	if gas != fixedGas || floorGas7623 != fixedFloor || overflow != fixedOverflow {
+		panic("intrinsic gas mismatch between multigas and fixedgas")
+	}
+
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
@@ -544,11 +553,13 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		t.OnGasChange(st.gasRemaining, st.gasRemaining-gas, tracing.GasChangeTxIntrinsicGas)
 	}
 	st.gasRemaining -= gas
+	usedMultiGas = usedMultiGas.SaturatingAdd(intrinsicMultiGas)
 
-	tipRecipient, _, err := st.evm.ProcessingHook.GasChargingHook(&st.gasRemaining, gas)
+	tipRecipient, hookMultiGas, err := st.evm.ProcessingHook.GasChargingHook(&st.gasRemaining, gas)
 	if err != nil {
 		return nil, err
 	}
+	usedMultiGas = usedMultiGas.SaturatingAdd(hookMultiGas)
 
 	var bailout bool
 	// Gas bailout (for trace_call) should only be applied if there is not sufficient balance to perform value transfer
@@ -578,15 +589,17 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		vmerr error // vm errors do not effect consensus and are therefore not assigned to err
 	)
 
+	var execMultiGas multigas.MultiGas
 	if contractCreation {
 		// The reason why we don't increment nonce here is that we need the original
 		// nonce to calculate the address of the contract that is being created
 		// It does get incremented inside the `Create` call, after the computation
 		// of the contract's address, but before the execution of the code.
-		ret, _, st.gasRemaining, _, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, bailout)
+		ret, _, st.gasRemaining, execMultiGas, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, bailout)
 	} else {
-		ret, st.gasRemaining, _, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
+		ret, st.gasRemaining, execMultiGas, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
 	}
+	usedMultiGas = usedMultiGas.SaturatingAdd(execMultiGas)
 
 	st.gasRemaining += st.evm.ProcessingHook.ForceRefundGas()
 	nonrefundable := st.evm.ProcessingHook.NonrefundableGas()
@@ -680,6 +693,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		FeeTipped:           tipAmount,
 		FeeBurnt:            burnAmount,
 		ScheduledTxes:       st.evm.ProcessingHook.ScheduledTxes(),
+		UsedMultiGas:        usedMultiGas,
 	}
 
 	result.BurntContractAddress = burntContractAddress

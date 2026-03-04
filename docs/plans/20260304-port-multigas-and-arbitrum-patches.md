@@ -98,17 +98,17 @@ Additionally, several state transition gaps need porting: DropTip pre-preCheck o
 **Files:**
 - Modify: `execution/protocol/state_transition.go`
 
-- [ ] Add `"github.com/erigontech/erigon/arb/multigas"` import
-- [ ] Initialize `usedMultiGas := multigas.ZeroGas()` at start of TransitionDb
-- [ ] Call `multigas.IntrinsicMultiGas()` alongside `fixedgas.IntrinsicGas()` — use multiGas from it
-- [ ] Add sanity check: panic if `multiGas.SingleGas() != gas` (same as arbitrum branch)
-- [ ] Accumulate: `usedMultiGas = usedMultiGas.SaturatingAdd(multiGas)` after intrinsic gas subtraction
-- [ ] Capture multigas from `GasChargingHook`: change `tipRecipient, _, err` to `tipRecipient, hookMultiGas, err` and accumulate
-- [ ] Capture multigas from `evm.Create()` / `evm.Call()` and accumulate
-- [ ] Set `result.UsedMultiGas = usedMultiGas` in the ExecutionResult at end of TransitionDb
-- [ ] Write test: `TestTransitionDb_MultiGasAccumulation` — verify `usedMultiGas.SingleGas() == result.ReceiptGasUsed` for a simple transfer
-- [ ] Write test: `TestTransitionDb_MultiGasStartHookEarlyReturn` — verify UsedMultiGas is set on early return path
-- [ ] Run `go test ./execution/protocol/... -count=1` — must pass
+- [x] Add `"github.com/erigontech/erigon/arb/multigas"` import
+- [x] Initialize `usedMultiGas := multigas.ZeroGas()` at start of TransitionDb
+- [x] Call `multigas.IntrinsicMultiGas()` alongside `fixedgas.IntrinsicGas()` — use multiGas from it
+- [x] Add sanity check: panic if `multiGas.SingleGas() != gas` (same as arbitrum branch)
+- [x] Accumulate: `usedMultiGas = usedMultiGas.SaturatingAdd(multiGas)` after intrinsic gas subtraction
+- [x] Capture multigas from `GasChargingHook`: change `tipRecipient, _, err` to `tipRecipient, hookMultiGas, err` and accumulate
+- [x] Capture multigas from `evm.Create()` / `evm.Call()` and accumulate
+- [x] Set `result.UsedMultiGas = usedMultiGas` in the ExecutionResult at end of TransitionDb
+- [x] Write test: `TestTransitionDb_MultiGasAccumulation` — verify `usedMultiGas.SingleGas() == result.ReceiptGasUsed` for a simple transfer
+- [x] Write test: `TestTransitionDb_MultiGasStartHookEarlyReturn` — verify UsedMultiGas is set on early return path
+- [x] Run `go test ./execution/protocol/... -count=1` — must pass
 
 ### Task 4: Port DropTip pre-preCheck price override
 
