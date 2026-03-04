@@ -842,18 +842,24 @@ func (d *Downloader) logDownload(
 ) {
 	startTime := time.Now()
 	stats := d.newStats(AggStats{}, ts)
+
+	// Log initial sync stats immediately so the user sees that a download has started.
+	// Don't log "No metadata yet" on the first pass — metadata tasks haven't had time to
+	// complete, so it would always fire and produce noisy (and potentially duplicate) output
+	// when sequential download batches each start their own logging goroutine.
+	stats = d.newStats(stats, ts)
+	d.logSyncStats(startTime, stats, target)
+
 	interval := time.Second
 	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(interval):
+		}
 		stats = d.newStats(stats, ts)
 		d.logSyncStats(startTime, stats, target)
 		d.logNoMetadata(getNoMetadataLvl(), ts)
-		if ctx.Err() != nil {
-			return
-		}
-		select {
-		case <-ctx.Done():
-		case <-time.After(interval):
-		}
 		interval = min(interval*2, 15*time.Second)
 	}
 }
