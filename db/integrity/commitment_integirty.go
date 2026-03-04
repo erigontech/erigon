@@ -836,6 +836,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, db kv.TemporalRoDB, br s
 	rng := rand.New(rand.NewPCG(uint64(seed), 0))
 	start := time.Now()
 	var checked atomic.Uint64
+	var lastBlockNum atomic.Uint64
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(runtime.GOMAXPROCS(-1)) // all cpus, because no producer-worker
 
@@ -850,7 +851,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, db kv.TemporalRoDB, br s
 				done := checked.Load()
 				elapsed := time.Since(start).Seconds()
 				rate := float64(done) / elapsed
-				logger.Info("checking commitment hist", "blks/s", rate, "checked", done, "from", from, "to", to)
+				logger.Info("[integrity] checking commitment hist", "blks/s", rate, "checked", done, "blockNum", lastBlockNum.Load(), "from", from, "to", to)
 			}
 		}
 	}()
@@ -870,6 +871,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, db kv.TemporalRoDB, br s
 				return fmt.Errorf("checkCommitmentHistAtBlk: %d, %w", blockNum, err)
 			}
 			checked.Add(1)
+			lastBlockNum.Store(blockNum)
 			return nil
 		})
 	}
