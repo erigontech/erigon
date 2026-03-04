@@ -311,7 +311,6 @@ func opBenchmark(b *testing.B, op executionFunc, args ...string) {
 		byteArgs[i] = common.Hex2Bytes(arg)
 	}
 	pc := uint64(0)
-	b.ResetTimer()
 	for b.Loop() {
 		for _, arg := range byteArgs {
 			a := *new(uint256.Int).SetBytes(arg)
