@@ -237,7 +237,7 @@ func TestBranchData_ReplacePlainKeys(t *testing.T) {
 
 	target := make([]byte, 0, len(enc))
 	oldKeys := make([][]byte, 0)
-	replaced, err := enc.ReplacePlainKeys(target, func(key []byte, isStorage bool) ([]byte, error) {
+	replaced, _, err := enc.ReplacePlainKeys(target, func(key []byte, isStorage bool) ([]byte, error) {
 		oldKeys = append(oldKeys, key)
 		if isStorage {
 			return key[:8], nil
@@ -248,7 +248,7 @@ func TestBranchData_ReplacePlainKeys(t *testing.T) {
 	require.Lessf(t, len(replaced), len(enc), "replaced expected to be shorter than original enc")
 
 	keyI := 0
-	replacedBack, err := replaced.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+	replacedBack, _, err := replaced.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
 		require.Equal(t, oldKeys[keyI][:4], key[:4])
 		defer func() { keyI++ }()
 		return oldKeys[keyI], nil
@@ -286,7 +286,7 @@ func TestBranchData_ReplacePlainKeys_WithEmpty(t *testing.T) {
 
 	target := make([]byte, 0, len(enc))
 	oldKeys := make([][]byte, 0)
-	replaced, err := enc.ReplacePlainKeys(target, func(key []byte, isStorage bool) ([]byte, error) {
+	replaced, _, err := enc.ReplacePlainKeys(target, func(key []byte, isStorage bool) ([]byte, error) {
 		oldKeys = append(oldKeys, key)
 		if isStorage {
 			return nil, nil
@@ -297,7 +297,7 @@ func TestBranchData_ReplacePlainKeys_WithEmpty(t *testing.T) {
 	require.Lenf(t, replaced, len(enc), "replaced expected to be equal to origin (since no replacements were made)")
 
 	keyI := 0
-	replacedBack, err := replaced.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+	replacedBack, _, err := replaced.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
 		require.Equal(t, oldKeys[keyI][:4], key[:4])
 		defer func() { keyI++ }()
 		return oldKeys[keyI], nil
