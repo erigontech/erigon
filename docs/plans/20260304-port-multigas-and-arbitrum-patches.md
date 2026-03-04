@@ -188,12 +188,12 @@ Additionally, several state transition gaps need porting: DropTip pre-preCheck o
 
 ### Task 10: Verify acceptance criteria
 
-- [ ] Verify multigas flows end-to-end: intrinsic → GasChargingHook → EVM exec → refund → result
-- [ ] Verify `usedMultiGas.SingleGas() == result.ReceiptGasUsed` invariant holds
-- [ ] Verify non-Arbitrum transactions produce `multigas.ZeroGas()` from hooks (DefaultTxProcessor)
-- [ ] Run full test suite: `go test ./execution/... -count=1 -short`
-- [ ] Run `go build ./...` — full codebase must compile
-- [ ] Verify no regressions in existing test coverage
+- [x] Verify multigas flows end-to-end: intrinsic → GasChargingHook → EVM exec → refund → result
+- [x] Verify `usedMultiGas.SingleGas() == result.ReceiptGasUsed` invariant holds
+- [x] Verify non-Arbitrum transactions produce `multigas.ZeroGas()` from hooks (DefaultTxProcessor)
+- [x] Run full test suite: `go test ./execution/... -count=1 -short`
+- [x] Run `go build ./...` — full codebase must compile
+- [x] Verify no regressions in existing test coverage
 
 ### Task 11: [Final] Update documentation
 

@@ -942,6 +942,210 @@ func TestHandleRevertedTx_NilTx(t *testing.T) {
 	require.Equal(t, inputMultiGas.SingleGas(), resultMultiGas.SingleGas())
 }
 
+// multiGasInjectionHook injects non-zero multigas at the GasChargingHook accumulation point,
+// allowing verification that all accumulation points contribute to the final UsedMultiGas.
+type multiGasInjectionHook struct {
+	earlyReturnHook
+	hookGas multigas.MultiGas
+}
+
+func (h multiGasInjectionHook) StartTxHook() (bool, multigas.MultiGas, error, []byte) {
+	return false, multigas.ZeroGas(), nil, nil
+}
+func (h multiGasInjectionHook) GasChargingHook(g *uint64, _ uint64) (accounts.Address, multigas.MultiGas, error) {
+	return h.coinbase, h.hookGas, nil
+}
+
+func TestMultiGasEndToEnd_AllAccumulationPoints(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+
+	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(sd.Close)
+
+	r := state.NewReaderV3(sd.AsGetter(tx))
+	s := state.New(r)
+
+	sender := accounts.InternAddress(common.HexToAddress("0xaaaa"))
+	recipient := accounts.InternAddress(common.HexToAddress("0xbbbb"))
+	coinbase := accounts.InternAddress(common.HexToAddress("0xdead"))
+
+	s.CreateAccount(sender, true)
+	s.AddBalance(sender, *uint256.NewInt(1_000_000_000_000_000_000), tracing.BalanceChangeUnspecified)
+	s.SetNonce(sender, 0)
+
+	hookGas := multigas.MultiGasFromPairs(
+		multigas.Pair{Kind: multigas.ResourceKindL1Calldata, Amount: 500},
+	)
+
+	gasPrice := uint256.NewInt(1)
+	blockCtx := evmtypes.BlockContext{
+		BlockNumber: 1,
+		GasLimit:    30_000_000,
+		Coinbase:    coinbase,
+		GetHash:     func(n uint64) (common.Hash, error) { return common.Hash{}, nil },
+		CanTransfer: func(ibs evmtypes.IntraBlockState, addr accounts.Address, val uint256.Int) (bool, error) {
+			bal, err := ibs.GetBalance(addr)
+			if err != nil {
+				return false, err
+			}
+			return bal.Cmp(&val) >= 0, nil
+		},
+		Transfer: func(ibs evmtypes.IntraBlockState, from, to accounts.Address, val uint256.Int, _ bool, _ *chain.Rules) error {
+			if err := ibs.SubBalance(from, val, tracing.BalanceChangeTransfer); err != nil {
+				return err
+			}
+			return ibs.AddBalance(to, val, tracing.BalanceChangeTransfer)
+		},
+	}
+	txCtx := evmtypes.TxContext{GasPrice: *gasPrice, Origin: sender}
+
+	cfg := &chain.Config{
+		ChainID:               big.NewInt(1),
+		HomesteadBlock:        new(big.Int),
+		TangerineWhistleBlock: new(big.Int),
+		SpuriousDragonBlock:   new(big.Int),
+		ByzantiumBlock:        new(big.Int),
+		ConstantinopleBlock:   new(big.Int),
+		PetersburgBlock:       new(big.Int),
+		IstanbulBlock:         new(big.Int),
+		BerlinBlock:           new(big.Int),
+		LondonBlock:           new(big.Int),
+	}
+
+	evmInst := vm.NewEVM(blockCtx, txCtx, s, cfg, vm.Config{})
+	evmInst.ProcessingHook = multiGasInjectionHook{
+		earlyReturnHook: earlyReturnHook{coinbase: coinbase},
+		hookGas:         hookGas,
+	}
+
+	msg := types.NewMessage(
+		sender, recipient, 0, uint256.NewInt(0), 50000,
+		gasPrice, gasPrice, uint256.NewInt(0),
+		nil, nil, true, false, true, false, nil,
+	)
+
+	gp := new(GasPool).AddGas(30_000_000)
+	result, err := ApplyMessage(evmInst, msg, gp, true, false, nil)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	// Intrinsic multigas should contribute to computation and L2 calldata
+	require.Greater(t, result.UsedMultiGas.Get(multigas.ResourceKindComputation), uint64(0),
+		"intrinsic gas should add computation multigas")
+
+	// Hook gas should contribute L1 calldata
+	require.GreaterOrEqual(t, result.UsedMultiGas.Get(multigas.ResourceKindL1Calldata), hookGas.Get(multigas.ResourceKindL1Calldata),
+		"GasChargingHook multigas should be accumulated")
+
+	// SingleGas should be intrinsic + hook gas (hook doesn't affect gasRemaining, so SingleGas > ReceiptGasUsed)
+	require.Equal(t, result.ReceiptGasUsed+hookGas.SingleGas(), result.UsedMultiGas.SingleGas(),
+		"SingleGas should equal ReceiptGasUsed + injected hook gas")
+}
+
+func TestDefaultTxProcessor_ZeroGas(t *testing.T) {
+	proc := vm.DefaultTxProcessor{}
+
+	// StartTxHook returns ZeroGas
+	_, startMultiGas, _, _ := proc.StartTxHook()
+	require.Equal(t, uint64(0), startMultiGas.SingleGas(),
+		"DefaultTxProcessor.StartTxHook should return ZeroGas")
+
+	// IsArbitrum is false
+	require.False(t, proc.IsArbitrum())
+
+	// ForceRefundGas and NonrefundableGas are zero
+	require.Equal(t, uint64(0), proc.ForceRefundGas())
+	require.Equal(t, uint64(0), proc.NonrefundableGas())
+
+	// DropTip is false
+	require.False(t, proc.DropTip())
+}
+
+func TestMultiGasSingleGasInvariant_Transfer(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+
+	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(sd.Close)
+
+	r := state.NewReaderV3(sd.AsGetter(tx))
+	s := state.New(r)
+
+	sender := accounts.InternAddress(common.HexToAddress("0xaaaa"))
+	recipient := accounts.InternAddress(common.HexToAddress("0xbbbb"))
+	coinbase := accounts.InternAddress(common.HexToAddress("0xdead"))
+
+	s.CreateAccount(sender, true)
+	s.AddBalance(sender, *uint256.NewInt(1_000_000_000_000_000_000), tracing.BalanceChangeUnspecified)
+	s.SetNonce(sender, 0)
+
+	gasPrice := uint256.NewInt(1)
+	blockCtx := evmtypes.BlockContext{
+		BlockNumber: 1,
+		GasLimit:    30_000_000,
+		Coinbase:    coinbase,
+		GetHash:     func(n uint64) (common.Hash, error) { return common.Hash{}, nil },
+		CanTransfer: func(ibs evmtypes.IntraBlockState, addr accounts.Address, val uint256.Int) (bool, error) {
+			bal, err := ibs.GetBalance(addr)
+			if err != nil {
+				return false, err
+			}
+			return bal.Cmp(&val) >= 0, nil
+		},
+		Transfer: func(ibs evmtypes.IntraBlockState, from, to accounts.Address, val uint256.Int, _ bool, _ *chain.Rules) error {
+			if err := ibs.SubBalance(from, val, tracing.BalanceChangeTransfer); err != nil {
+				return err
+			}
+			return ibs.AddBalance(to, val, tracing.BalanceChangeTransfer)
+		},
+	}
+	txCtx := evmtypes.TxContext{GasPrice: *gasPrice, Origin: sender}
+
+	cfg := &chain.Config{
+		ChainID:               big.NewInt(1),
+		HomesteadBlock:        new(big.Int),
+		TangerineWhistleBlock: new(big.Int),
+		SpuriousDragonBlock:   new(big.Int),
+		ByzantiumBlock:        new(big.Int),
+		ConstantinopleBlock:   new(big.Int),
+		PetersburgBlock:       new(big.Int),
+		IstanbulBlock:         new(big.Int),
+		BerlinBlock:           new(big.Int),
+		LondonBlock:           new(big.Int),
+	}
+
+	evmInst := vm.NewEVM(blockCtx, txCtx, s, cfg, vm.Config{})
+
+	// Test with data to exercise L2Calldata dimension
+	data := []byte{0x01, 0x02, 0x03, 0x00, 0x00}
+	msg := types.NewMessage(
+		sender, recipient, 0, uint256.NewInt(100), 100000,
+		gasPrice, gasPrice, uint256.NewInt(0),
+		data, nil, true, false, true, false, nil,
+	)
+
+	gp := new(GasPool).AddGas(30_000_000)
+	result, err := ApplyMessage(evmInst, msg, gp, true, false, nil)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NoError(t, result.Err)
+
+	require.Equal(t, result.ReceiptGasUsed, result.UsedMultiGas.SingleGas(),
+		"SingleGas must equal ReceiptGasUsed for transfer with calldata")
+
+	require.Greater(t, result.UsedMultiGas.Get(multigas.ResourceKindComputation), uint64(0),
+		"computation gas should be non-zero")
+	require.Greater(t, result.UsedMultiGas.Get(multigas.ResourceKindL2Calldata), uint64(0),
+		"L2 calldata gas should be non-zero for tx with data")
+}
+
 func TestFloorDataGas(t *testing.T) {
 	t.Run("empty_data", func(t *testing.T) {
 		gas, err := FloorDataGas(nil)
