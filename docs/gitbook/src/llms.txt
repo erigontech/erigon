@@ -49,6 +49,40 @@
 - [Otterscan](fundamentals/otterscan.md): Block explorer for Erigon
 - [Contributing](about/contributing.md): How to contribute to Erigon
 
+## Help & Troubleshooting
+
+- [Help Center](https://github.com/erigontech/erigon/blob/release/3.4/docs/gitbook-help/README.md): Overview of support resources
+- [FAQs](https://github.com/erigontech/erigon/blob/release/3.4/docs/gitbook-help/frequently-asked-questions-faqs.md): Frequently asked questions
+- [Troubleshooting](https://github.com/erigontech/erigon/blob/release/3.4/docs/gitbook-help/troubleshooting.md): Diagnosing common problems
+- [Common Errors](https://github.com/erigontech/erigon/blob/release/3.4/docs/gitbook-help/common-errors-and-solutions.md): Error messages and fixes
+- [Known Issues](https://github.com/erigontech/erigon/blob/release/3.4/docs/gitbook-help/known-issues.md): Current limitations and workarounds
+- [Best Practices](https://github.com/erigontech/erigon/blob/release/3.4/docs/gitbook-help/best-practices.md): Recommended configurations
+- [Glossary](https://github.com/erigontech/erigon/blob/release/3.4/docs/gitbook-help/glossary-of-key-terms.md): Definitions of key terms
+
+## Developer Internals
+
+- [Programmer's Guide](https://github.com/erigontech/erigon/blob/release/3.4/docs/programmers_guide/guide.md): Deep dive into Erigon architecture and code
+- [Database Walkthrough](https://github.com/erigontech/erigon/blob/release/3.4/docs/programmers_guide/db_walkthrough.MD): How Erigon stores blockchain data
+- [Database FAQ](https://github.com/erigontech/erigon/blob/release/3.4/docs/programmers_guide/db_faq.md): Common questions about the database layer
+- [Dupsort](https://github.com/erigontech/erigon/blob/release/3.4/docs/programmers_guide/dupsort.md): MDBX dupsort feature usage
+- [Witness Format](https://github.com/erigontech/erigon/blob/release/3.4/docs/programmers_guide/witness_format.md): Block witness serialization format
+- [Witness Formal Spec](https://github.com/erigontech/erigon/blob/release/3.4/docs/programmers_guide/witness_formal_spec.md): Formal specification of witnesses
+
+## Additional Documentation
+
+- [DEV_CHAIN.md](https://github.com/erigontech/erigon/blob/release/3.4/docs/DEV_CHAIN.md): Running a local development chain
+- [TESTING.md](https://github.com/erigontech/erigon/blob/release/3.4/docs/TESTING.md): How to run tests
+- [Mining](https://github.com/erigontech/erigon/blob/release/3.4/docs/mining.md): Mining configuration (legacy PoW)
+- [EVM Semantics](https://github.com/erigontech/erigon/blob/release/3.4/docs/evm_semantics.md): EVM implementation details
+- [Merry-go-round Sync](https://github.com/erigontech/erigon/blob/release/3.4/docs/merry-go-round-sync.md): Sync algorithm documentation
+
+## Security Audits
+
+- [2017 Geth Audit (Truesec)](https://github.com/erigontech/erigon/blob/release/3.4/docs/audits/2017-04-25_Geth-audit_Truesec.pdf)
+- [2018 Clef Audit (NCC)](https://github.com/erigontech/erigon/blob/release/3.4/docs/audits/2018-09-14_Clef-audit_NCC.pdf)
+- [2019 Discv5 Audit (Least Authority)](https://github.com/erigontech/erigon/blob/release/3.4/docs/audits/2019-10-15_Discv5_audit_LeastAuthority.pdf)
+- [2020 Discv5 Audit (Cure53)](https://github.com/erigontech/erigon/blob/release/3.4/docs/audits/2020-01-24_DiscV5_audit_Cure53.pdf)
+
 ## Source Code
 
 - [GitHub Repository](https://github.com/erigontech/erigon): Main source code repository
