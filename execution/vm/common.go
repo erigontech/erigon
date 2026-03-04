@@ -88,12 +88,23 @@ func ToWordSize(size uint64) uint64 {
 	return (size + 31) / 32
 }
 
-func maxCodeSize(rules *chain.Rules) int {
+func CheckMaxCodeSize(rules *chain.Rules, size int) error {
+	// Gnosis Chain prior to Shanghai didn't have EIP-170 enabled,
+	// but EIP-3860 (part of Shanghai) requires EIP-170.
+	if !rules.IsSpuriousDragon || (rules.IsAura && !rules.IsShanghai) {
+		return nil
+	}
+
+	var maxSize int
 	if rules.IsAmsterdam {
-		return params.MaxCodeSizeAmsterdam
+		maxSize = params.MaxCodeSizeAmsterdam
+	} else if rules.IsAhmedabad {
+		maxSize = params.MaxCodeSizeAhmedabad
+	} else {
+		maxSize = params.MaxCodeSize
 	}
-	if rules.IsAhmedabad {
-		return params.MaxCodeSizeAhmedabad
+	if size > maxSize {
+		return ErrMaxCodeSizeExceeded
 	}
-	return params.MaxCodeSize
+	return nil
 }
