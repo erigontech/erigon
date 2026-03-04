@@ -73,7 +73,7 @@ var skipAccountChecks = [...]bool{
 }
 
 func init() {
-	types.RegisterTransaction(ArbitrumDepositTxType, createArbitrumDespoitTxn)
+	types.RegisterTransaction(ArbitrumDepositTxType, createArbitrumDepositTxn)
 	types.RegisterTransaction(ArbitrumRetryTxType, createArbitrumRetryTx)
 	types.RegisterTransaction(ArbitrumSubmitRetryableTxType, createArbitrumSubmitRetryableTx)
 	types.RegisterTransaction(ArbitrumInternalTxType, createArbitrumInternalTx)
@@ -1701,16 +1701,12 @@ func (tx *ArbitrumSubmitRetryableTx) AsMessage(s types.Signer, baseFee *big.Int,
 	msg.SetCheckNonce(!skipAccountChecks[tx.Type()])
 
 	if baseFee != nil {
-		var gasPrice uint256.Int
-
-		gasPrice.SetFromBig(cmath.BigMin(msg.GasPrice().ToBig().Add(msg.TipCap().ToBig(), baseFee), msg.FeeCap().ToBig()))
-		msg.SetGasPrice(&gasPrice)
+		gp, of := uint256.FromBig(cmath.BigMin(msg.GasPrice().ToBig().Add(msg.TipCap().ToBig(), baseFee), msg.FeeCap().ToBig()))
+		if of {
+			return nil, fmt.Errorf("gas price overflow happened")
+		}
+		msg.SetGasPrice(gp)
 	}
-	gp, of := uint256.FromBig(cmath.BigMin(msg.GasPrice().ToBig().Add(msg.TipCap().ToBig(), baseFee), msg.FeeCap().ToBig()))
-	if of {
-		return nil, fmt.Errorf("gas price overflow happened")
-	}
-	msg.SetGasPrice(gp)
 	// if !rules.IsCancun {
 	// 	return msg, errors.New("BlobTx transactions require Cancun")
 	// }
@@ -1997,7 +1993,7 @@ func (tx *ArbitrumSubmitRetryableTx) decode(input []byte) error {
 //	return dst.Set(baseFee)
 //}
 
-func createArbitrumDespoitTxn() types.Transaction {
+func createArbitrumDepositTxn() types.Transaction {
 	return &ArbitrumDepositTx{}
 }
 
