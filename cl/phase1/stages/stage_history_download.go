@@ -151,6 +151,18 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			if err := beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, blk, true); err != nil {
 				return false, err
 			}
+			// [New in Gloas:EIP7732] WriteBeaconBlockAndIndicies skips EL indices for GLOAS blocks
+			// because the payload is in the envelope, not the block body. Write them here now
+			// that we have the envelope.
+			if blk.Version() >= clparams.GloasVersion && envelope != nil {
+				blockRoot, hashErr := blk.Block.HashSSZ()
+				if hashErr != nil {
+					return false, hashErr
+				}
+				if err := beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, common.Hash(blockRoot), envelope.Message); err != nil {
+					return false, err
+				}
+			}
 		}
 		// we need to backfill an equivalent number of blobs to the blocks
 		hasDownloadEnoughForImmediateBlobsBackfilling := true
