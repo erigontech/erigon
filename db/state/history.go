@@ -1122,6 +1122,7 @@ func (ht *HistoryRoTx) pruneHistoryTables(ctx context.Context, rwTx kv.RwTx, txF
 	}
 
 	stat.PruneCountTx = txCount
+	stat.Progress = prune.Done
 	if stat.MinTxNum == math.MaxUint64 {
 		stat.MinTxNum = 0
 	}
