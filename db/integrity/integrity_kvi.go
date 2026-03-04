@@ -46,7 +46,7 @@ var ErrIntegrity = errors.New("integrity error")
 
 // CheckKvis checks all kvi index files for a domain sequentially (one file at a time),
 // parallelizing the lookup work inside each file.
-func CheckKvis(ctx context.Context, tx kv.TemporalTx, domain kv.Domain, cache *IntegrityCache, failFast bool, logger log.Logger) error {
+func CheckKvis(ctx context.Context, tx kv.TemporalTx, domain kv.Domain, checkType Check, cache *IntegrityCache, failFast bool, logger log.Logger) error {
 	start := time.Now()
 	aggTx := state.AggTx(tx)
 	files := aggTx.Files(domain)
@@ -93,7 +93,7 @@ func CheckKvis(ctx context.Context, tx kv.TemporalTx, domain kv.Domain, cache *I
 			if err != nil {
 				return err
 			}
-			if cache.has(string(CommitmentKvi), fps) {
+			if cache.has(string(checkType), fps) {
 				logger.Info("skipping (cache hit)", "kv", filepath.Base(kvPath))
 				continue
 			}
@@ -126,9 +126,9 @@ func CheckKvis(ctx context.Context, tx kv.TemporalTx, domain kv.Domain, cache *I
 		return err
 	}
 	for _, fps := range successFps {
-		cache.add(string(CommitmentKvi), fps)
+		cache.add(string(checkType), fps)
 	}
-	logger.Info("[integrity] CommitmentKvi", "dur", time.Since(start), "files", len(files), "keys", keyCount.Load())
+	logger.Info("[integrity] "+string(checkType), "dur", time.Since(start), "files", len(files), "keys", keyCount.Load())
 	return nil
 }
 

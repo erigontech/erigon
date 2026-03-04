@@ -271,7 +271,7 @@ func CheckCommitmentKvi(ctx context.Context, db kv.TemporalRoDB, cache *Integrit
 		return err
 	}
 	defer tx.Rollback()
-	return CheckKvis(ctx, tx, kv.CommitmentDomain, cache, failFast, logger)
+	return CheckKvis(ctx, tx, kv.CommitmentDomain, CommitmentKvi, cache, failFast, logger)
 }
 
 func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, cache *IntegrityCache, failFast bool, logger log.Logger) error {
