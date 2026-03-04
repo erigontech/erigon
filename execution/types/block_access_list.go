@@ -31,6 +31,9 @@ const (
 	maxStorageChangesPerSlot    = math.MaxUint16 + 1
 	maxStorageReadsPerAccount   = 1 << 18
 	maxIndexedChangesPerAccount = math.MaxUint16 + 1
+
+	// EIP-7928: bal_items <= block_gas_limit / BalItemCost
+	BalItemCost = 2000
 )
 
 type AccountChanges struct {
@@ -862,6 +865,22 @@ func (bal BlockAccessList) Validate() error {
 	return nil
 }
 
+// ValidateMaxItems checks the EIP-7928 constraint: bal_items <= blockGasLimit / BalItemCost
+// where bal_items = count(addresses) + count(storage keys across all accounts).
+func (bal BlockAccessList) ValidateMaxItems(blockGasLimit uint64) error {
+	maxItems := blockGasLimit / BalItemCost
+	var items uint64
+	for _, ac := range bal {
+		items++ // each address counts as 1 item
+		items += uint64(len(ac.StorageChanges))
+		items += uint64(len(ac.StorageReads))
+	}
+	if items > maxItems {
+		return fmt.Errorf("block access list too large: %d items > %d max (gas limit %d / %d)", items, maxItems, blockGasLimit, BalItemCost)
+	}
+	return nil
+}
+
 func (ac *AccountChanges) validate() error {
 	if ac == nil {
 		return errors.New("nil account changes")
@@ -871,6 +890,18 @@ func (ac *AccountChanges) validate() error {
 	}
 	if err := validateStorageReads(ac.StorageReads); err != nil {
 		return fmt.Errorf("storage_reads: %w", err)
+	}
+	// EIP-7928: a slot must not appear in both storage_changes and storage_reads.
+	if len(ac.StorageChanges) > 0 && len(ac.StorageReads) > 0 {
+		changeSlots := make(map[common.Hash]struct{}, len(ac.StorageChanges))
+		for _, sc := range ac.StorageChanges {
+			changeSlots[sc.Slot.Value()] = struct{}{}
+		}
+		for _, key := range ac.StorageReads {
+			if _, exists := changeSlots[key.Value()]; exists {
+				return fmt.Errorf("storage key %s in both changes and reads", key.Value().Hex())
+			}
+		}
 	}
 	if err := validateBalanceChangeList(ac.BalanceChanges); err != nil {
 		return fmt.Errorf("balance_changes: %w", err)
