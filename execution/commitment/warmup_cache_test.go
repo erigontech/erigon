@@ -222,11 +222,9 @@ func BenchmarkWarmupCache_Branch(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 
-	var i int
-	for b.Loop() {
+	for i := 0; b.Loop(); i++ {
 		key := keys[i%len(keys)]
 		cache.GetBranch(key)
-		i++
 	}
 }
 
@@ -240,10 +238,8 @@ func BenchmarkWarmupCache_Branch_Put(b *testing.B) {
 
 	b.ReportAllocs()
 
-	var i int
-	for b.Loop() {
+	for i := 0; b.Loop(); i++ {
 		cache.PutBranch(keys[i%keyCount], data)
-		i++
 	}
 }
 
@@ -260,11 +256,9 @@ func BenchmarkWarmupCache_Account(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 
-	var i int
-	for b.Loop() {
+	for i := 0; b.Loop(); i++ {
 		key := keys[i%len(keys)]
 		cache.GetAccount(key)
-		i++
 	}
 }
 
@@ -281,11 +275,9 @@ func BenchmarkWarmupCache_Storage(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 
-	var i int
-	for b.Loop() {
+	for i := 0; b.Loop(); i++ {
 		key := keys[i%len(keys)]
 		cache.GetStorage(key)
-		i++
 	}
 }
 
@@ -312,8 +304,7 @@ func BenchmarkWarmupCache_Mixed(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 
-	var i int
-	for b.Loop() {
+	for i := 0; b.Loop(); i++ {
 		switch i % 3 {
 		case 0:
 			cache.GetAccount(accountKeys[i%len(accountKeys)])
@@ -322,7 +313,6 @@ func BenchmarkWarmupCache_Mixed(b *testing.B) {
 		case 2:
 			cache.GetBranch(branchKeys[i%len(branchKeys)])
 		}
-		i++
 	}
 }
 
@@ -339,9 +329,7 @@ func BenchmarkComparison_Map_100k(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 
-	var i int
-	for b.Loop() {
+	for i := 0; b.Loop(); i++ {
 		cache.GetStorage(keys[i%len(keys)])
-		i++
 	}
 }

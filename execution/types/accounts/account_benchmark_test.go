@@ -278,8 +278,7 @@ func BenchmarkDecodingAccount(b *testing.B) {
 	b.ResetTimer()
 	for _, test := range accountCases {
 		b.Run(fmt.Sprint(test.name), func(b *testing.B) {
-			var i int
-			for b.Loop() {
+			for i := 0; b.Loop(); i++ {
 				println(test.name, i, b.N) //TODO: it just stucks w/o that print
 				b.StopTimer()
 				test.acc.Nonce = uint64(i)
@@ -296,7 +295,6 @@ func BenchmarkDecodingAccount(b *testing.B) {
 				b.StopTimer()
 				decodedAccounts = append(decodedAccounts, decodedAccount)
 				b.StartTimer()
-				i++
 			}
 		})
 
@@ -348,8 +346,7 @@ func BenchmarkDecodingIncarnation(b *testing.B) { // V2 version of bench was a p
 	b.ResetTimer()
 	for _, test := range accountCases {
 		b.Run(fmt.Sprint(test.name), func(b *testing.B) {
-			var i int
-			for b.Loop() {
+			for i := 0; b.Loop(); i++ {
 				println(test.name, i, b.N) //TODO: it just stucks w/o that print
 				b.StopTimer()
 
@@ -368,7 +365,6 @@ func BenchmarkDecodingIncarnation(b *testing.B) { // V2 version of bench was a p
 				decodedIncarnations = append(decodedIncarnations, decodedAcc.Incarnation)
 
 				b.StartTimer()
-				i++
 			}
 		})
 	}
