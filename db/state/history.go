@@ -1419,14 +1419,20 @@ func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By
 		}
 		g := ht.iit.dataReader(item.src.decompressor)
 		g.Reset(0)
-		wrapper := NewSegReaderWrapper(g)
-		if wrapper.HasNext() {
-			key, val, err := wrapper.Next()
-			if err != nil {
-				s.Close()
-				return nil, err
+		if g.HasNext() {
+			key, _ := g.Next(nil)
+			var val []byte
+			if g.HasNext() {
+				val, _ = g.Next(nil)
 			}
-			heap.Push(&s.h, &ReconItem{g: wrapper, key: key, val: val, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum})
+			histFileIdx := -1
+			for j := range ht.files {
+				if ht.files[j].startTxNum == item.startTxNum && ht.files[j].endTxNum == item.endTxNum {
+					histFileIdx = j
+					break
+				}
+			}
+			heap.Push(&s.h, &ReconItem{g: g, key: key, val: val, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, histFileIdx: histFileIdx})
 		}
 	}
 	if err := s.advance(); err != nil {
