@@ -447,6 +447,10 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	snapshot := evm.intraBlockState.PushSnapshot()
 	defer evm.intraBlockState.PopSnapshot(snapshot)
 
+	wasEmpty, err := evm.intraBlockState.Empty(address)
+	if err != nil {
+		return nil, accounts.NilAddress, evmtypes.MdGas{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+	}
 	evm.intraBlockState.CreateAccount(address, true)
 	if evm.chainRules.IsSpuriousDragon {
 		evm.intraBlockState.SetNonce(address, 1)
@@ -492,6 +496,9 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 		if evm.chainRules.IsAmsterdam {
 			// EIP-8037
 			createDataGas = uint64(len(ret)) * evm.Context.CostPerStateByte // state gas cost
+			if wasEmpty {
+				createDataGas += 112 * evm.Context.CostPerStateByte
+			}
 			gasRemaining, stateGasOk = useMdGas(gasRemaining, createDataGas, evmtypes.StateGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage)
 			if stateGasOk {
 				createDataGas = 6 * ((uint64(len(ret)) + 31) / 32) // regular gas cost for hashing
