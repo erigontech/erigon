@@ -235,14 +235,10 @@ func (sdb *IntraBlockState) WasmTargets() []wasmdb.WasmTarget {
 
 func (sdb *IntraBlockState) GetReceiptsByHash(hash common.Hash) types.Receipts {
 	return nil
-	//TODO implement me
-	panic("implement me")
 }
 
 func (sdb *IntraBlockState) Commit(bn uint64, _ bool) (common.Hash, error) {
 	return common.Hash{}, nil
-	//TODO implement me
-	panic("implement me")
 }
 
 // making the function public to be used by external tests

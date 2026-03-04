@@ -160,8 +160,9 @@ func (c *Client) sendBatchHTTP(ctx context.Context, op *requestOp, msgs []*jsonr
 // SetRequestLimit sets a rate limit for requests: r requests per second with a burst of b.
 // b means limit on concurrent requests.
 func (c *Client) SetRequestLimit(r rate.Limit, b int) {
-	hc := c.writeConn.(*httpConn)
-	hc.SetLimit(r, b)
+	if hc, ok := c.writeConn.(*httpConn); ok {
+		hc.SetLimit(r, b)
+	}
 }
 
 func (hc *httpConn) doRequest(ctx context.Context, msg any) ([]byte, error) {

@@ -141,7 +141,16 @@ func (evm *EVM) Reset(txCtx evmtypes.TxContext, ibs *state.IntraBlockState) {
 func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state.IntraBlockState, vmConfig Config, chainRules *chain.Rules) {
 	if vmConfig.NoBaseFee {
 		if txCtx.GasPrice.IsZero() {
+			if evm.chainConfig.IsArbitrum() {
+				blockCtx.BaseFeeInBlock = new(uint256.Int)
+				if !blockCtx.BaseFee.IsZero() {
+					blockCtx.BaseFeeInBlock.Set(&blockCtx.BaseFee)
+				}
+			}
 			blockCtx.BaseFee = uint256.Int{}
+		}
+		if evm.chainConfig.IsArbitrum() && txCtx.BlobFee.IsZero() {
+			blockCtx.BlobBaseFee = uint256.Int{}
 		}
 	}
 	evm.Context = blockCtx
@@ -153,6 +162,7 @@ func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtype
 	evm.depth = 0
 	evm.returnData = nil
 	evm.jt = jumpTable(chainRules, vmConfig)
+	evm.ProcessingHook = DefaultTxProcessor{evm: evm}
 
 	// ensure the evm is reset to be used again
 	evm.abort.Store(false)

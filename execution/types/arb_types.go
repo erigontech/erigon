@@ -127,11 +127,7 @@ func (tx *ArbitrumUnsignedTx) GetFeeCap() *uint256.Int            { return uint2
 func (tx *ArbitrumUnsignedTx) GetAuthorizations() []Authorization { return nil }
 
 func (tx *ArbitrumUnsignedTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
-	if baseFee == nil {
-		return tx.GetPrice()
-	}
-	res := uint256.NewInt(0)
-	return res.Set(baseFee)
+	return uintZero
 }
 
 func (tx *ArbitrumUnsignedTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
@@ -523,11 +519,7 @@ func (tx *ArbitrumContractTx) GetAccessList() AccessList          { return nil }
 func (tx *ArbitrumContractTx) GetAuthorizations() []Authorization { return nil }
 
 func (tx *ArbitrumContractTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
-	if baseFee == nil {
-		return tx.GetPrice()
-	}
-	res := uint256.NewInt(0)
-	return res.Set(baseFee)
+	return uintZero
 }
 func (tx *ArbitrumContractTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
 	return uintZero, uintZero, uintZero
@@ -955,11 +947,7 @@ func (t *ArbitrumRetryTx) GetAccessList() AccessList           { return nil }
 func (tx *ArbitrumRetryTx) GetAuthorizations() []Authorization { return nil }
 
 func (t *ArbitrumRetryTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
-	if baseFee == nil {
-		return t.GetPrice()
-	}
-	res := uint256.NewInt(0)
-	return res.Set(baseFee)
+	return uintZero
 }
 func (t *ArbitrumRetryTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
 	return uintZero, uintZero, uintZero
@@ -1498,11 +1486,7 @@ func (tx *ArbitrumSubmitRetryableTx) GetFeeCap() *uint256.Int {
 }
 
 func (tx *ArbitrumSubmitRetryableTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
-	if baseFee == nil {
-		return tx.GetPrice()
-	}
-	res := uint256.NewInt(0)
-	return res.Set(baseFee)
+	return uintZero
 }
 
 func (tx *ArbitrumSubmitRetryableTx) GetData() []byte {
