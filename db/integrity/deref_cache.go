@@ -21,9 +21,16 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/anacrolix/torrent/metainfo"
+)
+
+// Check name constants for cache entries.
+const (
+	checkNameCommitmentKvi     = "CommitmentKvi"
+	checkNameCommitmentKvDeref = "CommitmentKvDeref"
 )
 
 type fileFingerprint struct {
@@ -130,21 +137,11 @@ func fingerprintsOf(paths ...string) ([]fileFingerprint, error) {
 			return nil, fmt.Errorf("loading torrent file %s: %w", torrentPath, err)
 		}
 		fps = append(fps, fileFingerprint{
-			basename: baseName(path),
+			basename: filepath.Base(path),
 			hash:     mi.HashInfoBytes(),
 		})
 	}
 	return fps, nil
-}
-
-// baseName extracts the file name from a path (like filepath.Base but simpler).
-func baseName(path string) string {
-	for i := len(path) - 1; i >= 0; i-- {
-		if path[i] == '/' || path[i] == '\\' {
-			return path[i+1:]
-		}
-	}
-	return path
 }
 
 // encodeEntry produces the tab-separated cache line used as the map key and
