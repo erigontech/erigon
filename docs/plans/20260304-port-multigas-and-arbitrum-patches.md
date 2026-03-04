@@ -80,18 +80,18 @@ Additionally, several state transition gaps need porting: DropTip pre-preCheck o
 - Modify: `execution/protocol/state_processor.go`
 - Modify: `execution/protocol/block_exec.go`
 
-- [ ] Update CALL opcode handler (instructions.go:1104) — capture and discard multigas for now: `ret, returnGas, _, err := evm.Call(...)`
-- [ ] Update CREATE opcode handler (instructions.go:998) — same pattern
-- [ ] Update CREATE2 opcode handler (instructions.go:1052) — same pattern
-- [ ] Update CALLCODE opcode handler (instructions.go:1149) — same pattern
-- [ ] Update DELEGATECALL opcode handler (instructions.go:1189) — same pattern
-- [ ] Update STATICCALL opcode handler (instructions.go:1229) — same pattern
-- [ ] Update `TransitionDb` Call/Create calls (state_transition.go:586-588) — capture multigas
-- [ ] Update `ApplyFrame` Call (state_transition.go:417) — capture multigas
-- [ ] Update `SysCallContract` (state_processor.go:266) — discard multigas
-- [ ] Update `block_exec.go:277` — discard multigas
-- [ ] Run `go build ./execution/...` — must compile
-- [ ] Run `go test ./execution/protocol/... -count=1 -short` — must pass
+- [x] Update CALL opcode handler (instructions.go:1104) — capture and discard multigas for now: `ret, returnGas, _, err := evm.Call(...)`
+- [x] Update CREATE opcode handler (instructions.go:998) — same pattern
+- [x] Update CREATE2 opcode handler (instructions.go:1052) — same pattern
+- [x] Update CALLCODE opcode handler (instructions.go:1149) — same pattern
+- [x] Update DELEGATECALL opcode handler (instructions.go:1189) — same pattern
+- [x] Update STATICCALL opcode handler (instructions.go:1229) — same pattern
+- [x] Update `TransitionDb` Call/Create calls (state_transition.go:586-588) — capture multigas
+- [x] Update `ApplyFrame` Call (state_transition.go:417) — capture multigas
+- [x] Update `SysCallContract` (state_processor.go:266) — discard multigas
+- [x] Update `block_exec.go:277` — discard multigas
+- [x] Run `go build ./execution/...` — must compile
+- [x] Run `go test ./execution/protocol/... -count=1 -short` — must pass
 
 ### Task 3: Wire multigas tracking through TransitionDb
 

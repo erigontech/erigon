@@ -58,7 +58,7 @@ func (ct *OverlayCreateTracer) OnEnter(depth int, typ byte, from accounts.Addres
 
 	if (vm.OpCode(typ) == vm.CREATE || vm.OpCode(typ) == vm.CREATE2) && to == ct.contractAddress {
 		ct.isCapturing = true
-		_, _, _, err := ct.evm.OverlayCreate(from, vm.NewCodeAndHash(ct.code), ct.gasCap, value, to, vm.OpCode(typ), true /* incrementNonce */)
+		_, _, _, _, err := ct.evm.OverlayCreate(from, vm.NewCodeAndHash(ct.code), ct.gasCap, value, to, vm.OpCode(typ), true /* incrementNonce */)
 		if err != nil {
 			ct.err = err
 		} else {

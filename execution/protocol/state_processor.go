@@ -263,7 +263,7 @@ func ProcessParentBlockHash(prevHash common.Hash, evm *vm.EVM) {
 		nil,
 	)
 
-	_, _, _ = evm.Call(msg.From(), msg.To(), msg.Data(), msg.Gas(), *msg.Value(), false)
+	_, _, _, _ = evm.Call(msg.From(), msg.To(), msg.Data(), msg.Gas(), *msg.Value(), false)
 }
 
 func MakeReceipt(
