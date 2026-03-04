@@ -85,7 +85,8 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 		}
 	}
 
-	result, buf, err := branch.ReplacePlainKeys(at.branchDerefBuf[:0], func(key []byte, isStorage bool) ([]byte, error) {
+	var result commitment.BranchData
+	result, at.branchDerefBuf, err = branch.ReplacePlainKeys(at.branchDerefBuf[:0], func(key []byte, isStorage bool) ([]byte, error) {
 		if isStorage {
 			if len(key) == length.Addr+length.Hash {
 				return nil, nil // save storage key as is
@@ -123,7 +124,6 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 	if err != nil {
 		return nil, err
 	}
-	at.branchDerefBuf = buf // retain grown heap buffer for next call
 	return result, nil
 }
 
@@ -431,12 +431,12 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 			return shortened, nil
 		}
 
-		temp, buf, err := commitment.BranchData(valBuf).ReplacePlainKeys(dt.comBuf[:0], replacer)
+		var branchData commitment.BranchData
+		branchData, dt.comBuf, err = commitment.BranchData(valBuf).ReplacePlainKeys(dt.comBuf[:0], replacer)
 		if err != nil {
 			return nil, err
 		}
-		dt.comBuf = append(buf[:0], temp...) // result may be mmap; copy into heap buf
-		return dt.comBuf, nil
+		return branchData, nil
 	}
 
 	return vt, nil
