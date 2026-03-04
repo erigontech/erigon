@@ -191,7 +191,7 @@ func (evm *EVM) SetCallGasTemp(gas uint64) {
 	evm.callGasTemp = gas
 }
 
-func (evm *EVM) ReadOnly() bool        { return evm.readOnly }
+func (evm *EVM) ReadOnly() bool         { return evm.readOnly }
 func (evm *EVM) SetReturnData(d []byte) { evm.returnData = d }
 
 // SetPrecompiles sets the precompiles for the EVM

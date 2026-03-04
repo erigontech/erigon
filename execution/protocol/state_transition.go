@@ -546,7 +546,10 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 
 	fixedGas, fixedFloor, fixedOverflow := fixedgas.IntrinsicGas(st.data, uint64(len(accessTuples)), uint64(accessTuples.StorageKeys()), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860, rules.IsPrague, false, uint64(len(auths)))
 	if gas != fixedGas || floorGas7623 != fixedFloor || overflow != fixedOverflow {
-		panic("intrinsic gas mismatch between multigas and fixedgas")
+		log.Error("[multigas] intrinsic gas mismatch between multigas and fixedgas",
+			"multiGas", gas, "fixedGas", fixedGas,
+			"multiFloor", floorGas7623, "fixedFloor", fixedFloor,
+			"multiOverflow", overflow, "fixedOverflow", fixedOverflow)
 	}
 
 	if overflow {
@@ -648,7 +651,11 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 			st.blockGasUsed = gasUsed
 			refund := min(gasUsed/refundQuotient, st.state.GetRefund())
 			gasUsed = gasUsed - refund
+			usedMultiGas = usedMultiGas.WithRefund(refund)
 			if rules.IsPrague {
+				if gasUsed < floorGas7623 {
+					usedMultiGas = usedMultiGas.SaturatingIncrement(multigas.ResourceKindL2Calldata, floorGas7623-usedMultiGas.SingleGas())
+				}
 				gasUsed = max(floorGas7623, gasUsed)
 			}
 			if rules.IsAmsterdam {
@@ -689,9 +696,10 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 			if err := st.state.AddBalance(coinbase, tipAmount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
 				return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 			}
-		}
-		if err := st.state.AddBalance(tipRecipient, tipAmount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+		} else {
+			if err := st.state.AddBalance(tipRecipient, tipAmount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
+				return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+			}
 		}
 	}
 

@@ -256,9 +256,10 @@ const (
 
 // Arbitrum specific
 const (
-	// Its like BalanceIncrease but marks address as escrow and prohibit it's deletion after SpuriousDragon
 	BalanceIncreaseEscrow BalanceChangeReason = 15
+)
 
+const (
 	BalanceChangeDuringEVMExecution BalanceChangeReason = 128 + iota
 	BalanceIncreaseDeposit
 	BalanceDecreaseWithdrawToL1
@@ -273,10 +274,8 @@ const (
 	BalanceChangeTransferBatchposterReward
 	BalanceChangeTransferBatchposterRefund
 	BalanceChangeTransferRetryableExcessRefund
-	// Stylus
 	BalanceChangeTransferActivationFee
 	BalanceChangeTransferActivationReimburse
-	// Native token minting and burning
 	BalanceIncreaseMintNativeToken
 	BalanceDecreaseBurnNativeToken
 )

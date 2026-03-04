@@ -74,24 +74,6 @@ func TestIntrinsicMultiGas_WithAuthorizations(t *testing.T) {
 	require.Equal(t, 2*params.CallNewAccountGas, mg.Get(multigas.ResourceKindStorageGrowth))
 }
 
-func TestArbitrumRules_BlobGasSkipped(t *testing.T) {
-	rules := &chain.Rules{
-		IsArbitrum: true,
-		IsCancun:   true,
-	}
-	require.True(t, rules.IsArbitrum)
-	require.True(t, rules.IsCancun)
-}
-
-func TestArbitrumRules_GasLimitCapSkipped(t *testing.T) {
-	rules := &chain.Rules{
-		IsArbitrum: true,
-		IsOsaka:    true,
-	}
-	require.True(t, rules.IsArbitrum)
-	require.True(t, rules.IsOsaka)
-}
-
 // earlyReturnHook is a mock TxProcessingHook that forces StartTxHook to return early
 // with configurable multigas, error, and return data.
 type earlyReturnHook struct {
@@ -101,25 +83,31 @@ type earlyReturnHook struct {
 	coinbase     accounts.Address
 }
 
-func (h earlyReturnHook) SetMessage(*types.Message, evmtypes.IntraBlockState)       {}
-func (h earlyReturnHook) IsArbitrum() bool                                           { return false }
-func (h earlyReturnHook) FillReceiptInfo(*types.Receipt)                             {}
-func (h earlyReturnHook) MsgIsNonMutating() bool                                    { return false }
-func (h earlyReturnHook) StartTxHook() (bool, multigas.MultiGas, error, []byte)     { return true, h.usedMultiGas, h.err, h.returnData }
-func (h earlyReturnHook) ScheduledTxes() types.Transactions                         { return nil }
-func (h earlyReturnHook) EndTxHook(uint64, bool)                                    {}
+func (h earlyReturnHook) SetMessage(*types.Message, evmtypes.IntraBlockState) {}
+func (h earlyReturnHook) IsArbitrum() bool                                    { return false }
+func (h earlyReturnHook) FillReceiptInfo(*types.Receipt)                      {}
+func (h earlyReturnHook) MsgIsNonMutating() bool                              { return false }
+func (h earlyReturnHook) StartTxHook() (bool, multigas.MultiGas, error, []byte) {
+	return true, h.usedMultiGas, h.err, h.returnData
+}
+func (h earlyReturnHook) ScheduledTxes() types.Transactions { return nil }
+func (h earlyReturnHook) EndTxHook(uint64, bool)            {}
 func (h earlyReturnHook) GasChargingHook(g *uint64, _ uint64) (accounts.Address, multigas.MultiGas, error) {
 	return h.coinbase, multigas.ZeroGas(), nil
 }
-func (h earlyReturnHook) ForceRefundGas() uint64                                            { return 0 }
-func (h earlyReturnHook) NonrefundableGas() uint64                                          { return 0 }
-func (h earlyReturnHook) DropTip() bool                                                     { return false }
-func (h earlyReturnHook) IsCalldataPricingIncreaseEnabled() bool                             { return true }
-func (h earlyReturnHook) ExecuteWASM(*vm.CallContext, []byte, *vm.EVM) ([]byte, error)       { return nil, fmt.Errorf("wasm not supported") }
-func (h earlyReturnHook) PushContract(*vm.Contract)                                          {}
-func (h earlyReturnHook) PopContract()                                                       {}
-func (h earlyReturnHook) GasPriceOp(evm *vm.EVM) *uint256.Int                               { return &evm.GasPrice }
-func (h earlyReturnHook) L1BlockNumber(ctx evmtypes.BlockContext) (uint64, error)            { return ctx.BlockNumber, nil }
+func (h earlyReturnHook) ForceRefundGas() uint64                 { return 0 }
+func (h earlyReturnHook) NonrefundableGas() uint64               { return 0 }
+func (h earlyReturnHook) DropTip() bool                          { return false }
+func (h earlyReturnHook) IsCalldataPricingIncreaseEnabled() bool { return true }
+func (h earlyReturnHook) ExecuteWASM(*vm.CallContext, []byte, *vm.EVM) ([]byte, error) {
+	return nil, fmt.Errorf("wasm not supported")
+}
+func (h earlyReturnHook) PushContract(*vm.Contract)           {}
+func (h earlyReturnHook) PopContract()                        {}
+func (h earlyReturnHook) GasPriceOp(evm *vm.EVM) *uint256.Int { return &evm.GasPrice }
+func (h earlyReturnHook) L1BlockNumber(ctx evmtypes.BlockContext) (uint64, error) {
+	return ctx.BlockNumber, nil
+}
 func (h earlyReturnHook) L1BlockHash(ctx evmtypes.BlockContext, n uint64) (common.Hash, error) {
 	return ctx.GetHash(n)
 }
@@ -176,8 +164,10 @@ type dropTipHook struct {
 	earlyReturnHook
 }
 
-func (h dropTipHook) DropTip() bool                                            { return true }
-func (h dropTipHook) StartTxHook() (bool, multigas.MultiGas, error, []byte)    { return false, multigas.ZeroGas(), nil, nil }
+func (h dropTipHook) DropTip() bool { return true }
+func (h dropTipHook) StartTxHook() (bool, multigas.MultiGas, error, []byte) {
+	return false, multigas.ZeroGas(), nil, nil
+}
 
 func TestTransitionDb_DropTipPrePreCheck(t *testing.T) {
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
@@ -371,10 +361,12 @@ type arbRefundHook struct {
 	ibs              *state.IntraBlockState
 }
 
-func (h arbRefundHook) IsArbitrum() bool                                        { return true }
-func (h arbRefundHook) StartTxHook() (bool, multigas.MultiGas, error, []byte)   { return false, multigas.ZeroGas(), nil, nil }
-func (h arbRefundHook) ForceRefundGas() uint64                                  { return h.forceRefundGas }
-func (h arbRefundHook) NonrefundableGas() uint64                                { return h.nonrefundableGas }
+func (h arbRefundHook) IsArbitrum() bool { return true }
+func (h arbRefundHook) StartTxHook() (bool, multigas.MultiGas, error, []byte) {
+	return false, multigas.ZeroGas(), nil, nil
+}
+func (h arbRefundHook) ForceRefundGas() uint64   { return h.forceRefundGas }
+func (h arbRefundHook) NonrefundableGas() uint64 { return h.nonrefundableGas }
 func (h arbRefundHook) GasChargingHook(g *uint64, _ uint64) (accounts.Address, multigas.MultiGas, error) {
 	if h.stateRefund > 0 && h.ibs != nil {
 		h.ibs.AddRefund(h.stateRefund)
@@ -449,7 +441,7 @@ func TestTransitionDb_ArbitrumRefundMultiGas(t *testing.T) {
 
 	evmInst := vm.NewEVM(blockCtx, txCtx, s, arbCfg, vm.Config{})
 	evmInst.ProcessingHook = arbRefundHook{
-		earlyReturnHook: earlyReturnHook{coinbase: coinbase},
+		earlyReturnHook:  earlyReturnHook{coinbase: coinbase},
 		forceRefundGas:   forceRefund,
 		nonrefundableGas: nonrefundable,
 		stateRefund:      stateRefund,
@@ -679,8 +671,10 @@ type arbIntrinsicGasHook struct {
 	fixedGas uint64
 }
 
-func (h arbIntrinsicGasHook) IsArbitrum() bool                                        { return true }
-func (h arbIntrinsicGasHook) StartTxHook() (bool, multigas.MultiGas, error, []byte)   { return false, multigas.ZeroGas(), nil, nil }
+func (h arbIntrinsicGasHook) IsArbitrum() bool { return true }
+func (h arbIntrinsicGasHook) StartTxHook() (bool, multigas.MultiGas, error, []byte) {
+	return false, multigas.ZeroGas(), nil, nil
+}
 func (h arbIntrinsicGasHook) GasChargingHook(g *uint64, _ uint64) (accounts.Address, multigas.MultiGas, error) {
 	*g = h.fixedGas
 	return h.coinbase, multigas.ZeroGas(), nil

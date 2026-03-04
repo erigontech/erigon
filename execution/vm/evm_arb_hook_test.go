@@ -4,7 +4,6 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/erigontech/erigon/arb/multigas"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	arbtypes "github.com/erigontech/erigon/execution/types"
@@ -131,35 +130,4 @@ func TestNewEVM_SetsDefaultProcessingHook(t *testing.T) {
 	evm := newTestEVM()
 	require.NotNil(t, evm.ProcessingHook)
 	require.False(t, evm.ProcessingHook.IsArbitrum())
-}
-
-func TestBlockContext_ArbOSVersion(t *testing.T) {
-	blockCtx := evmtypes.BlockContext{
-		ArbOSVersion: 50,
-		BlockGasUsed: 12345,
-	}
-	require.Equal(t, uint64(50), blockCtx.ArbOSVersion)
-	require.Equal(t, uint64(12345), blockCtx.BlockGasUsed)
-}
-
-func TestBlockContext_BaseFeeInBlock(t *testing.T) {
-	bf := uint256.NewInt(1000)
-	blockCtx := evmtypes.BlockContext{
-		BaseFeeInBlock: bf,
-	}
-	require.Equal(t, bf, blockCtx.BaseFeeInBlock)
-}
-
-func TestExecutionResult_ArbitrumFields(t *testing.T) {
-	mg := multigas.ComputationGas(500)
-	deployed := common.HexToAddress("0xabcd")
-	result := &evmtypes.ExecutionResult{
-		ReceiptGasUsed:   21000,
-		UsedMultiGas:     mg,
-		TopLevelDeployed: &deployed,
-		ScheduledTxes:    arbtypes.Transactions{},
-	}
-	require.Equal(t, uint64(500), result.UsedMultiGas.Get(multigas.ResourceKindComputation))
-	require.Equal(t, &deployed, result.TopLevelDeployed)
-	require.NotNil(t, result.ScheduledTxes)
 }

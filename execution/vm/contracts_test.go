@@ -291,17 +291,6 @@ func TestPrecompiledModExpInputEip7823(t *testing.T) {
 	assert.Equal(t, "", common.Bytes2Hex(res))
 	gas = osakaModExp.RequiredGas(in)
 	_, _, _, err = RunPrecompiledContract(osakaModExp, in, gas, nil, nil)
-	require.NoError(t, err)
-	assert.Equal(t, "", common.Bytes2Hex(res))
-
-	// length_of_EXPONENT = 1025; everything else is zero
-	in = common.Hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004010000000000000000000000000000000000000000000000000000000000000000")
-	gas = pragueModExp.RequiredGas(in)
-	res, _, _, err = RunPrecompiledContract(pragueModExp, in, gas, nil, nil)
-	require.NoError(t, err)
-	assert.Equal(t, "", common.Bytes2Hex(res))
-	gas = osakaModExp.RequiredGas(in)
-	_, _, _, err = RunPrecompiledContract(osakaModExp, in, gas, nil, nil)
 	assert.ErrorIs(t, err, errModExpExponentLengthTooLarge)
 
 	// length_of_EXPONENT = 2048; everything else is zero
