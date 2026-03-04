@@ -185,7 +185,7 @@ func (i *beaconStatesCollector) addGenesisState(ctx context.Context, state *stat
 		return err
 	}
 
-	return i.stateEventsCollector.Collect(base_encoding.Encode64ToBytes4(slot), events.CopyBytes())
+	return events.CollectTo(i.stateEventsCollector, base_encoding.Encode64ToBytes4(slot))
 }
 
 func (i *beaconStatesCollector) storeEpochData(st *state.CachingBeaconState) error {
@@ -340,7 +340,7 @@ func (i *beaconStatesCollector) collectSlashings(slot uint64, rawSlashings []byt
 }
 
 func (i *beaconStatesCollector) collectStateEvents(slot uint64, events *state_accessors.StateEvents) error {
-	return i.stateEventsCollector.Collect(base_encoding.Encode64ToBytes4(slot), events.CopyBytes())
+	return events.CollectTo(i.stateEventsCollector, base_encoding.Encode64ToBytes4(slot))
 }
 
 func (i *beaconStatesCollector) collectBalancesDiffs(ctx context.Context, slot uint64, old, new []byte) error {
