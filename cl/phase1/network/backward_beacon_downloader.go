@@ -36,7 +36,8 @@ import (
 )
 
 // Whether the reverse downloader arrived at expected height or condition.
-type OnNewBlock func(blk *cltypes.SignedBeaconBlock) (finished bool, err error)
+// [Modified in Gloas:EIP7732] envelope is non-nil for GLOAS FULL blocks, nil for EMPTY or pre-GLOAS.
+type OnNewBlock func(blk *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) (finished bool, err error)
 
 // BlockChecker is an interface for checking if a block exists
 type BlockChecker interface {
@@ -57,6 +58,9 @@ type BackwardBeaconDownloader struct {
 	neverSkip      bool
 	blockChecker   BlockChecker
 	beaconCfg      *clparams.BeaconChainConfig
+	// [New in Gloas:EIP7732] highest block from the previous batch, used as lookahead
+	// to determine FULL/EMPTY status of the highest block in the current batch.
+	prevBatchTopBlock *cltypes.SignedBeaconBlock
 
 	mu sync.Mutex
 }
@@ -142,7 +146,7 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 		return err
 	}
 
-	if err := b.processResponses(responses); err != nil {
+	if err := b.processResponses(ctx, responses); err != nil {
 		return err
 	}
 
@@ -204,7 +208,10 @@ func (b *BackwardBeaconDownloader) sendBlockRequest(
 }
 
 // processResponses processes downloaded blocks in reverse order.
-func (b *BackwardBeaconDownloader) processResponses(responses []*cltypes.SignedBeaconBlock) error {
+func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, responses []*cltypes.SignedBeaconBlock) error {
+	// [New in Gloas:EIP7732] Fetch envelopes for GLOAS FULL blocks before processing.
+	envelopes := b.fetchGloasEnvelopes(ctx, responses)
+
 	for i := len(responses) - 1; i >= 0; i-- {
 		if b.finished.Load() {
 			return nil
@@ -222,7 +229,12 @@ func (b *BackwardBeaconDownloader) processResponses(responses []*cltypes.SignedB
 			continue
 		}
 
-		finished, err := b.onNewBlock(block)
+		var envelope *cltypes.SignedExecutionPayloadEnvelope
+		if envelopes != nil {
+			envelope = envelopes[common.Hash(blockRoot)]
+		}
+
+		finished, err := b.onNewBlock(block, envelope)
 		b.finished.Store(finished)
 		if err != nil {
 			log.Warn("Error processing block", "err", err)
@@ -237,6 +249,67 @@ func (b *BackwardBeaconDownloader) processResponses(responses []*cltypes.SignedB
 		b.slotToDownload.Store(block.Block.Slot - 1)
 	}
 	return nil
+}
+
+// determineGloasFullRoots returns the block roots of GLOAS FULL blocks in the batch.
+// Uses the count+1 lookahead trick: block[i] is FULL if block[i+1].bid.ParentBlockHash == block[i].bid.BlockHash.
+// For the highest block in the batch, prevBatchTopBlock is used as the cross-batch lookahead.
+// If prevBatchTopBlock is nil (first batch ever), the highest block is requested optimistically.
+func determineGloasFullRoots(responses []*cltypes.SignedBeaconBlock, prevBatchTopBlock *cltypes.SignedBeaconBlock) [][32]byte {
+	var fullRoots [][32]byte
+	for i, block := range responses {
+		if block.Version() < clparams.GloasVersion {
+			continue
+		}
+		bid := block.Block.Body.GetSignedExecutionPayloadBid()
+		if bid == nil || bid.Message == nil {
+			continue
+		}
+		// Determine the lookahead block (next higher slot in the chain).
+		var lookahead *cltypes.SignedBeaconBlock
+		if i+1 < len(responses) {
+			lookahead = responses[i+1]
+		} else {
+			lookahead = prevBatchTopBlock
+		}
+		if lookahead == nil {
+			// No lookahead for the highest block in the first batch: request optimistically.
+			root, err := block.Block.HashSSZ()
+			if err == nil {
+				fullRoots = append(fullRoots, root)
+			}
+			continue
+		}
+		nextBid := lookahead.Block.Body.GetSignedExecutionPayloadBid()
+		if nextBid != nil && nextBid.Message != nil && nextBid.Message.ParentBlockHash == bid.Message.BlockHash {
+			root, err := block.Block.HashSSZ()
+			if err == nil {
+				fullRoots = append(fullRoots, root)
+			}
+		}
+	}
+	return fullRoots
+}
+
+// fetchGloasEnvelopes determines which GLOAS blocks in the batch are FULL and fetches their envelopes.
+func (b *BackwardBeaconDownloader) fetchGloasEnvelopes(ctx context.Context, responses []*cltypes.SignedBeaconBlock) map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope {
+	if len(responses) == 0 {
+		return nil
+	}
+	defer func() {
+		b.prevBatchTopBlock = responses[len(responses)-1]
+	}()
+
+	fullRoots := determineGloasFullRoots(responses, b.prevBatchTopBlock)
+	if len(fullRoots) == 0 {
+		return nil
+	}
+
+	envelopes, err := RequestEnvelopesFrantically(ctx, b.rpc, fullRoots)
+	if err != nil {
+		log.Debug("[BackwardBeaconDownloader] failed to fetch GLOAS envelopes", "err", err)
+	}
+	return envelopes
 }
 
 // trySkipToExistingBlock attempts to skip ahead if the expected block already exists in the database.
