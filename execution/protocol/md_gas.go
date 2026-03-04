@@ -22,21 +22,21 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
-func SplitIntoMdGas(txnGasLimit uint64, intrinsicGas evmtypes.MdGas, rules *chain.Rules) evmtypes.MdGas {
+func SplitIntoMdGas(txnGasLimit uint64, igas evmtypes.MdGas, rules *chain.Rules) evmtypes.MdGas {
 	if rules.IsAmsterdam {
 		//intrinsic_gas = intrinsic_regular_gas + intrinsic_state_gas
 		//execution_gas = tx.gas - intrinsic_gas
 		//regular_gas_budget = TX_MAX_GAS_LIMIT - intrinsic_regular_gas
 		//gas_left = min(regular_gas_budget, execution_gas)
 		//state_gas_reservoir = execution_gas - gas_left
-		intrinsicGas := intrinsicGas.Regular + intrinsicGas.State
+		intrinsicGas := igas.Regular + igas.State
 		executionGas := txnGasLimit - intrinsicGas
-		regularGasBudget := params.MaxTxnGasLimit - intrinsicGas
+		regularGasBudget := params.MaxTxnGasLimit - igas.Regular
 		gasLeft := min(regularGasBudget, executionGas)
 		stateGasReservoir := executionGas - gasLeft
 		return evmtypes.MdGas{Regular: gasLeft, State: stateGasReservoir}
 	}
 	gas := evmtypes.MdGas{Regular: txnGasLimit}
-	gas.Regular -= intrinsicGas.Regular
+	gas.Regular -= igas.Regular
 	return gas
 }
