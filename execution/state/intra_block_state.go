@@ -2196,6 +2196,21 @@ func (sdb *IntraBlockState) MarkAddressAccess(addr accounts.Address, revertable 
 	}
 }
 
+// MarkReadsInternal marks all versioned reads for addr as internal.
+// Internal reads are kept for parallel-execution conflict detection
+// but excluded from the block access list (BAL).  This is used when
+// a state read was performed for gas calculation but the operation
+// was rejected (e.g. CALL with value inside STATICCALL).
+func (sdb *IntraBlockState) MarkReadsInternal(addr accounts.Address) {
+	if sdb.versionedReads == nil {
+		return
+	}
+	for key, vr := range sdb.versionedReads[addr] {
+		vr.internal = true
+		sdb.versionedReads[addr][key] = vr
+	}
+}
+
 // AccessedAddresses returns and resets the set of addresses touched during the current transaction.
 func (sdb *IntraBlockState) AccessedAddresses() AccessSet {
 	if len(sdb.addressAccess) == 0 {

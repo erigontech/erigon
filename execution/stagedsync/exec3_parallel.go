@@ -221,9 +221,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							return fmt.Errorf("block %d: applyCount mismatch: got: %d expected %d", applyResult.BlockNum, blockUpdateCount, applyResult.ApplyCount)
 						}
 
-						// pe.cfg.chainConfig.AmsterdamTime != nil && pe.cfg.chainConfig.AmsterdamTime.Uint64() > 0 is
-						// temporary to allow for initial non bals amsterdam testing before parallel exec is live by default
-						if (pe.cfg.chainConfig.AmsterdamTime != nil && pe.cfg.chainConfig.AmsterdamTime.Uint64() > 0 && pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime)) || pe.cfg.experimentalBAL {
+						if (pe.cfg.chainConfig.AmsterdamTime != nil && pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime)) || pe.cfg.experimentalBAL {
 							bal := CreateBAL(applyResult.BlockNum, applyResult.TxIO, pe.cfg.dirs.DataDir)
 							if err := bal.Validate(); err != nil {
 								return fmt.Errorf("block %d: invalid computed block access list: %w", applyResult.BlockNum, err)
@@ -262,7 +260,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 										}
 									}
 									if headerBALHash != bal.Hash() {
-										log.Info(fmt.Sprintf("computed bal: %s", bal.DebugString()))
 										return fmt.Errorf("%w, block=%d: block access list mismatch: got %s expected %s", rules.ErrInvalidBlock, applyResult.BlockNum, bal.Hash(), headerBALHash)
 									}
 								}

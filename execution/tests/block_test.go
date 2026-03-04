@@ -115,13 +115,6 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	// static — tested in state test format by TestState
 	bt.skipLoad(`^static/state_tests/`)
 
-	bt.skipLoad(`^prague/eip7702_set_code_tx/test_set_code_to_sstore_then_sload.json`)
-
-	// BAL invalid-block tests: these test rejection of blocks with intentionally
-	// wrong BAL hashes.  BAL validation is not yet implemented, so these blocks
-	// are accepted instead of rejected.  Skip until validation is added.
-	bt.skipLoad(`^amsterdam/eip7928_block_level_access_lists/test_bal_invalid`)
-
 	bt.walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root
 		test.ExperimentalBAL = true // TODO eventually remove this from BlockTest and run normally

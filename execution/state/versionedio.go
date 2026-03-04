@@ -172,12 +172,13 @@ func (s WriteSet) Scan(yield func(input *VersionedWrite) bool) {
 }
 
 type VersionedRead struct {
-	Address accounts.Address
-	Path    AccountPath
-	Key     accounts.StorageKey
-	Source  ReadSource
-	Version Version
-	Val     any
+	Address  accounts.Address
+	Path     AccountPath
+	Key      accounts.StorageKey
+	Source   ReadSource
+	Version  Version
+	Val      any
+	internal bool // when true, read is used for conflict detection only; excluded from BAL
 }
 
 func (vr VersionedRead) String() string {
@@ -1048,7 +1049,7 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 
 	for txIndex := -1; txIndex <= maxTxIndex; txIndex++ {
 		io.ReadSet(txIndex).Scan(func(vr *VersionedRead) bool {
-			if vr.Address.IsNil() {
+			if vr.Address.IsNil() || vr.internal {
 				return true
 			}
 			// Skip validation-only reads for non-existent accounts.
