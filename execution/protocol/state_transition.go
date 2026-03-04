@@ -562,6 +562,12 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	if !rules.IsArbitrum && (st.gasRemaining < gas || st.gasRemaining < floorGas7623) {
 		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, max(gas, floorGas7623))
 	}
+	// Arbitrum skips the intrinsic gas validation above (gas is charged by the
+	// hook instead), but we still need to guard against uint64 underflow before
+	// subtracting.  This mirrors the safety check in the erigon arbitrum branch.
+	if st.gasRemaining < gas {
+		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, gas)
+	}
 
 	verifiedAuthorities, err := st.verifyAuthorities(auths, contractCreation, rules.ChainID.String())
 	if err != nil {

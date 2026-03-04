@@ -115,3 +115,6 @@ mdbx.lck
 *.prof
 
 .claude/settings.local.json
+
+# ralphex progress logs
+.ralphex/progress/

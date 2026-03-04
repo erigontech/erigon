@@ -680,13 +680,14 @@ func (h arbIntrinsicGasHook) GasChargingHook(g *uint64, _ uint64) (accounts.Addr
 	return h.coinbase, multigas.ZeroGas(), nil
 }
 
-func TestTransitionDb_ArbitrumSkipsIntrinsicGasCheck(t *testing.T) {
+func TestTransitionDb_ArbitrumIntrinsicGasHandling(t *testing.T) {
 	sender := accounts.InternAddress(common.HexToAddress("0xaaaa"))
 	recipient := accounts.InternAddress(common.HexToAddress("0xbbbb"))
 	coinbase := accounts.InternAddress(common.HexToAddress("0xdead"))
 	gasPrice := uint256.NewInt(1)
 	baseFee := uint256.NewInt(1)
-	insufficientGas := uint64(1000) // well below intrinsic gas (21000)
+	insufficientGas := uint64(1000)  // well below intrinsic gas (21000)
+	sufficientGas := uint64(100_000) // above intrinsic gas
 
 	makeBlockCtx := func() evmtypes.BlockContext {
 		return evmtypes.BlockContext{
@@ -728,9 +729,8 @@ func TestTransitionDb_ArbitrumSkipsIntrinsicGasCheck(t *testing.T) {
 		return s
 	}
 
-	t.Run("Arbitrum_skips_intrinsic_gas_check", func(t *testing.T) {
-		s := makeState(t)
-		arbCfg := &chain.Config{
+	makeArbCfg := func() *chain.Config {
+		return &chain.Config{
 			ChainID:               big.NewInt(412346),
 			HomesteadBlock:        new(big.Int),
 			TangerineWhistleBlock: new(big.Int),
@@ -743,10 +743,37 @@ func TestTransitionDb_ArbitrumSkipsIntrinsicGasCheck(t *testing.T) {
 			LondonBlock:           new(big.Int),
 			ArbitrumChainParams:   arbtypes.ArbitrumChainParams{EnableArbOS: true, GenesisBlockNum: 0},
 		}
+	}
+
+	t.Run("Arbitrum_with_sufficient_gas_succeeds", func(t *testing.T) {
+		s := makeState(t)
 
 		blockCtx := makeBlockCtx()
 		txCtx := evmtypes.TxContext{GasPrice: *gasPrice, Origin: sender}
-		evmInst := vm.NewEVM(blockCtx, txCtx, s, arbCfg, vm.Config{})
+		evmInst := vm.NewEVM(blockCtx, txCtx, s, makeArbCfg(), vm.Config{})
+		evmInst.ProcessingHook = arbIntrinsicGasHook{
+			earlyReturnHook: earlyReturnHook{coinbase: coinbase},
+			fixedGas:        50000,
+		}
+
+		msg := types.NewMessage(
+			sender, recipient, 0, uint256.NewInt(0), sufficientGas,
+			gasPrice, gasPrice, gasPrice,
+			nil, nil, false, false, false, false, nil,
+		)
+		gp := new(GasPool).AddGas(30_000_000)
+		st := NewStateTransition(evmInst, msg, gp)
+
+		_, err := st.TransitionDb(true, false)
+		require.NoError(t, err)
+	})
+
+	t.Run("Arbitrum_underflow_guard_prevents_wrap", func(t *testing.T) {
+		s := makeState(t)
+
+		blockCtx := makeBlockCtx()
+		txCtx := evmtypes.TxContext{GasPrice: *gasPrice, Origin: sender}
+		evmInst := vm.NewEVM(blockCtx, txCtx, s, makeArbCfg(), vm.Config{})
 		evmInst.ProcessingHook = arbIntrinsicGasHook{
 			earlyReturnHook: earlyReturnHook{coinbase: coinbase},
 			fixedGas:        50000,
@@ -761,10 +788,9 @@ func TestTransitionDb_ArbitrumSkipsIntrinsicGasCheck(t *testing.T) {
 		st := NewStateTransition(evmInst, msg, gp)
 
 		_, err := st.TransitionDb(true, false)
-		if err != nil {
-			require.False(t, errors.Is(err, ErrIntrinsicGas),
-				"Arbitrum should skip intrinsic gas check, but got ErrIntrinsicGas")
-		}
+		require.Error(t, err)
+		require.True(t, errors.Is(err, ErrIntrinsicGas),
+			"Arbitrum underflow guard should return ErrIntrinsicGas when gasRemaining < intrinsicGas")
 	})
 
 	t.Run("non_Arbitrum_fails_intrinsic_gas_check", func(t *testing.T) {
