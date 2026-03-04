@@ -118,6 +118,7 @@ for datadir mode.
 ## Available Tools
 
 ### Ethereum Standard (eth_*)
+
 `eth_blockNumber`, `eth_getBlockByNumber`, `eth_getBlockByHash`,
 `eth_getBalance`, `eth_getTransactionByHash`, `eth_getTransactionReceipt`,
 `eth_getBlockReceipts`, `eth_getLogs`, `eth_getCode`, `eth_getStorageAt`,
@@ -125,12 +126,14 @@ for datadir mode.
 `eth_chainId`, `eth_syncing`, `eth_getProof`, and more.
 
 ### Erigon-Specific (erigon_*)
+
 `erigon_forks`, `erigon_blockNumber`, `erigon_getHeaderByNumber`,
 `erigon_getHeaderByHash`, `erigon_getBlockByTimestamp`,
 `erigon_getBalanceChangesInBlock`, `erigon_getLogsByHash`,
 `erigon_getLogs`, `erigon_getBlockReceiptsByBlockHash`, `erigon_nodeInfo`.
 
 ### Otterscan (ots_*)
+
 `ots_getApiLevel`, `ots_getInternalOperations`,
 `ots_searchTransactionsBefore`, `ots_searchTransactionsAfter`,
 `ots_getBlockDetails`, `ots_getBlockTransactions`, `ots_hasCode`,
@@ -138,21 +141,23 @@ for datadir mode.
 `ots_getTransactionBySenderAndNonce`, `ots_getContractCreator`.
 
 ### Log Analysis
+
 `logs_tail`, `logs_head`, `logs_grep`, `logs_stats` — requires `--log.dir`
 or `--datadir` to locate Erigon/torrent log files.
 
 ### Metrics
+
 `metrics_list`, `metrics_get` — only available in embedded mode (inside Erigon).
 In standalone mode, these return an informational message.
 
 ## Flags
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--rpc.url` | `http://127.0.0.1:8545` | Erigon JSON-RPC endpoint URL |
-| `--port` | 0 | JSON-RPC port shorthand |
-| `--datadir` | | Erigon data directory (enables direct DB mode) |
-| `--private.api.addr` | `127.0.0.1:9090` | gRPC private API (with --datadir) |
-| `--transport` | `stdio` | Transport: `stdio` or `sse` |
-| `--sse.addr` | `127.0.0.1:8553` | SSE listen address |
-| `--log.dir` | | Log directory (overrides datadir detection) |
+| Flag                 | Default                 | Description                                    |
+|----------------------|-------------------------|------------------------------------------------|
+| `--rpc.url`          | `http://127.0.0.1:8545` | Erigon JSON-RPC endpoint URL                   |
+| `--port`             | 0                       | JSON-RPC port shorthand                        |
+| `--datadir`          |                         | Erigon data directory (enables direct DB mode) |
+| `--private.api.addr` | `127.0.0.1:9090`        | gRPC private API (with --datadir)              |
+| `--transport`        | `stdio`                 | Transport: `stdio` or `sse`                    |
+| `--sse.addr`         | `127.0.0.1:8553`        | SSE listen address                             |
+| `--log.dir`          |                         | Log directory (overrides datadir detection)    |

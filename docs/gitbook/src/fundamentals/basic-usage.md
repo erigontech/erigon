@@ -95,7 +95,8 @@ To run Erigon with RPCDaemon, TxPool, and other components in a single process i
 * `--log.dir.path` dictates where [logs](logs.md) will be output - useful for sending reports to the Erigon team when issues occur.
 * Based on the [sync mode](sync-modes.md) you want to run you can add `--prune.mode=archive` to run a archive node, `--prune.mode=full` for a full node (default value) or `--prune.mode=minimal` for a minimal node.
 * `--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool` to use [RPC Service](../interacting-with-erigon/) and e.g. be able to connect your [wallet](web3-wallet.md).
-* `--torrent.download.rate=512mb` sets the maximum download speed. The default is `512mb`. You can lower this value to limit bandwidth usage, for example `--torrent.download.rate=128mb` to cap downloads at 128 MB/s.
+* `--torrent.download.rate=512mb` sets the maximum download speed. The default is `512mb`. You can lower this value to
+  limit bandwidth usage, for example `--torrent.download.rate=128mb` to cap downloads at 128 MB/s.
 
 To stop the Erigon node you can use the `CTRL+C` command.
 
