@@ -581,11 +581,6 @@ func deriveReaderForOtherDomain(baseFile string, oldDomain, newDomain kv.Domain)
 	return seg.NewReader(decomp.MakeGetter(), compression), decomp.Close, nil
 }
 
-type commitmentHistValTask struct {
-	file   state.VisibleFile
-	bucket int
-}
-
 func CheckCommitmentHistVal(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, failFast bool, seed int64, sampleRatio float64, logger log.Logger) error {
 	start := time.Now()
 	tx, err := db.BeginTemporalRo(ctx)
@@ -606,33 +601,31 @@ func CheckCommitmentHistVal(ctx context.Context, db kv.TemporalRoDB, br services
 	} else {
 		eg.SetLimit(dbg.EnvInt("CHECK_COMMITMENT_HIST_VAL_WORKERS", 8))
 	}
-	// Pre-compute sampling decisions sequentially to avoid concurrent rng access.
-	rng := rand.New(rand.NewPCG(uint64(seed), 0))
 	coverageQuotient := dbg.EnvUint("CHECK_COMMITMENT_HIST_VAL_COVERAGE_QUOTIENT", 20)
-	var tasks []commitmentHistValTask
+	var totalVals atomic.Uint64
+	var checkedFiles atomic.Int64
 	for _, file := range files {
 		if !strings.HasSuffix(file.Fullpath(), ".v") {
 			continue
 		}
-		if sampleRatio < 1.0 && rng.Float64() >= sampleRatio {
+		// Per-file RNG seeded from (seed, startTxNum): reproducible and independent per file.
+		fileRng := rand.New(rand.NewPCG(uint64(seed), file.StartRootNum()))
+		if sampleRatio < 1.0 && fileRng.Float64() >= sampleRatio {
 			continue
 		}
 		txCount := file.EndRootNum() - file.StartRootNum()
 		if coverageQuotient > txCount {
 			panic(fmt.Errorf("coverage quotient %d is greater than total tx count %d in %s", coverageQuotient, txCount, filepath.Base(file.Fullpath())))
 		}
-		tasks = append(tasks, commitmentHistValTask{file: file, bucket: rng.IntN(int(coverageQuotient))})
-	}
-	var totalVals atomic.Uint64
-	for _, task := range tasks {
-		task := task
+		bucket := fileRng.IntN(int(coverageQuotient))
+		checkedFiles.Add(1)
 		eg.Go(func() error {
 			tx, err := db.BeginTemporalRo(ctx) // each worker has its own RoTx
 			if err != nil {
 				return err
 			}
 			defer tx.Rollback()
-			valCount, err := checkCommitmentHistVal(ctx, tx, br, task.file, task.bucket, coverageQuotient, failFast, logger)
+			valCount, err := checkCommitmentHistVal(ctx, tx, br, file, bucket, coverageQuotient, failFast, logger)
 			if err == nil {
 				totalVals.Add(valCount)
 				return nil
@@ -650,7 +643,7 @@ func CheckCommitmentHistVal(ctx context.Context, db kv.TemporalRoDB, br services
 	dur := time.Since(start)
 	total := totalVals.Load()
 	rate := float64(total) / dur.Seconds()
-	logger.Info("[integrity] CommitmentHistVal", "dur", time.Since(start), "files", len(tasks), "vals", total, "vals/s", rate, "seed", seed, "sampleRatio", sampleRatio)
+	logger.Info("[integrity] CommitmentHistVal", "dur", time.Since(start), "files", checkedFiles.Load(), "vals", total, "vals/s", rate, "seed", seed, "sampleRatio", sampleRatio)
 	return nil
 }
 
