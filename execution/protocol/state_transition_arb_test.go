@@ -806,3 +806,138 @@ func TestTransitionDb_ArbitrumSkipsIntrinsicGasCheck(t *testing.T) {
 			"non-Arbitrum should fail with ErrIntrinsicGas")
 	})
 }
+
+func TestHandleRevertedTx_MatchingHash(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+
+	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(sd.Close)
+
+	r := state.NewReaderV3(sd.AsGetter(tx))
+	s := state.New(r)
+
+	sender := accounts.InternAddress(common.HexToAddress("0xaaaa"))
+	s.CreateAccount(sender, true)
+	s.SetNonce(sender, 5)
+
+	// Create a real LegacyTx and compute its hash, then add to the map
+	testTx := &types.LegacyTx{GasPrice: uint256.NewInt(1)}
+	testHash := testTx.Hash()
+	testGasUsed := uint64(30000) // must be > params.TxGas (21000)
+
+	// Temporarily add to RevertedTxGasUsed
+	RevertedTxGasUsed[testHash] = testGasUsed
+	t.Cleanup(func() { delete(RevertedTxGasUsed, testHash) })
+
+	// Set up the StateTransition with enough gasRemaining
+	st := &StateTransition{
+		state:        s,
+		gasRemaining: 50000,
+	}
+
+	msg := types.NewMessage(
+		sender, accounts.InternAddress(common.HexToAddress("0xbbbb")),
+		5, uint256.NewInt(0), 50000,
+		uint256.NewInt(1), uint256.NewInt(1), uint256.NewInt(0),
+		nil, nil, false, false, false, false, nil,
+	)
+	msg.Tx = testTx
+
+	inputMultiGas := multigas.MultiGasFromPairs(
+		multigas.Pair{Kind: multigas.ResourceKindComputation, Amount: 1000},
+	)
+
+	resultMultiGas, err := st.handleRevertedTx(msg, inputMultiGas)
+	require.Error(t, err)
+	require.True(t, errors.Is(err, vm.ErrExecutionReverted))
+
+	// Nonce should be incremented
+	nonce, err := s.GetNonce(sender)
+	require.NoError(t, err)
+	require.Equal(t, uint64(6), nonce)
+
+	// gasRemaining should be reduced by adjustedGas = testGasUsed - TxGas = 30000 - 21000 = 9000
+	adjustedGas := testGasUsed - params.TxGas
+	require.Equal(t, uint64(50000-adjustedGas), st.gasRemaining)
+
+	// MultiGas should include the input plus computation gas for adjustedGas
+	expectedMultiGas := inputMultiGas.SaturatingAdd(multigas.ComputationGas(adjustedGas))
+	require.Equal(t, expectedMultiGas.SingleGas(), resultMultiGas.SingleGas())
+	require.Equal(t, expectedMultiGas.Get(multigas.ResourceKindComputation), resultMultiGas.Get(multigas.ResourceKindComputation))
+}
+
+func TestHandleRevertedTx_NoMatch(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+
+	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(sd.Close)
+
+	r := state.NewReaderV3(sd.AsGetter(tx))
+	s := state.New(r)
+
+	sender := accounts.InternAddress(common.HexToAddress("0xaaaa"))
+	s.CreateAccount(sender, true)
+	s.SetNonce(sender, 5)
+
+	// Create a tx whose hash is NOT in RevertedTxGasUsed
+	testTx := &types.LegacyTx{GasPrice: uint256.NewInt(42)}
+	testHash := testTx.Hash()
+	_, inMap := RevertedTxGasUsed[testHash]
+	require.False(t, inMap, "test tx hash should not be in RevertedTxGasUsed")
+
+	st := &StateTransition{
+		state:        s,
+		gasRemaining: 50000,
+	}
+
+	msg := types.NewMessage(
+		sender, accounts.InternAddress(common.HexToAddress("0xbbbb")),
+		5, uint256.NewInt(0), 50000,
+		uint256.NewInt(1), uint256.NewInt(1), uint256.NewInt(0),
+		nil, nil, false, false, false, false, nil,
+	)
+	msg.Tx = testTx
+
+	inputMultiGas := multigas.MultiGasFromPairs(
+		multigas.Pair{Kind: multigas.ResourceKindComputation, Amount: 1000},
+	)
+
+	resultMultiGas, err := st.handleRevertedTx(msg, inputMultiGas)
+	require.NoError(t, err)
+
+	// Nonce should not change
+	nonce, err := s.GetNonce(sender)
+	require.NoError(t, err)
+	require.Equal(t, uint64(5), nonce)
+
+	// gasRemaining should not change
+	require.Equal(t, uint64(50000), st.gasRemaining)
+
+	// MultiGas should be unchanged
+	require.Equal(t, inputMultiGas.SingleGas(), resultMultiGas.SingleGas())
+}
+
+func TestHandleRevertedTx_NilTx(t *testing.T) {
+	st := &StateTransition{gasRemaining: 50000}
+	msg := types.NewMessage(
+		accounts.InternAddress(common.HexToAddress("0xaaaa")),
+		accounts.InternAddress(common.HexToAddress("0xbbbb")),
+		0, uint256.NewInt(0), 50000,
+		uint256.NewInt(1), uint256.NewInt(1), uint256.NewInt(0),
+		nil, nil, false, false, false, false, nil,
+	)
+	// msg.Tx is nil by default
+
+	inputMultiGas := multigas.ZeroGas()
+	resultMultiGas, err := st.handleRevertedTx(msg, inputMultiGas)
+	require.NoError(t, err)
+	require.Equal(t, inputMultiGas.SingleGas(), resultMultiGas.SingleGas())
+}

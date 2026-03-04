@@ -169,13 +169,13 @@ Additionally, several state transition gaps need porting: DropTip pre-preCheck o
 - Modify: `execution/protocol/state_transition_arb.go`
 - Modify: `execution/protocol/state_transition_arb_test.go`
 
-- [ ] Add `handleRevertedTx` method to StateTransition (reference: /tmp/arb_st.go lines 857-889)
-- [ ] Function takes `(msg *types.Message, usedMultiGas multigas.MultiGas)` and returns `(multigas.MultiGas, error)`
-- [ ] Checks `RevertedTxGasUsed` map, adjusts nonce, gas, and multigas accordingly
-- [ ] Returns `vm.ErrExecutionReverted` if match found
-- [ ] Write test: `TestHandleRevertedTx_MatchingHash` — verify gas adjustment and ErrExecutionReverted
-- [ ] Write test: `TestHandleRevertedTx_NoMatch` — verify passthrough
-- [ ] Run `go test ./execution/protocol/... -count=1` — must pass
+- [x] Add `handleRevertedTx` method to StateTransition (reference: /tmp/arb_st.go lines 857-889)
+- [x] Function takes `(msg *types.Message, usedMultiGas multigas.MultiGas)` and returns `(multigas.MultiGas, error)`
+- [x] Checks `RevertedTxGasUsed` map, adjusts nonce, gas, and multigas accordingly
+- [x] Returns `vm.ErrExecutionReverted` if match found
+- [x] Write test: `TestHandleRevertedTx_MatchingHash` — verify gas adjustment and ErrExecutionReverted
+- [x] Write test: `TestHandleRevertedTx_NoMatch` — verify passthrough
+- [x] Run `go test ./execution/protocol/... -count=1` — must pass
 
 ### Task 9: Add FloorDataGas function
 
