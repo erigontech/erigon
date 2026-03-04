@@ -1950,7 +1950,7 @@ func BenchmarkHistoryRange(b *testing.B) {
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		it, err := ic.HistoryRange(0, int(txs), order.Asc, -1, tx)
 		require.NoError(b, err)
 		for it.HasNext() {
@@ -1981,7 +1981,7 @@ func BenchmarkRangeAsOf(b *testing.B) {
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		it, err := ic.RangeAsOf(ctx, checkTxNum, nil, nil, order.Asc, -1, tx)
 		require.NoError(b, err)
 		for it.HasNext() {
