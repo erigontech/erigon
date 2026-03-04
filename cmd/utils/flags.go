@@ -1146,6 +1146,11 @@ var (
 		Usage: "Enables background flush and commit",
 		Value: ethconfig.Defaults.FcuBackgroundCommit,
 	}
+	MCPDisableFlag = cli.BoolFlag{
+		Name:  "mcp.disable",
+		Usage: "Disables the embedded MCP server",
+		Value: false,
+	}
 	MCPAddrFlag = cli.StringFlag{
 		Name:  "mcp.addr",
 		Usage: "Address for MCP RPC server",
@@ -1860,7 +1865,7 @@ func CheckExclusive(ctx *cli.Context, args ...any) {
 
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.Config, logger log.Logger) {
-	if ctx.String(MCPAddrFlag.Name) != "" && ctx.String(MCPPortFlag.Name) != "" {
+	if !ctx.Bool(MCPDisableFlag.Name) && ctx.String(MCPAddrFlag.Name) != "" && ctx.String(MCPPortFlag.Name) != "" {
 		cfg.MCPAddress = fmt.Sprintf("%s:%s", ctx.String(MCPAddrFlag.Name), ctx.String(MCPPortFlag.Name))
 	}
 
