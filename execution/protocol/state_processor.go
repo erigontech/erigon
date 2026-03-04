@@ -93,6 +93,9 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 
 	// Update the evm with the new transaction context.
 	evm.Reset(txContext, ibs)
+	if vm.ReadyEVMForL2 != nil {
+		vm.ReadyEVMForL2(evm, msg)
+	}
 	result, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 	if err != nil {
 		return nil, err
@@ -297,5 +300,6 @@ func MakeReceipt(
 	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
 	receipt.BlockNumber = blockNumber
 	receipt.TransactionIndex = uint(ibs.TxnIndex())
+	evm.ProcessingHook.FillReceiptInfo(receipt)
 	return receipt
 }
