@@ -797,6 +797,10 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		return latestRoot, nil
 	}
 
+	// Wait for all background file builds to complete before merging
+	logger.Info("[rebuild_commitment_history] waiting for background builds to finish")
+	<-a.WaitForBuildAndMerge(ctx)
+
 	logger.Info("[rebuild_commitment_history] merging built files")
 	for {
 		somethingMerged, err := a.mergeLoopStep(ctx, lastToTxNum)
@@ -815,10 +819,18 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	logger.Info("[rebuild_commitment_history] squeeze starting")
 
 	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
-	a.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
 
+	// Check if account files exist - squeeze requires them for ReplaceKeysInValues
 	actx := a.BeginFilesRo()
+	hasAccountFiles := len(actx.d[kv.AccountsDomain].files) > 0
+	if !hasAccountFiles {
+		actx.Close()
+		logger.Info("[rebuild_commitment_history] no account files found, skipping squeeze (commitment-only rebuild)")
+		return latestRoot, nil
+	}
 	defer actx.Close()
+
+	a.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
 
 	if err = SqueezeCommitmentFiles(ctx, actx, logger); err != nil {
 		logger.Warn("[rebuild_commitment_history] squeeze failed", "err", err)
