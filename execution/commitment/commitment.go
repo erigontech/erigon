@@ -112,6 +112,10 @@ type Trie interface {
 
 	// Process updates. If warmup.Enabled is true, pre-warms MDBX page cache in parallel.
 	Process(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress, warmup WarmupConfig) (rootHash []byte, err error)
+
+	// Release returns the trie to a pool for reuse. After calling Release,
+	// the caller must not use the trie.
+	Release()
 }
 
 type CommitProgress struct {
@@ -429,6 +433,12 @@ func (be *BranchEncoder) ApplyDeferredUpdates(
 	return nil
 }
 
+// Pools for worker encoders/mergers to avoid per-call allocations.
+var (
+	workerEncoderPool = sync.Pool{New: func() any { return NewBranchEncoder(1024) }}
+	workerMergerPool  = sync.Pool{New: func() any { return NewHexBranchMerger(512) }}
+)
+
 // ApplyDeferredBranchUpdates encodes deferred branch updates concurrently and writes them.
 // Returns the number of updates successfully written.
 func ApplyDeferredBranchUpdates(
@@ -443,22 +453,49 @@ func ApplyDeferredBranchUpdates(
 		numWorkers = 1
 	}
 
-	// Pipeline: workers encode in parallel, results sent to channel, main goroutine writes sequentially
+	// Sequential fast path: avoids goroutine and channel overhead for small batches.
+	if numWorkers == 1 || len(deferred) <= numWorkers {
+		encoder := workerEncoderPool.Get().(*BranchEncoder)
+		merger := workerMergerPool.Get().(*BranchMerger)
+		defer workerEncoderPool.Put(encoder)
+		defer workerMergerPool.Put(merger)
+
+		var written int
+		for _, upd := range deferred {
+			if err := encodeDeferredUpdate(upd, encoder, merger); err != nil {
+				return written, err
+			}
+			if upd.encoded == nil {
+				continue
+			}
+			if err := putBranch(upd.prefix, upd.encoded, upd.prev); err != nil {
+				return written, err
+			}
+			written++
+		}
+		mxTrieBranchesUpdated.AddInt(written)
+		return written, nil
+	}
+
+	// Pipeline: workers encode in parallel, results sent to channel, main goroutine writes sequentially.
 	type result struct {
 		upd *DeferredBranchUpdate
 		err error
 	}
-	resultCh := make(chan result, maxDeferredUpdates)
-	workCh := make(chan *DeferredBranchUpdate, maxDeferredUpdates)
+	// Size channels to actual batch length, not the 50K max.
+	resultCh := make(chan result, len(deferred))
+	workCh := make(chan *DeferredBranchUpdate, len(deferred))
 
-	// Start workers - each with its own encoder and merger
+	// Start workers with pooled encoders/mergers.
 	var wg sync.WaitGroup
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			encoder := NewBranchEncoder(1024)
-			merger := NewHexBranchMerger(512)
+			encoder := workerEncoderPool.Get().(*BranchEncoder)
+			merger := workerMergerPool.Get().(*BranchMerger)
+			defer workerEncoderPool.Put(encoder)
+			defer workerMergerPool.Put(merger)
 
 			for upd := range workCh {
 				err := encodeDeferredUpdate(upd, encoder, merger)
@@ -501,10 +538,9 @@ func ApplyDeferredBranchUpdates(
 			firstErr = err
 			continue
 		}
-		mxTrieBranchesUpdated.Inc()
 		written++
 	}
-
+	mxTrieBranchesUpdated.AddInt(written)
 	return written, firstErr
 }
 
@@ -835,139 +871,132 @@ func (branchData BranchData) String() string {
 	return sb.String()
 }
 
-// if fn returns nil, the original key will be copied from branchData
-func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte, isStorage bool) (newKey []byte, err error)) (BranchData, error) {
+// if fn returns nil, the original key will be copied from branchData.
+// Returns (result, buf, err): result may point into mmap when returned unchanged;
+// buf is always the heap scratch buffer (grown from the input buf), safe to retain
+// across calls. Callers that need a heap-owned copy of result should bytes.Clone(result).
+func (branchData BranchData) ReplacePlainKeys(buf []byte, fn func(key []byte, isStorage bool) (newKey []byte, err error)) (BranchData, []byte, error) {
 	if len(branchData) < 4 {
-		return branchData, nil
+		return branchData, buf, nil
 	}
 
 	var numBuf [binary.MaxVarintLen64]byte
 	touchMap := binary.BigEndian.Uint16(branchData[0:])
 	afterMap := binary.BigEndian.Uint16(branchData[2:])
 	if touchMap&afterMap == 0 {
-		return branchData, nil
+		return branchData, buf, nil
 	}
 	pos := 4
-	newData = append(newData[:0], branchData[:4]...)
+	buf = append(buf[:0], branchData[:4]...)
 	for bitset, j := touchMap&afterMap, 0; bitset != 0; j++ {
 		bit := bitset & -bitset
 		fields := cellFields(branchData[pos])
-		newData = append(newData, byte(fields))
+		buf = append(buf, byte(fields))
 		pos++
 		if fields&fieldExtension != 0 {
 			l, n := binary.Uvarint(branchData[pos:])
 			if n == 0 {
-				return nil, errors.New("replacePlainKeys buffer too small for hashedKey len")
+				return nil, buf, errors.New("replacePlainKeys buffer too small for hashedKey len")
 			} else if n < 0 {
-				return nil, errors.New("replacePlainKeys value overflow for hashedKey len")
+				return nil, buf, errors.New("replacePlainKeys value overflow for hashedKey len")
 			}
-			newData = append(newData, branchData[pos:pos+n]...)
+			buf = append(buf, branchData[pos:pos+n]...)
 			pos += n
 			if len(branchData) < pos+int(l) {
-				return nil, fmt.Errorf("replacePlainKeys buffer too small for hashedKey: expected %d got %d", pos+int(l), len(branchData))
+				return nil, buf, fmt.Errorf("replacePlainKeys buffer too small for hashedKey: expected %d got %d", pos+int(l), len(branchData))
 			}
 			if l > 0 {
-				newData = append(newData, branchData[pos:pos+int(l)]...)
+				buf = append(buf, branchData[pos:pos+int(l)]...)
 				pos += int(l)
 			}
 		}
 		if fields&fieldAccountAddr != 0 {
 			l, n := binary.Uvarint(branchData[pos:])
 			if n == 0 {
-				return nil, errors.New("replacePlainKeys buffer too small for accountAddr len")
+				return nil, buf, errors.New("replacePlainKeys buffer too small for accountAddr len")
 			} else if n < 0 {
-				return nil, errors.New("replacePlainKeys value overflow for accountAddr len")
+				return nil, buf, errors.New("replacePlainKeys value overflow for accountAddr len")
 			}
 			pos += n
 			if len(branchData) < pos+int(l) {
-				return nil, fmt.Errorf("replacePlainKeys buffer too small for accountAddr: expected %d got %d", pos+int(l), len(branchData))
+				return nil, buf, fmt.Errorf("replacePlainKeys buffer too small for accountAddr: expected %d got %d", pos+int(l), len(branchData))
 			}
 			if l > 0 {
 				pos += int(l)
 			}
 			newKey, err := fn(branchData[pos-int(l):pos], false)
 			if err != nil {
-				return nil, err
+				return nil, buf, err
 			}
 			if newKey == nil {
-				newData = append(newData, branchData[pos-int(l)-n:pos]...)
-				//if l != length.Addr {
-				//	fmt.Printf("COPY %x LEN %d\n", []byte(branchData[pos-int(l):pos]), l)
-				//}
+				// invariant: fn returns nil (keep original) only for plain addr keys (length.Addr bytes)
+				buf = append(buf, branchData[pos-int(l)-n:pos]...)
 			} else {
-				//if len(newKey) > 8 && len(newKey) != length.Addr {
-				//	fmt.Printf("SHORT %x LEN %d\n", newKey, len(newKey))
-				//}
-
+				// invariant: newKey is a short reference (≤8 bytes) or full plain addr (length.Addr bytes)
 				n = binary.PutUvarint(numBuf[:], uint64(len(newKey)))
-				newData = append(newData, numBuf[:n]...)
-				newData = append(newData, newKey...)
+				buf = append(buf, numBuf[:n]...)
+				buf = append(buf, newKey...)
 			}
 		}
 		if fields&fieldStorageAddr != 0 {
 			l, n := binary.Uvarint(branchData[pos:])
 			if n == 0 {
-				return nil, errors.New("replacePlainKeys buffer too small for storageAddr len")
+				return nil, buf, errors.New("replacePlainKeys buffer too small for storageAddr len")
 			} else if n < 0 {
-				return nil, errors.New("replacePlainKeys value overflow for storageAddr len")
+				return nil, buf, errors.New("replacePlainKeys value overflow for storageAddr len")
 			}
 			pos += n
 			if len(branchData) < pos+int(l) {
-				return nil, fmt.Errorf("replacePlainKeys buffer too small for storageAddr: expected %d got %d", pos+int(l), len(branchData))
+				return nil, buf, fmt.Errorf("replacePlainKeys buffer too small for storageAddr: expected %d got %d", pos+int(l), len(branchData))
 			}
 			if l > 0 {
 				pos += int(l)
 			}
 			newKey, err := fn(branchData[pos-int(l):pos], true)
 			if err != nil {
-				return nil, err
+				return nil, buf, err
 			}
 			if newKey == nil {
-				newData = append(newData, branchData[pos-int(l)-n:pos]...) // -n to include length
-				if l != length.Addr+length.Hash {
-					fmt.Printf("COPY %x LEN %d\n", []byte(branchData[pos-int(l):pos]), l)
-				}
+				// invariant: fn returns nil (keep original) only for plain storage keys (length.Addr+length.Hash bytes)
+				buf = append(buf, branchData[pos-int(l)-n:pos]...) // -n to include length
 			} else {
-				if len(newKey) > 8 && len(newKey) != length.Addr+length.Hash {
-					fmt.Printf("SHORT %x LEN %d\n", newKey, len(newKey))
-				}
-
+				// invariant: newKey is a short reference (≤8 bytes) or full plain storage key (length.Addr+length.Hash bytes)
 				n = binary.PutUvarint(numBuf[:], uint64(len(newKey)))
-				newData = append(newData, numBuf[:n]...)
-				newData = append(newData, newKey...)
+				buf = append(buf, numBuf[:n]...)
+				buf = append(buf, newKey...)
 			}
 		}
 		if fields&fieldHash != 0 {
 			l, n := binary.Uvarint(branchData[pos:])
 			if n == 0 {
-				return nil, errors.New("replacePlainKeys buffer too small for hash len")
+				return nil, buf, errors.New("replacePlainKeys buffer too small for hash len")
 			} else if n < 0 {
-				return nil, errors.New("replacePlainKeys value overflow for hash len")
+				return nil, buf, errors.New("replacePlainKeys value overflow for hash len")
 			}
-			newData = append(newData, branchData[pos:pos+n]...)
+			buf = append(buf, branchData[pos:pos+n]...)
 			pos += n
 			if len(branchData) < pos+int(l) {
-				return nil, fmt.Errorf("replacePlainKeys buffer too small for hash: expected %d got %d", pos+int(l), len(branchData))
+				return nil, buf, fmt.Errorf("replacePlainKeys buffer too small for hash: expected %d got %d", pos+int(l), len(branchData))
 			}
 			if l > 0 {
-				newData = append(newData, branchData[pos:pos+int(l)]...)
+				buf = append(buf, branchData[pos:pos+int(l)]...)
 				pos += int(l)
 			}
 		}
 		if fields&fieldStateHash != 0 {
 			l, n := binary.Uvarint(branchData[pos:])
 			if n == 0 {
-				return nil, errors.New("replacePlainKeys buffer too small for acLeaf hash len")
+				return nil, buf, errors.New("replacePlainKeys buffer too small for acLeaf hash len")
 			} else if n < 0 {
-				return nil, errors.New("replacePlainKeys value overflow for acLeafhash len")
+				return nil, buf, errors.New("replacePlainKeys value overflow for acLeafhash len")
 			}
-			newData = append(newData, branchData[pos:pos+n]...)
+			buf = append(buf, branchData[pos:pos+n]...)
 			pos += n
 			if len(branchData) < pos+int(l) {
-				return nil, fmt.Errorf("replacePlainKeys buffer too small for LeafHash: expected %d got %d", pos+int(l), len(branchData))
+				return nil, buf, fmt.Errorf("replacePlainKeys buffer too small for LeafHash: expected %d got %d", pos+int(l), len(branchData))
 			}
 			if l > 0 {
-				newData = append(newData, branchData[pos:pos+int(l)]...)
+				buf = append(buf, branchData[pos:pos+int(l)]...)
 				pos += int(l)
 			}
 		}
@@ -975,7 +1004,7 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 		bitset ^= bit
 	}
 
-	return newData, nil
+	return bytes.Clone(buf), buf, nil
 }
 
 // IsComplete determines whether given branch data is complete, meaning that all information about all the children is present
@@ -1260,8 +1289,8 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 				}
 				pos1 += n
 				if len(branch1) < pos1+int(l) {
-					fmt.Printf("b1: %x %v\n", branch1, branch1)
-					fmt.Printf("b2: %x\n", branch2)
+					//fmt.Printf("b1: %x %v\n", branch1, branch1)
+					//fmt.Printf("b2: %x\n", branch2)
 					return nil, fmt.Errorf("MergeHexBranches branch1 is too small: expected at least %d got %d bytes", pos1+int(l), len(branch1))
 				}
 				if l > 0 {

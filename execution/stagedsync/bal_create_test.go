@@ -42,7 +42,7 @@ func TestCreateBALOrdering(t *testing.T) {
 
 	recordAll(io, readSets, writeSets)
 
-	bal := CreateBAL(1, io, "")
+	bal := io.AsBlockAccessList()
 
 	if len(bal) != 2 {
 		t.Fatalf("expected two accounts in BAL, got %d", len(bal))

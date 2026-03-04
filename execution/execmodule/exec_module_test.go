@@ -63,7 +63,12 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 		},
 	}
 	stepSize := uint64(5) // 2 for block 0 (0,1) and 3 for block 1 (2,3,4)
-	m := execmoduletester.NewWithGenesis(t, genesis, privKey, execmoduletester.WithStepSize(stepSize))
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(genesis),
+		execmoduletester.WithKey(privKey),
+		execmoduletester.WithStepSize(stepSize),
+	)
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(0, senderAddr, uint256.NewInt(0), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
@@ -129,7 +134,7 @@ func TestValidateChainAndUpdateForkChoiceWithSideForksThatGoBackAndForwardInHeig
 			senderAddr2: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.NewWithGenesis(t, genesis, privKey)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
 	longerFork, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
@@ -199,7 +204,7 @@ func addTwoTxnsToPool(ctx context.Context, startingNonce uint64, t *testing.T, m
 func TestAssembleBlock(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	m := execmoduletester.NewWithTxPoolAllProtocolChanges(t)
+	m := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
 	exec := m.ExecModule
 	txpool := m.TxPoolGrpcServer
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
@@ -241,7 +246,7 @@ func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
 	}
 	t.Parallel()
 	ctx := t.Context()
-	m := execmoduletester.NewWithTxPoolAllProtocolChanges(t)
+	m := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
 	exec := m.ExecModule
 	txpool := m.TxPoolGrpcServer
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {

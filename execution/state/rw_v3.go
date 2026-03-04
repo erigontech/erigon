@@ -185,7 +185,6 @@ func (rs *StateV3) Domains() *execctx.SharedDomains {
 
 func (rs *StateV3) SetTxNum(txNum uint64) {
 	rs.txNum = txNum
-	rs.domains.SetTxNum(txNum)
 }
 
 func (rs *StateV3) ApplyTxState(ctx context.Context,
@@ -458,17 +457,25 @@ func (w *BufferedWriter) UpdateAccountData(address accounts.Address, original, a
 		w.accumulator.ChangeAccount(address.Value(), account.Incarnation, accounts.SerialiseV3(account))
 	}
 
+	// Copy account data to prevent pointer aliasing with pooled stateObjects.
+	// After tx finalization, the stateObject (and its embedded Account) is returned
+	// to stateObjectPool. Without a copy, subsequent pool reuse overwrites the
+	// Account memory, corrupting data stored in the writeSet and rs.accounts.
+	var accountCopy accounts.Account
+	accountCopy.Copy(account)
+	accountCopy.PrevIncarnation = account.PrevIncarnation
+
 	if update, ok := w.writeSet.Get(&stateUpdate{address: address}); !ok {
 		update = &stateUpdate{&bufferedAccount{
 			originalIncarnation: original.Incarnation,
-			data:                account,
+			data:                &accountCopy,
 		}, address, false}
 		w.writeSet.Set(update)
 	} else {
 		if original.Incarnation < update.originalIncarnation {
 			update.originalIncarnation = original.Incarnation
 		}
-		update.data = account
+		update.data = &accountCopy
 	}
 
 	w.rs.accountsMutex.Lock()
@@ -477,7 +484,7 @@ func (w *BufferedWriter) UpdateAccountData(address accounts.Address, original, a
 		obj = &bufferedAccount{}
 	}
 	obj.originalIncarnation = original.Incarnation
-	obj.data = account
+	obj.data = &accountCopy
 	w.rs.accounts[address] = obj
 	w.rs.accountsMutex.Unlock()
 
@@ -1039,7 +1046,7 @@ func (r *bufferedReader) ReadAccountCode(address accounts.Address) ([]byte, erro
 	r.bufferedState.accountsMutex.RUnlock()
 
 	if len(code) != 0 {
-		return so.code, nil
+		return code, nil
 	}
 
 	return r.reader.ReadAccountCode(address)

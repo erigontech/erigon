@@ -308,6 +308,7 @@ func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, txNum u
 
 func (sdc *SharedDomainsCommitmentContext) Close() {
 	sdc.updates.Close()
+	sdc.patriciaTrie.Release()
 }
 
 func (sdc *SharedDomainsCommitmentContext) Reset() {

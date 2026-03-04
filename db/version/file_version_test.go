@@ -1,6 +1,7 @@
 package version
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -398,5 +399,23 @@ func TestMatchVersionedFile_DifferentSegAndIdxNames(t *testing.T) {
 	}
 	if ok {
 		t.Fatal("expected ok == false for non-existent file type")
+	}
+}
+
+func BenchmarkMatchVersionedFile(b *testing.B) {
+	// Simulate a large directory with thousands of snapshot files (realistic scenario)
+	dirEntries := make([]string, 0, 2000)
+	for i := 0; i < 500; i++ {
+		dirEntries = append(dirEntries,
+			fmt.Sprintf("v1.0-accounts.%d-%d.kv", i, i+1),
+			fmt.Sprintf("v1.0-storage.%d-%d.kv", i, i+1),
+			fmt.Sprintf("v1.0-accounts.%d-%d.kvi", i, i+1),
+			fmt.Sprintf("v1.0-storage.%d-%d.kvi", i, i+1),
+		)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _, _, _ = MatchVersionedFile("*-accounts.0-1.kvi", dirEntries, "/tmp")
 	}
 }
