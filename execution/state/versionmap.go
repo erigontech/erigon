@@ -337,13 +337,21 @@ func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path Acco
 	switch rr.Status() {
 	case MVReadResultDone:
 		if source != MapRead {
-			// When BAL is present, all significant writes are pre-populated
-			// in the VersionMap before execution. If a read was from storage
-			// (no VersionMap entry at execution time) but the VersionMap now
-			// has an entry (from a concurrent worker flush), the entry must
-			// be a BAL-filtered no-op write (zero-value balance touch,
-			// no-op rewrite, etc.) — the read value is still correct.
-			if !vm.HasBAL {
+			// When BAL is present, significant writes for BalancePath,
+			// NoncePath, CodePath and StoragePath are pre-populated in the
+			// VersionMap before execution.  If a read of one of those paths
+			// was from storage (no VersionMap entry at execution time) but
+			// the VersionMap now has an entry from a concurrent worker
+			// flush, the entry is a BAL-filtered no-op write and the read
+			// value is still correct.
+			//
+			// AddressPath and other paths are NOT pre-populated by the BAL,
+			// so a new VersionMap entry means a real state change from a
+			// concurrent worker (e.g. account creation) and must trigger
+			// invalidation.
+			isBALPrePopulatedPath := path == BalancePath || path == NoncePath ||
+				path == CodePath || path == StoragePath
+			if !vm.HasBAL || !isBALPrePopulatedPath {
 				valid = VersionInvalid
 			}
 		} else {
@@ -372,6 +380,17 @@ func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path Acco
 				} else if path == AddressPath {
 					valid = vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
 						version, checkVersion, traceInvalid, tracePrefix)
+
+					// When BAL is present, AddressPath is NOT pre-populated
+					// but BalancePath IS. If a prior tx created this account,
+					// the BAL will have a BalancePath entry at a lower txIndex.
+					// A nil AddressPath read from storage is then stale.
+					if valid == VersionValid && vm.HasBAL {
+						balRR := vm.Read(addr, BalancePath, accounts.NilKey, txIndex)
+						if balRR.Status() == MVReadResultDone {
+							valid = VersionInvalid
+						}
+					}
 				}
 			}
 		}
