@@ -26,8 +26,8 @@ The user may specify one or more test suites in any combination:
 | `api` | ethereum/engine | Engine API |
 | `auth` | ethereum/engine | Engine auth |
 | `rpc-compat` | ethereum/rpc | RPC compatibility |
-| `eest` | ethereum/eels/consume-engine | Execution Spec Tests (v5.3.0) |
-| `eest-bal` | ethereum/eels/consume-engine | EEST BAL amsterdam fixtures |
+| `eest` | ethereum/eels/consume-engine | Execution Spec Tests (version auto-discovered) |
+| `eest-bal` | ethereum/eels/consume-engine | EEST BAL amsterdam fixtures (version auto-discovered) |
 
 ### Groups
 | Group name | Expands to |
@@ -48,6 +48,8 @@ The user may specify one or more test suites in any combination:
 - **branch=BRANCH** - Clone erigon from a remote branch instead of using the local
   working directory. The branch is cloned from `https://github.com/erigontech/erigon.git`
   into the hive client directory. Example: `/hive-test api branch=fix/my-feature`
+- **eest-version=VERSION** - Pin EEST fixtures version (e.g. `v5.3.0`). Default: auto-discover latest.
+- **bal-version=VERSION** - Pin BAL fixtures version (e.g. `bal@v5.1.0`). Default: auto-discover latest.
 
 ## Expected Failures (CI thresholds)
 
@@ -62,7 +64,48 @@ The user may specify one or more test suites in any combination:
 | eest (consume-engine) | 0 |
 | eest-bal | 4 (upstream BPO2ToAmsterdamAtTime15k fork transition) |
 
+Note: Failure counts are version-dependent and may change with newer fixtures.
+The eest-bal fork transition failures are a known upstream issue, not Erigon bugs.
+
 ## Procedure
+
+### Phase 0: Discover Versions
+
+Before setup, discover the latest EEST fixture versions from GitHub. Skip this phase
+if the user provided explicit version overrides (`eest-version=`, `bal-version=`).
+
+```bash
+# Latest standard EEST fixtures (tag matching v*.*.*)
+EEST_VERSION=$(curl -s https://api.github.com/repos/ethereum/execution-spec-tests/releases \
+  | jq -r '[.[] | select(.tag_name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))][0].tag_name')
+
+# Latest BAL fixtures (tag matching bal@v*.*.*)
+BAL_TAG=$(curl -s https://api.github.com/repos/ethereum/execution-spec-tests/releases \
+  | jq -r '[.[] | select(.tag_name | startswith("bal@"))][0].tag_name')
+BAL_BRANCH="tests-${BAL_TAG}"
+BAL_TAG_URLENC=$(echo "$BAL_TAG" | sed 's/@/%40/')
+BAL_FIXTURES_URL="https://github.com/ethereum/execution-spec-tests/releases/download/${BAL_TAG_URLENC}/fixtures_bal.tar.gz"
+```
+
+Then check whether the EEST mapper at the discovered tag already has the exception
+entries Erigon needs. If not, the `disable_strict_exception_matching` workaround is
+required:
+
+```bash
+MAPPER_URL="https://raw.githubusercontent.com/ethereum/execution-specs/refs/tags/${BAL_BRANCH}/packages/testing/src/execution_testing/client_clis/clis/erigon.py"
+if curl -sf "$MAPPER_URL" | grep -q "GAS_USED_OVERFLOW"; then
+    DISABLE_STRICT=""
+    echo "Mapper has BAL exception entries — strict matching enabled"
+else
+    DISABLE_STRICT='--sim.buildarg disable_strict_exception_matching=erigon'
+    echo "Mapper missing BAL exception entries — strict matching disabled for erigon"
+fi
+```
+
+Log the discovered versions:
+```
+EEST: $EEST_VERSION | BAL: $BAL_TAG (branch: $BAL_BRANCH) | Strict matching: enabled/disabled
+```
 
 ### Phase 1: Setup
 
@@ -182,7 +225,7 @@ with `--sim.limit "suite1|suite2|..."`.
 
 **EEST** (sim: `ethereum/eels/consume-engine`):
 ```bash
-EEST_VERSION=v5.3.0
+# $EEST_VERSION discovered in Phase 0 (e.g. v5.4.0), or user-provided via eest-version=
 ./hive --client-file erigon-local.yaml \
   --sim ethereum/eels/consume-engine \
   --sim.parallelism=12 --docker.nocache=true \
@@ -192,21 +235,23 @@ EEST_VERSION=v5.3.0
 
 **EEST BAL** (sim: `ethereum/eels/consume-engine`, amsterdam filter):
 ```bash
+# $BAL_BRANCH, $BAL_FIXTURES_URL, $DISABLE_STRICT discovered in Phase 0
+# (e.g. BAL_BRANCH=tests-bal@v5.2.0), or user-provided via bal-version=
 ./hive --client-file erigon-local.yaml \
   --sim ethereum/eels/consume-engine \
   --sim.limit=".*amsterdam.*" \
   --sim.parallelism=12 --docker.nocache=true \
-  --sim.buildarg branch=hive \
-  --sim.buildarg branch=tests-bal@v5.1.0 \
-  --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/bal%40v5.1.0/fixtures_bal.tar.gz \
-  --sim.buildarg disable_strict_exception_matching=erigon \
+  --sim.buildarg branch=${BAL_BRANCH} \
+  --sim.buildarg fixtures=${BAL_FIXTURES_URL} \
+  ${DISABLE_STRICT} \
   --sim.timelimit 60m
 ```
 
-Note: `disable_strict_exception_matching=erigon` is needed because Erigon's error
-messages don't yet have upstream mappings in the EEST `ErigonExceptionMapper` for
-`BlockException.GAS_USED_OVERFLOW` and some BAL-specific exception types. Without
-this flag, ~38 tests fail due to exception type mismatches (not actual validation bugs).
+Note: The `disable_strict_exception_matching` flag is only added when Phase 0 detects
+that the EEST `ErigonExceptionMapper` at the discovered tag is missing required entries
+(e.g. `BlockException.GAS_USED_OVERFLOW`, BAL exception types). Once upstream updates
+their tagged releases with the mapper fixes (already on `forks/amsterdam` HEAD), this
+flag will no longer be needed automatically.
 
 ### Phase 3: Parse Results
 
