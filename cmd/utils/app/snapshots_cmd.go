@@ -1301,8 +1301,6 @@ func doCheckCommitmentHistAtBlkRange(cliCtx *cli.Context, logger log.Logger) err
 		return err
 	}
 	defer clean()
-	defer blockRetire.MadvNormal().DisableReadAhead()
-	defer agg.MadvNormal().DisableReadAhead()
 	db, err := temporal.New(chainDB, agg)
 	if err != nil {
 		return err
