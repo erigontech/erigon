@@ -1383,7 +1383,6 @@ func (b *Block) Body() *Body {
 	return bd
 }
 func (b *Block) SendersToTxs(senders []common.Address) {
-	return // TODO Arbitrum!!!
 	if len(senders) == 0 {
 		return
 	}

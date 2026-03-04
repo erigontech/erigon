@@ -849,10 +849,11 @@ func TestHandleRevertedTx_MatchingHash(t *testing.T) {
 	require.Error(t, err)
 	require.True(t, errors.Is(err, vm.ErrExecutionReverted))
 
-	// Nonce should be incremented
+	// Nonce should NOT be incremented here - TransitionDb handles nonce
+	// increment for non-contract-creation txs before calling handleRevertedTx
 	nonce, err := s.GetNonce(sender)
 	require.NoError(t, err)
-	require.Equal(t, uint64(6), nonce)
+	require.Equal(t, uint64(5), nonce)
 
 	// gasRemaining should be reduced by adjustedGas = testGasUsed - TxGas = 30000 - 21000 = 9000
 	adjustedGas := testGasUsed - params.TxGas

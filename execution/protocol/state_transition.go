@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	cmath "github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/protocol/fixedgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -494,14 +495,15 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	}
 	// Arbitrum: drop tip for delayed (and old) messages before preCheck
 	if st.evm.ProcessingHook.DropTip() && st.msg.GasPrice().Cmp(&st.evm.Context.BaseFee) > 0 {
-		mmsg := st.msg.(*types.Message)
-		mmsg.SetGasPrice(&st.evm.Context.BaseFee)
-		zero := u256.Num0
-		mmsg.SetTip(&zero)
-		mmsg.TxRunContext = types.NewMessageCommitContext(nil)
-		st.gasPrice = mmsg.GasPrice()
-		st.tipCap = mmsg.TipCap()
-		st.msg = mmsg
+		if mmsg, ok := st.msg.(*types.Message); ok {
+			mmsg.SetGasPrice(&st.evm.Context.BaseFee)
+			zero := u256.Num0
+			mmsg.SetTip(&zero)
+			mmsg.TxRunContext = types.NewMessageCommitContext(nil)
+			st.gasPrice = mmsg.GasPrice()
+			st.tipCap = mmsg.TipCap()
+			st.msg = mmsg
+		}
 	}
 
 	// First check this message satisfies all consensus rules before
@@ -610,10 +612,12 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	if rules.IsArbitrum {
 		if typedMsg, ok := st.msg.(*types.Message); ok {
 			revertMultiGas, revertErr := st.handleRevertedTx(typedMsg, usedMultiGas)
-			if revertErr != nil {
+			if errors.Is(revertErr, vm.ErrExecutionReverted) {
 				usedMultiGas = revertMultiGas
 				vmerr = revertErr
 				arbRevertHandled = true
+			} else if revertErr != nil {
+				return nil, revertErr
 			}
 		}
 	}
@@ -890,16 +894,19 @@ func (st *StateTransition) gasUsed() uint64 {
 }
 
 // FloorDataGas computes the minimum gas required for a transaction based on its data tokens (EIP-7623).
+// Uses the same token formula as fixedgas.IntrinsicGas: tokenLen = dataLen + 3*nz
+// (each zero byte = 1 token, each non-zero byte = 4 tokens).
 func FloorDataGas(data []byte) (uint64, error) {
-	var (
-		z                            = uint64(bytes.Count(data, []byte{0}))
-		nz                           = uint64(len(data)) - z
-		TxTokenPerNonZeroByte uint64 = 4
-		TxCostFloorPerToken   uint64 = 10
-		tokens                       = nz*TxTokenPerNonZeroByte + z
-	)
-	if (math.MaxUint64-params.TxGas)/TxCostFloorPerToken < tokens {
+	dataLen := uint64(len(data))
+	nz := dataLen - uint64(bytes.Count(data, []byte{0}))
+	tokenLen := dataLen + 3*nz
+	dataGas, overflow := cmath.SafeMul(tokenLen, params.TxTotalCostFloorPerToken)
+	if overflow {
 		return 0, ErrGasUintOverflow
 	}
-	return params.TxGas + tokens*TxCostFloorPerToken, nil
+	floorGas, overflow := cmath.SafeAdd(params.TxGas, dataGas)
+	if overflow {
+		return 0, ErrGasUintOverflow
+	}
+	return floorGas, nil
 }

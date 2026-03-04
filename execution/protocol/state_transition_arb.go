@@ -27,15 +27,10 @@ func (st *StateTransition) handleRevertedTx(msg *types.Message, usedMultiGas mul
 
 	txHash := msg.Tx.Hash()
 	if l2GasUsed, ok := RevertedTxGasUsed[txHash]; ok {
-		pn, err := st.state.GetNonce(msg.From())
-		if err != nil {
-			return usedMultiGas, fmt.Errorf("handle revert: %w", err)
-		}
-		err = st.state.SetNonce(msg.From(), pn+1)
-		if err != nil {
-			return usedMultiGas, fmt.Errorf("handle revert: %w", err)
-		}
-
+		// Note: nonce increment is NOT done here because TransitionDb already
+		// increments it for non-contract-creation txs (the known reverted txs
+		// are all non-contract-creation). This matches the original geth flow
+		// where the nonce increment and handleRevertedTx are mutually exclusive.
 		if l2GasUsed < params.TxGas {
 			return usedMultiGas, fmt.Errorf("adjustedGas underflow in handleRevertedTx: l2GasUsed=%d, params.TxGas=%d", l2GasUsed, params.TxGas)
 		}

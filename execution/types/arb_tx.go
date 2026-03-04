@@ -86,7 +86,7 @@ func (tx *ArbTx) encodeTyped(w *bytes.Buffer) error {
 }
 
 func (tx *ArbTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
-	msg, err := tx.Tx.AsMessage(s, baseFee, rules)
+	msg, err := tx.inner.AsMessage(s, baseFee, rules)
 	if err == nil {
 		msg.Tx = tx
 	}

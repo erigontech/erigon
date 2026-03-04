@@ -8,13 +8,13 @@ import (
 	"io"
 	"math/big"
 
+	"github.com/erigontech/erigon/arb"
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/arb"
-	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -443,8 +443,7 @@ func (tx *ArbitrumUnsignedTx) IsContractDeploy() bool {
 }
 
 func (tx *ArbitrumUnsignedTx) Unwrap() Transaction {
-	//TODO implement me
-	panic("implement me")
+	return tx
 }
 
 // func (tx *ArbitrumUnsignedTx) gas() uint64         {  }
@@ -907,7 +906,10 @@ func (t *ArbitrumRetryTx) copy() *ArbitrumRetryTx {
 		RefundTo:            t.RefundTo,
 		MaxRefund:           new(big.Int),
 		SubmissionFeeRefund: new(big.Int),
-		Timeboosted:         t.Timeboosted,
+	}
+	if t.Timeboosted != nil {
+		v := *t.Timeboosted
+		cpy.Timeboosted = &v
 	}
 	if t.ChainId != nil {
 		cpy.ChainId.Set(t.ChainId)
@@ -2249,14 +2251,20 @@ func (tx *ArbitrumDepositTx) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
-func (tx *ArbitrumDepositTx) Sender(signer Signer) (accounts.Address, error) { return accounts.InternAddress(tx.From), nil }
-func (tx *ArbitrumDepositTx) CachedSender() (accounts.Address, bool)       { return accounts.InternAddress(tx.From), true }
-func (tx *ArbitrumDepositTx) GetSender() (accounts.Address, bool)          { return accounts.InternAddress(tx.From), true }
-func (tx *ArbitrumDepositTx) SetSender(address accounts.Address)           { tx.From = address.Value() }
-func (tx *ArbitrumDepositTx) IsContractDeploy() bool                       { return false }
-func (tx *ArbitrumDepositTx) Unwrap() Transaction                          { return tx }
-func (tx *ArbitrumDepositTx) encode(b *bytes.Buffer) error                 { return rlp.Encode(b, tx) }
-func (tx *ArbitrumDepositTx) decode(input []byte) error                    { return rlp.DecodeBytes(input, tx) }
+func (tx *ArbitrumDepositTx) Sender(signer Signer) (accounts.Address, error) {
+	return accounts.InternAddress(tx.From), nil
+}
+func (tx *ArbitrumDepositTx) CachedSender() (accounts.Address, bool) {
+	return accounts.InternAddress(tx.From), true
+}
+func (tx *ArbitrumDepositTx) GetSender() (accounts.Address, bool) {
+	return accounts.InternAddress(tx.From), true
+}
+func (tx *ArbitrumDepositTx) SetSender(address accounts.Address) { tx.From = address.Value() }
+func (tx *ArbitrumDepositTx) IsContractDeploy() bool             { return false }
+func (tx *ArbitrumDepositTx) Unwrap() Transaction                { return tx }
+func (tx *ArbitrumDepositTx) encode(b *bytes.Buffer) error       { return rlp.Encode(b, tx) }
+func (tx *ArbitrumDepositTx) decode(input []byte) error          { return rlp.DecodeBytes(input, tx) }
 
 //func (tx *ArbitrumDepositTx) effectiveGasPrice(dst *big.Int, baseFee *big.Int) *big.Int {
 //	return dst.Set(bigZero)
@@ -2282,28 +2290,34 @@ func (t *ArbitrumInternalTx) copy() *ArbitrumInternalTx {
 	return cpy
 }
 
-func (tx *ArbitrumInternalTx) Type() byte                                   { return ArbitrumInternalTxType }
-func (tx *ArbitrumInternalTx) GetChainID() *uint256.Int                     { return tx.ChainId }
-func (tx *ArbitrumInternalTx) GetNonce() uint64                             { return 0 }
-func (tx *ArbitrumInternalTx) GetPrice() *uint256.Int                       { return uintZero }
-func (tx *ArbitrumInternalTx) GetTipCap() *uint256.Int                      { return uintZero }
-func (tx *ArbitrumInternalTx) GetFeeCap() *uint256.Int                      { return uintZero }
-func (tx *ArbitrumInternalTx) GetBlobHashes() []common.Hash                 { return []common.Hash{} }
-func (tx *ArbitrumInternalTx) GetGasLimit() uint64                          { return 0 }
-func (tx *ArbitrumInternalTx) GetBlobGas() uint64                           { return 0 } // todo
-func (tx *ArbitrumInternalTx) GetData() []byte                              { return tx.Data }
-func (tx *ArbitrumInternalTx) GetValue() *uint256.Int                       { return uintZero }
-func (tx *ArbitrumInternalTx) GetTo() *common.Address                       { return &ArbosAddress }
-func (tx *ArbitrumInternalTx) GetAccessList() AccessList                    { return nil }
-func (tx *ArbitrumInternalTx) GetAuthorizations() []Authorization           { return nil }
-func (tx *ArbitrumInternalTx) CachedSender() (accounts.Address, bool)       { return accounts.InternAddress(ArbosAddress), true }
-func (tx *ArbitrumInternalTx) GetSender() (accounts.Address, bool)          { return accounts.InternAddress(ArbosAddress), true }
-func (tx *ArbitrumInternalTx) IsContractDeploy() bool                       { return false }
-func (tx *ArbitrumInternalTx) Unwrap() Transaction                          { return tx }
-func (tx *ArbitrumInternalTx) SigningHash(chainID *big.Int) common.Hash     { panic("implement me") }
-func (tx *ArbitrumInternalTx) Protected() bool                              { panic("implement me") }
-func (tx *ArbitrumInternalTx) SetSender(address accounts.Address)           {} // not supported in ArbitrumInternalTx
-func (tx *ArbitrumInternalTx) Sender(signer Signer) (accounts.Address, error) { return accounts.InternAddress(ArbosAddress), nil }
+func (tx *ArbitrumInternalTx) Type() byte                         { return ArbitrumInternalTxType }
+func (tx *ArbitrumInternalTx) GetChainID() *uint256.Int           { return tx.ChainId }
+func (tx *ArbitrumInternalTx) GetNonce() uint64                   { return 0 }
+func (tx *ArbitrumInternalTx) GetPrice() *uint256.Int             { return uintZero }
+func (tx *ArbitrumInternalTx) GetTipCap() *uint256.Int            { return uintZero }
+func (tx *ArbitrumInternalTx) GetFeeCap() *uint256.Int            { return uintZero }
+func (tx *ArbitrumInternalTx) GetBlobHashes() []common.Hash       { return []common.Hash{} }
+func (tx *ArbitrumInternalTx) GetGasLimit() uint64                { return 0 }
+func (tx *ArbitrumInternalTx) GetBlobGas() uint64                 { return 0 } // todo
+func (tx *ArbitrumInternalTx) GetData() []byte                    { return tx.Data }
+func (tx *ArbitrumInternalTx) GetValue() *uint256.Int             { return uintZero }
+func (tx *ArbitrumInternalTx) GetTo() *common.Address             { return &ArbosAddress }
+func (tx *ArbitrumInternalTx) GetAccessList() AccessList          { return nil }
+func (tx *ArbitrumInternalTx) GetAuthorizations() []Authorization { return nil }
+func (tx *ArbitrumInternalTx) CachedSender() (accounts.Address, bool) {
+	return accounts.InternAddress(ArbosAddress), true
+}
+func (tx *ArbitrumInternalTx) GetSender() (accounts.Address, bool) {
+	return accounts.InternAddress(ArbosAddress), true
+}
+func (tx *ArbitrumInternalTx) IsContractDeploy() bool                   { return false }
+func (tx *ArbitrumInternalTx) Unwrap() Transaction                      { return tx }
+func (tx *ArbitrumInternalTx) SigningHash(chainID *big.Int) common.Hash { panic("implement me") }
+func (tx *ArbitrumInternalTx) Protected() bool                          { panic("implement me") }
+func (tx *ArbitrumInternalTx) SetSender(address accounts.Address)       {} // not supported in ArbitrumInternalTx
+func (tx *ArbitrumInternalTx) Sender(signer Signer) (accounts.Address, error) {
+	return accounts.InternAddress(ArbosAddress), nil
+}
 
 func (tx *ArbitrumInternalTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int { return uintZero }
 func (tx *ArbitrumInternalTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
