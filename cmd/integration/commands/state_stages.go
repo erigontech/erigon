@@ -173,6 +173,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig
 		return err
 	}
 	defer sd.Close()
+	sd.SetInMemHistoryReads(false)
 
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
@@ -398,6 +399,7 @@ func loopExec(db kv.TemporalRwDB, ctx context.Context, unwind uint64, logger log
 			return err
 		}
 		defer sd.Close()
+		sd.SetInMemHistoryReads(false)
 		_ = sync.SetCurrentStage(stages.Execution)
 		t := time.Now()
 		if _, err = sync.Run(sd, tx, initialCycle, false); err != nil {
