@@ -4,50 +4,50 @@
 
 ## Getting Started
 
-- [Introduction](https://docs.erigon.tech/erigon/v3.2): Overview of Erigon's core features and architecture
-- [Why Erigon?](https://docs.erigon.tech/erigon/v3.2/get-started/readme/why-using-erigon): Key advantages over other Ethereum clients
-- [Hardware Requirements](https://docs.erigon.tech/erigon/v3.2/get-started/hardware-requirements): System requirements for running Erigon
-- [Installation](https://docs.erigon.tech/erigon/v3.2/get-started/installation): How to install Erigon from source or Docker
-- [Migrating from Geth](https://docs.erigon.tech/erigon/v3.2/get-started/migrating-from-geth): Guide for users switching from go-ethereum
+- [Introduction](README.md): Overview of Erigon's core features and architecture
+- [Why Erigon?](get-started/readme/why-using-erigon.md): Key advantages over other Ethereum clients
+- [Hardware Requirements](get-started/hardware-requirements.md): System requirements for running Erigon
+- [Installation](get-started/installation/README.md): How to install Erigon from source or Docker
+- [Migrating from Geth](get-started/migrating-from-geth.md): Guide for users switching from go-ethereum
 
 ## Running a Node
 
-- [Basic Usage](https://docs.erigon.tech/erigon/v3.2/fundamentals/basic-usage): Essential commands and options
-- [Sync Modes](https://docs.erigon.tech/erigon/v3.2/fundamentals/sync-modes): Full, archive, and minimal sync options
-- [CLI Reference](https://docs.erigon.tech/erigon/v3.2/fundamentals/configuring-erigon): Complete command-line flag reference
-- [Supported Networks](https://docs.erigon.tech/erigon/v3.2/fundamentals/supported-networks): Ethereum mainnet, testnets, and L2s
-- [Docker Compose](https://docs.erigon.tech/erigon/v3.2/fundamentals/docker-compose): Running Erigon with Docker
+- [Basic Usage](fundamentals/basic-usage.md): Essential commands and options
+- [Sync Modes](fundamentals/sync-modes.md): Full, archive, and minimal sync options
+- [CLI Reference](fundamentals/configuring-erigon/README.md): Complete command-line flag reference
+- [Supported Networks](fundamentals/supported-networks.md): Ethereum mainnet, testnets, and L2s
+- [Docker Compose](fundamentals/docker-compose.md): Running Erigon with Docker
 
 ## JSON-RPC API
 
-- [RPC Service Overview](https://docs.erigon.tech/erigon/v3.2/interacting-with-erigon): How to interact with Erigon via RPC
-- [eth namespace](https://docs.erigon.tech/erigon/v3.2/interacting-with-erigon/eth): Standard Ethereum JSON-RPC methods
-- [erigon namespace](https://docs.erigon.tech/erigon/v3.2/interacting-with-erigon/erigon): Erigon-specific RPC methods
-- [debug namespace](https://docs.erigon.tech/erigon/v3.2/interacting-with-erigon/debug): Debugging and tracing methods
-- [trace namespace](https://docs.erigon.tech/erigon/v3.2/interacting-with-erigon/trace): OpenEthereum-compatible tracing
-- [txpool namespace](https://docs.erigon.tech/erigon/v3.2/interacting-with-erigon/txpool): Transaction pool inspection
-- [gRPC API](https://docs.erigon.tech/erigon/v3.2/interacting-with-erigon/grpc): Low-level gRPC interface for advanced use
+- [RPC Service Overview](interacting-with-erigon/README.md): How to interact with Erigon via RPC
+- [eth namespace](interacting-with-erigon/eth.md): Standard Ethereum JSON-RPC methods
+- [erigon namespace](interacting-with-erigon/erigon.md): Erigon-specific RPC methods
+- [debug namespace](interacting-with-erigon/debug.md): Debugging and tracing methods
+- [trace namespace](interacting-with-erigon/trace.md): OpenEthereum-compatible tracing
+- [txpool namespace](interacting-with-erigon/txpool.md): Transaction pool inspection
+- [gRPC API](interacting-with-erigon/grpc.md): Low-level gRPC interface for advanced use
 
 ## Architecture & Modules
 
-- [Caplin](https://docs.erigon.tech/erigon/v3.2/fundamentals/caplin): Integrated consensus layer client
-- [RPC Daemon](https://docs.erigon.tech/erigon/v3.2/fundamentals/modules/rpc-daemon): Separate RPC service module
-- [TxPool](https://docs.erigon.tech/erigon/v3.2/fundamentals/modules/txpool): Transaction pool module
-- [Sentry](https://docs.erigon.tech/erigon/v3.2/fundamentals/modules/sentry): P2P networking module
-- [Downloader](https://docs.erigon.tech/erigon/v3.2/fundamentals/modules/downloader): BitTorrent-based data downloader
+- [Caplin](fundamentals/caplin.md): Integrated consensus layer client
+- [RPC Daemon](fundamentals/modules/rpc-daemon.md): Separate RPC service module
+- [TxPool](fundamentals/modules/txpool.md): Transaction pool module
+- [Sentry](fundamentals/modules/sentry.md): P2P networking module
+- [Downloader](fundamentals/modules/downloader.md): BitTorrent-based data downloader
 
 ## Staking
 
-- [Staking with Caplin](https://docs.erigon.tech/erigon/v3.2/staking/caplin): Using the integrated consensus client as validator
-- [External Consensus Client](https://docs.erigon.tech/erigon/v3.2/staking/external-consensus-client-as-validator): Using Lighthouse, Prysm, etc.
+- [Staking with Caplin](staking/caplin.md): Using the integrated consensus client as validator
+- [External Consensus Client](staking/external-consensus-client-as-validator.md): Using Lighthouse, Prysm, etc.
 
 ## Optional
 
-- [Performance Tricks](https://docs.erigon.tech/erigon/v3.2/fundamentals/performance-tricks): Optimization tips for production
-- [Optimizing Storage](https://docs.erigon.tech/erigon/v3.2/fundamentals/optimizing-storage): Reducing disk usage
-- [Security](https://docs.erigon.tech/erigon/v3.2/fundamentals/security): Security best practices
-- [Otterscan](https://docs.erigon.tech/erigon/v3.2/fundamentals/otterscan): Block explorer for Erigon
-- [Contributing](https://docs.erigon.tech/erigon/v3.2/about/contributing): How to contribute to Erigon
+- [Performance Tricks](fundamentals/performance-tricks.md): Optimization tips for production
+- [Optimizing Storage](fundamentals/optimizing-storage.md): Reducing disk usage
+- [Security](fundamentals/security.md): Security best practices
+- [Otterscan](fundamentals/otterscan.md): Block explorer for Erigon
+- [Contributing](about/contributing.md): How to contribute to Erigon
 
 ## Source Code
 
