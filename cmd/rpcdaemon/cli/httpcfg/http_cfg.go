@@ -100,6 +100,7 @@ type HttpCfg struct {
 
 	BatchLimit                  int  // Maximum number of requests in a batch
 	ReturnDataLimit             int  // Maximum number of bytes returned from calls (like eth_call)
+	BlockRangeLimit             int  // Maximum number of blocks in a range query (0 = unlimited)
 	AllowUnprotectedTxs         bool // Whether to allow non EIP-155 protected transactions  txs over RPC
 	MaxGetProofRewindBlockCount int  //Max GetProof rewind block count
 	// Ots API

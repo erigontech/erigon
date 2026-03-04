@@ -372,6 +372,11 @@ var (
 		Usage: "Maximum number of bytes returned from eth_call or similar invocations",
 		Value: 100_000,
 	}
+	RpcBlockRangeLimit = cli.IntFlag{
+		Name:  "rpc.blockrange.limit",
+		Usage: "Maximum block range (end - begin) allowed for range queries (0 = unlimited)",
+		Value: 0,
+	}
 	HTTPTraceFlag = cli.BoolFlag{
 		Name:  "http.trace",
 		Usage: "Print all HTTP requests to logs with INFO level",
