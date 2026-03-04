@@ -108,7 +108,7 @@ func (ef *EliasFano) deriveFields() int {
 	jumpWords := ef.jumpSizeWords()
 	totalWords := wordsLowerBits + wordsUpperBits + jumpWords
 	//fmt.Printf("EF: %d, %d,%d,%d\n", totalWords, wordsLowerBits, wordsUpperBits, jumpWords)
-	if ef.data == nil {
+	if cap(ef.data) < totalWords {
 		ef.data = make([]uint64, totalWords)
 	} else {
 		ef.data = ef.data[:totalWords]
@@ -120,13 +120,25 @@ func (ef *EliasFano) deriveFields() int {
 	return wordsUpperBits
 }
 
+// ResetForWrite reinitializes the EliasFano for writing a new sequence, reusing
+// the existing data slice if it has sufficient capacity (avoiding allocation).
+// The caller must call Build() after all AddOffset calls, same as with NewEliasFano.
+func (ef *EliasFano) ResetForWrite(count, maxOffset uint64) {
+	ef.count = count - 1
+	ef.maxOffset = maxOffset
+	ef.u = maxOffset + 1
+	ef.i = 0
+	ef.wordsUpperBits = ef.deriveFields()
+	// Zero out the backing array so OR-style setBits starts from a clean slate.
+	// deriveFields() may have resliced ef.data without zeroing it.
+	clear(ef.data)
+}
+
 // Build construct Elias Fano index for a given sequences
 func (ef *EliasFano) Build() {
 	for i, c, lastSuperQ := uint64(0), uint64(0), uint64(0); i < uint64(ef.wordsUpperBits); i++ {
-		for b := uint64(0); b < 64; b++ {
-			if ef.upperBits[i]&(uint64(1)<<b) == 0 {
-				continue
-			}
+		for word := ef.upperBits[i]; word != 0; word &= word - 1 { // iterate over set bits only; word &= word-1 clears the lowest set bit
+			b := uint64(bits.TrailingZeros64(word))
 			if (c & superQMask) == 0 {
 				// When c is multiple of 2^14 (4096)
 				lastSuperQ = i*64 + b
@@ -739,10 +751,8 @@ func (ef *DoubleEliasFano) Build(cumKeys []uint64, position []uint64) {
 	// c/superQ is the index of the current 4096 block of bits
 	// superQSize is how many words is required to encode one block of 4096 bits. It is 17 words which is 1088 bits
 	for i, c, lastSuperQ := uint64(0), uint64(0), uint64(0); i < uint64(wordsCumKeys); i++ {
-		for b := uint64(0); b < 64; b++ {
-			if ef.upperBitsCumKeys[i]&(uint64(1)<<b) == 0 {
-				continue
-			}
+		for word := ef.upperBitsCumKeys[i]; word != 0; word &= word - 1 { // iterate over set bits only; word &= word-1 clears the lowest set bit
+			b := uint64(bits.TrailingZeros64(word))
 			if (c & superQMask) == 0 {
 				// When c is multiple of 2^14 (4096)
 				lastSuperQ = i*64 + b
@@ -768,11 +778,8 @@ func (ef *DoubleEliasFano) Build(cumKeys []uint64, position []uint64) {
 	}
 
 	for i, c, lastSuperQ := uint64(0), uint64(0), uint64(0); i < uint64(wordsPosition); i++ {
-		for b := uint64(0); b < 64; b++ {
-			if ef.upperBitsPosition[i]&(uint64(1)<<b) == 0 {
-				continue
-			}
-
+		for word := ef.upperBitsPosition[i]; word != 0; word &= word - 1 { // iterate over set bits only; word &= word-1 clears the lowest set bit
+			b := uint64(bits.TrailingZeros64(word))
 			if (c & superQMask) == 0 {
 				lastSuperQ = i*64 + b
 				ef.jump[(c/superQ)*(superQSize*2)+1] = lastSuperQ
