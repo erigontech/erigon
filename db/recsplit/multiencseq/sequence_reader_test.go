@@ -127,8 +127,8 @@ func TestMerge(t *testing.T) {
 		s1 := ReadMultiEncSeq(1000, buildTestSeq(1000, 1001, 1003, 1005))
 		s2 := ReadMultiEncSeq(1000, buildTestSeq(1000, 1007, 1009, 1011))
 
-		var it1, it2 SequenceIterator
-		merged, err := s1.Merge(s2, 1000, &it1, &it2)
+		var merged SequenceBuilder
+		err := merged.Merge(s1, s2, 1000)
 		require.NoError(t, err)
 
 		out := merged.AppendBytes(nil)
@@ -152,8 +152,8 @@ func TestMerge(t *testing.T) {
 		s1 := ReadMultiEncSeq(1000, buildTestSeq(1000, vals1...))
 		s2 := ReadMultiEncSeq(1000, buildTestSeq(1000, vals2...))
 
-		var it1, it2 SequenceIterator
-		merged, err := s1.Merge(s2, 1000, &it1, &it2)
+		var merged SequenceBuilder
+		err := merged.Merge(s1, s2, 1000)
 		require.NoError(t, err)
 
 		out := merged.AppendBytes(nil)
@@ -173,9 +173,8 @@ func TestMergeEncodingBoundary(t *testing.T) {
 	merge := func(baseNum uint64, raw1, raw2 []byte) []byte {
 		s1 := ReadMultiEncSeq(baseNum, raw1)
 		s2 := ReadMultiEncSeq(baseNum, raw2)
-		var it1, it2 SequenceIterator
-		merged, err := s1.Merge(s2, baseNum, &it1, &it2)
-		if err != nil {
+		var merged SequenceBuilder
+		if err := merged.Merge(s1, s2, baseNum); err != nil {
 			t.Fatal(err)
 		}
 		return merged.AppendBytes(nil)
@@ -206,8 +205,8 @@ func TestMergeSeek(t *testing.T) {
 	}
 	s1 := ReadMultiEncSeq(1000, buildTestSeq(1000, vals1...))
 	s2 := ReadMultiEncSeq(1000, buildTestSeq(1000, vals2...))
-	var it1, it2 SequenceIterator
-	merged, err := s1.Merge(s2, 1000, &it1, &it2)
+	var merged SequenceBuilder
+	err := merged.Merge(s1, s2, 1000)
 	require.NoError(t, err)
 	result := ReadMultiEncSeq(1000, merged.AppendBytes(nil))
 
@@ -276,13 +275,12 @@ func BenchmarkMerge(b *testing.B) {
 	}()
 
 	var s1, s2 SequenceReader
-	var it1, it2 SequenceIterator
+	var merged SequenceBuilder
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		s1.Reset(baseNum, raw1)
 		s2.Reset(baseNum, raw2)
-		merged, err := s1.Merge(&s2, baseNum, &it1, &it2)
-		if err != nil {
+		if err := merged.Merge(&s1, &s2, baseNum); err != nil {
 			b.Fatal(err)
 		}
 		_ = merged.AppendBytes(nil)

@@ -1116,19 +1116,17 @@ func doIntegrity(cliCtx *cli.Context) error {
 
 	skipChecks := cliCtx.String("skip-check")
 	if len(skipChecks) > 0 {
-		var finalChecks []integrity.Check
+		skipSet := map[integrity.Check]struct{}{}
 		for skipCheck := range strings.SplitSeq(skipChecks, ",") {
-			found := false
-			for _, chk := range requestedChecks {
-				if chk == integrity.Check(skipCheck) {
-					found = true
-					logger.Info("[integrity] skipping check", "check", chk)
-					break
-				}
+			skipSet[integrity.Check(skipCheck)] = struct{}{}
+		}
+		var finalChecks []integrity.Check
+		for _, chk := range requestedChecks {
+			if _, skip := skipSet[chk]; skip {
+				logger.Info("[integrity] skipping check", "check", chk)
+				continue
 			}
-			if !found {
-				finalChecks = append(finalChecks, integrity.Check(skipCheck))
-			}
+			finalChecks = append(finalChecks, chk)
 		}
 
 		requestedChecks = finalChecks
@@ -2898,7 +2896,11 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 		Accede(true) // integration tool: open db without creation and without blocking erigon
 }
 func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *state.Aggregator {
-	agg, err := state.New(dirs).SanityOldNaming().Logger(logger).Open(ctx, chainDB)
+	erigonDBSettings, err := state.ResolveErigonDBSettings(dirs, logger, false)
+	if err != nil {
+		panic(err)
+	}
+	agg, err := state.New(dirs).SanityOldNaming().Logger(logger).WithErigonDBSettings(erigonDBSettings).Open(ctx, chainDB)
 	if err != nil {
 		panic(err)
 	}
