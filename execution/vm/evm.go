@@ -470,7 +470,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 
 	// EIP-170: Contract code size limit
 	if err == nil {
-		err = CheckMaxCodeSize(evm.chainRules, len(ret))
+		err = CheckMaxCodeSize(len(ret), evm.chainRules)
 	}
 	// Reject code starting with 0xEF if EIP-3541 is enabled.
 	if err == nil && evm.chainRules.IsLondon && len(ret) >= 1 && ret[0] == 0xEF {

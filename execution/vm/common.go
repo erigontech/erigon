@@ -20,6 +20,8 @@
 package vm
 
 import (
+	"fmt"
+
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -88,7 +90,8 @@ func ToWordSize(size uint64) uint64 {
 	return (size + 31) / 32
 }
 
-func CheckMaxCodeSize(rules *chain.Rules, size int) error {
+// See EIP-170 & EIP-7954
+func CheckMaxCodeSize(size int, rules *chain.Rules) error {
 	// Gnosis Chain prior to Shanghai didn't have EIP-170 enabled,
 	// but EIP-3860 (part of Shanghai) requires EIP-170.
 	if !rules.IsSpuriousDragon || (rules.IsAura && !rules.IsShanghai) {
@@ -104,7 +107,23 @@ func CheckMaxCodeSize(rules *chain.Rules, size int) error {
 		maxSize = params.MaxCodeSize
 	}
 	if size > maxSize {
-		return ErrMaxCodeSizeExceeded
+		return fmt.Errorf("%w: code size %v limit %v", ErrMaxCodeSizeExceeded, size, maxSize)
+	}
+	return nil
+}
+
+// See EIP-3860 & EIP-7954
+func CheckMaxInitCodeSize(size int, rules *chain.Rules) error {
+	var maxSize int
+	if rules.IsAmsterdam {
+		maxSize = params.MaxInitCodeSizeAmsterdam
+	} else if rules.IsShanghai {
+		maxSize = params.MaxInitCodeSize
+	} else {
+		return nil
+	}
+	if size > maxSize {
+		return fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, size, maxSize)
 	}
 	return nil
 }
