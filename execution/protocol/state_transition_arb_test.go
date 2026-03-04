@@ -360,6 +360,215 @@ func TestTransitionDb_MultiGasAccumulation(t *testing.T) {
 		"computation gas should be non-zero for a transfer")
 }
 
+// arbRefundHook is a mock TxProcessingHook for testing Arbitrum refund paths.
+// It returns configurable ForceRefundGas, NonrefundableGas, and adds state refunds
+// during GasChargingHook.
+type arbRefundHook struct {
+	earlyReturnHook
+	forceRefundGas   uint64
+	nonrefundableGas uint64
+	stateRefund      uint64
+	ibs              *state.IntraBlockState
+}
+
+func (h arbRefundHook) IsArbitrum() bool                                        { return true }
+func (h arbRefundHook) StartTxHook() (bool, multigas.MultiGas, error, []byte)   { return false, multigas.ZeroGas(), nil, nil }
+func (h arbRefundHook) ForceRefundGas() uint64                                  { return h.forceRefundGas }
+func (h arbRefundHook) NonrefundableGas() uint64                                { return h.nonrefundableGas }
+func (h arbRefundHook) GasChargingHook(g *uint64, _ uint64) (accounts.Address, multigas.MultiGas, error) {
+	if h.stateRefund > 0 && h.ibs != nil {
+		h.ibs.AddRefund(h.stateRefund)
+	}
+	return h.coinbase, multigas.ZeroGas(), nil
+}
+
+func TestTransitionDb_ArbitrumRefundMultiGas(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+
+	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(sd.Close)
+
+	r := state.NewReaderV3(sd.AsGetter(tx))
+	s := state.New(r)
+
+	sender := accounts.InternAddress(common.HexToAddress("0xaaaa"))
+	recipient := accounts.InternAddress(common.HexToAddress("0xbbbb"))
+	coinbase := accounts.InternAddress(common.HexToAddress("0xdead"))
+
+	s.CreateAccount(sender, true)
+	s.AddBalance(sender, *uint256.NewInt(1_000_000_000_000_000_000), tracing.BalanceChangeUnspecified)
+	s.SetNonce(sender, 0)
+
+	baseFee := uint256.NewInt(1)
+	gasPrice := uint256.NewInt(1)
+	gasLimit := uint64(50000)
+	forceRefund := uint64(5000)
+	nonrefundable := uint64(1000)
+	stateRefund := uint64(10000)
+
+	blockCtx := evmtypes.BlockContext{
+		BlockNumber: 1,
+		GasLimit:    30_000_000,
+		BaseFee:     *baseFee,
+		Coinbase:    coinbase,
+		GetHash:     func(n uint64) (common.Hash, error) { return common.Hash{}, nil },
+		CanTransfer: func(ibs evmtypes.IntraBlockState, addr accounts.Address, val uint256.Int) (bool, error) {
+			bal, err := ibs.GetBalance(addr)
+			if err != nil {
+				return false, err
+			}
+			return bal.Cmp(&val) >= 0, nil
+		},
+		Transfer: func(ibs evmtypes.IntraBlockState, from, to accounts.Address, val uint256.Int, _ bool, _ *chain.Rules) error {
+			if err := ibs.SubBalance(from, val, tracing.BalanceChangeTransfer); err != nil {
+				return err
+			}
+			return ibs.AddBalance(to, val, tracing.BalanceChangeTransfer)
+		},
+	}
+
+	txCtx := evmtypes.TxContext{GasPrice: *gasPrice, Origin: sender}
+
+	arbCfg := &chain.Config{
+		ChainID:               big.NewInt(412346),
+		HomesteadBlock:        new(big.Int),
+		TangerineWhistleBlock: new(big.Int),
+		SpuriousDragonBlock:   new(big.Int),
+		ByzantiumBlock:        new(big.Int),
+		ConstantinopleBlock:   new(big.Int),
+		PetersburgBlock:       new(big.Int),
+		IstanbulBlock:         new(big.Int),
+		BerlinBlock:           new(big.Int),
+		LondonBlock:           new(big.Int),
+		ArbitrumChainParams:   arbtypes.ArbitrumChainParams{EnableArbOS: true, GenesisBlockNum: 0},
+	}
+
+	evmInst := vm.NewEVM(blockCtx, txCtx, s, arbCfg, vm.Config{})
+	evmInst.ProcessingHook = arbRefundHook{
+		earlyReturnHook: earlyReturnHook{coinbase: coinbase},
+		forceRefundGas:   forceRefund,
+		nonrefundableGas: nonrefundable,
+		stateRefund:      stateRefund,
+		ibs:              s,
+	}
+
+	msg := types.NewMessage(
+		sender, recipient, 0, uint256.NewInt(0), gasLimit,
+		gasPrice, gasPrice, gasPrice,
+		nil, nil, false, false, false, false, nil,
+	)
+
+	gp := new(GasPool).AddGas(30_000_000)
+	st := NewStateTransition(evmInst, msg, gp)
+	result, err := st.TransitionDb(true, false)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	// ForceRefundGas should reduce gas used
+	// intrinsicGas = 21000, gasRemaining after intrinsic = 29000
+	// ForceRefundGas adds 5000 → gasRemaining = 34000, gasUsed = 16000
+	// refund = (16000 - 1000) / 5 = 3000, capped at min(3000, 10000) = 3000
+	// gasRemaining += 3000 → 37000, gasUsed = 13000
+	expectedGasUsed := uint64(13000)
+	require.Equal(t, expectedGasUsed, result.ReceiptGasUsed,
+		"Arbitrum refund path should reduce gas by ForceRefundGas + capped refund")
+
+	// usedMultiGas.GetRefund should be set to the capped refund amount
+	expectedRefund := uint64(3000)
+	require.Equal(t, expectedRefund, result.UsedMultiGas.GetRefund(),
+		"multigas refund should be set via WithRefund in Arbitrum path")
+
+	// UsedMultiGas.SingleGas tracks accumulated multigas (intrinsic), not gasUsed
+	require.Greater(t, result.UsedMultiGas.SingleGas(), uint64(0))
+}
+
+func TestTransitionDb_NonArbitrumRefundUnchanged(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+
+	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(sd.Close)
+
+	r := state.NewReaderV3(sd.AsGetter(tx))
+	s := state.New(r)
+
+	sender := accounts.InternAddress(common.HexToAddress("0xaaaa"))
+	recipient := accounts.InternAddress(common.HexToAddress("0xbbbb"))
+	coinbase := accounts.InternAddress(common.HexToAddress("0xdead"))
+
+	s.CreateAccount(sender, true)
+	s.AddBalance(sender, *uint256.NewInt(1_000_000_000_000_000_000), tracing.BalanceChangeUnspecified)
+	s.SetNonce(sender, 0)
+
+	gasPrice := uint256.NewInt(1)
+
+	blockCtx := evmtypes.BlockContext{
+		BlockNumber: 1,
+		GasLimit:    30_000_000,
+		Coinbase:    coinbase,
+		GetHash:     func(n uint64) (common.Hash, error) { return common.Hash{}, nil },
+		CanTransfer: func(ibs evmtypes.IntraBlockState, addr accounts.Address, val uint256.Int) (bool, error) {
+			bal, err := ibs.GetBalance(addr)
+			if err != nil {
+				return false, err
+			}
+			return bal.Cmp(&val) >= 0, nil
+		},
+		Transfer: func(ibs evmtypes.IntraBlockState, from, to accounts.Address, val uint256.Int, _ bool, _ *chain.Rules) error {
+			if err := ibs.SubBalance(from, val, tracing.BalanceChangeTransfer); err != nil {
+				return err
+			}
+			return ibs.AddBalance(to, val, tracing.BalanceChangeTransfer)
+		},
+	}
+
+	txCtx := evmtypes.TxContext{GasPrice: *gasPrice, Origin: sender}
+
+	cfg := &chain.Config{
+		ChainID:               big.NewInt(1),
+		HomesteadBlock:        new(big.Int),
+		TangerineWhistleBlock: new(big.Int),
+		SpuriousDragonBlock:   new(big.Int),
+		ByzantiumBlock:        new(big.Int),
+		ConstantinopleBlock:   new(big.Int),
+		PetersburgBlock:       new(big.Int),
+		IstanbulBlock:         new(big.Int),
+		BerlinBlock:           new(big.Int),
+		LondonBlock:           new(big.Int),
+	}
+
+	evmInst := vm.NewEVM(blockCtx, txCtx, s, cfg, vm.Config{})
+
+	msg := types.NewMessage(
+		sender, recipient, 0, uint256.NewInt(0), 50000,
+		gasPrice, gasPrice, uint256.NewInt(0),
+		nil, nil, true, false, true, false, nil,
+	)
+
+	gp := new(GasPool).AddGas(30_000_000)
+	result, err := ApplyMessage(evmInst, msg, gp, true, false, nil)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	// Simple transfer uses 21000 gas, no SSTORE refunds
+	require.Equal(t, uint64(21000), result.ReceiptGasUsed)
+
+	// Non-Arbitrum: multigas SingleGas equals ReceiptGasUsed
+	require.Equal(t, result.ReceiptGasUsed, result.UsedMultiGas.SingleGas(),
+		"non-Arbitrum: multigas SingleGas must equal ReceiptGasUsed")
+
+	// No SSTORE refunds means multigas refund is zero
+	require.Equal(t, uint64(0), result.UsedMultiGas.GetRefund(),
+		"non-Arbitrum: no refund for simple transfer")
+}
+
 // arbIntrinsicGasHook is a mock that returns IsArbitrum()=true and fixes gasRemaining
 // in GasChargingHook to compensate for the skipped intrinsic gas check.
 type arbIntrinsicGasHook struct {

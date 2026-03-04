@@ -613,31 +613,51 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	}
 	usedMultiGas = usedMultiGas.SaturatingAdd(execMultiGas)
 
-	st.gasRemaining += st.evm.ProcessingHook.ForceRefundGas()
-	nonrefundable := st.evm.ProcessingHook.NonrefundableGas()
-
 	if refunds && !gasBailout {
 		refundQuotient := params.RefundQuotient
 		if rules.IsLondon {
 			refundQuotient = params.RefundQuotientEIP3529
 		}
-		gasUsed := st.gasUsed()
-		st.blockGasUsed = gasUsed
-		if nonrefundable > gasUsed {
-			nonrefundable = gasUsed
-		}
-		refund := min((gasUsed-nonrefundable)/refundQuotient, st.state.GetRefund())
-		gasUsed = gasUsed - refund
-		if rules.IsPrague {
-			gasUsed = max(floorGas7623, gasUsed)
-		}
-		if rules.IsAmsterdam {
-			// EIP-7778: Block Gas Accounting without Refunds
-			st.blockGasUsed = max(floorGas7623, st.blockGasUsed)
+
+		if st.evm.ProcessingHook.IsArbitrum() {
+			st.gasRemaining += st.evm.ProcessingHook.ForceRefundGas()
+			nonrefundable := st.evm.ProcessingHook.NonrefundableGas()
+			if nonrefundable < st.gasUsed() {
+				refund := (st.gasUsed() - nonrefundable) / refundQuotient
+				if refund > st.state.GetRefund() {
+					refund = st.state.GetRefund()
+				}
+				st.gasRemaining += refund
+				usedMultiGas = usedMultiGas.WithRefund(refund)
+			}
+
+			if rules.IsPrague && st.evm.ProcessingHook.IsCalldataPricingIncreaseEnabled() {
+				if st.gasUsed() < floorGas7623 {
+					usedMultiGas = usedMultiGas.SaturatingIncrement(multigas.ResourceKindL2Calldata, floorGas7623-usedMultiGas.SingleGas())
+					prev := st.gasRemaining
+					st.gasRemaining = st.initialGas - floorGas7623
+					if t := st.evm.Config().Tracer; t != nil && t.OnGasChange != nil {
+						t.OnGasChange(prev, st.gasRemaining, tracing.GasChangeTxDataFloor)
+					}
+				}
+			}
+			st.blockGasUsed = st.gasUsed()
 		} else {
+			gasUsed := st.gasUsed()
 			st.blockGasUsed = gasUsed
+			refund := min(gasUsed/refundQuotient, st.state.GetRefund())
+			gasUsed = gasUsed - refund
+			if rules.IsPrague {
+				gasUsed = max(floorGas7623, gasUsed)
+			}
+			if rules.IsAmsterdam {
+				// EIP-7778: Block Gas Accounting without Refunds
+				st.blockGasUsed = max(floorGas7623, st.blockGasUsed)
+			} else {
+				st.blockGasUsed = gasUsed
+			}
+			st.gasRemaining = st.initialGas - gasUsed
 		}
-		st.gasRemaining = st.initialGas - gasUsed
 		st.refundGas()
 	} else if rules.IsPrague {
 		st.blockGasUsed = max(floorGas7623, st.gasUsed())

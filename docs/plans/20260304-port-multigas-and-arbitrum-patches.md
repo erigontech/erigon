@@ -141,14 +141,14 @@ Additionally, several state transition gaps need porting: DropTip pre-preCheck o
 **Files:**
 - Modify: `execution/protocol/state_transition.go`
 
-- [ ] Split refund logic: `if st.evm.ProcessingHook.IsArbitrum() { ... } else { ... }` (reference: /tmp/arb_st.go lines 678-722)
-- [ ] In Arbitrum path: ForceRefundGas first, then nonrefundable-capped refund with multigas.WithRefund
-- [ ] Add `IsCalldataPricingIncreaseEnabled()` Prague guard for floor gas (reference: lines 698-711)
-- [ ] In Arbitrum path, use `usedMultiGas.SaturatingIncrement(multigas.ResourceKindL2Calldata, ...)` for Prague floor
-- [ ] Non-Arbitrum path: keep existing refund logic unchanged
-- [ ] Write test: `TestTransitionDb_ArbitrumRefundMultiGas` — verify multigas.WithRefund is set correctly
-- [ ] Write test: `TestTransitionDb_NonArbitrumRefundUnchanged` — verify standard refund path unchanged
-- [ ] Run `go test ./execution/protocol/... -count=1` — must pass
+- [x] Split refund logic: `if st.evm.ProcessingHook.IsArbitrum() { ... } else { ... }` (reference: /tmp/arb_st.go lines 678-722)
+- [x] In Arbitrum path: ForceRefundGas first, then nonrefundable-capped refund with multigas.WithRefund
+- [x] Add `IsCalldataPricingIncreaseEnabled()` Prague guard for floor gas (reference: lines 698-711)
+- [x] In Arbitrum path, use `usedMultiGas.SaturatingIncrement(multigas.ResourceKindL2Calldata, ...)` for Prague floor
+- [x] Non-Arbitrum path: keep existing refund logic unchanged
+- [x] Write test: `TestTransitionDb_ArbitrumRefundMultiGas` — verify multigas.WithRefund is set correctly
+- [x] Write test: `TestTransitionDb_NonArbitrumRefundUnchanged` — verify standard refund path unchanged
+- [x] Run `go test ./execution/protocol/... -count=1` — must pass
 
 ### Task 7: Fix EndTxHook signature and tip payment
 
