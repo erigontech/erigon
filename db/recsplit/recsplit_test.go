@@ -302,7 +302,6 @@ func BenchmarkFindSplit(b *testing.B) {
 	salt := uint64(0x6453cec3f7376937) // startSeed[1]
 	count := make([]uint16, secondaryAggrBound)
 
-	b.ResetTimer()
 	for b.Loop() {
 		for i := range buckets {
 			findSplit(buckets[i][:], salt, fanout, unit, count)
@@ -325,7 +324,6 @@ func BenchmarkFindBijection(b *testing.B) {
 	}
 	salt := uint64(0x106393c187cae2a) // startSeed[0]
 
-	b.ResetTimer()
 	for b.Loop() {
 		for i := range buckets {
 			findBijection(buckets[i][:], salt)
