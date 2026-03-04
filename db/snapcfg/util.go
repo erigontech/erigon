@@ -557,9 +557,9 @@ const RemotePreverifiedEnvKey = "ERIGON_REMOTE_PREVERIFIED"
 func fetchChainToml(ctx context.Context, source snapshothashes.SnapshotSource, branch, chain string) ([]byte, error) {
 	var url string
 	if source == snapshothashes.R2 {
-		url = fmt.Sprintf("https://erigon-snapshots.erigon.network/%s/%s.toml", branch, chain)
+		url = ChainTomlR2URL(branch, chain)
 	} else {
-		url = fmt.Sprintf("https://raw.githubusercontent.com/erigontech/erigon-snapshot/%s/%s.toml", branch, chain)
+		url = ChainTomlGitHubURL(branch, chain)
 	}
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
