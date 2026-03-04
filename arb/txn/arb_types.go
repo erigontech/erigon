@@ -11,9 +11,9 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	cmath "github.com/erigontech/erigon/common/math"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
@@ -2286,13 +2286,17 @@ func (tx *ArbitrumDepositTx) MarshalBinary(w io.Writer) error {
 func (tx *ArbitrumDepositTx) Sender(signer types.Signer) (accounts.Address, error) {
 	return accounts.InternAddress(tx.From), nil
 }
-func (tx *ArbitrumDepositTx) CachedSender() (accounts.Address, bool) { return accounts.InternAddress(tx.From), true }
-func (tx *ArbitrumDepositTx) GetSender() (accounts.Address, bool)    { return accounts.InternAddress(tx.From), true }
-func (tx *ArbitrumDepositTx) SetSender(address accounts.Address)     { tx.From = address.Value() }
-func (tx *ArbitrumDepositTx) IsContractDeploy() bool               { return false }
-func (tx *ArbitrumDepositTx) Unwrap() types.Transaction            { return tx }
-func (tx *ArbitrumDepositTx) encode(b *bytes.Buffer) error         { return rlp.Encode(b, tx) }
-func (tx *ArbitrumDepositTx) decode(input []byte) error            { return rlp.DecodeBytes(input, tx) }
+func (tx *ArbitrumDepositTx) CachedSender() (accounts.Address, bool) {
+	return accounts.InternAddress(tx.From), true
+}
+func (tx *ArbitrumDepositTx) GetSender() (accounts.Address, bool) {
+	return accounts.InternAddress(tx.From), true
+}
+func (tx *ArbitrumDepositTx) SetSender(address accounts.Address) { tx.From = address.Value() }
+func (tx *ArbitrumDepositTx) IsContractDeploy() bool             { return false }
+func (tx *ArbitrumDepositTx) Unwrap() types.Transaction          { return tx }
+func (tx *ArbitrumDepositTx) encode(b *bytes.Buffer) error       { return rlp.Encode(b, tx) }
+func (tx *ArbitrumDepositTx) decode(input []byte) error          { return rlp.DecodeBytes(input, tx) }
 
 //func (tx *ArbitrumDepositTx) effectiveGasPrice(dst *big.Int, baseFee *big.Int) *big.Int {
 //	return dst.Set(bigZero)

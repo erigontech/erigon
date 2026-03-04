@@ -154,7 +154,7 @@ func TestCheckL2RPCEndpointsHealth_NilReceipt(t *testing.T) {
 			},
 		},
 		"eth_getTransactionReceipt": nil,
-		"arb_getRawBlockMetadata": nil,
+		"arb_getRawBlockMetadata":   nil,
 	}
 	srv := newMockRPCServer(t, responses)
 	defer srv.Close()

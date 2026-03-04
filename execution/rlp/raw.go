@@ -336,4 +336,3 @@ func AppendUint64(b []byte, i uint64) []byte {
 		)
 	}
 }
-

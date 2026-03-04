@@ -142,7 +142,7 @@ func encodeTransactions(t *testing.T, txs []types.Transaction, segmentFile, idxF
 		sender, hasSender := tx.GetSender()
 		var senderBytes [20]byte
 		if hasSender {
-			senderBytes = sender
+			senderBytes = sender.Value()
 		}
 
 		hash := tx.Hash()

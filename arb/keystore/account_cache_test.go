@@ -29,6 +29,7 @@ import (
 	"github.com/cespare/cp"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/erigontech/erigon/common"
+	dir2 "github.com/erigontech/erigon/common/dir"
 	"golang.org/x/exp/slices"
 )
 
@@ -125,7 +126,7 @@ func TestWatchNoDir(t *testing.T) {
 	}
 	// Create the directory and copy a key file into it.
 	os.MkdirAll(dir, 0700)
-	defer os.RemoveAll(dir)
+	defer dir2.RemoveAll(dir) //nolint:errcheck
 	file := filepath.Join(dir, "aaa")
 	if err := cp.CopyFile(file, cachetestAccounts[0].URL.Path); err != nil {
 		t.Fatal(err)
@@ -336,7 +337,7 @@ func TestUpdatedKeyfileContents(t *testing.T) {
 	}
 	// Create the directory and copy a key file into it.
 	os.MkdirAll(dir, 0700)
-	defer os.RemoveAll(dir)
+	defer dir2.RemoveAll(dir) //nolint:errcheck
 	file := filepath.Join(dir, "aaa")
 
 	// Place one of our testfiles in there

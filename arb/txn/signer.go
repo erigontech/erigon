@@ -48,14 +48,13 @@ func (s ArbitrumSigner) Equal(s2 ArbitrumSigner) bool {
 }
 
 func (s ArbitrumSigner) SignatureValues(tx types.Transaction, sig []byte) (R, S, V *uint256.Int, err error) {
-	switch tx.(type) {
+	switch t := tx.(type) {
 	case *ArbitrumUnsignedTx, *ArbitrumContractTx, *ArbitrumDepositTx,
 		*ArbitrumInternalTx, *ArbitrumRetryTx, *ArbitrumSubmitRetryableTx:
 
 		return nil, nil, nil, nil
 	case *ArbitrumLegacyTxData:
-		legacyData := tx.(*ArbitrumLegacyTxData)
-		fakeTx := NewArbTx(legacyData.LegacyTx)
+		fakeTx := NewArbTx(t.LegacyTx)
 		return s.Signer.SignatureValues(fakeTx, sig)
 	default:
 		return s.Signer.SignatureValues(tx, sig)

@@ -429,7 +429,12 @@ func (z *MultiGas) UnmarshalJSON(data []byte) error {
 	z.refund = uint64(j.Refund)
 	var total uint64
 	for i := range NumResourceKind {
-		total += z.gas[i]
+		sum, carry := bits.Add64(total, z.gas[i], 0)
+		if carry != 0 {
+			total = math.MaxUint64
+			break
+		}
+		total = sum
 	}
 	z.total = total
 	return nil

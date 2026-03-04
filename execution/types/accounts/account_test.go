@@ -49,11 +49,10 @@ func TestEmptyAccount(t *testing.T) {
 func TestEmptyAcountEncoding(t *testing.T) {
 	t.Parallel()
 	emptyAcc := Account{
-		Initialised: true,
 		Nonce:       0,
-		Balance:     *new(uint256.Int),
+		Balance:     uint256.Int{},
 		Root:        empty.RootHash, // extAccount doesn't have Root value
-		CodeHash:    empty.CodeHash, // extAccount doesn't have CodeHash value
+		CodeHash:    EmptyCodeHash,  // extAccount doesn't have CodeHash value
 		Incarnation: 0,
 	}
 

@@ -1287,7 +1287,7 @@ func opSelfdestruct(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 		return pc, nil, err
 	}
 
-	if beneficiaryAddr == scope.Contract.Address() {
+	if evm.chainConfig.IsArbitrum() && beneficiaryAddr == scope.Contract.Address() {
 		evm.IntraBlockState().ExpectBalanceBurn(&balance)
 	}
 	ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct)

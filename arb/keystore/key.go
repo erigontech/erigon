@@ -30,6 +30,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/google/uuid"
 )
 
@@ -201,7 +202,7 @@ func writeTemporaryKeyFile(file string, content []byte) (string, error) {
 	}
 	if _, err := f.Write(content); err != nil {
 		f.Close()
-		os.Remove(f.Name())
+		dir2.RemoveFile(f.Name()) //nolint:errcheck
 		return "", err
 	}
 	f.Close()

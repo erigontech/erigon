@@ -25,7 +25,6 @@ import (
 	crand "crypto/rand"
 	"errors"
 	"math/big"
-	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -34,6 +33,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p/event"
 )
@@ -249,7 +249,7 @@ func (ks *KeyStore) Delete(a Account, passphrase string) error {
 	// The order is crucial here. The key is dropped from the
 	// cache after the file is gone so that a reload happening in
 	// between won't insert it into the cache again.
-	err = os.Remove(a.URL.Path)
+	err = dir2.RemoveFile(a.URL.Path)
 	if err == nil {
 		ks.cache.delete(a)
 		ks.refreshWallets()
