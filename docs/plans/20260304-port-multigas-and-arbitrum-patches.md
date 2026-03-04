@@ -132,9 +132,9 @@ Additionally, several state transition gaps need porting: DropTip pre-preCheck o
 **Files:**
 - Modify: `execution/protocol/state_transition.go`
 
-- [ ] Change line 534 from `if st.gasRemaining < gas || st.gasRemaining < floorGas7623` to `if !rules.IsArbitrum && (st.gasRemaining < gas || st.gasRemaining < floorGas7623)`
-- [ ] Write test: `TestTransitionDb_ArbitrumSkipsIntrinsicGasCheck` — verify Arbitrum transactions don't fail on insufficient intrinsic gas
-- [ ] Run `go test ./execution/protocol/... -count=1` — must pass
+- [x] Change line 534 from `if st.gasRemaining < gas || st.gasRemaining < floorGas7623` to `if !rules.IsArbitrum && (st.gasRemaining < gas || st.gasRemaining < floorGas7623)`
+- [x] Write test: `TestTransitionDb_ArbitrumSkipsIntrinsicGasCheck` — verify Arbitrum transactions don't fail on insufficient intrinsic gas
+- [x] Run `go test ./execution/protocol/... -count=1` — must pass
 
 ### Task 6: Port Arbitrum-specific refund path with multigas
 
