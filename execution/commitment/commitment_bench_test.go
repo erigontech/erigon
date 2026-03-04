@@ -147,9 +147,7 @@ func BenchmarkReplacePlainKeys_BufferReuse(b *testing.B) {
 	b.Run("reuse-clone", func(b *testing.B) {
 		var buf []byte
 		for b.Loop() {
-			result, newBuf, _ := enc.ReplacePlainKeys(buf[:0], replacer)
-			buf = newBuf
-			_ = common.Copy(result) // bytes.Clone equivalent
+			_, buf, _ = enc.ReplacePlainKeys(buf[:0], replacer)
 		}
 	})
 }
