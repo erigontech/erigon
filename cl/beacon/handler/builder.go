@@ -93,6 +93,10 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWr
 		if err != nil {
 			return nil, err
 		}
+		// [Modified in Gloas:EIP7732] GLOAS blocks have no ExecutionPayload; withdrawals are in the envelope
+		if blk.Version() >= clparams.GloasVersion {
+			continue
+		}
 		return newBeaconResponse(blk.Block.Body.ExecutionPayload.Withdrawals).WithFinalized(false).WithOptimistic(isOptimistic), nil
 	}
 
