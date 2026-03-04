@@ -394,6 +394,8 @@ var snapshotCommand = cli.Command{
 				&cli.StringFlag{Name: "skip-check", Usage: fmt.Sprintf("comma separated list from: %s", integrity.FastChecks)},
 				&cli.BoolFlag{Name: "failFast", Value: true, Usage: "to stop after 1st problem or print WARN log and continue check"},
 				&cli.Uint64Flag{Name: "fromStep", Value: 0, Usage: "skip files before given step"},
+				&cli.Int64Flag{Name: "seed", Usage: "random seed for sampling (auto-generated if not set)"},
+				&cli.Float64Flag{Name: "sample", Usage: "fraction of items to check via pseudo-random sampling (0.0-1.0)", Value: 1.0},
 			}),
 		},
 		{
@@ -1136,6 +1138,14 @@ func doIntegrity(cliCtx *cli.Context) error {
 
 	failFast := cliCtx.Bool("failFast")
 	fromStep := cliCtx.Uint64("fromStep")
+	var seed int64
+	if cliCtx.IsSet("seed") {
+		seed = cliCtx.Int64("seed")
+	} else {
+		seed = time.Now().UnixNano()
+	}
+	sampleRatio := cliCtx.Float64("sample")
+	logger.Info("[integrity] sampling config", "seed", seed, "sampleRatio", sampleRatio)
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
@@ -1243,7 +1253,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 					return err
 				}
 			case integrity.CommitmentHistVal:
-				if err := integrity.CheckCommitmentHistVal(ctx, db, blockReader, failFast, logger); err != nil {
+				if err := integrity.CheckCommitmentHistVal(ctx, db, blockReader, failFast, seed, sampleRatio, logger); err != nil {
 					return err
 				}
 			case integrity.StateVerify:
