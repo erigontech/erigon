@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -155,7 +156,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 		sender,
 		contractAsAddress,
 		input,
-		protocol.SplitIntoMdGas(cfg.GasLimit, evmtypes.MdGas{}, rules),
+		protocol.SplitIntoMdGas(cfg.GasLimit, params.MaxTxnGasLimit, evmtypes.MdGas{}, rules),
 		cfg.Value,
 		false, /* bailout */
 	)
@@ -208,7 +209,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 	code, address, leftOverGas, err := vmenv.Create(
 		sender,
 		input,
-		protocol.SplitIntoMdGas(cfg.GasLimit, evmtypes.MdGas{}, rules),
+		protocol.SplitIntoMdGas(cfg.GasLimit, params.MaxTxnGasLimit, evmtypes.MdGas{}, rules),
 		cfg.Value,
 		false,
 	)
@@ -242,7 +243,7 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, evmtypes
 		sender.Address(),
 		address,
 		input,
-		protocol.SplitIntoMdGas(cfg.GasLimit, evmtypes.MdGas{}, rules),
+		protocol.SplitIntoMdGas(cfg.GasLimit, params.MaxTxnGasLimit, evmtypes.MdGas{}, rules),
 		cfg.Value,
 		false, /* bailout */
 	)

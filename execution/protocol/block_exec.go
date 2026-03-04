@@ -21,6 +21,7 @@ package protocol
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -35,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/fixedgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -273,10 +275,24 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 		txContext = NewEVMTxContext(msg)
 	}
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
-	mdGas := evmtypes.MdGas{
-		Regular: msg.Gas(),
-		State:   math.MaxUint64,
+	rules := evm.ChainRules()
+	igasCalcRes, overflow := fixedgas.IntrinsicGas(fixedgas.IntrinsicGasCalcArgs{
+		Data:               data,
+		IsContractCreation: msg.To().IsNil(),
+		IsEIP2:             rules.IsHomestead,
+		IsEIP2028:          rules.IsIstanbul,
+		IsEIP3860:          vmConfig.HasEip3860(rules),
+		IsEIP7623:          rules.IsPrague,
+		IsEIP8037:          rules.IsAmsterdam,
+	})
+	if overflow {
+		return nil, errors.New("intrinsic gas calculation overflow in sys call")
 	}
+	igas := evmtypes.MdGas{
+		Regular: igasCalcRes.RegularGas,
+		State:   igasCalcRes.StateGas,
+	}
+	mdGas := SplitIntoMdGas(msg.Gas(), SysCallGasLimit, igas, rules)
 	ret, _, err := evm.Call(
 		msg.From(),
 		msg.To(),
@@ -314,10 +330,24 @@ func SysCreate(contract accounts.Address, data []byte, chainConfig *chain.Config
 	txContext := NewEVMTxContext(msg)
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), nil, author, chainConfig)
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
-	mdGas := evmtypes.MdGas{
-		Regular: msg.Gas(),
-		State:   math.MaxUint64,
+	rules := evm.ChainRules()
+	igasCalcRes, overflow := fixedgas.IntrinsicGas(fixedgas.IntrinsicGasCalcArgs{
+		Data:               data,
+		IsContractCreation: msg.To().IsNil(),
+		IsEIP2:             rules.IsHomestead,
+		IsEIP2028:          rules.IsIstanbul,
+		IsEIP3860:          vmConfig.HasEip3860(rules),
+		IsEIP7623:          rules.IsPrague,
+		IsEIP8037:          rules.IsAmsterdam,
+	})
+	if overflow {
+		return nil, errors.New("intrinsic gas calculation overflow in sys create")
 	}
+	igas := evmtypes.MdGas{
+		Regular: igasCalcRes.RegularGas,
+		State:   igasCalcRes.StateGas,
+	}
+	mdGas := SplitIntoMdGas(msg.Gas(), SysCallGasLimit, igas, rules)
 	ret, _, err := evm.SysCreate(
 		msg.From(),
 		msg.Data(),
