@@ -309,12 +309,12 @@ func gasCreate2(_ *EVM, callContext *CallContext, availableGas uint64, memorySiz
 	return gas, nil
 }
 
-func stateGasCreate(_ *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
-	return 112 * callContext.stateGas, nil
+func stateGasCreate(evm *EVM, _ *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
+	return 112 * evm.Context.CostPerStateByte, nil
 }
 
-func stateGasCall(_ *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
-	return 112 * callContext.stateGas, nil
+func stateGasCall(evm *EVM, _ *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
+	return 112 * evm.Context.CostPerStateByte, nil
 }
 
 func stateGasSstore(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
