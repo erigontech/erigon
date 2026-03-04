@@ -146,6 +146,8 @@ type TxPool struct {
 	isPostPrague            atomic.Bool
 	osakaTime               *uint64
 	isPostOsaka             atomic.Bool
+	amsterdamTime           *uint64
+	isPostAmsterdam         atomic.Bool
 	feeCalculator           FeeCalculator
 	p2pFetcher              *Fetch
 	p2pSender               *Send
@@ -292,6 +294,13 @@ func New(
 		}
 		osakaTimeU64 := chainConfig.OsakaTime.Uint64()
 		res.osakaTime = &osakaTimeU64
+	}
+	if chainConfig.AmsterdamTime != nil {
+		if !chainConfig.AmsterdamTime.IsUint64() {
+			return nil, errors.New("amsterdamTime overflow")
+		}
+		amsterdamTimeU64 := chainConfig.AmsterdamTime.Uint64()
+		res.amsterdamTime = &amsterdamTimeU64
 	}
 
 	res.p2pFetcher = NewFetch(ctx, sentryClients, res, stateChangesClient, poolDB, res.chainID, logger, opts...)
@@ -1246,6 +1255,10 @@ func (p *TxPool) isPrague() bool {
 
 func (p *TxPool) isOsaka() bool {
 	return isTimeBasedForkActivated(&p.isPostOsaka, p.osakaTime)
+}
+
+func (p *TxPool) isAmsterdam() bool {
+	return isTimeBasedForkActivated(&p.isPostAmsterdam, p.amsterdamTime)
 }
 
 func (p *TxPool) GetMaxBlobsPerBlock() uint64 {
