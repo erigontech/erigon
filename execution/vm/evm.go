@@ -280,7 +280,21 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 
 	// It is allowed to call precompiles, even via delegatecall
 	if isPrecompile {
-		ret, gas, _, err = RunPrecompiledContract(p, input, gas, evm.Config().Tracer, nil)
+		actingAs := addr.Value()
+		if typ == CALLCODE || typ == DELEGATECALL {
+			actingAs = callerAddress.Value()
+		}
+		advInfo := &AdvancedPrecompileCall{
+			PrecompileAddress: addr.Value(),
+			ActingAsAddress:   actingAs,
+			Caller:            caller.Value(),
+			Value:             value.ToBig(),
+			ReadOnly:          typ == STATICCALL,
+			Evm:               evm,
+		}
+		var precompileMultiGas multigas.MultiGas
+		ret, gas, precompileMultiGas, err = RunPrecompiledContract(p, input, gas, evm.Config().Tracer, advInfo)
+		usedMultiGas = usedMultiGas.SaturatingAdd(precompileMultiGas)
 	} else if len(code) == 0 {
 		// If the account has no code, we can abort here
 		// The depth-check is already done, and precompiles handled above

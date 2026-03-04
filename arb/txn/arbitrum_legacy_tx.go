@@ -13,10 +13,6 @@ import (
 	"github.com/holiman/uint256"
 )
 
-func init() {
-	types.RegisterTransaction(ArbitrumLegacyTxType, createArbitrumLegacyTx)
-}
-
 func createArbitrumLegacyTx() types.Transaction {
 	return &ArbitrumLegacyTxData{}
 }

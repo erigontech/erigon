@@ -600,22 +600,37 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 	}
 	var (
-		ret   []byte
-		vmerr error // vm errors do not effect consensus and are therefore not assigned to err
+		ret              []byte
+		vmerr            error // vm errors do not effect consensus and are therefore not assigned to err
+		deployedContract accounts.Address
 	)
 
-	var execMultiGas multigas.MultiGas
-	var deployedContract accounts.Address
-	if contractCreation {
-		// The reason why we don't increment nonce here is that we need the original
-		// nonce to calculate the address of the contract that is being created
-		// It does get incremented inside the `Create` call, after the computation
-		// of the contract's address, but before the execution of the code.
-		ret, deployedContract, st.gasRemaining, execMultiGas, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, bailout)
-	} else {
-		ret, st.gasRemaining, execMultiGas, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
+	// Handle known historically-reverted Arbitrum transactions before EVM execution.
+	var arbRevertHandled bool
+	if rules.IsArbitrum {
+		if typedMsg, ok := st.msg.(*types.Message); ok {
+			revertMultiGas, revertErr := st.handleRevertedTx(typedMsg, usedMultiGas)
+			if revertErr != nil {
+				usedMultiGas = revertMultiGas
+				vmerr = revertErr
+				arbRevertHandled = true
+			}
+		}
 	}
-	usedMultiGas = usedMultiGas.SaturatingAdd(execMultiGas)
+
+	if !arbRevertHandled {
+		var execMultiGas multigas.MultiGas
+		if contractCreation {
+			// The reason why we don't increment nonce here is that we need the original
+			// nonce to calculate the address of the contract that is being created
+			// It does get incremented inside the `Create` call, after the computation
+			// of the contract's address, but before the execution of the code.
+			ret, deployedContract, st.gasRemaining, execMultiGas, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, bailout)
+		} else {
+			ret, st.gasRemaining, execMultiGas, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
+		}
+		usedMultiGas = usedMultiGas.SaturatingAdd(execMultiGas)
+	}
 
 	if refunds && !gasBailout {
 		refundQuotient := params.RefundQuotient
@@ -730,7 +745,11 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 
 	if tracer := st.evm.Config().Tracer; tracer != nil && tracer.CaptureArbitrumTransfer != nil && !st.evm.ProcessingHook.DropTip() {
 		if tracingTipAmount != nil && !tracingTipAmount.IsZero() {
-			tipAddr := tipRecipient.Value()
+			tracedRecipient := tipRecipient
+			if rules.IsArbitrum {
+				tracedRecipient = coinbase
+			}
+			tipAddr := tracedRecipient.Value()
 			tracer.CaptureArbitrumTransfer(nil, &tipAddr, tracingTipAmount, false, "tip")
 		}
 	}

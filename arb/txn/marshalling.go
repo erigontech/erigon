@@ -1,7 +1,7 @@
 package txn
 
 import (
-	"encoding/json"
+	"fmt"
 
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -58,48 +58,26 @@ func ArbUnmarshalJSON(txType byte, input []byte) (types.Transaction, error) {
 	return nil, nil
 }
 
-func (tx *ArbitrumContractTx) UnmarshalJSON(input []byte) error {
-	var dec types.TxJSON
-	if err := json.Unmarshal(input, &dec); err != nil {
-		return err
-	}
-	return nil
-}
-func (tx *ArbitrumRetryTx) UnmarshalJSON(input []byte) error {
-	var dec types.TxJSON
-	if err := json.Unmarshal(input, &dec); err != nil {
-		return err
-	}
-	return nil
-}
-func (tx *ArbitrumSubmitRetryableTx) UnmarshalJSON(input []byte) error {
-	var dec types.TxJSON
-	if err := json.Unmarshal(input, &dec); err != nil {
-		return err
-	}
-	return nil
+func (tx *ArbitrumContractTx) UnmarshalJSON(_ []byte) error {
+	return fmt.Errorf("JSON unmarshaling not implemented for ArbitrumContractTx (type 0x%x)", ArbitrumContractTxType)
 }
 
-func (tx *ArbitrumDepositTx) UnmarshalJSON(input []byte) error {
-	var dec types.TxJSON
-	if err := json.Unmarshal(input, &dec); err != nil {
-		return err
-	}
-	return nil
+func (tx *ArbitrumRetryTx) UnmarshalJSON(_ []byte) error {
+	return fmt.Errorf("JSON unmarshaling not implemented for ArbitrumRetryTx (type 0x%x)", ArbitrumRetryTxType)
 }
 
-func (tx *ArbitrumUnsignedTx) UnmarshalJSON(input []byte) error {
-	var dec types.TxJSON
-	if err := json.Unmarshal(input, &dec); err != nil {
-		return err
-	}
-	return nil
+func (tx *ArbitrumSubmitRetryableTx) UnmarshalJSON(_ []byte) error {
+	return fmt.Errorf("JSON unmarshaling not implemented for ArbitrumSubmitRetryableTx (type 0x%x)", ArbitrumSubmitRetryableTxType)
 }
 
-func (tx *ArbitrumInternalTx) UnmarshalJSON(input []byte) error {
-	var dec types.TxJSON
-	if err := json.Unmarshal(input, &dec); err != nil {
-		return err
-	}
-	return nil
+func (tx *ArbitrumDepositTx) UnmarshalJSON(_ []byte) error {
+	return fmt.Errorf("JSON unmarshaling not implemented for ArbitrumDepositTx (type 0x%x)", ArbitrumDepositTxType)
+}
+
+func (tx *ArbitrumUnsignedTx) UnmarshalJSON(_ []byte) error {
+	return fmt.Errorf("JSON unmarshaling not implemented for ArbitrumUnsignedTx (type 0x%x)", ArbitrumUnsignedTxType)
+}
+
+func (tx *ArbitrumInternalTx) UnmarshalJSON(_ []byte) error {
+	return fmt.Errorf("JSON unmarshaling not implemented for ArbitrumInternalTx (type 0x%x)", ArbitrumInternalTxType)
 }
