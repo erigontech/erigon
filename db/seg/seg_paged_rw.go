@@ -32,46 +32,6 @@ import (
 
 var be = binary.BigEndian
 
-// Global pools for page work items and results - optimized for GC
-var (
-	pageWorkItemPool = sync.Pool{New: func() any { return &pageWorkItem{} }}
-	pageResultPool   = sync.Pool{New: func() any { return &pageResult{} }}
-)
-
-func getPageWorkItem() *pageWorkItem { return pageWorkItemPool.Get().(*pageWorkItem) }
-func putPageWorkItem(item *pageWorkItem) {
-	if item == nil {
-		return
-	}
-	item.seq = 0
-	item.uncompressedData = item.uncompressedData[:0]
-	pageWorkItemPool.Put(item)
-}
-
-func getPageResult() *pageResult { return pageResultPool.Get().(*pageResult) }
-func putPageResult(r *pageResult) {
-	r.seq = 0
-	r.data = r.data[:0]
-	pageResultPool.Put(r)
-}
-
-func drainResultCh(ch chan *pageResult) {
-	for {
-		select {
-		case r := <-ch:
-			putPageResult(r)
-		default:
-			return
-		}
-	}
-}
-
-func drainPendingResults(m map[int]*pageResult) {
-	for _, r := range m {
-		putPageResult(r)
-	}
-}
-
 func GetFromPage(key, compressedPage []byte, compressionBuf []byte, compressionEnabled bool) (v []byte, compressionBufOut []byte) {
 	var err error
 	var page []byte
@@ -290,10 +250,10 @@ func NewPagedWriter(ctx context.Context, parent CompressorI, compressionEnabled 
 		pageSize:           parent.GetValuesOnCompressedPage(),
 		compressionEnabled: compressionEnabled,
 		ctx:                ctx,
-		workers:            workers, //TODO: accept it as a parameter in next PR
+		numWorkers:         workers, //TODO: accept it as a parameter in next PR
 	}
 	if compressionEnabled && pw.pageSize > 1 {
-		if pw.workers > 1 {
+		if pw.numWorkers > 1 {
 			pw.initWorkers()
 		}
 	}
@@ -320,7 +280,7 @@ type PagedWriter struct {
 
 	pairs int
 
-	workers         int
+	numWorkers      int
 	workCh          chan *pageWorkItem
 	resultCh        chan *pageResult
 	eg              *errgroup.Group     // tracks workers + reducer; cancels all on first error
@@ -336,15 +296,15 @@ type PagedWriter struct {
 }
 
 func (c *PagedWriter) initWorkers() {
-	queueDepth := c.workers * 2
+	queueDepth := c.numWorkers * 2
 	c.workCh = make(chan *pageWorkItem, queueDepth)
 	c.resultCh = make(chan *pageResult, queueDepth)
 	c.pendingResults = make(map[int]*pageResult, queueDepth)
 	c.eg, c.egCtx = errgroup.WithContext(c.ctx)
 
 	var workerWg sync.WaitGroup
-	workerWg.Add(c.workers)
-	for range c.workers {
+	workerWg.Add(c.numWorkers)
+	for range c.numWorkers {
 		c.eg.Go(func() error {
 			defer workerWg.Done()
 			return c.compressionWorker(c.egCtx)
@@ -415,7 +375,7 @@ func (c *PagedWriter) writeInOrder() error {
 }
 
 func (c *PagedWriter) Empty() bool              { return c.pairs == 0 }
-func (c *PagedWriter) IsAsyncCompression() bool { return c.workers > 1 }
+func (c *PagedWriter) IsAsyncCompression() bool { return c.numWorkers > 1 }
 func (c *PagedWriter) PagesCompressed() int     { return c.pagesCompressed }
 func (c *PagedWriter) Close() {
 	c.parent.Close()
@@ -450,7 +410,7 @@ func (c *PagedWriter) writePage() error {
 	}
 
 	// Synchronous path (single-threaded or disabled workers)
-	if c.workers <= 1 {
+	if c.numWorkers <= 1 {
 		uncompressedPage, ok := c.bytesUncompressed()
 		c.resetPage()
 		if !ok {
@@ -517,7 +477,7 @@ func (c *PagedWriter) Flush() error {
 	if err := c.writePage(); err != nil {
 		return err
 	}
-	if c.workers <= 1 {
+	if c.numWorkers <= 1 {
 		c.resetPage()
 		return nil
 	}
@@ -618,4 +578,44 @@ func growslice(b []byte, wantLength int) []byte {
 		return b[:wantLength]
 	}
 	return make([]byte, wantLength)
+}
+
+// Global pools for page work items and results - optimized for GC
+var (
+	pageWorkItemPool = sync.Pool{New: func() any { return &pageWorkItem{} }}
+	pageResultPool   = sync.Pool{New: func() any { return &pageResult{} }}
+)
+
+func getPageWorkItem() *pageWorkItem { return pageWorkItemPool.Get().(*pageWorkItem) }
+func putPageWorkItem(item *pageWorkItem) {
+	if item == nil {
+		return
+	}
+	item.seq = 0
+	item.uncompressedData = item.uncompressedData[:0]
+	pageWorkItemPool.Put(item)
+}
+
+func getPageResult() *pageResult { return pageResultPool.Get().(*pageResult) }
+func putPageResult(r *pageResult) {
+	r.seq = 0
+	r.data = r.data[:0]
+	pageResultPool.Put(r)
+}
+
+func drainResultCh(ch chan *pageResult) {
+	for {
+		select {
+		case r := <-ch:
+			putPageResult(r)
+		default:
+			return
+		}
+	}
+}
+
+func drainPendingResults(m map[int]*pageResult) {
+	for _, r := range m {
+		putPageResult(r)
+	}
 }

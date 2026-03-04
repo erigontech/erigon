@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"math/rand"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -834,7 +835,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, db kv.TemporalRoDB, br s
 	}
 	start := time.Now()
 	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(estimate.AlmostAllCPUs())
+	g.SetLimit(runtime.GOMAXPROCS(-1)) // all cpus, because no producer-worker
 	for blockNum := from; blockNum < to; blockNum++ {
 		blockNum := blockNum
 		g.Go(func() error {
