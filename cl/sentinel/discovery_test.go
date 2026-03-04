@@ -67,7 +67,7 @@ func TestConnectSemaphoreBoundsConcurrency(t *testing.T) {
 	defer cancel()
 
 	var (
-		active atomic.Int32
+		active  atomic.Int32
 		maxSeen atomic.Int32
 	)
 
