@@ -337,11 +337,6 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 		}
 	}
 
-	// EIP-7825: Transaction Gas Limit Cap
-	if st.msg.CheckGas() && !rules.IsAmsterdam && rules.IsOsaka && st.msg.Gas() > params.MaxTxnGasLimit {
-		return fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, from, st.msg.Gas())
-	}
-
 	return st.buyGas(gasBailout)
 }
 
@@ -527,6 +522,18 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	}
 	if st.msg.Gas() < intrinsicGasResult.RegularGas || st.msg.Gas() < intrinsicGasResult.FloorGasCost {
 		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.msg.Gas(), max(intrinsicGasResult.RegularGas, intrinsicGasResult.FloorGasCost))
+	}
+	// EIP-7825: Transaction Gas Limit Cap
+	if st.msg.CheckGas() {
+		var gas uint64
+		if rules.IsAmsterdam { // EIP-8037
+			gas = max(intrinsicGasResult.RegularGas, intrinsicGasResult.FloorGasCost)
+		} else if rules.IsOsaka { // EIP-7825
+			gas = st.msg.Gas()
+		}
+		if gas > params.MaxTxnGasLimit {
+			return nil, fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, sender, gas)
+		}
 	}
 	imdGas := evmtypes.MdGas{
 		Regular: intrinsicGasResult.RegularGas,
