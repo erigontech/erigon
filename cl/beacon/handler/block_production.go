@@ -586,6 +586,10 @@ func (a *ApiHandler) produceBeaconBody(
 	// Build execution payload
 	latestExecutionPayload := baseState.LatestExecutionPayloadHeader()
 	head := latestExecutionPayload.BlockHash
+	// [GLOAS] LatestExecutionPayloadHeader is not updated in GLOAS; use GetLatestBlockHash instead
+	if stateVersion >= clparams.GloasVersion {
+		head = baseState.GetLatestBlockHash()
+	}
 	finalizedHash := a.forkchoiceStore.GetEth1Hash(baseState.FinalizedCheckpoint().Root)
 	if finalizedHash == (common.Hash{}) {
 		finalizedHash = head // probably fuck up fcu for EL but not a big deal.
