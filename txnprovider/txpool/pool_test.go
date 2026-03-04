@@ -1837,7 +1837,7 @@ func TestZombieQueuedEviction(t *testing.T) {
 	acc := accounts3.Account{
 		Nonce:       5,
 		Balance:     *uint256.NewInt(1 * common.Ether),
-		CodeHash:    accounts.EmptyCodeHash,
+		CodeHash:    common.Hash{},
 		Incarnation: 0,
 	}
 	v := accounts3.SerialiseV3(&acc)
@@ -1925,7 +1925,7 @@ func TestZombieQueuedEviction(t *testing.T) {
 		acc2 := accounts3.Account{
 			Nonce:    baseNonce,
 			Balance:  *uint256.NewInt(10 * common.Ether),
-			CodeHash: accounts.EmptyCodeHash,
+			CodeHash: common.Hash{},
 		}
 		v2 := accounts3.SerialiseV3(&acc2)
 		var addr2 [20]byte
