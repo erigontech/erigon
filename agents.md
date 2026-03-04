@@ -69,3 +69,46 @@ Common lint categories and fixes:
 - **rangeExprCopy:** Use `&x` in `range` to avoid copying large arrays.
 - **dupArg:** For intentional `x.Equal(x)` self-equality tests, suppress with `//nolint:gocritic`.
 - **Loop ruleguard in benchmarks:** For `BeginRw`/`BeginRo` inside loops where `defer` doesn't apply, suppress with `//nolint:gocritic`.
+
+## MultiGas (Arbitrum)
+
+Multi-dimensional gas tracking categorizes gas by spending type (computation, storage, calldata, etc.). The sum of all categories always equals the single-gas total. Required for ArbOS 50+ and Stylus.
+
+### Key files
+- `arb/multigas/resources.go` — `MultiGas` type, `IntrinsicMultiGas()`, `ZeroGas()`
+- `execution/vm/evm.go` — EVM Call/Create methods return `multigas.MultiGas`
+- `execution/vm/evm_arb_tx_hook.go` — `TxProcessingHook` interface (StartTxHook, GasChargingHook, EndTxHook)
+- `execution/protocol/state_transition.go` — MultiGas accumulation through `TransitionDb`
+- `execution/protocol/state_transition_arb.go` — `handleRevertedTx`, Arbitrum-specific helpers
+
+### Accumulation flow in TransitionDb
+```
+usedMultiGas = ZeroGas()
+├── += IntrinsicMultiGas(data, accessList, ...)     // L2Calldata, Computation, StorageAccess
+├── += GasChargingHook(&gasRemaining, intrinsicGas) // L1 poster cost (set by arbos TxProcessor)
+├── += evm.Call() or evm.Create()                   // Computation, Storage (from opcodes)
+├── .WithRefund(refund)                             // SSTORE refunds
+├── .SaturatingIncrement(L2Calldata, floorDelta)    // Prague EIP-7623 floor (if enabled)
+└── → result.UsedMultiGas
+```
+
+### EVM method signatures
+All EVM Call/Create methods return `multigas.MultiGas` as an additional return value:
+- `Call/CallCode/DelegateCall/StaticCall` → `(ret, leftOverGas, usedMultiGas, err)`
+- `Create/Create2/SysCreate` → `(ret, contractAddr, leftOverGas, usedMultiGas, err)`
+
+### ProcessingHook (TxProcessingHook interface)
+Arbitrum injects transaction processing behavior via `evm.ProcessingHook`:
+- `StartTxHook()` — can short-circuit TransitionDb (returns `takeover=true` for retryable tickets, deposits)
+- `GasChargingHook()` — charges L1 poster gas, returns multigas contribution
+- `EndTxHook(gasRemaining, success)` — finalizes Arbitrum-specific accounting
+- `DropTip()` — returns true for delayed messages (gasPrice capped to baseFee before preCheck)
+- `IsArbitrum()` — gates Arbitrum-specific paths (skip intrinsic gas check, custom refund logic)
+- `ForceRefundGas()` / `NonrefundableGas()` — Arbitrum refund controls
+
+### Testing multigas
+```bash
+go test ./execution/protocol/... -run TestMultiGas -count=1 -v
+go test ./execution/protocol/... -run TestTransitionDb -count=1 -v
+```
+Invariant: `usedMultiGas.SingleGas() == result.ReceiptGasUsed` for DefaultTxProcessor (non-Arbitrum) transactions.

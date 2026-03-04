@@ -197,8 +197,8 @@ Additionally, several state transition gaps need porting: DropTip pre-preCheck o
 
 ### Task 11: [Final] Update documentation
 
-- [ ] Update CLAUDE.md if new patterns discovered
-- [ ] Move this plan to `docs/plans/completed/`
+- [x] Update CLAUDE.md if new patterns discovered
+- [x] Move this plan to `docs/plans/completed/`
 
 ## Technical Details
 
