@@ -738,8 +738,8 @@ func checkCommitmentHistVal(ctx context.Context, tx kv.TemporalTx, br services.F
 	return total, integrityErr
 }
 
-func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, logger log.Logger) error {
-	logger.Info("checking commitment hist at block", "blockNum", blockNum)
+func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, lvl log.Lvl, logger log.Logger) error {
+	logger.Log(lvl, "checking commitment hist at block", "blockNum", blockNum)
 	start := time.Now()
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -816,7 +816,7 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	if header.Root != rootHash {
 		return fmt.Errorf("commitment root mismatch: %s != %s (blockNum=%d,txNum=%d)", header.Root, rootHash, blockNum, maxTxNum)
 	}
-	logger.Info(
+	logger.Log(lvl,
 		"commitment root matches",
 		"blockNum", blockNum,
 		"txNum", maxTxNum,
@@ -833,17 +833,36 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, db kv.TemporalRoDB, br s
 		return fmt.Errorf("invalid blk range: %d >= %d", from, to)
 	}
 	start := time.Now()
+	var checked atomic.Uint64
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(estimate.AlmostAllCPUs())
+
+	logTicker := time.NewTicker(20 * time.Second)
+	defer logTicker.Stop()
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-logTicker.C:
+				done := checked.Load()
+				elapsed := time.Since(start).Seconds()
+				rate := float64(done) / elapsed
+				logger.Info("checking commitment hist", "blks/s", rate, "checked", done, "from", from, "to", to)
+			}
+		}
+	}()
+
 	for blockNum := from; blockNum < to; blockNum++ {
 		blockNum := blockNum
 		g.Go(func() error {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			if err := CheckCommitmentHistAtBlk(ctx, db, br, blockNum, logger); err != nil {
+			if err := CheckCommitmentHistAtBlk(ctx, db, br, blockNum, log.LvlDebug, logger); err != nil {
 				return fmt.Errorf("checkCommitmentHistAtBlk: %d, %w", blockNum, err)
 			}
+			checked.Add(1)
 			return nil
 		})
 	}
