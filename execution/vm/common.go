@@ -107,23 +107,23 @@ func CheckMaxCodeSize(size int, rules *chain.Rules) error {
 		maxSize = params.MaxCodeSize
 	}
 	if size > maxSize {
-		return fmt.Errorf("%w: code size %v limit %v", ErrMaxCodeSizeExceeded, size, maxSize)
+		return fmt.Errorf("%w: size %v limit %v", ErrMaxCodeSizeExceeded, size, maxSize)
 	}
 	return nil
 }
 
 // See EIP-3860 & EIP-7954
-func CheckMaxInitCodeSize(size int, rules *chain.Rules) error {
-	var maxSize int
-	if rules.IsAmsterdam {
+func CheckMaxInitCodeSize(size uint64, eip3860, eip7954 bool) error {
+	var maxSize uint64
+	if eip7954 {
 		maxSize = params.MaxInitCodeSizeAmsterdam
-	} else if rules.IsShanghai {
+	} else if eip3860 {
 		maxSize = params.MaxInitCodeSize
 	} else {
 		return nil
 	}
 	if size > maxSize {
-		return fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, size, maxSize)
+		return fmt.Errorf("%w: size %v limit %v", ErrMaxInitCodeSizeExceeded, size, maxSize)
 	}
 	return nil
 }

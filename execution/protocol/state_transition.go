@@ -377,8 +377,8 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	}
 
 	// Check whether the init code size has been exceeded.
-	if isEIP3860 && contractCreation {
-		if err := vm.CheckMaxInitCodeSize(len(st.data), rules); err != nil {
+	if contractCreation {
+		if err := vm.CheckMaxInitCodeSize(uint64(len(st.data)), isEIP3860, rules.IsAmsterdam); err != nil {
 			return nil, err
 		}
 	}
@@ -535,8 +535,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	}
 
 	// Check whether the init code size has been exceeded.
-	if isEIP3860 && contractCreation {
-		if err := vm.CheckMaxInitCodeSize(len(st.data), rules); err != nil {
+	if contractCreation {
+		if err := vm.CheckMaxInitCodeSize(uint64(len(st.data)), isEIP3860, rules.IsAmsterdam); err != nil {
 			return nil, err
 		}
 	}

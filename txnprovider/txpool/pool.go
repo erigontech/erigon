@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
@@ -951,8 +952,11 @@ func toBlobs(_blobs [][]byte) []*goethkzg.Blob {
 func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView) txpoolcfg.DiscardReason {
 	isEIP3860 := p.isShanghai() || p.isAgra()
 	isPrague := p.isPrague() || p.isBhilai()
-	if isEIP3860 && txn.Creation && txn.DataLen > params.MaxInitCodeSize {
-		return txpoolcfg.InitCodeTooLarge // EIP-3860
+	isEIP7954 := p.isAmsterdam()
+	if txn.Creation {
+		if err := vm.CheckMaxInitCodeSize(uint64(txn.DataLen), isEIP3860, isEIP7954); err != nil {
+			return txpoolcfg.InitCodeTooLarge
+		}
 	}
 
 	if txn.Type == types.AccountAbstractionTxType {
