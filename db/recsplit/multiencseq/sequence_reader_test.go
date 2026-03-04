@@ -276,8 +276,7 @@ func BenchmarkMerge(b *testing.B) {
 
 	var s1, s2 SequenceReader
 	var merged SequenceBuilder
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		s1.Reset(baseNum, raw1)
 		s2.Reset(baseNum, raw2)
 		if err := merged.Merge(&s1, &s2, baseNum); err != nil {

@@ -414,8 +414,7 @@ func BenchmarkMatchVersionedFile(b *testing.B) {
 		)
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _, _, _ = MatchVersionedFile("*-accounts.0-1.kvi", dirEntries, "/tmp")
 	}
 }

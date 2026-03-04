@@ -393,7 +393,7 @@ func BenchmarkAddKeyAndBuild(b *testing.B) {
 			name = "enums"
 		}
 		b.Run(name, func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
+			for i := 0; b.Loop(); i++ {
 				b.StopTimer()
 				indexFile := filepath.Join(tmpDir, fmt.Sprintf("index_full_%s_%d", name, i))
 				rs, err := NewRecSplit(RecSplitArgs{
