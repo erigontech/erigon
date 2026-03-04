@@ -99,7 +99,10 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool, chain string, logger log.Lo
 		panic(opts.GetLabel())
 	}
 
-	rawDB := opts.MustOpen()
+	rawDB, err := opts.Open(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("open chaindata: %w", err)
+	}
 	if applyMigrations {
 		dirs := datadir.New(datadirCli)
 		migrationsDB, err := migrations.OpenMigrationsDB(dirs.Migrations, logger)

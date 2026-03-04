@@ -1366,6 +1366,7 @@ func (s *Ethereum) initDownloader(
 		return
 	}
 	s.downloader.HandleTorrentClientStatus(nodeCfg.DebugMux)
+	s.downloader.HandleTorrentsInfo(nodeCfg.DebugMux)
 
 	// This adds completed snapshots on disk. Ideally we'd do this after completing sync, so that we
 	// don't unnecessarily report incomplete torrents. But to do that we need access to
