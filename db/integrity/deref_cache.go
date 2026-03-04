@@ -18,18 +18,17 @@ package integrity
 
 import (
 	"bufio"
+	"encoding/hex"
 	"fmt"
-	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
-	"github.com/cespare/xxhash/v2"
+	"github.com/anacrolix/torrent/metainfo"
 )
 
 type fileFingerprint struct {
 	basename string
-	hash     uint64 // xxhash64 of full file contents
+	hash     [20]byte // SHA1 InfoHash from .torrent file
 }
 
 // IntegrityCache records which files have already passed an integrity check so
@@ -120,24 +119,37 @@ func (c *IntegrityCache) add(check string, files []fileFingerprint) {
 	c.newlyChecked = append(c.newlyChecked, encodeEntry(check, files))
 }
 
-// fingerprintOf opens the file at path and computes its xxhash64 fingerprint.
+// fingerprintOf loads the .torrent file for the given path and extracts its InfoHash.
+// Returns an error if the .torrent file does not exist (no fallback).
 func fingerprintOf(path string) (fileFingerprint, error) {
-	f, err := os.Open(path)
+	torrentPath := path + ".torrent"
+	mi, err := metainfo.LoadFromFile(torrentPath)
 	if err != nil {
-		return fileFingerprint{}, err
+		return fileFingerprint{}, fmt.Errorf("loading torrent file %s: %w", torrentPath, err)
 	}
-	defer f.Close()
-	h := xxhash.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return fileFingerprint{}, err
+	infoHash := mi.HashInfoBytes()
+	return fileFingerprint{
+		basename: baseName(path),
+		hash:     infoHash,
+	}, nil
+}
+
+// baseName extracts the file name from a path (like filepath.Base but simpler).
+func baseName(path string) string {
+	for i := len(path) - 1; i >= 0; i-- {
+		if path[i] == '/' || path[i] == '\\' {
+			return path[i+1:]
+		}
 	}
-	return fileFingerprint{basename: filepath.Base(path), hash: h.Sum64()}, nil
+	return path
 }
 
 // encodeEntry produces the tab-separated cache line used as the map key and
 // written to the cache file:
 //
 //	CheckName\tbasename1:hash1hex\tbasename2:hash2hex...
+//
+// Hash is 40 hex characters (20 bytes SHA1 InfoHash).
 func encodeEntry(check string, files []fileFingerprint) string {
 	var sb strings.Builder
 	sb.WriteString(check)
@@ -145,7 +157,7 @@ func encodeEntry(check string, files []fileFingerprint) string {
 		sb.WriteByte('\t')
 		sb.WriteString(fp.basename)
 		sb.WriteByte(':')
-		fmt.Fprintf(&sb, "%016x", fp.hash)
+		sb.WriteString(hex.EncodeToString(fp.hash[:]))
 	}
 	return sb.String()
 }
