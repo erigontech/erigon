@@ -634,6 +634,11 @@ func opExtCodeHash(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, err
 	slot := scope.Stack.peek()
 	address := accounts.InternAddress(slot.Bytes20())
 
+	// BAL: record address access so non-existent accounts appear in the block
+	// access list.  When Empty() returns true, GetCodeHash is never called,
+	// so no other read (BalancePath, CodePath, etc.) creates a BAL entry.
+	evm.IntraBlockState().MarkAddressAccess(address, true)
+
 	empty, err := evm.IntraBlockState().Empty(address)
 	if err != nil {
 		return pc, nil, err
@@ -1086,6 +1091,12 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 
 	if !value.IsZero() {
 		if evm.readOnly {
+			// The gas function already called Empty() on the target for
+			// gas calculation, which recorded versioned reads.  Mark them
+			// as internal so they are kept for conflict detection but
+			// excluded from the block access list — the CALL never
+			// actually executes.
+			evm.intraBlockState.MarkReadsInternal(toAddr)
 			return pc, nil, ErrWriteProtection
 		}
 		gas.Regular += params.CallStipend

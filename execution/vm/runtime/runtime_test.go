@@ -229,7 +229,6 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 		},
 	}
 	// Warm up the intpools and stuff
-	b.ResetTimer()
 	for b.Loop() {
 		_, _, _ = Call(receiver, []byte{}, &runtimeConfig)
 	}
