@@ -520,10 +520,12 @@ func (d *Decompressor) DictWords() int                  { return d.dictWords }
 func (d *Decompressor) DictLens() int                   { return d.dictLens }
 func (d *Decompressor) CompressedPageValuesCount() int  { return int(d.compPageValuesCount) }
 func (d *Decompressor) CompressionFormatVersion() uint8 { return d.version }
+
 // TotalPairsCount returns the number of key-value pairs stored in a page-compressed
 // file. Returns 0 for files that do not have PairsCountEnabled in their header (V1
 // files and V2 files written without page compression).
-func (d *Decompressor) TotalPairsCount() uint64         { return d.totalPairsCount }
+func (d *Decompressor) TotalPairsCount() uint64 { return d.totalPairsCount }
+
 // FileCompression returns the key/value compression flags stored in the file header.
 // Only reliable for V2+ files; returns CompressNone for V0 and V1.
 func (d *Decompressor) FileCompression() FileCompression {
