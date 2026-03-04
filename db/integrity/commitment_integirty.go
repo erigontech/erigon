@@ -743,8 +743,8 @@ func checkCommitmentHistVal(ctx context.Context, tx kv.TemporalTx, br services.F
 	return total, integrityErr
 }
 
-func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, logger log.Logger) error {
-	logger.Info("checking commitment hist at block", "blockNum", blockNum)
+func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, lvl log.Lvl, logger log.Logger) error {
+	logger.Log(lvl, "checking commitment hist at block", "blockNum", blockNum)
 	start := time.Now()
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -786,7 +786,7 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	if latestTxNum != maxTxNum {
 		return fmt.Errorf("commitment state txNum doesn't match maxTxNum: %d != %d", latestTxNum, maxTxNum)
 	}
-	logger.Info("commitment recalc info", "blockNum", blockNum, "minTxNum", minTxNum, "maxTxNum", maxTxNum, "toTxNum", toTxNum)
+	logger.Log(lvl, "commitment recalc info", "blockNum", blockNum, "minTxNum", minTxNum, "maxTxNum", maxTxNum, "toTxNum", toTxNum)
 	trace := logger.Enabled(ctx, log.LvlTrace)
 	touchLoggingVisitor := func(k []byte) {
 		if trace {
@@ -811,7 +811,7 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 		return err
 	}
 	touchDur := time.Since(touchStart)
-	logger.Info("commitment touched keys", "accTouches", accTouches, "storageTouches", storageTouches, "codeTouches", codeTouches, "touchDur", touchDur)
+	logger.Log(lvl, "commitment touched keys", "accTouches", accTouches, "storageTouches", storageTouches, "codeTouches", codeTouches, "touchDur", touchDur)
 	recalcStart := time.Now()
 	root, err := sd.ComputeCommitment(ctx, tx, false /* saveStateAfter */, blockNum, maxTxNum, "integrity", nil /* commitProgress */)
 	if err != nil {
@@ -821,7 +821,7 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	if header.Root != rootHash {
 		return fmt.Errorf("commitment root mismatch: %s != %s (blockNum=%d,txNum=%d)", header.Root, rootHash, blockNum, maxTxNum)
 	}
-	logger.Info(
+	logger.Log(lvl,
 		"commitment root matches",
 		"blockNum", blockNum,
 		"txNum", maxTxNum,
@@ -839,6 +839,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, db kv.TemporalRoDB, br s
 	}
 	rng := rand.New(rand.NewPCG(uint64(seed), 0))
 	start := time.Now()
+	var checked atomic.Uint64
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(estimate.AlmostAllCPUs())
 	var blks uint64
@@ -852,9 +853,10 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, db kv.TemporalRoDB, br s
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			if err := CheckCommitmentHistAtBlk(ctx, db, br, blockNum, logger); err != nil {
+			if err := CheckCommitmentHistAtBlk(ctx, db, br, blockNum, log.LvlDebug, logger); err != nil {
 				return fmt.Errorf("checkCommitmentHistAtBlk: %d, %w", blockNum, err)
 			}
+			checked.Add(1)
 			return nil
 		})
 	}

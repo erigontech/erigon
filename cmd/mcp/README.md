@@ -8,10 +8,18 @@ to AI assistants like Claude Desktop via the MCP standard.
 ### 1. Embedded (inside Erigon)
 
 The MCP server runs inside the Erigon process with direct access to APIs.
-Enabled with `--mcp.addr` and `--mcp.port` flags.
+It is **enabled by default** on `127.0.0.1:8553` (TCP).
 
 ```bash
-./build/bin/erigon --datadir=./data --mcp.addr=127.0.0.1 --mcp.port=8553
+# MCP server starts automatically
+./build/bin/erigon --datadir=./data
+
+# Disable it entirely
+./build/bin/erigon --datadir=./data --mcp.disable
+
+# Custom address/port (⚠️ 0.0.0.0 exposes the MCP server to all network
+# interfaces — use only on trusted networks or behind a firewall)
+./build/bin/erigon --datadir=./data --mcp.addr=0.0.0.0 --mcp.port=9000
 ```
 
 This mode uses SSE transport and provides full access to all tools including
