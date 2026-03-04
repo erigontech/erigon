@@ -182,9 +182,9 @@ Additionally, several state transition gaps need porting: DropTip pre-preCheck o
 **Files:**
 - Modify: `execution/protocol/state_transition.go`
 
-- [ ] Port `FloorDataGas(data []byte) (uint64, error)` function (reference: /tmp/arb_st.go lines 825-840)
-- [ ] Write test: `TestFloorDataGas` — verify computation matches EIP-7623 spec
-- [ ] Run `go test ./execution/protocol/... -count=1` — must pass
+- [x] Port `FloorDataGas(data []byte) (uint64, error)` function (reference: /tmp/arb_st.go lines 825-840)
+- [x] Write test: `TestFloorDataGas` — verify computation matches EIP-7623 spec
+- [x] Run `go test ./execution/protocol/... -count=1` — must pass
 
 ### Task 10: Verify acceptance criteria
 

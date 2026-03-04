@@ -861,3 +861,18 @@ func (st *StateTransition) refundGas() {
 func (st *StateTransition) gasUsed() uint64 {
 	return st.initialGas - st.gasRemaining
 }
+
+// FloorDataGas computes the minimum gas required for a transaction based on its data tokens (EIP-7623).
+func FloorDataGas(data []byte) (uint64, error) {
+	var (
+		z                            = uint64(bytes.Count(data, []byte{0}))
+		nz                           = uint64(len(data)) - z
+		TxTokenPerNonZeroByte uint64 = 4
+		TxCostFloorPerToken   uint64 = 10
+		tokens                       = nz*TxTokenPerNonZeroByte + z
+	)
+	if (math.MaxUint64-params.TxGas)/TxCostFloorPerToken < tokens {
+		return 0, ErrGasUintOverflow
+	}
+	return params.TxGas + tokens*TxCostFloorPerToken, nil
+}

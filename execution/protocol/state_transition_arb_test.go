@@ -941,3 +941,56 @@ func TestHandleRevertedTx_NilTx(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, inputMultiGas.SingleGas(), resultMultiGas.SingleGas())
 }
+
+func TestFloorDataGas(t *testing.T) {
+	t.Run("empty_data", func(t *testing.T) {
+		gas, err := FloorDataGas(nil)
+		require.NoError(t, err)
+		// 0 tokens * 10 + 21000 = 21000
+		require.Equal(t, params.TxGas, gas)
+
+		gas2, err := FloorDataGas([]byte{})
+		require.NoError(t, err)
+		require.Equal(t, params.TxGas, gas2)
+	})
+
+	t.Run("all_zero_bytes", func(t *testing.T) {
+		data := make([]byte, 10)
+		gas, err := FloorDataGas(data)
+		require.NoError(t, err)
+		// 10 zero bytes → tokens = 10*0 + 10*1 = 10; floor = 21000 + 10*10 = 21100
+		require.Equal(t, params.TxGas+10*10, gas)
+	})
+
+	t.Run("all_nonzero_bytes", func(t *testing.T) {
+		data := []byte{1, 2, 3, 4, 5}
+		gas, err := FloorDataGas(data)
+		require.NoError(t, err)
+		// 5 nonzero bytes → tokens = 5*4 + 0 = 20; floor = 21000 + 20*10 = 21200
+		require.Equal(t, params.TxGas+20*10, gas)
+	})
+
+	t.Run("mixed_bytes", func(t *testing.T) {
+		data := []byte{0, 1, 0, 2, 0}
+		gas, err := FloorDataGas(data)
+		require.NoError(t, err)
+		// 3 zero, 2 nonzero → tokens = 2*4 + 3 = 11; floor = 21000 + 11*10 = 21110
+		require.Equal(t, params.TxGas+11*10, gas)
+	})
+
+	t.Run("single_nonzero_byte", func(t *testing.T) {
+		data := []byte{0xff}
+		gas, err := FloorDataGas(data)
+		require.NoError(t, err)
+		// 1 nonzero → tokens = 4; floor = 21000 + 40 = 21040
+		require.Equal(t, params.TxGas+4*10, gas)
+	})
+
+	t.Run("single_zero_byte", func(t *testing.T) {
+		data := []byte{0x00}
+		gas, err := FloorDataGas(data)
+		require.NoError(t, err)
+		// 1 zero → tokens = 1; floor = 21000 + 10 = 21010
+		require.Equal(t, params.TxGas+1*10, gas)
+	})
+}
