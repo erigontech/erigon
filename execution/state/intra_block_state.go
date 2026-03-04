@@ -521,13 +521,21 @@ func (sdb *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error)
 		return so == nil || so.deleted || so.data.Empty(), nil
 	}
 
-	account, accountSource, accountVersion, err := sdb.getVersionedAccount(addr, true)
+	account, _, _, err := sdb.getVersionedAccount(addr, true)
 	if err != nil {
 		return false, err
 	}
 	if account == nil {
 		sdb.touchAccount(addr)
-		sdb.accountRead(addr, &emptyAccount, accountSource, accountVersion)
+		// Do NOT call accountRead here: getVersionedAccount already recorded
+		// the AddressPath read (via versionedRead) with Val=nil.  Calling
+		// accountRead(&emptyAccount) would overwrite that nil with a non-nil
+		// pointer to an empty Account.  Downstream code (getBalance →
+		// versionedRead for BalancePath → recursive AddressPath lookup) treats
+		// non-nil as "account exists", creating a stateObject instead of going
+		// through createObject.  When createObject is skipped, AddressPath is
+		// never written to the version map, and other txs that read this
+		// address miss the conflict during validation.
 	}
 	// Do not use SelfDestructPath here: a self-destructed account is still
 	// "alive" during the same tx (EIP-6780) and should not appear empty
@@ -940,8 +948,6 @@ func (sdb *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 			}
 		}
 
-		// BAL: record coinbase/selfdestruct recipients even with 0 value
-		sdb.MarkAddressAccess(addr, true)
 		return nil
 	}
 
@@ -1551,6 +1557,17 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 	obj := newObject(sdb, addr, account, account)
 	if code != nil {
 		obj.code = code
+		// When code is loaded from the version map (written by a prior tx),
+		// synchronise the stateObject's CodeHash with the actual code.
+		// Without this fix, the stale CodeHash causes the "revert to original"
+		// optimisation in SetCode to incorrectly delete code writes when
+		// clearing a delegation that was set by a prior transaction in the
+		// same block.
+		codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
+		if codeHash != obj.data.CodeHash {
+			obj.data.CodeHash = codeHash
+			obj.original.CodeHash = codeHash
+		}
 	}
 	sdb.setStateObject(addr, obj)
 	return obj, nil
@@ -2179,6 +2196,21 @@ func (sdb *IntraBlockState) MarkAddressAccess(addr accounts.Address, revertable 
 	}
 }
 
+// MarkReadsInternal marks all versioned reads for addr as internal.
+// Internal reads are kept for parallel-execution conflict detection
+// but excluded from the block access list (BAL).  This is used when
+// a state read was performed for gas calculation but the operation
+// was rejected (e.g. CALL with value inside STATICCALL).
+func (sdb *IntraBlockState) MarkReadsInternal(addr accounts.Address) {
+	if sdb.versionedReads == nil {
+		return
+	}
+	for key, vr := range sdb.versionedReads[addr] {
+		vr.internal = true
+		sdb.versionedReads[addr][key] = vr
+	}
+}
+
 // AccessedAddresses returns and resets the set of addresses touched during the current transaction.
 func (sdb *IntraBlockState) AccessedAddresses() AccessSet {
 	if len(sdb.addressAccess) == 0 {
@@ -2360,6 +2392,23 @@ func (sdb *IntraBlockState) VersionedWrites(checkDirty bool) VersionedWrites {
 // Apply entries in a given write set to StateDB. Note that this function does not change MVHashMap nor write set
 // of the current StateDB.
 func (sdb *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
+	// Sort writes by (Address, Path, Key) to ensure deterministic processing
+	// order. VersionedWrites come from WriteSet map iteration (Go maps have
+	// non-deterministic order). Processing order matters because some paths
+	// (CodePath, SelfDestructPath) call GetOrNewStateObject which triggers a
+	// read from the stateReader. If a BalancePath write for the same address
+	// has already been processed, the state object is already loaded and no
+	// read occurs; otherwise an extra read is recorded. Different reads
+	// produce different EIP-7928 BAL hashes.
+	sort.Slice(writes, func(i, j int) bool {
+		if c := writes[i].Address.Cmp(writes[j].Address); c != 0 {
+			return c < 0
+		}
+		if writes[i].Path != writes[j].Path {
+			return writes[i].Path < writes[j].Path
+		}
+		return writes[i].Key.Cmp(writes[j].Key) < 0
+	})
 	for i := range writes {
 		path := writes[i].Path
 		val := writes[i].Val

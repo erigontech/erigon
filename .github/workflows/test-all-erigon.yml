@@ -119,7 +119,7 @@ jobs:
     concurrency:
       group: >-
         ${{
-          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) &&
           format('{0}-{1}-{2}', github.workflow, matrix.os, github.run_id) ||
           format('{0}-{1}-{2}', github.workflow, matrix.os, github.ref)
         }}
@@ -129,6 +129,10 @@ jobs:
         os: [ windows-2025 ]
     runs-on:
       group: "selfhosted-win"
+
+    env:
+      GOMODCACHE: C:\go-cache\mod
+      GOCACHE: C:\go-cache\build
 
     steps:
       # not needed on self-hosted runner. already configured.
@@ -147,6 +151,12 @@ jobs:
           lfs: true
           clean: true
 
+      # Prune LFS blobs that are no longer referenced by the current checkout.
+      - name: Prune stale Git LFS objects
+        if: needs.source-of-changes.outputs.changed_files != 'true'
+        shell: bash
+        run: git lfs prune --verify-remote=false
+
       - name: Setup Go environment on ${{ matrix.os }}
         if: needs.source-of-changes.outputs.changed_files != 'true'
         uses: actions/setup-go@v6
@@ -161,15 +171,20 @@ jobs:
       - name: Run all tests on ${{ matrix.os }}
         if: needs.source-of-changes.outputs.changed_files != 'true'
         shell: bash
-        env:
-          GOMODCACHE: C:\go-cache\mod
-          GOCACHE: C:\go-cache\build
         run: make test-all
 
-      - name: Cleanup
+      # Clears the Go build cache after the run so compiled artifacts do not
+      # accumulate on the persistent self-hosted runner across runs.
+      # GOMODCACHE is intentionally kept: it is bounded by the number of unique
+      # dependency versions and saves re-downloading modules on the next run.
+      - name: Post-run cleanup
         if: always()
+        shell: bash
         run: |
-          Remove-Item -Path "$env:TEMP\*" -Recurse -Force -ErrorAction SilentlyContinue
+          go clean -cache
+          rm -f coverage-test-all.out
+          rm -rf "$TEMP/"* 2>/dev/null || true
+          rm -rf "$RUNNER_TEMP/"* 2>/dev/null || true
 
       - name: This ${{ matrix.os }} check does not make sense for changes within out-of-scope directories
         if: needs.source-of-changes.outputs.changed_files == 'true'

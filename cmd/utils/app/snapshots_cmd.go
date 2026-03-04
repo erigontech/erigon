@@ -431,6 +431,8 @@ var snapshotCommand = cli.Command{
 				&utils.DataDirFlag,
 				&cli.Uint64Flag{Name: "from", Usage: "block number from which to start verifying", Required: true},
 				&cli.Uint64Flag{Name: "to", Usage: "block number up to which to verify (exclusive)", Required: true},
+				&cli.Int64Flag{Name: "seed", Usage: "random seed for block sampling (auto-generated if not set)"},
+				&cli.Float64Flag{Name: "sample", Usage: "fraction of blocks to check via pseudo-random sampling (0.0-1.0)", Value: 1.0},
 			}),
 		},
 		{
@@ -866,6 +868,33 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 		removed++
 	}
 	fmt.Printf("removed %d state snapshot segments files\n", removed)
+
+	// Unconditionally remove .tmp files from all snapshot directories.
+	// These are artifacts from incomplete/cancelled operations and should always be cleaned up.
+	var removedTmp uint64
+	for _, dirPath := range []string{dirs.Snap, dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapCaplin, dirs.SnapForkable} {
+		tmpFiles, err := snaptype.TmpFiles(dirPath)
+		if err != nil {
+			return err
+		}
+		for _, tmpFile := range tmpFiles {
+			if dryRun {
+				fmt.Printf("[dry-run] rm %s\n", tmpFile)
+				removedTmp++
+				continue
+			}
+			if err := dir2.RemoveFile(tmpFile); err != nil {
+				if !errors.Is(err, fs.ErrNotExist) {
+					return err
+				}
+			}
+			removedTmp++
+		}
+	}
+	if removedTmp > 0 {
+		fmt.Printf("removed %d .tmp files\n", removedTmp)
+	}
+
 	fmt.Printf("\n\nBefore restarting Erigon, run one of:\n  - `integration stage_custom_trace --reset` if deleted domains are handled by stage_custom_trace\n  - `integration stage_exec --reset` otherwise\nThis prunes DB remnants to avoid gaps between snapshots and DB.\n")
 	return nil
 }
@@ -1089,19 +1118,17 @@ func doIntegrity(cliCtx *cli.Context) error {
 
 	skipChecks := cliCtx.String("skip-check")
 	if len(skipChecks) > 0 {
-		var finalChecks []integrity.Check
+		skipSet := map[integrity.Check]struct{}{}
 		for skipCheck := range strings.SplitSeq(skipChecks, ",") {
-			found := false
-			for _, chk := range requestedChecks {
-				if chk == integrity.Check(skipCheck) {
-					found = true
-					logger.Info("[integrity] skipping check", "check", chk)
-					break
-				}
+			skipSet[integrity.Check(skipCheck)] = struct{}{}
+		}
+		var finalChecks []integrity.Check
+		for _, chk := range requestedChecks {
+			if _, skip := skipSet[chk]; skip {
+				logger.Info("[integrity] skipping check", "check", chk)
+				continue
 			}
-			if !found {
-				finalChecks = append(finalChecks, integrity.Check(skipCheck))
-			}
+			finalChecks = append(finalChecks, chk)
 		}
 
 		requestedChecks = finalChecks
@@ -1284,7 +1311,15 @@ func doCheckCommitmentHistAtBlkRange(cliCtx *cli.Context, logger log.Logger) err
 	blockReader, _ := blockRetire.IO()
 	from := cliCtx.Uint64("from")
 	to := cliCtx.Uint64("to")
-	return integrity.CheckCommitmentHistAtBlkRange(ctx, db, blockReader, from, to, logger)
+	var seed int64
+	if cliCtx.IsSet("seed") {
+		seed = cliCtx.Int64("seed")
+	} else {
+		seed = time.Now().UnixNano()
+	}
+	sampleRatio := cliCtx.Float64("sample")
+	logger.Info("[check-commitment-hist-at-blk-range] sampling config", "seed", seed, "sampleRatio", sampleRatio)
+	return integrity.CheckCommitmentHistAtBlkRange(ctx, db, blockReader, from, to, seed, sampleRatio, logger)
 }
 
 func doVerifyState(cliCtx *cli.Context, logger log.Logger) error {
@@ -2871,7 +2906,11 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 		Accede(true) // integration tool: open db without creation and without blocking erigon
 }
 func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *state.Aggregator {
-	agg, err := state.New(dirs).SanityOldNaming().Logger(logger).Open(ctx, chainDB)
+	erigonDBSettings, err := state.ResolveErigonDBSettings(dirs, logger, false)
+	if err != nil {
+		panic(err)
+	}
+	agg, err := state.New(dirs).SanityOldNaming().Logger(logger).WithErigonDBSettings(erigonDBSettings).Open(ctx, chainDB)
 	if err != nil {
 		panic(err)
 	}

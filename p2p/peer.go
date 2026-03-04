@@ -129,10 +129,17 @@ type Peer struct {
 
 // NewPeer returns a peer for testing purposes.
 func NewPeer(id enode.ID, pubkey [64]byte, name string, caps []Cap, metricsEnabled bool) *Peer {
+	return NewPeerWithProtocols(id, pubkey, name, caps, nil, metricsEnabled)
+}
+
+// NewPeerWithProtocols returns a peer for testing purposes with the given
+// protocols registered in its running map. Caps and protocols must match
+// for a protocol to appear as running.
+func NewPeerWithProtocols(id enode.ID, pubkey [64]byte, name string, caps []Cap, protocols []Protocol, metricsEnabled bool) *Peer {
 	pipe, _ := net.Pipe()
 	node := enode.SignNull(new(enr.Record), id)
 	conn := &conn{fd: pipe, transport: nil, node: node, caps: caps, name: name}
-	peer := newPeer(log.Root(), conn, nil, pubkey, metricsEnabled)
+	peer := newPeer(log.Root(), conn, protocols, pubkey, metricsEnabled)
 	close(peer.closed) // ensures Disconnect doesn't block
 	return peer
 }
@@ -341,7 +348,7 @@ func (p *Peer) handle(msg Msg) error {
 		// We don't need to discard because the connection will be closed after it.
 		reason, err := DisconnectMessagePayloadDecode(msg.Payload)
 		if err != nil {
-			p.log.Debug("Peer.handle: failed to rlp.Decode msg.Payload", "err", err)
+			p.log.Debug("[p2p] Peer.handle: failed to rlp.Decode msg.Payload", "err", err)
 		}
 		return reason
 	case msg.Code < baseProtocolLength:
@@ -417,7 +424,7 @@ func (p *Peer) startProtocols(writeStart <-chan struct{}, writeErr chan<- error)
 		if p.events != nil {
 			rw = newMsgEventer(rw, p.events, p.ID(), proto.Name, p.RemoteAddr().String(), p.LocalAddr().String())
 		}
-		p.log.Trace(fmt.Sprintf("Starting protocol %s/%d", proto.Name, proto.Version))
+		p.log.Trace(fmt.Sprintf("[p2p] Starting protocol %s/%d", proto.Name, proto.Version))
 		go func() {
 			defer dbg.LogPanic()
 			defer p.wg.Done()
