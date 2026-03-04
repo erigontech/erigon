@@ -97,7 +97,7 @@ func BenchmarkBranchData_ReplacePlainKeys(b *testing.B) {
 	for b.Loop() {
 		target := make([]byte, 0, len(enc))
 		oldKeys := make([][]byte, 0)
-		replaced, err := enc.ReplacePlainKeys(target, func(key []byte, isStorage bool) ([]byte, error) {
+		replaced, _, err := enc.ReplacePlainKeys(target, func(key []byte, isStorage bool) ([]byte, error) {
 			oldKeys = append(oldKeys, key)
 			if isStorage {
 				return key[:8], nil
@@ -108,7 +108,7 @@ func BenchmarkBranchData_ReplacePlainKeys(b *testing.B) {
 		require.Lessf(b, len(replaced), len(enc), "replaced expected to be shorter than original enc")
 
 		keyI := 0
-		replacedBack, err := replaced.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+		replacedBack, _, err := replaced.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
 			require.Equal(b, oldKeys[keyI][:4], key[:4])
 			defer func() { keyI++ }()
 			return oldKeys[keyI], nil
@@ -140,15 +140,15 @@ func BenchmarkReplacePlainKeys_BufferReuse(b *testing.B) {
 	b.Run("fresh-make", func(b *testing.B) {
 		for b.Loop() {
 			aux := make([]byte, 0, 256)
-			_, _ = enc.ReplacePlainKeys(aux, replacer)
+			_, _, _ = enc.ReplacePlainKeys(aux, replacer)
 		}
 	})
 
 	b.Run("reuse-clone", func(b *testing.B) {
 		var buf []byte
 		for b.Loop() {
-			result, _ := enc.ReplacePlainKeys(buf[:0], replacer)
-			buf = result
+			result, newBuf, _ := enc.ReplacePlainKeys(buf[:0], replacer)
+			buf = newBuf
 			_ = common.Copy(result) // bytes.Clone equivalent
 		}
 	})

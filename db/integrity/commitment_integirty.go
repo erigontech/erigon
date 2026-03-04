@@ -351,7 +351,7 @@ func checkDerefBranch(
 	branchData := commitment.BranchData(branchValue)
 	var integrityErr error
 
-	newBranchData, _ = branchData.ReplacePlainKeys(newBranchValueBuf[:0], func(key []byte, isStorage bool) ([]byte, error) {
+	newBranchData, newBranchValueBuf, _ = branchData.ReplacePlainKeys(newBranchValueBuf[:0], func(key []byte, isStorage bool) ([]byte, error) {
 		if trace {
 			logger.Trace(
 				"checking commitment deref for branch",
@@ -1048,7 +1048,7 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 		}
 		// The callback returns nil (keep original key in output) because the result of ReplacePlainKeys
 		// is discarded (_): all side-effects happen before the return.
-		_, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+		_, _, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
 			var checkErr error
 			if isStorage {
 				checkErr = checkKey(key, stoCollector, storageReader, length.Addr+length.Hash, "storage")
@@ -1226,7 +1226,7 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 			continue
 		}
 
-		_, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+		_, _, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
 			if isStorage {
 				plainKey := key
 				if len(key) != length.Addr+length.Hash {
@@ -1588,7 +1588,7 @@ func extractCommitmentRefsToCollectors(ctx context.Context, file state.VisibleFi
 			continue
 		}
 
-		if _, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) { //nolint:gocritic
+		if _, _, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) { //nolint:gocritic
 			if isStorage {
 				plainKey := key
 				if len(key) != length.Addr+length.Hash {
@@ -1726,7 +1726,7 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 
 				// We need branch data with plain keys for VerifyBranchHashes.
 				// Walk the branch to extract + resolve all keys and read values.
-				resolvedBranchData, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+				resolvedBranchData, _, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
 					if isStorage {
 						plainKey := key
 						isRef := len(key) != length.Addr+length.Hash
