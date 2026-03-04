@@ -36,7 +36,7 @@ var latestBlock = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 
 func TestParityAPIImpl_ListStorageKeys_NoOffset(t *testing.T) {
 	assert := assert.New(t)
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	baseApi := NewBaseApi(nil, nil, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0)
 	api := NewParityAPIImpl(baseApi, m.DB)
 	answers := []string{
@@ -59,7 +59,7 @@ func TestParityAPIImpl_ListStorageKeys_NoOffset(t *testing.T) {
 
 func TestParityAPIImpl_ListStorageKeys_WithOffset_ExistingPrefix(t *testing.T) {
 	assert := assert.New(t)
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewParityAPIImpl(newBaseApiForTest(m), m.DB)
 	answers := []string{
 		"29d05770ca9ee7088a64e18c8e5160fc62c3c2179dc8ef9b4dbc970c9e51b4d8",
@@ -83,7 +83,7 @@ func TestParityAPIImpl_ListStorageKeys_WithOffset_ExistingPrefix(t *testing.T) {
 
 func TestParityAPIImpl_ListStorageKeys_WithOffset_NonExistingPrefix(t *testing.T) {
 	assert := assert.New(t)
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewParityAPIImpl(newBaseApiForTest(m), m.DB)
 	answers := []string{
 		"4644be453c81744b6842ddf615d7fca0e14a23b09734be63d44c23452de95631",
@@ -104,7 +104,7 @@ func TestParityAPIImpl_ListStorageKeys_WithOffset_NonExistingPrefix(t *testing.T
 
 func TestParityAPIImpl_ListStorageKeys_WithOffset_EmptyResponse(t *testing.T) {
 	assert := assert.New(t)
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewParityAPIImpl(newBaseApiForTest(m), m.DB)
 	addr := common.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcae5")
 	offset := common.Hex2Bytes("ff")
@@ -118,7 +118,7 @@ func TestParityAPIImpl_ListStorageKeys_WithOffset_EmptyResponse(t *testing.T) {
 
 func TestParityAPIImpl_ListStorageKeys_AccNotFound(t *testing.T) {
 	assert := assert.New(t)
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewParityAPIImpl(newBaseApiForTest(m), m.DB)
 	addr := common.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcaef")
 	_, err := api.ListStorageKeys(context.Background(), addr, 2, nil, latestBlock)

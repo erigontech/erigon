@@ -17,12 +17,11 @@
 package commitment
 
 import (
-	"encoding/binary"
 	"testing"
 
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
 )
 
 func BenchmarkBranchMerger_Merge(b *testing.B) {
@@ -64,58 +63,38 @@ func BenchmarkBranchMerger_Merge(b *testing.B) {
 	}
 }
 
-func BenchmarkBranchData_ReplacePlainKeys(b *testing.B) {
+// BenchmarkReplacePlainKeys_BufferReuse compares the old pattern (fresh make each call)
+// against the new pattern (reused scratch buffer + bytes.Clone), matching what
+// replaceShortenedKeysInBranch now does on AggregatorRoTx.
+func BenchmarkReplacePlainKeys_BufferReuse(b *testing.B) {
 	row, bm := generateCellRow(b, 16)
-
-	cells, am := unfoldBranchDataFromString(b, "86e586e5082035e72a782b51d9c98548467e3f868294d923cdbbdf4ce326c867bd972c4a2395090109203b51781a76dc87640aea038e3fdd8adca94049aaa436735b162881ec159f6fb408201aa2fa41b5fb019e8abf8fc32800805a2743cfa15373cf64ba16f4f70e683d8e0404a192d9050404f993d9050404e594d90508208642542ff3ce7d63b9703e85eb924ab3071aa39c25b1651c6dda4216387478f10404bd96d905")
-	for i, c := range cells {
-		if c == nil {
-			continue
-		}
-		if c.accountAddrLen > 0 {
-			offt, _ := binary.Uvarint(c.accountAddr[:c.accountAddrLen])
-			b.Logf("%d apk %x, offt %d\n", i, c.accountAddr[:c.accountAddrLen], offt)
-		}
-		if c.storageAddrLen > 0 {
-			offt, _ := binary.Uvarint(c.storageAddr[:c.storageAddrLen])
-			b.Logf("%d spk %x offt %d\n", i, c.storageAddr[:c.storageAddrLen], offt)
-		}
-
-	}
-	_ = cells
-	_ = am
-
-	cg := func(nibble int, skip bool) (*cell, error) {
-		return row[nibble], nil
-	}
-
 	be := NewBranchEncoder(1024)
-	enc, _, err := be.EncodeBranch(bm, bm, bm, cg)
-	require.NoError(b, err)
-
-	original := common.Copy(enc)
-	for b.Loop() {
-		target := make([]byte, 0, len(enc))
-		oldKeys := make([][]byte, 0)
-		replaced, err := enc.ReplacePlainKeys(target, func(key []byte, isStorage bool) ([]byte, error) {
-			oldKeys = append(oldKeys, key)
-			if isStorage {
-				return key[:8], nil
-			}
-			return key[:4], nil
-		})
-		require.NoError(b, err)
-		require.Lessf(b, len(replaced), len(enc), "replaced expected to be shorter than original enc")
-
-		keyI := 0
-		replacedBack, err := replaced.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
-			require.Equal(b, oldKeys[keyI][:4], key[:4])
-			defer func() { keyI++ }()
-			return oldKeys[keyI], nil
-		})
-		require.NoError(b, err)
-		require.EqualValues(b, original, replacedBack)
+	enc, _, err := be.EncodeBranch(bm, bm, bm, func(nibble int, skip bool) (*cell, error) {
+		return row[nibble], nil
+	})
+	if err != nil {
+		b.Fatal(err)
 	}
+	replacer := func(key []byte, isStorage bool) ([]byte, error) {
+		if isStorage {
+			return key[:8], nil
+		}
+		return key[:4], nil
+	}
+
+	b.Run("fresh-make", func(b *testing.B) {
+		for b.Loop() {
+			aux := make([]byte, 0, 256)
+			_, _, _ = enc.ReplacePlainKeys(aux, replacer)
+		}
+	})
+
+	b.Run("reuse-clone", func(b *testing.B) {
+		var buf []byte
+		for b.Loop() {
+			_, buf, _ = enc.ReplacePlainKeys(buf[:0], replacer)
+		}
+	})
 }
 
 func BenchmarkGetDeferredUpdate(b *testing.B) {
@@ -159,13 +138,13 @@ func BenchmarkGetDeferredUpdate(b *testing.B) {
 	afterMap := bitmap
 	prefix := []byte{0x01, 0x02, 0x03}
 	prev := []byte{0x04, 0x05, 0x06}
-	var prevStep kv.Step = 100
+	// prevStep removed
 
 	b.ResetTimer()
 	b.ReportAllocs()
 
 	for b.Loop() {
-		upd := getDeferredUpdate(prefix, bitmap, touchMap, afterMap, &cells, 5, prev, prevStep)
+		upd := getDeferredUpdate(prefix, bitmap, touchMap, afterMap, &cells, 5, prev)
 		putDeferredUpdate(upd)
 	}
 }
@@ -193,13 +172,13 @@ func BenchmarkGetDeferredUpdate_FewCells(b *testing.B) {
 	afterMap := bitmap
 	prefix := []byte{0x01, 0x02, 0x03}
 	prev := []byte{0x04, 0x05, 0x06}
-	var prevStep kv.Step = 100
+	// prevStep removed
 
 	b.ResetTimer()
 	b.ReportAllocs()
 
 	for b.Loop() {
-		upd := getDeferredUpdate(prefix, bitmap, touchMap, afterMap, &cells, 5, prev, prevStep)
+		upd := getDeferredUpdate(prefix, bitmap, touchMap, afterMap, &cells, 5, prev)
 		putDeferredUpdate(upd)
 	}
 }

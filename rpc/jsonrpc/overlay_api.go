@@ -291,7 +291,7 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, begin)
+	err = api.BaseAPI.checkReceiptsAvailable(ctx, tx, begin)
 	if err != nil {
 		return nil, err
 	}

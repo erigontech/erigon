@@ -26,9 +26,10 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"math/big"
 	"reflect"
 	"sync/atomic"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
@@ -84,8 +85,8 @@ type Header struct {
 	TxHash      common.Hash    `json:"transactionsRoot" gencodec:"required"`
 	ReceiptHash common.Hash    `json:"receiptsRoot"     gencodec:"required"`
 	Bloom       Bloom          `json:"logsBloom"        gencodec:"required"`
-	Difficulty  *big.Int       `json:"difficulty"       gencodec:"required"`
-	Number      *big.Int       `json:"number"           gencodec:"required"`
+	Difficulty  uint256.Int    `json:"difficulty"       gencodec:"required"`
+	Number      uint256.Int    `json:"number"           gencodec:"required"`
 	GasLimit    uint64         `json:"gasLimit"         gencodec:"required"`
 	GasUsed     uint64         `json:"gasUsed"          gencodec:"required"`
 	Time        uint64         `json:"timestamp"        gencodec:"required"`
@@ -96,7 +97,7 @@ type Header struct {
 	AuRaStep uint64 `json:"auraStep,omitempty"`
 	AuRaSeal []byte `json:"auraSeal,omitempty"`
 
-	BaseFee         *big.Int     `json:"baseFeePerGas"`   // EIP-1559
+	BaseFee         *uint256.Int `json:"baseFeePerGas"`   // EIP-1559
 	WithdrawalsHash *common.Hash `json:"withdrawalsRoot"` // EIP-4895
 
 	// BlobGasUsed & ExcessBlobGas were added by EIP-4844 and are ignored in legacy headers.
@@ -108,6 +109,7 @@ type Header struct {
 	RequestsHash        *common.Hash `json:"requestsHash"`        // EIP-7685
 	BlockAccessListHash *common.Hash `json:"blockAccessListHash"` // EIP-7928
 
+	SlotNumber *uint64 `json:"slotNumber"` // EIP-7843
 	// by default all headers are immutable
 	// but assembling/mining may use `NewEmptyHeaderForAssembling` to create temporary mutable Header object
 	// then pass it to `block.WithSeal(header)` - to produce new block with immutable `Header`
@@ -126,8 +128,8 @@ func (h *Header) EncodingSize() int {
 	encodingSize := 33 /* ParentHash */ + 33 /* UncleHash */ + 21 /* Coinbase */ + 33 /* Root */ + 33 /* TxHash */ +
 		33 /* ReceiptHash */ + 259 /* Bloom */
 
-	encodingSize += rlp.BigIntLen(h.Difficulty)
-	encodingSize += rlp.BigIntLen(h.Number)
+	encodingSize += rlp.Uint256Len(h.Difficulty)
+	encodingSize += rlp.Uint256Len(h.Number)
 	encodingSize += rlp.U64Len(h.GasLimit)
 	encodingSize += rlp.U64Len(h.GasUsed)
 	encodingSize += rlp.U64Len(h.Time)
@@ -141,7 +143,7 @@ func (h *Header) EncodingSize() int {
 	}
 
 	if h.BaseFee != nil {
-		encodingSize += rlp.BigIntLen(h.BaseFee)
+		encodingSize += rlp.Uint256Len(*h.BaseFee)
 	}
 
 	if h.WithdrawalsHash != nil {
@@ -165,6 +167,10 @@ func (h *Header) EncodingSize() int {
 
 	if h.BlockAccessListHash != nil {
 		encodingSize += 33
+	}
+
+	if h.SlotNumber != nil {
+		encodingSize += rlp.U64Len(*h.SlotNumber)
 	}
 
 	return encodingSize
@@ -227,10 +233,10 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 	if _, err := w.Write(h.Bloom[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeBigInt(h.Difficulty, w, b[:]); err != nil {
+	if err := rlp.EncodeUint256(h.Difficulty, w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeBigInt(h.Number, w, b[:]); err != nil {
+	if err := rlp.EncodeUint256(h.Number, w, b[:]); err != nil {
 		return err
 	}
 	if err := rlp.EncodeInt(h.GasLimit, w, b[:]); err != nil {
@@ -271,7 +277,7 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 	}
 
 	if h.BaseFee != nil {
-		if err := rlp.EncodeBigInt(h.BaseFee, w, b[:]); err != nil {
+		if err := rlp.EncodeUint256(*h.BaseFee, w, b[:]); err != nil {
 			return err
 		}
 	}
@@ -327,6 +333,11 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 		}
 	}
 
+	if h.SlotNumber != nil {
+		if err := rlp.EncodeInt(*h.SlotNumber, w, b[:]); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -358,14 +369,12 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 	if err = s.ReadBytes(h.Bloom[:]); err != nil {
 		return fmt.Errorf("read Bloom: %w", err)
 	}
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&h.Difficulty); err != nil {
 		return fmt.Errorf("read Difficulty: %w", err)
 	}
-	h.Difficulty = new(big.Int).SetBytes(b)
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&h.Number); err != nil {
 		return fmt.Errorf("read Number: %w", err)
 	}
-	h.Number = new(big.Int).SetBytes(b)
 	if h.GasLimit, err = s.Uint(); err != nil {
 		return fmt.Errorf("read GasLimit: %w", err)
 	}
@@ -399,8 +408,8 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		}
 	}
 
-	// BaseFee
-	if b, err = s.Uint256Bytes(); err != nil {
+	var baseFee uint256.Int
+	if err = s.ReadUint256(&baseFee); err != nil {
 		if errors.Is(err, rlp.EOL) {
 			h.BaseFee = nil
 			if err := s.ListEnd(); err != nil {
@@ -410,7 +419,7 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		}
 		return fmt.Errorf("read BaseFee: %w", err)
 	}
-	h.BaseFee = new(big.Int).SetBytes(b)
+	h.BaseFee = &baseFee
 
 	// WithdrawalsHash
 	if b, err = s.Bytes(); err != nil {
@@ -506,6 +515,19 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 	h.BlockAccessListHash = new(common.Hash)
 	h.BlockAccessListHash.SetBytes(b)
 
+	var slotNumber uint64
+	if slotNumber, err = s.Uint(); err != nil {
+		if errors.Is(err, rlp.EOL) {
+			h.SlotNumber = nil
+			if err := s.ListEnd(); err != nil {
+				return fmt.Errorf("close header struct (no SlotNumber): %w", err)
+			}
+			return nil
+		}
+		return fmt.Errorf("read SlotNumber: %w", err)
+	}
+	h.SlotNumber = &slotNumber
+
 	if err := s.ListEnd(); err != nil {
 		return fmt.Errorf("close header struct: %w", err)
 	}
@@ -586,13 +608,11 @@ func (h *Header) Size() common.StorageSize {
 // that the unbounded fields are stuffed with junk data to add processing
 // overhead
 func (h *Header) SanityCheck() error {
-	if h.Number != nil && !h.Number.IsUint64() {
+	if !h.Number.IsUint64() {
 		return fmt.Errorf("too large block number: bitlen %d", h.Number.BitLen())
 	}
-	if h.Difficulty != nil {
-		if diffLen := h.Difficulty.BitLen(); diffLen > 192 {
-			return fmt.Errorf("too large block difficulty: bitlen %d", diffLen)
-		}
+	if diffLen := h.Difficulty.BitLen(); diffLen > 192 {
+		return fmt.Errorf("too large block difficulty: bitlen %d", diffLen)
 	}
 	if eLen := len(h.Extra); eLen > 100*1024 {
 		return fmt.Errorf("too large block extradata: size %d", eLen)
@@ -1144,12 +1164,8 @@ func CopyHeader(h *Header) *Header {
 	cpy.TxHash = h.TxHash
 	cpy.ReceiptHash = h.ReceiptHash
 	cpy.Bloom = h.Bloom
-	if cpy.Difficulty = new(big.Int); h.Difficulty != nil {
-		cpy.Difficulty.Set(h.Difficulty)
-	}
-	if cpy.Number = new(big.Int); h.Number != nil {
-		cpy.Number.Set(h.Number)
-	}
+	cpy.Difficulty = h.Difficulty
+	cpy.Number = h.Number
 	cpy.GasLimit = h.GasLimit
 	cpy.GasUsed = h.GasUsed
 	cpy.Time = h.Time
@@ -1165,7 +1181,7 @@ func CopyHeader(h *Header) *Header {
 		copy(cpy.AuRaSeal, h.AuRaSeal)
 	}
 	if h.BaseFee != nil {
-		cpy.BaseFee = new(big.Int)
+		cpy.BaseFee = new(uint256.Int)
 		cpy.BaseFee.Set(h.BaseFee)
 	}
 	if h.WithdrawalsHash != nil {
@@ -1191,6 +1207,10 @@ func CopyHeader(h *Header) *Header {
 	if h.BlockAccessListHash != nil {
 		cpy.BlockAccessListHash = new(common.Hash)
 		cpy.BlockAccessListHash.SetBytes(h.BlockAccessListHash.Bytes())
+	}
+	if h.SlotNumber != nil {
+		slotNumber := *h.SlotNumber
+		cpy.SlotNumber = &slotNumber
 	}
 	cpy.mutable = h.mutable
 	return &cpy
@@ -1298,11 +1318,11 @@ func (b *Block) Transaction(hash common.Hash) Transaction {
 	return nil
 }
 
-func (b *Block) Number() *big.Int     { return b.header.Number }
-func (b *Block) GasLimit() uint64     { return b.header.GasLimit }
-func (b *Block) GasUsed() uint64      { return b.header.GasUsed }
-func (b *Block) Difficulty() *big.Int { return new(big.Int).Set(b.header.Difficulty) }
-func (b *Block) Time() uint64         { return b.header.Time }
+func (b *Block) Number() uint256.Int     { return b.header.Number }
+func (b *Block) GasLimit() uint64        { return b.header.GasLimit }
+func (b *Block) GasUsed() uint64         { return b.header.GasUsed }
+func (b *Block) Difficulty() uint256.Int { return b.header.Difficulty }
+func (b *Block) Time() uint64            { return b.header.Time }
 
 func (b *Block) NumberU64() uint64        { return b.header.Number.Uint64() }
 func (b *Block) MixDigest() common.Hash   { return b.header.MixDigest }
@@ -1316,11 +1336,11 @@ func (b *Block) TxHash() common.Hash      { return b.header.TxHash }
 func (b *Block) ReceiptHash() common.Hash { return b.header.ReceiptHash }
 func (b *Block) UncleHash() common.Hash   { return b.header.UncleHash }
 func (b *Block) Extra() []byte            { return common.Copy(b.header.Extra) }
-func (b *Block) BaseFee() *big.Int {
+func (b *Block) BaseFee() *uint256.Int {
 	if b.header.BaseFee == nil {
 		return nil
 	}
-	return new(big.Int).Set(b.header.BaseFee)
+	return b.header.BaseFee.Clone()
 }
 func (b *Block) WithdrawalsHash() *common.Hash       { return b.header.WithdrawalsHash }
 func (b *Block) Withdrawals() Withdrawals            { return b.withdrawals }
@@ -1441,8 +1461,7 @@ func CopyTxs(in Transactions) Transactions {
 		if txWrapper, ok := txn.(*BlobTxWrapper); ok {
 			blobTx := out[i].(*BlobTx)
 			out[i] = &BlobTxWrapper{
-				// it's ok to copy here - because it's constructor of object - no parallel access yet
-				Tx:          *blobTx, //nolint
+				Tx:          blobTx.copyData(),
 				Commitments: txWrapper.Commitments.copy(),
 				Blobs:       txWrapper.Blobs.copy(),
 				Proofs:      txWrapper.Proofs.copy(),

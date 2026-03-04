@@ -19,7 +19,6 @@ package state
 import (
 	"context"
 	"fmt"
-	"os"
 	"slices"
 	"testing"
 
@@ -34,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
+	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
@@ -114,17 +114,19 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 
 }
 
-func emptyTestInvertedIndex(aggStep uint64) *InvertedIndex {
+func emptyTestInvertedIndex(t testing.TB, aggStep uint64) *InvertedIndex {
+	t.Helper()
 	salt := uint32(1)
 	cfg := statecfg.Schema.AccountsDomain.Hist.IiCfg
 
-	dirs := datadir.New(os.TempDir())
+	dirs := datadir.New(t.TempDir())
 	ii, err := NewInvertedIndex(cfg, aggStep, config3.DefaultStepsInFrozenFile, dirs, log.New())
-	ii.Accessors = 0
-	ii.salt.Store(&salt)
 	if err != nil {
 		panic(err)
 	}
+	t.Cleanup(ii.Close)
+	ii.Accessors = 0
+	ii.salt.Store(&salt)
 	return ii
 }
 
@@ -132,7 +134,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	t.Parallel()
 
 	newTestDomain := func() (*InvertedIndex, *History) {
-		d := emptyTestDomain(1)
+		d := emptyTestDomain(t, 1)
 		d.History.InvertedIndex.Accessors = 0
 		d.History.Accessors = 0
 		return d.History.InvertedIndex, d.History
@@ -745,11 +747,15 @@ func Test_mergeEliasFano(t *testing.T) {
 		require.Contains(t, secondList, int(v))
 	}
 
-	menc, err := mergeNumSeqs(firstBytes, secondBytes, 0, 0, nil, 0)
+	var seq1, seq2 multiencseq.SequenceReader
+	seq1.Reset(0, firstBytes)
+	seq2.Reset(0, secondBytes)
+	var mergedSeq multiencseq.SequenceBuilder
+	err := mergedSeq.Merge(&seq1, &seq2, 0)
 	require.NoError(t, err)
+	menc := mergedSeq.AppendBytes(nil)
 
 	merged, _ := eliasfano32.ReadEliasFano(menc)
-	require.NoError(t, err)
 	require.EqualValues(t, len(uniq), merged.Count())
 	require.Equal(t, merged.Count(), eliasfano32.Count(menc))
 	mergedLists := append(firstList, secondList...)
@@ -762,6 +768,23 @@ func Test_mergeEliasFano(t *testing.T) {
 		v, _ := mit.Next()
 		require.Contains(t, mergedLists, int(v))
 	}
+}
+
+func TestCommitmentValTransformDomainPanicsWithNeedMergeFalse(t *testing.T) {
+	t.Parallel()
+	// Regression: aggregator.mergeFiles called commitmentValTransformDomain with a zero
+	// MergeRange{needMerge:false} whenever the commitment domain had any() work (e.g. history-only
+	// merge). That caused rawLookupFileByRange(0,0) to return
+	// "file v2.0-storage.0-0.kv was not found".
+	// Fix: (1) guard the call with values.needMerge in aggregator.go;
+	//      (2) this panic assert catches future callers that violate the contract.
+	d := emptyTestDomain(t, 1)
+	dc := d.BeginFilesRo()
+	defer dc.Close()
+
+	require.Panics(t, func() {
+		dc.commitmentValTransformDomain(MergeRange{needMerge: false}, dc, dc, nil, nil)
+	})
 }
 
 func TestMergeFiles(t *testing.T) {
@@ -788,12 +811,11 @@ func TestMergeFiles(t *testing.T) {
 	w := dc.NewWriter()
 
 	prev := []byte{}
-	prevStep := kv.Step(0)
 	for key, upd := range data {
 		for _, v := range upd {
-			err := w.PutWithPrev([]byte(key), v.value, v.txNum, prev, prevStep)
+			err := w.PutWithPrev([]byte(key), v.value, v.txNum, prev)
 
-			prev, prevStep = v.value, kv.Step(v.txNum/d.stepSize)
+			prev = v.value
 			require.NoError(t, err)
 		}
 	}
@@ -824,7 +846,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		cfg := statecfg.Schema.GetDomainCfg(dom)
 
 		salt := uint32(1)
-		dirs := datadir.New(os.TempDir())
+		dirs := datadir.New(t.TempDir())
 		cfg.Hist.IiCfg.Name = kv.InvertedIdx(0)
 		cfg.Hist.IiCfg.FileVersion = statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}
 
@@ -837,6 +859,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		d.History.InvertedIndex.Accessors = 0
 		d.History.Accessors = 0
 		d.Accessors = 0
+		t.Cleanup(d.Close)
 		return d
 	}
 
@@ -1076,6 +1099,7 @@ func TestHistoryAndIIAlignment(t *testing.T) {
 	t.Cleanup(db.Close)
 
 	agg := NewTest(dirs).Logger(logger).StepSize(1).MustOpen(t.Context(), db)
+	t.Cleanup(agg.Close)
 	setup := func() (account *Domain) {
 		agg.RegisterDomain(statecfg.Schema.GetDomainCfg(kv.AccountsDomain), nil, dirs, logger)
 		domain := agg.d[kv.AccountsDomain]
@@ -1102,6 +1126,14 @@ func TestHistoryAndIIAlignment(t *testing.T) {
 		item.decompressor = &seg.Decompressor{}
 		return true
 	})
+	t.Cleanup(func() {
+		h.dirtyFiles.Scan(func(item *FilesItem) bool {
+			if item.decompressor != nil {
+				item.decompressor.Close()
+			}
+			return true
+		})
+	})
 
 	ii.scanDirtyFiles([]string{
 		"v1.0-accounts.0-1.ef",
@@ -1113,6 +1145,14 @@ func TestHistoryAndIIAlignment(t *testing.T) {
 	ii.dirtyFiles.Scan(func(item *FilesItem) bool {
 		item.decompressor = &seg.Decompressor{}
 		return true
+	})
+	t.Cleanup(func() {
+		ii.dirtyFiles.Scan(func(item *FilesItem) bool {
+			if item.decompressor != nil {
+				item.decompressor.Close()
+			}
+			return true
+		})
 	})
 	h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 

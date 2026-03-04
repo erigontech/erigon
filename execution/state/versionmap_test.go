@@ -72,32 +72,27 @@ func TestFlushMVWrite(t *testing.T) {
 		Path:    AddressPath,
 		Version: Version{0, 0, 0, 1},
 		Val:     valueFor(0, 1),
-	})
-	wd = append(wd, &VersionedWrite{
+	}, &VersionedWrite{
 		Address: ap1,
 		Path:    AddressPath,
 		Version: Version{0, 0, 0, 2},
 		Val:     valueFor(0, 2),
-	})
-	wd = append(wd, &VersionedWrite{
+	}, &VersionedWrite{
 		Address: ap2,
 		Path:    AddressPath,
 		Version: Version{0, 0, 1, 1},
 		Val:     valueFor(1, 1),
-	})
-	wd = append(wd, &VersionedWrite{
+	}, &VersionedWrite{
 		Address: ap2,
 		Path:    AddressPath,
 		Version: Version{0, 0, 1, 2},
 		Val:     valueFor(1, 2),
-	})
-	wd = append(wd, &VersionedWrite{
+	}, &VersionedWrite{
 		Address: ap1,
 		Path:    AddressPath,
 		Version: Version{0, 0, 2, 1},
 		Val:     valueFor(2, 1),
-	})
-	wd = append(wd, &VersionedWrite{
+	}, &VersionedWrite{
 		Address: ap1,
 		Path:    AddressPath,
 		Version: Version{0, 0, 2, 2},
@@ -285,6 +280,9 @@ func BenchmarkReadTimeSameLocationDifferentTxIdx(b *testing.B) {
 }
 
 func TestTimeComplexity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 
 	// for 1000000 read and write with no dependency at different memory location
@@ -307,6 +305,9 @@ func TestTimeComplexity(t *testing.T) {
 }
 
 func TestWriteTimeSameLocationDifferentTxnIdx(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 
 	mvh1 := NewVersionMap(nil)
@@ -329,6 +330,9 @@ func TestWriteTimeSameLocationSameTxnIdx(t *testing.T) {
 }
 
 func TestWriteTimeDifferentLocation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 
 	mvh1 := NewVersionMap(nil)

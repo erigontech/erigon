@@ -60,18 +60,11 @@ func TestDefaults(t *testing.T) {
 	if cfg.Difficulty == nil {
 		t.Error("expected difficulty to be non nil")
 	}
-
-	if cfg.Time == nil {
-		t.Error("expected time to be non nil")
-	}
 	if cfg.GasLimit == 0 {
 		t.Error("didn't expect gaslimit to be zero")
 	}
 	if cfg.GetHashFn == nil {
 		t.Error("expected time to be non nil")
-	}
-	if cfg.BlockNumber == nil {
-		t.Error("expected block number to be non nil")
 	}
 }
 
@@ -181,7 +174,7 @@ func BenchmarkCall(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	cfg := &Config{ChainConfig: &chain.Config{}, BlockNumber: big.NewInt(0), Time: big.NewInt(0), Value: *uint256.MustFromBig(big.NewInt(13377))}
+	cfg := &Config{ChainConfig: &chain.Config{}, BlockNumber: 0, Time: 0, Value: *uint256.MustFromBig(big.NewInt(13377))}
 	db := testTemporalDB(b)
 	tx, sd := testTemporalTxSD(b, db)
 	//cfg.w = state.NewWriter(execctx, nil)
@@ -218,10 +211,10 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 		Origin:      sender,
 		State:       statedb,
 		GasLimit:    10000000,
-		Difficulty:  big.NewInt(0x200000),
-		Time:        new(big.Int).SetUint64(0),
+		Difficulty:  uint256.NewInt(0x200000),
+		Time:        0,
 		Coinbase:    accounts.ZeroAddress,
-		BlockNumber: new(big.Int).SetUint64(1),
+		BlockNumber: 1,
 		ChainConfig: &chain.Config{
 			ChainID:               big.NewInt(1),
 			HomesteadBlock:        new(big.Int),
@@ -300,12 +293,11 @@ func BenchmarkEVM_RETURN(b *testing.B) {
 func fakeHeader(n uint64, parentHash common.Hash) *types.Header {
 	return &types.Header{
 		Coinbase:   common.HexToAddress("0x00000000000000000000000000000000deadbeef"),
-		Number:     new(big.Int).SetUint64(n),
+		Number:     *uint256.NewInt(n),
 		ParentHash: parentHash,
 		Time:       n,
 		Nonce:      types.BlockNonce{0x1},
 		Extra:      []byte{},
-		Difficulty: big.NewInt(0),
 		GasLimit:   100000,
 	}
 }
@@ -328,12 +320,11 @@ func (cr *FakeChainHeaderReader) CurrentSafeHeader() *types.Header      { return
 func (cr *FakeChainHeaderReader) GetHeader(hash common.Hash, number uint64) *types.Header {
 	return &types.Header{
 		Coinbase:   common.HexToAddress("0x00000000000000000000000000000000deadbeef"),
-		Number:     new(big.Int).SetUint64(number),
+		Number:     *uint256.NewInt(number),
 		ParentHash: common.BigToHash(new(big.Int).SetUint64(number - 1)),
 		Time:       number,
 		Nonce:      types.BlockNonce{0x1},
 		Extra:      []byte{},
-		Difficulty: big.NewInt(0),
 		GasLimit:   100000,
 	}
 }
@@ -416,8 +407,7 @@ func TestBlockhash(t *testing.T) {
 	chain := &dummyChain{}
 	cfg := &Config{
 		GetHashFn:   protocol.GetHashFn(header, chain.GetHeader),
-		BlockNumber: new(big.Int).Set(header.Number),
-		Time:        new(big.Int),
+		BlockNumber: header.Number.Uint64(),
 	}
 	setDefaults(cfg)
 	cfg.ChainConfig.PragueTime = big.NewInt(1)

@@ -94,10 +94,10 @@ type TransactionReader interface {
 // implementations of the interface may be unable to return state values for old blocks.
 // In many cases, using CallContract can be preferable to reading raw contract storage.
 type ChainStateReader interface {
-	BalanceAt(ctx context.Context, account common.Address, blockNumber *big.Int) (*big.Int, error)
-	StorageAt(ctx context.Context, account common.Address, key common.Hash, blockNumber *big.Int) ([]byte, error)
-	CodeAt(ctx context.Context, account common.Address, blockNumber *big.Int) ([]byte, error)
-	NonceAt(ctx context.Context, account common.Address, blockNumber *big.Int) (uint64, error)
+	BalanceAt(ctx context.Context, account common.Address, blockNumber *uint256.Int) (*big.Int, error)
+	StorageAt(ctx context.Context, account common.Address, key common.Hash, blockNumber *uint256.Int) ([]byte, error)
+	CodeAt(ctx context.Context, account common.Address, blockNumber *uint256.Int) ([]byte, error)
+	NonceAt(ctx context.Context, account common.Address, blockNumber *uint256.Int) (uint64, error)
 }
 
 // SyncProgress gives progress indications when the node is synchronising with
@@ -138,7 +138,7 @@ type CallMsg struct {
 // execute such calls. For applications which are structured around specific contracts,
 // the abigen tool provides a nicer, properly typed way to perform calls.
 type ContractCaller interface {
-	CallContract(ctx context.Context, call CallMsg, blockNumber *big.Int) ([]byte, error)
+	CallContract(ctx context.Context, call CallMsg, blockNumber *uint256.Int) ([]byte, error)
 }
 
 // FilterQuery contains options for contract log filtering.

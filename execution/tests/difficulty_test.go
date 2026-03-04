@@ -30,10 +30,6 @@ import (
 )
 
 func TestDifficulty(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	dt := new(testMatcher)
 	dir := filepath.Join(legacyDir, "DifficultyTests")
 
