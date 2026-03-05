@@ -154,7 +154,31 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, blo
 			return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", blockNum, dbBAL.Hash(), headerBALHash)
 		}
 	}
-	if headerBALHash != bal.Hash() {
+	// Only validate computed BAL against header when we have the stored BAL
+	// body. Without it, HasBAL=false on the VersionMap, so the computed BAL
+	// may be inaccurate due to VersionMap mutations during execution.
+	// This limitation goes away once eth/71 delivers BAL bodies via p2p sync.
+	if dbBALBytes != nil && headerBALHash != bal.Hash() {
+		if dataDir != "" {
+			balDir := filepath.Join(dataDir, "bal")
+			if err := os.MkdirAll(balDir, 0o755); err != nil {
+				log.Warn("failed to create BAL debug directory", "dir", balDir, "err", err)
+			} else {
+				computedPath := filepath.Join(balDir, fmt.Sprintf("computed_bal_%d.txt", blockNum))
+				if err := os.WriteFile(computedPath, []byte(bal.DebugString()), 0o644); err != nil {
+					log.Warn("failed to write computed BAL debug file", "path", computedPath, "err", err)
+				}
+				dbBAL2, err := types.DecodeBlockAccessListBytes(dbBALBytes)
+				if err != nil {
+					log.Warn("failed to decode stored BAL for debug dump", "err", err)
+				} else if dbBAL2 != nil {
+					storedPath := filepath.Join(balDir, fmt.Sprintf("stored_bal_%d.txt", blockNum))
+					if err := os.WriteFile(storedPath, []byte(dbBAL2.DebugString()), 0o644); err != nil {
+						log.Warn("failed to write stored BAL debug file", "path", storedPath, "err", err)
+					}
+				}
+			}
+		}
 		return fmt.Errorf("%w, block=%d: block access list mismatch: got %s expected %s", rules.ErrInvalidBlock, blockNum, bal.Hash(), headerBALHash)
 	}
 	return nil
