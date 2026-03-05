@@ -22,7 +22,9 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -54,27 +56,36 @@ var snapshotGitBranch = dbg.EnvString("SNAPS_GIT_BRANCH", ver.DefaultSnapshotGit
 
 type preverifiedRegistry struct {
 	mu     sync.RWMutex
-	data   map[string]Preverified
+	raw    map[string][]byte      // raw embedded TOML bytes (cheap, no parsing)
+	data   map[string]Preverified // parsed on demand
 	cached map[string]*Cfg
 }
 
 var registry = &preverifiedRegistry{
-	data: map[string]Preverified{
-		networkname.Mainnet:    fromEmbeddedToml(snapshothashes.Mainnet),
-		networkname.Sepolia:    fromEmbeddedToml(snapshothashes.Sepolia),
-		networkname.Amoy:       fromEmbeddedToml(snapshothashes.Amoy),
-		networkname.BorMainnet: fromEmbeddedToml(snapshothashes.BorMainnet),
-		networkname.Gnosis:     fromEmbeddedToml(snapshothashes.Gnosis),
-		networkname.Chiado:     fromEmbeddedToml(snapshothashes.Chiado),
-		networkname.Hoodi:      fromEmbeddedToml(snapshothashes.Hoodi),
-		networkname.Bloatnet:   fromEmbeddedToml(snapshothashes.Bloatnet),
+	raw: map[string][]byte{
+		networkname.Mainnet:    snapshothashes.Mainnet,
+		networkname.Sepolia:    snapshothashes.Sepolia,
+		networkname.Amoy:       snapshothashes.Amoy,
+		networkname.BorMainnet: snapshothashes.BorMainnet,
+		networkname.Gnosis:     snapshothashes.Gnosis,
+		networkname.Chiado:     snapshothashes.Chiado,
+		networkname.Hoodi:      snapshothashes.Hoodi,
+		networkname.Bloatnet:   snapshothashes.Bloatnet,
 	},
+	data:   make(map[string]Preverified),
 	cached: make(map[string]*Cfg),
 }
 
+// All forces parsing of all remaining raw entries and returns a clone of the data map.
 func (r *preverifiedRegistry) All() map[string]Preverified {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for name, rawBytes := range r.raw {
+		if _, ok := r.data[name]; !ok {
+			r.data[name] = fromEmbeddedToml(rawBytes)
+		}
+	}
+	r.raw = nil
 	return maps.Clone(r.data)
 }
 
@@ -84,11 +95,25 @@ func (r *preverifiedRegistry) Get(networkName string) (*Cfg, bool) {
 		r.mu.RUnlock()
 		return cfg, true
 	}
-	pv, ok := r.data[networkName]
+	pv, pvOk := r.data[networkName]
+	rawBytes, rawOk := r.raw[networkName]
 	r.mu.RUnlock()
 
-	if !ok {
+	if !pvOk && !rawOk {
 		return newCfg(networkName, Preverified{}), false
+	}
+
+	if !pvOk && rawOk {
+		// Parse outside the lock (fromEmbeddedToml is a pure function on immutable data)
+		pv = fromEmbeddedToml(rawBytes)
+		r.mu.Lock()
+		// Double-check: another goroutine may have parsed it
+		if existing, ok := r.data[networkName]; ok {
+			pv = existing
+		} else {
+			r.data[networkName] = pv
+		}
+		r.mu.Unlock()
 	}
 
 	cfg := newCfg(networkName, pv.Typed(knownTypes[networkName]))
@@ -108,29 +133,51 @@ func (r *preverifiedRegistry) Get(networkName string) (*Cfg, bool) {
 func (r *preverifiedRegistry) Set(networkName string, pv Preverified) {
 	r.mu.Lock()
 	r.data[networkName] = pv
+	delete(r.raw, networkName)    // prevent stale re-parse
 	delete(r.cached, networkName) // Invalidate cache atomically
 	r.mu.Unlock()
 }
 
+// Reset replaces all data, clearing raw and cached.
 func (r *preverifiedRegistry) Reset(data map[string]Preverified) {
 	r.mu.Lock()
 	r.data = data
+	r.raw = nil
 	r.cached = make(map[string]*Cfg) // Clear all cached
 	r.mu.Unlock()
 }
 
-var (
-	// This belongs in a generic embed.FS or something.
-	allSnapshotHashes = []*[]byte{
-		&snapshothashes.Mainnet,
-		&snapshothashes.Sepolia,
-		&snapshothashes.Amoy,
-		&snapshothashes.BorMainnet,
-		&snapshothashes.Gnosis,
-		&snapshothashes.Chiado,
-		&snapshothashes.Hoodi,
+// ResetRaw replaces the raw bytes, clearing data and cached. Used after remote loading
+// updates the module-level snapshot hash vars.
+func (r *preverifiedRegistry) ResetRaw(raw map[string][]byte) {
+	r.mu.Lock()
+	r.raw = raw
+	r.data = make(map[string]Preverified)
+	r.cached = make(map[string]*Cfg)
+	r.mu.Unlock()
+}
+
+// Has checks whether a chain name exists in either raw or data without triggering parsing.
+func (r *preverifiedRegistry) Has(networkName string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if _, ok := r.data[networkName]; ok {
+		return true
 	}
-)
+	_, ok := r.raw[networkName]
+	return ok
+}
+
+var snapshotHashPtrs = map[string]*[]byte{
+	networkname.Mainnet:    &snapshothashes.Mainnet,
+	networkname.Sepolia:    &snapshothashes.Sepolia,
+	networkname.Amoy:       &snapshothashes.Amoy,
+	networkname.BorMainnet: &snapshothashes.BorMainnet,
+	networkname.Gnosis:     &snapshothashes.Gnosis,
+	networkname.Chiado:     &snapshothashes.Chiado,
+	networkname.Hoodi:      &snapshothashes.Hoodi,
+	networkname.Bloatnet:   &snapshothashes.Bloatnet,
+}
 
 func fromEmbeddedToml(in []byte) Preverified {
 	items := fromToml(in)
@@ -151,6 +198,10 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 
 	for _, p := range p.Items {
 		if strings.HasPrefix(p.Name, "salt") && strings.HasSuffix(p.Name, "txt") {
+			bestVersions.Set(p.Name, p)
+			continue
+		}
+		if p.Name == "erigondb.toml" {
 			bestVersions.Set(p.Name, p)
 			continue
 		}
@@ -500,6 +551,78 @@ func webseedsParse(in []byte) (res []string) {
 
 const RemotePreverifiedEnvKey = "ERIGON_REMOTE_PREVERIFIED"
 
+// fetchChainToml fetches a single chain's TOML file from the snapshot CDN.
+// TODO: Copied from github.com/erigontech/erigon-snapshot/embed.go (getURLByChain + fetchSnapshotHashes).
+// Remove the copies in erigon-snapshot once this is the canonical location.
+func fetchChainToml(ctx context.Context, source snapshothashes.SnapshotSource, branch, chain string) ([]byte, error) {
+	var url string
+	if source == snapshothashes.R2 {
+		url = ChainTomlR2URL(branch, chain)
+	} else {
+		url = ChainTomlGitHubURL(branch, chain)
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	if source == snapshothashes.R2 {
+		InsertCloudflareHeaders(req)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to fetch snapshot hashes by %q: status code %d %s", url, resp.StatusCode, resp.Status)
+	}
+	res, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if len(res) == 0 {
+		return nil, fmt.Errorf("empty response from %s", url)
+	}
+	return res, nil
+}
+
+// LoadRemotePreverifiedForChain fetches and loads snapshot hashes for a single chain only.
+func LoadRemotePreverifiedForChain(ctx context.Context, chainName string) error {
+	if s, ok := os.LookupEnv(RemotePreverifiedEnvKey); ok {
+		log.Info("Loading local preverified override file", "file", s)
+
+		b, err := os.ReadFile(s)
+		if err != nil {
+			return fmt.Errorf("reading remote preverified override file: %w", err)
+		}
+		if ptr, ok := snapshotHashPtrs[chainName]; ok {
+			*ptr = bytes.Clone(b)
+		}
+	} else {
+		log.Info("Loading remote snapshot hashes", "chain", chainName)
+
+		hashes, err := fetchChainToml(ctx, snapshothashes.R2, snapshotGitBranch, chainName)
+		if err != nil {
+			log.Root().Warn("Failed to load snapshot hashes from R2; falling back to GitHub", "chain", chainName, "err", err)
+
+			hashes, err = fetchChainToml(ctx, snapshothashes.Github, snapshotGitBranch, chainName)
+			if err != nil {
+				return err
+			}
+		}
+
+		if ptr, ok := snapshotHashPtrs[chainName]; ok {
+			*ptr = hashes
+		}
+	}
+
+	// Re-load the preverified hashes for this chain
+	if ptr, ok := snapshotHashPtrs[chainName]; ok {
+		registry.Set(chainName, fromEmbeddedToml(*ptr))
+	}
+	return nil
+}
+
 func LoadRemotePreverified(ctx context.Context) (err error) {
 	if s, ok := os.LookupEnv(RemotePreverifiedEnvKey); ok {
 		log.Info("Loading local preverified override file", "file", s)
@@ -508,7 +631,7 @@ func LoadRemotePreverified(ctx context.Context) (err error) {
 		if err != nil {
 			return fmt.Errorf("reading remote preverified override file: %w", err)
 		}
-		for _, sh := range allSnapshotHashes {
+		for _, sh := range snapshotHashPtrs {
 			*sh = bytes.Clone(b)
 		}
 	} else {
@@ -538,46 +661,30 @@ func LoadRemotePreverified(ctx context.Context) (err error) {
 	}
 
 	// Re-load the preverified hashes
-	registry.Reset(map[string]Preverified{
-		networkname.Mainnet:    fromEmbeddedToml(snapshothashes.Mainnet),
-		networkname.Sepolia:    fromEmbeddedToml(snapshothashes.Sepolia),
-		networkname.Amoy:       fromEmbeddedToml(snapshothashes.Amoy),
-		networkname.BorMainnet: fromEmbeddedToml(snapshothashes.BorMainnet),
-		networkname.Gnosis:     fromEmbeddedToml(snapshothashes.Gnosis),
-		networkname.Chiado:     fromEmbeddedToml(snapshothashes.Chiado),
-		networkname.Hoodi:      fromEmbeddedToml(snapshothashes.Hoodi),
-		networkname.Bloatnet:   fromEmbeddedToml(snapshothashes.Bloatnet),
+	registry.ResetRaw(map[string][]byte{
+		networkname.Mainnet:    snapshothashes.Mainnet,
+		networkname.Sepolia:    snapshothashes.Sepolia,
+		networkname.Amoy:       snapshothashes.Amoy,
+		networkname.BorMainnet: snapshothashes.BorMainnet,
+		networkname.Gnosis:     snapshothashes.Gnosis,
+		networkname.Chiado:     snapshothashes.Chiado,
+		networkname.Hoodi:      snapshothashes.Hoodi,
+		networkname.Bloatnet:   snapshothashes.Bloatnet,
 	})
 	return
 }
 
 func SetToml(networkName string, toml []byte, local bool) {
-	if _, ok := registry.Get(networkName); ok {
+	if registry.Has(networkName) {
 		registry.Set(networkName, Preverified{Local: local, Items: fromToml(toml)})
 	}
 }
 
 func GetToml(networkName string) []byte {
-	switch networkName {
-	case networkname.Mainnet:
-		return snapshothashes.Mainnet
-	case networkname.Sepolia:
-		return snapshothashes.Sepolia
-	case networkname.Amoy:
-		return snapshothashes.Amoy
-	case networkname.BorMainnet:
-		return snapshothashes.BorMainnet
-	case networkname.Gnosis:
-		return snapshothashes.Gnosis
-	case networkname.Chiado:
-		return snapshothashes.Chiado
-	case networkname.Hoodi:
-		return snapshothashes.Hoodi
-	case networkname.Bloatnet:
-		return snapshothashes.Bloatnet
-	default:
-		return nil
+	if ptr, ok := snapshotHashPtrs[networkName]; ok {
+		return *ptr
 	}
+	return nil
 }
 
 // Gets the current preverified for all chains.

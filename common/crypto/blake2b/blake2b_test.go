@@ -315,7 +315,6 @@ func benchmarkSum(b *testing.B, size int, sse4, avx, avx2 bool) {
 
 	data := make([]byte, size)
 	b.SetBytes(int64(size))
-	b.ResetTimer()
 	for b.Loop() {
 		Sum512(data)
 	}
@@ -332,7 +331,6 @@ func benchmarkWrite(b *testing.B, size int, sse4, avx, avx2 bool) {
 	data := make([]byte, size)
 	h, _ := New512(nil)
 	b.SetBytes(int64(size))
-	b.ResetTimer()
 	for b.Loop() {
 		h.Write(data)
 	}
