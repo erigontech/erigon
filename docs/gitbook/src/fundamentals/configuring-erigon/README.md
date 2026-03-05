@@ -243,10 +243,11 @@ Flags for configuring various RPC servers and their behavior.
 
 ### MCP Server
 
-Flags for configuring the Model Context Protocol (MCP) server. The embedded MCP server is **enabled by default** on `127.0.0.1:8553`. Pass `--mcp.disable` to turn it off.
+Flags for configuring the Model Context Protocol (MCP) server. The embedded MCP server is **enabled by default** on
+`127.0.0.1:8553`. Pass `--mcp.disable` to turn it off.
 
 * `--mcp.disable`: Disables the embedded MCP server.
-  * Default: `false`
+    * Default: `false`
 * `--mcp.addr value`: The MCP server listening address.
   * Default: `127.0.0.1`
 * `--mcp.port value`: The MCP server listening port.
