@@ -19,10 +19,10 @@ package protocol
 import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
-	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/execution/vm/evmtypes/mdgas"
 )
 
-func SplitIntoMdGas(txnGasLimit uint64, igas evmtypes.MdGas, rules *chain.Rules) evmtypes.MdGas {
+func SplitIntoMdGas(txnGasLimit uint64, igas mdgas.MdGas, rules *chain.Rules) mdgas.MdGas {
 	if rules.IsAmsterdam {
 		//intrinsic_gas = intrinsic_regular_gas + intrinsic_state_gas
 		//execution_gas = tx.gas - intrinsic_gas
@@ -34,9 +34,9 @@ func SplitIntoMdGas(txnGasLimit uint64, igas evmtypes.MdGas, rules *chain.Rules)
 		regularGasBudget := params.MaxTxnGasLimit - igas.Regular
 		gasLeft := min(regularGasBudget, executionGas)
 		stateGasReservoir := executionGas - gasLeft
-		return evmtypes.MdGas{Regular: gasLeft, State: stateGasReservoir}
+		return mdgas.MdGas{Regular: gasLeft, State: stateGasReservoir}
 	}
-	gas := evmtypes.MdGas{Regular: txnGasLimit}
+	gas := mdgas.MdGas{Regular: txnGasLimit}
 	gas.Regular -= igas.Regular
 	return gas
 }

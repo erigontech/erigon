@@ -49,7 +49,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/asm"
-	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/execution/vm/evmtypes/mdgas"
 	"github.com/erigontech/erigon/execution/vm/program"
 )
 
@@ -438,7 +438,7 @@ func TestBlockhash(t *testing.T) {
 
 // benchmarkNonModifyingCode benchmarks code, but if the code modifies the
 // state, this should not be used, since it does not reset the state between runs.
-func benchmarkNonModifyingCode(gas evmtypes.MdGas, code []byte, name string, tracerCode string, b *testing.B) { //nolint:unparam
+func benchmarkNonModifyingCode(gas mdgas.MdGas, code []byte, name string, tracerCode string, b *testing.B) { //nolint:unparam
 	b.Helper()
 	cfg := new(Config)
 	setDefaults(cfg)
@@ -564,14 +564,14 @@ func BenchmarkSimpleLoop(b *testing.B) {
 	//		Tracer: tracer,
 	//	}})
 	// 100M gas
-	benchmarkNonModifyingCode(evmtypes.MdGas{Regular: 100_000_000}, staticCallIdentity, "staticcall-identity-100M", "", b)
-	benchmarkNonModifyingCode(evmtypes.MdGas{Regular: 100_000_000}, callIdentity, "call-identity-100M", "", b)
-	benchmarkNonModifyingCode(evmtypes.MdGas{Regular: 100_000_000}, loopingCode, "loop-100M", "", b)
-	benchmarkNonModifyingCode(evmtypes.MdGas{Regular: 100_000_000}, loopingCode2, "loop2-100M", "", b)
-	benchmarkNonModifyingCode(evmtypes.MdGas{Regular: 100_000_000}, loopingCode3, "loop3-100M", "", b)
-	benchmarkNonModifyingCode(evmtypes.MdGas{Regular: 100_000_000}, callInexistant, "call-nonexist-100M", "", b)
-	benchmarkNonModifyingCode(evmtypes.MdGas{Regular: 100_000_000}, callEOA, "call-EOA-100M", "", b)
-	benchmarkNonModifyingCode(evmtypes.MdGas{Regular: 100_000_000}, callRevertingContractWithInput, "call-reverting-100M", "", b)
+	benchmarkNonModifyingCode(mdgas.MdGas{Regular: 100_000_000}, staticCallIdentity, "staticcall-identity-100M", "", b)
+	benchmarkNonModifyingCode(mdgas.MdGas{Regular: 100_000_000}, callIdentity, "call-identity-100M", "", b)
+	benchmarkNonModifyingCode(mdgas.MdGas{Regular: 100_000_000}, loopingCode, "loop-100M", "", b)
+	benchmarkNonModifyingCode(mdgas.MdGas{Regular: 100_000_000}, loopingCode2, "loop2-100M", "", b)
+	benchmarkNonModifyingCode(mdgas.MdGas{Regular: 100_000_000}, loopingCode3, "loop3-100M", "", b)
+	benchmarkNonModifyingCode(mdgas.MdGas{Regular: 100_000_000}, callInexistant, "call-nonexist-100M", "", b)
+	benchmarkNonModifyingCode(mdgas.MdGas{Regular: 100_000_000}, callEOA, "call-EOA-100M", "", b)
+	benchmarkNonModifyingCode(mdgas.MdGas{Regular: 100_000_000}, callRevertingContractWithInput, "call-reverting-100M", "", b)
 
 	//benchmarkNonModifyingCode(10000000, staticCallIdentity, "staticcall-identity-10M", b)
 	//benchmarkNonModifyingCode(10000000, loopingCode, "loop-10M", b)

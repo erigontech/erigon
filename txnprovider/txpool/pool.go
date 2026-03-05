@@ -51,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm/evmtypes/mdgas"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
@@ -1009,9 +1010,12 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		IsEIP8037:          p.isAmsterdam(),
 		IsAATxn:            isAATxn,
 	})
-	gas := intrinsicGasResult.RegularGas
-	if isPrague && intrinsicGasResult.FloorGasCost > gas {
-		gas = intrinsicGasResult.FloorGasCost
+	gas := mdgas.MdGas{
+		Regular: intrinsicGasResult.RegularGas,
+		State:   intrinsicGasResult.StateGas,
+	}
+	if isPrague && intrinsicGasResult.FloorGasCost > gas.Regular {
+		gas.Regular = intrinsicGasResult.FloorGasCost
 	}
 
 	if txn.Traced {
@@ -1023,7 +1027,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		}
 		return txpoolcfg.GasUintOverflow
 	}
-	if gas > txn.Gas {
+	if gas.Total() > txn.Gas {
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas > txn.gas idHash=%x gas=%d, txn.gas=%d", txn.IDHash, gas, txn.Gas))
 		}
@@ -1035,7 +1039,15 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		}
 		return txpoolcfg.GasLimitTooHigh
 	}
-	if txn.Gas > params.MaxTxnGasLimit {
+	if p.isAmsterdam() {
+		// EIP-8037: total gas can exceed MaxTxnGasLimit (excess becomes state gas); only cap intrinsic regular gas.
+		if gas.Total() > params.MaxTxnGasLimit {
+			if txn.Traced {
+				p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic regular gas > max gas limit idHash=%x gas=%d", txn.IDHash, gas))
+			}
+			return txpoolcfg.GasLimitTooHigh
+		}
+	} else if txn.Gas > params.MaxTxnGasLimit {
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx txn.gas > max gas limit idHash=%x gas=%d", txn.IDHash, txn.Gas))
 		}

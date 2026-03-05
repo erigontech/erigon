@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/execution/vm/evmtypes/mdgas"
 )
 
 /*
@@ -83,12 +84,12 @@ func (e ErrExecAbortError) Error() string {
 type StateTransition struct {
 	gp           *GasPool
 	msg          Message
-	gasRemaining evmtypes.MdGas
+	gasRemaining mdgas.MdGas
 	blockGasUsed uint64 // Gas used by the transaction relevant for block limit accounting - see EIP-7778
 	gasPrice     *uint256.Int
 	feeCap       *uint256.Int
 	tipCap       *uint256.Int
-	initialGas   evmtypes.MdGas
+	initialGas   mdgas.MdGas
 	value        uint256.Int
 	data         []byte
 	state        *state.IntraBlockState
@@ -388,7 +389,7 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
-	imdGas := evmtypes.MdGas{
+	imdGas := mdgas.MdGas{
 		Regular: intrinsicGasResult.RegularGas,
 		State:   intrinsicGasResult.StateGas - stateIgasRefund,
 	}
@@ -543,7 +544,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		return nil, err
 	}
 
-	imdGas := evmtypes.MdGas{
+	imdGas := mdgas.MdGas{
 		Regular: intrinsicGasResult.RegularGas,
 		State:   intrinsicGasResult.StateGas - stateIgasRefund,
 	}
@@ -598,22 +599,23 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 			refundQuotient = params.RefundQuotientEIP3529
 		}
 		mdGasUsed := st.mdGasUsed()
-		gasUsed := mdGasUsed.Total()
 		stateRefund := st.state.GetRefund()
-		refund := min(gasUsed/refundQuotient, stateRefund)
-		gasUsed = gasUsed - refund
-		if rules.IsPrague {
-			gasUsed = max(intrinsicGasResult.FloorGasCost, gasUsed)
+		refund := mdgas.MdGas{
+			Regular: min(mdGasUsed.Regular/refundQuotient, stateRefund.Regular),
+			State:   min(mdGasUsed.State/refundQuotient, stateRefund.State),
 		}
+		mdGasUsedRefunded := mdGasUsed.Minus(refund)
 		if rules.IsAmsterdam {
 			// EIP-7778: Block Gas Accounting without Refunds
 			mdGasUsed.Regular = max(mdGasUsed.Regular, intrinsicGasResult.FloorGasCost)
 			// EIP-8037: State Creation Gas Cost Increase
 			st.blockGasUsed = mdGasUsed.Bottleneck()
+		} else if rules.IsPrague {
+			st.blockGasUsed = max(intrinsicGasResult.FloorGasCost, mdGasUsedRefunded.Regular)
 		} else {
-			st.blockGasUsed = gasUsed
+			st.blockGasUsed = mdGasUsedRefunded.Regular
 		}
-		st.gasRemaining.Regular = st.initialGas.Regular - gasUsed
+		st.gasRemaining = st.initialGas.Minus(mdGasUsedRefunded)
 		st.refundGas()
 	} else if rules.IsAmsterdam {
 		mdGasUsed := st.mdGasUsed()
@@ -627,7 +629,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	}
 	// Also return remaining gas to the block gas counter so it is
 	// available for the next transaction.
-	st.gp.AddGas(st.initialGas.Regular - st.blockGasUsed)
+	st.gp.AddGas(st.initialGas.Total() - st.blockGasUsed)
 
 	effectiveTip := *st.gasPrice
 	if rules.IsLondon {
@@ -803,6 +805,6 @@ func (st *StateTransition) gasUsed() uint64 {
 	return st.mdGasUsed().Total()
 }
 
-func (st *StateTransition) mdGasUsed() evmtypes.MdGas {
+func (st *StateTransition) mdGasUsed() mdgas.MdGas {
 	return st.initialGas.Minus(st.gasRemaining)
 }

@@ -33,7 +33,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/execution/vm/evmtypes/mdgas"
 )
 
 // Config are the configuration options for the Interpreter
@@ -73,7 +73,7 @@ var contextPool = sync.Pool{
 	},
 }
 
-func getCallContext(contract Contract, input []byte, gas evmtypes.MdGas) *CallContext {
+func getCallContext(contract Contract, input []byte, gas mdgas.MdGas) *CallContext {
 	ctx, ok := contextPool.Get().(*CallContext)
 	if !ok {
 		log.Error("Type assertion failure", "err", "cannot get Stack pointer from stackPool")
@@ -102,7 +102,7 @@ func (c *CallContext) useGas(gas uint64, tracer *tracing.Hooks, reason tracing.G
 	return false
 }
 
-func (c *CallContext) useMdGas(gas uint64, t evmtypes.MdGasType, tracer *tracing.Hooks, reason tracing.GasChangeReason) (ok bool) {
+func (c *CallContext) useMdGas(gas uint64, t mdgas.MdGasType, tracer *tracing.Hooks, reason tracing.GasChangeReason) (ok bool) {
 	remaining, ok := useMdGas(c.Gas(), gas, t, tracer, reason)
 	if ok {
 		c.gas = remaining.Regular
@@ -128,10 +128,10 @@ func useGas(initial uint64, gas uint64, tracer *tracing.Hooks, reason tracing.Ga
 	return initial - gas, true
 }
 
-func useMdGas(initial evmtypes.MdGas, gas uint64, t evmtypes.MdGasType, tracer *tracing.Hooks, reason tracing.GasChangeReason) (evmtypes.MdGas, bool) {
+func useMdGas(initial mdgas.MdGas, gas uint64, t mdgas.MdGasType, tracer *tracing.Hooks, reason tracing.GasChangeReason) (mdgas.MdGas, bool) {
 	var ok bool
 	switch t {
-	case evmtypes.StateGas:
+	case mdgas.StateGas:
 		initial.State, ok = useGas(initial.State, gas, tracer, reason)
 		if ok {
 			return initial, true
@@ -140,7 +140,7 @@ func useMdGas(initial evmtypes.MdGas, gas uint64, t evmtypes.MdGasType, tracer *
 		gas = gas - initial.State
 		initial.State = 0
 		fallthrough
-	case evmtypes.RegularGas:
+	case mdgas.RegularGas:
 		initial.Regular, ok = useGas(initial.Regular, gas, tracer, reason)
 		return initial, ok
 	default:
@@ -203,8 +203,8 @@ func (ctx *CallContext) CodeHash() accounts.CodeHash {
 	return ctx.Contract.CodeHash
 }
 
-func (ctx *CallContext) Gas() evmtypes.MdGas {
-	return evmtypes.MdGas{
+func (ctx *CallContext) Gas() mdgas.MdGas {
+	return mdgas.MdGas{
 		Regular: ctx.gas,
 		State:   ctx.stateGas,
 	}
@@ -277,10 +277,10 @@ func jumpTable(chainRules *chain.Rules, cfg Config) *JumpTable {
 // It's important to note that any errors returned by the interpreter should be
 // considered a revert-and-consume-all-gas operation except for
 // ErrExecutionReverted which means revert-and-keep-gas-left.
-func (evm *EVM) Run(contract Contract, gas evmtypes.MdGas, input []byte, readOnly bool) (_ []byte, _ evmtypes.MdGas, err error) {
+func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly bool) (_ []byte, _ mdgas.MdGas, err error) {
 	// Don't bother with the execution if there's no code.
 	if len(contract.Code) == 0 {
-		return nil, evmtypes.MdGas{}, nil
+		return nil, mdgas.MdGas{}, nil
 	}
 
 	// Reset the previous call's return data. It's unimportant to preserve the old buffer
@@ -424,7 +424,7 @@ func (evm *EVM) Run(contract Contract, gas evmtypes.MdGas, input []byte, readOnl
 				return nil, callContext.Gas(), err
 			}
 			cost += stateGas
-			ok := callContext.useMdGas(stateGas, evmtypes.StateGas, nil, tracing.GasChangeIgnored)
+			ok := callContext.useMdGas(stateGas, mdgas.StateGas, nil, tracing.GasChangeIgnored)
 			if !ok {
 				return nil, callContext.Gas(), ErrOutOfGas
 			}

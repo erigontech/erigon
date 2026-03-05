@@ -33,7 +33,7 @@ import (
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/execution/vm/evmtypes/mdgas"
 )
 
 func opAdd(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
@@ -1079,7 +1079,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	// Pop gas. The actual gas in evm.callGasTemp.
 	// We can use this as a temporary value
 	temp := stack.pop()
-	gas := evmtypes.MdGas{
+	gas := mdgas.MdGas{
 		Regular: evm.CallGasTemp(),
 		State:   scope.stateGas,
 	}
@@ -1136,7 +1136,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	stack := &scope.Stack
 	// We use it as a temporary value
 	temp := stack.pop()
-	gas := evmtypes.MdGas{
+	gas := mdgas.MdGas{
 		Regular: evm.CallGasTemp(),
 		State:   scope.stateGas,
 	}
@@ -1183,7 +1183,7 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	// Pop gas. The actual gas is in evm.callGasTemp.
 	// We use it as a temporary value
 	temp := stack.pop()
-	gas := evmtypes.MdGas{
+	gas := mdgas.MdGas{
 		Regular: evm.CallGasTemp(),
 		State:   scope.stateGas,
 	}
@@ -1226,7 +1226,7 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	stack := &scope.Stack
 	// We use it as a temporary value
 	temp := stack.pop()
-	gas := evmtypes.MdGas{
+	gas := mdgas.MdGas{
 		Regular: evm.CallGasTemp(),
 		State:   scope.stateGas,
 	}

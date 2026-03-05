@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/execution/vm/evmtypes/mdgas"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 )
 
@@ -273,7 +274,7 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 		txContext = NewEVMTxContext(msg)
 	}
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
-	mdGas := evmtypes.MdGas{
+	mdGas := mdgas.MdGas{
 		Regular: msg.Gas(),
 		State:   0, // state gas reservoir will consume from regular gas for sys calls
 	}
@@ -314,7 +315,7 @@ func SysCreate(contract accounts.Address, data []byte, chainConfig *chain.Config
 	txContext := NewEVMTxContext(msg)
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), nil, author, chainConfig)
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
-	mdGas := evmtypes.MdGas{
+	mdGas := mdgas.MdGas{
 		Regular: msg.Gas(),
 		State:   0, // state gas reservoir will consume from regular gas for sys calls
 	}

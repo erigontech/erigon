@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/execution/vm/evmtypes/mdgas"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -136,7 +137,7 @@ func TestEIP2200(t *testing.T) {
 			}
 			_ = s.CommitBlock(vmctx.Rules(chain.AllProtocolChanges), w)
 			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.AllProtocolChanges, vm.Config{ExtraEips: []int{2200}})
-			mdGas := evmtypes.MdGas{
+			mdGas := mdgas.MdGas{
 				Regular: tt.gaspool,
 			}
 			_, gas, err := vmenv.Call(accounts.ZeroAddress, address, nil, mdGas, uint256.Int{}, false /* bailout */)
@@ -146,7 +147,7 @@ func TestEIP2200(t *testing.T) {
 			if used := tt.gaspool - gas.Regular; used != tt.used {
 				t.Errorf("test %d: gas used mismatch: have %v, want %v", i, used, tt.used)
 			}
-			if refund := vmenv.IntraBlockState().GetRefund(); refund != tt.refund {
+			if refund := vmenv.IntraBlockState().GetRefund(); refund.Regular != tt.refund {
 				t.Errorf("test %d: gas refund mismatch: have %v, want %v", i, refund, tt.refund)
 			}
 		})
@@ -204,7 +205,7 @@ func TestCreateGas(t *testing.T) {
 		}
 
 		vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.TestChainConfig, config)
-		startGas := evmtypes.MdGas{
+		startGas := mdgas.MdGas{
 			Regular: math.MaxUint64,
 		}
 		_, gas, err := vmenv.Call(accounts.ZeroAddress, address, nil, startGas, uint256.Int{}, false /* bailout */)

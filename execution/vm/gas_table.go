@@ -330,7 +330,7 @@ func stateGasSstore(evm *EVM, callContext *CallContext, availableGas uint64, mem
 	original, _ := evm.IntraBlockState().GetCommittedState(callContext.Address(), slot)
 	if original.IsZero() && !current.IsZero() && newValue.IsZero() {
 		// Case 2.2.2.1: reset to inexistent original (0→X→0).
-		evm.IntraBlockState().AddRefund(32 * evm.Context.CostPerStateByte)
+		evm.IntraBlockState().AddStateRefund(32 * evm.Context.CostPerStateByte)
 		return 0, nil
 	}
 	if !newValue.IsZero() && current.IsZero() && original.IsZero() {
