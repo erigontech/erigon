@@ -252,7 +252,7 @@ func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v 
 	return nil, false, nil
 }
 
-func (sd *TemporalMemBatch) SizeEstimate() uint64 {
+func (sd *TemporalMemBatch) Size() uint64 {
 	sd.latestStateLock.RLock()
 	defer sd.latestStateLock.RUnlock()
 	return uint64(sd.metrics.CachePutSize)

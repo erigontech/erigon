@@ -484,7 +484,7 @@ type TemporalMemBatch interface {
 	IndexAdd(table InvertedIdx, key []byte, txNum uint64) (err error)
 	IteratePrefix(domain Domain, prefix []byte, roTx Tx, it func(k []byte, v []byte, step Step) (cont bool, err error)) error
 	HasPrefix(domain Domain, prefix []byte, roTx Tx) ([]byte, []byte, bool, error)
-	SizeEstimate() uint64
+	Size() uint64
 	Flush(ctx context.Context, tx RwTx) error
 	Close()
 	PutForkable(id ForkableId, num Num, v []byte) error
