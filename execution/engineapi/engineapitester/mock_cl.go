@@ -136,11 +136,15 @@ func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOpti
 	}
 	parentBeaconBlockRoot := common.BigToHash(cl.state.ParentClBlockRoot)
 	slotNumber := cl.state.NextSlotNumber()
+	withdrawals := make([]*types.Withdrawal, 0)
+	if options.withdrawals != nil {
+		withdrawals = options.withdrawals
+	}
 	payloadAttributes := enginetypes.PayloadAttributes{
 		Timestamp:             hexutil.Uint64(timestamp),
 		PrevRandao:            common.BigToHash(cl.state.ParentRandao),
 		SuggestedFeeRecipient: cl.suggestedFeeRecipient,
-		Withdrawals:           make([]*types.Withdrawal, 0),
+		Withdrawals:           withdrawals,
 		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
 		SlotNumber:            (*hexutil.Uint64)(&slotNumber),
 	}
@@ -246,9 +250,16 @@ func WithWaitUntilTimestamp() BlockBuildingOption {
 	}
 }
 
+func WithWithdrawals(withdrawals []*types.Withdrawal) BlockBuildingOption {
+	return func(opts *blockBuildingOptions) {
+		opts.withdrawals = withdrawals
+	}
+}
+
 type blockBuildingOptions struct {
 	timestamp          *uint64
 	waitUntilTimestamp bool
+	withdrawals        []*types.Withdrawal
 }
 
 func RetryEngine[T any](ctx context.Context, retryStatuses []enginetypes.EngineStatus, retryErrors []error,
