@@ -76,11 +76,6 @@ func NewSampler(seed int64, sampleRatio float64) *Sampler {
 	return SamplerCfg{Seed: seed, SampleRatio: sampleRatio}.NewSampler()
 }
 
-// IntN returns a non-negative random int in [0, n). Used for bucket-based sampling.
-func (s *Sampler) IntN(n int) int {
-	return s.rng.IntN(n)
-}
-
 // CanSkip returns true if the current item should be skipped.
 // Draws one random value per call, so call it once per item in the iteration loop.
 func (s *Sampler) CanSkip() bool {
@@ -105,6 +100,22 @@ func (s *Sampler) BlockNums(from, to uint64) iter.Seq[uint64] {
 //	}
 func (s *Sampler) TxNums(from, to uint64) iter.Seq[uint64] {
 	return s.nums(from, to)
+}
+
+// Buckets returns an iterator over sampled bucket indices in [from, to) (exclusive upper bound).
+// Uses geometric skipping so cost is O(sampled) rather than O(total).
+//
+//	for bucket := range sampler.Buckets(0, numBuckets) {
+//	    // check bucket
+//	}
+func (s *Sampler) Buckets(from, to int) iter.Seq[int] {
+	return func(yield func(int) bool) {
+		for n := range s.nums(uint64(from), uint64(to)) {
+			if !yield(int(n)) {
+				return
+			}
+		}
+	}
 }
 
 func (s *Sampler) nums(from, to uint64) iter.Seq[uint64] {

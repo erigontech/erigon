@@ -23,7 +23,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"math"
+	"math/rand/v2"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -602,38 +602,38 @@ func CheckCommitmentHistVal(ctx context.Context, sc SamplerCfg, db kv.TemporalRo
 	} else {
 		eg.SetLimit(dbg.EnvInt("CHECK_COMMITMENT_HIST_VAL_WORKERS", 8))
 	}
-	// Stratified sampling: divide each file's tx range into numBuckets equal slices and
-	// pick one randomly. This guarantees every part of history is reachable (unlike pure
-	// Bernoulli which might cluster hits at the start), and keeps checked tx count ≈
-	// totalTxCount * sampleRatio regardless of how txs are distributed across files.
-	sampler := sc.NewSampler()
-	numBuckets := uint64(math.Round(1.0 / sampler.SampleRatio))
+	// numBuckets controls granularity; sampleRatio controls how many buckets per file to check.
+	// e.g. sampleRatio=0.05 → ~50 out of 1000 buckets → ~5% of each file, as sequential scans.
+	const numBuckets = 1000
 	var totalVals atomic.Uint64
-	for _, file := range files {
+	for i, file := range files {
 		if !strings.HasSuffix(file.Fullpath(), ".v") {
 			continue
 		}
-		txCount := file.EndRootNum() - file.StartRootNum()
-		if numBuckets > txCount {
-			panic(fmt.Errorf("numBuckets %d is greater than total tx count %d in %s", numBuckets, txCount, filepath.Base(file.Fullpath())))
+		// XOR file index into seed so bucket selection is reproducible per file.
+		sampler := NewSampler(sc.Seed^int64(i), sc.SampleRatio)
+		var buckets []int
+		for b := range sampler.Buckets(0, numBuckets) {
+			buckets = append(buckets, b)
 		}
-		bucket := sampler.IntN(int(numBuckets))
-		eg.Go(func() error {
-			tx, err := db.BeginTemporalRo(ctx) // each worker has its own RoTx
-			if err != nil {
+		if len(buckets) == 0 {
+			buckets = []int{rand.New(rand.NewPCG(uint64(sc.Seed^int64(i)), 1)).IntN(numBuckets)}
+		}
+		for _, bucket := range buckets {
+			eg.Go(func() error {
+				tx, err := db.BeginTemporalRo(ctx)
+				if err != nil {
+					return err
+				}
+				defer tx.Rollback()
+				n, err := checkCommitmentHistValBucket(ctx, tx, br, file, bucket, failFast, logger)
+				totalVals.Add(n)
+				if err != nil && !failFast {
+					logger.Warn(err.Error())
+				}
 				return err
-			}
-			defer tx.Rollback()
-			valCount, err := checkCommitmentHistVal(ctx, tx, br, file, bucket, numBuckets, failFast, logger)
-			if err == nil {
-				totalVals.Add(valCount)
-				return nil
-			}
-			if !failFast {
-				logger.Warn(err.Error())
-			}
-			return err
-		})
+			})
+		}
 	}
 	err = eg.Wait()
 	if err != nil {
@@ -642,11 +642,12 @@ func CheckCommitmentHistVal(ctx context.Context, sc SamplerCfg, db kv.TemporalRo
 	dur := time.Since(start)
 	total := totalVals.Load()
 	rate := float64(total) / dur.Seconds()
-	logger.Info("[integrity] CommitmentHistVal", "dur", time.Since(start), "files", len(files), "vals", total, "vals/s", rate, "seed", sampler.Seed, "sampleRatio", sampler.SampleRatio)
+	logger.Info("[integrity] CommitmentHistVal", "dur", time.Since(start), "files", len(files), "vals", total, "vals/s", rate, "seed", sc.Seed)
 	return nil
 }
 
-func checkCommitmentHistVal(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, file state.VisibleFile, bucket int, numBuckets uint64, failFast bool, logger log.Logger) (uint64, error) {
+func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, file state.VisibleFile, bucket int, failFast bool, logger log.Logger) (uint64, error) {
+	const numBuckets = 1000
 	start := time.Now()
 	fileName := filepath.Base(file.Fullpath())
 	startTxNum := file.StartRootNum()
