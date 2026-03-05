@@ -107,6 +107,8 @@ import (
 	"github.com/erigontech/erigon/node/rulesconfig"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/p2p"
+	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/enr"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/p2p/sentry/libsentry"
@@ -1278,6 +1280,18 @@ func (s *Ethereum) setUpSnapDownloader(
 	if client != nil {
 		s.downloaderClient = downloader.NewRpcClient(client, s.config.Dirs.Snap)
 	}
+
+	// Wire chain.toml ENR updater: advertise snapshot manifest info-hash via discv5.
+	if s.downloader != nil && len(s.sentryServers) > 0 {
+		s.downloader.SetENRUpdater(func(ct enr.ChainToml) {
+			for _, srv := range s.sentryServers {
+				if p2p := srv.GetP2PServer(); p2p != nil {
+					p2p.LocalNode().Set(ct)
+				}
+			}
+		})
+	}
+
 	return err
 }
 
@@ -1300,6 +1314,32 @@ func (s *Ethereum) initDownloader(
 		return
 	}
 	s.downloader.HandleTorrentClientStatus(nodeCfg.DebugMux)
+
+	// This adds completed snapshots on disk. Ideally we'd do this after completing sync, so that we
+	// don't unnecessarily report incomplete torrents. But to do that we need access to
+	// Downloader.AddTorrentsFromDisk in the sync stage, which only has the GPRC client. There's
+	// also the issue of having torrents not in the preverified set: If we are performing a sync for
+	// missing snapshots, any snapshots not in that set could cause issues. That's an unsolved issue
+	// and probably requires always resetting before resuming/starting a sync.
+	incomplete, err := s.downloader.AddTorrentsFromDisk(ctx)
+	if err != nil {
+		err = fmt.Errorf("adding torrents from disk: %w", err)
+		return
+	}
+
+	if incomplete != 0 {
+		// This is fine if we're resuming a sync. If not, there are files that will just float
+		// around. See the comment about resetting above. If that is resolved, we could delete or
+		// ignore incomplete torrents as aberrations.
+		s.logger.Warn("Downloader detected incomplete snapshots", "count", incomplete)
+	}
+
+	// Generate chain.toml from existing torrents on disk. The ENR updater is wired
+	// later (after this function returns), so the ENR update will be a no-op here.
+	// The background loop will re-publish with the correct frozenTx once P2P is up.
+	if pubErr := s.downloader.PublishLocalChainToml(0); pubErr != nil {
+		s.logger.Warn("Failed to publish initial chain.toml", "err", pubErr)
+	}
 
 	bittorrentServer, err := downloader.NewGrpcServer(s.downloader)
 	if err != nil {
