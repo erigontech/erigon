@@ -1264,6 +1264,14 @@ func doIntegrity(cliCtx *cli.Context) error {
 				if err := integrity.CheckCommitmentHistVal(ctx, sc, db, blockReader, failFast, logger); err != nil {
 					return err
 				}
+			case integrity.CommitmentHistAtBlkRange:
+				to, err := stateProgress(ctx, chainDB, agg, blockReader.TxnumReader())
+				if err != nil {
+					return err
+				}
+				if err := integrity.CheckCommitmentHistAtBlkRange(ctx, sc, db, blockReader, 1, to+1, logger); err != nil {
+					return err
+				}
 			case integrity.StateVerify:
 				if err := integrity.CheckStateVerify(ctx, db, failFast, fromStep, logger); err != nil {
 					return err
