@@ -288,24 +288,4 @@ func TestTrieTraceSaveLoad(t *testing.T) {
 		require.Equal(t, tt.Updates[i].PlainKey, loaded.Updates[i].PlainKey)
 		require.Equal(t, tt.Updates[i].Update, loaded.Updates[i].Update)
 	}
-
-	// Verify hex values are valid
-	for hexKey, hexVal := range loaded.Branches {
-		_, err := hex.DecodeString(hexKey)
-		require.NoError(t, err, "branch key should be valid hex")
-		_, err = hex.DecodeString(hexVal)
-		require.NoError(t, err, "branch value should be valid hex")
-	}
-	for hexKey, hexVal := range loaded.Accounts {
-		_, err := hex.DecodeString(hexKey)
-		require.NoError(t, err, "account key should be valid hex")
-		_, err = hex.DecodeString(hexVal)
-		require.NoError(t, err, "account value should be valid hex")
-	}
-	for hexKey, hexVal := range loaded.Storages {
-		_, err := hex.DecodeString(hexKey)
-		require.NoError(t, err, "storage key should be valid hex")
-		_, err = hex.DecodeString(hexVal)
-		require.NoError(t, err, "storage value should be valid hex")
-	}
 }

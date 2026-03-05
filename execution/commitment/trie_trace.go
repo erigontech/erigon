@@ -47,9 +47,6 @@ type TraceKeyUpdate struct {
 // updates for replay (in ModeDirect, followAndUpdate reads the current state
 // from the context to obtain the Update).
 func BuildTrieTrace(rc *RecordingContext) (*TrieTrace, error) {
-	rc.mu.Lock()
-	defer rc.mu.Unlock()
-
 	tt := &TrieTrace{
 		Branches: make(map[string]string, len(rc.branches)),
 		Accounts: make(map[string]string, len(rc.accounts)),
@@ -91,7 +88,7 @@ func (tt *TrieTrace) Save(path string) error {
 	if err != nil {
 		return fmt.Errorf("marshal trie trace: %w", err)
 	}
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	if err := os.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("write trie trace to %s: %w", path, err)
 	}
 	return nil

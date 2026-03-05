@@ -17,8 +17,6 @@
 package commitment
 
 import (
-	"sync"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 )
@@ -26,10 +24,10 @@ import (
 // RecordingContext wraps a PatriciaContext and records all data read during
 // trie processing (branches, accounts, storages). The recorded data can be
 // used to build a TrieTrace for replay in tests.
+// Not safe for concurrent use — Process runs single-threaded.
 type RecordingContext struct {
 	inner PatriciaContext
 
-	mu       sync.Mutex
 	branches map[string][]byte
 	accounts map[string][]byte
 	storages map[string][]byte
@@ -51,9 +49,7 @@ func (rc *RecordingContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
 		return data, step, err
 	}
 	if data != nil {
-		rc.mu.Lock()
 		rc.branches[string(common.Copy(prefix))] = common.Copy(data)
-		rc.mu.Unlock()
 	}
 	return data, step, nil
 }
@@ -63,12 +59,10 @@ func (rc *RecordingContext) Account(plainKey []byte) (*Update, error) {
 	if err != nil {
 		return u, err
 	}
-	if u != nil && u.Flags&DeleteUpdate == 0 {
+	if u != nil {
 		var numBuf [10]byte
 		encoded := u.Encode(nil, numBuf[:])
-		rc.mu.Lock()
 		rc.accounts[string(common.Copy(plainKey))] = encoded
-		rc.mu.Unlock()
 	}
 	return u, nil
 }
@@ -78,12 +72,10 @@ func (rc *RecordingContext) Storage(plainKey []byte) (*Update, error) {
 	if err != nil {
 		return u, err
 	}
-	if u != nil && u.Flags&DeleteUpdate == 0 {
+	if u != nil {
 		var numBuf [10]byte
 		encoded := u.Encode(nil, numBuf[:])
-		rc.mu.Lock()
 		rc.storages[string(common.Copy(plainKey))] = encoded
-		rc.mu.Unlock()
 	}
 	return u, nil
 }
