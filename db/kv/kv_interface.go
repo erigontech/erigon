@@ -317,10 +317,6 @@ type StatelessRwTx interface {
 	Putter
 }
 
-type GetPut interface {
-	Getter
-	Putter
-}
 type Getter interface {
 	// Has indicates whether a key exists in the database.
 	Has(table string, key []byte) (bool, error)
@@ -552,10 +548,6 @@ type TemporalRwDB interface {
 // ---- non-important utilities
 
 type TxnId uint64 // internal auto-increment ID. can't cast to eth-network canonical blocks txNum
-
-type HasSpaceDirty interface {
-	SpaceDirty() (uint64, uint64, error)
-}
 
 // BucketMigrator used for buckets migration, don't use it in usual app code
 type BucketMigrator interface {

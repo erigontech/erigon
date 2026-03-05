@@ -180,7 +180,7 @@ func (p Distance) PruneTo(stageHead uint64) uint64 {
 }
 
 // EnsureNotChanged - prohibit change some configs after node creation. prohibit from human mistakes
-func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
+func EnsureNotChanged(tx kv.StatelessRwTx, pruneMode Mode) (Mode, error) {
 	if err := setIfNotExist(tx, pruneMode); err != nil {
 		return pruneMode, err
 	}
@@ -205,7 +205,7 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 	return pm, nil
 }
 
-func setIfNotExist(db kv.GetPut, pm Mode) (err error) {
+func setIfNotExist(db kv.StatelessRwTx, pm Mode) (err error) {
 	if !pm.Initialised {
 		pm = DefaultMode
 	}
@@ -262,7 +262,7 @@ func keyType(name []byte) []byte {
 	return append(name, []byte("Type")...)
 }
 
-func setOnEmpty(db kv.GetPut, key []byte, blockAmount BlockAmount) error {
+func setOnEmpty(db kv.StatelessRwTx, key []byte, blockAmount BlockAmount) error {
 	mode, err := db.GetOne(kv.DatabaseInfo, key)
 	if err != nil {
 		return err

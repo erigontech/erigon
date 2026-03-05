@@ -116,7 +116,7 @@ func bytes2bool(in []byte) bool {
 }
 
 // EnsureNotChangedBool - used to store immutable config flags in db. protects from human mistakes
-func EnsureNotChangedBool(tx GetPut, bucket string, k []byte, value bool) (notChanged, enabled bool, err error) {
+func EnsureNotChangedBool(tx StatelessRwTx, bucket string, k []byte, value bool) (notChanged, enabled bool, err error) {
 	vBytes, err := tx.GetOne(bucket, k)
 	if err != nil {
 		return false, enabled, err
