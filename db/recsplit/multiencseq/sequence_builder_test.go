@@ -193,8 +193,7 @@ func BenchmarkBuilder(b *testing.B) {
 		vals[i] = baseNum + uint64(i)*2
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		sb := NewBuilder(baseNum, n, vals[n-1])
 		for _, v := range vals {
 			sb.AddOffset(v)
