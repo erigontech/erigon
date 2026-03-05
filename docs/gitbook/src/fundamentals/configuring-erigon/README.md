@@ -82,8 +82,7 @@ Flags for managing how old chain data is handled and stored.
   * Default: `0`
 * `--prune.distance.blocks value`: Keeps block history for the latest `N` blocks.
   * Default: `0`
-*
-`--prune.include-commitment-history, --prune.experimental.include-commitment-history, --experimental.commitment-history`: (
+* `--prune.include-commitment-history, --prune.experimental.include-commitment-history, --experimental.commitment-history`: (
 experimental) Enables blazing fast `eth_getProof` for executed blocks by storing commitment history.
   * Default: `false`
 * `--snap.keepblocks`: Keeps ancient blocks in the database for debugging.
@@ -242,8 +241,11 @@ Flags for configuring various RPC servers and their behavior.
 
 ### MCP Server
 
-Flags for configuring the Model Context Protocol (MCP) server.
+Flags for configuring the Model Context Protocol (MCP) server. The embedded MCP server is **enabled by default** on
+`127.0.0.1:8553`. Pass `--mcp.disable` to turn it off.
 
+* `--mcp.disable`: Disables the embedded MCP server.
+    * Default: `false`
 * `--mcp.addr value`: The MCP server listening address.
   * Default: `127.0.0.1`
 * `--mcp.port value`: The MCP server listening port.
@@ -744,6 +746,7 @@ GLOBAL OPTIONS:
    --no-downloader                                                                                                         Disables downloader component (default: false)
    --downloader.verify                                                                                                     Verify snapshots on startup. It will not report problems found, but re-download broken pieces. (default: false)
    --healthcheck                                                                                                           Enable grpc health check (default: false)
+   --mcp.disable                                                                                                           Disables the embedded MCP server (default: false)
    --mcp.addr value                                                                                                        MCP server listening interface (default: "127.0.0.1")
    --mcp.port value                                                                                                        MCP server listening port (default: 8553)
    --bor.heimdall value                                                                                                    URL of Heimdall service (default: "http://localhost:1317")
