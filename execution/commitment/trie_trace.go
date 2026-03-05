@@ -42,11 +42,13 @@ type TraceKeyUpdate struct {
 }
 
 // BuildTrieTrace converts the data recorded by a RecordingContext into a
-// TrieTrace. The accounts and storages captured by the recorder represent the
-// state values read during Process — these same values serve as the input
-// updates for replay (in ModeDirect, followAndUpdate reads the current state
-// from the context to obtain the Update).
-func BuildTrieTrace(rc *RecordingContext) (*TrieTrace, error) {
+// TrieTrace. All recorded branches, accounts, and storages are included in the
+// state maps (for MockState population). The Updates list is filtered to only
+// include keys present in inputKeys — this prevents fold-time context reads
+// (for neighboring cells) from being treated as input updates during replay.
+// When inputKeys is nil, all recorded accounts and storages are included as
+// updates (useful in tests where the trie starts empty).
+func BuildTrieTrace(rc *RecordingContext, inputKeys map[string]struct{}) (*TrieTrace, error) {
 	tt := &TrieTrace{
 		Branches: make(map[string]string, len(rc.branches)),
 		Accounts: make(map[string]string, len(rc.accounts)),
@@ -60,18 +62,22 @@ func BuildTrieTrace(rc *RecordingContext) (*TrieTrace, error) {
 	for k, v := range rc.accounts {
 		hexKey := hex.EncodeToString([]byte(k))
 		tt.Accounts[hexKey] = hex.EncodeToString(v)
-		tt.Updates = append(tt.Updates, TraceKeyUpdate{
-			PlainKey: hexKey,
-			Update:   hex.EncodeToString(v),
-		})
+		if inputKeys == nil || containsKey(inputKeys, k) {
+			tt.Updates = append(tt.Updates, TraceKeyUpdate{
+				PlainKey: hexKey,
+				Update:   hex.EncodeToString(v),
+			})
+		}
 	}
 	for k, v := range rc.storages {
 		hexKey := hex.EncodeToString([]byte(k))
 		tt.Storages[hexKey] = hex.EncodeToString(v)
-		tt.Updates = append(tt.Updates, TraceKeyUpdate{
-			PlainKey: hexKey,
-			Update:   hex.EncodeToString(v),
-		})
+		if inputKeys == nil || containsKey(inputKeys, k) {
+			tt.Updates = append(tt.Updates, TraceKeyUpdate{
+				PlainKey: hexKey,
+				Update:   hex.EncodeToString(v),
+			})
+		}
 	}
 
 	// Sort updates by plain key for deterministic output.
@@ -80,6 +86,12 @@ func BuildTrieTrace(rc *RecordingContext) (*TrieTrace, error) {
 	})
 
 	return tt, nil
+}
+
+// containsKey checks if the key (as raw bytes stored in a string) exists in the set.
+func containsKey(keys map[string]struct{}, k string) bool {
+	_, ok := keys[k]
+	return ok
 }
 
 // Save marshals the TrieTrace to TOML and writes it to the given path.

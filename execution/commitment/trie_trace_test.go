@@ -112,7 +112,7 @@ func TestTrieTraceRoundTrip(t *testing.T) {
 	upds1.Close()
 
 	// Build trace and save to temp file
-	trace, err := BuildTrieTrace(recorder)
+	trace, err := BuildTrieTrace(recorder, nil)
 	require.NoError(t, err)
 
 	tracePath := filepath.Join(t.TempDir(), "trace.toml")
@@ -140,7 +140,7 @@ func TestTrieTraceEmptyUpdates(t *testing.T) {
 	ms := NewMockState(t)
 	rc := NewRecordingContext(ms)
 
-	trace, err := BuildTrieTrace(rc)
+	trace, err := BuildTrieTrace(rc, nil)
 	require.NoError(t, err)
 	require.Empty(t, trace.Branches)
 	require.Empty(t, trace.Accounts)
@@ -180,7 +180,7 @@ func TestTrieTraceAccountOnlyRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	upds1.Close()
 
-	trace, err := BuildTrieTrace(recorder)
+	trace, err := BuildTrieTrace(recorder, nil)
 	require.NoError(t, err)
 	require.Empty(t, trace.Storages, "account-only trace should have no storages")
 	require.NotEmpty(t, trace.Accounts, "account-only trace should have accounts")
@@ -227,7 +227,7 @@ func TestTrieTraceStorageOnlyRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	upds1.Close()
 
-	trace, err := BuildTrieTrace(recorder)
+	trace, err := BuildTrieTrace(recorder, nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, trace.Storages, "storage trace should have storages")
 

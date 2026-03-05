@@ -281,11 +281,15 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	if dbg.TrieTraceFile != "" {
 		recorder = commitment.NewRecordingContext(trieContext)
 		sdc.patriciaTrie.ResetContext(recorder)
+		// Capture input keys before Process consumes them — fold operations may
+		// read Account/Storage for neighboring cells, and we must not include
+		// those reads as input updates in the trace.
+		inputKeys := sdc.updates.PlainKeys()
 		defer func() {
 			if recorder == nil || err != nil {
 				return
 			}
-			if trace, traceErr := commitment.BuildTrieTrace(recorder); traceErr != nil {
+			if trace, traceErr := commitment.BuildTrieTrace(recorder, inputKeys); traceErr != nil {
 				log.Warn("[commitment] failed to build trie trace", "err", traceErr)
 			} else if traceErr = trace.Save(dbg.TrieTraceFile); traceErr != nil {
 				log.Warn("[commitment] failed to save trie trace", "path", dbg.TrieTraceFile, "err", traceErr)
