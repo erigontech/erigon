@@ -115,6 +115,7 @@ import (
 	"github.com/erigontech/erigon/node/silkworm"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/enr"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/p2p/sentry/libsentry"
@@ -1344,6 +1345,18 @@ func (s *Ethereum) setUpSnapDownloader(
 	if client != nil {
 		s.downloaderClient = downloader.NewRpcClient(client, s.config.Dirs.Snap)
 	}
+
+	// Wire chain.toml ENR updater: advertise snapshot manifest info-hash via discv5.
+	if s.downloader != nil && len(s.sentryServers) > 0 {
+		s.downloader.SetENRUpdater(func(ct enr.ChainToml) {
+			for _, srv := range s.sentryServers {
+				if p2p := srv.GetP2PServer(); p2p != nil {
+					p2p.LocalNode().Set(ct)
+				}
+			}
+		})
+	}
+
 	return err
 }
 
@@ -1384,6 +1397,13 @@ func (s *Ethereum) initDownloader(
 		// around. See the comment about resetting above. If that is resolved, we could delete or
 		// ignore incomplete torrents as aberrations.
 		s.logger.Warn("Downloader detected incomplete snapshots", "count", incomplete)
+	}
+
+	// Generate chain.toml from existing torrents on disk. The ENR updater is wired
+	// later (after this function returns), so the ENR update will be a no-op here.
+	// The background loop will re-publish with the correct frozenTx once P2P is up.
+	if pubErr := s.downloader.PublishLocalChainToml(0); pubErr != nil {
+		s.logger.Warn("Failed to publish initial chain.toml", "err", pubErr)
 	}
 
 	bittorrentServer, err := downloader.NewGrpcServer(s.downloader)

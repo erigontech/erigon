@@ -65,6 +65,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/p2p/enr"
 )
 
 var debugWebseed = false
@@ -114,6 +115,10 @@ type Downloader struct {
 	// Torrents that were added for download. The first time a torrent is added here, the adder is
 	// responsible for fetching metainfo and executing after-add handlers.
 	downloads map[*torrent.Torrent]struct{}
+
+	// enrUpdater is an optional callback to advertise chain.toml info-hash via discv5 ENR.
+	// Set via SetENRUpdater after P2P is available.
+	enrUpdater func(enr.ChainToml)
 }
 
 type AggStats struct {
@@ -395,6 +400,24 @@ func (d *Downloader) InitBackgroundLogger(logSeeding bool) {
 }
 
 func (d *Downloader) snapDir() string { return d.cfg.Dirs.Snap }
+
+// SetENRUpdater sets the callback used to advertise chain.toml info-hash via discv5 ENR.
+// Should be called after P2P servers are available.
+func (d *Downloader) SetENRUpdater(fn func(enr.ChainToml)) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	d.enrUpdater = fn
+}
+
+// PublishLocalChainToml generates chain.toml from local torrents, builds its .torrent,
+// and advertises the info-hash via ENR. frozenTx is the current max frozen transaction number.
+func (d *Downloader) PublishLocalChainToml(frozenTx uint64) error {
+	d.lock.RLock()
+	updater := d.enrUpdater
+	d.lock.RUnlock()
+
+	return PublishChainToml(d.snapDir(), d.torrentFS, frozenTx, updater)
+}
 
 // Check snapshot data looks right.
 func (d *Downloader) snapshotDataLooksComplete(info *metainfo.Info) bool {
