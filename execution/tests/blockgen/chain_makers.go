@@ -478,10 +478,36 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 				b.header.Extra = common.Copy(misc.DAOForkBlockExtra)
 			}
 		}
+		// Set ParentBeaconBlockRoot for Cancun+ blocks before InitializeBlockExecution
+		// so that EIP-4788 can store it during initialization.
+		if config.IsCancun(b.header.Time) {
+			var beaconBlockRoot common.Hash
+			if _, err := rand.Read(beaconBlockRoot[:]); err != nil {
+				return nil, nil, nil, fmt.Errorf("can't create beacon block root: %w", err)
+			}
+			b.header.ParentBeaconBlockRoot = &beaconBlockRoot
+		}
 		if b.engine != nil {
+			// Set tx context for system init call (txIndex -1)
+			if ibs.IsVersioned() {
+				ibs.ResetVersionedIO()
+				ibs.SetTxContext(b.header.Number.Uint64(), -1)
+			}
 			err := protocol.InitializeBlockExecution(b.engine, chainreader, b.header, config, ibs, nil, logger, nil)
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("call to InitializeBlockExecution: %w", err)
+			}
+			// Record system call I/O into blockIO for BAL computation
+			if ibs.IsVersioned() && b.blockIO != nil {
+				initVersion := state.Version{BlockNum: b.header.Number.Uint64(), TxIndex: -1}
+				writes := ibs.VersionedWrites(false)
+				b.blockIO.RecordReads(initVersion, ibs.VersionedReads())
+				b.blockIO.RecordAccesses(initVersion, ibs.AccessedAddresses())
+				b.blockIO.RecordWrites(initVersion, writes)
+				if b.versionMap != nil {
+					b.versionMap.FlushVersionedWrites(writes, true, "")
+				}
+				ibs.ResetVersionedIO()
 			}
 		}
 		// Execute any user modifications to the block
@@ -498,6 +524,10 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			if b.versionMap != nil {
 				b.ibs.SetTxContext(b.header.Number.Uint64(), len(b.txs))
 			}
+			// Reset versioned I/O before finalize to capture system call I/O cleanly
+			if ibs.IsVersioned() {
+				ibs.ResetVersionedIO()
+			}
 			// Finalize and seal the block
 			syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 				return protocol.SysCallContract(contract, data, config, ibs, b.header, b.engine, false /* constCall */, vm.Config{})
@@ -506,6 +536,18 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
+			}
+			// Record finalize system call I/O into blockIO for BAL computation
+			if ibs.IsVersioned() && b.blockIO != nil {
+				finalizeVersion := state.Version{BlockNum: b.header.Number.Uint64(), TxIndex: len(b.txs)}
+				writes := ibs.VersionedWrites(false)
+				b.blockIO.RecordReads(finalizeVersion, ibs.VersionedReads())
+				b.blockIO.RecordAccesses(finalizeVersion, ibs.AccessedAddresses())
+				b.blockIO.RecordWrites(finalizeVersion, writes)
+				if b.versionMap != nil {
+					b.versionMap.FlushVersionedWrites(writes, true, "")
+				}
+				ibs.ResetVersionedIO()
 			}
 
 			// Write state changes to db
@@ -516,11 +558,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 
 			if config.IsPrague(b.header.Time) {
 				b.header.RequestsHash = requests.Hash()
-				var beaconBlockRoot common.Hash
-				if _, err := rand.Read(beaconBlockRoot[:]); err != nil {
-					return nil, nil, nil, fmt.Errorf("can't create beacon block root: %w", err)
-				}
-				b.header.ParentBeaconBlockRoot = &beaconBlockRoot
 			}
 
 			var bal types.BlockAccessList

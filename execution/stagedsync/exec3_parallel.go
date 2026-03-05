@@ -22,7 +22,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
@@ -221,54 +220,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							return fmt.Errorf("block %d: applyCount mismatch: got: %d expected %d", applyResult.BlockNum, blockUpdateCount, applyResult.ApplyCount)
 						}
 
-						// pe.cfg.chainConfig.AmsterdamTime != nil && pe.cfg.chainConfig.AmsterdamTime.Uint64() > 0 is
-						// temporary to allow for initial non bals amsterdam testing before parallel exec is live by default
-						if (pe.cfg.chainConfig.AmsterdamTime != nil && pe.cfg.chainConfig.AmsterdamTime.Uint64() > 0 && pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime)) || pe.cfg.experimentalBAL {
-							bal := CreateBAL(applyResult.BlockNum, applyResult.TxIO, pe.cfg.dirs.DataDir)
-							if err := bal.Validate(); err != nil {
-								return fmt.Errorf("block %d: invalid computed block access list: %w", applyResult.BlockNum, err)
-							}
-							log.Debug("bal", "blockNum", applyResult.BlockNum, "hash", bal.Hash())
-							if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) {
-								if lastHeader.BlockAccessListHash == nil {
-									if pe.isBlockProduction {
-										hash := bal.Hash()
-										lastHeader.BlockAccessListHash = &hash
-									} else {
-										return fmt.Errorf("block %d: missing block access list hash", applyResult.BlockNum)
-									}
-								}
-								headerBALHash := *lastHeader.BlockAccessListHash
-								if !pe.isBlockProduction {
-									dbBALBytes, err := rawdb.ReadBlockAccessListBytes(rwTx, applyResult.BlockHash, applyResult.BlockNum)
-									if err != nil {
-										return fmt.Errorf("block %d: read stored block access list: %w", applyResult.BlockNum, err)
-									}
-									// BAL data may not be stored for blocks downloaded via backward
-									// block downloader (p2p sync) since it does not carry BAL sidecars.
-									// Remove after eth/71 has been implemented.
-									if dbBALBytes != nil {
-										dbBAL, err := types.DecodeBlockAccessListBytes(dbBALBytes)
-										if err != nil {
-											return fmt.Errorf("block %d: read stored block access list: %w", applyResult.BlockNum, err)
-										}
-										if err = dbBAL.Validate(); err != nil {
-											return fmt.Errorf("block %d: db block access list is invalid: %w", applyResult.BlockNum, err)
-										}
-
-										if headerBALHash != dbBAL.Hash() {
-											log.Info(fmt.Sprintf("bal from block: %s", dbBAL.DebugString()))
-											return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", applyResult.BlockNum, dbBAL.Hash(), headerBALHash)
-										}
-									}
-									if headerBALHash != bal.Hash() {
-										log.Info(fmt.Sprintf("computed bal: %s", bal.DebugString()))
-										return fmt.Errorf("%w, block=%d: block access list mismatch: got %s expected %s", rules.ErrInvalidBlock, applyResult.BlockNum, bal.Hash(), headerBALHash)
-									}
-								}
-							}
-						}
-
 						if err := pe.getPostValidator().Process(applyResult.BlockGasUsed, applyResult.BlobGasUsed, checkReceipts, applyResult.Receipts,
 							lastHeader, pe.isBlockProduction, b.Transactions(), pe.cfg.chainConfig, pe.logger); err != nil {
 							dumpTxIODebug(applyResult.BlockNum, applyResult.TxIO)
@@ -393,6 +344,13 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							err = pe.getPostValidator().Wait()
 							if err != nil {
 								return err
+							}
+
+							if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) || pe.cfg.experimentalBAL {
+								err = ProcessBAL(rwTx, lastHeader, applyResult.TxIO, pe.isBlockProduction, pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime), pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir)
+								if err != nil {
+									return err
+								}
 							}
 
 							if shouldGenerateChangesets {
@@ -1095,7 +1053,13 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 		if engine != nil {
 			if postApplyMessageFunc := engine.GetPostApplyMessageFunc(); postApplyMessageFunc != nil {
 				execResult := result.ExecutionResult
-				coinbase, err := stateReader.ReadAccountData(result.Coinbase) // to generate logs we want the initial balance
+				// Use a versionedStateReader to get the coinbase balance
+				// deterministically from the block's version map (which
+				// includes fee-calc writes from prior txs) instead of
+				// reading from stateReader whose content depends on
+				// apply-loop timing.
+				cbReader := state.NewVersionedStateReader(txIndex, nil, vm, stateReader)
+				coinbase, err := cbReader.ReadAccountData(result.Coinbase) // to generate logs we want the initial balance
 
 				if err != nil {
 					return nil, nil, nil, err
@@ -1570,15 +1534,17 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					be.blockIO.RecordReads(txVersion, mergedReads)
 				}
 				if len(addWrites) > 0 {
-					existing := be.blockIO.WriteSet(txVersion.TxIndex)
-					if len(existing) > 0 {
-						combined := append(state.VersionedWrites{}, existing...)
-						combined = append(combined, addWrites...)
-						be.blockIO.RecordWrites(txVersion, combined)
-					} else {
-						log.Info(fmt.Sprintf("writing %d, a: %v", len(addWrites), addWrites))
-						be.blockIO.RecordWrites(txVersion, addWrites)
-					}
+					// Merge finalization writes with existing execution writes.
+					existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
+					merged := MergeVersionedWrites(existingWrites, addWrites)
+					be.blockIO.RecordWrites(txVersion, merged)
+
+					// Flush the merged writes (including fee calc changes)
+					// to the version map so that subsequent per-tx
+					// finalizations see the full post-tx state (execution
+					// + fees) when reading via the version map fallback
+					// chain.
+					be.versionMap.FlushVersionedWrites(merged, true, "")
 				}
 
 				stateUpdates := stateWriter.WriteSet()
