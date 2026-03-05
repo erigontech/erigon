@@ -785,8 +785,25 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 		return fmt.Errorf("commitment state blockNum is ahead of blockNum: %d > %d", latestBlockNum, blockNum)
 	}
 	if latestBlockNum < blockNum {
-		// Empty blocks between latestBlockNum and blockNum had no state changes,
-		// so no commitment state was stored. Root hash check below will still verify correctness.
+		// Commitment state is from an earlier block. This is expected when intermediate blocks
+		// had no state changes (empty blocks). Verify the gap is truly empty.
+		if minTxNum > latestTxNum+1 {
+			gapAcc, err := touchHistoricalKeys(sd, tx, kv.AccountsDomain, latestTxNum+1, minTxNum, nil)
+			if err != nil {
+				return err
+			}
+			gapStorage, err := touchHistoricalKeys(sd, tx, kv.StorageDomain, latestTxNum+1, minTxNum, nil)
+			if err != nil {
+				return err
+			}
+			gapCode, err := touchHistoricalKeys(sd, tx, kv.CodeDomain, latestTxNum+1, minTxNum, nil)
+			if err != nil {
+				return err
+			}
+			if gapAcc+gapStorage+gapCode > 0 {
+				return fmt.Errorf("commitment state blockNum doesn't match blockNum: %d != %d (gap has %d acc, %d storage, %d code changes)", latestBlockNum, blockNum, gapAcc, gapStorage, gapCode)
+			}
+		}
 		logger.Log(lvl, "commitment state is from earlier block (empty blocks in between)", "commitmentBlockNum", latestBlockNum, "blockNum", blockNum)
 	}
 	if latestTxNum != maxTxNum && latestBlockNum == blockNum {
