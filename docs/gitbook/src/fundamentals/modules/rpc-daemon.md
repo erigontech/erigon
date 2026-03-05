@@ -98,6 +98,7 @@ Flags:
       --rpc.allow-unprotected-txs                   Allow for unprotected (non-EIP155 signed) transactions to be submitted via RPC
       --rpc.batch.concurrency uint                  Does limit amount of goroutines to process 1 batch request. Means 1 bach request can't overload server. 1 batch still can have unlimited amount of request (default 2)
       --rpc.batch.limit int                         Maximum number of requests in a batch (default 100)
+      --rpc.blockrange.limit int                    Sets a limit on the maximum number of blocks scanned per RPC request. Protects the rpcdaemon from resource exhaustion (CPU/Memory) and hangs caused by "heavy" queries (default 0)
       --rpc.evmtimeout duration                     Maximum amount of time to wait for the answer from EVM call. (default 5m0s)
       --rpc.gascap uint                             Sets a cap on gas that can be used in eth_call/estimateGas (default 50000000)
       --rpc.maxgetproofrewindblockcount.limit int   Max GetProof rewind block count (default 100000)
