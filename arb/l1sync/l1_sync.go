@@ -33,10 +33,10 @@ type L1SyncService struct {
 }
 
 func New(
+	ctx context.Context,
 	config *Config,
 	l1Client *ethclient.Client,
 	beaconUrl string,
-	blobL1Client *ethclient.Client,
 	exec execution.ExecutionSequencer,
 	db kv.RwDB,
 	logger log.Logger,
@@ -51,9 +51,10 @@ func New(
 	}
 	blobClient, err := headerreader.NewBlobClient(
 		headerreader.BlobClientConfig{BeaconUrl: beaconUrl},
-		blobL1Client)
+		l1Client)
+	err = blobClient.Initialize(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error initializing blob reader: %w", err)
 	}
 
 	return &L1SyncService{

@@ -93,13 +93,6 @@ func run(cliCtx *cli.Context) error {
 	}
 	logger.Info("connected to L1", "url", l1RpcUrl)
 
-	// Connect blob L1 client
-	blobL1Client, err := ethclient.Dial(cliCtx.String(beaconUrlFlag.Name))
-	if err != nil {
-		return fmt.Errorf("failed to connect to blob L1 RPC: %w", err)
-	}
-	logger.Info("connected to blob L1", "url", cliCtx.String(beaconUrlFlag.Name))
-
 	// Open database
 	db, err := openDB(cliCtx.String(dataDirFlag.Name))
 	if err != nil {
@@ -108,11 +101,14 @@ func run(cliCtx *cli.Context) error {
 	defer db.Close()
 
 	// Create l1sync service (nil exec for now)
+	ctx, cancel := context.WithCancel(cliCtx.Context)
+	defer cancel()
+
 	svc, err := l1sync.New(
+		ctx,
 		&cfg,
 		l1Client,
 		cliCtx.String(beaconUrlFlag.Name),
-		blobL1Client,
 		nil, // no execution sequencer for now
 		db,
 		logger,
@@ -121,8 +117,6 @@ func run(cliCtx *cli.Context) error {
 		return fmt.Errorf("failed to create l1sync service: %w", err)
 	}
 
-	ctx, cancel := context.WithCancel(cliCtx.Context)
-	defer cancel()
 
 	svc.Start(ctx)
 	logger.Info("l1sync service started, waiting for interrupt...")
