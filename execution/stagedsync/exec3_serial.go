@@ -35,6 +35,11 @@ type serialExecutor struct {
 	blobGasUsed     uint64
 	lastBlockResult *blockResult
 	worker          *exec.Worker
+
+	// accumulator for the current block; set at StartChange and used by the
+	// block-end stateWriter so that AuRa system-call nonce changes are
+	// included in the txpool state-diff batch.
+	accumulator *shards.Accumulator
 }
 
 func warmTxsHashes(block *types.Block) {
@@ -124,6 +129,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			return se.getHeader(ctx, hash, number)
 		}), se.cfg.engine, se.cfg.author, se.cfg.chainConfig)
 
+		se.accumulator = accumulator // keep in sync for executeBlock's stateWriter
 		if accumulator != nil {
 			txs, err := se.cfg.blockReader.RawTransactions(context.Background(), se.applyTx, b.NumberU64(), b.NumberU64())
 			if err != nil {
@@ -402,7 +408,10 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					}
 				}
 
-				stateWriter := state.NewWriter(se.doms.AsPutDel(se.applyTx), nil, txTask.TxNum)
+				// Pass se.accumulator so that AuRa / system-call nonce changes
+				// are included in the txpool state-diff batch (fixes empty block
+				// production on Gnosis Chain caused by stale pending txns).
+				stateWriter := state.NewWriter(se.doms.AsPutDel(se.applyTx), se.accumulator, txTask.TxNum)
 
 				if err = ibs.MakeWriteSet(txTask.Rules(), stateWriter); err != nil {
 					panic(err)
