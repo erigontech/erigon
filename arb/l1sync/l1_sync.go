@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"sync"
 	"time"
 
 	"github.com/erigontech/erigon-lib/log/v3"
@@ -30,6 +31,7 @@ type L1SyncService struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
+	wg     sync.WaitGroup
 }
 
 func New(
@@ -118,13 +120,18 @@ func (s *L1SyncService) Start(ctx context.Context) {
 		}
 	}
 
-	go s.pollLoop()
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.pollLoop()
+	}()
 }
 
 func (s *L1SyncService) StopAndWait() {
 	if s.cancel != nil {
 		s.cancel()
 	}
+	s.wg.Wait()
 }
 
 func (s *L1SyncService) pollLoop() {
@@ -203,6 +210,9 @@ func (s *L1SyncService) pollOnce(ctx context.Context) (pollMore bool, err error)
 		}
 
 		if err := s.fetchDelayedMessagesInRange(ctx, fromL1Block, toL1Block); err != nil {
+			if s.chunkSize <= 1 {
+				return false, fmt.Errorf("failed to fetch delayed messages at minimum chunk size for block %d: %w", fromL1Block, err)
+			}
 			s.logger.Warn("failed to fetch delayed messages, reducing chunk size",
 				"fromL1Block", fromL1Block, "toL1Block", toL1Block, "chunkSize", s.chunkSize, "err", err)
 			s.chunkSize = s.chunkSize / 2

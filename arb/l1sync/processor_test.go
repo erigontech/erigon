@@ -347,7 +347,7 @@ func TestUnpackBatchWithDelayedMessages(t *testing.T) {
 
 func TestCreateBlockFromMessage(t *testing.T) {
 	t.Run("nil message", func(t *testing.T) {
-		block, err := createBlockFromMessage(nil, nil)
+		block, err := createBlockFromMessage(nil, nil, big.NewInt(421614))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -358,7 +358,7 @@ func TestCreateBlockFromMessage(t *testing.T) {
 
 	t.Run("nil inner message", func(t *testing.T) {
 		msg := &arbostypes.MessageWithMetadata{Message: nil}
-		block, err := createBlockFromMessage(msg, nil)
+		block, err := createBlockFromMessage(msg, nil, big.NewInt(421614))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -381,7 +381,7 @@ func TestCreateBlockFromMessage(t *testing.T) {
 			},
 			DelayedMessagesRead: 0,
 		}
-		block, err := createBlockFromMessage(msg, nil)
+		block, err := createBlockFromMessage(msg, nil, big.NewInt(421614))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -473,7 +473,7 @@ func TestSingleBatchBackend(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		b := &singleBatchBackend{db: db}
+		b := &singleBatchBackend{ctx: context.Background(), db: db}
 		got, err := b.ReadDelayedInbox(5)
 		if err != nil {
 			t.Fatal(err)

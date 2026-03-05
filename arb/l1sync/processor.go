@@ -28,6 +28,7 @@ var (
 
 // singleBatchBackend implements arbstate.InboxBackend for a single batch
 type singleBatchBackend struct {
+	ctx                   context.Context
 	data                  []byte
 	blockHash             common.Hash
 	seqNum                uint64
@@ -64,7 +65,7 @@ func (b *singleBatchBackend) ReadDelayedInbox(seqNum uint64) (*arbostypes.L1Inco
 		return nil, fmt.Errorf("delayed inbox not available (requested seqNum %d)", seqNum)
 	}
 	var msg *arbostypes.L1IncomingMessage
-	err := b.db.View(context.Background(), func(tx kv.Tx) error {
+	err := b.db.View(b.ctx, func(tx kv.Tx) error {
 		var e error
 		msg, e = getDelayedMessage(tx, seqNum)
 		return e
@@ -75,6 +76,7 @@ func (b *singleBatchBackend) ReadDelayedInbox(seqNum uint64) (*arbostypes.L1Inco
 // UnpackBatch takes serialized batch data and extracts all MessageWithMetadata from it
 func UnpackBatch(ctx context.Context, seqNum uint64, data []byte, blockHash common.Hash, dapReaders []daprovider.Reader, db kv.RwDB, delayedMessagesRead uint64) ([]*arbostypes.MessageWithMetadata, error) {
 	backend := &singleBatchBackend{
+		ctx:       ctx,
 		data:      data,
 		blockHash: blockHash,
 		seqNum:    seqNum,
@@ -125,7 +127,7 @@ func (s *L1SyncService) ProcessBatch(ctx context.Context, seqNum uint64, data []
 		if err := tx.Put(kv.ArbL1SyncMsg, msgKey(seqNum, uint64(i)), msgBytes); err != nil {
 			return fmt.Errorf("failed to store message %d/%d: %w", seqNum, i, err)
 		}
-		block, err := createBlockFromMessage(msg, nil)
+		block, err := createBlockFromMessage(msg, nil, s.config.ChainID)
 		if err != nil {
 			fmt.Println("err", err)
 		} else if block.Number() != nil && block.NumberU64()%1000 == 0 {
@@ -250,11 +252,11 @@ type L1Info struct {
 	l1Timestamp   uint64
 }
 
-func createBlockFromMessage(msg *arbostypes.MessageWithMetadata, lastBlockHeader *types.Header) (*types.Block, error) {
+func createBlockFromMessage(msg *arbostypes.MessageWithMetadata, lastBlockHeader *types.Header, chainID *big.Int) (*types.Block, error) {
 	if msg == nil || msg.Message == nil {
 		return nil, nil
 	}
-	arbTxes, err := arbos.ParseL2Transactions(msg.Message, big.NewInt(421614))
+	arbTxes, err := arbos.ParseL2Transactions(msg.Message, chainID)
 	if err != nil {
 		// log.Warn("error parsing incoming message", "err", err)
 		arbTxes = arbTxes[:0]
@@ -279,7 +281,7 @@ func createBlockFromMessage(msg *arbostypes.MessageWithMetadata, lastBlockHeader
 	l1BlockNum := l1Info.l1BlockNumber
 
 	// Prepend a tx before all others to touch up the osState (update the L1 block num, pricing pools, etc)
-	startTx := arbos.InternalTxStartBlock(big.NewInt(421614), l1Header.L1BaseFee, l1BlockNum, header, lastBlockHeader)
+	startTx := arbos.InternalTxStartBlock(chainID, l1Header.L1BaseFee, l1BlockNum, header, lastBlockHeader)
 	txes = append(types.Transactions{startTx}, txes...)
 	// startTx := arbos.InternalTxStartBlock(e.chainConfig.ChainID, l1Header.L1BaseFee, l1BlockNum, header, header)
 	// txes = append(types.Transactions{types.NewArbTx(startTx)}, txes...)

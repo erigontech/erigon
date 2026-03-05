@@ -626,7 +626,7 @@ var PolygonBridgeTablesCfg = TableCfg{}
 
 func TablesCfgByLabel(label Label) TableCfg {
 	switch label {
-	case dbcfg.ChainDB, dbcfg.TemporaryDB, dbcfg.CaplinDB, dbcfg.ArbitrumDB, dbcfg.ArbClassicDB, dbcfg.ArbWasmDB, dbcfg.ArbStreamerDB, "ArbDb": //TODO: move caplindb tables to own table config
+	case dbcfg.ChainDB, dbcfg.TemporaryDB, dbcfg.CaplinDB, dbcfg.ArbitrumDB, dbcfg.ArbClassicDB, dbcfg.ArbWasmDB, dbcfg.ArbStreamerDB: //TODO: move caplindb tables to own table config
 		return ChaindataTablesCfg
 	case dbcfg.TxPoolDB:
 		return TxpoolTablesCfg
