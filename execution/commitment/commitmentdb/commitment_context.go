@@ -282,7 +282,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		recorder = commitment.NewRecordingContext(trieContext)
 		sdc.patriciaTrie.ResetContext(recorder)
 		defer func() {
-			if recorder == nil {
+			if recorder == nil || err != nil {
 				return
 			}
 			if trace, traceErr := commitment.BuildTrieTrace(recorder); traceErr != nil {
