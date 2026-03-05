@@ -19,74 +19,50 @@ package service
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"path"
 	"strconv"
 	"strings"
-	"time"
-	"unicode"
-
-	"github.com/erigontech/erigon/cl/gossip"
-	"github.com/erigontech/erigon/cl/sentinel"
-	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
 
 	"github.com/libp2p/go-libp2p/core/peer"
 
-	"github.com/erigontech/erigon-lib/diagnostics"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	sentinelrpc "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/sentinel"
+	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
-const gracePeerCount = 8
+const gracePeerCount = 32
 
-var _ sentinelrpc.SentinelServer = (*SentinelServer)(nil)
+var _ sentinelproto.SentinelServer = (*SentinelServer)(nil)
 
 type SentinelServer struct {
-	sentinelrpc.UnimplementedSentinelServer
+	sentinelproto.UnimplementedSentinelServer
 
-	ctx            context.Context
-	sentinel       *sentinel.Sentinel
-	gossipNotifier *gossipNotifier
+	ctx      context.Context
+	sentinel *sentinel.Sentinel
 
 	logger log.Logger
 }
 
 func NewSentinelServer(ctx context.Context, sentinel *sentinel.Sentinel, logger log.Logger) *SentinelServer {
 	return &SentinelServer{
-		sentinel:       sentinel,
-		ctx:            ctx,
-		gossipNotifier: newGossipNotifier(),
-		logger:         logger,
+		sentinel: sentinel,
+		ctx:      ctx,
+		logger:   logger,
 	}
 }
 
-// extractSubnetIndexByGossipTopic takes a topic and extract the blob sidecar
-func extractSubnetIndexByGossipTopic(name string) int {
-	// e.g blob_sidecar_3, we want to extract 3
-	// reject if last character is not a number
-	if !unicode.IsNumber(rune(name[len(name)-1])) {
-		return -1
+func (s *SentinelServer) BanPeer(_ context.Context, p *sentinelproto.Peer) (*sentinelproto.EmptyMessage, error) {
+	active, _, _ := s.sentinel.GetPeersCount()
+	if active < gracePeerCount {
+		return &sentinelproto.EmptyMessage{}, nil
 	}
-	// get the last part of the topic
-	parts := strings.Split(name, "_")
-	// convert it to int
-	index, err := strconv.Atoi(parts[len(parts)-1])
-	if err != nil {
-		log.Warn("[Sentinel] failed to parse subnet index", "topic", name, "err", err)
-		return -1
-	}
-	return index
-}
 
-//BanPeer(context.Context, *Peer) (*EmptyMessage, error)
-
-func (s *SentinelServer) BanPeer(_ context.Context, p *sentinelrpc.Peer) (*sentinelrpc.EmptyMessage, error) {
 	var pid peer.ID
 	if err := pid.UnmarshalText([]byte(p.Pid)); err != nil {
 		return nil, err
@@ -94,120 +70,18 @@ func (s *SentinelServer) BanPeer(_ context.Context, p *sentinelrpc.Peer) (*senti
 	s.sentinel.Peers().SetBanStatus(pid, true)
 	s.sentinel.Host().Peerstore().RemovePeer(pid)
 	s.sentinel.Host().Network().ClosePeer(pid)
-	return &sentinelrpc.EmptyMessage{}, nil
+	return &sentinelproto.EmptyMessage{}, nil
 }
 
-func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.GossipData) (*sentinelrpc.EmptyMessage, error) {
-	manager := s.sentinel.GossipManager()
-	// Snappify payload before sending it to gossip
-	compressedData := utils.CompressSnappy(msg.Data)
-
-	//trackPeerStatistics(msg.GetPeer().Pid, false, msg.Name, "unknown", len(compressedData))
-
-	var subscription *sentinel.GossipSubscription
-
-	switch msg.Name {
-	case gossip.TopicNameBeaconBlock,
-		gossip.TopicNameBeaconAggregateAndProof,
-		gossip.TopicNameVoluntaryExit,
-		gossip.TopicNameProposerSlashing,
-		gossip.TopicNameSyncCommitteeContributionAndProof,
-		gossip.TopicNameAttesterSlashing,
-		gossip.TopicNameBlsToExecutionChange:
-		subscription = manager.GetMatchingSubscription(msg.Name)
-	default:
-		// check subnets
-		switch {
-		case gossip.IsTopicBlobSidecar(msg.Name):
-			if msg.SubnetId == nil {
-				return nil, errors.New("subnetId is required for blob sidecar")
-			}
-			subscription = manager.GetMatchingSubscription(gossip.TopicNameBlobSidecar(*msg.SubnetId))
-		case gossip.IsTopicSyncCommittee(msg.Name):
-			if msg.SubnetId == nil {
-				return nil, errors.New("subnetId is required for sync_committee")
-			}
-			subscription = manager.GetMatchingSubscription(gossip.TopicNameSyncCommittee(int(*msg.SubnetId)))
-		case gossip.IsTopicBeaconAttestation(msg.Name):
-			if msg.SubnetId == nil {
-				return nil, errors.New("subnetId is required for beacon attestation")
-			}
-			subscription = manager.GetMatchingSubscription(gossip.TopicNameBeaconAttestation(*msg.SubnetId))
-		case gossip.IsTopicDataColumnSidecar(msg.Name):
-			if msg.SubnetId == nil {
-				return nil, errors.New("subnetId is required for data column sidecar")
-			}
-			subscription = manager.GetMatchingSubscription(gossip.TopicNameDataColumnSidecar(*msg.SubnetId))
-		default:
-			return &sentinelrpc.EmptyMessage{}, fmt.Errorf("unknown topic %s", msg.Name)
-		}
-	}
-	if subscription == nil {
-		return &sentinelrpc.EmptyMessage{}, fmt.Errorf("unknown topic %s", msg.Name)
-	}
-	return &sentinelrpc.EmptyMessage{}, subscription.Publish(compressedData)
+func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelproto.GossipData) (*sentinelproto.EmptyMessage, error) {
+	panic("do not call this")
 }
 
-func (s *SentinelServer) SubscribeGossip(data *sentinelrpc.SubscriptionData, stream sentinelrpc.Sentinel_SubscribeGossipServer) error {
-	// first of all subscribe
-	ch, subId, err := s.gossipNotifier.addSubscriber()
-	if err != nil {
-		return err
-	}
-	defer s.gossipNotifier.removeSubscriber(subId)
-
-	for {
-		select {
-		// Exit on stream context done
-		case <-stream.Context().Done():
-			return nil
-		case packet := <-ch:
-			if !s.gossipMatchSubscription(packet, data) {
-				continue
-			}
-			if err := stream.Send(&sentinelrpc.GossipData{
-				Data: packet.data,
-				Name: packet.t,
-				Peer: &sentinelrpc.Peer{
-					Pid: packet.pid,
-				},
-				SubnetId: packet.subnetId,
-			}); err != nil {
-				s.logger.Warn("[Sentinel] Could not relay gossip packet", "reason", err)
-			}
-		}
-	}
+func (s *SentinelServer) SubscribeGossip(data *sentinelproto.SubscriptionData, stream sentinelproto.Sentinel_SubscribeGossipServer) error {
+	panic("do not call this")
 }
 
-func (s *SentinelServer) gossipMatchSubscription(obj gossipObject, data *sentinelrpc.SubscriptionData) bool {
-	if data.Filter != nil {
-		filter := data.GetFilter()
-		matched, err := path.Match(obj.t, filter)
-		if err != nil || !matched {
-			return false
-		}
-	}
-	return true
-}
-
-func (s *SentinelServer) withTimeoutCtx(pctx context.Context, dur time.Duration) (ctx context.Context, cn func()) {
-	if dur > 0 {
-		ctx, cn = context.WithTimeout(pctx, 8*time.Second)
-	} else {
-		ctx, cn = context.WithCancel(pctx)
-	}
-	go func() {
-		select {
-		case <-s.ctx.Done():
-			cn()
-		case <-ctx.Done():
-			return
-		}
-	}()
-	return ctx, cn
-}
-
-func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sentinelrpc.RequestData) (*sentinelrpc.ResponseData, error) {
+func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sentinelproto.RequestData) (*sentinelproto.ResponseData, error) {
 	// prepare the http request
 	httpReq, err := http.NewRequest("GET", "http://service.internal/", bytes.NewBuffer(req.Data))
 	if err != nil {
@@ -264,10 +138,10 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	if err != nil {
 		return nil, err
 	}
-	ans := &sentinelrpc.ResponseData{
+	ans := &sentinelproto.ResponseData{
 		Data:  data,
 		Error: !responseCode.Success(),
-		Peer: &sentinelrpc.Peer{
+		Peer: &sentinelproto.Peer{
 			Pid: pid.String(),
 		},
 	}
@@ -275,7 +149,7 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 
 }
 
-func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelrpc.RequestData) (*sentinelrpc.ResponseData, error) {
+func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelproto.RequestData) (*sentinelproto.ResponseData, error) {
 	// Try finding the data to our peers
 	// this is using return statements instead of continue, since it saves a few lines
 	// but me writing this comment has put them back.. oh no!!! anyways, returning true means we stop.
@@ -300,12 +174,12 @@ func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelrpc.Reque
 	return resp, nil
 }
 
-func (s *SentinelServer) SendPeerRequest(ctx context.Context, reqWithPeer *sentinelrpc.RequestDataWithPeer) (*sentinelrpc.ResponseData, error) {
+func (s *SentinelServer) SendPeerRequest(ctx context.Context, reqWithPeer *sentinelproto.RequestDataWithPeer) (*sentinelproto.ResponseData, error) {
 	pid, err := peer.Decode(reqWithPeer.Pid)
 	if err != nil {
 		return nil, err
 	}
-	req := &sentinelrpc.RequestData{
+	req := &sentinelproto.RequestData{
 		Data:  reqWithPeer.Data,
 		Topic: reqWithPeer.Topic,
 	}
@@ -323,15 +197,15 @@ func (s *SentinelServer) SendPeerRequest(ctx context.Context, reqWithPeer *senti
 	return resp, nil
 }
 
-func (s *SentinelServer) Identity(ctx context.Context, in *sentinelrpc.EmptyMessage) (*sentinelrpc.IdentityResponse, error) {
+func (s *SentinelServer) Identity(ctx context.Context, in *sentinelproto.EmptyMessage) (*sentinelproto.IdentityResponse, error) {
 	// call s.sentinel.Identity()
 	pid, enr, p2pAddresses, discoveryAddresses, metadata := s.sentinel.Identity()
-	return &sentinelrpc.IdentityResponse{
+	return &sentinelproto.IdentityResponse{
 		Pid:                pid,
 		Enr:                enr,
 		P2PAddresses:       p2pAddresses,
 		DiscoveryAddresses: discoveryAddresses,
-		Metadata: &sentinelrpc.Metadata{
+		Metadata: &sentinelproto.Metadata{
 			Seq:      metadata.SeqNumber,
 			Attnets:  fmt.Sprintf("%x", metadata.Attnets),
 			Syncnets: fmt.Sprintf("%x", *metadata.Syncnets),
@@ -340,7 +214,7 @@ func (s *SentinelServer) Identity(ctx context.Context, in *sentinelrpc.EmptyMess
 
 }
 
-func (s *SentinelServer) SetStatus(_ context.Context, req *sentinelrpc.Status) (*sentinelrpc.EmptyMessage, error) {
+func (s *SentinelServer) SetStatus(_ context.Context, req *sentinelproto.Status) (*sentinelproto.EmptyMessage, error) {
 	// Send the request and get the data if we get an answer.
 	s.sentinel.SetStatus(&cltypes.Status{
 		ForkDigest:     utils.Uint32ToBytes4(req.ForkDigest),
@@ -349,26 +223,26 @@ func (s *SentinelServer) SetStatus(_ context.Context, req *sentinelrpc.Status) (
 		FinalizedEpoch: req.FinalizedEpoch,
 		HeadSlot:       req.HeadSlot,
 	})
-	return &sentinelrpc.EmptyMessage{}, nil
+	return &sentinelproto.EmptyMessage{}, nil
 }
 
-func (s *SentinelServer) GetPeers(_ context.Context, _ *sentinelrpc.EmptyMessage) (*sentinelrpc.PeerCount, error) {
+func (s *SentinelServer) GetPeers(_ context.Context, _ *sentinelproto.EmptyMessage) (*sentinelproto.PeerCount, error) {
 	count, connected, disconnected := s.sentinel.GetPeersCount()
 	// Send the request and get the data if we get an answer.
-	return &sentinelrpc.PeerCount{
+	return &sentinelproto.PeerCount{
 		Active:       uint64(count),
 		Connected:    uint64(connected),
 		Disconnected: uint64(disconnected),
 	}, nil
 }
 
-func (s *SentinelServer) PeersInfo(ctx context.Context, r *sentinelrpc.PeersInfoRequest) (*sentinelrpc.PeersInfoResponse, error) {
+func (s *SentinelServer) PeersInfo(ctx context.Context, r *sentinelproto.PeersInfoRequest) (*sentinelproto.PeersInfoResponse, error) {
 	peersInfos := s.sentinel.GetPeersInfos()
 	if r.Direction == nil && r.State == nil {
 		return peersInfos, nil
 	}
-	filtered := &sentinelrpc.PeersInfoResponse{
-		Peers: make([]*sentinelrpc.Peer, 0, len(peersInfos.Peers)),
+	filtered := &sentinelproto.PeersInfoResponse{
+		Peers: make([]*sentinelproto.Peer, 0, len(peersInfos.Peers)),
 	}
 	for _, peer := range peersInfos.Peers {
 		if r.Direction != nil && peer.Direction != *r.Direction {
@@ -382,112 +256,8 @@ func (s *SentinelServer) PeersInfo(ctx context.Context, r *sentinelrpc.PeersInfo
 	return filtered, nil
 }
 
-func (s *SentinelServer) ListenToGossip() {
-	for {
-		select {
-		case pkt := <-s.sentinel.RecvGossip():
-			s.handleGossipPacket(pkt)
-		case <-s.ctx.Done():
-			return
-		}
-	}
-}
-
-func (s *SentinelServer) SetSubscribeExpiry(ctx context.Context, expiryReq *sentinelrpc.RequestSubscribeExpiry) (*sentinelrpc.EmptyMessage, error) {
-	var (
-		topic      = expiryReq.GetTopic()
-		expiryTime = time.Unix(int64(expiryReq.GetExpiryUnixSecs()), 0)
-	)
-	subs := s.sentinel.GossipManager().GetMatchingSubscription(topic)
-	if subs == nil {
-		return nil, errors.New("no such subscription")
-	}
-	subs.OverwriteSubscriptionExpiry(expiryTime)
-	return &sentinelrpc.EmptyMessage{}, nil
-}
-
-func (s *SentinelServer) handleGossipPacket(pkt *sentinel.GossipMessage) error {
-	var err error
-	s.logger.Trace("[Sentinel Gossip] Received Packet", "topic", pkt.TopicName)
-
-	data := pkt.Data
-	topic := pkt.TopicName
-	// If we use snappy codec then decompress it accordingly.
-	if strings.Contains(topic, sentinel.SSZSnappyCodec) {
-		data, err = utils.DecompressSnappy(data, true)
-		if err != nil {
-			return err
-		}
-	}
-	textPid, err := pkt.From.MarshalText()
-	if err != nil {
-		return err
-	}
-
-	msgType, gossipTopic := parseTopic(topic)
-	trackPeerStatistics(string(textPid), true, msgType, gossipTopic, len(data))
-
-	switch gossipTopic {
-	case gossip.TopicNameBeaconBlock,
-		gossip.TopicNameBeaconAggregateAndProof,
-		gossip.TopicNameVoluntaryExit,
-		gossip.TopicNameProposerSlashing,
-		gossip.TopicNameAttesterSlashing,
-		gossip.TopicNameBlsToExecutionChange,
-		gossip.TopicNameSyncCommitteeContributionAndProof:
-		s.gossipNotifier.notify(&gossipObject{
-			data:     data,
-			t:        gossipTopic,
-			pid:      string(textPid),
-			subnetId: nil,
-		})
-	default:
-		// case for:
-		// TopicNamePrefixBlobSidecar
-		// TopicNamePrefixBeaconAttestation
-		// TopicNamePrefixSyncCommittee
-		subnet := extractSubnetIndexByGossipTopic(gossipTopic)
-		if subnet < 0 {
-			break
-		}
-		subnetId := uint64(subnet)
-		s.gossipNotifier.notify(&gossipObject{
-			data:     data,
-			t:        gossipTopic,
-			pid:      string(textPid),
-			subnetId: &subnetId,
-		})
-	}
-	return nil
-}
-
-func trackPeerStatistics(peerID string, inbound bool, msgType string, msgCap string, bytes int) {
-	isDiagEnabled := diagnostics.TypeOf(diagnostics.PeerStatisticMsgUpdate{}).Enabled()
-	if isDiagEnabled {
-		diagnostics.Send(diagnostics.PeerStatisticMsgUpdate{
-			PeerName: "TODO",
-			PeerType: "Sentinel",
-			PeerID:   peerID,
-			Inbound:  inbound,
-			MsgType:  msgType,
-			MsgCap:   msgCap,
-			Bytes:    bytes,
-		})
-	}
-}
-
-func parseTopic(input string) (string, string) {
-	// e.g /eth2/d31f6191/blob_sidecar_3/ssz_snappy
-	parts := strings.Split(input, "/")
-
-	if len(parts) < 4 {
-		return "unknown", "unknown"
-	}
-
-	capability := parts[1]
-	topick := parts[3]
-
-	return capability, topick
+func (s *SentinelServer) SetSubscribeExpiry(ctx context.Context, expiryReq *sentinelproto.RequestSubscribeExpiry) (*sentinelproto.EmptyMessage, error) {
+	panic("do not call this")
 }
 
 type ResponseCode int

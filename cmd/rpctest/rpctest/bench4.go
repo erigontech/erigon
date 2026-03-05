@@ -18,8 +18,9 @@ package rpctest
 
 import (
 	"fmt"
+	"maps"
 
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 )
 
 func Bench4(erigon_url string) error {
@@ -66,9 +67,7 @@ func Bench4(erigon_url string) error {
 			break
 		} else {
 			nextKey = sr.Result.NextKey
-			for k, v := range sr.Result.Storage {
-				sm[k] = v
-			}
+			maps.Copy(sm, sr.Result.Storage)
 		}
 	}
 	fmt.Printf("storageRange: %d\n", len(sm))

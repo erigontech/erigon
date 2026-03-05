@@ -27,7 +27,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 func newTestServer(logger log.Logger) *Server {
@@ -71,9 +71,9 @@ type echoResult struct {
 
 type testError struct{}
 
-func (testError) Error() string          { return "testError" }
-func (testError) ErrorCode() int         { return 444 }
-func (testError) ErrorData() interface{} { return "testError data" }
+func (testError) Error() string  { return "testError" }
+func (testError) ErrorCode() int { return 444 }
+func (testError) ErrorData() any { return "testError data" }
 
 func (s *testService) NoArgsRets() {}
 
@@ -119,24 +119,24 @@ func (s *testService) ReturnError() error {
 	return testError{}
 }
 
-func (s *testService) CallMeBack(ctx context.Context, method string, args []interface{}) (interface{}, error) {
+func (s *testService) CallMeBack(ctx context.Context, method string, args []any) (any, error) {
 	c, ok := ClientFromContext(ctx, log.New())
 	if !ok {
 		return nil, errors.New("no client")
 	}
-	var result interface{}
+	var result any
 	err := c.Call(&result, method, args...)
 	return result, err
 }
 
-func (s *testService) CallMeBackLater(ctx context.Context, method string, args []interface{}) error {
+func (s *testService) CallMeBackLater(ctx context.Context, method string, args []any) error {
 	c, ok := ClientFromContext(ctx, log.New())
 	if !ok {
 		return errors.New("no client")
 	}
 	go func() {
 		<-ctx.Done()
-		var result interface{}
+		var result any
 		c.Call(&result, method, args...)
 	}()
 	return nil

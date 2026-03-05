@@ -78,10 +78,14 @@ docker-compose.*.yml
 .env
 coverage-test.out
 coverage-test-all.out
+cpu_*.out
+mem_*.out
+bench_*.txt
 
 dist
 __debug_bin
 *.exe
+*.test
 
 *.log
 
@@ -109,3 +113,14 @@ mdbx.dat
 mdbx.lck
 /*/**/LOCK
 /*/**/nodekey
+
+.my
+
+*.prof
+
+.claude/settings.local.json
+.claude/projects/
+.claude/skills/**/skill.md
+
+# Prevent accidental commit of locally-built binaries
+/erigon

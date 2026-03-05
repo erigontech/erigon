@@ -33,7 +33,7 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/gorilla/websocket"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 const (
@@ -203,6 +203,9 @@ func DialWebsocketWithDialer(ctx context.Context, endpoint, origin string, diale
 		//nolint
 		conn, resp, err := dialer.DialContext(ctx, endpoint, header)
 		if err != nil {
+			if resp != nil {
+				resp.Body.Close()
+			}
 			hErr := wsHandshakeError{err: err}
 			if resp != nil {
 				hErr.status = resp.Status
@@ -285,7 +288,7 @@ func (wc *websocketCodec) peerInfo() PeerInfo {
 	return wc.info
 }
 
-func (wc *websocketCodec) WriteJSON(ctx context.Context, v interface{}) error {
+func (wc *websocketCodec) WriteJSON(ctx context.Context, v any) error {
 	err := wc.jsonCodec.WriteJSON(ctx, v)
 	if err == nil {
 		// Notify pingLoop to delay the next idle ping.

@@ -22,15 +22,12 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	sentinel "github.com/erigontech/erigon-lib/gointerfaces/sentinelproto"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/aggregation"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
@@ -39,12 +36,15 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/committee_subscription"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 var (
 	computeSubnetForAttestation  = subnets.ComputeSubnetForAttestation
 	computeCommitteeCountPerSlot = subnets.ComputeCommitteeCountPerSlot
-	computeSigningRoot           = fork.ComputeSigningRoot
 )
 
 type attestationService struct {
@@ -67,7 +67,7 @@ type attestationService struct {
 type AttestationForGossip struct {
 	Attestation       *solid.Attestation
 	SingleAttestation *solid.SingleAttestation // New container after Electra
-	Receiver          *sentinel.Peer
+	Receiver          *sentinelproto.Peer
 	// ImmediateProcess indicates whether the attestation should be processed immediately or able to be scheduled for later processing.
 	ImmediateProcess bool
 }
@@ -100,6 +100,30 @@ func NewAttestationService(
 
 	//go a.loop(ctx)
 	return a
+}
+
+func (s *attestationService) Names() []string {
+	names := make([]string, 0, s.netCfg.AttestationSubnetCount)
+	for i := 0; i < int(s.netCfg.AttestationSubnetCount); i++ {
+		names = append(names, gossip.TopicNameBeaconAttestation(uint64(i)))
+	}
+	return names
+}
+
+func (s *attestationService) IsMyGossipMessage(name string) bool {
+	return gossip.IsTopicBeaconAttestation(name)
+}
+
+func (s *attestationService) DecodeGossipMessage(pid peer.ID, data []byte, version clparams.StateVersion) (*AttestationForGossip, error) {
+	obj := &AttestationForGossip{
+		Receiver:         &sentinelproto.Peer{Pid: pid.String()},
+		ImmediateProcess: false,
+	}
+	obj.SingleAttestation = &solid.SingleAttestation{}
+	if err := obj.SingleAttestation.DecodeSSZ(data, int(version)); err != nil {
+		return nil, err
+	}
+	return obj, nil
 }
 
 func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64, att *AttestationForGossip) error {
@@ -158,7 +182,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	// i.e. attestation.data.slot + ATTESTATION_PROPAGATION_SLOT_RANGE >= current_slot >= attestation.data.slot (a client MAY queue future attestations for processing at the appropriate slot).
 	currentSlot := s.ethClock.GetCurrentSlot()
 	if currentSlot < slot || currentSlot > slot+s.netCfg.AttestationPropagationSlotRange {
-		return fmt.Errorf("not in propagation range %w", ErrIgnore)
+		return fmt.Errorf("not in propagation range")
 	}
 	// [REJECT] The attestation's epoch matches its target -- i.e. attestation.data.target.epoch == compute_epoch_at_slot(attestation.data.slot)
 	if targetEpoch != slot/s.beaconCfg.SlotsPerEpoch {
@@ -306,7 +330,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 
 	if att.ImmediateProcess {
 		return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
-
 	}
 
 	// push the signatures to verify asynchronously and run final functions after that.
@@ -316,7 +339,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves
 	// in BatchSignatureVerifier service. After validating signatures, if they are valid we will publish the
 	// gossip ourselves or ban the peer which sent that particular invalid signature.
-	return ErrIgnore
+	return nil
 }
 
 // type attestationJob struct {

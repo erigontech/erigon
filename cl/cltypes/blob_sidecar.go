@@ -19,14 +19,14 @@ package cltypes
 import (
 	"encoding/json"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/types/clonable"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/length"
 )
 
 const CommitmentBranchSize = 17
@@ -97,8 +97,8 @@ func (b *BlobSidecar) Clone() clonable.Clonable {
 	return NewBlobSidecar(b.Index, blob, b.KzgCommitment, b.KzgProof, b.SignedBlockHeader, b.CommitmentInclusionProof)
 }
 
-func (b *BlobSidecar) getSchema() []interface{} {
-	s := []interface{}{&b.Index, b.Blob[:], b.KzgCommitment[:], b.KzgProof[:]}
+func (b *BlobSidecar) getSchema() []any {
+	s := []any{&b.Index, b.Blob[:], b.KzgCommitment[:], b.KzgProof[:]}
 	if b.SignedBlockHeader != nil {
 		s = append(s, b.SignedBlockHeader)
 	}
@@ -140,8 +140,8 @@ func (*BlobIdentifier) Clone() clonable.Clonable {
 	return &BlobIdentifier{}
 }
 
-func (b *BlobIdentifier) getSchema() []interface{} {
-	return []interface{}{
+func (b *BlobIdentifier) getSchema() []any {
+	return []any{
 		b.BlockRoot[:],
 		&b.Index,
 	}

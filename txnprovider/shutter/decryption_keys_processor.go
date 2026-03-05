@@ -19,7 +19,6 @@
 package shutter
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -28,15 +27,16 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
-	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/estimate"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/estimate"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	shuttercrypto "github.com/erigontech/erigon/txnprovider/shutter/internal/crypto"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/proto"
+	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
@@ -150,9 +150,11 @@ func (dkp *DecryptionKeysProcessor) process(msg *proto.DecryptionKeys) error {
 		return err
 	}
 
-	txnIndexToKey := make(map[TxnIndex]*proto.Key, len(keys))
-	for i, key := range keys {
-		txnIndexToKey[from+TxnIndex(i)] = key
+	ipToKey := make(map[IdentityPreimage]*proto.Key, len(keys))
+	for _, key := range keys {
+		// note keys that have reached here are validated by NewDecryptionKeysExtendedValidator,
+		// so it is safe to cast directly without validating
+		ipToKey[IdentityPreimage(key.IdentityPreimage)] = key
 	}
 
 	var eg errgroup.Group
@@ -162,7 +164,7 @@ func (dkp *DecryptionKeysProcessor) process(msg *proto.DecryptionKeys) error {
 	var totalBytes atomic.Int64
 	for i, encryptedTxn := range encryptedTxns {
 		eg.Go(func() error {
-			txn, err := dkp.decryptTxn(txnIndexToKey, encryptedTxn)
+			txn, err := dkp.decryptTxn(ipToKey, encryptedTxn)
 			if err != nil {
 				dkp.logger.Debug(
 					"failed to decrypt transaction - skipping",
@@ -222,21 +224,17 @@ func (dkp *DecryptionKeysProcessor) process(msg *proto.DecryptionKeys) error {
 	return nil
 }
 
-func (dkp *DecryptionKeysProcessor) decryptTxn(keys map[TxnIndex]*proto.Key, sub EncryptedTxnSubmission) (types.Transaction, error) {
-	dkp.logger.Debug("decrypting txn", "txnIndex", sub.TxnIndex)
-	key, ok := keys[sub.TxnIndex]
+func (dkp *DecryptionKeysProcessor) decryptTxn(keys map[IdentityPreimage]*proto.Key, sub EncryptedTxnSubmission) (types.Transaction, error) {
+	submissionIp := sub.IdentityPreimage()
+	dkp.logger.Debug("decrypting txn", "txnIndex", sub.TxnIndex, "ip", submissionIp)
+	key, ok := keys[*submissionIp]
 	if !ok {
-		return nil, fmt.Errorf("key not found for txn index %d", sub.TxnIndex)
+		return nil, fmt.Errorf("decryption key not found for txn: index=%d, ip=%s", sub.TxnIndex, submissionIp)
 	}
 
 	epochSecretKey, err := EpochSecretKeyFromBytes(key.Key)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode epoch secret key during txn decryption: %w", err)
-	}
-
-	submissionIdentityPreimage := sub.IdentityPreimageBytes()
-	if !bytes.Equal(key.IdentityPreimage, submissionIdentityPreimage) {
-		return nil, identityPreimageMismatchErr(key.IdentityPreimage, submissionIdentityPreimage)
 	}
 
 	encryptedMessage := new(shuttercrypto.EncryptedMessage)
@@ -268,7 +266,7 @@ func (dkp *DecryptionKeysProcessor) decryptTxn(keys map[TxnIndex]*proto.Key, sub
 		return nil, fmt.Errorf("txn gas limit mismatch: txn=%d, encryptedTxnSubmission=%d", txn.GetGasLimit(), subGasLimit)
 	}
 
-	txn.SetSender(sender)
+	txn.SetSender(accounts.InternAddress(sender))
 	return txn, nil
 }
 
@@ -279,7 +277,7 @@ func (dkp *DecryptionKeysProcessor) threadSafeParseTxn(rlp []byte) (*txpool.TxnS
 
 	var txnSlot txpool.TxnSlot
 	var sender common.Address
-	_, err := dkp.txnParseCtx.ParseTransaction(rlp, 0, &txnSlot, sender[:], true, true, nil)
+	_, err := dkp.txnParseCtx.ParseTransaction(rlp, 0, &txnSlot, sender[:], false, true, nil)
 	if err != nil {
 		return nil, common.Address{}, err
 	}
@@ -288,6 +286,7 @@ func (dkp *DecryptionKeysProcessor) threadSafeParseTxn(rlp []byte) (*txpool.TxnS
 }
 
 func (dkp *DecryptionKeysProcessor) cleanupLoop(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
 	blockEventC := make(chan BlockEvent)
 	unregister := dkp.blockListener.RegisterObserver(func(event BlockEvent) {
 		select {
@@ -296,6 +295,7 @@ func (dkp *DecryptionKeysProcessor) cleanupLoop(ctx context.Context) error {
 		}
 	})
 	defer unregister()
+	defer cancel() // make sure we release the observer before unregistering to avoid leaks/deadlocks
 
 	for {
 		select {
@@ -343,30 +343,10 @@ func (dkp *DecryptionKeysProcessor) processBlockEventCleanup(blockEvent BlockEve
 
 	for _, mark := range cleanUpMarks {
 		dkp.processed.Remove(mark)
-		dkp.encryptedTxnsPool.DeleteUpTo(mark.Eon, mark.To+1)
+		dkp.encryptedTxnsPool.DeleteUpTo(mark.Eon, mark.To)
 	}
 
 	return nil
-}
-
-func identityPreimageMismatchErr(keyIpBytes, submissionIpBytes []byte) error {
-	err := errors.New("identity preimage mismatch")
-
-	keyIp, ipErr := IdentityPreimageFromBytes(keyIpBytes)
-	if ipErr != nil {
-		err = fmt.Errorf("%w: keyIp=%s", err, ipErr)
-	} else {
-		err = fmt.Errorf("%w: keyIp=%s", err, keyIp)
-	}
-
-	submissionIp, ipErr := IdentityPreimageFromBytes(submissionIpBytes)
-	if ipErr != nil {
-		err = fmt.Errorf("%w: submissionIp=%s", err, ipErr)
-	} else {
-		err = fmt.Errorf("%w: submissionIp=%s", err, submissionIp)
-	}
-
-	return err
 }
 
 type ProcessedMark struct {

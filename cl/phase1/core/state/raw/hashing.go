@@ -20,10 +20,10 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/types/ssz"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/merkle_tree"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 func (b *BeaconState) HashSSZ() (out [32]byte, err error) {
@@ -69,7 +69,7 @@ func (b *BeaconState) CurrentSyncCommitteeBranch() ([][32]byte, error) {
 		leafSize = StateLeafSizeFulu
 	}
 
-	schema := []interface{}{}
+	schema := []any{}
 	for i := 0; i < leafSize*32; i += 32 {
 		schema = append(schema, b.leaves[i:i+32])
 	}
@@ -92,7 +92,7 @@ func (b *BeaconState) NextSyncCommitteeBranch() ([][32]byte, error) {
 		leafSize = StateLeafSizeFulu
 	}
 
-	schema := []interface{}{}
+	schema := []any{}
 	for i := 0; i < leafSize*32; i += 32 {
 		schema = append(schema, b.leaves[i:i+32])
 	}
@@ -114,7 +114,7 @@ func (b *BeaconState) FinalityRootBranch() ([][32]byte, error) {
 		leafSize = StateLeafSizeFulu
 	}
 
-	schema := []interface{}{}
+	schema := []any{}
 	for i := 0; i < leafSize*32; i += 32 {
 		schema = append(schema, b.leaves[i:i+32])
 	}

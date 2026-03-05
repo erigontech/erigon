@@ -26,8 +26,8 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 //go:generate mockgen -typed=true -destination=./store_mock.go -package=sync . Store

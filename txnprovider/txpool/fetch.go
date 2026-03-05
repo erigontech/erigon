@@ -27,13 +27,14 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/gointerfaces/grpcutil"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	sentry "github.com/erigontech/erigon-lib/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/maphash"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 )
 
 // Fetch connects to sentry and implements eth/66 protocol regarding the transaction
@@ -48,14 +49,14 @@ type Fetch struct {
 	wg                       *sync.WaitGroup // used for synchronisation in the tests (nil when not in tests)
 	stateChangesParseCtx     *TxnParseContext
 	pooledTxnsParseCtx       *TxnParseContext
-	sentryClients            []sentry.SentryClient // sentry clients that will be used for accessing the network
+	sentryClients            []sentryproto.SentryClient // sentry clients that will be used for accessing the network
 	stateChangesParseCtxLock sync.Mutex
 	pooledTxnsParseCtxLock   sync.Mutex
 	logger                   log.Logger
 }
 
 type StateChangesClient interface {
-	StateChanges(ctx context.Context, in *remote.StateChangeRequest, opts ...grpc.CallOption) (remote.KV_StateChangesClient, error)
+	StateChanges(ctx context.Context, in *remoteproto.StateChangeRequest, opts ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error)
 }
 
 // NewFetch creates a new fetch object that will work with given sentry clients. Since the
@@ -63,7 +64,7 @@ type StateChangesClient interface {
 // to implement all the functions of the SentryClient interface).
 func NewFetch(
 	ctx context.Context,
-	sentryClients []sentry.SentryClient,
+	sentryClients []sentryproto.SentryClient,
 	pool Pool,
 	stateChangesClient StateChangesClient,
 	db kv.RwDB,
@@ -132,7 +133,7 @@ func (f *Fetch) ConnectCore() {
 	}()
 }
 
-func (f *Fetch) receiveMessageLoop(sentryClient sentry.SentryClient) {
+func (f *Fetch) receiveMessageLoop(sentryClient sentryproto.SentryClient) {
 	for {
 		select {
 		case <-f.ctx.Done():
@@ -158,15 +159,15 @@ func (f *Fetch) receiveMessageLoop(sentryClient sentry.SentryClient) {
 	}
 }
 
-func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentry.SentryClient) error {
+func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.SentryClient) error {
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	stream, err := sentryClient.Messages(streamCtx, &sentry.MessagesRequest{Ids: []sentry.MessageId{
-		sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
-		sentry.MessageId_GET_POOLED_TRANSACTIONS_66,
-		sentry.MessageId_TRANSACTIONS_66,
-		sentry.MessageId_POOLED_TRANSACTIONS_66,
-		sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_68,
+	stream, err := sentryClient.Messages(streamCtx, &sentryproto.MessagesRequest{Ids: []sentryproto.MessageId{
+		sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
+		sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66,
+		sentryproto.MessageId_TRANSACTIONS_66,
+		sentryproto.MessageId_POOLED_TRANSACTIONS_66,
+		sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68,
 	}}, grpc.WaitForReady(true))
 	if err != nil {
 		select {
@@ -176,7 +177,77 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentry.SentryCl
 		}
 		return err
 	}
-	var req *sentry.InboundMessage
+
+	var (
+		batch     = make([]*sentryproto.InboundMessage, 0, 256)
+		batchLock sync.Mutex
+	)
+
+	// LRU cache for deduplication - filters duplicates before they enter the batch
+	// Uses maphash to avoid string allocations
+	seenLRU, _ := maphash.NewLRU[struct{}](1024)
+
+	flushBatch := func() {
+		batchLock.Lock()
+		if len(batch) == 0 {
+			batchLock.Unlock()
+			return
+		}
+		toProcess := batch
+		batch = make([]*sentryproto.InboundMessage, 0, 256)
+		batchLock.Unlock()
+
+		if !f.pool.Started() {
+			return
+		}
+
+		if f.db == nil {
+			for range toProcess {
+				if f.wg != nil {
+					f.wg.Done()
+				}
+			}
+			return
+		}
+
+		tx, txErr := f.db.BeginRo(streamCtx)
+		if txErr != nil {
+			f.logger.Warn("[txpool.fetch] failed to begin batch transaction", "err", txErr)
+			return
+		}
+		defer tx.Rollback()
+
+		for _, req := range toProcess {
+			if handleErr := f.handleInboundMessageWithTx(streamCtx, tx, req, sentryClient); handleErr != nil {
+				if !grpcutil.IsRetryLater(handleErr) && !grpcutil.IsEndOfStream(handleErr) {
+					f.logger.Trace("[txpool.fetch] Handling batched message", "reqID", req.Id.String(), "err", handleErr)
+				}
+			}
+			if f.wg != nil {
+				f.wg.Done()
+			}
+		}
+	}
+
+	// Start ticker goroutine to flush batch.
+	// Reduced from 1s to 250ms to lower worst-case latency between receiving
+	// a POOLED_TRANSACTIONS_66 response and the transaction entering the pool.
+	// This matters for block builders that need freshly-gossiped transactions
+	// (e.g. multi-client blob tx ordering tests with a 2s payload window).
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+	go func() {
+		for {
+			select {
+			case <-streamCtx.Done():
+				return
+			case <-ticker.C:
+				flushBatch()
+			}
+		}
+	}()
+
+	var req *sentryproto.InboundMessage
 	for req, err = stream.Recv(); ; req, err = stream.Recv() {
 		if err != nil {
 			select {
@@ -187,22 +258,26 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentry.SentryCl
 			return fmt.Errorf("txpool.receiveMessage: %w", err)
 		}
 		if req == nil {
+			flushBatch()
 			return nil
 		}
-		if err = f.handleInboundMessage(streamCtx, req, sentryClient); err != nil {
-			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-				time.Sleep(3 * time.Second)
-				continue
+
+		// Skip duplicates using LRU cache with maphash to avoid string allocs
+		if _, seen := seenLRU.Get(req.Data); seen {
+			if f.wg != nil {
+				f.wg.Done()
 			}
-			f.logger.Debug("[txpool.fetch] Handling incoming message", "reqID", req.Id.String(), "err", err)
+			continue
 		}
-		if f.wg != nil {
-			f.wg.Done()
-		}
+		seenLRU.Set(req.Data, struct{}{})
+
+		batchLock.Lock()
+		batch = append(batch, req)
+		batchLock.Unlock()
 	}
 }
 
-func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMessage, sentryClient sentry.SentryClient) (err error) {
+func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s, rlp: %x", rec, dbg.Stack(), req.Data)
@@ -212,18 +287,22 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 	if !f.pool.Started() {
 		return nil
 	}
-	tx, err := f.db.BeginRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
 
 	switch req.Id {
-	case sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66:
+	case sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_66:
 		hashCount, pos, err := ParseHashesCount(req.Data, 0)
 		if err != nil {
 			return fmt.Errorf("parsing NewPooledTransactionHashes: %w", err)
 		}
+
+		const maxHashesPerMsg = 4096 // See https://github.com/ethereum/devp2p/blob/master/caps/eth.md#newpooledtransactionhashes-0x08
+		if hashCount > maxHashesPerMsg {
+			f.logger.Warn("Oversized hash announcement",
+				"peer", req.PeerId, "count", hashCount)
+			sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick}) // Disconnect peer
+			return nil
+		}
+
 		hashes := make([]byte, 32*hashCount)
 		for i := 0; i < len(hashes); i += 32 {
 			if _, pos, err = ParseHash(req.Data, pos, hashes[i:]); err != nil {
@@ -236,19 +315,19 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 		}
 		if len(unknownHashes) > 0 {
 			var encodedRequest []byte
-			var messageID sentry.MessageId
+			var messageID sentryproto.MessageId
 			if encodedRequest, err = EncodeGetPooledTransactions66(unknownHashes, uint64(1), nil); err != nil {
 				return err
 			}
-			messageID = sentry.MessageId_GET_POOLED_TRANSACTIONS_66
-			if _, err = sentryClient.SendMessageById(f.ctx, &sentry.SendMessageByIdRequest{
-				Data:   &sentry.OutboundMessageData{Id: messageID, Data: encodedRequest},
+			messageID = sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66
+			if _, err = sentryClient.SendMessageById(f.ctx, &sentryproto.SendMessageByIdRequest{
+				Data:   &sentryproto.OutboundMessageData{Id: messageID, Data: encodedRequest},
 				PeerId: req.PeerId,
 			}, &grpc.EmptyCallOption{}); err != nil {
 				return err
 			}
 		}
-	case sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_68:
+	case sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68:
 		_, _, hashes, _, err := rlp.ParseAnnouncements(req.Data, 0)
 		if err != nil {
 			return fmt.Errorf("parsing NewPooledTransactionHashes88: %w", err)
@@ -260,23 +339,23 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 
 		if len(unknownHashes) > 0 {
 			var encodedRequest []byte
-			var messageID sentry.MessageId
+			var messageID sentryproto.MessageId
 			if encodedRequest, err = EncodeGetPooledTransactions66(unknownHashes, uint64(1), nil); err != nil {
 				return err
 			}
-			messageID = sentry.MessageId_GET_POOLED_TRANSACTIONS_66
-			if _, err = sentryClient.SendMessageById(f.ctx, &sentry.SendMessageByIdRequest{
-				Data:   &sentry.OutboundMessageData{Id: messageID, Data: encodedRequest},
+			messageID = sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66
+			if _, err = sentryClient.SendMessageById(f.ctx, &sentryproto.SendMessageByIdRequest{
+				Data:   &sentryproto.OutboundMessageData{Id: messageID, Data: encodedRequest},
 				PeerId: req.PeerId,
 			}, &grpc.EmptyCallOption{}); err != nil {
 				return err
 			}
 		}
-	case sentry.MessageId_GET_POOLED_TRANSACTIONS_66:
+	case sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66:
 		//TODO: handleInboundMessage is single-threaded - means it can accept as argument couple buffers (or analog of txParseContext). Protobuf encoding will copy data anyway, but DirectClient doesn't
 		var encodedRequest []byte
-		var messageID sentry.MessageId
-		messageID = sentry.MessageId_POOLED_TRANSACTIONS_66
+		var messageID sentryproto.MessageId
+		messageID = sentryproto.MessageId_POOLED_TRANSACTIONS_66
 		requestID, hashes, _, err := ParseGetPooledTransactions66(req.Data, 0, nil)
 		if err != nil {
 			return err
@@ -315,22 +394,16 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 			log.Trace("txpool.Fetch.handleInboundMessage PooledTransactions reply exceeds p2pTxPacketLimit", "requested", len(hashes), "processed", processed)
 		}
 
-		if _, err := sentryClient.SendMessageById(f.ctx, &sentry.SendMessageByIdRequest{
-			Data:   &sentry.OutboundMessageData{Id: messageID, Data: encodedRequest},
+		if _, err := sentryClient.SendMessageById(f.ctx, &sentryproto.SendMessageByIdRequest{
+			Data:   &sentryproto.OutboundMessageData{Id: messageID, Data: encodedRequest},
 			PeerId: req.PeerId,
 		}, &grpc.EmptyCallOption{}); err != nil {
 			return err
 		}
-	case sentry.MessageId_POOLED_TRANSACTIONS_66, sentry.MessageId_TRANSACTIONS_66:
+	case sentryproto.MessageId_POOLED_TRANSACTIONS_66, sentryproto.MessageId_TRANSACTIONS_66:
 		txns := TxnSlots{}
-		if err := f.threadSafeParsePooledTxn(func(parseContext *TxnParseContext) error {
-			return nil
-		}); err != nil {
-			return err
-		}
-
 		switch req.Id {
-		case sentry.MessageId_TRANSACTIONS_66:
+		case sentryproto.MessageId_TRANSACTIONS_66:
 			if err := f.threadSafeParsePooledTxn(func(parseContext *TxnParseContext) error {
 				if _, err := ParseTransactions(req.Data, 0, parseContext, &txns, func(hash []byte) error {
 					known, err := f.pool.IdHashKnown(tx, hash)
@@ -348,7 +421,7 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 			}); err != nil {
 				return err
 			}
-		case sentry.MessageId_POOLED_TRANSACTIONS_66:
+		case sentryproto.MessageId_POOLED_TRANSACTIONS_66:
 			if err := f.threadSafeParsePooledTxn(func(parseContext *TxnParseContext) error {
 				if _, _, err := ParsePooledTransactions66(req.Data, 0, parseContext, &txns, func(hash []byte) error {
 					known, err := f.pool.IdHashKnown(tx, hash)
@@ -381,7 +454,7 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 	return nil
 }
 
-func (f *Fetch) receivePeerLoop(sentryClient sentry.SentryClient) {
+func (f *Fetch) receivePeerLoop(sentryClient sentryproto.SentryClient) {
 	for {
 		select {
 		case <-f.ctx.Done():
@@ -409,11 +482,11 @@ func (f *Fetch) receivePeerLoop(sentryClient sentry.SentryClient) {
 	}
 }
 
-func (f *Fetch) receivePeer(sentryClient sentry.SentryClient) error {
+func (f *Fetch) receivePeer(sentryClient sentryproto.SentryClient) error {
 	streamCtx, cancel := context.WithCancel(f.ctx)
 	defer cancel()
 
-	stream, err := sentryClient.PeerEvents(streamCtx, &sentry.PeerEventsRequest{})
+	stream, err := sentryClient.PeerEvents(streamCtx, &sentryproto.PeerEventsRequest{})
 	if err != nil {
 		select {
 		case <-f.ctx.Done():
@@ -423,7 +496,7 @@ func (f *Fetch) receivePeer(sentryClient sentry.SentryClient) error {
 		return err
 	}
 
-	var req *sentry.PeerEvent
+	var req *sentryproto.PeerEvent
 	for req, err = stream.Recv(); ; req, err = stream.Recv() {
 		if err != nil {
 			return err
@@ -440,12 +513,12 @@ func (f *Fetch) receivePeer(sentryClient sentry.SentryClient) error {
 	}
 }
 
-func (f *Fetch) handleNewPeer(req *sentry.PeerEvent) error {
+func (f *Fetch) handleNewPeer(req *sentryproto.PeerEvent) error {
 	if req == nil {
 		return nil
 	}
 	switch req.EventId {
-	case sentry.PeerEvent_Connect:
+	case sentryproto.PeerEvent_Connect:
 		f.pool.AddNewGoodPeer(req.PeerId)
 	}
 
@@ -455,7 +528,7 @@ func (f *Fetch) handleNewPeer(req *sentry.PeerEvent) error {
 func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClient) error {
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	stream, err := client.StateChanges(streamCtx, &remote.StateChangeRequest{WithStorage: false, WithTransactions: true}, grpc.WaitForReady(true))
+	stream, err := client.StateChanges(streamCtx, &remoteproto.StateChangeRequest{WithStorage: false, WithTransactions: true}, grpc.WaitForReady(true))
 	if err != nil {
 		return err
 	}
@@ -476,22 +549,28 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 	}
 }
 
-func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remote.StateChangeBatch) error {
+func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remoteproto.StateChangeBatch) error {
 	var unwindTxns, unwindBlobTxns, minedTxns TxnSlots
 	for _, change := range req.ChangeBatch {
-		if change.Direction == remote.Direction_FORWARD {
-			minedTxns.Resize(uint(len(change.Txs)))
+		if change.Direction == remoteproto.Direction_FORWARD {
 			for i := range change.Txs {
-				minedTxns.Txns[i] = &TxnSlot{}
 				if err := f.threadSafeParseStateChangeTxn(func(parseContext *TxnParseContext) error {
-					_, err := parseContext.ParseTransaction(change.Txs[i], 0, minedTxns.Txns[i], minedTxns.Senders.At(i), false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
-					return err
+					utx := &TxnSlot{}
+					sender := make([]byte, 20)
+					_, err := parseContext.ParseTransaction(change.Txs[i], 0, utx, sender, false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
+					if err != nil {
+						return err
+					}
+					minedTxns.Append(utx, sender, false)
+					return nil
 				}); err != nil && !errors.Is(err, context.Canceled) {
-					f.logger.Warn("[txpool.fetch] stream.Recv", "err", err)
+					txnType, _ := PeekTransactionType(change.Txs[i])
+					f.logger.Debug("[txpool.fetch] stream.Recv", "dir", change.Direction, "txnType", txnType, "index", i, "err", err)
 					continue // 1 txn handling error must not stop batch processing
 				}
+
 			}
-		} else if change.Direction == remote.Direction_UNWIND {
+		} else if change.Direction == remoteproto.Direction_UNWIND {
 			for i := range change.Txs {
 				if err := f.threadSafeParseStateChangeTxn(func(parseContext *TxnParseContext) error {
 					utx := &TxnSlot{}
@@ -507,7 +586,8 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remote.State
 					}
 					return nil
 				}); err != nil && !errors.Is(err, context.Canceled) {
-					f.logger.Warn("[txpool.fetch] stream.Recv", "err", err)
+					txnType, _ := PeekTransactionType(change.Txs[i])
+					f.logger.Debug("[txpool.fetch] stream.Recv", "dir", change.Direction, "txnType", txnType, "index", i, "err", err)
 					continue // 1 txn handling error must not stop batch processing
 				}
 			}

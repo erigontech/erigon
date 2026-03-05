@@ -29,16 +29,17 @@ jobs:
       - name: Run API Call
         env:
           TOKEN: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
+          DOCKER_IMAGE_TAG: ${{ inputs.docker_image_tag }}
         run: |
           output_code=$(curl --write-out %{http_code} --output curl-output.log \
                     -s -X DELETE -H "Accept: application/json" \
                     -H "Authorization: JWT ${{ env.TOKEN }}" \
-                    ${{ env.API_URL }}/${{ inputs.docker_image_tag }} )
+                    ${{ env.API_URL }}/$DOCKER_IMAGE_TAG )
           if [ $output_code -ne 204 ]; then
-            echo "ERROR: failed to remove docker image ${{ env.DOCKERHUB_REPOSITORY }}:${{ inputs.docker_image_tag }}"
+            echo "ERROR: failed to remove docker image ${{ env.DOCKERHUB_REPOSITORY }}:$DOCKER_IMAGE_TAG"
             echo "ERROR: API response: $(cat curl-output.log)."
             exit 1
           else
-            echo "SUCCESS: docker image ${{ env.DOCKERHUB_REPOSITORY }}:${{ inputs.docker_image_tag }} removed."
+            echo "SUCCESS: docker image ${{ env.DOCKERHUB_REPOSITORY }}:$DOCKER_IMAGE_TAG removed."
             exit 0
           fi

@@ -17,15 +17,16 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
 	"os/exec"
-	"sort"
+	"slices"
 	"strconv"
 
-	"github.com/erigontech/erigon-lib/crypto"
 	"github.com/erigontech/erigon/cmd/pics/visual"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 var pic = flag.String("pic", "", "specifies picture to regenerate")
@@ -69,7 +70,7 @@ func prefixGroups1() {
 		panic(err)
 	}
 	//nolint:gosec
-	cmd := exec.Command("dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
+	cmd := exec.CommandContext(context.Background(), "dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("error: %v, output: %s\n", err, output)
 	}
@@ -84,7 +85,7 @@ func prefixGroups2() {
 	}
 
 	keys := generatePrefixGroups()
-	sort.Strings(keys)
+	slices.Sort(keys)
 	visual.StartGraph(f, false)
 	for i, key := range keys {
 		visual.QuadVertical(f, []byte(key), len(key), fmt.Sprintf("q_%x", key))
@@ -98,7 +99,7 @@ func prefixGroups2() {
 		panic(err)
 	}
 	//nolint:gosec
-	cmd := exec.Command("dot", "-Tpng:gd", "-O", filename)
+	cmd := exec.CommandContext(context.Background(), "dot", "-Tpng:gd", "-O", filename)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("error: %v, output: %s\n", err, output)
 	}
@@ -120,7 +121,7 @@ func prefixGroups3() {
 		panic(err)
 	}
 	keys := generatePrefixGroups()
-	sort.Strings(keys)
+	slices.Sort(keys)
 	// Set of all possible common prefixes
 	prefixSet := make(map[string]struct{})
 	for i, key := range keys {
@@ -194,7 +195,7 @@ q_%x->q_%x;
 		panic(err)
 	}
 	//nolint:gosec
-	cmd := exec.Command("dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
+	cmd := exec.CommandContext(context.Background(), "dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("error: %v, output: %s\n", err, output)
 	}

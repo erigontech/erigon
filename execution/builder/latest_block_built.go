@@ -19,7 +19,7 @@ package builder
 import (
 	"sync"
 
-	"github.com/erigontech/erigon-lib/types"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 type LatestBlockBuiltStore struct {

@@ -6,7 +6,7 @@ There are 2 options exist:
 
 1. call --private.api.addr there is grpc interface with low-level data access methods - can read any data in any order,
    etc... Interface is here: https://github.com/erigontech/interfaces/blob/master/remote/kv.proto
-   Go/C++/Rust libs already exist. Names of buckets and their format you can find in `erigon-lib/kv/tables.go` You can
+   Go/C++/Rust libs already exist. Names of buckets and their format you can find in `db/kv/tables.go` You can
    do such calls by network.
 2. Read Erigon's db while Erigon is running - it's also ok - just need be careful - do not run too long read
    transactions (long read transactions do block free space in DB). Then your app will share with Erigon same OS-level
@@ -18,12 +18,12 @@ There are 2 options exist:
 
 this 2 options ^ are exactly how RPCDaemon works with flags `--private.api.addr` and `--datadir`. One by using grpc
 interface, another by opening Erigon's db in read-only mode while Erigon running. But both this options are
-using `RoKV` (stands for read-only) `kv_abstract.go` interface. Option 1 using `kv_remote.go` to implement `RoKV`,
+using `RoKV` (stands for read-only) `kv_interface.go` interface. Option 1 using `kv_remote.go` to implement `RoKV`,
 option 2 using - `kv_mdbx.go`
 
 Erigon uses MDBX storage engine. But most information on the Internet about LMDB is also valid for MDBX.
 
-We have Go, Rust and C++ implementations of `RoKV` interface.
+We have Go, Rust and C++ implementations of `RoKV` interface. See [interfaces repository](https://github.com/erigontech/interfaces) for details.
 
 Rationale and Architecture of DB interface: [./../../ethdb/Readme.md](../../ethdb/Readme.md)
 

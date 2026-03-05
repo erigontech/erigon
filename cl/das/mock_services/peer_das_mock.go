@@ -13,9 +13,9 @@ import (
 	context "context"
 	reflect "reflect"
 
-	common "github.com/erigontech/erigon-lib/common"
 	cltypes "github.com/erigontech/erigon/cl/cltypes"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
+	common "github.com/erigontech/erigon/common"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -44,7 +44,7 @@ func (m *MockPeerDas) EXPECT() *MockPeerDasMockRecorder {
 }
 
 // DownloadColumnsAndRecoverBlobs mocks base method.
-func (m *MockPeerDas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*cltypes.SignedBeaconBlock) error {
+func (m *MockPeerDas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*cltypes.SignedBlindedBeaconBlock) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "DownloadColumnsAndRecoverBlobs", ctx, blocks)
 	ret0, _ := ret[0].(error)
@@ -70,19 +70,19 @@ func (c *MockPeerDasDownloadColumnsAndRecoverBlobsCall) Return(arg0 error) *Mock
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockPeerDasDownloadColumnsAndRecoverBlobsCall) Do(f func(context.Context, []*cltypes.SignedBeaconBlock) error) *MockPeerDasDownloadColumnsAndRecoverBlobsCall {
+func (c *MockPeerDasDownloadColumnsAndRecoverBlobsCall) Do(f func(context.Context, []*cltypes.SignedBlindedBeaconBlock) error) *MockPeerDasDownloadColumnsAndRecoverBlobsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockPeerDasDownloadColumnsAndRecoverBlobsCall) DoAndReturn(f func(context.Context, []*cltypes.SignedBeaconBlock) error) *MockPeerDasDownloadColumnsAndRecoverBlobsCall {
+func (c *MockPeerDasDownloadColumnsAndRecoverBlobsCall) DoAndReturn(f func(context.Context, []*cltypes.SignedBlindedBeaconBlock) error) *MockPeerDasDownloadColumnsAndRecoverBlobsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // DownloadOnlyCustodyColumns mocks base method.
-func (m *MockPeerDas) DownloadOnlyCustodyColumns(ctx context.Context, blocks []*cltypes.SignedBeaconBlock) error {
+func (m *MockPeerDas) DownloadOnlyCustodyColumns(ctx context.Context, blocks []*cltypes.SignedBlindedBeaconBlock) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "DownloadOnlyCustodyColumns", ctx, blocks)
 	ret0, _ := ret[0].(error)
@@ -108,13 +108,13 @@ func (c *MockPeerDasDownloadOnlyCustodyColumnsCall) Return(arg0 error) *MockPeer
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockPeerDasDownloadOnlyCustodyColumnsCall) Do(f func(context.Context, []*cltypes.SignedBeaconBlock) error) *MockPeerDasDownloadOnlyCustodyColumnsCall {
+func (c *MockPeerDasDownloadOnlyCustodyColumnsCall) Do(f func(context.Context, []*cltypes.SignedBlindedBeaconBlock) error) *MockPeerDasDownloadOnlyCustodyColumnsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockPeerDasDownloadOnlyCustodyColumnsCall) DoAndReturn(f func(context.Context, []*cltypes.SignedBeaconBlock) error) *MockPeerDasDownloadOnlyCustodyColumnsCall {
+func (c *MockPeerDasDownloadOnlyCustodyColumnsCall) DoAndReturn(f func(context.Context, []*cltypes.SignedBlindedBeaconBlock) error) *MockPeerDasDownloadOnlyCustodyColumnsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -196,17 +196,17 @@ func (c *MockPeerDasIsBlobAlreadyRecoveredCall) DoAndReturn(f func(common.Hash) 
 }
 
 // IsColumnOverHalf mocks base method.
-func (m *MockPeerDas) IsColumnOverHalf(blockRoot common.Hash) bool {
+func (m *MockPeerDas) IsColumnOverHalf(slot uint64, blockRoot common.Hash) bool {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "IsColumnOverHalf", blockRoot)
+	ret := m.ctrl.Call(m, "IsColumnOverHalf", slot, blockRoot)
 	ret0, _ := ret[0].(bool)
 	return ret0
 }
 
 // IsColumnOverHalf indicates an expected call of IsColumnOverHalf.
-func (mr *MockPeerDasMockRecorder) IsColumnOverHalf(blockRoot any) *MockPeerDasIsColumnOverHalfCall {
+func (mr *MockPeerDasMockRecorder) IsColumnOverHalf(slot, blockRoot any) *MockPeerDasIsColumnOverHalfCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsColumnOverHalf", reflect.TypeOf((*MockPeerDas)(nil).IsColumnOverHalf), blockRoot)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsColumnOverHalf", reflect.TypeOf((*MockPeerDas)(nil).IsColumnOverHalf), slot, blockRoot)
 	return &MockPeerDasIsColumnOverHalfCall{Call: call}
 }
 
@@ -222,30 +222,30 @@ func (c *MockPeerDasIsColumnOverHalfCall) Return(arg0 bool) *MockPeerDasIsColumn
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockPeerDasIsColumnOverHalfCall) Do(f func(common.Hash) bool) *MockPeerDasIsColumnOverHalfCall {
+func (c *MockPeerDasIsColumnOverHalfCall) Do(f func(uint64, common.Hash) bool) *MockPeerDasIsColumnOverHalfCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockPeerDasIsColumnOverHalfCall) DoAndReturn(f func(common.Hash) bool) *MockPeerDasIsColumnOverHalfCall {
+func (c *MockPeerDasIsColumnOverHalfCall) DoAndReturn(f func(uint64, common.Hash) bool) *MockPeerDasIsColumnOverHalfCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // IsDataAvailable mocks base method.
-func (m *MockPeerDas) IsDataAvailable(blockRoot common.Hash) (bool, error) {
+func (m *MockPeerDas) IsDataAvailable(slot uint64, blockRoot common.Hash) (bool, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "IsDataAvailable", blockRoot)
+	ret := m.ctrl.Call(m, "IsDataAvailable", slot, blockRoot)
 	ret0, _ := ret[0].(bool)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // IsDataAvailable indicates an expected call of IsDataAvailable.
-func (mr *MockPeerDasMockRecorder) IsDataAvailable(blockRoot any) *MockPeerDasIsDataAvailableCall {
+func (mr *MockPeerDasMockRecorder) IsDataAvailable(slot, blockRoot any) *MockPeerDasIsDataAvailableCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsDataAvailable", reflect.TypeOf((*MockPeerDas)(nil).IsDataAvailable), blockRoot)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsDataAvailable", reflect.TypeOf((*MockPeerDas)(nil).IsDataAvailable), slot, blockRoot)
 	return &MockPeerDasIsDataAvailableCall{Call: call}
 }
 
@@ -261,13 +261,13 @@ func (c *MockPeerDasIsDataAvailableCall) Return(arg0 bool, arg1 error) *MockPeer
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockPeerDasIsDataAvailableCall) Do(f func(common.Hash) (bool, error)) *MockPeerDasIsDataAvailableCall {
+func (c *MockPeerDasIsDataAvailableCall) Do(f func(uint64, common.Hash) (bool, error)) *MockPeerDasIsDataAvailableCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockPeerDasIsDataAvailableCall) DoAndReturn(f func(common.Hash) (bool, error)) *MockPeerDasIsDataAvailableCall {
+func (c *MockPeerDasIsDataAvailableCall) DoAndReturn(f func(uint64, common.Hash) (bool, error)) *MockPeerDasIsDataAvailableCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -344,6 +344,44 @@ func (c *MockPeerDasStateReaderCall) Do(f func() peerdasstate.PeerDasStateReader
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockPeerDasStateReaderCall) DoAndReturn(f func() peerdasstate.PeerDasStateReader) *MockPeerDasStateReaderCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// SyncColumnDataLater mocks base method.
+func (m *MockPeerDas) SyncColumnDataLater(block *cltypes.SignedBeaconBlock) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SyncColumnDataLater", block)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SyncColumnDataLater indicates an expected call of SyncColumnDataLater.
+func (mr *MockPeerDasMockRecorder) SyncColumnDataLater(block any) *MockPeerDasSyncColumnDataLaterCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SyncColumnDataLater", reflect.TypeOf((*MockPeerDas)(nil).SyncColumnDataLater), block)
+	return &MockPeerDasSyncColumnDataLaterCall{Call: call}
+}
+
+// MockPeerDasSyncColumnDataLaterCall wrap *gomock.Call
+type MockPeerDasSyncColumnDataLaterCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockPeerDasSyncColumnDataLaterCall) Return(arg0 error) *MockPeerDasSyncColumnDataLaterCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockPeerDasSyncColumnDataLaterCall) Do(f func(*cltypes.SignedBeaconBlock) error) *MockPeerDasSyncColumnDataLaterCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockPeerDasSyncColumnDataLaterCall) DoAndReturn(f func(*cltypes.SignedBeaconBlock) error) *MockPeerDasSyncColumnDataLaterCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

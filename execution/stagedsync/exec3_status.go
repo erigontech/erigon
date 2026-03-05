@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/erigontech/erigon/core/state"
+	"github.com/erigontech/erigon/execution/state"
 )
 
 type ExecutionStat struct {
@@ -206,7 +206,7 @@ func (m *execStatusList) addDependency(blocker int, dependent int) bool {
 	if _, ok := m.dependency[blocker]; !ok {
 		if m.dependency == nil {
 			m.dependency = map[int]map[int]bool{
-				blocker: map[int]bool{},
+				blocker: {},
 			}
 		} else {
 			m.dependency[blocker] = map[int]bool{}

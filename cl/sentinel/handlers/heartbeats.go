@@ -17,14 +17,15 @@
 package handlers
 
 import (
+	"encoding/hex"
 	"strings"
 
 	"github.com/libp2p/go-libp2p/core/network"
 
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/p2p/enr"
 )
 
@@ -121,5 +122,19 @@ func (c *ConsensusHandlers) metadataV3Handler(s network.Stream) error {
 
 // TODO: Actually respond with proper status
 func (c *ConsensusHandlers) statusHandler(s network.Stream) error {
-	return ssz_snappy.EncodeAndWrite(s, c.hs.Status(), SuccessfulResponsePrefix)
+	status := c.hs.Status()
+	status.EarliestAvailableSlot = nil
+	return ssz_snappy.EncodeAndWrite(s, status, SuccessfulResponsePrefix)
+}
+
+func (c *ConsensusHandlers) statusV2Handler(s network.Stream) error {
+	status := c.hs.Status()
+	forkDigest, err := c.ethClock.CurrentForkDigest()
+	if err != nil {
+		return err
+	}
+	copy(status.ForkDigest[:], forkDigest[:])
+	log.Debug("statusV2Handler", "forkDigest", hex.EncodeToString(status.ForkDigest[:]), "finalizedRoot", hex.EncodeToString(status.FinalizedRoot[:]),
+		"finalizedEpoch", status.FinalizedEpoch, "headSlot", status.HeadSlot, "headRoot", hex.EncodeToString(status.HeadRoot[:]), "earliestAvailableSlot", c.peerdasStateReader.GetEarliestAvailableSlot())
+	return ssz_snappy.EncodeAndWrite(s, status, SuccessfulResponsePrefix)
 }

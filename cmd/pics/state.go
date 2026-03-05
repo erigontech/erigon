@@ -29,20 +29,21 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/trie"
-	"github.com/erigontech/erigon-lib/types"
 	"github.com/erigontech/erigon/cmd/pics/contracts"
 	"github.com/erigontech/erigon/cmd/pics/visual"
-	"github.com/erigontech/erigon/core"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
-	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment/trie"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 /*func statePicture(t *trie.Trie, number int, keyCompression int, codeCompressed bool, valCompressed bool,
@@ -77,7 +78,7 @@ import (
 		return nil, err
 	}
 	//nolint:gosec
-	cmd := exec.Command("dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
+	cmd := exec.CommandContext(context.Background(), "dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("error: %v, output: %s\n", err, output)
 	}
@@ -91,12 +92,10 @@ var bucketLabels = map[string]string{
 	kv.BlockBody:                "Block Bodies",
 	kv.HeaderNumber:             "Header Numbers",
 	kv.TxLookup:                 "Transaction Index",
-	kv.Code:                     "Code Of Contracts",
 	kv.SyncStageProgress:        "Sync Progress",
 	kv.PlainState:               "Plain State",
 	kv.HashedAccountsDeprecated: "Hashed Accounts",
 	kv.HashedStorageDeprecated:  "Hashed Storage",
-	kv.IncarnationMap:           "Incarnations",
 	kv.Senders:                  "Transaction Senders",
 }
 
@@ -120,7 +119,7 @@ func hexPalette() error {
 		return err
 	}
 	//nolint:gosec
-	cmd := exec.Command("dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
+	cmd := exec.CommandContext(context.Background(), "dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("error: %v, output: %s\n", err, output)
 	}
@@ -142,7 +141,6 @@ func stateDatabaseComparison(first kv.RwDB, second kv.RwDB, number int) error {
 	if err = second.View(context.Background(), func(readTx kv.Tx) error {
 		return first.View(context.Background(), func(firstTx kv.Tx) error {
 			for bucketName := range bucketLabels {
-				bucketName := bucketName
 				if err := readTx.ForEach(bucketName, nil, func(k, v []byte) error {
 					if firstV, _ := firstTx.GetOne(bucketName, k); firstV != nil && bytes.Equal(v, firstV) {
 						// Skip the record that is the same as in the first Db
@@ -242,7 +240,7 @@ func stateDatabaseComparison(first kv.RwDB, second kv.RwDB, number int) error {
 		return err
 	}
 	//nolint:gosec
-	cmd := exec.Command("dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
+	cmd := exec.CommandContext(context.Background(), "dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("error: %v, output: %s\n", err, output)
 	}
@@ -254,7 +252,7 @@ func stateDatabaseComparison(first kv.RwDB, second kv.RwDB, number int) error {
 			return err
 		}
 		//nolint:gosec
-		cmd := exec.Command("dot", "-Tpng:gd", "-o"+dot2png(f1.Name()), f1.Name())
+		cmd := exec.CommandContext(context.Background(), "dot", "-Tpng:gd", "-o"+dot2png(f1.Name()), f1.Name())
 		if output, err := cmd.CombinedOutput(); err != nil {
 			fmt.Printf("error: %v, output: %s\n", err, output)
 		}
@@ -291,7 +289,7 @@ func initialState1() error {
 		// this code generates a log
 		signer = types.MakeSigner(chain.AllProtocolChanges, 1, 0)
 	)
-	m := mock.MockWithGenesis(nil, gspec, key, false)
+	m := execmoduletester.New(nil, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 	defer m.DB.Close()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(nil, gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -310,8 +308,8 @@ func initialState1() error {
 	}
 
 	var tokenContract *contracts.Token
-	// We generate the blocks without plainstant because it's not supported in core.GenerateChain
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, func(i int, block *core.BlockGen) {
+	// We generate the blocks without plainstant because it's not supported in blockgen.GenerateChain
+	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, func(i int, block *blockgen.BlockGen) {
 		var (
 			txn types.Transaction
 			txs []types.Transaction
@@ -420,14 +418,14 @@ func initialState1() error {
 	if err != nil {
 		return err
 	}
-	m2 := mock.MockWithGenesis(nil, gspec, key, false)
+	m2 := execmoduletester.New(nil, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 	defer m2.DB.Close()
 
 	if err = hexPalette(); err != nil {
 		return err
 	}
 
-	emptyKv := memdb.New("", kv.ChainDB)
+	emptyKv := memdb.New(nil, "", dbcfg.ChainDB)
 	if err = stateDatabaseComparison(emptyKv, m.DB, 0); err != nil {
 		return err
 	}

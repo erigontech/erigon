@@ -27,7 +27,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 func TestNewID(t *testing.T) {
@@ -82,11 +82,11 @@ func TestSubscriptions(t *testing.T) {
 
 	// create subscriptions one by one
 	for i, namespace := range namespaces {
-		request := map[string]interface{}{
+		request := map[string]any{
 			"id":      i,
 			"method":  fmt.Sprintf("%s_subscribe", namespace),
 			"version": "2.0",
-			"params":  []interface{}{"someSubscription", notificationCount, i},
+			"params":  []any{"someSubscription", notificationCount, i},
 		}
 		if err := out.Encode(&request); err != nil {
 			t.Fatalf("Could not create subscription: %v", err)

@@ -26,15 +26,16 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv"
-	kv2 "github.com/erigontech/erigon-lib/kv/mdbx"
-	"github.com/erigontech/erigon-lib/kv/temporal"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/node/migrations"
-	"github.com/erigontech/erigon/turbo/debug"
-	"github.com/erigontech/erigon/turbo/logging"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	kv2 "github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/migrations"
+	"github.com/erigontech/erigon/node/debug"
+	"github.com/erigontech/erigon/node/logging"
 )
 
 func expandHomeDir(dirpath string) string {
@@ -87,15 +88,29 @@ func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 	return opts
 }
 
-func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (tdb kv.TemporalRwDB, err error) {
-	if opts.GetLabel() != kv.ChainDB {
+func openDB(opts kv2.MdbxOpts, applyMigrations bool, chain string, logger log.Logger) (tdb kv.TemporalRwDB, err error) {
+	migrationDBs := map[kv.Label]bool{
+		dbcfg.ChainDB:         true,
+		dbcfg.ConsensusDB:     true,
+		dbcfg.HeimdallDB:      true,
+		dbcfg.PolygonBridgeDB: true,
+	}
+	if _, ok := migrationDBs[opts.GetLabel()]; !ok {
 		panic(opts.GetLabel())
 	}
 
 	rawDB := opts.MustOpen()
 	if applyMigrations {
+		dirs := datadir.New(datadirCli)
+		migrationsDB, err := migrations.OpenMigrationsDB(dirs.Migrations, logger)
+		if err != nil {
+			rawDB.Close()
+			return nil, fmt.Errorf("open migrations db: %w", err)
+		}
+		defer migrationsDB.Close()
+
 		migrator := migrations.NewMigrator(opts.GetLabel())
-		has, err := migrator.HasPendingMigrations(rawDB)
+		has, err := migrator.HasPendingMigrations(migrationsDB)
 		if err != nil {
 			return nil, err
 		}
@@ -103,7 +118,7 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (tdb kv.
 			logger.Info("Re-Opening DB in exclusive mode to apply DB migrations")
 			rawDB.Close()
 			rawDB = opts.Exclusive(true).MustOpen()
-			if err := migrator.Apply(rawDB, datadirCli, "", logger); err != nil {
+			if err := migrator.Apply(rawDB, migrationsDB, datadirCli, "", logger); err != nil {
 				return nil, err
 			}
 			rawDB.Close()
@@ -120,5 +135,6 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (tdb kv.
 	if err != nil {
 		return nil, err
 	}
+
 	return temporal.New(rawDB, agg)
 }

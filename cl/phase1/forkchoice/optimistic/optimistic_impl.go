@@ -19,8 +19,8 @@ package optimistic
 import (
 	"sync"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/common"
 )
 
 type optimisticStoreImpl struct {
@@ -100,7 +100,7 @@ func (impl *optimisticStoreImpl) ValidateBlock(block *cltypes.BeaconBlock) error
 	// for _, root := range toRemoves {
 	// 	delete(impl.optimisticRoots, root)
 	// }
-	impl.optimisticRoots.Range(func(root, node interface{}) bool {
+	impl.optimisticRoots.Range(func(root, node any) bool {
 		if node.(*opNode).execBlockNum < blockNum {
 			toRemoves = append(toRemoves, root.(common.Hash))
 		}

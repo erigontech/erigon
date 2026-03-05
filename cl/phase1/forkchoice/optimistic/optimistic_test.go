@@ -20,8 +20,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -81,7 +81,7 @@ func (t *optimisticTestSuite) TearDownTest() {
 
 func checkSyncMapLength(m *sync.Map, length int) bool {
 	l := 0
-	m.Range(func(_, _ interface{}) bool {
+	m.Range(func(_, _ any) bool {
 		l++
 		return true
 	})

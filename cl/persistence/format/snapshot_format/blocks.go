@@ -22,10 +22,10 @@ import (
 	"io"
 	"sync"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/common"
 )
 
 type ExecutionBlockReaderByNumber interface {
@@ -35,7 +35,7 @@ type ExecutionBlockReaderByNumber interface {
 }
 
 var buffersPool = sync.Pool{
-	New: func() interface{} { return &bytes.Buffer{} },
+	New: func() any { return &bytes.Buffer{} },
 }
 
 // WriteBlockForSnapshot writes a block to the given writer in the format expected by the snapshot.

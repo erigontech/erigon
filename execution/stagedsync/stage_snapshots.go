@@ -17,74 +17,60 @@
 package stagedsync
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
-	"io"
-	"io/fs"
-	"os"
-	"path/filepath"
-	"reflect"
-	"runtime"
-	"sort"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 
-	"github.com/anacrolix/torrent"
-	"golang.org/x/sync/errgroup"
-
-	"github.com/erigontech/erigon-db/downloader"
-	"github.com/erigontech/erigon-db/downloader/downloadercfg"
-	coresnaptype "github.com/erigontech/erigon-db/snaptype"
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/chain/snapcfg"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/diagnostics"
-	"github.com/erigontech/erigon-lib/estimate"
-	protodownloader "github.com/erigontech/erigon-lib/gointerfaces/downloaderproto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/prune"
-	"github.com/erigontech/erigon-lib/kv/temporal"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/snaptype"
-	"github.com/erigontech/erigon-lib/state"
-	"github.com/erigontech/erigon-lib/state/stats"
-	"github.com/erigontech/erigon/eth/ethconfig"
-	"github.com/erigontech/erigon/eth/rawdbreset"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/estimate"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/downloader/downloadercfg"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/db/snapshotsync"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/snaptype2"
+	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/stats"
+	"github.com/erigontech/erigon/diagnostics/diaglib"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
-	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/turbo/services"
-	"github.com/erigontech/erigon/turbo/shards"
-	"github.com/erigontech/erigon/turbo/silkworm"
-	"github.com/erigontech/erigon/turbo/snapshotsync"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/shards"
+	"github.com/erigontech/erigon/node/silkworm"
 )
 
 type SnapshotsCfg struct {
-	db          kv.TemporalRwDB
-	chainConfig *chain.Config
-	dirs        datadir.Dirs
-
+	db                 kv.TemporalRwDB
+	chainConfig        *chain.Config
+	dirs               datadir.Dirs
 	blockRetire        services.BlockRetire
-	snapshotDownloader protodownloader.DownloaderClient
+	snapshotDownloader downloader.Client
 	blockReader        services.FullBlockReader
 	notifier           *shards.Notifications
+	caplin             bool
+	blobs              bool
+	caplinState        bool
+	silkworm           *silkworm.Silkworm
+	syncConfig         ethconfig.Sync
+	prune              prune.Mode
+}
 
-	caplin           bool
-	blobs            bool
-	caplinState      bool
-	silkworm         *silkworm.Silkworm
-	snapshotUploader *snapshotUploader
-	syncConfig       ethconfig.Sync
-	prune            prune.Mode
+// Returns a seeder client for block management, a noop implementation if no downloader is attached.
+func (me *SnapshotsCfg) getSeederClient() downloader.SeederClient {
+	if me.snapshotDownloader == nil {
+		return downloader.NoopSeederClient{}
+	}
+	return me.snapshotDownloader
 }
 
 func StageSnapshotsCfg(db kv.TemporalRwDB,
@@ -92,7 +78,7 @@ func StageSnapshotsCfg(db kv.TemporalRwDB,
 	syncConfig ethconfig.Sync,
 	dirs datadir.Dirs,
 	blockRetire services.BlockRetire,
-	snapshotDownloader protodownloader.DownloaderClient,
+	snapshotDownloader downloader.Client,
 	blockReader services.FullBlockReader,
 	notifier *shards.Notifications,
 	caplin bool,
@@ -117,57 +103,10 @@ func StageSnapshotsCfg(db kv.TemporalRwDB,
 		caplinState:        caplinState,
 	}
 
-	if uploadFs := cfg.syncConfig.UploadLocation; len(uploadFs) > 0 {
-
-		cfg.snapshotUploader = &snapshotUploader{
-			cfg:          &cfg,
-			uploadFs:     uploadFs,
-			torrentFiles: downloader.NewAtomicTorrentFS(cfg.dirs.Snap),
-		}
-
-		cfg.blockRetire.SetWorkers(estimate.CompressSnapshot.Workers())
-
-		freezingCfg := cfg.blockReader.FreezingCfg()
-
-		if freezingCfg.ProduceE2 {
-			u := cfg.snapshotUploader
-
-			if maxSeedable := u.maxSeedableHeader(); u.cfg.syncConfig.FrozenBlockLimit > 0 && maxSeedable > u.cfg.syncConfig.FrozenBlockLimit {
-				blockLimit := maxSeedable - u.minBlockNumber()
-
-				if u.cfg.syncConfig.FrozenBlockLimit < blockLimit {
-					blockLimit = u.cfg.syncConfig.FrozenBlockLimit
-				}
-
-				if snapshots, ok := u.cfg.blockReader.Snapshots().(*freezeblocks.RoSnapshots); ok {
-					snapshots.SetSegmentsMin(maxSeedable - blockLimit)
-				}
-
-				if snapshots, ok := u.cfg.blockReader.BorSnapshots().(*heimdall.RoSnapshots); ok {
-					snapshots.SetSegmentsMin(maxSeedable - blockLimit)
-				}
-			}
-		}
-	}
-
 	return cfg
 }
 
-func SpawnStageSnapshots(
-	s *StageState,
-	ctx context.Context,
-	tx kv.RwTx,
-	cfg SnapshotsCfg,
-	logger log.Logger,
-) (err error) {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
+func SpawnStageSnapshots(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, logger log.Logger) (err error) {
 	if err := DownloadAndIndexSnapshotsIfNeed(s, ctx, tx, cfg, logger); err != nil {
 		return err
 	}
@@ -191,11 +130,6 @@ func SpawnStageSnapshots(
 			return err
 		}
 	}
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
 
 	// call this after the tx is commited otherwise observing
 	// components see an inconsistent db view
@@ -210,28 +144,79 @@ func SpawnStageSnapshots(
 }
 
 func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, logger log.Logger) error {
-	if cfg.snapshotUploader != nil {
-		u := cfg.snapshotUploader
+	if !s.CurrentSyncCycle.IsFirstCycle {
+		return nil
+	}
 
-		u.init(ctx, logger)
+	cstate := snapshotsync.NoCaplin
+	if cfg.caplin {
+		cstate = snapshotsync.AlsoCaplin
+	}
 
-		if cfg.syncConfig.UploadFrom != rpc.EarliestBlockNumber {
-			u.downloadLatestSnapshots(ctx, cfg.syncConfig.UploadFrom)
-		}
+	log.Info("[OtterSync] Starting Ottersync")
 
-		if maxSeedable := u.maxSeedableHeader(); u.cfg.syncConfig.FrozenBlockLimit > 0 && maxSeedable > u.cfg.syncConfig.FrozenBlockLimit {
-			blockLimit := maxSeedable - u.minBlockNumber()
+	agg := cfg.db.(*temporal.DB).Agg().(*state.Aggregator)
+	// Download only the snapshots that are for the header chain.
 
-			if cfg.syncConfig.FrozenBlockLimit < blockLimit {
-				blockLimit = u.cfg.syncConfig.FrozenBlockLimit
-			}
+	// How do we get to the real Downloader if we need? Get the stack trace.
+	//panic("here")
 
-			cfg.blockReader.Snapshots().SetSegmentsMin(maxSeedable - blockLimit)
-			if cfg.chainConfig.Bor != nil {
-				cfg.blockReader.BorSnapshots().SetSegmentsMin(maxSeedable - blockLimit)
-			}
-		}
+	if err := snapshotsync.SyncSnapshots(
+		ctx,
+		s.LogPrefix(),
+		"header-chain",
+		true, /*headerChain=*/
+		cfg.blobs,
+		cfg.caplinState,
+		cfg.prune,
+		cstate,
+		tx,
+		cfg.blockReader,
+		cfg.chainConfig,
+		cfg.snapshotDownloader,
+		cfg.syncConfig,
+		agg.StepSize(),
+	); err != nil {
+		return err
+	}
 
+	// Reload erigondb settings: the downloader should have provided the real erigondb.toml
+	// during header-chain phase, which may have a different stepSize than the default.
+	if err := agg.ReloadErigonDBSettings(cfg.snapshotDownloader == nil); err != nil {
+		return err
+	}
+
+	// Erigon can start on datadir with broken files `transactions.seg` files and Downloader will
+	// fix them, but only if Erigon call `.Add()` for broken files. But `headerchain` feature
+	// calling `.Add()` only for header/body files (not for `transactions.seg`) and `.OpenFolder()` will fail
+	if err := cfg.blockReader.Snapshots().OpenSegments([]snaptype.Type{snaptype2.Headers, snaptype2.Bodies}, true, false); err != nil {
+		err = fmt.Errorf("error opening segments after syncing header chain: %w", err)
+		return err
+	}
+
+	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "Download snapshots"})
+	if err := snapshotsync.SyncSnapshots(
+		ctx,
+		s.LogPrefix(),
+		"remaining snapshots",
+		false, /*headerChain=*/
+		cfg.blobs,
+		cfg.caplinState,
+		cfg.prune,
+		cstate,
+		tx,
+		cfg.blockReader,
+		cfg.chainConfig,
+		cfg.snapshotDownloader,
+		cfg.syncConfig,
+		agg.StepSize(),
+	); err != nil {
+		return err
+	}
+
+	// want to add remaining snapshots here?
+
+	{ // Now can open all files
 		if err := cfg.blockReader.Snapshots().OpenFolder(); err != nil {
 			return err
 		}
@@ -241,77 +226,13 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 				return err
 			}
 		}
-	}
+		if err := agg.OpenFolder(); err != nil {
+			return err
+		}
 
-	if !s.CurrentSyncCycle.IsFirstCycle {
-		return nil
-	}
-
-	diagnostics.Send(diagnostics.CurrentSyncStage{Stage: string(stages.Snapshots)})
-
-	cstate := snapshotsync.NoCaplin
-	if cfg.caplin {
-		cstate = snapshotsync.AlsoCaplin
-	}
-
-	subStages := diagnostics.InitSubStagesFromList([]string{"Download header-chain", "Download snapshots", "E2 Indexing", "E3 Indexing", "Fill DB"})
-	diagnostics.Send(diagnostics.SetSyncSubStageList{
-		Stage: string(stages.Snapshots),
-		List:  subStages,
-	})
-
-	log.Info("[OtterSync] Starting Ottersync")
-	log.Info(snapshotsync.GreatOtterBanner)
-
-	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Download header-chain"})
-	agg := cfg.db.(*temporal.DB).Agg().(*state.Aggregator)
-	// Download only the snapshots that are for the header chain.
-
-	if err := snapshotsync.SyncSnapshots(
-		ctx,
-		s.LogPrefix(),
-		"header-chain",
-		cfg.dirs,
-		true, /*headerChain=*/
-		cfg.blobs,
-		cfg.caplinState,
-		cfg.prune,
-		cstate,
-		agg,
-		tx,
-		cfg.blockReader,
-		cfg.blockReader.TxnumReader(ctx),
-		cfg.chainConfig,
-		cfg.snapshotDownloader,
-		cfg.syncConfig,
-	); err != nil {
-		return err
-	}
-
-	if err := cfg.blockReader.Snapshots().OpenSegments([]snaptype.Type{coresnaptype.Headers, coresnaptype.Bodies}, true, false); err != nil {
-		return err
-	}
-
-	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Download snapshots"})
-	if err := snapshotsync.SyncSnapshots(
-		ctx,
-		s.LogPrefix(),
-		"remaining snapshots",
-		cfg.dirs,
-		false, /*headerChain=*/
-		cfg.blobs,
-		cfg.caplinState,
-		cfg.prune,
-		cstate,
-		agg,
-		tx,
-		cfg.blockReader,
-		cfg.blockReader.TxnumReader(ctx),
-		cfg.chainConfig,
-		cfg.snapshotDownloader,
-		cfg.syncConfig,
-	); err != nil {
-		return err
+		if err := firstNonGenesisCheck(tx, cfg.blockReader.Snapshots(), s.LogPrefix(), cfg.dirs); err != nil {
+			return err
+		}
 	}
 
 	// All snapshots are downloaded. Now commit the preverified.toml file so we load the same set of
@@ -326,14 +247,16 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cfg.notifier.Events.OnNewSnapshot()
 	}
 
-	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "E2 Indexing"})
-	if err := cfg.blockRetire.BuildMissedIndicesIfNeed(ctx, s.LogPrefix(), cfg.notifier.Events); err != nil {
+	headersProgress, err := stages.GetStageProgress(tx, stages.Headers)
+	if err != nil {
+		return fmt.Errorf("getting headers progress for indexing decision: %w", err)
+	}
+
+	if err := buildOrDeferE2Indices(ctx, s, cfg, headersProgress); err != nil {
 		return err
 	}
 
-	indexWorkers := estimate.IndexSnapshot.Workers()
-	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "E3 Indexing"})
-	if err := agg.BuildMissedAccessors(ctx, indexWorkers); err != nil {
+	if err := buildOrDeferE3Accessors(ctx, s, cfg, agg, headersProgress); err != nil {
 		return err
 	}
 
@@ -366,7 +289,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		s.BlockNumber = frozenBlocks
 	}
 
-	diagnostics.Send(diagnostics.CurrentSyncSubStage{SubStage: "Fill DB"})
+	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "Fill DB"})
 	if err := rawdbreset.FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs, cfg.blockReader, logger); err != nil {
 		return fmt.Errorf("FillDBFromSnapshots: %w", err)
 	}
@@ -377,14 +300,75 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 	{
 		cfg.blockReader.Snapshots().LogStat("download")
-		txNumsReader := cfg.blockReader.TxnumReader(ctx)
+		txNumsReader := cfg.blockReader.TxnumReader()
 		aggtx := state.AggTx(tx)
 		stats.LogStats(aggtx, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
-			histBlockNumProgress, _, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
+			histBlockNumProgress, _, err := txNumsReader.FindBlockNum(ctx, tx, endTxNumMinimax)
 			return histBlockNumProgress, err
 		})
 	}
 
+	return nil
+}
+
+// buildOrDeferE2Indices decides whether to build E2 block snapshot indices synchronously
+// or defer them to background processing.
+// On restart (headersProgress > 0), E2 indexing is skipped at startup. Missing indices
+// will be built in the background via RetireBlocksInBackground (called from SnapshotsPrune
+// on every sync cycle).
+// Exception: Bor chains always index synchronously because RetireBlocks has an early-exit
+// guard for Bor data readiness that may skip BuildMissedIndicesIfNeed.
+func buildOrDeferE2Indices(ctx context.Context, s *StageState, cfg SnapshotsCfg, headersProgress uint64) error {
+	isBor := cfg.chainConfig.Bor != nil
+	canDefer := headersProgress > 0 && !isBor
+
+	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "E2 Indexing"})
+	if !canDefer {
+		if err := cfg.blockRetire.BuildMissedIndicesIfNeed(ctx, s.LogPrefix(), cfg.notifier.Events); err != nil {
+			return err
+		}
+	} else {
+		log.Info(fmt.Sprintf("[%s] Deferring E2 indexing to background", s.LogPrefix()), "reason", "restart", "headersProgress", headersProgress)
+	}
+	return nil
+}
+
+// buildOrDeferE3Accessors decides whether to build E3 state accessors synchronously
+// or defer them to background processing.
+// On restart (headersProgress > 0), E3 indexing is skipped at startup. Missing accessors
+// will be built in the background via BuildMissedAccessorsInBackground (called from
+// SnapshotsPrune on every sync cycle).
+// Unindexed state files are safely excluded from visible files by checkForVisibility
+// (which checks accessor presence), so queries correctly reflect only indexed data.
+// Note: unlike E2, there is no Bor exception — the background path calls
+// BuildMissedAccessors directly without any Bor-specific early-exit guards.
+func buildOrDeferE3Accessors(ctx context.Context, s *StageState, cfg SnapshotsCfg, agg *state.Aggregator, headersProgress uint64) error {
+	canDefer := headersProgress > 0
+
+	indexWorkers := estimate.IndexSnapshot.Workers()
+	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "E3 Indexing"})
+	if !canDefer {
+		if err := agg.BuildMissedAccessors(ctx, indexWorkers); err != nil {
+			return err
+		}
+	} else {
+		log.Info(fmt.Sprintf("[%s] Deferring E3 indexing to background", s.LogPrefix()), "reason", "restart", "headersProgress", headersProgress)
+	}
+	return nil
+}
+
+func firstNonGenesisCheck(tx kv.RwTx, snapshots services.BlockSnapshots, logPrefix string, dirs datadir.Dirs) error {
+	firstNonGenesis, err := rawdbv3.SecondKey(tx, kv.Headers)
+	if err != nil {
+		return err
+	}
+	if firstNonGenesis != nil {
+		firstNonGenesisBlockNumber := binary.BigEndian.Uint64(firstNonGenesis)
+		if snapshots.SegmentsMax()+1 < firstNonGenesisBlockNumber {
+			log.Warn(fmt.Sprintf("[%s] Some blocks are not in snapshots and not in db. This could have happened because the node was stopped at the wrong time; you can fix this with 'rm -rf %s' (this is not equivalent to a full resync)", logPrefix, dirs.Chaindata), "max_in_snapshots", snapshots.SegmentsMax(), "min_in_db", firstNonGenesisBlockNumber)
+			return fmt.Errorf("some blocks are not in snapshots and not in db. This could have happened because the node was stopped at the wrong time; you can fix this with 'rm -rf %s' (this is not equivalent to a full resync)", dirs.Chaindata)
+		}
+	}
 	return nil
 }
 
@@ -425,28 +409,13 @@ func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader services
 	return nil
 }
 
-/* ====== PRUNING ====== */
-// snapshots pruning sections works more as a retiring of blocks
-// retiring blocks means moving block data from db into snapshots
+// SnapshotsPrune moving block data from db into snapshots, removing old snapshots (if --prune.* enabled)
 func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx, logger log.Logger) (err error) {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-
 	freezingCfg := cfg.blockReader.FreezingCfg()
 	if freezingCfg.ProduceE2 {
 		//TODO: initialSync maybe save files progress here
 
 		var minBlockNumber uint64
-
-		if cfg.snapshotUploader != nil {
-			minBlockNumber = cfg.snapshotUploader.minBlockNumber()
-		}
 
 		if s.CurrentSyncCycle.IsInitialCycle {
 			cfg.blockRetire.SetWorkers(estimate.CompressSnapshot.Workers())
@@ -459,32 +428,15 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 			minBlockNumber,
 			s.ForwardProgress,
 			log.LvlDebug,
-			func(downloadRequest []snapshotsync.DownloadRequest) error {
-				if cfg.snapshotDownloader != nil && !reflect.ValueOf(cfg.snapshotDownloader).IsNil() {
-					if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader, ""); err != nil {
-						return err
-					}
-				}
-
-				return nil
-			}, func(l []string) error {
-				//if cfg.snapshotUploader != nil {
-				// TODO - we need to also remove files from the uploader (100k->500K transition)
-				//}
-
-				if !(cfg.snapshotDownloader == nil || reflect.ValueOf(cfg.snapshotDownloader).IsNil()) {
-					_, err := cfg.snapshotDownloader.Delete(ctx, &protodownloader.DeleteRequest{Paths: l})
-					return err
-				}
-
-				return nil
-			}, func() error {
+			cfg.getSeederClient(),
+			func() error {
 				filesDeleted, err := pruneBlockSnapshots(ctx, cfg, logger)
 				if filesDeleted && cfg.notifier != nil {
 					cfg.notifier.Events.OnNewSnapshot()
 				}
 				return err
-			}, func() {
+			},
+			func() {
 				if cfg.notifier != nil {
 					cfg.notifier.Events.OnRetirementDone()
 				}
@@ -492,8 +444,15 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 		if cfg.notifier != nil {
 			cfg.notifier.Events.OnRetirementStart(started)
 		}
+	}
 
-		//	cfg.agg.BuildFilesInBackground()
+	// Build any missed E3 state accessors in the background.
+	// This is the counterpart to RetireBlocksInBackground → BuildMissedIndicesIfNeed for E2.
+	// On restart, buildOrDeferE3Accessors skips synchronous accessor building;
+	// this call ensures missing accessors are rebuilt in the background on every sync cycle.
+	if freezingCfg.ProduceE3 {
+		agg := cfg.db.(state.HasAgg).Agg().(*state.Aggregator)
+		agg.BuildMissedAccessorsInBackground(estimate.IndexSnapshot.Workers())
 	}
 
 	pruneLimit := 10
@@ -508,35 +467,6 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 	if err := pruneCanonicalMarkers(ctx, tx, cfg.blockReader); err != nil {
 		return err
 	}
-
-	if cfg.snapshotUploader != nil {
-		// if we're uploading make sure that the DB does not get too far
-		// ahead of the snapshot production process - otherwise DB will
-		// grow larger than necessary - we may also want to increase the
-		// workers
-		if s.ForwardProgress > cfg.blockReader.FrozenBlocks()+300_000 {
-			func() {
-				checkEvery := time.NewTicker(logInterval)
-				defer checkEvery.Stop()
-
-				for s.ForwardProgress > cfg.blockReader.FrozenBlocks()+300_000 {
-					select {
-					case <-ctx.Done():
-						return
-					case <-checkEvery.C:
-						log.Info(fmt.Sprintf("[%s] Waiting for snapshots...", s.LogPrefix()), "progress", s.ForwardProgress, "frozen", cfg.blockReader.FrozenBlocks(), "gap", s.ForwardProgress-cfg.blockReader.FrozenBlocks())
-					}
-				}
-			}()
-		}
-	}
-
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 
@@ -564,6 +494,7 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 		return false, nil
 	}
 
+	//TODO: push-down this logic into `blockRetire`: instead of work on raw file names - we must work on dirtySegments. Instead of calling downloader.Del(file) we must call `downloader.Del(dirtySegment.Paths(snapDir)`
 	snapshotFileNames := cfg.blockReader.FrozenFiles()
 	filesDeleted := false
 	// Prune blocks snapshots if necessary
@@ -583,10 +514,9 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 		if info.To-info.From != snaptype.Erigon2MergeLimit {
 			continue
 		}
-		if cfg.snapshotDownloader != nil {
-			if _, err := cfg.snapshotDownloader.Delete(ctx, &protodownloader.DeleteRequest{Paths: []string{file}}); err != nil {
-				return filesDeleted, err
-			}
+		err = cfg.getSeederClient().Delete(ctx, []string{file})
+		if err != nil {
+			return filesDeleted, err
 		}
 		if err := cfg.blockReader.Snapshots().Delete(file); err != nil {
 			return filesDeleted, err
@@ -594,812 +524,4 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 		filesDeleted = true
 	}
 	return filesDeleted, nil
-}
-
-type uploadState struct {
-	sync.Mutex
-	file             string
-	info             *snaptype.FileInfo
-	torrent          *torrent.TorrentSpec
-	buildingTorrent  bool
-	uploads          []string
-	remote           bool
-	hasRemoteTorrent bool
-	//remoteHash       string
-	local     bool
-	localHash string
-}
-
-type snapshotUploader struct {
-	cfg             *SnapshotsCfg
-	files           map[string]*uploadState
-	uploadFs        string
-	rclone          *downloader.RCloneClient
-	uploadSession   *downloader.RCloneSession
-	uploadScheduled atomic.Bool
-	uploading       atomic.Bool
-	manifestMutex   sync.Mutex
-	torrentFiles    *downloader.AtomicTorrentFS
-}
-
-func (u *snapshotUploader) init(ctx context.Context, logger log.Logger) {
-	if u.files == nil {
-		freezingCfg := u.cfg.blockReader.FreezingCfg()
-
-		if freezingCfg.ProduceE2 {
-			u.files = map[string]*uploadState{}
-			u.start(ctx, logger)
-		}
-	}
-}
-
-func (u *snapshotUploader) maxUploadedHeader() uint64 {
-	var _max uint64
-
-	if len(u.files) > 0 {
-		for _, state := range u.files {
-			if state.local && state.remote {
-				if state.info != nil {
-					if state.info.Type.Enum() == coresnaptype.Enums.Headers {
-						if state.info.To > _max {
-							_max = state.info.To
-						}
-					}
-				} else {
-					if info, _, ok := snaptype.ParseFileName(u.cfg.dirs.Snap, state.file); ok {
-						if info.Type.Enum() == coresnaptype.Enums.Headers {
-							if info.To > _max {
-								_max = info.To
-							}
-						}
-						state.info = &info
-					}
-				}
-			}
-		}
-	}
-
-	return _max
-}
-
-type dirEntry struct {
-	name string
-}
-
-type snapInfo struct {
-	snaptype.FileInfo
-}
-
-func (i *snapInfo) Version() snaptype.Version {
-	return i.FileInfo.Version
-}
-
-func (i *snapInfo) From() uint64 {
-	return i.FileInfo.From
-}
-
-func (i *snapInfo) To() uint64 {
-	return i.FileInfo.To
-}
-
-func (i *snapInfo) Type() snaptype.Type {
-	return i.FileInfo.Type
-}
-
-func (e dirEntry) Name() string {
-	return e.name
-}
-
-func (e dirEntry) IsDir() bool {
-	return false
-}
-
-func (e dirEntry) Type() fs.FileMode {
-	return e.Mode()
-}
-
-func (e dirEntry) Size() int64 {
-	return -1
-}
-
-func (e dirEntry) Mode() fs.FileMode {
-	return fs.ModeIrregular
-}
-
-func (e dirEntry) ModTime() time.Time {
-	return time.Time{}
-}
-
-func (e dirEntry) Sys() any {
-	if info, _, ok := snaptype.ParseFileName("", e.name); ok {
-		return &snapInfo{info}
-	}
-
-	return nil
-}
-
-func (e dirEntry) Info() (fs.FileInfo, error) {
-	return e, nil
-}
-
-var checkKnownSizes = false
-
-func (u *snapshotUploader) seedable(fi snaptype.FileInfo) bool {
-	if !snapcfg.Seedable(u.cfg.chainConfig.ChainName, fi) {
-		return false
-	}
-
-	if checkKnownSizes {
-		snapCfg, _ := snapcfg.KnownCfg(u.cfg.chainConfig.ChainName)
-		for _, it := range snapCfg.Preverified.Items {
-			info, _, _ := snaptype.ParseFileName("", it.Name)
-
-			if fi.From == info.From {
-				return fi.To == info.To
-			}
-
-			if fi.From < info.From {
-				return info.To-info.From == fi.To-fi.From
-			}
-
-			if fi.From < info.To {
-				return false
-			}
-		}
-	}
-
-	return true
-}
-
-func (u *snapshotUploader) downloadManifest(ctx context.Context) ([]fs.DirEntry, error) {
-	u.manifestMutex.Lock()
-	defer u.manifestMutex.Unlock()
-
-	reader, err := u.uploadSession.Cat(ctx, "manifest.txt")
-
-	if err != nil {
-		return nil, err
-	}
-
-	var entries []fs.DirEntry
-
-	scanner := bufio.NewScanner(reader)
-
-	for scanner.Scan() {
-		entries = append(entries, dirEntry{scanner.Text()})
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-
-	if len(entries) == 0 {
-		return nil, io.ErrUnexpectedEOF
-	}
-
-	return entries, nil
-}
-
-func (u *snapshotUploader) uploadManifest(ctx context.Context, remoteRefresh bool) error {
-	u.manifestMutex.Lock()
-	defer u.manifestMutex.Unlock()
-
-	if remoteRefresh {
-		u.refreshFromRemote(ctx)
-	}
-
-	manifestFile := "manifest.txt"
-
-	fileMap := map[string]string{}
-
-	for file, state := range u.files {
-		if state.remote {
-			if state.hasRemoteTorrent {
-				fileMap[file] = file + ".torrent"
-			} else {
-				fileMap[file] = ""
-			}
-		}
-	}
-
-	files := make([]string, 0, len(fileMap))
-
-	for torrent, file := range fileMap {
-		files = append(files, file)
-
-		if len(torrent) > 0 {
-			files = append(files, torrent)
-		}
-	}
-
-	sort.Strings(files)
-
-	manifestEntries := bytes.Buffer{}
-
-	for _, file := range files {
-		fmt.Fprintln(&manifestEntries, file)
-	}
-
-	_ = os.WriteFile(filepath.Join(u.cfg.dirs.Snap, manifestFile), manifestEntries.Bytes(), 0644)
-	defer os.Remove(filepath.Join(u.cfg.dirs.Snap, manifestFile))
-
-	return u.uploadSession.Upload(ctx, manifestFile)
-}
-
-func (u *snapshotUploader) refreshFromRemote(ctx context.Context) {
-	remoteFiles, err := u.uploadSession.ReadRemoteDir(ctx, true)
-
-	if err != nil {
-		return
-	}
-
-	u.updateRemotes(remoteFiles)
-}
-
-func (u *snapshotUploader) updateRemotes(remoteFiles []fs.DirEntry) {
-	for _, fi := range remoteFiles {
-		var file string
-		var hasTorrent bool
-
-		if hasTorrent = filepath.Ext(fi.Name()) == ".torrent"; hasTorrent {
-			file = strings.TrimSuffix(fi.Name(), ".torrent")
-		} else {
-			file = fi.Name()
-		}
-
-		// if we have found the file & its torrent we don't
-		// need to attempt another sync operation
-		if state, ok := u.files[file]; ok {
-			state.remote = true
-
-			if hasTorrent {
-				state.hasRemoteTorrent = true
-			}
-
-		} else {
-			info, isStateFile, ok := snaptype.ParseFileName(u.cfg.dirs.Snap, fi.Name())
-			if !ok {
-				continue
-			}
-			if isStateFile {
-				//TODO
-				continue
-			}
-
-			u.files[file] = &uploadState{
-				file:             file,
-				info:             &info,
-				local:            dir.FileNonZero(info.Path),
-				hasRemoteTorrent: hasTorrent,
-			}
-		}
-	}
-}
-
-func (u *snapshotUploader) downloadLatestSnapshots(ctx context.Context, blockNumber rpc.BlockNumber) error {
-
-	entries, err := u.downloadManifest(ctx)
-
-	if err != nil {
-		entries, err = u.uploadSession.ReadRemoteDir(ctx, true)
-	}
-
-	if err != nil {
-		return err
-	}
-
-	lastSegments := map[snaptype.Enum]fs.FileInfo{}
-	torrents := map[string]string{}
-
-	for _, ent := range entries {
-		if info, err := ent.Info(); err == nil {
-
-			if info.Size() > -1 && info.Size() <= 32 {
-				continue
-			}
-
-			snapInfo, ok := info.Sys().(downloader.SnapInfo)
-
-			if ok && snapInfo.Type() != nil {
-				if last, ok := lastSegments[snapInfo.Type().Enum()]; ok {
-					if lastInfo, ok := last.Sys().(downloader.SnapInfo); ok && snapInfo.To() > lastInfo.To() {
-						lastSegments[snapInfo.Type().Enum()] = info
-					}
-				} else {
-					lastSegments[snapInfo.Type().Enum()] = info
-				}
-			} else {
-				if ext := filepath.Ext(info.Name()); ext == ".torrent" {
-					fileName := strings.TrimSuffix(info.Name(), ".torrent")
-					torrents[fileName] = info.Name()
-				}
-			}
-		}
-	}
-
-	var _min uint64
-
-	for _, info := range lastSegments {
-		if lastInfo, ok := info.Sys().(downloader.SnapInfo); ok {
-			if _min == 0 || lastInfo.From() < _min {
-				_min = lastInfo.From()
-			}
-		}
-	}
-
-	for segType, info := range lastSegments {
-		if lastInfo, ok := info.Sys().(downloader.SnapInfo); ok {
-			if lastInfo.From() > _min {
-				for _, ent := range entries {
-					if info, err := ent.Info(); err == nil {
-						snapInfo, ok := info.Sys().(downloader.SnapInfo)
-
-						if ok && snapInfo.Type().Enum() == segType &&
-							snapInfo.From() == _min {
-							lastSegments[segType] = info
-						}
-					}
-				}
-			}
-		}
-	}
-
-	downloads := make([]string, 0, len(lastSegments))
-
-	for _, info := range lastSegments {
-		downloads = append(downloads, info.Name())
-		if torrent, ok := torrents[info.Name()]; ok {
-			downloads = append(downloads, torrent)
-		}
-	}
-
-	if len(downloads) > 0 {
-		return u.uploadSession.Download(ctx, downloads...)
-	}
-
-	return nil
-}
-
-func (u *snapshotUploader) maxSeedableHeader() uint64 {
-	return snapcfg.MaxSeedableSegment(u.cfg.chainConfig.ChainName, u.cfg.dirs.Snap)
-}
-
-func (u *snapshotUploader) minBlockNumber() uint64 {
-	var _min uint64
-
-	if list, err := snaptype.Segments(u.cfg.dirs.Snap); err == nil {
-		for _, info := range list {
-			if u.seedable(info) && _min == 0 || info.From < _min {
-				_min = info.From
-			}
-		}
-	}
-
-	return _min
-}
-
-func expandHomeDir(dirpath string) string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return dirpath
-	}
-	prefix := fmt.Sprintf("~%c", os.PathSeparator)
-	if strings.HasPrefix(dirpath, prefix) {
-		return filepath.Join(home, dirpath[len(prefix):])
-	} else if dirpath == "~" {
-		return home
-	}
-	return dirpath
-}
-
-func isLocalFs(ctx context.Context, rclient *downloader.RCloneClient, fs string) bool {
-
-	remotes, _ := rclient.ListRemotes(ctx)
-
-	if remote, _, ok := strings.Cut(fs, ":"); ok {
-		for _, r := range remotes {
-			if remote == r {
-				return false
-			}
-		}
-
-		return filepath.VolumeName(fs) == remote
-	}
-
-	return true
-}
-
-func (u *snapshotUploader) start(ctx context.Context, logger log.Logger) {
-	var err error
-
-	u.rclone, err = downloader.NewRCloneClient(logger)
-
-	if err != nil {
-		logger.Warn("[uploader] Uploading disabled: rclone start failed", "err", err)
-		return
-	}
-
-	uploadFs := u.uploadFs
-
-	if isLocalFs(ctx, u.rclone, uploadFs) {
-		uploadFs = expandHomeDir(filepath.Clean(uploadFs))
-
-		uploadFs, err = filepath.Abs(uploadFs)
-
-		if err != nil {
-			logger.Warn("[uploader] Uploading disabled: invalid upload fs", "err", err, "fs", u.uploadFs)
-			return
-		}
-
-		if err := os.MkdirAll(uploadFs, 0755); err != nil {
-			logger.Warn("[uploader] Uploading disabled: can't create upload fs", "err", err, "fs", u.uploadFs)
-			return
-		}
-	}
-
-	u.uploadSession, err = u.rclone.NewSession(ctx, u.cfg.dirs.Snap, uploadFs, nil)
-
-	if err != nil {
-		logger.Warn("[uploader] Uploading disabled: rclone session failed", "err", err)
-		return
-	}
-
-	go func() {
-
-		remoteFiles, _ := u.downloadManifest(ctx)
-		refreshFromRemote := false
-
-		if len(remoteFiles) > 0 {
-			u.updateRemotes(remoteFiles)
-			refreshFromRemote = true
-		} else {
-			u.refreshFromRemote(ctx)
-		}
-
-		go u.uploadManifest(ctx, refreshFromRemote)
-
-		logger.Debug("[snapshot uploader] starting snapshot subscription...")
-		snapshotSubCh, snapshotSubClean := u.cfg.notifier.Events.AddNewSnapshotSubscription()
-		defer snapshotSubClean()
-
-		logger.Info("[snapshot uploader] subscription established")
-
-		defer func() {
-			if err != nil {
-				if !errors.Is(err, context.Canceled) {
-					logger.Warn("[snapshot uploader] subscription closed", "reason", err)
-				}
-			} else {
-				logger.Warn("[snapshot uploader] subscription closed")
-			}
-		}()
-
-		u.scheduleUpload(ctx, logger)
-
-		for {
-			select {
-			case <-ctx.Done():
-				err = ctx.Err()
-				return
-			case <-snapshotSubCh:
-				logger.Info("[snapshot uploader] new snapshot received")
-				u.scheduleUpload(ctx, logger)
-			}
-		}
-	}()
-}
-
-func (u *snapshotUploader) scheduleUpload(ctx context.Context, logger log.Logger) {
-	if !u.uploadScheduled.CompareAndSwap(false, true) {
-		return
-	}
-
-	if u.uploading.CompareAndSwap(false, true) {
-		go func() {
-			defer u.uploading.Store(false)
-			for u.uploadScheduled.Load() {
-				u.uploadScheduled.Store(false)
-				u.upload(ctx, logger)
-			}
-		}()
-	}
-}
-
-func (u *snapshotUploader) removeBefore(before uint64) {
-	list, err := snaptype.Segments(u.cfg.dirs.Snap)
-
-	if err != nil {
-		return
-	}
-
-	var toReopen []string
-	var borToReopen []string
-
-	toRemove := make([]string, 0, len(list))
-
-	for _, f := range list {
-		if f.To > before {
-			switch f.Type.Enum() {
-			case heimdall.Enums.Events, heimdall.Enums.Spans,
-				heimdall.Enums.Checkpoints, heimdall.Enums.Milestones:
-				borToReopen = append(borToReopen, filepath.Base(f.Path))
-			default:
-				toReopen = append(toReopen, filepath.Base(f.Path))
-			}
-
-			continue
-		}
-
-		toRemove = append(toRemove, f.Path)
-	}
-
-	if len(toRemove) > 0 {
-		if snapshots, ok := u.cfg.blockReader.Snapshots().(*freezeblocks.RoSnapshots); ok {
-			snapshots.SetSegmentsMin(before)
-			snapshots.OpenList(toReopen, true)
-		}
-
-		if snapshots, ok := u.cfg.blockReader.BorSnapshots().(*heimdall.RoSnapshots); ok {
-			snapshots.OpenList(borToReopen, true)
-			snapshots.SetSegmentsMin(before)
-		}
-
-		for _, f := range toRemove {
-			_ = os.Remove(f)
-			_ = os.Remove(f + ".torrent")
-			ext := filepath.Ext(f)
-			withoutExt := f[:len(f)-len(ext)]
-			_ = os.Remove(withoutExt + ".idx")
-
-			if strings.HasSuffix(withoutExt, "transactions") {
-				_ = os.Remove(withoutExt + "-to-block.idx")
-			}
-		}
-	}
-}
-
-func (u *snapshotUploader) upload(ctx context.Context, logger log.Logger) {
-	defer func() {
-		if r := recover(); r != nil {
-			log.Error("[snapshot uploader] snapshot upload failed", "err", r, "stack", dbg.Stack())
-		}
-	}()
-
-	retryTime := 30 * time.Second
-	maxRetryTime := 300 * time.Second
-
-	var uploadCount int
-
-	for {
-		var processList []*uploadState
-
-		for _, f := range u.cfg.blockReader.FrozenFiles() {
-			if state, ok := u.files[f]; !ok {
-				if fi, isStateFile, ok := snaptype.ParseFileName(u.cfg.dirs.Snap, f); ok {
-					if isStateFile {
-						//TODO
-						continue
-					}
-
-					if u.seedable(fi) {
-						state := &uploadState{
-							file:  f,
-							info:  &fi,
-							local: true,
-						}
-						exists, err := fi.TorrentFileExists()
-						if err != nil {
-							logger.Debug("TorrentFileExists error", "err", err)
-						}
-						if exists {
-							state.torrent, _ = u.torrentFiles.LoadByName(f)
-						}
-
-						u.files[f] = state
-						processList = append(processList, state)
-					}
-				}
-			} else {
-				func() {
-					state.Lock()
-					defer state.Unlock()
-
-					state.local = true
-					exists, err := state.info.TorrentFileExists()
-					if err != nil {
-						logger.Debug("TorrentFileExists error", "err", err)
-					}
-					if state.torrent == nil && exists {
-						state.torrent, _ = u.torrentFiles.LoadByName(f)
-						if state.torrent != nil {
-							state.localHash = state.torrent.InfoHash.String()
-						}
-					}
-
-					if !state.remote {
-						processList = append(processList, state)
-					}
-				}()
-			}
-		}
-
-		var torrentList []*uploadState
-
-		for _, state := range processList {
-			func() {
-				state.Lock()
-				defer state.Unlock()
-				if !(state.torrent != nil || state.buildingTorrent) {
-					torrentList = append(torrentList, state)
-					state.buildingTorrent = true
-				}
-			}()
-		}
-
-		if len(torrentList) > 0 {
-			g, gctx := errgroup.WithContext(ctx)
-			g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
-			var i atomic.Int32
-
-			go func() {
-				logEvery := time.NewTicker(20 * time.Second)
-				defer logEvery.Stop()
-
-				for int(i.Load()) < len(torrentList) {
-					select {
-					case <-gctx.Done():
-						return
-					case <-logEvery.C:
-						if int(i.Load()) == len(torrentList) {
-							return
-						}
-						log.Info("[snapshot uploader] Creating .torrent files", "progress", fmt.Sprintf("%d/%d", i.Load(), len(torrentList)))
-					}
-				}
-			}()
-
-			for _, s := range torrentList {
-				state := s
-
-				g.Go(func() error {
-					defer i.Add(1)
-
-					_, err := downloader.BuildTorrentIfNeed(gctx, state.file, u.cfg.dirs.Snap, u.torrentFiles)
-
-					state.Lock()
-					state.buildingTorrent = false
-					state.Unlock()
-
-					if err != nil {
-						return err
-					}
-
-					torrent, err := u.torrentFiles.LoadByName(state.file)
-
-					if err != nil {
-						return err
-					}
-
-					state.Lock()
-					state.torrent = torrent
-					state.Unlock()
-
-					state.localHash = state.torrent.InfoHash.String()
-
-					logger.Info("[snapshot uploader] built torrent", "file", state.file, "hash", state.localHash)
-
-					return nil
-				})
-			}
-
-			if err := g.Wait(); err != nil {
-				logger.Debug(".torrent file creation failed", "err", err)
-			}
-		}
-
-		var f atomic.Int32
-
-		var uploadList []*uploadState
-
-		for _, state := range processList {
-			err := func() error {
-				state.Lock()
-				defer state.Unlock()
-				if !state.remote && state.torrent != nil && len(state.uploads) == 0 && u.rclone != nil {
-					state.uploads = []string{state.file, state.file + ".torrent"}
-					uploadList = append(uploadList, state)
-				}
-
-				return nil
-			}()
-
-			if err != nil {
-				logger.Debug("upload failed", "file", state.file, "err", err)
-			}
-		}
-
-		if len(uploadList) > 0 {
-			log.Info("[snapshot uploader] Starting upload", "count", len(uploadList))
-
-			g, gctx := errgroup.WithContext(ctx)
-			g.SetLimit(16)
-			var i atomic.Int32
-
-			go func() {
-				logEvery := time.NewTicker(20 * time.Second)
-				defer logEvery.Stop()
-
-				for int(i.Load()) < len(processList) {
-					select {
-					case <-gctx.Done():
-						log.Info("[snapshot uploader] Uploaded files", "processed", fmt.Sprintf("%d/%d/%d", i.Load(), len(processList), f.Load()))
-						return
-					case <-logEvery.C:
-						if int(i.Load()+f.Load()) == len(processList) {
-							return
-						}
-						log.Info("[snapshot uploader] Uploading files", "progress", fmt.Sprintf("%d/%d/%d", i.Load(), len(processList), f.Load()))
-					}
-				}
-			}()
-
-			for _, s := range uploadList {
-				state := s
-				func() {
-					state.Lock()
-					defer state.Unlock()
-
-					g.Go(func() error {
-						defer i.Add(1)
-						defer func() {
-							state.Lock()
-							state.uploads = nil
-							state.Unlock()
-						}()
-
-						if err := u.uploadSession.Upload(gctx, state.uploads...); err != nil {
-							f.Add(1)
-							return nil
-						}
-
-						uploadCount++
-
-						state.Lock()
-						state.remote = true
-						state.hasRemoteTorrent = true
-						state.Unlock()
-						return nil
-					})
-				}()
-			}
-
-			if err := g.Wait(); err != nil {
-				logger.Debug("[snapshot uploader] upload failed", "err", err)
-			}
-		}
-
-		if f.Load() == 0 {
-			break
-		}
-
-		time.Sleep(retryTime)
-
-		if retryTime < maxRetryTime {
-			retryTime += retryTime
-		} else {
-			retryTime = maxRetryTime
-		}
-	}
-
-	var err error
-
-	if uploadCount > 0 {
-		err = u.uploadManifest(ctx, false)
-	}
-
-	if err == nil {
-		if maxUploaded := u.maxUploadedHeader(); u.cfg.syncConfig.FrozenBlockLimit > 0 && maxUploaded > u.cfg.syncConfig.FrozenBlockLimit {
-			u.removeBefore(maxUploaded - u.cfg.syncConfig.FrozenBlockLimit)
-		}
-	}
 }

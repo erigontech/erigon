@@ -14,8 +14,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build !nofuzz
-
 package txpool
 
 import (
@@ -28,18 +26,18 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/chain"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/common/u256"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/kv/kvcache"
-	"github.com/erigontech/erigon-lib/kv/memdb"
-	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/rlp"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -208,7 +206,7 @@ func poolsFromFuzzBytes(rawTxnNonce, rawValues, rawTips, rawFeeCap, rawSender []
 		senderIDs[senders.AddressAt(i%senders.Len())] = senderID
 	}
 	txns.Txns = make([]*TxnSlot, len(txnNonce))
-	parseCtx := NewTxnParseContext(*u256.N1)
+	parseCtx := NewTxnParseContext(u256.N1)
 	parseCtx.WithSender(false)
 	for i := range txnNonce {
 		txns.Txns[i] = &TxnSlot{
@@ -232,10 +230,10 @@ func poolsFromFuzzBytes(rawTxnNonce, rawValues, rawTips, rawFeeCap, rawSender []
 // fakeRlpTxn add anything what identifying txn to `data` to make hash unique
 func fakeRlpTxn(slot *TxnSlot, data []byte) []byte {
 	dataLen := rlp.U64Len(1) + //chainID
-		rlp.U64Len(slot.Nonce) + rlp.U256Len(&slot.Tip) + rlp.U256Len(&slot.FeeCap) +
+		rlp.U64Len(slot.Nonce) + rlp.Uint256Len(slot.Tip) + rlp.Uint256Len(slot.FeeCap) +
 		rlp.U64Len(0) + // gas
 		rlp.StringLen([]byte{}) + // dest addr
-		rlp.U256Len(&slot.Value) +
+		rlp.Uint256Len(slot.Value) +
 		rlp.StringLen(data) + // data
 		rlp.ListPrefixLen(0) + //access list
 		+3 // v,r,s
@@ -248,22 +246,22 @@ func fakeRlpTxn(slot *TxnSlot, data []byte) []byte {
 	p += rlp.EncodeU64(slot.Nonce, buf[p:])
 	bb := bytes.NewBuffer(buf[p:p])
 	_ = slot.Tip.EncodeRLP(bb)
-	p += rlp.U256Len(&slot.Tip)
+	p += rlp.Uint256Len(slot.Tip)
 	bb = bytes.NewBuffer(buf[p:p])
 	_ = slot.FeeCap.EncodeRLP(bb)
-	p += rlp.U256Len(&slot.FeeCap)
+	p += rlp.Uint256Len(slot.FeeCap)
 	p += rlp.EncodeU64(0, buf[p:])            //gas
 	p += rlp.EncodeString2([]byte{}, buf[p:]) //destrination addr
 	bb = bytes.NewBuffer(buf[p:p])
 	_ = slot.Value.EncodeRLP(bb)
-	p += rlp.U256Len(&slot.Value)
+	p += rlp.Uint256Len(slot.Value)
 	p += rlp.EncodeString2(data, buf[p:]) //data
 	p += rlp.EncodeListPrefix(0, buf[p:]) // access list
 	p += rlp.EncodeU64(1, buf[p:])        //v
 	p += rlp.EncodeU64(1, buf[p:])        //r
 	p += rlp.EncodeU64(1, buf[p:])        //s
 	_ = p
-	return buf[:]
+	return buf
 }
 
 func iterateSubPoolUnordered(subPool *SubPool, f func(txn *metaTxn)) {
@@ -306,7 +304,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 	f.Add(u64[:], u64[:], u64[:], u64[:], senderAddr[:], uint8(14))
 	f.Add(u64[:], u64[:], u64[:], u64[:], senderAddr[:], uint8(123))
 	f.Fuzz(func(t *testing.T, txnNonce, values, tips, feeCap, senderAddr []byte, pendingBaseFee1 uint8) {
-		//t.Parallel()
+		t.Parallel()
 		ctx := context.Background()
 
 		pendingBaseFee := uint64(pendingBaseFee1%16 + 1)
@@ -481,10 +479,10 @@ func FuzzOnNewBlocks(f *testing.F) {
 			txID = tx.ViewID()
 			return nil
 		})
-		change := &remote.StateChangeBatch{
+		change := &remoteproto.StateChangeBatch{
 			StateVersionId:      txID,
 			PendingBlockBaseFee: pendingBaseFee,
-			ChangeBatch: []*remote.StateChange{
+			ChangeBatch: []*remoteproto.StateChange{
 				{BlockHeight: 0, BlockHash: h0},
 			},
 		}
@@ -492,8 +490,8 @@ func FuzzOnNewBlocks(f *testing.F) {
 			addr := pool.senders.senderID2Addr[id]
 			v := make([]byte, EncodeSenderLengthForStorage(sender.nonce, sender.balance))
 			EncodeSender(sender.nonce, sender.balance, v)
-			change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
-				Action:  remote.Action_UPSERT,
+			change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
+				Action:  remoteproto.Action_UPSERT,
 				Address: gointerfaces.ConvertAddressToH160(addr),
 				Data:    v,
 			})
@@ -506,10 +504,10 @@ func FuzzOnNewBlocks(f *testing.F) {
 		checkNotify(txns1, TxnSlots{}, "fork1")
 
 		_, _, _ = p2pReceived, txns2, txns3
-		change = &remote.StateChangeBatch{
+		change = &remoteproto.StateChangeBatch{
 			StateVersionId:      txID,
 			PendingBlockBaseFee: pendingBaseFee,
-			ChangeBatch: []*remote.StateChange{
+			ChangeBatch: []*remoteproto.StateChange{
 				{BlockHeight: 1, BlockHash: h0},
 			},
 		}
@@ -519,11 +517,11 @@ func FuzzOnNewBlocks(f *testing.F) {
 		checkNotify(TxnSlots{}, txns2, "fork1 mined")
 
 		// unwind everything and switch to new fork (need unwind mined now)
-		change = &remote.StateChangeBatch{
+		change = &remoteproto.StateChangeBatch{
 			StateVersionId:      txID,
 			PendingBlockBaseFee: pendingBaseFee,
-			ChangeBatch: []*remote.StateChange{
-				{BlockHeight: 0, BlockHash: h0, Direction: remote.Direction_UNWIND},
+			ChangeBatch: []*remoteproto.StateChange{
+				{BlockHeight: 0, BlockHash: h0, Direction: remoteproto.Direction_UNWIND},
 			},
 		}
 		err = pool.OnNewBlock(ctx, change, txns2, TxnSlots{}, TxnSlots{})
@@ -531,10 +529,10 @@ func FuzzOnNewBlocks(f *testing.F) {
 		check(txns2, TxnSlots{}, "fork2")
 		checkNotify(txns2, TxnSlots{}, "fork2")
 
-		change = &remote.StateChangeBatch{
+		change = &remoteproto.StateChangeBatch{
 			StateVersionId:      txID,
 			PendingBlockBaseFee: pendingBaseFee,
-			ChangeBatch: []*remote.StateChange{
+			ChangeBatch: []*remoteproto.StateChange{
 				{BlockHeight: 1, BlockHash: h22},
 			},
 		}

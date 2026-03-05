@@ -20,7 +20,7 @@ import (
 	"container/heap"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 type SubPoolType uint8
@@ -75,27 +75,31 @@ func (p *SubPool) EnforceInvariants() {
 	heap.Init(p.best)
 }
 
-func (p *SubPool) Best() *metaTxn { //nolint
+// Best returns the transaction with the highest priority in the sub-pool.
+func (p *SubPool) Best() *metaTxn {
 	if len(p.best.ms) == 0 {
 		return nil
 	}
 	return p.best.ms[0]
 }
 
-func (p *SubPool) Worst() *metaTxn { //nolint
+// Worst returns the transaction with the lowest priority in the sub-pool.
+func (p *SubPool) Worst() *metaTxn {
 	if len(p.worst.ms) == 0 {
 		return nil
 	}
 	return p.worst.ms[0]
 }
 
-func (p *SubPool) PopBest() *metaTxn { //nolint
+// PopBest removes and returns the highest-priority transaction from the sub-pool.
+func (p *SubPool) PopBest() *metaTxn {
 	i := heap.Pop(p.best).(*metaTxn)
 	heap.Remove(p.worst, i.worstIndex)
 	return i
 }
 
-func (p *SubPool) PopWorst() *metaTxn { //nolint
+// PopWorst removes and returns the lowest-priority transaction from the sub-pool.
+func (p *SubPool) PopWorst() *metaTxn {
 	i := heap.Pop(p.worst).(*metaTxn)
 	heap.Remove(p.best, i.bestIndex)
 	return i

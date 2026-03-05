@@ -30,9 +30,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/mclock"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/testlog"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mclock"
+	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/netutil"
 )
@@ -161,6 +161,9 @@ func TestDialSchedNetRestrict(t *testing.T) {
 
 // This test checks that static dials work and obey the limits.
 func TestDialSchedStaticDial(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 
 	config := dialConfig{
@@ -522,7 +525,7 @@ func (it *dialTestIterator) Next() bool {
 		return false
 	}
 	it.cur = it.buf[0]
-	copy(it.buf[:], it.buf[1:])
+	copy(it.buf, it.buf[1:])
 	it.buf = it.buf[:len(it.buf)-1]
 	return true
 }

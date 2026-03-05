@@ -22,15 +22,17 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/holiman/uint256"
+
 	ethereum "github.com/erigontech/erigon"
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/types"
-	"github.com/erigontech/erigon/eth/filters"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/abi/bind"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p/event"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/rpc/filters"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 )
 
@@ -46,15 +48,15 @@ func NewDirectBackend(api jsonrpc.EthAPI) DirectBackend {
 	}
 }
 
-func (b DirectBackend) CodeAt(ctx context.Context, account common.Address, blockNum *big.Int) ([]byte, error) {
+func (b DirectBackend) CodeAt(ctx context.Context, account common.Address, blockNum *uint256.Int) ([]byte, error) {
 	return b.api.GetCode(ctx, account, BlockNumArg(blockNum))
 }
 
-func (b DirectBackend) CallContract(ctx context.Context, callMsg ethereum.CallMsg, blockNum *big.Int) ([]byte, error) {
+func (b DirectBackend) CallContract(ctx context.Context, callMsg ethereum.CallMsg, blockNum *uint256.Int) ([]byte, error) {
 	blockNumberOrHash := BlockNumArg(blockNum)
-	var blockNumberOrHashRef *rpc.BlockNumberOrHash = &blockNumberOrHash
+	var blockNumberOrHashRef = &blockNumberOrHash
 
-	return b.api.Call(ctx, CallArgsFromCallMsg(callMsg), blockNumberOrHashRef, nil)
+	return b.api.Call(ctx, CallArgsFromCallMsg(callMsg), blockNumberOrHashRef, nil, nil)
 }
 
 func (b DirectBackend) PendingCodeAt(ctx context.Context, account common.Address) ([]byte, error) {
@@ -81,7 +83,7 @@ func (b DirectBackend) SuggestGasPrice(ctx context.Context) (*big.Int, error) {
 
 func (b DirectBackend) EstimateGas(ctx context.Context, call ethereum.CallMsg) (uint64, error) {
 	callArgs := CallArgsFromCallMsg(call)
-	gas, err := b.api.EstimateGas(ctx, &callArgs, nil, nil)
+	gas, err := b.api.EstimateGas(ctx, &callArgs, nil, nil, nil)
 	if err != nil {
 		return 0, err
 	}
@@ -101,14 +103,25 @@ func (b DirectBackend) SendTransaction(ctx context.Context, txn types.Transactio
 }
 
 func (b DirectBackend) FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error) {
-	logs, err := b.api.GetLogs(ctx, filters.FilterCriteria(query))
+	rpcLogs, err := b.api.GetLogs(ctx, filters.FilterCriteria(query))
 	if err != nil {
 		return nil, err
 	}
 
-	res := make([]types.Log, len(logs))
-	for i, log := range logs {
-		res[i] = *log
+	res := make([]types.Log, len(rpcLogs))
+
+	for i, log := range rpcLogs {
+		res[i] = types.Log{
+			Address:     log.Address,
+			Topics:      log.Topics,
+			Data:        log.Data,
+			BlockNumber: log.BlockNumber,
+			TxHash:      log.TxHash,
+			TxIndex:     log.TxIndex,
+			BlockHash:   log.BlockHash,
+			Index:       log.Index,
+			Removed:     log.Removed,
+		}
 	}
 
 	return res, nil
@@ -142,7 +155,7 @@ func (b DirectBackend) SubscribeFilterLogs(ctx context.Context, query ethereum.F
 	return sub, nil
 }
 
-func BlockNumArg(blockNum *big.Int) rpc.BlockNumberOrHash {
+func BlockNumArg(blockNum *uint256.Int) rpc.BlockNumberOrHash {
 	var blockRef rpc.BlockReference
 	if blockNum == nil {
 		blockRef = rpc.LatestBlock

@@ -120,7 +120,7 @@ It allows to process this blocks again
 erigon --snap.skip-state-snapshot-download
 
 # Option 2 (on synced datadir):
-erigon seg rm-all-state-snapshots
+erigon snapshots rm-all-state-state
 integration stage_exec --reset
 integration stage_exec 
 
@@ -130,14 +130,14 @@ integration stage_exec
 ## How to re-gen CommitmentDomain
 
 ```sh
-integration commitment_rebuild
+integration commitment rebuild
 ```
 
 ## How to re-generate optional Domain/Index
 
 ```sh
 # By parallel executing blocks on existing historical state. Can be 1 or many domains:
-erigon seg rm-state-snapshots --domain=receipt,rcache,logtopics,logaddrs,tracesfrom,tracesto
+erigon snapshots rm-state-snapshots --domain=receipt,rcache,logtopics,logaddrs,tracesfrom,tracesto
 integration stage_custom_trace --domain=receipt,rcache,logtopics,logaddrs,tracesfrom,tracesto --reset
 integration stage_custom_trace --domain=receipt,rcache,logtopics,logaddrs,tracesfrom,tracesto
 ```
@@ -148,13 +148,13 @@ integration stage_custom_trace --domain=receipt,rcache,logtopics,logaddrs,traces
 rm -rf datadir/heimdall
 rm -rf datadir/snapshots/*borch*
 # Start erigon, it will gen. Then:
-erigon seg integrity --datadir /erigon-data/ --check=BorCheckpoints
+erigon snapshots integrity --datadir /erigon-data/ --check=BorCheckpoints
 ```
 
 ## See tables size
 
 ```sh
-./build/bin/mdbx_stat -efa /erigon-data/chaindata/   | awk '
+./build/bin/mdbx_stat -efa  /erigon-data/mainnet_archive/chaindata/ | awk '
     BEGIN { pagesize = 4096 }
     /^  Pagesize:/ { pagesize = $2 }
     /^Status of/ { table = $3 }
@@ -162,9 +162,15 @@ erigon seg integrity --datadir /erigon-data/ --check=BorCheckpoints
     /Leaf pages:/ { leaf = $3 }
     /Overflow pages:/ { overflow = $3 }
     /Entries:/ {
-      total_pages = branch + leaf + overflow
-      size_gb = (total_pages * pagesize) / (1024^3)
-      printf "%-30s %.3fG\n", table, size_gb
+      table_pages = branch + leaf + overflow
+      size_gb = (table_pages * pagesize) / (1024^3)
+      printf "%-30s %.2fG\n", table, size_gb
     }
-  ' | grep -v '0.000G'
+    /Reclaimable:/ {
+      table = "Reclaimable" 
+      table_pages = $2
+      size_gb = (table_pages * pagesize) / (1024^3)
+      printf "%-30s %.2fG\n", table, size_gb
+    }
+  ' | grep -v '0.0'
 ```

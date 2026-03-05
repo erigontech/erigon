@@ -1,0 +1,189 @@
+package integrity
+
+import (
+	"context"
+	"fmt"
+	"math/rand/v2"
+	"sync/atomic"
+	"time"
+
+	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon/common/estimate"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/services"
+)
+
+func CheckRCacheNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool, seed int64, sampleRatio float64) (err error) {
+	defer func() {
+		log.Info("[integrity] RCacheNoDups: done", "err", err)
+	}()
+
+	txNumsReader := blockReader.TxnumReader()
+
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	rcacheDomainProgress := tx.Debug().DomainProgress(kv.RCacheDomain)
+	fromBlock := uint64(1)
+	toBlock, _, _ := txNumsReader.FindBlockNum(ctx, tx, rcacheDomainProgress)
+
+	if err := ValidateDomainProgress(ctx, db, kv.RCacheDomain, txNumsReader); err != nil {
+		return err
+	}
+
+	log.Info("[integrity] RCacheNoDups starting", "fromBlock", fromBlock, "toBlock", toBlock)
+
+	return parallelChunkCheck(ctx, fromBlock, toBlock, db, blockReader, failFast, seed, sampleRatio, string(RCacheNoDups), RCacheNoDupsRange)
+}
+
+func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
+	if fromBlock > toBlock {
+		panic(fmt.Sprintf("fromBlock(%d) > toBlock(%d)", fromBlock, toBlock))
+	}
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	txNumsReader := blockReader.TxnumReader()
+	fromTxNum, err := txNumsReader.Min(ctx, tx, fromBlock)
+	if err != nil {
+		return err
+	}
+	if toBlock > 0 {
+		toBlock-- // [fromBlock,toBlock)
+	}
+
+	toTxNum, err := txNumsReader.Max(ctx, tx, toBlock)
+	if err != nil {
+		return err
+	}
+
+	prevCumUsedGas := -1
+	expectedFirstLogIdx := uint32(0)
+	blockNum := fromBlock
+	var _min, _max uint64
+	_min = fromTxNum
+	_max, _ = txNumsReader.Max(ctx, tx, fromBlock)
+
+	it, err := rawdb.ReceiptCacheV2Stream(tx, fromTxNum, toTxNum)
+	if err != nil {
+		return err
+	}
+	defer it.Close()
+
+	for it.HasNext() {
+		txNum, r, err := it.Next()
+		if err != nil {
+			return err
+		}
+
+		if r == nil {
+			continue
+		}
+
+		for txNum > _max {
+			blockNum++
+			_min = _max + 1
+			_max, _ = txNumsReader.Max(ctx, tx, blockNum)
+			expectedFirstLogIdx = 0
+			prevCumUsedGas = -1
+		}
+
+		logIdx := r.FirstLogIndexWithinBlock
+		exactLogIdx := logIdx == expectedFirstLogIdx
+		if !exactLogIdx && txNum <= _max {
+			err := fmt.Errorf("RCacheNoDups: non-monotonic logIndex at txnum: %d, block: %d(%d-%d), logIdx=%d, expectedFirstLogIdx=%d", txNum, blockNum, _min, _max, logIdx, expectedFirstLogIdx)
+			if failFast {
+				return err
+			}
+			log.Error(err.Error())
+		}
+		expectedFirstLogIdx = logIdx + uint32(len(r.Logs))
+
+		cumUsedGas := r.CumulativeGasUsed
+		strongMonotonicCumGasUsed := int(cumUsedGas) > prevCumUsedGas
+		if !strongMonotonicCumGasUsed && txNum <= _max { // system tx can be skipped
+			err := fmt.Errorf("RCacheNoDups: non-monotonic cumUsedGas at txnum: %d, block: %d(%d-%d), cumUsedGas=%d, prevCumUsedGas=%d", txNum, blockNum, _min, _max, cumUsedGas, prevCumUsedGas)
+			if failFast {
+				return err
+			}
+			log.Error(err.Error())
+		}
+		prevCumUsedGas = int(cumUsedGas)
+
+		if txNum%1000 == 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+		}
+	}
+
+	return nil
+}
+
+type chunkFn func(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) error
+
+func parallelChunkCheck(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool, seed int64, sampleRatio float64, prefix string, fn chunkFn) (err error) {
+	blockRange := toBlock - fromBlock + 1
+	if blockRange == 0 {
+		return nil
+	}
+
+	numWorkers := estimate.AlmostAllCPUs()
+	chunkSize := uint64(1000)
+
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(numWorkers)
+	var completedChunks atomic.Uint64
+	totalChunks := (blockRange + chunkSize - 1) / chunkSize
+	log.Info("[integrity] "+prefix, "workers", numWorkers, "chunkSize", chunkSize, "blockRange", blockRange, "seed", seed, "sampleRatio", sampleRatio)
+
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-logEvery.C:
+				completed := completedChunks.Load()
+				progress := float64(completed) / float64(totalChunks) * 100
+				log.Info("[integrity] "+prefix, "progress", fmt.Sprintf("%.1f%%", progress))
+			}
+		}
+	}()
+
+	rng := rand.New(rand.NewPCG(uint64(seed), 0))
+	// Process chunks in parallel
+	for start := fromBlock; start <= toBlock; start += chunkSize {
+		if sampleRatio < 1.0 && rng.Float64() >= sampleRatio {
+			continue
+		}
+		end := min(start+chunkSize-1, toBlock)
+		chunkStart := start
+		chunkEnd := end
+		g.Go(func() error {
+			chunkErr := fn(ctx, chunkStart, chunkEnd, db, blockReader, failFast)
+			if chunkErr != nil {
+				return chunkErr
+			}
+			completedChunks.Add(1)
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		return err
+	}
+	return nil
+}

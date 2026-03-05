@@ -25,7 +25,7 @@ func (f *operationFeed) SendAttestation(value *AttestationData) int {
 
 func (f *operationFeed) SendSingleAttestation(value *SingleAttestationData) int {
 	return f.feed.Send(&EventStream{
-		Event: OpAttestation,
+		Event: OpSingleAttestation,
 		Data:  value,
 	})
 }
@@ -69,6 +69,13 @@ func (f *operationFeed) SendContributionProof(value *ContributionAndProofData) i
 func (f *operationFeed) SendBlobSidecar(value *BlobSidecarData) int {
 	return f.feed.Send(&EventStream{
 		Event: OpBlobSidecar,
+		Data:  value,
+	})
+}
+
+func (f *operationFeed) SendDataColumnSidecar(value *DataColumnSidecarData) int {
+	return f.feed.Send(&EventStream{
+		Event: OpDataColumnSidecar,
 		Data:  value,
 	})
 }

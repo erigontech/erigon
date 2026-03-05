@@ -19,11 +19,14 @@ package testhelpers
 import (
 	"context"
 	"crypto/ecdsa"
+	"fmt"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/abi/bind"
+	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 	shuttercontracts "github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
 )
 
@@ -33,7 +36,7 @@ type ContractsDeployer struct {
 	contractBackend      bind.ContractBackend
 	cl                   *MockCl
 	chainId              *big.Int
-	txnInclusionVerifier TxnInclusionVerifier
+	txnInclusionVerifier engineapitester.TxnInclusionVerifier
 }
 
 func NewContractsDeployer(
@@ -41,7 +44,7 @@ func NewContractsDeployer(
 	cb bind.ContractBackend,
 	cl *MockCl,
 	chainId *big.Int,
-	txnInclusionVerifier TxnInclusionVerifier,
+	txnInclusionVerifier engineapitester.TxnInclusionVerifier,
 ) ContractsDeployer {
 	return ContractsDeployer{
 		key:                  key,
@@ -53,13 +56,18 @@ func NewContractsDeployer(
 	}
 }
 
-func (d ContractsDeployer) DeployCore(ctx context.Context) (ContractsDeployment, error) {
+func (d ContractsDeployer) DeployCore(ctx context.Context) (_ ContractsDeployment, err error) {
+	defer func() {
+		if err != nil {
+			fmt.Println("DEPLOY ERR", err, dbg.Stack())
+		}
+	}()
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(d.key, d.chainId)
 	if err != nil {
 		return ContractsDeployment{}, err
 	}
 
-	sequencerAddr, sequencerDeployTxn, sequencer, err := shuttercontracts.DeploySequencer(
+	sequencerAddr, sequencerDeployTxn, _, err := shuttercontracts.DeploySequencer(
 		transactOpts,
 		d.contractBackend,
 	)
@@ -76,7 +84,7 @@ func (d ContractsDeployer) DeployCore(ctx context.Context) (ContractsDeployment,
 		return ContractsDeployment{}, err
 	}
 
-	keyBroadcastAddr, keyBroadcastDeployTxn, keyBroadcast, err := shuttercontracts.DeployKeyBroadcastContract(
+	keyBroadcastAddr, keyBroadcastDeployTxn, _, err := shuttercontracts.DeployKeyBroadcastContract(
 		transactOpts,
 		d.contractBackend,
 		ksmAddr,
@@ -111,11 +119,8 @@ func (d ContractsDeployer) DeployCore(ctx context.Context) (ContractsDeployment,
 	}
 
 	res := ContractsDeployment{
-		Sequencer:        sequencer,
 		SequencerAddr:    sequencerAddr,
-		Ksm:              ksm,
 		KsmAddr:          ksmAddr,
-		KeyBroadcast:     keyBroadcast,
 		KeyBroadcastAddr: keyBroadcastAddr,
 	}
 
@@ -177,7 +182,12 @@ func (d ContractsDeployer) DeployKeyperSet(
 		return common.Address{}, nil, err
 	}
 
-	addKeyperSetTxn, err := dep.Ksm.AddKeyperSet(transactOpts, ekg.ActivationBlock, keyperSetAddr)
+	ksm, err := shuttercontracts.NewKeyperSetManager(dep.KsmAddr, d.contractBackend)
+	if err != nil {
+		return common.Address{}, nil, err
+	}
+
+	addKeyperSetTxn, err := ksm.AddKeyperSet(transactOpts, ekg.ActivationBlock, keyperSetAddr)
 	if err != nil {
 		return common.Address{}, nil, err
 	}
@@ -192,7 +202,12 @@ func (d ContractsDeployer) DeployKeyperSet(
 		return common.Address{}, nil, err
 	}
 
-	broadcastKeyTxn, err := dep.KeyBroadcast.BroadcastEonKey(transactOpts, uint64(ekg.EonIndex), ekg.EonPublicKey.Marshal())
+	keyBroadcast, err := shuttercontracts.NewKeyBroadcastContract(dep.KeyBroadcastAddr, d.contractBackend)
+	if err != nil {
+		return common.Address{}, nil, err
+	}
+
+	broadcastKeyTxn, err := keyBroadcast.BroadcastEonKey(transactOpts, uint64(ekg.EonIndex), ekg.EonPublicKey.Marshal())
 	if err != nil {
 		return common.Address{}, nil, err
 	}
@@ -211,10 +226,7 @@ func (d ContractsDeployer) DeployKeyperSet(
 }
 
 type ContractsDeployment struct {
-	Sequencer        *shuttercontracts.Sequencer
 	SequencerAddr    common.Address
-	Ksm              *shuttercontracts.KeyperSetManager
 	KsmAddr          common.Address
-	KeyBroadcast     *shuttercontracts.KeyBroadcastContract
 	KeyBroadcastAddr common.Address
 }

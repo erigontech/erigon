@@ -20,8 +20,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/kv"
 	"github.com/erigontech/erigon/cl/antiquary"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -35,14 +33,14 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/execution_client/block_collector"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
-	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/erigontech/erigon/cl/validator/attestation_producer"
-	"github.com/erigontech/erigon/turbo/snapshotsync/freezeblocks"
-
-	"github.com/erigontech/erigon-lib/log/v3"
-
 	network2 "github.com/erigontech/erigon/cl/phase1/network"
 	"github.com/erigontech/erigon/cl/rpc"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/cl/validator/attestation_producer"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 )
 
 type Cfg struct {
@@ -51,7 +49,6 @@ type Cfg struct {
 	beaconCfg               *clparams.BeaconChainConfig
 	executionClient         execution_client.ExecutionEngine
 	state                   *state.CachingBeaconState
-	gossipManager           *network2.GossipManager
 	forkChoice              *forkchoice.ForkChoiceStore
 	indiciesDB              kv.RwDB
 	dirs                    datadir.Dirs
@@ -63,6 +60,7 @@ type Cfg struct {
 	sn                      *freezeblocks.CaplinSnapshots
 	blobStore               blob_storage.BlobStorage
 	peerDas                 das.PeerDas
+	blobDownloader          *network2.BlobHistoryDownloader
 	attestationDataProducer attestation_producer.AttestationDataProducer
 	caplinConfig            clparams.CaplinConfig
 	hasDownloaded           bool
@@ -78,13 +76,13 @@ type Args struct {
 }
 
 func ClStagesCfg(
+	ctx context.Context,
 	rpc *rpc.BeaconRpcP2P,
 	antiquary *antiquary.Antiquary,
 	ethClock eth_clock.EthereumClock,
 	beaconCfg *clparams.BeaconChainConfig,
 	state *state.CachingBeaconState,
 	executionClient execution_client.ExecutionEngine,
-	gossipManager *network2.GossipManager,
 	forkChoice *forkchoice.ForkChoiceStore,
 	indiciesDB kv.RwDB,
 	sn *freezeblocks.CaplinSnapshots,
@@ -98,6 +96,21 @@ func ClStagesCfg(
 	attestationDataProducer attestation_producer.AttestationDataProducer,
 	peerDas das.PeerDas,
 ) *Cfg {
+	blobDownloader := network2.NewBlobHistoryDownloader(
+		ctx,
+		beaconCfg,
+		rpc,
+		indiciesDB,
+		blobStore,
+		blockReader,
+		sn,
+		forkChoice,
+		forkChoice,
+		caplinConfig.ArchiveBlobs,
+		caplinConfig.ImmediateBlobsBackfilling,
+		log.Root(),
+	)
+
 	return &Cfg{
 		rpc:                     rpc,
 		antiquary:               antiquary,
@@ -106,17 +119,17 @@ func ClStagesCfg(
 		beaconCfg:               beaconCfg,
 		state:                   state,
 		executionClient:         executionClient,
-		gossipManager:           gossipManager,
 		forkChoice:              forkChoice,
 		dirs:                    dirs,
 		indiciesDB:              indiciesDB,
 		sn:                      sn,
 		blockReader:             blockReader,
 		peerDas:                 peerDas,
+		blobDownloader:          blobDownloader,
 		syncedData:              syncedData,
 		emitter:                 emitters,
 		blobStore:               blobStore,
-		blockCollector:          block_collector.NewBlockCollector(log.Root(), executionClient, beaconCfg, syncBackLoopLimit, dirs.Tmp),
+		blockCollector:          block_collector.NewPersistentBlockCollector(log.Root(), executionClient, beaconCfg, syncBackLoopLimit, dirs.CaplinHistory),
 		attestationDataProducer: attestationDataProducer,
 	}
 }
@@ -252,7 +265,7 @@ func ConsensusClStages(ctx context.Context,
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc, cfg.sn, cfg.executionClient, cfg.indiciesDB)
 
-					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.beaconCfg, cfg.caplinConfig, false, startingRoot, startingSlot, cfg.dirs.Tmp, 600*time.Millisecond, cfg.blockCollector, cfg.blockReader, cfg.blobStore, logger), context.Background(), logger); err != nil {
+					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.beaconCfg, cfg.caplinConfig, false, startingRoot, startingSlot, cfg.dirs.Tmp, 600*time.Millisecond, cfg.blockCollector, cfg.blockReader, cfg.blobStore, logger, cfg.forkChoice, cfg.blobDownloader), context.Background(), logger); err != nil {
 						cfg.hasDownloaded = false
 						return err
 					}

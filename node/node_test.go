@@ -28,10 +28,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon-lib/common/datadir"
-	"github.com/erigontech/erigon-lib/crypto"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/node/nodecfg"
 	"github.com/erigontech/erigon/p2p"
 )
@@ -155,7 +156,7 @@ func TestNodeCloseClosesDB(t *testing.T) {
 	stack, _ := New(context.Background(), testNodeConfig(t), logger)
 	defer stack.Close()
 
-	db, err := OpenDatabase(context.Background(), stack.Config(), kv.SentryDB, "", false, logger)
+	db, err := OpenDatabase(context.Background(), stack.Config(), dbcfg.SentryDB, "", false, logger)
 	if err != nil {
 		t.Fatal("can't open DB:", err)
 	}
@@ -187,7 +188,7 @@ func TestNodeOpenDatabaseFromLifecycleStart(t *testing.T) {
 	var db kv.RwDB
 	stack.RegisterLifecycle(&InstrumentedService{
 		startHook: func() {
-			db, err = OpenDatabase(context.Background(), stack.Config(), kv.SentryDB, "", false, logger)
+			db, err = OpenDatabase(context.Background(), stack.Config(), dbcfg.SentryDB, "", false, logger)
 			if err != nil {
 				t.Fatal("can't open DB:", err)
 			}
@@ -213,7 +214,7 @@ func TestNodeOpenDatabaseFromLifecycleStop(t *testing.T) {
 
 	stack.RegisterLifecycle(&InstrumentedService{
 		stopHook: func() {
-			db, err := OpenDatabase(context.Background(), stack.Config(), kv.ChainDB, "", false, logger)
+			db, err := OpenDatabase(context.Background(), stack.Config(), dbcfg.ChainDB, "", false, logger)
 			if err != nil {
 				t.Fatal("can't open DB:", err)
 			}
@@ -368,7 +369,7 @@ func TestLifecycleTerminationGuarantee(t *testing.T) {
 
 	// Start the protocol stack, and ensure that a failing shut down terminates all
 	// Start the stack and make sure all is online
-	if err1 := stack.Start(); err != nil {
+	if err1 := stack.Start(); err1 != nil {
 		t.Fatalf("failed to start protocol stack: %v", err1)
 	}
 	for id := range lifecycles {
@@ -384,7 +385,7 @@ func TestLifecycleTerminationGuarantee(t *testing.T) {
 	if err, ok := err.(*StopError); !ok {
 		t.Fatalf("termination failure mismatch: have %v, want StopError", err)
 	} else {
-		failer := reflect.TypeOf(&InstrumentedService{})
+		failer := reflect.TypeFor[*InstrumentedService]()
 		if !errors.Is(err.Services[failer], failure) {
 			t.Fatalf("failer termination failure mismatch: have %v, want %v", err.Services[failer], failure)
 		}
@@ -399,13 +400,4 @@ func TestLifecycleTerminationGuarantee(t *testing.T) {
 		delete(started, id)
 		delete(stopped, id)
 	}
-}
-
-func containsProtocol(stackProtocols []p2p.Protocol, protocol p2p.Protocol) bool {
-	for _, a := range stackProtocols {
-		if reflect.DeepEqual(a, protocol) {
-			return true
-		}
-	}
-	return false
 }

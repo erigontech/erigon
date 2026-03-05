@@ -19,14 +19,14 @@ package jsonrpc
 import (
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/eth/tracers"
+	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/tracing/tracers"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 )
 
 type OverlayCreateTracer struct {
-	contractAddress common.Address
+	contractAddress accounts.Address
 	isCapturing     bool
 	code            []byte
 	gasCap          uint64
@@ -45,20 +45,20 @@ func (ct *OverlayCreateTracer) Tracer() *tracers.Tracer {
 }
 
 // Top call frame
-func (ct *OverlayCreateTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (ct *OverlayCreateTracer) CaptureStart(env *vm.EVM, from accounts.Address, to accounts.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	ct.evm = env
 }
 func (ct *OverlayCreateTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {}
 
 // Rest of the frames
-func (ct *OverlayCreateTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (ct *OverlayCreateTracer) OnEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
 	if ct.isCapturing {
 		return
 	}
 
 	if (vm.OpCode(typ) == vm.CREATE || vm.OpCode(typ) == vm.CREATE2) && to == ct.contractAddress {
 		ct.isCapturing = true
-		_, _, _, err := ct.evm.OverlayCreate(vm.AccountRef(from), vm.NewCodeAndHash(ct.code), ct.gasCap, value, to, vm.OpCode(typ), true /* incrementNonce */)
+		_, _, _, err := ct.evm.OverlayCreate(from, vm.NewCodeAndHash(ct.code), ct.gasCap, value, to, vm.OpCode(typ), true /* incrementNonce */)
 		if err != nil {
 			ct.err = err
 		} else {

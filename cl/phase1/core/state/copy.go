@@ -17,21 +17,18 @@
 package state
 
 import (
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
-	"golang.org/x/exp/maps"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/maphash"
 )
 
 func (b *CachingBeaconState) CopyInto(bs *CachingBeaconState) (err error) {
-	if bs.BeaconState == nil {
-		bs.BeaconState = raw.New(b.BeaconConfig())
-	}
 	err = b.BeaconState.CopyInto(bs.BeaconState)
 	if err != nil {
 		return err
 	}
+
 	err = bs.reinitCaches()
 	if err != nil {
 		return err
@@ -44,15 +41,14 @@ func (bs *CachingBeaconState) reinitCaches() error {
 		return bs.InitBeaconState()
 	}
 
-	// Clear the existing map instead of re-allocating
 	if bs.publicKeyIndicies == nil {
-		bs.publicKeyIndicies = make(map[[48]byte]uint64)
+		bs.publicKeyIndicies = maphash.NewNonConcurrentMap[uint64]()
 	} else {
-		maps.Clear(bs.publicKeyIndicies)
+		bs.publicKeyIndicies.Clear()
 	}
 
 	bs.ForEachValidator(func(v solid.Validator, idx, total int) bool {
-		bs.publicKeyIndicies[v.PublicKey()] = uint64(idx)
+		bs.publicKeyIndicies.Set(v.PublicKeyBytes(), uint64(idx))
 		return true
 	})
 

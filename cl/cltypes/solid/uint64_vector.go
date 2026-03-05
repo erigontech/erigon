@@ -19,7 +19,8 @@ package solid
 import (
 	"encoding/json"
 
-	"github.com/erigontech/erigon-lib/types/clonable"
+	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 type uint64VectorSSZ struct {
@@ -95,6 +96,9 @@ func (arr *uint64VectorSSZ) EncodeSSZ(buf []byte) (dst []byte, err error) {
 }
 
 func (arr *uint64VectorSSZ) DecodeSSZ(buf []byte, version int) error {
+	if len(buf) < arr.Length()*8 {
+		return ssz.ErrLowBufferSize
+	}
 	return arr.u.DecodeSSZ(buf[:arr.Length()*8], version)
 }
 

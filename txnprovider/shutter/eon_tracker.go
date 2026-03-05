@@ -21,18 +21,18 @@ package shutter
 import (
 	"context"
 	"fmt"
-	"math/big"
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/google/btree"
+	"github.com/holiman/uint256"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
+	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 )
 
 type EonTracker interface {
@@ -143,6 +143,7 @@ func (et *KsmEonTracker) recentEon(index EonIndex) (Eon, bool) {
 }
 
 func (et *KsmEonTracker) trackCurrentEon(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
 	blockEventC := make(chan BlockEvent)
 	unregisterBlockEventObserver := et.blockListener.RegisterObserver(func(blockEvent BlockEvent) {
 		select {
@@ -150,8 +151,9 @@ func (et *KsmEonTracker) trackCurrentEon(ctx context.Context) error {
 		case blockEventC <- blockEvent:
 		}
 	})
-
 	defer unregisterBlockEventObserver()
+	defer cancel() // make sure we release the observer before unregistering to avoid leaks/deadlocks
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -201,7 +203,7 @@ func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (Eon, bool, err
 		et.logger.Trace("readEonAtNewBlockEvent timing", "blockNum", blockNum, "cached", cached, "duration", time.Since(startTime))
 	}()
 
-	callOpts := &bind.CallOpts{BlockNumber: new(big.Int).SetUint64(blockNum)}
+	callOpts := &bind.CallOpts{BlockNumber: uint256.NewInt(blockNum)}
 	if et.currentEon == nil {
 		numKeyperSets, err := et.ksmContract.GetNumKeyperSets(callOpts)
 		if err != nil {
@@ -383,7 +385,7 @@ func (et *KsmEonTracker) handleKeyperSetAddedEvent(event *contracts.KeyperSetMan
 
 func (et *KsmEonTracker) readEonAtKeyperSetAddedEvent(event *contracts.KeyperSetManagerKeyperSetAdded) (Eon, bool, error) {
 	callOpts := &bind.CallOpts{
-		BlockNumber: new(big.Int).SetUint64(event.Raw.BlockNumber),
+		BlockNumber: uint256.NewInt(event.Raw.BlockNumber),
 	}
 
 	eonIndex := event.Eon

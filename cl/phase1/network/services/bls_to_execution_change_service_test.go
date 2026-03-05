@@ -25,7 +25,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
 	mockState "github.com/erigontech/erigon/cl/abstract/mock_services"
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -34,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 )
@@ -103,7 +103,7 @@ func (t *blsToExecutionChangeTestSuite) TestProcessMessage() {
 				t.operationsPool.BLSToExecutionChangesPool.Insert(mockMsg.SignedBLSToExecutionChange.Signature, mockMsg.SignedBLSToExecutionChange)
 			},
 			msg:     mockMsg,
-			wantErr: true,
+			wantErr: false, // Silent ignore: returns nil when already in pool
 		},
 		{
 			name: "version is less than CapellaVersion",

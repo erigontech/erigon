@@ -1,0 +1,42 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package gaspricecfg
+
+import (
+	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/common"
+)
+
+var DefaultIgnorePrice = uint256.NewInt(2 * common.Wei)
+
+// BorDefaultGpoIgnorePrice defines the minimum gas price below which bor gpo will ignore transactions.
+var BorDefaultGpoIgnorePrice = uint256.NewInt(25 * common.Wei)
+
+var (
+	DefaultMaxPrice = uint256.NewInt(500 * common.GWei)
+)
+
+type Config struct {
+	Blocks           int
+	Percentile       int
+	MaxHeaderHistory int
+	MaxBlockHistory  int
+	Default          *uint256.Int `toml:",omitempty"`
+	MaxPrice         *uint256.Int `toml:",omitempty"`
+	IgnorePrice      *uint256.Int `toml:",omitempty"`
+}

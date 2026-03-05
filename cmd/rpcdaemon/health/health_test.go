@@ -27,7 +27,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/common/hexutil"
 
 	"github.com/erigontech/erigon/rpc"
 )
@@ -42,17 +42,17 @@ func (n *netApiStub) PeerCount(_ context.Context) (hexutil.Uint, error) {
 }
 
 type ethApiStub struct {
-	blockResult   map[string]interface{}
+	blockResult   map[string]any
 	blockError    error
-	syncingResult interface{}
+	syncingResult any
 	syncingError  error
 }
 
-func (e *ethApiStub) GetBlockByNumber(_ context.Context, _ rpc.BlockNumber, _ bool) (map[string]interface{}, error) {
+func (e *ethApiStub) GetBlockByNumber(_ context.Context, _ rpc.BlockNumber, _ bool) (map[string]any, error) {
 	return e.blockResult, e.blockError
 }
 
-func (e *ethApiStub) Syncing(_ context.Context) (interface{}, error) {
+func (e *ethApiStub) Syncing(_ context.Context) (any, error) {
 	return e.syncingResult, e.syncingError
 }
 
@@ -61,9 +61,9 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 		headers             []string
 		netApiResponse      hexutil.Uint
 		netApiError         error
-		ethApiBlockResult   map[string]interface{}
+		ethApiBlockResult   map[string]any
 		ethApiBlockError    error
-		ethApiSyncingResult interface{}
+		ethApiSyncingResult any
 		ethApiSyncingError  error
 		expectedStatusCode  int
 		expectedBody        map[string]string
@@ -73,7 +73,7 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			headers:             []string{"synced"},
 			netApiResponse:      hexutil.Uint(1),
 			netApiError:         nil,
-			ethApiBlockResult:   make(map[string]interface{}),
+			ethApiBlockResult:   make(map[string]any),
 			ethApiBlockError:    nil,
 			ethApiSyncingResult: false,
 			ethApiSyncingError:  nil,
@@ -90,7 +90,7 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			headers:             []string{"synced"},
 			netApiResponse:      hexutil.Uint(1),
 			netApiError:         nil,
-			ethApiBlockResult:   make(map[string]interface{}),
+			ethApiBlockResult:   make(map[string]any),
 			ethApiBlockError:    nil,
 			ethApiSyncingResult: struct{}{},
 			ethApiSyncingError:  nil,
@@ -107,7 +107,7 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			headers:             []string{"synced"},
 			netApiResponse:      hexutil.Uint(1),
 			netApiError:         nil,
-			ethApiBlockResult:   make(map[string]interface{}),
+			ethApiBlockResult:   make(map[string]any),
 			ethApiBlockError:    nil,
 			ethApiSyncingResult: struct{}{},
 			ethApiSyncingError:  errors.New("problem checking sync"),
@@ -124,7 +124,7 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			headers:             []string{"min_peer_count1"},
 			netApiResponse:      hexutil.Uint(1),
 			netApiError:         nil,
-			ethApiBlockResult:   make(map[string]interface{}),
+			ethApiBlockResult:   make(map[string]any),
 			ethApiBlockError:    nil,
 			ethApiSyncingResult: false,
 			ethApiSyncingError:  nil,
@@ -141,7 +141,7 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			headers:             []string{"min_peer_count10"},
 			netApiResponse:      hexutil.Uint(1),
 			netApiError:         nil,
-			ethApiBlockResult:   make(map[string]interface{}),
+			ethApiBlockResult:   make(map[string]any),
 			ethApiBlockError:    nil,
 			ethApiSyncingResult: false,
 			ethApiSyncingError:  nil,
@@ -158,7 +158,7 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			headers:             []string{"min_peer_count10"},
 			netApiResponse:      hexutil.Uint(1),
 			netApiError:         errors.New("problem checking peers"),
-			ethApiBlockResult:   make(map[string]interface{}),
+			ethApiBlockResult:   make(map[string]any),
 			ethApiBlockError:    nil,
 			ethApiSyncingResult: false,
 			ethApiSyncingError:  nil,
@@ -175,7 +175,7 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			headers:             []string{"min_peer_countABC"},
 			netApiResponse:      hexutil.Uint(1),
 			netApiError:         nil,
-			ethApiBlockResult:   make(map[string]interface{}),
+			ethApiBlockResult:   make(map[string]any),
 			ethApiBlockError:    nil,
 			ethApiSyncingResult: false,
 			ethApiSyncingError:  nil,
@@ -192,7 +192,7 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			headers:             []string{"check_block10"},
 			netApiResponse:      hexutil.Uint(1),
 			netApiError:         nil,
-			ethApiBlockResult:   map[string]interface{}{"test": struct{}{}},
+			ethApiBlockResult:   map[string]any{"test": struct{}{}},
 			ethApiBlockError:    nil,
 			ethApiSyncingResult: false,
 			ethApiSyncingError:  nil,
@@ -209,7 +209,7 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			headers:             []string{"check_block10"},
 			netApiResponse:      hexutil.Uint(1),
 			netApiError:         nil,
-			ethApiBlockResult:   map[string]interface{}{},
+			ethApiBlockResult:   map[string]any{},
 			ethApiBlockError:    nil,
 			ethApiSyncingResult: false,
 			ethApiSyncingError:  nil,
@@ -226,7 +226,7 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			headers:             []string{"check_block10"},
 			netApiResponse:      hexutil.Uint(1),
 			netApiError:         nil,
-			ethApiBlockResult:   map[string]interface{}{},
+			ethApiBlockResult:   map[string]any{},
 			ethApiBlockError:    errors.New("problem checking block"),
 			ethApiSyncingResult: false,
 			ethApiSyncingError:  nil,
@@ -243,7 +243,7 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			headers:             []string{"check_blockABC"},
 			netApiResponse:      hexutil.Uint(1),
 			netApiError:         nil,
-			ethApiBlockResult:   map[string]interface{}{},
+			ethApiBlockResult:   map[string]any{},
 			ethApiBlockError:    nil,
 			ethApiSyncingResult: false,
 			ethApiSyncingError:  nil,
@@ -260,7 +260,7 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			headers:        []string{"max_seconds_behind60"},
 			netApiResponse: hexutil.Uint(1),
 			netApiError:    nil,
-			ethApiBlockResult: map[string]interface{}{
+			ethApiBlockResult: map[string]any{
 				"timestamp": uint64(time.Now().Add(-10 * time.Second).Unix()),
 			},
 			ethApiBlockError:    nil,
@@ -279,7 +279,7 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			headers:        []string{"max_seconds_behind60"},
 			netApiResponse: hexutil.Uint(1),
 			netApiError:    nil,
-			ethApiBlockResult: map[string]interface{}{
+			ethApiBlockResult: map[string]any{
 				"timestamp": uint64(time.Now().Add(-1 * time.Hour).Unix()),
 			},
 			ethApiBlockError:    nil,
@@ -298,7 +298,7 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			headers:        []string{"max_seconds_behind-1"},
 			netApiResponse: hexutil.Uint(1),
 			netApiError:    nil,
-			ethApiBlockResult: map[string]interface{}{
+			ethApiBlockResult: map[string]any{
 				"timestamp": uint64(time.Now().Add(1 * time.Hour).Unix()),
 			},
 			ethApiBlockError:    nil,
@@ -317,7 +317,7 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			headers:             []string{"max_seconds_behindABC"},
 			netApiResponse:      hexutil.Uint(1),
 			netApiError:         nil,
-			ethApiBlockResult:   map[string]interface{}{},
+			ethApiBlockResult:   map[string]any{},
 			ethApiBlockError:    nil,
 			ethApiSyncingResult: false,
 			ethApiSyncingError:  nil,
@@ -334,7 +334,7 @@ func TestProcessHealthcheckIfNeeded_HeadersTests(t *testing.T) {
 			headers:        []string{"synced", "check_block10", "min_peer_count1", "max_seconds_behind60"},
 			netApiResponse: hexutil.Uint(10),
 			netApiError:    nil,
-			ethApiBlockResult: map[string]interface{}{
+			ethApiBlockResult: map[string]any{
 				"timestamp": uint64(time.Now().Add(1 * time.Second).Unix()),
 			},
 			ethApiBlockError:    nil,
@@ -423,7 +423,7 @@ func TestProcessHealthcheckIfNeeded_RequestBody(t *testing.T) {
 		body               string
 		netApiResponse     hexutil.Uint
 		netApiError        error
-		ethApiBlockResult  map[string]interface{}
+		ethApiBlockResult  map[string]any
 		ethApiBlockError   error
 		expectedStatusCode int
 		expectedBody       map[string]string
@@ -433,7 +433,7 @@ func TestProcessHealthcheckIfNeeded_RequestBody(t *testing.T) {
 			body:               "{\"min_peer_count\": 1, \"known_block\": 123}",
 			netApiResponse:     hexutil.Uint(1),
 			netApiError:        nil,
-			ethApiBlockResult:  map[string]interface{}{"test": struct{}{}},
+			ethApiBlockResult:  map[string]any{"test": struct{}{}},
 			ethApiBlockError:   nil,
 			expectedStatusCode: http.StatusOK,
 			expectedBody: map[string]string{
@@ -447,7 +447,7 @@ func TestProcessHealthcheckIfNeeded_RequestBody(t *testing.T) {
 			body:               "{\"min_peer_count\" 1, \"known_block\": 123}",
 			netApiResponse:     hexutil.Uint(1),
 			netApiError:        nil,
-			ethApiBlockResult:  map[string]interface{}{"test": struct{}{}},
+			ethApiBlockResult:  map[string]any{"test": struct{}{}},
 			ethApiBlockError:   nil,
 			expectedStatusCode: http.StatusInternalServerError,
 			expectedBody: map[string]string{
@@ -461,7 +461,7 @@ func TestProcessHealthcheckIfNeeded_RequestBody(t *testing.T) {
 			body:               "{\"min_peer_count\": 1, \"known_block\": 123}",
 			netApiResponse:     hexutil.Uint(1),
 			netApiError:        errors.New("problem getting peers"),
-			ethApiBlockResult:  map[string]interface{}{"test": struct{}{}},
+			ethApiBlockResult:  map[string]any{"test": struct{}{}},
 			ethApiBlockError:   nil,
 			expectedStatusCode: http.StatusInternalServerError,
 			expectedBody: map[string]string{
@@ -475,7 +475,7 @@ func TestProcessHealthcheckIfNeeded_RequestBody(t *testing.T) {
 			body:               "{\"min_peer_count\": 10, \"known_block\": 123}",
 			netApiResponse:     hexutil.Uint(1),
 			netApiError:        nil,
-			ethApiBlockResult:  map[string]interface{}{"test": struct{}{}},
+			ethApiBlockResult:  map[string]any{"test": struct{}{}},
 			ethApiBlockError:   nil,
 			expectedStatusCode: http.StatusInternalServerError,
 			expectedBody: map[string]string{
@@ -489,7 +489,7 @@ func TestProcessHealthcheckIfNeeded_RequestBody(t *testing.T) {
 			body:               "{\"min_peer_count\": 1, \"known_block\": 123}",
 			netApiResponse:     hexutil.Uint(1),
 			netApiError:        nil,
-			ethApiBlockResult:  map[string]interface{}{},
+			ethApiBlockResult:  map[string]any{},
 			ethApiBlockError:   nil,
 			expectedStatusCode: http.StatusInternalServerError,
 			expectedBody: map[string]string{
@@ -503,7 +503,7 @@ func TestProcessHealthcheckIfNeeded_RequestBody(t *testing.T) {
 			body:               "{\"min_peer_count\": 1, \"known_block\": 123}",
 			netApiResponse:     hexutil.Uint(1),
 			netApiError:        nil,
-			ethApiBlockResult:  map[string]interface{}{},
+			ethApiBlockResult:  map[string]any{},
 			ethApiBlockError:   errors.New("problem getting block"),
 			expectedStatusCode: http.StatusInternalServerError,
 			expectedBody: map[string]string{

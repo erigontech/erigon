@@ -4,14 +4,15 @@ run-name: Build release ${{ inputs.release_version}} from branch ${{ inputs.chec
 env:
   APPLICATION: "erigon"
   APPLICATION_VERSION: "Erigon3"
+  PRUNE_MODE: "full_node"
   TEST_TRACKING_TIME_SECONDS: 7200 # 2 hours
   TEST_TOTAL_TIME_SECONDS: 432000   # 5 days
   TEST_CHAIN: "mainnet"
-  BUILDER_IMAGE: "golang:1.24-bookworm"
-  DOCKER_BASE_IMAGE: "debian:12-slim"
+  BUILDER_IMAGE: "golang:1.25-bookworm"
+  TARGET_BASE_IMAGE: "debian:12-slim"
   APP_REPO: "erigontech/erigon"
   PACKAGE: "github.com/erigontech/erigon"
-  BINARIES: "erigon downloader devnet evm caplin diag integration rpcdaemon sentry txpool"
+  BINARIES: "erigon downloader evm caplin capcli integration rpcdaemon sentry txpool"
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
   DOCKERHUB_REPOSITORY_DEV: "erigontech/dev-erigon"
   DOCKERFILE_PATH: "Dockerfile"
@@ -23,8 +24,8 @@ on:
       checkout_ref:
         required: true
         type: string
-        default: 'main'
-        description: 'The branch to checkout and build artifacts from. By default "main".'
+        default: 'release/x.x'
+        description: '[MANUAL EDIT REQUIRED] Specify the branch to checkout and build artifacts from. Default value is "release/x.x".'
       release_version:
         required: true
         type: string
@@ -44,6 +45,11 @@ on:
         type: boolean
         default: false
         description: 'Skip tests during release build (not recommended)'
+      disable_version_check:
+        required: false
+        type: boolean
+        default: false
+        description: 'Skip validation that db/version/app.go Major.Minor.Micro matches release_version.'
 
 jobs:
 
@@ -65,7 +71,7 @@ jobs:
           docker buildx prune --verbose -f -a
 
       - name: Checkout git repository ${{ env.APP_REPO }} reference ${{ inputs.checkout_ref }}
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 ## v4.2.2
+        uses: actions/checkout@v6
         with:
           repository: ${{ env.APP_REPO }}
           fetch-depth: 0
@@ -74,20 +80,24 @@ jobs:
 
       - name: Check if tag ${{ inputs.release_version }} already exists and create it in case perform_release is set.
         if: ${{ (inputs.perform_release) && (inputs.release_version != '') }}
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
         run: |
           cd erigon
-          if git ls-remote --exit-code --quiet --tags origin '${{ inputs.release_version }}'; then
-            echo "ERROR: tag ${{ inputs.release_version }} exists and workflow is performing release. Exit."
+          if git ls-remote --exit-code --quiet --tags origin '${RELEASE_VERSION}'; then
+            echo "ERROR: tag ${RELEASE_VERSION} exists and workflow is performing release. Exit."
             exit 1
           else
-            echo "OK: tag ${{ inputs.release_version }} does not exists. Proceeding."
-            git tag ${{ inputs.release_version }}
-            git push origin ${{ inputs.release_version }}
-            echo; echo "Git TAG ${{ inputs.release_version }} created and pushed."
+            echo "OK: tag ${RELEASE_VERSION} does not exists. Proceeding."
+            git tag ${RELEASE_VERSION}
+            git push origin ${RELEASE_VERSION}
+            echo; echo "Git TAG ${RELEASE_VERSION} created and pushed."
           fi
 
       - name: Create sub-directories, get commit id, etc
         id: getCommitId
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
         run: |
           mkdir \
             $GITHUB_WORKSPACE/build-arm64 \
@@ -97,7 +107,31 @@ jobs:
           cd erigon
           echo "id=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
           echo "short_commit_id=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
-          echo "parsed_version=$(echo ${{ inputs.release_version }} | sed -e 's/^v//g')" >> $GITHUB_OUTPUT
+          echo "parsed_version=$(echo ${RELEASE_VERSION} | sed -e 's/^v//g')" >> $GITHUB_OUTPUT
+
+      - name: Validate release version against db/version/app.go
+        if: ${{ ! inputs.disable_version_check }}
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
+        run: |
+          cd erigon
+          APP_VERSION=$(awk '
+            /Major\s*=/{major=$3}
+            /Minor\s*=/{minor=$3}
+            /Micro\s*=/{micro=$3}
+            END{printf "%s.%s.%s", major, minor, micro}
+          ' db/version/app.go)
+          INPUT_VERSION=$(echo "${RELEASE_VERSION}" | sed -e 's/^v//')
+
+          echo "Version from db/version/app.go: ${APP_VERSION}"
+          echo "Version from workflow input: ${INPUT_VERSION} (raw: ${RELEASE_VERSION})"
+
+          if [ "${APP_VERSION}" != "${INPUT_VERSION}" ]; then
+            echo "ERROR: release_version (${RELEASE_VERSION}) does not match db/version/app.go version (${APP_VERSION})."
+            exit 1
+          fi
+
+          echo "OK: release_version matches db/version/app.go."
 
       - name: Login to Docker Hub
         uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567  ## v3.3.0
@@ -113,8 +147,9 @@ jobs:
 
       - name: Build and push temporary multiplatform image, store outputs locally for further processing
         env:
-          BUILD_VERSION: ${{ inputs.release_version }}
+          RELEASE_VERSION: ${{ inputs.release_version }}
           DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY_DEV }}
+          CHECKOUT_REF: ${{ inputs.checkout_ref }}
         run: |
           cd erigon;
           docker buildx build \
@@ -126,18 +161,20 @@ jobs:
             --platform linux/amd64,linux/amd64/v2,linux/arm64 \
             --label org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
             --label org.opencontainers.image.authors="https://github.com/erigontech/erigon/graphs/contributors" \
-            --label org.opencontainers.image.url="https://github.com/erigontech/erigon/tree/${{ inputs.checkout_ref }}" \
+            --label org.opencontainers.image.url="https://github.com/erigontech/erigon/tree/${CHECKOUT_REF}" \
             --label org.opencontainers.image.documentation="https://docs.erigon.tech/" \
             --label org.opencontainers.image.source="https://github.com/erigontech/erigon" \
-            --label org.opencontainers.image.version=${{ inputs.release_version }} \
+            --label org.opencontainers.image.version=${RELEASE_VERSION} \
             --label org.opencontainers.image.revision=${{ steps.getCommitId.outputs.commit-id }} \
             --label org.opencontainers.image.vcs-ref-short=${{ steps.getCommitId.outputs.short-commit-id }} \
             --label org.opencontainers.image.vendor="${{ github.repository_owner }}" \
             --label org.opencontainers.image.description="${{ env.LABEL_DESCRIPTION }}" \
-            --label org.opencontainers.image.base.name="${{ env.DOCKER_BASE_IMAGE }}" \
-            --build-arg VERSION=${{ env.BUILD_VERSION }} \
+            --label org.opencontainers.image.base.name="${{ env.TARGET_BASE_IMAGE }}" \
+            --build-arg VERSION=${RELEASE_VERSION} \
             --build-arg BINARIES='${{ env.BINARIES }}' \
-            --tag ${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }} \
+            --build-arg BUILDER_IMAGE='${{ env.BUILDER_IMAGE }}' \
+            --build-arg TARGET_BASE_IMAGE='${{ env.TARGET_BASE_IMAGE }}' \
+            --tag ${DOCKER_URL}:${RELEASE_VERSION} \
             --push \
             .
 
@@ -170,7 +207,7 @@ jobs:
           find . -type f -ls
 
       - name: Upload artifact -- linux/arm64
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  ## v4.6.2
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  ## v6.0.0
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar
           path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar
@@ -179,7 +216,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload artifact -- linux/amd64
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  ## v4.6.2
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  ## v6.0.0
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar
           path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar
@@ -188,7 +225,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload artifact -- linux/amd64/v2
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  ## v4.6.2
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  ## v6.0.0
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
           path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
@@ -218,25 +255,27 @@ jobs:
         run: rm -drfv *
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
       - name: Download artifact ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar
           path: .
 
       - name: Extract artifact ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
         run: |
           pwd
-          ls -l ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar
-          tar xvf ${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }}.tar
+          ls -l ${{ env.APPLICATION }}_${RELEASE_VERSION}_${{ matrix.artifact }}.tar
+          tar xvf ${{ env.APPLICATION }}_${RELEASE_VERSION}_${{ matrix.artifact }}.tar
           ls -lR
 
       - name: Fast checkout git repository erigontech/erigon-qa
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 ## 4.2.2
+        uses: actions/checkout@v6
         with:
           token: ${{ secrets.ORG_GITHUB_ERIGONTECH_ERIGON_QA_READ }}
           repository: erigontech/erigon-qa
@@ -245,6 +284,8 @@ jobs:
           path: erigon-qa
 
       - name: Run QA Tests
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
         run: |
           cd ./erigon-qa/test_system
           pwd
@@ -262,8 +303,8 @@ jobs:
           mkdir ${RUNNER_WORKSPACE}/erigon-data
           # Run Erigon, wait sync and check ability to maintain sync
           python3 qa-tests/tip-tracking/run_and_check_tip_tracking.py \
-            ${GITHUB_WORKSPACE}/${{ env.APPLICATION }}_${{ inputs.release_version }}_${{ matrix.artifact }} \
-              ${RUNNER_WORKSPACE}/erigon-data ${{ env.TEST_TRACKING_TIME_SECONDS }} ${{ env.TEST_TOTAL_TIME_SECONDS }} ${{ env.APPLICATION_VERSION }} ${{ env.TEST_CHAIN }}
+            ${GITHUB_WORKSPACE}/${{ env.APPLICATION }}_${RELEASE_VERSION}_${{ matrix.artifact }} \
+              ${RUNNER_WORKSPACE}/erigon-data ${{ env.TEST_TRACKING_TIME_SECONDS }} ${{ env.TEST_TOTAL_TIME_SECONDS }} ${{ env.APPLICATION_VERSION }} ${{ env.TEST_CHAIN }} ${{ env.PRUNE_MODE }}
           # Capture monitoring script exit status
           test_exit_status=$?
           # Save the subsection reached status
@@ -279,7 +320,7 @@ jobs:
 
       - name: Upload Downloader Torrent Client Status
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: torrent-client-status-${{ matrix.artifact }}
           path: torrent-client-status.txt
@@ -291,7 +332,7 @@ jobs:
     name: Debian packages
     needs: [ build-release, test-release ]
     if: always() && contains(needs.build-release.result, 'success') && !contains(needs.test-release.result, 'failure')
-    uses: erigontech/erigon/.github/workflows/reusable-release-build-debian-pkg.yml@main
+    uses: ./.github/workflows/reusable-release-build-debian-pkg.yml
     with:
       application: ${{ needs.build-release.outputs.application }}
       version: ${{ needs.build-release.outputs.parsed-version }}
@@ -307,7 +348,7 @@ jobs:
     steps:
 
     - name: Fast checkout just ${{ env.DOCKERFILE_PATH }} from git repository ${{ env.APP_REPO }}
-      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 ## v4.2.2
+      uses: actions/checkout@v6
       with:
         repository: ${{ env.APP_REPO }}
         sparse-checkout: ${{ env.DOCKERFILE_PATH }}
@@ -315,17 +356,17 @@ jobs:
         ref: ${{ needs.build-release.outputs.commit-id }}
 
     - name: Download arm64 artifact
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v7
       with:
         name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar
 
     - name: Download amd64 artifact
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v7
       with:
         name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar
 
     - name: Download amd64v2 artifact
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v7
       with:
         name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
 
@@ -338,18 +379,19 @@ jobs:
     - name: Push multi-platform docker images (${{ env.BUILD_VERSION }}${{ inputs.publish_latest_tag == true && ' and latest tag'}}) in case perform_release is true
       if: ${{ inputs.perform_release }}
       env:
-        BUILD_VERSION: ${{ inputs.release_version }}
+        RELEASE_VERSION: ${{ inputs.release_version }}
         DOCKER_URL: ${{ env.DOCKERHUB_REPOSITORY }}
         DOCKER_URL_TMP: ${{ env.DOCKERHUB_REPOSITORY_DEV }}
+        PUBLISH_LATEST_TAG: ${{ inputs.publish_latest_tag }}
       run: |
         echo Publishing docker image: 
-        skopeo copy --multi-arch all docker://${{ env.DOCKER_URL_TMP }}:${{ env.BUILD_VERSION }} docker://${{ env.DOCKER_URL }}:${{ env.BUILD_VERSION }}
-        if [ "x${{ inputs.publish_latest_tag }}" == "xtrue" ]; then
+        skopeo copy --multi-arch all docker://${{ env.DOCKER_URL_TMP }}:${RELEASE_VERSION} docker://${{ env.DOCKER_URL }}:${RELEASE_VERSION}
+        if [ "x${PUBLISH_LATEST_TAG}" == "xtrue" ]; then
           echo Publishing latest tag:
-          skopeo copy --multi-arch all docker://${{ env.DOCKER_URL_TMP }}:${{ env.BUILD_VERSION }} docker://${{ env.DOCKER_URL }}:latest
+          skopeo copy --multi-arch all docker://${{ env.DOCKER_URL_TMP }}:${RELEASE_VERSION} docker://${{ env.DOCKER_URL }}:latest
         fi
         echo -n Deleting temporary image:
-        skopeo delete docker://${{ env.DOCKER_URL_TMP }}:${{ env.BUILD_VERSION }} && echo " ...done"
+        skopeo delete docker://${{ env.DOCKER_URL_TMP }}:${RELEASE_VERSION} && echo " ...done"
 
   publish-release:
     needs: [ build-debian-pkg, publish-docker-image, build-release ]
@@ -360,31 +402,31 @@ jobs:
 
     steps:
     - name: Download linux/arm64 artifact
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v7
       with:
         name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar
         path: dist/
 
     - name: Download linux/amd64 artifact
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v7
       with:
         name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar
         path: dist/
 
     - name: Download linux/amd64v2 artifact
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v7
       with:
         name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
         path: dist/
 
     - name: Download arm64 debian package
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v7
       with:
         name: ${{ env.APPLICATION }}_${{ needs.build-release.outputs.parsed-version }}_arm64.deb
         path: dist/
 
     - name: Download amd64 debian package
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v7
       with:
         name: ${{ env.APPLICATION }}_${{ needs.build-release.outputs.parsed-version }}_amd64.deb
         path: dist/
@@ -394,20 +436,20 @@ jobs:
       env:
         GH_TOKEN: ${{ github.token }}
         GH_REPO: ${{ github.repository }}
-        DOCKER_TAGS: ${{ env.DOCKERHUB_REPOSITORY }}:${{ inputs.release_version }}
+        RELEASE_VERSION: ${{ inputs.release_version }}
+        DOCKER_TAGS: "${{ env.DOCKERHUB_REPOSITORY }}:${{ inputs.release_version }}"
         GITHUB_RELEASE_TARGET: ${{ inputs.checkout_ref }}
       run: |
         cd dist
         for archive in *.tar; do gzip $archive; echo Artifact $archive compressed; done
-        sha256sum *.tar.gz *.deb > ${HOME}/${{ env.APPLICATION }}_${{ inputs.release_version }}_checksums.txt
+        sha256sum *.tar.gz *.deb > ${HOME}/${{ env.APPLICATION }}_${RELEASE_VERSION}_checksums.txt
         gh release create \
-          --generate-notes \
           --target ${GITHUB_RELEASE_TARGET} \
           --draft=true \
-          --title "${{ inputs.release_version }}" \
-          --notes "**Improvements:**<br>- ...coming soon <br><br>**Bugfixes:**<br><br>- ...coming soon<br><br>**Docker images:**<br><br>Docker image released:<br> ${{ env.DOCKER_TAGS }}<br><br>... coming soon<br>" \
-          "${{ inputs.release_version }}" \
-          *.tar.gz *.deb ${HOME}/${{ env.APPLICATION }}_${{ inputs.release_version }}_checksums.txt
+          --title "${RELEASE_VERSION}" \
+          --notes "**Please generate notes in WEB UI and copy-paste here**<br>**Improvements:**<br>- ...coming soon <br><br>**Bugfixes:**<br><br>- ...coming soon<br><br>**Docker images:**<br><br>Docker image released:<br> ${DOCKER_TAGS}<br><br>... coming soon<br>" \
+          "${RELEASE_VERSION}" \
+          *.tar.gz *.deb ${HOME}/${{ env.APPLICATION }}_${RELEASE_VERSION}_checksums.txt
 
 
   In-case-of-failure:
@@ -415,10 +457,11 @@ jobs:
     needs: [ publish-release, build-release, test-release, build-debian-pkg, publish-docker-image ]
     if: always() && !contains(needs.build-release.result, 'success') && contains(needs.test-release.result, 'failure') && !contains(needs.publish-release.result, 'success') && !contains(needs.build-debian-pkg.result, 'success') && !contains(needs.publish-docker-image.result, 'success')
     runs-on: ubuntu-latest
-
+    env:
+      RELEASE_VERSION: ${{ inputs.release_version }}
     steps:
       - name: Checkout git repository ${{ env.APP_REPO }} reference ${{ inputs.checkout_ref }}
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 ## 4.2.2 release
+        uses: actions/checkout@v6
         with:
           repository: ${{ env.APP_REPO }}
           fetch-depth: 0
@@ -429,4 +472,4 @@ jobs:
         if: ${{ (inputs.perform_release) && (inputs.release_version != '') }}
         run: |
           cd erigon
-          git push -d origin ${{ inputs.release_version }}
+          git push -d origin ${RELEASE_VERSION}

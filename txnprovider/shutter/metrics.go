@@ -1,6 +1,6 @@
 package shutter
 
-import "github.com/erigontech/erigon-lib/metrics"
+import "github.com/erigontech/erigon/diagnostics/metrics"
 
 var (
 	encryptedTxnsPoolAdded      = metrics.GetOrCreateCounter("shutter_encrypted_txns_pool_added")

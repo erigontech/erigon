@@ -1,8 +1,10 @@
 #!/bin/bash
 
 ## create backup of a datadir for experiments/debugging etc.
-## it creates copy of editable files like mdbx.dat 
-## and symlinks to immutable files like snapshots
+## it creates copy of editable files like mdbx.dat
+## and hardlinks to immutable files like snapshots
+
+set -e
 
 # Check if correct number of arguments provided
 if [ $# -ne 2 ]; then
@@ -25,85 +27,92 @@ fi
 source="${source%/}"
 destination="${destination%/}"
 
-# Determine optimal number of parallel jobs (default to number of CPU cores)
-num_jobs=$(nproc 2>/dev/null || echo 4)
+# Convert to absolute paths (required for --link-dest)
+source_abs=$(realpath "$source")
 
-echo "Syncing files from '$source' to '$destination' using $num_jobs parallel jobs"
-
-# Create the destination directory if it doesn't exist
+# Create the destination directory first, then get absolute path (portable, no -m needed)
 mkdir -p "$destination"
+destination_abs=$(realpath "$destination")
 
-# First create the directory structure
-echo "Creating directory structure..."
-find "$source" -type d | sed "s|^$source|$destination|" | xargs -I{} mkdir -p {}
+# Check if destination is a subdirectory of source
+dest_rel=""
+if [[ "$destination_abs" == "$source_abs"/* ]]; then
+    dest_rel="${destination_abs#$source_abs/}"
+    echo "Note: Destination is a subdirectory of source, will be excluded from operations"
+fi
 
-# Function to process individual files
-process_file() {
-    local file="$1"
-    local source="$2"
-    local destination="$3"
+echo "Mirroring '$source' to '$destination'"
 
-    rel_path="${file#$source}"
-    filename=$(basename "$file")
+# Files that must be copied (mutable), not hardlinked
+MUTABLE_FILES=(mdbx.dat mdbx.lck jwt.hex LOCK prohibit_new_downloads.lock nodekey '*.log')
 
-    # Skip these files entirely
-    if [ "$filename" = "erigon.log" ] || [ "$filename" = ".DS_Store" ]; then
-        echo "Skipping: $file"
-        return
-    fi
+# Build rsync options for hardlinking immutable files
+RSYNC_LINK_OPTS=(
+    -a                          # archive mode
+    --link-dest="$source_abs"   # hardlink to source when files match
+    --delete                    # remove files in dest that don't exist in source
+    --exclude='.DS_Store'
+)
 
-    # Copy these files instead of symlinking
-    if [ "$filename" = "mdbx.dat" ] || [ "$filename" = "mdbx.lck" ] || [ "$filename" = "jwt.hex" ] || [ "$filename" = "LOCK" ] || [ "$filename" = "prohibit_new_downloads.lock" ] || [ "$filename" = "nodekey" ]; then
-        if cmp -s "$file" "$destination$rel_path" 2>/dev/null; then
-            echo "Already up-to-date: $file"
+# Exclude destination if it's a subdirectory of source
+if [ -n "$dest_rel" ]; then
+    RSYNC_LINK_OPTS+=(--exclude="$dest_rel")
+fi
+
+# Exclude mutable files from hardlink pass
+for f in "${MUTABLE_FILES[@]}"; do
+    RSYNC_LINK_OPTS+=(--exclude="$f")
+done
+
+# First pass: hardlink all immutable files
+echo "Hardlinking immutable files..."
+rsync "${RSYNC_LINK_OPTS[@]}" "$source_abs/" "$destination_abs/"
+
+# Second pass: copy mutable files using reflinks (CoW clones) where supported
+echo "Copying mutable files..."
+
+# Test if reflinks work from source to destination (requires same filesystem + CoW support)
+_test_src="$source_abs/.reflink_test_$$"
+_test_dst="$destination_abs/.reflink_test_$$"
+_cp_clone=""
+touch "$_test_src" 2>/dev/null && {
+    case "$(uname -s)" in
+        Darwin) cp -c "$_test_src" "$_test_dst" 2>/dev/null && _cp_clone="cp -c" ;;
+        *)      cp --reflink=always "$_test_src" "$_test_dst" 2>/dev/null && _cp_clone="cp --reflink=always" ;;
+    esac
+    rm -f "$_test_src" "$_test_dst"
+}
+
+if [ -n "$_cp_clone" ]; then
+    echo "  Using reflinks ($_cp_clone)"
+    for f in "${MUTABLE_FILES[@]}"; do
+        if [ -n "$dest_rel" ]; then
+            find "$source_abs" -path "$source_abs/$dest_rel" -prune -o -name "$f" -type f -print0
         else
-            echo "Copying: $file"
-            cp "$file" "$destination$rel_path" 2>/dev/null || {
-                echo "Copying: $file"
-                cp "$file" "$destination$rel_path"
-            }
-        fi
-    else
-        # Symlink all other files
-        if [ "$(readlink "$destination$rel_path" 2>/dev/null)" != "$file" ]; then
-            echo "Linking: $file"
-            ln -f "$file" "$destination$rel_path"
-        fi
+            find "$source_abs" -name "$f" -type f -print0
+        fi | while IFS= read -r -d '' src_file; do
+            rel="${src_file#$source_abs/}"
+            mkdir -p "$(dirname "$destination_abs/$rel")"
+            $_cp_clone "$src_file" "$destination_abs/$rel" 2>/dev/null || \
+                [ -f "$destination_abs/$rel" ] || \
+                { echo "Error: failed to clone $rel" >&2; exit 1; }
+        done
+    done
+else
+    # Fall back to rsync when reflinks are not supported
+    RSYNC_COPY_OPTS=(-a)
+    if [ -n "$dest_rel" ]; then
+        RSYNC_COPY_OPTS+=(--exclude="$dest_rel")
     fi
-}
+    INCLUDE_PATTERNS=()
+    for f in "${MUTABLE_FILES[@]}"; do
+        INCLUDE_PATTERNS+=(--include="$f")
+    done
+    rsync "${RSYNC_COPY_OPTS[@]}" \
+        --include='*/' \
+        "${INCLUDE_PATTERNS[@]}" \
+        --exclude='*' \
+        "$source_abs/" "$destination_abs/"
+fi
 
-# Export function for parallel execution
-export -f process_file
-
-# Process files in parallel
-echo "Creating symbolic links and copying files..."
-find "$source" -type f | xargs -I{} -P"$num_jobs" bash -c 'process_file "$1" "$2" "$3"' _ {} "$source" "$destination"
-
-# Function to clean orphaned files
-cleanup_file() {
-    local file="$1"
-    local source="$2"
-    local destination="$3"
-
-    rel_path="${file#$destination}"
-    filename=$(basename "$file")
-
-    # Skip these files in cleanup since we don't sync them
-    if [ "$filename" = "erigon.log" ] || [ "$filename" = ".DS_Store" ]; then
-        return
-    fi
-
-    if [ ! -e "$source$rel_path" ]; then
-        echo "Removing orphaned: $file"
-        rm "$file"
-    fi
-}
-
-# Export cleanup function for parallel execution
-export -f cleanup_file
-
-# Remove files in destination that don't exist in source (except erigon.log which we skip)
-echo "Cleaning up orphaned links..."
-find "$destination" -type f -o -type l | xargs -I{} -P"$num_jobs" bash -c 'cleanup_file "$1" "$2" "$3"' _ {} "$source" "$destination"
-
-echo "Sync complete!"
+echo "Mirror complete!"

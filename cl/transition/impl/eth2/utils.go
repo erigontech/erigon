@@ -19,9 +19,9 @@ package eth2
 import (
 	"encoding/binary"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common"
 )
 
 func computeSigningRootEpoch(epoch uint64, domain []byte) (common.Hash, error) {

@@ -44,62 +44,62 @@ func executeTestSSZQueue(t *testing.T, oldQueue, newQueue []*solid.PendingPartia
 
 func TestSSZQueue(t *testing.T) {
 	executeTestSSZQueue(t, []*solid.PendingPartialWithdrawal{
-		{Amount: 1, Index: 2},
-		{Amount: 3, Index: 4},
+		{Amount: 1, ValidatorIndex: 2},
+		{Amount: 3, ValidatorIndex: 4},
 	}, []*solid.PendingPartialWithdrawal{
-		{Amount: 1, Index: 2},
-		{Amount: 3, Index: 4},
-		{Amount: 5, Index: 6},
+		{Amount: 1, ValidatorIndex: 2},
+		{Amount: 3, ValidatorIndex: 4},
+		{Amount: 5, ValidatorIndex: 6},
 	})
 	executeTestSSZQueue(t, []*solid.PendingPartialWithdrawal{
-		{Amount: 1, Index: 2},
-		{Amount: 3, Index: 4},
-		{Amount: 5, Index: 6},
+		{Amount: 1, ValidatorIndex: 2},
+		{Amount: 3, ValidatorIndex: 4},
+		{Amount: 5, ValidatorIndex: 6},
 	}, []*solid.PendingPartialWithdrawal{
-		{Amount: 5, Index: 6},
+		{Amount: 5, ValidatorIndex: 6},
 	})
 	executeTestSSZQueue(t, []*solid.PendingPartialWithdrawal{
-		{Amount: 1, Index: 2},
-		{Amount: 3, Index: 4},
-		{Amount: 5, Index: 6},
+		{Amount: 1, ValidatorIndex: 2},
+		{Amount: 3, ValidatorIndex: 4},
+		{Amount: 5, ValidatorIndex: 6},
 	}, []*solid.PendingPartialWithdrawal{
-		{Amount: 5, Index: 6},
-		{Amount: 7, Index: 8},
-		{Amount: 8, Index: 9},
-		{Amount: 9, Index: 10},
+		{Amount: 5, ValidatorIndex: 6},
+		{Amount: 7, ValidatorIndex: 8},
+		{Amount: 8, ValidatorIndex: 9},
+		{Amount: 9, ValidatorIndex: 10},
 	})
 	executeTestSSZQueue(t, []*solid.PendingPartialWithdrawal{}, []*solid.PendingPartialWithdrawal{})
 	executeTestSSZQueue(t, []*solid.PendingPartialWithdrawal{
-		{Amount: 5, Index: 6},
+		{Amount: 5, ValidatorIndex: 6},
 	}, []*solid.PendingPartialWithdrawal{})
 
 	executeTestSSZQueue(t, []*solid.PendingPartialWithdrawal{}, []*solid.PendingPartialWithdrawal{
-		{Amount: 5, Index: 6},
+		{Amount: 5, ValidatorIndex: 6},
 	})
 
 	executeTestSSZQueue(t, []*solid.PendingPartialWithdrawal{{}}, []*solid.PendingPartialWithdrawal{{}})
 	executeTestSSZQueue(t, []*solid.PendingPartialWithdrawal{
-		{Amount: 5, Index: 6},
-		{Amount: 7, Index: 8},
-		{Amount: 8, Index: 9},
-		{Amount: 9, Index: 10},
+		{Amount: 5, ValidatorIndex: 6},
+		{Amount: 7, ValidatorIndex: 8},
+		{Amount: 8, ValidatorIndex: 9},
+		{Amount: 9, ValidatorIndex: 10},
 	}, []*solid.PendingPartialWithdrawal{
-		{Amount: 5, Index: 6},
-		{Amount: 7, Index: 8},
-		{Amount: 8, Index: 9},
-		{Amount: 9, Index: 10},
+		{Amount: 5, ValidatorIndex: 6},
+		{Amount: 7, ValidatorIndex: 8},
+		{Amount: 8, ValidatorIndex: 9},
+		{Amount: 9, ValidatorIndex: 10},
 	})
 	executeTestSSZQueue(t, []*solid.PendingPartialWithdrawal{
-		{Amount: 5, Index: 6},
+		{Amount: 5, ValidatorIndex: 6},
 	}, []*solid.PendingPartialWithdrawal{
-		{Amount: 6, Index: 7},
-		{Amount: 7, Index: 9},
+		{Amount: 6, ValidatorIndex: 7},
+		{Amount: 7, ValidatorIndex: 9},
 	})
 	executeTestSSZQueue(t, []*solid.PendingPartialWithdrawal{
-		{Amount: 6, Index: 7},
-		{Amount: 7, Index: 9},
+		{Amount: 6, ValidatorIndex: 7},
+		{Amount: 7, ValidatorIndex: 9},
 	}, []*solid.PendingPartialWithdrawal{
-		{Amount: 5, Index: 6},
+		{Amount: 5, ValidatorIndex: 6},
 	})
 
 }

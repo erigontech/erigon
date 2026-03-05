@@ -17,26 +17,32 @@
 package stagedsync
 
 import (
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/kv"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/wrap"
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
 
 // ExecFunc is the execution function for the stage to move forward.
 // * state - is the current state of the stage and contains stage data.
 // * unwinder - if the stage needs to cause unwinding, `unwinder` methods can be used.
-type ExecFunc func(badBlockUnwind bool, s *StageState, unwinder Unwinder, txc wrap.TxContainer, logger log.Logger) error
+type ExecFunc func(badBlockUnwind bool, s *StageState, unwinder Unwinder, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, logger log.Logger) error
 
 // UnwindFunc is the unwinding logic of the stage.
 // * unwindState - contains information about the unwind itself.
 // * stageState - represents the state of this stage at the beginning of unwind.
-type UnwindFunc func(u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error
+type UnwindFunc func(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, logger log.Logger) error
 
 // PruneFunc is the execution function for the stage to prune old data.
 // * state - is the current state of the stage and contains stage data.
-type PruneFunc func(p *PruneState, tx kv.RwTx, logger log.Logger) error
+type PruneFunc func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error
 
 // Stage is a single sync stage in staged sync.
 type Stage struct {
@@ -62,7 +68,7 @@ type CurrentSyncCycleInfo struct {
 
 // StageState is the state of the stage.
 type StageState struct {
-	state       *Sync
+	State       *Sync
 	ID          stages.SyncStage
 	BlockNumber uint64 // BlockNumber is the current block number of the stage at the beginning of the state execution.
 
@@ -73,20 +79,25 @@ func (s *StageState) LogPrefix() string {
 	if s == nil {
 		return ""
 	}
-	return s.state.LogPrefix()
+	return s.State.LogPrefix()
 }
 
 func (s *StageState) SyncMode() stages.Mode {
 	if s == nil {
 		return stages.ModeUnknown
 	}
-	return s.state.mode
+	return s.State.mode
 }
 
 // Update updates the stage state (current block number) in the database. Can be called multiple times during stage execution.
 func (s *StageState) Update(db kv.Putter, newBlockNum uint64) error {
-	return stages.SaveStageProgress(db, s.ID, newBlockNum)
+	if err := stages.SaveStageProgress(db, s.ID, newBlockNum); err != nil {
+		return err
+	}
+	s.BlockNumber = newBlockNum
+	return nil
 }
+
 func (s *StageState) UpdatePrune(db kv.Putter, blockNum uint64) error {
 	return stages.SaveStagePruneProgress(db, s.ID, blockNum)
 }
@@ -102,23 +113,43 @@ type UnwindReason struct {
 	// them as bad - as they may get replayed then deselected
 	Block *common.Hash
 	// If unwind is caused by a bad block, this error is not empty
-	Err error
+	ErrBadBlock error
+	// If unwind is caused by some operational error, this error is not empty
+	ErrOperational error
 }
 
 func (u UnwindReason) IsBadBlock() bool {
-	return u.Err != nil
+	return u.ErrBadBlock != nil
 }
 
-var StagedUnwind = UnwindReason{nil, nil}
-var ExecUnwind = UnwindReason{nil, nil}
-var ForkChoice = UnwindReason{nil, nil}
+func (u UnwindReason) Err() error {
+	if u.ErrBadBlock != nil {
+		return fmt.Errorf("bad block err: %w", u.ErrBadBlock)
+	}
+	if u.ErrOperational != nil {
+		return fmt.Errorf("operational err: %w", u.ErrOperational)
+	}
+	return nil
+}
+
+var StagedUnwind = UnwindReason{}
+var ExecUnwind = UnwindReason{}
+var ForkChoice = UnwindReason{}
 
 func BadBlock(badBlock common.Hash, err error) UnwindReason {
-	return UnwindReason{&badBlock, err}
+	if !errors.Is(err, rules.ErrInvalidBlock) {
+		// make sure to always have ErrInvalidBlock in the error chain for bad block unwinding
+		err = fmt.Errorf("%w: %w", rules.ErrInvalidBlock, err)
+	}
+	return UnwindReason{Block: &badBlock, ErrBadBlock: err}
+}
+
+func OperationalErr(err error) UnwindReason {
+	return UnwindReason{ErrOperational: err}
 }
 
 func ForkReset(badBlock common.Hash) UnwindReason {
-	return UnwindReason{&badBlock, nil}
+	return UnwindReason{Block: &badBlock}
 }
 
 // Unwinder allows the stage to cause an unwind.

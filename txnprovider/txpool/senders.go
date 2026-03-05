@@ -21,16 +21,15 @@ import (
 	"math"
 	"math/bits"
 
-	"github.com/erigontech/erigon-lib/types/accounts"
-
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/gointerfaces"
-	remote "github.com/erigontech/erigon-lib/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon-lib/kv/kvcache"
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -141,9 +140,9 @@ func (b *BySenderAndNonce) delete(mt *metaTxn, reason txpoolcfg.DiscardReason, l
 
 		if mt.TxnSlot.Type == BlobTxnType && mt.TxnSlot.BlobBundles != nil {
 			accBlobCount := b.senderIDBlobCount[senderID]
-			txnBlobCount := len(mt.TxnSlot.BlobBundles)
-			if txnBlobCount > 1 {
-				b.senderIDBlobCount[senderID] = accBlobCount - uint64(txnBlobCount)
+			txnBlobCount := uint64(len(mt.TxnSlot.BlobBundles))
+			if accBlobCount > txnBlobCount {
+				b.senderIDBlobCount[senderID] = accBlobCount - txnBlobCount
 			} else {
 				delete(b.senderIDBlobCount, senderID)
 			}
@@ -193,11 +192,6 @@ func newSendersBatch(tracedSenders map[common.Address]struct{}) *sendersBatch {
 func (sc *sendersBatch) getID(addr common.Address) (uint64, bool) {
 	id, ok := sc.senderIDs[addr]
 	return id, ok
-}
-
-func (sc *sendersBatch) getAddr(id uint64) (common.Address, bool) {
-	addr, ok := sc.senderID2Addr[id]
-	return addr, ok
 }
 
 var traceAllSenders = false
@@ -250,7 +244,7 @@ func (sc *sendersBatch) registerNewSenders(newTxns *TxnSlots, logger log.Logger)
 	return nil
 }
 
-func (sc *sendersBatch) onNewBlock(stateChanges *remote.StateChangeBatch, unwindTxns, minedTxns TxnSlots, logger log.Logger) error {
+func (sc *sendersBatch) onNewBlock(stateChanges *remoteproto.StateChangeBatch, unwindTxns, minedTxns TxnSlots, logger log.Logger) error {
 	for _, diff := range stateChanges.ChangeBatch {
 		for _, change := range diff.Changes { // merge state changes
 			addrB := gointerfaces.ConvertH160toAddress(change.Address)

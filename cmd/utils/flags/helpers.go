@@ -28,7 +28,11 @@ import (
 
 // Merge merges the given flag slices.
 func Merge(groups ...[]cli.Flag) []cli.Flag {
-	var ret []cli.Flag
+	totalLen := 0
+	for _, group := range groups {
+		totalLen += len(group)
+	}
+	ret := make([]cli.Flag, 0, totalLen)
 	for _, group := range groups {
 		ret = append(ret, group...)
 	}

@@ -2,18 +2,13 @@ package stages
 
 import (
 	"context"
-	"fmt"
 	"sort"
-	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/persistence/blob_storage"
-	network2 "github.com/erigontech/erigon/cl/phase1/network"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 // waitForExecutionEngineToBeFinished checks if the execution engine is ready within a specified timeout.
@@ -27,7 +22,7 @@ func waitForExecutionEngineToBeFinished(ctx context.Context, cfg *Cfg) (ready bo
 
 	// Setup the timers
 	readyTimeout := time.NewTimer(10 * time.Second)
-	readyInterval := time.NewTimer(50 * time.Millisecond)
+	readyInterval := time.NewTicker(50 * time.Millisecond)
 
 	// Ensure the timers are stopped to release resources
 	defer readyTimeout.Stop()
@@ -76,66 +71,6 @@ func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count ui
 	sort.Slice(blocks, func(i, j int) bool {
 		return blocks[i].Block.Slot < blocks[j].Block.Slot
 	})
-
-	denebBlocks := []*cltypes.SignedBeaconBlock{}
-	fuluBlocks := []*cltypes.SignedBeaconBlock{}
-	for _, block := range blocks {
-		if block.Version() >= clparams.FuluVersion {
-			fuluBlocks = append(fuluBlocks, block)
-		} else if block.Version() >= clparams.DenebVersion {
-			denebBlocks = append(denebBlocks, block)
-		}
-	}
-
-	if len(fuluBlocks) > 0 {
-		// download missing column data for the fulu blocks
-		wg := sync.WaitGroup{}
-		for _, block := range fuluBlocks {
-			wg.Add(1)
-			go func(block *cltypes.SignedBeaconBlock) {
-				defer wg.Done()
-				if cfg.caplinConfig.ArchiveBlobs || cfg.caplinConfig.ImmediateBlobsBackfilling {
-					if err := cfg.peerDas.DownloadColumnsAndRecoverBlobs(ctx, []*cltypes.SignedBeaconBlock{block}); err != nil {
-						log.Warn("[chainTipSync] failed to download columns and recover blobs", "err", err)
-					}
-				} else {
-					if err := cfg.peerDas.DownloadOnlyCustodyColumns(ctx, []*cltypes.SignedBeaconBlock{block}); err != nil {
-						log.Warn("[chainTipSync] failed to download only custody columns", "err", err)
-					}
-				}
-			}(block)
-		}
-		wg.Wait()
-	}
-
-	if len(denebBlocks) > 0 {
-		// Generate blob identifiers from the retrieved blocks
-		ids, err := network2.BlobsIdentifiersFromBlocks(denebBlocks, cfg.beaconCfg)
-		if err != nil {
-			return nil, err
-		}
-		var inserted uint64
-		// Loop until all blobs are inserted into the blob store
-		for inserted != uint64(ids.Len()) {
-			select {
-			case <-ctx.Done():
-				// Context canceled or timed out
-				return nil, ctx.Err()
-			default:
-			}
-
-			// Request blobs frantically from the execution client
-			blobs, err := network2.RequestBlobsFrantically(ctx, cfg.rpc, ids)
-			if err != nil {
-				return nil, fmt.Errorf("failed to request blobs frantically: %w", err)
-			}
-
-			// Verify the blobs against identifiers and insert them into the blob store
-			if _, inserted, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, nil); err != nil {
-				return nil, fmt.Errorf("failed to verify blobs against identifiers and insert into the blob store: %w", err)
-			}
-		}
-	}
 
 	// Return the blocks and the peer ID wrapped in a PeeredObject
 	return &peers.PeeredObject[[]*cltypes.SignedBeaconBlock]{
@@ -235,8 +170,8 @@ MainLoop:
 					continue
 				}
 
-				// Process the block
-				if err := processBlock(ctx, cfg, cfg.indiciesDB, block, true, true, true); err != nil {
+				// Process the block - DA can be downloaded later if we are behind (see blobHistoryDownloader)
+				if err := processBlock(ctx, cfg, cfg.indiciesDB, block, true, true, false); err != nil {
 					log.Debug("bad blocks segment received", "err", err, "blockSlot", block.Block.Slot)
 					continue
 				}

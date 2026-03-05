@@ -21,16 +21,15 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon-lib/types/clonable"
-	"github.com/erigontech/erigon-lib/types/ssz"
-
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 var (
@@ -373,8 +372,8 @@ func (b *BeaconBody) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(b.getSchema(false)...)
 }
 
-func (b *BeaconBody) getSchema(storage bool) []interface{} {
-	s := []interface{}{b.RandaoReveal[:], b.Eth1Data, b.Graffiti[:], b.ProposerSlashings, b.AttesterSlashings, b.Attestations, b.Deposits, b.VoluntaryExits}
+func (b *BeaconBody) getSchema(storage bool) []any {
+	s := []any{b.RandaoReveal[:], b.Eth1Data, b.Graffiti[:], b.ProposerSlashings, b.AttesterSlashings, b.Attestations, b.Deposits, b.VoluntaryExits}
 	if b.Version >= clparams.AltairVersion {
 		s = append(s, b.SyncAggregate)
 	}
@@ -527,7 +526,10 @@ func (b *BeaconBody) GetExecutionRequests() *ExecutionRequests {
 }
 
 func (b *BeaconBody) GetExecutionRequestsList() []hexutil.Bytes {
-	r := b.ExecutionRequests
+	return GetExecutionRequestsList(b.beaconCfg, b.ExecutionRequests)
+}
+
+func GetExecutionRequestsList(beaconCfg *clparams.BeaconChainConfig, r *ExecutionRequests) []hexutil.Bytes {
 	if r == nil {
 		return nil
 	}
@@ -536,9 +538,9 @@ func (b *BeaconBody) GetExecutionRequestsList() []hexutil.Bytes {
 		typ      byte
 		requests ssz.EncodableSSZ
 	}{
-		{byte(b.beaconCfg.DepositRequestType), r.Deposits},
-		{byte(b.beaconCfg.WithdrawalRequestType), r.Withdrawals},
-		{byte(b.beaconCfg.ConsolidationRequestType), r.Consolidations},
+		{byte(beaconCfg.DepositRequestType), r.Deposits},
+		{byte(beaconCfg.WithdrawalRequestType), r.Withdrawals},
+		{byte(beaconCfg.ConsolidationRequestType), r.Consolidations},
 	} {
 		ssz, err := r.requests.EncodeSSZ([]byte{})
 		if err != nil {
