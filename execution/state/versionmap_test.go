@@ -373,9 +373,9 @@ func TestValidateRead_NoHasBAL_InvalidatesAllPaths(t *testing.T) {
 // TestValidateRead_HasBAL_AddressPathCrossCheckWithBalancePath verifies that
 // when HasBAL is true and an AddressPath read returns MVReadResultNone (no
 // entry in the version map), but BalancePath has a MVReadResultDone entry
-// (from BAL pre-population at a lower txIndex), the AddressPath read is
-// invalidated. This catches the case where a prior tx created the account,
-// reflected in the BAL as a BalancePath entry.
+// (from BAL pre-population), the AddressPath read is invalidated.
+// See also TestValidateRead_NoHasBAL_AddressPathCrossCheckWithBalancePath
+// for the same check without HasBAL (worker flush case).
 func TestValidateRead_HasBAL_AddressPathCrossCheckWithBalancePath(t *testing.T) {
 	t.Parallel()
 
@@ -409,6 +409,46 @@ func TestValidateRead_HasBAL_AddressPathCrossCheckWithBalancePath(t *testing.T) 
 	valid := vm.ValidateVersion(2, io, checkVersionEqual, false, "")
 	require.Equal(t, VersionInvalid, valid,
 		"AddressPath read should be invalidated when BAL has a BalancePath entry from a prior tx (account may have been created)")
+}
+
+// TestValidateRead_NoHasBAL_AddressPathCrossCheckWithBalancePath verifies that
+// even without HasBAL (no stored BAL body, e.g. p2p blocks), the BalancePath
+// cross-check still catches stale AddressPath reads. This is the key fix:
+// worker flushes create BalancePath entries that must be checked regardless
+// of whether BAL pre-population was used.
+func TestValidateRead_NoHasBAL_AddressPathCrossCheckWithBalancePath(t *testing.T) {
+	t.Parallel()
+
+	addr := getAddress(42)
+	checkVersionEqual := func(readVersion, writeVersion Version) VersionValidity {
+		if readVersion == writeVersion {
+			return VersionValid
+		}
+		return VersionInvalid
+	}
+
+	vm := NewVersionMap(nil) // HasBAL = false
+	require.False(t, vm.HasBAL)
+
+	// A concurrent worker flushed a BalancePath entry at txIndex 0
+	// (simulating account creation by a prior tx).
+	vm.Write(addr, BalancePath, accounts.NilKey, Version{TxIndex: 0, Incarnation: 1}, valueFor(0, 1), true)
+
+	// No AddressPath entry exists.
+	// Tx 2 read AddressPath from storage during execution (got "account doesn't exist").
+	io := NewVersionedIO(2)
+	rs := ReadSet{}
+	rs.Set(VersionedRead{
+		Address: addr,
+		Path:    AddressPath,
+		Source:  StorageRead,
+		Version: Version{TxIndex: 2, Incarnation: 1},
+	})
+	io.RecordReads(Version{TxIndex: 2, Incarnation: 1}, rs)
+
+	valid := vm.ValidateVersion(2, io, checkVersionEqual, false, "")
+	require.Equal(t, VersionInvalid, valid,
+		"without HasBAL, AddressPath read should still be invalidated when BalancePath has an entry from a worker flush")
 }
 
 func BenchmarkWriteTimeSameLocationDifferentTxIdx(b *testing.B) {
