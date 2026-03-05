@@ -49,6 +49,14 @@ func CreateRulesEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainCon
 ) rules.Engine {
 	var eng rules.Engine
 
+	// Arbitrum chains use a simple engine that returns header.Coinbase as the author.
+	// This must be checked before the switch because Arbitrum chainspecs may include
+	// a Clique config (for historical reasons), and Clique's Author() does ecrecover
+	// on the header extra-data which doesn't work for Arbitrum blocks.
+	if chainConfig.IsArbitrum() {
+		return ethash.NewFaker()
+	}
+
 	switch consensusCfg := config.(type) {
 	case *ethashcfg.Config:
 		switch consensusCfg.PowMode {
