@@ -58,12 +58,13 @@ func newkey() *ecdsa.PrivateKey {
 	return key
 }
 
-func testLocalNode() *enode.LocalNode {
-	db, err := enode.OpenDB(context.TODO(), "", "", log.Root())
+func testLocalNode(t *testing.T) *enode.LocalNode {
+	db, err := enode.OpenDBEx(context.TODO(), "", "", log.Root())
 	if err != nil {
-		panic(err)
+		t.Fatal(err)
 	}
-	ln := enode.NewLocalNode(db, newkey(), log.Root())
+	t.Cleanup(func() { db.Close() })
+	ln := enode.NewLocalNode(db, newkey())
 	ln.Set(enr.WithEntry("attnets", attnetsTestVal))
 	ln.Set(enr.WithEntry("syncnets", syncnetsTestVal))
 	return ln
@@ -72,13 +73,13 @@ func testLocalNode() *enode.LocalNode {
 func TestPing(t *testing.T) {
 	ctx := context.Background()
 
-	listenAddrHost := "/ip4/127.0.0.1/tcp/4501"
-	host, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost))
+	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
+	t.Cleanup(func() { host.Close() })
 
-	listenAddrHost1 := "/ip4/127.0.0.1/tcp/4503"
-	host1, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost1))
+	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
+	t.Cleanup(func() { host1.Close() })
 
 	err = host.Connect(ctx, peer.AddrInfo{
 		ID:    host1.ID(),
@@ -100,7 +101,7 @@ func TestPing(t *testing.T) {
 		host,
 		peersPool,
 		&clparams.NetworkConfig{},
-		testLocalNode(),
+		testLocalNode(t),
 		beaconCfg,
 		ethClock,
 		nil, f, nil, nil, nil, true,
@@ -127,13 +128,13 @@ func TestPing(t *testing.T) {
 func TestGoodbye(t *testing.T) {
 	ctx := context.Background()
 
-	listenAddrHost := "/ip4/127.0.0.1/tcp/4509"
-	host, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost))
+	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
+	t.Cleanup(func() { host.Close() })
 
-	listenAddrHost1 := "/ip4/127.0.0.1/tcp/4512"
-	host1, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost1))
+	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
+	t.Cleanup(func() { host1.Close() })
 
 	err = host.Connect(ctx, peer.AddrInfo{
 		ID:    host1.ID(),
@@ -154,7 +155,7 @@ func TestGoodbye(t *testing.T) {
 		host,
 		peersPool,
 		&clparams.NetworkConfig{},
-		testLocalNode(),
+		testLocalNode(t),
 		beaconCfg,
 		ethClock,
 		nil, f, nil, nil, nil, true,
@@ -187,13 +188,13 @@ func TestGoodbye(t *testing.T) {
 func TestMetadataV2(t *testing.T) {
 	ctx := context.Background()
 
-	listenAddrHost := "/ip4/127.0.0.1/tcp/2509"
-	host, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost))
+	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
+	t.Cleanup(func() { host.Close() })
 
-	listenAddrHost1 := "/ip4/127.0.0.1/tcp/7510"
-	host1, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost1))
+	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
+	t.Cleanup(func() { host1.Close() })
 
 	err = host.Connect(ctx, peer.AddrInfo{
 		ID:    host1.ID(),
@@ -215,7 +216,7 @@ func TestMetadataV2(t *testing.T) {
 		host,
 		peersPool,
 		&nc,
-		testLocalNode(),
+		testLocalNode(t),
 		beaconCfg,
 		ethClock,
 		nil, f, nil, nil, nil, true,
@@ -245,13 +246,13 @@ func TestMetadataV2(t *testing.T) {
 func TestMetadataV1(t *testing.T) {
 	ctx := context.Background()
 
-	listenAddrHost := "/ip4/127.0.0.1/tcp/4519"
-	host, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost))
+	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
+	t.Cleanup(func() { host.Close() })
 
-	listenAddrHost1 := "/ip4/127.0.0.1/tcp/4578"
-	host1, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost1))
+	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
+	t.Cleanup(func() { host1.Close() })
 
 	err = host.Connect(ctx, peer.AddrInfo{
 		ID:    host1.ID(),
@@ -274,7 +275,7 @@ func TestMetadataV1(t *testing.T) {
 		host,
 		peersPool,
 		&nc,
-		testLocalNode(),
+		testLocalNode(t),
 		beaconCfg,
 		ethClock,
 		nil, f, nil, nil, nil, true,
@@ -303,13 +304,13 @@ func TestMetadataV1(t *testing.T) {
 func TestStatus(t *testing.T) {
 	ctx := context.Background()
 
-	listenAddrHost := "/ip4/127.0.0.1/tcp/1519"
-	host, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost))
+	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
+	t.Cleanup(func() { host.Close() })
 
-	listenAddrHost1 := "/ip4/127.0.0.1/tcp/4518"
-	host1, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost1))
+	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
+	t.Cleanup(func() { host1.Close() })
 
 	err = host.Connect(ctx, peer.AddrInfo{
 		ID:    host1.ID(),
@@ -361,7 +362,7 @@ func TestStatus(t *testing.T) {
 		host,
 		peersPool,
 		&nc,
-		testLocalNode(),
+		testLocalNode(t),
 		beaconCfg,
 		getEthClock(t),
 		hs, f, nil, nil, mockPeerDasStateReader, true,

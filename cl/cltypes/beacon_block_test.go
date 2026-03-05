@@ -19,7 +19,6 @@ package cltypes
 import (
 	_ "embed"
 	"encoding/json"
-	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -54,7 +53,7 @@ func TestBeaconBody(t *testing.T) {
 	blobKzgCommitments := solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48)
 	version := clparams.DenebVersion
 	block := types.NewBlock(&types.Header{
-		BaseFee: big.NewInt(1),
+		BaseFee: uint256.NewInt(1),
 	}, []types.Transaction{types.NewTransaction(1, [20]byte{}, uint256.NewInt(1), 5, uint256.NewInt(2), nil)}, nil, nil, types.Withdrawals{&types.Withdrawal{
 		Index: 69,
 	}})

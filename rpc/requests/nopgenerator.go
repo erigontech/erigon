@@ -115,6 +115,10 @@ func (n NopRequestGenerator) GasPrice() (*big.Int, error) {
 	return nil, ErrNotImplemented
 }
 
+func (n NopRequestGenerator) GetBlockReceipts(ctx context.Context, blockRef rpc.BlockNumberOrHash) (types.Receipts, error) {
+	return nil, ErrNotImplemented
+}
+
 func (n NopRequestGenerator) GetRootHash(ctx context.Context, startBlock uint64, endBlock uint64) (common.Hash, error) {
 	return common.Hash{}, ErrNotImplemented
 }

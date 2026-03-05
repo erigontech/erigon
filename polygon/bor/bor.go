@@ -31,10 +31,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	keccak "github.com/erigontech/fastkeccak"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/holiman/uint256"
 	"github.com/xsleonard/go-merkle"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -455,10 +455,6 @@ func (c *Bor) VerifyHeaders(chain rules.ChainHeaderReader, headers []*types.Head
 // looking those up from the database. This is useful for concurrently verifying
 // a batch of new headers.
 func (c *Bor) verifyHeader(chain rules.ChainHeaderReader, header *types.Header, parents []*types.Header) error {
-	if header.Number == nil {
-		return errUnknownBlock
-	}
-
 	number := header.Number.Uint64()
 	now := time.Now().Unix()
 
@@ -492,11 +488,6 @@ func (c *Bor) verifyHeader(chain rules.ChainHeaderReader, header *types.Header, 
 	}
 	if err := ValidateHeaderSprintValidators(header, c.config); err != nil {
 		return err
-	}
-
-	// Ensure that the block's difficulty is meaningful (may not be correct at this point)
-	if (number > 0) && (header.Difficulty == nil) {
-		return errInvalidDifficulty
 	}
 
 	// All basic checks passed, verify cascading fields
@@ -691,7 +682,7 @@ func (c *Bor) Prepare(chain rules.ChainHeaderReader, header *types.Header, state
 	}
 
 	// Set the correct difficulty
-	header.Difficulty = new(big.Int).SetUint64(validatorSet.SafeDifficulty(c.authorizedSigner.Load().signer))
+	header.Difficulty.SetUint64(validatorSet.SafeDifficulty(c.authorizedSigner.Load().signer))
 
 	// Ensure the extra data has all it's components
 	if len(header.Extra) < types.ExtraVanityLength {
@@ -1069,16 +1060,15 @@ func (c *Bor) IsProposer(header *types.Header) (bool, error) {
 // CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
 // that a new block should have based on the previous blocks in the chain and the
 // current signer.
-func (c *Bor) CalcDifficulty(chain rules.ChainHeaderReader, _, _ uint64, _ *big.Int, parentNumber uint64, parentHash, _ common.Hash, _ uint64) *big.Int {
+func (c *Bor) CalcDifficulty(chain rules.ChainHeaderReader, _, _ uint64, _ uint256.Int, parentNumber uint64, parentHash, _ common.Hash, _ uint64) uint256.Int {
 	signer := c.authorizedSigner.Load().signer
 
 	validatorSet, err := c.spanReader.Producers(context.Background(), parentNumber+1)
 	if err != nil {
-		return nil
+		return uint256.Int{}
 	}
 
-	return big.NewInt(int64(validatorSet.SafeDifficulty(signer)))
-
+	return *uint256.NewInt(validatorSet.SafeDifficulty(signer))
 }
 
 // SealHash returns the hash of a block prior to it being sealed.
@@ -1206,7 +1196,7 @@ func ComputeHeadersRootHash(blockHeaders []*types.Header) ([]byte, error) {
 		headers[i] = arr
 	}
 	tree := merkle.NewTreeWithOpts(merkle.TreeOptions{EnableHashSorting: false, DisableHashLeaves: true})
-	if err := tree.Generate(Convert(headers), sha3.NewLegacyKeccak256()); err != nil {
+	if err := tree.Generate(Convert(headers), keccak.NewFastKeccak()); err != nil {
 		return nil, err
 	}
 

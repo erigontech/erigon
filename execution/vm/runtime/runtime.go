@@ -24,8 +24,6 @@ import (
 	"math"
 	"math/big"
 	"os"
-	"path/filepath"
-	"time"
 
 	"github.com/holiman/uint256"
 
@@ -48,11 +46,11 @@ import (
 // the EVM.
 type Config struct {
 	ChainConfig *chain.Config
-	Difficulty  *big.Int
+	Difficulty  *uint256.Int
 	Origin      accounts.Address
 	Coinbase    accounts.Address
-	BlockNumber *big.Int
-	Time        *big.Int
+	BlockNumber uint64
+	Time        uint64
 	GasLimit    uint64
 	GasPrice    uint256.Int
 	Value       uint256.Int
@@ -92,16 +90,10 @@ func setDefaults(cfg *Config) {
 		cfg.Origin = accounts.ZeroAddress
 	}
 	if cfg.Difficulty == nil {
-		cfg.Difficulty = new(big.Int)
-	}
-	if cfg.Time == nil {
-		cfg.Time = big.NewInt(time.Now().Unix())
+		cfg.Difficulty = new(uint256.Int)
 	}
 	if cfg.GasLimit == 0 {
 		cfg.GasLimit = math.MaxUint64
-	}
-	if cfg.BlockNumber == nil {
-		cfg.BlockNumber = new(big.Int)
 	}
 	if cfg.GetHashFn == nil {
 		cfg.GetHashFn = func(n uint64) (common.Hash, error) {
@@ -181,8 +173,11 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 
 	externalState := cfg.State != nil
 	if !externalState {
-		tmp := filepath.Join(os.TempDir(), "create-vm")
-		defer dir.RemoveAll(tmp) //nolint
+		tmp, err := os.MkdirTemp("", "erigon-create-vm-*")
+		if err != nil {
+			return nil, [20]byte{}, 0, err
+		}
+		defer dir.RemoveAll(tmp)
 
 		dirs := datadir.New(tmp)
 		db := temporaltest.NewTestDB(nil, dirs)

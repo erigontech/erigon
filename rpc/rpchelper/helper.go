@@ -77,8 +77,14 @@ func GetBlockNumber(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, tx
 }
 
 func GetCanonicalBlockNumber(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br services.FullBlockReader, filters *Filters) (uint64, common.Hash, bool, error) {
-	bn, bh, latest, _, err := _GetBlockNumber(ctx, true, blockNrOrHash, tx, br, filters)
-	return bn, bh, latest, err
+	bn, bh, latest, found, err := _GetBlockNumber(ctx, true, blockNrOrHash, tx, br, filters)
+	if err != nil {
+		return 0, common.Hash{}, false, err
+	}
+	if !found {
+		return bn, bh, latest, rpc.BlockNotFoundErr{BlockId: blockNrOrHash.String()}
+	}
+	return bn, bh, latest, nil
 }
 
 func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br services.FullBlockReader, filters *Filters) (blockNumber uint64, hash common.Hash, latest bool, found bool, err error) {
@@ -178,8 +184,8 @@ func CreateHistoryStateReader(ctx context.Context, tx kv.TemporalTx, blockNumber
 	}
 	txNum := uint64(int(minTxNum) + txnIndex + /* 1 system txNum in beginning of block */ 1)
 	if minHistoryTxNum := state.StateHistoryStartTxNum(tx); txNum < minHistoryTxNum {
-		bn, _, _ := txNumsReader.FindBlockNum(ctx, tx, minHistoryTxNum)
-		return nil, fmt.Errorf("%w: block tx: %d, min tx: %d last state history bn: %d", state.PrunedError, txNum, minHistoryTxNum, bn)
+		firstAvailBlock, _, _ := txNumsReader.FindBlockNum(ctx, tx, minHistoryTxNum)
+		return nil, fmt.Errorf("%w: requested block %d, history is available from block %d", state.PrunedError, blockNumber, firstAvailBlock)
 	}
 	return state.NewHistoryReaderV3(tx, txNum), nil
 }
@@ -194,7 +200,6 @@ func NewLatestStateWriter(tx kv.TemporalTx, domains *execctx.SharedDomains, bloc
 		panic(err)
 	}
 	txNum := uint64(int(minTxNum) + /* 1 system txNum in beginning of block */ 1)
-	domains.SetTxNum(txNum)
 	return state.NewWriter(domains.AsPutDel(tx), nil, txNum)
 }
 
@@ -256,6 +261,9 @@ func (hr *cachedHistoryReaderV3) ReadAccountData(address accounts.Address) (*acc
 	}
 
 	if ok {
+		if len(enc) == 0 {
+			return nil, nil
+		}
 		var a accounts.Account
 		if err := accounts.DeserialiseV3(&a, enc); err != nil {
 			return nil, fmt.Errorf("%sread account data (cache)(%x): %w", hr.TracePrefix(), address, err)

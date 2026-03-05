@@ -54,6 +54,8 @@ type HistoryRangeAsOfFiles struct {
 
 	logger log.Logger
 	ctx    context.Context
+
+	seq multiencseq.SequenceReader // re-usable instance, to reduce allocations
 }
 
 func (hi *HistoryRangeAsOfFiles) Close() {
@@ -79,14 +81,19 @@ func (hi *HistoryRangeAsOfFiles) init(iiFiles visibleFiles) error {
 		}
 		g.Reset(offset)
 		if g.HasNext() {
-			wrapper := NewSegReaderWrapper(g)
-			if wrapper.HasNext() {
-				key, val, err := wrapper.Next()
-				if err != nil {
-					return err
-				}
-				heap.Push(&hi.h, &ReconItem{g: wrapper, key: key, val: val, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum})
+			key, _ := g.Next(nil)
+			var val []byte
+			if g.HasNext() {
+				val, _ = g.Next(nil)
 			}
+			histFileIdx := -1
+			for j := range hi.hc.files {
+				if hi.hc.files[j].startTxNum == item.startTxNum && hi.hc.files[j].endTxNum == item.endTxNum {
+					histFileIdx = j
+					break
+				}
+			}
+			heap.Push(&hi.h, &ReconItem{g: g, key: key, val: val, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, histFileIdx: histFileIdx})
 		}
 	}
 	binary.BigEndian.PutUint64(hi.startTxKey[:], hi.startTxNum)
@@ -99,20 +106,25 @@ func (hi *HistoryRangeAsOfFiles) Trace(prefix string) *stream.TracedDuo[[]byte, 
 
 func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 	for hi.h.Len() > 0 {
-		top := heap.Pop(&hi.h).(*ReconItem)
+		top := hi.h[0] // peek at minimum without removing
 		key := top.key
 		idxVal := top.val
 
 		// Get the next key-value pair for the next iteration
 		if top.g.HasNext() {
-			var err error
-			top.key, top.val, err = top.g.Next()
-			if err != nil {
-				return err
+			top.key, _ = top.g.Next(nil)
+			if top.g.HasNext() {
+				top.val, _ = top.g.Next(nil)
+			} else {
+				top.val = nil
 			}
 			if hi.toPrefix == nil || bytes.Compare(top.key, hi.toPrefix) < 0 {
-				heap.Push(&hi.h, top)
+				heap.Fix(&hi.h, 0) // sift-down only, O(log n) vs Pop+Push O(2 log n)
+			} else {
+				heap.Pop(&hi.h)
 			}
+		} else {
+			heap.Pop(&hi.h)
 		}
 
 		if hi.from != nil && bytes.Compare(key, hi.from) < 0 { //TODO: replace by seekInFiles()
@@ -123,18 +135,19 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 			continue
 		}
 
-		txNum, ok := multiencseq.Seek(top.startTxNum, idxVal, hi.startTxNum)
+		hi.seq.Reset(top.startTxNum, idxVal)
+		txNum, ok := hi.seq.Seek(hi.startTxNum)
 		if !ok {
 			continue
 		}
 
+		if top.histFileIdx < 0 {
+			return fmt.Errorf("no %s file found for [%x]", hi.hc.h.FilenameBase, key)
+		}
+		historyItem := hi.hc.files[top.histFileIdx]
 		hi.nextKey = key
 		binary.BigEndian.PutUint64(hi.txnKey[:], txNum)
-		historyItem, ok := hi.hc.getFileDeprecated(top.startTxNum, top.endTxNum)
-		if !ok {
-			return fmt.Errorf("no %s file found for [%x]", hi.hc.h.FilenameBase, hi.nextKey)
-		}
-		reader := hi.hc.statelessIdxReader(historyItem.i)
+		reader := hi.hc.statelessIdxReader(top.histFileIdx)
 		offset, ok := reader.Lookup2(hi.txnKey[:], hi.nextKey)
 		if !ok {
 			continue
@@ -147,11 +160,11 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 		}
 
 		if compressedPageValuesCount <= 1 {
-			g := hi.hc.statelessGetter(historyItem.i)
+			g := hi.hc.statelessGetter(top.histFileIdx)
 			g.Reset(offset)
 			hi.nextVal, _ = g.Next(nil)
 		} else {
-			g := seg.NewPagedReader(hi.hc.statelessGetter(historyItem.i), compressedPageValuesCount, true)
+			g := seg.NewPagedReader(hi.hc.statelessGetter(top.histFileIdx), compressedPageValuesCount, true)
 			g.Reset(offset)
 			for i := 0; i < compressedPageValuesCount && g.HasNext(); i++ {
 				k, v, _, _ := g.Next2(nil)
@@ -399,6 +412,8 @@ type HistoryChangesIterFiles struct {
 	k, v, kBackup, vBackup []byte
 	err                    error
 	limit                  int
+
+	seq multiencseq.SequenceReader // re-usable instance, to reduce allocations
 }
 
 func (hi *HistoryChangesIterFiles) Close() {
@@ -406,21 +421,26 @@ func (hi *HistoryChangesIterFiles) Close() {
 
 func (hi *HistoryChangesIterFiles) advance() error {
 	for hi.h.Len() > 0 {
-		top := heap.Pop(&hi.h).(*ReconItem)
+		top := hi.h[0] // peek at minimum without removing
 		key, idxVal := top.key, top.val
 		if top.g.HasNext() {
-			var err error
-			top.key, top.val, err = top.g.Next()
-			if err != nil {
-				return err
+			top.key, _ = top.g.Next(nil)
+			if top.g.HasNext() {
+				top.val, _ = top.g.Next(nil)
+			} else {
+				top.val = nil
 			}
-			heap.Push(&hi.h, top)
+			heap.Fix(&hi.h, 0) // sift-down only, O(log n) vs Pop+Push O(2 log n)
+		} else {
+			heap.Pop(&hi.h)
 		}
 
 		if bytes.Equal(key, hi.nextKey) { // deduplication
 			continue
 		}
-		txNum, ok := multiencseq.Seek(top.startTxNum, idxVal, hi.startTxNum)
+
+		hi.seq.Reset(top.startTxNum, idxVal)
+		txNum, ok := hi.seq.Seek(hi.startTxNum)
 		if !ok {
 			continue
 		}
@@ -428,13 +448,13 @@ func (hi *HistoryChangesIterFiles) advance() error {
 			continue
 		}
 
+		if top.histFileIdx < 0 {
+			return fmt.Errorf("HistoryChangesIterFiles: no %s file found for [%x]", hi.hc.h.FilenameBase, key)
+		}
+		historyItem := hi.hc.files[top.histFileIdx]
 		hi.nextKey = key
 		binary.BigEndian.PutUint64(hi.txnKey[:], txNum)
-		historyItem, ok := hi.hc.getFileDeprecated(top.startTxNum, top.endTxNum)
-		if !ok {
-			return fmt.Errorf("HistoryChangesIterFiles: no %s file found for [%x]", hi.hc.h.FilenameBase, hi.nextKey)
-		}
-		reader := hi.hc.statelessIdxReader(historyItem.i)
+		reader := hi.hc.statelessIdxReader(top.histFileIdx)
 		offset, ok := reader.Lookup2(hi.txnKey[:], hi.nextKey)
 		if !ok {
 			continue
@@ -447,11 +467,11 @@ func (hi *HistoryChangesIterFiles) advance() error {
 		}
 
 		if compressedPageValuesCount <= 1 {
-			g := hi.hc.statelessGetter(historyItem.i)
+			g := hi.hc.statelessGetter(top.histFileIdx)
 			g.Reset(offset)
 			hi.nextVal, _ = g.Next(nil)
 		} else {
-			g := seg.NewPagedReader(hi.hc.statelessGetter(historyItem.i), compressedPageValuesCount, true)
+			g := seg.NewPagedReader(hi.hc.statelessGetter(top.histFileIdx), compressedPageValuesCount, true)
 			g.Reset(offset)
 			for i := 0; i < compressedPageValuesCount && g.HasNext(); i++ {
 				k, v, _, _ := g.Next2(nil)
