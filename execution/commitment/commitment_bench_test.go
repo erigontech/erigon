@@ -18,9 +18,9 @@ package commitment
 
 import (
 	"context"
-	"fmt"
- 	"encoding/binary"
+	"encoding/binary"
 	"encoding/hex"
+	"fmt"
 	"testing"
 
 	"github.com/erigontech/erigon/common"
