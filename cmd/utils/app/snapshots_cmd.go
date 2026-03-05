@@ -1278,10 +1278,11 @@ func doIntegrity(cliCtx *cli.Context) error {
 	return g.Wait()
 }
 
-// latestBlockNum returns the latest block number that has full state snapshot coverage,
-// derived from the aggregator's EndTxNumMinimax. Useful as a default upper bound for
-// block-range integrity commands.
-func latestBlockNum(ctx context.Context, db kv.RoDB, agg *state.Aggregator, txNumsReader rawdbv3.TxNumsReader) (uint64, error) {
+// stateProgress returns the latest block number covered by state snapshots,
+// derived from the aggregator's EndTxNumMinimax. This may differ from the block
+// files progress — block snapshots and state snapshots advance independently.
+// Use this as the upper bound for state-history integrity commands.
+func stateProgress(ctx context.Context, db kv.RoDB, agg *state.Aggregator, txNumsReader rawdbv3.TxNumsReader) (uint64, error) {
 	aggMax := agg.EndTxNumMinimax()
 	roTx, err := db.BeginRo(ctx)
 	if err != nil {
@@ -1345,7 +1346,7 @@ func doCheckCommitmentHistAtBlkRange(cliCtx *cli.Context, logger log.Logger) err
 	from := cliCtx.Uint64("from")
 	to := cliCtx.Uint64("to")
 	if !cliCtx.IsSet("to") {
-		latestBlock, err := latestBlockNum(ctx, chainDB, agg, blockReader.TxnumReader())
+		latestBlock, err := stateProgress(ctx, chainDB, agg, blockReader.TxnumReader())
 		if err != nil {
 			return err
 		}
