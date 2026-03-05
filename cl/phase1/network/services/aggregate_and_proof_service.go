@@ -247,7 +247,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 			index: aggregateAndProof.SignedAggregateAndProof.Message.AggregatorIndex,
 		}
 		if a.seenAggreatorIndexes.Contains(seenIndex) {
-			return nil
+			return fmt.Errorf("%w: aggregator already seen", ErrIgnore)
 		}
 
 		committee, err := headState.GetBeaconCommitee(slot, committeeIndex)

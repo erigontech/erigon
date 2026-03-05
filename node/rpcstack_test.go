@@ -347,6 +347,9 @@ func rpcRequest(t *testing.T, url string, extraHeaders ...string) *http.Response
 }
 
 func TestHTTP2H2C(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	srv := createAndStartServer(t, &httpConfig{}, false, &wsConfig{})
 	defer srv.stop()
 

@@ -22,7 +22,6 @@ package vm
 import (
 	"errors"
 	"fmt"
-	"hash"
 	"slices"
 	"sync"
 
@@ -169,14 +168,6 @@ func (ctx *CallContext) CodeHash() accounts.CodeHash {
 
 func (ctx *CallContext) Gas() uint64 {
 	return ctx.gas
-}
-
-// keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
-// Read to get a variable amount of data from the hash state. Read is faster than Sum
-// because it doesn't copy the internal state, but also modifies the internal state.
-type keccakState interface {
-	hash.Hash
-	Read([]byte) (int, error)
 }
 
 func copyJumpTable(jt *JumpTable) *JumpTable {

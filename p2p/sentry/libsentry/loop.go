@@ -40,6 +40,16 @@ type (
 	MessageHandler[T any] func(context.Context, T, sentryproto.SentryClient) error
 )
 
+// contextSleep sleeps for the given duration but returns early if ctx is cancelled.
+func contextSleep(ctx context.Context, d time.Duration) {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+	case <-timer.C:
+	}
+}
+
 func ReconnectAndPumpStreamLoop[TMessage any](
 	ctx context.Context,
 	sentryClient sentryproto.SentryClient,
@@ -57,11 +67,11 @@ func ReconnectAndPumpStreamLoop[TMessage any](
 				continue
 			}
 			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-				time.Sleep(3 * time.Second)
+				contextSleep(ctx, 3*time.Second)
 				continue
 			}
 			logger.Warn("HandShake error, sentry not ready yet", "stream", streamName, "err", err)
-			time.Sleep(time.Second)
+			contextSleep(ctx, time.Second)
 			continue
 		}
 
@@ -69,7 +79,7 @@ func ReconnectAndPumpStreamLoop[TMessage any](
 
 		if err != nil {
 			logger.Error("SentryReconnectAndPumpStreamLoop: statusDataFactory error", "stream", streamName, "err", err)
-			time.Sleep(time.Second)
+			contextSleep(ctx, time.Second)
 			continue
 		}
 
@@ -78,11 +88,11 @@ func ReconnectAndPumpStreamLoop[TMessage any](
 				continue
 			}
 			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-				time.Sleep(3 * time.Second)
+				contextSleep(ctx, 3*time.Second)
 				continue
 			}
 			logger.Warn("Status error, sentry not ready yet", "stream", streamName, "err", err)
-			time.Sleep(time.Second)
+			contextSleep(ctx, time.Second)
 			continue
 		}
 
@@ -94,7 +104,7 @@ func ReconnectAndPumpStreamLoop[TMessage any](
 				continue
 			}
 			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-				time.Sleep(3 * time.Second)
+				contextSleep(ctx, 3*time.Second)
 				continue
 			}
 			logger.Warn("pumpStreamLoop failure", "stream", streamName, "err", err)

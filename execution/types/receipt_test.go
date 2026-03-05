@@ -23,10 +23,10 @@ import (
 	"bytes"
 	"errors"
 	"math"
-	"math/big"
 	"reflect"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -79,7 +79,7 @@ func TestLegacyReceiptDecoding(t *testing.T) {
 		TxHash:          tx.Hash(),
 		ContractAddress: common.BytesToAddress([]byte{0x01, 0x11, 0x11}),
 		GasUsed:         111111,
-		BlockNumber:     big.NewInt(1),
+		BlockNumber:     uint256.NewInt(1),
 	}
 	receipt.Bloom = CreateBloom(Receipts{receipt})
 
@@ -174,7 +174,7 @@ func clearComputedFieldsOnReceipt(t *testing.T, receipt *Receipt) {
 
 	receipt.TxHash = common.Hash{}
 	receipt.BlockHash = common.Hash{}
-	receipt.BlockNumber = big.NewInt(math.MaxUint32)
+	receipt.BlockNumber = uint256.NewInt(math.MaxUint32)
 	receipt.TransactionIndex = math.MaxUint32
 	receipt.ContractAddress = common.Address{}
 	receipt.GasUsed = 0
@@ -350,6 +350,184 @@ func TestReceiptUnmarshalBinary(t *testing.T) {
 			t.Errorf("receipt unmarshalled from binary mismatch, got %v want %v", got1559Receipt, eip1559Receipt)
 		}
 	})
+}
+
+// TestReceiptEncodeRLP69_AllTypesAreList verifies that EncodeRLP69 produces a flat RLP
+// list [tx-type, post-state-or-status, cumulative-gas, logs] for every transaction type,
+// conforming to the ETH69 spec. In particular, typed receipts must NOT use the old
+// type_byte || rlp(data) byte-string envelope from ETH68.
+func TestReceiptEncodeRLP69_AllTypesAreList(t *testing.T) {
+	t.Parallel()
+
+	logs := []*Log{
+		{
+			Address: common.BytesToAddress([]byte{0x11}),
+			Topics:  []common.Hash{common.HexToHash("dead"), common.HexToHash("beef")},
+			Data:    []byte{0x01, 0x00, 0xff},
+		},
+	}
+
+	txTypes := []struct {
+		name   string
+		txType uint8
+	}{
+		{"Legacy", LegacyTxType},
+		{"AccessList", AccessListTxType},
+		{"DynamicFee", DynamicFeeTxType},
+		{"Blob", BlobTxType},
+		{"SetCode", SetCodeTxType},
+	}
+
+	for _, tt := range txTypes {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			receipt := &Receipt{
+				Type:              tt.txType,
+				Status:            ReceiptStatusSuccessful,
+				CumulativeGasUsed: 50000,
+				Logs:              logs,
+			}
+
+			var buf bytes.Buffer
+			err := receipt.EncodeRLP69(&buf)
+			require.NoError(t, err)
+			encoded := buf.Bytes()
+			require.NotEmpty(t, encoded)
+
+			// The first byte must indicate an RLP list (0xc0..0xf7 for short lists,
+			// 0xf8..0xff for long lists), NOT a byte string (0x80..0xbf).
+			firstByte := encoded[0]
+			assert.True(t, firstByte >= 0xc0,
+				"expected RLP list prefix (>= 0xc0), got 0x%02x — typed receipt was likely wrapped as byte string", firstByte)
+
+			// Decode back using the receiptRLP69 struct to verify all 4 fields.
+			var decoded receiptRLP69
+			err = rlp.DecodeBytes(encoded, &decoded)
+			require.NoError(t, err)
+
+			assert.Equal(t, tt.txType, decoded.Type, "Type mismatch")
+			assert.Equal(t, receiptStatusSuccessfulRLP, decoded.PostStateOrStatus, "PostStateOrStatus mismatch")
+			assert.Equal(t, uint64(50000), decoded.CumulativeGasUsed, "CumulativeGasUsed mismatch")
+			require.Len(t, decoded.Logs, 1)
+			assert.Equal(t, logs[0].Address, decoded.Logs[0].Address)
+		})
+	}
+}
+
+// TestReceiptEncodeRLP69_NoBloom confirms that the ETH69 encoding omits the bloom filter.
+func TestReceiptEncodeRLP69_NoBloom(t *testing.T) {
+	t.Parallel()
+
+	receipt := &Receipt{
+		Type:              DynamicFeeTxType,
+		Status:            ReceiptStatusSuccessful,
+		CumulativeGasUsed: 21000,
+		Bloom:             CreateBloom(Receipts{{Status: ReceiptStatusSuccessful, Logs: []*Log{{Address: common.BytesToAddress([]byte{0x11})}}}}),
+		Logs:              []*Log{},
+	}
+
+	var buf bytes.Buffer
+	err := receipt.EncodeRLP69(&buf)
+	require.NoError(t, err)
+
+	// Decode using the 4-field struct; if a bloom was incorrectly included,
+	// the RLP decoder would either fail or produce wrong field values.
+	var decoded receiptRLP69
+	err = rlp.DecodeBytes(buf.Bytes(), &decoded)
+	require.NoError(t, err)
+	assert.Equal(t, uint8(DynamicFeeTxType), decoded.Type)
+	assert.Equal(t, uint64(21000), decoded.CumulativeGasUsed)
+}
+
+// TestReceiptsEncodeRLP69_MixedTypes verifies that Receipts.EncodeRLP69 correctly
+// encodes a batch of mixed-type receipts.
+func TestReceiptsEncodeRLP69_MixedTypes(t *testing.T) {
+	t.Parallel()
+
+	receipts := Receipts{
+		{
+			Type:              LegacyTxType,
+			Status:            ReceiptStatusSuccessful,
+			CumulativeGasUsed: 21000,
+			Logs:              []*Log{},
+		},
+		{
+			Type:              AccessListTxType,
+			Status:            ReceiptStatusFailed,
+			CumulativeGasUsed: 42000,
+			Logs:              []*Log{},
+		},
+		{
+			Type:              DynamicFeeTxType,
+			Status:            ReceiptStatusSuccessful,
+			CumulativeGasUsed: 63000,
+			Logs:              []*Log{},
+		},
+		{
+			Type:              BlobTxType,
+			Status:            ReceiptStatusSuccessful,
+			CumulativeGasUsed: 84000,
+			Logs:              []*Log{},
+		},
+	}
+
+	var buf bytes.Buffer
+	err := receipts.EncodeRLP69(&buf)
+	require.NoError(t, err)
+
+	// Decode the outer list of receipt lists.
+	var decodedList []receiptRLP69
+	err = rlp.DecodeBytes(buf.Bytes(), &decodedList)
+	require.NoError(t, err)
+	require.Len(t, decodedList, 4)
+
+	assert.Equal(t, uint8(LegacyTxType), decodedList[0].Type)
+	assert.Equal(t, uint64(21000), decodedList[0].CumulativeGasUsed)
+
+	assert.Equal(t, uint8(AccessListTxType), decodedList[1].Type)
+	assert.Equal(t, receiptStatusFailedRLP, decodedList[1].PostStateOrStatus)
+
+	assert.Equal(t, uint8(DynamicFeeTxType), decodedList[2].Type)
+	assert.Equal(t, uint64(63000), decodedList[2].CumulativeGasUsed)
+
+	assert.Equal(t, uint8(BlobTxType), decodedList[3].Type)
+	assert.Equal(t, uint64(84000), decodedList[3].CumulativeGasUsed)
+}
+
+// TestReceiptEncodeRLP69_DiffersFromETH68 ensures that the ETH69 encoding
+// is structurally different from the ETH68 encoding for typed receipts.
+func TestReceiptEncodeRLP69_DiffersFromETH68(t *testing.T) {
+	t.Parallel()
+
+	receipt := &Receipt{
+		Type:              DynamicFeeTxType,
+		Status:            ReceiptStatusSuccessful,
+		CumulativeGasUsed: 21000,
+		Bloom:             CreateBloom(Receipts{{Status: ReceiptStatusSuccessful, Logs: []*Log{}}}),
+		Logs:              []*Log{},
+	}
+
+	// ETH68 encoding
+	var buf68 bytes.Buffer
+	err := receipt.EncodeRLP(&buf68)
+	require.NoError(t, err)
+
+	// ETH69 encoding
+	var buf69 bytes.Buffer
+	err = receipt.EncodeRLP69(&buf69)
+	require.NoError(t, err)
+
+	// They must differ: ETH68 wraps typed receipts as byte strings; ETH69 uses flat lists.
+	assert.False(t, bytes.Equal(buf68.Bytes(), buf69.Bytes()),
+		"ETH68 and ETH69 typed receipt encodings should differ")
+
+	// ETH69 result must be a list (first byte >= 0xc0).
+	assert.True(t, buf69.Bytes()[0] >= 0xc0,
+		"ETH69 encoding should be an RLP list, got first byte 0x%02x", buf69.Bytes()[0])
+
+	// ETH68 result for typed receipt is a byte string (first byte < 0xc0).
+	assert.True(t, buf68.Bytes()[0] < 0xc0,
+		"ETH68 typed receipt encoding should be an RLP byte string, got first byte 0x%02x", buf68.Bytes()[0])
 }
 
 func TestReceiptEncode(t *testing.T) {

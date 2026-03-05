@@ -29,8 +29,8 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonstream"
@@ -58,7 +58,10 @@ func blockNumbersFromTraces(t *testing.T, b []byte) []int {
 }
 
 func TestCallTraceOneByOne(t *testing.T) {
-	m := mock.Mock(t)
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m := execmoduletester.New(t)
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *blockgen.BlockGen) {
 		gen.SetCoinbase(common.Address{1})
 	})
@@ -91,7 +94,7 @@ func TestCallTraceOneByOne(t *testing.T) {
 }
 
 func TestCallTraceUnwind(t *testing.T) {
-	m := mock.Mock(t)
+	m := execmoduletester.New(t)
 	var chainA, chainB *blockgen.ChainPack
 	var err error
 	chainA, err = blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *blockgen.BlockGen) {
@@ -165,7 +168,10 @@ func TestCallTraceUnwind(t *testing.T) {
 }
 
 func TestFilterNoAddresses(t *testing.T) {
-	m := mock.Mock(t)
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m := execmoduletester.New(t)
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *blockgen.BlockGen) {
 		gen.SetCoinbase(common.Address{1})
 	})
@@ -195,7 +201,7 @@ func TestFilterNoAddresses(t *testing.T) {
 }
 
 func TestFilterAddressIntersection(t *testing.T) {
-	m := mock.Mock(t)
+	m := execmoduletester.New(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 
 	toAddress1, toAddress2, other := common.Address{1}, common.Address{2}, common.Address{3}

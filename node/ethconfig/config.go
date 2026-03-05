@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
@@ -63,7 +64,7 @@ func DefaultBlockGasLimitByChain(chainConfig *chain.Config) uint64 {
 // FullNodeGPO contains default gasprice oracle settings for full node.
 var FullNodeGPO = gaspricecfg.Config{
 	Blocks:           20,
-	Default:          big.NewInt(0),
+	Default:          uint256.NewInt(0),
 	Percentile:       60,
 	MaxHeaderHistory: 0,
 	MaxBlockHistory:  0,
@@ -114,6 +115,7 @@ var Defaults = Config{
 	FcuTimeout:          1 * time.Second,
 	FcuBackgroundPrune:  true,
 	FcuBackgroundCommit: false, // to enable, we need to 1) have rawdb API go via execctx and 2) revive Coherent cache for rpcdaemon
+	ExperimentalBAL:     false,
 }
 
 const DefaultChainDBPageSize = 16 * datasize.KB
@@ -208,8 +210,8 @@ type Config struct {
 	// Whitelist of required block number -> hash values to accept
 	Whitelist map[uint64]common.Hash `toml:"-"`
 
-	// Mining options
-	Miner buildercfg.MiningConfig
+	// Block builder options
+	Builder buildercfg.BuilderConfig
 
 	// Ethash options
 	Ethash ethashcfg.Config
