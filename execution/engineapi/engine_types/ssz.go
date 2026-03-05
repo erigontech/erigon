@@ -22,6 +22,7 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon/common"
+	commonssz "github.com/erigontech/erigon/common/ssz"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -296,53 +297,98 @@ func DecodeForkchoiceUpdatedResponse(buf []byte) (*ForkchoiceUpdatedResponseSSZ,
 	return resp, nil
 }
 
-// ExchangeCapabilitiesSSZ encodes/decodes a list of capability strings for SSZ transport.
+// EncodeCapabilities encodes a list of capability strings as an SSZ
+// ExchangeCapabilitiesRequest container:
+//
+//	Container { capabilities: List[List[uint8, 64], 128] }
+//
+// Wire format:
+//
+//	container_offset(4) -> list_data
+//	list_data = N * item_offset(4) + concatenated UTF-8 string bytes
 func EncodeCapabilities(capabilities []string) []byte {
-	// count(4) + for each: len(4) + bytes
-	var totalSize int
+	n := len(capabilities)
+	// Container fixed part: one offset (4 bytes) pointing to the list data.
+	const containerFixed = 4
+	// List data: N offsets (4 bytes each) + concatenated string bytes.
+	offsetsSize := n * 4
+	totalStrBytes := 0
 	for _, cap := range capabilities {
-		totalSize += 4 + len(cap)
+		totalStrBytes += len(cap)
 	}
 
-	buf := make([]byte, 4+totalSize)
-	binary.LittleEndian.PutUint32(buf[0:4], uint32(len(capabilities)))
+	buf := make([]byte, 0, containerFixed+offsetsSize+totalStrBytes)
+	// Container offset -> start of list data
+	buf = append(buf, commonssz.OffsetSSZ(containerFixed)...)
 
-	offset := 4
+	// List item offsets (relative to start of list data)
+	itemOffset := uint32(offsetsSize)
 	for _, cap := range capabilities {
-		capBytes := []byte(cap)
-		binary.LittleEndian.PutUint32(buf[offset:offset+4], uint32(len(capBytes)))
-		offset += 4
-		copy(buf[offset:], capBytes)
-		offset += len(capBytes)
+		buf = append(buf, commonssz.OffsetSSZ(itemOffset)...)
+		itemOffset += uint32(len(cap))
+	}
+	// Concatenated string data
+	for _, cap := range capabilities {
+		buf = append(buf, []byte(cap)...)
 	}
 
 	return buf
 }
 
+// DecodeCapabilities decodes an SSZ ExchangeCapabilitiesRequest container.
+// See EncodeCapabilities for wire format.
 func DecodeCapabilities(buf []byte) ([]string, error) {
 	if len(buf) < 4 {
 		return nil, fmt.Errorf("Capabilities: buffer too short")
 	}
 
-	count := binary.LittleEndian.Uint32(buf[0:4])
+	listOffset := commonssz.DecodeOffset(buf[0:4])
+	if listOffset > uint32(len(buf)) {
+		return nil, fmt.Errorf("Capabilities: list offset out of bounds")
+	}
+
+	listData := buf[listOffset:]
+	if len(listData) == 0 {
+		return []string{}, nil
+	}
+	if len(listData) < 4 {
+		return nil, fmt.Errorf("Capabilities: list data too short")
+	}
+
+	// First offset tells us how many items there are.
+	firstOffset := commonssz.DecodeOffset(listData[0:4])
+	if firstOffset%4 != 0 || firstOffset == 0 {
+		return nil, fmt.Errorf("Capabilities: invalid first offset %d", firstOffset)
+	}
+	count := firstOffset / 4
 	if count > 128 {
 		return nil, fmt.Errorf("Capabilities: too many capabilities (%d > 128)", count)
 	}
+	if uint32(len(listData)) < count*4 {
+		return nil, fmt.Errorf("Capabilities: truncated offset table")
+	}
 
-	capabilities := make([]string, 0, count)
-	offset := uint32(4)
-
+	offsets := make([]uint32, count)
 	for i := uint32(0); i < count; i++ {
-		if offset+4 > uint32(len(buf)) {
-			return nil, fmt.Errorf("Capabilities: unexpected end of buffer")
+		offsets[i] = commonssz.DecodeOffset(listData[i*4 : i*4+4])
+	}
+
+	capabilities := make([]string, count)
+	for i := uint32(0); i < count; i++ {
+		start := offsets[i]
+		var end uint32
+		if i+1 < count {
+			end = offsets[i+1]
+		} else {
+			end = uint32(len(listData))
 		}
-		capLen := binary.LittleEndian.Uint32(buf[offset : offset+4])
-		offset += 4
-		if capLen > 64 || offset+capLen > uint32(len(buf)) {
-			return nil, fmt.Errorf("Capabilities: capability too long or truncated")
+		if start > uint32(len(listData)) || end > uint32(len(listData)) || start > end {
+			return nil, fmt.Errorf("Capabilities: offset out of bounds")
 		}
-		capabilities = append(capabilities, string(buf[offset:offset+capLen]))
-		offset += capLen
+		if end-start > 64 {
+			return nil, fmt.Errorf("Capabilities: capability too long (%d > 64)", end-start)
+		}
+		capabilities[i] = string(listData[start:end])
 	}
 
 	return capabilities, nil
