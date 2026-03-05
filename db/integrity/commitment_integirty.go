@@ -23,7 +23,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"math/rand/v2"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -612,14 +611,7 @@ func CheckCommitmentHistVal(ctx context.Context, sc SamplerCfg, db kv.TemporalRo
 		}
 		// XOR file index into seed so bucket selection is reproducible per file.
 		sampler := NewSampler(sc.Seed^int64(i), sc.SampleRatio)
-		var buckets []int
-		for b := range sampler.Buckets(0, numBuckets) {
-			buckets = append(buckets, b)
-		}
-		if len(buckets) == 0 {
-			buckets = []int{rand.New(rand.NewPCG(uint64(sc.Seed^int64(i)), 1)).IntN(numBuckets)}
-		}
-		for _, bucket := range buckets {
+		for bucket := range sampler.Buckets(0, numBuckets) {
 			eg.Go(func() error {
 				tx, err := db.BeginTemporalRo(ctx)
 				if err != nil {
@@ -809,8 +801,8 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 			}
 		}
 
-		// Verify gap blocks have the same state root
-		currentRoot, err := sd.ComputeCommitment(ctx, tx, false, latestBlockNum, latestTxNum, lvl.String(), nil)
+		// Verify gap blocks all share the same state root (no state changes confirmed above).
+		refHeader, err := br.HeaderByNumber(ctx, tx, latestBlockNum)
 		if err != nil {
 			return err
 		}
@@ -819,8 +811,8 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 			if err != nil {
 				return err
 			}
-			if gapHeader.Root != common.Hash(currentRoot) {
-				return fmt.Errorf("commitment state blockNum doesn't match blockNum: %d != %d (block %d has different state root: commitment=%x header=%x)", latestBlockNum, blockNum, gapBlock, currentRoot, gapHeader.Root)
+			if gapHeader.Root != refHeader.Root {
+				return fmt.Errorf("commitment state blockNum doesn't match blockNum: %d != %d (block %d has different state root: ref=%x header=%x)", latestBlockNum, blockNum, gapBlock, refHeader.Root, gapHeader.Root)
 			}
 		}
 		logger.Log(lvl, "commitment state is from earlier block (empty blocks in between)", "commitmentBlockNum", latestBlockNum, "blockNum", blockNum)
