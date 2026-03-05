@@ -781,10 +781,15 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	if err != nil {
 		return err
 	}
-	if latestBlockNum != blockNum {
-		return fmt.Errorf("commitment state blockNum doesn't match blockNum: %d != %d", latestBlockNum, blockNum)
+	if latestBlockNum > blockNum {
+		return fmt.Errorf("commitment state blockNum is ahead of blockNum: %d > %d", latestBlockNum, blockNum)
 	}
-	if latestTxNum != maxTxNum {
+	if latestBlockNum < blockNum {
+		// Empty blocks between latestBlockNum and blockNum had no state changes,
+		// so no commitment state was stored. Root hash check below will still verify correctness.
+		logger.Log(lvl, "commitment state is from earlier block (empty blocks in between)", "commitmentBlockNum", latestBlockNum, "blockNum", blockNum)
+	}
+	if latestTxNum != maxTxNum && latestBlockNum == blockNum {
 		return fmt.Errorf("commitment state txNum doesn't match maxTxNum: %d != %d", latestTxNum, maxTxNum)
 	}
 	logger.Log(lvl, "commitment recalc info", "blockNum", blockNum, "minTxNum", minTxNum, "maxTxNum", maxTxNum, "toTxNum", toTxNum)
