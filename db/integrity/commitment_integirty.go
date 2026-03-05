@@ -1004,7 +1004,6 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 	var branchKeys uint64
 	var integrityErr error
 
-
 	for i := 0; commReader.HasNext(); i++ {
 		if i%1024 == 0 {
 			select {
@@ -1220,7 +1219,6 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 	var branchKeys uint64
 	var integrityErr error
 	var extractedAccKeys, extractedStoKeys, skippedAccKeys, skippedStoKeys uint64
-
 
 	// Phase 1: Walk commitment branches, collect extracted plain keys into ETL collectors.
 	for i := 0; commReader.HasNext(); i++ {
@@ -1604,7 +1602,6 @@ func extractCommitmentRefsToCollectors(ctx context.Context, file state.VisibleFi
 	branchValueBuf := make([]byte, 0, datasize.MB.Bytes())
 	plainKeyBuf := make([]byte, 0, length.Addr+length.Hash)
 
-
 	for commReader.HasNext() {
 		select {
 		case <-ctx.Done():
@@ -1749,7 +1746,6 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 
 			plainKeyBuf := make([]byte, 0, length.Addr+length.Hash)
 			valBuf := make([]byte, 0, 128)
-		
 
 			for item := range workCh {
 				select {
