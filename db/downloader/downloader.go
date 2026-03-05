@@ -724,7 +724,15 @@ func (d *Downloader) DownloadSnapshots(ctx context.Context, items []preverifiedS
 	if err != nil {
 		return
 	}
-	return wait(ctx)
+	if err = wait(ctx); err != nil {
+		return
+	}
+
+	// After downloads complete, regenerate chain.toml with all available torrents.
+	if pubErr := d.PublishLocalChainToml(0); pubErr != nil {
+		d.logger.Warn("[Downloader] failed to publish chain.toml after download", "err", pubErr)
+	}
+	return
 }
 
 // Starts downloading, returns a function to wait for completion. Wait or err are returned. Wait
