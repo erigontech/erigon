@@ -1265,7 +1265,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 					return err
 				}
 			case integrity.CommitmentHistAtBlkRange:
-				to, err := stateProgress(ctx, chainDB, agg, blockReader.TxnumReader())
+				to, err := stateProgress(ctx, db, blockReader.TxnumReader())
 				if err != nil {
 					return err
 				}
@@ -1290,7 +1290,8 @@ func doIntegrity(cliCtx *cli.Context) error {
 // derived from the aggregator's EndTxNumMinimax. This may differ from the block
 // files progress — block snapshots and state snapshots advance independently.
 // Use this as the upper bound for state-history integrity commands.
-func stateProgress(ctx context.Context, db kv.RoDB, agg *state.Aggregator, txNumsReader rawdbv3.TxNumsReader) (uint64, error) {
+func stateProgress(ctx context.Context, db kv.TemporalRoDB, txNumsReader rawdbv3.TxNumsReader) (uint64, error) {
+	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
 	aggMax := agg.EndTxNumMinimax()
 	roTx, err := db.BeginRo(ctx)
 	if err != nil {
@@ -1354,7 +1355,7 @@ func doCheckCommitmentHistAtBlkRange(cliCtx *cli.Context, logger log.Logger) err
 	from := cliCtx.Uint64("from")
 	to := cliCtx.Uint64("to")
 	if !cliCtx.IsSet("to") {
-		latestBlock, err := stateProgress(ctx, chainDB, agg, blockReader.TxnumReader())
+		latestBlock, err := stateProgress(ctx, db, blockReader.TxnumReader())
 		if err != nil {
 			return err
 		}
