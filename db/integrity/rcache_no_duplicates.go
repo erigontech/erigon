@@ -3,7 +3,6 @@ package integrity
 import (
 	"context"
 	"fmt"
-	"math/rand/v2"
 	"sync/atomic"
 	"time"
 
@@ -139,7 +138,7 @@ func parallelChunkCheck(ctx context.Context, fromBlock, toBlock uint64, db kv.Te
 	}
 
 	numWorkers := estimate.AlmostAllCPUs()
-	chunkSize := uint64(1000)
+	chunkSize := uint64(100)
 
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(numWorkers)
@@ -163,10 +162,10 @@ func parallelChunkCheck(ctx context.Context, fromBlock, toBlock uint64, db kv.Te
 		}
 	}()
 
-	rng := rand.New(rand.NewPCG(uint64(seed), 0))
+	sampler := NewSampler(seed, sampleRatio)
 	// Process chunks in parallel
 	for start := fromBlock; start <= toBlock; start += chunkSize {
-		if sampleRatio < 1.0 && rng.Float64() >= sampleRatio {
+		if sampler.CanSkip() {
 			continue
 		}
 		end := min(start+chunkSize-1, toBlock)
