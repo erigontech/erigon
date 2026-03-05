@@ -299,6 +299,12 @@ func (t *TxTask) TxMessage() (*types.Message, error) {
 				return nil, err
 			}
 
+			// Ensure msg.Tx is set for Arbitrum L1 poster cost calculation.
+			// Some tx types (LegacyTx, DynamicFeeTransaction, etc.) don't set it in AsMessage().
+			if message.Tx == nil {
+				message.Tx = tx
+			}
+
 			t.message = message
 		}
 	}

@@ -73,6 +73,10 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 	if err != nil {
 		return nil, err
 	}
+	// Ensure msg.Tx is set for Arbitrum L1 poster cost calculation.
+	if msg.Tx == nil {
+		msg.Tx = txn
+	}
 	msg.SetCheckNonce(!cfg.StatelessExec)
 
 	if cfg.Tracer != nil {
