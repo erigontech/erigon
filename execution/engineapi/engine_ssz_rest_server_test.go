@@ -238,23 +238,6 @@ func TestSszRestGetClientVersion(t *testing.T) {
 	req.Equal("EG", versions[0].Code) // Erigon's client code
 }
 
-func TestSszRestGetClientCommunicationChannels(t *testing.T) {
-	setup := newSszRestTestSetup(t)
-	defer setup.cancel()
-
-	req := require.New(t)
-
-	resp, respBody := setup.doRequest(t, "/engine/v1/get_client_communication_channels", nil)
-	req.Equal(http.StatusOK, resp.StatusCode)
-
-	channels, err := engine_types.DecodeCommunicationChannels(respBody)
-	req.NoError(err)
-	req.Len(channels, 2) // json_rpc + ssz_rest
-	req.Equal("json_rpc", channels[0].Protocol)
-	req.Equal("ssz_rest", channels[1].Protocol)
-	req.Contains(channels[1].URL, "http://")
-}
-
 func TestSszRestGetBlobsV1(t *testing.T) {
 	setup := newSszRestTestSetup(t)
 	defer setup.cancel()
@@ -517,40 +500,3 @@ func TestSszRestGetPayloadV4ValidRequest(t *testing.T) {
 	}
 }
 
-func TestGetClientCommunicationChannelsV1WithSSZRest(t *testing.T) {
-	mockSentry := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
-	req := require.New(t)
-
-	executionRpc := direct.NewExecutionClientDirect(mockSentry.ExecModule)
-	maxReorgDepth := ethconfig.Defaults.MaxReorgDepth
-	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, true, nil, ethconfig.Defaults.FcuTimeout, maxReorgDepth)
-
-	ctx := context.Background()
-
-	// Without SSZ-REST enabled — should return only json_rpc
-	engineServer.httpConfig = &httpcfg.HttpCfg{
-		AuthRpcHTTPListenAddress: "0.0.0.0",
-		AuthRpcPort:              9551,
-		SszRestEnabled:           false,
-	}
-	channels, err := engineServer.GetClientCommunicationChannelsV1(ctx)
-	req.NoError(err)
-	req.Len(channels, 1)
-	req.Equal("json_rpc", channels[0].Protocol)
-
-	// With SSZ-REST enabled — should return both
-	engineServer.httpConfig = &httpcfg.HttpCfg{
-		AuthRpcHTTPListenAddress: "0.0.0.0",
-		AuthRpcPort:              9551,
-		SszRestEnabled:           true,
-		SszRestPort:              9552,
-	}
-	engineServer.sszRestPort = 9552
-	channels, err = engineServer.GetClientCommunicationChannelsV1(ctx)
-	req.NoError(err)
-	req.Len(channels, 2)
-	req.Equal("json_rpc", channels[0].Protocol)
-	req.Equal("0.0.0.0:9551", channels[0].URL)
-	req.Equal("ssz_rest", channels[1].Protocol)
-	req.Equal("http://0.0.0.0:9552", channels[1].URL)
-}

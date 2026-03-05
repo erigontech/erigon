@@ -348,35 +348,6 @@ func TestGetPayloadBodiesByHashV2(t *testing.T) {
 	req.Equal(hexutil.Bytes(balBytes), bodies[0].BlockAccessList)
 }
 
-func TestGetClientCommunicationChannelsV1(t *testing.T) {
-	mockSentry := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
-	req := require.New(t)
-
-	executionRpc := direct.NewExecutionClientDirect(mockSentry.ExecModule)
-	maxReorgDepth := ethconfig.Defaults.MaxReorgDepth
-	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, true, nil, ethconfig.Defaults.FcuTimeout, maxReorgDepth)
-
-	ctx := context.Background()
-
-	// Before Start (no httpConfig set) — should return defaults
-	channels, err := engineServer.GetClientCommunicationChannelsV1(ctx)
-	req.NoError(err)
-	req.Len(channels, 1)
-	req.Equal("json_rpc", channels[0].Protocol)
-	req.Equal("localhost:8551", channels[0].URL)
-
-	// After setting httpConfig via Start-like initialization
-	engineServer.httpConfig = &httpcfg.HttpCfg{
-		AuthRpcHTTPListenAddress: "0.0.0.0",
-		AuthRpcPort:              9551,
-	}
-	channels, err = engineServer.GetClientCommunicationChannelsV1(ctx)
-	req.NoError(err)
-	req.Len(channels, 1)
-	req.Equal("json_rpc", channels[0].Protocol)
-	req.Equal("0.0.0.0:9551", channels[0].URL)
-}
-
 func TestGetPayloadBodiesByRangeV2(t *testing.T) {
 	mockSentry := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
 	req := require.New(t)

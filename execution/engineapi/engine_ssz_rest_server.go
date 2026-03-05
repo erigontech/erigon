@@ -162,12 +162,6 @@ func (s *SszRestServer) registerRoutes(mux *http.ServeMux) {
 
 	// getClientVersion
 	mux.HandleFunc("POST /engine/v1/get_client_version", s.handleGetClientVersion)
-
-	// getClientCommunicationChannels (deprecated, kept for backward compat)
-	mux.HandleFunc("POST /engine/v1/get_client_communication_channels", s.handleGetClientCommunicationChannels)
-
-	// exchangeCapabilitiesV2 (EIP-8160)
-	mux.HandleFunc("POST /engine/v2/exchange_capabilities", s.handleExchangeCapabilitiesV2)
 }
 
 // readBody reads the request body with a size limit.
@@ -611,55 +605,6 @@ func (s *SszRestServer) handleGetClientVersion(w http.ResponseWriter, r *http.Re
 	}
 
 	sszResponse(w, engine_types.EncodeClientVersions(result))
-}
-
-// --- exchangeCapabilitiesV2 handler (EIP-8160) ---
-
-func (s *SszRestServer) handleExchangeCapabilitiesV2(w http.ResponseWriter, r *http.Request) {
-	s.logger.Info("[SSZ-REST] Received ExchangeCapabilitiesV2")
-
-	body, err := readBody(r, 1024*1024)
-	if err != nil {
-		sszErrorResponse(w, http.StatusBadRequest, -32602, "failed to read request body")
-		return
-	}
-
-	capabilities, err := engine_types.DecodeCapabilities(body)
-	if err != nil {
-		sszErrorResponse(w, http.StatusBadRequest, -32602, err.Error())
-		return
-	}
-
-	result := s.engine.ExchangeCapabilitiesV2(capabilities)
-	// Encode as: capabilities SSZ + communication channels SSZ appended
-	// For simplicity, use the same capabilities encoding followed by channels encoding.
-	capBuf := engine_types.EncodeCapabilities(result.Capabilities)
-	chanBuf := engine_types.EncodeCommunicationChannels(result.SupportedProtocols)
-
-	// SSZ Container: capabilities_offset(4) + channels_offset(4) + capabilities_data + channels_data
-	fixedSize := uint32(8)
-	buf := make([]byte, 8+len(capBuf)+len(chanBuf))
-	binary.LittleEndian.PutUint32(buf[0:4], fixedSize)
-	binary.LittleEndian.PutUint32(buf[4:8], fixedSize+uint32(len(capBuf)))
-	copy(buf[8:], capBuf)
-	copy(buf[8+len(capBuf):], chanBuf)
-
-	sszResponse(w, buf)
-}
-
-// --- getClientCommunicationChannels handler ---
-
-func (s *SszRestServer) handleGetClientCommunicationChannels(w http.ResponseWriter, r *http.Request) {
-	s.logger.Info("[SSZ-REST] Received GetClientCommunicationChannels")
-
-	ctx := r.Context()
-	result, err := s.engine.GetClientCommunicationChannelsV1(ctx)
-	if err != nil {
-		s.handleEngineError(w, err)
-		return
-	}
-
-	sszResponse(w, engine_types.EncodeCommunicationChannels(result))
 }
 
 // handleEngineError converts engine errors to appropriate HTTP error responses.

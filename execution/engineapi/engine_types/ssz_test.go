@@ -129,31 +129,6 @@ func TestForkchoiceStateDecodeShortBuffer(t *testing.T) {
 	req.Contains(err.Error(), "buffer too short")
 }
 
-func TestCommunicationChannelsRoundTrip(t *testing.T) {
-	req := require.New(t)
-
-	channels := []CommunicationChannel{
-		{Protocol: "json_rpc", URL: "localhost:8551"},
-		{Protocol: "ssz_rest", URL: "localhost:8552"},
-	}
-
-	encoded := EncodeCommunicationChannels(channels)
-	decoded, err := DecodeCommunicationChannels(encoded)
-	req.NoError(err)
-	req.Len(decoded, 2)
-	req.Equal("json_rpc", decoded[0].Protocol)
-	req.Equal("localhost:8551", decoded[0].URL)
-	req.Equal("ssz_rest", decoded[1].Protocol)
-	req.Equal("localhost:8552", decoded[1].URL)
-}
-
-func TestCommunicationChannelsEmpty(t *testing.T) {
-	req := require.New(t)
-
-	encoded := EncodeCommunicationChannels(nil)
-	req.Empty(encoded)
-}
-
 func TestCapabilitiesRoundTrip(t *testing.T) {
 	req := require.New(t)
 
