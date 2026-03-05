@@ -237,7 +237,7 @@ func TestBranchData_ReplacePlainKeys(t *testing.T) {
 
 	target := make([]byte, 0, len(enc))
 	oldKeys := make([][]byte, 0)
-	replaced, _, err := enc.ReplacePlainKeys(target, func(key []byte, isStorage bool) ([]byte, error) {
+	replaced, err := enc.ReplacePlainKeys(target, func(key []byte, isStorage bool) ([]byte, error) {
 		oldKeys = append(oldKeys, key)
 		if isStorage {
 			return key[:8], nil
@@ -248,7 +248,7 @@ func TestBranchData_ReplacePlainKeys(t *testing.T) {
 	require.Lessf(t, len(replaced), len(enc), "replaced expected to be shorter than original enc")
 
 	keyI := 0
-	replacedBack, _, err := replaced.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+	replacedBack, err := replaced.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
 		require.Equal(t, oldKeys[keyI][:4], key[:4])
 		defer func() { keyI++ }()
 		return oldKeys[keyI], nil
@@ -286,7 +286,7 @@ func TestBranchData_ReplacePlainKeys_WithEmpty(t *testing.T) {
 
 	target := make([]byte, 0, len(enc))
 	oldKeys := make([][]byte, 0)
-	replaced, _, err := enc.ReplacePlainKeys(target, func(key []byte, isStorage bool) ([]byte, error) {
+	replaced, err := enc.ReplacePlainKeys(target, func(key []byte, isStorage bool) ([]byte, error) {
 		oldKeys = append(oldKeys, key)
 		if isStorage {
 			return nil, nil
@@ -297,7 +297,7 @@ func TestBranchData_ReplacePlainKeys_WithEmpty(t *testing.T) {
 	require.Lenf(t, replaced, len(enc), "replaced expected to be equal to origin (since no replacements were made)")
 
 	keyI := 0
-	replacedBack, _, err := replaced.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+	replacedBack, err := replaced.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
 		require.Equal(t, oldKeys[keyI][:4], key[:4])
 		defer func() { keyI++ }()
 		return oldKeys[keyI], nil
@@ -316,6 +316,55 @@ func TestBranchData_ReplacePlainKeys_WithEmpty(t *testing.T) {
 		require.NoError(t, err)
 		require.EqualValues(t, orig, merged)
 	})
+}
+
+// TestBranchData_ReplacePlainKeys_PartialChange exercises the span-copy logic
+// when only some keys change (account keys shortened, storage keys kept).
+func TestBranchData_ReplacePlainKeys_PartialChange(t *testing.T) {
+	t.Parallel()
+
+	row, bm := generateCellRow(t, 16)
+	be := NewBranchEncoder(1024)
+	enc, _, err := be.EncodeBranch(bm, bm, bm, func(i int, skip bool) (*cell, error) {
+		return row[i], nil
+	})
+	require.NoError(t, err)
+
+	original := common.Copy(enc)
+
+	// Collect original keys and shorten only account keys.
+	type keyRecord struct {
+		key       []byte
+		isStorage bool
+	}
+	var origKeys []keyRecord
+	replaced, err := BranchData(common.Copy(enc)).ReplacePlainKeys(
+		make([]byte, 0, len(enc)),
+		func(key []byte, isStorage bool) ([]byte, error) {
+			origKeys = append(origKeys, keyRecord{common.Copy(key), isStorage})
+			if isStorage {
+				return nil, nil // keep original
+			}
+			return key[:4], nil // shorten account keys
+		},
+	)
+	require.NoError(t, err)
+
+	// Expand back: restore account keys, keep storage keys.
+	keyI := 0
+	expandedBack, err := replaced.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+		rec := origKeys[keyI]
+		keyI++
+		if isStorage {
+			require.True(t, rec.isStorage)
+			return nil, nil
+		}
+		require.False(t, rec.isStorage)
+		return rec.key, nil
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, original, expandedBack,
+		"round-trip with partial key replacement should reproduce original")
 }
 
 func TestNewUpdates(t *testing.T) {
