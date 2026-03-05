@@ -81,10 +81,10 @@ Add a feature to capture all data read during trie `Process` (branch nodes, acco
 
 ### Task 5: Verify acceptance criteria
 
-- [ ] Verify all requirements from Overview are implemented
-- [ ] Verify edge cases: empty updates, storage-only updates, account-only updates
-- [ ] Run full test suite: `go test ./execution/commitment/... -count=1`
-- [ ] Run lint: `make lint` (repeat until clean)
+- [x] Verify all requirements from Overview are implemented
+- [x] Verify edge cases: empty updates, storage-only updates, account-only updates
+- [x] Run full test suite: `go test ./execution/commitment/... -count=1`
+- [x] Run lint: `make lint` (repeat until clean)
 
 ### Task 6: [Final] Update documentation
 
