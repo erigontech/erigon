@@ -88,8 +88,8 @@ Add a feature to capture all data read during trie `Process` (branch nodes, acco
 
 ### Task 6: [Final] Update documentation
 
-- [ ] Update `CLAUDE.md` if new patterns discovered
-- [ ] Move this plan to `docs/plans/completed/`
+- [x] Update `CLAUDE.md` if new patterns discovered
+- [x] Move this plan to `docs/plans/completed/`
 
 ## Technical Details
 
