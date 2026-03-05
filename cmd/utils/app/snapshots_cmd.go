@@ -432,7 +432,7 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&cli.Uint64Flag{Name: "from", Usage: "block number from which to start verifying", Required: true},
-				&cli.Uint64Flag{Name: "to", Usage: "block number up to which to verify (exclusive)", Required: true},
+				&cli.Uint64Flag{Name: "to", Usage: "block number up to which to verify (exclusive); defaults to latest block with state"},
 				&cli.Int64Flag{Name: "seed", Usage: "random seed for block sampling (auto-generated if not set)"},
 				&cli.Float64Flag{Name: "sample", Usage: "fraction of blocks to check via pseudo-random sampling (0.0-1.0)", Value: 1.0},
 			}),
@@ -1319,6 +1319,20 @@ func doCheckCommitmentHistAtBlkRange(cliCtx *cli.Context, logger log.Logger) err
 	blockReader, _ := blockRetire.IO()
 	from := cliCtx.Uint64("from")
 	to := cliCtx.Uint64("to")
+	if !cliCtx.IsSet("to") {
+		aggMax := agg.EndTxNumMinimax()
+		roTx, err := chainDB.BeginRo(ctx)
+		if err != nil {
+			return err
+		}
+		latestBlock, _, err := blockReader.TxnumReader().FindBlockNum(ctx, roTx, aggMax)
+		roTx.Rollback()
+		if err != nil {
+			return err
+		}
+		to = latestBlock + 1 // exclusive upper bound
+		logger.Info("[check-commitment-hist-at-blk-range] auto-detected --to", "to", to, "aggMaxTxNum", aggMax)
+	}
 	var seed int64
 	if cliCtx.IsSet("seed") {
 		seed = cliCtx.Int64("seed")
