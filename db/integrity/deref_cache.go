@@ -36,9 +36,9 @@ type fileFingerprint struct {
 // that repeated runs can skip them.  has/add must only be called from the main
 // goroutine (before spawning workers and after eg.Wait() respectively).
 type IntegrityCache struct {
-	path         string
-	checked      map[string]struct{} // encoded line -> present; read-only after Load
-	newlyChecked []string            // appended after eg.Wait() in main goroutine
+	path    string
+	entries map[string]string // cacheKey (check+basenames) -> tab-separated hashes
+	dirty   bool              // true if entries were added or replaced
 }
 
 // LoadIntegrityCache reads the cache file at path into an IntegrityCache.
@@ -46,7 +46,7 @@ type IntegrityCache struct {
 func LoadIntegrityCache(path string) (*IntegrityCache, error) {
 	c := &IntegrityCache{
 		path:    path,
-		checked: make(map[string]struct{}),
+		entries: make(map[string]string),
 	}
 	f, err := os.Open(path)
 	if os.IsNotExist(err) {
@@ -62,15 +62,16 @@ func LoadIntegrityCache(path string) (*IntegrityCache, error) {
 		if line == "" {
 			continue
 		}
-		c.checked[line] = struct{}{}
+		key, hashes := parseEntry(line)
+		c.entries[key] = hashes
 	}
 	return c, scanner.Err()
 }
 
-// Save atomically writes all entries (existing + newly added) to disk.
-// No-ops when nothing new was added since Load.
+// Save atomically writes all entries to disk.
+// No-ops when nothing changed since Load.
 func (c *IntegrityCache) Save() error {
-	if len(c.newlyChecked) == 0 {
+	if !c.dirty {
 		return nil
 	}
 	tmpPath := c.path + ".tmp"
@@ -79,14 +80,9 @@ func (c *IntegrityCache) Save() error {
 		return err
 	}
 	w := bufio.NewWriter(f)
-	for entry := range c.checked {
-		if _, err := fmt.Fprintln(w, entry); err != nil {
-			f.Close()
-			return err
-		}
-	}
-	for _, entry := range c.newlyChecked {
-		if _, err := fmt.Fprintln(w, entry); err != nil {
+	for key, hashes := range c.entries {
+		// Reconstruct full entry: interleave basenames from key with hashes
+		if _, err := fmt.Fprintln(w, formatEntry(key, hashes)); err != nil {
 			f.Close()
 			return err
 		}
@@ -101,23 +97,30 @@ func (c *IntegrityCache) Save() error {
 	return os.Rename(tmpPath, c.path)
 }
 
-// has reports whether (check, files) is already in the cache.
+// has reports whether (check, files) is already in the cache with matching hashes.
 // Safe to call on nil receiver (returns false).
 func (c *IntegrityCache) has(check string, files []fileFingerprint) bool {
 	if c == nil {
 		return false
 	}
-	_, ok := c.checked[encodeEntry(check, files)]
-	return ok
+	key := cacheKey(check, files)
+	hashes, ok := c.entries[key]
+	if !ok {
+		return false
+	}
+	return hashes == encodeHashes(files)
 }
 
-// add records (check, files) as successfully checked.
+// add records (check, files) as successfully checked, replacing any existing entry
+// for the same check+basenames combination.
 // Safe to call on nil receiver (no-op).
 func (c *IntegrityCache) add(check string, files []fileFingerprint) {
 	if c == nil {
 		return
 	}
-	c.newlyChecked = append(c.newlyChecked, encodeEntry(check, files))
+	key := cacheKey(check, files)
+	c.entries[key] = encodeHashes(files)
+	c.dirty = true
 }
 
 // fingerprintsOf loads .torrent files for the given paths and extracts their InfoHashes.
@@ -138,20 +141,76 @@ func fingerprintsOf(paths ...string) ([]fileFingerprint, error) {
 	return fps, nil
 }
 
-// encodeEntry produces the tab-separated cache line used as the map key and
-// written to the cache file:
-//
-//	CheckName\tbasename1:hash1hex\tbasename2:hash2hex...
-//
-// Hash is 40 hex characters (20 bytes SHA1 InfoHash).
-func encodeEntry(check string, files []fileFingerprint) string {
+// cacheKey produces a key from check name and file basenames (without hashes).
+// This allows lookup/replacement when file contents change.
+func cacheKey(check string, files []fileFingerprint) string {
 	var sb strings.Builder
 	sb.WriteString(check)
 	for _, fp := range files {
 		sb.WriteByte('\t')
 		sb.WriteString(fp.basename)
+	}
+	return sb.String()
+}
+
+// parseEntry splits a cache file line into key (check+basenames) and value (hashes).
+func parseEntry(line string) (key, hashes string) {
+	parts := strings.Split(line, "\t")
+	if len(parts) == 0 {
+		return line, ""
+	}
+	var keySb, hashesSb strings.Builder
+	keySb.WriteString(parts[0]) // check name
+	for i, part := range parts[1:] {
+		keySb.WriteByte('\t')
+		if i > 0 {
+			hashesSb.WriteByte('\t')
+		}
+		// Split "basename:hash"
+		if idx := strings.LastIndex(part, ":"); idx > 0 {
+			keySb.WriteString(part[:idx])
+			hashesSb.WriteString(part[idx+1:])
+		} else {
+			keySb.WriteString(part)
+		}
+	}
+	return keySb.String(), hashesSb.String()
+}
+
+// formatEntry reconstructs a cache file line from key and hashes.
+func formatEntry(key, hashes string) string {
+	keyParts := strings.Split(key, "\t")
+	hashParts := strings.Split(hashes, "\t")
+	var sb strings.Builder
+	sb.WriteString(keyParts[0]) // check name
+	for i, basename := range keyParts[1:] {
+		sb.WriteByte('\t')
+		sb.WriteString(basename)
 		sb.WriteByte(':')
+		if i < len(hashParts) {
+			sb.WriteString(hashParts[i])
+		}
+	}
+	return sb.String()
+}
+
+// encodeHashes produces tab-separated hex hashes from fingerprints.
+func encodeHashes(files []fileFingerprint) string {
+	var sb strings.Builder
+	for i, fp := range files {
+		if i > 0 {
+			sb.WriteByte('\t')
+		}
 		sb.WriteString(hex.EncodeToString(fp.hash[:]))
 	}
 	return sb.String()
+}
+
+// encodeEntry produces the tab-separated cache line written to the cache file:
+//
+//	CheckName\tbasename1:hash1hex\tbasename2:hash2hex...
+//
+// Hash is 40 hex characters (20 bytes SHA1 InfoHash).
+func encodeEntry(check string, files []fileFingerprint) string {
+	return formatEntry(cacheKey(check, files), encodeHashes(files))
 }
