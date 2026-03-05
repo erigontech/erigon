@@ -471,9 +471,9 @@ func ApplyDeferredBranchUpdates(
 			if err := putBranch(upd.prefix, upd.encoded, upd.prev); err != nil {
 				return written, err
 			}
-			mxTrieBranchesUpdated.Inc()
 			written++
 		}
+		mxTrieBranchesUpdated.AddInt(written)
 		return written, nil
 	}
 
@@ -538,10 +538,9 @@ func ApplyDeferredBranchUpdates(
 			firstErr = err
 			continue
 		}
-		mxTrieBranchesUpdated.Inc()
 		written++
 	}
-
+	mxTrieBranchesUpdated.AddInt(written)
 	return written, firstErr
 }
 
@@ -872,7 +871,11 @@ func (branchData BranchData) String() string {
 	return sb.String()
 }
 
-// if fn returns nil, the original key will be copied from branchData
+// if fn returns nil, the original key will be kept from branchData.
+// Uses span-based lazy copy: unchanged regions of branchData are copied in bulk
+// only when a key actually changes. When no keys change, returns branchData as-is
+// with zero copies. When the caller passes nil or an undersized buffer, newData
+// is auto-sized to len(branchData) on first use.
 func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte, isStorage bool) (newKey []byte, err error)) (BranchData, error) {
 	if len(branchData) < 4 {
 		return branchData, nil
@@ -884,12 +887,13 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 	if touchMap&afterMap == 0 {
 		return branchData, nil
 	}
+
 	pos := 4
-	newData = append(newData[:0], branchData[:4]...)
+	anyChanged := false
+	spanStart := 0 // start of current unchanged span in branchData
 	for bitset, j := touchMap&afterMap, 0; bitset != 0; j++ {
 		bit := bitset & -bitset
 		fields := cellFields(branchData[pos])
-		newData = append(newData, byte(fields))
 		pos++
 		if fields&fieldExtension != 0 {
 			l, n := binary.Uvarint(branchData[pos:])
@@ -898,17 +902,16 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 			} else if n < 0 {
 				return nil, errors.New("replacePlainKeys value overflow for hashedKey len")
 			}
-			newData = append(newData, branchData[pos:pos+n]...)
 			pos += n
 			if len(branchData) < pos+int(l) {
 				return nil, fmt.Errorf("replacePlainKeys buffer too small for hashedKey: expected %d got %d", pos+int(l), len(branchData))
 			}
 			if l > 0 {
-				newData = append(newData, branchData[pos:pos+int(l)]...)
 				pos += int(l)
 			}
 		}
 		if fields&fieldAccountAddr != 0 {
+			keyFieldStart := pos
 			l, n := binary.Uvarint(branchData[pos:])
 			if n == 0 {
 				return nil, errors.New("replacePlainKeys buffer too small for accountAddr len")
@@ -926,17 +929,24 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 			if err != nil {
 				return nil, err
 			}
-			if newKey == nil {
-				// invariant: fn returns nil (keep original) only for plain addr keys (length.Addr bytes)
-				newData = append(newData, branchData[pos-int(l)-n:pos]...)
-			} else {
-				// invariant: newKey is a short reference (≤8 bytes) or full plain addr (length.Addr bytes)
+			if newKey != nil {
+				if !anyChanged {
+					if cap(newData) < len(branchData) {
+						newData = make([]byte, 0, len(branchData))
+					} else {
+						newData = newData[:0]
+					}
+					anyChanged = true
+				}
+				newData = append(newData, branchData[spanStart:keyFieldStart]...)
 				n = binary.PutUvarint(numBuf[:], uint64(len(newKey)))
 				newData = append(newData, numBuf[:n]...)
 				newData = append(newData, newKey...)
+				spanStart = pos
 			}
 		}
 		if fields&fieldStorageAddr != 0 {
+			keyFieldStart := pos
 			l, n := binary.Uvarint(branchData[pos:])
 			if n == 0 {
 				return nil, errors.New("replacePlainKeys buffer too small for storageAddr len")
@@ -954,14 +964,20 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 			if err != nil {
 				return nil, err
 			}
-			if newKey == nil {
-				// invariant: fn returns nil (keep original) only for plain storage keys (length.Addr+length.Hash bytes)
-				newData = append(newData, branchData[pos-int(l)-n:pos]...) // -n to include length
-			} else {
-				// invariant: newKey is a short reference (≤8 bytes) or full plain storage key (length.Addr+length.Hash bytes)
+			if newKey != nil {
+				if !anyChanged {
+					if cap(newData) < len(branchData) {
+						newData = make([]byte, 0, len(branchData))
+					} else {
+						newData = newData[:0]
+					}
+					anyChanged = true
+				}
+				newData = append(newData, branchData[spanStart:keyFieldStart]...)
 				n = binary.PutUvarint(numBuf[:], uint64(len(newKey)))
 				newData = append(newData, numBuf[:n]...)
 				newData = append(newData, newKey...)
+				spanStart = pos
 			}
 		}
 		if fields&fieldHash != 0 {
@@ -971,13 +987,11 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 			} else if n < 0 {
 				return nil, errors.New("replacePlainKeys value overflow for hash len")
 			}
-			newData = append(newData, branchData[pos:pos+n]...)
 			pos += n
 			if len(branchData) < pos+int(l) {
 				return nil, fmt.Errorf("replacePlainKeys buffer too small for hash: expected %d got %d", pos+int(l), len(branchData))
 			}
 			if l > 0 {
-				newData = append(newData, branchData[pos:pos+int(l)]...)
 				pos += int(l)
 			}
 		}
@@ -988,13 +1002,11 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 			} else if n < 0 {
 				return nil, errors.New("replacePlainKeys value overflow for acLeafhash len")
 			}
-			newData = append(newData, branchData[pos:pos+n]...)
 			pos += n
 			if len(branchData) < pos+int(l) {
 				return nil, fmt.Errorf("replacePlainKeys buffer too small for LeafHash: expected %d got %d", pos+int(l), len(branchData))
 			}
 			if l > 0 {
-				newData = append(newData, branchData[pos:pos+int(l)]...)
 				pos += int(l)
 			}
 		}
@@ -1002,6 +1014,11 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 		bitset ^= bit
 	}
 
+	if !anyChanged {
+		return branchData, nil
+	}
+	// Flush remaining unchanged span
+	newData = append(newData, branchData[spanStart:]...)
 	return newData, nil
 }
 

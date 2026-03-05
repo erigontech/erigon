@@ -132,69 +132,71 @@ func prepareDictMetadata(t testing.TB, multiplier int, hasMetadata bool, metadat
 }
 
 func TestCompressDict1(t *testing.T) {
-	d := prepareDict(t, 1, 100)
-	defer d.Close()
-	g := d.MakeGetter()
-	i := 0
-	g.Reset(0)
-	for g.HasNext() {
-		// next word is `nil`
-		require.False(t, g.MatchPrefix([]byte("long")))
-		require.True(t, g.MatchPrefix([]byte("")))
-		require.True(t, g.MatchPrefix([]byte{}))
+	t.Run("100_words", func(t *testing.T) {
+		d := prepareDict(t, 1, 100)
+		defer d.Close()
+		g := d.MakeGetter()
+		i := 0
+		g.Reset(0)
+		for g.HasNext() {
+			// next word is `nil`
+			require.False(t, g.MatchPrefix([]byte("long")))
+			require.True(t, g.MatchPrefix([]byte("")))
+			require.True(t, g.MatchPrefix([]byte{}))
 
-		word, _ := g.Next(nil)
-		require.NotNil(t, word)
-		require.Empty(t, word)
+			word, _ := g.Next(nil)
+			require.NotNil(t, word)
+			require.Empty(t, word)
 
-		// next word is `long`
-		require.True(t, g.MatchPrefix([]byte("long")))
-		require.False(t, g.MatchPrefix([]byte("longlong")))
-		require.False(t, g.MatchPrefix([]byte("wordnotmatch")))
-		require.False(t, g.MatchPrefix([]byte("longnotmatch")))
-		require.True(t, g.MatchPrefix([]byte{}))
+			// next word is `long`
+			require.True(t, g.MatchPrefix([]byte("long")))
+			require.False(t, g.MatchPrefix([]byte("longlong")))
+			require.False(t, g.MatchPrefix([]byte("wordnotmatch")))
+			require.False(t, g.MatchPrefix([]byte("longnotmatch")))
+			require.True(t, g.MatchPrefix([]byte{}))
 
-		_, _ = g.Next(nil)
+			_, _ = g.Next(nil)
 
-		// next word is `word`
-		require.False(t, g.MatchPrefix([]byte("long")))
-		require.False(t, g.MatchPrefix([]byte("longlong")))
-		require.True(t, g.MatchPrefix([]byte("word")))
-		require.True(t, g.MatchPrefix([]byte("")))
-		require.True(t, g.MatchPrefix(nil))
-		require.False(t, g.MatchPrefix([]byte("wordnotmatch")))
-		require.False(t, g.MatchPrefix([]byte("longnotmatch")))
+			// next word is `word`
+			require.False(t, g.MatchPrefix([]byte("long")))
+			require.False(t, g.MatchPrefix([]byte("longlong")))
+			require.True(t, g.MatchPrefix([]byte("word")))
+			require.True(t, g.MatchPrefix([]byte("")))
+			require.True(t, g.MatchPrefix(nil))
+			require.False(t, g.MatchPrefix([]byte("wordnotmatch")))
+			require.False(t, g.MatchPrefix([]byte("longnotmatch")))
 
-		_, _ = g.Next(nil)
+			_, _ = g.Next(nil)
 
-		// next word is `longlongword %d`
-		expectPrefix := fmt.Sprintf("%d long", i)
+			// next word is `longlongword %d`
+			expectPrefix := fmt.Sprintf("%d long", i)
 
-		require.True(t, g.MatchPrefix(fmt.Appendf(nil, "%d", i)))
-		require.True(t, g.MatchPrefix([]byte(expectPrefix)))
-		require.True(t, g.MatchPrefix([]byte(expectPrefix+"long")))
-		require.True(t, g.MatchPrefix([]byte(expectPrefix+"longword ")))
-		require.False(t, g.MatchPrefix([]byte("wordnotmatch")))
-		require.False(t, g.MatchPrefix([]byte("longnotmatch")))
-		require.True(t, g.MatchPrefix([]byte{}))
+			require.True(t, g.MatchPrefix(fmt.Appendf(nil, "%d", i)))
+			require.True(t, g.MatchPrefix([]byte(expectPrefix)))
+			require.True(t, g.MatchPrefix([]byte(expectPrefix+"long")))
+			require.True(t, g.MatchPrefix([]byte(expectPrefix+"longword ")))
+			require.False(t, g.MatchPrefix([]byte("wordnotmatch")))
+			require.False(t, g.MatchPrefix([]byte("longnotmatch")))
+			require.True(t, g.MatchPrefix([]byte{}))
 
-		savePos := g.dataP
-		word, nextPos := g.Next(nil)
-		expected := fmt.Sprintf("%d longlongword %d", i, i)
-		g.Reset(savePos)
-		require.Equal(t, 0, g.MatchCmp([]byte(expected)))
-		g.Reset(nextPos)
-		if string(word) != expected {
-			t.Errorf("expected %s, got (hex) [%s]", expected, word)
+			savePos := g.dataP
+			word, nextPos := g.Next(nil)
+			expected := fmt.Sprintf("%d longlongword %d", i, i)
+			g.Reset(savePos)
+			require.Equal(t, 0, g.MatchCmp([]byte(expected)))
+			g.Reset(nextPos)
+			if string(word) != expected {
+				t.Errorf("expected %s, got (hex) [%s]", expected, word)
+			}
+			i++
 		}
-		i++
-	}
 
-	if cs := checksum(d.filePath); cs != 3613725886 {
-		// it's ok if hash changed, but need re-generate all existing snapshot hashes
-		// in https://github.com/erigontech/erigon-snapshot
-		t.Errorf("result file hash changed, %d", cs)
-	}
+		if cs := checksum(d.filePath); cs != 3613725886 {
+			// it's ok if hash changed, but need re-generate all existing snapshot hashes
+			// in https://github.com/erigontech/erigon-snapshot
+			t.Errorf("result file hash changed, %d", cs)
+		}
+	})
 }
 
 func TestCompressDictCmp(t *testing.T) {

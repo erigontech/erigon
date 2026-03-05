@@ -249,15 +249,15 @@ func BenchmarkWriteTimeSameLocationDifferentTxIdx(b *testing.B) {
 	mvh2 := NewVersionMap(nil)
 	ap2 := getAddress(2)
 
-	randInts := []int{}
-	for i := 0; i < b.N; i++ {
-		randInts = append(randInts, rand.Intn(1000000000000000))
+	const n = 10000
+	randInts := make([]int, n)
+	for i := range randInts {
+		randInts[i] = rand.Intn(1000000000000000)
 	}
 
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		mvh2.Write(ap2, AddressPath, accounts.NilKey, Version{0, 0, randInts[i], 1}, valueFor(randInts[i], 1), true)
+	for i := 0; b.Loop(); i++ {
+		idx := randInts[i%n]
+		mvh2.Write(ap2, AddressPath, accounts.NilKey, Version{0, 0, idx, 1}, valueFor(idx, 1), true)
 	}
 }
 

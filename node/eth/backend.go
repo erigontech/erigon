@@ -1417,7 +1417,11 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
 
-	agg, err := state.New(dirs).Logger(logger).SanityOldNaming().GenSaltIfNeed(createNewSaltFileIfNeeded).Open(ctx, db)
+	erigonDBSettings, err := state.ResolveErigonDBSettings(dirs, logger, snConfig.Snapshot.NoDownloader)
+	if err != nil {
+		return nil, nil, nil, nil, nil, nil, nil, err
+	}
+	agg, err := state.New(dirs).Logger(logger).SanityOldNaming().GenSaltIfNeed(createNewSaltFileIfNeeded).WithErigonDBSettings(erigonDBSettings).Open(ctx, db)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
@@ -1476,6 +1480,26 @@ func (s *Ethereum) RemovePeer(ctx context.Context, req *remoteproto.RemovePeerRe
 		_, err := sentryClient.RemovePeer(ctx, &sentryproto.RemovePeerRequest{Url: req.Url})
 		if err != nil {
 			return nil, fmt.Errorf("ethereum backend MultiClient.RemovePeers error: %w", err)
+		}
+	}
+	return &remoteproto.RemovePeerReply{Success: true}, nil
+}
+
+func (s *Ethereum) AddTrustedPeer(ctx context.Context, req *remoteproto.AddPeerRequest) (*remoteproto.AddPeerReply, error) {
+	for _, sentryClient := range s.sentriesClient.Sentries() {
+		_, err := sentryClient.AddTrustedPeer(ctx, &sentryproto.AddPeerRequest{Url: req.Url})
+		if err != nil {
+			return nil, fmt.Errorf("ethereum backend MultiClient.AddTrustedPeer error: %w", err)
+		}
+	}
+	return &remoteproto.AddPeerReply{Success: true}, nil
+}
+
+func (s *Ethereum) RemoveTrustedPeer(ctx context.Context, req *remoteproto.RemovePeerRequest) (*remoteproto.RemovePeerReply, error) {
+	for _, sentryClient := range s.sentriesClient.Sentries() {
+		_, err := sentryClient.RemoveTrustedPeer(ctx, &sentryproto.RemovePeerRequest{Url: req.Url})
+		if err != nil {
+			return nil, fmt.Errorf("ethereum backend MultiClient.RemoveTrustedPeer error: %w", err)
 		}
 	}
 	return &remoteproto.RemovePeerReply{Success: true}, nil
