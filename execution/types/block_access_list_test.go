@@ -93,6 +93,8 @@ func TestBlockAccessListRLPEncoding(t *testing.T) {
 		t.Fatalf("encode failed: %v", err)
 	}
 
+	// Fixed-size encoding: slot keys and storage values are 32-byte strings,
+	// storage reads are 32-byte strings, balances are 16-byte strings.
 	expected := common.FromHex("0xf0ef9400000000000000000000000000000000000000aac9c801c6c20102c20503c102c3c20104c3c20907c5c40282beef")
 	if !bytes.Equal(encoded, expected) {
 		t.Fatalf("unexpected encoding\nhave: %x\nwant: %x", encoded, expected)
