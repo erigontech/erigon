@@ -122,7 +122,7 @@ var FastChecks = []Check{
 	CommitmentKvi, CommitmentHistVal,
 }
 
-var SlowChecks = []Check{StateVerify}
+var SlowChecks = []Check{CommitmentHistAtBlkRange, StateVerify}
 var DeprecatedChecks = []Check{
 	CommitmentKvDeref, //StateVerify - will overcome
 }
