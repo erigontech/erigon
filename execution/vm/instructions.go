@@ -383,6 +383,9 @@ func opAddress(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 func opBalance(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	slot := scope.Stack.peek()
 	address := accounts.InternAddress(slot.Bytes20())
+	// BAL: BALANCE is a real state access per EIP-7928 — mark as non-revertable
+	// so the system address is included when explicitly queried by user txs.
+	evm.IntraBlockState().MarkAddressAccess(address, false)
 	balance, err := evm.IntraBlockState().GetBalance(address)
 	if err != nil {
 		return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -541,6 +544,8 @@ func stReturnDataCopy(_ uint64, scope *CallContext) string {
 func opExtCodeSize(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	slot := scope.Stack.peek()
 	addr := accounts.InternAddress(slot.Bytes20())
+	// BAL: EXTCODESIZE is a real state access per EIP-7928.
+	evm.IntraBlockState().MarkAddressAccess(addr, false)
 	codeSize, err := evm.IntraBlockState().GetCodeSize(addr)
 	if err != nil {
 		return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -580,6 +585,8 @@ func opExtCodeCopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, err
 		length     = stack.pop()
 	)
 	addr := accounts.InternAddress(a.Bytes20())
+	// BAL: EXTCODECOPY is a real state access per EIP-7928.
+	evm.IntraBlockState().MarkAddressAccess(addr, false)
 	len64 := length.Uint64()
 
 	code, err := evm.IntraBlockState().GetCode(addr)
@@ -633,10 +640,10 @@ func opExtCodeHash(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, err
 	slot := scope.Stack.peek()
 	address := accounts.InternAddress(slot.Bytes20())
 
-	// BAL: record address access so non-existent accounts appear in the block
-	// access list.  When Empty() returns true, GetCodeHash is never called,
-	// so no other read (BalancePath, CodePath, etc.) creates a BAL entry.
-	evm.IntraBlockState().MarkAddressAccess(address, true)
+	// BAL: EXTCODEHASH is a real state access per EIP-7928 — mark as
+	// non-revertable.  Also ensures non-existent accounts appear in the BAL
+	// when Empty() returns true and GetCodeHash is never called.
+	evm.IntraBlockState().MarkAddressAccess(address, false)
 
 	empty, err := evm.IntraBlockState().Empty(address)
 	if err != nil {
