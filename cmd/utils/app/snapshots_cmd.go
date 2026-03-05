@@ -62,6 +62,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
@@ -1180,7 +1181,11 @@ func doIntegrity(cliCtx *cli.Context) error {
 	for _, chk := range requestedChecks {
 		chk := chk
 		g.Go(func() error {
-			logger.Info("[integrity] starting", "check", chk, "seed", seed, "sampleRatio", sampleRatio)
+			sc, err := integrity.NewSamplerCfg(seed, sampleRatio)
+			if err != nil {
+				return err
+			}
+			logger.Info("[integrity] starting", "check", chk, "seed", sc.Seed, "sampleRatio", sc.SampleRatio)
 			switch chk {
 			case integrity.BlocksTxnID:
 				if err := blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(failFast); err != nil {
@@ -1228,11 +1233,11 @@ func doIntegrity(cliCtx *cli.Context) error {
 					return err
 				}
 			case integrity.ReceiptsNoDups:
-				if err := integrity.CheckReceiptsNoDups(ctx, db, blockReader, failFast, seed, sampleRatio); err != nil {
+				if err := integrity.CheckReceiptsNoDups(ctx, sc, db, blockReader, failFast); err != nil {
 					return err
 				}
 			case integrity.RCacheNoDups:
-				if err := integrity.CheckRCacheNoDups(ctx, db, blockReader, failFast, seed, sampleRatio); err != nil {
+				if err := integrity.CheckRCacheNoDups(ctx, sc, db, blockReader, failFast); err != nil {
 					return err
 				}
 			case integrity.StateProgress:
@@ -1256,7 +1261,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 					return err
 				}
 			case integrity.CommitmentHistVal:
-				if err := integrity.CheckCommitmentHistVal(ctx, db, blockReader, failFast, seed, sampleRatio, logger); err != nil {
+				if err := integrity.CheckCommitmentHistVal(ctx, sc, db, blockReader, failFast, logger); err != nil {
 					return err
 				}
 			case integrity.StateVerify:
@@ -1271,6 +1276,23 @@ func doIntegrity(cliCtx *cli.Context) error {
 	}
 
 	return g.Wait()
+}
+
+// latestBlockNum returns the latest block number that has full state snapshot coverage,
+// derived from the aggregator's EndTxNumMinimax. Useful as a default upper bound for
+// block-range integrity commands.
+func latestBlockNum(ctx context.Context, db kv.RoDB, agg *state.Aggregator, txNumsReader rawdbv3.TxNumsReader) (uint64, error) {
+	aggMax := agg.EndTxNumMinimax()
+	roTx, err := db.BeginRo(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer roTx.Rollback()
+	blockNum, _, err := txNumsReader.FindBlockNum(ctx, roTx, aggMax)
+	if err != nil {
+		return 0, err
+	}
+	return blockNum, nil
 }
 
 func doCheckCommitmentHistAtBlk(cliCtx *cli.Context, logger log.Logger) error {
@@ -1323,18 +1345,12 @@ func doCheckCommitmentHistAtBlkRange(cliCtx *cli.Context, logger log.Logger) err
 	from := cliCtx.Uint64("from")
 	to := cliCtx.Uint64("to")
 	if !cliCtx.IsSet("to") {
-		aggMax := agg.EndTxNumMinimax()
-		roTx, err := chainDB.BeginRo(ctx)
-		if err != nil {
-			return err
-		}
-		latestBlock, _, err := blockReader.TxnumReader().FindBlockNum(ctx, roTx, aggMax)
-		roTx.Rollback()
+		latestBlock, err := latestBlockNum(ctx, chainDB, agg, blockReader.TxnumReader())
 		if err != nil {
 			return err
 		}
 		to = latestBlock + 1 // exclusive upper bound
-		logger.Info("[check-commitment-hist-at-blk-range] auto-detected --to", "to", to, "aggMaxTxNum", aggMax)
+		logger.Info("[check-commitment-hist-at-blk-range] auto-detected --to", "to", to)
 	}
 	var seed int64
 	if cliCtx.IsSet("seed") {
@@ -1343,11 +1359,12 @@ func doCheckCommitmentHistAtBlkRange(cliCtx *cli.Context, logger log.Logger) err
 		seed = time.Now().UnixNano()
 	}
 	sampleRatio := cliCtx.Float64("sample")
-	if err := integrity.ValidateSampleRatio(sampleRatio); err != nil {
+	sc, err := integrity.NewSamplerCfg(seed, sampleRatio)
+	if err != nil {
 		return err
 	}
-	logger.Info("[check-commitment-hist-at-blk-range] sampling config", "seed", seed, "sampleRatio", sampleRatio)
-	return integrity.CheckCommitmentHistAtBlkRange(ctx, db, blockReader, from, to, seed, sampleRatio, logger)
+	logger.Info("[check-commitment-hist-at-blk-range] sampling config", "seed", sc.Seed, "sampleRatio", sc.SampleRatio)
+	return integrity.CheckCommitmentHistAtBlkRange(ctx, sc, db, blockReader, from, to, logger)
 }
 
 func doVerifyState(cliCtx *cli.Context, logger log.Logger) error {

@@ -24,7 +24,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/rand/v2"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -583,7 +582,7 @@ func deriveReaderForOtherDomain(baseFile string, oldDomain, newDomain kv.Domain)
 	return seg.NewReader(decomp.MakeGetter(), compression), decomp.Close, nil
 }
 
-func CheckCommitmentHistVal(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, failFast bool, seed int64, sampleRatio float64, logger log.Logger) error {
+func CheckCommitmentHistVal(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, br services.FullBlockReader, failFast bool, logger log.Logger) error {
 	start := time.Now()
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -603,9 +602,13 @@ func CheckCommitmentHistVal(ctx context.Context, db kv.TemporalRoDB, br services
 	} else {
 		eg.SetLimit(dbg.EnvInt("CHECK_COMMITMENT_HIST_VAL_WORKERS", 8))
 	}
-	numBuckets := uint64(math.Round(1.0 / sampleRatio))
+	// Stratified sampling: divide each file's tx range into numBuckets equal slices and
+	// pick one randomly. This guarantees every part of history is reachable (unlike pure
+	// Bernoulli which might cluster hits at the start), and keeps checked tx count ≈
+	// totalTxCount * sampleRatio regardless of how txs are distributed across files.
+	sampler := sc.NewSampler()
+	numBuckets := uint64(math.Round(1.0 / sampler.SampleRatio))
 	var totalVals atomic.Uint64
-	rng := rand.New(rand.NewPCG(uint64(seed), 0))
 	for _, file := range files {
 		if !strings.HasSuffix(file.Fullpath(), ".v") {
 			continue
@@ -614,7 +617,7 @@ func CheckCommitmentHistVal(ctx context.Context, db kv.TemporalRoDB, br services
 		if numBuckets > txCount {
 			panic(fmt.Errorf("numBuckets %d is greater than total tx count %d in %s", numBuckets, txCount, filepath.Base(file.Fullpath())))
 		}
-		bucket := rng.IntN(int(numBuckets))
+		bucket := sampler.IntN(int(numBuckets))
 		eg.Go(func() error {
 			tx, err := db.BeginTemporalRo(ctx) // each worker has its own RoTx
 			if err != nil {
@@ -639,7 +642,7 @@ func CheckCommitmentHistVal(ctx context.Context, db kv.TemporalRoDB, br services
 	dur := time.Since(start)
 	total := totalVals.Load()
 	rate := float64(total) / dur.Seconds()
-	logger.Info("[integrity] CommitmentHistVal", "dur", time.Since(start), "files", len(files), "vals", total, "vals/s", rate, "seed", seed, "sampleRatio", sampleRatio)
+	logger.Info("[integrity] CommitmentHistVal", "dur", time.Since(start), "files", len(files), "vals", total, "vals/s", rate, "seed", sampler.Seed, "sampleRatio", sampler.SampleRatio)
 	return nil
 }
 
@@ -871,11 +874,11 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	return nil
 }
 
-func CheckCommitmentHistAtBlkRange(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, from, to uint64, seed int64, sampleRatio float64, logger log.Logger) error {
+func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, br services.FullBlockReader, from, to uint64, logger log.Logger) error {
 	if from >= to {
 		return fmt.Errorf("invalid blk range: %d >= %d", from, to)
 	}
-	sampler := NewSampler(seed, sampleRatio)
+	sampler := sc.NewSampler()
 	start := time.Now()
 	var checked atomic.Uint64
 	var lastBlockNum atomic.Uint64
@@ -919,7 +922,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, db kv.TemporalRoDB, br s
 	}
 	dur := time.Since(start)
 	rate := float64(blks) / dur.Seconds()
-	logger.Info("checked commitment hist at blk range", "dur", dur, "blks", blks, "blks/s", rate, "from", from, "to", to, "seed", seed, "sampleRatio", sampleRatio)
+	logger.Info("checked commitment hist at blk range", "dur", dur, "blks", blks, "blks/s", rate, "from", from, "to", to, "seed", sampler.Seed, "sampleRatio", sampler.SampleRatio)
 	return nil
 }
 

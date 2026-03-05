@@ -32,22 +32,53 @@ type Sampler struct {
 	Seed        int64
 }
 
-// ValidateSampleRatio returns an error if sampleRatio is outside the valid range (0, 1].
-func ValidateSampleRatio(sampleRatio float64) error {
+// SamplerCfg is plain configuration data (seed + ratio) with no mutable RNG state.
+// It is safe to share across goroutines and to pass to multiple check functions —
+// each call to NewSampler produces an independent Sampler starting from block 0.
+type SamplerCfg struct {
+	Seed        int64
+	SampleRatio float64
+}
+
+// NewSamplerCfg creates a SamplerCfg and validates sampleRatio.
+func NewSamplerCfg(seed int64, sampleRatio float64) (SamplerCfg, error) {
+	if err := validateSampleRatio(sampleRatio); err != nil {
+		return SamplerCfg{}, err
+	}
+	return SamplerCfg{Seed: seed, SampleRatio: sampleRatio}, nil
+}
+
+// NewSampler creates a fresh Sampler from this config. Every call returns an
+// independent instance starting at its own RNG position — safe to call from
+// multiple goroutines or multiple sequential checks without interference.
+func (c SamplerCfg) NewSampler() *Sampler {
+	return &Sampler{
+		rng:         rand.New(rand.NewPCG(uint64(c.Seed), 0)),
+		SampleRatio: c.SampleRatio,
+		Seed:        c.Seed,
+	}
+}
+
+// validateSampleRatio returns an error if sampleRatio is outside the valid range (0, 1].
+func validateSampleRatio(sampleRatio float64) error {
 	if sampleRatio <= 0 || sampleRatio > 1 {
 		return fmt.Errorf("--sample must be in (0, 1], got %v", sampleRatio)
 	}
 	return nil
 }
 
+// ValidateSampleRatio is the exported form for CLI validation.
+func ValidateSampleRatio(sampleRatio float64) error { return validateSampleRatio(sampleRatio) }
+
 // NewSampler creates a Sampler with the given seed and sampleRatio (0.0–1.0].
-// sampleRatio=1.0 means check everything; sampleRatio=0.05 means check ~5%.
+// Prefer SamplerCfg.NewSampler when the config is shared across calls.
 func NewSampler(seed int64, sampleRatio float64) *Sampler {
-	return &Sampler{
-		rng:         rand.New(rand.NewPCG(uint64(seed), 0)),
-		SampleRatio: sampleRatio,
-		Seed:        seed,
-	}
+	return SamplerCfg{Seed: seed, SampleRatio: sampleRatio}.NewSampler()
+}
+
+// IntN returns a non-negative random int in [0, n). Used for bucket-based sampling.
+func (s *Sampler) IntN(n int) int {
+	return s.rng.IntN(n)
 }
 
 // CanSkip returns true if the current item should be skipped.
