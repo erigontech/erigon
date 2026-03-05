@@ -311,27 +311,18 @@ func (s *SszRestServer) handleForkchoiceUpdated(w http.ResponseWriter, r *http.R
 	if attrOffset < uint32(len(body)) {
 		attrData := body[attrOffset:]
 		if len(attrData) > 0 {
-			// List[PayloadAttributes, 1] with 1 element: decode the element directly.
-			// For backwards compatibility also support Union encoding (selector byte 0/1).
-			if attrData[0] == 0 || attrData[0] == 1 {
-				// Legacy Union encoding: selector(1) + data
-				if attrData[0] == 1 && len(attrData) > 1 {
-					pa, err := decodePayloadAttributesSSZ(attrData[1:], version)
-					if err != nil {
-						sszErrorResponse(w, http.StatusUnprocessableEntity, -32602, err.Error())
-						return
-					}
-					payloadAttributes = pa
-				}
-			} else {
-				// New List[T, 1] encoding: the list data IS the element
-				pa, err := decodePayloadAttributesSSZ(attrData, version)
-				if err != nil {
-					sszErrorResponse(w, http.StatusUnprocessableEntity, -32602, err.Error())
-					return
-				}
-				payloadAttributes = pa
+			// List[PayloadAttributes, 1]: since PayloadAttributes is variable-size,
+			// the list data is offset(4) + element. Skip the 4-byte list item offset.
+			if len(attrData) < 4 {
+				sszErrorResponse(w, http.StatusBadRequest, -32602, "payload attributes list too short")
+				return
 			}
+			pa, err := decodePayloadAttributesSSZ(attrData[4:], version)
+			if err != nil {
+				sszErrorResponse(w, http.StatusUnprocessableEntity, -32602, err.Error())
+				return
+			}
+			payloadAttributes = pa
 		}
 		// Empty list = no attributes (payloadAttributes stays nil)
 	}
