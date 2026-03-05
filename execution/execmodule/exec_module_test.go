@@ -514,7 +514,7 @@ func TestAssembleBlockWithContractCreation(t *testing.T) {
 	exec := m.ExecModule
 	txpool := m.TxPoolGrpcServer
 
-	// Build 1 empty block as genesis state.
+	// Build 1 block with 1 tx as genesis state.
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
 		tx, txErr := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
 		require.NoError(t, txErr)
