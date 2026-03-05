@@ -21,7 +21,7 @@ These instructions are designed to improve the performance of Erigon 3, particul
 * Adjust download speed with flag `--torrent.download.rate=[value]` setting your max speed (default value is `512mb`). For example:
 
 ```bash
---torrent.download.rate=512mb
+--torrent.download.rate=1024mb
 ```
 
 ## Optimize for Cloud Drives
