@@ -368,7 +368,8 @@ Note: enabling the Beacon API will lead to a 6 GB higher RAM usage
 
 ### Multiple Instances / One Machine
 
-Define 7 flags to avoid conflicts: `--datadir --port --http.port --authrpc.port --torrent.port --private.api.addr --mcp.port`.
+Define 7 flags to avoid conflicts:
+`--datadir --port --http.port --authrpc.port --torrent.port --private.api.addr --mcp.port`.
 Example of multiple chains on the same machine:
 
 ```
