@@ -25,8 +25,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"slices"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -71,9 +72,9 @@ type Receipt struct {
 
 	// Inclusion information: These fields provide information about the inclusion of the
 	// transaction corresponding to this receipt.
-	BlockHash        common.Hash `json:"blockHash,omitempty"`
-	BlockNumber      *big.Int    `json:"blockNumber,omitempty"`
-	TransactionIndex uint        `json:"transactionIndex"`
+	BlockHash        common.Hash  `json:"blockHash,omitempty"`
+	BlockNumber      *uint256.Int `json:"blockNumber,omitempty"`
+	TransactionIndex uint         `json:"transactionIndex"`
 
 	FirstLogIndexWithinBlock uint32 `json:"-"` // field which used to store in db and re-calc
 }
@@ -97,7 +98,11 @@ type receiptRLP struct {
 }
 
 // receiptRLP69 is the post-eth/69 consensus encoding of a receipt.
+// ETH69 changed receipt encoding so all receipts (including typed) use the same
+// flat list format: [tx-type, post-state-or-status, cumulative-gas, logs].
+// This removes the type-byte envelope used in ETH68 and drops the bloom filter.
 type receiptRLP69 struct {
+	Type              uint8
 	PostStateOrStatus []byte
 	CumulativeGasUsed uint64
 	Logs              []*Log
@@ -151,28 +156,16 @@ func (r Receipt) EncodeRLP(w io.Writer) error {
 
 // EncodeRLP69 implements rlp.Encoder for post-eth/69 messages, and flattens the consensus fields of a receipt
 // into an RLP stream. If no post state is present, byzantium fork is assumed.
+// ETH69 uses a uniform list encoding for all receipt types:
+//
+//	receiptₙ = [tx-type, post-state-or-status, cumulative-gas, logs]
 func (r Receipt) EncodeRLP69(w io.Writer) error {
-	data := &receiptRLP69{r.statusEncoding(), r.CumulativeGasUsed, r.Logs}
-	if r.Type == LegacyTxType {
-		return rlp.Encode(w, data)
-	}
-	buf := encodeBufferPool.Get().(*bytes.Buffer)
-	defer encodeBufferPool.Put(buf)
-	buf.Reset()
-	if err := r.encodeTyped69(data, buf); err != nil {
-		return err
-	}
-	return rlp.Encode(w, buf.Bytes())
+	data := &receiptRLP69{r.Type, r.statusEncoding(), r.CumulativeGasUsed, r.Logs}
+	return rlp.Encode(w, data)
 }
 
 // encodeTyped writes the canonical encoding of a typed receipt to w.
 func (r *Receipt) encodeTyped(data *receiptRLP, w *bytes.Buffer) error {
-	w.WriteByte(r.Type)
-	return rlp.Encode(w, data)
-}
-
-// encodeTyped writes the post-eth/69 canonical encoding of a typed receipt to w.
-func (r *Receipt) encodeTyped69(data *receiptRLP69, w *bytes.Buffer) error {
 	w.WriteByte(r.Type)
 	return rlp.Encode(w, data)
 }
@@ -310,26 +303,24 @@ func (r *Receipt) DecodeRLP(s *rlp.Stream) error {
 		}
 		r.Type = LegacyTxType
 	case rlp.String:
-		// It's an EIP-2718 typed txn receipt.
-		s.NewList(size) // Hack - convert String (envelope) into List
-		var b []byte
-		if b, err = s.Bytes(); err != nil {
-			return fmt.Errorf("read TxType: %w", err)
+		// EIP-2718 typed txn receipt. Read the envelope as raw bytes,
+		// then decode from them using a fresh stream.
+		if size == 0 {
+			return rlp.EOL
 		}
-		if len(b) != 1 {
-			return fmt.Errorf("%w, got %d bytes", rlp.ErrWrongTxTypePrefix, len(b))
+		b := make([]byte, size)
+		if err = s.ReadBytes(b); err != nil {
+			return fmt.Errorf("read typed receipt: %w", err)
 		}
 		r.Type = b[0]
 		switch r.Type {
 		case AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType:
-			if err := r.decodePayload(s); err != nil {
+			inner := rlp.NewStream(bytes.NewReader(b[1:]), uint64(len(b)-1))
+			if err := r.decodePayload(inner); err != nil {
 				return err
 			}
 		default:
 			return ErrTxTypeNotSupported
-		}
-		if err = s.ListEnd(); err != nil {
-			return err
 		}
 	default:
 		return rlp.ErrExpectedList
@@ -377,7 +368,7 @@ func (r *Receipt) Copy() *Receipt {
 		ContractAddress:   r.ContractAddress,
 		GasUsed:           r.GasUsed,
 		BlockHash:         r.BlockHash,
-		BlockNumber:       big.NewInt(0).Set(r.BlockNumber),
+		BlockNumber:       new(uint256.Int).Set(r.BlockNumber),
 		TransactionIndex:  r.TransactionIndex,
 
 		FirstLogIndexWithinBlock: r.FirstLogIndexWithinBlock,
@@ -552,14 +543,13 @@ func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash common.Ha
 		return errors.New("tx must have cached sender")
 	}
 
-	blockNumber := new(big.Int).SetUint64(blockNum)
 	// The transaction type and hash can be retrieved from the transaction itself
 	r.Type = txn.Type()
 	r.TxHash = txn.Hash()
 
 	// block location fields
 	r.BlockHash = blockHash
-	r.BlockNumber = blockNumber
+	r.BlockNumber = uint256.NewInt(blockNum)
 	r.TransactionIndex = uint(txnIdx)
 
 	// The contract address can be derived from the transaction itself
@@ -594,7 +584,7 @@ func (r *Receipt) DeriveFieldsV4ForCachedReceipt(blockHash common.Hash, blockNum
 	logIndex := r.FirstLogIndexWithinBlock // logIdx is unique within the block and starts from 0
 
 	r.BlockHash = blockHash
-	r.BlockNumber = big.NewInt(int64(blockNum))
+	r.BlockNumber = uint256.NewInt(blockNum)
 	r.TxHash = txnHash
 
 	// The derived log fields can simply be set from the block and transaction

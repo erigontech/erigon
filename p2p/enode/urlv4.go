@@ -1,6 +1,6 @@
 // Copyright 2018 The go-ethereum Authors
 // (original work)
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // (modifications)
 // This file is part of Erigon.
 //
@@ -30,13 +30,11 @@ import (
 	"strconv"
 
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/p2p/enr"
 )
 
-var (
-	incompleteNodeURL = regexp.MustCompile("(?i)^(?:enode://)?([0-9a-f]+)$")
-	lookupIPFunc      = net.LookupIP
-)
+var incompleteNodeURL = regexp.MustCompile("(?i)^(?:enode://)?([0-9a-f]+)$")
 
 // MustParseV4 parses a node URL. It panics if the URL is not valid.
 func MustParseV4(rawurl string) *Node {
@@ -128,20 +126,9 @@ func parseComplete(rawurl string) (*Node, error) {
 	if id, err = parsePubkey(u.User.String()); err != nil {
 		return nil, fmt.Errorf("invalid public key (%w)", err)
 	}
-	// Parse the IP address.
+
+	// Parse the IP and ports.
 	ip := net.ParseIP(u.Hostname())
-	if ip == nil {
-		ips, err := lookupIPFunc(u.Hostname())
-		if err != nil {
-			return nil, err
-		}
-		ip = ips[0]
-	}
-	// Ensure the IP is 4 bytes long for IPv4 addresses.
-	if ipv4 := ip.To4(); ipv4 != nil {
-		ip = ipv4
-	}
-	// Parse the port numbers.
 	if tcpPort, err = strconv.ParseUint(u.Port(), 10, 16); err != nil {
 		return nil, errors.New("invalid port")
 	}
@@ -153,7 +140,13 @@ func parseComplete(rawurl string) (*Node, error) {
 			return nil, errors.New("invalid discport in query")
 		}
 	}
-	return NewV4(id, ip, int(tcpPort), int(udpPort)), nil
+
+	// Create the node.
+	node := NewV4(id, ip, int(tcpPort), int(udpPort))
+	if ip == nil && u.Hostname() != "" {
+		node = node.WithHostname(u.Hostname())
+	}
+	return node, nil
 }
 
 // parsePubkey parses a hex-encoded secp256k1 public key.
@@ -164,7 +157,8 @@ func parsePubkey(in string) (*ecdsa.PublicKey, error) {
 	} else if len(b) != 64 {
 		return nil, fmt.Errorf("wrong length, want %d hex chars", 128)
 	}
-	return crypto.UnmarshalPubkey(b)
+	b = append([]byte{0x4}, b...)
+	return crypto.UnmarshalPubkeyStd(b)
 }
 
 func (n *Node) URLv4() string {
@@ -177,20 +171,36 @@ func (n *Node) URLv4() string {
 	n.Load((*Secp256k1)(&key))
 	switch {
 	case scheme == "v4" || key != ecdsa.PublicKey{}:
-		nodeid = hex.EncodeToString(crypto.MarshalPubkey(&key))
+		nodeid = fmt.Sprintf("%x", crypto.FromECDSAPub(&key)[1:])
 	default:
 		nodeid = fmt.Sprintf("%s.%x", scheme, n.id[:])
 	}
 	u := url.URL{Scheme: "enode"}
-	if n.Incomplete() {
-		u.Host = nodeid
-	} else {
+	if n.Hostname() != "" {
+		// For nodes with a DNS name: include DNS name, TCP port, and optional UDP port
+		u.User = url.User(nodeid)
+		u.Host = fmt.Sprintf("%s:%d", n.Hostname(), n.TCP())
+		if n.UDP() != n.TCP() {
+			u.RawQuery = "discport=" + strconv.Itoa(n.UDP())
+		}
+	} else if n.ip.IsValid() {
+		// For IP-based nodes: include IP address, TCP port, and optional UDP port
 		addr := net.TCPAddr{IP: n.IP(), Port: n.TCP()}
 		u.User = url.User(nodeid)
 		u.Host = addr.String()
 		if n.UDP() != n.TCP() {
 			u.RawQuery = "discport=" + strconv.Itoa(n.UDP())
 		}
+	} else {
+		u.Host = nodeid
 	}
 	return u.String()
+}
+
+// PubkeyToIDV4 derives the v4 node address from the given public key.
+func PubkeyToIDV4(key *ecdsa.PublicKey) ID {
+	e := make([]byte, 64)
+	math.ReadBits(key.X, e[:len(e)/2])
+	math.ReadBits(key.Y, e[len(e)/2:])
+	return ID(crypto.Keccak256Hash(e))
 }

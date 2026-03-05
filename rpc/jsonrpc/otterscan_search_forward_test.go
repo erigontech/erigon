@@ -21,11 +21,12 @@ import (
 	"testing"
 
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/stretchr/testify/require"
 )
 
 func newMockForwardChunkLocator(chunks [][]byte) ChunkLocator {
@@ -164,7 +165,7 @@ func TestForwardBlockProviderWithMultipleChunksBlockNotFound(t *testing.T) {
 }
 
 func TestSearchTransactionsAfter(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewOtterscanAPI(newBaseApiForTest(m), m.DB, 25)
 
 	addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf44")

@@ -523,7 +523,6 @@ func TestStateCache_NewStateCache(t *testing.T) {
 	assert.NotNil(t, c.GetCache(kv.AccountsDomain))
 	assert.NotNil(t, c.GetCache(kv.StorageDomain))
 	assert.NotNil(t, c.GetCache(kv.CodeDomain))
-	assert.NotNil(t, c.GetCache(kv.CommitmentDomain))
 
 	// Other domains should be nil
 	assert.Nil(t, c.GetCache(kv.ReceiptDomain))
@@ -683,21 +682,6 @@ func TestStateCache_GetCache_OutOfBounds(t *testing.T) {
 
 	cache = c.GetCache(kv.Domain(100))
 	assert.Nil(t, cache)
-}
-
-func TestStateCache_OnlyAccountStorageCodeCommitmentSupported(t *testing.T) {
-	c := NewDefaultStateCache()
-
-	supportedDomains := []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain}
-	unsupportedDomains := []kv.Domain{kv.ReceiptDomain, kv.RCacheDomain}
-
-	for _, d := range supportedDomains {
-		assert.NotNil(t, c.GetCache(d), "domain %d should be supported", d)
-	}
-
-	for _, d := range unsupportedDomains {
-		assert.Nil(t, c.GetCache(d), "domain %d should not be supported", d)
-	}
 }
 
 // =============================================================================

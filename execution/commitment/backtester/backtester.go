@@ -209,15 +209,15 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 	sd.GetCommitmentCtx().SetStateReader(newBacktestStateReader(tx, fromTxNum, toTxNum))
 	sd.GetCommitmentCtx().SetTrace(bt.logger.Enabled(ctx, log.LvlTrace))
 	sd.GetCommitmentCtx().EnableCsvMetrics(deriveBlockMetricsFilePrefix(blockOutputDir))
-	err = sd.SeekCommitment(ctx, tx)
+	latestTxNum, latestBlockNum, err := sd.SeekCommitment(ctx, tx)
 	if err != nil {
 		return err
 	}
-	if expected := block - 1; sd.BlockNum() != expected {
-		return fmt.Errorf("unexpected sd block number: %d != %d", sd.BlockNum(), expected)
+	if expected := block - 1; latestBlockNum != expected {
+		return fmt.Errorf("unexpected sd block number: %d != %d", latestBlockNum, expected)
 	}
-	if expected := fromTxNum - 1; sd.TxNum() != expected {
-		return fmt.Errorf("unexpected sd tx number: %d != %d", sd.TxNum(), maxTxNum)
+	if expected := fromTxNum - 1; latestTxNum != expected {
+		return fmt.Errorf("unexpected sd tx number: %d != %d", latestTxNum, maxTxNum)
 	}
 	err = bt.replayChanges(tx, kv.AccountsDomain, sd, fromTxNum, toTxNum)
 	if err != nil {

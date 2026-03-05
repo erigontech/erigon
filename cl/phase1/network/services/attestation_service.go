@@ -263,7 +263,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		// mark the validator as seen
 		epochLastTime, ok := s.validatorAttestationSeen.Get(vIndex)
 		if ok && epochLastTime == targetEpoch {
-			return nil
+			return fmt.Errorf("validator already seen in target epoch %w", ErrIgnore)
 		}
 		s.validatorAttestationSeen.Add(vIndex, targetEpoch)
 

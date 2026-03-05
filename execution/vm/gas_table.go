@@ -447,7 +447,13 @@ func statefulGasCall(evm *EVM, callContext *CallContext, gas uint64, availableGa
 		}
 		if transfersValue && empty {
 			accountGas = params.CallNewAccountGas
-			evm.IntraBlockState().MarkAddressAccess(address, false)
+			// Record the address access for BAL tracking, but only when the CALL
+			// will actually proceed. In read-only (STATICCALL) context, CALL with
+			// value > 0 will be rejected by ErrWriteProtection before evm.Call()
+			// runs, so the target is never truly accessed.
+			if !evm.readOnly {
+				evm.IntraBlockState().MarkAddressAccess(address, false)
+			}
 		}
 	} else {
 		exists, err := evm.IntraBlockState().Exist(address)

@@ -222,7 +222,9 @@ sudo apt install build-essential cmake -y
 
 **1.3 Go Programming Language**
 
-Erigon utilizes Go (also known as Golang) version 1.24 or newer for part of its development. It is recommended to have a fresh Go installation. If you have an older version, consider deleting the `/usr/local/go` folder (you may need to use `sudo`) and re-extract the new version in its place.
+Erigon utilizes Go (also known as Golang) version 1.25 or newer for part of its development. It is recommended to have a
+fresh Go installation. If you have an older version, consider deleting the `/usr/local/go` folder (you may need to use
+`sudo`) and re-extract the new version in its place.
 
 To install the latest Go version, visit the official documentation at [https://golang.org/doc/install](https://golang.org/doc/install).
 
@@ -330,7 +332,9 @@ Git is a tool that helps download and manage the Erigon source code. To install 
 
 **1.4 Go Programming Language**
 
-Erigon utilizes Go (also known as Golang) version 1.24 or newer for part of its development. It is recommended to have a fresh Go installation. If you have an older version, consider deleting the `/usr/local/go` folder (you may need to use `sudo`) and re-extract the new version in its place.
+Erigon utilizes Go (also known as Golang) version 1.25 or newer for part of its development. It is recommended to have a
+fresh Go installation. If you have an older version, consider deleting the `/usr/local/go` folder (you may need to use
+`sudo`) and re-extract the new version in its place.
 
 To install the latest Go version, visit the official documentation at [https://golang.org/doc/install](https://golang.org/doc/install).
 
@@ -380,7 +384,7 @@ Set-ExecutionPolicy RemoteSigned
 
 This section outlines how to compile the Erigon client and its associated modules directly from the source code on a Windows environment. Compiling from source ensures you are running the latest version and gives you control over the final binaries. All successfully compiled binaries will be placed in the `.\build\bin\` subfolder of your Erigon directory.
 
-Open a terminal (PowerShell or the Git Bash shell that comes with Git for Windows) and change to the Erigon directory:
+Open Git Bash (the shell that comes with Git for Windows) and change to the Erigon directory:
 
 ```bash
 cd erigon

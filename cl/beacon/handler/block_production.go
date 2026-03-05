@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/network/subnets"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/transition/machine"
@@ -143,8 +144,13 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	}
 
 	defer func() {
+		epoch := *slot / a.beaconChainCfg.SlotsPerEpoch
+		committeesPerSlot := a.syncedData.CommitteeCount(epoch)
+		subnet := subnets.ComputeSubnetForAttestation(
+			committeesPerSlot, *slot, *committeeIndex,
+			a.beaconChainCfg.SlotsPerEpoch, 64)
 		a.logger.Debug("Produced Attestation", "slot", *slot,
-			"committee_index", *committeeIndex, "cached", ok, "beacon_block_root",
+			"committee_index", *committeeIndex, "subnet", subnet, "cached", ok, "beacon_block_root",
 			attestationData.BeaconBlockRoot, "duration", time.Since(start))
 	}()
 

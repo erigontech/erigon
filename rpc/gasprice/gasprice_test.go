@@ -28,14 +28,15 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/gasprice"
 	"github.com/erigontech/erigon/rpc/gasprice/gaspricecfg"
@@ -43,7 +44,7 @@ import (
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
-func newTestBackend(t *testing.T) *mock.MockSentry {
+func newTestBackend(t *testing.T) *execmoduletester.ExecModuleTester {
 
 	var (
 		key, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -54,7 +55,7 @@ func newTestBackend(t *testing.T) *mock.MockSentry {
 		}
 		signer = types.LatestSigner(gspec.Config)
 	)
-	m := mock.MockWithGenesis(t, gspec, key)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
 	// Generate testing blocks
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 32, func(i int, b *blockgen.BlockGen) {
@@ -76,28 +77,32 @@ func newTestBackend(t *testing.T) *mock.MockSentry {
 }
 
 func TestSuggestPrice(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	config := gaspricecfg.Config{
 		Blocks:     2,
 		Percentile: 60,
-		Default:    big.NewInt(common.GWei),
+		Default:    uint256.NewInt(common.GWei),
 	}
 
 	m := newTestBackend(t) //, big.NewInt(16), c.pending)
 	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewDummy(), m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0)
 
-	tx, _ := m.DB.BeginTemporalRo(m.Ctx)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
 	defer tx.Rollback()
 
 	cache := jsonrpc.NewGasPriceCache()
-	oracle := gasprice.NewOracle(jsonrpc.NewGasPriceOracleBackend(tx, baseApi), config, cache, log.New())
+	oracle := gasprice.NewOracle(jsonrpc.NewGasPriceOracleBackend(nil, tx, baseApi), config, cache, nil, log.New())
 
 	// The gas price sampled is: 32G, 31G, 30G, 29G, 28G, 27G
 	got, err := oracle.SuggestTipCap(context.Background())
 	if err != nil {
 		t.Fatalf("Failed to retrieve recommended gas price: %v", err)
 	}
-	expect := big.NewInt(common.GWei * int64(30))
-	if got.Cmp(expect) != 0 {
+	expect := common.GWei * uint64(30)
+	if got.CmpUint64(expect) != 0 {
 		t.Fatalf("Gas price mismatch, want %d, got %d", expect, got)
 	}
 }
@@ -217,8 +222,7 @@ func BenchmarkHeapPercentile_N20(b *testing.B) {
 		testData[i] = generateUint256Slice(sliceSizeSmall)
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		for j := 0; j < iterations; j++ {
 			values := copyUint256Slice(testData[j])
 			_ = heapPercentile(values, percentile)
@@ -232,8 +236,7 @@ func BenchmarkKthPercentile_N20(b *testing.B) {
 		testData[i] = generateUint256Slice(sliceSizeSmall)
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		for j := 0; j < iterations; j++ {
 			values := copyUint256Slice(testData[j])
 			index := (len(values) - 1) * percentile / 100
@@ -243,27 +246,19 @@ func BenchmarkKthPercentile_N20(b *testing.B) {
 }
 
 func BenchmarkHeapPercentile(b *testing.B) {
-	testData := make([][]*uint256.Int, b.N)
-	for i := 0; i < b.N; i++ {
-		testData[i] = generateUint256Slice(sliceSizeLarge)
-	}
+	testData := generateUint256Slice(sliceSizeLarge)
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		values := copyUint256Slice(testData[i])
+	for b.Loop() {
+		values := copyUint256Slice(testData)
 		_ = heapPercentile(values, percentile)
 	}
 }
 
 func BenchmarkKthPercentile(b *testing.B) {
-	testData := make([][]*uint256.Int, b.N)
-	for i := 0; i < b.N; i++ {
-		testData[i] = generateUint256Slice(sliceSizeLarge)
-	}
+	testData := generateUint256Slice(sliceSizeLarge)
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		values := copyUint256Slice(testData[i])
+	for b.Loop() {
+		values := copyUint256Slice(testData)
 		index := (len(values) - 1) * percentile / 100
 		_ = findKthUint256(values, index)
 	}
