@@ -23,7 +23,8 @@ Erigon provides two ways to run the MCP server:
 
 ### Embedded (inside Erigon)
 
-The MCP server runs inside the main `erigon` process, with direct access to internal APIs and Prometheus metrics. It is **enabled by default** on `127.0.0.1:8553`:
+The MCP server runs inside the main `erigon` process, with direct access to internal APIs and Prometheus metrics. It is
+**enabled by default** on `127.0.0.1:8553`:
 
 ```bash
 # MCP server starts automatically on 127.0.0.1:8553
@@ -51,14 +52,17 @@ make mcp
 
 ### Flags (embedded mode)
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--mcp.disable` | `false` | Disable the embedded MCP server entirely |
-| `--mcp.addr` | `127.0.0.1` | Listening address for the embedded MCP server |
-| `--mcp.port` | `8553` | Listening port for the embedded MCP server |
+| Flag            | Default     | Description                                   |
+|-----------------|-------------|-----------------------------------------------|
+| `--mcp.disable` | `false`     | Disable the embedded MCP server entirely      |
+| `--mcp.addr`    | `127.0.0.1` | Listening address for the embedded MCP server |
+| `--mcp.port`    | `8553`      | Listening port for the embedded MCP server    |
 
 {% hint style="info" %}
-The embedded MCP server is **enabled by default** and listens on `127.0.0.1:8553`. Because it binds to localhost only, it is not reachable from external networks. If you do not need AI-assistant integration, pass `--mcp.disable` to avoid opening the port. If you are running multiple Erigon instances on the same machine, assign distinct ports with `--mcp.port` to avoid conflicts.
+The embedded MCP server is **enabled by default** and listens on `127.0.0.1:8553`. Because it binds to localhost only,
+it is not reachable from external networks. If you do not need AI-assistant integration, pass `--mcp.disable` to avoid
+opening the port. If you are running multiple Erigon instances on the same machine, assign distinct ports with
+`--mcp.port` to avoid conflicts.
 {% endhint %}
 
 ### Flags (standalone `mcp` binary)
@@ -183,7 +187,8 @@ Add the following to your Claude Desktop configuration file (`~/.config/claude-d
 }
 ```
 
-The embedded MCP server starts by default on `127.0.0.1:8553`. To use a different address or port, pass `--mcp.addr` and `--mcp.port`. To disable it, pass `--mcp.disable`.
+The embedded MCP server starts by default on `127.0.0.1:8553`. To use a different address or port, pass `--mcp.addr` and
+`--mcp.port`. To disable it, pass `--mcp.disable`.
 {% endtab %}
 {% endtabs %}
 
