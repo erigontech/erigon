@@ -276,6 +276,13 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 
 	trieContext := sdc.trieContext(tx, blockNum, txNum)
 
+	// If trie trace file is configured, wrap the context with a recorder
+	var recorder *commitment.RecordingContext
+	if dbg.TrieTraceFile != "" {
+		recorder = commitment.NewRecordingContext(trieContext)
+		sdc.patriciaTrie.ResetContext(recorder)
+	}
+
 	var warmupConfig commitment.WarmupConfig
 	if sdc.paraTrieDB != nil {
 		warmupConfig = commitment.WarmupConfig{
@@ -304,6 +311,17 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, onProgress, warmupConfig)
 	if err != nil {
 		return nil, err
+	}
+
+	// Save trie trace if recording was enabled
+	if recorder != nil {
+		if trace, traceErr := commitment.BuildTrieTrace(recorder); traceErr != nil {
+			log.Warn("[commitment] failed to build trie trace", "err", traceErr)
+		} else if traceErr = trace.Save(dbg.TrieTraceFile); traceErr != nil {
+			log.Warn("[commitment] failed to save trie trace", "path", dbg.TrieTraceFile, "err", traceErr)
+		} else {
+			log.Info("[commitment] trie trace saved", "path", dbg.TrieTraceFile, "branches", len(trace.Branches), "accounts", len(trace.Accounts), "storages", len(trace.Storages), "updates", len(trace.Updates))
+		}
 	}
 
 	// Handle deferred branch updates left by Process() on the branch encoder.

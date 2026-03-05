@@ -63,11 +63,11 @@ Add a feature to capture all data read during trie `Process` (branch nodes, acco
 - Modify: `common/dbg/dbg_env.go`
 - Modify: `execution/commitment/commitmentdb/commitment_context.go`
 
-- [ ] Add `var TrieTraceFile = EnvString("TRIE_TRACE_FILE", "")` to `dbg_env.go`
-- [ ] In `ComputeCommitment`, after `trieContext` is created (line ~395) and before `Process` (line ~422): if `dbg.TrieTraceFile != ""`, create `RecordingContext` wrapping `trieContext`, call `ResetContext(recorder)`
-- [ ] After `Process` returns successfully: call `BuildTrieTrace(recorder, sdc.updates)` then `Save(dbg.TrieTraceFile)`, log result with `log.Info`
-- [ ] Handle errors gracefully — log warnings but don't fail the Process
-- [ ] Verify builds: `go build ./execution/commitment/commitmentdb/...`
+- [x] Add `var TrieTraceFile = EnvString("TRIE_TRACE_FILE", "")` to `dbg_env.go`
+- [x] In `ComputeCommitment`, after `trieContext` is created (line ~395) and before `Process` (line ~422): if `dbg.TrieTraceFile != ""`, create `RecordingContext` wrapping `trieContext`, call `ResetContext(recorder)`
+- [x] After `Process` returns successfully: call `BuildTrieTrace(recorder, sdc.updates)` then `Save(dbg.TrieTraceFile)`, log result with `log.Info`
+- [x] Handle errors gracefully — log warnings but don't fail the Process
+- [x] Verify builds: `go build ./execution/commitment/commitmentdb/...`
 
 ### Task 4: Add test helper and round-trip test
 
