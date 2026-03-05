@@ -238,12 +238,6 @@ func UnmarshallMetricsCsv(filePath string) ([]*Metrics, error) {
 }
 
 func (m *Metrics) Reset() {
-	if !m.collectCommitmentMetrics {
-		return
-	}
-
-	m.Accounts.Reset()
-	m.Branches.Reset()
 	m.updates.Store(0)
 	m.addressKeys.Store(0)
 	m.storageKeys.Store(0)
@@ -252,6 +246,13 @@ func (m *Metrics) Reset() {
 	m.loadStorage.Store(0)
 	m.updateBranch.Store(0)
 	m.unfolds.Store(0)
+
+	if !m.collectCommitmentMetrics {
+		return
+	}
+
+	m.Accounts.Reset()
+	m.Branches.Reset()
 	m.spentUnfolding = 0
 	m.spentFolding = 0
 	m.spentProcessing = 0
@@ -276,23 +277,22 @@ func (m *Metrics) CollectFileDepthStats(endTxNumStats map[uint64]skipStat) {
 }
 
 func (m *Metrics) Updates(plainKey []byte) {
-	if !m.collectCommitmentMetrics {
-		return
-	}
 	if len(plainKey) == length.Addr {
 		m.addressKeys.Add(1)
 	} else {
 		m.storageKeys.Add(1)
 
-		m.Accounts.collect(plainKey, func(mx *AccountStats) {
-			mx.StorageUpates++
-		})
+		if m.collectCommitmentMetrics {
+			m.Accounts.collect(plainKey, func(mx *AccountStats) {
+				mx.StorageUpates++
+			})
+		}
 	}
 }
 
 func (m *Metrics) AccountLoad(plainKey []byte) {
+	m.loadAccount.Add(1)
 	if m.collectCommitmentMetrics {
-		m.loadAccount.Add(1)
 		m.Accounts.collect(plainKey, func(mx *AccountStats) {
 			mx.LoadAccount++
 		})
@@ -300,8 +300,8 @@ func (m *Metrics) AccountLoad(plainKey []byte) {
 }
 
 func (m *Metrics) StorageLoad(plainKey []byte) {
+	m.loadStorage.Add(1)
 	if m.collectCommitmentMetrics {
-		m.loadStorage.Add(1)
 		m.Accounts.collect(plainKey, func(mx *AccountStats) {
 			mx.LoadStorage++
 		})
@@ -309,8 +309,8 @@ func (m *Metrics) StorageLoad(plainKey []byte) {
 }
 
 func (m *Metrics) BranchLoad(plainKey []byte) {
+	m.loadBranch.Add(1)
 	if m.collectCommitmentMetrics {
-		m.loadBranch.Add(1)
 		m.Branches.collect(plainKey, func(mx *BranchStats) {
 			mx.LoadBranch++
 		})
@@ -318,9 +318,9 @@ func (m *Metrics) BranchLoad(plainKey []byte) {
 }
 
 func (m *Metrics) StartUnfolding(plainKey []byte) func() {
+	m.unfolds.Add(1)
 	if m.collectCommitmentMetrics {
 		start := time.Now()
-		m.unfolds.Add(1)
 		return func() {
 			d := time.Since(start)
 			m.spentUnfolding += d
