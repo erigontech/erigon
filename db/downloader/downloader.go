@@ -24,7 +24,6 @@ import (
 	"io"
 	"io/fs"
 	"iter"
-	"maps"
 	"math"
 	"net"
 	"net/http"
@@ -64,6 +63,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
 )
 
@@ -151,15 +151,6 @@ type requestHandler struct {
 	rt http.RoundTripper
 }
 
-var cloudflareHeaders = http.Header{
-	"lsjdjwcush6jbnjj3jnjscoscisoc5s": []string{"I%OSJDNFKE783DDHHJD873EFSIVNI7384R78SSJBJBCCJBC32JABBJCBJK45"},
-}
-
-func insertCloudflareHeaders(req *http.Request) {
-	// Note this is clobbering the headers.
-	maps.Copy(req.Header, cloudflareHeaders)
-}
-
 type roundTripperFunc func(req *http.Request) (*http.Response, error)
 
 func (me roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -168,7 +159,7 @@ func (me roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) 
 
 // TODO(anacrolix): Upstream any logic that works reliably.
 func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err error) {
-	insertCloudflareHeaders(req)
+	snapcfg.InsertCloudflareHeaders(req)
 
 	resp, err = r.rt.RoundTrip(req)
 	if err != nil {
