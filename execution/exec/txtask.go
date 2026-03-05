@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"sync"
 	"time"
 
@@ -111,7 +110,7 @@ type TxResult struct {
 
 	TraceFroms        map[accounts.Address]struct{}
 	TraceTos          map[accounts.Address]struct{}
-	AccessedAddresses map[accounts.Address]struct{}
+	AccessedAddresses state.AccessSet
 }
 
 func (r *TxResult) compare(other *TxResult) int {
@@ -138,7 +137,7 @@ func (r *TxResult) CreateNextReceipt(prev *types.Receipt) (*types.Receipt, error
 		}
 	}
 
-	cumulativeGasUsed += r.ExecutionResult.GasUsed
+	cumulativeGasUsed += r.ExecutionResult.ReceiptGasUsed
 
 	var err error
 	r.Receipt, err = r.CreateReceipt(txIndex, cumulativeGasUsed, firstLogIndex)
@@ -154,11 +153,11 @@ func (r *TxResult) CreateReceipt(txIndex int, cumulativeGasUsed uint64, firstLog
 
 	blockNum := r.Version().BlockNum
 	receipt := &types.Receipt{
-		BlockNumber:              big.NewInt(int64(blockNum)),
+		BlockNumber:              uint256.NewInt(blockNum),
 		BlockHash:                r.BlockHash(),
 		TransactionIndex:         uint(txIndex),
 		Type:                     r.TxType(),
-		GasUsed:                  r.ExecutionResult.GasUsed,
+		GasUsed:                  r.ExecutionResult.ReceiptGasUsed,
 		CumulativeGasUsed:        cumulativeGasUsed,
 		TxHash:                   r.TxHash(),
 		Logs:                     r.Logs,
@@ -469,9 +468,11 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		if txTask.BlockNumber() == 0 {
 
 			//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
-			_, ibs, err = genesiswrite.GenesisToBlock(nil, genesis, dirs, txTask.Logger)
-			if err != nil {
-				panic(err)
+			if genesis != nil {
+				_, ibs, err = genesiswrite.GenesisToBlock(nil, genesis, dirs, txTask.Logger)
+				if err != nil {
+					panic(err)
+				}
 			}
 			// For Genesis, rules should be empty, so that empty accounts can be included
 			rules = &chain.Rules{}
@@ -550,6 +551,13 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		}()
 
 		if result.Err == nil {
+			// Capture residual-balance selfdestructs before SoftFinalise clears the
+			// journal.  These are accounts selfdestructed in this tx that also received
+			// ETH after the SELFDESTRUCT opcode (EIP-7708 case 2).  SoftFinalise calls
+			// clearJournalAndRefund, so GetRemovedAccountsWithBalance returns nothing
+			// afterwards.
+			result.ExecutionResult.SelfDestructedWithBalance = ibs.GetRemovedAccountsWithBalance()
+
 			// TODO these can be removed - use result instead
 			// Update the state with pending changes
 			ibs.SoftFinalise()
@@ -637,7 +645,8 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 		return &result
 	}
 
-	result.ExecutionResult.GasUsed = gasUsed
+	result.ExecutionResult.ReceiptGasUsed = gasUsed
+	result.ExecutionResult.BlockGasUsed = gasUsed
 	// Update the state with pending changes
 	ibs.SoftFinalise()
 	result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
@@ -945,6 +954,9 @@ func (q *PriorityQueue[T]) AwaitDrain(ctx context.Context, waitTime time.Duratio
 	q.Unlock()
 
 	if resultCh == nil {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
 		var none T
 		return q.Drain(ctx, none)
 	}

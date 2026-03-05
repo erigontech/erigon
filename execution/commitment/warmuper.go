@@ -35,11 +35,12 @@ type TrieContextFactory func() (PatriciaContext, func())
 // WarmupConfig contains configuration for pre-warming MDBX page cache
 // during commitment processing.
 type WarmupConfig struct {
-	Enabled    bool
-	CtxFactory TrieContextFactory
-	NumWorkers int
-	MaxDepth   int
-	LogPrefix  string
+	Enabled           bool
+	EnableWarmupCache bool // If true, cache warmed data for use during trie processing
+	CtxFactory        TrieContextFactory
+	NumWorkers        int
+	MaxDepth          int
+	LogPrefix         string
 }
 
 const WarmupMaxDepth = 128 // covers full key paths for both account keys (64 nibbles) and storage keys (128 nibbles)
@@ -64,6 +65,9 @@ type Warmuper struct {
 	// Worker group
 	g *errgroup.Group
 
+	// Cache for storing warmed data to be used during trie processing
+	cache *WarmupCache
+
 	// Stats
 	keysProcessed atomic.Uint64
 	startTime     time.Time
@@ -81,7 +85,7 @@ type warmupWorkItem struct {
 // NewWarmuper creates a new Warmuper instance.
 func NewWarmuper(ctx context.Context, cfg WarmupConfig) *Warmuper {
 	ctx, cancel := context.WithCancel(ctx)
-	return &Warmuper{
+	w := &Warmuper{
 		ctx:        ctx,
 		cancel:     cancel,
 		ctxFactory: cfg.CtxFactory,
@@ -89,6 +93,66 @@ func NewWarmuper(ctx context.Context, cfg WarmupConfig) *Warmuper {
 		numWorkers: cfg.NumWorkers,
 		logPrefix:  cfg.LogPrefix,
 	}
+	if cfg.EnableWarmupCache {
+		w.cache = NewWarmupCache()
+	}
+	return w
+}
+
+// Cache returns the warmup cache, or nil if caching is disabled.
+func (w *Warmuper) Cache() *WarmupCache {
+	return w.cache
+}
+
+// branchFromCacheOrDB reads branch data from cache if available, otherwise from DB and caches it.
+func (w *Warmuper) branchFromCacheOrDB(trieCtx PatriciaContext, prefix []byte) ([]byte, error) {
+	if w.cache != nil {
+		if data, found := w.cache.GetBranch(prefix); found {
+			return data, nil
+		}
+	}
+	branchData, _, err := trieCtx.Branch(prefix)
+	if err != nil {
+		return nil, err
+	}
+	if w.cache != nil && len(branchData) > 0 {
+		w.cache.PutBranch(prefix, branchData)
+	}
+	return branchData, nil
+}
+
+// accountFromCacheOrDB reads account data from cache if available, otherwise from DB and caches it.
+func (w *Warmuper) accountFromCacheOrDB(trieCtx PatriciaContext, plainKey []byte) (*Update, error) {
+	if w.cache != nil {
+		if update, found := w.cache.GetAccount(plainKey); found {
+			return update, nil
+		}
+	}
+	update, err := trieCtx.Account(plainKey)
+	if err != nil {
+		return nil, err
+	}
+	if w.cache != nil {
+		w.cache.PutAccount(plainKey, update)
+	}
+	return update, nil
+}
+
+// storageFromCacheOrDB reads storage data from cache if available, otherwise from DB and caches it.
+func (w *Warmuper) storageFromCacheOrDB(trieCtx PatriciaContext, plainKey []byte) (*Update, error) {
+	if w.cache != nil {
+		if update, found := w.cache.GetStorage(plainKey); found {
+			return update, nil
+		}
+	}
+	update, err := trieCtx.Storage(plainKey)
+	if err != nil {
+		return nil, err
+	}
+	if w.cache != nil {
+		w.cache.PutStorage(plainKey, update)
+	}
+	return update, nil
 }
 
 // Start initializes and starts the warmup workers.
@@ -100,8 +164,7 @@ func (w *Warmuper) Start() {
 		return
 	}
 
-	w.startTime = time.Now()
-	w.work = make(chan warmupWorkItem, 50_000)
+	w.work = make(chan warmupWorkItem, w.numWorkers*64)
 	w.g, w.ctx = errgroup.WithContext(w.ctx)
 
 	for i := 0; i < w.numWorkers; i++ {
@@ -127,13 +190,14 @@ func (w *Warmuper) Start() {
 }
 
 // warmupKey performs the actual warmup for a single key by reading data to warm MDBX page cache.
+// If cache is enabled, the data is also stored in the cache for later use.
 func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDepth int) {
 	depth := startDepth
 	for depth <= len(hashedKey) && depth <= w.maxDepth {
 		prefix := HexNibblesToCompactBytes(hashedKey[:depth])
 
-		// Read branch data to warm the MDBX page cache
-		branchData, _, err := trieCtx.Branch(prefix)
+		// Check cache first, then fall back to DB
+		branchData, err := w.branchFromCacheOrDB(trieCtx, prefix)
 		if err != nil {
 			log.Debug(fmt.Sprintf("[%s][warmup] failed to get branch", w.logPrefix),
 				"prefix", common.Bytes2Hex(prefix), "error", err)
@@ -152,18 +216,10 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 		// Extract and prefetch account/storage addresses to warm page cache
 		cellAccounts, cellStorages := extractBranchCellAddresses(branchData, nextNibble)
 		for _, addr := range cellAccounts {
-			_, err := trieCtx.Account(addr)
-			if err != nil {
-				log.Debug(fmt.Sprintf("[%s][warmup] failed to get account", w.logPrefix),
-					"addr", common.Bytes2Hex(addr), "error", err)
-			}
+			_, _ = w.accountFromCacheOrDB(trieCtx, addr)
 		}
 		for _, addr := range cellStorages {
-			_, err := trieCtx.Storage(addr)
-			if err != nil {
-				log.Debug(fmt.Sprintf("[%s][warmup] failed to get storage", w.logPrefix),
-					"addr", common.Bytes2Hex(addr), "error", err)
-			}
+			_, _ = w.storageFromCacheOrDB(trieCtx, addr)
 		}
 
 		branchData = branchData[2:] // skip touch map
@@ -218,6 +274,7 @@ func (w *Warmuper) WarmKey(hashedKey []byte, startDepth int) {
 	select {
 	case w.work <- warmupWorkItem{hashedKey: hashedKey, startDepth: startDepth}:
 	case <-w.ctx.Done():
+	default: // non-blocking
 	}
 }
 
@@ -229,16 +286,9 @@ func (w *Warmuper) Wait() error {
 
 	// Only close the channel once
 	close(w.work)
-	err := w.g.Wait()
+	w.g.Wait()
 
-	log.Debug(fmt.Sprintf("[%s][warmup] completed", w.logPrefix),
-		"keys", common.PrettyCounter(int(w.keysProcessed.Load())),
-		"maxDepth", w.maxDepth,
-		"workers", w.numWorkers,
-		"spent", time.Since(w.startTime),
-	)
-
-	return err
+	return nil
 }
 
 // Stats returns statistics about the warmup.
@@ -268,10 +318,12 @@ func (w *Warmuper) DrainPending() {
 }
 
 // WaitAndClose waits for all warmup work to complete and then closes the warmuper.
-func (w *Warmuper) WaitAndClose() error {
-	err := w.Wait()
+func (w *Warmuper) WaitAndClose() {
+	if w.closed.Swap(true) {
+		return // Already closed
+	}
+	w.Wait()
 	w.Close()
-	return err
 }
 
 // Close cancels all warmup work and releases resources.

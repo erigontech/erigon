@@ -83,6 +83,8 @@ type EthBackend interface {
 	Peers(ctx context.Context) (*remoteproto.PeersReply, error)
 	AddPeer(ctx context.Context, url *remoteproto.AddPeerRequest) (*remoteproto.AddPeerReply, error)
 	RemovePeer(ctx context.Context, url *remoteproto.RemovePeerRequest) (*remoteproto.RemovePeerReply, error)
+	AddTrustedPeer(ctx context.Context, url *remoteproto.AddPeerRequest) (*remoteproto.AddPeerReply, error)
+	RemoveTrustedPeer(ctx context.Context, url *remoteproto.RemovePeerRequest) (*remoteproto.RemovePeerReply, error)
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.TemporalRwDB, notifications *shards.Notifications, blockReader services.FullBlockReader,
@@ -326,7 +328,23 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remoteproto.BlockRequ
 	}
 	defer tx.Rollback()
 
-	block, senders, err := s.blockReader.BlockWithSenders(ctx, tx, gointerfaces.ConvertH256ToHash(req.BlockHash), req.BlockHeight)
+	var blockHash common.Hash
+	var blockHeight = req.BlockHeight
+	if req.BlockHash != nil {
+		blockHash = gointerfaces.ConvertH256ToHash(req.BlockHash)
+	} else if req.BlockHeight > 0 {
+		// If height is provided but hash is not, get the canonical hash
+		var ok bool
+		blockHash, ok, err = s.blockReader.CanonicalHash(ctx, tx, blockHeight)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return &remoteproto.BlockReply{}, nil
+		}
+	}
+
+	block, senders, err := s.blockReader.BlockWithSenders(ctx, tx, blockHash, blockHeight)
 	if err != nil {
 		return nil, err
 	}
@@ -421,6 +439,14 @@ func (s *EthBackendServer) AddPeer(ctx context.Context, req *remoteproto.AddPeer
 
 func (s *EthBackendServer) RemovePeer(ctx context.Context, req *remoteproto.RemovePeerRequest) (*remoteproto.RemovePeerReply, error) {
 	return s.eth.RemovePeer(ctx, req)
+}
+
+func (s *EthBackendServer) AddTrustedPeer(ctx context.Context, req *remoteproto.AddPeerRequest) (*remoteproto.AddPeerReply, error) {
+	return s.eth.AddTrustedPeer(ctx, req)
+}
+
+func (s *EthBackendServer) RemoveTrustedPeer(ctx context.Context, req *remoteproto.RemovePeerRequest) (*remoteproto.RemovePeerReply, error) {
+	return s.eth.RemoveTrustedPeer(ctx, req)
 }
 
 func (s *EthBackendServer) SubscribeLogs(server remoteproto.ETHBACKEND_SubscribeLogsServer) (err error) {

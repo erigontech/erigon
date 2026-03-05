@@ -26,8 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
-	"strings"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -39,7 +38,6 @@ import (
 	stack2 "github.com/go-stack/stack"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/estimate"
@@ -109,7 +107,14 @@ func New(label kv.Label, log log.Logger) MdbxOpts {
 	}
 	if label == dbcfg.ChainDB {
 		opts = opts.RemoveFlags(mdbx.NoReadahead) // enable readahead for chaindata by default. Erigon3 require fast updates and prune. Also it's chaindata is small (doesen GB)
+		if dbg.MdbxNoSync {
+			opts = opts.Flags(func(f uint) uint { return f&^mdbx.Durable | mdbx.SafeNoSync })
+		}
+		if dbg.MdbxNoSyncUnsafe {
+			opts = opts.Flags(func(f uint) uint { return f&^mdbx.Durable | mdbx.UtterlyNoSync | mdbx.NoMetaSync })
+		}
 	}
+
 	return opts
 }
 
@@ -167,6 +172,9 @@ func (opts MdbxOpts) InMem(tb testing.TB, tmpDir string) MdbxOpts {
 	opts.growthStep = 2 * datasize.MB
 	opts.mapSize = 16 * datasize.GB
 	opts.dirtySpace = uint64(16 * datasize.MB)
+	if tb != nil {
+		opts.dirtySpace = uint64(2 * datasize.MB)
+	}
 	opts.shrinkThreshold = 0 // disable
 	opts.pageSize = 4096
 	return opts
@@ -411,7 +419,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 
 	}
 	db.path = opts.path
-	if dbg.MdbxLockInRam() && opts.label == dbcfg.ChainDB {
+	if dbg.MdbxLockInRam && opts.label == dbcfg.ChainDB {
 		log.Info("[dbg] locking db in mem", "label", opts.label)
 		if err := db.View(ctx, func(tx kv.Tx) error { return tx.(*MdbxTx).LockDBInRam() }); err != nil {
 			return nil, err
@@ -1003,14 +1011,6 @@ func (tx *MdbxTx) Commit() error {
 	}()
 	tx.closeCursors()
 
-	//slowTx := 10 * time.Second
-	//if debug.SlowCommit() > 0 {
-	//	slowTx = debug.SlowCommit()
-	//}
-	//
-	//if debug.BigRoTxKb() > 0 || debug.BigRwTxKb() > 0 {
-	//	tx.PrintDebugInfo()
-	//}
 	tx.CollectMetrics()
 
 	latency, err := tx.tx.Commit()
@@ -1406,6 +1406,66 @@ func (c *MdbxCursor) Close() {
 
 func (c *MdbxCursor) IsClosed() bool { return c.c == nil }
 
+type MdbxCursorPseudoDupSort struct {
+	*MdbxCursor
+}
+
+func (c *MdbxCursorPseudoDupSort) DeleteExact(k1, k2 []byte) error {
+	return c.Delete(k1)
+}
+
+// NextNoDup - iterate with skipping all duplicates
+func (c *MdbxCursorPseudoDupSort) NextNoDup() ([]byte, []byte, error) {
+	k, v, err := c.Next()
+	if err != nil {
+		if mdbx.IsNotFound(err) {
+			return nil, nil, nil
+		}
+		return []byte{}, nil, fmt.Errorf("in NextNoDup: %w", err)
+	}
+	return k, v, nil
+}
+
+// NextDup - iterate only over duplicates of current key
+func (c *MdbxCursorPseudoDupSort) NextDup() ([]byte, []byte, error) {
+	return nil, nil, nil
+}
+
+func (c *MdbxCursorPseudoDupSort) FirstDup() ([]byte, error) {
+	_, v, err := c.Current()
+	if err != nil {
+		if mdbx.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("in FirstDup: tbl=%s, %w", c.bucketName, err)
+	}
+	return v, nil
+}
+
+func (c *MdbxCursorPseudoDupSort) LastDup() ([]byte, error) {
+	_, v, err := c.Current()
+	if err != nil {
+		if mdbx.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("in FirstDup: tbl=%s, %w", c.bucketName, err)
+	}
+	return v, nil
+}
+
+// DeleteCurrentDuplicates - delete all of the data items for the current key.
+func (c *MdbxCursorPseudoDupSort) DeleteCurrentDuplicates() error {
+	if err := c.DeleteCurrent(); err != nil {
+		return fmt.Errorf("label: %s,in DeleteCurrentDuplicates: %w", c.label, err)
+	}
+	return nil
+}
+
+// CountDuplicates returns the number of duplicates for the current key. See mdb_cursor_count
+func (c *MdbxCursorPseudoDupSort) CountDuplicates() (uint64, error) {
+	return 1, nil
+}
+
 type MdbxDupSortCursor struct {
 	*MdbxCursor
 }
@@ -1442,6 +1502,17 @@ func (c *MdbxDupSortCursor) SeekBothRange(key, value []byte) ([]byte, error) {
 		return nil, fmt.Errorf("in SeekBothRange, table=%s: %w", c.bucketName, err)
 	}
 	return v, nil
+}
+
+func (c *MdbxDupSortCursor) DeleteBothRange(key, value []byte) error {
+	_, _, err := c.c.Get(key, value, mdbx.GetBothRange)
+	if err != nil {
+		if mdbx.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("in SeekBothRange, table=%s: %w", c.bucketName, err)
+	}
+	return c.c.Del(mdbx.Current)
 }
 
 func (c *MdbxDupSortCursor) FirstDup() ([]byte, error) {
@@ -1556,9 +1627,7 @@ func bucketSlice(b kv.TableCfg) []string {
 	for name := range b {
 		buckets = append(buckets, name)
 	}
-	sort.Slice(buckets, func(i, j int) bool {
-		return strings.Compare(buckets[i], buckets[j]) < 0
-	})
+	slices.Sort(buckets)
 	return buckets
 }
 
@@ -1599,9 +1668,6 @@ func (tx *MdbxTx) Range(table string, fromPrefix, toPrefix []byte, asc order.By,
 		s.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
-	if !s.tx.readOnly {
-		s.nextK, s.nextV = common.Copy(s.nextK), common.Copy(s.nextV)
-	}
 	return s, nil
 }
 
@@ -1610,10 +1676,11 @@ type cursor2iter struct {
 	id uint64
 	tx *MdbxTx
 
-	fromPrefix, toPrefix, nextK, nextV []byte
-	orderAscend                        order.By
-	limit                              int64
-	ctx                                context.Context
+	fromPrefix, toPrefix []byte
+	orderAscend          order.By
+	limit                int64
+	ctx                  context.Context
+	done                 bool
 }
 
 func (s *cursor2iter) init(table string, tx kv.Tx) error {
@@ -1629,23 +1696,26 @@ func (s *cursor2iter) init(table string, tx kv.Tx) error {
 	}
 	s.c = c
 
+	var firstK []byte
 	if s.fromPrefix == nil { // no initial position
 		if s.orderAscend {
-			s.nextK, s.nextV, err = s.c.First()
+			firstK, _, err = s.c.First()
 		} else {
-			s.nextK, s.nextV, err = s.c.Last()
+			firstK, _, err = s.c.Last()
 		}
 		if err != nil {
 			return err
 		}
+		s.done = firstK == nil
 		return nil
 	}
 
 	if s.orderAscend {
-		s.nextK, s.nextV, err = s.c.Seek(s.fromPrefix)
+		firstK, _, err = s.c.Seek(s.fromPrefix)
 		if err != nil {
 			return err
 		}
+		s.done = firstK == nil
 		return nil
 	}
 
@@ -1653,17 +1723,18 @@ func (s *cursor2iter) init(table string, tx kv.Tx) error {
 	// `Seek(nextPrefix)+Prev()` will do the job.
 	nextPrefix, ok := kv.NextSubtree(s.fromPrefix)
 	if !ok { // end of table
-		s.nextK, s.nextV, err = s.c.Last()
+		firstK, _, err = s.c.Last()
 		if err != nil {
 			return err
 		}
-		if s.nextK == nil {
+		if firstK == nil {
+			s.done = true
 			return nil
 		}
 
 		// go to last value of this key
 		if casted, ok := s.c.(kv.CursorDupSort); ok {
-			s.nextV, err = casted.LastDup()
+			_, err = casted.LastDup()
 			if err != nil {
 				return err
 			}
@@ -1671,25 +1742,26 @@ func (s *cursor2iter) init(table string, tx kv.Tx) error {
 		return nil
 	}
 
-	s.nextK, s.nextV, err = s.c.Seek(nextPrefix)
+	firstK, _, err = s.c.Seek(nextPrefix)
 	if err != nil {
 		return err
 	}
-	if s.nextK == nil {
-		s.nextK, s.nextV, err = s.c.Last()
+	if firstK == nil {
+		firstK, _, err = s.c.Last()
 	} else {
-		s.nextK, s.nextV, err = s.c.Prev()
+		firstK, _, err = s.c.Prev()
 	}
 	if err != nil {
 		return err
 	}
-	if s.nextK == nil {
+	if firstK == nil {
+		s.done = true
 		return nil
 	}
 
 	// go to last value of this key
 	if casted, ok := s.c.(kv.CursorDupSort); ok {
-		s.nextV, err = casted.LastDup()
+		_, err = casted.LastDup()
 		if err != nil {
 			return err
 		}
@@ -1698,17 +1770,16 @@ func (s *cursor2iter) init(table string, tx kv.Tx) error {
 }
 
 func (s *cursor2iter) advance() (err error) {
+	var k []byte
 	if s.orderAscend {
-		s.nextK, s.nextV, err = s.c.Next()
-		if err != nil {
-			return err
-		}
+		k, _, err = s.c.Next()
 	} else {
-		s.nextK, s.nextV, err = s.c.Prev()
-		if err != nil {
-			return err
-		}
+		k, _, err = s.c.Prev()
 	}
+	if err != nil {
+		return err
+	}
+	s.done = k == nil
 	return nil
 }
 
@@ -1727,16 +1798,20 @@ func (s *cursor2iter) HasNext() bool {
 	if s.limit == 0 { // limit reached
 		return false
 	}
-	if s.nextK == nil { // EndOfTable
+	if s.done { // EndOfTable
 		return false
 	}
-	if s.toPrefix == nil { // s.nextK == nil check is above
+	if s.toPrefix == nil {
 		return true
 	}
 
 	//Asc:  [from, to) AND from < to
 	//Desc: [from, to) AND from > to
-	cmp := bytes.Compare(s.nextK, s.toPrefix)
+	k, _, err := s.c.Current()
+	if err != nil || k == nil {
+		return false
+	}
+	cmp := bytes.Compare(k, s.toPrefix)
 	return (bool(s.orderAscend) && cmp < 0) || (!bool(s.orderAscend) && cmp > 0)
 }
 
@@ -1747,12 +1822,12 @@ func (s *cursor2iter) Next() (k, v []byte, err error) {
 	default:
 	}
 	s.limit--
-	k, v = s.nextK, s.nextV
-	if err = s.advance(); err != nil {
+	k, v, err = s.c.Current()
+	if err != nil {
 		return nil, nil, err
 	}
-	if !s.tx.readOnly {
-		s.nextK, s.nextV = common.Copy(s.nextK), common.Copy(s.nextV)
+	if err = s.advance(); err != nil {
+		return nil, nil, err
 	}
 	return k, v, nil
 }
@@ -1768,9 +1843,6 @@ func (tx *MdbxTx) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []
 		s.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
-	if !s.tx.readOnly {
-		s.nextV = common.Copy(s.nextV)
-	}
 	return s, nil
 }
 
@@ -1779,11 +1851,12 @@ type cursorDup2iter struct {
 	id uint64
 	tx *MdbxTx
 
-	key                         []byte
-	fromPrefix, toPrefix, nextV []byte
-	orderAscend                 bool
-	limit                       int64
-	ctx                         context.Context
+	key                  []byte
+	fromPrefix, toPrefix []byte
+	orderAscend          bool
+	limit                int64
+	ctx                  context.Context
+	done                 bool
 }
 
 func (s *cursorDup2iter) init(table string, tx kv.Tx) error {
@@ -1803,81 +1876,84 @@ func (s *cursorDup2iter) init(table string, tx kv.Tx) error {
 		return err
 	}
 	if k == nil {
+		s.done = true
 		return nil
 	}
 
+	var firstV []byte
 	if s.fromPrefix == nil { // no initial position
 		if s.orderAscend {
-			s.nextV, err = s.c.FirstDup()
-			if err != nil {
-				return err
-			}
+			firstV, err = s.c.FirstDup()
 		} else {
-			s.nextV, err = s.c.LastDup()
-			if err != nil {
-				return err
-			}
+			firstV, err = s.c.LastDup()
 		}
+		if err != nil {
+			return err
+		}
+		s.done = firstV == nil
 		return nil
 	}
 
 	if s.orderAscend {
-		s.nextV, err = s.c.SeekBothRange(s.key, s.fromPrefix)
+		firstV, err = s.c.SeekBothRange(s.key, s.fromPrefix)
 		if err != nil {
 			return err
 		}
+		s.done = firstV == nil
 		return nil
 	}
 
-	// to find LAST key with given prefix:
+	// to find LAST dup with given prefix (descending):
 	nextSubtree, ok := kv.NextSubtree(s.fromPrefix)
 	if !ok {
-		_, s.nextV, err = s.c.PrevDup()
+		_, firstV, err = s.c.PrevDup()
 		if err != nil {
 			return err
 		}
+		s.done = firstV == nil
 		return nil
 	}
 
-	s.nextV, err = s.c.SeekBothRange(s.key, nextSubtree)
+	firstV, err = s.c.SeekBothRange(s.key, nextSubtree)
 	if err != nil {
 		return err
 	}
-	if s.nextV != nil {
-		_, s.nextV, err = s.c.PrevDup()
+	if firstV != nil {
+		_, firstV, err = s.c.PrevDup()
 		if err != nil {
 			return err
 		}
+		s.done = firstV == nil
 		return nil
 	}
 
-	k, s.nextV, err = s.c.SeekExact(s.key)
+	k, _, err = s.c.SeekExact(s.key)
 	if err != nil {
 		return err
 	}
 	if k == nil {
-		s.nextV = nil
+		s.done = true
 		return nil
 	}
-	s.nextV, err = s.c.LastDup()
+	firstV, err = s.c.LastDup()
 	if err != nil {
 		return err
 	}
+	s.done = firstV == nil
 	return nil
 }
 
 func (s *cursorDup2iter) advance() (err error) {
+	var k []byte
 	if s.orderAscend {
-		_, s.nextV, err = s.c.NextDup()
-		if err != nil {
-			return err
-		}
+		k, _, err = s.c.NextDup()
 	} else {
-		_, s.nextV, err = s.c.PrevDup()
-		if err != nil {
-			return err
-		}
+		k, _, err = s.c.PrevDup()
 	}
+	if err != nil {
+		return err
+	}
+	s.done = k == nil
 	return nil
 }
 
@@ -1895,16 +1971,20 @@ func (s *cursorDup2iter) HasNext() bool {
 	if s.limit == 0 { // limit reached
 		return false
 	}
-	if s.nextV == nil { // EndOfTable
+	if s.done { // EndOfTable
 		return false
 	}
-	if s.toPrefix == nil { // s.nextK == nil check is above
+	if s.toPrefix == nil {
 		return true
 	}
 
 	//Asc:  [from, to) AND from < to
 	//Desc: [from, to) AND from > to
-	cmp := bytes.Compare(s.nextV, s.toPrefix)
+	_, v, err := s.c.Current()
+	if err != nil || v == nil {
+		return false
+	}
+	cmp := bytes.Compare(v, s.toPrefix)
 	return (s.orderAscend && cmp < 0) || (!s.orderAscend && cmp > 0)
 }
 func (s *cursorDup2iter) Next() (k, v []byte, err error) {
@@ -1914,12 +1994,12 @@ func (s *cursorDup2iter) Next() (k, v []byte, err error) {
 	default:
 	}
 	s.limit--
-	v = s.nextV
-	if err = s.advance(); err != nil {
+	_, v, err = s.c.Current()
+	if err != nil {
 		return nil, nil, err
 	}
-	if !s.tx.readOnly {
-		s.nextV = common.Copy(s.nextV)
+	if err = s.advance(); err != nil {
+		return nil, nil, err
 	}
 	return s.key, v, nil
 }

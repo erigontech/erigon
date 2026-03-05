@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/anacrolix/sync"
 	"github.com/anacrolix/torrent"
@@ -17,7 +18,8 @@ type downloadBatch struct {
 	all      sync.WaitGroup
 	torrents []*torrent.Torrent
 	// Fetch tasks that should be completed before running afterTasks
-	metainfoTasks sync.WaitGroup
+	metainfoTasks         sync.WaitGroup
+	finishedMetadataTasks atomic.Bool
 	// These must be run even if the batch is abandoned.
 	afterTasks chan func()
 }
@@ -27,6 +29,7 @@ type downloadBatch struct {
 func (me *downloadBatch) taskWaiter() {
 	me.metainfoTasks.Wait()
 	close(me.afterTasks)
+	me.finishedMetadataTasks.Store(true)
 	for t := range me.afterTasks {
 		if me.d.ctx.Err() != nil {
 			return
@@ -64,7 +67,7 @@ func (me *downloadBatch) addAllItems(ctx context.Context, items []preverifiedSna
 		}
 		err := me.addDownload(it)
 		if err != nil {
-			err = fmt.Errorf("adding %q: %w", it.Name, err)
+			err = fmt.Errorf("downloading snapshot %s (infohash %s): %w", it.Name, it.InfoHash.HexString(), err)
 			return err
 		}
 	}

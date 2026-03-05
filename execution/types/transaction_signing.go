@@ -328,7 +328,10 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) 
 func (sg Signer) SignatureValues(txn Transaction, sig []byte) (R, S, V *uint256.Int, err error) {
 	switch t := txn.(type) {
 	case *LegacyTx:
-		R, S, V = decodeSignature(sig)
+		R, S, V, err = decodeSignature(sig)
+		if err != nil {
+			return nil, nil, nil, err
+		}
 		if sg.chainID.IsZero() {
 			V.Add(V, &u256.Num27)
 		} else {
@@ -342,7 +345,10 @@ func (sg Signer) SignatureValues(txn Transaction, sig []byte) (R, S, V *uint256.
 		if chainId != nil && !chainId.IsZero() && !chainId.Eq(&sg.chainID) {
 			return nil, nil, nil, ErrInvalidChainId
 		}
-		R, S, V = decodeSignature(sig)
+		R, S, V, err = decodeSignature(sig)
+		if err != nil {
+			return nil, nil, nil, err
+		}
 	default:
 		return nil, nil, nil, ErrTxTypeNotSupported
 	}
@@ -365,14 +371,14 @@ func (sg Signer) Equal(other Signer) bool {
 		sg.setCode == other.setCode
 }
 
-func decodeSignature(sig []byte) (r, s, v *uint256.Int) {
+func decodeSignature(sig []byte) (r, s, v *uint256.Int, err error) {
 	if len(sig) != crypto.SignatureLength {
-		panic(fmt.Sprintf("wrong size for signature: got %d, want %d", len(sig), crypto.SignatureLength))
+		return nil, nil, nil, fmt.Errorf("wrong size for signature: got %d, want %d", len(sig), crypto.SignatureLength)
 	}
 	r = new(uint256.Int).SetBytes(sig[:32])
 	s = new(uint256.Int).SetBytes(sig[32:64])
 	v = new(uint256.Int).SetBytes(sig[64:65])
-	return r, s, v
+	return r, s, v, nil
 }
 
 func recoverPlain(context *secp256k1.Context, sighash common.Hash, R, S, Vb *uint256.Int, homestead bool) (accounts.Address, error) {

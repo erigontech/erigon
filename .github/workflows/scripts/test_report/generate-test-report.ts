@@ -13,6 +13,7 @@ const acceptedWorkflows = [
     '.github/workflows/qa-rpc-integration-tests-polygon.yml',
     '.github/workflows/qa-rpc-integration-tests.yml',
     '.github/workflows/qa-rpc-performance-tests.yml',
+    '.github/workflows/qa-rpc-performance-comparison-tests.yml',
     '.github/workflows/qa-snap-download.yml',
     '.github/workflows/qa-sync-from-scratch-minimal-node.yml',
     '.github/workflows/qa-sync-from-scratch.yml',

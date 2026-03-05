@@ -1,3 +1,10 @@
+---
+metaLinks:
+  alternates:
+    - >-
+      https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/fundamentals/layer-2-networks
+---
+
 # Layer 2 Networks
 
 ### Running an Op-Node alongside Erigon

@@ -85,8 +85,7 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 		}
 	}
 
-	aux := make([]byte, 0, 256)
-	return branch.ReplacePlainKeys(aux, func(key []byte, isStorage bool) ([]byte, error) {
+	result, err := branch.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
 		if isStorage {
 			if len(key) == length.Addr+length.Hash {
 				return nil, nil // save storage key as is
@@ -121,6 +120,10 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 		}
 		return apkBuf, nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func DecodeReferenceKey(from []byte) uint64 {
@@ -135,17 +138,17 @@ func DecodeReferenceKey(from []byte) uint64 {
 }
 
 func EncodeReferenceKey(buf []byte, offset uint64) []byte {
-	if len(buf) == 0 {
+	if cap(buf) == 0 {
 		buf = make([]byte, 0, 8)
 	}
-	return binary.AppendUvarint(buf, offset)
+	return binary.AppendUvarint(buf[:0], offset)
 }
 
 // Finds shorter replacement for full key in given file item. filesItem -- result of merging of multiple files.
 // If item is nil, or shorter key was not found, or anything else goes wrong, nil key and false returned.
-func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, item *FilesItem) (shortened []byte, found bool) {
+func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, item *FilesItem) (offset uint64, found bool) {
 	if item == nil {
-		return nil, false
+		return 0, false
 	}
 	if !strings.Contains(item.decompressor.FileName(), dt.d.FilenameBase) {
 		panic(fmt.Sprintf("findShortenedKeyEasier of %s called with merged file %s", dt.d.FilenameBase, item.decompressor.FileName()))
@@ -168,14 +171,14 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 
 		offset, ok := reader.Lookup(fullKey)
 		if !ok {
-			return nil, false
+			return 0, false
 		}
 
 		itemGetter.Reset(offset)
 		if !itemGetter.HasNext() {
 			dt.d.logger.Warn("commitment branch key replacement seek failed",
 				"key", hex.EncodeToString(fullKey), "idx", "hash", "file", item.decompressor.FileName())
-			return nil, false
+			return 0, false
 		}
 
 		k, _ := itemGetter.Next(nil)
@@ -183,25 +186,25 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 			dt.d.logger.Warn("commitment branch key replacement seek invalid key",
 				"key", hex.EncodeToString(fullKey), "idx", "hash", "file", item.decompressor.FileName())
 
-			return nil, false
+			return 0, false
 		}
-		return EncodeReferenceKey(nil, offset), true
+		return offset, true
 	}
 	if dt.d.Accessors.Has(statecfg.AccessorBTree) {
 		if item.bindex == nil {
 			dt.d.logger.Warn("[agg] commitment branch key replacement: file doesn't have index", "name", item.decompressor.FileName())
 		}
-		_, _, offsetInFile, ok, err := item.bindex.Get(fullKey, itemGetter)
+		_, _, offset, ok, err := item.bindex.Get(fullKey, itemGetter)
 		if err != nil {
 			dt.d.logger.Warn("[agg] commitment branch key replacement seek failed",
 				"key", hex.EncodeToString(fullKey), "idx", "bt", "err", err, "file", item.decompressor.FileName())
 		}
 		if !ok {
-			return nil, false
+			return 0, false
 		}
-		return EncodeReferenceKey(nil, offsetInFile), true
+		return offset, true
 	}
-	return nil, false
+	return 0, false
 }
 
 // rawLookupFileByRange searches for a file that contains the given range of tx numbers.
@@ -278,16 +281,20 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter *seg.Reader) 
 		return nil, false
 	}
 
-	fullKey, _ = getter.Next(fullKey[:0])
-	return fullKey, true
+	dt.lookupFullKey, _ = getter.Next(dt.lookupFullKey[:0])
+	return dt.lookupFullKey, true
 }
 
 // commitmentValTransform parses the value of the commitment record to extract references
 // to accounts and storage items, then looks them up in the new, merged files, and replaces them with
 // the updated references
 func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, storage *DomainRoTx, mergedAccount, mergedStorage *FilesItem) (valueTransformer, error) {
+	if !rng.needMerge {
+		panic(fmt.Sprintf("assert: commitmentValTransformDomain called with domain.needMerge=false (from=%d to=%d): caller must guard with values.needMerge", rng.from, rng.to))
+	}
 	var keyBuf [60]byte // 52b key and 8b for inverted step
 	var err error
+	shortened := make([]byte, 16)
 
 	hadToLookupStorage := mergedStorage == nil
 	if mergedStorage == nil {
@@ -329,7 +336,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 	dt.d.logger.Debug("prepare commitmentValTransformDomain", "merge", rng.String("range", dt.d.stepSize), "Mstorage", hadToLookupStorage, "Maccount", hadToLookupAccount)
 
 	vt := func(valBuf []byte, keyFromTxNum, keyEndTxNum uint64) (transValBuf []byte, err error) {
-		if !dt.d.ReplaceKeysInValues || len(valBuf) == 0 || !ValuesPlainKeyReferencingThresholdReached(dt.d.stepSize, keyFromTxNum, keyEndTxNum) {
+		if !dt.d.ReplaceKeysInValues || len(valBuf) == 0 || !ValuesPlainKeyReferencingThresholdReached(dt.d.stepSize, rng.from, rng.to) {
 			return valBuf, nil
 		}
 		if _, ok := storageFileMap[keyFromTxNum]; !ok {
@@ -378,7 +385,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 					}
 				}
 
-				shortened, found := storage.findShortenedKey(auxBuf, ms, mergedStorage)
+				shortenedKeyOffset, found := storage.findShortenedKey(auxBuf, ms, mergedStorage)
 				if !found {
 					if len(auxBuf) == length.Addr+length.Hash {
 						return auxBuf, nil // if plain key is lost, we can save original fullkey
@@ -390,6 +397,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 
 					return nil, fmt.Errorf("replacement not found for storage %x", auxBuf)
 				}
+				shortened = EncodeReferenceKey(shortened[:0], shortenedKeyOffset)
 				return shortened, nil
 			}
 
@@ -408,7 +416,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 				}
 			}
 
-			shortened, found := accounts.findShortenedKey(auxBuf, ma, mergedAccount)
+			shortenedKeyOffset, found := accounts.findShortenedKey(auxBuf, ma, mergedAccount)
 			if !found {
 				if len(auxBuf) == length.Addr {
 					return auxBuf, nil // if plain key is lost, we can save original fullkey
@@ -418,15 +426,15 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 					"shortened", hex.EncodeToString(shortened), "toReplace", hex.EncodeToString(auxBuf))
 				return nil, fmt.Errorf("replacement not found for account  %x", auxBuf)
 			}
+			shortened = EncodeReferenceKey(shortened[:0], shortenedKeyOffset)
 			return shortened, nil
 		}
 
-		temp, err := commitment.BranchData(valBuf).ReplacePlainKeys(dt.comBuf[:0], replacer)
+		branchData, err := commitment.BranchData(valBuf).ReplacePlainKeys(nil, replacer)
 		if err != nil {
 			return nil, err
 		}
-		dt.comBuf = append(dt.comBuf[:0], temp...) // cover branch data case
-		return dt.comBuf, nil
+		return branchData, nil
 	}
 
 	return vt, nil

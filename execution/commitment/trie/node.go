@@ -162,6 +162,10 @@ func resetRefs(nd Node) {
 				resetRefs(child)
 			}
 		}
+	case *AccountNode:
+		if n.Storage != nil {
+			resetRefs(n.Storage)
+		}
 	}
 }
 

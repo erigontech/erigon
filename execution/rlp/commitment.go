@@ -67,25 +67,105 @@ func generateByteArrayLen(buffer []byte, pos int, l int) int {
 	if l < 56 {
 		buffer[pos] = byte(0x80 + l)
 		pos++
-	} else if l < 256 {
-		// len(vn) can be encoded as 1 byte
+	} else if l < 256 { // 1<<8
+		// l can be encoded as 1 byte
 		buffer[pos] = multiByteHeaderPrefixOfLen(1)
 		pos++
 		buffer[pos] = byte(l)
 		pos++
-	} else if l < 65536 {
-		// len(vn) is encoded as two bytes
+	} else if l < 65_536 { // 1<<16
+		// l can be encoded as 2 bytes
 		buffer[pos] = multiByteHeaderPrefixOfLen(2)
 		pos++
 		buffer[pos] = byte(l >> 8)
 		pos++
 		buffer[pos] = byte(l & 255)
 		pos++
-	} else {
-		// len(vn) is encoded as three bytes
+	} else if l < 16_777_216 { // 1 <<24
+		// l can be encoded as 3 bytes
 		buffer[pos] = multiByteHeaderPrefixOfLen(3)
 		pos++
 		buffer[pos] = byte(l >> 16)
+		pos++
+		buffer[pos] = byte((l >> 8) & 255)
+		pos++
+		buffer[pos] = byte(l & 255)
+		pos++
+	} else if l < 1<<32 {
+		// l can be encoded as 4 bytes
+		buffer[pos] = multiByteHeaderPrefixOfLen(4)
+		pos++
+		buffer[pos] = byte(l >> 24)
+		pos++
+		buffer[pos] = byte((l >> 16) & 255)
+		pos++
+		buffer[pos] = byte((l >> 8) & 255)
+		pos++
+		buffer[pos] = byte(l & 255)
+		pos++
+	} else if l < 1<<40 {
+		// l can be encoded as 5 bytes
+		buffer[pos] = multiByteHeaderPrefixOfLen(5)
+		pos++
+		buffer[pos] = byte(l >> 32)
+		pos++
+		buffer[pos] = byte((l >> 24) & 255)
+		pos++
+		buffer[pos] = byte((l >> 16) & 255)
+		pos++
+		buffer[pos] = byte((l >> 8) & 255)
+		pos++
+		buffer[pos] = byte(l & 255)
+		pos++
+	} else if l < 1<<48 {
+		// l can be encoded as 6 bytes
+		buffer[pos] = multiByteHeaderPrefixOfLen(6)
+		pos++
+		buffer[pos] = byte(l >> 40)
+		pos++
+		buffer[pos] = byte((l >> 32) & 255)
+		pos++
+		buffer[pos] = byte((l >> 24) & 255)
+		pos++
+		buffer[pos] = byte((l >> 16) & 255)
+		pos++
+		buffer[pos] = byte((l >> 8) & 255)
+		pos++
+		buffer[pos] = byte(l & 255)
+		pos++
+	} else if l < 1<<56 {
+		// l can be encoded as 7 bytes
+		buffer[pos] = multiByteHeaderPrefixOfLen(7)
+		pos++
+		buffer[pos] = byte(l >> 48)
+		pos++
+		buffer[pos] = byte((l >> 40) & 255)
+		pos++
+		buffer[pos] = byte((l >> 32) & 255)
+		pos++
+		buffer[pos] = byte((l >> 24) & 255)
+		pos++
+		buffer[pos] = byte((l >> 16) & 255)
+		pos++
+		buffer[pos] = byte((l >> 8) & 255)
+		pos++
+		buffer[pos] = byte(l & 255)
+		pos++
+	} else {
+		// l can be encoded as 8 bytes
+		buffer[pos] = multiByteHeaderPrefixOfLen(8)
+		pos++
+		buffer[pos] = byte(l >> 56)
+		pos++
+		buffer[pos] = byte((l >> 48) & 255)
+		pos++
+		buffer[pos] = byte((l >> 40) & 255)
+		pos++
+		buffer[pos] = byte((l >> 32) & 255)
+		pos++
+		buffer[pos] = byte((l >> 24) & 255)
+		pos++
+		buffer[pos] = byte((l >> 16) & 255)
 		pos++
 		buffer[pos] = byte((l >> 8) & 255)
 		pos++
@@ -190,13 +270,28 @@ func generateRlpPrefixLen(l int) int {
 	if l < 56 {
 		return 1
 	}
-	if l < 256 {
+	if l < 256 { // 1<<8
 		return 2
 	}
-	if l < 65536 {
+	if l < 65_536 { // 1<<16
 		return 3
 	}
-	return 4
+	if l < 16_777_216 { // 1 <<24
+		return 4
+	}
+	if l < 1<<32 {
+		return 5
+	}
+	if l < 1<<40 {
+		return 6
+	}
+	if l < 1<<48 {
+		return 7
+	}
+	if l < 1<<56 {
+		return 8
+	}
+	return 9
 }
 
 // RlpSerializable is a value that can be double-RLP coded.
@@ -264,21 +359,78 @@ func GenerateStructLen(buffer []byte, l int) int {
 		buffer[0] = byte(192 + l)
 		return 1
 	}
-	if l < 256 {
+	if l < 256 { // 1<<8
 		// l can be encoded as 1 byte
 		buffer[1] = byte(l)
 		buffer[0] = byte(247 + 1)
 		return 2
 	}
-	if l < 65536 {
+	if l < 65_536 { // 1<<16
+		// l can be encoded as 2 bytes
 		buffer[2] = byte(l & 255)
 		buffer[1] = byte(l >> 8)
 		buffer[0] = byte(247 + 2)
 		return 3
 	}
-	buffer[3] = byte(l & 255)
-	buffer[2] = byte((l >> 8) & 255)
-	buffer[1] = byte(l >> 16)
-	buffer[0] = byte(247 + 3)
-	return 4
+	if l < 16_777_216 { // 1 <<24
+		// l can be encoded as 3 bytes
+		buffer[3] = byte(l & 255)
+		buffer[2] = byte((l >> 8) & 255)
+		buffer[1] = byte(l >> 16)
+		buffer[0] = byte(247 + 3)
+		return 4
+	}
+	if l < 1<<32 {
+		// l can be encoded as 4 bytes
+		buffer[4] = byte(l & 255)
+		buffer[3] = byte((l >> 8) & 255)
+		buffer[2] = byte((l >> 16) & 255)
+		buffer[1] = byte(l >> 24)
+		buffer[0] = byte(247 + 4)
+		return 5
+	}
+	if l < 1<<40 {
+		// l can be encoded as 5 bytes
+		buffer[5] = byte(l & 255)
+		buffer[4] = byte((l >> 8) & 255)
+		buffer[3] = byte((l >> 16) & 255)
+		buffer[2] = byte((l >> 24) & 255)
+		buffer[1] = byte(l >> 32)
+		buffer[0] = byte(247 + 5)
+		return 6
+	}
+	if l < 1<<48 {
+		// l can be encoded as 6 bytes
+		buffer[6] = byte(l & 255)
+		buffer[5] = byte((l >> 8) & 255)
+		buffer[4] = byte((l >> 16) & 255)
+		buffer[3] = byte((l >> 24) & 255)
+		buffer[2] = byte((l >> 32) & 255)
+		buffer[1] = byte(l >> 40)
+		buffer[0] = byte(247 + 6)
+		return 7
+	}
+	if l < 1<<56 {
+		// l can be encoded as 7 bytes
+		buffer[7] = byte(l & 255)
+		buffer[6] = byte((l >> 8) & 255)
+		buffer[5] = byte((l >> 16) & 255)
+		buffer[4] = byte((l >> 24) & 255)
+		buffer[3] = byte((l >> 32) & 255)
+		buffer[2] = byte((l >> 40) & 255)
+		buffer[1] = byte(l >> 48)
+		buffer[0] = byte(247 + 7)
+		return 8
+	}
+	// l can be encoded as 8 bytes
+	buffer[8] = byte(l & 255)
+	buffer[7] = byte((l >> 8) & 255)
+	buffer[6] = byte((l >> 16) & 255)
+	buffer[5] = byte((l >> 24) & 255)
+	buffer[4] = byte((l >> 32) & 255)
+	buffer[3] = byte((l >> 40) & 255)
+	buffer[2] = byte((l >> 48) & 255)
+	buffer[1] = byte(l >> 56)
+	buffer[0] = byte(247 + 8)
+	return 9
 }

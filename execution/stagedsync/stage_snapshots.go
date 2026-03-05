@@ -50,21 +50,19 @@ import (
 )
 
 type SnapshotsCfg struct {
-	db          kv.TemporalRwDB
-	chainConfig *chain.Config
-	dirs        datadir.Dirs
-
+	db                 kv.TemporalRwDB
+	chainConfig        *chain.Config
+	dirs               datadir.Dirs
 	blockRetire        services.BlockRetire
 	snapshotDownloader downloader.Client
 	blockReader        services.FullBlockReader
 	notifier           *shards.Notifications
-
-	caplin      bool
-	blobs       bool
-	caplinState bool
-	silkworm    *silkworm.Silkworm
-	syncConfig  ethconfig.Sync
-	prune       prune.Mode
+	caplin             bool
+	blobs              bool
+	caplinState        bool
+	silkworm           *silkworm.Silkworm
+	syncConfig         ethconfig.Sync
+	prune              prune.Mode
 }
 
 // Returns a seeder client for block management, a noop implementation if no downloader is attached.
@@ -109,14 +107,6 @@ func StageSnapshotsCfg(db kv.TemporalRwDB,
 }
 
 func SpawnStageSnapshots(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, logger log.Logger) (err error) {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
 	if err := DownloadAndIndexSnapshotsIfNeed(s, ctx, tx, cfg, logger); err != nil {
 		return err
 	}
@@ -140,11 +130,6 @@ func SpawnStageSnapshots(s *StageState, ctx context.Context, tx kv.RwTx, cfg Sna
 			return err
 		}
 	}
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
 
 	// call this after the tx is commited otherwise observing
 	// components see an inconsistent db view
@@ -163,23 +148,13 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return nil
 	}
 
-	diaglib.Send(diaglib.CurrentSyncStage{Stage: string(stages.Snapshots)})
-
 	cstate := snapshotsync.NoCaplin
 	if cfg.caplin {
 		cstate = snapshotsync.AlsoCaplin
 	}
 
-	subStages := diaglib.InitSubStagesFromList([]string{"Download header-chain", "Download snapshots", "E2 Indexing", "E3 Indexing", "Fill DB"})
-	diaglib.Send(diaglib.SetSyncSubStageList{
-		Stage: string(stages.Snapshots),
-		List:  subStages,
-	})
-
 	log.Info("[OtterSync] Starting Ottersync")
-	log.Info(snapshotsync.GreatOtterBanner)
 
-	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "Download header-chain"})
 	agg := cfg.db.(*temporal.DB).Agg().(*state.Aggregator)
 	// Download only the snapshots that are for the header chain.
 
@@ -202,6 +177,12 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cfg.syncConfig,
 		agg.StepSize(),
 	); err != nil {
+		return err
+	}
+
+	// Reload erigondb settings: the downloader should have provided the real erigondb.toml
+	// during header-chain phase, which may have a different stepSize than the default.
+	if err := agg.ReloadErigonDBSettings(cfg.snapshotDownloader == nil); err != nil {
 		return err
 	}
 
@@ -266,14 +247,16 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cfg.notifier.Events.OnNewSnapshot()
 	}
 
-	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "E2 Indexing"})
-	if err := cfg.blockRetire.BuildMissedIndicesIfNeed(ctx, s.LogPrefix(), cfg.notifier.Events); err != nil {
+	headersProgress, err := stages.GetStageProgress(tx, stages.Headers)
+	if err != nil {
+		return fmt.Errorf("getting headers progress for indexing decision: %w", err)
+	}
+
+	if err := buildOrDeferE2Indices(ctx, s, cfg, headersProgress); err != nil {
 		return err
 	}
 
-	indexWorkers := estimate.IndexSnapshot.Workers()
-	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "E3 Indexing"})
-	if err := agg.BuildMissedAccessors(ctx, indexWorkers); err != nil {
+	if err := buildOrDeferE3Accessors(ctx, s, cfg, agg, headersProgress); err != nil {
 		return err
 	}
 
@@ -325,6 +308,52 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		})
 	}
 
+	return nil
+}
+
+// buildOrDeferE2Indices decides whether to build E2 block snapshot indices synchronously
+// or defer them to background processing.
+// On restart (headersProgress > 0), E2 indexing is skipped at startup. Missing indices
+// will be built in the background via RetireBlocksInBackground (called from SnapshotsPrune
+// on every sync cycle).
+// Exception: Bor chains always index synchronously because RetireBlocks has an early-exit
+// guard for Bor data readiness that may skip BuildMissedIndicesIfNeed.
+func buildOrDeferE2Indices(ctx context.Context, s *StageState, cfg SnapshotsCfg, headersProgress uint64) error {
+	isBor := cfg.chainConfig.Bor != nil
+	canDefer := headersProgress > 0 && !isBor
+
+	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "E2 Indexing"})
+	if !canDefer {
+		if err := cfg.blockRetire.BuildMissedIndicesIfNeed(ctx, s.LogPrefix(), cfg.notifier.Events); err != nil {
+			return err
+		}
+	} else {
+		log.Info(fmt.Sprintf("[%s] Deferring E2 indexing to background", s.LogPrefix()), "reason", "restart", "headersProgress", headersProgress)
+	}
+	return nil
+}
+
+// buildOrDeferE3Accessors decides whether to build E3 state accessors synchronously
+// or defer them to background processing.
+// On restart (headersProgress > 0), E3 indexing is skipped at startup. Missing accessors
+// will be built in the background via BuildMissedAccessorsInBackground (called from
+// SnapshotsPrune on every sync cycle).
+// Unindexed state files are safely excluded from visible files by checkForVisibility
+// (which checks accessor presence), so queries correctly reflect only indexed data.
+// Note: unlike E2, there is no Bor exception — the background path calls
+// BuildMissedAccessors directly without any Bor-specific early-exit guards.
+func buildOrDeferE3Accessors(ctx context.Context, s *StageState, cfg SnapshotsCfg, agg *state.Aggregator, headersProgress uint64) error {
+	canDefer := headersProgress > 0
+
+	indexWorkers := estimate.IndexSnapshot.Workers()
+	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "E3 Indexing"})
+	if !canDefer {
+		if err := agg.BuildMissedAccessors(ctx, indexWorkers); err != nil {
+			return err
+		}
+	} else {
+		log.Info(fmt.Sprintf("[%s] Deferring E3 indexing to background", s.LogPrefix()), "reason", "restart", "headersProgress", headersProgress)
+	}
 	return nil
 }
 
@@ -382,15 +411,6 @@ func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader services
 
 // SnapshotsPrune moving block data from db into snapshots, removing old snapshots (if --prune.* enabled)
 func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx, logger log.Logger) (err error) {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-
 	freezingCfg := cfg.blockReader.FreezingCfg()
 	if freezingCfg.ProduceE2 {
 		//TODO: initialSync maybe save files progress here
@@ -426,6 +446,15 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 		}
 	}
 
+	// Build any missed E3 state accessors in the background.
+	// This is the counterpart to RetireBlocksInBackground → BuildMissedIndicesIfNeed for E2.
+	// On restart, buildOrDeferE3Accessors skips synchronous accessor building;
+	// this call ensures missing accessors are rebuilt in the background on every sync cycle.
+	if freezingCfg.ProduceE3 {
+		agg := cfg.db.(state.HasAgg).Agg().(*state.Aggregator)
+		agg.BuildMissedAccessorsInBackground(estimate.IndexSnapshot.Workers())
+	}
+
 	pruneLimit := 10
 	pruneTimeout := 125 * time.Millisecond
 	if s.CurrentSyncCycle.IsInitialCycle {
@@ -438,13 +467,6 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 	if err := pruneCanonicalMarkers(ctx, tx, cfg.blockReader); err != nil {
 		return err
 	}
-
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 

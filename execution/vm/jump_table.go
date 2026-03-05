@@ -26,8 +26,10 @@ import (
 )
 
 type (
-	executionFunc func(pc uint64, interpreter *EVMInterpreter, callContext *CallContext) (uint64, []byte, error)
-	gasFunc       func(*EVM, *CallContext, uint64, uint64) (uint64, error) // last parameter is the requested memory size as a uint64
+	executionFunc    func(pc uint64, evm *EVM, callContext *CallContext) (uint64, []byte, error)
+	gasFunc          func(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error)
+	statelessGasFunc func(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64, withCallGasCalc bool) (uint64, bool, error)
+	statefulGasFunc  func(evm *EVM, callContext *CallContext, gas uint64, availableGas uint64, transfersValue bool) (uint64, error)
 	// memorySizeFunc returns the required size, and whether the operation overflowed a uint64
 	memorySizeFunc func(*CallContext) (size uint64, overflow bool)
 	stringer       func(pc uint64, callContext *CallContext) string
@@ -67,6 +69,7 @@ var (
 	cancunInstructionSet           = newCancunInstructionSet()
 	pragueInstructionSet           = newPragueInstructionSet()
 	osakaInstructionSet            = newOsakaInstructionSet()
+	amsterdamInstructionSet        = newAmsterdamInstructionSet()
 )
 
 // JumpTable contains the EVM opcodes supported at a given fork.
@@ -88,6 +91,21 @@ func validateAndFillMaxStack(jt *JumpTable) {
 		}
 		op.maxStack = maxStack(op.numPop, op.numPush)
 	}
+}
+
+func newAmsterdamInstructionSet() JumpTable {
+	instructionSet := newOsakaInstructionSet()
+	enable8024(&instructionSet) // EIP-8024 (DUPN, SWAPN, EXCHANGE)
+	enable7843(&instructionSet) // EIP-7843 (SLOTNUM)
+	validateAndFillMaxStack(&instructionSet)
+	return instructionSet
+}
+
+func newOsakaInstructionSet() JumpTable {
+	instructionSet := newPragueInstructionSet()
+	enable7939(&instructionSet) // EIP-7939 (CLZ opcode)
+	validateAndFillMaxStack(&instructionSet)
+	return instructionSet
 }
 
 // newPragueInstructionSet returns the frontier, homestead, byzantium,
@@ -285,13 +303,6 @@ func newHomesteadInstructionSet() JumpTable {
 		memorySize:  memoryDelegateCall,
 		string:      stDelegateCall,
 	}
-	validateAndFillMaxStack(&instructionSet)
-	return instructionSet
-}
-
-func newOsakaInstructionSet() JumpTable {
-	instructionSet := newPragueInstructionSet()
-	enable7939(&instructionSet) // EIP-7939 (CLZ opcode)
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }

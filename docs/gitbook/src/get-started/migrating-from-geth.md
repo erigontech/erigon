@@ -2,6 +2,10 @@
 description: >-
   How to perform a smooth and quick transition from Geth or another Execution
   Layer (Nethermind, Reth, Besu) to Erigon.
+metaLinks:
+  alternates:
+    - >-
+      https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/get-started/migrating-from-geth
 ---
 
 # Migrating from Geth
@@ -38,16 +42,18 @@ This path offers the simplest validator configuration by using Erigon's embedded
 **Steps for Minimal Downtime**
 
 1. **Preparation**: [Install](installation/) Erigon.
-2.  **Configuration Check** (No Conflict): Ensure Erigon's standard [ports](../fundamentals/default-ports.md) (JSON-RPC, P2P) are different from Geth's. These ports are configured via command-line options: `--port <port>` and `--p2p.listen-addr <IP:port>`. For example:
+2. **Configuration Check** (No Conflict): Ensure Erigon's standard [ports](../fundamentals/default-ports.md) (JSON-RPC,
+   P2P) are different from Geth's. These ports are configured via the `--port` and `--p2p.allowed-ports` command-line
+   options. For example:
 
     ```sh
     erigon \
       --datadir=/data/erigon \
       --chain=mainnet \
-      --port: 30304 \
-      --p2p.allowed-ports: 30310, 30311, 30312, 30313, 30314, 30315, 30316
+      --port=30304 \
+      --p2p.allowed-ports=30310,30311,30312,30313,30314,30315,30316
     ```
-3. **Synchronization**: Start syncing Erigon. Monitor the sync status using the `eth_syncing` JSON-[RPC method](../interacting-with-erigon/README.md) or a health check.
+3. **Synchronization**: Start syncing Erigon. Monitor the sync status using the `eth_syncing` JSON-[RPC method](../interacting-with-erigon/) or a health check.
 4. **Validator Swap**: Once Erigon is fully synced, shut down Geth and the external CL client.
 5. **Reconfiguration and Restart**:
    * To restart Erigon, there's no need to specify `--port` or `--P2P.allowed-ports`. Refer to this [guide](../fundamentals/caplin.md) for additional Erigon + Caplin configuration recommendations.
@@ -61,14 +67,16 @@ Switch to an Erigon Execution Layer (EL) while keeping your current external Con
 **Steps for Minimal Downtime**
 
 1. **Preparation**: [Install](installation/) Erigon.
-2.  **Configuration Check**: run Erigon + Caplin simultaneously with Geth (or any other EL) for fast, parallel syncing and assign unique ports for its P2P networking (check which ports your present EL is using). For example:
+2. **Configuration Check**: run Erigon + Caplin simultaneously with Geth (or any other EL) for fast, parallel syncing
+   and assign unique ports for its P2P networking via `--port` and `--p2p.allowed-ports` (check which ports your present
+   EL is using). For example:
 
     ```sh
     erigon \
       --datadir=/data/erigon \
       --chain=mainnet \
-      --port: 30304 \
-      --p2p.allowed-ports: 30310, 30311, 30312, 30313, 30314, 30315, 30316
+      --port=30304 \
+      --p2p.allowed-ports=30310,30311,30312,30313,30314,30315,30316
     ```
 3. **Synchronization**: Monitor the sync status using the `eth_syncing` JSON-RPC method or a health check.
 4. **Validator Swap**: Once Erigon is fully synced, **shut down** both Geth and Erigon. **Keep the external CL client running.**
@@ -128,4 +136,5 @@ This path retains your existing **external Consensus Layer (CL)** client (e.g., 
 
 ***
 
-See [Basic Usage](../fundamentals/basic-usage.md) and [Configuring Erigon](../fundamentals/configuring-erigon.md) for more details on available options.
+See [Basic Usage](../fundamentals/basic-usage.md) and [Configuring Erigon](../fundamentals/configuring-erigon/) for more details on available options.
+

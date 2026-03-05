@@ -23,6 +23,7 @@ import (
 	"context"
 	"math/rand"
 	"net"
+	"net/netip"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -33,12 +34,12 @@ import (
 )
 
 func newLocalNodeForTesting(tmpDir string, logger log.Logger) (*LocalNode, *DB) {
-	db, err := OpenDB(context.Background(), "", tmpDir, logger)
+	db, err := OpenDBEx(context.Background(), "", tmpDir, logger)
 	if err != nil {
 		panic(err)
 	}
 	key, _ := crypto.GenerateKey()
-	return NewLocalNode(db, key, logger), db
+	return NewLocalNode(db, key), db
 }
 
 func TestLocalNode(t *testing.T) {
@@ -66,28 +67,27 @@ func TestLocalNodeSeqPersist(t *testing.T) {
 	ln, db := newLocalNodeForTesting(tmpDir, logger)
 	defer db.Close()
 
-	if s := ln.Node().Seq(); s != 1 {
-		t.Fatalf("wrong initial seq %d, want 1", s)
-	}
+	initialSeq := ln.Node().Seq()
 	ln.Set(enr.WithEntry("x", uint(1)))
-	if s := ln.Node().Seq(); s != 2 {
-		t.Fatalf("wrong seq %d after set, want 2", s)
+	if s := ln.Node().Seq(); s != initialSeq+1 {
+		t.Fatalf("wrong seq %d after set, want %d", s, initialSeq+1)
 	}
 
 	// Create a new instance, it should reload the sequence number.
 	// The number increases just after that because a new record is
 	// created without the "x" entry.
-	ln2 := NewLocalNode(db, ln.key, logger)
-	if s := ln2.Node().Seq(); s != 3 {
-		t.Fatalf("wrong seq %d on new instance, want 3", s)
+	ln2 := NewLocalNode(db, ln.key)
+	if s := ln2.Node().Seq(); s != initialSeq+2 {
+		t.Fatalf("wrong seq %d on new instance, want %d", s, initialSeq+2)
 	}
 
 	// Create a new instance with a different node key on the same database.
-	// This should reset the sequence number.
+	// This should reset the sequence number, but the new initial seq is
+	// time-based, so just check it's greater than zero.
 	key, _ := crypto.GenerateKey()
-	ln3 := NewLocalNode(db, key, logger)
-	if s := ln3.Node().Seq(); s != 1 {
-		t.Fatalf("wrong seq %d on instance with changed key, want 1", s)
+	ln3 := NewLocalNode(db, key)
+	if s := ln3.Node().Seq(); s == 0 {
+		t.Fatalf("wrong seq %d on instance with changed key, want > 0", s)
 	}
 }
 
@@ -104,34 +104,36 @@ func TestLocalNodeEndpoint(t *testing.T) {
 	defer db.Close()
 
 	// Nothing is set initially.
+	initialSeq := ln.Node().Seq()
 	assert.Equal(t, net.IP(nil), ln.Node().IP())
 	assert.Equal(t, 0, ln.Node().UDP())
-	assert.Equal(t, uint64(1), ln.Node().Seq())
 
 	// Set up fallback address.
 	ln.SetFallbackIP(fallback.IP)
 	ln.SetFallbackUDP(fallback.Port)
 	assert.Equal(t, fallback.IP, ln.Node().IP())
 	assert.Equal(t, fallback.Port, ln.Node().UDP())
-	assert.Equal(t, uint64(2), ln.Node().Seq())
+	assert.Equal(t, initialSeq+1, ln.Node().Seq())
 
 	// Add endpoint statements from random hosts.
 	for i := 0; i < iptrackMinStatements; i++ {
 		assert.Equal(t, fallback.IP, ln.Node().IP())
 		assert.Equal(t, fallback.Port, ln.Node().UDP())
-		assert.Equal(t, uint64(2), ln.Node().Seq())
+		assert.Equal(t, initialSeq+1, ln.Node().Seq())
 
-		from := &net.UDPAddr{IP: make(net.IP, 4), Port: 90}
-		rand.Read(from.IP)
-		ln.UDPEndpointStatement(from, predicted)
+		fromIP := make(net.IP, 4)
+		rand.Read(fromIP)
+		fromAddr := netip.AddrPortFrom(netip.AddrFrom4([4]byte(fromIP)), 90)
+		predictedAddr := netip.AddrPortFrom(netip.AddrFrom4([4]byte(predicted.IP.To4())), uint16(predicted.Port))
+		ln.UDPEndpointStatement(fromAddr, predictedAddr)
 	}
 	assert.Equal(t, predicted.IP, ln.Node().IP())
 	assert.Equal(t, predicted.Port, ln.Node().UDP())
-	assert.Equal(t, uint64(3), ln.Node().Seq())
+	assert.Equal(t, initialSeq+2, ln.Node().Seq())
 
 	// Static IP overrides prediction.
 	ln.SetStaticIP(staticIP)
 	assert.Equal(t, staticIP, ln.Node().IP())
 	assert.Equal(t, fallback.Port, ln.Node().UDP())
-	assert.Equal(t, uint64(4), ln.Node().Seq())
+	assert.Equal(t, initialSeq+3, ln.Node().Seq())
 }

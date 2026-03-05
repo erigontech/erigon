@@ -198,7 +198,7 @@ var Schema = SchemaGen{
 
 		Hist: HistCfg{
 			ValuesTable:   kv.TblAccountHistoryVals,
-			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressNone,
+			CompressorCfg: seg.DefaultCfg.WithValuesOnCompressedPage(64), Compression: seg.CompressNone,
 			Accessors: AccessorHashMap,
 
 			HistoryLargeValues: false,

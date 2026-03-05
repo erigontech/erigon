@@ -38,47 +38,8 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 )
-
-var GreatOtterBanner = `
-   _____ _             _   _                ____  _   _                                       
-  / ____| |           | | (_)              / __ \| | | |                                      
- | (___ | |_ __ _ _ __| |_ _ _ __   __ _  | |  | | |_| |_ ___ _ __ ___ _   _ _ __   ___       
-  \___ \| __/ _ | '__| __| | '_ \ / _ | | |  | | __| __/ _ \ '__/ __| | | | '_ \ / __|      
-  ____) | || (_| | |  | |_| | | | | (_| | | |__| | |_| ||  __/ |  \__ \ |_| | | | | (__ _ _ _ 
- |_____/ \__\__,_|_|   \__|_|_| |_|\__, |  \____/ \__|\__\___|_|  |___/\__, |_| |_|\___(_|_|_)
-                                    __/ |                               __/ |                 
-                                   |___/                               |___/                                            
-
-
-                                        .:-===++**++===-:                                 
-                                   :=##%@@@@@@@@@@@@@@@@@@%#*=.                           
-                               .=#@@@@@@%##+====--====+##@@@@@@@#=.     ...               
-                   .=**###*=:+#@@@@%*=:.                  .:=#%@@@@#==#@@@@@%#-           
-                 -#@@@@%%@@@@@@%+-.                            .=*%@@@@#*+*#@@@%=         
-                =@@@*:    -%%+:                                    -#@+.     =@@@-        
-                %@@#     +@#.                                        :%%-     %@@*        
-                @@@+    +%=.     -+=                        :=-       .#@-    %@@#        
-                *@@%:  #@-      =@@@*                      +@@@%.       =@= -*@@@:        
-                 #@@@##@+       #@@@@.                     %@@@@=        #@%@@@#-         
-                  :#@@@@:       +@@@#       :=++++==-.     *@@@@:        =@@@@-           
-                  =%@@%=         +#*.    =#%#+==-==+#%%=:  .+#*:         .#@@@#.          
-                 +@@%+.               .+%+-.          :=##-                :#@@@-         
-                -@@@=                -%#:     ..::.      +@*                 +@@%.        
-    .::-========*@@@..              -@#      +%@@@@%.     -@#               .-@@@+=======-
-.:-====----:::::#@@%:--=::::..      #@:      *@@@@@%:      *@=      ..:-:-=--:@@@+::::----
-                =@@@:.......        @@        :+@#=.       -@+        .......-@@@:        
-       .:=++####*%@@%=--::::..      @@   %#     %*    :@*  -@+      ...::---+@@@#*#*##+=-:
-  ..--==::..     :%@@@-   ..:::..   @@   +@*:.-#@@+-.-#@-  -@+   ..:::..  .+@@@#.     ..:-
-                  .#@@@##-:.        @@    :+#@%=.:+@@#=.   -@+        .-=#@@@@+           
-             -=+++=--+%@@%+=.       @@       +%*=+#%-      -@+       :=#@@@%+--++++=:     
-         .=**=:.      .=*@@@@@#=:.  @@         :--.        -@+  .-+#@@@@%+:       .:=*+-. 
-        ::.              .=*@@@@@@%#@@+=-:..         ..::=+#@%#@@@@@@%+-.             ..-.
-                            ..=*#@@@@@@@@@@@@@@@%%@@@@@@@@@@@@@@%#+-.                     
-                                  .:-==++*#######%######**+==-:                           
-
-             
-`
 
 type CaplinMode int
 
@@ -347,7 +308,7 @@ func SyncSnapshots(
 	if blockReader.FreezingCfg().NoDownloader || snapshotDownloader == nil {
 		return nil
 	}
-	snapCfg, _ := snapcfg.KnownCfg(cc.ChainName)
+	snapCfg := snapcfg.KnownCfgOrDevnet(cc.ChainName)
 	// Skip getMinimumBlocksToDownload if we can because it's slow.
 	if snapCfg.Local {
 		// This belongs higher up the call chain.
@@ -451,7 +412,7 @@ func SyncSnapshots(
 				continue
 			}
 			if headerchain &&
-				!(strings.Contains(p.Name, "headers") || strings.Contains(p.Name, "bodies") || p.Name == "salt-blocks.txt") {
+				!(strings.Contains(p.Name, "headers") || strings.Contains(p.Name, "bodies") || p.Name == "salt-blocks.txt" || p.Name == "erigondb.toml") {
 				continue
 			}
 			if !syncCfg.KeepExecutionProofs && isStateHistory(p.Name) && strings.Contains(p.Name, kv.CommitmentDomain.String()) {
@@ -497,9 +458,12 @@ func SyncSnapshots(
 				break
 			}
 			if ctx.Err() != nil {
-				return context.Cause(ctx)
+				return err
 			}
-			log.Error(fmt.Sprintf("[%s] call downloader", logPrefix), "err", err)
+			if !grpcutil.IsRetryLater(err) {
+				return err
+			}
+			log.Error(fmt.Sprintf("[%s] error requesting snapshots download from downloader", logPrefix), "err", err)
 			select {
 			case <-ctx.Done():
 				return context.Cause(ctx)

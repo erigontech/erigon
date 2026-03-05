@@ -28,54 +28,35 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
+	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
-	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
 type TxLookupCfg struct {
-	db          kv.RwDB
 	prune       prune.Mode
 	tmpdir      string
-	borConfig   *borcfg.BorConfig
 	blockReader services.FullBlockReader
 }
 
 func StageTxLookupCfg(
-	db kv.RwDB,
 	prune prune.Mode,
 	tmpdir string,
-	borConfigInterface chain.BorConfig,
 	blockReader services.FullBlockReader,
 ) TxLookupCfg {
-	var borConfig *borcfg.BorConfig
-	if borConfigInterface != nil {
-		borConfig = borConfigInterface.(*borcfg.BorConfig)
-	}
-
 	return TxLookupCfg{
-		db:          db,
 		prune:       prune,
 		tmpdir:      tmpdir,
-		borConfig:   borConfig,
 		blockReader: blockReader,
 	}
 }
 
 func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, ctx context.Context, logger log.Logger) (err error) {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
 	logPrefix := s.LogPrefix()
 	endBlock, err := s.ExecutionAt(tx)
 	if err != nil {
@@ -125,13 +106,6 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 			return fmt.Errorf("txnLookupIntegrity: %w", err)
 		}
 	}
-
-	if !useExternalTx {
-		if err = tx.Commit(); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 
@@ -209,14 +183,6 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 	if s.BlockNumber <= u.UnwindPoint {
 		return nil
 	}
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
 
 	// end key needs to be s.BlockNumber + 1 and not s.BlockNumber, because
 	// the keys in BlockBody table always have hash after the block number
@@ -231,24 +197,11 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 	if err := u.Done(tx); err != nil {
 		return err
 	}
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
 func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Context, logger log.Logger) (err error) {
 	logPrefix := s.LogPrefix()
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
 	blockFrom := s.PruneProgress
 	if blockFrom == 0 {
 		firstNonGenesisHeader, err := rawdbv3.SecondKey(tx, kv.Headers)
@@ -274,45 +227,75 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 		blockTo = cfg.blockReader.CanPruneTo(s.ForwardProgress)
 	}
 
-	pruneTimeout := time.Hour // aggressive pruning at non-chain-tip
-	if !s.CurrentSyncCycle.IsInitialCycle {
-		pruneTimeout = 250 * time.Millisecond
-		// can't prune much on non-chain-tip: because tx_lookup has crypto-hashed-keys. 1 block producing hundreds of random deletes: ~2pages updated per delete
-		blockTo = min(blockTo, blockFrom+10)
+	if blockFrom >= blockTo {
+		return nil
 	}
 
-	if blockFrom < blockTo {
-		logEvery := time.NewTicker(logInterval)
-		defer logEvery.Stop()
+	txNumReader := cfg.blockReader.TxnumReader()
+	txFrom, err := txNumReader.Min(ctx, tx, blockFrom)
+	if err != nil {
+		return fmt.Errorf("txNumReader.Min(%d): %w", blockFrom, err)
+	}
+	txTo, err := txNumReader.Max(ctx, tx, blockTo)
+	if err != nil {
+		return fmt.Errorf("txNumReader.Max(%d): %w", blockTo, err)
+	}
+	if txFrom >= txTo {
+		return nil
+	}
 
-		t := time.Now()
-		var pruneBlockNum = blockFrom
-		for ; pruneBlockNum < blockTo; pruneBlockNum++ {
-			select {
-			case <-logEvery.C:
-				logger.Info(fmt.Sprintf("[%s] progress", logPrefix), "blockNum", pruneBlockNum)
-			default:
-			}
+	prevStat, err := state.GetPruneValProgress(tx, []byte(kv.TxLookup))
+	if err != nil {
+		return err
+	}
+	if prevStat != nil && prevStat.TxFrom == txFrom && prevStat.TxTo == txTo && prevStat.ValueProgress == prune.Done {
+		return nil
+	}
+	if prevStat == nil {
+		prevStat = &prune.Stat{}
+	}
 
-			err = deleteTxLookupRange(tx, logPrefix, pruneBlockNum, pruneBlockNum+1, ctx, cfg, logger)
-			if err != nil {
-				return fmt.Errorf("prune TxLookUp: %w", err)
-			}
+	valsRwCursor, err := tx.RwCursor(kv.TxLookup)
+	if err != nil {
+		return fmt.Errorf("create TxLookup cursor: %w", err)
+	}
+	defer valsRwCursor.Close()
+	var valsCursor kv.PseudoDupSortRwCursor
+	switch c := valsRwCursor.(type) {
+	case *mdbx2.MdbxCursor:
+		valsCursor = &mdbx2.MdbxCursorPseudoDupSort{MdbxCursor: c}
+	default:
+		return fmt.Errorf("unexpected cursor type %T for table %s", valsRwCursor, kv.TxLookup)
+	}
 
-			if time.Since(t) > pruneTimeout {
-				break
-			}
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+
+	pruneTimeout := 2 * time.Second
+	if s.CurrentSyncCycle.IsInitialCycle {
+		pruneTimeout = time.Hour
+	}
+	pruneCtx, pruneCancel := context.WithTimeout(ctx, pruneTimeout)
+	defer pruneCancel()
+
+	pruneStat, err := prune.TableScanningPrune(pruneCtx, logPrefix, "txlookup", txFrom, txTo, 0, 1,
+		logEvery, logger, nil, valsCursor, false, prevStat, prune.ValueOffset8StorageMode)
+	if err != nil {
+		return fmt.Errorf("prune TxLookup: %w", err)
+	}
+	defer func() {
+		pruneStat.TxFrom, pruneStat.TxTo = txFrom, txTo
+		if e := state.SavePruneValProgress(tx, kv.TxLookup, pruneStat); e != nil {
+			logger.Error("[snapshots] save prune val progress", "name", "txlookup", "err", e)
 		}
-		if err = s.DoneAt(tx, pruneBlockNum); err != nil {
+	}()
+
+	if pruneStat.ValueProgress == prune.Done {
+		if err = s.DoneAt(tx, blockTo); err != nil {
 			return err
 		}
 	}
 
-	if !useExternalTx {
-		if err = tx.Commit(); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 

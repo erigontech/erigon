@@ -1,5 +1,8 @@
 ---
 description: Command Line Usage and Basic Erigon Configuration
+metaLinks:
+  alternates:
+    - https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/fundamentals/basic-usage
 ---
 
 # Basic Usage
@@ -16,7 +19,7 @@ erigon [options]
 {% endtab %}
 
 {% tab title="Docker" %}
-* You can use Docker Compose like in this [example](../get-started/easy-nodes/how-to-run-an-ethereum-node/README.md#id-2.-configure-and-launch-erigon)
+* You can use Docker Compose like in this [example](../get-started/easy-nodes/how-to-run-an-ethereum-node/#id-2.-configure-and-launch-erigon)
 *   Alternatively you can use the Docker syntax, for example:
 
     `docker run -it erigontech/erigon:v3.2.2 [options]`
@@ -92,14 +95,15 @@ To run Erigon with RPCDaemon, TxPool, and other components in a single process i
 * `--log.dir.path` dictates where [logs](logs.md) will be output - useful for sending reports to the Erigon team when issues occur.
 * Based on the [sync mode](sync-modes.md) you want to run you can add `--prune.mode=archive` to run a archive node, `--prune.mode=full` for a full node (default value) or `--prune.mode=minimal` for a minimal node.
 * `--http.addr="0.0.0.0" --http.api=eth,web3,net,debug,trace,txpool` to use [RPC Service](../interacting-with-erigon/) and e.g. be able to connect your [wallet](web3-wallet.md).
-* `--torrent.download.rate=512mb` to increase download speed. While the default downloading speed is 128mb, with this flag Erigon will use as much download speed as it can, up to a maximum of 512 megabytes per second. This means it will try to download data as quickly as possible, but it won't exceed the 512 MB/s limit you've set.
+* `--torrent.download.rate=512mb` sets the maximum download speed. The default is `512mb`. You can lower this value to
+  limit bandwidth usage, for example `--torrent.download.rate=128mb` to cap downloads at 128 MB/s.
 
 To stop the Erigon node you can use the `CTRL+C` command.
 
 Additional flags can be added to configure the node with several options.
 
-{% content-ref url="configuring-erigon.md" %}
-[configuring-erigon.md](configuring-erigon.md)
+{% content-ref url="configuring-erigon/" %}
+[configuring-erigon](configuring-erigon/)
 {% endcontent-ref %}
 
 ## Help

@@ -1,5 +1,9 @@
 ---
 description: 'Optimizing Erigon Performance: Sync Speed, Cloud Drives, and Memory Tuning'
+metaLinks:
+  alternates:
+    - >-
+      https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/fundamentals/performance-tricks
 ---
 
 # Performance Tricks
@@ -14,7 +18,8 @@ These instructions are designed to improve the performance of Erigon 3, particul
 --sync.loop.block.limit=10_000 --batchSize=2g
 ```
 
-* Increase download speed with flag `--torrent.download.rate=[value]` setting your max speed (default value is 128MB). For example:
+* Adjust download speed with flag `--torrent.download.rate=[value]` setting your max speed (default value is `512mb`).
+  For example:
 
 ```bash
 --torrent.download.rate=512mb

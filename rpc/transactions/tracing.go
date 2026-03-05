@@ -22,8 +22,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
 	"time"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
@@ -110,7 +111,7 @@ func TraceTx(
 	message protocol.Message,
 	blockCtx evmtypes.BlockContext,
 	txCtx evmtypes.TxContext,
-	blockNumber *big.Int,
+	blockNumber *uint256.Int,
 	blockHash common.Hash,
 	txnIndex int,
 	ibs *state.IntraBlockState,
@@ -142,11 +143,11 @@ func TraceTx(
 			return result, err
 		} else {
 			if tracer != nil && tracer.OnTxEnd != nil {
-				tracer.OnTxEnd(&types.Receipt{GasUsed: result.GasUsed}, nil)
+				tracer.OnTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, nil)
 			}
 		}
 
-		gasUsed = result.GasUsed
+		gasUsed = result.ReceiptGasUsed
 		return result, err
 	}
 
@@ -158,7 +159,7 @@ func AssembleTracer(
 	ctx context.Context,
 	config *tracersConfig.TraceConfig,
 	txHash common.Hash,
-	blockNumber *big.Int,
+	blockNumber *uint256.Int,
 	blockHash common.Hash,
 	txnIndex int,
 	stream jsonstream.Stream,
@@ -242,7 +243,7 @@ func ExecuteTraceTx(
 		stream.WriteArrayEnd()
 		stream.WriteMore()
 		stream.WriteObjectField("gas")
-		stream.WriteUint64(result.GasUsed)
+		stream.WriteUint64(result.ReceiptGasUsed)
 		stream.WriteMore()
 		stream.WriteObjectField("failed")
 		stream.WriteBool(result.Failed())

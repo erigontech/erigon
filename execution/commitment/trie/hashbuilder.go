@@ -22,8 +22,8 @@ import (
 	"io"
 	"math/bits"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
 	length2 "github.com/erigontech/erigon/common/length"
@@ -42,10 +42,10 @@ type HashBuilder struct {
 	hashStack []byte                // Stack of sub-slices, each 33 bytes each, containing RLP encodings of node hashes (or of nodes themselves, if shorter than 32 bytes)
 	nodeStack []Node                // Stack of nodes
 	acc       accounts.Account      // Working account instance (to avoid extra allocations)
-	sha       keccakState           // Keccak primitive that can absorb data (Write), and get squeezed to the hash out (Read)
+	sha       keccak.KeccakState    // Keccak primitive that can absorb data (Write), and get squeezed to the hash out (Read)
 	hashBuf   [hashStackStride]byte // RLP representation of hash (or un-hashes value)
 	keyPrefix [1]byte
-	lenPrefix [4]byte
+	lenPrefix [9]byte
 	valBuf    [128]byte // Enough to accommodate hash encoding of any account
 	b         [1]byte   // Buffer for single byte
 	prefixBuf [8]byte
@@ -62,7 +62,7 @@ type HashBuilder struct {
 // NewHashBuilder creates a new HashBuilder
 func NewHashBuilder(trace bool) *HashBuilder {
 	return &HashBuilder{
-		sha:             sha3.NewLegacyKeccak256().(keccakState),
+		sha:             keccak.NewFastKeccak(),
 		byteArrayWriter: &ByteArrayWriter{},
 		trace:           trace,
 	}
@@ -235,7 +235,6 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 	hb.acc.CodeHash = accounts.EmptyCodeHash
 	hb.acc.Nonce = nonce
 	hb.acc.Balance.Set(balance)
-	hb.acc.Initialised = true
 	hb.acc.Incarnation = incarnation
 
 	popped := 0
@@ -312,7 +311,6 @@ func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, balance *uint2
 	key := keyHex[len(keyHex)-length:]
 	hb.acc.Nonce = nonce
 	hb.acc.Balance.Set(balance)
-	hb.acc.Initialised = true
 	hb.acc.Incarnation = incarnation
 
 	popped := 0

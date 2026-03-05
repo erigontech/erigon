@@ -32,16 +32,17 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 func TestGasPrice(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 
 	cases := []struct {
 		description   string
@@ -64,7 +65,7 @@ func TestGasPrice(t *testing.T) {
 		t.Run(testCase.description, func(t *testing.T) {
 			m := createGasPriceTestKV(t, testCase.chainSize)
 			defer m.DB.Close()
-			eth := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
+			eth := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 
 			ctx := context.Background()
 			result, err := eth.GasPrice(ctx)
@@ -81,6 +82,9 @@ func TestGasPrice(t *testing.T) {
 }
 
 func TestEthConfig(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	toTimeArg := func(t hexutil.Uint64) *hexutil.Uint64 { return &t }
 	for _, test := range []struct {
@@ -154,7 +158,7 @@ func TestEthConfig(t *testing.T) {
 		{
 			name:                 "mainnet prague scheduled but not activated no osaka no bpos with head at shanghai",
 			genesisFilePath:      path.Join(".", "testdata", "eth_config", "mainnet_prague_scheduled_no_osaka_no_bpos_genesis.json"),
-			head:                 &types.Header{Number: big.NewInt(123), Time: 1710338135 - 1000},
+			head:                 &types.Header{Number: *uint256.NewInt(123), Time: 1710338135 - 1000},
 			wantResponseFilePath: path.Join(".", "testdata", "eth_config", "mainnet_prague_scheduled_no_osaka_no_bpos_response_head_at_shanghai.json"),
 		},
 		{
@@ -175,9 +179,9 @@ func TestEthConfig(t *testing.T) {
 			var genesis types.Genesis
 			err = json.Unmarshal(genesisBytes, &genesis)
 			require.NoError(t, err)
-			m := mock.MockWithGenesis(t, &genesis, key, false)
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&genesis), execmoduletester.WithKey(key))
 			defer m.Close()
-			eth := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000, ethconfig.Defaults.RPCTxFeeCap, 10_000, false, 10_000, 128, log.New())
+			eth := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 			if test.head != nil {
 				tx, err := m.DB.BeginTemporalRw(ctx)
 				require.NoError(t, err)
@@ -204,7 +208,7 @@ func TestEthConfig(t *testing.T) {
 	}
 }
 
-func createGasPriceTestKV(t *testing.T, chainSize int) *mock.MockSentry {
+func createGasPriceTestKV(t *testing.T, chainSize int) *execmoduletester.ExecModuleTester {
 	var (
 		key, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr   = crypto.PubkeyToAddress(key.PublicKey)
@@ -214,7 +218,7 @@ func createGasPriceTestKV(t *testing.T, chainSize int) *mock.MockSentry {
 		}
 		signer = types.LatestSigner(gspec.Config)
 	)
-	m := mock.MockWithGenesis(t, gspec, key, false)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
 	// Generate testing blocks
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(i int, b *blockgen.BlockGen) {

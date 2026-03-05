@@ -23,25 +23,12 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"sync"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/rlp"
 )
-
-type encodingBuf [32]byte
-
-var pooledBuf = sync.Pool{
-	New: func() any { return new(encodingBuf) },
-}
-
-func newEncodingBuf() *encodingBuf {
-	b := pooledBuf.Get().(*encodingBuf)
-	*b = encodingBuf([32]byte{}) // reset, do we need to?
-	return b
-}
 
 //go:generate gencodec -type Withdrawal -field-override withdrawalMarshaling -out gen_withdrawal_json.go
 

@@ -7,12 +7,11 @@ set -o pipefail
 OS_RELEASE_PATH=/etc/os-release
 
 function glibc_version {
-    cmd="ldd --version"
-    $cmd | head -1 | awk '{ print $NF }'
+    ldd --version 2>/dev/null | awk 'NR==1 { print $NF }'
 }
 
 function glibcpp_version {
-    link_path=$(/sbin/ldconfig -p | grep libstdc++ | awk '{ print $NF }' | head -1)
+    link_path=$(/sbin/ldconfig -p | awk '/libstdc++/ { print $NF; exit }')
     if [[ ! -L "$link_path" ]]
     then
         echo "0"
@@ -83,6 +82,9 @@ case $(uname -s) in
 
 		;;
 	Darwin)
+		;;
+	MINGW*|MSYS*)
+		echo "unsupported OS"
 		;;
 	*)
 		echo "unsupported OS"

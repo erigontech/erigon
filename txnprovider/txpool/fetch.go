@@ -229,8 +229,12 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 		}
 	}
 
-	// Start ticker goroutine to flush batch every second
-	ticker := time.NewTicker(1 * time.Second)
+	// Start ticker goroutine to flush batch.
+	// Reduced from 1s to 250ms to lower worst-case latency between receiving
+	// a POOLED_TRANSACTIONS_66 response and the transaction entering the pool.
+	// This matters for block builders that need freshly-gossiped transactions
+	// (e.g. multi-client blob tx ordering tests with a 2s payload window).
+	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 	go func() {
 		for {
@@ -549,16 +553,22 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remoteproto.
 	var unwindTxns, unwindBlobTxns, minedTxns TxnSlots
 	for _, change := range req.ChangeBatch {
 		if change.Direction == remoteproto.Direction_FORWARD {
-			minedTxns.Resize(uint(len(change.Txs)))
 			for i := range change.Txs {
-				minedTxns.Txns[i] = &TxnSlot{}
 				if err := f.threadSafeParseStateChangeTxn(func(parseContext *TxnParseContext) error {
-					_, err := parseContext.ParseTransaction(change.Txs[i], 0, minedTxns.Txns[i], minedTxns.Senders.At(i), false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
-					return err
+					utx := &TxnSlot{}
+					sender := make([]byte, 20)
+					_, err := parseContext.ParseTransaction(change.Txs[i], 0, utx, sender, false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
+					if err != nil {
+						return err
+					}
+					minedTxns.Append(utx, sender, false)
+					return nil
 				}); err != nil && !errors.Is(err, context.Canceled) {
-					f.logger.Debug("[txpool.fetch] stream.Recv", "err", err)
+					txnType, _ := PeekTransactionType(change.Txs[i])
+					f.logger.Debug("[txpool.fetch] stream.Recv", "dir", change.Direction, "txnType", txnType, "index", i, "err", err)
 					continue // 1 txn handling error must not stop batch processing
 				}
+
 			}
 		} else if change.Direction == remoteproto.Direction_UNWIND {
 			for i := range change.Txs {
@@ -576,7 +586,8 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remoteproto.
 					}
 					return nil
 				}); err != nil && !errors.Is(err, context.Canceled) {
-					f.logger.Debug("[txpool.fetch] stream.Recv", "err", err)
+					txnType, _ := PeekTransactionType(change.Txs[i])
+					f.logger.Debug("[txpool.fetch] stream.Recv", "dir", change.Direction, "txnType", txnType, "index", i, "err", err)
 					continue // 1 txn handling error must not stop batch processing
 				}
 			}

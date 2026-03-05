@@ -194,11 +194,6 @@ func (sc *sendersBatch) getID(addr common.Address) (uint64, bool) {
 	return id, ok
 }
 
-func (sc *sendersBatch) getAddr(id uint64) (common.Address, bool) {
-	addr, ok := sc.senderID2Addr[id]
-	return addr, ok
-}
-
 var traceAllSenders = false
 
 func (sc *sendersBatch) getOrCreateID(addr common.Address, logger log.Logger) (uint64, bool) {

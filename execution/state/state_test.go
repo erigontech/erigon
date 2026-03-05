@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -175,7 +176,6 @@ func TestSnapshotEmpty(t *testing.T) {
 // use testing instead of checker because checker does not support
 // printing/logging in tests (-check.vv does not work)
 func TestSnapshot2(t *testing.T) {
-	//TODO: why I shouldn't recreate writer here? And why domains.SetBlockNum(1) is enough for green test?
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
 
@@ -198,7 +198,7 @@ func TestSnapshot2(t *testing.T) {
 	state.SetState(stateobjaddr1, storageaddr, *data1)
 
 	// db, trie are already non-empty values
-	so0, err := state.getStateObject(stateobjaddr0)
+	so0, err := state.getStateObject(stateobjaddr0, true)
 	require.NoError(t, err)
 	so0.SetBalance(*uint256.NewInt(42), true, tracing.BalanceChangeUnspecified)
 	so0.SetNonce(43, true)
@@ -214,7 +214,7 @@ func TestSnapshot2(t *testing.T) {
 	require.NoError(t, err)
 
 	// and one with deleted == true
-	so1, err := state.getStateObject(stateobjaddr1)
+	so1, err := state.getStateObject(stateobjaddr1, true)
 	require.NoError(t, err)
 	so1.SetBalance(*uint256.NewInt(52), true, tracing.BalanceChangeUnspecified)
 	so1.SetNonce(53, true)
@@ -223,7 +223,7 @@ func TestSnapshot2(t *testing.T) {
 	so1.deleted = true
 	state.setStateObject(stateobjaddr1, so1)
 
-	so1, err = state.getStateObject(stateobjaddr1)
+	so1, err = state.getStateObject(stateobjaddr1, true)
 	require.NoError(t, err)
 	if so1 != nil && !so1.deleted {
 		t.Fatalf("deleted object not nil when getting")
@@ -233,7 +233,7 @@ func TestSnapshot2(t *testing.T) {
 	state.RevertToSnapshot(snapshot, nil)
 	state.PopSnapshot(snapshot)
 
-	so0Restored, err := state.getStateObject(stateobjaddr0)
+	so0Restored, err := state.getStateObject(stateobjaddr0, true)
 	require.NoError(t, err)
 	// Update lazily-loaded values before comparing.
 	so0Restored.GetState(storageaddr)
@@ -242,11 +242,63 @@ func TestSnapshot2(t *testing.T) {
 	compareStateObjects(so0Restored, so0, t)
 
 	// deleted should be nil, both before and after restore of state copy
-	so1Restored, err := state.getStateObject(stateobjaddr1)
+	so1Restored, err := state.getStateObject(stateobjaddr1, true)
 	require.NoError(t, err)
 	if so1Restored != nil && !so1Restored.deleted {
 		t.Fatalf("deleted object not nil after restoring snapshot: %+v", so1Restored)
 	}
+}
+
+func TestCodeResolve(t *testing.T) {
+	t.Parallel()
+	_, tx, domains := NewTestRwTx(t)
+
+	txNum := uint64(1)
+	err := rawdbv3.TxNums.Append(tx, 1, 1)
+	require.NoError(t, err)
+
+	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
+
+	state := New(NewReaderV3(domains.AsGetter(tx)))
+
+	stateobjaddr0 := toAddr([]byte("so0"))
+	stateobjaddr1 := toAddr([]byte("so1"))
+
+	so0, err := state.GetOrNewStateObject(stateobjaddr0)
+	require.NoError(t, err)
+	del := types.AddressToDelegation(stateobjaddr1)
+	so0.SetCode(accounts.InternCodeHash(crypto.Keccak256Hash(del)), del, true)
+	so0.selfdestructed = false
+	so0.deleted = false
+	state.setStateObject(stateobjaddr0, so0)
+
+	so1, err := state.GetOrNewStateObject(stateobjaddr1)
+	require.NoError(t, err)
+	target := []byte{'c', 'a', 'f', 'e'}
+	so1.SetCode(accounts.InternCodeHash(crypto.Keccak256Hash(target)), target, true)
+	so1.selfdestructed = false
+	so1.deleted = false
+	state.setStateObject(stateobjaddr1, so1)
+
+	err = state.FinalizeTx(&chain.Rules{}, w)
+	require.NoError(t, err)
+
+	err = state.CommitBlock(&chain.Rules{}, w)
+	require.NoError(t, err)
+
+	state1 := New(NewReaderV3(domains.AsGetter(tx)))
+	state1.SetVersionMap(&VersionMap{})
+	state1.Prepare(&chain.Rules{}, accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, nil, nil, nil)
+
+	_, ok, err := state1.GetDelegatedDesignation(stateobjaddr0)
+	require.NoError(t, err)
+	require.True(t, ok)
+	code, err := state1.GetCode(stateobjaddr0)
+	require.NoError(t, err)
+	require.Equal(t, del, code)
+	code, err = state1.ResolveCode(stateobjaddr0)
+	require.NoError(t, err)
+	require.Equal(t, target, code)
 }
 
 func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
@@ -306,6 +358,7 @@ func NewTestRwTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.Shar
 
 	stepSize := uint64(16)
 	db := temporaltest.NewTestDBWithStepSize(tb, dirs, stepSize)
+	tb.Cleanup(db.Close)
 	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 	require.NoError(tb, err)
 	tb.Cleanup(tx.Rollback)
@@ -320,8 +373,10 @@ func NewTestRwTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.Shar
 func TestDump(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
+	txNum, _, err := domains.SeekCommitment(t.Context(), tx)
+	require.NoError(t, err)
 
-	err := rawdbv3.TxNums.Append(tx, 1, 1)
+	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
 	st := New(NewReaderV3(domains.AsGetter(tx)))
@@ -338,7 +393,7 @@ func TestDump(t *testing.T) {
 	require.NoError(t, err)
 	obj3.SetBalance(*uint256.NewInt(44), true, tracing.BalanceChangeUnspecified)
 
-	w := NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
+	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 	// write some of them to the trie
 	err = w.UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
 	require.NoError(t, err)
@@ -347,7 +402,7 @@ func TestDump(t *testing.T) {
 	err = st.FinalizeTx(&chain.Rules{}, w)
 	require.NoError(t, err)
 
-	blockWriter := NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
+	blockWriter := NewWriter(domains.AsPutDel(tx), nil, txNum)
 	err = st.CommitBlock(&chain.Rules{}, blockWriter)
 	require.NoError(t, err)
 	err = domains.Flush(context.Background(), tx)

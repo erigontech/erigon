@@ -332,7 +332,7 @@ func (rw *Worker) RunTxTask(txTask Task) (result *TxResult) {
 		rw.notifier.Wait()
 	}
 
-	if rw.metrics != nil {
+	if rw.metrics != nil && dbg.KVReadLevelledMetrics {
 		rw.metrics.Active.Add(1)
 		start := time.Now()
 		defer func() {
@@ -348,7 +348,7 @@ func (rw *Worker) RunTxTask(txTask Task) (result *TxResult) {
 				rw.metrics.CodeReadCount.Add(rw.ibs.CodeReadCount())
 			}
 			if result != nil {
-				rw.metrics.GasUsed.Add(int64(result.ExecutionResult.GasUsed))
+				rw.metrics.GasUsed.Add(int64(result.ExecutionResult.BlockGasUsed))
 			}
 			rw.metrics.Active.Add(-1)
 		}()

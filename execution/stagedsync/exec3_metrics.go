@@ -455,6 +455,11 @@ func NewProgress(initialBlockNum, initialTxNum, commitThreshold uint64, updateMe
 }
 
 type Progress struct {
+	// mu protects all prev* fields accessed concurrently from the commit-logger
+	// goroutine (func1.2 inside parallelExecutor.exec) and the outer exec()
+	// function after pe.wait() returns. The commit-logger goroutine may still
+	// be running when the outer exec calls LogCommitments for the final summary.
+	mu                             sync.Mutex
 	initialTime                    time.Time
 	initialTxNum                   uint64
 	initialBlockNum                uint64
@@ -591,8 +596,8 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 
 	curTaskGasPerSec := int64(float64(curTaskGas) / seconds)
 
-	uncommitedGas := uint64(te.executedGas.Load() - te.committedGas)
-	sizeEstimate := rs.SizeEstimate()
+	uncommitedGas := uint64(te.executedGas.Load() - te.committedGas.Load())
+	sizeEstimate := rs.SizeEstimateBeforeCommitment()
 
 	switch ex.(type) {
 	case *parallelExecutor:
@@ -725,6 +730,9 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 }
 
 func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, commitStart time.Time, stepsInDb float64, lastProgress commitment.CommitProgress) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	var te *txExecutor
 	var suffix string
 
@@ -745,12 +753,12 @@ func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, commitStart ti
 	currentTime := time.Now()
 	interval := currentTime.Sub(p.prevCommitTime)
 
-	committedGasSec := uint64(float64(te.committedGas-p.prevCommittedGas) / interval.Seconds())
+	committedGasSec := uint64(float64(te.committedGas.Load()-p.prevCommittedGas) / interval.Seconds())
 	var committedTxSec uint64
-	if te.lastCommittedTxNum > p.prevCommittedTxNum {
-		committedTxSec = uint64(float64(te.lastCommittedTxNum-p.prevCommittedTxNum) / interval.Seconds())
+	if te.lastCommittedTxNum.Load() > p.prevCommittedTxNum {
+		committedTxSec = uint64(float64(te.lastCommittedTxNum.Load()-p.prevCommittedTxNum) / interval.Seconds())
 	}
-	committedDiffBlocks := max(int64(te.lastCommittedBlockNum)-int64(p.prevCommittedBlockNum), 0)
+	committedDiffBlocks := max(int64(te.lastCommittedBlockNum.Load())-int64(p.prevCommittedBlockNum), 0)
 
 	var commitedBlockDur time.Duration
 
@@ -795,23 +803,25 @@ func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, commitStart ti
 	mxCommitmentMGasSec.Set(float64(committedGasSec / 1e6))
 	mxCommitmentBlockDuration.Set(float64(commitedBlockDur))
 
+	rs.Domains().Metrics().RLock()
 	commitVals := []any{
 		"bdur", common.Round(commitedBlockDur, 0),
 		"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(lastProgress.KeyIndex), common.PrettyCounter(lastProgress.UpdateCount)),
 		"buf", common.ByteCount(uint64(rs.Domains().Metrics().CachePutSize + rs.Domains().Metrics().CacheGetSize)),
 	}
+	rs.Domains().Metrics().RUnlock()
 
-	p.log("committed", suffix, te, rs, interval, te.lastCommittedBlockNum, committedDiffBlocks,
-		te.lastCommittedTxNum-p.prevCommittedTxNum, committedTxSec, committedGasSec, 0, stepsInDb, commitVals)
+	p.log("committed", suffix, te, rs, interval, te.lastCommittedBlockNum.Load(), committedDiffBlocks,
+		te.lastCommittedTxNum.Load()-p.prevCommittedTxNum, committedTxSec, committedGasSec, 0, stepsInDb, commitVals)
 
 	p.prevDomainMetrics = updateExecDomainMetrics(te.doms.Metrics(), p.prevDomainMetrics, interval, false)
 
 	p.prevCommitTime = currentTime
 
-	if te.lastCommittedTxNum > 0 {
-		p.prevCommittedTxNum = te.lastCommittedTxNum
-		p.prevCommittedGas = te.committedGas
-		p.prevCommittedBlockNum = te.lastCommittedBlockNum
+	if te.lastCommittedTxNum.Load() > 0 {
+		p.prevCommittedTxNum = te.lastCommittedTxNum.Load()
+		p.prevCommittedGas = te.committedGas.Load()
+		p.prevCommittedBlockNum = te.lastCommittedBlockNum.Load()
 	}
 }
 
@@ -830,19 +840,19 @@ func (p *Progress) LogComplete(rs *state.StateV3, ex executor, stepsInDb float64
 		suffix = " serial"
 	}
 
-	gas := te.committedGas
+	gas := te.committedGas.Load()
 
 	if gas == 0 {
 		gas = te.executedGas.Load()
 	}
 
-	lastTxNum := te.lastCommittedTxNum
+	lastTxNum := te.lastCommittedTxNum.Load()
 
 	if lastTxNum == 0 {
 		lastTxNum = uint64(te.lastExecutedTxNum.Load())
 	}
 
-	lastBlockNum := te.lastCommittedBlockNum
+	lastBlockNum := te.lastCommittedBlockNum.Load()
 
 	if lastBlockNum == 0 {
 		lastBlockNum = uint64(te.lastExecutedBlockNum.Load())
@@ -872,7 +882,10 @@ func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.Sta
 	var vals []any
 
 	if mode == "done" {
-		vals = []any{"in", interval}
+		vals = []any{
+			"in", interval,
+			"buf", fmt.Sprintf("%s/%s", common.ByteCount(rs.SizeEstimateAfterCommitment()), common.ByteCount(p.commitThreshold)),
+		}
 	}
 
 	vals = append(vals, []any{
@@ -891,7 +904,7 @@ func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.Sta
 	if stepsInDb > 0 {
 		vals = append(vals, []any{
 			"stepsInDB", fmt.Sprintf("%.2f", stepsInDb),
-			"step", fmt.Sprintf("%.1f", float64(te.lastCommittedTxNum)/float64(te.agg.StepSize())),
+			"step", fmt.Sprintf("%.1f", float64(te.lastCommittedTxNum.Load())/float64(te.agg.StepSize())),
 		}...)
 	}
 

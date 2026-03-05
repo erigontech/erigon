@@ -31,10 +31,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	keccak "github.com/erigontech/fastkeccak"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/holiman/uint256"
 	"github.com/xsleonard/go-merkle"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -455,10 +455,6 @@ func (c *Bor) VerifyHeaders(chain rules.ChainHeaderReader, headers []*types.Head
 // looking those up from the database. This is useful for concurrently verifying
 // a batch of new headers.
 func (c *Bor) verifyHeader(chain rules.ChainHeaderReader, header *types.Header, parents []*types.Header) error {
-	if header.Number == nil {
-		return errUnknownBlock
-	}
-
 	number := header.Number.Uint64()
 	now := time.Now().Unix()
 
@@ -492,11 +488,6 @@ func (c *Bor) verifyHeader(chain rules.ChainHeaderReader, header *types.Header, 
 	}
 	if err := ValidateHeaderSprintValidators(header, c.config); err != nil {
 		return err
-	}
-
-	// Ensure that the block's difficulty is meaningful (may not be correct at this point)
-	if (number > 0) && (header.Difficulty == nil) {
-		return errInvalidDifficulty
 	}
 
 	// All basic checks passed, verify cascading fields
@@ -691,7 +682,7 @@ func (c *Bor) Prepare(chain rules.ChainHeaderReader, header *types.Header, state
 	}
 
 	// Set the correct difficulty
-	header.Difficulty = new(big.Int).SetUint64(validatorSet.SafeDifficulty(c.authorizedSigner.Load().signer))
+	header.Difficulty.SetUint64(validatorSet.SafeDifficulty(c.authorizedSigner.Load().signer))
 
 	// Ensure the extra data has all it's components
 	if len(header.Extra) < types.ExtraVanityLength {
@@ -804,7 +795,7 @@ func (c *Bor) CalculateRewards(config *chain.Config, header *types.Header, uncle
 // Finalize implements rules.Engine, ensuring no uncles are set, nor block
 // rewards given.
 func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
+	uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
 	chain rules.ChainReader, syscall rules.SystemCall, skipReceiptsEval bool, logger log.Logger,
 ) (types.FlatRequests, error) {
 	headerNumber := header.Number.Uint64()
@@ -1069,16 +1060,15 @@ func (c *Bor) IsProposer(header *types.Header) (bool, error) {
 // CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
 // that a new block should have based on the previous blocks in the chain and the
 // current signer.
-func (c *Bor) CalcDifficulty(chain rules.ChainHeaderReader, _, _ uint64, _ *big.Int, parentNumber uint64, parentHash, _ common.Hash, _ uint64) *big.Int {
+func (c *Bor) CalcDifficulty(chain rules.ChainHeaderReader, _, _ uint64, _ uint256.Int, parentNumber uint64, parentHash, _ common.Hash, _ uint64) uint256.Int {
 	signer := c.authorizedSigner.Load().signer
 
 	validatorSet, err := c.spanReader.Producers(context.Background(), parentNumber+1)
 	if err != nil {
-		return nil
+		return uint256.Int{}
 	}
 
-	return big.NewInt(int64(validatorSet.SafeDifficulty(signer)))
-
+	return *uint256.NewInt(validatorSet.SafeDifficulty(signer))
 }
 
 // SealHash returns the hash of a block prior to it being sealed.
@@ -1206,7 +1196,7 @@ func ComputeHeadersRootHash(blockHeaders []*types.Header) ([]byte, error) {
 		headers[i] = arr
 	}
 	tree := merkle.NewTreeWithOpts(merkle.TreeOptions{EnableHashSorting: false, DisableHashLeaves: true})
-	if err := tree.Generate(Convert(headers), sha3.NewLegacyKeccak256()); err != nil {
+	if err := tree.Generate(Convert(headers), keccak.NewFastKeccak()); err != nil {
 		return nil, err
 	}
 
@@ -1286,7 +1276,7 @@ func (c *Bor) CommitStates(
 }
 
 // BorTransfer transfer in Bor
-func BorTransfer(db evmtypes.IntraBlockState, sender, recipient accounts.Address, amount uint256.Int, bailout bool) error {
+func BorTransfer(db evmtypes.IntraBlockState, sender, recipient accounts.Address, amount uint256.Int, bailout bool, cr *chain.Rules) error {
 	// get inputs before
 	input1, err := db.GetBalance(sender)
 	if err != nil {
@@ -1297,7 +1287,7 @@ func BorTransfer(db evmtypes.IntraBlockState, sender, recipient accounts.Address
 		return err
 	}
 
-	rules.Transfer(db, sender, recipient, amount, bailout)
+	misc.Transfer(db, sender, recipient, amount, bailout, cr)
 
 	output1, err := db.GetBalance(sender)
 	if err != nil {
@@ -1318,7 +1308,7 @@ func (c *Bor) GetTransferFunc() evmtypes.TransferFunc {
 
 // AddFeeTransferLog adds fee transfer log into state
 // Deprecating transfer log and will be removed in future fork. PLEASE DO NOT USE this transfer log going forward. Parameters won't get updated as expected going forward with EIP1559
-func AddFeeTransferLog(ibs evmtypes.IntraBlockState, sender accounts.Address, coinbase accounts.Address, result *evmtypes.ExecutionResult) {
+func AddFeeTransferLog(ibs evmtypes.IntraBlockState, sender accounts.Address, coinbase accounts.Address, result *evmtypes.ExecutionResult, _ *chain.Rules) {
 	output1 := result.SenderInitBalance
 	output2 := result.CoinbaseInitBalance
 	addTransferLog(

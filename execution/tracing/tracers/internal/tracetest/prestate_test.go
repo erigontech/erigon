@@ -21,20 +21,18 @@ package tracetest
 
 import (
 	"encoding/json"
-	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
-	"github.com/erigontech/erigon/execution/protocol/rules"
-	"github.com/erigontech/erigon/execution/tests/mock"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	debugtracer "github.com/erigontech/erigon/execution/tracing/tracers/debug"
@@ -72,6 +70,9 @@ func TestPrestateTracer(t *testing.T) {
 }
 
 func TestPrestateWithDiffModeTracer(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	testPrestateTracer("prestateTracer", "prestate_tracer_with_diff_mode", t)
 }
 
@@ -105,19 +106,21 @@ func testPrestateTracer(tracerName string, dirPath string, t *testing.T) {
 			signer := types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number), uint64(test.Context.Time))
 			context := evmtypes.BlockContext{
 				CanTransfer: protocol.CanTransfer,
-				Transfer:    rules.Transfer,
+				Transfer:    misc.Transfer,
 				Coinbase:    accounts.InternAddress(test.Context.Miner),
 				BlockNumber: uint64(test.Context.Number),
 				Time:        uint64(test.Context.Time),
-				Difficulty:  (*big.Int)(test.Context.Difficulty),
 				GasLimit:    uint64(test.Context.GasLimit),
 			}
+			if test.Context.Difficulty != nil {
+				context.Difficulty = *test.Context.Difficulty
+			}
 			if test.Context.BaseFee != nil {
-				baseFee, _ := uint256.FromBig((*big.Int)(test.Context.BaseFee))
+				baseFee := test.Context.BaseFee
 				context.BaseFee = *baseFee
 			}
 			rules := context.Rules(test.Genesis.Config)
-			m := mock.Mock(t)
+			m := execmoduletester.New(t)
 			dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 			require.NoError(t, err)
 			defer dbTx.Rollback()
@@ -150,7 +153,7 @@ func testPrestateTracer(tracerName string, dirPath string, t *testing.T) {
 				)
 			}
 			statedb.SetHooks(tracer.Hooks)
-			msg, err := tx.AsMessage(*signer, (*big.Int)(test.Context.BaseFee), rules)
+			msg, err := tx.AsMessage(*signer, test.Context.BaseFee, rules)
 			if err != nil {
 				t.Fatalf("failed to prepare transaction for tracing: %v", err)
 			}
@@ -162,7 +165,7 @@ func testPrestateTracer(tracerName string, dirPath string, t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to execute transaction: %v", err)
 			}
-			tracer.OnTxEnd(&types.Receipt{GasUsed: vmRet.GasUsed}, nil)
+			tracer.OnTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, nil)
 			// Retrieve the trace result and compare against the expected
 			res, err := tracer.GetResult()
 			if err != nil {

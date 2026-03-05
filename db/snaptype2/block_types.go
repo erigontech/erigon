@@ -48,6 +48,7 @@ func init() {
 	snapcfg.RegisterKnownTypes(networkname.Gnosis, ethereumTypes)
 	snapcfg.RegisterKnownTypes(networkname.Chiado, ethereumTypes)
 	snapcfg.RegisterKnownTypes(networkname.Hoodi, ethereumTypes)
+	snapcfg.RegisterKnownTypes(networkname.Bloatnet, ethereumTypes)
 }
 
 var Enums = struct {
@@ -88,7 +89,7 @@ var Indexes = struct {
 
 var (
 	Salt = snaptype.RegisterType(
-		Enums.Domains,
+		Enums.Salt,
 		"salt",
 		snaptype.Versions{
 			Current:      version.ZeroVersion, //2,
@@ -243,12 +244,6 @@ var (
 					return fmt.Errorf("TransactionsIdx: at=%d-%d, pre index building, expect: %d, got %d", sn.From, sn.To, expectedCount, d.Count())
 				}
 
-				if p != nil {
-					name := sn.Name()
-					p.Name.Store(&name)
-					p.Total.Store(uint64(d.Count() * 2))
-				}
-
 				txnHashIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 					KeyCount: d.Count(),
 
@@ -290,6 +285,7 @@ var (
 				defer bodiesSegment.MadvSequential().DisableReadAhead()
 
 				for {
+					txnHashIdx.SetProgress(p)
 					g, bodyGetter := d.MakeGetter(), bodiesSegment.MakeGetter()
 					var ti, offset, nextPos uint64
 					blockNum := firstBlockNum
@@ -301,10 +297,6 @@ var (
 					}
 
 					for g.HasNext() {
-						if p != nil {
-							p.Processed.Add(1)
-						}
-
 						word, nextPos = g.Next(word[:0])
 						select {
 						case <-ctx.Done():

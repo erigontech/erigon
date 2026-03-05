@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/erigontech/erigon/common/hexutil"
@@ -129,30 +130,16 @@ func (ma *MixedcaseAddress) Original() string {
 	return ma.original
 }
 
-// Addresses is a slice of common.Address, implementing sort.Interface
 type Addresses []Address
 
-func (addrs Addresses) Len() int {
-	return len(addrs)
-}
-func (addrs Addresses) Less(i, j int) bool {
-	return bytes.Compare(addrs[i][:], addrs[j][:]) == -1
-}
-func (addrs Addresses) Swap(i, j int) {
-	addrs[i], addrs[j] = addrs[j], addrs[i]
+func (addrs Addresses) Sort() {
+	slices.SortFunc(addrs, Address.Cmp)
 }
 
-// Hashes is a slice of common.Hash, implementing sort.Interface
 type Hashes []Hash
 
-func (hashes Hashes) Len() int {
-	return len(hashes)
-}
-func (hashes Hashes) Less(i, j int) bool {
-	return bytes.Compare(hashes[i][:], hashes[j][:]) == -1
-}
-func (hashes Hashes) Swap(i, j int) {
-	hashes[i], hashes[j] = hashes[j], hashes[i]
+func (hashes Hashes) Sort() {
+	slices.SortFunc(hashes, Hash.Cmp)
 }
 
 const StorageKeyLen = 2*length.Hash + IncarnationLength
@@ -163,15 +150,12 @@ const StorageKeyLen = 2*length.Hash + IncarnationLength
 // 2. Hash of the item's key
 type StorageKey [StorageKeyLen]byte
 
-// StorageKeys is a slice of StorageKey, implementing sort.Interface
+func (k StorageKey) Cmp(other StorageKey) int {
+	return bytes.Compare(k[:], other[:])
+}
+
 type StorageKeys []StorageKey
 
-func (keys StorageKeys) Len() int {
-	return len(keys)
-}
-func (keys StorageKeys) Less(i, j int) bool {
-	return bytes.Compare(keys[i][:], keys[j][:]) == -1
-}
-func (keys StorageKeys) Swap(i, j int) {
-	keys[i], keys[j] = keys[j], keys[i]
+func (keys StorageKeys) Sort() {
+	slices.SortFunc(keys, StorageKey.Cmp)
 }

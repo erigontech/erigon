@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon/db/datadir"
 	"golang.org/x/sync/semaphore"
 
 	"google.golang.org/grpc"
@@ -218,6 +219,7 @@ type MultiClient struct {
 var _ eth.ReceiptsGetter = new(receipts.Generator) // compile-time interface-check
 
 func NewMultiClient(
+	dirs datadir.Dirs,
 	db kv.TemporalRoDB,
 	chainConfig *chain.Config,
 	engine rules.Engine,
@@ -287,7 +289,7 @@ func NewMultiClient(
 		disableBlockDownload:              disableBlockDownload,
 		logger:                            logger,
 		getReceiptsActiveGoroutineNumber:  semaphore.NewWeighted(1),
-		ethApiWrapper:                     receipts.NewGenerator(blockReader, engine, nil, 5*time.Minute),
+		ethApiWrapper:                     receipts.NewGenerator(dirs, blockReader, engine, nil, 5*time.Minute),
 	}
 
 	return cs, nil
@@ -386,7 +388,8 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 		if err != nil {
 			return fmt.Errorf("decode 3 BlockHeadersPacket66: %w", err)
 		}
-		hRaw := append([]byte{}, headerRaw...)
+		hRaw := make([]byte, len(headerRaw))
+		copy(hRaw, headerRaw)
 		number := header.Number.Uint64()
 		if number > highestBlock {
 			highestBlock = number

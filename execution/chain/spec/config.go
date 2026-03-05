@@ -41,6 +41,7 @@ func init() {
 	RegisterChainSpec(networkname.Gnosis, Gnosis)
 	RegisterChainSpec(networkname.Chiado, Chiado)
 	RegisterChainSpec(networkname.Test, Test)
+	RegisterChainSpec(networkname.Bloatnet, Bloatnet)
 
 	// verify registered chains
 	for _, spec := range registeredChainsByName {
@@ -118,7 +119,13 @@ func ChainSpecByGenesisHash(genesisHash common.Hash) (Spec, error) {
 // If the name already exists, it will be overwritten.
 func RegisterChainSpec(name string, spec Spec) {
 	registeredChainsByName[name] = spec
-	NetworkNameByID[spec.Config.ChainID.Uint64()] = name
+
+	// Use custom NetworkID if specified, otherwise use ChainID
+	networkID := spec.NetworkID
+	if networkID == 0 {
+		networkID = spec.Config.ChainID.Uint64()
+	}
+	NetworkNameByID[networkID] = name
 
 	if spec.GenesisHash != (common.Hash{}) {
 		registeredChainsByGenesisHash[spec.GenesisHash] = spec
@@ -133,6 +140,7 @@ type Spec struct {
 	Config           *chain.Config
 	Bootnodes        []string // list of bootnodes for the chain, if any
 	DNSNetwork       string   // address of a public DNS-based node list. See https://github.com/ethereum/discv4-dns-lists for more information.
+	NetworkID        uint64   // Optional custom network ID (defaults to ChainID if 0)
 }
 
 func (cs Spec) IsEmpty() bool {
@@ -204,6 +212,16 @@ var (
 		//Bootnodes:   TestBootnodes,
 		Genesis: TestGenesisBlock(),
 	}
+
+	Bloatnet = Spec{
+		Name:        networkname.Bloatnet,
+		GenesisHash: common.HexToHash("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"), // Same as mainnet
+		Bootnodes:   bloatnetBootnodes,
+		Config:      ReadChainConfig(chainspecs, "chainspecs/bloatnet.json"),
+		Genesis:     BloatnetGenesisBlock(),
+		DNSNetwork:  "", // No DNS discovery
+		NetworkID:   12159,
+	}
 )
 
 var chainNamesPoS = []string{
@@ -212,6 +230,7 @@ var chainNamesPoS = []string{
 	networkname.Hoodi,
 	networkname.Gnosis,
 	networkname.Chiado,
+	networkname.Bloatnet,
 }
 
 func IsChainPoS(chainConfig *chain.Config, currentTDProvider func() *big.Int) bool {

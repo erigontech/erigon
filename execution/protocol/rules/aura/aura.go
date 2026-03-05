@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/clique"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
@@ -551,8 +552,8 @@ func (c *AuRa) verifyFamily(chain rules.ChainHeaderReader, e *NonTransactionalEp
 	*/
 	if header.Number.Uint64() >= c.cfg.ValidateScoreTransition {
 		expectedDifficulty := calculateScore(parentStep, step, emptyStepLen)
-		if header.Difficulty.Cmp(expectedDifficulty.ToBig()) != 0 {
-			return fmt.Errorf("invlid difficulty: expect=%s, found=%s\n", expectedDifficulty, header.Difficulty)
+		if !header.Difficulty.Eq(&expectedDifficulty) {
+			return fmt.Errorf("invalid difficulty: expect=%s, found=%s", &expectedDifficulty, &header.Difficulty)
 		}
 	}
 	return nil
@@ -724,7 +725,7 @@ func (c *AuRa) applyRewards(header *types.Header, state *state.IntraBlockState, 
 }
 
 // word `signal epoch` == word `pending epoch`
-func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState, txs types.Transactions,
+func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
 	chain rules.ChainReader, syscall rules.SystemCall, skipReceiptsEval bool, logger log.Logger,
 ) (types.FlatRequests, error) {
@@ -869,7 +870,7 @@ func allHeadersUntil(chain rules.ChainHeaderReader, from *types.Header, to commo
 
 // FinalizeAndAssemble implements rules.Engine
 func (c *AuRa) FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState, txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain rules.ChainReader, syscall rules.SystemCall, call rules.Call, logger log.Logger) (*types.Block, types.FlatRequests, error) {
-	_, err := c.Finalize(config, header, state, txs, uncles, receipts, withdrawals, chain, syscall, false, logger)
+	_, err := c.Finalize(config, header, state, uncles, receipts, withdrawals, chain, syscall, false, logger)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -995,22 +996,22 @@ func (c *AuRa) epochSet(chain rules.ChainHeaderReader, e *NonTransactionalEpochR
 	return finalityChecker.signers, epochTransitionNumber, nil
 }
 
-func (c *AuRa) CalcDifficulty(chain rules.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentStep uint64) *big.Int {
+func (c *AuRa) CalcDifficulty(chain rules.ChainHeaderReader, time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentStep uint64) uint256.Int {
 	currentStep := c.step.inner.inner.Load()
 	currentEmptyStepsLen := 0
-	return calculateScore(parentStep, currentStep, uint64(currentEmptyStepsLen)).ToBig()
+	return calculateScore(parentStep, currentStep, uint64(currentEmptyStepsLen))
 }
 
 // calculateScore - analog of PoW difficulty:
 //
 //	sqrt(U256::max_value()) + parent_step - current_step + current_empty_steps
-func calculateScore(parentStep, currentStep, currentEmptySteps uint64) *uint256.Int {
+func calculateScore(parentStep, currentStep, currentEmptySteps uint64) uint256.Int {
 	maxU128 := uint256.NewInt(0).SetAllOne()
 	maxU128 = maxU128.Rsh(maxU128, 128)
 	res := maxU128.Add(maxU128, uint256.NewInt(parentStep))
 	res = res.Sub(res, uint256.NewInt(currentStep))
 	res = res.Add(res, uint256.NewInt(currentEmptySteps))
-	return res
+	return *res
 }
 
 func (c *AuRa) SealHash(header *types.Header) common.Hash {
@@ -1162,7 +1163,7 @@ func (c *AuRa) ExecuteSystemWithdrawals(withdrawals []*types.Withdrawal, syscall
 }
 
 func (c *AuRa) GetTransferFunc() evmtypes.TransferFunc {
-	return rules.Transfer
+	return misc.Transfer
 }
 
 func (c *AuRa) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {

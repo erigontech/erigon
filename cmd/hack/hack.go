@@ -91,7 +91,7 @@ func dbSlice(chaindata string, bucket string, prefix []byte) {
 	}
 }
 
-// Searches 1000 blocks from the given one to try to find the one with the given state root hash
+// Searches 10000000 blocks from the given one to try to find the one with the given state root hash
 func testBlockHashes(chaindata string, block int, stateRoot common.Hash) {
 	ethDb := mdbx.MustOpen(chaindata)
 	defer ethDb.Close()
@@ -649,7 +649,11 @@ func chainConfig(name string) error {
 	if err != nil {
 		return err
 	}
-	f, err := os.Create(filepath.Join("params", "chainspecs", name+".json"))
+	dirPath := filepath.Join("params", "chainspecs")
+	if err := os.MkdirAll(dirPath, 0755); err != nil {
+		return err
+	}
+	f, err := os.Create(filepath.Join(dirPath, name+".json"))
 	if err != nil {
 		return err
 	}
@@ -816,7 +820,7 @@ func main() {
 	case "scanTxs":
 		err = scanTxs(*chaindata)
 
-	case "chainConsfig":
+	case "chainConfig":
 		err = chainConfig(*name)
 	case "iterate":
 		err = iterate(*chaindata, *account)

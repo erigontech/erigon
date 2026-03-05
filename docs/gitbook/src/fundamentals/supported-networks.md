@@ -1,5 +1,9 @@
 ---
 description: Erigon Supported Networks and --chain Flag Reference
+metaLinks:
+  alternates:
+    - >-
+      https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/fundamentals/supported-networks
 ---
 
 # Supported Networks
