@@ -5,9 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mark3labs/mcp-go/mcp"
-
 	"github.com/erigontech/erigon/rpc/mcp/metrics"
+	"github.com/mark3labs/mcp-go/mcp"
 )
 
 // handleMetricsList handles the metrics_list tool

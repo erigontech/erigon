@@ -15,19 +15,22 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon/common/dir"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/node/debug"
 )
 
 func stepRebase(cliCtx *cli.Context) error {
-	logger := log.Root()
+	logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
+	if err != nil {
+		return err
+	}
 
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
 	dirs := datadir.Open(cliCtx.String("datadir"))
-	settings, err := state.ResolveErigonDBSettings(dirs, logger, true)
+	settings, err := state.CreateOrReadErigonDBSettings(dirs, logger)
 	if err != nil {
 		return err
 	}

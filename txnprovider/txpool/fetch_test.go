@@ -42,11 +42,7 @@ import (
 )
 
 func TestFetch(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
 	ctx := t.Context()
-	t.Parallel()
 
 	ctrl := gomock.NewController(t)
 	remoteKvClient := remoteproto.NewMockKVClient(ctrl)
@@ -239,7 +235,6 @@ func decodeHex(in string) []byte {
 }
 
 func TestOnNewBlock(t *testing.T) {
-	t.Parallel()
 	ctx := t.Context()
 	_, db := memdb.NewTestDB(t, dbcfg.ChainDB), memdb.NewTestDB(t, dbcfg.TxPoolDB)
 	ctrl := gomock.NewController(t)

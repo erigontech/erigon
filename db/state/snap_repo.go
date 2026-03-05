@@ -8,7 +8,6 @@ import (
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/recsplit"
@@ -76,7 +75,7 @@ func (f *SnapshotRepo) OpenFolder() error {
 
 	f.closeWhatNotInList(files)
 	f.loadDirtyFiles(files)
-	if err := f.openDirtyFiles(files); err != nil {
+	if err := f.openDirtyFiles(); err != nil {
 		return fmt.Errorf("SnapshotRepo(%s).openFolder: %w", f.schema.DataTag(), err)
 	}
 	return nil
@@ -355,18 +354,16 @@ func (f *SnapshotRepo) FilesWithMissedAccessors() *MissedFilesMap {
 
 // private methods
 
-func (f *SnapshotRepo) openDirtyFiles(dirEntries []string) error {
+func (f *SnapshotRepo) openDirtyFiles() error {
 	invalidFilesMu := sync.Mutex{}
 	invalidFileItems := make([]*FilesItem, 0)
 	p := f.schema
-	dir := f.schema.DataDirectory()
 	f.dirtyFiles.Walk(func(items []*FilesItem) bool {
 		for _, item := range items {
 			if item.decompressor == nil {
 				fPathGen, _ := p.DataFile(version.V1_0, RootNum(item.startTxNum), RootNum(item.endTxNum))
 				fPathMask, _ := version.ReplaceVersionWithMask(fPathGen)
-				_, fNameMask := filepath.Split(fPathMask)
-				fPath, _, ok, err := version.MatchVersionedFile(fNameMask, dirEntries, dir)
+				fPath, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
 				if err != nil || !ok {
 					_, fName := filepath.Split(fPath)
 					if err == nil {
@@ -408,7 +405,7 @@ func (f *SnapshotRepo) openDirtyFiles(dirEntries []string) error {
 					f.logger.Error("SnapshotRepo.openDirtyFiles btindex path", "err", err, "f", fPath)
 				} else {
 					r := seg.NewReader(item.decompressor.MakeGetter(), p.DataFileCompression())
-					if item.bindex, err = btindex.OpenBtreeIndexWithDecompressor(fPath, btindex.DefaultBtreeM, r); err != nil {
+					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, DefaultBtreeM, r); err != nil {
 						_, fName := filepath.Split(fPath)
 						f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files maybe good

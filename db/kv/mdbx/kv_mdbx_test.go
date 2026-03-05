@@ -257,61 +257,6 @@ func TestRangeDupSort(t *testing.T) {
 	})
 }
 
-// TestRangeRwTxInterleavedWrite verifies that Range iterators remain correct
-// when writes are interleaved with Next() calls on a read-write transaction.
-// Without cursor.Current()-based iteration, the stored raw MDBX nextK pointer
-// can be invalidated by copy-on-write page operations triggered by writes,
-// causing HasNext() or Next() to return stale/wrong data.
-func TestRangeRwTxInterleavedWrite(t *testing.T) {
-	path := t.TempDir()
-	logger := log.New()
-	table := "Plain"
-	db := New(dbcfg.ChainDB, logger).InMem(t, path).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
-		return kv.TableCfg{table: kv.TableCfgItem{}}
-	}).MapSize(128 * datasize.MB).MustOpen()
-	t.Cleanup(db.Close)
-
-	ctx := context.Background()
-	tx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
-	t.Cleanup(tx.Rollback)
-
-	require.NoError(t, tx.Put(table, []byte{1}, []byte{10}))
-	require.NoError(t, tx.Put(table, []byte{3}, []byte{30}))
-	require.NoError(t, tx.Put(table, []byte{5}, []byte{50}))
-
-	it, err := tx.Range(table, nil, nil, order.Asc, kv.Unlim)
-	require.NoError(t, err)
-	defer it.Close()
-
-	// Read first item; internally cursor advances to {3}.
-	require.True(t, it.HasNext())
-	k, v, err := it.Next()
-	require.NoError(t, err)
-	require.Equal(t, []byte{1}, k)
-	require.Equal(t, []byte{10}, v)
-
-	// Write to {3} - the key cursor is now sitting on.
-	// This triggers MDBX copy-on-write page operations that would invalidate a
-	// stored raw nextK pointer (the bug before using cursor.Current()).
-	require.NoError(t, tx.Put(table, []byte{3}, []byte{31}))
-
-	// Iterator must survive the write and reflect the updated value.
-	require.True(t, it.HasNext())
-	k, v, err = it.Next()
-	require.NoError(t, err)
-	require.Equal(t, []byte{3}, k)
-	require.Equal(t, []byte{31}, v)
-
-	require.True(t, it.HasNext())
-	k, v, err = it.Next()
-	require.NoError(t, err)
-	require.Equal(t, []byte{5}, k)
-	require.Equal(t, []byte{50}, v)
-
-	require.False(t, it.HasNext())
-}
-
 func TestLastDup(t *testing.T) {
 	db, tx, _ := BaseCase(t)
 
@@ -987,6 +932,7 @@ func BenchmarkDB_BeginRO(b *testing.B) {
 	_db := BaseCaseDBForBenchmark(b)
 	db := _db.(*MdbxKV)
 
+	b.ResetTimer()
 	for b.Loop() {
 		tx, _ := db.BeginRo(context.Background())
 		tx.Rollback()
@@ -1009,6 +955,7 @@ func BenchmarkDB_Get(b *testing.B) {
 	// Ensure data is correct.
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		key := u64tob(uint64(1))
+		b.ResetTimer()
 		for b.Loop() {
 			v, err := tx.GetOne(table, key)
 			if err != nil {
@@ -1029,12 +976,13 @@ func BenchmarkDB_Put(b *testing.B) {
 	table := "Table"
 	db := _db.(*MdbxKV)
 
-	const keyCount = 10000
-	keys := make([][]byte, keyCount)
-	for i := 1; i <= keyCount; i++ {
+	// Ensure data is correct.
+	keys := make([][]byte, b.N)
+	for i := 1; i <= b.N; i++ {
 		keys[i-1] = u64tob(uint64(i))
 	}
 
+	b.ResetTimer()
 	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
 		var idx int
 		for b.Loop() {
@@ -1079,9 +1027,8 @@ func BenchmarkDB_Delete(b *testing.B) {
 	table := "Table"
 	db := _db.(*MdbxKV)
 
-	const keyCount = 10000
-	keys := make([][]byte, keyCount)
-	for i := 1; i <= keyCount; i++ {
+	keys := make([][]byte, b.N)
+	for i := 1; i <= b.N; i++ {
 		keys[i-1] = u64tob(uint64(i))
 	}
 
@@ -1097,6 +1044,8 @@ func BenchmarkDB_Delete(b *testing.B) {
 		b.Fatal(err)
 	}
 
+	// Ensure data is correct.
+	b.ResetTimer()
 	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
 		var idx int
 		for b.Loop() {
@@ -1169,7 +1118,6 @@ func BenchmarkDB_ResetSequence(b *testing.B) {
 
 	tx, err := _db.BeginRw(ctx)
 	require.NoError(b, err)
-	defer tx.Rollback()
 
 	for i := 0; b.Loop(); i++ {
 		err = tx.ResetSequence(table, uint64(i))
@@ -1177,6 +1125,7 @@ func BenchmarkDB_ResetSequence(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
+	tx.Rollback()
 }
 
 func TestMdbxWithSyncBytes(t *testing.T) {

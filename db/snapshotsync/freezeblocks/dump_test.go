@@ -34,9 +34,9 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
-	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
+	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	polychain "github.com/erigontech/erigon/polygon/chain"
@@ -65,6 +65,7 @@ func TestDump(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
+
 	type test struct {
 		chainConfig *chain.Config
 		chainSize   int
@@ -259,13 +260,13 @@ func TestDump(t *testing.T) {
 			snConfig, _ := snapcfg.KnownCfg(networkname.Mainnet)
 			snConfig.ExpectBlocks = math.MaxUint64
 
-			err := freezeblocks.DumpBlocks(m.Ctx, 0, uint64(test.chainSize), m.ChainConfig, tmpDir, snapDir, m.DB, 1, log.LvlInfo, logger, m.BlockReader, snConfig)
+			err := freezeblocks.DumpBlocks(m.Ctx, 0, uint64(test.chainSize), m.ChainConfig, tmpDir, snapDir, m.DB, 1, log.LvlInfo, logger, m.BlockReader)
 			require.NoError(err)
 		})
 	}
 }
 
-func createDumpTestKV(t *testing.T, chainConfig *chain.Config, chainSize int) *execmoduletester.ExecModuleTester {
+func createDumpTestKV(t *testing.T, chainConfig *chain.Config, chainSize int) *mock.MockSentry {
 	var (
 		key, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr   = crypto.PubkeyToAddress(key.PublicKey)
@@ -276,13 +277,7 @@ func createDumpTestKV(t *testing.T, chainConfig *chain.Config, chainSize int) *e
 		signer = types.LatestSigner(gspec.Config)
 	)
 
-	m := execmoduletester.New(
-		t,
-		execmoduletester.WithGenesisSpec(gspec),
-		execmoduletester.WithKey(key),
-		execmoduletester.WithBlockBufferSize(chainSize),
-		execmoduletester.WithPruneMode(prune.DefaultMode),
-	)
+	m := mock.MockWithGenesisPruneMode(t, gspec, key, chainSize, prune.DefaultMode)
 
 	// Generate testing blocks
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(i int, b *blockgen.BlockGen) {

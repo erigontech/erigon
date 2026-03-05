@@ -37,7 +37,6 @@
   * [TxPool](fundamentals/modules/txpool.md)
   * [Sentry](fundamentals/modules/sentry.md)
   * [Downloader](fundamentals/modules/downloader.md)
-* [MCP Server](fundamentals/mcp.md)
 * [Creating a dashboard](fundamentals/creating-a-dashboard.md)
 * [Docker Compose](fundamentals/docker-compose.md)
 * [Otterscan](fundamentals/otterscan.md)

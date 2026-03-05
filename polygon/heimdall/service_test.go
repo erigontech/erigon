@@ -221,7 +221,6 @@ func (suite *ServiceTestSuite) TearDownSuite() {
 	err := suite.eg.Wait()
 	suite.logger.Info("test has been torn down")
 	suite.Require().ErrorIs(err, context.Canceled)
-	suite.service.store.Close()
 }
 
 func (suite *ServiceTestSuite) TestMilestones() {
@@ -532,6 +531,10 @@ type difficultiesKV struct {
 }
 
 func TestIsCatchingUp(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	ctrl := gomock.NewController(t)
 	mockClient := NewMockClient(ctrl)
 
@@ -554,6 +557,10 @@ func TestIsCatchingUp(t *testing.T) {
 }
 
 func TestIsCatchingUpLateBlock(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	ctrl := gomock.NewController(t)
 	mockClient := NewMockClient(ctrl)
 

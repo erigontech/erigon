@@ -71,8 +71,8 @@ func TestUnmarked_PutToDb(t *testing.T) {
 	uma_tx := uma.BeginTemporalTx()
 	defer uma_tx.Close()
 	rwtx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
 	defer rwtx.Rollback()
+	require.NoError(t, err)
 
 	num := Num(0)
 	value := []byte{1, 2, 3, 4, 5}
@@ -90,9 +90,6 @@ func TestUnmarked_PutToDb(t *testing.T) {
 }
 
 func TestUnmarkedPrune(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
 	for pruneTo := RootNum(0); ; pruneTo++ {
 		var entries_count uint64
 		t.Run(fmt.Sprintf("prune to %d", pruneTo), func(t *testing.T) {
@@ -107,8 +104,8 @@ func TestUnmarkedPrune(t *testing.T) {
 			uma_tx := uma.BeginTemporalTx()
 			defer uma_tx.Close()
 			rwtx, err := db.BeginRw(ctx)
-			require.NoError(t, err)
 			defer rwtx.Rollback()
+			require.NoError(t, err)
 
 			getData := func(i int) (Num, state.Bytes) {
 				return Num(i), fmt.Appendf(nil, "data%d", i)
@@ -143,8 +140,8 @@ func TestUnmarkedPrune(t *testing.T) {
 			defer uma_tx.Close()
 
 			rwtx, err = db.BeginRw(ctx)
-			require.NoError(t, err)
 			defer rwtx.Rollback()
+			require.NoError(t, err)
 
 			stat, err := uma_tx.Prune(ctx, pruneTo, 1000, nil, rwtx)
 			require.NoError(t, err)
@@ -187,8 +184,8 @@ func TestBuildFiles_Unmarked(t *testing.T) {
 	uma_tx := uma.BeginTemporalTx()
 	defer uma_tx.Close()
 	rwtx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
 	defer rwtx.Rollback()
+	require.NoError(t, err)
 	cfg := state.Registry.SnapshotConfig(borSpanId)
 	num_files := uint64(5)
 	entries_count := num_files*cfg.MinimumSize + cfg.SafetyMargin + /** in db **/ 5
@@ -238,8 +235,8 @@ func TestBuildFiles_Unmarked(t *testing.T) {
 	defer uma_tx.Close()
 
 	rwtx, err = db.BeginRw(ctx)
-	require.NoError(t, err)
 	defer rwtx.Rollback()
+	require.NoError(t, err)
 
 	firstRootNumNotInSnap := uma_tx.DebugFiles().VisibleFilesMaxRootNum()
 	firstSpanIdNotInSnap := Num(CustomSpanIdAt(uint64(firstRootNumNotInSnap)))
@@ -284,8 +281,8 @@ func TestBuildFiles_PagedUnmarked(t *testing.T) {
 	uma_tx := uma.BeginTemporalTx()
 	defer uma_tx.Close()
 	rwtx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
 	defer rwtx.Rollback()
+	require.NoError(t, err)
 	cfg := state.Registry.SnapshotConfig(pagedDataId)
 	num_files := uint64(5)
 	entries_count := num_files*cfg.MinimumSize + cfg.SafetyMargin + /** in db **/ 5
@@ -335,8 +332,8 @@ func TestBuildFiles_PagedUnmarked(t *testing.T) {
 	defer uma_tx.Close()
 
 	rwtx, err = db.BeginRw(ctx)
-	require.NoError(t, err)
 	defer rwtx.Rollback()
+	require.NoError(t, err)
 
 	firstRootNumNotInSnap := uma_tx.DebugFiles().VisibleFilesMaxRootNum()
 	firstNumNotInSnap := uma_tx.DebugFiles().VisibleFilesMaxNum()
@@ -398,10 +395,9 @@ func setupPagedEntity(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RwD
 
 	rwtx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
-	defer rwtx.Rollback()
+	defer rwtx.Commit()
 
 	require.NoError(t, rwtx.CreateTable(cfg.ValsTbl))
-	require.NoError(t, rwtx.Commit())
 
 	uma, err := state.NewUnmarkedForkable(id,
 		cfg,

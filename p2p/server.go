@@ -22,13 +22,14 @@ package p2p
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/ecdsa"
 	"encoding/hex"
 	"errors"
 	"net"
-	"net/netip"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -345,11 +346,11 @@ type sharedUDPConn struct {
 	unhandled chan discover.ReadPacket
 }
 
-// ReadFromUDPAddrPort implements discover.UDPConn
-func (s *sharedUDPConn) ReadFromUDPAddrPort(b []byte) (n int, addr netip.AddrPort, err error) {
+// ReadFromUDP implements discover.UDPConn
+func (s *sharedUDPConn) ReadFromUDP(b []byte) (n int, addr *net.UDPAddr, err error) {
 	packet, ok := <-s.unhandled
 	if !ok {
-		return 0, netip.AddrPort{}, errors.New("connection was closed")
+		return 0, nil, errors.New("connection was closed")
 	}
 	l := min(len(packet.Data), len(b))
 	copy(b[:l], packet.Data[:l])
@@ -435,13 +436,13 @@ func (srv *Server) setupLocalNode() error {
 	}
 	sort.Sort(capsByNameAndVersion(srv.ourHandshake.Caps))
 	// Create the local node
-	db, err := enode.OpenDBEx(srv.quitCtx, srv.Config.NodeDatabase, srv.Config.TmpDir, srv.logger)
+	db, err := enode.OpenDB(srv.quitCtx, srv.Config.NodeDatabase, srv.Config.TmpDir, srv.logger)
 	if err != nil {
 		return err
 	}
 	srv.nodedb = db
 
-	srv.localnode = enode.NewLocalNode(db, srv.PrivateKey)
+	srv.localnode = enode.NewLocalNode(db, srv.PrivateKey, srv.logger)
 	srv.localnode.SetFallbackIP(net.IP{127, 0, 0, 1})
 
 	// TODO: check conflicts
@@ -532,7 +533,7 @@ func (srv *Server) setupDiscovery(ctx context.Context) error {
 			Unhandled:   unhandled,
 			Log:         srv.logger,
 		}
-		ntab, err := discover.ListenV4(conn, srv.localnode, cfg)
+		ntab, err := discover.ListenV4(ctx, strconv.FormatUint(uint64(srv.Config.Protocols[0].Version), 10), conn, srv.localnode, cfg)
 		if err != nil {
 			return err
 		}
@@ -545,11 +546,12 @@ func (srv *Server) setupDiscovery(ctx context.Context) error {
 			Bootnodes:   srv.BootstrapNodesV5,
 			Log:         srv.logger,
 		}
+		version := uint64(srv.Config.Protocols[0].Version)
 		var err error
 		if sconn != nil {
-			srv.discv5, err = discover.ListenV5(sconn, srv.localnode, cfg)
+			srv.discv5, err = discover.ListenV5(ctx, strconv.FormatUint(version, 10), sconn, srv.localnode, cfg)
 		} else {
-			srv.discv5, err = discover.ListenV5(conn, srv.localnode, cfg)
+			srv.discv5, err = discover.ListenV5(ctx, strconv.FormatUint(version, 10), conn, srv.localnode, cfg)
 		}
 		if err != nil {
 			// Clean up v4 if v5 setup fails.
@@ -595,13 +597,7 @@ func (srv *Server) setupDialScheduler() {
 		dialer:         srv.Dialer,
 		clock:          srv.clock,
 	}
-	// NOTE: cmp.Or cannot be used here because wrapping a nil concrete pointer
-	// in an interface produces a non-nil interface value (Go nil interface trap).
-	if srv.discv5 != nil {
-		config.resolver = srv.discv5
-	} else if srv.discv4 != nil {
-		config.resolver = srv.discv4
-	}
+	config.resolver = cmp.Or[nodeResolver](srv.discv5, srv.discv4)
 	if config.dialer == nil {
 		config.dialer = tcpDialer{&net.Dialer{Timeout: defaultDialTimeout}}
 	}
@@ -864,14 +860,14 @@ func (srv *Server) listenLoop(ctx context.Context) {
 			break
 		}
 
-		remoteIP := netutil.AddrAddr(fd.RemoteAddr())
+		remoteIP := netutil.AddrIP(fd.RemoteAddr())
 		if err := srv.checkInboundConn(fd, remoteIP); err != nil {
 			srv.logger.Trace("Rejected inbound connection", "addr", fd.RemoteAddr(), "err", err)
 			_ = fd.Close()
 			slots.Release(1)
 			continue
 		}
-		if remoteIP.IsValid() {
+		if remoteIP != nil {
 			var addr *net.TCPAddr
 			if tcp, ok := fd.RemoteAddr().(*net.TCPAddr); ok {
 				addr = tcp
@@ -888,18 +884,18 @@ func (srv *Server) listenLoop(ctx context.Context) {
 	}
 }
 
-func (srv *Server) checkInboundConn(fd net.Conn, remoteIP netip.Addr) error {
-	if !remoteIP.IsValid() {
+func (srv *Server) checkInboundConn(fd net.Conn, remoteIP net.IP) error {
+	if remoteIP == nil {
 		return nil
 	}
 	// Reject connections that do not match NetRestrict.
-	if srv.NetRestrict != nil && !srv.NetRestrict.ContainsAddr(remoteIP) {
+	if srv.NetRestrict != nil && !srv.NetRestrict.Contains(remoteIP) {
 		return errors.New("not whitelisted in NetRestrict")
 	}
 	// Reject Internet peers that try too often.
 	now := srv.clock.Now()
 	srv.inboundHistory.expire(now, nil)
-	if !netutil.AddrIsLAN(remoteIP) && srv.inboundHistory.contains(remoteIP.String()) {
+	if !netutil.IsLAN(remoteIP) && srv.inboundHistory.contains(remoteIP.String()) {
 		return errors.New("too many attempts")
 	}
 	srv.inboundHistory.add(remoteIP.String(), now.Add(inboundThrottleTime))
@@ -957,7 +953,7 @@ func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) erro
 	clog := srv.logger.New("id", c.node.ID(), "addr", c.fd.RemoteAddr(), "conn", c.flags)
 	err = srv.checkpoint(c, srv.checkpointPostHandshake)
 	if err != nil {
-		clog.Trace("[p2p] Rejected peer", "err", err)
+		clog.Trace("Rejected peer", "err", err)
 		return err
 	}
 
@@ -965,17 +961,17 @@ func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) erro
 	phs, err := c.doProtoHandshake(srv.ourHandshake)
 	if err != nil {
 		srv.addError(err)
-		clog.Trace("[p2p] Failed p2p handshake", "err", err)
+		clog.Trace("Failed p2p handshake", "err", err)
 		return err
 	}
 	if id := c.node.ID(); !bytes.Equal(crypto.Keccak256(phs.Pubkey), id[:]) {
-		clog.Trace("[p2p] Wrong devp2p handshake identity", "phsid", hex.EncodeToString(phs.Pubkey))
+		clog.Trace("Wrong devp2p handshake identity", "phsid", hex.EncodeToString(phs.Pubkey))
 		return DiscUnexpectedIdentity
 	}
 	c.caps, c.name = phs.Caps, phs.Name
 	err = srv.checkpoint(c, srv.checkpointAddPeer)
 	if err != nil {
-		clog.Trace("[p2p] Rejected peer", "err", err)
+		clog.Trace("Rejected peer", "err", err)
 		return err
 	}
 

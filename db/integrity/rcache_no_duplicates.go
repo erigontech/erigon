@@ -3,20 +3,19 @@ package integrity
 import (
 	"context"
 	"fmt"
-	"math/rand/v2"
+	"runtime"
 	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
 )
 
-func CheckRCacheNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool, seed int64, sampleRatio float64) (err error) {
+func CheckRCacheNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
 	defer func() {
 		log.Info("[integrity] RCacheNoDups: done", "err", err)
 	}()
@@ -39,13 +38,12 @@ func CheckRCacheNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader serv
 
 	log.Info("[integrity] RCacheNoDups starting", "fromBlock", fromBlock, "toBlock", toBlock)
 
-	return parallelChunkCheck(ctx, fromBlock, toBlock, db, blockReader, failFast, seed, sampleRatio, string(RCacheNoDups), RCacheNoDupsRange)
+	defer db.Debug().EnableReadAhead().DisableReadAhead()
+
+	return parallelChunkCheck(ctx, fromBlock, toBlock, db, blockReader, failFast, RCacheNoDupsRange)
 }
 
 func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
-	if fromBlock > toBlock {
-		panic(fmt.Sprintf("fromBlock(%d) > toBlock(%d)", fromBlock, toBlock))
-	}
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
@@ -132,20 +130,20 @@ func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.Tem
 
 type chunkFn func(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) error
 
-func parallelChunkCheck(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool, seed int64, sampleRatio float64, prefix string, fn chunkFn) (err error) {
+func parallelChunkCheck(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool, fn chunkFn) (err error) {
 	blockRange := toBlock - fromBlock + 1
 	if blockRange == 0 {
 		return nil
 	}
 
-	numWorkers := estimate.AlmostAllCPUs()
+	numWorkers := runtime.NumCPU() * 5
 	chunkSize := uint64(1000)
 
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(numWorkers)
 	var completedChunks atomic.Uint64
-	totalChunks := (blockRange + chunkSize - 1) / chunkSize
-	log.Info("[integrity] "+prefix, "workers", numWorkers, "chunkSize", chunkSize, "blockRange", blockRange, "seed", seed, "sampleRatio", sampleRatio)
+	var totalChunks uint64 = (blockRange + chunkSize - 1) / chunkSize
+	log.Info("[integrity] parallel processing", "workers", numWorkers, "chunkSize", chunkSize, "blockRange", blockRange)
 
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -158,25 +156,24 @@ func parallelChunkCheck(ctx context.Context, fromBlock, toBlock uint64, db kv.Te
 			case <-logEvery.C:
 				completed := completedChunks.Load()
 				progress := float64(completed) / float64(totalChunks) * 100
-				log.Info("[integrity] "+prefix, "progress", fmt.Sprintf("%.1f%%", progress))
+				log.Info("[integrity] progress", "progress", fmt.Sprintf("%.1f%%", progress))
 			}
 		}
 	}()
 
-	rng := rand.New(rand.NewPCG(uint64(seed), 0))
 	// Process chunks in parallel
 	for start := fromBlock; start <= toBlock; start += chunkSize {
-		if sampleRatio < 1.0 && rng.Float64() >= sampleRatio {
-			continue
-		}
 		end := min(start+chunkSize-1, toBlock)
-		chunkStart := start
-		chunkEnd := end
+
+		chunkStart := start // Capture loop variable
+		chunkEnd := end     // Capture loop variable
+
 		g.Go(func() error {
 			chunkErr := fn(ctx, chunkStart, chunkEnd, db, blockReader, failFast)
 			if chunkErr != nil {
 				return chunkErr
 			}
+
 			completedChunks.Add(1)
 			return nil
 		})

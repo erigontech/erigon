@@ -66,13 +66,13 @@ func getTestBlobSidecars(blockHeader *cltypes.SignedBeaconBlockHeader) []*cltype
 func TestBlobsByRangeHandler(t *testing.T) {
 	ctx := context.Background()
 
-	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	listenAddrHost := "/ip4/127.0.0.1/tcp/6121"
+	host, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost))
 	require.NoError(t, err)
-	t.Cleanup(func() { host.Close() })
 
-	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	listenAddrHost1 := "/ip4/127.0.0.1/tcp/6358"
+	host1, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost1))
 	require.NoError(t, err)
-	t.Cleanup(func() { host1.Close() })
 
 	err = host.Connect(ctx, peer.AddrInfo{
 		ID:    host1.ID(),
@@ -86,9 +86,7 @@ func TestBlobsByRangeHandler(t *testing.T) {
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
 
-	tx, err := indiciesDB.BeginRw(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
+	tx, _ := indiciesDB.BeginRw(ctx)
 
 	startSlot := uint64(100)
 	count := uint64(10)
@@ -101,7 +99,7 @@ func TestBlobsByRangeHandler(t *testing.T) {
 	r, _ := h.Header.HashSSZ()
 	require.NoError(t, blobStorage.WriteBlobSidecars(ctx, r, sidecars))
 
-	require.NoError(t, tx.Commit())
+	tx.Commit()
 
 	ethClock := getEthClock(t)
 	c := NewConsensusHandlers(
@@ -190,13 +188,13 @@ func TestBlobsByRangeHandler(t *testing.T) {
 func TestBlobsByIdentifiersHandler(t *testing.T) {
 	ctx := context.Background()
 
-	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	listenAddrHost := "/ip4/127.0.0.1/tcp/6125"
+	host, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost))
 	require.NoError(t, err)
-	t.Cleanup(func() { host.Close() })
 
-	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	listenAddrHost1 := "/ip4/127.0.0.1/tcp/6350"
+	host1, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost1))
 	require.NoError(t, err)
-	t.Cleanup(func() { host1.Close() })
 
 	err = host.Connect(ctx, peer.AddrInfo{
 		ID:    host1.ID(),
@@ -209,9 +207,7 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
 
-	tx, err := indiciesDB.BeginRw(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
+	tx, _ := indiciesDB.BeginRw(ctx)
 
 	startSlot := uint64(100)
 	count := uint64(10)
@@ -225,7 +221,7 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 	r, _ := h.Header.HashSSZ()
 	require.NoError(t, blobStorage.WriteBlobSidecars(ctx, r, sidecars))
 
-	require.NoError(t, tx.Commit())
+	tx.Commit()
 
 	c := NewConsensusHandlers(
 		ctx,

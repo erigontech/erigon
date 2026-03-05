@@ -30,7 +30,7 @@ import (
 	"slices"
 	"strings"
 
-	keccak "github.com/erigontech/fastkeccak"
+	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -230,7 +230,7 @@ const (
 )
 
 func subdomain(e entry) string {
-	h := keccak.NewFastKeccak()
+	h := sha3.NewLegacyKeccak256()
 	io.WriteString(h, e.String())
 	return b32format.EncodeToString(h.Sum(nil)[:16])
 }
@@ -240,7 +240,7 @@ func (e *rootEntry) String() string {
 }
 
 func (e *rootEntry) sigHash() []byte {
-	h := keccak.NewFastKeccak()
+	h := sha3.NewLegacyKeccak256()
 	fmt.Fprintf(h, rootPrefix+" e=%s l=%s seq=%d", e.eroot, e.lroot, e.seq)
 	return h.Sum(nil)
 }

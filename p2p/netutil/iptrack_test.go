@@ -21,7 +21,7 @@ package netutil
 
 import (
 	"fmt"
-	"net/netip"
+	mrand "math/rand"
 	"testing"
 	"time"
 
@@ -96,24 +96,12 @@ func runIPTrackerTest(t *testing.T, evs []iptrackTestEvent) {
 		clock.Run(evtime - time.Duration(clock.Now()))
 		switch ev.op {
 		case opStatement:
-			from := netip.MustParseAddr(ev.from)
-			endpoint := netip.AddrPortFrom(netip.MustParseAddr(ev.ip), 0)
-			it.AddStatement(from, endpoint)
+			it.AddStatement(ev.from, ev.ip)
 		case opContact:
-			from := netip.MustParseAddr(ev.from)
-			it.AddContact(from)
+			it.AddContact(ev.from)
 		case opPredict:
-			pred := it.PredictEndpoint()
-			var wantStr string
-			if ev.ip != "" {
-				wantStr = netip.AddrPortFrom(netip.MustParseAddr(ev.ip), 0).String()
-			}
-			predStr := ""
-			if pred.IsValid() {
-				predStr = pred.String()
-			}
-			if predStr != wantStr {
-				t.Errorf("op %d: wrong prediction %q, want %q", i, predStr, wantStr)
+			if pred := it.PredictEndpoint(); pred != ev.ip {
+				t.Errorf("op %d: wrong prediction %q, want %q", i, pred, ev.ip)
 			}
 		case opCheckFullCone:
 			pred := fmt.Sprintf("%t", it.PredictFullConeNAT())
@@ -136,10 +124,12 @@ func TestIPTrackerForceGC(t *testing.T) {
 	it.clock = &clock
 
 	for i := 0; i < 5*max; i++ {
-		addr := netip.AddrFrom4([4]byte{byte(i >> 24), byte(i >> 16), byte(i >> 8), byte(i)})
-		endpoint := netip.AddrPortFrom(addr, uint16(i))
-		it.AddStatement(addr, endpoint)
-		it.AddContact(addr)
+		e1 := make([]byte, 4)
+		e2 := make([]byte, 4)
+		mrand.Read(e1)
+		mrand.Read(e2)
+		it.AddStatement(string(e1), string(e2))
+		it.AddContact(string(e1))
 		clock.Run(rate)
 	}
 	if len(it.contact) > 2*max {

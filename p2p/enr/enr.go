@@ -53,7 +53,6 @@ var (
 	errNotSorted      = errors.New("record key/value pairs are not sorted by key")
 	errDuplicateKey   = errors.New("record contains duplicate key")
 	errIncompletePair = errors.New("record contains incomplete k/v pair")
-	errIncompleteList = errors.New("record contains less than two list elements")
 	errTooBig         = fmt.Errorf("record bigger than %d bytes", SizeLimit)
 	errEncodeUnsigned = errors.New("can't encode unsigned record")
 	errNotFound       = errors.New("no such key in record")
@@ -99,24 +98,6 @@ type pair struct {
 	v rlp.RawValue
 }
 
-// Size returns the encoded size of the record.
-func (r *Record) Size() uint64 {
-	if r.raw != nil {
-		return uint64(len(r.raw))
-	}
-	return computeSize(r)
-}
-
-func computeSize(r *Record) uint64 {
-	size := uint64(rlp.IntSize(r.seq))
-	size += rlp.BytesSize(r.signature)
-	for _, p := range r.pairs {
-		size += rlp.StringSize(p.k)
-		size += uint64(len(p.v))
-	}
-	return rlp.ListSize(size)
-}
-
 // Seq returns the sequence number.
 func (r *Record) Seq() uint64 {
 	return r.seq
@@ -153,7 +134,7 @@ func (r *Record) Load(e Entry) error {
 func (r *Record) Set(e Entry) {
 	blob, err := rlp.EncodeToBytes(e)
 	if err != nil {
-		panic(fmt.Errorf("enr: can't encode %s: %v", e.ENRKey(), err))
+		panic(fmt.Errorf("enr: can't encode %s: %w", e.ENRKey(), err))
 	}
 	r.invalidate()
 
@@ -227,20 +208,14 @@ func decodeRecord(s *rlp.Stream) (dec Record, raw []byte, err error) {
 
 	// Decode the RLP container.
 	s = rlp.NewStream(bytes.NewReader(raw), 0)
-	if _, err := s.List(); err != nil {
-		return dec, raw, err
+	if _, e := s.List(); e != nil {
+		return dec, raw, e
 	}
-	if err = s.Decode(&dec.signature); err != nil {
-		if errors.Is(err, rlp.EOL) {
-			err = errIncompleteList
-		}
-		return dec, raw, err
+	if e := s.Decode(&dec.signature); e != nil {
+		return dec, raw, e
 	}
-	if err = s.Decode(&dec.seq); err != nil {
-		if errors.Is(err, rlp.EOL) {
-			err = errIncompleteList
-		}
-		return dec, raw, err
+	if e := s.Decode(&dec.seq); e != nil {
+		return dec, raw, e
 	}
 	// The rest of the record contains sorted k/v pairs.
 	var prevkey string
@@ -325,7 +300,7 @@ func (r *Record) AppendElements(list []any) []any {
 }
 
 func (r *Record) encode(sig []byte) (raw []byte, err error) {
-	list := make([]any, 1, 2*len(r.pairs)+2)
+	list := make([]any, 1, 2*len(r.pairs)+1)
 	list[0] = sig
 	list = r.AppendElements(list)
 	if raw, err = rlp.EncodeToBytes(list); err != nil {

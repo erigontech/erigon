@@ -23,7 +23,6 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
 
 	"github.com/erigontech/erigon/common"
@@ -49,11 +48,11 @@ func config() *chain.Config {
 // TestBlockGasLimits tests the gasLimit checks for blocks both across
 // the EIP-1559 boundary and post-1559 blocks
 func TestBlockGasLimits(t *testing.T) {
-	initial := uint256.NewInt(params.InitialBaseFee)
+	initial := new(big.Int).SetUint64(params.InitialBaseFee)
 
 	for i, tc := range []struct {
 		pGasLimit uint64
-		pNum      uint64
+		pNum      int64
 		gasLimit  uint64
 		ok        bool
 	}{
@@ -78,13 +77,13 @@ func TestBlockGasLimits(t *testing.T) {
 			GasUsed:  tc.pGasLimit / 2,
 			GasLimit: tc.pGasLimit,
 			BaseFee:  initial,
-			Number:   *uint256.NewInt(tc.pNum),
+			Number:   big.NewInt(tc.pNum),
 		}
 		header := &types.Header{
 			GasUsed:  tc.gasLimit / 2,
 			GasLimit: tc.gasLimit,
 			BaseFee:  initial,
-			Number:   *uint256.NewInt(tc.pNum + 1),
+			Number:   big.NewInt(tc.pNum + 1),
 		}
 		err := VerifyEip1559Header(config(), parent, header, false /*skipGasLimit*/)
 		if tc.ok && err != nil {
@@ -99,10 +98,10 @@ func TestBlockGasLimits(t *testing.T) {
 // TestCalcBaseFee assumes all blocks are 1559-blocks
 func TestCalcBaseFee(t *testing.T) {
 	tests := []struct {
-		parentBaseFee   uint64
+		parentBaseFee   int64
 		parentGasLimit  uint64
 		parentGasUsed   uint64
-		expectedBaseFee uint64
+		expectedBaseFee int64
 	}{
 		{params.InitialBaseFee, 20000000, 10000000, params.InitialBaseFee}, // usage == target
 		{params.InitialBaseFee, 20000000, 9000000, 987500000},              // usage below target
@@ -110,12 +109,12 @@ func TestCalcBaseFee(t *testing.T) {
 	}
 	for i, test := range tests {
 		parent := &types.Header{
-			Number:   *common.Num32,
+			Number:   common.Big32,
 			GasLimit: test.parentGasLimit,
 			GasUsed:  test.parentGasUsed,
-			BaseFee:  uint256.NewInt(test.parentBaseFee),
+			BaseFee:  big.NewInt(test.parentBaseFee),
 		}
-		if have, want := CalcBaseFee(config(), parent), uint256.NewInt(test.expectedBaseFee); have.Cmp(want) != 0 {
+		if have, want := CalcBaseFee(config(), parent), big.NewInt(test.expectedBaseFee); have.Cmp(want) != 0 {
 			t.Errorf("test %d: have %d  want %d, ", i, have, want)
 		}
 	}

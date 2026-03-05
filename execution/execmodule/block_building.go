@@ -34,7 +34,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 )
 
-func (e *ExecModule) checkWithdrawalsPresence(time uint64, withdrawals []*types.Withdrawal) error {
+func (e *EthereumExecutionModule) checkWithdrawalsPresence(time uint64, withdrawals []*types.Withdrawal) error {
 	if !e.config.IsShanghai(time) && withdrawals != nil {
 		return &rpc.InvalidParamsError{Message: "withdrawals before shanghai"}
 	}
@@ -44,7 +44,7 @@ func (e *ExecModule) checkWithdrawalsPresence(time uint64, withdrawals []*types.
 	return nil
 }
 
-func (e *ExecModule) evictOldBuilders() {
+func (e *EthereumExecutionModule) evictOldBuilders() {
 	ids := common.SortedKeys(e.builders)
 
 	// remove old builders so that at most MaxBuilders - 1 remain
@@ -54,7 +54,7 @@ func (e *ExecModule) evictOldBuilders() {
 }
 
 // Missing: NewPayload, AssembleBlock
-func (e *ExecModule) AssembleBlock(ctx context.Context, req *executionproto.AssembleBlockRequest) (*executionproto.AssembleBlockResponse, error) {
+func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *executionproto.AssembleBlockRequest) (*executionproto.AssembleBlockResponse, error) {
 	if !e.semaphore.TryAcquire(1) {
 		return &executionproto.AssembleBlockResponse{
 			Id:   0,
@@ -68,7 +68,6 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, req *executionproto.Asse
 		PrevRandao:            gointerfaces.ConvertH256ToHash(req.PrevRandao),
 		SuggestedFeeRecipient: gointerfaces.ConvertH160toAddress(req.SuggestedFeeRecipient),
 		Withdrawals:           moduleutil.ConvertWithdrawalsFromRpc(req.Withdrawals),
-		SlotNumber:            req.SlotNumber,
 	}
 
 	if err := e.checkWithdrawalsPresence(param.Timestamp, param.Withdrawals); err != nil {
@@ -99,7 +98,7 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, req *executionproto.Asse
 	param.PayloadId = e.nextPayloadId
 	e.lastParameters = &param
 
-	e.builders[e.nextPayloadId] = builder.NewBlockBuilder(e.builderFunc, &param, e.config.SecondsPerSlot()/4)
+	e.builders[e.nextPayloadId] = builder.NewBlockBuilder(e.builderFunc, &param, e.config.SecondsPerSlot())
 	e.logger.Info("[ForkChoiceUpdated] BlockBuilder added", "payload", e.nextPayloadId)
 
 	return &executionproto.AssembleBlockResponse{
@@ -121,40 +120,31 @@ func blockValue(br *types.BlockWithReceipts, baseFee *uint256.Int) *uint256.Int 
 	return blockValue
 }
 
-func (e *ExecModule) GetAssembledBlockWithReceipts(payloadId uint64) (block *types.BlockWithReceipts, busy bool, err error) {
+func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *executionproto.GetAssembledBlockRequest) (*executionproto.GetAssembledBlockResponse, error) {
 	if !e.semaphore.TryAcquire(1) {
-		return nil, true, nil
-	}
-	defer e.semaphore.Release(1)
-	builder, ok := e.builders[payloadId]
-	if !ok {
-		return nil, false, nil
-	}
-	blockWithReceipts, err := builder.Stop()
-	return blockWithReceipts, false, err
-}
-
-func (e *ExecModule) GetAssembledBlock(ctx context.Context, req *executionproto.GetAssembledBlockRequest) (*executionproto.GetAssembledBlockResponse, error) {
-	blockWithReceipts, busy, err := e.GetAssembledBlockWithReceipts(req.Id)
-	if err != nil {
-		e.logger.Error("Failed to build PoS block", "err", err)
-		return nil, err
-	}
-	if busy {
 		return &executionproto.GetAssembledBlockResponse{
 			Busy: true,
 		}, nil
 	}
-	if blockWithReceipts == nil {
+	defer e.semaphore.Release(1)
+	payloadId := req.Id
+	builder, ok := e.builders[payloadId]
+	if !ok {
 		return &executionproto.GetAssembledBlockResponse{
 			Busy: false,
 		}, nil
 	}
 
+	blockWithReceipts, err := builder.Stop()
+	if err != nil {
+		e.logger.Error("Failed to build PoS block", "err", err)
+		return nil, err
+	}
 	block := blockWithReceipts.Block
 	header := block.Header()
 
-	baseFee := header.BaseFee
+	baseFee := new(uint256.Int)
+	baseFee.SetFromBig(header.BaseFee)
 
 	encodedTransactions, err := types.MarshalTransactionsBinary(block.Transactions())
 	if err != nil {
@@ -177,7 +167,6 @@ func (e *ExecModule) GetAssembledBlock(ctx context.Context, req *executionproto.
 		BaseFeePerGas: gointerfaces.ConvertUint256IntToH256(baseFee),
 		BlockHash:     gointerfaces.ConvertHashToH256(block.Hash()),
 		Transactions:  encodedTransactions,
-		SlotNumber:    header.SlotNumber,
 	}
 	if block.Withdrawals() != nil {
 		payload.Version = 2
@@ -189,13 +178,12 @@ func (e *ExecModule) GetAssembledBlock(ctx context.Context, req *executionproto.
 		payload.BlobGasUsed = header.BlobGasUsed
 		payload.ExcessBlobGas = header.ExcessBlobGas
 	}
-	blockAccessList := blockWithReceipts.BlockAccessList
-	// Only bump payload version for Amsterdam+ chains where the BAL hash
-	// is part of the block header. For pre-Amsterdam chains with ExperimentalBAL,
-	// the BAL is computed for validation but not included in the payload.
-	if header.BlockAccessListHash != nil {
+	blockAccessList := block.BlockAccessList()
+	if header.BlockAccessListHash != nil || blockAccessList != nil {
 		payload.Version = 4
-		payload.BlockAccessListHash = gointerfaces.ConvertHashToH256(*header.BlockAccessListHash)
+		if header.BlockAccessListHash != nil {
+			payload.BlockAccessListHash = gointerfaces.ConvertHashToH256(*header.BlockAccessListHash)
+		}
 		payload.BlockAccessList = types.ConvertBlockAccessListToTypesProto(blockAccessList)
 		if payload.BlockAccessList == nil {
 			payload.BlockAccessList = []*typesproto.BlockAccessListAccount{}

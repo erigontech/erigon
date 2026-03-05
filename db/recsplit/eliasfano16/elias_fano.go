@@ -25,7 +25,6 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
-
 	"github.com/erigontech/erigon/common/bitutil"
 )
 
@@ -75,7 +74,7 @@ func NewEliasFano(count uint64, maxOffset, minDelta uint64) *EliasFano {
 func (ef *EliasFano) AddOffset(offset uint64) {
 	//fmt.Printf("0x%x,\n", offset)
 	if ef.l != 0 {
-		setBits(ef.lowerBits, ef.i*ef.l, (offset-ef.delta)&ef.lowerBitsMask)
+		setBits(ef.lowerBits, ef.i*ef.l, int(ef.l), (offset-ef.delta)&ef.lowerBitsMask)
 	}
 	//pos := ((offset - ef.delta) >> ef.l) + ef.i
 	set(ef.upperBits, ((offset-ef.delta)>>ef.l)+ef.i)
@@ -119,35 +118,36 @@ func (ef *EliasFano) deriveFields() int {
 // Build construct Elias Fano index for a given sequences
 func (ef *EliasFano) Build() {
 	for i, c, lastSuperQ := uint64(0), uint64(0), uint64(0); i < uint64(ef.wordsUpperBits); i++ {
-		for word := ef.upperBits[i]; word != 0; word &= word - 1 { // iterate over set bits only; word &= word-1 clears the lowest set bit
-			b := uint64(bits.TrailingZeros64(word))
-			if (c & superQMask) == 0 {
-				// When c is multiple of 2^14 (4096)
-				lastSuperQ = i*64 + b
-				ef.jump[(c/superQ)*superQSize] = lastSuperQ
-			}
-			if (c & qMask) == 0 {
-				// When c is multiple of 2^8 (256)
-				var offset = i*64 + b - lastSuperQ // offset can be either 0, 256, 512, 768, ..., up to 4096-256
-				// offset needs to be encoded as 16-bit integer, therefore the following check
-				if offset >= (1 << 16) {
-					fmt.Printf("ef.l=%x,ef.u=%x\n", ef.l, ef.u)
-					fmt.Printf("offset=%x,lastSuperQ=%x,i=%x,b=%x,c=%x\n", offset, lastSuperQ, i, b, c)
-					fmt.Printf("ef.minDelta=%x\n", ef.minDelta)
-					//fmt.Printf("ef.upperBits=%x\n", ef.upperBits)
-					//fmt.Printf("ef.lowerBits=%x\n", ef.lowerBits)
-					//fmt.Printf("ef.wordsUpperBits=%b\n", ef.wordsUpperBits)
-					panic("")
+		for b := uint64(0); b < 64; b++ {
+			if ef.upperBits[i]&(uint64(1)<<b) != 0 {
+				if (c & superQMask) == 0 {
+					// When c is multiple of 2^14 (4096)
+					lastSuperQ = i*64 + b
+					ef.jump[(c/superQ)*superQSize] = lastSuperQ
 				}
-				// c % superQ is the bit index inside the group of 4096 bits
-				jumpSuperQ := (c / superQ) * superQSize
-				jumpInsideSuperQ := (c % superQ) / q
-				idx64 := jumpSuperQ + 1 + (jumpInsideSuperQ >> 2)
-				shift := 16 * (jumpInsideSuperQ % 4)
-				mask := uint64(0xffff) << shift
-				ef.jump[idx64] = (ef.jump[idx64] &^ mask) | (offset << shift)
+				if (c & qMask) == 0 {
+					// When c is multiple of 2^8 (256)
+					var offset = i*64 + b - lastSuperQ // offset can be either 0, 256, 512, 768, ..., up to 4096-256
+					// offset needs to be encoded as 16-bit integer, therefore the following check
+					if offset >= (1 << 16) {
+						fmt.Printf("ef.l=%x,ef.u=%x\n", ef.l, ef.u)
+						fmt.Printf("offset=%x,lastSuperQ=%x,i=%x,b=%x,c=%x\n", offset, lastSuperQ, i, b, c)
+						fmt.Printf("ef.minDelta=%x\n", ef.minDelta)
+						//fmt.Printf("ef.upperBits=%x\n", ef.upperBits)
+						//fmt.Printf("ef.lowerBits=%x\n", ef.lowerBits)
+						//fmt.Printf("ef.wordsUpperBits=%b\n", ef.wordsUpperBits)
+						panic("")
+					}
+					// c % superQ is the bit index inside the group of 4096 bits
+					jumpSuperQ := (c / superQ) * superQSize
+					jumpInsideSuperQ := (c % superQ) / q
+					idx64 := jumpSuperQ + 1 + (jumpInsideSuperQ >> 2)
+					shift := 16 * (jumpInsideSuperQ % 4)
+					mask := uint64(0xffff) << shift
+					ef.jump[idx64] = (ef.jump[idx64] &^ mask) | (offset << shift)
+				}
+				c++
 			}
-			c++
 		}
 	}
 }
@@ -332,7 +332,7 @@ func (ef *DoubleEliasFano) Build(cumKeys []uint64, position []uint64) {
 	for i, cumDelta, bitDelta := uint64(0), uint64(0), uint64(0); i <= ef.numBuckets; i, cumDelta, bitDelta = i+1, cumDelta+ef.cumKeysMinDelta, bitDelta+ef.posMinDelta {
 		if ef.lCumKeys != 0 {
 			//fmt.Printf("i=%d, set_bits cum for %d = %b\n", i, cumKeys[i]-cumDelta, (cumKeys[i]-cumDelta)&ef.lowerBitsMaskCumKeys)
-			setBits(ef.lowerBits, i*(ef.lCumKeys+ef.lPosition), (cumKeys[i]-cumDelta)&ef.lowerBitsMaskCumKeys)
+			setBits(ef.lowerBits, i*(ef.lCumKeys+ef.lPosition), int(ef.lCumKeys), (cumKeys[i]-cumDelta)&ef.lowerBitsMaskCumKeys)
 			//fmt.Printf("loweBits %b\n", ef.lowerBits)
 		}
 		set(ef.upperBitsCumKeys, ((cumKeys[i]-cumDelta)>>ef.lCumKeys)+i)
@@ -340,7 +340,7 @@ func (ef *DoubleEliasFano) Build(cumKeys []uint64, position []uint64) {
 
 		if ef.lPosition != 0 {
 			//fmt.Printf("i=%d, set_bits pos for %d = %b\n", i, position[i]-bitDelta, (position[i]-bitDelta)&ef.lowerBitsMaskPosition)
-			setBits(ef.lowerBits, i*(ef.lCumKeys+ef.lPosition)+ef.lCumKeys, (position[i]-bitDelta)&ef.lowerBitsMaskPosition)
+			setBits(ef.lowerBits, i*(ef.lCumKeys+ef.lPosition)+ef.lCumKeys, int(ef.lPosition), (position[i]-bitDelta)&ef.lowerBitsMaskPosition)
 			//fmt.Printf("lowerBits %b\n", ef.lowerBits)
 		}
 		set(ef.upperBitsPosition, ((position[i]-bitDelta)>>ef.lPosition)+i)
@@ -355,67 +355,72 @@ func (ef *DoubleEliasFano) Build(cumKeys []uint64, position []uint64) {
 	// c/superQ is the index of the current 4096 block of bits
 	// superQSize is how many words is required to encode one block of 4096 bits. It is 17 words which is 1088 bits
 	for i, c, lastSuperQ := uint64(0), uint64(0), uint64(0); i < uint64(wordsCumKeys); i++ {
-		for word := ef.upperBitsCumKeys[i]; word != 0; word &= word - 1 { // iterate over set bits only; word &= word-1 clears the lowest set bit
-			b := uint64(bits.TrailingZeros64(word))
-			if (c & superQMask) == 0 {
-				// When c is multiple of 2^14 (4096)
-				lastSuperQ = i*64 + b
-				ef.jump[(c/superQ)*(superQSize*2)] = lastSuperQ
-			}
-			if (c & qMask) == 0 {
-				// When c is multiple of 2^8 (256)
-				var offset = i*64 + b - lastSuperQ // offset can be either 0, 256, 512, 768, ..., up to 4096-256
-				// offset needs to be encoded as 16-bit integer, therefore the following check
-				if offset >= (1 << 16) {
-					panic("")
+		for b := uint64(0); b < 64; b++ {
+			if ef.upperBitsCumKeys[i]&(uint64(1)<<b) != 0 {
+				if (c & superQMask) == 0 {
+					// When c is multiple of 2^14 (4096)
+					lastSuperQ = i*64 + b
+					ef.jump[(c/superQ)*(superQSize*2)] = lastSuperQ
 				}
-				// c % superQ is the bit index inside the group of 4096 bits
-				jumpSuperQ := (c / superQ) * (superQSize * 2)
-				jumpInsideSuperQ := 2 * (c % superQ) / q
-				idx64 := jumpSuperQ + 2 + (jumpInsideSuperQ >> 2)
-				shift := 16 * (jumpInsideSuperQ % 4)
-				mask := uint64(0xffff) << shift
-				ef.jump[idx64] = (ef.jump[idx64] &^ mask) | (offset << shift)
+				if (c & qMask) == 0 {
+					// When c is multiple of 2^8 (256)
+					var offset = i*64 + b - lastSuperQ // offset can be either 0, 256, 512, 768, ..., up to 4096-256
+					// offset needs to be encoded as 16-bit integer, therefore the following check
+					if offset >= (1 << 16) {
+						panic("")
+					}
+					// c % superQ is the bit index inside the group of 4096 bits
+					jumpSuperQ := (c / superQ) * (superQSize * 2)
+					jumpInsideSuperQ := 2 * (c % superQ) / q
+					idx64 := jumpSuperQ + 2 + (jumpInsideSuperQ >> 2)
+					shift := 16 * (jumpInsideSuperQ % 4)
+					mask := uint64(0xffff) << shift
+					ef.jump[idx64] = (ef.jump[idx64] &^ mask) | (offset << shift)
+				}
+				c++
 			}
-			c++
 		}
 	}
 
 	for i, c, lastSuperQ := uint64(0), uint64(0), uint64(0); i < uint64(wordsPosition); i++ {
-		for word := ef.upperBitsPosition[i]; word != 0; word &= word - 1 { // iterate over set bits only; word &= word-1 clears the lowest set bit
-			b := uint64(bits.TrailingZeros64(word))
-			if (c & superQMask) == 0 {
-				lastSuperQ = i*64 + b
-				ef.jump[(c/superQ)*(superQSize*2)+1] = lastSuperQ
-			}
-			if (c & qMask) == 0 {
-				var offset = i*64 + b - lastSuperQ
-				if offset >= (1 << 16) {
-					panic("")
+		for b := uint64(0); b < 64; b++ {
+			if ef.upperBitsPosition[i]&(uint64(1)<<b) != 0 {
+				if (c & superQMask) == 0 {
+					lastSuperQ = i*64 + b
+					ef.jump[(c/superQ)*(superQSize*2)+1] = lastSuperQ
 				}
-				jumpSuperQ := (c / superQ) * (superQSize * 2)
-				jumpInsideSuperQ := 2*((c%superQ)/q) + 1
-				idx64 := jumpSuperQ + 2 + (jumpInsideSuperQ >> 2)
-				shift := 16 * (jumpInsideSuperQ % 4)
-				mask := uint64(0xffff) << shift
-				ef.jump[idx64] = (ef.jump[idx64] &^ mask) | (offset << shift)
+				if (c & qMask) == 0 {
+					var offset = i*64 + b - lastSuperQ
+					if offset >= (1 << 16) {
+						panic("")
+					}
+					jumpSuperQ := (c / superQ) * (superQSize * 2)
+					jumpInsideSuperQ := 2*((c%superQ)/q) + 1
+					idx64 := jumpSuperQ + 2 + (jumpInsideSuperQ >> 2)
+					shift := 16 * (jumpInsideSuperQ % 4)
+					mask := uint64(0xffff) << shift
+					ef.jump[idx64] = (ef.jump[idx64] &^ mask) | (offset << shift)
+				}
+				c++
 			}
-			c++
 		}
 	}
 	//fmt.Printf("jump: %x\n", ef.jump)
 }
 
-// setBits stores a value at bit position start.
-// All callers write in monotonic order, so target bits are guaranteed zero
-// and we can use |= instead of clear-and-set. The lowerBits slice always
-// has +1 padding word, making the unconditional second write safe.
-// When shift+width <= 64, value>>(64-shift) == 0, so the write is a no-op.
-func setBits(bits []uint64, start uint64, value uint64) {
-	idx64, shift := start>>6, int(start&63)
-	_ = bits[idx64+1] // BCE hint: proves both accesses are in-bounds
-	bits[idx64] |= value << shift
-	bits[idx64+1] |= value >> (64 - shift)
+// setBits assumes that bits are set in monotonic order, so that
+// we can skip the masking for the second word
+func setBits(bits []uint64, start uint64, width int, value uint64) {
+	shift := int(start & 63)
+	idx64 := start >> 6
+	mask := (uint64(1)<<width - 1) << shift
+	//fmt.Printf("mask = %b, idx64 = %d\n", mask, idx64)
+	bits[idx64] = (bits[idx64] &^ mask) | (value << shift)
+	//fmt.Printf("start = %d, width = %d, shift + width = %d\n", start, width, shift+width)
+	if shift+width > 64 {
+		// changes two 64-bit words
+		bits[idx64+1] = value >> (64 - shift)
+	}
 }
 
 func set(bits []uint64, pos uint64) {

@@ -21,8 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-
-	"github.com/holiman/uint256"
+	"math/big"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -90,7 +89,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 		blockTime := header.Time
 
 		// Add GasPrice for the DynamicFeeTransaction
-		var baseFee *uint256.Int
+		var baseFee *big.Int
 		if chainConfig.IsLondon(blockNum) && blockHash != (common.Hash{}) {
 			baseFee = header.BaseFee
 		}
@@ -296,21 +295,6 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 		return nil, err
 	}
 
-	if blockNr == rpc.PendingBlockNumber {
-		b, err := api.blockByNumber(ctx, blockNr, tx)
-		if err != nil {
-			return nil, err
-		}
-		if b == nil {
-			return nil, errors.New("pending block is not available")
-		}
-		txs := b.Transactions()
-		if uint64(txIndex) >= uint64(len(txs)) {
-			return nil, nil
-		}
-		return ethapi.NewRPCTransaction(txs[txIndex], common.Hash{}, b.Time(), 0, uint64(txIndex), b.BaseFee()), nil
-	}
-
 	// https://www.quicknode.com/docs/ethereum/eth_getTransactionByBlockNumberAndIndex
 	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader, api.filters)
 	if err != nil {
@@ -367,17 +351,6 @@ func (api *APIImpl) GetRawTransactionByBlockNumberAndIndex(ctx context.Context, 
 		return nil, err
 	}
 	defer tx.Rollback()
-
-	if blockNr == rpc.PendingBlockNumber {
-		b, err := api.blockByNumber(ctx, blockNr, tx)
-		if err != nil {
-			return nil, err
-		}
-		if b == nil {
-			return nil, errors.New("pending block is not available")
-		}
-		return newRPCRawTransactionFromBlockIndex(b, uint64(index))
-	}
 
 	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNr.Uint64())
 	if err != nil {

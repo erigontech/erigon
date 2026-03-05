@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math"
 	"runtime"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -90,7 +91,7 @@ type SharedDomains struct {
 	logger log.Logger
 
 	txNum             uint64
-	currentStep       kv.Step
+	blockNum          atomic.Uint64
 	trace             bool //nolint
 	commitmentCapture bool
 	mem               kv.TemporalMemBatch
@@ -117,7 +118,7 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) 
 
 	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp)
 
-	if _, _, err := sd.SeekCommitment(ctx, tx); err != nil {
+	if err := sd.SeekCommitment(ctx, tx); err != nil {
 		return sd, err
 	}
 
@@ -129,12 +130,12 @@ type temporalPutDel struct {
 	tx kv.TemporalTx
 }
 
-func (pd *temporalPutDel) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte) error {
-	return pd.sd.DomainPut(domain, pd.tx, k, v, txNum, prevVal)
+func (pd *temporalPutDel) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
+	return pd.sd.DomainPut(domain, pd.tx, k, v, txNum, prevVal, prevStep)
 }
 
-func (pd *temporalPutDel) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte) error {
-	return pd.sd.DomainDel(domain, pd.tx, k, txNum, prevVal)
+func (pd *temporalPutDel) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
+	return pd.sd.DomainDel(domain, pd.tx, k, txNum, prevVal, prevStep)
 }
 
 func (pd *temporalPutDel) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uint64) error {
@@ -154,9 +155,9 @@ type changesetSwitcher interface {
 	SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet)
 }
 
-func (sd *SharedDomains) Merge(sdTxNum uint64, other *SharedDomains, otherTxNum uint64) error {
-	if sdTxNum > otherTxNum {
-		return fmt.Errorf("can't merge backwards: txnum: %d > %d", sdTxNum, otherTxNum)
+func (sd *SharedDomains) Merge(other *SharedDomains) error {
+	if sd.txNum > other.txNum {
+		return fmt.Errorf("can't merge backwards: txnum: %d > %d", sd.txNum, other.txNum)
 	}
 
 	if err := sd.mem.Merge(other.mem); err != nil {
@@ -168,8 +169,8 @@ func (sd *SharedDomains) Merge(sdTxNum uint64, other *SharedDomains, otherTxNum 
 		sd.sdCtx.SetPendingUpdate(otherUpd)
 	}
 
-	sd.txNum = otherTxNum
-	sd.currentStep = kv.Step(otherTxNum / sd.stepSize)
+	sd.txNum = other.txNum
+	sd.blockNum.Store(other.blockNum.Load())
 	return nil
 }
 
@@ -190,8 +191,8 @@ func (sd *SharedDomains) FlushPendingUpdates(ctx context.Context, tx kv.Temporal
 	}
 	defer upd.Clear()
 
-	putBranch := func(prefix, data, prevData []byte) error {
-		return sd.DomainPut(kv.CommitmentDomain, tx, prefix, data, upd.TxNum, prevData)
+	putBranch := func(prefix, data, prevData []byte, prevStep kv.Step) error {
+		return sd.DomainPut(kv.CommitmentDomain, tx, prefix, data, upd.TxNum, prevData, prevStep)
 	}
 
 	switcher, ok := sd.mem.(changesetSwitcher)
@@ -316,10 +317,15 @@ func (sd *SharedDomains) StepSize() uint64 { return sd.stepSize }
 // Requires for sd.rwTx because of commitment evaluation in shared domains if stepSize is reached
 func (sd *SharedDomains) SetTxNum(txNum uint64) {
 	sd.txNum = txNum
-	sd.currentStep = kv.Step(txNum / sd.stepSize)
 }
 
 func (sd *SharedDomains) TxNum() uint64 { return sd.txNum }
+
+func (sd *SharedDomains) BlockNum() uint64 { return sd.blockNum.Load() }
+
+func (sd *SharedDomains) SetBlockNum(blockNum uint64) {
+	sd.blockNum.Store(blockNum)
+}
 
 func (sd *SharedDomains) SetTrace(b, capture bool) []string {
 	sd.trace = b
@@ -328,7 +334,22 @@ func (sd *SharedDomains) SetTrace(b, capture bool) []string {
 }
 
 func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]byte, []byte, bool, error) {
-	return sd.mem.HasPrefix(domain, prefix, roTx)
+	var firstKey, firstVal []byte
+	var hasPrefix bool
+	err := sd.IteratePrefix(domain, prefix, roTx, func(k []byte, v []byte, step kv.Step) (bool, error) {
+		// we need to do this to ensure the value has not been unwound
+		if lv, _, ok := sd.mem.GetLatest(domain, k); ok {
+			v = lv
+		}
+		if len(v) > 0 {
+			firstKey = common.Copy(k)
+			firstVal = common.Copy(v)
+			hasPrefix = true
+			return false, nil // do not continue, end on first occurrence
+		}
+		return true, nil
+	})
+	return firstKey, firstVal, hasPrefix, err
 }
 
 func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step kv.Step) (cont bool, err error)) error {
@@ -340,6 +361,7 @@ func (sd *SharedDomains) Close() {
 		return
 	}
 
+	sd.SetBlockNum(0)
 	sd.SetTxNum(0)
 	sd.ResetPendingUpdates()
 
@@ -383,14 +405,13 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		}
 	}
 
-	// stateCache holds in-flight values from previous transactions in the same batch
-	// that haven't been flushed to DB yet. Early return keeps correctness AND performance.
-	// We return step=0 (unknown) because the cache doesn't store the step at which a key
-	// was last written — and prevStep has been removed from DomainPut (see #19240), so
-	// callers no longer require an accurate step from this path.
 	if sd.stateCache != nil {
+		// This is fine, we will have some extra entries into domain worst case.
+		// regarding file determinism: probability of non-deterministic goes to 0 as we do
+		// files merge so this is not a problem in practice. file 0-1 will be non-deterministic
+		// but file 0-2 will be deterministic as it will include all entries from file 0-1 and so on.
 		if v, ok := sd.stateCache.Get(domain, k); ok {
-			return v, 0, nil
+			return v, kv.Step(sd.txNum / sd.stepSize), nil
 		}
 	}
 
@@ -483,7 +504,7 @@ func (sd *SharedDomains) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []b
 //   - user can provide `prevVal != nil` - then it will not read prev value from storage
 //   - user can append k2 into k1, then underlying methods will not preform append
 //   - if `val == nil` it will call DomainDel
-func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte) error {
+func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
 	if v == nil {
 		return fmt.Errorf("DomainPut: %s, trying to put nil value. not allowed", domain)
 	}
@@ -492,17 +513,17 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 
 	if prevVal == nil {
 		var err error
-		prevVal, _, err = sd.GetLatest(domain, roTx, k)
+		prevVal, prevStep, err = sd.GetLatest(domain, roTx, k)
 		if err != nil {
 			return err
 		}
 	}
 	switch domain {
-	case kv.CodeDomain, kv.AccountsDomain, kv.StorageDomain, kv.CommitmentDomain:
+	case kv.CodeDomain, kv.AccountsDomain, kv.StorageDomain:
 		if bytes.Equal(prevVal, v) {
 			return nil
 		}
-	case kv.RCacheDomain:
+	case kv.RCacheDomain, kv.CommitmentDomain:
 		//noop
 	default:
 		if bytes.Equal(prevVal, v) {
@@ -515,7 +536,7 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 		sd.stateCache.Put(domain, k, v)
 	}
 
-	return sd.mem.DomainPut(domain, ks, v, txNum, prevVal)
+	return sd.mem.DomainPut(domain, ks, v, txNum, prevVal, prevStep)
 }
 
 // DomainDel
@@ -523,13 +544,12 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 //   - user can prvide `prevVal != nil` - then it will not read prev value from storage
 //   - user can append k2 into k1, then underlying methods will not preform append
 //   - if `val == nil` it will call DomainDel
-func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte, txNum uint64, prevVal []byte) error {
+func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
 	ks := string(k)
 	sd.sdCtx.TouchKey(domain, ks, nil)
-
 	if prevVal == nil {
 		var err error
-		prevVal, _, err = sd.GetLatest(domain, tx, k)
+		prevVal, prevStep, err = sd.GetLatest(domain, tx, k)
 		if err != nil {
 			return err
 		}
@@ -540,7 +560,7 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 		if err := sd.DomainDelPrefix(kv.StorageDomain, tx, k, txNum); err != nil {
 			return err
 		}
-		if err := sd.DomainDel(kv.CodeDomain, tx, k, txNum, nil); err != nil {
+		if err := sd.DomainDel(kv.CodeDomain, tx, k, txNum, nil, 0); err != nil {
 			return err
 		}
 		// Remove from state cache when account is deleted
@@ -548,7 +568,7 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 			sd.stateCache.Delete(kv.AccountsDomain, k)
 			sd.stateCache.Delete(kv.CodeDomain, k)
 		}
-		return sd.mem.DomainDel(kv.AccountsDomain, ks, txNum, prevVal)
+		return sd.mem.DomainDel(kv.AccountsDomain, ks, txNum, prevVal, prevStep)
 	case kv.StorageDomain:
 		// Remove from state cache when storage is deleted
 		if sd.stateCache != nil {
@@ -565,7 +585,7 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	default:
 		//noop
 	}
-	return sd.mem.DomainDel(domain, ks, txNum, prevVal)
+	return sd.mem.DomainDel(domain, ks, txNum, prevVal, prevStep)
 }
 
 func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.TemporalTx, prefix []byte, txNum uint64) error {
@@ -586,7 +606,7 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.TemporalTx, p
 		return err
 	}
 	for _, tomb := range tombs {
-		if err := sd.DomainDel(kv.StorageDomain, roTx, tomb.k, txNum, tomb.v); err != nil {
+		if err := sd.DomainDel(kv.StorageDomain, roTx, tomb.k, txNum, tomb.v, tomb.step); err != nil {
 			return err
 		}
 	}
@@ -621,13 +641,12 @@ func (sd *SharedDomains) GetCommitmentContext() *commitmentdb.SharedDomainsCommi
 }
 
 // SeekCommitment lookups latest available commitment and sets it as current
-func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (txNum, blockNum uint64, err error) {
-	txNum, blockNum, err = sd.sdCtx.SeekCommitment(ctx, tx)
+func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (err error) {
+	_, _, _, err = sd.sdCtx.SeekCommitment(ctx, tx)
 	if err != nil {
-		return 0, 0, err
+		return err
 	}
-	sd.SetTxNum(txNum)
-	return txNum, blockNum, nil
+	return nil
 }
 
 // ComputeCommitment evaluates commitment for gathered updates.

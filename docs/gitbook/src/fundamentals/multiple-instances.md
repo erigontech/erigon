@@ -12,7 +12,7 @@ Erigon supports running multiple instances on the same machine by configuring di
 
 ## Required Configuration Flags
 
-To avoid conflicts between instances, you must define **7 essential flags** for each instance:
+To avoid conflicts between instances, you must define **6 essential flags** for each instance:
 
 * `--datadir` - Separate data directory for each instance
 * `--port` - P2P networking port (default: `30303`)
@@ -20,7 +20,6 @@ To avoid conflicts between instances, you must define **7 essential flags** for 
 * `--authrpc.port` - Engine API port (default: `8551`)
 * `--torrent.port` - BitTorrent protocol port (default: `42069`)
 * `--private.api.addr` - Internal gRPC API address (default: `127.0.0.1:9090`)
-* `--mcp.port` - MCP server port (default: `8553`), or `--mcp.disable` to turn it off
 
 ## Example Configuration
 
@@ -36,7 +35,6 @@ Here's how to run mainnet and sepolia instances simultaneously:
   --authrpc.port=8551 \
   --torrent.port=42069 \
   --private.api.addr=127.0.0.1:9090 \
-  --mcp.port=8553 \
   --http --ws \
   --http.api=eth,debug,net,trace,web3,erigon
 
@@ -49,7 +47,6 @@ Here's how to run mainnet and sepolia instances simultaneously:
   --authrpc.port=8552 \
   --torrent.port=42068 \
   --private.api.addr=127.0.0.1:9091 \
-  --mcp.port=8554 \
   --http --ws \
   --http.api=eth,debug,net,trace,web3,erigon
 ```
@@ -83,7 +80,8 @@ The compose file demonstrates the port allocation strategy:
 For multiple instances, consider adjusting database parameters to reduce resource contention:
 
 ```bash
-# Reduce memory-mapped database size limit
+# Reduce memory-mapped database growth to minimize disk churn
+--db.growth.step=32MB
 --db.size.limit=512MB
 ```
 
@@ -92,13 +90,12 @@ For multiple instances, consider adjusting database parameters to reduce resourc
 **Default Port Allocation:**
 
 | Component | Default Port | Protocol | Purpose                  |
-|-----------|--------------|----------|--------------------------|
+| --------- | ------------ | -------- | ------------------------ |
 | Engine    | 9090         | TCP      | gRPC Server (Private)    |
 | Engine    | 42069        | TCP/UDP  | BitTorrent (Public)      |
 | Engine    | 8551         | TCP      | Engine API (Private)     |
 | Sentry    | 30303/30304  | TCP/UDP  | P2P Peering (Public)     |
 | RPCDaemon | 8545         | TCP      | HTTP/WebSocket (Private) |
-| MCP       | 8553         | TCP      | MCP Server (Private)     |
 
 ### 4. Service Separation
 
@@ -132,7 +129,7 @@ If using network-attached storage, apply these optimizations:
 
 ```bash
 # Reduce disk latency impact
-export SNAPSHOT_MADV_RND=false
+export ERIGON_SNAPSHOT_MADV_RND=false
 --db.pagesize=64kb
 
 # For Polygon networks
@@ -171,7 +168,7 @@ What can be done:
   * use latency-critical cloud-drives
   * or attached-NVMe (at least for initial sync)
 * increase RAM
-* if you throw enough RAM, then can set env variable `SNAPSHOT_MADV_RND=false`
+* if you throw enough RAM, then can set env variable `ERIGON_SNAPSHOT_MADV_RND=false`
 * Use `--db.pagesize=64kb` (less fragmentation, more IO)
 * Or use Erigon3 (it also sensitive for disk-latency - but it will download 99% of history)
 

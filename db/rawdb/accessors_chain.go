@@ -26,7 +26,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/big"
-	"sync"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -78,11 +77,9 @@ func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64, markChainAsBad bool) er
 				return err
 			}
 
-			bheapMu.Lock()
 			if bheapCache != nil {
 				heap.Push(bheapCache, &utils.BlockId{Number: binary.BigEndian.Uint64(blockNumBytes), Hash: common.BytesToHash(blockHash)})
 			}
-			bheapMu.Unlock()
 		}
 		return tx.Delete(kv.HeaderCanonical, blockNumBytes)
 	}); err != nil {
@@ -92,24 +89,14 @@ func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64, markChainAsBad bool) er
 }
 
 /* latest bad blocks start */
-var (
-	bheapCache utils.ExtendedHeap
-	bheapMu    sync.RWMutex
-)
+var bheapCache utils.ExtendedHeap
 
 func GetLatestBadBlocks(tx kv.Tx) ([]*types.Block, error) {
-	bheapMu.RLock()
-	needsInit := bheapCache == nil
-	bheapMu.RUnlock()
-
-	if needsInit {
+	if bheapCache == nil {
 		ResetBadBlockCache(tx, 100)
 	}
 
-	bheapMu.RLock()
 	blockIds := bheapCache.SortedValues()
-	bheapMu.RUnlock()
-
 	blocks := make([]*types.Block, len(blockIds))
 	for i, blockId := range blockIds {
 		blocks[i] = ReadBlock(tx, blockId.Hash, blockId.Number)
@@ -120,14 +107,10 @@ func GetLatestBadBlocks(tx kv.Tx) ([]*types.Block, error) {
 
 // mainly for testing purposes
 func ResetBadBlockCache(tx kv.Tx, limit int) error {
-	bheapMu.Lock()
 	bheapCache = utils.NewBlockMaxHeap(limit)
-	bheapMu.Unlock()
 	// load the heap
 	return tx.ForEach(kv.BadHeaderNumber, nil, func(blockHash, blockNumBytes []byte) error {
-		bheapMu.Lock()
 		heap.Push(bheapCache, &utils.BlockId{Number: binary.BigEndian.Uint64(blockNumBytes), Hash: common.BytesToHash(blockHash)})
-		bheapMu.Unlock()
 		return nil
 	})
 }
@@ -602,28 +585,12 @@ func ReadBody(db kv.Getter, hash common.Hash, number uint64) (*types.Body, uint6
 	body := new(types.Body)
 	body.Uncles = bodyForStorage.Uncles
 	body.Withdrawals = bodyForStorage.Withdrawals
+	body.BlockAccessList = bodyForStorage.BlockAccessList
 
 	if bodyForStorage.TxCount < 2 {
 		panic(fmt.Sprintf("block body hash too few txs amount: %d, %d", number, bodyForStorage.TxCount))
 	}
 	return body, bodyForStorage.BaseTxnID.First(), bodyForStorage.TxCount - 2 // 1 system txn in the beginning of block, and 1 at the end
-}
-
-// ReadBlockAccessListBytes reads the RLP-encoded block access list sidecar for a block.
-func ReadBlockAccessListBytes(db kv.Getter, hash common.Hash, number uint64) ([]byte, error) {
-	data, err := db.GetOne(kv.BlockAccessList, dbutils.BlockBodyKey(number, hash))
-	if err != nil {
-		return nil, err
-	}
-	return data, nil
-}
-
-// WriteBlockAccessListBytes stores the RLP-encoded block access list sidecar for a block.
-func WriteBlockAccessListBytes(db kv.Putter, hash common.Hash, number uint64, data []byte) error {
-	if err := db.Put(kv.BlockAccessList, dbutils.BlockBodyKey(number, hash), data); err != nil {
-		return fmt.Errorf("failed to store block access list: %w", err)
-	}
-	return nil
 }
 
 func HasSenders(db kv.Getter, hash common.Hash, number uint64) (bool, error) {
@@ -659,10 +626,11 @@ func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBo
 		return false, err
 	}
 	data := types.BodyForStorage{
-		BaseTxnID:   types.BaseTxnID(baseTxnID),
-		TxCount:     types.TxCountToTxAmount(len(body.Transactions)), /*system txs*/
-		Uncles:      body.Uncles,
-		Withdrawals: body.Withdrawals,
+		BaseTxnID:       types.BaseTxnID(baseTxnID),
+		TxCount:         types.TxCountToTxAmount(len(body.Transactions)), /*system txs*/
+		Uncles:          body.Uncles,
+		Withdrawals:     body.Withdrawals,
+		BlockAccessList: body.BlockAccessList,
 	}
 	if err = WriteBodyForStorage(db, hash, number, &data); err != nil {
 		return false, fmt.Errorf("WriteBodyForStorage: %w", err)
@@ -682,10 +650,11 @@ func WriteBody(db kv.RwTx, hash common.Hash, number uint64, body *types.Body) (e
 		return err
 	}
 	data := types.BodyForStorage{
-		BaseTxnID:   types.BaseTxnID(baseTxnID),
-		TxCount:     types.TxCountToTxAmount(len(body.Transactions)),
-		Uncles:      body.Uncles,
-		Withdrawals: body.Withdrawals,
+		BaseTxnID:       types.BaseTxnID(baseTxnID),
+		TxCount:         types.TxCountToTxAmount(len(body.Transactions)),
+		Uncles:          body.Uncles,
+		Withdrawals:     body.Withdrawals,
+		BlockAccessList: body.BlockAccessList,
 	}
 	if err = WriteBodyForStorage(db, hash, number, &data); err != nil {
 		return fmt.Errorf("failed to write body: %w", err)
@@ -711,9 +680,6 @@ func WriteSenders(db kv.Putter, hash common.Hash, number uint64, senders []commo
 func DeleteBody(db kv.Putter, hash common.Hash, number uint64) {
 	if err := db.Delete(kv.BlockBody, dbutils.BlockBodyKey(number, hash)); err != nil {
 		log.Crit("Failed to delete block body", "err", err)
-	}
-	if err := db.Delete(kv.BlockAccessList, dbutils.BlockBodyKey(number, hash)); err != nil {
-		log.Crit("Failed to delete block access list", "err", err)
 	}
 }
 
@@ -815,7 +781,7 @@ func ReadBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
 	if body == nil {
 		return nil
 	}
-	block := types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals)
+	block := types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals, body.BlockAccessList)
 	return block
 }
 
@@ -912,9 +878,6 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int
 		if err = tx.Delete(kv.BlockBody, kCopy); err != nil {
 			return deleted, err
 		}
-		if err = tx.Delete(kv.BlockAccessList, kCopy); err != nil {
-			return deleted, err
-		}
 		if err = tx.Delete(kv.Headers, kCopy); err != nil {
 			return deleted, err
 		}
@@ -961,9 +924,6 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 			return err
 		}
 		if err := tx.Delete(kv.BlockBody, kCopy); err != nil {
-			return err
-		}
-		if err := tx.Delete(kv.BlockAccessList, kCopy); err != nil {
 			return err
 		}
 		if err := tx.Delete(kv.Headers, kCopy); err != nil {
@@ -1380,7 +1340,7 @@ func WriteReceiptCacheV2(tx kv.TemporalPutDel, receipt *types.Receipt, txNum uin
 		toWrite = []byte{}
 	}
 
-	if err := tx.DomainPut(kv.RCacheDomain, receiptCacheKey, toWrite, txNum, nil); err != nil {
+	if err := tx.DomainPut(kv.RCacheDomain, receiptCacheKey, toWrite, txNum, nil, 0); err != nil {
 		return fmt.Errorf("WriteReceiptCache: %w", err)
 	}
 

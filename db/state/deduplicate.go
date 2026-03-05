@@ -56,7 +56,7 @@ func (ht *HistoryRoTx) deduplicateFiles(ctx context.Context, indexFiles, history
 		return fmt.Errorf("deduo %s history compressor: %w", ht.h.FilenameBase, err)
 	}
 
-	pagedWr := ht.dataWriter(ctx, comp)
+	pagedWr := ht.dataWriter(comp)
 
 	var cp CursorHeap
 	heap.Init(&cp)
@@ -252,12 +252,7 @@ func (iit *InvertedIndexRoTx) deduplicateFiles(ctx context.Context, files []*Fil
 	}
 
 	write := iit.dataWriter(comp, false)
-
-	cnt := 0
-	for _, item := range files {
-		cnt += item.decompressor.Count()
-	}
-	p := ps.AddNew(path.Base(datPath), uint64(cnt/2))
+	p := ps.AddNew(path.Base(datPath), 1)
 	defer ps.Delete(p)
 
 	var cp CursorHeap
@@ -289,7 +284,6 @@ func (iit *InvertedIndexRoTx) deduplicateFiles(ctx context.Context, files []*Fil
 	// (when CursorHeap cp is empty), there is a need to process the last pair `keyBuf=>valBuf`, because it was one step behind
 	var keyBuf, valBuf []byte
 	var lastKey, lastVal []byte
-	i := uint64(0)
 	for cp.Len() > 0 {
 		lastKey = append(lastKey[:0], cp[0].key...)
 		lastVal = append(lastVal[:0], cp[0].val...)
@@ -343,13 +337,9 @@ func (iit *InvertedIndexRoTx) deduplicateFiles(ctx context.Context, files []*Fil
 			if ci1.kvReader.HasNext() {
 				ci1.key, _ = ci1.kvReader.Next(ci1.key[:0])
 				ci1.val, _ = ci1.kvReader.Next(ci1.val[:0])
-				i += 2
 				// fmt.Printf("heap next push %s [%d] %x\n", ii.KeysTable, ci1.endTxNum, ci1.key)
 				heap.Push(&cp, ci1)
 			}
-		}
-		if i%1024 == 0 {
-			p.Processed.Store(i)
 		}
 		if keyBuf != nil {
 			// fmt.Printf("pput %x->%x\n", keyBuf, valBuf)

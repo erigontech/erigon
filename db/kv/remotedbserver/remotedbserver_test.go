@@ -42,7 +42,6 @@ func TestKvServer_renew(t *testing.T) {
 	require.NoError(db.Update(ctx, func(tx kv.RwTx) error {
 		wc, err := tx.RwCursorDupSort(kv.TblAccountVals)
 		require.NoError(err)
-		defer wc.Close()
 		require.NoError(wc.Append([]byte{1}, []byte{1}))
 		require.NoError(wc.Append([]byte{1}, []byte{2}))
 		require.NoError(wc.Append([]byte{2}, []byte{1}))
@@ -74,7 +73,7 @@ func TestKvServer_renew(t *testing.T) {
 		}
 
 		if err = s.with(id, func(tx kv.TemporalTx) error {
-			c, err = tx.Cursor(kv.TblAccountVals) //nolint:gocritic
+			c, err = tx.Cursor(kv.TblAccountVals)
 			if err != nil {
 				return err
 			}
@@ -83,8 +82,6 @@ func TestKvServer_renew(t *testing.T) {
 		}); err != nil {
 			return err
 		}
-		defer c.Close()
-		defer c2.Close()
 
 		k, v, err = c.Next()
 		require.NoError(err)

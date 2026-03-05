@@ -81,9 +81,6 @@ func setupBlobSidecarService(t *testing.T, ctrl *gomock.Controller, test bool) (
 }
 
 func TestBlobServiceUnsynced(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -94,9 +91,6 @@ func TestBlobServiceUnsynced(t *testing.T) {
 }
 
 func TestBlobServiceInvalidIndex(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 

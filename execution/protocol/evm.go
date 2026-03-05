@@ -21,6 +21,7 @@ package protocol
 
 import (
 	"fmt"
+	"math/big"
 	"sync"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -58,11 +59,14 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 	}
 	var baseFee uint256.Int
 	if header.BaseFee != nil {
-		baseFee.Set(header.BaseFee)
+		overflow := baseFee.SetFromBig(header.BaseFee)
+		if overflow {
+			panic("header.BaseFee higher than 2^256-1")
+		}
 	}
 
 	var prevRandDao *common.Hash
-	if header.Difficulty.Cmp(merge.ProofOfStakeDifficulty) == 0 {
+	if header.Difficulty != nil && header.Difficulty.Cmp(merge.ProofOfStakeDifficulty) == 0 {
 		// EIP-4399. We use ProofOfStakeDifficulty (i.e. 0) as a telltale of Proof-of-Stake blocks.
 		prevRandDao = new(common.Hash)
 		*prevRandDao = header.MixDigest
@@ -86,12 +90,6 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		transferFunc = misc.Transfer
 		postApplyMessageFunc = misc.LogSelfDestructedAccounts
 	}
-
-	var slotNumber uint64
-	if header.SlotNumber != nil {
-		slotNumber = *header.SlotNumber
-	}
-
 	blockContext := evmtypes.BlockContext{
 		CanTransfer:      CanTransfer,
 		Transfer:         transferFunc,
@@ -100,12 +98,13 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		Coinbase:         beneficiary,
 		BlockNumber:      header.Number.Uint64(),
 		Time:             header.Time,
-		Difficulty:       header.Difficulty,
 		BaseFee:          baseFee,
 		GasLimit:         header.GasLimit,
 		PrevRanDao:       prevRandDao,
 		BlobBaseFee:      blobBaseFee,
-		SlotNumber:       slotNumber,
+	}
+	if header.Difficulty != nil {
+		blockContext.Difficulty = new(big.Int).Set(header.Difficulty)
 	}
 	return blockContext
 }

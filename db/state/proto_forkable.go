@@ -3,6 +3,7 @@ package state
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 
 	"golang.org/x/sync/errgroup"
 
@@ -120,7 +121,7 @@ func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.R
 		// TODO: fsync params?
 
 		compress := a.isCompressionUsed(calcFrom, calcTo)
-		writer := a.DataWriter(ctx, sn, compress)
+		writer := a.DataWriter(sn, compress)
 		defer writer.Close()
 		meta, err := a.freezer.Freeze(ctx, calcFrom, calcTo, writer, db)
 		if err != nil {
@@ -132,6 +133,8 @@ func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.R
 		}
 		writer.SetMetadata(mbytes)
 
+		p := ps.AddNew(filepath.Base(path), 1)
+		defer ps.Delete(p)
 		if err := writer.Flush(); err != nil {
 			return nil, false, err
 		}
@@ -140,6 +143,7 @@ func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.R
 		}
 		writer.Close()
 		sn.Close()
+		ps.Delete(p)
 	}
 
 	valuesDecomp, err := seg.NewDecompressorWithMetadata(path, cfg.HasMetadata)
@@ -160,8 +164,8 @@ func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.R
 	return df, true, nil
 }
 
-func (a *ProtoForkable) DataWriter(ctx context.Context, f *seg.Compressor, compress bool) *seg.PagedWriter {
-	return seg.NewPagedWriter(ctx, seg.NewWriter(f, a.cfg.Compression), compress)
+func (a *ProtoForkable) DataWriter(f *seg.Compressor, compress bool) *seg.PagedWriter {
+	return seg.NewPagedWriter(seg.NewWriter(f, a.cfg.Compression), compress, a.dirs.Tmp)
 }
 
 func (a *ProtoForkable) DataReader(f *seg.Decompressor, compress bool) *seg.Reader {

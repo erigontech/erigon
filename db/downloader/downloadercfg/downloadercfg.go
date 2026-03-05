@@ -20,14 +20,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/anacrolix/torrent/metainfo"
@@ -64,31 +62,6 @@ func init() {
 	NetworkChunkSize = pp.Integer(i64)
 }
 
-// safeWriter wraps an io.WriteCloser and silently discards writes after Close.
-// This prevents panics from the torrent client's background goroutines (e.g.
-// forwardPort) that may attempt to log after the file has been closed.
-type safeWriter struct {
-	mu     sync.Mutex
-	w      io.WriteCloser
-	closed bool
-}
-
-func (s *safeWriter) Write(p []byte) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closed {
-		return len(p), nil
-	}
-	return s.w.Write(p)
-}
-
-func (s *safeWriter) Close() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.closed = true
-	return s.w.Close()
-}
-
 type Cfg struct {
 	Dirs datadir.Dirs
 	// Separate rate limit for webseeds.
@@ -100,7 +73,7 @@ type Cfg struct {
 	ChainName string
 
 	ClientConfig   *torrent.ClientConfig
-	TorrentLogFile io.Closer
+	TorrentLogFile *os.File
 
 	MdbxWriteMap bool
 	// Don't trust any existing piece completion. Revalidate all pieces when added.
@@ -235,16 +208,13 @@ func New(
 
 	torrentSloggerHandlers := multiHandler{&torrentSlogToErigonHandler}
 
-	var torrentLogCloser io.Closer
 	torrentLogFile, err := os.OpenFile(
 		filepath.Join(dirs.DataDir, "logs", "torrent.log"),
 		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err == nil {
-		sw := &safeWriter{w: torrentLogFile}
-		torrentLogCloser = sw
 		torrentSloggerHandlers = append(
 			torrentSloggerHandlers,
-			slog.NewJSONHandler(sw, &slog.HandlerOptions{
+			slog.NewJSONHandler(torrentLogFile, &slog.HandlerOptions{
 				AddSource:   true,
 				Level:       min(erigonToSlogLevel(verbosity), slog.LevelWarn),
 				ReplaceAttr: nil,
@@ -280,7 +250,7 @@ func New(
 		Dirs:              dirs,
 		ChainName:         chainName,
 		ClientConfig:      torrentConfig,
-		TorrentLogFile:    torrentLogCloser,
+		TorrentLogFile:    torrentLogFile,
 		MdbxWriteMap:      mdbxWriteMap,
 		VerifyTorrentData: opts.Verify,
 		LogPrefix:         "[Downloader] ",
@@ -308,8 +278,7 @@ func New(
 // LoadSnapshotsHashes checks local preverified.toml. If file exists, used local hashes.
 // If there are no such file, try to fetch hashes from the web and create local file.
 func LoadSnapshotsHashes(ctx context.Context, dirs datadir.Dirs, chainName string) error {
-	cfg, known := snapcfg.KnownCfg(chainName)
-	if !known {
+	if _, known := snapcfg.KnownCfg(chainName); !known {
 		log.Root().Warn("No snapshot hashes for chain", "chain", chainName)
 		return nil
 	}
@@ -328,12 +297,13 @@ func LoadSnapshotsHashes(ctx context.Context, dirs datadir.Dirs, chainName strin
 		snapcfg.SetToml(chainName, haveToml, true)
 	} else {
 		// Fetch the snapshot hashes from the web
-		err := snapcfg.LoadRemotePreverifiedForChain(ctx, chainName)
+		err := snapcfg.LoadRemotePreverified(ctx)
 		if err != nil {
 			log.Root().Crit("Snapshot hashes for supported networks was not loaded. Please check your network connection and/or GitHub status here https://www.githubstatus.com/", "chain", chainName, "err", err)
 			return fmt.Errorf("failed to fetch remote snapshot hashes for chain %s", chainName)
 		}
 	}
+	cfg, _ := snapcfg.KnownCfg(chainName)
 	cfg.Local = exists
 	return nil
 }

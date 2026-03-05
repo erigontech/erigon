@@ -44,13 +44,13 @@ import (
 func TestBlocksByRootHandler(t *testing.T) {
 	ctx := context.Background()
 
-	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	listenAddrHost := "/ip4/127.0.0.1/tcp/5000"
+	host, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost))
 	require.NoError(t, err)
-	t.Cleanup(func() { host.Close() })
 
-	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	listenAddrHost1 := "/ip4/127.0.0.1/tcp/5001"
+	host1, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost1))
 	require.NoError(t, err)
-	t.Cleanup(func() { host1.Close() })
 
 	err = host.Connect(ctx, peer.AddrInfo{
 		ID:    host1.ID(),
@@ -62,16 +62,14 @@ func TestBlocksByRootHandler(t *testing.T) {
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
 
-	tx, err := indiciesDB.BeginRw(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
+	tx, _ := indiciesDB.BeginRw(ctx)
 
 	startSlot := uint64(100)
 	count := uint64(10)
 	step := uint64(1)
 
 	expBlocks := populateDatabaseWithBlocks(t, store, tx, startSlot, count)
-	require.NoError(t, tx.Commit())
+	tx.Commit()
 
 	ethClock := getEthClock(t)
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)

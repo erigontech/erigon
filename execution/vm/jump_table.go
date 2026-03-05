@@ -96,7 +96,6 @@ func validateAndFillMaxStack(jt *JumpTable) {
 func newAmsterdamInstructionSet() JumpTable {
 	instructionSet := newOsakaInstructionSet()
 	enable8024(&instructionSet) // EIP-8024 (DUPN, SWAPN, EXCHANGE)
-	enable7843(&instructionSet) // EIP-7843 (SLOTNUM)
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }

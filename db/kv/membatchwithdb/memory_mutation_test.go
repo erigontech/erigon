@@ -79,7 +79,6 @@ func TestLastMiningDB(t *testing.T) {
 
 	cursor, err := batch.Cursor(kv.HeaderNumber)
 	require.NoError(t, err)
-	defer cursor.Close()
 
 	key, value, err := cursor.Last()
 	require.NoError(t, err)
@@ -104,7 +103,6 @@ func TestLastMiningMem(t *testing.T) {
 
 	cursor, err := batch.Cursor(kv.HeaderNumber)
 	require.NoError(t, err)
-	defer cursor.Close()
 
 	key, value, err := cursor.Last()
 	require.NoError(t, err)
@@ -132,7 +130,6 @@ func TestDeleteMining(t *testing.T) {
 
 	cursor, err := batch.Cursor(kv.HeaderNumber)
 	require.NoError(t, err)
-	defer cursor.Close()
 
 	key, value, err := cursor.SeekExact([]byte("BAAA"))
 	require.NoError(t, err)
@@ -331,7 +328,6 @@ func TestSeekExactAfterClearBucket(t *testing.T) {
 
 	cursor, err := batch.RwCursor(kv.HeaderNumber)
 	require.NoError(t, err)
-	defer cursor.Close()
 
 	key, val, err := cursor.SeekExact([]byte("AAAA"))
 	require.NoError(t, err)
@@ -368,7 +364,6 @@ func TestFirstAfterClearBucket(t *testing.T) {
 
 	cursor, err := batch.Cursor(kv.HeaderNumber)
 	require.NoError(t, err)
-	defer cursor.Close()
 
 	key, val, err := cursor.First()
 	require.NoError(t, err)
@@ -416,7 +411,6 @@ func TestNext(t *testing.T) {
 
 	cursor, err := batch.CursorDupSort(kv.TblAccountVals)
 	require.NoError(t, err)
-	defer cursor.Close()
 
 	k, v, err := cursor.First()
 	require.NoError(t, err)
@@ -462,7 +456,6 @@ func TestNextNoDup(t *testing.T) {
 
 	cursor, err := batch.CursorDupSort(kv.TblAccountVals)
 	require.NoError(t, err)
-	defer cursor.Close()
 
 	k, _, err := cursor.First()
 	require.NoError(t, err)
@@ -487,7 +480,6 @@ func TestDeleteCurrentDuplicates(t *testing.T) {
 
 	cursor, err := batch.RwCursorDupSort(kv.TblAccountVals)
 	require.NoError(t, err)
-	defer cursor.Close()
 
 	require.NoError(t, cursor.Put([]byte("key3"), []byte("value3.2")))
 
@@ -523,7 +515,6 @@ func TestSeekBothRange(t *testing.T) {
 
 	cursor, err := batch.RwCursorDupSort(kv.TblAccountVals)
 	require.NoError(t, err)
-	defer cursor.Close()
 
 	require.NoError(t, cursor.Put([]byte("key3"), []byte("value3.1")))
 	require.NoError(t, cursor.Put([]byte("key1"), []byte("value1.3")))

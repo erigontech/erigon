@@ -35,13 +35,13 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/metrics"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
-	"github.com/erigontech/erigon/execution/metrics"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/dataflow"
@@ -590,7 +590,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 					return true, true, 0, lastTime, nil
 				}
 				returnTd = td
-				lastD = link.header.Difficulty.ToBig()
+				lastD = link.header.Difficulty
 			}
 		}
 
@@ -944,7 +944,7 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader servic
 		return nil, fmt.Errorf("[%s] parent's total difficulty not found with hash %x and height %d for header %x %d: %v", hi.logPrefix, header.ParentHash, blockHeight-1, hash, blockHeight, err)
 	}
 	// Calculate total difficulty of this header using parent's total difficulty
-	td = new(big.Int).Add(parentTd, header.Difficulty.ToBig())
+	td = new(big.Int).Add(parentTd, header.Difficulty)
 
 	// Now we can decide whether this header will create a change in the canonical head
 	if td.Cmp(hi.localTd) >= 0 {
@@ -1000,7 +1000,7 @@ func (hi *HeaderInserter) FeedHeaderPoS(db kv.RwTx, header *types.Header, hash c
 	if err != nil || parentTd == nil {
 		return fmt.Errorf("[%s] parent's total difficulty not found with hash %x and height %d for header %x %d: %v", hi.logPrefix, header.ParentHash, blockHeight-1, hash, blockHeight, err)
 	}
-	td := new(big.Int).Add(parentTd, header.Difficulty.ToBig())
+	td := new(big.Int).Add(parentTd, header.Difficulty)
 	if err = rawdb.WriteHeader(db, header); err != nil {
 		return fmt.Errorf("[%s] failed to WriteHeader: %w", hi.logPrefix, err)
 	}

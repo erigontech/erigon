@@ -79,7 +79,7 @@ func NoGapsInCanonicalHeaders(ctx context.Context, db kv.RoDB, br services.FullB
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-logEvery.C:
-			log.Info("[integrity] HeaderNoGaps", "progress", fmt.Sprintf("%s/%s", common.PrettyCounter(i), common.PrettyCounter(lastBlockNum)))
+			log.Info("[integrity] NoGapsInCanonicalHeaders", "progress", fmt.Sprintf("%s/%s", common.PrettyCounter(i), common.PrettyCounter(lastBlockNum)))
 		default:
 		}
 	}

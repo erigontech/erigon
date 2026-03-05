@@ -84,26 +84,26 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
-			err = domains.DomainPut(kv.AccountsDomain, rwTx, addrs[txNum].Bytes(), buf, txNum, nil)
+			err = domains.DomainPut(kv.AccountsDomain, rwTx, addrs[txNum].Bytes(), buf, txNum, nil, 0)
 			require.NoError(t, err)
 
-			err = domains.DomainPut(kv.StorageDomain, rwTx, composite(addrs[txNum].Bytes(), locs[txNum].Bytes()), []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}, txNum, nil)
+			err = domains.DomainPut(kv.StorageDomain, rwTx, composite(addrs[txNum].Bytes(), locs[txNum].Bytes()), []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}, txNum, nil, 0)
 			require.NoError(t, err)
 
 			var v [8]byte
 			binary.BigEndian.PutUint64(v[:], txNum)
 			if txNum%135 == 0 {
-				pv, _, err := rwTx.GetLatest(kv.CommitmentDomain, commKey2)
+				pv, step, err := rwTx.GetLatest(kv.CommitmentDomain, commKey2)
 				require.NoError(t, err)
 
-				err = domains.DomainPut(kv.CommitmentDomain, rwTx, commKey2, v[:], txNum, pv)
+				err = domains.DomainPut(kv.CommitmentDomain, rwTx, commKey2, v[:], txNum, pv, step)
 				require.NoError(t, err)
 				otherMaxWrite = txNum
 			} else {
-				pv, _, err := rwTx.GetLatest(kv.CommitmentDomain, commKey1)
+				pv, step, err := rwTx.GetLatest(kv.CommitmentDomain, commKey1)
 				require.NoError(t, err)
 
-				err = domains.DomainPut(kv.CommitmentDomain, rwTx, commKey1, v[:], txNum, pv)
+				err = domains.DomainPut(kv.CommitmentDomain, rwTx, commKey1, v[:], txNum, pv, step)
 				require.NoError(t, err)
 				maxWrite = txNum
 			}
@@ -143,13 +143,13 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 		require.NoError(t, err)
 		require.NotNil(t, v, "key %x not found", commKey1)
 
-		require.Equal(t, maxWrite, binary.BigEndian.Uint64(v))
+		require.Equal(t, maxWrite, binary.BigEndian.Uint64(v[:]))
 
 		v, _, err = roTx.GetLatest(kv.CommitmentDomain, commKey2)
 		require.NoError(t, err)
 		require.NotNil(t, v, "key %x not found", commKey2)
 
-		require.Equal(t, otherMaxWrite, binary.BigEndian.Uint64(v))
+		require.Equal(t, otherMaxWrite, binary.BigEndian.Uint64(v[:]))
 	})
 
 }
@@ -195,12 +195,12 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
-			err = domains.DomainPut(kv.AccountsDomain, rwTx, addrs[txNum].Bytes(), buf, txNum, nil)
+			err = domains.DomainPut(kv.AccountsDomain, rwTx, addrs[txNum].Bytes(), buf, txNum, nil, 0)
 			require.NoError(t, err)
 
 			k := composite(addrs[txNum].Bytes(), locs[txNum].Bytes())
 			v := []byte{addrs[txNum].Bytes()[0], locs[txNum].Bytes()[0]}
-			err = domains.DomainPut(kv.StorageDomain, rwTx, k, v, txNum, nil)
+			err = domains.DomainPut(kv.StorageDomain, rwTx, k, v, txNum, nil, 0)
 			require.NoError(t, err)
 
 			if (txNum+1)%agg.StepSize() == 0 {

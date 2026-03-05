@@ -6,7 +6,6 @@ import (
 	"path"
 	"testing"
 
-	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -106,9 +105,6 @@ func Test_LastFileMissingForOneEnum(t *testing.T) {
 }
 
 func Test_VersionLessThanMin(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
 	dirs := datadir.New(t.TempDir())
 	touchFiles(t, dirs, []snapRange{
 		{0, 10}, {10, 20}, {20, 30},
@@ -139,9 +135,6 @@ func Test_VersionLessThanMin(t *testing.T) {
 }
 
 func Test_VersionMoreThanCurrent(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
 	dirs := datadir.New(t.TempDir())
 	touchFiles(t, dirs, []snapRange{
 		{0, 10}, {10, 20}, {20, 30},
@@ -219,5 +212,5 @@ func touchFiles(t *testing.T, dirs datadir.Dirs, ranges []snapRange) {
 func delFile(t *testing.T, folder string, filename string) {
 	t.Helper()
 	fullpath := path.Join(folder, filename)
-	require.NoError(t, dir.RemoveFile(fullpath))
+	require.NoError(t, os.Remove(fullpath))
 }

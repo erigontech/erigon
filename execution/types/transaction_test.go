@@ -724,7 +724,7 @@ func newRandBlobWrapper() *BlobTxWrapper {
 	btxw := newRandBlobTx()
 	l := len(btxw.BlobVersionedHashes)
 	return &BlobTxWrapper{
-		Tx:          btxw.copyData(),
+		Tx:          *btxw, //nolint
 		Commitments: newRandCommitments(l),
 		Blobs:       newRandBlobs(l),
 		Proofs:      newRandProofs(l),
@@ -766,9 +766,6 @@ func TestBlobTxEncodeDecode(t *testing.T) {
 }
 
 func TestShortUnwrap(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
 	blobTxRlp, _ := MakeBlobTxnRlp()
 	shortRlp, err := UnwrapTxPlayloadRlp(blobTxRlp)
 	if err != nil {
@@ -791,9 +788,6 @@ func TestShortUnwrap(t *testing.T) {
 }
 
 func TestV1BlobTxnUnwrap(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
 	blobTxRlp, _ := MakeV1WrappedBlobTxnRlp()
 	shortRlp, err := UnwrapTxPlayloadRlp(blobTxRlp)
 	if err != nil {

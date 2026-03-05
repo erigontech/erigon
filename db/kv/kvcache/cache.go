@@ -18,19 +18,18 @@ package kvcache
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"encoding/binary"
 	"fmt"
 	"hash"
-	"slices"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	keccak "github.com/erigontech/fastkeccak"
 	btree2 "github.com/tidwall/btree"
+	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
@@ -198,7 +197,7 @@ func New(cfg CoherentConfig) *Coherent {
 		roots:        map[uint64]*CoherentRoot{},
 		stateEvict:   &ThreadSafeEvictionList{l: NewList()},
 		codeEvict:    &ThreadSafeEvictionList{l: NewList()},
-		hasher:       keccak.NewFastKeccak(),
+		hasher:       sha3.NewLegacyKeccak256(),
 		cfg:          cfg,
 		miss:         metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="miss",name="%s"}`, cfg.MetricsLabel)),
 		hits:         metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="hit",name="%s"}`, cfg.MetricsLabel)),
@@ -653,7 +652,7 @@ func DebugStats(cache Cache) []Stat {
 		})
 	}
 	casted.lock.Unlock()
-	slices.SortFunc(res, func(a, b Stat) int { return cmp.Compare(a.BlockNum, b.BlockNum) })
+	sort.Slice(res, func(i, j int) bool { return res[i].BlockNum < res[j].BlockNum })
 	return res
 }
 func AssertCheckValues(ctx context.Context, tx kv.TemporalTx, cache Cache) (int, error) {

@@ -20,84 +20,48 @@
 package discover
 
 import (
-	"slices"
-	"sort"
+	"net"
 	"time"
 
 	"github.com/erigontech/erigon/p2p/enode"
 )
 
-type BucketNode struct {
-	Node          *enode.Node `json:"node"`
-	AddedToTable  time.Time   `json:"addedToTable"`
-	AddedToBucket time.Time   `json:"addedToBucket"`
-	Checks        int         `json:"checks"`
-	Live          bool        `json:"live"`
+// node represents a host on the network.
+// The fields of Node may not be modified.
+type node struct {
+	enode.Node
+	addedAt        time.Time // time when the node was added to the table
+	livenessChecks uint      // how often liveness was checked
 }
 
-// tableNode is an entry in Table.
-type tableNode struct {
-	*enode.Node
-	revalList       *revalidationList
-	addedToTable    time.Time // first time node was added to bucket or replacement list
-	addedToBucket   time.Time // time it was added in the actual bucket
-	livenessChecks  uint      // how often liveness was checked
-	isValidatedLive bool      // true if existence of node is considered validated right now
+func wrapNode(n *enode.Node) *node {
+	return &node{Node: *n}
 }
 
-func unwrapNodes(ns []*tableNode) []*enode.Node {
-	result := make([]*enode.Node, len(ns))
+func wrapNodes(ns []*enode.Node) []*node {
+	result := make([]*node, len(ns))
 	for i, n := range ns {
-		result[i] = n.Node
+		result[i] = wrapNode(n)
 	}
 	return result
 }
 
-func (n *tableNode) String() string {
+func unwrapNode(n *node) *enode.Node {
+	return &n.Node
+}
+
+func unwrapNodes(ns []*node) []*enode.Node {
+	result := make([]*enode.Node, len(ns))
+	for i, n := range ns {
+		result[i] = unwrapNode(n)
+	}
+	return result
+}
+
+func (n *node) addr() *net.UDPAddr {
+	return &net.UDPAddr{IP: n.IP(), Port: n.UDP()}
+}
+
+func (n *node) String() string {
 	return n.Node.String()
-}
-
-// nodesByDistance is a list of nodes, ordered by distance to target.
-type nodesByDistance struct {
-	entries []*enode.Node
-	target  enode.ID
-}
-
-// push adds the given node to the list, keeping the total size below maxElems.
-func (h *nodesByDistance) push(n *enode.Node, maxElems int) {
-	ix := sort.Search(len(h.entries), func(i int) bool {
-		return enode.DistCmp(h.target, h.entries[i].ID(), n.ID()) > 0
-	})
-
-	end := len(h.entries)
-	if len(h.entries) < maxElems {
-		h.entries = append(h.entries, n)
-	}
-	if ix < end {
-		// Slide existing entries down to make room.
-		// This will overwrite the entry we just appended.
-		copy(h.entries[ix+1:], h.entries[ix:])
-		h.entries[ix] = n
-	}
-}
-
-type nodeType interface {
-	ID() enode.ID
-}
-
-// containsID reports whether ns contains a node with the given ID.
-func containsID[N nodeType](ns []N, id enode.ID) bool {
-	for _, n := range ns {
-		if n.ID() == id {
-			return true
-		}
-	}
-	return false
-}
-
-// deleteNode removes a node from the list.
-func deleteNode[N nodeType](list []N, id enode.ID) []N {
-	return slices.DeleteFunc(list, func(n N) bool {
-		return n.ID() == id
-	})
 }

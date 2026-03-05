@@ -206,7 +206,8 @@ func TestConvertType(t *testing.T) {
 		Name: "X",
 		Type: reflect.TypeFor[*big.Int](),
 		Tag:  "json:\"" + "x" + "\"",
-	}, reflect.StructField{
+	})
+	fields = append(fields, reflect.StructField{
 		Name: "Y",
 		Type: reflect.TypeFor[*big.Int](),
 		Tag:  "json:\"" + "y" + "\"",

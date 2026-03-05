@@ -192,7 +192,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 			gasUsed += _gasUsed
 		} else {
 			var _gasUsed uint64
-			_gasUsed, err = transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.Header().Number, block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout, nil)
+			_gasUsed, err = transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, block.Number(), block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout, nil)
 			gasUsed += _gasUsed
 		}
 		if err == nil {
@@ -347,7 +347,7 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 	txCtx.TxHash = txn.Hash()
 
 	// Trace the transaction and return
-	_, err = transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.Header().Number, block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout, nil)
+	_, err = transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, block.Number(), block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout, nil)
 	return err
 }
 
@@ -365,7 +365,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 	}
 	engine := api.engine()
 
-	blockNumber, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, dbtx, api._blockReader, api.filters)
+	blockNumber, hash, isLatest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, dbtx, api._blockReader, api.filters)
 	if err != nil {
 		return fmt.Errorf("get block number: %v", err)
 	}
@@ -400,7 +400,11 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 
 	var baseFee *uint256.Int
 	if header.BaseFee != nil {
-		baseFee = new(uint256.Int).Set(header.BaseFee)
+		var overflow bool
+		baseFee, overflow = uint256.FromBig(header.BaseFee)
+		if overflow {
+			return errors.New("header.BaseFee uint256 overflow")
+		}
 	}
 
 	if config != nil && config.BlockOverrides != nil {
@@ -551,21 +555,13 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	}
 
 	blockCtx = protocol.NewEVMBlockContext(header, getHash, api.engine(), accounts.NilAddress /* author */, chainConfig)
-	// Apply global block overrides as the baseline for all bundles.
-	if config.BlockOverrides != nil {
-		if err := config.BlockOverrides.Override(&blockCtx); err != nil {
-			return err
-		}
-	}
 	// Get a new instance of the EVM
 	evm = vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{})
 	rules := evm.ChainRules()
 
-	var precompiles vm.PrecompiledContracts
 	// after replaying the txns, we want to overload the state
 	if config.StateOverrides != nil {
-		precompiles = vm.ActivePrecompiledContracts(rules)
-		err = config.StateOverrides.Override(ibs, precompiles, rules)
+		err = config.StateOverrides.Override(ibs, nil, rules)
 		if err != nil {
 			return err
 		}
@@ -593,7 +589,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 			txCtx = protocol.NewEVMTxContext(msg)
 			ibs := evm.IntraBlockState()
 			ibs.SetTxContext(blockCtx.BlockNumber, txnIndex)
-			_, err = transactions.TraceTx(ctx, api.engine(), transaction, msg, blockCtx, txCtx, nil, common.Hash{}, txnIndex, evm.IntraBlockState(), config, chainConfig, stream, api.evmCallTimeout, precompiles)
+			_, err = transactions.TraceTx(ctx, api.engine(), transaction, msg, blockCtx, txCtx, nil, common.Hash{}, txnIndex, evm.IntraBlockState(), config, chainConfig, stream, api.evmCallTimeout, nil)
 			if err != nil {
 				return err
 			}

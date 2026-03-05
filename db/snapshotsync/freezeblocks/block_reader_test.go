@@ -102,7 +102,9 @@ func TestBlockReaderGenesisBlockWithSnapshots(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	genesisHeader := &types.Header{}
+	genesisHeader := &types.Header{
+		Number: common.Big0,
+	}
 	genesisHash = genesisHeader.Hash()
 	err = rawdb.WriteHeader(rwTx, genesisHeader)
 	require.NoError(t, err)

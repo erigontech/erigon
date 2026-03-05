@@ -102,15 +102,6 @@ func DialJsonRpcClient(url string, jwtSecret []byte, logger log.Logger, opts ...
 	if err != nil {
 		return nil, err
 	}
-
-	// Always retry on transient server errors (e.g., server shutting down returning
-	// empty response or 503 Service Unavailable).
-	defaultCheckers := []RetryableErrChecker{
-		ErrContainsRetryableErrChecker("empty response from JSON-RPC server"),
-		ErrContainsRetryableErrChecker("503 Service Unavailable"),
-	}
-	options.retryableErrCheckers = append(defaultCheckers, options.retryableErrCheckers...)
-
 	res := &JsonRpcClient{
 		rpcClient:            client,
 		maxRetries:           options.maxRetries,
@@ -260,21 +251,6 @@ func (c *JsonRpcClient) ForkchoiceUpdatedV3(
 	}, c.backOff(ctx))
 }
 
-func (c *JsonRpcClient) ForkchoiceUpdatedV4(
-	ctx context.Context,
-	forkChoiceState *enginetypes.ForkChoiceState,
-	payloadAttributes *enginetypes.PayloadAttributes,
-) (*enginetypes.ForkChoiceUpdatedResponse, error) {
-	return backoff.RetryWithData(func() (*enginetypes.ForkChoiceUpdatedResponse, error) {
-		var result enginetypes.ForkChoiceUpdatedResponse
-		err := c.rpcClient.CallContext(ctx, &result, "engine_forkchoiceUpdatedV4", forkChoiceState, payloadAttributes)
-		if err != nil {
-			return nil, c.maybeMakePermanent(err)
-		}
-		return &result, nil
-	}, c.backOff(ctx))
-}
-
 func (c *JsonRpcClient) GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) (*enginetypes.ExecutionPayload, error) {
 	return backoff.RetryWithData(func() (*enginetypes.ExecutionPayload, error) {
 		var result enginetypes.ExecutionPayload
@@ -352,32 +328,10 @@ func (c *JsonRpcClient) GetPayloadBodiesByHashV1(ctx context.Context, hashes []c
 	}, c.backOff(ctx))
 }
 
-func (c *JsonRpcClient) GetPayloadBodiesByHashV2(ctx context.Context, hashes []common.Hash) ([]*enginetypes.ExecutionPayloadBodyV2, error) {
-	return backoff.RetryWithData(func() ([]*enginetypes.ExecutionPayloadBodyV2, error) {
-		var result []*enginetypes.ExecutionPayloadBodyV2
-		err := c.rpcClient.CallContext(ctx, &result, "engine_getPayloadBodiesByHashV2", hashes)
-		if err != nil {
-			return nil, c.maybeMakePermanent(err)
-		}
-		return result, nil
-	}, c.backOff(ctx))
-}
-
 func (c *JsonRpcClient) GetPayloadBodiesByRangeV1(ctx context.Context, start, count hexutil.Uint64) ([]*enginetypes.ExecutionPayloadBody, error) {
 	return backoff.RetryWithData(func() ([]*enginetypes.ExecutionPayloadBody, error) {
 		var result []*enginetypes.ExecutionPayloadBody
 		err := c.rpcClient.CallContext(ctx, &result, "engine_getPayloadBodiesByRangeV1", start, count)
-		if err != nil {
-			return nil, c.maybeMakePermanent(err)
-		}
-		return result, nil
-	}, c.backOff(ctx))
-}
-
-func (c *JsonRpcClient) GetPayloadBodiesByRangeV2(ctx context.Context, start, count hexutil.Uint64) ([]*enginetypes.ExecutionPayloadBodyV2, error) {
-	return backoff.RetryWithData(func() ([]*enginetypes.ExecutionPayloadBodyV2, error) {
-		var result []*enginetypes.ExecutionPayloadBodyV2
-		err := c.rpcClient.CallContext(ctx, &result, "engine_getPayloadBodiesByRangeV2", start, count)
 		if err != nil {
 			return nil, c.maybeMakePermanent(err)
 		}

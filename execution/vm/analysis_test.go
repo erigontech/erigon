@@ -97,6 +97,7 @@ func BenchmarkJumpDest(b *testing.B) {
 	contract.Code = code
 	contract.CodeHash = accounts.InternCodeHash(hash)
 
+	b.ResetTimer()
 	for b.Loop() {
 		for i := range contract.Code {
 			contract.validJumpdest(*pc.SetUint64(uint64(i)))

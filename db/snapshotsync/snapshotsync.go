@@ -41,6 +41,46 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 )
 
+var GreatOtterBanner = `
+   _____ _             _   _                ____  _   _                                       
+  / ____| |           | | (_)              / __ \| | | |                                      
+ | (___ | |_ __ _ _ __| |_ _ _ __   __ _  | |  | | |_| |_ ___ _ __ ___ _   _ _ __   ___       
+  \___ \| __/ _ | '__| __| | '_ \ / _ | | |  | | __| __/ _ \ '__/ __| | | | '_ \ / __|      
+  ____) | || (_| | |  | |_| | | | | (_| | | |__| | |_| ||  __/ |  \__ \ |_| | | | | (__ _ _ _ 
+ |_____/ \__\__,_|_|   \__|_|_| |_|\__, |  \____/ \__|\__\___|_|  |___/\__, |_| |_|\___(_|_|_)
+                                    __/ |                               __/ |                 
+                                   |___/                               |___/                                            
+
+
+                                        .:-===++**++===-:                                 
+                                   :=##%@@@@@@@@@@@@@@@@@@%#*=.                           
+                               .=#@@@@@@%##+====--====+##@@@@@@@#=.     ...               
+                   .=**###*=:+#@@@@%*=:.                  .:=#%@@@@#==#@@@@@%#-           
+                 -#@@@@%%@@@@@@%+-.                            .=*%@@@@#*+*#@@@%=         
+                =@@@*:    -%%+:                                    -#@+.     =@@@-        
+                %@@#     +@#.                                        :%%-     %@@*        
+                @@@+    +%=.     -+=                        :=-       .#@-    %@@#        
+                *@@%:  #@-      =@@@*                      +@@@%.       =@= -*@@@:        
+                 #@@@##@+       #@@@@.                     %@@@@=        #@%@@@#-         
+                  :#@@@@:       +@@@#       :=++++==-.     *@@@@:        =@@@@-           
+                  =%@@%=         +#*.    =#%#+==-==+#%%=:  .+#*:         .#@@@#.          
+                 +@@%+.               .+%+-.          :=##-                :#@@@-         
+                -@@@=                -%#:     ..::.      +@*                 +@@%.        
+    .::-========*@@@..              -@#      +%@@@@%.     -@#               .-@@@+=======-
+.:-====----:::::#@@%:--=::::..      #@:      *@@@@@%:      *@=      ..:-:-=--:@@@+::::----
+                =@@@:.......        @@        :+@#=.       -@+        .......-@@@:        
+       .:=++####*%@@%=--::::..      @@   %#     %*    :@*  -@+      ...::---+@@@#*#*##+=-:
+  ..--==::..     :%@@@-   ..:::..   @@   +@*:.-#@@+-.-#@-  -@+   ..:::..  .+@@@#.     ..:-
+                  .#@@@##-:.        @@    :+#@%=.:+@@#=.   -@+        .-=#@@@@+           
+             -=+++=--+%@@%+=.       @@       +%*=+#%-      -@+       :=#@@@%+--++++=:     
+         .=**=:.      .=*@@@@@#=:.  @@         :--.        -@+  .-+#@@@@%+:       .:=*+-. 
+        ::.              .=*@@@@@@%#@@+=-:..         ..::=+#@%#@@@@@@%+-.             ..-.
+                            ..=*#@@@@@@@@@@@@@@@%%@@@@@@@@@@@@@@%#+-.                     
+                                  .:-==++*#######%######**+==-:                           
+
+             
+`
+
 type CaplinMode int
 
 const (
@@ -308,7 +348,7 @@ func SyncSnapshots(
 	if blockReader.FreezingCfg().NoDownloader || snapshotDownloader == nil {
 		return nil
 	}
-	snapCfg := snapcfg.KnownCfgOrDevnet(cc.ChainName)
+	snapCfg, _ := snapcfg.KnownCfg(cc.ChainName)
 	// Skip getMinimumBlocksToDownload if we can because it's slow.
 	if snapCfg.Local {
 		// This belongs higher up the call chain.
@@ -412,7 +452,7 @@ func SyncSnapshots(
 				continue
 			}
 			if headerchain &&
-				!(strings.Contains(p.Name, "headers") || strings.Contains(p.Name, "bodies") || p.Name == "salt-blocks.txt" || p.Name == "erigondb.toml") {
+				!(strings.Contains(p.Name, "headers") || strings.Contains(p.Name, "bodies") || p.Name == "salt-blocks.txt") {
 				continue
 			}
 			if !syncCfg.KeepExecutionProofs && isStateHistory(p.Name) && strings.Contains(p.Name, kv.CommitmentDomain.String()) {

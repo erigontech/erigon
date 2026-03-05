@@ -65,4 +65,6 @@ For production environments where RPC endpoints are exposed publicly, it is stro
 
 **Dedicated User**: Run Erigon as a dedicated system user rather than root to limit potential damage from security breaches.
 
+**Transaction Pool Security**: Use `--txpool.nolocals=true` for public nodes to prevent local transaction injection.
+
 **Virtual Host Protection**: Configure `HTTPVirtualHosts` to prevent DNS rebinding attacks. This validates the Host header to ensure requests come from authorized domains.

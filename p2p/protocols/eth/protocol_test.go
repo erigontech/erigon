@@ -21,9 +21,8 @@ package eth
 
 import (
 	"bytes"
+	"math/big"
 	"testing"
-
-	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -124,8 +123,8 @@ func TestEth66Messages(t *testing.T) {
 		err error
 	)
 	header = &types.Header{
-		Difficulty: *uint256.NewInt(2222),
-		Number:     *uint256.NewInt(3333),
+		Difficulty: big.NewInt(2222),
+		Number:     big.NewInt(3333),
 		GasLimit:   4444,
 		GasUsed:    5555,
 		Time:       6666,

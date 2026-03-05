@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -209,13 +210,11 @@ func (s *remoteSealer) loop() {
 //	result[3], hex encoded block number
 func (s *remoteSealer) makeWork(blockWithReceipts *types.BlockWithReceipts) {
 	block := blockWithReceipts.Block
-	blockNum := block.Number()
-	blockDiff := block.Difficulty()
 	hash := s.ethash.SealHash(block.Header())
 	s.currentWork[0] = hash.Hex()
 	s.currentWork[1] = common.BytesToHash(SeedHash(block.NumberU64())).Hex()
-	s.currentWork[2] = common.BytesToHash(new(big.Int).Div(two256, blockDiff.ToBig()).Bytes()).Hex()
-	s.currentWork[3] = blockNum.Hex()
+	s.currentWork[2] = common.BytesToHash(new(big.Int).Div(two256, block.Difficulty()).Bytes()).Hex()
+	s.currentWork[3] = hexutil.EncodeBig(block.Number())
 
 	// Trace the seal work fetched by remote sealer.
 	s.currentBlock = block
@@ -261,12 +260,7 @@ func (s *remoteSealer) submitWork(nonce types.BlockNonce, mixDigest common.Hash,
 	// The submitted solution is within the scope of acceptance.
 	if solution.NumberU64()+staleThreshold > s.currentBlock.NumberU64() {
 		select {
-		case s.results <- &types.BlockWithReceipts{
-			Block:           solution,
-			Receipts:        block.Receipts,
-			Requests:        block.Requests,
-			BlockAccessList: block.BlockAccessList,
-		}:
+		case s.results <- &types.BlockWithReceipts{Block: solution, Receipts: block.Receipts}:
 			s.ethash.config.Log.Trace("Work submitted is acceptable", "number", solution.NumberU64(), "sealhash", sealhash, "hash", solution.Hash())
 			return true
 		default:

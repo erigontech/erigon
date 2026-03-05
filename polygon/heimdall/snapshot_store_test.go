@@ -72,9 +72,6 @@ func TestHeimdallStoreLastFrozenSpanIdWhenSegmentFilesAreNotPresent(t *testing.T
 	require.Equal(t, uint64(0), lastFrozenSpanId)
 }
 func TestHeimdallStoreLastFrozenSpanIdReturnsLastSegWithIdx(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
 	t.Parallel()
 
 	logger := testlog.Logger(t, log.LvlInfo)
@@ -108,9 +105,6 @@ func TestHeimdallStoreLastFrozenSpanIdReturnsLastSegWithIdx(t *testing.T) {
 }
 
 func TestHeimdallStoreEntity(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
 	t.Parallel()
 
 	logger := testlog.Logger(t, log.LvlInfo)
@@ -144,9 +138,6 @@ func TestHeimdallStoreEntity(t *testing.T) {
 }
 
 func TestHeimdallStoreLastFrozenIdWithSpanRotations(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
 	t.Parallel()
 
 	logger := testlog.Logger(t, log.LvlInfo)
@@ -175,9 +166,6 @@ func TestHeimdallStoreLastFrozenIdWithSpanRotations(t *testing.T) {
 }
 
 func TestHeimdallStoreEntityWithSpanRotations(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
 	t.Parallel()
 
 	logger := testlog.Logger(t, log.LvlInfo)

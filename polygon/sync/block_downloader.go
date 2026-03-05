@@ -312,8 +312,7 @@ func (d *BlockDownloader) downloadBlocksUsingWaypoints(
 				break
 			}
 
-			blockNum := blockBatch[0].Number()
-			if blockNum.IsZero() {
+			if blockBatch[0].Number().Sign() == 0 {
 				// we do not want to insert block 0 (genesis)
 				blockBatch = blockBatch[1:]
 			}
@@ -342,7 +341,7 @@ func (d *BlockDownloader) downloadBlocksUsingWaypoints(
 
 		if end != nil {
 			for i := range blocks {
-				if blocks[i].NumberU64() > *end {
+				if blocks[i].Number().Uint64() > *end {
 					blocks = blocks[:i]
 					break
 				}

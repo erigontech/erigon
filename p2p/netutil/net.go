@@ -24,19 +24,23 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"maps"
 	"net"
-	"net/netip"
 	"slices"
 	"strings"
+	"sync"
 )
 
-var special4, special6 Netlist
+var lan4, lan6, special4, special6 Netlist
 
 func init() {
 	// Lists from RFC 5735, RFC 5156,
 	// https://www.iana.org/assignments/iana-ipv4-special-registry/
-	special4.Add("0.0.0.0/8")          // "This" network.
+	lan4.Add("0.0.0.0/8")              // "This" network
+	lan4.Add("10.0.0.0/8")             // Private Use
+	lan4.Add("172.16.0.0/12")          // Private Use
+	lan4.Add("192.168.0.0/16")         // Private Use
+	lan6.Add("fe80::/10")              // Link-Local
+	lan6.Add("fc00::/7")               // Unique-Local
 	special4.Add("192.0.0.0/29")       // IPv4 Service Continuity
 	special4.Add("192.0.0.9/32")       // PCP Anycast
 	special4.Add("192.0.0.170/32")     // NAT64/DNS64 Discovery
@@ -66,7 +70,7 @@ func init() {
 }
 
 // Netlist is a list of IP networks.
-type Netlist []netip.Prefix
+type Netlist []net.IPNet
 
 // ParseNetlist parses a comma-separated list of CIDR masks.
 // Whitespace and extra commas are ignored.
@@ -78,11 +82,11 @@ func ParseNetlist(s string) (*Netlist, error) {
 		if mask == "" {
 			continue
 		}
-		prefix, err := netip.ParsePrefix(mask)
+		_, n, err := net.ParseCIDR(mask)
 		if err != nil {
 			return nil, err
 		}
-		l = append(l, prefix)
+		l = append(l, *n)
 	}
 	return &l, nil
 }
@@ -103,11 +107,11 @@ func (l *Netlist) UnmarshalTOML(fn func(any) error) error {
 		return err
 	}
 	for _, mask := range masks {
-		prefix, err := netip.ParsePrefix(mask)
+		_, n, err := net.ParseCIDR(mask)
 		if err != nil {
 			return err
 		}
-		*l = append(*l, prefix)
+		*l = append(*l, *n)
 	}
 	return nil
 }
@@ -115,20 +119,15 @@ func (l *Netlist) UnmarshalTOML(fn func(any) error) error {
 // Add parses a CIDR mask and appends it to the list. It panics for invalid masks and is
 // intended to be used for setting up static lists.
 func (l *Netlist) Add(cidr string) {
-	prefix, err := netip.ParsePrefix(cidr)
+	_, n, err := net.ParseCIDR(cidr)
 	if err != nil {
 		panic(err)
 	}
-	*l = append(*l, prefix)
+	*l = append(*l, *n)
 }
 
 // Contains reports whether the given IP is contained in the list.
 func (l *Netlist) Contains(ip net.IP) bool {
-	return l.ContainsAddr(IPToAddr(ip))
-}
-
-// ContainsAddr reports whether the given IP is contained in the list.
-func (l *Netlist) ContainsAddr(ip netip.Addr) bool {
 	if l == nil {
 		return false
 	}
@@ -142,39 +141,25 @@ func (l *Netlist) ContainsAddr(ip netip.Addr) bool {
 
 // IsLAN reports whether an IP is a local network address.
 func IsLAN(ip net.IP) bool {
-	return AddrIsLAN(IPToAddr(ip))
-}
-
-// AddrIsLAN reports whether an IP is a local network address.
-func AddrIsLAN(ip netip.Addr) bool {
-	if ip.Is4In6() {
-		ip = netip.AddrFrom4(ip.As4())
-	}
 	if ip.IsLoopback() {
 		return true
 	}
-	return ip.IsPrivate() || ip.IsLinkLocalUnicast()
+	if v4 := ip.To4(); v4 != nil {
+		return lan4.Contains(v4)
+	}
+	return lan6.Contains(ip)
 }
 
 // IsSpecialNetwork reports whether an IP is located in a special-use network range
 // This includes broadcast, multicast and documentation addresses.
 func IsSpecialNetwork(ip net.IP) bool {
-	return AddrIsSpecialNetwork(IPToAddr(ip))
-}
-
-// AddrIsSpecialNetwork reports whether an IP is located in a special-use network range
-// This includes broadcast, multicast and documentation addresses.
-func AddrIsSpecialNetwork(ip netip.Addr) bool {
-	if ip.Is4In6() {
-		ip = netip.AddrFrom4(ip.As4())
-	}
 	if ip.IsMulticast() {
 		return true
 	}
-	if ip.Is4() {
-		return special4.ContainsAddr(ip)
+	if v4 := ip.To4(); v4 != nil {
+		return special4.Contains(v4)
 	}
-	return special6.ContainsAddr(ip)
+	return special6.Contains(ip)
 }
 
 var (
@@ -194,31 +179,19 @@ var (
 //   - LAN addresses are OK if relayed by a LAN host.
 //   - All other addresses are always acceptable.
 func CheckRelayIP(sender, addr net.IP) error {
-	return CheckRelayAddr(IPToAddr(sender), IPToAddr(addr))
-}
-
-// CheckRelayAddr reports whether an IP relayed from the given sender IP
-// is a valid connection target.
-//
-// There are four rules:
-//   - Special network addresses are never valid.
-//   - Loopback addresses are OK if relayed by a loopback host.
-//   - LAN addresses are OK if relayed by a LAN host.
-//   - All other addresses are always acceptable.
-func CheckRelayAddr(sender, addr netip.Addr) error {
-	if !addr.IsValid() {
+	if len(addr) != net.IPv4len && len(addr) != net.IPv6len {
 		return errInvalid
 	}
 	if addr.IsUnspecified() {
 		return errUnspecified
 	}
-	if AddrIsSpecialNetwork(addr) {
+	if IsSpecialNetwork(addr) {
 		return errSpecial
 	}
 	if addr.IsLoopback() && !sender.IsLoopback() {
 		return errLoopback
 	}
-	if AddrIsLAN(addr) && !AddrIsLAN(sender) {
+	if IsLAN(addr) && !IsLAN(sender) {
 		return errLAN
 	}
 	return nil
@@ -252,22 +225,20 @@ type DistinctNetSet struct {
 	Subnet uint // number of common prefix bits
 	Limit  uint // maximum number of IPs in each subnet
 
-	members map[netip.Prefix]uint
+	members *sync.Map
+	buf     net.IP
 }
 
 // Add adds an IP address to the set. It returns false (and doesn't add the IP) if the
 // number of existing IPs in the defined range exceeds the limit.
 func (s *DistinctNetSet) Add(ip net.IP) bool {
-	return s.AddAddr(IPToAddr(ip))
-}
-
-// AddAddr adds an IP address to the set. It returns false (and doesn't add the IP) if the
-// number of existing IPs in the defined range exceeds the limit.
-func (s *DistinctNetSet) AddAddr(ip netip.Addr) bool {
 	key := s.key(ip)
-	n := s.members[key]
+	n := uint(0)
+	if value, ok := s.members.Load(string(key)); ok {
+		n = value.(uint)
+	}
 	if n < s.Limit {
-		s.members[key] = n + 1
+		s.members.Store(string(key), n+1)
 		return true
 	}
 	return false
@@ -275,65 +246,90 @@ func (s *DistinctNetSet) AddAddr(ip netip.Addr) bool {
 
 // Remove removes an IP from the set.
 func (s *DistinctNetSet) Remove(ip net.IP) {
-	s.RemoveAddr(IPToAddr(ip))
-}
-
-// RemoveAddr removes an IP from the set.
-func (s *DistinctNetSet) RemoveAddr(ip netip.Addr) {
 	key := s.key(ip)
-	if n, ok := s.members[key]; ok {
-		if n == 1 {
-			delete(s.members, key)
+	if n, ok := s.members.Load(string(key)); ok {
+		if n.(uint) == 1 {
+			s.members.Delete(string(key))
 		} else {
-			s.members[key] = n - 1
+			s.members.Store(string(key), n.(uint)-1)
 		}
 	}
 }
 
-// Contains reports whether the given IP is contained in the set.
+// Contains whether the given IP is contained in the set.
 func (s DistinctNetSet) Contains(ip net.IP) bool {
-	return s.ContainsAddr(IPToAddr(ip))
-}
-
-// ContainsAddr reports whether the given IP is contained in the set.
-func (s DistinctNetSet) ContainsAddr(ip netip.Addr) bool {
 	key := s.key(ip)
-	_, ok := s.members[key]
+	_, ok := s.members.Load(string(key))
 	return ok
 }
 
 // Len returns the number of tracked IPs.
 func (s DistinctNetSet) Len() int {
 	n := uint(0)
-	for _, i := range s.members {
-		n += i
+	if s.members == nil {
+		return 0
 	}
+	s.members.Range(func(_, v any) bool {
+		n += v.(uint)
+		return true
+	})
 	return int(n)
 }
 
-// key returns the map key for ip.
-func (s *DistinctNetSet) key(ip netip.Addr) netip.Prefix {
+// key encodes the map key for an address into a temporary buffer.
+//
+// The first byte of key is '4' or '6' to distinguish IPv4/IPv6 address types.
+// The remainder of the key is the IP, truncated to the number of bits.
+func (s *DistinctNetSet) key(ip net.IP) net.IP {
 	// Lazily initialize storage.
 	if s.members == nil {
-		s.members = make(map[netip.Prefix]uint)
+		s.members = &sync.Map{}
+		s.buf = make(net.IP, 17)
 	}
-	p, err := ip.Prefix(int(s.Subnet)) //nolint:gocritic
-	if err != nil {
-		panic(err)
+	// Canonicalize ip and bits.
+	typ := byte('6')
+	if ip4 := ip.To4(); ip4 != nil {
+		typ, ip = '4', ip4
 	}
-	return p
+	bits := min(s.Subnet, uint(len(ip)*8))
+	// Encode the prefix into s.buf.
+	nb := int(bits / 8)
+	mask := ^byte(0xFF >> (bits % 8))
+	s.buf[0] = typ
+	buf := append(s.buf[:1], ip[:nb]...)
+	if nb < len(ip) && mask != 0 {
+		buf = append(buf, ip[nb]&mask)
+	}
+	return buf
 }
 
 // String implements fmt.Stringer
 func (s DistinctNetSet) String() string {
-	keys := slices.SortedFunc(maps.Keys(s.members), func(a, b netip.Prefix) int {
-		return strings.Compare(a.String(), b.String())
-	})
-
 	var buf bytes.Buffer
 	buf.WriteString("{")
+	if s.members == nil {
+		return "{}"
+	}
+	keys := []string{}
+	s.members.Range(func(k, v any) bool {
+		keys = append(keys, k.(string))
+		return true
+	})
+	slices.Sort(keys)
 	for i, k := range keys {
-		fmt.Fprintf(&buf, "%v×%d", k, s.members[k])
+		var ip net.IP
+		if k[0] == '4' {
+			ip = make(net.IP, 4)
+		} else {
+			ip = make(net.IP, 16)
+		}
+		copy(ip, k[1:])
+		v, ok := s.members.Load(k)
+		vs := uint(0)
+		if ok {
+			vs = v.(uint)
+		}
+		fmt.Fprintf(&buf, "%v×%d", ip, vs)
 		if i != len(keys)-1 {
 			buf.WriteString(" ")
 		}
