@@ -74,10 +74,10 @@ Add a feature to capture all data read during trie `Process` (branch nodes, acco
 **Files:**
 - Create: `execution/commitment/trie_trace_test.go`
 
-- [ ] Implement `LoadTrieTraceIntoMockState(t testing.TB, path string) (*MockState, [][]byte, []Update)` — loads TOML, decodes hex values, populates `MockState.sm` (accounts + storages) and `MockState.cm` (branches), returns plainKeys and Updates for `WrapKeyUpdates`
-- [ ] Write round-trip test `TestTrieTraceRoundTrip`: create MockState → build updates with `UpdateBuilder` → `applyPlainUpdates` → `Process` with RecordingContext → `Save` to temp file → `LoadTrieTraceIntoMockState` into fresh MockState → `Process` again → assert same root hash
-- [ ] Write test for Save/Load TOML serialization (verify hex encoding correctness)
-- [ ] Run tests: `go test ./execution/commitment/ -run TestTrieTrace -v`
+- [x] Implement `LoadTrieTraceIntoMockState(t testing.TB, path string) (*MockState, [][]byte, []Update)` — loads TOML, decodes hex values, populates `MockState.sm` (accounts + storages) and `MockState.cm` (branches), returns plainKeys and Updates for `WrapKeyUpdates`
+- [x] Write round-trip test `TestTrieTraceRoundTrip`: create MockState → build updates with `UpdateBuilder` → `applyPlainUpdates` → `Process` with RecordingContext → `Save` to temp file → `LoadTrieTraceIntoMockState` into fresh MockState → `Process` again → assert same root hash
+- [x] Write test for Save/Load TOML serialization (verify hex encoding correctness)
+- [x] Run tests: `go test ./execution/commitment/ -run TestTrieTrace -v`
 
 ### Task 5: Verify acceptance criteria
 
