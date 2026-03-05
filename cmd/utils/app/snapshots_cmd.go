@@ -1145,6 +1145,9 @@ func doIntegrity(cliCtx *cli.Context) error {
 		seed = time.Now().UnixNano()
 	}
 	sampleRatio := cliCtx.Float64("sample")
+	if err := integrity.ValidateSampleRatio(sampleRatio); err != nil {
+		return err
+	}
 
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
@@ -1340,6 +1343,9 @@ func doCheckCommitmentHistAtBlkRange(cliCtx *cli.Context, logger log.Logger) err
 		seed = time.Now().UnixNano()
 	}
 	sampleRatio := cliCtx.Float64("sample")
+	if err := integrity.ValidateSampleRatio(sampleRatio); err != nil {
+		return err
+	}
 	logger.Info("[check-commitment-hist-at-blk-range] sampling config", "seed", seed, "sampleRatio", sampleRatio)
 	return integrity.CheckCommitmentHistAtBlkRange(ctx, db, blockReader, from, to, seed, sampleRatio, logger)
 }

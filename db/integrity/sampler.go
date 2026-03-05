@@ -17,6 +17,7 @@
 package integrity
 
 import (
+	"fmt"
 	"iter"
 	"math"
 	"math/rand/v2"
@@ -31,7 +32,15 @@ type Sampler struct {
 	Seed        int64
 }
 
-// NewSampler creates a Sampler with the given seed and sampleRatio (0.0–1.0).
+// ValidateSampleRatio returns an error if sampleRatio is outside the valid range (0, 1].
+func ValidateSampleRatio(sampleRatio float64) error {
+	if sampleRatio <= 0 || sampleRatio > 1 {
+		return fmt.Errorf("--sample must be in (0, 1], got %v", sampleRatio)
+	}
+	return nil
+}
+
+// NewSampler creates a Sampler with the given seed and sampleRatio (0.0–1.0].
 // sampleRatio=1.0 means check everything; sampleRatio=0.05 means check ~5%.
 func NewSampler(seed int64, sampleRatio float64) *Sampler {
 	return &Sampler{
@@ -83,6 +92,9 @@ func (s *Sampler) nums(from, to uint64) iter.Seq[uint64] {
 func (s *Sampler) geometricSkip() uint64 {
 	if s.SampleRatio >= 1.0 {
 		return 0
+	}
+	if s.SampleRatio <= 0 {
+		return math.MaxUint64
 	}
 	u := s.rng.Float64()
 	if u <= 0 {
