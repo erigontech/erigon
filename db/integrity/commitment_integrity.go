@@ -395,7 +395,7 @@ func checkDerefBranch(
 	branchData := commitment.BranchData(branchValue)
 	var integrityErr error
 
-	newBranchData, newBranchValueBuf, _ = branchData.ReplacePlainKeys(newBranchValueBuf[:0], func(key []byte, isStorage bool) ([]byte, error) {
+	newBranchData, _ = branchData.ReplacePlainKeys(newBranchValueBuf[:0], func(key []byte, isStorage bool) ([]byte, error) {
 		if trace {
 			logger.Trace(
 				"[integrity] CommitmentKvDeref",
@@ -1053,7 +1053,6 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 	branchValueBuf := make([]byte, 0, datasize.MB.Bytes())
 	var branchKeys uint64
 	var integrityErr error
-	var branchDerefBuf []byte
 
 	for i := 0; commReader.HasNext(); i++ {
 		if i%1024 == 0 {
@@ -1135,8 +1134,7 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 		}
 		// The callback returns nil (keep original key in output) because the result of ReplacePlainKeys
 		// is discarded (_): all side-effects happen before the return.
-		var err error
-		_, branchDerefBuf, err = branchData.ReplacePlainKeys(branchDerefBuf[:0], func(key []byte, isStorage bool) ([]byte, error) {
+		_, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
 			var checkErr error
 			if isStorage {
 				checkErr = checkKey(key, stoCollector, storageReader, length.Addr+length.Hash, "storage")
@@ -1271,7 +1269,6 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 	var branchKeys uint64
 	var integrityErr error
 	var extractedAccKeys, extractedStoKeys, skippedAccKeys, skippedStoKeys uint64
-	var branchDerefBuf []byte
 
 	// Phase 1: Walk commitment branches, collect extracted plain keys into ETL collectors.
 	for i := 0; commReader.HasNext(); i++ {
@@ -1315,8 +1312,7 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 			continue
 		}
 
-		var err error
-		_, branchDerefBuf, err = branchData.ReplacePlainKeys(branchDerefBuf[:0], func(key []byte, isStorage bool) ([]byte, error) {
+		_, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
 			if isStorage {
 				plainKey := key
 				if len(key) != length.Addr+length.Hash {
@@ -1655,7 +1651,6 @@ func extractCommitmentRefsToCollectors(ctx context.Context, file state.VisibleFi
 	branchKeyBuf := make([]byte, 0, 128)
 	branchValueBuf := make([]byte, 0, datasize.MB.Bytes())
 	plainKeyBuf := make([]byte, 0, length.Addr+length.Hash)
-	var branchDerefBuf []byte
 
 	for commReader.HasNext() {
 		select {
@@ -1679,8 +1674,7 @@ func extractCommitmentRefsToCollectors(ctx context.Context, file state.VisibleFi
 			continue
 		}
 
-		var err error
-		_, branchDerefBuf, err = branchData.ReplacePlainKeys(branchDerefBuf[:0], func(key []byte, isStorage bool) ([]byte, error) { //nolint:gocritic
+		_, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) { //nolint:gocritic
 			if isStorage {
 				plainKey := key
 				if len(key) != length.Addr+length.Hash {
@@ -1802,7 +1796,6 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 
 			plainKeyBuf := make([]byte, 0, length.Addr+length.Hash)
 			valBuf := make([]byte, 0, 128)
-			var branchDerefBuf []byte
 
 			for item := range workCh {
 				select {
@@ -1820,9 +1813,7 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 
 				// We need branch data with plain keys for VerifyBranchHashes.
 				// Walk the branch to extract + resolve all keys and read values.
-				var resolvedBranchData commitment.BranchData
-				var err error
-				resolvedBranchData, branchDerefBuf, err = branchData.ReplacePlainKeys(branchDerefBuf[:0], func(key []byte, isStorage bool) ([]byte, error) {
+				resolvedBranchData, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
 					if isStorage {
 						plainKey := key
 						isRef := len(key) != length.Addr+length.Hash
