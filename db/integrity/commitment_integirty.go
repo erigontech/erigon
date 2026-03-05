@@ -804,6 +804,21 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 				return fmt.Errorf("commitment state blockNum doesn't match blockNum: %d != %d (gap has %d acc, %d storage, %d code changes)", latestBlockNum, blockNum, gapAcc, gapStorage, gapCode)
 			}
 		}
+
+		// Verify gap blocks have the same state root
+		currentRoot, err := sd.ComputeCommitment(ctx, tx, false, latestBlockNum, latestTxNum, lvl.String(), nil)
+		if err != nil {
+			return err
+		}
+		for gapBlock := latestBlockNum + 1; gapBlock < blockNum; gapBlock++ {
+			gapHeader, err := br.HeaderByNumber(ctx, tx, gapBlock)
+			if err != nil {
+				return err
+			}
+			if gapHeader.Root != common.Hash(currentRoot) {
+				return fmt.Errorf("commitment state blockNum doesn't match blockNum: %d != %d (block %d has different state root: commitment=%x header=%x)", latestBlockNum, blockNum, gapBlock, currentRoot, gapHeader.Root)
+			}
+		}
 		logger.Log(lvl, "commitment state is from earlier block (empty blocks in between)", "commitmentBlockNum", latestBlockNum, "blockNum", blockNum)
 	}
 	if latestTxNum != maxTxNum && latestBlockNum == blockNum {
