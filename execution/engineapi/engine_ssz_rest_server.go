@@ -19,7 +19,6 @@ package engineapi
 import (
 	"context"
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -57,18 +56,11 @@ func NewSszRestServer(engine *EngineServer, logger log.Logger, jwtSecret []byte,
 	}
 }
 
-// sszErrorResponse writes a JSON error response for non-200 status codes per EIP-8161.
-func sszErrorResponse(w http.ResponseWriter, code int, jsonRpcCode int, message string) {
-	w.Header().Set("Content-Type", "application/json")
+// sszErrorResponse writes a text/plain error response per execution-apis SSZ spec.
+func sszErrorResponse(w http.ResponseWriter, code int, _ int, message string) {
+	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(code)
-	resp := struct {
-		Code    int    `json:"code"`
-		Message string `json:"message"`
-	}{
-		Code:    jsonRpcCode,
-		Message: message,
-	}
-	json.NewEncoder(w).Encode(resp) //nolint:errcheck
+	w.Write([]byte(message)) //nolint:errcheck
 }
 
 // sszResponse writes a successful SSZ-encoded response.
@@ -133,34 +125,55 @@ func (s *SszRestServer) jwtMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// registerRoutes registers all SSZ-REST endpoint routes per EIP-8161.
+// registerRoutes registers all SSZ-REST endpoint routes per execution-apis SSZ spec.
+// Uses RESTful resource-oriented paths (POST /engine/v{N}/payloads for newPayload,
+// GET /engine/v{N}/payloads/{id} for getPayload, etc.)
 func (s *SszRestServer) registerRoutes(mux *http.ServeMux) {
-	// newPayload versions
+	// newPayload: POST /engine/v{N}/payloads
+	mux.HandleFunc("POST /engine/v1/payloads", s.handleNewPayloadV1)
+	mux.HandleFunc("POST /engine/v2/payloads", s.handleNewPayloadV2)
+	mux.HandleFunc("POST /engine/v3/payloads", s.handleNewPayloadV3)
+	mux.HandleFunc("POST /engine/v4/payloads", s.handleNewPayloadV4)
+	mux.HandleFunc("POST /engine/v5/payloads", s.handleNewPayloadV5)
+
+	// getPayload: GET /engine/v{N}/payloads/{payload_id}
+	mux.HandleFunc("GET /engine/v1/payloads/", s.handleGetPayloadV1)
+	mux.HandleFunc("GET /engine/v2/payloads/", s.handleGetPayloadV2)
+	mux.HandleFunc("GET /engine/v3/payloads/", s.handleGetPayloadV3)
+	mux.HandleFunc("GET /engine/v4/payloads/", s.handleGetPayloadV4)
+	mux.HandleFunc("GET /engine/v5/payloads/", s.handleGetPayloadV5)
+	mux.HandleFunc("GET /engine/v6/payloads/", s.handleGetPayloadV6)
+
+	// forkchoiceUpdated: POST /engine/v{N}/forkchoice
+	mux.HandleFunc("POST /engine/v1/forkchoice", s.handleForkchoiceUpdatedV1)
+	mux.HandleFunc("POST /engine/v2/forkchoice", s.handleForkchoiceUpdatedV2)
+	mux.HandleFunc("POST /engine/v3/forkchoice", s.handleForkchoiceUpdatedV3)
+
+	// getBlobs: POST /engine/v{N}/blobs
+	mux.HandleFunc("POST /engine/v1/blobs", s.handleGetBlobsV1)
+
+	// capabilities: POST /engine/v1/capabilities
+	mux.HandleFunc("POST /engine/v1/capabilities", s.handleExchangeCapabilities)
+
+	// client version: POST /engine/v1/client/version
+	mux.HandleFunc("POST /engine/v1/client/version", s.handleGetClientVersion)
+
+	// Legacy paths (backwards compatibility with existing CL clients)
 	mux.HandleFunc("POST /engine/v1/new_payload", s.handleNewPayloadV1)
 	mux.HandleFunc("POST /engine/v2/new_payload", s.handleNewPayloadV2)
 	mux.HandleFunc("POST /engine/v3/new_payload", s.handleNewPayloadV3)
 	mux.HandleFunc("POST /engine/v4/new_payload", s.handleNewPayloadV4)
 	mux.HandleFunc("POST /engine/v5/new_payload", s.handleNewPayloadV5)
-
-	// forkchoiceUpdated versions
 	mux.HandleFunc("POST /engine/v1/forkchoice_updated", s.handleForkchoiceUpdatedV1)
 	mux.HandleFunc("POST /engine/v2/forkchoice_updated", s.handleForkchoiceUpdatedV2)
 	mux.HandleFunc("POST /engine/v3/forkchoice_updated", s.handleForkchoiceUpdatedV3)
-
-	// getPayload versions
-	mux.HandleFunc("POST /engine/v1/get_payload", s.handleGetPayloadV1)
-	mux.HandleFunc("POST /engine/v2/get_payload", s.handleGetPayloadV2)
-	mux.HandleFunc("POST /engine/v3/get_payload", s.handleGetPayloadV3)
-	mux.HandleFunc("POST /engine/v4/get_payload", s.handleGetPayloadV4)
-	mux.HandleFunc("POST /engine/v5/get_payload", s.handleGetPayloadV5)
-
-	// getBlobs
+	mux.HandleFunc("POST /engine/v1/get_payload", s.handleGetPayloadV1Legacy)
+	mux.HandleFunc("POST /engine/v2/get_payload", s.handleGetPayloadV2Legacy)
+	mux.HandleFunc("POST /engine/v3/get_payload", s.handleGetPayloadV3Legacy)
+	mux.HandleFunc("POST /engine/v4/get_payload", s.handleGetPayloadV4Legacy)
+	mux.HandleFunc("POST /engine/v5/get_payload", s.handleGetPayloadV5Legacy)
 	mux.HandleFunc("POST /engine/v1/get_blobs", s.handleGetBlobsV1)
-
-	// exchangeCapabilities
 	mux.HandleFunc("POST /engine/v1/exchange_capabilities", s.handleExchangeCapabilities)
-
-	// getClientVersion
 	mux.HandleFunc("POST /engine/v1/get_client_version", s.handleGetClientVersion)
 }
 
@@ -275,13 +288,13 @@ func (s *SszRestServer) handleForkchoiceUpdated(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// SSZ Container layout:
-	// Fixed: forkchoice_state(96) + attributes_offset(4) = 100 bytes
-	// Variable: Union[None, PayloadAttributes]
+	// SSZ Container layout per execution-apis spec:
+	// Fixed: forkchoice_state(96) + payload_attributes_offset(4) = 100 bytes
+	// Variable: List[PayloadAttributes, 1] (0 elements = no attributes, 1 element = attributes present)
 	const fixedSize = 100
 
-	if len(body) < 96 {
-		sszErrorResponse(w, http.StatusBadRequest, -32602, "request body too short for ForkchoiceState")
+	if len(body) < fixedSize {
+		sszErrorResponse(w, http.StatusBadRequest, -32602, "request body too short for ForkchoiceUpdatedRequest")
 		return
 	}
 
@@ -294,24 +307,33 @@ func (s *SszRestServer) handleForkchoiceUpdated(w http.ResponseWriter, r *http.R
 
 	var payloadAttributes *engine_types.PayloadAttributes
 
-	if len(body) >= fixedSize {
-		attrOffset := binary.LittleEndian.Uint32(body[96:100])
-		if attrOffset <= uint32(len(body)) && attrOffset < uint32(len(body)) {
-			// Union data at attrOffset
-			unionData := body[attrOffset:]
-			if len(unionData) > 0 {
-				selector := unionData[0]
-				if selector == 1 && len(unionData) > 1 {
-					pa, err := decodePayloadAttributesSSZ(unionData[1:], version)
+	attrOffset := binary.LittleEndian.Uint32(body[96:100])
+	if attrOffset < uint32(len(body)) {
+		attrData := body[attrOffset:]
+		if len(attrData) > 0 {
+			// List[PayloadAttributes, 1] with 1 element: decode the element directly.
+			// For backwards compatibility also support Union encoding (selector byte 0/1).
+			if attrData[0] == 0 || attrData[0] == 1 {
+				// Legacy Union encoding: selector(1) + data
+				if attrData[0] == 1 && len(attrData) > 1 {
+					pa, err := decodePayloadAttributesSSZ(attrData[1:], version)
 					if err != nil {
-						sszErrorResponse(w, http.StatusBadRequest, -32602, err.Error())
+						sszErrorResponse(w, http.StatusUnprocessableEntity, -32602, err.Error())
 						return
 					}
 					payloadAttributes = pa
 				}
-				// selector == 0 means None
+			} else {
+				// New List[T, 1] encoding: the list data IS the element
+				pa, err := decodePayloadAttributesSSZ(attrData, version)
+				if err != nil {
+					sszErrorResponse(w, http.StatusUnprocessableEntity, -32602, err.Error())
+					return
+				}
+				payloadAttributes = pa
 			}
 		}
+		// Empty list = no attributes (payloadAttributes stays nil)
 	}
 
 	ctx := r.Context()
@@ -409,61 +431,108 @@ func decodePayloadAttributesSSZ(buf []byte, version int) (*engine_types.PayloadA
 	return pa, nil
 }
 
-// --- getPayload handlers ---
+// --- getPayload handlers (GET with payload_id in URL path) ---
 
 func (s *SszRestServer) handleGetPayloadV1(w http.ResponseWriter, r *http.Request) {
-	s.handleGetPayload(w, r, 1)
+	s.handleGetPayloadFromPath(w, r, 1)
 }
 
 func (s *SszRestServer) handleGetPayloadV2(w http.ResponseWriter, r *http.Request) {
-	s.handleGetPayload(w, r, 2)
+	s.handleGetPayloadFromPath(w, r, 2)
 }
 
 func (s *SszRestServer) handleGetPayloadV3(w http.ResponseWriter, r *http.Request) {
-	s.handleGetPayload(w, r, 3)
+	s.handleGetPayloadFromPath(w, r, 3)
 }
 
 func (s *SszRestServer) handleGetPayloadV4(w http.ResponseWriter, r *http.Request) {
-	s.handleGetPayload(w, r, 4)
+	s.handleGetPayloadFromPath(w, r, 4)
 }
 
 func (s *SszRestServer) handleGetPayloadV5(w http.ResponseWriter, r *http.Request) {
-	s.handleGetPayload(w, r, 5)
+	s.handleGetPayloadFromPath(w, r, 5)
 }
 
-func (s *SszRestServer) handleGetPayload(w http.ResponseWriter, r *http.Request, version int) {
-	s.logger.Info("[SSZ-REST] Received GetPayload", "version", version)
+func (s *SszRestServer) handleGetPayloadV6(w http.ResponseWriter, r *http.Request) {
+	s.handleGetPayloadFromPath(w, r, 6)
+}
+
+// handleGetPayloadFromPath handles GET /engine/v{N}/payloads/{payload_id}
+// where payload_id is hex-encoded Bytes8 (e.g., 0x0000000000000001).
+func (s *SszRestServer) handleGetPayloadFromPath(w http.ResponseWriter, r *http.Request, version int) {
+	// Extract payload_id from URL path: /engine/v{N}/payloads/{payload_id}
+	path := r.URL.Path
+	// Find the last path segment
+	lastSlash := len(path) - 1
+	for lastSlash > 0 && path[lastSlash] != '/' {
+		lastSlash--
+	}
+	payloadIdHex := path[lastSlash+1:]
+	if payloadIdHex == "" {
+		sszErrorResponse(w, http.StatusBadRequest, -32602, "missing payload_id in URL path")
+		return
+	}
+
+	payloadIdBytes, err := hexutil.Decode(payloadIdHex)
+	if err != nil || len(payloadIdBytes) != 8 {
+		sszErrorResponse(w, http.StatusBadRequest, -32602, fmt.Sprintf("invalid payload_id: %s", payloadIdHex))
+		return
+	}
+
+	s.logger.Info("[SSZ-REST] Received GetPayload", "version", version, "payloadId", payloadIdHex)
+	s.doGetPayload(w, r, version, hexutil.Bytes(payloadIdBytes))
+}
+
+// --- getPayload legacy handlers (POST with payload_id in body) ---
+
+func (s *SszRestServer) handleGetPayloadV1Legacy(w http.ResponseWriter, r *http.Request) {
+	s.handleGetPayloadFromBody(w, r, 1)
+}
+func (s *SszRestServer) handleGetPayloadV2Legacy(w http.ResponseWriter, r *http.Request) {
+	s.handleGetPayloadFromBody(w, r, 2)
+}
+func (s *SszRestServer) handleGetPayloadV3Legacy(w http.ResponseWriter, r *http.Request) {
+	s.handleGetPayloadFromBody(w, r, 3)
+}
+func (s *SszRestServer) handleGetPayloadV4Legacy(w http.ResponseWriter, r *http.Request) {
+	s.handleGetPayloadFromBody(w, r, 4)
+}
+func (s *SszRestServer) handleGetPayloadV5Legacy(w http.ResponseWriter, r *http.Request) {
+	s.handleGetPayloadFromBody(w, r, 5)
+}
+
+func (s *SszRestServer) handleGetPayloadFromBody(w http.ResponseWriter, r *http.Request, version int) {
+	s.logger.Info("[SSZ-REST] Received GetPayload (legacy POST)", "version", version)
 
 	body, err := readBody(r, 64)
 	if err != nil {
 		sszErrorResponse(w, http.StatusBadRequest, -32602, "failed to read request body")
 		return
 	}
-
 	if len(body) != 8 {
 		sszErrorResponse(w, http.StatusBadRequest, -32602, fmt.Sprintf("expected 8 bytes for payload ID, got %d", len(body)))
 		return
 	}
-
-	// Payload ID is 8 bytes. The Engine API internally uses big-endian payload IDs
-	// (see ConvertPayloadId), so we pass the raw bytes directly.
 	payloadIdBytes := make(hexutil.Bytes, 8)
 	copy(payloadIdBytes, body)
+	s.doGetPayload(w, r, version, payloadIdBytes)
+}
 
+func (s *SszRestServer) doGetPayload(w http.ResponseWriter, r *http.Request, version int, payloadIdBytes hexutil.Bytes) {
 	ctx := r.Context()
+	var err error
 
 	switch version {
 	case 1:
 		result, err := s.engine.GetPayloadV1(ctx, payloadIdBytes)
 		if err != nil {
-			s.handleEngineError(w, err)
+			s.handleGetPayloadError(w, err)
 			return
 		}
 		resp := &engine_types.GetPayloadResponse{ExecutionPayload: result}
 		sszResponse(w, engine_types.EncodeGetPayloadResponseSSZ(resp, 1))
-	case 2, 3, 4, 5:
+	case 2, 3, 4, 5, 6:
 		var result *engine_types.GetPayloadResponse
-		// For SSZ encoding, v5 (Fulu) uses same payload format as v4 (Electra/Deneb).
 		encodeVersion := version
 		switch version {
 		case 2:
@@ -473,18 +542,29 @@ func (s *SszRestServer) handleGetPayload(w http.ResponseWriter, r *http.Request,
 		case 4:
 			result, err = s.engine.GetPayloadV4(ctx, payloadIdBytes)
 		case 5:
-			// Fulu uses same payload layout as Electra (Deneb format for SSZ encoding).
 			result, err = s.engine.GetPayloadV5(ctx, payloadIdBytes)
+			encodeVersion = 4
+		case 6:
+			result, err = s.engine.GetPayloadV5(ctx, payloadIdBytes) // TODO: GetPayloadV6 when available
 			encodeVersion = 4
 		}
 		if err != nil {
-			s.handleEngineError(w, err)
+			s.handleGetPayloadError(w, err)
 			return
 		}
 		sszResponse(w, engine_types.EncodeGetPayloadResponseSSZ(result, encodeVersion))
 	default:
 		sszErrorResponse(w, http.StatusBadRequest, -32601, fmt.Sprintf("unsupported getPayload version: %d", version))
 	}
+}
+
+// handleGetPayloadError returns 404 for unknown payload ID, otherwise delegates.
+func (s *SszRestServer) handleGetPayloadError(w http.ResponseWriter, err error) {
+	if err != nil && err.Error() == "unknown payload" {
+		sszErrorResponse(w, http.StatusNotFound, -32001, "Unknown payload ID")
+		return
+	}
+	s.handleEngineError(w, err)
 }
 
 // --- getBlobs handler ---
@@ -616,6 +696,13 @@ func (s *SszRestServer) handleEngineError(w http.ResponseWriter, err error) {
 	case *rpc.UnsupportedForkError:
 		sszErrorResponse(w, http.StatusBadRequest, -32000, e.Message)
 	default:
-		sszErrorResponse(w, http.StatusInternalServerError, -32603, err.Error())
+		errMsg := err.Error()
+		if errMsg == "invalid forkchoice state" {
+			sszErrorResponse(w, http.StatusConflict, -32000, errMsg)
+		} else if errMsg == "invalid payload attributes" {
+			sszErrorResponse(w, http.StatusUnprocessableEntity, -32000, errMsg)
+		} else {
+			sszErrorResponse(w, http.StatusInternalServerError, -32603, errMsg)
+		}
 	}
 }
