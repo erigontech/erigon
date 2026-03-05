@@ -18,13 +18,13 @@ package commitment
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
+ 	"encoding/binary"
+	"encoding/hex"
 	"testing"
 
-	"github.com/stretchr/testify/require"
-
 	"github.com/erigontech/erigon/common"
+	"github.com/stretchr/testify/require"
 )
 
 func BenchmarkBranchMerger_Merge(b *testing.B) {
@@ -66,37 +66,132 @@ func BenchmarkBranchMerger_Merge(b *testing.B) {
 	}
 }
 
-// BenchmarkReplacePlainKeys_BufferReuse compares the old pattern (fresh make each call)
-// against the new pattern (reused scratch buffer + bytes.Clone), matching what
-// replaceShortenedKeysInBranch now does on AggregatorRoTx.
-func BenchmarkReplacePlainKeys_BufferReuse(b *testing.B) {
-	row, bm := generateCellRow(b, 16)
+// benchReplacePlainKeys runs ReplacePlainKeys in a tight loop with b.ReportAllocs().
+// buf is a pre-allocated output buffer (pass nil to let ReplacePlainKeys allocate).
+// No assertions inside the hot loop.
+func benchReplacePlainKeys(b *testing.B, data BranchData, buf []byte, fn func(key []byte, isStorage bool) ([]byte, error)) {
+	b.Helper()
+	b.ReportAllocs()
+	for b.Loop() {
+		_, err := data.ReplacePlainKeys(buf[:0], fn)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// encodeSyntheticBranch creates encoded BranchData from generateCellRow output.
+func encodeSyntheticBranch(b *testing.B, nCells int) (BranchData, uint16) {
+	b.Helper()
+	row, bm := generateCellRow(b, nCells)
 	be := NewBranchEncoder(1024)
-	enc, _, err := be.EncodeBranch(bm, bm, bm, func(nibble int, skip bool) (*cell, error) {
-		return row[nibble], nil
+	enc, _, err := be.EncodeBranch(bm, bm, bm, func(i int, skip bool) (*cell, error) {
+		return row[i], nil
 	})
 	if err != nil {
 		b.Fatal(err)
 	}
-	replacer := func(key []byte, isStorage bool) ([]byte, error) {
+	return BranchData(common.Copy(enc)), bm
+}
+
+// preshortenBranchData shortens keys in enc and returns the shortened data plus
+// a map from shortened key to original key (for the expand benchmark).
+func preshortenBranchData(b *testing.B, enc BranchData) (BranchData, map[string][]byte) {
+	b.Helper()
+	keyMap := make(map[string][]byte)
+	shortened, err := enc.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+		var short []byte
+		if isStorage {
+			short = key[:8]
+		} else {
+			short = key[:4]
+		}
+		keyMap[string(short)] = common.Copy(key)
+		return short, nil
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	return BranchData(common.Copy(shortened)), keyMap
+}
+
+func BenchmarkBranchData_ReplacePlainKeys(b *testing.B) {
+	// Shorten callback: truncate account keys to 4 bytes, storage keys to 8 bytes
+	shortenFn := func(key []byte, isStorage bool) ([]byte, error) {
 		if isStorage {
 			return key[:8], nil
 		}
 		return key[:4], nil
 	}
 
-	b.Run("fresh-make", func(b *testing.B) {
+	// --- Synthetic dense (16-cell) data ---
+	denseEnc, _ := encodeSyntheticBranch(b, 16)
+	denseShortened, denseKeyMap := preshortenBranchData(b, denseEnc)
+
+	// --- Synthetic sparse (2-cell) data ---
+	sparseEnc, _ := encodeSyntheticBranch(b, 2)
+	sparseShortened, sparseKeyMap := preshortenBranchData(b, sparseEnc)
+
+	// --- Real data from production hex string ---
+	// This data has already-shortened 4-byte storage keys and no account keys,
+	// so it exercises the no-change fast path (all keys already short).
+	// Its value is measuring parsing overhead on production-format data with
+	// mixed field types (hashes, extensions, storage addresses).
+	realDataHex := "86e586e5082035e72a782b51d9c98548467e3f868294d923cdbbdf4ce326c867bd972c4a2395090109203b51781a76dc87640aea038e3fdd8adca94049aaa436735b162881ec159f6fb408201aa2fa41b5fb019e8abf8fc32800805a2743cfa15373cf64ba16f4f70e683d8e0404a192d9050404f993d9050404e594d90508208642542ff3ce7d63b9703e85eb924ab3071aa39c25b1651c6dda4216387478f10404bd96d905"
+	realDataBytes, err := hex.DecodeString(realDataHex)
+	if err != nil {
+		b.Fatal(err)
+	}
+	realData := BranchData(realDataBytes)
+
+	// --- Sub-benchmarks ---
+
+	b.Run("Shorten/Dense", func(b *testing.B) {
+		buf := make([]byte, 0, len(denseEnc))
+		benchReplacePlainKeys(b, denseEnc, buf, shortenFn)
+	})
+
+	b.Run("Shorten/Sparse", func(b *testing.B) {
+		buf := make([]byte, 0, len(sparseEnc))
+		benchReplacePlainKeys(b, sparseEnc, buf, shortenFn)
+	})
+
+	b.Run("Expand/Dense", func(b *testing.B) {
+		buf := make([]byte, 0, len(denseEnc))
+		benchReplacePlainKeys(b, denseShortened, buf, func(key []byte, isStorage bool) ([]byte, error) {
+			return denseKeyMap[string(key)], nil
+		})
+	})
+
+	b.Run("Expand/Sparse", func(b *testing.B) {
+		buf := make([]byte, 0, len(sparseEnc))
+		benchReplacePlainKeys(b, sparseShortened, buf, func(key []byte, isStorage bool) ([]byte, error) {
+			return sparseKeyMap[string(key)], nil
+		})
+	})
+
+	b.Run("NoChange/Dense", func(b *testing.B) {
+		buf := make([]byte, 0, len(denseEnc))
+		benchReplacePlainKeys(b, denseEnc, buf, func(key []byte, isStorage bool) ([]byte, error) {
+			return nil, nil
+		})
+	})
+
+	b.Run("BufferReuse/FreshAlloc", func(b *testing.B) {
+		b.ReportAllocs()
 		for b.Loop() {
-			aux := make([]byte, 0, 256)
-			_, _, _ = enc.ReplacePlainKeys(aux, replacer)
+			_, err := denseEnc.ReplacePlainKeys(make([]byte, 0, len(denseEnc)), shortenFn)
+			if err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 
-	b.Run("reuse-clone", func(b *testing.B) {
-		var buf []byte
-		for b.Loop() {
-			_, buf, _ = enc.ReplacePlainKeys(buf[:0], replacer)
-		}
+	b.Run("RealData/NoChange", func(b *testing.B) {
+		buf := make([]byte, 0, len(realData))
+		benchReplacePlainKeys(b, realData, buf, func(key []byte, isStorage bool) ([]byte, error) {
+			return nil, nil
+		})
 	})
 }
 
