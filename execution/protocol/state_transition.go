@@ -537,6 +537,12 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSize)
 	}
 
+	peakGasUsed := st.gasUsed()
+
+	 if rules.IsPrague {
+        peakGasUsed = max(intrinsicGasResult.FloorGasCost, peakGasUsed)
+    }
+
 	// Execute the preparatory steps for state transition which includes:
 	// - prepare accessList(post-berlin; eip-7702)
 	// - reset transient storage(eip 1153)
@@ -632,6 +638,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	result = &evmtypes.ExecutionResult{
 		ReceiptGasUsed:      st.gasUsed(),
 		BlockGasUsed:        st.blockGasUsed,
+		MaxGasUsed:          peakGasUsed,
 		Err:                 vmerr,
 		Reverted:            errors.Is(vmerr, vm.ErrExecutionReverted),
 		ReturnData:          ret,
