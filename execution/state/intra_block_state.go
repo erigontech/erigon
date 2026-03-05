@@ -2219,8 +2219,8 @@ func (sdb *IntraBlockState) AccessedAddresses() AccessSet {
 		return nil
 	}
 	out := make(AccessSet, len(sdb.addressAccess))
-	for addr := range sdb.addressAccess {
-		out[addr] = nil
+	for addr, opts := range sdb.addressAccess {
+		out[addr] = opts
 	}
 	sdb.recordAccess = false
 	sdb.addressAccess = nil
