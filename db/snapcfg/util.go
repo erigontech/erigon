@@ -577,10 +577,13 @@ func fetchChainToml(ctx context.Context, source snapshothashes.SnapshotSource, b
 		return nil, fmt.Errorf("failed to fetch snapshot hashes by %q: status code %d %s", url, resp.StatusCode, resp.Status)
 	}
 	res, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
 	if len(res) == 0 {
 		return nil, fmt.Errorf("empty response from %s", url)
 	}
-	return res, err
+	return res, nil
 }
 
 // LoadRemotePreverifiedForChain fetches and loads snapshot hashes for a single chain only.
@@ -678,26 +681,10 @@ func SetToml(networkName string, toml []byte, local bool) {
 }
 
 func GetToml(networkName string) []byte {
-	switch networkName {
-	case networkname.Mainnet:
-		return snapshothashes.Mainnet
-	case networkname.Sepolia:
-		return snapshothashes.Sepolia
-	case networkname.Amoy:
-		return snapshothashes.Amoy
-	case networkname.BorMainnet:
-		return snapshothashes.BorMainnet
-	case networkname.Gnosis:
-		return snapshothashes.Gnosis
-	case networkname.Chiado:
-		return snapshothashes.Chiado
-	case networkname.Hoodi:
-		return snapshothashes.Hoodi
-	case networkname.Bloatnet:
-		return snapshothashes.Bloatnet
-	default:
-		return nil
+	if ptr, ok := snapshotHashPtrs[networkName]; ok {
+		return *ptr
 	}
+	return nil
 }
 
 // Gets the current preverified for all chains.
