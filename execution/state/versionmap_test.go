@@ -245,6 +245,172 @@ func TestMVHashMapBasics(t *testing.T) {
 	require.Equal(t, valueFor(10, 2), res.value)
 }
 
+// TestValidateRead_HasBAL_BypassForPrePopulatedPaths verifies that when
+// HasBAL is true, a StorageRead that now finds a MVReadResultDone entry on a
+// BAL-prepopulated path (BalancePath, NoncePath, CodePath, StoragePath) is
+// considered valid — the entry is a BAL-filtered no-op write and the original
+// storage read value is still correct.
+func TestValidateRead_HasBAL_BypassForPrePopulatedPaths(t *testing.T) {
+	t.Parallel()
+
+	addr := getAddress(42)
+	checkVersionEqual := func(readVersion, writeVersion Version) VersionValidity {
+		if readVersion == writeVersion {
+			return VersionValid
+		}
+		return VersionInvalid
+	}
+
+	for _, path := range []AccountPath{BalancePath, NoncePath, CodePath, StoragePath} {
+		t.Run(path.String(), func(t *testing.T) {
+			vm := NewVersionMap(nil)
+			vm.HasBAL = true
+
+			// Simulate a BAL-prepopulated write at txIndex 0, incarnation 1.
+			key := accounts.NilKey
+			if path == StoragePath {
+				key = accounts.InternKey(common.BigToHash(big.NewInt(1)))
+			}
+			vm.Write(addr, path, key, Version{TxIndex: 0, Incarnation: 1}, valueFor(0, 1), true)
+
+			// Build a VersionedIO where tx 2 read from storage (no map entry
+			// at execution time) with its own version as the read version.
+			io := NewVersionedIO(2)
+			rs := ReadSet{}
+			rs.Set(VersionedRead{
+				Address: addr,
+				Path:    path,
+				Key:     key,
+				Source:  StorageRead,
+				Version: Version{TxIndex: 2, Incarnation: 1},
+			})
+			io.RecordReads(Version{TxIndex: 2, Incarnation: 1}, rs)
+
+			valid := vm.ValidateVersion(2, io, checkVersionEqual, false, "")
+			require.Equal(t, VersionValid, valid,
+				"HasBAL should bypass invalidation for %s when entry is from BAL pre-population", path)
+		})
+	}
+}
+
+// TestValidateRead_HasBAL_NoBypassForAddressPath verifies that when HasBAL is
+// true, AddressPath is NOT bypassed — a new MVReadResultDone entry on
+// AddressPath means a real state change (e.g. account creation) from a
+// concurrent worker, and the read must be invalidated.
+func TestValidateRead_HasBAL_NoBypassForAddressPath(t *testing.T) {
+	t.Parallel()
+
+	addr := getAddress(42)
+	checkVersionEqual := func(readVersion, writeVersion Version) VersionValidity {
+		if readVersion == writeVersion {
+			return VersionValid
+		}
+		return VersionInvalid
+	}
+
+	vm := NewVersionMap(nil)
+	vm.HasBAL = true
+
+	// A concurrent worker wrote to AddressPath at txIndex 0.
+	vm.Write(addr, AddressPath, accounts.NilKey, Version{TxIndex: 0, Incarnation: 1}, valueFor(0, 1), true)
+
+	// Tx 2 originally read from storage (no map entry at execution time).
+	io := NewVersionedIO(2)
+	rs := ReadSet{}
+	rs.Set(VersionedRead{
+		Address: addr,
+		Path:    AddressPath,
+		Source:  StorageRead,
+		Version: Version{TxIndex: 2, Incarnation: 1},
+	})
+	io.RecordReads(Version{TxIndex: 2, Incarnation: 1}, rs)
+
+	valid := vm.ValidateVersion(2, io, checkVersionEqual, false, "")
+	require.Equal(t, VersionInvalid, valid,
+		"HasBAL should NOT bypass invalidation for AddressPath — new entry means real state change")
+}
+
+// TestValidateRead_NoHasBAL_InvalidatesAllPaths verifies the baseline behavior
+// without HasBAL: any StorageRead that now finds a MVReadResultDone entry
+// should be invalidated, regardless of path.
+func TestValidateRead_NoHasBAL_InvalidatesAllPaths(t *testing.T) {
+	t.Parallel()
+
+	addr := getAddress(42)
+	checkVersionEqual := func(readVersion, writeVersion Version) VersionValidity {
+		if readVersion == writeVersion {
+			return VersionValid
+		}
+		return VersionInvalid
+	}
+
+	for _, path := range []AccountPath{BalancePath, NoncePath, AddressPath} {
+		t.Run(path.String(), func(t *testing.T) {
+			vm := NewVersionMap(nil) // HasBAL = false
+			require.False(t, vm.HasBAL)
+
+			// A concurrent worker wrote at txIndex 0.
+			vm.Write(addr, path, accounts.NilKey, Version{TxIndex: 0, Incarnation: 1}, valueFor(0, 1), true)
+
+			// Tx 2 originally read from storage (no map entry).
+			io := NewVersionedIO(2)
+			rs := ReadSet{}
+			rs.Set(VersionedRead{
+				Address: addr,
+				Path:    path,
+				Source:  StorageRead,
+				Version: Version{TxIndex: 2, Incarnation: 1},
+			})
+			io.RecordReads(Version{TxIndex: 2, Incarnation: 1}, rs)
+
+			valid := vm.ValidateVersion(2, io, checkVersionEqual, false, "")
+			require.Equal(t, VersionInvalid, valid,
+				"without HasBAL, StorageRead finding MVReadResultDone should invalidate for %s", path)
+		})
+	}
+}
+
+// TestValidateRead_HasBAL_AddressPathCrossCheckWithBalancePath verifies that
+// when HasBAL is true and an AddressPath read returns MVReadResultNone (no
+// entry in the version map), but BalancePath has a MVReadResultDone entry
+// (from BAL pre-population at a lower txIndex), the AddressPath read is
+// invalidated. This catches the case where a prior tx created the account,
+// reflected in the BAL as a BalancePath entry.
+func TestValidateRead_HasBAL_AddressPathCrossCheckWithBalancePath(t *testing.T) {
+	t.Parallel()
+
+	addr := getAddress(42)
+	checkVersionEqual := func(readVersion, writeVersion Version) VersionValidity {
+		if readVersion == writeVersion {
+			return VersionValid
+		}
+		return VersionInvalid
+	}
+
+	vm := NewVersionMap(nil)
+	vm.HasBAL = true
+
+	// BAL pre-populated a BalancePath entry at txIndex 0 (simulating account
+	// creation by a prior tx that set a balance).
+	vm.Write(addr, BalancePath, accounts.NilKey, Version{TxIndex: 0, Incarnation: 1}, valueFor(0, 1), true)
+
+	// No AddressPath entry exists (it's not BAL-pre-populated).
+	// Tx 2 read AddressPath from storage during execution.
+	io := NewVersionedIO(2)
+	rs := ReadSet{}
+	rs.Set(VersionedRead{
+		Address: addr,
+		Path:    AddressPath,
+		Source:  StorageRead,
+		Version: Version{TxIndex: 2, Incarnation: 1},
+	})
+	io.RecordReads(Version{TxIndex: 2, Incarnation: 1}, rs)
+
+	valid := vm.ValidateVersion(2, io, checkVersionEqual, false, "")
+	require.Equal(t, VersionInvalid, valid,
+		"AddressPath read should be invalidated when BAL has a BalancePath entry from a prior tx (account may have been created)")
+}
+
 func BenchmarkWriteTimeSameLocationDifferentTxIdx(b *testing.B) {
 	mvh2 := NewVersionMap(nil)
 	ap2 := getAddress(2)
