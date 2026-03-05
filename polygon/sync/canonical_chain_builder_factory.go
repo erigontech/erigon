@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/jellydator/ttlcache/v3"
 )
@@ -35,7 +36,7 @@ func NewCanonicalChainBuilderFactory(
 	chainConfig *chain.Config,
 	borConfig *borcfg.BorConfig,
 	blockProducersTracker blockProducersTracker,
-	signaturesCache *lru.ARCCache[common.Hash, common.Address],
+	signaturesCache *lru.ARCCache[common.Hash, accounts.Address],
 	logger log.Logger,
 ) CanonicalChainBuilderFactory {
 	recentVerifiedHeaders := ttlcache.New[common.Hash, *types.Header](

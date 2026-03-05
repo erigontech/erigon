@@ -116,10 +116,7 @@ func (r *HistoricalStatesReader) ComputeCommittee(mix common.Hash, indicies []ui
 }
 
 func committeeCount(cfg *clparams.BeaconChainConfig, epoch uint64, idxs []uint64) uint64 {
-	committeCount := min(cfg.MaxCommitteesPerSlot, uint64(len(idxs))/cfg.SlotsPerEpoch/cfg.TargetCommitteeSize)
-	if committeCount < 1 {
-		committeCount = 1
-	}
+	committeCount := max(min(cfg.MaxCommitteesPerSlot, uint64(len(idxs))/cfg.SlotsPerEpoch/cfg.TargetCommitteeSize), 1)
 	return committeCount
 }
 

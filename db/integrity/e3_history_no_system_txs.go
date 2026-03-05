@@ -45,7 +45,7 @@ func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReade
 
 	skipForPerf := 11
 	prefixesDone, prefixesTotal := atomic.Uint64{}, atomic.Uint64{}
-	txNumsReader := blockReader.TxnumReader(ctx)
+	txNumsReader := blockReader.TxnumReader()
 
 	for j := 0; j < 256; j++ {
 		j := j
@@ -130,7 +130,7 @@ func HistoryCheckNoSystemTxsRange(ctx context.Context, prefixFrom, prefixTo []by
 			}
 
 			if blk == -1 {
-				blockNum, ok, err := txNumsReader.FindBlockNum(tx, txNum)
+				blockNum, ok, err := txNumsReader.FindBlockNum(ctx, tx, txNum)
 				if err != nil {
 					return err
 				}
@@ -141,7 +141,7 @@ func HistoryCheckNoSystemTxsRange(ctx context.Context, prefixFrom, prefixTo []by
 				if blockNum == 0 {
 					continue
 				}
-				minT, err := rawdbv3.TxNums.Min(tx, blockNum)
+				minT, err := rawdbv3.TxNums.Min(ctx, tx, blockNum)
 				if err != nil {
 					return err
 				}

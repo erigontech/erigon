@@ -13,7 +13,9 @@ import (
 	context "context"
 	reflect "reflect"
 
+	clparams "github.com/erigontech/erigon/cl/clparams"
 	services "github.com/erigontech/erigon/cl/phase1/network/services"
+	peer "github.com/libp2p/go-libp2p/core/peer"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -39,6 +41,83 @@ func NewMockBLSToExecutionChangeService(ctrl *gomock.Controller) *MockBLSToExecu
 // EXPECT returns an object that allows the caller to indicate expected use.
 func (m *MockBLSToExecutionChangeService) EXPECT() *MockBLSToExecutionChangeServiceMockRecorder {
 	return m.recorder
+}
+
+// DecodeGossipMessage mocks base method.
+func (m *MockBLSToExecutionChangeService) DecodeGossipMessage(pid peer.ID, data []byte, version clparams.StateVersion) (*services.SignedBLSToExecutionChangeForGossip, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DecodeGossipMessage", pid, data, version)
+	ret0, _ := ret[0].(*services.SignedBLSToExecutionChangeForGossip)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DecodeGossipMessage indicates an expected call of DecodeGossipMessage.
+func (mr *MockBLSToExecutionChangeServiceMockRecorder) DecodeGossipMessage(pid, data, version any) *MockBLSToExecutionChangeServiceDecodeGossipMessageCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DecodeGossipMessage", reflect.TypeOf((*MockBLSToExecutionChangeService)(nil).DecodeGossipMessage), pid, data, version)
+	return &MockBLSToExecutionChangeServiceDecodeGossipMessageCall{Call: call}
+}
+
+// MockBLSToExecutionChangeServiceDecodeGossipMessageCall wrap *gomock.Call
+type MockBLSToExecutionChangeServiceDecodeGossipMessageCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBLSToExecutionChangeServiceDecodeGossipMessageCall) Return(arg0 *services.SignedBLSToExecutionChangeForGossip, arg1 error) *MockBLSToExecutionChangeServiceDecodeGossipMessageCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBLSToExecutionChangeServiceDecodeGossipMessageCall) Do(f func(peer.ID, []byte, clparams.StateVersion) (*services.SignedBLSToExecutionChangeForGossip, error)) *MockBLSToExecutionChangeServiceDecodeGossipMessageCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBLSToExecutionChangeServiceDecodeGossipMessageCall) DoAndReturn(f func(peer.ID, []byte, clparams.StateVersion) (*services.SignedBLSToExecutionChangeForGossip, error)) *MockBLSToExecutionChangeServiceDecodeGossipMessageCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// Names mocks base method.
+func (m *MockBLSToExecutionChangeService) Names() []string {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Names")
+	ret0, _ := ret[0].([]string)
+	return ret0
+}
+
+// Names indicates an expected call of Names.
+func (mr *MockBLSToExecutionChangeServiceMockRecorder) Names() *MockBLSToExecutionChangeServiceNamesCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Names", reflect.TypeOf((*MockBLSToExecutionChangeService)(nil).Names))
+	return &MockBLSToExecutionChangeServiceNamesCall{Call: call}
+}
+
+// MockBLSToExecutionChangeServiceNamesCall wrap *gomock.Call
+type MockBLSToExecutionChangeServiceNamesCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBLSToExecutionChangeServiceNamesCall) Return(arg0 []string) *MockBLSToExecutionChangeServiceNamesCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBLSToExecutionChangeServiceNamesCall) Do(f func() []string) *MockBLSToExecutionChangeServiceNamesCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBLSToExecutionChangeServiceNamesCall) DoAndReturn(f func() []string) *MockBLSToExecutionChangeServiceNamesCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
 }
 
 // ProcessMessage mocks base method.

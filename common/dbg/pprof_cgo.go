@@ -15,7 +15,6 @@
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 //go:build debug
-// +build debug
 
 package dbg
 

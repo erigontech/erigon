@@ -19,6 +19,7 @@ package txpool
 import (
 	"bytes"
 	"crypto/rand"
+	"fmt"
 	"strconv"
 	"testing"
 
@@ -29,7 +30,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/testdata"
@@ -37,13 +38,11 @@ import (
 
 func TestParseTransactionRLP(t *testing.T) {
 	for _, testSet := range allNetsTestCases {
-		testSet := testSet
 		t.Run(strconv.Itoa(int(testSet.chainID.Uint64())), func(t *testing.T) {
 			require := require.New(t)
 			ctx := NewTxnParseContext(testSet.chainID)
 			txn, txnSender := &TxnSlot{}, [20]byte{}
 			for i, tt := range testSet.tests {
-				tt := tt
 				t.Run(strconv.Itoa(i), func(t *testing.T) {
 					payload := hexutil.MustDecodeHex(tt.PayloadStr)
 					parseEnd, err := ctx.ParseTransaction(payload, 0, txn, txnSender[:], false /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
@@ -435,6 +434,127 @@ func TestWrapperV1BlobTxnParsing(t *testing.T) {
 	}
 }
 
+func TestInvalidWrapperVersionAcceptance(t *testing.T) {
+	bodyRlpHex := "f9012705078502540be4008506fc23ac008357b58494811a752c8cd697e3cb27" +
+		"279c330ed1ada745a8d7808204f7f872f85994de0b295669a9fd93d5f28d9ec85e40f4cb697b" +
+		"aef842a00000000000000000000000000000000000000000000000000000000000000003a000" +
+		"00000000000000000000000000000000000000000000000000000000000007d694bb9bc244d7" +
+		"98123fde783fcc1c72d3bb8c189413c07bf842a0c6bdd1de713471bd6cfa62dd8b5a5b42969e" +
+		"d09e26212d3377f3f8426d8ec210a08aaeccaf3873d07cef005aca28c39f8a9f8bdb1ec8d79f" +
+		"fc25afc0a4fa2ab73601a036b241b061a36a32ab7fe86c7aa9eb592dd59018cd0443adc09035" +
+		"90c16b02b0a05edcc541b4741c5cc6dd347c5ed9577ef293a62787b4510465fadbfe39ee4094"
+	bodyRlp := hexutil.MustDecodeHex(bodyRlpHex)
+
+	// Create minimal blob data
+	blob0 := make([]byte, params.BlobSize)
+	rand.Read(blob0)
+	blob1 := make([]byte, params.BlobSize)
+	rand.Read(blob1)
+
+	var commitment0, commitment1 goethkzg.KZGCommitment
+	rand.Read(commitment0[:])
+	rand.Read(commitment1[:])
+
+	// Create 256 cell proofs (128 per blob for v1)
+	proofs := make([]goethkzg.KZGProof, 0, 256)
+	for range 256 {
+		var p goethkzg.KZGProof
+		rand.Read(p[:])
+		proofs = append(proofs, p)
+	}
+
+	// Test different invalid wrapper versions
+	invalidVersions := []struct {
+		version byte
+		desc    string
+	}{
+		{0x00, "version 0 (wrong format for v1 data)"},
+		{0x02, "non-existent version 2"},
+	}
+
+	for _, tv := range invalidVersions {
+		t.Run(fmt.Sprintf("wrapper_version_0x%02x", tv.version), func(t *testing.T) {
+			// Build transaction with INVALID wrapper version
+			wrapperRlp := hexutil.MustDecodeHex("03fa04329e")
+			wrapperRlp = append(wrapperRlp, bodyRlp...)
+			wrapperRlp = append(wrapperRlp, tv.version) // ← INVALID VERSION
+
+			// Add blobs
+			blobsRlpPrefix := hexutil.MustDecodeHex("fa040008")
+			blobRlpPrefix := hexutil.MustDecodeHex("ba020000")
+			wrapperRlp = append(wrapperRlp, blobsRlpPrefix...)
+			wrapperRlp = append(wrapperRlp, blobRlpPrefix...)
+			wrapperRlp = append(wrapperRlp, blob0...)
+			wrapperRlp = append(wrapperRlp, blobRlpPrefix...)
+			wrapperRlp = append(wrapperRlp, blob1...)
+
+			// Add commitments
+			commitmentRlpPrefix := hexutil.MustDecodeHex("f862")
+			wrapperRlp = append(wrapperRlp, commitmentRlpPrefix...)
+			wrapperRlp = append(wrapperRlp, 0xb0)
+			wrapperRlp = append(wrapperRlp, commitment0[:]...)
+			wrapperRlp = append(wrapperRlp, 0xb0)
+			wrapperRlp = append(wrapperRlp, commitment1[:]...)
+
+			// Add cell proofs
+			proofsRlpPrefix := hexutil.MustDecodeHex("f93100") // 256*(48+1)
+			wrapperRlp = append(wrapperRlp, proofsRlpPrefix...)
+			for _, p := range proofs {
+				wrapperRlp = append(wrapperRlp, 0xb0)
+				wrapperRlp = append(wrapperRlp, p[:]...)
+			}
+
+			// Parse the transaction with INVALID wrapper version
+			ctx := NewTxnParseContext(*uint256.NewInt(5))
+			ctx.withSender = false
+			var txn TxnSlot
+
+			_, err := ctx.ParseTransaction(wrapperRlp, 0, &txn, nil, false, true, nil)
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestParseTransactionRejectsBlobCommitmentCountMismatch(t *testing.T) {
+	chainID := uint256.NewInt(5)
+	baseWrapper := types.MakeWrappedBlobTxn(chainID)
+
+	baseBuf := &bytes.Buffer{}
+	require.NoError(t, baseWrapper.MarshalBinaryWrapped(baseBuf))
+
+	ctx := NewTxnParseContext(*chainID)
+	ctx.withSender = false
+
+	// Sanity-check baseline payload parses successfully.
+	var validSlot TxnSlot
+	_, err := ctx.ParseTransaction(baseBuf.Bytes(), 0, &validSlot, nil, false /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
+	require.NoError(t, err)
+
+	// Commitments > blobs.
+	moreCommitmentsWrapper := types.MakeWrappedBlobTxn(chainID)
+	moreCommitmentsWrapper.Commitments = append(moreCommitmentsWrapper.Commitments, types.KZGCommitment{})
+
+	moreBuf := &bytes.Buffer{}
+	require.NoError(t, moreCommitmentsWrapper.MarshalBinaryWrapped(moreBuf))
+
+	var moreSlot TxnSlot
+	_, err = ctx.ParseTransaction(moreBuf.Bytes(), 0, &moreSlot, nil, false /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "more commitments than blobs")
+
+	// Commitments < blobs.
+	fewerCommitmentsWrapper := types.MakeWrappedBlobTxn(chainID)
+	fewerCommitmentsWrapper.Commitments = fewerCommitmentsWrapper.Commitments[:len(fewerCommitmentsWrapper.Commitments)-1]
+
+	fewerBuf := &bytes.Buffer{}
+	require.NoError(t, fewerCommitmentsWrapper.MarshalBinaryWrapped(fewerBuf))
+
+	var fewerSlot TxnSlot
+	_, err = ctx.ParseTransaction(fewerBuf.Bytes(), 0, &fewerSlot, nil, false /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "fewer commitments than blobs")
+}
+
 func TestSetCodeAuthSignatureRecover(t *testing.T) {
 	txnRlpHex := testdata.ValidSetCodeTxn1
 	// For authorizationList[0] in the above :-
@@ -464,7 +584,7 @@ func TestSetCodeAuthSignatureRecover(t *testing.T) {
 	rlpStream := rlp.NewStream(bytes.NewBuffer(txnRlpBytes[1:]), uint64(len(txnRlpBytes)))
 	setCodeTx.DecodeRLP(rlpStream)
 	require.Len(t, txn.AuthAndNonces, 1)
-	require.Equal(t, expectedSigner.String(), txn.AuthAndNonces[0].authority)
+	require.Equal(t, expectedSigner, txn.AuthAndNonces[0].authority)
 }
 
 func TestSetCodeTxnParsing(t *testing.T) {

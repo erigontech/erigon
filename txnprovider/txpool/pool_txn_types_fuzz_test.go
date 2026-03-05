@@ -38,7 +38,7 @@ func FuzzParseTx(f *testing.F) {
 	f.Add([]byte{1}, 0)
 	f.Fuzz(func(t *testing.T, in []byte, pos int) {
 		t.Parallel()
-		ctx := NewTxnParseContext(*u256.N1)
+		ctx := NewTxnParseContext(u256.N1)
 		txn := &TxnSlot{}
 		sender := make([]byte, 20)
 		_, _ = ctx.ParseTransaction(in, pos, txn, sender, false /* hasEnvelope */, true /* wrappedWithBlobs */, nil)

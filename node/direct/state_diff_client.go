@@ -50,12 +50,18 @@ func (c *StateDiffClientDirect) Snapshots(ctx context.Context, in *remoteproto.S
 
 func (c *StateDiffClientDirect) StateChanges(ctx context.Context, in *remoteproto.StateChangeRequest, opts ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error) {
 	ch := make(chan *stateDiffReply, 16384)
-	streamServer := &StateDiffStreamS{ch: ch, ctx: ctx}
+	subscribed := make(chan struct{})
+	streamServer := &StateDiffStreamS{ch: ch, ctx: ctx, subscribed: subscribed}
 	go func() {
 		defer close(ch)
 		streamServer.Err(c.server.StateChanges(in, streamServer))
 	}()
-	return &StateDiffStreamC{ch: ch, ctx: ctx}, nil
+	select {
+	case <-subscribed:
+		return &StateDiffStreamC{ch: ch, ctx: ctx}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 type stateDiffReply struct {
@@ -80,9 +86,14 @@ func (c *StateDiffStreamC) Context() context.Context { return c.ctx }
 
 // StateDiffStreamS implements proto_sentry.Sentry_ReceiveMessagesServer
 type StateDiffStreamS struct {
-	ch  chan *stateDiffReply
-	ctx context.Context
+	ch         chan *stateDiffReply
+	ctx        context.Context
+	subscribed chan struct{}
 	grpc.ServerStream
+}
+
+func (s *StateDiffStreamS) NotifySubscribed() {
+	close(s.subscribed)
 }
 
 func (s *StateDiffStreamS) Send(m *remoteproto.StateChangeBatch) error {

@@ -43,6 +43,50 @@ func (m *MockKVClient) EXPECT() *MockKVClientMockRecorder {
 	return m.recorder
 }
 
+// CurrentDomainVersion mocks base method.
+func (m *MockKVClient) CurrentDomainVersion(ctx context.Context, in *CurrentDomainVersionReq, opts ...grpc.CallOption) (*CurrentDomainVersionReply, error) {
+	m.ctrl.T.Helper()
+	varargs := []any{ctx, in}
+	for _, a := range opts {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "CurrentDomainVersion", varargs...)
+	ret0, _ := ret[0].(*CurrentDomainVersionReply)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CurrentDomainVersion indicates an expected call of CurrentDomainVersion.
+func (mr *MockKVClientMockRecorder) CurrentDomainVersion(ctx, in any, opts ...any) *MockKVClientCurrentDomainVersionCall {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{ctx, in}, opts...)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CurrentDomainVersion", reflect.TypeOf((*MockKVClient)(nil).CurrentDomainVersion), varargs...)
+	return &MockKVClientCurrentDomainVersionCall{Call: call}
+}
+
+// MockKVClientCurrentDomainVersionCall wrap *gomock.Call
+type MockKVClientCurrentDomainVersionCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockKVClientCurrentDomainVersionCall) Return(arg0 *CurrentDomainVersionReply, arg1 error) *MockKVClientCurrentDomainVersionCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockKVClientCurrentDomainVersionCall) Do(f func(context.Context, *CurrentDomainVersionReq, ...grpc.CallOption) (*CurrentDomainVersionReply, error)) *MockKVClientCurrentDomainVersionCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockKVClientCurrentDomainVersionCall) DoAndReturn(f func(context.Context, *CurrentDomainVersionReq, ...grpc.CallOption) (*CurrentDomainVersionReply, error)) *MockKVClientCurrentDomainVersionCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // GetLatest mocks base method.
 func (m *MockKVClient) GetLatest(ctx context.Context, in *GetLatestReq, opts ...grpc.CallOption) (*GetLatestReply, error) {
 	m.ctrl.T.Helper()
@@ -523,6 +567,50 @@ func (c *MockKVClientStateChangesCall) Do(f func(context.Context, *StateChangeRe
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockKVClientStateChangesCall) DoAndReturn(f func(context.Context, *StateChangeRequest, ...grpc.CallOption) (grpc.ServerStreamingClient[StateChangeBatch], error)) *MockKVClientStateChangesCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// StepSize mocks base method.
+func (m *MockKVClient) StepSize(ctx context.Context, in *StepSizeReq, opts ...grpc.CallOption) (*StepSizeReply, error) {
+	m.ctrl.T.Helper()
+	varargs := []any{ctx, in}
+	for _, a := range opts {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "StepSize", varargs...)
+	ret0, _ := ret[0].(*StepSizeReply)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// StepSize indicates an expected call of StepSize.
+func (mr *MockKVClientMockRecorder) StepSize(ctx, in any, opts ...any) *MockKVClientStepSizeCall {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{ctx, in}, opts...)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StepSize", reflect.TypeOf((*MockKVClient)(nil).StepSize), varargs...)
+	return &MockKVClientStepSizeCall{Call: call}
+}
+
+// MockKVClientStepSizeCall wrap *gomock.Call
+type MockKVClientStepSizeCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockKVClientStepSizeCall) Return(arg0 *StepSizeReply, arg1 error) *MockKVClientStepSizeCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockKVClientStepSizeCall) Do(f func(context.Context, *StepSizeReq, ...grpc.CallOption) (*StepSizeReply, error)) *MockKVClientStepSizeCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockKVClientStepSizeCall) DoAndReturn(f func(context.Context, *StepSizeReq, ...grpc.CallOption) (*StepSizeReply, error)) *MockKVClientStepSizeCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

@@ -86,15 +86,25 @@ var zeroes = make([]byte, 4*4096)
 
 // Resize resizes the memory to size
 func (m *Memory) Resize(size uint64) {
-	l := int(size) - m.Len()
-	if l <= 0 {
+	currLen := uint64(len(m.store))
+	if size <= currLen {
 		return
 	}
-	if l >= len(zeroes) {
-		m.store = append(m.store, make([]byte, l)...)
+
+	if uint64(cap(m.store)) >= size {
+		m.store = m.store[:size]
+		// Use clear() for fast zeroing (compiler optimizes to memclr)
+		clear(m.store[currLen:])
 		return
 	}
-	m.store = append(m.store, zeroes[:l]...)
+
+	grow := size - currLen
+	if grow <= uint64(len(zeroes)) {
+		m.store = append(m.store, zeroes[:grow]...)
+		return
+	}
+
+	m.store = append(m.store, make([]byte, grow)...)
 }
 
 func (m *Memory) reset() {

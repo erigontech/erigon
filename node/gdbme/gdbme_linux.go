@@ -57,13 +57,14 @@ func RestartUnderGDB() {
 	}
 
 	// Формируем аргументы для GDB
-	gdbArgs := []string{
+	var gdbArgs = make([]string, 0, len(gdbCommands)+10)
+	gdbArgs = append(gdbArgs,
 		"-q",
 		"-batch",
 		"-nx",
 		"-nh",
 		"-return-child-result",
-	}
+	)
 	for _, cmd := range gdbCommands {
 		gdbArgs = append(gdbArgs, "-ex", cmd)
 	}

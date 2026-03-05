@@ -20,53 +20,164 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"maps"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
-	"github.com/anacrolix/missinggo/v2/panicif"
 	snapshothashes "github.com/erigontech/erigon-snapshot"
 	"github.com/erigontech/erigon-snapshot/webseed"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/tidwall/btree"
 
+	"github.com/erigontech/erigon/db/preverified"
+
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/version"
 	ver "github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 )
 
+type (
+	PreverifiedItems = preverified.SortedItems
+	PreverifiedItem  = preverified.Item
+)
+
 var snapshotGitBranch = dbg.EnvString("SNAPS_GIT_BRANCH", ver.DefaultSnapshotGitBranch)
 
-var (
-	Mainnet = fromEmbeddedToml(snapshothashes.Mainnet)
-	Holesky = fromEmbeddedToml(snapshothashes.Holesky)
-	Sepolia = fromEmbeddedToml(snapshothashes.Sepolia)
-	//Mumbai     = fromToml(snapshothashes.Mumbai)
-	Amoy       = fromEmbeddedToml(snapshothashes.Amoy)
-	BorMainnet = fromEmbeddedToml(snapshothashes.BorMainnet)
-	Gnosis     = fromEmbeddedToml(snapshothashes.Gnosis)
-	Chiado     = fromEmbeddedToml(snapshothashes.Chiado)
-	Hoodi      = fromEmbeddedToml(snapshothashes.Hoodi)
+type preverifiedRegistry struct {
+	mu     sync.RWMutex
+	raw    map[string][]byte      // raw embedded TOML bytes (cheap, no parsing)
+	data   map[string]Preverified // parsed on demand
+	cached map[string]*Cfg
+}
 
-	// This belongs in a generic embed.FS or something.
-	allSnapshotHashes = []*[]byte{
-		&snapshothashes.Mainnet,
-		&snapshothashes.Holesky,
-		&snapshothashes.Sepolia,
-		&snapshothashes.Amoy,
-		&snapshothashes.BorMainnet,
-		&snapshothashes.Gnosis,
-		&snapshothashes.Chiado,
-		&snapshothashes.Hoodi,
+var registry = &preverifiedRegistry{
+	raw: map[string][]byte{
+		networkname.Mainnet:    snapshothashes.Mainnet,
+		networkname.Sepolia:    snapshothashes.Sepolia,
+		networkname.Amoy:       snapshothashes.Amoy,
+		networkname.BorMainnet: snapshothashes.BorMainnet,
+		networkname.Gnosis:     snapshothashes.Gnosis,
+		networkname.Chiado:     snapshothashes.Chiado,
+		networkname.Hoodi:      snapshothashes.Hoodi,
+		networkname.Bloatnet:   snapshothashes.Bloatnet,
+	},
+	data:   make(map[string]Preverified),
+	cached: make(map[string]*Cfg),
+}
+
+// All forces parsing of all remaining raw entries and returns a clone of the data map.
+func (r *preverifiedRegistry) All() map[string]Preverified {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for name, rawBytes := range r.raw {
+		if _, ok := r.data[name]; !ok {
+			r.data[name] = fromEmbeddedToml(rawBytes)
+		}
 	}
-)
+	r.raw = nil
+	return maps.Clone(r.data)
+}
+
+func (r *preverifiedRegistry) Get(networkName string) (*Cfg, bool) {
+	r.mu.RLock()
+	if cfg, ok := r.cached[networkName]; ok {
+		r.mu.RUnlock()
+		return cfg, true
+	}
+	pv, pvOk := r.data[networkName]
+	rawBytes, rawOk := r.raw[networkName]
+	r.mu.RUnlock()
+
+	if !pvOk && !rawOk {
+		return newCfg(networkName, Preverified{}), false
+	}
+
+	if !pvOk && rawOk {
+		// Parse outside the lock (fromEmbeddedToml is a pure function on immutable data)
+		pv = fromEmbeddedToml(rawBytes)
+		r.mu.Lock()
+		// Double-check: another goroutine may have parsed it
+		if existing, ok := r.data[networkName]; ok {
+			pv = existing
+		} else {
+			r.data[networkName] = pv
+		}
+		r.mu.Unlock()
+	}
+
+	cfg := newCfg(networkName, pv.Typed(knownTypes[networkName]))
+
+	r.mu.Lock()
+	// Double-check after acquiring write lock
+	if existing, ok := r.cached[networkName]; ok {
+		r.mu.Unlock()
+		return existing, true
+	}
+	r.cached[networkName] = cfg
+	r.mu.Unlock()
+
+	return cfg, true
+}
+
+func (r *preverifiedRegistry) Set(networkName string, pv Preverified) {
+	r.mu.Lock()
+	r.data[networkName] = pv
+	delete(r.raw, networkName)    // prevent stale re-parse
+	delete(r.cached, networkName) // Invalidate cache atomically
+	r.mu.Unlock()
+}
+
+// Reset replaces all data, clearing raw and cached.
+func (r *preverifiedRegistry) Reset(data map[string]Preverified) {
+	r.mu.Lock()
+	r.data = data
+	r.raw = nil
+	r.cached = make(map[string]*Cfg) // Clear all cached
+	r.mu.Unlock()
+}
+
+// ResetRaw replaces the raw bytes, clearing data and cached. Used after remote loading
+// updates the module-level snapshot hash vars.
+func (r *preverifiedRegistry) ResetRaw(raw map[string][]byte) {
+	r.mu.Lock()
+	r.raw = raw
+	r.data = make(map[string]Preverified)
+	r.cached = make(map[string]*Cfg)
+	r.mu.Unlock()
+}
+
+// Has checks whether a chain name exists in either raw or data without triggering parsing.
+func (r *preverifiedRegistry) Has(networkName string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if _, ok := r.data[networkName]; ok {
+		return true
+	}
+	_, ok := r.raw[networkName]
+	return ok
+}
+
+var snapshotHashPtrs = map[string]*[]byte{
+	networkname.Mainnet:    &snapshothashes.Mainnet,
+	networkname.Sepolia:    &snapshothashes.Sepolia,
+	networkname.Amoy:       &snapshothashes.Amoy,
+	networkname.BorMainnet: &snapshothashes.BorMainnet,
+	networkname.Gnosis:     &snapshothashes.Gnosis,
+	networkname.Chiado:     &snapshothashes.Chiado,
+	networkname.Hoodi:      &snapshothashes.Hoodi,
+	networkname.Bloatnet:   &snapshothashes.Bloatnet,
+}
 
 func fromEmbeddedToml(in []byte) Preverified {
 	items := fromToml(in)
@@ -76,57 +187,10 @@ func fromEmbeddedToml(in []byte) Preverified {
 	}
 }
 
-type PreverifiedItem struct {
-	Name string
-	Hash string
-}
-
-type PreverifiedItems []PreverifiedItem
-
 type Preverified struct {
 	Local bool
 	// These should be sorted by Name.
 	Items PreverifiedItems
-}
-
-func (p PreverifiedItems) searchName(name string) (int, bool) {
-	p.assertSorted()
-	return slices.BinarySearchFunc(p, name, func(l PreverifiedItem, target string) int {
-		return strings.Compare(l.Name, target)
-	})
-}
-
-// Preverified.Typed was breaking sort invariance.
-func (me PreverifiedItems) assertSorted() {
-	panicif.False(slices.IsSortedFunc(me, preverifiedItemCompare))
-}
-
-func preverifiedItemCompare(a, b PreverifiedItem) int {
-	return strings.Compare(a.Name, b.Name)
-}
-
-func (me PreverifiedItems) Get(name string) (item PreverifiedItem, found bool) {
-	me.assertSorted()
-	i, found := me.searchName(name)
-	if found {
-		item = me[i]
-	}
-	return
-}
-
-func (me PreverifiedItems) Contains(name string, ignoreVersion ...bool) bool {
-	if len(ignoreVersion) > 0 && ignoreVersion[0] {
-		_, name, _ := strings.Cut(name, "-")
-		for _, item := range me {
-			_, noVersion, _ := strings.Cut(item.Name, "-")
-			if noVersion == name {
-				return true
-			}
-		}
-		return false
-	}
-	_, found := me.searchName(name)
-	return found
 }
 
 func (p Preverified) Typed(types []snaptype.Type) Preverified {
@@ -134,6 +198,10 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 
 	for _, p := range p.Items {
 		if strings.HasPrefix(p.Name, "salt") && strings.HasSuffix(p.Name, "txt") {
+			bestVersions.Set(p.Name, p)
+			continue
+		}
+		if p.Name == "erigondb.toml" {
 			bestVersions.Set(p.Name, p)
 			continue
 		}
@@ -173,14 +241,25 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 		//typeName, _ := strings.CutSuffix(parts[2], filepath.Ext(parts[2]))
 		typeName := name[lastSep+1 : dot]
 		include := false
+		idxIndex := 0
 		if strings.Contains(name, "transactions-to-block") { // transactions-to-block should just be "transactions" type
+			idxIndex = 1
 			typeName = "transactions"
+		}
+		if strings.Contains(name, "blocksidecars") {
+			typeName = "blobsidecars"
 		}
 
 		for _, typ := range types {
 			if typeName == typ.Name() {
-				preferredVersion = typ.Versions().Current
-				minVersion = typ.Versions().MinSupported
+				var versions version.Versions
+				if strings.HasSuffix(p.Name, "idx") {
+					versions = typ.Indexes()[idxIndex].Version
+				} else {
+					versions = typ.Versions()
+				}
+				preferredVersion = versions.Current
+				minVersion = versions.MinSupported
 				include = true
 				break
 			}
@@ -226,6 +305,18 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 	slices.SortFunc(versioned, func(i, j PreverifiedItem) int {
 		return strings.Compare(i.Name, j.Name)
 	})
+	if len(p.Items) != len(versioned) {
+		log.Root().Warn("Preverified list reduced after applying type filter", "from", len(p.Items), "to", len(versioned))
+		// for _, v := range p.Items {
+		// 	if !slices.ContainsFunc(versioned, func(item PreverifiedItem) bool {
+		// 		return item.Name == v.Name
+		// 	}) {
+		// 		log.Root().Warn("Preverified item removed by type filter", "name", v.Name)
+		// 	}
+		// }
+	} else {
+		log.Root().Debug("Preverified list has same len after applying type filter", "len", len(p.Items))
+	}
 	p.Items = versioned
 	return p
 }
@@ -292,11 +383,7 @@ func ExtractBlockFromName(name string, v ver.Version) (block uint64, err error) 
 		i++
 	}
 
-	end := i
-
-	if i > len(name) {
-		end = len(name)
-	}
+	end := min(i, len(name))
 
 	block, err = strconv.ParseUint(name[start:end], 10, 64)
 	if err != nil {
@@ -305,43 +392,13 @@ func ExtractBlockFromName(name string, v ver.Version) (block uint64, err error) 
 
 	return block, nil
 }
-
-func (p PreverifiedItems) MarshalJSON() ([]byte, error) {
-	out := map[string]string{}
-
-	for _, i := range p {
-		out[i.Name] = i.Hash
-	}
-
-	return json.Marshal(out)
-}
-
-func (p *PreverifiedItems) UnmarshalJSON(data []byte) error {
-	var outMap map[string]string
-
-	if err := json.Unmarshal(data, &outMap); err != nil {
-		return err
-	}
-
-	*p = doSort(outMap)
-	return nil
-}
-
 func fromToml(in []byte) PreverifiedItems {
 	var outMap map[string]string
 	if err := toml.Unmarshal(in, &outMap); err != nil {
 		panic(err)
 	}
-	return doSort(outMap)
-}
 
-func doSort(in map[string]string) []PreverifiedItem {
-	out := make([]PreverifiedItem, 0, len(in))
-	for k, v := range in {
-		out = append(out, PreverifiedItem{k, v})
-	}
-	slices.SortFunc(out, preverifiedItemCompare)
-	return out
+	return preverified.ItemsFromMap(outMap)
 }
 
 func newCfg(networkName string, preverified Preverified) *Cfg {
@@ -432,48 +489,14 @@ func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 	return c.MergeLimit(snaptype.MinCoreEnum, fromBlock)
 }
 
-var knownPreverified = map[string]Preverified{
-	networkname.Mainnet: Mainnet,
-	networkname.Holesky: Holesky,
-	networkname.Sepolia: Sepolia,
-	//networkname.Mumbai:     Mumbai,
-	networkname.Amoy:       Amoy,
-	networkname.BorMainnet: BorMainnet,
-	networkname.Gnosis:     Gnosis,
-	networkname.Chiado:     Chiado,
-	networkname.Hoodi:      Hoodi,
-}
-
 func RegisterKnownTypes(networkName string, types []snaptype.Type) {
 	knownTypes[networkName] = types
 }
 
 var knownTypes = map[string][]snaptype.Type{}
 
-func Seedable(networkName string, info snaptype.FileInfo) bool {
-	if networkName == "" {
-		return false
-	}
-	snapCfg, _ := KnownCfg(networkName)
-	return snapCfg.Seedable(info)
-}
-
 func MergeLimitFromCfg(cfg *Cfg, snapType snaptype.Enum, fromBlock uint64) uint64 {
 	return cfg.MergeLimit(snapType, fromBlock)
-}
-
-func MaxSeedableSegment(chain string, dir string) uint64 {
-	var _max uint64
-	segConfig, _ := KnownCfg(chain)
-	if list, err := snaptype.Segments(dir); err == nil {
-		for _, info := range list {
-			if segConfig.Seedable(info) && info.Type.Enum() == snaptype.MinCoreEnum && info.To > _max {
-				_max = info.To
-			}
-		}
-	}
-
-	return _max
 }
 
 var oldMergeSteps = append([]uint64{snaptype.Erigon2OldMergeLimit}, snaptype.MergeSteps...)
@@ -490,23 +513,28 @@ func MergeStepsFromCfg(cfg *Cfg, snapType snaptype.Enum, fromBlock uint64) []uin
 
 // KnownCfg return list of preverified hashes for given network, but apply whiteList filter if it's not empty
 func KnownCfg(networkName string) (*Cfg, bool) {
-	c, ok := knownPreverified[networkName]
-	if !ok {
-		return newCfg(networkName, Preverified{}), false
+	return registry.Get(networkName)
+}
+
+// KnownCfgOrDevnet returns the known config for networkName, falling back to
+// the Mainnet config when the network is not recognised.
+func KnownCfgOrDevnet(networkName string) *Cfg {
+	if cfg, ok := registry.Get(networkName); ok {
+		return cfg
 	}
-	return newCfg(networkName, c.Typed(knownTypes[networkName])), true
+	cfg, _ := registry.Get(networkname.Dev)
+	return cfg
 }
 
 var KnownWebseeds = map[string][]string{
-	networkname.Mainnet: webseedsParse(webseed.Mainnet),
-	networkname.Sepolia: webseedsParse(webseed.Sepolia),
-	//networkname.Mumbai:     webseedsParse(webseed.Mumbai),
+	networkname.Mainnet:    webseedsParse(webseed.Mainnet),
+	networkname.Sepolia:    webseedsParse(webseed.Sepolia),
 	networkname.Amoy:       webseedsParse(webseed.Amoy),
 	networkname.BorMainnet: webseedsParse(webseed.BorMainnet),
 	networkname.Gnosis:     webseedsParse(webseed.Gnosis),
 	networkname.Chiado:     webseedsParse(webseed.Chiado),
-	networkname.Holesky:    webseedsParse(webseed.Holesky),
 	networkname.Hoodi:      webseedsParse(webseed.Hoodi),
+	networkname.Bloatnet:   webseedsParse(webseed.Bloatnet),
 }
 
 func webseedsParse(in []byte) (res []string) {
@@ -521,15 +549,89 @@ func webseedsParse(in []byte) (res []string) {
 	return res
 }
 
-func LoadRemotePreverified(ctx context.Context) (err error) {
-	if s, ok := os.LookupEnv("ERIGON_REMOTE_PREVERIFIED"); ok {
+const RemotePreverifiedEnvKey = "ERIGON_REMOTE_PREVERIFIED"
+
+// fetchChainToml fetches a single chain's TOML file from the snapshot CDN.
+// TODO: Copied from github.com/erigontech/erigon-snapshot/embed.go (getURLByChain + fetchSnapshotHashes).
+// Remove the copies in erigon-snapshot once this is the canonical location.
+func fetchChainToml(ctx context.Context, source snapshothashes.SnapshotSource, branch, chain string) ([]byte, error) {
+	var url string
+	if source == snapshothashes.R2 {
+		url = ChainTomlR2URL(branch, chain)
+	} else {
+		url = ChainTomlGitHubURL(branch, chain)
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	if source == snapshothashes.R2 {
+		InsertCloudflareHeaders(req)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to fetch snapshot hashes by %q: status code %d %s", url, resp.StatusCode, resp.Status)
+	}
+	res, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if len(res) == 0 {
+		return nil, fmt.Errorf("empty response from %s", url)
+	}
+	return res, nil
+}
+
+// LoadRemotePreverifiedForChain fetches and loads snapshot hashes for a single chain only.
+func LoadRemotePreverifiedForChain(ctx context.Context, chainName string) error {
+	if s, ok := os.LookupEnv(RemotePreverifiedEnvKey); ok {
 		log.Info("Loading local preverified override file", "file", s)
 
 		b, err := os.ReadFile(s)
 		if err != nil {
 			return fmt.Errorf("reading remote preverified override file: %w", err)
 		}
-		for _, sh := range allSnapshotHashes {
+		if ptr, ok := snapshotHashPtrs[chainName]; ok {
+			*ptr = bytes.Clone(b)
+		}
+	} else {
+		log.Info("Loading remote snapshot hashes", "chain", chainName)
+
+		hashes, err := fetchChainToml(ctx, snapshothashes.R2, snapshotGitBranch, chainName)
+		if err != nil {
+			log.Root().Warn("Failed to load snapshot hashes from R2; falling back to GitHub", "chain", chainName, "err", err)
+
+			hashes, err = fetchChainToml(ctx, snapshothashes.Github, snapshotGitBranch, chainName)
+			if err != nil {
+				return err
+			}
+		}
+
+		if ptr, ok := snapshotHashPtrs[chainName]; ok {
+			*ptr = hashes
+		}
+	}
+
+	// Re-load the preverified hashes for this chain
+	if ptr, ok := snapshotHashPtrs[chainName]; ok {
+		registry.Set(chainName, fromEmbeddedToml(*ptr))
+	}
+	return nil
+}
+
+func LoadRemotePreverified(ctx context.Context) (err error) {
+	if s, ok := os.LookupEnv(RemotePreverifiedEnvKey); ok {
+		log.Info("Loading local preverified override file", "file", s)
+
+		b, err := os.ReadFile(s)
+		if err != nil {
+			return fmt.Errorf("reading remote preverified override file: %w", err)
+		}
+		for _, sh := range snapshotHashPtrs {
 			*sh = bytes.Clone(b)
 		}
 	} else {
@@ -547,76 +649,56 @@ func LoadRemotePreverified(ctx context.Context) (err error) {
 		}
 	}
 
-	// Re-load the preverified hashes
-	Mainnet = fromEmbeddedToml(snapshothashes.Mainnet)
-	Holesky = fromEmbeddedToml(snapshothashes.Holesky)
-	//Mumbai = fromEmbeddedToml(snapshothashes.Mumbai)
-	Sepolia = fromEmbeddedToml(snapshothashes.Sepolia)
-	Amoy = fromEmbeddedToml(snapshothashes.Amoy)
-	BorMainnet = fromEmbeddedToml(snapshothashes.BorMainnet)
-	Gnosis = fromEmbeddedToml(snapshothashes.Gnosis)
-	Chiado = fromEmbeddedToml(snapshothashes.Chiado)
-	Hoodi = fromEmbeddedToml(snapshothashes.Hoodi)
-
-	// Update the known preverified hashes
 	KnownWebseeds = map[string][]string{
-		networkname.Mainnet: webseedsParse(webseed.Mainnet),
-		networkname.Sepolia: webseedsParse(webseed.Sepolia),
-		//networkname.Mumbai:     webseedsParse(webseed.Mumbai),
+		networkname.Mainnet:    webseedsParse(webseed.Mainnet),
+		networkname.Sepolia:    webseedsParse(webseed.Sepolia),
 		networkname.Amoy:       webseedsParse(webseed.Amoy),
 		networkname.BorMainnet: webseedsParse(webseed.BorMainnet),
 		networkname.Gnosis:     webseedsParse(webseed.Gnosis),
 		networkname.Chiado:     webseedsParse(webseed.Chiado),
-		networkname.Holesky:    webseedsParse(webseed.Holesky),
 		networkname.Hoodi:      webseedsParse(webseed.Hoodi),
+		networkname.Bloatnet:   webseedsParse(webseed.Bloatnet),
 	}
 
-	knownPreverified = map[string]Preverified{
-		networkname.Mainnet: Mainnet,
-		networkname.Holesky: Holesky,
-		networkname.Sepolia: Sepolia,
-		//networkname.Mumbai:     Mumbai,
-		networkname.Amoy:       Amoy,
-		networkname.BorMainnet: BorMainnet,
-		networkname.Gnosis:     Gnosis,
-		networkname.Chiado:     Chiado,
-		networkname.Hoodi:      Hoodi,
-	}
+	// Re-load the preverified hashes
+	registry.ResetRaw(map[string][]byte{
+		networkname.Mainnet:    snapshothashes.Mainnet,
+		networkname.Sepolia:    snapshothashes.Sepolia,
+		networkname.Amoy:       snapshothashes.Amoy,
+		networkname.BorMainnet: snapshothashes.BorMainnet,
+		networkname.Gnosis:     snapshothashes.Gnosis,
+		networkname.Chiado:     snapshothashes.Chiado,
+		networkname.Hoodi:      snapshothashes.Hoodi,
+		networkname.Bloatnet:   snapshothashes.Bloatnet,
+	})
 	return
 }
 
 func SetToml(networkName string, toml []byte, local bool) {
-	if _, ok := knownPreverified[networkName]; !ok {
-		return
+	if registry.Has(networkName) {
+		registry.Set(networkName, Preverified{Local: local, Items: fromToml(toml)})
 	}
-	value := Preverified{
-		Local: local,
-		Items: fromToml(toml),
-	}
-	knownPreverified[networkName] = value
 }
 
 func GetToml(networkName string) []byte {
-	switch networkName {
-	case networkname.Mainnet:
-		return snapshothashes.Mainnet
-	case networkname.Holesky:
-		return snapshothashes.Holesky
-	case networkname.Sepolia:
-		return snapshothashes.Sepolia
-	//case networkname.Mumbai:
-	//	return snapshothashes.Mumbai
-	case networkname.Amoy:
-		return snapshothashes.Amoy
-	case networkname.BorMainnet:
-		return snapshothashes.BorMainnet
-	case networkname.Gnosis:
-		return snapshothashes.Gnosis
-	case networkname.Chiado:
-		return snapshothashes.Chiado
-	case networkname.Hoodi:
-		return snapshothashes.Hoodi
-	default:
-		return nil
+	if ptr, ok := snapshotHashPtrs[networkName]; ok {
+		return *ptr
 	}
+	return nil
+}
+
+// Gets the current preverified for all chains.
+func GetAllCurrentPreverified() map[string]Preverified {
+	return registry.All()
+}
+
+// Converts webseed value to URL. Mostly this is just stripping v1: for now, as nothing else is in
+// active use.
+func WebseedToUrl(s string) (_ string, err error) {
+	after, ok := strings.CutPrefix(s, "v1:")
+	if !ok {
+		err = fmt.Errorf("unhandled webseed %q", s)
+		return
+	}
+	return after, nil
 }

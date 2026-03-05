@@ -13,17 +13,10 @@ import (
 	"github.com/erigontech/erigon/db/snapcfg"
 )
 
-// ForkableId id as a uint64, returned by `RegisterForkable`. It is dependent on
-// the order of registration, and so counting on it being constant across reboots
-// might be tricky.
-type ForkableId = kv.ForkableId
-
 type holder struct {
 	// tag - "type" of snapshot file. e.g. tag is "bodies" for "v1.0-007300-007400-bodies.seg" file
 	name                string
-	snapshotDataFileTag string   // name to be used in snapshot file
-	indexFileTag        []string // one indexFileTag for each index
-	dirs                datadir.Dirs
+	snapshotDataFileTag string // name to be used in snapshot file
 	saltFile            string
 	snapshotConfig      *SnapshotConfig
 }
@@ -37,8 +30,6 @@ type registry struct {
 
 var Registry = registry{}
 
-var curr uint16
-
 var mu sync.RWMutex
 
 // RegisterForkable
@@ -46,10 +37,9 @@ var mu sync.RWMutex
 // dirs: directory where snapshots have to reside
 // salt: for creation of indexes.
 // pre: preverified files are snapshot file lists that gets downloaded initially.
-func RegisterForkable(name string, dirs datadir.Dirs, pre snapcfg.PreverifiedItems, options ...EntityIdOption) ForkableId {
+func RegisterForkable(name string, forkableId kv.ForkableId, dirs datadir.Dirs, pre snapcfg.PreverifiedItems, options ...EntityIdOption) {
 	h := &holder{
 		name: name,
-		dirs: dirs,
 	}
 	for _, opt := range options {
 		opt(h)
@@ -57,11 +47,6 @@ func RegisterForkable(name string, dirs datadir.Dirs, pre snapcfg.PreverifiedIte
 
 	if h.snapshotDataFileTag == "" {
 		h.snapshotDataFileTag = name
-	}
-
-	if h.indexFileTag == nil {
-		// default
-		h.indexFileTag = []string{name}
 	}
 
 	if h.saltFile == "" {
@@ -72,22 +57,11 @@ func RegisterForkable(name string, dirs datadir.Dirs, pre snapcfg.PreverifiedIte
 		panic("snapshotCreationConfig is required")
 	}
 
-	mu.Lock()
+	h.snapshotConfig.HasMetadata = true
 
-	Registry.entityRegistry[curr] = *h
-	id := ForkableId(curr)
+	mu.Lock()
+	Registry.entityRegistry[forkableId] = *h
 	h.snapshotConfig.LoadPreverified(pre)
-	curr++
-
-	mu.Unlock()
-
-	return id
-}
-
-func Cleanup() {
-	// only for tests
-	mu.Lock()
-	curr = 0
 	mu.Unlock()
 }
 
@@ -96,12 +70,6 @@ type EntityIdOption func(*holder)
 func WithSnapshotTag(tag string) EntityIdOption {
 	return func(a *holder) {
 		a.snapshotDataFileTag = tag
-	}
-}
-
-func WithIndexFileType(indexFileTag []string) EntityIdOption {
-	return func(a *holder) {
-		a.indexFileTag = indexFileTag
 	}
 }
 
@@ -120,32 +88,24 @@ func WithSaltFile(saltFile string) EntityIdOption {
 	}
 }
 
-func (r *registry) Name(a ForkableId) string {
+func (r *registry) Exists(a kv.ForkableId) bool {
+	return r.entityRegistry[a].name != ""
+}
+
+func (r *registry) Name(a kv.ForkableId) string {
 	return r.entityRegistry[a].name
 }
 
-func (r *registry) SnapshotTag(a ForkableId) string {
-	return r.entityRegistry[a].snapshotDataFileTag
-}
-
-func (r *registry) IndexFileTag(a ForkableId) []string {
-	return r.entityRegistry[a].indexFileTag
-}
-
-func (r *registry) Dirs(a ForkableId) datadir.Dirs {
-	return r.entityRegistry[a].dirs
-}
-
-func (r *registry) String(a ForkableId) string {
+func (r *registry) String(a kv.ForkableId) string {
 	return r.entityRegistry[a].name
 }
 
-func (r *registry) SnapshotConfig(a ForkableId) *SnapshotConfig {
+func (r *registry) SnapshotConfig(a kv.ForkableId) *SnapshotConfig {
 	return r.entityRegistry[a].snapshotConfig
 }
 
-func (r *registry) Salt(a ForkableId) (uint32, error) {
-	// not computing salt an EntityId inception
+func (r *registry) Salt(a kv.ForkableId) (uint32, error) {
+	// not computing salt at EntityId inception
 	// since salt file might not be downloaded yet.
 	saltFile := r.entityRegistry[a].saltFile
 	baseDir := path.Dir(saltFile)

@@ -35,27 +35,28 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/math"
-	"github.com/erigontech/erigon/execution/chain"
+
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/core"
-	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	_ "github.com/erigontech/erigon/execution/tracing/tracers/js"
 	_ "github.com/erigontech/erigon/execution/tracing/tracers/native"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 type callContext struct {
-	Number     math.HexOrDecimal64   `json:"number"`
-	Difficulty *math.HexOrDecimal256 `json:"difficulty"`
-	Time       math.HexOrDecimal64   `json:"timestamp"`
-	GasLimit   math.HexOrDecimal64   `json:"gasLimit"`
-	BaseFee    *math.HexOrDecimal256 `json:"baseFeePerGas"`
-	Miner      common.Address        `json:"miner"`
+	Number     math.HexOrDecimal64 `json:"number"`
+	Difficulty *uint256.Int        `json:"difficulty"`
+	Time       math.HexOrDecimal64 `json:"timestamp"`
+	GasLimit   math.HexOrDecimal64 `json:"gasLimit"`
+	BaseFee    *uint256.Int        `json:"baseFeePerGas"`
+	Miner      common.Address      `json:"miner"`
 }
 
 // callLog is the result of LOG opCode
@@ -96,14 +97,23 @@ type callTracerTest struct {
 // Iterates over all the input-output datasets in the tracer test harness and
 // runs the JavaScript tracers against them.
 func TestCallTracerLegacy(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	testCallTracer("callTracerLegacy", "call_tracer_legacy", t)
 }
 
 func TestCallTracerNative(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	testCallTracer("callTracer", "call_tracer", t)
 }
 
 func TestCallTracerNativeWithLog(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	testCallTracer("callTracer", "call_tracer_withLog", t)
 }
 
@@ -137,20 +147,23 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 			// Configure a blockchain with the given prestate
 			signer := types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number), uint64(test.Context.Time))
 			context := evmtypes.BlockContext{
-				CanTransfer: core.CanTransfer,
-				Transfer:    consensus.Transfer,
-				Coinbase:    test.Context.Miner,
+				CanTransfer: protocol.CanTransfer,
+				Transfer:    misc.Transfer,
+				Coinbase:    accounts.InternAddress(test.Context.Miner),
 				BlockNumber: uint64(test.Context.Number),
 				Time:        uint64(test.Context.Time),
-				Difficulty:  (*big.Int)(test.Context.Difficulty),
 				GasLimit:    uint64(test.Context.GasLimit),
 			}
+			if test.Context.Difficulty != nil {
+				context.Difficulty = *test.Context.Difficulty
+			}
 			if test.Context.BaseFee != nil {
-				context.BaseFee, _ = uint256.FromBig((*big.Int)(test.Context.BaseFee))
+				baseFee := test.Context.BaseFee
+				context.BaseFee = *baseFee
 			}
 			rules := context.Rules(test.Genesis.Config)
 
-			m := mock.Mock(t)
+			m := execmoduletester.New(t)
 			dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 			require.NoError(t, err)
 			defer dbTx.Rollback()
@@ -161,18 +174,18 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 				t.Fatalf("failed to create call tracer: %v", err)
 			}
 			statedb.SetHooks(tracer.Hooks)
-			msg, err := tx.AsMessage(*signer, (*big.Int)(test.Context.BaseFee), rules)
+			msg, err := tx.AsMessage(*signer, test.Context.BaseFee, rules)
 			if err != nil {
 				t.Fatalf("failed to prepare transaction for tracing: %v", err)
 			}
-			txContext := core.NewEVMTxContext(msg)
+			txContext := protocol.NewEVMTxContext(msg)
 			evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Tracer: tracer.Hooks})
 			tracer.OnTxStart(evm.GetVMContext(), tx, msg.From())
-			vmRet, err := core.ApplyMessage(evm, msg, new(core.GasPool).AddGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()), true /* refunds */, false /* gasBailout */, nil /* engine */)
+			vmRet, err := protocol.ApplyMessage(evm, msg, new(protocol.GasPool).AddGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()), true /* refunds */, false /* gasBailout */, nil /* engine */)
 			if err != nil {
 				t.Fatalf("failed to execute transaction: %v", err)
 			}
-			tracer.OnTxEnd(&types.Receipt{GasUsed: vmRet.GasUsed}, err)
+			tracer.OnTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, err)
 			// Retrieve the trace result and compare against the expected.
 			res, err := tracer.GetResult()
 			if err != nil {
@@ -204,8 +217,8 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 			if err := json.Unmarshal(res, &topCall); err != nil {
 				t.Fatalf("failed to unmarshal top calls gasUsed: %v", err)
 			}
-			if uint64(topCall.GasUsed) != vmRet.GasUsed {
-				t.Fatalf("top call has invalid gasUsed. have: %d want: %d", topCall.GasUsed, vmRet.GasUsed)
+			if uint64(topCall.GasUsed) != vmRet.ReceiptGasUsed {
+				t.Fatalf("top call has invalid gasUsed. have: %d want: %d", topCall.GasUsed, vmRet.ReceiptGasUsed)
 			}
 		})
 	}
@@ -242,42 +255,41 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 		b.Fatalf("failed to parse testcase input: %v", err)
 	}
 	signer := types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number), uint64(test.Context.Time))
-	rules := &chain.Rules{}
+	context := evmtypes.BlockContext{
+		CanTransfer: protocol.CanTransfer,
+		Transfer:    misc.Transfer,
+		Coinbase:    accounts.InternAddress(test.Context.Miner),
+		BlockNumber: uint64(test.Context.Number),
+		Time:        uint64(test.Context.Time),
+		Difficulty:  *test.Context.Difficulty,
+		GasLimit:    uint64(test.Context.GasLimit),
+	}
+	rules := context.Rules(test.Genesis.Config)
 	msg, err := tx.AsMessage(*signer, nil, rules)
 	if err != nil {
 		b.Fatalf("failed to prepare transaction for tracing: %v", err)
 	}
 	origin, _ := signer.Sender(tx)
-	baseFee := uint256.MustFromBig((*big.Int)(test.Context.BaseFee))
+	baseFee := test.Context.BaseFee
 	txContext := evmtypes.TxContext{
 		Origin:   origin,
-		GasPrice: tx.GetEffectiveGasTip(baseFee),
+		GasPrice: *tx.GetEffectiveGasTip(baseFee),
 	}
-	context := evmtypes.BlockContext{
-		CanTransfer: core.CanTransfer,
-		Transfer:    consensus.Transfer,
-		Coinbase:    test.Context.Miner,
-		BlockNumber: uint64(test.Context.Number),
-		Time:        uint64(test.Context.Time),
-		Difficulty:  (*big.Int)(test.Context.Difficulty),
-		GasLimit:    uint64(test.Context.GasLimit),
-	}
-	m := mock.Mock(b)
+	m := execmoduletester.New(b)
 	dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(b, err)
 	defer dbTx.Rollback()
 	statedb, _ := testutil.MakePreState(rules, dbTx, test.Genesis.Alloc, uint64(test.Context.Number))
 
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		tracer, err := tracers.New(tracerName, new(tracers.Context), nil)
 		if err != nil {
 			b.Fatalf("failed to create call tracer: %v", err)
 		}
 		evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Tracer: tracer.Hooks})
-		snap := statedb.Snapshot()
-		st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()))
+		snap := statedb.PushSnapshot()
+		st := protocol.NewStateTransition(evm, msg, new(protocol.GasPool).AddGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()))
 		if _, err = st.TransitionDb(true /* refunds */, false /* gasBailout */); err != nil {
 			b.Fatalf("failed to execute transaction: %v", err)
 		}
@@ -285,6 +297,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 			b.Fatal(err)
 		}
 		statedb.RevertToSnapshot(snap, nil)
+		statedb.PopSnapshot(snap)
 	}
 }
 
@@ -311,15 +324,15 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 	origin, _ := signer.Sender(tx)
 	txContext := evmtypes.TxContext{
 		Origin:   origin,
-		GasPrice: uint256.NewInt(1),
+		GasPrice: *uint256.NewInt(1),
 	}
 	context := evmtypes.BlockContext{
-		CanTransfer: core.CanTransfer,
-		Transfer:    consensus.Transfer,
-		Coinbase:    common.Address{},
+		CanTransfer: protocol.CanTransfer,
+		Transfer:    misc.Transfer,
+		Coinbase:    accounts.ZeroAddress,
 		BlockNumber: 8000000,
 		Time:        5,
-		Difficulty:  big.NewInt(0x30000),
+		Difficulty:  *uint256.NewInt(0x30000),
 		GasLimit:    uint64(6000000),
 	}
 	var code = []byte{
@@ -332,13 +345,13 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 			Nonce: 1,
 			Code:  code,
 		},
-		origin: types.GenesisAccount{
+		origin.Value(): types.GenesisAccount{
 			Nonce:   0,
 			Balance: big.NewInt(500000000000000),
 		},
 	}
 	rules := context.Rules(chainspec.Mainnet.Config)
-	m := mock.Mock(t)
+	m := execmoduletester.New(t)
 	dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(t, err)
 	defer dbTx.Rollback()
@@ -356,12 +369,12 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 		t.Fatalf("failed to prepare transaction for tracing: %v", err)
 	}
 	tracer.OnTxStart(evm.GetVMContext(), tx, msg.From())
-	st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()))
+	st := protocol.NewStateTransition(evm, msg, new(protocol.GasPool).AddGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()))
 	vmRet, err := st.TransitionDb(true /* refunds */, false /* gasBailout */)
 	if err != nil {
 		t.Fatalf("failed to execute transaction: %v", err)
 	}
-	tracer.OnTxEnd(&types.Receipt{GasUsed: vmRet.GasUsed}, err)
+	tracer.OnTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, err)
 	// Retrieve the trace result and compare against the etalon
 	res, err := tracer.GetResult()
 	if err != nil {

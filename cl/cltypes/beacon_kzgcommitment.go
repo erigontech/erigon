@@ -30,7 +30,7 @@ import (
 )
 
 var (
-	blobT = reflect.TypeOf(Blob{})
+	blobT = reflect.TypeFor[Blob]()
 
 	_ ssz2.SizedObjectSSZ = (*Blob)(nil)
 	_ ssz2.SizedObjectSSZ = (*KZGProof)(nil)

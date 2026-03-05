@@ -45,7 +45,7 @@ func (t *TransactionsSSZ) UnmarshalJSON(buf []byte) error {
 }
 
 func (t TransactionsSSZ) MarshalJSON() ([]byte, error) {
-	tmp := []hexutil.Bytes{}
+	tmp := make([]hexutil.Bytes, 0, len(t.underlying))
 	for _, tx := range t.underlying {
 		tmp = append(tmp, tx)
 	}
@@ -69,6 +69,13 @@ func (t *TransactionsSSZ) DecodeSSZ(buf []byte, _ int) error {
 	}
 	t.root = common.Hash{}
 	length := ssz.DecodeOffset(buf[:4]) / 4
+	if length == 0 {
+		t.underlying = nil
+		return nil
+	}
+	if uint32(len(buf)) < length*4 {
+		return ssz.ErrLowBufferSize
+	}
 	t.underlying = make([][]byte, length)
 	for i := uint32(0); i < length; i++ {
 		offsetPosition := i * 4

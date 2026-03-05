@@ -1,4 +1,4 @@
-// Copyright 2017 The go-ethereum Authors
+// Copyright 2022 The go-ethereum Authors
 // (original work)
 // Copyright 2024 The Erigon Authors
 // (modifications)
@@ -51,7 +51,7 @@ type Type struct {
 // as an empty string or empty list.
 func (t Type) DefaultNilValue() NilKind {
 	k := t.Kind
-	if isUint(k) || k == reflect.String || k == reflect.Bool || isByteArray(t) {
+	if isUint(k) || isInt(k) || k == reflect.String || k == reflect.Bool || isByteArray(t) {
 		return NilKindString
 	}
 	return NilKindList
@@ -102,6 +102,20 @@ func (e TagError) Error() string {
 	return fmt.Sprintf("rlp: invalid struct tag %q for %s (%s)", e.Tag, field, e.Err)
 }
 
+// OptionalFieldError is raised when a non-optional field follows an optional field.
+type OptionalFieldError struct {
+	StructType string
+	Field      string
+}
+
+func (e OptionalFieldError) Error() string {
+	name := e.Field
+	if e.StructType != "" {
+		name = e.StructType + "." + e.Field
+	}
+	return fmt.Sprintf("rlp: struct field %s needs %q tag", name, "optional")
+}
+
 // ProcessFields filters the given struct fields, returning only fields
 // that should be considered for encoding/decoding.
 func ProcessFields(allFields []Field) ([]Field, []Tags, error) {
@@ -129,18 +143,13 @@ func ProcessFields(allFields []Field) ([]Field, []Tags, error) {
 	// all fields after it must also be optional. Note: optional + tail
 	// is supported.
 	var anyOptional bool
-	var firstOptionalName string
 	for i, ts := range tags {
 		name := fields[i].Name
 		if ts.Optional || ts.Tail {
-			if !anyOptional {
-				firstOptionalName = name
-			}
 			anyOptional = true
 		} else {
 			if anyOptional {
-				msg := fmt.Sprintf("must be optional because preceding field %q is optional", firstOptionalName)
-				return nil, nil, TagError{Field: name, Err: msg}
+				return nil, nil, OptionalFieldError{Field: name}
 			}
 		}
 	}
@@ -151,7 +160,7 @@ func parseTag(field Field, lastPublic int) (Tags, error) {
 	name := field.Name
 	tag := reflect.StructTag(field.Tag)
 	var ts Tags
-	for _, t := range strings.Split(tag.Get("rlp"), ",") {
+	for t := range strings.SplitSeq(tag.Get("rlp"), ",") {
 		switch t = strings.TrimSpace(t); t {
 		case "":
 			// empty tag is allowed for some reason
@@ -159,7 +168,7 @@ func parseTag(field Field, lastPublic int) (Tags, error) {
 			ts.Ignored = true
 		case "nil", "nilString", "nilList":
 			ts.NilOK = true
-			if field.Type.Kind != reflect.Ptr {
+			if field.Type.Kind != reflect.Pointer {
 				return ts, TagError{Field: name, Tag: t, Err: "field is not a pointer"}
 			}
 			switch t {
@@ -205,6 +214,10 @@ func lastPublicField(fields []Field) int {
 
 func isUint(k reflect.Kind) bool {
 	return k >= reflect.Uint && k <= reflect.Uintptr
+}
+
+func isInt(k reflect.Kind) bool {
+	return k >= reflect.Int && k <= reflect.Int64
 }
 
 func isByte(typ Type) bool {

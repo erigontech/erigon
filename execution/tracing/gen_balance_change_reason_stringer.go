@@ -30,8 +30,9 @@ const _BalanceChangeReason_name = "BalanceChangeUnspecifiedBalanceIncreaseReward
 var _BalanceChangeReason_index = [...]uint16{0, 24, 54, 84, 109, 138, 173, 194, 218, 244, 269, 290, 315, 342, 369, 400}
 
 func (i BalanceChangeReason) String() string {
-	if i >= BalanceChangeReason(len(_BalanceChangeReason_index)-1) {
+	idx := int(i) - 0
+	if i < 0 || idx >= len(_BalanceChangeReason_index)-1 {
 		return "BalanceChangeReason(" + strconv.FormatInt(int64(i), 10) + ")"
 	}
-	return _BalanceChangeReason_name[_BalanceChangeReason_index[i]:_BalanceChangeReason_index[i+1]]
+	return _BalanceChangeReason_name[_BalanceChangeReason_index[idx]:_BalanceChangeReason_index[idx+1]]
 }

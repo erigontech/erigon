@@ -183,10 +183,7 @@ func benchmarkPrecompiled(b *testing.B, addr string, test precompiledTest) {
 			res, _, err = RunPrecompiledContract(p, data, reqGas, nil)
 		}
 		bench.StopTimer()
-		elapsed := uint64(time.Since(start))
-		if elapsed < 1 {
-			elapsed = 1
-		}
+		elapsed := max(uint64(time.Since(start)), 1)
 		gasUsed := reqGas * uint64(bench.N)
 		bench.ReportMetric(float64(reqGas), "gas/op")
 		// Keep it as uint64, multiply 100 to get two digit float later
@@ -386,7 +383,12 @@ func TestPrecompiledBLS12381G2MultiExp(t *testing.T) { testJson("blsG2MultiExp",
 func TestPrecompiledBLS12381Pairing(t *testing.T)    { testJson("blsPairing", "0f", t) }
 func TestPrecompiledBLS12381MapG1(t *testing.T)      { testJson("blsMapG1", "10", t) }
 func TestPrecompiledBLS12381MapG2(t *testing.T)      { testJson("blsMapG2", "11", t) }
-func TestPrecompiledPointEvaluation(t *testing.T)    { testJson("pointEvaluation", "0a", t) }
+func TestPrecompiledPointEvaluation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	testJson("pointEvaluation", "0a", t)
+}
 
 func BenchmarkPrecompiledBLS12381G1Add(b *testing.B)      { benchJson("blsG1Add", "0b", b) }
 func BenchmarkPrecompiledBLS12381G1MultiExp(b *testing.B) { benchJson("blsG1MultiExp", "0c", b) }

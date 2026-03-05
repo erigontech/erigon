@@ -79,7 +79,7 @@ var supportCommand = cli.Command{
 	Usage:     "Connect Erigon instance to a diagnostics system for support",
 	ArgsUsage: "--diagnostics.addr <URL for the diagnostics system> --ids <diagnostic session ids allowed to connect> --metrics.urls <http://erigon_host:metrics_port>",
 	Before: func(cliCtx *cli.Context) error {
-		_, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+		_, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
 		if err != nil {
 			return err
 		}
@@ -149,9 +149,10 @@ func ConnectDiagnostics(cliCtx *cli.Context, logger log.Logger) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	debugURLs := []string{}
+	debugURLSlice := cliCtx.StringSlice(debugURLsFlag.Name)
+	debugURLs := make([]string, 0, len(debugURLSlice))
 
-	for _, debugURL := range cliCtx.StringSlice(debugURLsFlag.Name) {
+	for _, debugURL := range debugURLSlice {
 		debugURLs = append(debugURLs, "http://"+debugURL)
 	}
 

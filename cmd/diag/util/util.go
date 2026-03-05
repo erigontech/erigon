@@ -31,7 +31,7 @@ import (
 	"github.com/jedib0t/go-pretty/v6/text"
 )
 
-func MakeHttpGetCall(ctx context.Context, url string, data interface{}) error {
+func MakeHttpGetCall(ctx context.Context, url string, data any) error {
 	var client = &http.Client{
 		Timeout: time.Second * 20,
 	}
@@ -67,7 +67,7 @@ func MakeHttpGetCall(ctx context.Context, url string, data interface{}) error {
 	return nil
 }
 
-func RenderJson(data interface{}) {
+func RenderJson(data any) {
 	bytes, err := json.Marshal(data)
 
 	if err == nil {
@@ -123,45 +123,7 @@ func CreateTable(header table.Row, rows []table.Row, footer table.Row) table.Wri
 	return t
 }
 
-func RenderUseDiagUI() {
-	txt := text.Colors{text.BgGreen, text.Bold}
-	fmt.Println(txt.Sprint("To get detailed info about Erigon node state use 'diag ui' command."))
-}
-
 func RenderError(err error) {
 	txt := text.Colors{text.FgWhite, text.BgRed}
 	fmt.Printf("%s %s\n", txt.Sprint("[ERROR]"), err)
-}
-
-func SaveDataToFile(filePath string, fileName string, data string) error {
-	//check is folder exists
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		err := os.MkdirAll(filePath, 0755)
-		if err != nil {
-			return err
-		}
-	}
-
-	fullPath := MakePath(filePath, fileName)
-
-	file, err := os.Create(fullPath)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	_, err = file.WriteString(fmt.Sprintf("%v\n", data))
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func MakePath(filePath string, fileName string) string {
-	if filePath[len(filePath)-1] == '/' {
-		filePath = filePath[:len(filePath)-1]
-	}
-
-	return fmt.Sprintf("%s/%s", filePath, fileName)
 }

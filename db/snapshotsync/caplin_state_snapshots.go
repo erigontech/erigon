@@ -444,7 +444,7 @@ func (s *CaplinStateSnapshots) recalcVisibleFiles() {
 	// for k := range s.visible {
 	// 	s.visible[k] = getNewVisibleSegments(s.dirty[k])
 	// }
-	s.visible.Range(func(k, v interface{}) bool {
+	s.visible.Range(func(k, v any) bool {
 		s.visible.Store(k, getNewVisibleSegments(s.dirty[k.(string)]))
 		return true
 	})
@@ -463,7 +463,7 @@ func (s *CaplinStateSnapshots) idxAvailability() uint64 {
 	// 		min = segs[len(segs)-1].to
 	// 	}
 	// }
-	s.visible.Range(func(_, v interface{}) bool {
+	s.visible.Range(func(_, v any) bool {
 		segs := v.([]*VisibleSegment)
 		if len(segs) == 0 {
 			min = 0
@@ -552,7 +552,7 @@ func (s *CaplinStateSnapshots) View() *CaplinStateView {
 	// for k, segments := range s.visible {
 	// 	v.roTxs[k] = segments.BeginRo()
 	// }
-	s.visible.Range(func(k, val interface{}) bool {
+	s.visible.Range(func(k, val any) bool {
 		v.roTxs[k.(string)] = VisibleSegments(val.([]*VisibleSegment)).BeginRo()
 		return true
 	})
@@ -703,24 +703,37 @@ func (s *CaplinStateSnapshots) BuildMissingIndices(ctx context.Context, logger l
 	// }
 
 	// wait for Downloader service to download all expected snapshots
-	segments, _, err := SegmentsCaplin(s.dir)
-	if err != nil {
-		return err
-	}
+
 	noneDone := true
-	for index := range segments {
-		segment := segments[index]
-		// The same slot=>offset mapping is used for both beacon blocks and blob sidecars.
-		if segment.Type.Enum() != snaptype.CaplinEnums.BeaconBlocks && segment.Type.Enum() != snaptype.CaplinEnums.BlobSidecars {
+
+	for caplinType, filesTree := range s.dirty {
+		files := filesTree.Items()
+		_, ok := s.snapshotTypes.KeyValueGetters[caplinType]
+		if !ok {
+			s.logger.Warn("no kv getter for caplin state snapshot type", "type", caplinType)
 			continue
 		}
-		if segment.Type.HasIndexFiles(segment, logger) {
-			continue
-		}
-		p := &background.Progress{}
-		noneDone = false
-		if err := BeaconSimpleIdx(ctx, segment, s.Salt, s.tmpdir, p, log.LvlDebug, logger); err != nil {
-			return err
+		for _, df := range files {
+			if df.Decompressor == nil {
+				return fmt.Errorf("segment %s is not opened", df.FilePath())
+			}
+			if isIndexed(df) {
+				continue
+			}
+			sn, _, _ := snaptype.ParseFileName(s.dir, filepath.Base(df.FilePath()))
+
+			indexFile := filepath.Join(sn.Dir(), snaptype.IdxFileName(sn.Version, sn.From, sn.To, sn.CaplinTypeString))
+			if _, err := os.Stat(indexFile); err == nil {
+				logger.Info("index file already exists, yet dirtyFile didn't have it opened", "seg", sn.Name())
+				continue
+			}
+			logger.Info("building index file", "seg", sn.Name())
+			p := &background.Progress{}
+			noneDone = false
+
+			if err := simpleIdx(ctx, sn, s.Salt, s.tmpdir, p, log.LvlDebug, logger); err != nil {
+				return err
+			}
 		}
 	}
 	if noneDone {

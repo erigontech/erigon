@@ -130,7 +130,7 @@ func (p *Program) Push(val any) *Program {
 		p.doPush(new(uint256.Int).SetUint64(uint64(v)))
 	case interface{ Bytes() []byte }:
 		// Here, we jump through some hoops in order to avoid depending on
-		// go-ethereum types.Address and common.Hash, and instead use the
+		// go-ethereum accounts.Address and common.Hash, and instead use the
 		// interface. This works on both values and pointers!
 		p.doPush(new(uint256.Int).SetBytes(v.Bytes()))
 	case nil:

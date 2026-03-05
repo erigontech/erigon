@@ -161,7 +161,7 @@ func MustParseUints(strNum, separator string) []uint64 {
 	}
 	parts := strings.Split(strNum, separator)
 	ints := make([]uint64, 0, len(parts))
-	for _, str := range strings.Split(strNum, separator) {
+	for str := range strings.SplitSeq(strNum, separator) {
 		ints = append(ints, MustParseUint(str))
 	}
 	return ints

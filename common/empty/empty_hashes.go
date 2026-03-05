@@ -45,4 +45,7 @@ var (
 
 	// RequestsHash is the known hash of an empty request set, sha256("").
 	RequestsHash = common.HexToHash("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+
+	// BlockAccessListHash is the known hash of an empty block access list, keccak256(rlp.encode([])).
+	BlockAccessListHash = common.HexToHash("1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347")
 )

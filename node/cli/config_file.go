@@ -32,7 +32,7 @@ import (
 func SetFlagsFromConfigFile(ctx *cli.Context, filePath string) error {
 	fileExtension := filepath.Ext(filePath)
 
-	fileConfig := make(map[string]interface{})
+	fileConfig := make(map[string]any)
 
 	if fileExtension == ".yml" || fileExtension == ".yaml" {
 		yamlFile, err := os.ReadFile(filePath)
@@ -59,7 +59,7 @@ func SetFlagsFromConfigFile(ctx *cli.Context, filePath string) error {
 	for key, value := range fileConfig {
 		if !ctx.IsSet(key) {
 			if reflect.ValueOf(value).Kind() == reflect.Slice {
-				sliceInterface := value.([]interface{})
+				sliceInterface := value.([]any)
 				s := make([]string, len(sliceInterface))
 				for i, v := range sliceInterface {
 					s[i] = fmt.Sprintf("%v", v)

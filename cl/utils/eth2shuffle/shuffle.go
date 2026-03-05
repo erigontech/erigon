@@ -82,10 +82,7 @@ func innerPermuteIndex(hashFn HashFn, rounds uint8, index uint64, listSize uint6
 		// Why? Don't do double work: we consider every pair only once.
 		// (Otherwise we would swap it back in place)
 		// Pick the highest index of the pair as position to retrieve randomness with.
-		position := index
-		if flip > position {
-			position = flip
-		}
+		position := max(flip, index)
 		// spec: source = hash(seed + int_to_bytes1(round) + int_to_bytes4(position // 256))
 		// - seed is still in 0:32 (excl., 32 bytes)
 		// - round number is still in 32

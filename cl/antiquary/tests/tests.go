@@ -19,7 +19,6 @@ package tests
 import (
 	"context"
 	"embed"
-	_ "embed"
 	"strconv"
 	"testing"
 

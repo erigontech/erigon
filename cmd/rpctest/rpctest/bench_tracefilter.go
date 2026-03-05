@@ -85,10 +85,7 @@ func BenchTraceFilter(erigonURL, oeURL string, needCompare bool, blockFrom uint6
 				accounts = append(accounts, account)
 			}
 			// Randomly select 100 accounts
-			selects := 100
-			if len(accounts) < 100 {
-				selects = len(accounts)
-			}
+			selects := min(len(accounts), 100)
 			for i := 0; i < selects; i++ {
 				idx := i
 				if len(accounts) > 100 {

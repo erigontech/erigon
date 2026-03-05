@@ -19,7 +19,6 @@ package logger
 import (
 	"context"
 	"encoding/hex"
-	"sort"
 
 	"github.com/holiman/uint256"
 
@@ -27,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
@@ -44,7 +44,7 @@ type JsonStreamLogger struct {
 	firstCapture bool
 
 	locations common.Hashes // For sorting
-	storage   map[common.Address]Storage
+	storage   map[accounts.Address]Storage
 	logs      []StructLog
 	output    []byte //nolint
 	err       error  //nolint
@@ -56,7 +56,7 @@ func NewJsonStreamLogger(cfg *LogConfig, ctx context.Context, stream jsonstream.
 	logger := &JsonStreamLogger{
 		ctx:          ctx,
 		stream:       stream,
-		storage:      make(map[common.Address]Storage),
+		storage:      make(map[accounts.Address]Storage),
 		firstCapture: true,
 	}
 	if cfg != nil {
@@ -75,7 +75,7 @@ func (l *JsonStreamLogger) Tracer() *tracers.Tracer {
 	}
 }
 
-func (l *JsonStreamLogger) OnTxStart(env *tracing.VMContext, tx types.Transaction, from common.Address) {
+func (l *JsonStreamLogger) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
 	l.env = env
 }
 
@@ -123,11 +123,11 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 		// capture SLOAD opcodes and record the read entry in the local storage
 		if op == vm.SLOAD && len(stack) >= 1 {
 			var (
-				address = common.Hash(stack[len(stack)-1].Bytes32())
+				address = accounts.InternKey(stack[len(stack)-1].Bytes32())
 				value   uint256.Int
 			)
-			l.env.IntraBlockState.GetState(contractAddr, address, &value)
-			l.storage[contractAddr][address] = value.Bytes32()
+			value, _ = l.env.IntraBlockState.GetState(contractAddr, address)
+			l.storage[contractAddr][address.Value()] = value.Bytes32()
 			outputStorage = true
 		}
 		// capture SSTORE opcodes and record the written entry in the local storage.
@@ -206,7 +206,7 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 		for loc := range s {
 			l.locations = append(l.locations, loc)
 		}
-		sort.Sort(l.locations)
+		l.locations.Sort()
 		for _, loc := range l.locations {
 			value := s[loc]
 			if first {

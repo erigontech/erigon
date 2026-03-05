@@ -24,42 +24,43 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestGetBurntContract(t *testing.T) {
 	// Ethereum
-	assert.Nil(t, chainspec.Mainnet.Config.GetBurntContract(0))
-	assert.Nil(t, chainspec.Mainnet.Config.GetBurntContract(10_000_000))
+	assert.Equal(t, accounts.NilAddress, chainspec.Mainnet.Config.GetBurntContract(0))
+	assert.Equal(t, accounts.NilAddress, chainspec.Mainnet.Config.GetBurntContract(10_000_000))
 
 	// Gnosis Chain
 	addr := chainspec.Gnosis.Config.GetBurntContract(19_040_000)
 	require.NotNil(t, addr)
-	assert.Equal(t, common.HexToAddress("0x6BBe78ee9e474842Dbd4AB4987b3CeFE88426A92"), *addr)
+	assert.Equal(t, common.HexToAddress("0x6BBe78ee9e474842Dbd4AB4987b3CeFE88426A92"), addr.Value())
 	addr = chainspec.Gnosis.Config.GetBurntContract(19_040_001)
 	require.NotNil(t, addr)
-	assert.Equal(t, common.HexToAddress("0x6BBe78ee9e474842Dbd4AB4987b3CeFE88426A92"), *addr)
+	assert.Equal(t, common.HexToAddress("0x6BBe78ee9e474842Dbd4AB4987b3CeFE88426A92"), addr.Value())
 
 	// Bor Mainnet
 	addr = BorMainnet.Config.GetBurntContract(23850000)
 	require.NotNil(t, addr)
-	assert.Equal(t, common.HexToAddress("0x70bcA57F4579f58670aB2d18Ef16e02C17553C38"), *addr)
+	assert.Equal(t, common.HexToAddress("0x70bcA57F4579f58670aB2d18Ef16e02C17553C38"), addr.Value())
 	addr = BorMainnet.Config.GetBurntContract(23850000 + 1)
 	require.NotNil(t, addr)
-	assert.Equal(t, common.HexToAddress("0x70bcA57F4579f58670aB2d18Ef16e02C17553C38"), *addr)
+	assert.Equal(t, common.HexToAddress("0x70bcA57F4579f58670aB2d18Ef16e02C17553C38"), addr.Value())
 	addr = BorMainnet.Config.GetBurntContract(50523000 - 1)
 	require.NotNil(t, addr)
-	assert.Equal(t, common.HexToAddress("0x70bcA57F4579f58670aB2d18Ef16e02C17553C38"), *addr)
+	assert.Equal(t, common.HexToAddress("0x70bcA57F4579f58670aB2d18Ef16e02C17553C38"), addr.Value())
 	addr = BorMainnet.Config.GetBurntContract(50523000)
 	require.NotNil(t, addr)
-	assert.Equal(t, common.HexToAddress("0x7A8ed27F4C30512326878652d20fC85727401854"), *addr)
+	assert.Equal(t, common.HexToAddress("0x7A8ed27F4C30512326878652d20fC85727401854"), addr.Value())
 	addr = BorMainnet.Config.GetBurntContract(50523000 + 1)
 	require.NotNil(t, addr)
-	assert.Equal(t, common.HexToAddress("0x7A8ed27F4C30512326878652d20fC85727401854"), *addr)
+	assert.Equal(t, common.HexToAddress("0x7A8ed27F4C30512326878652d20fC85727401854"), addr.Value())
 
 	// Amoy
 	addr = Amoy.Config.GetBurntContract(0)
 	require.NotNil(t, addr)
-	assert.Equal(t, common.HexToAddress("0x000000000000000000000000000000000000dead"), *addr)
+	assert.Equal(t, common.HexToAddress("0x000000000000000000000000000000000000dead"), addr.Value())
 }
 
 func TestCalculateCoinbaseAmoy(t *testing.T) {
@@ -80,7 +81,7 @@ func TestCalculateCoinbaseAmoy(t *testing.T) {
 	}
 	for _, tc := range testCases {
 		result := config.Bor.CalculateCoinbase(tc.blockNumber)
-		if result != tc.expected {
+		if result != accounts.InternAddress(tc.expected) {
 			t.Errorf("Block %d (%s): expected %s, got %s",
 				tc.blockNumber, tc.description, tc.expected, result)
 		}

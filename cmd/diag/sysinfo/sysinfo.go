@@ -30,24 +30,6 @@ import (
 	"github.com/erigontech/erigon/diagnostics/sysutils"
 )
 
-var (
-	ExportPathFlag = cli.StringFlag{
-		Name:     "export.path",
-		Aliases:  []string{"ep"},
-		Usage:    "Path to folder for export result",
-		Required: true,
-		Value:    "",
-	}
-
-	ExportFileNameFlag = cli.StringFlag{
-		Name:     "export.file",
-		Aliases:  []string{"ef"},
-		Usage:    "File name to export result default is sysinfo.txt",
-		Required: false,
-		Value:    "sysinfo.txt",
-	}
-)
-
 var Command = cli.Command{
 	Name:      "sysinfo",
 	Aliases:   []string{"sinfo"},
@@ -55,17 +37,15 @@ var Command = cli.Command{
 	Action:    collectInfo,
 	Flags: []cli.Flag{
 		&flags.DebugURLFlag,
-		&ExportPathFlag,
-		&ExportFileNameFlag,
 	},
 	Description: "Collect information about system and save it to file in order to provide to support person",
 }
 
 type Flag struct {
-	Name    string      `json:"name"`
-	Value   interface{} `json:"value"`
-	Usage   string      `json:"usage"`
-	Default bool        `json:"default"`
+	Name    string `json:"name"`
+	Value   any    `json:"value"`
+	Usage   string `json:"usage"`
+	Default bool   `json:"default"`
 }
 
 type SortType int
@@ -73,7 +53,6 @@ type SortType int
 const (
 	SortByCPU SortType = iota
 	SortByMemory
-	SortByPID
 )
 
 func collectInfo(cliCtx *cli.Context) error {
@@ -100,13 +79,7 @@ func collectInfo(cliCtx *cli.Context) error {
 	writeCPUInfoToStringBuilder(data.CPU, cpuusage, &builder)
 
 	writeProcessesToStringBuilder(processes, cpuusage.Total, totalMemory, &builder)
-
-	// Save data to file
-	err = util.SaveDataToFile(cliCtx.String(ExportPathFlag.Name), cliCtx.String(ExportFileNameFlag.Name), builder.String())
-	if err != nil {
-		util.RenderError(err)
-	}
-
+	fmt.Println(builder.String())
 	return nil
 }
 
@@ -159,7 +132,7 @@ func writeProcessesToStringBuilder(prcInfo []*sysutils.ProcessInfo, cpuUsage flo
 	builder.WriteString("\n\nProcesses info:\n")
 
 	prcInfo = sortProcessesByCPU(prcInfo)
-	rows := make([]table.Row, 0)
+	rows := make([]table.Row, 0, len(prcInfo))
 	header := table.Row{"PID", "Name", "% CPU", "% Memory"}
 
 	for _, process := range prcInfo {
@@ -194,14 +167,6 @@ func sortProcessesByCPU(prcInfo []*sysutils.ProcessInfo) []*sysutils.ProcessInfo
 	return sortProcesses(prcInfo, SortByCPU)
 }
 
-func sortProcessesByMemory(prcInfo []*sysutils.ProcessInfo) []*sysutils.ProcessInfo {
-	return sortProcesses(prcInfo, SortByMemory)
-}
-
-func sortProcessesByPID(prcInfo []*sysutils.ProcessInfo) []*sysutils.ProcessInfo {
-	return sortProcesses(prcInfo, SortByPID)
-}
-
 func getData(cliCtx *cli.Context) (diaglib.HardwareInfo, error) {
 	var data diaglib.HardwareInfo
 	url := "http://" + cliCtx.String(flags.DebugURLFlag.Name) + flags.ApiPath + "/hardware-info"
@@ -216,7 +181,7 @@ func getData(cliCtx *cli.Context) (diaglib.HardwareInfo, error) {
 }
 
 func getFlagsData(cliCtx *cli.Context) ([]Flag, error) {
-	var rawData map[string]map[string]interface{}
+	var rawData map[string]map[string]any
 	url := "http://" + cliCtx.String(flags.DebugURLFlag.Name) + flags.ApiPath + "/flags"
 
 	err := util.MakeHttpGetCall(cliCtx.Context, url, &rawData)

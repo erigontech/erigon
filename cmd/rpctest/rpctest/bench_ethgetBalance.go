@@ -18,6 +18,12 @@ package rpctest
 
 import (
 	"fmt"
+	"math/rand"
+	"sort"
+	"sync"
+	"time"
+
+	"github.com/erigontech/erigon/common"
 )
 
 // BenchEthGetBalance compares response of Erigon with Geth
@@ -105,4 +111,112 @@ func BenchEthGetBalance(erigonURL, gethURL string, needCompare bool, blockFrom u
 		}
 	}
 	return nil
+}
+
+func BenchEthGetBalanceRandomAccount(erigonURL string, concurentRequests int) error {
+	setRoutes(erigonURL, "")
+
+	reqGen := &RequestGenerator{}
+
+	var res CallResult
+
+	var blockNumber EthBlockNumber
+	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
+	if res.Err != nil {
+		return fmt.Errorf("Could not get block number: %v\n", res.Err)
+	}
+	if blockNumber.Error != nil {
+		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
+	}
+
+	latencyLen := 1000
+	latency := make([]int, 0, latencyLen)
+	var m sync.Mutex
+	var finishedRequests uint64
+
+	go func() {
+		lastPrint := time.Now()
+		p50 := float64(0)
+		p90 := float64(0)
+		p99 := float64(0)
+		rps := float64(0)
+
+		for {
+
+			time.Sleep(time.Second)
+			m.Lock()
+
+			if len(latency) > 0 {
+				sort.Ints(latency)
+
+				p50 = float64(latency[len(latency)/2]) / 1000 // convert to ms
+				p90 = float64(latency[len(latency)/10*9]) / 1000
+				p99 = float64(latency[len(latency)/100*99]) / 1000
+				rps = float64(finishedRequests) / float64(time.Since(lastPrint).Seconds())
+
+				lastPrint = time.Now()
+				finishedRequests = 0
+			}
+
+			m.Unlock()
+
+			fmt.Printf("Latency 50p: %.2fms 90p: %.2fms 99p: %.2fms RPS: %.2f req/s\n",
+				p50,
+				p90,
+				p99,
+				rps,
+			)
+
+		}
+
+	}()
+
+	reqQueue := make(chan struct{}, concurentRequests)
+
+	for {
+		bn := uint64(rand.Intn(
+			int(blockNumber.Number.Uint64()),
+		))
+
+		var b EthBlockByNumber
+		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &b)
+		if res.Err != nil {
+			return fmt.Errorf("Could not retrieve block (Erigon) %d: %v\n", bn, res.Err)
+		}
+
+		if b.Error != nil {
+			return fmt.Errorf("Error retrieving block (Erigon): %d %s\n", b.Error.Code, b.Error.Message)
+		}
+
+		for txn := range b.Result.Transactions {
+			account := b.Result.Transactions[txn].From
+
+			reqQueue <- struct{}{}
+
+			go func(account common.Address, bn uint64, launchedAt time.Time) {
+				var balance EthBalance
+
+				res = reqGen.Erigon("eth_getBalance", reqGen.getBalance(account, bn), &balance)
+				if res.Err != nil {
+					panic(fmt.Errorf("Could not get account balance (Erigon): %v\n", res.Err))
+				}
+				if balance.Error != nil {
+					panic(fmt.Errorf("Error getting account balance (Erigon): %d %s", balance.Error.Code, balance.Error.Message))
+				}
+
+				reqLatency := int(time.Since(launchedAt).Microseconds())
+				<-reqQueue
+
+				m.Lock()
+				finishedRequests += 1
+
+				if len(latency) == latencyLen {
+					latency = latency[1:]
+				}
+
+				latency = append(latency, reqLatency)
+				m.Unlock()
+			}(account, bn, time.Now())
+		}
+	}
 }

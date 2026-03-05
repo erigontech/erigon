@@ -43,7 +43,9 @@ var DefaultFlags = []cli.Flag{
 	&PruneBlocksDistanceFlag,
 	&PruneModeFlag,
 	&utils.KeepExecutionProofsFlag,
-
+	&utils.FcuTimeoutFlag,
+	&utils.FcuBackgroundPruneFlag,
+	&utils.FcuBackgroundCommitFlag,
 	&BatchSizeFlag,
 	&BodyCacheLimitFlag,
 	&DatabaseVerbosityFlag,
@@ -55,6 +57,7 @@ var DefaultFlags = []cli.Flag{
 	&TLSKeyFlag,
 	&TLSCACertFlag,
 	&StateStreamDisableFlag,
+	&ExperimentalBALFlag,
 	&SyncLoopThrottleFlag,
 	&BadBlockFlag,
 
@@ -82,13 +85,16 @@ var DefaultFlags = []cli.Flag{
 	&utils.DBReadConcurrencyFlag,
 	&utils.RpcAccessListFlag,
 	&utils.RpcTraceCompatFlag,
+	&utils.RpcGethCompatFlag,
 	&utils.RpcGasCapFlag,
+	&utils.RpcBlockRangeLimit,
 	&utils.RpcBatchLimit,
 	&utils.RpcReturnDataLimit,
 	&utils.AllowUnprotectedTxs,
 	&utils.RPCGlobalTxFeeCapFlag,
 	&utils.TxpoolApiAddrFlag,
 	&utils.TraceMaxtracesFlag,
+	&utils.AlwaysGenerateChangesetsFlag,
 
 	&HTTPReadTimeoutFlag,
 	&HTTPWriteTimeoutFlag,
@@ -117,7 +123,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.TorrentPortFlag,
 	&utils.TorrentMaxPeersFlag,
 	&utils.TorrentConnsPerFileFlag,
-	&utils.TorrentDownloadSlotsFlag,
+	&utils.TorrentDownloadSlotsFlag, // Deprecated (v3.0) - kept for backward compatibility, no effect
 	&utils.TorrentStaticPeersFlag,
 	&utils.TorrentDisableTrackers,
 	&utils.TorrentUploadRateFlag,
@@ -129,6 +135,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.P2pProtocolAllowedPorts,
 	&utils.NATFlag,
 	&utils.NoDiscoverFlag,
+	&utils.DiscoveryV4Flag,
 	&utils.DiscoveryV5Flag,
 	&utils.NetrestrictFlag,
 	&utils.NodeKeyFileFlag,
@@ -153,16 +160,11 @@ var DefaultFlags = []cli.Flag{
 	&utils.CliqueSnapshotInmemorySnapshotsFlag,
 	&utils.CliqueSnapshotInmemorySignaturesFlag,
 	&utils.CliqueDataDirFlag,
-	&utils.MiningEnabledFlag,
 	&utils.ProposingDisableFlag,
-	&utils.MinerNotifyFlag,
 	&utils.MinerGasLimitFlag,
 	&utils.MinerEtherbaseFlag,
-	&utils.MinerGasPriceFlag,
 	&utils.MinerExtraDataFlag,
-	&utils.MinerNoVerfiyFlag,
-	&utils.MinerSigningKeyFileFlag,
-	&utils.MinerRecommitIntervalFlag,
+	&utils.BuilderMaxBlobsFlag,
 	&utils.SentryAddrFlag,
 	&utils.SentryLogPeerInfoFlag,
 	&utils.DownloaderAddrFlag,
@@ -179,6 +181,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.AAFlag,
 	&utils.EthStatsURLFlag,
 	&utils.OverrideOsakaFlag,
+	&utils.OverrideAmsterdamFlag,
 	&utils.KeepStoredChainConfigFlag,
 
 	&utils.CaplinDiscoveryAddrFlag,
@@ -237,6 +240,8 @@ var DefaultFlags = []cli.Flag{
 
 	&utils.TrustedSetupFile,
 	&utils.RPCSlowFlag,
+	&utils.RpcTxSyncDefaultTimeoutFlag,
+	&utils.RpcTxSyncMaxTimeoutFlag,
 
 	&utils.TxPoolGossipDisableFlag,
 	&SyncLoopBlockLimitFlag,
@@ -256,4 +261,8 @@ var DefaultFlags = []cli.Flag{
 	&utils.GDBMeFlag,
 
 	&utils.ExperimentalConcurrentCommitmentFlag,
+
+	&utils.MCPDisableFlag,
+	&utils.MCPAddrFlag,
+	&utils.MCPPortFlag,
 }

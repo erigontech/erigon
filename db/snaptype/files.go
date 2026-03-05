@@ -66,8 +66,10 @@ func FilterExt(in []FileInfo, expectExt string) (out []FileInfo) {
 	}
 
 	slices.SortFunc(out, func(a, b FileInfo) int {
-		if cmp := strings.Compare(a.Type.Name(), b.Type.Name()); cmp != 0 {
-			return cmp
+		if a.Type != nil && b.Type != nil {
+			if cmp := strings.Compare(a.Type.Name(), b.Type.Name()); cmp != 0 {
+				return cmp
+			}
 		}
 		if cmp := strings.Compare(a.TypeString, b.TypeString); cmp != 0 {
 			return cmp
@@ -111,15 +113,21 @@ func IsStateFileV2(name string) bool {
 	return StateFileRegex.MatchString(name)
 }
 
+func IsCaplin(dir string, fileName string) bool {
+	if strings.Contains(fileName, "caplin") || strings.Contains(dir, "caplin") {
+		return true
+	}
+	return false
+}
+
 func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bool) {
 	res.Path = filepath.Join(dir, fileName)
 	res.Ext = filepath.Ext(fileName)
 	res.name = fileName
-	dirPart, fileName := filepath.Split(fileName)
-	caplin := false
-	if dirPart == "caplin/" {
-		caplin = true
-	}
+	caplin := IsCaplin(dir, fileName)
+
+	fileName = filepath.Base(fileName)
+
 	if isSaltFile(fileName) {
 		typeString := "salt"
 		// format for salt files is different: salt-<type>.txt
@@ -352,7 +360,7 @@ func SeedableV2Extensions() []string {
 }
 
 func AllV2Extensions() []string {
-	return []string{".seg", ".idx", ".txt"}
+	return []string{".seg", ".idx", ".txt", ".toml"}
 }
 
 func SeedableV3Extensions() []string {
@@ -502,8 +510,7 @@ func ParseDir(name string) (res []FileInfo, err error) {
 
 		case i.To != j.To:
 			return cmp.Compare(i.To, j.To)
-		case i.Type.Enum() != j.Type.Enum():
-
+		case i.Type != nil && j.Type != nil && i.Type.Enum() != j.Type.Enum():
 			return cmp.Compare(i.Type.Enum(), j.Type.Enum())
 
 		case i.TypeString != j.TypeString:

@@ -28,15 +28,17 @@ type Merger struct {
 	chainDB         kv.RoDB
 	logger          log.Logger
 	noFsync         bool // fsync is enabled by default, but tests can manually disable
+	snCfg           *snapcfg.Cfg
 }
 
 func NewMerger(tmpDir string, compressWorkers int, lvl log.Lvl, chainDB kv.RoDB, chainConfig *chain.Config, logger log.Logger) *Merger {
-	return &Merger{tmpDir: tmpDir, compressWorkers: compressWorkers, lvl: lvl, chainDB: chainDB, chainConfig: chainConfig, logger: logger}
+	snCfg := snapcfg.KnownCfgOrDevnet(chainConfig.ChainName)
+	return &Merger{tmpDir: tmpDir, compressWorkers: compressWorkers, lvl: lvl, chainDB: chainDB, chainConfig: chainConfig, logger: logger, snCfg: snCfg}
 }
 func (m *Merger) DisableFsync() { m.noFsync = true }
 
 func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toMerge []Range) {
-	cfg, _ := snapcfg.KnownCfg(m.chainConfig.ChainName)
+	cfg := m.snCfg
 	for i := len(currentRanges) - 1; i > 0; i-- {
 		r := currentRanges[i]
 		mergeLimit := cfg.MergeLimit(snaptype.Unknown, r.From())
@@ -85,7 +87,15 @@ func (m *Merger) filesByRangeOfType(view *View, from, to uint64, snapshotType sn
 	return
 }
 
-func (m *Merger) mergeSubSegment(ctx context.Context, v *View, sn snaptype.FileInfo, toMerge []*DirtySegment, snapDir string, doIndex bool, indexBuilder snaptype.IndexBuilder, onMerge func(r Range) error) (newDirtySegment *DirtySegment, err error) {
+func (m *Merger) mergeSubSegment(
+	ctx context.Context,
+	v *View,
+	sn snaptype.FileInfo,
+	toMerge []*DirtySegment,
+	snapDir string,
+	doIndex bool,
+	indexBuilder snaptype.IndexBuilder,
+) (newDirtySegment *DirtySegment, err error) {
 	defer func() {
 		if err == nil {
 			if rec := recover(); rec != nil {
@@ -121,7 +131,7 @@ func (m *Merger) mergeSubSegment(ctx context.Context, v *View, sn snaptype.FileI
 		if err = buildIdx(ctx, sn, indexBuilder, m.chainConfig, m.tmpDir, p, m.lvl, m.logger); err != nil {
 			return
 		}
-		err = newDirtySegment.openIdx(snapDir)
+		err = newDirtySegment.openIdx(snapDir, nil)
 		if err != nil {
 			return
 		}
@@ -140,7 +150,16 @@ func buildIdx(ctx context.Context, sn snaptype.FileInfo, indexBuilder snaptype.I
 }
 
 // Merge does merge segments in given ranges
-func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []snaptype.Type, mergeRanges []Range, snapDir string, doIndex bool, onMerge func(r Range) error, onDelete func(l []string) error) (err error) {
+func (m *Merger) Merge(
+	ctx context.Context,
+	snapshots *RoSnapshots,
+	snapTypes []snaptype.Type,
+	mergeRanges []Range,
+	snapDir string,
+	doIndex bool,
+	onMerge func(mergedFileNames []string) error,
+	onDelete func(context.Context, []string) error,
+) (err error) {
 	v := snapshots.View()
 	defer v.Close()
 
@@ -153,8 +172,10 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []
 
 	in := make(map[snaptype.Enum][]*DirtySegment)
 	out := make(map[snaptype.Enum][]*DirtySegment)
+	mergedFileNames := make([]string, 0, 16)
 
 	for _, r := range mergeRanges {
+		mergedFileNames = mergedFileNames[:0]
 		toMerge, err := m.filesByRange(v, r.From(), r.To())
 		if err != nil {
 			return err
@@ -167,7 +188,15 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []
 		}
 
 		for _, t := range snapTypes {
-			newDirtySegment, err := m.mergeSubSegment(ctx, v, t.FileInfo(snapDir, r.From(), r.To()), toMerge[t.Enum()], snapDir, doIndex, snapshots.IndexBuilder(t), onMerge)
+			newDirtySegment, err := m.mergeSubSegment(
+				ctx,
+				v,
+				t.FileInfo(snapDir, r.From(), r.To()),
+				toMerge[t.Enum()],
+				snapDir,
+				doIndex,
+				snapshots.IndexBuilder(t),
+			)
 			if err != nil {
 				return err
 			}
@@ -175,17 +204,18 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []
 				in[t.Enum()] = make([]*DirtySegment, 0, len(toMerge[t.Enum()]))
 			}
 			in[t.Enum()] = append(in[t.Enum()], newDirtySegment)
+			mergedFileNames = append(mergedFileNames, newDirtySegment.FilePath())
 		}
 
 		snapshots.LogStat("merge")
 
 		if onMerge != nil {
-			if err := onMerge(r); err != nil {
+			if err := onMerge(mergedFileNames); err != nil {
 				return err
 			}
 		}
 
-		//TODO: or move it inside `integrateMergedDirtyFiles`, or move `integrateMergedDirtyFiles` here. Merge can be long - means call `integrateMergedDirtyFiles` earliear can make sense.
+		//TODO: or move it inside `integrateMergedDirtyFiles`, or move `integrateMergedDirtyFiles` here. Merge can be long - means call `integrateMergedDirtyFiles` earlier can make sense.
 		toMergeFileNames := make([]string, 0, 16)
 		for _, segments := range toMerge {
 			for _, segment := range segments {
@@ -193,7 +223,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []
 			}
 		}
 		if onDelete != nil {
-			if err := onDelete(toMergeFileNames); err != nil {
+			if err := onDelete(ctx, toMergeFileNames); err != nil {
 				return fmt.Errorf("merger.Merge: onDelete: %w", err)
 			}
 		}
@@ -300,8 +330,12 @@ func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, ta
 	if err = f.Compress(); err != nil {
 		return nil, err
 	}
-	sn := &DirtySegment{segType: targetFile.Type, version: targetFile.Version, Range: Range{targetFile.From, targetFile.To},
-		frozen: snapcfg.Seedable(v.s.cfg.ChainName, targetFile)}
+	sn := &DirtySegment{
+		segType: targetFile.Type,
+		version: targetFile.Version,
+		Range:   Range{targetFile.From, targetFile.To},
+		frozen:  m.snCfg.IsFrozen(targetFile),
+	}
 
 	err = sn.Open(snapDir)
 	if err != nil {

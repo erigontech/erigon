@@ -52,4 +52,7 @@ type ExecutionEngine interface {
 	HasGapInSnapshots(ctx context.Context) bool
 	// Block production
 	GetAssembledBlock(ctx context.Context, id []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error)
+
+	// Blobs
+	GetBlobs(ctx context.Context, versionedHashes []common.Hash) (blobs [][]byte, proofs [][][]byte)
 }

@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
@@ -56,10 +55,7 @@ func doSqueeze(cliCtx *cli.Context) error {
 		return err
 	}
 	defer l.Unlock()
-	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
-	if err != nil {
-		return err
-	}
+	logger := log.Root()
 	ctx := cliCtx.Context
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
@@ -90,7 +86,8 @@ func squeezeCommitment(ctx context.Context, dirs datadir.Dirs, logger log.Logger
 	defer db.Close()
 	cfg := ethconfig.NewSnapCfg(false, true, true, fromdb.ChainConfig(db).ChainName)
 
-	_, _, _, _, agg, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
+	res, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
+	agg := res.Aggregator
 	if err != nil {
 		return err
 	}
@@ -108,6 +105,9 @@ func squeezeCommitment(ctx context.Context, dirs datadir.Dirs, logger log.Logger
 		return err
 	}
 	ac.Close()
+	if err := agg.ReloadFiles(); err != nil {
+		return err
+	}
 	if err := agg.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 		return err
 	}
@@ -118,7 +118,8 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 	db := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
 	cfg := ethconfig.NewSnapCfg(false, true, true, fromdb.ChainConfig(db).ChainName)
-	_, _, _, _, agg, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
+	res, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
+	agg := res.Aggregator
 	if err != nil {
 		return err
 	}
@@ -140,7 +141,11 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
-	aggOld, err := state.New(dirsOld).Logger(logger).Open(ctx, db)
+	erigonDBSettingsOld, err := state.ResolveErigonDBSettings(dirsOld, logger, false)
+	if err != nil {
+		panic(err)
+	}
+	aggOld, err := state.New(dirsOld).Logger(logger).WithErigonDBSettings(erigonDBSettingsOld).Open(ctx, db)
 	if err != nil {
 		panic(err)
 	}
@@ -167,6 +172,7 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 	if err := agg.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 		return err
 	}
+	// TODO: aggOld.reload files?
 	if err := aggOld.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 		return err
 	}
@@ -181,7 +187,11 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 func squeezeCode(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	db := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
-	agg := state.New(dirs).Logger(logger).MustOpen(ctx, db)
+	erigonDBSettings, err := state.ResolveErigonDBSettings(dirs, logger, false)
+	if err != nil {
+		return err
+	}
+	agg := state.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings).MustOpen(ctx, db)
 	defer agg.Close()
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 
@@ -227,7 +237,8 @@ func squeezeBlocks(ctx context.Context, dirs datadir.Dirs, logger log.Logger) er
 	chainConfig := fromdb.ChainConfig(db)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
-	_, _, _, br, _, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
+	res, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
+	br := res.BlockRetire
 	if err != nil {
 		return err
 	}

@@ -27,7 +27,7 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/metrics"
+	"github.com/erigontech/erigon/execution/metrics"
 )
 
 // Determine the log dir path based on the given urfave context
@@ -234,7 +234,7 @@ func initSeparatedLogging(
 		return
 	}
 
-	err := os.MkdirAll(dirPath, 0764)
+	err := os.MkdirAll(dirPath, 0755)
 	if err != nil {
 		logger.Warn("failed to create log dir, console logging only")
 		return
@@ -250,6 +250,7 @@ func initSeparatedLogging(
 		MaxSize:    100, // megabytes
 		MaxBackups: 3,
 		MaxAge:     28, //days
+		Compress:   true,
 	}
 	userLog := log.StreamHandler(lumberjack, dirFormat)
 

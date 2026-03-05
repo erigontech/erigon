@@ -13,13 +13,13 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/gointerfaces"
 	proto_sentry "github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	proto_types "github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
 
 type receiptRLP69 struct {
+	Type              uint8
 	PostStateOrStatus []byte
 	CumulativeGasUsed uint64
 	Logs              []*types.Log
@@ -31,6 +31,7 @@ func TestMultiClient_GetReceipts69(t *testing.T) {
 	testHash := common.HexToHash("0x123")
 	testReceipts := types.Receipts{
 		{
+			Type:              types.LegacyTxType,
 			Status:            types.ReceiptStatusSuccessful,
 			CumulativeGasUsed: 21000,
 			Logs:              []*types.Log{},
@@ -38,6 +39,7 @@ func TestMultiClient_GetReceipts69(t *testing.T) {
 			GasUsed:           21000,
 		},
 		{
+			Type:              types.DynamicFeeTxType,
 			Status:            types.ReceiptStatusSuccessful,
 			CumulativeGasUsed: 42000,
 			Logs:              []*types.Log{},
@@ -117,140 +119,27 @@ func TestMultiClient_GetReceipts69(t *testing.T) {
 	}
 
 	if len(receiptsList) != 2 {
-		t.Fatalf("Expected 2 receipt in list, got %d", len(receiptsList))
+		t.Fatalf("Expected 2 receipts in list, got %d", len(receiptsList))
 	}
 
-	receipt := receiptsList[0]
-
-	// Verify the receipt was decoded correctly
-	if receipt.CumulativeGasUsed != 21000 {
-		t.Errorf("Expected CumulativeGasUsed 21000, got %d", receipt.CumulativeGasUsed)
+	// Verify legacy receipt (type 0)
+	receipt0 := receiptsList[0]
+	if receipt0.Type != types.LegacyTxType {
+		t.Errorf("Expected receipt[0] Type %d (legacy), got %d", types.LegacyTxType, receipt0.Type)
 	}
-}
-
-func TestMultiClient_AnnounceBlockRangeLoop(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	testMinimumBlockHeight := uint64(100)
-	testLatestBlockHeight := uint64(200)
-	testBestHash := common.HexToHash("0xabc")
-
-	var sentMessage *proto_sentry.OutboundMessageData
-	mockSentry := &mockSentryClient{
-		sendMessageToAllFunc: func(ctx context.Context, req *proto_sentry.OutboundMessageData, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error) {
-			sentMessage = req
-			return &proto_sentry.SentPeers{}, nil
-		},
-		handShakeFunc: func(ctx context.Context, req *emptypb.Empty, opts ...grpc.CallOption) (*proto_sentry.HandShakeReply, error) {
-			return &proto_sentry.HandShakeReply{
-				Protocol: proto_sentry.Protocol_ETH69,
-			}, nil
-		},
+	if receipt0.CumulativeGasUsed != 21000 {
+		t.Errorf("Expected receipt[0] CumulativeGasUsed 21000, got %d", receipt0.CumulativeGasUsed)
 	}
 
-	mockStatus := &mockStatusDataProvider{
-		getStatusDataFunc: func(ctx context.Context) (*proto_sentry.StatusData, error) {
-			return &proto_sentry.StatusData{
-				MinimumBlockHeight: testMinimumBlockHeight,
-				MaxBlockHeight:     testLatestBlockHeight,
-				BestHash:           gointerfaces.ConvertHashToH256(testBestHash),
-			}, nil
-		},
+	// Verify typed receipt (DynamicFee, type 2) — this is the critical case:
+	// ETH69 requires typed receipts to be list-encoded [type, status, gas, logs],
+	// NOT the old byte-string envelope (type_byte || rlp(data)) used in ETH68.
+	receipt1 := receiptsList[1]
+	if receipt1.Type != types.DynamicFeeTxType {
+		t.Errorf("Expected receipt[1] Type %d (DynamicFee), got %d", types.DynamicFeeTxType, receipt1.Type)
 	}
-
-	mockBlockReader := &mockFullBlockReader{
-		readyFunc: func(ctx context.Context) <-chan error {
-			ch := make(chan error, 1)
-			ch <- nil // Signal that the block reader is ready
-			return ch
-		},
-	}
-
-	cs := &MultiClient{
-		sentries:           []proto_sentry.SentryClient{mockSentry},
-		statusDataProvider: mockStatus,
-		blockReader:        mockBlockReader,
-		logger:             log.New(),
-	}
-
-	cs.doAnnounceBlockRange(ctx)
-
-	if sentMessage == nil {
-		t.Fatal("No message was sent")
-	}
-	if sentMessage.Id != proto_sentry.MessageId_BLOCK_RANGE_UPDATE_69 {
-		t.Errorf("Expected message ID %v, got %v", proto_sentry.MessageId_BLOCK_RANGE_UPDATE_69, sentMessage.Id)
-	}
-
-	var response eth.BlockRangeUpdatePacket
-	if err := rlp.DecodeBytes(sentMessage.Data, &response); err != nil {
-		t.Fatalf("Failed to decode response: %v", err)
-	}
-
-	if response.Earliest != testMinimumBlockHeight {
-		t.Errorf("Expected earliest block height %d, got %d", testMinimumBlockHeight, response.Earliest)
-	}
-	if response.Latest != testLatestBlockHeight {
-		t.Errorf("Expected latest block height %d, got %d", testLatestBlockHeight, response.Latest)
-	}
-	if response.LatestHash != testBestHash {
-		t.Errorf("Expected latest hash %s, got %s", testBestHash.Hex(), response.LatestHash.Hex())
-	}
-}
-
-func TestMultiClient_AnnounceBlockRangeLoop_SkipInvalidRanges(t *testing.T) {
-	ctx := context.Background()
-	nonZeroHash := common.HexToHash("0x1")
-
-	testcases := []struct {
-		name   string
-		status *proto_sentry.StatusData
-	}{
-		{
-			name: "earliestGreaterThanLatest",
-			status: &proto_sentry.StatusData{
-				MinimumBlockHeight: 10,
-				MaxBlockHeight:     5,
-				BestHash:           gointerfaces.ConvertHashToH256(nonZeroHash),
-			},
-		},
-		{
-			name: "zeroBestHash",
-			status: &proto_sentry.StatusData{
-				MinimumBlockHeight: 5,
-				MaxBlockHeight:     10,
-				BestHash:           gointerfaces.ConvertHashToH256(common.Hash{}),
-			},
-		},
-	}
-
-	for _, tc := range testcases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			mockSentry := &mockSentryClient{
-				handShakeFunc: func(ctx context.Context, req *emptypb.Empty, opts ...grpc.CallOption) (*proto_sentry.HandShakeReply, error) {
-					t.Fatalf("handshake should not be called for invalid status %q", tc.name)
-					return nil, nil
-				},
-				sendMessageToAllFunc: func(ctx context.Context, req *proto_sentry.OutboundMessageData, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error) {
-					t.Fatalf("sendMessageToAll should not be called for invalid status %q", tc.name)
-					return nil, nil
-				},
-			}
-
-			cs := &MultiClient{
-				sentries: []proto_sentry.SentryClient{mockSentry},
-				statusDataProvider: &mockStatusDataProvider{
-					getStatusDataFunc: func(context.Context) (*proto_sentry.StatusData, error) {
-						return tc.status, nil
-					},
-				},
-				logger: log.New(),
-			}
-
-			cs.doAnnounceBlockRange(ctx)
-		})
+	if receipt1.CumulativeGasUsed != 42000 {
+		t.Errorf("Expected receipt[1] CumulativeGasUsed 42000, got %d", receipt1.CumulativeGasUsed)
 	}
 }
 

@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/tidwall/btree"
+
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type statusFlag uint
@@ -25,6 +27,8 @@ func (p AccountPath) String() string {
 		return "Balance"
 	case NoncePath:
 		return "Nonce"
+	case IncarnationPath:
+		return "Incarnation"
 	case CodePath:
 		return "Code"
 	case CodeHashPath:
@@ -33,31 +37,38 @@ func (p AccountPath) String() string {
 		return "Code Size"
 	case SelfDestructPath:
 		return "Destruct"
-	case StatePath:
-		return "State"
+	case StoragePath:
+		return "Storage"
 	default:
 		return fmt.Sprintf(" Unknown %d", p)
 	}
 }
 
+// AccountPath enum values. The numeric order matters: AsBlockAccessList
+// sorts writes by Path to ensure deterministic processing. SelfDestructPath
+// MUST precede BalancePath because updateWrite skips non-zero balance writes
+// in the same tx as a selfdestruct — the selfDestructed flag must be set
+// before balance writes are evaluated. Do not reorder without reviewing
+// updateWrite in versionedio.go.
 const (
-	AddressPath = iota
+	AddressPath AccountPath = iota
+	SelfDestructPath
 	BalancePath
 	NoncePath
+	IncarnationPath
 	CodePath
 	CodeHashPath
 	CodeSizePath
-	SelfDestructPath
-	StatePath
+	StoragePath
 )
 
 type AccountKey struct {
 	Path AccountPath
-	Key  common.Hash
+	Key  accounts.StorageKey
 }
 
 func (k AccountKey) String() string {
-	if k.Path == StatePath {
+	if k.Path == StoragePath {
 		return fmt.Sprintf("%x", k.Key)
 	}
 
@@ -65,22 +76,26 @@ func (k AccountKey) String() string {
 }
 
 type VersionMap struct {
-	mu    sync.RWMutex
-	s     map[common.Address]map[AccountKey]*btree.Map[int, *WriteCell]
-	trace bool
+	mu     sync.RWMutex
+	s      map[accounts.Address]map[AccountKey]*btree.Map[int, *WriteCell]
+	trace  bool
+	HasBAL bool // When true, all significant writes are pre-populated from BAL
 }
 
-func NewVersionMap() *VersionMap {
-	return &VersionMap{
-		s: map[common.Address]map[AccountKey]*btree.Map[int, *WriteCell]{},
+func NewVersionMap(changes []*types.AccountChanges) *VersionMap {
+	vm := &VersionMap{
+		s:      map[accounts.Address]map[AccountKey]*btree.Map[int, *WriteCell]{},
+		HasBAL: len(changes) > 0,
 	}
+	vm.WriteChanges(changes)
+	return vm
 }
 
 func (vm *VersionMap) SetTrace(trace bool) {
 	vm.trace = trace
 }
 
-func (vm *VersionMap) getKeyCells(addr common.Address, path AccountPath, key common.Hash, fNoKey func(addr common.Address, path AccountPath, key common.Hash) *btree.Map[int, *WriteCell]) (cells *btree.Map[int, *WriteCell]) {
+func (vm *VersionMap) getKeyCells(addr accounts.Address, path AccountPath, key accounts.StorageKey, fNoKey func(addr accounts.Address, path AccountPath, key accounts.StorageKey) *btree.Map[int, *WriteCell]) (cells *btree.Map[int, *WriteCell]) {
 	it, ok := vm.s[addr]
 
 	if ok {
@@ -94,11 +109,38 @@ func (vm *VersionMap) getKeyCells(addr common.Address, path AccountPath, key com
 	return
 }
 
-func (vm *VersionMap) Write(addr common.Address, path AccountPath, key common.Hash, v Version, data interface{}, complete bool) {
+func (vm *VersionMap) WriteChanges(changes []*types.AccountChanges) {
+	for _, accountChanges := range changes {
+		for _, storageChanges := range accountChanges.StorageChanges {
+			for _, change := range storageChanges.Changes {
+				value := change.Value
+				vm.Write(accountChanges.Address, StoragePath, storageChanges.Slot, Version{TxIndex: int(change.Index) - 1}, value, true)
+			}
+		}
+		for _, balanceChange := range accountChanges.BalanceChanges {
+			vm.Write(accountChanges.Address, BalancePath, accounts.NilKey, Version{TxIndex: int(balanceChange.Index) - 1}, balanceChange.Value, true)
+		}
+		for _, nonceChange := range accountChanges.NonceChanges {
+			vm.Write(accountChanges.Address, NoncePath, accounts.NilKey, Version{TxIndex: int(nonceChange.Index) - 1}, nonceChange.Value, true)
+		}
+		for _, codeChange := range accountChanges.CodeChanges {
+			vm.Write(accountChanges.Address, CodePath, accounts.NilKey, Version{TxIndex: int(codeChange.Index) - 1}, codeChange.Bytecode, true)
+		}
+	}
+
+}
+
+func (vm *VersionMap) Write(addr accounts.Address, path AccountPath, key accounts.StorageKey, v Version, data any, complete bool) {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
 
-	cells := vm.getKeyCells(addr, path, key, func(addr common.Address, path AccountPath, key common.Hash) (cells *btree.Map[int, *WriteCell]) {
+	vm.writeLocked(addr, path, key, v, data, complete)
+}
+
+// writeLocked performs the write without acquiring the lock.
+// Caller must hold vm.mu.Lock().
+func (vm *VersionMap) writeLocked(addr accounts.Address, path AccountPath, key accounts.StorageKey, v Version, data any, complete bool) {
+	cells := vm.getKeyCells(addr, path, key, func(addr accounts.Address, path AccountPath, key accounts.StorageKey) (cells *btree.Map[int, *WriteCell]) {
 		it, ok := vm.s[addr]
 		cells = &btree.Map[int, *WriteCell]{}
 		if ok {
@@ -142,16 +184,16 @@ func (vm *VersionMap) Write(addr common.Address, path AccountPath, key common.Ha
 	}
 }
 
-func (vm *VersionMap) Read(addr common.Address, path AccountPath, key common.Hash, txIdx int) (res ReadResult) {
+func (vm *VersionMap) Read(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int) (res ReadResult) {
+	res.depIdx = UnknownDep
+	res.incarnation = -1
+
 	if vm == nil {
 		return res
 	}
 
 	vm.mu.RLock()
 	defer vm.mu.RUnlock()
-
-	res.depIdx = UnknownDep
-	res.incarnation = -1
 
 	cells := vm.getKeyCells(addr, path, key, nil)
 
@@ -190,20 +232,29 @@ func (vm *VersionMap) Read(addr common.Address, path AccountPath, key common.Has
 	return
 }
 
+// FlushVersionedWrites atomically flushes all writes to the version map
+// under a single lock acquisition. This prevents concurrent readers from
+// observing a partially-flushed state (e.g. seeing an AddressPath write
+// but not the corresponding CodePath write from the same transaction),
+// which could cause non-deterministic BAL (EIP-7928) hashes during
+// parallel execution.
 func (vm *VersionMap) FlushVersionedWrites(writes VersionedWrites, complete bool, tracePrefix string) {
+	vm.mu.Lock()
+	defer vm.mu.Unlock()
+
 	for _, v := range writes {
 		if vm.trace {
 			fmt.Println(tracePrefix, "FLSH", v.String())
 		}
-		vm.Write(v.Address, v.Path, v.Key, v.Version, v.Val, complete)
+		vm.writeLocked(v.Address, v.Path, v.Key, v.Version, v.Val, complete)
 	}
 }
 
-func (vm *VersionMap) MarkEstimate(addr common.Address, path AccountPath, key common.Hash, txIdx int) {
+func (vm *VersionMap) MarkEstimate(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int) {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
 
-	cells := vm.getKeyCells(addr, path, key, func(_ common.Address, _ AccountPath, _ common.Hash) *btree.Map[int, *WriteCell] {
+	cells := vm.getKeyCells(addr, path, key, func(_ accounts.Address, _ AccountPath, _ accounts.StorageKey) *btree.Map[int, *WriteCell] {
 		panic(errors.New("path must already exist"))
 	})
 
@@ -214,11 +265,11 @@ func (vm *VersionMap) MarkEstimate(addr common.Address, path AccountPath, key co
 	}
 }
 
-func (vm *VersionMap) MarkComplete(addr common.Address, path AccountPath, key common.Hash, txIdx int) {
+func (vm *VersionMap) MarkComplete(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int) {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
 
-	cells := vm.getKeyCells(addr, path, key, func(_ common.Address, _ AccountPath, _ common.Hash) *btree.Map[int, *WriteCell] {
+	cells := vm.getKeyCells(addr, path, key, func(_ accounts.Address, _ AccountPath, _ accounts.StorageKey) *btree.Map[int, *WriteCell] {
 		panic(errors.New("path must already exist"))
 	})
 
@@ -229,7 +280,7 @@ func (vm *VersionMap) MarkComplete(addr common.Address, path AccountPath, key co
 	}
 }
 
-func (vm *VersionMap) Delete(addr common.Address, path AccountPath, key common.Hash, txIdx int, checkExists bool) {
+func (vm *VersionMap) Delete(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int, checkExists bool) {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
 	cells := vm.getKeyCells(addr, path, key, nil)
@@ -245,7 +296,7 @@ func (vm *VersionMap) Delete(addr common.Address, path AccountPath, key common.H
 	cells.Delete(txIdx)
 }
 
-func (vm *VersionMap) DeleteAll(addr common.Address, txIdx int) {
+func (vm *VersionMap) DeleteAll(addr accounts.Address, txIdx int) {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
 	if writes, ok := vm.s[addr]; ok {
@@ -276,7 +327,7 @@ const (
 	VersionTooEarly
 )
 
-func (vm *VersionMap) validateRead(txIndex int, addr common.Address, path AccountPath, key common.Hash, source ReadSource, version Version,
+func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path AccountPath, key accounts.StorageKey, source ReadSource, version Version,
 	checkVersion func(readVersion, writeVersion Version) VersionValidity,
 	traceInvalid bool, tracePrefix string) VersionValidity {
 
@@ -286,7 +337,23 @@ func (vm *VersionMap) validateRead(txIndex int, addr common.Address, path Accoun
 	switch rr.Status() {
 	case MVReadResultDone:
 		if source != MapRead {
-			valid = VersionInvalid
+			// When BAL is present, significant writes for BalancePath,
+			// NoncePath, CodePath and StoragePath are pre-populated in the
+			// VersionMap before execution.  If a read of one of those paths
+			// was from storage (no VersionMap entry at execution time) but
+			// the VersionMap now has an entry from a concurrent worker
+			// flush, the entry is a BAL-filtered no-op write and the read
+			// value is still correct.
+			//
+			// AddressPath and other paths are NOT pre-populated by the BAL,
+			// so a new VersionMap entry means a real state change from a
+			// concurrent worker (e.g. account creation) and must trigger
+			// invalidation.
+			isBALPrePopulatedPath := path == BalancePath || path == NoncePath ||
+				path == CodePath || path == StoragePath
+			if !vm.HasBAL || !isBALPrePopulatedPath {
+				valid = VersionInvalid
+			}
 		} else {
 			valid = checkVersion(version, rr.Version())
 		}
@@ -297,9 +364,33 @@ func (vm *VersionMap) validateRead(txIndex int, addr common.Address, path Accoun
 			valid = VersionInvalid
 		} else {
 			if valid = checkVersion(version, version); valid == VersionValid {
-				if path == BalancePath || path == NoncePath || path == CodeHashPath {
-					valid = vm.validateRead(txIndex, addr, AddressPath, common.Hash{}, source,
+				// Cross-validate any account property read against AddressPath
+				// and SelfDestructPath.  A prior tx may have created or
+				// self-destructed the account, invalidating storage reads of
+				// any property (code, storage slots, balance, nonce, etc.).
+				if path != AddressPath && path != SelfDestructPath {
+					if valid = vm.validateRead(txIndex, addr, AddressPath, accounts.StorageKey{}, source,
+						version, checkVersion, traceInvalid, tracePrefix); valid == VersionValid {
+						valid = vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
+							version, checkVersion, traceInvalid, tracePrefix)
+					} else {
+						vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
+							version, checkVersion, traceInvalid, tracePrefix)
+					}
+				} else if path == AddressPath {
+					valid = vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
 						version, checkVersion, traceInvalid, tracePrefix)
+
+					// When BAL is present, AddressPath is NOT pre-populated
+					// but BalancePath IS. If a prior tx created this account,
+					// the BAL will have a BalancePath entry at a lower txIndex.
+					// A nil AddressPath read from storage is then stale.
+					if valid == VersionValid && vm.HasBAL {
+						balRR := vm.Read(addr, BalancePath, accounts.NilKey, txIndex)
+						if balRR.Status() == MVReadResultDone {
+							valid = VersionInvalid
+						}
+					}
 				}
 			}
 		}
@@ -348,7 +439,7 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 type WriteCell struct {
 	flag        statusFlag
 	incarnation int
-	data        interface{}
+	data        any
 }
 
 type Version struct {
@@ -360,6 +451,10 @@ type Version struct {
 
 var UnknownVersion = Version{TxIndex: UnknownDep, Incarnation: -1}
 
+func (v Version) blockAccessIndex() uint16 {
+	return uint16(v.TxIndex + 1)
+}
+
 const (
 	MVReadResultDone       = 0
 	MVReadResultDependency = 1
@@ -369,7 +464,14 @@ const (
 type ReadResult struct {
 	depIdx      int
 	incarnation int
-	value       interface{}
+	value       any
+}
+
+func (res *ReadResult) DepString() string {
+	if res.depIdx == UnknownDep {
+		return "unknown"
+	}
+	return fmt.Sprintf("%d.%d", res.depIdx, res.incarnation)
 }
 
 func (res *ReadResult) DepIdx() int {
@@ -380,7 +482,7 @@ func (res *ReadResult) Incarnation() int {
 	return res.incarnation
 }
 
-func (res *ReadResult) Value() interface{} {
+func (res *ReadResult) Value() any {
 	return res.value
 }
 

@@ -28,7 +28,6 @@ import (
 type BlockEvent struct {
 	LatestBlockNum  uint64
 	LatestBlockTime uint64
-	BlocksBatchLen  uint64
 	Unwind          bool
 }
 
@@ -70,7 +69,6 @@ func (bl *BlockListener) Run(ctx context.Context) error {
 		blockEvent := BlockEvent{
 			LatestBlockNum:  latestChange.BlockHeight,
 			LatestBlockTime: latestChange.BlockTime,
-			BlocksBatchLen:  uint64(len(batch.ChangeBatch)),
 			Unwind:          latestChange.Direction == remoteproto.Direction_UNWIND,
 		}
 

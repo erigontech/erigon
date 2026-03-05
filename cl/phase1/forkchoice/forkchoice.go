@@ -118,7 +118,6 @@ type ForkChoiceStore struct {
 	preverifiedSizes    *lru.Cache[common.Hash, preverifiedAppendListsSizes]
 	finalityCheckpoints *lru.Cache[common.Hash, finalityCheckpoints]
 	totalActiveBalances *lru.Cache[common.Hash, uint64]
-	nextBlockProposers  *lru.Cache[common.Hash, []uint64]
 	// Randao mixes
 	randaoMixesLists *lru.Cache[common.Hash, solid.HashListSSZ] // limited randao mixes full list (only 16 elements)
 	randaoDeltas     *lru.Cache[common.Hash, randaoDelta]       // small entry can be lots of elements.
@@ -228,11 +227,6 @@ func NewForkChoiceStore(
 		return nil, err
 	}
 
-	nextBlockProposers, err := lru.New[common.Hash, []uint64](checkpointsPerCache * 10)
-	if err != nil {
-		return nil, err
-	}
-
 	partialWithdrawals, err := lru.New[common.Hash, *solid.ListSSZ[*solid.PendingPartialWithdrawal]](queueCacheSize)
 	if err != nil {
 		return nil, err
@@ -280,7 +274,6 @@ func NewForkChoiceStore(
 		emitters:                 emitters,
 		genesisTime:              anchorState.GenesisTime(),
 		syncedDataManager:        syncedDataManager,
-		nextBlockProposers:       nextBlockProposers,
 		genesisValidatorsRoot:    anchorState.GenesisValidatorsRoot(),
 		hotSidecars:              make(map[common.Hash][]*cltypes.BlobSidecar),
 		blobStorage:              blobStorage,
@@ -594,7 +587,7 @@ func (f *ForkChoiceStore) DumpBeaconStateOnDisk(bs *state.CachingBeaconState) er
 	return f.forkGraph.DumpBeaconStateOnDisk(anchorRoot, bs, false)
 }
 
-func (f *ForkChoiceStore) addPendingConsolidations(blockRoot common.Hash, pendingConsolidations *solid.ListSSZ[*solid.PendingConsolidation]) {
+func (f *ForkChoiceStore) addPendingConsolidations(blockRoot common.Hash, pendingConsolidations *solid.ListSSZ[*solid.PendingConsolidation]) error {
 	// first check if we already have the same list in the parent node.
 	header, ok := f.forkGraph.GetHeader(blockRoot)
 	// If there is no header, make a copy.
@@ -604,7 +597,7 @@ func (f *ForkChoiceStore) addPendingConsolidations(blockRoot common.Hash, pendin
 			pendingConsolidationsCopy.Append(pendingConsolidations.Get(i))
 		}
 		f.pendingConsolidations.Add(blockRoot, pendingConsolidationsCopy)
-		return
+		return nil
 	}
 	parentRoot := header.ParentRoot
 	parentConsolidations, ok := f.pendingConsolidations.Get(parentRoot)
@@ -614,31 +607,32 @@ func (f *ForkChoiceStore) addPendingConsolidations(blockRoot common.Hash, pendin
 			pendingConsolidationsCopy.Append(pendingConsolidations.Get(i))
 		}
 		f.pendingConsolidations.Add(blockRoot, pendingConsolidationsCopy)
-		return
+		return nil
 	}
 
 	// check if the two lists are equal via their hashes.
 	pendingConsolidationsHash, err := pendingConsolidations.HashSSZ()
 	if err != nil {
-		panic(err)
+		return err
 	}
 	parentConsolidationsHash, err := parentConsolidations.HashSSZ()
 	if err != nil {
-		panic(err)
+		return err
 	}
 	if pendingConsolidationsHash == parentConsolidationsHash {
 		// If they are equal, we can just store the parent consolidations.
 		f.pendingConsolidations.Add(blockRoot, parentConsolidations)
-		return
+		return nil
 	}
 	pendingConsolidationsCopy := solid.NewPendingConsolidationList(f.beaconCfg)
 	for i := 0; i < pendingConsolidations.Len(); i++ {
 		pendingConsolidationsCopy.Append(pendingConsolidations.Get(i))
 	}
 	f.pendingConsolidations.Add(blockRoot, pendingConsolidationsCopy)
+	return nil
 }
 
-func (f *ForkChoiceStore) addPendingDeposits(blockRoot common.Hash, pendingDeposits *solid.ListSSZ[*solid.PendingDeposit]) {
+func (f *ForkChoiceStore) addPendingDeposits(blockRoot common.Hash, pendingDeposits *solid.ListSSZ[*solid.PendingDeposit]) error {
 	// first check if we already have the same list in the parent node.
 	header, ok := f.forkGraph.GetHeader(blockRoot)
 	// If there is no header, make a copy.
@@ -648,7 +642,7 @@ func (f *ForkChoiceStore) addPendingDeposits(blockRoot common.Hash, pendingDepos
 			pendingDepositsCopy.Append(pendingDeposits.Get(i))
 		}
 		f.pendingDeposits.Add(blockRoot, pendingDepositsCopy)
-		return
+		return nil
 	}
 	parentRoot := header.ParentRoot
 	parentDeposits, ok := f.pendingDeposits.Get(parentRoot)
@@ -658,31 +652,32 @@ func (f *ForkChoiceStore) addPendingDeposits(blockRoot common.Hash, pendingDepos
 			pendingDepositsCopy.Append(pendingDeposits.Get(i))
 		}
 		f.pendingDeposits.Add(blockRoot, pendingDepositsCopy)
-		return
+		return nil
 	}
 
 	// check if the two lists are equal via their hashes.
 	pendingDepositsHash, err := pendingDeposits.HashSSZ()
 	if err != nil {
-		panic(err)
+		return err
 	}
 	parentDepositsHash, err := parentDeposits.HashSSZ()
 	if err != nil {
-		panic(err)
+		return err
 	}
 	if pendingDepositsHash == parentDepositsHash {
 		// If they are equal, we can just store the parent deposits.
 		f.pendingDeposits.Add(blockRoot, parentDeposits)
-		return
+		return nil
 	}
 	pendingDepositsCopy := solid.NewPendingDepositList(f.beaconCfg)
 	for i := 0; i < pendingDeposits.Len(); i++ {
 		pendingDepositsCopy.Append(pendingDeposits.Get(i))
 	}
 	f.pendingDeposits.Add(blockRoot, pendingDepositsCopy)
+	return nil
 }
 
-func (f *ForkChoiceStore) addPendingPartialWithdrawals(blockRoot common.Hash, pendingPartialWithdrawals *solid.ListSSZ[*solid.PendingPartialWithdrawal]) {
+func (f *ForkChoiceStore) addPendingPartialWithdrawals(blockRoot common.Hash, pendingPartialWithdrawals *solid.ListSSZ[*solid.PendingPartialWithdrawal]) error {
 	// first check if we already have the same list in the parent node.
 	header, ok := f.forkGraph.GetHeader(blockRoot)
 	// If there is no header, make a copy.
@@ -692,7 +687,7 @@ func (f *ForkChoiceStore) addPendingPartialWithdrawals(blockRoot common.Hash, pe
 			pendingPartialWithdrawalsCopy.Append(pendingPartialWithdrawals.Get(i))
 		}
 		f.partialWithdrawals.Add(blockRoot, pendingPartialWithdrawalsCopy)
-		return
+		return nil
 	}
 	parentRoot := header.ParentRoot
 	parentWithdrawals, ok := f.partialWithdrawals.Get(parentRoot)
@@ -702,37 +697,39 @@ func (f *ForkChoiceStore) addPendingPartialWithdrawals(blockRoot common.Hash, pe
 			pendingPartialWithdrawalsCopy.Append(pendingPartialWithdrawals.Get(i))
 		}
 		f.partialWithdrawals.Add(blockRoot, pendingPartialWithdrawalsCopy)
-		return
+		return nil
 	}
 
 	// check if the two lists are equal via their hashes.
 	pendingPartialWithdrawalsHash, err := pendingPartialWithdrawals.HashSSZ()
 	if err != nil {
-		panic(err)
+		return err
 	}
 	parentWithdrawalsHash, err := parentWithdrawals.HashSSZ()
 	if err != nil {
-		panic(err)
+		return err
 	}
 	if pendingPartialWithdrawalsHash == parentWithdrawalsHash {
 		// If they are equal, we can just store the parent withdrawals.
 		f.partialWithdrawals.Add(blockRoot, parentWithdrawals)
-		return
+		return nil
 	}
 	pendingPartialWithdrawalsCopy := solid.NewPendingWithdrawalList(f.beaconCfg)
 	for i := 0; i < pendingPartialWithdrawals.Len(); i++ {
 		pendingPartialWithdrawalsCopy.Append(pendingPartialWithdrawals.Get(i))
 	}
 	f.partialWithdrawals.Add(blockRoot, pendingPartialWithdrawalsCopy)
+	return nil
 }
 
-func (f *ForkChoiceStore) addProposerLookahead(slot uint64, proposerLookahead solid.Uint64VectorSSZ) {
+func (f *ForkChoiceStore) addProposerLookahead(slot uint64, proposerLookahead solid.Uint64VectorSSZ) error {
 	epoch := slot / f.beaconCfg.SlotsPerEpoch
 	if _, ok := f.proposerLookahead.Get(epoch); !ok {
 		pl := solid.NewUint64VectorSSZ(proposerLookahead.Length())
 		proposerLookahead.CopyTo(pl)
 		f.proposerLookahead.Add(epoch, pl)
 	}
+	return nil
 }
 
 func (f *ForkChoiceStore) GetPendingConsolidations(blockRoot common.Hash) (*solid.ListSSZ[*solid.PendingConsolidation], bool) {

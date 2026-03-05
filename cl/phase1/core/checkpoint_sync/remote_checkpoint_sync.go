@@ -48,9 +48,6 @@ func (r *RemoteCheckpointSync) GetLatestBeaconState(ctx context.Context) (*state
 		}
 
 		req.Header.Set("Accept", "application/octet-stream")
-		if err != nil {
-			return nil, fmt.Errorf("checkpoint sync request failed %s", err)
-		}
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			return nil, err

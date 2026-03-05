@@ -109,13 +109,13 @@ func TestJson(t *testing.T) {
 	l, buf := testFormatter(JsonFormat())
 	l.Error("some message", "x", 1, "y", 3.2)
 
-	var v map[string]interface{}
+	var v map[string]any
 	decoder := json.NewDecoder(buf)
 	if err := decoder.Decode(&v); err != nil {
 		t.Fatalf("Error decoding JSON: %v", v)
 	}
 
-	validate := func(key string, expected interface{}) {
+	validate := func(key string, expected any) {
 		if v[key] != expected {
 			t.Fatalf("Got %v expected %v for %v", v[key], expected, key)
 		}
@@ -128,7 +128,7 @@ func TestJson(t *testing.T) {
 }
 
 func TestJSONMap(t *testing.T) {
-	m := map[string]interface{}{
+	m := map[string]any{
 		"name":     "gopher",
 		"age":      float64(5),
 		"language": "go",
@@ -137,19 +137,19 @@ func TestJSONMap(t *testing.T) {
 	l, buf := testFormatter(JsonFormat())
 	l.Error("logging structs", "struct", m)
 
-	var v map[string]interface{}
+	var v map[string]any
 	decoder := json.NewDecoder(buf)
 	if err := decoder.Decode(&v); err != nil {
 		t.Fatalf("Error decoding JSON: %v", v)
 	}
 
-	checkMap := func(key string, expected interface{}) {
+	checkMap := func(key string, expected any) {
 		if m[key] != expected {
 			t.Fatalf("Got %v expected %v for %v", m[key], expected, key)
 		}
 	}
 
-	mv := v["struct"].(map[string]interface{})
+	mv := v["struct"].(map[string]any)
 	checkMap("name", mv["name"])
 	checkMap("age", mv["age"])
 	checkMap("language", mv["language"])
@@ -590,7 +590,7 @@ func TestConcurrent(t *testing.T) {
 	// go to allocate extra capacity in the logger's context slice which
 	// was necessary to trigger the bug
 	const ctxLen = 34
-	l := root.New(make([]interface{}, ctxLen)...)
+	l := root.New(make([]any, ctxLen)...)
 	const goroutines = 8
 	var res [goroutines]int
 	l.SetHandler(SyncHandler(concurrentCaptureTestHandler{res: res[:], ctxLen: ctxLen}))

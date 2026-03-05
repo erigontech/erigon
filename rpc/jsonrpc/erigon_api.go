@@ -38,7 +38,7 @@ type ErigonAPI interface {
 	// Blocks related (see ./erigon_blocks.go)
 	GetHeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error)
 	GetHeaderByHash(_ context.Context, hash common.Hash) (*types.Header, error)
-	GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Timestamp, fullTx bool) (map[string]interface{}, error)
+	GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Timestamp, fullTx bool) (map[string]any, error)
 	GetBalanceChangesInBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (map[common.Address]*hexutil.Big, error)
 
 	// Receipt related (see ./erigon_receipts.go)
@@ -47,7 +47,7 @@ type ErigonAPI interface {
 	GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.ErigonLogs, error)
 	GetLatestLogs(ctx context.Context, crit filters.FilterCriteria, logOptions filters.LogFilterOptions) (types.ErigonLogs, error)
 	// Gets cannonical block receipt through hash. If the block is not cannonical returns error
-	GetBlockReceiptsByBlockHash(ctx context.Context, cannonicalBlockHash common.Hash) ([]map[string]interface{}, error)
+	GetBlockReceiptsByBlockHash(ctx context.Context, cannonicalBlockHash common.Hash) ([]map[string]any, error)
 
 	// NodeInfo returns a collection of metadata known about the host.
 	NodeInfo(ctx context.Context) ([]p2p.NodeInfo, error)

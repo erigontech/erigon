@@ -38,7 +38,7 @@ func BenchmarkAggregateSigCached(b *testing.B) {
 	bls.LoadPublicKeyIntoCache(convertHexToPublicKey("b301803f8b5ac4a1133581fc676dfedc60d891dd5fa99028805e5ea5b08d3491af75d0707adab3b70c6a6a580217bf81"), false)
 	bls.LoadPublicKeyIntoCache(convertHexToPublicKey("b53d21a4cfd562c469cc81514d4ce5a6b577d8403d32a394dc265dd190b47fa9f829fdd7963afdf972e5e77854051f6f"), false)
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		bls.VerifyAggregate(
 			convertHexToSignature("9712c3edd73a209c742b8250759db12549b3eaf43b5ca61376d9f30e2747dbcf842d8b2ac0901d2a093713e20284a7670fcf6954e9ab93de991bb9b313e664785a075fc285806fa5224c82bde146561b446ccfc706a64b8579513cfc4ff1d930"),
 			convertHexToMessage("abababababababababababababababababababababababababababababababab"),
@@ -66,7 +66,7 @@ PASS
 */
 func BenchmarkAggregateSigNonCached(b *testing.B) {
 	bls.SetEnabledCaching(false)
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		bls.VerifyAggregate(
 			convertHexToSignature("9712c3edd73a209c742b8250759db12549b3eaf43b5ca61376d9f30e2747dbcf842d8b2ac0901d2a093713e20284a7670fcf6954e9ab93de991bb9b313e664785a075fc285806fa5224c82bde146561b446ccfc706a64b8579513cfc4ff1d930"),
 			convertHexToMessage("abababababababababababababababababababababababababababababababab"),

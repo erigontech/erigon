@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/network/subnets"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/transition/machine"
@@ -59,8 +60,9 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
 type BlockPublishingValidation string
@@ -142,8 +144,13 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	}
 
 	defer func() {
+		epoch := *slot / a.beaconChainCfg.SlotsPerEpoch
+		committeesPerSlot := a.syncedData.CommitteeCount(epoch)
+		subnet := subnets.ComputeSubnetForAttestation(
+			committeesPerSlot, *slot, *committeeIndex,
+			a.beaconChainCfg.SlotsPerEpoch, 64)
 		a.logger.Debug("Produced Attestation", "slot", *slot,
-			"committee_index", *committeeIndex, "cached", ok, "beacon_block_root",
+			"committee_index", *committeeIndex, "subnet", subnet, "cached", ok, "beacon_block_root",
 			attestationData.BeaconBlockRoot, "duration", time.Since(start))
 	}()
 
@@ -613,7 +620,7 @@ func (a *ApiHandler) produceBeaconBody(
 			baseState,
 			targetSlot/a.beaconChainCfg.SlotsPerEpoch,
 		)
-		withdrawals := []*types.Withdrawal{}
+		withdrawals := make([]*types.Withdrawal, 0, len(clWithdrawals))
 		for _, w := range clWithdrawals {
 			withdrawals = append(withdrawals, &types.Withdrawal{
 				Index:     w.Index,
@@ -1031,10 +1038,25 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
+
 	if signedBlindedBlock.Version().AfterOrEqual(clparams.FuluVersion) {
+		requestsList := cltypes.GetExecutionRequestsList(a.beaconChainCfg, executionRequests)
+		requestsHash := cltypes.ComputeExecutionRequestHash(requestsList)
+		header, err := blockPayload.RlpHeader(&signedBlindedBlock.Block.ParentRoot, requestsHash)
+		if err != nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
+		}
+		rawBlock := types.RawBlock{Header: header, Body: blockPayload.Body()}
+		blockRlpSize := rawBlock.EncodingSize()
+		blockRlpSize += rlp.ListPrefixLen(blockRlpSize)
+		if blockRlpSize > params.MaxRlpBlockSize {
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("block payload rlp size exceeds the limit: %d > %d", blockRlpSize, params.MaxRlpBlockSize))
+		}
+
 		log.Info("Successfully submitted blinded block", "block_num", signedBlindedBlock.Block.Body.ExecutionPayload.BlockNumber, "api_version", apiVersion)
 		return newBeaconResponse(nil), nil
 	}
+
 	signedBlock, err := signedBlindedBlock.Unblind(blockPayload)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
@@ -1054,8 +1076,7 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 				}
 
 				// Finish KzGProofs and blob checks
-				if blockPayload.Version() < clparams.FuluVersion {
-
+				if blockPayload.Version() < clparams.FuluVersion { //nolint:staticcheck until https://github.com/erigontech/erigon/issues/17943
 				}
 				if len(b.Proofs[i]) != length.Bytes48 {
 					return errors.New("proof must be 48 bytes long")
@@ -1273,21 +1294,13 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		lenBlobs,
 	)
 	// Broadcast the block and its blobs
-	if _, err := a.sentinel.PublishGossip(ctx, &sentinelproto.GossipData{
-		Name: gossip.TopicNameBeaconBlock,
-		Data: blkSSZ,
-	}); err != nil {
+	if err := a.gossipManager.Publish(ctx, gossip.TopicNameBeaconBlock, blkSSZ); err != nil {
 		a.logger.Error("Failed to publish block", "err", err)
 	}
 
 	if blk.Version() < clparams.FuluVersion {
 		for idx, blob := range blobsSidecarsBytes {
-			idx64 := uint64(idx)
-			if _, err := a.sentinel.PublishGossip(ctx, &sentinelproto.GossipData{
-				Name:     gossip.TopicNamePrefixBlobSidecar,
-				Data:     blob,
-				SubnetId: &idx64,
-			}); err != nil {
+			if err := a.gossipManager.Publish(ctx, gossip.TopicNameBlobSidecar(uint64(idx)), blob); err != nil {
 				a.logger.Error("Failed to publish blob sidecar", "err", err)
 			}
 		}
@@ -1301,11 +1314,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 				continue
 			}
 			subnet := das.ComputeSubnetForDataColumnSidecar(column.Index)
-			if _, err := a.sentinel.PublishGossip(ctx, &sentinelproto.GossipData{
-				Name:     gossip.TopicNamePrefixDataColumnSidecar,
-				Data:     columnSSZ,
-				SubnetId: &subnet,
-			}); err != nil {
+			if err := a.gossipManager.Publish(ctx, gossip.TopicNameDataColumnSidecar(subnet), columnSSZ); err != nil {
 				a.logger.Error("Failed to publish data column sidecar", "err", err)
 			}
 		}

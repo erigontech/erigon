@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/execution/consensus/ethash"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -162,10 +162,9 @@ func (s *MiningServer) BroadcastMinedBlock(block *types.Block) error {
 
 // MinedBlockStreams - it's safe to use this class as non-pointer
 type MinedBlockStreams struct {
-	chans  map[uint]txpoolproto.Mining_OnMinedBlockServer
-	id     uint
-	mu     sync.Mutex
-	logger log.Logger
+	chans map[uint]txpoolproto.Mining_OnMinedBlockServer
+	id    uint
+	mu    sync.Mutex
 }
 
 func (s *MinedBlockStreams) Add(stream txpoolproto.Mining_OnMinedBlockServer) (remove func()) {

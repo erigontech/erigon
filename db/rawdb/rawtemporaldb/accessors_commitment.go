@@ -15,8 +15,9 @@ func CanUnwindToBlockNum(tx kv.TemporalTx) (uint64, error) {
 		return 0, err
 	}
 	if minUnwindale == math.MaxUint64 { // no unwindable block found
-		log.Warn("no unwindable block found from changesets, falling back to latest with commitment")
-		return commitmentdb.LatestBlockNumWithCommitment(tx)
+		minUnwindale, err = commitmentdb.LatestBlockNumWithCommitment(tx)
+		log.Warn("no unwindable block found from changesets, falling back to latest with commitment", "block", minUnwindale, "err", err)
+		return minUnwindale, err
 	}
 	if minUnwindale > 0 {
 		minUnwindale-- // UnwindTo is exclusive, i.e. (unwindPoint,tip] get unwound

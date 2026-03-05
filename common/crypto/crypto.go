@@ -27,12 +27,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"hash"
 	"io"
 	"math/big"
 	"os"
 	"sync"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
@@ -51,23 +51,24 @@ const RecoveryIDOffset = 64
 const DigestLength = 32
 
 var (
-	secp256k1N     = new(uint256.Int).SetBytes(hexutil.MustDecode("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141"))
+	secp256k1N     = *new(uint256.Int).SetBytes(hexutil.MustDecode("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141"))
 	secp256k1NBig  = secp256k1N.ToBig()
-	secp256k1halfN = new(uint256.Int).Rsh(secp256k1N, 1)
+	secp256k1halfN = new(uint256.Int).Rsh(&secp256k1N, 1)
 )
 
 var errInvalidPubkey = errors.New("invalid secp256k1 public key")
 
-// KeccakState wraps sha3.state. In addition to the usual hash methods, it also supports
-// Read to get a variable amount of data from the hash state. Read is faster than Sum
-// because it doesn't copy the internal state, but also modifies the internal state.
-type KeccakState interface {
-	hash.Hash
-	Read([]byte) (int, error)
+// EllipticCurve contains curve operations.
+type EllipticCurve interface {
+	elliptic.Curve
+
+	// Point marshaling/unmarshaing.
+	Marshal(x, y *big.Int) []byte
+	Unmarshal(data []byte) (x, y *big.Int)
 }
 
 // HashData hashes the provided data using the KeccakState and returns a 32 byte hash
-func HashData(kh KeccakState, data []byte) (h common.Hash) {
+func HashData(kh keccak.KeccakState, data []byte) (h common.Hash) {
 	kh.Reset()
 	//nolint:errcheck
 	kh.Write(data)
@@ -142,7 +143,7 @@ func toECDSA(d []byte, strict bool) (*ecdsa.PrivateKey, error) {
 		return nil, errors.New("invalid private key, zero or negative")
 	}
 
-	priv.PublicKey.X, priv.PublicKey.Y = priv.PublicKey.Curve.ScalarBaseMult(d)
+	priv.PublicKey.X, priv.PublicKey.Y = S256().ScalarBaseMult(d)
 	if priv.PublicKey.X == nil {
 		return nil, errors.New("invalid private key")
 	}
@@ -161,7 +162,7 @@ func FromECDSA(priv *ecdsa.PrivateKey) []byte {
 // The input slice must be 65 bytes long and have this format: [4, X..., Y...]
 // See MarshalPubkeyStd.
 func UnmarshalPubkeyStd(pub []byte) (*ecdsa.PublicKey, error) {
-	x, y := elliptic.Unmarshal(S256(), pub)
+	x, y := S256().Unmarshal(pub)
 	if x == nil {
 		return nil, errInvalidPubkey
 	}
@@ -179,7 +180,7 @@ func MarshalPubkeyStd(pub *ecdsa.PublicKey) []byte {
 	if pub == nil || pub.X == nil || pub.Y == nil {
 		return nil
 	}
-	return elliptic.Marshal(S256(), pub.X, pub.Y)
+	return S256().Marshal(pub.X, pub.Y)
 }
 
 // UnmarshalPubkey parses a public key from the given bytes in the 64 bytes "uncompressed" format.
@@ -202,6 +203,16 @@ func MarshalPubkey(pubkey *ecdsa.PublicKey) []byte {
 		return nil
 	}
 	return keyBytes[1:]
+}
+
+// FromECDSAPub converts a secp256k1 public key to bytes.
+// Note: it does not use the curve from pub, instead it always
+// encodes using secp256k1.
+func FromECDSAPub(pub *ecdsa.PublicKey) []byte {
+	if pub == nil || pub.X == nil || pub.Y == nil {
+		return nil
+	}
+	return S256().Marshal(pub.X, pub.Y)
 }
 
 // HexToECDSA parses a secp256k1 private key.
@@ -294,7 +305,7 @@ func TransactionSignatureIsValid(v byte, r, s *uint256.Int, allowPreEip2s bool) 
 		return false
 	}
 
-	return r.Lt(secp256k1N) && s.Lt(secp256k1N) && (v == 0 || v == 1)
+	return r.Lt(&secp256k1N) && s.Lt(&secp256k1N) && (v == 0 || v == 1)
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
@@ -305,15 +316,15 @@ func PubkeyToAddress(p ecdsa.PublicKey) common.Address {
 
 // hasherPool holds LegacyKeccak hashers.
 var hasherPool = sync.Pool{
-	New: func() interface{} {
-		return sha3.NewLegacyKeccak256()
+	New: func() any {
+		return keccak.NewFastKeccak()
 	},
 }
 
 // NewKeccakState creates a new KeccakState
-func NewKeccakState() KeccakState {
-	h := hasherPool.Get().(KeccakState)
+func NewKeccakState() keccak.KeccakState {
+	h := hasherPool.Get().(keccak.KeccakState)
 	h.Reset()
 	return h
 }
-func ReturnToPool(h KeccakState) { hasherPool.Put(h) }
+func ReturnToPool(h keccak.KeccakState) { hasherPool.Put(h) }

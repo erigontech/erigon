@@ -110,17 +110,17 @@ func goStruct(dom string) string {
 
 func pathPrefix(sec, dom string) string {
 	if sec == "domain" || sec == "block" {
-		return ".Version"
+		return ".FileVersion"
 	}
 	if sec == "hist" {
-		return ".Hist.Version"
+		return ".Hist.FileVersion"
 	}
 	// ii
 	switch dom {
 	case "logaddrs", "logtopics", "tracesfrom", "tracesto":
-		return ".Version"
+		return ".FileVersion"
 	default:
-		return ".Hist.IiCfg.Version"
+		return ".Hist.IiCfg.FileVersion"
 	}
 }
 

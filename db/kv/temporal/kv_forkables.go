@@ -34,6 +34,10 @@ func (b *forkableBaseTx) GetFromFile(entityNum Num, idx int) (v []byte, found bo
 	return b.f.GetFromFile(entityNum, idx)
 }
 
+func (b *forkableBaseTx) StepSize() uint64 {
+	return b.f.StepSize()
+}
+
 // implements both UnmarkedRoTx and UnmarkedRwTx
 type unmarkedTx struct {
 	forkableBaseTx
@@ -73,8 +77,8 @@ func (m *unmarkedTx) HasRootNumUpto(ctx context.Context, to RootNum) (bool, erro
 	return m.s.DebugDb().HasRootNumUpto(ctx, to, m.dbtx)
 }
 
-func (m *unmarkedTx) Type() kv.CanonicityStrategy {
-	return m.s.Type()
+func (m *unmarkedTx) Id() kv.ForkableId {
+	return m.s.Id()
 }
 
 func (m *unmarkedTx) Close() {
@@ -97,4 +101,12 @@ func (m *unmarkedTx) Prune(ctx context.Context, to RootNum, limit uint64) (uint6
 func (m *unmarkedTx) Unwind(ctx context.Context, from RootNum) error {
 	_, err := m.s.DebugDb().Unwind(ctx, from, m.dbtx.(kv.RwTx))
 	return err
+}
+
+func (m *unmarkedTx) BufferedWriter() kv.BufferedWriter {
+	return m.s.(*state.UnmarkedTx).BufferedWriter()
+}
+
+func (m *unmarkedTx) Progress() (Num, error) {
+	return m.s.Progress(m.dbtx)
 }

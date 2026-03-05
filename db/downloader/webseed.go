@@ -22,22 +22,20 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"sort"
+	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/hashicorp/go-retryablehttp"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
 )
 
 // WebSeeds - allow use HTTP-based infrastructure to support Bittorrent network
 // it allows download .torrent files and data files from trusted url's (for example: S3 signed url)
 type WebSeeds struct {
-	lock sync.Mutex
-
 	seeds []*url.URL
 
 	logger    log.Logger
@@ -128,11 +126,13 @@ func (d *WebSeeds) VerifyManifestedBuckets(ctx context.Context, failFast bool) e
 		fmt.Printf("%s\n", rep.ToString(false))
 	}
 	if failed {
-		merr := "error list:\n"
+		// errors.Join?
+		var merr strings.Builder
+		merr.WriteString("error list:\n")
 		for _, err := range supErr {
-			merr += fmt.Sprintf("%s\n", err)
+			merr.WriteString(fmt.Sprintf("%s\n", err))
 		}
-		return fmt.Errorf("webseed: some webseeds are not OK, details above| %s", merr)
+		return fmt.Errorf("webseed: some webseeds are not OK, details above| %s", merr.String())
 	}
 	return nil
 }
@@ -146,8 +146,8 @@ type WebSeedCheckReport struct {
 }
 
 func (w *WebSeedCheckReport) sort() {
-	sort.Strings(w.missingTorrents)
-	sort.Strings(w.danglingTorrents)
+	slices.Sort(w.missingTorrents)
+	slices.Sort(w.danglingTorrents)
 }
 
 func (w *WebSeedCheckReport) OK() bool {
@@ -228,7 +228,7 @@ func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url
 		if err != nil {
 			return nil, err
 		}
-		insertCloudflareHeaders(request)
+		snapcfg.InsertCloudflareHeaders(request)
 		resp, err := d.client.Do(request)
 		if err != nil {
 			return nil, fmt.Errorf("webseed.http: make request: %w, url=%s", err, u.String())
@@ -241,7 +241,7 @@ func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url
 		return nil, err
 	}
 
-	insertCloudflareHeaders(request)
+	snapcfg.InsertCloudflareHeaders(request)
 
 	resp, err := d.client.Do(request)
 	if err != nil {

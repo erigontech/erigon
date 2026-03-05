@@ -23,15 +23,12 @@ import (
 	"container/list"
 	"context"
 	crand "crypto/rand"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"math/rand"
 	"reflect"
 	"strings"
 	"sync"
-	"time"
 )
 
 var (
@@ -53,24 +50,15 @@ func NewID() ID {
 	return globalGen()
 }
 
-// randomIDGenerator returns a function generates a random IDs.
+// randomIDGenerator returns a function that generates cryptographically-strong random IDs.
+// We avoid math/rand and time-based seeds to prevent predictable sequences.
+// If crypto/rand fails, we propagate the error by panicking to avoid producing weak IDs.
 func randomIDGenerator() func() ID {
-	var buf = make([]byte, 8)
-	var seed int64
-	if _, err := crand.Read(buf); err == nil {
-		seed = int64(binary.BigEndian.Uint64(buf))
-	} else {
-		seed = int64(time.Now().Nanosecond())
-	}
-	var (
-		mu  sync.Mutex
-		rng = rand.New(rand.NewSource(seed)) // nolint: gosec
-	)
 	return func() ID {
-		mu.Lock()
-		defer mu.Unlock()
 		id := make([]byte, 16)
-		rng.Read(id)
+		if _, err := crand.Read(id); err != nil {
+			panic("crypto/rand failure generating subscription ID: " + err.Error())
+		}
 		return encodeID(id)
 	}
 }

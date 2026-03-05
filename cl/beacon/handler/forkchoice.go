@@ -34,8 +34,8 @@ func (a *ApiHandler) GetEthV2DebugBeaconHeads(w http.ResponseWriter, r *http.Req
 		return nil, beaconhttp.NewEndpointError(statusCode, err)
 	}
 	return newBeaconResponse(
-		[]interface{}{
-			map[string]interface{}{
+		[]any{
+			map[string]any{
 				"slot":                 strconv.FormatUint(slot, 10),
 				"root":                 root,
 				"execution_optimistic": false,
@@ -47,7 +47,7 @@ func (a *ApiHandler) GetEthV1DebugBeaconForkChoice(w http.ResponseWriter, r *htt
 	justifiedCheckpoint := a.forkchoiceStore.JustifiedCheckpoint()
 	finalizedCheckpoint := a.forkchoiceStore.FinalizedCheckpoint()
 	forkNodes := a.forkchoiceStore.ForkNodes()
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]any{
 		"justified_checkpoint": justifiedCheckpoint,
 		"finalized_checkpoint": finalizedCheckpoint,
 		"fork_choice_nodes":    forkNodes,

@@ -19,18 +19,18 @@ package state
 import (
 	"bytes"
 
-	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/seg"
 )
 
 // Algorithms for reconstituting the state from state history
 
 type ReconItem struct {
-	g          stream.KV
-	key, val   []byte
-	txNum      uint64
-	startTxNum uint64
-	endTxNum   uint64
+	g           *seg.Reader
+	key, val    []byte
+	txNum       uint64
+	startTxNum  uint64
+	endTxNum    uint64
+	histFileIdx int // index into HistoryRoTx.files; -1 if not found
 }
 
 type ReconHeap []*ReconItem
@@ -58,7 +58,7 @@ func (rh ReconHeap) Swap(i, j int) {
 }
 
 // Push (part of heap.Interface) places a new link onto the end of queue. Note that idx attribute is set to the correct position of the new link
-func (rh *ReconHeap) Push(x interface{}) {
+func (rh *ReconHeap) Push(x any) {
 	// Push and Pop use pointer receivers because they modify the slice's length,
 	// not just its contents.
 	l := x.(*ReconItem)
@@ -66,7 +66,7 @@ func (rh *ReconHeap) Push(x interface{}) {
 }
 
 // Pop (part of heap.Interface) removes the first link from the queue
-func (rh *ReconHeap) Pop() interface{} {
+func (rh *ReconHeap) Pop() any {
 	old := *rh
 	n := len(old)
 	x := old[n-1]
@@ -85,42 +85,4 @@ func (rh ReconHeapOlderFirst) Less(i, j int) bool {
 		return rh.ReconHeap[i].txNum >= rh.ReconHeap[j].txNum
 	}
 	return c < 0
-}
-
-// SegReaderWrapper wraps seg.ReaderI to satisfy stream.KV interface
-type SegReaderWrapper struct {
-	reader seg.ReaderI
-}
-
-// NewSegReaderWrapper creates a new wrapper for seg.ReaderI to satisfy stream.KV interface
-func NewSegReaderWrapper(reader seg.ReaderI) stream.KV {
-	return &SegReaderWrapper{reader: reader}
-}
-
-// Next returns key and value by calling the underlying getter twice
-func (w *SegReaderWrapper) Next() ([]byte, []byte, error) {
-	if !w.reader.HasNext() {
-		return nil, nil, stream.ErrIteratorExhausted
-	}
-
-	// First call: get the key
-	key, _ := w.reader.Next(nil)
-
-	// Second call: get the value
-	var value []byte
-	if w.reader.HasNext() {
-		value, _ = w.reader.Next(nil)
-	}
-
-	return key, value, nil
-}
-
-// HasNext delegates to the underlying reader
-func (w *SegReaderWrapper) HasNext() bool {
-	return w.reader.HasNext()
-}
-
-// Close is a no-op as seg.ReaderI doesn't have Close method
-func (w *SegReaderWrapper) Close() {
-	// No-op
 }

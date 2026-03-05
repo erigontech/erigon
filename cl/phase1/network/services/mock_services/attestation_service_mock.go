@@ -13,7 +13,9 @@ import (
 	context "context"
 	reflect "reflect"
 
+	clparams "github.com/erigontech/erigon/cl/clparams"
 	services "github.com/erigontech/erigon/cl/phase1/network/services"
+	peer "github.com/libp2p/go-libp2p/core/peer"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -39,6 +41,83 @@ func NewMockAttestationService(ctrl *gomock.Controller) *MockAttestationService 
 // EXPECT returns an object that allows the caller to indicate expected use.
 func (m *MockAttestationService) EXPECT() *MockAttestationServiceMockRecorder {
 	return m.recorder
+}
+
+// DecodeGossipMessage mocks base method.
+func (m *MockAttestationService) DecodeGossipMessage(pid peer.ID, data []byte, version clparams.StateVersion) (*services.AttestationForGossip, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DecodeGossipMessage", pid, data, version)
+	ret0, _ := ret[0].(*services.AttestationForGossip)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DecodeGossipMessage indicates an expected call of DecodeGossipMessage.
+func (mr *MockAttestationServiceMockRecorder) DecodeGossipMessage(pid, data, version any) *MockAttestationServiceDecodeGossipMessageCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DecodeGossipMessage", reflect.TypeOf((*MockAttestationService)(nil).DecodeGossipMessage), pid, data, version)
+	return &MockAttestationServiceDecodeGossipMessageCall{Call: call}
+}
+
+// MockAttestationServiceDecodeGossipMessageCall wrap *gomock.Call
+type MockAttestationServiceDecodeGossipMessageCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockAttestationServiceDecodeGossipMessageCall) Return(arg0 *services.AttestationForGossip, arg1 error) *MockAttestationServiceDecodeGossipMessageCall {
+	c.Call = c.Call.Return(arg0, arg1)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockAttestationServiceDecodeGossipMessageCall) Do(f func(peer.ID, []byte, clparams.StateVersion) (*services.AttestationForGossip, error)) *MockAttestationServiceDecodeGossipMessageCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockAttestationServiceDecodeGossipMessageCall) DoAndReturn(f func(peer.ID, []byte, clparams.StateVersion) (*services.AttestationForGossip, error)) *MockAttestationServiceDecodeGossipMessageCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// Names mocks base method.
+func (m *MockAttestationService) Names() []string {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Names")
+	ret0, _ := ret[0].([]string)
+	return ret0
+}
+
+// Names indicates an expected call of Names.
+func (mr *MockAttestationServiceMockRecorder) Names() *MockAttestationServiceNamesCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Names", reflect.TypeOf((*MockAttestationService)(nil).Names))
+	return &MockAttestationServiceNamesCall{Call: call}
+}
+
+// MockAttestationServiceNamesCall wrap *gomock.Call
+type MockAttestationServiceNamesCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockAttestationServiceNamesCall) Return(arg0 []string) *MockAttestationServiceNamesCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockAttestationServiceNamesCall) Do(f func() []string) *MockAttestationServiceNamesCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockAttestationServiceNamesCall) DoAndReturn(f func() []string) *MockAttestationServiceNamesCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
 }
 
 // ProcessMessage mocks base method.

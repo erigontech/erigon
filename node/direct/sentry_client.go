@@ -140,7 +140,7 @@ func (c *SentryClientRemote) Messages(ctx context.Context, in *sentryproto.Messa
 }
 
 func (c *SentryClientRemote) PeerCount(ctx context.Context, in *sentryproto.PeerCountRequest, opts ...grpc.CallOption) (*sentryproto.PeerCountReply, error) {
-	return c.SentryClient.PeerCount(ctx, in)
+	return c.SentryClient.PeerCount(ctx, in, opts...)
 }
 
 // Contains implementations of SentryServer, SentryClient, ControlClient, and ControlServer, that may be linked to each other
@@ -294,7 +294,7 @@ func (c *SentryMessagesStreamC) Recv() (*sentryproto.InboundMessage, error) {
 
 func (c *SentryMessagesStreamC) Context() context.Context { return c.ctx }
 
-func (c *SentryMessagesStreamC) RecvMsg(anyMessage interface{}) error {
+func (c *SentryMessagesStreamC) RecvMsg(anyMessage any) error {
 	m, err := c.Recv()
 	if err != nil {
 		return err
@@ -323,6 +323,14 @@ func (c *SentryClientDirect) AddPeer(ctx context.Context, in *sentryproto.AddPee
 
 func (c *SentryClientDirect) RemovePeer(ctx context.Context, in *sentryproto.RemovePeerRequest, opts ...grpc.CallOption) (*sentryproto.RemovePeerReply, error) {
 	return c.server.RemovePeer(ctx, in)
+}
+
+func (c *SentryClientDirect) AddTrustedPeer(ctx context.Context, in *sentryproto.AddPeerRequest, opts ...grpc.CallOption) (*sentryproto.AddPeerReply, error) {
+	return c.server.AddTrustedPeer(ctx, in)
+}
+
+func (c *SentryClientDirect) RemoveTrustedPeer(ctx context.Context, in *sentryproto.RemovePeerRequest, opts ...grpc.CallOption) (*sentryproto.RemovePeerReply, error) {
+	return c.server.RemoveTrustedPeer(ctx, in)
 }
 
 type peersReply struct {
@@ -367,7 +375,7 @@ func (c *SentryPeersStreamC) Recv() (*sentryproto.PeerEvent, error) {
 
 func (c *SentryPeersStreamC) Context() context.Context { return c.ctx }
 
-func (c *SentryPeersStreamC) RecvMsg(anyMessage interface{}) error {
+func (c *SentryPeersStreamC) RecvMsg(anyMessage any) error {
 	m, err := c.Recv()
 	if err != nil {
 		return err

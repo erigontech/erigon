@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	mock_services2 "github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
+	gossip_mock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	"github.com/erigontech/erigon/cl/phase1/network/services/mock_services"
 	"github.com/erigontech/erigon/cl/pool"
@@ -85,7 +86,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 	}
 	ctx := context.Background()
 	vt := state_accessors.NewStaticValidatorTable()
-	a := antiquary.NewAntiquary(ctx, nil, preState, vt, &bcfg, datadir.New("/tmp"), nil, db, nil, nil, reader, syncedData, logger, true, true, false, false, nil)
+	a := antiquary.NewAntiquary(ctx, nil, preState, vt, &bcfg, datadir.New(t.TempDir()), nil, db, nil, nil, reader, syncedData, logger, true, true, false, false, nil)
 	require.NoError(t, a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33))
 	// historical states reader below
 	statesReader := historical_states_reader.NewHistoricalStatesReader(&bcfg, reader, vt, preState, nil, syncedData)
@@ -145,6 +146,10 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		return nil
 	}).AnyTimes()
 
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	gossipManager.EXPECT().Publish(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	gossipManager.EXPECT().SubscribeWithExpiry(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+
 	vp = validator_params.NewValidatorParams()
 	h = NewApiHandler(
 		logger,
@@ -177,7 +182,9 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		proposerSlashingService,
 		nil,
 		nil,
+		gossipManager,
 		false,
+		nil,
 	) // TODO: add tests
 	h.Init()
 	return

@@ -317,7 +317,7 @@ func SyncStagesFromTX(tx kv.Tx) ([]byte, error) {
 		return nil, err
 	}
 
-	return common.CopyBytes(bytes), nil
+	return common.Copy(bytes), nil
 }
 
 func StagesListUpdater(info []SyncStage) func(tx kv.RwTx) error {

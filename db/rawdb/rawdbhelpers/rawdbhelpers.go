@@ -19,18 +19,17 @@ package rawdbhelpers
 import (
 	"encoding/binary"
 
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/kv"
 )
 
-func IdxStepsCountV3(tx kv.Tx) float64 {
+func IdxStepsCountV3(tx kv.Tx, stepSize uint64) float64 {
 	fst, _ := kv.FirstKey(tx, kv.TblAccountHistoryKeys)
 	lst, _ := kv.LastKey(tx, kv.TblAccountHistoryKeys)
 	if len(fst) > 0 && len(lst) > 0 {
 		fstTxNum := binary.BigEndian.Uint64(fst)
 		lstTxNum := binary.BigEndian.Uint64(lst)
 
-		return float64(lstTxNum-fstTxNum) / float64(config3.DefaultStepSize)
+		return float64(lstTxNum-fstTxNum) / float64(stepSize)
 	}
 	return 0
 }

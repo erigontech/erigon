@@ -166,7 +166,7 @@ func TestFindMergeRange(t *testing.T) {
 		require.Equal(t, expect.String(), Ranges(found).String())
 
 		var RangesNew []Range
-		start := uint64(19_000_000)
+		start := uint64(99_000_000)
 		for i := uint64(0); i < 24; i++ {
 			RangesNew = append(RangesNew, NewRange(start+(i*100_000), start+((i+1)*100_000)))
 		}
@@ -193,7 +193,7 @@ func TestFindMergeRange(t *testing.T) {
 		require.Equal(t, expect.String(), Ranges(found).String())
 
 		var RangesNew Ranges
-		start := uint64(19_000_000)
+		start := uint64(99_000_000)
 		for i := uint64(0); i < 240; i++ {
 			RangesNew = append(RangesNew, NewRange(start+i*10_000, start+(i+1)*10_000))
 		}
@@ -345,9 +345,6 @@ func TestDeleteSnapshots(t *testing.T) {
 }
 
 func TestRemoveOverlaps(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
 	mustSeeFile := func(files []string, fileNameWithoutVersion string) bool { //file-version agnostic
 		for _, f := range files {
 			if strings.HasSuffix(f, fileNameWithoutVersion) {
@@ -484,8 +481,9 @@ func TestCanRetire(t *testing.T) {
 		{2_500_000, 2_500_100, 2_500_000, 2_500_000, false},
 		{1_001_000, 2_000_000, 1_001_000, 1_002_000, true},
 	}
+	snCfg := snapcfg.KnownCfgOrDevnet(networkname.Mainnet)
 	for i, tc := range cases {
-		from, to, can := CanRetire(tc.inFrom, tc.inTo, snaptype.Unknown, nil)
+		from, to, can := CanRetire(tc.inFrom, tc.inTo, snaptype.Unknown, snCfg)
 		require.Equal(int(tc.outFrom), int(from), i)
 		require.Equal(int(tc.outTo), int(to), i)
 		require.Equal(tc.can, can, tc.inFrom, tc.inTo, i)
@@ -604,6 +602,7 @@ func TestParseCompressedFileName(t *testing.T) {
 		"v1.0-accounts.24-28.ef.torrent":                                   &fstest.MapFile{},
 		"v1.0-accounts.24-28.ef.torrent.tmp.tmp.tmp":                       &fstest.MapFile{},
 		"v1.0-070200-070300-bodies.seg.torrent4014494284":                  &fstest.MapFile{},
+		"caplin/v1.1-013050-013100-ValidatorEffectiveBalance.seg":          &fstest.MapFile{},
 	}
 	stat := func(name string) string {
 		s, err := fs.Stat(name)
@@ -638,6 +637,23 @@ func TestParseCompressedFileName(t *testing.T) {
 	require.Equal(21150000, int(f.From))
 	require.Equal(21200000, int(f.To))
 	require.Equal("BlockRoot", f.TypeString)
+	require.Equal("BlockRoot", f.CaplinTypeString)
+
+	f, e3, ok = snaptype.ParseFileName("", "caplin/v1.1-013050-013100-ValidatorEffectiveBalance.seg")
+	require.True(ok)
+	require.False(e3)
+	require.Equal(13050000, int(f.From))
+	require.Equal(13100000, int(f.To))
+	require.Equal("ValidatorEffectiveBalance", f.TypeString)
+	require.Equal("ValidatorEffectiveBalance", f.CaplinTypeString)
+
+	f, e3, ok = snaptype.ParseFileName("caplin", "v1.1-013050-013100-ValidatorEffectiveBalance.seg")
+	require.True(ok)
+	require.False(e3)
+	require.Equal(13050000, int(f.From))
+	require.Equal(13100000, int(f.To))
+	require.Equal("ValidatorEffectiveBalance", f.TypeString)
+	require.Equal("ValidatorEffectiveBalance", f.CaplinTypeString)
 
 	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-022695-022696-transactions-to-block.idx"))
 	require.True(ok)
@@ -716,9 +732,14 @@ func TestParseCompressedFileName(t *testing.T) {
 	require.True(ok)
 	require.False(e3)
 	require.Equal("salt", f.TypeString)
-	require.Equal("domain", f.Type.Name())
+	require.Equal("salt", f.Type.Name())
 
 	f, e3, ok = snaptype.ParseFileName("", stat("idx/v1-tracesto.40-44.ef"))
+	require.True(ok)
+	require.True(e3)
+	require.Equal("tracesto", f.TypeString)
+
+	f, e3, ok = snaptype.ParseFileName("caplin/", stat("idx/v1-tracesto.40-44.ef"))
 	require.True(ok)
 	require.True(e3)
 	require.Equal("tracesto", f.TypeString)

@@ -57,11 +57,6 @@ func (a *ApiHandler) GetEthV1BeaconBlobSidecars(w http.ResponseWriter, r *http.R
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("block not found"))
 	}
 
-	// reject after fulu fork
-	if a.beaconChainCfg.GetCurrentStateVersion(*slot/a.beaconChainCfg.SlotsPerEpoch) >= clparams.FuluVersion {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("blobs are not supported after fulu fork"))
-	}
-
 	if a.caplinSnapshots != nil && *slot <= a.caplinSnapshots.FrozenBlobs() {
 		out, err := a.caplinSnapshots.ReadBlobSidecars(*slot)
 		if err != nil {
@@ -168,6 +163,8 @@ func (a *ApiHandler) GetEthV1DebugBeaconDataColumnSidecars(w http.ResponseWriter
 			return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 		}
 		if sidecar != nil {
+			sidecar.BlockRoot = blockRoot
+			sidecar.Slot = *slot
 			dataColumnSidecars = append(dataColumnSidecars, sidecar)
 		}
 	}

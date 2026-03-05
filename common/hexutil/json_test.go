@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"math/bits"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -101,7 +102,7 @@ func TestUnmarshalBig(t *testing.T) {
 
 func BenchmarkUnmarshalBig(b *testing.B) {
 	input := []byte(`"0x123456789abcdef123456789abcdef"`)
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		var v Big
 		if err := v.UnmarshalJSON(input); err != nil {
 			b.Fatal(err)
@@ -118,6 +119,57 @@ func TestMarshalBig(t *testing.T) {
 			want := `"` + test.want + `"`
 			require.Equal(t, want, string(out))
 			require.Equal(t, test.want, (*Big)(in).String())
+		})
+	}
+}
+
+var unmarshalUint16Tests = []unmarshalTest{
+	// invalid encoding
+	{input: "", wantErr: errJSONEOF},
+	{input: "null", wantErr: errNonString(uint16T)},
+	{input: "10", wantErr: errNonString(uint16T)},
+	{input: `"0"`, wantErr: wrapTypeError(ErrMissingPrefix, uint16T)},
+	{input: `"0x"`, wantErr: wrapTypeError(ErrEmptyNumber, uint16T)},
+	{input: `"0xfffff"`, wantErr: wrapTypeError(ErrUint16Range, uint16T)},
+	{input: `"0xx"`, wantErr: wrapTypeError(ErrSyntax, uint16T)},
+	{input: `"0x1zz01"`, wantErr: wrapTypeError(ErrUint16Range, uint16T)},
+	{input: `"0x1z"`, wantErr: wrapTypeError(ErrSyntax, uint16T)},
+
+	// valid encoding (accepts leading zeros, unlike Uint64)
+	{input: `""`, want: uint16(0)},
+	{input: `"0x0"`, want: uint16(0)},
+	{input: `"0x00"`, want: uint16(0)},
+	{input: `"0x01"`, want: uint16(1)},
+	{input: `"0x1"`, want: uint16(1)},
+	{input: `"0x0F"`, want: uint16(0xf)},
+	{input: `"0xff"`, want: uint16(0xff)},
+	{input: `"0x0100"`, want: uint16(0x100)},
+	{input: `"0xffff"`, want: uint16(0xffff)},
+	{input: `"0x0001"`, want: uint16(1)},
+}
+
+func TestUnmarshalUint16(t *testing.T) {
+	for idx, test := range unmarshalUint16Tests {
+		t.Run(fmt.Sprintf("%d", idx), func(t *testing.T) {
+			var v Uint16
+			err := json.Unmarshal([]byte(test.input), &v)
+			checkError(t, test.input, err, test.wantErr)
+			if test.want != nil {
+				require.EqualValues(t, test.want, v)
+			}
+		})
+	}
+}
+
+func TestMarshalUint16(t *testing.T) {
+	for idx, test := range encodeUint16Tests {
+		t.Run(fmt.Sprintf("%d", idx), func(t *testing.T) {
+			in := test.input.(uint16)
+			out, err := json.Marshal(Uint16(in))
+			require.NoError(t, err)
+			want := `"` + test.want + `"`
+			require.Equal(t, want, string(out))
+			require.Equal(t, test.want, (Uint16)(in).String())
 		})
 	}
 }
@@ -160,7 +212,7 @@ func TestUnmarshalUint64(t *testing.T) {
 
 func BenchmarkUnmarshalUint64(b *testing.B) {
 	input := []byte(`"0x123456789abcdf"`)
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		var v Uint64
 		_ = v.UnmarshalJSON(input)
 	}
@@ -227,7 +279,7 @@ func TestUnmarshalUint(t *testing.T) {
 		t.Run(fmt.Sprintf("%d", idx), func(t *testing.T) {
 			var v Uint
 			err := json.Unmarshal([]byte(test.input), &v)
-			if uintBits == 32 && test.wantErr32bit != nil {
+			if bits.UintSize == 32 && test.wantErr32bit != nil {
 				checkError(t, test.input, err, test.wantErr32bit)
 				return
 			}

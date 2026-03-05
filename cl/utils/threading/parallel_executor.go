@@ -21,6 +21,7 @@ func NewParallelExecutor() *ParallelExecutor {
 // close work channel and finish
 func (wp *ParallelExecutor) Execute() error {
 	var errOut error
+	var once sync.Once
 	if dbg.CaplinSyncedDataMangerDeadlockDetection {
 		st := dbg.Stack()
 		ch := make(chan struct{})
@@ -38,7 +39,7 @@ func (wp *ParallelExecutor) Execute() error {
 		go func(job func() error) {
 			defer wp.wg.Done()
 			if err := job(); err != nil {
-				errOut = err
+				once.Do(func() { errOut = err })
 			}
 		}(job)
 	}

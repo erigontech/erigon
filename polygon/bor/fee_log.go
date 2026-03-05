@@ -21,6 +21,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
@@ -34,7 +35,7 @@ func addTransferLog(
 	eventSig common.Hash,
 
 	sender,
-	recipient common.Address,
+	recipient accounts.Address,
 
 	amount,
 	input1,
@@ -60,8 +61,8 @@ func addTransferLog(
 		Topics: []common.Hash{
 			eventSig,
 			feeAddress.Hash(),
-			sender.Hash(),
-			recipient.Hash(),
+			sender.Value().Hash(),
+			recipient.Value().Hash(),
 		},
 		Data: data,
 	})

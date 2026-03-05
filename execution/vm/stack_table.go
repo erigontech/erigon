@@ -20,7 +20,7 @@
 package vm
 
 import (
-	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/protocol/params"
 )
 
 func maxStack(pop, push int) int {

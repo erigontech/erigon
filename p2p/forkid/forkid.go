@@ -115,7 +115,7 @@ func forkIsTimeBased(fork uint64) bool {
 }
 
 func newFilter(heightForks, timeForks []uint64, genesis common.Hash, headHeight, headTime uint64) Filter {
-	var forks []uint64
+	forks := make([]uint64, 0, len(heightForks)+len(timeForks))
 	forks = append(forks, heightForks...)
 	forks = append(forks, timeForks...)
 
@@ -193,7 +193,7 @@ func newFilter(heightForks, timeForks []uint64, genesis common.Hash, headHeight,
 			// No exact, subset or superset match. We are on differing chains, reject.
 			return ErrLocalIncompatibleOrStale
 		}
-		log.Error("Impossible fork ID validation", "id", id)
+		log.Error("[p2p] Impossible fork ID validation", "id", id)
 		return nil // Something's very wrong, accept rather than reject
 	}
 }
@@ -229,7 +229,7 @@ func GatherForks(config *chain.Config, genesisTime uint64) (heightForks []uint64
 			}
 			time = true
 		}
-		if field.Type != reflect.TypeOf(new(big.Int)) {
+		if field.Type != reflect.TypeFor[*big.Int]() {
 			continue
 		}
 		// Extract the fork rule block number and aggregate it

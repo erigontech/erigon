@@ -118,7 +118,7 @@ func VMErrorFromErr(err error) error {
 	}
 
 	return &VMError{
-		error: fmt.Errorf("%w", err),
+		error: err,
 		code:  vmErrorCodeFromErr(err),
 	}
 }

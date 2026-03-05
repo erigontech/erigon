@@ -14,10 +14,10 @@
 ##   Using "make" (see Makefile for defaults)
 ##   4. make docker
 ##
-##   5. make docker DOCKER_BINARIES='erigon downloader evm'
+##   5. DOCKER_BINARIES='erigon downloader rpcdaemon' make docker
 
-ARG BUILDER_IMAGE="golang:1.24-bookworm" \
-    TARGET_BASE_IMAGE="debian:12-slim" \
+ARG BUILDER_IMAGE="golang:1.25-trixie" \
+    TARGET_BASE_IMAGE="debian:13-slim" \
     BINARIES="erigon" \
     BUILD_DBTOOLS="false" \
     BUILD_DATE="Not defined" \
@@ -123,8 +123,8 @@ SHELL ["/bin/bash", "-c"]
 
 RUN --mount=type=bind,from=builder,source=/build,target=/tmp/build \
     echo Installing on ${TARGETARCH} with variant ${TARGETVARIANT} && \
-    addgroup --gid ${GID_ERIGON} ${GROUP} && \
-    adduser --system --uid ${UID_ERIGON} --ingroup ${GROUP} --home /home/${USER} --shell /bin/bash ${USER} && \
+    groupadd --gid ${GID_ERIGON} ${GROUP} && \
+    useradd --system --uid ${UID_ERIGON} -g ${GROUP} --home /home/${USER} --shell /bin/bash ${USER} && \
     apt update -y && \
     apt install -y --no-install-recommends ca-certificates && \
     apt clean && \

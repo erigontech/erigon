@@ -3,6 +3,7 @@ package blob_storage
 import (
 	"bytes"
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -317,13 +318,7 @@ func TestGetSavedColumnIndex(t *testing.T) {
 	// Should contain the written indices
 	assert.Len(t, savedIndices, len(indices))
 	for _, expectedIdx := range indices {
-		found := false
-		for _, savedIdx := range savedIndices {
-			if uint64(expectedIdx) == savedIdx {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(savedIndices, uint64(expectedIdx))
 		assert.True(t, found, "Expected index %d not found", expectedIdx)
 	}
 }

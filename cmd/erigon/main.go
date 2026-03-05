@@ -19,19 +19,17 @@ package main
 import (
 	"cmp"
 	"fmt"
-	"net/http"
 	"os"
 
-	"github.com/anacrolix/envpprof"
-	"github.com/felixge/fgprof"
 	"github.com/urfave/cli/v2"
+
+	"github.com/erigontech/erigon/common"
 
 	"github.com/erigontech/erigon/cmd/erigon/node"
 	erigonapp "github.com/erigontech/erigon/cmd/utils/app"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/version"
-	"github.com/erigontech/erigon/diagnostics"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/diagnostics/syscheck"
 	erigoncli "github.com/erigontech/erigon/node/cli"
@@ -39,15 +37,16 @@ import (
 )
 
 func main() {
-	defer envpprof.Stop()
-	http.DefaultServeMux.Handle("/debug/fgprof", fgprof.Handler())
-	app := erigonapp.MakeApp("erigon", runErigon, erigoncli.DefaultFlags)
-	if err := app.Run(os.Args); err != nil {
+	var err error
+	common.WithProfilersMain(func() {
+		app := erigonapp.MakeApp("erigon", runErigon, erigoncli.DefaultFlags)
+		err = app.Run(os.Args)
 		_, printErr := fmt.Fprintln(os.Stderr, err)
 		if printErr != nil {
 			log.Warn("Fprintln error", "err", printErr)
 		}
-		envpprof.Stop()
+	})
+	if err != nil {
 		os.Exit(1)
 	}
 }
@@ -99,7 +98,7 @@ func runErigon(cliCtx *cli.Context) (err error) {
 		return err
 	}
 
-	diagnostics.Setup(cliCtx, ethNode, metricsMux, pprofMux)
+	//diagnostics.Setup(cliCtx, ethNode, metricsMux, pprofMux)
 
 	err = ethNode.Serve()
 	if err != nil {

@@ -148,7 +148,7 @@ func (p *PeerStats) GetPeers() map[string]PeerStatistics {
 
 func (p *PeerStats) getPeers() map[string]PeerStatistics {
 	stats := make(map[string]PeerStatistics)
-	p.peersInfo.Range(func(key, value interface{}) bool {
+	p.peersInfo.Range(func(key, value any) bool {
 		loadedKey, ok := key.(string)
 		if !ok {
 			log.Debug("Failed to cast key to string", key)

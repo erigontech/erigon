@@ -198,7 +198,7 @@ var Schema = SchemaGen{
 
 		Hist: HistCfg{
 			ValuesTable:   kv.TblAccountHistoryVals,
-			CompressorCfg: seg.DefaultCfg, Compression: seg.CompressNone,
+			CompressorCfg: seg.DefaultCfg.WithValuesOnCompressedPage(64), Compression: seg.CompressNone,
 			Accessors: AccessorHashMap,
 
 			HistoryLargeValues: false,
@@ -263,7 +263,7 @@ var Schema = SchemaGen{
 
 		Hist: HistCfg{
 			ValuesTable:   kv.TblCommitmentHistoryVals,
-			CompressorCfg: HistoryCompressCfg, Compression: seg.CompressNone, // seg.CompressKeys | seg.CompressVals,
+			CompressorCfg: HistoryCompressCfg.WithValuesOnCompressedPage(64), Compression: seg.CompressNone, // seg.CompressKeys | seg.CompressVals,
 			HistoryIdx: kv.CommitmentHistoryIdx,
 			Accessors:  AccessorHashMap,
 
@@ -310,9 +310,9 @@ var Schema = SchemaGen{
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
 
 		Hist: HistCfg{
-			ValuesTable: kv.TblRCacheHistoryVals,
-			Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
-			Accessors:   AccessorHashMap,
+			ValuesTable:   kv.TblRCacheHistoryVals,
+			CompressorCfg: seg.Cfg{ValuesOnCompressedPage: 16}, Compression: seg.CompressNone, //seg.CompressKeys | seg.CompressVals,
+			Accessors: AccessorHashMap,
 
 			HistoryLargeValues: true,
 			HistoryIdx:         kv.RCacheHistoryIdx,
@@ -413,8 +413,8 @@ func AdjustReceiptCurrentVersionIfNeeded(dirs datadir.Dirs, logger log.Logger) e
 		logger.Info("adjusting receipt current version to v1.1")
 
 		// else v1.0 -- need to adjust version
-		Schema.ReceiptDomain.Version.DataKV = version.V1_1_standart
-		Schema.ReceiptDomain.Hist.Version.DataV = version.V1_1_standart
+		Schema.ReceiptDomain.FileVersion.DataKV = version.V1_1_standart
+		Schema.ReceiptDomain.Hist.FileVersion.DataV = version.V1_1_standart
 
 		return nil
 	})

@@ -11,24 +11,28 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pelletier/go-toml"
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon/common/dir"
-	"github.com/erigontech/erigon/db/config3"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/node/debug"
+	"github.com/erigontech/erigon/db/state"
 )
 
 func stepRebase(cliCtx *cli.Context) error {
-	logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
-	if err != nil {
-		return err
-	}
+	logger := log.Root()
 
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
-	currentStepSize := uint64(config3.DefaultStepSize) // in the future we can allow overrides
+	dirs := datadir.Open(cliCtx.String("datadir"))
+	settings, err := state.ResolveErigonDBSettings(dirs, logger, true)
+	if err != nil {
+		return err
+	}
+
+	currentStepSize := settings.StepSize
 	newStepSize := cliCtx.Uint64("new-step-size")
 	logger.Info("Rebasing step size", "current", currentStepSize, "new", newStepSize)
 
@@ -54,7 +58,6 @@ func stepRebase(cliCtx *cli.Context) error {
 	}
 
 	// Look for files to be renamed
-	dirs := datadir.Open(cliCtx.String("datadir"))
 	re := regexp.MustCompile(`^v(\d+(?:\.\d+)?)-(.+)\.(\d+)-(\d+)\.([^.]+)$`)
 
 	rens := make([]string, 0, 100)
@@ -139,16 +142,22 @@ func stepRebase(cliCtx *cli.Context) error {
 		fmt.Printf("Deleted: %s\n", p)
 	}
 
-	// warn about manual changes required
-	fmt.Printf("\nMANUAL CHANGES REQUIRED:\n\n")
-	fmt.Printf("On db/config3/config3.go, change the following constants:\n\n")
-	fmt.Printf("const DefaultStepSize = %d\n", newStepSize)
-	newFrozenSteps := config3.StepsInFrozenFile / factor
+	// Write rebased settings
+	settings.StepSize = newStepSize
+	newFrozenSteps := settings.StepsInFrozenFile / factor
 	if decr {
-		newFrozenSteps = config3.StepsInFrozenFile * factor
+		newFrozenSteps = settings.StepsInFrozenFile * factor
 	}
-	fmt.Printf("const StepsInFrozenFile = %d\n", newFrozenSteps)
-	fmt.Printf("\nCompile erigon binary with those settings before running the rebased datadir.\n")
+	settings.StepsInFrozenFile = newFrozenSteps
+
+	settingsBytes, err := toml.Marshal(settings)
+	if err != nil {
+		return err
+	}
+	err = os.WriteFile(filepath.Join(dirs.Snap, state.ERIGONDB_SETTINGS_FILE), settingsBytes, 0644)
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
