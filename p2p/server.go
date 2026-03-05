@@ -223,6 +223,11 @@ func (srv *Server) LocalNode() *enode.LocalNode {
 	return srv.localnode
 }
 
+// DiscV5 returns the UDPv5 discovery protocol instance, or nil if not running.
+func (srv *Server) DiscV5() *discover.UDPv5 {
+	return srv.discv5
+}
+
 // Peers returns all connected peers.
 func (srv *Server) Peers() []*Peer {
 	var ps []*Peer

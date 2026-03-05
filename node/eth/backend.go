@@ -575,6 +575,78 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}()
 	}
 
+	// Wire chain.toml ENR updater and P2P discovery after sentry servers are created.
+	if backend.downloader != nil && len(backend.sentryServers) > 0 {
+		backend.downloader.SetENRUpdater(func(ct enr.ChainToml) {
+			for _, srv := range backend.sentryServers {
+				if p2p := srv.GetP2PServer(); p2p != nil {
+					p2p.LocalNode().Set(ct)
+				}
+			}
+		})
+
+		sentryServers := backend.sentryServers
+		backend.downloader.SetNodeSourceFn(func() downloader.NodeSource {
+			var sources []downloader.NodeSource
+			for _, srv := range sentryServers {
+				p2pSrv := srv.GetP2PServer()
+				if p2pSrv == nil {
+					continue
+				}
+				dv5 := p2pSrv.DiscV5()
+				// Add directly connected devp2p peers FIRST — resolved peers take
+				// priority over discv5 routing table entries which may have stale ENRs.
+				srv := p2pSrv // capture for closure
+				peersFn := func() []*enode.Node {
+					peers := srv.Peers()
+					nodes := make([]*enode.Node, len(peers))
+					for i, p := range peers {
+						nodes[i] = p.Node()
+					}
+					return nodes
+				}
+				if dv5 != nil {
+					sources = append(sources, &downloader.ResolvingPeerNodeSource{
+						PeersFn:  peersFn,
+						Resolver: dv5,
+					})
+				} else {
+					sources = append(sources, &downloader.PeerNodeSource{
+						PeersFn: peersFn,
+					})
+				}
+				// Add discv5 routing table (deduped by CompositeNodeSource).
+				if dv5 != nil {
+					sources = append(sources, dv5)
+				}
+			}
+			if len(sources) == 0 {
+				return nil
+			}
+			return &downloader.CompositeNodeSource{Sources: sources}
+		})
+
+		// Re-publish chain.toml ENR entry after a delay to let P2P servers start.
+		// P2P servers start lazily on SetStatus(), so the ENR updater callback
+		// needs the P2P server to be running before it can set ENR entries.
+		go func() {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(30 * time.Second):
+			}
+			if pubErr := backend.downloader.PublishLocalChainToml(0); pubErr != nil {
+				logger.Debug("[chaintoml] no existing chain.toml to re-publish", "err", pubErr)
+			} else {
+				logger.Info("[chaintoml] re-published existing chain.toml ENR entry")
+			}
+		}()
+
+		if backend.config.Snapshot.P2PManifest {
+			backend.downloader.StartChainTomlDiscovery(ctx, backend.config.Snapshot.ChainName)
+		}
+	}
+
 	// setup periodic logging and prometheus updates
 	go mem.LogMemStats(ctx, logger)
 	go disk.UpdateDiskStats(ctx, logger)
@@ -1333,8 +1405,15 @@ func (s *Ethereum) setUpSnapDownloader(
 	}
 
 	if downloaderCfg != nil {
-		if err := downloadercfg.LoadSnapshotsHashes(ctx, downloaderCfg.Dirs, downloaderCfg.ChainName); err != nil {
-			return err
+		if s.config.Snapshot.P2PManifest {
+			s.logger.Info("P2P manifest mode: skipping centralized preverified.toml, waiting for P2P discovery")
+			// Clear embedded baseline so the node doesn't download from it.
+			// The discovery loop will populate the registry from P2P peers.
+			snapcfg.SetToml(downloaderCfg.ChainName, []byte{}, false)
+		} else {
+			if err := downloadercfg.LoadSnapshotsHashes(ctx, downloaderCfg.Dirs, downloaderCfg.ChainName); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -1344,17 +1423,6 @@ func (s *Ethereum) setUpSnapDownloader(
 	}
 	if client != nil {
 		s.downloaderClient = downloader.NewRpcClient(client, s.config.Dirs.Snap)
-	}
-
-	// Wire chain.toml ENR updater: advertise snapshot manifest info-hash via discv5.
-	if s.downloader != nil && len(s.sentryServers) > 0 {
-		s.downloader.SetENRUpdater(func(ct enr.ChainToml) {
-			for _, srv := range s.sentryServers {
-				if p2p := srv.GetP2PServer(); p2p != nil {
-					p2p.LocalNode().Set(ct)
-				}
-			}
-		})
 	}
 
 	return err

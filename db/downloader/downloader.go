@@ -119,6 +119,10 @@ type Downloader struct {
 	// enrUpdater is an optional callback to advertise chain.toml info-hash via discv5 ENR.
 	// Set via SetENRUpdater after P2P is available.
 	enrUpdater func(enr.ChainToml)
+
+	// nodeSourceFn lazily resolves the P2P node source for chain.toml discovery.
+	// Returns nil if P2P is not yet available. Called each discovery iteration.
+	nodeSourceFn func() NodeSource
 }
 
 type AggStats struct {
@@ -411,12 +415,57 @@ func (d *Downloader) SetENRUpdater(fn func(enr.ChainToml)) {
 
 // PublishLocalChainToml generates chain.toml from local torrents, builds its .torrent,
 // and advertises the info-hash via ENR. frozenTx is the current max frozen transaction number.
+// It also adds the chain.toml torrent to the client for seeding so other nodes can download it.
 func (d *Downloader) PublishLocalChainToml(frozenTx uint64) error {
 	d.lock.RLock()
 	updater := d.enrUpdater
 	d.lock.RUnlock()
 
-	return PublishChainToml(d.snapDir(), d.torrentFS, frozenTx, updater)
+	if err := PublishChainToml(d.snapDir(), d.torrentFS, frozenTx, updater); err != nil {
+		return err
+	}
+
+	// Seed the chain.toml torrent so other nodes can download it by info-hash.
+	if err := d.seedChainTomlTorrent(); err != nil {
+		d.logger.Debug("[chaintoml] could not seed chain.toml torrent", "err", err)
+	}
+	return nil
+}
+
+// seedChainTomlTorrent adds the chain.toml torrent to the client for seeding.
+func (d *Downloader) seedChainTomlTorrent() error {
+	spec, err := d.torrentFS.LoadByName(ChainTomlFileName)
+	if err != nil {
+		return fmt.Errorf("loading chain.toml torrent: %w", err)
+	}
+	t, _, err := d.torrentClient.AddTorrentSpec(spec)
+	if err != nil {
+		return fmt.Errorf("adding chain.toml torrent: %w", err)
+	}
+	// Verify we have the data and can seed it.
+	if !t.Complete().Bool() {
+		t.DownloadAll()
+	}
+	return nil
+}
+
+// SetNodeSourceFn sets a lazy resolver for the P2P node source.
+// The function is called each discovery iteration, returning nil if P2P isn't ready yet.
+func (d *Downloader) SetNodeSourceFn(fn func() NodeSource) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	d.nodeSourceFn = fn
+}
+
+// StartChainTomlDiscovery launches the background chain.toml discovery loop.
+// It discovers chain.toml from P2P peers and either merges new entries (acquiring mode)
+// or verifies against local entries (verify mode after initial sync).
+func (d *Downloader) StartChainTomlDiscovery(ctx context.Context, networkName string) {
+	d.wg.Add(1)
+	go func() {
+		defer d.wg.Done()
+		d.chainTomlDiscoveryLoop(ctx, networkName)
+	}()
 }
 
 // Check snapshot data looks right.
