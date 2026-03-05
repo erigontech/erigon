@@ -367,17 +367,11 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 	}
 
 	if label == dbcfg.ChainDB {
-		migrationsDB, err := migrations.OpenMigrationsDB(config.Dirs.Migrations, logger)
-		if err != nil {
-			return nil, fmt.Errorf("open migrations db: %w", err)
-		}
-		defer migrationsDB.Close()
-
 		migrator := migrations.NewMigrator(label)
 		if err := migrator.VerifyVersion(db, dbPath); err != nil {
 			return nil, err
 		}
-		has, err := migrator.HasPendingMigrations(migrationsDB)
+		has, err := migrator.HasPendingMigrations(db)
 		if err != nil {
 			return nil, err
 		}
@@ -388,7 +382,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 			if err != nil {
 				return nil, err
 			}
-			if err = migrator.Apply(db, migrationsDB, config.Dirs.DataDir, dbPath, logger); err != nil {
+			if err = migrator.Apply(db, config.Dirs.DataDir, dbPath, logger); err != nil {
 				return nil, err
 			}
 			db.Close()

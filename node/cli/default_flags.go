@@ -85,7 +85,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.DBReadConcurrencyFlag,
 	&utils.RpcAccessListFlag,
 	&utils.RpcTraceCompatFlag,
-	&utils.RpcGethCompatFlag,
 	&utils.RpcGasCapFlag,
 	&utils.RpcBlockRangeLimit,
 	&utils.RpcBatchLimit,
@@ -262,7 +261,6 @@ var DefaultFlags = []cli.Flag{
 
 	&utils.ExperimentalConcurrentCommitmentFlag,
 
-	&utils.MCPDisableFlag,
 	&utils.MCPAddrFlag,
 	&utils.MCPPortFlag,
 }

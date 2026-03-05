@@ -23,7 +23,7 @@ import (
 	"fmt"
 	"math/big"
 
-	keccak "github.com/erigontech/fastkeccak"
+	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
@@ -77,7 +77,7 @@ func (a *Address) checksumHex() []byte {
 	buf := a.hex()
 
 	// compute checksum
-	sha := keccak.NewFastKeccak()
+	sha := sha3.NewLegacyKeccak256()
 	//nolint:errcheck
 	sha.Write(buf[2:])
 	hash := sha.Sum(nil)

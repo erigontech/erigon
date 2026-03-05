@@ -89,7 +89,7 @@ type RequestGenerator interface {
 	GetCode(address common.Address, blockRef rpc.BlockReference) (hexutil.Bytes, error)
 	EstimateGas(args ethereum.CallMsg, blockNum BlockNumber) (uint64, error)
 	GasPrice() (*big.Int, error)
-	GetBlockReceipts(ctx context.Context, blockRef rpc.BlockNumberOrHash) (types.Receipts, error)
+
 	GetRootHash(ctx context.Context, startBlock uint64, endBlock uint64) (common.Hash, error)
 }
 
@@ -144,7 +144,6 @@ var Methods = struct {
 	ETHGasPrice              RPCMethod
 	ETHGetTransactionByHash  RPCMethod
 	ETHGetTransactionReceipt RPCMethod
-	ETHGetBlockReceipts      RPCMethod
 	BorGetRootHash           RPCMethod
 	ETHCall                  RPCMethod
 }{
@@ -169,7 +168,6 @@ var Methods = struct {
 	ETHGasPrice:               "eth_gasPrice",
 	ETHGetTransactionByHash:   "eth_getTransactionByHash",
 	ETHGetTransactionReceipt:  "eth_getTransactionReceipt",
-	ETHGetBlockReceipts:       "eth_getBlockReceipts",
 	BorGetRootHash:            "bor_getRootHash",
 	ETHCall:                   "eth_call",
 }

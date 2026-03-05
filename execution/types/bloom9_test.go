@@ -140,7 +140,7 @@ func BenchmarkCreateBloom(b *testing.B) {
 	b.Run("small", func(b *testing.B) {
 		b.ReportAllocs()
 		var bl Bloom
-		for b.Loop() {
+		for i := 0; i < b.N; i++ {
 			bl = CreateBloom(rSmall)
 		}
 		b.StopTimer()
@@ -153,7 +153,7 @@ func BenchmarkCreateBloom(b *testing.B) {
 	b.Run("large", func(b *testing.B) {
 		b.ReportAllocs()
 		var bl Bloom
-		for b.Loop() {
+		for i := 0; i < b.N; i++ {
 			bl = CreateBloom(rLarge)
 		}
 		b.StopTimer()

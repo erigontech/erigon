@@ -25,10 +25,10 @@ import (
 )
 
 type IdleClient struct {
-	cfg buildercfg.BuilderConfig
+	cfg buildercfg.MiningConfig
 }
 
-func NewIdleClient(cfg buildercfg.BuilderConfig) Client {
+func NewIdleClient(cfg buildercfg.MiningConfig) Client {
 	return &IdleClient{cfg: cfg}
 }
 

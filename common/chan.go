@@ -17,8 +17,9 @@
 package common
 
 import (
-	"context"
 	"errors"
+
+	"golang.org/x/net/context"
 )
 
 var ErrStopped = errors.New("stopped")

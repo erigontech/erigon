@@ -41,23 +41,6 @@ type BlobTx struct {
 
 func (stx *BlobTx) Type() byte { return BlobTxType }
 
-// copyData returns a copy of BlobTx where the TransactionMisc cache fields
-// (hash, from) are not copied directly but rebuilt field-by-field, avoiding
-// go vet copylocks warnings on the embedded sync/atomic.Pointer.
-func (stx *BlobTx) copyData() BlobTx {
-	return BlobTx{
-		DynamicFeeTransaction: DynamicFeeTransaction{
-			CommonTx:   stx.CommonTx.copyData(),
-			ChainID:    stx.ChainID,
-			TipCap:     stx.TipCap,
-			FeeCap:     stx.FeeCap,
-			AccessList: stx.AccessList,
-		},
-		MaxFeePerBlobGas:    stx.MaxFeePerBlobGas,
-		BlobVersionedHashes: stx.BlobVersionedHashes,
-	}
-}
-
 func (stx *BlobTx) GetBlobHashes() []common.Hash {
 	return stx.BlobVersionedHashes
 }
@@ -66,7 +49,7 @@ func (stx *BlobTx) GetBlobGas() uint64 {
 	return params.GasPerBlob * uint64(len(stx.BlobVersionedHashes))
 }
 
-func (stx *BlobTx) AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules) (*Message, error) {
+func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
 	var stxTo accounts.Address
 	if stx.To == nil {
 		stxTo = accounts.NilAddress
@@ -91,7 +74,10 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules)
 		return nil, errors.New("BlobTx transactions require Cancun")
 	}
 	if baseFee != nil {
-		msg.gasPrice.Set(baseFee)
+		overflow := msg.gasPrice.SetFromBig(baseFee)
+		if overflow {
+			return nil, errors.New("gasPrice higher than 2^256-1")
+		}
 	}
 	msg.gasPrice.Add(&msg.gasPrice, stx.TipCap)
 	if msg.gasPrice.Gt(stx.FeeCap) {

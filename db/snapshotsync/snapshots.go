@@ -190,7 +190,7 @@ func FindOverlaps(in []snaptype.FileInfo) (res []snaptype.FileInfo, overlapped [
 	return res, overlapped
 }
 
-func CanRetire(from, to uint64, snapType snaptype.Enum, snCfg *snapcfg.Cfg) (blockFrom, blockTo uint64, can bool) {
+func CanRetire(from, to uint64, snapType snaptype.Enum, chainConfig *chain.Config) (blockFrom, blockTo uint64, can bool) {
 	if to <= from {
 		return
 	}
@@ -198,7 +198,14 @@ func CanRetire(from, to uint64, snapType snaptype.Enum, snCfg *snapcfg.Cfg) (blo
 	roundedTo1K := (to / 1_000) * 1_000
 	var maxJump uint64 = 1_000
 
-	mergeLimit := snapcfg.MergeLimitFromCfg(snCfg, snapType, blockFrom)
+	var chainName string
+
+	if chainConfig != nil {
+		chainName = chainConfig.ChainName
+	}
+
+	snapCfg, _ := snapcfg.KnownCfg(chainName)
+	mergeLimit := snapcfg.MergeLimitFromCfg(snapCfg, snapType, blockFrom)
 
 	if blockFrom%mergeLimit == 0 {
 		maxJump = mergeLimit
@@ -427,13 +434,13 @@ func (s *DirtySegment) closeAndRemoveFiles() {
 	}
 }
 
-func (s *DirtySegment) OpenIdxIfNeed(dir string, optimistic bool, dirEntries []string) (err error) {
+func (s *DirtySegment) OpenIdxIfNeed(dir string, optimistic bool) (err error) {
 	if len(s.Type().IdxFileNames(s.from, s.to)) == 0 {
 		return nil
 	}
 
 	if s.refcount.Load() == 0 {
-		err = s.openIdx(dir, dirEntries)
+		err = s.openIdx(dir)
 
 		if err != nil {
 			if !errors.Is(err, os.ErrNotExist) {
@@ -449,7 +456,7 @@ func (s *DirtySegment) OpenIdxIfNeed(dir string, optimistic bool, dirEntries []s
 	return nil
 }
 
-func (s *DirtySegment) openIdx(dir string, dirEntries []string) (err error) {
+func (s *DirtySegment) openIdx(dir string) (err error) {
 	if s.Decompressor == nil {
 		return nil
 	}
@@ -462,18 +469,11 @@ func (s *DirtySegment) openIdx(dir string, dirEntries []string) (err error) {
 		if s.indexes[i] != nil {
 			continue
 		}
-		fPathMask, err := version.ReplaceVersionWithMask(fileName)
+		fPathMask, err := version.ReplaceVersionWithMask(filepath.Join(dir, fileName))
 		if err != nil {
 			return fmt.Errorf("[open index] can't replace with mask in file %s: %w", fileName, err)
 		}
-
-		var fPath string
-		var ok bool
-		if dirEntries != nil {
-			fPath, _, ok, err = version.MatchVersionedFile(fPathMask, dirEntries, dir)
-		} else {
-			fPath, _, ok, err = version.FindFilesWithVersionsByPattern(filepath.Join(dir, fPathMask))
-		}
+		fPath, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
 		if err != nil {
 			return fmt.Errorf("%w, fileName: %s", err, fileName)
 		}
@@ -497,12 +497,6 @@ type VisibleSegments []*VisibleSegment
 
 func (s VisibleSegments) BeginRo() *RoTx {
 	for _, seg := range s {
-		if seg.src == nil {
-			continue
-		}
-		if seg.src.frozen {
-			continue
-		}
 		seg.src.refcount.Add(1)
 	}
 	return &RoTx{Segments: s}
@@ -522,9 +516,6 @@ func (s *RoTx) Close() {
 	for i := range VisibleSegments {
 		src := VisibleSegments[i].src
 		if src == nil {
-			continue
-		}
-		if src.frozen {
 			continue
 		}
 
@@ -560,7 +551,6 @@ type RoSnapshots struct {
 	segmentsMinByType map[snaptype.Enum]*atomic.Uint64 // min block number per segment type
 	idxMax            atomic.Uint64                    // all types of .idx files are available - up to this number
 	cfg               ethconfig.BlocksFreezing
-	snCfg             *snapcfg.Cfg
 	logger            log.Logger
 
 	ready     ready
@@ -585,8 +575,7 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	for i, t := range types {
 		enums[i] = t.Enum()
 	}
-	snCfg := snapcfg.KnownCfgOrDevnet(cfg.ChainName)
-	s := &RoSnapshots{dir: snapDir, cfg: cfg, snCfg: snCfg, logger: logger,
+	s := &RoSnapshots{dir: snapDir, cfg: cfg, logger: logger,
 		types: types, enums: enums,
 		dirty:             make([]*btree.BTreeG[*DirtySegment], snaptype.MaxEnum),
 		alignMin:          alignMin,
@@ -1087,24 +1076,11 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 	var segmentsMaxSet bool
 
 	wg := &errgroup.Group{}
-	wg.SetLimit(estimate.HalfCPUs())
+	wg.SetLimit(64)
 	//fmt.Println("RS", s)
 	//defer fmt.Println("Done RS", s)
 
-	// Read full directory listing once for efficient index file lookups
-	var dirEntries []string
-	if open {
-		entries, err := os.ReadDir(s.dir)
-		if err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("read dir %s: %w", s.dir, err)
-		}
-		dirEntries = make([]string, 0, len(entries))
-		for _, e := range entries {
-			if !e.IsDir() {
-				dirEntries = append(dirEntries, e.Name())
-			}
-		}
-	}
+	snConfig, _ := snapcfg.KnownCfg(s.cfg.ChainName)
 
 	for _, fName := range fileNames {
 		f, isState, ok := snaptype.ParseFileName(s.dir, fName)
@@ -1138,7 +1114,7 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 		})
 
 		if !exists {
-			sn = &DirtySegment{segType: f.Type, version: f.Version, Range: Range{f.From, f.To}, frozen: s.snCfg.IsFrozen(f)}
+			sn = &DirtySegment{segType: f.Type, version: f.Version, Range: Range{f.From, f.To}, frozen: snConfig.IsFrozen(f)}
 		}
 
 		if open {
@@ -1166,7 +1142,7 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 
 		if open {
 			wg.Go(func() error {
-				if err := sn.OpenIdxIfNeed(s.dir, optimistic, dirEntries); err != nil {
+				if err := sn.OpenIdxIfNeed(s.dir, optimistic); err != nil {
 					return err
 				}
 				return nil

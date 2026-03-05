@@ -48,7 +48,6 @@ func TestQueryAllWithoutPanicUnknown(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	t.Parallel()
 
 	const ObservationWindow = 10 * time.Second
 

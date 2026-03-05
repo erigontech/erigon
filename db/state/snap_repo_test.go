@@ -14,7 +14,6 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/recsplit"
@@ -31,8 +30,9 @@ import (
 
 func TestOpenFolder_AccountsDomain(t *testing.T) {
 	if testing.Short() {
-		t.Skip("slow test")
+		t.Skip()
 	}
+
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	name, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
@@ -84,8 +84,9 @@ func TestOpenFolder_AccountsDomain(t *testing.T) {
 
 func TestOpenFolder_CodeII(t *testing.T) {
 	if testing.Short() {
-		t.Skip("slow test")
+		t.Skip()
 	}
+
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	name, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
@@ -137,8 +138,9 @@ func TestOpenFolder_CodeII(t *testing.T) {
 
 func TestIntegrateDirtyFile(t *testing.T) {
 	if testing.Short() {
-		t.Skip("slow test")
+		t.Skip()
 	}
+
 	// setup account
 	// add a dirty file
 	// check presence of dirty file
@@ -176,7 +178,6 @@ func TestIntegrateDirtyFile(t *testing.T) {
 
 	filesItem.decompressor, err = seg.NewDecompressor(filename)
 	require.NoError(t, err)
-	defer filesItem.decompressor.Close()
 	// add dirty file
 	repo.IntegrateDirtyFile(filesItem)
 	_, found := repo.dirtyFiles.Get(filesItem)
@@ -185,8 +186,9 @@ func TestIntegrateDirtyFile(t *testing.T) {
 
 func TestCloseFilesAfterRootNum(t *testing.T) {
 	if testing.Short() {
-		t.Skip("slow test")
+		t.Skip()
 	}
+
 	// setup account
 	// set various root numbers and check if the right files are closed
 	dirs := datadir.New(t.TempDir())
@@ -241,8 +243,9 @@ func TestCloseFilesAfterRootNum(t *testing.T) {
 
 func TestMergeRangeSnapRepo(t *testing.T) {
 	if testing.Short() {
-		t.Skip("slow test")
+		t.Skip()
 	}
+
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
@@ -287,53 +290,35 @@ func TestMergeRangeSnapRepo(t *testing.T) {
 		cleanupFiles(t, repo, dirs)
 	}
 
-	execTestCase := func(ranges []testFileRange, vfCount int, needMerge bool, mergeFromStep, mergeToStep uint64) {
-		testFn(ranges, vfCount, needMerge, mergeFromStep, mergeToStep)
-		// Clean up temporary files created by compressors/decompressors in dirs.Tmp
-		filepath.WalkDir(dirs.Tmp, func(path string, d os.DirEntry, err error) error {
-			if err != nil {
-				if os.IsNotExist(err) {
-					return nil
-				}
-				return err
-			}
-			if d.IsDir() {
-				return nil
-			}
-			_ = dir.RemoveFile(path)
-			return nil
-		})
-	}
-
 	// 0-1, 1-2 => 0-2
-	execTestCase([]testFileRange{{0, 1}, {1, 2}}, 2, true, 0, 2)
+	testFn([]testFileRange{{0, 1}, {1, 2}}, 2, true, 0, 2)
 
 	// 0-1, 1-2, 2-3 => 0-2, 2-3
-	execTestCase([]testFileRange{{0, 1}, {1, 2}, {2, 3}}, 3, true, 0, 2)
+	testFn([]testFileRange{{0, 1}, {1, 2}, {2, 3}}, 3, true, 0, 2)
 
 	// 0-1, 1-2, 2-3, 3-4 => 0-4
-	execTestCase([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}}, 4, true, 0, 4)
+	testFn([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}}, 4, true, 0, 4)
 
 	// 0-1, 1-2, 2-3, 3-4, 4-5, 5-6, 6-7 => 0-1, 1-2, 2-3, 3-4, 4-6, 6-7
-	execTestCase([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 7}}, 7, true, 4, 6)
+	testFn([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 7}}, 7, true, 4, 6)
 
 	// 0-1, 1-2, 2-3, 3-4, 4-6, 6-7 => 0-4, 4-6, 6-7
-	execTestCase([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 6}, {6, 7}}, 6, true, 0, 4)
+	testFn([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 6}, {6, 7}}, 6, true, 0, 4)
 
 	// 0-4, 4-6, 6-7 => same
-	execTestCase([]testFileRange{{0, 4}, {4, 6}, {6, 7}}, 3, false, 0, 0)
+	testFn([]testFileRange{{0, 4}, {4, 6}, {6, 7}}, 3, false, 0, 0)
 
 	// 0-1, 1-2, 2-3, 3-4, 0-4 => no merge
-	execTestCase([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {0, 4}}, 1, false, 0, 0)
+	testFn([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {0, 4}}, 1, false, 0, 0)
 
 	// 0-1, 1-2, 2-3, 3-4, 0-2 => 0-4
-	execTestCase([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {0, 2}}, 3, true, 0, 4)
+	testFn([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {0, 2}}, 3, true, 0, 4)
 
 	// 0-1, 1-2, ..... 14-15 => 0-1....12-13, 13-15
-	execTestCase([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 7}, {7, 8}, {8, 9}, {9, 10}, {10, 11}, {11, 12}, {12, 13}, {13, 14}, {14, 15}}, 15, true, 13, 15)
+	testFn([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 7}, {7, 8}, {8, 9}, {9, 10}, {10, 11}, {11, 12}, {12, 13}, {13, 14}, {14, 15}}, 15, true, 13, 15)
 
 	//0-1....12-13, 13-15, 15-16 => 0-16
-	execTestCase([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 7}, {7, 8}, {8, 9}, {9, 10}, {10, 11}, {11, 12}, {12, 13}, {13, 15}, {15, 16}}, 15, true, 0, 16)
+	testFn([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 7}, {7, 8}, {8, 9}, {9, 10}, {10, 11}, {11, 12}, {12, 13}, {13, 15}, {15, 16}}, 15, true, 0, 16)
 }
 
 // foreign key; commitment <> accounts
@@ -350,6 +335,8 @@ func TestReferencingIntegrityChecker(t *testing.T) {
 		return name, schema
 	})
 
+	defer accountsR.Close()
+
 	_, commitmentR := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
 		accessors := statecfg.AccessorHashMap
 		name = "commitment"
@@ -359,6 +346,7 @@ func TestReferencingIntegrityChecker(t *testing.T) {
 			Build()
 		return name, schema
 	})
+	defer commitmentR.Close()
 
 	accountsR.integrity = NewDependencyIntegrityChecker(dirs, log.New())
 	accountsR.integrity.AddDependency(FromDomain(kv.AccountsDomain), &DependentInfo{
@@ -500,9 +488,7 @@ func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
 
 		merged := newFilesItemWithSnapConfig(mr.from, mr.to, repo.cfg)
 		repo.IntegrateDirtyFile(merged)
-		dirEntries, err := filesFromDir(repo.schema.DataDirectory())
-		require.NoError(t, err)
-		require.NoError(t, repo.openDirtyFiles(dirEntries))
+		require.NoError(t, repo.openDirtyFiles())
 		repo.RecalcVisibleFiles(RootNum(MaxUint64))
 
 		vf = repo.visibleFiles()
@@ -561,14 +547,14 @@ func cleanupFiles(t *testing.T, repo *SnapshotRepo, dirs datadir.Dirs) {
 	repo.Close()
 	repo.RecalcVisibleFiles(0)
 
-	filepath.WalkDir(dirs.DataDir, func(path string, d os.DirEntry, err error) error {
+	filepath.Walk(dirs.DataDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			if os.IsNotExist(err) { //skip magically disappeared files
 				return nil
 			}
 			return err
 		}
-		if d.IsDir() {
+		if info.IsDir() {
 			return nil
 		}
 		err = dir.RemoveFile(path)
@@ -601,7 +587,6 @@ func setupEntity(t *testing.T, dirs datadir.Dirs, genRepo func(stepSize uint64, 
 		SnapshotCreationConfig: &createConfig,
 		Schema:                 schema,
 	}, log.New())
-	t.Cleanup(repo.Close)
 
 	return name, repo
 }
@@ -683,12 +668,12 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 		if strings.HasSuffix(filename, ".ef") || strings.HasSuffix(filename, ".v") || strings.HasSuffix(filename, ".kv") {
 			seg, err := seg.NewCompressor(context.Background(), t.Name(), filename, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 			require.NoError(t, err)
-			defer seg.Close()
 			seg.DisableFsync()
 			if err = seg.AddWord([]byte("word")); err != nil {
 				t.Fatal(err)
 			}
 			require.NoError(t, seg.Compress())
+			seg.Close()
 
 			if strings.Contains(filename, name) && containsSubstring(t, filename, extensions) && strings.Contains(filename, dataFolder) {
 				dataFileCount++
@@ -698,10 +683,8 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 		}
 
 		if strings.HasSuffix(filename, ".bt") {
-			sampleFile := filename + ".sample"
-			seg2, err := seg.NewCompressor(context.Background(), t.Name(), sampleFile, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+			seg2, err := seg.NewCompressor(context.Background(), t.Name(), filename+".sample", dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 			require.NoError(t, err)
-			defer seg2.Close()
 			seg2.DisableFsync()
 			if err = seg2.AddWord([]byte("key")); err != nil {
 				t.Fatal(err)
@@ -710,18 +693,17 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 				t.Fatal(err)
 			}
 			require.NoError(t, seg2.Compress())
-			seg3, err := seg.NewDecompressor(sampleFile)
+			seg2.Close()
+			seg3, err := seg.NewDecompressor(filename + ".sample")
 			require.NoError(t, err)
-			defer seg3.Close()
-			defer dir.RemoveFile(sampleFile)
 
 			r := seg.NewReader(seg3.MakeGetter(), seg.CompressNone)
-			bti, err := btindex.CreateBtreeIndexWithDecompressor(filename, 128, r, uint32(1), background.NewProgressSet(), dirs.Tmp, log.New(), true, statecfg.AccessorBTree|statecfg.AccessorExistence)
+			btindex, err := CreateBtreeIndexWithDecompressor(filename, 128, r, uint32(1), background.NewProgressSet(), dirs.Tmp, log.New(), true, statecfg.AccessorBTree|statecfg.AccessorExistence)
 			if err != nil {
 				t.Fatal(err)
 			}
 			seg3.Close()
-			bti.Close()
+			btindex.Close()
 
 			if strings.Contains(filename, name) && containsSubstring(t, filename, extensions) {
 				btCount++
@@ -733,9 +715,9 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 		if strings.HasSuffix(filename, ".kvei") {
 			filter, err := existence.NewFilter(0, filename, false)
 			require.NoError(t, err)
-			defer filter.Close()
 			filter.DisableFsync()
 			require.NoError(t, filter.Build())
+			filter.Close()
 
 			if strings.Contains(filename, name) && containsSubstring(t, filename, extensions) {
 				existenceCount++

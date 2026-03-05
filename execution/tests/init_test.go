@@ -20,6 +20,7 @@
 package executiontests
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -28,11 +29,8 @@ import (
 	"regexp"
 	"runtime"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
-
-	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tests/testutil"
@@ -51,9 +49,9 @@ func readJSONFile(fn string, value any) error {
 		return fmt.Errorf("error reading JSON file: %w", err)
 	}
 
-	if err = jsoniter.Unmarshal(data, &value); err != nil {
-		if offset, ok := jsoniterErrorOffset(err); ok {
-			line := findLine(data, offset)
+	if err = json.Unmarshal(data, &value); err != nil {
+		if syntaxerr, ok := err.(*json.SyntaxError); ok {
+			line := findLine(data, syntaxerr.Offset)
 			return fmt.Errorf("JSON syntax error at line %v: %w", line, err)
 		}
 		return err
@@ -73,27 +71,6 @@ func findLine(data []byte, offset int64) (line int) {
 		}
 	}
 	return
-}
-
-// jsoniterErrorOffset extracts the byte offset from a jsoniter error message.
-// jsoniter formats errors as: "..., error found in #N byte of ..."
-func jsoniterErrorOffset(err error) (int64, bool) {
-	const marker = ", error found in #"
-	msg := err.Error()
-	idx := strings.Index(msg, marker)
-	if idx < 0 {
-		return 0, false
-	}
-	rest := msg[idx+len(marker):]
-	end := strings.IndexByte(rest, ' ')
-	if end < 0 {
-		return 0, false
-	}
-	n, parseErr := strconv.ParseInt(rest[:end], 10, 64)
-	if parseErr != nil {
-		return 0, false
-	}
-	return n, true
 }
 
 // testMatcher controls skipping and chain config assignment to tests.
@@ -118,10 +95,6 @@ type testFailure struct {
 
 // skipShortMode skips tests matching when the -short flag is used.
 func (tm *testMatcher) slow(pattern string) {
-	if runtime.GOOS == "windows" {
-		tm.skipLoad(pattern)
-		return
-	}
 	tm.slowpat = append(tm.slowpat, regexp.MustCompile(pattern))
 }
 
@@ -203,7 +176,7 @@ func (tm *testMatcher) walk(t *testing.T, dir string, runTest any) {
 		fmt.Fprintf(os.Stderr, "can't find test files in %s, did you clone the tests submodule?\n", dir)
 		t.Skip("missing test files")
 	}
-	err = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+	err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			if os.IsNotExist(err) { //skip magically disappeared files
 				return nil
@@ -211,7 +184,7 @@ func (tm *testMatcher) walk(t *testing.T, dir string, runTest any) {
 			return err
 		}
 		name := filepath.ToSlash(strings.TrimPrefix(path, dir+string(filepath.Separator)))
-		if d.IsDir() {
+		if info.IsDir() {
 			if _, skipload := tm.findSkip(name + "/"); skipload {
 				return filepath.SkipDir
 			}

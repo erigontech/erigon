@@ -59,7 +59,6 @@ type Dirs struct {
 	CaplinLatest     string
 	CaplinGenesis    string
 	CaplinHistory    string
-	Migrations       string // persistent DB tracking which migrations have been applied
 
 	Log string
 }
@@ -85,7 +84,6 @@ func New(datadir string) Dirs {
 		dirs.CaplinGenesis,
 		dirs.CaplinColumnData,
 		dirs.CaplinHistory,
-		dirs.Migrations,
 		filepath.Join(datadir, "logs"),
 	)
 
@@ -130,7 +128,6 @@ func Open(datadir string) Dirs {
 		CaplinLatest:     filepath.Join(datadir, "caplin", "latest"),
 		CaplinGenesis:    filepath.Join(datadir, "caplin", "genesis-state"),
 		CaplinHistory:    filepath.Join(datadir, "caplin", "history"),
-		Migrations:       filepath.Join(datadir, "migrations"),
 	}
 	return dirs
 }
@@ -153,7 +150,7 @@ func TryFlock(dirs Dirs) (*flock.Flock, bool, error) {
 	l := dirs.newFlock()
 	locked, err := l.TryLock()
 	if err != nil {
-		return nil, false, fmt.Errorf("%w, %s", convertFileLockError(err), dirs.DataDir)
+		return nil, false, convertFileLockError(err)
 	}
 	return l, locked, nil
 }
@@ -172,7 +169,7 @@ func (d Dirs) MustFlock() (Dirs, *flock.Flock, error) {
 		return d, l, err
 	}
 	if !locked {
-		return d, l, fmt.Errorf("%w, %s", ErrDataDirLocked, d.DataDir)
+		return d, l, ErrDataDirLocked
 	}
 	return d, l, nil
 }
@@ -188,7 +185,7 @@ func (d Dirs) TryFlock() (unlock func(), err error) {
 	}()
 	locked, err := f.TryLock()
 	if err != nil {
-		err = fmt.Errorf("%w, %s", convertFileLockError(err), d.DataDir)
+		err = convertFileLockError(err)
 		return
 	}
 	if locked {
@@ -197,7 +194,7 @@ func (d Dirs) TryFlock() (unlock func(), err error) {
 			panicif.Err(f.Unlock())
 		}
 	} else {
-		err = fmt.Errorf("%w %s", ErrDataDirLocked, d.DataDir)
+		err = ErrDataDirLocked
 	}
 	return
 }

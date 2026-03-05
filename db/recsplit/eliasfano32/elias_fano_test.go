@@ -18,7 +18,6 @@ package eliasfano32
 
 import (
 	"bytes"
-	"fmt"
 	"math"
 	"math/bits"
 	"testing"
@@ -95,8 +94,9 @@ func TestEliasFanoSeekBoundaries(t *testing.T) {
 
 func TestEliasFanoSeek(t *testing.T) {
 	if testing.Short() {
-		t.Skip("slow test")
+		t.Skip()
 	}
+
 	count := uint64(100_000)
 	maxOffset := (count - 1) * 123
 	ef := NewEliasFano(count, maxOffset)
@@ -270,11 +270,6 @@ func TestEliasFano(t *testing.T) {
 	assert.Equal(t, ef2.Max(), Max(buf.Bytes()))
 	assert.Equal(t, ef2.Min(), Min(buf.Bytes()))
 	assert.Equal(t, ef2.Count(), Count(buf.Bytes()))
-
-	ref := RebasedEliasFano{}
-	ref.Reset(1000, buf.Bytes())
-	assert.True(t, ref.Has(1037))
-	assert.False(t, ref.Has(1038))
 }
 
 func BenchmarkRead(b *testing.B) {
@@ -560,9 +555,6 @@ func BenchmarkEF(b *testing.B) {
 		}
 	})
 	b.Run("reverse seek to value 1_230", func(b *testing.B) {
-		it := ef.ReverseIterator()
-		it.Seek(1_230)
-
 		for b.Loop() {
 			it := ef.ReverseIterator()
 			it.Seek(1_230)
@@ -589,22 +581,6 @@ func BenchmarkEF(b *testing.B) {
 			}
 		}
 	})
-}
-
-func BenchmarkBuild(b *testing.B) {
-	for _, count := range []uint64{100, 1_000_000} {
-		b.Run(fmt.Sprintf("count=%d", count), func(b *testing.B) {
-			maxOffset := (count - 1) * 123
-			ef := NewEliasFano(count, maxOffset)
-			for i := uint64(0); i < count; i++ {
-				ef.AddOffset(i * 123)
-			}
-			b.ResetTimer()
-			for b.Loop() {
-				ef.Build()
-			}
-		})
-	}
 }
 
 func naiveReverseIterator(ef *EliasFano) *stream.ArrStream[uint64] {

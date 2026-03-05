@@ -20,10 +20,9 @@
 package ethash
 
 import (
+	"math/big"
 	"testing"
 	"time"
-
-	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
@@ -45,7 +44,7 @@ func TestStaleSubmission(t *testing.T) {
 		// Case1: submit solution for the latest mining package
 		{
 			[]*types.Header{
-				{ParentHash: common.BytesToHash([]byte{0xa}), Number: *uint256.NewInt(1), Difficulty: *uint256.NewInt(100000000)},
+				{ParentHash: common.BytesToHash([]byte{0xa}), Number: big.NewInt(1), Difficulty: big.NewInt(100000000)},
 			},
 			0,
 			true,
@@ -53,8 +52,8 @@ func TestStaleSubmission(t *testing.T) {
 		// Case2: submit solution for the previous package but have same parent.
 		{
 			[]*types.Header{
-				{ParentHash: common.BytesToHash([]byte{0xb}), Number: *uint256.NewInt(2), Difficulty: *uint256.NewInt(100000000)},
-				{ParentHash: common.BytesToHash([]byte{0xb}), Number: *uint256.NewInt(2), Difficulty: *uint256.NewInt(100000001)},
+				{ParentHash: common.BytesToHash([]byte{0xb}), Number: big.NewInt(2), Difficulty: big.NewInt(100000000)},
+				{ParentHash: common.BytesToHash([]byte{0xb}), Number: big.NewInt(2), Difficulty: big.NewInt(100000001)},
 			},
 			0,
 			true,
@@ -62,8 +61,8 @@ func TestStaleSubmission(t *testing.T) {
 		// Case3: submit stale but acceptable solution
 		{
 			[]*types.Header{
-				{ParentHash: common.BytesToHash([]byte{0xc}), Number: *uint256.NewInt(3), Difficulty: *uint256.NewInt(100000000)},
-				{ParentHash: common.BytesToHash([]byte{0xd}), Number: *uint256.NewInt(9), Difficulty: *uint256.NewInt(100000000)},
+				{ParentHash: common.BytesToHash([]byte{0xc}), Number: big.NewInt(3), Difficulty: big.NewInt(100000000)},
+				{ParentHash: common.BytesToHash([]byte{0xd}), Number: big.NewInt(9), Difficulty: big.NewInt(100000000)},
 			},
 			0,
 			true,
@@ -71,8 +70,8 @@ func TestStaleSubmission(t *testing.T) {
 		// Case4: submit very old solution
 		{
 			[]*types.Header{
-				{ParentHash: common.BytesToHash([]byte{0xe}), Number: *uint256.NewInt(10), Difficulty: *uint256.NewInt(100000000)},
-				{ParentHash: common.BytesToHash([]byte{0xf}), Number: *uint256.NewInt(17), Difficulty: *uint256.NewInt(100000000)},
+				{ParentHash: common.BytesToHash([]byte{0xe}), Number: big.NewInt(10), Difficulty: big.NewInt(100000000)},
+				{ParentHash: common.BytesToHash([]byte{0xf}), Number: big.NewInt(17), Difficulty: big.NewInt(100000000)},
 			},
 			0,
 			false,
@@ -97,14 +96,13 @@ func TestStaleSubmission(t *testing.T) {
 		select {
 		case resWithReceipts := <-results:
 			res := resWithReceipts.Block
-			diff := res.Difficulty()
 			if res.Nonce() != fakeNonce {
 				t.Errorf("case %d block nonce mismatch, want %x, get %x", id+1, fakeNonce, res.Nonce())
 			}
 			if res.MixDigest() != fakeDigest {
 				t.Errorf("case %d block digest mismatch, want %x, get %x", id+1, fakeDigest, res.MixDigest())
 			}
-			if !diff.Eq(&c.headers[c.submitIndex].Difficulty) {
+			if res.Difficulty().Uint64() != c.headers[c.submitIndex].Difficulty.Uint64() {
 				t.Errorf("case %d block difficulty mismatch, want %d, get %d", id+1, c.headers[c.submitIndex].Difficulty, res.Difficulty())
 			}
 			if res.NumberU64() != c.headers[c.submitIndex].Number.Uint64() {

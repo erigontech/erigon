@@ -21,14 +21,14 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/stagedsync/bodydownload"
+	"github.com/erigontech/erigon/execution/tests/mock"
 )
 
 func TestCreateBodyDownload(t *testing.T) {
 	t.Parallel()
-	m := execmoduletester.New(t)
+	m := mock.Mock(t)
 	tx, err := m.DB.BeginRo(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()

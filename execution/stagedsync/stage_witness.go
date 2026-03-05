@@ -17,7 +17,6 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/trie"
-	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -39,7 +38,7 @@ type WitnessStore struct {
 	Tds             *state.TrieDbState
 	TrieStateWriter *state.TrieStateWriter
 	Statedb         *state.IntraBlockState
-	ChainReader     rules.ChainReader
+	ChainReader     *ChainReaderImpl
 	GetHashFn       func(n uint64) (common.Hash, error)
 }
 
@@ -71,7 +70,7 @@ func PrepareForWitness(tx kv.TemporalTx, block *types.Block, prevRoot common.Has
 
 	statedb := state.New(tds)
 
-	chainReader := exec.NewChainReader(cfg.chainConfig, tx, cfg.blockReader, logger)
+	chainReader := NewChainReaderImpl(cfg.chainConfig, tx, cfg.blockReader, logger)
 
 	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
 		return cfg.blockReader.Header(ctx, tx, hash, number)

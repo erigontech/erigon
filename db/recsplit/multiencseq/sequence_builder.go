@@ -29,12 +29,8 @@ const SIMPLE_SEQUENCE_MAX_THRESHOLD = 16
 //
 // This is the "writer" counterpart of SequenceReader.
 type SequenceBuilder struct {
-	baseNum    uint64
-	smallBuf   [SIMPLE_SEQUENCE_MAX_THRESHOLD]uint32 // rebased values for simple encoding (count <= 16)
-	smallCount uint8
-	rebasedEf  *eliasfano32.EliasFano // direct rebased EF for large sequences (count > 16)
-	it1        SequenceIterator
-	it2        SequenceIterator
+	baseNum uint64
+	ef      *eliasfano32.EliasFano
 }
 
 // Creates a new builder. The builder is not meant to be reused. The construction
@@ -51,90 +47,67 @@ type SequenceBuilder struct {
 // count: this is the number of elements in the sequence, used in case of elias fano
 // maxOffset: this is maximum value in the sequence, used in case of elias fano
 func NewBuilder(baseNum, count, maxOffset uint64) *SequenceBuilder {
-	if count > SIMPLE_SEQUENCE_MAX_THRESHOLD {
-		// For large sequences, target rebased EF directly. AddOffset subtracts baseNum
-		// on the fly, so AppendBytes can serialize without a second pass.
-		return &SequenceBuilder{
-			baseNum:   baseNum,
-			rebasedEf: eliasfano32.NewEliasFano(count, maxOffset-baseNum),
-		}
-	}
-	return &SequenceBuilder{baseNum: baseNum}
-}
-
-// Reset reinitializes the builder for a new sequence, reusing the existing object
-// and its internal EliasFano allocation where possible.
-// Same parameter semantics as NewBuilder.
-func (b *SequenceBuilder) Reset(baseNum, count, maxOffset uint64) {
-	b.baseNum = baseNum
-	b.smallCount = 0
-	if count > SIMPLE_SEQUENCE_MAX_THRESHOLD {
-		if b.rebasedEf != nil {
-			b.rebasedEf.ResetForWrite(count, maxOffset-baseNum)
-		} else {
-			b.rebasedEf = eliasfano32.NewEliasFano(count, maxOffset-baseNum)
-		}
-	} else {
-		b.rebasedEf = nil
+	return &SequenceBuilder{
+		baseNum: baseNum,
+		ef:      eliasfano32.NewEliasFano(count, maxOffset),
 	}
 }
 
 func (b *SequenceBuilder) AddOffset(offset uint64) {
-	if b.rebasedEf != nil {
-		b.rebasedEf.AddOffset(offset - b.baseNum)
-		return
-	}
-	b.smallBuf[b.smallCount] = uint32(offset - b.baseNum)
-	b.smallCount++
+	// TODO: write offset already subtracting baseNum now that PlainEF is gone
+	b.ef.AddOffset(offset)
 }
 
 func (b *SequenceBuilder) Build() {
-	if b.rebasedEf != nil {
-		b.rebasedEf.Build()
-	}
+	b.ef.Build()
 }
 
 func (b *SequenceBuilder) AppendBytes(buf []byte) []byte {
-	if b.rebasedEf != nil {
-		buf = append(buf, byte(RebasedEliasFano))
-		return b.rebasedEf.AppendBytes(buf)
+	if b.ef.Count() <= SIMPLE_SEQUENCE_MAX_THRESHOLD {
+		return b.simpleEncoding(buf)
 	}
-	return b.simpleEncoding(buf)
+
+	return b.rebasedEliasFano(buf)
 }
 
 func (b *SequenceBuilder) simpleEncoding(buf []byte) []byte {
 	// Simple encoding type + size: [0x80, 0x8F]
-	enc := (b.smallCount-1)&0x0F | byte(SimpleEncoding)
+	count := b.ef.Count()
+	enc := byte(count-1) & byte(0b00001111)
+	enc |= byte(SimpleEncoding)
 	buf = append(buf, enc)
 
-	for _, v := range b.smallBuf[:b.smallCount] {
-		buf = binary.BigEndian.AppendUint32(buf, v)
+	// Encode elems
+	var bn [4]byte
+	for it := b.ef.Iterator(); it.HasNext(); {
+		n, err := it.Next()
+		if err != nil {
+			// TODO: err
+			panic(err)
+		}
+		n -= b.baseNum
+
+		binary.BigEndian.PutUint32(bn[:], uint32(n))
+		buf = append(buf, bn[:]...)
 	}
 
 	return buf
 }
 
-// Merge merges s1 and s2 into this builder, resetting it first.
-// s1 and s2 must be pre-sorted with s1.Max() <= s2.Min().
-// Call AppendBytes on the builder to serialize.
-func (b *SequenceBuilder) Merge(s1, s2 *SequenceReader, outBaseNum uint64) error {
-	b.Reset(outBaseNum, s1.Count()+s2.Count(), s2.Max())
-	b.it1.Reset(s1, 0)
-	b.it2.Reset(s2, 0)
-	for b.it1.HasNext() {
-		v, err := b.it1.Next()
+func (b *SequenceBuilder) rebasedEliasFano(buf []byte) []byte {
+	// Reserved encoding type 0x90 == rebased elias fano
+	buf = append(buf, byte(RebasedEliasFano))
+
+	// Rebased ef
+	rbef := eliasfano32.NewEliasFano(b.ef.Count(), b.ef.Max()-b.baseNum)
+	for it := b.ef.Iterator(); it.HasNext(); {
+		n, err := it.Next()
 		if err != nil {
-			return err
+			panic(err)
 		}
-		b.AddOffset(v)
+
+		rbef.AddOffset(n - b.baseNum)
 	}
-	for b.it2.HasNext() {
-		v, err := b.it2.Next()
-		if err != nil {
-			return err
-		}
-		b.AddOffset(v)
-	}
-	b.Build()
-	return nil
+	rbef.Build()
+	return rbef.AppendBytes(buf)
 }

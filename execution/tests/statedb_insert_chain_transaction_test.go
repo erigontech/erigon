@@ -32,18 +32,15 @@ import (
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/contracts"
+	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
 	data := getGenesis()
 	from := data.addresses[0]
 	fromKey := data.keys[0]
@@ -128,9 +125,6 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 }
 
 func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
 	data := getGenesis()
 	from := data.addresses[0]
 	fromKey := data.keys[0]
@@ -736,9 +730,6 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 }
 
 func TestAccountDeleteIncorrectRoot(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
 	data := getGenesis()
 	from := data.addresses[0]
 	fromKey := data.keys[0]
@@ -897,9 +888,9 @@ type txn struct {
 	key  *ecdsa.PrivateKey
 }
 
-func GenerateBlocks(t *testing.T, gspec *types.Genesis, txs map[int]txn) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack, error) {
+func GenerateBlocks(t *testing.T, gspec *types.Genesis, txs map[int]txn) (*mock.MockSentry, *blockgen.ChainPack, error) {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
+	m := mock.MockWithGenesis(t, gspec, key)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 

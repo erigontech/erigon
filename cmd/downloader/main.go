@@ -363,7 +363,7 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 	d.InitBackgroundLogger(true)
 	if seedbox {
 		var downloadItems []*downloaderproto.DownloadItem
-		snapCfg := snapcfg.KnownCfgOrDevnet(chain)
+		snapCfg, _ := snapcfg.KnownCfg(chain)
 		for _, it := range snapCfg.Preverified.Items {
 			downloadItems = append(downloadItems, &downloaderproto.DownloadItem{
 				Path:        it.Name,

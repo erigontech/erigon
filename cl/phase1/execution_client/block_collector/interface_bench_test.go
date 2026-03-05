@@ -35,7 +35,7 @@ func BenchmarkEncodeBlockBuffer(b *testing.B) {
 
 	b.Run("Optimized", func(b *testing.B) {
 		b.ReportAllocs()
-		for b.Loop() {
+		for i := 0; i < b.N; i++ {
 			buf := make([]byte, 1+32+32+len(encodedPayload))
 			buf[0] = version
 			copy(buf[1:], parentRoot[:])
@@ -47,7 +47,7 @@ func BenchmarkEncodeBlockBuffer(b *testing.B) {
 
 	b.Run("Old", func(b *testing.B) {
 		b.ReportAllocs()
-		for b.Loop() {
+		for i := 0; i < b.N; i++ {
 			buf := append([]byte{version}, append(append(parentRoot[:], requestsHash[:]...), encodedPayload...)...)
 			_ = buf
 		}

@@ -24,7 +24,7 @@ import (
 )
 
 func TestGetChainConfig(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	db, ctx := m.DB, m.Ctx
 	api := newBaseApiForTest(m)
 	config := m.ChainConfig

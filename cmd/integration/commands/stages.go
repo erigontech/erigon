@@ -87,46 +87,178 @@ import (
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
 
-// makeStageCmd creates a cobra command that opens the DB, runs stageFn, and handles errors.
-// Set applyMigrations=false for read-only commands. Set timeit=true to log elapsed time.
-// Set debugVerbosity=true to force log verbosity to "debug" before SetupCobra.
-func makeStageCmd(use string, stageFn func(kv.TemporalRwDB, context.Context, log.Logger) error, applyMigrations, timeit, debugVerbosity bool) *cobra.Command {
-	return &cobra.Command{
-		Use:   use,
-		Short: "",
-		Run: func(cmd *cobra.Command, args []string) {
-			if debugVerbosity {
-				cmd.Flags().Set(logging.LogConsoleVerbosityFlag.Name, "debug")
+var cmdStageSnapshots = &cobra.Command{
+	Use:   "stage_snapshots",
+	Short: "",
+	Run: func(cmd *cobra.Command, args []string) {
+		logger := debug.SetupCobra(cmd, "integration")
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
+		defer db.Close()
+
+		if err := stageSnapshots(db, cmd.Context(), logger); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				logger.Error(err.Error())
 			}
-			logger := debug.SetupCobra(cmd, "integration")
-			db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), applyMigrations, chain, logger)
-			if err != nil {
-				logger.Error("Opening DB", "error", err)
-				return
-			}
-			defer db.Close()
-			if timeit {
-				defer func(t time.Time) { logger.Info("total", "took", time.Since(t)) }(time.Now())
-			}
-			if err := stageFn(db, cmd.Context(), logger); err != nil {
-				if !errors.Is(err, context.Canceled) {
-					logger.Error(err.Error())
-				}
-			}
-		},
-	}
+			return
+		}
+	},
 }
 
-var (
-	cmdStageSnapshots   = makeStageCmd("stage_snapshots", stageSnapshots, true, false, false)
-	cmdStageHeaders     = makeStageCmd("stage_headers", stageHeaders, true, false, false)
-	cmdStageBodies      = makeStageCmd("stage_bodies", stageBodies, true, false, false)
-	cmdStageSenders     = makeStageCmd("stage_senders", stageSenders, true, false, false)
-	cmdStageExec        = makeStageCmd("stage_exec", stageExec, true, true, false)
-	cmdStageCustomTrace = makeStageCmd("stage_custom_trace", stageCustomTrace, true, true, false)
-	cmdStageTxLookup    = makeStageCmd("stage_tx_lookup", stageTxLookup, true, false, false)
-	cmdPrintStages      = makeStageCmd("print_stages", printAllStages, false, false, true)
-)
+var cmdStageHeaders = &cobra.Command{
+	Use:   "stage_headers",
+	Short: "",
+	Run: func(cmd *cobra.Command, args []string) {
+		logger := debug.SetupCobra(cmd, "integration")
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
+		defer db.Close()
+
+		if err := stageHeaders(db, cmd.Context(), logger); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				logger.Error(err.Error())
+			}
+			return
+		}
+	},
+}
+
+var cmdStageBodies = &cobra.Command{
+	Use:   "stage_bodies",
+	Short: "",
+	Run: func(cmd *cobra.Command, args []string) {
+		logger := debug.SetupCobra(cmd, "integration")
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
+		defer db.Close()
+
+		if err := stageBodies(db, cmd.Context(), logger); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				logger.Error(err.Error())
+			}
+			return
+		}
+	},
+}
+
+var cmdStageSenders = &cobra.Command{
+	Use:   "stage_senders",
+	Short: "",
+	Run: func(cmd *cobra.Command, args []string) {
+		logger := debug.SetupCobra(cmd, "integration")
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
+		defer db.Close()
+
+		if err := stageSenders(db, cmd.Context(), logger); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				logger.Error(err.Error())
+			}
+			return
+		}
+	},
+}
+
+var cmdStageExec = &cobra.Command{
+	Use:   "stage_exec",
+	Short: "",
+	Run: func(cmd *cobra.Command, args []string) {
+		logger := debug.SetupCobra(cmd, "integration")
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
+		defer db.Close()
+
+		defer func(t time.Time) { logger.Info("total", "took", time.Since(t)) }(time.Now())
+
+		if err := stageExec(db, cmd.Context(), logger); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				logger.Error(err.Error())
+			}
+			return
+		}
+	},
+}
+
+var cmdStageCustomTrace = &cobra.Command{
+	Use:   "stage_custom_trace",
+	Short: "",
+	Run: func(cmd *cobra.Command, args []string) {
+		logger := debug.SetupCobra(cmd, "integration")
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
+		defer db.Close()
+
+		defer func(t time.Time) { logger.Info("total", "took", time.Since(t)) }(time.Now())
+
+		if err := stageCustomTrace(db, cmd.Context(), logger); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				logger.Error(err.Error())
+			}
+			return
+		}
+	},
+}
+
+var cmdStageTxLookup = &cobra.Command{
+	Use:   "stage_tx_lookup",
+	Short: "",
+	Run: func(cmd *cobra.Command, args []string) {
+		logger := debug.SetupCobra(cmd, "integration")
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
+		defer db.Close()
+
+		if err := stageTxLookup(db, cmd.Context(), logger); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				logger.Error(err.Error())
+			}
+			return
+		}
+	},
+}
+
+var cmdPrintStages = &cobra.Command{
+	Use:   "print_stages",
+	Short: "",
+	Run: func(cmd *cobra.Command, args []string) {
+		cmd.Flags().Set(logging.LogConsoleVerbosityFlag.Name, "debug")
+		logger := debug.SetupCobra(cmd, "integration")
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), false, chain, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
+		defer db.Close()
+
+		if err := printAllStages(db, cmd.Context(), logger); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				logger.Error(err.Error())
+			}
+			return
+		}
+	},
+}
 
 var cmdAlloc = &cobra.Command{
 	Use:     "alloc",
@@ -199,14 +331,13 @@ var cmdPrintMigrations = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		dirs := datadir.New(datadirCli)
-		migrationsDB, err := migrations.OpenMigrationsDB(dirs.Migrations, logger)
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), false, chain, logger)
 		if err != nil {
-			logger.Error("Opening migrations DB", "error", err)
+			logger.Error("Opening DB", "error", err)
 			return
 		}
-		defer migrationsDB.Close()
-		if err := printAppliedMigrations(migrationsDB, cmd.Context(), logger); err != nil {
+		defer db.Close()
+		if err := printAppliedMigrations(db, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -220,14 +351,13 @@ var cmdRemoveMigration = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		dirs := datadir.New(datadirCli)
-		migrationsDB, err := migrations.OpenMigrationsDB(dirs.Migrations, logger)
+		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), false, chain, logger)
 		if err != nil {
-			logger.Error("Opening migrations DB", "error", err)
+			logger.Error("Opening DB", "error", err)
 			return
 		}
-		defer migrationsDB.Close()
-		if err := removeMigration(migrationsDB, cmd.Context()); err != nil {
+		defer db.Close()
+		if err := removeMigration(db, cmd.Context()); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -292,48 +422,83 @@ func init() {
 	withOutputCsvFile(cmdPrintTableSizes)
 	rootCmd.AddCommand(cmdPrintTableSizes)
 
-	// Snapshots: no Heimdall/Unwind, so withStageBase doesn't fit
-	withConfig(cmdStageSnapshots)
-	withDataDir(cmdStageSnapshots)
-	withChain(cmdStageSnapshots)
-	withChaosMonkey(cmdStageSnapshots)
-	withReset(cmdStageSnapshots)
-	rootCmd.AddCommand(cmdStageSnapshots)
-
-	withStageBase(cmdStageHeaders)
-	withIntegrityChecks(cmdStageHeaders)
-	withReset(cmdStageHeaders)
-	rootCmd.AddCommand(cmdStageHeaders)
-
-	withStageBase(cmdStageBodies)
-	rootCmd.AddCommand(cmdStageBodies)
-
-	withStageBase(cmdStageSenders)
+	withConfig(cmdStageSenders)
 	withIntegrityChecks(cmdStageSenders)
 	withReset(cmdStageSenders)
 	withBlock(cmdStageSenders)
+	withUnwind(cmdStageSenders)
+	withDataDir(cmdStageSenders)
+	withChain(cmdStageSenders)
+	withHeimdall(cmdStageSenders)
+	withChaosMonkey(cmdStageSenders)
 	rootCmd.AddCommand(cmdStageSenders)
 
-	withStageBase(cmdStageExec)
+	withConfig(cmdStageSnapshots)
+	withDataDir(cmdStageSnapshots)
+	withChain(cmdStageSnapshots)
+	withReset(cmdStageSnapshots)
+	withChaosMonkey(cmdStageSnapshots)
+	rootCmd.AddCommand(cmdStageSnapshots)
+
+	withConfig(cmdStageHeaders)
+	withIntegrityChecks(cmdStageHeaders)
+	withDataDir(cmdStageHeaders)
+	withUnwind(cmdStageHeaders)
+	withReset(cmdStageHeaders)
+	withChain(cmdStageHeaders)
+	withHeimdall(cmdStageHeaders)
+	withChaosMonkey(cmdStageHeaders)
+	rootCmd.AddCommand(cmdStageHeaders)
+
+	withConfig(cmdStageBodies)
+	withDataDir(cmdStageBodies)
+	withUnwind(cmdStageBodies)
+	withChain(cmdStageBodies)
+	withHeimdall(cmdStageBodies)
+	withChaosMonkey(cmdStageBodies)
+	rootCmd.AddCommand(cmdStageBodies)
+
+	withConfig(cmdStageExec)
+	withDataDir(cmdStageExec)
 	withReset(cmdStageExec)
 	withBlock(cmdStageExec)
+	withUnwind(cmdStageExec)
+	withNoCommit(cmdStageExec)
 	withPruneTo(cmdStageExec)
-	withTraceFlags(cmdStageExec)
+	withBatchSize(cmdStageExec)
+	withTxTrace(cmdStageExec)
+	withChain(cmdStageExec)
+	withHeimdall(cmdStageExec)
+	withWorkers(cmdStageExec)
+	withChaosMonkey(cmdStageExec)
 	withChainTipMode(cmdStageExec)
 	rootCmd.AddCommand(cmdStageExec)
 
-	withStageBase(cmdStageCustomTrace)
+	withConfig(cmdStageCustomTrace)
+	withDataDir(cmdStageCustomTrace)
 	withReset(cmdStageCustomTrace)
 	withBlock(cmdStageCustomTrace)
+	withUnwind(cmdStageCustomTrace)
+	withNoCommit(cmdStageCustomTrace)
 	withPruneTo(cmdStageCustomTrace)
-	withTraceFlags(cmdStageCustomTrace)
+	withBatchSize(cmdStageCustomTrace)
+	withTxTrace(cmdStageCustomTrace)
+	withChain(cmdStageCustomTrace)
+	withHeimdall(cmdStageCustomTrace)
+	withWorkers(cmdStageCustomTrace)
+	withChaosMonkey(cmdStageCustomTrace)
 	withDomain(cmdStageCustomTrace)
 	rootCmd.AddCommand(cmdStageCustomTrace)
 
-	withStageBase(cmdStageTxLookup)
+	withConfig(cmdStageTxLookup)
 	withReset(cmdStageTxLookup)
 	withBlock(cmdStageTxLookup)
+	withUnwind(cmdStageTxLookup)
+	withDataDir(cmdStageTxLookup)
 	withPruneTo(cmdStageTxLookup)
+	withChain(cmdStageTxLookup)
+	withHeimdall(cmdStageTxLookup)
+	withChaosMonkey(cmdStageTxLookup)
 	rootCmd.AddCommand(cmdStageTxLookup)
 
 	withConfig(cmdPrintMigrations)
@@ -377,10 +542,8 @@ func stageSnapshots(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 		return err
 	}
 	defer domains.Close()
-	_, blockNum, err := domains.SeekCommitment(ctx, tx)
-	if err != nil {
-		return err
-	}
+	//txnUm := domains.TxNum()
+	blockNum := domains.BlockNum()
 
 	// stagedsync.SpawnStageSnapshots(s, ctx, rwTx, logger)
 	progress, err := stages.GetStageProgress(tx, stages.Snapshots)
@@ -676,7 +839,13 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		return err
 	}
 
-	defer tx.Rollback()
+	defer func() {
+		if noCommit {
+			tx.Rollback()
+		} else {
+			tx.Commit()
+		}
+	}()
 
 	if pruneTo > 0 {
 		p, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, true)
@@ -687,10 +856,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		if err != nil {
 			return err
 		}
-		if noCommit {
-			return nil
-		}
-		return tx.Commit()
+		return nil
 	}
 
 	var sendersProgress, execProgress uint64
@@ -703,10 +869,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		if err != nil {
 			panic(err)
 		}
-		_, execProgress, err = doms.SeekCommitment(ctx, tx)
-		if err != nil {
-			panic(err)
-		}
+		execProgress = doms.BlockNum()
 		doms.Close()
 	}
 	if sendersProgress, err = stages.GetStageProgress(tx, stages.Senders); err != nil {
@@ -760,16 +923,8 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			return err
 		}
 		doms.ClearRam(true)
-		return tx.Commit()
+		return nil
 	}
-	agg := (db.(dbstate.HasAgg).Agg()).(*dbstate.Aggregator)
-	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
-	agg.SetSnapshotBuildSema(blockSnapBuildSema)
-	agg.SetCollateAndBuildWorkers(min(4, estimate.StateV3Collate.Workers()))
-	agg.SetMergeWorkers(min(4, estimate.StateV3Collate.Workers()))
-	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
-	agg.PeriodicalyPrintProcessSet(ctx)
-	agg.LockWorkersEditing()
 
 	for {
 		if err := stagedsync.SpawnExecuteBlocksStage(s, sync, doms, tx, block, ctx, cfg, logger); err != nil {
@@ -914,8 +1069,8 @@ func printAllStages(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 	return db.ViewTemporal(ctx, func(tx kv.TemporalTx) error { return printStages(tx, sn, borSn) })
 }
 
-func printAppliedMigrations(migrationsDB kv.RwDB, ctx context.Context, logger log.Logger) error {
-	return migrationsDB.View(ctx, func(tx kv.Tx) error {
+func printAppliedMigrations(db kv.RwDB, ctx context.Context, logger log.Logger) error {
+	return db.View(ctx, func(tx kv.Tx) error {
 		applied, err := migrations.AppliedMigrations(tx, false /* withPayload */)
 		if err != nil {
 			return err
@@ -932,8 +1087,8 @@ func printAppliedMigrations(migrationsDB kv.RwDB, ctx context.Context, logger lo
 	})
 }
 
-func removeMigration(migrationsDB kv.RwDB, ctx context.Context) error {
-	return migrationsDB.Update(ctx, func(tx kv.RwTx) error {
+func removeMigration(db kv.RwDB, ctx context.Context) error {
+	return db.Update(ctx, func(tx kv.RwTx) error {
 		return tx.Delete(kv.Migrations, []byte(migration))
 	})
 }
@@ -966,11 +1121,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		blockReader := freezeblocks.NewBlockReader(_allSnapshotsSingleton, _allBorSnapshotsSingleton)
 		txNums := blockReader.TxnumReader()
 
-		var erigonDBSettings *dbstate.ErigonDBSettings
-		if erigonDBSettings, err = dbstate.ResolveErigonDBSettings(dirs, logger, false); err != nil {
-			return
-		}
-		_aggSingleton = dbstate.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings).MustOpen(ctx, db)
+		_aggSingleton = dbstate.New(dirs).Logger(logger).MustOpen(ctx, db)
 
 		_aggSingleton.SetProduceMod(snapCfg.ProduceE3)
 
@@ -1049,7 +1200,7 @@ func blocksIO(db kv.RoDB, logger log.Logger) (services.FullBlockReader, *blockio
 
 const blockBufferSize = 128
 
-func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.BuilderConfig, logger log.Logger) (
+func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *buildercfg.MiningConfig, logger log.Logger) (
 	services.BlockRetire, rules.Engine, *vm.Config, *stagedsync.Sync,
 ) {
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
@@ -1083,8 +1234,8 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.
 	cfg.BatchSize = batchSize
 	cfg.TxPool.Disable = true
 	cfg.Genesis = genesis
-	if builderConfig != nil {
-		cfg.Builder = *builderConfig
+	if miningConfig != nil {
+		cfg.Miner = *miningConfig
 	}
 	cfg.Dirs = dirs
 	dbReadConcurrency := runtime.GOMAXPROCS(-1) * 16
@@ -1170,7 +1321,7 @@ func initRulesEngine(ctx context.Context, cc *chain2.Config, dir string, db kv.R
 			heimdallClient = heimdall.NewHttpClient(config.HeimdallURL, logger, poshttp.WithApiVersioner(ctx))
 			bridgeClient = bridge.NewHttpClient(config.HeimdallURL, logger, poshttp.WithApiVersioner(ctx))
 		} else {
-			heimdallClient = heimdall.NewIdleClient(config.Builder)
+			heimdallClient = heimdall.NewIdleClient(config.Miner)
 			bridgeClient = bridge.NewIdleClient()
 		}
 		borConfig := rulesConfig.(*borcfg.BorConfig)

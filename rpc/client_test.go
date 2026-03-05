@@ -388,8 +388,9 @@ func TestClientCloseUnsubscribeRace(t *testing.T) {
 // doesn't read subscription events.
 func TestClientNotificationStorm(t *testing.T) {
 	if testing.Short() {
-		t.Skip("slow test")
+		t.Skip("too slow for testing.Short")
 	}
+
 	logger := log.New()
 	server := newTestServer(logger)
 	defer server.Stop()

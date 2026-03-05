@@ -18,7 +18,6 @@ package app
 
 import (
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/erigontech/erigon/db/datadir"
@@ -177,85 +176,4 @@ func createFiles(t *testing.T, dirs datadir.Dirs, from, to int, b *bundle) {
 	genFile(b.domain)
 	genFile(b.history)
 	genFile(b.ii)
-}
-
-func Test_DeleteStateSnaps_RemovesTmpFiles(t *testing.T) {
-	dirs := datadir.New(t.TempDir())
-
-	// Create some normal state snapshot files so DeleteStateSnapshots has something to process
-	b := bundle{}
-	dc := statecfg.Schema.ReceiptDomain
-	b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(dc, dirs, 10)
-	for i := 0; i < 3; i++ {
-		createFiles(t, dirs, i*10, (i+1)*10, &b)
-	}
-
-	touchFile := func(path string) {
-		f, err := os.OpenFile(path, os.O_RDONLY|os.O_CREATE, 0644)
-		require.NoError(t, err)
-		f.Close()
-	}
-
-	// SnapForkable is not auto-created by datadir.New, so create it manually
-	require.NoError(t, os.MkdirAll(dirs.SnapForkable, 0755))
-
-	// Create .tmp files in all snapshot directories (matching patterns from issue #18789)
-	tmpFiles := []string{
-		filepath.Join(dirs.Snap, "v1.1-headers.0-500.seg.123456.tmp"),
-		filepath.Join(dirs.SnapDomain, "v1.1-commitment.8272-8280.kv.252752124.tmp"),
-		filepath.Join(dirs.SnapHistory, "v2.0-commitment.8256-8272.kvi.857462302.tmp"),
-		filepath.Join(dirs.SnapIdx, "v1.1-storage.8256-8288.bt.209594880.tmp"),
-		filepath.Join(dirs.SnapAccessors, "v2.0-commitment.8256-8272.kvi.3646922560.existence.tmp"),
-		filepath.Join(dirs.SnapCaplin, "v1.0-beaconblocks.0-100.seg.999999.tmp"),
-		filepath.Join(dirs.SnapForkable, "v1.0-forkable.0-100.kv.111111.tmp"),
-	}
-	for _, tf := range tmpFiles {
-		touchFile(tf)
-		confirmExist(t, tf)
-	}
-
-	// Run DeleteStateSnapshots (non-dry-run)
-	err := DeleteStateSnapshots(dirs, true, false, false, "")
-	require.NoError(t, err)
-
-	// All .tmp files should be removed
-	for _, tf := range tmpFiles {
-		confirmDoesntExist(t, tf)
-	}
-}
-
-func Test_DeleteStateSnaps_DryRunKeepsTmpFiles(t *testing.T) {
-	dirs := datadir.New(t.TempDir())
-
-	// Create some normal state snapshot files
-	b := bundle{}
-	dc := statecfg.Schema.ReceiptDomain
-	b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(dc, dirs, 10)
-	for i := 0; i < 3; i++ {
-		createFiles(t, dirs, i*10, (i+1)*10, &b)
-	}
-
-	touchFile := func(path string) {
-		f, err := os.OpenFile(path, os.O_RDONLY|os.O_CREATE, 0644)
-		require.NoError(t, err)
-		f.Close()
-	}
-
-	// Create .tmp files
-	tmpFiles := []string{
-		filepath.Join(dirs.SnapDomain, "v1.1-commitment.8272-8280.kv.252752124.tmp"),
-		filepath.Join(dirs.SnapHistory, "v2.0-commitment.8256-8272.kvi.857462302.tmp"),
-	}
-	for _, tf := range tmpFiles {
-		touchFile(tf)
-	}
-
-	// Run DeleteStateSnapshots with dry-run=true
-	err := DeleteStateSnapshots(dirs, true, false, true, "")
-	require.NoError(t, err)
-
-	// .tmp files should still exist (dry-run does not delete)
-	for _, tf := range tmpFiles {
-		confirmExist(t, tf)
-	}
 }

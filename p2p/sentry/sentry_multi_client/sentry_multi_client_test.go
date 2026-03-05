@@ -19,7 +19,6 @@ import (
 )
 
 type receiptRLP69 struct {
-	Type              uint8
 	PostStateOrStatus []byte
 	CumulativeGasUsed uint64
 	Logs              []*types.Log
@@ -31,7 +30,6 @@ func TestMultiClient_GetReceipts69(t *testing.T) {
 	testHash := common.HexToHash("0x123")
 	testReceipts := types.Receipts{
 		{
-			Type:              types.LegacyTxType,
 			Status:            types.ReceiptStatusSuccessful,
 			CumulativeGasUsed: 21000,
 			Logs:              []*types.Log{},
@@ -39,7 +37,6 @@ func TestMultiClient_GetReceipts69(t *testing.T) {
 			GasUsed:           21000,
 		},
 		{
-			Type:              types.DynamicFeeTxType,
 			Status:            types.ReceiptStatusSuccessful,
 			CumulativeGasUsed: 42000,
 			Logs:              []*types.Log{},
@@ -119,27 +116,14 @@ func TestMultiClient_GetReceipts69(t *testing.T) {
 	}
 
 	if len(receiptsList) != 2 {
-		t.Fatalf("Expected 2 receipts in list, got %d", len(receiptsList))
+		t.Fatalf("Expected 2 receipt in list, got %d", len(receiptsList))
 	}
 
-	// Verify legacy receipt (type 0)
-	receipt0 := receiptsList[0]
-	if receipt0.Type != types.LegacyTxType {
-		t.Errorf("Expected receipt[0] Type %d (legacy), got %d", types.LegacyTxType, receipt0.Type)
-	}
-	if receipt0.CumulativeGasUsed != 21000 {
-		t.Errorf("Expected receipt[0] CumulativeGasUsed 21000, got %d", receipt0.CumulativeGasUsed)
-	}
+	receipt := receiptsList[0]
 
-	// Verify typed receipt (DynamicFee, type 2) — this is the critical case:
-	// ETH69 requires typed receipts to be list-encoded [type, status, gas, logs],
-	// NOT the old byte-string envelope (type_byte || rlp(data)) used in ETH68.
-	receipt1 := receiptsList[1]
-	if receipt1.Type != types.DynamicFeeTxType {
-		t.Errorf("Expected receipt[1] Type %d (DynamicFee), got %d", types.DynamicFeeTxType, receipt1.Type)
-	}
-	if receipt1.CumulativeGasUsed != 42000 {
-		t.Errorf("Expected receipt[1] CumulativeGasUsed 42000, got %d", receipt1.CumulativeGasUsed)
+	// Verify the receipt was decoded correctly
+	if receipt.CumulativeGasUsed != 21000 {
+		t.Errorf("Expected CumulativeGasUsed 21000, got %d", receipt.CumulativeGasUsed)
 	}
 }
 

@@ -28,17 +28,15 @@ type Merger struct {
 	chainDB         kv.RoDB
 	logger          log.Logger
 	noFsync         bool // fsync is enabled by default, but tests can manually disable
-	snCfg           *snapcfg.Cfg
 }
 
 func NewMerger(tmpDir string, compressWorkers int, lvl log.Lvl, chainDB kv.RoDB, chainConfig *chain.Config, logger log.Logger) *Merger {
-	snCfg := snapcfg.KnownCfgOrDevnet(chainConfig.ChainName)
-	return &Merger{tmpDir: tmpDir, compressWorkers: compressWorkers, lvl: lvl, chainDB: chainDB, chainConfig: chainConfig, logger: logger, snCfg: snCfg}
+	return &Merger{tmpDir: tmpDir, compressWorkers: compressWorkers, lvl: lvl, chainDB: chainDB, chainConfig: chainConfig, logger: logger}
 }
 func (m *Merger) DisableFsync() { m.noFsync = true }
 
 func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toMerge []Range) {
-	cfg := m.snCfg
+	cfg, _ := snapcfg.KnownCfg(m.chainConfig.ChainName)
 	for i := len(currentRanges) - 1; i > 0; i-- {
 		r := currentRanges[i]
 		mergeLimit := cfg.MergeLimit(snaptype.Unknown, r.From())
@@ -131,7 +129,7 @@ func (m *Merger) mergeSubSegment(
 		if err = buildIdx(ctx, sn, indexBuilder, m.chainConfig, m.tmpDir, p, m.lvl, m.logger); err != nil {
 			return
 		}
-		err = newDirtySegment.openIdx(snapDir, nil)
+		err = newDirtySegment.openIdx(snapDir)
 		if err != nil {
 			return
 		}
@@ -330,12 +328,8 @@ func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, ta
 	if err = f.Compress(); err != nil {
 		return nil, err
 	}
-	sn := &DirtySegment{
-		segType: targetFile.Type,
-		version: targetFile.Version,
-		Range:   Range{targetFile.From, targetFile.To},
-		frozen:  m.snCfg.IsFrozen(targetFile),
-	}
+	sn := &DirtySegment{segType: targetFile.Type, version: targetFile.Version, Range: Range{targetFile.From, targetFile.To},
+		frozen: snapcfg.Seedable(v.s.cfg.ChainName, targetFile)}
 
 	err = sn.Open(snapDir)
 	if err != nil {

@@ -49,8 +49,7 @@ type ExecutionPayload struct {
 	Withdrawals     []*types.Withdrawal `json:"withdrawals"`
 	BlobGasUsed     *hexutil.Uint64     `json:"blobGasUsed"`
 	ExcessBlobGas   *hexutil.Uint64     `json:"excessBlobGas"`
-	SlotNumber      *hexutil.Uint64     `json:"slotNumber"`
-	BlockAccessList hexutil.Bytes       `json:"blockAccessList"`
+	BlockAccessList *hexutil.Bytes      `json:"blockAccessList"`
 }
 
 // PayloadAttributes represent the attributes required to start assembling a payload
@@ -67,7 +66,6 @@ type PayloadAttributes struct {
 	SuggestedFeeRecipient common.Address      `json:"suggestedFeeRecipient" gencodec:"required"`
 	Withdrawals           []*types.Withdrawal `json:"withdrawals"`
 	ParentBeaconBlockRoot *common.Hash        `json:"parentBeaconBlockRoot"`
-	SlotNumber            *hexutil.Uint64     `json:"slotNumber"`
 }
 
 // TransitionConfiguration represents the correct configurations of the CL and the EL
@@ -101,12 +99,6 @@ type BlobAndProofV2 struct {
 type ExecutionPayloadBody struct {
 	Transactions []hexutil.Bytes     `json:"transactions" gencodec:"required"`
 	Withdrawals  []*types.Withdrawal `json:"withdrawals"  gencodec:"required"`
-}
-
-type ExecutionPayloadBodyV2 struct {
-	Transactions    []hexutil.Bytes     `json:"transactions" gencodec:"required"`
-	Withdrawals     []*types.Withdrawal `json:"withdrawals"  gencodec:"required"`
-	BlockAccessList hexutil.Bytes       `json:"blockAccessList"`
 }
 
 type PayloadStatus struct {
@@ -178,7 +170,7 @@ func ConvertRpcBlockToExecutionPayload(payload *executionproto.Block) *Execution
 	body := payload.Body
 
 	var bloom types.Bloom = gointerfaces.ConvertH2048ToBloom(header.LogsBloom)
-	baseFee := gointerfaces.ConvertH256ToUint256Int(header.BaseFeePerGas)
+	baseFee := gointerfaces.ConvertH256ToUint256Int(header.BaseFeePerGas).ToBig()
 
 	// Convert slice of hexutil.Bytes to a slice of slice of bytes
 	transactions := make([]hexutil.Bytes, len(body.Transactions))
@@ -198,7 +190,7 @@ func ConvertRpcBlockToExecutionPayload(payload *executionproto.Block) *Execution
 		GasUsed:       hexutil.Uint64(header.GasUsed),
 		Timestamp:     hexutil.Uint64(header.Timestamp),
 		ExtraData:     header.ExtraData,
-		BaseFeePerGas: (*hexutil.Big)(baseFee.ToBig()),
+		BaseFeePerGas: (*hexutil.Big)(baseFee),
 		BlockHash:     gointerfaces.ConvertH256ToHash(header.BlockHash),
 		Transactions:  transactions,
 	}
@@ -211,16 +203,15 @@ func ConvertRpcBlockToExecutionPayload(payload *executionproto.Block) *Execution
 		excessBlobGas := *header.ExcessBlobGas
 		res.ExcessBlobGas = (*hexutil.Uint64)(&excessBlobGas)
 	}
-	if header.SlotNumber != nil {
-		slotNumber := *header.SlotNumber
-		res.SlotNumber = (*hexutil.Uint64)(&slotNumber)
+	if body.BlockAccessList != nil {
+		res.BlockAccessList = types.ConvertBlockAccessListFromExecutionProto(body.BlockAccessList)
 	}
 	return res
 }
 
 func ConvertPayloadFromRpc(payload *typesproto.ExecutionPayload) *ExecutionPayload {
 	var bloom types.Bloom = gointerfaces.ConvertH2048ToBloom(payload.LogsBloom)
-	baseFee := gointerfaces.ConvertH256ToUint256Int(payload.BaseFeePerGas)
+	baseFee := gointerfaces.ConvertH256ToUint256Int(payload.BaseFeePerGas).ToBig()
 
 	// Convert slice of hexutil.Bytes to a slice of slice of bytes
 	transactions := make([]hexutil.Bytes, len(payload.Transactions))
@@ -240,7 +231,7 @@ func ConvertPayloadFromRpc(payload *typesproto.ExecutionPayload) *ExecutionPaylo
 		GasUsed:       hexutil.Uint64(payload.GasUsed),
 		Timestamp:     hexutil.Uint64(payload.Timestamp),
 		ExtraData:     payload.ExtraData,
-		BaseFeePerGas: (*hexutil.Big)(baseFee.ToBig()),
+		BaseFeePerGas: (*hexutil.Big)(baseFee),
 		BlockHash:     gointerfaces.ConvertH256ToHash(payload.BlockHash),
 		Transactions:  transactions,
 	}
@@ -254,13 +245,7 @@ func ConvertPayloadFromRpc(payload *typesproto.ExecutionPayload) *ExecutionPaylo
 		res.ExcessBlobGas = (*hexutil.Uint64)(&excessBlobGas)
 	}
 	if payload.Version >= 4 {
-		if payload.SlotNumber != nil {
-			slotNumber := *payload.SlotNumber
-			res.SlotNumber = (*hexutil.Uint64)(&slotNumber)
-		}
-		if blockAccessList := types.ConvertBlockAccessListFromTypesProto(payload.BlockAccessList); blockAccessList != nil {
-			res.BlockAccessList = blockAccessList
-		}
+		res.BlockAccessList = types.ConvertBlockAccessListFromTypesProto(payload.BlockAccessList)
 	}
 	return res
 }

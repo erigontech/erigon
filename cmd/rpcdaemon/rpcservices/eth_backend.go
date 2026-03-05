@@ -283,7 +283,7 @@ func (back *RemoteBackend) SubscribeLogs(ctx context.Context, onNewLogs func(rep
 	return nil
 }
 
-func (back *RemoteBackend) SubscribeReceipts(ctx context.Context, onNewReceipts func(reply *remoteproto.SubscribeReceiptsReply), onReady func(func(*remoteproto.ReceiptsFilterRequest) error)) error {
+func (back *RemoteBackend) SubscribeReceipts(ctx context.Context, onNewReceipts func(reply *remoteproto.SubscribeReceiptsReply), requestor *atomic.Value) error {
 	subscription, err := back.remoteEthBackend.SubscribeReceipts(ctx, grpc.WaitForReady(true))
 	if err != nil {
 		if s, ok := status.FromError(err); ok {
@@ -291,9 +291,7 @@ func (back *RemoteBackend) SubscribeReceipts(ctx context.Context, onNewReceipts 
 		}
 		return err
 	}
-	if onReady != nil {
-		onReady(subscription.Send)
-	}
+	requestor.Store(subscription.Send)
 	for {
 		receipts, err := subscription.Recv()
 		if errors.Is(err, io.EOF) {
@@ -411,22 +409,6 @@ func (back *RemoteBackend) RemovePeer(ctx context.Context, request *remoteproto.
 	result, err := back.remoteEthBackend.RemovePeer(ctx, request)
 	if err != nil {
 		return nil, fmt.Errorf("ETHBACKENDClient.RemovePeer() error: %w", err)
-	}
-	return result, nil
-}
-
-func (back *RemoteBackend) AddTrustedPeer(ctx context.Context, request *remoteproto.AddPeerRequest) (*remoteproto.AddPeerReply, error) {
-	result, err := back.remoteEthBackend.AddTrustedPeer(ctx, request)
-	if err != nil {
-		return nil, fmt.Errorf("ETHBACKENDClient.AddTrustedPeer() error: %w", err)
-	}
-	return result, nil
-}
-
-func (back *RemoteBackend) RemoveTrustedPeer(ctx context.Context, request *remoteproto.RemovePeerRequest) (*remoteproto.RemovePeerReply, error) {
-	result, err := back.remoteEthBackend.RemoveTrustedPeer(ctx, request)
-	if err != nil {
-		return nil, fmt.Errorf("ETHBACKENDClient.RemoveTrustedPeer() error: %w", err)
 	}
 	return result, nil
 }

@@ -1,9 +1,8 @@
 package stateless
 
 import (
+	"math/big"
 	"testing"
-
-	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
@@ -33,7 +32,7 @@ func TestValidateWitnessPreState_Success(t *testing.T) {
 	parentStateRoot := common.HexToHash("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
 
 	parentHeader := &types.Header{
-		Number:     *uint256.NewInt(99),
+		Number:     big.NewInt(99),
 		ParentHash: common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
 		Root:       parentStateRoot,
 	}
@@ -42,7 +41,7 @@ func TestValidateWitnessPreState_Success(t *testing.T) {
 	parentHash := parentHeader.Hash()
 
 	contextHeader := &types.Header{
-		Number:     *uint256.NewInt(100),
+		Number:     big.NewInt(100),
 		ParentHash: parentHash,
 		Root:       common.HexToHash("0xfedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321"),
 	}
@@ -72,7 +71,7 @@ func TestValidateWitnessPreState_StateMismatch(t *testing.T) {
 	mismatchedStateRoot := common.HexToHash("0x9999999999999999999999999999999999999999999999999999999999999999")
 
 	parentHeader := &types.Header{
-		Number:     *uint256.NewInt(99),
+		Number:     big.NewInt(99),
 		ParentHash: common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
 		Root:       parentStateRoot,
 	}
@@ -81,14 +80,14 @@ func TestValidateWitnessPreState_StateMismatch(t *testing.T) {
 	parentHash := parentHeader.Hash()
 
 	contextHeader := &types.Header{
-		Number:     *uint256.NewInt(100),
+		Number:     big.NewInt(100),
 		ParentHash: parentHash,
 		Root:       common.HexToHash("0xfedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321"),
 	}
 
 	// Create witness header with mismatched state root.
 	witnessParentHeader := &types.Header{
-		Number:     *uint256.NewInt(99),
+		Number:     big.NewInt(99),
 		ParentHash: common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
 		Root:       mismatchedStateRoot, // Different from actual parent.
 	}
@@ -136,7 +135,7 @@ func TestValidateWitnessPreState_EdgeCases(t *testing.T) {
 	// Test case 2: Witness with no headers.
 	t.Run("NoHeaders", func(t *testing.T) {
 		witness := &Witness{
-			context: &types.Header{Number: *uint256.NewInt(100)},
+			context: &types.Header{Number: big.NewInt(100)},
 			Headers: []*types.Header{}, // Empty headers.
 			Codes:   make(map[string]struct{}),
 			State:   make(map[string]struct{}),
@@ -157,7 +156,7 @@ func TestValidateWitnessPreState_EdgeCases(t *testing.T) {
 			context: nil, // Nil context header.
 			Headers: []*types.Header{
 				{
-					Number: *uint256.NewInt(99),
+					Number: big.NewInt(99),
 					Root:   common.HexToHash("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"),
 				},
 			},
@@ -177,7 +176,7 @@ func TestValidateWitnessPreState_EdgeCases(t *testing.T) {
 	// Test case 4: Parent header not found.
 	t.Run("ParentNotFound", func(t *testing.T) {
 		contextHeader := &types.Header{
-			Number:     *uint256.NewInt(100),
+			Number:     big.NewInt(100),
 			ParentHash: common.HexToHash("0xnonexistent1234567890abcdef1234567890abcdef1234567890abcdef123456"),
 			Root:       common.HexToHash("0xfedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321"),
 		}
@@ -186,7 +185,7 @@ func TestValidateWitnessPreState_EdgeCases(t *testing.T) {
 			context: contextHeader,
 			Headers: []*types.Header{
 				{
-					Number: *uint256.NewInt(99),
+					Number: big.NewInt(99),
 					Root:   common.HexToHash("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"),
 				},
 			},
@@ -215,7 +214,7 @@ func TestValidateWitnessPreState_MultipleHeaders(t *testing.T) {
 	grandParentStateRoot := common.HexToHash("0x5555555555555555555555555555555555555555555555555555555555555555")
 
 	grandParentHeader := &types.Header{
-		Number:     *uint256.NewInt(98),
+		Number:     big.NewInt(98),
 		ParentHash: common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
 		Root:       grandParentStateRoot,
 	}
@@ -224,7 +223,7 @@ func TestValidateWitnessPreState_MultipleHeaders(t *testing.T) {
 	grandParentHash := grandParentHeader.Hash()
 
 	parentHeader := &types.Header{
-		Number:     *uint256.NewInt(99),
+		Number:     big.NewInt(99),
 		ParentHash: grandParentHash,
 		Root:       parentStateRoot,
 	}
@@ -233,7 +232,7 @@ func TestValidateWitnessPreState_MultipleHeaders(t *testing.T) {
 	parentHash := parentHeader.Hash()
 
 	contextHeader := &types.Header{
-		Number:     *uint256.NewInt(100),
+		Number:     big.NewInt(100),
 		ParentHash: parentHash,
 		Root:       common.HexToHash("0xfedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321"),
 	}

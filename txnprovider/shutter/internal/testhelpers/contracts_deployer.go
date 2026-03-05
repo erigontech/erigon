@@ -26,7 +26,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/abi/bind"
-	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
+	executiontests "github.com/erigontech/erigon/execution/tests"
 	shuttercontracts "github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
 )
 
@@ -36,7 +36,7 @@ type ContractsDeployer struct {
 	contractBackend      bind.ContractBackend
 	cl                   *MockCl
 	chainId              *big.Int
-	txnInclusionVerifier engineapitester.TxnInclusionVerifier
+	txnInclusionVerifier executiontests.TxnInclusionVerifier
 }
 
 func NewContractsDeployer(
@@ -44,7 +44,7 @@ func NewContractsDeployer(
 	cb bind.ContractBackend,
 	cl *MockCl,
 	chainId *big.Int,
-	txnInclusionVerifier engineapitester.TxnInclusionVerifier,
+	txnInclusionVerifier executiontests.TxnInclusionVerifier,
 ) ContractsDeployer {
 	return ContractsDeployer{
 		key:                  key,

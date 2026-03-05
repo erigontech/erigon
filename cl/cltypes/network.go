@@ -112,9 +112,6 @@ func (p *Ping) EncodingSizeSSZ() int {
 }
 
 func (p *Ping) DecodeSSZ(buf []byte, _ int) error {
-	if len(buf) < 8 {
-		return ssz.ErrLowBufferSize
-	}
 	p.Id = ssz.UnmarshalUint64SSZ(buf)
 	return nil
 }

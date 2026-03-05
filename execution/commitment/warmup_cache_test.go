@@ -20,6 +20,8 @@ import (
 	"bytes"
 	"crypto/rand"
 	"testing"
+
+	"github.com/erigontech/erigon/db/kv"
 )
 
 // TestWarmupCache_Basic tests basic put/get operations
@@ -29,14 +31,17 @@ func TestWarmupCache_Basic(t *testing.T) {
 	// Test branch operations
 	branchKey := []byte("test-branch-key-12345678901234567890")
 	branchData := []byte("branch-data-content")
-	cache.PutBranch(branchKey, branchData)
+	cache.PutBranch(branchKey, branchData, 42)
 
-	gotData, found := cache.GetBranch(branchKey)
+	gotData, gotStep, found := cache.GetBranch(branchKey)
 	if !found {
 		t.Fatal("expected to find branch")
 	}
 	if !bytes.Equal(gotData, branchData) {
 		t.Errorf("branch data mismatch: got %x, want %x", gotData, branchData)
+	}
+	if gotStep != 42 {
+		t.Errorf("branch step mismatch: got %d, want 42", gotStep)
 	}
 
 	// Test account operations
@@ -56,7 +61,7 @@ func TestWarmupCache_Basic(t *testing.T) {
 	storageKey := make([]byte, 52)
 	rand.Read(storageKey)
 	storageUpdate := &Update{Flags: StorageUpdate, StorageLen: 5}
-	copy(storageUpdate.Storage[:], "hello")
+	copy(storageUpdate.Storage[:], []byte("hello"))
 	cache.PutStorage(storageKey, storageUpdate)
 
 	gotStorage, found := cache.GetStorage(storageKey)
@@ -75,7 +80,7 @@ func TestWarmupCache_Basic(t *testing.T) {
 func TestWarmupCache_NotFound(t *testing.T) {
 	cache := NewWarmupCache()
 
-	_, found := cache.GetBranch([]byte("nonexistent"))
+	_, _, found := cache.GetBranch([]byte("nonexistent"))
 	if found {
 		t.Error("expected not to find nonexistent branch")
 	}
@@ -153,7 +158,7 @@ func TestWarmupCache_Clear(t *testing.T) {
 	// Add some data
 	cache.PutAccount([]byte("12345678901234567890"), &Update{})
 	cache.PutStorage(make([]byte, 52), &Update{})
-	cache.PutBranch([]byte("branch"), []byte("data"))
+	cache.PutBranch([]byte("branch"), []byte("data"), 1)
 
 	// Clear
 	cache.Clear()
@@ -171,9 +176,9 @@ func TestWarmupCache_KeyPadding(t *testing.T) {
 
 	// Test with a key shorter than the fixed size
 	shortKey := []byte("short")
-	cache.PutBranch(shortKey, []byte("data"))
+	cache.PutBranch(shortKey, []byte("data"), 1)
 
-	gotData, found := cache.GetBranch(shortKey)
+	gotData, _, found := cache.GetBranch(shortKey)
 	if !found {
 		t.Fatal("expected to find branch with short key")
 	}
@@ -183,14 +188,14 @@ func TestWarmupCache_KeyPadding(t *testing.T) {
 
 	// Ensure different short keys don't collide
 	shortKey2 := []byte("other")
-	cache.PutBranch(shortKey2, []byte("data2"))
+	cache.PutBranch(shortKey2, []byte("data2"), 2)
 
-	gotData, found = cache.GetBranch(shortKey)
+	gotData, _, found = cache.GetBranch(shortKey)
 	if !found || !bytes.Equal(gotData, []byte("data")) {
 		t.Error("first key affected by second key")
 	}
 
-	gotData2, found := cache.GetBranch(shortKey2)
+	gotData2, _, found := cache.GetBranch(shortKey2)
 	if !found || !bytes.Equal(gotData2, []byte("data2")) {
 		t.Error("second key not found or wrong data")
 	}
@@ -216,13 +221,13 @@ func BenchmarkWarmupCache_Branch(b *testing.B) {
 	rand.Read(data)
 
 	for _, key := range keys {
-		cache.PutBranch(key, data)
+		cache.PutBranch(key, data, 1)
 	}
 
 	b.ResetTimer()
 	b.ReportAllocs()
 
-	for i := 0; b.Loop(); i++ {
+	for i := 0; i < b.N; i++ {
 		key := keys[i%len(keys)]
 		cache.GetBranch(key)
 	}
@@ -231,15 +236,15 @@ func BenchmarkWarmupCache_Branch(b *testing.B) {
 // BenchmarkWarmupCache_Branch_Put benchmarks Put operations
 func BenchmarkWarmupCache_Branch_Put(b *testing.B) {
 	cache := NewWarmupCache()
-	const keyCount = 10000
-	keys := generateTestKeys(keyCount, 52)
+	keys := generateTestKeys(b.N, 52)
 	data := make([]byte, 100)
 	rand.Read(data)
 
+	b.ResetTimer()
 	b.ReportAllocs()
 
-	for i := 0; b.Loop(); i++ {
-		cache.PutBranch(keys[i%keyCount], data)
+	for i := 0; i < b.N; i++ {
+		cache.PutBranch(keys[i], data, kv.Step(i))
 	}
 }
 
@@ -256,7 +261,7 @@ func BenchmarkWarmupCache_Account(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 
-	for i := 0; b.Loop(); i++ {
+	for i := 0; i < b.N; i++ {
 		key := keys[i%len(keys)]
 		cache.GetAccount(key)
 	}
@@ -275,7 +280,7 @@ func BenchmarkWarmupCache_Storage(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 
-	for i := 0; b.Loop(); i++ {
+	for i := 0; i < b.N; i++ {
 		key := keys[i%len(keys)]
 		cache.GetStorage(key)
 	}
@@ -298,13 +303,13 @@ func BenchmarkWarmupCache_Mixed(b *testing.B) {
 		cache.PutStorage(key, update)
 	}
 	for _, key := range branchKeys {
-		cache.PutBranch(key, data)
+		cache.PutBranch(key, data, 1)
 	}
 
 	b.ResetTimer()
 	b.ReportAllocs()
 
-	for i := 0; b.Loop(); i++ {
+	for i := 0; i < b.N; i++ {
 		switch i % 3 {
 		case 0:
 			cache.GetAccount(accountKeys[i%len(accountKeys)])
@@ -329,7 +334,7 @@ func BenchmarkComparison_Map_100k(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 
-	for i := 0; b.Loop(); i++ {
+	for i := 0; i < b.N; i++ {
 		cache.GetStorage(keys[i%len(keys)])
 	}
 }

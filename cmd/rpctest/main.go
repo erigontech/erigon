@@ -526,19 +526,6 @@ func main() {
 	}
 	with(benchEthGetBalanceCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum)
 
-	var BenchEthGetLogsRandomBlockCmd = &cobra.Command{
-		Use:   "benchEthGetLogsRandomBlock",
-		Short: "",
-		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			err := rpctest.BenchEthGetLogsRandomBlock(erigonURL, int(concurentRequests))
-			if err != nil {
-				logger.Error(err.Error())
-			}
-		},
-	}
-	with(BenchEthGetLogsRandomBlockCmd, withErigonUrl, withRandBlockNum, withConcurentRequestNum)
-
 	var BenchEthGetBalanceRandomAccountCmd = &cobra.Command{
 		Use:   "benchEthGetBalanceRandomAccount",
 		Short: "",
@@ -616,7 +603,6 @@ func main() {
 		benchEthBlockByNumberCmd,
 		benchEthGetBalanceCmd,
 		BenchEthGetBalanceRandomAccountCmd,
-		BenchEthGetLogsRandomBlockCmd,
 		benchOtsGetBlockTransactions,
 		replayCmd,
 	)

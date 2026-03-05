@@ -30,7 +30,6 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -65,9 +64,6 @@ type callback struct {
 	isSubscribe bool           // true if this is a subscription callback
 	streamable  bool           // support JSON streaming (more efficient for large responses)
 	logger      log.Logger
-
-	timerSuccess metrics.Summary // pre-cached success timer, avoids per-call GetOrCreateSummary
-	timerFailure metrics.Summary // pre-cached failure timer
 }
 
 func (r *serviceRegistry) registerName(name string, rcvr any) error {
@@ -94,16 +90,11 @@ func (r *serviceRegistry) registerName(name string, rcvr any) error {
 		}
 		r.services[name] = svc
 	}
-	for shortName, cb := range callbacks {
-		// Pre-cache metrics timers using the full "namespace_method" name so the
-		// hot call path never needs to call GetOrCreateSummary or fmt.Sprintf.
-		fullMethod := name + serviceMethodSeparator + shortName
-		cb.timerSuccess = newRPCServingTimerMS(fullMethod, true)
-		cb.timerFailure = newRPCServingTimerMS(fullMethod, false)
+	for name, cb := range callbacks {
 		if cb.isSubscribe {
-			svc.subscriptions[shortName] = cb
+			svc.subscriptions[name] = cb
 		} else {
-			svc.callbacks[shortName] = cb
+			svc.callbacks[name] = cb
 		}
 	}
 	return nil
@@ -111,13 +102,13 @@ func (r *serviceRegistry) registerName(name string, rcvr any) error {
 
 // callback returns the callback corresponding to the given RPC method name.
 func (r *serviceRegistry) callback(method string) *callback {
-	svc, name, ok := strings.Cut(method, serviceMethodSeparator)
-	if !ok {
+	elem := strings.SplitN(method, serviceMethodSeparator, 2)
+	if len(elem) != 2 {
 		return nil
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.services[svc].callbacks[name]
+	return r.services[elem[0]].callbacks[elem[1]]
 }
 
 // subscription returns a subscription callback in the given service.
@@ -250,7 +241,7 @@ func (c *callback) call(ctx context.Context, method string, args []reflect.Value
 
 // Is t context.Context or *context.Context?
 func isContextType(t reflect.Type) bool {
-	for t.Kind() == reflect.Pointer {
+	for t.Kind() == reflect.Ptr {
 		t = t.Elem()
 	}
 	return t == contextType
@@ -258,7 +249,7 @@ func isContextType(t reflect.Type) bool {
 
 // Does t satisfy the error interface?
 func isErrorType(t reflect.Type) bool {
-	for t.Kind() == reflect.Pointer {
+	for t.Kind() == reflect.Ptr {
 		t = t.Elem()
 	}
 	return t.Implements(errorType)
@@ -266,7 +257,7 @@ func isErrorType(t reflect.Type) bool {
 
 // Is t Subscription or *Subscription?
 func isSubscriptionType(t reflect.Type) bool {
-	for t.Kind() == reflect.Pointer {
+	for t.Kind() == reflect.Ptr {
 		t = t.Elem()
 	}
 	return t == subscriptionType

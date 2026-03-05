@@ -24,13 +24,14 @@ import (
 // Used by commitment to write branch data.
 // SharedDomains implements this interface directly.
 type DomainPutter interface {
-	DomainPut(domain kv.Domain, tx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte) error
+	DomainPut(domain kv.Domain, tx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error
 }
 
 // CommitmentWrite represents a commitment domain write that needs to be added to changesets.
 type CommitmentWrite struct {
-	Key     []byte
-	Value   []byte
-	TxNum   uint64
-	PrevVal []byte
+	Key      []byte
+	Value    []byte
+	TxNum    uint64
+	PrevVal  []byte
+	PrevStep kv.Step
 }

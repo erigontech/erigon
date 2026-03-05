@@ -97,14 +97,17 @@ func uint256FromBigInt(num *big.Int) (*uint256.Int, error) {
 }
 
 func makeGenesisChainHead(genesis *types.Block) ChainHead {
-	genesisDifficulty := genesis.Difficulty()
+	genesisDifficulty, err := uint256FromBigInt(genesis.Difficulty())
+	if err != nil {
+		panic(fmt.Errorf("makeGenesisChainHead: difficulty conversion error: %w", err))
+	}
 
 	return ChainHead{
 		HeadHeight:    genesis.NumberU64(),
 		HeadTime:      genesis.Time(),
 		HeadHash:      genesis.Hash(),
 		MinimumHeight: genesis.NumberU64(),
-		HeadTd:        &genesisDifficulty,
+		HeadTd:        genesisDifficulty,
 	}
 }
 
@@ -198,11 +201,16 @@ func (s *StatusDataProvider) ReadChainHeadFromSnapshots(ctx context.Context, min
 		return ChainHead{}, fmt.Errorf("failed reading snapshot header %d: %w", latest, err)
 	}
 
+	td256, err := uint256FromBigInt(header.Difficulty)
+	if err != nil {
+		return ChainHead{}, fmt.Errorf("difficulty conversion for snapshot block %d: %w", latest, err)
+	}
+
 	return ChainHead{
 		HeadHeight:    header.Number.Uint64(),
 		HeadTime:      header.Time,
 		HeadHash:      header.Hash(),
 		MinimumHeight: minimumBlock,
-		HeadTd:        &header.Difficulty,
+		HeadTd:        td256,
 	}, nil
 }

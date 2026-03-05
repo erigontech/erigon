@@ -134,24 +134,6 @@ func StageExecuteBlocksCfg(
 	}
 }
 
-// ChainConfig returns the chain configuration.
-func (cfg ExecuteBlockCfg) ChainConfig() *chain.Config { return cfg.chainConfig }
-
-// IsExperimentalBAL returns whether experimental BAL is enabled.
-func (cfg ExecuteBlockCfg) IsExperimentalBAL() bool { return cfg.experimentalBAL }
-
-// BlockReader returns the block reader.
-func (cfg ExecuteBlockCfg) BlockReader() services.FullBlockReader { return cfg.blockReader }
-
-// DirsDataDir returns the data directory path.
-func (cfg ExecuteBlockCfg) DirsDataDir() string { return cfg.dirs.DataDir }
-
-// WithAuthor returns a copy of the config with the author set.
-func (cfg ExecuteBlockCfg) WithAuthor(author accounts.Address) ExecuteBlockCfg {
-	cfg.author = author
-	return cfg
-}
-
 // ================ Erigon3 ================
 
 var ErrTooDeepUnwind = errors.New("too deep unwind")
@@ -213,13 +195,7 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 			}
 		}
 	}
-	// Get the hash of the last executed block (the tip we're unwinding from)
-	// so RevertWithDiffset can detect if the cache was modified by a rolled-back tx.
-	lastExecHash, _, err := br.CanonicalHash(ctx, rwTx, u.CurrentBlockNumber)
-	if err != nil {
-		lastExecHash = common.Hash{}
-	}
-	if err := unwindExec3State(ctx, doms, rwTx, u.UnwindPoint, txNum, accumulator, changeSet, lastExecHash, logger); err != nil {
+	if err := unwindExec3State(ctx, doms, rwTx, u.UnwindPoint, txNum, accumulator, changeSet, logger); err != nil {
 		return fmt.Errorf("unwindExec3State(%d->%d): %w, took %s", s.BlockNumber, u.UnwindPoint, err, time.Since(t))
 	}
 	if err := rawdb.DeleteNewerEpochs(rwTx, u.UnwindPoint+1); err != nil {
@@ -234,7 +210,7 @@ func unwindExec3State(ctx context.Context,
 	sd *execctx.SharedDomains, tx kv.TemporalRwTx,
 	blockUnwindTo, txUnwindTo uint64,
 	accumulator *shards.Accumulator,
-	changeset *[kv.DomainLen][]kv.DomainEntryDiff, lastExecutedBlockHash common.Hash, logger log.Logger) error {
+	changeset *[kv.DomainLen][]kv.DomainEntryDiff, logger log.Logger) error {
 	st := time.Now()
 	defer mxState3Unwind.ObserveDuration(st)
 	var currentInc uint64
@@ -289,16 +265,14 @@ func unwindExec3State(ctx context.Context,
 	defer stateChanges.Close()
 	stateChanges.SortAndFlushInBackground(true)
 
-	// Invalidate state cache entries affected by the unwind.
-	// Pass the hash of the last executed block so RevertWithDiffset can detect
-	// if the cache was modified by a rolled-back tx (e.g. ValidatePayload).
+	// Invalidate state cache entries affected by the unwind
 	if stateCache := sd.GetStateCache(); stateCache != nil {
 		unwindToHash, err := rawdb.ReadCanonicalHash(tx, blockUnwindTo)
 		if err != nil {
 			logger.Warn("failed to read canonical hash for cache update", "block", blockUnwindTo, "err", err)
 			unwindToHash = common.Hash{}
 		}
-		stateCache.RevertWithDiffset(changeset, lastExecutedBlockHash, unwindToHash)
+		stateCache.RevertWithDiffset(changeset, unwindToHash)
 	}
 	if changeset != nil {
 		accountDiffs := changeset[kv.AccountsDomain]
@@ -306,15 +280,22 @@ func unwindExec3State(ctx context.Context,
 			if dbg.TraceUnwinds && dbg.TraceDomain(uint16(kv.AccountsDomain)) {
 				address := entry.Key[:len(entry.Key)-8]
 				keyStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
-				if entry.Value != nil && len(entry.Value) > 0 {
+				prevStep := ^binary.BigEndian.Uint64(entry.PrevStepBytes)
+				if len(entry.Value) > 0 {
 					var account accounts.Account
 					if err := accounts.DeserialiseV3(&account, entry.Value); err == nil {
-						fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}, step: %d\n", blockUnwindTo, txUnwindTo, address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash, keyStep)
+						fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}, step: %d, prev: %d\n", blockUnwindTo, txUnwindTo, address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash, keyStep, prevStep)
 					}
-				} else if entry.Value == nil {
-					fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: [different step], step: %d\n", blockUnwindTo, txUnwindTo, address, keyStep)
 				} else {
-					fmt.Printf("unwind (Block:%d,Tx:%d): del acc: %x, step: %d\n", blockUnwindTo, txUnwindTo, address, keyStep)
+					if keyStep != prevStep {
+						if prevStep == 0 {
+							fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: [empty], step: %d\n", blockUnwindTo, txUnwindTo, address, keyStep)
+						} else {
+							fmt.Printf("unwind (Block:%d,Tx:%d): acc: %x, in prev step: {key: %d, prev: %d}\n", blockUnwindTo, txUnwindTo, address, keyStep, prevStep)
+						}
+					} else {
+						fmt.Printf("unwind (Block:%d,Tx:%d): del acc: %x, step: %d\n", blockUnwindTo, txUnwindTo, address, keyStep)
+					}
 				}
 			}
 			if err := stateChanges.Collect(toBytesZeroCopy(entry.Key)[:length.Addr], entry.Value); err != nil {
@@ -352,6 +333,7 @@ func unwindExec3State(ctx context.Context,
 
 	sd.Unwind(txUnwindTo, changeset)
 	sd.SetTxNum(txUnwindTo)
+	sd.SetBlockNum(blockUnwindTo)
 	return nil
 }
 
@@ -452,7 +434,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 		return err
 	}
 
-	_, _, _ = doms.SeekCommitment(ctx, rwTx) // ensure internal state of `doms` is set
+	doms.SeekCommitment(ctx, rwTx)
 	//dumpPlainStateDebug(tx, nil)
 	return nil
 }
@@ -500,27 +482,6 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 				"duration", duration,
 				"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
 			)
-		}
-	}
-
-	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth {
-		pruneBalLimit := 10_000
-		pruneTimeout := quickPruneTimeout
-		if s.CurrentSyncCycle.IsInitialCycle {
-			pruneBalLimit = math.MaxInt
-			pruneTimeout = time.Hour
-		}
-		if err := rawdb.PruneTable(
-			tx,
-			kv.BlockAccessList,
-			s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
-			ctx,
-			pruneBalLimit,
-			pruneTimeout,
-			logger,
-			s.LogPrefix(),
-		); err != nil {
-			return err
 		}
 	}
 

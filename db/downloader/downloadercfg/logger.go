@@ -68,7 +68,10 @@ func erigonToAnalogLevel(level log.Lvl) (lvl analog.Level, dbg bool, err error) 
 func anacrolixToErigonLogLevel(level analog.Level) log.Lvl {
 	switch level {
 	case analog.Never:
-		panic(level) // This should never occur. Maybe log that a message leaked?
+		// This should never occur. Maybe log that a message leaked?
+		panic(level)
+		//nolint
+		return log.LvlTrace + 1
 	case analog.NotSet:
 		// This is usually bad practice. Set an appropriate default so it doesn't happen.
 		return log.LvlWarn
@@ -83,7 +86,10 @@ func anacrolixToErigonLogLevel(level analog.Level) log.Lvl {
 	case analog.Critical:
 		return log.LvlCrit
 	case analog.Disabled:
-		panic(level) // This should never occur. Maybe log that a message leaked?
+		panic(level)
+		// This should never occur. Maybe log that a message leaked?
+		//nolint
+		return log.LvlError
 	default:
 		// This shouldn't happen...
 		panic(level)

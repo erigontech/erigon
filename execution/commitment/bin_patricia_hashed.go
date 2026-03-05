@@ -99,8 +99,8 @@ package commitment
 //
 //func NewBinPatriciaHashed(accountKeyLen int, ctx PatriciaContext, tmpdir string) *BinPatriciaHashed {
 //	bph := &BinPatriciaHashed{
-//		keccak:        keccak.NewFastKeccak(),
-//		keccak2:       keccak.NewFastKeccak(),
+//		keccak:        sha3.NewLegacyKeccak256().(keccakState),
+//		keccak2:       sha3.NewLegacyKeccak256().(keccakState),
 //		accountKeyLen: accountKeyLen,
 //		accountFn:     wrapAccountStorageFn(ctx.GetAccount),
 //		storageFn:     wrapAccountStorageFn(ctx.GetStorage),

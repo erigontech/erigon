@@ -17,6 +17,7 @@
 package shutter
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -42,21 +43,21 @@ func TestRegistrationMessageMarshalRoundtrip(t *testing.T) {
 }
 
 func TestRegistrationMessageInvalidUnmarshal(t *testing.T) {
-	base := make([]byte, 46)
+	base := bytes.Repeat([]byte{0}, 46)
 	require.NoError(t, new(LegacyRegistrationMessage).Unmarshal(base))
 
 	for _, b := range [][]byte{
 		{},
-		make([]byte, 45),
-		make([]byte, 47),
-		make([]byte, 92),
+		bytes.Repeat([]byte{0}, 45),
+		bytes.Repeat([]byte{0}, 47),
+		bytes.Repeat([]byte{0}, 92),
 	} {
 		err := new(LegacyRegistrationMessage).Unmarshal(b)
 		assert.ErrorContains(t, err, "invalid registration message length")
 	}
 
 	for _, isRegistrationByte := range []byte{2, 3, 255} {
-		b := make([]byte, 46)
+		b := bytes.Repeat([]byte{0}, 46)
 		b[45] = isRegistrationByte
 		err := new(LegacyRegistrationMessage).Unmarshal(b)
 		assert.ErrorContains(t, err, "invalid registration message type byte")

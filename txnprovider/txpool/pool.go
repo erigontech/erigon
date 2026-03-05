@@ -818,22 +818,9 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 		// this stage
 		isAATxn := mt.TxnSlot.Type == types.AccountAbstractionTxType
 		authorizationLen := uint64(len(mt.TxnSlot.AuthAndNonces))
-		intrinsicGasResult, _ := fixedgas.CalcIntrinsicGas(fixedgas.IntrinsicGasCalcArgs{
-			Data:               make([]byte, mt.TxnSlot.DataLen),
-			DataNonZeroLen:     uint64(mt.TxnSlot.DataNonZeroLen),
-			AuthorizationsLen:  authorizationLen,
-			AccessListLen:      uint64(mt.TxnSlot.AccessListAddrCount),
-			StorageKeysLen:     uint64(mt.TxnSlot.AccessListStorCount),
-			IsContractCreation: mt.TxnSlot.Creation,
-			IsEIP2:             true,
-			IsEIP2028:          true,
-			IsEIP3860:          isEIP3860,
-			IsEIP7623:          isEIP7623,
-			IsAATxn:            isAATxn,
-		})
-		intrinsicGas := intrinsicGasResult.RegularGas
-		if isEIP7623 && intrinsicGasResult.FloorGasCost > intrinsicGas {
-			intrinsicGas = intrinsicGasResult.FloorGasCost
+		intrinsicGas, floorGas, _ := fixedgas.CalcIntrinsicGas(uint64(mt.TxnSlot.DataLen), uint64(mt.TxnSlot.DataNonZeroLen), authorizationLen, uint64(mt.TxnSlot.AccessListAddrCount), uint64(mt.TxnSlot.AccessListStorCount), mt.TxnSlot.Creation, true, true, isEIP3860, isEIP7623, isAATxn)
+		if isEIP7623 && floorGas > intrinsicGas {
+			intrinsicGas = floorGas
 		}
 		if intrinsicGas > availableGas {
 			// we might find another txn with a low enough intrinsic gas to include so carry on
@@ -982,22 +969,9 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 	}
 
 	isAATxn := txn.Type == types.AccountAbstractionTxType
-	intrinsicGasResult, overflow := fixedgas.CalcIntrinsicGas(fixedgas.IntrinsicGasCalcArgs{
-		Data:               make([]byte, txn.DataLen),
-		DataNonZeroLen:     uint64(txn.DataNonZeroLen),
-		AuthorizationsLen:  uint64(authorizationLen),
-		AccessListLen:      uint64(txn.AccessListAddrCount),
-		StorageKeysLen:     uint64(txn.AccessListStorCount),
-		IsContractCreation: txn.Creation,
-		IsEIP2:             true,
-		IsEIP2028:          true,
-		IsEIP3860:          isEIP3860,
-		IsEIP7623:          isPrague,
-		IsAATxn:            isAATxn,
-	})
-	gas := intrinsicGasResult.RegularGas
-	if isPrague && intrinsicGasResult.FloorGasCost > gas {
-		gas = intrinsicGasResult.FloorGasCost
+	gas, floorGas, overflow := fixedgas.CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), uint64(authorizationLen), uint64(txn.AccessListAddrCount), uint64(txn.AccessListStorCount), txn.Creation, true, true, isEIP3860, isPrague, isAATxn)
+	if isPrague && floorGas > gas {
+		gas = floorGas
 	}
 
 	if txn.Traced {
@@ -1863,22 +1837,12 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 	cumulativeRequiredBalance := uint256.NewInt(0)
 	minFeeCap := uint256.NewInt(0).SetAllOne()
 	minTip := uint64(math.MaxUint64)
-	var toDel []*metaTxn                       // can't delete items while iterate them
-	var toDelReasons []txpoolcfg.DiscardReason // parallel reasons slice for toDel
+	var toDel []*metaTxn // can't delete items while iterate them
 
 	p.all.ascend(senderID, func(mt *metaTxn) bool {
 		deleteAndContinueReasonLog := ""
-		discardReason := txpoolcfg.NonceTooLow
 		if senderNonce > mt.TxnSlot.Nonce {
 			deleteAndContinueReasonLog = "low nonce"
-		} else if p.cfg.MaxNonceGap > 0 && mt.TxnSlot.Nonce > noGapsNonce && mt.TxnSlot.Nonce-noGapsNonce > p.cfg.MaxNonceGap {
-			// Evict "zombie" queued transactions whose nonce is so far ahead of the sender's
-			// on-chain nonce (accounting for any consecutive txns already in the pool) that they
-			// can practically never become pending. This prevents unbounded pool bloat from accounts
-			// that submitted transactions with impossibly large nonce gaps (e.g. nonce 144968 when
-			// on-chain nonce is 6398). The gap threshold is configurable via MaxNonceGap (default 64).
-			deleteAndContinueReasonLog = "nonce gap too large"
-			discardReason = txpoolcfg.NonceTooDistant
 		} else if mt.TxnSlot.Nonce != noGapsNonce && mt.TxnSlot.Type == BlobTxnType { // Discard nonce-gapped blob txns
 			deleteAndContinueReasonLog = "nonce-gapped blob txn"
 		}
@@ -1898,7 +1862,6 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 				//already removed
 			}
 			toDel = append(toDel, mt)
-			toDelReasons = append(toDelReasons, discardReason)
 			return true
 		}
 
@@ -1967,8 +1930,8 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 		return true
 	})
 
-	for i, mt := range toDel {
-		p.discardLocked(mt, toDelReasons[i])
+	for _, mt := range toDel {
+		p.discardLocked(mt, txpoolcfg.NonceTooLow)
 	}
 
 	logger.Trace("[txpool] onSenderStateChange", "sender", senderID, "count", p.all.count(senderID), "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len())

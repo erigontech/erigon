@@ -20,11 +20,12 @@
 package vm
 
 import (
+	"errors"
 	"fmt"
 	"math"
 
-	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
+	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -361,7 +362,7 @@ func opKeccak256(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error
 	data := scope.Memory.GetPtr(offset.Uint64(), size.Uint64())
 
 	if evm.hasher == nil {
-		evm.hasher = keccak.NewFastKeccak()
+		evm.hasher = sha3.NewLegacyKeccak256().(keccakState)
 	} else {
 		evm.hasher.Reset()
 	}
@@ -633,11 +634,6 @@ func opExtCodeHash(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, err
 	slot := scope.Stack.peek()
 	address := accounts.InternAddress(slot.Bytes20())
 
-	// BAL: record address access so non-existent accounts appear in the block
-	// access list.  When Empty() returns true, GetCodeHash is never called,
-	// so no other read (BalancePath, CodePath, etc.) creates a BAL entry.
-	evm.IntraBlockState().MarkAddressAccess(address, true)
-
 	empty, err := evm.IntraBlockState().Empty(address)
 	if err != nil {
 		return pc, nil, err
@@ -717,21 +713,19 @@ func opNumber(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	return pc, nil, nil
 }
 
-func opSlotNum(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	v := new(uint256.Int).SetUint64(evm.Context.SlotNumber)
-	scope.Stack.push(*v)
-	return pc, nil, nil
-}
-
 func opDifficulty(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	var v uint256.Int
+	var v *uint256.Int
 	if evm.Context.PrevRanDao != nil {
 		// EIP-4399: Supplant DIFFICULTY opcode with PREVRANDAO
-		v.SetBytes32(evm.Context.PrevRanDao.Bytes())
+		v = new(uint256.Int).SetBytes(evm.Context.PrevRanDao.Bytes())
 	} else {
-		v = evm.Context.Difficulty
+		var overflow bool
+		v, overflow = uint256.FromBig(evm.Context.Difficulty)
+		if overflow {
+			return pc, nil, errors.New("evm.Context.Difficulty higher than 2^256-1")
+		}
 	}
-	scope.Stack.push(v)
+	scope.Stack.push(*v)
 	return pc, nil, nil
 }
 
@@ -1087,12 +1081,6 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 
 	if !value.IsZero() {
 		if evm.readOnly {
-			// The gas function already called Empty() on the target for
-			// gas calculation, which recorded versioned reads.  Mark them
-			// as internal so they are kept for conflict detection but
-			// excluded from the block access list — the CALL never
-			// actually executes.
-			evm.intraBlockState.MarkReadsInternal(toAddr)
 			return pc, nil, ErrWriteProtection
 		}
 		gas += params.CallStipend

@@ -76,7 +76,11 @@ func (api *APIImpl) SendRawTransactionSync(ctx context.Context, encodedTx hexuti
 	timeout := api.RpcTxSyncDefaultTimeout
 	if timeoutMs != nil && *timeoutMs > 0 {
 		reqTimeout := time.Duration(*timeoutMs) * time.Millisecond
-		timeout = min(reqTimeout, api.RpcTxSyncMaxTimeout)
+		if reqTimeout > api.RpcTxSyncMaxTimeout {
+			timeout = api.RpcTxSyncMaxTimeout
+		} else {
+			timeout = reqTimeout
+		}
 	}
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

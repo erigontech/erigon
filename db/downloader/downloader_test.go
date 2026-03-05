@@ -117,12 +117,9 @@ func TestVerifyDataNoTorrents(t *testing.T) {
 }
 
 func TestVerifyData(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Skip on Windows due to file locking issues")
-	}
 	require := require.New(t)
 	test := newDownloaderTest(t)
-	os.WriteFile(filepath.Join(test.dirs.Snap, "a"), nil, 0o644)
+	os.WriteFile(filepath.Join(test.dirs.Snap, "a"), nil, 0o444)
 	err := test.downloader.AddNewSeedableFile(t.Context(), "a")
 	require.NoError(err)
 	err = test.downloader.VerifyData(test.downloader.ctx, nil, false)

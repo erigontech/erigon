@@ -198,7 +198,7 @@ func (hdt blockDownloaderTest) defaultFetchHeadersMock() fetchHeadersMock {
 		size := 0
 		for num := start; num < end; num++ {
 			header := &types.Header{
-				Number: *uint256.NewInt(num),
+				Number: new(big.Int).SetUint64(num),
 			}
 			res[num-start] = header
 			size += header.EncodingSize()

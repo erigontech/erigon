@@ -29,8 +29,6 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
@@ -86,7 +84,6 @@ type EngineServer struct {
 	engineLogSpamer *engine_logs_spammer.EngineLogsSpammer
 	// TODO Remove this on next release
 	printPectraBanner bool
-	maxReorgDepth     uint64
 }
 
 func NewEngineServer(
@@ -99,9 +96,8 @@ func NewEngineServer(
 	consuming bool,
 	txPool txpoolproto.TxpoolClient,
 	fcuTimeout time.Duration,
-	maxReorgDepth uint64,
 ) *EngineServer {
-	chainRW := chainreader.NewChainReaderEth1(config, executionService, fcuTimeout)
+	chainRW := chainreader.NewChainReaderEth1(config, executionService, uint64(fcuTimeout.Milliseconds()))
 	srv := &EngineServer{
 		logger:            logger,
 		config:            config,
@@ -113,7 +109,6 @@ func NewEngineServer(
 		engineLogSpamer:   engine_logs_spammer.NewEngineLogsSpammer(logger, config),
 		printPectraBanner: true,
 		txpool:            txPool,
-		maxReorgDepth:     maxReorgDepth,
 	}
 
 	srv.consuming.Store(consuming)
@@ -155,16 +150,6 @@ func (e *EngineServer) Start(
 			Service:   EngineAPI(e),
 			Version:   "1.0",
 		}}
-
-	if httpConfig.TestingEnabled {
-		e.logger.Warn("[EngineServer] testing_ RPC namespace is ENABLED — do not use on production networks")
-		apiList = append(apiList, rpc.API{
-			Namespace: "testing",
-			Public:    false,
-			Service:   TestingAPI(NewTestingImpl(e, true)),
-			Version:   "1.0",
-		})
-	}
 
 	eg.Go(func() error {
 		defer e.logger.Debug("[EngineServer] engine rpc server goroutine terminated")
@@ -230,15 +215,15 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		Coinbase:    req.FeeRecipient,
 		Root:        req.StateRoot,
 		Bloom:       bloom,
-		BaseFee:     uint256.MustFromBig(req.BaseFeePerGas.ToInt()),
+		BaseFee:     (*big.Int)(req.BaseFeePerGas),
 		Extra:       req.ExtraData,
-		Number:      *uint256.NewInt(req.BlockNumber.Uint64()),
+		Number:      big.NewInt(0).SetUint64(req.BlockNumber.Uint64()),
 		GasUsed:     uint64(req.GasUsed),
 		GasLimit:    uint64(req.GasLimit),
 		Time:        uint64(req.Timestamp),
 		MixDigest:   req.PrevRandao,
 		UncleHash:   empty.UncleHash,
-		Difficulty:  *merge.ProofOfStakeDifficulty,
+		Difficulty:  merge.ProofOfStakeDifficulty,
 		Nonce:       merge.ProofOfStakeNonce,
 		ReceiptHash: req.ReceiptsRoot,
 		TxHash:      types.DeriveSha(types.BinaryTransactions(txs)),
@@ -293,42 +278,29 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	var blockAccessList types.BlockAccessList
-	var blockAccessListBytes []byte
 	var err error
 	if version >= clparams.GloasVersion {
 		if req.BlockAccessList == nil {
 			return nil, &rpc.InvalidParamsError{Message: "blockAccessList missing"}
 		}
-		if len(req.BlockAccessList) == 0 {
+		if len(*req.BlockAccessList) == 0 {
 			blockAccessList = nil
 			header.BlockAccessListHash = &empty.BlockAccessListHash
 		} else {
-			blockAccessList, err = types.DecodeBlockAccessListBytes(req.BlockAccessList)
+			blockAccessList, err = types.DecodeBlockAccessListBytes(*req.BlockAccessList)
 			if err != nil {
-				s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(req.BlockAccessList))
-				return &engine_types.PayloadStatus{
-					Status:          engine_types.InvalidStatus,
-					ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("invalid block access list decode: %v", err)),
-				}, nil
+				s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(*req.BlockAccessList))
+				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid blockAccessList decode: %v", err)}
 			}
 			if err := blockAccessList.Validate(); err != nil {
-				return &engine_types.PayloadStatus{
-					Status:          engine_types.InvalidStatus,
-					ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("invalid block access list validate: %v", err)),
-				}, nil
+				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid blockAccessList validate: %v", err)}
 			}
-			hash := crypto.Keccak256Hash(req.BlockAccessList)
+			hash := crypto.Keccak256Hash(*req.BlockAccessList)
 			header.BlockAccessListHash = &hash
-			blockAccessListBytes = req.BlockAccessList
 		}
-		if req.SlotNumber != nil {
-			slotNumber := uint64(*req.SlotNumber)
-			header.SlotNumber = &slotNumber
-			// TODO: No Slot Error Yet - Treate it as optional for hive testing
-			// qreturn nil, &rpc.InvalidParamsError{Message: "slotNumber missing"}
-		}
+	} else if req.BlockAccessList != nil {
+		return nil, &rpc.InvalidParamsError{Message: "unexpected blockAccessList before Amsterdam"}
 	}
-
 	log.Debug(fmt.Sprintf("bal from header: %s", blockAccessList.DebugString()))
 
 	if (!s.config.IsCancun(header.Time) && version >= clparams.DenebVersion) ||
@@ -411,8 +383,9 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	defer s.lock.Unlock()
 
 	s.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
-	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals)
-	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes, blockAccessListBytes)
+	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals, blockAccessList)
+
+	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes)
 	if err != nil {
 		if errors.Is(err, rules.ErrInvalidBlock) {
 			return &engine_types.PayloadStatus{
@@ -603,10 +576,6 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 	}
 
 	data := resp.Data
-	if data.ExecutionPayload == nil {
-		s.logger.Warn("Payload build failed (nil ExecutionPayload)", "payloadId", payloadId)
-		return nil, &engine_helpers.UnknownPayloadErr
-	}
 	var executionRequests []hexutil.Bytes
 	if version >= clparams.ElectraVersion {
 		executionRequests = make([]hexutil.Bytes, 0)
@@ -735,7 +704,6 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		Timestamp:             timestamp,
 		PrevRandao:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
 		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
-		SlotNumber:            (*uint64)(payloadAttributes.SlotNumber),
 	}
 
 	if version >= clparams.CapellaVersion {
@@ -839,7 +807,6 @@ func (e *EngineServer) HandleNewPayload(
 	logPrefix string,
 	block *types.Block,
 	versionedHashes []common.Hash,
-	blockAccessListBytes []byte,
 ) (*engine_types.PayloadStatus, error) {
 	e.engineLogSpamer.RecordRequest()
 
@@ -911,17 +878,7 @@ func (e *EngineServer) HandleNewPayload(
 		}
 	}
 
-	var accessLists []*executionproto.BlockAccessListEntry
-	if len(blockAccessListBytes) > 0 || block.BlockAccessListHash() != nil {
-		accessLists = []*executionproto.BlockAccessListEntry{
-			{
-				BlockHash:       gointerfaces.ConvertHashToH256(block.Hash()),
-				BlockNumber:     block.NumberU64(),
-				BlockAccessList: blockAccessListBytes,
-			},
-		}
-	}
-	if err := e.chainRW.InsertBlocksAndWaitWithAccessLists(ctx, []*types.Block{block}, accessLists); err != nil {
+	if err := e.chainRW.InsertBlockAndWait(ctx, block); err != nil {
 		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) {
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
@@ -931,7 +888,7 @@ func (e *EngineServer) HandleNewPayload(
 		return nil, err
 	}
 
-	if math.AbsoluteDifference(*currentHeadNumber, headerNumber) >= e.maxReorgDepth {
+	if math.AbsoluteDifference(*currentHeadNumber, headerNumber) >= 32 {
 		return &engine_types.PayloadStatus{Status: engine_types.AcceptedStatus}, nil
 	}
 

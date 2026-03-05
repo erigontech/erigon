@@ -20,10 +20,12 @@ import (
 	"sync/atomic"
 
 	"github.com/erigontech/erigon/common/maphash"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 type branchEntry struct {
 	data      []byte
+	step      kv.Step
 	isEvicted atomic.Bool
 }
 
@@ -70,7 +72,7 @@ func (c *WarmupCache) IsEnabled() bool {
 }
 
 // PutBranch stores branch data in the cache.
-func (c *WarmupCache) PutBranch(prefix []byte, data []byte) {
+func (c *WarmupCache) PutBranch(prefix []byte, data []byte, step kv.Step) {
 	if !c.enabled.Load() {
 		return
 	}
@@ -78,32 +80,33 @@ func (c *WarmupCache) PutBranch(prefix []byte, data []byte) {
 	dataCopy := make([]byte, len(data))
 	copy(dataCopy, data)
 
-	c.branches.Set(prefix, &branchEntry{data: dataCopy})
+	c.branches.Set(prefix, &branchEntry{data: dataCopy, step: step})
 }
 
 // GetBranch retrieves branch data from the cache.
-func (c *WarmupCache) GetBranch(prefix []byte) ([]byte, bool) {
+func (c *WarmupCache) GetBranch(prefix []byte) ([]byte, kv.Step, bool) {
 	if !c.enabled.Load() {
-		return nil, false
+		return nil, 0, false
 	}
 	entry, found := c.branches.Get(prefix)
 	if !found || entry.isEvicted.Load() {
-		return nil, false
+		return nil, 0, false
 	}
-	return entry.data, true
+	return entry.data, entry.step, true
 }
 
 // GetAndEvictBranch retrieves branch data and marks the entry as evicted in one operation.
-func (c *WarmupCache) GetAndEvictBranch(prefix []byte) ([]byte, bool) {
+// Returns the entry pointer allowing the caller to read the data before it's considered evicted.
+func (c *WarmupCache) GetAndEvictBranch(prefix []byte) ([]byte, kv.Step, bool) {
 	if !c.enabled.Load() {
-		return nil, false
+		return nil, 0, false
 	}
 	entry, found := c.branches.Get(prefix)
 	if !found || entry.isEvicted.Load() {
-		return nil, false
+		return nil, 0, false
 	}
 	entry.isEvicted.Store(true)
-	return entry.data, true
+	return entry.data, entry.step, true
 }
 
 // EvictBranch marks a branch entry as evicted without retrieving it.

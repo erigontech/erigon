@@ -32,6 +32,10 @@ import (
 )
 
 func TestArchiveWriter(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
 	tmp := t.TempDir()
 	logger := log.New()
 
@@ -44,9 +48,7 @@ func TestArchiveWriter(t *testing.T) {
 		compressCfg.MinPatternScore = 8
 		comp, err := seg.NewCompressor(context.Background(), "", file, tmp, compressCfg, log.LvlDebug, logger)
 		require.NoError(tb, err)
-		w := seg.NewWriter(comp, compFlags)
-		tb.Cleanup(w.Close)
-		return w
+		return seg.NewWriter(comp, compFlags)
 	}
 	keys := make([][]byte, 0, len(td))
 	for k := range td {

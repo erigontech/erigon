@@ -389,10 +389,10 @@ type Enums struct {
 }
 
 const MinCoreEnum = 1
-const MinBorEnum = 11
+const MinBorEnum = 5
 const MinCaplinEnum = 9
 
-const MaxEnum = 15
+const MaxEnum = 12
 
 var CaplinEnums = struct {
 	Enums
@@ -492,6 +492,11 @@ func BuildIndex(ctx context.Context, info FileInfo, indexVersion version.Version
 	}
 	defer d.Close()
 
+	if p != nil {
+		fname := info.Name()
+		p.Name.Store(&fname)
+		p.Total.Store(uint64(d.Count()))
+	}
 	cfg.KeyCount = d.Count()
 	idxVer := indexVersion.Current
 	cfg.IndexFile = filepath.Join(info.Dir(), info.Type.IdxFileName(idxVer, info.From, info.To))
@@ -510,7 +515,6 @@ func BuildIndex(ctx context.Context, info FileInfo, indexVersion version.Version
 	defer d.MadvSequential().DisableReadAhead()
 
 	for {
-		rs.SetProgress(p)
 		g := d.MakeGetter()
 		var i, offset, nextPos uint64
 		word := make([]byte, 0, 4096)
@@ -556,6 +560,11 @@ func BuildIndexWithSnapName(ctx context.Context, info FileInfo, cfg recsplit.Rec
 	}
 	defer d.Close()
 
+	if p != nil {
+		fname := info.Name()
+		p.Name.Store(&fname)
+		p.Total.Store(uint64(d.Count()))
+	}
 	cfg.KeyCount = d.Count()
 	cfg.IndexFile = filepath.Join(info.Dir(), IdxFileName(info.Version, info.From, info.To, info.CaplinTypeString))
 	rs, err := recsplit.NewRecSplit(cfg, logger)
@@ -568,7 +577,6 @@ func BuildIndexWithSnapName(ctx context.Context, info FileInfo, cfg recsplit.Rec
 	defer d.MadvSequential().DisableReadAhead()
 
 	for {
-		rs.SetProgress(p)
 		g := d.MakeGetter()
 		var i, offset, nextPos uint64
 		word := make([]byte, 0, 4096)

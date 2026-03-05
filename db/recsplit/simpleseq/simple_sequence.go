@@ -17,7 +17,6 @@ type SimpleSequence struct {
 	baseNum uint64
 	raw     []byte
 	pos     int
-	count   uint64 //u64-typed pre-calculated `len(raw)/4`
 }
 
 func NewSimpleSequence(baseNum uint64, count uint64) *SimpleSequence {
@@ -25,7 +24,6 @@ func NewSimpleSequence(baseNum uint64, count uint64) *SimpleSequence {
 		baseNum: baseNum,
 		raw:     make([]byte, count*4),
 		pos:     0,
-		count:   count,
 	}
 }
 
@@ -39,74 +37,60 @@ func ReadSimpleSequence(baseNum uint64, raw []byte) *SimpleSequence {
 }
 
 func (s *SimpleSequence) Get(i uint64) uint64 {
-	delta := uint64(binary.BigEndian.Uint32(s.raw[i*4:]))
-	return s.baseNum + delta
+	idx := i * 4
+	delta := binary.BigEndian.Uint32(s.raw[idx : idx+4])
+	return s.baseNum + uint64(delta)
 }
 
 func (s *SimpleSequence) Min() uint64 {
-	delta := uint64(binary.BigEndian.Uint32(s.raw))
-	return s.baseNum + delta
+	return s.Get(0)
 }
 
 func (s *SimpleSequence) Max() uint64 {
-	delta := uint64(binary.BigEndian.Uint32(s.raw[len(s.raw)-4:]))
-	return s.baseNum + delta
+	return s.Get(s.Count() - 1)
 }
 
 func (s *SimpleSequence) Count() uint64 {
-	return s.count
+	return uint64(len(s.raw) / 4)
 }
-func (s *SimpleSequence) Empty() bool { return len(s.raw) == 0 }
 
 func (s *SimpleSequence) AddOffset(offset uint64) {
-	binary.BigEndian.PutUint32(s.raw[s.pos*4:], uint32(offset-s.baseNum))
+	binary.BigEndian.PutUint32(s.raw[s.pos*4:(s.pos+1)*4], uint32(offset-s.baseNum))
 	s.pos++
 }
 
-func (s *SimpleSequence) Reset(baseNum uint64, raw []byte) { // no `return parameter` to avoid heap-allocation of `s` object
+func (s *SimpleSequence) Reset(baseNum uint64, raw []byte) {
 	s.baseNum = baseNum
 	s.raw = raw
 	s.pos = len(raw) / 4
-	s.count = uint64(len(raw) / 4)
 }
 
 func (s *SimpleSequence) AppendBytes(buf []byte) []byte {
 	return append(buf, s.raw...)
 }
 
-func (s *SimpleSequence) search(seek uint64) (idx int, ok bool) {
-	// Real data lengths:
-	//   - 70% len=1
-	//   - 15% len=2
-	//   - ...
-	//
-	// Real data return `idx`:
-	//   - 85% return idx=0 (first element)
-	//   - 10% return "not found"
-	//   - 5% other lengths
-	if seek <= s.Min() { // fast-path for 1-st element hit
-		return 0, true
-	}
-	if s.count == 1 { // if len=1 then nothing left to search
+func (s *SimpleSequence) search(v uint64) (int, bool) {
+	c := s.Count()
+	idx := sort.Search(int(c), func(i int) bool {
+		return s.Get(uint64(i)) >= v
+	})
+
+	if idx >= int(c) {
 		return 0, false
 	}
-	idx = sort.Search(int(s.count), func(i int) bool {
-		return s.Get(uint64(i)) >= seek
-	})
-	return idx, idx < int(s.count)
+	return idx, true
 }
 
-func (s *SimpleSequence) reverseSearch(seek uint64) (idx int, ok bool) {
-	if seek >= s.Max() { // fast-path for last element hit
-		return int(s.count) - 1, true
-	}
-	if s.count == 1 { // if len=1 then nothing left to search
+func (s *SimpleSequence) reverseSearch(v uint64) (int, bool) {
+	c := s.Count()
+	idx := sort.Search(int(c), func(i int) bool {
+		return s.Get(c-uint64(i)-1) <= v
+	})
+
+	if idx >= int(c) {
 		return 0, false
 	}
-	idx = sort.Search(int(s.count), func(i int) bool {
-		return s.Get(uint64(i)) > seek
-	}) - 1
-	return idx, idx >= 0
+	return int(c) - idx - 1, true
 }
 
 func (s *SimpleSequence) Seek(v uint64) (uint64, bool) {
@@ -115,11 +99,6 @@ func (s *SimpleSequence) Seek(v uint64) (uint64, bool) {
 		return 0, false
 	}
 	return s.Get(uint64(idx)), true
-}
-
-func (s *SimpleSequence) Has(v uint64) bool {
-	n, ok := s.Seek(v)
-	return ok && n == v
 }
 
 func (s *SimpleSequence) Iterator() *SimpleSequenceIterator {
@@ -139,11 +118,6 @@ func (s *SimpleSequence) ReverseIterator() *ReverseSimpleSequenceIterator {
 type SimpleSequenceIterator struct {
 	seq *SimpleSequence
 	pos int
-}
-
-func (it *SimpleSequenceIterator) Reset(seq *SimpleSequence) {
-	it.seq = seq
-	it.pos = 0
 }
 
 func (it *SimpleSequenceIterator) Next() (uint64, error) {
@@ -177,11 +151,6 @@ func (it *SimpleSequenceIterator) Seek(v uint64) {
 type ReverseSimpleSequenceIterator struct {
 	seq *SimpleSequence
 	pos int
-}
-
-func (it *ReverseSimpleSequenceIterator) Reset(seq *SimpleSequence) {
-	it.seq = seq
-	it.pos = int(seq.Count()) - 1
 }
 
 func (it *ReverseSimpleSequenceIterator) Next() (uint64, error) {

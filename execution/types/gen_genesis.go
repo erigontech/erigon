@@ -7,8 +7,6 @@ import (
 	"errors"
 	"math/big"
 
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/math"
@@ -39,7 +37,6 @@ func (g Genesis) MarshalJSON() ([]byte, error) {
 		ParentBeaconBlockRoot *common.Hash                                `json:"parentBeaconBlockRoot"`
 		RequestsHash          *common.Hash                                `json:"requestsHash"`
 		BlockAccessListHash   *common.Hash                                `json:"blockAccessListHash"`
-		SlotNumber            *math.HexOrDecimal64                        `json:"slotNumber"`
 	}
 	var enc Genesis
 	enc.Config = g.Config
@@ -47,9 +44,7 @@ func (g Genesis) MarshalJSON() ([]byte, error) {
 	enc.Timestamp = math.HexOrDecimal64(g.Timestamp)
 	enc.ExtraData = g.ExtraData
 	enc.GasLimit = math.HexOrDecimal64(g.GasLimit)
-	if g.Difficulty != nil {
-		enc.Difficulty = (*math.HexOrDecimal256)(g.Difficulty.ToBig())
-	}
+	enc.Difficulty = (*math.HexOrDecimal256)(g.Difficulty)
 	enc.Mixhash = g.Mixhash
 	enc.Coinbase = g.Coinbase
 	if g.Alloc != nil {
@@ -62,15 +57,12 @@ func (g Genesis) MarshalJSON() ([]byte, error) {
 	enc.Number = math.HexOrDecimal64(g.Number)
 	enc.GasUsed = math.HexOrDecimal64(g.GasUsed)
 	enc.ParentHash = g.ParentHash
-	if g.BaseFee != nil {
-		enc.BaseFee = (*math.HexOrDecimal256)(g.BaseFee.ToBig())
-	}
+	enc.BaseFee = (*math.HexOrDecimal256)(g.BaseFee)
 	enc.BlobGasUsed = (*math.HexOrDecimal64)(g.BlobGasUsed)
 	enc.ExcessBlobGas = (*math.HexOrDecimal64)(g.ExcessBlobGas)
 	enc.ParentBeaconBlockRoot = g.ParentBeaconBlockRoot
 	enc.RequestsHash = g.RequestsHash
 	enc.BlockAccessListHash = g.BlockAccessListHash
-	enc.SlotNumber = (*math.HexOrDecimal64)(g.SlotNumber)
 	return json.Marshal(&enc)
 }
 
@@ -96,7 +88,6 @@ func (g *Genesis) UnmarshalJSON(input []byte) error {
 		ParentBeaconBlockRoot *common.Hash                                `json:"parentBeaconBlockRoot"`
 		RequestsHash          *common.Hash                                `json:"requestsHash"`
 		BlockAccessListHash   *common.Hash                                `json:"blockAccessListHash"`
-		SlotNumber            *math.HexOrDecimal64                        `json:"slotNumber"`
 	}
 	var dec Genesis
 	if err := json.Unmarshal(input, &dec); err != nil {
@@ -121,7 +112,7 @@ func (g *Genesis) UnmarshalJSON(input []byte) error {
 	if dec.Difficulty == nil {
 		return errors.New("missing required field 'difficulty' for Genesis")
 	}
-	g.Difficulty = uint256.MustFromBig((*big.Int)(dec.Difficulty))
+	g.Difficulty = (*big.Int)(dec.Difficulty)
 	if dec.Mixhash != nil {
 		g.Mixhash = *dec.Mixhash
 	}
@@ -147,7 +138,7 @@ func (g *Genesis) UnmarshalJSON(input []byte) error {
 		g.ParentHash = *dec.ParentHash
 	}
 	if dec.BaseFee != nil {
-		g.BaseFee = uint256.MustFromBig((*big.Int)(dec.BaseFee))
+		g.BaseFee = (*big.Int)(dec.BaseFee)
 	}
 	if dec.BlobGasUsed != nil {
 		g.BlobGasUsed = (*uint64)(dec.BlobGasUsed)
@@ -163,9 +154,6 @@ func (g *Genesis) UnmarshalJSON(input []byte) error {
 	}
 	if dec.BlockAccessListHash != nil {
 		g.BlockAccessListHash = dec.BlockAccessListHash
-	}
-	if dec.SlotNumber != nil {
-		g.SlotNumber = (*uint64)(dec.SlotNumber)
 	}
 	return nil
 }

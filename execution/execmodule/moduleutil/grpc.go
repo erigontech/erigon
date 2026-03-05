@@ -31,6 +31,16 @@ import (
 )
 
 func HeaderToHeaderRPC(header *types.Header) *executionproto.Header {
+	difficulty := new(uint256.Int)
+	difficulty.SetFromBig(header.Difficulty)
+
+	var baseFeeReply *typesproto.H256
+	if header.BaseFee != nil {
+		var baseFee uint256.Int
+		baseFee.SetFromBig(header.BaseFee)
+		baseFeeReply = gointerfaces.ConvertUint256IntToH256(&baseFee)
+	}
+
 	h := &executionproto.Header{
 		ParentHash:      gointerfaces.ConvertHashToH256(header.ParentHash),
 		Coinbase:        gointerfaces.ConvertAddressToH160(header.Coinbase),
@@ -45,10 +55,10 @@ func HeaderToHeaderRPC(header *types.Header) *executionproto.Header {
 		GasUsed:         header.GasUsed,
 		Timestamp:       header.Time,
 		ExtraData:       header.Extra,
-		Difficulty:      gointerfaces.ConvertUint256IntToH256(&header.Difficulty),
+		Difficulty:      gointerfaces.ConvertUint256IntToH256(difficulty),
 		BlockHash:       gointerfaces.ConvertHashToH256(header.Hash()),
 		OmmerHash:       gointerfaces.ConvertHashToH256(header.UncleHash),
-		BaseFeePerGas:   gointerfaces.ConvertUint256IntToH256(header.BaseFee),
+		BaseFeePerGas:   baseFeeReply,
 	}
 
 	if header.ExcessBlobGas != nil {
@@ -70,10 +80,6 @@ func HeaderToHeaderRPC(header *types.Header) *executionproto.Header {
 
 	if header.BlockAccessListHash != nil {
 		h.BlockAccessListHash = gointerfaces.ConvertHashToH256(*header.BlockAccessListHash)
-	}
-
-	if header.SlotNumber != nil {
-		h.SlotNumber = header.SlotNumber
 	}
 
 	if len(header.AuRaSeal) > 0 {
@@ -124,6 +130,8 @@ func HeaderRpcToHeader(header *executionproto.Header) (*types.Header, error) {
 		TxHash:        gointerfaces.ConvertH256ToHash(header.TransactionHash),
 		ReceiptHash:   gointerfaces.ConvertH256ToHash(header.ReceiptRoot),
 		Bloom:         gointerfaces.ConvertH2048ToBloom(header.LogsBloom),
+		Difficulty:    gointerfaces.ConvertH256ToUint256Int(header.Difficulty).ToBig(),
+		Number:        new(big.Int).SetUint64(header.BlockNumber),
 		GasLimit:      header.GasLimit,
 		GasUsed:       header.GasUsed,
 		Time:          header.Timestamp,
@@ -132,16 +140,13 @@ func HeaderRpcToHeader(header *executionproto.Header) (*types.Header, error) {
 		Nonce:         blockNonce,
 		BlobGasUsed:   header.BlobGasUsed,
 		ExcessBlobGas: header.ExcessBlobGas,
-		SlotNumber:    header.SlotNumber,
 	}
-	h.Difficulty.Set(gointerfaces.ConvertH256ToUint256Int(header.Difficulty))
-	h.Number.SetUint64(header.BlockNumber)
 	if header.AuraStep != nil {
 		h.AuRaSeal = header.AuraSeal
 		h.AuRaStep = *header.AuraStep
 	}
 	if header.BaseFeePerGas != nil {
-		h.BaseFee = gointerfaces.ConvertH256ToUint256Int(header.BaseFeePerGas)
+		h.BaseFee = gointerfaces.ConvertH256ToUint256Int(header.BaseFeePerGas).ToBig()
 	}
 	if header.WithdrawalHash != nil {
 		h.WithdrawalsHash = new(common.Hash)
@@ -220,11 +225,12 @@ func ConvertRawBlockBodyToRpc(in *types.RawBody, blockNumber uint64, blockHash c
 	}
 
 	return &executionproto.BlockBody{
-		BlockNumber:  blockNumber,
-		BlockHash:    gointerfaces.ConvertHashToH256(blockHash),
-		Transactions: in.Transactions,
-		Uncles:       HeadersToHeadersRPC(in.Uncles),
-		Withdrawals:  ConvertWithdrawalsToRpc(in.Withdrawals),
+		BlockNumber:     blockNumber,
+		BlockHash:       gointerfaces.ConvertHashToH256(blockHash),
+		Transactions:    in.Transactions,
+		Uncles:          HeadersToHeadersRPC(in.Uncles),
+		Withdrawals:     ConvertWithdrawalsToRpc(in.Withdrawals),
+		BlockAccessList: types.ConvertBlockAccessListToExecutionProto(in.BlockAccessList),
 	}
 }
 
@@ -245,10 +251,15 @@ func ConvertRawBlockBodyFromRpc(in *executionproto.BlockBody) (*types.RawBody, e
 	if err != nil {
 		return nil, err
 	}
+	blockAccessList, err := types.ConvertExecutionProtoToBlockAccessList(in.BlockAccessList)
+	if err != nil {
+		return nil, err
+	}
 	return &types.RawBody{
-		Transactions: in.Transactions,
-		Uncles:       uncles,
-		Withdrawals:  ConvertWithdrawalsFromRpc(in.Withdrawals),
+		Transactions:    in.Transactions,
+		Uncles:          uncles,
+		Withdrawals:     ConvertWithdrawalsFromRpc(in.Withdrawals),
+		BlockAccessList: blockAccessList,
 	}, nil
 }
 

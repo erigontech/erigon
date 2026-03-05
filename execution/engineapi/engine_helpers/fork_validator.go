@@ -48,6 +48,9 @@ const (
 
 const timingsCacheSize = 16
 
+// the maximum point from the current head, past which side forks are not validated anymore.
+const maxForkDepth = 32 // 32 slots is the duration of an epoch thus there cannot be side forks in PoS deeper than 32 blocks from head.
+
 type validatePayloadFunc func(*execctx.SharedDomains, kv.TemporalRwTx, uint64, []*types.Header, []*types.RawBody, *shards.Notifications) error
 
 type ForkValidator struct {
@@ -58,7 +61,6 @@ type ForkValidator struct {
 	// hash of chain head that extend canonical fork.
 	extendingForkHeadHash common.Hash
 	extendingForkNumber   uint64
-	maxReorgDepth         uint64
 	// this is the function we use to perform payload validation.
 	validatePayload validatePayloadFunc
 	blockReader     services.FullBlockReader
@@ -76,8 +78,24 @@ type ForkValidator struct {
 	timingsCache *lru.Cache[common.Hash, BlockTimings]
 }
 
-func NewForkValidator(ctx context.Context, currentHeight uint64, validatePayload validatePayloadFunc, tmpDir string, blockReader services.FullBlockReader, maxReorgDepth uint64) *ForkValidator {
-	validHashes, err := lru.New[common.Hash, bool]("validHashes", int(maxReorgDepth)*8)
+func NewForkValidatorMock(currentHeight uint64) *ForkValidator {
+	validHashes, err := lru.New[common.Hash, bool]("validHashes", maxForkDepth*8)
+	if err != nil {
+		panic(err)
+	}
+	timingsCache, err := lru.New[common.Hash, BlockTimings]("timingsCache", timingsCacheSize)
+	if err != nil {
+		panic(err)
+	}
+	return &ForkValidator{
+		currentHeight: currentHeight,
+		validHashes:   validHashes,
+		timingsCache:  timingsCache,
+	}
+}
+
+func NewForkValidator(ctx context.Context, currentHeight uint64, validatePayload validatePayloadFunc, tmpDir string, blockReader services.FullBlockReader) *ForkValidator {
+	validHashes, err := lru.New[common.Hash, bool]("validHashes", maxForkDepth*8)
 	if err != nil {
 		panic(err)
 	}
@@ -94,7 +112,6 @@ func NewForkValidator(ctx context.Context, currentHeight uint64, validatePayload
 		ctx:             ctx,
 		validHashes:     validHashes,
 		timingsCache:    timingsCache,
-		maxReorgDepth:   maxReorgDepth,
 	}
 }
 
@@ -132,15 +149,7 @@ func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, tx kv.TemporalT
 		if err := fv.sharedDom.FlushPendingUpdates(ctx, tx); err != nil {
 			return err
 		}
-		sdTxNum, _, err := sd.SeekCommitment(ctx, tx)
-		if err != nil {
-			return err
-		}
-		otherTxNum, _, err := fv.sharedDom.SeekCommitment(ctx, tx)
-		if err != nil {
-			return err
-		}
-		err = sd.Merge(sdTxNum, fv.sharedDom, otherTxNum)
+		err := sd.Merge(fv.sharedDom)
 		if err != nil {
 			return err
 		}
@@ -183,8 +192,8 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 		return
 	}
 
-	// if the block is not in range of maxReorgDepth from head then we do not validate it.
-	if math.AbsoluteDifference(fv.currentHeight, header.Number.Uint64()) > fv.maxReorgDepth {
+	// if the block is not in range of maxForkDepth from head then we do not validate it.
+	if math.AbsoluteDifference(fv.currentHeight, header.Number.Uint64()) > maxForkDepth {
 		status = engine_types.AcceptedStatus
 		return
 	}

@@ -165,7 +165,10 @@ func readLogTail(filename string, lines int, filter string) ([]string, error) {
 	}
 
 	// Return last N lines
-	start := max(len(allLines)-lines, 0)
+	start := len(allLines) - lines
+	if start < 0 {
+		start = 0
+	}
 
 	return allLines[start:], nil
 }

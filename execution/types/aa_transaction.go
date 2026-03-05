@@ -164,7 +164,7 @@ func (tx *AccountAbstractionTransaction) Type() byte {
 	return AccountAbstractionTxType
 }
 
-func (tx *AccountAbstractionTransaction) AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules) (*Message, error) {
+func (tx *AccountAbstractionTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
 	return &Message{
 		to:         accounts.NilAddress,
 		gasPrice:   *tx.FeeCap,
@@ -529,23 +529,13 @@ func (tx *AccountAbstractionTransaction) PreTransactionGasCost(rules *chain.Rule
 	data = append(data, tx.DeployerData...)
 	data = append(data, tx.ExecutionData...)
 	data = append(data, tx.PaymasterData...)
-	intrinsicGasResult, overflow := fixedgas.IntrinsicGas(fixedgas.IntrinsicGasCalcArgs{
-		Data:              data,
-		AuthorizationsLen: uint64(len(tx.Authorizations)),
-		AccessListLen:     uint64(len(tx.AccessList)),
-		StorageKeysLen:    uint64(tx.AccessList.StorageKeys()),
-		IsEIP2:            rules.IsHomestead,
-		IsEIP2028:         rules.IsIstanbul,
-		IsEIP3860:         hasEIP3860,
-		IsEIP7623:         rules.IsPrague,
-		IsAATxn:           true,
-	})
+	gas, _, overflow := fixedgas.IntrinsicGas(data, uint64(len(tx.AccessList)), uint64(tx.AccessList.StorageKeys()), false, rules.IsHomestead, rules.IsIstanbul, hasEIP3860, rules.IsPrague, true, uint64(len(tx.Authorizations)))
 
 	if overflow {
 		return 0, errors.New("overflow")
 	}
 
-	return intrinsicGasResult.RegularGas, nil
+	return gas, nil
 }
 
 func (tx *AccountAbstractionTransaction) DeployerFrame(rules *chain.Rules, hasEIP3860 bool) *Message {

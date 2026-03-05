@@ -19,6 +19,7 @@ package cltypes
 import (
 	"encoding/json"
 	"fmt"
+	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -311,7 +312,7 @@ func (b *Eth1Block) RlpHeader(parentRoot *common.Hash, executionReqHash common.H
 	for i, j := 0, len(reversedBaseFeePerGas)-1; i < j; i, j = i+1, j-1 {
 		reversedBaseFeePerGas[i], reversedBaseFeePerGas[j] = reversedBaseFeePerGas[j], reversedBaseFeePerGas[i]
 	}
-	baseFee := new(uint256.Int).SetBytes(reversedBaseFeePerGas)
+	baseFee := new(big.Int).SetBytes(reversedBaseFeePerGas)
 	// If the block version is Capella or later, calculate the withdrawals hash.
 	var withdrawalsHash *common.Hash
 	if b.version >= clparams.CapellaVersion {
@@ -337,7 +338,8 @@ func (b *Eth1Block) RlpHeader(parentRoot *common.Hash, executionReqHash common.H
 		TxHash:                types.DeriveSha(types.BinaryTransactions(b.Transactions.UnderlyngReference())),
 		ReceiptHash:           b.ReceiptsRoot,
 		Bloom:                 b.LogsBloom,
-		Difficulty:            *merge.ProofOfStakeDifficulty,
+		Difficulty:            merge.ProofOfStakeDifficulty,
+		Number:                new(big.Int).SetUint64(b.BlockNumber),
 		GasLimit:              b.GasLimit,
 		GasUsed:               b.GasUsed,
 		Time:                  b.Time,
@@ -348,7 +350,6 @@ func (b *Eth1Block) RlpHeader(parentRoot *common.Hash, executionReqHash common.H
 		WithdrawalsHash:       withdrawalsHash,
 		ParentBeaconBlockRoot: parentRoot,
 	}
-	header.Number.SetUint64(b.BlockNumber)
 
 	if b.version >= clparams.DenebVersion {
 		blobGasUsed := b.BlobGasUsed
