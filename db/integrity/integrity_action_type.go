@@ -90,6 +90,12 @@ const (
 	// consistent. This is a statistical check used to catch corruption without checking every value.
 	CommitmentHistVal Check = "CommitmentHistVal"
 
+	// CommitmentHistAtBlkRange samples and validates commitment history values over a specific
+	// block range. For each sampled block, it re-derives the commitment root from history
+	// and checks that it matches the stored root. More targeted than CommitmentHistVal when
+	// a particular block range is suspect.
+	CommitmentHistAtBlkRange Check = "CommitmentHistAtBlkRange"
+
 	// StateVerify verifies state correspondence between commitment and domains. Checks that
 	// every key in account/storage domains is properly referenced by commitment branches,
 	// and vice versa. Catches missing or extra keys. Uses forward check for base files

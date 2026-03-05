@@ -838,7 +838,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, db kv.TemporalRoDB, br s
 	if from >= to {
 		return fmt.Errorf("invalid blk range: %d >= %d", from, to)
 	}
-	rng := rand.New(rand.NewPCG(uint64(seed), 0))
+	sampler := NewSampler(seed, sampleRatio)
 	start := time.Now()
 	var checked atomic.Uint64
 	var lastBlockNum atomic.Uint64
@@ -856,16 +856,13 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, db kv.TemporalRoDB, br s
 				done := checked.Load()
 				elapsed := time.Since(start).Seconds()
 				rate := float64(done) / elapsed
-				logger.Info("[integrity] checking commitment hist", "blks/s", rate, "checked", done, "blockNum", lastBlockNum.Load(), "from", from, "to", to)
+				logger.Info("[integrity] "+string(CommitmentHistAtBlkRange), "blks/s", rate, "checked", common.PrettyCounter(done), "blockNum", common.PrettyCounter(lastBlockNum.Load()))
 			}
 		}
 	}()
 
 	var blks uint64
-	for blockNum := from; blockNum < to; blockNum++ {
-		if sampleRatio < 1.0 && rng.Float64() >= sampleRatio {
-			continue
-		}
+	for blockNum := range sampler.BlockNums(from, to) {
 		blks++
 		blockNum := blockNum
 		g.Go(func() error {
