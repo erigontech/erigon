@@ -306,7 +306,6 @@ func BenchmarkFindSplit(b *testing.B) {
 	salt := uint64(0x6453cec3f7376937) // startSeed[1]
 	count := make([]uint16, secondaryAggrBound)
 
-	b.ResetTimer()
 	for b.Loop() {
 		for i := range buckets {
 			findSplit(buckets[i][:], salt, fanout, unit, count)
@@ -329,7 +328,6 @@ func BenchmarkFindBijection(b *testing.B) {
 	}
 	salt := uint64(0x106393c187cae2a) // startSeed[0]
 
-	b.ResetTimer()
 	for b.Loop() {
 		for i := range buckets {
 			findBijection(buckets[i][:], salt)
@@ -397,7 +395,7 @@ func BenchmarkAddKeyAndBuild(b *testing.B) {
 			name = "enums"
 		}
 		b.Run(name, func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
+			for i := 0; b.Loop(); i++ {
 				b.StopTimer()
 				indexFile := filepath.Join(tmpDir, fmt.Sprintf("index_full_%s_%d", name, i))
 				rs, err := NewRecSplit(RecSplitArgs{

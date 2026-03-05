@@ -53,14 +53,13 @@ func (ht *HistoryRoTx) iterateKeyTxNumFrozen(fromTxNum, toTxNum int, asc order.B
 		}
 		g := ht.iit.dataReader(item.src.decompressor)
 		g.Reset(0)
-		wrapper := NewSegReaderWrapper(g)
-		if wrapper.HasNext() {
-			key, val, err := wrapper.Next()
-			if err != nil {
-				s.Close()
-				return nil, err
+		if g.HasNext() {
+			key, _ := g.Next(nil)
+			var val []byte
+			if g.HasNext() {
+				val, _ = g.Next(nil)
 			}
-			heap.Push(&s.h, &ReconItem{g: wrapper, key: key, val: val, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum})
+			heap.Push(&s.h, &ReconItem{g: g, key: key, val: val, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum})
 		}
 	}
 	if err := s.advance(); err != nil {
@@ -143,16 +142,19 @@ func (hi *HistoryKeyTxNumIterFiles) advance() error {
 			return nil
 		}
 
-		top := heap.Pop(&hi.h).(*ReconItem)
+		top := hi.h[0]
 		key, idxVal := top.key, top.val
 
 		if top.g.HasNext() {
-			var err error
-			top.key, top.val, err = top.g.Next()
-			if err != nil {
-				return err
+			top.key, _ = top.g.Next(nil)
+			if top.g.HasNext() {
+				top.val, _ = top.g.Next(nil)
+			} else {
+				top.val = nil
 			}
-			heap.Push(&hi.h, top)
+			heap.Fix(&hi.h, 0)
+		} else {
+			heap.Pop(&hi.h)
 		}
 
 		// Clone: segment reader reuses buffers
