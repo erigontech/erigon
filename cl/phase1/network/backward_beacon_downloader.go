@@ -236,7 +236,7 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 		}
 
 		if blockRoot != b.expectedRoot {
-			log.Trace("Unexpected root", "got", common.Hash(blockRoot), "expected", b.expectedRoot)
+			log.Trace("Unexpected root", "slot", block.Block.Slot, "version", block.Version(), "got", common.Hash(blockRoot), "expected", b.expectedRoot)
 			continue
 		}
 
