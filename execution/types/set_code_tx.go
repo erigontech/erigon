@@ -25,6 +25,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -135,6 +136,8 @@ func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		checkNonce:       true,
 		checkTransaction: true,
 		checkGas:         true,
+		TxRunContext:     NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
+		Tx:               tx,
 	}
 	if !rules.IsPrague {
 		return nil, errors.New("SetCodeTransaction is only supported in Prague")

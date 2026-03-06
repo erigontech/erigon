@@ -26,6 +26,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -409,6 +410,8 @@ func (tx *LegacyTx) AsMessage(s Signer, _ *big.Int, _ *chain.Rules) (*Message, e
 		checkNonce:       true,
 		checkTransaction: true,
 		checkGas:         true,
+		TxRunContext:     NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
+		Tx:               tx,
 	}
 
 	var err error
