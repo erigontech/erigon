@@ -221,7 +221,7 @@ func (s *Sync) handleMilestoneTipMismatch(ctx context.Context, ccb *CanonicalCha
 
 	if s.config.PolygonPosSingleSlotFinality {
 		for i := range blocks {
-			if blocks[i].Number().Uint64() > s.config.PolygonPosSingleSlotFinalityBlockAt {
+			if blocks[i].NumberU64() > s.config.PolygonPosSingleSlotFinalityBlockAt {
 				blocks = blocks[:i]
 				break
 			}
@@ -502,7 +502,7 @@ func (s *Sync) applyNewBlockBatchOnTip(ctx context.Context, event EventNewBlockB
 		s.logger.Debug(syncLogPrefix("applying new empty block batch event"))
 		return nil
 	} else {
-		s.logger.Debug(syncLogPrefix("applying new block batch event"), "startBlock", event.NewBlocks[0].Number().Uint64(), "endBlock", event.NewBlocks[numBlocks-1].Number().Uint64())
+		s.logger.Debug(syncLogPrefix("applying new block batch event"), "startBlock", event.NewBlocks[0].NumberU64(), "endBlock", event.NewBlocks[numBlocks-1].NumberU64())
 	}
 	blockChain := event.NewBlocks
 	newBlockHeader := blockChain[len(blockChain)-1].HeaderNoCopy()
@@ -1142,17 +1142,4 @@ func (s *Sync) handleWaypointExecutionErr(ctx context.Context, lastCorrectTip *t
 	}
 
 	return execErr
-}
-
-func (s *Sync) ignoreFetchBlocksErrOnTipEvent(err error) bool {
-	return errors.Is(err, &p2p.ErrIncompleteHeaders{}) ||
-		errors.Is(err, &p2p.ErrNonSequentialHeaderNumbers{}) ||
-		errors.Is(err, &p2p.ErrNonSequentialHeaderHashes{}) ||
-		errors.Is(err, &p2p.ErrMissingHeaderHash{}) ||
-		errors.Is(err, &p2p.ErrUnexpectedHeaderHash{}) ||
-		errors.Is(err, &p2p.ErrTooManyHeaders{}) ||
-		errors.Is(err, &p2p.ErrMissingBodies{}) ||
-		errors.Is(err, &p2p.ErrTooManyBodies{}) ||
-		errors.Is(err, p2p.ErrPeerNotFound) ||
-		errors.Is(err, context.DeadlineExceeded)
 }

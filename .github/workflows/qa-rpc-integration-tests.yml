@@ -29,7 +29,6 @@ jobs:
       cancel-in-progress: true
     runs-on: [ self-hosted, qa, Ethereum, rpc-integration-commitment ]
     env:
-      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_AREA: /opt/erigon-testbed
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       ERIGON_ASSERT: true
@@ -39,6 +38,21 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+
+      - name: Set reference data dir based on branch
+        run: |
+          # For pull_request events base_ref is the target branch name; for push/dispatch parse from ref.
+          BRANCH="${{ github.base_ref }}"
+          if [ -z "$BRANCH" ]; then
+            BRANCH="${{ github.ref }}"
+            BRANCH="${BRANCH#refs/heads/}"
+          fi
+          if [[ "$BRANCH" == release/* ]]; then
+            VERSION="${BRANCH#release/}"
+            echo "ERIGON_REFERENCE_DATA_DIR=/opt/erigon-versions/reference-version-${VERSION}/datadir" >> $GITHUB_ENV
+          else
+            echo "ERIGON_REFERENCE_DATA_DIR=/opt/erigon-versions/reference-version/datadir" >> $GITHUB_ENV
+          fi
 
       - name: Clean Erigon Build Directory
         run: |
@@ -201,7 +215,16 @@ jobs:
             db_version="no-version"
           fi
           
-          python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py --repo erigon --commit $(git rev-parse HEAD) --branch ${{ github.ref_name }} --test_name rpc-integration-tests --chain $CHAIN --runner ${{ runner.name }} --db_version $db_version --outcome $TEST_RESULT #--result_file ${{ github.workspace }}/result-$CHAIN.json
+          python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
+            --repo erigon \
+            --commit $(git rev-parse HEAD) \
+            --branch ${{ github.ref_name }} \
+            --test_name rpc-integration-tests \
+            --chain $CHAIN \
+            --runner ${{ runner.name }} \
+            --db_version $db_version \
+            --outcome $TEST_RESULT \
+            --result_file $TEST_RESULT_DIR/results/test_report.json
 
       - name: Action to check failure condition
         if: failure()

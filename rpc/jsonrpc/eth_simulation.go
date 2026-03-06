@@ -72,9 +72,9 @@ type SimulationRequest struct {
 
 // SimulatedBlock defines the simulation for a single block.
 type SimulatedBlock struct {
-	BlockOverrides *transactions.BlockOverrides `json:"blockOverrides,omitempty"`
-	StateOverrides *ethapi.StateOverrides       `json:"stateOverrides,omitempty"`
-	Calls          []ethapi.CallArgs            `json:"calls"`
+	BlockOverrides *ethapi.BlockOverrides `json:"blockOverrides,omitempty"`
+	StateOverrides *ethapi.StateOverrides `json:"stateOverrides,omitempty"`
+	Calls          []ethapi.CallArgs      `json:"calls"`
 }
 
 // CallResult represents the result of a single call in the simulation.
@@ -229,35 +229,35 @@ func newSimulator(
 // Note: this can modify BlockOverrides objects in simulated blocks.
 func (s *simulator) sanitizeSimulatedBlocks(blocks []SimulatedBlock) ([]SimulatedBlock, error) {
 	sanitizedBlocks := make([]SimulatedBlock, 0, len(blocks))
-	prevNumber := s.base.Number
+	prevNumber := s.base.Number.Uint64()
 	prevTimestamp := s.base.Time
 	for _, block := range blocks {
 		if block.BlockOverrides == nil {
-			block.BlockOverrides = &transactions.BlockOverrides{}
+			block.BlockOverrides = &ethapi.BlockOverrides{}
 		}
-		if block.BlockOverrides.BlockNumber == nil {
-			nextNumber := prevNumber.Uint64() + 1
-			block.BlockOverrides.BlockNumber = (*hexutil.Uint64)(&nextNumber)
+		if block.BlockOverrides.Number == nil {
+			nextNumber := prevNumber + 1
+			block.BlockOverrides.Number = (*hexutil.Big)(new(big.Int).SetUint64(nextNumber))
 		}
-		blockNumber := new(big.Int).SetUint64(block.BlockOverrides.BlockNumber.Uint64())
-		diff := new(big.Int).Sub(blockNumber, prevNumber)
-		if diff.Cmp(common.Big0) <= 0 {
+		blockNumber := block.BlockOverrides.Number.Uint64()
+		if blockNumber <= prevNumber {
 			return nil, invalidBlockNumberError(fmt.Sprintf("block numbers must be in order: %d <= %d", blockNumber, prevNumber))
 		}
-		if total := new(big.Int).Sub(blockNumber, s.base.Number); total.Cmp(big.NewInt(maxSimulateBlocks)) > 0 {
+		if total := blockNumber - s.base.Number.Uint64(); total > maxSimulateBlocks {
 			return nil, clientLimitExceededError(fmt.Sprintf("too many blocks: %d > %d", total, maxSimulateBlocks))
 		}
-		if diff.Cmp(big.NewInt(1)) > 0 {
+		diff := blockNumber - prevNumber
+		if diff > 1 {
 			// Fill the gap with empty blocks.
-			gap := new(big.Int).Sub(diff, big.NewInt(1))
+			gap := diff - 1
 			// Assign block number to the empty blocks.
-			for i := uint64(0); i < gap.Uint64(); i++ {
-				n := new(big.Int).Add(prevNumber, big.NewInt(int64(i+1))).Uint64()
+			for i := uint64(0); i < gap; i++ {
+				n := prevNumber + i + 1
 				t := prevTimestamp + timestampIncrement
 				b := SimulatedBlock{
-					BlockOverrides: &transactions.BlockOverrides{
-						BlockNumber: (*hexutil.Uint64)(&n),
-						Timestamp:   (*hexutil.Uint64)(&t),
+					BlockOverrides: &ethapi.BlockOverrides{
+						Number: (*hexutil.Big)(new(big.Int).SetUint64(n)),
+						Time:   (*hexutil.Uint64)(&t),
 					},
 				}
 				prevTimestamp = t
@@ -267,11 +267,11 @@ func (s *simulator) sanitizeSimulatedBlocks(blocks []SimulatedBlock) ([]Simulate
 		// Only append block after filling a potential gap.
 		prevNumber = blockNumber
 		var timestamp uint64
-		if block.BlockOverrides.Timestamp == nil {
+		if block.BlockOverrides.Time == nil {
 			timestamp = prevTimestamp + timestampIncrement
-			block.BlockOverrides.Timestamp = (*hexutil.Uint64)(&timestamp)
+			block.BlockOverrides.Time = (*hexutil.Uint64)(&timestamp)
 		} else {
-			timestamp = block.BlockOverrides.Timestamp.Uint64()
+			timestamp = block.BlockOverrides.Time.Uint64()
 			if timestamp <= prevTimestamp {
 				return nil, invalidBlockTimestampError(fmt.Sprintf("block timestamps must be in order: %d <= %d", timestamp, prevTimestamp))
 			}
@@ -290,17 +290,17 @@ func (s *simulator) makeHeaders(blocks []SimulatedBlock) ([]*types.Header, error
 	header := s.base
 	headers := make([]*types.Header, len(blocks))
 	for bi, block := range blocks {
-		if block.BlockOverrides == nil || block.BlockOverrides.BlockNumber == nil {
+		if block.BlockOverrides == nil || block.BlockOverrides.Number == nil {
 			return nil, errors.New("empty block number")
 		}
 		overrides := block.BlockOverrides
 
 		var withdrawalsHash *common.Hash
-		if s.chainConfig.IsShanghai((uint64)(*overrides.Timestamp)) {
+		if s.chainConfig.IsShanghai((uint64)(*overrides.Time)) {
 			withdrawalsHash = &empty.WithdrawalsHash
 		}
 		var parentBeaconRoot *common.Hash
-		if s.chainConfig.IsCancun((uint64)(*overrides.Timestamp)) {
+		if s.chainConfig.IsCancun((uint64)(*overrides.Time)) {
 			parentBeaconRoot = &common.Hash{}
 			if overrides.BeaconRoot != nil {
 				parentBeaconRoot = overrides.BeaconRoot
@@ -326,7 +326,7 @@ func (s *simulator) sanitizeCall(
 	args *ethapi.CallArgs,
 	intraBlockState *state.IntraBlockState,
 	blockContext *evmtypes.BlockContext,
-	baseFee *big.Int,
+	baseFee *uint256.Int,
 	gasUsed uint64,
 	globalGasCap uint64,
 ) error {
@@ -476,7 +476,7 @@ func (s *simulator) simulateBlock(
 			if s.validation {
 				header.BaseFee = misc.CalcBaseFee(s.chainConfig, parent)
 			} else {
-				header.BaseFee = big.NewInt(0)
+				header.BaseFee = uint256.NewInt(0)
 			}
 		}
 	}
@@ -490,7 +490,7 @@ func (s *simulator) simulateBlock(
 
 	blockNumber := header.Number.Uint64()
 
-	blockHashOverrides := transactions.BlockHashOverrides{}
+	blockHashOverrides := ethapi.BlockHashOverrides{}
 	txnList := make([]types.Transaction, 0, len(bsc.Calls))
 	receiptList := make(types.Receipts, 0, len(bsc.Calls))
 	tracer := rpchelper.NewLogTracer(s.traceTransfers, blockNumber, common.Hash{}, common.Hash{}, 0)
@@ -501,8 +501,6 @@ func (s *simulator) simulateBlock(
 	if err != nil {
 		return nil, nil, err
 	}
-	sharedDomains.SetBlockNum(blockNumber)
-	sharedDomains.SetTxNum(minTxNum)
 
 	var stateReader state.StateReader
 	if latest {
@@ -523,9 +521,6 @@ func (s *simulator) simulateBlock(
 	// Create a custom block context and apply any custom block overrides
 	blockCtx := transactions.NewEVMBlockContextWithOverrides(ctx, s.engine, header, tx, s.newSimulatedCanonicalReader(ancestors), s.chainConfig,
 		bsc.BlockOverrides, blockHashOverrides)
-	if bsc.BlockOverrides.BlobBaseFee != nil {
-		blockCtx.BlobBaseFee = *bsc.BlockOverrides.BlobBaseFee.ToUint256()
-	}
 	rules := blockCtx.Rules(s.chainConfig)
 
 	// Determine the active precompiled contracts for this block.
@@ -564,7 +559,7 @@ func (s *simulator) simulateBlock(
 		return nil, nil, err
 	}
 
-	stateWriter := newDiffTrackingWriter(sharedDomains.AsPutDel(tx), sharedDomains.TxNum())
+	stateWriter := newDiffTrackingWriter(sharedDomains.AsPutDel(tx), minTxNum)
 	callResults := make([]CallResult, 0, len(bsc.Calls))
 	for callIndex, call := range bsc.Calls {
 		callResult, txn, receipt, err := s.simulateCall(ctx, blockCtx, intraBlockState, callIndex, &call, header,
@@ -604,17 +599,19 @@ func (s *simulator) simulateBlock(
 
 	// Compute the state root for execution on the latest state and also on the historical state if commitment history is present.
 	if latest || s.commitmentHistory {
+		commitTxNum := minTxNum
 		if !latest {
 			// Restore the commitment state at the start of the simulated block using historical state reader.
 			sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
-			if err := sharedDomains.SeekCommitment(context.Background(), tx); err != nil {
+			commitTxNum, _, err = sharedDomains.SeekCommitment(context.Background(), tx)
+			if err != nil {
 				return nil, nil, err
 			}
 			// Change the state reader to a commitment-only history reader that reads non-commitment domains from the latest state.
 			txNum := minTxNum + 1 + uint64(len(bsc.Calls))
 			sharedDomains.GetCommitmentContext().SetStateReader(newHistoryCommitmentOnlyReader(tx, sharedDomains, txNum+1))
 		}
-		stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, false, blockNumber, sharedDomains.TxNum(), "eth_simulateV1", nil)
+		stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, false, blockNumber, commitTxNum, "eth_simulateV1", nil)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -709,7 +706,7 @@ func (s *simulator) simulateCall(
 		return nil, nil, nil, fmt.Errorf("execution aborted (timeout = %v)", s.evmCallTimeout)
 	}
 	*cumulativeGasUsed += result.ReceiptGasUsed
-	receipt := protocol.MakeReceipt(header.Number, common.Hash{}, msg, txn, *cumulativeGasUsed, result, intraBlockState, evm)
+	receipt := protocol.MakeReceipt(&header.Number, common.Hash{}, msg, txn, *cumulativeGasUsed, result, intraBlockState, evm)
 	*cumulativeBlobGasUsed += receipt.BlobGasUsed
 
 	var logs []*types.Log
@@ -849,12 +846,12 @@ func clientLimitExceededError(message string) error {
 
 func newHistoryCommitmentOnlyReader(roTx kv.TemporalTx, sd *execctx.SharedDomains, limitReadAsOfTxNum uint64) commitmentdb.StateReader {
 	// Commitment values are read from history, whereas account/storage/code values are read from latest state
-	return rpchelper.NewCommitmentSplitStateReader(commitmentdb.NewHistoryStateReader(roTx, limitReadAsOfTxNum), commitmentdb.NewLatestStateReader(roTx, sd), true)
+	return commitmentdb.NewCommitmentSplitStateReader(commitmentdb.NewHistoryStateReader(roTx, limitReadAsOfTxNum), commitmentdb.NewLatestStateReader(roTx, sd), true)
 }
 
 func newSimulateStateReader(ttx, tx kv.TemporalTx, tsd, sd *execctx.SharedDomains) commitmentdb.StateReader {
 	// Both commitment and account/storage/code values are read from latest state *but* on different SharedDomains instances
-	return rpchelper.NewCommitmentSplitStateReader(commitmentdb.NewLatestStateReader(ttx, tsd), commitmentdb.NewLatestStateReader(tx, sd), false)
+	return commitmentdb.NewCommitmentSplitStateReader(commitmentdb.NewLatestStateReader(ttx, tsd), commitmentdb.NewLatestStateReader(tx, sd), false)
 }
 
 // computeCommitmentFromStateHistory calculates the commitment root for simulated block from state history

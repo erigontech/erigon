@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/aa"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -302,10 +303,11 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 			// commitment is indexed by txNum of the first tx (system-tx) of the block
 			sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
-			if err := sharedDomains.SeekCommitment(ctx, tx); err != nil {
+			latestTxNum, _, err := sharedDomains.SeekCommitment(ctx, tx)
+			if err != nil {
 				return nil, err
 			}
-			stateWriter = state.NewWriter(sharedDomains.AsPutDel(tx), nil, sharedDomains.TxNum())
+			stateWriter = state.NewWriter(sharedDomains.AsPutDel(tx), nil, latestTxNum)
 
 			evm = protocol.CreateEVM(cfg, protocol.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, accounts.NilAddress, genEnv.ibs, genEnv.header, vm.Config{})
 			ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
@@ -364,7 +366,11 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			var stateRoot []byte
 			if postState.CommitmentHistory {
 				sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, txNum+1)
-				stateRoot, err = sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, sharedDomains.TxNum(), "getReceipt", nil)
+				latestTxNum, _, err := sharedDomains.SeekCommitment(ctx, tx)
+				if err != nil {
+					return nil, err
+				}
+				stateRoot, err = sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, latestTxNum, "getReceipt", nil)
 				if err != nil {
 					return nil, err
 				}
@@ -486,10 +492,11 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		sharedDomains.GetCommitmentContext().SetDeferBranchUpdates(false)
 		// commitment are indexed by txNum of the first tx (system-tx) of the block
 		sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
-		if err := sharedDomains.SeekCommitment(ctx, tx); err != nil {
+		latestTxNum, _, err := sharedDomains.SeekCommitment(ctx, tx)
+		if err != nil {
 			return nil, err
 		}
-		stateWriter = state.NewWriter(sharedDomains.AsPutDel(tx), nil, sharedDomains.TxNum())
+		stateWriter = state.NewWriter(sharedDomains.AsPutDel(tx), nil, latestTxNum)
 	} else {
 		stateWriter = genEnv.noopWriter
 	}
@@ -527,7 +534,11 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 			var stateRoot []byte
 			if commitmentHistory {
 				sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, txNum+1)
-				stateRoot, err = sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, sharedDomains.TxNum(), "getReceipts", nil)
+				latestTxNum, _, err := sharedDomains.SeekCommitment(ctx, tx)
+				if err != nil {
+					return nil, err
+				}
+				stateRoot, err = sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, latestTxNum, "getReceipts", nil)
 				if err != nil {
 					return nil, err
 				}
@@ -654,7 +665,7 @@ func (m *loaderMutex[K]) unlock(mu *sync.Mutex, key K) {
 
 func (g *Generator) computeCommitmentFromStateHistory(ctx context.Context, tx kv.TemporalTx, blockNum uint64, txNum uint64) ([]byte, error) {
 	receiptComputeCommitment := func(ctx context.Context, ttx kv.TemporalTx, tsd *execctx.SharedDomains) ([]byte, error) {
-		tsd.GetCommitmentCtx().SetStateReader(rpchelper.NewCommitmentReplayStateReader(ttx, tx, tsd, txNum+1))
+		tsd.GetCommitmentCtx().SetStateReader(commitmentdb.NewCommitmentReplayStateReader(ttx, tx, tsd, txNum+1))
 		minTxNum, err := g.txNumReader.Min(ctx, tx, blockNum)
 		if err != nil {
 			return nil, err

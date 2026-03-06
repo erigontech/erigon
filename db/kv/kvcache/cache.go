@@ -18,18 +18,19 @@ package kvcache
 
 import (
 	"bytes"
+
 	"context"
 	"encoding/binary"
 	"fmt"
 	"hash"
-	"sort"
+
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	keccak "github.com/erigontech/fastkeccak"
 	btree2 "github.com/tidwall/btree"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
@@ -197,7 +198,7 @@ func New(cfg CoherentConfig) *Coherent {
 		roots:        map[uint64]*CoherentRoot{},
 		stateEvict:   &ThreadSafeEvictionList{l: NewList()},
 		codeEvict:    &ThreadSafeEvictionList{l: NewList()},
-		hasher:       sha3.NewLegacyKeccak256(),
+		hasher:       keccak.NewFastKeccak(),
 		cfg:          cfg,
 		miss:         metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="miss",name="%s"}`, cfg.MetricsLabel)),
 		hits:         metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="hit",name="%s"}`, cfg.MetricsLabel)),
@@ -632,29 +633,6 @@ func (c *Coherent) clearCaches(r *CoherentRoot) {
 	r.codeCache.Clear()
 }
 
-type Stat struct {
-	BlockNum  uint64
-	BlockHash [32]byte
-	Lenght    int
-}
-
-func DebugStats(cache Cache) []Stat {
-	res := []Stat{}
-	casted, ok := cache.(*Coherent)
-	if !ok {
-		return res
-	}
-	casted.lock.Lock()
-	for root, r := range casted.roots {
-		res = append(res, Stat{
-			BlockNum: root,
-			Lenght:   r.cache.Len(),
-		})
-	}
-	casted.lock.Unlock()
-	sort.Slice(res, func(i, j int) bool { return res[i].BlockNum < res[j].BlockNum })
-	return res
-}
 func AssertCheckValues(ctx context.Context, tx kv.TemporalTx, cache Cache) (int, error) {
 	defer func(t time.Time) { fmt.Printf("AssertCheckValues:327: %s\n", time.Since(t)) }(time.Now())
 	view, err := cache.View(ctx, tx)

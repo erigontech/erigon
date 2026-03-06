@@ -39,18 +39,6 @@ func ByteCount(b uint64) string {
 
 var Copy = bytes.Clone
 
-func Append(data ...[]byte) []byte {
-	var totalLen int
-	for _, d := range data {
-		totalLen += len(d)
-	}
-	result := make([]byte, 0, totalLen)
-	for _, d := range data {
-		result = append(result, d...)
-	}
-	return result
-}
-
 func EnsureEnoughSize(in []byte, size int) []byte {
 	if cap(in) < size {
 		newBuf := make([]byte, size)

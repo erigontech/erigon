@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"sync/atomic"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -87,8 +88,8 @@ type EVM struct {
 	// optional overridden set of precompiled contracts
 	precompiles PrecompiledContracts
 
-	hasher    keccakState // Keccak256 hasher instance shared across opcodes
-	hasherBuf common.Hash // Keccak256 hasher result array shared across opcodes
+	hasher    keccak.KeccakState // Keccak256 hasher instance shared across opcodes
+	hasherBuf common.Hash        // Keccak256 hasher result array shared across opcodes
 
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
@@ -199,6 +200,9 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		}(gas)
 	}
 
+	// BAL: record address access even if call fails due to gas/call depth/insufficient balance
+	evm.intraBlockState.MarkAddressAccess(addr, false)
+
 	if evm.config.NoRecursion && depth > 0 {
 		return nil, gas, nil
 	}
@@ -218,9 +222,6 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 			}
 		}
 	}
-
-	// BAL: record address access even if call fails due to gas/call depth and to precompiles
-	evm.intraBlockState.MarkAddressAccess(addr, false)
 
 	snapshot := evm.intraBlockState.PushSnapshot()
 	defer evm.intraBlockState.PopSnapshot(snapshot)

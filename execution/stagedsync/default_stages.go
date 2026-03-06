@@ -334,30 +334,6 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 	}
 }
 
-func DownloadSyncStages(
-	ctx context.Context,
-	snapshots SnapshotsCfg,
-) []*Stage {
-	return []*Stage{
-		{
-			ID:          stages.Snapshots,
-			Description: "Download snapshots",
-			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
-				if badBlockUnwind {
-					return nil
-				}
-				return SpawnStageSnapshots(s, ctx, tx, snapshots, logger)
-			},
-			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
-				return nil
-			},
-			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
-				return nil
-			},
-		},
-	}
-}
-
 var DefaultForwardOrder = UnwindOrder{
 	stages.Snapshots,
 	stages.Headers,
@@ -435,6 +411,3 @@ var PipelinePruneOrder = PruneOrder{
 	stages.BlockHashes,
 	stages.Snapshots,
 }
-
-var MiningUnwindOrder = UnwindOrder{} // nothing to unwind in mining - because mining does not commit db changes
-var MiningPruneOrder = PruneOrder{}   // nothing to unwind in mining - because mining does not commit db changes

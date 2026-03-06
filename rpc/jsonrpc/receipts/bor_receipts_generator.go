@@ -136,19 +136,20 @@ func getBorLogs(msgs []*types.Message, evm *vm.EVM, gp *protocol.GasPool, ibs *s
 }
 
 func applyBorTransaction(msgs []*types.Message, evm *vm.EVM, gp *protocol.GasPool, ibs *state.IntraBlockState, block *types.Block, cumulativeGasUsed uint64, logIdxAfterTx uint, receiptWithFirstLogIdx bool) (*types.Receipt, error) {
-	receiptLogs, err := getBorLogs(msgs, evm, gp, ibs, block.Number().Uint64(), block.Hash(), uint(len(block.Transactions())), logIdxAfterTx, receiptWithFirstLogIdx)
+	receiptLogs, err := getBorLogs(msgs, evm, gp, ibs, block.NumberU64(), block.Hash(), uint(len(block.Transactions())), logIdxAfterTx, receiptWithFirstLogIdx)
 	if err != nil {
 		return nil, err
 	}
 
 	numReceipts := len(block.Transactions())
+	blockNum := block.Number()
 	receipt := types.Receipt{
 		Type:              0,
 		CumulativeGasUsed: cumulativeGasUsed,
 		TxHash:            bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash()),
 		GasUsed:           0,
 		BlockHash:         block.Hash(),
-		BlockNumber:       block.Number(),
+		BlockNumber:       &blockNum,
 		TransactionIndex:  uint(numReceipts),
 		Logs:              receiptLogs,
 		Status:            types.ReceiptStatusSuccessful,

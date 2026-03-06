@@ -20,12 +20,11 @@
 package vm
 
 import (
-	"errors"
 	"fmt"
 	"math"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -362,7 +361,7 @@ func opKeccak256(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error
 	data := scope.Memory.GetPtr(offset.Uint64(), size.Uint64())
 
 	if evm.hasher == nil {
-		evm.hasher = sha3.NewLegacyKeccak256().(keccakState)
+		evm.hasher = keccak.NewFastKeccak()
 	} else {
 		evm.hasher.Reset()
 	}
@@ -384,6 +383,9 @@ func opAddress(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 func opBalance(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	slot := scope.Stack.peek()
 	address := accounts.InternAddress(slot.Bytes20())
+	// BAL: BALANCE is a real state access per EIP-7928 — mark as non-revertable
+	// so the system address is included when explicitly queried by user txs.
+	evm.IntraBlockState().MarkAddressAccess(address, false)
 	balance, err := evm.IntraBlockState().GetBalance(address)
 	if err != nil {
 		return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -542,6 +544,8 @@ func stReturnDataCopy(_ uint64, scope *CallContext) string {
 func opExtCodeSize(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	slot := scope.Stack.peek()
 	addr := accounts.InternAddress(slot.Bytes20())
+	// BAL: EXTCODESIZE is a real state access per EIP-7928.
+	evm.IntraBlockState().MarkAddressAccess(addr, false)
 	codeSize, err := evm.IntraBlockState().GetCodeSize(addr)
 	if err != nil {
 		return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -581,6 +585,8 @@ func opExtCodeCopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, err
 		length     = stack.pop()
 	)
 	addr := accounts.InternAddress(a.Bytes20())
+	// BAL: EXTCODECOPY is a real state access per EIP-7928.
+	evm.IntraBlockState().MarkAddressAccess(addr, false)
 	len64 := length.Uint64()
 
 	code, err := evm.IntraBlockState().GetCode(addr)
@@ -633,6 +639,11 @@ func opExtCodeCopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, err
 func opExtCodeHash(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	slot := scope.Stack.peek()
 	address := accounts.InternAddress(slot.Bytes20())
+
+	// BAL: EXTCODEHASH is a real state access per EIP-7928 — mark as
+	// non-revertable.  Also ensures non-existent accounts appear in the BAL
+	// when Empty() returns true and GetCodeHash is never called.
+	evm.IntraBlockState().MarkAddressAccess(address, false)
 
 	empty, err := evm.IntraBlockState().Empty(address)
 	if err != nil {
@@ -713,19 +724,21 @@ func opNumber(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	return pc, nil, nil
 }
 
+func opSlotNum(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	v := new(uint256.Int).SetUint64(evm.Context.SlotNumber)
+	scope.Stack.push(*v)
+	return pc, nil, nil
+}
+
 func opDifficulty(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	var v *uint256.Int
+	var v uint256.Int
 	if evm.Context.PrevRanDao != nil {
 		// EIP-4399: Supplant DIFFICULTY opcode with PREVRANDAO
-		v = new(uint256.Int).SetBytes(evm.Context.PrevRanDao.Bytes())
+		v.SetBytes32(evm.Context.PrevRanDao.Bytes())
 	} else {
-		var overflow bool
-		v, overflow = uint256.FromBig(evm.Context.Difficulty)
-		if overflow {
-			return pc, nil, errors.New("evm.Context.Difficulty higher than 2^256-1")
-		}
+		v = evm.Context.Difficulty
 	}
-	scope.Stack.push(*v)
+	scope.Stack.push(v)
 	return pc, nil, nil
 }
 
@@ -1081,6 +1094,12 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 
 	if !value.IsZero() {
 		if evm.readOnly {
+			// The gas function already called Empty() on the target for
+			// gas calculation, which recorded versioned reads.  Mark them
+			// as internal so they are kept for conflict detection but
+			// excluded from the block access list — the CALL never
+			// actually executes.
+			evm.intraBlockState.MarkReadsInternal(toAddr)
 			return pc, nil, ErrWriteProtection
 		}
 		gas += params.CallStipend

@@ -56,12 +56,6 @@ func Circle(w io.Writer, name string, label string, filled bool) {
 	}
 }
 
-func Box(w io.Writer, name string, label string) {
-	fmt.Fprintf(w,
-		`%s [label="%s" shape=box margin=0.1 width=0 height=0 fillcolor="#FF6403" style=filled];
-`, name, label)
-}
-
 func StartCluster(w io.Writer, number int, label string) {
 	fmt.Fprintf(w,
 		`subgraph cluster_%d {

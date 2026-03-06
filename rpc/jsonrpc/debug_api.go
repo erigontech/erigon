@@ -92,16 +92,18 @@ type PrivateDebugAPI interface {
 // PrivateDebugAPIImpl is implementation of the PrivateDebugAPI interface based on remote Db access
 type DebugAPIImpl struct {
 	*BaseAPI
-	db     kv.TemporalRoDB
-	GasCap uint64
+	db                kv.TemporalRoDB
+	GasCap            uint64
+	gethCompatibility bool // Geth-compatible storage iteration order for debug_storageRangeAt
 }
 
 // NewPrivateDebugAPI returns PrivateDebugAPIImpl instance
-func NewPrivateDebugAPI(base *BaseAPI, db kv.TemporalRoDB, gascap uint64) *DebugAPIImpl {
+func NewPrivateDebugAPI(base *BaseAPI, db kv.TemporalRoDB, gascap uint64, gethCompatibility bool) *DebugAPIImpl {
 	return &DebugAPIImpl{
-		BaseAPI: base,
-		db:      db,
-		GasCap:  gascap,
+		BaseAPI:           base,
+		db:                db,
+		GasCap:            gascap,
+		gethCompatibility: gethCompatibility,
 	}
 }
 
@@ -113,26 +115,27 @@ func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Ha
 	}
 	defer tx.Rollback()
 
-	number, err := api._blockReader.HeaderNumber(ctx, tx, blockHash)
+	blockNrOrHash := rpc.BlockNumberOrHashWithHash(blockHash, true)
+	blockNumber, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
-		return StorageRangeResult{}, err
-	}
-	if number == nil {
-		return StorageRangeResult{}, nil
-	}
-
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, *number)
-	if err != nil {
+		if errors.As(err, &rpc.BlockNotFoundErr{}) {
+			return StorageRangeResult{}, nil
+		}
 		return StorageRangeResult{}, err
 	}
 
-	minTxNum, err := api._txNumReader.Min(ctx, tx, *number)
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	if err != nil {
+		return StorageRangeResult{}, err
+	}
+
+	minTxNum, err := api._txNumReader.Min(ctx, tx, blockNumber)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
 
 	fromTxNum := minTxNum + txIndex + 1 //+1 for system txn in the beginning of block
-	return storageRangeAt(tx, contractAddress, keyStart, fromTxNum, maxResult)
+	return storageRangeAt(tx, contractAddress, keyStart, fromTxNum, maxResult, api.gethCompatibility)
 }
 
 // AccountRange implements debug_accountRange. Returns a range of accounts involved in the given block rangeb
@@ -203,15 +206,12 @@ func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.Blo
 			blockNumber = uint64(number)
 		}
 
-	} else if hash, ok := blockNrOrHash.Hash(); ok {
-		header, err1 := api.headerByHash(ctx, hash, tx)
-		if err1 != nil {
-			return state.IteratorDump{}, err1
+	} else if _, ok := blockNrOrHash.Hash(); ok {
+		bn, _, _, err2 := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+		if err2 != nil {
+			return state.IteratorDump{}, err2
 		}
-		if header == nil {
-			return state.IteratorDump{}, fmt.Errorf("header %s not found", hash.Hex())
-		}
-		blockNumber = header.Number.Uint64()
+		blockNumber = bn
 	}
 
 	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
@@ -380,7 +380,7 @@ func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, t
 	if err != nil {
 		return &AccountResult{}, err
 	}
-	if header == nil || header.Number == nil {
+	if header == nil {
 		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 	}
 	canonicalHash, ok, err := api._blockReader.CanonicalHash(ctx, tx, header.Number.Uint64())
@@ -1567,7 +1567,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	}
 
 	// Helper to reset commitment to parent block state and re-seek
-	resetToParentState := func() error {
+	resetToParentState := func() (txNum uint64, blockNum uint64, err error) {
 		sdCtx.SetHistoryStateReader(tx, firstTxNumInBlock)
 		return domains.SeekCommitment(context.Background(), tx)
 	}
@@ -1583,11 +1583,9 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	var collapseSiblingPaths [][]byte
 
 	// Set up split reader: branch data from parent state, plain state from end of block
-	branchDataReader := commitmentdb.NewHistoryStateReader(tx, firstTxNumInBlock)
-	plainStateReader := commitmentdb.NewHistoryStateReader(tx, lastTxNumInBlock+1)
-	splitStateReader := rpchelper.NewCommitmentSplitStateReader(branchDataReader, plainStateReader /* withHistory */, true)
+	splitStateReader := commitmentdb.NewSplitHistoryReader(tx, firstTxNumInBlock, lastTxNumInBlock, true /* withHistory */)
 	sdCtx.SetCustomHistoryStateReader(splitStateReader)
-	if err := domains.SeekCommitment(context.Background(), tx); err != nil {
+	if _, _, err := domains.SeekCommitment(context.Background(), tx); err != nil {
 		return nil, fmt.Errorf("failed to re-seek commitment for collapse detection: %w", err)
 	}
 
@@ -1615,7 +1613,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	sdCtx.SetCollapseTracer(nil)
 
 	// === STEP 2: Generate witness for regular keys + siblings from collapses
-	if err := resetToParentState(); err != nil {
+	if _, _, err := resetToParentState(); err != nil {
 		return nil, fmt.Errorf("failed to reset commitment for regular witness: %w", err)
 	}
 	touchAllKeys()
@@ -1753,7 +1751,7 @@ func (api *DebugAPIImpl) buildExpectedPostState(
 			return nil, nil, fmt.Errorf("failed to get last txn in block: %w", err)
 		}
 		postSdCtx.SetHistoryStateReader(tx, lastTxnInBlock)
-		if err := postDomains.SeekCommitment(context.Background(), tx); err != nil {
+		if _, _, err := postDomains.SeekCommitment(context.Background(), tx); err != nil {
 			return nil, nil, fmt.Errorf("failed to seek commitment: %w", err)
 		}
 	}
