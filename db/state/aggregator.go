@@ -555,6 +555,12 @@ func (a *Aggregator) SetCompressWorkers(i int) {
 	for _, ii := range a.iis {
 		ii.CompressorCfg.Workers = i
 	}
+}
+
+func (a *Aggregator) SetBuildAccessorsWorkers(i int) {
+	if a.lockWorkersEditing {
+		return
+	}
 	for _, d := range a.d {
 		if d == nil {
 			continue
@@ -576,6 +582,7 @@ func (a *Aggregator) PresetChainTipConcurrency() {
 	a.SetCollateAndBuildWorkers(1)
 	a.SetMergeWorkers(dbg.MergeWorkers)
 	a.SetCompressWorkers(dbg.CompressWorkers)
+	a.SetBuildAccessorsWorkers(dbg.CompressWorkers)
 }
 
 // PresetNonChainTipConcurrency configures workers for initial sync (not at chain tip):
@@ -584,6 +591,7 @@ func (a *Aggregator) PresetNonChainTipConcurrency() {
 	a.SetCollateAndBuildWorkers(dbg.CollateWorkers)
 	a.SetMergeWorkers(dbg.MergeWorkers)
 	a.SetCompressWorkers(dbg.CompressWorkers)
+	a.SetBuildAccessorsWorkers(dbg.CompressWorkers)
 }
 
 // PresetOfflineMerge configures workers for offline merge operations:
@@ -592,6 +600,7 @@ func (a *Aggregator) PresetOfflineMerge() {
 	a.SetCollateAndBuildWorkers(estimate.StateV3Collate.Workers())
 	a.SetMergeWorkers(min(4, estimate.StateV3Collate.Workers()))
 	a.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+	a.SetBuildAccessorsWorkers(estimate.CompressSnapshot.Workers())
 }
 
 // PresetOfflineExecution configures workers for offline execution (e.g. integration tool):
@@ -600,6 +609,7 @@ func (a *Aggregator) PresetOfflineExecution() {
 	a.SetCollateAndBuildWorkers(min(4, estimate.StateV3Collate.Workers()))
 	a.SetMergeWorkers(min(2, estimate.StateV3Collate.Workers()))
 	a.SetCompressWorkers(estimate.CompressSnapshot.WorkersHalf())
+	a.SetBuildAccessorsWorkers(estimate.CompressSnapshot.WorkersHalf())
 }
 
 func (a *Aggregator) LockWorkersEditing()   { a.lockWorkersEditing = true }
