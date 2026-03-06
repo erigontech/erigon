@@ -120,6 +120,7 @@ func (s *SequenceReader) Reset(baseNum uint64, raw []byte) { // no `return param
 	if raw[0]&PlainEliasFanoMask == 0 {
 		s.currentEnc = PlainEliasFano
 		s.ref.Reset(0, raw)
+		s.assertSorted()
 		return
 	}
 
@@ -127,6 +128,7 @@ func (s *SequenceReader) Reset(baseNum uint64, raw []byte) { // no `return param
 	if EncodingType(raw[0]) == RebasedEliasFano {
 		s.currentEnc = RebasedEliasFano
 		s.ref.Reset(baseNum, raw[1:])
+		s.assertSorted()
 		return
 	}
 
@@ -134,10 +136,17 @@ func (s *SequenceReader) Reset(baseNum uint64, raw []byte) { // no `return param
 	if EncodingType(raw[0]&SimpleEncodingMask) == SimpleEncoding {
 		s.currentEnc = SimpleEncoding
 		s.sseq.Reset(baseNum, raw[1:])
+		s.assertSorted()
 		return
 	}
 
 	panic(fmt.Sprintf("unknown sequence encoding: %d", raw[0]))
+}
+
+func (s *SequenceReader) assertSorted() {
+	if s.Count() > 1 && s.Max() < s.Min() {
+		panic(fmt.Sprintf("SequenceReader: corrupt sequence: Max()=%d < Min()=%d, Count=%d, enc=%d", s.Max(), s.Min(), s.Count(), s.currentEnc))
+	}
 }
 
 func (s *SequenceReader) Seek(v uint64) (uint64, bool) {
