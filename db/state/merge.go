@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
@@ -682,12 +681,10 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 				mergeSeq.Reset(ci1.startTxNum, ci1.val)
 				preSeq.Reset(startTxNum, lastVal)
 				if mergeSeq.Max() > preSeq.Min() {
-					arr1, _ := stream.ToArray(mergeSeq.Iterator(0))
-					arr2, _ := stream.ToArray(preSeq.Iterator(0))
-					panic(fmt.Sprintf("merge %s: mergeSeq.Max(%d) > preSeq.Min(%d), key=%x, file=%s, prevFile=%s, firstFile=%s, ci1=[%d-%d], merge=[%d-%d], arr1=%v, arr2=%v",
+					panic(fmt.Sprintf("merge %s: mergeSeq.Max(%d) > preSeq.Min(%d), key=%x, file=%s, prevFile=%s, firstFile=%s, ci1=[%d-%d], merge=[%d-%d]",
 						iit.ii.FilenameBase, mergeSeq.Max(), preSeq.Min(), lastKey,
 						ci1.kvReader.FileName(), lastMergedFile, firstFile,
-						ci1.startTxNum, ci1.endTxNum, startTxNum, endTxNum, arr1, arr2))
+						ci1.startTxNum, ci1.endTxNum, startTxNum, endTxNum))
 				}
 				if mergeErr := builder.Merge(mergeSeq, preSeq, startTxNum); mergeErr != nil {
 					return nil, fmt.Errorf("merge %s inverted index: %w", iit.ii.FilenameBase, mergeErr)
