@@ -252,8 +252,13 @@ func makeGasLog(n uint64) gasFunc {
 		}
 
 		if evm.chainRules.IsArbitrum {
+			// Data bytes → HistoryGrowth
 			callContext.Contract.UsedMultiGas.SaturatingIncrementInto(multigas.ResourceKindHistoryGrowth, memorySizeGas)
-			callContext.Contract.UsedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, gas-memorySizeGas)
+			// Topic gas: split between history (LogDataGas * 32 bytes) and computation per topic
+			callContext.Contract.UsedMultiGas.SaturatingIncrementInto(multigas.ResourceKindHistoryGrowth, n*params.LogTopicHistoryGas)
+			callContext.Contract.UsedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, n*params.LogTopicComputationGas)
+			// LogGas base + memory expansion → Computation
+			callContext.Contract.UsedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, gas-memorySizeGas-n*params.LogTopicGas)
 		}
 
 		return gas, nil

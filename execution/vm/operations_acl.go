@@ -283,6 +283,17 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 			gas += params.CreateBySelfdestructGas
 		}
 
+		if evm.chainRules.IsArbitrum && gas > 0 {
+			coldPortion := gas
+			if empty && !balance.IsZero() {
+				callContext.Contract.UsedMultiGas.SaturatingIncrementInto(multigas.ResourceKindStorageGrowth, params.CreateBySelfdestructGas)
+				coldPortion = gas - params.CreateBySelfdestructGas
+			}
+			if coldPortion > 0 {
+				callContext.Contract.UsedMultiGas.SaturatingIncrementInto(multigas.ResourceKindStorageAccess, coldPortion)
+			}
+		}
+
 		hasSelfdestructed, err := evm.IntraBlockState().HasSelfdestructed(callContext.Address())
 		if err != nil {
 			return 0, err

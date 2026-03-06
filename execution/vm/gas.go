@@ -68,6 +68,7 @@ func categorizeDynamicGas(usedMultiGas *multigas.MultiGas, op OpCode, cost uint6
 	switch op {
 	case SLOAD,
 		SSTORE,
+		SELFDESTRUCT,
 		CALL, CALLCODE, STATICCALL, DELEGATECALL,
 		LOG0, LOG1, LOG2, LOG3, LOG4:
 		// Handled by gas functions in operations_acl.go and gas_table.go

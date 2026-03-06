@@ -59,7 +59,7 @@ func TestCategorizeDynamicGas_StorageAccess(t *testing.T) {
 }
 
 func TestCategorizeDynamicGas_SkipsSelfCategorizing(t *testing.T) {
-	for _, op := range []OpCode{SLOAD, SSTORE, CALL, CALLCODE, STATICCALL, DELEGATECALL, LOG0, LOG1, LOG2, LOG3, LOG4} {
+	for _, op := range []OpCode{SLOAD, SSTORE, SELFDESTRUCT, CALL, CALLCODE, STATICCALL, DELEGATECALL, LOG0, LOG1, LOG2, LOG3, LOG4} {
 		mg := multigas.ZeroGas()
 		categorizeDynamicGas(&mg, op, 5000)
 		require.True(t, mg.IsZero(), "op=%s should be skipped by categorizeDynamicGas", op)

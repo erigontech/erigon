@@ -173,29 +173,8 @@ func TestRun_NonStylus_DoesNotCallExecuteWASM(t *testing.T) {
 	require.Equal(t, 0, hook.wasmCalls)
 }
 
-func newArbitrumEVM() *EVM {
-	cfg := &chain.Config{
-		ChainID:             big.NewInt(42161),
-		ArbitrumChainParams: arbchaintypes.ArbitrumChainParams{EnableArbOS: true},
-	}
-	blockCtx := evmtypes.BlockContext{
-		BlockNumber:  100,
-		Time:         1000,
-		ArbOSVersion: 31,
-		Coinbase:     accounts.InternAddress(common.HexToAddress("0xdead")),
-		GasLimit:     30_000_000,
-		GetHash: func(n uint64) (common.Hash, error) {
-			return common.Hash{byte(n)}, nil
-		},
-	}
-	txCtx := evmtypes.TxContext{
-		GasPrice: *uint256.NewInt(1),
-	}
-	return NewEVM(blockCtx, txCtx, nil, cfg, Config{})
-}
-
 func TestRun_MultiGasAccumulation_ConstantGas(t *testing.T) {
-	evm := newArbitrumEVM()
+	evm := newStylusEVM()
 	require.True(t, evm.chainRules.IsArbitrum)
 
 	hook := &recordingHook{}
