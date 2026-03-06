@@ -233,7 +233,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 					if applyResult.BlockNum > lastBlockResult.BlockNum {
 						uncommittedBlocks++
-						pe.doms.SetTxNum(applyResult.lastTxNum)
 						lastBlockResult = *applyResult
 					}
 
