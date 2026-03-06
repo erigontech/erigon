@@ -415,7 +415,7 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 				opstr = op.String()
 			}
 
-			fmt.Printf("%d (%d.%d) %5d %5d %s\n", blockNum, txIndex, txIncarnation, pc, traceGas(op, callGas, cost), opstr)
+			fmt.Printf("%d (%d.%d) pc=%5d gas=%d cost=%5d depth=%d %s\n", blockNum, txIndex, txIncarnation, pc, gasCopy, traceGas(op, callGas, cost), evm.depth, opstr)
 		}
 
 		// execute the operation

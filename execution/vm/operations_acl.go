@@ -25,7 +25,7 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common/dbg"
+
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -325,6 +325,9 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 		}
 
 		var delegationGas uint64
+		if ok && evm.intraBlockState.Trace() {
+			fmt.Printf("[EIP7702] delegation found for %x → %x (accessGas=%d)\n", addr.Value(), dd.Value(), accessGas)
+		}
 		if ok {
 			if !evm.intraBlockState.AddressInAccessList(dd) {
 				delegationGas = params.ColdAccountAccessCostEIP2929
@@ -355,10 +358,10 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 			return 0, err
 		}
 
-		if dbg.TraceDynamicGas && evm.intraBlockState.Trace() {
-			fmt.Printf("%d (%d.%d) Variant Gas: base %d, access: %d, delegation: %d, call: %d\n",
-				evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(),
-				statefulBaseGas, accessGas, delegationGas, callGas)
+		if evm.intraBlockState.Trace() {
+			fmt.Printf("[EIP7702gas] block=%d tx=%d addr=%x warm=%t accessGas=%d base=%d delegGas=%d callGas=%d total=%d avail=%d\n",
+				evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(),
+				addr.Value(), accessGas == 0, accessGas, statefulBaseGas, delegationGas, callGas, gas, availableGas)
 		}
 		if gas, overflow = math.SafeAdd(gas, callGas); overflow {
 			return 0, ErrGasUintOverflow
