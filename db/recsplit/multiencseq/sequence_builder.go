@@ -2,6 +2,7 @@ package multiencseq
 
 import (
 	"encoding/binary"
+	"fmt"
 
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
 )
