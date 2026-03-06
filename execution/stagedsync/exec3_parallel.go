@@ -1821,16 +1821,3 @@ func MergeVersionedWrites(prev, next state.VersionedWrites) state.VersionedWrite
 	})
 	return out
 }
-
-func MergeAccessedAddresses(dst, src map[accounts.Address]struct{}) map[accounts.Address]struct{} {
-	if len(src) == 0 {
-		return dst
-	}
-	if dst == nil {
-		dst = make(map[accounts.Address]struct{}, len(src))
-	}
-	for addr := range src {
-		dst[addr] = struct{}{}
-	}
-	return dst
-}

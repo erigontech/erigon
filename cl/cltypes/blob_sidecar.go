@@ -113,13 +113,6 @@ type BlobIdentifier struct {
 	Index     uint64      `json:"index,string"`
 }
 
-func NewBlobIdentifier(blockRoot common.Hash, index uint64) *BlobIdentifier {
-	return &BlobIdentifier{
-		BlockRoot: blockRoot,
-		Index:     index,
-	}
-}
-
 func (b *BlobIdentifier) EncodeSSZ(buf []byte) ([]byte, error) {
 	return ssz2.MarshalSSZ(buf, b.getSchema()...)
 }

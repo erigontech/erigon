@@ -95,10 +95,6 @@ func (f *ForkChoiceStore) computeEpochAtSlot(slot uint64) uint64 {
 	return slot / f.beaconCfg.SlotsPerEpoch
 }
 
-func (f *ForkChoiceStore) computeSyncPeriod(epoch uint64) uint64 {
-	return epoch / f.beaconCfg.EpochsPerSyncCommitteePeriod
-}
-
 // computeStartSlotAtEpoch calculates the starting slot of a given epoch.
 func (f *ForkChoiceStore) computeStartSlotAtEpoch(epoch uint64) uint64 {
 	return epoch * f.beaconCfg.SlotsPerEpoch

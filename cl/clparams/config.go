@@ -17,17 +17,13 @@
 package clparams
 
 import (
-	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
-	"math/big"
 	mathrand "math/rand"
 	"os"
-	"path"
 	"sort"
-	"strconv"
 	"time"
 
 	"gopkg.in/yaml.v2"
@@ -1229,7 +1225,7 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.DenebForkVersion = 0x0400006f
 	cfg.ElectraForkEpoch = 948224
 	cfg.ElectraForkVersion = 0x0500006f
-	cfg.FuluForkEpoch = math.MaxUint64
+	cfg.FuluForkEpoch = 1353216
 	cfg.FuluForkVersion = 0x0600006f
 	cfg.TerminalTotalDifficulty = "231707791542740786049188744689299064356246512"
 	cfg.DepositContractAddress = "0xb97036A26259B7147018913bD58a774cf91acf25"
@@ -1475,30 +1471,6 @@ func GetAllCheckpointSyncEndpoints(net NetworkType) []string {
 	return urls
 }
 
-func GetCheckpointSyncEndpoint(net NetworkType) string {
-	randomOne := func(checkpoints []string) string {
-		if len(checkpoints) == 1 {
-			return checkpoints[0]
-		}
-		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(checkpoints))))
-		if err != nil {
-			panic(err)
-		}
-		return checkpoints[n.Int64()]
-	}
-	// Check if the user has configured a custom checkpoint sync endpoint
-	if len(ConfigurableCheckpointsURLs) > 0 {
-		return randomOne(ConfigurableCheckpointsURLs)
-	}
-
-	// Otherwise, use the default endpoints
-	checkpoints, ok := CheckpointSyncEndpoints[net]
-	if !ok {
-		return ""
-	}
-	return randomOne(checkpoints)
-}
-
 // Check if chain with a specific ID is supported or not
 //
 // note: the following code uses chainID constants because they are usually the same as the network ID,
@@ -1520,9 +1492,4 @@ func SupportBackfilling(networkId uint64) bool {
 		networkId == chainspec.ChiadoChainID ||
 		networkId == chainspec.HoodiChainID ||
 		networkId == chainspec.BloatnetNetworkID
-}
-
-func EpochToPaths(slot uint64, config *BeaconChainConfig, suffix string) (string, string) {
-	folderPath := path.Clean(strconv.FormatUint(slot/SubDivisionFolderSize, 10))
-	return folderPath, path.Clean(fmt.Sprintf("%s/%d.%s.sz", folderPath, slot, suffix))
 }

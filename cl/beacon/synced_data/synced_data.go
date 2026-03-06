@@ -37,8 +37,6 @@ var (
 
 var _ SyncedData = (*SyncedDataManager)(nil)
 
-func EmptyCancel() {}
-
 type SyncedDataManager struct {
 	enabled bool
 	cfg     *clparams.BeaconChainConfig
