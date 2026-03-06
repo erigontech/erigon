@@ -86,7 +86,7 @@ jobs:
           rm -rf $ERIGON_TESTBED_DATA_DIR || true
 
           echo "Mirror datadir"
-          if ! "$GITHUB_WORKSPACE/cmd/scripts/mirror-datadir.sh" "$ERIGON_REFERENCE_DATA_DIR" "$ERIGON_TESTBED_DATA_DIR" > /dev/null 2>&1; then
+          if ! "$GITHUB_WORKSPACE/cmd/scripts/mirror-datadir.sh" "$ERIGON_REFERENCE_DATA_DIR" "$ERIGON_TESTBED_DATA_DIR" ; then
             echo "::error::Failed to mirror datadir from $ERIGON_REFERENCE_DATA_DIR to $ERIGON_TESTBED_DATA_DIR"
             echo "Failed to mirror datadir from $ERIGON_REFERENCE_DATA_DIR to $ERIGON_TESTBED_DATA_DIR"
             exit 1
