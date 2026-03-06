@@ -75,10 +75,10 @@ echo "Copying mutable files..."
 _test_src="$source_abs/.reflink_test_$$"
 _test_dst="$destination_abs/.reflink_test_$$"
 _cp_clone=""
-touch "$_test_src" 2>/dev/null && {
+touch "$_test_src" && {
     case "$(uname -s)" in
-        Darwin) cp -c "$_test_src" "$_test_dst" 2>/dev/null && _cp_clone="cp -c" ;;
-        *)      cp --reflink=always "$_test_src" "$_test_dst" 2>/dev/null && _cp_clone="cp --reflink=always" ;;
+        Darwin) cp -c "$_test_src" "$_test_dst" && _cp_clone="cp -c" ;;
+        *)      cp --reflink=always "$_test_src" "$_test_dst" && _cp_clone="cp --reflink=always" ;;
     esac
     rm -f "$_test_src" "$_test_dst"
 }
@@ -93,7 +93,7 @@ if [ -n "$_cp_clone" ]; then
         fi | while IFS= read -r -d '' src_file; do
             rel="${src_file#$source_abs/}"
             mkdir -p "$(dirname "$destination_abs/$rel")"
-            $_cp_clone "$src_file" "$destination_abs/$rel" 2>/dev/null || \
+            $_cp_clone "$src_file" "$destination_abs/$rel" || \
                 [ -f "$destination_abs/$rel" ] || \
                 { echo "Error: failed to clone $rel" >&2; exit 1; }
         done
