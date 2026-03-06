@@ -274,6 +274,17 @@ func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, forc
 		return false, err
 	}
 
+	// When versionedRead resolves the previous value from a cached read
+	// (ReadSetRead) or from the version map (MapRead), the readStorage
+	// callback is never called and commited stays at its zero-value (false).
+	// In both cases there is no versioned write for this key in the current
+	// transaction, so this IS the first write — commited must be true so
+	// that storageChange.revert deletes the versioned write instead of
+	// updating it to the prevalue.
+	if source != WriteSetRead && source != UnknownSource && source != StorageRead {
+		commited = true
+	}
+
 	if !force && source != UnknownSource && prev == value {
 		return false, nil
 	}

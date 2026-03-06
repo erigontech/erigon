@@ -86,7 +86,7 @@ func (f *ProtoForkable) MergeFiles(ctx context.Context, _filesToMerge []visibleF
 			return
 		}
 		defer comp.Close()
-		writer := f.DataWriter(comp, f.isCompressionUsed(from, to))
+		writer := f.DataWriter(ctx, comp, f.isCompressionUsed(from, to))
 
 		p := ps.AddNew(path.Base(segPath), 1)
 		defer ps.Delete(p)

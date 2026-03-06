@@ -663,7 +663,7 @@ func BenchmarkHeaderRLP(b *testing.B) {
 	var buf bytes.Buffer
 	b.Run(`Encode`, func(b *testing.B) {
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			buf.Reset()
 			header.EncodeRLP(&buf)
 		}
@@ -673,7 +673,7 @@ func BenchmarkHeaderRLP(b *testing.B) {
 		buf.Reset()
 		header.EncodeRLP(&buf)
 		var v Header
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			rlp.DecodeBytes(buf.Bytes(), &v)
 		}
 	})
@@ -789,7 +789,7 @@ func BenchmarkLogRLP(b *testing.B) {
 
 	b.Run(`Encode`, func(b *testing.B) {
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			buf.Reset()
 			logStorage := (*LogForStorage)(log)
 			logStorage.EncodeRLP(&buf)
@@ -802,7 +802,7 @@ func BenchmarkLogRLP(b *testing.B) {
 		logStorage := (*LogForStorage)(log)
 		logStorage.EncodeRLP(&buf)
 		var decoded LogForStorage
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			rlp.DecodeBytes(buf.Bytes(), &decoded)
 		}
 	})
@@ -815,7 +815,7 @@ func BenchmarkReceiptRLP(b *testing.B) {
 
 	b.Run(`Encode`, func(b *testing.B) {
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			buf.Reset()
 			receiptStorage := (*ReceiptForStorage)(receipt)
 			receiptStorage.EncodeRLP(&buf)
@@ -828,7 +828,7 @@ func BenchmarkReceiptRLP(b *testing.B) {
 		receiptStorage := (*ReceiptForStorage)(receipt)
 		receiptStorage.EncodeRLP(&buf)
 		var decoded ReceiptForStorage
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			rlp.DecodeBytes(buf.Bytes(), &decoded)
 		}
 	})
@@ -842,7 +842,7 @@ func BenchmarkLogCustomVsGenerated(b *testing.B) {
 
 	b.Run(`Custom/Encode`, func(b *testing.B) {
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			buf.Reset()
 			logStorage := (*LogForStorage)(logData)
 			logStorage.EncodeRLP(&buf)
@@ -855,7 +855,7 @@ func BenchmarkLogCustomVsGenerated(b *testing.B) {
 		logStorage := (*LogForStorage)(logData)
 		logStorage.EncodeRLP(&buf)
 		var decoded LogForStorage
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			rlp.DecodeBytes(buf.Bytes(), &decoded)
 		}
 	})
@@ -869,7 +869,7 @@ func BenchmarkLogCustomVsGenerated(b *testing.B) {
 
 	b.Run(`Generated/Encode`, func(b *testing.B) {
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			buf.Reset()
 			genLog.EncodeRLP(&buf)
 		}
@@ -880,7 +880,7 @@ func BenchmarkLogCustomVsGenerated(b *testing.B) {
 		buf.Reset()
 		genLog.EncodeRLP(&buf)
 		var decoded LogForStorageGen
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			rlp.DecodeBytes(buf.Bytes(), &decoded)
 		}
 	})
@@ -894,7 +894,7 @@ func BenchmarkLogCustomVsGeneratedFixed(b *testing.B) {
 
 	b.Run(`Custom/Encode`, func(b *testing.B) {
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			buf.Reset()
 			logStorage := (*LogForStorage)(logData)
 			logStorage.EncodeRLP(&buf)
@@ -907,7 +907,7 @@ func BenchmarkLogCustomVsGeneratedFixed(b *testing.B) {
 		logStorage := (*LogForStorage)(logData)
 		logStorage.EncodeRLP(&buf)
 		var decoded LogForStorage
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			rlp.DecodeBytes(buf.Bytes(), &decoded)
 		}
 	})
@@ -921,7 +921,7 @@ func BenchmarkLogCustomVsGeneratedFixed(b *testing.B) {
 
 	b.Run(`Generated/Encode`, func(b *testing.B) {
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			buf.Reset()
 			genLog.EncodeRLP(&buf)
 		}
@@ -932,7 +932,7 @@ func BenchmarkLogCustomVsGeneratedFixed(b *testing.B) {
 		buf.Reset()
 		genLog.EncodeRLP(&buf)
 		var decoded LogForStorageGen
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			rlp.DecodeBytes(buf.Bytes(), &decoded)
 		}
 	})

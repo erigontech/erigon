@@ -660,7 +660,8 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 	var keyBuf, valBuf []byte
 	var lastKey, lastVal []byte
 	preSeq, mergeSeq := &multiencseq.SequenceReader{}, &multiencseq.SequenceReader{}
-	preIt, mergeIt := &multiencseq.SequenceIterator{}, &multiencseq.SequenceIterator{}
+	preIt := &multiencseq.SequenceIterator{}
+	builder := &multiencseq.SequenceBuilder{}
 	i := uint64(0)
 	for cp.Len() > 0 {
 		lastKey = append(lastKey[:0], cp[0].key...)
@@ -669,16 +670,16 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 		// Pre-rebase the first sequence
 		preSeq.Reset(cp[0].startTxNum, lastVal)
 		preIt.Reset(preSeq, 0)
-		newSeq := multiencseq.NewBuilder(startTxNum, preSeq.Count(), preSeq.Max())
+		builder.Reset(startTxNum, preSeq.Count(), preSeq.Max())
 		for preIt.HasNext() {
 			v, err := preIt.Next()
 			if err != nil {
 				return nil, err
 			}
-			newSeq.AddOffset(v)
+			builder.AddOffset(v)
 		}
-		newSeq.Build()
-		lastVal = newSeq.AppendBytes(nil)
+		builder.Build()
+		lastVal = builder.AppendBytes(lastVal[:0])
 		var mergedOnce bool
 
 		// Advance all the items that have this key (including the top)
@@ -687,11 +688,10 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 			if mergedOnce {
 				mergeSeq.Reset(ci1.startTxNum, ci1.val)
 				preSeq.Reset(startTxNum, lastVal)
-				merged, mergeErr := mergeSeq.Merge(preSeq, startTxNum, mergeIt, preIt)
-				if mergeErr != nil {
+				if mergeErr := builder.Merge(mergeSeq, preSeq, startTxNum); mergeErr != nil {
 					return nil, fmt.Errorf("merge %s inverted index: %w", iit.ii.FilenameBase, mergeErr)
 				}
-				lastVal = merged.AppendBytes(nil)
+				lastVal = builder.AppendBytes(lastVal[:0])
 			} else {
 				mergedOnce = true
 			}
@@ -807,7 +807,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 			comp.DisableFsync()
 		}
 
-		pagedWr := ht.dataWriter(comp)
+		pagedWr := ht.dataWriter(ctx, comp)
 
 		cnt := 0
 		for _, item := range indexFiles {
