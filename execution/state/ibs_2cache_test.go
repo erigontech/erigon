@@ -269,23 +269,6 @@ func TestCommittedStateWithVersionMap(t *testing.T) {
 	require.Equal(t, val2, current, "GetState must return the current tx1 value (val2)")
 }
 
-// TestStateUpdatesEquivalence is a placeholder for the Phase 2 equivalence
-// check between StateUpdatesFromVersionedWrites (not yet implemented) and the
-// existing BufferedWriter path.
-//
-// Skipped until Phase 2 (#19701) implements StateUpdatesFromVersionedWrites.
-func TestStateUpdatesEquivalence(t *testing.T) {
-	t.Skip("Phase 2 (#19701): StateUpdatesFromVersionedWrites not yet implemented")
-
-	// When un-skipped in Phase 2, this test will:
-	//   1. Run a fixed tx sequence through the existing path:
-	//      VersionedWrites → ApplyVersionedWrites → IBS → FinalizeTx/MakeWriteSet → BufferedWriter → StateUpdates
-	//   2. Run the same sequence through the new direct path:
-	//      VersionedWrites → StateUpdatesFromVersionedWrites → StateUpdates
-	//   3. Assert the two StateUpdates are byte-for-byte identical.
-	_ = chain.Rules{}
-}
-
 // TestCrossBlockStateReadConsistency verifies that a new IBS created for
 // block N+1 correctly reads state written by block N through SharedDomains.
 //
