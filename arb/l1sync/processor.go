@@ -110,11 +110,10 @@ func (s *L1SyncService) ProcessBatch(ctx context.Context, seqNum uint64, data []
 	}
 	defer tx.Rollback()
 
-	// Store raw batch data with msg count: value = uint64(msgCount) + rawData
-	batchVal := make([]byte, 8+len(data))
-	binary.BigEndian.PutUint64(batchVal[:8], uint64(len(messages)))
-	copy(batchVal[8:], data)
-	if err := tx.Put(kv.ArbL1SyncBatch, uint64Key(seqNum), batchVal); err != nil {
+	// Compute cumulative message count
+	cumulativeMsgCount := s.cumulativeMsgCount + uint64(len(messages))
+
+	if err := storeBatch(tx, seqNum, l1BlockNumber, cumulativeMsgCount, data, uint64(len(messages))); err != nil {
 		return fmt.Errorf("failed to store batch %d: %w", seqNum, err)
 	}
 
@@ -154,10 +153,18 @@ func (s *L1SyncService) ProcessBatch(ctx context.Context, seqNum uint64, data []
 		return fmt.Errorf("failed to commit batch %d: %w", seqNum, err)
 	}
 
-	// Update in-memory delayedMessagesRead from the last message of this batch
+	// Update in-memory state
+	s.cumulativeMsgCount = cumulativeMsgCount
 	if len(messages) > 0 {
 		s.delayedMessagesRead = messages[len(messages)-1].DelayedMessagesRead
 	}
+
+	// Track batch in memory for finality lookups
+	s.addRecentBatch(batchInfo{
+		seqNum:             seqNum,
+		l1Block:            l1BlockNumber,
+		cumulativeMsgCount: cumulativeMsgCount,
+	})
 
 	s.logger.Info("batch processed and stored", "batchSeqNum", seqNum, "messages", len(messages), "l1Block", l1BlockNumber)
 	return nil
@@ -168,15 +175,10 @@ func (s *L1SyncService) ProcessBatch(ctx context.Context, seqNum uint64, data []
 func (s *L1SyncService) getLastDelayedMessagesRead(ctx context.Context, batchSeqNum uint64) (uint64, error) {
 	var result uint64
 	err := s.db.View(ctx, func(tx kv.Tx) error {
-		// Get msg count from the batch entry
-		val, e := tx.GetOne(kv.ArbL1SyncBatch, uint64Key(batchSeqNum))
+		msgCount, _, _, _, e := readBatch(tx, batchSeqNum)
 		if e != nil {
 			return e
 		}
-		if val == nil || len(val) < 8 {
-			return nil
-		}
-		msgCount := binary.BigEndian.Uint64(val[:8])
 		if msgCount == 0 {
 			return nil
 		}
@@ -214,16 +216,9 @@ func (s *L1SyncService) GetProgress(ctx context.Context) (lastBatchSeqNum uint64
 
 func (s *L1SyncService) GetStoredBatch(ctx context.Context, seqNum uint64) (data []byte, msgCount uint64, err error) {
 	err = s.db.View(ctx, func(tx kv.Tx) error {
-		val, e := tx.GetOne(kv.ArbL1SyncBatch, uint64Key(seqNum))
-		if e != nil {
-			return e
-		}
-		if val == nil || len(val) < 8 {
-			return fmt.Errorf("batch %d not found", seqNum)
-		}
-		msgCount = binary.BigEndian.Uint64(val[:8])
-		data = val[8:]
-		return nil
+		var e error
+		msgCount, _, _, data, e = readBatch(tx, seqNum)
+		return e
 	})
 	return
 }
@@ -330,6 +325,36 @@ func createNewHeader(prevHeader *types.Header, l1info *L1Info) *types.Header {
 		Nonce:       [8]byte{}, // Filled in later; post-merge Ethereum will require this to be zero
 	}
 	return header
+}
+
+// --- batch storage helpers ---
+
+// storeBatch writes batch data to DB.
+// Value format: uint64(msgCount) + uint64(l1BlockNumber) + uint64(cumulativeMsgCount) + rawData
+func storeBatch(tx kv.RwTx, seqNum, l1BlockNumber, cumulativeMsgCount uint64, data []byte, msgCount uint64) error {
+	batchVal := make([]byte, 24+len(data))
+	binary.BigEndian.PutUint64(batchVal[:8], msgCount)
+	binary.BigEndian.PutUint64(batchVal[8:16], l1BlockNumber)
+	binary.BigEndian.PutUint64(batchVal[16:24], cumulativeMsgCount)
+	copy(batchVal[24:], data)
+	return tx.Put(kv.ArbL1SyncBatch, uint64Key(seqNum), batchVal)
+}
+
+// readBatch reads batch data from DB. Returns all metadata and raw data.
+func readBatch(tx kv.Tx, seqNum uint64) (msgCount, l1Block, cumulativeMsgCount uint64, data []byte, err error) {
+	val, err := tx.GetOne(kv.ArbL1SyncBatch, uint64Key(seqNum))
+	if err != nil {
+		return 0, 0, 0, nil, err
+	}
+	if val == nil || len(val) < 24 {
+		return 0, 0, 0, nil, fmt.Errorf("batch %d not found", seqNum)
+	}
+	msgCount = binary.BigEndian.Uint64(val[:8])
+	l1Block = binary.BigEndian.Uint64(val[8:16])
+	cumulativeMsgCount = binary.BigEndian.Uint64(val[16:24])
+	data = make([]byte, len(val)-24)
+	copy(data, val[24:])
+	return
 }
 
 // --- delayed message helpers ---
