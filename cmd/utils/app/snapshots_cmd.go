@@ -1264,6 +1264,8 @@ func doIntegrity(cliCtx *cli.Context) error {
 						return err
 					}
 				case integrity.CommitmentHistVal:
+					scCopy := sc
+					scCopy.SampleRatio /= 10 // it's very slow check
 					if err := integrity.CheckCommitmentHistVal(ctx, sc, db, blockReader, failFast, logger); err != nil {
 						return err
 					}
