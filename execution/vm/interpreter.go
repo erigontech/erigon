@@ -264,7 +264,7 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 		evm.ProcessingHook.PushContract(&callContext.Contract)
 		defer evm.ProcessingHook.PopContract()
 		ret, wasmErr := evm.ProcessingHook.ExecuteWASM(callContext, input, evm)
-		return ret, callContext.Contract.Gas, callContext.Contract.UsedMultiGas, wasmErr
+		return ret, callContext.Contract.Gas, callContext.Contract.GetTotalUsedMultiGas(), wasmErr
 	}
 
 	// Arbitrum: track contract on the call stack for Stylus reentrancy detection
@@ -355,13 +355,13 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 		cost = operation.constantGas // For tracing
 		// Validate stack
 		if sLen := callContext.Stack.len(); sLen < operation.numPop {
-			return nil, callContext.gas, callContext.Contract.UsedMultiGas, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
+			return nil, callContext.gas, callContext.Contract.GetTotalUsedMultiGas(), &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
 		} else if sLen > operation.maxStack {
-			return nil, callContext.gas, callContext.Contract.UsedMultiGas, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			return nil, callContext.gas, callContext.Contract.GetTotalUsedMultiGas(), &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
 		}
 		// for tracing: this gas consumption event is emitted below in the debug section.
 		if callContext.gas < cost {
-			return nil, callContext.gas, callContext.Contract.UsedMultiGas, ErrOutOfGas
+			return nil, callContext.gas, callContext.Contract.GetTotalUsedMultiGas(), ErrOutOfGas
 		} else {
 			callContext.gas -= cost
 		}
@@ -379,12 +379,12 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 			if operation.memorySize != nil {
 				memSize, overflow := operation.memorySize(callContext)
 				if overflow {
-					return nil, callContext.gas, callContext.Contract.UsedMultiGas, ErrGasUintOverflow
+					return nil, callContext.gas, callContext.Contract.GetTotalUsedMultiGas(), ErrGasUintOverflow
 				}
 				// memory is expanded in words of 32 bytes. Gas
 				// is also calculated in words.
 				if memorySize, overflow = math.SafeMul(ToWordSize(memSize), 32); overflow {
-					return nil, callContext.gas, callContext.Contract.UsedMultiGas, ErrGasUintOverflow
+					return nil, callContext.gas, callContext.Contract.GetTotalUsedMultiGas(), ErrGasUintOverflow
 				}
 			}
 			// Consume the gas and return an error if not enough gas is available.
@@ -395,7 +395,7 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 				if !errors.Is(err, ErrOutOfGas) {
 					err = fmt.Errorf("%w: %v", ErrOutOfGas, err)
 				}
-				return nil, callContext.gas, callContext.Contract.UsedMultiGas, err
+				return nil, callContext.gas, callContext.Contract.GetTotalUsedMultiGas(), err
 			}
 			cost += dynamicCost // for tracing
 			callGas = operation.constantGas + dynamicCost - evm.CallGasTemp()
@@ -405,7 +405,7 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 
 			// for tracing: this gas consumption event is emitted below in the debug section.
 			if callContext.gas < dynamicCost {
-				return nil, callContext.gas, callContext.Contract.UsedMultiGas, ErrOutOfGas
+				return nil, callContext.gas, callContext.Contract.GetTotalUsedMultiGas(), ErrOutOfGas
 			} else {
 				callContext.gas -= dynamicCost
 			}
@@ -455,5 +455,5 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 		err = nil // clear stop token error
 	}
 
-	return res, callContext.gas, callContext.Contract.UsedMultiGas, err
+	return res, callContext.gas, callContext.Contract.GetTotalUsedMultiGas(), err
 }
