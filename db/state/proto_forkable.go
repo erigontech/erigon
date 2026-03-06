@@ -162,7 +162,7 @@ func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.R
 }
 
 func (a *ProtoForkable) DataWriter(ctx context.Context, f *seg.Compressor, compress bool) *seg.PagedWriter {
-	return seg.NewPagedWriter(seg.NewWriter(f, a.cfg.Compression), a.cfg.ValuesOnCompressedPage, compress)
+	return seg.NewPagedWriter(ctx, seg.NewWriter(f, a.cfg.Compression), a.cfg.ValuesOnCompressedPage, compress)
 }
 
 func (a *ProtoForkable) DataReader(f *seg.Decompressor, compress bool) *seg.Reader {
