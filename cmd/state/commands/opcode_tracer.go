@@ -436,7 +436,11 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 	rawChainDb := mdbx.MustOpen(dirs.Chaindata)
 	defer rawChainDb.Close()
 
-	agg, err := dbstate.New(dirs).Logger(logger).Open(context.Background(), rawChainDb)
+	erigonDBSettings, err := dbstate.ResolveErigonDBSettings(dirs, logger, false)
+	if err != nil {
+		return err
+	}
+	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings).Open(context.Background(), rawChainDb)
 	if err != nil {
 		return err
 	}

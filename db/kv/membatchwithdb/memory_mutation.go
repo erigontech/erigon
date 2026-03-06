@@ -773,11 +773,11 @@ func (m *MemoryMutation) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
 	return m.db.Unmarked(id)
 }
 
-func (m *MemoryMutation) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
+func (m *MemoryMutation) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte) error {
 	panic("implement me pls. or use SharedDomains")
 }
 
-func (m *MemoryMutation) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
+func (m *MemoryMutation) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte) error {
 	panic("implement me pls. or use SharedDomains")
 }
 
@@ -791,10 +791,6 @@ func (m *MemoryMutation) UnmarkedRw(id kv.ForkableId) kv.UnmarkedRwTx {
 
 func (m *MemoryMutation) PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error) {
 	return m.db.(kv.TemporalRwTx).PruneSmallBatches(ctx, timeout)
-}
-
-func (m *MemoryMutation) GreedyPruneHistory(ctx context.Context, domain kv.Domain) error {
-	return m.db.(kv.TemporalRwTx).GreedyPruneHistory(ctx, domain)
 }
 
 func (m *MemoryMutation) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {

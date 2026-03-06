@@ -63,9 +63,13 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		lastFrozenTxNum = uint64((lastFrozenStep+1)*kv.Step(se.doms.StepSize())) - 1
 	}
 
-	if blockLimit > 0 && min(blockNum+blockLimit, maxBlockNum) > blockNum+16 || maxBlockNum > blockNum+16 {
+	toBlockNum := maxBlockNum
+	if blockLimit > 0 {
+		toBlockNum = min(maxBlockNum, blockNum+blockLimit-1)
+	}
+	if maxBlockNum > blockNum+16 {
 		log.Info(fmt.Sprintf("[%s] serial starting", execStage.LogPrefix()),
-			"from", blockNum, "to", min(maxBlockNum, blockNum+blockLimit-1), "initialTxNum", initialTxNum,
+			"from", blockNum, "to", toBlockNum, "initialTxNum", initialTxNum,
 			"initialBlockTxOffset", offsetFromBlockBeginning, "lastFrozenStep", lastFrozenStep,
 			"initialCycle", initialCycle, "isForkValidation", se.isForkValidation, "isBlockProduction", se.isBlockProduction)
 	}
@@ -109,11 +113,8 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		header := b.HeaderNoCopy()
 		getHashFnMutex := sync.Mutex{}
 
-		// se.cfg.chainConfig.AmsterdamTime != nil && se.cfg.chainConfig.AmsterdamTime.Uint64() > 0 is
-		// temporary to allow for inital non bals amsterdam testing before parallel exec is live by defualt
 		if se.cfg.chainConfig.AmsterdamTime != nil && se.cfg.chainConfig.AmsterdamTime.Uint64() > 0 && se.cfg.chainConfig.IsAmsterdam(header.Time) {
 			se.logger.Error(fmt.Sprintf("[%s] BLOCK PROCESSING FAILED: Amsterdam processing is not supported by serial exec", se.logPrefix), "fork-block", blockNum)
-			se.logger.Error(fmt.Sprintf("[%s] Run erigon with either '--experimental.bal' or 'export ERIGON_EXEC3_PARALLEL=true'", se.logPrefix))
 			return nil, rwTx, fmt.Errorf("amsterdam processing is not supported by serial exec from block: %d", blockNum)
 		}
 
@@ -235,8 +236,8 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			se.txExecutor.lastCommittedTxNum.Store(inputTxNum)
 			se.logger.Info(
 				"periodic commit check",
-				"block", se.doms.BlockNum(),
-				"txNum", se.doms.TxNum(),
+				"block", b.NumberU64(),
+				"txNum", inputTxNum,
 				"commitment", times.ComputeCommitment,
 			)
 			if isBatchFull {
@@ -355,7 +356,6 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			se.txCount++
 			se.blockGasUsed += result.ExecutionResult.BlockGasUsed
 			mxExecTransactions.Add(1)
-
 			if txTask.Tx() != nil {
 				se.blobGasUsed += txTask.Tx().GetBlobGas()
 			}
@@ -524,7 +524,6 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 		}
 
 		se.doms.SetTxNum(txTask.TxNum)
-		se.doms.SetBlockNum(txTask.BlockNumber())
 		se.lastBlockResult = &blockResult{
 			BlockNum:  txTask.BlockNumber(),
 			lastTxNum: txTask.TxNum,

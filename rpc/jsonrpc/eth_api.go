@@ -20,12 +20,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"math/big"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -34,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -49,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/rpc/ethapi"
 	ethapi2 "github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/filters"
+	"github.com/erigontech/erigon/rpc/gasprice"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -94,6 +97,7 @@ type EthAPI interface {
 	GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error)
 	GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Uint64, error)
 	GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error)
+	GetStorageValues(ctx context.Context, requests map[common.Address][]common.Hash, blockNrOrHash rpc.BlockNumberOrHash) (map[common.Address][]hexutil.Bytes, error)
 	GetCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error)
 
 	// System related (see ./eth_system.go)
@@ -208,6 +212,9 @@ func (api *BaseAPI) chainConfigWithGenesis(ctx context.Context, tx kv.Tx) (*chai
 }
 
 func (api *BaseAPI) pendingBlock() *types.Block {
+	if api.filters == nil {
+		return nil
+	}
 	return api.filters.LastPendingBlock()
 }
 func (api *BaseAPI) engine() rules.EngineReader {
@@ -368,11 +375,24 @@ func (api *BaseAPI) checkPruneHistory(ctx context.Context, tx kv.Tx, block uint6
 		}
 		prunedTo := p.History.PruneTo(latest)
 		if block < prunedTo {
-			return state.PrunedError
+			return fmt.Errorf("%w: requested block %d, history is available from block %d", state.PrunedError, block, prunedTo)
 		}
 	}
 
 	return nil
+}
+
+// checkReceiptsAvailable checks if receipts are available for the given block.
+// In case --persist.receipts which makes all historical receipts available even when state history is pruned.
+func (api *BaseAPI) checkReceiptsAvailable(ctx context.Context, tx kv.Tx, block uint64) error {
+	persistReceipts, err := kvcfg.PersistReceipts.Enabled(tx)
+	if err != nil {
+		return err
+	}
+	if persistReceipts {
+		return nil
+	}
+	return api.checkPruneHistory(ctx, tx, block)
 }
 
 func (api *BaseAPI) pruneMode(tx kv.Tx) (*prune.Mode, error) {
@@ -403,6 +423,7 @@ type APIImpl struct {
 	txPool                      txpoolproto.TxpoolClient
 	mining                      txpoolproto.MiningClient
 	gasCache                    *GasPriceCache
+	feeHistoryCache             *gasprice.FeeHistoryCache
 	db                          kv.TemporalRoDB
 	GasCap                      uint64
 	FeeCap                      float64
@@ -441,6 +462,7 @@ func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPo
 		txPool:                      txPool,
 		mining:                      mining,
 		gasCache:                    NewGasPriceCache(),
+		feeHistoryCache:             gasprice.NewFeeHistoryCache(),
 		GasCap:                      gascap,
 		FeeCap:                      cfg.FeeCap,
 		AllowUnprotectedTxs:         cfg.AllowUnprotectedTxs,
@@ -456,7 +478,7 @@ func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPo
 // newRPCPendingTransaction returns a pending transaction that will serialize to the RPC representation
 func newRPCPendingTransaction(txn types.Transaction, current *types.Header, config *chain.Config) *ethapi.RPCTransaction {
 	var (
-		baseFee   *big.Int
+		baseFee   *uint256.Int
 		blockTime = uint64(0)
 	)
 	if current != nil {
@@ -478,21 +500,21 @@ func newRPCRawTransactionFromBlockIndex(b *types.Block, index uint64) (hexutil.B
 }
 
 type GasPriceCache struct {
-	latestPrice *big.Int
+	latestPrice *uint256.Int
 	latestHash  common.Hash
 	mtx         sync.Mutex
 }
 
 func NewGasPriceCache() *GasPriceCache {
 	return &GasPriceCache{
-		latestPrice: big.NewInt(0),
+		latestPrice: uint256.NewInt(0),
 		latestHash:  common.Hash{},
 	}
 }
 
-func (c *GasPriceCache) GetLatest() (common.Hash, *big.Int) {
+func (c *GasPriceCache) GetLatest() (common.Hash, *uint256.Int) {
 	var hash common.Hash
-	var price *big.Int
+	var price *uint256.Int
 	c.mtx.Lock()
 	hash = c.latestHash
 	price = c.latestPrice
@@ -500,7 +522,7 @@ func (c *GasPriceCache) GetLatest() (common.Hash, *big.Int) {
 	return hash, price
 }
 
-func (c *GasPriceCache) SetLatest(hash common.Hash, price *big.Int) {
+func (c *GasPriceCache) SetLatest(hash common.Hash, price *uint256.Int) {
 	c.mtx.Lock()
 	c.latestPrice = price
 	c.latestHash = hash

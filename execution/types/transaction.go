@@ -71,7 +71,7 @@ type Transaction interface {
 	GetBlobGas() uint64
 	GetValue() *uint256.Int
 	GetTo() *common.Address
-	AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error)
+	AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules) (*Message, error)
 	WithSignature(signer Signer, sig []byte) (Transaction, error)
 	Hash() common.Hash
 	SigningHash(chainID *big.Int) common.Hash

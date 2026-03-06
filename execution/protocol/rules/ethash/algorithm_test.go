@@ -763,11 +763,8 @@ func BenchmarkHashimotoFullMmap(b *testing.B) {
 
 func BenchmarkSeedHash(b *testing.B) {
 	var res []byte
-	const repeats = 100
-	for n := 0; n < repeats; n++ {
-		for i := uint64(0); i < uint64(b.N); i++ {
-			res = seedHash(i*epochLength + 1)
-		}
+	for i := uint64(0); b.Loop(); i++ {
+		res = seedHash(i*epochLength + 1)
 	}
 
 	_, err := io.Copy(io.Discard, bytes.NewBuffer(res))
@@ -778,11 +775,8 @@ func BenchmarkSeedHash(b *testing.B) {
 
 func BenchmarkSeedHashOld(b *testing.B) {
 	var res []byte
-	const repeats = 100
-	for n := 0; n < repeats; n++ {
-		for i := uint64(0); i < uint64(b.N); i++ {
-			res = seedHashOld(i*epochLength + 1)
-		}
+	for i := uint64(0); b.Loop(); i++ {
+		res = seedHashOld(i*epochLength + 1)
 	}
 
 	_, err := io.Copy(io.Discard, bytes.NewBuffer(res))

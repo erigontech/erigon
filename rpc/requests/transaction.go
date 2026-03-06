@@ -193,3 +193,13 @@ func (req *requestGenerator) GetTransactionReceipt(ctx context.Context, hash com
 
 	return &result, nil
 }
+
+func (req *requestGenerator) GetBlockReceipts(ctx context.Context, blockRef rpc.BlockNumberOrHash) (types.Receipts, error) {
+	var result types.Receipts
+
+	if err := req.rpcCall(ctx, &result, Methods.ETHGetBlockReceipts, blockRef); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
