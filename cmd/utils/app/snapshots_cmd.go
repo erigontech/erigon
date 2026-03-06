@@ -398,7 +398,7 @@ var snapshotCommand = cli.Command{
 				&cli.StringFlag{Name: "file-integrity-cache", Usage: "path to integrity check cache file (speeds up repeated runs)"},
 				&cli.BoolFlag{Name: "skip-torrent-verify", Usage: "skip torrent piece verification when using file-integrity-cache"},
 				&cli.Int64Flag{Name: "seed", Usage: "random seed for sampling (auto-generated if not set)"},
-				&cli.Float64Flag{Name: "sample", Usage: "fraction of items to check via pseudo-random sampling (0.0-1.0)", Value: 1.0},
+				&cli.Float64Flag{Name: "sample", Usage: "fraction of items to check via pseudo-random sampling (0.0-1.0)", Value: 0.01},
 			}),
 		},
 		{
@@ -423,7 +423,7 @@ var snapshotCommand = cli.Command{
 			Name: "check-commitment-hist-at-blk-range",
 			Action: func(cliCtx *cli.Context) error {
 				logger := log.Root()
-				err := doCheckCommitmentHistAtBlkRange(cliCtx, logger)
+				err := doCheckStateRootByHistory(cliCtx, logger)
 				if err != nil {
 					log.Error("[check-commitment-hist-at-blk-range] failure", "err", err)
 					return err
@@ -431,7 +431,7 @@ var snapshotCommand = cli.Command{
 				log.Info("[check-commitment-hist-at-blk-range] success")
 				return nil
 			},
-			Description: "check if our historical commitment data matches the state roots of headers for a given [from,to) block range",
+			Description: "verify block state roots against commitment history snapshots for a given [from,to) block range (no block re-execution)",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&cli.Uint64Flag{Name: "from", Usage: "block number from which to start verifying", Required: true},
@@ -1175,6 +1175,12 @@ func doIntegrity(cliCtx *cli.Context) error {
 	if err := integrity.ValidateSampleRatio(sampleRatio); err != nil {
 		return err
 	}
+	sc, err := integrity.NewSamplerCfg(seed, sampleRatio)
+	if err != nil {
+		return err
+	}
+
+	logger.Info("[integrity] starting", "seed", sc.Seed, "sampleRatio", sc.SampleRatio, "checks", requestedChecks)
 
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
@@ -1203,107 +1209,114 @@ func doIntegrity(cliCtx *cli.Context) error {
 	heimdallStore, _ := blockRetire.BorStore()
 
 	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(2)
+	g.SetLimit(1)
 	for _, chk := range requestedChecks {
 		chk := chk
 		g.Go(func() error {
-			sc, err := integrity.NewSamplerCfg(seed, sampleRatio)
-			if err != nil {
-				return err
-			}
-			logger.Info("[integrity] starting", "check", chk, "seed", sc.Seed, "sampleRatio", sc.SampleRatio)
-			switch chk {
-			case integrity.BlocksTxnID:
-				if err := blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(failFast); err != nil {
-					return err
+			logger.Info("[integrity] starting", "check", chk)
+			if err := func() error {
+				switch chk {
+				case integrity.BlocksTxnID:
+					if err := blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(failFast); err != nil {
+						return err
+					}
+				case integrity.HeaderNoGaps:
+					if err := integrity.NoGapsInCanonicalHeaders(ctx, db, blockReader, failFast); err != nil {
+						return err
+					}
+				case integrity.Blocks:
+					if err := integrity.SnapBlocksRead(ctx, db, blockReader, 0, 0, failFast); err != nil {
+						return err
+					}
+				case integrity.InvertedIndex:
+					if err := integrity.E3EfFiles(ctx, db, failFast, fromStep); err != nil {
+						return err
+					}
+				case integrity.HistoryNoSystemTxs:
+					if err := integrity.HistoryCheckNoSystemTxs(ctx, db, blockReader); err != nil {
+						return err
+					}
+				case integrity.BorEvents:
+					if !CheckBorChain(chainConfig.ChainName) {
+						logger.Info("BorEvents skipped because not bor chain")
+						return nil
+					}
+					snapshots := blockReader.BorSnapshots().(*heimdall.RoSnapshots)
+					if err := bridge.ValidateBorEvents(ctx, db, blockReader, snapshots, 0, 0, failFast); err != nil {
+						return err
+					}
+				case integrity.BorSpans:
+					if !CheckBorChain(chainConfig.ChainName) {
+						logger.Info("BorSpans skipped because not bor chain")
+						return nil
+					}
+					if err := heimdall.ValidateBorSpans(ctx, logger, dirs, heimdallStore, borSnaps, failFast); err != nil {
+						return err
+					}
+				case integrity.BorCheckpoints:
+					if !CheckBorChain(chainConfig.ChainName) {
+						logger.Info("BorCheckpoints skipped because not bor chain")
+						return nil
+					}
+					if err := heimdall.ValidateBorCheckpoints(ctx, logger, dirs, heimdallStore, borSnaps, failFast); err != nil {
+						return err
+					}
+				case integrity.ReceiptsNoDups:
+					if err := integrity.CheckReceiptsNoDups(ctx, sc, db, blockReader, failFast); err != nil {
+						return err
+					}
+				case integrity.RCacheNoDups:
+					if err := integrity.CheckRCacheNoDups(ctx, sc, db, blockReader, failFast); err != nil {
+						return err
+					}
+				case integrity.StateProgress:
+					if err := integrity.CheckStateProgress(ctx, db, blockReader, failFast); err != nil {
+						return err
+					}
+				case integrity.Publishable:
+					if err := doPublishable(cliCtx, chainDB); err != nil {
+						return err
+					}
+				case integrity.CommitmentRoot:
+					if err := integrity.CheckCommitmentRoot(ctx, db, blockReader, failFast, logger); err != nil {
+						return err
+					}
+				case integrity.CommitmentKvi:
+					scCopy := sc
+					scCopy.SampleRatio = 0 // Sudeep will try to speedup it different way: by use `cache`
+					if err := integrity.CheckCommitmentKvi(ctx, scCopy, db, cache, failFast, logger); err != nil {
+						return err
+					}
+				case integrity.CommitmentKvDeref:
+					if err := integrity.CheckCommitmentKvDeref(ctx, db, cache, failFast, logger); err != nil {
+						return err
+					}
+				case integrity.CommitmentHistVal:
+					scCopy := sc
+					scCopy.SampleRatio /= 100 // it's very slow check
+					if err := integrity.CheckCommitmentHistVal(ctx, scCopy, db, blockReader, failFast, logger); err != nil {
+						return err
+					}
+				case integrity.StateRootVerifyByHistory:
+					to, err := stateProgress(ctx, db, blockReader.TxnumReader())
+					if err != nil {
+						return err
+					}
+					scCopy := sc
+					scCopy.SampleRatio /= 100 // it's very slow check
+					if err := integrity.CheckCommitmentHistAtBlkRange(ctx, scCopy, db, blockReader, 1, to+1, logger); err != nil {
+						return err
+					}
+				case integrity.StateVerify:
+					if err := integrity.CheckStateVerify(ctx, db, failFast, fromStep, logger); err != nil {
+						return err
+					}
+				default:
+					return fmt.Errorf("unknown check: %s", chk)
 				}
-			case integrity.HeaderNoGaps:
-				if err := integrity.NoGapsInCanonicalHeaders(ctx, db, blockReader, failFast); err != nil {
-					return err
-				}
-			case integrity.Blocks:
-				if err := integrity.SnapBlocksRead(ctx, db, blockReader, 0, 0, failFast); err != nil {
-					return err
-				}
-			case integrity.InvertedIndex:
-				if err := integrity.E3EfFiles(ctx, db, failFast, fromStep); err != nil {
-					return err
-				}
-			case integrity.HistoryNoSystemTxs:
-				if err := integrity.HistoryCheckNoSystemTxs(ctx, db, blockReader); err != nil {
-					return err
-				}
-			case integrity.BorEvents:
-				if !CheckBorChain(chainConfig.ChainName) {
-					logger.Info("BorEvents skipped because not bor chain")
-					return nil
-				}
-				snapshots := blockReader.BorSnapshots().(*heimdall.RoSnapshots)
-				if err := bridge.ValidateBorEvents(ctx, db, blockReader, snapshots, 0, 0, failFast); err != nil {
-					return err
-				}
-			case integrity.BorSpans:
-				if !CheckBorChain(chainConfig.ChainName) {
-					logger.Info("BorSpans skipped because not bor chain")
-					return nil
-				}
-				if err := heimdall.ValidateBorSpans(ctx, logger, dirs, heimdallStore, borSnaps, failFast); err != nil {
-					return err
-				}
-			case integrity.BorCheckpoints:
-				if !CheckBorChain(chainConfig.ChainName) {
-					logger.Info("BorCheckpoints skipped because not bor chain")
-					return nil
-				}
-				if err := heimdall.ValidateBorCheckpoints(ctx, logger, dirs, heimdallStore, borSnaps, failFast); err != nil {
-					return err
-				}
-			case integrity.ReceiptsNoDups:
-				if err := integrity.CheckReceiptsNoDups(ctx, sc, db, blockReader, failFast); err != nil {
-					return err
-				}
-			case integrity.RCacheNoDups:
-				if err := integrity.CheckRCacheNoDups(ctx, sc, db, blockReader, failFast); err != nil {
-					return err
-				}
-			case integrity.StateProgress:
-				if err := integrity.CheckStateProgress(ctx, db, blockReader, failFast); err != nil {
-					return err
-				}
-			case integrity.Publishable:
-				if err := doPublishable(cliCtx, chainDB); err != nil {
-					return err
-				}
-			case integrity.CommitmentRoot:
-				if err := integrity.CheckCommitmentRoot(ctx, db, blockReader, failFast, logger); err != nil {
-					return err
-				}
-			case integrity.CommitmentKvi:
-				if err := integrity.CheckCommitmentKvi(ctx, db, cache, failFast, logger); err != nil {
-					return err
-				}
-			case integrity.CommitmentKvDeref:
-				if err := integrity.CheckCommitmentKvDeref(ctx, db, cache, failFast, logger); err != nil {
-					return err
-				}
-			case integrity.CommitmentHistVal:
-				if err := integrity.CheckCommitmentHistVal(ctx, sc, db, blockReader, failFast, logger); err != nil {
-					return err
-				}
-			case integrity.CommitmentHistAtBlkRange:
-				to, err := stateProgress(ctx, db, blockReader.TxnumReader())
-				if err != nil {
-					return err
-				}
-				if err := integrity.CheckCommitmentHistAtBlkRange(ctx, sc, db, blockReader, 1, to+1, logger); err != nil {
-					return err
-				}
-			case integrity.StateVerify:
-				if err := integrity.CheckStateVerify(ctx, db, failFast, fromStep, logger); err != nil {
-					return err
-				}
-			default:
-				return fmt.Errorf("unknown check: %s", chk)
+				return nil
+			}(); err != nil {
+				return fmt.Errorf("%s: %w", chk, err)
 			}
 			return nil
 		})
@@ -1359,7 +1372,7 @@ func doCheckCommitmentHistAtBlk(cliCtx *cli.Context, logger log.Logger) error {
 	return nil
 }
 
-func doCheckCommitmentHistAtBlkRange(cliCtx *cli.Context, logger log.Logger) error {
+func doCheckStateRootByHistory(cliCtx *cli.Context, logger log.Logger) error {
 	ctx := cliCtx.Context
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()

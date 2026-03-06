@@ -46,7 +46,7 @@ var ErrIntegrity = errors.New("integrity error")
 
 // CheckKvis checks all kvi index files for a domain sequentially (one file at a time),
 // parallelizing the lookup work inside each file.
-func CheckKvis(ctx context.Context, tx kv.TemporalTx, domain kv.Domain, checkType Check, cache *IntegrityCache, failFast bool, logger log.Logger) error {
+func CheckKvis(ctx context.Context, tx kv.TemporalTx, domain kv.Domain, checkType Check, sc SamplerCfg, cache *IntegrityCache, failFast bool, logger log.Logger) error {
 	start := time.Now()
 	aggTx := state.AggTx(tx)
 	files := aggTx.Files(domain)
@@ -107,7 +107,7 @@ func CheckKvis(ctx context.Context, tx kv.TemporalTx, domain kv.Domain, checkTyp
 	for _, w := range works {
 		w := w
 		eg.Go(func() error {
-			keys, err := CheckKvi(ctx, w.kviPath, w.kvPath, kvCompression, failFast, logger)
+			keys, err := CheckKvi(ctx, w.kviPath, w.kvPath, kvCompression, sc, failFast, logger)
 			if err == nil {
 				keyCount.Add(keys)
 				if w.fps != nil {
@@ -137,7 +137,7 @@ type kviWorkItem struct {
 	offset uint64
 }
 
-func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression seg.FileCompression, failFast bool, logger log.Logger) (uint64, error) {
+func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression seg.FileCompression, sc SamplerCfg, failFast bool, logger log.Logger) (uint64, error) {
 	kviFileName := filepath.Base(kviPath)
 	kvFileName := filepath.Base(kvPath)
 	logger.Info("[integrity] CommitmentKvi", "kvi", kviFileName, "kv", kvFileName)
@@ -207,29 +207,31 @@ func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression 
 		})
 	}
 
-	// Producer: scan kv file sequentially, emit (key, offset) pairs to workers.
+	// Producer: scan kv file, emit sampled (key, offset) pairs to workers.
+	// Unsampled entries use Skip() for both key and value to avoid decompressing key bytes.
 	eg.Go(func() error {
 		defer close(workCh)
+		sampler := sc.NewSampler()
 		logTicker := time.NewTicker(30 * time.Second)
 		defer logTicker.Stop()
 		var keyBuf []byte
-		var keyOffset uint64
-		var atValue bool
+		var keyOffset uint64 // byte offset of the current key in the bitstream
 		for kvReader.HasNext() {
-			if atValue {
-				keyOffset, _ = kvReader.Skip()
-				atValue = false
+			if sampler.CanSkip() {
+				kvReader.Skip()                // skip key (no decompression of bytes)
+				keyOffset, _ = kvReader.Skip() // skip value, advance to next key
+				keyCount++
 				continue
 			}
-			keyBuf, _ = kvReader.Next(keyBuf[:0])
-			keyCount++
-			atValue = true
-
+			keyBuf, _ = kvReader.Next(keyBuf[:0]) // decompress key
+			nextOffset, _ := kvReader.Skip()      // skip value
 			select {
 			case <-ctx.Done():
 				return nil
 			case workCh <- kviWorkItem{key: bytes.Clone(keyBuf), offset: keyOffset}:
 			}
+			keyOffset = nextOffset
+			keyCount++
 
 			select {
 			case <-logTicker.C:
