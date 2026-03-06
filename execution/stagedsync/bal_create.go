@@ -113,6 +113,9 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, blo
 	if !amsterdam && !experimental {
 		return nil
 	}
+	if h == nil {
+		return nil
+	}
 	blockNum := h.Number.Uint64()
 	blockHash := h.Hash()
 	bal := CreateBAL(blockNum, vio, dataDir)

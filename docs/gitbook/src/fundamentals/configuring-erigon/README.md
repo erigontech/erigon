@@ -200,6 +200,8 @@ Flags for configuring various RPC servers and their behavior.
   * Default: `50000000`
 * `--rpc.batch.limit value`: Sets the maximum number of requests in a batch.
   * Default: `100`
+* `--rpc.blockrange.limit value`: Sets a hardware cap on the number of blocks scanned per RPC request. Protects the rpcdaemon from resource exhaustion (CPU/Memory) and hangs caused by "heavy" queries. A value of `0` means unlimited.
+  * Default: `0`
 * `--rpc.returndata.limit value`: Sets the maximum return data size for `eth_call`.
   * Default: `100000`
 * `--rpc.allow-unprotected-txs`: Allows unprotected transactions via RPC.
