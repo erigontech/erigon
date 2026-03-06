@@ -76,8 +76,6 @@ func run(cliCtx *cli.Context) error {
 	default:
 		cfg = l1sync.DefaultConfig
 	}
-	cfg.Enable = true
-
 	logger.Info("l1sync starting",
 		"chain", cliCtx.String(chainFlag.Name),
 		"sequencerInbox", cfg.SequencerInboxAddr,
