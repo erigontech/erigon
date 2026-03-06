@@ -1583,7 +1583,8 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	var collapseSiblingPaths [][]byte
 
 	// Set up split reader: branch data from parent state, plain state from end of block
-	splitStateReader := commitmentdb.NewSplitHistoryReader(tx, firstTxNumInBlock, lastTxNumInBlock, true /* withHistory */)
+	// need withHistory=false to have branch updates written using PutBranch()
+	splitStateReader := commitmentdb.NewSplitHistoryReader(tx, firstTxNumInBlock, lastTxNumInBlock+1, false /* withHistory */)
 	sdCtx.SetCustomHistoryStateReader(splitStateReader)
 	if _, _, err := domains.SeekCommitment(context.Background(), tx); err != nil {
 		return nil, fmt.Errorf("failed to re-seek commitment for collapse detection: %w", err)
