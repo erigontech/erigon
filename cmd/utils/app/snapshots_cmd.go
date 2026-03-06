@@ -1149,6 +1149,12 @@ func doIntegrity(cliCtx *cli.Context) error {
 	if err := integrity.ValidateSampleRatio(sampleRatio); err != nil {
 		return err
 	}
+	sc, err := integrity.NewSamplerCfg(seed, sampleRatio)
+	if err != nil {
+		return err
+	}
+
+	logger.Info("[integrity] starting", "seed", sc.Seed, "sampleRatio", sc.SampleRatio, "checks", requestedChecks)
 
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
@@ -1181,11 +1187,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 	for _, chk := range requestedChecks {
 		chk := chk
 		g.Go(func() error {
-			sc, err := integrity.NewSamplerCfg(seed, sampleRatio)
-			if err != nil {
-				return err
-			}
-			logger.Info("[integrity] starting", "check", chk, "seed", sc.Seed, "sampleRatio", sc.SampleRatio)
+			logger.Info("[integrity] starting", "check", chk)
 			if err := func() error {
 				switch chk {
 				case integrity.BlocksTxnID:
