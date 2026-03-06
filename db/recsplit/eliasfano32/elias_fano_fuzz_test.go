@@ -104,6 +104,106 @@ func FuzzSingleEliasFano(f *testing.F) {
 	})
 }
 
+func FuzzEliasFanoAddOffset(f *testing.F) {
+	f.Fuzz(func(t *testing.T, in []byte) {
+		if len(in) < 2 {
+			t.Skip()
+		}
+		for len(in) < int(2*superQ) {
+			in = append(in, in...)
+		}
+
+		count := len(in)
+		keys := make([]uint64, count+1)
+		for i, b := range in {
+			keys[i+1] = keys[i] + uint64(b)
+		}
+		maxVal := keys[count]
+
+		// Build with fresh allocation
+		ef1 := NewEliasFano(uint64(count+1), maxVal)
+		for _, c := range keys {
+			ef1.AddOffset(c)
+		}
+		ef1.Build()
+
+		// Build with ResetForWrite (reuse path) — first build a large EF
+		// with non-zero data, then reset and rebuild to verify clear works
+		shiftedMax := maxVal + uint64(count)
+		ef2 := NewEliasFano(uint64(count+1), shiftedMax)
+		for i, c := range keys {
+			ef2.AddOffset(c + uint64(i))
+		}
+		ef2.Build()
+		ef2.ResetForWrite(uint64(count+1), maxVal)
+		for _, c := range keys {
+			ef2.AddOffset(c)
+		}
+		ef2.Build()
+
+		// Verify both produce identical Get results
+		for i := range keys {
+			v1 := ef1.Get(uint64(i))
+			v2 := ef2.Get(uint64(i))
+			if v1 != keys[i] {
+				t.Fatalf("ef1.Get(%d) = %d, want %d", i, v1, keys[i])
+			}
+			if v2 != keys[i] {
+				t.Fatalf("ef2.Get(%d) = %d, want %d", i, v2, keys[i])
+			}
+		}
+
+		// Verify Get2 (pair retrieval)
+		for i := 0; i < count; i++ {
+			v, vNext := ef1.Get2(uint64(i))
+			if v != keys[i] {
+				t.Fatalf("Get2(%d) val = %d, want %d", i, v, keys[i])
+			}
+			if vNext != keys[i+1] {
+				t.Fatalf("Get2(%d) next = %d, want %d", i, vNext, keys[i+1])
+			}
+		}
+
+		// Verify Seek finds correct values
+		for i := range keys {
+			target := keys[i]
+			found, ok := ef1.Seek(target)
+			if !ok {
+				t.Fatalf("Seek(%d) not found", target)
+			}
+			if found != target {
+				t.Fatalf("Seek(%d) = %d, want exact match", target, found)
+			}
+		}
+
+		// Seek beyond max returns not-found
+		if _, ok := ef1.Seek(maxVal + 1); ok {
+			t.Fatalf("Seek(%d) should not find anything beyond max", maxVal+1)
+		}
+
+		// Seek for value between elements finds next
+		if count > 1 && keys[1] > keys[0]+1 {
+			mid := keys[0] + 1
+			found, ok := ef1.Seek(mid)
+			if !ok {
+				t.Fatalf("Seek(%d) not found", mid)
+			}
+			if found < mid {
+				t.Fatalf("Seek(%d) = %d, should be >= target", mid, found)
+			}
+		}
+
+		// Verify serialization round-trip preserves data
+		buf := ef1.AppendBytes(nil)
+		efRead, _ := ReadEliasFano(buf)
+		for i := range keys {
+			if efRead.Get(uint64(i)) != keys[i] {
+				t.Fatalf("round-trip Get(%d) = %d, want %d", i, efRead.Get(uint64(i)), keys[i])
+			}
+		}
+	})
+}
+
 func FuzzDoubleEliasFano(f *testing.F) {
 	f.Fuzz(func(t *testing.T, in []byte) {
 		if len(in)%2 == 1 {
