@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/forkid"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
+	"github.com/erigontech/erigon/p2p/protocols/wit"
 )
 
 // Handles RLP encoding/decoding for p2p.Msg
@@ -574,7 +575,12 @@ func startHandshake(
 
 // Tests that peers are correctly accepted (or rejected) based on the advertised
 // fork IDs in the protocol handshake.
-func TestForkIDSplit68(t *testing.T) { testForkIDSplit(t, direct.ETH68) }
+func TestForkIDSplit68(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	testForkIDSplit(t, direct.ETH68)
+}
 
 func testForkIDSplit(t *testing.T, protocol uint) {
 	var (
@@ -698,5 +704,112 @@ func TestSentryServerImpl_SetStatusInitPanic(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatalf("error expected")
+	}
+}
+
+// newTestPeerInfoWithEth creates a PeerInfo backed by a *p2p.Peer that has
+// the eth protocol in its running map (so WaitForEth won't fail) and marks
+// the eth handshake as already completed.
+func newTestPeerInfoWithEth(t *testing.T) (*PeerInfo, [64]byte) {
+	t.Helper()
+	var pubkey [64]byte
+	pubkey[0] = 0x01
+	id := enode.ID{}
+	copy(id[:], pubkey[:])
+
+	caps := []p2p.Cap{
+		{Name: eth.ProtocolName, Version: direct.ETH68},
+	}
+	protocols := []p2p.Protocol{
+		{Name: eth.ProtocolName, Version: direct.ETH68, Length: eth.ProtocolLengths[direct.ETH68]},
+	}
+	peer := p2p.NewPeerWithProtocols(id, pubkey, "test-peer", caps, protocols, false)
+
+	rw := NewRLPReadWriter()
+	t.Cleanup(rw.Close)
+
+	pi := NewPeerInfo(peer, rw)
+	// Mark eth handshake as done so WaitForEth returns immediately.
+	pi.SetEthProtocol(direct.ETH68)
+
+	return pi, pubkey
+}
+
+// TestRunWitPeer_MalformedNewWitnessMsg verifies that a malformed
+// NewWitnessMsg causes a PeerError (peer disconnect) rather than a
+// nil-pointer panic. This is the regression test for the DoS
+// vulnerability where a missing 'continue' after RLP decode failure
+// led to query.Witness.Header().Hash() panicking on a nil Witness.
+func TestRunWitPeer_MalformedNewWitnessMsg(t *testing.T) {
+	t.Parallel()
+
+	peerInfo, peerID := newTestPeerInfoWithEth(t)
+
+	rw := NewRLPReadWriter()
+	t.Cleanup(rw.Close)
+
+	logger := log.Root()
+
+	send := func(msgId sentryproto.MessageId, peerID [64]byte, b []byte) {}
+	hasSubscribers := func(msgId sentryproto.MessageId) bool { return true }
+	getWitnessRequest := func(hash common.Hash, peerID [64]byte) bool { return false }
+
+	// Feed a NewWitnessMsg with garbage RLP payload.
+	garbage := []byte{0xff, 0xfe, 0xfd}
+	rw.readCh <- p2p.Msg{
+		Code:    wit.NewWitnessMsg,
+		Size:    uint32(len(garbage)),
+		Payload: io.NopCloser(bytes.NewReader(garbage)),
+	}
+
+	errCh := make(chan *p2p.PeerError, 1)
+	go func() {
+		errCh <- runWitPeer(t.Context(), peerID, rw, peerInfo, send, hasSubscribers, getWitnessRequest, logger)
+	}()
+
+	select {
+	case peerErr := <-errCh:
+		require.NotNil(t, peerErr, "expected a PeerError for malformed message")
+		assert.Equal(t, p2p.PeerErrorInvalidMessage, peerErr.Code)
+	case <-time.After(5 * time.Second):
+		t.Fatal("runWitPeer did not return within timeout")
+	}
+}
+
+// TestRunWitPeer_MalformedNewWitnessHashesMsg verifies the same
+// protection for NewWitnessHashesMsg.
+func TestRunWitPeer_MalformedNewWitnessHashesMsg(t *testing.T) {
+	t.Parallel()
+
+	peerInfo, peerID := newTestPeerInfoWithEth(t)
+
+	rw := NewRLPReadWriter()
+	t.Cleanup(rw.Close)
+
+	logger := log.Root()
+
+	send := func(msgId sentryproto.MessageId, peerID [64]byte, b []byte) {}
+	hasSubscribers := func(msgId sentryproto.MessageId) bool { return true }
+	getWitnessRequest := func(hash common.Hash, peerID [64]byte) bool { return false }
+
+	// Feed a NewWitnessHashesMsg with garbage RLP payload.
+	garbage := []byte{0xff, 0xfe, 0xfd}
+	rw.readCh <- p2p.Msg{
+		Code:    wit.NewWitnessHashesMsg,
+		Size:    uint32(len(garbage)),
+		Payload: io.NopCloser(bytes.NewReader(garbage)),
+	}
+
+	errCh := make(chan *p2p.PeerError, 1)
+	go func() {
+		errCh <- runWitPeer(t.Context(), peerID, rw, peerInfo, send, hasSubscribers, getWitnessRequest, logger)
+	}()
+
+	select {
+	case peerErr := <-errCh:
+		require.NotNil(t, peerErr, "expected a PeerError for malformed message")
+		assert.Equal(t, p2p.PeerErrorInvalidMessage, peerErr.Code)
+	case <-time.After(5 * time.Second):
+		t.Fatal("runWitPeer did not return within timeout")
 	}
 }

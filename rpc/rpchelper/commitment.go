@@ -20,6 +20,7 @@ import (
 	"context"
 
 	"github.com/c2h5oh/datasize"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -106,7 +107,11 @@ func (r *CommitmentReplay) ComputeCustomCommitmentFromStateHistory(
 		InMem(nil, r.dirs.Tmp).MapSize(2 * datasize.TB).GrowthStep(1 * datasize.MB).MustOpen()
 	defer db.Close()
 
-	agg, err := dbstate.New(r.dirs).Logger(r.logger).Open(ctx, db)
+	erigonDBSettings, err := dbstate.ResolveErigonDBSettings(r.dirs, r.logger, false)
+	if err != nil {
+		return nil, err
+	}
+	agg, err := dbstate.New(r.dirs).Logger(r.logger).WithErigonDBSettings(erigonDBSettings).Open(ctx, db)
 	if err != nil {
 		return nil, err
 	}

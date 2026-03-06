@@ -132,7 +132,15 @@ func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, tx kv.TemporalT
 		if err := fv.sharedDom.FlushPendingUpdates(ctx, tx); err != nil {
 			return err
 		}
-		err := sd.Merge(fv.sharedDom)
+		sdTxNum, _, err := sd.SeekCommitment(ctx, tx)
+		if err != nil {
+			return err
+		}
+		otherTxNum, _, err := fv.sharedDom.SeekCommitment(ctx, tx)
+		if err != nil {
+			return err
+		}
+		err = sd.Merge(sdTxNum, fv.sharedDom, otherTxNum)
 		if err != nil {
 			return err
 		}

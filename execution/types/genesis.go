@@ -27,6 +27,8 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/math"
@@ -47,7 +49,7 @@ type Genesis struct {
 	Timestamp  uint64         `json:"timestamp"`
 	ExtraData  []byte         `json:"extraData"`
 	GasLimit   uint64         `json:"gasLimit"   gencodec:"required"`
-	Difficulty *big.Int       `json:"difficulty" gencodec:"required"`
+	Difficulty *uint256.Int   `json:"difficulty" gencodec:"required"`
 	Mixhash    common.Hash    `json:"mixHash"`
 	Coinbase   common.Address `json:"coinbase"`
 	Alloc      GenesisAlloc   `json:"alloc"`
@@ -61,7 +63,7 @@ type Genesis struct {
 	ParentHash common.Hash `json:"parentHash"`
 
 	// Header fields added in London and later hard forks
-	BaseFee               *big.Int     `json:"baseFeePerGas"`         // EIP-1559
+	BaseFee               *uint256.Int `json:"baseFeePerGas"`         // EIP-1559
 	BlobGasUsed           *uint64      `json:"blobGasUsed"`           // EIP-4844
 	ExcessBlobGas         *uint64      `json:"excessBlobGas"`         // EIP-4844
 	ParentBeaconBlockRoot *common.Hash `json:"parentBeaconBlockRoot"` // EIP-4788

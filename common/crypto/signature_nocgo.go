@@ -23,7 +23,6 @@ package crypto
 
 import (
 	"crypto/ecdsa"
-	"crypto/elliptic"
 	"errors"
 	"fmt"
 	"math/big"
@@ -162,12 +161,19 @@ func CompressPubkey(pubkey *ecdsa.PublicKey) []byte {
 }
 
 // S256 returns an instance of the secp256k1 curve.
-func S256() elliptic.Curve {
+func S256() EllipticCurve {
 	return btCurve{secp256k1.S256()}
 }
 
 type btCurve struct {
 	*secp256k1.KoblitzCurve
+}
+
+func (curve btCurve) IsOnCurve(x, y *big.Int) bool {
+	if x.Cmp(secp256k1.Params().P) >= 0 || y.Cmp(secp256k1.Params().P) >= 0 {
+		return false
+	}
+	return curve.KoblitzCurve.IsOnCurve(x, y)
 }
 
 // Marshal converts a point given as (x, y) into a byte slice.

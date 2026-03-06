@@ -134,6 +134,24 @@ func StageExecuteBlocksCfg(
 	}
 }
 
+// ChainConfig returns the chain configuration.
+func (cfg ExecuteBlockCfg) ChainConfig() *chain.Config { return cfg.chainConfig }
+
+// IsExperimentalBAL returns whether experimental BAL is enabled.
+func (cfg ExecuteBlockCfg) IsExperimentalBAL() bool { return cfg.experimentalBAL }
+
+// BlockReader returns the block reader.
+func (cfg ExecuteBlockCfg) BlockReader() services.FullBlockReader { return cfg.blockReader }
+
+// DirsDataDir returns the data directory path.
+func (cfg ExecuteBlockCfg) DirsDataDir() string { return cfg.dirs.DataDir }
+
+// WithAuthor returns a copy of the config with the author set.
+func (cfg ExecuteBlockCfg) WithAuthor(author accounts.Address) ExecuteBlockCfg {
+	cfg.author = author
+	return cfg
+}
+
 // ================ Erigon3 ================
 
 var ErrTooDeepUnwind = errors.New("too deep unwind")
@@ -288,22 +306,15 @@ func unwindExec3State(ctx context.Context,
 			if dbg.TraceUnwinds && dbg.TraceDomain(uint16(kv.AccountsDomain)) {
 				address := entry.Key[:len(entry.Key)-8]
 				keyStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
-				prevStep := ^binary.BigEndian.Uint64(entry.PrevStepBytes)
-				if len(entry.Value) > 0 {
+				if entry.Value != nil && len(entry.Value) > 0 {
 					var account accounts.Account
 					if err := accounts.DeserialiseV3(&account, entry.Value); err == nil {
-						fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}, step: %d, prev: %d\n", blockUnwindTo, txUnwindTo, address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash, keyStep, prevStep)
+						fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}, step: %d\n", blockUnwindTo, txUnwindTo, address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash, keyStep)
 					}
+				} else if entry.Value == nil {
+					fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: [different step], step: %d\n", blockUnwindTo, txUnwindTo, address, keyStep)
 				} else {
-					if keyStep != prevStep {
-						if prevStep == 0 {
-							fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: [empty], step: %d\n", blockUnwindTo, txUnwindTo, address, keyStep)
-						} else {
-							fmt.Printf("unwind (Block:%d,Tx:%d): acc: %x, in prev step: {key: %d, prev: %d}\n", blockUnwindTo, txUnwindTo, address, keyStep, prevStep)
-						}
-					} else {
-						fmt.Printf("unwind (Block:%d,Tx:%d): del acc: %x, step: %d\n", blockUnwindTo, txUnwindTo, address, keyStep)
-					}
+					fmt.Printf("unwind (Block:%d,Tx:%d): del acc: %x, step: %d\n", blockUnwindTo, txUnwindTo, address, keyStep)
 				}
 			}
 			if err := stateChanges.Collect(toBytesZeroCopy(entry.Key)[:length.Addr], entry.Value); err != nil {
@@ -341,7 +352,6 @@ func unwindExec3State(ctx context.Context,
 
 	sd.Unwind(txUnwindTo, changeset)
 	sd.SetTxNum(txUnwindTo)
-	sd.SetBlockNum(blockUnwindTo)
 	return nil
 }
 
@@ -442,7 +452,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 		return err
 	}
 
-	doms.SeekCommitment(ctx, rwTx)
+	_, _, _ = doms.SeekCommitment(ctx, rwTx) // ensure internal state of `doms` is set
 	//dumpPlainStateDebug(tx, nil)
 	return nil
 }
