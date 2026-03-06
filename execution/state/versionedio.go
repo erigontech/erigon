@@ -1078,12 +1078,22 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 			account.updateWrite(vw, accessIndex)
 		}
 
-		for addr := range io.AccessedAddresses(txIndex) {
+		isUserTx := txIndex >= 0
+		for addr, opts := range io.AccessedAddresses(txIndex) {
 			if addr.IsNil() {
 				continue
 			}
 
-			ensureAccountState(ac, addr)
+			account := ensureAccountState(ac, addr)
+			// A non-revertable access means the address was the target of
+			// an actual EVM operation (evm.Call, evm.Create, SELFDESTRUCT
+			// with non-zero balance, BALANCE, EXTCODESIZE, etc.) — not just
+			// a gas-calculation read. This is used to distinguish real state
+			// access from incidental reads (e.g. Empty() in gas calc) for
+			// the system address filter.
+			if isUserTx && opts != nil && !opts.revertable {
+				account.nonRevertableUserAccess = true
+			}
 		}
 	}
 
@@ -1091,13 +1101,15 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 	for _, account := range ac {
 		account.finalize()
 		account.changes.Normalize()
-		// The system address (0xff...fe) is touched during system calls (EIP-4788
-		// beacon root) because it is msg.sender. Exclude it when it has no actual
-		// state changes, but keep it when a user tx sends real ETH to it
-		// (e.g. SELFDESTRUCT to the system address or a plain value transfer).
-		// System contracts (BeaconRoots, HistoryStorage, etc.) are NOT excluded
-		// because they have real state changes that belong in the BAL.
-		if account.changes.Address == params.SystemAddress && !hasAccountChanges(account.changes) {
+		// The system address (0xff...fe) is touched during every block's system
+		// call (EIP-4788 beacon root) because it is msg.sender. Per EIP-7928,
+		// "SYSTEM_ADDRESS MUST NOT be included unless it experiences state access
+		// itself." We use the non-revertable access flag from MarkAddressAccess
+		// to distinguish real state access (evm.Call target, SELFDESTRUCT
+		// beneficiary, BALANCE opcode, etc.) from incidental gas-calculation
+		// reads (Empty() in statefulGasCall). Keep it when it has actual state
+		// changes or when a user tx performed a non-revertable access to it.
+		if account.changes.Address == params.SystemAddress && !hasAccountChanges(account.changes) && !account.nonRevertableUserAccess {
 			continue
 		}
 		bal = append(bal, account.changes)
@@ -1111,14 +1123,15 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 }
 
 type accountState struct {
-	changes           *types.AccountChanges
-	balance           *fieldTracker[uint256.Int]
-	nonce             *fieldTracker[uint64]
-	code              *fieldTracker[[]byte]
-	balanceValue      *uint256.Int // tracks latest seen balance
-	selfDestructed    bool
-	selfDestructedAt  uint16                              // access index of the selfdestruct
-	storageReadValues map[accounts.StorageKey]uint256.Int // original read values for net-zero detection
+	changes                 *types.AccountChanges
+	balance                 *fieldTracker[uint256.Int]
+	nonce                   *fieldTracker[uint64]
+	code                    *fieldTracker[[]byte]
+	balanceValue            *uint256.Int                        // tracks latest seen balance
+	selfDestructed          bool                                //
+	selfDestructedAt        uint16                              // access index of the selfdestruct
+	storageReadValues       map[accounts.StorageKey]uint256.Int // original read values for net-zero detection
+	nonRevertableUserAccess bool                                // true if a user tx (txIndex >= 0) has non-revertable access
 }
 
 // check pre- and post-values, add to BAL if different

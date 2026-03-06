@@ -24,6 +24,10 @@ import (
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 )
 
+func NewTestDiagnosticClient() (*diaglib.DiagnosticClient, error) {
+	return &diaglib.DiagnosticClient{}, nil
+}
+
 func TestInitSyncStages(t *testing.T) {
 	d, err := NewTestDiagnosticClient()
 	require.NoError(t, err)

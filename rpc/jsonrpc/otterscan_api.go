@@ -23,7 +23,6 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -252,48 +251,6 @@ func (api *OtterscanAPIImpl) SearchTransactionsAfter(ctx context.Context, addr c
 		return nil, err
 	}
 	return api.searchTransactionsAfterV3(dbtx, ctx, addr, blockNum, pageSize)
-}
-
-func (api *OtterscanAPIImpl) traceBlocks(ctx context.Context, addr common.Address, chainConfig *chain.Config, pageSize, resultCount uint16, callFromToProvider BlockProvider) ([]*TransactionsWithReceipts, bool, error) {
-	// Estimate the common case of user address having at most 1 interaction/block and
-	// trace N := remaining page matches as number of blocks to trace concurrently.
-	// TODO: this is not optimimal for big contract addresses; implement some better heuristics.
-	estBlocksToTrace := pageSize - resultCount
-	results := make([]*TransactionsWithReceipts, estBlocksToTrace)
-	totalBlocksTraced := 0
-	hasMore := true
-
-	eg, ctx := errgroup.WithContext(ctx)
-	eg.SetLimit(1024) // we don't want limit much here, but protecting from infinity attack
-	for i := 0; i < int(estBlocksToTrace); i++ {
-		i := i // we will pass it to goroutine
-
-		var nextBlock uint64
-		var err error
-		nextBlock, hasMore, err = callFromToProvider()
-		if err != nil {
-			return nil, false, err
-		}
-		// TODO: nextBlock == 0 seems redundant with hasMore == false
-		if !hasMore && nextBlock == 0 {
-			break
-		}
-
-		totalBlocksTraced++
-
-		eg.Go(func() error {
-			// don't return error from searchTraceBlock - to avoid 1 block fail impact to other blocks
-			// if return error - `errgroup` will interrupt all other goroutines
-			// but passing `ctx` - then user still can cancel request
-			api.searchTraceBlock(ctx, addr, chainConfig, i, nextBlock, results)
-			return nil
-		})
-	}
-	if err := eg.Wait(); err != nil {
-		return nil, false, err
-	}
-
-	return results[:totalBlocksTraced], hasMore, nil
 }
 
 func delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, inclTx bool) (map[string]any, error) {

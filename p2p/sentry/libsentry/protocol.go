@@ -32,10 +32,6 @@ func MinProtocol(m sentryproto.MessageId) sentryproto.Protocol {
 	return -1
 }
 
-func ProtocolVersion(p sentryproto.Protocol) uint {
-	return uint(p + 65)
-}
-
 var ProtoIds = map[sentryproto.Protocol]map[sentryproto.MessageId]struct{}{
 	sentryproto.Protocol_ETH68: {
 		sentryproto.MessageId_GET_BLOCK_HEADERS_66:             struct{}{},

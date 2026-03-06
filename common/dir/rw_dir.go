@@ -113,20 +113,6 @@ func FileExist(path string) (exists bool, err error) {
 	return true, nil
 }
 
-func FileNonZero(path string) bool {
-	fi, err := os.Stat(path)
-	if err != nil && os.IsNotExist(err) {
-		return false
-	}
-	if fi == nil {
-		return false
-	}
-	if !fi.Mode().IsRegular() {
-		return false
-	}
-	return fi.Size() > 0
-}
-
 // Writes an entire file from data. Extra flags can be provided.
 func writeFileWithFsyncAndFlags(name string, data []byte, perm os.FileMode, flags int) error {
 	f, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|flags, perm)
