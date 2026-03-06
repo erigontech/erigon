@@ -23,7 +23,6 @@ import (
 
 	"github.com/RoaringBitmap/roaring/v2"
 
-	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 
 	"github.com/erigontech/erigon/common"
@@ -34,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/ethutils"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
@@ -74,10 +72,6 @@ func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.Temp
 
 func (api *BaseAPI) getReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
 	return api.receiptsGenerator.GetReceiptsGasUsed(ctx, tx, block, api._txNumReader)
-}
-
-func (api *BaseAPI) getCachedReceipt(ctx context.Context, hash common.Hash) (*types.Receipt, bool) {
-	return api.receiptsGenerator.GetCachedReceipt(ctx, hash)
 }
 
 func (api *BaseAPI) getCachedReceipts(ctx context.Context, hash common.Hash) (types.Receipts, bool) {
@@ -222,26 +216,6 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	}
 
 	return rpcLogs, nil
-}
-
-// receiptsAvailable corner cases:
-//   - `--persist.receipts`: means all receipts available (even in `--prune.mode=minimal` mode)
-//   - `--prune.mode=minimal` (and `full`) can serve receipts as much as "state history" available (by re-executing blocks)
-//
-// returns `state.PrunedError` if not available for given `fromTxNum`
-func assertReceiptsAvailable(ctx context.Context, txNumsReader rawdbv3.TxNumsReader, begin uint64, fromTxNum uint64, tx kv.TemporalTx) error {
-	persistReceipts, err := kvcfg.PersistReceipts.Enabled(tx)
-	if err != nil {
-		return err
-	}
-	if persistReceipts {
-		return nil
-	}
-	if minTxNum := state.StateHistoryStartTxNum(tx); fromTxNum < minTxNum {
-		firstAvailBlock, _, _ := txNumsReader.FindBlockNum(ctx, tx, minTxNum)
-		return fmt.Errorf("%w: requested block %d, history is available from block %d", state.PrunedError, begin, firstAvailBlock)
-	}
-	return nil
 }
 
 func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria, asc order.By) (out stream.U64, err error) {

@@ -86,26 +86,10 @@ func NewIDFromForks(heightForks, timeForks []uint64, genesis common.Hash, headHe
 	return ID{Hash: ChecksumToBytes(hash), Activation: activation, Next: next}
 }
 
-func NextForkHashFromForks(heightForks, timeForks []uint64, genesis common.Hash, headHeight, headTime uint64) [4]byte {
-	id := NewIDFromForks(heightForks, timeForks, genesis, headHeight, headTime)
-	if id.Next == 0 {
-		return id.Hash
-	} else {
-		hash := binary.BigEndian.Uint32(id.Hash[:])
-		return ChecksumToBytes(ChecksumUpdate(hash, id.Next))
-	}
-}
-
 // NewFilterFromForks creates a filter that returns if a fork ID should be rejected or not
 // based on the provided current head.
 func NewFilterFromForks(heightForks, timeForks []uint64, genesis common.Hash, headHeight, headTime uint64) Filter {
 	return newFilter(heightForks, timeForks, genesis, headHeight, headTime)
-}
-
-// NewStaticFilter creates a filter at block zero.
-func NewStaticFilter(config *chain.Config, genesisHash common.Hash, genesisTime uint64) Filter {
-	heightForks, timeForks := GatherForks(config, genesisTime)
-	return newFilter(heightForks, timeForks, genesisHash, 0 /* headHeight */, genesisTime)
 }
 
 // Simple heuristic returning true if the value is a Unix time after 2 Dec 2022.

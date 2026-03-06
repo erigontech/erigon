@@ -54,6 +54,10 @@ Commit messages: prefix with package(s) modified, e.g., `eth, rpc: make trace co
 
 **Important**: Always run `make lint` after making code changes and before committing. Fix any linter errors before proceeding.
 
+## Pre-push
+
+Before running `git push`, always run `make lint` first and fix all issues. Run lint multiple times if needed — it is non-deterministic.
+
 ## Lint Notes
 
 The linter (`make lint`) is non-deterministic in which files it scans — new issues may appear on subsequent runs. Run lint repeatedly until clean.

@@ -29,40 +29,6 @@ import (
 	"github.com/erigontech/erigon/db/version"
 )
 
-// HelpData is a one shot struct to pass to the usage template
-type HelpData struct {
-	App        any
-	FlagGroups []FlagGroup
-}
-
-// FlagGroup is a collection of flags belonging to a single topic.
-type FlagGroup struct {
-	Name  string
-	Flags []cli.Flag
-}
-
-// ByCategory sorts an array of FlagGroup by Name in the order
-// defined in AppHelpFlagGroups.
-type ByCategory []FlagGroup
-
-func (a ByCategory) Len() int      { return len(a) }
-func (a ByCategory) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
-func (a ByCategory) Less(i, j int) bool {
-	iCat, jCat := a[i].Name, a[j].Name
-	iIdx, jIdx := len(a), len(a) // ensure non categorized flags come last
-
-	for i, group := range a {
-		if iCat == group.Name {
-			iIdx = i
-		}
-		if jCat == group.Name {
-			jIdx = i
-		}
-	}
-
-	return iIdx < jIdx
-}
-
 // NewApp creates an app with sane defaults.
 func NewApp(desc string) *cli.App {
 	app := cli.NewApp()

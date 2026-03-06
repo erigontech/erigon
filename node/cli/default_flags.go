@@ -201,18 +201,6 @@ var DefaultFlags = []cli.Flag{
 
 	&utils.OtsSearchMaxCapFlag,
 
-	&utils.SilkwormExecutionFlag,
-	&utils.SilkwormRpcDaemonFlag,
-	&utils.SilkwormSentryFlag,
-	&utils.SilkwormVerbosityFlag,
-	&utils.SilkwormNumContextsFlag,
-	&utils.SilkwormRpcLogEnabledFlag,
-	&utils.SilkwormRpcLogMaxFileSizeFlag,
-	&utils.SilkwormRpcLogMaxFilesFlag,
-	&utils.SilkwormRpcLogDumpResponseFlag,
-	&utils.SilkwormRpcNumWorkersFlag,
-	&utils.SilkwormRpcJsonCompatibilityFlag,
-
 	&utils.BeaconAPIFlag,
 	&utils.BeaconApiAddrFlag,
 	&utils.BeaconApiAllowMethodsFlag,
