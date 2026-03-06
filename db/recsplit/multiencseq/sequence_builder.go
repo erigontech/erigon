@@ -33,7 +33,8 @@ type SequenceBuilder struct {
 	baseNum    uint64
 	smallBuf   [SIMPLE_SEQUENCE_MAX_THRESHOLD]uint32 // rebased values for simple encoding (count <= 16)
 	smallCount uint8
-	rebasedEf  *eliasfano32.EliasFano // direct rebased EF for large sequences (count > 16)
+	useEf      bool                   // true when current sequence uses EF encoding (count > 16)
+	rebasedEf  *eliasfano32.EliasFano // kept alive across resets to amortize allocations
 	it1        SequenceIterator
 }
 
@@ -56,6 +57,7 @@ func NewBuilder(baseNum, count, maxOffset uint64) *SequenceBuilder {
 		// on the fly, so AppendBytes can serialize without a second pass.
 		return &SequenceBuilder{
 			baseNum:   baseNum,
+			useEf:     true,
 			rebasedEf: eliasfano32.NewEliasFano(count, maxOffset-baseNum),
 		}
 	}
@@ -69,18 +71,20 @@ func (b *SequenceBuilder) Reset(baseNum, count, maxOffset uint64) {
 	b.baseNum = baseNum
 	b.smallCount = 0
 	if count > SIMPLE_SEQUENCE_MAX_THRESHOLD {
+		b.useEf = true
 		if b.rebasedEf != nil {
 			b.rebasedEf.ResetForWrite(count, maxOffset-baseNum)
 		} else {
 			b.rebasedEf = eliasfano32.NewEliasFano(count, maxOffset-baseNum)
 		}
 	} else {
-		b.rebasedEf = nil
+		b.useEf = false
+		// Keep rebasedEf alive so its backing array can be reused on the next large sequence.
 	}
 }
 
 func (b *SequenceBuilder) AddOffset(offset uint64) {
-	if b.rebasedEf != nil {
+	if b.useEf {
 		b.rebasedEf.AddOffset(offset - b.baseNum)
 		return
 	}
@@ -89,13 +93,13 @@ func (b *SequenceBuilder) AddOffset(offset uint64) {
 }
 
 func (b *SequenceBuilder) Build() {
-	if b.rebasedEf != nil {
+	if b.useEf {
 		b.rebasedEf.Build()
 	}
 }
 
 func (b *SequenceBuilder) AppendBytes(buf []byte) []byte {
-	if b.rebasedEf != nil {
+	if b.useEf {
 		buf = append(buf, byte(RebasedEliasFano))
 		return b.rebasedEf.AppendBytes(buf)
 	}
