@@ -475,8 +475,7 @@ func (b *BeaconBody) getSchema(storage bool) []any {
 	}
 	// [New in Gloas:EIP7732] SignedExecutionPayloadBid and PayloadAttestations
 	if b.Version >= clparams.GloasVersion {
-		s = append(s, b.SignedExecutionPayloadBid)
-		s = append(s, b.PayloadAttestations)
+		s = append(s, b.SignedExecutionPayloadBid, b.PayloadAttestations)
 	}
 	return s
 }
