@@ -54,14 +54,16 @@ class WorkflowRunSummary {
     jobs!: JobSummary[];
 }
 
-// Generates an array of date strings between two dates (inclusive)
+// Generates an array of date strings between two dates (inclusive), using UTC
 function getDateStringsBetween(startDate: Date, endDate: Date): string[] {
     const dates: string[] = [];
     const current = new Date(startDate);
+    // Normalize to UTC midnight to avoid issues with local time shifts
+    current.setUTCHours(0, 0, 0, 0);
 
     while (current <= endDate) {
         dates.push(current.toISOString().split('T')[0]);
-        current.setDate(current.getDate() + 1);
+        current.setUTCDate(current.getUTCDate() + 1);
     }
 
     return dates;
@@ -177,14 +179,14 @@ export async function run() {
         // Input
         const token = process.env.GITHUB_TOKEN as string;  // The GitHub token for authentication
         const startDate = new Date(process.env.START_DATE as string);  // The start date for filtering workflow runs
+        startDate.setUTCHours(0, 0, 0, 0);
         const endDate = new Date(process.env.END_DATE as string);   // The end date for filtering workflow runs
+        endDate.setUTCHours(23, 59, 59, 999);
         // The branch name, defaults to the current branch or 'main' if not in GitHub Actions
         const branch= process.env.BRANCH_NAME ?? (github.context.ref ? github.context.ref.replace(/^refs\/\w+\//, '') : 'main');
         // Use github.context.repo if available, otherwise use default values
         const repoArray = process.env.GITHUB_REPOSITORY ? process.env.GITHUB_REPOSITORY.split('/') : ['erigontech', 'erigon'];
         const { owner, repo } = github.context.action ? github.context.repo : { owner: repoArray[0], repo: repoArray[1] };
-
-        endDate.setUTCHours(23, 59, 59, 999);
 
         // Log the inputs
         core.info(`Generating test report for branch: ${branch}`);
