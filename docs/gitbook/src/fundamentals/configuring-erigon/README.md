@@ -200,6 +200,8 @@ Flags for configuring various RPC servers and their behavior.
   * Default: `50000000`
 * `--rpc.batch.limit value`: Sets the maximum number of requests in a batch.
   * Default: `100`
+* `--rpc.blockrange.limit value`: Sets a hardware cap on the number of blocks scanned per RPC request. Protects the rpcdaemon from resource exhaustion (CPU/Memory) and hangs caused by "heavy" queries. A value of `0` means unlimited.
+  * Default: `0`
 * `--rpc.returndata.limit value`: Sets the maximum return data size for `eth_call`.
   * Default: `100000`
 * `--rpc.allow-unprotected-txs`: Allows unprotected transactions via RPC.
@@ -775,17 +777,6 @@ GLOBAL OPTIONS:
    --sentinel.bootnodes value [ --sentinel.bootnodes value ]                                                               Comma separated enode URLs for P2P discovery bootstrap
    --sentinel.staticpeers value [ --sentinel.staticpeers value ]                                                           connect to comma-separated Consensus static peers
    --ots.search.max.pagesize value                                                                                         Max allowed page size for search methods (default: 25)
-   --silkworm.exec                                                                                                         Enable Silkworm block execution (default: false)
-   --silkworm.rpc                                                                                                          Enable embedded Silkworm RPC service (default: false)
-   --silkworm.sentry                                                                                                       Enable embedded Silkworm Sentry service (default: false)
-   --silkworm.verbosity value                                                                                              Set the log level for Silkworm console logs (default: "info")
-   --silkworm.contexts value                                                                                               Number of I/O contexts used in embedded Silkworm RPC and Sentry services (zero means use default in Silkworm) (default: 0)
-   --silkworm.rpc.log                                                                                                      Enable interface log for embedded Silkworm RPC service (default: false)
-   --silkworm.rpc.log.maxsize value                                                                                        Max interface log file size in MB for embedded Silkworm RPC service (default: 1)
-   --silkworm.rpc.log.maxfiles value                                                                                       Max interface log files for embedded Silkworm RPC service (default: 100)
-   --silkworm.rpc.log.response                                                                                             Dump responses in interface logs for embedded Silkworm RPC service (default: false)
-   --silkworm.rpc.workers value                                                                                            Number of worker threads used in embedded Silkworm RPC service (zero means use default in Silkworm) (default: 0)
-   --silkworm.rpc.compatibility                                                                                            Preserve JSON-RPC compatibility using embedded Silkworm RPC service (default: true)
    --beacon.api value [ --beacon.api value ]                                                                               Enable beacon API (available endpoints: beacon, builder, config, debug, events, node, validator, lighthouse)
    --beacon.api.addr value                                                                                                 sets the host to listen for beacon api requests (default: "localhost")
    --beacon.api.cors.allow-methods value [ --beacon.api.cors.allow-methods value ]                                         set the cors' allow methods (default: "GET", "POST", "PUT", "DELETE", "OPTIONS")
