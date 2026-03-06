@@ -646,6 +646,8 @@ func LoadRemotePreverified(ctx context.Context) (err error) {
 			if err != nil {
 				log.Root().Warn("Failed2 GitHub", "err", err)
 				return err
+			} else {
+				log.Root().Warn("Fallback to Gihub happened", "err", err)
 			}
 		}
 	}
