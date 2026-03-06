@@ -78,13 +78,18 @@ func NewEliasFano(count uint64, maxOffset uint64) *EliasFano {
 func (ef *EliasFano) Size() datasize.ByteSize { return datasize.ByteSize(len(ef.data) * 8) }
 
 func (ef *EliasFano) AddOffset(offset uint64) {
-	//fmt.Printf("0x%x,\n", offset)
+	if offset > ef.maxOffset {
+		panic(fmt.Sprintf("eliasfano: AddOffset(%d) exceeds maxOffset(%d), count=%d, i=%d", offset, ef.maxOffset, ef.count+1, ef.i))
+	}
 	if ef.l != 0 {
 		setBits(ef.lowerBits, ef.i*ef.l, offset&ef.lowerBitsMask)
 	}
-	//pos := ((offset - ef.delta) >> ef.l) + ef.i
-	set(ef.upperBits, (offset>>ef.l)+ef.i)
-	//fmt.Printf("add:%x, pos=%x, set=%x, res=%x\n", offset, pos, pos/64, uint64(1)<<(pos%64))
+	pos := (offset >> ef.l) + ef.i
+	if pos/64 >= uint64(len(ef.upperBits)) {
+		panic(fmt.Sprintf("eliasfano: upperBits OOB: pos=%d, len(upperBits)=%d, offset=%d, maxOffset=%d, l=%d, i=%d, count=%d",
+			pos, len(ef.upperBits), offset, ef.maxOffset, ef.l, ef.i, ef.count+1))
+	}
+	set(ef.upperBits, pos)
 	ef.i++
 }
 
