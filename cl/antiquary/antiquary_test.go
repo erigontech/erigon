@@ -78,8 +78,7 @@ func TestAntiquateFullUint64List(t *testing.T) {
 	require.NoError(t, antiquateFullUint64List(collector, slot, raw, buf, compressor))
 
 	collected := collectAll(t, collector)
-	key := string(base_encoding.Encode64ToBytes4(slot))
-	compressed, ok := collected[key]
+	compressed, ok := collected[string(base_encoding.Encode64ToBytes4(slot))]
 	require.True(t, ok, "expected key for slot %d", slot)
 
 	// Decompress and verify round-trip
@@ -99,8 +98,7 @@ func TestAntiquateFullUint64List_Empty(t *testing.T) {
 	require.NoError(t, antiquateFullUint64List(collector, 0, nil, buf, compressor))
 
 	collected := collectAll(t, collector)
-	key := string(base_encoding.Encode64ToBytes4(0))
-	compressed := collected[key]
+	compressed := collected[string(base_encoding.Encode64ToBytes4(0))]
 
 	dec, err := zstd.NewReader(bytes.NewReader(compressed))
 	require.NoError(t, err)
@@ -122,8 +120,7 @@ func TestAntiquateField(t *testing.T) {
 	collected := collectAll(t, collector)
 	// antiquateField rounds the slot down to SlotsPerDump boundary
 	roundedSlot := slot - (slot % clparams.SlotsPerDump)
-	key := string(base_encoding.Encode64ToBytes4(roundedSlot))
-	compressed, ok := collected[key]
+	compressed, ok := collected[string(base_encoding.Encode64ToBytes4(roundedSlot))]
 	require.True(t, ok, "expected key for rounded slot %d", roundedSlot)
 
 	dec, err := zstd.NewReader(bytes.NewReader(compressed))
@@ -144,8 +141,7 @@ func TestAntiquateField_SlotAligned(t *testing.T) {
 	require.NoError(t, antiquateField(context.Background(), slot, data, buf, compressor, collector))
 
 	collected := collectAll(t, collector)
-	key := string(base_encoding.Encode64ToBytes4(slot))
-	_, ok := collected[key]
+	_, ok := collected[string(base_encoding.Encode64ToBytes4(slot))]
 	require.True(t, ok, "expected key for aligned slot %d", slot)
 }
 
