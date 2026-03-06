@@ -175,7 +175,7 @@ func TestPagedReaderWithCompression(t *testing.T) {
 func TestPagedWriterCRC32Sequential(t *testing.T) {
 	// Test that we can compute CRC32 of written pages
 	mock := &multyBytesWriter{pageSize: 4}
-	pw := NewPagedWriter(t.Context(), mock, true)
+	pw := NewPagedWriter(t.Context(), mock, 4, true)
 
 	// Add test data
 	testData := []struct{ k, v string }{
@@ -210,7 +210,7 @@ func TestPagedWriterCRC32Sequential(t *testing.T) {
 
 	// Now test parallel compression produces same CRC32
 	mock2 := &multyBytesWriter{pageSize: 4}
-	pw2 := NewPagedWriter(t.Context(), mock2, true)
+	pw2 := NewPagedWriter(t.Context(), mock2, 4, true)
 
 	for _, kv := range testData {
 		if err := pw2.Add([]byte(kv.k), []byte(kv.v)); err != nil {
