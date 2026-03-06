@@ -1186,100 +1186,105 @@ func doIntegrity(cliCtx *cli.Context) error {
 				return err
 			}
 			logger.Info("[integrity] starting", "check", chk, "seed", sc.Seed, "sampleRatio", sc.SampleRatio)
-			switch chk {
-			case integrity.BlocksTxnID:
-				if err := blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(failFast); err != nil {
-					return err
+			if err := func() error {
+				switch chk {
+				case integrity.BlocksTxnID:
+					if err := blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(failFast); err != nil {
+						return err
+					}
+				case integrity.HeaderNoGaps:
+					if err := integrity.NoGapsInCanonicalHeaders(ctx, db, blockReader, failFast); err != nil {
+						return err
+					}
+				case integrity.Blocks:
+					if err := integrity.SnapBlocksRead(ctx, db, blockReader, 0, 0, failFast); err != nil {
+						return err
+					}
+				case integrity.InvertedIndex:
+					if err := integrity.E3EfFiles(ctx, db, failFast, fromStep); err != nil {
+						return err
+					}
+				case integrity.HistoryNoSystemTxs:
+					if err := integrity.HistoryCheckNoSystemTxs(ctx, db, blockReader); err != nil {
+						return err
+					}
+				case integrity.BorEvents:
+					if !CheckBorChain(chainConfig.ChainName) {
+						logger.Info("BorEvents skipped because not bor chain")
+						return nil
+					}
+					snapshots := blockReader.BorSnapshots().(*heimdall.RoSnapshots)
+					if err := bridge.ValidateBorEvents(ctx, db, blockReader, snapshots, 0, 0, failFast); err != nil {
+						return err
+					}
+				case integrity.BorSpans:
+					if !CheckBorChain(chainConfig.ChainName) {
+						logger.Info("BorSpans skipped because not bor chain")
+						return nil
+					}
+					if err := heimdall.ValidateBorSpans(ctx, logger, dirs, heimdallStore, borSnaps, failFast); err != nil {
+						return err
+					}
+				case integrity.BorCheckpoints:
+					if !CheckBorChain(chainConfig.ChainName) {
+						logger.Info("BorCheckpoints skipped because not bor chain")
+						return nil
+					}
+					if err := heimdall.ValidateBorCheckpoints(ctx, logger, dirs, heimdallStore, borSnaps, failFast); err != nil {
+						return err
+					}
+				case integrity.ReceiptsNoDups:
+					if err := integrity.CheckReceiptsNoDups(ctx, sc, db, blockReader, failFast); err != nil {
+						return err
+					}
+				case integrity.RCacheNoDups:
+					if err := integrity.CheckRCacheNoDups(ctx, sc, db, blockReader, failFast); err != nil {
+						return err
+					}
+				case integrity.StateProgress:
+					if err := integrity.CheckStateProgress(ctx, db, blockReader, failFast); err != nil {
+						return err
+					}
+				case integrity.Publishable:
+					if err := doPublishable(cliCtx, chainDB); err != nil {
+						return err
+					}
+				case integrity.CommitmentRoot:
+					if err := integrity.CheckCommitmentRoot(ctx, db, blockReader, failFast, logger); err != nil {
+						return err
+					}
+				case integrity.CommitmentKvi:
+					if err := integrity.CheckCommitmentKvi(ctx, db, failFast, logger); err != nil {
+						return err
+					}
+				case integrity.CommitmentKvDeref:
+					if err := integrity.CheckCommitmentKvDeref(ctx, db, failFast, logger); err != nil {
+						return err
+					}
+				case integrity.CommitmentHistVal:
+					if err := integrity.CheckCommitmentHistVal(ctx, sc, db, blockReader, failFast, logger); err != nil {
+						return err
+					}
+				case integrity.StateRootVerifyByHistory:
+					to, err := stateProgress(ctx, db, blockReader.TxnumReader())
+					if err != nil {
+						return err
+					}
+					scCopy := sc
+					scCopy.SampleRatio /= 100 // it's very slow check
+					if err := integrity.CheckCommitmentHistAtBlkRange(ctx, sc, db, blockReader, 1, to+1, logger); err != nil {
+						return err
+					}
+				case integrity.StateVerify:
+					if err := integrity.CheckStateVerify(ctx, db, failFast, fromStep, logger); err != nil {
+						return err
+					}
+				default:
+					return fmt.Errorf("unknown check: %s", chk)
 				}
-			case integrity.HeaderNoGaps:
-				if err := integrity.NoGapsInCanonicalHeaders(ctx, db, blockReader, failFast); err != nil {
-					return err
-				}
-			case integrity.Blocks:
-				if err := integrity.SnapBlocksRead(ctx, db, blockReader, 0, 0, failFast); err != nil {
-					return err
-				}
-			case integrity.InvertedIndex:
-				if err := integrity.E3EfFiles(ctx, db, failFast, fromStep); err != nil {
-					return err
-				}
-			case integrity.HistoryNoSystemTxs:
-				if err := integrity.HistoryCheckNoSystemTxs(ctx, db, blockReader); err != nil {
-					return err
-				}
-			case integrity.BorEvents:
-				if !CheckBorChain(chainConfig.ChainName) {
-					logger.Info("BorEvents skipped because not bor chain")
-					return nil
-				}
-				snapshots := blockReader.BorSnapshots().(*heimdall.RoSnapshots)
-				if err := bridge.ValidateBorEvents(ctx, db, blockReader, snapshots, 0, 0, failFast); err != nil {
-					return err
-				}
-			case integrity.BorSpans:
-				if !CheckBorChain(chainConfig.ChainName) {
-					logger.Info("BorSpans skipped because not bor chain")
-					return nil
-				}
-				if err := heimdall.ValidateBorSpans(ctx, logger, dirs, heimdallStore, borSnaps, failFast); err != nil {
-					return err
-				}
-			case integrity.BorCheckpoints:
-				if !CheckBorChain(chainConfig.ChainName) {
-					logger.Info("BorCheckpoints skipped because not bor chain")
-					return nil
-				}
-				if err := heimdall.ValidateBorCheckpoints(ctx, logger, dirs, heimdallStore, borSnaps, failFast); err != nil {
-					return err
-				}
-			case integrity.ReceiptsNoDups:
-				if err := integrity.CheckReceiptsNoDups(ctx, sc, db, blockReader, failFast); err != nil {
-					return err
-				}
-			case integrity.RCacheNoDups:
-				if err := integrity.CheckRCacheNoDups(ctx, sc, db, blockReader, failFast); err != nil {
-					return err
-				}
-			case integrity.StateProgress:
-				if err := integrity.CheckStateProgress(ctx, db, blockReader, failFast); err != nil {
-					return err
-				}
-			case integrity.Publishable:
-				if err := doPublishable(cliCtx, chainDB); err != nil {
-					return err
-				}
-			case integrity.CommitmentRoot:
-				if err := integrity.CheckCommitmentRoot(ctx, db, blockReader, failFast, logger); err != nil {
-					return err
-				}
-			case integrity.CommitmentKvi:
-				if err := integrity.CheckCommitmentKvi(ctx, db, failFast, logger); err != nil {
-					return err
-				}
-			case integrity.CommitmentKvDeref:
-				if err := integrity.CheckCommitmentKvDeref(ctx, db, failFast, logger); err != nil {
-					return err
-				}
-			case integrity.CommitmentHistVal:
-				if err := integrity.CheckCommitmentHistVal(ctx, sc, db, blockReader, failFast, logger); err != nil {
-					return err
-				}
-			case integrity.StateRootVerifyByHistory:
-				to, err := stateProgress(ctx, db, blockReader.TxnumReader())
-				if err != nil {
-					return err
-				}
-				scCopy := sc
-				scCopy.SampleRatio /= 100 // it's very slow check
-				if err := integrity.CheckCommitmentHistAtBlkRange(ctx, sc, db, blockReader, 1, to+1, logger); err != nil {
-					return err
-				}
-			case integrity.StateVerify:
-				if err := integrity.CheckStateVerify(ctx, db, failFast, fromStep, logger); err != nil {
-					return err
-				}
-			default:
-				return fmt.Errorf("unknown check: %s", chk)
+				return nil
+			}(); err != nil {
+				return fmt.Errorf("%s: %w", chk, err)
 			}
 			return nil
 		})
