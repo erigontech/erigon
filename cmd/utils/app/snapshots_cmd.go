@@ -1256,7 +1256,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 						return err
 					}
 				case integrity.CommitmentKvi:
-					if err := integrity.CheckCommitmentKvi(ctx, db, failFast, logger); err != nil {
+					if err := integrity.CheckCommitmentKvi(ctx, sc, db, failFast, logger); err != nil {
 						return err
 					}
 				case integrity.CommitmentKvDeref:

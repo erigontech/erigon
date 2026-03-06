@@ -263,13 +263,13 @@ func checkCommitmentRootViaRecompute(ctx context.Context, tx kv.TemporalTx, sd *
 	return nil
 }
 
-func CheckCommitmentKvi(ctx context.Context, db kv.TemporalRoDB, failFast bool, logger log.Logger) error {
+func CheckCommitmentKvi(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, failFast bool, logger log.Logger) error {
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	return CheckKvis(ctx, tx, kv.CommitmentDomain, failFast, logger)
+	return CheckKvis(ctx, tx, kv.CommitmentDomain, sc, failFast, logger)
 }
 
 func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, failFast bool, logger log.Logger) error {

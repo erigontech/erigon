@@ -43,7 +43,7 @@ var ErrIntegrity = errors.New("integrity error")
 
 // CheckKvis checks all kvi index files for a domain sequentially (one file at a time),
 // parallelizing the lookup work inside each file.
-func CheckKvis(ctx context.Context, tx kv.TemporalTx, domain kv.Domain, failFast bool, logger log.Logger) error {
+func CheckKvis(ctx context.Context, tx kv.TemporalTx, domain kv.Domain, sc SamplerCfg, failFast bool, logger log.Logger) error {
 	start := time.Now()
 	aggTx := state.AggTx(tx)
 	files := aggTx.Files(domain)
@@ -68,7 +68,7 @@ func CheckKvis(ctx context.Context, tx kv.TemporalTx, domain kv.Domain, failFast
 		if !ok {
 			return fmt.Errorf("kvi not found for %s", kvPath)
 		}
-		keys, err := CheckKvi(ctx, kviPath, kvPath, kvCompression, failFast, logger)
+		keys, err := CheckKvi(ctx, kviPath, kvPath, kvCompression, sc, failFast, logger)
 		keyCount += keys
 		if err != nil {
 			if failFast {
@@ -86,7 +86,7 @@ type kviWorkItem struct {
 	offset uint64
 }
 
-func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression seg.FileCompression, failFast bool, logger log.Logger) (uint64, error) {
+func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression seg.FileCompression, sc SamplerCfg, failFast bool, logger log.Logger) (uint64, error) {
 	kviFileName := filepath.Base(kviPath)
 	kvFileName := filepath.Base(kvPath)
 	logger.Info("[integrity] CommitmentKvi", "kvi", kviFileName, "kv", kvFileName)
@@ -159,6 +159,7 @@ func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression 
 	// Producer: scan kv file sequentially, emit (key, offset) pairs to workers.
 	eg.Go(func() error {
 		defer close(workCh)
+		sampler := sc.NewSampler()
 		logTicker := time.NewTicker(30 * time.Second)
 		defer logTicker.Stop()
 		var keyBuf []byte
@@ -174,6 +175,9 @@ func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression 
 			keyCount++
 			atValue = true
 
+			if sampler.CanSkip() {
+				continue
+			}
 			select {
 			case <-ctx.Done():
 				return nil
