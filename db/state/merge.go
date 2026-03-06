@@ -24,6 +24,7 @@ import (
 	"math"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/tidwall/btree"
@@ -667,12 +668,13 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 			sameKeyItems = append(sameKeyItems, heap.Pop(&cp).(*CursorItem))
 		}
 
-		// Build ascending-order input slices for MergeSorted (reverse of sameKeyItems).
+		// Reverse to ascending txNum order (heap gives descending), then build MergeSorted inputs.
+		slices.Reverse(sameKeyItems)
 		mergeBaseNums = mergeBaseNums[:0]
 		mergeSeqs = mergeSeqs[:0]
-		for j := len(sameKeyItems) - 1; j >= 0; j-- {
-			mergeBaseNums = append(mergeBaseNums, sameKeyItems[j].startTxNum)
-			mergeSeqs = append(mergeSeqs, sameKeyItems[j].val)
+		for _, ci := range sameKeyItems {
+			mergeBaseNums = append(mergeBaseNums, ci.startTxNum)
+			mergeSeqs = append(mergeSeqs, ci.val)
 		}
 
 		// Merge all sequences for this key in a single pass (O(N·C), one EF allocation).
