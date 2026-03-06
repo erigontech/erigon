@@ -21,18 +21,3 @@ func (m Mode) String() string {
 		return "UnknownMode"
 	}
 }
-
-func ModeFromString(s string) Mode { //nolint
-	switch s {
-	case "ModeBlockProduction":
-		return ModeBlockProduction
-	case "ModeForkValidation":
-		return ModeForkValidation
-	case "ModeApplyingBlocks":
-		return ModeApplyingBlocks
-	case "UnknownMode":
-		return ModeUnknown
-	default:
-		panic("unexpected mode string: " + s)
-	}
-}

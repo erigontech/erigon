@@ -51,7 +51,6 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/shards"
-	"github.com/erigontech/erigon/node/silkworm"
 )
 
 const (
@@ -86,7 +85,6 @@ type ExecuteBlockCfg struct {
 	syncCfg   ethconfig.Sync
 	genesis   *types.Genesis
 
-	silkworm        *silkworm.Silkworm
 	experimentalBAL bool
 }
 
@@ -106,7 +104,6 @@ func StageExecuteBlocksCfg(
 	hd headerDownloader,
 	genesis *types.Genesis,
 	syncCfg ethconfig.Sync,
-	silkworm *silkworm.Silkworm,
 	experimentalBAL bool,
 ) ExecuteBlockCfg {
 	if dirs.SnapDomain == "" {
@@ -129,7 +126,6 @@ func StageExecuteBlocksCfg(
 		genesis:         genesis,
 		historyV3:       true,
 		syncCfg:         syncCfg,
-		silkworm:        silkworm,
 		experimentalBAL: experimentalBAL,
 	}
 }

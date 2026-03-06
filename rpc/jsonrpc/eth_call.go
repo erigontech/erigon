@@ -596,34 +596,6 @@ func (api *APIImpl) GetTxWitness(ctx context.Context, blockNr rpc.BlockNumberOrH
 	return api.getWitness(ctx, api.db, blockNr, txIndex, false, api.MaxGetProofRewindBlockCount, api.logger)
 }
 
-func verifyExecResult(execResult *protocol.EphemeralExecResult, block *types.Block) error {
-	actualTxRoot := execResult.TxRoot.Bytes()
-	expectedTxRoot := block.TxHash().Bytes()
-	if !bytes.Equal(actualTxRoot, expectedTxRoot) {
-		return fmt.Errorf("mismatch in block TxRoot actual(%x) != expected(%x)", actualTxRoot, expectedTxRoot)
-	}
-
-	actualGasUsed := uint64(execResult.GasUsed)
-	expectedGasUsed := block.GasUsed()
-	if actualGasUsed != expectedGasUsed {
-		return fmt.Errorf("mismatch in block gas used actual(%x) != expected(%x)", actualGasUsed, expectedGasUsed)
-	}
-
-	actualReceiptsHash := execResult.ReceiptRoot.Bytes()
-	expectedReceiptsHash := block.ReceiptHash().Bytes()
-	if !bytes.Equal(actualReceiptsHash, expectedReceiptsHash) {
-		return fmt.Errorf("mismatch in receipts hash actual(%x) != expected(%x)", actualReceiptsHash, expectedReceiptsHash)
-	}
-
-	// check the state root
-	resultingStateRoot := execResult.StateRoot.Bytes()
-	expectedBlockStateRoot := block.Root().Bytes()
-	if !bytes.Equal(resultingStateRoot, expectedBlockStateRoot) {
-		return fmt.Errorf("resulting state root after execution doesn't match state root in block actual(%x)!=expected(%x)", resultingStateRoot, expectedBlockStateRoot)
-	}
-	return nil
-}
-
 func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrOrHash rpc.BlockNumberOrHash, txIndex hexutil.Uint, fullBlock bool, maxGetProofRewindBlockCount int, logger log.Logger) (hexutil.Bytes, error) {
 	roTx, err := db.BeginRo(ctx)
 	if err != nil {
@@ -793,16 +765,6 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	witnessBufBytes := witnessBuffer.Bytes()
 	witnessBufBytesCopy := common.Copy(witnessBufBytes)
 	return witnessBufBytesCopy, nil
-}
-
-func (api *APIImpl) tryBlockFromLru(hash common.Hash) *types.Block {
-	var block *types.Block
-	if api.blocksLRU != nil {
-		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
-			block = it
-		}
-	}
-	return block
 }
 
 // accessListResult returns an optional accesslist
