@@ -92,7 +92,7 @@ func squeezeCommitment(ctx context.Context, dirs datadir.Dirs, logger log.Logger
 		return err
 	}
 	defer clean()
-	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+	agg.PresetOfflineMerge()
 	if err := agg.OpenFolder(); err != nil {
 		return err
 	}
@@ -124,7 +124,7 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 		return err
 	}
 	defer clean()
-	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+	agg.PresetOfflineMerge()
 	dirsOld := dirs
 	dirsOld.SnapDomain += "_old"
 	dir.MustExist(dirsOld.SnapDomain, dirs.SnapDomain+"_backup")
@@ -153,7 +153,7 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 	if err = aggOld.OpenFolder(); err != nil {
 		panic(err)
 	}
-	aggOld.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+	aggOld.PresetOfflineMerge()
 	if err := aggOld.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 		return err
 	}
@@ -193,7 +193,7 @@ func squeezeCode(ctx context.Context, dirs datadir.Dirs, logger log.Logger) erro
 	}
 	agg := state.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings).MustOpen(ctx, db)
 	defer agg.Close()
-	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+	agg.PresetOfflineMerge()
 
 	log.Info("[sqeeze] start")
 	if err := agg.Sqeeze(ctx, kv.CodeDomain); err != nil {
