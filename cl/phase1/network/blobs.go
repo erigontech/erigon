@@ -66,7 +66,6 @@ func BlobsIdentifiersFromBlocks(blocks []*cltypes.SignedBeaconBlock, cfg *clpara
 	return ids, nil
 }
 
-
 type PeerAndSidecars struct {
 	Peer      string
 	Responses []*cltypes.BlobSidecar

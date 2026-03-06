@@ -111,7 +111,6 @@ func (b *BackwardBeaconDownloader) SetBlockChecker(checker BlockChecker) {
 	b.blockChecker = checker
 }
 
-
 // SetShouldStopAtFn sets the stop condition.
 func (b *BackwardBeaconDownloader) SetOnNewBlock(onNewBlock OnNewBlock) {
 	b.mu.Lock()
@@ -399,10 +398,7 @@ func (b *BackwardBeaconDownloader) canSkipSlot(ctx context.Context, tx kv.Tx, el
 		// [New in Gloas:EIP7732] GLOAS EMPTY blocks have no execution hash (no payload delivered).
 		// If this slot is in the GLOAS era, no EL processing is needed, so we can skip.
 		epoch := slot / b.beaconCfg.SlotsPerEpoch
-		if b.beaconCfg.GetCurrentStateVersion(epoch) >= clparams.GloasVersion {
-			return true
-		}
-		return false
+		return b.beaconCfg.GetCurrentStateVersion(epoch) >= clparams.GloasVersion
 	}
 
 	blockNumber, err := beacon_indicies.ReadExecutionBlockNumber(tx, b.expectedRoot)
