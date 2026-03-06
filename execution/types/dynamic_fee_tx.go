@@ -189,6 +189,66 @@ func (tx *DynamicFeeTransaction) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
+func (tx *DynamicFeeTransaction) MarshalBinaryForHashing(w io.Writer) error {
+	payloadSize, accessListLen := tx.payloadSize()
+	if tx.Timeboosted != nil {
+		payloadSize--
+	}
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
+	b[0] = DynamicFeeTxType
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	return tx.encodePayloadWithoutTimeboosted(w, b[:], payloadSize, accessListLen)
+}
+
+func (tx *DynamicFeeTransaction) encodePayloadWithoutTimeboosted(w io.Writer, b []byte, payloadSize, accessListLen int) error {
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeUint256(*tx.ChainID, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeInt(tx.Nonce, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeUint256(*tx.TipCap, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeUint256(*tx.FeeCap, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeInt(tx.GasLimit, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeOptionalAddress(tx.To, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeUint256(*tx.Value, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeString(tx.Data, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeStructSizePrefix(accessListLen, w, b); err != nil {
+		return err
+	}
+	if err := encodeAccessList(tx.AccessList, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeUint256(tx.V, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeUint256(tx.R, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeUint256(tx.S, w, b); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen int) error {
 	// prefix
 	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {

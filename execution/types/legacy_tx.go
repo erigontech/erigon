@@ -236,6 +236,50 @@ func (tx *LegacyTx) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
+func (tx *LegacyTx) MarshalBinaryForHashing(w io.Writer) error {
+	payloadSize := tx.payloadSize()
+	if tx.Timeboosted != nil {
+		payloadSize--
+	}
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
+	return tx.encodePayloadWithoutTimeboosted(w, b[:], payloadSize)
+}
+
+func (tx *LegacyTx) encodePayloadWithoutTimeboosted(w io.Writer, b []byte, payloadSize int) error {
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeInt(tx.Nonce, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeUint256(*tx.GasPrice, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeInt(tx.GasLimit, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeOptionalAddress(tx.To, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeUint256(*tx.Value, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeString(tx.Data, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeUint256(tx.V, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeUint256(tx.R, w, b); err != nil {
+		return err
+	}
+	if err := rlp.EncodeUint256(tx.S, w, b); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize int) error {
 	// prefix
 	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
