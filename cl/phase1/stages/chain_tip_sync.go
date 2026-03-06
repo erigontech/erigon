@@ -154,6 +154,9 @@ MainLoop:
 			// Handle errors received on the error channel
 			return err
 		case blocks := <-respCh:
+			if blocks == nil {
+				continue
+			}
 			// [GLOAS] Fetch missing execution payload envelopes for confirmed FULL parents.
 			// Runs concurrently so block processing is not blocked; we wait via envelopeDone after MainLoop.
 			if fullRoots := findMissingEnvelopeRoots(cfg, blocks.Data); len(fullRoots) > 0 {
