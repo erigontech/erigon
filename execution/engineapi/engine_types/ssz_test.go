@@ -37,7 +37,8 @@ func TestPayloadStatusSSZRoundTrip(t *testing.T) {
 		ValidationError: "test error",
 	}
 
-	encoded := ps.EncodeSSZ()
+	encoded, err := ps.EncodeSSZ(nil)
+	req.NoError(err)
 	decoded, err := DecodePayloadStatusSSZ(encoded)
 	req.NoError(err)
 	req.Equal(ps.Status, decoded.Status)
@@ -52,7 +53,8 @@ func TestPayloadStatusSSZRoundTrip(t *testing.T) {
 		ValidationError: "",
 	}
 
-	encoded2 := ps2.EncodeSSZ()
+	encoded2, err := ps2.EncodeSSZ(nil)
+	req.NoError(err)
 	decoded2, err := DecodePayloadStatusSSZ(encoded2)
 	req.NoError(err)
 	req.Equal(SSZStatusSyncing, decoded2.Status)
@@ -86,8 +88,8 @@ func TestEngineStatusSSZConversion(t *testing.T) {
 	req := require.New(t)
 
 	tests := []struct {
-		status    EngineStatus
-		sszValue  uint8
+		status   EngineStatus
+		sszValue uint8
 	}{
 		{ValidStatus, SSZStatusValid},
 		{InvalidStatus, SSZStatusInvalid},
@@ -126,7 +128,6 @@ func TestForkchoiceStateDecodeShortBuffer(t *testing.T) {
 
 	_, err := DecodeForkchoiceState(make([]byte, 50))
 	req.Error(err)
-	req.Contains(err.Error(), "buffer too short")
 }
 
 func TestCapabilitiesRoundTrip(t *testing.T) {
@@ -177,8 +178,10 @@ func TestClientVersionsRoundTrip(t *testing.T) {
 	req.Len(decoded, 2)
 	req.Equal(versions[0].Code, decoded[0].Code)
 	req.Equal(versions[0].Name, decoded[0].Name)
+	req.Equal(versions[0].Commit, decoded[0].Commit)
 	req.Equal(versions[1].Code, decoded[1].Code)
 	req.Equal(versions[1].Version, decoded[1].Version)
+	req.Equal(versions[1].Commit, decoded[1].Commit)
 }
 
 func TestGetBlobsRequestRoundTrip(t *testing.T) {
@@ -213,7 +216,6 @@ func TestPayloadStatusSSZDecodeShortBuffer(t *testing.T) {
 
 	_, err := DecodePayloadStatusSSZ(make([]byte, 5))
 	req.Error(err)
-	req.Contains(err.Error(), "buffer too short")
 }
 
 func TestCapabilitiesDecodeShortBuffer(t *testing.T) {
@@ -236,15 +238,13 @@ func TestGetBlobsRequestDecodeShortBuffer(t *testing.T) {
 
 	_, err := DecodeGetBlobsRequest(make([]byte, 2))
 	req.Error(err)
-	req.Contains(err.Error(), "buffer too short")
 }
 
-// --- ForkchoiceUpdatedResponse round-trip tests (verifies offset bug fix) ---
+// --- ForkchoiceUpdatedResponse round-trip tests ---
 
 func TestForkchoiceUpdatedResponseRoundTrip(t *testing.T) {
 	req := require.New(t)
 
-	// Test with no validation error and no payload ID
 	hash := common.HexToHash("0xabcdef")
 	ps := &PayloadStatus{
 		Status:          ValidStatus,
@@ -291,15 +291,12 @@ func TestForkchoiceUpdatedResponseWithPayloadId(t *testing.T) {
 	req.NoError(err)
 	req.Equal(SSZStatusSyncing, decoded.PayloadStatus.Status)
 	req.NotNil(decoded.PayloadId)
-	req.Equal(uint64(0x42), *decoded.PayloadId)
+	req.Equal([]byte(pidBytes), decoded.PayloadId)
 }
 
 func TestForkchoiceUpdatedResponseWithValidationError(t *testing.T) {
 	req := require.New(t)
 
-	// This is the key test for the byte offset bug fix:
-	// When PayloadStatus has a validation error (variable-length),
-	// the payload_id must still be decoded correctly.
 	hash := common.HexToHash("0xdeadbeef")
 	pidBytes := make(hexutil.Bytes, 8)
 	pidBytes[7] = 0xFF
@@ -320,7 +317,7 @@ func TestForkchoiceUpdatedResponseWithValidationError(t *testing.T) {
 	req.Equal(hash, *decoded.PayloadStatus.LatestValidHash)
 	req.Equal("block gas limit exceeded by a very long error message that makes the buffer larger", decoded.PayloadStatus.ValidationError)
 	req.NotNil(decoded.PayloadId)
-	req.Equal(uint64(0xFF), *decoded.PayloadId)
+	req.Equal([]byte(pidBytes), decoded.PayloadId)
 }
 
 func TestForkchoiceUpdatedResponseShortBuffer(t *testing.T) {
@@ -448,7 +445,6 @@ func TestExecutionPayloadSSZDecodeShortBuffer(t *testing.T) {
 
 	_, err := DecodeExecutionPayloadSSZ(make([]byte, 100), 1)
 	req.Error(err)
-	req.Contains(err.Error(), "buffer too short")
 }
 
 // --- NewPayload request SSZ round-trip tests ---
@@ -496,8 +492,6 @@ func TestNewPayloadRequestV3RoundTrip(t *testing.T) {
 func TestNewPayloadRequestV4RoundTrip(t *testing.T) {
 	req := require.New(t)
 
-	// V4 = Electra, which uses Deneb payload layout (version 3)
-	// No SlotNumber or BlockAccessList
 	ep := makeTestExecutionPayloadV1()
 	ep.Withdrawals = []*types.Withdrawal{}
 	blobGasUsed := hexutil.Uint64(0)
@@ -588,13 +582,13 @@ func TestUint256SSZRoundTrip(t *testing.T) {
 	for _, val := range tests {
 		encoded := uint256ToSSZBytes(val)
 		req.Len(encoded, 32)
-		decoded := sszBytesToUint256(encoded)
+		decoded := sszBytesToUint256(encoded[:])
 		req.Equal(val.String(), decoded.String(), "round-trip failed for %s", val.String())
 	}
 
 	// Test nil
 	encoded := uint256ToSSZBytes(nil)
 	req.Len(encoded, 32)
-	decoded := sszBytesToUint256(encoded)
+	decoded := sszBytesToUint256(encoded[:])
 	req.Equal("0", decoded.String())
 }

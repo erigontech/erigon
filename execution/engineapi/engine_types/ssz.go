@@ -17,13 +17,14 @@
 package engine_types
 
 import (
-	"encoding/binary"
 	"fmt"
 	"math/big"
 
+	ssz2 "github.com/erigontech/erigon/cl/ssz"
 	"github.com/erigontech/erigon/common"
-	commonssz "github.com/erigontech/erigon/common/ssz"
+	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/hexutil"
+	commonssz "github.com/erigontech/erigon/common/ssz"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -72,16 +73,16 @@ func SSZToEngineStatus(status uint8) EngineStatus {
 	}
 }
 
+// ---------------------------------------------------------------
+// PayloadStatusSSZ
+// ---------------------------------------------------------------
+
 // PayloadStatusSSZ is the SSZ-encoded version of PayloadStatus for EIP-8161.
 //
-// SSZ layout (fixed part = 9 bytes):
-//   - status:                    1 byte  (uint8)
-//   - latest_valid_hash_offset:  4 bytes (offset to List[Hash32, 1])
-//   - validation_error_offset:   4 bytes (offset to List[uint8, 1024])
+// SSZ Container layout:
 //
-// SSZ variable part:
-//   - List[Hash32, 1]: 0 bytes = absent, 32 bytes = present
-//   - validation_error: List[uint8, 1024] — UTF-8 bytes
+//	Fixed: status(1) + latest_valid_hash_offset(4) + validation_error_offset(4) = 9 bytes
+//	Variable: List[Hash32, 1] (0 or 32 bytes) + List[uint8, 1024]
 type PayloadStatusSSZ struct {
 	Status          uint8
 	LatestValidHash *common.Hash
@@ -90,65 +91,67 @@ type PayloadStatusSSZ struct {
 
 const payloadStatusFixedSize = 9 // status(1) + hash_offset(4) + err_offset(4)
 
-// EncodeSSZ encodes the PayloadStatusSSZ to SSZ bytes per execution-apis spec.
-func (p *PayloadStatusSSZ) EncodeSSZ() []byte {
-	// Build List[Hash32, 1] variable data: 0 bytes = absent, 32 bytes = present
-	var hashList []byte
+func (p *PayloadStatusSSZ) EncodeSSZ(buf []byte) (dst []byte, err error) {
+	dst = buf
+	var hashData []byte
 	if p.LatestValidHash != nil {
-		hashList = p.LatestValidHash[:]
+		hashData = p.LatestValidHash[:]
 	}
+	errBytes := []byte(p.ValidationError)
 
-	errorBytes := []byte(p.ValidationError)
+	// Fixed part
+	dst = append(dst, p.Status)
+	dst = append(dst, commonssz.OffsetSSZ(uint32(payloadStatusFixedSize))...)
+	dst = append(dst, commonssz.OffsetSSZ(uint32(payloadStatusFixedSize+len(hashData)))...)
 
-	buf := make([]byte, payloadStatusFixedSize+len(hashList)+len(errorBytes))
-
-	buf[0] = p.Status
-
-	// Offset to List[Hash32, 1] (starts after fixed part)
-	binary.LittleEndian.PutUint32(buf[1:5], uint32(payloadStatusFixedSize))
-	// Offset to validation_error
-	binary.LittleEndian.PutUint32(buf[5:9], uint32(payloadStatusFixedSize+len(hashList)))
-
-	copy(buf[payloadStatusFixedSize:], hashList)
-	copy(buf[payloadStatusFixedSize+len(hashList):], errorBytes)
-	return buf
+	// Variable part
+	dst = append(dst, hashData...)
+	dst = append(dst, errBytes...)
+	return dst, nil
 }
 
-// DecodePayloadStatusSSZ decodes SSZ bytes into a PayloadStatusSSZ.
-func DecodePayloadStatusSSZ(buf []byte) (*PayloadStatusSSZ, error) {
+func (p *PayloadStatusSSZ) DecodeSSZ(buf []byte, _ int) error {
 	if len(buf) < payloadStatusFixedSize {
-		return nil, fmt.Errorf("PayloadStatusSSZ: buffer too short (%d < %d)", len(buf), payloadStatusFixedSize)
+		return fmt.Errorf("PayloadStatusSSZ: %w (need %d, got %d)", commonssz.ErrLowBufferSize, payloadStatusFixedSize, len(buf))
 	}
-
-	p := &PayloadStatusSSZ{
-		Status: buf[0],
-	}
-
-	hashOffset := binary.LittleEndian.Uint32(buf[1:5])
-	errOffset := binary.LittleEndian.Uint32(buf[5:9])
+	p.Status = buf[0]
+	hashOffset := commonssz.DecodeOffset(buf[1:])
+	errOffset := commonssz.DecodeOffset(buf[5:])
 
 	if hashOffset > uint32(len(buf)) || errOffset > uint32(len(buf)) || hashOffset > errOffset {
-		return nil, fmt.Errorf("PayloadStatusSSZ: offsets out of bounds")
+		return fmt.Errorf("PayloadStatusSSZ: %w", commonssz.ErrBadOffset)
 	}
 
-	// Decode List[Hash32, 1]: 0 bytes = absent, 32 bytes = present
-	listData := buf[hashOffset:errOffset]
-	if len(listData) == 32 {
-		hash := common.BytesToHash(listData)
+	hashData := buf[hashOffset:errOffset]
+	switch len(hashData) {
+	case 32:
+		hash := common.BytesToHash(hashData)
 		p.LatestValidHash = &hash
+	case 0:
+		p.LatestValidHash = nil
+	default:
+		return fmt.Errorf("PayloadStatusSSZ: invalid hash list length %d", len(hashData))
 	}
 
-	// Decode validation_error
-	if errOffset < uint32(len(buf)) {
-		errLen := uint32(len(buf)) - errOffset
-		if errLen > 1024 {
-			return nil, fmt.Errorf("PayloadStatusSSZ: validation error too long (%d > 1024)", errLen)
-		}
-		p.ValidationError = string(buf[errOffset:])
+	errData := buf[errOffset:]
+	if len(errData) > 1024 {
+		return fmt.Errorf("PayloadStatusSSZ: validation error too long (%d > 1024)", len(errData))
 	}
-
-	return p, nil
+	p.ValidationError = string(errData)
+	return nil
 }
+
+func (p *PayloadStatusSSZ) EncodingSizeSSZ() int {
+	size := payloadStatusFixedSize
+	if p.LatestValidHash != nil {
+		size += 32
+	}
+	size += len(p.ValidationError)
+	return size
+}
+
+func (p *PayloadStatusSSZ) Static() bool          { return false }
+func (p *PayloadStatusSSZ) Clone() clonable.Clonable { return &PayloadStatusSSZ{} }
 
 // ToPayloadStatus converts SSZ format to the standard JSON-RPC PayloadStatus.
 func (p *PayloadStatusSSZ) ToPayloadStatus() *PayloadStatus {
@@ -174,6 +177,19 @@ func PayloadStatusToSSZ(ps *PayloadStatus) *PayloadStatusSSZ {
 	return s
 }
 
+// DecodePayloadStatusSSZ decodes SSZ bytes into a PayloadStatusSSZ.
+func DecodePayloadStatusSSZ(buf []byte) (*PayloadStatusSSZ, error) {
+	p := &PayloadStatusSSZ{}
+	if err := p.DecodeSSZ(buf, 0); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+// ---------------------------------------------------------------
+// ForkchoiceStateSSZ
+// ---------------------------------------------------------------
+
 // ForkchoiceStateSSZ is the SSZ encoding of ForkchoiceState.
 // Fixed layout: head_block_hash(32) + safe_block_hash(32) + finalized_block_hash(32) = 96 bytes
 type ForkchoiceStateSSZ struct {
@@ -182,382 +198,814 @@ type ForkchoiceStateSSZ struct {
 	FinalizedBlockHash common.Hash
 }
 
+func (f *ForkchoiceStateSSZ) EncodeSSZ(buf []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(buf, f.HeadBlockHash[:], f.SafeBlockHash[:], f.FinalizedBlockHash[:])
+}
+
+func (f *ForkchoiceStateSSZ) DecodeSSZ(buf []byte, version int) error {
+	return ssz2.UnmarshalSSZ(buf, version, f.HeadBlockHash[:], f.SafeBlockHash[:], f.FinalizedBlockHash[:])
+}
+
+func (f *ForkchoiceStateSSZ) EncodingSizeSSZ() int   { return 96 }
+func (f *ForkchoiceStateSSZ) Static() bool            { return true }
+func (f *ForkchoiceStateSSZ) Clone() clonable.Clonable { return &ForkchoiceStateSSZ{} }
+
 func EncodeForkchoiceState(fcs *ForkChoiceState) []byte {
-	buf := make([]byte, 96)
-	copy(buf[0:32], fcs.HeadHash[:])
-	copy(buf[32:64], fcs.SafeBlockHash[:])
-	copy(buf[64:96], fcs.FinalizedBlockHash[:])
+	s := &ForkchoiceStateSSZ{
+		HeadBlockHash:      fcs.HeadHash,
+		SafeBlockHash:      fcs.SafeBlockHash,
+		FinalizedBlockHash: fcs.FinalizedBlockHash,
+	}
+	buf, _ := s.EncodeSSZ(nil)
 	return buf
 }
 
 func DecodeForkchoiceState(buf []byte) (*ForkChoiceState, error) {
-	if len(buf) < 96 {
-		return nil, fmt.Errorf("ForkchoiceState: buffer too short (%d < 96)", len(buf))
+	s := &ForkchoiceStateSSZ{}
+	if err := s.DecodeSSZ(buf, 0); err != nil {
+		return nil, fmt.Errorf("ForkchoiceState: %w", err)
 	}
-	fcs := &ForkChoiceState{}
-	copy(fcs.HeadHash[:], buf[0:32])
-	copy(fcs.SafeBlockHash[:], buf[32:64])
-	copy(fcs.FinalizedBlockHash[:], buf[64:96])
-	return fcs, nil
+	return &ForkChoiceState{
+		HeadHash:           s.HeadBlockHash,
+		SafeBlockHash:      s.SafeBlockHash,
+		FinalizedBlockHash: s.FinalizedBlockHash,
+	}, nil
 }
+
+// ---------------------------------------------------------------
+// ForkchoiceUpdatedResponseSSZ
+// ---------------------------------------------------------------
 
 // ForkchoiceUpdatedResponseSSZ is the SSZ-encoded forkchoice updated response.
 //
-// SSZ layout (fixed part = 8 bytes):
-//   - payload_status_offset: 4 bytes (uint32 LE, points to variable PayloadStatusSSZ data)
-//   - payload_id_offset:     4 bytes (uint32 LE, points to List[Bytes8, 1])
+// SSZ Container layout:
 //
-// Variable part:
-//   - PayloadStatusSSZ data (variable length due to validation_error)
-//   - List[Bytes8, 1]: 0 bytes = absent, 8 bytes = present
+//	Fixed: payload_status_offset(4) + payload_id_offset(4) = 8 bytes
+//	Variable: PayloadStatusSSZ data + List[Bytes8, 1] (0 or 8 bytes)
 type ForkchoiceUpdatedResponseSSZ struct {
 	PayloadStatus *PayloadStatusSSZ
-	PayloadId     *uint64
+	PayloadId     []byte // raw Bytes8 (nil=absent, 8 bytes=present)
 }
 
-const forkchoiceUpdatedResponseFixedSize = 8 // 4 + 4
+const forkchoiceUpdatedResponseFixedSize = 8
+
+func (r *ForkchoiceUpdatedResponseSSZ) EncodeSSZ(buf []byte) (dst []byte, err error) {
+	dst = buf
+	psBytes, err := r.PayloadStatus.EncodeSSZ(nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// Fixed part
+	dst = append(dst, commonssz.OffsetSSZ(uint32(forkchoiceUpdatedResponseFixedSize))...)
+	dst = append(dst, commonssz.OffsetSSZ(uint32(forkchoiceUpdatedResponseFixedSize+len(psBytes)))...)
+
+	// Variable part
+	dst = append(dst, psBytes...)
+	dst = append(dst, r.PayloadId...) // 0 or 8 bytes
+	return dst, nil
+}
+
+func (r *ForkchoiceUpdatedResponseSSZ) DecodeSSZ(buf []byte, _ int) error {
+	if len(buf) < forkchoiceUpdatedResponseFixedSize {
+		return fmt.Errorf("ForkchoiceUpdatedResponseSSZ: %w", commonssz.ErrLowBufferSize)
+	}
+	psOffset := commonssz.DecodeOffset(buf[0:])
+	pidOffset := commonssz.DecodeOffset(buf[4:])
+
+	if psOffset > uint32(len(buf)) || pidOffset > uint32(len(buf)) || psOffset > pidOffset {
+		return fmt.Errorf("ForkchoiceUpdatedResponseSSZ: %w", commonssz.ErrBadOffset)
+	}
+
+	r.PayloadStatus = &PayloadStatusSSZ{}
+	if err := r.PayloadStatus.DecodeSSZ(buf[psOffset:pidOffset], 0); err != nil {
+		return err
+	}
+
+	pidData := buf[pidOffset:]
+	if len(pidData) == 8 {
+		r.PayloadId = make([]byte, 8)
+		copy(r.PayloadId, pidData)
+	}
+	return nil
+}
+
+func (r *ForkchoiceUpdatedResponseSSZ) EncodingSizeSSZ() int {
+	size := forkchoiceUpdatedResponseFixedSize
+	if r.PayloadStatus != nil {
+		size += r.PayloadStatus.EncodingSizeSSZ()
+	}
+	size += len(r.PayloadId)
+	return size
+}
+
+func (r *ForkchoiceUpdatedResponseSSZ) Static() bool            { return false }
+func (r *ForkchoiceUpdatedResponseSSZ) Clone() clonable.Clonable { return &ForkchoiceUpdatedResponseSSZ{PayloadStatus: &PayloadStatusSSZ{}} }
 
 func EncodeForkchoiceUpdatedResponse(resp *ForkChoiceUpdatedResponse) []byte {
 	ps := PayloadStatusToSSZ(resp.PayloadStatus)
-	psBytes := ps.EncodeSSZ()
-
-	// Build List[Bytes8, 1] for payload ID: 0 bytes = absent, 8 bytes = present
-	var pidList []byte
+	r := &ForkchoiceUpdatedResponseSSZ{PayloadStatus: ps}
 	if resp.PayloadId != nil {
-		payloadIdBytes := []byte(*resp.PayloadId)
-		if len(payloadIdBytes) == 8 {
-			pidList = payloadIdBytes
+		pidBytes := []byte(*resp.PayloadId)
+		if len(pidBytes) == 8 {
+			r.PayloadId = pidBytes
 		}
 	}
-
-	buf := make([]byte, forkchoiceUpdatedResponseFixedSize+len(psBytes)+len(pidList))
-
-	// Offset to PayloadStatus variable data (starts after fixed part)
-	binary.LittleEndian.PutUint32(buf[0:4], uint32(forkchoiceUpdatedResponseFixedSize))
-	// Offset to List[Bytes8, 1] (after PayloadStatus data)
-	binary.LittleEndian.PutUint32(buf[4:8], uint32(forkchoiceUpdatedResponseFixedSize+len(psBytes)))
-
-	// Variable part
-	copy(buf[forkchoiceUpdatedResponseFixedSize:], psBytes)
-	copy(buf[forkchoiceUpdatedResponseFixedSize+len(psBytes):], pidList)
-
+	buf, _ := r.EncodeSSZ(nil)
 	return buf
 }
 
 func DecodeForkchoiceUpdatedResponse(buf []byte) (*ForkchoiceUpdatedResponseSSZ, error) {
-	if len(buf) < forkchoiceUpdatedResponseFixedSize {
-		return nil, fmt.Errorf("ForkchoiceUpdatedResponseSSZ: buffer too short (%d < %d)", len(buf), forkchoiceUpdatedResponseFixedSize)
-	}
-
-	psOffset := binary.LittleEndian.Uint32(buf[0:4])
-	pidOffset := binary.LittleEndian.Uint32(buf[4:8])
-
-	if psOffset > uint32(len(buf)) || pidOffset > uint32(len(buf)) || psOffset > pidOffset {
-		return nil, fmt.Errorf("ForkchoiceUpdatedResponseSSZ: offsets out of bounds")
-	}
-
-	resp := &ForkchoiceUpdatedResponseSSZ{}
-
-	// Decode PayloadStatus from psOffset to pidOffset
-	ps, err := DecodePayloadStatusSSZ(buf[psOffset:pidOffset])
-	if err != nil {
+	r := &ForkchoiceUpdatedResponseSSZ{}
+	if err := r.DecodeSSZ(buf, 0); err != nil {
 		return nil, err
 	}
-	resp.PayloadStatus = ps
-
-	// Decode List[Bytes8, 1] from pidOffset to end: 0 bytes = absent, 8 bytes = present
-	pidData := buf[pidOffset:]
-	if len(pidData) == 8 {
-		pid := binary.BigEndian.Uint64(pidData)
-		resp.PayloadId = &pid
-	}
-
-	return resp, nil
+	return r, nil
 }
 
-// EncodeCapabilities encodes a list of capability strings as an SSZ
-// ExchangeCapabilitiesRequest container:
-//
-//	Container { capabilities: List[List[uint8, 64], 128] }
-//
-// Wire format:
-//
-//	container_offset(4) -> list_data
-//	list_data = N * item_offset(4) + concatenated UTF-8 string bytes
-func EncodeCapabilities(capabilities []string) []byte {
-	n := len(capabilities)
-	// Container fixed part: one offset (4 bytes) pointing to the list data.
-	const containerFixed = 4
-	// List data: N offsets (4 bytes each) + concatenated string bytes.
-	offsetsSize := n * 4
-	totalStrBytes := 0
-	for _, cap := range capabilities {
-		totalStrBytes += len(cap)
-	}
+// ---------------------------------------------------------------
+// SSZ Helper Types (SizedObjectSSZ implementations)
+// ---------------------------------------------------------------
 
-	buf := make([]byte, 0, containerFixed+offsetsSize+totalStrBytes)
-	// Container offset -> start of list data
-	buf = append(buf, commonssz.OffsetSSZ(containerFixed)...)
+// ByteListSSZ wraps a byte slice for use in SSZ schemas as a variable-length field.
+type ByteListSSZ struct{ data []byte }
 
-	// List item offsets (relative to start of list data)
-	itemOffset := uint32(offsetsSize)
-	for _, cap := range capabilities {
-		buf = append(buf, commonssz.OffsetSSZ(itemOffset)...)
-		itemOffset += uint32(len(cap))
-	}
-	// Concatenated string data
-	for _, cap := range capabilities {
-		buf = append(buf, []byte(cap)...)
-	}
+func (b *ByteListSSZ) EncodeSSZ(buf []byte) ([]byte, error)  { return append(buf, b.data...), nil }
+func (b *ByteListSSZ) DecodeSSZ(buf []byte, _ int) error      { b.data = append([]byte(nil), buf...); return nil }
+func (b *ByteListSSZ) EncodingSizeSSZ() int                    { return len(b.data) }
+func (b *ByteListSSZ) Static() bool                            { return false }
+func (b *ByteListSSZ) Clone() clonable.Clonable                { return &ByteListSSZ{} }
 
-	return buf
+// TransactionListSSZ wraps a list of variable-length transactions for SSZ schemas.
+type TransactionListSSZ struct{ txs [][]byte }
+
+func (t *TransactionListSSZ) EncodeSSZ(buf []byte) ([]byte, error) {
+	if len(t.txs) == 0 {
+		return buf, nil
+	}
+	offsetsSize := len(t.txs) * 4
+	dataSize := 0
+	for _, tx := range t.txs {
+		dataSize += len(tx)
+	}
+	start := len(buf)
+	buf = append(buf, make([]byte, offsetsSize+dataSize)...)
+	dataStart := uint32(offsetsSize)
+	for i, tx := range t.txs {
+		commonssz.EncodeOffset(buf[start+i*4:], dataStart)
+		dataStart += uint32(len(tx))
+	}
+	pos := start + offsetsSize
+	for _, tx := range t.txs {
+		copy(buf[pos:], tx)
+		pos += len(tx)
+	}
+	return buf, nil
 }
 
-// DecodeCapabilities decodes an SSZ ExchangeCapabilitiesRequest container.
-// See EncodeCapabilities for wire format.
-func DecodeCapabilities(buf []byte) ([]string, error) {
+func (t *TransactionListSSZ) DecodeSSZ(buf []byte, _ int) error {
+	if len(buf) == 0 {
+		t.txs = nil
+		return nil
+	}
 	if len(buf) < 4 {
-		return nil, fmt.Errorf("Capabilities: buffer too short")
+		return fmt.Errorf("transactions SSZ: buffer too short")
 	}
-
-	listOffset := commonssz.DecodeOffset(buf[0:4])
-	if listOffset > uint32(len(buf)) {
-		return nil, fmt.Errorf("Capabilities: list offset out of bounds")
-	}
-
-	listData := buf[listOffset:]
-	if len(listData) == 0 {
-		return []string{}, nil
-	}
-	if len(listData) < 4 {
-		return nil, fmt.Errorf("Capabilities: list data too short")
-	}
-
-	// First offset tells us how many items there are.
-	firstOffset := commonssz.DecodeOffset(listData[0:4])
-	if firstOffset%4 != 0 || firstOffset == 0 {
-		return nil, fmt.Errorf("Capabilities: invalid first offset %d", firstOffset)
+	firstOffset := commonssz.DecodeOffset(buf[0:])
+	if firstOffset%4 != 0 || firstOffset > uint32(len(buf)) {
+		return fmt.Errorf("transactions SSZ: invalid first offset (%d)", firstOffset)
 	}
 	count := firstOffset / 4
-	if count > 128 {
-		return nil, fmt.Errorf("Capabilities: too many capabilities (%d > 128)", count)
+	if count == 0 {
+		t.txs = nil
+		return nil
 	}
-	if uint32(len(listData)) < count*4 {
-		return nil, fmt.Errorf("Capabilities: truncated offset table")
-	}
-
 	offsets := make([]uint32, count)
 	for i := uint32(0); i < count; i++ {
-		offsets[i] = commonssz.DecodeOffset(listData[i*4 : i*4+4])
+		offsets[i] = commonssz.DecodeOffset(buf[i*4:])
 	}
-
-	capabilities := make([]string, count)
+	t.txs = make([][]byte, count)
 	for i := uint32(0); i < count; i++ {
 		start := offsets[i]
-		var end uint32
+		end := uint32(len(buf))
 		if i+1 < count {
 			end = offsets[i+1]
-		} else {
-			end = uint32(len(listData))
 		}
-		if start > uint32(len(listData)) || end > uint32(len(listData)) || start > end {
-			return nil, fmt.Errorf("Capabilities: offset out of bounds")
+		if start > uint32(len(buf)) || end > uint32(len(buf)) || start > end {
+			return fmt.Errorf("transactions SSZ: invalid offset at index %d", i)
 		}
-		if end-start > 64 {
-			return nil, fmt.Errorf("Capabilities: capability too long (%d > 64)", end-start)
-		}
-		capabilities[i] = string(listData[start:end])
+		t.txs[i] = append([]byte(nil), buf[start:end]...)
 	}
-
-	return capabilities, nil
+	return nil
 }
 
-// ClientVersionSSZ encodes/decodes a ClientVersionV1 for SSZ transport.
-func EncodeClientVersion(cv *ClientVersionV1) []byte {
-	codeBytes := []byte(cv.Code)
-	nameBytes := []byte(cv.Name)
-	versionBytes := []byte(cv.Version)
-	commitBytes := []byte(cv.Commit)
-
-	// code_len(4) + code + name_len(4) + name + version_len(4) + version + commit_len(4) + commit
-	totalLen := 4 + len(codeBytes) + 4 + len(nameBytes) + 4 + len(versionBytes) + 4 + len(commitBytes)
-	buf := make([]byte, totalLen)
-
-	offset := 0
-	binary.LittleEndian.PutUint32(buf[offset:offset+4], uint32(len(codeBytes)))
-	offset += 4
-	copy(buf[offset:], codeBytes)
-	offset += len(codeBytes)
-
-	binary.LittleEndian.PutUint32(buf[offset:offset+4], uint32(len(nameBytes)))
-	offset += 4
-	copy(buf[offset:], nameBytes)
-	offset += len(nameBytes)
-
-	binary.LittleEndian.PutUint32(buf[offset:offset+4], uint32(len(versionBytes)))
-	offset += 4
-	copy(buf[offset:], versionBytes)
-	offset += len(versionBytes)
-
-	binary.LittleEndian.PutUint32(buf[offset:offset+4], uint32(len(commitBytes)))
-	offset += 4
-	copy(buf[offset:], commitBytes)
-
-	return buf
-}
-
-func DecodeClientVersion(buf []byte) (*ClientVersionV1, error) {
-	if len(buf) < 16 { // minimum: 4 length fields
-		return nil, fmt.Errorf("ClientVersion: buffer too short")
-	}
-
-	cv := &ClientVersionV1{}
-	offset := uint32(0)
-
-	readString := func(maxLen uint32) (string, error) {
-		if offset+4 > uint32(len(buf)) {
-			return "", fmt.Errorf("ClientVersion: unexpected end of buffer")
-		}
-		strLen := binary.LittleEndian.Uint32(buf[offset : offset+4])
-		offset += 4
-		if strLen > maxLen || offset+strLen > uint32(len(buf)) {
-			return "", fmt.Errorf("ClientVersion: string too long or truncated")
-		}
-		s := string(buf[offset : offset+strLen])
-		offset += strLen
-		return s, nil
-	}
-
-	var err error
-	if cv.Code, err = readString(8); err != nil {
-		return nil, err
-	}
-	if cv.Name, err = readString(64); err != nil {
-		return nil, err
-	}
-	if cv.Version, err = readString(64); err != nil {
-		return nil, err
-	}
-	if cv.Commit, err = readString(64); err != nil {
-		return nil, err
-	}
-
-	return cv, nil
-}
-
-// EncodeClientVersions encodes a list of ClientVersionV1 for SSZ transport.
-func EncodeClientVersions(versions []ClientVersionV1) []byte {
-	var parts [][]byte
-	for i := range versions {
-		parts = append(parts, EncodeClientVersion(&versions[i]))
-	}
-
-	// count(4) + for each: len(4) + encoded
-	totalLen := 4
-	for _, p := range parts {
-		totalLen += 4 + len(p)
-	}
-
-	buf := make([]byte, totalLen)
-	binary.LittleEndian.PutUint32(buf[0:4], uint32(len(versions)))
-
-	offset := 4
-	for _, p := range parts {
-		binary.LittleEndian.PutUint32(buf[offset:offset+4], uint32(len(p)))
-		offset += 4
-		copy(buf[offset:], p)
-		offset += len(p)
-	}
-
-	return buf
-}
-
-// DecodeClientVersions decodes a list of ClientVersionV1 from SSZ bytes.
-func DecodeClientVersions(buf []byte) ([]ClientVersionV1, error) {
-	if len(buf) < 4 {
-		return nil, fmt.Errorf("ClientVersions: buffer too short")
-	}
-
-	count := binary.LittleEndian.Uint32(buf[0:4])
-	if count > 16 {
-		return nil, fmt.Errorf("ClientVersions: too many versions (%d > 16)", count)
-	}
-
-	versions := make([]ClientVersionV1, 0, count)
-	offset := uint32(4)
-
-	for i := uint32(0); i < count; i++ {
-		if offset+4 > uint32(len(buf)) {
-			return nil, fmt.Errorf("ClientVersions: unexpected end of buffer")
-		}
-		cvLen := binary.LittleEndian.Uint32(buf[offset : offset+4])
-		offset += 4
-		if offset+cvLen > uint32(len(buf)) {
-			return nil, fmt.Errorf("ClientVersions: truncated")
-		}
-		cv, err := DecodeClientVersion(buf[offset : offset+cvLen])
-		if err != nil {
-			return nil, err
-		}
-		versions = append(versions, *cv)
-		offset += cvLen
-	}
-
-	return versions, nil
-}
-
-// engineVersionToPayloadVersion maps Engine API versions to ExecutionPayload SSZ versions.
-// Engine V4 = Electra, which reuses the Deneb payload layout (version 3).
-// Engine V5 = Gloas, which adds slot_number + block_access_list (version 4).
-func engineVersionToPayloadVersion(engineVersion int) int {
-	if engineVersion == 4 {
-		return 3 // Electra uses Deneb payload layout
-	}
-	if engineVersion >= 5 {
-		return 4 // Gloas and beyond use the extended layout
-	}
-	return engineVersion
-}
-
-// --- ExecutionPayload SSZ encoding/decoding ---
-//
-// The ExecutionPayload SSZ encoding follows the Ethereum consensus specs SSZ container layout.
-// Fields are version-dependent:
-//   - V1 (Bellatrix): base fields
-//   - V2 (Capella): + withdrawals
-//   - V3 (Deneb): + blob_gas_used, excess_blob_gas
-//   - V4 (Gloas): + slot_number, block_access_list
-//
-// The SSZ container has a fixed part (with offsets for variable-length fields)
-// followed by a variable part containing the actual variable-length data.
-
-// executionPayloadFixedSize returns the fixed part size for a given version.
-func executionPayloadFixedSize(version int) int {
-	// Base (V1/Bellatrix): parent_hash(32) + fee_recipient(20) + state_root(32) +
-	// receipts_root(32) + logs_bloom(256) + prev_randao(32) + block_number(8) +
-	// gas_limit(8) + gas_used(8) + timestamp(8) + extra_data_offset(4) +
-	// base_fee_per_gas(32) + block_hash(32) + transactions_offset(4) = 508
-	size := 508
-	if version >= 2 {
-		size += 4 // withdrawals_offset
-	}
-	if version >= 3 {
-		size += 8 + 8 // blob_gas_used + excess_blob_gas
-	}
-	if version >= 4 {
-		size += 8 + 4 // slot_number + block_access_list_offset
+func (t *TransactionListSSZ) EncodingSizeSSZ() int {
+	size := len(t.txs) * 4
+	for _, tx := range t.txs {
+		size += len(tx)
 	}
 	return size
 }
 
+func (t *TransactionListSSZ) Static() bool             { return false }
+func (t *TransactionListSSZ) Clone() clonable.Clonable { return &TransactionListSSZ{} }
+
+// WithdrawalSSZ is a single execution-layer withdrawal (44 bytes fixed).
+type WithdrawalSSZ struct {
+	Index     uint64
+	Validator uint64
+	Address   common.Address
+	Amount    uint64
+}
+
+func (w *WithdrawalSSZ) EncodeSSZ(buf []byte) ([]byte, error) {
+	buf = append(buf, commonssz.Uint64SSZ(w.Index)...)
+	buf = append(buf, commonssz.Uint64SSZ(w.Validator)...)
+	buf = append(buf, w.Address[:]...)
+	buf = append(buf, commonssz.Uint64SSZ(w.Amount)...)
+	return buf, nil
+}
+
+func (w *WithdrawalSSZ) DecodeSSZ(buf []byte, _ int) error {
+	if len(buf) < 44 {
+		return fmt.Errorf("WithdrawalSSZ: %w (need 44, got %d)", commonssz.ErrLowBufferSize, len(buf))
+	}
+	w.Index = commonssz.UnmarshalUint64SSZ(buf[0:])
+	w.Validator = commonssz.UnmarshalUint64SSZ(buf[8:])
+	copy(w.Address[:], buf[16:36])
+	w.Amount = commonssz.UnmarshalUint64SSZ(buf[36:])
+	return nil
+}
+
+func (w *WithdrawalSSZ) EncodingSizeSSZ() int   { return 44 }
+func (w *WithdrawalSSZ) Static() bool            { return true }
+func (w *WithdrawalSSZ) Clone() clonable.Clonable { return &WithdrawalSSZ{} }
+
+func (w *WithdrawalSSZ) ToExecution() *types.Withdrawal {
+	return &types.Withdrawal{Index: w.Index, Validator: w.Validator, Address: w.Address, Amount: w.Amount}
+}
+
+func WithdrawalFromExecution(ew *types.Withdrawal) *WithdrawalSSZ {
+	return &WithdrawalSSZ{Index: ew.Index, Validator: ew.Validator, Address: ew.Address, Amount: ew.Amount}
+}
+
+// WithdrawalListSSZ is a list of fixed-size withdrawals for SSZ schemas.
+type WithdrawalListSSZ struct{ withdrawals []*WithdrawalSSZ }
+
+func (l *WithdrawalListSSZ) EncodeSSZ(buf []byte) ([]byte, error) {
+	var err error
+	for _, w := range l.withdrawals {
+		if buf, err = w.EncodeSSZ(buf); err != nil {
+			return nil, err
+		}
+	}
+	return buf, nil
+}
+
+func (l *WithdrawalListSSZ) DecodeSSZ(buf []byte, _ int) error {
+	if len(buf) == 0 {
+		l.withdrawals = nil
+		return nil
+	}
+	if len(buf)%44 != 0 {
+		return fmt.Errorf("WithdrawalListSSZ: length %d not divisible by 44", len(buf))
+	}
+	count := len(buf) / 44
+	l.withdrawals = make([]*WithdrawalSSZ, count)
+	for i := range count {
+		w := &WithdrawalSSZ{}
+		if err := w.DecodeSSZ(buf[i*44:(i+1)*44], 0); err != nil {
+			return err
+		}
+		l.withdrawals[i] = w
+	}
+	return nil
+}
+
+func (l *WithdrawalListSSZ) EncodingSizeSSZ() int   { return len(l.withdrawals) * 44 }
+func (l *WithdrawalListSSZ) Static() bool            { return false }
+func (l *WithdrawalListSSZ) Clone() clonable.Clonable { return &WithdrawalListSSZ{} }
+
+// HashListSSZ is a list of 32-byte hashes for SSZ schemas.
+type HashListSSZ struct{ hashes []common.Hash }
+
+func (h *HashListSSZ) EncodeSSZ(buf []byte) ([]byte, error) {
+	for _, hash := range h.hashes {
+		buf = append(buf, hash[:]...)
+	}
+	return buf, nil
+}
+
+func (h *HashListSSZ) DecodeSSZ(buf []byte, _ int) error {
+	if len(buf)%32 != 0 {
+		return fmt.Errorf("HashListSSZ: length %d not aligned to 32", len(buf))
+	}
+	count := len(buf) / 32
+	h.hashes = make([]common.Hash, count)
+	for i := range count {
+		copy(h.hashes[i][:], buf[i*32:(i+1)*32])
+	}
+	return nil
+}
+
+func (h *HashListSSZ) EncodingSizeSSZ() int   { return len(h.hashes) * 32 }
+func (h *HashListSSZ) Static() bool            { return false }
+func (h *HashListSSZ) Clone() clonable.Clonable { return &HashListSSZ{} }
+
+// ConcatBytesListSSZ wraps a list of fixed-size byte slices (commitments, proofs, blobs).
+type ConcatBytesListSSZ struct {
+	items    [][]byte
+	itemSize int
+}
+
+func (c *ConcatBytesListSSZ) EncodeSSZ(buf []byte) ([]byte, error) {
+	for _, item := range c.items {
+		buf = append(buf, item...)
+	}
+	return buf, nil
+}
+
+func (c *ConcatBytesListSSZ) DecodeSSZ(buf []byte, _ int) error {
+	if len(buf) == 0 {
+		c.items = nil
+		return nil
+	}
+	if c.itemSize > 0 && len(buf)%c.itemSize != 0 {
+		return fmt.Errorf("ConcatBytesListSSZ: length %d not aligned to %d", len(buf), c.itemSize)
+	}
+	if c.itemSize == 0 {
+		c.items = [][]byte{append([]byte(nil), buf...)}
+		return nil
+	}
+	count := len(buf) / c.itemSize
+	c.items = make([][]byte, count)
+	for i := range count {
+		c.items[i] = append([]byte(nil), buf[i*c.itemSize:(i+1)*c.itemSize]...)
+	}
+	return nil
+}
+
+func (c *ConcatBytesListSSZ) EncodingSizeSSZ() int {
+	size := 0
+	for _, item := range c.items {
+		size += len(item)
+	}
+	return size
+}
+
+func (c *ConcatBytesListSSZ) Static() bool             { return false }
+func (c *ConcatBytesListSSZ) Clone() clonable.Clonable { return &ConcatBytesListSSZ{itemSize: c.itemSize} }
+
+// ---------------------------------------------------------------
+// ExchangeCapabilities SSZ
+// ---------------------------------------------------------------
+
+// CapabilitiesSSZ is the SSZ container for ExchangeCapabilities requests/responses.
+type CapabilitiesSSZ struct {
+	Capabilities []string
+}
+
+func (c *CapabilitiesSSZ) EncodeSSZ(buf []byte) (dst []byte, err error) {
+	dst = buf
+	// Container: offset(4) → list data
+	// List data: N item offsets(4 each) + concatenated UTF-8 strings
+	n := len(c.Capabilities)
+	offsetsSize := n * 4
+	totalStrBytes := 0
+	for _, cap := range c.Capabilities {
+		totalStrBytes += len(cap)
+	}
+
+	dst = append(dst, commonssz.OffsetSSZ(4)...)
+	itemOffset := uint32(offsetsSize)
+	for _, cap := range c.Capabilities {
+		dst = append(dst, commonssz.OffsetSSZ(itemOffset)...)
+		itemOffset += uint32(len(cap))
+	}
+	for _, cap := range c.Capabilities {
+		dst = append(dst, []byte(cap)...)
+	}
+	return dst, nil
+}
+
+func (c *CapabilitiesSSZ) DecodeSSZ(buf []byte, _ int) error {
+	if len(buf) < 4 {
+		return fmt.Errorf("Capabilities: buffer too short")
+	}
+	listOffset := commonssz.DecodeOffset(buf[0:])
+	if listOffset > uint32(len(buf)) {
+		return fmt.Errorf("Capabilities: list offset out of bounds")
+	}
+	listData := buf[listOffset:]
+	if len(listData) == 0 {
+		c.Capabilities = []string{}
+		return nil
+	}
+	if len(listData) < 4 {
+		return fmt.Errorf("Capabilities: list data too short")
+	}
+	firstOffset := commonssz.DecodeOffset(listData[0:])
+	if firstOffset%4 != 0 || firstOffset == 0 {
+		return fmt.Errorf("Capabilities: invalid first offset %d", firstOffset)
+	}
+	count := firstOffset / 4
+	if count > 128 {
+		return fmt.Errorf("Capabilities: too many capabilities (%d > 128)", count)
+	}
+	if uint32(len(listData)) < count*4 {
+		return fmt.Errorf("Capabilities: truncated offset table")
+	}
+	offsets := make([]uint32, count)
+	for i := uint32(0); i < count; i++ {
+		offsets[i] = commonssz.DecodeOffset(listData[i*4:])
+	}
+	c.Capabilities = make([]string, count)
+	for i := uint32(0); i < count; i++ {
+		start := offsets[i]
+		end := uint32(len(listData))
+		if i+1 < count {
+			end = offsets[i+1]
+		}
+		if start > uint32(len(listData)) || end > uint32(len(listData)) || start > end {
+			return fmt.Errorf("Capabilities: offset out of bounds")
+		}
+		if end-start > 64 {
+			return fmt.Errorf("Capabilities: capability too long (%d > 64)", end-start)
+		}
+		c.Capabilities[i] = string(listData[start:end])
+	}
+	return nil
+}
+
+func (c *CapabilitiesSSZ) EncodingSizeSSZ() int {
+	size := 4 // container offset
+	size += len(c.Capabilities) * 4
+	for _, cap := range c.Capabilities {
+		size += len(cap)
+	}
+	return size
+}
+
+func (c *CapabilitiesSSZ) Static() bool             { return false }
+func (c *CapabilitiesSSZ) Clone() clonable.Clonable { return &CapabilitiesSSZ{} }
+
+// Convenience wrappers (backward-compatible API).
+func EncodeCapabilities(capabilities []string) []byte {
+	c := &CapabilitiesSSZ{Capabilities: capabilities}
+	buf, _ := c.EncodeSSZ(nil)
+	return buf
+}
+
+func DecodeCapabilities(buf []byte) ([]string, error) {
+	c := &CapabilitiesSSZ{}
+	if err := c.DecodeSSZ(buf, 0); err != nil {
+		return nil, err
+	}
+	return c.Capabilities, nil
+}
+
+// ---------------------------------------------------------------
+// ClientVersion SSZ
+// ---------------------------------------------------------------
+
+// ClientVersionSSZ is the SSZ container for a single ClientVersionV1.
+type ClientVersionSSZ struct {
+	Code    []byte
+	Name    []byte
+	Version []byte
+	Commit  [4]byte
+}
+
+func (cv *ClientVersionSSZ) EncodeSSZ(buf []byte) (dst []byte, err error) {
+	dst = buf
+	const fixedSize = 16
+	nameOff := uint32(fixedSize + len(cv.Code))
+	versionOff := nameOff + uint32(len(cv.Name))
+	dst = append(dst, commonssz.OffsetSSZ(uint32(fixedSize))...)
+	dst = append(dst, commonssz.OffsetSSZ(nameOff)...)
+	dst = append(dst, commonssz.OffsetSSZ(versionOff)...)
+	dst = append(dst, cv.Commit[:]...)
+	dst = append(dst, cv.Code...)
+	dst = append(dst, cv.Name...)
+	dst = append(dst, cv.Version...)
+	return dst, nil
+}
+
+func (cv *ClientVersionSSZ) DecodeSSZ(buf []byte, _ int) error {
+	const fixedSize = 16
+	if len(buf) < fixedSize {
+		return fmt.Errorf("ClientVersion: buffer too short (%d < %d)", len(buf), fixedSize)
+	}
+	codeOff := commonssz.DecodeOffset(buf[0:])
+	nameOff := commonssz.DecodeOffset(buf[4:])
+	versionOff := commonssz.DecodeOffset(buf[8:])
+	copy(cv.Commit[:], buf[12:16])
+	bufLen := uint32(len(buf))
+	if codeOff > bufLen || nameOff > bufLen || versionOff > bufLen || codeOff > nameOff || nameOff > versionOff {
+		return fmt.Errorf("ClientVersion: invalid offsets")
+	}
+	cv.Code = append([]byte(nil), buf[codeOff:nameOff]...)
+	cv.Name = append([]byte(nil), buf[nameOff:versionOff]...)
+	cv.Version = append([]byte(nil), buf[versionOff:]...)
+	return nil
+}
+
+func (cv *ClientVersionSSZ) EncodingSizeSSZ() int { return 16 + len(cv.Code) + len(cv.Name) + len(cv.Version) }
+func (cv *ClientVersionSSZ) Static() bool             { return false }
+func (cv *ClientVersionSSZ) Clone() clonable.Clonable { return &ClientVersionSSZ{} }
+
+// ClientVersionListSSZ is the SSZ container wrapping a list of ClientVersionSSZ.
+type ClientVersionListSSZ struct {
+	Versions []*ClientVersionSSZ
+}
+
+func (l *ClientVersionListSSZ) EncodeSSZ(buf []byte) (dst []byte, err error) {
+	dst = buf
+	// Container: offset(4) → list data
+	dst = append(dst, commonssz.OffsetSSZ(4)...)
+	// List data: item offsets + concatenated items
+	var itemParts [][]byte
+	for _, v := range l.Versions {
+		part, err := v.EncodeSSZ(nil)
+		if err != nil {
+			return nil, err
+		}
+		itemParts = append(itemParts, part)
+	}
+	itemOffsetsSize := uint32(len(l.Versions) * 4)
+	itemOffset := itemOffsetsSize
+	for _, part := range itemParts {
+		dst = append(dst, commonssz.OffsetSSZ(itemOffset)...)
+		itemOffset += uint32(len(part))
+	}
+	for _, part := range itemParts {
+		dst = append(dst, part...)
+	}
+	return dst, nil
+}
+
+func (l *ClientVersionListSSZ) DecodeSSZ(buf []byte, _ int) error {
+	if len(buf) < 4 {
+		return fmt.Errorf("ClientVersions: buffer too short")
+	}
+	listOffset := commonssz.DecodeOffset(buf[0:])
+	if listOffset > uint32(len(buf)) {
+		return fmt.Errorf("ClientVersions: list offset out of bounds")
+	}
+	listData := buf[listOffset:]
+	if len(listData) == 0 {
+		l.Versions = nil
+		return nil
+	}
+	if len(listData) < 4 {
+		return fmt.Errorf("ClientVersions: list data too short")
+	}
+	firstOffset := commonssz.DecodeOffset(listData[0:])
+	if firstOffset%4 != 0 || firstOffset == 0 {
+		return fmt.Errorf("ClientVersions: invalid first offset %d", firstOffset)
+	}
+	count := firstOffset / 4
+	if count > 16 {
+		return fmt.Errorf("ClientVersions: too many versions (%d > 16)", count)
+	}
+	offsets := make([]uint32, count)
+	for i := uint32(0); i < count; i++ {
+		offsets[i] = commonssz.DecodeOffset(listData[i*4:])
+	}
+	l.Versions = make([]*ClientVersionSSZ, count)
+	for i := uint32(0); i < count; i++ {
+		start := offsets[i]
+		end := uint32(len(listData))
+		if i+1 < count {
+			end = offsets[i+1]
+		}
+		if start > uint32(len(listData)) || end > uint32(len(listData)) || start > end {
+			return fmt.Errorf("ClientVersions: offset out of bounds at %d", i)
+		}
+		cv := &ClientVersionSSZ{}
+		if err := cv.DecodeSSZ(listData[start:end], 0); err != nil {
+			return err
+		}
+		l.Versions[i] = cv
+	}
+	return nil
+}
+
+func (l *ClientVersionListSSZ) EncodingSizeSSZ() int {
+	size := 4 // container offset
+	size += len(l.Versions) * 4
+	for _, v := range l.Versions {
+		size += v.EncodingSizeSSZ()
+	}
+	return size
+}
+
+func (l *ClientVersionListSSZ) Static() bool             { return false }
+func (l *ClientVersionListSSZ) Clone() clonable.Clonable { return &ClientVersionListSSZ{} }
+
+// Convenience wrappers (backward-compatible API).
+func EncodeClientVersion(cv *ClientVersionV1) []byte {
+	s := &ClientVersionSSZ{Code: []byte(cv.Code), Name: []byte(cv.Name), Version: []byte(cv.Version)}
+	if commitRaw, err := hexutil.Decode(cv.Commit); err == nil {
+		copy(s.Commit[:], commitRaw)
+	}
+	buf, _ := s.EncodeSSZ(nil)
+	return buf
+}
+
+func DecodeClientVersion(buf []byte) (*ClientVersionV1, error) {
+	s := &ClientVersionSSZ{}
+	if err := s.DecodeSSZ(buf, 0); err != nil {
+		return nil, err
+	}
+	return &ClientVersionV1{
+		Code: string(s.Code), Name: string(s.Name),
+		Version: string(s.Version), Commit: hexutil.Encode(s.Commit[:]),
+	}, nil
+}
+
+func EncodeClientVersions(versions []ClientVersionV1) []byte {
+	l := &ClientVersionListSSZ{Versions: make([]*ClientVersionSSZ, len(versions))}
+	for i := range versions {
+		s := &ClientVersionSSZ{Code: []byte(versions[i].Code), Name: []byte(versions[i].Name), Version: []byte(versions[i].Version)}
+		if commitRaw, err := hexutil.Decode(versions[i].Commit); err == nil {
+			copy(s.Commit[:], commitRaw)
+		}
+		l.Versions[i] = s
+	}
+	buf, _ := l.EncodeSSZ(nil)
+	return buf
+}
+
+func DecodeClientVersions(buf []byte) ([]ClientVersionV1, error) {
+	l := &ClientVersionListSSZ{}
+	if err := l.DecodeSSZ(buf, 0); err != nil {
+		return nil, err
+	}
+	result := make([]ClientVersionV1, len(l.Versions))
+	for i, v := range l.Versions {
+		result[i] = ClientVersionV1{
+			Code: string(v.Code), Name: string(v.Name),
+			Version: string(v.Version), Commit: hexutil.Encode(v.Commit[:]),
+		}
+	}
+	return result, nil
+}
+
+// ---------------------------------------------------------------
+// GetBlobs request SSZ
+// ---------------------------------------------------------------
+
+// GetBlobsRequestSSZ is the SSZ container for GetBlobs requests.
+type GetBlobsRequestSSZ struct {
+	VersionedHashes *HashListSSZ
+}
+
+func (g *GetBlobsRequestSSZ) EncodeSSZ(buf []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(buf, g.VersionedHashes)
+}
+
+func (g *GetBlobsRequestSSZ) DecodeSSZ(buf []byte, version int) error {
+	if g.VersionedHashes == nil {
+		g.VersionedHashes = &HashListSSZ{}
+	}
+	return ssz2.UnmarshalSSZ(buf, version, g.VersionedHashes)
+}
+
+func (g *GetBlobsRequestSSZ) EncodingSizeSSZ() int { return 4 + g.VersionedHashes.EncodingSizeSSZ() }
+func (g *GetBlobsRequestSSZ) Static() bool             { return false }
+func (g *GetBlobsRequestSSZ) Clone() clonable.Clonable { return &GetBlobsRequestSSZ{} }
+
+func EncodeGetBlobsRequest(hashes []common.Hash) []byte {
+	g := &GetBlobsRequestSSZ{VersionedHashes: &HashListSSZ{hashes: hashes}}
+	buf, _ := g.EncodeSSZ(nil)
+	return buf
+}
+
+func DecodeGetBlobsRequest(buf []byte) ([]common.Hash, error) {
+	g := &GetBlobsRequestSSZ{}
+	if err := g.DecodeSSZ(buf, 0); err != nil {
+		return nil, err
+	}
+	return g.VersionedHashes.hashes, nil
+}
+
+// ---------------------------------------------------------------
+// ExecutionPayload SSZ
+// ---------------------------------------------------------------
+
+// ExecutionPayloadSSZ is a version-dependent SSZ container for execution payloads.
+// Follows the Eth1Block pattern from cl/cltypes using getSchema().
+type ExecutionPayloadSSZ struct {
+	ParentHash      common.Hash
+	FeeRecipient    common.Address
+	StateRoot       common.Hash
+	ReceiptsRoot    common.Hash
+	LogsBloom       [256]byte
+	PrevRandao      common.Hash
+	BlockNumber     uint64
+	GasLimit        uint64
+	GasUsed         uint64
+	Timestamp       uint64
+	ExtraData       *ByteListSSZ
+	BaseFeePerGas   [32]byte // uint256 LE
+	BlockHash       common.Hash
+	Transactions    *TransactionListSSZ
+	Withdrawals     *WithdrawalListSSZ  // v2+
+	BlobGasUsed     uint64              // v3+
+	ExcessBlobGas   uint64              // v3+
+	SlotNumber      uint64              // v4+
+	BlockAccessList *ByteListSSZ        // v4+
+	version         int
+}
+
+func (e *ExecutionPayloadSSZ) getSchema() []any {
+	s := []any{
+		e.ParentHash[:], e.FeeRecipient[:], e.StateRoot[:], e.ReceiptsRoot[:],
+		e.LogsBloom[:], e.PrevRandao[:],
+		&e.BlockNumber, &e.GasLimit, &e.GasUsed, &e.Timestamp,
+		e.ExtraData, e.BaseFeePerGas[:], e.BlockHash[:], e.Transactions,
+	}
+	if e.version >= 2 {
+		s = append(s, e.Withdrawals)
+	}
+	if e.version >= 3 {
+		s = append(s, &e.BlobGasUsed, &e.ExcessBlobGas)
+	}
+	if e.version >= 4 {
+		s = append(s, &e.SlotNumber, e.BlockAccessList)
+	}
+	return s
+}
+
+func (e *ExecutionPayloadSSZ) EncodeSSZ(buf []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(buf, e.getSchema()...)
+}
+
+func (e *ExecutionPayloadSSZ) DecodeSSZ(buf []byte, version int) error {
+	e.version = engineVersionToPayloadVersion(version)
+	if e.ExtraData == nil {
+		e.ExtraData = &ByteListSSZ{}
+	}
+	if e.Transactions == nil {
+		e.Transactions = &TransactionListSSZ{}
+	}
+	if version >= 2 && e.Withdrawals == nil {
+		e.Withdrawals = &WithdrawalListSSZ{}
+	}
+	if version >= 4 && e.BlockAccessList == nil {
+		e.BlockAccessList = &ByteListSSZ{}
+	}
+	return ssz2.UnmarshalSSZ(buf, version, e.getSchema()...)
+}
+
+func (e *ExecutionPayloadSSZ) EncodingSizeSSZ() int {
+	size := 508 // fixed part for v1 (includes ExtraData and Transactions offset slots)
+	if e.ExtraData != nil {
+		size += e.ExtraData.EncodingSizeSSZ()
+	}
+	if e.Transactions != nil {
+		size += e.Transactions.EncodingSizeSSZ()
+	}
+	if e.version >= 2 {
+		size += 4 // withdrawals offset
+		if e.Withdrawals != nil {
+			size += e.Withdrawals.EncodingSizeSSZ()
+		}
+	}
+	if e.version >= 3 {
+		size += 16 // BlobGasUsed + ExcessBlobGas
+	}
+	if e.version >= 4 {
+		size += 12 // SlotNumber + BlockAccessList offset
+		if e.BlockAccessList != nil {
+			size += e.BlockAccessList.EncodingSizeSSZ()
+		}
+	}
+	return size
+}
+
+func (e *ExecutionPayloadSSZ) Static() bool             { return false }
+func (e *ExecutionPayloadSSZ) Clone() clonable.Clonable { return &ExecutionPayloadSSZ{} }
+
+// engineVersionToPayloadVersion maps Engine API versions to ExecutionPayload SSZ versions.
+func engineVersionToPayloadVersion(engineVersion int) int {
+	if engineVersion == 4 {
+		return 3
+	}
+	if engineVersion >= 5 {
+		return 4
+	}
+	return engineVersion
+}
+
 // uint256ToSSZBytes converts a big.Int to 32-byte little-endian SSZ representation.
-func uint256ToSSZBytes(val *big.Int) []byte {
-	buf := make([]byte, 32)
+func uint256ToSSZBytes(val *big.Int) [32]byte {
+	var buf [32]byte
 	if val == nil {
 		return buf
 	}
-	b := val.Bytes() // big-endian, minimal
-	// Copy into buf in reverse (little-endian)
+	b := val.Bytes()
 	for i, v := range b {
 		buf[len(b)-1-i] = v
 	}
@@ -566,7 +1014,6 @@ func uint256ToSSZBytes(val *big.Int) []byte {
 
 // sszBytesToUint256 converts 32-byte little-endian SSZ bytes to a big.Int.
 func sszBytesToUint256(buf []byte) *big.Int {
-	// Convert from little-endian to big-endian
 	be := make([]byte, 32)
 	for i := 0; i < 32; i++ {
 		be[31-i] = buf[i]
@@ -574,394 +1021,274 @@ func sszBytesToUint256(buf []byte) *big.Int {
 	return new(big.Int).SetBytes(be)
 }
 
-// encodeTransactionsSSZ encodes a list of transactions as an SSZ list of variable-length items.
-// Layout: N offsets (4 bytes each) followed by transaction data.
-func encodeTransactionsSSZ(txs []hexutil.Bytes) []byte {
-	if len(txs) == 0 {
-		return nil
+// ExecutionPayloadToSSZ converts a JSON-RPC ExecutionPayload to SSZ format.
+func ExecutionPayloadToSSZ(ep *ExecutionPayload, version int) *ExecutionPayloadSSZ {
+	s := &ExecutionPayloadSSZ{
+		ParentHash:   ep.ParentHash,
+		FeeRecipient: ep.FeeRecipient,
+		StateRoot:    ep.StateRoot,
+		ReceiptsRoot: ep.ReceiptsRoot,
+		PrevRandao:   ep.PrevRandao,
+		BlockNumber:  uint64(ep.BlockNumber),
+		GasLimit:     uint64(ep.GasLimit),
+		GasUsed:      uint64(ep.GasUsed),
+		Timestamp:    uint64(ep.Timestamp),
+		ExtraData:    &ByteListSSZ{data: []byte(ep.ExtraData)},
+		BlockHash:    ep.BlockHash,
+		Transactions: &TransactionListSSZ{},
+		version:      version,
 	}
-	// Calculate total size
-	offsetsSize := len(txs) * 4
-	dataSize := 0
-	for _, tx := range txs {
-		dataSize += len(tx)
-	}
-	buf := make([]byte, offsetsSize+dataSize)
-
-	// Write offsets (relative to start of this list data)
-	dataStart := offsetsSize
-	for i, tx := range txs {
-		binary.LittleEndian.PutUint32(buf[i*4:(i+1)*4], uint32(dataStart))
-		dataStart += len(tx)
-	}
-	// Write transaction data
-	pos := offsetsSize
-	for _, tx := range txs {
-		copy(buf[pos:], tx)
-		pos += len(tx)
-	}
-	return buf
-}
-
-// decodeTransactionsSSZ decodes an SSZ-encoded list of variable-length transactions.
-func decodeTransactionsSSZ(buf []byte) ([]hexutil.Bytes, error) {
-	if len(buf) == 0 {
-		return nil, nil
-	}
-	if len(buf) < 4 {
-		return nil, fmt.Errorf("transactions SSZ: buffer too short")
-	}
-	// The first offset tells us how many offsets there are
-	firstOffset := binary.LittleEndian.Uint32(buf[0:4])
-	if firstOffset%4 != 0 {
-		return nil, fmt.Errorf("transactions SSZ: first offset not aligned (%d)", firstOffset)
-	}
-	count := firstOffset / 4
-	if count == 0 {
-		return nil, nil
-	}
-	if firstOffset > uint32(len(buf)) {
-		return nil, fmt.Errorf("transactions SSZ: first offset out of bounds")
-	}
-
-	// Read all offsets
-	offsets := make([]uint32, count)
-	for i := uint32(0); i < count; i++ {
-		offsets[i] = binary.LittleEndian.Uint32(buf[i*4 : (i+1)*4])
-	}
-
-	txs := make([]hexutil.Bytes, count)
-	for i := uint32(0); i < count; i++ {
-		start := offsets[i]
-		var end uint32
-		if i+1 < count {
-			end = offsets[i+1]
-		} else {
-			end = uint32(len(buf))
-		}
-		if start > uint32(len(buf)) || end > uint32(len(buf)) || start > end {
-			return nil, fmt.Errorf("transactions SSZ: invalid offset at index %d", i)
-		}
-		tx := make(hexutil.Bytes, end-start)
-		copy(tx, buf[start:end])
-		txs[i] = tx
-	}
-	return txs, nil
-}
-
-// SSZ Withdrawal layout: index(8) + validator_index(8) + address(20) + amount(8) = 44 bytes
-const withdrawalSSZSize = 44
-
-func encodeWithdrawalsSSZ(withdrawals []*types.Withdrawal) []byte {
-	if withdrawals == nil {
-		return nil
-	}
-	buf := make([]byte, len(withdrawals)*withdrawalSSZSize)
-	for i, w := range withdrawals {
-		off := i * withdrawalSSZSize
-		binary.LittleEndian.PutUint64(buf[off:off+8], w.Index)
-		binary.LittleEndian.PutUint64(buf[off+8:off+16], w.Validator)
-		copy(buf[off+16:off+36], w.Address[:])
-		binary.LittleEndian.PutUint64(buf[off+36:off+44], w.Amount)
-	}
-	return buf
-}
-
-func decodeWithdrawalsSSZ(buf []byte) ([]*types.Withdrawal, error) {
-	if len(buf) == 0 {
-		return []*types.Withdrawal{}, nil
-	}
-	if len(buf)%withdrawalSSZSize != 0 {
-		return nil, fmt.Errorf("withdrawals SSZ: buffer length %d not divisible by %d", len(buf), withdrawalSSZSize)
-	}
-	count := len(buf) / withdrawalSSZSize
-	withdrawals := make([]*types.Withdrawal, count)
-	for i := 0; i < count; i++ {
-		off := i * withdrawalSSZSize
-		withdrawals[i] = &types.Withdrawal{
-			Index:     binary.LittleEndian.Uint64(buf[off : off+8]),
-			Validator: binary.LittleEndian.Uint64(buf[off+8 : off+16]),
-			Amount:    binary.LittleEndian.Uint64(buf[off+36 : off+44]),
-		}
-		copy(withdrawals[i].Address[:], buf[off+16:off+36])
-	}
-	return withdrawals, nil
-}
-
-// EncodeExecutionPayloadSSZ encodes an ExecutionPayload to SSZ bytes.
-// The version parameter determines which fields are included:
-//
-//	1=Bellatrix, 2=Capella, 3=Deneb, 4=Gloas
-func EncodeExecutionPayloadSSZ(ep *ExecutionPayload, version int) []byte {
-	fixedSize := executionPayloadFixedSize(version)
-
-	// Prepare variable-length field data
-	extraData := []byte(ep.ExtraData)
-	txData := encodeTransactionsSSZ(ep.Transactions)
-	var withdrawalData []byte
-	if version >= 2 {
-		withdrawalData = encodeWithdrawalsSSZ(ep.Withdrawals)
-	}
-	var blockAccessListData []byte
-	if version >= 4 {
-		blockAccessListData = []byte(ep.BlockAccessList)
-	}
-
-	totalVarSize := len(extraData) + len(txData)
-	if version >= 2 {
-		totalVarSize += len(withdrawalData)
-	}
-	if version >= 4 {
-		totalVarSize += len(blockAccessListData)
-	}
-
-	buf := make([]byte, fixedSize+totalVarSize)
-	pos := 0
-
-	// Fixed fields
-	copy(buf[pos:pos+32], ep.ParentHash[:])
-	pos += 32
-	copy(buf[pos:pos+20], ep.FeeRecipient[:])
-	pos += 20
-	copy(buf[pos:pos+32], ep.StateRoot[:])
-	pos += 32
-	copy(buf[pos:pos+32], ep.ReceiptsRoot[:])
-	pos += 32
-	// LogsBloom is always 256 bytes
 	if len(ep.LogsBloom) >= 256 {
-		copy(buf[pos:pos+256], ep.LogsBloom[:256])
+		copy(s.LogsBloom[:], ep.LogsBloom[:256])
 	}
-	pos += 256
-	copy(buf[pos:pos+32], ep.PrevRandao[:])
-	pos += 32
-	binary.LittleEndian.PutUint64(buf[pos:pos+8], uint64(ep.BlockNumber))
-	pos += 8
-	binary.LittleEndian.PutUint64(buf[pos:pos+8], uint64(ep.GasLimit))
-	pos += 8
-	binary.LittleEndian.PutUint64(buf[pos:pos+8], uint64(ep.GasUsed))
-	pos += 8
-	binary.LittleEndian.PutUint64(buf[pos:pos+8], uint64(ep.Timestamp))
-	pos += 8
-
-	// extra_data offset
-	extraDataOffset := fixedSize
-	binary.LittleEndian.PutUint32(buf[pos:pos+4], uint32(extraDataOffset))
-	pos += 4
-
-	// base_fee_per_gas (uint256, 32 bytes LE)
-	var baseFee *big.Int
 	if ep.BaseFeePerGas != nil {
-		baseFee = ep.BaseFeePerGas.ToInt()
+		s.BaseFeePerGas = uint256ToSSZBytes(ep.BaseFeePerGas.ToInt())
 	}
-	copy(buf[pos:pos+32], uint256ToSSZBytes(baseFee))
-	pos += 32
-
-	copy(buf[pos:pos+32], ep.BlockHash[:])
-	pos += 32
-
-	// transactions offset
-	txOffset := extraDataOffset + len(extraData)
-	binary.LittleEndian.PutUint32(buf[pos:pos+4], uint32(txOffset))
-	pos += 4
-
+	txs := make([][]byte, len(ep.Transactions))
+	for i, tx := range ep.Transactions {
+		txs[i] = []byte(tx)
+	}
+	s.Transactions = &TransactionListSSZ{txs: txs}
 	if version >= 2 {
-		// withdrawals offset
-		wdOffset := txOffset + len(txData)
-		binary.LittleEndian.PutUint32(buf[pos:pos+4], uint32(wdOffset))
-		pos += 4
+		wds := make([]*WithdrawalSSZ, len(ep.Withdrawals))
+		for i, w := range ep.Withdrawals {
+			wds[i] = WithdrawalFromExecution(w)
+		}
+		s.Withdrawals = &WithdrawalListSSZ{withdrawals: wds}
 	}
-
 	if version >= 3 {
-		var blobGasUsed, excessBlobGas uint64
 		if ep.BlobGasUsed != nil {
-			blobGasUsed = uint64(*ep.BlobGasUsed)
+			s.BlobGasUsed = uint64(*ep.BlobGasUsed)
 		}
 		if ep.ExcessBlobGas != nil {
-			excessBlobGas = uint64(*ep.ExcessBlobGas)
+			s.ExcessBlobGas = uint64(*ep.ExcessBlobGas)
 		}
-		binary.LittleEndian.PutUint64(buf[pos:pos+8], blobGasUsed)
-		pos += 8
-		binary.LittleEndian.PutUint64(buf[pos:pos+8], excessBlobGas)
-		pos += 8
 	}
-
 	if version >= 4 {
-		var slotNumber uint64
 		if ep.SlotNumber != nil {
-			slotNumber = uint64(*ep.SlotNumber)
+			s.SlotNumber = uint64(*ep.SlotNumber)
 		}
-		binary.LittleEndian.PutUint64(buf[pos:pos+8], slotNumber)
-		pos += 8
-
-		// block_access_list offset
-		balOffset := extraDataOffset + len(extraData) + len(txData)
-		if version >= 2 {
-			balOffset += len(withdrawalData)
-		}
-		binary.LittleEndian.PutUint32(buf[pos:pos+4], uint32(balOffset))
-		pos += 4
+		s.BlockAccessList = &ByteListSSZ{data: []byte(ep.BlockAccessList)}
 	}
-
-	// Variable part
-	copy(buf[extraDataOffset:], extraData)
-	copy(buf[txOffset:], txData)
-	if version >= 2 {
-		wdOffset := txOffset + len(txData)
-		copy(buf[wdOffset:], withdrawalData)
-	}
-	if version >= 4 {
-		balOffset := extraDataOffset + len(extraData) + len(txData)
-		if version >= 2 {
-			balOffset += len(withdrawalData)
-		}
-		copy(buf[balOffset:], blockAccessListData)
-	}
-
-	return buf
+	return s
 }
 
-// DecodeExecutionPayloadSSZ decodes SSZ bytes into an ExecutionPayload.
-func DecodeExecutionPayloadSSZ(buf []byte, version int) (*ExecutionPayload, error) {
-	fixedSize := executionPayloadFixedSize(version)
-	if len(buf) < fixedSize {
-		return nil, fmt.Errorf("ExecutionPayload SSZ: buffer too short (%d < %d)", len(buf), fixedSize)
+// ToExecutionPayload converts SSZ format back to JSON-RPC ExecutionPayload.
+func (e *ExecutionPayloadSSZ) ToExecutionPayload() *ExecutionPayload {
+	ep := &ExecutionPayload{
+		ParentHash:   e.ParentHash,
+		FeeRecipient: e.FeeRecipient,
+		StateRoot:    e.StateRoot,
+		ReceiptsRoot: e.ReceiptsRoot,
+		PrevRandao:   e.PrevRandao,
+		BlockNumber:  hexutil.Uint64(e.BlockNumber),
+		GasLimit:     hexutil.Uint64(e.GasLimit),
+		GasUsed:      hexutil.Uint64(e.GasUsed),
+		Timestamp:    hexutil.Uint64(e.Timestamp),
+		BlockHash:    e.BlockHash,
 	}
-
-	ep := &ExecutionPayload{}
-	pos := 0
-
-	copy(ep.ParentHash[:], buf[pos:pos+32])
-	pos += 32
-	copy(ep.FeeRecipient[:], buf[pos:pos+20])
-	pos += 20
-	copy(ep.StateRoot[:], buf[pos:pos+32])
-	pos += 32
-	copy(ep.ReceiptsRoot[:], buf[pos:pos+32])
-	pos += 32
 	ep.LogsBloom = make(hexutil.Bytes, 256)
-	copy(ep.LogsBloom, buf[pos:pos+256])
-	pos += 256
-	copy(ep.PrevRandao[:], buf[pos:pos+32])
-	pos += 32
-	ep.BlockNumber = hexutil.Uint64(binary.LittleEndian.Uint64(buf[pos : pos+8]))
-	pos += 8
-	ep.GasLimit = hexutil.Uint64(binary.LittleEndian.Uint64(buf[pos : pos+8]))
-	pos += 8
-	ep.GasUsed = hexutil.Uint64(binary.LittleEndian.Uint64(buf[pos : pos+8]))
-	pos += 8
-	ep.Timestamp = hexutil.Uint64(binary.LittleEndian.Uint64(buf[pos : pos+8]))
-	pos += 8
-
-	extraDataOffset := binary.LittleEndian.Uint32(buf[pos : pos+4])
-	pos += 4
-
-	baseFee := sszBytesToUint256(buf[pos : pos+32])
+	copy(ep.LogsBloom, e.LogsBloom[:])
+	baseFee := sszBytesToUint256(e.BaseFeePerGas[:])
 	ep.BaseFeePerGas = (*hexutil.Big)(baseFee)
-	pos += 32
-
-	copy(ep.BlockHash[:], buf[pos:pos+32])
-	pos += 32
-
-	txOffset := binary.LittleEndian.Uint32(buf[pos : pos+4])
-	pos += 4
-
-	var wdOffset uint32
-	if version >= 2 {
-		wdOffset = binary.LittleEndian.Uint32(buf[pos : pos+4])
-		pos += 4
+	if e.ExtraData != nil {
+		ep.ExtraData = make(hexutil.Bytes, len(e.ExtraData.data))
+		copy(ep.ExtraData, e.ExtraData.data)
 	}
-
-	if version >= 3 {
-		blobGasUsed := hexutil.Uint64(binary.LittleEndian.Uint64(buf[pos : pos+8]))
-		ep.BlobGasUsed = &blobGasUsed
-		pos += 8
-		excessBlobGas := hexutil.Uint64(binary.LittleEndian.Uint64(buf[pos : pos+8]))
-		ep.ExcessBlobGas = &excessBlobGas
-		pos += 8
+	if e.Transactions != nil {
+		ep.Transactions = make([]hexutil.Bytes, len(e.Transactions.txs))
+		for i, tx := range e.Transactions.txs {
+			ep.Transactions[i] = make(hexutil.Bytes, len(tx))
+			copy(ep.Transactions[i], tx)
+		}
 	}
-
-	var balOffset uint32
-	if version >= 4 {
-		slotNumber := hexutil.Uint64(binary.LittleEndian.Uint64(buf[pos : pos+8]))
-		ep.SlotNumber = &slotNumber
-		pos += 8
-		balOffset = binary.LittleEndian.Uint32(buf[pos : pos+4])
-		pos += 4
-	}
-
-	// Decode variable-length fields using offsets
-	// extra_data: from extraDataOffset to txOffset
-	if extraDataOffset > uint32(len(buf)) || txOffset > uint32(len(buf)) || extraDataOffset > txOffset {
-		return nil, fmt.Errorf("ExecutionPayload SSZ: invalid extra_data/transactions offsets")
-	}
-	ep.ExtraData = make(hexutil.Bytes, txOffset-extraDataOffset)
-	copy(ep.ExtraData, buf[extraDataOffset:txOffset])
-
-	// Determine end of transactions
-	var txEnd uint32
-	if version >= 2 {
-		txEnd = wdOffset
-	} else {
-		txEnd = uint32(len(buf))
-	}
-	if txOffset > txEnd {
-		return nil, fmt.Errorf("ExecutionPayload SSZ: transactions offset > end")
-	}
-
-	// Decode transactions
-	txBuf := buf[txOffset:txEnd]
-	txs, err := decodeTransactionsSSZ(txBuf)
-	if err != nil {
-		return nil, fmt.Errorf("ExecutionPayload SSZ: %w", err)
-	}
-	ep.Transactions = txs
 	if ep.Transactions == nil {
 		ep.Transactions = []hexutil.Bytes{}
 	}
-
-	// Decode withdrawals
-	if version >= 2 {
-		var wdEnd uint32
-		if version >= 4 {
-			wdEnd = balOffset
-		} else {
-			wdEnd = uint32(len(buf))
+	if e.version >= 2 && e.Withdrawals != nil {
+		ep.Withdrawals = make([]*types.Withdrawal, len(e.Withdrawals.withdrawals))
+		for i, w := range e.Withdrawals.withdrawals {
+			ep.Withdrawals[i] = w.ToExecution()
 		}
-		if wdOffset > wdEnd || wdEnd > uint32(len(buf)) {
-			return nil, fmt.Errorf("ExecutionPayload SSZ: invalid withdrawals offset")
-		}
-		wds, err := decodeWithdrawalsSSZ(buf[wdOffset:wdEnd])
-		if err != nil {
-			return nil, fmt.Errorf("ExecutionPayload SSZ: %w", err)
-		}
-		ep.Withdrawals = wds
 	}
-
-	// Decode block access list
-	if version >= 4 {
-		if balOffset > uint32(len(buf)) {
-			return nil, fmt.Errorf("ExecutionPayload SSZ: block_access_list offset out of bounds")
-		}
-		ep.BlockAccessList = make(hexutil.Bytes, uint32(len(buf))-balOffset)
-		copy(ep.BlockAccessList, buf[balOffset:])
+	if e.version >= 3 {
+		bgu := hexutil.Uint64(e.BlobGasUsed)
+		ep.BlobGasUsed = &bgu
+		ebg := hexutil.Uint64(e.ExcessBlobGas)
+		ep.ExcessBlobGas = &ebg
 	}
-
-	return ep, nil
+	if e.version >= 4 {
+		sn := hexutil.Uint64(e.SlotNumber)
+		ep.SlotNumber = &sn
+		if e.BlockAccessList != nil {
+			ep.BlockAccessList = make(hexutil.Bytes, len(e.BlockAccessList.data))
+			copy(ep.BlockAccessList, e.BlockAccessList.data)
+		}
+	}
+	return ep
 }
 
-// --- NewPayload request SSZ encoding/decoding ---
-//
-// V1/V2: The request body is just the SSZ-encoded ExecutionPayload.
-//
-// V3 NewPayloadRequest SSZ container:
-//   Fixed part: ep_offset(4) + blob_hashes_offset(4) + parent_beacon_block_root(32) = 40 bytes
-//   Variable: ExecutionPayload data, blob hashes (N * 32 bytes)
-//
-// V4 NewPayloadRequest SSZ container:
-//   Fixed part: ep_offset(4) + blob_hashes_offset(4) + parent_beacon_block_root(32) + requests_offset(4) = 44 bytes
-//   Variable: ExecutionPayload data, blob hashes, execution requests
+// Convenience wrappers (backward-compatible API).
+func EncodeExecutionPayloadSSZ(ep *ExecutionPayload, version int) []byte {
+	s := ExecutionPayloadToSSZ(ep, version)
+	buf, _ := s.EncodeSSZ(nil)
+	return buf
+}
 
-// EncodeNewPayloadRequestSSZ encodes a newPayload request to SSZ.
+func DecodeExecutionPayloadSSZ(buf []byte, version int) (*ExecutionPayload, error) {
+	s := &ExecutionPayloadSSZ{version: version}
+	if err := s.DecodeSSZ(buf, version); err != nil {
+		return nil, fmt.Errorf("ExecutionPayload SSZ: %w", err)
+	}
+	return s.ToExecutionPayload(), nil
+}
+
+// ---------------------------------------------------------------
+// StructuredExecutionRequests SSZ
+// ---------------------------------------------------------------
+
+// StructuredRequestsSSZ is the SSZ container for execution requests
+// (deposits, withdrawals, consolidations) as 3 dynamic byte fields.
+type StructuredRequestsSSZ struct {
+	Deposits       *ByteListSSZ
+	Withdrawals    *ByteListSSZ
+	Consolidations *ByteListSSZ
+}
+
+func (r *StructuredRequestsSSZ) EncodeSSZ(buf []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(buf, r.Deposits, r.Withdrawals, r.Consolidations)
+}
+
+func (r *StructuredRequestsSSZ) DecodeSSZ(buf []byte, version int) error {
+	if r.Deposits == nil {
+		r.Deposits = &ByteListSSZ{}
+	}
+	if r.Withdrawals == nil {
+		r.Withdrawals = &ByteListSSZ{}
+	}
+	if r.Consolidations == nil {
+		r.Consolidations = &ByteListSSZ{}
+	}
+	return ssz2.UnmarshalSSZ(buf, version, r.Deposits, r.Withdrawals, r.Consolidations)
+}
+
+func (r *StructuredRequestsSSZ) EncodingSizeSSZ() int {
+	return 12 + r.Deposits.EncodingSizeSSZ() + r.Withdrawals.EncodingSizeSSZ() + r.Consolidations.EncodingSizeSSZ()
+}
+
+func (r *StructuredRequestsSSZ) Static() bool             { return false }
+func (r *StructuredRequestsSSZ) Clone() clonable.Clonable { return &StructuredRequestsSSZ{} }
+
+func structuredRequestsFromSlice(reqs []hexutil.Bytes) *StructuredRequestsSSZ {
+	s := &StructuredRequestsSSZ{
+		Deposits: &ByteListSSZ{}, Withdrawals: &ByteListSSZ{}, Consolidations: &ByteListSSZ{},
+	}
+	for _, r := range reqs {
+		if len(r) < 1 {
+			continue
+		}
+		switch r[0] {
+		case 0x00:
+			s.Deposits.data = append(s.Deposits.data, r[1:]...)
+		case 0x01:
+			s.Withdrawals.data = append(s.Withdrawals.data, r[1:]...)
+		case 0x02:
+			s.Consolidations.data = append(s.Consolidations.data, r[1:]...)
+		}
+	}
+	return s
+}
+
+func (r *StructuredRequestsSSZ) toSlice() []hexutil.Bytes {
+	reqs := make([]hexutil.Bytes, 0, 3)
+	if len(r.Deposits.data) > 0 {
+		req := make(hexutil.Bytes, 1+len(r.Deposits.data))
+		req[0] = 0x00
+		copy(req[1:], r.Deposits.data)
+		reqs = append(reqs, req)
+	}
+	if len(r.Withdrawals.data) > 0 {
+		req := make(hexutil.Bytes, 1+len(r.Withdrawals.data))
+		req[0] = 0x01
+		copy(req[1:], r.Withdrawals.data)
+		reqs = append(reqs, req)
+	}
+	if len(r.Consolidations.data) > 0 {
+		req := make(hexutil.Bytes, 1+len(r.Consolidations.data))
+		req[0] = 0x02
+		copy(req[1:], r.Consolidations.data)
+		reqs = append(reqs, req)
+	}
+	return reqs
+}
+
+// ---------------------------------------------------------------
+// NewPayload request SSZ
+// ---------------------------------------------------------------
+
+// NewPayloadRequestSSZ is the version-dependent SSZ container for newPayload requests.
+type NewPayloadRequestSSZ struct {
+	Payload               *ExecutionPayloadSSZ
+	BlobVersionedHashes   *HashListSSZ
+	ParentBeaconBlockRoot common.Hash
+	ExecutionRequests     *StructuredRequestsSSZ
+	version               int
+}
+
+func (n *NewPayloadRequestSSZ) getSchema() []any {
+	if n.version <= 2 {
+		return n.Payload.getSchema()
+	}
+	if n.version == 3 {
+		return []any{n.Payload, n.BlobVersionedHashes, n.ParentBeaconBlockRoot[:]}
+	}
+	// V4+
+	return []any{n.Payload, n.BlobVersionedHashes, n.ParentBeaconBlockRoot[:], n.ExecutionRequests}
+}
+
+func (n *NewPayloadRequestSSZ) EncodeSSZ(buf []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(buf, n.getSchema()...)
+}
+
+func (n *NewPayloadRequestSSZ) DecodeSSZ(buf []byte, version int) error {
+	n.version = version
+	payloadVersion := engineVersionToPayloadVersion(version)
+	if n.Payload == nil {
+		n.Payload = &ExecutionPayloadSSZ{version: payloadVersion}
+	}
+	n.Payload.version = payloadVersion
+	if version <= 2 {
+		return n.Payload.DecodeSSZ(buf, payloadVersion)
+	}
+	if n.BlobVersionedHashes == nil {
+		n.BlobVersionedHashes = &HashListSSZ{}
+	}
+	if version >= 4 && n.ExecutionRequests == nil {
+		n.ExecutionRequests = &StructuredRequestsSSZ{
+			Deposits: &ByteListSSZ{}, Withdrawals: &ByteListSSZ{}, Consolidations: &ByteListSSZ{},
+		}
+	}
+	return ssz2.UnmarshalSSZ(buf, version, n.getSchema()...)
+}
+
+func (n *NewPayloadRequestSSZ) EncodingSizeSSZ() int {
+	if n.version <= 2 {
+		return n.Payload.EncodingSizeSSZ()
+	}
+	size := 4 + 4 + 32 // payload offset + hashes offset + parent root
+	size += n.Payload.EncodingSizeSSZ()
+	size += n.BlobVersionedHashes.EncodingSizeSSZ()
+	if n.version >= 4 {
+		size += 4 // requests offset
+		size += n.ExecutionRequests.EncodingSizeSSZ()
+	}
+	return size
+}
+
+func (n *NewPayloadRequestSSZ) Static() bool             { return false }
+func (n *NewPayloadRequestSSZ) Clone() clonable.Clonable { return &NewPayloadRequestSSZ{} }
+
+// Convenience wrappers (backward-compatible API).
 func EncodeNewPayloadRequestSSZ(
 	ep *ExecutionPayload,
 	blobHashes []common.Hash,
@@ -970,55 +1297,21 @@ func EncodeNewPayloadRequestSSZ(
 	version int,
 ) []byte {
 	payloadVersion := engineVersionToPayloadVersion(version)
-	if version <= 2 {
-		return EncodeExecutionPayloadSSZ(ep, payloadVersion)
+	n := &NewPayloadRequestSSZ{
+		Payload:             ExecutionPayloadToSSZ(ep, payloadVersion),
+		BlobVersionedHashes: &HashListSSZ{hashes: blobHashes},
+		version:             version,
 	}
-
-	epBytes := EncodeExecutionPayloadSSZ(ep, payloadVersion)
-	blobHashBytes := make([]byte, len(blobHashes)*32)
-	for i, h := range blobHashes {
-		copy(blobHashBytes[i*32:(i+1)*32], h[:])
-	}
-
-	if version == 3 {
-		fixedSize := 40 // ep_offset(4) + blob_hashes_offset(4) + parent_beacon_block_root(32)
-		buf := make([]byte, fixedSize+len(epBytes)+len(blobHashBytes))
-
-		// ep offset
-		binary.LittleEndian.PutUint32(buf[0:4], uint32(fixedSize))
-		// blob hashes offset
-		binary.LittleEndian.PutUint32(buf[4:8], uint32(fixedSize+len(epBytes)))
-		// parent beacon block root
-		if parentBeaconBlockRoot != nil {
-			copy(buf[8:40], parentBeaconBlockRoot[:])
-		}
-		// Variable
-		copy(buf[fixedSize:], epBytes)
-		copy(buf[fixedSize+len(epBytes):], blobHashBytes)
-		return buf
-	}
-
-	// V4+
-	// Encode execution requests as structured SSZ Container for Prysm compatibility
-	reqBytes := encodeStructuredExecutionRequestsSSZ(executionRequests)
-
-	fixedSize := 44 // ep_offset(4) + blob_hashes_offset(4) + parent_beacon_block_root(32) + requests_offset(4)
-	buf := make([]byte, fixedSize+len(epBytes)+len(blobHashBytes)+len(reqBytes))
-
-	binary.LittleEndian.PutUint32(buf[0:4], uint32(fixedSize))
-	binary.LittleEndian.PutUint32(buf[4:8], uint32(fixedSize+len(epBytes)))
 	if parentBeaconBlockRoot != nil {
-		copy(buf[8:40], parentBeaconBlockRoot[:])
+		n.ParentBeaconBlockRoot = *parentBeaconBlockRoot
 	}
-	binary.LittleEndian.PutUint32(buf[40:44], uint32(fixedSize+len(epBytes)+len(blobHashBytes)))
-
-	copy(buf[fixedSize:], epBytes)
-	copy(buf[fixedSize+len(epBytes):], blobHashBytes)
-	copy(buf[fixedSize+len(epBytes)+len(blobHashBytes):], reqBytes)
+	if version >= 4 {
+		n.ExecutionRequests = structuredRequestsFromSlice(executionRequests)
+	}
+	buf, _ := n.EncodeSSZ(nil)
 	return buf
 }
 
-// DecodeNewPayloadRequestSSZ decodes a newPayload request from SSZ.
 func DecodeNewPayloadRequestSSZ(buf []byte, version int) (
 	ep *ExecutionPayload,
 	blobHashes []common.Hash,
@@ -1026,478 +1319,220 @@ func DecodeNewPayloadRequestSSZ(buf []byte, version int) (
 	executionRequests []hexutil.Bytes,
 	err error,
 ) {
-	payloadVersion := engineVersionToPayloadVersion(version)
-	if version <= 2 {
-		ep, err = DecodeExecutionPayloadSSZ(buf, payloadVersion)
+	n := &NewPayloadRequestSSZ{version: version}
+	if err = n.DecodeSSZ(buf, version); err != nil {
 		return
 	}
-
-	if version == 3 {
-		if len(buf) < 40 {
-			err = fmt.Errorf("NewPayloadV3 SSZ: buffer too short (%d < 40)", len(buf))
-			return
-		}
-		epOffset := binary.LittleEndian.Uint32(buf[0:4])
-		blobHashOffset := binary.LittleEndian.Uint32(buf[4:8])
-		root := common.BytesToHash(buf[8:40])
+	ep = n.Payload.ToExecutionPayload()
+	if version >= 3 {
+		blobHashes = n.BlobVersionedHashes.hashes
+		root := n.ParentBeaconBlockRoot
 		parentBeaconBlockRoot = &root
-
-		if epOffset > uint32(len(buf)) || blobHashOffset > uint32(len(buf)) || epOffset > blobHashOffset {
-			err = fmt.Errorf("NewPayloadV3 SSZ: invalid offsets")
-			return
-		}
-		ep, err = DecodeExecutionPayloadSSZ(buf[epOffset:blobHashOffset], payloadVersion)
-		if err != nil {
-			return
-		}
-		blobHashBuf := buf[blobHashOffset:]
-		if len(blobHashBuf)%32 != 0 {
-			err = fmt.Errorf("NewPayloadV3 SSZ: blob hashes not aligned")
-			return
-		}
-		blobHashes = make([]common.Hash, len(blobHashBuf)/32)
-		for i := range blobHashes {
-			copy(blobHashes[i][:], blobHashBuf[i*32:(i+1)*32])
-		}
-		return
 	}
-
-	// V4+
-	if len(buf) < 44 {
-		err = fmt.Errorf("NewPayloadV4 SSZ: buffer too short (%d < 44)", len(buf))
-		return
+	if version >= 4 && n.ExecutionRequests != nil {
+		executionRequests = n.ExecutionRequests.toSlice()
 	}
-	epOffset := binary.LittleEndian.Uint32(buf[0:4])
-	blobHashOffset := binary.LittleEndian.Uint32(buf[4:8])
-	root := common.BytesToHash(buf[8:40])
-	parentBeaconBlockRoot = &root
-	reqOffset := binary.LittleEndian.Uint32(buf[40:44])
-
-	if epOffset > uint32(len(buf)) || blobHashOffset > uint32(len(buf)) || reqOffset > uint32(len(buf)) {
-		err = fmt.Errorf("NewPayloadV4 SSZ: offsets out of bounds")
-		return
-	}
-	ep, err = DecodeExecutionPayloadSSZ(buf[epOffset:blobHashOffset], payloadVersion)
-	if err != nil {
-		return
-	}
-	blobHashBuf := buf[blobHashOffset:reqOffset]
-	if len(blobHashBuf)%32 != 0 {
-		err = fmt.Errorf("NewPayloadV4 SSZ: blob hashes not aligned")
-		return
-	}
-	blobHashes = make([]common.Hash, len(blobHashBuf)/32)
-	for i := range blobHashes {
-		copy(blobHashes[i][:], blobHashBuf[i*32:(i+1)*32])
-	}
-
-	executionRequests, err = decodeStructuredExecutionRequestsSSZ(buf[reqOffset:])
 	return
 }
 
-// encodeExecutionRequestsSSZ encodes execution requests as SSZ list of variable items.
-func encodeExecutionRequestsSSZ(reqs []hexutil.Bytes) []byte {
-	if len(reqs) == 0 {
-		return nil
-	}
-	offsetsSize := len(reqs) * 4
-	dataSize := 0
-	for _, r := range reqs {
-		dataSize += len(r)
-	}
-	buf := make([]byte, offsetsSize+dataSize)
-	dataStart := offsetsSize
-	for i, r := range reqs {
-		binary.LittleEndian.PutUint32(buf[i*4:(i+1)*4], uint32(dataStart))
-		dataStart += len(r)
-	}
-	pos := offsetsSize
-	for _, r := range reqs {
-		copy(buf[pos:], r)
-		pos += len(r)
-	}
-	return buf
+// ---------------------------------------------------------------
+// BlobsBundle SSZ
+// ---------------------------------------------------------------
+
+// BlobsBundleSSZ is the SSZ container for BlobsBundle.
+type BlobsBundleSSZ struct {
+	Commitments *ConcatBytesListSSZ
+	Proofs      *ConcatBytesListSSZ
+	Blobs       *ConcatBytesListSSZ
 }
 
-func decodeExecutionRequestsSSZ(buf []byte) ([]hexutil.Bytes, error) {
-	if len(buf) == 0 {
-		return nil, nil
-	}
-	if len(buf) < 4 {
-		return nil, fmt.Errorf("execution requests SSZ: buffer too short")
-	}
-	firstOffset := binary.LittleEndian.Uint32(buf[0:4])
-	if firstOffset%4 != 0 || firstOffset > uint32(len(buf)) {
-		return nil, fmt.Errorf("execution requests SSZ: invalid first offset")
-	}
-	count := firstOffset / 4
-	offsets := make([]uint32, count)
-	for i := uint32(0); i < count; i++ {
-		offsets[i] = binary.LittleEndian.Uint32(buf[i*4 : (i+1)*4])
-	}
-	reqs := make([]hexutil.Bytes, count)
-	for i := uint32(0); i < count; i++ {
-		start := offsets[i]
-		var end uint32
-		if i+1 < count {
-			end = offsets[i+1]
-		} else {
-			end = uint32(len(buf))
-		}
-		if start > uint32(len(buf)) || end > uint32(len(buf)) || start > end {
-			return nil, fmt.Errorf("execution requests SSZ: invalid offset at index %d", i)
-		}
-		r := make(hexutil.Bytes, end-start)
-		copy(r, buf[start:end])
-		reqs[i] = r
-	}
-	return reqs, nil
+func (b *BlobsBundleSSZ) EncodeSSZ(buf []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(buf, b.Commitments, b.Proofs, b.Blobs)
 }
 
-// encodeStructuredExecutionRequestsSSZ encodes execution requests as a structured SSZ Container
-// that Prysm can UnmarshalSSZ. The container has 3 offsets (deposits, withdrawals, consolidations)
-// followed by the raw SSZ data for each list.
-//
-// Container layout:
-//
-//	Fixed: deposits_offset(4) + withdrawals_offset(4) + consolidations_offset(4) = 12 bytes
-//	Variable: deposits_ssz + withdrawals_ssz + consolidations_ssz
-//
-// The input flat format is []hexutil.Bytes where each item is: type_byte + ssz_data
-func encodeStructuredExecutionRequestsSSZ(reqs []hexutil.Bytes) []byte {
-	var depositsData, withdrawalsData, consolidationsData []byte
-
-	for _, r := range reqs {
-		if len(r) < 1 {
-			continue
-		}
-		switch r[0] {
-		case 0x00: // deposits
-			depositsData = append(depositsData, r[1:]...)
-		case 0x01: // withdrawals
-			withdrawalsData = append(withdrawalsData, r[1:]...)
-		case 0x02: // consolidations
-			consolidationsData = append(consolidationsData, r[1:]...)
-		}
+func (b *BlobsBundleSSZ) DecodeSSZ(buf []byte, version int) error {
+	if b.Commitments == nil {
+		b.Commitments = &ConcatBytesListSSZ{itemSize: 48}
 	}
-
-	fixedSize := 12 // 3 offsets * 4 bytes
-	totalVar := len(depositsData) + len(withdrawalsData) + len(consolidationsData)
-	buf := make([]byte, fixedSize+totalVar)
-
-	depositsOffset := fixedSize
-	withdrawalsOffset := depositsOffset + len(depositsData)
-	consolidationsOffset := withdrawalsOffset + len(withdrawalsData)
-
-	binary.LittleEndian.PutUint32(buf[0:4], uint32(depositsOffset))
-	binary.LittleEndian.PutUint32(buf[4:8], uint32(withdrawalsOffset))
-	binary.LittleEndian.PutUint32(buf[8:12], uint32(consolidationsOffset))
-
-	copy(buf[depositsOffset:], depositsData)
-	copy(buf[withdrawalsOffset:], withdrawalsData)
-	copy(buf[consolidationsOffset:], consolidationsData)
-
-	return buf
+	if b.Proofs == nil {
+		b.Proofs = &ConcatBytesListSSZ{itemSize: 48}
+	}
+	if b.Blobs == nil {
+		b.Blobs = &ConcatBytesListSSZ{itemSize: 131072}
+	}
+	return ssz2.UnmarshalSSZ(buf, version, b.Commitments, b.Proofs, b.Blobs)
 }
 
-// decodeStructuredExecutionRequestsSSZ decodes a structured SSZ Container of execution requests
-// into the flat format used by Erigon ([]hexutil.Bytes where each item is type_byte + ssz_data).
-func decodeStructuredExecutionRequestsSSZ(buf []byte) ([]hexutil.Bytes, error) {
-	if len(buf) == 0 {
-		return []hexutil.Bytes{}, nil
-	}
-	if len(buf) < 12 {
-		return nil, fmt.Errorf("structured execution requests SSZ: buffer too short (%d < 12)", len(buf))
-	}
-
-	depositsOffset := binary.LittleEndian.Uint32(buf[0:4])
-	withdrawalsOffset := binary.LittleEndian.Uint32(buf[4:8])
-	consolidationsOffset := binary.LittleEndian.Uint32(buf[8:12])
-
-	if depositsOffset > uint32(len(buf)) || withdrawalsOffset > uint32(len(buf)) || consolidationsOffset > uint32(len(buf)) {
-		return nil, fmt.Errorf("structured execution requests SSZ: offsets out of bounds")
-	}
-	if depositsOffset > withdrawalsOffset || withdrawalsOffset > consolidationsOffset {
-		return nil, fmt.Errorf("structured execution requests SSZ: offsets not in order")
-	}
-
-	// Always return non-nil slice (engine requires non-nil for V4+ even if empty).
-	reqs := make([]hexutil.Bytes, 0, 3)
-
-	// Deposits (type 0x00)
-	depositsData := buf[depositsOffset:withdrawalsOffset]
-	if len(depositsData) > 0 {
-		r := make(hexutil.Bytes, 1+len(depositsData))
-		r[0] = 0x00
-		copy(r[1:], depositsData)
-		reqs = append(reqs, r)
-	}
-
-	// Withdrawals (type 0x01)
-	withdrawalsData := buf[withdrawalsOffset:consolidationsOffset]
-	if len(withdrawalsData) > 0 {
-		r := make(hexutil.Bytes, 1+len(withdrawalsData))
-		r[0] = 0x01
-		copy(r[1:], withdrawalsData)
-		reqs = append(reqs, r)
-	}
-
-	// Consolidations (type 0x02)
-	consolidationsData := buf[consolidationsOffset:]
-	if len(consolidationsData) > 0 {
-		r := make(hexutil.Bytes, 1+len(consolidationsData))
-		r[0] = 0x02
-		copy(r[1:], consolidationsData)
-		reqs = append(reqs, r)
-	}
-
-	return reqs, nil
+func (b *BlobsBundleSSZ) EncodingSizeSSZ() int {
+	return 12 + b.Commitments.EncodingSizeSSZ() + b.Proofs.EncodingSizeSSZ() + b.Blobs.EncodingSizeSSZ()
 }
 
-// --- GetPayload response SSZ encoding ---
-//
-// V1: The response body is just the SSZ-encoded ExecutionPayload.
-//
-// V2+ GetPayloadResponse SSZ container:
-//   Fixed part: ep_offset(4) + block_value(32) + blobs_bundle_offset(4) +
-//               should_override_builder(1) + requests_offset(4) = 45 bytes
-//   Variable: ExecutionPayload, BlobsBundle, ExecutionRequests
+func (b *BlobsBundleSSZ) Static() bool             { return false }
+func (b *BlobsBundleSSZ) Clone() clonable.Clonable { return &BlobsBundleSSZ{} }
 
-const getPayloadResponseFixedSize = 45
-
-// EncodeGetPayloadResponseSSZ encodes a GetPayloadResponse to SSZ.
-func EncodeGetPayloadResponseSSZ(resp *GetPayloadResponse, version int) []byte {
-	if version == 1 {
-		return EncodeExecutionPayloadSSZ(resp.ExecutionPayload, 1)
-	}
-
-	payloadVersion := engineVersionToPayloadVersion(version)
-	epBytes := EncodeExecutionPayloadSSZ(resp.ExecutionPayload, payloadVersion)
-	blobsBytes := encodeBlobsBundleSSZ(resp.BlobsBundle)
-	reqBytes := encodeStructuredExecutionRequestsSSZ(resp.ExecutionRequests)
-
-	buf := make([]byte, getPayloadResponseFixedSize+len(epBytes)+len(blobsBytes)+len(reqBytes))
-
-	// ep offset
-	binary.LittleEndian.PutUint32(buf[0:4], uint32(getPayloadResponseFixedSize))
-
-	// block_value (uint256 LE)
-	if resp.BlockValue != nil {
-		copy(buf[4:36], uint256ToSSZBytes(resp.BlockValue.ToInt()))
-	}
-
-	// blobs_bundle offset
-	blobsOffset := getPayloadResponseFixedSize + len(epBytes)
-	binary.LittleEndian.PutUint32(buf[36:40], uint32(blobsOffset))
-
-	// should_override_builder
-	if resp.ShouldOverrideBuilder {
-		buf[40] = 1
-	}
-
-	// execution_requests offset
-	reqOffset := blobsOffset + len(blobsBytes)
-	binary.LittleEndian.PutUint32(buf[41:45], uint32(reqOffset))
-
-	// Variable data
-	copy(buf[getPayloadResponseFixedSize:], epBytes)
-	copy(buf[blobsOffset:], blobsBytes)
-	copy(buf[reqOffset:], reqBytes)
-
-	return buf
-}
-
-// DecodeGetPayloadResponseSSZ decodes SSZ bytes into a GetPayloadResponse.
-func DecodeGetPayloadResponseSSZ(buf []byte, version int) (*GetPayloadResponse, error) {
-	if version == 1 {
-		ep, err := DecodeExecutionPayloadSSZ(buf, 1)
-		if err != nil {
-			return nil, err
-		}
-		return &GetPayloadResponse{ExecutionPayload: ep}, nil
-	}
-
-	if len(buf) < getPayloadResponseFixedSize {
-		return nil, fmt.Errorf("GetPayloadResponse SSZ: buffer too short (%d < %d)", len(buf), getPayloadResponseFixedSize)
-	}
-
-	resp := &GetPayloadResponse{}
-
-	epOffset := binary.LittleEndian.Uint32(buf[0:4])
-	blockValue := sszBytesToUint256(buf[4:36])
-	resp.BlockValue = (*hexutil.Big)(blockValue)
-	blobsOffset := binary.LittleEndian.Uint32(buf[36:40])
-	resp.ShouldOverrideBuilder = buf[40] == 1
-	reqOffset := binary.LittleEndian.Uint32(buf[41:45])
-
-	// Decode ExecutionPayload
-	if epOffset > uint32(len(buf)) || blobsOffset > uint32(len(buf)) {
-		return nil, fmt.Errorf("GetPayloadResponse SSZ: offsets out of bounds")
-	}
-	payloadVersion := engineVersionToPayloadVersion(version)
-	ep, err := DecodeExecutionPayloadSSZ(buf[epOffset:blobsOffset], payloadVersion)
-	if err != nil {
-		return nil, err
-	}
-	resp.ExecutionPayload = ep
-
-	// Decode BlobsBundle
-	if blobsOffset > reqOffset || reqOffset > uint32(len(buf)) {
-		return nil, fmt.Errorf("GetPayloadResponse SSZ: invalid blobs/requests offsets")
-	}
-	bundle, err := decodeBlobsBundleSSZ(buf[blobsOffset:reqOffset])
-	if err != nil {
-		return nil, err
-	}
-	resp.BlobsBundle = bundle
-
-	// Decode ExecutionRequests
-	if reqOffset < uint32(len(buf)) {
-		reqs, err := decodeStructuredExecutionRequestsSSZ(buf[reqOffset:])
-		if err != nil {
-			return nil, err
-		}
-		resp.ExecutionRequests = reqs
-	}
-
-	return resp, nil
-}
-
-// --- BlobsBundle SSZ encoding ---
-//
-// SSZ container:
-//   Fixed part: commitments_offset(4) + proofs_offset(4) + blobs_offset(4) = 12 bytes
-//   Variable: commitments (N*48), proofs (N*48), blobs (N*131072)
-
-const blobsBundleFixedSize = 12
-
-func encodeBlobsBundleSSZ(bundle *BlobsBundle) []byte {
+func blobsBundleToSSZ(bundle *BlobsBundle) *BlobsBundleSSZ {
 	if bundle == nil {
-		return nil
+		return &BlobsBundleSSZ{
+			Commitments: &ConcatBytesListSSZ{itemSize: 48},
+			Proofs:      &ConcatBytesListSSZ{itemSize: 48},
+			Blobs:       &ConcatBytesListSSZ{itemSize: 131072},
+		}
 	}
+	toBytes := func(items []hexutil.Bytes) [][]byte {
+		result := make([][]byte, len(items))
+		for i, item := range items {
+			result[i] = []byte(item)
+		}
+		return result
+	}
+	return &BlobsBundleSSZ{
+		Commitments: &ConcatBytesListSSZ{items: toBytes(bundle.Commitments), itemSize: 48},
+		Proofs:      &ConcatBytesListSSZ{items: toBytes(bundle.Proofs), itemSize: 48},
+		Blobs:       &ConcatBytesListSSZ{items: toBytes(bundle.Blobs), itemSize: 131072},
+	}
+}
 
-	commitmentsData := encodeFixedSizeList(bundle.Commitments)
-	proofsData := encodeFixedSizeList(bundle.Proofs)
-	blobsData := encodeFixedSizeList(bundle.Blobs)
+func (b *BlobsBundleSSZ) toBlobsBundle() *BlobsBundle {
+	toHex := func(items [][]byte) []hexutil.Bytes {
+		result := make([]hexutil.Bytes, len(items))
+		for i, item := range items {
+			result[i] = make(hexutil.Bytes, len(item))
+			copy(result[i], item)
+		}
+		return result
+	}
+	return &BlobsBundle{
+		Commitments: toHex(b.Commitments.items),
+		Proofs:      toHex(b.Proofs.items),
+		Blobs:       toHex(b.Blobs.items),
+	}
+}
 
-	totalVar := len(commitmentsData) + len(proofsData) + len(blobsData)
-	buf := make([]byte, blobsBundleFixedSize+totalVar)
+// ---------------------------------------------------------------
+// GetPayload response SSZ
+// ---------------------------------------------------------------
 
-	commitmentsOffset := blobsBundleFixedSize
-	proofsOffset := commitmentsOffset + len(commitmentsData)
-	blobsOffset := proofsOffset + len(proofsData)
+// GetPayloadResponseSSZType is the SSZ container for GetPayloadResponse.
+type GetPayloadResponseSSZType struct {
+	Payload               *ExecutionPayloadSSZ
+	BlockValue            [32]byte // uint256 LE
+	BlobsBundle           *BlobsBundleSSZ
+	ShouldOverrideBuilder bool
+	ExecutionRequests     *StructuredRequestsSSZ
+	version               int
+}
 
-	binary.LittleEndian.PutUint32(buf[0:4], uint32(commitmentsOffset))
-	binary.LittleEndian.PutUint32(buf[4:8], uint32(proofsOffset))
-	binary.LittleEndian.PutUint32(buf[8:12], uint32(blobsOffset))
+func (g *GetPayloadResponseSSZType) EncodeSSZ(buf []byte) ([]byte, error) {
+	if g.version == 1 {
+		return g.Payload.EncodeSSZ(buf)
+	}
+	overrideByte := commonssz.BoolSSZ(g.ShouldOverrideBuilder)
+	return ssz2.MarshalSSZ(buf,
+		g.Payload, g.BlockValue[:], g.BlobsBundle, []byte{overrideByte}, g.ExecutionRequests,
+	)
+}
 
-	copy(buf[commitmentsOffset:], commitmentsData)
-	copy(buf[proofsOffset:], proofsData)
-	copy(buf[blobsOffset:], blobsData)
+func (g *GetPayloadResponseSSZType) DecodeSSZ(buf []byte, version int) error {
+	g.version = version
+	payloadVersion := engineVersionToPayloadVersion(version)
+	if g.Payload == nil {
+		g.Payload = &ExecutionPayloadSSZ{version: payloadVersion}
+	}
+	g.Payload.version = payloadVersion
+	if version == 1 {
+		return g.Payload.DecodeSSZ(buf, payloadVersion)
+	}
+	if g.BlobsBundle == nil {
+		g.BlobsBundle = &BlobsBundleSSZ{
+			Commitments: &ConcatBytesListSSZ{itemSize: 48},
+			Proofs:      &ConcatBytesListSSZ{itemSize: 48},
+			Blobs:       &ConcatBytesListSSZ{itemSize: 131072},
+		}
+	}
+	if g.ExecutionRequests == nil {
+		g.ExecutionRequests = &StructuredRequestsSSZ{
+			Deposits: &ByteListSSZ{}, Withdrawals: &ByteListSSZ{}, Consolidations: &ByteListSSZ{},
+		}
+	}
+	// Manual decode: fixed part is ep_offset(4) + block_value(32) + blobs_offset(4) + override(1) + requests_offset(4) = 45
+	const fixedSize = 45
+	if len(buf) < fixedSize {
+		return fmt.Errorf("GetPayloadResponse SSZ: buffer too short (%d < %d)", len(buf), fixedSize)
+	}
+	epOffset := commonssz.DecodeOffset(buf[0:])
+	copy(g.BlockValue[:], buf[4:36])
+	blobsOffset := commonssz.DecodeOffset(buf[36:])
+	g.ShouldOverrideBuilder = buf[40] != 0
+	reqOffset := commonssz.DecodeOffset(buf[41:])
 
+	bufLen := uint32(len(buf))
+	if epOffset > bufLen || blobsOffset > bufLen || reqOffset > bufLen {
+		return fmt.Errorf("GetPayloadResponse SSZ: offsets out of bounds")
+	}
+	if epOffset > blobsOffset || blobsOffset > reqOffset {
+		return fmt.Errorf("GetPayloadResponse SSZ: offsets not in order")
+	}
+	if err := g.Payload.DecodeSSZ(buf[epOffset:blobsOffset], payloadVersion); err != nil {
+		return err
+	}
+	if err := g.BlobsBundle.DecodeSSZ(buf[blobsOffset:reqOffset], 0); err != nil {
+		return err
+	}
+	if reqOffset < bufLen {
+		if err := g.ExecutionRequests.DecodeSSZ(buf[reqOffset:], 0); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (g *GetPayloadResponseSSZType) EncodingSizeSSZ() int {
+	if g.version == 1 {
+		return g.Payload.EncodingSizeSSZ()
+	}
+	return 45 + g.Payload.EncodingSizeSSZ() + g.BlobsBundle.EncodingSizeSSZ() + g.ExecutionRequests.EncodingSizeSSZ()
+}
+
+func (g *GetPayloadResponseSSZType) Static() bool             { return false }
+func (g *GetPayloadResponseSSZType) Clone() clonable.Clonable { return &GetPayloadResponseSSZType{} }
+
+// Convenience wrappers (backward-compatible API).
+func EncodeGetPayloadResponseSSZ(resp *GetPayloadResponse, version int) []byte {
+	payloadVersion := engineVersionToPayloadVersion(version)
+	g := &GetPayloadResponseSSZType{
+		Payload: ExecutionPayloadToSSZ(resp.ExecutionPayload, payloadVersion),
+		version: version,
+	}
+	if version > 1 {
+		if resp.BlockValue != nil {
+			g.BlockValue = uint256ToSSZBytes(resp.BlockValue.ToInt())
+		}
+		g.BlobsBundle = blobsBundleToSSZ(resp.BlobsBundle)
+		g.ShouldOverrideBuilder = resp.ShouldOverrideBuilder
+		g.ExecutionRequests = structuredRequestsFromSlice(resp.ExecutionRequests)
+	}
+	buf, _ := g.EncodeSSZ(nil)
 	return buf
 }
 
-func decodeBlobsBundleSSZ(buf []byte) (*BlobsBundle, error) {
-	if len(buf) == 0 {
-		return nil, nil
+func DecodeGetPayloadResponseSSZ(buf []byte, version int) (*GetPayloadResponse, error) {
+	g := &GetPayloadResponseSSZType{version: version}
+	if err := g.DecodeSSZ(buf, version); err != nil {
+		return nil, err
 	}
-	if len(buf) < blobsBundleFixedSize {
-		return nil, fmt.Errorf("BlobsBundle SSZ: buffer too short")
+	resp := &GetPayloadResponse{
+		ExecutionPayload:      g.Payload.ToExecutionPayload(),
+		ShouldOverrideBuilder: g.ShouldOverrideBuilder,
 	}
-
-	commitmentsOffset := binary.LittleEndian.Uint32(buf[0:4])
-	proofsOffset := binary.LittleEndian.Uint32(buf[4:8])
-	blobsOffset := binary.LittleEndian.Uint32(buf[8:12])
-
-	if commitmentsOffset > uint32(len(buf)) || proofsOffset > uint32(len(buf)) || blobsOffset > uint32(len(buf)) {
-		return nil, fmt.Errorf("BlobsBundle SSZ: offsets out of bounds")
-	}
-
-	bundle := &BlobsBundle{}
-
-	// Commitments (each 48 bytes)
-	commBuf := buf[commitmentsOffset:proofsOffset]
-	if len(commBuf) > 0 {
-		if len(commBuf)%48 != 0 {
-			return nil, fmt.Errorf("BlobsBundle SSZ: commitments not aligned to 48 bytes")
+	if version > 1 {
+		blockValue := sszBytesToUint256(g.BlockValue[:])
+		resp.BlockValue = (*hexutil.Big)(blockValue)
+		if g.BlobsBundle != nil {
+			resp.BlobsBundle = g.BlobsBundle.toBlobsBundle()
 		}
-		bundle.Commitments = make([]hexutil.Bytes, len(commBuf)/48)
-		for i := range bundle.Commitments {
-			c := make(hexutil.Bytes, 48)
-			copy(c, commBuf[i*48:(i+1)*48])
-			bundle.Commitments[i] = c
+		if g.ExecutionRequests != nil {
+			resp.ExecutionRequests = g.ExecutionRequests.toSlice()
 		}
 	}
-
-	// Proofs (each 48 bytes)
-	proofBuf := buf[proofsOffset:blobsOffset]
-	if len(proofBuf) > 0 {
-		if len(proofBuf)%48 != 0 {
-			return nil, fmt.Errorf("BlobsBundle SSZ: proofs not aligned to 48 bytes")
-		}
-		bundle.Proofs = make([]hexutil.Bytes, len(proofBuf)/48)
-		for i := range bundle.Proofs {
-			p := make(hexutil.Bytes, 48)
-			copy(p, proofBuf[i*48:(i+1)*48])
-			bundle.Proofs[i] = p
-		}
-	}
-
-	// Blobs (each 131072 bytes)
-	blobBuf := buf[blobsOffset:]
-	if len(blobBuf) > 0 {
-		if len(blobBuf)%131072 != 0 {
-			return nil, fmt.Errorf("BlobsBundle SSZ: blobs not aligned to 131072 bytes")
-		}
-		bundle.Blobs = make([]hexutil.Bytes, len(blobBuf)/131072)
-		for i := range bundle.Blobs {
-			b := make(hexutil.Bytes, 131072)
-			copy(b, blobBuf[i*131072:(i+1)*131072])
-			bundle.Blobs[i] = b
-		}
-	}
-
-	return bundle, nil
-}
-
-// encodeFixedSizeList concatenates a list of byte slices.
-func encodeFixedSizeList(items []hexutil.Bytes) []byte {
-	totalLen := 0
-	for _, item := range items {
-		totalLen += len(item)
-	}
-	buf := make([]byte, totalLen)
-	pos := 0
-	for _, item := range items {
-		copy(buf[pos:], item)
-		pos += len(item)
-	}
-	return buf
-}
-
-// EncodeGetBlobsRequest encodes a list of versioned hashes for the get_blobs SSZ request.
-func EncodeGetBlobsRequest(hashes []common.Hash) []byte {
-	buf := make([]byte, 4+len(hashes)*32)
-	binary.LittleEndian.PutUint32(buf[0:4], uint32(len(hashes)))
-	for i, h := range hashes {
-		copy(buf[4+i*32:4+(i+1)*32], h[:])
-	}
-	return buf
-}
-
-// DecodeGetBlobsRequest decodes a list of versioned hashes from SSZ bytes.
-func DecodeGetBlobsRequest(buf []byte) ([]common.Hash, error) {
-	if len(buf) < 4 {
-		return nil, fmt.Errorf("GetBlobsRequest: buffer too short")
-	}
-	count := binary.LittleEndian.Uint32(buf[0:4])
-	if 4+count*32 > uint32(len(buf)) {
-		return nil, fmt.Errorf("GetBlobsRequest: buffer too short for %d hashes", count)
-	}
-	hashes := make([]common.Hash, count)
-	for i := uint32(0); i < count; i++ {
-		copy(hashes[i][:], buf[4+i*32:4+(i+1)*32])
-	}
-	return hashes, nil
+	return resp, nil
 }

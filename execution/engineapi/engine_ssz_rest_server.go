@@ -18,7 +18,7 @@ package engineapi
 
 import (
 	"context"
-	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	commonssz "github.com/erigontech/erigon/common/ssz"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
@@ -56,11 +57,15 @@ func NewSszRestServer(engine *EngineServer, logger log.Logger, jwtSecret []byte,
 	}
 }
 
-// sszErrorResponse writes a text/plain error response per execution-apis SSZ spec.
-func sszErrorResponse(w http.ResponseWriter, code int, _ int, message string) {
-	w.Header().Set("Content-Type", "text/plain")
+// sszErrorResponse writes a JSON error response per EIP-8161 spec.
+func sszErrorResponse(w http.ResponseWriter, code int, jsonCode int, message string) {
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	w.Write([]byte(message)) //nolint:errcheck
+	body, _ := json.Marshal(struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	}{Code: jsonCode, Message: message})
+	w.Write(body) //nolint:errcheck
 }
 
 // sszResponse writes a successful SSZ-encoded response.
@@ -262,7 +267,8 @@ func (s *SszRestServer) handleNewPayload(w http.ResponseWriter, r *http.Request,
 
 	// Encode PayloadStatus response
 	ps := engine_types.PayloadStatusToSSZ(result)
-	sszResponse(w, ps.EncodeSSZ())
+	psBytes, _ := ps.EncodeSSZ(nil)
+	sszResponse(w, psBytes)
 }
 
 // --- forkchoiceUpdated handlers ---
@@ -307,7 +313,7 @@ func (s *SszRestServer) handleForkchoiceUpdated(w http.ResponseWriter, r *http.R
 
 	var payloadAttributes *engine_types.PayloadAttributes
 
-	attrOffset := binary.LittleEndian.Uint32(body[96:100])
+	attrOffset := commonssz.DecodeOffset(body[96:])
 	if attrOffset < uint32(len(body)) {
 		attrData := body[attrOffset:]
 		if len(attrData) > 0 {
@@ -368,7 +374,7 @@ func decodePayloadAttributesSSZ(buf []byte, version int) (*engine_types.PayloadA
 		return nil, fmt.Errorf("PayloadAttributes: buffer too short (%d < 60)", len(buf))
 	}
 
-	timestamp := binary.LittleEndian.Uint64(buf[0:8])
+	timestamp := commonssz.UnmarshalUint64SSZ(buf[0:])
 	pa := &engine_types.PayloadAttributes{
 		Timestamp: hexutil.Uint64(timestamp),
 	}
@@ -383,7 +389,7 @@ func decodePayloadAttributesSSZ(buf []byte, version int) (*engine_types.PayloadA
 	if len(buf) < 64 {
 		return nil, fmt.Errorf("PayloadAttributes V2+: buffer too short (%d < 64)", len(buf))
 	}
-	withdrawalsOffset := binary.LittleEndian.Uint32(buf[60:64])
+	withdrawalsOffset := commonssz.DecodeOffset(buf[60:])
 
 	if version >= 3 {
 		// V3: has parent_beacon_block_root at bytes 64-96
@@ -407,9 +413,9 @@ func decodePayloadAttributesSSZ(buf []byte, version int) (*engine_types.PayloadA
 			for i := 0; i < count; i++ {
 				off := i * 44
 				w := &types.Withdrawal{
-					Index:     binary.LittleEndian.Uint64(wdBuf[off : off+8]),
-					Validator: binary.LittleEndian.Uint64(wdBuf[off+8 : off+16]),
-					Amount:    binary.LittleEndian.Uint64(wdBuf[off+36 : off+44]),
+					Index:     commonssz.UnmarshalUint64SSZ(wdBuf[off:]),
+					Validator: commonssz.UnmarshalUint64SSZ(wdBuf[off+8:]),
+					Amount:    commonssz.UnmarshalUint64SSZ(wdBuf[off+36:]),
 				}
 				copy(w.Address[:], wdBuf[off+16:off+36])
 				pa.Withdrawals[i] = w
@@ -607,7 +613,7 @@ func encodeGetBlobsV1Response(blobs []*engine_types.BlobAndProofV1) []byte {
 	buf := make([]byte, fixedSize+listSize)
 
 	// Offset to the list data
-	binary.LittleEndian.PutUint32(buf[0:4], uint32(fixedSize))
+	commonssz.EncodeOffset(buf[0:], uint32(fixedSize))
 
 	// Write each non-nil BlobAndProof as fixed-size items
 	pos := fixedSize
