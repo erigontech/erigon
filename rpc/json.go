@@ -68,10 +68,6 @@ func (msg *jsonrpcMessage) hasVersion() bool {
 	return msg.Version != ""
 }
 
-func (msg *jsonrpcMessage) hasMethod() bool {
-	return msg.Method != ""
-}
-
 func (msg *jsonrpcMessage) isCall() bool {
 	return msg.hasValidID() && msg.Method != ""
 }
