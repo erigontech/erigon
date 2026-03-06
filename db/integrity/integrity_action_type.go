@@ -119,12 +119,13 @@ const (
 
 var FastChecks = []Check{
 	Blocks, HeaderNoGaps, BlocksTxnID, InvertedIndex, StateProgress, HistoryNoSystemTxs,
-	BorEvents, BorSpans, BorCheckpoints, ReceiptsNoDups, RCacheNoDups, CommitmentRoot,
-	CommitmentKvi, CommitmentHistVal, StateRootVerifyByHistory, Publishable,
+	CommitmentKvi, ReceiptsNoDups, RCacheNoDups, CommitmentRoot,
+	CommitmentHistVal, StateRootVerifyByHistory, Publishable,
 }
 
 var SlowChecks = []Check{StateVerify}
 var DeprecatedChecks = []Check{
+	BorEvents, BorSpans, BorCheckpoints,
 	CommitmentKvDeref, //StateVerify - will overcome
 }
 var AllChecks = append(append(append([]Check{}, FastChecks...), SlowChecks...), DeprecatedChecks...)
