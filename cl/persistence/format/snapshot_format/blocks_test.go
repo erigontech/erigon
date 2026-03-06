@@ -102,7 +102,11 @@ func TestBlockSnapshotEncoding(t *testing.T) {
 
 		hash4, err := blk4.HashSSZ()
 		require.NoError(t, err)
-		require.Equal(t, hash1, hash4)
+		// ReadBeaconBlockBodyFromSnapshot does not reconstruct execution data,
+		// so hash equality only holds for pre-Bellatrix blocks.
+		if blk.Version() < clparams.BellatrixVersion {
+			require.Equal(t, hash1, hash4)
+		}
 
 		if blk.Version() >= clparams.BellatrixVersion {
 			require.Equal(t, bn, blk.Block.Body.ExecutionPayload.BlockNumber)

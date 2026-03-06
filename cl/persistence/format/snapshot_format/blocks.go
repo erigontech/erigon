@@ -253,10 +253,15 @@ func ReadBeaconBlockBodyFromSnapshot(r io.Reader, cfg *clparams.BeaconChainConfi
 		return block, nil
 	}
 
-	// Pre-GLOAS: stored as blinded block; promote to full block with nil execution data.
+	// Pre-GLOAS: stored as blinded block; promote to full block with empty execution data.
 	blindedBlock := cltypes.NewSignedBlindedBeaconBlock(cfg, v)
 	if err := blindedBlock.DecodeSSZ(buffer.Bytes(), int(v)); err != nil {
 		return nil, err
 	}
-	return blindedBlock.Full(nil, nil), nil
+	txs := &solid.TransactionsSSZ{}
+	var ws *solid.ListSSZ[*cltypes.Withdrawal]
+	if v >= clparams.CapellaVersion {
+		ws = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
+	}
+	return blindedBlock.Full(txs, ws), nil
 }
