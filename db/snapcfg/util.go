@@ -607,9 +607,15 @@ func LoadRemotePreverifiedForChain(ctx context.Context, chainName string) error 
 
 			hashes, err = fetchChainToml(ctx, snapshothashes.Github, snapshotGitBranch, chainName)
 			if err != nil {
+				log.Root().Warn("Failed2 GitHub", "err", err)
 				return err
+			} else {
+				log.Root().Warn("Fallback to Gihub happened", "err", err)
 			}
+			fmt.Printf("%s\n", hashes)
+			panic(1)
 		}
+		panic(2)
 
 		if ptr, ok := snapshotHashPtrs[chainName]; ok {
 			*ptr = hashes
@@ -649,8 +655,11 @@ func LoadRemotePreverified(ctx context.Context) (err error) {
 			} else {
 				log.Root().Warn("Fallback to Gihub happened", "err", err)
 			}
+			panic(1)
 		}
+		panic(2)
 	}
+	panic(3)
 
 	KnownWebseeds = map[string][]string{
 		networkname.Mainnet:    webseedsParse(webseed.Mainnet),
