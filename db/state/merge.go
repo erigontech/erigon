@@ -658,7 +658,6 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 		lastVal = append(lastVal[:0], cp[0].val...)
 
 		// Pre-rebase the first sequence
-		firstFile := cp[0].kvReader.FileName()
 		preSeq.Reset(cp[0].startTxNum, lastVal)
 		preIt.Reset(preSeq, 0)
 		builder.Reset(startTxNum, preSeq.Count(), preSeq.Max())
@@ -672,7 +671,6 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 		builder.Build()
 		lastVal = builder.AppendBytes(lastVal[:0])
 		var mergedOnce bool
-		var lastMergedFile string
 
 		// Advance all the items that have this key (including the top)
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
@@ -680,12 +678,6 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 			if mergedOnce {
 				mergeSeq.Reset(ci1.startTxNum, ci1.val)
 				preSeq.Reset(startTxNum, lastVal)
-				if mergeSeq.Max() > preSeq.Min() {
-					panic(fmt.Sprintf("merge %s: mergeSeq.Max(%d) > preSeq.Min(%d), key=%x, file=%s, prevFile=%s, firstFile=%s, ci1=[%d-%d], merge=[%d-%d]",
-						iit.ii.FilenameBase, mergeSeq.Max(), preSeq.Min(), lastKey,
-						ci1.kvReader.FileName(), lastMergedFile, firstFile,
-						ci1.startTxNum, ci1.endTxNum, startTxNum, endTxNum))
-				}
 				if mergeErr := builder.Merge(mergeSeq, preSeq, startTxNum); mergeErr != nil {
 					return nil, fmt.Errorf("merge %s inverted index: %w", iit.ii.FilenameBase, mergeErr)
 				}
@@ -693,7 +685,6 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 			} else {
 				mergedOnce = true
 			}
-			lastMergedFile = ci1.kvReader.FileName()
 			// fmt.Printf("multi-way %s [%d] %x\n", ii.KeysTable, ci1.endTxNum, ci1.key)
 			if ci1.kvReader.HasNext() {
 				ci1.key, _ = ci1.kvReader.Next(ci1.key[:0])
