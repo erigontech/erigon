@@ -109,7 +109,11 @@ func (ef *EliasFano) deriveFields() int {
 	totalWords := wordsLowerBits + wordsUpperBits + jumpWords
 	//fmt.Printf("EF: %d, %d,%d,%d\n", totalWords, wordsLowerBits, wordsUpperBits, jumpWords)
 	if cap(ef.data) < totalWords {
-		ef.data = make([]uint64, totalWords)
+		alloc := totalWords
+		if c := cap(ef.data); c > 0 { // re-usable buffer: grow 2x old cap to amortize future reallocs
+			alloc = max(totalWords, c*2)
+		}
+		ef.data = make([]uint64, totalWords, alloc)
 	} else {
 		ef.data = ef.data[:totalWords]
 	}
