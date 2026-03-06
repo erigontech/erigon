@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"math"
 	"time"
-	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 
@@ -313,13 +312,13 @@ func unwindExec3State(ctx context.Context,
 					fmt.Printf("unwind (Block:%d,Tx:%d): del acc: %x, step: %d\n", blockUnwindTo, txUnwindTo, address, keyStep)
 				}
 			}
-			if err := stateChanges.Collect(toBytesZeroCopy(entry.Key)[:length.Addr], entry.Value); err != nil {
+			if err := stateChanges.Collect(common.ToBytesZeroCopy(entry.Key)[:length.Addr], entry.Value); err != nil {
 				return err
 			}
 		}
 		storageDiffs := changeset[kv.StorageDomain]
 		for _, kv := range storageDiffs {
-			if err := stateChanges.Collect(toBytesZeroCopy(kv.Key), kv.Value); err != nil {
+			if err := stateChanges.Collect(common.ToBytesZeroCopy(kv.Key), kv.Value); err != nil {
 				return err
 			}
 		}
@@ -350,8 +349,6 @@ func unwindExec3State(ctx context.Context,
 	sd.SetTxNum(txUnwindTo)
 	return nil
 }
-
-func toBytesZeroCopy(s string) []byte { return unsafe.Slice(unsafe.StringData(s), len(s)) }
 
 func stageProgress(tx kv.Tx, db kv.RoDB, stage stages.SyncStage) (prevStageProgress uint64, err error) {
 	if tx != nil {
