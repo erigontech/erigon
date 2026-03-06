@@ -143,7 +143,7 @@ This command will display a list of convenience commands available in the Makefi
  prometheus:                        run prometheus and grafana with docker-compose
  escape:                            run escape path={path} to check for memory leaks e.g. run escape path=cmd/erigon
  git-submodules:                    update git submodules
- install:                           copies binaries and libraries to DIST
+ install:                           copies binaries to DIST
  user_linux:                        create "erigon" user (Linux)
  user_macos:                        create "erigon" user (MacOS)
  hive:                              run hive test suite locally using docker e.g. OUTPUT_DIR=~/results/hive SIM=ethereum/engine make hive

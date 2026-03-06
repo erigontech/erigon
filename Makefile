@@ -489,7 +489,7 @@ git-submodules:
 	@git submodule sync --quiet --recursive || true
 	@git submodule update --quiet --init --recursive --force || true
 
-## install:                            copies binaries and libraries to DIST
+## install:                            copies binaries to DIST
 DIST ?= $(CURDIR)/build/dist
 .PHONY: install
 install:

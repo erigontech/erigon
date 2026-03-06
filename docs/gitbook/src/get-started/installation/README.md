@@ -228,9 +228,9 @@ fresh Go installation. If you have an older version, consider deleting the `/usr
 
 To install the latest Go version, visit the official documentation at [https://golang.org/doc/install](https://golang.org/doc/install).
 
-**1.4 C++ Compiler**
+**1.4 C Compiler**
 
-This turns the C++ part of Erigon's code into a program your computer can run. You can use either **Clang** or **GCC**:
+A C compiler is required to build Erigon's CGO-based dependencies (such as MDBX, blst, and secp256k1). You can use either **Clang** or **GCC**:
 
 * For **Clang** follow the instructions at [https://clang.llvm.org/get\_started.html](https://clang.llvm.org/get_started.html);
 * For **GCC** (version 10 or newer): [https://gcc.gnu.org/install/index.html](https://gcc.gnu.org/install/index.html).
