@@ -286,11 +286,12 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	seq := &multiencseq.SequenceReader{}
 	it := &multiencseq.SequenceIterator{}
 
-	i := 0
 	for {
 		histReader.Reset(0)
 		iiReader.Reset(0)
 		rs.SetProgress(p)
+
+		i := 0
 
 		valOffset = 0
 		for iiReader.HasNext() {
