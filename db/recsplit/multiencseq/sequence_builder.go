@@ -35,7 +35,6 @@ type SequenceBuilder struct {
 	smallCount uint8
 	rebasedEf  *eliasfano32.EliasFano // direct rebased EF for large sequences (count > 16)
 	it1        SequenceIterator
-	it2        SequenceIterator
 }
 
 // Creates a new builder. The builder is not meant to be reused. The construction
@@ -166,7 +165,6 @@ func (b *SequenceBuilder) Merge(s1, s2 *SequenceReader, outBaseNum uint64) error
 	}
 	b.Reset(outBaseNum, s1.Count()+s2.Count(), maxOffset)
 	b.it1.Reset(s1, 0)
-	b.it2.Reset(s2, 0)
 	for b.it1.HasNext() {
 		v, err := b.it1.Next()
 		if err != nil {
@@ -174,8 +172,9 @@ func (b *SequenceBuilder) Merge(s1, s2 *SequenceReader, outBaseNum uint64) error
 		}
 		b.AddOffset(v)
 	}
-	for b.it2.HasNext() {
-		v, err := b.it2.Next()
+	b.it1.Reset(s2, 0)
+	for b.it1.HasNext() {
+		v, err := b.it1.Next()
 		if err != nil {
 			return err
 		}
