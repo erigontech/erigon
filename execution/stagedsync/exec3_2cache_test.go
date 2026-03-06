@@ -99,13 +99,13 @@ func TestCrossBlockTimingRace(t *testing.T) {
 
 	rs := state.NewStateV3Buffered(state.NewStateV3(domains, ethconfig.Sync{}, lgr))
 
-	// Simulate block N's finalize(): BufferedWriter writes to rs.accounts
+	// Simulate block N's finalize(): versionedWriteCollector writes to rs.accounts
 	// synchronously, before the async applyResults channel fires.
 	// Domains are NOT updated yet.
-	bw := state.NewBufferedWriter(rs, nil)
+	collector := state.NewVersionedWriteCollector(rs)
 	blockNAccount := &accounts.Account{Balance: *uint256.NewInt(500), Nonce: 7}
 	original := &accounts.Account{}
-	err := bw.UpdateAccountData(addr, original, blockNAccount)
+	err := collector.UpdateAccountData(addr, original, blockNAccount)
 	require.NoError(t, err)
 
 	// Block N+1 worker reads via NewBufferedReader.
