@@ -330,6 +330,9 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	if fromBlock > toBlock {
 		return errors.New("invalid parameters: fromBlock cannot be greater than toBlock")
 	}
+	if api.rangeLimit != 0 && (toBlock-fromBlock) > uint64(api.rangeLimit) {
+		return fmt.Errorf("%s: %d", errExceedBlockRange, api.rangeLimit)
+	}
 
 	return api.filterV3(ctx, dbtx, fromBlock, toBlock, req, stream, *gasBailOut, traceConfig)
 }

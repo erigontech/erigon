@@ -46,6 +46,7 @@ var (
 	errBlockRangeIntoFuture = "block range extends beyond current head block"
 	errBlockHashWithRange   = "can't specify fromBlock/toBlock with blockHash"
 	errExceedMaxTopics      = "exceed max topics"
+	errExceedBlockRange     = "exceed maximum block range"
 )
 
 const (
@@ -155,6 +156,9 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 
 	if end < begin {
 		return nil, &rpc.CustomError{Message: errInvalidBlockRange, Code: rpc.ErrCodeInvalidParams}
+	}
+	if api.rangeLimit != 0 && (end-begin) > uint64(api.rangeLimit) {
+		return nil, &rpc.CustomError{Message: fmt.Sprintf("%s: %d", errExceedBlockRange, api.rangeLimit), Code: rpc.ErrCodeInvalidParams}
 	}
 	if end > roaring.MaxUint32 {
 		latest, err := rpchelper.GetLatestBlockNumber(tx)
