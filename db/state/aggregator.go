@@ -601,6 +601,11 @@ func (a *Aggregator) PresetOfflineMerge() {
 	a.SetMergeWorkers(min(4, estimate.StateV3Collate.Workers()))
 	a.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 	a.SetBuildAccessorsWorkers(estimate.CompressSnapshot.Workers())
+	log.Warn("[dbg] workers",
+		"a.collateAndBuildWorkers", a.collateAndBuildWorkers,
+		"a.compressWorkers", estimate.CompressSnapshot.Workers(),
+		"a.accessorWorkers", estimate.CompressSnapshot.Workers(),
+	)
 }
 
 // PresetOfflineExecution configures workers for offline execution (e.g. integration tool):
