@@ -253,6 +253,10 @@ func ConsensusClStages(ctx context.Context,
 					}
 					// We only download historical blocks once
 					cfg.hasDownloaded = true
+					stateRoot, err := cfg.state.HashSSZ()
+					if err != nil {
+						return err
+					}
 					startingRoot, err := cfg.state.BlockRoot()
 					if err != nil {
 						return err
@@ -263,7 +267,13 @@ func ConsensusClStages(ctx context.Context,
 					}
 
 					startingSlot := cfg.state.LatestBlockHeader().Slot
-					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc, cfg.sn, cfg.executionClient, cfg.indiciesDB)
+					logger.Info("[DEBUG] Backward sync starting",
+						"slot", startingSlot,
+						"stateVersion", cfg.state.Version(),
+						"stateRoot", stateRoot,
+						"blockRoot", startingRoot,
+					)
+					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc, cfg.sn, cfg.executionClient, cfg.indiciesDB, cfg.beaconCfg)
 
 					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.beaconCfg, cfg.caplinConfig, false, startingRoot, startingSlot, cfg.dirs.Tmp, 600*time.Millisecond, cfg.blockCollector, cfg.blockReader, cfg.blobStore, logger, cfg.forkChoice, cfg.blobDownloader), context.Background(), logger); err != nil {
 						cfg.hasDownloaded = false

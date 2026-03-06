@@ -31,9 +31,9 @@ import (
 
 // make sure that the type implements the interface ssz2.ObjectSSZ
 var (
-	_ ssz2.ObjectSSZ = (*BlindedBeaconBody)(nil)
-	_ ssz2.ObjectSSZ = (*BlindedBeaconBlock)(nil)
-	_ ssz2.ObjectSSZ = (*SignedBlindedBeaconBlock)(nil)
+	_ ssz2.HashableSizedObjectSSZ = (*BlindedBeaconBody)(nil)
+	_ ssz2.HashableSizedObjectSSZ = (*BlindedBeaconBlock)(nil)
+	_ ssz.EncodableSSZ            = (*SignedBlindedBeaconBlock)(nil)
 
 	_ GenericBeaconBlock = (*BlindedBeaconBlock)(nil)
 	_ GenericBeaconBody  = (*BlindedBeaconBody)(nil)
@@ -117,6 +117,26 @@ func (b *SignedBlindedBeaconBlock) Full(txs *solid.TransactionsSSZ, withdrawals 
 		Signature: b.Signature,
 		Block:     b.Block.Full(txs, withdrawals),
 	}
+}
+
+// GetSlot returns the slot of the inner block.
+// Implements ColumnSyncableSignedBlock interface.
+func (b *SignedBlindedBeaconBlock) GetSlot() uint64 {
+	return b.Block.Slot
+}
+
+// BlockHashSSZ returns the hash of the inner block (not the signed block).
+// Implements ColumnSyncableSignedBlock interface.
+func (b *SignedBlindedBeaconBlock) BlockHashSSZ() ([32]byte, error) {
+	return b.Block.HashSSZ()
+}
+
+// GetBlobKzgCommitments returns blob KZG commitments from the block body.
+// Implements ColumnSyncableSignedBlock interface.
+// Note: BlindedBeaconBlock cannot exist for GLOAS (Blinded() returns error),
+// so this always returns the pre-GLOAS commitments.
+func (b *SignedBlindedBeaconBlock) GetBlobKzgCommitments() *solid.ListSSZ[*KZGCommitment] {
+	return b.Block.Body.GetBlobKzgCommitments()
 }
 
 // Definitions of BlindedBeaconBlock
@@ -483,6 +503,12 @@ func (b *BlindedBeaconBody) GetVoluntaryExits() *solid.ListSSZ[*SignedVoluntaryE
 }
 
 func (b *BlindedBeaconBody) GetBlobKzgCommitments() *solid.ListSSZ[*KZGCommitment] {
+	// [Modified in Gloas:EIP7732] BlindedBeaconBody does not support GLOAS
+	// In GLOAS, blob_kzg_commitments are in signed_execution_payload_bid.message,
+	// which is not available in blinded blocks
+	if b.Version >= clparams.GloasVersion {
+		return nil
+	}
 	return b.BlobKzgCommitments
 }
 
@@ -492,4 +518,12 @@ func (b *BlindedBeaconBody) GetExecutionChanges() *solid.ListSSZ[*SignedBLSToExe
 
 func (b *BlindedBeaconBody) GetExecutionRequests() *ExecutionRequests {
 	return b.ExecutionRequests
+}
+
+func (b *BlindedBeaconBody) GetSignedExecutionPayloadBid() *SignedExecutionPayloadBid {
+	return nil
+}
+
+func (b *BlindedBeaconBody) GetPayloadAttestations() *solid.ListSSZ[*PayloadAttestation] {
+	return nil
 }

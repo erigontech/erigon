@@ -23,6 +23,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -105,7 +106,7 @@ func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, che
 }
 
 // GetHead returns the head of the fork choice store.
-// it can take an optional auxilliary state to determine the current weights instead of computing the justified state.
+// Dispatches to GLOAS or pre-GLOAS implementation based on current epoch.
 func (f *ForkChoiceStore) GetHead(auxilliaryState *state.CachingBeaconState) (common.Hash, uint64, error) {
 	f.mu.RLock()
 	if f.headHash != (common.Hash{}) {
@@ -113,6 +114,86 @@ func (f *ForkChoiceStore) GetHead(auxilliaryState *state.CachingBeaconState) (co
 		return f.headHash, f.headSlot, nil
 	}
 	f.mu.RUnlock()
+
+	currentEpoch := f.computeEpochAtSlot(f.Slot())
+	if f.beaconCfg.GetCurrentStateVersion(currentEpoch) >= clparams.GloasVersion {
+		return f.getHeadGloas()
+	}
+	return f.getHead(auxilliaryState)
+}
+
+// getHeadGloas returns the head using GLOAS fork choice rules.
+// [New in Gloas:EIP7732]
+func (f *ForkChoiceStore) getHeadGloas() (common.Hash, uint64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+
+	// Get filtered block tree
+	blocks := f.getFilteredBlockTree(justifiedCheckpoint.Root)
+
+	// Start from justified checkpoint with PENDING status
+	head := ForkChoiceNode{
+		Root:          justifiedCheckpoint.Root,
+		PayloadStatus: cltypes.PayloadStatusPending,
+	}
+
+	// Get weight store for weight calculation
+	ws := f.GetWeightStore()
+
+	for {
+		children := f.getNodeChildren(head, blocks)
+		if len(children) == 0 {
+			// No children, head is the result
+			header, hasHeader := f.forkGraph.GetHeader(head.Root)
+			if !hasHeader {
+				return common.Hash{}, 0, errors.New("no slot for head is stored")
+			}
+			f.headHash = head.Root
+			f.headSlot = header.Slot
+			return f.headHash, f.headSlot, nil
+		}
+
+		// Find best child: max(children, key=(weight, root, tiebreaker))
+		bestChild := children[0]
+		bestWeight := ws.GetWeight(bestChild)
+		bestTiebreaker := f.getPayloadStatusTiebreaker(bestChild)
+
+		for i := 1; i < len(children); i++ {
+			child := children[i]
+			weight := ws.GetWeight(child)
+			tiebreaker := f.getPayloadStatusTiebreaker(child)
+
+			// Compare: weight first, then root, then tiebreaker
+			if weight > bestWeight {
+				bestChild = child
+				bestWeight = weight
+				bestTiebreaker = tiebreaker
+			} else if weight == bestWeight {
+				// Compare by root (lexicographically greater wins)
+				rootCmp := bytes.Compare(child.Root[:], bestChild.Root[:])
+				if rootCmp > 0 {
+					bestChild = child
+					bestWeight = weight
+					bestTiebreaker = tiebreaker
+				} else if rootCmp == 0 {
+					// Same root, compare by tiebreaker
+					if tiebreaker > bestTiebreaker {
+						bestChild = child
+						bestWeight = weight
+						bestTiebreaker = tiebreaker
+					}
+				}
+			}
+		}
+
+		head = bestChild
+	}
+}
+
+// getHead returns the head using pre-GLOAS fork choice rules.
+func (f *ForkChoiceStore) getHead(auxilliaryState *state.CachingBeaconState) (common.Hash, uint64, error) {
 	justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
 	var justificationState *checkpointState
 	var err error

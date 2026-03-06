@@ -277,3 +277,134 @@ func (b *CachingBeaconState) UpgradeToFulu() error {
 	log.Info("Upgrade to Fulu complete")
 	return nil
 }
+
+func (b *CachingBeaconState) UpgradeToGloas() error {
+	b.previousStateRoot = common.Hash{}
+	epoch := Epoch(b.BeaconState)
+	cfg := b.BeaconConfig()
+
+	// Update fork version
+	forkData := b.Fork()
+	forkData.Epoch = epoch
+	forkData.PreviousVersion = forkData.CurrentVersion
+	forkData.CurrentVersion = utils.Uint32ToBytes4(uint32(cfg.GloasForkVersion))
+	b.SetFork(forkData)
+
+	// Get the latest block hash from the previous execution payload header
+	latestBlockHash := b.LatestExecutionPayloadHeader().BlockHash
+
+	// Replace latest_execution_payload_header with latest_execution_payload_bid
+	// The bid contains only the block_hash from the previous header
+	bid := &cltypes.ExecutionPayloadBid{
+		BuilderIndex:       0,
+		Slot:               0,
+		PrevRandao:         common.Hash{},
+		ParentBlockHash:    common.Hash{},
+		ParentBlockRoot:    common.Hash{},
+		BlockHash:          latestBlockHash,
+		FeeRecipient:       common.Address{},
+		GasLimit:           0,
+		Value:              0,
+		ExecutionPayment:   0,
+		BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
+	}
+	b.SetLatestExecutionPayloadBid(bid)
+
+	// Initialize builder-related fields
+	builders := solid.NewStaticListSSZ[*cltypes.Builder](int(cfg.BuilderRegistryLimit), new(cltypes.Builder).EncodingSizeSSZ())
+	b.SetBuilders(builders)
+
+	b.SetNextWithdrawalBuilderIndex(0)
+
+	// Initialize execution_payload_availability to all 1s (all prior slots had payloads)
+	for i := uint64(0); i < cfg.SlotsPerHistoricalRoot; i++ {
+		b.SetExecutionPayloadAvailability(i, true)
+	}
+
+	// Initialize builder_pending_payments with empty payments
+	builderPendingPayments := solid.NewVectorSSZ[*cltypes.BuilderPendingPayment](int(2 * cfg.SlotsPerEpoch))
+	for i := 0; i < int(2*cfg.SlotsPerEpoch); i++ {
+		builderPendingPayments.Set(i, &cltypes.BuilderPendingPayment{
+			Withdrawal: &cltypes.BuilderPendingWithdrawal{},
+		})
+	}
+	b.SetBuilderPendingPayments(builderPendingPayments)
+
+	// Initialize empty builder_pending_withdrawals
+	builderPendingWithdrawals := solid.NewStaticListSSZ[*cltypes.BuilderPendingWithdrawal](int(cfg.BuilderPendingWithdrawalsLimit), new(cltypes.BuilderPendingWithdrawal).EncodingSizeSSZ())
+	b.SetBuilderPendingWithdrawals(builderPendingWithdrawals)
+
+	// Set latest_block_hash
+	b.SetLatestBlockHash(latestBlockHash)
+
+	// Initialize empty payload_expected_withdrawals
+	payloadExpectedWithdrawals := solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), new(cltypes.Withdrawal).EncodingSizeSSZ())
+	b.SetPayloadExpectedWithdrawals(payloadExpectedWithdrawals)
+
+	// Update the state version
+	b.SetVersion(clparams.GloasVersion)
+
+	// Onboard builders from pending deposits
+	if err := b.onboardBuildersFromPendingDeposits(); err != nil {
+		return err
+	}
+
+	log.Info("Upgrade to Gloas complete")
+	return nil
+}
+
+// onboardBuildersFromPendingDeposits processes pending deposits to onboard builders at the fork.
+// Applies any pending deposit for builders, effectively onboarding builders at the fork.
+// [New in Gloas:EIP7732]
+func (b *CachingBeaconState) onboardBuildersFromPendingDeposits() error {
+	cfg := b.BeaconConfig()
+
+	// Build a set of validator pubkeys
+	validatorPubkeys := make(map[common.Bytes48]struct{})
+	b.ValidatorSet().Range(func(_ int, v solid.Validator, _ int) bool {
+		validatorPubkeys[v.PublicKey()] = struct{}{}
+		return true
+	})
+
+	// Process pending deposits
+	pendingDeposits := b.GetPendingDeposits()
+	newPendingDeposits := solid.NewPendingDepositList(cfg)
+
+	for i := 0; i < pendingDeposits.Len(); i++ {
+		deposit := pendingDeposits.Get(i)
+
+		// Deposits for existing validators stay in pending queue
+		if _, isValidator := validatorPubkeys[deposit.PubKey]; isValidator {
+			newPendingDeposits.Append(deposit)
+			continue
+		}
+
+		// Check if pubkey is associated with an existing builder or has builder credentials
+		// Note: builders list may be mutated by apply_deposit_for_builder, so we check each iteration
+		isExistingBuilder := IsBuilderPubkey(b, deposit.PubKey)
+		hasBuilderCredentials := IsBuilderWithdrawalCredential(deposit.WithdrawalCredentials, cfg)
+
+		if isExistingBuilder || hasBuilderCredentials {
+			// Apply deposit for builder
+			ApplyDepositForBuilder(b, deposit.PubKey, deposit.WithdrawalCredentials, deposit.Amount, deposit.Signature, deposit.Slot)
+			continue
+		}
+
+		// For new validator deposits with valid signature, track pubkey and keep in pending
+		// Deposits with invalid signatures are dropped
+		valid, err := IsValidDepositSignature(cfg, deposit.PubKey, deposit.WithdrawalCredentials, deposit.Amount, deposit.Signature)
+		if err != nil {
+			log.Debug("Error validating deposit signature during upgrade", "err", err)
+			continue
+		}
+		if valid {
+			// Track this pubkey so subsequent builder deposits for same pubkey stay pending
+			validatorPubkeys[deposit.PubKey] = struct{}{}
+			newPendingDeposits.Append(deposit)
+		}
+		// Invalid signature deposits are dropped (they would fail in apply_pending_deposit anyway)
+	}
+
+	b.SetPendingDeposits(newPendingDeposits)
+	return nil
+}

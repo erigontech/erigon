@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 )
@@ -97,6 +98,9 @@ type ForkChoiceStore struct {
 	headSet                  map[common.Hash]struct{}
 	hotSidecars              map[common.Hash][]*cltypes.BlobSidecar // Set of sidecars that are not yet processed.
 	verifiedExecutionPayload *lru.Cache[common.Hash, struct{}]
+	// [New in Gloas:EIP7732] Track execution payload validation status by execution block hash.
+	// Used to check if parent execution payload has been validated/invalidated for gossip validation.
+	executionPayloadStatus *lru.Cache[common.Hash, execution_client.PayloadStatus]
 	// childrens
 	childrens sync.Map
 
@@ -146,11 +150,23 @@ type ForkChoiceStore struct {
 	ethClock                eth_clock.EthereumClock
 	optimisticStore         optimistic.OptimisticStore
 	probabilisticHeadGetter bool
-}
 
-type LatestMessage struct {
-	Epoch uint64
-	Root  common.Hash
+	// [New in Gloas:EIP7732]
+	payloadTimelinessVote       sync.Map // map[common.Hash][clparams.PtcSize]bool
+	payloadDataAvailabilityVote sync.Map // map[common.Hash][clparams.PtcSize]bool
+	// [New in Gloas:EIP7732] Indexed weight store for optimized weight calculation
+	indexedWeightStore *indexedWeightStore
+	// [New in Gloas:EIP7732] Envelopes waiting for their corresponding block to arrive.
+	// In GLOAS, BeaconBlock and ExecutionPayloadEnvelope are gossiped separately.
+	// Due to network timing, the envelope may arrive before its corresponding block.
+	// When this happens, OnExecutionPayload queues the envelope here (keyed by beacon_block_root).
+	// Later, when OnBlock processes the block, it checks this cache and processes any pending envelope.
+	pendingEnvelopes *lru.Cache[common.Hash, *cltypes.SignedExecutionPayloadEnvelope]
+
+	// db is used to persist execution payload indices (block number/hash) when an envelope
+	// is accepted in OnExecutionPayload. May be nil (e.g. in tests), in which case the
+	// index writes are skipped.
+	db kv.RwDB
 }
 
 type childrens struct {
@@ -171,6 +187,7 @@ func NewForkChoiceStore(
 	publicKeysRegistry public_keys_registry.PublicKeyRegistry,
 	localValidators *validator_params.ValidatorParams,
 	probabilisticHeadGetter bool,
+	db kv.RwDB,
 ) (*ForkChoiceStore, error) {
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
@@ -246,6 +263,18 @@ func NewForkChoiceStore(
 		return nil, err
 	}
 
+	// [New in Gloas:EIP7732] LRU cache for pending envelopes waiting for their block
+	pendingEnvelopes, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
+	if err != nil {
+		return nil, err
+	}
+
+	// [New in Gloas:EIP7732] Track execution payload validation status by execution block hash
+	executionPayloadStatus, err := lru.New[common.Hash, execution_client.PayloadStatus](checkpointsPerCache)
+	if err != nil {
+		return nil, err
+	}
+
 	publicKeysRegistry.ResetAnchor(anchorState)
 	participation.Add(state.Epoch(anchorState.BeaconState), anchorState.CurrentEpochParticipation().Copy())
 
@@ -287,6 +316,9 @@ func NewForkChoiceStore(
 		pendingDeposits:          pendingDeposits,
 		partialWithdrawals:       partialWithdrawals,
 		proposerLookahead:        proposerLookahead,
+		pendingEnvelopes:         pendingEnvelopes,
+		executionPayloadStatus:   executionPayloadStatus,
+		db:                       db,
 	}
 	f.justifiedCheckpoint.Store(anchorCheckpoint)
 	f.finalizedCheckpoint.Store(anchorCheckpoint)
@@ -296,6 +328,21 @@ func NewForkChoiceStore(
 
 	f.highestSeen.Store(anchorState.Slot())
 	f.time.Store(anchorState.GenesisTime() + anchorState.BeaconConfig().SecondsPerSlot*anchorState.Slot())
+
+	// [New in Gloas:EIP7732] Initialize payload timeliness and data availability votes
+	// Anchor block votes are initialized to all true (prior payloads/blobs were available)
+	var anchorTimelinessVotes [clparams.PtcSize]bool
+	var anchorDataAvailabilityVotes [clparams.PtcSize]bool
+	for i := range anchorTimelinessVotes {
+		anchorTimelinessVotes[i] = true
+		anchorDataAvailabilityVotes[i] = true
+	}
+	f.payloadTimelinessVote.Store(common.Hash(anchorRoot), anchorTimelinessVotes)
+	f.payloadDataAvailabilityVote.Store(common.Hash(anchorRoot), anchorDataAvailabilityVotes)
+
+	// [New in Gloas:EIP7732] Initialize indexed weight store
+	f.indexedWeightStore = NewIndexedWeightStore(f)
+
 	return f, nil
 }
 
@@ -306,6 +353,13 @@ func (f *ForkChoiceStore) InitPeerDas(peerDas das.PeerDas) {
 
 func (f *ForkChoiceStore) GetPeerDas() das.PeerDas {
 	return f.peerDas
+}
+
+// GetRecentExecutionPayloadStatus returns the validation status of a recently validated execution payload
+// by its execution block hash. This is an LRU cache lookup; older payloads may not be found.
+// [New in Gloas:EIP7732]
+func (f *ForkChoiceStore) GetRecentExecutionPayloadStatus(executionBlockHash common.Hash) (execution_client.PayloadStatus, bool) {
+	return f.executionPayloadStatus.Get(executionBlockHash)
 }
 
 // Highest seen returns highest seen slot
@@ -537,6 +591,22 @@ func (f *ForkChoiceStore) GetLightClientUpdate(period uint64) (*cltypes.LightCli
 
 func (f *ForkChoiceStore) GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHeader, bool) {
 	return f.forkGraph.GetHeader(blockRoot)
+}
+
+func (f *ForkChoiceStore) GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+	return f.forkGraph.GetBlock(blockRoot)
+}
+
+// HasEnvelope delegates to forkGraph.HasEnvelope.
+// [New in Gloas:EIP7732]
+func (f *ForkChoiceStore) HasEnvelope(blockRoot common.Hash) bool {
+	return f.forkGraph.HasEnvelope(blockRoot)
+}
+
+// ReadEnvelopeFromDisk delegates to forkGraph.ReadEnvelopeFromDisk.
+// [New in Gloas:EIP7732]
+func (f *ForkChoiceStore) ReadEnvelopeFromDisk(blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	return f.forkGraph.ReadEnvelopeFromDisk(blockRoot)
 }
 
 func (f *ForkChoiceStore) GetBalances(blockRoot common.Hash) (solid.Uint64ListSSZ, error) {

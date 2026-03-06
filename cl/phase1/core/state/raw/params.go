@@ -47,6 +47,8 @@ const (
 	NextSyncCommitteeLeafIndex    StateLeafIndex = 23
 	// Bellatrix
 	LatestExecutionPayloadHeaderLeafIndex StateLeafIndex = 24
+	// new in Gloas
+	LatestExecutionPayloadBidLeafIndex StateLeafIndex = 24 // same as LatestExecutionPayloadHeaderLeafIndex
 	// Capella
 	NextWithdrawalIndexLeafIndex          StateLeafIndex = 25
 	NextWithdrawalValidatorIndexLeafIndex StateLeafIndex = 26
@@ -63,14 +65,23 @@ const (
 	PendingConsolidationsLeafIndex         StateLeafIndex = 36
 	// Fulu
 	ProposerLookaheadLeafIndex StateLeafIndex = 37
+	// Gloas
+	BuildersLeafIndex                     StateLeafIndex = 38
+	NextWithdrawalBuilderIndexLeafIndex   StateLeafIndex = 39
+	ExecutionPayloadAvailabilityLeafIndex StateLeafIndex = 40
+	BuilderPendingPaymentsLeafIndex       StateLeafIndex = 41
+	BuilderPendingWithdrawalsLeafIndex    StateLeafIndex = 42
+	LatestBlockHashLeafIndex              StateLeafIndex = 43
+	PayloadExpectedWithdrawalsLeafIndex   StateLeafIndex = 44
 )
 
 const (
 	StateLeafSizeDeneb   = 32
 	StateLeafSizeElectra = 37
 	StateLeafSizeFulu    = 38
+	StateLeafSizeGloas   = 45
 
-	StateLeafSizeLatest = StateLeafSizeFulu
+	StateLeafSizeLatest = StateLeafSizeGloas
 
 	LeafInitValue  = 0
 	LeafCleanValue = 1

@@ -14,12 +14,15 @@ import (
 )
 
 func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) error {
-	if c.ethClock.GetCurrentEpoch() < c.beaconConfig.FuluForkEpoch {
+	curEpoch := c.ethClock.GetCurrentEpoch()
+	if curEpoch < c.beaconConfig.FuluForkEpoch {
 		return nil
 	}
 
+	// Use current epoch's version for decoding (supports Fulu and GLOAS)
+	version := c.beaconConfig.GetCurrentStateVersion(curEpoch)
 	req := &cltypes.ColumnSidecarsByRangeRequest{}
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, clparams.FuluVersion); err != nil {
+	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, version); err != nil {
 		return err
 	}
 
@@ -115,20 +118,20 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) e
 }
 
 func (c *ConsensusHandlers) dataColumnSidecarsByRootHandler(s network.Stream) error {
-	if c.ethClock.GetCurrentEpoch() < c.beaconConfig.FuluForkEpoch {
+	curEpoch := c.ethClock.GetCurrentEpoch()
+	if curEpoch < c.beaconConfig.FuluForkEpoch {
 		return nil
 	}
 
+	// Use current epoch's version for decoding (supports Fulu and GLOAS)
+	version := c.beaconConfig.GetCurrentStateVersion(curEpoch)
 	req := solid.NewDynamicListSSZ[*cltypes.DataColumnsByRootIdentifier](int(c.beaconConfig.MaxRequestBlocksDeneb))
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, clparams.FuluVersion); err != nil {
+	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, version); err != nil {
 		return err
 	}
 	if req.Len() > int(c.beaconConfig.MaxRequestBlocksDeneb) {
 		return errors.New("request is too large")
 	}
-
-	curSlot := c.ethClock.GetCurrentSlot()
-	curEpoch := curSlot / c.beaconConfig.SlotsPerEpoch
 
 	tx, err := c.indiciesDB.BeginRo(c.ctx)
 	if err != nil {

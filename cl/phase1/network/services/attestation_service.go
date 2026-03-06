@@ -246,9 +246,16 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 			attestation = att.Attestation
 		} else {
 			// electra and after
-			// [REJECT] attestation.data.index == 0
-			if att.SingleAttestation.Data.CommitteeIndex != 0 {
-				return errors.New("committee index must be 0")
+			if clVersion >= clparams.GloasVersion {
+				// [New in Gloas] [REJECT] attestation.data.index < 2
+				if att.SingleAttestation.Data.CommitteeIndex >= 2 {
+					return errors.New("attestation data index must be less than 2")
+				}
+			} else {
+				// [REJECT] attestation.data.index == 0
+				if att.SingleAttestation.Data.CommitteeIndex != 0 {
+					return errors.New("committee index must be 0")
+				}
 			}
 			// [REJECT] The attester is a member of the committee -- i.e. attestation.attester_index in get_beacon_committee(state, attestation.data.slot, index).
 			memIndexInCommittee := contains(att.SingleAttestation.AttesterIndex, beaconCommittee)
@@ -287,21 +294,29 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 
 	// [IGNORE] The block being voted for (attestation.data.beacon_block_root) has been seen (via both gossip and non-gossip sources)
 	// (a client MAY queue attestations for processing once block is retrieved).
-	if _, ok := s.forkchoiceStore.GetHeader(root); !ok {
+	blockHeader, ok := s.forkchoiceStore.GetHeader(root)
+	if !ok {
 		//s.scheduleAttestationForLaterProcessing(att)
 		return ErrIgnore
+	}
+
+	// [New in Gloas] [REJECT] attestation.data.index == 0 if block.slot == attestation.data.slot
+	if clVersion >= clparams.GloasVersion {
+		if blockHeader.Slot == data.Slot && data.CommitteeIndex != 0 {
+			return errors.New("attestation data index must be 0 when block slot equals attestation slot")
+		}
 	}
 
 	// [REJECT] The attestation's target block is an ancestor of the block named in the LMD vote -- i.e.
 	// get_checkpoint_block(store, attestation.data.beacon_block_root, attestation.data.target.epoch) == attestation.data.target.root
 	startSlotAtEpoch := targetEpoch * s.beaconCfg.SlotsPerEpoch
-	if targetBlock := s.forkchoiceStore.Ancestor(root, startSlotAtEpoch); targetBlock != data.Target.Root {
-		return fmt.Errorf("invalid target block. root %v targetEpoch %v attTargetBlockRoot %v targetBlock %v", root.Hex(), targetEpoch, data.Target.Root.Hex(), targetBlock.Hex())
+	if targetBlock := s.forkchoiceStore.Ancestor(root, startSlotAtEpoch); targetBlock.Root != data.Target.Root {
+		return fmt.Errorf("invalid target block. root %v targetEpoch %v attTargetBlockRoot %v targetBlock %v", root.Hex(), targetEpoch, data.Target.Root.Hex(), targetBlock.Root.Hex())
 	}
 	// [IGNORE] The current finalized_checkpoint is an ancestor of the block defined by attestation.data.beacon_block_root --
 	// i.e. get_checkpoint_block(store, attestation.data.beacon_block_root, store.finalized_checkpoint.epoch) == store.finalized_checkpoint.root
 	startSlotAtEpoch = s.forkchoiceStore.FinalizedCheckpoint().Epoch * s.beaconCfg.SlotsPerEpoch
-	if s.forkchoiceStore.Ancestor(root, startSlotAtEpoch) != s.forkchoiceStore.FinalizedCheckpoint().Root {
+	if s.forkchoiceStore.Ancestor(root, startSlotAtEpoch).Root != s.forkchoiceStore.FinalizedCheckpoint().Root {
 		return fmt.Errorf("invalid finalized checkpoint %w", ErrIgnore)
 	}
 

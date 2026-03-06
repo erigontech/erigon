@@ -40,25 +40,38 @@ var buffersPool = sync.Pool{
 
 // WriteBlockForSnapshot writes a block to the given writer in the format expected by the snapshot.
 // buf is just a reusable buffer. if it had to grow it will be returned back as grown.
+//
+// Format: [1 byte version][32 bytes bodyRoot][8 bytes length][N bytes SSZ payload]
+//
+// For pre-GLOAS blocks the SSZ payload is a SignedBlindedBeaconBlock (ExecutionPayload stripped
+// to save space; transactions/withdrawals live in the EL snapshots).
+// For GLOAS blocks (version >= GloasVersion) the SSZ payload is the full SignedBeaconBlock,
+// because the beacon block contains no ExecutionPayload — there is nothing to blind.
 func WriteBlockForSnapshot(w io.Writer, block *cltypes.SignedBeaconBlock, reusable []byte) ([]byte, error) {
 	bodyRoot, err := block.Block.Body.HashSSZ()
 	if err != nil {
 		return reusable, err
 	}
 	reusable = reusable[:0]
-	// Find the blinded block
-	blinded, err := block.Blinded()
-	if err != nil {
-		return reusable, err
+	version := block.Version()
+
+	var encoded []byte
+	if version >= clparams.GloasVersion {
+		// [New in Gloas:EIP7732] No ExecutionPayload in beacon block; store the full block directly.
+		encoded, err = block.EncodeSSZ(reusable)
+	} else {
+		// Pre-GLOAS: strip the execution payload to avoid duplicating data already held by the EL.
+		blinded, blindErr := block.Blinded()
+		if blindErr != nil {
+			return reusable, blindErr
+		}
+		encoded, err = blinded.EncodeSSZ(reusable)
 	}
-	// Maybe reuse the buffer?
-	encoded, err := blinded.EncodeSSZ(reusable)
 	if err != nil {
 		return reusable, err
 	}
 
 	reusable = encoded
-	version := block.Version()
 	if _, err := w.Write([]byte{byte(version)}); err != nil {
 		return reusable, err
 	}
@@ -96,17 +109,27 @@ func ReadBlockFromSnapshot(r io.Reader, executionReader ExecutionBlockReaderByNu
 	if err != nil {
 		return nil, err
 	}
-	blindedBlock := cltypes.NewSignedBlindedBeaconBlock(cfg, v)
 	// Read the length
 	length := make([]byte, 8)
 	if _, err := io.ReadFull(r, length); err != nil {
 		return nil, err
 	}
-	// Read the block
+	// Read the block bytes
 	if _, err := io.CopyN(buffer, r, int64(binary.BigEndian.Uint64(length))); err != nil {
 		return nil, err
 	}
-	// Decode the block in blinded
+
+	// [New in Gloas:EIP7732] GLOAS blocks are stored as full SignedBeaconBlock (no blinding).
+	if v >= clparams.GloasVersion {
+		block := cltypes.NewSignedBeaconBlock(cfg, v)
+		if err := block.DecodeSSZ(buffer.Bytes(), int(v)); err != nil {
+			return nil, err
+		}
+		return block, nil
+	}
+
+	// Pre-GLOAS: stored as blinded block; reconstruct full block with execution data from EL.
+	blindedBlock := cltypes.NewSignedBlindedBeaconBlock(cfg, v)
 	if err := blindedBlock.DecodeSSZ(buffer.Bytes(), int(v)); err != nil {
 		return nil, err
 	}
@@ -139,18 +162,39 @@ func ReadBlockHeaderFromSnapshotWithExecutionData(r io.Reader, cfg *clparams.Bea
 	if err != nil {
 		return nil, 0, common.Hash{}, err
 	}
-	blindedBlock := cltypes.NewSignedBlindedBeaconBlock(cfg, v)
-
 	// Read the length
 	length := make([]byte, 8)
 	if _, err := io.ReadFull(r, length); err != nil {
 		return nil, 0, common.Hash{}, err
 	}
-	// Read the block
+	// Read the block bytes
 	if _, err := io.CopyN(buffer, r, int64(binary.BigEndian.Uint64(length))); err != nil {
 		return nil, 0, common.Hash{}, err
 	}
-	// Decode the block in blinded
+
+	// [New in Gloas:EIP7732] GLOAS blocks are stored as full SignedBeaconBlock (no blinding).
+	// Execution block number and hash are not present in the beacon block; they come from the
+	// SignedExecutionPayloadEnvelope and are tracked separately via WriteExecutionPayloadEnvelopeIndicies.
+	if v >= clparams.GloasVersion {
+		block := cltypes.NewSignedBeaconBlock(cfg, v)
+		if err := block.DecodeSSZ(buffer.Bytes(), int(v)); err != nil {
+			return nil, 0, common.Hash{}, err
+		}
+		blockHeader := &cltypes.SignedBeaconBlockHeader{
+			Signature: block.Signature,
+			Header: &cltypes.BeaconBlockHeader{
+				Slot:          block.Block.Slot,
+				ProposerIndex: block.Block.ProposerIndex,
+				ParentRoot:    block.Block.ParentRoot,
+				Root:          block.Block.StateRoot,
+				BodyRoot:      bodyRoot,
+			},
+		}
+		return blockHeader, 0, common.Hash{}, nil
+	}
+
+	// Pre-GLOAS: stored as blinded block.
+	blindedBlock := cltypes.NewSignedBlindedBeaconBlock(cfg, v)
 	if err := blindedBlock.DecodeSSZ(buffer.Bytes(), int(v)); err != nil {
 		return nil, 0, common.Hash{}, err
 	}
@@ -173,7 +217,13 @@ func ReadBlockHeaderFromSnapshotWithExecutionData(r io.Reader, cfg *clparams.Bea
 	return blockHeader, blockNumber, blockHash, nil
 }
 
-func ReadBlindedBlockFromSnapshot(r io.Reader, cfg *clparams.BeaconChainConfig) (*cltypes.SignedBlindedBeaconBlock, error) {
+// ReadBeaconBlockBodyFromSnapshot reads a beacon block from the snapshot without reconstructing
+// execution payload transactions or withdrawals. Works for both pre- and post-GLOAS:
+//   - Pre-GLOAS: stored as SignedBlindedBeaconBlock; decoded and promoted to SignedBeaconBlock
+//     with nil transactions/withdrawals (suitable for attestation replay, blob counting, etc.).
+//     Callers that need full EL data should use ReadBlockFromSnapshot instead.
+//   - GLOAS: stored as full SignedBeaconBlock (no payload to blind); decoded directly.
+func ReadBeaconBlockBodyFromSnapshot(r io.Reader, cfg *clparams.BeaconChainConfig) (*cltypes.SignedBeaconBlock, error) {
 	buffer := buffersPool.Get().(*bytes.Buffer)
 	defer buffersPool.Put(buffer)
 	buffer.Reset()
@@ -184,20 +234,34 @@ func ReadBlindedBlockFromSnapshot(r io.Reader, cfg *clparams.BeaconChainConfig) 
 	if err != nil {
 		return nil, err
 	}
-	blindedBlock := cltypes.NewSignedBlindedBeaconBlock(cfg, v)
-
 	// Read the length
 	length := make([]byte, 8)
 	if _, err := io.ReadFull(r, length); err != nil {
 		return nil, err
 	}
-	// Read the block
+	// Read the block bytes
 	if _, err := io.CopyN(buffer, r, int64(binary.BigEndian.Uint64(length))); err != nil {
 		return nil, err
 	}
-	// Decode the block in blinded
+
+	// [New in Gloas:EIP7732] GLOAS blocks are stored as full SignedBeaconBlock.
+	if v >= clparams.GloasVersion {
+		block := cltypes.NewSignedBeaconBlock(cfg, v)
+		if err := block.DecodeSSZ(buffer.Bytes(), int(v)); err != nil {
+			return nil, err
+		}
+		return block, nil
+	}
+
+	// Pre-GLOAS: stored as blinded block; promote to full block with empty execution data.
+	blindedBlock := cltypes.NewSignedBlindedBeaconBlock(cfg, v)
 	if err := blindedBlock.DecodeSSZ(buffer.Bytes(), int(v)); err != nil {
 		return nil, err
 	}
-	return blindedBlock, nil
+	txs := &solid.TransactionsSSZ{}
+	var ws *solid.ListSSZ[*cltypes.Withdrawal]
+	if v >= clparams.CapellaVersion {
+		ws = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
+	}
+	return blindedBlock.Full(txs, ws), nil
 }

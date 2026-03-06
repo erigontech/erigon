@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"time"
 
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -243,8 +244,31 @@ func (b *CachingBeaconState) GetAttestationParticipationFlagIndicies(
 	if err != nil {
 		return nil, err
 	}
+
 	matchingTarget := data.Target.Root == targetRoot
 	matchingHead := matchingTarget && data.BeaconBlockRoot == headRoot
+
+	if b.Version() >= clparams.GloasVersion {
+		var payloadMatch bool
+		ok, err := IsAttestationSameSlot(b, data)
+		if err != nil {
+			return nil, fmt.Errorf("GetAttestationParticipationFlagIndicies: failed to check attestation same slot: %w", err)
+		}
+		if ok {
+			// assert data.Index == 0
+			if data.CommitteeIndex != 0 {
+				return nil, fmt.Errorf("GetAttestationParticipationFlagIndicies: committee index is not zero for indexed payload attestation")
+			}
+			payloadMatch = true
+		} else {
+			slotIndex := data.Slot % b.BeaconConfig().SlotsPerHistoricalRoot
+			aval := b.GetExecutionPayloadAvailability()
+			payloadAvailable := aval.GetBitAt(int(slotIndex))
+			payloadMatch = (data.CommitteeIndex == 1) == payloadAvailable
+		}
+		matchingHead = matchingHead && payloadMatch
+	}
+
 	participationFlagIndicies := []uint8{}
 	if inclusionDelay <= utils.IntegerSquareRoot(b.BeaconConfig().SlotsPerEpoch) {
 		participationFlagIndicies = append(
@@ -292,6 +316,36 @@ func (b *CachingBeaconState) GetBeaconCommitee(slot, committeeIndex uint64) ([]u
 }
 
 func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, error) {
+	if b.Version() >= clparams.GloasVersion {
+		indicies, err := GetNextSyncCommitteeIndices(b)
+		if err != nil {
+			return nil, err
+		}
+		pubKeys := make([]common.Bytes48, 0, len(indicies))
+		for _, index := range indicies {
+			validator, err := b.ValidatorForValidatorIndex(int(index))
+			if err != nil {
+				return nil, err
+			}
+			pubKeys = append(pubKeys, validator.PublicKey())
+		}
+		// Compute aggregate pubkey
+		formattedKeys := make([][]byte, len(pubKeys))
+		for i := range formattedKeys {
+			formattedKeys[i] = make([]byte, 48)
+			copy(formattedKeys[i], pubKeys[i][:])
+		}
+		aggregatePublicKeyBytes, err := bls.AggregatePublickKeys(formattedKeys)
+		if err != nil {
+			return nil, err
+		}
+		var aggregate common.Bytes48
+		copy(aggregate[:], aggregatePublicKeyBytes)
+
+		return solid.NewSyncCommitteeFromParameters(pubKeys, aggregate), nil
+	}
+
+	// pre-gloas computation
 	beaconConfig := b.BeaconConfig()
 	optimizedHashFunc := utils.OptimizedSha256NotThreadSafe()
 	epoch := Epoch(b) + 1
@@ -350,6 +404,7 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 		}
 		i++
 	}
+
 	// Format public keys.
 	formattedKeys := make([][]byte, cltypes.SyncCommitteeSize)
 	for i := range formattedKeys {
@@ -453,4 +508,75 @@ func (b *CachingBeaconState) GetValidatorActivationChurnLimit() uint64 {
 		)
 	}
 	return b.GetValidatorChurnLimit()
+}
+
+func (b *CachingBeaconState) GetPTC(slot uint64) ([]uint64, error) {
+	epoch := GetEpochAtSlot(b.BeaconConfig(), slot)
+	beaconConfig := b.BeaconConfig()
+	mixPosition := (epoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
+		beaconConfig.EpochsPerHistoricalVector
+	mix := b.GetRandaoMix(int(mixPosition))
+	baseSeed := shuffling.GetSeed(b.BeaconConfig(), mix, epoch, b.BeaconConfig().DomainPtcAttester)
+
+	// seed = hash(get_seed(state, epoch, DOMAIN_PTC_ATTESTER) + uint_to_bytes(slot))
+	slotBytes := make([]byte, 8)
+	binary.LittleEndian.PutUint64(slotBytes, slot)
+	seedInput := append(baseSeed[:], slotBytes...)
+	seed := utils.Sha256(seedInput)
+
+	// Concatenate all committees for this slot in order
+	indices := []uint64{}
+	committeesPerSlot := b.CommitteeCount(epoch)
+	for i := uint64(0); i < committeesPerSlot; i++ {
+		committee, err := b.GetBeaconCommitee(slot, i)
+		if err != nil {
+			return nil, err
+		}
+		indices = append(indices, committee...)
+	}
+
+	// compute_balance_weighted_selection with shuffle_indices=false
+	ptcIndices, err := shuffling.ComputeBalanceWeightedSelection(
+		b.BeaconState,
+		indices,
+		seed,
+		clparams.PtcSize,
+		false,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return ptcIndices, nil
+}
+
+func (b *CachingBeaconState) GetIndexedPayloadAttestation(payloadAttestation *cltypes.PayloadAttestation) (*cltypes.IndexedPayloadAttestation, error) {
+	slot := payloadAttestation.Data.Slot
+	ptc, err := b.GetPTC(slot)
+	if err != nil {
+		return nil, err
+	}
+	bits := payloadAttestation.AggregationBits
+	indices := []uint64{}
+	for i, index := range ptc {
+		if bits.GetBitAt(i) {
+			indices = append(indices, index)
+		}
+	}
+	sort.SliceStable(indices, func(i, j int) bool {
+		return indices[i] < indices[j]
+	})
+
+	return &cltypes.IndexedPayloadAttestation{
+		AttestingIndices: solid.NewRawUint64List(len(indices), indices),
+		Data:             payloadAttestation.Data,
+		Signature:        payloadAttestation.Signature,
+	}, nil
+}
+
+// GetBuilderPaymentQuorumThreshold calculates the quorum threshold for builder payments.
+func (b *CachingBeaconState) GetBuilderPaymentQuorumThreshold() uint64 {
+	perSlotBalance := b.GetTotalActiveBalance() / b.BeaconConfig().SlotsPerEpoch
+	quorum := perSlotBalance * clparams.BuilderPaymentThresholdNumerator
+	return quorum / clparams.BuilderPaymentThresholdDenominator
 }

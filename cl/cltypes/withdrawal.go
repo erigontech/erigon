@@ -86,3 +86,12 @@ func convertExecutionWithdrawalsToConsensusWithdrawals(executionWithdrawal []*ty
 	}
 	return ret
 }
+
+// ExpectedWithdrawals represents the expected withdrawals for a beacon state
+type ExpectedWithdrawals struct {
+	Withdrawals                      []*Withdrawal `json:"withdrawals"`
+	ProcessedBuilderWithdrawalsCount uint64        `json:"processed_builder_withdrawals_count,string"` // [New in Gloas:EIP7732]
+	ProcessedPartialWithdrawalsCount uint64        `json:"processed_partial_withdrawals_count,string"`
+	ProcessedBuildersSweepCount      uint64        `json:"processed_builders_sweep_count,string"` // [New in Gloas:EIP7732]
+	ProcessedSweepWithdrawalsCount   uint64        `json:"processed_sweep_withdrawals_count,string"`
+}

@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/ssz"
 )
@@ -58,6 +59,8 @@ func (b *BeaconState) baseOffsetSSZ() uint32 {
 		return 2736653
 	case clparams.FuluVersion:
 		return 2736653
+	case clparams.GloasVersion:
+		return 2736653
 	default:
 		// ?????
 		panic("tf is that")
@@ -79,7 +82,12 @@ func (b *BeaconState) getSchema() []any {
 	s = append(s, b.previousEpochParticipation, b.currentEpochParticipation, &b.justificationBits, &b.previousJustifiedCheckpoint, &b.currentJustifiedCheckpoint,
 		&b.finalizedCheckpoint, b.inactivityScores, b.currentSyncCommittee, b.nextSyncCommittee)
 	if b.version >= clparams.BellatrixVersion {
-		s = append(s, b.latestExecutionPayloadHeader)
+		// Note: latestExecutionPayloadHeader will be removed and replaced by latestExecutionPayloadBid after Gloas fork
+		if b.version >= clparams.GloasVersion {
+			s = append(s, b.latestExecutionPayloadBid)
+		} else {
+			s = append(s, b.latestExecutionPayloadHeader)
+		}
 	}
 	if b.version >= clparams.CapellaVersion {
 		s = append(s, &b.nextWithdrawalIndex, &b.nextWithdrawalValidatorIndex, b.historicalSummaries)
@@ -91,6 +99,9 @@ func (b *BeaconState) getSchema() []any {
 	}
 	if b.version >= clparams.FuluVersion {
 		s = append(s, b.proposerLookahead)
+	}
+	if b.version >= clparams.GloasVersion {
+		s = append(s, b.builders, &b.nextWithdrawalBuilderIndex, b.executionPayloadAvailability, b.builderPendingPayments, b.builderPendingWithdrawals, b.latestBlockHash[:], b.payloadExpectedWithdrawals)
 	}
 	return s
 }
@@ -110,6 +121,16 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 	}
 	if version >= int(clparams.FuluVersion) {
 		b.proposerLookahead = solid.NewUint64VectorSSZ(int((b.beaconConfig.MinSeedLookahead + 1) * b.beaconConfig.SlotsPerEpoch))
+	}
+	if version >= int(clparams.GloasVersion) {
+		b.latestExecutionPayloadBid = &cltypes.ExecutionPayloadBid{}
+		b.builders = solid.NewStaticListSSZ[*cltypes.Builder](int(b.beaconConfig.BuilderRegistryLimit), new(cltypes.Builder).EncodingSizeSSZ())
+		b.nextWithdrawalBuilderIndex = 0
+		b.executionPayloadAvailability = solid.NewBitVector(int(b.beaconConfig.SlotsPerHistoricalRoot))
+		b.builderPendingPayments = solid.NewVectorSSZ[*cltypes.BuilderPendingPayment](int(2 * b.beaconConfig.SlotsPerEpoch))
+		b.builderPendingWithdrawals = solid.NewStaticListSSZ[*cltypes.BuilderPendingWithdrawal](int(b.beaconConfig.BuilderPendingWithdrawalsLimit), new(cltypes.BuilderPendingWithdrawal).EncodingSizeSSZ())
+		b.latestBlockHash = common.Hash{}
+		b.payloadExpectedWithdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(b.beaconConfig.MaxWithdrawalsPerPayload), new(cltypes.Withdrawal).EncodingSizeSSZ())
 	}
 	if err := ssz2.UnmarshalSSZ(buf, version, b.getSchema()...); err != nil {
 		return err
@@ -144,6 +165,19 @@ func (b *BeaconState) EncodingSizeSSZ() (size int) {
 	}
 	if b.version >= clparams.FuluVersion {
 		size += b.proposerLookahead.EncodingSizeSSZ()
+	}
+	if b.version >= clparams.GloasVersion {
+		// replace latestExecutionPayloadHeader with latestExecutionPayloadBid
+		size -= b.latestExecutionPayloadHeader.EncodingSizeSSZ()
+		size += b.latestExecutionPayloadBid.EncodingSizeSSZ()
+		// new fields
+		size += b.builders.EncodingSizeSSZ()
+		size += 8
+		size += b.executionPayloadAvailability.EncodingSizeSSZ()
+		size += b.builderPendingPayments.EncodingSizeSSZ()
+		size += b.builderPendingWithdrawals.EncodingSizeSSZ()
+		size += 32
+		size += b.payloadExpectedWithdrawals.EncodingSizeSSZ()
 	}
 	return
 }
