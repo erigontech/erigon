@@ -24,7 +24,6 @@ import (
 	"io"
 	"io/fs"
 	"iter"
-	"maps"
 	"math"
 	"net"
 	"net/http"
@@ -64,6 +63,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
 )
 
@@ -142,33 +142,14 @@ type AggStats struct {
 	HashRate, FlushRate       uint64
 }
 
-func (me *AggStats) AllTorrentsComplete() bool {
-	return me.TorrentsCompleted == me.NumTorrents
-}
-
 type requestHandler struct {
 	// Separated this rather than embedded it to ensure our wrapper RoundTrip is called.
 	rt http.RoundTripper
 }
 
-var cloudflareHeaders = http.Header{
-	"lsjdjwcush6jbnjj3jnjscoscisoc5s": []string{"I%OSJDNFKE783DDHHJD873EFSIVNI7384R78SSJBJBCCJBC32JABBJCBJK45"},
-}
-
-func insertCloudflareHeaders(req *http.Request) {
-	// Note this is clobbering the headers.
-	maps.Copy(req.Header, cloudflareHeaders)
-}
-
-type roundTripperFunc func(req *http.Request) (*http.Response, error)
-
-func (me roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
-	return me(req)
-}
-
 // TODO(anacrolix): Upstream any logic that works reliably.
 func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err error) {
-	insertCloudflareHeaders(req)
+	snapcfg.InsertCloudflareHeaders(req)
 
 	resp, err = r.rt.RoundTrip(req)
 	if err != nil {
@@ -842,18 +823,24 @@ func (d *Downloader) logDownload(
 ) {
 	startTime := time.Now()
 	stats := d.newStats(AggStats{}, ts)
+
+	// Log initial sync stats immediately so the user sees that a download has started.
+	// Don't log "No metadata yet" on the first pass — metadata tasks haven't had time to
+	// complete, so it would always fire and produce noisy (and potentially duplicate) output
+	// when sequential download batches each start their own logging goroutine.
+	stats = d.newStats(stats, ts)
+	d.logSyncStats(startTime, stats, target)
+
 	interval := time.Second
 	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(interval):
+		}
 		stats = d.newStats(stats, ts)
 		d.logSyncStats(startTime, stats, target)
 		d.logNoMetadata(getNoMetadataLvl(), ts)
-		if ctx.Err() != nil {
-			return
-		}
-		select {
-		case <-ctx.Done():
-		case <-time.After(interval):
-		}
 		interval = min(interval*2, 15*time.Second)
 	}
 }

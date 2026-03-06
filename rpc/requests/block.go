@@ -19,7 +19,6 @@ package requests
 import (
 	"context"
 	"encoding/json"
-	"math/big"
 
 	"github.com/erigontech/erigon/common"
 	hexutil2 "github.com/erigontech/erigon/common/hexutil"
@@ -37,10 +36,6 @@ func (bn BlockNumber) Uint64() uint64 {
 	}
 
 	return 0
-}
-
-func AsBlockNumber(n *big.Int) BlockNumber {
-	return BlockNumber(hexutil2.EncodeBig(n))
 }
 
 var BlockNumbers = struct {

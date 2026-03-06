@@ -82,7 +82,8 @@ Flags for managing how old chain data is handled and stored.
   * Default: `0`
 * `--prune.distance.blocks value`: Keeps block history for the latest `N` blocks.
   * Default: `0`
-* `--prune.include-commitment-history, --prune.experimental.include-commitment-history, --experimental.commitment-history`: (experimental) Enables blazing fast `eth_getProof` for executed blocks by storing commitment history.
+* `--prune.include-commitment-history, --prune.experimental.include-commitment-history, --experimental.commitment-history`: (
+experimental) Enables blazing fast `eth_getProof` for executed blocks by storing commitment history.
   * Default: `false`
 * `--snap.keepblocks`: Keeps ancient blocks in the database for debugging.
   * Default: `false`
@@ -240,8 +241,11 @@ Flags for configuring various RPC servers and their behavior.
 
 ### MCP Server
 
-Flags for configuring the Model Context Protocol (MCP) server.
+Flags for configuring the Model Context Protocol (MCP) server. The embedded MCP server is **enabled by default** on
+`127.0.0.1:8553`. Pass `--mcp.disable` to turn it off.
 
+* `--mcp.disable`: Disables the embedded MCP server.
+    * Default: `false`
 * `--mcp.addr value`: The MCP server listening address.
   * Default: `127.0.0.1`
 * `--mcp.port value`: The MCP server listening port.
@@ -742,6 +746,7 @@ GLOBAL OPTIONS:
    --no-downloader                                                                                                         Disables downloader component (default: false)
    --downloader.verify                                                                                                     Verify snapshots on startup. It will not report problems found, but re-download broken pieces. (default: false)
    --healthcheck                                                                                                           Enable grpc health check (default: false)
+   --mcp.disable                                                                                                           Disables the embedded MCP server (default: false)
    --mcp.addr value                                                                                                        MCP server listening interface (default: "127.0.0.1")
    --mcp.port value                                                                                                        MCP server listening port (default: 8553)
    --bor.heimdall value                                                                                                    URL of Heimdall service (default: "http://localhost:1317")
@@ -770,17 +775,6 @@ GLOBAL OPTIONS:
    --sentinel.bootnodes value [ --sentinel.bootnodes value ]                                                               Comma separated enode URLs for P2P discovery bootstrap
    --sentinel.staticpeers value [ --sentinel.staticpeers value ]                                                           connect to comma-separated Consensus static peers
    --ots.search.max.pagesize value                                                                                         Max allowed page size for search methods (default: 25)
-   --silkworm.exec                                                                                                         Enable Silkworm block execution (default: false)
-   --silkworm.rpc                                                                                                          Enable embedded Silkworm RPC service (default: false)
-   --silkworm.sentry                                                                                                       Enable embedded Silkworm Sentry service (default: false)
-   --silkworm.verbosity value                                                                                              Set the log level for Silkworm console logs (default: "info")
-   --silkworm.contexts value                                                                                               Number of I/O contexts used in embedded Silkworm RPC and Sentry services (zero means use default in Silkworm) (default: 0)
-   --silkworm.rpc.log                                                                                                      Enable interface log for embedded Silkworm RPC service (default: false)
-   --silkworm.rpc.log.maxsize value                                                                                        Max interface log file size in MB for embedded Silkworm RPC service (default: 1)
-   --silkworm.rpc.log.maxfiles value                                                                                       Max interface log files for embedded Silkworm RPC service (default: 100)
-   --silkworm.rpc.log.response                                                                                             Dump responses in interface logs for embedded Silkworm RPC service (default: false)
-   --silkworm.rpc.workers value                                                                                            Number of worker threads used in embedded Silkworm RPC service (zero means use default in Silkworm) (default: 0)
-   --silkworm.rpc.compatibility                                                                                            Preserve JSON-RPC compatibility using embedded Silkworm RPC service (default: true)
    --beacon.api value [ --beacon.api value ]                                                                               Enable beacon API (available endpoints: beacon, builder, config, debug, events, node, validator, lighthouse)
    --beacon.api.addr value                                                                                                 sets the host to listen for beacon api requests (default: "localhost")
    --beacon.api.cors.allow-methods value [ --beacon.api.cors.allow-methods value ]                                         set the cors' allow methods (default: "GET", "POST", "PUT", "DELETE", "OPTIONS")

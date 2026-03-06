@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
-	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -242,32 +241,4 @@ func messageFromData(to accounts.Address, data []byte) *types.Message {
 	)
 
 	return msg
-}
-
-// NewStateSyncEventMessages creates a corresponding message that can be passed to EVM for multiple state sync events
-func NewStateSyncEventMessages(stateSyncEvents []rlp.RawValue, stateReceiverContract accounts.Address, gasLimit uint64) []*types.Message {
-	msgs := make([]*types.Message, len(stateSyncEvents))
-	for i, event := range stateSyncEvents {
-		msg := types.NewMessage(
-			params.SystemAddress, // from
-			stateReceiverContract,
-			0,          // nonce
-			&u256.Num0, // amount
-			gasLimit,
-			&u256.Num0, // gasPrice
-			nil,        // feeCap
-			nil,        // tip
-			event,
-			nil,   // accessList
-			false, // checkNonce
-			false, // checkTransaction
-			false, // checkGas
-			true,  // isFree
-			nil,   // maxFeePerBlobGas
-		)
-
-		msgs[i] = msg
-	}
-
-	return msgs
 }

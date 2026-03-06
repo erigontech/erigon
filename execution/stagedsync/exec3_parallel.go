@@ -22,7 +22,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
@@ -221,51 +220,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							return fmt.Errorf("block %d: applyCount mismatch: got: %d expected %d", applyResult.BlockNum, blockUpdateCount, applyResult.ApplyCount)
 						}
 
-						if (pe.cfg.chainConfig.AmsterdamTime != nil && pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime)) || pe.cfg.experimentalBAL {
-							bal := CreateBAL(applyResult.BlockNum, applyResult.TxIO, pe.cfg.dirs.DataDir)
-							if err := bal.Validate(); err != nil {
-								return fmt.Errorf("block %d: invalid computed block access list: %w", applyResult.BlockNum, err)
-							}
-							log.Debug("bal", "blockNum", applyResult.BlockNum, "hash", bal.Hash())
-							if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) {
-								if lastHeader.BlockAccessListHash == nil {
-									if pe.isBlockProduction {
-										hash := bal.Hash()
-										lastHeader.BlockAccessListHash = &hash
-									} else {
-										return fmt.Errorf("block %d: missing block access list hash", applyResult.BlockNum)
-									}
-								}
-								headerBALHash := *lastHeader.BlockAccessListHash
-								if !pe.isBlockProduction {
-									dbBALBytes, err := rawdb.ReadBlockAccessListBytes(rwTx, applyResult.BlockHash, applyResult.BlockNum)
-									if err != nil {
-										return fmt.Errorf("block %d: read stored block access list: %w", applyResult.BlockNum, err)
-									}
-									// BAL data may not be stored for blocks downloaded via backward
-									// block downloader (p2p sync) since it does not carry BAL sidecars.
-									// Remove after eth/71 has been implemented.
-									if dbBALBytes != nil {
-										dbBAL, err := types.DecodeBlockAccessListBytes(dbBALBytes)
-										if err != nil {
-											return fmt.Errorf("block %d: read stored block access list: %w", applyResult.BlockNum, err)
-										}
-										if err = dbBAL.Validate(); err != nil {
-											return fmt.Errorf("block %d: db block access list is invalid: %w", applyResult.BlockNum, err)
-										}
-
-										if headerBALHash != dbBAL.Hash() {
-											log.Info(fmt.Sprintf("bal from block: %s", dbBAL.DebugString()))
-											return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", applyResult.BlockNum, dbBAL.Hash(), headerBALHash)
-										}
-									}
-									if headerBALHash != bal.Hash() {
-										return fmt.Errorf("%w, block=%d: block access list mismatch: got %s expected %s", rules.ErrInvalidBlock, applyResult.BlockNum, bal.Hash(), headerBALHash)
-									}
-								}
-							}
-						}
-
 						if err := pe.getPostValidator().Process(applyResult.BlockGasUsed, applyResult.BlobGasUsed, checkReceipts, applyResult.Receipts,
 							lastHeader, pe.isBlockProduction, b.Transactions(), pe.cfg.chainConfig, pe.logger); err != nil {
 							dumpTxIODebug(applyResult.BlockNum, applyResult.TxIO)
@@ -390,6 +344,13 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							err = pe.getPostValidator().Wait()
 							if err != nil {
 								return err
+							}
+
+							if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) || pe.cfg.experimentalBAL {
+								err = ProcessBAL(rwTx, lastHeader, applyResult.TxIO, pe.isBlockProduction, pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime), pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir)
+								if err != nil {
+									return err
+								}
 							}
 
 							if shouldGenerateChangesets {
@@ -1842,17 +1803,4 @@ func MergeVersionedWrites(prev, next state.VersionedWrites) state.VersionedWrite
 		return true
 	})
 	return out
-}
-
-func MergeAccessedAddresses(dst, src map[accounts.Address]struct{}) map[accounts.Address]struct{} {
-	if len(src) == 0 {
-		return dst
-	}
-	if dst == nil {
-		dst = make(map[accounts.Address]struct{}, len(src))
-	}
-	for addr := range src {
-		dst[addr] = struct{}{}
-	}
-	return dst
 }

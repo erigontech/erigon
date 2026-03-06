@@ -23,8 +23,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"math/rand"
+	"math"
+	"math/rand/v2"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -351,7 +353,7 @@ func checkDerefBranch(
 	branchData := commitment.BranchData(branchValue)
 	var integrityErr error
 
-	newBranchData, newBranchValueBuf, _ = branchData.ReplacePlainKeys(newBranchValueBuf[:0], func(key []byte, isStorage bool) ([]byte, error) {
+	newBranchData, _ = branchData.ReplacePlainKeys(newBranchValueBuf[:0], func(key []byte, isStorage bool) ([]byte, error) {
 		if trace {
 			logger.Trace(
 				"[integrity] CommitmentKvDeref",
@@ -581,7 +583,7 @@ func deriveReaderForOtherDomain(baseFile string, oldDomain, newDomain kv.Domain)
 	return seg.NewReader(decomp.MakeGetter(), compression), decomp.Close, nil
 }
 
-func CheckCommitmentHistVal(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, failFast bool, logger log.Logger) error {
+func CheckCommitmentHistVal(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, failFast bool, seed int64, sampleRatio float64, logger log.Logger) error {
 	start := time.Now()
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -601,18 +603,25 @@ func CheckCommitmentHistVal(ctx context.Context, db kv.TemporalRoDB, br services
 	} else {
 		eg.SetLimit(dbg.EnvInt("CHECK_COMMITMENT_HIST_VAL_WORKERS", 8))
 	}
+	numBuckets := uint64(math.Round(1.0 / sampleRatio))
 	var totalVals atomic.Uint64
+	rng := rand.New(rand.NewPCG(uint64(seed), 0))
 	for _, file := range files {
 		if !strings.HasSuffix(file.Fullpath(), ".v") {
 			continue
 		}
+		txCount := file.EndRootNum() - file.StartRootNum()
+		if numBuckets > txCount {
+			panic(fmt.Errorf("numBuckets %d is greater than total tx count %d in %s", numBuckets, txCount, filepath.Base(file.Fullpath())))
+		}
+		bucket := rng.IntN(int(numBuckets))
 		eg.Go(func() error {
 			tx, err := db.BeginTemporalRo(ctx) // each worker has its own RoTx
 			if err != nil {
 				return err
 			}
 			defer tx.Rollback()
-			valCount, err := checkCommitmentHistVal(ctx, tx, br, file, failFast, logger)
+			valCount, err := checkCommitmentHistVal(ctx, tx, br, file, bucket, numBuckets, failFast, logger)
 			if err == nil {
 				totalVals.Add(valCount)
 				return nil
@@ -630,23 +639,20 @@ func CheckCommitmentHistVal(ctx context.Context, db kv.TemporalRoDB, br services
 	dur := time.Since(start)
 	total := totalVals.Load()
 	rate := float64(total) / dur.Seconds()
-	logger.Info("[integrity] CommitmentHistVal", "dur", time.Since(start), "files", len(files), "vals", total, "vals/s", rate)
+	logger.Info("[integrity] CommitmentHistVal", "dur", time.Since(start), "files", len(files), "vals", total, "vals/s", rate, "seed", seed, "sampleRatio", sampleRatio)
 	return nil
 }
 
-func checkCommitmentHistVal(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, file state.VisibleFile, failFast bool, logger log.Logger) (uint64, error) {
+func checkCommitmentHistVal(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, file state.VisibleFile, bucket int, numBuckets uint64, failFast bool, logger log.Logger) (uint64, error) {
 	start := time.Now()
 	fileName := filepath.Base(file.Fullpath())
 	startTxNum := file.StartRootNum()
 	endTxNum := file.EndRootNum()
 	txCount := endTxNum - startTxNum
-	// cover 5% by doing random bucket sampling from each file
-	coverageQuotient := dbg.EnvUint("CHECK_COMMITMENT_HIST_VAL_COVERAGE_QUOTIENT", 20)
-	if coverageQuotient > txCount {
-		panic(fmt.Errorf("coverage quotient %d is greater than total tx count %d", coverageQuotient, txCount))
+	if numBuckets > txCount {
+		panic(fmt.Errorf("numBuckets %d is greater than total tx count %d", numBuckets, txCount))
 	}
-	bucket := rand.Intn(int(coverageQuotient))
-	bucketSize := txCount / coverageQuotient
+	bucketSize := txCount / numBuckets
 	bucketStart := startTxNum + uint64(bucket)*bucketSize
 	bucketEnd := min(bucketStart+bucketSize, endTxNum)
 	logger.Info(
@@ -654,7 +660,7 @@ func checkCommitmentHistVal(ctx context.Context, tx kv.TemporalTx, br services.F
 		"v", fileName,
 		"startTxNum", startTxNum,
 		"endTxNum", endTxNum,
-		"coverageQuotient", coverageQuotient,
+		"numBuckets", numBuckets,
 		"bucket", bucket,
 		"bucketSize", bucketSize,
 		"bucketStart", bucketStart,
@@ -738,8 +744,8 @@ func checkCommitmentHistVal(ctx context.Context, tx kv.TemporalTx, br services.F
 	return total, integrityErr
 }
 
-func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, logger log.Logger) error {
-	logger.Info("checking commitment hist at block", "blockNum", blockNum)
+func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, lvl log.Lvl, logger log.Logger) error {
+	logger.Log(lvl, "checking commitment hist at block", "blockNum", blockNum)
 	start := time.Now()
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -768,20 +774,30 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	if err != nil {
 		return err
 	}
-	sd.GetCommitmentCtx().SetHistoryStateReader(tx, toTxNum)
+	// For blockNum==0 there is no prior commitment state (GetAsOf at txNum=0
+	// falls back to latest for the commitment domain). Use commitmentAsOf=toTxNum
+	// so the trie is restored from the committed state at the end of block 0.
+	commitmentAsOf := minTxNum
+	if blockNum == 0 {
+		commitmentAsOf = toTxNum
+	}
+	// commitment branch data view: as of beginning of the block (or end for block 0)
+	// plain state data view: as of end of the block
+	splitStateReader := commitmentdb.NewSplitHistoryReader(tx, commitmentAsOf, toTxNum, true /* withHistory */)
+	sd.GetCommitmentCtx().SetStateReader(splitStateReader)
 	sd.GetCommitmentCtx().SetTrace(logger.Enabled(ctx, log.LvlTrace))
 	sd.GetCommitmentContext().SetDeferBranchUpdates(false)
 	latestTxNum, latestBlockNum, err := sd.SeekCommitment(ctx, tx) // seek commitment again with new history state reader
 	if err != nil {
 		return err
 	}
-	if latestBlockNum != blockNum {
-		return fmt.Errorf("commitment state blockNum doesn't match blockNum: %d != %d", latestBlockNum, blockNum)
+	if blockNum > 0 && latestBlockNum != blockNum-1 { // commitment domain reads branches at end of blockNum-1
+		return fmt.Errorf("commitment state blockNum doesn't match blockNum-1: %d != %d", latestBlockNum, blockNum-1)
 	}
-	if latestTxNum != maxTxNum {
-		return fmt.Errorf("commitment state txNum doesn't match maxTxNum: %d != %d", latestTxNum, maxTxNum)
+	if blockNum > 0 && latestTxNum != minTxNum-1 { // commitment state is read as of minTxNum-1
+		return fmt.Errorf("commitment state txNum doesn't match minTxNum-1: %d != %d", latestTxNum, minTxNum-1)
 	}
-	logger.Info("commitment recalc info", "blockNum", blockNum, "minTxNum", minTxNum, "maxTxNum", maxTxNum, "toTxNum", toTxNum)
+	logger.Log(lvl, "commitment recalc info", "blockNum", blockNum, "minTxNum", minTxNum, "maxTxNum", maxTxNum, "toTxNum", toTxNum)
 	trace := logger.Enabled(ctx, log.LvlTrace)
 	touchLoggingVisitor := func(k []byte) {
 		if trace {
@@ -806,7 +822,7 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 		return err
 	}
 	touchDur := time.Since(touchStart)
-	logger.Info("commitment touched keys", "accTouches", accTouches, "storageTouches", storageTouches, "codeTouches", codeTouches, "touchDur", touchDur)
+	logger.Log(lvl, "commitment touched keys", "accTouches", accTouches, "storageTouches", storageTouches, "codeTouches", codeTouches, "touchDur", touchDur)
 	recalcStart := time.Now()
 	root, err := sd.ComputeCommitment(ctx, tx, false /* saveStateAfter */, blockNum, maxTxNum, "integrity", nil /* commitProgress */)
 	if err != nil {
@@ -816,7 +832,7 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	if header.Root != rootHash {
 		return fmt.Errorf("commitment root mismatch: %s != %s (blockNum=%d,txNum=%d)", header.Root, rootHash, blockNum, maxTxNum)
 	}
-	logger.Info(
+	logger.Log(lvl,
 		"commitment root matches",
 		"blockNum", blockNum,
 		"txNum", maxTxNum,
@@ -828,22 +844,49 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	return nil
 }
 
-func CheckCommitmentHistAtBlkRange(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, from, to uint64, logger log.Logger) error {
+func CheckCommitmentHistAtBlkRange(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, from, to uint64, seed int64, sampleRatio float64, logger log.Logger) error {
 	if from >= to {
 		return fmt.Errorf("invalid blk range: %d >= %d", from, to)
 	}
+	rng := rand.New(rand.NewPCG(uint64(seed), 0))
 	start := time.Now()
+	var checked atomic.Uint64
+	var lastBlockNum atomic.Uint64
 	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(estimate.AlmostAllCPUs())
+	g.SetLimit(runtime.GOMAXPROCS(-1)) // all cpus, because no producer-worker
+
+	logTicker := time.NewTicker(20 * time.Second)
+	defer logTicker.Stop()
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-logTicker.C:
+				done := checked.Load()
+				elapsed := time.Since(start).Seconds()
+				rate := float64(done) / elapsed
+				logger.Info("[integrity] checking commitment hist", "blks/s", rate, "checked", done, "blockNum", lastBlockNum.Load(), "from", from, "to", to)
+			}
+		}
+	}()
+
+	var blks uint64
 	for blockNum := from; blockNum < to; blockNum++ {
+		if sampleRatio < 1.0 && rng.Float64() >= sampleRatio {
+			continue
+		}
+		blks++
 		blockNum := blockNum
 		g.Go(func() error {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			if err := CheckCommitmentHistAtBlk(ctx, db, br, blockNum, logger); err != nil {
+			if err := CheckCommitmentHistAtBlk(ctx, db, br, blockNum, log.LvlDebug, logger); err != nil {
 				return fmt.Errorf("checkCommitmentHistAtBlk: %d, %w", blockNum, err)
 			}
+			checked.Add(1)
+			lastBlockNum.Store(blockNum)
 			return nil
 		})
 	}
@@ -851,9 +894,8 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, db kv.TemporalRoDB, br s
 		return err
 	}
 	dur := time.Since(start)
-	blks := to - from
 	rate := float64(blks) / dur.Seconds()
-	logger.Info("checked commitment hist at blk range", "dur", dur, "blks", blks, "blks/s", rate, "from", from, "to", to)
+	logger.Info("checked commitment hist at blk range", "dur", dur, "blks", blks, "blks/s", rate, "from", from, "to", to, "seed", seed, "sampleRatio", sampleRatio)
 	return nil
 }
 
@@ -971,7 +1013,6 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 	branchValueBuf := make([]byte, 0, datasize.MB.Bytes())
 	var branchKeys uint64
 	var integrityErr error
-	var branchDerefBuf []byte
 
 	for i := 0; commReader.HasNext(); i++ {
 		if i%1024 == 0 {
@@ -1053,8 +1094,7 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 		}
 		// The callback returns nil (keep original key in output) because the result of ReplacePlainKeys
 		// is discarded (_): all side-effects happen before the return.
-		var err error
-		_, branchDerefBuf, err = branchData.ReplacePlainKeys(branchDerefBuf[:0], func(key []byte, isStorage bool) ([]byte, error) {
+		_, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
 			var checkErr error
 			if isStorage {
 				checkErr = checkKey(key, stoCollector, storageReader, length.Addr+length.Hash, "storage")
@@ -1189,7 +1229,6 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 	var branchKeys uint64
 	var integrityErr error
 	var extractedAccKeys, extractedStoKeys, skippedAccKeys, skippedStoKeys uint64
-	var branchDerefBuf []byte
 
 	// Phase 1: Walk commitment branches, collect extracted plain keys into ETL collectors.
 	for i := 0; commReader.HasNext(); i++ {
@@ -1233,8 +1272,7 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 			continue
 		}
 
-		var err error
-		_, branchDerefBuf, err = branchData.ReplacePlainKeys(branchDerefBuf[:0], func(key []byte, isStorage bool) ([]byte, error) {
+		_, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
 			if isStorage {
 				plainKey := key
 				if len(key) != length.Addr+length.Hash {
@@ -1573,7 +1611,6 @@ func extractCommitmentRefsToCollectors(ctx context.Context, file state.VisibleFi
 	branchKeyBuf := make([]byte, 0, 128)
 	branchValueBuf := make([]byte, 0, datasize.MB.Bytes())
 	plainKeyBuf := make([]byte, 0, length.Addr+length.Hash)
-	var branchDerefBuf []byte
 
 	for commReader.HasNext() {
 		select {
@@ -1597,8 +1634,7 @@ func extractCommitmentRefsToCollectors(ctx context.Context, file state.VisibleFi
 			continue
 		}
 
-		var err error
-		_, branchDerefBuf, err = branchData.ReplacePlainKeys(branchDerefBuf[:0], func(key []byte, isStorage bool) ([]byte, error) { //nolint:gocritic
+		_, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) { //nolint:gocritic
 			if isStorage {
 				plainKey := key
 				if len(key) != length.Addr+length.Hash {
@@ -1720,7 +1756,6 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 
 			plainKeyBuf := make([]byte, 0, length.Addr+length.Hash)
 			valBuf := make([]byte, 0, 128)
-			var branchDerefBuf []byte
 
 			for item := range workCh {
 				select {
@@ -1738,9 +1773,7 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 
 				// We need branch data with plain keys for VerifyBranchHashes.
 				// Walk the branch to extract + resolve all keys and read values.
-				var resolvedBranchData commitment.BranchData
-				var err error
-				resolvedBranchData, branchDerefBuf, err = branchData.ReplacePlainKeys(branchDerefBuf[:0], func(key []byte, isStorage bool) ([]byte, error) {
+				resolvedBranchData, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
 					if isStorage {
 						plainKey := key
 						isRef := len(key) != length.Addr+length.Hash
