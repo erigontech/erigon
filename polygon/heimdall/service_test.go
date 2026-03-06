@@ -221,6 +221,7 @@ func (suite *ServiceTestSuite) TearDownSuite() {
 	err := suite.eg.Wait()
 	suite.logger.Info("test has been torn down")
 	suite.Require().ErrorIs(err, context.Canceled)
+	suite.service.store.Close()
 }
 
 func (suite *ServiceTestSuite) TestMilestones() {

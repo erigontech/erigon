@@ -83,6 +83,8 @@ type EthBackend interface {
 	Peers(ctx context.Context) (*remoteproto.PeersReply, error)
 	AddPeer(ctx context.Context, url *remoteproto.AddPeerRequest) (*remoteproto.AddPeerReply, error)
 	RemovePeer(ctx context.Context, url *remoteproto.RemovePeerRequest) (*remoteproto.RemovePeerReply, error)
+	AddTrustedPeer(ctx context.Context, url *remoteproto.AddPeerRequest) (*remoteproto.AddPeerReply, error)
+	RemoveTrustedPeer(ctx context.Context, url *remoteproto.RemovePeerRequest) (*remoteproto.RemovePeerReply, error)
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.TemporalRwDB, notifications *shards.Notifications, blockReader services.FullBlockReader,
@@ -437,6 +439,14 @@ func (s *EthBackendServer) AddPeer(ctx context.Context, req *remoteproto.AddPeer
 
 func (s *EthBackendServer) RemovePeer(ctx context.Context, req *remoteproto.RemovePeerRequest) (*remoteproto.RemovePeerReply, error) {
 	return s.eth.RemovePeer(ctx, req)
+}
+
+func (s *EthBackendServer) AddTrustedPeer(ctx context.Context, req *remoteproto.AddPeerRequest) (*remoteproto.AddPeerReply, error) {
+	return s.eth.AddTrustedPeer(ctx, req)
+}
+
+func (s *EthBackendServer) RemoveTrustedPeer(ctx context.Context, req *remoteproto.RemovePeerRequest) (*remoteproto.RemovePeerReply, error) {
+	return s.eth.RemoveTrustedPeer(ctx, req)
 }
 
 func (s *EthBackendServer) SubscribeLogs(server remoteproto.ETHBACKEND_SubscribeLogsServer) (err error) {

@@ -87,14 +87,29 @@ jobs:
     env:
       RUN_ID: ${{ needs.setup.outputs.run_id }}
       NETWORK: ${{ needs.setup.outputs.network }}
-      ERIGON_REFERENCE_DIR: /opt/erigon-versions/reference-version
-      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_AREA: /opt/erigon-testbed
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       GETH_INSTALL_DIR: /opt/go-ethereum
       CLIENT: ${{ matrix.client }}
 
     steps:
+      - name: Set reference data dir based on branch
+        run: |
+          # For pull_request events base_ref is the target branch name; for push/dispatch parse from ref.
+          BRANCH="${{ github.base_ref }}"
+          if [ -z "$BRANCH" ]; then
+            BRANCH="${{ github.ref }}"
+            BRANCH="${BRANCH#refs/heads/}"
+          fi
+          if [[ "$BRANCH" == release/* ]]; then
+            VERSION="${BRANCH#release/}"
+            ERIGON_REFERENCE_DIR="/opt/erigon-versions/reference-version-${VERSION}"
+          else
+            ERIGON_REFERENCE_DIR="/opt/erigon-versions/reference-version"
+          fi
+          echo "ERIGON_REFERENCE_DIR=${ERIGON_REFERENCE_DIR}" >> $GITHUB_ENV
+          echo "ERIGON_REFERENCE_DATA_DIR=${ERIGON_REFERENCE_DIR}/datadir" >> $GITHUB_ENV
+
       - name: Checkout Erigon repository
         if: matrix.client == 'erigon'
         uses: actions/checkout@v6

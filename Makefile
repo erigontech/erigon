@@ -68,13 +68,7 @@ endif
 
 BUILD_TAGS =
 
-ifneq ($(shell $(CURDIR)/node/silkworm/silkworm_compat_check.sh),)
-	BUILD_TAGS := $(BUILD_TAGS),nosilkworm
-endif
-
 override BUILD_TAGS := $(BUILD_TAGS),$(EXTRA_BUILD_TAGS)
-
-GOPRIVATE = github.com/erigontech/silkworm-go
 
 PACKAGE = github.com/erigontech/erigon
 
@@ -189,6 +183,7 @@ COMMANDS += evm
 COMMANDS += caplin
 COMMANDS += snapshots
 COMMANDS += diag
+COMMANDS += mcp
 
 # build each command using %.cmd rule
 $(COMMANDS): %: %.cmd
@@ -499,7 +494,6 @@ DIST ?= $(CURDIR)/build/dist
 .PHONY: install
 install:
 	mkdir -p "$(DIST)"
-	cp -f "$$($(CURDIR)/node/silkworm/silkworm_lib_path.sh)" "$(DIST)"
 	cp -f "$(GOBIN)/"* "$(DIST)"
 	@echo "Copied files to $(DIST):"
 	@ls -al "$(DIST)"

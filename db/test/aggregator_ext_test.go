@@ -140,7 +140,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	newDb := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
 	t.Cleanup(newDb.Close)
 
-	newAgg := state.New(agg.Dirs()).StepSize(stepSize).MustOpen(ctx, newDb)
+	newAgg := state.New(agg.Dirs()).StepSize(stepSize).StepsInFrozenFile(config3.DefaultStepsInFrozenFile).MustOpen(ctx, newDb)
 	t.Cleanup(newAgg.Close)
 	require.NoError(t, newAgg.OpenFolder())
 
@@ -408,7 +408,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
 	require.Equal(t, 3, onChangeCalls)
-	require.Equal(t, 4, onDelCalls)
+	require.Equal(t, 7, onDelCalls)
 
 	{ //prune
 		rwTx, err = db.BeginTemporalRw(context.Background())

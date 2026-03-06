@@ -23,7 +23,6 @@ import (
 
 	"github.com/RoaringBitmap/roaring/v2"
 
-	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 
 	"github.com/erigontech/erigon/common"
@@ -34,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/ethutils"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
@@ -74,10 +72,6 @@ func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.Temp
 
 func (api *BaseAPI) getReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
 	return api.receiptsGenerator.GetReceiptsGasUsed(ctx, tx, block, api._txNumReader)
-}
-
-func (api *BaseAPI) getCachedReceipt(ctx context.Context, hash common.Hash) (*types.Receipt, bool) {
-	return api.receiptsGenerator.GetCachedReceipt(ctx, hash)
 }
 
 func (api *BaseAPI) getCachedReceipts(ctx context.Context, hash common.Hash) (types.Receipts, bool) {
@@ -194,6 +188,10 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		return nil, fmt.Errorf("node is still initializing")
 	}
 
+	if err = api.BaseAPI.checkReceiptsAvailable(ctx, tx, begin); err != nil {
+		return nil, err
+	}
+
 	erigonLogs, err := api.getLogsV3(ctx, tx, begin, end, crit, api.BaseAPI.rangeLimit)
 	if err != nil {
 		return nil, err
@@ -220,35 +218,12 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	return rpcLogs, nil
 }
 
-// receiptsAvailable corner cases:
-//   - `--persist.receipts`: means all receipts available (even in `--prune.mode=minimal` mode)
-//   - `--prune.mode=minimal` (and `full`) can serve receipts as much as "state history" available (by re-executing blocks)
-//
-// returns `state.PrunedError` if not available for given `fromTxNum`
-func assertReceiptsAvailable(ctx context.Context, txNumsReader rawdbv3.TxNumsReader, begin uint64, fromTxNum uint64, tx kv.TemporalTx) error {
-	persistReceipts, err := kvcfg.PersistReceipts.Enabled(tx)
-	if err != nil {
-		return err
-	}
-	if persistReceipts {
-		return nil
-	}
-	if minTxNum := state.StateHistoryStartTxNum(tx); fromTxNum < minTxNum {
-		firstAvailBlock, _, _ := txNumsReader.FindBlockNum(ctx, tx, minTxNum)
-		return fmt.Errorf("%w: requested block %d, history is available from block %d", state.PrunedError, begin, firstAvailBlock)
-	}
-	return nil
-}
-
 func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria, asc order.By) (out stream.U64, err error) {
 	//[from,to)
 	var fromTxNum, toTxNum uint64
 	if begin > 0 {
 		fromTxNum, err = txNumsReader.Min(context.Background(), tx, begin)
 		if err != nil {
-			return out, err
-		}
-		if err := assertReceiptsAvailable(context.Background(), txNumsReader, begin, fromTxNum, tx); err != nil {
 			return out, err
 		}
 	}
@@ -503,7 +478,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, nil
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkReceiptsAvailable(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -606,6 +581,14 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 		return nil, err
 	}
 	defer tx.Rollback()
+
+	// Pending block receipts are only available if the miner has a pending block
+	// with executed transactions. Erigon receives only header+txs from the miner
+	// and cannot compute receipts on-the-fly.
+	if numberOrHash.BlockNumber != nil && *numberOrHash.BlockNumber == rpc.PendingBlockNumber {
+		return nil, errors.New("pending receipts are not available")
+	}
+
 	blockNum, blockHash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, numberOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
@@ -614,7 +597,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkReceiptsAvailable(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}

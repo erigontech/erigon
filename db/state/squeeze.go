@@ -33,7 +33,6 @@ import (
 	downloadertype "github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/execution/commitment/backtester"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
@@ -610,7 +609,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	// finalizeBlock computes and verifies the commitment root for a single block.
 	finalizeBlock := func(blockNum, toTxNum uint64) error {
 		domains.SetTxNum(toTxNum)
-		domains.GetCommitmentCtx().SetStateReader(backtester.NewRebuildStateReader(rwTx, domains, toTxNum+1))
+		domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewCommitmentReplayStateReader(rwTx, rwTx, domains, toTxNum+1))
 
 		if debugBlock > 0 && blockNum >= debugBlock-2 && blockNum <= debugBlock+2 {
 			logger.Info("[rebuild_debug] finalizeBlock",
@@ -709,7 +708,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 				// Set correct state reader and clear stale warmup cache before TouchKey calls begin.
 				toTxNum := batch.TxNum(blockNum)
 				domains.SetTxNum(toTxNum)
-				domains.GetCommitmentCtx().SetStateReader(backtester.NewRebuildStateReader(rwTx, domains, toTxNum+1))
+				domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewCommitmentReplayStateReader(rwTx, rwTx, domains, toTxNum+1))
 				domains.ClearWarmupCache()
 				curBlock = blockNum
 			}

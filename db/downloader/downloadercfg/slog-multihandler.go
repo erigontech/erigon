@@ -10,12 +10,6 @@ import (
 
 type multiHandler []slog.Handler
 
-// MultiHandler returns a Handler that handles each record with all the given
-// handlers.
-func MultiHandler(handlers ...slog.Handler) slog.Handler {
-	return multiHandler(handlers)
-}
-
 func (h multiHandler) Enabled(ctx context.Context, l slog.Level) bool {
 	for i := range h {
 		if h[i].Enabled(ctx, l) {

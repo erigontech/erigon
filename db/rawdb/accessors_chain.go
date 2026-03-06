@@ -26,6 +26,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/big"
+	"sync"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -77,9 +78,11 @@ func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64, markChainAsBad bool) er
 				return err
 			}
 
+			bheapMu.Lock()
 			if bheapCache != nil {
 				heap.Push(bheapCache, &utils.BlockId{Number: binary.BigEndian.Uint64(blockNumBytes), Hash: common.BytesToHash(blockHash)})
 			}
+			bheapMu.Unlock()
 		}
 		return tx.Delete(kv.HeaderCanonical, blockNumBytes)
 	}); err != nil {
@@ -89,14 +92,24 @@ func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64, markChainAsBad bool) er
 }
 
 /* latest bad blocks start */
-var bheapCache utils.ExtendedHeap
+var (
+	bheapCache utils.ExtendedHeap
+	bheapMu    sync.RWMutex
+)
 
 func GetLatestBadBlocks(tx kv.Tx) ([]*types.Block, error) {
-	if bheapCache == nil {
+	bheapMu.RLock()
+	needsInit := bheapCache == nil
+	bheapMu.RUnlock()
+
+	if needsInit {
 		ResetBadBlockCache(tx, 100)
 	}
 
+	bheapMu.RLock()
 	blockIds := bheapCache.SortedValues()
+	bheapMu.RUnlock()
+
 	blocks := make([]*types.Block, len(blockIds))
 	for i, blockId := range blockIds {
 		blocks[i] = ReadBlock(tx, blockId.Hash, blockId.Number)
@@ -107,10 +120,14 @@ func GetLatestBadBlocks(tx kv.Tx) ([]*types.Block, error) {
 
 // mainly for testing purposes
 func ResetBadBlockCache(tx kv.Tx, limit int) error {
+	bheapMu.Lock()
 	bheapCache = utils.NewBlockMaxHeap(limit)
+	bheapMu.Unlock()
 	// load the heap
 	return tx.ForEach(kv.BadHeaderNumber, nil, func(blockHash, blockNumBytes []byte) error {
+		bheapMu.Lock()
 		heap.Push(bheapCache, &utils.BlockId{Number: binary.BigEndian.Uint64(blockNumBytes), Hash: common.BytesToHash(blockHash)})
+		bheapMu.Unlock()
 		return nil
 	})
 }
@@ -410,21 +427,6 @@ func ReadStorageBodyRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawVa
 		log.Error("ReadStorageBodyRLP failed", "err", err)
 	}
 	return bodyRlp
-}
-func readBodyForStorage(db kv.Getter, hash common.Hash, number uint64) (*types.BodyForStorage, error) {
-	data, err := db.GetOne(kv.BlockBody, dbutils.BlockBodyKey(number, hash))
-	if err != nil {
-		return nil, err
-	}
-	if len(data) == 0 {
-		return nil, nil
-	}
-	bodyForStorage := new(types.BodyForStorage)
-	err = rlp.DecodeBytes(data, bodyForStorage)
-	if err != nil {
-		return nil, fmt.Errorf("readBodyForStorage: %w, %d, %x", err, number, hash)
-	}
-	return bodyForStorage, nil
 }
 
 func TxnByIdxInBlock(db kv.Getter, blockHash common.Hash, blockNum uint64, txIdxInBlock int) (types.Transaction, error) {

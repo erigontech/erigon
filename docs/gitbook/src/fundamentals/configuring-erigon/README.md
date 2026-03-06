@@ -38,6 +38,8 @@ These flags cover the general behavior and configuration of the Erigon client.
   * Default: `false`, means that Caplin is enabled.
 * `--override.osaka value`: Manually specifies the Osaka fork time.
   * Default: `0`
+* `--override.amsterdam value`: Manually specifies the Amsterdam fork time.
+  * Default: `0`
 * `--vmdebug`: Records information for VM and contract debugging.
   * Default: `false`
 * `--gdbme`: Restarts Erigon under gdb for debugging.
@@ -80,9 +82,8 @@ Flags for managing how old chain data is handled and stored.
   * Default: `0`
 * `--prune.distance.blocks value`: Keeps block history for the latest `N` blocks.
   * Default: `0`
-* `--prune.experimental.include-commitment-history, --experimental.commitment-history`: Enables faster `eth_getProof` for executed blocks.
-  * Default: `false`
-* `--prune.include-commitment-history` : (experimental) Enables the storage of commitment history. When enabled, it allows for blazing fast retrieval of Merkle proofs for executed blocks using the `eth_getProof` JSON-RPC method.
+* `--prune.include-commitment-history, --prune.experimental.include-commitment-history, --experimental.commitment-history`: (
+experimental) Enables blazing fast `eth_getProof` for executed blocks by storing commitment history.
   * Default: `false`
 * `--snap.keepblocks`: Keeps ancient blocks in the database for debugging.
   * Default: `false`
@@ -139,13 +140,9 @@ These flags manage network connectivity, peer discovery, and traffic control.
 * `--nodiscover`: Disables peer discovery.
   * Default: `false`
 * `--discovery.v4`, `--discv4`: Enables the Node Discovery Protocol v4 (Discv4) for managed ENRs and topic discovery.
-  * Default: `true`
+  * Default: `false`
 * `--discovery.v5`, `--discv5`, `--v5disc`: Enables the Node Discovery Protocol v5 (Discv5) for managed ENRs and topic discovery.
   * Default: `true`
-* `--discovery.parallelism value`: The number of concurrent lookup requests allowed per discovery query.
-  * Default: `3`
-* `**`--discovery.ban-threshold value`: The number of failed handshake attempts before an IP is temporarily blacklisted.
-  * Default: `5`
 * `--netrestrict value`: Restricts network communication to specific IP networks.
 * `--nodekey value`: The P2P node key file.
 * `--nodekeyhex value`: The P2P node key as a hexadecimal string.
@@ -203,6 +200,8 @@ Flags for configuring various RPC servers and their behavior.
   * Default: `50000000`
 * `--rpc.batch.limit value`: Sets the maximum number of requests in a batch.
   * Default: `100`
+* `--rpc.blockrange.limit value`: Sets a hardware cap on the number of blocks scanned per RPC request. Protects the rpcdaemon from resource exhaustion (CPU/Memory) and hangs caused by "heavy" queries. A value of `0` means unlimited.
+  * Default: `0`
 * `--rpc.returndata.limit value`: Sets the maximum return data size for `eth_call`.
   * Default: `100000`
 * `--rpc.allow-unprotected-txs`: Allows unprotected transactions via RPC.
@@ -242,6 +241,18 @@ Flags for configuring various RPC servers and their behavior.
 * `--healthcheck`: Enables gRPC health checks.
   * Default: `false`
 
+### MCP Server
+
+Flags for configuring the Model Context Protocol (MCP) server. The embedded MCP server is **enabled by default** on
+`127.0.0.1:8553`. Pass `--mcp.disable` to turn it off.
+
+* `--mcp.disable`: Disables the embedded MCP server.
+    * Default: `false`
+* `--mcp.addr value`: The MCP server listening address.
+  * Default: `127.0.0.1`
+* `--mcp.port value`: The MCP server listening port.
+  * Default: `8553`
+
 ### Logging and Profiling
 
 Flags for controlling logging and performance profiling.
@@ -261,7 +272,7 @@ Flags for controlling logging and performance profiling.
 * `--log.dir.path value`: The path to store user and error logs.
 * `--log.dir.prefix value`: The file name prefix for logs stored on disk.
 * `--log.dir.verbosity value`: Sets the log verbosity for disk logs.
-  * Default: `info`
+  * Default: `dbug`
 * `--log.delays`: Enables block delay logging.
   * Default: `false`
 * `--pprof`: Enables the pprof HTTP server.
@@ -366,6 +377,17 @@ These flags control the block synchronization and data downloading process, incl
 * `--torrent.webseed.download.rate value`: The download rate for webseeds. If not set, rate limit is shared with torrent.
 * `--torrent.verbosity value`: Sets the verbosity level for BitTorrent logs. 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (must set `--verbosity` to equal or higher level)
   * Default: `1`
+
+### Fork Choice Update (FCU)
+
+Flags for configuring Fork Choice Update behavior.
+
+* `--fcu.timeout value`: FCU timeout before switching to async processing (use `0` to disable).
+  * Default: `1s`
+* `--fcu.background.prune`: Enables background pruning after FCU.
+  * Default: `true`
+* `--fcu.background.commit`: Enables background flush and commit after FCU.
+  * Default: `false`
 
 ### Caplin (Consensus Layer)
 
@@ -600,6 +622,7 @@ GLOBAL OPTIONS:
    --prune.include-commitment-history, --experimental.commitment-history, --prune.experimental.include-commitment-history  Enables blazing fast eth_getProof for executed block (default: false)
    --fcu.timeout value                                                                                                     FCU timeout before it switches to being process async (use 0 to disable) (default: 1s)
    --fcu.background.prune                                                                                                  Enables background pruning post fcu (default: true)
+   --fcu.background.commit                                                                                                Enables background flush and commit post fcu (default: false)
    --batchSize value                                                                                                       Batch size for the execution stage (default: "512M")
    --bodies.cache value                                                                                                    Limit on the cache for block bodies (default: "268435456")
    --database.verbosity value                                                                                              Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning. (default: 2)
@@ -688,7 +711,7 @@ GLOBAL OPTIONS:
                                                                                                                                 "stun"               Uses STUN to detect an external IP using a default server
                                                                                                                                 "stun:<server>"      Uses STUN to detect an external IP using the given server (host:port)
    --nodiscover                                                                                                            Disables the peer discovery mechanism (manual peer addition) (default: false)
-   --discovery.v4, --discv4                                                                                                Enables the V4 discovery mechanism (default: true)
+   --discovery.v4, --discv4                                                                                                Enables the V4 discovery mechanism (default: false)
    --discovery.v5, --discv5, --v5disc                                                                                      Enables the V5 discovery mechanism (default: true)
    --netrestrict value                                                                                                     Restricts network communication to the given IP networks (CIDR masks)
    --nodekey value                                                                                                         P2P node key file
@@ -725,6 +748,9 @@ GLOBAL OPTIONS:
    --no-downloader                                                                                                         Disables downloader component (default: false)
    --downloader.verify                                                                                                     Verify snapshots on startup. It will not report problems found, but re-download broken pieces. (default: false)
    --healthcheck                                                                                                           Enable grpc health check (default: false)
+   --mcp.disable                                                                                                           Disables the embedded MCP server (default: false)
+   --mcp.addr value                                                                                                        MCP server listening interface (default: "127.0.0.1")
+   --mcp.port value                                                                                                        MCP server listening port (default: 8553)
    --bor.heimdall value                                                                                                    URL of Heimdall service (default: "http://localhost:1317")
    --webseed value                                                                                                         Comma-separated URL's, holding metadata about network-support infrastructure (like S3 buckets with snapshots, bootnodes, etc...)
    --bor.withoutheimdall                                                                                                   Run without Heimdall service (for testing purposes) (default: false)
@@ -733,6 +759,7 @@ GLOBAL OPTIONS:
    --aa                                                                                                                    Enable AA transactions (default: false)
    --ethstats value                                                                                                        Reporting URL of a ethstats service (nodename:secret@host:port)
    --override.osaka value                                                                                                  Manually specify the Osaka fork time, overriding the bundled setting (default: 0)
+   --override.amsterdam value                                                                                              Manually specify the Amsterdam fork time, overriding the bundled setting (default: 0)
    --override.balancer value                                                                                               Manually specify the Balancer fork time, overriding the bundled setting (default: 0)
    --keep.stored.chain.config                                                                                              Avoid overriding chain config already stored in the DB (default: false)
    --caplin.discovery.addr value                                                                                           Address for Caplin DISCV5 protocol (default: "0.0.0.0")
@@ -750,17 +777,6 @@ GLOBAL OPTIONS:
    --sentinel.bootnodes value [ --sentinel.bootnodes value ]                                                               Comma separated enode URLs for P2P discovery bootstrap
    --sentinel.staticpeers value [ --sentinel.staticpeers value ]                                                           connect to comma-separated Consensus static peers
    --ots.search.max.pagesize value                                                                                         Max allowed page size for search methods (default: 25)
-   --silkworm.exec                                                                                                         Enable Silkworm block execution (default: false)
-   --silkworm.rpc                                                                                                          Enable embedded Silkworm RPC service (default: false)
-   --silkworm.sentry                                                                                                       Enable embedded Silkworm Sentry service (default: false)
-   --silkworm.verbosity value                                                                                              Set the log level for Silkworm console logs (default: "info")
-   --silkworm.contexts value                                                                                               Number of I/O contexts used in embedded Silkworm RPC and Sentry services (zero means use default in Silkworm) (default: 0)
-   --silkworm.rpc.log                                                                                                      Enable interface log for embedded Silkworm RPC service (default: false)
-   --silkworm.rpc.log.maxsize value                                                                                        Max interface log file size in MB for embedded Silkworm RPC service (default: 1)
-   --silkworm.rpc.log.maxfiles value                                                                                       Max interface log files for embedded Silkworm RPC service (default: 100)
-   --silkworm.rpc.log.response                                                                                             Dump responses in interface logs for embedded Silkworm RPC service (default: false)
-   --silkworm.rpc.workers value                                                                                            Number of worker threads used in embedded Silkworm RPC service (zero means use default in Silkworm) (default: 0)
-   --silkworm.rpc.compatibility                                                                                            Preserve JSON-RPC compatibility using embedded Silkworm RPC service (default: true)
    --beacon.api value [ --beacon.api value ]                                                                               Enable beacon API (available endpoints: beacon, builder, config, debug, events, node, validator, lighthouse)
    --beacon.api.addr value                                                                                                 sets the host to listen for beacon api requests (default: "localhost")
    --beacon.api.cors.allow-methods value [ --beacon.api.cors.allow-methods value ]                                         set the cors' allow methods (default: "GET", "POST", "PUT", "DELETE", "OPTIONS")
@@ -818,7 +834,7 @@ GLOBAL OPTIONS:
    --log.dir.disable                                                                                                       disable disk logging (default: false)
    --log.dir.path value                                                                                                    Path to store user and error logs to disk
    --log.dir.prefix value                                                                                                  The file name prefix for logs stored to disk
-   --log.dir.verbosity value                                                                                               Set the log verbosity for logs stored to disk (default: "info")
+   --log.dir.verbosity value                                                                                               Set the log verbosity for logs stored to disk (default: "dbug")
    --log.delays                                                                                                            Enable block delay logging (default: false)
    --config value                                                                                                          Sets erigon flags from YAML/TOML file
    --help, -h                                                                                                              show help

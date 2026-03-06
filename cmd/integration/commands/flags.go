@@ -193,6 +193,25 @@ func withOutputCsvFile(cmd *cobra.Command) {
 func withChaosMonkey(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&syncCfg.ChaosMonkey, utils.ChaosMonkeyFlag.Name, utils.ChaosMonkeyFlag.Value, utils.ChaosMonkeyFlag.Usage)
 }
+
+// withStageBase applies flags common to most stage commands: config, datadir, chain, chaos monkey, heimdall, unwind.
+func withStageBase(cmd *cobra.Command) {
+	withConfig(cmd)
+	withDataDir(cmd)
+	withChain(cmd)
+	withChaosMonkey(cmd)
+	withHeimdall(cmd)
+	withUnwind(cmd)
+}
+
+// withTraceFlags applies flags shared by exec-style tracing commands.
+func withTraceFlags(cmd *cobra.Command) {
+	withNoCommit(cmd)
+	withBatchSize(cmd)
+	withTxTrace(cmd)
+	withWorkers(cmd)
+}
+
 func withChainTipMode(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&chainTipMode, "sync.mode.chaintip", false, "Every block does: `CalcCommitment`, `rwtx.Commit()`, generate diffs/changesets. Also can use it to generate diffs before `integration loop_exec`")
 }

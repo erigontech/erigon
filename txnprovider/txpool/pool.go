@@ -1863,12 +1863,22 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 	cumulativeRequiredBalance := uint256.NewInt(0)
 	minFeeCap := uint256.NewInt(0).SetAllOne()
 	minTip := uint64(math.MaxUint64)
-	var toDel []*metaTxn // can't delete items while iterate them
+	var toDel []*metaTxn                       // can't delete items while iterate them
+	var toDelReasons []txpoolcfg.DiscardReason // parallel reasons slice for toDel
 
 	p.all.ascend(senderID, func(mt *metaTxn) bool {
 		deleteAndContinueReasonLog := ""
+		discardReason := txpoolcfg.NonceTooLow
 		if senderNonce > mt.TxnSlot.Nonce {
 			deleteAndContinueReasonLog = "low nonce"
+		} else if p.cfg.MaxNonceGap > 0 && mt.TxnSlot.Nonce > noGapsNonce && mt.TxnSlot.Nonce-noGapsNonce > p.cfg.MaxNonceGap {
+			// Evict "zombie" queued transactions whose nonce is so far ahead of the sender's
+			// on-chain nonce (accounting for any consecutive txns already in the pool) that they
+			// can practically never become pending. This prevents unbounded pool bloat from accounts
+			// that submitted transactions with impossibly large nonce gaps (e.g. nonce 144968 when
+			// on-chain nonce is 6398). The gap threshold is configurable via MaxNonceGap (default 64).
+			deleteAndContinueReasonLog = "nonce gap too large"
+			discardReason = txpoolcfg.NonceTooDistant
 		} else if mt.TxnSlot.Nonce != noGapsNonce && mt.TxnSlot.Type == BlobTxnType { // Discard nonce-gapped blob txns
 			deleteAndContinueReasonLog = "nonce-gapped blob txn"
 		}
@@ -1888,6 +1898,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 				//already removed
 			}
 			toDel = append(toDel, mt)
+			toDelReasons = append(toDelReasons, discardReason)
 			return true
 		}
 
@@ -1956,8 +1967,8 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 		return true
 	})
 
-	for _, mt := range toDel {
-		p.discardLocked(mt, txpoolcfg.NonceTooLow)
+	for i, mt := range toDel {
+		p.discardLocked(mt, toDelReasons[i])
 	}
 
 	logger.Trace("[txpool] onSenderStateChange", "sender", senderID, "count", p.all.count(senderID), "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len())

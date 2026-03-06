@@ -36,10 +36,11 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
 type Opt func(bt *Backtester)
@@ -68,12 +69,7 @@ func WithChartsPageSize(n uint64) Opt {
 	}
 }
 
-type blockReader interface {
-	TxnumReader() rawdbv3.TxNumsReader
-	HeaderByNumber(ctx context.Context, tx kv.Getter, blockNum uint64) (*types.Header, error)
-}
-
-func New(logger log.Logger, db kv.TemporalRoDB, br blockReader, outputDir string, opts ...Opt) Backtester {
+func New(logger log.Logger, db kv.TemporalRoDB, br services.FullBlockReader, outputDir string, opts ...Opt) Backtester {
 	bt := Backtester{
 		logger:          logger,
 		db:              db,
@@ -91,7 +87,7 @@ func New(logger log.Logger, db kv.TemporalRoDB, br blockReader, outputDir string
 type Backtester struct {
 	logger          log.Logger
 	db              kv.TemporalRoDB
-	blockReader     blockReader
+	blockReader     services.FullBlockReader
 	outputDir       string
 	paraTrie        bool
 	trieWarmup      bool
@@ -211,7 +207,10 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 	if bt.paraTrie {
 		sd.EnableParaTrieDB(bt.db)
 	}
-	sd.GetCommitmentCtx().SetStateReader(newBacktestStateReader(tx, fromTxNum, toTxNum))
+	// A history reader that reads:
+	//   - commitment data as-of the beginning of the block
+	//   - account/storage/code data as-of the end of the block
+	sd.GetCommitmentCtx().SetStateReader(commitmentdb.NewSplitHistoryReader(tx, fromTxNum, toTxNum /* withHistory */, false))
 	sd.GetCommitmentCtx().SetTrace(bt.logger.Enabled(ctx, log.LvlTrace))
 	sd.GetCommitmentCtx().EnableCsvMetrics(deriveBlockMetricsFilePrefix(blockOutputDir))
 	latestTxNum, latestBlockNum, err := sd.SeekCommitment(ctx, tx)

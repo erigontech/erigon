@@ -22,45 +22,8 @@ import (
 	"fmt"
 
 	ethereum "github.com/erigontech/erigon"
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
 )
-
-func Compare(expected types.Log, actual types.Log) ([]error, bool) {
-	var errs []error
-
-	switch {
-	case expected.Address != actual.Address:
-		errs = append(errs, fmt.Errorf("expected address: %v, actual address %v", expected.Address, actual.Address))
-	case expected.TxHash != actual.TxHash:
-		errs = append(errs, fmt.Errorf("expected txhash: %v, actual txhash %v", expected.TxHash, actual.TxHash))
-	case expected.BlockHash != actual.BlockHash:
-		errs = append(errs, fmt.Errorf("expected blockHash: %v, actual blockHash %v", expected.BlockHash, actual.BlockHash))
-	case expected.BlockNumber != actual.BlockNumber:
-		errs = append(errs, fmt.Errorf("expected blockNumber: %v, actual blockNumber %v", expected.BlockNumber, actual.BlockNumber))
-	case expected.TxIndex != actual.TxIndex:
-		errs = append(errs, fmt.Errorf("expected txIndex: %v, actual txIndex %v", expected.TxIndex, actual.TxIndex))
-	case !hashSlicesAreEqual(expected.Topics, actual.Topics):
-		errs = append(errs, fmt.Errorf("expected topics: %v, actual topics %v", expected.Topics, actual.Topics))
-	}
-
-	return errs, len(errs) == 0
-}
-
-func NewLog(hash common.Hash, blockNum uint64, address common.Address, topics []common.Hash, data hexutil.Bytes, txIndex uint, blockHash common.Hash, index hexutil.Uint, removed bool) types.Log {
-	return types.Log{
-		Address:     address,
-		Topics:      topics,
-		Data:        data,
-		BlockNumber: blockNum,
-		TxHash:      hash,
-		TxIndex:     txIndex,
-		BlockHash:   blockHash,
-		Index:       txIndex,
-		Removed:     removed,
-	}
-}
 
 func (reqGen *requestGenerator) FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error) {
 	var result []types.Log
@@ -84,18 +47,4 @@ func parseResponse(resp any) (string, error) {
 	}
 
 	return string(result), nil
-}
-
-func hashSlicesAreEqual(s1, s2 []common.Hash) bool {
-	if len(s1) != len(s2) {
-		return false
-	}
-
-	for i := 0; i < len(s1); i++ {
-		if s1[i] != s2[i] {
-			return false
-		}
-	}
-
-	return true
 }
