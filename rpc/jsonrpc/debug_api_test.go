@@ -917,11 +917,18 @@ func TestSetHeadCanonicalCleanup(t *testing.T) {
 	require.Equal(t, targetHash, headHeaderHash,
 		"HeadHeaderHash should equal the target block hash after SetHead")
 
+	// 4) rpchelper.GetLatestBlockNumber must return the target block, not the stale
+	//    forkchoice head that pointed to the old (unwound) chain tip.
+	latestBlock, err := rpchelper.GetLatestBlockNumber(roTx)
+	require.NoError(t, err)
+	require.Equal(t, targetBlock, latestBlock,
+		"GetLatestBlockNumber should return targetBlock after SetHead, not the stale forkchoice head")
+
 	// Record the original head hash (before unwind) for the FCU below.
 	originalHeadHash := staleHashes[head]
 	roTx.Rollback()
 
-	// 4) A subsequent UpdateForkChoice back to the original head must succeed,
+	// 5) A subsequent UpdateForkChoice back to the original head must succeed,
 	//    proving that SetHead left the DB in a consistent state.
 	headHashH256 := gointerfaces.ConvertHashToH256(originalHeadHash)
 	receipt, err := m.ExecModule.UpdateForkChoice(ctx, &executionproto.ForkChoice{
