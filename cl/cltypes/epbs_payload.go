@@ -51,12 +51,19 @@ type PayloadAttestationData struct {
 	BlobDataAvailable bool        `json:"blob_data_available"`
 }
 
+func boolToUint64(b bool) uint64 {
+	if b {
+		return 1
+	}
+	return 0
+}
+
 func (p *PayloadAttestationData) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(
 		p.BeaconBlockRoot[:],
 		p.Slot,
-		uint64(ssz.BoolSSZ(p.PayloadPresent)),
-		uint64(ssz.BoolSSZ(p.BlobDataAvailable)),
+		boolToUint64(p.PayloadPresent),
+		boolToUint64(p.BlobDataAvailable),
 	)
 }
 
