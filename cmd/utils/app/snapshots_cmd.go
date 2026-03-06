@@ -2765,10 +2765,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 
-	// `erigon retire` command is designed to maximize resouces utilization. But `Erigon itself` does minimize background impact (because not in rush).
-	agg.SetCollateAndBuildWorkers(min(8, estimate.StateV3Collate.Workers()))
-	agg.SetMergeWorkers(min(8, estimate.StateV3Collate.Workers()))
-	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+	agg.PresetOfflineMerge()
 	agg.PeriodicalyPrintProcessSet(ctx)
 
 	if err := br.BuildMissedIndicesIfNeed(ctx, "retire", nil); err != nil {
@@ -2974,6 +2971,5 @@ func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log
 	if err = agg.OpenFolder(); err != nil {
 		panic(err)
 	}
-	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 	return agg
 }
