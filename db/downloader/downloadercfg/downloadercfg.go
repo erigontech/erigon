@@ -359,7 +359,7 @@ func getIpv6Enabled() bool {
 			return false
 		}
 		fileContent := strings.TrimSpace(string(file))
-		return fileContent != "0"
+		return fileContent == "0"
 	}
 
 	// TODO hotfix: for platforms other than linux disable ipv6
