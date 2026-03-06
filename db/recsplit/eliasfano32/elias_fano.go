@@ -109,7 +109,8 @@ func (ef *EliasFano) deriveFields() int {
 	totalWords := wordsLowerBits + wordsUpperBits + jumpWords
 	//fmt.Printf("EF: %d, %d,%d,%d\n", totalWords, wordsLowerBits, wordsUpperBits, jumpWords)
 	if cap(ef.data) < totalWords {
-		ef.data = make([]uint64, totalWords)
+		newCap := max(totalWords, cap(ef.data)*2)
+		ef.data = make([]uint64, totalWords, newCap)
 	} else {
 		ef.data = ef.data[:totalWords]
 	}
