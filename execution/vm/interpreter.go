@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -249,9 +250,21 @@ func jumpTable(chainRules *chain.Rules, cfg Config) *JumpTable {
 // considered a revert-and-consume-all-gas operation except for
 // ErrExecutionReverted which means revert-and-keep-gas-left.
 func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) (_ []byte, _ uint64, err error) {
+	// Arbitrum: track contract on the call stack for Stylus reentrancy detection
+	evm.ProcessingHook.PushContract(&contract)
+	defer evm.ProcessingHook.PopContract()
+
 	// Don't bother with the execution if there's no code.
 	if len(contract.Code) == 0 {
 		return nil, gas, nil
+	}
+
+	// Arbitrum Stylus: execute WASM programs directly, bypassing the EVM bytecode loop
+	if evm.chainRules.IsStylus && state.IsStylusProgram(contract.Code) {
+		callContext := getCallContext(contract, input, gas)
+		defer callContext.put()
+		ret, wasmErr := evm.ProcessingHook.ExecuteWASM(callContext, input, evm)
+		return ret, callContext.gas, wasmErr
 	}
 
 	// Reset the previous call's return data. It's unimportant to preserve the old buffer
