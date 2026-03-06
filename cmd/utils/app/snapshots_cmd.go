@@ -394,6 +394,8 @@ var snapshotCommand = cli.Command{
 				&cli.StringFlag{Name: "skip-check", Usage: fmt.Sprintf("comma separated list from: %s", integrity.FastChecks)},
 				&cli.BoolFlag{Name: "failFast", Value: true, Usage: "to stop after 1st problem or print WARN log and continue check"},
 				&cli.Uint64Flag{Name: "fromStep", Value: 0, Usage: "skip files before given step"},
+				&cli.Int64Flag{Name: "seed", Usage: "random seed for sampling (auto-generated if not set)"},
+				&cli.Float64Flag{Name: "sample", Usage: "fraction of items to check via pseudo-random sampling (0.0-1.0)", Value: 1.0},
 			}),
 		},
 		{
@@ -431,6 +433,8 @@ var snapshotCommand = cli.Command{
 				&utils.DataDirFlag,
 				&cli.Uint64Flag{Name: "from", Usage: "block number from which to start verifying", Required: true},
 				&cli.Uint64Flag{Name: "to", Usage: "block number up to which to verify (exclusive)", Required: true},
+				&cli.Int64Flag{Name: "seed", Usage: "random seed for block sampling (auto-generated if not set)"},
+				&cli.Float64Flag{Name: "sample", Usage: "fraction of blocks to check via pseudo-random sampling (0.0-1.0)", Value: 1.0},
 			}),
 		},
 		{
@@ -1116,19 +1120,17 @@ func doIntegrity(cliCtx *cli.Context) error {
 
 	skipChecks := cliCtx.String("skip-check")
 	if len(skipChecks) > 0 {
-		var finalChecks []integrity.Check
+		skipSet := map[integrity.Check]struct{}{}
 		for skipCheck := range strings.SplitSeq(skipChecks, ",") {
-			found := false
-			for _, chk := range requestedChecks {
-				if chk == integrity.Check(skipCheck) {
-					found = true
-					logger.Info("[integrity] skipping check", "check", chk)
-					break
-				}
+			skipSet[integrity.Check(skipCheck)] = struct{}{}
+		}
+		var finalChecks []integrity.Check
+		for _, chk := range requestedChecks {
+			if _, skip := skipSet[chk]; skip {
+				logger.Info("[integrity] skipping check", "check", chk)
+				continue
 			}
-			if !found {
-				finalChecks = append(finalChecks, integrity.Check(skipCheck))
-			}
+			finalChecks = append(finalChecks, chk)
 		}
 
 		requestedChecks = finalChecks
@@ -1136,6 +1138,14 @@ func doIntegrity(cliCtx *cli.Context) error {
 
 	failFast := cliCtx.Bool("failFast")
 	fromStep := cliCtx.Uint64("fromStep")
+	var seed int64
+	if cliCtx.IsSet("seed") {
+		seed = cliCtx.Int64("seed")
+	} else {
+		seed = time.Now().UnixNano()
+	}
+	sampleRatio := cliCtx.Float64("sample")
+
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
@@ -1167,7 +1177,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 	for _, chk := range requestedChecks {
 		chk := chk
 		g.Go(func() error {
-			logger.Info("[integrity] starting", "check", chk)
+			logger.Info("[integrity] starting", "check", chk, "seed", seed, "sampleRatio", sampleRatio)
 			switch chk {
 			case integrity.BlocksTxnID:
 				if err := blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(failFast); err != nil {
@@ -1215,11 +1225,11 @@ func doIntegrity(cliCtx *cli.Context) error {
 					return err
 				}
 			case integrity.ReceiptsNoDups:
-				if err := integrity.CheckReceiptsNoDups(ctx, db, blockReader, failFast); err != nil {
+				if err := integrity.CheckReceiptsNoDups(ctx, db, blockReader, failFast, seed, sampleRatio); err != nil {
 					return err
 				}
 			case integrity.RCacheNoDups:
-				if err := integrity.CheckRCacheNoDups(ctx, db, blockReader, failFast); err != nil {
+				if err := integrity.CheckRCacheNoDups(ctx, db, blockReader, failFast, seed, sampleRatio); err != nil {
 					return err
 				}
 			case integrity.StateProgress:
@@ -1243,7 +1253,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 					return err
 				}
 			case integrity.CommitmentHistVal:
-				if err := integrity.CheckCommitmentHistVal(ctx, db, blockReader, failFast, logger); err != nil {
+				if err := integrity.CheckCommitmentHistVal(ctx, db, blockReader, failFast, seed, sampleRatio, logger); err != nil {
 					return err
 				}
 			case integrity.StateVerify:
@@ -1282,7 +1292,7 @@ func doCheckCommitmentHistAtBlk(cliCtx *cli.Context, logger log.Logger) error {
 	defer db.Close()
 	blockReader, _ := blockRetire.IO()
 	blockNum := cliCtx.Uint64("block")
-	if err = integrity.CheckCommitmentHistAtBlk(ctx, db, blockReader, blockNum, logger); err != nil {
+	if err = integrity.CheckCommitmentHistAtBlk(ctx, db, blockReader, blockNum, log.LvlInfo, logger); err != nil {
 		return fmt.Errorf("checkCommitmentHistAtBlk: %d, %w", blockNum, err)
 	}
 	return nil
@@ -1301,8 +1311,6 @@ func doCheckCommitmentHistAtBlkRange(cliCtx *cli.Context, logger log.Logger) err
 		return err
 	}
 	defer clean()
-	defer blockRetire.MadvNormal().DisableReadAhead()
-	defer agg.MadvNormal().DisableReadAhead()
 	db, err := temporal.New(chainDB, agg)
 	if err != nil {
 		return err
@@ -1311,7 +1319,15 @@ func doCheckCommitmentHistAtBlkRange(cliCtx *cli.Context, logger log.Logger) err
 	blockReader, _ := blockRetire.IO()
 	from := cliCtx.Uint64("from")
 	to := cliCtx.Uint64("to")
-	return integrity.CheckCommitmentHistAtBlkRange(ctx, db, blockReader, from, to, logger)
+	var seed int64
+	if cliCtx.IsSet("seed") {
+		seed = cliCtx.Int64("seed")
+	} else {
+		seed = time.Now().UnixNano()
+	}
+	sampleRatio := cliCtx.Float64("sample")
+	logger.Info("[check-commitment-hist-at-blk-range] sampling config", "seed", seed, "sampleRatio", sampleRatio)
+	return integrity.CheckCommitmentHistAtBlkRange(ctx, db, blockReader, from, to, seed, sampleRatio, logger)
 }
 
 func doVerifyState(cliCtx *cli.Context, logger log.Logger) error {
@@ -2898,7 +2914,11 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 		Accede(true) // integration tool: open db without creation and without blocking erigon
 }
 func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *state.Aggregator {
-	agg, err := state.New(dirs).SanityOldNaming().Logger(logger).Open(ctx, chainDB)
+	erigonDBSettings, err := state.ResolveErigonDBSettings(dirs, logger, false)
+	if err != nil {
+		panic(err)
+	}
+	agg, err := state.New(dirs).SanityOldNaming().Logger(logger).WithErigonDBSettings(erigonDBSettings).Open(ctx, chainDB)
 	if err != nil {
 		panic(err)
 	}

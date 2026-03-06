@@ -182,24 +182,6 @@ func (f *ForkChoiceStore) GetHead(auxilliaryState *state.CachingBeaconState) (co
 	}
 }
 
-// filterValidatorSetForAttestationScores preliminarly filter the validator set obliging to consensus rules.
-func (f *ForkChoiceStore) filterValidatorSetForAttestationScores(c *checkpointState, epoch uint64) []uint64 {
-	filtered := make([]uint64, 0, c.validatorSetSize)
-	for validatorIndex := 0; validatorIndex < c.validatorSetSize; validatorIndex++ {
-		if !readFromBitset(c.actives, validatorIndex) || readFromBitset(c.slasheds, validatorIndex) {
-			continue
-		}
-		if _, hasLatestMessage := f.getLatestMessage(uint64(validatorIndex)); !hasLatestMessage {
-			continue
-		}
-		if f.isUnequivocating(uint64(validatorIndex)) {
-			continue
-		}
-		filtered = append(filtered, uint64(validatorIndex))
-	}
-	return filtered
-}
-
 // getFilteredBlockTree filters out dumb blocks.
 func (f *ForkChoiceStore) getFilteredBlockTree(base common.Hash) map[common.Hash]*cltypes.BeaconBlockHeader {
 	blocks := make(map[common.Hash]*cltypes.BeaconBlockHeader)

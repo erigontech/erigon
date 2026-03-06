@@ -246,11 +246,23 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 		if err != nil {
 			return 0, err
 		}
-		// Record the address access for BAL tracking, but only in non-read-only
-		// context. In STATICCALL, SELFDESTRUCT will be rejected by ErrWriteProtection
-		// before it executes, so the beneficiary is never truly accessed.
-		if !evm.readOnly {
+		// Record the beneficiary address access for BAL tracking when the
+		// contract has non-zero balance.  A zero-balance selfdestruct does
+		// not transfer value, so the beneficiary should not appear in the
+		// block access list.  Skip in read-only context (STATICCALL) where
+		// SELFDESTRUCT will be rejected by ErrWriteProtection.
+		if !evm.readOnly && !balance.IsZero() {
 			evm.IntraBlockState().MarkAddressAccess(address, false)
+		}
+		// When balance is zero OR we're in a read-only (STATICCALL) context,
+		// and the beneficiary differs from self, mark the beneficiary's reads
+		// as internal.  In both cases the Empty() call above recorded versioned
+		// reads for the beneficiary purely for gas calculation — no value is
+		// actually transferred (zero balance) or SELFDESTRUCT will be rejected
+		// (read-only).  Skip when beneficiary == self to avoid incorrectly
+		// marking the contract's own legitimate reads.
+		if (balance.IsZero() || evm.readOnly) && address != callContext.Address() {
+			evm.IntraBlockState().MarkReadsInternal(address)
 		}
 		if empty && !balance.IsZero() {
 			gas += params.CreateBySelfdestructGas
