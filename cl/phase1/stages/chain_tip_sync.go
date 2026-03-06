@@ -277,6 +277,7 @@ func recoverMissingEnvelopes(ctx context.Context, cfg *Cfg) {
 
 	childBlock, ok := cfg.forkChoice.GetBlock(headRoot)
 	if !ok {
+		log.Debug("[chainTipSync] envelope recovery: head block not in fork graph", "headRoot", headRoot)
 		return
 	}
 
@@ -313,6 +314,7 @@ func recoverMissingEnvelopes(ctx context.Context, cfg *Cfg) {
 	}
 
 	if len(missingRoots) > 0 {
+		log.Debug("[chainTipSync] envelope recovery: fetching missing envelopes", "count", len(missingRoots))
 		go fetchAndApplyEnvelopes(ctx, cfg, missingRoots)
 	}
 }
