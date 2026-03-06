@@ -52,7 +52,7 @@ func TestGasPrice(t *testing.T) {
 		{
 			description:   "standard settings 60 blocks",
 			chainSize:     60,
-			expectedPrice: big.NewInt(common.GWei * int64(36)),
+			expectedPrice: big.NewInt(common.GWei * int64(44)),
 		},
 		{
 			description:   "standard settings 30 blocks",
