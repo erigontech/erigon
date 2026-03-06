@@ -867,7 +867,7 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	return nil
 }
 
-func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, br services.FullBlockReader, from, to uint64, logger log.Logger) error {
+func CheckStateRootByHistory(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, br services.FullBlockReader, from, to uint64, logger log.Logger) error {
 	if from >= to {
 		return fmt.Errorf("invalid blk range: %d >= %d", from, to)
 	}
@@ -889,7 +889,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 				done := checked.Load()
 				elapsed := time.Since(start).Seconds()
 				rate := float64(done) / elapsed
-				logger.Info("[integrity] "+string(CommitmentHistAtBlkRange), "blks/s", rate, "checked", common.PrettyCounter(done), "blockNum", common.PrettyCounter(lastBlockNum.Load()))
+				logger.Info("[integrity] "+string(StateRootVerifyByHistory), "blks/s", rate, "checked", common.PrettyCounter(done), "blockNum", common.PrettyCounter(lastBlockNum.Load()))
 			}
 		}
 	}()

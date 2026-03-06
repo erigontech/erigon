@@ -421,7 +421,7 @@ var snapshotCommand = cli.Command{
 			Name: "check-commitment-hist-at-blk-range",
 			Action: func(cliCtx *cli.Context) error {
 				logger := log.Root()
-				err := doCheckCommitmentHistAtBlkRange(cliCtx, logger)
+				err := doCheckStateRootByHistory(cliCtx, logger)
 				if err != nil {
 					log.Error("[check-commitment-hist-at-blk-range] failure", "err", err)
 					return err
@@ -429,7 +429,7 @@ var snapshotCommand = cli.Command{
 				log.Info("[check-commitment-hist-at-blk-range] success")
 				return nil
 			},
-			Description: "check if our historical commitment data matches the state roots of headers for a given [from,to) block range",
+			Description: "verify block state roots against commitment history snapshots for a given [from,to) block range (no block re-execution)",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&cli.Uint64Flag{Name: "from", Usage: "block number from which to start verifying", Required: true},
@@ -1264,14 +1264,14 @@ func doIntegrity(cliCtx *cli.Context) error {
 				if err := integrity.CheckCommitmentHistVal(ctx, sc, db, blockReader, failFast, logger); err != nil {
 					return err
 				}
-			case integrity.CommitmentHistAtBlkRange:
+			case integrity.StateRootVerifyByHistory:
 				to, err := stateProgress(ctx, db, blockReader.TxnumReader())
 				if err != nil {
 					return err
 				}
 				scCopy := sc
 				scCopy.SampleRatio /= 100 // it's very slow check
-				if err := integrity.CheckCommitmentHistAtBlkRange(ctx, sc, db, blockReader, 1, to+1, logger); err != nil {
+				if err := integrity.CheckStateRootByHistory(ctx, sc, db, blockReader, 1, to+1, logger); err != nil {
 					return err
 				}
 			case integrity.StateVerify:
@@ -1335,7 +1335,7 @@ func doCheckCommitmentHistAtBlk(cliCtx *cli.Context, logger log.Logger) error {
 	return nil
 }
 
-func doCheckCommitmentHistAtBlkRange(cliCtx *cli.Context, logger log.Logger) error {
+func doCheckStateRootByHistory(cliCtx *cli.Context, logger log.Logger) error {
 	ctx := cliCtx.Context
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
@@ -1376,7 +1376,7 @@ func doCheckCommitmentHistAtBlkRange(cliCtx *cli.Context, logger log.Logger) err
 		return err
 	}
 	logger.Info("[check-commitment-hist-at-blk-range] sampling config", "seed", sc.Seed, "sampleRatio", sc.SampleRatio)
-	return integrity.CheckCommitmentHistAtBlkRange(ctx, sc, db, blockReader, from, to, logger)
+	return integrity.CheckStateRootByHistory(ctx, sc, db, blockReader, from, to, logger)
 }
 
 func doVerifyState(cliCtx *cli.Context, logger log.Logger) error {
