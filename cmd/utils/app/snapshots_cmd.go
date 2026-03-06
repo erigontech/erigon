@@ -62,6 +62,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
@@ -432,7 +433,7 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&cli.Uint64Flag{Name: "from", Usage: "block number from which to start verifying", Required: true},
-				&cli.Uint64Flag{Name: "to", Usage: "block number up to which to verify (exclusive)", Required: true},
+				&cli.Uint64Flag{Name: "to", Usage: "block number up to which to verify (exclusive); defaults to latest block with state"},
 				&cli.Int64Flag{Name: "seed", Usage: "random seed for block sampling (auto-generated if not set)"},
 				&cli.Float64Flag{Name: "sample", Usage: "fraction of blocks to check via pseudo-random sampling (0.0-1.0)", Value: 1.0},
 			}),
@@ -1145,6 +1146,9 @@ func doIntegrity(cliCtx *cli.Context) error {
 		seed = time.Now().UnixNano()
 	}
 	sampleRatio := cliCtx.Float64("sample")
+	if err := integrity.ValidateSampleRatio(sampleRatio); err != nil {
+		return err
+	}
 
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
@@ -1177,7 +1181,11 @@ func doIntegrity(cliCtx *cli.Context) error {
 	for _, chk := range requestedChecks {
 		chk := chk
 		g.Go(func() error {
-			logger.Info("[integrity] starting", "check", chk, "seed", seed, "sampleRatio", sampleRatio)
+			sc, err := integrity.NewSamplerCfg(seed, sampleRatio)
+			if err != nil {
+				return err
+			}
+			logger.Info("[integrity] starting", "check", chk, "seed", sc.Seed, "sampleRatio", sc.SampleRatio)
 			switch chk {
 			case integrity.BlocksTxnID:
 				if err := blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(failFast); err != nil {
@@ -1225,11 +1233,11 @@ func doIntegrity(cliCtx *cli.Context) error {
 					return err
 				}
 			case integrity.ReceiptsNoDups:
-				if err := integrity.CheckReceiptsNoDups(ctx, db, blockReader, failFast, seed, sampleRatio); err != nil {
+				if err := integrity.CheckReceiptsNoDups(ctx, sc, db, blockReader, failFast); err != nil {
 					return err
 				}
 			case integrity.RCacheNoDups:
-				if err := integrity.CheckRCacheNoDups(ctx, db, blockReader, failFast, seed, sampleRatio); err != nil {
+				if err := integrity.CheckRCacheNoDups(ctx, sc, db, blockReader, failFast); err != nil {
 					return err
 				}
 			case integrity.StateProgress:
@@ -1253,7 +1261,15 @@ func doIntegrity(cliCtx *cli.Context) error {
 					return err
 				}
 			case integrity.CommitmentHistVal:
-				if err := integrity.CheckCommitmentHistVal(ctx, db, blockReader, failFast, seed, sampleRatio, logger); err != nil {
+				if err := integrity.CheckCommitmentHistVal(ctx, sc, db, blockReader, failFast, logger); err != nil {
+					return err
+				}
+			case integrity.CommitmentHistAtBlkRange:
+				to, err := stateProgress(ctx, db, blockReader.TxnumReader())
+				if err != nil {
+					return err
+				}
+				if err := integrity.CheckCommitmentHistAtBlkRange(ctx, sc, db, blockReader, 1, to+1, logger); err != nil {
 					return err
 				}
 			case integrity.StateVerify:
@@ -1268,6 +1284,25 @@ func doIntegrity(cliCtx *cli.Context) error {
 	}
 
 	return g.Wait()
+}
+
+// stateProgress returns the latest block number covered by state snapshots,
+// derived from the aggregator's EndTxNumMinimax. This may differ from the block
+// files progress — block snapshots and state snapshots advance independently.
+// Use this as the upper bound for state-history integrity commands.
+func stateProgress(ctx context.Context, db kv.TemporalRoDB, txNumsReader rawdbv3.TxNumsReader) (uint64, error) {
+	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
+	aggMax := agg.EndTxNumMinimax()
+	roTx, err := db.BeginRo(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer roTx.Rollback()
+	blockNum, _, err := txNumsReader.FindBlockNum(ctx, roTx, aggMax)
+	if err != nil {
+		return 0, err
+	}
+	return blockNum, nil
 }
 
 func doCheckCommitmentHistAtBlk(cliCtx *cli.Context, logger log.Logger) error {
@@ -1319,6 +1354,14 @@ func doCheckCommitmentHistAtBlkRange(cliCtx *cli.Context, logger log.Logger) err
 	blockReader, _ := blockRetire.IO()
 	from := cliCtx.Uint64("from")
 	to := cliCtx.Uint64("to")
+	if !cliCtx.IsSet("to") {
+		latestBlock, err := stateProgress(ctx, db, blockReader.TxnumReader())
+		if err != nil {
+			return err
+		}
+		to = latestBlock + 1 // exclusive upper bound
+		logger.Info("[check-commitment-hist-at-blk-range] auto-detected --to", "to", to)
+	}
 	var seed int64
 	if cliCtx.IsSet("seed") {
 		seed = cliCtx.Int64("seed")
@@ -1326,8 +1369,12 @@ func doCheckCommitmentHistAtBlkRange(cliCtx *cli.Context, logger log.Logger) err
 		seed = time.Now().UnixNano()
 	}
 	sampleRatio := cliCtx.Float64("sample")
-	logger.Info("[check-commitment-hist-at-blk-range] sampling config", "seed", seed, "sampleRatio", sampleRatio)
-	return integrity.CheckCommitmentHistAtBlkRange(ctx, db, blockReader, from, to, seed, sampleRatio, logger)
+	sc, err := integrity.NewSamplerCfg(seed, sampleRatio)
+	if err != nil {
+		return err
+	}
+	logger.Info("[check-commitment-hist-at-blk-range] sampling config", "seed", sc.Seed, "sampleRatio", sc.SampleRatio)
+	return integrity.CheckCommitmentHistAtBlkRange(ctx, sc, db, blockReader, from, to, logger)
 }
 
 func doVerifyState(cliCtx *cli.Context, logger log.Logger) error {
@@ -1635,17 +1682,19 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs, chainDB kv.RoDB) error 
 		if err != nil {
 			return fmt.Errorf("failed to read PersistReceipts config: %w", err)
 		}
-		log.Warn("[integrity] This installation doesn't persist receipts cache; ignoring .rcache checks")
-
 		commitmentHistory, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
 		if err != nil {
 			return fmt.Errorf("failed to read CommitmentHistory config: %w", err)
 		}
-		log.Warn("[integrity] This installation doesn't persist commitment history; ignoring commitment history checks")
-
 		return nil
 	}); err != nil {
 		return err
+	}
+	if !persistReceiptCache {
+		log.Warn("[integrity] This installation doesn't persist receipts cache; ignoring .rcache checks")
+	}
+	if !commitmentHistory {
+		log.Warn("[integrity] This installation doesn't persist commitment history; ignoring commitment history checks")
 	}
 
 	var maxStepDomain uint64 // across all files in SnapDomain
