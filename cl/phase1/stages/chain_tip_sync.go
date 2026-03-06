@@ -5,7 +5,9 @@ import (
 	"sort"
 	"time"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	network "github.com/erigontech/erigon/cl/phase1/network"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -60,6 +62,9 @@ func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count ui
 	// spam requests to fetch blocks by range from the execution client
 	blocks, pid, err := cfg.rpc.SendBeaconBlocksByRangeReq(ctx, from, count)
 	for err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		blocks, pid, err = cfg.rpc.SendBeaconBlocksByRangeReq(ctx, from, count)
 	}
 
@@ -132,6 +137,8 @@ func listenToIncomingBlocksUntilANewBlockIsReceived(ctx context.Context, logger 
 
 	// Map to keep track of seen block roots
 	seenBlockRoots := make(map[common.Hash]struct{})
+	// [GLOAS] Track the latest envelope fetch goroutine so we can wait for it before returning.
+	var envelopeDone chan struct{}
 MainLoop:
 	for {
 		select {
@@ -147,6 +154,15 @@ MainLoop:
 			// Handle errors received on the error channel
 			return err
 		case blocks := <-respCh:
+			// [GLOAS] Fetch missing execution payload envelopes for confirmed FULL parents.
+			// Runs concurrently so block processing is not blocked; we wait via envelopeDone after MainLoop.
+			if fullRoots := findMissingEnvelopeRoots(cfg, blocks.Data); len(fullRoots) > 0 {
+				envelopeDone = make(chan struct{})
+				go func(done chan struct{}) {
+					defer close(done)
+					fetchAndApplyEnvelopes(ctx, cfg, fullRoots)
+				}(envelopeDone)
+			}
 			// Handle blocks received on the response channel
 			for _, block := range blocks.Data {
 				// Check if the parent block is known
@@ -189,12 +205,129 @@ MainLoop:
 			logger.Info("[Caplin] Progress", "progress", cfg.forkChoice.HighestSeen(), "from", args.seenSlot, "to", args.targetSlot)
 		}
 	}
+	if envelopeDone != nil {
+		<-envelopeDone
+	}
 	return nil
+}
+
+// findMissingEnvelopeRoots identifies blocks whose parent was FULL but missing its execution payload envelope.
+// Each block's bid.ParentBlockHash is compared against the parent block's bid.BlockHash to determine FULL status.
+func findMissingEnvelopeRoots(cfg *Cfg, blocks []*cltypes.SignedBeaconBlock) [][32]byte {
+	var missing [][32]byte
+	for _, block := range blocks {
+		epoch := block.Block.Slot / cfg.beaconCfg.SlotsPerEpoch
+		if cfg.beaconCfg.GetCurrentStateVersion(epoch) < clparams.GloasVersion {
+			continue
+		}
+		parentRoot := block.Block.ParentRoot
+		if cfg.forkChoice.HasEnvelope(common.Hash(parentRoot)) {
+			continue
+		}
+		bid := block.Block.Body.GetSignedExecutionPayloadBid()
+		if bid == nil || bid.Message == nil {
+			log.Warn("[chainTipSync] GLOAS block missing bid", "slot", block.Block.Slot)
+			continue
+		}
+		parentBlock, ok := cfg.forkChoice.GetBlock(parentRoot)
+		if !ok {
+			log.Debug("[chainTipSync] parent block not in fork choice (possible reorg)", "slot", block.Block.Slot, "parentRoot", common.Hash(parentRoot))
+			continue
+		}
+		parentBid := parentBlock.Block.Body.GetSignedExecutionPayloadBid()
+		if parentBid == nil || parentBid.Message == nil {
+			continue // normal at GLOAS transition boundary (parent is pre-GLOAS)
+		}
+		if bid.Message.ParentBlockHash == parentBid.Message.BlockHash {
+			missing = append(missing, parentRoot)
+		}
+	}
+	return missing
+}
+
+// fetchAndApplyEnvelopes fetches missing execution payload envelopes from peers and applies them.
+func fetchAndApplyEnvelopes(ctx context.Context, cfg *Cfg, roots [][32]byte) {
+	envelopes, err := network.RequestEnvelopesFrantically(ctx, cfg.rpc, roots)
+	if err != nil {
+		log.Debug("[chainTipSync] failed to request GLOAS envelopes", "err", err)
+		return
+	}
+	for _, env := range envelopes {
+		if err := cfg.forkChoice.OnExecutionPayload(ctx, env, false, false); err != nil {
+			log.Debug("[chainTipSync] failed to apply GLOAS envelope", "beaconBlockRoot", env.Message.BeaconBlockRoot, "err", err)
+		}
+	}
+}
+
+// recoverMissingEnvelopes walks backwards from the current fork choice head
+// and fetches execution payload envelopes for FULL GLOAS blocks that are missing them.
+// It stops when it finds a parent that already has its envelope, since prior blocks are
+// expected to be covered. Fetching runs in a background goroutine to avoid blocking the stage.
+func recoverMissingEnvelopes(ctx context.Context, cfg *Cfg) {
+	headRoot, headSlot, err := cfg.forkChoice.GetHead(nil)
+	if err != nil {
+		log.Debug("[chainTipSync] envelope recovery: failed to get head", "err", err)
+		return
+	}
+
+	epoch := headSlot / cfg.beaconCfg.SlotsPerEpoch
+	if cfg.beaconCfg.GetCurrentStateVersion(epoch) < clparams.GloasVersion {
+		return
+	}
+
+	childBlock, ok := cfg.forkChoice.GetBlock(headRoot)
+	if !ok {
+		return
+	}
+
+	var missingRoots [][32]byte
+	for {
+		parentRoot := childBlock.Block.ParentRoot
+		parentBlock, ok := cfg.forkChoice.GetBlock(parentRoot)
+		if !ok {
+			break
+		}
+
+		parentEpoch := parentBlock.Block.Slot / cfg.beaconCfg.SlotsPerEpoch
+		if cfg.beaconCfg.GetCurrentStateVersion(parentEpoch) < clparams.GloasVersion {
+			break
+		}
+
+		childBid := childBlock.Block.Body.GetSignedExecutionPayloadBid()
+		parentBid := parentBlock.Block.Body.GetSignedExecutionPayloadBid()
+		if childBid == nil || childBid.Message == nil || parentBid == nil || parentBid.Message == nil {
+			childBlock = parentBlock
+			continue
+		}
+
+		if childBid.Message.ParentBlockHash == parentBid.Message.BlockHash {
+			// Parent is FULL.
+			if cfg.forkChoice.HasEnvelope(common.Hash(parentRoot)) {
+				// Envelope already present; everything further back is covered.
+				break
+			}
+			missingRoots = append(missingRoots, parentRoot)
+		}
+		// Whether FULL (missing) or EMPTY, continue walking backwards.
+		childBlock = parentBlock
+	}
+
+	if len(missingRoots) > 0 {
+		go fetchAndApplyEnvelopes(ctx, cfg, missingRoots)
+	}
 }
 
 // chainTipSync synchronizes the chain tip by fetching blocks from the highest seen block up to the target slot by listening to incoming blocks.
 // or by fetching blocks that might have been missed by gossip after a delay.
 func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
+	// [GLOAS] When caught up on blocks, check for missing execution payload envelopes.
+	// The gossip service has a 30-second window to deliver envelopes; this is the fallback
+	// for when gossip permanently failed but the CL block arrived on time.
+	if args.seenSlot >= args.targetSlot {
+		recoverMissingEnvelopes(ctx, cfg)
+		return nil
+	}
+
 	totalRequest := args.targetSlot - args.seenSlot
 	log.Debug("[chainTipSync] totalRequest", "totalRequest", totalRequest, "seenSlot", args.seenSlot, "targetSlot", args.targetSlot)
 	// If the execution engine is not ready, wait for it to be ready.
