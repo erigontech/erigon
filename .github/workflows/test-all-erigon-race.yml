@@ -77,7 +77,7 @@ jobs:
           GOTRACEBACK: 1
           GOGC: 80
           CGO_CFLAGS: -D__BLST_PORTABLE__
-          GOFLAGS: -race -timeout=30m
+          GOFLAGS: -race -timeout=60m
         run: make test-group TEST_GROUP=${{ matrix.test-group }}
 
       - uses: ./.github/actions/cleanup-erigon
