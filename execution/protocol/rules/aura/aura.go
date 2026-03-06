@@ -1167,7 +1167,7 @@ func (c *AuRa) GetTransferFunc() evmtypes.TransferFunc {
 }
 
 func (c *AuRa) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
-	return nil
+	return misc.LogSelfDestructedAccounts // EIP-7708
 }
 
 /*

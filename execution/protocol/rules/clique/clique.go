@@ -645,5 +645,5 @@ func (c *Clique) GetTransferFunc() evmtypes.TransferFunc {
 }
 
 func (c *Clique) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
-	return nil
+	return misc.LogSelfDestructedAccounts // EIP-7708
 }
