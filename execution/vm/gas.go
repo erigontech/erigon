@@ -59,19 +59,21 @@ func callGas(isEip150 bool, availableGas, base uint64, callCost *uint256.Int) (u
 
 // categorizeDynamicGas adds to usedMultiGas the dynamic gas cost of an opcode,
 // categorized by resource kind based on the opcode type.
-// This provides broad-brush categorization; ACL operations (cold/warm splitting)
-// and LOG data/topic splitting are refined in operations_acl.go and gas_table.go.
+// Opcodes that have fine-grained multigas categorization in their gas functions
+// (ACL cold/warm splitting, LOG data/topic splitting) are skipped here.
 func categorizeDynamicGas(usedMultiGas *multigas.MultiGas, op OpCode, cost uint64) {
 	if cost == 0 {
 		return
 	}
 	switch op {
-	case SLOAD, BALANCE, EXTCODESIZE, EXTCODECOPY, EXTCODEHASH, SELFBALANCE:
+	case SLOAD,
+		SSTORE,
+		CALL, CALLCODE, STATICCALL, DELEGATECALL,
+		LOG0, LOG1, LOG2, LOG3, LOG4:
+		// Handled by gas functions in operations_acl.go and gas_table.go
+		return
+	case BALANCE, EXTCODESIZE, EXTCODECOPY, EXTCODEHASH, SELFBALANCE:
 		usedMultiGas.SaturatingIncrementInto(multigas.ResourceKindStorageAccess, cost)
-	case SSTORE:
-		usedMultiGas.SaturatingIncrementInto(multigas.ResourceKindStorageGrowth, cost)
-	case LOG0, LOG1, LOG2, LOG3, LOG4:
-		usedMultiGas.SaturatingIncrementInto(multigas.ResourceKindHistoryGrowth, cost)
 	default:
 		usedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, cost)
 	}

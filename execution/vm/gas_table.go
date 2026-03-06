@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/erigontech/erigon/arb/multigas"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/math"
@@ -224,7 +225,7 @@ func gasSStoreEIP2200(evm *EVM, callContext *CallContext, availableGas uint64, m
 }
 
 func makeGasLog(n uint64) gasFunc {
-	return func(_ *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
+	return func(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
 		requestedSize, overflow := callContext.Stack.Back(1).Uint64WithOverflow()
 		if overflow {
 			return 0, ErrGasUintOverflow
@@ -249,6 +250,12 @@ func makeGasLog(n uint64) gasFunc {
 		if gas, overflow = math.SafeAdd(gas, memorySizeGas); overflow {
 			return 0, ErrGasUintOverflow
 		}
+
+		if evm.chainRules.IsArbitrum {
+			callContext.Contract.UsedMultiGas.SaturatingIncrementInto(multigas.ResourceKindHistoryGrowth, memorySizeGas)
+			callContext.Contract.UsedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, gas-memorySizeGas)
+		}
+
 		return gas, nil
 	}
 }

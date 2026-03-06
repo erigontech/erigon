@@ -25,6 +25,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/arb/multigas"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -56,24 +57,32 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		var value uint256.Int
 		value.Set(y)
 
+		// Arbitrum multigas: split cold sload cost (StorageAccess) from write cost (StorageGrowth)
+		arbSstoreReturn := func(totalGas uint64) (uint64, error) {
+			if evm.chainRules.IsArbitrum {
+				categorizeAclSstoreGas(&callContext.Contract.UsedMultiGas, cost, totalGas)
+			}
+			return totalGas, nil
+		}
+
 		if current.Eq(&value) { // noop (1)
 			// EIP 2200 original clause:
 			//		return params.SloadGasEIP2200, nil
-			return cost + params.WarmStorageReadCostEIP2929, nil // SLOAD_GAS
+			return arbSstoreReturn(cost + params.WarmStorageReadCostEIP2929) // SLOAD_GAS
 		}
 
 		slotCommited := accounts.InternKey(x.Bytes32())
 		var original, _ = evm.IntraBlockState().GetCommittedState(callContext.Address(), slotCommited)
 		if original.Eq(&current) {
 			if original.IsZero() { // create slot (2.1.1)
-				return cost + params.SstoreSetGasEIP2200, nil
+				return arbSstoreReturn(cost + params.SstoreSetGasEIP2200)
 			}
 			if value.IsZero() { // delete slot (2.1.2b)
 				evm.IntraBlockState().AddRefund(clearingRefund)
 			}
 			// EIP-2200 original clause:
 			//		return params.SstoreResetGasEIP2200, nil // write existing slot (2.1.2)
-			return cost + (params.SstoreResetGasEIP2200 - params.ColdSloadCostEIP2929), nil // write existing slot (2.1.2)
+			return arbSstoreReturn(cost + (params.SstoreResetGasEIP2200 - params.ColdSloadCostEIP2929)) // write existing slot (2.1.2)
 		}
 		if !original.IsZero() {
 			if current.IsZero() { // recreate slot (2.2.1.1)
@@ -98,7 +107,17 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		}
 		// EIP-2200 original clause:
 		//return params.SloadGasEIP2200, nil // dirty update (2.2)
-		return cost + params.WarmStorageReadCostEIP2929, nil // dirty update (2.2)
+		return arbSstoreReturn(cost + params.WarmStorageReadCostEIP2929) // dirty update (2.2)
+	}
+}
+
+// categorizeAclSstoreGas splits SSTORE gas into StorageAccess (cold sload) and StorageGrowth (write cost).
+func categorizeAclSstoreGas(mg *multigas.MultiGas, coldCost, totalGas uint64) {
+	if coldCost > 0 {
+		mg.SaturatingIncrementInto(multigas.ResourceKindStorageAccess, coldCost)
+	}
+	if totalGas > coldCost {
+		mg.SaturatingIncrementInto(multigas.ResourceKindStorageGrowth, totalGas-coldCost)
 	}
 }
 
@@ -112,7 +131,13 @@ func gasSLoadEIP2929(evm *EVM, callContext *CallContext, scopeGas uint64, memory
 	// If the caller cannot afford the cost, this change will be rolled back
 	// If he does afford it, we can skip checking the same thing later on, during execution
 	if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(callContext.Address(), accounts.InternKey(loc.Bytes32())); slotMod {
+		if evm.chainRules.IsArbitrum {
+			callContext.Contract.UsedMultiGas.SaturatingIncrementInto(multigas.ResourceKindStorageAccess, params.ColdSloadCostEIP2929)
+		}
 		return params.ColdSloadCostEIP2929, nil
+	}
+	if evm.chainRules.IsArbitrum {
+		callContext.Contract.UsedMultiGas.SaturatingIncrementInto(multigas.ResourceKindStorageAccess, params.WarmStorageReadCostEIP2929)
 	}
 	return params.WarmStorageReadCostEIP2929, nil
 }
@@ -182,12 +207,19 @@ func makeCallVariantGasCallEIP2929(oldCalculator gasFunc) gasFunc {
 		// - 63/64ths rule
 		gas, err := oldCalculator(evm, callContext, scopeGas, memorySize)
 		if warmAccess || err != nil {
+			if err == nil && evm.chainRules.IsArbitrum {
+				callContext.Contract.UsedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, gas)
+			}
 			return gas, err
 		}
 		// In case of a cold access, we temporarily add the cold charge back, and also
 		// add it to the returned gas. By adding it to the return, it will be charged
 		// outside of this function, as part of the dynamic gas, and that will make it
 		// also become correctly reported to tracers.
+		if evm.chainRules.IsArbitrum {
+			callContext.Contract.UsedMultiGas.SaturatingIncrementInto(multigas.ResourceKindStorageAccess, coldCost)
+			callContext.Contract.UsedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, gas)
+		}
 		return gas + coldCost, nil
 	}
 }
@@ -364,6 +396,13 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 		}
 		if gas, overflow = math.SafeAdd(gas, callGas); overflow {
 			return 0, ErrGasUintOverflow
+		}
+
+		if evm.chainRules.IsArbitrum {
+			callContext.Contract.UsedMultiGas.SaturatingIncrementInto(multigas.ResourceKindStorageAccess, accessGas+delegationGas)
+			if gas > accessGas+delegationGas {
+				callContext.Contract.UsedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, gas-accessGas-delegationGas)
+			}
 		}
 
 		return gas, nil

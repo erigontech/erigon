@@ -49,7 +49,7 @@ func TestAddConstantMultiGas_ZeroCost(t *testing.T) {
 }
 
 func TestCategorizeDynamicGas_StorageAccess(t *testing.T) {
-	for _, op := range []OpCode{SLOAD, BALANCE, EXTCODESIZE, EXTCODECOPY, EXTCODEHASH, SELFBALANCE} {
+	for _, op := range []OpCode{BALANCE, EXTCODESIZE, EXTCODECOPY, EXTCODEHASH, SELFBALANCE} {
 		mg := multigas.ZeroGas()
 		categorizeDynamicGas(&mg, op, 200)
 		require.Equal(t, uint64(200), mg.Get(multigas.ResourceKindStorageAccess), "op=%s", op)
@@ -58,25 +58,16 @@ func TestCategorizeDynamicGas_StorageAccess(t *testing.T) {
 	}
 }
 
-func TestCategorizeDynamicGas_StorageGrowth(t *testing.T) {
-	mg := multigas.ZeroGas()
-	categorizeDynamicGas(&mg, SSTORE, 5000)
-	require.Equal(t, uint64(5000), mg.Get(multigas.ResourceKindStorageGrowth))
-	require.Equal(t, uint64(0), mg.Get(multigas.ResourceKindComputation))
-	require.Equal(t, uint64(5000), mg.SingleGas())
-}
-
-func TestCategorizeDynamicGas_HistoryGrowth(t *testing.T) {
-	for _, op := range []OpCode{LOG0, LOG1, LOG2, LOG3, LOG4} {
+func TestCategorizeDynamicGas_SkipsSelfCategorizing(t *testing.T) {
+	for _, op := range []OpCode{SLOAD, SSTORE, CALL, CALLCODE, STATICCALL, DELEGATECALL, LOG0, LOG1, LOG2, LOG3, LOG4} {
 		mg := multigas.ZeroGas()
-		categorizeDynamicGas(&mg, op, 375)
-		require.Equal(t, uint64(375), mg.Get(multigas.ResourceKindHistoryGrowth), "op=%s", op)
-		require.Equal(t, uint64(375), mg.SingleGas(), "op=%s", op)
+		categorizeDynamicGas(&mg, op, 5000)
+		require.True(t, mg.IsZero(), "op=%s should be skipped by categorizeDynamicGas", op)
 	}
 }
 
 func TestCategorizeDynamicGas_Computation(t *testing.T) {
-	for _, op := range []OpCode{CALL, CALLCODE, DELEGATECALL, STATICCALL, CREATE, CREATE2, KECCAK256, CODECOPY, RETURNDATACOPY} {
+	for _, op := range []OpCode{CREATE, CREATE2, KECCAK256, CODECOPY, RETURNDATACOPY} {
 		mg := multigas.ZeroGas()
 		categorizeDynamicGas(&mg, op, 100)
 		require.Equal(t, uint64(100), mg.Get(multigas.ResourceKindComputation), "op=%s", op)
@@ -86,19 +77,47 @@ func TestCategorizeDynamicGas_Computation(t *testing.T) {
 
 func TestCategorizeDynamicGas_ZeroCost(t *testing.T) {
 	mg := multigas.ZeroGas()
-	categorizeDynamicGas(&mg, SLOAD, 0)
+	categorizeDynamicGas(&mg, CREATE, 0)
 	require.True(t, mg.IsZero())
 }
 
 func TestCategorizeDynamicGas_Accumulates(t *testing.T) {
 	mg := multigas.ZeroGas()
-	categorizeDynamicGas(&mg, SLOAD, 100)
-	categorizeDynamicGas(&mg, SSTORE, 5000)
-	categorizeDynamicGas(&mg, LOG0, 375)
-	categorizeDynamicGas(&mg, CALL, 700)
-	require.Equal(t, uint64(100), mg.Get(multigas.ResourceKindStorageAccess))
-	require.Equal(t, uint64(5000), mg.Get(multigas.ResourceKindStorageGrowth))
-	require.Equal(t, uint64(375), mg.Get(multigas.ResourceKindHistoryGrowth))
+	categorizeDynamicGas(&mg, BALANCE, 100)
+	categorizeDynamicGas(&mg, CREATE, 700)
+	categorizeDynamicGas(&mg, EXTCODESIZE, 50)
+	require.Equal(t, uint64(150), mg.Get(multigas.ResourceKindStorageAccess))
 	require.Equal(t, uint64(700), mg.Get(multigas.ResourceKindComputation))
-	require.Equal(t, uint64(6175), mg.SingleGas())
+	require.Equal(t, uint64(850), mg.SingleGas())
+}
+
+func TestCategorizeAclSstoreGas_ColdAccess(t *testing.T) {
+	mg := multigas.ZeroGas()
+	totalGas := params.ColdSloadCostEIP2929 + params.SstoreSetGasEIP2200
+	categorizeAclSstoreGas(&mg, params.ColdSloadCostEIP2929, totalGas)
+
+	require.Equal(t, params.ColdSloadCostEIP2929, mg.Get(multigas.ResourceKindStorageAccess))
+	require.Equal(t, params.SstoreSetGasEIP2200, mg.Get(multigas.ResourceKindStorageGrowth))
+	require.Equal(t, totalGas, mg.SingleGas())
+}
+
+func TestCategorizeAclSstoreGas_WarmAccess(t *testing.T) {
+	mg := multigas.ZeroGas()
+	writeCost := params.WarmStorageReadCostEIP2929
+	categorizeAclSstoreGas(&mg, 0, writeCost)
+
+	require.Equal(t, uint64(0), mg.Get(multigas.ResourceKindStorageAccess))
+	require.Equal(t, writeCost, mg.Get(multigas.ResourceKindStorageGrowth))
+	require.Equal(t, writeCost, mg.SingleGas())
+}
+
+func TestCategorizeAclSstoreGas_ColdResetSlot(t *testing.T) {
+	mg := multigas.ZeroGas()
+	writeCost := params.SstoreResetGasEIP2200 - params.ColdSloadCostEIP2929
+	totalGas := params.ColdSloadCostEIP2929 + writeCost
+	categorizeAclSstoreGas(&mg, params.ColdSloadCostEIP2929, totalGas)
+
+	require.Equal(t, params.ColdSloadCostEIP2929, mg.Get(multigas.ResourceKindStorageAccess))
+	require.Equal(t, writeCost, mg.Get(multigas.ResourceKindStorageGrowth))
+	require.Equal(t, totalGas, mg.SingleGas())
 }
