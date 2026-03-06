@@ -577,7 +577,7 @@ func growslice(b []byte, wantLength int) []byte {
 	if cap(b) >= wantLength {
 		return b[:wantLength]
 	}
-	return make([]byte, wantLength)
+	return make([]byte, wantLength, max(wantLength, 2*cap(b)))
 }
 
 // Global pools for page work items and results - optimized for GC
