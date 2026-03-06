@@ -79,13 +79,19 @@ func (r *ResolvingPeerNodeSource) AllNodes() []*enode.Node {
 	return resolved
 }
 
+// ChainTomlPeer pairs a chain-toml ENR entry with the node that advertised it.
+type ChainTomlPeer struct {
+	ChainToml enr.ChainToml
+	Node      *enode.Node
+}
+
 // DiscoverChainToml queries all known peers for their "chain-toml" ENR entry
-// and returns the one with the highest FrozenTx. This represents the most
+// and returns the one with the highest KnownTx. This represents the most
 // advanced snapshot set available on the network.
 //
 // Returns nil if no peers have the chain-toml entry.
-func DiscoverChainToml(nodes NodeSource) *enr.ChainToml {
-	var best *enr.ChainToml
+func DiscoverChainToml(nodes NodeSource) *ChainTomlPeer {
+	var best *ChainTomlPeer
 
 	for _, node := range nodes.AllNodes() {
 		var ct enr.ChainToml
@@ -93,9 +99,8 @@ func DiscoverChainToml(nodes NodeSource) *enr.ChainToml {
 			continue // peer doesn't have chain-toml entry
 		}
 
-		if best == nil || ct.FrozenTx > best.FrozenTx {
-			found := ct // copy
-			best = &found
+		if best == nil || ct.KnownTx > best.ChainToml.KnownTx {
+			best = &ChainTomlPeer{ChainToml: ct, Node: node}
 		}
 	}
 

@@ -155,6 +155,9 @@ type BlocksFreezing struct {
 	DisableDownloadE3 bool // disable download state snapshots
 	DownloaderAddr    string
 	ChainName         string
+	// ManifestReady is closed when P2P manifest discovery completes.
+	// Set by the backend when P2PManifest is enabled. Nil otherwise.
+	ManifestReady <-chan struct{}
 }
 
 func (s BlocksFreezing) String() string {
