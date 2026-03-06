@@ -115,6 +115,45 @@ func (b *SequenceBuilder) simpleEncoding(buf []byte) []byte {
 	return buf
 }
 
+// MergeSorted merges N sorted, non-overlapping sequences into b in a single pass.
+//
+// seqs[i] is the raw encoded bytes and baseNums[i] is the base number for the i-th sequence.
+// Sequences must be in ascending order: seqs[i].Max() <= seqs[i+1].Min().
+// seqReader is caller-supplied for reuse (avoids heap allocation).
+// Panics if the ordering invariant is violated. Calls b.Build() automatically.
+func (b *SequenceBuilder) MergeSorted(seqReader *SequenceReader, outBaseNum uint64, baseNums []uint64, seqs [][]byte) error {
+	// First pass: compute total count and max offset to size the builder correctly.
+	var totalCount, maxOff uint64
+	for i, data := range seqs {
+		seqReader.Reset(baseNums[i], data)
+		totalCount += seqReader.Count()
+		if seqReader.Max() > maxOff {
+			maxOff = seqReader.Max()
+		}
+	}
+	b.Reset(outBaseNum, totalCount, maxOff)
+
+	// Second pass: add values, asserting each sequence starts after the previous ends.
+	var prevMax uint64
+	for i, data := range seqs {
+		seqReader.Reset(baseNums[i], data)
+		if i > 0 && prevMax > seqReader.Min() {
+			panic(fmt.Sprintf("MergeSorted: sequences out of order: prevMax=%d > currentMin=%d", prevMax, seqReader.Min()))
+		}
+		prevMax = seqReader.Max()
+		b.it1.Reset(seqReader, 0)
+		for b.it1.HasNext() {
+			v, err := b.it1.Next()
+			if err != nil {
+				return err
+			}
+			b.AddOffset(v)
+		}
+	}
+	b.Build()
+	return nil
+}
+
 // Merge merges s1 and s2 into this builder, resetting it first.
 // s1 and s2 must be pre-sorted with s1.Max() <= s2.Min().
 // Call AppendBytes on the builder to serialize.

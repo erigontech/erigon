@@ -650,10 +650,12 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 	var keyBuf, valBuf []byte
 	var lastKey, lastVal []byte
 	var seqReader multiencseq.SequenceReader
-	var seqIt multiencseq.SequenceIterator
 	builder := &multiencseq.SequenceBuilder{}
 	// sameKeyItems collects all heap items sharing the current key; reused across iterations.
 	var sameKeyItems []*CursorItem
+	// mergeBaseNums and mergeSeqs hold the per-item inputs for MergeSorted in ascending txNum order.
+	var mergeBaseNums []uint64
+	var mergeSeqs [][]byte
 	i := uint64(0)
 	for cp.Len() > 0 {
 		lastKey = append(lastKey[:0], cp[0].key...)
@@ -665,32 +667,18 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 			sameKeyItems = append(sameKeyItems, heap.Pop(&cp).(*CursorItem))
 		}
 
-		// Single pass: calculate total count and max offset across all files for this key.
-		var totalCount, maxOff uint64
-		for _, ci := range sameKeyItems {
-			seqReader.Reset(ci.startTxNum, ci.val)
-			totalCount += seqReader.Count()
-			if seqReader.Max() > maxOff {
-				maxOff = seqReader.Max()
-			}
+		// Build ascending-order input slices for MergeSorted (reverse of sameKeyItems).
+		mergeBaseNums = mergeBaseNums[:0]
+		mergeSeqs = mergeSeqs[:0]
+		for j := len(sameKeyItems) - 1; j >= 0; j-- {
+			mergeBaseNums = append(mergeBaseNums, sameKeyItems[j].startTxNum)
+			mergeSeqs = append(mergeSeqs, sameKeyItems[j].val)
 		}
 
-		// Build the merged output in one pass, initialising the builder exactly once.
-		// sameKeyItems is in descending txNum order; iterate in reverse for ascending values.
-		builder.Reset(startTxNum, totalCount, maxOff)
-		for j := len(sameKeyItems) - 1; j >= 0; j-- {
-			ci := sameKeyItems[j]
-			seqReader.Reset(ci.startTxNum, ci.val)
-			seqIt.Reset(&seqReader, 0)
-			for seqIt.HasNext() {
-				v, err := seqIt.Next()
-				if err != nil {
-					return nil, err
-				}
-				builder.AddOffset(v)
-			}
+		// Merge all sequences for this key in a single pass (O(N·C), one EF allocation).
+		if err := builder.MergeSorted(&seqReader, startTxNum, mergeBaseNums, mergeSeqs); err != nil {
+			return nil, err
 		}
-		builder.Build()
 		lastVal = builder.AppendBytes(lastVal[:0])
 
 		// Advance each item's reader and return non-exhausted ones to the heap.
