@@ -49,7 +49,7 @@ func TestAddConstantMultiGas_ZeroCost(t *testing.T) {
 }
 
 func TestCategorizeDynamicGas_StorageAccess(t *testing.T) {
-	for _, op := range []OpCode{BALANCE, EXTCODESIZE, EXTCODECOPY, EXTCODEHASH, SELFBALANCE} {
+	for _, op := range []OpCode{BALANCE, EXTCODESIZE, EXTCODECOPY, EXTCODEHASH} {
 		mg := multigas.ZeroGas()
 		categorizeDynamicGas(&mg, op, 200)
 		require.Equal(t, uint64(200), mg.Get(multigas.ResourceKindStorageAccess), "op=%s", op)

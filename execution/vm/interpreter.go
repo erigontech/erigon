@@ -251,10 +251,6 @@ func jumpTable(chainRules *chain.Rules, cfg Config) *JumpTable {
 // considered a revert-and-consume-all-gas operation except for
 // ErrExecutionReverted which means revert-and-keep-gas-left.
 func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) (_ []byte, _ uint64, _ multigas.MultiGas, err error) {
-	// Arbitrum: track contract on the call stack for Stylus reentrancy detection
-	evm.ProcessingHook.PushContract(&contract)
-	defer evm.ProcessingHook.PopContract()
-
 	// Don't bother with the execution if there's no code.
 	if len(contract.Code) == 0 {
 		return nil, gas, multigas.ZeroGas(), nil
@@ -264,9 +260,17 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 	if evm.chainRules.IsStylus && state.IsStylusProgram(contract.Code) {
 		callContext := getCallContext(contract, input, gas)
 		defer callContext.put()
+		callContext.Contract.Gas = gas // Stylus uses contract.UseGas/contract.Gas for accounting
+		evm.ProcessingHook.PushContract(&callContext.Contract)
+		defer evm.ProcessingHook.PopContract()
 		ret, wasmErr := evm.ProcessingHook.ExecuteWASM(callContext, input, evm)
-		return ret, callContext.gas, callContext.Contract.UsedMultiGas, wasmErr
+		return ret, callContext.Contract.Gas, callContext.Contract.UsedMultiGas, wasmErr
 	}
+
+	// Arbitrum: track contract on the call stack for Stylus reentrancy detection
+	// For non-Stylus, PushContract is used for the Programs map (address tracking only).
+	evm.ProcessingHook.PushContract(&contract)
+	defer evm.ProcessingHook.PopContract()
 
 	// Reset the previous call's return data. It's unimportant to preserve the old buffer
 	// as every returning call will return new data anyway.

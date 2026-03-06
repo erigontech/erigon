@@ -18,11 +18,12 @@ import (
 
 type recordingHook struct {
 	DefaultTxProcessor
-	pushCalls []*Contract
-	popCalls  int
-	wasmCalls int
-	wasmRet   []byte
-	wasmErr   error
+	pushCalls  []*Contract
+	popCalls   int
+	wasmCalls  int
+	wasmRet    []byte
+	wasmErr    error
+	wasmGasUsed uint64
 }
 
 func (h *recordingHook) PushContract(contract *Contract) {
@@ -35,6 +36,9 @@ func (h *recordingHook) PopContract() {
 
 func (h *recordingHook) ExecuteWASM(scope *CallContext, input []byte, evm *EVM) ([]byte, error) {
 	h.wasmCalls++
+	if h.wasmGasUsed > 0 {
+		scope.Contract.UseGas(h.wasmGasUsed, nil, 0)
+	}
 	return h.wasmRet, h.wasmErr
 }
 
@@ -79,7 +83,7 @@ func (h *recordingHook) L1BlockHash(blockCtx evmtypes.BlockContext, l1BlockNumbe
 	return blockCtx.GetHash(l1BlockNumber)
 }
 
-func TestRun_PushPopContract_CalledForEmptyCode(t *testing.T) {
+func TestRun_PushPopContract_SkippedForEmptyCode(t *testing.T) {
 	evm := newTestEVM()
 	hook := &recordingHook{}
 	evm.ProcessingHook = hook
@@ -91,8 +95,8 @@ func TestRun_PushPopContract_CalledForEmptyCode(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, ret)
 	require.Equal(t, uint64(10000), gas)
-	require.Equal(t, 1, len(hook.pushCalls))
-	require.Equal(t, 1, hook.popCalls)
+	require.Equal(t, 0, len(hook.pushCalls), "no PushContract for empty code")
+	require.Equal(t, 0, hook.popCalls, "no PopContract for empty code")
 }
 
 func TestRun_PushPopContract_CalledForSTOP(t *testing.T) {
@@ -134,11 +138,11 @@ func TestRun_StylusDispatch_CallsExecuteWASM(t *testing.T) {
 	evm := newStylusEVM()
 
 	if !evm.chainRules.IsStylus {
-		t.Skip("chain rules do not enable Stylus for this config")
+		t.Fatal("expected IsStylus to be true for ArbOSVersion 31")
 	}
 
 	expectedRet := []byte{0x01, 0x02, 0x03}
-	hook := &recordingHook{wasmRet: expectedRet}
+	hook := &recordingHook{wasmRet: expectedRet, wasmGasUsed: 1000}
 	evm.ProcessingHook = hook
 
 	stylusCode := state.NewStylusPrefix(0x00)
@@ -146,12 +150,14 @@ func TestRun_StylusDispatch_CallsExecuteWASM(t *testing.T) {
 	contract := Contract{
 		Code: stylusCode,
 	}
-	ret, _, _, err := evm.Run(contract, 50000, []byte{0xAA}, false)
+	startGas := uint64(50000)
+	ret, remainingGas, _, err := evm.Run(contract, startGas, []byte{0xAA}, false)
 	require.NoError(t, err)
 	require.Equal(t, expectedRet, ret)
 	require.Equal(t, 1, hook.wasmCalls)
 	require.Equal(t, 1, len(hook.pushCalls))
 	require.Equal(t, 1, hook.popCalls)
+	require.Equal(t, startGas-hook.wasmGasUsed, remainingGas, "remaining gas should reflect WASM consumption")
 }
 
 func TestRun_NonStylus_DoesNotCallExecuteWASM(t *testing.T) {

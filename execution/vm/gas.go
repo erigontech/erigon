@@ -72,7 +72,7 @@ func categorizeDynamicGas(usedMultiGas *multigas.MultiGas, op OpCode, cost uint6
 		LOG0, LOG1, LOG2, LOG3, LOG4:
 		// Handled by gas functions in operations_acl.go and gas_table.go
 		return
-	case BALANCE, EXTCODESIZE, EXTCODECOPY, EXTCODEHASH, SELFBALANCE:
+	case BALANCE, EXTCODESIZE, EXTCODECOPY, EXTCODEHASH:
 		usedMultiGas.SaturatingIncrementInto(multigas.ResourceKindStorageAccess, cost)
 	default:
 		usedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, cost)
