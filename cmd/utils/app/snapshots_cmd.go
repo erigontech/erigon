@@ -396,7 +396,7 @@ var snapshotCommand = cli.Command{
 				&cli.BoolFlag{Name: "failFast", Value: true, Usage: "to stop after 1st problem or print WARN log and continue check"},
 				&cli.Uint64Flag{Name: "fromStep", Value: 0, Usage: "skip files before given step"},
 				&cli.Int64Flag{Name: "seed", Usage: "random seed for sampling (auto-generated if not set)"},
-				&cli.Float64Flag{Name: "sample", Usage: "fraction of items to check via pseudo-random sampling (0.0-1.0)", Value: 0.1},
+				&cli.Float64Flag{Name: "sample", Usage: "fraction of items to check via pseudo-random sampling (0.0-1.0)", Value: 0.01},
 			}),
 		},
 		{
