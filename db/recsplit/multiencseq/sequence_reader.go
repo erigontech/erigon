@@ -120,7 +120,6 @@ func (s *SequenceReader) Reset(baseNum uint64, raw []byte) { // no `return param
 	if raw[0]&PlainEliasFanoMask == 0 {
 		s.currentEnc = PlainEliasFano
 		s.ref.Reset(0, raw)
-		s.assertSorted()
 		return
 	}
 
@@ -128,7 +127,6 @@ func (s *SequenceReader) Reset(baseNum uint64, raw []byte) { // no `return param
 	if EncodingType(raw[0]) == RebasedEliasFano {
 		s.currentEnc = RebasedEliasFano
 		s.ref.Reset(baseNum, raw[1:])
-		s.assertSorted()
 		return
 	}
 
@@ -136,7 +134,6 @@ func (s *SequenceReader) Reset(baseNum uint64, raw []byte) { // no `return param
 	if EncodingType(raw[0]&SimpleEncodingMask) == SimpleEncoding {
 		s.currentEnc = SimpleEncoding
 		s.sseq.Reset(baseNum, raw[1:])
-		s.assertSorted()
 		return
 	}
 
