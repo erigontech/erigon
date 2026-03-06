@@ -40,7 +40,6 @@ func BuilderStages(
 	ctx context.Context,
 	createBlockCfg BuilderCreateBlockCfg,
 	executeBlockCfg stagedsync.ExecuteBlockCfg,
-	sendersCfg stagedsync.SendersCfg,
 	execCfg BuilderExecCfg,
 	finish BuilderFinishCfg,
 ) []*stagedsync.Stage {
@@ -62,7 +61,7 @@ func BuilderStages(
 			ID:          BuilderExecution,
 			Description: "Builder: execute new block from txn pool",
 			Forward: func(badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
-				return SpawnBuilderExecStage(ctx, s, sd, tx, execCfg, sendersCfg, executeBlockCfg, logger, nil)
+				return SpawnBuilderExecStage(ctx, s, sd, tx, execCfg, executeBlockCfg, logger)
 			},
 			Unwind: func(u *stagedsync.UnwindState, s *stagedsync.StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
 				return nil
