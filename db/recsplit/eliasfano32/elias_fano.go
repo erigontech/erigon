@@ -109,8 +109,14 @@ func (ef *EliasFano) deriveFields() int {
 	totalWords := wordsLowerBits + wordsUpperBits + jumpWords
 	//fmt.Printf("EF: %d, %d,%d,%d\n", totalWords, wordsLowerBits, wordsUpperBits, jumpWords)
 	if cap(ef.data) < totalWords {
-		newCap := max(totalWords, cap(ef.data)*2)
-		ef.data = make([]uint64, totalWords, newCap)
+		if cap(ef.data) > 0 {
+			// if cap() > 0: means we using `ef` class as reusable buffer
+			// and re-alloc happened
+			// to reduce probability of future re-allocs: 2x over-allocate
+			ef.data = make([]uint64, totalWords, cap(ef.data)*2)
+		} else {
+			ef.data = make([]uint64, totalWords)
+		}
 	} else {
 		ef.data = ef.data[:totalWords]
 	}
