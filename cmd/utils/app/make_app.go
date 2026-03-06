@@ -89,6 +89,7 @@ func MakeApp(name string, action cli.ActionFunc, cliFlags []cli.Flag) *cli.App {
 		&snapshotCommand,
 		&supportCommand,
 		&backtestCommitmentCommand,
+		&qmtreeBenchCommand,
 		//&backupCommand,
 	}
 	shuttercmd.RegisterCmds(app)

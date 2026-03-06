@@ -474,6 +474,168 @@ func NewTree(hasher Hasher, shardId int, entryStorage EntryStorage, twigStorage 
 	return tree
 }
 
+// SyncAndRoot runs the full three-phase sync (FlushFiles, EvictTwigs,
+// SyncUpperNodes) and returns the current tree root hash.
+func (t *Tree) SyncAndRoot(hasher Hasher) [32]byte {
+	nList := t.FlushFiles(0, 0)
+	nList = t.upperTree.EvictTwigs(hasher, nList, 0, 0)
+	_, root := t.upperTree.SyncUpperNodes(hasher, nList, t.youngestTwigId)
+	return root
+}
+
+// UnwindTo rolls back the tree so that targetSN is the last (youngest)
+// serial number in the tree. All entries with SN > targetSN are removed.
+// After calling UnwindTo, the caller should call SyncAndRoot to recompute
+// the root hash.
+//
+// entryHashes must provide the hash of each entry in the youngest twig
+// from SN twigBase..targetSN (inclusive). This is needed to rebuild the
+// youngest twig's merkle tree since that data is only on disk for
+// completed (non-youngest) twigs.
+func (t *Tree) UnwindTo(targetSN uint64, entryHashes []common.Hash) {
+	targetTwigId := targetSN >> TWIG_SHIFT
+	posInTwig := targetSN & TWIG_MASK
+
+	// When targetSN is the last entry of a twig, the twig is fully complete.
+	// In normal operation, AppendEntry flushes the full twig and creates a new
+	// empty youngest twig. We replicate that here: the youngest twig becomes
+	// targetTwigId+1 (empty).
+	twigComplete := posInTwig == TWIG_MASK
+
+	// The youngest twig after unwind.
+	var youngestAfter uint64
+	if twigComplete {
+		youngestAfter = targetTwigId + 1
+	} else {
+		youngestAfter = targetTwigId
+	}
+
+	// 1. Truncate files.
+	if t.entryStorage != nil {
+		t.entryStorage.Truncate(int64((targetSN + 1) * entryHashSize))
+	}
+	if t.twigStorage != nil {
+		// Keep completed twigs on disk. If twigComplete, targetTwigId is also
+		// completed, so keep twigs 0..targetTwigId (truncate at targetTwigId+1).
+		var keepTwigs uint64
+		if twigComplete {
+			keepTwigs = targetTwigId + 1
+		} else {
+			keepTwigs = targetTwigId
+		}
+		if err := t.twigStorage.Truncate(int64(keepTwigs * TWIG_SIZE)); err != nil {
+			panic(fmt.Sprintf("UnwindTo: twigStorage.Truncate: %v", err))
+		}
+	}
+
+	// 2. Clear in-memory twigs and active bits beyond youngestAfter.
+	for i := range t.activeBitShards {
+		for key := range t.activeBitShards[i] {
+			twigId := key*TWIG_SHARD_COUNT + uint64(i)
+			if twigId > youngestAfter {
+				delete(t.activeBitShards[i], key)
+			}
+		}
+	}
+	for i := range t.upperTree.activeTwigShards {
+		for key := range t.upperTree.activeTwigShards[i] {
+			twigId := key*TWIG_SHARD_COUNT + uint64(i)
+			if twigId > youngestAfter {
+				delete(t.upperTree.activeTwigShards[i], key)
+			}
+		}
+	}
+
+	// 3. Clear upper tree nodes.
+	maxLevel := calcMaxLevel(t.youngestTwigId)
+	for level := uint8(twigRoot_LEVEL); level <= maxLevel; level++ {
+		for _, shard := range t.upperTree.nodes[level] {
+			for pos := range shard {
+				delete(shard, pos)
+			}
+		}
+	}
+
+	// 4. Reset youngest twig ID.
+	t.youngestTwigId = youngestAfter
+	t.touchedPosOf512b = map[uint64]struct{}{}
+
+	s, k := GetShardIdxAndKey(youngestAfter)
+
+	if twigComplete {
+		// The target twig is fully complete. Create an empty youngest twig
+		// (same as what AppendEntry does when it fills a twig).
+		t.newTwigMap = map[uint64]*Twig{
+			youngestAfter: t.hasher.nullTwig().Clone(),
+		}
+		t.activeBitShards[s][k] = &ActiveBits{}
+		t.mtreeForYoungestTwig = t.hasher.nullMtForTwig().Clone()
+		t.mtreeForYtChangeStart = -1
+		t.mtreeForYtChangeEnd = -1
+		// Touch the first position of the new empty twig.
+		t.touchPos(youngestAfter << TWIG_SHIFT)
+	} else {
+		// Rebuild the youngest twig from provided entry hashes.
+		t.newTwigMap = map[uint64]*Twig{
+			targetTwigId: t.hasher.nullTwig().Clone(),
+		}
+		activeBits := &ActiveBits{}
+		t.activeBitShards[s][k] = activeBits
+
+		nullHash := NullEntry{}.Hash()
+		t.mtreeForYoungestTwig = t.hasher.nullMtForTwig().Clone()
+
+		expectedCount := int(posInTwig + 1)
+		if len(entryHashes) != expectedCount {
+			panic(fmt.Sprintf("UnwindTo: expected %d entry hashes for twig rebuild, got %d",
+				expectedCount, len(entryHashes)))
+		}
+
+		for i := 0; i < expectedCount; i++ {
+			t.mtreeForYoungestTwig[LEAF_COUNT_IN_TWIG+i] = entryHashes[i]
+			if entryHashes[i] != nullHash {
+				activeBits.SetBit(uint32(i))
+			}
+		}
+
+		t.mtreeForYtChangeStart = 0
+		t.mtreeForYtChangeEnd = int32(posInTwig)
+
+		// Touch all active bit positions.
+		twigBase := targetTwigId << TWIG_SHIFT
+		for i := uint64(0); i <= posInTwig; i++ {
+			t.touchPos(twigBase + i)
+		}
+		if posInTwig < TWIG_MASK {
+			t.touchPos(twigBase + posInTwig + 1)
+		}
+	}
+
+	// Re-register this twig in the upper tree.
+	t.upperTree.SetNode(nodePos(FIRST_LEVEL_ABOVE_TWIG, 0), [32]byte{})
+	nullTwig := t.hasher.nullTwig()
+	t.upperTree.activeTwigShards[s][k] = &nullTwig
+}
+
+// NextSN returns the next serial number that would be assigned to a new entry.
+// This equals (youngestTwigId * LEAF_COUNT_IN_TWIG) + count of entries in youngest twig.
+func (t *Tree) NextSN() uint64 {
+	// Count active entries in the youngest twig by checking the merkle tree leaves.
+	nullHash := NullEntry{}.Hash()
+	count := uint64(0)
+	for i := 0; i < LEAF_COUNT_IN_TWIG; i++ {
+		if t.mtreeForYoungestTwig[LEAF_COUNT_IN_TWIG+i] != nullHash {
+			count = uint64(i) + 1
+		}
+	}
+	return t.youngestTwigId*LEAF_COUNT_IN_TWIG + count
+}
+
+// YoungestTwigId returns the current youngest twig ID.
+func (t *Tree) YoungestTwigId() uint64 {
+	return t.youngestTwigId
+}
+
 func (t *Tree) Close() {
 	// Close files
 	if t.entryStorage != nil {

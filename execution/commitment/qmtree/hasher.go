@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 type Hasher interface {
@@ -112,5 +113,61 @@ func (h *Sha256Hasher) nullNodeInHigerTree(level uint8) common.Hash {
 		h.initNulls()
 	}
 
+	return h.nulls.nodesInHigerTree[level]
+}
+
+// Keccak256Hasher implements Hasher using keccak256 (Ethereum-native hash).
+type Keccak256Hasher struct {
+	nulls *struct {
+		mtForTwig        TwigMT
+		nodesInHigerTree [64]common.Hash
+		twig             Twig
+	}
+}
+
+func (_ Keccak256Hasher) nodeHash(level uint8, left []byte, right []byte) common.Hash {
+	return crypto.Keccak256Hash([]byte{level}, left, right)
+}
+
+func (_ Keccak256Hasher) hash2(level uint8, h0 []byte, h1 []byte) common.Hash {
+	return crypto.Keccak256Hash([]byte{level}, h0, h1)
+}
+
+func (h Keccak256Hasher) hash2x(level uint8, h0 []byte, h1 []byte, exchange bool) common.Hash {
+	if exchange {
+		return h.hash2(level, h1, h0)
+	}
+	return h.hash2(level, h0, h1)
+}
+
+func (h *Keccak256Hasher) initNulls() {
+	h.nulls = &struct {
+		mtForTwig        TwigMT
+		nodesInHigerTree [64]common.Hash
+		twig             Twig
+	}{}
+	h.nulls.mtForTwig = nullMtForTwig(h)
+	h.nulls.twig = nullTwig(h, h.nulls.mtForTwig[1])
+	h.nulls.nodesInHigerTree = nullNodeInHigherTree(h, &h.nulls.twig)
+}
+
+func (h *Keccak256Hasher) nullMtForTwig() TwigMT {
+	if h.nulls == nil {
+		h.initNulls()
+	}
+	return h.nulls.mtForTwig
+}
+
+func (h *Keccak256Hasher) nullTwig() Twig {
+	if h.nulls == nil {
+		h.initNulls()
+	}
+	return h.nulls.twig
+}
+
+func (h *Keccak256Hasher) nullNodeInHigerTree(level uint8) common.Hash {
+	if h.nulls == nil {
+		h.initNulls()
+	}
 	return h.nulls.nodesInHigerTree[level]
 }
