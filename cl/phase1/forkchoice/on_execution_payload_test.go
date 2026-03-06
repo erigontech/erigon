@@ -17,6 +17,7 @@
 package forkchoice
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -217,7 +218,7 @@ func TestCheckDataAvailability_NoBid(t *testing.T) {
 		},
 	}
 
-	err := f.checkDataAvailability(nil, block, common.Hash{})
+	err := f.checkDataAvailability(context.TODO(), block, common.Hash{})
 	require.NoError(t, err)
 }
 
@@ -242,7 +243,7 @@ func TestCheckDataAvailability_NoBlobs(t *testing.T) {
 		},
 	}
 
-	err := f.checkDataAvailability(nil, block, common.Hash{})
+	err := f.checkDataAvailability(context.TODO(), block, common.Hash{})
 	require.NoError(t, err)
 }
 
@@ -267,6 +268,6 @@ func TestValidatePayloadWithEL_NoEngine(t *testing.T) {
 		},
 	}
 
-	err := f.validatePayloadWithEL(nil, envelope, block, common.Hash{})
+	err := f.validatePayloadWithEL(context.TODO(), envelope, block, common.Hash{})
 	require.NoError(t, err)
 }

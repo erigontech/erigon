@@ -110,7 +110,6 @@ func downloadAndProcessEip4844DA(ctx context.Context, logger log.Logger, cfg *Cf
 	return highestProcessed - 1, err
 }
 
-
 // processDownloadedBlockBatches processes a batch of downloaded blocks.
 // It takes the highest block processed, a flag to determine if insertion is needed, a list of signed beacon blocks,
 // and a map of beacon block root -> envelope for GLOAS FULL blocks.
