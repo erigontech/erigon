@@ -582,11 +582,21 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	st.gasRemaining -= gas
 	usedMultiGas = usedMultiGas.SaturatingAdd(intrinsicMultiGas)
 
+	if dbg.ArbTrace() {
+		fmt.Printf("[TransitionDb] block=%d txIdx=%d initialGas=%d intrinsicGas=%d gasAfterIntrinsic=%d isArbitrum=%t hookIsArbitrum=%t\n",
+			st.evm.Context.BlockNumber, st.state.TxIndex(), st.initialGas, gas, st.gasRemaining, rules.IsArbitrum, st.evm.ProcessingHook.IsArbitrum())
+	}
+
 	tipRecipient, hookMultiGas, err := st.evm.ProcessingHook.GasChargingHook(&st.gasRemaining, gas)
 	if err != nil {
 		return nil, err
 	}
 	usedMultiGas = usedMultiGas.SaturatingAdd(hookMultiGas)
+
+	if dbg.ArbTrace() {
+		fmt.Printf("[TransitionDb] block=%d txIdx=%d gasAfterHook=%d\n",
+			st.evm.Context.BlockNumber, st.state.TxIndex(), st.gasRemaining)
+	}
 
 	var bailout bool
 	// Gas bailout (for trace_call) should only be applied if there is not sufficient balance to perform value transfer
@@ -646,6 +656,11 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		usedMultiGas = usedMultiGas.SaturatingAdd(execMultiGas)
 	}
 
+	if dbg.ArbTrace() {
+		fmt.Printf("[TransitionDb] block=%d txIdx=%d gasAfterEVM=%d vmerr=%v evmRefund=%d arbRevertHandled=%t\n",
+			st.evm.Context.BlockNumber, st.state.TxIndex(), st.gasRemaining, vmerr, st.state.GetRefund(), arbRevertHandled)
+	}
+
 	if refunds && !gasBailout {
 		refundQuotient := params.RefundQuotient
 		if rules.IsLondon {
@@ -653,15 +668,23 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		}
 
 		if st.evm.ProcessingHook.IsArbitrum() {
-			st.gasRemaining += st.evm.ProcessingHook.ForceRefundGas()
+			forceRefund := st.evm.ProcessingHook.ForceRefundGas()
+			st.gasRemaining += forceRefund
 			nonrefundable := st.evm.ProcessingHook.NonrefundableGas()
+			var sstoreRefund uint64
 			if nonrefundable < st.gasUsed() {
 				refund := (st.gasUsed() - nonrefundable) / refundQuotient
 				if refund > st.state.GetRefund() {
 					refund = st.state.GetRefund()
 				}
+				sstoreRefund = refund
 				st.gasRemaining += refund
 				usedMultiGas = usedMultiGas.WithRefund(refund)
+			}
+
+			if dbg.ArbTrace() {
+				fmt.Printf("[TransitionDb] block=%d txIdx=%d REFUND: forceRefund=%d nonrefundable=%d sstoreRefund=%d evmRefundCounter=%d gasAfterRefund=%d gasUsed=%d isPrague=%t\n",
+					st.evm.Context.BlockNumber, st.state.TxIndex(), forceRefund, nonrefundable, sstoreRefund, st.state.GetRefund(), st.gasRemaining, st.gasUsed(), rules.IsPrague)
 			}
 
 			if rules.IsPrague && st.evm.ProcessingHook.IsCalldataPricingIncreaseEnabled() {
