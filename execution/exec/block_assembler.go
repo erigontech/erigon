@@ -103,10 +103,10 @@ type TxNumAdvancer func()
 
 type BlockAssembler struct {
 	*AssembledBlock
-	cfg            AssemblerCfg
-	balIO          *state.VersionedIO
-	stateWriter    state.StateWriter // optional: if set, domain writes go here instead of NoopWriter
-	advanceTxNum   TxNumAdvancer     // optional: called after each FinalizeTx/CommitBlock
+	cfg          AssemblerCfg
+	balIO        *state.VersionedIO
+	stateWriter  state.StateWriter // optional: if set, domain writes go here instead of NoopWriter
+	advanceTxNum TxNumAdvancer     // optional: called after each FinalizeTx/CommitBlock
 }
 
 func NewBlockAssembler(cfg AssemblerCfg, payloadId, parentTime uint64, header *types.Header, uncles []*types.Header, withdrawals []*types.Withdrawal) *BlockAssembler {
