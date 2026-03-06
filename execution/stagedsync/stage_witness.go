@@ -108,7 +108,7 @@ func RewindStagesForWitness(sd *execctx.SharedDomains, batch *membatchwithdb.Mem
 	blockReader := cfg.blockReader
 	syncCfg := ethconfig.Defaults.Sync
 	execCfg := StageExecuteBlocksCfg(batch.MemDB(), pruneMode, batchSize, cfg.chainConfig, cfg.engine, vmConfig,
-		nil /*stateStream=*/, false /*badBlockHalt=*/, true, dirs, blockReader, nil, nil, syncCfg, nil, false /*experimentalBAL=*/)
+		nil /*stateStream=*/, false /*badBlockHalt=*/, true, dirs, blockReader, nil, nil, syncCfg, false /*experimentalBAL=*/)
 
 	if err := UnwindExecutionStage(unwindState, stageState, sd, batch, ctx, execCfg, logger); err != nil {
 		return err

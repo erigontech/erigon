@@ -203,13 +203,11 @@ func ExecV3(ctx context.Context,
 
 	doms.EnableParaTrieDB(cfg.db)
 	doms.EnableTrieWarmup(true)
-	isChainTip := maxBlockNum == startBlockNum
 	// Do it only for chain-tip blocks!
-	doms.EnableWarmupCache(isChainTip)
-	//log.Debug("Warmup Cache", "enabled", isChainTip)
+	doms.EnableWarmupCache(!isApplyingBlocks)
 	postValidator := newBlockPostExecutionValidator()
 	doms.SetDeferCommitmentUpdates(false)
-	if isChainTip {
+	if !isApplyingBlocks {
 		postValidator = newParallelBlockPostExecutionValidator()
 	}
 	// Enable deferred commitment updates only for serial execution (fork validation).
@@ -222,7 +220,7 @@ func ExecV3(ctx context.Context,
 	// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
 	// can't use OS-level ReadAhead - because Data >> RAM
 	// it also warmsup state a bit - by touching senders/coninbase accounts and code
-	if !execStage.CurrentSyncCycle.IsInitialCycle && !isChainTip {
+	if !execStage.CurrentSyncCycle.IsInitialCycle && isApplyingBlocks {
 		var clean func()
 
 		readAhead, clean = exec.BlocksReadAhead(ctx, 2, cfg.db, cfg.engine, cfg.blockReader)
@@ -287,7 +285,7 @@ func ExecV3(ctx context.Context,
 		se.lastCommittedBlockNum.Store(blockNum)
 
 		defer func() {
-			if !isChainTip {
+			if isApplyingBlocks {
 				se.LogComplete(stepsInDb)
 			}
 		}()
@@ -599,9 +597,11 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 
 			var dbBAL types.BlockAccessList
 			var data []byte
-			if err = tx.Apply(ctx, func(applyTx kv.Tx) error {
+			// Use a fresh read tx (not tx.Apply) so we can see BAL data
+			// committed by InsertBlocks after this execution's tx was opened.
+			if err = te.cfg.db.View(ctx, func(roTx kv.Tx) error {
 				var e error
-				data, e = rawdb.ReadBlockAccessListBytes(applyTx, b.Hash(), blockNum)
+				data, e = rawdb.ReadBlockAccessListBytes(roTx, b.Hash(), blockNum)
 				return e
 			}); err != nil {
 				return err
