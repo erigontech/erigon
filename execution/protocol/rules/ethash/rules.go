@@ -591,8 +591,9 @@ func (ethash *Ethash) Finalize(config *chain.Config, header *types.Header, state
 	uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
 	chain rules.ChainReader, syscall rules.SystemCall, skipReceiptsEval bool, logger log.Logger,
 ) (types.FlatRequests, error) {
-	// Accumulate any block and uncle rewards and commit the final state root
-	accumulateRewards(config, state, header, uncles)
+	if !config.IsArbitrum() {
+		accumulateRewards(config, state, header, uncles)
+	}
 	return nil, nil
 }
 
@@ -645,6 +646,9 @@ func (ethash *Ethash) IsServiceTransaction(sender accounts.Address, syscall rule
 
 func (ethash *Ethash) CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, _ rules.SystemCall,
 ) ([]rules.Reward, error) {
+	if config.IsArbitrum() {
+		return []rules.Reward{}, nil
+	}
 	minerReward, uncleRewards := AccumulateRewards(config, header, uncles)
 	rewards := make([]rules.Reward, 1+len(uncles))
 	rewards[0].Beneficiary = accounts.InternAddress(header.Coinbase)
