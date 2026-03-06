@@ -494,9 +494,12 @@ func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 			panic(err)
 		}
 	default:
-		// For unsupported types, write nothing. Since this is for
-		// DeriveSha, the error will be caught matching the derived hash
-		// to the block.
+		// All typed receipts (including Arbitrum types 0x64-0x6A) use
+		// the same encoding: type byte prefix + RLP of receipt data.
+		w.WriteByte(r.Type)
+		if err := rlp.Encode(w, data); err != nil {
+			panic(err)
+		}
 	}
 }
 
