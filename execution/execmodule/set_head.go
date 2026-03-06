@@ -123,11 +123,12 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 		return fmt.Errorf("failed to truncate canonical hashes: %w", err)
 	}
 
-	// Update the head block hash and head header hash
+	// Update the head block hash, head header hash, and forkchoice head
 	rawdb.WriteHeadBlockHash(tx, targetHash)
 	if err := rawdb.WriteHeadHeaderHash(tx, targetHash); err != nil {
 		return fmt.Errorf("failed to write head header hash: %w", err)
 	}
+	rawdb.WriteForkchoiceHead(tx, targetHash)
 
 	// Update stage progress for headers and bodies
 	if err := stages.SaveStageProgress(tx, stages.Headers, targetBlock); err != nil {
@@ -144,7 +145,6 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	if err := sd.Flush(ctx, tx); err != nil {
 		return fmt.Errorf("failed to flush shared domains: %w", err)
 	}
-	sd.Close()
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
