@@ -118,9 +118,9 @@ const (
 )
 
 var FastChecks = []Check{
-	Blocks, HeaderNoGaps, BlocksTxnID, InvertedIndex, StateProgress, Publishable, HistoryNoSystemTxs,
+	Blocks, HeaderNoGaps, BlocksTxnID, InvertedIndex, StateProgress, HistoryNoSystemTxs,
 	BorEvents, BorSpans, BorCheckpoints, ReceiptsNoDups, RCacheNoDups, CommitmentRoot,
-	CommitmentKvi, CommitmentHistVal, StateRootVerifyByHistory,
+	CommitmentKvi, CommitmentHistVal, StateRootVerifyByHistory, Publishable,
 }
 
 var SlowChecks = []Check{StateVerify}
