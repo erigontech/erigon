@@ -115,6 +115,35 @@ func BenchmarkSeek(b *testing.B) {
 	}
 }
 
+// BenchmarkAddOffset measures the build path (AddOffset + Build) cost.
+func BenchmarkAddOffset(b *testing.B) {
+	const count = 1_000_000
+
+	cases := []struct {
+		name   string
+		stride uint64
+	}{
+		{"stride1_l0", 1},
+		{"stride123_l6", 123},
+		{"stride1000_l9", 1000},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			maxOffset := (count - 1) * tc.stride
+			for b.Loop() {
+				ef := NewEliasFano(count, maxOffset)
+				for i := uint64(0); i < count; i++ {
+					ef.AddOffset(i * tc.stride)
+				}
+				ef.Build()
+			}
+		})
+	}
+}
+
 // BenchmarkSeekPool models real mainnet seek patterns:
 //   - a pool of many small EFs placed at random offsets in a large global range
 //     (matching the real distribution: 83% of EFs have 1–3 word upperBits = 8–24 bytes)
