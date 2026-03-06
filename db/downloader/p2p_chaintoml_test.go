@@ -51,7 +51,7 @@ func TestDiscoverChainToml_NoPeersWithEntry(t *testing.T) {
 func TestDiscoverChainToml_SinglePeer(t *testing.T) {
 	key, _ := crypto.GenerateKey()
 	ct := &enr.ChainToml{
-		FrozenTx: 100,
+		KnownTx: 100,
 		InfoHash: [20]byte{1, 2, 3},
 	}
 	src := &mockNodeSource{
@@ -60,27 +60,27 @@ func TestDiscoverChainToml_SinglePeer(t *testing.T) {
 
 	result := DiscoverChainToml(src)
 	require.NotNil(t, result)
-	assert.Equal(t, uint64(100), result.FrozenTx)
-	assert.Equal(t, [20]byte{1, 2, 3}, result.InfoHash)
+	assert.Equal(t, uint64(100), result.ChainToml.KnownTx)
+	assert.Equal(t, [20]byte{1, 2, 3}, result.ChainToml.InfoHash)
 }
 
-func TestDiscoverChainToml_PicksHighestFrozenTx(t *testing.T) {
+func TestDiscoverChainToml_PicksHighestKnownTx(t *testing.T) {
 	key1, _ := crypto.GenerateKey()
 	key2, _ := crypto.GenerateKey()
 	key3, _ := crypto.GenerateKey()
 
 	src := &mockNodeSource{
 		nodes: []*enode.Node{
-			makeTestNode(t, key1, &enr.ChainToml{FrozenTx: 50, InfoHash: [20]byte{1}}),
-			makeTestNode(t, key2, &enr.ChainToml{FrozenTx: 200, InfoHash: [20]byte{2}}),
-			makeTestNode(t, key3, &enr.ChainToml{FrozenTx: 100, InfoHash: [20]byte{3}}),
+			makeTestNode(t, key1, &enr.ChainToml{KnownTx: 50, InfoHash: [20]byte{1}}),
+			makeTestNode(t, key2, &enr.ChainToml{KnownTx: 200, InfoHash: [20]byte{2}}),
+			makeTestNode(t, key3, &enr.ChainToml{KnownTx: 100, InfoHash: [20]byte{3}}),
 		},
 	}
 
 	result := DiscoverChainToml(src)
 	require.NotNil(t, result)
-	assert.Equal(t, uint64(200), result.FrozenTx)
-	assert.Equal(t, [20]byte{2}, result.InfoHash)
+	assert.Equal(t, uint64(200), result.ChainToml.KnownTx)
+	assert.Equal(t, [20]byte{2}, result.ChainToml.InfoHash)
 }
 
 func TestDiscoverChainToml_MixedPeers(t *testing.T) {
@@ -91,14 +91,44 @@ func TestDiscoverChainToml_MixedPeers(t *testing.T) {
 	src := &mockNodeSource{
 		nodes: []*enode.Node{
 			makeTestNode(t, key1, nil), // no chain-toml
-			makeTestNode(t, key2, &enr.ChainToml{FrozenTx: 42, InfoHash: [20]byte{0xab}}),
+			makeTestNode(t, key2, &enr.ChainToml{KnownTx: 42, InfoHash: [20]byte{0xab}}),
 			makeTestNode(t, key3, nil), // no chain-toml
 		},
 	}
 
 	result := DiscoverChainToml(src)
 	require.NotNil(t, result)
-	assert.Equal(t, uint64(42), result.FrozenTx)
+	assert.Equal(t, uint64(42), result.ChainToml.KnownTx)
+}
+
+func TestDiscoverChainToml_ReturnsNode(t *testing.T) {
+	key, _ := crypto.GenerateKey()
+	ct := &enr.ChainToml{KnownTx: 42, InfoHash: [20]byte{0xab}}
+	node := makeTestNode(t, key, ct)
+	src := &mockNodeSource{nodes: []*enode.Node{node}}
+
+	result := DiscoverChainToml(src)
+	require.NotNil(t, result)
+	assert.Equal(t, node.ID(), result.Node.ID())
+}
+
+func TestDiscoverChainToml_WithBTPort(t *testing.T) {
+	key, _ := crypto.GenerateKey()
+	var r enr.Record
+	r.Set(enr.ChainToml{KnownTx: 100, InfoHash: [20]byte{1}})
+	r.Set(enr.BT(42069))
+	require.NoError(t, enode.SignV4(&r, key))
+	node, err := enode.New(enode.ValidSchemes, &r)
+	require.NoError(t, err)
+
+	src := &mockNodeSource{nodes: []*enode.Node{node}}
+	result := DiscoverChainToml(src)
+	require.NotNil(t, result)
+
+	// Verify we can extract the BT port from the returned node
+	var bt enr.BT
+	require.NoError(t, result.Node.Record().Load(&bt))
+	assert.Equal(t, enr.BT(42069), bt)
 }
 
 func TestDiscoverAllChainToml(t *testing.T) {
@@ -108,9 +138,9 @@ func TestDiscoverAllChainToml(t *testing.T) {
 
 	src := &mockNodeSource{
 		nodes: []*enode.Node{
-			makeTestNode(t, key1, &enr.ChainToml{FrozenTx: 10}),
+			makeTestNode(t, key1, &enr.ChainToml{KnownTx: 10}),
 			makeTestNode(t, key2, nil), // no entry
-			makeTestNode(t, key3, &enr.ChainToml{FrozenTx: 20}),
+			makeTestNode(t, key3, &enr.ChainToml{KnownTx: 20}),
 		},
 	}
 

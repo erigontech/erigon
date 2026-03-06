@@ -63,6 +63,9 @@ type SnapshotsCfg struct {
 	silkworm           *silkworm.Silkworm
 	syncConfig         ethconfig.Sync
 	prune              prune.Mode
+	// manifestReady is closed when P2P manifest discovery completes (--snap.p2p-manifest).
+	// Nil when P2P manifest mode is not enabled.
+	manifestReady <-chan struct{}
 }
 
 // Returns a seeder client for block management, a noop implementation if no downloader is attached.
@@ -86,6 +89,7 @@ func StageSnapshotsCfg(db kv.TemporalRwDB,
 	caplinState bool,
 	silkworm *silkworm.Silkworm,
 	prune prune.Mode,
+	manifestReady <-chan struct{},
 ) SnapshotsCfg {
 	cfg := SnapshotsCfg{
 		db:                 db,
@@ -101,6 +105,7 @@ func StageSnapshotsCfg(db kv.TemporalRwDB,
 		blobs:              blobs,
 		prune:              prune,
 		caplinState:        caplinState,
+		manifestReady:      manifestReady,
 	}
 
 	return cfg
@@ -154,6 +159,19 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	log.Info("[OtterSync] Starting Ottersync")
+
+	// If P2P manifest mode is enabled, wait for chain.toml discovery before
+	// building download requests. Without this, the preverified registry is
+	// empty and OtterSync would complete instantly with nothing to download.
+	if cfg.manifestReady != nil {
+		log.Info(fmt.Sprintf("[%s] Waiting for P2P manifest discovery...", s.LogPrefix()))
+		select {
+		case <-cfg.manifestReady:
+			log.Info(fmt.Sprintf("[%s] P2P manifest ready, proceeding with download", s.LogPrefix()))
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 
 	agg := cfg.db.(*temporal.DB).Agg().(*state.Aggregator)
 	// Download only the snapshots that are for the header chain.

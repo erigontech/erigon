@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"net"
 	"os"
 	"sort"
 	"strings"
@@ -84,9 +85,17 @@ func CompareChainToml(local, discovered map[string]string) (matching, newEntries
 
 // DownloadChainTomlByInfoHash downloads chain.toml from the BitTorrent network using its info-hash.
 // The file is downloaded to snapDir, read, and the torrent is dropped afterward.
-func DownloadChainTomlByInfoHash(ctx context.Context, client *torrent.Client, infoHash metainfo.Hash, snapDir string) ([]byte, error) {
+//
+// If peer is non-nil, it is used to directly add the peer's torrent endpoint via AddPeers,
+// bypassing the need for DHT or tracker discovery.
+func DownloadChainTomlByInfoHash(ctx context.Context, client *torrent.Client, infoHash metainfo.Hash, snapDir string, peer *ChainTomlPeer) ([]byte, error) {
 	t, _ := client.AddTorrentInfoHash(infoHash)
 	defer t.Drop()
+
+	// If the peer advertised a BT port in their ENR, add them directly as a torrent peer.
+	if peer != nil {
+		addTorrentPeerFromENR(t, peer)
+	}
 
 	// Use a timeout to avoid blocking the discovery loop indefinitely.
 	dlCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
@@ -114,6 +123,40 @@ func DownloadChainTomlByInfoHash(ctx context.Context, client *torrent.Client, in
 	}
 
 	return data, nil
+}
+
+// addTorrentPeerFromENR extracts the BT port and IP from a peer's ENR record
+// and adds them as a direct torrent peer. The IP defaults to the node's
+// advertised IP if not separately specified.
+func addTorrentPeerFromENR(t *torrent.Torrent, peer *ChainTomlPeer) {
+	var bt enr.BT
+	if err := peer.Node.Record().Load(&bt); err != nil {
+		return // peer doesn't advertise a BT port
+	}
+	if bt == 0 {
+		return
+	}
+
+	ip := peer.Node.IP()
+	if ip == nil {
+		return
+	}
+
+	t.AddPeers([]torrent.PeerInfo{{
+		Addr:    ipPortAddr{IP: ip, Port: int(bt)},
+		Trusted: true,
+	}})
+}
+
+// ipPortAddr implements net.Addr for use with torrent.PeerInfo.
+type ipPortAddr struct {
+	IP   net.IP
+	Port int
+}
+
+func (a ipPortAddr) Network() string { return "" }
+func (a ipPortAddr) String() string {
+	return net.JoinHostPort(a.IP.String(), fmt.Sprintf("%d", a.Port))
 }
 
 // ApplyDiscoveredChainToml merges discovered chain.toml entries into the preverified registry.
@@ -164,13 +207,13 @@ func (d *Downloader) chainTomlDiscoveryLoop(ctx context.Context, networkName str
 	// Re-publish existing chain.toml ENR entry now that P2P is likely running.
 	// This is needed because the ENR updater is set before P2P servers start,
 	// so any early PublishLocalChainToml call would be a no-op.
-	if pubErr := d.PublishLocalChainToml(0); pubErr != nil {
+	if pubErr := d.PublishLocalChainToml(); pubErr != nil {
 		d.logger.Debug("[chaintoml] no existing chain.toml to re-publish", "err", pubErr)
 	} else {
 		d.logger.Info("[chaintoml] re-published existing chain.toml ENR entry")
 	}
 
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -214,7 +257,7 @@ func (d *Downloader) acquireChainToml(ctx context.Context, networkName string, n
 		var ct enr.ChainToml
 		if err := node.Record().Load(&ct); err == nil {
 			withChainToml++
-			d.logger.Debug("[chaintoml] found chain-toml entry", "node", node.ID().TerminalString(), "frozenTx", ct.FrozenTx)
+			d.logger.Debug("[chaintoml] found chain-toml entry", "node", node.ID().TerminalString(), "authoritativeTx", ct.AuthoritativeTx, "knownTx", ct.KnownTx)
 		}
 	}
 	d.logger.Info("[chaintoml] scanning peers for chain-toml ENR entry", "peers", len(allNodes), "withChainToml", withChainToml)
@@ -226,10 +269,11 @@ func (d *Downloader) acquireChainToml(ctx context.Context, networkName string, n
 	}
 
 	d.logger.Info("[chaintoml] discovered peer chain.toml",
-		"frozenTx", best.FrozenTx,
-		"infoHash", hex.EncodeToString(best.InfoHash[:]))
+		"authoritativeTx", best.ChainToml.AuthoritativeTx,
+		"knownTx", best.ChainToml.KnownTx,
+		"infoHash", hex.EncodeToString(best.ChainToml.InfoHash[:]))
 
-	tomlBytes, err := DownloadChainTomlByInfoHash(ctx, d.torrentClient, best.InfoHash, d.snapDir())
+	tomlBytes, err := DownloadChainTomlByInfoHash(ctx, d.torrentClient, best.ChainToml.InfoHash, d.snapDir(), best)
 	if err != nil {
 		d.logger.Warn("[chaintoml] failed to download chain.toml", "err", err)
 		return
@@ -243,6 +287,15 @@ func (d *Downloader) acquireChainToml(ctx context.Context, networkName string, n
 
 	if newCount > 0 {
 		d.logger.Info("[chaintoml] applied discovered entries", "new", newCount)
+		// Signal that the P2P manifest is ready so the snapshot stage can proceed.
+		if d.manifestReady != nil {
+			select {
+			case <-d.manifestReady:
+				// already closed
+			default:
+				close(d.manifestReady)
+			}
+		}
 	} else {
 		d.logger.Debug("[chaintoml] no new entries from peer")
 	}
@@ -257,7 +310,7 @@ func (d *Downloader) verifyChainToml(ctx context.Context, networkName string, ns
 		return
 	}
 
-	tomlBytes, err := DownloadChainTomlByInfoHash(ctx, d.torrentClient, best.InfoHash, d.snapDir())
+	tomlBytes, err := DownloadChainTomlByInfoHash(ctx, d.torrentClient, best.ChainToml.InfoHash, d.snapDir(), best)
 	if err != nil {
 		d.logger.Warn("[chaintoml] verify: failed to download chain.toml", "err", err)
 		return

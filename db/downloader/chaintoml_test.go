@@ -92,6 +92,23 @@ func TestSaveChainToml_Overwrite(t *testing.T) {
 	assert.Equal(t, []byte("version2"), loaded)
 }
 
+func TestSaveChainToml_ReadOnlyOverwrite(t *testing.T) {
+	snapDir := t.TempDir()
+
+	// Write initial content, then make it read-only (simulates torrent client behavior).
+	err := SaveChainToml(snapDir, []byte("initial"))
+	require.NoError(t, err)
+	require.NoError(t, os.Chmod(ChainTomlPath(snapDir), 0o444))
+
+	// SaveChainToml should still succeed despite the read-only file.
+	err = SaveChainToml(snapDir, []byte("updated"))
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(ChainTomlPath(snapDir))
+	require.NoError(t, err)
+	assert.Equal(t, []byte("updated"), data)
+}
+
 func TestBuildChainTomlTorrent(t *testing.T) {
 	snapDir := t.TempDir()
 	torrentFS := NewAtomicTorrentFS(snapDir)
@@ -144,7 +161,7 @@ func TestPublishChainToml(t *testing.T) {
 		receivedENR = ct
 	}
 
-	err := PublishChainToml(snapDir, torrentFS, 42, updater)
+	err := PublishChainToml(snapDir, torrentFS, "", updater)
 	require.NoError(t, err)
 
 	// Verify chain.toml was created.
@@ -152,8 +169,9 @@ func TestPublishChainToml(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEmpty(t, loaded)
 
-	// Verify ENR updater was called.
-	assert.Equal(t, uint64(42), receivedENR.FrozenTx)
+	// Verify ENR updater was called (no chainName → AuthoritativeTx/KnownTx = 0).
+	assert.Equal(t, uint64(0), receivedENR.AuthoritativeTx)
+	assert.Equal(t, uint64(0), receivedENR.KnownTx)
 	assert.NotEqual(t, [20]byte{}, receivedENR.InfoHash)
 }
 
@@ -163,7 +181,7 @@ func TestPublishChainToml_NilUpdater(t *testing.T) {
 	createTestTorrent(t, snapDir, "v1-000000-000500-headers.seg")
 
 	// Should not panic with nil updater.
-	err := PublishChainToml(snapDir, torrentFS, 0, nil)
+	err := PublishChainToml(snapDir, torrentFS, "", nil)
 	require.NoError(t, err)
 }
 

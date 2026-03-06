@@ -577,10 +577,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	// Wire chain.toml ENR updater and P2P discovery after sentry servers are created.
 	if backend.downloader != nil && len(backend.sentryServers) > 0 {
+		btPort := enr.BT(backend.downloader.TorrentPort())
 		backend.downloader.SetENRUpdater(func(ct enr.ChainToml) {
 			for _, srv := range backend.sentryServers {
 				if p2p := srv.GetP2PServer(); p2p != nil {
 					p2p.LocalNode().Set(ct)
+					p2p.LocalNode().Set(btPort)
 				}
 			}
 		})
@@ -635,7 +637,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				return
 			case <-time.After(30 * time.Second):
 			}
-			if pubErr := backend.downloader.PublishLocalChainToml(0); pubErr != nil {
+			if pubErr := backend.downloader.PublishLocalChainToml(); pubErr != nil {
 				logger.Debug("[chaintoml] no existing chain.toml to re-publish", "err", pubErr)
 			} else {
 				logger.Info("[chaintoml] re-published existing chain.toml ENR entry")
@@ -645,6 +647,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if backend.config.Snapshot.P2PManifest {
 			backend.downloader.StartChainTomlDiscovery(ctx, backend.config.Snapshot.ChainName)
 		}
+
+		// Start torrent peer manager — keeps torrent peers in sync with DevP2P peers.
+		backend.downloader.StartTorrentPeerManager(ctx)
 	}
 
 	// setup periodic logging and prometheus updates
@@ -1425,6 +1430,13 @@ func (s *Ethereum) setUpSnapDownloader(
 		s.downloaderClient = downloader.NewRpcClient(client, s.config.Dirs.Snap)
 	}
 
+	// Enable P2P manifest mode on the downloader and expose the readiness
+	// channel so the snapshot stage can wait for discovery to complete.
+	if s.config.Snapshot.P2PManifest && s.downloader != nil {
+		s.downloader.EnableP2PManifest()
+		s.config.Snapshot.ManifestReady = s.downloader.ManifestReady()
+	}
+
 	return err
 }
 
@@ -1470,7 +1482,7 @@ func (s *Ethereum) initDownloader(
 	// Generate chain.toml from existing torrents on disk. The ENR updater is wired
 	// later (after this function returns), so the ENR update will be a no-op here.
 	// The background loop will re-publish with the correct frozenTx once P2P is up.
-	if pubErr := s.downloader.PublishLocalChainToml(0); pubErr != nil {
+	if pubErr := s.downloader.PublishLocalChainToml(); pubErr != nil {
 		s.logger.Warn("Failed to publish initial chain.toml", "err", pubErr)
 	}
 

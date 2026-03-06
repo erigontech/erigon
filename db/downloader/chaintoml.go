@@ -12,6 +12,7 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/p2p/enr"
 )
 
@@ -74,8 +75,13 @@ func GenerateChainToml(snapDir string) ([]byte, error) {
 
 // SaveChainToml atomically writes chain.toml to the snap directory.
 // It can be called repeatedly as snapshots advance.
+// The file is chmod'd before writing because the torrent client may have
+// created it as read-only during download.
 func SaveChainToml(snapDir string, tomlBytes []byte) error {
-	return dir.WriteFileWithFsync(ChainTomlPath(snapDir), tomlBytes, 0o644)
+	path := ChainTomlPath(snapDir)
+	// Make writable if already exists (torrent client creates files read-only).
+	_ = os.Chmod(path, 0o644)
+	return dir.WriteFileWithFsync(path, tomlBytes, 0o644)
 }
 
 // LoadChainToml reads the local chain.toml file if it exists.
@@ -120,16 +126,34 @@ func BuildChainTomlTorrent(snapDir string, torrentFS *AtomicTorrentFS) (metainfo
 }
 
 // PublishChainToml orchestrates the full chain.toml publish flow:
-// 1. Generate chain.toml from local .torrent files
+// 1. Generate chain.toml from local .torrent files + preverified registry
 // 2. Save chain.toml to disk
 // 3. Build chain.toml .torrent file
 // 4. Call ENR updater with the new info-hash
 //
 // enrUpdater may be nil if P2P is not yet available.
-func PublishChainToml(snapDir string, torrentFS *AtomicTorrentFS, frozenTx uint64, enrUpdater func(enr.ChainToml)) error {
+// chainName is used to include preverified entries from the snapcfg registry.
+func PublishChainToml(snapDir string, torrentFS *AtomicTorrentFS, chainName string, enrUpdater func(enr.ChainToml)) error {
+	// Start from local .torrent files.
 	tomlBytes, err := GenerateChainToml(snapDir)
 	if err != nil {
 		return fmt.Errorf("generating chain.toml: %w", err)
+	}
+
+	// Merge in preverified entries from the registry (covers files without .torrent files).
+	// Also compute AuthoritativeTx from the registry's ExpectBlocks.
+	var authoritativeTx uint64
+	if chainName != "" {
+		localMap, _ := ParseChainToml(tomlBytes)
+		if cfg, known := snapcfg.KnownCfg(chainName); known {
+			authoritativeTx = cfg.ExpectBlocks
+			preverified := make(map[string]string, len(cfg.Preverified.Items))
+			for _, item := range cfg.Preverified.Items {
+				preverified[item.Name] = item.Hash
+			}
+			merged, _ := MergeChainToml(localMap, preverified)
+			tomlBytes = BuildTomlFromMap(merged)
+		}
 	}
 
 	if err := SaveChainToml(snapDir, tomlBytes); err != nil {
@@ -142,9 +166,13 @@ func PublishChainToml(snapDir string, torrentFS *AtomicTorrentFS, frozenTx uint6
 	}
 
 	if enrUpdater != nil {
+		// For the initial implementation, AuthoritativeTx == KnownTx.
+		// When a node re-publishes peer-discovered entries, KnownTx will
+		// be derived from the peer's ENR values and may exceed AuthoritativeTx.
 		enrUpdater(enr.ChainToml{
-			FrozenTx: frozenTx,
-			InfoHash: infoHash,
+			AuthoritativeTx: authoritativeTx,
+			KnownTx:         authoritativeTx,
+			InfoHash:        infoHash,
 		})
 	}
 
