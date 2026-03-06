@@ -119,6 +119,12 @@ func (b *SequenceBuilder) simpleEncoding(buf []byte) []byte {
 // s1 and s2 must be pre-sorted with s1.Max() <= s2.Min().
 // Call AppendBytes on the builder to serialize.
 func (b *SequenceBuilder) Merge(s1, s2 *SequenceReader, outBaseNum uint64) error {
+	if s1.Max() < s1.Min() {
+		panic(fmt.Sprintf("Merge: s1 corrupt: Max()=%d < Min()=%d, Count=%d", s1.Max(), s1.Min(), s1.Count()))
+	}
+	if s2.Max() < s2.Min() {
+		panic(fmt.Sprintf("Merge: s2 corrupt: Max()=%d < Min()=%d, Count=%d", s2.Max(), s2.Min(), s2.Count()))
+	}
 	maxOffset := max(s1.Max(), s2.Max())
 	if s1.Max() > s2.Min() {
 		panic(fmt.Sprintf("Merge precondition violated: s1.Max()=%d > s2.Min()=%d", s1.Max(), s2.Min()))

@@ -679,16 +679,13 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 			if mergedOnce {
 				mergeSeq.Reset(ci1.startTxNum, ci1.val)
 				preSeq.Reset(startTxNum, lastVal)
-				arr1, _ := stream.ToArray(mergeSeq.Iterator(0))
-				arr2, _ := stream.ToArray(preSeq.Iterator(0))
-				log.Debug("[dbg] merge", "f", ci1.kvReader.FileName(), "key", fmt.Sprintf("%x", lastKey),
-					"arr1_len", len(arr1), "arr1_min", arr1[0], "arr1_max", arr1[len(arr1)-1],
-					"arr2_len", len(arr2), "arr2_min", arr2[0], "arr2_max", arr2[len(arr2)-1],
-					"ci1.startTxNum", ci1.startTxNum, "ci1.endTxNum", ci1.endTxNum,
-					"startTxNum", startTxNum, "endTxNum", endTxNum)
-				// Re-reset after debug logging consumed iterators
-				mergeSeq.Reset(ci1.startTxNum, ci1.val)
-				preSeq.Reset(startTxNum, lastVal)
+				if mergeSeq.Max() > preSeq.Min() {
+					arr1, _ := stream.ToArray(mergeSeq.Iterator(0))
+					arr2, _ := stream.ToArray(preSeq.Iterator(0))
+					panic(fmt.Sprintf("merge %s: mergeSeq.Max(%d) > preSeq.Min(%d), key=%x, file=%s, ci1=[%d-%d], merge=[%d-%d], arr1=%v, arr2=%v",
+						iit.ii.FilenameBase, mergeSeq.Max(), preSeq.Min(), lastKey, ci1.kvReader.FileName(),
+						ci1.startTxNum, ci1.endTxNum, startTxNum, endTxNum, arr1, arr2))
+				}
 				if mergeErr := builder.Merge(mergeSeq, preSeq, startTxNum); mergeErr != nil {
 					return nil, fmt.Errorf("merge %s inverted index: %w", iit.ii.FilenameBase, mergeErr)
 				}
