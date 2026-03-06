@@ -263,13 +263,13 @@ func checkCommitmentRootViaRecompute(ctx context.Context, tx kv.TemporalTx, sd *
 	return nil
 }
 
-func CheckCommitmentKvi(ctx context.Context, db kv.TemporalRoDB, cache *IntegrityCache, failFast bool, logger log.Logger) error {
+func CheckCommitmentKvi(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, cache *IntegrityCache, failFast bool, logger log.Logger) error {
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	return CheckKvis(ctx, tx, kv.CommitmentDomain, CommitmentKvi, cache, failFast, logger)
+	return CheckKvis(ctx, tx, kv.CommitmentDomain, CommitmentKvi, sc, cache, failFast, logger)
 }
 
 func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, cache *IntegrityCache, failFast bool, logger log.Logger) error {
@@ -653,7 +653,7 @@ func CheckCommitmentHistVal(ctx context.Context, sc SamplerCfg, db kv.TemporalRo
 	}
 	// numBuckets controls granularity; sampleRatio controls how many buckets per file to check.
 	// e.g. sampleRatio=0.05 → ~50 out of 1000 buckets → ~5% of each file, as sequential scans.
-	const numBuckets = 1000
+	const numBuckets = 10000
 	var totalVals atomic.Uint64
 	for i, file := range files {
 		if !strings.HasSuffix(file.Fullpath(), ".v") {
@@ -689,7 +689,7 @@ func CheckCommitmentHistVal(ctx context.Context, sc SamplerCfg, db kv.TemporalRo
 }
 
 func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, file state.VisibleFile, bucket int, failFast bool, logger log.Logger) (uint64, error) {
-	const numBuckets = 1000
+	const numBuckets = 10000
 	start := time.Now()
 	fileName := filepath.Base(file.Fullpath())
 	startTxNum := file.StartRootNum()
@@ -939,7 +939,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 				done := checked.Load()
 				elapsed := time.Since(start).Seconds()
 				rate := float64(done) / elapsed
-				logger.Info("[integrity] "+string(CommitmentHistAtBlkRange), "blks/s", rate, "checked", common.PrettyCounter(done), "blockNum", common.PrettyCounter(lastBlockNum.Load()))
+				logger.Info("[integrity] "+string(StateRootVerifyByHistory), "blks/s", rate, "checked", common.PrettyCounter(done), "blockNum", common.PrettyCounter(lastBlockNum.Load()))
 			}
 		}
 	}()

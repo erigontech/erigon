@@ -90,11 +90,12 @@ const (
 	// consistent. This is a statistical check used to catch corruption without checking every value.
 	CommitmentHistVal Check = "CommitmentHistVal"
 
-	// CommitmentHistAtBlkRange samples and validates commitment history values over a specific
-	// block range. For each sampled block, it re-derives the commitment root from history
-	// and checks that it matches the stored root. More targeted than CommitmentHistVal when
-	// a particular block range is suspect.
-	CommitmentHistAtBlkRange Check = "CommitmentHistAtBlkRange"
+	// StateRootVerifyByHistory verifies block state roots against commitment history over a
+	// specific block range. For each sampled block, it reads the commitment trie state from
+	// history snapshots and checks that the re-derived root matches the header's stored state
+	// root. Does NOT re-execute transactions — relies solely on history domain reads.
+	// More targeted than CommitmentHistVal when a particular block range is suspect.
+	StateRootVerifyByHistory Check = "StateRootVerifyByHistory"
 
 	// StateVerify verifies state correspondence between commitment and domains. Checks that
 	// every key in account/storage domains is properly referenced by commitment branches,
@@ -117,13 +118,14 @@ const (
 )
 
 var FastChecks = []Check{
-	Blocks, HeaderNoGaps, BlocksTxnID, InvertedIndex, StateProgress, Publishable, HistoryNoSystemTxs,
-	BorEvents, BorSpans, BorCheckpoints, ReceiptsNoDups, RCacheNoDups, CommitmentRoot,
-	CommitmentKvi, CommitmentHistVal,
+	Blocks, HeaderNoGaps, BlocksTxnID, InvertedIndex, StateProgress, HistoryNoSystemTxs,
+	CommitmentKvi, ReceiptsNoDups, RCacheNoDups, CommitmentRoot,
+	CommitmentHistVal, StateRootVerifyByHistory, Publishable,
 }
 
-var SlowChecks = []Check{CommitmentHistAtBlkRange, StateVerify}
+var SlowChecks = []Check{StateVerify}
 var DeprecatedChecks = []Check{
+	BorEvents, BorSpans, BorCheckpoints,
 	CommitmentKvDeref, //StateVerify - will overcome
 }
 var AllChecks = append(append(append([]Check{}, FastChecks...), SlowChecks...), DeprecatedChecks...)

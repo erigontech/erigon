@@ -169,6 +169,100 @@ func TestMerge(t *testing.T) {
 	})
 }
 
+func TestMergeSorted(t *testing.T) {
+	t.Run("small sequences (simple encoding path)", func(t *testing.T) {
+		// 3 + 3 = 6 elements across two files with different baseNums
+		raw1 := buildTestSeq(1000, 1001, 1003, 1005)
+		raw2 := buildTestSeq(1006, 1007, 1009, 1011)
+
+		var sr SequenceReader
+		var merged SequenceBuilder
+		err := merged.MergeSorted(&sr, 1000, []uint64{1000, 1006}, [][]byte{raw1, raw2})
+		require.NoError(t, err)
+
+		result := ReadMultiEncSeq(1000, merged.AppendBytes(nil))
+		require.Equal(t, uint64(6), result.Count())
+		require.Equal(t, uint64(1001), result.Min())
+		require.Equal(t, uint64(1011), result.Max())
+		for i, want := range []uint64{1001, 1003, 1005, 1007, 1009, 1011} {
+			require.Equal(t, want, result.Get(uint64(i)))
+		}
+	})
+
+	t.Run("large sequences (rebased EF path)", func(t *testing.T) {
+		// 10 + 10 = 20 elements across two files
+		vals1 := make([]uint64, 10)
+		vals2 := make([]uint64, 10)
+		for i := range vals1 {
+			vals1[i] = 1000 + uint64(i)*2
+			vals2[i] = 1020 + uint64(i)*2
+		}
+		raw1 := buildTestSeq(1000, vals1...)
+		raw2 := buildTestSeq(1020, vals2...)
+
+		var sr SequenceReader
+		var merged SequenceBuilder
+		err := merged.MergeSorted(&sr, 1000, []uint64{1000, 1020}, [][]byte{raw1, raw2})
+		require.NoError(t, err)
+
+		out := merged.AppendBytes(nil)
+		require.Equal(t, byte(RebasedEliasFano), out[0], "expected rebased EF encoding")
+		result := ReadMultiEncSeq(1000, out)
+		require.Equal(t, uint64(20), result.Count())
+		require.Equal(t, uint64(1000), result.Min())
+		require.Equal(t, uint64(1038), result.Max())
+		for i := uint64(0); i < 20; i++ {
+			require.Equal(t, 1000+i*2, result.Get(i))
+		}
+	})
+
+	t.Run("three sequences", func(t *testing.T) {
+		// 4 + 4 + 4 = 12 elements across three files
+		raw1 := buildTestSeq(1000, 1001, 1003, 1005, 1007)
+		raw2 := buildTestSeq(1010, 1011, 1013, 1015, 1017)
+		raw3 := buildTestSeq(1020, 1021, 1023, 1025, 1027)
+
+		var sr SequenceReader
+		var merged SequenceBuilder
+		err := merged.MergeSorted(&sr, 1000, []uint64{1000, 1010, 1020}, [][]byte{raw1, raw2, raw3})
+		require.NoError(t, err)
+
+		result := ReadMultiEncSeq(1000, merged.AppendBytes(nil))
+		require.Equal(t, uint64(12), result.Count())
+		require.Equal(t, uint64(1001), result.Min())
+		require.Equal(t, uint64(1027), result.Max())
+		want := []uint64{1001, 1003, 1005, 1007, 1011, 1013, 1015, 1017, 1021, 1023, 1025, 1027}
+		for i, v := range want {
+			require.Equal(t, v, result.Get(uint64(i)))
+		}
+	})
+
+	t.Run("out of order panics", func(t *testing.T) {
+		raw1 := buildTestSeq(1000, 1001, 1010)
+		raw2 := buildTestSeq(1005, 1005, 1020) // Min=1005 < prevMax=1010
+
+		var sr SequenceReader
+		var merged SequenceBuilder
+		require.Panics(t, func() {
+			_ = merged.MergeSorted(&sr, 1000, []uint64{1000, 1005}, [][]byte{raw1, raw2})
+		})
+	})
+
+	t.Run("single sequence is a no-op rebase", func(t *testing.T) {
+		raw := buildTestSeq(500, 501, 503, 505)
+
+		var sr SequenceReader
+		var merged SequenceBuilder
+		err := merged.MergeSorted(&sr, 500, []uint64{500}, [][]byte{raw})
+		require.NoError(t, err)
+
+		result := ReadMultiEncSeq(500, merged.AppendBytes(nil))
+		require.Equal(t, uint64(3), result.Count())
+		require.Equal(t, uint64(501), result.Min())
+		require.Equal(t, uint64(505), result.Max())
+	})
+}
+
 func TestMergeEncodingBoundary(t *testing.T) {
 	merge := func(baseNum uint64, raw1, raw2 []byte) []byte {
 		s1 := ReadMultiEncSeq(baseNum, raw1)
