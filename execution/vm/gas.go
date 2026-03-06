@@ -57,6 +57,26 @@ func callGas(isEip150 bool, availableGas, base uint64, callCost *uint256.Int) (u
 	return callCost.Uint64(), nil
 }
 
+// categorizeDynamicGas adds to usedMultiGas the dynamic gas cost of an opcode,
+// categorized by resource kind based on the opcode type.
+// This provides broad-brush categorization; ACL operations (cold/warm splitting)
+// and LOG data/topic splitting are refined in operations_acl.go and gas_table.go.
+func categorizeDynamicGas(usedMultiGas *multigas.MultiGas, op OpCode, cost uint64) {
+	if cost == 0 {
+		return
+	}
+	switch op {
+	case SLOAD, BALANCE, EXTCODESIZE, EXTCODECOPY, EXTCODEHASH, SELFBALANCE:
+		usedMultiGas.SaturatingIncrementInto(multigas.ResourceKindStorageAccess, cost)
+	case SSTORE:
+		usedMultiGas.SaturatingIncrementInto(multigas.ResourceKindStorageGrowth, cost)
+	case LOG0, LOG1, LOG2, LOG3, LOG4:
+		usedMultiGas.SaturatingIncrementInto(multigas.ResourceKindHistoryGrowth, cost)
+	default:
+		usedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, cost)
+	}
+}
+
 // addConstantMultiGas adds to usedMultiGas the constant multi-gas cost of an opcode.
 func addConstantMultiGas(usedMultiGas *multigas.MultiGas, cost uint64, op OpCode) {
 	// SELFDESTRUCT is a special case because it charges for storage access but it isn't

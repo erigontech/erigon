@@ -339,7 +339,9 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		if typ == STATICCALL {
 			readOnly = true
 		}
-		ret, gas, err = evm.Run(contract, gas, input, readOnly)
+		var runMultiGas multigas.MultiGas
+		ret, gas, runMultiGas, err = evm.Run(contract, gas, input, readOnly)
+		usedMultiGas.SaturatingAddInto(runMultiGas)
 	}
 	// When an error was returned by the EVM or when setting the creation code
 	// above we revert to the snapshot and consume any gas remaining. Additionally
@@ -515,7 +517,9 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 		return nil, address, gasRemaining, usedMultiGas, nil
 	}
 
-	ret, gasRemaining, err = evm.Run(contract, gasRemaining, nil, false)
+	var runMultiGas multigas.MultiGas
+	ret, gasRemaining, runMultiGas, err = evm.Run(contract, gasRemaining, nil, false)
+	usedMultiGas.SaturatingAddInto(runMultiGas)
 
 	// EIP-170: Contract code size limit
 	if err == nil && evm.chainRules.IsSpuriousDragon && len(ret) > evm.maxCodeSize() {

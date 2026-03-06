@@ -87,7 +87,7 @@ func TestRun_PushPopContract_CalledForEmptyCode(t *testing.T) {
 	contract := Contract{
 		Code: nil,
 	}
-	ret, gas, err := evm.Run(contract, 10000, nil, false)
+	ret, gas, _, err := evm.Run(contract, 10000, nil, false)
 	require.NoError(t, err)
 	require.Nil(t, ret)
 	require.Equal(t, uint64(10000), gas)
@@ -103,7 +103,7 @@ func TestRun_PushPopContract_CalledForSTOP(t *testing.T) {
 	contract := Contract{
 		Code: []byte{byte(STOP)},
 	}
-	_, _, err := evm.Run(contract, 10000, nil, false)
+	_, _, _, err := evm.Run(contract, 10000, nil, false)
 	require.NoError(t, err)
 	require.Equal(t, 1, len(hook.pushCalls))
 	require.Equal(t, 1, hook.popCalls)
@@ -146,7 +146,7 @@ func TestRun_StylusDispatch_CallsExecuteWASM(t *testing.T) {
 	contract := Contract{
 		Code: stylusCode,
 	}
-	ret, _, err := evm.Run(contract, 50000, []byte{0xAA}, false)
+	ret, _, _, err := evm.Run(contract, 50000, []byte{0xAA}, false)
 	require.NoError(t, err)
 	require.Equal(t, expectedRet, ret)
 	require.Equal(t, 1, hook.wasmCalls)
@@ -162,7 +162,70 @@ func TestRun_NonStylus_DoesNotCallExecuteWASM(t *testing.T) {
 	contract := Contract{
 		Code: []byte{byte(STOP)},
 	}
-	_, _, err := evm.Run(contract, 10000, nil, false)
+	_, _, _, err := evm.Run(contract, 10000, nil, false)
 	require.NoError(t, err)
 	require.Equal(t, 0, hook.wasmCalls)
+}
+
+func newArbitrumEVM() *EVM {
+	cfg := &chain.Config{
+		ChainID:             big.NewInt(42161),
+		ArbitrumChainParams: arbchaintypes.ArbitrumChainParams{EnableArbOS: true},
+	}
+	blockCtx := evmtypes.BlockContext{
+		BlockNumber:  100,
+		Time:         1000,
+		ArbOSVersion: 31,
+		Coinbase:     accounts.InternAddress(common.HexToAddress("0xdead")),
+		GasLimit:     30_000_000,
+		GetHash: func(n uint64) (common.Hash, error) {
+			return common.Hash{byte(n)}, nil
+		},
+	}
+	txCtx := evmtypes.TxContext{
+		GasPrice: *uint256.NewInt(1),
+	}
+	return NewEVM(blockCtx, txCtx, nil, cfg, Config{})
+}
+
+func TestRun_MultiGasAccumulation_ConstantGas(t *testing.T) {
+	evm := newArbitrumEVM()
+	require.True(t, evm.chainRules.IsArbitrum)
+
+	hook := &recordingHook{}
+	evm.ProcessingHook = hook
+
+	// PUSH1 0x01, PUSH1 0x02, ADD, STOP
+	// PUSH1 has constant gas = 3 (GasFastestStep), ADD has constant gas = 3
+	code := []byte{
+		byte(PUSH1), 0x01,
+		byte(PUSH1), 0x02,
+		byte(ADD),
+		byte(STOP),
+	}
+	contract := Contract{Code: code}
+	_, gasLeft, mg, err := evm.Run(contract, 100000, nil, false)
+	require.NoError(t, err)
+
+	gasUsed := 100000 - gasLeft
+	require.Greater(t, gasUsed, uint64(0))
+	require.Equal(t, gasUsed, mg.SingleGas())
+	require.Equal(t, gasUsed, mg.Get(multigas.ResourceKindComputation))
+}
+
+func TestRun_MultiGasAccumulation_NonArbitrum(t *testing.T) {
+	evm := newTestEVM()
+	require.False(t, evm.chainRules.IsArbitrum)
+
+	code := []byte{
+		byte(PUSH1), 0x01,
+		byte(PUSH1), 0x02,
+		byte(ADD),
+		byte(STOP),
+	}
+	contract := Contract{Code: code}
+	_, _, mg, err := evm.Run(contract, 100000, nil, false)
+	require.NoError(t, err)
+
+	require.True(t, mg.IsZero())
 }

@@ -28,6 +28,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/arb/multigas"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
@@ -249,14 +250,14 @@ func jumpTable(chainRules *chain.Rules, cfg Config) *JumpTable {
 // It's important to note that any errors returned by the interpreter should be
 // considered a revert-and-consume-all-gas operation except for
 // ErrExecutionReverted which means revert-and-keep-gas-left.
-func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) (_ []byte, _ uint64, err error) {
+func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) (_ []byte, _ uint64, _ multigas.MultiGas, err error) {
 	// Arbitrum: track contract on the call stack for Stylus reentrancy detection
 	evm.ProcessingHook.PushContract(&contract)
 	defer evm.ProcessingHook.PopContract()
 
 	// Don't bother with the execution if there's no code.
 	if len(contract.Code) == 0 {
-		return nil, gas, nil
+		return nil, gas, multigas.ZeroGas(), nil
 	}
 
 	// Arbitrum Stylus: execute WASM programs directly, bypassing the EVM bytecode loop
@@ -264,7 +265,7 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 		callContext := getCallContext(contract, input, gas)
 		defer callContext.put()
 		ret, wasmErr := evm.ProcessingHook.ExecuteWASM(callContext, input, evm)
-		return ret, callContext.gas, wasmErr
+		return ret, callContext.gas, callContext.Contract.UsedMultiGas, wasmErr
 	}
 
 	// Reset the previous call's return data. It's unimportant to preserve the old buffer
@@ -350,15 +351,18 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 		cost = operation.constantGas // For tracing
 		// Validate stack
 		if sLen := callContext.Stack.len(); sLen < operation.numPop {
-			return nil, callContext.gas, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
+			return nil, callContext.gas, callContext.Contract.UsedMultiGas, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
 		} else if sLen > operation.maxStack {
-			return nil, callContext.gas, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			return nil, callContext.gas, callContext.Contract.UsedMultiGas, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
 		}
 		// for tracing: this gas consumption event is emitted below in the debug section.
 		if callContext.gas < cost {
-			return nil, callContext.gas, ErrOutOfGas
+			return nil, callContext.gas, callContext.Contract.UsedMultiGas, ErrOutOfGas
 		} else {
 			callContext.gas -= cost
+		}
+		if evm.chainRules.IsArbitrum {
+			addConstantMultiGas(&callContext.Contract.UsedMultiGas, cost, op)
 		}
 
 		// All ops with a dynamic memory usage also has a dynamic gas cost.
@@ -371,12 +375,12 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 			if operation.memorySize != nil {
 				memSize, overflow := operation.memorySize(callContext)
 				if overflow {
-					return nil, callContext.gas, ErrGasUintOverflow
+					return nil, callContext.gas, callContext.Contract.UsedMultiGas, ErrGasUintOverflow
 				}
 				// memory is expanded in words of 32 bytes. Gas
 				// is also calculated in words.
 				if memorySize, overflow = math.SafeMul(ToWordSize(memSize), 32); overflow {
-					return nil, callContext.gas, ErrGasUintOverflow
+					return nil, callContext.gas, callContext.Contract.UsedMultiGas, ErrGasUintOverflow
 				}
 			}
 			// Consume the gas and return an error if not enough gas is available.
@@ -387,7 +391,7 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 				if !errors.Is(err, ErrOutOfGas) {
 					err = fmt.Errorf("%w: %v", ErrOutOfGas, err)
 				}
-				return nil, callContext.gas, err
+				return nil, callContext.gas, callContext.Contract.UsedMultiGas, err
 			}
 			cost += dynamicCost // for tracing
 			callGas = operation.constantGas + dynamicCost - evm.CallGasTemp()
@@ -397,9 +401,12 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 
 			// for tracing: this gas consumption event is emitted below in the debug section.
 			if callContext.gas < dynamicCost {
-				return nil, callContext.gas, ErrOutOfGas
+				return nil, callContext.gas, callContext.Contract.UsedMultiGas, ErrOutOfGas
 			} else {
 				callContext.gas -= dynamicCost
+			}
+			if evm.chainRules.IsArbitrum {
+				categorizeDynamicGas(&callContext.Contract.UsedMultiGas, op, dynamicCost)
 			}
 		}
 
@@ -444,5 +451,5 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 		err = nil // clear stop token error
 	}
 
-	return res, callContext.gas, err
+	return res, callContext.gas, callContext.Contract.UsedMultiGas, err
 }
