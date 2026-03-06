@@ -1143,16 +1143,3 @@ func (s *Sync) handleWaypointExecutionErr(ctx context.Context, lastCorrectTip *t
 
 	return execErr
 }
-
-func (s *Sync) ignoreFetchBlocksErrOnTipEvent(err error) bool {
-	return errors.Is(err, &p2p.ErrIncompleteHeaders{}) ||
-		errors.Is(err, &p2p.ErrNonSequentialHeaderNumbers{}) ||
-		errors.Is(err, &p2p.ErrNonSequentialHeaderHashes{}) ||
-		errors.Is(err, &p2p.ErrMissingHeaderHash{}) ||
-		errors.Is(err, &p2p.ErrUnexpectedHeaderHash{}) ||
-		errors.Is(err, &p2p.ErrTooManyHeaders{}) ||
-		errors.Is(err, &p2p.ErrMissingBodies{}) ||
-		errors.Is(err, &p2p.ErrTooManyBodies{}) ||
-		errors.Is(err, p2p.ErrPeerNotFound) ||
-		errors.Is(err, context.DeadlineExceeded)
-}

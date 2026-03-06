@@ -17,7 +17,6 @@
 package commands
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -30,7 +29,6 @@ import (
 
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/cmd/utils"
-	"github.com/erigontech/erigon/cmd/utils/debugprint"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -38,12 +36,10 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
-	chain2 "github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
-	"github.com/erigontech/erigon/execution/types"
 	erigoncli "github.com/erigontech/erigon/node/cli"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -330,20 +326,6 @@ func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig
 	}
 
 	return nil
-}
-
-func checkMinedBlock(b1, b2 *types.Block, chainConfig *chain2.Config) {
-	if b1.Root() != b2.Root() ||
-		(chainConfig.IsByzantium(b1.NumberU64()) && b1.ReceiptHash() != b2.ReceiptHash()) ||
-		b1.TxHash() != b2.TxHash() ||
-		b1.ParentHash() != b2.ParentHash() ||
-		b1.UncleHash() != b2.UncleHash() ||
-		b1.GasUsed() != b2.GasUsed() ||
-		!bytes.Equal(b1.Extra(), b2.Extra()) { // TODO: Extra() doesn't need to be a copy for a read-only compare
-		// Header()'s deep-copy doesn't matter here since it will panic anyway
-		debugprint.Headers(b1.Header(), b2.Header())
-		panic("blocks are not same")
-	}
 }
 
 func loopExec(db kv.TemporalRwDB, ctx context.Context, unwind uint64, logger log.Logger) error {
