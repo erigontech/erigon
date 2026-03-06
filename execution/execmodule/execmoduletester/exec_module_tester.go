@@ -531,7 +531,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		terseLogger.SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StderrHandler))
 		// Needs its own notifications to not update RPC daemon and txpool about pending blocks
 		stateSync := stageloop.NewInMemoryExecution(mock.Ctx, mock.DB, &cfg, mock.sentriesClient,
-			dirs, notifications, mock.BlockReader, blockWriter, nil, terseLogger)
+			dirs, notifications, mock.BlockReader, blockWriter, terseLogger)
 		chainReader := consensuschain.NewReader(mock.ChainConfig, tx, mock.BlockReader, logger)
 		// We start the mining step
 		if err := stageloop.StateStep(ctx, chainReader, mock.Engine, sd, tx, stateSync, unwindPoint, headersChain, bodiesChain); err != nil {
@@ -622,7 +622,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 					mock.sentriesClient.Hd,
 					gspec,
 					cfg.Sync,
-					nil,
 					false, /*experimentalBAL*/
 				),
 				stagedsync.StageSendersCfg(mock.ChainConfig, cfg.Sync, false /* badBlockHalt */, dirs.Tmp, pruneMode, mock.BlockReader, mock.sentriesClient.Hd),
@@ -647,7 +646,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		cfg.Sync,
 		stagedsync.DefaultStages(
 			mock.Ctx,
-			stagedsync.StageSnapshotsCfg(mock.DB, mock.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, mock.BlockReader, mock.Notifications, false, false, false, nil, pruneMode),
+			stagedsync.StageSnapshotsCfg(mock.DB, mock.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, mock.BlockReader, mock.Notifications, false, false, false, pruneMode),
 			stagedsync.StageHeadersCfg(mock.sentriesClient.Hd, mock.ChainConfig, cfg.Sync, sendHeaderRequest, propagateNewBlockHashes, penalize, false /* noP2PDiscovery */, mock.BlockReader),
 			stagedsync.StageBlockHashesCfg(mock.Dirs.Tmp, blockWriter),
 			stagedsync.StageBodiesCfg(mock.sentriesClient.Bd, sendBodyRequest, penalize, blockPropagator, cfg.Sync.BodyDownloadTimeoutSeconds, mock.ChainConfig, mock.BlockReader, blockWriter),
@@ -667,7 +666,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 				mock.sentriesClient.Hd,
 				gspec,
 				cfg.Sync,
-				nil,
 				false, /*experimentalBAL*/
 			),
 			stagedsync.StageTxLookupCfg(pruneMode, dirs.Tmp, mock.BlockReader),
@@ -688,7 +686,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	}
 
 	cfg.Genesis = gspec
-	pipelineStages := stageloop.NewPipelineStages(mock.Ctx, db, &cfg, mock.sentriesClient, mock.Notifications, snapDownloader, mock.BlockReader, blockRetire, nil, forkValidator, tracer)
+	pipelineStages := stageloop.NewPipelineStages(mock.Ctx, db, &cfg, mock.sentriesClient, mock.Notifications, snapDownloader, mock.BlockReader, blockRetire, forkValidator, tracer)
 	mock.posStagedSync = stagedsync.New(cfg.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 
 	hook := stageloop.NewHook(mock.Ctx, mock.Notifications, mock.posStagedSync, mock.ChainConfig, logger, nil, nil, nil)
@@ -744,7 +742,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 				mock.sentriesClient.Hd,
 				gspec,
 				cfg.Sync,
-				nil,
 				/*experimentalBAL*/ false,
 			),
 			stagedsync.StageSendersCfg(mock.ChainConfig, cfg.Sync, false /* badBlockHalt */, dirs.Tmp, pruneMode, mock.BlockReader, mock.sentriesClient.Hd),

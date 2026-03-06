@@ -428,21 +428,6 @@ func ReadStorageBodyRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawVa
 	}
 	return bodyRlp
 }
-func readBodyForStorage(db kv.Getter, hash common.Hash, number uint64) (*types.BodyForStorage, error) {
-	data, err := db.GetOne(kv.BlockBody, dbutils.BlockBodyKey(number, hash))
-	if err != nil {
-		return nil, err
-	}
-	if len(data) == 0 {
-		return nil, nil
-	}
-	bodyForStorage := new(types.BodyForStorage)
-	err = rlp.DecodeBytes(data, bodyForStorage)
-	if err != nil {
-		return nil, fmt.Errorf("readBodyForStorage: %w, %d, %x", err, number, hash)
-	}
-	return bodyForStorage, nil
-}
 
 func TxnByIdxInBlock(db kv.Getter, blockHash common.Hash, blockNum uint64, txIdxInBlock int) (types.Transaction, error) {
 	b, err := ReadBodyForStorageByKey(db, dbutils.BlockBodyKey(blockNum, blockHash))
