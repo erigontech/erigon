@@ -133,7 +133,8 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 		v, ok, err := tx.HistorySeek(kv.AccountsDomain, addr[:], txnID)
 		if err != nil {
 			log.Error("[rpc] Unexpected error, couldn't find changeset", "txNum", i, "addr", addr)
-			panic(err)
+			searchErr = err
+			return false
 		}
 		if !ok {
 			return false
