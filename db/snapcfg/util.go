@@ -644,6 +644,7 @@ func LoadRemotePreverified(ctx context.Context) (err error) {
 			// Fallback to GitHub if R2 fails
 			err = snapshothashes.LoadSnapshots(ctx, snapshothashes.Github, snapshotGitBranch)
 			if err != nil {
+				log.Root().Warn("Failed2 GitHub", "err", err)
 				return err
 			}
 		}
