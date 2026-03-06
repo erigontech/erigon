@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
@@ -678,6 +679,9 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 			if mergedOnce {
 				mergeSeq.Reset(ci1.startTxNum, ci1.val)
 				preSeq.Reset(startTxNum, lastVal)
+				arr1, _ := stream.ToArray(mergeSeq.Iterator(0))
+				arr2, _ := stream.ToArray(preSeq.Iterator(0))
+				log.Warn("[dbg] merge", "f", cp[0].hist.FileName(), "arr1", arr1, arr2, arr2)
 				if mergeErr := builder.Merge(mergeSeq, preSeq, startTxNum); mergeErr != nil {
 					return nil, fmt.Errorf("merge %s inverted index: %w", iit.ii.FilenameBase, mergeErr)
 				}
