@@ -21,17 +21,35 @@ Check if `./build/bin/erigon` exists. If it does not exist or the user requests 
 
 ### Step 2: Create Datadir
 
+#### Disk Space Check (always do this first)
+
+Before creating the datadir, check available disk space on candidate locations. Mainnet requires ~1TB, testnets vary (Hoodi ~80GB, Sepolia ~200GB). The `/tmp` partition is often a small tmpfs mount and **must not** be used for large chain data.
+
+```bash
+df -h /tmp ~ 2>/dev/null
+```
+
+**Location selection rules:**
+1. If the user specifies a location, use it.
+2. If `/tmp` is on a separate (small) partition or has less than **200GB** free, use `~/erigon-ephemeral-<random>` instead.
+3. If `/tmp` is on the same partition as `~` and has sufficient space, `/tmp` is fine.
+4. Always report the chosen location and available space to the user.
+
 There are two modes: **empty** (default) or **clone** (if the user provides a source datadir to clone from).
 
 #### Mode A: Empty datadir (default)
 
-**Always** use `mktemp -d` to create the datadir. This guarantees the directory does not already exist (mktemp creates a new unique directory atomically). Never construct the path manually or use `mkdir`.
+Use `mktemp -d` to create the datadir. The `-p` flag controls the parent directory. Choose the parent based on the disk space check above:
 
 ```bash
-mktemp -d -t erigon-ephemeral
+# If /tmp has sufficient space:
+mktemp -d -t erigon-ephemeral.XXXXXX
+
+# If /tmp is too small, use home directory:
+mktemp -d -p ~ -t erigon-ephemeral.XXXXXX
 ```
 
-This uses the system's default temp directory (e.g., `/var/folders/...` on macOS, `/tmp` on Linux). Capture the output — that is the datadir path. Report the full path to the user so they know where data is stored.
+This guarantees the directory does not already exist (mktemp creates a new unique directory atomically). Never construct the path manually or use `mkdir`. Capture the output — that is the datadir path. Report the full path to the user so they know where data is stored.
 
 #### Mode B: Clone an existing datadir
 
@@ -137,10 +155,10 @@ When the user asks to stop/clean up:
 
 ### Step 6: Leftover Detection
 
-This step can be run independently at any time (the user does not need to be launching a new instance). Check for leftover ephemeral datadirs from previous sessions:
+This step can be run independently at any time (the user does not need to be launching a new instance). Check for leftover ephemeral datadirs from previous sessions in both `/tmp` and `~`:
 
 ```bash
-ls -d "$TMPDIR"erigon-ephemeral.* 2>/dev/null
+ls -d /tmp/erigon-ephemeral.* ~/erigon-ephemeral.* 2>/dev/null
 ```
 
 If any are found:
