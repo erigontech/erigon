@@ -1,4 +1,4 @@
-name: QA - Constrained Tip tracking
+name: QA - Tip tracking with constraints
 
 on:
   schedule:
