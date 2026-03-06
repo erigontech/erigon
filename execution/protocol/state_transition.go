@@ -539,9 +539,9 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 
 	peakGasUsed := st.gasUsed()
 
-	 if rules.IsPrague {
-        peakGasUsed = max(intrinsicGasResult.FloorGasCost, peakGasUsed)
-    }
+	if rules.IsPrague {
+		peakGasUsed = max(intrinsicGasResult.FloorGasCost, peakGasUsed)
+	}
 
 	// Execute the preparatory steps for state transition which includes:
 	// - prepare accessList(post-berlin; eip-7702)
