@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/rpc"
 )
 
 // getFreePort returns a free TCP port for testing.
@@ -61,10 +62,10 @@ func makeJWTToken(secret []byte) string {
 	return tokenString
 }
 
-// sszRestTestSetup creates an EngineServer and an SSZ-REST server for testing.
+// sszRestTestSetup creates an EngineServer and a test HTTP server with
+// SSZ-REST routes + JWT middleware for testing.
 type sszRestTestSetup struct {
 	engineServer *EngineServer
-	sszServer    *SszRestServer
 	jwtSecret    []byte
 	baseURL      string
 	cancel       context.CancelFunc
@@ -83,29 +84,39 @@ func newSszRestTestSetup(t *testing.T) *sszRestTestSetup {
 	engineServer.httpConfig = &httpcfg.HttpCfg{
 		AuthRpcHTTPListenAddress: "127.0.0.1",
 		AuthRpcPort:              8551,
-		SszRestEnabled:           true,
-		SszRestPort:              port,
 	}
-	engineServer.sszRestPort = port
 
 	jwtSecret := make([]byte, 32)
 	rand.Read(jwtSecret)
 
-	sszServer := NewSszRestServer(engineServer, log.New(), jwtSecret, "127.0.0.1", port)
+	// Create the SSZ-REST handler (same as production code)
+	sszHandler := NewSszRestHandler(engineServer, log.New())
+
+	// Wrap with JWT middleware for testing (in production this is done by createHandler)
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !rpc.CheckJwtSecret(w, r, jwtSecret) {
+			return
+		}
+		sszHandler.ServeHTTP(w, r)
+	})
+
+	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	require.NoError(t, err)
+
+	server := &http.Server{Handler: handler}
+	go server.Serve(listener) //nolint:errcheck
 
 	ctx, cancel := context.WithCancel(context.Background())
-
 	go func() {
-		sszServer.Start(ctx) //nolint:errcheck
+		<-ctx.Done()
+		server.Close()
 	}()
 
-	// Wait for server to start
 	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
 	waitForServer(t, baseURL, jwtSecret)
 
 	return &sszRestTestSetup{
 		engineServer: engineServer,
-		sszServer:    sszServer,
 		jwtSecret:    jwtSecret,
 		baseURL:      baseURL,
 		cancel:       cancel,

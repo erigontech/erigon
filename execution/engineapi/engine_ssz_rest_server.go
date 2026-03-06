@@ -17,11 +17,9 @@
 package engineapi
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -35,26 +33,23 @@ import (
 )
 
 // SszRestServer implements the EIP-8161 SSZ-REST Engine API transport.
-// It runs alongside the JSON-RPC Engine API server and shares the same
-// EngineServer for method dispatch.
+// Routes are registered on the same HTTP server as the JSON-RPC Engine API
+// (path-based routing: /engine/* → SSZ-REST, / → JSON-RPC).
 type SszRestServer struct {
-	engine    *EngineServer
-	logger    log.Logger
-	jwtSecret []byte
-	addr      string
-	port      int
-	server    *http.Server
+	engine *EngineServer
+	logger log.Logger
 }
 
-// NewSszRestServer creates a new SSZ-REST server.
-func NewSszRestServer(engine *EngineServer, logger log.Logger, jwtSecret []byte, addr string, port int) *SszRestServer {
-	return &SszRestServer{
-		engine:    engine,
-		logger:    logger,
-		jwtSecret: jwtSecret,
-		addr:      addr,
-		port:      port,
+// NewSszRestHandler creates an http.Handler for SSZ-REST routes.
+// JWT authentication is handled by the caller (the main engine API handler).
+func NewSszRestHandler(engine *EngineServer, logger log.Logger) http.Handler {
+	s := &SszRestServer{
+		engine: engine,
+		logger: logger,
 	}
+	mux := http.NewServeMux()
+	s.registerRoutes(mux)
+	return mux
 }
 
 // sszErrorResponse writes a JSON error response per EIP-8161 spec.
@@ -73,61 +68,6 @@ func sszResponse(w http.ResponseWriter, data []byte) {
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.WriteHeader(http.StatusOK)
 	w.Write(data) //nolint:errcheck
-}
-
-// Start starts the SSZ-REST HTTP server. It blocks until ctx is cancelled.
-func (s *SszRestServer) Start(ctx context.Context) error {
-	mux := http.NewServeMux()
-	s.registerRoutes(mux)
-
-	handler := s.jwtMiddleware(mux)
-
-	listenAddr := fmt.Sprintf("%s:%d", s.addr, s.port)
-	listener, err := net.Listen("tcp", listenAddr)
-	if err != nil {
-		return fmt.Errorf("SSZ-REST server failed to listen on %s: %w", listenAddr, err)
-	}
-
-	s.server = &http.Server{
-		Handler: handler,
-	}
-
-	s.logger.Info("[SSZ-REST] Engine API server started", "addr", listenAddr)
-
-	errCh := make(chan error, 1)
-	go func() {
-		if err := s.server.Serve(listener); err != nil && err != http.ErrServerClosed {
-			errCh <- err
-		}
-		close(errCh)
-	}()
-
-	select {
-	case <-ctx.Done():
-		s.server.Close()
-		return ctx.Err()
-	case err := <-errCh:
-		return err
-	}
-}
-
-// jwtMiddleware wraps an http.Handler with JWT authentication using the same
-// secret and validation logic as the JSON-RPC Engine API (EIP-8161 requirement).
-func (s *SszRestServer) jwtMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !rpc.CheckJwtSecret(w, r, s.jwtSecret) {
-			return // CheckJwtSecret already wrote the error response
-		}
-		// Recover from panics in handlers (e.g., nil pointer dereferences
-		// when engine dependencies are not fully initialized)
-		defer func() {
-			if rec := recover(); rec != nil {
-				s.logger.Error("[SSZ-REST] panic in handler", "panic", rec, "path", r.URL.Path)
-				sszErrorResponse(w, http.StatusInternalServerError, -32603, fmt.Sprintf("internal error: %v", rec))
-			}
-		}()
-		next.ServeHTTP(w, r)
-	})
 }
 
 // registerRoutes registers all SSZ-REST endpoint routes per execution-apis SSZ spec.

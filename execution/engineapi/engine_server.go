@@ -86,9 +86,8 @@ type EngineServer struct {
 	engineLogSpamer *engine_logs_spammer.EngineLogsSpammer
 	// TODO Remove this on next release
 	printPectraBanner bool
-	maxReorgDepth     uint64
-	httpConfig        *httpcfg.HttpCfg
-	sszRestPort       int // EIP-8161: port the SSZ-REST server is listening on
+	maxReorgDepth uint64
+	httpConfig    *httpcfg.HttpCfg
 }
 
 func NewEngineServer(
@@ -159,6 +158,11 @@ func (e *EngineServer) Start(
 			Version:   "1.0",
 		}}
 
+	// EIP-8161: Register SSZ-REST handler on the same port as JSON-RPC.
+	// Path-based routing: /engine/* → SSZ-REST, / → JSON-RPC
+	httpConfig.SszRestHandler = NewSszRestHandler(e, e.logger)
+	e.logger.Info("[EngineServer] SSZ-REST routes registered on Engine API port")
+
 	eg.Go(func() error {
 		defer e.logger.Debug("[EngineServer] engine rpc server goroutine terminated")
 		err := cli.StartRpcServerWithJwtAuthentication(ctx, httpConfig, apiList, e.logger)
@@ -167,38 +171,6 @@ func (e *EngineServer) Start(
 		}
 		return err
 	})
-
-	// EIP-8161: Start SSZ-REST Engine API server if enabled
-	if httpConfig.SszRestEnabled {
-		eg.Go(func() error {
-			defer e.logger.Debug("[EngineServer] SSZ-REST server goroutine terminated")
-			jwtSecret, err := cli.ObtainJWTSecret(httpConfig, e.logger)
-			if err != nil {
-				e.logger.Error("[EngineServer] failed to obtain JWT secret for SSZ-REST server", "err", err)
-				return err
-			}
-
-			addr := httpConfig.AuthRpcHTTPListenAddress
-			if addr == "" {
-				addr = "127.0.0.1"
-			}
-			port := httpConfig.SszRestPort
-			if port == 0 {
-				port = httpConfig.AuthRpcPort + 1
-				if httpConfig.AuthRpcPort == 0 {
-					port = 8552
-				}
-			}
-			e.sszRestPort = port
-
-			sszServer := NewSszRestServer(e, e.logger, jwtSecret, addr, port)
-			err = sszServer.Start(ctx)
-			if err != nil && !errors.Is(err, context.Canceled) {
-				e.logger.Error("[EngineServer] SSZ-REST server background goroutine failed", "err", err)
-			}
-			return err
-		})
-	}
 
 	return eg.Wait()
 }

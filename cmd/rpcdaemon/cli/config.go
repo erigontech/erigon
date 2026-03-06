@@ -928,6 +928,13 @@ func createHandler(cfg *httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Han
 			return
 		}
 
+		// EIP-8161: Route /engine/* paths to SSZ-REST handler,
+		// everything else (/) to JSON-RPC handler.
+		if cfg.SszRestHandler != nil && strings.HasPrefix(r.URL.Path, "/engine/") {
+			cfg.SszRestHandler.ServeHTTP(w, r)
+			return
+		}
+
 		httpHandler.ServeHTTP(w, r)
 	})
 

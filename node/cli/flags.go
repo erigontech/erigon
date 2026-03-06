@@ -422,8 +422,6 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		AuthRpcHTTPListenAddress: ctx.String(utils.AuthRpcAddr.Name),
 		AuthRpcPort:              ctx.Int(utils.AuthRpcPort.Name),
 		JWTSecretPath:            jwtSecretPath,
-		SszRestEnabled:           ctx.Bool(utils.SszRestEnabledFlag.Name),
-		SszRestPort:              ctx.Int(utils.SszRestPortFlag.Name),
 		TraceRequests:            ctx.Bool(utils.HTTPTraceFlag.Name),
 		DebugSingleRequest:       ctx.Bool(utils.HTTPDebugSingleFlag.Name),
 		HttpCORSDomain:           common.CliString2Array(ctx.String(utils.HTTPCORSDomainFlag.Name)),

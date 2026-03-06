@@ -17,6 +17,7 @@
 package httpcfg
 
 import (
+	"net/http"
 	"time"
 
 	"github.com/erigontech/erigon/db/datadir"
@@ -112,7 +113,7 @@ type HttpCfg struct {
 	RpcTxSyncDefaultTimeout time.Duration // Default timeout for eth_sendRawTransactionSync
 	RpcTxSyncMaxTimeout     time.Duration // Maximum timeout for eth_sendRawTransactionSync
 
-	// EIP-8161: SSZ-REST Engine API Transport
-	SszRestEnabled bool // Enable SSZ-REST Engine API server alongside JSON-RPC
-	SszRestPort    int  // Port for the SSZ-REST Engine API server (default: AuthRpcPort + 1)
+	// EIP-8161: SSZ-REST Engine API Transport — handler injected by EngineServer,
+	// served on the same port as JSON-RPC (path-based routing).
+	SszRestHandler http.Handler
 }
