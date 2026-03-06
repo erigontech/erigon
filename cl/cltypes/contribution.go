@@ -129,56 +129,6 @@ func (a *Contribution) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(&a.Slot, a.BeaconBlockRoot[:], &a.SubcommitteeIndex, []byte(a.AggregationBits), a.Signature[:])
 }
 
-/*
- * SyncContribution, Determines successful committee, bits shows active participants,
- * and signature is the aggregate BLS signature of the committee.
- */
-type SyncContribution struct {
-	SyncCommiteeBits      common.Bytes64 `json:"sync_committee_bits"`
-	SyncCommiteeSignature common.Bytes96 `json:"signature"`
-}
-
-// return sum of the committee bits
-func (agg *SyncContribution) Sum() int {
-	ret := 0
-	for i := range agg.SyncCommiteeBits {
-		for bit := 1; bit <= 128; bit *= 2 {
-			if agg.SyncCommiteeBits[i]&byte(bit) > 0 {
-				ret++
-			}
-		}
-	}
-	return ret
-}
-
-func (agg *SyncContribution) IsSet(idx uint64) bool {
-	if idx >= 2048 {
-		return false
-	}
-	return agg.SyncCommiteeBits[idx/8]&(1<<(idx%8)) > 0
-}
-
-func (agg *SyncContribution) EncodeSSZ(buf []byte) ([]byte, error) {
-	return append(buf, append(agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:]...)...), nil
-}
-
-func (*SyncContribution) Static() bool {
-	return true
-}
-
-func (agg *SyncContribution) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:])
-}
-
-func (agg *SyncContribution) EncodingSizeSSZ() int {
-	return 160
-}
-
-func (agg *SyncContribution) HashSSZ() ([32]byte, error) {
-	return merkle_tree.HashTreeRoot(agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:])
-
-}
-
 type SyncCommitteeMessage struct {
 	Slot            uint64         `json:"slot,string"`
 	BeaconBlockRoot common.Hash    `json:"beacon_block_root"`
