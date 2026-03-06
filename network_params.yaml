@@ -1,0 +1,13 @@
+participants:
+  - el_type: erigon
+    el_image: eip8161-el-erigon:latest
+    cl_type: prysm
+    cl_image: eip8161-cl-prysm:latest
+    vc_type: prysm
+    vc_image: eip8161-vc-prysm:latest
+    count: 1
+network_params:
+  network_id: "3151908"
+  seconds_per_slot: 3
+  electra_fork_epoch: 0
+additional_services: []
