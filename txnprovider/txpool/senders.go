@@ -245,18 +245,25 @@ func (sc *sendersBatch) registerNewSenders(newTxns *TxnSlots, logger log.Logger)
 }
 
 func (sc *sendersBatch) onNewBlock(stateChanges *remoteproto.StateChangeBatch, unwindTxns, minedTxns TxnSlots, logger log.Logger) error {
+	var processedTxns bool
 	for _, diff := range stateChanges.ChangeBatch {
 		for _, change := range diff.Changes { // merge state changes
 			addrB := gointerfaces.ConvertH160toAddress(change.Address)
 			sc.getOrCreateID(addrB, logger)
 		}
 
-		for i, txn := range unwindTxns.Txns {
-			txn.SenderID, txn.Traced = sc.getOrCreateID(unwindTxns.Senders.AddressAt(i), logger)
+		// unwindTxns/minedTxns do not depend on individual diffs inside the batch.
+		// Processing them for every diff only repeats the same work.
+		if processedTxns {
+			continue
 		}
+		processedTxns = true
 
-		for i, txn := range minedTxns.Txns {
-			txn.SenderID, txn.Traced = sc.getOrCreateID(minedTxns.Senders.AddressAt(i), logger)
+		if err := sc.registerNewSenders(&unwindTxns, logger); err != nil {
+			return err
+		}
+		if err := sc.registerNewSenders(&minedTxns, logger); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -281,7 +288,6 @@ func EncodeSender(nonce uint64, balance uint256.Int, buffer []byte) {
 		fieldSet = 1
 		nonceBytes := common.BitLenToByteLen(bits.Len64(nonce))
 		buffer[pos] = byte(nonceBytes)
-		var nonce = nonce
 		for i := nonceBytes; i > 0; i-- {
 			buffer[pos+i] = byte(nonce)
 			nonce >>= 8
