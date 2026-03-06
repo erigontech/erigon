@@ -260,7 +260,6 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	_, fName := filepath.Split(historyIdxPath)
 	p := ps.AddNew(fName, uint64(efHist.Count())/2)
 	defer ps.Delete(p)
-	log.Warn("[dbg] h.BuildAccessorsWorkers", "h.BuildAccessorsWorkers", h.BuildAccessorsWorkers)
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   int(cnt),
 		Enums:      false,
@@ -277,6 +276,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	}
 	defer rs.Close()
 	rs.LogLvl(log.LvlTrace)
+	log.Warn("[dbg] buildvi", "f", rs.FileName(), "workers", h.BuildAccessorsWorkers)
 
 	seq := &multiencseq.SequenceReader{}
 	it := &multiencseq.SequenceIterator{}
