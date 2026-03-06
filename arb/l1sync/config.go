@@ -13,6 +13,7 @@ type Config struct {
 	StartL1Block       uint64
 	L1BlocksPerRequest uint64
 	ChainID            *big.Int
+	GenesisBlockNumber uint64
 	SequencerInboxAddr common.Address
 	BridgeAddr         common.Address
 }
