@@ -1270,7 +1270,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 					return err
 				}
 				scCopy := sc
-				scCopy.SampleRatio /= 100
+				scCopy.SampleRatio /= 100 // it's very slow check
 				if err := integrity.CheckCommitmentHistAtBlkRange(ctx, sc, db, blockReader, 1, to+1, logger); err != nil {
 					return err
 				}
