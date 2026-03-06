@@ -636,19 +636,6 @@ func (sc *StateCache) StorageHashesSeek(addrHash common.Hash, incarnation uint64
 	return cur.locHashPrefix, cur.hasState, cur.hasTree, cur.hasHash, cur.hashes
 }
 
-func WalkAccountHashesWrites(writes [5]*btree.BTree, update func(prefix []byte, hasState, hasTree, hasHash uint16, h []common.Hash), del func(prefix []byte, hasState, hasTree, hasHash uint16, h []common.Hash)) {
-	id := id(&AccountHashWriteItem{})
-	writes[id].Ascend(func(i btree.Item) bool {
-		it := i.(*AccountHashWriteItem)
-		if it.ai.HasFlag(AbsentFlag) || it.ai.HasFlag(DeletedFlag) {
-			del(it.ai.addrHashPrefix, it.ai.hasState, it.ai.hasTree, it.ai.hasHash, it.ai.hashes)
-			return true
-		}
-		update(it.ai.addrHashPrefix, it.ai.hasState, it.ai.hasTree, it.ai.hasHash, it.ai.hashes)
-		return true
-	})
-}
-
 func (sc *StateCache) WalkStorageHashes(walker func(addrHash common.Hash, incarnation uint64, prefix []byte, hasStat, hasTree, hasHash uint16, h []common.Hash) error) error {
 	id := id(&StorageHashItem{})
 	sc.readWrites[id].Ascend(func(i btree.Item) bool {
@@ -665,19 +652,6 @@ func (sc *StateCache) WalkStorageHashes(walker func(addrHash common.Hash, incarn
 		return true
 	})
 	return nil
-}
-
-func WalkStorageHashesWrites(writes [5]*btree.BTree, update func(addrHash common.Hash, incarnation uint64, locHashPrefix []byte, hasState, hasTree, hasHash uint16, h []common.Hash), del func(addrHash common.Hash, incarnation uint64, locHashPrefix []byte, hasStat, hasTree, hasHash uint16, h []common.Hash)) {
-	id := id(&StorageWriteItem{})
-	writes[id].Ascend(func(i btree.Item) bool {
-		it := i.(*StorageHashWriteItem)
-		if it.i.HasFlag(AbsentFlag) || it.i.HasFlag(DeletedFlag) {
-			del(it.i.addrHash, it.i.incarnation, it.i.locHashPrefix, it.i.hasState, it.i.hasTree, it.i.hasHash, it.i.hashes)
-			return true
-		}
-		update(it.i.addrHash, it.i.incarnation, it.i.locHashPrefix, it.i.hasState, it.i.hasTree, it.i.hasHash, it.i.hashes)
-		return true
-	})
 }
 
 func (sc *StateCache) WalkStorage(addrHash common.Hash, incarnation uint64, prefix []byte, walker func(locHash common.Hash, val []byte) error) error {
