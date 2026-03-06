@@ -164,7 +164,7 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 			g.Reset(offset)
 			hi.nextVal, _ = g.Next(nil)
 		} else {
-			g := seg.NewPagedReader(hi.hc.statelessGetter(top.histFileIdx), compressedPageValuesCount, true)
+			g := seg.NewPagedReader(hi.hc.statelessGetter(top.histFileIdx), compressedPageValuesCount, false)
 			g.Reset(offset)
 			for i := 0; i < compressedPageValuesCount && g.HasNext(); i++ {
 				k, v, _, _ := g.Next2(nil)
@@ -471,7 +471,7 @@ func (hi *HistoryChangesIterFiles) advance() error {
 			g.Reset(offset)
 			hi.nextVal, _ = g.Next(nil)
 		} else {
-			g := seg.NewPagedReader(hi.hc.statelessGetter(top.histFileIdx), compressedPageValuesCount, true)
+			g := seg.NewPagedReader(hi.hc.statelessGetter(top.histFileIdx), compressedPageValuesCount, false)
 			g.Reset(offset)
 			for i := 0; i < compressedPageValuesCount && g.HasNext(); i++ {
 				k, v, _, _ := g.Next2(nil)
@@ -811,7 +811,7 @@ func (ht *HistoryTraceKeyFiles) advance() error {
 			ht.histReader = seg.NewPagedReader(
 				getter,
 				compressedPageValuesCount,
-				true,
+				false,
 			)
 			offset, ok := idxReader.Lookup(ht.histKey)
 			if !ok {

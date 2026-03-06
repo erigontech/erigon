@@ -871,7 +871,7 @@ func (h *History) dataWriter(ctx context.Context, f *seg.Compressor) *seg.PagedW
 	if !strings.Contains(f.FileName(), ".v") {
 		panic("assert: miss-use " + f.FileName())
 	}
-	return seg.NewPagedWriter(ctx, seg.NewWriter(f, h.Compression), h.HistoryValuesOnCompressedPage, true)
+	return seg.NewPagedWriter(ctx, seg.NewWriter(f, h.Compression), f.GetValuesOnCompressedPage(), false)
 }
 func (ht *HistoryRoTx) dataReader(f *seg.Decompressor) *seg.Reader { return ht.h.dataReader(f) }
 func (ht *HistoryRoTx) dataWriter(ctx context.Context, f *seg.Compressor) *seg.PagedWriter {
@@ -1259,7 +1259,7 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	}
 
 	if compressedPageValuesCount > 1 {
-		v, ht.snappyReadBuffer = seg.GetFromPage(historyKey, v, ht.snappyReadBuffer, true)
+		v, ht.snappyReadBuffer = seg.GetFromPage(historyKey, v, ht.snappyReadBuffer, false)
 	}
 	return v, true, nil
 }
@@ -1567,7 +1567,7 @@ func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, du
 
 				if compressedPageValuesCount > 0 {
 					histKeyBuf = historyKey(txNum, key, histKeyBuf)
-					val, _ = seg.GetFromPage(histKeyBuf, val, nil, true)
+					val, _ = seg.GetFromPage(histKeyBuf, val, nil, false)
 				}
 
 				dumpTo(key, txNum, val)

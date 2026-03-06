@@ -78,7 +78,7 @@ func (ht *HistoryRoTx) deduplicateFiles(ctx context.Context, indexFiles, history
 						compressedPageValuesCount = ht.h.HistoryValuesOnCompressedPage
 					}
 
-					g2 = seg.NewPagedReader(ht.dataReader(hi.decompressor), compressedPageValuesCount, true)
+					g2 = seg.NewPagedReader(ht.dataReader(hi.decompressor), compressedPageValuesCount, false)
 					break
 				}
 			}

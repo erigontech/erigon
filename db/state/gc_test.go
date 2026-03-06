@@ -69,7 +69,7 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 				compressedPageValuesCount = hc.h.HistoryValuesOnCompressedPage
 			}
 
-			g := seg.NewPagedReader(hc.statelessGetter(len(hc.files)-1), compressedPageValuesCount, true)
+			g := seg.NewPagedReader(hc.statelessGetter(len(hc.files)-1), compressedPageValuesCount, false)
 			require.Equal(lastInView.startTxNum, lastOnFs.startTxNum)
 			require.Equal(lastInView.endTxNum, lastOnFs.endTxNum)
 			if g.HasNext() {
