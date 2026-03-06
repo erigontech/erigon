@@ -110,7 +110,7 @@ func (ef *EliasFano) deriveFields() int {
 	//fmt.Printf("EF: %d, %d,%d,%d\n", totalWords, wordsLowerBits, wordsUpperBits, jumpWords)
 	if cap(ef.data) < totalWords {
 		alloc := totalWords
-		if c := cap(ef.data); c > 0 { // re-usable buffer: grow 2x old cap to amortize future reallocs
+		if c := cap(ef.data); c > 0 { // means `ef` object is used as re-usable buffer. then re-alloc in `append()` style: grow at-least 2x times - to amortize future re-allocs
 			alloc = max(totalWords, c*2)
 		}
 		ef.data = make([]uint64, totalWords, alloc)
