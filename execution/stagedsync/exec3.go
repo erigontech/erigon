@@ -675,13 +675,13 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 					exhausted = &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
 				}
 			}
-
-			te.execRequests <- &execRequest{
-				b.NumberU64(), b.Hash(),
+			select {
+			case te.execRequests <- &execRequest{b.NumberU64(), b.Hash(),
 				protocol.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time())),
-				dbBAL, txTasks, applyResults, false, exhausted,
+				dbBAL, txTasks, applyResults, false, exhausted}:
+			case <-ctx.Done():
+				break
 			}
-
 			mxExecBlocks.Add(1)
 
 			if exhausted != nil {
