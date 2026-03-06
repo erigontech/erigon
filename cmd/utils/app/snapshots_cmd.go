@@ -1282,7 +1282,9 @@ func doIntegrity(cliCtx *cli.Context) error {
 						return err
 					}
 				case integrity.CommitmentKvi:
-					if err := integrity.CheckCommitmentKvi(ctx, sc, db, cache, failFast, logger); err != nil {
+					scCopy := sc
+					scCopy.SampleRatio = 0 // Sudeep will try to speedup it different way: by use `cache`
+					if err := integrity.CheckCommitmentKvi(ctx, scCopy, db, cache, failFast, logger); err != nil {
 						return err
 					}
 				case integrity.CommitmentKvDeref:
