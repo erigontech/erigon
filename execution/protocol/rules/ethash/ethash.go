@@ -585,7 +585,7 @@ func (ethash *Ethash) GetTransferFunc() evmtypes.TransferFunc {
 }
 
 func (ethash *Ethash) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
-	return misc.LogSelfDestructedAccounts // EIP-7708
+	return nil
 }
 
 func (c *Ethash) TxDependencies(h *types.Header) [][]int {
