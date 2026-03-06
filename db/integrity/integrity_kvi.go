@@ -207,33 +207,31 @@ func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression 
 		})
 	}
 
-	// Producer: scan kv file sequentially, emit (key, offset) pairs to workers.
+	// Producer: scan kv file, emit sampled (key, offset) pairs to workers.
+	// Unsampled entries use Skip() for both key and value to avoid decompressing key bytes.
 	eg.Go(func() error {
 		defer close(workCh)
 		sampler := sc.NewSampler()
 		logTicker := time.NewTicker(30 * time.Second)
 		defer logTicker.Stop()
 		var keyBuf []byte
-		var keyOffset uint64
-		var atValue bool
+		var keyOffset uint64 // byte offset of the current key in the bitstream
 		for kvReader.HasNext() {
-			if atValue {
-				keyOffset, _ = kvReader.Skip()
-				atValue = false
-				continue
-			}
-			keyBuf, _ = kvReader.Next(keyBuf[:0])
-			keyCount++
-			atValue = true
-
 			if sampler.CanSkip() {
+				kvReader.Skip()                // skip key (no decompression of bytes)
+				keyOffset, _ = kvReader.Skip() // skip value, advance to next key
+				keyCount++
 				continue
 			}
+			keyBuf, _ = kvReader.Next(keyBuf[:0]) // decompress key
+			nextOffset, _ := kvReader.Skip()      // skip value
 			select {
 			case <-ctx.Done():
 				return nil
 			case workCh <- kviWorkItem{key: bytes.Clone(keyBuf), offset: keyOffset}:
 			}
+			keyOffset = nextOffset
+			keyCount++
 
 			select {
 			case <-logTicker.C:
