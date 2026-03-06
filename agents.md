@@ -67,3 +67,7 @@ Common lint categories and fixes:
 - **rangeExprCopy:** Use `&x` in `range` to avoid copying large arrays.
 - **dupArg:** For intentional `x.Equal(x)` self-equality tests, suppress with `//nolint:gocritic`.
 - **Loop ruleguard in benchmarks:** For `BeginRw`/`BeginRo` inside loops where `defer` doesn't apply, suppress with `//nolint:gocritic`.
+
+## Workflows
+
+Make sure all scripts and shell code used from GitHub workflows is cross platform, for macOS, Windows and Linux.
