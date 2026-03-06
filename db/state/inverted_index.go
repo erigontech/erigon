@@ -1009,7 +1009,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 
 		baseTxNum := uint64(step) * ii.stepSize
 		if bitmap.Minimum() < txFrom || bitmap.Maximum() >= txTo {
-			return fmt.Errorf("[integrity] collate %s: txNums out of range [%d, %d) for step %d: min=%d, max=%d, key=%x",
+			return fmt.Errorf("[inverted_index] collate %s: txNums out of range [%d, %d) for step %d: min=%d, max=%d, key=%x",
 				ii.FilenameBase, txFrom, txTo, step, bitmap.Minimum(), bitmap.Maximum(), prevKey)
 		}
 		ef := multiencseq.NewBuilder(baseTxNum, bitmap.GetCardinality(), bitmap.Maximum())
