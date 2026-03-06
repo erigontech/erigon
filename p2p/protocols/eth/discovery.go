@@ -20,11 +20,8 @@
 package eth
 
 import (
-	"fmt"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/p2p/enr"
 	"github.com/erigontech/erigon/p2p/forkid"
 )
 
@@ -46,15 +43,4 @@ func CurrentENREntryFromForks(heightForks, timeForks []uint64, genesisHash commo
 	return &enrEntry{
 		ForkID: forkid.NewIDFromForks(heightForks, timeForks, genesisHash, headHeight, headTime),
 	}
-}
-
-func LoadENRForkID(r *enr.Record) (*forkid.ID, error) {
-	var entry enrEntry
-	if err := r.Load(&entry); err != nil {
-		if enr.IsNotFound(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to load fork ID from ENR: %w", err)
-	}
-	return &entry.ForkID, nil
 }

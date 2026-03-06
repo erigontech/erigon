@@ -180,10 +180,6 @@ func ApplyFrame(evm *vm.EVM, msg Message, gp *GasPool) (*evmtypes.ExecutionResul
 	return NewStateTransition(evm, msg, gp).ApplyFrame()
 }
 
-func (st *StateTransition) SetTrace(trace bool) {
-	st.evm.IntraBlockState().SetTrace(trace)
-}
-
 // to returns the recipient of the message.
 func (st *StateTransition) to() accounts.Address {
 	if st.msg == nil || st.msg.To().IsNil() /* contract creation */ {
@@ -565,7 +561,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		}
 		gasUsed := st.gasUsed()
 		st.blockGasUsed = gasUsed
-		refund := min(gasUsed/refundQuotient, st.state.GetRefund())
+		stateRefund := st.state.GetRefund()
+		refund := min(gasUsed/refundQuotient, stateRefund)
 		gasUsed = gasUsed - refund
 		if rules.IsPrague {
 			gasUsed = max(intrinsicGasResult.FloorGasCost, gasUsed)

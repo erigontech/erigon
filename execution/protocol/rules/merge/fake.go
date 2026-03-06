@@ -14,38 +14,29 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package jsonrpc
+package merge
 
 import (
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/execution/tracing"
-	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 )
 
-type TouchTracer struct {
-	searchAddr accounts.Address
-	Found      bool
-	hooks      *tracing.Hooks
+type FakeMerge struct {
+	*Merge
 }
 
-func NewTouchTracer(searchAddr accounts.Address) *TouchTracer {
-	tracer := &TouchTracer{
-		searchAddr: searchAddr,
+// NewFaker creates a ethash rules engine with a fake PoW scheme that accepts
+// all blocks' seal as valid, though they still have to conform to the Ethereum
+// consensus rules.
+func NewFaker(eth1Fake *ethash.FakeEthash) *FakeMerge {
+	return &FakeMerge{
+		Merge: New(eth1Fake),
 	}
-	tracer.hooks = &tracing.Hooks{
-		OnEnter: tracer.OnEnter,
-	}
-
-	return tracer
 }
 
-func (t *TouchTracer) TracingHooks() *tracing.Hooks {
-	return t.hooks
-}
-
-func (t *TouchTracer) OnEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
-	if !t.Found && (t.searchAddr == from || t.searchAddr == to) {
-		t.Found = true
-	}
+func (s *FakeMerge) CalcDifficulty(chain rules.ChainHeaderReader, time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentAuRaStep uint64) uint256.Int {
+	return *ProofOfStakeDifficulty
 }
