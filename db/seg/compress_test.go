@@ -65,7 +65,7 @@ func TestCompressEmptyDict(t *testing.T) {
 	if g.HasNext() {
 		t.Fatalf("not expecting anything else")
 	}
-	if cs := checksum(file); cs != 2900861311 {
+	if cs := checksum(file); cs != 1708374642 {
 		t.Errorf("result file hash changed, %d", cs)
 	}
 }
@@ -191,7 +191,7 @@ func TestCompressDict1(t *testing.T) {
 			i++
 		}
 
-		if cs := checksum(d.filePath); cs != 3613725886 {
+		if cs := checksum(d.filePath); cs != 1393846834 {
 			// it's ok if hash changed, but need re-generate all existing snapshot hashes
 			// in https://github.com/erigontech/erigon-snapshot
 			t.Errorf("result file hash changed, %d", cs)
@@ -262,7 +262,7 @@ func TestCompressDictCmp(t *testing.T) {
 		i++
 	}
 
-	if cs := checksum(d.filePath); cs != 3613725886 {
+	if cs := checksum(d.filePath); cs != 1393846834 {
 		// it's ok if hash changed, but need re-generate all existing snapshot hashes
 		// in https://github.com/erigontech/erigon-snapshot
 		t.Errorf("result file hash changed, %d", cs)
@@ -329,7 +329,7 @@ func Test_CompressWithMetadata(t *testing.T) {
 		}
 		i++
 	}
-	if cs := checksum(d.filePath); cs != 4122484600 {
+	if cs := checksum(d.filePath); cs != 878767318 {
 		t.Errorf("result file hash changed, %d", cs)
 	}
 }
@@ -384,7 +384,7 @@ func TestCompressNoWordPatterns(t *testing.T) {
 	}
 	require.False(t, g.HasNext())
 
-	if cs := checksum(file); cs != 1879837905 {
+	if cs := checksum(file); cs != 1750094945 {
 		t.Errorf("fast-path output differs from main, checksum=%d", cs)
 	}
 }
