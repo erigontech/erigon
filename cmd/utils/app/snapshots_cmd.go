@@ -395,6 +395,8 @@ var snapshotCommand = cli.Command{
 				&cli.StringFlag{Name: "skip-check", Usage: fmt.Sprintf("comma separated list from: %s", integrity.FastChecks)},
 				&cli.BoolFlag{Name: "failFast", Value: true, Usage: "to stop after 1st problem or print WARN log and continue check"},
 				&cli.Uint64Flag{Name: "fromStep", Value: 0, Usage: "skip files before given step"},
+				&cli.StringFlag{Name: "file-integrity-cache", Usage: "path to integrity check cache file (speeds up repeated runs)"},
+				&cli.BoolFlag{Name: "skip-torrent-verify", Usage: "skip torrent piece verification when using file-integrity-cache"},
 				&cli.Int64Flag{Name: "seed", Usage: "random seed for sampling (auto-generated if not set)"},
 				&cli.Float64Flag{Name: "sample", Usage: "fraction of items to check via pseudo-random sampling (0.0-1.0)", Value: 0.01},
 			}),
@@ -1139,6 +1141,30 @@ func doIntegrity(cliCtx *cli.Context) error {
 
 	failFast := cliCtx.Bool("failFast")
 	fromStep := cliCtx.Uint64("fromStep")
+
+	var cache *integrity.IntegrityCache
+	if cachePath := cliCtx.String("file-integrity-cache"); cachePath != "" {
+		var err error
+		cache, err = integrity.LoadIntegrityCache(cachePath)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if err := cache.Save(); err != nil {
+				logger.Warn("[integrity] failed to save cache", "err", err)
+			}
+		}()
+
+		// When using cache, verify torrent piece hashes first (unless skipped)
+		if !cliCtx.Bool("skip-torrent-verify") {
+			dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+			logger.Info("[integrity] verifying torrent piece hashes before integrity checks")
+			if err := integrity.VerifyTorrentFiles(ctx, dirs.Snap, failFast, logger); err != nil {
+				return fmt.Errorf("torrent verification failed: %w", err)
+			}
+		}
+	}
+
 	var seed int64
 	if cliCtx.IsSet("seed") {
 		seed = cliCtx.Int64("seed")
@@ -1256,11 +1282,11 @@ func doIntegrity(cliCtx *cli.Context) error {
 						return err
 					}
 				case integrity.CommitmentKvi:
-					if err := integrity.CheckCommitmentKvi(ctx, sc, db, failFast, logger); err != nil {
+					if err := integrity.CheckCommitmentKvi(ctx, sc, db, cache, failFast, logger); err != nil {
 						return err
 					}
 				case integrity.CommitmentKvDeref:
-					if err := integrity.CheckCommitmentKvDeref(ctx, db, failFast, logger); err != nil {
+					if err := integrity.CheckCommitmentKvDeref(ctx, db, cache, failFast, logger); err != nil {
 						return err
 					}
 				case integrity.CommitmentHistVal:
