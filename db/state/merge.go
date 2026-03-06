@@ -681,7 +681,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 				preSeq.Reset(startTxNum, lastVal)
 				arr1, _ := stream.ToArray(mergeSeq.Iterator(0))
 				arr2, _ := stream.ToArray(preSeq.Iterator(0))
-				log.Warn("[dbg] merge", "f", cp[0].hist.FileName(), "arr1", arr1, arr2, arr2)
+				log.Warn("[dbg] merge", "f", ci1.kvReader.FileName(), "arr1", arr1, arr2, arr2)
 				if mergeErr := builder.Merge(mergeSeq, preSeq, startTxNum); mergeErr != nil {
 					return nil, fmt.Errorf("merge %s inverted index: %w", iit.ii.FilenameBase, mergeErr)
 				}
