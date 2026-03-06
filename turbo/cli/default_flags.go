@@ -46,6 +46,8 @@ var DefaultFlags = []cli.Flag{
 	&L2RPCBlockBurstFlag,
 	&L2RPCReceiptRPSFlag,
 	&L2RPCReceiptBurstFlag,
+	&L1RPCFlag,
+	&BeaconURLFlag,
 	&PruneBlocksDistanceFlag,
 	&PruneModeFlag,
 	&utils.KeepExecutionProofsFlag,

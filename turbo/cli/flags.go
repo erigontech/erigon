@@ -105,6 +105,15 @@ var (
 		Value: 3,
 	}
 
+	L1RPCFlag = cli.StringFlag{
+		Name:  "l1sync.rpc",
+		Usage: "L1 RPC URL for fetching sequencer batches and delayed messages",
+	}
+	BeaconURLFlag = cli.StringFlag{
+		Name:  "l1sync.beacon-url",
+		Usage: "Beacon chain URL for blob resolution (required with --l1sync.rpc)",
+	}
+
 	PruneModeFlag = cli.StringFlag{
 		Name: "prune.mode",
 		Usage: `Choose a pruning preset to run onto. Available values: "full", "archive", "minimal", "blocks".
@@ -580,6 +589,14 @@ func applyL2RPCFlagsFromCli(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.L2RPC.BlockBurst = ctx.Int(L2RPCBlockBurstFlag.Name)
 	cfg.L2RPC.ReceiptRPS = ctx.Int(L2RPCReceiptRPSFlag.Name)
 	cfg.L2RPC.ReceiptBurst = ctx.Int(L2RPCReceiptBurstFlag.Name)
+
+	cfg.L1Sync.L1RPC = ctx.String(L1RPCFlag.Name)
+	cfg.L1Sync.BeaconURL = ctx.String(BeaconURLFlag.Name)
+	if cfg.L1Sync.L1RPC != "" {
+		log.Info("[l1sync] enabled", "l1sync.rpc", cfg.L1Sync.L1RPC, "l1sync.beacon-url", cfg.L1Sync.BeaconURL)
+	} else {
+		log.Info("[l1sync] disabled (no --l1sync.rpc provided)")
+	}
 }
 
 func applyL2RPCFlagsFromCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
