@@ -27,6 +27,7 @@ import (
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
+	"github.com/erigontech/erigon/arb/multigas"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/protocol/misc"
@@ -995,7 +996,10 @@ func opCreate(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 
 	scope.useGas(gas, evm.Config().Tracer, tracing.GasChangeCallContractCreation)
 
-	res, addr, returnGas, _, suberr := evm.Create(scope.Contract.Address(), input, gas, value, false)
+	res, addr, returnGas, usedMultiGas, suberr := evm.Create(scope.Contract.Address(), input, gas, value, false)
+
+	scope.Contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, gas)
+	scope.Contract.UsedMultiGas.SaturatingAddInto(usedMultiGas)
 
 	// Push item on the stack based on the returned error. If the ruleset is
 	// homestead we must check for CodeStoreOutOfGasError (homestead only
@@ -1049,7 +1053,10 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 	scope.useGas(gas, evm.Config().Tracer, tracing.GasChangeCallContractCreation2)
 	// reuse size int for stackvalue
 	stackValue := size
-	res, addr, returnGas, _, suberr := evm.Create2(scope.Contract.Address(), input, gas, endowment, &salt, false)
+	res, addr, returnGas, usedMultiGas, suberr := evm.Create2(scope.Contract.Address(), input, gas, endowment, &salt, false)
+
+	scope.Contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, gas)
+	scope.Contract.UsedMultiGas.SaturatingAddInto(usedMultiGas)
 
 	// Push item on the stack based on the returned error.
 	if suberr != nil {
@@ -1093,6 +1100,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	toAddr := accounts.InternAddress(addr.Bytes20())
 	// Get the arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
+	ogGas := gas
 
 	if !value.IsZero() {
 		if evm.readOnly {
@@ -1101,7 +1109,10 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		gas += params.CallStipend
 	}
 
-	ret, returnGas, _, err := evm.Call(scope.Contract.Address(), toAddr, args, gas, value, false /* bailout */)
+	ret, returnGas, usedMultiGas, err := evm.Call(scope.Contract.Address(), toAddr, args, gas, value, false /* bailout */)
+
+	scope.Contract.UsedMultiGas.SaturatingAddInto(usedMultiGas)
+	scope.Contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, ogGas)
 
 	if err != nil {
 		temp.Clear()
@@ -1142,11 +1153,16 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
+	ogGas := gas
 	if !value.IsZero() {
 		gas += params.CallStipend
 	}
 
-	ret, returnGas, _, err := evm.CallCode(scope.Contract.Address(), toAddr, args, gas, value)
+	ret, returnGas, usedMultiGas, err := evm.CallCode(scope.Contract.Address(), toAddr, args, gas, value)
+
+	scope.Contract.UsedMultiGas.SaturatingAddInto(usedMultiGas)
+	scope.Contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, ogGas)
+
 	if err != nil {
 		temp.Clear()
 	} else {
@@ -1186,7 +1202,11 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
-	ret, returnGas, _, err := evm.DelegateCall(scope.Contract.addr, scope.Contract.caller, toAddr, args, scope.Contract.value, gas)
+	ret, returnGas, usedMultiGas, err := evm.DelegateCall(scope.Contract.addr, scope.Contract.caller, toAddr, args, scope.Contract.value, gas)
+
+	scope.Contract.UsedMultiGas.SaturatingAddInto(usedMultiGas)
+	scope.Contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, gas)
+
 	if err != nil {
 		temp.Clear()
 	} else {
@@ -1226,7 +1246,11 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
-	ret, returnGas, _, err := evm.StaticCall(scope.Contract.Address(), toAddr, args, gas)
+	ret, returnGas, usedMultiGas, err := evm.StaticCall(scope.Contract.Address(), toAddr, args, gas)
+
+	scope.Contract.UsedMultiGas.SaturatingAddInto(usedMultiGas)
+	scope.Contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, gas)
+
 	if err != nil {
 		temp.Clear()
 	} else {

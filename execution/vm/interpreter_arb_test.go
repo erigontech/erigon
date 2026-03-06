@@ -18,11 +18,11 @@ import (
 
 type recordingHook struct {
 	DefaultTxProcessor
-	pushCalls  []*Contract
-	popCalls   int
-	wasmCalls  int
-	wasmRet    []byte
-	wasmErr    error
+	pushCalls   []*Contract
+	popCalls    int
+	wasmCalls   int
+	wasmRet     []byte
+	wasmErr     error
 	wasmGasUsed uint64
 }
 
