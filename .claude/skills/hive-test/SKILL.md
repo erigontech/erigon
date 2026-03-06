@@ -141,18 +141,17 @@ EEST: $EEST_VERSION | BAL: $BAL_TAG (branch: $BAL_BRANCH) | Strict matching: ena
    Ensure `clients/erigon/Dockerfile.local` exists with the correct content.
    Key requirements:
    - Base image: `golang:1.25.0-trixie` (Debian, not Alpine)
-   - Build command: `make EXTRA_BUILD_TAGS=nosilkworm erigon`
+   - Build command: `make erigon`
    - Runtime: `debian:13-slim` with `bash curl jq libstdc++6 libgcc-s1`
    - P2P protocol: `erigon.sh` must include `--p2p.protocol 68,69`
 
-   If `clients/erigon/Dockerfile.local` doesn't already exist or doesn't have
-   `nosilkworm`, write the correct version:
+   If `clients/erigon/Dockerfile.local` doesn't already exist, write the correct version:
    ```dockerfile
    FROM golang:1.25.0-trixie as builder
    ARG local_path=erigon
    COPY $local_path erigon
    RUN apt-get update && apt-get install -y bash build-essential ca-certificates git \
-       && cd erigon && make EXTRA_BUILD_TAGS=nosilkworm erigon \
+       && cd erigon && make erigon \
        && cp build/bin/erigon /usr/local/bin/erigon
 
    FROM debian:13-slim
@@ -282,10 +281,6 @@ docker image prune -f
 ```
 
 ## Troubleshooting
-
-### Container crash: "libsilkworm_capi.so not found"
-The Dockerfile.local must use `make EXTRA_BUILD_TAGS=nosilkworm erigon`. Ensure the
-Dockerfile does NOT use Alpine (use Debian trixie).
 
 ### Fork ID test failures: "rlp: expected input list for devp2p.Disconnect"
 The erigon.sh is missing eth/69 support. Ensure `--p2p.protocol 68,69`.
