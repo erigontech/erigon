@@ -641,4 +641,3 @@ func AggTx(tx kv.Tx) *AggregatorRoTx {
 
 	return nil
 }
-

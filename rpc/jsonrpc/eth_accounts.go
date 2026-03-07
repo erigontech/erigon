@@ -42,7 +42,7 @@ const maxGetStorageSlots = 1024
 // checks prune history and block execution, and creates a state reader.
 // The caller must defer tx.Rollback() on the returned tx.
 func (api *APIImpl) stateReaderAt(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (kv.TemporalTx, state.StateReader, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.db.BeginTemporalRo(ctx) //nolint:gocritic
 	if err != nil {
 		return nil, nil, err
 	}
@@ -75,7 +75,7 @@ func (api *APIImpl) stateReaderAt(ctx context.Context, blockNrOrHash rpc.BlockNu
 func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error) {
 	tx, reader, err := api.stateReaderAt(ctx, blockNrOrHash)
 	if err != nil {
-		return nil, fmt.Errorf("getBalance cannot open tx: %w", err)
+		return nil, err
 	}
 	defer tx.Rollback()
 
@@ -108,7 +108,7 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Addr
 	}
 	tx, reader, err := api.stateReaderAt(ctx, blockNrOrHash)
 	if err != nil {
-		return nil, fmt.Errorf("getTransactionCount cannot open tx: %w", err)
+		return nil, err
 	}
 	defer tx.Rollback()
 
@@ -124,7 +124,7 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Addr
 func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
 	tx, reader, err := api.stateReaderAt(ctx, blockNrOrHash)
 	if err != nil {
-		return nil, fmt.Errorf("getCode cannot open tx: %w", err)
+		return nil, err
 	}
 	defer tx.Rollback()
 
