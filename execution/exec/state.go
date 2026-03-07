@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/diagnostics/metrics"
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
@@ -190,6 +191,12 @@ func (rw *Worker) Resume() {
 }
 
 func (rw *Worker) LogLRUStats() {}
+
+func (rw *Worker) SetArbitrumWasmDB(wasmDB wasmdb.WasmIface) {
+	if rw.chainConfig.IsArbitrum() {
+		rw.ibs.SetWasmDB(wasmDB)
+	}
+}
 
 func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.TemporalTx, stateReader state.StateReader, stateWriter state.StateWriter, accumulator *shards.Accumulator) error {
 	rw.lock.Lock()

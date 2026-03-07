@@ -57,8 +57,8 @@ arbitrum:execution/stages/stageloop.go:681+        — callers pass OpenArbitrum
 **Files:**
 - Modify: `erigon/execution/exec/state.go`
 
-- [ ] Add import `"github.com/erigontech/erigon/arb/ethdb/wasmdb"`
-- [ ] Add method after line ~162:
+- [x] Add import `"github.com/erigontech/erigon/arb/ethdb/wasmdb"`
+- [x] Add method after line ~162:
   ```go
   func (rw *Worker) SetArbitrumWasmDB(wasmDB wasmdb.WasmIface) {
       if rw.chainConfig.IsArbitrum() {
@@ -66,7 +66,7 @@ arbitrum:execution/stages/stageloop.go:681+        — callers pass OpenArbitrum
       }
   }
   ```
-- [ ] Run `go build ./execution/exec/...` to verify
+- [x] Run `go build ./execution/exec/...` to verify
 
 ### Task 4: Call `SetArbitrumWasmDB` in serial executor
 
