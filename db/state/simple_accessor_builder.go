@@ -136,7 +136,7 @@ func (s *SimpleAccessorBuilder) SetAccessorArgs(args *AccessorArgs) {
 func (s *SimpleAccessorBuilder) GetInputDataQuery(decomp *seg.Decompressor, compressionUsed bool) (*DecompressorIndexInputDataQuery, error) {
 	//sgname := s.parser.DataFile(version.V1_0, from, to)
 	//decomp, _ := seg.NewDecompressorWithMetadata(sgname, true)
-	reader := seg.NewPagedReader(decomp.MakeGetter(), s.args.ValuesOnCompressedPage, compressionUsed)
+	reader := seg.NewPagedReader(decomp.MakeGetter(), compressionUsed)
 	return NewDecompressorIndexInputDataQuery(reader)
 }
 

@@ -155,16 +155,12 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 
 		compressedPageValuesCount := historyItem.src.decompressor.CompressedPageValuesCount()
 
-		if historyItem.src.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
-			compressedPageValuesCount = hi.hc.h.HistoryValuesOnCompressedPage
-		}
-
 		if compressedPageValuesCount <= 1 {
 			g := hi.hc.statelessGetter(top.histFileIdx)
 			g.Reset(offset)
 			hi.nextVal, _ = g.Next(nil)
 		} else {
-			g := seg.NewPagedReader(hi.hc.statelessGetter(top.histFileIdx), compressedPageValuesCount, true)
+			g := seg.NewPagedReader(hi.hc.statelessGetter(top.histFileIdx), true)
 			g.Reset(offset)
 			for i := 0; i < compressedPageValuesCount && g.HasNext(); i++ {
 				k, v, _, _ := g.Next2(nil)
@@ -462,16 +458,12 @@ func (hi *HistoryChangesIterFiles) advance() error {
 
 		compressedPageValuesCount := historyItem.src.decompressor.CompressedPageValuesCount()
 
-		if historyItem.src.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
-			compressedPageValuesCount = hi.hc.h.HistoryValuesOnCompressedPage
-		}
-
 		if compressedPageValuesCount <= 1 {
 			g := hi.hc.statelessGetter(top.histFileIdx)
 			g.Reset(offset)
 			hi.nextVal, _ = g.Next(nil)
 		} else {
-			g := seg.NewPagedReader(hi.hc.statelessGetter(top.histFileIdx), compressedPageValuesCount, true)
+			g := seg.NewPagedReader(hi.hc.statelessGetter(top.histFileIdx), true)
 			g.Reset(offset)
 			for i := 0; i < compressedPageValuesCount && g.HasNext(); i++ {
 				k, v, _, _ := g.Next2(nil)
@@ -800,17 +792,12 @@ func (ht *HistoryTraceKeyFiles) advance() error {
 
 		compressedPageValuesCount := historyItem.src.decompressor.CompressedPageValuesCount()
 
-		if historyItem.src.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
-			compressedPageValuesCount = ht.hc.h.HistoryValuesOnCompressedPage
-		}
-
 		if ht.histReader == nil {
 			idxReader := ht.hc.statelessIdxReader(ht.fileIdx)
 			getter := ht.hc.statelessGetter(ht.fileIdx)
 			getter.Reset(0)
 			ht.histReader = seg.NewPagedReader(
 				getter,
-				compressedPageValuesCount,
 				true,
 			)
 			offset, ok := idxReader.Lookup(ht.histKey)
