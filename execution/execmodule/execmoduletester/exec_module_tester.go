@@ -120,6 +120,7 @@ type ExecModuleTester struct {
 	SentryClient    direct.SentryClient
 	PeerId          *typesproto.H512
 	streams         map[sentryproto.MessageId][]sentryproto.Sentry_MessagesServer
+	sentMessagesMu  sync.Mutex
 	sentMessages    []*sentryproto.OutboundMessageData
 	StreamWg        sync.WaitGroup
 	ReceiveWg       sync.WaitGroup
@@ -198,22 +199,32 @@ func (emt *ExecModuleTester) HandShake(ctx context.Context, in *emptypb.Empty) (
 	return &sentryproto.HandShakeReply{Protocol: sentryproto.Protocol_ETH69}, nil
 }
 func (emt *ExecModuleTester) SendMessageByMinBlock(_ context.Context, r *sentryproto.SendMessageByMinBlockRequest) (*sentryproto.SentPeers, error) {
+	emt.sentMessagesMu.Lock()
 	emt.sentMessages = append(emt.sentMessages, r.Data)
+	emt.sentMessagesMu.Unlock()
 	return nil, nil
 }
 func (emt *ExecModuleTester) SendMessageById(_ context.Context, r *sentryproto.SendMessageByIdRequest) (*sentryproto.SentPeers, error) {
+	emt.sentMessagesMu.Lock()
 	emt.sentMessages = append(emt.sentMessages, r.Data)
+	emt.sentMessagesMu.Unlock()
 	return nil, nil
 }
 func (emt *ExecModuleTester) SendMessageToRandomPeers(_ context.Context, r *sentryproto.SendMessageToRandomPeersRequest) (*sentryproto.SentPeers, error) {
+	emt.sentMessagesMu.Lock()
 	emt.sentMessages = append(emt.sentMessages, r.Data)
+	emt.sentMessagesMu.Unlock()
 	return nil, nil
 }
 func (emt *ExecModuleTester) SendMessageToAll(_ context.Context, r *sentryproto.OutboundMessageData) (*sentryproto.SentPeers, error) {
+	emt.sentMessagesMu.Lock()
 	emt.sentMessages = append(emt.sentMessages, r)
+	emt.sentMessagesMu.Unlock()
 	return nil, nil
 }
 func (emt *ExecModuleTester) SentMessage(i int) (*sentryproto.OutboundMessageData, error) {
+	emt.sentMessagesMu.Lock()
+	defer emt.sentMessagesMu.Unlock()
 	if i < 0 || i >= len(emt.sentMessages) {
 		return nil, fmt.Errorf("no sent message for index %d found", i)
 	}
