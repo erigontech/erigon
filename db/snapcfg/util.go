@@ -526,15 +526,25 @@ func KnownCfgOrDevnet(networkName string) *Cfg {
 	return cfg
 }
 
-var KnownWebseeds = map[string][]string{
-	networkname.Mainnet:    webseedsParse(webseed.Mainnet),
-	networkname.Sepolia:    webseedsParse(webseed.Sepolia),
-	networkname.Amoy:       webseedsParse(webseed.Amoy),
-	networkname.BorMainnet: webseedsParse(webseed.BorMainnet),
-	networkname.Gnosis:     webseedsParse(webseed.Gnosis),
-	networkname.Chiado:     webseedsParse(webseed.Chiado),
-	networkname.Hoodi:      webseedsParse(webseed.Hoodi),
-	networkname.Bloatnet:   webseedsParse(webseed.Bloatnet),
+// KnownWebseedsRaw holds the unparsed embedded webseed TOML bytes per chain.
+var KnownWebseedsRaw = map[string][]byte{
+	networkname.Mainnet:    webseed.Mainnet,
+	networkname.Sepolia:    webseed.Sepolia,
+	networkname.Amoy:       webseed.Amoy,
+	networkname.BorMainnet: webseed.BorMainnet,
+	networkname.Gnosis:     webseed.Gnosis,
+	networkname.Chiado:     webseed.Chiado,
+	networkname.Hoodi:      webseed.Hoodi,
+	networkname.Bloatnet:   webseed.Bloatnet,
+}
+
+// GetKnownWebseeds parses and returns the webseed URLs for a single chain.
+func GetKnownWebseeds(chain string) ([]string, bool) {
+	raw, ok := KnownWebseedsRaw[chain]
+	if !ok {
+		return nil, false
+	}
+	return webseedsParse(raw), true
 }
 
 func webseedsParse(in []byte) (res []string) {
