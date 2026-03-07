@@ -112,6 +112,8 @@ func stepRebase(cliCtx *cli.Context) error {
 
 	// include whole chaindata directory for deletion
 	dels = append(dels, dirs.Chaindata)
+	// include erigondb.toml.torrent which is invalidated by the rebase
+	dels = append(dels, filepath.Join(dirs.Snap, "erigondb.toml.torrent"))
 	for _, f := range dels {
 		fmt.Printf("D: %s\n", f)
 	}
