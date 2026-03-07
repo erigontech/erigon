@@ -186,8 +186,7 @@ func (tx *ArbitrumUnsignedTx) SigningHash(chainID *big.Int) common.Hash {
 }
 
 func (tx *ArbitrumUnsignedTx) Protected() bool {
-	//TODO implement me
-	panic("implement me")
+	return false
 }
 
 func (tx *ArbitrumUnsignedTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
@@ -578,8 +577,7 @@ func (tx *ArbitrumContractTx) SigningHash(chainID *big.Int) common.Hash {
 }
 
 func (tx *ArbitrumContractTx) Protected() bool {
-	//TODO implement me
-	panic("implement me")
+	return false
 }
 
 func (tx *ArbitrumContractTx) payloadSize() (payloadSize int, gasLen int) {
@@ -1013,8 +1011,7 @@ func (t *ArbitrumRetryTx) SigningHash(chainID *big.Int) common.Hash {
 }
 
 func (t *ArbitrumRetryTx) Protected() bool {
-	//TODO implement me
-	panic("implement me")
+	return false
 }
 
 func (t *ArbitrumRetryTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen int, hashingOnly bool) error {
@@ -1730,8 +1727,7 @@ func (tx *ArbitrumSubmitRetryableTx) SigningHash(chainID *big.Int) common.Hash {
 }
 
 func (tx *ArbitrumSubmitRetryableTx) Protected() bool {
-	//TODO implement me
-	panic("implement me")
+	return false
 }
 
 func (tx *ArbitrumSubmitRetryableTx) EncodingSize() int {
@@ -2060,8 +2056,7 @@ func (tx *ArbitrumDepositTx) SigningHash(chainID *big.Int) common.Hash {
 	panic("implement me")
 }
 func (tx *ArbitrumDepositTx) Protected() bool {
-	//TODO implement me
-	panic("implement me")
+	return false
 }
 func (tx *ArbitrumDepositTx) WithSignature(signer Signer, sig []byte) (Transaction, error) {
 	//TODO implement me
@@ -2313,7 +2308,7 @@ func (tx *ArbitrumInternalTx) GetSender() (accounts.Address, bool) {
 func (tx *ArbitrumInternalTx) IsContractDeploy() bool                   { return false }
 func (tx *ArbitrumInternalTx) Unwrap() Transaction                      { return tx }
 func (tx *ArbitrumInternalTx) SigningHash(chainID *big.Int) common.Hash { panic("implement me") }
-func (tx *ArbitrumInternalTx) Protected() bool                          { panic("implement me") }
+func (tx *ArbitrumInternalTx) Protected() bool                          { return false }
 func (tx *ArbitrumInternalTx) SetSender(address accounts.Address)       {} // not supported in ArbitrumInternalTx
 func (tx *ArbitrumInternalTx) Sender(signer Signer) (accounts.Address, error) {
 	return accounts.InternAddress(ArbosAddress), nil

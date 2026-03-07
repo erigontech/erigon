@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"sync"
 
 	"github.com/erigontech/erigon/arb/lru"
 	"github.com/erigontech/erigon/common"
@@ -217,9 +218,15 @@ func WrapDatabaseWithWasm(wasm kv.RwDB, targets []WasmTarget) WasmIface {
 	return &WasmDB{RwDB: wasm, cacheTag: constantCacheTag, targets: targets, activatedAsmCache: lru.NewSizeConstrainedCache[activatedAsmCacheKey, []byte](1000)}
 }
 
-var openedArbitrumWasmDB WasmIface
+var (
+	openedArbitrumWasmDB WasmIface
+	wasmDBMu             sync.Mutex
+)
 
 func OpenArbitrumWasmDB(ctx context.Context, path string) WasmIface {
+	wasmDBMu.Lock()
+	defer wasmDBMu.Unlock()
+
 	if openedArbitrumWasmDB != nil {
 		return openedArbitrumWasmDB
 	}
@@ -229,7 +236,9 @@ func OpenArbitrumWasmDB(ctx context.Context, path string) WasmIface {
 		}).MustOpen()
 	go func() {
 		<-ctx.Done()
+		wasmDBMu.Lock()
 		openedArbitrumWasmDB = nil
+		wasmDBMu.Unlock()
 		mdbxDB.Close()
 	}()
 

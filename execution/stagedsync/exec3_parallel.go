@@ -519,6 +519,7 @@ func (pe *parallelExecutor) resetWorkers(ctx context.Context, rs *state.StateV3B
 	for _, worker := range pe.execWorkers {
 		// parallel workers hold thier own tx don't pass in an externals tx
 		worker.ResetState(rs, nil, nil, state.NewNoopWriter(), nil)
+		worker.SetArbitrumWasmDB(pe.cfg.arbitrumWasmDB)
 	}
 
 	return nil
