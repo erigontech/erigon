@@ -40,6 +40,7 @@ type operation struct {
 	execute     executionFunc
 	constantGas uint64
 	dynamicGas  gasFunc
+	stateGas    gasFunc
 	// maxStack specifies the max length the stack can have for this operation
 	// to not overflow the stack.
 	maxStack int
@@ -97,6 +98,7 @@ func newAmsterdamInstructionSet() JumpTable {
 	instructionSet := newOsakaInstructionSet()
 	enable8024(&instructionSet) // EIP-8024 (DUPN, SWAPN, EXCHANGE)
 	enable7843(&instructionSet) // EIP-7843 (SLOTNUM)
+	enable8037(&instructionSet) // EIP-8037 (State Creation Gas Cost Increase)
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }

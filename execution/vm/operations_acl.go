@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -34,6 +35,7 @@ import (
 
 func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 	return func(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (uint64, error) {
+		rules := evm.chainRules
 		if evm.readOnly {
 			return 0, ErrWriteProtection
 		}
@@ -72,7 +74,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		var original, _ = evm.IntraBlockState().GetCommittedState(callContext.Address(), slotCommited)
 		if original.Eq(&current) {
 			if original.IsZero() { // create slot (2.1.1)
-				return cost + params.SstoreSetGasEIP2200, nil
+				return cost + gasSstoreSet(rules), nil
 			}
 			if value.IsZero() { // delete slot (2.1.2b)
 				evm.IntraBlockState().AddRefund(clearingRefund)
@@ -92,7 +94,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 			if original.IsZero() { // reset to original inexistent slot (2.2.2.1)
 				// EIP 2200 Original clause:
 				//evm.StateDB.AddRefund(params.SstoreSetGasEIP2200 - params.SloadGasEIP2200)
-				evm.IntraBlockState().AddRefund(params.SstoreSetGasEIP2200 - params.WarmStorageReadCostEIP2929)
+				evm.IntraBlockState().AddRefund(gasSstoreSet(rules) - params.WarmStorageReadCostEIP2929)
 			} else { // reset to original existing slot (2.2.2.2)
 				// EIP 2200 Original clause:
 				//	evm.StateDB.AddRefund(params.SstoreResetGasEIP2200 - params.SloadGasEIP2200)
@@ -106,6 +108,13 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		//return params.SloadGasEIP2200, nil // dirty update (2.2)
 		return cost + params.WarmStorageReadCostEIP2929, nil // dirty update (2.2)
 	}
+}
+
+func gasSstoreSet(rules *chain.Rules) uint64 {
+	if rules.IsAmsterdam {
+		return params.SstoreSetGasEIP8037
+	}
+	return params.SstoreSetGasEIP2200
 }
 
 // gasSLoadEIP2929 calculates dynamic gas for SLOAD according to EIP-2929
@@ -273,7 +282,9 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 			evm.IntraBlockState().MarkReadsInternal(address)
 		}
 		if empty && !balance.IsZero() {
-			gas += params.CreateBySelfdestructGas
+			if !evm.chainRules.IsAmsterdam { // EIP-8037 charges this as state gas instead
+				gas += params.CreateBySelfdestructGas
+			}
 		}
 
 		hasSelfdestructed, err := evm.IntraBlockState().HasSelfdestructed(callContext.Address())

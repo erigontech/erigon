@@ -47,9 +47,11 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/fixedgas"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm/evmtypes/mdgas"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
@@ -146,6 +148,8 @@ type TxPool struct {
 	isPostPrague            atomic.Bool
 	osakaTime               *uint64
 	isPostOsaka             atomic.Bool
+	amsterdamTime           *uint64
+	isPostAmsterdam         atomic.Bool
 	feeCalculator           FeeCalculator
 	p2pFetcher              *Fetch
 	p2pSender               *Send
@@ -292,6 +296,13 @@ func New(
 		}
 		osakaTimeU64 := chainConfig.OsakaTime.Uint64()
 		res.osakaTime = &osakaTimeU64
+	}
+	if chainConfig.AmsterdamTime != nil {
+		if !chainConfig.AmsterdamTime.IsUint64() {
+			return nil, errors.New("amsterdamTime overflow")
+		}
+		amsterdamTimeU64 := chainConfig.AmsterdamTime.Uint64()
+		res.amsterdamTime = &amsterdamTimeU64
 	}
 
 	res.p2pFetcher = NewFetch(ctx, sentryClients, res, stateChangesClient, poolDB, res.chainID, logger, opts...)
@@ -824,11 +835,13 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 			AuthorizationsLen:  authorizationLen,
 			AccessListLen:      uint64(mt.TxnSlot.AccessListAddrCount),
 			StorageKeysLen:     uint64(mt.TxnSlot.AccessListStorCount),
+			CostPerStateByte:   misc.CostPerStateByte(p.blockGasLimit.Load()),
 			IsContractCreation: mt.TxnSlot.Creation,
 			IsEIP2:             true,
 			IsEIP2028:          true,
 			IsEIP3860:          isEIP3860,
 			IsEIP7623:          isEIP7623,
+			IsEIP8037:          p.isAmsterdam(),
 			IsAATxn:            isAATxn,
 		})
 		intrinsicGas := intrinsicGasResult.RegularGas
@@ -988,16 +1001,21 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		AuthorizationsLen:  uint64(authorizationLen),
 		AccessListLen:      uint64(txn.AccessListAddrCount),
 		StorageKeysLen:     uint64(txn.AccessListStorCount),
+		CostPerStateByte:   misc.CostPerStateByte(p.blockGasLimit.Load()),
 		IsContractCreation: txn.Creation,
 		IsEIP2:             true,
 		IsEIP2028:          true,
 		IsEIP3860:          isEIP3860,
 		IsEIP7623:          isPrague,
+		IsEIP8037:          p.isAmsterdam(),
 		IsAATxn:            isAATxn,
 	})
-	gas := intrinsicGasResult.RegularGas
-	if isPrague && intrinsicGasResult.FloorGasCost > gas {
-		gas = intrinsicGasResult.FloorGasCost
+	gas := mdgas.MdGas{
+		Regular: intrinsicGasResult.RegularGas,
+		State:   intrinsicGasResult.StateGas,
+	}
+	if isPrague && intrinsicGasResult.FloorGasCost > gas.Regular {
+		gas.Regular = intrinsicGasResult.FloorGasCost
 	}
 
 	if txn.Traced {
@@ -1009,7 +1027,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		}
 		return txpoolcfg.GasUintOverflow
 	}
-	if gas > txn.Gas {
+	if gas.Total() > txn.Gas {
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas > txn.gas idHash=%x gas=%d, txn.gas=%d", txn.IDHash, gas, txn.Gas))
 		}
@@ -1021,7 +1039,15 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		}
 		return txpoolcfg.GasLimitTooHigh
 	}
-	if txn.Gas > params.MaxTxnGasLimit {
+	if p.isAmsterdam() {
+		// EIP-8037: total gas can exceed MaxTxnGasLimit (excess becomes state gas); only cap intrinsic regular gas.
+		if gas.Total() > params.MaxTxnGasLimit {
+			if txn.Traced {
+				p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic regular gas > max gas limit idHash=%x gas=%d", txn.IDHash, gas))
+			}
+			return txpoolcfg.GasLimitTooHigh
+		}
+	} else if txn.Gas > params.MaxTxnGasLimit {
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx txn.gas > max gas limit idHash=%x gas=%d", txn.IDHash, txn.Gas))
 		}
@@ -1246,6 +1272,10 @@ func (p *TxPool) isPrague() bool {
 
 func (p *TxPool) isOsaka() bool {
 	return isTimeBasedForkActivated(&p.isPostOsaka, p.osakaTime)
+}
+
+func (p *TxPool) isAmsterdam() bool {
+	return isTimeBasedForkActivated(&p.isPostAmsterdam, p.amsterdamTime)
 }
 
 func (p *TxPool) GetMaxBlobsPerBlock() uint64 {

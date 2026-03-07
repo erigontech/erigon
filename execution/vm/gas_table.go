@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -314,6 +315,53 @@ func gasCreate2(_ *EVM, callContext *CallContext, availableGas uint64, memorySiz
 	return gas, nil
 }
 
+func stateGasCreate(evm *EVM, _ *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
+	return 112 * evm.Context.CostPerStateByte, nil
+}
+
+func stateGasCall(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
+	if !callContext.Stack.Back(2).IsZero() { // value > 0
+		addr := accounts.InternAddress(callContext.Stack.Back(1).Bytes20())
+		if empty, _ := evm.IntraBlockState().Empty(addr); empty {
+			return 112 * evm.Context.CostPerStateByte, nil
+		}
+	}
+	return 0, nil
+}
+
+func stateGasSstore(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
+	newValue := callContext.Stack.Back(1)
+	slot := accounts.InternKey(callContext.Stack.Back(0).Bytes32())
+	current, _ := evm.IntraBlockState().GetState(callContext.Address(), slot)
+	original, _ := evm.IntraBlockState().GetCommittedState(callContext.Address(), slot)
+	if original.IsZero() && !current.IsZero() && newValue.IsZero() {
+		// Case 2.2.2.1: reset to inexistent original (0→X→0).
+		evm.IntraBlockState().AddStateRefund(32 * evm.Context.CostPerStateByte)
+		return 0, nil
+	}
+	if !newValue.IsZero() && current.IsZero() && original.IsZero() {
+		// Case 2.1.1: new slot creation.
+		return 32 * evm.Context.CostPerStateByte, nil
+	}
+	return 0, nil
+}
+
+func stateGasSelfDestruct(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
+	address := accounts.InternAddress(callContext.Stack.peek().Bytes20())
+	empty, err := evm.IntraBlockState().Empty(address)
+	if err != nil {
+		return 0, err
+	}
+	balance, err := evm.IntraBlockState().GetBalance(callContext.Address())
+	if err != nil {
+		return 0, err
+	}
+	if empty && !balance.IsZero() {
+		return 112 * evm.Context.CostPerStateByte, nil
+	}
+	return 0, nil
+}
+
 func gasCreateEip3860(_ *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
 	gas, err := memoryGasCost(callContext, memorySize)
 	if err != nil {
@@ -450,13 +498,14 @@ func statelessGasCall(evm *EVM, callContext *CallContext, availableGas uint64, m
 func statefulGasCall(evm *EVM, callContext *CallContext, gas uint64, availableGas uint64, transfersValue bool) (uint64, error) {
 	var accountGas uint64
 	var address = accounts.InternAddress(callContext.Stack.Back(1).Bytes20())
-	if evm.ChainRules().IsSpuriousDragon {
+	rules := evm.ChainRules()
+	if rules.IsSpuriousDragon {
 		empty, err := evm.IntraBlockState().Empty(address)
 		if err != nil {
 			return 0, err
 		}
 		if transfersValue && empty {
-			accountGas = params.CallNewAccountGas
+			accountGas = gasNewAccount(rules)
 			// Record the address access for BAL tracking, but only when the CALL
 			// will actually proceed. In read-only (STATICCALL) context, CALL with
 			// value > 0 will be rejected by ErrWriteProtection before evm.Call()
@@ -471,7 +520,7 @@ func statefulGasCall(evm *EVM, callContext *CallContext, gas uint64, availableGa
 			return 0, err
 		}
 		if !exists {
-			accountGas = params.CallNewAccountGas
+			accountGas = gasNewAccount(rules)
 		}
 	}
 
@@ -486,6 +535,13 @@ func statefulGasCall(evm *EVM, callContext *CallContext, gas uint64, availableGa
 	}
 
 	return gas, nil
+}
+
+func gasNewAccount(rules *chain.Rules) uint64 {
+	if rules.IsAmsterdam {
+		return 0 // EIP-8037: State Creation Gas Cost Increase
+	}
+	return params.CallNewAccountGas
 }
 
 func calcCallGas(evm *EVM, callContext *CallContext, availableGas, baseGas uint64) (uint64, error) {
