@@ -530,7 +530,10 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, met
 		workerCount: runtime.NumCPU() - 1,
 	}
 
-	executorContext, executorCancel, err := pe.run(context.Background())
+	applyResults := make(chan applyResult, 1000)
+	defer close(applyResults)
+	executorContext, executorCancel, cleanup, err := pe.run(context.Background(), applyResults)
+	defer cleanup()
 
 	assert.NoError(tb, err, "error occur during parallel init")
 	assert.NoError(tb, executorContext.Err(), "error occur during parallel init")
@@ -544,7 +547,7 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, met
 	}
 
 	start := time.Now()
-	_, err = executeParallelWithCheck(tb, pe, tasks, false, validation, metadata)
+	_, err = executeParallelWithCheck(tb, pe, executorCancel, applyResults, tasks, false, validation, metadata)
 
 	assert.NoError(tb, err, "error occur during parallel execution")
 
@@ -579,16 +582,12 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, met
 
 type propertyCheck func(*parallelExecutor) error
 
-func executeParallelWithCheck(tb testing.TB, pe *parallelExecutor, tasks []exec.Task, profile bool, check propertyCheck, metadata bool) (result *blockResult, err error) {
+func executeParallelWithCheck(tb testing.TB, pe *parallelExecutor, cancel context.CancelFunc, applyResults <-chan applyResult, tasks []exec.Task, profile bool, check propertyCheck, metadata bool) (result *blockResult, err error) {
 	if len(tasks) == 0 {
 		return nil, nil
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-
-	applyResults := make(chan applyResult, 1000)
-
-	pe.execRequests <- &execRequest{0, common.Hash{}, nil, nil, tasks, applyResults, profile, nil}
+	pe.execRequests <- &execRequest{0, common.Hash{}, nil, nil, tasks, profile, nil}
 
 	// TODO get results back
 
@@ -600,7 +599,7 @@ func executeParallelWithCheck(tb testing.TB, pe *parallelExecutor, tasks []exec.
 	}
 
 	cancel()
-	pe.wait(ctx)
+	pe.wait()
 
 	if check != nil {
 		err = check(pe)
@@ -653,7 +652,10 @@ func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propert
 		workerCount: runtime.NumCPU() - 1,
 	}
 
-	executorContext, executorCancel, err := pe.run(context.Background())
+	applyResults := make(chan applyResult, 1000)
+	defer close(applyResults)
+	executorContext, executorCancel, execLoopCleanup, err := pe.run(context.Background(), applyResults)
+	defer execLoopCleanup()
 	defer executorCancel()
 	assert.NoError(tb, err, "error occur during parallel init")
 
@@ -662,7 +664,7 @@ func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propert
 		task.ctx = executorContext //nolint:fatcontext
 	}
 
-	res, err := executeParallelWithCheck(tb, pe, tasks, true, validation, false)
+	res, err := executeParallelWithCheck(tb, pe, executorCancel, applyResults, tasks, true, validation, false)
 
 	assert.NoError(tb, err, "error occur during parallel execution")
 
@@ -693,6 +695,8 @@ func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyC
 
 	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
 
+	applyResults := make(chan applyResult, 1000)
+	defer close(applyResults)
 	// newExecutor creates a fresh domains/state/executor on the shared DB.
 	newExecutor := func() (*parallelExecutor, context.Context, context.CancelFunc, func()) {
 		tx, err := db.BeginTemporalRo(context.Background()) //nolint:gocritic
@@ -710,11 +714,11 @@ func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyC
 			workerCount: runtime.NumCPU() - 1,
 		}
 
-		executorCtx, executorCancel, err := pe.run(context.Background())
+		executorCtx, executorCancel, execLoopCleanup, err := pe.run(context.Background(), applyResults)
 		assert.NoError(tb, err, "error during parallel init")
 
 		cleanup := func() {
-			executorCancel()
+			execLoopCleanup()
 			domains.Close()
 			tx.Rollback()
 		}
@@ -724,7 +728,7 @@ func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyC
 	// Pass 1: profile to discover dependency metadata
 	var allDeps map[int]map[int]bool
 	{
-		pe, executorCtx, _, cleanup := newExecutor()
+		pe, executorCtx, executorCancel, cleanup := newExecutor()
 		defer cleanup()
 
 		for _, task := range tasks {
@@ -733,9 +737,8 @@ func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyC
 			task.ctx = executorCtx //nolint:fatcontext
 		}
 
-		res, err := executeParallelWithCheck(tb, pe, tasks, true, validation, false)
+		res, err := executeParallelWithCheck(tb, pe, executorCancel, applyResults, tasks, true, validation, false)
 		assert.NoError(tb, err, "error during profiling pass")
-		cleanup() // cleanup eagerly so pass 2 gets a clean slate
 		allDeps = res.AllDeps
 	}
 
@@ -743,7 +746,7 @@ func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyC
 	tasks = applyDeps(tasks, allDeps)
 
 	// Pass 2: execute with metadata
-	pe, executorCtx, _, cleanup := newExecutor()
+	pe, executorCtx, executorCancel, cleanup := newExecutor()
 	defer cleanup()
 
 	for _, task := range tasks {
@@ -753,7 +756,7 @@ func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyC
 	}
 
 	start := time.Now()
-	_, err = executeParallelWithCheck(tb, pe, tasks, false, validation, true)
+	_, err = executeParallelWithCheck(tb, pe, executorCancel, applyResults, tasks, false, validation, true)
 	assert.NoError(tb, err, "error during metadata execution pass")
 
 	finalWriteSet := map[accounts.Address]map[state.AccountKey]time.Duration{}

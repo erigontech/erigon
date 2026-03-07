@@ -840,7 +840,7 @@ func (q *QueueWithRetry) popNoWait() (task Task, ok bool) {
 	}
 
 	// otherwise get some new task. non-blocking way. without adding to queue.
-	for task == nil && len(newTasks) > 0 {
+	for task == nil {
 		select {
 		case task, ok = <-newTasks:
 			if !ok {
