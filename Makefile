@@ -226,6 +226,22 @@ check-generated:
 	@if ! git diff --exit-code -- go.mod go.sum; then \
 		echo "ERROR: go.mod or go.sum is out of date. Run 'go mod tidy' and commit."; exit 1; fi
 
+## check-large-files BASE=<ref>:        check for files >1MB added vs BASE (default: main)
+check-large-files:
+	@base="${BASE:-main}"; \
+	found=0; \
+	while IFS= read -r file; do \
+		size=$$(git cat-file -s "HEAD:$$file" 2>/dev/null) || continue; \
+		if [ "$$size" -gt 1048576 ]; then \
+			echo "$$(awk "BEGIN{printf \"%.1f\", $$size/1048576}") MB: $$file"; \
+			found=1; \
+		fi; \
+	done < <(git diff --diff-filter=ACMR --name-only "$$base"...HEAD); \
+	if [ "$$found" -eq 1 ]; then \
+		echo "ERROR: Files exceeding 1 MB found."; \
+		exit 1; \
+	fi
+
 ## test-group TEST_GROUP=<name>			run a named CI test group
 test-group:
 	(set -o pipefail && $(GO_BUILD_ENV) GODEBUG=$(GODEBUG) GOTRACEBACK=1 go test $(GO_FLAGS) $$(go list ./... | ./tools/test-groups packages $(TEST_GROUP)) 2>&1 | ./tools/filter-test-output | tee -a run.log)
