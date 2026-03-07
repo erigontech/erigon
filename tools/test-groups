@@ -15,7 +15,9 @@ from collections.abc import Iterator
 MODULE = "github.com/erigontech/erigon"
 
 GROUPS: OrderedDict[str, set[str]] = OrderedDict([
-    ("execution-tests",         {"./execution/tests/..."}),
+    ("execution-eest-blockchain", {"./execution/tests/eest_blockchain/..."}),
+    ("execution-eest-devnet",     {"./execution/tests/eest_devnet/..."}),
+    ("execution-tests",           {"./execution/tests/..."}),
     ("execution-other",         {"./execution/..."}),
     ("consensus",               {"./cl/..."}),
     ("core-rpc",                {"./db/...", "./node/...", "./txnprovider/...", "./p2p/...", "./rpc/..."}),

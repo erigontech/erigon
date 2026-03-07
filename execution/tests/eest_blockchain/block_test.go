@@ -17,18 +17,17 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package executiontests
+package eest_blockchain_test
 
 import (
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 )
 
-func TestLegacyBlockchain(t *testing.T) {
+func TestExecutionSpecBlockchain(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
@@ -36,15 +35,26 @@ func TestLegacyBlockchain(t *testing.T) {
 
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
-	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win please") // after remove ChainReader from rules engine - this test can be changed to create less databases, then can enable on win. now timeout after 20min
-	}
 
 	bt := new(testutil.TestMatcher)
-	dir := filepath.Join(legacyDir, "BlockchainTests")
+	dir := filepath.Join("..", "execution-spec-tests", "blockchain_tests")
 
-	// This directory contains no tests
-	bt.SkipLoad(`.*\.meta/.*`)
+	// Slow tests — split into their own packages for parallelism
+	bt.SkipLoad(`^cancun/eip4844_blobs/test_invalid_negative_excess_blob_gas.json`)
+	bt.SkipLoad(`^frontier/scenarios/test_scenarios.json`)
+	bt.SkipLoad(`^osaka/eip7939_count_leading_zeros/test_clz_opcode_scenarios.json`)
+	bt.SkipLoad(`^prague/eip7623_increase_calldata_cost/test_transaction_validity_type_1_type_2.json`)
+
+	// Very slow tests
+	bt.SkipLoad(`^berlin/eip2930_access_list/test_tx_intrinsic_gas.json`)
+	bt.SkipLoad(`^cancun/eip4844_blobs/test_sufficient_balance_blob_tx`)
+	bt.SkipLoad(`^cancun/eip4844_blobs/test_valid_blob_tx_combinations.json`)
+	bt.SkipLoad(`^frontier/opcodes/test_stack_overflow.json`)
+	bt.SkipLoad(`^prague/eip2537_bls_12_381_precompiles/test_invalid.json`)
+	bt.SkipLoad(`^prague/eip2537_bls_12_381_precompiles/test_valid.json`)
+
+	// Tested in the state test format by TestState
+	bt.SkipLoad(`^static/state_tests/`)
 
 	bt.Walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root
@@ -52,7 +62,4 @@ func TestLegacyBlockchain(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	// There is also a LegacyTests folder, containing blockchain tests generated
-	// prior to Istanbul. However, they are all derived from GeneralStateTests,
-	// which run natively, so there's no reason to run them here.
 }
