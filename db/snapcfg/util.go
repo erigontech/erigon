@@ -544,19 +544,16 @@ func GetKnownWebseeds(chain string) ([]string, bool) {
 	if !ok {
 		return nil, false
 	}
-	return webseedsParse(raw), true
-}
-
-func webseedsParse(in []byte) (res []string) {
 	a := map[string]string{}
-	if err := toml.Unmarshal(in, &a); err != nil {
+	if err := toml.Unmarshal(raw, &a); err != nil {
 		panic(err)
 	}
+	res := make([]string, 0, len(a))
 	for _, l := range a {
 		res = append(res, l)
 	}
 	slices.Sort(res)
-	return res
+	return res, true
 }
 
 const RemotePreverifiedEnvKey = "ERIGON_REMOTE_PREVERIFIED"
