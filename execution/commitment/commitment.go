@@ -1614,13 +1614,13 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			return false
 		})
 		if !updated {
-			pivot.hashedKey = t.hasher(toBytesZeroCopy(pivot.plainKey))
+			pivot.hashedKey = t.hasher(common.ToBytesZeroCopy(pivot.plainKey))
 			fn(pivot, val)
 			t.tree.ReplaceOrInsert(pivot)
 		}
 	case ModeDirect:
 		if _, ok := t.keys[key]; !ok {
-			keyBytes := toBytesZeroCopy(key)
+			keyBytes := common.ToBytesZeroCopy(key)
 			hashedKey := t.hasher(keyBytes)
 
 			var err error
@@ -1757,7 +1757,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 						return ctx.Err()
 					default:
 					}
-					if err := fn(p.hashedKey, toBytesZeroCopy(p.plainKey), nil); err != nil {
+					if err := fn(p.hashedKey, common.ToBytesZeroCopy(p.plainKey), nil); err != nil {
 						return err
 					}
 				}
@@ -1779,7 +1779,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 				return ctx.Err()
 			default:
 			}
-			if err := fn(p.hashedKey, toBytesZeroCopy(p.plainKey), nil); err != nil {
+			if err := fn(p.hashedKey, common.ToBytesZeroCopy(p.plainKey), nil); err != nil {
 				return err
 			}
 		}
@@ -1827,7 +1827,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 						return false
 					default:
 					}
-					if err := fn(p.hashedKey, toBytesZeroCopy(p.plainKey), p.update); err != nil {
+					if err := fn(p.hashedKey, common.ToBytesZeroCopy(p.plainKey), p.update); err != nil {
 						processErr = err
 						return false
 					}
@@ -1851,7 +1851,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 				return ctx.Err()
 			default:
 			}
-			if err := fn(p.hashedKey, toBytesZeroCopy(p.plainKey), p.update); err != nil {
+			if err := fn(p.hashedKey, common.ToBytesZeroCopy(p.plainKey), p.update); err != nil {
 				return err
 			}
 		}
@@ -2077,6 +2077,3 @@ func (u *Update) String() string {
 	}
 	return sb.String()
 }
-
-func toStringZeroCopy(v []byte) string { return unsafe.String(&v[0], len(v)) } //nolint
-func toBytesZeroCopy(s string) []byte  { return unsafe.Slice(unsafe.StringData(s), len(s)) }

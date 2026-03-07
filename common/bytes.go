@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
+	"unsafe"
 )
 
 func ByteCount(b uint64) string {
@@ -137,6 +138,19 @@ func TrimRightZeroes(s []byte) []byte {
 	}
 	return s[:idx]
 }
+
+// ToStringZeroCopy converts a byte slice to a string without copying.
+// The caller must ensure the byte slice is not modified after the conversion.
+func ToStringZeroCopy(v []byte) string {
+	if len(v) == 0 {
+		return ""
+	}
+	return unsafe.String(&v[0], len(v))
+}
+
+// ToBytesZeroCopy converts a string to a byte slice without copying.
+// The returned slice must not be modified.
+func ToBytesZeroCopy(s string) []byte { return unsafe.Slice(unsafe.StringData(s), len(s)) }
 
 func KeyCmp(key1, key2 []byte) (int, bool) {
 	switch {

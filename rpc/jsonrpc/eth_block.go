@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -241,18 +242,9 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	if err != nil {
 		return nil, err
 	}
-	var borTx types.Transaction
-	var borTxHash common.Hash
-	if chainConfig.Bor != nil {
-		possibleBorTxnHash := bortypes.ComputeBorTxHash(b.NumberU64(), b.Hash())
-		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, possibleBorTxnHash)
-		if err != nil {
-			return nil, err
-		}
-		if ok {
-			borTx = bortypes.NewBorTransaction()
-			borTxHash = possibleBorTxnHash
-		}
+	borTx, borTxHash, err := api.lookupBorTx(ctx, chainConfig, b.NumberU64(), b.Hash())
+	if err != nil {
+		return nil, err
 	}
 
 	response, err := ethapi.RPCMarshalBlockEx(b, true, fullTx, borTx, borTxHash, additionalFields)
@@ -310,18 +302,9 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	if err != nil {
 		return nil, err
 	}
-	var borTx types.Transaction
-	var borTxHash common.Hash
-	if chainConfig.Bor != nil {
-		possibleBorTxnHash := bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash())
-		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, possibleBorTxnHash)
-		if err != nil {
-			return nil, err
-		}
-		if ok {
-			borTx = bortypes.NewBorTransaction()
-			borTxHash = possibleBorTxnHash
-		}
+	borTx, borTxHash, err := api.lookupBorTx(ctx, chainConfig, block.NumberU64(), block.Hash())
+	if err != nil {
+		return nil, err
 	}
 
 	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, borTx, borTxHash, additionalFields)
@@ -392,16 +375,12 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		return nil, err
 	}
 
-	if chainConfig.Bor != nil {
-		borStateSyncTxHash := bortypes.ComputeBorTxHash(blockNum, blockHash)
-
-		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxHash)
-		if err != nil {
-			return nil, err
-		}
-		if ok {
-			txCount++
-		}
+	borTx, _, err := api.lookupBorTx(ctx, chainConfig, blockNum, blockHash)
+	if err != nil {
+		return nil, err
+	}
+	if borTx != nil {
+		txCount++
 	}
 
 	numOfTx := hexutil.Uint(txCount)
@@ -439,21 +418,34 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 		return nil, err
 	}
 
-	if chainConfig.Bor != nil {
-		borStateSyncTxHash := bortypes.ComputeBorTxHash(blockNum, blockHash)
-
-		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxHash)
-		if err != nil {
-			return nil, err
-		}
-		if ok {
-			txCount++
-		}
+	borTx, _, err := api.lookupBorTx(ctx, chainConfig, blockNum, blockHash)
+	if err != nil {
+		return nil, err
+	}
+	if borTx != nil {
+		txCount++
 	}
 
 	numOfTx := hexutil.Uint(txCount)
 
 	return &numOfTx, nil
+}
+
+// lookupBorTx checks whether the given block has a Bor state-sync transaction.
+// Returns the synthetic transaction and its hash, or (nil, Hash{}, nil) if none.
+func (api *APIImpl) lookupBorTx(ctx context.Context, chainConfig *chain.Config, blockNum uint64, blockHash common.Hash) (types.Transaction, common.Hash, error) {
+	if chainConfig.Bor == nil {
+		return nil, common.Hash{}, nil
+	}
+	borTxHash := bortypes.ComputeBorTxHash(blockNum, blockHash)
+	_, ok, err := api.bridgeReader.EventTxnLookup(ctx, borTxHash)
+	if err != nil {
+		return nil, common.Hash{}, err
+	}
+	if !ok {
+		return nil, common.Hash{}, nil
+	}
+	return bortypes.NewBorTransaction(), borTxHash, nil
 }
 
 func (api *APIImpl) blockByNumber(ctx context.Context, blockNumber rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {
