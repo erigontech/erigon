@@ -801,23 +801,13 @@ func (q *QueueWithRetry) popWait(ctx context.Context) (task Task, ok bool) {
 		newTasks := q.newTasks
 		q.lock.Unlock()
 		if newTasks == nil {
-			q.lock.Lock()
-			if q.retires.Len() > 0 {
-				task = heap.Pop(&q.retires).(Task)
-			}
-			q.lock.Unlock()
-			return task, task != nil
+			return q.popNoWait()
 		}
 
 		select {
 		case inTask, ok := <-newTasks:
 			if !ok {
-				q.lock.Lock()
-				if q.retires.Len() > 0 {
-					task = heap.Pop(&q.retires).(Task)
-				}
-				q.lock.Unlock()
-				return task, task != nil
+				return q.popNoWait()
 			}
 
 			q.lock.Lock()
@@ -832,12 +822,7 @@ func (q *QueueWithRetry) popWait(ctx context.Context) (task Task, ok bool) {
 				return task, true
 			}
 		case <-ctx.Done():
-			q.lock.Lock()
-			if q.retires.Len() > 0 {
-				task = heap.Pop(&q.retires).(Task)
-			}
-			q.lock.Unlock()
-			return task, task != nil
+			return q.popNoWait()
 		}
 	}
 }
@@ -879,7 +864,6 @@ func (q *QueueWithRetry) Close() {
 	q.closed = true
 	if q.newTasks != nil {
 		newTasks := q.newTasks
-		q.newTasks = nil
 		close(newTasks)
 	}
 }
