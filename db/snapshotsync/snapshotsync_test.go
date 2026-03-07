@@ -42,21 +42,33 @@ func TestBlackListForSparse(t *testing.T) {
 	blackList := buildBlackListForSparse(keepRecentSteps, maxStep, preverified)
 	t.Logf("Sparse blacklist: %d files (maxStep=%d, keepRecent=%d)", len(blackList), maxStep, keepRecentSteps)
 
-	var dataBlacklisted, indexSkipped, recentDomainKept int
+	var stateBlacklisted, caplinBlacklisted, indexSkipped, recentDomainKept, blockSegKept int
 	for _, p := range preverified.Items {
 		name := p.Name
 		_, blacklisted := blackList[name]
 
 		if blacklisted {
-			dataBlacklisted++
 			// Index files should never be blacklisted
 			if !isDataFile(name) {
 				t.Errorf("Index file should not be blacklisted: %s", name)
+			}
+			if isStateSnapshot(name) {
+				stateBlacklisted++
+			} else if isCaplinFile(name) {
+				caplinBlacklisted++
 			}
 		}
 
 		if !isDataFile(name) && !blacklisted {
 			indexSkipped++
+		}
+
+		// Block-level .seg files should never be blacklisted
+		if strings.HasSuffix(name, ".seg") && !isStateSnapshot(name) && !isCaplinFile(name) && blacklisted {
+			t.Errorf("Block .seg file should not be blacklisted in sparse mode: %s", name)
+		}
+		if strings.HasSuffix(name, ".seg") && !isStateSnapshot(name) && !isCaplinFile(name) && !blacklisted {
+			blockSegKept++
 		}
 
 		// Recent domain .kv files should not be blacklisted
@@ -71,16 +83,20 @@ func TestBlackListForSparse(t *testing.T) {
 		}
 	}
 
-	t.Logf("Data files blacklisted: %d, Index files kept: %d, Recent domain .kv kept: %d", dataBlacklisted, indexSkipped, recentDomainKept)
+	t.Logf("State data blacklisted: %d, Caplin blacklisted: %d, Index files kept: %d, Block .seg kept: %d, Recent domain .kv kept: %d",
+		stateBlacklisted, caplinBlacklisted, indexSkipped, blockSegKept, recentDomainKept)
 
-	if dataBlacklisted == 0 {
-		t.Error("Expected some data files to be blacklisted in sparse mode")
+	if stateBlacklisted == 0 {
+		t.Error("Expected some state data files to be blacklisted in sparse mode")
 	}
 	if indexSkipped == 0 {
 		t.Error("Expected some index files to be kept (not blacklisted)")
 	}
 	if recentDomainKept == 0 {
 		t.Error("Expected some recent domain files to be kept locally")
+	}
+	if blockSegKept == 0 {
+		t.Error("Expected block .seg files to be kept (not blacklisted)")
 	}
 }
 

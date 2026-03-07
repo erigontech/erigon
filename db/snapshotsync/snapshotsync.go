@@ -119,6 +119,10 @@ func isDataFile(name string) bool {
 // downloaded in sparse mode. Index files and metadata files are always downloaded.
 // Recent state files (within keepRecentSteps of the tip) are also downloaded locally
 // for execution performance.
+//
+// Block-level .seg files (headers, bodies, transactions) are ALWAYS downloaded
+// because they're needed for the node to sync and determine block boundaries.
+// Only state data files (.kv, .v, .ef) and caplin .seg files are made sparse.
 func buildBlackListForSparse(
 	keepRecentSteps uint64,
 	maxStep uint64,
@@ -150,16 +154,23 @@ func buildBlackListForSparse(
 			if strings.HasPrefix(name, "domain") && res.From >= recentStepThreshold {
 				continue
 			}
-			// Everything else (older state, all history, all idx/ef) → sparse
+			// Older state data (.kv, .v, .ef) → sparse
 			blackList[name] = struct{}{}
-		} else {
-			// Block-level files (.seg): keep recent blocks, sparse the rest
-			// For now, blacklist all block data files — they'll be served sparse
-			// The header chain download happens separately and isn't affected
+		} else if isCaplinFile(name) {
+			// Caplin beacon block/blob .seg files → sparse (served on-demand)
 			blackList[name] = struct{}{}
 		}
+		// Block-level .seg files (headers, bodies, transactions) are NOT blacklisted —
+		// they're always downloaded because the node needs them for sync and block boundary
+		// determination (SegmentsMax, IterateFrozenBodies, etc.)
 	}
 	return blackList
+}
+
+// isCaplinFile returns true for caplin-related snapshot files.
+func isCaplinFile(name string) bool {
+	return strings.Contains(name, "beaconblocks") || strings.Contains(name, "blobsidecars") ||
+		strings.HasPrefix(name, "caplin/")
 }
 
 func buildBlackListForPruning(
