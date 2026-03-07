@@ -91,9 +91,18 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 
 	// Update the evm with the new transaction context.
 	evm.Reset(txContext, ibs)
+	// Disable post apply message during state transition (we handle it manually below to mimic parallel executor pattern)
+	postApplyMessage := evm.Context.PostApplyMessage
+	evm.Context.PostApplyMessage = nil
+	defer func() { evm.Context.PostApplyMessage = postApplyMessage }()
+
 	result, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 	if err != nil {
 		return nil, err
+	}
+
+	if postApplyMessage != nil {
+		postApplyMessage(ibs, msg.From(), evm.Context.Coinbase, result, rules)
 	}
 	// Update the state with pending changes
 	if err = ibs.FinalizeTx(rules, stateWriter); err != nil {
