@@ -246,7 +246,7 @@ func Test_DeleteStateSnaps_RemovesTmpFiles(t *testing.T) {
 	}
 
 	// Run DeleteStateSnapshots (non-dry-run)
-	err := DeleteStateSnapshots(dirs, true, false, false, "")
+	err := DeleteStateSnapshots(dirs, true, false, false, "", false)
 	require.NoError(t, err)
 
 	// All .tmp files should be removed
@@ -282,7 +282,7 @@ func Test_DeleteStateSnaps_DryRunKeepsTmpFiles(t *testing.T) {
 	}
 
 	// Run DeleteStateSnapshots with dry-run=true
-	err := DeleteStateSnapshots(dirs, true, false, true, "")
+	err := DeleteStateSnapshots(dirs, true, false, true, "", false)
 	require.NoError(t, err)
 
 	// .tmp files should still exist (dry-run does not delete)
