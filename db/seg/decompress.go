@@ -1151,7 +1151,10 @@ func (g *Getter) Reset(offset uint64) {
 // dataP=0 because the fetched data starts at the requested offset.
 func (g *Getter) sparseReset(offset uint64) {
 	absOffset := int64(g.wordsStart + offset)
-	windowSize := int64(64 * 1024) // 64KB — generous for most records
+	// Read a generous window. For most records 1MB is enough, but .ef (inverted
+	// index) records can be several MB. Cap at 8MB to limit memory; records
+	// larger than that will fail gracefully.
+	windowSize := int64(8 * 1024 * 1024)
 	if absOffset+windowSize > g.sparse.fileSize {
 		windowSize = g.sparse.fileSize - absOffset
 	}
