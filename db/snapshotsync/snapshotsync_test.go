@@ -25,6 +25,65 @@ import (
 	"github.com/erigontech/erigon/execution/chain/networkname"
 )
 
+func TestBlackListForSparse(t *testing.T) {
+	c, ok := snapcfg.KnownCfg(networkname.Mainnet)
+	if !ok {
+		t.Fatal("no known cfg")
+	}
+
+	preverified := c.Preverified
+
+	maxStep, err := getMaxStepRangeInSnapshots(preverified)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	keepRecentSteps := uint64(64)
+	blackList := buildBlackListForSparse(keepRecentSteps, maxStep, preverified)
+	t.Logf("Sparse blacklist: %d files (maxStep=%d, keepRecent=%d)", len(blackList), maxStep, keepRecentSteps)
+
+	var dataBlacklisted, indexSkipped, recentDomainKept int
+	for _, p := range preverified.Items {
+		name := p.Name
+		_, blacklisted := blackList[name]
+
+		if blacklisted {
+			dataBlacklisted++
+			// Index files should never be blacklisted
+			if !isDataFile(name) {
+				t.Errorf("Index file should not be blacklisted: %s", name)
+			}
+		}
+
+		if !isDataFile(name) && !blacklisted {
+			indexSkipped++
+		}
+
+		// Recent domain .kv files should not be blacklisted
+		if strings.HasPrefix(name, "domain") && strings.HasSuffix(name, ".kv") {
+			info, _, ok := snaptype.ParseFileName("", name)
+			if ok && info.From >= maxStep-keepRecentSteps && blacklisted {
+				t.Errorf("Recent domain file should not be blacklisted: %s (from=%d, threshold=%d)", name, info.From, maxStep-keepRecentSteps)
+			}
+			if ok && info.From >= maxStep-keepRecentSteps && !blacklisted {
+				recentDomainKept++
+			}
+		}
+	}
+
+	t.Logf("Data files blacklisted: %d, Index files kept: %d, Recent domain .kv kept: %d", dataBlacklisted, indexSkipped, recentDomainKept)
+
+	if dataBlacklisted == 0 {
+		t.Error("Expected some data files to be blacklisted in sparse mode")
+	}
+	if indexSkipped == 0 {
+		t.Error("Expected some index files to be kept (not blacklisted)")
+	}
+	if recentDomainKept == 0 {
+		t.Error("Expected some recent domain files to be kept locally")
+	}
+}
+
 func TestBlackListForPruning(t *testing.T) {
 	c, ok := snapcfg.KnownCfg(networkname.Mainnet)
 	if !ok {

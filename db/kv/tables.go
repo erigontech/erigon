@@ -278,6 +278,7 @@ var (
 	PruneTypeOlder = []byte("older")
 	PruneHistory   = []byte("pruneHistory")
 	PruneBlocks    = []byte("pruneBlocks")
+	PruneSparse    = []byte("pruneSparse")
 
 	DBSchemaVersionKey = []byte("dbVersion")
 	GenesisKey         = []byte("genesis")

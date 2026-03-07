@@ -103,6 +103,65 @@ func canSnapshotBePruned(name string) bool {
 	return (isStateHistory(name) || strings.Contains(name, "transactions")) && !strings.Contains(name, "rcache")
 }
 
+// isDataFile returns true for snapshot data files that can be served sparsely
+// (on-demand from the torrent network) instead of being downloaded locally.
+// Index files (.idx, .bt, .kvei, .kvi, .vi, .efi) must always be local.
+func isDataFile(name string) bool {
+	for _, ext := range []string{".kv", ".v", ".ef", ".seg"} {
+		if strings.HasSuffix(name, ext) {
+			return true
+		}
+	}
+	return false
+}
+
+// buildBlackListForSparse builds a blacklist of data files that should not be
+// downloaded in sparse mode. Index files and metadata files are always downloaded.
+// Recent state files (within keepRecentSteps of the tip) are also downloaded locally
+// for execution performance.
+func buildBlackListForSparse(
+	keepRecentSteps uint64,
+	maxStep uint64,
+	preverified snapcfg.Preverified,
+) map[string]struct{} {
+	blackList := make(map[string]struct{})
+	recentStepThreshold := uint64(0)
+	if maxStep > keepRecentSteps {
+		recentStepThreshold = maxStep - keepRecentSteps
+	}
+
+	for _, p := range preverified.Items {
+		name := p.Name
+		if !isDataFile(name) {
+			continue // always download index/metadata files
+		}
+		// Always download salt and config files
+		if strings.HasPrefix(name, "salt") || name == "erigondb.toml" {
+			continue
+		}
+
+		if isStateSnapshot(name) {
+			// For state files, keep recent steps local for execution performance
+			res, _, ok := snaptype.ParseFileName("", name)
+			if !ok {
+				continue
+			}
+			// Keep domain files for recent steps (needed for block execution)
+			if strings.HasPrefix(name, "domain") && res.From >= recentStepThreshold {
+				continue
+			}
+			// Everything else (older state, all history, all idx/ef) → sparse
+			blackList[name] = struct{}{}
+		} else {
+			// Block-level files (.seg): keep recent blocks, sparse the rest
+			// For now, blacklist all block data files — they'll be served sparse
+			// The header chain download happens separately and isn't affected
+			blackList[name] = struct{}{}
+		}
+	}
+	return blackList
+}
+
 func buildBlackListForPruning(
 	pruneMode bool,
 	stepPrune, minBlockToDownload, blockPrune uint64,
@@ -386,6 +445,21 @@ func SyncSnapshots(
 			if err != nil {
 				return err
 			}
+		}
+
+		// Sparse mode: blacklist data files that will be served on-demand from torrent
+		if prune.Sparse && !headerchain {
+			maxStateStep, err := getMaxStepRangeInSnapshots(preverifiedBlockSnapshots)
+			if err != nil {
+				return err
+			}
+			// Keep recent 64 steps of domain data local for execution
+			keepRecentSteps := uint64(64)
+			sparseBlackList := buildBlackListForSparse(keepRecentSteps, maxStateStep, preverifiedBlockSnapshots)
+			for k, v := range sparseBlackList {
+				blackListForPruning[k] = v
+			}
+			log.Info(fmt.Sprintf("[%s] Sparse mode: blacklisted %d data files for on-demand access", logPrefix, len(sparseBlackList)))
 		}
 
 		// If we want to get all receipts, we also need to unblack list log indexes (otherwise eth_getLogs won't work).

@@ -73,6 +73,9 @@ type CaplinSnapshots struct {
 	logger      log.Logger
 	// chain cfg
 	beaconCfg *clparams.BeaconChainConfig
+
+	// sparse: on-demand segment provider for data not locally available
+	sparseProvider *snapshotsync.SparseProvider
 }
 
 // NewCaplinSnapshots - opens all snapshots. But to simplify everything:
@@ -92,6 +95,11 @@ func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.Beacon
 	c.dirty[snaptype.BlobSidecars.Enum()] = btree.NewBTreeGOptions[*snapshotsync.DirtySegment](snapshotsync.DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
 	c.recalcVisibleFiles()
 	return c
+}
+
+// SetSparseProvider sets the provider for on-demand sparse snapshot access.
+func (s *CaplinSnapshots) SetSparseProvider(sp *snapshotsync.SparseProvider) {
+	s.sparseProvider = sp
 }
 
 func (s *CaplinSnapshots) IndicesMax() uint64  { return s.idxMax.Load() }
@@ -377,6 +385,9 @@ type CaplinView struct {
 	BeaconBlockRotx *snapshotsync.RoTx
 	BlobSidecarRotx *snapshotsync.RoTx
 	closed          bool
+
+	// sparse segments created during this view's lifetime (must be closed with view)
+	sparseSegments []*snapshotsync.VisibleSegment
 }
 
 func (s *CaplinSnapshots) View() *CaplinView {
@@ -399,6 +410,7 @@ func (v *CaplinView) Close() {
 	}
 	v.BeaconBlockRotx.Close()
 	v.BlobSidecarRotx.Close()
+	v.sparseSegments = nil
 	v.s = nil
 	v.closed = true
 }
@@ -415,6 +427,13 @@ func (v *CaplinView) BeaconBlocksSegment(slot uint64) (*snapshotsync.VisibleSegm
 		}
 		return seg, true
 	}
+	// Sparse fallback: try to create an on-demand segment from the torrent network
+	if v.s.sparseProvider != nil {
+		if sparseSeg, found := v.s.sparseProvider.ViewSingleFile(snaptype.BeaconBlocks, slot); found {
+			v.sparseSegments = append(v.sparseSegments, sparseSeg)
+			return sparseSeg, true
+		}
+	}
 	return nil, false
 }
 
@@ -424,6 +443,13 @@ func (v *CaplinView) BlobSidecarsSegment(slot uint64) (*snapshotsync.VisibleSegm
 			continue
 		}
 		return seg, true
+	}
+	// Sparse fallback: try to create an on-demand segment from the torrent network
+	if v.s.sparseProvider != nil {
+		if sparseSeg, found := v.s.sparseProvider.ViewSingleFile(snaptype.BlobSidecars, slot); found {
+			v.sparseSegments = append(v.sparseSegments, sparseSeg)
+			return sparseSeg, true
+		}
 	}
 	return nil, false
 }

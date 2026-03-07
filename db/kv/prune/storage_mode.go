@@ -49,6 +49,12 @@ var (
 		Blocks:      Distance(config3.DefaultPruneDistance),
 		History:     Distance(config3.DefaultPruneDistance),
 	}
+	SparseMode = Mode{
+		Initialised: true,
+		Blocks:      Distance(config3.DefaultPruneDistance),
+		History:     Distance(config3.DefaultPruneDistance),
+		Sparse:      true,
+	}
 
 	DefaultMode = ArchiveMode
 	MockMode    = Mode{
@@ -57,7 +63,7 @@ var (
 		Blocks:      Distance(math.MaxUint64),
 	}
 
-	ErrUnknownPruneMode       = fmt.Errorf("--prune.mode must be one of %s, %s, %s, %s", fullModeStr, archiveModeStr, minimalModeStr, blockModeStr)
+	ErrUnknownPruneMode       = fmt.Errorf("--prune.mode must be one of %s, %s, %s, %s, %s", fullModeStr, archiveModeStr, minimalModeStr, blockModeStr, sparseModeStr)
 	ErrDistanceOnlyForArchive = fmt.Errorf("--prune.distance and --prune.distance.blocks are only allowed with --prune.mode=%s", archiveModeStr)
 )
 
@@ -66,17 +72,22 @@ const (
 	blockModeStr   = "blocks"
 	fullModeStr    = "full"
 	minimalModeStr = "minimal"
+	sparseModeStr  = "sparse"
 )
 
 type Mode struct {
 	Initialised bool // Set when the values are initialised (not default)
 	History     BlockAmount
 	Blocks      BlockAmount
+	Sparse      bool // Download index files only; serve data on-demand from torrent network
 }
 
 func (m Mode) String() string {
 	if !m.Initialised {
 		return archiveModeStr
+	}
+	if m.Sparse {
+		return sparseModeStr
 	}
 	if m.History.toValue() == FullMode.History.toValue() && m.Blocks.toValue() == FullMode.Blocks.toValue() {
 		return fullModeStr
@@ -111,6 +122,8 @@ func FromCli(pruneMode string, distanceHistory, distanceBlocks uint64) (Mode, er
 		mode = MinimalMode
 	case blockModeStr:
 		mode = BlocksMode
+	case sparseModeStr:
+		mode = SparseMode
 	default:
 		return Mode{}, ErrUnknownPruneMode
 	}
@@ -142,6 +155,14 @@ func Get(db kv.Getter) (Mode, error) {
 	}
 	if blockAmount != nil {
 		prune.Blocks = blockAmount
+	}
+
+	sparseVal, err := db.GetOne(kv.DatabaseInfo, kv.PruneSparse)
+	if err != nil {
+		return prune, err
+	}
+	if len(sparseVal) > 0 && sparseVal[0] == 1 {
+		prune.Sparse = true
 	}
 
 	return prune, nil
@@ -220,6 +241,22 @@ func setIfNotExist(db kv.GetPut, pm Mode) (err error) {
 			return err
 		}
 	}
+
+	// Persist sparse flag
+	existing, err := db.GetOne(kv.DatabaseInfo, kv.PruneSparse)
+	if err != nil {
+		return err
+	}
+	if len(existing) == 0 {
+		sparseVal := byte(0)
+		if pm.Sparse {
+			sparseVal = 1
+		}
+		if err = db.Put(kv.DatabaseInfo, kv.PruneSparse, []byte{sparseVal}); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
