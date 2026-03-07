@@ -863,7 +863,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 
 	pe.execLoopGroup.Go(func() error {
 		defer pe.rws.Close()
-		defer pe.in.Close()
+		defer pe.in.Release()
 		pe.resetWorkers(execLoopCtx, pe.rs, nil)
 		return pe.execLoop(execLoopCtx)
 	})
@@ -871,7 +871,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	return execLoopCtx, func() {
 		execLoopCtxCancel()
 		defer pe.stopWorkers()
-		defer pe.in.Close()
+		defer pe.in.Release()
 
 		if err := pe.wait(ctx); err != nil {
 			pe.logger.Debug("exec loop cancel failed", "err", err)
@@ -1803,17 +1803,4 @@ func MergeVersionedWrites(prev, next state.VersionedWrites) state.VersionedWrite
 		return true
 	})
 	return out
-}
-
-func MergeAccessedAddresses(dst, src map[accounts.Address]struct{}) map[accounts.Address]struct{} {
-	if len(src) == 0 {
-		return dst
-	}
-	if dst == nil {
-		dst = make(map[accounts.Address]struct{}, len(src))
-	}
-	for addr := range src {
-		dst[addr] = struct{}{}
-	}
-	return dst
 }

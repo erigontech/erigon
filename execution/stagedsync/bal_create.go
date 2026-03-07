@@ -113,6 +113,9 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, blo
 	if !amsterdam && !experimental {
 		return nil
 	}
+	if h == nil {
+		return nil
+	}
 	blockNum := h.Number.Uint64()
 	blockHash := h.Hash()
 	bal := CreateBAL(blockNum, vio, dataDir)
@@ -154,7 +157,30 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, blo
 			return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", blockNum, dbBAL.Hash(), headerBALHash)
 		}
 	}
+	// Always validate computed BAL against header. The BalancePath cross-check
+	// in VersionMap.validateRead ensures deterministic parallel execution even
+	// without a stored BAL body (HasBAL=false), so the computed BAL is accurate.
 	if headerBALHash != bal.Hash() {
+		if dataDir != "" {
+			balDir := filepath.Join(dataDir, "bal")
+			if err := os.MkdirAll(balDir, 0o755); err != nil {
+				log.Warn("failed to create BAL debug directory", "dir", balDir, "err", err)
+			} else {
+				computedPath := filepath.Join(balDir, fmt.Sprintf("computed_bal_%d.txt", blockNum))
+				if err := os.WriteFile(computedPath, []byte(bal.DebugString()), 0o644); err != nil {
+					log.Warn("failed to write computed BAL debug file", "path", computedPath, "err", err)
+				}
+				dbBAL2, err := types.DecodeBlockAccessListBytes(dbBALBytes)
+				if err != nil {
+					log.Warn("failed to decode stored BAL for debug dump", "err", err)
+				} else if dbBAL2 != nil {
+					storedPath := filepath.Join(balDir, fmt.Sprintf("stored_bal_%d.txt", blockNum))
+					if err := os.WriteFile(storedPath, []byte(dbBAL2.DebugString()), 0o644); err != nil {
+						log.Warn("failed to write stored BAL debug file", "path", storedPath, "err", err)
+					}
+				}
+			}
+		}
 		return fmt.Errorf("%w, block=%d: block access list mismatch: got %s expected %s", rules.ErrInvalidBlock, blockNum, bal.Hash(), headerBALHash)
 	}
 	return nil

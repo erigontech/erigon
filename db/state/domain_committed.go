@@ -85,8 +85,7 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 		}
 	}
 
-	var result commitment.BranchData
-	result, at.branchDerefBuf, err = branch.ReplacePlainKeys(at.branchDerefBuf[:0], func(key []byte, isStorage bool) ([]byte, error) {
+	result, err := branch.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
 		if isStorage {
 			if len(key) == length.Addr+length.Hash {
 				return nil, nil // save storage key as is
@@ -431,8 +430,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 			return shortened, nil
 		}
 
-		var branchData commitment.BranchData
-		branchData, dt.comBuf, err = commitment.BranchData(valBuf).ReplacePlainKeys(dt.comBuf[:0], replacer)
+		branchData, err := commitment.BranchData(valBuf).ReplacePlainKeys(nil, replacer)
 		if err != nil {
 			return nil, err
 		}
