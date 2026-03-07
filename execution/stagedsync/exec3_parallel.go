@@ -89,6 +89,9 @@ type parallelExecutor struct {
 	rws            *exec.ResultsQueue
 	workerCount    int
 	blockExecutors map[uint64]*blockExecutor
+	// accumulator for txpool state-diff notifications; set before execLoop
+	// starts so that AuRa system-call nonce changes are emitted per block.
+	accumulator *shards.Accumulator
 }
 
 func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
@@ -123,6 +126,9 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	if err != nil {
 		return nil, rwTx, err
 	}
+
+	// Set accumulator before pe.run() so execLoop sees it without a race.
+	pe.accumulator = accumulator
 
 	executorContext, executorCancel, err := pe.run(ctx)
 	defer executorCancel()
@@ -631,6 +637,17 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						}
 
 						chainReader := consensuschain.NewReader(pe.cfg.chainConfig, applyTx, pe.cfg.blockReader, pe.logger)
+
+						// StartChange before Finalize so that AuRa/system-call nonce
+						// changes are emitted into the accumulator for the txpool diff.
+						if pe.accumulator != nil {
+							rawTxs, txErr := pe.cfg.blockReader.RawTransactions(ctx, applyTx, txTask.Header.Number.Uint64(), txTask.Header.Number.Uint64())
+							if txErr != nil {
+								return state.StateUpdates{}, fmt.Errorf("can't read raw txns for accumulator, block %d: %w", blockResult.BlockNum, txErr)
+							}
+							pe.accumulator.StartChange(txTask.Header, rawTxs, false)
+						}
+
 						if pe.isBlockProduction {
 							_, _, err =
 								pe.cfg.engine.FinalizeAndAssemble(
@@ -656,7 +673,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 							blockExecutor.versionMap.FlushVersionedWrites(finalWrites, true, "")
 						}
 
-						stateWriter := state.NewBufferedWriter(pe.rs, nil)
+						stateWriter := state.NewBufferedWriter(pe.rs, pe.accumulator)
 						if err = ibs.MakeWriteSet(txTask.EvmBlockContext.Rules(txTask.Config), stateWriter); err != nil {
 							return state.StateUpdates{}, err
 						}
