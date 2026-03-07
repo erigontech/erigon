@@ -255,9 +255,6 @@ type DirtySegment struct {
 
 	// only caplin state
 	filePath string
-
-	// sparse: on-demand decompressor backed by torrent reader (nil when local)
-	sparseDecomp *seg.SparseDecompressor
 }
 
 func NewDirtySegment(segType snaptype.Type, version snaptype.Version, from uint64, to uint64, frozen bool) *DirtySegment {
@@ -371,23 +368,15 @@ func (s *DirtySegment) GetType() snaptype.Type      { return s.segType }
 
 // IsSparse returns true when this segment is backed by on-demand torrent data
 // rather than a locally mmapped file.
-func (s *DirtySegment) IsSparse() bool { return s.sparseDecomp != nil }
+func (s *DirtySegment) IsSparse() bool {
+	return s.Decompressor != nil && s.Decompressor.IsSparse()
+}
 
 // GetRecord reads and decompresses a single record at the given word offset
 // (relative to the data section start, as returned by Index.OrdinalLookup).
 // Works for both normal (local) and sparse (torrent-backed) segments.
 func (s *DirtySegment) GetRecord(wordOffset uint64) ([]byte, error) {
-	if s.sparseDecomp != nil {
-		return s.sparseDecomp.SparseGet(wordOffset)
-	}
-	// Normal path: use the local Decompressor
-	gg := s.MakeGetter()
-	gg.Reset(wordOffset)
-	if !gg.HasNext() {
-		return nil, nil
-	}
-	buf, _ := gg.Next(nil)
-	return buf, nil
+	return s.Decompressor.GetRecord(wordOffset)
 }
 
 func (s *DirtySegment) isSubSetOf(j *DirtySegment) bool {
@@ -406,10 +395,6 @@ func (s *DirtySegment) Open(dir string) (err error) {
 }
 
 func (s *DirtySegment) closeSeg() {
-	if s.sparseDecomp != nil {
-		s.sparseDecomp.Close()
-		s.sparseDecomp = nil
-	}
 	if s.Decompressor != nil {
 		s.Close()
 		s.Decompressor = nil

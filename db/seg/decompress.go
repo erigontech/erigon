@@ -21,9 +21,11 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -197,6 +199,19 @@ type Decompressor struct {
 	filePath, fileName string
 
 	readAheadRefcnt atomic.Int32 // ref-counter: allow enable/disable read-ahead from goroutines. only when refcnt=0 - disable read-ahead once
+
+	// sparse: on-demand data access via io.ReadSeeker (e.g. torrent reader)
+	// When non-nil, data is nil and records are fetched on demand.
+	sparse *sparseBackend
+}
+
+// sparseBackend holds state for on-demand data access via an io.ReadSeeker.
+// When a Decompressor has a non-nil sparse field, data is fetched from the
+// reader on demand rather than being memory-mapped.
+type sparseBackend struct {
+	reader   io.ReadSeeker
+	readerMu sync.Mutex
+	fileSize int64
 }
 
 const (
@@ -419,6 +434,199 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 	return d, nil
 }
 
+// NewDecompressorFromReader creates a Decompressor backed by an io.ReadSeeker
+// (typically a BitTorrent torrent.Reader) instead of a local mmapped file.
+// The header (Huffman dictionaries) is read from the reader on construction.
+// Record data is fetched on demand via Getter.Reset() + Next().
+func NewDecompressorFromReader(reader io.ReadSeeker, fileSize int64, fileName string) (*Decompressor, error) {
+	d := &Decompressor{
+		fileName: fileName,
+		size:     fileSize,
+		sparse: &sparseBackend{
+			reader:   reader,
+			fileSize: fileSize,
+		},
+	}
+
+	// Read header to parse dictionaries
+	headerSize := min(512*1024, fileSize)
+	headerBuf := make([]byte, headerSize)
+	if _, err := reader.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("[sparse] seek to start: %w", err)
+	}
+	n, err := io.ReadFull(reader, headerBuf)
+	if err == io.ErrUnexpectedEOF {
+		headerBuf = headerBuf[:n]
+	} else if err != nil {
+		return nil, fmt.Errorf("[sparse] read header: %w", err)
+	}
+
+	if len(headerBuf) < compressedMinSize {
+		return nil, fmt.Errorf("[sparse] file too small: %d bytes", len(headerBuf))
+	}
+
+	data := headerBuf
+	headerSkip := uint64(0)
+
+	d.version = data[0]
+	if d.version == FileCompressionFormatV1 {
+		d.featureFlagBitmask = FeatureFlagBitmask(data[1])
+		data = data[2:]
+		headerSkip = 2
+		if d.featureFlagBitmask.Has(PageLevelCompressionEnabled) {
+			d.compPageValuesCount = data[0]
+			data = data[1:]
+			headerSkip = 3
+		}
+	}
+
+	if len(data) < 24 {
+		return nil, fmt.Errorf("[sparse] header too short")
+	}
+
+	d.wordsCount = binary.BigEndian.Uint64(data[:8])
+	d.emptyWordsCount = binary.BigEndian.Uint64(data[8:16])
+	pos := uint64(24)
+	dictSize := binary.BigEndian.Uint64(data[16:24])
+	d.serializedDictSize = dictSize
+
+	// Ensure we have enough data for both dictionaries
+	needed := headerSkip + pos + dictSize + 64*1024
+	if needed > uint64(len(headerBuf)) && needed <= uint64(fileSize) {
+		if _, err := reader.Seek(0, io.SeekStart); err != nil {
+			return nil, fmt.Errorf("[sparse] re-seek: %w", err)
+		}
+		headerBuf = make([]byte, min(int64(needed), fileSize))
+		n, err = io.ReadFull(reader, headerBuf)
+		if err == io.ErrUnexpectedEOF {
+			headerBuf = headerBuf[:n]
+		} else if err != nil {
+			return nil, fmt.Errorf("[sparse] re-read header: %w", err)
+		}
+		data = headerBuf[headerSkip:]
+	}
+
+	// --- Pattern dictionary ---
+	if pos+dictSize > uint64(len(data)) {
+		return nil, fmt.Errorf("[sparse] pattern dict overflows buffer")
+	}
+	dictData := data[pos : pos+dictSize]
+
+	if dictSize > 0 {
+		var depths []uint64
+		var patterns [][]byte
+		var dictPos uint64
+		var patternMaxDepth uint64
+
+		for dictPos < dictSize {
+			depth, ns := binary.Uvarint(dictData[dictPos:])
+			if depth > maxAllowedDepth {
+				return nil, fmt.Errorf("[sparse] pattern depth %d > max %d", depth, maxAllowedDepth)
+			}
+			depths = append(depths, depth)
+			if depth > patternMaxDepth {
+				patternMaxDepth = depth
+			}
+			dictPos += uint64(ns)
+			l, nn := binary.Uvarint(dictData[dictPos:])
+			dictPos += uint64(nn)
+			pat := make([]byte, l)
+			copy(pat, dictData[dictPos:dictPos+l])
+			patterns = append(patterns, pat)
+			dictPos += l
+		}
+		d.dictWords = len(patterns)
+
+		bitLen := int(patternMaxDepth)
+		if bitLen > 9 {
+			bitLen = 9
+		}
+		_, extraSlots, numSubTables := countHuffmanArena(depths, 0, 0, patternMaxDepth)
+		d.patArena = &patternArena{
+			codewords: make([]codeword, len(patterns)+numSubTables),
+			tables:    make([]patternTable, 1+numSubTables),
+			slots:     make([]*codeword, (1<<bitLen)+extraSlots),
+		}
+		d.dict = d.patArena.allocTable(bitLen)
+		if _, err = buildCondensedPatternTable(d.dict, depths, patterns, 0, 0, 0, patternMaxDepth, d.patArena); err != nil {
+			return nil, fmt.Errorf("[sparse] build pattern table: %w", err)
+		}
+	}
+
+	pos += dictSize
+
+	// --- Position dictionary ---
+	if pos+8 > uint64(len(data)) {
+		return nil, fmt.Errorf("[sparse] pos dict size overflows buffer")
+	}
+	posDictSize := binary.BigEndian.Uint64(data[pos : pos+8])
+	d.lenDictSize = posDictSize
+	pos += 8
+
+	// Ensure enough data for position dictionary
+	needed = headerSkip + pos + posDictSize + 1024
+	if needed > uint64(len(headerBuf)) && needed <= uint64(fileSize) {
+		if _, err := reader.Seek(0, io.SeekStart); err != nil {
+			return nil, fmt.Errorf("[sparse] re-seek for pos dict: %w", err)
+		}
+		headerBuf = make([]byte, min(int64(needed), fileSize))
+		n, err = io.ReadFull(reader, headerBuf)
+		if err == io.ErrUnexpectedEOF {
+			headerBuf = headerBuf[:n]
+		} else if err != nil {
+			return nil, fmt.Errorf("[sparse] re-read for pos dict: %w", err)
+		}
+		data = headerBuf[headerSkip:]
+	}
+
+	if pos+posDictSize > uint64(len(data)) {
+		return nil, fmt.Errorf("[sparse] pos dict overflows buffer")
+	}
+
+	if posDictSize > 0 {
+		posData := data[pos : pos+posDictSize]
+		var posDepths []uint64
+		var poss []uint64
+		var posMaxDepth uint64
+		var dictPos uint64
+
+		for dictPos < posDictSize {
+			depth, ns := binary.Uvarint(posData[dictPos:])
+			if depth > maxAllowedDepth {
+				return nil, fmt.Errorf("[sparse] pos depth %d > max %d", depth, maxAllowedDepth)
+			}
+			posDepths = append(posDepths, depth)
+			if depth > posMaxDepth {
+				posMaxDepth = depth
+			}
+			dictPos += uint64(ns)
+			dp, nn := binary.Uvarint(posData[dictPos:])
+			dictPos += uint64(nn)
+			poss = append(poss, dp)
+		}
+		d.dictLens = len(poss)
+
+		bitLen := int(posMaxDepth)
+		if bitLen > 9 {
+			bitLen = 9
+		}
+		_, extraSlots, numSubTables := countHuffmanArena(posDepths, 0, 0, posMaxDepth)
+		totalSlots := (1 << bitLen) + extraSlots
+		d.posArena = &posArena{
+			tables:     make([]posTable, 1+numSubTables),
+			entriesArr: make([]posEntry, totalSlots),
+			ptrsArr:    make([]*posTable, totalSlots),
+		}
+		d.posDict = d.posArena.allocTable(bitLen)
+		if _, err = buildPosTable(posDepths, poss, d.posDict, 0, 0, 0, posMaxDepth, d.posArena); err != nil {
+			return nil, fmt.Errorf("[sparse] build pos table: %w", err)
+		}
+	}
+
+	d.wordsStart = headerSkip + pos + posDictSize
+	return d, nil
+}
+
 func buildCondensedPatternTable(table *patternTable, depths []uint64, patterns [][]byte, code uint16, bits int, depth uint64, maxDepth uint64, arena *patternArena) (int, error) {
 	if maxDepth > maxAllowedDepth {
 		return 0, fmt.Errorf("buildCondensedPatternTable: maxDepth=%d is too deep", maxDepth)
@@ -523,7 +731,7 @@ func (d *Decompressor) ModTime() time.Time {
 }
 
 func (d *Decompressor) IsOpen() bool {
-	return d != nil && d.f != nil
+	return d != nil && (d.f != nil || d.sparse != nil)
 }
 
 func (d *Decompressor) checkFileLenChange() {
@@ -543,7 +751,21 @@ func (d *Decompressor) checkFileLenChange() {
 }
 
 func (d *Decompressor) Close() {
-	if d == nil || d.f == nil {
+	if d == nil {
+		return
+	}
+	if d.sparse != nil {
+		if closer, ok := d.sparse.reader.(io.Closer); ok {
+			closer.Close() //nolint:errcheck
+		}
+		d.sparse = nil
+		d.posDict = nil
+		d.dict = nil
+		d.patArena = nil
+		d.posArena = nil
+		return
+	}
+	if d.f == nil {
 		return
 	}
 	d.checkFileLenChange()
@@ -746,6 +968,11 @@ type Getter struct {
 	d           *Decompressor
 	fName       string
 	trace       bool
+
+	// sparse: when non-nil, Reset() fetches a data window from the reader
+	sparse *sparseBackend
+	// wordsStart is needed by sparse getter to convert word offsets to absolute file offsets
+	wordsStart uint64
 }
 
 func (g *Getter) MadvNormal() MadvDisabler {
@@ -868,14 +1095,20 @@ func (d *Decompressor) EmptyWordsCount() int { return int(d.emptyWordsCount) }
 // Getter is not thread-safe, but there can be multiple getters used simultaneously and concurrently
 // for the same decompressor
 func (d *Decompressor) MakeGetter() *Getter {
-	data := d.data[d.wordsStart:]
 	g := &Getter{
 		d:           d,
 		posDict:     d.posDict,
-		data:        data,
-		dataLen:     uint64(len(data)),
 		patternDict: d.dict,
 		fName:       d.FileName(),
+	}
+	if d.sparse != nil {
+		// Sparse mode: data is fetched on demand via Reset()
+		g.sparse = d.sparse
+		g.wordsStart = d.wordsStart
+	} else {
+		data := d.data[d.wordsStart:]
+		g.data = data
+		g.dataLen = uint64(len(data))
 	}
 	if d.posDict != nil {
 		g.posMask = d.posDict.mask
@@ -884,12 +1117,77 @@ func (d *Decompressor) MakeGetter() *Getter {
 	return g
 }
 
+// IsSparse returns true when this decompressor is backed by on-demand data
+// access rather than a local memory-mapped file.
+func (d *Decompressor) IsSparse() bool { return d != nil && d.sparse != nil }
+
+// GetRecord reads and decompresses a single record at the given word offset.
+// Works for both normal (local) and sparse (reader-backed) decompressors.
+func (d *Decompressor) GetRecord(wordOffset uint64) ([]byte, error) {
+	g := d.MakeGetter()
+	g.Reset(wordOffset)
+	if !g.HasNext() {
+		return nil, nil
+	}
+	buf, _ := g.Next(nil)
+	return buf, nil
+}
+
 func (g *Getter) DataLen() int {
 	return len(g.data)
 }
 
 func (g *Getter) Reset(offset uint64) {
+	if g.sparse != nil {
+		g.sparseReset(offset)
+		return
+	}
 	g.dataP = offset
+	g.dataBit = 0
+}
+
+// sparseReset fetches a data window from the sparse reader at the given word offset
+// and sets the getter's data slice to the fetched window. After this call,
+// dataP=0 because the fetched data starts at the requested offset.
+func (g *Getter) sparseReset(offset uint64) {
+	absOffset := int64(g.wordsStart + offset)
+	windowSize := int64(64 * 1024) // 64KB — generous for most records
+	if absOffset+windowSize > g.sparse.fileSize {
+		windowSize = g.sparse.fileSize - absOffset
+	}
+	if windowSize <= 0 {
+		g.data = nil
+		g.dataLen = 0
+		g.dataP = 0
+		g.dataBit = 0
+		return
+	}
+
+	g.sparse.readerMu.Lock()
+	defer g.sparse.readerMu.Unlock()
+
+	if _, err := g.sparse.reader.Seek(absOffset, io.SeekStart); err != nil {
+		g.data = nil
+		g.dataLen = 0
+		g.dataP = 0
+		g.dataBit = 0
+		return
+	}
+	buf := make([]byte, windowSize)
+	n, err := io.ReadFull(g.sparse.reader, buf)
+	if err == io.ErrUnexpectedEOF {
+		buf = buf[:n]
+	} else if err != nil {
+		g.data = nil
+		g.dataLen = 0
+		g.dataP = 0
+		g.dataBit = 0
+		return
+	}
+
+	g.data = buf[:n]
+	g.dataLen = uint64(n)
+	g.dataP = 0
 	g.dataBit = 0
 }
 

@@ -13,7 +13,7 @@ import (
 )
 
 // TestSparseProviderWithRealFiles tests the complete sparse loading path:
-// Index lookup → SparseDecompressor → record comparison with standard decompressor.
+// Index lookup → sparse Decompressor → record comparison with standard decompressor.
 //
 // This validates that the sparse provider can correctly serve records using
 // only an index file (.idx) and a remote reader (simulated by bytes.Reader),
@@ -53,7 +53,8 @@ func TestSparseProviderWithRealFiles(t *testing.T) {
 
 	// Create sparse decompressor from in-memory reader
 	reader := bytes.NewReader(fileData)
-	sd := seg.NewSparseDecompressor(reader, fileSize, "test-sparse-provider")
+	sd, err := seg.NewDecompressorFromReader(reader, fileSize, "test-sparse-provider")
+	require.NoError(t, err)
 	defer sd.Close()
 
 	// Test: look up specific block heights via index, then read via sparse decompressor
@@ -80,10 +81,10 @@ func TestSparseProviderWithRealFiles(t *testing.T) {
 		// Look up the word offset via the index (ordinal lookup)
 		wordOffset := idx.OrdinalLookup(blockOffset)
 
-		// Read via sparse decompressor
-		sparseRecord, err := sd.SparseGet(wordOffset)
-		require.NoError(t, err, "SparseGet failed for block %d at wordOffset %d", blockNum, wordOffset)
-		require.NotNil(t, sparseRecord, "SparseGet returned nil for block %d", blockNum)
+		// Read via sparse decompressor's GetRecord
+		sparseRecord, err := sd.GetRecord(wordOffset)
+		require.NoError(t, err, "GetRecord failed for block %d at wordOffset %d", blockNum, wordOffset)
+		require.NotNil(t, sparseRecord, "GetRecord returned nil for block %d", blockNum)
 
 		// Compare with standard record
 		standardRecord := standardRecords[blockOffset]
@@ -107,7 +108,7 @@ func (m *mockTorrentLookup) NewReaderForFile(fileName string) (io.ReadSeekCloser
 	if !ok {
 		return nil, 0, false
 	}
-	return io.NopCloser(bytes.NewReader(data)).(io.ReadSeekCloser), int64(len(data)), true
+	return nopCloserReadSeeker{bytes.NewReader(data)}, int64(len(data)), true
 }
 
 type nopCloserReadSeeker struct {

@@ -14,9 +14,9 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-// TestSparseDecompressor verifies that SparseDecompressor can read records
-// from an io.ReadSeeker (simulating torrent-backed access) and produce the
-// same output as the standard Decompressor.
+// TestSparseDecompressor verifies that a sparse Decompressor (created via
+// NewDecompressorFromReader) can read records from an io.ReadSeeker and
+// produce the same output as the standard Decompressor.
 func TestSparseDecompressor(t *testing.T) {
 	// Create a compressed segment file using the standard compressor
 	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "")
@@ -56,16 +56,18 @@ func TestSparseDecompressor(t *testing.T) {
 		standardRecords = append(standardRecords, word)
 	}
 
-	// Now read the same records via SparseDecompressor
+	// Now read the same records via sparse Decompressor
 	reader := bytes.NewReader(fileData)
-	sd := NewSparseDecompressor(reader, fileSize, "test-sparse")
+	sd, err := NewDecompressorFromReader(reader, fileSize, "test-sparse")
+	require.NoError(t, err)
 	defer sd.Close()
 
 	require.Equal(t, len(loremStrings), sd.Count(), "word count mismatch")
+	require.True(t, sd.IsSparse(), "should be sparse")
 
 	for i, expectedWord := range standardRecords {
-		got, err := sd.SparseGet(standardOffsets[i])
-		require.NoError(t, err, "SparseGet failed for record %d at offset %d", i, standardOffsets[i])
+		got, err := sd.GetRecord(standardOffsets[i])
+		require.NoError(t, err, "GetRecord failed for record %d at offset %d", i, standardOffsets[i])
 		require.Equal(t, expectedWord, got, "record %d mismatch", i)
 	}
 }
@@ -109,13 +111,14 @@ func TestSparseDecompressorRandomAccess(t *testing.T) {
 		records = append(records, word)
 	}
 
-	// Access records in reverse order
+	// Access records in reverse order via sparse Decompressor
 	reader := bytes.NewReader(fileData)
-	sd := NewSparseDecompressor(reader, int64(len(fileData)), "test-random")
+	sd, err := NewDecompressorFromReader(reader, int64(len(fileData)), "test-random")
+	require.NoError(t, err)
 	defer sd.Close()
 
 	for i := len(records) - 1; i >= 0; i-- {
-		got, err := sd.SparseGet(offsets[i])
+		got, err := sd.GetRecord(offsets[i])
 		require.NoError(t, err)
 		require.Equal(t, records[i], got, "record %d mismatch (reverse access)", i)
 	}
@@ -123,14 +126,15 @@ func TestSparseDecompressorRandomAccess(t *testing.T) {
 	// Access specific records (first, last, middle)
 	indices := []int{0, len(records) / 2, len(records) - 1}
 	for _, idx := range indices {
-		got, err := sd.SparseGet(offsets[idx])
+		got, err := sd.GetRecord(offsets[idx])
 		require.NoError(t, err)
 		require.Equal(t, records[idx], got, "record %d mismatch (spot check)", idx)
 	}
 }
 
-// TestSparseDecompressorMakeGetter verifies that MakeGetter returns a Getter
-// with the correct dictionaries (even though data is nil for sparse).
+// TestSparseDecompressorMakeGetter verifies that MakeGetter + Reset + Next
+// works transparently for sparse decompressors — the same path used by
+// domain/history code.
 func TestSparseDecompressorMakeGetter(t *testing.T) {
 	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "")
 	logger := log.New()
@@ -151,17 +155,47 @@ func TestSparseDecompressorMakeGetter(t *testing.T) {
 	fileData, err := os.ReadFile(file)
 	require.NoError(t, err)
 
+	// Get ground truth from standard decompressor
+	d, err := NewDecompressor(file)
+	require.NoError(t, err)
+	defer d.Close()
+
+	var records [][]byte
+	var offsets []uint64
+	g := d.MakeGetter()
+	offset := uint64(0)
+	for g.HasNext() {
+		offsets = append(offsets, offset)
+		word, nextOffset := g.Next(nil)
+		offset = nextOffset
+		records = append(records, word)
+	}
+
+	// Create sparse decompressor and test MakeGetter path
 	reader := bytes.NewReader(fileData)
-	sd := NewSparseDecompressor(reader, int64(len(fileData)), "test-getter")
+	sd, err := NewDecompressorFromReader(reader, int64(len(fileData)), "test-getter")
+	require.NoError(t, err)
 	defer sd.Close()
 
-	// Trigger init explicitly to check for errors
-	rec, err := sd.SparseGet(0)
-	require.NoError(t, err)
-	require.NotNil(t, rec, "should be able to read first record")
+	require.True(t, sd.IsSparse())
 
-	g := sd.MakeGetter()
-	require.NotNil(t, g)
-	// Pattern dict may be nil for small datasets — just verify the getter is functional
-	require.Equal(t, "test-getter", g.fName)
+	sg := sd.MakeGetter()
+	require.NotNil(t, sg)
+	require.Equal(t, "test-getter", sg.FileName())
+
+	// Verify Reset + HasNext + Next works for each record
+	for i, expected := range records {
+		sg.Reset(offsets[i])
+		require.True(t, sg.HasNext(), "HasNext should be true for record %d", i)
+		got, _ := sg.Next(nil)
+		require.Equal(t, expected, got, "record %d mismatch via MakeGetter path", i)
+	}
+
+	// Verify reverse access via MakeGetter
+	for i := len(records) - 1; i >= 0; i-- {
+		sg.Reset(offsets[i])
+		require.True(t, sg.HasNext())
+		got, _ := sg.Next(nil)
+		require.Equal(t, records[i], got, "record %d mismatch (reverse via MakeGetter)", i)
+	}
 }

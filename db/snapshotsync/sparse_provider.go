@@ -90,13 +90,20 @@ func (sp *SparseProvider) createSparseSegment(segType snaptype.Type, segFileName
 		return nil
 	}
 
-	// Create sparse decompressor
-	ds.sparseDecomp = seg.NewSparseDecompressor(reader, fileSize, segFileName)
+	// Create sparse-backed Decompressor (reads header, stores reader for on-demand access)
+	d, err := seg.NewDecompressorFromReader(reader, fileSize, segFileName)
+	if err != nil {
+		log.Debug("[sparse] failed to create decompressor from reader", "file", segFileName, "err", err)
+		reader.Close() //nolint:errcheck
+		return nil
+	}
+	ds.Decompressor = d
 
 	// Open index files — these must be locally present
 	if err := sp.openSparseIdx(ds); err != nil {
 		log.Debug("[sparse] index not available, closing reader", "file", segFileName, "err", err)
-		reader.Close() //nolint:errcheck
+		ds.Close()
+		ds.Decompressor = nil
 		return nil
 	}
 
