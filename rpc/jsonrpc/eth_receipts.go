@@ -48,6 +48,7 @@ var (
 	errBlockHashWithRange   = "can't specify fromBlock/toBlock with blockHash"
 	errExceedMaxTopics      = "exceed max topics"
 	errExceedLogQueryLimit  = "exceed max addresses or topics per search position"
+	errExceedLogResults     = "exceed maximum log results"
 )
 
 const (
@@ -192,7 +193,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		return nil, err
 	}
 
-	erigonLogs, err := api.getLogsV3(ctx, tx, begin, end, crit, api.BaseAPI.rangeLimit)
+	erigonLogs, err := api.getLogsV3(ctx, tx, begin, end, crit, api.BaseAPI.blockRangeLimit, api.BaseAPI.getLogsMaxResults)
 	if err != nil {
 		return nil, err
 	}
@@ -280,7 +281,7 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 	return out, nil
 }
 
-func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria, rangeLimit int) ([]*types.ErigonLog, error) {
+func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria, rangeLimit int, maxResults int) ([]*types.ErigonLog, error) {
 	logs := []*types.ErigonLog{} //nolint
 
 	if rangeLimit != 0 && (end-begin) > uint64(rangeLimit) {
@@ -353,6 +354,9 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 
 				borLogs = borLogs.Filter(addrMap, crit.Topics, 0)
 				for _, filteredLog := range borLogs {
+					if maxResults != 0 && len(logs) >= maxResults {
+						return nil, fmt.Errorf("%s: %d", errExceedLogResults, maxResults)
+					}
 					logs = append(logs, &types.ErigonLog{
 						Address:     filteredLog.Address,
 						Topics:      filteredLog.Topics,
@@ -390,6 +394,9 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		filtered := r.Logs.Filter(addrMap, crit.Topics, 0)
 
 		for _, filteredLog := range filtered {
+			if maxResults != 0 && len(logs) >= maxResults {
+				return nil, fmt.Errorf("%s: %d", errExceedLogResults, maxResults)
+			}
 			logs = append(logs, &types.ErigonLog{
 				Address:     filteredLog.Address,
 				Topics:      filteredLog.Topics,
