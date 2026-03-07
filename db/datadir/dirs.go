@@ -61,6 +61,8 @@ type Dirs struct {
 	CaplinHistory    string
 
 	Log string
+
+	ArbitrumWasm string
 }
 
 func New(datadir string) Dirs {
@@ -84,6 +86,7 @@ func New(datadir string) Dirs {
 		dirs.CaplinGenesis,
 		dirs.CaplinColumnData,
 		dirs.CaplinHistory,
+		dirs.ArbitrumWasm,
 		filepath.Join(datadir, "logs"),
 	)
 
@@ -128,6 +131,7 @@ func Open(datadir string) Dirs {
 		CaplinLatest:     filepath.Join(datadir, "caplin", "latest"),
 		CaplinGenesis:    filepath.Join(datadir, "caplin", "genesis-state"),
 		CaplinHistory:    filepath.Join(datadir, "caplin", "history"),
+		ArbitrumWasm:    filepath.Join(datadir, "arbitrumwasm"),
 	}
 	return dirs
 }
