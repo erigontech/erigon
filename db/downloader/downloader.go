@@ -1273,6 +1273,59 @@ func (d *Downloader) PeerID() []byte {
 
 func (d *Downloader) TorrentClient() *torrent.Client { return d.torrentClient }
 
+// TorrentByName returns the torrent for the given snapshot file name (e.g. "v1-000000-000500-headers.seg").
+func (d *Downloader) TorrentByName(name string) (*torrent.Torrent, bool) {
+	d.lock.RLock()
+	defer d.lock.RUnlock()
+	t, ok := d.torrentsByName[snapshotName(name)]
+	return t, ok
+}
+
+// AddIncompleteTorrentsFromDisk loads torrents from .torrent files even when
+// the corresponding data file is missing or incomplete. This is used for sparse
+// snapshot access where the data is fetched on-demand from the torrent network.
+func (d *Downloader) AddIncompleteTorrentsFromDisk(ctx context.Context) (added int, err error) {
+	d.log(log.LvlInfo, "[sparse] loading incomplete torrents for sparse access")
+	err = fs.WalkDir(
+		os.DirFS(d.snapDir()),
+		".",
+		func(path string, de fs.DirEntry, err error) error {
+			if ctx.Err() != nil {
+				return context.Cause(ctx)
+			}
+			if err != nil {
+				return nil
+			}
+			if de.IsDir() {
+				return nil
+			}
+			name, ok := strings.CutSuffix(path, ".torrent")
+			if !ok {
+				return nil
+			}
+			// Skip if already loaded
+			if _, exists := d.TorrentByName(name); exists {
+				return nil
+			}
+			mi, loadErr := d.loadMetainfoFromDisk(name)
+			if loadErr != nil {
+				return nil // skip unreadable torrent files
+			}
+			d.lock.Lock()
+			_, _, addErr := d.addTorrentFromMetainfo(mi, name, mi.HashInfoBytes())
+			d.lock.Unlock()
+			if addErr != nil {
+				d.log(log.LvlDebug, "[sparse] failed to add torrent", "name", name, "err", addErr)
+				return nil
+			}
+			added++
+			return nil
+		},
+	)
+	d.log(log.LvlInfo, "[sparse] loaded incomplete torrents", "count", added)
+	return
+}
+
 // For the downloader only.
 func openMdbx(
 	ctx context.Context,

@@ -255,6 +255,9 @@ type DirtySegment struct {
 
 	// only caplin state
 	filePath string
+
+	// sparse: on-demand decompressor backed by torrent reader (nil when local)
+	sparseDecomp *seg.SparseDecompressor
 }
 
 func NewDirtySegment(segType snaptype.Type, version snaptype.Version, from uint64, to uint64, frozen bool) *DirtySegment {
@@ -288,17 +291,7 @@ func (s *VisibleSegment) Get(globalId uint64) ([]byte, error) {
 	}
 	blockOffset := idxSlot.OrdinalLookup(globalId - idxSlot.BaseDataID())
 
-	gg := s.src.MakeGetter()
-	gg.Reset(blockOffset)
-	if !gg.HasNext() {
-		return nil, nil
-	}
-	buf, _ := gg.Next(nil)
-	if len(buf) == 0 {
-		return nil, nil
-	}
-
-	return buf, nil
+	return s.src.GetRecord(blockOffset)
 }
 
 func DirtySegmentLess(i, j *DirtySegment) bool {
@@ -375,6 +368,28 @@ func (s *DirtySegment) FileInfo(dir string) snaptype.FileInfo {
 
 func (s *DirtySegment) GetRange() (from, to uint64) { return s.from, s.to }
 func (s *DirtySegment) GetType() snaptype.Type      { return s.segType }
+
+// IsSparse returns true when this segment is backed by on-demand torrent data
+// rather than a locally mmapped file.
+func (s *DirtySegment) IsSparse() bool { return s.sparseDecomp != nil }
+
+// GetRecord reads and decompresses a single record at the given word offset
+// (relative to the data section start, as returned by Index.OrdinalLookup).
+// Works for both normal (local) and sparse (torrent-backed) segments.
+func (s *DirtySegment) GetRecord(wordOffset uint64) ([]byte, error) {
+	if s.sparseDecomp != nil {
+		return s.sparseDecomp.SparseGet(wordOffset)
+	}
+	// Normal path: use the local Decompressor
+	gg := s.MakeGetter()
+	gg.Reset(wordOffset)
+	if !gg.HasNext() {
+		return nil, nil
+	}
+	buf, _ := gg.Next(nil)
+	return buf, nil
+}
+
 func (s *DirtySegment) isSubSetOf(j *DirtySegment) bool {
 	return (j.from <= s.from && s.to <= j.to) && (j.from != s.from || s.to != j.to)
 }
@@ -391,6 +406,10 @@ func (s *DirtySegment) Open(dir string) (err error) {
 }
 
 func (s *DirtySegment) closeSeg() {
+	if s.sparseDecomp != nil {
+		s.sparseDecomp.Close()
+		s.sparseDecomp = nil
+	}
 	if s.Decompressor != nil {
 		s.Close()
 		s.Decompressor = nil
@@ -566,6 +585,9 @@ type RoSnapshots struct {
 	ready     ready
 	operators map[snaptype.Enum]*retireOperators
 	alignMin  bool // do we want to align all visible segments to the minimum available
+
+	// sparse: on-demand segment provider for data not locally available
+	sparseProvider *SparseProvider
 }
 
 // NewRoSnapshots - opens all snapshots. But to simplify everything:
@@ -1616,7 +1638,20 @@ func (s *RoSnapshots) ViewSingleFile(t snaptype.Type, blockNum uint64) (segment 
 		return seg, true, segmentRotx.Close
 	}
 	segmentRotx.Close()
+
+	// Sparse fallback: try to create an on-demand segment from the torrent network
+	if s.sparseProvider != nil {
+		if sparseSeg, found := s.sparseProvider.ViewSingleFile(t, blockNum); found {
+			return sparseSeg, true, noop
+		}
+	}
+
 	return nil, false, noop
+}
+
+// SetSparseProvider sets the provider for on-demand sparse snapshot access.
+func (s *RoSnapshots) SetSparseProvider(sp *SparseProvider) {
+	s.sparseProvider = sp
 }
 
 func (v *View) Segments(t snaptype.Type) []*VisibleSegment {

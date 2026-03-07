@@ -69,6 +69,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state"
@@ -410,6 +411,15 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	// Can happen in some configurations
 	if err := backend.setUpSnapDownloader(ctx, stack.Config(), config.Downloader); err != nil {
 		return nil, err
+	}
+
+	// Wire sparse snapshot provider if the downloader is available.
+	// This enables on-demand loading of snapshot data from the BitTorrent
+	// network for data not present locally.
+	if backend.downloader != nil {
+		sp := snapshotsync.NewSparseProvider(backend.downloader, config.Dirs.Snap)
+		allSnapshots.SetSparseProvider(sp)
+		logger.Info("[sparse] enabled on-demand snapshot access via BitTorrent")
 	}
 
 	kvRPC := remotedbserver.NewKvServer(ctx, backend.chainDB, allSnapshots, allBorSnapshots, temporalDb.Debug(), logger)
@@ -1299,6 +1309,13 @@ func (s *Ethereum) initDownloader(
 	if err != nil {
 		err = fmt.Errorf("adding torrents from disk: %w", err)
 		return
+	}
+
+	// Load incomplete torrents for sparse snapshot access. This ensures
+	// torrents are available in torrentsByName even when the .seg data
+	// file is missing, enabling on-demand loading from the network.
+	if _, sparseErr := s.downloader.AddIncompleteTorrentsFromDisk(ctx); sparseErr != nil {
+		s.logger.Warn("[sparse] failed to load incomplete torrents", "err", sparseErr)
 	}
 
 	if incomplete != 0 {

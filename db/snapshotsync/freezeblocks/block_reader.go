@@ -959,12 +959,11 @@ func (r *BlockReader) headerFromSnapshot(blockHeight uint64, sn *snapshotsync.Vi
 		return nil, buf, nil
 	}
 	headerOffset := index.OrdinalLookup(blockHeight - index.BaseDataID())
-	gg := sn.Src().MakeGetter()
-	gg.Reset(headerOffset)
-	if !gg.HasNext() {
-		return nil, buf, nil
+
+	buf, err := sn.Src().GetRecord(headerOffset)
+	if err != nil {
+		return nil, buf, err
 	}
-	buf, _ = gg.Next(buf[:0])
 	if len(buf) == 0 {
 		return nil, buf, nil
 	}
@@ -1004,12 +1003,10 @@ func (r *BlockReader) headerFromSnapshotByHash(hash common.Hash, sn *snapshotsyn
 		return nil, nil
 	}
 
-	gg := sn.Src().MakeGetter()
-	gg.Reset(headerOffset)
-	if !gg.HasNext() {
-		return nil, nil
+	buf, err := sn.Src().GetRecord(headerOffset)
+	if err != nil {
+		return nil, err
 	}
-	buf, _ = gg.Next(buf[:0])
 	if len(buf) > 1 && hash[0] != buf[0] {
 		return nil, nil
 	}
@@ -1061,12 +1058,10 @@ func BodyForTxnFromSnapshot(blockHeight uint64, sn *snapshotsync.VisibleSegment,
 
 	bodyOffset := index.OrdinalLookup(blockHeight - index.BaseDataID())
 
-	gg := sn.Src().MakeGetter()
-	gg.Reset(bodyOffset)
-	if !gg.HasNext() {
-		return nil, buf, nil
+	buf, err := sn.Src().GetRecord(bodyOffset)
+	if err != nil {
+		return nil, buf, err
 	}
-	buf, _ = gg.Next(buf[:0])
 	if len(buf) == 0 {
 		return nil, buf, nil
 	}
@@ -1087,12 +1082,10 @@ func BodyForStorageFromSnapshot(blockHeight uint64, sn *snapshotsync.VisibleSegm
 
 	bodyOffset := index.OrdinalLookup(blockHeight - index.BaseDataID())
 
-	gg := sn.Src().MakeGetter()
-	gg.Reset(bodyOffset)
-	if !gg.HasNext() {
-		return nil, buf, nil
+	buf, err := sn.Src().GetRecord(bodyOffset)
+	if err != nil {
+		return nil, buf, err
 	}
-	buf, _ = gg.Next(buf[:0])
 	if len(buf) == 0 {
 		return nil, buf, nil
 	}
@@ -1125,27 +1118,51 @@ func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txCount uint32, txsSeg *
 	if txCount == 0 {
 		return txs, senders, nil
 	}
-	txnOffset := idxTxnHash.OrdinalLookup(baseTxnID - idxTxnHash.BaseDataID())
 	if txsSeg.Src() == nil {
 		return nil, nil, nil
 	}
-	gg := txsSeg.Src().MakeGetter()
-	gg.Reset(txnOffset)
-	for i := uint32(0); i < txCount; i++ {
-		if !gg.HasNext() {
-			return nil, nil, nil
+
+	if txsSeg.Src().IsSparse() {
+		// Sparse path: read each txn individually via index lookup
+		baseID := idxTxnHash.BaseDataID()
+		for i := uint32(0); i < txCount; i++ {
+			offset := idxTxnHash.OrdinalLookup(baseTxnID - baseID + uint64(i))
+			buf, err = txsSeg.Src().GetRecord(offset)
+			if err != nil {
+				return nil, nil, err
+			}
+			if len(buf) < 1+20 {
+				return nil, nil, fmt.Errorf("segment %s has too short record: len(buf)=%d < 21", txsSeg.Src().FileName(), len(buf))
+			}
+			senders[i].SetBytes(buf[1 : 1+20])
+			txRlp := buf[1+20:]
+			txs[i], err = types.DecodeTransaction(txRlp)
+			if err != nil {
+				return nil, nil, err
+			}
+			txs[i].SetSender(accounts.InternAddress(senders[i]))
 		}
-		buf, _ = gg.Next(buf[:0])
-		if len(buf) < 1+20 {
-			return nil, nil, fmt.Errorf("segment %s has too short record: len(buf)=%d < 21", txsSeg.Src().FileName(), len(buf))
+	} else {
+		// Normal path: sequential read with a single getter
+		txnOffset := idxTxnHash.OrdinalLookup(baseTxnID - idxTxnHash.BaseDataID())
+		gg := txsSeg.Src().MakeGetter()
+		gg.Reset(txnOffset)
+		for i := uint32(0); i < txCount; i++ {
+			if !gg.HasNext() {
+				return nil, nil, nil
+			}
+			buf, _ = gg.Next(buf[:0])
+			if len(buf) < 1+20 {
+				return nil, nil, fmt.Errorf("segment %s has too short record: len(buf)=%d < 21", txsSeg.Src().FileName(), len(buf))
+			}
+			senders[i].SetBytes(buf[1 : 1+20])
+			txRlp := buf[1+20:]
+			txs[i], err = types.DecodeTransaction(txRlp)
+			if err != nil {
+				return nil, nil, err
+			}
+			txs[i].SetSender(accounts.InternAddress(senders[i]))
 		}
-		senders[i].SetBytes(buf[1 : 1+20])
-		txRlp := buf[1+20:]
-		txs[i], err = types.DecodeTransaction(txRlp)
-		if err != nil {
-			return nil, nil, err
-		}
-		txs[i].SetSender(accounts.InternAddress(senders[i]))
 	}
 
 	return txs, senders, nil
@@ -1155,12 +1172,14 @@ func (r *BlockReader) txnByID(txnID uint64, sn *snapshotsync.VisibleSegment, buf
 	idxTxnHash := sn.Src().Index(snaptype2.Indexes.TxnHash)
 
 	offset := idxTxnHash.OrdinalLookup(txnID - idxTxnHash.BaseDataID())
-	gg := sn.Src().MakeGetter()
-	gg.Reset(offset)
-	if !gg.HasNext() {
+
+	buf, err = sn.Src().GetRecord(offset)
+	if err != nil {
+		return nil, err
+	}
+	if len(buf) == 0 {
 		return nil, nil
 	}
-	buf, _ = gg.Next(buf[:0])
 	sender, txnRlp := buf[1:1+20], buf[1+20:]
 
 	txn, err = types.DecodeTransaction(txnRlp)
@@ -1188,13 +1207,14 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*snapshotsync.Vi
 			continue
 		}
 		offset := idxTxnHash.OrdinalLookup(txNumInFile)
-		gg := sn.Src().MakeGetter()
-		gg.Reset(offset)
-		// first byte txnHash check - reducing false-positives 256 times. Allows don't store and don't calculate full hash of entity - when checking many snapshots.
-		if !gg.MatchPrefix([]byte{txnHash[0]}) {
+		buf, err := sn.Src().GetRecord(offset)
+		if err != nil {
+			return nil, 0, 0, false, err
+		}
+		// first byte txnHash check - reducing false-positives 256 times.
+		if len(buf) < 1 || buf[0] != txnHash[0] {
 			continue
 		}
-		buf, _ = gg.Next(buf[:0])
 		sender, txnRlp := buf[1:1+20], buf[1+20:]
 
 		txn, err := types.DecodeTransaction(txnRlp)
