@@ -395,6 +395,27 @@ func BlockPostValidation(blockGasUsed, blobGasUsed uint64, checkReceipts bool, r
 				h.ReceiptHash = receiptHash
 				return nil
 			}
+			// Debug: dump receipt details for mismatch diagnosis
+			for i, r := range receipts {
+				logTopics := make([]string, 0)
+				for _, l := range r.Logs {
+					for _, t := range l.Topics {
+						logTopics = append(logTopics, t.Hex()[:10]+"...")
+					}
+				}
+				logger.Warn("[receiptHash debug] receipt details",
+					"idx", i, "type", r.Type, "status", r.Status,
+					"cumGas", r.CumulativeGasUsed, "gasUsed", r.GasUsed,
+					"logCount", len(r.Logs), "bloomNonZero", r.Bloom != types.Bloom{},
+					"logTopics", logTopics)
+				for j, l := range r.Logs {
+					logger.Warn("[receiptHash debug] log",
+						"idx", i, "logIdx", j,
+						"addr", l.Address.Hex(),
+						"topicCount", len(l.Topics),
+						"dataLen", len(l.Data))
+				}
+			}
 			if dbg.LogHashMismatchReason() {
 				ethutils.LogReceipts(log.LvlWarn, "receipt hash mismatch in BlockPostValidation", receipts, txns, chainConfig, h, logger)
 			}
