@@ -469,14 +469,9 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	ret, gasRemaining, err = evm.Run(contract, gasRemaining, nil, false)
 
 	// EIP-170: Contract code size limit
-	if err == nil && evm.chainRules.IsSpuriousDragon && len(ret) > evm.maxCodeSize() {
-		// Gnosis Chain prior to Shanghai didn't have EIP-170 enabled,
-		// but EIP-3860 (part of Shanghai) requires EIP-170.
-		if !evm.chainRules.IsAura || evm.config.HasEip3860(evm.chainRules) {
-			err = ErrMaxCodeSizeExceeded
-		}
+	if err == nil {
+		err = CheckMaxCodeSize(len(ret), evm.chainRules)
 	}
-
 	// Reject code starting with 0xEF if EIP-3541 is enabled.
 	if err == nil && evm.chainRules.IsLondon && len(ret) >= 1 && ret[0] == 0xEF {
 		err = ErrInvalidCode
@@ -510,13 +505,6 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	}
 
 	return ret, address, gasRemaining, err
-}
-
-func (evm *EVM) maxCodeSize() int {
-	if evm.chainConfig.Bor != nil && evm.chainConfig.Bor.IsAhmedabad(evm.Context.BlockNumber) {
-		return params.MaxCodeSizePostAhmedabad
-	}
-	return params.MaxCodeSize
 }
 
 // Create creates a new contract using code as deployment code.
