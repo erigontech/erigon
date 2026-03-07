@@ -449,6 +449,9 @@ type TemporalDebugTx interface {
 	// TraceKey returns stream of <txNum->value_after_txnum_change> for a given key
 	TraceKey(domain Domain, k []byte, fromTxNum, toTxNum uint64) (stream.U64V, error)
 
+	// HistoryKeyTxNumRange returns (key, txNum) pairs for every txNum at which a key changed in [fromTs, toTs)
+	HistoryKeyTxNumRange(name Domain, fromTs, toTs int, asc order.By, limit int) (it stream.KU64, err error)
+
 	DomainFiles(domain ...Domain) VisibleFiles
 	CurrentDomainVersion(domain Domain) version.Version
 	TxNumsInFiles(domains ...Domain) (minTxNum uint64)

@@ -48,8 +48,10 @@ var (
 
 	dbWriteMap bool
 
-	chainTipMode bool
-	syncCfg      = ethconfig.Defaults.Sync
+	chainTipMode    bool
+	clearCommitment bool
+	resume          bool
+	syncCfg         = ethconfig.Defaults.Sync
 )
 
 func must(err error) {
@@ -111,6 +113,14 @@ func withReset(cmd *cobra.Command) {
 
 func withSqueeze(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&squeeze, "squeeze", true, "use offset-pointers from commitment.kv to account.kv")
+}
+
+func withClearCommitment(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&clearCommitment, "clear-commitment", false, "remove commitment data from DB and delete state files, then exit without rebuilding")
+}
+
+func withResume(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&resume, "resume", false, "resume a previously interrupted commitment rebuild")
 }
 
 func withBucket(cmd *cobra.Command) {

@@ -261,6 +261,9 @@ func (tx *tx) GetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v
 func (tx *tx) TraceKey(domain kv.Domain, k []byte, fromTxNum, toTxNum uint64) (stream.U64V, error) {
 	panic("not implemented")
 }
+func (tx *tx) HistoryKeyTxNumRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (stream.KU64, error) {
+	panic("not implemented")
+}
 func (tx *tx) IIProgress(domain kv.InvertedIdx) uint64 { panic("not implemented") }
 func (tx *tx) RangeLatest(domain kv.Domain, from, to []byte, limit int) (stream.KV, error) {
 	panic("not implemented")
