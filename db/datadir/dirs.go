@@ -131,7 +131,7 @@ func Open(datadir string) Dirs {
 		CaplinLatest:     filepath.Join(datadir, "caplin", "latest"),
 		CaplinGenesis:    filepath.Join(datadir, "caplin", "genesis-state"),
 		CaplinHistory:    filepath.Join(datadir, "caplin", "history"),
-		ArbitrumWasm:    filepath.Join(datadir, "arbitrumwasm"),
+		ArbitrumWasm:     filepath.Join(datadir, "arbitrumwasm"),
 	}
 	return dirs
 }

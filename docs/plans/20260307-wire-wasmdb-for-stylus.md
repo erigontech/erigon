@@ -114,9 +114,9 @@ arbitrum:execution/stages/stageloop.go:681+        — callers pass OpenArbitrum
 
 ### Task 7: Verify and lint
 
-- [ ] Run `make lint`
-- [ ] Run `make erigon`
-- [ ] Verify all tests pass: `go test ./execution/exec/... ./arb/ethdb/wasmdb/... ./db/datadir/... -count=1`
+- [x] Run `make lint`
+- [x] Run `make erigon`
+- [x] Verify all tests pass: `go test ./execution/exec/... ./arb/ethdb/wasmdb/... ./db/datadir/... -count=1`
 
 ## Technical Details
 
