@@ -184,9 +184,16 @@ func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOpti
 func (cl *MockCl) InsertNewPayload(ctx context.Context, p *MockClPayload) (*enginetypes.PayloadStatus, error) {
 	elPayload := p.ExecutionPayload
 	clParentBlockRoot := p.ParentBeaconBlockRoot
+	// Forward execution requests from GetPayload to NewPayload.
+	// Without this, blocks containing real execution requests (e.g. withdrawal
+	// requests from EIP-7002) would fail validation due to requestsHash mismatch.
+	executionRequests := p.ExecutionRequests
+	if executionRequests == nil {
+		executionRequests = []hexutil.Bytes{}
+	}
 	return RetryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, nil,
 		func() (*enginetypes.PayloadStatus, enginetypes.EngineStatus, error) {
-			r, err := cl.engineApiClient.NewPayloadV5(ctx, elPayload, []common.Hash{}, clParentBlockRoot, []hexutil.Bytes{})
+			r, err := cl.engineApiClient.NewPayloadV5(ctx, elPayload, []common.Hash{}, clParentBlockRoot, executionRequests)
 			if err != nil {
 				return nil, "", err
 			}

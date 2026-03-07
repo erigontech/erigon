@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -118,13 +119,16 @@ func SpawnBuilderExecStage(ctx context0.Context, s *stagedsync.StageState, sd *e
 	// The filter makes speculative nonce/balance writes that may not match actual
 	// execution results (e.g., a tx passes the filter but fails in the EVM).
 	// These speculative writes must NOT pollute sd's commitment computation.
-	filterSd, err := execctx.NewSharedDomains(ctx, tx, logger)
+	// filterSd must be backed by its own MemoryBatch to ensure full isolation.
+	filterMb := membatchwithdb.NewMemoryBatch(tx, cfg.tmpdir, logger)
+	defer filterMb.Close()
+	filterSd, err := execctx.NewSharedDomains(ctx, filterMb, logger)
 	if err != nil {
 		return err
 	}
 	defer filterSd.Close()
-	filterWriter := state.NewWriter(filterSd.AsPutDel(tx), nil, txNum)
-	filterReader := state.NewReaderV3(filterSd.AsGetter(tx))
+	filterWriter := state.NewWriter(filterSd.AsPutDel(filterMb), nil, txNum)
+	filterReader := state.NewReaderV3(filterSd.AsGetter(filterMb))
 
 	ibs := state.New(stateReader)
 	defer ibs.Release(false)
@@ -232,9 +236,8 @@ func SpawnBuilderExecStage(ctx context0.Context, s *stagedsync.StageState, sd *e
 	blockHeight := block.NumberU64()
 
 	// Compute state root directly from the domain writes accumulated during
-	// block assembly. The simSd has all state changes from Initialize,
-	// AddTransactions, and FinalizeBlockExecution — no re-execution needed.
-	// txNum has been advanced by advanceTxNum at each transaction boundary.
+	// block assembly. All state changes flow through CommitBlock in
+	// AssembleBlock — no re-execution needed.
 	rh, err := sd.ComputeCommitment(ctx, tx, false, blockHeight, txNum, s.LogPrefix(), nil)
 	if err != nil {
 		return fmt.Errorf("compute commitment failed: %w", err)

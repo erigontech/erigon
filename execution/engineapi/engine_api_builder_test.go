@@ -26,6 +26,8 @@ import (
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/stretchr/testify/require"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/abi/bind"
@@ -361,5 +363,66 @@ func TestEngineApiHighGasContractsFillBlock(t *testing.T) {
 		balance, err := eat.RpcApiClient.GetBalance(receiver, rpc.LatestBlock)
 		require.NoError(t, err)
 		require.Equal(t, big.NewInt(1000), balance) // 500 + 500
+	})
+}
+
+// TestEngineApiBuiltBlockWithWithdrawalRequest sends a transaction to the EIP-7002
+// withdrawal request system contract and verifies the builder produces a block that
+// passes validation via NewPayload (ExecV3). This exercises the builder's state root
+// computation when system calls during finalization read state written by user txns.
+func TestEngineApiBuiltBlockWithWithdrawalRequest(t *testing.T) {
+	eat := engineapitester.DefaultEngineApiTester(t)
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		sender := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
+
+		// Build calldata: 48-byte validator pubkey + 8-byte amount (little-endian).
+		// Use a fake pubkey (all 0x01) and amount=0 (full exit).
+		var calldata []byte
+		pubkey := make([]byte, 48)
+		for i := range pubkey {
+			pubkey[i] = 0x01
+		}
+		amount := make([]byte, 8) // 0 = full exit
+		calldata = append(calldata, pubkey...)
+		calldata = append(calldata, amount...)
+
+		// Get current nonce and gas price.
+		nonce, err := eat.RpcApiClient.GetTransactionCount(sender, rpc.PendingBlock)
+		require.NoError(t, err)
+		gasPrice, err := eat.RpcApiClient.GasPrice()
+		require.NoError(t, err)
+		gasPriceU256, _ := uint256.FromBig(gasPrice)
+
+		// Send tx to withdrawal request contract with 0.5 ETH.
+		withdrawalRequestAddr := params.WithdrawalRequestAddress.Value()
+		txn := &types.LegacyTx{
+			CommonTx: types.CommonTx{
+				Nonce:    nonce.Uint64(),
+				GasLimit: 1_000_000,
+				To:       &withdrawalRequestAddr,
+				Value:    uint256.NewInt(500_000_000_000_000_000), // 0.5 ETH
+				Data:     calldata,
+			},
+			GasPrice: gasPriceU256,
+		}
+		signer := types.LatestSignerForChainID(eat.ChainConfig.ChainID)
+		signedTxn, err := types.SignTx(txn, *signer, eat.CoinbaseKey)
+		require.NoError(t, err)
+
+		_, err = eat.RpcApiClient.SendTransaction(signedTxn)
+		require.NoError(t, err)
+
+		// Build canonical block — this builds via the builder AND validates via NewPayload.
+		// If the builder's ComputeCommitment produces a different state root than ExecV3,
+		// InsertNewPayload will return INVALID and BuildCanonicalBlock will fail.
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+
+		// Verify the withdrawal request tx was included.
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, payload.ExecutionPayload, signedTxn.Hash())
+		require.NoError(t, err)
+
+		// Verify execution requests are present in the payload (Prague includes withdrawal requests).
+		require.NotNil(t, payload.ExecutionRequests)
 	})
 }

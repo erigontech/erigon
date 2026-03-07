@@ -156,8 +156,14 @@ func (ba *BlockAssembler) BalIO() *state.VersionedIO {
 }
 
 func (ba *BlockAssembler) Initialize(ibs *state.IntraBlockState, tx kv.TemporalTx, logger log.Logger) error {
+	// Use NoopWriter for FinalizeTx during initialization. Intermediate state
+	// writes to SharedDomains would become stale if later system calls (e.g.
+	// EIP-7002 dequeue) revert storage slots back to their original values,
+	// because CommitBlock's blockOriginStorage==dirtyStorage check skips the
+	// undo write. All final state is correctly written by CommitBlock in
+	// AssembleBlock using the real writer.
 	if err := protocol.InitializeBlockExecution(ba.cfg.Engine,
-		NewChainReader(ba.cfg.ChainConfig, tx, ba.cfg.BlockReader, logger), ba.Header, ba.cfg.ChainConfig, ibs, ba.writer(), logger, nil); err != nil {
+		NewChainReader(ba.cfg.ChainConfig, tx, ba.cfg.BlockReader, logger), ba.Header, ba.cfg.ChainConfig, ibs, state.NewNoopWriter(), logger, nil); err != nil {
 		return err
 	}
 	if ba.advanceTxNum != nil {
@@ -190,7 +196,11 @@ func (ba *BlockAssembler) AddTransactions(
 	signer := types.MakeSigner(ba.cfg.ChainConfig, header.Number.Uint64(), header.Time)
 
 	var coalescedLogs types.Logs
-	writer := ba.writer()
+	// Use NoopWriter for FinalizeTx after each user transaction. See
+	// Initialize comment for rationale — intermediate writes to
+	// SharedDomains become stale when system calls revert storage slots.
+	// CommitBlock in AssembleBlock writes all final state correctly.
+	writer := state.NewNoopWriter()
 	recordTxIO := func(balIO *state.VersionedIO) {
 		if balIO != nil {
 			ba.balIO = ba.balIO.Merge(ibs.TxIO())
