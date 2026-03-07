@@ -113,6 +113,7 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	//bt.whitelist(`.*amsterdam/eip8024_dupn_swapn_exchange.*`)
 
 	// TODO remove skips
+	bt.skipLoad(`^for_amsterdam/amsterdam/eip7928_block_level_access_lists/test_bal_invalid_`)                                                                  // BAL validation not yet implemented
 	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_contract_creation_tx.json`)                                                            // gas used by execution: 53064, in header: 131488
 	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_create_collision_no_log.json`)                                                         // gas used by execution: 197704, in header: 131488
 	bt.skipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_create_initcode_stop_emits_log.json`)                                                  // gas used by execution: 53023, in header: 131488

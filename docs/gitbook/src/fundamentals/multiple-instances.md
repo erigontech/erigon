@@ -92,7 +92,7 @@ For multiple instances, consider adjusting database parameters to reduce resourc
 **Default Port Allocation:**
 
 | Component | Default Port | Protocol | Purpose                  |
-| --------- | ------------ | -------- | ------------------------ |
+|-----------|--------------|----------|--------------------------|
 | Engine    | 9090         | TCP      | gRPC Server (Private)    |
 | Engine    | 42069        | TCP/UDP  | BitTorrent (Public)      |
 | Engine    | 8551         | TCP      | Engine API (Private)     |
