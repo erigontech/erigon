@@ -120,6 +120,11 @@ var (
 		Usage: "generate block access list",
 		Value: false,
 	}
+	ExperimentalQmtreeFlag = cli.BoolFlag{
+		Name:  "experimental.qmtree",
+		Usage: "compute qmtree proof roots alongside MPT commitment (proof of execution + transition)",
+		Value: false,
+	}
 
 	// Throttling Flags
 	SyncLoopThrottleFlag = cli.StringFlag{
@@ -279,6 +284,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 
 	cfg.StateStream = !ctx.Bool(StateStreamDisableFlag.Name)
 	cfg.ExperimentalBAL = ctx.Bool(ExperimentalBALFlag.Name)
+	cfg.ExperimentalQmtree = ctx.Bool(ExperimentalQmtreeFlag.Name)
 	if bodyCacheLim := ctx.String(BodyCacheLimitFlag.Name); bodyCacheLim != "" {
 		if err := cfg.Sync.BodyCacheLimit.UnmarshalText([]byte(bodyCacheLim)); err != nil {
 			utils.Fatalf("Invalid bodyCacheLimit provided: %v", err)
@@ -371,6 +377,9 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	}
 	if v := f.Bool(ExperimentalBALFlag.Name, false, ExperimentalBALFlag.Usage); v != nil {
 		cfg.ExperimentalBAL = *v
+	}
+	if v := f.Bool(ExperimentalQmtreeFlag.Name, false, ExperimentalQmtreeFlag.Usage); v != nil {
+		cfg.ExperimentalQmtree = *v
 	}
 
 	if v, _ := f.GetBool(utils.ChaosMonkeyFlag.Name); v {

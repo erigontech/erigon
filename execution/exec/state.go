@@ -124,6 +124,12 @@ type Worker struct {
 	dirs datadir.Dirs
 
 	metrics *WorkerMetrics
+
+	// Proof-of-execution: when enabled, attach ExecHasher and TransitionHasher
+	// to the EVM for each transaction execution.
+	qmtreeEnabled    bool
+	execHasher       *vm.ExecHasher
+	transitionHasher *vm.TransitionHasher
 }
 
 func NewWorker(ctx context.Context, background bool, metrics *WorkerMetrics, chainDb kv.TemporalRoDB, in *QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *ResultsQueue, engine rules.Engine, dirs datadir.Dirs, logger log.Logger) *Worker {
@@ -154,6 +160,15 @@ func NewWorker(ctx context.Context, background bool, metrics *WorkerMetrics, cha
 	w.runnable.Store(true)
 	w.ibs = state.New(w.stateReader)
 	return w
+}
+
+// EnableQmtree enables proof-of-execution hashing for this worker.
+// When enabled, ExecHasher and TransitionHasher are attached to the EVM
+// for each transaction execution.
+func (rw *Worker) EnableQmtree() {
+	rw.qmtreeEnabled = true
+	rw.execHasher = vm.GetExecHasher()
+	rw.transitionHasher = vm.GetTransitionHasher()
 }
 
 func (rw *Worker) Pause() {
@@ -431,7 +446,22 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 		}
 	}
 
+	// Attach proof-of-execution hashers before transaction execution.
+	if rw.qmtreeEnabled && txIndex >= 0 && !txTask.IsBlockEnd() {
+		rw.execHasher.Reset()
+		rw.evm.SetExecHasher(rw.execHasher)
+		rw.transitionHasher.Reset()
+		rw.evm.SetTransitionHasher(rw.transitionHasher)
+	}
+
 	result := txTask.Execute(rw.evm, rw.engine, rw.genesis, rw.ibs, rw.stateWriter, rw.chainConfig, rw.chain, rw.dirs, true)
+
+	// Detach hashers after execution (ExecHash/TransitionHash are already
+	// finalized inside TransitionDb and stored on ExecutionResult).
+	if rw.qmtreeEnabled {
+		rw.evm.SetExecHasher(nil)
+		rw.evm.SetTransitionHasher(nil)
+	}
 
 	if result.Task == nil {
 		result.Task = txTask

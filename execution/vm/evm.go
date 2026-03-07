@@ -93,6 +93,9 @@ type EVM struct {
 
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
+
+	execHasher       *ExecHasher       // nil = proof-of-execution disabled
+	transitionHasher *TransitionHasher // nil = proof-of-transition disabled
 }
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
@@ -168,6 +171,19 @@ func (evm *EVM) SetPrecompiles(precompiles PrecompiledContracts) {
 	evm.precompiles = precompiles
 }
 
+// SetExecHasher sets the execution hasher for proof-of-execution.
+// When non-nil, every opcode and precompile call is hashed.
+func (evm *EVM) SetExecHasher(h *ExecHasher) { evm.execHasher = h }
+
+// ExecHasher returns the current execution hasher, or nil if disabled.
+func (evm *EVM) ExecHasher() *ExecHasher { return evm.execHasher }
+
+// SetTransitionHasher sets the transition hasher for proof-of-transition.
+func (evm *EVM) SetTransitionHasher(h *TransitionHasher) { evm.transitionHasher = h }
+
+// TransitionHasher returns the current transition hasher, or nil if disabled.
+func (evm *EVM) TransitionHasher() *TransitionHasher { return evm.transitionHasher }
+
 func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts.Address, addr accounts.Address, input []byte, gas uint64, value uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {
 	if evm.abort.Load() {
 		return ret, leftOverGas, nil
@@ -238,6 +254,9 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 			evm.intraBlockState.CreateAccount(addr, false)
 		}
 		evm.Context.Transfer(evm.intraBlockState, caller, addr, value, bailout, evm.chainRules)
+		if evm.transitionHasher != nil && !value.IsZero() {
+			evm.transitionHasher.HashTransfer(evm.depth, caller, addr, &value)
+		}
 	} else if typ == STATICCALL {
 		// We do an AddBalance of zero here, just in order to trigger a touch.
 		// This doesn't matter on Mainnet, where all empties are gone at the time of Byzantium,
@@ -249,6 +268,9 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	// It is allowed to call precompiles, even via delegatecall
 	if isPrecompile {
 		ret, gas, err = RunPrecompiledContract(p, input, gas, evm.Config().Tracer)
+		if err == nil && evm.execHasher != nil {
+			evm.execHasher.HashPrecompile(evm.depth, addr, input, ret, gas)
+		}
 	} else if len(code) == 0 {
 		// If the account has no code, we can abort here
 		// The depth-check is already done, and precompiles handled above
@@ -451,6 +473,9 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 		evm.intraBlockState.SetNonce(address, 1)
 	}
 	evm.Context.Transfer(evm.intraBlockState, caller, address, value, bailout, evm.chainRules)
+	if evm.transitionHasher != nil && !value.IsZero() {
+		evm.transitionHasher.HashTransfer(evm.depth, caller, address, &value)
+	}
 
 	// Initialise a new contract and set the code that is to be used by the EVM.
 	// The contract is a scoped environment for this execution context only.

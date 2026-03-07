@@ -624,6 +624,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 					cfg.Sync,
 					nil,
 					false, /*experimentalBAL*/
+					false, /*experimentalQmtree*/
 				),
 				stagedsync.StageSendersCfg(mock.ChainConfig, cfg.Sync, false /* badBlockHalt */, dirs.Tmp, pruneMode, mock.BlockReader, mock.sentriesClient.Hd),
 				builderstages.StageBuilderExecCfg(builderStatePos, nil /* notifier */, mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, interrupt, param.PayloadId, mock.TxPool, mock.BlockReader),
@@ -669,6 +670,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 				cfg.Sync,
 				nil,
 				false, /*experimentalBAL*/
+				false, /*experimentalQmtree*/
 			),
 			stagedsync.StageTxLookupCfg(pruneMode, dirs.Tmp, mock.BlockReader),
 			stagedsync.StageFinishCfg(forkValidator),
@@ -746,6 +748,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 				cfg.Sync,
 				nil,
 				/*experimentalBAL*/ false,
+				/*experimentalQmtree*/ false,
 			),
 			stagedsync.StageSendersCfg(mock.ChainConfig, cfg.Sync, false /* badBlockHalt */, dirs.Tmp, pruneMode, mock.BlockReader, mock.sentriesClient.Hd),
 			builderstages.StageBuilderExecCfg(miner, nil, mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, nil, 0, mock.TxPool, mock.BlockReader),

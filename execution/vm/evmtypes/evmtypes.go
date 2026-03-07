@@ -75,6 +75,9 @@ type ExecutionResult struct {
 	FeeTipped            uint256.Int
 	FeeBurnt             uint256.Int
 	BurntContractAddress accounts.Address
+	ExecHash             common.Hash // Proof-of-execution hash (zero if disabled)
+	ExecOps              uint64      // Number of EVM opcodes hashed
+	TransitionHash       common.Hash // Proof-of-transition hash (zero if disabled)
 
 	// SelfDestructedWithBalance holds accounts that were selfdestructed during
 	// execution but received ETH after the SELFDESTRUCT opcode ran (EIP-7708).

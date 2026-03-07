@@ -235,7 +235,8 @@ type Config struct {
 
 	StateStream bool
 
-	ExperimentalBAL bool
+	ExperimentalBAL    bool
+	ExperimentalQmtree bool // compute qmtree proof roots alongside MPT commitment
 
 	// URL to connect to Heimdall node
 	HeimdallURL string

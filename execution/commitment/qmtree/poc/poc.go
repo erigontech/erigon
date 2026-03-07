@@ -123,13 +123,14 @@ func (r *Runner) Run(ctx context.Context, fromBlock, toBlock uint64) ([]BlockRes
 	// We need to know the starting serial number. The qmtree expects
 	// contiguous serial numbers starting from 0. We use a running counter.
 	var nextSN uint64
+	var previousLeafHash common.Hash // chain inclusion: each leaf commits to its predecessor
 
 	for block := fromBlock; block <= toBlock; block++ {
 		if ctx.Err() != nil {
 			return results, ctx.Err()
 		}
 
-		br, err := r.processBlock(ctx, tx, tnr, tree, hasher, block, &nextSN)
+		br, err := r.processBlock(ctx, tx, tnr, tree, hasher, block, &nextSN, &previousLeafHash)
 		if err != nil {
 			return results, fmt.Errorf("block %d: %w", block, err)
 		}
@@ -177,6 +178,7 @@ func (r *Runner) processBlock(
 	hasher *qmtree.Keccak256Hasher,
 	block uint64,
 	nextSN *uint64,
+	previousLeafHash *common.Hash,
 ) (BlockResult, error) {
 	start := time.Now()
 
@@ -199,10 +201,16 @@ func (r *Runner) processBlock(
 			return BlockResult{}, fmt.Errorf("txnum %d: %w", txNum, err)
 		}
 
-		entry := NewStateEntry(*nextSN, changes)
+		opts := LeafHashInputs{
+			PreviousLeafHash: *previousLeafHash,
+			// PreStateHash and TransitionHash are zero in state-only mode.
+			// Full mode (exec_runner.go) provides these.
+		}
+		entry := NewStateEntry(*nextSN, changes, opts)
 		if _, err := tree.AppendEntry(entry); err != nil {
 			return BlockResult{}, fmt.Errorf("append sn=%d txnum=%d: %w", *nextSN, txNum, err)
 		}
+		*previousLeafHash = entry.Hash()
 		*nextSN++
 		totalChanges += len(changes)
 		txCount++

@@ -473,6 +473,14 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 
 	msg := st.msg
 	sender := msg.From()
+
+	// Proof-of-transition: emit TX_CONTEXT and GAS_PURCHASE records.
+	th := st.evm.TransitionHasher()
+	if th != nil {
+		gasVal, _ := u256.MulOverflow(u256.U64(msg.Gas()), *st.gasPrice)
+		th.HashTxContext(st.evm.TxContext.TxHash, 0, msg.Nonce(), msg.Gas(), st.feeCap, st.tipCap, &st.value)
+		th.HashGasPurchase(&gasVal, &st.evm.BlobFee)
+	}
 	contractCreation := msg.To().IsNil()
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
@@ -486,6 +494,9 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 			return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 		}
 		st.state.SetNonce(msg.From(), nonce+1)
+		if th != nil {
+			th.HashNonceIncrement(nonce + 1)
+		}
 	}
 
 	// set code tx
@@ -508,6 +519,10 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	}
 	if st.gasRemaining < intrinsicGasResult.RegularGas || st.gasRemaining < intrinsicGasResult.FloorGasCost {
 		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, max(intrinsicGasResult.RegularGas, intrinsicGasResult.FloorGasCost))
+	}
+
+	if th != nil {
+		th.HashIntrinsicGas(intrinsicGasResult.RegularGas, intrinsicGasResult.FloorGasCost)
 	}
 
 	verifiedAuthorities, err := st.verifyAuthorities(auths, contractCreation, rules.ChainID.String())
@@ -540,9 +555,58 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	// Execute the preparatory steps for state transition which includes:
 	// - prepare accessList(post-berlin; eip-7702)
 	// - reset transient storage(eip 1153)
-	if err = st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), accessTuples, verifiedAuthorities); err != nil {
+	precompiles := vm.ActivePrecompiles(rules)
+	if err = st.state.Prepare(rules, msg.From(), coinbase, msg.To(), precompiles, accessTuples, verifiedAuthorities); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 	}
+
+	if th != nil {
+		// Emit ACCESS_WARM records for all warmed addresses (sorted).
+		addrSet := make(map[common.Address]struct{})
+		addrSet[sender.Value()] = struct{}{}
+		addrSet[coinbase.Value()] = struct{}{}
+		if !msg.To().IsNil() {
+			addrSet[msg.To().Value()] = struct{}{}
+		}
+		for _, p := range precompiles {
+			addrSet[p.Value()] = struct{}{}
+		}
+		for _, tuple := range accessTuples {
+			addrSet[tuple.Address] = struct{}{}
+		}
+		sortedAddrs := make([]common.Address, 0, len(addrSet))
+		for a := range addrSet {
+			sortedAddrs = append(sortedAddrs, a)
+		}
+		slices.SortFunc(sortedAddrs, func(a, b common.Address) int {
+			return bytes.Compare(a[:], b[:])
+		})
+		for _, a := range sortedAddrs {
+			th.HashAccessWarm(accounts.InternAddress(a))
+		}
+
+		// Emit ACCESS_SLOT records sorted by (address, slot).
+		type addrSlot struct {
+			addr common.Address
+			slot common.Hash
+		}
+		var slots []addrSlot
+		for _, tuple := range accessTuples {
+			for _, sk := range tuple.StorageKeys {
+				slots = append(slots, addrSlot{tuple.Address, sk})
+			}
+		}
+		slices.SortFunc(slots, func(a, b addrSlot) int {
+			if c := bytes.Compare(a.addr[:], b.addr[:]); c != 0 {
+				return c
+			}
+			return bytes.Compare(a.slot[:], b.slot[:])
+		})
+		for _, s := range slots {
+			th.HashAccessSlot(accounts.InternAddress(s.addr), s.slot)
+		}
+	}
+
 	var (
 		ret   []byte
 		vmerr error // vm errors do not effect consensus and are therefore not assigned to err
@@ -558,6 +622,19 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
 	}
 
+	// Finalize the exec hasher (if present) and embed the result in the
+	// transition hash. The exec hash is also stored on ExecutionResult so
+	// the caller doesn't need to call Finalize() separately.
+	var execHash [32]byte
+	var execOps uint64
+	if eh := st.evm.ExecHasher(); eh != nil {
+		execHash, execOps = eh.Finalize()
+	}
+	if th != nil {
+		th.HashExecHash(execHash, execOps)
+	}
+
+	var effectiveRefund uint64
 	if refunds && !gasBailout {
 		refundQuotient := params.RefundQuotient
 		if rules.IsLondon {
@@ -566,8 +643,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		gasUsed := st.gasUsed()
 		st.blockGasUsed = gasUsed
 		stateRefund := st.state.GetRefund()
-		refund := min(gasUsed/refundQuotient, stateRefund)
-		gasUsed = gasUsed - refund
+		effectiveRefund = min(gasUsed/refundQuotient, stateRefund)
+		gasUsed = gasUsed - effectiveRefund
 		if rules.IsPrague {
 			gasUsed = max(intrinsicGasResult.FloorGasCost, gasUsed)
 		}
@@ -588,6 +665,10 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	// Also return remaining gas to the block gas counter so it is
 	// available for the next transaction.
 	st.gp.AddGas(st.initialGas - st.blockGasUsed)
+
+	if th != nil {
+		th.HashGasAccounting(st.gasUsed(), st.state.GetRefund(), effectiveRefund, st.gasRemaining, st.blockGasUsed)
+	}
 
 	effectiveTip := *st.gasPrice
 	if rules.IsLondon {
@@ -629,6 +710,14 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		fmt.Printf("%d (%d.%d) Fees %x: tipped: %d, burnt: %d, price: %d, gas: %d\n", st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), &tipAmount, &burnAmount, st.gasPrice, st.gasUsed())
 	}
 
+	// Proof-of-transition: emit FEE_DISTRIBUTION and finalize.
+	var transitionHash common.Hash
+	if th != nil {
+		gasReturnValue := u256.Mul(u256.U64(st.gasRemaining), *st.gasPrice)
+		th.HashFeeDistribution(coinbase, &tipAmount, burntContractAddress, &burnAmount, &gasReturnValue)
+		transitionHash = th.Finalize()
+	}
+
 	result = &evmtypes.ExecutionResult{
 		ReceiptGasUsed:      st.gasUsed(),
 		BlockGasUsed:        st.blockGasUsed,
@@ -639,6 +728,9 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		CoinbaseInitBalance: coinbaseInitBalance,
 		FeeTipped:           tipAmount,
 		FeeBurnt:            burnAmount,
+		ExecHash:            common.Hash(execHash),
+		ExecOps:             execOps,
+		TransitionHash:      transitionHash,
 	}
 
 	result.BurntContractAddress = burntContractAddress

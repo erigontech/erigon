@@ -104,6 +104,102 @@ func TestStateEntryImplementsEntry(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Four-component leaf hash
+// ---------------------------------------------------------------------------
+
+func TestStateEntry_FourComponentLeaf(t *testing.T) {
+	changes := []StateChange{
+		{Domain: kv.AccountsDomain, Key: []byte{0x01}, Value: []byte{0xAA}},
+	}
+
+	// Without opts: leaf = stateChangeHash (backward compatible)
+	eOld := NewStateEntry(0, changes)
+
+	// With opts: leaf = hash(preState || stateChange || transition || prevLeaf)
+	opts := LeafHashInputs{
+		PreStateHash:     common.HexToHash("0x1111"),
+		TransitionHash:   common.HexToHash("0x2222"),
+		PreviousLeafHash: common.HexToHash("0x3333"),
+	}
+	eNew := NewStateEntry(0, changes, opts)
+
+	require.NotEqual(t, eOld.Hash(), eNew.Hash(),
+		"four-component leaf must differ from stateChangeHash-only leaf")
+	require.NotEqual(t, common.Hash{}, eNew.Hash())
+}
+
+func TestStateEntry_FourComponentDeterminism(t *testing.T) {
+	changes := []StateChange{
+		{Domain: kv.AccountsDomain, Key: []byte{0x01}, Value: []byte{0xAA}},
+	}
+	opts := LeafHashInputs{
+		PreStateHash:     common.HexToHash("0x1111"),
+		TransitionHash:   common.HexToHash("0x2222"),
+		PreviousLeafHash: common.HexToHash("0x3333"),
+	}
+
+	e1 := NewStateEntry(0, changes, opts)
+	e2 := NewStateEntry(0, changes, opts)
+	require.Equal(t, e1.Hash(), e2.Hash(), "same inputs must produce same leaf hash")
+}
+
+func TestStateEntry_FourComponentSensitivity(t *testing.T) {
+	changes := []StateChange{
+		{Domain: kv.AccountsDomain, Key: []byte{0x01}, Value: []byte{0xAA}},
+	}
+	base := LeafHashInputs{
+		PreStateHash:     common.HexToHash("0x1111"),
+		TransitionHash:   common.HexToHash("0x2222"),
+		PreviousLeafHash: common.HexToHash("0x3333"),
+	}
+	baseHash := NewStateEntry(0, changes, base).Hash()
+
+	// Changing any component should change the leaf hash
+	mod1 := base
+	mod1.PreStateHash = common.HexToHash("0xFFFF")
+	require.NotEqual(t, baseHash, NewStateEntry(0, changes, mod1).Hash(),
+		"different preStateHash must change leaf")
+
+	mod2 := base
+	mod2.TransitionHash = common.HexToHash("0xFFFF")
+	require.NotEqual(t, baseHash, NewStateEntry(0, changes, mod2).Hash(),
+		"different transitionHash must change leaf")
+
+	mod3 := base
+	mod3.PreviousLeafHash = common.HexToHash("0xFFFF")
+	require.NotEqual(t, baseHash, NewStateEntry(0, changes, mod3).Hash(),
+		"different previousLeafHash must change leaf")
+}
+
+func TestStateEntry_PreviousLeafChain(t *testing.T) {
+	// Build a chain of 5 leaves where each uses the previous leaf's hash
+	var prevHash common.Hash
+	hashes := make([]common.Hash, 5)
+
+	for i := 0; i < 5; i++ {
+		changes := []StateChange{
+			{Domain: kv.AccountsDomain, Key: []byte{byte(i)}, Value: []byte{byte(i + 1)}},
+		}
+		opts := LeafHashInputs{
+			PreStateHash:     common.HexToHash("0xaaaa"),
+			TransitionHash:   common.HexToHash("0xbbbb"),
+			PreviousLeafHash: prevHash,
+		}
+		entry := NewStateEntry(uint64(i), changes, opts)
+		hashes[i] = entry.Hash()
+		prevHash = entry.Hash()
+	}
+
+	// All hashes must be unique
+	for i := 0; i < len(hashes); i++ {
+		for j := i + 1; j < len(hashes); j++ {
+			require.NotEqual(t, hashes[i], hashes[j],
+				"leaf %d and %d must have different hashes (chain effect)", i, j)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Single block tree build (in-memory, no DB)
 // ---------------------------------------------------------------------------
 

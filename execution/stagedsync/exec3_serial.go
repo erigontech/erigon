@@ -35,6 +35,9 @@ type serialExecutor struct {
 	blobGasUsed     uint64
 	lastBlockResult *blockResult
 	worker          *exec.Worker
+
+	// qmtree proof-of-execution tracking (nil when disabled)
+	qmtracker *qmtreeTracker
 }
 
 func warmTxsHashes(block *types.Block) {
@@ -50,6 +53,14 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 	accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
 
 	se.resetWorkers(ctx, se.rs, se.applyTx)
+
+	if se.cfg.experimentalQmtree && se.qmtracker == nil {
+		var err error
+		se.qmtracker, err = newQmtreeTracker(se.cfg.dirs.DataDir)
+		if err != nil {
+			return nil, rwTx, fmt.Errorf("init qmtree tracker: %w", err)
+		}
+	}
 
 	havePartialBlock := false
 	blockNum := startBlockNum
@@ -200,6 +211,13 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			}
 		}
 
+		if se.qmtracker != nil {
+			qmroot := se.qmtracker.syncRoot()
+			if blockNum%1000 == 0 || blockNum <= 10 {
+				log.Info(fmt.Sprintf("[%s] qmtree root", se.logPrefix), "block", blockNum, "root", qmroot, "leaves", se.qmtracker.nextSN)
+			}
+		}
+
 		if dbg.StopAfterBlock > 0 && blockNum == dbg.StopAfterBlock {
 			panic(fmt.Sprintf("stopping: block %d complete", blockNum))
 			//return fmt.Errorf("stopping: block %d complete", blockNum)
@@ -287,6 +305,9 @@ func (se *serialExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buf
 		se.taskExecMetrics = exec.NewWorkerMetrics()
 		se.worker = exec.NewWorker(context.Background(), false, se.taskExecMetrics,
 			se.cfg.db.(kv.TemporalRoDB), nil, se.cfg.blockReader, se.cfg.chainConfig, se.cfg.genesis, nil, se.cfg.engine, se.cfg.dirs, se.logger)
+		if se.cfg.experimentalQmtree {
+			se.worker.EnableQmtree()
+		}
 	}
 
 	if se.applyTx != applyTx {
@@ -351,6 +372,10 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			}
 			if result.Err != nil {
 				return fmt.Errorf("%w, txnIdx=%d, %v", rules.ErrInvalidBlock, txTask.TxIndex, result.Err) //same as in stage_exec.go
+			}
+
+			if se.qmtracker != nil {
+				se.qmtracker.appendTxResult(result)
 			}
 
 			se.txCount++

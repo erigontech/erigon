@@ -16,22 +16,50 @@ type StateChange struct {
 	Value  []byte
 }
 
+// LeafHashInputs holds the additional hash components for the four-layer
+// leaf structure. All fields are optional — zero values are used when
+// the corresponding proof layer is not available.
+type LeafHashInputs struct {
+	PreStateHash     common.Hash // keccak256 of sorted pre-state reads
+	TransitionHash   common.Hash // proof-of-transition hash (embeds exec hash)
+	PreviousLeafHash common.Hash // hash of the previous leaf (chain inclusion)
+}
+
 // StateEntry implements qmtree.Entry for a single transaction's state changes.
-// The leaf hash is SHA256 of the canonically-encoded sorted changes.
+// The leaf hash is keccak256(preStateHash || stateChangeHash || transitionHash || previousLeafHash).
 type StateEntry struct {
 	txNum   uint64
 	hash    common.Hash
 	changes []StateChange
 }
 
-// NewStateEntry creates a StateEntry from a list of state changes.
-// Changes are sorted and hashed deterministically.
-func NewStateEntry(txNum uint64, changes []StateChange) *StateEntry {
+// NewStateEntry creates a StateEntry from a list of state changes and
+// optional proof layer inputs. Changes are sorted and hashed to produce
+// the stateChangeHash component. The final leaf hash combines all four
+// proof layers:
+//
+//	leaf = keccak256(preStateHash || stateChangeHash || transitionHash || previousLeafHash)
+func NewStateEntry(txNum uint64, changes []StateChange, opts ...LeafHashInputs) *StateEntry {
 	sortChanges(changes)
-	h := hashChanges(changes)
+	stateChangeHash := hashChanges(changes)
+
+	var leaf common.Hash
+	if len(opts) > 0 {
+		o := opts[0]
+		h := crypto.NewKeccakState()
+		defer crypto.ReturnToPool(h)
+		h.Write(o.PreStateHash[:])
+		h.Write(stateChangeHash[:])
+		h.Write(o.TransitionHash[:])
+		h.Write(o.PreviousLeafHash[:])
+		h.Read(leaf[:])
+	} else {
+		leaf = stateChangeHash
+	}
+
 	return &StateEntry{
 		txNum:   txNum,
-		hash:    h,
+		hash:    leaf,
 		changes: changes,
 	}
 }

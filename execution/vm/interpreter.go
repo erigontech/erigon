@@ -407,8 +407,19 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 			fmt.Printf("%d (%d.%d) %5d %5d %s\n", blockNum, txIndex, txIncarnation, pc, traceGas(op, callGas, cost), opstr)
 		}
 
+		// Proof of execution: capture stack inputs before execute
+		if evm.execHasher != nil {
+			evm.execHasher.CaptureInputs(&callContext.Stack, operation.numPop)
+		}
+
 		// execute the operation
 		pc, res, err = operation.execute(pc, evm, callContext)
+
+		// Proof of execution: hash the complete instruction record
+		if evm.execHasher != nil {
+			evm.execHasher.HashOp(evm.depth, pcCopy, byte(op), gasCopy, cost,
+				&callContext.Stack, operation.numPush)
+		}
 
 		if err != nil {
 			break

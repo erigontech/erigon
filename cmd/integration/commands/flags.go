@@ -48,8 +48,9 @@ var (
 
 	dbWriteMap bool
 
-	chainTipMode bool
-	syncCfg      = ethconfig.Defaults.Sync
+	chainTipMode         bool
+	experimentalQmtree   bool
+	syncCfg              = ethconfig.Defaults.Sync
 )
 
 func must(err error) {
@@ -204,4 +205,8 @@ func withTraceFlags(cmd *cobra.Command) {
 
 func withChainTipMode(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&chainTipMode, "sync.mode.chaintip", false, "Every block does: `CalcCommitment`, `rwtx.Commit()`, generate diffs/changesets. Also can use it to generate diffs before `integration loop_exec`")
+}
+
+func withExperimentalQmtree(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&experimentalQmtree, "experimental.qmtree", false, "compute qmtree proof roots alongside MPT commitment (proof of execution + transition)")
 }
