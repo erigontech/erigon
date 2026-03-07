@@ -346,6 +346,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 		txTask.Config = se.cfg.chainConfig
 		txTask.Engine = se.cfg.engine
 
+		se.worker.SetArbitrumWasmDB(se.cfg.arbitrumWasmDB)
 		result := se.worker.RunTxTask(txTask)
 
 		if err := func() error {

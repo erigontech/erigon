@@ -73,11 +73,11 @@ arbitrum:execution/stages/stageloop.go:681+        — callers pass OpenArbitrum
 **Files:**
 - Modify: `erigon/execution/stagedsync/exec3_serial.go`
 
-- [ ] In `executeBlock()`, before `se.worker.RunTxTask(txTask)` (line 349), add:
+- [x] In `executeBlock()`, before `se.worker.RunTxTask(txTask)` (line 349), add:
   ```go
   se.worker.SetArbitrumWasmDB(se.cfg.arbitrumWasmDB)
   ```
-- [ ] Run `go build ./execution/stagedsync/...` to verify
+- [x] Run `go build ./execution/stagedsync/...` to verify
 
 ### Task 5: Update all `StageExecuteBlocksCfg` callers
 
