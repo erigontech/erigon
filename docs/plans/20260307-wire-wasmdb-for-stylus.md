@@ -105,12 +105,12 @@ arbitrum:execution/stages/stageloop.go:681+        — callers pass OpenArbitrum
 - Create: `erigon/execution/exec/state_arb_test.go`
 - Create: `erigon/arb/ethdb/wasmdb/wasmdb_test.go` (extend if exists)
 
-- [ ] Test `SetArbitrumWasmDB` sets wasmDB on Worker's IBS when `IsArbitrum()` is true
-- [ ] Test `SetArbitrumWasmDB` is no-op when `IsArbitrum()` is false (non-Arbitrum chain config)
-- [ ] Test `OpenArbitrumWasmDB` singleton returns same instance on repeated calls
-- [ ] Test `WrapDatabaseWithWasm` write/read round-trip for `ActivatedAsm`
-- [ ] Test `ActivatedAsm` returns error for missing module hash
-- [ ] Run `go test ./execution/exec/... ./arb/ethdb/wasmdb/... -count=1 -v`
+- [x] Test `SetArbitrumWasmDB` sets wasmDB on Worker's IBS when `IsArbitrum()` is true
+- [x] Test `SetArbitrumWasmDB` is no-op when `IsArbitrum()` is false (non-Arbitrum chain config)
+- [x] Test `OpenArbitrumWasmDB` singleton returns same instance on repeated calls
+- [x] Test `WrapDatabaseWithWasm` write/read round-trip for `ActivatedAsm`
+- [x] Test `ActivatedAsm` returns error for missing module hash
+- [x] Run `go test ./execution/exec/... ./arb/ethdb/wasmdb/... -count=1 -v`
 
 ### Task 7: Verify and lint
 
