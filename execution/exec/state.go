@@ -127,6 +127,8 @@ type Worker struct {
 	evm *vm.EVM
 	ibs *state.IntraBlockState
 
+	arbitrumWasmDB wasmdb.WasmIface
+
 	dirs datadir.Dirs
 
 	metrics *WorkerMetrics
@@ -194,6 +196,7 @@ func (rw *Worker) LogLRUStats() {}
 
 func (rw *Worker) SetArbitrumWasmDB(wasmDB wasmdb.WasmIface) {
 	if rw.chainConfig.IsArbitrum() {
+		rw.arbitrumWasmDB = wasmDB
 		rw.ibs.SetWasmDB(wasmDB)
 	}
 }
@@ -389,6 +392,9 @@ func (rw *Worker) SetReader(reader state.StateReader) {
 		typedReader.SetTx(rw.chainTx)
 	}
 	rw.ibs = state.New(rw.stateReader)
+	if rw.arbitrumWasmDB != nil {
+		rw.ibs.SetWasmDB(rw.arbitrumWasmDB)
+	}
 
 	switch reader.(type) {
 	case *state.HistoryReaderV3:

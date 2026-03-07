@@ -115,20 +115,27 @@ func WriteActivatedAsm(db kv.Putter, target WasmTarget, moduleHash common.Hash, 
 	}
 }
 
-// Retrieves the activated asm for a given moduleHash and target
-func ReadActivatedAsm(db kv.Getter, target WasmTarget, moduleHash common.Hash) []byte {
+// ReadActivatedAsmWithError retrieves the activated asm, propagating DB errors.
+func ReadActivatedAsmWithError(db kv.Getter, target WasmTarget, moduleHash common.Hash) ([]byte, error) {
 	if target == TargetWasm {
-		return nil // wasm is not stored in the database
+		return nil, nil
 	}
 	prefix, err := activatedAsmKeyPrefix(target)
 	if err != nil {
-		log.Crit("Failed to read activated wasm asm", "err", err)
+		return nil, fmt.Errorf("activated asm key prefix: %w", err)
 	}
 	key := activatedKey(prefix, moduleHash)
 	asm, err := db.GetOne(kv.ArbWasmActivationBucket, key[:])
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("read activated asm: %w", err)
 	}
+	return asm, nil
+}
+
+// ReadActivatedAsm retrieves the activated asm for a given moduleHash and target.
+// Deprecated: use ReadActivatedAsmWithError for proper error handling.
+func ReadActivatedAsm(db kv.Getter, target WasmTarget, moduleHash common.Hash) []byte {
+	asm, _ := ReadActivatedAsmWithError(db, target, moduleHash)
 	return asm
 }
 
@@ -171,8 +178,9 @@ func (w *WasmDB) ActivatedAsm(target WasmTarget, moduleHash common.Hash) ([]byte
 	}
 	var asm []byte
 	err := w.View(context.Background(), func(tx kv.Tx) error {
-		asm = ReadActivatedAsm(tx, target, moduleHash)
-		return nil
+		var readErr error
+		asm, readErr = ReadActivatedAsmWithError(tx, target, moduleHash)
+		return readErr
 	})
 	if err != nil {
 		return nil, err

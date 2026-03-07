@@ -138,19 +138,11 @@ func StageExecuteBlocksCfg(
 	}
 }
 
-// ChainConfig returns the chain configuration.
-func (cfg ExecuteBlockCfg) ChainConfig() *chain.Config { return cfg.chainConfig }
-
-// IsExperimentalBAL returns whether experimental BAL is enabled.
-func (cfg ExecuteBlockCfg) IsExperimentalBAL() bool { return cfg.experimentalBAL }
-
-// BlockReader returns the block reader.
+func (cfg ExecuteBlockCfg) ChainConfig() *chain.Config            { return cfg.chainConfig }
+func (cfg ExecuteBlockCfg) IsExperimentalBAL() bool               { return cfg.experimentalBAL }
 func (cfg ExecuteBlockCfg) BlockReader() services.FullBlockReader { return cfg.blockReader }
+func (cfg ExecuteBlockCfg) DirsDataDir() string                   { return cfg.dirs.DataDir }
 
-// DirsDataDir returns the data directory path.
-func (cfg ExecuteBlockCfg) DirsDataDir() string { return cfg.dirs.DataDir }
-
-// WithAuthor returns a copy of the config with the author set.
 func (cfg ExecuteBlockCfg) WithAuthor(author accounts.Address) ExecuteBlockCfg {
 	cfg.author = author
 	return cfg
