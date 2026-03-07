@@ -287,6 +287,11 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		return nil, fmt.Errorf("%s: %d", errExceedBlockRange, rangeLimit)
 	}
 
+	var logLimit uint64
+	if crit.Limit != nil {
+		logLimit = *crit.Limit
+	}
+
 	addrMap := make(map[common.Address]struct{}, len(crit.Addresses))
 	for _, v := range crit.Addresses {
 		addrMap[v] = struct{}{}
@@ -351,7 +356,11 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 					return logs, err
 				}
 
-				borLogs = borLogs.Filter(addrMap, crit.Topics, 0)
+				var maxBorCount uint64
+				if logLimit > 0 {
+					maxBorCount = logLimit - uint64(len(logs))
+				}
+				borLogs = borLogs.Filter(addrMap, crit.Topics, maxBorCount)
 				for _, filteredLog := range borLogs {
 					logs = append(logs, &types.ErigonLog{
 						Address:     filteredLog.Address,
@@ -365,6 +374,9 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 						Removed:     filteredLog.Removed,
 						Timestamp:   header.Time,
 					})
+				}
+				if logLimit > 0 && uint64(len(logs)) >= logLimit {
+					return logs, nil
 				}
 			}
 
@@ -387,7 +399,11 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if r == nil {
 			return nil, err
 		}
-		filtered := r.Logs.Filter(addrMap, crit.Topics, 0)
+		var maxCount uint64
+		if logLimit > 0 {
+			maxCount = logLimit - uint64(len(logs))
+		}
+		filtered := r.Logs.Filter(addrMap, crit.Topics, maxCount)
 
 		for _, filteredLog := range filtered {
 			logs = append(logs, &types.ErigonLog{
@@ -402,6 +418,9 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				Removed:     filteredLog.Removed,
 				Timestamp:   header.Time,
 			})
+		}
+		if logLimit > 0 && uint64(len(logs)) >= logLimit {
+			return logs, nil
 		}
 	}
 

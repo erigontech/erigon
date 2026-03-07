@@ -185,4 +185,25 @@ func TestUnmarshalJSONNewFilterArgs(t *testing.T) {
 	if len(test7.Topics[2]) != 0 {
 		t.Fatalf("expected 0 topics, got %d topics", len(test7.Topics[2]))
 	}
+
+	// test limit field: absent means nil
+	var test8 FilterCriteria
+	if err := json.Unmarshal([]byte(`{}`), &test8); err != nil {
+		t.Fatal(err)
+	}
+	if test8.Limit != nil {
+		t.Fatalf("expected nil limit, got %d", *test8.Limit)
+	}
+
+	// test limit field: hex-encoded value is parsed correctly
+	var test9 FilterCriteria
+	if err := json.Unmarshal([]byte(`{"limit":"0x64"}`), &test9); err != nil {
+		t.Fatal(err)
+	}
+	if test9.Limit == nil {
+		t.Fatal("expected non-nil limit")
+	}
+	if *test9.Limit != 100 {
+		t.Fatalf("expected limit 100, got %d", *test9.Limit)
+	}
 }

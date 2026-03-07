@@ -18,17 +18,20 @@ package jsonrpc
 
 import (
 	"math/rand"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
@@ -211,4 +214,32 @@ func TestGetFilterChangesReturnsFilterNotFoundForUnknownID(t *testing.T) {
 	// Use a bogus id that does not correspond to any subscription
 	_, err := api.GetFilterChanges(ctx, "0xdeadbeefcafebabe")
 	assert.ErrorIs(err, rpc.ErrFilterNotFound)
+}
+
+func TestGetFilterLogsLimit(t *testing.T) {
+	require := require.New(t)
+
+	m := execmoduletester.New(t)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
+	mining := txpoolproto.NewMiningClient(conn)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log)
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, stateCache, m), m.DB, nil, nil)
+
+	// Create a filter with Limit=2.
+	limit := uint64(2)
+	idStr, err := api.NewFilter(ctx, filters.FilterCriteria{Limit: &limit})
+	require.NoError(err)
+
+	// Simulate 3 logs arriving for this subscription by adding them directly to the store.
+	logSubID := rpchelper.LogsSubID(strings.TrimPrefix(idStr, "0x"))
+	logEntry := &types.Log{Address: common.HexToAddress("0x1234567890123456789012345678901234567890")}
+	ff.AddLogs(logSubID, logEntry)
+	ff.AddLogs(logSubID, logEntry)
+	ff.AddLogs(logSubID, logEntry)
+
+	// GetFilterLogs must cap the result at Limit=2.
+	result, err := api.GetFilterLogs(ctx, idStr)
+	require.NoError(err)
+	require.Len(result, 2)
 }

@@ -494,6 +494,7 @@ func (args *FilterCriteria) UnmarshalJSON(data []byte) error {
 		ToBlock   *rpc.BlockNumber `json:"toBlock"`
 		Addresses any              `json:"address"`
 		Topics    []any            `json:"topics"`
+		Limit     *hexutil.Uint64  `json:"limit"`
 	}
 
 	var raw input
@@ -584,6 +585,11 @@ func (args *FilterCriteria) UnmarshalJSON(data []byte) error {
 				return errors.New("invalid topic(s)")
 			}
 		}
+	}
+
+	if raw.Limit != nil {
+		limit := uint64(*raw.Limit)
+		args.Limit = &limit
 	}
 
 	return nil

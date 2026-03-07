@@ -64,6 +64,7 @@ type Filters struct {
 	onNewSnapshot         func()
 
 	logsStores         *concurrent.SyncMap[LogsSubID, []*types.Log]
+	logsCriteria       *concurrent.SyncMap[LogsSubID, filters.FilterCriteria]
 	pendingHeadsStores *concurrent.SyncMap[HeadsSubID, []*types.Header]
 	pendingTxsStores   *concurrent.SyncMap[PendingTxsSubID, [][]types.Transaction]
 	logger             log.Logger
@@ -86,6 +87,7 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 		logsSubs:           NewLogsFilterAggregator(),
 		onNewSnapshot:      onNewSnapshot,
 		logsStores:         concurrent.NewSyncMap[LogsSubID, []*types.Log](),
+		logsCriteria:       concurrent.NewSyncMap[LogsSubID, filters.FilterCriteria](),
 		pendingHeadsStores: concurrent.NewSyncMap[HeadsSubID, []*types.Header](),
 		pendingTxsStores:   concurrent.NewSyncMap[PendingTxsSubID, [][]types.Transaction](),
 		logger:             logger,
@@ -523,6 +525,8 @@ func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria) (<-c
 	sub := newChanSub[*types.Log](size)
 	id, f := ff.logsSubs.insertLogsFilter(sub)
 
+	ff.logsCriteria.Put(id, criteria)
+
 	// Initialize address and topic maps
 	f.addrs = concurrent.NewSyncMap[common.Address, int]()
 	f.topics = concurrent.NewSyncMap[common.Hash, int]()
@@ -649,6 +653,12 @@ func (ff *Filters) UnsubscribeLogs(id LogsSubID) bool {
 // deleteLogStore deletes the log store associated with the given subscription ID.
 func (ff *Filters) deleteLogStore(id LogsSubID) {
 	ff.logsStores.Delete(id)
+	ff.logsCriteria.Delete(id)
+}
+
+// ReadLogsCriteria returns the FilterCriteria stored for the given subscription, if any.
+func (ff *Filters) ReadLogsCriteria(id LogsSubID) (filters.FilterCriteria, bool) {
+	return ff.logsCriteria.Get(id)
 }
 
 // OnNewEvent is called when there is a new event from the remote and processes it.

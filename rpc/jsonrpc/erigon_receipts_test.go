@@ -70,6 +70,70 @@ func TestGetLogs(t *testing.T) {
 	}
 }
 
+// logEmitterInitCode is EVM init bytecode that emits a single LOG1 during
+// contract deployment and then returns empty runtime code.
+//
+// Disassembly:
+//
+//	PUSH32 0xbbbb...bb  // topic
+//	PUSH1  0x00         // memsize = 0
+//	PUSH1  0x00         // memoffset = 0
+//	LOG1                // emit one log with the topic above
+//	PUSH1  0x00         // return size = 0
+//	PUSH1  0x00         // return offset = 0
+//	RETURN              // return empty runtime code
+var logEmitterInitCode = common.FromHex(
+	"7f" + "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" + // PUSH32 topic
+		"6000" + // PUSH1 0 (memsize)
+		"6000" + // PUSH1 0 (memoffset)
+		"a1" + // LOG1
+		"6000" + // PUSH1 0 (return size)
+		"6000" + // PUSH1 0 (return offset)
+		"f3", // RETURN
+)
+
+func TestGetLogsLimit(t *testing.T) {
+	require := require.New(t)
+
+	// Build a chain with 3 blocks, each deploying logEmitterInitCode once.
+	// Every deployment emits exactly one LOG1, giving us 3 logs total.
+	nonce := uint64(0)
+	signer := types.LatestSignerForChainID(nil)
+	m := mockWithGenerator(t, 3, func(_ int, block *blockgen.BlockGen) {
+		txn, err := types.SignTx(
+			types.NewContractCreation(nonce, uint256.NewInt(0), 100_000, uint256.NewInt(0), logEmitterInitCode),
+			*signer, testKey,
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		block.AddTx(txn)
+		nonce++
+	})
+
+	ethApi := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	// Without limit: confirm we get at least 3 logs (one per deployment).
+	allLogs, err := ethApi.GetLogs(context.Background(), filters.FilterCriteria{
+		FromBlock: big.NewInt(0),
+		ToBlock:   big.NewInt(rpc.LatestBlockNumber.Int64()),
+	})
+	require.NoError(err)
+	require.GreaterOrEqual(len(allLogs), 3, "expected at least 3 logs from 3 deployments")
+
+	// With Limit=2: must return exactly 2 logs, matching the first two from above.
+	limit := uint64(2)
+	limited, err := ethApi.GetLogs(context.Background(), filters.FilterCriteria{
+		FromBlock: big.NewInt(0),
+		ToBlock:   big.NewInt(rpc.LatestBlockNumber.Int64()),
+		Limit:     &limit,
+	})
+	require.NoError(err)
+	require.Len(limited, 2)
+	require.Equal(allLogs[0].TxHash, limited[0].TxHash)
+	require.Equal(allLogs[1].TxHash, limited[1].TxHash)
+}
+
 func TestErigonGetLatestLogs(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")

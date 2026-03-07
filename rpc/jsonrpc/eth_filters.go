@@ -141,13 +141,18 @@ func (api *APIImpl) GetFilterLogs(_ context.Context, index string) ([]*types.Log
 		return nil, rpc.ErrNotificationsUnsupported
 	}
 	cutIndex := strings.TrimPrefix(index, "0x")
-	if found := api.filters.HasSubscription(rpchelper.LogsSubID(cutIndex)); !found {
+	id := rpchelper.LogsSubID(cutIndex)
+	if found := api.filters.HasSubscription(id); !found {
 		return nil, rpc.ErrFilterNotFound
 	}
-	if logs, ok := api.filters.ReadLogs(rpchelper.LogsSubID(cutIndex)); ok {
-		return logs, nil
+	logs, ok := api.filters.ReadLogs(id)
+	if !ok {
+		return []*types.Log{}, nil
 	}
-	return []*types.Log{}, nil
+	if crit, hasCrit := api.filters.ReadLogsCriteria(id); hasCrit && crit.Limit != nil && uint64(len(logs)) > *crit.Limit {
+		logs = logs[:*crit.Limit]
+	}
+	return logs, nil
 }
 
 // NewHeads send a notification each time a new (header) block is appended to the chain.
