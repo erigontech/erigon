@@ -46,11 +46,11 @@ arbitrum:execution/stages/stageloop.go:681+        — callers pass OpenArbitrum
 **Files:**
 - Modify: `erigon/execution/stagedsync/stage_execute.go`
 
-- [ ] Add import `"github.com/erigontech/erigon/arb/ethdb/wasmdb"`
-- [ ] Add `arbitrumWasmDB wasmdb.WasmIface` field to `ExecuteBlockCfg` (after line 90)
-- [ ] Add `arbitrumWasmDB wasmdb.WasmIface` param to `StageExecuteBlocksCfg` (after `experimentalBAL bool`)
-- [ ] Set `arbitrumWasmDB: arbitrumWasmDB` in the return struct literal (line ~134)
-- [ ] Run `go build ./execution/stagedsync/...` (will fail until callers updated — that's OK)
+- [x] Add import `"github.com/erigontech/erigon/arb/ethdb/wasmdb"`
+- [x] Add `arbitrumWasmDB wasmdb.WasmIface` field to `ExecuteBlockCfg` (after line 90)
+- [x] Add `arbitrumWasmDB wasmdb.WasmIface` param to `StageExecuteBlocksCfg` (after `experimentalBAL bool`)
+- [x] Set `arbitrumWasmDB: arbitrumWasmDB` in the return struct literal (line ~134)
+- [x] Run `go build ./execution/stagedsync/...` (will fail until callers updated — that's OK)
 
 ### Task 3: Add `SetArbitrumWasmDB` method to Worker
 

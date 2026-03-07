@@ -27,6 +27,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
@@ -88,6 +89,7 @@ type ExecuteBlockCfg struct {
 
 	silkworm        *silkworm.Silkworm
 	experimentalBAL bool
+	arbitrumWasmDB  wasmdb.WasmIface
 }
 
 func StageExecuteBlocksCfg(
@@ -108,6 +110,7 @@ func StageExecuteBlocksCfg(
 	syncCfg ethconfig.Sync,
 	silkworm *silkworm.Silkworm,
 	experimentalBAL bool,
+	arbitrumWasmDB wasmdb.WasmIface,
 ) ExecuteBlockCfg {
 	if dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
@@ -131,6 +134,7 @@ func StageExecuteBlocksCfg(
 		syncCfg:         syncCfg,
 		silkworm:        silkworm,
 		experimentalBAL: experimentalBAL,
+		arbitrumWasmDB:  arbitrumWasmDB,
 	}
 }
 
