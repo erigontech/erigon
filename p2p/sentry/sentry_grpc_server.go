@@ -46,7 +46,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
-	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -367,15 +366,11 @@ func ConvertH512ToPeerID(h512 *typesproto.H512) [64]byte {
 
 func makeP2PServer(
 	p2pConfig p2p.Config,
-	genesisHash common.Hash,
+	bootnodes []string,
 	protocols []p2p.Protocol,
 ) (*p2p.Server, error) {
-	if len(p2pConfig.BootstrapNodes) == 0 {
-		spec, err := chainspec.ChainSpecByGenesisHash(genesisHash)
-		if err != nil {
-			return nil, fmt.Errorf("no config for given genesis hash: %w", err)
-		}
-		bootstrapNodes, err := enode.ParseNodesFromURLs(spec.Bootnodes)
+	if len(p2pConfig.BootstrapNodes) == 0 && len(bootnodes) > 0 {
+		bootstrapNodes, err := enode.ParseNodesFromURLs(bootnodes)
 		if err != nil {
 			return nil, fmt.Errorf("bad bootnodes option: %w", err)
 		}
@@ -756,7 +751,7 @@ func grpcSentryServer(ctx context.Context, sentryAddr string, ss *GrpcServer, he
 	return grpcServer, nil
 }
 
-func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, readNodeInfo func() *eth.NodeInfo, cfg *p2p.Config, protocol uint, logger log.Logger) *GrpcServer {
+func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, readNodeInfo func() *eth.NodeInfo, cfg *p2p.Config, protocol uint, logger log.Logger, bootnodes []string, dnsNetwork string) *GrpcServer {
 	ss := &GrpcServer{
 		ctx:                   ctx,
 		p2p:                   cfg,
@@ -764,6 +759,8 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 		logger:                logger,
 		goodPeers:             make(map[[64]byte]*PeerInfo),
 		activeWitnessRequests: make(map[common.Hash]*WitnessRequest),
+		bootnodes:             bootnodes,
+		dnsNetwork:            dnsNetwork,
 	}
 
 	var disc enode.Iterator
@@ -922,7 +919,7 @@ func Sentry(ctx context.Context, dirs datadir.Dirs, sentryAddr string, discovery
 		return d
 	}
 	cfg.DiscoveryDNS = discoveryDNS
-	sentryServer := NewGrpcServer(ctx, discovery, func() *eth.NodeInfo { return nil }, cfg, protocolVersion, logger)
+	sentryServer := NewGrpcServer(ctx, discovery, func() *eth.NodeInfo { return nil }, cfg, protocolVersion, logger, nil, "")
 
 	grpcServer, err := grpcSentryServer(ctx, sentryAddr, sentryServer, healthCheck)
 	if err != nil {
@@ -951,6 +948,8 @@ type GrpcServer struct {
 	peersStreams         *PeersStreams
 	p2p                  *p2p.Config
 	logger               log.Logger
+	bootnodes            []string // chain-specific bootnodes, used if p2pConfig has none
+	dnsNetwork           string   // chain-specific DNS discovery URL
 	// witness request tracking
 	activeWitnessRequests map[common.Hash]*WitnessRequest
 	witnessRequestMutex   sync.RWMutex
@@ -1360,16 +1359,11 @@ func (ss *GrpcServer) HandShake(context.Context, *emptypb.Empty) (*sentryproto.H
 	return reply, nil
 }
 
-func (ss *GrpcServer) startP2PServer(genesisHash common.Hash) (*p2p.Server, error) {
+func (ss *GrpcServer) startP2PServer() (*p2p.Server, error) {
 	if !ss.p2p.NoDiscovery {
 		if len(ss.p2p.DiscoveryDNS) == 0 {
-			s, err := chainspec.ChainSpecByGenesisHash(genesisHash)
-			if err != nil {
-				ss.logger.Debug("[sentry] Could not get chain spec for genesis hash", "genesisHash", genesisHash, "err", err)
-			} else {
-				if url := s.DNSNetwork; url != "" {
-					ss.p2p.DiscoveryDNS = []string{url}
-				}
+			if url := ss.dnsNetwork; url != "" {
+				ss.p2p.DiscoveryDNS = []string{url}
 			}
 
 			for i := range ss.Protocols {
@@ -1382,7 +1376,7 @@ func (ss *GrpcServer) startP2PServer(genesisHash common.Hash) (*p2p.Server, erro
 		}
 	}
 
-	srv, err := makeP2PServer(*ss.p2p, genesisHash, ss.Protocols)
+	srv, err := makeP2PServer(*ss.p2p, ss.bootnodes, ss.Protocols)
 	if err != nil {
 		return nil, err
 	}
@@ -1409,7 +1403,7 @@ func (ss *GrpcServer) SetStatus(ctx context.Context, statusData *sentryproto.Sta
 	ss.p2pServerLock.Lock()
 	defer ss.p2pServerLock.Unlock()
 	if ss.p2pServer == nil {
-		srv, err := ss.startP2PServer(genesisHash)
+		srv, err := ss.startP2PServer()
 		if err != nil {
 			return reply, err
 		}

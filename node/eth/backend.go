@@ -381,7 +381,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			genesisSpec = nil
 		}
 		var genesisErr error
-		chainConfig, genesis, genesisErr = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.OverrideOsakaTime, config.OverrideAmsterdamTime, config.KeepStoredChainConfig, dirs, logger)
+		chainConfig, genesis, genesisErr = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.Snapshot.ChainName, config.OverrideOsakaTime, config.OverrideAmsterdamTime, config.KeepStoredChainConfig, dirs, logger)
 		if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
 			return genesisErr
 		}
@@ -491,6 +491,14 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 		p2pConfig.DiscoveryDNS = backend.config.EthDiscoveryURLs
 
+		// Resolve chain-specific bootnodes and DNS for sentry servers
+		var chainBootnodes []string
+		var chainDNSNetwork string
+		if spec, err := chainspec.ChainSpecByName(config.Snapshot.ChainName); err == nil {
+			chainBootnodes = spec.Bootnodes
+			chainDNSNetwork = spec.DNSNetwork
+		}
+
 		listenHost, listenPort, err := splitAddrIntoHostAndPort(p2pConfig.ListenAddr)
 		if err != nil {
 			return nil, err
@@ -529,7 +537,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			cfg.ListenAddr = fmt.Sprintf("%s:%d", listenHost, listenPort)
 
 			// TODO: Auto-enable WIT protocol for Bor chains if not explicitly set
-			server := sentry.NewGrpcServer(backend.sentryCtx, nil, readNodeInfo, &cfg, protocol, logger)
+			server := sentry.NewGrpcServer(backend.sentryCtx, nil, readNodeInfo, &cfg, protocol, logger, chainBootnodes, chainDNSNetwork)
 			backend.sentryServers = append(backend.sentryServers, server)
 			var sideProtocols []sentryproto.Protocol
 			if stack.Config().P2P.EnableWitProtocol {
