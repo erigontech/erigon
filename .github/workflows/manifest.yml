@@ -26,9 +26,16 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+
+      - name: Get Go version from go.mod
+        id: goversion
+        run: |
+          minor=$(sed -n 's/^go \([0-9]*\.[0-9]*\).*/\1/p' go.mod)
+          echo "version=${minor}.x" >> "$GITHUB_OUTPUT"
+
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.25'
+          go-version: ${{ steps.goversion.outputs.version }}
       - run: make downloader
       - run: echo $ModModified
       - run: ./build/bin/downloader manifest-verify --chain mainnet     --webseed 'https://erigon3-v1-snapshots-mainnet.erigon.network'

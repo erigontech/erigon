@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
+	"github.com/erigontech/erigon/execution/tests/testutil"
 )
 
 func TestInvalidReceiptHashHighMgas(t *testing.T) {
@@ -41,8 +42,8 @@ func TestInvalidReceiptHashHighMgas(t *testing.T) {
 	payloadsDir := path.Join(testDir, "payloads")
 	engineXRunner, err := NewEngineXTestRunner(t, logger, preAllocsDir)
 	require.NoError(t, err)
-	tm := testMatcher{}
-	tm.walk(t, payloadsDir, func(t *testing.T, name string, test EngineXTestDefinition) {
+	tm := testutil.TestMatcher{}
+	tm.Walk(t, payloadsDir, func(t *testing.T, name string, test EngineXTestDefinition) {
 		err := engineXRunner.Run(ctx, test)
 		require.NoError(t, err)
 	})

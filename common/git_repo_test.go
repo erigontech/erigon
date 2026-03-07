@@ -1,6 +1,7 @@
 package common
 
 import (
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -19,6 +20,12 @@ func TestNoLargeFilesInRecentGitHistory(t *testing.T) {
 		grep -v 'signer/fourbyte/4byte.json' |
 		awk '$2 > 1*1024*1024 {printf "%s MB: %s\n", $2/(1*1024*1024), $3}'`
 	cmd := exec.Command("bash", "-c", gitCommand)
+	// Prevent git from lazy-fetching missing blobs in partial (blob:none) clones.
+	// Without this, git cat-file tries to fetch every historical blob from the
+	// remote, causing the test to hang. Blobs not present locally are reported
+	// as "missing" and filtered out by grep; blobs from the current checkout ARE
+	// present and will still be checked.
+	cmd.Env = append(os.Environ(), "GIT_NO_LAZY_FETCH=1")
 	output, err := cmd.Output()
 	require.NoError(t, err)
 	outStr := strings.TrimSpace(string(output))

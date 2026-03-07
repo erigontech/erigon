@@ -1,0 +1,36 @@
+name: Cleanup Erigon
+description: Save build and module caches, and warn about uncached tests
+
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/save-build-cache
+      if: ${{ always() && env.ERIGON_CI_GOCACHE_PATH != '' }}
+      with:
+        gocache: ${{ env.ERIGON_CI_GOCACHE_PATH }}
+        key: ${{ env.ERIGON_CI_GOCACHE_KEY }}
+
+    - uses: ./.github/actions/save-mod-cache
+      if: ${{ always() && env.ERIGON_CI_MODCACHE != '' }}
+      with:
+        modcache-path: ${{ env.ERIGON_CI_MODCACHE }}
+        key: ${{ env.ERIGON_CI_MODCACHE_KEY }}
+
+    - name: Save submodule git objects cache
+      if: >-
+        ${{ always()
+        && env.ERIGON_CI_SUBMODULE_CACHE_KEY != ''
+        && env.ERIGON_CI_SUBMODULE_CACHE_RESTORED_KEY != env.ERIGON_CI_SUBMODULE_CACHE_KEY }}
+      uses: actions/cache/save@v4
+      with:
+        path: .git/modules
+        key: ${{ env.ERIGON_CI_SUBMODULE_CACHE_KEY }}
+
+    - name: Check for uncached tests
+      if: hashFiles('run.log') != ''
+      shell: bash
+      run: |
+        ran=$(grep -cE '^ok\s.*[0-9]+\.[0-9]+s$' run.log || true)
+        if [ "$ran" -gt 0 ]; then
+          echo "::warning::$ran test package(s) ran without caching"
+        fi
