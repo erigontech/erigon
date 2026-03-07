@@ -506,14 +506,7 @@ func (tx *ArbTx) Hash() common.Hash {
 		return hash.(common.Hash)
 	}
 
-	var h common.Hash
-	if tx.Type() == LegacyTxType {
-		h = rlpHash(tx.inner)
-	} else if tx.Type() == ArbitrumLegacyTxType {
-		h = tx.inner.(*ArbitrumLegacyTxData).HashOverride
-	} else {
-		h = PrefixedRlpHash(tx.Type(), tx.inner)
-	}
+	h := tx.inner.Hash()
 	tx.hash.Store(h)
 	return h
 }
