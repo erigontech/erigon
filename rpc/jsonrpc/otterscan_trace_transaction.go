@@ -105,8 +105,11 @@ func (t *TransactionTracer) OnEnter(depth int, typRaw byte, from accounts.Addres
 	} else if typ == vm.CREATE2 {
 		entry = &TraceEntry{"CREATE2", t.depth, from.Value(), to.Value(), (*hexutil.Big)(value.ToBig()), inputCopy, nil}
 	} else if typ == vm.SELFDESTRUCT {
-		last := t.Results[len(t.Results)-1]
-		entry = &TraceEntry{"SELFDESTRUCT", last.Depth + 1, from.Value(), to.Value(), (*hexutil.Big)(value.ToBig()), nil, nil}
+		selfDestructDepth := depth
+		if len(t.Results) > 0 {
+			selfDestructDepth = t.Results[len(t.Results)-1].Depth + 1
+		}
+		entry = &TraceEntry{"SELFDESTRUCT", selfDestructDepth, from.Value(), to.Value(), (*hexutil.Big)(value.ToBig()), nil, nil}
 	} else {
 		// safeguard in case new CALL-like opcodes are introduced but not handled,
 		// otherwise CaptureExit/stack will get out of sync
