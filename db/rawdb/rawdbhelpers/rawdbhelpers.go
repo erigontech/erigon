@@ -23,8 +23,8 @@ import (
 )
 
 func IdxStepsCountV3(tx kv.Tx, stepSize uint64) float64 {
-	fst, _ := kv.FirstKey(tx, kv.TblAccountHistoryKeys)
-	lst, _ := kv.LastKey(tx, kv.TblAccountHistoryKeys)
+	fst, _ := kv.FirstKey(tx, kv.TblAccountHistoryData)
+	lst, _ := kv.LastKey(tx, kv.TblAccountHistoryData)
 	if len(fst) > 0 && len(lst) > 0 {
 		fstTxNum := binary.BigEndian.Uint64(fst)
 		lstTxNum := binary.BigEndian.Uint64(lst)

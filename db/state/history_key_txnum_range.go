@@ -17,7 +17,6 @@
 package state
 
 import (
-	"bytes"
 	"container/heap"
 	"encoding/binary"
 
@@ -79,11 +78,10 @@ func (ht *HistoryRoTx) iterateKeyTxNumRecent(fromTxNum, toTxNum int, asc order.B
 		return stream.EmptyKU64, nil
 	}
 	s := &HistoryKeyTxNumIterDB{
-		endTxNum:    toTxNum,
-		roTx:        roTx,
-		largeValues: ht.h.HistoryLargeValues,
-		valsTable:   ht.h.ValuesTable,
-		limit:       limit,
+		endTxNum:  toTxNum,
+		roTx:      roTx,
+		valsTable: ht.h.ValuesTable,
+		limit:     limit,
 	}
 	if fromTxNum >= 0 {
 		s.startTxNum = uint64(fromTxNum)
@@ -191,11 +189,10 @@ func (hi *HistoryKeyTxNumIterFiles) Next() ([]byte, uint64, error) {
 // HistoryKeyTxNumIterDB emits (key, txNum) for every txNum at which a key changed in the DB.
 // Unlike HistoryChangesIterDB, it iterates ALL dups per key (not just the first one).
 type HistoryKeyTxNumIterDB struct {
-	largeValues     bool
-	roTx            kv.Tx
-	valsC           kv.Cursor
-	valsCDup        kv.CursorDupSort
-	valsTable       string
+	roTx      kv.Tx
+	valsCDup  kv.CursorDupSort
+	valsTable string // InvIndexTable: key → txNum (DupSort)
+
 	limit, endTxNum int
 	startTxNum      uint64
 	startTxKey      [8]byte // startTxNum encoded as big-endian for cursor seeks
@@ -208,9 +205,6 @@ type HistoryKeyTxNumIterDB struct {
 }
 
 func (hi *HistoryKeyTxNumIterDB) Close() {
-	if hi.valsC != nil {
-		hi.valsC.Close()
-	}
 	if hi.valsCDup != nil {
 		hi.valsCDup.Close()
 	}
@@ -223,9 +217,6 @@ func (hi *HistoryKeyTxNumIterDB) setNext(k []byte, txNum uint64) {
 }
 
 func (hi *HistoryKeyTxNumIterDB) advance() error {
-	if hi.largeValues {
-		return hi.advanceLargeVals()
-	}
 	return hi.advanceSmallVals()
 }
 
@@ -236,7 +227,8 @@ func (hi *HistoryKeyTxNumIterDB) seekNextSmallKey(k []byte) error {
 			return err
 		}
 		if v != nil {
-			txNum := binary.BigEndian.Uint64(v[:8])
+			// InvIndexTable dup value is 8-byte txNum only (no embedded value)
+			txNum := binary.BigEndian.Uint64(v)
 			if hi.endTxNum < 0 || int(txNum) < hi.endTxNum {
 				hi.setNext(k, txNum)
 				return nil
@@ -275,7 +267,8 @@ func (hi *HistoryKeyTxNumIterDB) advanceSmallVals() error {
 		return err
 	}
 	if v != nil {
-		txNum := binary.BigEndian.Uint64(v[:8])
+		// InvIndexTable dup value is 8-byte txNum only (no embedded value)
+		txNum := binary.BigEndian.Uint64(v)
 		if hi.endTxNum < 0 || int(txNum) < hi.endTxNum {
 			hi.setNext(k, txNum)
 			return nil
@@ -286,79 +279,6 @@ func (hi *HistoryKeyTxNumIterDB) advanceSmallVals() error {
 		return err
 	}
 	return hi.seekNextSmallKey(k)
-}
-
-func (hi *HistoryKeyTxNumIterDB) advanceLargeVals() error {
-	var err error
-	if hi.valsC == nil {
-		if hi.valsC, err = hi.roTx.Cursor(hi.valsTable); err != nil {
-			return err
-		}
-		k, _, err := hi.valsC.First()
-		if err != nil {
-			return err
-		}
-		if k == nil {
-			hi.nextKey = nil
-			return nil
-		}
-		seek := append(common.Copy(k[:len(k)-8]), hi.startTxKey[:]...)
-		k, _, err = hi.valsC.Seek(seek)
-		if err != nil {
-			return err
-		}
-		return hi.scanLargeVals(k)
-	}
-
-	k, _, err := hi.valsC.Next()
-	if err != nil {
-		return err
-	}
-	if k == nil {
-		hi.nextKey = nil
-		return nil
-	}
-	if hi.nextKey != nil && !bytes.Equal(k[:len(k)-8], hi.nextKey) {
-		seek := append(common.Copy(k[:len(k)-8]), hi.startTxKey[:]...)
-		k, _, err = hi.valsC.Seek(seek)
-		if err != nil {
-			return err
-		}
-	}
-	return hi.scanLargeVals(k)
-}
-
-func (hi *HistoryKeyTxNumIterDB) scanLargeVals(k []byte) error {
-	for k != nil {
-		txNum := binary.BigEndian.Uint64(k[len(k)-8:])
-		if hi.endTxNum >= 0 && int(txNum) >= hi.endTxNum {
-			next, ok := kv.NextSubtree(k[:len(k)-8])
-			if !ok {
-				hi.nextKey = nil
-				return nil
-			}
-			seek := append(next, hi.startTxKey[:]...)
-			var err error
-			k, _, err = hi.valsC.Seek(seek)
-			if err != nil {
-				return err
-			}
-			continue
-		}
-		if txNum < binary.BigEndian.Uint64(hi.startTxKey[:]) {
-			seek := append(common.Copy(k[:len(k)-8]), hi.startTxKey[:]...)
-			var err error
-			k, _, err = hi.valsC.Seek(seek)
-			if err != nil {
-				return err
-			}
-			continue
-		}
-		hi.setNext(k[:len(k)-8], txNum)
-		return nil
-	}
-	hi.nextKey = nil
-	return nil
 }
 
 func (hi *HistoryKeyTxNumIterDB) HasNext() bool {

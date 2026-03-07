@@ -109,14 +109,9 @@ func TestHistoryKeyTxNumRange(t *testing.T) {
 		require.NoError(err)
 		require.Equal(expectedKeyTxNums(980, 1001, txs), collectKeyTxNumRange(t, it))
 	}
-	t.Run("large_values", func(t *testing.T) {
-		db, h, txs := filledHistory(t, true, logger)
-		test(t, h, db, txs)
-	})
-	t.Run("small_values", func(t *testing.T) {
-		db, h, txs := filledHistory(t, false, logger)
-		test(t, h, db, txs)
-	})
+
+	db, h, txs := filledHistory(t, logger)
+	test(t, h, db, txs)
 }
 
 func TestHistoryKeyTxNumRange_EdgeCases(t *testing.T) {
@@ -191,14 +186,9 @@ func TestHistoryKeyTxNumRange_EdgeCases(t *testing.T) {
 			require.Equal(expectedKeyTxNums(6, 7, txs), collectKeyTxNumRange(t, it))
 		})
 	}
-	t.Run("large_values", func(t *testing.T) {
-		db, h, txs := filledHistory(t, true, logger)
-		test(t, h, db, txs)
-	})
-	t.Run("small_values", func(t *testing.T) {
-		db, h, txs := filledHistory(t, false, logger)
-		test(t, h, db, txs)
-	})
+
+	db, h, txs := filledHistory(t, logger)
+	test(t, h, db, txs)
 }
 
 func TestHistoryKeyTxNumRange_DBOnly(t *testing.T) {
@@ -231,14 +221,9 @@ func TestHistoryKeyTxNumRange_DBOnly(t *testing.T) {
 		require.NoError(err)
 		require.Len(collectKeyTxNumRange(t, it), 3)
 	}
-	t.Run("large_values", func(t *testing.T) {
-		db, h, txs := filledHistory(t, true, logger)
-		test(t, h, db, txs)
-	})
-	t.Run("small_values", func(t *testing.T) {
-		db, h, txs := filledHistory(t, false, logger)
-		test(t, h, db, txs)
-	})
+
+	db, h, txs := filledHistory(t, logger)
+	test(t, h, db, txs)
 }
 
 func TestHistoryKeyTxNumRange_RandomRanges(t *testing.T) {
@@ -289,12 +274,7 @@ func TestHistoryKeyTxNumRange_RandomRanges(t *testing.T) {
 			require.Equal(expected, got, "iter %d: from=%d to=%d limit=%d", i, from, to, limit)
 		}
 	}
-	t.Run("large_values", func(t *testing.T) {
-		db, h, txs := filledHistory(t, true, logger)
-		test(t, h, db, txs)
-	})
-	t.Run("small_values", func(t *testing.T) {
-		db, h, txs := filledHistory(t, false, logger)
-		test(t, h, db, txs)
-	})
+
+	db, h, txs := filledHistory(t, logger)
+	test(t, h, db, txs)
 }

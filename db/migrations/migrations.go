@@ -53,6 +53,7 @@ var migrations = map[kv.Label][]Migration{
 	dbcfg.ChainDB: {
 		dbSchemaVersion5,
 		ResetStageTxnLookup,
+		HistoryTableFormatChange,
 	},
 	dbcfg.TxPoolDB: {},
 	dbcfg.SentryDB: {},

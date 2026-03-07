@@ -144,35 +144,35 @@ const (
 	// Domains/History/InvertedIndices
 	// Constants have "Tbl" prefix, to avoid collision with actual Domain names
 	// This constants is very rarely used in APP, but Domain/History/Idx names are widely used
-	TblAccountVals        = "AccountVals"
-	TblAccountHistoryKeys = "AccountHistoryKeys"
-	TblAccountHistoryVals = "AccountHistoryVals"
-	TblAccountIdx         = "AccountIdx"
+	TblAccountVals          = "AccountVals"
+	TblAccountHistoryData   = "AccountHistoryKeys" // DataTable: txNum+key → prev_value (non-DupSort, sequential writes)
+	TblAccountHistoryInvIdx = "AccountHistoryVals" // InvIndexTable: key → txNum (DupSort, no embedded value)
+	TblAccountIdx           = "AccountIdx"
 
-	TblStorageVals        = "StorageVals"
-	TblStorageHistoryKeys = "StorageHistoryKeys"
-	TblStorageHistoryVals = "StorageHistoryVals"
-	TblStorageIdx         = "StorageIdx"
+	TblStorageVals          = "StorageVals"
+	TblStorageHistoryData   = "StorageHistoryKeys"
+	TblStorageHistoryInvIdx = "StorageHistoryVals"
+	TblStorageIdx           = "StorageIdx"
 
-	TblCodeVals        = "CodeVals"
-	TblCodeHistoryKeys = "CodeHistoryKeys"
-	TblCodeHistoryVals = "CodeHistoryVals"
-	TblCodeIdx         = "CodeIdx"
+	TblCodeVals          = "CodeVals"
+	TblCodeHistoryData   = "CodeHistoryKeys"
+	TblCodeHistoryInvIdx = "CodeHistoryVals"
+	TblCodeIdx           = "CodeIdx"
 
-	TblCommitmentVals        = "CommitmentVals"
-	TblCommitmentHistoryKeys = "CommitmentHistoryKeys"
-	TblCommitmentHistoryVals = "CommitmentHistoryVals"
-	TblCommitmentIdx         = "CommitmentIdx"
+	TblCommitmentVals          = "CommitmentVals"
+	TblCommitmentHistoryData   = "CommitmentHistoryKeys"
+	TblCommitmentHistoryInvIdx = "CommitmentHistoryVals"
+	TblCommitmentIdx           = "CommitmentIdx"
 
-	TblReceiptVals        = "ReceiptVals"
-	TblReceiptHistoryKeys = "ReceiptHistoryKeys"
-	TblReceiptHistoryVals = "ReceiptHistoryVals"
-	TblReceiptIdx         = "ReceiptIdx"
+	TblReceiptVals          = "ReceiptVals"
+	TblReceiptHistoryData   = "ReceiptHistoryKeys"
+	TblReceiptHistoryInvIdx = "ReceiptHistoryVals"
+	TblReceiptIdx           = "ReceiptIdx"
 
-	TblRCacheVals        = "ReceiptCacheVals"
-	TblRCacheHistoryKeys = "ReceiptCacheHistoryKeys"
-	TblRCacheHistoryVals = "ReceiptCacheHistoryVals"
-	TblRCacheIdx         = "ReceiptCacheIdx"
+	TblRCacheVals          = "ReceiptCacheVals"
+	TblRCacheHistoryData   = "ReceiptCacheHistoryKeys"
+	TblRCacheHistoryInvIdx = "ReceiptCacheHistoryVals"
+	TblRCacheIdx           = "ReceiptCacheIdx"
 
 	TblLogAddressKeys = "LogAddressKeys"
 	TblLogAddressIdx  = "LogAddressIdx"
@@ -186,7 +186,7 @@ const (
 
 	// Prune progress of execution: tableName -> [8bytes of invStep]latest pruned key
 	// Could use table constants `Tbl{Account,Storage,Code,Commitment}Keys` for domains
-	// corresponding history tables `Tbl{Account,Storage,Code,Commitment}HistoryKeys` for history
+	// corresponding history tables `Tbl{Account,Storage,Code,Commitment}HistoryData` for history
 	// and `Tbl{Account,Storage,Code,Commitment}Idx` for inverted indices
 	TblPruningProgress = "PruningProgress"
 	// tableName -> txTo;last pruned val
@@ -342,33 +342,33 @@ var ChaindataTables = []string{
 	BorWitnesses,
 	BorWitnessSizes,
 	TblAccountVals,
-	TblAccountHistoryKeys,
-	TblAccountHistoryVals,
+	TblAccountHistoryData,
+	TblAccountHistoryInvIdx,
 	TblAccountIdx,
 
 	TblStorageVals,
-	TblStorageHistoryKeys,
-	TblStorageHistoryVals,
+	TblStorageHistoryData,
+	TblStorageHistoryInvIdx,
 	TblStorageIdx,
 
 	TblCodeVals,
-	TblCodeHistoryKeys,
-	TblCodeHistoryVals,
+	TblCodeHistoryData,
+	TblCodeHistoryInvIdx,
 	TblCodeIdx,
 
 	TblCommitmentVals,
-	TblCommitmentHistoryKeys,
-	TblCommitmentHistoryVals,
+	TblCommitmentHistoryData,
+	TblCommitmentHistoryInvIdx,
 	TblCommitmentIdx,
 
 	TblReceiptVals,
-	TblReceiptHistoryKeys,
-	TblReceiptHistoryVals,
+	TblReceiptHistoryData,
+	TblReceiptHistoryInvIdx,
 	TblReceiptIdx,
 
 	TblRCacheVals,
-	TblRCacheHistoryKeys,
-	TblRCacheHistoryVals,
+	TblRCacheHistoryData,
+	TblRCacheHistoryInvIdx,
 	TblRCacheIdx,
 
 	TblLogAddressKeys,
@@ -521,31 +521,33 @@ var ChaindataTablesCfg = TableCfg{
 		DupToLen:                  28,
 	},
 
-	TblAccountVals:        {Flags: DupSort},
-	TblAccountHistoryKeys: {Flags: DupSort},
-	TblAccountHistoryVals: {Flags: DupSort},
-	TblAccountIdx:         {Flags: DupSort},
+	TblAccountVals:          {Flags: DupSort},
+	TblAccountHistoryData:   {},               // DataTable: non-DupSort (txNum+key → value, sequential writes)
+	TblAccountHistoryInvIdx: {Flags: DupSort}, // InvIndexTable: key → txNum
+	TblAccountIdx:           {Flags: DupSort},
 
-	TblStorageVals:        {Flags: DupSort},
-	TblStorageHistoryKeys: {Flags: DupSort},
-	TblStorageHistoryVals: {Flags: DupSort},
-	TblStorageIdx:         {Flags: DupSort},
+	TblStorageVals:          {Flags: DupSort},
+	TblStorageHistoryData:   {},
+	TblStorageHistoryInvIdx: {Flags: DupSort},
+	TblStorageIdx:           {Flags: DupSort},
 
-	TblCodeHistoryKeys: {Flags: DupSort},
-	TblCodeIdx:         {Flags: DupSort},
+	TblCodeHistoryData:   {},               // was DupSort (TblCodeHistoryKeys)
+	TblCodeHistoryInvIdx: {Flags: DupSort}, // was non-DupSort (TblCodeHistoryVals)
+	TblCodeIdx:           {Flags: DupSort},
 
-	TblCommitmentVals:        {Flags: DupSort},
-	TblCommitmentHistoryKeys: {Flags: DupSort},
-	TblCommitmentHistoryVals: {Flags: DupSort},
-	TblCommitmentIdx:         {Flags: DupSort},
+	TblCommitmentVals:          {Flags: DupSort},
+	TblCommitmentHistoryData:   {},
+	TblCommitmentHistoryInvIdx: {Flags: DupSort},
+	TblCommitmentIdx:           {Flags: DupSort},
 
-	TblReceiptVals:        {Flags: DupSort},
-	TblReceiptHistoryKeys: {Flags: DupSort},
-	TblReceiptHistoryVals: {Flags: DupSort},
-	TblReceiptIdx:         {Flags: DupSort},
+	TblReceiptVals:          {Flags: DupSort},
+	TblReceiptHistoryData:   {},
+	TblReceiptHistoryInvIdx: {Flags: DupSort},
+	TblReceiptIdx:           {Flags: DupSort},
 
-	TblRCacheHistoryKeys: {Flags: DupSort},
-	TblRCacheIdx:         {Flags: DupSort},
+	TblRCacheHistoryData:   {},               // was DupSort (TblRCacheHistoryKeys)
+	TblRCacheHistoryInvIdx: {Flags: DupSort}, // was non-DupSort (TblRCacheHistoryVals)
+	TblRCacheIdx:           {Flags: DupSort},
 
 	TblLogAddressKeys: {Flags: DupSort},
 	TblLogAddressIdx:  {Flags: DupSort},

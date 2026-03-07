@@ -988,6 +988,17 @@ func (tx *MdbxTx) DropTable(bucket string) error {
 	return tx.dropEvenIfBucketIsNotDeprecated(bucket)
 }
 
+// DropTableForced drops a DBI and all its data unconditionally, regardless of IsDeprecated status.
+// Intended for use in schema migrations where table flags need to change (e.g. adding/removing DupSort).
+// After dropping, the table is re-created with the current config flags on the next DB open.
+func DropTableForced(tx kv.RwTx, name string) error {
+	mdbxTx, ok := tx.(*MdbxTx)
+	if !ok {
+		return fmt.Errorf("DropTableForced: expected *MdbxTx, got %T", tx)
+	}
+	return mdbxTx.dropEvenIfBucketIsNotDeprecated(name)
+}
+
 func (tx *MdbxTx) ExistsTable(bucket string) (bool, error) {
 	if cfg, ok := tx.db.buckets[bucket]; ok {
 		return cfg.DBI != NonExistingDBI, nil
