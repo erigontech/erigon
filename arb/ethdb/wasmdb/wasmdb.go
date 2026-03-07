@@ -224,6 +224,9 @@ var (
 )
 
 func OpenArbitrumWasmDB(ctx context.Context, path string) WasmIface {
+	if path == "" {
+		return nil
+	}
 	wasmDBMu.Lock()
 	defer wasmDBMu.Unlock()
 

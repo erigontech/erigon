@@ -13,8 +13,14 @@ import (
 )
 
 func TestOpenArbitrumWasmDBSingleton(t *testing.T) {
+	wasmDBMu.Lock()
 	openedArbitrumWasmDB = nil
-	t.Cleanup(func() { openedArbitrumWasmDB = nil })
+	wasmDBMu.Unlock()
+	t.Cleanup(func() {
+		wasmDBMu.Lock()
+		openedArbitrumWasmDB = nil
+		wasmDBMu.Unlock()
+	})
 
 	dir := t.TempDir()
 	ctx, cancel := context.WithCancel(context.Background())
