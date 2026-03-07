@@ -112,7 +112,6 @@ jobs:
 
       # Prune LFS blobs that are no longer referenced by the current checkout.
       - name: Prune stale Git LFS objects
-        if: needs.source-of-changes.outputs.changed_files != 'true'
         shell: bash
         run: git lfs prune --verify-remote=false
 
@@ -143,6 +142,3 @@ jobs:
           rm -rf "$TEMP/"* 2>/dev/null || true
           rm -rf "$RUNNER_TEMP/"* 2>/dev/null || true
 
-      - name: This ${{ matrix.os }} check does not make sense for changes within out-of-scope directories
-        if: needs.source-of-changes.outputs.changed_files == 'true'
-        run: echo "This check does not make sense for changes within out-of-scope directories"
