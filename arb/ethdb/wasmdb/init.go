@@ -1,5 +1,0 @@
-package wasmdb
-
-func init() {
-
-}

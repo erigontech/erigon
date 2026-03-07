@@ -238,8 +238,8 @@ func OpenArbitrumWasmDB(ctx context.Context, path string) WasmIface {
 		<-ctx.Done()
 		wasmDBMu.Lock()
 		openedArbitrumWasmDB = nil
-		wasmDBMu.Unlock()
 		mdbxDB.Close()
+		wasmDBMu.Unlock()
 	}()
 
 	openedArbitrumWasmDB = WrapDatabaseWithWasm(mdbxDB, []WasmTarget{LocalTarget()})

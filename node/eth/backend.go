@@ -43,6 +43,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
 	executionclient "github.com/erigontech/erigon/cl/phase1/execution_client"
@@ -920,7 +921,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 					config.Sync,
 					stageloop.SilkwormForExecutionStage(backend.silkworm, config),
 					config.ExperimentalBAL,
-					nil,
+					wasmdb.OpenArbitrumWasmDB(backend.sentryCtx, dirs.ArbitrumWasm),
 				),
 				stagedsync.StageSendersCfg(chainConfig, config.Sync, false /* badBlockHalt */, dirs.Tmp, config.Prune, blockReader, backend.sentriesClient.Hd),
 				builderstages.StageBuilderExecCfg(builderStatePos, backend.notifications.Events, backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, txnProvider, blockReader),
