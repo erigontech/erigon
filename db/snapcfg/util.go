@@ -649,17 +649,6 @@ func LoadRemotePreverified(ctx context.Context) (err error) {
 		}
 	}
 
-	KnownWebseeds = map[string][]string{
-		networkname.Mainnet:    webseedsParse(webseed.Mainnet),
-		networkname.Sepolia:    webseedsParse(webseed.Sepolia),
-		networkname.Amoy:       webseedsParse(webseed.Amoy),
-		networkname.BorMainnet: webseedsParse(webseed.BorMainnet),
-		networkname.Gnosis:     webseedsParse(webseed.Gnosis),
-		networkname.Chiado:     webseedsParse(webseed.Chiado),
-		networkname.Hoodi:      webseedsParse(webseed.Hoodi),
-		networkname.Bloatnet:   webseedsParse(webseed.Bloatnet),
-	}
-
 	// Re-load the preverified hashes
 	registry.ResetRaw(map[string][]byte{
 		networkname.Mainnet:    snapshothashes.Mainnet,
