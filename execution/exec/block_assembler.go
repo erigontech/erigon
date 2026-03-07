@@ -97,10 +97,16 @@ func (mb *AssembledBlock) TxnsRlpSize(withAdditional ...types.Transaction) int {
 	return s
 }
 
+// TxNumAdvancer increments the txNum on the state writer and SharedDomains
+// after each transaction boundary during block assembly.
+type TxNumAdvancer func()
+
 type BlockAssembler struct {
 	*AssembledBlock
-	cfg   AssemblerCfg
-	balIO *state.VersionedIO
+	cfg          AssemblerCfg
+	balIO        *state.VersionedIO
+	stateWriter  state.StateWriter // optional: if set, domain writes go here instead of NoopWriter
+	advanceTxNum TxNumAdvancer     // optional: called after each FinalizeTx/CommitBlock
 }
 
 func NewBlockAssembler(cfg AssemblerCfg, payloadId, parentTime uint64, header *types.Header, uncles []*types.Header, withdrawals []*types.Withdrawal) *BlockAssembler {
@@ -126,14 +132,42 @@ func (ba *BlockAssembler) HasBAL() bool {
 	return ba.balIO != nil
 }
 
+// SetStateWriter sets a real state writer for domain writes during block assembly.
+// When set, state changes are written to the backing store (e.g. SharedDomains)
+// instead of being discarded via NoopWriter. This enables computing state root
+// directly from the assembled block without re-executing via ExecV3.
+//
+// The advanceTxNum callback is called after each transaction boundary (system
+// calls, user transactions, finalization) to keep the domain's txNum in sync.
+func (ba *BlockAssembler) SetStateWriter(w state.StateWriter, advanceTxNum TxNumAdvancer) {
+	ba.stateWriter = w
+	ba.advanceTxNum = advanceTxNum
+}
+
+func (ba *BlockAssembler) writer() state.StateWriter {
+	if ba.stateWriter != nil {
+		return ba.stateWriter
+	}
+	return state.NewNoopWriter()
+}
+
 func (ba *BlockAssembler) BalIO() *state.VersionedIO {
 	return ba.balIO
 }
 
 func (ba *BlockAssembler) Initialize(ibs *state.IntraBlockState, tx kv.TemporalTx, logger log.Logger) error {
+	// Use NoopWriter for FinalizeTx during initialization. Intermediate state
+	// writes to SharedDomains would become stale if later system calls (e.g.
+	// EIP-7002 dequeue) revert storage slots back to their original values,
+	// because CommitBlock's blockOriginStorage==dirtyStorage check skips the
+	// undo write. All final state is correctly written by CommitBlock in
+	// AssembleBlock using the real writer.
 	if err := protocol.InitializeBlockExecution(ba.cfg.Engine,
-		NewChainReader(ba.cfg.ChainConfig, tx, ba.cfg.BlockReader, logger), ba.Header, ba.cfg.ChainConfig, ibs, &state.NoopWriter{}, logger, nil); err != nil {
+		NewChainReader(ba.cfg.ChainConfig, tx, ba.cfg.BlockReader, logger), ba.Header, ba.cfg.ChainConfig, ibs, state.NewNoopWriter(), logger, nil); err != nil {
 		return err
+	}
+	if ba.advanceTxNum != nil {
+		ba.advanceTxNum() // system call tx boundary
 	}
 	if ba.HasBAL() {
 		ba.balIO = ba.balIO.Merge(ibs.TxIO())
@@ -162,7 +196,11 @@ func (ba *BlockAssembler) AddTransactions(
 	signer := types.MakeSigner(ba.cfg.ChainConfig, header.Number.Uint64(), header.Time)
 
 	var coalescedLogs types.Logs
-	noop := state.NewNoopWriter()
+	// Use NoopWriter for FinalizeTx after each user transaction. See
+	// Initialize comment for rationale — intermediate writes to
+	// SharedDomains become stale when system calls revert storage slots.
+	// CommitBlock in AssembleBlock writes all final state correctly.
+	writer := state.NewNoopWriter()
 	recordTxIO := func(balIO *state.VersionedIO) {
 		if balIO != nil {
 			ba.balIO = ba.balIO.Merge(ibs.TxIO())
@@ -213,7 +251,7 @@ func (ba *BlockAssembler) AddTransactions(
 
 		gasUsed := protocol.NewGasUsed(header, current.Receipts.CumulativeGasUsed())
 		receipt, err := protocol.ApplyTransaction(chainConfig, protocol.GetHashFn(header, getHeader),
-			ba.cfg.Engine, coinbase, gasPool, ibs, noop, header, txn, gasUsed, *vmConfig)
+			ba.cfg.Engine, coinbase, gasPool, ibs, writer, header, txn, gasUsed, *vmConfig)
 		if err != nil {
 			ibs.RevertToSnapshot(snap, err)
 			gasPool = new(protocol.GasPool).AddGas(gasSnap).AddBlobGas(blobGasSnap)
@@ -303,6 +341,9 @@ LOOP:
 		} else if errors.Is(err, protocol.ErrNonceTooHigh) {
 			logger.Debug(fmt.Sprintf("[%s] Skipping transaction with high nonce", logPrefix), "hash", txn.Hash(), "sender", from, "nonce", txn.GetNonce())
 		} else if err == nil {
+			if ba.advanceTxNum != nil {
+				ba.advanceTxNum() // user tx boundary
+			}
 			logger.Trace(fmt.Sprintf("[%s] Added transaction", logPrefix), "hash", txn.Hash(), "sender", from, "nonce", txn.GetNonce(), "payload", ba.PayloadId)
 			coalescedLogs = append(coalescedLogs, logs...)
 			txnIdx++
@@ -325,10 +366,13 @@ func (ba *BlockAssembler) AssembleBlock(stateReader state.StateReader, ibs *stat
 		ibs.ResetVersionedIO()
 	}
 	block, ba.Requests, err = protocol.FinalizeBlockExecution(ba.cfg.Engine, stateReader, ba.Header, ba.Txns, ba.Uncles,
-		&state.NoopWriter{}, ba.cfg.ChainConfig, ibs, ba.Receipts, ba.Withdrawals, chainReader, true, logger, nil)
+		ba.writer(), ba.cfg.ChainConfig, ibs, ba.Receipts, ba.Withdrawals, chainReader, true, logger, nil)
 
 	if err != nil {
 		return nil, fmt.Errorf("cannot finalize block execution: %s", err)
+	}
+	if ba.advanceTxNum != nil {
+		ba.advanceTxNum() // block finalization tx boundary
 	}
 
 	// Note: NewBlock (called by FinalizeBlockExecution) copies the header,

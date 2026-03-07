@@ -136,11 +136,15 @@ func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOpti
 	}
 	parentBeaconBlockRoot := common.BigToHash(cl.state.ParentClBlockRoot)
 	slotNumber := cl.state.NextSlotNumber()
+	withdrawals := make([]*types.Withdrawal, 0)
+	if options.withdrawals != nil {
+		withdrawals = options.withdrawals
+	}
 	payloadAttributes := enginetypes.PayloadAttributes{
 		Timestamp:             hexutil.Uint64(timestamp),
 		PrevRandao:            common.BigToHash(cl.state.ParentRandao),
 		SuggestedFeeRecipient: cl.suggestedFeeRecipient,
-		Withdrawals:           make([]*types.Withdrawal, 0),
+		Withdrawals:           withdrawals,
 		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
 		SlotNumber:            (*hexutil.Uint64)(&slotNumber),
 	}
@@ -180,9 +184,16 @@ func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOpti
 func (cl *MockCl) InsertNewPayload(ctx context.Context, p *MockClPayload) (*enginetypes.PayloadStatus, error) {
 	elPayload := p.ExecutionPayload
 	clParentBlockRoot := p.ParentBeaconBlockRoot
+	// Forward execution requests from GetPayload to NewPayload.
+	// Without this, blocks containing real execution requests (e.g. withdrawal
+	// requests from EIP-7002) would fail validation due to requestsHash mismatch.
+	executionRequests := p.ExecutionRequests
+	if executionRequests == nil {
+		executionRequests = []hexutil.Bytes{}
+	}
 	return RetryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, nil,
 		func() (*enginetypes.PayloadStatus, enginetypes.EngineStatus, error) {
-			r, err := cl.engineApiClient.NewPayloadV5(ctx, elPayload, []common.Hash{}, clParentBlockRoot, []hexutil.Bytes{})
+			r, err := cl.engineApiClient.NewPayloadV5(ctx, elPayload, []common.Hash{}, clParentBlockRoot, executionRequests)
 			if err != nil {
 				return nil, "", err
 			}
@@ -246,9 +257,16 @@ func WithWaitUntilTimestamp() BlockBuildingOption {
 	}
 }
 
+func WithWithdrawals(withdrawals []*types.Withdrawal) BlockBuildingOption {
+	return func(opts *blockBuildingOptions) {
+		opts.withdrawals = withdrawals
+	}
+}
+
 type blockBuildingOptions struct {
 	timestamp          *uint64
 	waitUntilTimestamp bool
+	withdrawals        []*types.Withdrawal
 }
 
 func RetryEngine[T any](ctx context.Context, retryStatuses []enginetypes.EngineStatus, retryErrors []error,
