@@ -168,10 +168,10 @@ func getPopulatedCommitmentFilesItem(t *testing.T, dirs datadir.Dirs, startTxNum
 	comp, err := seg.NewCompressor(context.Background(), "", base+"data", dirs.Tmp, seg.DefaultCfg, log.LvlInfo, logger)
 	require.NoError(t, err)
 	require.NotNil(t, comp)
-	defer comp.Close()
 
 	err = comp.Compress()
 	require.NoError(t, err)
+	comp.Close() // Close before opening decompressor (required on Windows)
 
 	decomp, err := seg.NewDecompressor(base + "data")
 	require.NoError(t, err)
