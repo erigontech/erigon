@@ -454,6 +454,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	if endTxNow {
 		return &evmtypes.ExecutionResult{
 			ReceiptGasUsed: startHookUsedSingleGas,
+			BlockGasUsed:   startHookUsedSingleGas,
 			Err:            err,
 			ReturnData:     returnData,
 			ScheduledTxes:  st.evm.ProcessingHook.ScheduledTxes(),
