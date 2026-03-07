@@ -28,6 +28,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/spf13/cobra"
 
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/cmd/utils/debugprint"
@@ -186,7 +187,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig
 	}
 
 	br, _ := blocksIO(db, logger1)
-	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications, false, true, dirs, br, nil, spec.Genesis, syncCfg, nil, false)
+	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications, false, true, dirs, br, nil, spec.Genesis, syncCfg, nil, false, wasmdb.OpenArbitrumWasmDB(ctx, dirs.ArbitrumWasm))
 
 	execUntilFunc := func(execToBlock uint64) stagedsync.ExecFunc {
 		return func(badBlockUnwind bool, s *stagedsync.StageState, unwinder stagedsync.Unwinder, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, logger log.Logger) error {
@@ -376,7 +377,7 @@ func loopExec(db kv.TemporalRwDB, ctx context.Context, unwind uint64, logger log
 	initialCycle := false
 	br, _ := blocksIO(db, logger)
 	notifications := shards.NewNotifications(nil)
-	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications, false, true, dirs, br, nil, spec.Genesis, syncCfg, nil, false)
+	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications, false, true, dirs, br, nil, spec.Genesis, syncCfg, nil, false, wasmdb.OpenArbitrumWasmDB(ctx, dirs.ArbitrumWasm))
 
 	// set block limit of execute stage
 	sync.MockExecFunc(stages.Execution, func(badBlockUnwind bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {

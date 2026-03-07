@@ -37,6 +37,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
@@ -817,7 +818,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications,
 		/*stateStream=*/ false,
 		/*badBlockHalt=*/ true,
-		dirs, br, nil, genesis, syncCfg, nil /*experimentalBAL=*/, false)
+		dirs, br, nil, genesis, syncCfg, nil /*experimentalBAL=*/, false, wasmdb.OpenArbitrumWasmDB(ctx, dirs.ArbitrumWasm))
 
 	if unwind > 0 {
 		if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {

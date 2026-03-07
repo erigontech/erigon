@@ -23,6 +23,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -746,7 +747,7 @@ func NewDefaultStages(ctx context.Context,
 		stagedsync.StageBlockHashesCfg(dirs.Tmp, blockWriter),
 		stagedsync.StageBodiesCfg(controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, controlServer.ChainConfig, blockReader, blockWriter),
 		stagedsync.StageSendersCfg(controlServer.ChainConfig, cfg.Sync, false /* badBlockHalt */, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd),
-		stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{Tracer: tracingHooks}, notifications, cfg.StateStream, false /* badBlockHalt */, dirs, blockReader, controlServer.Hd, cfg.Genesis, cfg.Sync, SilkwormForExecutionStage(silkworm, cfg), cfg.ExperimentalBAL),
+		stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{Tracer: tracingHooks}, notifications, cfg.StateStream, false /* badBlockHalt */, dirs, blockReader, controlServer.Hd, cfg.Genesis, cfg.Sync, SilkwormForExecutionStage(silkworm, cfg), cfg.ExperimentalBAL, wasmdb.OpenArbitrumWasmDB(ctx, dirs.ArbitrumWasm)),
 		stagedsync.StageTxLookupCfg(cfg.Prune, dirs.Tmp, blockReader),
 		stagedsync.StageFinishCfg(forkValidator),
 	)
@@ -781,7 +782,7 @@ func NewPipelineStages(ctx context.Context,
 		stagedsync.StageSnapshotsCfg(db, controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.InternalCL && cfg.CaplinConfig.ArchiveBlocks, cfg.CaplinConfig.ArchiveBlobs, cfg.CaplinConfig.ArchiveStates, silkworm, cfg.Prune),
 		stagedsync.StageBlockHashesCfg(dirs.Tmp, blockWriter),
 		stagedsync.StageSendersCfg(controlServer.ChainConfig, cfg.Sync, false /* badBlockHalt */, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd),
-		stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{Tracer: tracingHooks}, notifications, cfg.StateStream, false, dirs, blockReader, controlServer.Hd, cfg.Genesis, cfg.Sync, SilkwormForExecutionStage(silkworm, cfg), cfg.ExperimentalBAL),
+		stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{Tracer: tracingHooks}, notifications, cfg.StateStream, false, dirs, blockReader, controlServer.Hd, cfg.Genesis, cfg.Sync, SilkwormForExecutionStage(silkworm, cfg), cfg.ExperimentalBAL, wasmdb.OpenArbitrumWasmDB(ctx, dirs.ArbitrumWasm)),
 		stagedsync.StageTxLookupCfg(cfg.Prune, dirs.Tmp, blockReader),
 		stagedsync.StageFinishCfg(forkValidator),
 		stagedsync.StageWitnessProcessingCfg(controlServer.ChainConfig, controlServer.WitnessBuffer),
@@ -807,7 +808,7 @@ func NewInMemoryExecution(
 			stagedsync.StageBodiesCfg(controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, controlServer.ChainConfig, blockReader, blockWriter),
 			stagedsync.StageBlockHashesCfg(dirs.Tmp, blockWriter),
 			stagedsync.StageSendersCfg(controlServer.ChainConfig, cfg.Sync, true /* badBlockHalt */, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd),
-			stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{}, notifications, cfg.StateStream, true, cfg.Dirs, blockReader, controlServer.Hd, cfg.Genesis, cfg.Sync, SilkwormForExecutionStage(silkworm, cfg), cfg.ExperimentalBAL),
+			stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{}, notifications, cfg.StateStream, true, cfg.Dirs, blockReader, controlServer.Hd, cfg.Genesis, cfg.Sync, SilkwormForExecutionStage(silkworm, cfg), cfg.ExperimentalBAL, wasmdb.OpenArbitrumWasmDB(ctx, cfg.Dirs.ArbitrumWasm)),
 		),
 		stagedsync.StateUnwindOrder,
 		nil, /* pruneOrder */

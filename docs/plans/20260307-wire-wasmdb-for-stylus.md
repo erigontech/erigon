@@ -88,16 +88,16 @@ arbitrum:execution/stages/stageloop.go:681+        — callers pass OpenArbitrum
 - Modify: `erigon/execution/tests/mock/mock_sentry.go` (lines 535, 580, 638)
 - Modify: `erigon/execution/stagedsync/stage_witness.go` (line 109)
 
-- [ ] `stageloop.go:749` — add `wasmdb.OpenArbitrumWasmDB(ctx, dirs.ArbitrumWasm)` as last param
-- [ ] `stageloop.go:784` — same
-- [ ] `stageloop.go:810` — add `wasmdb.OpenArbitrumWasmDB(ctx, cfg.Dirs.ArbitrumWasm)` (uses `cfg.Dirs`)
-- [ ] `stages.go:817` — add `wasmdb.OpenArbitrumWasmDB(ctx, dirs.ArbitrumWasm)`
-- [ ] `state_stages.go:189` — add `wasmdb.OpenArbitrumWasmDB(ctx, dirs.ArbitrumWasm)`
-- [ ] `state_stages.go:379` — add `wasmdb.OpenArbitrumWasmDB(ctx, dirs.ArbitrumWasm)`
-- [ ] `mock_sentry.go:535,580,638` — add `nil` (tests don't use Arbitrum)
-- [ ] `stage_witness.go:109` — add `nil` (witness stage doesn't need wasmDB for now)
-- [ ] Add `"github.com/erigontech/erigon/arb/ethdb/wasmdb"` import to files that need it
-- [ ] Run `make erigon` to verify full build
+- [x] `stageloop.go:749` — add `wasmdb.OpenArbitrumWasmDB(ctx, dirs.ArbitrumWasm)` as last param
+- [x] `stageloop.go:784` — same
+- [x] `stageloop.go:810` — add `wasmdb.OpenArbitrumWasmDB(ctx, cfg.Dirs.ArbitrumWasm)` (uses `cfg.Dirs`)
+- [x] `stages.go:817` — add `wasmdb.OpenArbitrumWasmDB(ctx, dirs.ArbitrumWasm)`
+- [x] `state_stages.go:189` — add `wasmdb.OpenArbitrumWasmDB(ctx, dirs.ArbitrumWasm)`
+- [x] `state_stages.go:379` — add `wasmdb.OpenArbitrumWasmDB(ctx, dirs.ArbitrumWasm)`
+- [x] `mock_sentry.go:535,580,638` — add `nil` (tests don't use Arbitrum)
+- [x] `stage_witness.go:109` — add `nil` (witness stage doesn't need wasmDB for now)
+- [x] Add `"github.com/erigontech/erigon/arb/ethdb/wasmdb"` import to files that need it
+- [x] Run `make erigon` to verify full build
 
 ### Task 6: Write tests
 

@@ -549,6 +549,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 					cfg.Sync,
 					nil,
 					false, /*experimentalBAL*/
+					nil,
 				),
 				stagedsync.StageSendersCfg(mock.ChainConfig, cfg.Sync, false /* badBlockHalt */, dirs.Tmp, prune, mock.BlockReader, mock.sentriesClient.Hd),
 				builderstages.StageBuilderExecCfg(builderStatePos, nil /* notifier */, mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, interrupt, param.PayloadId, mock.TxPool, mock.BlockReader),
@@ -594,6 +595,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 				cfg.Sync,
 				nil,
 				false, /*experimentalBAL*/
+				nil,
 			),
 			stagedsync.StageTxLookupCfg(prune, dirs.Tmp, mock.BlockReader),
 			stagedsync.StageFinishCfg(forkValidator),
@@ -652,6 +654,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 				cfg.Sync,
 				nil,
 				/*experimentalBAL*/ false,
+				nil,
 			),
 			stagedsync.StageSendersCfg(mock.ChainConfig, cfg.Sync, false /* badBlockHalt */, dirs.Tmp, prune, mock.BlockReader, mock.sentriesClient.Hd),
 			builderstages.StageBuilderExecCfg(miner, nil, mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, nil, 0, mock.TxPool, mock.BlockReader),

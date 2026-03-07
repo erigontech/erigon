@@ -920,6 +920,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 					config.Sync,
 					stageloop.SilkwormForExecutionStage(backend.silkworm, config),
 					config.ExperimentalBAL,
+					nil,
 				),
 				stagedsync.StageSendersCfg(chainConfig, config.Sync, false /* badBlockHalt */, dirs.Tmp, config.Prune, blockReader, backend.sentriesClient.Hd),
 				builderstages.StageBuilderExecCfg(builderStatePos, backend.notifications.Events, backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, txnProvider, blockReader),
