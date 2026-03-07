@@ -696,13 +696,29 @@ func (h *Queue[T]) Pop() any {
 type QueueWithRetry struct {
 	closed   bool
 	newTasks chan Task
+	parked   chan Task
 	retires  Queue[Task]
 	lock     sync.Mutex
 	capacity int
 }
 
+var queuePool sync.Pool
+
 func NewQueueWithRetry(capacity int) *QueueWithRetry {
 	return &QueueWithRetry{newTasks: make(chan Task, capacity), capacity: capacity}
+}
+
+func GetQueueWithRetryFromPool(capacity int) *QueueWithRetry {
+	if v := queuePool.Get(); v != nil {
+		q := v.(*QueueWithRetry)
+		if q.capacity == capacity && q.parked != nil {
+			q.closed = false
+			q.newTasks = q.parked
+			q.parked = nil
+			return q
+		}
+	}
+	return NewQueueWithRetry(capacity)
 }
 
 func (q *QueueWithRetry) NewTasksLen() int {
@@ -780,38 +796,18 @@ func (q *QueueWithRetry) popWait(ctx context.Context) (task Task, ok bool) {
 		return q.popNoWait()
 	}
 
-	var checkEmpty = func() bool {
-		q.lock.Lock()
-		defer q.lock.Unlock()
-		if q.closed && q.newTasks != nil && len(q.newTasks) == 0 {
-			newTasks := q.newTasks
-			q.newTasks = nil
-			close(newTasks)
-		}
-
-		return q.newTasks == nil
-	}
-
-	if checkEmpty() {
-		return nil, false
-	}
-
-	defer checkEmpty()
-
 	for {
 		q.lock.Lock()
 		newTasks := q.newTasks
 		q.lock.Unlock()
+		if newTasks == nil {
+			return q.popNoWait()
+		}
 
 		select {
 		case inTask, ok := <-newTasks:
 			if !ok {
-				q.lock.Lock()
-				if q.retires.Len() > 0 {
-					task = heap.Pop(&q.retires).(Task)
-				}
-				q.lock.Unlock()
-				return task, task != nil
+				return q.popNoWait()
 			}
 
 			q.lock.Lock()
@@ -826,7 +822,7 @@ func (q *QueueWithRetry) popWait(ctx context.Context) (task Task, ok bool) {
 				return task, true
 			}
 		case <-ctx.Done():
-			return nil, false
+			return q.popNoWait()
 		}
 	}
 }
@@ -866,11 +862,30 @@ func (q *QueueWithRetry) Close() {
 		return
 	}
 	q.closed = true
-	if q.newTasks != nil && len(q.newTasks) == 0 {
+	if q.newTasks != nil {
 		newTasks := q.newTasks
-		q.newTasks = nil
 		close(newTasks)
 	}
+}
+
+// Release puts the queue back into the pool
+func (q *QueueWithRetry) Release() {
+	q.lock.Lock()
+	if q.newTasks == nil || q.closed {
+		q.lock.Unlock()
+		return
+	}
+	q.closed = true
+	// Drain channel.
+	for len(q.newTasks) > 0 {
+		<-q.newTasks
+	}
+	// Clear retry heap, keep backing array.
+	q.retires = q.retires[:0]
+	q.parked = q.newTasks
+	q.newTasks = nil
+	q.lock.Unlock()
+	queuePool.Put(q)
 }
 
 // ResultsQueue thread-safe priority-queue of execution results
