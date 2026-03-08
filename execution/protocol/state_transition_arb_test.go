@@ -1167,6 +1167,223 @@ func TestMultiGasSingleGasInvariant_Transfer(t *testing.T) {
 		"L2 calldata gas should be non-zero for tx with data")
 }
 
+// arbPragueFloorHook is a mock TxProcessingHook for testing the EIP-7623 floor
+// gas path in the Arbitrum refund branch of TransitionDb.
+type arbPragueFloorHook struct {
+	earlyReturnHook
+	forceRefundGas   uint64
+	nonrefundableGas uint64
+}
+
+func (h arbPragueFloorHook) IsArbitrum() bool { return true }
+func (h arbPragueFloorHook) StartTxHook() (bool, multigas.MultiGas, error, []byte) {
+	return false, multigas.ZeroGas(), nil, nil
+}
+func (h arbPragueFloorHook) ForceRefundGas() uint64   { return h.forceRefundGas }
+func (h arbPragueFloorHook) NonrefundableGas() uint64 { return h.nonrefundableGas }
+func (h arbPragueFloorHook) IsCalldataPricingIncreaseEnabled() bool { return true }
+func (h arbPragueFloorHook) GasChargingHook(g *uint64, _ uint64) (accounts.Address, multigas.MultiGas, error) {
+	return h.coinbase, multigas.ZeroGas(), nil
+}
+
+func TestTransitionDb_EIP7623Floor_ArbitrumPrague(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+
+	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(sd.Close)
+
+	r := state.NewReaderV3(sd.AsGetter(tx))
+	s := state.New(r)
+
+	sender := accounts.InternAddress(common.HexToAddress("0xaaaa"))
+	recipient := accounts.InternAddress(common.HexToAddress("0xbbbb"))
+	coinbase := accounts.InternAddress(common.HexToAddress("0xdead"))
+
+	s.CreateAccount(sender, true)
+	s.AddBalance(sender, *uint256.NewInt(1_000_000_000_000_000_000), tracing.BalanceChangeUnspecified)
+	s.SetNonce(sender, 0)
+
+	// Use lots of non-zero calldata to push floor gas above the simple transfer cost.
+	// Non-zero bytes contribute 4 tokens each. 200 non-zero bytes = 800 tokens.
+	// floorGas = TxGas(21000) + 800 * TxTotalCostFloorPerToken(10) = 29000
+	// A simple transfer uses 21000 gas, so gasUsed(21000) < floorGas(29000).
+	data := make([]byte, 200)
+	for i := range data {
+		data[i] = 0xff
+	}
+
+	gasPrice := uint256.NewInt(1)
+	gasLimit := uint64(100_000)
+
+	blockCtx := evmtypes.BlockContext{
+		BlockNumber:    1,
+		GasLimit:       30_000_000,
+		BaseFee:        *uint256.NewInt(1),
+		Coinbase:       coinbase,
+		ArbOSVersion:   40, // Prague enabled for Arbitrum
+		GetHash:        func(n uint64) (common.Hash, error) { return common.Hash{}, nil },
+		CanTransfer: func(ibs evmtypes.IntraBlockState, addr accounts.Address, val uint256.Int) (bool, error) {
+			bal, err := ibs.GetBalance(addr)
+			if err != nil {
+				return false, err
+			}
+			return bal.Cmp(&val) >= 0, nil
+		},
+		Transfer: func(ibs evmtypes.IntraBlockState, from, to accounts.Address, val uint256.Int, _ bool, _ *chain.Rules) error {
+			if err := ibs.SubBalance(from, val, tracing.BalanceChangeTransfer); err != nil {
+				return err
+			}
+			return ibs.AddBalance(to, val, tracing.BalanceChangeTransfer)
+		},
+	}
+	txCtx := evmtypes.TxContext{GasPrice: *gasPrice, Origin: sender}
+
+	arbCfg := &chain.Config{
+		ChainID:               big.NewInt(412346),
+		HomesteadBlock:        new(big.Int),
+		TangerineWhistleBlock: new(big.Int),
+		SpuriousDragonBlock:   new(big.Int),
+		ByzantiumBlock:        new(big.Int),
+		ConstantinopleBlock:   new(big.Int),
+		PetersburgBlock:       new(big.Int),
+		IstanbulBlock:         new(big.Int),
+		BerlinBlock:           new(big.Int),
+		LondonBlock:           new(big.Int),
+		ArbitrumChainParams:   arbtypes.ArbitrumChainParams{EnableArbOS: true, GenesisBlockNum: 0},
+	}
+
+	evmInst := vm.NewEVM(blockCtx, txCtx, s, arbCfg, vm.Config{})
+	evmInst.ProcessingHook = arbPragueFloorHook{
+		earlyReturnHook: earlyReturnHook{coinbase: coinbase},
+	}
+
+	msg := types.NewMessage(
+		sender, recipient, 0, uint256.NewInt(0), gasLimit,
+		gasPrice, gasPrice, gasPrice,
+		data, nil, false, false, false, false, nil,
+	)
+
+	gp := new(GasPool).AddGas(30_000_000)
+	st := NewStateTransition(evmInst, msg, gp)
+	result, err := st.TransitionDb(true, false)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	// Compute expected floor: 200 non-zero bytes → tokenLen = 200 + 3*200 = 800
+	// floorGas = TxGas(21000) + 800 * 10 = 29000
+	expectedFloor := params.TxGas + uint64(800)*params.TxTotalCostFloorPerToken
+	require.Equal(t, uint64(29000), expectedFloor)
+
+	// gasUsed should be bumped to floorGas since actual execution cost < floor
+	require.Equal(t, expectedFloor, result.ReceiptGasUsed,
+		"gasUsed should be raised to EIP-7623 floor when actual gas < floor")
+
+	// L2Calldata multigas should get the floor delta
+	require.Greater(t, result.UsedMultiGas.Get(multigas.ResourceKindL2Calldata), uint64(0),
+		"L2Calldata multigas should be non-zero after floor adjustment")
+}
+
+func TestTransitionDb_EIP7623Floor_AboveFloor(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+
+	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(sd.Close)
+
+	r := state.NewReaderV3(sd.AsGetter(tx))
+	s := state.New(r)
+
+	sender := accounts.InternAddress(common.HexToAddress("0xaaaa"))
+	recipient := accounts.InternAddress(common.HexToAddress("0xbbbb"))
+	coinbase := accounts.InternAddress(common.HexToAddress("0xdead"))
+
+	s.CreateAccount(sender, true)
+	s.AddBalance(sender, *uint256.NewInt(1_000_000_000_000_000_000), tracing.BalanceChangeUnspecified)
+	s.SetNonce(sender, 0)
+
+	// Minimal calldata: 1 zero byte → tokenLen = 1 + 3*0 = 1
+	// floorGas = TxGas(21000) + 1 * 10 = 21010
+	// A simple transfer uses 21000 gas, which is below 21010.
+	// But with no calldata at all, floor = 21000 = gasUsed → no adjustment.
+	// Use empty data so floor = TxGas = 21000 = gasUsed. No floor adjustment.
+	data := []byte{}
+
+	gasPrice := uint256.NewInt(1)
+	gasLimit := uint64(100_000)
+
+	blockCtx := evmtypes.BlockContext{
+		BlockNumber:    1,
+		GasLimit:       30_000_000,
+		BaseFee:        *uint256.NewInt(1),
+		Coinbase:       coinbase,
+		ArbOSVersion:   40,
+		GetHash:        func(n uint64) (common.Hash, error) { return common.Hash{}, nil },
+		CanTransfer: func(ibs evmtypes.IntraBlockState, addr accounts.Address, val uint256.Int) (bool, error) {
+			bal, err := ibs.GetBalance(addr)
+			if err != nil {
+				return false, err
+			}
+			return bal.Cmp(&val) >= 0, nil
+		},
+		Transfer: func(ibs evmtypes.IntraBlockState, from, to accounts.Address, val uint256.Int, _ bool, _ *chain.Rules) error {
+			if err := ibs.SubBalance(from, val, tracing.BalanceChangeTransfer); err != nil {
+				return err
+			}
+			return ibs.AddBalance(to, val, tracing.BalanceChangeTransfer)
+		},
+	}
+	txCtx := evmtypes.TxContext{GasPrice: *gasPrice, Origin: sender}
+
+	arbCfg := &chain.Config{
+		ChainID:               big.NewInt(412346),
+		HomesteadBlock:        new(big.Int),
+		TangerineWhistleBlock: new(big.Int),
+		SpuriousDragonBlock:   new(big.Int),
+		ByzantiumBlock:        new(big.Int),
+		ConstantinopleBlock:   new(big.Int),
+		PetersburgBlock:       new(big.Int),
+		IstanbulBlock:         new(big.Int),
+		BerlinBlock:           new(big.Int),
+		LondonBlock:           new(big.Int),
+		ArbitrumChainParams:   arbtypes.ArbitrumChainParams{EnableArbOS: true, GenesisBlockNum: 0},
+	}
+
+	evmInst := vm.NewEVM(blockCtx, txCtx, s, arbCfg, vm.Config{})
+	evmInst.ProcessingHook = arbPragueFloorHook{
+		earlyReturnHook: earlyReturnHook{coinbase: coinbase},
+	}
+
+	msg := types.NewMessage(
+		sender, recipient, 0, uint256.NewInt(0), gasLimit,
+		gasPrice, gasPrice, gasPrice,
+		data, nil, false, false, false, false, nil,
+	)
+
+	gp := new(GasPool).AddGas(30_000_000)
+	st := NewStateTransition(evmInst, msg, gp)
+	result, err := st.TransitionDb(true, false)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	// With empty data, floorGas = TxGas = 21000
+	// gasUsed = 21000 (simple transfer) which equals the floor, so no adjustment
+	require.Equal(t, params.TxGas, result.ReceiptGasUsed,
+		"gasUsed should remain at 21000 when at or above floor")
+
+	// The L2Calldata multigas should only have the intrinsic contribution, no floor delta
+	l2CalldataBefore := result.UsedMultiGas.Get(multigas.ResourceKindL2Calldata)
+	// With no calldata, IntrinsicMultiGas contributes 0 to L2Calldata
+	require.Equal(t, uint64(0), l2CalldataBefore,
+		"L2Calldata multigas should be zero with no calldata and no floor adjustment")
+}
+
 func TestFloorDataGas(t *testing.T) {
 	t.Run("empty_data", func(t *testing.T) {
 		gas, err := FloorDataGas(nil)
