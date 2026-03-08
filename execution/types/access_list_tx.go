@@ -497,7 +497,21 @@ func (tx *AccessListTx) SigningHash(chainID *big.Int) common.Hash {
 }
 
 func (tx *AccessListTx) MarshalBinaryForHashing(w io.Writer) error {
-	return tx.MarshalBinary(w)
+	payloadSize, accessListLen := tx.payloadSize()
+	if tx.Timeboosted != nil {
+		payloadSize--
+	}
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
+	b[0] = AccessListTxType
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	saved := tx.Timeboosted
+	tx.Timeboosted = nil
+	err := tx.encodePayload(w, b[:], payloadSize, accessListLen)
+	tx.Timeboosted = saved
+	return err
 }
 
 func (tx *AccessListTx) Type() byte { return AccessListTxType }

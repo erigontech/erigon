@@ -70,6 +70,41 @@ func TestBlobTx_MarshalBinaryForHashing_ExcludesTimeboosted(t *testing.T) {
 	require.True(t, *tx1.Timeboosted)
 }
 
+func TestAccessListTx_MarshalBinaryForHashing_ExcludesTimeboosted(t *testing.T) {
+	to := common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678")
+	makeTx := func() *AccessListTx {
+		return &AccessListTx{
+			LegacyTx: LegacyTx{
+				CommonTx: CommonTx{
+					Nonce:    1,
+					GasLimit: 21000,
+					To:       &to,
+					Value:    uint256.NewInt(100),
+				},
+				GasPrice: uint256.NewInt(1000000000),
+			},
+			ChainID:    uint256.NewInt(1),
+			AccessList: AccessList{},
+		}
+	}
+
+	tx1 := makeTx()
+	tb := true
+	tx1.Timeboosted = &tb
+
+	tx2 := makeTx()
+	tx2.Timeboosted = nil
+
+	var buf1, buf2 bytes.Buffer
+	require.NoError(t, tx1.MarshalBinaryForHashing(&buf1))
+	require.NoError(t, tx2.MarshalBinaryForHashing(&buf2))
+
+	require.Equal(t, buf1.Bytes(), buf2.Bytes(),
+		"MarshalBinaryForHashing output must be identical regardless of Timeboosted value")
+	require.NotNil(t, tx1.Timeboosted)
+	require.True(t, *tx1.Timeboosted)
+}
+
 func TestAllTxTypes_MarshalBinaryForHashing_TypeByteCorrect(t *testing.T) {
 	to := common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678")
 
