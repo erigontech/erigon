@@ -63,6 +63,13 @@ jobs:
           SKIP_FLAKY_TESTS: 'true'
         run: make test-all
 
+      - name: Report uncached test packages
+        if: always()
+        run: |
+          if [ -f run.log ]; then
+            awk '/^ok/ && !/\(cached\)/ { print "::notice::" $2 " ran without test cache (" $3 ")" }' run.log
+          fi
+
       - name: SonarCloud scan in case OS Linux
         if: runner.os == 'Linux'
         uses: SonarSource/sonarqube-scan-action@v7
