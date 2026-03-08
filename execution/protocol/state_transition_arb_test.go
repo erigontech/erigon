@@ -1179,8 +1179,8 @@ func (h arbPragueFloorHook) IsArbitrum() bool { return true }
 func (h arbPragueFloorHook) StartTxHook() (bool, multigas.MultiGas, error, []byte) {
 	return false, multigas.ZeroGas(), nil, nil
 }
-func (h arbPragueFloorHook) ForceRefundGas() uint64   { return h.forceRefundGas }
-func (h arbPragueFloorHook) NonrefundableGas() uint64 { return h.nonrefundableGas }
+func (h arbPragueFloorHook) ForceRefundGas() uint64                 { return h.forceRefundGas }
+func (h arbPragueFloorHook) NonrefundableGas() uint64               { return h.nonrefundableGas }
 func (h arbPragueFloorHook) IsCalldataPricingIncreaseEnabled() bool { return true }
 func (h arbPragueFloorHook) GasChargingHook(g *uint64, _ uint64) (accounts.Address, multigas.MultiGas, error) {
 	return h.coinbase, multigas.ZeroGas(), nil
@@ -1220,12 +1220,12 @@ func TestTransitionDb_EIP7623Floor_ArbitrumPrague(t *testing.T) {
 	gasLimit := uint64(100_000)
 
 	blockCtx := evmtypes.BlockContext{
-		BlockNumber:    1,
-		GasLimit:       30_000_000,
-		BaseFee:        *uint256.NewInt(1),
-		Coinbase:       coinbase,
-		ArbOSVersion:   40, // Prague enabled for Arbitrum
-		GetHash:        func(n uint64) (common.Hash, error) { return common.Hash{}, nil },
+		BlockNumber:  1,
+		GasLimit:     30_000_000,
+		BaseFee:      *uint256.NewInt(1),
+		Coinbase:     coinbase,
+		ArbOSVersion: 40, // Prague enabled for Arbitrum
+		GetHash:      func(n uint64) (common.Hash, error) { return common.Hash{}, nil },
 		CanTransfer: func(ibs evmtypes.IntraBlockState, addr accounts.Address, val uint256.Int) (bool, error) {
 			bal, err := ibs.GetBalance(addr)
 			if err != nil {
@@ -1319,12 +1319,12 @@ func TestTransitionDb_EIP7623Floor_AboveFloor(t *testing.T) {
 	gasLimit := uint64(100_000)
 
 	blockCtx := evmtypes.BlockContext{
-		BlockNumber:    1,
-		GasLimit:       30_000_000,
-		BaseFee:        *uint256.NewInt(1),
-		Coinbase:       coinbase,
-		ArbOSVersion:   40,
-		GetHash:        func(n uint64) (common.Hash, error) { return common.Hash{}, nil },
+		BlockNumber:  1,
+		GasLimit:     30_000_000,
+		BaseFee:      *uint256.NewInt(1),
+		Coinbase:     coinbase,
+		ArbOSVersion: 40,
+		GetHash:      func(n uint64) (common.Hash, error) { return common.Hash{}, nil },
 		CanTransfer: func(ibs evmtypes.IntraBlockState, addr accounts.Address, val uint256.Int) (bool, error) {
 			bal, err := ibs.GetBalance(addr)
 			if err != nil {

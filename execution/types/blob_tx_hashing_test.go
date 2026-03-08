@@ -84,9 +84,9 @@ func TestAllTxTypes_MarshalBinaryForHashing_TypeByteCorrect(t *testing.T) {
 	to := common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678")
 
 	tests := []struct {
-		name         string
-		tx           Transaction
-		expectedType byte
+		name          string
+		tx            Transaction
+		expectedType  byte
 		hasTypePrefix bool
 	}{
 		{
@@ -139,9 +139,9 @@ func TestAllTxTypes_MarshalBinaryForHashing_TypeByteCorrect(t *testing.T) {
 			hasTypePrefix: true,
 		},
 		{
-			name:         "BlobTx",
-			tx:           newTestBlobTx(),
-			expectedType: BlobTxType,
+			name:          "BlobTx",
+			tx:            newTestBlobTx(),
+			expectedType:  BlobTxType,
 			hasTypePrefix: true,
 		},
 		{
