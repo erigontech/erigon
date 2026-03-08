@@ -56,7 +56,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 	if se.cfg.experimentalQmtree && se.qmtracker == nil {
 		var err error
-		se.qmtracker, err = newQmtreeTracker(se.cfg.dirs.DataDir)
+		se.qmtracker, err = newQmtreeTracker(se.cfg.dirs.Snap)
 		if err != nil {
 			return nil, rwTx, fmt.Errorf("init qmtree tracker: %w", err)
 		}
@@ -212,10 +212,11 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		}
 
 		if se.qmtracker != nil {
-			qmroot := se.qmtracker.syncRoot()
 			if blockNum%1000 == 0 || blockNum <= 10 {
+				qmroot := se.qmtracker.syncRoot()
 				log.Info(fmt.Sprintf("[%s] qmtree root", se.logPrefix), "block", blockNum, "root", qmroot, "leaves", se.qmtracker.nextSN)
 			}
+			se.qmtracker.logStepProgress(se.logPrefix)
 		}
 
 		if dbg.StopAfterBlock > 0 && blockNum == dbg.StopAfterBlock {

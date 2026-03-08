@@ -368,6 +368,118 @@ Full production proof system in the commitment pipeline.
 
 ---
 
+## Phase 10: Full Sync Benchmark
+
+Run a complete sync to chain tip with `--experimental.qmtree` to measure
+the overhead and storage cost of the proof-of-execution system relative
+to the existing commitment scheme.
+
+### 10.1 Hoodi full sync to tip
+
+- Run erigon with `--experimental.qmtree` on hoodi from genesis to chain tip
+- Measure: blocks/sec, txs/sec, total wall time
+- Compare against a baseline sync without `--experimental.qmtree`
+
+### 10.2 Tip processing
+
+- Once synced to tip, observe steady-state performance processing new blocks
+- Measure per-block overhead of qmtree maintenance
+
+### 10.3 Storage measurement
+
+- Measure total qmtree disk usage at tip (entries + twigs)
+- Compare to existing commitment/snapshot storage
+- Compute bytes-per-leaf and bytes-per-block ratios
+
+### 10.4 Memory measurement
+
+- Measure memory overhead from the in-memory leaf data map
+- Determine if leaf data needs to be moved to disk for production viability
+
+### Deliverable
+
+Benchmark report with concrete performance and storage numbers. Identifies
+whether the current approach is viable for production or needs optimization.
+
+---
+
+## Phase 11: Shared Domain Integration
+
+Integrate qmtree into the shared domain object so that the tree participates
+in the same periodic commit/flush cycle as other domains (accounts, storage,
+code, commitment). This eliminates the standalone tracker in favour of a
+properly integrated component.
+
+### 11.1 Register qmtree as a domain
+
+- Add qmtree as a new domain alongside accounts, storage, code, commitment
+- The shared domain object manages the qmtree tree lifecycle
+- Tree creation, flush, and close happen through the domain interface
+- Storage lives under `<datadir>/snapshots/qmtree/{entries,twigs}/`
+
+### 11.2 Periodic flush at commit boundaries
+
+- Move `SyncAndRoot()` from per-block to the shared domain's commit cycle
+- qmtree entry/twig files flush at the same boundaries as `.kv` files
+- Root computation only at commit points and explicit log blocks
+- Eliminates the goroutine-per-block overhead found during Phase 10
+
+### 11.3 Step-aligned file rotation
+
+- Entry and twig HPFile segments rotate at domain step boundaries
+- Completed segments become read-only, matching the domain freeze pattern
+- Step metadata (which step each segment covers) tracked consistently
+
+### 11.4 Unwind support
+
+- Wire qmtree `UnwindTo()` into the domain's unwind path
+- On reorg, truncate entry/twig files and rebuild the youngest twig
+- Leaf data for the rewound range is discarded
+
+### Deliverable
+
+qmtree fully integrated into the shared domain lifecycle — flush, commit,
+unwind, and step rotation all handled through the existing domain machinery.
+
+---
+
+## Phase 12: Snapshot Segmentation
+
+Integrate qmtree storage into erigon's snapshot distribution model by
+splitting the monolithic entry/twig files into step-sized segments.
+
+### 12.1 Segment format design
+
+- Define segment boundaries aligned with erigon's step size
+- Entry segments: `v1-qmtree-entries.<from>-<to>.seg`
+- Twig segments: `v1-qmtree-twigs.<from>-<to>.seg`
+- Each segment is self-contained and distributable independently
+
+### 12.2 Segment creation (freeze/retire)
+
+- At step boundaries, freeze completed entry/twig data into segment files
+- Move frozen data from the active hpfile to immutable segments
+- Active (youngest) twig remains in the hpfile for ongoing writes
+
+### 12.3 Segment reading
+
+- qmtree Tree reads from frozen segments for historical data
+- Seamless transition between segment files and the active hpfile
+- Support proof generation across segment boundaries
+
+### 12.4 Integration with snapshot downloader
+
+- Register qmtree segments with the torrent-based snapshot downloader
+- New nodes can download qmtree segments alongside block/state snapshots
+- Skip re-computation of proof-of-execution for already-downloaded ranges
+
+### Deliverable
+
+qmtree data split into distributable segments compatible with erigon's
+snapshot infrastructure. No pruning — just segmentation for distribution.
+
+---
+
 ## Status Summary
 
 | Phase | Description | Status |
@@ -386,6 +498,9 @@ Full production proof system in the commitment pipeline.
 | 9.1 | Production integration: Worker + serial executor wiring | Done |
 | 9.2 | Production integration: Disk-backed tree + leaf data storage | Done |
 | 9.3 | Production integration: Witness/proof generation | Done |
+| 10 | Full sync benchmark (hoodi to tip) | In progress |
+| 11 | Shared domain integration | - |
+| 12 | Snapshot segmentation | - |
 
 ## File Summary
 
@@ -425,3 +540,6 @@ Full production proof system in the commitment pipeline.
 - Phase 7: Phase 6 + existing qmtree PoC
 - Phase 8: Phase 7
 - Phase 9: Phase 8 + production readiness review
+- Phase 10: Phase 9 (full sync requires production wiring)
+- Phase 11: Phase 10 (shared domain integration informed by sync findings)
+- Phase 12: Phase 11 (segmentation requires domain integration for step alignment)

@@ -802,12 +802,13 @@ func (t *Tree) FlushFiles(twigDeleteStart uint64, twigDeleteEnd uint64) []uint64
 	}
 
 	t.syncMtForYoungestTwig(false)
+	// Move all accumulated twigs (including completed ones) to upperTree
+	// before replacing newTwigMap with only the youngest twig.
+	oldTwigMap := t.newTwigMap
 	t.newTwigMap = map[uint64]*Twig{
-		t.youngestTwigId: t.newTwigMap[t.youngestTwigId].Clone(),
+		t.youngestTwigId: oldTwigMap[t.youngestTwigId].Clone(),
 	}
-	//add newTwigMap's old content to upperTree
-	t.upperTree.AddTwigs(t.newTwigMap)
-	//now, newTwigMap only contains one member: youngest_twig.clone()
+	t.upperTree.AddTwigs(oldTwigMap)
 
 	nList := t.syncMtForActiveBitsPhase1()
 	for twigId := twigDeleteStart; twigId < twigDeleteEnd; twigId++ {
