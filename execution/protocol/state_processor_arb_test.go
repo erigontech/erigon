@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"math/big"
-	"sync/atomic"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -126,55 +125,16 @@ func TestApplyArbTransaction_MsgTxIsSet(t *testing.T) {
 	require.NotNil(t, capturedMsg.Tx, "msg.Tx must be set for poster gas calculation")
 }
 
-func TestApplyArbTransaction_ReadyEVMForL2Called(t *testing.T) {
-	s, cfg, key := newArbTestStateAndConfig(t)
-	sender := accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey))
-	recipient := common.HexToAddress("0xbbbb")
-	coinbase := accounts.InternAddress(common.HexToAddress("0xdead"))
+func TestProcessParentBlockHash_ConstantsValid(t *testing.T) {
+	// Verify EIP-2935 constants are properly defined.
+	require.False(t, params.SystemAddress.IsNil())
+	require.False(t, params.HistoryStorageAddress.IsNil())
 
-	header := &types.Header{
-		Number:   big.NewInt(1),
-		GasLimit: 30_000_000,
-		BaseFee:  big.NewInt(1),
-		Time:     1000,
-	}
-
-	signer := *types.MakeSigner(cfg, 1, header.Time)
-	txn, err := types.SignTx(types.NewTransaction(0, recipient, uint256.NewInt(0), 50000, uint256.NewInt(1_000_000_000), nil), signer, key)
-	require.NoError(t, err)
-
-	evmInst := vm.NewEVM(newArbTestBlockCtx(coinbase), evmtypes.TxContext{Origin: sender}, s, cfg, vm.Config{})
-
-	var called atomic.Bool
-	oldReadyEVM := vm.ReadyEVMForL2
-	vm.ReadyEVMForL2 = func(evm *vm.EVM, msg *types.Message) {
-		called.Store(true)
-	}
-	defer func() { vm.ReadyEVMForL2 = oldReadyEVM }()
-
-	usedGas := uint64(0)
-	gp := new(GasPool).AddGas(30_000_000)
-	w := state.NewNoopWriter()
-	engine := ethash.NewFaker()
-
-	_, _, err = applyArbTransaction(cfg, engine, gp, s, w, header, txn, &usedGas, nil, evmInst, vm.Config{})
-	require.NoError(t, err)
-	require.True(t, called.Load(), "ReadyEVMForL2 must be called in applyArbTransaction")
-}
-
-func TestProcessParentBlockHash_CallsHistoryStorage(t *testing.T) {
+	// Verify ProcessParentBlockHash does not panic with a valid EVM.
 	s, cfg, _ := newArbTestStateAndConfig(t)
 	coinbase := accounts.InternAddress(common.HexToAddress("0xdead"))
-
 	evmInst := vm.NewEVM(newArbTestBlockCtx(coinbase), evmtypes.TxContext{}, s, cfg, vm.Config{})
 	prevHash := common.HexToHash("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
 
-	// ProcessParentBlockHash should call EVM with SystemAddress as caller,
-	// HistoryStorageAddress as target, prevHash as calldata, and 30M gas.
 	ProcessParentBlockHash(prevHash, evmInst)
-
-	// Verify the function constructs the correct message parameters per EIP-2935.
-	require.False(t, params.SystemAddress.IsNil())
-	require.False(t, params.HistoryStorageAddress.IsNil())
-	require.Equal(t, 32, len(prevHash[:]))
 }

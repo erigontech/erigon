@@ -70,16 +70,6 @@ func TestBlobTx_MarshalBinaryForHashing_ExcludesTimeboosted(t *testing.T) {
 	require.True(t, *tx1.Timeboosted)
 }
 
-func TestBlobTx_MarshalBinaryForHashing_RoundTrip(t *testing.T) {
-	tx := newTestBlobTx()
-	var buf bytes.Buffer
-	require.NoError(t, tx.MarshalBinaryForHashing(&buf))
-
-	data := buf.Bytes()
-	require.True(t, len(data) > 1, "output must not be empty")
-	require.Equal(t, byte(BlobTxType), data[0], "type byte must match BlobTxType")
-}
-
 func TestAllTxTypes_MarshalBinaryForHashing_TypeByteCorrect(t *testing.T) {
 	to := common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678")
 
@@ -179,6 +169,9 @@ func TestAllTxTypes_MarshalBinaryForHashing_TypeByteCorrect(t *testing.T) {
 			if tt.hasTypePrefix {
 				require.Equal(t, byte(tt.expectedType), data[0],
 					"first byte must be the tx type byte for %s", tt.name)
+			} else {
+				require.GreaterOrEqual(t, data[0], byte(0xc0),
+					"LegacyTx first byte must be RLP list prefix, got 0x%02x", data[0])
 			}
 		})
 	}

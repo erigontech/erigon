@@ -24,5 +24,6 @@ func TestArbSepoliaRollupGenesisBlock_Fields(t *testing.T) {
 func TestArbSepoliaRollupGenesisBlock_AllocNonEmpty(t *testing.T) {
 	genesis := ArbSepoliaRollupGenesisBlock()
 	require.NotNil(t, genesis)
-	require.NotEmpty(t, genesis.Alloc, "Alloc must contain precompile accounts")
+	require.Greater(t, len(genesis.Alloc), 10,
+		"Alloc must contain many precompile/ArbOS accounts, got %d", len(genesis.Alloc))
 }

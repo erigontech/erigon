@@ -1273,7 +1273,7 @@ func TestTransitionDb_EIP7623Floor_ArbitrumPrague(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
-	// Compute expected floor: 200 non-zero bytes → tokenLen = 200 + 3*200 = 800
+	// Compute expected floor: 200 non-zero bytes → tokens = 200*4 + 0*1 = 800
 	// floorGas = TxGas(21000) + 800 * 10 = 29000
 	expectedFloor := params.TxGas + uint64(800)*params.TxTotalCostFloorPerToken
 	require.Equal(t, uint64(29000), expectedFloor)
@@ -1287,7 +1287,7 @@ func TestTransitionDb_EIP7623Floor_ArbitrumPrague(t *testing.T) {
 		"L2Calldata multigas should be non-zero after floor adjustment")
 }
 
-func TestTransitionDb_EIP7623Floor_AboveFloor(t *testing.T) {
+func TestTransitionDb_EIP7623Floor_AtFloor(t *testing.T) {
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
