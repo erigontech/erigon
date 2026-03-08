@@ -1,10 +1,19 @@
 package vm
 
 import (
+	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
+
+	arbtypes "github.com/erigontech/erigon/arb/chain/types"
 	"github.com/erigontech/erigon/arb/multigas"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/stretchr/testify/require"
 )
 
@@ -120,4 +129,68 @@ func TestCategorizeAclSstoreGas_ColdResetSlot(t *testing.T) {
 	require.Equal(t, params.ColdSloadCostEIP2929, mg.Get(multigas.ResourceKindStorageAccess))
 	require.Equal(t, writeCost, mg.Get(multigas.ResourceKindStorageGrowth))
 	require.Equal(t, totalGas, mg.SingleGas())
+}
+
+func newSloadTestEVM(isArbitrum bool) *EVM {
+	cfg := &chain.Config{
+		ChainID: big.NewInt(1),
+	}
+	if isArbitrum {
+		cfg.ArbitrumChainParams = arbtypes.ArbitrumChainParams{EnableArbOS: true}
+	}
+	blockCtx := evmtypes.BlockContext{
+		BlockNumber: 100,
+		Time:        1000,
+		Coinbase:    accounts.InternAddress(common.HexToAddress("0xdead")),
+		GasLimit:    30_000_000,
+		GetHash:     func(n uint64) (common.Hash, error) { return common.Hash{}, nil },
+	}
+	txCtx := evmtypes.TxContext{GasPrice: *uint256.NewInt(1)}
+	ibs := state.New(nil)
+	return NewEVM(blockCtx, txCtx, ibs, cfg, Config{})
+}
+
+func newSloadCallContext(addr accounts.Address) *CallContext {
+	cc := &CallContext{}
+	cc.Contract = *NewContract(addr, addr, addr, *uint256.NewInt(0))
+	cc.Stack.push(*uint256.NewInt(42))
+	return cc
+}
+
+func TestGasSLoadEIP2929_ColdMultiGas(t *testing.T) {
+	evm := newSloadTestEVM(true)
+	addr := accounts.InternAddress(common.HexToAddress("0x1234"))
+	evm.IntraBlockState().AddAddressToAccessList(addr)
+	cc := newSloadCallContext(addr)
+
+	gas, err := gasSLoadEIP2929(evm, cc, 100_000, 0)
+	require.NoError(t, err)
+	require.Equal(t, params.ColdSloadCostEIP2929, gas)
+	require.Equal(t, params.ColdSloadCostEIP2929, cc.Contract.UsedMultiGas.Get(multigas.ResourceKindStorageAccess))
+}
+
+func TestGasSLoadEIP2929_WarmMultiGas(t *testing.T) {
+	evm := newSloadTestEVM(true)
+	addr := accounts.InternAddress(common.HexToAddress("0x1234"))
+	evm.IntraBlockState().AddAddressToAccessList(addr)
+	slot := accounts.InternKey(uint256.NewInt(42).Bytes32())
+	evm.IntraBlockState().AddSlotToAccessList(addr, slot)
+	cc := newSloadCallContext(addr)
+
+	gas, err := gasSLoadEIP2929(evm, cc, 100_000, 0)
+	require.NoError(t, err)
+	require.Equal(t, params.WarmStorageReadCostEIP2929, gas)
+	require.Equal(t, params.WarmStorageReadCostEIP2929, cc.Contract.UsedMultiGas.Get(multigas.ResourceKindStorageAccess))
+}
+
+func TestGasSLoadEIP2929_NonArbitrum_NoMultiGas(t *testing.T) {
+	evm := newSloadTestEVM(false)
+	addr := accounts.InternAddress(common.HexToAddress("0x1234"))
+	evm.IntraBlockState().AddAddressToAccessList(addr)
+	cc := newSloadCallContext(addr)
+
+	gas, err := gasSLoadEIP2929(evm, cc, 100_000, 0)
+	require.NoError(t, err)
+	require.Equal(t, params.ColdSloadCostEIP2929, gas)
+	require.True(t, cc.Contract.UsedMultiGas.IsZero())
 }
