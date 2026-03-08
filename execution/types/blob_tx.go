@@ -326,6 +326,27 @@ func (stx *BlobTx) EncodeRLP(w io.Writer) error {
 	return nil
 }
 
+func (stx *BlobTx) MarshalBinaryForHashing(w io.Writer) error {
+	if stx.To == nil {
+		return ErrNilToFieldTx
+	}
+	payloadSize, accessListLen, blobHashesLen := stx.payloadSize()
+	if stx.Timeboosted != nil {
+		payloadSize--
+	}
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
+	b[0] = BlobTxType
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	saved := stx.Timeboosted
+	stx.Timeboosted = nil
+	err := stx.encodePayload(w, b[:], payloadSize, accessListLen, blobHashesLen)
+	stx.Timeboosted = saved
+	return err
+}
+
 func (stx *BlobTx) MarshalBinary(w io.Writer) error {
 	if stx.To == nil {
 		return ErrNilToFieldTx
