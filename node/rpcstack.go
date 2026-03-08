@@ -20,17 +20,18 @@
 package node
 
 import (
-	"compress/gzip"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	libdeflate "github.com/erigontech/go-libdeflate"
 
 	"github.com/rs/cors"
 
@@ -508,25 +509,25 @@ func (h *virtualHostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "invalid host specified", http.StatusForbidden)
 }
 
-var gzPool = sync.Pool{
+var gzCompressorPool = sync.Pool{
 	New: func() any {
-		w := gzip.NewWriter(io.Discard)
-		return w
+		c, _ := libdeflate.NewCompressor(libdeflate.DefaultCompression)
+		return c
 	},
 }
 
 type gzipResponseWriter struct {
-	io.Writer
+	buf bytes.Buffer
 	http.ResponseWriter
+	status int
 }
 
 func (w *gzipResponseWriter) WriteHeader(status int) {
-	w.Header().Del("Content-Length")
-	w.ResponseWriter.WriteHeader(status)
+	w.status = status
 }
 
 func (w *gzipResponseWriter) Write(b []byte) (int, error) {
-	return w.Writer.Write(b)
+	return w.buf.Write(b)
 }
 
 func newGzipHandler(next http.Handler) http.Handler {
@@ -536,15 +537,26 @@ func newGzipHandler(next http.Handler) http.Handler {
 			return
 		}
 
+		grw := &gzipResponseWriter{ResponseWriter: w}
+		next.ServeHTTP(grw, r)
+
+		c := gzCompressorPool.Get().(*libdeflate.Compressor)
+		defer gzCompressorPool.Put(c)
+
+		src := grw.buf.Bytes()
+		dst := make([]byte, c.GzipCompressBound(len(src)))
+		n, err := c.CompressGzip(dst, src)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
 		w.Header().Set("Content-Encoding", "gzip")
-
-		gz := gzPool.Get().(*gzip.Writer)
-		defer gzPool.Put(gz)
-
-		gz.Reset(w)
-		defer gz.Close()
-
-		next.ServeHTTP(&gzipResponseWriter{ResponseWriter: w, Writer: gz}, r)
+		w.Header().Del("Content-Length")
+		if grw.status != 0 {
+			w.WriteHeader(grw.status)
+		}
+		w.Write(dst[:n]) //nolint:errcheck
 	})
 }
 
