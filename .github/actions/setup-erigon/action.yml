@@ -172,12 +172,16 @@ runs:
         #   execution/tests/test-corners/** - custom edge-case fixtures
         #   cl/spectest/**/data_*/** - consensus spec test data
         #   cl/transition/**/test_data/** - consensus transition test data
-        #   Extensions: .json .js .txt .ssz .ssz_snappy .yaml
+        #   cl/utils/eth2shuffle/spec/** - shuffle spec CSV (read at runtime)
+        #   execution/state/genesiswrite/*.json - genesis JSON (read at runtime)
+        #   Extensions: .json .js .txt .ssz .ssz_snappy .yaml .csv
         time git restore-mtime --no-directories -- \
           '**/testdata/**' \
           'execution/tests/test-corners/**' \
           'cl/spectest/**/data_*/**' \
-          'cl/transition/**/test_data/**'
+          'cl/transition/**/test_data/**' \
+          'cl/utils/eth2shuffle/spec/**' \
+          'execution/state/genesiswrite/*.json'
 
         # Submodules are all fixture data; set mtimes to HEAD commit time.
         git submodule foreach --quiet --recursive \
