@@ -20,7 +20,6 @@
 package testutil
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -29,8 +28,11 @@ import (
 	"regexp"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+
+	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/execution/chain"
 )
@@ -210,14 +212,35 @@ func readJSONFile(fn string, value any) error {
 		return fmt.Errorf("error reading JSON file: %w", err)
 	}
 
-	if err = json.Unmarshal(data, &value); err != nil {
-		if syntaxerr, ok := err.(*json.SyntaxError); ok {
-			line := findLine(data, syntaxerr.Offset)
+	if err = jsoniter.Unmarshal(data, &value); err != nil {
+		if offset, ok := jsoniterErrorOffset(err); ok {
+			line := findLine(data, offset)
 			return fmt.Errorf("JSON syntax error at line %v: %w", line, err)
 		}
 		return err
 	}
 	return nil
+}
+
+// jsoniterErrorOffset extracts the byte offset from a jsoniter error message.
+// jsoniter formats errors as: "..., error found in #N byte of ..."
+func jsoniterErrorOffset(err error) (int64, bool) {
+	const marker = ", error found in #"
+	msg := err.Error()
+	idx := strings.Index(msg, marker)
+	if idx < 0 {
+		return 0, false
+	}
+	rest := msg[idx+len(marker):]
+	end := strings.IndexByte(rest, ' ')
+	if end < 0 {
+		return 0, false
+	}
+	n, parseErr := strconv.ParseInt(rest[:end], 10, 64)
+	if parseErr != nil {
+		return 0, false
+	}
+	return n, true
 }
 
 // findLine returns the line number for the given offset into data.
