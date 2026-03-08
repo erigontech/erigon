@@ -167,6 +167,9 @@ func applyArbTransaction(config *chain.Config, engine rules.EngineReader, gp *Ga
 	if err != nil {
 		return nil, nil, err
 	}
+	if msg.Tx == nil {
+		msg.Tx = txn
+	}
 	msg.SetCheckNonce(!cfg.StatelessExec)
 
 	if cfg.Tracer != nil {
