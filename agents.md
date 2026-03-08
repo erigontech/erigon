@@ -76,6 +76,8 @@ Common lint categories and fixes:
 
 Make sure all scripts and shell code used from GitHub workflows is cross platform, for macOS, Windows and Linux.
 
+Read [`.github/README.md`](.github/README.md) for guidelines before making changes to workflows.
+
 ## Go Test Caching
 
 Go's test result cache keys on the mtime+size of every file read (via Go stdlib) during a test run. CI normalizes mtimes via `git restore-mtime` in `.github/actions/setup-erigon/action.yml` so that unchanged files get stable mtimes across runs.

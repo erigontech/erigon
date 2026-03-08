@@ -1,3 +1,2 @@
-- Add -parallel flag to execution/tests and other heavy suites; see what breaks.
 - Merge workflows with similar triggers to reduce duplication.
 - Add a workflow that checks benchmarks compile and run without error.
