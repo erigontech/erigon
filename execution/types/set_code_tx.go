@@ -98,6 +98,27 @@ func (tx *SetCodeTransaction) WithSignature(signer Signer, sig []byte) (Transact
 	return cpy, nil
 }
 
+func (tx *SetCodeTransaction) MarshalBinaryForHashing(w io.Writer) error {
+	if tx.To == nil {
+		return ErrNilToFieldTx
+	}
+	payloadSize, accessListLen, authorizationsLen := tx.payloadSize()
+	if tx.Timeboosted != nil {
+		payloadSize--
+	}
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
+	b[0] = SetCodeTxType
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	saved := tx.Timeboosted
+	tx.Timeboosted = nil
+	err := tx.encodePayload(w, b[:], payloadSize, accessListLen, authorizationsLen)
+	tx.Timeboosted = saved
+	return err
+}
+
 func (tx *SetCodeTransaction) MarshalBinary(w io.Writer) error {
 	if tx.To == nil {
 		return ErrNilToFieldTx
