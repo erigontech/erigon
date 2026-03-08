@@ -2042,7 +2042,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 			// Unfortunately we don't take webseed URL here in the native format.
 			webseedsList = common.CliString2Array(ctx.String(WebSeedsFlag.Name))
 		} else {
-			if known, ok := snapcfg.KnownWebseeds[chain]; ok {
+			if known, ok := snapcfg.GetEmbeddedWebseeds(chain); ok {
 				webseedsList = append(webseedsList, known...)
 			}
 		}
