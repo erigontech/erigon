@@ -78,6 +78,8 @@ type ExecutionResult struct {
 	ExecHash             common.Hash // Proof-of-execution hash (zero if disabled)
 	ExecOps              uint64      // Number of EVM opcodes hashed
 	TransitionHash       common.Hash // Proof-of-transition hash (zero if disabled)
+	PreStateHash         common.Hash // Hash of all state reads before execution (zero if disabled)
+	StateChangeHash      common.Hash // Hash of all state changes produced by execution (zero if disabled)
 
 	// SelfDestructedWithBalance holds accounts that were selfdestructed during
 	// execution but received ETH after the SELFDESTRUCT opcode ran (EIP-7708).

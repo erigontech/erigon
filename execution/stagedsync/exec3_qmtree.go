@@ -47,12 +47,12 @@ type qmtreeTracker struct {
 	twigFile  *qmtree.TwigFile
 
 	// Step tracking.
-	stepSize      uint64 // entries per step (matches config3.DefaultStepSize)
+	stepSize       uint64 // entries per step (matches config3.DefaultStepSize)
 	lastStepLogged uint64 // last completed step that was logged
 }
 
 const (
-	qmtreeSubdir      = "qmtree"  // lives under snapshots/
+	qmtreeSubdir      = "qmtree" // lives under snapshots/
 	qmtreeEntrySubdir = "entries"
 	qmtreeTwigSubdir  = "twigs"
 
@@ -123,11 +123,10 @@ func newQmtreeTracker(snapDir string) (*qmtreeTracker, error) {
 // appendTxResult builds a proof leaf from a transaction execution result
 // and appends it to the qmtree.
 func (qt *qmtreeTracker) appendTxResult(result *exec.TxResult) {
-	var zero common.Hash
 	ld := qmtree.LeafData{
 		SerialNum:        qt.nextSN,
-		PreStateHash:     zero, // future: from PreStateHasher
-		StateChangeHash:  zero, // future: from state writer
+		PreStateHash:     result.ExecutionResult.PreStateHash,
+		StateChangeHash:  result.ExecutionResult.StateChangeHash,
 		TransitionHash:   result.ExecutionResult.TransitionHash,
 		PreviousLeafHash: qt.prevLeaf,
 	}
@@ -186,13 +185,13 @@ func (qt *qmtreeTracker) logStepProgress(logPrefix string) {
 
 // storageStats returns current storage sizes.
 type qmtreeStorageStats struct {
-	Entries        uint64 // total entries (leaves)
-	Steps          uint64 // completed steps
-	CurrentStep    uint64 // current (possibly incomplete) step
-	EntryBytes     int64  // entry file size
-	TwigBytes      int64  // twig file size
-	TotalBytes     int64  // total storage
-	LeafDataCount  int    // in-memory leaf data entries
+	Entries       uint64 // total entries (leaves)
+	Steps         uint64 // completed steps
+	CurrentStep   uint64 // current (possibly incomplete) step
+	EntryBytes    int64  // entry file size
+	TwigBytes     int64  // twig file size
+	TotalBytes    int64  // total storage
+	LeafDataCount int    // in-memory leaf data entries
 }
 
 func (qt *qmtreeTracker) storageStats() qmtreeStorageStats {

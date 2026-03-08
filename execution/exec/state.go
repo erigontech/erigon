@@ -130,6 +130,8 @@ type Worker struct {
 	qmtreeEnabled    bool
 	execHasher       *vm.ExecHasher
 	transitionHasher *vm.TransitionHasher
+	hashReader       *hashingReader
+	hashWriter       *hashingWriter
 }
 
 func NewWorker(ctx context.Context, background bool, metrics *WorkerMetrics, chainDb kv.TemporalRoDB, in *QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *ResultsQueue, engine rules.Engine, dirs datadir.Dirs, logger log.Logger) *Worker {
@@ -169,6 +171,8 @@ func (rw *Worker) EnableQmtree() {
 	rw.qmtreeEnabled = true
 	rw.execHasher = vm.GetExecHasher()
 	rw.transitionHasher = vm.GetTransitionHasher()
+	rw.hashReader = newHashingReader()
+	rw.hashWriter = newHashingWriter()
 }
 
 func (rw *Worker) Pause() {
@@ -391,7 +395,16 @@ func (rw *Worker) SetReader(reader state.StateReader) {
 	case historic:
 		typedReader.SetTx(rw.chainTx)
 	}
-	rw.ibs = state.New(rw.stateReader)
+
+	// When qmtree is enabled, wrap the reader so ibs reads are recorded
+	// for preStateHash computation. The real reader stays in rw.stateReader
+	// for type switches in resetTx.
+	if rw.hashReader != nil {
+		rw.hashReader.inner = rw.stateReader
+		rw.ibs = state.New(rw.hashReader)
+	} else {
+		rw.ibs = state.New(rw.stateReader)
+	}
 
 	switch reader.(type) {
 	case *state.HistoryReaderV3:
@@ -447,20 +460,29 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 	}
 
 	// Attach proof-of-execution hashers before transaction execution.
+	writer := rw.stateWriter
 	if rw.qmtreeEnabled && txIndex >= 0 && !txTask.IsBlockEnd() {
 		rw.execHasher.Reset()
 		rw.evm.SetExecHasher(rw.execHasher)
 		rw.transitionHasher.Reset()
 		rw.evm.SetTransitionHasher(rw.transitionHasher)
+		rw.hashReader.Reset()
+		rw.hashWriter.inner = rw.stateWriter
+		rw.hashWriter.Reset()
+		writer = rw.hashWriter
 	}
 
-	result := txTask.Execute(rw.evm, rw.engine, rw.genesis, rw.ibs, rw.stateWriter, rw.chainConfig, rw.chain, rw.dirs, true)
+	result := txTask.Execute(rw.evm, rw.engine, rw.genesis, rw.ibs, writer, rw.chainConfig, rw.chain, rw.dirs, true)
 
 	// Detach hashers after execution (ExecHash/TransitionHash are already
 	// finalized inside TransitionDb and stored on ExecutionResult).
 	if rw.qmtreeEnabled {
 		rw.evm.SetExecHasher(nil)
 		rw.evm.SetTransitionHasher(nil)
+		if txIndex >= 0 && !txTask.IsBlockEnd() {
+			result.ExecutionResult.PreStateHash = rw.hashReader.Finalize()
+			result.ExecutionResult.StateChangeHash = rw.hashWriter.Finalize()
+		}
 	}
 
 	if result.Task == nil {
