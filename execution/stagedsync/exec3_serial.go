@@ -11,12 +11,14 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/qmtree"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -36,8 +38,10 @@ type serialExecutor struct {
 	lastBlockResult *blockResult
 	worker          *exec.Worker
 
-	// qmtree proof-of-execution tracking (nil when disabled)
-	qmtracker *qmtreeTracker
+	// qmtree proof-of-execution tracking (nil when disabled).
+	// Attached to SharedDomains for flush/close lifecycle,
+	// but referenced here for per-tx append and root computation.
+	qmtracker *qmtree.Tracker
 }
 
 func warmTxsHashes(block *types.Block) {
@@ -56,10 +60,12 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 	if se.cfg.experimentalQmtree && se.qmtracker == nil {
 		var err error
-		se.qmtracker, err = newQmtreeTracker(se.cfg.dirs.Snap)
+		se.qmtracker, err = qmtree.NewTracker(se.cfg.dirs.Snap, uint64(config3.DefaultStepSize))
 		if err != nil {
 			return nil, rwTx, fmt.Errorf("init qmtree tracker: %w", err)
 		}
+		// Attach to SharedDomains so qmtree flushes alongside domain data.
+		se.doms.SetAppendOnly(se.qmtracker)
 	}
 
 	havePartialBlock := false
@@ -213,10 +219,10 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 		if se.qmtracker != nil {
 			if blockNum%1000 == 0 || blockNum <= 10 {
-				qmroot := se.qmtracker.syncRoot()
-				log.Info(fmt.Sprintf("[%s] qmtree root", se.logPrefix), "block", blockNum, "root", qmroot, "leaves", se.qmtracker.nextSN)
+				qmroot := se.qmtracker.SyncRoot()
+				log.Info(fmt.Sprintf("[%s] qmtree root", se.logPrefix), "block", blockNum, "root", qmroot, "leaves", se.qmtracker.NextSN)
 			}
-			se.qmtracker.logStepProgress(se.logPrefix)
+			se.qmtracker.LogStepProgress(se.logPrefix)
 		}
 
 		if dbg.StopAfterBlock > 0 && blockNum == dbg.StopAfterBlock {
@@ -376,7 +382,11 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			}
 
 			if se.qmtracker != nil {
-				se.qmtracker.appendTxResult(result)
+				se.qmtracker.AppendLeaf(
+					result.ExecutionResult.PreStateHash,
+					result.ExecutionResult.StateChangeHash,
+					result.ExecutionResult.TransitionHash,
+				)
 			}
 
 			se.txCount++

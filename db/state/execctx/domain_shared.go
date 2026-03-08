@@ -82,6 +82,14 @@ func IsDomainAheadOfBlocks(ctx context.Context, tx kv.TemporalRwTx, logger log.L
 	return false
 }
 
+// AppendOnlyFlusher is an optional component that participates in the
+// SharedDomains flush/close lifecycle but stores append-only data (not
+// key-value). Used by the qmtree proof-of-execution tree.
+type AppendOnlyFlusher interface {
+	Flush()
+	Close()
+}
+
 type SharedDomains struct {
 	sdCtx *commitmentdb.SharedDomainsCommitmentContext
 
@@ -98,6 +106,10 @@ type SharedDomains struct {
 
 	// stateCache is an optional cache for state data (accounts, storage, code)
 	stateCache *cache.StateCache
+
+	// appendOnly holds optional append-only storage (e.g. qmtree) that
+	// flushes and closes alongside domain data.
+	appendOnly AppendOnlyFlusher
 }
 
 func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
@@ -350,11 +362,24 @@ func (sd *SharedDomains) Close() {
 
 	sd.sdCtx.Close()
 	sd.sdCtx = nil
+
+	if sd.appendOnly != nil {
+		sd.appendOnly.Close()
+	}
 }
 
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	defer mxFlushTook.ObserveDuration(time.Now())
+	if sd.appendOnly != nil {
+		sd.appendOnly.Flush()
+	}
 	return sd.mem.Flush(ctx, tx)
+}
+
+// SetAppendOnly attaches an optional append-only flusher (e.g. qmtree)
+// to the shared domain lifecycle.
+func (sd *SharedDomains) SetAppendOnly(f AppendOnlyFlusher) {
+	sd.appendOnly = f
 }
 
 // TemporalDomain satisfaction
