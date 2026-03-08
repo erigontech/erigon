@@ -52,6 +52,8 @@ Erigon is a high-performance Ethereum execution client with embedded consensus l
 
 Commit messages: prefix with package(s) modified, e.g., `eth, rpc: make trace configs optional`
 
+Cherry-pick PRs: when opening a PR that cherry-picks a commit to a `release/X.Y` branch, prepend the PR title with `[rX.Y]`, e.g., a cherry-pick to `release/3.4` → `[r3.4] eth, rpc: make trace configs optional`
+
 **Important**: Always run `make lint` after making code changes and before committing. Fix any linter errors before proceeding.
 
 ## Pre-push
