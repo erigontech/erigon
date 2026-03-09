@@ -27,10 +27,14 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
+	"github.com/erigontech/erigon/execution/protocol/params"
+	stateContracts "github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/jsonrpc/contracts"
 )
 
 func TestEngineApiGeneratedPayloadIncludesBlockAccessList(t *testing.T) {
@@ -102,6 +106,403 @@ func TestEngineApiGeneratedPayloadIncludesBlockAccessList(t *testing.T) {
 	})
 }
 
+func TestEngineApiBALContractCreation(t *testing.T) {
+	if !dbg.Exec3Parallel {
+		t.Skip("requires parallel exec")
+	}
+	eat := engineapitester.DefaultEngineApiTester(t)
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		sender := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
+
+		// Deploy Token contract via ContractBackend
+		auth, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainConfig.ChainID)
+		require.NoError(t, err)
+
+		contractAddr, deployTx, _, err := contracts.DeployToken(auth, eat.ContractBackend, sender)
+		require.NoError(t, err)
+
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, payload.ExecutionPayload, deployTx.Hash())
+		require.NoError(t, err)
+
+		bal := decodeAndValidateBAL(t, payload)
+
+		// Verify contract address has CodeChange
+		contractChanges := findAccountChanges(bal, accounts.InternAddress(contractAddr))
+		require.NotNilf(t, contractChanges, "missing contract account changes\n%s", bal.DebugString())
+
+		receipt, err := eat.RpcApiClient.GetTransactionReceipt(ctx, deployTx.Hash())
+		require.NoError(t, err)
+		require.NotNil(t, receipt)
+		balIndex := uint16(receipt.TransactionIndex + 1)
+
+		codeChange := findCodeChange(contractChanges, balIndex)
+		require.NotNilf(t, codeChange, "missing code change at index %d\n%s", balIndex, bal.DebugString())
+		require.NotEmpty(t, codeChange.Bytecode, "code change bytecode should not be empty")
+
+		// Verify deployed code matches what's on chain
+		deployedCode, err := eat.RpcApiClient.GetCode(contractAddr, rpc.LatestBlock)
+		require.NoError(t, err)
+		require.Equal(t, []byte(deployedCode), codeChange.Bytecode)
+
+		// Verify sender has balance + nonce changes
+		senderChanges := findAccountChanges(bal, accounts.InternAddress(sender))
+		require.NotNilf(t, senderChanges, "missing sender account changes\n%s", bal.DebugString())
+		require.NotNil(t, findBalanceChange(senderChanges, balIndex), "missing sender balance change")
+		require.NotNil(t, findNonceChange(senderChanges, balIndex), "missing sender nonce change")
+	})
+}
+
+func TestEngineApiBALStorageWrites(t *testing.T) {
+	if !dbg.Exec3Parallel {
+		t.Skip("requires parallel exec")
+	}
+	eat := engineapitester.DefaultEngineApiTester(t)
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		sender := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
+		mintReceiver := common.HexToAddress("0x444")
+
+		// Block 1: deploy contract
+		auth, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainConfig.ChainID)
+		require.NoError(t, err)
+		contractAddr, _, tokenContract, err := contracts.DeployToken(auth, eat.ContractBackend, sender)
+		require.NoError(t, err)
+		_, err = eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+
+		// Block 2: mint tokens (writes to storage: balanceOf[receiver], totalSupply)
+		auth, err = bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainConfig.ChainID)
+		require.NoError(t, err)
+		mintTx, err := tokenContract.Mint(auth, mintReceiver, big.NewInt(1000))
+		require.NoError(t, err)
+
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, payload.ExecutionPayload, mintTx.Hash())
+		require.NoError(t, err)
+
+		bal := decodeAndValidateBAL(t, payload)
+
+		// Contract account should have storage changes from mint
+		contractChanges := findAccountChanges(bal, accounts.InternAddress(contractAddr))
+		require.NotNilf(t, contractChanges, "missing contract account changes\n%s", bal.DebugString())
+		require.NotEmpty(t, contractChanges.StorageChanges,
+			"contract should have storage changes from mint\n%s", bal.DebugString())
+
+		receipt, err := eat.RpcApiClient.GetTransactionReceipt(ctx, mintTx.Hash())
+		require.NoError(t, err)
+		balIndex := uint16(receipt.TransactionIndex + 1)
+
+		// Verify at least one storage slot was written at the mint tx index
+		foundStorageChange := false
+		for _, slotChange := range contractChanges.StorageChanges {
+			if findStorageChange(slotChange, balIndex) != nil {
+				foundStorageChange = true
+				break
+			}
+		}
+		require.Truef(t, foundStorageChange,
+			"expected storage change at index %d\n%s", balIndex, bal.DebugString())
+
+		// Sender should have balance + nonce changes
+		senderChanges := findAccountChanges(bal, accounts.InternAddress(sender))
+		require.NotNilf(t, senderChanges, "missing sender account changes\n%s", bal.DebugString())
+		require.NotNil(t, findBalanceChange(senderChanges, balIndex), "missing sender balance change")
+		require.NotNil(t, findNonceChange(senderChanges, balIndex), "missing sender nonce change")
+	})
+}
+
+func TestEngineApiBALMultiTxBlock(t *testing.T) {
+	if !dbg.Exec3Parallel {
+		t.Skip("requires parallel exec")
+	}
+	eat := engineapitester.DefaultEngineApiTester(t)
+	transferReceiver := common.HexToAddress("0x555")
+	mintReceiver := common.HexToAddress("0x666")
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		sender := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
+
+		// Block 1: deploy contract (needed for block 2)
+		auth, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainConfig.ChainID)
+		require.NoError(t, err)
+		contractAddr, _, tokenContract, err := contracts.DeployToken(auth, eat.ContractBackend, sender)
+		require.NoError(t, err)
+		_, err = eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+
+		// Block 2: submit multiple transactions of different types
+		// Tx 1: simple ETH transfer
+		transferTx, err := eat.Transactor.SubmitSimpleTransfer(eat.CoinbaseKey, transferReceiver, big.NewInt(1))
+		require.NoError(t, err)
+
+		// Tx 2: mint tokens (contract call with storage writes)
+		auth, err = bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainConfig.ChainID)
+		require.NoError(t, err)
+		mintTx, err := tokenContract.Mint(auth, mintReceiver, big.NewInt(500))
+		require.NoError(t, err)
+
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, payload.ExecutionPayload, transferTx.Hash(), mintTx.Hash())
+		require.NoError(t, err)
+
+		bal := decodeAndValidateBAL(t, payload)
+
+		// Verify block-level BAL hash
+		blockNumber := rpc.BlockNumber(payload.ExecutionPayload.BlockNumber)
+		block, err := eat.RpcApiClient.GetBlockByNumber(ctx, blockNumber, false)
+		require.NoError(t, err)
+		require.NotNil(t, block.BlockAccessListHash)
+		require.Equal(t, bal.Hash(), *block.BlockAccessListHash)
+
+		// Get receipts to determine BAL indices
+		transferReceipt, err := eat.RpcApiClient.GetTransactionReceipt(ctx, transferTx.Hash())
+		require.NoError(t, err)
+		mintReceipt, err := eat.RpcApiClient.GetTransactionReceipt(ctx, mintTx.Hash())
+		require.NoError(t, err)
+		transferIdx := uint16(transferReceipt.TransactionIndex + 1)
+		mintIdx := uint16(mintReceipt.TransactionIndex + 1)
+		require.NotEqual(t, transferIdx, mintIdx, "transactions should have different indices")
+
+		// Sender: should have balance+nonce changes at BOTH indices
+		senderChanges := findAccountChanges(bal, accounts.InternAddress(sender))
+		require.NotNilf(t, senderChanges, "missing sender changes\n%s", bal.DebugString())
+		require.NotNilf(t, findBalanceChange(senderChanges, transferIdx),
+			"missing sender balance change at transfer index %d\n%s", transferIdx, bal.DebugString())
+		require.NotNilf(t, findBalanceChange(senderChanges, mintIdx),
+			"missing sender balance change at mint index %d\n%s", mintIdx, bal.DebugString())
+		require.NotNilf(t, findNonceChange(senderChanges, transferIdx),
+			"missing sender nonce change at transfer index %d\n%s", transferIdx, bal.DebugString())
+		require.NotNilf(t, findNonceChange(senderChanges, mintIdx),
+			"missing sender nonce change at mint index %d\n%s", mintIdx, bal.DebugString())
+
+		// Transfer receiver: balance change at transfer index
+		receiverChanges := findAccountChanges(bal, accounts.InternAddress(transferReceiver))
+		require.NotNilf(t, receiverChanges, "missing transfer receiver changes\n%s", bal.DebugString())
+		require.NotNilf(t, findBalanceChange(receiverChanges, transferIdx),
+			"missing receiver balance change at index %d\n%s", transferIdx, bal.DebugString())
+
+		// Contract: storage changes at mint index
+		contractChanges := findAccountChanges(bal, accounts.InternAddress(contractAddr))
+		require.NotNilf(t, contractChanges, "missing contract changes\n%s", bal.DebugString())
+		foundStorageChange := false
+		for _, slotChange := range contractChanges.StorageChanges {
+			if findStorageChange(slotChange, mintIdx) != nil {
+				foundStorageChange = true
+				break
+			}
+		}
+		require.Truef(t, foundStorageChange,
+			"expected contract storage change at mint index %d\n%s", mintIdx, bal.DebugString())
+
+		// Verify final balances match BAL entries
+		senderBalance, err := eat.RpcApiClient.GetBalance(sender, rpc.LatestBlock)
+		require.NoError(t, err)
+		expectedSenderBal, overflow := uint256.FromBig(senderBalance)
+		require.False(t, overflow)
+
+		// The last BAL entry for the sender should reflect the final balance
+		lastSenderBalChange := findBalanceChange(senderChanges, mintIdx)
+		require.NotNil(t, lastSenderBalChange)
+		require.Truef(t, lastSenderBalChange.Value.Eq(expectedSenderBal),
+			"sender balance mismatch: BAL=%s expected=%s", lastSenderBalChange.Value.Hex(), expectedSenderBal.Hex())
+	})
+}
+
+// TestEngineApiBALMixedBlock packs a variety of transaction types into a single block
+// to exercise multiple state write paths through the BAL:
+//   - Simple ETH transfer (balance, nonce)
+//   - Contract deployment (code change)
+//   - Contract call with storage writes (storage changes)
+//   - Withdrawals (CL-side balance increases via system transaction)
+//   - System transactions at block boundaries (beacon root contract)
+//
+// The test uses two blocks:
+//   - Block 1: deploy Changer contract
+//   - Block 2: ETH transfer + Token deploy + Changer.Change() + withdrawals
+func TestEngineApiBALMixedBlock(t *testing.T) {
+	eat := engineapitester.DefaultEngineApiTester(t)
+	transferReceiver := common.HexToAddress("0x777")
+	withdrawalReceiver := common.HexToAddress("0x888")
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		sender := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
+		chainId := eat.ChainConfig.ChainID
+
+		// Block 1: deploy Changer contract (need it alive for block 2 storage writes)
+		auth, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, chainId)
+		require.NoError(t, err)
+		auth.GasLimit = params.MaxTxnGasLimit
+		changerAddr, _, changerContract, err := stateContracts.DeployChanger(auth, eat.ContractBackend)
+		require.NoError(t, err)
+		_, err = eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+
+		// --- Block 2: the mixed block ---
+
+		// Tx A: simple ETH transfer
+		transferTx, err := eat.Transactor.SubmitSimpleTransfer(eat.CoinbaseKey, transferReceiver, big.NewInt(42))
+		require.NoError(t, err)
+
+		// Tx B: deploy Token contract (contract creation with code change)
+		auth, err = bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, chainId)
+		require.NoError(t, err)
+		tokenAddr, deployTx, _, err := contracts.DeployToken(auth, eat.ContractBackend, sender)
+		require.NoError(t, err)
+
+		// Tx C: call Changer.Change() — writes storage (x=1, y=2, z=3)
+		auth, err = bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, chainId)
+		require.NoError(t, err)
+		auth.GasLimit = params.MaxTxnGasLimit
+		changeTx, err := changerContract.Change(auth)
+		require.NoError(t, err)
+
+		// Build block with withdrawals
+		withdrawals := []*types.Withdrawal{
+			{Index: 0, Validator: 1, Address: withdrawalReceiver, Amount: 1000}, // 1000 Gwei
+		}
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx, engineapitester.WithWithdrawals(withdrawals))
+		require.NoError(t, err)
+
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, payload.ExecutionPayload,
+			transferTx.Hash(), deployTx.Hash(), changeTx.Hash())
+		require.NoError(t, err)
+
+		bal := decodeAndValidateBAL(t, payload)
+
+		// Verify block hash includes BAL
+		blockNumber := rpc.BlockNumber(payload.ExecutionPayload.BlockNumber)
+		block, err := eat.RpcApiClient.GetBlockByNumber(ctx, blockNumber, false)
+		require.NoError(t, err)
+		require.NotNil(t, block.BlockAccessListHash)
+		require.Equal(t, bal.Hash(), *block.BlockAccessListHash)
+
+		// Get receipts to determine BAL indices
+		transferReceipt, err := eat.RpcApiClient.GetTransactionReceipt(ctx, transferTx.Hash())
+		require.NoError(t, err)
+		deployReceipt, err := eat.RpcApiClient.GetTransactionReceipt(ctx, deployTx.Hash())
+		require.NoError(t, err)
+		changeReceipt, err := eat.RpcApiClient.GetTransactionReceipt(ctx, changeTx.Hash())
+		require.NoError(t, err)
+
+		transferIdx := uint16(transferReceipt.TransactionIndex + 1)
+		deployIdx := uint16(deployReceipt.TransactionIndex + 1)
+		changeIdx := uint16(changeReceipt.TransactionIndex + 1)
+
+		// --- Verify sender: balance+nonce changes at all tx indices ---
+		senderChanges := findAccountChanges(bal, accounts.InternAddress(sender))
+		require.NotNilf(t, senderChanges, "missing sender changes\n%s", bal.DebugString())
+		for _, idx := range []uint16{transferIdx, deployIdx, changeIdx} {
+			require.NotNilf(t, findBalanceChange(senderChanges, idx),
+				"missing sender balance change at index %d", idx)
+			require.NotNilf(t, findNonceChange(senderChanges, idx),
+				"missing sender nonce change at index %d", idx)
+		}
+
+		// --- Verify transfer receiver: balance change ---
+		receiverChanges := findAccountChanges(bal, accounts.InternAddress(transferReceiver))
+		require.NotNilf(t, receiverChanges, "missing transfer receiver\n%s", bal.DebugString())
+		require.NotNil(t, findBalanceChange(receiverChanges, transferIdx))
+
+		// --- Verify Token contract: code change at deploy index ---
+		tokenChanges := findAccountChanges(bal, accounts.InternAddress(tokenAddr))
+		require.NotNilf(t, tokenChanges, "missing token contract\n%s", bal.DebugString())
+		require.NotNil(t, findCodeChange(tokenChanges, deployIdx), "missing code change for token deploy")
+
+		// --- Verify Changer contract: storage changes at change index ---
+		changerChanges := findAccountChanges(bal, accounts.InternAddress(changerAddr))
+		require.NotNilf(t, changerChanges, "missing changer contract\n%s", bal.DebugString())
+		foundStorageAtChange := false
+		for _, slotChange := range changerChanges.StorageChanges {
+			if findStorageChange(slotChange, changeIdx) != nil {
+				foundStorageAtChange = true
+				break
+			}
+		}
+		require.Truef(t, foundStorageAtChange,
+			"expected storage change at change index %d\n%s", changeIdx, bal.DebugString())
+
+		// --- Verify withdrawal receiver: balance change ---
+		withdrawalChanges := findAccountChanges(bal, accounts.InternAddress(withdrawalReceiver))
+		require.NotNilf(t, withdrawalChanges, "missing withdrawal receiver\n%s", bal.DebugString())
+		require.NotEmpty(t, withdrawalChanges.BalanceChanges, "withdrawal receiver should have balance changes")
+
+		withdrawalBalance, err := eat.RpcApiClient.GetBalance(withdrawalReceiver, rpc.LatestBlock)
+		require.NoError(t, err)
+		expectedWithdrawalWei := new(big.Int).Mul(big.NewInt(1000), big.NewInt(1e9))
+		require.Equal(t, expectedWithdrawalWei, withdrawalBalance)
+
+		// --- Verify system contracts appear in BAL ---
+		beaconRootChanges := findAccountChanges(bal, params.BeaconRootsAddress)
+		require.NotNilf(t, beaconRootChanges,
+			"beacon root contract should appear in BAL (system tx at block start)\n%s", bal.DebugString())
+		require.NotEmpty(t, beaconRootChanges.StorageChanges,
+			"beacon root contract should have storage changes")
+	})
+}
+
+// TestEngineApiBALSelfDestruct tests BAL tracking when a contract self-destructs.
+// Exercises storage writes followed by self-destruct in the same block.
+func TestEngineApiBALSelfDestruct(t *testing.T) {
+	if !dbg.Exec3Parallel {
+		t.Skip("requires parallel exec")
+	}
+	eat := engineapitester.DefaultEngineApiTester(t)
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		chainId := eat.ChainConfig.ChainID
+
+		// Block 1: deploy Selfdestruct contract
+		auth, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, chainId)
+		require.NoError(t, err)
+		auth.GasLimit = params.MaxTxnGasLimit
+		sdAddr, _, sdContract, err := stateContracts.DeploySelfdestruct(auth, eat.ContractBackend)
+		require.NoError(t, err)
+		_, err = eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+
+		sdCode, err := eat.RpcApiClient.GetCode(sdAddr, rpc.LatestBlock)
+		require.NoError(t, err)
+		require.NotEmpty(t, sdCode, "selfdestruct contract should have code")
+
+		// Block 2: change storage then self-destruct in same block
+		auth, err = bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, chainId)
+		require.NoError(t, err)
+		auth.GasLimit = params.MaxTxnGasLimit
+		changeTx, err := sdContract.Change(auth)
+		require.NoError(t, err)
+
+		auth, err = bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, chainId)
+		require.NoError(t, err)
+		auth.GasLimit = params.MaxTxnGasLimit
+		destructTx, err := sdContract.Destruct(auth)
+		require.NoError(t, err)
+
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, payload.ExecutionPayload,
+			changeTx.Hash(), destructTx.Hash())
+		require.NoError(t, err)
+
+		bal := decodeAndValidateBAL(t, payload)
+
+		sdChanges := findAccountChanges(bal, accounts.InternAddress(sdAddr))
+		require.NotNilf(t, sdChanges, "missing selfdestruct contract\n%s", bal.DebugString())
+	})
+}
+
+func decodeAndValidateBAL(t *testing.T, payload *engineapitester.MockClPayload) types.BlockAccessList {
+	t.Helper()
+	balBytes := payload.ExecutionPayload.BlockAccessList
+	require.NotNil(t, balBytes)
+	require.NotEmpty(t, balBytes)
+
+	bal, err := types.DecodeBlockAccessListBytes(balBytes)
+	require.NoError(t, err)
+	require.NoError(t, bal.Validate())
+	require.NotEmpty(t, bal)
+	return bal
+}
+
 func findAccountChanges(bal types.BlockAccessList, addr accounts.Address) *types.AccountChanges {
 	for _, ac := range bal {
 		if ac != nil && ac.Address == addr {
@@ -128,6 +529,30 @@ func findNonceChange(ac *types.AccountChanges, index uint16) *types.NonceChange 
 		return nil
 	}
 	for _, change := range ac.NonceChanges {
+		if change != nil && change.Index == index {
+			return change
+		}
+	}
+	return nil
+}
+
+func findCodeChange(ac *types.AccountChanges, index uint16) *types.CodeChange {
+	if ac == nil {
+		return nil
+	}
+	for _, change := range ac.CodeChanges {
+		if change != nil && change.Index == index {
+			return change
+		}
+	}
+	return nil
+}
+
+func findStorageChange(sc *types.SlotChanges, index uint16) *types.StorageChange {
+	if sc == nil {
+		return nil
+	}
+	for _, change := range sc.Changes {
 		if change != nil && change.Index == index {
 			return change
 		}

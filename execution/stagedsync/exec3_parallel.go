@@ -640,10 +640,12 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 
 						// StartChange before Finalize so that AuRa/system-call nonce
 						// changes are emitted into the accumulator for the txpool diff.
+						// Use txTask.Txs (already in memory) instead of reading from DB
+						// to avoid the stale applyTx canonical-hash issue.
 						if pe.accumulator != nil {
-							rawTxs, txErr := pe.cfg.blockReader.RawTransactions(ctx, applyTx, txTask.Header.Number.Uint64(), txTask.Header.Number.Uint64())
-							if txErr != nil {
-								return state.StateUpdates{}, fmt.Errorf("can't read raw txns for accumulator, block %d: %w", blockResult.BlockNum, txErr)
+							rawTxs, marshalErr := types.MarshalTransactionsBinary(txTask.Txs)
+							if marshalErr != nil {
+								return state.StateUpdates{}, fmt.Errorf("marshal transactions for accumulator, block %d: %w", blockResult.BlockNum, marshalErr)
 							}
 							pe.accumulator.StartChange(txTask.Header, rawTxs, false)
 						}
