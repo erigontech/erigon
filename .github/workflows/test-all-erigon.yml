@@ -80,14 +80,6 @@ jobs:
             awk '/^ok/ && !/\(cached\)/ { print "::notice::" $2 " ran without test cache (" $3 ")" }' run.log
           fi
 
-      - name: SonarCloud scan in case OS Linux
-        if: runner.os == 'Linux'
-        uses: SonarSource/sonarqube-scan-action@v7
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        continue-on-error: true
-
       - uses: ./.github/actions/cleanup-erigon
         if: always()
 
