@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
@@ -219,7 +220,7 @@ func encodeBlockReceipts69WithLimit(receipts types.Receipts, totalBytes, sizeLim
 }
 
 // NoSizeLimit disables per-receipt truncation (used for eth/68 and eth/69).
-const NoSizeLimit = int(^uint(0) >> 1)
+const NoSizeLimit = math.MaxInt
 
 // Eth70ResponseSizeLimit is the maximum size of encoded receipt data in an eth/70 response.
 // This leaves room for the packet envelope (request-id, lastBlockIncomplete flag, list prefixes).
