@@ -23,6 +23,8 @@ runs:
         && env.ERIGON_CI_SUBMODULE_CACHE_RESTORED_KEY != env.ERIGON_CI_SUBMODULE_CACHE_KEY }}
       uses: actions/cache/save@v4
       with:
-        path: .git/modules
+        path: |
+          .git/modules
+          .git/lfs
         key: ${{ env.ERIGON_CI_SUBMODULE_CACHE_KEY }}
 

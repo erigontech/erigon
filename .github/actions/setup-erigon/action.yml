@@ -113,7 +113,9 @@ runs:
       if: ${{ inputs.submodules == 'true' }}
       uses: actions/cache/restore@v4
       with:
-        path: .git/modules
+        path: |
+          .git/modules
+          .git/lfs
         key: gitobjects|${{ runner.os }}|lfs-${{ inputs.lfs }}|${{ steps.submodule-key.outputs.hash }}
         restore-keys: |
           gitobjects|${{ runner.os }}|lfs-${{ inputs.lfs }}|
