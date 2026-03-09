@@ -354,7 +354,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			}
 
 			se.txCount++
-			se.blockGasUsed += result.ExecutionResult.BlockGasUsed
+			se.blockGasUsed += result.ExecutionResult.BlockRegularGasUsed
 			mxExecTransactions.Add(1)
 			if txTask.Tx() != nil {
 				se.blobGasUsed += txTask.Tx().GetBlobGas()

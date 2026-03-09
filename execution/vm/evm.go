@@ -94,6 +94,9 @@ type EVM struct {
 
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
+
+	stateGasConsumed   uint64 // total state gas charged during tx execution (for logical accounting)
+	regularGasConsumed uint64 // total regular gas charged during tx execution (for block-level accounting)
 }
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
@@ -153,6 +156,18 @@ func (evm *EVM) Cancel() { evm.abort.Store(true) }
 
 // Cancelled returns true if Cancel has been called
 func (evm *EVM) Cancelled() bool { return evm.abort.Load() }
+
+// StateGasConsumed returns the total state gas charged during tx execution
+func (evm *EVM) StateGasConsumed() uint64 { return evm.stateGasConsumed }
+
+// RegularGasConsumed returns the total regular gas charged during tx execution (for block-level accounting)
+func (evm *EVM) RegularGasConsumed() uint64 { return evm.regularGasConsumed }
+
+// ResetStateGasConsumed resets the state and regular gas consumed counters
+func (evm *EVM) ResetStateGasConsumed() {
+	evm.stateGasConsumed = 0
+	evm.regularGasConsumed = 0
+}
 
 // CallGasTemp returns the callGasTemp for the EVM
 func (evm *EVM) CallGasTemp() uint64 {
@@ -247,9 +262,16 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		evm.intraBlockState.AddBalance(addr, u256.Num0, tracing.BalanceChangeTouchAccount)
 	}
 
+	savedStateGasConsumed := evm.stateGasConsumed
+	initialChildState := gas.State
+
 	// It is allowed to call precompiles, even via delegatecall
 	if isPrecompile {
+		preGas := gas.Regular
 		ret, gas.Regular, err = RunPrecompiledContract(p, input, gas.Regular, evm.Config().Tracer)
+		if evm.chainRules.IsAmsterdam {
+			evm.regularGasConsumed += preGas - gas.Regular
+		}
 	} else if len(code) == 0 {
 		// If the account has no code, we can abort here
 		// The depth-check is already done, and precompiles handled above
@@ -299,12 +321,31 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	// when we're in Homestead this also counts for code storage gas errors.
 	if err != nil || evm.config.RestoreState {
 		evm.intraBlockState.RevertToSnapshot(snapshot, err)
+
 		if err != ErrExecutionReverted {
+			// EIP-8037: On exceptional halt, count remaining gas as "consumed"
+			// for block-level regular gas accounting before zeroing.
+			if evm.chainRules.IsAmsterdam {
+				evm.regularGasConsumed += gas.Regular
+			}
 			if evm.config.Tracer != nil && evm.config.Tracer.OnGasChange != nil {
 				evm.Config().Tracer.OnGasChange(gas.Regular, 0, tracing.GasChangeCallFailedExecution)
 			}
 			gas.Regular = 0
 			gas.State = 0
+		}
+
+		if evm.chainRules.IsAmsterdam {
+			childStateConsumed := evm.stateGasConsumed - savedStateGasConsumed
+			evm.stateGasConsumed = savedStateGasConsumed
+
+			// Restore spill: state gas charged from child's regular gas goes back
+			// This happens after halt zeroing so spill is preserved even on halt
+			reservoirUsed := initialChildState - gas.State
+			if childStateConsumed > reservoirUsed {
+				spill := childStateConsumed - reservoirUsed
+				gas.Regular += spill
+			}
 		}
 	}
 
@@ -448,10 +489,6 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	snapshot := evm.intraBlockState.PushSnapshot()
 	defer evm.intraBlockState.PopSnapshot(snapshot)
 
-	wasEmpty, err := evm.intraBlockState.Empty(address)
-	if err != nil {
-		return nil, accounts.NilAddress, mdgas.MdGas{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
-	}
 	evm.intraBlockState.CreateAccount(address, true)
 	if evm.chainRules.IsSpuriousDragon {
 		evm.intraBlockState.SetNonce(address, 1)
@@ -472,6 +509,9 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 		return nil, address, gasRemaining, nil
 	}
 
+	savedStateGasConsumed := evm.stateGasConsumed
+	initialChildState := gasRemaining.State
+
 	ret, gasRemaining, err = evm.Run(contract, gasRemaining, nil, false)
 
 	// EIP-170: Contract code size limit
@@ -490,12 +530,10 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 		var stateGasOk bool
 		var createDataGas uint64
 		if evm.chainRules.IsAmsterdam {
-			// EIP-8037
+			// EIP-8037: GAS_CODE_DEPOSIT = cpsb/byte (state) + 6*ceil(len/32) (regular)
+			// GAS_CREATE (112*cpsb) is already charged in stateGasCreate, no wasEmpty here
 			createDataGas = uint64(len(ret)) * evm.Context.CostPerStateByte // state gas cost
-			if wasEmpty {
-				createDataGas += 112 * evm.Context.CostPerStateByte
-			}
-			gasRemaining, stateGasOk = useMdGas(gasRemaining, createDataGas, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage)
+			gasRemaining, stateGasOk = useMdGas(evm, gasRemaining, createDataGas, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage)
 			if stateGasOk {
 				createDataGas = 6 * ((uint64(len(ret)) + 31) / 32) // regular gas cost for hashing
 			}
@@ -505,7 +543,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 		}
 		var regularGasOk bool
 		if stateGasOk {
-			gasRemaining, regularGasOk = useMdGas(gasRemaining, createDataGas, mdgas.RegularGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage)
+			gasRemaining, regularGasOk = useMdGas(evm, gasRemaining, createDataGas, mdgas.RegularGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage)
 		}
 		if stateGasOk && regularGasOk {
 			evm.intraBlockState.SetCode(address, ret)
@@ -523,8 +561,27 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	// when we're in Homestead, this also counts for code storage gas errors.
 	if err != nil && (evm.chainRules.IsHomestead || err != ErrCodeStoreOutOfGas) {
 		evm.intraBlockState.RevertToSnapshot(snapshot, nil)
+
 		if err != ErrExecutionReverted {
+			// EIP-8037: On exceptional halt, count remaining gas as "consumed"
+			// for block-level regular gas accounting before zeroing.
+			if evm.chainRules.IsAmsterdam {
+				evm.regularGasConsumed += gasRemaining.Regular
+			}
 			gasRemaining.Regular, _ = useGas(gasRemaining.Regular, gasRemaining.Regular, evm.Config().Tracer, tracing.GasChangeCallFailedExecution)
+		}
+
+		if evm.chainRules.IsAmsterdam {
+			childStateConsumed := evm.stateGasConsumed - savedStateGasConsumed
+			evm.stateGasConsumed = savedStateGasConsumed
+
+			// Restore spill: state gas charged from child's regular gas goes back
+			// This happens after halt zeroing so spill is preserved even on halt
+			reservoirUsed := initialChildState - gasRemaining.State
+			if childStateConsumed > reservoirUsed {
+				spill := childStateConsumed - reservoirUsed
+				gasRemaining.Regular += spill
+			}
 		}
 	}
 

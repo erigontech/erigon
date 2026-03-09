@@ -1268,9 +1268,10 @@ type blockExecutor struct {
 	cntExec, cntSpecExec, cntSuccess, cntAbort, cntTotalValidations, cntValidationFail, cntFinalized int
 
 	// cumulative gas for this block
-	blockGasUsed uint64
-	blobGasUsed  uint64
-	gasPool      *protocol.GasPool
+	blockRegularGasUsed uint64 // accumulated regular gas (pre-Amsterdam: same as block gas)
+	blockStateGasUsed   uint64 // EIP-8037: accumulated state gas
+	blobGasUsed         uint64
+	gasPool             *protocol.GasPool
 
 	execFailed, execAborted []int
 
@@ -1498,7 +1499,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				txResult := be.results[tx]
 
-				if err := be.gasPool.SubGas(txResult.ExecutionResult.BlockGasUsed); err != nil {
+				// Per-tx gas pool deduction uses max(regular, state).
+				// Pre-Amsterdam: blockStateGasUsed is 0, so this equals blockRegularGasUsed.
+				// The exact block-level Bottleneck is computed from accumulated totals at end of block.
+				txBlockGas := max(txResult.ExecutionResult.BlockRegularGasUsed, txResult.ExecutionResult.BlockStateGasUsed)
+				if err := be.gasPool.SubGas(txBlockGas); err != nil {
 					return nil, fmt.Errorf("%w, block=%d: block gas used overflow", rules.ErrInvalidBlock, be.blockNum)
 				}
 
@@ -1600,8 +1605,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 
 			if result.Receipt != nil {
-				applyResult.blockGasUsed = int64(result.ExecutionResult.BlockGasUsed)
-				be.blockGasUsed += result.ExecutionResult.BlockGasUsed
+				be.blockRegularGasUsed += result.ExecutionResult.BlockRegularGasUsed
+				be.blockStateGasUsed += result.ExecutionResult.BlockStateGasUsed
+				// For metrics/commit heuristics, use per-tx gas contribution: max(regular, state).
+				applyResult.blockGasUsed = int64(max(result.ExecutionResult.BlockRegularGasUsed, result.ExecutionResult.BlockStateGasUsed))
 				receipt := *result.Receipt
 				applyResult.receipt = &receipt
 				applyResult.receipt.Logs = append([]*types.Log{}, result.Receipt.Logs...)
@@ -1651,6 +1658,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 		}
 
+		// Block gas = max(regular, state). Pre-Amsterdam: blockStateGasUsed is 0.
+		blockGasUsed := max(be.blockRegularGasUsed, be.blockStateGasUsed)
+
 		be.result = &blockResult{
 			be.blockNum,
 			txTask.BlockTime(),
@@ -1658,7 +1668,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			txTask.ParentHash(),
 			txTask.BlockRoot(),
 			nil,
-			be.blockGasUsed,
+			blockGasUsed,
 			be.blobGasUsed,
 			txTask.Version().TxNum,
 			true,
@@ -1682,6 +1692,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 	txTask := be.tasks[0].Task
 
+	// Block gas = max(regular, state). Pre-Amsterdam: blockStateGasUsed is 0.
+	blockGasUsed := max(be.blockRegularGasUsed, be.blockStateGasUsed)
+
 	return &blockResult{
 		be.blockNum,
 		txTask.BlockTime(),
@@ -1689,7 +1702,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		txTask.ParentHash(),
 		txTask.BlockRoot(),
 		nil,
-		be.blockGasUsed,
+		blockGasUsed,
 		be.blobGasUsed,
 		lastTxNum,
 		false,

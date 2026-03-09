@@ -348,7 +348,7 @@ func (rw *Worker) RunTxTask(txTask Task) (result *TxResult) {
 				rw.metrics.CodeReadCount.Add(rw.ibs.CodeReadCount())
 			}
 			if result != nil {
-				rw.metrics.GasUsed.Add(int64(result.ExecutionResult.BlockGasUsed))
+				rw.metrics.GasUsed.Add(int64(result.ExecutionResult.BlockRegularGasUsed))
 			}
 			rw.metrics.Active.Add(-1)
 		}()

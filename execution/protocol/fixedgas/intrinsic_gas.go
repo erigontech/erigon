@@ -67,7 +67,11 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 	dataLen := uint64(len(args.Data))
 	var stateGas uint64
 	// Set the starting gas for the raw transaction
-	if args.IsContractCreation && args.IsEIP2 {
+	if args.IsEIP8037 && args.IsContractCreation {
+		// EIP-8037: GAS_CREATE = 112*cpsb (state) + 9000 (regular), plus TxGas (21000)
+		result.RegularGas = params.TxGas + params.CreateGasEIP8037
+		stateGas += 112 * args.CostPerStateByte
+	} else if args.IsContractCreation && args.IsEIP2 {
 		stateGas += params.TxGasContractCreation
 	} else if args.IsAATxn {
 		result.RegularGas = params.TxAAGas

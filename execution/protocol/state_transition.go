@@ -82,19 +82,20 @@ func (e ErrExecAbortError) Error() string {
 }
 
 type StateTransition struct {
-	gp           *GasPool
-	msg          Message
-	gasRemaining mdgas.MdGas
-	blockGasUsed uint64 // Gas used by the transaction relevant for block limit accounting - see EIP-7778
-	txnGasUsed   uint64
-	gasPrice     *uint256.Int
-	feeCap       *uint256.Int
-	tipCap       *uint256.Int
-	initialGas   mdgas.MdGas
-	value        uint256.Int
-	data         []byte
-	state        *state.IntraBlockState
-	evm          *vm.EVM
+	gp                  *GasPool
+	msg                 Message
+	gasRemaining        mdgas.MdGas
+	blockRegularGasUsed uint64 // Per-tx regular gas for block-level accounting (pre-Amsterdam: same as block gas)
+	blockStateGasUsed   uint64 // Per-tx state gas for block-level Bottleneck (EIP-8037)
+	txnGasUsed          uint64
+	gasPrice            *uint256.Int
+	feeCap              *uint256.Int
+	tipCap              *uint256.Int
+	initialGas          mdgas.MdGas
+	value               uint256.Int
+	data                []byte
+	state               *state.IntraBlockState
+	evm                 *vm.EVM
 
 	// If true, fee burning and tipping won't happen during transition. Instead, their values will be included in the
 	// ExecutionResult, which caller can use the values to update the balance of burner and coinbase account.
@@ -245,9 +246,9 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	if err := st.gp.SubGas(st.msg.Gas()); err != nil {
 		return err
 	}
-	// Correct blockGasUsed will be set later in TransitionDb; set it for the moment to the txn's gas limit
-	// so that st.gp.AddGas(st.blockGasUsed) in the recover block works correctly even if a panic occurs beforehand.
-	st.blockGasUsed = st.msg.Gas()
+	// Correct blockRegularGasUsed will be set later in TransitionDb; set it for the moment to the txn's gas limit
+	// so that st.gp.AddGas(st.blockRegularGasUsed) in the recover block works correctly even if a panic occurs beforehand.
+	st.blockRegularGasUsed = st.msg.Gas()
 
 	if st.evm.Config().Tracer != nil && st.evm.Config().Tracer.OnGasChange != nil {
 		st.evm.Config().Tracer.OnGasChange(0, st.msg.Gas(), tracing.GasChangeTxInitialBalance)
@@ -409,7 +410,8 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 
 	result := &evmtypes.ExecutionResult{
 		ReceiptGasUsed:      st.txnGasUsed,
-		BlockGasUsed:        st.blockGasUsed,
+		BlockRegularGasUsed: st.blockRegularGasUsed,
+		BlockStateGasUsed:   st.blockStateGasUsed,
 		Err:                 vmerr,
 		Reverted:            errors.Is(vmerr, vm.ErrExecutionReverted),
 		ReturnData:          ret,
@@ -445,7 +447,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 				if r != state.ErrDependency {
 					log.Debug("Recovered from transition exec failure.", "Error:", r, "stack", dbg.Stack())
 				}
-				st.gp.AddGas(st.blockGasUsed)
+				st.gp.AddGas(st.blockRegularGasUsed)
 				depTxIndex := st.evm.IntraBlockState().DepTxIndex()
 				if depTxIndex < 0 {
 					err = fmt.Errorf("transition exec failure: %s at: %s", r, dbg.Stack())
@@ -584,6 +586,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		vmerr error // vm errors do not effect consensus and are therefore not assigned to err
 	)
 
+	st.evm.ResetStateGasConsumed()
+
 	if contractCreation {
 		// The reason why we don't increment nonce here is that we need the original
 		// nonce to calculate the address of the contract that is being created
@@ -600,38 +604,49 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 			refundQuotient = params.RefundQuotientEIP3529
 		}
 		mdGasUsed := st.mdGasUsed()
-		gasUsed := mdGasUsed.Total()
 		if rules.IsAmsterdam {
+			// EIP-8037: Block gas uses actual execution costs (regularGasConsumed/stateGasConsumed),
+			// not gas pool depletion. This correctly separates block gas from receipt gas:
+			// - Receipt gas = tx.gas - gas_left (what user pays)
+			// - Block gas = intrinsic + execution costs (what the network processed)
+			// Bottleneck (max of regular, state) is computed at block level, not per-tx.
+			blockRegular := imdGas.Regular + st.evm.RegularGasConsumed()
+			blockState := imdGas.State + st.evm.StateGasConsumed()
 			// EIP-7778: Block Gas Accounting without Refunds
+			gasUsed := mdGasUsed.Total()
 			refund := min(gasUsed/refundQuotient, st.state.GetRefund().Total())
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, gasUsed-refund)
-			// EIP-8037: State Creation Gas Cost Increase
-			mdGasUsed.Regular = max(mdGasUsed.Regular, intrinsicGasResult.FloorGasCost)
-			st.blockGasUsed = mdGasUsed.Bottleneck()
+			// EIP-8037: Floor gas applies to block regular gas
+			st.blockRegularGasUsed = max(blockRegular, intrinsicGasResult.FloorGasCost)
+			st.blockStateGasUsed = blockState
 		} else if rules.IsPrague {
+			gasUsed := mdGasUsed.Regular
 			refund := min(gasUsed/refundQuotient, st.state.GetRefund().Regular)
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, gasUsed-refund)
-			st.blockGasUsed = st.txnGasUsed
+			st.blockRegularGasUsed = st.txnGasUsed
 		} else {
-			st.txnGasUsed = gasUsed
-			st.blockGasUsed = st.txnGasUsed
+			st.txnGasUsed = mdGasUsed.Regular
+			st.blockRegularGasUsed = st.txnGasUsed
 		}
 		st.refundGas()
 	} else if rules.IsAmsterdam {
 		mdGasUsed := st.mdGasUsed()
+		blockRegular := imdGas.Regular + st.evm.RegularGasConsumed()
+		blockState := imdGas.State + st.evm.StateGasConsumed()
 		st.txnGasUsed = max(mdGasUsed.Total(), intrinsicGasResult.FloorGasCost)
-		mdGasUsed.Regular = max(mdGasUsed.Regular, intrinsicGasResult.FloorGasCost)
-		st.blockGasUsed = mdGasUsed.Bottleneck()
+		st.blockRegularGasUsed = max(blockRegular, intrinsicGasResult.FloorGasCost)
+		st.blockStateGasUsed = blockState
 	} else if rules.IsPrague {
 		st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.mdGasUsed().Regular)
-		st.blockGasUsed = st.txnGasUsed
+		st.blockRegularGasUsed = st.txnGasUsed
 	} else {
 		st.txnGasUsed = st.mdGasUsed().Regular
-		st.blockGasUsed = st.txnGasUsed
+		st.blockRegularGasUsed = st.txnGasUsed
 	}
 	// Also return remaining gas to the block gas counter so it is
 	// available for the next transaction.
-	st.gp.AddGas(st.initialGas.Total() - st.blockGasUsed)
+	// Pre-Amsterdam: blockStateGasUsed is 0, so max(regular, state) == regular == old blockGasUsed.
+	st.gp.AddGas(st.initialGas.Total() - max(st.blockRegularGasUsed, st.blockStateGasUsed))
 
 	effectiveTip := *st.gasPrice
 	if rules.IsLondon {
@@ -675,7 +690,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 
 	result = &evmtypes.ExecutionResult{
 		ReceiptGasUsed:      st.txnGasUsed,
-		BlockGasUsed:        st.blockGasUsed,
+		BlockRegularGasUsed: st.blockRegularGasUsed,
+		BlockStateGasUsed:   st.blockStateGasUsed,
 		Err:                 vmerr,
 		Reverted:            errors.Is(vmerr, vm.ErrExecutionReverted),
 		ReturnData:          ret,

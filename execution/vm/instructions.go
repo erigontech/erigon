@@ -994,6 +994,9 @@ func opCreate(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 
 	scope.useGas(gas.Regular, evm.Config().Tracer, tracing.GasChangeCallContractCreation)
 
+	parentStateGas := scope.stateGas
+	scope.stateGas = 0
+
 	res, addr, returnGas, suberr := evm.Create(scope.Contract.Address(), input, gas, value, false)
 
 	// Push item on the stack based on the returned error. If the ruleset is
@@ -1009,6 +1012,11 @@ func opCreate(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		stackvalue.SetBytes(addrVal[:])
 	}
 
+	if suberr != nil {
+		scope.stateGas = parentStateGas
+	} else {
+		scope.stateGas = returnGas.State
+	}
 	scope.refundGas(returnGas.Regular, evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
 
 	if suberr == ErrExecutionReverted {
@@ -1048,6 +1056,10 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 	scope.useGas(gas.Regular, evm.Config().Tracer, tracing.GasChangeCallContractCreation2)
 	// reuse size int for stackvalue
 	stackValue := size
+
+	parentStateGas := scope.stateGas
+	scope.stateGas = 0
+
 	res, addr, returnGas, suberr := evm.Create2(scope.Contract.Address(), input, gas, endowment, &salt, false)
 
 	// Push item on the stack based on the returned error.
@@ -1059,6 +1071,11 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 	}
 
 	scope.Stack.push(stackValue)
+	if suberr != nil {
+		scope.stateGas = parentStateGas
+	} else {
+		scope.stateGas = returnGas.State
+	}
 	scope.refundGas(returnGas.Regular, evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
 
 	if suberr == ErrExecutionReverted {
@@ -1107,7 +1124,16 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 			return pc, nil, ErrWriteProtection
 		}
 		gas.Regular += params.CallStipend
+		// EIP-8037: The stipend is added to child gas but wasn't charged.
+		// In the Python spec, escrow_subcall_regular_gas includes the stipend,
+		// so we must deduct it from regularGasConsumed for correct block accounting.
+		if evm.chainRules.IsAmsterdam {
+			evm.regularGasConsumed -= params.CallStipend
+		}
 	}
+
+	parentStateGas := scope.stateGas
+	scope.stateGas = 0
 
 	ret, returnGas, err := evm.Call(scope.Contract.Address(), toAddr, args, gas, value, false /* bailout */)
 
@@ -1122,6 +1148,11 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
+	if err != nil {
+		scope.stateGas = parentStateGas
+	} else {
+		scope.stateGas = returnGas.State
+	}
 	scope.refundGas(returnGas.Regular, evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
 
 	evm.returnData = ret
@@ -1155,7 +1186,14 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 
 	if !value.IsZero() {
 		gas.Regular += params.CallStipend
+		// EIP-8037: See comment in opCall — stipend is part of escrow.
+		if evm.chainRules.IsAmsterdam {
+			evm.regularGasConsumed -= params.CallStipend
+		}
 	}
+
+	parentStateGas := scope.stateGas
+	scope.stateGas = 0
 
 	ret, returnGas, err := evm.CallCode(scope.Contract.Address(), toAddr, args, gas, value)
 	if err != nil {
@@ -1169,6 +1207,11 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
+	if err != nil {
+		scope.stateGas = parentStateGas
+	} else {
+		scope.stateGas = returnGas.State
+	}
 	scope.refundGas(returnGas.Regular, evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
 
 	evm.returnData = ret
@@ -1200,6 +1243,9 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
+	parentStateGas := scope.stateGas
+	scope.stateGas = 0
+
 	ret, returnGas, err := evm.DelegateCall(scope.Contract.addr, scope.Contract.caller, toAddr, args, scope.Contract.value, gas)
 	if err != nil {
 		temp.Clear()
@@ -1212,6 +1258,11 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
+	if err != nil {
+		scope.stateGas = parentStateGas
+	} else {
+		scope.stateGas = returnGas.State
+	}
 	scope.refundGas(returnGas.Regular, evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
 
 	evm.returnData = ret
@@ -1243,6 +1294,9 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
+	parentStateGas := scope.stateGas
+	scope.stateGas = 0
+
 	ret, returnGas, err := evm.StaticCall(scope.Contract.Address(), toAddr, args, gas)
 	if err != nil {
 		temp.Clear()
@@ -1254,6 +1308,11 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
+	if err != nil {
+		scope.stateGas = parentStateGas
+	} else {
+		scope.stateGas = returnGas.State
+	}
 	scope.refundGas(returnGas.Regular, evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
 
 	evm.returnData = ret

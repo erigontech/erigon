@@ -164,8 +164,11 @@ func ExecuteBlockEphemerally(
 		return nil, fmt.Errorf("mismatched receipt headers for block %d (%s != %s)", block.NumberU64(), receiptSha.Hex(), block.ReceiptHash().Hex())
 	}
 
-	if !vmConfig.StatelessExec && gasUsed.Block != header.GasUsed {
-		return nil, fmt.Errorf("gas used by execution: %d, in header: %d", gasUsed.Block, header.GasUsed)
+	// EIP-8037: compute block-level Bottleneck for Amsterdam.
+	// Pre-Amsterdam: blockStateGasUsed is 0, so this is a no-op.
+	blockGasUsed := max(gasUsed.BlockRegular, gasUsed.BlockState)
+	if !vmConfig.StatelessExec && blockGasUsed != header.GasUsed {
+		return nil, fmt.Errorf("gas used by execution: %d, in header: %d", blockGasUsed, header.GasUsed)
 	}
 
 	if header.BlobGasUsed != nil && gasUsed.Blob != *header.BlobGasUsed {
@@ -198,7 +201,7 @@ func ExecuteBlockEphemerally(
 		LogsHash:    rlpHash(blockLogs),
 		Receipts:    receipts,
 		Difficulty:  &header.Difficulty,
-		GasUsed:     math.HexOrDecimal64(gasUsed.Block),
+		GasUsed:     math.HexOrDecimal64(blockGasUsed),
 		Rejected:    rejectedTxs,
 	}
 

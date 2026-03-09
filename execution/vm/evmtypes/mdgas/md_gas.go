@@ -42,10 +42,6 @@ func (g MdGas) Total() uint64 {
 	return g.Regular + g.State
 }
 
-func (g MdGas) Bottleneck() uint64 {
-	return max(g.Regular, g.State)
-}
-
 type MdGasType uint8
 
 const (
