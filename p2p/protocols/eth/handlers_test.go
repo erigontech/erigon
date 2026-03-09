@@ -43,15 +43,18 @@ func makeReceipt(cumulativeGas uint64, logDataSize int) *types.Receipt {
 	return r
 }
 
-// receiptEncodedSize returns the eth/69 encoded size of a single receipt.
+// receiptEncodedSize returns the eth/69 encoded size of a single receipt
+// wrapped in an RLP list (i.e. the full encoded block-receipts list for one receipt).
 func receiptEncodedSize(r *types.Receipt) int {
-	encoded, _, _ := encodeBlockReceipts69WithLimit(types.Receipts{r}, 0, 1<<30)
-	// The encoded value is an RLP list containing one receipt; subtract the list prefix.
+	encoded, _, _, _ := encodeBlockReceipts69WithLimit(types.Receipts{r}, 0, 1<<30)
 	return len(encoded)
 }
 
 func TestEncodeBlockReceipts69WithLimit_EmptyReceipts(t *testing.T) {
-	encoded, size, complete := encodeBlockReceipts69WithLimit(nil, 0, 1000)
+	encoded, size, complete, err := encodeBlockReceipts69WithLimit(nil, 0, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !complete {
 		t.Fatal("expected complete for nil receipts")
 	}
@@ -75,7 +78,10 @@ func TestEncodeBlockReceipts69WithLimit_AllFit(t *testing.T) {
 		makeReceipt(200, 10),
 		makeReceipt(300, 10),
 	}
-	encoded, size, complete := encodeBlockReceipts69WithLimit(receipts, 0, 1<<20)
+	encoded, size, complete, err := encodeBlockReceipts69WithLimit(receipts, 0, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !complete {
 		t.Fatal("expected complete when all receipts fit")
 	}
@@ -104,7 +110,10 @@ func TestEncodeBlockReceipts69WithLimit_Truncated(t *testing.T) {
 	// totalBytes starts at 0, so the limit should be just above 2 receipts' list encoding
 	limit := oneSize*2 + 20 // generous for 2, tight for 3
 
-	encoded, size, complete := encodeBlockReceipts69WithLimit(receipts, 0, limit)
+	encoded, size, complete, err := encodeBlockReceipts69WithLimit(receipts, 0, limit)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if complete {
 		t.Fatal("expected incomplete when limit is tight")
 	}
@@ -124,7 +133,10 @@ func TestEncodeBlockReceipts69WithLimit_FirstReceiptAlwaysIncluded(t *testing.T)
 	// Even if a single receipt exceeds the limit, it should still be included
 	// (the check is `len(perReceipt) > 0` before breaking)
 	receipt := makeReceipt(100, 1000)
-	encoded, size, complete := encodeBlockReceipts69WithLimit(types.Receipts{receipt}, 0, 1)
+	encoded, size, complete, err := encodeBlockReceipts69WithLimit(types.Receipts{receipt}, 0, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !complete {
 		t.Fatal("single receipt should always be included even if over limit")
 	}
@@ -148,7 +160,10 @@ func TestEncodeBlockReceipts69WithLimit_TotalBytesOffset(t *testing.T) {
 	}
 	limit := 500
 	// Pretend we already have limit-1 bytes; only the first receipt should fit
-	encoded, _, complete := encodeBlockReceipts69WithLimit(receipts, limit-1, limit)
+	encoded, _, complete, err := encodeBlockReceipts69WithLimit(receipts, limit-1, limit)
+	if err != nil {
+		t.Fatal(err)
+	}
 	// First receipt is always included since perReceipt is empty
 	if complete {
 		t.Fatal("expected incomplete with high totalBytes offset")
