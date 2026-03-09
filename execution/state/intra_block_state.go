@@ -2219,8 +2219,8 @@ func (sdb *IntraBlockState) AccessedAddresses() AccessSet {
 		return nil
 	}
 	out := make(AccessSet, len(sdb.addressAccess))
-	for addr := range sdb.addressAccess {
-		out[addr] = nil
+	for addr, opts := range sdb.addressAccess {
+		out[addr] = opts
 	}
 	sdb.recordAccess = false
 	sdb.addressAccess = nil
@@ -2347,13 +2347,12 @@ func (sdb *IntraBlockState) VersionedWrites(checkDirty bool) VersionedWrites {
 				}
 			}
 
-			// If an account was selfdestructed, strip all writes except
-			// SelfDestructPath itself (and any zero-balance BalancePath writes).
-			// Non-zero BalancePath writes after selfdestruct represent residual ETH
-			// (EIP-7708 case 2); these are carried via
-			// ExecutionResult.SelfDestructedWithBalance captured before SoftFinalise
-			// clears the journal, and must NOT appear here to avoid polluting the
-			// EIP-7928 block access list.
+			// If an account was selfdestructed, strip writes that don't affect
+			// state: keep SelfDestructPath, BalancePath (all values — the BAL
+			// needs to see residual balance from EIP-7708 case 2), and
+			// IncarnationPath (so resurrection txs find the prior incarnation).
+			// Other paths (NoncePath, CodePath) are dropped because selfdestruct
+			// resets them.
 			var appends = make(VersionedWrites, 0, len(vwrites))
 			var selfDestructed bool
 			for _, v := range vwrites {
@@ -2362,19 +2361,13 @@ func (sdb *IntraBlockState) VersionedWrites(checkDirty bool) VersionedWrites {
 					prevs := appends
 					appends = VersionedWrites{v}
 					for _, prev := range prevs {
-						if prev.Path == BalancePath && prev.Val.(uint256.Int) == (uint256.Int{}) {
-							appends = append(appends, prev)
-						} else if prev.Path == IncarnationPath {
-							// Preserve incarnation so resurrection txs can find the prior incarnation
+						if prev.Path == BalancePath || prev.Path == IncarnationPath {
 							appends = append(appends, prev)
 						}
 					}
 				} else {
 					if selfDestructed {
-						if v.Path == BalancePath && v.Val.(uint256.Int) == (uint256.Int{}) {
-							appends = append(appends, v)
-						} else if v.Path == IncarnationPath {
-							// Preserve incarnation so resurrection txs can find the prior incarnation
+						if v.Path == BalancePath || v.Path == IncarnationPath {
 							appends = append(appends, v)
 						}
 					} else {
