@@ -569,7 +569,6 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 			refundQuotient = params.RefundQuotientEIP3529
 		}
 		gasUsed := st.gasUsed()
-
 		st.blockGasUsed = gasUsed
 		stateRefund := st.state.GetRefund()
 		refund := min(gasUsed/refundQuotient, stateRefund)
