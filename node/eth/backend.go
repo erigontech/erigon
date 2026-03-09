@@ -874,7 +874,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			builderstages.BuilderUnwindOrder,
 			builderstages.BuilderPruneOrder,
 			logger,
-			stages.ModeBlockProduction,
+			stages.ModeApplyingBlocks,
 		)
 		// We start the mining step
 		if err := stageloop.MiningStep(ctx, backend.chainDB, proposingSync, tmpdir, logger); err != nil {
