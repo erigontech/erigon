@@ -639,8 +639,9 @@ func (cs *MultiClient) getReceipts66(ctx context.Context, inreq *sentryproto.Inb
 		return fmt.Errorf("decoding getReceipts66: %w, data: %x", err, inreq.Data)
 	}
 	return cs.getReceiptsInner(ctx, inreq.PeerId, sentryClient, requestParams{
-		id:    query.RequestId,
-		query: query.GetReceiptsPacket,
+		id:         query.RequestId,
+		query:      query.GetReceiptsPacket,
+		ethVersion: direct.ETH68,
 	})
 }
 
@@ -650,9 +651,9 @@ func (cs *MultiClient) getReceipts69(ctx context.Context, inreq *sentryproto.Inb
 		return fmt.Errorf("decoding getReceipts69: %w, data: %x", err, inreq.Data)
 	}
 	return cs.getReceiptsInner(ctx, inreq.PeerId, sentryClient, requestParams{
-		id:             query.RequestId,
-		query:          query.GetReceiptsPacket,
-		isEth69OrLater: true,
+		id:         query.RequestId,
+		query:      query.GetReceiptsPacket,
+		ethVersion: direct.ETH69,
 	})
 }
 
@@ -664,8 +665,7 @@ func (cs *MultiClient) getReceipts70(ctx context.Context, inreq *sentryproto.Inb
 	return cs.getReceiptsInner(ctx, inreq.PeerId, sentryClient, requestParams{
 		id:                     query.RequestId,
 		query:                  query.GetReceiptsPacket,
-		isEth69OrLater:         true,
-		isEth70:                true,
+		ethVersion:             direct.ETH70,
 		firstBlockReceiptIndex: query.FirstBlockReceiptIndex,
 	})
 }
@@ -674,19 +674,18 @@ func (cs *MultiClient) getReceipts70(ctx context.Context, inreq *sentryproto.Inb
 type requestParams struct {
 	id                     uint64
 	query                  eth.GetReceiptsPacket
-	isEth69OrLater         bool
-	isEth70                bool
+	ethVersion             uint
 	firstBlockReceiptIndex uint64
 }
 
 // getReceiptsInner handles GetReceipts for all protocol versions.
 func (cs *MultiClient) getReceiptsInner(ctx context.Context, peerId *typesproto.H512, sentryClient sentryproto.SentryClient, p requestParams) error {
 	sizeLimit := eth.NoSizeLimit
-	if p.isEth70 {
+	if p.ethVersion >= direct.ETH70 {
 		sizeLimit = eth.Eth70ResponseSizeLimit
 	}
 	opts := eth.ReceiptQueryOpts{
-		IsEth69OrLater:         p.isEth69OrLater,
+		EthVersion:             p.ethVersion,
 		FirstBlockReceiptIndex: p.firstBlockReceiptIndex,
 		SizeLimit:              sizeLimit,
 	}
@@ -722,7 +721,7 @@ func (cs *MultiClient) getReceiptsInner(ctx context.Context, peerId *typesproto.
 	}
 
 	var b []byte
-	if p.isEth70 {
+	if p.ethVersion >= direct.ETH70 {
 		var incomplete uint64
 		if lastBlockIncomplete {
 			incomplete = 1
@@ -743,7 +742,7 @@ func (cs *MultiClient) getReceiptsInner(ctx context.Context, peerId *typesproto.
 	}
 
 	msgId := sentryproto.MessageId_RECEIPTS_66
-	if p.isEth70 {
+	if p.ethVersion >= direct.ETH70 {
 		msgId = sentryproto.MessageId_RECEIPTS_70
 	}
 	outreq := sentryproto.SendMessageByIdRequest{

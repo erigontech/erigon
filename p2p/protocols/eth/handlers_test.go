@@ -46,7 +46,7 @@ func makeReceipt(cumulativeGas uint64, logDataSize int) *types.Receipt {
 // eth70Opts returns ReceiptQueryOpts for eth/70 with the given firstBlockReceiptIndex.
 func eth70Opts(firstBlockReceiptIndex uint64) ReceiptQueryOpts {
 	return ReceiptQueryOpts{
-		IsEth69OrLater:         true,
+		EthVersion:             70,
 		FirstBlockReceiptIndex: firstBlockReceiptIndex,
 		SizeLimit:              Eth70ResponseSizeLimit,
 	}

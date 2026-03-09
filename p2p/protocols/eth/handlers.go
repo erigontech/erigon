@@ -229,8 +229,9 @@ const Eth70ResponseSizeLimit = maxMessageSize - 512
 // ReceiptQueryOpts controls the behavior differences between eth protocol versions
 // when answering GetReceipts queries.
 type ReceiptQueryOpts struct {
-	// IsEth69OrLater uses eth/69 encoding (no Bloom field). False means eth/68 encoding.
-	IsEth69OrLater bool
+	// EthVersion is the protocol version (e.g. direct.ETH68, direct.ETH69, direct.ETH70).
+	// eth/69+ uses encoding without the Bloom field.
+	EthVersion uint
 	// FirstBlockReceiptIndex skips this many receipts from the first block (eth/70).
 	FirstBlockReceiptIndex uint64
 	// SizeLimit is the maximum encoded response size for per-receipt truncation.
@@ -298,7 +299,7 @@ func AnswerGetReceiptsQueryCacheOnly(ctx context.Context, receiptsGetter Receipt
 // For eth/69+ it uses eth/69 encoding (no Bloom) with optional per-receipt size limiting.
 // For eth/68 it uses standard RLP encoding.
 func encodeBlockReceiptsWithLimit(receipts types.Receipts, totalBytes int, opts ReceiptQueryOpts) (rlp.RawValue, int, bool, error) {
-	if opts.IsEth69OrLater {
+	if opts.EthVersion >= 69 {
 		return encodeBlockReceipts69WithLimit(receipts, totalBytes, opts.SizeLimit)
 	}
 	// eth/68: standard RLP encoding, no size limiting
