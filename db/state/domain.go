@@ -1299,7 +1299,7 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 
 	for i := range domainDiffs {
 		keyStr, value := domainDiffs[i].Key, domainDiffs[i].Value
-		key := toBytesZeroCopy(keyStr)
+		key := common.ToBytesZeroCopy(keyStr)
 		if dt.d.LargeValues {
 			// Delete the entry at the write step
 			if err := rwTx.Delete(d.ValuesTable, key); err != nil {
