@@ -63,6 +63,7 @@ type FilesItem struct {
 	// Cold: file containing < Aggregator.stepsInFrozenFile steps. Immutable, but can be closed/removed after merge to bigger file.
 	// Hot: Stored in DB. Providing Snapshot-Isolation by CopyOnWrite.
 	frozen   bool         // immutable, don't need atomic
+	sparse   bool         // file backed by torrent, not local disk — relaxed visibility checks
 	refcount atomic.Int32 // only for `frozen=false`
 
 	// file can be deleted in 2 cases: 1. when `refcount == 0 && canDelete == true` 2. on app startup when `file.isSubsetOfFrozenFile()`
@@ -348,31 +349,46 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 					continue
 				}
 				if !ok {
-					fName := fNameMask
-					d.logger.Debug("[agg] Domain.openDirtyFiles: file does not exists", "f", fName)
-					invalidFileItemsLock.Lock()
-					invalidFileItems = append(invalidFileItems, item)
-					invalidFileItemsLock.Unlock()
-					continue
-				}
-
-				if fileVer.Less(d.FileVersion.DataKV.MinSupported) {
-					_, fName := filepath.Split(fPath)
-					versionTooLowPanic(fName, d.FileVersion.DataKV)
-				}
-
-				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
-					_, fName := filepath.Split(fPath)
-					if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
-						d.logger.Debug("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
-					} else {
-						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
+					// File not on disk — try sparse fallback via torrent
+					if d.sparseLookup != nil {
+						reader, fileSize, matchedName, found := d.sparseLookup.FindReaderForFileMask("domain", fNameMask)
+						if found {
+							item.decompressor, err = seg.NewDecompressorFromReader(reader, fileSize, matchedName)
+							if err != nil {
+								d.logger.Warn("[agg] Domain.openDirtyFiles: sparse fallback failed", "f", matchedName, "err", err)
+								reader.Close() //nolint:errcheck
+							} else {
+								item.sparse = true
+								d.logger.Info("[agg] Domain.openDirtyFiles: sparse torrent access", "f", matchedName, "size", fileSize)
+							}
+						}
 					}
-					invalidFileItemsLock.Lock()
-					invalidFileItems = append(invalidFileItems, item)
-					invalidFileItemsLock.Unlock()
-					// don't interrupt on error. other files may be good. but skip indices open.
-					continue
+					if item.decompressor == nil {
+						d.logger.Debug("[agg] Domain.openDirtyFiles: file does not exist", "f", fNameMask)
+						invalidFileItemsLock.Lock()
+						invalidFileItems = append(invalidFileItems, item)
+						invalidFileItemsLock.Unlock()
+						continue
+					}
+				} else {
+					if fileVer.Less(d.FileVersion.DataKV.MinSupported) {
+						_, fName := filepath.Split(fPath)
+						versionTooLowPanic(fName, d.FileVersion.DataKV)
+					}
+
+					if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
+						_, fName := filepath.Split(fPath)
+						if errors.Is(err, &seg.ErrCompressedFileCorrupted{}) {
+							d.logger.Debug("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
+						} else {
+							d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
+						}
+						invalidFileItemsLock.Lock()
+						invalidFileItems = append(invalidFileItems, item)
+						invalidFileItemsLock.Unlock()
+						// don't interrupt on error. other files may be good. but skip indices open.
+						continue
+					}
 				}
 			}
 
@@ -402,15 +418,24 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 					_, fName := filepath.Split(fPath)
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 				}
+				if !ok && d.sparseLookup != nil {
+					d.logger.Info("[agg] Domain.openDirtyFiles: bt not found for sparse file", "mask", fNameMask, "dir", d.dirs.SnapDomain, "dirEntries", len(dirEntries))
+				}
 				if ok {
 					if fileVer.Less(d.FileVersion.AccessorBT.MinSupported) {
 						_, fName := filepath.Split(fPath)
 						versionTooLowPanic(fName, d.FileVersion.AccessorBT)
 					}
+					if item.sparse {
+						d.logger.Info("[agg] Domain.openDirtyFiles: opening bt for sparse file", "f", filepath.Base(fPath), "domain", d.FilenameBase)
+					}
 					if item.bindex, err = btindex.OpenBtreeIndexWithDecompressor(fPath, btindex.DefaultBtreeM, d.dataReader(item.decompressor)); err != nil {
 						_, fName := filepath.Split(fPath)
-						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
+						d.logger.Warn("[agg] Domain.openDirtyFiles: bt open error", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
+					}
+					if item.sparse && item.bindex != nil {
+						d.logger.Info("[agg] Domain.openDirtyFiles: bt opened for sparse file", "f", filepath.Base(fPath), "domain", d.FilenameBase)
 					}
 				}
 			}
@@ -709,6 +734,11 @@ func checkForVisibility(item *FilesItem, l statecfg.Accessors, trace bool) (canB
 		}
 		return false
 	}
+	// Sparse files (backed by torrent) may not have btree/index/existence
+	// accessors on disk — they use linear scan fallback instead.
+	if item.sparse {
+		return true
+	}
 	if l.Has(statecfg.AccessorBTree) && item.bindex == nil {
 		if trace {
 			log.Warn("[dbg] checkForVisibility: BTindex not opened", "f", item.decompressor.FileName())
@@ -829,6 +859,11 @@ func closeWhatNotInList(dirtyFiles *btree2.BTreeG[*FilesItem], fNames []string) 
 	var toClose []*FilesItem
 	dirtyFiles.Walk(func(items []*FilesItem) bool {
 		for _, item := range items {
+			// Sparse items (torrent-backed) are not on disk — preserve them
+			// across OpenFolder/OpenList calls that rebuild from disk scan.
+			if item.sparse {
+				continue
+			}
 			if item.decompressor != nil {
 				if _, ok := protectFiles[item.decompressor.FileName()]; ok {
 					continue

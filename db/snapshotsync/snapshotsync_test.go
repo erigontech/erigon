@@ -33,16 +33,11 @@ func TestBlackListForSparse(t *testing.T) {
 
 	preverified := c.Preverified
 
-	maxStep, err := getMaxStepRangeInSnapshots(preverified)
-	if err != nil {
-		t.Fatal(err)
-	}
+	blackList := buildBlackListForSparse(preverified)
+	t.Logf("Sparse blacklist: %d files", len(blackList))
 
-	keepRecentSteps := uint64(64)
-	blackList := buildBlackListForSparse(keepRecentSteps, maxStep, preverified)
-	t.Logf("Sparse blacklist: %d files (maxStep=%d, keepRecent=%d)", len(blackList), maxStep, keepRecentSteps)
-
-	var stateBlacklisted, caplinBlacklisted, indexSkipped, recentDomainKept, blockSegKept int
+	var historyBlacklisted, efBlacklisted, caplinBlacklisted, domainBlacklisted int
+	var indexKept, blockSegKept, domainKept int
 	for _, p := range preverified.Items {
 		name := p.Name
 		_, blacklisted := blackList[name]
@@ -52,15 +47,23 @@ func TestBlackListForSparse(t *testing.T) {
 			if !isDataFile(name) {
 				t.Errorf("Index file should not be blacklisted: %s", name)
 			}
-			if isStateSnapshot(name) {
-				stateBlacklisted++
+			if strings.HasPrefix(name, "history") {
+				historyBlacklisted++
+			} else if strings.HasPrefix(name, "idx/") && strings.HasSuffix(name, ".ef") {
+				efBlacklisted++
 			} else if isCaplinFile(name) {
 				caplinBlacklisted++
+			} else if strings.HasPrefix(name, "domain") {
+				domainBlacklisted++
 			}
 		}
 
 		if !isDataFile(name) && !blacklisted {
-			indexSkipped++
+			indexKept++
+		}
+
+		if strings.HasPrefix(name, "domain") && !blacklisted {
+			domainKept++
 		}
 
 		// Block-level .seg files should never be blacklisted
@@ -70,33 +73,60 @@ func TestBlackListForSparse(t *testing.T) {
 		if strings.HasSuffix(name, ".seg") && !isStateSnapshot(name) && !isCaplinFile(name) && !blacklisted {
 			blockSegKept++
 		}
-
-		// Recent domain .kv files should not be blacklisted
-		if strings.HasPrefix(name, "domain") && strings.HasSuffix(name, ".kv") {
-			info, _, ok := snaptype.ParseFileName("", name)
-			if ok && info.From >= maxStep-keepRecentSteps && blacklisted {
-				t.Errorf("Recent domain file should not be blacklisted: %s (from=%d, threshold=%d)", name, info.From, maxStep-keepRecentSteps)
-			}
-			if ok && info.From >= maxStep-keepRecentSteps && !blacklisted {
-				recentDomainKept++
-			}
-		}
 	}
 
-	t.Logf("State data blacklisted: %d, Caplin blacklisted: %d, Index files kept: %d, Block .seg kept: %d, Recent domain .kv kept: %d",
-		stateBlacklisted, caplinBlacklisted, indexSkipped, blockSegKept, recentDomainKept)
+	t.Logf("History blacklisted: %d, EF blacklisted: %d, Caplin blacklisted: %d, Domain blacklisted: %d",
+		historyBlacklisted, efBlacklisted, caplinBlacklisted, domainBlacklisted)
+	t.Logf("Index kept: %d, Block .seg kept: %d, Domain kept (latest only): %d",
+		indexKept, blockSegKept, domainKept)
 
-	if stateBlacklisted == 0 {
-		t.Error("Expected some state data files to be blacklisted in sparse mode")
+	if historyBlacklisted == 0 {
+		t.Error("Expected some history .v files to be blacklisted")
 	}
-	if indexSkipped == 0 {
-		t.Error("Expected some index files to be kept (not blacklisted)")
+	if caplinBlacklisted == 0 {
+		t.Error("Expected some caplin files to be blacklisted")
 	}
-	if recentDomainKept == 0 {
-		t.Error("Expected some recent domain files to be kept locally")
+	if indexKept == 0 {
+		t.Error("Expected some index files to be kept")
 	}
 	if blockSegKept == 0 {
-		t.Error("Expected block .seg files to be kept (not blacklisted)")
+		t.Error("Expected block .seg files to be kept")
+	}
+	if domainKept == 0 {
+		t.Error("Expected at least the latest domain files to be kept")
+	}
+	if domainBlacklisted == 0 {
+		t.Error("Expected older domain files to be blacklisted")
+	}
+
+	// Verify only ONE domain .kv file per type is kept (the latest)
+	keptByType := make(map[string]string)
+	for _, p := range preverified.Items {
+		if !strings.HasPrefix(p.Name, "domain") || !strings.HasSuffix(p.Name, ".kv") {
+			continue
+		}
+		if _, bl := blackList[p.Name]; bl {
+			continue
+		}
+		domainType, _, ok := parseDomainFile(p.Name)
+		if !ok {
+			continue
+		}
+		if prev, exists := keptByType[domainType]; exists {
+			t.Errorf("Multiple domain .kv files kept for type %q: %s and %s", domainType, prev, p.Name)
+		}
+		keptByType[domainType] = p.Name
+		t.Logf("  Kept latest %s: %s", domainType, p.Name)
+	}
+
+	// Must have commitment (determines execution start)
+	if _, ok := keptByType["commitment"]; !ok {
+		t.Error("Latest commitment domain file must be kept")
+	}
+	for _, required := range []string{"accounts", "code", "storage"} {
+		if _, ok := keptByType[required]; !ok {
+			t.Errorf("Latest %s domain file must be kept", required)
+		}
 	}
 }
 

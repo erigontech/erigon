@@ -525,6 +525,129 @@ func (a *Aggregator) closeDirtyFiles() {
 }
 
 func (a *Aggregator) EnableDomain(domain kv.Domain) { a.d[domain].Disable = false }
+// SetSparseLookup configures sparse torrent access for all domains.
+// When set, domain files missing from local disk will be accessed on-demand
+// from the BitTorrent network.
+func (a *Aggregator) SetSparseLookup(sl SparseTorrentLookup) {
+	for _, d := range a.d {
+		if d == nil {
+			continue
+		}
+		d.SetSparseLookup(sl)
+	}
+}
+
+// SparseStepRange represents a step range for a domain file that should be
+// available via sparse torrent access.
+type SparseStepRange struct {
+	StartStep uint64
+	EndStep   uint64
+}
+
+// OpenSparseFiles adds FilesItem entries for the given step ranges to each
+// domain's dirtyFiles btree (if not already present), then re-runs
+// openDirtyFiles to trigger the sparse fallback. This allows domain files
+// that are not on disk but available via torrent to be opened for on-demand
+// reading.
+func (a *Aggregator) OpenSparseFiles(ranges []SparseStepRange) error {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+
+	scanRes, err := scanDirs(a.dirs)
+	if err != nil {
+		return err
+	}
+
+	a.logger.Info("[sparse] OpenSparseFiles", "ranges", len(ranges), "stepSize", a.stepSize, "stepsInFrozenFile", a.stepsInFrozenFile)
+	for i, r := range ranges {
+		a.logger.Info("[sparse] input range", "i", i, "startStep", r.StartStep, "endStep", r.EndStep)
+	}
+
+	for _, d := range a.d {
+		if d == nil || d.Disable || d.sparseLookup == nil {
+			continue
+		}
+
+		// Log existing dirtyFiles before adding
+		existingCount := 0
+		d.dirtyFiles.Walk(func(items []*FilesItem) bool {
+			for _, item := range items {
+				from, to := item.StepRange(d.stepSize)
+				a.logger.Info("[sparse] existing dirtyFile", "domain", d.FilenameBase, "steps", fmt.Sprintf("%d-%d", from, to), "decomp", item.decompressor != nil)
+				existingCount++
+			}
+			return true
+		})
+		a.logger.Info("[sparse] existing dirtyFiles count", "domain", d.FilenameBase, "count", existingCount)
+
+		// Re-scan on-disk files that may not have been present during initial openFolder
+		// (e.g., downloaded by the downloader after aggregator startup)
+		d.scanDirtyFiles(scanRes.domainFiles)
+
+		// Add FilesItem entries for step ranges not already in dirtyFiles
+		for _, r := range ranges {
+			startTxNum := r.StartStep * a.stepSize
+			endTxNum := r.EndStep * a.stepSize
+			item := newFilesItem(startTxNum, endTxNum, a.stepSize, a.stepsInFrozenFile)
+			item.frozen = false
+			if _, has := d.dirtyFiles.Get(item); !has {
+				d.dirtyFiles.Set(item)
+				a.logger.Info("[sparse] added new dirtyFile", "domain", d.FilenameBase, "steps", fmt.Sprintf("%d-%d", r.StartStep, r.EndStep))
+			} else {
+				a.logger.Info("[sparse] dirtyFile already exists", "domain", d.FilenameBase, "steps", fmt.Sprintf("%d-%d", r.StartStep, r.EndStep))
+			}
+		}
+
+		// Re-open to trigger sparse fallback for nil decompressor items
+		if err := d.openDirtyFiles(scanRes.domainFiles); err != nil {
+			return fmt.Errorf("OpenSparseFiles(%s): %w", d.FilenameBase, err)
+		}
+
+		// Log status of each dirtyFile item for debugging
+		d.dirtyFiles.Walk(func(items []*FilesItem) bool {
+			for _, item := range items {
+				hasDecomp := item.decompressor != nil
+				hasBindex := item.bindex != nil
+				hasIndex := item.index != nil
+				hasExist := item.existence != nil
+				from, to := item.StepRange(d.stepSize)
+				fname := ""
+				if hasDecomp {
+					fname = item.decompressor.FileName()
+				}
+				a.logger.Info("[sparse] dirtyFile status",
+					"domain", d.FilenameBase,
+					"steps", fmt.Sprintf("%d-%d", from, to),
+					"decomp", hasDecomp, "bindex", hasBindex,
+					"index", hasIndex, "existence", hasExist,
+					"sparse", item.sparse, "frozen", item.frozen,
+					"file", fname)
+			}
+			return true
+		})
+	}
+
+	minimax := a.dirtyFilesEndTxNumMinimax()
+	a.logger.Info("[sparse] recalcVisibleFiles", "minimax", minimax, "minimaxStep", minimax/a.stepSize)
+	a.recalcVisibleFiles(minimax)
+
+	// Log visible file counts per domain
+	for _, d := range a.d {
+		if d == nil || d.Disable {
+			continue
+		}
+		a.logger.Info("[sparse] visible files", "domain", d.FilenameBase, "count", len(d._visible.files))
+		for j, vf := range d._visible.files {
+			from, to := vf.src.StepRange(d.stepSize)
+			a.logger.Info("[sparse] visible file", "domain", d.FilenameBase, "i", j,
+				"steps", fmt.Sprintf("%d-%d", from, to),
+				"sparse", vf.src.sparse,
+				"file", vf.src.decompressor.FileName())
+		}
+	}
+	return nil
+}
+
 func (a *Aggregator) SetCollateAndBuildWorkers(i int) {
 	if a.lockWorkersEditing {
 		return

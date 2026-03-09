@@ -111,6 +111,7 @@ type Downloader struct {
 	wg                     sync.WaitGroup
 	initedBackgroundLogger bool
 	torrentsByName         map[snapshotName]*torrent.Torrent
+	sparseTorrents         map[snapshotName]struct{} // torrents added only for sparse access, excluded from download stats
 	// Torrents that were added for download. The first time a torrent is added here, the adder is
 	// responsible for fetching metainfo and executing after-add handlers.
 	downloads map[*torrent.Torrent]struct{}
@@ -762,6 +763,11 @@ func (d *Downloader) decDownloadRequests() {
 // the name from there.
 func (d *Downloader) allActiveSnapshots() (ret []snapshot) {
 	for name, t := range d.torrentsByName {
+		// Exclude sparse-only torrents from download stats.
+		// They are metadata-only and should not block sync completion.
+		if _, isSparse := d.sparseTorrents[name]; isSparse {
+			continue
+		}
 		ret = append(ret, snapshot{
 			Name:     name,
 			InfoHash: t.InfoHash(),

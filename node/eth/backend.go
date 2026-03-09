@@ -419,6 +419,61 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	if backend.downloader != nil {
 		sp := snapshotsync.NewSparseProvider(backend.downloader, config.Dirs.Snap)
 		allSnapshots.SetSparseProvider(sp)
+
+		// Also enable sparse domain access for the state aggregator.
+		// This allows domain .kv files not present locally to be read
+		// on-demand from the BitTorrent network.
+		if agg, ok := temporalDb.(state.HasAgg).Agg().(*state.Aggregator); ok {
+			agg.SetSparseLookup(backend.downloader)
+		}
+
+		// In sparse mode, register blacklisted domain files as metadata-only
+		// torrents so they can be read on-demand via FindReaderForFileMask.
+		// Then wait for domain .kv metadata and inject step ranges into the
+		// aggregator's dirtyFiles so openDirtyFiles triggers sparse fallback.
+		if config.Prune.Sparse {
+			if snapCfg, known := snapcfg.KnownCfg(chainConfig.ChainName); known {
+				sparseEntries := snapshotsync.SparseBlacklistEntries(snapCfg.Preverified)
+				if len(sparseEntries) > 0 {
+					domainReady := backend.downloader.AddSparseMetadataTorrents(sparseEntries)
+					logger.Info("[sparse] registered metadata-only torrents, waiting for domain metadata", "count", len(sparseEntries))
+
+					// Wait for domain .kv torrent metadata with timeout
+					select {
+					case <-domainReady:
+						logger.Info("[sparse] domain metadata ready")
+					case <-time.After(10 * time.Minute):
+						logger.Warn("[sparse] timeout waiting for domain metadata, some sparse files may be unavailable")
+					case <-ctx.Done():
+					}
+
+					// Get step ranges from blacklisted domain files and inject them
+					// into the aggregator so openDirtyFiles tries sparse fallback.
+					stepRanges := snapshotsync.SparseDomainStepRanges(snapCfg.Preverified)
+					for i, r := range stepRanges {
+						logger.Info("[sparse] step range from preverified", "i", i, "startStep", r.StartStep, "endStep", r.EndStep)
+					}
+					if len(stepRanges) > 0 {
+						if ha, ok := temporalDb.(state.HasAgg); ok {
+							if agg, ok := ha.Agg().(*state.Aggregator); ok {
+								// Convert snapshotsync.StepRange to state.SparseStepRange
+								aggRanges := make([]state.SparseStepRange, len(stepRanges))
+								for i, r := range stepRanges {
+									aggRanges[i] = state.SparseStepRange{StartStep: r.StartStep, EndStep: r.EndStep}
+								}
+								logger.Info("[sparse] opening sparse domain files", "ranges", len(aggRanges))
+								if err := agg.OpenSparseFiles(aggRanges); err != nil {
+									logger.Warn("[sparse] failed to open sparse domain files", "err", err)
+								} else {
+									logger.Info("[sparse] sparse domain files opened successfully")
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
 		logger.Info("[sparse] enabled on-demand snapshot access via BitTorrent")
 	}
 

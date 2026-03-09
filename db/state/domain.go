@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"path/filepath"
 	"sort"
@@ -63,6 +64,20 @@ var (
 )
 var traceGetLatest, _ = kv.String2Domain(dbg.EnvString("AGG_TRACE_GET_LATEST", ""))
 
+// SparseTorrentLookup provides on-demand access to snapshot data files via BitTorrent.
+// When a domain .kv file is not available locally, the aggregator can use this
+// interface to create a sparse Decompressor backed by torrent data.
+type SparseTorrentLookup interface {
+	// NewReaderForFile returns an io.ReadSeekCloser for the named snapshot file
+	// and the file’s total size. Returns nil, 0, false if no torrent exists.
+	NewReaderForFile(fileName string) (reader io.ReadSeekCloser, fileSize int64, ok bool)
+
+	// FindReaderForFileMask searches known torrents for a file matching the
+	// given glob-like mask (e.g. "*-accounts.0-2048.kv") and returns a reader.
+	// This handles version differences between what code expects vs what torrents have.
+	FindReaderForFileMask(dirPrefix, fileNameMask string) (reader io.ReadSeekCloser, fileSize int64, matchedName string, ok bool)
+}
+
 // Domain is a part of the state (examples are Accounts, Storage, Code)
 // Domain should not have any go routines or locks
 //
@@ -90,11 +105,15 @@ type Domain struct {
 	// BeginRo() using _visible in zero-copy way
 	dirtyFiles *btree2.BTreeG[*FilesItem]
 
-	// _visible - underscore in name means: don't use this field directly, use BeginFilesRo()
-	// underlying array is immutable - means it's ready for zero-copy use
+	// _visible - underscore in name means: don’t use this field directly, use BeginFilesRo()
+	// underlying array is immutable - means it’s ready for zero-copy use
 	_visible *domainVisible
 
 	checker *DependencyIntegrityChecker
+
+	// sparseLookup provides on-demand access to domain .kv files via BitTorrent
+	// when the file is not available locally. Used in sparse/pruned mode.
+	sparseLookup SparseTorrentLookup
 }
 
 type domainVisible struct {
@@ -139,6 +158,10 @@ func NewDomain(cfg statecfg.DomainCfg, stepSize, stepsInFrozenFile uint64, dirs 
 }
 func (d *Domain) SetChecker(checker *DependencyIntegrityChecker) {
 	d.checker = checker
+}
+
+func (d *Domain) SetSparseLookup(sl SparseTorrentLookup) {
+	d.sparseLookup = sl
 }
 
 func (d *Domain) kvNewFilePath(fromStep, toStep kv.Step) string {
@@ -552,6 +575,14 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte, hi, lo uint64) (v
 		defer domainReadMetric(dt.name, i).ObserveDuration(time.Now())
 	}
 
+	// Sparse files (backed by torrent) without btree index: skip.
+	// Linear scan of torrent data is unreliable (pieces may not be downloaded yet)
+	// and risks panics from incomplete data. Only btree-indexed sparse files
+	// (where btree was built from the same data version) are safe to read.
+	if dt.files[i].src.sparse && dt.files[i].src.bindex == nil {
+		return nil, false, 0, nil
+	}
+
 	if dt.d.Accessors.Has(statecfg.AccessorBTree) {
 		_, v, offset, ok, err = dt.statelessBtree(i).Get(filekey, dt.reusableReader(i))
 		if err != nil || !ok {
@@ -581,6 +612,29 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte, hi, lo uint64) (v
 	}
 	return nil, false, 0, errors.New("no index defined")
 
+}
+
+// sparseLinearScan does a full sequential scan of a sparse domain file
+// to find a key. This is slow but works without btree/index accessors.
+func (dt *DomainRoTx) sparseLinearScan(i int, filekey []byte) (v []byte, ok bool, offset uint64, err error) {
+	g := dt.reusableReader(i)
+	g.Reset(0)
+	scanned := 0
+	for g.HasNext() {
+		k, _ := g.Next(nil)
+		val, _ := g.Next(nil)
+		scanned++
+		if bytes.Equal(k, filekey) {
+			if scanned < 100 || scanned%10000 == 0 {
+				log.Info("[sparse] linear scan HIT", "domain", dt.name, "file", i, "key", fmt.Sprintf("%x", filekey[:min(len(filekey), 8)]), "scanned", scanned, "valLen", len(val))
+			}
+			return val, true, 0, nil
+		}
+	}
+	if scanned < 100 {
+		log.Info("[sparse] linear scan MISS", "domain", dt.name, "file", i, "key", fmt.Sprintf("%x", filekey[:min(len(filekey), 8)]), "scanned", scanned)
+	}
+	return nil, false, 0, nil
 }
 
 func (d *Domain) BeginFilesRo() *DomainRoTx {

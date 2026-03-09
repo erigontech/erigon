@@ -116,24 +116,26 @@ func isDataFile(name string) bool {
 }
 
 // buildBlackListForSparse builds a blacklist of data files that should not be
-// downloaded in sparse mode. Index files and metadata files are always downloaded.
-// Recent state files (within keepRecentSteps of the tip) are also downloaded locally
-// for execution performance.
+// downloaded in sparse mode.
 //
-// Block-level .seg files (headers, bodies, transactions) are ALWAYS downloaded
-// because they're needed for the node to sync and determine block boundaries.
-// Only state data files (.kv, .v, .ef) and caplin .seg files are made sparse.
+// Always downloaded (never blacklisted):
+//   - All index files (.idx, .bt, .kvei, .kvi, .vi, .efi)
+//   - All block .seg files (headers, bodies, transactions) — needed for sync
+//   - Metadata files (salt, erigondb.toml)
+//
+// Made sparse (blacklisted, accessed on-demand via torrent):
+//   - Domain .kv files (except commitment) — accessed on-demand via sparse decompressor
+//     (btree indices are always downloaded, so btree lookups work with sparse data)
+//   - Commitment .kv NOT sparse: trie nodes require fully consistent random access
+//   - History .v files — only needed for historical state queries
+//   - Inverted index .ef files (in idx/) — only needed for historical log queries
+//   - Caplin .seg files (beacon blocks, blob sidecars) — served on-demand
 func buildBlackListForSparse(
-	keepRecentSteps uint64,
-	maxStep uint64,
 	preverified snapcfg.Preverified,
 ) map[string]struct{} {
 	blackList := make(map[string]struct{})
-	recentStepThreshold := uint64(0)
-	if maxStep > keepRecentSteps {
-		recentStepThreshold = maxStep - keepRecentSteps
-	}
 
+	// Second pass: build blacklist
 	for _, p := range preverified.Items {
 		name := p.Name
 		if !isDataFile(name) {
@@ -143,28 +145,167 @@ func buildBlackListForSparse(
 		if strings.HasPrefix(name, "salt") || name == "erigondb.toml" {
 			continue
 		}
-
-		if isStateSnapshot(name) {
-			// For state files, keep recent steps local for execution performance
-			res, _, ok := snaptype.ParseFileName("", name)
-			if !ok {
-				continue
+		// Domain .kv files → sparse (on-demand via torrent, btree indices on disk)
+		// Commitment domain excluded: trie node data must be fully consistent,
+		// and sparse torrent reads may return incomplete data for random access patterns.
+		if strings.HasPrefix(name, "domain") && strings.HasSuffix(name, ".kv") {
+			if !strings.Contains(name, "commitment") {
+				blackList[name] = struct{}{}
 			}
-			// Keep domain files for recent steps (needed for block execution)
-			if strings.HasPrefix(name, "domain") && res.From >= recentStepThreshold {
-				continue
-			}
-			// Older state data (.kv, .v, .ef) → sparse
-			blackList[name] = struct{}{}
-		} else if isCaplinFile(name) {
-			// Caplin beacon block/blob .seg files → sparse (served on-demand)
-			blackList[name] = struct{}{}
+			continue
 		}
-		// Block-level .seg files (headers, bodies, transactions) are NOT blacklisted —
-		// they're always downloaded because the node needs them for sync and block boundary
-		// determination (SegmentsMax, IterateFrozenBodies, etc.)
+		// History .v files → sparse (only needed for eth_getBalance at old blocks)
+		if strings.HasPrefix(name, "history") {
+			blackList[name] = struct{}{}
+			continue
+		}
+		// Inverted index .ef files → sparse (only needed for eth_getLogs at old blocks)
+		if strings.HasPrefix(name, "idx/") && strings.HasSuffix(name, ".ef") {
+			blackList[name] = struct{}{}
+			continue
+		}
+		// Caplin .seg files → sparse (beacon blocks served on-demand)
+		if isCaplinFile(name) {
+			blackList[name] = struct{}{}
+			continue
+		}
+		// Block-level .seg files — always downloaded
 	}
 	return blackList
+}
+
+// parseDomainFile extracts the domain type and To step from a domain file name.
+// e.g. "domain/v1.1-accounts.0-2048.kv" → ("accounts", 2048, true)
+func parseDomainFile(name string) (domainType string, to uint64, ok bool) {
+	base := strings.TrimPrefix(name, "domain/")
+	base = strings.TrimSuffix(base, ".kv")
+
+	dashIdx := strings.Index(base, "-")
+	if dashIdx < 0 {
+		return "", 0, false
+	}
+	rest := base[dashIdx+1:]
+
+	dotIdx := strings.Index(rest, ".")
+	if dotIdx < 0 {
+		return "", 0, false
+	}
+	domainType = rest[:dotIdx]
+	stepRange := rest[dotIdx+1:]
+
+	rangeDash := strings.Index(stepRange, "-")
+	if rangeDash < 0 {
+		return "", 0, false
+	}
+	toStr := stepRange[rangeDash+1:]
+	var toVal uint64
+	for _, c := range toStr {
+		if c < '0' || c > '9' {
+			return "", 0, false
+		}
+		toVal = toVal*10 + uint64(c-'0')
+	}
+	return domainType, toVal, true
+}
+
+// SparseBlacklistEntries returns the preverified items that are blacklisted in
+// sparse mode. These entries need their torrent metadata loaded (but not data
+// downloaded) so they can be served on-demand via sparse decompressor.
+func SparseBlacklistEntries(preverified snapcfg.Preverified) []downloader.SparseEntry {
+	blackList := buildBlackListForSparse(preverified)
+	entries := make([]downloader.SparseEntry, 0, len(blackList))
+	for _, p := range preverified.Items {
+		if _, ok := blackList[p.Name]; ok {
+			entries = append(entries, downloader.SparseEntry{
+				Name: p.Name,
+				Hash: p.Hash,
+			})
+		}
+	}
+	return entries
+}
+
+// StepRange is a [StartStep, EndStep) range for a domain file.
+type StepRange struct {
+	StartStep uint64
+	EndStep   uint64
+}
+
+// SparseDomainStepRanges returns the unique step ranges from blacklisted domain
+// .kv files. These ranges are used to create dirtyFiles entries in the aggregator
+// so that openDirtyFiles can trigger the sparse fallback for on-demand access.
+func SparseDomainStepRanges(preverified snapcfg.Preverified) []StepRange {
+	blackList := buildBlackListForSparse(preverified)
+	// Debug: log all domain .kv items in preverified and blacklist status
+	for _, p := range preverified.Items {
+		if strings.HasPrefix(p.Name, "domain") && strings.HasSuffix(p.Name, ".kv") {
+			_, inBL := blackList[p.Name]
+			log.Info("[sparse] preverified domain .kv", "name", p.Name, "inBlacklist", inBL)
+		}
+	}
+	seen := make(map[[2]uint64]struct{})
+	var ranges []StepRange
+	for _, p := range preverified.Items {
+		if _, ok := blackList[p.Name]; !ok {
+			continue
+		}
+		if !strings.HasPrefix(p.Name, "domain") || !strings.HasSuffix(p.Name, ".kv") {
+			continue
+		}
+		from, to := parseDomainFileRange(p.Name)
+		if to == 0 {
+			continue
+		}
+		key := [2]uint64{from, to}
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		ranges = append(ranges, StepRange{StartStep: from, EndStep: to})
+	}
+	return ranges
+}
+
+// parseDomainFileRange extracts the From and To step from a domain file name.
+// e.g. "domain/v1.1-accounts.0-2048.kv" → (0, 2048)
+func parseDomainFileRange(name string) (from, to uint64) {
+	base := strings.TrimPrefix(name, "domain/")
+	base = strings.TrimSuffix(base, ".kv")
+
+	// Find first dot after the version-type prefix
+	dashIdx := strings.Index(base, "-")
+	if dashIdx < 0 {
+		return 0, 0
+	}
+	rest := base[dashIdx+1:] // "accounts.0-2048"
+
+	dotIdx := strings.Index(rest, ".")
+	if dotIdx < 0 {
+		return 0, 0
+	}
+	stepRange := rest[dotIdx+1:] // "0-2048"
+
+	rangeDash := strings.Index(stepRange, "-")
+	if rangeDash < 0 {
+		return 0, 0
+	}
+
+	fromStr := stepRange[:rangeDash]
+	toStr := stepRange[rangeDash+1:]
+
+	for _, c := range fromStr {
+		if c < '0' || c > '9' {
+			return 0, 0
+		}
+		from = from*10 + uint64(c-'0')
+	}
+	for _, c := range toStr {
+		if c < '0' || c > '9' {
+			return 0, 0
+		}
+		to = to*10 + uint64(c-'0')
+	}
+	return from, to
 }
 
 // isCaplinFile returns true for caplin-related snapshot files.
@@ -460,13 +601,7 @@ func SyncSnapshots(
 
 		// Sparse mode: blacklist data files that will be served on-demand from torrent
 		if prune.Sparse && !headerchain {
-			maxStateStep, err := getMaxStepRangeInSnapshots(preverifiedBlockSnapshots)
-			if err != nil {
-				return err
-			}
-			// Keep recent 64 steps of domain data local for execution
-			keepRecentSteps := uint64(64)
-			sparseBlackList := buildBlackListForSparse(keepRecentSteps, maxStateStep, preverifiedBlockSnapshots)
+			sparseBlackList := buildBlackListForSparse(preverifiedBlockSnapshots)
 			for k, v := range sparseBlackList {
 				blackListForPruning[k] = v
 			}

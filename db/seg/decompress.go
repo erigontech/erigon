@@ -1085,6 +1085,11 @@ func (g *Getter) nextPattern() []byte {
 }
 
 func (g *Getter) Size() int {
+	if g.sparse != nil {
+		// For sparse getters, g.data is a small window (8MB).
+		// Return the total word data size for offset comparisons.
+		return int(g.sparse.fileSize - int64(g.wordsStart))
+	}
 	return len(g.data)
 }
 
