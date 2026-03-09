@@ -127,8 +127,6 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7954_increase_max_contract_size/test_max_code_size_via_create.json`)                                               // gas limit too high: address 0x1AD9bc24818784172FF393bb6F89F094D4d2Ca29, gas limit 100000000
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7954_increase_max_contract_size/test_max_code_size_with_max_initcode.json`)                                        // gas limit too high: address 0x1AD9bc24818784172FF393bb6F89F094D4d2Ca29, gas limit 100000000
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7954_increase_max_contract_size/test_max_code_size_with_max_initcode_mainnet.json`)                                // gas used by execution: 102194, in header: 112704
-	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7954_increase_max_contract_size/test_max_initcode_size.json`)                                                      // max initcode size exceeded: code size 65536 limit 49152
-	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7954_increase_max_contract_size/test_max_initcode_size_gas_metering.json`)                                         // max initcode size exceeded: code size 65536 limit 49152
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7954_increase_max_contract_size/test_max_initcode_size_gas_metering_via_create.json`)                              // block access list mismatch
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7954_increase_max_contract_size/test_max_initcode_size_via_create.json`)                                           // gas used by execution: 16777216, in header: 676630
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7954_increase_max_contract_size/test_over_max_code_size_mainnet.json`)                                             // gas used by execution: 16777216, in header: 16645728
@@ -445,7 +443,6 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	bt.SkipLoad(`^for_amsterdam/prague/eip7702_set_code_tx/test_valid_tx_invalid_chain_id.json`)                                                                // gas used by execution: 72931, in header: 196058
 	bt.SkipLoad(`^for_amsterdam/shanghai/eip3651_warm_coinbase/`)                                                                                               // gas used by execution: 45846, in header: 37568
 	bt.SkipLoad(`^for_amsterdam/shanghai/eip3855_push0/`)                                                                                                       // gas used by execution: 67973, in header: 75136
-	bt.SkipLoad(`^for_amsterdam/shanghai/eip3860_initcode/test_contract_creating_tx.json`)                                                                      // max initcode size exceeded: code size 49153 limit 49152
 	bt.SkipLoad(`^for_amsterdam/shanghai/eip4895_withdrawals/test_balance_within_block.json`)                                                                   // gas used by execution: 46076, in header: 37568
 	bt.SkipLoad(`^for_amsterdam/shanghai/eip4895_withdrawals/test_newly_created_contract.json`)                                                                 // gas used by execution: 53279, in header: 132662
 	bt.SkipLoad(`^for_amsterdam/shanghai/eip4895_withdrawals/test_no_evm_execution.json`)                                                                       // gas used by execution: 86210, in header: 75136
