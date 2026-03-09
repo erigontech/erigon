@@ -56,11 +56,17 @@ runs:
       if: ${{ inputs.cleanup-space == 'true' && runner.os != 'Windows' }}
       shell: bash
       run: |
-        time rm -fr /opt/az \
-               /opt/microsoft \
-               /usr/share/dotnet \
-               /usr/share/miniconda \
-               /usr/share/swift
+        if [ "$(uname)" = "Linux" ]; then
+          time sudo rm -rf /usr/local/lib/android \
+                 /opt/az \
+                 /opt/microsoft \
+                 /usr/share/dotnet \
+                 /usr/share/miniconda \
+                 /usr/share/swift
+        elif [ "$(uname)" = "Darwin" ]; then
+          time rm -rf /Users/runner/Library/Android \
+                 /Users/runner/.dotnet
+        fi
         df -h
 
     - name: "Use D: drive for temp files on Windows"
