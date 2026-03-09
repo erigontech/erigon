@@ -227,6 +227,131 @@ func AnswerGetReceiptsQueryCacheOnly(ctx context.Context, receiptsGetter Receipt
 	}, needMore, nil
 }
 
+// AnswerGetReceiptsQueryCacheOnly70 is the eth/70 version that supports firstBlockReceiptIndex.
+func AnswerGetReceiptsQueryCacheOnly70(ctx context.Context, receiptsGetter ReceiptsGetter, query GetReceiptsPacket, firstBlockReceiptIndex uint64) (*CachedReceipts, bool, error) {
+	var (
+		numBytes     int
+		pendingIndex int
+		needMore     = true
+	)
+	receiptsList := make([]rlp.RawValue, 0, len(query))
+
+	for lookups, hash := range query {
+		if numBytes >= softResponseLimit || len(receiptsList) >= maxReceiptsServe ||
+			lookups >= 2*maxReceiptsServe {
+			needMore = false
+			break
+		}
+
+		receipts, ok := receiptsGetter.GetCachedReceipts(ctx, hash)
+		if !ok {
+			break
+		}
+
+		// For the first block, skip receipts before firstBlockReceiptIndex
+		if lookups == 0 && firstBlockReceiptIndex > 0 {
+			if int(firstBlockReceiptIndex) >= len(receipts) {
+				receipts = nil
+			} else {
+				receipts = receipts[firstBlockReceiptIndex:]
+			}
+		}
+
+		buf := &bytes.Buffer{}
+		if err := receipts.EncodeRLP69(buf); err != nil {
+			return nil, needMore, fmt.Errorf("failed to encode receipt: %w", err)
+		}
+		encoded := buf.Bytes()
+
+		receiptsList = append(receiptsList, encoded)
+		numBytes += len(encoded)
+		pendingIndex = lookups + 1
+	}
+	if pendingIndex == len(query) {
+		needMore = false
+	}
+	return &CachedReceipts{
+		EncodedReceipts: receiptsList,
+		Bytes:           numBytes,
+		PendingIndex:    pendingIndex,
+	}, needMore, nil
+}
+
+// AnswerGetReceiptsQuery70 is the eth/70 version that supports firstBlockReceiptIndex.
+func AnswerGetReceiptsQuery70(ctx context.Context, cfg *chain.Config, receiptsGetter ReceiptsGetter, br services.HeaderAndBodyReader, db kv.TemporalTx, query GetReceiptsPacket, firstBlockReceiptIndex uint64, cachedReceipts *CachedReceipts) ([]rlp.RawValue, error) {
+	var (
+		numBytes     int
+		receipts     []rlp.RawValue
+		pendingIndex int
+	)
+
+	if cachedReceipts != nil {
+		numBytes = cachedReceipts.Bytes
+		receipts = cachedReceipts.EncodedReceipts
+		pendingIndex = cachedReceipts.PendingIndex
+	}
+
+	for lookups := pendingIndex; lookups < len(query); lookups++ {
+		hash := query[lookups]
+		if numBytes >= softResponseLimit || len(receipts) >= maxReceiptsServe ||
+			lookups >= 2*maxReceiptsServe {
+			break
+		}
+		number, _ := br.HeaderNumber(context.Background(), db, hash)
+		if number == nil {
+			return nil, nil
+		}
+		b, _, err := br.BlockWithSenders(context.Background(), db, hash, *number)
+		if err != nil {
+			return nil, err
+		}
+		if b == nil {
+			return nil, nil
+		}
+
+		results, err := receiptsGetter.GetReceipts(ctx, cfg, db, b)
+		if err != nil {
+			return nil, err
+		}
+
+		if results == nil {
+			header, err := rawdb.ReadHeaderByHash(db, hash)
+			if err != nil {
+				return nil, err
+			}
+			if header == nil || header.ReceiptHash != empty.RootHash {
+				continue
+			}
+		}
+
+		// For the first block, skip receipts before firstBlockReceiptIndex
+		if lookups == 0 && firstBlockReceiptIndex > 0 && results != nil {
+			if int(firstBlockReceiptIndex) >= len(results) {
+				results = nil
+			} else {
+				results = results[firstBlockReceiptIndex:]
+			}
+		}
+
+		var encoded []byte
+		if results != nil {
+			buf := &bytes.Buffer{}
+			if err = results.EncodeRLP69(buf); err != nil {
+				return nil, fmt.Errorf("failed to encode receipt: %w", err)
+			}
+			encoded = buf.Bytes()
+		} else {
+			if encoded, err = rlp.EncodeToBytes(results); err != nil {
+				return nil, fmt.Errorf("failed to encode receipt: %w", err)
+			}
+		}
+
+		receipts = append(receipts, encoded)
+		numBytes += len(encoded)
+	}
+	return receipts, nil
+}
+
 func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGetter ReceiptsGetter, br services.HeaderAndBodyReader, db kv.TemporalTx, query GetReceiptsPacket, cachedReceipts *CachedReceipts, isEth69 bool) ([]rlp.RawValue, error) { //nolint:unparam
 	// Gather state data until the fetch or network limits is reached
 	var (
