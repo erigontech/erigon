@@ -20,7 +20,6 @@
 package runtime
 
 import (
-	"context"
 	"encoding/binary"
 	"fmt"
 	"math/big"
@@ -33,17 +32,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -111,8 +106,8 @@ func TestExecute(t *testing.T) {
 
 func TestCall(t *testing.T) {
 	t.Parallel()
-	db := testTemporalDB(t)
-	tx, domains := testTemporalTxSD(t, db)
+	db := testutil.TemporalDB(t)
+	tx, domains := testutil.TemporalTxSD(t, db)
 
 	state := state.New(state.NewReaderV3(domains.AsGetter(tx)))
 	address := accounts.InternAddress(common.HexToAddress("0xaa"))
@@ -134,22 +129,6 @@ func TestCall(t *testing.T) {
 	if num.Cmp(big.NewInt(10)) != 0 {
 		t.Error("Expected 10, got", num)
 	}
-}
-
-func testTemporalDB(t testing.TB) kv.TemporalRwDB {
-	return temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-}
-
-func testTemporalTxSD(t testing.TB, db kv.TemporalRwDB) (kv.TemporalRwTx, *execctx.SharedDomains) {
-	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
-	require.NoError(t, err)
-	t.Cleanup(tx.Rollback)
-
-	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
-	require.NoError(t, err)
-	t.Cleanup(sd.Close)
-
-	return tx, sd
 }
 
 func BenchmarkCall(b *testing.B) {
@@ -175,8 +154,8 @@ func BenchmarkCall(b *testing.B) {
 		b.Fatal(err)
 	}
 	cfg := &Config{ChainConfig: &chain.Config{}, BlockNumber: 0, Time: 0, Value: *uint256.MustFromBig(big.NewInt(13377))}
-	db := testTemporalDB(b)
-	tx, sd := testTemporalTxSD(b, db)
+	db := testutil.TemporalDB(b)
+	tx, sd := testutil.TemporalTxSD(b, db)
 	//cfg.w = state.NewWriter(execctx, nil)
 	cfg.State = state.New(state.NewReaderV3(sd.AsGetter(tx)))
 	//cfg.EVMConfig.JumpDestCache = vm.NewJumpDestCache(128)
@@ -193,8 +172,8 @@ func BenchmarkCall(b *testing.B) {
 }
 
 func benchmarkEVM_Create(b *testing.B, code string) {
-	db := testTemporalDB(b)
-	tx, domains := testTemporalTxSD(b, db)
+	db := testutil.TemporalDB(b)
+	tx, domains := testutil.TemporalTxSD(b, db)
 
 	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(b, err)
@@ -263,8 +242,8 @@ func BenchmarkEVM_RETURN(b *testing.B) {
 		return contract
 	}
 
-	db := testTemporalDB(b)
-	tx, domains := testTemporalTxSD(b, db)
+	db := testutil.TemporalDB(b)
+	tx, domains := testutil.TemporalTxSD(b, db)
 
 	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
 	contractAddr := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
@@ -441,8 +420,8 @@ func benchmarkNonModifyingCode(gas uint64, code []byte, name string, tracerCode 
 	b.Helper()
 	cfg := new(Config)
 	setDefaults(cfg)
-	db := testTemporalDB(b)
-	tx, domains := testTemporalTxSD(b, db)
+	db := testutil.TemporalDB(b)
+	tx, domains := testutil.TemporalTxSD(b, db)
 
 	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(b, err)
@@ -701,8 +680,8 @@ func BenchmarkEVM_SWAP1(b *testing.B) {
 		return contract
 	}
 
-	db := testTemporalDB(b)
-	tx, domains := testTemporalTxSD(b, db)
+	db := testutil.TemporalDB(b)
+	tx, domains := testutil.TemporalTxSD(b, db)
 	state := state.New(state.NewReaderV3(domains.AsGetter(tx)))
 	contractAddr := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
 

@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
@@ -131,11 +132,14 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		Coinbase:   coinbase,
 	}
 	header.Number.SetUint64(blockNumber)
+	if chainConfig.IsLondon(blockNumber) {
+		header.BaseFee = misc.CalcBaseFee(chainConfig, parent)
+	}
 
 	signer := types.MakeSigner(chainConfig, blockNumber, timestamp)
 	blockCtx := transactions.NewEVMBlockContext(engine, header, stateBlockNumberOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
 	rules := blockCtx.Rules(chainConfig)
-	firstMsg, err := txs[0].AsMessage(*signer, nil, rules)
+	firstMsg, err := txs[0].AsMessage(*signer, header.BaseFee, rules)
 	if err != nil {
 		return nil, err
 	}
@@ -177,12 +181,14 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 
 	results := make([]map[string]any, 0, len(txs))
 	for _, txn := range txs {
-		msg, err := txn.AsMessage(*signer, nil, rules)
-		msg.SetCheckNonce(false)
-		msg.SetCheckGas(false)
+		msg, err := txn.AsMessage(*signer, header.BaseFee, rules)
 		if err != nil {
 			return nil, err
 		}
+		msg.SetCheckNonce(false)
+		msg.SetCheckGas(false)
+		// Recreate EVM with the correct txCtx for this transaction
+		evm = vm.NewEVM(blockCtx, protocol.NewEVMTxContext(msg), ibs, chainConfig, vm.Config{})
 		// Execute the transaction message
 		result, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 		if err != nil {
@@ -191,6 +197,9 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		// If the timer caused an abort, return an appropriate error message
 		if evm.Cancelled() {
 			return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
+		}
+		if err = ibs.FinalizeTx(rules, state.NewNoopWriter()); err != nil {
+			return nil, err
 		}
 
 		txHash := txn.Hash().String()
