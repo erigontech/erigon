@@ -774,18 +774,28 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	if err != nil {
 		return err
 	}
-	sd.GetCommitmentCtx().SetHistoryStateReader(tx, toTxNum)
+	// For blockNum==0 there is no prior commitment state (GetAsOf at txNum=0
+	// falls back to latest for the commitment domain). Use commitmentAsOf=toTxNum
+	// so the trie is restored from the committed state at the end of block 0.
+	commitmentAsOf := minTxNum
+	if blockNum == 0 {
+		commitmentAsOf = toTxNum
+	}
+	// commitment branch data view: as of beginning of the block (or end for block 0)
+	// plain state data view: as of end of the block
+	splitStateReader := commitmentdb.NewSplitHistoryReader(tx, commitmentAsOf, toTxNum, true /* withHistory */)
+	sd.GetCommitmentCtx().SetStateReader(splitStateReader)
 	sd.GetCommitmentCtx().SetTrace(logger.Enabled(ctx, log.LvlTrace))
 	sd.GetCommitmentContext().SetDeferBranchUpdates(false)
 	latestTxNum, latestBlockNum, err := sd.SeekCommitment(ctx, tx) // seek commitment again with new history state reader
 	if err != nil {
 		return err
 	}
-	if latestBlockNum != blockNum {
-		return fmt.Errorf("commitment state blockNum doesn't match blockNum: %d != %d", latestBlockNum, blockNum)
+	if blockNum > 0 && latestBlockNum != blockNum-1 { // commitment domain reads branches at end of blockNum-1
+		return fmt.Errorf("commitment state blockNum doesn't match blockNum-1: %d != %d", latestBlockNum, blockNum-1)
 	}
-	if latestTxNum != maxTxNum {
-		return fmt.Errorf("commitment state txNum doesn't match maxTxNum: %d != %d", latestTxNum, maxTxNum)
+	if blockNum > 0 && latestTxNum != minTxNum-1 { // commitment state is read as of minTxNum-1
+		return fmt.Errorf("commitment state txNum doesn't match minTxNum-1: %d != %d", latestTxNum, minTxNum-1)
 	}
 	logger.Log(lvl, "commitment recalc info", "blockNum", blockNum, "minTxNum", minTxNum, "maxTxNum", maxTxNum, "toTxNum", toTxNum)
 	trace := logger.Enabled(ctx, log.LvlTrace)

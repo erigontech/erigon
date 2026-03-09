@@ -11,7 +11,6 @@ require (
 	github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116
 	github.com/erigontech/mdbx-go v0.39.12
 	github.com/erigontech/secp256k1 v1.2.1-0.20260218182123-377cc1bd6410
-	github.com/erigontech/silkworm-go v0.24.0
 )
 
 require (
