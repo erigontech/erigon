@@ -526,27 +526,34 @@ func KnownCfgOrDevnet(networkName string) *Cfg {
 	return cfg
 }
 
-var KnownWebseeds = map[string][]string{
-	networkname.Mainnet:    webseedsParse(webseed.Mainnet),
-	networkname.Sepolia:    webseedsParse(webseed.Sepolia),
-	networkname.Amoy:       webseedsParse(webseed.Amoy),
-	networkname.BorMainnet: webseedsParse(webseed.BorMainnet),
-	networkname.Gnosis:     webseedsParse(webseed.Gnosis),
-	networkname.Chiado:     webseedsParse(webseed.Chiado),
-	networkname.Hoodi:      webseedsParse(webseed.Hoodi),
-	networkname.Bloatnet:   webseedsParse(webseed.Bloatnet),
+// EmbeddedWebseedsRaw holds the unparsed embedded webseed TOML bytes per chain.
+var EmbeddedWebseedsRaw = map[string][]byte{
+	networkname.Mainnet:    webseed.Mainnet,
+	networkname.Sepolia:    webseed.Sepolia,
+	networkname.Amoy:       webseed.Amoy,
+	networkname.BorMainnet: webseed.BorMainnet,
+	networkname.Gnosis:     webseed.Gnosis,
+	networkname.Chiado:     webseed.Chiado,
+	networkname.Hoodi:      webseed.Hoodi,
+	networkname.Bloatnet:   webseed.Bloatnet,
 }
 
-func webseedsParse(in []byte) (res []string) {
+// GetEmbeddedWebseeds parses and returns the webseed URLs for a single chain.
+func GetEmbeddedWebseeds(chain string) ([]string, bool) {
+	raw, ok := EmbeddedWebseedsRaw[chain]
+	if !ok {
+		return nil, false
+	}
 	a := map[string]string{}
-	if err := toml.Unmarshal(in, &a); err != nil {
+	if err := toml.Unmarshal(raw, &a); err != nil {
 		panic(err)
 	}
+	res := make([]string, 0, len(a))
 	for _, l := range a {
 		res = append(res, l)
 	}
 	slices.Sort(res)
-	return res
+	return res, true
 }
 
 const RemotePreverifiedEnvKey = "ERIGON_REMOTE_PREVERIFIED"
@@ -647,17 +654,6 @@ func LoadRemotePreverified(ctx context.Context) (err error) {
 				return err
 			}
 		}
-	}
-
-	KnownWebseeds = map[string][]string{
-		networkname.Mainnet:    webseedsParse(webseed.Mainnet),
-		networkname.Sepolia:    webseedsParse(webseed.Sepolia),
-		networkname.Amoy:       webseedsParse(webseed.Amoy),
-		networkname.BorMainnet: webseedsParse(webseed.BorMainnet),
-		networkname.Gnosis:     webseedsParse(webseed.Gnosis),
-		networkname.Chiado:     webseedsParse(webseed.Chiado),
-		networkname.Hoodi:      webseedsParse(webseed.Hoodi),
-		networkname.Bloatnet:   webseedsParse(webseed.Bloatnet),
 	}
 
 	// Re-load the preverified hashes

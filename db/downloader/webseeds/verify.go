@@ -49,7 +49,7 @@ func Verify(
 		return
 	}
 	allPreverified := snapcfg.GetAllCurrentPreverified()
-	chains := selectChains(targetChain, snapcfg.KnownWebseeds)
+	chains := selectChains(targetChain, snapcfg.EmbeddedWebseedsRaw)
 	if len(chains) == 0 {
 		err = errors.New("no matching chains")
 		return
@@ -78,7 +78,7 @@ func Verify(
 	for _, chain := range chains {
 		// Shift left?
 		//
-		webseeds := g.MapMustGet(snapcfg.KnownWebseeds, chain)
+		webseeds, _ := snapcfg.GetEmbeddedWebseeds(chain)
 		var baseUrl string
 		err := errors.New("no valid webseeds")
 		for _, webseed := range webseeds {
