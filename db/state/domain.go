@@ -1214,7 +1214,7 @@ func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, va
 		}
 	}()
 
-	var keyPos, valPos uint64
+	var valPos uint64
 	for {
 		word := make([]byte, 0, 256)
 		if err := ctx.Err(); err != nil {
@@ -1222,6 +1222,8 @@ func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, va
 		}
 		g.Reset(0)
 		rs.SetProgress(p)
+
+		keyPos := uint64(0)
 		for g.HasNext() {
 			word, valPos = g.Next(word[:0])
 			if values {
