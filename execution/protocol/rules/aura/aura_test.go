@@ -195,6 +195,5 @@ func TestEmptySystemAccountCreation(t *testing.T) {
 	account, err := reader.ReadAccountData(params.SystemAddress)
 	require.NoError(err)
 	require.NotNil(account)
-	require.True(account.Balance.IsZero())
-	require.Equal(uint64(0), account.Nonce)
+	require.True(account.Empty())
 }
