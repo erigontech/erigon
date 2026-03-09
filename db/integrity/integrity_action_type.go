@@ -98,11 +98,6 @@ const (
 	// bidirectional correspondence rather than just reference validity.
 	StateVerify Check = "StateVerify"
 
-	// StateProgress verifies state files aren't ahead of block files. Checks that the
-	// commitment domain progress doesn't exceed the frozen block files progress.
-	// Prevents inconsistent states where state snapshots are more recent than block snapshots.
-	StateProgress Check = "StateProgress"
-
 	// Publishable validates snapshot publication readiness. Checks that all required snapshot
 	// files exist and are properly structured: block snapshots, state snapshots, beacon/caplin
 	// snapshots, and required metadata files (salt files). This is the final check before
@@ -111,7 +106,7 @@ const (
 )
 
 var FastChecks = []Check{
-	Blocks, HeaderNoGaps, BlocksTxnID, InvertedIndex, StateProgress, Publishable, HistoryNoSystemTxs,
+	Blocks, HeaderNoGaps, BlocksTxnID, InvertedIndex, Publishable, HistoryNoSystemTxs,
 	BorEvents, BorSpans, BorCheckpoints, ReceiptsNoDups, RCacheNoDups, CommitmentRoot,
 	CommitmentKvi,
 }
