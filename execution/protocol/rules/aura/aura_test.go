@@ -31,8 +31,10 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -149,15 +151,30 @@ func TestEmptySystemAccountCreation(t *testing.T) {
 	genesis := chainspec.ChiadoGenesisBlock()
 	ctx := context.Background()
 	logger := log.New()
+	dirs := datadir.New(t.TempDir())
 	db := testutil.TemporalDB(t)
 	tx, domains := testutil.TemporalTxSD(t, db)
-	config, genesisBlock, err := genesiswrite.WriteGenesisBlock(tx, genesis, nil, nil, false, datadir.New(t.TempDir()), logger)
+
+	// Replay genesis block the same way exec3 does (see txtask.go):
+	// GenesisToBlock populates an IntraBlockState with the alloc,
+	// then MakeWriteSet writes it into the real shared domains.
+	genesisBlock, genesisIbs, err := genesiswrite.GenesisToBlock(t, genesis, dirs, logger)
 	require.NoError(err)
+	domainWriter := state.NewWriter(domains.AsPutDel(tx), nil, 1)
+	err = genesisIbs.MakeWriteSet(&chain.Rules{}, domainWriter)
+	require.NoError(err)
+
+	// Write block headers so ChainReader can look up the genesis header.
+	err = genesiswrite.WriteGenesisBesideState(genesisBlock, tx, genesis)
+	require.NoError(err)
+
+	config := genesis.Config
+	blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap, logger), nil)
+	chainRdr := stagedsync.ChainReader{Cfg: config, Db: tx, BlockReader: blockReader}
 	engine := rulesconfig.CreateRulesEngineBareBones(ctx, config, logger)
 	time := uint64(1)
 	header := builder.MakeEmptyHeader(genesisBlock.Header(), config, time, nil)
-	chain := stagedsync.ChainReader{Cfg: config, Db: tx}
-	header.Difficulty = engine.CalcDifficulty(chain, time,
+	header.Difficulty = engine.CalcDifficulty(chainRdr, time,
 		0,
 		genesisBlock.Difficulty(),
 		genesisBlock.NumberU64(),
@@ -166,14 +183,18 @@ func TestEmptySystemAccountCreation(t *testing.T) {
 		genesisBlock.Header().AuRaStep,
 	)
 	header.GasLimit = 12500000
+
+	// Set up block 1 state the same way exec3 does for TxIndex == -1:
+	// engine.Initialize + FinalizeTx via InitializeBlockExecution.
 	rs := state.NewStateV3Buffered(state.NewStateV3(domains, ethconfig.Sync{}, logger))
 	reader := state.NewBufferedReader(rs, state.NewReaderV3(rs.Domains().AsGetter(tx)))
 	writer := state.NewBufferedWriter(rs, nil)
 	ibs := state.New(reader)
-	err = protocol.InitializeBlockExecution(engine, chain, header, config, ibs, writer, logger, nil)
+	err = protocol.InitializeBlockExecution(engine, chainRdr, header, config, ibs, writer, logger, nil)
 	require.NoError(err)
 	account, err := reader.ReadAccountData(params.SystemAddress)
 	require.NoError(err)
 	require.NotNil(account)
-	require.Equal(accounts.Account{}, account)
+	require.True(account.Balance.IsZero())
+	require.Equal(uint64(0), account.Nonce)
 }
