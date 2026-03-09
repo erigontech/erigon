@@ -235,6 +235,14 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						if !pe.isBlockProduction && !applyResult.isPartial && !execStage.CurrentSyncCycle.IsInitialCycle {
 							pe.cfg.notifications.RecentReceipts.Add(applyResult.Receipts, b.Transactions(), lastHeader)
 						}
+
+						if accumulator != nil && !pe.isBlockProduction {
+							txsRaw, rawErr := pe.cfg.blockReader.RawTransactions(ctx, rwTx, applyResult.BlockNum, applyResult.BlockNum)
+							if rawErr != nil {
+								return fmt.Errorf("RawTransactions for accumulator: %w", rawErr)
+							}
+							accumulator.StartChange(lastHeader, txsRaw, false)
+						}
 					}
 
 					if applyResult.BlockNum > lastBlockResult.BlockNum {
