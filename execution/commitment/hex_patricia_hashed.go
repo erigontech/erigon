@@ -1649,6 +1649,13 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 						// // DEBUG patch with cell hash which we know to be correct
 						//fmt.Printf("witness cell (%d, %0x, depth=%d) %s\n", row, currentNibble, hph.depths[row], cellToExpand.FullString())
 						//nextNode = trie.NewHashNode(cellToExpand.stateHash[:])
+					} else if cellToExpand.hashLen > 0 && len(hashedKey) != 64 && len(hashedKey) != 128 {
+						// Intermediate key (not account or full storage) landing on extension → branch:
+						// extension key should NOT have a terminator, Val is the branch hash.
+						nextNode = &trie.ShortNode{
+							Key: common.Copy(hashedExtKey),
+							Val: trie.NewHashNode(common.Copy(cellToExpand.hash[:cellToExpand.hashLen])),
+						}
 					}
 					if keyPos+1 == int16(len(hashedKey)) {
 						keyPos++

@@ -2592,4 +2592,80 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 			[][]byte{nonExistentAddr, targetAddr, fullStorageKey},
 			[]bool{false, true, true})
 	})
+
+	t.Run("IntermediateStorageTrieNodeProof_ExtensionToBranch", func(t *testing.T) {
+		// Test: request a proof for a 68-nibble hashed key (64 account + 4 storage nibbles)
+		// that lands on an extension node pointing to a branch node (cell.hashLen > 0).
+		//
+		// Storage trie structure:
+		//   depth 65 (storage root): branch with children at nibbles 3 and 5
+		//   under nibble 5: extension [6,a,b] → branch at depth 69
+		//   under nibble 3: leaf/branch for group B keys
+		//
+		// The 68-nibble key = account_hash(64) + [5,6,a,b] navigates into the
+		// storage trie and should land on the extension → branch.
+
+		ctx := context.Background()
+		ms := NewMockState(t)
+		hph := NewHexPatriciaHashed(length.Addr, ms)
+		hph.SetTrace(false)
+
+		targetAddr, _ := generateKeyWithHashedPrefix([]byte{0x5}, length.Addr)
+		otherAddr, _ := generateKeyWithHashedPrefix([]byte{0x9}, length.Addr)
+
+		// Storage group A: 3 keys sharing hash prefix [5,6,a,b] → extension under nibble 5
+		storageGroupA, storageGroupAHashes := generatePlainKeysWithSameHashPrefix(t, []byte{0x5, 0x6, 0xa, 0xb}, length.Hash, 4, 3)
+		// Storage group B: 2 keys with hash prefix [3] → ensures branch at storage root
+		storageGroupB, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x3}, length.Hash, 1, 2)
+
+		_ = storageGroupAHashes
+
+		builder := NewUpdateBuilder()
+		builder.Balance(common.Bytes2Hex(targetAddr), 100)
+		builder.Balance(common.Bytes2Hex(otherAddr), 200)
+
+		allStorageKeys := append(append([][]byte(nil), storageGroupA...), storageGroupB...)
+		for _, slot := range allStorageKeys {
+			builder.Storage(common.Bytes2Hex(targetAddr), common.Bytes2Hex(slot), common.Bytes2Hex(slot))
+		}
+
+		plainKeys, updates := builder.Build()
+		err := ms.applyPlainUpdates(plainKeys, updates)
+		require.NoError(t, err)
+
+		toProcess := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+		defer toProcess.Close()
+
+		root, err := hph.Process(ctx, toProcess, "", nil, WarmupConfig{})
+		require.NoError(t, err)
+
+		// Build the 68-nibble hashed key:
+		// account_hash (64 nibbles) + first 4 nibbles of storage path [5,6,a,b]
+		targetHashedAddr := KeyToNibblizedHash(targetAddr)
+		hashedKey68 := make([]byte, 68)
+		copy(hashedKey68[:64], targetHashedAddr)
+		copy(hashedKey68[64:], []byte{0x5, 0x6, 0xa, 0xb})
+
+		// Also witness the target account itself (will be processed before the 68-nibble key)
+		toWitness := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)
+		defer toWitness.Close()
+		toWitness.TouchPlainKey(string(targetAddr), nil, toProcess.TouchAccount)
+		toWitness.TouchHashedKey(hashedKey68)
+
+		// Also witness one full storage key to verify the trie is correct
+		fullStorageKey := append(common.Copy(targetAddr), storageGroupA[0]...)
+		toWitness.TouchPlainKey(string(fullStorageKey), nil, toProcess.TouchStorage)
+
+		witnessTrie, rootWitness, err := hph.GenerateWitness(ctx, toWitness, nil, "")
+		require.NoError(t, err)
+		require.NotNil(t, witnessTrie, "witness trie should not be nil")
+		require.NotNil(t, rootWitness, "root witness should not be nil")
+		require.Equal(t, root, rootWitness, "root witness should have the same root hash as trie")
+
+		// Verify the full storage key can be found in the witness trie
+		hashedFullStorageKey, err := CompactKey(KeyToHexNibbleHash(fullStorageKey))
+		require.NoError(t, err)
+		_, gotValue := witnessTrie.Get(hashedFullStorageKey)
+		require.True(t, gotValue, "storage value not found in witness trie for key %x", fullStorageKey)
+	})
 }
