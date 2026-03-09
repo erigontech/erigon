@@ -2541,6 +2541,57 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		keyExists := []bool{true, true, false}
 		buildTrieAndWitness(t, builder, keysToProve, keyExists)
 	})
+
+	t.Run("StorageProofAfterNonExistentAccountUnfoldsExtension", func(t *testing.T) {
+		// a non-existent account whose hash shares the same branch
+		// as an account with storage causes a partial extension unfold (cpl=0).
+		// This creates a stale grid row that isn't folded away because
+		// subsequent keys share the same prefix. When the storage key (128 nibbles)
+		// is then witnessed, toWitnessTrie() traverses past the extension into the
+		// stale row and reads the wrong cell, producing an incorrect witness.
+		//
+		// Hash order: nonExistent(370...) < target(37d...) < storage(37d...+storageHash)
+		// The stale row persists because all keys share prefix [37] → needFolding=false.
+
+		// Target account at hash prefix [3,7,d] — only account at nibble 7 at depth 2,
+		// creating a long extension (62 nibbles) from depth 2 to depth 64.
+		targetAddr, _ := generateKeyWithHashedPrefix([]byte{0x3, 0x7, 0xd}, length.Addr)
+
+		// Other accounts to create branches at depth 1 and depth 2
+		otherAddr35, _ := generateKeyWithHashedPrefix([]byte{0x3, 0x5}, length.Addr)
+		otherAddr5, _ := generateKeyWithHashedPrefix([]byte{0x5}, length.Addr)
+		otherAddr9, _ := generateKeyWithHashedPrefix([]byte{0x9}, length.Addr)
+
+		// Non-existent account at hash prefix [3,7,0] — diverges from target's
+		// extension at cpl=0 (nibble 0 ≠ d), causing unfold(1) which creates a stale
+		// grid row with 61-nibble extension. Hash 370... < 37d... so processed first.
+		nonExistentAddr, _ := generateKeyWithHashedPrefix([]byte{0x3, 0x7, 0x0}, length.Addr)
+
+		// Storage slot for target account
+		storageSlot := make([]byte, length.Hash)
+		storageSlot[31] = 0x01
+
+		builder := NewUpdateBuilder()
+		// builder.Balance(common.Bytes2Hex(nonExistentAddr), 666)
+		builder.Balance(common.Bytes2Hex(targetAddr), 100)
+		builder.Balance(common.Bytes2Hex(otherAddr35), 200)
+		builder.Balance(common.Bytes2Hex(otherAddr5), 300)
+		builder.Balance(common.Bytes2Hex(otherAddr9), 400)
+		builder.Storage(common.Bytes2Hex(targetAddr), common.Bytes2Hex(storageSlot), "0102030405")
+
+		// Full storage key = target address + storage slot (52 bytes)
+		fullStorageKey := common.Copy(targetAddr)
+		fullStorageKey = append(fullStorageKey, storageSlot...)
+		require.Equal(t, len(fullStorageKey), length.Addr+length.Hash)
+
+		// Witness keys (processed in hash order):
+		// 1. nonExistentAddr (370...) — partially unfolds target's extension, stale row left
+		// 2. targetAddr (37d...) — works fine (64-nibble key, loop exits before stale row)
+		// 3. fullStorageKey (37d...+storageHash) — 128-nibble key, affected by stale row of key 1. if it's not folded back
+		buildTrieAndWitness(t, builder,
+			[][]byte{nonExistentAddr, targetAddr, fullStorageKey},
+			[]bool{false, true, true})
+	})
 }
 
 // Test_HexPatriciaHashed_PhantomKeys verifies that TouchKey for keys that have
