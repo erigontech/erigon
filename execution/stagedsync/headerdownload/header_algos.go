@@ -18,14 +18,11 @@ package headerdownload
 
 import (
 	"bytes"
-	"compress/gzip"
 	"container/heap"
 	"context"
-	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"math/big"
 	"slices"
 	"strconv"
@@ -992,29 +989,6 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader servic
 	return td, nil
 }
 
-func (hi *HeaderInserter) FeedHeaderPoS(db kv.RwTx, header *types.Header, hash common.Hash) error {
-	blockHeight := header.Number.Uint64()
-	// TODO(yperbasis): do we need to check if the header is already inserted (oldH)?
-
-	parentTd, err := rawdb.ReadTd(db, header.ParentHash, blockHeight-1)
-	if err != nil || parentTd == nil {
-		return fmt.Errorf("[%s] parent's total difficulty not found with hash %x and height %d for header %x %d: %v", hi.logPrefix, header.ParentHash, blockHeight-1, hash, blockHeight, err)
-	}
-	td := new(big.Int).Add(parentTd, header.Difficulty.ToBig())
-	if err = rawdb.WriteHeader(db, header); err != nil {
-		return fmt.Errorf("[%s] failed to WriteHeader: %w", hi.logPrefix, err)
-	}
-	if err = rawdb.WriteTd(db, hash, blockHeight, td); err != nil {
-		return fmt.Errorf("[%s] failed to WriteTd: %w", hi.logPrefix, err)
-	}
-
-	hi.highest = blockHeight
-	hi.highestHash = hash
-	hi.highestTimestamp = header.Time
-
-	return nil
-}
-
 func (hi *HeaderInserter) GetLocalTd() *big.Int {
 	return hi.localTd
 }
@@ -1391,47 +1365,4 @@ func (hd *HeaderDownload) StartPoSDownloader(
 			timer.Stop()
 		}
 	}()
-}
-
-func DecodeTips(encodings []string) (map[common.Hash]HeaderRecord, error) {
-	hardTips := make(map[common.Hash]HeaderRecord, len(encodings))
-
-	var buf bytes.Buffer
-
-	for i, encoding := range encodings {
-		b, err := base64.RawStdEncoding.DecodeString(encoding)
-		if err != nil {
-			return nil, fmt.Errorf("decoding hard coded header on %d: %w", i, err)
-		}
-
-		if _, err = buf.Write(b); err != nil {
-			return nil, fmt.Errorf("gzip write string on %d: %w", i, err)
-		}
-
-		zr, err := gzip.NewReader(&buf)
-		if err != nil {
-			return nil, fmt.Errorf("gzip reader on %d: %w %q", i, err, encoding)
-		}
-
-		res, err := io.ReadAll(zr)
-		if err != nil {
-			return nil, fmt.Errorf("gzip copy on %d: %w %q", i, err, encoding)
-		}
-
-		if err := zr.Close(); err != nil {
-			return nil, fmt.Errorf("gzip close on %d: %w", i, err)
-		}
-
-		var h types.Header
-		if err := rlp.DecodeBytes(res, &h); err != nil {
-			return nil, fmt.Errorf("parsing hard coded header on %d: %w", i, err)
-		}
-
-		headerHash := types.RawRlpHash(res)
-		hardTips[headerHash] = HeaderRecord{Raw: b, Header: &h}
-
-		buf.Reset()
-	}
-
-	return hardTips, nil
 }
