@@ -1112,7 +1112,15 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 	// they are taken into account by subsequent transactions
 	allWrites := ibs.VersionedWrites(true)
 
-	vm.FlushVersionedWrites(allWrites, true, tracePrefix)
+	// When BAL is present, the VersionMap is pre-populated with all
+	// correct final values (including fees). Flushing here would modify
+	// the VersionMap while workers are concurrently reading it, causing
+	// false ErrDependency panics and cascading invalidations. Since BAL
+	// already provides the correct values for subsequent finalizations
+	// to read, the flush is unnecessary.
+	if !vm.HasBAL {
+		vm.FlushVersionedWrites(allWrites, true, tracePrefix)
+	}
 	vm.SetTrace(false)
 	ibs.FinalizeTx(rules, stateWriter)
 
@@ -1295,6 +1303,7 @@ type blockExecutor struct {
 	result      *blockResult
 	applyCount  int
 	exhausted   *ErrLoopExhausted
+	hasBAL      bool
 }
 
 func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, accessList types.BlockAccessList, applyResults chan applyResult, profile bool, exhausted *ErrLoopExhausted) *blockExecutor {
@@ -1312,6 +1321,7 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 		applyResults: applyResults,
 		gasPool:      gasPool,
 		exhausted:    exhausted,
+		hasBAL:       len(accessList) > 0,
 	}
 }
 
@@ -1418,7 +1428,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			for _, v := range prevWrites {
 				if _, ok := cmpMap[v.Address][state.AccountKey{Path: v.Path, Key: v.Key}]; !ok {
 					hasWriteChange = true
-					be.versionMap.Delete(v.Address, v.Path, v.Key, txVersion.TxIndex, true)
+					// With BAL, worker writes are never flushed to the VersionMap,
+					// so there is nothing to delete. Calling Delete with
+					// checkExists=true would panic on the missing entry.
+					if !be.hasBAL {
+						be.versionMap.Delete(v.Address, v.Path, v.Key, txVersion.TxIndex, true)
+					}
 				}
 			}
 
@@ -1497,7 +1512,13 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		valid := be.skipCheck[tx] || validity == state.VersionValid
 
 		be.versionMap.SetTrace(trace)
-		be.versionMap.FlushVersionedWrites(be.blockIO.WriteSet(txVersion.TxIndex), cntInvalid == 0, tracePrefix)
+		// When BAL is present, skip VersionMap flushes entirely — the
+		// BAL pre-populated values are immutable and correct. Flushing
+		// worker writes would modify the VersionMap while other workers
+		// are concurrently reading it, causing false dependency panics.
+		if !be.hasBAL {
+			be.versionMap.FlushVersionedWrites(be.blockIO.WriteSet(txVersion.TxIndex), cntInvalid == 0, tracePrefix)
+		}
 		be.versionMap.SetTrace(false)
 
 		if valid {
@@ -1555,8 +1576,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					// to the version map so that subsequent per-tx
 					// finalizations see the full post-tx state (execution
 					// + fees) when reading via the version map fallback
-					// chain.
-					be.versionMap.FlushVersionedWrites(merged, true, "")
+					// chain. Skip when BAL â values are already correct.
+					if !be.hasBAL {
+						be.versionMap.FlushVersionedWrites(merged, true, "")
+					}
 				}
 
 				stateUpdates := stateWriter.WriteSet()
