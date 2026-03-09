@@ -46,9 +46,10 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	// to run only tests for 1 eip do:
 	//bt.Whitelist(`.*amsterdam/eip8024_dupn_swapn_exchange.*`)
 
+	// only run tests for amsterdam, otherwise this takes too long
+	bt.Whitelist(`.*for_amsterdam/.*`)
 	// static — tested in state test format by TestState
 	bt.SkipLoad(`^for_amsterdam/static/state_tests/`)
-	bt.SkipLoad(`^prague/eip7702_set_code_tx/test_set_code_to_sstore_then_sload.json`)
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7928_block_level_access_lists/test_bal_invalid_`)                                                                  // BAL validation not yet implemented
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_contract_creation_tx.json`)                                                            // gas used by execution: 53064, in header: 131488
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_create_collision_no_log.json`)                                                         // gas used by execution: 197704, in header: 131488
