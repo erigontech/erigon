@@ -705,13 +705,17 @@ func (cs *MultiClient) getReceipts70Inner(ctx context.Context, inreq *sentryprot
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding getReceipts70: %w, data: %x", err, inreq.Data)
 	}
-	cachedReceipts, needMore, err := eth.AnswerGetReceiptsQueryCacheOnly70(ctx, cs.ethApiWrapper, query.GetReceiptsPacket, query.FirstBlockReceiptIndex)
+	cached, needMore, err := eth.AnswerGetReceiptsQueryCacheOnly70(ctx, cs.ethApiWrapper, query.GetReceiptsPacket, query.FirstBlockReceiptIndex)
 	if err != nil {
 		return err
 	}
-	var receiptsList []rlp.RawValue
-	if cachedReceipts != nil {
-		receiptsList = cachedReceipts.EncodedReceipts
+	var (
+		receiptsList        []rlp.RawValue
+		lastBlockIncomplete bool
+	)
+	if cached != nil {
+		receiptsList = cached.EncodedReceipts
+		lastBlockIncomplete = cached.LastBlockIncomplete
 	}
 	if needMore {
 		err = cs.getReceiptsActiveGoroutineNumber.Acquire(ctx, 1)
@@ -725,14 +729,18 @@ func (cs *MultiClient) getReceipts70Inner(ctx context.Context, inreq *sentryprot
 			return err
 		}
 		defer tx.Rollback()
-		receiptsList, err = eth.AnswerGetReceiptsQuery70(ctx, cs.ChainConfig, cs.ethApiWrapper, cs.blockReader, tx, query.GetReceiptsPacket, query.FirstBlockReceiptIndex, cachedReceipts)
+		receiptsList, lastBlockIncomplete, err = eth.AnswerGetReceiptsQuery70(ctx, cs.ChainConfig, cs.ethApiWrapper, cs.blockReader, tx, query.GetReceiptsPacket, query.FirstBlockReceiptIndex, cached)
 		if err != nil {
 			return err
 		}
 	}
+	var incomplete uint64
+	if lastBlockIncomplete {
+		incomplete = 1
+	}
 	b, err := rlp.EncodeToBytes(&eth.ReceiptsRLPPacket70{
 		RequestId:           query.RequestId,
-		LastBlockIncomplete: 0, // We always serve complete block receipt lists
+		LastBlockIncomplete: incomplete,
 		ReceiptsRLPPacket:   receiptsList,
 	})
 	if err != nil {
