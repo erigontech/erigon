@@ -140,7 +140,7 @@ func SpawnBuilderExecStage(ctx context0.Context, s *stagedsync.StageState, sd *e
 		BlockReader:     cfg.blockReader,
 		ExperimentalBAL: execCfg.IsExperimentalBAL(),
 	}, cfg.payloadId, current.ParentHeaderTime, current.Header, current.Uncles, current.Withdrawals)
-	ba.SetStateWriter(stateWriter, nil)
+	ba.SetStateWriter(stateWriter)
 
 	if ba.HasBAL() {
 		ibs.SetVersionMap(state.NewVersionMap(nil))
