@@ -192,51 +192,16 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	// Step 6: Store raw RLP bytes.
 	slot.Rlp = txBytes
 
-	// Step 7: Populate derived fields from the decoded transaction.
-	slot.Type = txn.Type()
+	// Step 7: Populate fields that are kept on TxnSlot.
 	slot.Nonce = txn.GetNonce()
-	if tipCap := txn.GetTipCap(); tipCap != nil {
-		slot.Tip.Set(tipCap)
-	}
-	if feeCap := txn.GetFeeCap(); feeCap != nil {
-		slot.FeeCap.Set(feeCap)
-	}
-	if value := txn.GetValue(); value != nil {
-		slot.Value.Set(value)
-	}
-	slot.Gas = txn.GetGasLimit()
-	if chainID := txn.GetChainID(); chainID != nil {
-		slot.ChainID.Set(chainID)
-	}
-	slot.Creation = txn.IsContractDeploy()
 
-	// Data metrics for intrinsic gas calculation.
+	// AA-specific fields.
 	if txn.Type() == types.AccountAbstractionTxType {
 		populateAAFields(slot, txn)
-	} else {
-		data := txn.GetData()
-		slot.DataLen = len(data)
-		slot.DataNonZeroLen = 0
-		for _, b := range data {
-			if b != 0 {
-				slot.DataNonZeroLen++
-			}
-		}
 	}
 
-	// Access list counts.
-	al := txn.GetAccessList()
-	slot.AccessListAddrCount = len(al)
-	slot.AccessListStorCount = al.StorageKeys()
-
-	// Blob-specific fields (EIP-4844).
-	slot.BlobHashes = txn.GetBlobHashes()
-	switch bt := txn.(type) {
-	case *types.BlobTxWrapper:
-		if bt.Tx.MaxFeePerBlobGas != nil {
-			slot.BlobFeeCap.Set(bt.Tx.MaxFeePerBlobGas)
-		}
-
+	// Blob-specific validation and bundle extraction (EIP-4844).
+	if bt, ok := txn.(*types.BlobTxWrapper); ok {
 		// Validate wrapper version (only 0 and 1 are defined).
 		if bt.WrapperVersion > 1 {
 			return 0, fmt.Errorf("%w: unsupported blob wrapper version %d", ErrParseTxn, bt.WrapperVersion)
@@ -276,10 +241,6 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 						goethkzg.KZGProof(bt.Proofs[i*proofsPerBlob+j]))
 				}
 			}
-		}
-	case *types.BlobTx:
-		if bt.MaxFeePerBlobGas != nil {
-			slot.BlobFeeCap.Set(bt.MaxFeePerBlobGas)
 		}
 	}
 
@@ -325,8 +286,6 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		}
 	}
 
-	slot.Size = uint32(len(slot.Rlp))
-
 	return p, nil
 }
 
@@ -353,19 +312,6 @@ func populateAAFields(slot *TxnSlot, txn types.Transaction) {
 	if aaTx.BuilderFee != nil {
 		slot.BuilderFee.Set(aaTx.BuilderFee)
 	}
-
-	// AA-specific data len calculation: combined deployer+paymaster+execution data
-	execData := make([]byte, 0, len(aaTx.DeployerData)+len(aaTx.PaymasterData)+len(aaTx.ExecutionData))
-	execData = append(execData, aaTx.DeployerData...)
-	execData = append(execData, aaTx.PaymasterData...)
-	execData = append(execData, aaTx.ExecutionData...)
-	slot.DataLen = len(execData)
-	slot.DataNonZeroLen = 0
-	for _, b := range execData {
-		if b != 0 {
-			slot.DataNonZeroLen++
-		}
-	}
 }
 
 type AuthAndNonce struct {
@@ -382,31 +328,15 @@ type PoolBlobBundle struct {
 // TxnSlot contains information extracted from an Ethereum transaction, which is enough to manage it inside the transaction.
 // Also, it contains some auxiliary information, like ephemeral fields, and indices within priority queues
 type TxnSlot struct {
-	Txn                 types.Transaction // The decoded standard transaction
-	Rlp                 []byte            // Is set to nil after flushing to db, frees memory, later we look for it in the db, if needed
-	Value               uint256.Int       // Value transferred by the transaction
-	Tip                 uint256.Int       // Maximum tip that transaction is giving to miner/block proposer
-	FeeCap              uint256.Int       // Maximum fee that transaction burns and gives to the miner/block proposer
-	SenderID            uint64            // SenderID - require external mapping to it's address
-	Nonce               uint64            // Nonce of the transaction
-	DataLen             int               // Length of transaction's data (for calculation of intrinsic gas)
-	DataNonZeroLen      int
-	AccessListAddrCount int      // Number of addresses in the access list
-	AccessListStorCount int      // Number of storage keys in the access list
-	Gas                 uint64   // Gas limit of the transaction
-	IDHash              [32]byte // Transaction hash for the purposes of using it as a transaction Id
-	Traced              bool     // Whether transaction needs to be traced throughout transaction pool code and generate debug printing
-	Creation            bool     // Set to true if "To" field of the transaction is not set
-	Type                byte     // Transaction type
-	Size                uint32   // Size of the payload (without the RLP string envelope for typed transactions)
-	ChainID             uint256.Int
+	Txn      types.Transaction // The decoded standard transaction
+	Rlp      []byte            // Is set to nil after flushing to db, frees memory, later we look for it in the db, if needed
+	SenderID uint64            // SenderID - require external mapping to it's address
+	Nonce    uint64            // Nonce of the transaction (kept as field for btree search sentinel)
+	IDHash   [32]byte          // Transaction hash for the purposes of using it as a transaction Id
+	Traced   bool              // Whether transaction needs to be traced throughout transaction pool code and generate debug printing
 
-	// EIP-4844: Shard Blob Transactions
-	BlobFeeCap  uint256.Int // max_fee_per_blob_gas
-	BlobHashes  []common.Hash
-	BlobBundles []PoolBlobBundle
-
-	AuthAndNonces []AuthAndNonce // Indexed authorization signers + nonces for EIP-7702 txns (type-4)
+	BlobBundles   []PoolBlobBundle // EIP-4844: extracted blob bundles from wrapper
+	AuthAndNonces []AuthAndNonce   // Indexed authorization signers + nonces for EIP-7702 txns (type-4)
 
 	// RIP-7560: account abstraction
 	SenderAddress, Paymaster, Deployer                               *common.Address
@@ -415,8 +345,145 @@ type TxnSlot struct {
 	NonceKey, BuilderFee                                             uint256.Int
 }
 
+// Accessor methods that delegate to the stored Transaction.
+// These handle nil Txn (used in btree search sentinels and test stubs).
+
+var _zeroUint256 uint256.Int
+
+func (tx *TxnSlot) TxType() byte {
+	if tx.Txn != nil {
+		return tx.Txn.Type()
+	}
+	return 0
+}
+
+func (tx *TxnSlot) GetTip() *uint256.Int {
+	if tx.Txn != nil {
+		if v := tx.Txn.GetTipCap(); v != nil {
+			return v
+		}
+	}
+	return &_zeroUint256
+}
+
+func (tx *TxnSlot) GetFeeCap() *uint256.Int {
+	if tx.Txn != nil {
+		if v := tx.Txn.GetFeeCap(); v != nil {
+			return v
+		}
+	}
+	return &_zeroUint256
+}
+
+func (tx *TxnSlot) GetValue() *uint256.Int {
+	if tx.Txn != nil {
+		if v := tx.Txn.GetValue(); v != nil {
+			return v
+		}
+	}
+	return &_zeroUint256
+}
+
+func (tx *TxnSlot) GetGas() uint64 {
+	if tx.Txn != nil {
+		return tx.Txn.GetGasLimit()
+	}
+	return 0
+}
+
+func (tx *TxnSlot) IsCreation() bool {
+	if tx.Txn != nil {
+		return tx.Txn.IsContractDeploy()
+	}
+	return false
+}
+
+func (tx *TxnSlot) GetChainID() *uint256.Int {
+	if tx.Txn != nil {
+		if v := tx.Txn.GetChainID(); v != nil {
+			return v
+		}
+	}
+	return &_zeroUint256
+}
+
+func (tx *TxnSlot) GetBlobFeeCap() *uint256.Int {
+	if tx.Txn != nil {
+		switch bt := tx.Txn.(type) {
+		case *types.BlobTxWrapper:
+			if bt.Tx.MaxFeePerBlobGas != nil {
+				return bt.Tx.MaxFeePerBlobGas
+			}
+		case *types.BlobTx:
+			if bt.MaxFeePerBlobGas != nil {
+				return bt.MaxFeePerBlobGas
+			}
+		}
+	}
+	return &_zeroUint256
+}
+
+func (tx *TxnSlot) GetBlobHashes() []common.Hash {
+	if tx.Txn != nil {
+		return tx.Txn.GetBlobHashes()
+	}
+	return nil
+}
+
+func (tx *TxnSlot) GetSize() uint32 { return uint32(len(tx.Rlp)) }
+
+func (tx *TxnSlot) GetDataLen() int {
+	if tx.Txn == nil {
+		return 0
+	}
+	if tx.Txn.Type() == types.AccountAbstractionTxType {
+		if aaTx, ok := tx.Txn.(*types.AccountAbstractionTransaction); ok {
+			return len(aaTx.DeployerData) + len(aaTx.PaymasterData) + len(aaTx.ExecutionData)
+		}
+	}
+	return len(tx.Txn.GetData())
+}
+
+func (tx *TxnSlot) GetDataNonZeroLen() int {
+	if tx.Txn == nil {
+		return 0
+	}
+	var data []byte
+	if tx.Txn.Type() == types.AccountAbstractionTxType {
+		if aaTx, ok := tx.Txn.(*types.AccountAbstractionTransaction); ok {
+			data = make([]byte, 0, len(aaTx.DeployerData)+len(aaTx.PaymasterData)+len(aaTx.ExecutionData))
+			data = append(data, aaTx.DeployerData...)
+			data = append(data, aaTx.PaymasterData...)
+			data = append(data, aaTx.ExecutionData...)
+		}
+	} else {
+		data = tx.Txn.GetData()
+	}
+	count := 0
+	for _, b := range data {
+		if b != 0 {
+			count++
+		}
+	}
+	return count
+}
+
+func (tx *TxnSlot) GetAccessListAddrCount() int {
+	if tx.Txn != nil {
+		return len(tx.Txn.GetAccessList())
+	}
+	return 0
+}
+
+func (tx *TxnSlot) GetAccessListStorCount() int {
+	if tx.Txn != nil {
+		return tx.Txn.GetAccessList().StorageKeys()
+	}
+	return 0
+}
+
 func (tx *TxnSlot) PrintDebug(prefix string) {
-	fmt.Printf("%s: senderID=%d,nonce=%d,tip=%d,v=%d\n", prefix, tx.SenderID, tx.Nonce, tx.Tip, tx.Value.Uint64())
+	fmt.Printf("%s: senderID=%d,nonce=%d,tip=%d,v=%d\n", prefix, tx.SenderID, tx.Nonce, tx.GetTip(), tx.GetValue().Uint64())
 }
 
 func (tx *TxnSlot) Blobs() [][]byte {
@@ -465,10 +532,10 @@ func (tx *TxnSlot) ToProtoAccountAbstractionTxn() *typesproto.AccountAbstraction
 
 	return &typesproto.AccountAbstractionTransaction{
 		Nonce:                       tx.Nonce,
-		ChainId:                     tx.ChainID.Bytes(),
-		Tip:                         tx.Tip.Bytes(),
-		FeeCap:                      tx.FeeCap.Bytes(),
-		Gas:                         tx.Gas,
+		ChainId:                     tx.GetChainID().Bytes(),
+		Tip:                         tx.GetTip().Bytes(),
+		FeeCap:                      tx.GetFeeCap().Bytes(),
+		Gas:                         tx.GetGas(),
 		SenderAddress:               tx.SenderAddress.Bytes(),
 		SenderValidationData:        tx.SenderValidationData,
 		ExecutionData:               tx.ExecutionData,

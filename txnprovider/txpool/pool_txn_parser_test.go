@@ -220,10 +220,10 @@ func TestBlobTxnParsing(t *testing.T) {
 	p, err := ctx.ParseTransaction(bodyEnvelope, 0, &thinTxn, nil, hasEnvelope, wrappedWithBlobs, nil)
 	require.NoError(t, err)
 	assert.Equal(t, len(bodyEnvelope), p)
-	assert.Equal(t, len(bodyEnvelope)-len(bodyEnvelopePrefix), int(thinTxn.Size))
+	assert.Equal(t, len(bodyEnvelope)-len(bodyEnvelopePrefix), int(thinTxn.GetSize()))
 	assert.Equal(t, bodyEnvelope[3:], thinTxn.Rlp)
-	assert.Equal(t, BlobTxnType, thinTxn.Type)
-	assert.Len(t, thinTxn.BlobHashes, 2)
+	assert.Equal(t, BlobTxnType, thinTxn.TxType())
+	assert.Len(t, thinTxn.GetBlobHashes(), 2)
 	assert.Empty(t, thinTxn.Blobs())
 	assert.Empty(t, thinTxn.Commitments())
 	assert.Empty(t, thinTxn.Proofs())
@@ -273,23 +273,23 @@ func TestBlobTxnParsing(t *testing.T) {
 	p, err = ctx.ParseTransaction(wrapperRlp, 0, &fatTxn, nil, hasEnvelope, wrappedWithBlobs, nil)
 	require.NoError(t, err)
 	assert.Equal(t, len(wrapperRlp), p)
-	assert.Equal(t, len(wrapperRlp), int(fatTxn.Size))
+	assert.Equal(t, len(wrapperRlp), int(fatTxn.GetSize()))
 	assert.Equal(t, wrapperRlp, fatTxn.Rlp)
-	assert.Equal(t, BlobTxnType, fatTxn.Type)
+	assert.Equal(t, BlobTxnType, fatTxn.TxType())
 
-	assert.Equal(t, thinTxn.Value, fatTxn.Value)
-	assert.Equal(t, thinTxn.Tip, fatTxn.Tip)
-	assert.Equal(t, thinTxn.FeeCap, fatTxn.FeeCap)
+	assert.Equal(t, thinTxn.GetValue(), fatTxn.GetValue())
+	assert.Equal(t, thinTxn.GetTip(), fatTxn.GetTip())
+	assert.Equal(t, thinTxn.GetFeeCap(), fatTxn.GetFeeCap())
 	assert.Equal(t, thinTxn.Nonce, fatTxn.Nonce)
-	assert.Equal(t, thinTxn.DataLen, fatTxn.DataLen)
-	assert.Equal(t, thinTxn.DataNonZeroLen, fatTxn.DataNonZeroLen)
-	assert.Equal(t, thinTxn.AccessListAddrCount, fatTxn.AccessListAddrCount)
-	assert.Equal(t, thinTxn.AccessListStorCount, fatTxn.AccessListStorCount)
-	assert.Equal(t, thinTxn.Gas, fatTxn.Gas)
+	assert.Equal(t, thinTxn.GetDataLen(), fatTxn.GetDataLen())
+	assert.Equal(t, thinTxn.GetDataNonZeroLen(), fatTxn.GetDataNonZeroLen())
+	assert.Equal(t, thinTxn.GetAccessListAddrCount(), fatTxn.GetAccessListAddrCount())
+	assert.Equal(t, thinTxn.GetAccessListStorCount(), fatTxn.GetAccessListStorCount())
+	assert.Equal(t, thinTxn.GetGas(), fatTxn.GetGas())
 	assert.Equal(t, thinTxn.IDHash, fatTxn.IDHash)
-	assert.Equal(t, thinTxn.Creation, fatTxn.Creation)
-	assert.Equal(t, thinTxn.BlobFeeCap, fatTxn.BlobFeeCap)
-	assert.Equal(t, thinTxn.BlobHashes, fatTxn.BlobHashes)
+	assert.Equal(t, thinTxn.IsCreation(), fatTxn.IsCreation())
+	assert.Equal(t, thinTxn.GetBlobFeeCap(), fatTxn.GetBlobFeeCap())
+	assert.Equal(t, thinTxn.GetBlobHashes(), fatTxn.GetBlobHashes())
 
 	require.Len(t, fatTxn.BlobBundles, 2)
 	require.NotEmpty(t, fatTxn.BlobBundles[0].Blob)
@@ -340,10 +340,10 @@ func TestWrapperV1BlobTxnParsing(t *testing.T) {
 	p, err := ctx.ParseTransaction(bodyEnvelope, 0, &thinTxn, nil, hasEnvelope, wrappedWithBlobs, nil)
 	require.NoError(t, err)
 	assert.Equal(t, len(bodyEnvelope), p)
-	assert.Equal(t, len(bodyEnvelope)-len(bodyEnvelopePrefix), int(thinTxn.Size))
+	assert.Equal(t, len(bodyEnvelope)-len(bodyEnvelopePrefix), int(thinTxn.GetSize()))
 	assert.Equal(t, bodyEnvelope[3:], thinTxn.Rlp)
-	assert.Equal(t, BlobTxnType, thinTxn.Type)
-	assert.Len(t, thinTxn.BlobHashes, 2)
+	assert.Equal(t, BlobTxnType, thinTxn.TxType())
+	assert.Len(t, thinTxn.GetBlobHashes(), 2)
 	assert.Empty(t, thinTxn.Blobs())
 	assert.Empty(t, thinTxn.Commitments())
 	assert.Empty(t, thinTxn.Proofs())
@@ -402,23 +402,23 @@ func TestWrapperV1BlobTxnParsing(t *testing.T) {
 	p, err = ctx.ParseTransaction(wrapperRlp, 0, &fatTxn, nil, hasEnvelope, wrappedWithBlobs, nil)
 	require.NoError(t, err)
 	assert.Equal(t, len(wrapperRlp), p)
-	assert.Equal(t, len(wrapperRlp), int(fatTxn.Size))
+	assert.Equal(t, len(wrapperRlp), int(fatTxn.GetSize()))
 	assert.Equal(t, wrapperRlp, fatTxn.Rlp)
-	assert.Equal(t, BlobTxnType, fatTxn.Type)
+	assert.Equal(t, BlobTxnType, fatTxn.TxType())
 
-	assert.Equal(t, thinTxn.Value, fatTxn.Value)
-	assert.Equal(t, thinTxn.Tip, fatTxn.Tip)
-	assert.Equal(t, thinTxn.FeeCap, fatTxn.FeeCap)
+	assert.Equal(t, thinTxn.GetValue(), fatTxn.GetValue())
+	assert.Equal(t, thinTxn.GetTip(), fatTxn.GetTip())
+	assert.Equal(t, thinTxn.GetFeeCap(), fatTxn.GetFeeCap())
 	assert.Equal(t, thinTxn.Nonce, fatTxn.Nonce)
-	assert.Equal(t, thinTxn.DataLen, fatTxn.DataLen)
-	assert.Equal(t, thinTxn.DataNonZeroLen, fatTxn.DataNonZeroLen)
-	assert.Equal(t, thinTxn.AccessListAddrCount, fatTxn.AccessListAddrCount)
-	assert.Equal(t, thinTxn.AccessListStorCount, fatTxn.AccessListStorCount)
-	assert.Equal(t, thinTxn.Gas, fatTxn.Gas)
+	assert.Equal(t, thinTxn.GetDataLen(), fatTxn.GetDataLen())
+	assert.Equal(t, thinTxn.GetDataNonZeroLen(), fatTxn.GetDataNonZeroLen())
+	assert.Equal(t, thinTxn.GetAccessListAddrCount(), fatTxn.GetAccessListAddrCount())
+	assert.Equal(t, thinTxn.GetAccessListStorCount(), fatTxn.GetAccessListStorCount())
+	assert.Equal(t, thinTxn.GetGas(), fatTxn.GetGas())
 	assert.Equal(t, thinTxn.IDHash, fatTxn.IDHash)
-	assert.Equal(t, thinTxn.Creation, fatTxn.Creation)
-	assert.Equal(t, thinTxn.BlobFeeCap, fatTxn.BlobFeeCap)
-	assert.Equal(t, thinTxn.BlobHashes, fatTxn.BlobHashes)
+	assert.Equal(t, thinTxn.IsCreation(), fatTxn.IsCreation())
+	assert.Equal(t, thinTxn.GetBlobFeeCap(), fatTxn.GetBlobFeeCap())
+	assert.Equal(t, thinTxn.GetBlobHashes(), fatTxn.GetBlobHashes())
 
 	require.Len(t, fatTxn.BlobBundles, 2)
 	require.NotEmpty(t, fatTxn.BlobBundles[0].Blob)
@@ -609,7 +609,7 @@ func TestSetCodeTxnParsing(t *testing.T) {
 	_, err = ctx.ParseTransaction(bodyRlx, 0, &txn, nil, hasEnvelope, false, nil)
 	require.NoError(t, err)
 	assert.Len(t, txn.AuthAndNonces, 2)
-	assert.Equal(t, SetCodeTxnType, txn.Type)
+	assert.Equal(t, SetCodeTxnType, txn.TxType())
 
 	// test empty authorizations
 	bodyRlxHex = "0x04f903420188db1b29114eba96ab887145908699cc1f3488987b96c0c55fced7886b85e4937b481442949a60a150fda306891ad7aff6d47584c8a0e1571788c5f7682286d452e0b9021164b57ad1f652639f5d44536f1b868437787082df48b3e2a684742d0eafcfda5336e7a958afb22ae57aad8e9a271528f9aa1f4a34e29491a8929732e22c04a438578b2b8510862572dd36b5304a9c3b6668b7c8f818be8411c07866ccb1fbe34586f80a1ace62753b918139acefc71f92d0c4679c0a56bb6c8ae38bc37a7ee8f348255c8ada95e842b52d4bd2b2447789a8543beda9f3bc8e27f28d51373ef9b1494c3d21adc6b0416444088ed08834eb5736d48566da000356bbcd7d78b118c39d15a56874fd254dcfcc172cd7a82e36621b964ebc54fdaa64de9e381b1545cfc7c4ea1cfccff829f0dfa395ef5f750b79689e5c8e3f6c7de9afe34d05f599dac8e3ae999f7acb32f788991425a7d8b36bf92a7dc14d913c3cc5854e580f48d507bf06018f3d012155791e1930791afccefe46f268b59e023ddacaf1e8278026a4c962f9b968f065e7c33d98d2aea49e8885ac77bfcc952e322c5e414cb5b4e7477829c0a4b8b0964fc28d202bca1b3bedca34f3fe12d62629b30a4764121440d0ea0f50f26579c486070d00309a44c14f6c3347c5d14b520eca8a399a1cd3c421f28ae5485e96b4c500a411754a78f558701d1a9788d22e6d2f02fefd1c45c2d427b518adda66a34432c3f94b4b3811e2d063dca2917f403033b0400e4e9dc3fd327b10a43a15229332596671d0392e501c39f43b23f814e95b093e981418091f9e2a32013ab8fa7a409d5636b52fded6f8d5f794de688ae4be9a54b20eb5366903223863de2bc895e1a0f5ecb3956919b8e9e9956c20c89b523e71c5803592c99871b7d5ee025e402941f89b94ae16863cc3bf6e6946f186d0f63d77343f81363ef884a0b09afe54c0376e3e3091473edb4e2bf43f08530356a2c9236bf373869b79c8d0a0ec2c57ca577173865f340a7cd13cf0051e52229722e3a529f851d4b74e315c8ca00bbe5f1a1ef2e5830d0c5cb8e93a05d4d29b4d7bf244ceea432888c4fbd5d5d5a0823b7ceaeba3a4cd70572c2ccc560d588ffeed638aec7c0cc364afa7dbf1c51cc0018818848492f65ca7bd88ea2017dc526fff7f"
@@ -625,7 +625,7 @@ func TestSetCodeTxnParsing(t *testing.T) {
 	_, err = ctx.ParseTransaction(bodyRlx, 0, &tx2, nil, hasEnvelope, false, nil)
 	require.NoError(t, err)
 	assert.Empty(t, tx2.AuthAndNonces)
-	assert.Equal(t, SetCodeTxnType, tx2.Type)
+	assert.Equal(t, SetCodeTxnType, tx2.TxType())
 
 	// generated using this in core/types/encdec_test.go
 	/*
@@ -783,4 +783,55 @@ var TxnParseMainnetTests = []parseTxnTest{
 		SenderStr: "4d8286232b1f058d8bdb1702d0f6a1e887ced385", IdHashStr: "bde66bd7925917db9e49e38a12ed0dcd6f9422f8db90de26d34a4523f8861d1e",
 		SignHashStr: "7f69febd06ddc1e72d9cd34524c82b3a8a116a02a10757be34cf536d6992d51c", Nonce: 499},
 	{PayloadStr: "01f84b01018080808080c080a0382d06e968cc18373209a2532b2c9df494c36475e479020730c918b1b6f73f6ba0084b433c82339de844e2531363f59fa64218e965016cc55069828d88959b58fe", Nonce: 1},
+}
+
+func BenchmarkParseTransaction(b *testing.B) {
+	// Collect all test payloads with their chain IDs.
+	type benchCase struct {
+		name    string
+		chainID uint256.Int
+		payload []byte
+	}
+	var cases []benchCase
+	for _, ts := range allNetsTestCases {
+		for i, tt := range ts.tests {
+			cases = append(cases, benchCase{
+				name:    fmt.Sprintf("chain%d_tx%d", ts.chainID.Uint64(), i),
+				chainID: ts.chainID,
+				payload: hexutil.MustDecodeHex(tt.PayloadStr),
+			})
+		}
+	}
+
+	b.Run("WithSender", func(b *testing.B) {
+		for _, bc := range cases {
+			b.Run(bc.name, func(b *testing.B) {
+				ctx := NewTxnParseContext(bc.chainID)
+				slot := &TxnSlot{}
+				sender := [20]byte{}
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					*slot = TxnSlot{}
+					_, _ = ctx.ParseTransaction(bc.payload, 0, slot, sender[:], false, true, nil)
+				}
+			})
+		}
+	})
+
+	b.Run("WithoutSender", func(b *testing.B) {
+		for _, bc := range cases {
+			b.Run(bc.name, func(b *testing.B) {
+				ctx := NewTxnParseContext(bc.chainID)
+				ctx.WithSender(false)
+				slot := &TxnSlot{}
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					*slot = TxnSlot{}
+					_, _ = ctx.ParseTransaction(bc.payload, 0, slot, nil, false, true, nil)
+				}
+			})
+		}
+	})
 }
