@@ -63,7 +63,7 @@ jobs:
         env:
           SKIP_FLAKY_TESTS: 'true'
         run: |
-          if ! make test-all; then
+          if ! make test-all GO_FLAGS='--timeout 20m'; then
             # Retry after clearing the Go build cache. Low disk space can cause
             # severe, non-obvious build/test failures that don't surface a clear
             # "no space left" message. Tuning a cache size limit is too fragile;
@@ -71,7 +71,7 @@ jobs:
             # handles the rest.
             echo "::notice::make test-all failed; clearing Go build cache and retrying"
             time go clean -cache
-            make test-all
+            make test-all GO_FLAGS='--timeout 20m'
           fi
 
       - name: Report uncached test packages
