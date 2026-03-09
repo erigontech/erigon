@@ -17,8 +17,6 @@
 package dataflow
 
 import (
-	"fmt"
-	"io"
 	"sync"
 
 	"github.com/google/btree"
@@ -108,27 +106,4 @@ func (s *States) makeSnapshot() {
 		}
 	}
 	s.idx = 0
-}
-
-func (s *States) ChangesSince(startTick int, w io.Writer) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	var startI int
-	var tick int
-	if startTick <= s.snapshotTick {
-		// Include snapshot
-		fmt.Fprintf(w, "snapshot %d\n", s.snapshotTick)
-		s.snapshot.Ascend(func(a SnapshotItem) bool {
-			fmt.Fprintf(w, "%d,%d\n", a.id, a.state)
-			return true
-		})
-		tick = s.snapshotTick + 1
-	} else {
-		startI = startTick - s.snapshotTick
-		tick = startTick
-	}
-	fmt.Fprintf(w, "changes %d\n", tick)
-	for i := startI; i < s.idx; i++ {
-		fmt.Fprintf(w, "%d,%d\n", s.ids[i], s.states[i])
-	}
 }

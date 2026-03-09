@@ -28,9 +28,9 @@ jobs:
 
       - name: Update and install required packages, run dpkg
         run: |
-          sudo apt-get update
-          sudo apt-get upgrade -y
-          sudo apt-get install -y dpkg-dev debhelper
+          sudo apt-get update -q
+          sudo apt-get upgrade -q -y
+          sudo apt-get install -q -y dpkg-dev debhelper
           sudo dpkg --clear-avail
 
       - name: Extract archives and rename amd64v2 to amd64

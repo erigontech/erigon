@@ -1109,14 +1109,6 @@ var readListPool = sync.Pool{
 	},
 }
 
-func newReadList() ReadLists {
-	v := readListPool.Get().(ReadLists)
-	for _, tbl := range v {
-		tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
-	}
-	return v
-	//return readListPool.Get().(map[string]*state.KvList)
-}
 func returnReadList(v ReadLists) {
 	if v == nil {
 		return
