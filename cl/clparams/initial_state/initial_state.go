@@ -53,6 +53,9 @@ var gnosisStateSSZ []byte
 //go:embed chiado.state.ssz
 var chiadoStateSSZ []byte
 
+//go:embed bloatnet.state.ssz
+var bloatnetStateSSZ []byte
+
 // Return genesis state
 func GetGenesisState(network clparams.NetworkType) (*state.CachingBeaconState, error) {
 	_, config := clparams.GetConfigsByNetwork(network)
@@ -84,6 +87,10 @@ func GetGenesisState(network clparams.NetworkType) (*state.CachingBeaconState, e
 		if err := returnState.DecodeSSZ(encodedState, int(clparams.DenebVersion)); err != nil {
 			return nil, err
 		}
+	case chainspec.BloatnetNetworkID:
+		if err := returnState.DecodeSSZ(bloatnetStateSSZ, int(clparams.DenebVersion)); err != nil {
+			return nil, err
+		}
 	default:
 		return nil, nil
 	}
@@ -95,5 +102,6 @@ func IsGenesisStateSupported(network clparams.NetworkType) bool {
 		network == chainspec.SepoliaChainID ||
 		network == chainspec.GnosisChainID ||
 		network == chainspec.ChiadoChainID ||
-		network == chainspec.HoodiChainID
+		network == chainspec.HoodiChainID ||
+		network == chainspec.BloatnetNetworkID
 }

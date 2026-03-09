@@ -325,6 +325,14 @@ func (c *SentryClientDirect) RemovePeer(ctx context.Context, in *sentryproto.Rem
 	return c.server.RemovePeer(ctx, in)
 }
 
+func (c *SentryClientDirect) AddTrustedPeer(ctx context.Context, in *sentryproto.AddPeerRequest, opts ...grpc.CallOption) (*sentryproto.AddPeerReply, error) {
+	return c.server.AddTrustedPeer(ctx, in)
+}
+
+func (c *SentryClientDirect) RemoveTrustedPeer(ctx context.Context, in *sentryproto.RemovePeerRequest, opts ...grpc.CallOption) (*sentryproto.RemovePeerReply, error) {
+	return c.server.RemoveTrustedPeer(ctx, in)
+}
+
 type peersReply struct {
 	r   *sentryproto.PeerEvent
 	err error

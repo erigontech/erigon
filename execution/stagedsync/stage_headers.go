@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/headerdownload"
 	"github.com/erigontech/erigon/execution/types"
@@ -74,19 +75,19 @@ func StageHeadersCfg(
 	}
 }
 
-func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg HeadersCfg, test bool, logger log.Logger) error {
+func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg HeadersCfg, logger log.Logger) error {
 	if s.CurrentSyncCycle.IsInitialCycle {
 		if err := cfg.hd.AddHeadersFromSnapshot(tx, cfg.blockReader); err != nil {
 			return err
 		}
 	}
 	cfg.hd.Progress()
-	return HeadersPOW(s, u, ctx, tx, cfg, test, logger)
+	return HeadersPOW(s, u, ctx, tx, cfg, logger)
 
 }
 
 // HeadersPOW progresses Headers stage for Proof-of-Work headers
-func HeadersPOW(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg HeadersCfg, test bool, logger log.Logger) error {
+func HeadersPOW(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg HeadersCfg, logger log.Logger) error {
 	var err error
 
 	startTime := time.Now()
@@ -137,12 +138,7 @@ func HeadersPOW(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg 
 	}*/
 
 	headerInserter := headerdownload.NewHeaderInserter(logPrefix, localTd, startProgress, cfg.blockReader)
-	cfg.hd.SetHeaderReader(&ChainReaderImpl{
-		config:      cfg.chainConfig,
-		tx:          tx,
-		blockReader: cfg.blockReader,
-		logger:      logger,
-	})
+	cfg.hd.SetHeaderReader(exec.NewChainReader(cfg.chainConfig, tx, cfg.blockReader, logger))
 
 	stopped := false
 	var noProgressCounter uint = 0
@@ -162,7 +158,7 @@ Loop:
 			if err := s.Update(tx, startProgress); err != nil {
 				return err
 			}
-			s.state.posTransition = &startProgress
+			s.State.posTransition = &startProgress
 			break
 		}
 
@@ -226,15 +222,6 @@ Loop:
 
 		loopBlockLimit := uint64(cfg.syncConfig.LoopBlockLimit)
 		if loopBlockLimit > 0 && cfg.hd.Progress() > startProgress+loopBlockLimit {
-			break
-		}
-
-		if test {
-			announces := cfg.hd.GrabAnnounces()
-			if len(announces) > 0 {
-				cfg.announceNewHashes(ctx, announces)
-			}
-
 			break
 		}
 
@@ -307,8 +294,8 @@ Loop:
 	}
 	// We do not print the following line if the stage was interrupted
 
-	if s.state.posTransition != nil {
-		logger.Info(fmt.Sprintf("[%s] Transitioned to POS", logPrefix), "block", *s.state.posTransition)
+	if s.State.posTransition != nil {
+		logger.Info(fmt.Sprintf("[%s] Transitioned to POS", logPrefix), "block", *s.State.posTransition)
 	} else {
 		headers := headerInserter.GetHighest() - startProgress
 		secs := time.Since(startTime).Seconds()
@@ -368,7 +355,7 @@ func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, h
 	return nil
 }
 
-func HeadersUnwind(ctx context.Context, u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, test bool) (err error) {
+func HeadersUnwind(ctx context.Context, u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg) (err error) {
 	u.UnwindPoint = max(u.UnwindPoint, cfg.blockReader.FrozenBlocks()) // protect from unwind behind files
 	// Delete canonical hashes that are being unwound
 	unwindBlock := (u.Reason.Block != nil)
@@ -409,40 +396,38 @@ func HeadersUnwind(ctx context.Context, u *UnwindState, s *StageState, tx kv.RwT
 		var maxHash common.Hash
 		var maxNum uint64 = 0
 
-		if test { // If we are not in the test, we can do searching for the heaviest chain in the next cycle
-			// Find header with biggest TD
-			tdCursor, cErr := tx.Cursor(kv.HeaderTD)
-			if cErr != nil {
-				return cErr
+		// Find header with biggest TD
+		tdCursor, cErr := tx.Cursor(kv.HeaderTD)
+		if cErr != nil {
+			return cErr
+		}
+		defer tdCursor.Close()
+		var k, v []byte
+		k, v, err = tdCursor.Last()
+		if err != nil {
+			return err
+		}
+		for ; err == nil && k != nil; k, v, err = tdCursor.Prev() {
+			if len(k) != 40 {
+				return fmt.Errorf("key in TD table has to be 40 bytes long: %x", k)
 			}
-			defer tdCursor.Close()
-			var k, v []byte
-			k, v, err = tdCursor.Last()
-			if err != nil {
+			var hash common.Hash
+			copy(hash[:], k[8:])
+			if cfg.hd.IsBadHeader(hash) {
+				continue
+			}
+			var td big.Int
+			if err = rlp.DecodeBytes(v, &td); err != nil {
 				return err
 			}
-			for ; err == nil && k != nil; k, v, err = tdCursor.Prev() {
-				if len(k) != 40 {
-					return fmt.Errorf("key in TD table has to be 40 bytes long: %x", k)
-				}
-				var hash common.Hash
-				copy(hash[:], k[8:])
-				if cfg.hd.IsBadHeader(hash) {
-					continue
-				}
-				var td big.Int
-				if err = rlp.DecodeBytes(v, &td); err != nil {
-					return err
-				}
-				if td.Cmp(&maxTd) > 0 {
-					maxTd.Set(&td)
-					copy(maxHash[:], k[8:])
-					maxNum = binary.BigEndian.Uint64(k[:8])
-				}
+			if td.Cmp(&maxTd) > 0 {
+				maxTd.Set(&td)
+				copy(maxHash[:], k[8:])
+				maxNum = binary.BigEndian.Uint64(k[:8])
 			}
-			if err != nil {
-				return err
-			}
+		}
+		if err != nil {
+			return err
 		}
 		/* TODO(yperbasis): Is it safe?
 		if err := rawdb.TruncateTd(tx, u.UnwindPoint+1); err != nil {
@@ -511,75 +496,4 @@ func logProgressHeaders(
 	})
 
 	return now
-}
-
-type ChainReaderImpl struct {
-	config      *chain.Config
-	tx          kv.Tx
-	blockReader services.FullBlockReader
-	logger      log.Logger
-}
-
-func NewChainReaderImpl(config *chain.Config, tx kv.Tx, blockReader services.FullBlockReader, logger log.Logger) *ChainReaderImpl {
-	return &ChainReaderImpl{config, tx, blockReader, logger}
-}
-
-func (cr ChainReaderImpl) Config() *chain.Config        { return cr.config }
-func (cr ChainReaderImpl) CurrentHeader() *types.Header { panic("") }
-func (cr ChainReaderImpl) CurrentFinalizedHeader() *types.Header {
-	hash := rawdb.ReadForkchoiceFinalized(cr.tx)
-	if hash == (common.Hash{}) {
-		return nil
-	}
-	return cr.GetHeaderByHash(hash)
-}
-func (cr ChainReaderImpl) CurrentSafeHeader() *types.Header {
-	hash := rawdb.ReadForkchoiceSafe(cr.tx)
-	if hash == (common.Hash{}) {
-		return nil
-	}
-
-	return cr.GetHeaderByHash(hash)
-}
-func (cr ChainReaderImpl) GetHeader(hash common.Hash, number uint64) *types.Header {
-	if cr.blockReader != nil {
-		h, _ := cr.blockReader.Header(context.Background(), cr.tx, hash, number)
-		return h
-	}
-	return rawdb.ReadHeader(cr.tx, hash, number)
-}
-func (cr ChainReaderImpl) GetHeaderByNumber(number uint64) *types.Header {
-	if cr.blockReader != nil {
-		h, _ := cr.blockReader.HeaderByNumber(context.Background(), cr.tx, number)
-		return h
-	}
-	return rawdb.ReadHeaderByNumber(cr.tx, number)
-}
-func (cr ChainReaderImpl) GetHeaderByHash(hash common.Hash) *types.Header {
-	if cr.blockReader != nil {
-		h, _ := cr.blockReader.HeaderByHash(context.Background(), cr.tx, hash)
-		return h
-	}
-	h, _ := rawdb.ReadHeaderByHash(cr.tx, hash)
-	return h
-}
-func (cr ChainReaderImpl) GetTd(hash common.Hash, number uint64) *big.Int {
-	td, err := rawdb.ReadTd(cr.tx, hash, number)
-	if err != nil {
-		cr.logger.Error("ReadTd failed", "err", err)
-		return nil
-	}
-	return td
-}
-func (cr ChainReaderImpl) FrozenBlocks() uint64 { return cr.blockReader.FrozenBlocks() }
-func (cr ChainReaderImpl) FrozenBorBlocks(align bool) uint64 {
-	return cr.blockReader.FrozenBorBlocks(align)
-}
-func (cr ChainReaderImpl) GetBlock(hash common.Hash, number uint64) *types.Block {
-	b, _, _ := cr.blockReader.BlockWithSenders(context.Background(), cr.tx, hash, number)
-	return b
-}
-func (cr ChainReaderImpl) HasBlock(hash common.Hash, number uint64) bool {
-	b, _ := cr.blockReader.BodyRlp(context.Background(), cr.tx, hash, number)
-	return b != nil
 }

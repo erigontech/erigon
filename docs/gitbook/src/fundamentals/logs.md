@@ -1,12 +1,15 @@
 ---
 description: Erigon's logging framework
+metaLinks:
+  alternates:
+    - https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/fundamentals/logs
 ---
 
 # Logs
 
 Erigon features a sophisticated logging framework that offers detailed visibility into the synchronization process and operational status. This system provides comprehensive, structured logs suitable for both human operators and automated monitoring, while maintaining high performance.
 
-The modular, staged approach to logging allows for granular control over verbosity, which is crucial for precise debugging and flexible deployment across various environments.&#x20;
+The modular, staged approach to logging allows for granular control over verbosity, which is crucial for precise debugging and flexible deployment across various environments.
 
 {% hint style="success" %}
 Erigon offers a `--metrics` flag for using prometheus/grafana monitoring, see [Creating a Dashboard](creating-a-dashboard.md).
@@ -23,7 +26,7 @@ Erigon implements a custom logging framework that supports structured logging wi
 Erigon provides extensive logging configuration through command-line flags. Key configuration options include:
 
 * `--log.json`: Enable JSON formatting for console logs
-* `--verbosity`: Set console log level (default: `2`)
+* `--verbosity`: Set console log level (default: `info`)
 * `--log.dir.path`: Specify directory for log files. By default Erigon writing logs to `datadir/logs` directory.
 * `--log.dir.verbosity`: Set file log level
 * `--log.delays`: Enable block delay logging

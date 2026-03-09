@@ -51,7 +51,7 @@ func (ip *IdentityPreimage) EncodeSSZ(dst []byte) ([]byte, error) {
 
 func (ip *IdentityPreimage) DecodeSSZ(buf []byte, _ int) error {
 	if len(buf) != identityPreimageSize {
-		return fmt.Errorf("%w: len=%d", ErrIncorrectIdentityPreimageSize, len(ip))
+		return fmt.Errorf("%w: len=%d", ErrIncorrectIdentityPreimageSize, len(buf))
 	}
 
 	copy(ip[:], buf)

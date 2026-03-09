@@ -24,6 +24,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/rpc"
@@ -63,11 +65,10 @@ func TestFeeHistory(t *testing.T) {
 		{false, 20, 2, 100, rpc.LatestBlockNumber, nil, 13, 20, nil},
 		{false, 20, 2, 100, rpc.LatestBlockNumber, []float64{0, 10}, 31, 2, nil},
 		{false, 20, 2, 100, 32, []float64{0, 10}, 31, 2, nil},
-		{false, 0, 0, 1, rpc.PendingBlockNumber, nil, 0, 0, nil},
-		{false, 0, 0, 2, rpc.PendingBlockNumber, nil, 32, 1, nil},
+		{false, 0, 0, 1, rpc.PendingBlockNumber, nil, 32, 1, nil},
+		{true, 0, 0, 2, rpc.PendingBlockNumber, nil, 31, 2, nil},
+		{true, 0, 0, 2, rpc.PendingBlockNumber, []float64{0, 10}, 31, 2, nil},
 		{false, 0, 0, 10, 30, overMaxQuery, 0, 0, gasprice.ErrInvalidPercentile},
-		//{true, 0, 0, 2, rpc.PendingBlockNumber, nil, 32, 2, nil},
-		//{true, 0, 0, 2, rpc.PendingBlockNumber, []float64{0, 10}, 32, 2, nil},
 	}
 	for i, c := range cases {
 		config := gaspricecfg.Config{
@@ -79,12 +80,13 @@ func TestFeeHistory(t *testing.T) {
 			m := newTestBackend(t) //, big.NewInt(16), c.pending)
 			defer m.Close()
 
-			baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewDummy(), m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil)
-			tx, _ := m.DB.BeginTemporalRo(m.Ctx)
+			baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewDummy(), m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0)
+			tx, err := m.DB.BeginTemporalRo(m.Ctx)
+			require.NoError(t, err)
 			defer tx.Rollback()
 
 			cache := jsonrpc.NewGasPriceCache()
-			oracle := gasprice.NewOracle(jsonrpc.NewGasPriceOracleBackend(tx, baseApi), config, cache, log.New())
+			oracle := gasprice.NewOracle(jsonrpc.NewGasPriceOracleBackend(m.DB, tx, baseApi), config, cache, gasprice.NewFeeHistoryCache(), log.New())
 
 			first, reward, baseFee, ratio, blobBaseFee, blobBaseFeeRatio, err := oracle.FeeHistory(context.Background(), c.count, c.last, c.percent)
 

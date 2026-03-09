@@ -298,11 +298,14 @@ func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates
 	switch updates.IsConcurrentCommitment() {
 	case true:
 		rootHash, err = updates.ParallelHashSort(ctx, p, warmup.CtxFactory)
+		if err != nil {
+			return nil, err
+		}
 	default:
 		rootHash, err = p.root.Process(ctx, updates, logPrefix, progress, warmup)
-	}
-	if err != nil {
-		return nil, err
+		if err != nil {
+			return nil, err
+		}
 	}
 	nextConcurrent, err := p.CanDoConcurrentNext()
 	if err != nil {
@@ -340,6 +343,10 @@ func (p *ConcurrentPatriciaHashed) Reset() {
 	for i := 0; i < len(p.mounts); i++ {
 		p.mounts[i].Reset()
 	}
+}
+
+func (p *ConcurrentPatriciaHashed) Release() {
+	p.root.Release()
 }
 
 // Set context for state IO

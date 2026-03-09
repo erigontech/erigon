@@ -10,7 +10,7 @@ import (
 func TestToJSONText(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    interface{}
+		input    any
 		expected string
 	}{
 		{
@@ -149,8 +149,8 @@ func TestMCPServerCreation(t *testing.T) {
 
 func TestJSONMarshaling(t *testing.T) {
 	// Test that our utility functions work with complex nested structures
-	complexData := map[string]interface{}{
-		"block": map[string]interface{}{
+	complexData := map[string]any{
+		"block": map[string]any{
 			"number":     12345,
 			"hash":       "0xabcdef",
 			"timestamp":  1234567890,
@@ -165,14 +165,14 @@ func TestJSONMarshaling(t *testing.T) {
 	result := toJSONText(complexData)
 
 	// Verify it's valid JSON
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	err := json.Unmarshal([]byte(result), &parsed)
 	if err != nil {
 		t.Errorf("toJSONText produced invalid JSON: %v", err)
 	}
 
 	// Verify structure is preserved
-	if block, ok := parsed["block"].(map[string]interface{}); ok {
+	if block, ok := parsed["block"].(map[string]any); ok {
 		if number, ok := block["number"].(float64); !ok || number != 12345 {
 			t.Errorf("Block number not preserved correctly")
 		}

@@ -17,8 +17,6 @@
 package evmtypes
 
 import (
-	"math/big"
-
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -46,10 +44,11 @@ type BlockContext struct {
 	MaxGasLimit bool             // Use GasLimit override for 2^256-1 (to be compatible with OpenEthereum's trace_call)
 	BlockNumber uint64           // Provides information for NUMBER
 	Time        uint64           // Provides information for TIME
-	Difficulty  *big.Int         // Provides information for DIFFICULTY
+	Difficulty  uint256.Int      // Provides information for DIFFICULTY
 	BaseFee     uint256.Int      // Provides information for BASEFEE
 	PrevRanDao  *common.Hash     // Provides information for PREVRANDAO
 	BlobBaseFee uint256.Int      // Provides information for BLOBBASEFEE
+	SlotNumber  uint64           // Provides information for SLOTNUM
 }
 
 // TxContext provides the EVM with information about a transaction.
@@ -66,7 +65,8 @@ type TxContext struct {
 // ExecutionResult includes all output after executing given evm
 // message no matter the execution itself is successful or not.
 type ExecutionResult struct {
-	GasUsed              uint64 // Total used gas but include the refunded gas
+	ReceiptGasUsed       uint64 // Gas used by the transaction with refunds (what the user pays) - see EIP-7778
+	BlockGasUsed         uint64 // Gas used for block limit accounting - see EIP-7778
 	Err                  error  // Any error encountered during the execution(listed in core/vm/errors.go)
 	Reverted             bool   // Whether the execution was aborted by `REVERT`
 	ReturnData           []byte // Returned data from evm(function result or data supplied with revert opcode)
@@ -75,6 +75,11 @@ type ExecutionResult struct {
 	FeeTipped            uint256.Int
 	FeeBurnt             uint256.Int
 	BurntContractAddress accounts.Address
+
+	// SelfDestructedWithBalance holds accounts that were selfdestructed during
+	// execution but received ETH after the SELFDESTRUCT opcode ran (EIP-7708).
+	// Captured before SoftFinalise clears the journal.
+	SelfDestructedWithBalance []AddressAndBalance
 }
 
 // Unwrap returns the internal evm error which allows us for further

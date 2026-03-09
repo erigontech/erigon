@@ -22,7 +22,6 @@ package vm
 import (
 	"errors"
 	"fmt"
-	"hash"
 	"slices"
 	"sync"
 
@@ -171,14 +170,6 @@ func (ctx *CallContext) Gas() uint64 {
 	return ctx.gas
 }
 
-// keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
-// Read to get a variable amount of data from the hash state. Read is faster than Sum
-// because it doesn't copy the internal state, but also modifies the internal state.
-type keccakState interface {
-	hash.Hash
-	Read([]byte) (int, error)
-}
-
 func copyJumpTable(jt *JumpTable) *JumpTable {
 	var copy JumpTable
 	for i, op := range jt {
@@ -320,10 +311,10 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 
 	for {
 		steps++
-		if steps%5000 == 0 && evm.Cancelled() {
+		if steps%50_000 == 0 && evm.Cancelled() {
 			break
 		}
-		if dbg.TraceDyanmicGas || debug || trace {
+		if dbg.TraceDynamicGas || debug || trace {
 			// Capture pre-execution values for tracing.
 			logged, pcCopy, gasCopy = false, pc, callContext.gas
 			blockNum, txIndex, txIncarnation = evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation()
@@ -369,11 +360,14 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 			var dynamicCost uint64
 			dynamicCost, err = operation.dynamicGas(evm, callContext, callContext.gas, memorySize)
 			if err != nil {
-				return nil, callContext.gas, fmt.Errorf("%w: %v", ErrOutOfGas, err)
+				if !errors.Is(err, ErrOutOfGas) {
+					err = fmt.Errorf("%w: %v", ErrOutOfGas, err)
+				}
+				return nil, callContext.gas, err
 			}
 			cost += dynamicCost // for tracing
 			callGas = operation.constantGas + dynamicCost - evm.CallGasTemp()
-			if dbg.TraceDyanmicGas && dynamicCost > 0 {
+			if dbg.TraceDynamicGas && dynamicCost > 0 {
 				fmt.Printf("%d (%d.%d) Dynamic Gas: %d (%s)\n", blockNum, txIndex, txIncarnation, traceGas(op, callGas, cost), op)
 			}
 

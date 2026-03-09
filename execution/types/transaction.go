@@ -28,7 +28,6 @@ import (
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
-	"github.com/protolambda/ztyp/codec"
 
 	"github.com/erigontech/erigon/common"
 	libcrypto "github.com/erigontech/erigon/common/crypto"
@@ -71,7 +70,7 @@ type Transaction interface {
 	GetBlobGas() uint64
 	GetValue() *uint256.Int
 	GetTo() *common.Address
-	AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error)
+	AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules) (*Message, error)
 	WithSignature(signer Signer, sig []byte) (Transaction, error)
 	Hash() common.Hash
 	SigningHash(chainID *big.Int) common.Hash
@@ -349,33 +348,6 @@ func (s Transactions) EncodeIndex(i int, w *bytes.Buffer) {
 // TransactionsGroupedBySender - lists of transactions grouped by sender
 type TransactionsGroupedBySender []Transactions
 
-// TxDifference returns a new set which is the difference between a and b.
-func TxDifference(a, b Transactions) Transactions {
-	keep := make(Transactions, 0, len(a))
-
-	remove := make(map[common.Hash]struct{})
-	for _, txn := range b {
-		remove[txn.Hash()] = struct{}{}
-	}
-
-	for _, txn := range a {
-		if _, ok := remove[txn.Hash()]; !ok {
-			keep = append(keep, txn)
-		}
-	}
-
-	return keep
-}
-
-// TxByNonce implements the sort interface to allow sorting a list of transactions
-// by their nonces. This is usually only useful for sorting transactions from a
-// single account, otherwise a nonce comparison doesn't make much sense.
-type TxByNonce Transactions
-
-func (s TxByNonce) Len() int           { return len(s) }
-func (s TxByNonce) Less(i, j int) bool { return s[i].GetNonce() < s[j].GetNonce() }
-func (s TxByNonce) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
-
 // Message is a fully derived transaction and implements core.Message
 type Message struct {
 	to               accounts.Address
@@ -486,12 +458,3 @@ func (m *Message) MaxFeePerBlobGas() *uint256.Int {
 }
 
 func (m *Message) BlobHashes() []common.Hash { return m.blobHashes }
-
-func DecodeSSZ(data []byte, dest codec.Deserializable) error {
-	err := dest.Deserialize(codec.NewDecodingReader(bytes.NewReader(data), uint64(len(data))))
-	return err
-}
-
-func EncodeSSZ(w io.Writer, obj codec.Serializable) error {
-	return obj.Serialize(codec.NewEncodingWriter(w))
-}

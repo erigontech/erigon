@@ -1,5 +1,9 @@
 ---
 description: Inspecting Unconfirmed Transactions in Erigon
+metaLinks:
+  alternates:
+    - >-
+      https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/interacting-with-erigon/interacting-with-erigon/txpool
 ---
 
 # txpool

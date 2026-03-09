@@ -2,6 +2,10 @@
 description: >-
   Securing Erigon Communication with TLS Authentication: A Step-by-Step OpenSSL
   Guide
+metaLinks:
+  alternates:
+    - >-
+      https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/fundamentals/tls-authentication
 ---
 
 # TLS Authentication

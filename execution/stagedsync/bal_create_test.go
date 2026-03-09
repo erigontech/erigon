@@ -8,6 +8,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -41,7 +42,7 @@ func TestCreateBALOrdering(t *testing.T) {
 
 	recordAll(io, readSets, writeSets)
 
-	bal := CreateBAL(1, io, "")
+	bal := io.AsBlockAccessList()
 
 	if len(bal) != 2 {
 		t.Fatalf("expected two accounts in BAL, got %d", len(bal))
@@ -80,12 +81,16 @@ func TestCreateBALOrdering(t *testing.T) {
 	}
 
 	slot1Changes := accountB.StorageChanges[0].Changes
-	if len(slot1Changes) != 1 || slot1Changes[0].Index != 2 || uint256.NewInt(0).SetBytes(slot1Changes[0].Value[:]).Uint64() != 5 {
-		t.Fatalf("unexpected slot1 change: %+v", slot1Changes)
+	if len(slot1Changes) != 1 || slot1Changes[0].Index != 2 || slot1Changes[0].Value.Uint64() != 5 {
+		changes := make([]types.StorageChange, len(slot1Changes))
+		for i, change := range slot1Changes {
+			changes[i] = *change
+		}
+		t.Fatalf("unexpected slot1 change: %+v", changes)
 	}
 
 	slot2Changes := accountB.StorageChanges[1].Changes
-	if len(slot2Changes) != 1 || slot2Changes[0].Index != 1 || uint256.NewInt(0).SetBytes(slot2Changes[0].Value[:]).Uint64() != 20 {
+	if len(slot2Changes) != 1 || slot2Changes[0].Index != 1 || slot2Changes[0].Value.Uint64() != 20 {
 		t.Fatalf("slot2 changes not deduplicated or unsorted: %+v", slot2Changes)
 	}
 }

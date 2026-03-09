@@ -59,6 +59,7 @@ type HttpCfg struct {
 
 	API                               []string
 	Gascap                            uint64
+	RangeLimit                        int
 	Feecap                            float64
 	MaxTraces                         uint64
 	WebsocketPort                     int
@@ -71,6 +72,7 @@ type HttpCfg struct {
 	RpcFiltersConfig                  rpchelper.FiltersConfig
 	DBReadConcurrency                 int
 	TraceCompatibility                bool // Bug for bug compatibility for trace_ routines with OpenEthereum
+	GethCompatibility                 bool // Geth-compatible storage iteration order for debug_storageRangeAt
 	TxPoolApiAddr                     string
 	StateCache                        kvcache.CoherentConfig
 	Snap                              ethconfig.BlocksFreezing
@@ -106,4 +108,10 @@ type HttpCfg struct {
 	OtsMaxPageSize uint64
 
 	RPCSlowLogThreshold time.Duration
+
+	RpcTxSyncDefaultTimeout time.Duration // Default timeout for eth_sendRawTransactionSync
+	RpcTxSyncMaxTimeout     time.Duration // Maximum timeout for eth_sendRawTransactionSync
+
+	// TestingEnabled enables the testing_ RPC namespace. Should only be used in test/dev environments.
+	TestingEnabled bool
 }

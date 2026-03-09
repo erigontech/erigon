@@ -1,5 +1,9 @@
 ---
 description: 'Quick Start: Running a Polygon Node with Erigon'
+metaLinks:
+  alternates:
+    - >-
+      https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/get-started/easy-nodes/how-to-run-a-polygon-node
 ---
 
 # How to run a Polygon node
@@ -75,4 +79,4 @@ Now you can relax and watch your Erigon Polygon node sync!
 
 {% include "../../.gitbook/includes/press-ctrl+c-in-the-termina....md" %}
 
-Additional flags can be added to [configure](../../fundamentals/configuring-erigon.md) Erigon with several options.
+Additional flags can be added to [configure](../../fundamentals/configuring-erigon/) Erigon with several options.

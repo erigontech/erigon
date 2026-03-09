@@ -15,22 +15,19 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/node/debug"
 )
 
 func stepRebase(cliCtx *cli.Context) error {
-	logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
-	if err != nil {
-		return err
-	}
+	logger := log.Root()
 
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
 	dirs := datadir.Open(cliCtx.String("datadir"))
-	settings, err := state.CreateOrReadErigonDBSettings(dirs, logger)
+	settings, err := state.ResolveErigonDBSettings(dirs, logger, true)
 	if err != nil {
 		return err
 	}
@@ -114,7 +111,11 @@ func stepRebase(cliCtx *cli.Context) error {
 	dels = append(dels, idxTorrents...)
 
 	// include whole chaindata directory for deletion
-	dels = append(dels, dirs.Chaindata)
+	dels = append(dels, dirs.Chaindata) //nolint:gocritic
+
+	// include erigondb.toml.torrent which is invalidated by the rebase
+	dels = append(dels, filepath.Join(dirs.Snap, "erigondb.toml.torrent"))
+
 	for _, f := range dels {
 		fmt.Printf("D: %s\n", f)
 	}

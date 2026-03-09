@@ -139,7 +139,7 @@ func InitMiner(
 		NetworkID: genesis.Config.ChainID.Uint64(),
 		TxPool:    txpoolcfg.DefaultConfig,
 		GPO:       ethconfig.Defaults.GPO,
-		Miner: buildercfg.MiningConfig{
+		Builder: buildercfg.BuilderConfig{
 			Etherbase:  crypto.PubkeyToAddress(privKey.PublicKey),
 			GasLimit:   &genesis.GasLimit,
 			EnabledPOS: true,
@@ -147,7 +147,6 @@ func InitMiner(
 		Sync:            ethconfig.Defaults.Sync,
 		Downloader:      downloaderConfig,
 		WithoutHeimdall: withoutHeimdall,
-		ImportMode:      ethconfig.Defaults.ImportMode,
 		RPCGasCap:       50000000,
 		RPCTxFeeCap:     1, // 1 ether
 		Snapshot:        ethconfig.BlocksFreezing{NoDownloader: true, ChainName: genesis.Config.ChainName},

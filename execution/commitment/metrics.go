@@ -77,7 +77,7 @@ func NewMetrics() *Metrics {
 	metrics := &Metrics{
 		Accounts:                 NewAccounts(),
 		Branches:                 NewBranches(),
-		collectCommitmentMetrics: true,
+		collectCommitmentMetrics: dbg.KVReadLevelledMetrics,
 	}
 	csvFilePathPrefix := dbg.EnvString("ERIGON_COMMITMENT_CSV_METRICS_FILE_PATH_PREFIX", "")
 	if csvFilePathPrefix != "" {

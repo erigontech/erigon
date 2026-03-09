@@ -19,14 +19,13 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
 	"fmt"
 	"io"
 	"math/big"
 	"math/rand"
 	"testing"
 	"time"
-
-	"crypto/ecdsa"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
@@ -44,26 +43,28 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
-	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 func TestEstimateGas(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mock.Mock(t))
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, execmoduletester.New(t))
 	mining := txpoolproto.NewMiningClient(conn)
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log)
-	api := NewEthAPI(NewBaseApi(ff, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, stateCache, m), m.DB, nil, nil)
 	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 	if _, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
@@ -75,13 +76,13 @@ func TestEstimateGas(t *testing.T) {
 }
 
 func TestEthCallNonCanonical(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(nil, stateCache, m), m.DB, nil, nil)
 	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 	blockNumberOrHash := rpc.BlockNumberOrHashWithHash(common.HexToHash("0x3fcb7c0d4569fddc89cbea54b42f163e0c789351d98810a513895ab44b47020b"), true)
-	var blockNumberOrHashRef *rpc.BlockNumberOrHash = &blockNumberOrHash
+	var blockNumberOrHashRef = &blockNumberOrHash
 
 	if _, err := api.Call(context.Background(), ethapi.CallArgs{
 		From: &from,
@@ -99,13 +100,13 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 
 	m, bankAddress, contractAddress, _ := chainWithDeployedContract(t)
 	doPrune(t, m.DB, pruneTo)
-	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 
 	callData := hexutil.MustDecode("0x2e64cec1")
 	callDataBytes := hexutil.Bytes(callData)
 
 	blockNumberOrHash := rpc.BlockNumberOrHashWithNumber(ethCallBlockNumber)
-	var blockNumberOrHashRef *rpc.BlockNumberOrHash = &blockNumberOrHash
+	var blockNumberOrHashRef = &blockNumberOrHash
 
 	if _, err := api.Call(context.Background(), ethapi.CallArgs{
 		From: &bankAddress,
@@ -120,7 +121,17 @@ func TestGetProof(t *testing.T) {
 	var maxGetProofRewindBlockCount = 1   // Note, this is unsafe for parallel tests, but, this test is the only consumer for now
 	statecfg.EnableHistoricalCommitment() // enable commitment history to test historical proofs
 	m, bankAddr, contractAddr, receiverAddress := chainWithDeployedContract(t)
-	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, maxGetProofRewindBlockCount, 128, log.New())
+	cfg := &EthApiConfig{
+		GasCap:                      5000000,
+		FeeCap:                      ethconfig.Defaults.RPCTxFeeCap,
+		ReturnDataLimit:             100_000,
+		AllowUnprotectedTxs:         false,
+		MaxGetProofRewindBlockCount: maxGetProofRewindBlockCount,
+		SubscribeLogsChannelSize:    128,
+		RpcTxSyncDefaultTimeout:     20 * time.Second,
+		RpcTxSyncMaxTimeout:         1 * time.Minute,
+	}
+	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, cfg, log.New())
 
 	key := func(b byte) hexutil.Bytes {
 		result := common.Hash{}
@@ -230,7 +241,7 @@ func TestGetProof(t *testing.T) {
 			tx, err := m.DB.BeginTemporalRo(context.Background())
 			require.NoError(t, err)
 			defer tx.Rollback()
-			header, err := api.headerByRPCNumber(context.Background(), rpc.BlockNumber(tt.blockNum), tx)
+			header, err := api.headerByNumber(context.Background(), rpc.BlockNumber(tt.blockNum), tx)
 			require.NoError(t, err)
 
 			require.Equal(t, tt.addr, proof.Address)
@@ -260,7 +271,7 @@ func TestGetProof(t *testing.T) {
 
 func TestGetBlockByTimestampLatestTime(t *testing.T) {
 	ctx := context.Background()
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	tx, err := m.DB.BeginTemporalRo(ctx)
 	if err != nil {
 		t.Errorf("fail at beginning tx")
@@ -295,7 +306,7 @@ func TestGetBlockByTimestampLatestTime(t *testing.T) {
 
 func TestGetBlockByTimestampOldestTime(t *testing.T) {
 	ctx := context.Background()
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	tx, err := m.DB.BeginTemporalRo(ctx)
 	if err != nil {
 		t.Errorf("failed at beginning tx")
@@ -333,7 +344,7 @@ func TestGetBlockByTimestampOldestTime(t *testing.T) {
 
 func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 	ctx := context.Background()
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	tx, err := m.DB.BeginTemporalRo(ctx)
 	if err != nil {
 		t.Errorf("fail at beginning tx")
@@ -369,7 +380,7 @@ func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 
 func TestGetBlockByTimeMiddle(t *testing.T) {
 	ctx := context.Background()
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	tx, err := m.DB.BeginTemporalRo(ctx)
 	if err != nil {
 		t.Errorf("fail at beginning tx")
@@ -416,7 +427,7 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 
 func TestGetBlockByTimestamp(t *testing.T) {
 	ctx := context.Background()
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	tx, err := m.DB.BeginTemporalRo(ctx)
 	if err != nil {
 		t.Errorf("fail at beginning tx")
@@ -546,7 +557,7 @@ func generatePseudoRandomECDSAKeyPairs(rand io.Reader, n int) ([]*ecdsa.PrivateK
 	return privateKeys, publicKeys, nil
 }
 
-func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, common.Address, common.Address, common.Address) {
+func chainWithDeployedContract(t *testing.T) (*execmoduletester.ExecModuleTester, common.Address, common.Address, common.Address) {
 	var (
 		seed            = int64(12345)
 		rng             = rand.New(rand.NewSource(seed)) // rng for filler accounts
@@ -568,7 +579,7 @@ func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, common.Address, 
 	_, fillerPublicKeys, err := generatePseudoRandomECDSAKeyPairs(rng, nFillerAccounts)
 	require.NoError(t, err)
 
-	m := mock.MockWithGenesis(t, gspec, bankKey, false)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(bankKey))
 	db := m.DB
 
 	var contractAddr common.Address
@@ -660,6 +671,7 @@ func doPrune(t *testing.T, db kv.RwDB, pruneTo uint64) {
 	//logger := testlog.Logger(t, log.LvlCrit)
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
+	defer tx.Rollback()
 
 	logEvery := time.NewTicker(20 * time.Second)
 

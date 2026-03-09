@@ -20,20 +20,23 @@
 package gasprice_test
 
 import (
+	"container/heap"
 	"context"
 	"math"
 	"math/big"
+	"math/rand"
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/gasprice"
 	"github.com/erigontech/erigon/rpc/gasprice/gaspricecfg"
@@ -41,7 +44,7 @@ import (
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
-func newTestBackend(t *testing.T) *mock.MockSentry {
+func newTestBackend(t *testing.T) *execmoduletester.ExecModuleTester {
 
 	var (
 		key, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -52,7 +55,7 @@ func newTestBackend(t *testing.T) *mock.MockSentry {
 		}
 		signer = types.LatestSigner(gspec.Config)
 	)
-	m := mock.MockWithGenesis(t, gspec, key, false)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
 	// Generate testing blocks
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 32, func(i int, b *blockgen.BlockGen) {
@@ -74,28 +77,189 @@ func newTestBackend(t *testing.T) *mock.MockSentry {
 }
 
 func TestSuggestPrice(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	config := gaspricecfg.Config{
 		Blocks:     2,
 		Percentile: 60,
-		Default:    big.NewInt(common.GWei),
+		Default:    uint256.NewInt(common.GWei),
 	}
 
 	m := newTestBackend(t) //, big.NewInt(16), c.pending)
-	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewDummy(), m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil)
+	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewDummy(), m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0)
 
-	tx, _ := m.DB.BeginTemporalRo(m.Ctx)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
 	defer tx.Rollback()
 
 	cache := jsonrpc.NewGasPriceCache()
-	oracle := gasprice.NewOracle(jsonrpc.NewGasPriceOracleBackend(tx, baseApi), config, cache, log.New())
+	oracle := gasprice.NewOracle(jsonrpc.NewGasPriceOracleBackend(nil, tx, baseApi), config, cache, nil, log.New())
 
 	// The gas price sampled is: 32G, 31G, 30G, 29G, 28G, 27G
 	got, err := oracle.SuggestTipCap(context.Background())
 	if err != nil {
 		t.Fatalf("Failed to retrieve recommended gas price: %v", err)
 	}
-	expect := big.NewInt(common.GWei * int64(30))
-	if got.Cmp(expect) != 0 {
+	expect := common.GWei * uint64(30)
+	if got.CmpUint64(expect) != 0 {
 		t.Fatalf("Gas price mismatch, want %d, got %d", expect, got)
+	}
+}
+
+const (
+	sliceSizeSmall = 20
+	sliceSizeLarge = 3600
+	percentile     = 60
+	iterations     = 20
+)
+
+func generateUint256Slice(n int) []*uint256.Int {
+	out := make([]*uint256.Int, n)
+	for i := 0; i < n; i++ {
+		out[i] = uint256.NewInt(uint64(rand.Int63()))
+	}
+	return out
+}
+
+func copyUint256Slice(src []*uint256.Int) []*uint256.Int {
+	dst := make([]*uint256.Int, len(src))
+	for i, v := range src {
+		dst[i] = new(uint256.Int).Set(v)
+	}
+	return dst
+}
+
+type sortingHeap []*uint256.Int
+
+func (s sortingHeap) Len() int           { return len(s) }
+func (s sortingHeap) Less(i, j int) bool { return s[i].Lt(s[j]) }
+func (s sortingHeap) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
+
+func (s *sortingHeap) Push(x any) {
+	*s = append(*s, x.(*uint256.Int))
+}
+
+func (s *sortingHeap) Pop() any {
+	old := *s
+	n := len(old)
+	x := old[n-1]
+	old[n-1] = nil
+	*s = old[:n-1]
+	return x
+}
+
+func heapPercentile(values []*uint256.Int, percentile int) *uint256.Int {
+	h := sortingHeap(values)
+	heap.Init(&h)
+	pos := (h.Len() - 1) * percentile / 100
+	for i := 0; i < pos; i++ {
+		heap.Pop(&h)
+	}
+	return h[0]
+}
+
+func partitionUint256(values []*uint256.Int, left, right int) int {
+	pivot := values[right]
+	i := left
+	for j := left; j < right; j++ {
+		if values[j].Lt(pivot) {
+			values[i], values[j] = values[j], values[i]
+			i++
+		}
+	}
+	values[i], values[right] = values[right], values[i]
+	return i
+}
+
+func findKthUint256(values []*uint256.Int, k int) *uint256.Int {
+	left, right := 0, len(values)-1
+	for left < right {
+		pivot := left + rand.Intn(right-left+1)
+		values[pivot], values[right] = values[right], values[pivot]
+		pos := partitionUint256(values, left, right)
+		if pos == k {
+			return values[k]
+		} else if pos < k {
+			left = pos + 1
+		} else {
+			right = pos - 1
+		}
+	}
+	return values[left]
+}
+
+func TestKthAlgorithmCorrectness(t *testing.T) {
+	for i := 0; i < iterations; i++ {
+		original := generateUint256Slice(sliceSizeSmall)
+
+		// Create independent copies
+		heapCopy := copyUint256Slice(original)
+		kthCopy := copyUint256Slice(original)
+
+		// Heap-based percentile (current Erigon behavior)
+		heapResult := heapPercentile(heapCopy, percentile)
+
+		// K-th / QuickSelect percentile (optimized behavior)
+		index := (len(kthCopy) - 1) * percentile / 100
+		kthResult := findKthUint256(kthCopy, index)
+
+		// Verify results match
+		if heapResult.Cmp(kthResult) != 0 {
+			t.Fatalf(
+				"Iteration %d: percentile mismatch\nheap=%s\nkth =%s",
+				i,
+				heapResult.String(),
+				kthResult.String(),
+			)
+		}
+	}
+}
+
+func BenchmarkHeapPercentile_N20(b *testing.B) {
+	testData := make([][]*uint256.Int, iterations)
+	for i := 0; i < iterations; i++ {
+		testData[i] = generateUint256Slice(sliceSizeSmall)
+	}
+
+	for b.Loop() {
+		for j := 0; j < iterations; j++ {
+			values := copyUint256Slice(testData[j])
+			_ = heapPercentile(values, percentile)
+		}
+	}
+}
+
+func BenchmarkKthPercentile_N20(b *testing.B) {
+	testData := make([][]*uint256.Int, iterations)
+	for i := 0; i < iterations; i++ {
+		testData[i] = generateUint256Slice(sliceSizeSmall)
+	}
+
+	for b.Loop() {
+		for j := 0; j < iterations; j++ {
+			values := copyUint256Slice(testData[j])
+			index := (len(values) - 1) * percentile / 100
+			_ = findKthUint256(values, index)
+		}
+	}
+}
+
+func BenchmarkHeapPercentile(b *testing.B) {
+	testData := generateUint256Slice(sliceSizeLarge)
+
+	for b.Loop() {
+		values := copyUint256Slice(testData)
+		_ = heapPercentile(values, percentile)
+	}
+}
+
+func BenchmarkKthPercentile(b *testing.B) {
+	testData := generateUint256Slice(sliceSizeLarge)
+
+	for b.Loop() {
+		values := copyUint256Slice(testData)
+		index := (len(values) - 1) * percentile / 100
+		_ = findKthUint256(values, index)
 	}
 }

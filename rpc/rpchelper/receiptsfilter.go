@@ -58,18 +58,30 @@ func NewReceiptsFilterAggregator() *ReceiptsFilterAggregator {
 	}
 }
 
-// insertReceiptsFilter inserts a new receipt filter with the specified sender
-func (a *ReceiptsFilterAggregator) insertReceiptsFilter(sender Sub[*remoteproto.SubscribeReceiptsReply]) (ReceiptsSubID, *ReceiptsFilter) {
-	a.receiptsFilterLock.Lock()
-	defer a.receiptsFilterLock.Unlock()
-
-	filterId := ReceiptsSubID(generateSubscriptionID())
+// insertReceiptsFilter creates a fully-configured filter, inserts it into the map,
+// and adds its counts to the aggregate, all under the write lock.
+func (a *ReceiptsFilterAggregator) insertReceiptsFilter(sender Sub[*remoteproto.SubscribeReceiptsReply], txHashes []common.Hash, maxTxHashes int) ReceiptsSubID {
 	filter := &ReceiptsFilter{
 		transactionHashes: concurrent.NewSyncMap[common.Hash, int](),
 		sender:            sender,
 	}
+	if len(txHashes) == 0 {
+		filter.allTxHashes = 1
+	} else {
+		for i, txHash := range txHashes {
+			if maxTxHashes > 0 && i >= maxTxHashes {
+				break
+			}
+			filter.transactionHashes.Put(txHash, 1)
+		}
+	}
+
+	a.receiptsFilterLock.Lock()
+	defer a.receiptsFilterLock.Unlock()
+	filterId := ReceiptsSubID(generateSubscriptionID())
 	a.receiptsFilters.Put(filterId, filter)
-	return filterId, filter
+	a.addReceiptsFilters(filter)
+	return filterId
 }
 
 // removeReceiptsFilter removes a receipt filter

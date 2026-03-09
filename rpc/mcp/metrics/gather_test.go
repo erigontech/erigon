@@ -115,7 +115,7 @@ func TestGatherMetrics(t *testing.T) {
 
 	// Check counter
 	if counterData, ok := metrics["test_mcp_gather_counter"]; ok {
-		counterMap := counterData.(map[string]interface{})
+		counterMap := counterData.(map[string]any)
 		if counterMap["type"] != "COUNTER" {
 			t.Errorf("Counter type = %v, want COUNTER", counterMap["type"])
 		}
@@ -125,7 +125,7 @@ func TestGatherMetrics(t *testing.T) {
 
 	// Check gauge
 	if gaugeData, ok := metrics["test_mcp_gather_gauge"]; ok {
-		gaugeMap := gaugeData.(map[string]interface{})
+		gaugeMap := gaugeData.(map[string]any)
 		if gaugeMap["type"] != "GAUGE" {
 			t.Errorf("Gauge type = %v, want GAUGE", gaugeMap["type"])
 		}

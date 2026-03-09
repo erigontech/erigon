@@ -235,17 +235,9 @@ func (nbp NewBlockPacket) EncodeRLP(w io.Writer) error {
 	blockLen := nbp.Block.EncodingSize()
 	encodingSize += rlp.ListPrefixLen(blockLen) + blockLen
 	// size of TD
-	encodingSize++
-	var tdBitLen, tdLen int
-	if nbp.TD != nil {
-		tdBitLen = nbp.TD.BitLen()
-		if tdBitLen >= 8 {
-			tdLen = common.BitLenToByteLen(tdBitLen)
-		}
-	}
-	encodingSize += tdLen
-	var b [33]byte
+	encodingSize += rlp.BigIntLen(nbp.TD)
 	// prefix
+	var b [32]byte
 	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
@@ -254,21 +246,8 @@ func (nbp NewBlockPacket) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	// encode TD
-	if tdBitLen < 8 {
-		if tdBitLen > 0 {
-			b[0] = byte(nbp.TD.Uint64())
-		} else {
-			b[0] = 128
-		}
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
-	} else {
-		b[0] = 128 + byte(tdLen)
-		nbp.TD.FillBytes(b[1 : 1+tdLen])
-		if _, err := w.Write(b[:1+tdLen]); err != nil {
-			return err
-		}
+	if err := rlp.EncodeBigInt(nbp.TD, w, b[:]); err != nil {
+		return err
 	}
 	return nil
 }

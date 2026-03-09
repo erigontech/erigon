@@ -184,6 +184,7 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 	//s.subManager.Start(s.ctx)
 
 	go s.listenForPeers()
+	go s.proactiveSubnetPeerSearch() // Proactively search for peers when subnet coverage is low
 	//go s.forkWatcher()
 	//go s.observeBandwidth(s.ctx)
 
@@ -242,8 +243,8 @@ func (s *Sentinel) GetPeersInfos() *sentinelproto.PeersInfoResponse {
 		} else {
 			entry.Direction = "inbound"
 		}
-		if enr, ok := s.pidToEnr.Load(p); ok {
-			entry.Enr = enr.(string)
+		if node, ok := s.pidToEnr.Load(p); ok {
+			entry.Enr = node.(*enode.Node).String()
 		} else {
 			entry.Enr = ""
 		}
@@ -273,21 +274,22 @@ func (s *Sentinel) Identity() (pid, enrStr string, p2pAddresses, discoveryAddres
 	}
 	discoveryAddresses = []string{}
 
-	if s.listener.LocalNode().Node().TCP() != 0 {
+	nodeIP := s.listener.LocalNode().Node().IP()
+	if nodeIP == nil {
+		s.logger.Warn("[Sentinel] Discovery node has nil IP address, skipping discovery address advertisement. Check caplin.discovery.addr configuration and host IPv6 setup")
+	} else {
 		protocol := "ip4"
-		if s.listener.LocalNode().Node().IP().To4() == nil {
+		if nodeIP.To4() == nil {
 			protocol = "ip6"
 		}
-		port := s.listener.LocalNode().Node().TCP()
-		discoveryAddresses = append(discoveryAddresses, fmt.Sprintf("/%s/%s/tcp/%d/p2p/%s", protocol, s.listener.LocalNode().Node().IP(), port, pid))
-	}
-	if s.listener.LocalNode().Node().UDP() != 0 {
-		protocol := "ip4"
-		if s.listener.LocalNode().Node().IP().To4() == nil {
-			protocol = "ip6"
+		if s.listener.LocalNode().Node().TCP() != 0 {
+			port := s.listener.LocalNode().Node().TCP()
+			discoveryAddresses = append(discoveryAddresses, fmt.Sprintf("/%s/%s/tcp/%d/p2p/%s", protocol, nodeIP, port, pid))
 		}
-		port := s.listener.LocalNode().Node().UDP()
-		discoveryAddresses = append(discoveryAddresses, fmt.Sprintf("/%s/%s/udp/%d/p2p/%s", protocol, s.listener.LocalNode().Node().IP(), port, pid))
+		if s.listener.LocalNode().Node().UDP() != 0 {
+			port := s.listener.LocalNode().Node().UDP()
+			discoveryAddresses = append(discoveryAddresses, fmt.Sprintf("/%s/%s/udp/%d/p2p/%s", protocol, nodeIP, port, pid))
+		}
 	}
 	subnetField := bitfield.NewBitvector64()
 	syncnetField := bitfield.NewBitvector8()

@@ -1,5 +1,9 @@
 ---
 description: Erigon Extensions for Block Explorer Functionality
+metaLinks:
+  alternates:
+    - >-
+      https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/interacting-with-erigon/interacting-with-erigon/ots
 ---
 
 # ots

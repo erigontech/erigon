@@ -343,8 +343,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 		Action:  remoteproto.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addrA),
 		Data:    v,
-	})
-	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
+	}, &remoteproto.AccountChange{
 		Action:  remoteproto.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addrB),
 		Data:    v,
@@ -862,6 +861,9 @@ func TestTxnPoke(t *testing.T) {
 }
 
 func TestShanghaiValidateTxn(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	asrt := assert.New(t)
 	tests := map[string]struct {
 		expected   txpoolcfg.DiscardReason
@@ -924,8 +926,8 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			t.Cleanup(cancel)
 			tx, err := coreDB.BeginTemporalRw(ctx)
-			defer tx.Rollback()
 			asrt.NoError(err)
+			defer tx.Rollback()
 			sd, err := execctx.NewSharedDomains(ctx, tx, logger)
 			asrt.NoError(err)
 			defer sd.Close()
@@ -936,7 +938,7 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			sndr := accounts3.Account{Nonce: 0, Balance: *uint256.NewInt(math.MaxUint64)}
 			sndrBytes := accounts3.SerialiseV3(&sndr)
 			txNum := uint64(0)
-			err = sd.DomainPut(kv.AccountsDomain, tx, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, sndrBytes, txNum, nil, 0)
+			err = sd.DomainPut(kv.AccountsDomain, tx, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, sndrBytes, txNum, nil)
 			asrt.NoError(err)
 
 			err = sd.Flush(ctx, tx)
@@ -1048,8 +1050,8 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	require.NoError(t, err)
 	pool.blockGasLimit.Store(30_000_000)
 	tx, err := coreDB.BeginTemporalRw(ctx)
-	defer tx.Rollback()
 	require.NoError(t, err)
+	defer tx.Rollback()
 	sd, err := execctx.NewSharedDomains(ctx, tx.(kv.TemporalTx), logger)
 	require.NoError(t, err)
 	defer sd.Close()
@@ -1057,7 +1059,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	sndr := accounts3.Account{Nonce: 0, Balance: *uint256.NewInt(math.MaxUint64)}
 	sndrBytes := accounts3.SerialiseV3(&sndr)
 	txNum := uint64(0)
-	err = sd.DomainPut(kv.AccountsDomain, tx, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, sndrBytes, txNum, nil, 0)
+	err = sd.DomainPut(kv.AccountsDomain, tx, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, sndrBytes, txNum, nil)
 	require.NoError(t, err)
 
 	err = sd.Flush(ctx, tx)
@@ -1086,6 +1088,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 
 // Blob gas price bump + other requirements to replace existing txns in the pool
 func TestBlobTxnReplacement(t *testing.T) {
+	t.Parallel()
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan Announcements, 5)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
@@ -1305,7 +1308,7 @@ func makeWrappedBlobTxnRlpWithCellProofs(t *testing.T, chainID *uint256.Int, blo
 		require.NoError(err)
 
 		copy(wrapper.Commitments[i][:], commitment[:])
-		for _, proof := range cellProofs {
+		for _, proof := range &cellProofs {
 			var proofBytes types.KZGProof
 			copy(proofBytes[:], proof[:])
 			wrapper.Proofs = append(wrapper.Proofs, proofBytes)
@@ -1444,6 +1447,9 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 }
 
 func TestBlobSlots(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan Announcements, 5)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
@@ -1527,6 +1533,9 @@ func TestBlobSlots(t *testing.T) {
 }
 
 func TestWrappedSixBlobTxnExceedsRlpLimit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	require := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -1805,4 +1814,287 @@ func BenchmarkProcessRemoteTxns(b *testing.B) {
 	// Log final pool statistics after processing all transactions
 	pending, baseFee, queued := pool.CountContent()
 	b.Logf("Final pool stats - pending: %d, baseFee: %d, queued: %d", pending, baseFee, queued)
+}
+
+// TestZombieQueuedEviction verifies that queued transactions whose nonce is so far ahead of
+// the sender's on-chain nonce that they can never become pending are evicted from the pool.
+// This covers Bug #2: "zombie" queued txns on Gnosis Chain (e.g. on-chain nonce=281 but
+// queued nonce=16814, a gap of 16,533 that can never be filled).
+func TestZombieQueuedEviction(t *testing.T) {
+	assert, require := assert.New(t), require.New(t)
+	ch := make(chan Announcements, 100)
+	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db := memdb.NewTestPoolDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	cfg := txpoolcfg.DefaultConfig
+	cfg.MaxNonceGap = 64 // explicit, same as default
+	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.TestChainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	require.NoError(err)
+	require.NotNil(pool)
+
+	pendingBaseFee := uint64(200_000)
+	h1 := gointerfaces.ConvertHashToH256([32]byte{})
+	var senderAddr [20]byte
+	senderAddr[0] = 0x42
+
+	// Set sender's on-chain nonce = 5
+	acc := accounts3.Account{
+		Nonce:       5,
+		Balance:     *uint256.NewInt(1 * common.Ether),
+		CodeHash:    accounts.EmptyCodeHash,
+		Incarnation: 0,
+	}
+	v := accounts3.SerialiseV3(&acc)
+	change := &remoteproto.StateChangeBatch{
+		StateVersionId:      0,
+		PendingBlockBaseFee: pendingBaseFee,
+		BlockGasLimit:       1_000_000,
+		ChangeBatch: []*remoteproto.StateChange{
+			{
+				BlockHeight: 0,
+				BlockHash:   h1,
+				Changes: []*remoteproto.AccountChange{
+					{
+						Action:  remoteproto.Action_UPSERT,
+						Address: gointerfaces.ConvertAddressToH160(senderAddr),
+						Data:    v,
+					},
+				},
+			},
+		},
+	}
+	require.NoError(pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+	t.Run("zombie tx with impossible nonce gap is evicted", func(t *testing.T) {
+		// nonce = 5 + 64 + 1 = 70, gap=65 > MaxNonceGap(64)
+		zombieNonce := uint64(5 + cfg.MaxNonceGap + 1)
+		var txnSlots TxnSlots
+		slot := &TxnSlot{
+			Tip:    *uint256.NewInt(300_000),
+			FeeCap: *uint256.NewInt(300_000),
+			Gas:    100_000,
+			Nonce:  zombieNonce,
+		}
+		slot.IDHash[0] = 0xAA
+		txnSlots.Append(slot, senderAddr[:], true)
+
+		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
+		require.NoError(err)
+		require.Len(reasons, 1)
+		assert.Equal(txpoolcfg.NonceTooDistant, reasons[0],
+			"zombie tx (nonce gap %d > MaxNonceGap %d) should be evicted with NonceTooDistant",
+			zombieNonce-5, cfg.MaxNonceGap)
+
+		_, _, queued := pool.CountContent()
+		assert.Equal(0, queued, "queued pool should be empty after zombie eviction")
+	})
+
+	t.Run("tx at exactly MaxNonceGap boundary is kept", func(t *testing.T) {
+		// nonce = 5 + 64 = 69, gap=64 == MaxNonceGap (NOT evicted)
+		boundaryNonce := uint64(5 + cfg.MaxNonceGap)
+		var txnSlots TxnSlots
+		slot := &TxnSlot{
+			Tip:    *uint256.NewInt(300_000),
+			FeeCap: *uint256.NewInt(300_000),
+			Gas:    100_000,
+			Nonce:  boundaryNonce,
+		}
+		slot.IDHash[0] = 0xBB
+		txnSlots.Append(slot, senderAddr[:], true)
+
+		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
+		require.NoError(err)
+		require.Len(reasons, 1)
+		// gap = boundaryNonce - noGapsNonce. noGapsNonce=5 (no consecutive txns).
+		// 64 is NOT > 64, so the tx should be kept (in queued due to nonce gap).
+		assert.Equal(txpoolcfg.Success, reasons[0],
+			"tx at exactly MaxNonceGap boundary (gap=%d) should be accepted", cfg.MaxNonceGap)
+	})
+
+	t.Run("consecutive txns beyond MaxNonceGap are kept", func(t *testing.T) {
+		// If there are consecutive txns 5, 6, 7, ..., 5+MaxNonceGap+5, they should all be kept
+		// because the gap from noGapsNonce is always 0 for consecutive txns.
+		var txnSlots TxnSlots
+		baseNonce := uint64(5)
+		// Clear the pool first by using a fresh pool
+		ch2 := make(chan Announcements, 100)
+		coreDB2 := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+		db2 := memdb.NewTestPoolDB(t)
+		cfg2 := txpoolcfg.DefaultConfig
+		cfg2.MaxNonceGap = 10 // small gap for this test
+		pool2, err := New(ctx, ch2, db2, coreDB2, cfg2, kvcache.New(kvcache.DefaultCoherentConfig),
+			chain.TestChainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+		require.NoError(err)
+
+		acc2 := accounts3.Account{
+			Nonce:    baseNonce,
+			Balance:  *uint256.NewInt(10 * common.Ether),
+			CodeHash: accounts.EmptyCodeHash,
+		}
+		v2 := accounts3.SerialiseV3(&acc2)
+		var addr2 [20]byte
+		addr2[0] = 0x99
+		change2 := &remoteproto.StateChangeBatch{
+			StateVersionId:      0,
+			PendingBlockBaseFee: pendingBaseFee,
+			BlockGasLimit:       1_000_000,
+			ChangeBatch: []*remoteproto.StateChange{
+				{
+					BlockHeight: 0,
+					BlockHash:   gointerfaces.ConvertHashToH256([32]byte{1}),
+					Changes: []*remoteproto.AccountChange{
+						{Action: remoteproto.Action_UPSERT, Address: gointerfaces.ConvertAddressToH160(addr2), Data: v2},
+					},
+				},
+			},
+		}
+		require.NoError(pool2.OnNewBlock(ctx, change2, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+		// Add consecutive txns: nonces 5, 6, 7, ..., 5+MaxNonceGap+5 = 20
+		count := int(cfg2.MaxNonceGap + 5 + 1)
+		for i := 0; i < count; i++ {
+			txnSlots.Txns = nil
+			txnSlots.Senders = txnSlots.Senders[:0]
+			txnSlots.IsLocal = txnSlots.IsLocal[:0]
+			slot := &TxnSlot{
+				Tip:    *uint256.NewInt(300_000),
+				FeeCap: *uint256.NewInt(300_000),
+				Gas:    100_000,
+				Nonce:  baseNonce + uint64(i),
+			}
+			slot.IDHash[0] = uint8(0xC0 + i)
+			txnSlots.Append(slot, addr2[:], true)
+			reasons, err := pool2.AddLocalTxns(ctx, txnSlots)
+			require.NoError(err)
+			assert.Equal(txpoolcfg.Success, reasons[0],
+				"consecutive tx nonce=%d should not be evicted (gap from noGapsNonce is 0)", baseNonce+uint64(i))
+		}
+		// All consecutive txns (no nonce gaps) should be accepted and promoted to pending.
+		// The key check is that NONE were evicted with NonceTooDistant — verified above per-tx.
+		pending2, _, queued2 := pool2.CountContent()
+		assert.Equal(0, queued2, "no consecutive txns should be zombie-evicted (queued should be drained to pending)")
+		assert.Equal(count, pending2, "all consecutive txns should be pending (no gaps, sufficient balance)")
+	})
+}
+
+// TestStalePendingEvictionViaMineNonce verifies that when the execution layer
+// correctly emits a state-diff UPSERT for an AuRa/Gnosis system-transaction
+// sender (fixed in exec3_serial.go by passing the accumulator to the block-end
+// stateWriter), the txpool evicts the now-stale pending transactions.
+//
+// Scenario:
+//  1. addr1 has two pending txns: T1 (nonce=0) and T2 (nonce=1).
+//  2. The block mines T1 from the pool AND an AuRa system tx at nonce=1,
+//     advancing the on-chain nonce to 2. Only T1 appears in minedTxns.
+//  3. The EL (after the exec3_serial.go fix) emits addr1 with nonce=2 in
+//     stateChanges. The pool receives this via OnNewBlock.
+//  4. removeMined removes T1; onSenderStateChange(nonce=2) evicts T2 (nonce=1).
+func TestStalePendingEvictionViaMineNonce(t *testing.T) {
+	asrt := assert.New(t)
+	req := require.New(t)
+	logger := log.New()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	ch := make(chan Announcements, 100)
+	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	cfg := txpoolcfg.DefaultConfig
+
+	// DummyCache reads directly from the DB — avoids coherence-version coupling.
+	pool, err := New(ctx, ch, nil, coreDB, cfg, kvcache.NewDummy(), chain.TestChainConfig, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
+	req.NoError(err)
+	req.NotNil(pool)
+
+	var addr1 [20]byte
+	addr1[0] = 1
+	h0 := gointerfaces.ConvertHashToH256([32]byte{})
+
+	// writeAccount writes addr1 to coreDB at the given nonce so that senders.info
+	// (which reads from the DB when using DummyCache) returns the expected value.
+	writeAccount := func(nonce, txNum uint64) {
+		tx, werr := coreDB.BeginTemporalRw(ctx)
+		req.NoError(werr)
+		defer tx.Rollback()
+		sd, werr := execctx.NewSharedDomains(ctx, tx, logger)
+		req.NoError(werr)
+		a := accounts3.Account{
+			Nonce: nonce, Balance: *uint256.NewInt(1 * common.Ether),
+			CodeHash: accounts.EmptyCodeHash, Incarnation: 1,
+		}
+		req.NoError(sd.DomainPut(kv.AccountsDomain, tx, addr1[:], accounts3.SerialiseV3(&a), txNum, nil))
+		req.NoError(sd.Flush(ctx, tx))
+		sd.Close()
+		req.NoError(tx.Commit())
+	}
+
+	serialiseAcc := func(nonce uint64) []byte {
+		a := accounts3.Account{
+			Nonce: nonce, Balance: *uint256.NewInt(1 * common.Ether),
+			CodeHash: accounts.EmptyCodeHash, Incarnation: 1,
+		}
+		return accounts3.SerialiseV3(&a)
+	}
+
+	// ── Step 1: write addr1 nonce=0 to DB and bootstrap pool ─────────────────
+	writeAccount(0, 0)
+	initChange := &remoteproto.StateChangeBatch{
+		StateVersionId: 0, PendingBlockBaseFee: 200_000, BlockGasLimit: 1_000_000,
+		ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 0, BlockHash: h0}},
+	}
+	initChange.ChangeBatch[0].Changes = append(initChange.ChangeBatch[0].Changes, &remoteproto.AccountChange{
+		Action:  remoteproto.Action_UPSERT,
+		Address: gointerfaces.ConvertAddressToH160(addr1),
+		Data:    serialiseAcc(0),
+	})
+	req.NoError(pool.OnNewBlock(ctx, initChange, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+	// ── Step 2: add T1 (nonce=0) and T2 (nonce=1) to pending ────────────────
+	T1 := &TxnSlot{Tip: *uint256.NewInt(300_000), FeeCap: *uint256.NewInt(300_000), Gas: 100_000, Nonce: 0}
+	T1.IDHash[0] = 1
+	T2 := &TxnSlot{Tip: *uint256.NewInt(300_000), FeeCap: *uint256.NewInt(300_000), Gas: 100_000, Nonce: 1}
+	T2.IDHash[0] = 2
+	var slots TxnSlots
+	slots.Append(T1, addr1[:], true)
+	slots.Append(T2, addr1[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, slots)
+	req.NoError(err)
+	for _, r := range reasons {
+		asrt.Equal(txpoolcfg.Success, r, r.String())
+	}
+	pending, _, _ := pool.CountContent()
+	asrt.Equal(2, pending, "both T1 and T2 should be in pending")
+
+	// ── Step 3: advance DB nonce to 2 (T1 mined + AuRa system tx at nonce=1) ─
+	writeAccount(2, 1)
+
+	// ── Step 4: OnNewBlock with the correct stateChanges from the fixed EL ───
+	// The exec3_serial.go fix ensures addr1 appears in stateChanges with
+	// nonce=2 because the block-end stateWriter now carries the accumulator.
+	h1 := gointerfaces.ConvertHashToH256([32]byte{1})
+	blockChange := &remoteproto.StateChangeBatch{
+		StateVersionId: 1, PendingBlockBaseFee: 200_000, BlockGasLimit: 1_000_000,
+		ChangeBatch: []*remoteproto.StateChange{{BlockHeight: 1, BlockHash: h1}},
+	}
+	blockChange.ChangeBatch[0].Changes = append(blockChange.ChangeBatch[0].Changes, &remoteproto.AccountChange{
+		Action:  remoteproto.Action_UPSERT,
+		Address: gointerfaces.ConvertAddressToH160(addr1),
+		Data:    serialiseAcc(2), // EL now correctly emits nonce=2
+	})
+
+	minedT1 := &TxnSlot{Tip: *uint256.NewInt(300_000), FeeCap: *uint256.NewInt(300_000), Gas: 100_000, Nonce: 0}
+	minedT1.IDHash[0] = 1
+	var minedSlots TxnSlots
+	minedSlots.Append(minedT1, addr1[:], true)
+
+	req.NoError(pool.OnNewBlock(ctx, blockChange, TxnSlots{}, TxnSlots{}, minedSlots))
+
+	// ── Step 5: T1 removed by removeMined; T2 evicted by onSenderStateChange ─
+	// senderNonce=2 (from DB) > T2.Nonce=1 → NonceTooLow.
+	pending, _, queued := pool.CountContent()
+	asrt.Equal(0, pending, "T2 must be evicted: on-chain nonce=2 > T2.nonce=1")
+	asrt.Equal(0, queued, "no queued txns expected")
 }

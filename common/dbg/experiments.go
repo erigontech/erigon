@@ -36,15 +36,18 @@ import (
 )
 
 var (
-	MaxReorgDepth = EnvUint("MAX_REORG_DEPTH", 512)
+	MaxReorgDepth = EnvUint("MAX_REORG_DEPTH", 96)
 
 	noMemstat            = EnvBool("NO_MEMSTAT", false)
 	saveHeapProfile      = EnvBool("SAVE_HEAP_PROFILE", false)
 	heapProfileFilePath  = EnvString("HEAP_PROFILE_FILE_PATH", "")
 	heapProfileThreshold = EnvUint("HEAP_PROFILE_THRESHOLD", 35)
 	heapProfileFrequency = EnvDuration("HEAP_PROFILE_FREQUENCY", 30*time.Second)
-	mdbxLockInRam        = EnvBool("MDBX_LOCK_IN_RAM", false)
 	StagesOnlyBlocks     = EnvBool("STAGES_ONLY_BLOCKS", false)
+
+	MdbxLockInRam    = EnvBool("MDBX_LOCK_IN_RAM", false)
+	MdbxNoSync       = EnvBool("MDBX_NO_FSYNC", false)
+	MdbxNoSyncUnsafe = EnvBool("MDBX_NO_FSYNC_UNSAFE", false)
 
 	stopBeforeStage = EnvString("STOP_BEFORE_STAGE", "")
 	stopAfterStage  = EnvString("STOP_AFTER_STAGE", "")
@@ -53,7 +56,9 @@ var (
 
 	//state v3
 	noPrune              = EnvBool("NO_PRUNE", false)
-	noMerge              = EnvBool("NO_MERGE", false)
+	noMerge              = EnvBool("NO_MERGE", false)              // don't merge Domain/Hist/II
+	noMergeHistory       = EnvBool("NO_MERGE_HISTORY", false)      // don't merge Hist/II but still merge Domain
+	noDeepMergeHistory   = EnvBool("NO_DEEP_MERGE_HISTORY", false) // merge Hist/II only up to 2 steps (small+fast), skip larger merges
 	discardCommitment    = EnvBool("DISCARD_COMMITMENT", false)
 	pruneTotalDifficulty = EnvBool("PRUNE_TOTAL_DIFFICULTY", true)
 
@@ -72,28 +77,34 @@ var (
 
 	CaplinSyncedDataMangerDeadlockDetection = EnvBool("CAPLIN_SYNCED_DATA_MANAGER_DEADLOCK_DETECTION", false)
 
-	Exec3Parallel = EnvBool("EXEC3_PARALLEL", false)
-	numWorkers    = runtime.NumCPU() / 2
-	Exec3Workers  = EnvInt("EXEC3_WORKERS", numWorkers)
+	Exec3Parallel        = EnvBool("EXEC3_PARALLEL", false)
+	numWorkers           = runtime.NumCPU() / 2
+	Exec3Workers         = EnvInt("EXEC3_WORKERS", numWorkers)
+	ExecTerseLoggerLevel = EnvInt("EXEC_TERSE_LOGGER_LEVEL", int(log.LvlWarn))
+	CompressWorkers      = EnvInt("COMPRESS_WORKERS", 1)
+	MergeWorkers         = EnvInt("MERGE_WORKERS", 1)
+	CollateWorkers       = EnvInt("COLLATE_WORKERS", 2)
 
-	TraceAccounts        = EnvStrings("TRACE_ACCOUNTS", ",", nil)
-	TraceStateKeys       = EnvStrings("TRACE_STATE_KEYS", ",", nil)
-	TraceInstructions    = EnvBool("TRACE_INSTRUCTIONS", false)
-	TraceTransactionIO   = EnvBool("TRACE_TRANSACTION_IO", false)
-	TraceDomainIO        = EnvBool("TRACE_DOMAIN_IO", false)
-	TraceNoopIO          = EnvBool("TRACE_NOOP_IO", false)
-	TraceLogs            = EnvBool("TRACE_LOGS", false)
-	TraceGas             = EnvBool("TRACE_GAS", false)
-	TraceDyanmicGas      = EnvBool("TRACE_DYNAMIC_GAS", false)
-	TraceApply           = EnvBool("TRACE_APPLY", false)
-	TraceBlocks          = EnvUints("TRACE_BLOCKS", ",", nil)
-	TraceTxIndexes       = EnvInts("TRACE_TXINDEXES", ",", nil)
-	TraceUnwinds         = EnvBool("TRACE_UNWINDS", false)
-	traceDomains         = EnvStrings("TRACE_DOMAINS", ",", nil)
-	StopAfterBlock       = EnvUint("STOP_AFTER_BLOCK", 0)
-	BatchCommitments     = EnvBool("BATCH_COMMITMENTS", true)
-	CaplinEfficientReorg = EnvBool("CAPLIN_EFFICIENT_REORG", true)
-	UseTxDependencies    = EnvBool("USE_TX_DEPENDENCIES", false)
+	TraceAccounts         = EnvStrings("TRACE_ACCOUNTS", ",", nil)
+	TraceStateKeys        = EnvStrings("TRACE_STATE_KEYS", ",", nil)
+	TraceInstructions     = EnvBool("TRACE_INSTRUCTIONS", false)
+	TraceTransactionIO    = EnvBool("TRACE_TRANSACTION_IO", false)
+	TraceDomainIO         = EnvBool("TRACE_DOMAIN_IO", false)
+	TraceNoopIO           = EnvBool("TRACE_NOOP_IO", false)
+	TraceLogs             = EnvBool("TRACE_LOGS", false)
+	TraceGas              = EnvBool("TRACE_GAS", false)
+	TraceDynamicGas       = EnvBool("TRACE_DYNAMIC_GAS", false)
+	TraceApply            = EnvBool("TRACE_APPLY", false)
+	TraceBlockAccessLists = EnvBool("TRACE_BLOCK_ACCESS_LISTS", false)
+	TraceBlocks           = EnvUints("TRACE_BLOCKS", ",", nil)
+	TraceTxIndexes        = EnvInts("TRACE_TXINDEXES", ",", nil)
+	TraceUnwinds          = EnvBool("TRACE_UNWINDS", false)
+	traceDomains          = EnvStrings("TRACE_DOMAINS", ",", nil)
+	StopAfterBlock        = EnvUint("STOP_AFTER_BLOCK", 0)
+	BatchCommitments      = EnvBool("BATCH_COMMITMENTS", true)
+	CaplinEfficientReorg  = EnvBool("CAPLIN_EFFICIENT_REORG", true)
+	UseTxDependencies     = EnvBool("USE_TX_DEPENDENCIES", false)
+	UseStateCache         = EnvBool("USE_STATE_CACHE", true)
 
 	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
 	TraceDeletion         = EnvBool("TRACE_DELETION", false)
@@ -108,11 +119,11 @@ func ReadMemStats(m *runtime.MemStats) {
 	runtime.ReadMemStats(m)
 }
 
-func MdbxLockInRam() bool { return mdbxLockInRam }
-
 func DiscardCommitment() bool    { return discardCommitment }
 func NoPrune() bool              { return noPrune }
 func NoMerge() bool              { return noMerge }
+func NoMergeHistory() bool       { return noMergeHistory }
+func NoDeepMergeHistory() bool   { return noDeepMergeHistory }
 func PruneTotalDifficulty() bool { return pruneTotalDifficulty }
 
 var (
@@ -122,7 +133,7 @@ var (
 
 func DirtySpace() uint64 {
 	dirtySaceOnce.Do(func() {
-		v, _ := os.LookupEnv("MDBX_DIRTY_SPACE_MB")
+		v, _ := envLookup("MDBX_DIRTY_SPACE_MB")
 		if v != "" {
 			i := MustParseInt(v)
 			log.Info("[Experiment]", "MDBX_DIRTY_SPACE_MB", i)
@@ -141,7 +152,7 @@ var (
 
 func SlowTx() time.Duration {
 	slowTxOnce.Do(func() {
-		v, _ := os.LookupEnv("SLOW_TX")
+		v, _ := envLookup("SLOW_TX")
 		if v != "" {
 			var err error
 			slowTx, err = time.ParseDuration(v)
@@ -168,8 +179,8 @@ var (
 
 func LogHashMismatchReason() bool {
 	logHashMismatchReasonOnce.Do(func() {
-		v, _ := os.LookupEnv("LOG_HASH_MISMATCH_REASON")
-		if v == "true" {
+		v, _ := envLookup("LOG_HASH_MISMATCH_REASON")
+		if strings.EqualFold(v, "true") {
 			logHashMismatchReason = true
 			log.Info("[Experiment]", "LOG_HASH_MISMATCH_REASON", logHashMismatchReason)
 		}
