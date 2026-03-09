@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+#
+# Rerun PR checks that use the build cache and haven't run at least twice.
+# The first run populates the cache; the second run benefits from it.
+
+set -euo pipefail
+
+# Workflows that use restore-build-cache / save-build-cache.
+WORKFLOWS=(
+  lint.yml
+  sonar.yml
+  test-all-erigon.yml
+  test-all-erigon-race.yml
+  reproducible-build.yml
+)
+
+head_sha=$(gh pr view --json headRefOid --jq .headRefOid)
+pr_number=$(gh pr view --json number --jq .number)
+echo "PR #$pr_number  HEAD $head_sha"
+
+rerun_ids=()
+
+for wf in "${WORKFLOWS[@]}"; do
+  runs=$(gh run list --workflow "$wf" --json databaseId,status,headSha \
+    | jq --arg sha "$head_sha" '[.[] | select(.headSha == $sha)]')
+
+  completed=$(jq '[.[] | select(.status == "completed")] | length' <<< "$runs")
+  in_progress=$(jq '[.[] | select(.status != "completed")] | length' <<< "$runs")
+
+  if (( in_progress > 0 )); then
+    echo "$wf: $completed completed, $in_progress in progress — skipping"
+    continue
+  fi
+
+  if (( completed >= 2 )); then
+    echo "$wf: $completed completed — already warmed"
+    continue
+  fi
+
+  if (( completed == 0 )); then
+    echo "$wf: no completed runs — triggering"
+    gh workflow run "$wf" --ref "$(gh pr view --json headRefName --jq .headRefName)" || true
+    continue
+  fi
+
+  run_id=$(jq '[.[] | select(.status == "completed")][0].databaseId' <<< "$runs")
+  rerun_ids+=("$run_id")
+  echo "$wf: $completed completed — queuing rerun (run $run_id)"
+done
+
+if (( ${#rerun_ids[@]} == 0 )); then
+  echo "Nothing to rerun."
+  exit 0
+fi
+
+for run_id in "${rerun_ids[@]}"; do
+  echo "Rerunning $run_id …"
+  gh run rerun "$run_id" || true
+done

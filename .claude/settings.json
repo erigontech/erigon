@@ -7,7 +7,16 @@
       "Bash(go vet:*)",
       "Bash(make lint:*)",
       "Bash(git fetch:*)",
-      "Bash(go mod tidy:*)"
+      "Bash(go mod tidy:*)",
+      "WebFetch(domain:github.com)",
+      "WebSearch",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(git status:*)",
+      "Bash(gh pr edit:*)",
+      "Bash(git lfs ls-files:*)",
+      "Bash(grep:*)",
+      "Bash(git add:*)",
+      "WebFetch(domain:pypi.org)"
     ]
   }
 }
