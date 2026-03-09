@@ -339,10 +339,3 @@ func getFinalizedBranchSize(version clparams.StateVersion) int {
 	}
 	return FinalizedBranchSize
 }
-
-func getSyncCommitteeBranchSize(version clparams.StateVersion) int {
-	if version >= clparams.ElectraVersion {
-		return SyncCommitteeBranchSizeElectra
-	}
-	return SyncCommitteeBranchSize
-}

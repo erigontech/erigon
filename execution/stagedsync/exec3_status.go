@@ -2,96 +2,14 @@ package stagedsync
 
 import (
 	"errors"
-	"fmt"
 	"sort"
-	"strconv"
-	"strings"
 	"time"
-
-	"github.com/erigontech/erigon/execution/state"
 )
 
 type ExecutionStat struct {
 	TxIdx       int
 	Incarnation int
 	Duration    time.Duration
-}
-
-// Find the longest execution path in the DAG
-func LongestPath(d *state.DAG, stats map[int]ExecutionStat) ([]int, uint64) {
-	prev := make(map[int]int, len(d.GetVertices()))
-
-	for i := 0; i < len(d.GetVertices()); i++ {
-		prev[i] = -1
-	}
-
-	pathWeights := make(map[int]uint64, len(d.GetVertices()))
-
-	maxPath := 0
-	maxPathWeight := uint64(0)
-
-	idxToId := make(map[int]string, len(d.GetVertices()))
-
-	for k, i := range d.GetVertices() {
-		idxToId[i.(int)] = k
-	}
-
-	for i := 0; i < len(idxToId); i++ {
-		parents, _ := d.GetParents(idxToId[i])
-
-		if len(parents) > 0 {
-			for _, p := range parents {
-				weight := pathWeights[p.(int)] + uint64(stats[i].Duration)
-				if weight > pathWeights[i] {
-					pathWeights[i] = weight
-					prev[i] = p.(int)
-				}
-			}
-		} else {
-			pathWeights[i] = uint64(stats[i].Duration)
-		}
-
-		if pathWeights[i] > maxPathWeight {
-			maxPath = i
-			maxPathWeight = pathWeights[i]
-		}
-	}
-
-	path := make([]int, 0)
-	for i := maxPath; i != -1; i = prev[i] {
-		path = append(path, i)
-	}
-
-	// Reverse the path so the transactions are in the ascending order
-	for i, j := 0, len(path)-1; i < j; i, j = i+1, j-1 {
-		path[i], path[j] = path[j], path[i]
-	}
-
-	return path, maxPathWeight
-}
-
-func ReportDAG(d *state.DAG, stats map[int]ExecutionStat, out func(string)) {
-	longestPath, weight := LongestPath(d, stats)
-
-	serialWeight := uint64(0)
-
-	for i := 0; i < len(d.GetVertices()); i++ {
-		serialWeight += uint64(stats[i].Duration)
-	}
-
-	makeStrs := func(ints []int) (ret []string) {
-		for _, v := range ints {
-			ret = append(ret, strconv.Itoa(v))
-		}
-
-		return
-	}
-
-	out("Longest execution path:")
-	out(fmt.Sprintf("(%v) %v", len(longestPath), strings.Join(makeStrs(longestPath), "->")))
-
-	out(fmt.Sprintf("Longest path ideal execution time: %v of %v (serial total), %v%%", time.Duration(weight),
-		time.Duration(serialWeight), fmt.Sprintf("%.1f", float64(weight)*100.0/float64(serialWeight))))
 }
 
 type execStatusList struct {
