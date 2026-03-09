@@ -113,12 +113,18 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, blo
 	if !amsterdam && !experimental {
 		return nil
 	}
+	if h == nil {
+		return nil
+	}
 	blockNum := h.Number.Uint64()
 	blockHash := h.Hash()
 	bal := CreateBAL(blockNum, vio, dataDir)
 	err := bal.Validate()
 	if err != nil {
 		return fmt.Errorf("block %d: invalid computed block access list: %w", blockNum, err)
+	}
+	if err := bal.ValidateMaxItems(h.GasLimit); err != nil {
+		return fmt.Errorf("block %d: %w", blockNum, err)
 	}
 	log.Debug("bal", "blockNum", blockNum, "hash", bal.Hash())
 	if !amsterdam {
@@ -154,11 +160,10 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, blo
 			return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", blockNum, dbBAL.Hash(), headerBALHash)
 		}
 	}
-	// Only validate computed BAL against header when we have the stored BAL
-	// body. Without it, HasBAL=false on the VersionMap, so the computed BAL
-	// may be inaccurate due to VersionMap mutations during execution.
-	// This limitation goes away once eth/71 delivers BAL bodies via p2p sync.
-	if dbBALBytes != nil && headerBALHash != bal.Hash() {
+	// Always validate computed BAL against header. The BalancePath cross-check
+	// in VersionMap.validateRead ensures deterministic parallel execution even
+	// without a stored BAL body (HasBAL=false), so the computed BAL is accurate.
+	if headerBALHash != bal.Hash() {
 		if dataDir != "" {
 			balDir := filepath.Join(dataDir, "bal")
 			if err := os.MkdirAll(balDir, 0o755); err != nil {
