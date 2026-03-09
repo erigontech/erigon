@@ -228,11 +228,11 @@ func ExecV3(ctx context.Context,
 	if parallel {
 		pe := &parallelExecutor{
 			txExecutor: txExecutor{
-				cfg:              cfg,
-				rs:               rs,
-				doms:             doms,
-				agg:              agg,
-				isForkValidation: isForkValidation,
+				cfg:               cfg,
+				rs:                rs,
+				doms:              doms,
+				agg:               agg,
+				isForkValidation:  isForkValidation,
 				isApplyingBlocks:  isApplyingBlocks,
 				logger:            logger,
 				logPrefix:         execStage.LogPrefix(),
@@ -263,12 +263,12 @@ func ExecV3(ctx context.Context,
 	} else {
 		se := &serialExecutor{
 			txExecutor: txExecutor{
-				cfg:              cfg,
-				rs:               rs,
-				doms:             doms,
-				agg:              agg,
-				u:                u,
-				isForkValidation: isForkValidation,
+				cfg:               cfg,
+				rs:                rs,
+				doms:              doms,
+				agg:               agg,
+				u:                 u,
+				isForkValidation:  isForkValidation,
 				isApplyingBlocks:  isApplyingBlocks,
 				applyTx:           applyTx,
 				logger:            logger,
@@ -409,20 +409,20 @@ func dumpTxIODebug(blockNum uint64, txIO *state.VersionedIO) {
 
 type txExecutor struct {
 	sync.RWMutex
-	cfg               ExecuteBlockCfg
-	agg               *dbstate.Aggregator
-	rs                *state.StateV3Buffered
-	doms              *execctx.SharedDomains
+	cfg              ExecuteBlockCfg
+	agg              *dbstate.Aggregator
+	rs               *state.StateV3Buffered
+	doms             *execctx.SharedDomains
 	u                Unwinder
 	isForkValidation bool
-	isApplyingBlocks  bool
-	applyTx           kv.TemporalTx
-	logger            log.Logger
-	logPrefix         string
-	progress          *Progress
-	taskExecMetrics   *exec.WorkerMetrics
-	blockExecMetrics  *blockExecMetrics
-	hooks             *tracing.Hooks
+	isApplyingBlocks bool
+	applyTx          kv.TemporalTx
+	logger           log.Logger
+	logPrefix        string
+	progress         *Progress
+	taskExecMetrics  *exec.WorkerMetrics
+	blockExecMetrics *blockExecMetrics
+	hooks            *tracing.Hooks
 
 	lastExecutedBlockNum  atomic.Int64
 	lastExecutedTxNum     atomic.Int64
