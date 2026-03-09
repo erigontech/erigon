@@ -406,12 +406,6 @@ type ReceiptsRLPPacket70 struct {
 	ReceiptsRLPPacket
 }
 
-// ReceiptsPacket70 is the network packet for block receipts distribution over eth/70.
-type ReceiptsPacket70 struct {
-	RequestId           uint64
-	LastBlockIncomplete uint64
-	ReceiptsPacket
-}
 type BlockRangeUpdatePacket struct {
 	Earliest, Latest uint64
 	LatestHash       common.Hash
