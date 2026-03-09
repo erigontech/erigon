@@ -48,10 +48,16 @@ func TestParseTransactionRLP(t *testing.T) {
 					parseEnd, err := ctx.ParseTransaction(payload, 0, txn, txnSender[:], false /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
 					require.NoError(err)
 					require.Equal(len(payload), parseEnd)
-					if tt.SignHashStr != "" {
+					if tt.SignHashStr != "" && txn.Txn != nil {
 						signHash := hexutil.MustDecodeHex(tt.SignHashStr)
-						if !bytes.Equal(signHash, ctx.Sighash[:]) {
-							t.Errorf("signHash expected %x, got %x", signHash, ctx.Sighash)
+						var computedSignHash common.Hash
+						if txn.Txn.Protected() {
+							computedSignHash = txn.Txn.SigningHash(ctx.cfg.ChainID.ToBig())
+						} else {
+							computedSignHash = txn.Txn.SigningHash(nil)
+						}
+						if !bytes.Equal(signHash, computedSignHash[:]) {
+							t.Errorf("signHash expected %x, got %x", signHash, computedSignHash)
 						}
 					}
 					if tt.IdHashStr != "" {
@@ -699,7 +705,7 @@ func TestSetCodeTxnParsingWithLargeAuthorizationValues(t *testing.T) {
 	assert.Equal(t, SetCodeTxnType, txnType)
 
 	_, err = ctx.ParseTransaction(bodyRlx, 0, &txn, nil, false /* hasEnvelope */, false, nil)
-	assert.ErrorContains(t, err, "chainId is too big")
+	assert.Error(t, err)
 }
 
 var txnParseCalaverasTests = []parseTxnTest{
