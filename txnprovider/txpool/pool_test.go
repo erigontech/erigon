@@ -1584,10 +1584,12 @@ func TestGetBlobs(t *testing.T) {
 		proofs = append(proofs, bb.Proofs...)
 	}
 	require.Equal(len(proofs), len(blobHashes))
-	assert.Equal(blobTxn.BlobBundles[0].Blob, blobs[0])
-	assert.Equal(blobTxn.BlobBundles[1].Blob, blobs[1])
-	assert.Equal(blobTxn.BlobBundles[0].Proofs[0], proofs[0])
-	assert.Equal(blobTxn.BlobBundles[1].Proofs[0], proofs[1])
+	blob0, _, proofs0 := blobTxn.BlobBundle(0)
+	blob1, _, proofs1 := blobTxn.BlobBundle(1)
+	assert.Equal(blob0, blobs[0])
+	assert.Equal(blob1, blobs[1])
+	assert.Equal(proofs0[0], proofs[0])
+	assert.Equal(proofs1[0], proofs[1])
 }
 
 func TestGasLimitChanged(t *testing.T) {

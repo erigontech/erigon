@@ -195,12 +195,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	// Step 7: Populate fields that are kept on TxnSlot.
 	slot.Nonce = txn.GetNonce()
 
-	// AA-specific fields.
-	if txn.Type() == types.AccountAbstractionTxType {
-		populateAAFields(slot, txn)
-	}
-
-	// Blob-specific validation and bundle extraction (EIP-4844).
+	// Blob-specific validation (EIP-4844).
 	if bt, ok := txn.(*types.BlobTxWrapper); ok {
 		// Validate wrapper version (only 0 and 1 are defined).
 		if bt.WrapperVersion > 1 {
@@ -224,23 +219,6 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		}
 		if bt.WrapperVersion == 1 && numProofs != numBlobs*128 {
 			return 0, fmt.Errorf("%w: wrong number of proofs for v1 wrapper (%d proofs, expected %d)", ErrParseTxn, numProofs, numBlobs*128)
-		}
-
-		// Extract blob bundles.
-		if numBlobs > 0 {
-			proofsPerBlob := numProofs / numBlobs
-			slot.BlobBundles = make([]PoolBlobBundle, numBlobs)
-			for i := 0; i < numBlobs; i++ {
-				slot.BlobBundles[i] = PoolBlobBundle{
-					Commitment: goethkzg.KZGCommitment(bt.Commitments[i]),
-					Blob:       bt.Blobs[i][:],
-					Proofs:     make([]goethkzg.KZGProof, 0, proofsPerBlob),
-				}
-				for j := 0; j < proofsPerBlob; j++ {
-					slot.BlobBundles[i].Proofs = append(slot.BlobBundles[i].Proofs,
-						goethkzg.KZGProof(bt.Proofs[i*proofsPerBlob+j]))
-				}
-			}
 		}
 	}
 
@@ -289,36 +267,12 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	return p, nil
 }
 
-// populateAAFields fills AA-specific fields on TxnSlot from a decoded AccountAbstractionTransaction.
-func populateAAFields(slot *TxnSlot, txn types.Transaction) {
-	aaTx, ok := txn.(*types.AccountAbstractionTransaction)
-	if !ok {
-		return
-	}
-	addr := aaTx.SenderAddress.Value()
-	slot.SenderAddress = &addr
-	slot.Paymaster = aaTx.Paymaster
-	slot.Deployer = aaTx.Deployer
-	slot.SenderValidationData = aaTx.SenderValidationData
-	slot.PaymasterData = aaTx.PaymasterData
-	slot.DeployerData = aaTx.DeployerData
-	slot.ExecutionData = aaTx.ExecutionData
-	slot.ValidationGasLimit = aaTx.ValidationGasLimit
-	slot.PaymasterValidationGasLimit = aaTx.PaymasterValidationGasLimit
-	slot.PostOpGasLimit = aaTx.PostOpGasLimit
-	if aaTx.NonceKey != nil {
-		slot.NonceKey.Set(aaTx.NonceKey)
-	}
-	if aaTx.BuilderFee != nil {
-		slot.BuilderFee.Set(aaTx.BuilderFee)
-	}
-}
-
 type AuthAndNonce struct {
 	authority common.Address
 	nonce     uint64
 }
 
+// PoolBlobBundle holds a single blob's data for the GetBlobs API.
 type PoolBlobBundle struct {
 	Commitment goethkzg.KZGCommitment
 	Blob       []byte
@@ -335,14 +289,7 @@ type TxnSlot struct {
 	IDHash   [32]byte          // Transaction hash for the purposes of using it as a transaction Id
 	Traced   bool              // Whether transaction needs to be traced throughout transaction pool code and generate debug printing
 
-	BlobBundles   []PoolBlobBundle // EIP-4844: extracted blob bundles from wrapper
-	AuthAndNonces []AuthAndNonce   // Indexed authorization signers + nonces for EIP-7702 txns (type-4)
-
-	// RIP-7560: account abstraction
-	SenderAddress, Paymaster, Deployer                               *common.Address
-	SenderValidationData, PaymasterData, DeployerData, ExecutionData []byte
-	PostOpGasLimit, ValidationGasLimit, PaymasterValidationGasLimit  uint64
-	NonceKey, BuilderFee                                             uint256.Int
+	AuthAndNonces []AuthAndNonce // Indexed authorization signers + nonces for EIP-7702 txns (type-4)
 }
 
 // Accessor methods that delegate to the stored Transaction.
@@ -486,28 +433,74 @@ func (tx *TxnSlot) PrintDebug(prefix string) {
 	fmt.Printf("%s: senderID=%d,nonce=%d,tip=%d,v=%d\n", prefix, tx.SenderID, tx.Nonce, tx.GetTip(), tx.GetValue().Uint64())
 }
 
+// BlobTxWrapper returns the underlying *types.BlobTxWrapper if this is a blob transaction, or nil.
+func (tx *TxnSlot) BlobTxWrapper() *types.BlobTxWrapper {
+	if tx.Txn == nil {
+		return nil
+	}
+	bt, _ := tx.Txn.(*types.BlobTxWrapper)
+	return bt
+}
+
 func (tx *TxnSlot) Blobs() [][]byte {
-	b := make([][]byte, 0, len(tx.BlobBundles))
-	for _, bb := range tx.BlobBundles {
-		b = append(b, bb.Blob)
+	bt := tx.BlobTxWrapper()
+	if bt == nil {
+		return nil
+	}
+	b := make([][]byte, len(bt.Blobs))
+	for i := range bt.Blobs {
+		b[i] = bt.Blobs[i][:]
 	}
 	return b
 }
 
 func (tx *TxnSlot) Commitments() []goethkzg.KZGCommitment {
-	c := make([]goethkzg.KZGCommitment, 0, len(tx.BlobBundles))
-	for _, bb := range tx.BlobBundles {
-		c = append(c, bb.Commitment)
+	bt := tx.BlobTxWrapper()
+	if bt == nil {
+		return nil
+	}
+	c := make([]goethkzg.KZGCommitment, len(bt.Commitments))
+	for i := range bt.Commitments {
+		c[i] = goethkzg.KZGCommitment(bt.Commitments[i])
 	}
 	return c
 }
 
 func (tx *TxnSlot) Proofs() []goethkzg.KZGProof {
-	p := make([]goethkzg.KZGProof, 0, len(tx.BlobBundles))
-	for _, bb := range tx.BlobBundles {
-		p = append(p, bb.Proofs...)
+	bt := tx.BlobTxWrapper()
+	if bt == nil {
+		return nil
+	}
+	p := make([]goethkzg.KZGProof, len(bt.Proofs))
+	for i := range bt.Proofs {
+		p[i] = goethkzg.KZGProof(bt.Proofs[i])
 	}
 	return p
+}
+
+// BlobBundle returns the blob, commitment, and proofs for the i-th blob.
+func (tx *TxnSlot) BlobBundle(i int) (blob []byte, commitment goethkzg.KZGCommitment, proofs []goethkzg.KZGProof) {
+	bt := tx.BlobTxWrapper()
+	if bt == nil || i >= len(bt.Blobs) {
+		return nil, goethkzg.KZGCommitment{}, nil
+	}
+	blob = bt.Blobs[i][:]
+	commitment = goethkzg.KZGCommitment(bt.Commitments[i])
+	// Proofs: for v0 wrappers there's 1 proof per blob, for v1 there are 128 per blob.
+	proofsPerBlob := 1
+	if bt.WrapperVersion == 1 {
+		proofsPerBlob = 128
+	}
+	start := i * proofsPerBlob
+	end := start + proofsPerBlob
+	if end > len(bt.Proofs) {
+		end = len(bt.Proofs)
+	}
+	proofs = make([]goethkzg.KZGProof, end-start)
+	for j, p := range bt.Proofs[start:end] {
+		proofs[j] = goethkzg.KZGProof(p)
+	}
+	return blob, commitment, proofs
 }
 
 // ToProtoAccountAbstractionTxn converts a TxnSlot to a typesproto.AccountAbstractionTransaction
@@ -515,39 +508,50 @@ func (tx *TxnSlot) ToProtoAccountAbstractionTxn() *typesproto.AccountAbstraction
 	if tx == nil {
 		return nil
 	}
-
-	var paymasterData, deployerData, paymaster, deployer []byte
-	if tx.PaymasterData != nil {
-		paymasterData = tx.PaymasterData
-	}
-	if tx.DeployerData != nil {
-		deployerData = tx.DeployerData
-	}
-	if tx.Paymaster != nil {
-		paymaster = tx.Paymaster.Bytes()
-	}
-	if tx.Deployer != nil {
-		deployer = tx.Deployer.Bytes()
+	aaTx, ok := tx.Txn.(*types.AccountAbstractionTransaction)
+	if !ok {
+		return nil
 	}
 
+	var paymasterData, deployerData, paymaster, deployer, builderFee, nonceKey []byte
+	if aaTx.PaymasterData != nil {
+		paymasterData = aaTx.PaymasterData
+	}
+	if aaTx.DeployerData != nil {
+		deployerData = aaTx.DeployerData
+	}
+	if aaTx.Paymaster != nil {
+		paymaster = aaTx.Paymaster.Bytes()
+	}
+	if aaTx.Deployer != nil {
+		deployer = aaTx.Deployer.Bytes()
+	}
+	if aaTx.BuilderFee != nil {
+		builderFee = aaTx.BuilderFee.Bytes()
+	}
+	if aaTx.NonceKey != nil {
+		nonceKey = aaTx.NonceKey.Bytes()
+	}
+
+	senderAddr := aaTx.SenderAddress.Value()
 	return &typesproto.AccountAbstractionTransaction{
-		Nonce:                       tx.Nonce,
-		ChainId:                     tx.GetChainID().Bytes(),
-		Tip:                         tx.GetTip().Bytes(),
-		FeeCap:                      tx.GetFeeCap().Bytes(),
-		Gas:                         tx.GetGas(),
-		SenderAddress:               tx.SenderAddress.Bytes(),
-		SenderValidationData:        tx.SenderValidationData,
-		ExecutionData:               tx.ExecutionData,
+		Nonce:                       aaTx.Nonce,
+		ChainId:                     aaTx.ChainID.Bytes(),
+		Tip:                         aaTx.Tip.Bytes(),
+		FeeCap:                      aaTx.FeeCap.Bytes(),
+		Gas:                         aaTx.GasLimit,
+		SenderAddress:               senderAddr[:],
+		SenderValidationData:        aaTx.SenderValidationData,
+		ExecutionData:               aaTx.ExecutionData,
 		Paymaster:                   paymaster,
 		PaymasterData:               paymasterData,
 		Deployer:                    deployer,
 		DeployerData:                deployerData,
-		BuilderFee:                  tx.BuilderFee.Bytes(),
-		ValidationGasLimit:          tx.ValidationGasLimit,
-		PaymasterValidationGasLimit: tx.PaymasterValidationGasLimit,
-		PostOpGasLimit:              tx.PostOpGasLimit,
-		NonceKey:                    tx.NonceKey.Bytes(),
+		BuilderFee:                  builderFee,
+		ValidationGasLimit:          aaTx.ValidationGasLimit,
+		PaymasterValidationGasLimit: aaTx.PaymasterValidationGasLimit,
+		PostOpGasLimit:              aaTx.PostOpGasLimit,
+		NonceKey:                    nonceKey,
 	}
 }
 
@@ -621,15 +625,19 @@ func (h Addresses) Len() int {
 }
 
 type TxnsRlp struct {
-	Txns    [][]byte
-	Senders Addresses
-	IsLocal []bool
+	Txns      [][]byte
+	ParsedTxn []types.Transaction // populated by best() when slot.Txn is available
+	Senders   Addresses
+	IsLocal   []bool
 }
 
 // Resize internal arrays to len=targetSize, shrinks if need. It rely on `append` algorithm to realloc
 func (r *TxnsRlp) Resize(targetSize uint) {
 	for uint(len(r.Txns)) < targetSize {
 		r.Txns = append(r.Txns, nil)
+	}
+	for uint(len(r.ParsedTxn)) < targetSize {
+		r.ParsedTxn = append(r.ParsedTxn, nil)
 	}
 	for uint(r.Senders.Len()) < targetSize {
 		r.Senders = append(r.Senders, addressesGrowth...)
@@ -639,6 +647,7 @@ func (r *TxnsRlp) Resize(targetSize uint) {
 	}
 	//todo: set nil to overflow txns
 	r.Txns = r.Txns[:targetSize]
+	r.ParsedTxn = r.ParsedTxn[:targetSize]
 	r.Senders = r.Senders[:length.Addr*targetSize]
 	r.IsLocal = r.IsLocal[:targetSize]
 }

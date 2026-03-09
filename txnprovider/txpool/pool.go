@@ -811,7 +811,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 		if blobCount > 0 {
 			if p.isOsaka() {
 				proofs := mt.TxnSlot.Proofs()
-				if len(proofs) != len(mt.TxnSlot.BlobBundles)*int(params.CellsPerExtBlob) { // cell_proofs contains exactly CELLS_PER_EXT_BLOB * len(blobs) cell proofs
+				if len(proofs) != int(blobCount)*int(params.CellsPerExtBlob) { // cell_proofs contains exactly CELLS_PER_EXT_BLOB * len(blobs) cell proofs
 					toRemove = append(toRemove, mt)
 					continue
 				}
@@ -851,6 +851,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 		availableGas -= intrinsicGas
 		availableRlpSpace -= len(rlpTxn)
 		txns.Txns[count] = rlpTxn
+		txns.ParsedTxn[count] = mt.TxnSlot.Txn
 		copy(txns.Senders.At(count), sender.Bytes())
 		txns.IsLocal[count] = isLocal
 		if yielded != nil {
@@ -886,11 +887,15 @@ func (p *TxPool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOpt
 		return nil, err
 	}
 
-	txns := make([]types.Transaction, 0, len(txnsRlp.Txns))
-	for i := range txnsRlp.Txns {
-		txn, err := types.DecodeWrappedTransaction(txnsRlp.Txns[i])
-		if err != nil {
-			return nil, err
+	txns := make([]types.Transaction, 0, len(txnsRlp.ParsedTxn))
+	for i, txn := range txnsRlp.ParsedTxn {
+		if txn == nil {
+			// Fallback: decode from RLP if parsed txn not available
+			var err error
+			txn, err = types.DecodeWrappedTransaction(txnsRlp.Txns[i])
+			if err != nil {
+				return nil, err
+			}
 		}
 
 		var sender common.Address
@@ -1085,8 +1090,12 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 		return txpoolcfg.TooManyBlobs
 	}
 
-	if blobCount != len(txn.BlobBundles) {
-		p.logger.Debug(fmt.Sprintf("TX POOL: blobCount %d != len(txn.BlobBundles) %d", blobCount, len(txn.BlobBundles)))
+	bt := txn.BlobTxWrapper()
+	if bt == nil {
+		return txpoolcfg.UnequalBlobTxExt
+	}
+	if blobCount != len(bt.Blobs) {
+		p.logger.Debug(fmt.Sprintf("TX POOL: blobCount %d != len(blobs) %d", blobCount, len(bt.Blobs)))
 		return txpoolcfg.UnequalBlobTxExt
 	}
 	blobs := txn.Blobs()
@@ -1737,7 +1746,8 @@ func (p *TxPool) getBlobsAndProofByBlobHashLocked(blobHashes []common.Hash) []Po
 		if !ok || mt == nil {
 			continue
 		}
-		blobBundles[i] = mt.TxnSlot.BlobBundles[th.index]
+		blob, commitment, proofs := mt.TxnSlot.BlobBundle(th.index)
+		blobBundles[i] = PoolBlobBundle{Blob: blob, Commitment: commitment, Proofs: proofs}
 	}
 	return blobBundles
 }
