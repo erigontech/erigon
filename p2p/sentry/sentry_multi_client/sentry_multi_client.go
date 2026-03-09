@@ -641,10 +641,6 @@ func (cs *MultiClient) getReceipts69(ctx context.Context, inreq *sentryproto.Inb
 	return cs.getReceiptsInner(ctx, inreq, sentryClient, true)
 }
 
-func (cs *MultiClient) getReceipts70(ctx context.Context, inreq *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient) error {
-	return cs.getReceipts70Inner(ctx, inreq, sentryClient)
-}
-
 func (cs *MultiClient) getReceiptsInner(ctx context.Context, inreq *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient, isEth69 bool) error {
 	var query eth.GetReceiptsPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
@@ -700,7 +696,7 @@ func (cs *MultiClient) getReceiptsInner(ctx context.Context, inreq *sentryproto.
 	return nil
 }
 
-func (cs *MultiClient) getReceipts70Inner(ctx context.Context, inreq *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient) error {
+func (cs *MultiClient) getReceipts70(ctx context.Context, inreq *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient) error {
 	var query eth.GetReceiptsPacket70
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding getReceipts70: %w, data: %x", err, inreq.Data)
