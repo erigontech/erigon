@@ -36,7 +36,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/mdbx-go/mdbx"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
@@ -49,7 +48,6 @@ import (
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	rpcdaemoncli "github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/disk"
@@ -112,9 +110,7 @@ import (
 	privateapi2 "github.com/erigontech/erigon/node/privateapi"
 	"github.com/erigontech/erigon/node/rulesconfig"
 	"github.com/erigontech/erigon/node/shards"
-	"github.com/erigontech/erigon/node/silkworm"
 	"github.com/erigontech/erigon/p2p"
-	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/p2p/sentry/libsentry"
@@ -219,10 +215,6 @@ type Ethereum struct {
 	logger         log.Logger
 
 	sentinel sentinelproto.SentinelClient
-
-	silkworm                 *silkworm.Silkworm
-	silkwormRPCDaemonService *silkworm.RpcDaemonService
-	silkwormSentryService    *silkworm.SentryService
 
 	polygonSyncService *polygonsync.Service
 	polygonBridge      *bridge.Service
@@ -424,17 +416,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.notifications = shards.NewNotifications(kvRPC)
 	backend.kvRPC = kvRPC
 
-	if config.SilkwormExecution || config.SilkwormRpcDaemon || config.SilkwormSentry {
-		logLevel, err := log.LvlFromString(config.SilkwormVerbosity)
-		if err != nil {
-			return nil, err
-		}
-		backend.silkworm, err = silkworm.New(config.Dirs.DataDir, mdbx.Version(), config.SilkwormNumContexts, logLevel)
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	p2pConfig := stack.Config().P2P
 	var sentries []sentryproto.SentryClient
 	if len(p2pConfig.SentryAddr) > 0 {
@@ -445,39 +426,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			}
 			sentries = append(sentries, sentryClient)
 		}
-	} else if config.SilkwormSentry {
-		apiPort := 53774
-		apiAddr := fmt.Sprintf("127.0.0.1:%d", apiPort)
-
-		collectNodeURLs := func(nodes []*enode.Node) []string {
-			urls := make([]string, 0, len(nodes))
-			for _, n := range nodes {
-				urls = append(urls, n.URLv4())
-			}
-			return urls
-		}
-
-		settings := silkworm.SentrySettings{
-			ClientId:    p2pConfig.Name,
-			ApiPort:     apiPort,
-			Port:        p2pConfig.ListenPort(),
-			Nat:         p2pConfig.NATSpec,
-			NetworkId:   config.NetworkID,
-			NodeKey:     crypto.FromECDSA(p2pConfig.PrivateKey),
-			StaticPeers: collectNodeURLs(p2pConfig.StaticNodes),
-			Bootnodes:   collectNodeURLs(p2pConfig.BootstrapNodes),
-			NoDiscover:  p2pConfig.NoDiscovery,
-			MaxPeers:    p2pConfig.MaxPeers,
-		}
-
-		silkwormSentryService := silkworm.NewSentryService(backend.silkworm, settings)
-		backend.silkwormSentryService = &silkwormSentryService
-
-		sentryClient, err := sentry_multi_client.GrpcClient(backend.sentryCtx, apiAddr)
-		if err != nil {
-			return nil, err
-		}
-		sentries = append(sentries, sentryClient)
 	} else {
 		var readNodeInfo = func() *eth.NodeInfo {
 			var res *eth.NodeInfo
@@ -661,7 +609,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		terseLogger.SetHandler(log.LvlFilterHandler(log.Lvl(dbg.ExecTerseLoggerLevel), log.StderrHandler))
 		// Needs its own notifications to not update RPC daemon and txpool about pending blocks
 		stateSync := stageloop.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentriesClient,
-			dirs, notifications, blockReader, blockWriter, backend.silkworm, terseLogger)
+			dirs, notifications, blockReader, blockWriter, terseLogger)
 		chainReader := consensuschain.NewReader(chainConfig, tx, blockReader, logger)
 		// We start the mining step
 		if err := stageloop.StateStep(ctx, chainReader, backend.engine, sd, tx, stateSync, unwindPoint, headersChain, bodiesChain); err != nil {
@@ -918,7 +866,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 					backend.sentriesClient.Hd,
 					config.Genesis,
 					config.Sync,
-					stageloop.SilkwormForExecutionStage(backend.silkworm, config),
 					config.ExperimentalBAL,
 				),
 				stagedsync.StageSendersCfg(chainConfig, config.Sync, false /* badBlockHalt */, dirs.Tmp, config.Prune, blockReader, backend.sentriesClient.Hd),
@@ -1004,7 +951,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}()
 
 	backend.syncStages = stageloop.NewDefaultStages(backend.sentryCtx, backend.chainDB, p2pConfig, config, backend.sentriesClient, backend.notifications, backend.downloaderClient,
-		blockReader, blockRetire, backend.silkworm, backend.forkValidator, tracer)
+		blockReader, blockRetire, backend.forkValidator, tracer)
 	backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
 	backend.syncPruneOrder = stagedsync.DefaultPruneOrder
 
@@ -1012,7 +959,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	hook := stageloop.NewHook(backend.sentryCtx, backend.notifications, backend.stagedSync, backend.chainConfig, backend.logger, backend.sentriesClient.SetStatus, statusDataProvider, executionPublisher)
 
-	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, backend.silkworm, backend.forkValidator, tracer)
+	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, backend.forkValidator, tracer)
 	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 	// for polygon, we only need to download snapshots on start so that all driver components are correctly initialised before any block execution begins
 	onlySnapDownloadOnStart := chainConfig.Bor != nil
@@ -1177,38 +1124,13 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 
 	s.apiList = jsonrpc.APIList(chainKv, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &httpRpcCfg, s.engine, s.logger, s.polygonBridge, s.heimdallService)
 
-	if config.SilkwormRpcDaemon && httpRpcCfg.Enabled {
-		interface_log_settings := silkworm.RpcInterfaceLogSettings{
-			Enabled:         config.SilkwormRpcLogEnabled,
-			ContainerFolder: config.SilkwormRpcLogDirPath,
-			MaxFileSizeMB:   config.SilkwormRpcLogMaxFileSize,
-			MaxFiles:        config.SilkwormRpcLogMaxFiles,
-			DumpResponse:    config.SilkwormRpcLogDumpResponse,
+	s.bgComponentsEg.Go(func() error {
+		err := rpcdaemoncli.StartRpcServer(ctx, &httpRpcCfg, s.apiList, s.logger)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			s.logger.Error("cli.StartRpcServer error", "err", err)
 		}
-		settings := silkworm.RpcDaemonSettings{
-			EthLogSettings:       interface_log_settings,
-			EthAPIHost:           httpRpcCfg.HttpListenAddress,
-			EthAPIPort:           httpRpcCfg.HttpPort,
-			EthAPISpec:           httpRpcCfg.API,
-			NumWorkers:           config.SilkwormRpcNumWorkers,
-			CORSDomains:          httpRpcCfg.HttpCORSDomain,
-			JWTFilePath:          httpRpcCfg.JWTSecretPath,
-			JSONRPCCompatibility: config.SilkwormRpcJsonCompatibility,
-			WebSocketEnabled:     httpRpcCfg.WebsocketEnabled,
-			WebSocketCompression: httpRpcCfg.WebsocketCompression,
-			HTTPCompression:      httpRpcCfg.HttpCompression,
-		}
-		silkwormRPCDaemonService := silkworm.NewRpcDaemonService(s.silkworm, chainKv, settings)
-		s.silkwormRPCDaemonService = &silkwormRPCDaemonService
-	} else {
-		s.bgComponentsEg.Go(func() error {
-			err := rpcdaemoncli.StartRpcServer(ctx, &httpRpcCfg, s.apiList, s.logger)
-			if err != nil && !errors.Is(err, context.Canceled) {
-				s.logger.Error("cli.StartRpcServer error", "err", err)
-			}
-			return err
-		})
-	}
+		return err
+	})
 
 	if chainConfig.Bor == nil || config.PolygonPosSingleSlotFinality {
 		s.bgComponentsEg.Go(func() error {
@@ -1592,17 +1514,6 @@ func (s *Ethereum) Start() error {
 		go stageloop.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockReader, hook)
 	}
 
-	if s.silkwormRPCDaemonService != nil {
-		if err := s.silkwormRPCDaemonService.Start(); err != nil {
-			s.logger.Error("silkworm.StartRpcDaemon error", "err", err)
-		}
-	}
-	if s.silkwormSentryService != nil {
-		if err := s.silkwormSentryService.Start(); err != nil {
-			s.logger.Error("silkworm.SentryStart error", "err", err)
-		}
-	}
-
 	if s.txPool != nil {
 		// We start the transaction pool on startup, for a couple of reasons:
 		// 1) Hive tests requires us to do so and starting it from eth_sendRawTransaction is not viable as we have not enough data
@@ -1664,22 +1575,6 @@ func (s *Ethereum) Stop() error {
 		sentryServer.Close()
 	}
 	s.chainDB.Close()
-
-	if s.silkwormRPCDaemonService != nil {
-		if err := s.silkwormRPCDaemonService.Stop(); err != nil {
-			s.logger.Error("silkworm.StopRpcDaemon error", "err", err)
-		}
-	}
-	if s.silkwormSentryService != nil {
-		if err := s.silkwormSentryService.Stop(); err != nil {
-			s.logger.Error("silkworm.SentryStop error", "err", err)
-		}
-	}
-	if s.silkworm != nil {
-		if err := s.silkworm.Close(); err != nil {
-			s.logger.Error("silkworm.Close error", "err", err)
-		}
-	}
 
 	if err := s.bgComponentsEg.Wait(); err != nil && !errors.Is(err, context.Canceled) {
 		s.logger.Error("background component error", "err", err)
