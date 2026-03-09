@@ -531,13 +531,7 @@ in [IpTables syntax](https://ethereum.stackexchange.com/questions/6386/how-to-pr
 
 ### Run as a separate user - `systemd` example
 
-Running erigon from `build/bin` as a separate user might produce an error:
-
-```sh
-error while loading shared libraries: libsilkworm_capi.so: cannot open shared object file: No such file or directory
-```
-
-The library needs to be *installed* for another user using `make DIST=<path> install`. You could use `$HOME/erigon`
+Running erigon from `build/bin` as a separate user requires the binaries to be *installed* using `make DIST=<path> install`. You could use `$HOME/erigon`
 or `/opt/erigon` as the installation path, for example:
 
 ```sh

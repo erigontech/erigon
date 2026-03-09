@@ -78,6 +78,9 @@ docker-compose.*.yml
 .env
 coverage-test.out
 coverage-test-all.out
+cpu_*.out
+mem_*.out
+bench_*.txt
 
 dist
 __debug_bin
@@ -121,3 +124,4 @@ mdbx.lck
 
 # Prevent accidental commit of locally-built binaries
 /erigon
+
