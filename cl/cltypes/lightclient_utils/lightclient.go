@@ -135,6 +135,10 @@ func BlockToLightClientHeader(block *cltypes.SignedBeaconBlock) (*cltypes.LightC
 	if block.Version() < clparams.CapellaVersion {
 		return h, nil
 	}
+	// [Modified in Gloas:EIP7732] ExecutionPayload not in BeaconBody for GLOAS blocks
+	if block.Version() >= clparams.GloasVersion || block.Block.Body.ExecutionPayload == nil {
+		return h, nil
+	}
 	var err error
 	h.ExecutionPayloadHeader, err = block.Block.Body.ExecutionPayload.PayloadHeader()
 	if err != nil {

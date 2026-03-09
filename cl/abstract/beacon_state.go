@@ -99,6 +99,7 @@ type BeaconStateSSZ interface {
 	DecodeSSZ(buf []byte, version int) error
 	EncodingSizeSSZ() (size int)
 	HashSSZ() (out [32]byte, err error)
+	PrintLeaves()
 }
 
 //go:generate mockgen -typed=true -destination=./mock_services/beacon_state_mutator_mock.go -package=mock_services . BeaconStateMutator
