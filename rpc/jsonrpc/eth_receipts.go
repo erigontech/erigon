@@ -353,6 +353,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				}
 
 				borLogs = borLogs.Filter(addrMap, crit.Topics, 0)
+
 				for _, filteredLog := range borLogs {
 					if maxResults != 0 && len(logs) >= maxResults {
 						return nil, fmt.Errorf("%s: %d", errExceedLogResults, maxResults)

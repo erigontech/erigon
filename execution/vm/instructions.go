@@ -1350,19 +1350,15 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 }
 
 func decodeSingle(x byte) int {
-	if x <= 90 {
-		return int(x) + 17
-	}
-	return int(x) - 20
+	// EIP-8024: branchless decode. The immediate is encoded as (n + 111) % 256,
+	// so decoding is (x + 145) % 256, covering depths 17–235.
+	return (int(x) + 145) % 256
 }
 
 func decodePair(x byte) (int, int) {
-	var k int
-	if x <= 79 {
-		k = int(x)
-	} else {
-		k = int(x) - 48
-	}
+	// EIP-8024: XOR with 143 remaps the forbidden bytes [82, 127] to an unused
+	// corner of the 16×16 grid, giving a contiguous valid domain.
+	k := int(x ^ 143)
 	q, r := k/16, k%16
 	if q < r {
 		return q + 1, r + 1
@@ -1427,8 +1423,8 @@ func opExchange(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	}
 
 	// This range is excluded both to preserve compatibility with existing opcodes
-	// and to keep decode_pair’s 16-aligned arithmetic mapping valid (0–79, 128–255).
-	if x > 79 && x < 128 {
+	// and to keep decode_pair’s 16-aligned arithmetic mapping valid (0–81, 128–255).
+	if x > 81 && x < 128 {
 		return pc, nil, &ErrInvalidOpCode{opcode: OpCode(x)}
 	}
 	n, m := decodePair(x)
