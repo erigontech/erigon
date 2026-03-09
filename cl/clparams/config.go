@@ -191,8 +191,13 @@ var (
 	}
 	BloatnetBootstrapNodes = []string{
 		"enr:-Iq4QO5d3m9DzBlj1PLCovLotwN8b9mFp_MrCx-KiNjzltphcYYT7oeD-VU7qyuNJd50X3wlJwjd6C989B3DkVcQ3tiGAZfpKz9kgmlkgnY0gmlwhJ20DuWJc2VjcDI1NmsxoQJJ3h8aUO3GJHv-bdvHtsQZ2OEisutelYfGjXO4lSg8BYN1ZHCCIzI",
-		"enr:-LK4QAtyVYCHLTOF1iJ8TK84phLbeuUt42ub5x9OODjTbvnwHS96e6NFlpappH6eeUcyiVmS98usL3cwHUb8F1Y3NTwIh2F0dG5ldHOIAACAAQAAAACEZXRoMpBAw1JZYIAnZP__________gmlkgnY0gmlwhJ20DuWJc2VjcDI1NmsxoQJMpOlHHZBgztApCE2mE4_MZRqgAi2Y81u446NOF7RE04N0Y3CCIyiDdWRwgiMo",
-		"enr:-Mq4QNiucamyTUE9hnWkibGb5BgmKQkEBTkzhLCZJa0SpH6IOLWx4Bkx0E-xzVea9A0-cmtBbk3Sz416oVN8tCq1IMGGAZfpPPVeh2F0dG5ldHOIAAADAAAAAACEZXRoMpBAw1JZcAAAAP__________gmlkgnY0gmlwhJ20DuGEcXVpY4IyyIlzZWNwMjU2azGhA7HMxNX8T5X4lwmmbnuglDAgSHvAw_XSIEu4sf0I4gdYiHN5bmNuZXRzD4N0Y3CCIyiDdWRwgiMo",
+		"enr:-LK4QL8T5e1VWIkPmwdj_tYp0aR-GAqiKg2dO6azs25df44IT6TTZt-iybpRpAblEWEARfYKr3LWglSS0TNzlQ243nUEh2F0dG5ldHOIAAAAAAAAAAyEZXRoMpCpeSKMYDZEaf__________gmlkgnY0gmlwhJ20DuWJc2VjcDI1NmsxoQPlfW3XDntHy35jQwan5Cyesx4lrVVXDdyfOlcsnBL6S4N0Y3CCIyiDdWRwgiMo",
+		"enr:-N24QFEzQ_JIL0cEz4HROg-YhNJgX75kjiawDIhTt3DGKU-sYnxnTfOuCeO6B3mS0nl7-aNSPMXPzl8Gi4knbOjbGkkDh2F0dG5ldHOIAAAAAAAABgCGY2xpZW500YpMaWdodGhvdXNlhTguMS4whGV0aDKQqXkijGA2RGn__________4JpZIJ2NIJpcITOvTovhHF1aWOCIymJc2VjcDI1NmsxoQL8higsdFOIx759KuDWcM09KXKQvMqTARVKnN6S5qELUohzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
+		"enr:-N24QPb7SqEEvJK5ws9HxJWC4K0kcSJW5ZwlWDRo7TEM2w0xIXQMRJjT8hYVlYx5e_KWZa2JMEF6kNfQ0XVijo_5a5IDh2F0dG5ldHOIAAAAYAAAAACGY2xpZW500YpMaWdodGhvdXNlhTguMS4whGV0aDKQqXkijGA2RGn__________4JpZIJ2NIJpcISdtA7mhHF1aWOCIymJc2VjcDI1NmsxoQJMmRIjDEBzk1RE01Bvb_fIXG9ZfxKs92CypoBJTE6y44hzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
+		"enr:-N24QHsp9pbbf-6tYpyaUP1eaXNbUKgkQ_kkVOqxAgF3vOrIHjDbeqVltdhkHVVzD4C4lC9zhP5HbLplCZrw5c9idNsDh2F0dG5ldHOIAAAAAMAAAACGY2xpZW500YpMaWdodGhvdXNlhTguMS4whGV0aDKQqXkijGA2RGn__________4JpZIJ2NIJpcISdtA7jhHF1aWOCIymJc2VjcDI1NmsxoQJMAIcNubXwQuD9RYFo4rcOc58C5YqexXLAS5sFzWJNTohzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
+		"enr:-Le4QGFJJPou4aP5ghuvjc_aIohwh1-hE2f2M3Ec5Qn4CJbQTMCMmzEDA8L5eiv9pLwjmrR9xcPky9S-U1YFTUo2_7cDh2F0dG5ldHOIAAADAAAAAACDY2djBIRldGgykKl5IoxgNkRp__________-CaWSCdjSCaXCEnbQO4olzZWNwMjU2azGhAlvTDd_xk8EfKIqq0uqh7RYxTkVq4KjYoE0rB75SyzGqg3RjcIIjKIN1ZHCCIyg",
+		"enr:-Mq4QGYx7TrWf9SO6dJUxcON0pT6G3LsoeHXxl7FvEOlPQpSK-pc6jqWk3REApaO5mIUzLcz9SK29Zj0naftKvJg-6eGAZxwhJQCh2F0dG5ldHOIAAAAAAAAAAyEZXRoMpCpeSKMcAAAAP__________gmlkgnY0gmlwhJ20DuGEcXVpY4IyyIlzZWNwMjU2azGhA3rJ9h5udMo-Bz4vMDH1h1YSDoKRiE4oYK6xOMictvbziHN5bmNuZXRzD4N0Y3CCIyiDdWRwgiMo",
+		"enr:-LK4QFs_NfU-2-9t1yjePgJFVsZZoVsEx_mXN8BkKgo5f30CIUtZcxAfcDL5bE33Y77fD4rcOXD9OGbO360Vvpk9oZcEh2F0dG5ldHOIDAAAAAAAAACEZXRoMpCpeSKMYDZEaf__________gmlkgnY0gmlwhJ20DuSJc2VjcDI1NmsxoQIwulbHaiOcC3DFsV7btzBVbU1jBIM0BpwsunpYg-t8OoN0Y3CCIyiDdWRwgiMo",
 	}
 )
 
@@ -375,7 +380,7 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 		"https://hoodi-checkpoint-sync.attestant.io/eth/v2/debug/beacon/states/finalized",
 	},
 	chainspec.BloatnetNetworkID: {
-		"https://checkpoint-sync.perf-devnet-2.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
+		"https://checkpoint-sync.perf-devnet-3.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
 	},
 }
 
@@ -1117,8 +1122,8 @@ func bloatnetConfig() BeaconChainConfig {
 	cfg := MainnetBeaconConfig
 	cfg.ConfigName = "testnet"
 	cfg.MinGenesisActiveValidatorCount = 500
-	cfg.MinGenesisTime = 1751967000 // 2025-Jul-08 09:30:00 AM UTC
-	cfg.GenesisForkVersion = 0x10802764
+	cfg.MinGenesisTime = 1771423200 // 2026-Feb-19 02:00:00 AM UTC
+	cfg.GenesisForkVersion = 0x10364469
 	cfg.GenesisDelay = 60
 
 	// Time parameters
@@ -1138,15 +1143,15 @@ func bloatnetConfig() BeaconChainConfig {
 
 	// Forking - all forks at epoch 0 except Fulu
 	cfg.AltairForkEpoch = 0
-	cfg.AltairForkVersion = 0x20802764
+	cfg.AltairForkVersion = 0x20364469
 	cfg.BellatrixForkEpoch = 0
-	cfg.BellatrixForkVersion = 0x30802764
+	cfg.BellatrixForkVersion = 0x30364469
 	cfg.CapellaForkEpoch = 0
-	cfg.CapellaForkVersion = 0x40802764
+	cfg.CapellaForkVersion = 0x40364469
 	cfg.DenebForkEpoch = 0
-	cfg.DenebForkVersion = 0x50802764
+	cfg.DenebForkVersion = 0x50364469
 	cfg.ElectraForkEpoch = 0
-	cfg.ElectraForkVersion = 0x60802764
+	cfg.ElectraForkVersion = 0x60364469
 	cfg.FuluForkEpoch = math.MaxUint64
 	cfg.FuluForkVersion = 0x70000000
 	cfg.TerminalTotalDifficulty = "58750000000000000000000"
