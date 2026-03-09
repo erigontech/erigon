@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+"""Test group partitioning for CI and local use.
+
+Subcommands:
+  names               Print group names as JSON array.
+  packages <group>    Print packages for a group (one per line).
+                      Reads package list from stdin (go list ./...).
+"""
+
+import json
+import sys
+from collections import OrderedDict
+from collections.abc import Iterator
+
+MODULE = "github.com/erigontech/erigon"
+
+GROUPS: OrderedDict[str, set[str]] = OrderedDict([
+    ("execution-eest-blockchain", {"./execution/tests/eest_blockchain/..."}),
+    ("execution-eest-devnet",     {"./execution/tests/eest_devnet/..."}),
+    ("execution-tests",           {"./execution/tests/..."}),
+    ("execution-other",         {"./execution/..."}),
+    ("consensus",               {"./cl/..."}),
+    ("core-rpc",                {"./db/...", "./node/...", "./txnprovider/...", "./p2p/...", "./rpc/..."}),
+    ("other",                   {"./..."}),
+])
+
+
+def pkg_match(pkg: str, spec: str) -> bool:
+    """Match a package import path against a Go package spec.
+
+    If spec starts with "./", pkg must start with MODULE; both prefixes are
+    stripped before matching. Otherwise the full import path is matched from
+    the start. In both cases a trailing /... matches the root and all children.
+    """
+    if spec.startswith("./"):
+        if pkg == MODULE:
+            target = ""
+        elif pkg.startswith(MODULE + "/"):
+            target = pkg[len(MODULE) + 1:]
+        else:
+            raise ValueError(f"package {pkg!r} does not have required prefix {MODULE!r}")
+        path = spec[2:]
+    else:
+        target = pkg
+        path = spec
+
+    if path == "...":
+        return True
+    if path.endswith("/..."):
+        root = path[:-4]
+        return target == root or target.startswith(root + "/")
+    return target == path
+
+
+def partition(packages: list[str], groups: OrderedDict[str, set[str]]) -> Iterator[tuple[str, list[str]]]:
+    all_pkgs = set(packages)
+    remaining = set(packages)
+
+    def claim(specs: set[str]) -> list[str]:
+        nonlocal remaining
+        out: list[str] = []
+        claimed: set[str] = set()
+        for spec in sorted(specs):
+            spec_all = {p for p in all_pkgs if pkg_match(p, spec)}
+            spec_now = spec_all & remaining
+            if not spec_now:
+                continue
+            if spec_all == spec_now:
+                out.append(spec)
+            else:
+                out.extend(sorted(spec_now))
+            claimed |= spec_now
+        remaining -= claimed
+        return out
+
+    for group, specs in groups.items():
+        yield group, claim(specs)
+
+
+def cmd_names() -> int:
+    print(json.dumps(list(GROUPS.keys())))
+    return 0
+
+
+def cmd_packages(group: str) -> int:
+    if group not in GROUPS:
+        print(f"error: unknown group {group!r}. Known groups: {', '.join(GROUPS)}", file=sys.stderr)
+        return 1
+    packages = [p for p in sys.stdin.read().splitlines() if p]
+    for name, pkgs in partition(packages, GROUPS):
+        if name == group:
+            for p in pkgs:
+                print(p)
+            return 0
+    return 0
+
+
+def main() -> int:
+    if len(sys.argv) < 2:
+        print(__doc__.strip(), file=sys.stderr)
+        return 1
+
+    cmd = sys.argv[1]
+    if cmd == "names":
+        return cmd_names()
+    elif cmd == "packages":
+        if len(sys.argv) != 3:
+            print("usage: test-groups packages <group>", file=sys.stderr)
+            return 1
+        return cmd_packages(sys.argv[2])
+    else:
+        print(f"error: unknown subcommand {cmd!r}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

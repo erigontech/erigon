@@ -80,7 +80,7 @@ func (ef *EliasFano) Size() datasize.ByteSize { return datasize.ByteSize(len(ef.
 func (ef *EliasFano) AddOffset(offset uint64) {
 	//fmt.Printf("0x%x,\n", offset)
 	if ef.l != 0 {
-		setBits(ef.lowerBits, ef.i*ef.l, int(ef.l), offset&ef.lowerBitsMask)
+		setBits(ef.lowerBits, ef.i*ef.l, offset&ef.lowerBitsMask)
 	}
 	//pos := ((offset - ef.delta) >> ef.l) + ef.i
 	set(ef.upperBits, (offset>>ef.l)+ef.i)
@@ -728,7 +728,7 @@ func (ef *DoubleEliasFano) Build(cumKeys []uint64, position []uint64) {
 	for i, cumDelta, bitDelta := uint64(0), uint64(0), uint64(0); i <= ef.numBuckets; i, cumDelta, bitDelta = i+1, cumDelta+ef.cumKeysMinDelta, bitDelta+ef.posMinDelta {
 		if ef.lCumKeys != 0 {
 			//fmt.Printf("i=%d, set_bits cum for %d = %b\n", i, cumKeys[i]-cumDelta, (cumKeys[i]-cumDelta)&ef.lowerBitsMaskCumKeys)
-			setBits(ef.lowerBits, i*(ef.lCumKeys+ef.lPosition), int(ef.lCumKeys), (cumKeys[i]-cumDelta)&ef.lowerBitsMaskCumKeys)
+			setBits(ef.lowerBits, i*(ef.lCumKeys+ef.lPosition), (cumKeys[i]-cumDelta)&ef.lowerBitsMaskCumKeys)
 			//fmt.Printf("loweBits %b\n", ef.lowerBits)
 		}
 		set(ef.upperBitsCumKeys, ((cumKeys[i]-cumDelta)>>ef.lCumKeys)+i)
@@ -736,7 +736,7 @@ func (ef *DoubleEliasFano) Build(cumKeys []uint64, position []uint64) {
 
 		if ef.lPosition != 0 {
 			//fmt.Printf("i=%d, set_bits pos for %d = %b\n", i, position[i]-bitDelta, (position[i]-bitDelta)&ef.lowerBitsMaskPosition)
-			setBits(ef.lowerBits, i*(ef.lCumKeys+ef.lPosition)+ef.lCumKeys, int(ef.lPosition), (position[i]-bitDelta)&ef.lowerBitsMaskPosition)
+			setBits(ef.lowerBits, i*(ef.lCumKeys+ef.lPosition)+ef.lCumKeys, (position[i]-bitDelta)&ef.lowerBitsMaskPosition)
 			//fmt.Printf("lowerBits %b\n", ef.lowerBits)
 		}
 		set(ef.upperBitsPosition, ((position[i]-bitDelta)>>ef.lPosition)+i)
@@ -802,18 +802,16 @@ func (ef *DoubleEliasFano) Build(cumKeys []uint64, position []uint64) {
 	//fmt.Printf("jump: %x\n", ef.jump)
 }
 
-// setBits assumes that bits are set in monotonic order, so that
-// we can skip the masking for the second word
-func setBits(bits []uint64, start uint64, width int, value uint64) {
+// setBits stores a value at bit position start.
+// All callers write in monotonic order, so target bits are guaranteed zero
+// and we can use |= instead of clear-and-set. The lowerBits slice always
+// has +1 padding word, making the unconditional second write safe.
+// When shift+width <= 64, value>>(64-shift) == 0, so the write is a no-op.
+func setBits(bits []uint64, start uint64, value uint64) {
 	idx64, shift := start>>6, int(start&63)
-	mask := (uint64(1)<<width - 1) << shift
-	//fmt.Printf("mask = %b, idx64 = %d\n", mask, idx64)
-	bits[idx64] = (bits[idx64] &^ mask) | (value << shift)
-	//fmt.Printf("start = %d, width = %d, shift + width = %d\n", start, width, shift+width)
-	if shift+width > 64 {
-		// changes two 64-bit words
-		bits[idx64+1] = value >> (64 - shift)
-	}
+	_ = bits[idx64+1] // BCE hint: proves both accesses are in-bounds
+	bits[idx64] |= value << shift
+	bits[idx64+1] |= value >> (64 - shift)
 }
 
 func set(bits []uint64, pos uint64) {
