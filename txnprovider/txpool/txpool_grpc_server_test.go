@@ -94,9 +94,10 @@ func TestQueryAllWithoutPanicUnknown(t *testing.T) {
 
 	// Prepare two alternating local transactions with the same nonce to exercise replacement
 	mkSlot := func(id byte, tip uint64) *TxnSlot {
+		to := common.Address{1}
 		s := &TxnSlot{
 			Txn: &types.DynamicFeeTransaction{
-				CommonTx: types.CommonTx{GasLimit: 21000},
+				CommonTx: types.CommonTx{GasLimit: 21000, To: &to},
 				TipCap:   uint256.NewInt(tip),
 				FeeCap:   uint256.NewInt(tip),
 			},
