@@ -106,7 +106,7 @@ func TestEngineApiGeneratedPayloadIncludesBlockAccessList(t *testing.T) {
 	})
 }
 
-func TestEngineApiBAlContractCreation(t *testing.T) {
+func TestEngineApiBALContractCreation(t *testing.T) {
 	if !dbg.Exec3Parallel {
 		t.Skip("requires parallel exec")
 	}
@@ -154,7 +154,7 @@ func TestEngineApiBAlContractCreation(t *testing.T) {
 	})
 }
 
-func TestEngineApiBAlStorageWrites(t *testing.T) {
+func TestEngineApiBALStorageWrites(t *testing.T) {
 	if !dbg.Exec3Parallel {
 		t.Skip("requires parallel exec")
 	}
@@ -213,7 +213,7 @@ func TestEngineApiBAlStorageWrites(t *testing.T) {
 	})
 }
 
-func TestEngineApiBAlMultiTxBlock(t *testing.T) {
+func TestEngineApiBALMultiTxBlock(t *testing.T) {
 	if !dbg.Exec3Parallel {
 		t.Skip("requires parallel exec")
 	}
@@ -310,7 +310,7 @@ func TestEngineApiBAlMultiTxBlock(t *testing.T) {
 	})
 }
 
-// TestEngineApiBAlMixedBlock packs a variety of transaction types into a single block
+// TestEngineApiBALMixedBlock packs a variety of transaction types into a single block
 // to exercise multiple state write paths through the BAL:
 //   - Simple ETH transfer (balance, nonce)
 //   - Contract deployment (code change)
@@ -323,7 +323,7 @@ func TestEngineApiBAlMultiTxBlock(t *testing.T) {
 //   - Block 2: ETH transfer + Token deploy + Changer.Change() + withdrawals
 //
 // Known issue: currently fails with BAL mismatch under parallel execution (#19668).
-func TestEngineApiBAlMixedBlock(t *testing.T) {
+func TestEngineApiBALMixedBlock(t *testing.T) {
 	if !dbg.Exec3Parallel {
 		t.Skip("requires parallel exec")
 	}
@@ -446,9 +446,9 @@ func TestEngineApiBAlMixedBlock(t *testing.T) {
 	})
 }
 
-// TestEngineApiBAlSelfDestruct tests BAL tracking when a contract self-destructs.
+// TestEngineApiBALSelfDestruct tests BAL tracking when a contract self-destructs.
 // Exercises storage writes followed by self-destruct in the same block.
-func TestEngineApiBAlSelfDestruct(t *testing.T) {
+func TestEngineApiBALSelfDestruct(t *testing.T) {
 	if !dbg.Exec3Parallel {
 		t.Skip("requires parallel exec")
 	}
