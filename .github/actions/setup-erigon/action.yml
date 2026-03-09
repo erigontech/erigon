@@ -97,7 +97,11 @@ runs:
         # determine per-file mtimes. Avoids the O(branches+tags) overhead that
         # actions/checkout incurs when fetch-depth: 0 fetches refs/heads/* and
         # refs/tags/* for the entire repo.
-        time git fetch --filter=${{ inputs.filter }} --unshallow --no-tags \
+        filter_arg=''
+        if [[ -n '${{ inputs.filter }}' ]]; then
+          filter_arg='--filter=${{ inputs.filter }}'
+        fi
+        time git fetch $filter_arg --unshallow --no-tags \
           --prune --no-recurse-submodules origin "$(git rev-parse HEAD)"
 
     - name: Compute submodule objects cache key
