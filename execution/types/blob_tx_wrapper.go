@@ -307,7 +307,7 @@ func (txw *BlobTxWrapper) GetBlobGas() uint64     { return txw.Tx.GetBlobGas() }
 func (txw *BlobTxWrapper) GetValue() *uint256.Int { return txw.Tx.GetValue() }
 func (txw *BlobTxWrapper) GetTo() *common.Address { return txw.Tx.GetTo() }
 
-func (txw *BlobTxWrapper) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
+func (txw *BlobTxWrapper) AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules) (*Message, error) {
 	return txw.Tx.AsMessage(s, baseFee, rules)
 }
 
@@ -316,10 +316,8 @@ func (txw *BlobTxWrapper) WithSignature(signer Signer, sig []byte) (Transaction,
 	if err != nil {
 		return nil, err
 	}
-	//goland:noinspection GoVetCopyLock
 	blobTxnWrapper := &BlobTxWrapper{
-		// it's ok to copy here - because it's constructor of object - no parallel access yet
-		Tx:             *signedCopy.(*BlobTx), //nolint
+		Tx:             signedCopy.(*BlobTx).copyData(),
 		WrapperVersion: txw.WrapperVersion,
 		Blobs:          make(Blobs, len(txw.Blobs)),
 		Commitments:    make(BlobKzgs, len(txw.Commitments)),

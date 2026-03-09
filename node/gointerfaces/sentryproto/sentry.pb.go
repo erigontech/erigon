@@ -1828,7 +1828,8 @@ const file_p2psentry_sentry_proto_rawDesc = "" +
 	"\x05ETH67\x10\x02\x12\t\n" +
 	"\x05ETH68\x10\x03\x12\t\n" +
 	"\x05ETH69\x10\x04\x12\b\n" +
-	"\x04WIT0\x10\x052\xcc\t\n" +
+	"\x04WIT0\x10\x052\xd5\n" +
+	"\n" +
 	"\x06Sentry\x127\n" +
 	"\tSetStatus\x12\x12.sentry.StatusData\x1a\x16.sentry.SetStatusReply\x12C\n" +
 	"\fPenalizePeer\x12\x1b.sentry.PenalizePeerRequest\x1a\x16.google.protobuf.Empty\x12O\n" +
@@ -1848,7 +1849,9 @@ const file_p2psentry_sentry_proto_rawDesc = "" +
 	"PeerEvents\x12\x19.sentry.PeerEventsRequest\x1a\x11.sentry.PeerEvent0\x01\x127\n" +
 	"\aAddPeer\x12\x16.sentry.AddPeerRequest\x1a\x14.sentry.AddPeerReply\x12@\n" +
 	"\n" +
-	"RemovePeer\x12\x19.sentry.RemovePeerRequest\x1a\x17.sentry.RemovePeerReply\x128\n" +
+	"RemovePeer\x12\x19.sentry.RemovePeerRequest\x1a\x17.sentry.RemovePeerReply\x12>\n" +
+	"\x0eAddTrustedPeer\x12\x16.sentry.AddPeerRequest\x1a\x14.sentry.AddPeerReply\x12G\n" +
+	"\x11RemoveTrustedPeer\x12\x19.sentry.RemovePeerRequest\x1a\x17.sentry.RemovePeerReply\x128\n" +
 	"\bNodeInfo\x12\x16.google.protobuf.Empty\x1a\x14.types.NodeInfoReplyB\x16Z\x14./sentry;sentryprotob\x06proto3"
 
 var (
@@ -1948,27 +1951,31 @@ var file_p2psentry_sentry_proto_depIdxs = []int32{
 	27, // 41: sentry.Sentry.PeerEvents:input_type -> sentry.PeerEventsRequest
 	13, // 42: sentry.Sentry.AddPeer:input_type -> sentry.AddPeerRequest
 	14, // 43: sentry.Sentry.RemovePeer:input_type -> sentry.RemovePeerRequest
-	34, // 44: sentry.Sentry.NodeInfo:input_type -> google.protobuf.Empty
-	18, // 45: sentry.Sentry.SetStatus:output_type -> sentry.SetStatusReply
-	34, // 46: sentry.Sentry.PenalizePeer:output_type -> google.protobuf.Empty
-	34, // 47: sentry.Sentry.SetPeerLatestBlock:output_type -> google.protobuf.Empty
-	34, // 48: sentry.Sentry.SetPeerMinimumBlock:output_type -> google.protobuf.Empty
-	34, // 49: sentry.Sentry.SetPeerBlockRange:output_type -> google.protobuf.Empty
-	19, // 50: sentry.Sentry.HandShake:output_type -> sentry.HandShakeReply
-	8,  // 51: sentry.Sentry.SendMessageByMinBlock:output_type -> sentry.SentPeers
-	8,  // 52: sentry.Sentry.SendMessageById:output_type -> sentry.SentPeers
-	8,  // 53: sentry.Sentry.SendMessageToRandomPeers:output_type -> sentry.SentPeers
-	8,  // 54: sentry.Sentry.SendMessageToAll:output_type -> sentry.SentPeers
-	15, // 55: sentry.Sentry.Messages:output_type -> sentry.InboundMessage
-	21, // 56: sentry.Sentry.Peers:output_type -> sentry.PeersReply
-	24, // 57: sentry.Sentry.PeerCount:output_type -> sentry.PeerCountReply
-	26, // 58: sentry.Sentry.PeerById:output_type -> sentry.PeerByIdReply
-	28, // 59: sentry.Sentry.PeerEvents:output_type -> sentry.PeerEvent
-	29, // 60: sentry.Sentry.AddPeer:output_type -> sentry.AddPeerReply
-	30, // 61: sentry.Sentry.RemovePeer:output_type -> sentry.RemovePeerReply
-	35, // 62: sentry.Sentry.NodeInfo:output_type -> types.NodeInfoReply
-	45, // [45:63] is the sub-list for method output_type
-	27, // [27:45] is the sub-list for method input_type
+	13, // 44: sentry.Sentry.AddTrustedPeer:input_type -> sentry.AddPeerRequest
+	14, // 45: sentry.Sentry.RemoveTrustedPeer:input_type -> sentry.RemovePeerRequest
+	34, // 46: sentry.Sentry.NodeInfo:input_type -> google.protobuf.Empty
+	18, // 47: sentry.Sentry.SetStatus:output_type -> sentry.SetStatusReply
+	34, // 48: sentry.Sentry.PenalizePeer:output_type -> google.protobuf.Empty
+	34, // 49: sentry.Sentry.SetPeerLatestBlock:output_type -> google.protobuf.Empty
+	34, // 50: sentry.Sentry.SetPeerMinimumBlock:output_type -> google.protobuf.Empty
+	34, // 51: sentry.Sentry.SetPeerBlockRange:output_type -> google.protobuf.Empty
+	19, // 52: sentry.Sentry.HandShake:output_type -> sentry.HandShakeReply
+	8,  // 53: sentry.Sentry.SendMessageByMinBlock:output_type -> sentry.SentPeers
+	8,  // 54: sentry.Sentry.SendMessageById:output_type -> sentry.SentPeers
+	8,  // 55: sentry.Sentry.SendMessageToRandomPeers:output_type -> sentry.SentPeers
+	8,  // 56: sentry.Sentry.SendMessageToAll:output_type -> sentry.SentPeers
+	15, // 57: sentry.Sentry.Messages:output_type -> sentry.InboundMessage
+	21, // 58: sentry.Sentry.Peers:output_type -> sentry.PeersReply
+	24, // 59: sentry.Sentry.PeerCount:output_type -> sentry.PeerCountReply
+	26, // 60: sentry.Sentry.PeerById:output_type -> sentry.PeerByIdReply
+	28, // 61: sentry.Sentry.PeerEvents:output_type -> sentry.PeerEvent
+	29, // 62: sentry.Sentry.AddPeer:output_type -> sentry.AddPeerReply
+	30, // 63: sentry.Sentry.RemovePeer:output_type -> sentry.RemovePeerReply
+	29, // 64: sentry.Sentry.AddTrustedPeer:output_type -> sentry.AddPeerReply
+	30, // 65: sentry.Sentry.RemoveTrustedPeer:output_type -> sentry.RemovePeerReply
+	35, // 66: sentry.Sentry.NodeInfo:output_type -> types.NodeInfoReply
+	47, // [47:67] is the sub-list for method output_type
+	27, // [27:47] is the sub-list for method input_type
 	27, // [27:27] is the sub-list for extension type_name
 	27, // [27:27] is the sub-list for extension extendee
 	0,  // [0:27] is the sub-list for field type_name

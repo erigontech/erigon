@@ -67,15 +67,13 @@ func BenchmarkEncodingLengthForStorage(b *testing.B) {
 	b.ResetTimer()
 	for _, test := range accountCases {
 		b.Run(fmt.Sprint(test.name), func(b *testing.B) {
-			lengths := make([]uint, b.N)
-
-			for i := 0; i < b.N; i++ {
+			var length uint
+			for b.Loop() {
 				b.StartTimer()
-				lengths[i] = test.acc.EncodingLengthForStorage()
+				length = test.acc.EncodingLengthForStorage()
 				b.StopTimer()
 			}
-
-			fmt.Fprint(io.Discard, lengths)
+			fmt.Fprint(io.Discard, length)
 		})
 	}
 }
@@ -119,15 +117,13 @@ func BenchmarkEncodingLengthForHashing(b *testing.B) {
 	b.ResetTimer()
 	for _, test := range accountCases {
 		b.Run(fmt.Sprint(test.name), func(bn *testing.B) {
-			lengths := make([]uint, bn.N)
-
-			for i := 0; i < bn.N; i++ {
+			var length uint
+			for bn.Loop() {
 				bn.StartTimer()
-				lengths[i] = test.acc.EncodingLengthForHashing()
+				length = test.acc.EncodingLengthForHashing()
 				bn.StopTimer()
 			}
-
-			fmt.Fprint(io.Discard, lengths)
+			fmt.Fprint(io.Discard, length)
 		})
 
 	}
@@ -175,7 +171,7 @@ func BenchmarkEncodingAccountForStorage(b *testing.B) {
 
 		//buf := make([]byte, test.acc.EncodingLengthForStorage())
 		b.Run(fmt.Sprint(test.name), func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				SerialiseV3(test.acc)
 				//test.acc.EncodeForStorage(buf) performance has degraded a bit because we are not using the same buf now
 			}
@@ -229,7 +225,7 @@ func BenchmarkEncodingAccountForHashing(b *testing.B) {
 	for _, test := range accountCases {
 		buf := make([]byte, test.acc.EncodingLengthForStorage())
 		b.Run(fmt.Sprint(test.name), func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				test.acc.EncodeForHashing(buf)
 			}
 		})
@@ -282,7 +278,7 @@ func BenchmarkDecodingAccount(b *testing.B) {
 	b.ResetTimer()
 	for _, test := range accountCases {
 		b.Run(fmt.Sprint(test.name), func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
+			for i := 0; b.Loop(); i++ {
 				println(test.name, i, b.N) //TODO: it just stucks w/o that print
 				b.StopTimer()
 				test.acc.Nonce = uint64(i)
@@ -350,7 +346,7 @@ func BenchmarkDecodingIncarnation(b *testing.B) { // V2 version of bench was a p
 	b.ResetTimer()
 	for _, test := range accountCases {
 		b.Run(fmt.Sprint(test.name), func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
+			for i := 0; b.Loop(); i++ {
 				println(test.name, i, b.N) //TODO: it just stucks w/o that print
 				b.StopTimer()
 
@@ -419,7 +415,7 @@ func BenchmarkRLPEncodingAccount(b *testing.B) {
 	b.ResetTimer()
 	for _, test := range accountCases {
 		b.Run(fmt.Sprint(test.name), func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				if err := test.acc.EncodeRLP(io.Discard); err != nil {
 					b.Fatal("cant encode the account", err, test)
 				}

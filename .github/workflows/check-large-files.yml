@@ -1,0 +1,25 @@
+name: Check large files
+
+on:
+  pull_request:
+    branches:
+      - main
+      - 'release/**'
+    types: [opened, reopened, synchronize, ready_for_review]
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          filter: blob:none
+
+      - name: Check for large files in PR
+        run: make check-large-files BASE=${{ github.event.pull_request.base.sha }}

@@ -64,14 +64,6 @@ func New(cfg *clparams.BeaconChainConfig) *CachingBeaconState {
 	return state
 }
 
-func NewFromRaw(r *raw.BeaconState) *CachingBeaconState {
-	state := &CachingBeaconState{
-		BeaconState: r,
-	}
-	state.InitBeaconState()
-	return state
-}
-
 func (b *CachingBeaconState) SetPreviousStateRoot(root common.Hash) {
 	b.previousStateRoot = root
 }

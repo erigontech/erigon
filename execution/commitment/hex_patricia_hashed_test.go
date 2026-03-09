@@ -1099,7 +1099,7 @@ func Test_HexPatriciaHashed_StateRestoreAndContinue(t *testing.T) {
 	// Previously we did not apply updates in this test - trieTwo simply read same commitment data from msOne.
 	// Now when branch data is written during ProcessKeys, need to use separated state for this exact case.
 	for ck, cv := range msOne.cm {
-		err = msTwo.PutBranch([]byte(ck), cv, nil, 0)
+		err = msTwo.PutBranch([]byte(ck), cv, nil)
 		require.NoError(t, err)
 	}
 
@@ -1988,12 +1988,12 @@ func sortUpdatesByHashIncrease(t *testing.T, hph *HexPatriciaHashed, plainKeys [
 		ku[i] = &KeyUpdate{plainKey: string(pk), hashedKey: KeyToHexNibbleHash(pk), update: &updates[i]}
 	}
 
-	sort.Slice(updates, func(i, j int) bool {
+	sort.Slice(ku, func(i, j int) bool {
 		return bytes.Compare(ku[i].hashedKey, ku[j].hashedKey) < 0
 	})
 
-	pks := make([][]byte, len(updates))
-	upds := make([]Update, len(updates))
+	pks := make([][]byte, len(ku))
+	upds := make([]Update, len(ku))
 	for i, u := range ku {
 		pks[i] = []byte(u.plainKey)
 		upds[i] = *u.update
@@ -2003,6 +2003,9 @@ func sortUpdatesByHashIncrease(t *testing.T, hph *HexPatriciaHashed, plainKeys [
 }
 
 func Test_WitnessTrie_GenerateWitness(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	// t.Parallel()
 
 	buildTrieAndWitness := func(t *testing.T, builder *UpdateBuilder, plainKeysToWitness [][]byte, keyExists []bool) {

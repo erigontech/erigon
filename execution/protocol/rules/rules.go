@@ -186,8 +186,8 @@ type EngineWriter interface {
 
 	// CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
 	// that a new block should have.
-	CalcDifficulty(chain ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64,
-		parentHash, parentUncleHash common.Hash, parentAuRaStep uint64) *big.Int
+	CalcDifficulty(chain ChainHeaderReader, time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64,
+		parentHash, parentUncleHash common.Hash, parentAuRaStep uint64) uint256.Int
 
 	// APIs returns the RPC APIs this rules engine provides.
 	APIs(chain ChainHeaderReader) []rpc.API

@@ -151,6 +151,11 @@ func (s *SequenceReader) Seek(v uint64) (uint64, bool) {
 	panic(fmt.Sprintf("unknown sequence encoding: %d", s.currentEnc))
 }
 
+func (s *SequenceReader) Has(v uint64) bool {
+	n, ok := s.Seek(v)
+	return ok && n == v
+}
+
 func (s *SequenceReader) Iterator(from int) stream.U64 {
 	switch s.currentEnc {
 	case SimpleEncoding:
@@ -187,31 +192,6 @@ func (s *SequenceReader) ReverseIterator(v int) stream.U64 {
 	}
 
 	panic(fmt.Sprintf("unknown sequence encoding: %d", s.currentEnc))
-}
-
-// Merge merges the other sequence into this one, returning a built SequenceBuilder
-// with outBaseNum. Both sequences must be pre-sorted.
-// Call AppendBytes on the result to serialize.
-func (s *SequenceReader) Merge(other *SequenceReader, outBaseNum uint64, it1, it2 *SequenceIterator) (*SequenceBuilder, error) {
-	it1.Reset(s, 0)
-	it2.Reset(other, 0)
-	newSeq := NewBuilder(outBaseNum, s.Count()+other.Count(), other.Max())
-	for it1.HasNext() {
-		v, err := it1.Next()
-		if err != nil {
-			return nil, err
-		}
-		newSeq.AddOffset(v)
-	}
-	for it2.HasNext() {
-		v, err := it2.Next()
-		if err != nil {
-			return nil, err
-		}
-		newSeq.AddOffset(v)
-	}
-	newSeq.Build()
-	return newSeq, nil
 }
 
 // SequenceIterator is a reusable iterator for SequenceReader.

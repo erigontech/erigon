@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"sync/atomic"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -87,8 +88,8 @@ type EVM struct {
 	// optional overridden set of precompiled contracts
 	precompiles PrecompiledContracts
 
-	hasher    keccakState // Keccak256 hasher instance shared across opcodes
-	hasherBuf common.Hash // Keccak256 hasher result array shared across opcodes
+	hasher    keccak.KeccakState // Keccak256 hasher instance shared across opcodes
+	hasherBuf common.Hash        // Keccak256 hasher result array shared across opcodes
 
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
@@ -199,6 +200,9 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		}(gas)
 	}
 
+	// BAL: record address access even if call fails due to gas/call depth/insufficient balance
+	evm.intraBlockState.MarkAddressAccess(addr, false)
+
 	if evm.config.NoRecursion && depth > 0 {
 		return nil, gas, nil
 	}
@@ -218,9 +222,6 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 			}
 		}
 	}
-
-	// BAL: record address access even if call fails due to gas/call depth and to precompiles
-	evm.intraBlockState.MarkAddressAccess(addr, false)
 
 	snapshot := evm.intraBlockState.PushSnapshot()
 	defer evm.intraBlockState.PopSnapshot(snapshot)
@@ -468,14 +469,9 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	ret, gasRemaining, err = evm.Run(contract, gasRemaining, nil, false)
 
 	// EIP-170: Contract code size limit
-	if err == nil && evm.chainRules.IsSpuriousDragon && len(ret) > evm.maxCodeSize() {
-		// Gnosis Chain prior to Shanghai didn't have EIP-170 enabled,
-		// but EIP-3860 (part of Shanghai) requires EIP-170.
-		if !evm.chainRules.IsAura || evm.config.HasEip3860(evm.chainRules) {
-			err = ErrMaxCodeSizeExceeded
-		}
+	if err == nil {
+		err = CheckMaxCodeSize(len(ret), evm.chainRules)
 	}
-
 	// Reject code starting with 0xEF if EIP-3541 is enabled.
 	if err == nil && evm.chainRules.IsLondon && len(ret) >= 1 && ret[0] == 0xEF {
 		err = ErrInvalidCode
@@ -509,13 +505,6 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	}
 
 	return ret, address, gasRemaining, err
-}
-
-func (evm *EVM) maxCodeSize() int {
-	if evm.chainConfig.Bor != nil && evm.chainConfig.Bor.IsAhmedabad(evm.Context.BlockNumber) {
-		return params.MaxCodeSizePostAhmedabad
-	}
-	return params.MaxCodeSize
 }
 
 // Create creates a new contract using code as deployment code.

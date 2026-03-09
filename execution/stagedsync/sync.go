@@ -491,7 +491,7 @@ func (s *Sync) PrintTimings() []any {
 
 func (s *Sync) runStage(stage *Stage, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, initialCycle, firstCycle bool, badBlockUnwind bool) (bool, error) {
 	start := time.Now()
-	s.logger.Debug(fmt.Sprintf("[%s] Starting Stage run", s.LogPrefix()))
+	//s.logger.Debug(fmt.Sprintf("[%s] Starting Stage run", s.LogPrefix()))
 	stageState, err := s.StageState(stage.ID, rwTx, initialCycle, firstCycle)
 	if err != nil {
 		return false, err

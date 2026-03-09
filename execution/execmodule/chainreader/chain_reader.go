@@ -48,11 +48,14 @@ type ChainReaderWriterEth1 struct {
 	fcuTimeoutMillis uint64
 }
 
-func NewChainReaderEth1(cfg *chain.Config, executionModule executionproto.ExecutionClient, fcuTimeoutMillis uint64) ChainReaderWriterEth1 {
+func NewChainReaderEth1(cfg *chain.Config, executionModule executionproto.ExecutionClient, fcuTimeout time.Duration) ChainReaderWriterEth1 {
+	if fcuTimeout > 0 && fcuTimeout < time.Millisecond {
+		panic("chain rw eth1: fcuTimeout must be at least 1ms or 0 for unlimited")
+	}
 	return ChainReaderWriterEth1{
 		cfg:              cfg,
 		executionModule:  executionModule,
-		fcuTimeoutMillis: fcuTimeoutMillis,
+		fcuTimeoutMillis: uint64(fcuTimeout.Milliseconds()),
 	}
 }
 

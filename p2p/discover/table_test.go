@@ -200,6 +200,9 @@ func checkIPLimitInvariant(t *testing.T, tab *Table) {
 }
 
 func TestTable_findnodeByID(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 
 	test := func(test *closeTest) bool {

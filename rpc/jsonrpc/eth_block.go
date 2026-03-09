@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -29,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -125,12 +125,12 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	coinbase := parent.Coinbase
 	header := &types.Header{
 		ParentHash: parent.Hash(),
-		Number:     new(big.Int).SetUint64(blockNumber),
 		GasLimit:   parent.GasLimit,
 		Time:       timestamp,
 		Difficulty: parent.Difficulty,
 		Coinbase:   coinbase,
 	}
+	header.Number.SetUint64(blockNumber)
 
 	signer := types.MakeSigner(chainConfig, blockNumber, timestamp)
 	blockCtx := transactions.NewEVMBlockContext(engine, header, stateBlockNumberOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
@@ -242,18 +242,9 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	if err != nil {
 		return nil, err
 	}
-	var borTx types.Transaction
-	var borTxHash common.Hash
-	if chainConfig.Bor != nil {
-		possibleBorTxnHash := bortypes.ComputeBorTxHash(b.NumberU64(), b.Hash())
-		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, possibleBorTxnHash)
-		if err != nil {
-			return nil, err
-		}
-		if ok {
-			borTx = bortypes.NewBorTransaction()
-			borTxHash = possibleBorTxnHash
-		}
+	borTx, borTxHash, err := api.lookupBorTx(ctx, chainConfig, b.NumberU64(), b.Hash())
+	if err != nil {
+		return nil, err
 	}
 
 	response, err := ethapi.RPCMarshalBlockEx(b, true, fullTx, borTx, borTxHash, additionalFields)
@@ -311,18 +302,9 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	if err != nil {
 		return nil, err
 	}
-	var borTx types.Transaction
-	var borTxHash common.Hash
-	if chainConfig.Bor != nil {
-		possibleBorTxnHash := bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash())
-		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, possibleBorTxnHash)
-		if err != nil {
-			return nil, err
-		}
-		if ok {
-			borTx = bortypes.NewBorTransaction()
-			borTxHash = possibleBorTxnHash
-		}
+	borTx, borTxHash, err := api.lookupBorTx(ctx, chainConfig, block.NumberU64(), block.Hash())
+	if err != nil {
+		return nil, err
 	}
 
 	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, borTx, borTxHash, additionalFields)
@@ -345,12 +327,14 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 	defer tx.Rollback()
 
 	if blockNr == rpc.PendingBlockNumber {
-		b, err := api.blockByNumberWithSenders(ctx, tx, blockNr.Uint64())
+		b, err := api.blockByNumber(ctx, blockNr, tx)
 		if err != nil {
 			return nil, err
 		}
 		if b == nil {
-			return nil, nil
+			// No pending block available: return 0x0
+			n := hexutil.Uint(0)
+			return &n, nil
 		}
 		n := hexutil.Uint(len(b.Transactions()))
 		return &n, nil
@@ -391,16 +375,12 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		return nil, err
 	}
 
-	if chainConfig.Bor != nil {
-		borStateSyncTxHash := bortypes.ComputeBorTxHash(blockNum, blockHash)
-
-		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxHash)
-		if err != nil {
-			return nil, err
-		}
-		if ok {
-			txCount++
-		}
+	borTx, _, err := api.lookupBorTx(ctx, chainConfig, blockNum, blockHash)
+	if err != nil {
+		return nil, err
+	}
+	if borTx != nil {
+		txCount++
 	}
 
 	numOfTx := hexutil.Uint(txCount)
@@ -438,21 +418,34 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 		return nil, err
 	}
 
-	if chainConfig.Bor != nil {
-		borStateSyncTxHash := bortypes.ComputeBorTxHash(blockNum, blockHash)
-
-		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxHash)
-		if err != nil {
-			return nil, err
-		}
-		if ok {
-			txCount++
-		}
+	borTx, _, err := api.lookupBorTx(ctx, chainConfig, blockNum, blockHash)
+	if err != nil {
+		return nil, err
+	}
+	if borTx != nil {
+		txCount++
 	}
 
 	numOfTx := hexutil.Uint(txCount)
 
 	return &numOfTx, nil
+}
+
+// lookupBorTx checks whether the given block has a Bor state-sync transaction.
+// Returns the synthetic transaction and its hash, or (nil, Hash{}, nil) if none.
+func (api *APIImpl) lookupBorTx(ctx context.Context, chainConfig *chain.Config, blockNum uint64, blockHash common.Hash) (types.Transaction, common.Hash, error) {
+	if chainConfig.Bor == nil {
+		return nil, common.Hash{}, nil
+	}
+	borTxHash := bortypes.ComputeBorTxHash(blockNum, blockHash)
+	_, ok, err := api.bridgeReader.EventTxnLookup(ctx, borTxHash)
+	if err != nil {
+		return nil, common.Hash{}, err
+	}
+	if !ok {
+		return nil, common.Hash{}, nil
+	}
+	return bortypes.NewBorTransaction(), borTxHash, nil
 }
 
 func (api *APIImpl) blockByNumber(ctx context.Context, blockNumber rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {
@@ -472,5 +465,6 @@ func (api *APIImpl) blockByNumber(ctx context.Context, blockNumber rpc.BlockNumb
 		return block, nil
 	}
 
-	return api.blockByNumberWithSenders(ctx, tx, blockNumber.Uint64())
+	// No pending block available: return nil
+	return nil, nil
 }

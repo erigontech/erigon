@@ -211,7 +211,7 @@ func (tab *Table) setFallbackNodes(nodes []*enode.Node) error {
 			return fmt.Errorf("bad bootstrap node %q: %v", n, err)
 		}
 		if tab.cfg.NetRestrict != nil && !tab.cfg.NetRestrict.ContainsAddr(n.IPAddr()) {
-			tab.log.Error("Bootstrap node filtered by netrestrict", "id", n.ID(), "ip", n.IPAddr())
+			tab.log.Error("[p2p] Bootstrap node filtered by netrestrict", "id", n.ID(), "ip", n.IPAddr())
 			continue
 		}
 		nursery = append(nursery, n)
@@ -453,7 +453,7 @@ func (tab *Table) loadSeedNodes() {
 		if tab.log.Enabled(context.Background(), log.LvlTrace) {
 			age := time.Since(tab.db.LastPongReceived(seed.ID(), seed.IPAddr()))
 			addr, _ := seed.UDPEndpoint()
-			tab.log.Trace("Found seed node in database", "id", seed.ID(), "addr", addr, "age", age)
+			tab.log.Trace("[p2p] Found seed node in database", "id", seed.ID(), "addr", addr, "age", age)
 		}
 		tab.mutex.Lock()
 		tab.handleAddNode(addNodeOp{node: seed, isInbound: false})
@@ -487,11 +487,11 @@ func (tab *Table) addIP(b *bucket, ip netip.Addr) bool {
 		return true
 	}
 	if !tab.ips.AddAddr(ip) {
-		tab.log.Debug("IP exceeds table limit", "ip", ip)
+		tab.log.Debug("[p2p] IP exceeds table limit", "ip", ip)
 		return false
 	}
 	if !b.ips.AddAddr(ip) {
-		tab.log.Debug("IP exceeds bucket limit", "ip", ip)
+		tab.log.Debug("[p2p] IP exceeds bucket limit", "ip", ip)
 		tab.ips.RemoveAddr(ip)
 		return false
 	}
@@ -603,7 +603,7 @@ func (tab *Table) deleteInBucket(b *bucket, id enode.ID) *tableNode {
 
 	// Add replacement.
 	if len(b.replacements) == 0 {
-		tab.log.Debug("Removed dead node", "b", b.index, "id", n.ID(), "ip", n.IPAddr())
+		tab.log.Debug("[p2p] Removed dead node", "b", b.index, "id", n.ID(), "ip", n.IPAddr())
 		return nil
 	}
 	rindex := tab.rand.Intn(len(b.replacements))
@@ -611,7 +611,7 @@ func (tab *Table) deleteInBucket(b *bucket, id enode.ID) *tableNode {
 	b.replacements = slices.Delete(b.replacements, rindex, rindex+1)
 	b.entries = append(b.entries, rep)
 	tab.nodeAdded(b, rep)
-	tab.log.Debug("Replaced dead node", "b", b.index, "id", n.ID(), "ip", n.IPAddr(), "r", rep.ID(), "rip", rep.IPAddr())
+	tab.log.Debug("[p2p] Replaced dead node", "b", b.index, "id", n.ID(), "ip", n.IPAddr(), "r", rep.ID(), "rip", rep.IPAddr())
 	return rep
 }
 

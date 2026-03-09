@@ -36,7 +36,7 @@ import (
 
 var errNotFound = errors.New("notfound")
 
-func (e *EthereumExecutionModule) parseSegmentRequest(ctx context.Context, tx kv.Tx, req *executionproto.GetSegmentRequest) (blockHash common.Hash, blockNumber uint64, err error) {
+func (e *ExecModule) parseSegmentRequest(ctx context.Context, tx kv.Tx, req *executionproto.GetSegmentRequest) (blockHash common.Hash, blockNumber uint64, err error) {
 	switch {
 	// Case 1: Only hash is given.
 	case req.BlockHash != nil && req.BlockNumber == nil:
@@ -65,7 +65,7 @@ func (e *EthereumExecutionModule) parseSegmentRequest(ctx context.Context, tx kv
 	return
 }
 
-func (e *EthereumExecutionModule) GetBody(ctx context.Context, req *executionproto.GetSegmentRequest) (*executionproto.GetBodyResponse, error) {
+func (e *ExecModule) GetBody(ctx context.Context, req *executionproto.GetSegmentRequest) (*executionproto.GetBodyResponse, error) {
 	// Invalid case: request is invalid.
 	if req == nil || (req.BlockHash == nil && req.BlockNumber == nil) {
 		return nil, errors.New("ethereumExecutionModule.GetBody: bad request")
@@ -95,7 +95,7 @@ func (e *EthereumExecutionModule) GetBody(ctx context.Context, req *executionpro
 	return &executionproto.GetBodyResponse{Body: moduleutil.ConvertRawBlockBodyToRpc(rawBody, blockNumber, blockHash)}, nil
 }
 
-func (e *EthereumExecutionModule) GetHeader(ctx context.Context, req *executionproto.GetSegmentRequest) (*executionproto.GetHeaderResponse, error) {
+func (e *ExecModule) GetHeader(ctx context.Context, req *executionproto.GetSegmentRequest) (*executionproto.GetHeaderResponse, error) {
 	// Invalid case: request is invalid.
 	if req == nil || (req.BlockHash == nil && req.BlockNumber == nil) {
 		return nil, errors.New("ethereumExecutionModule.GetHeader: bad request")
@@ -122,7 +122,7 @@ func (e *EthereumExecutionModule) GetHeader(ctx context.Context, req *executionp
 	return &executionproto.GetHeaderResponse{Header: moduleutil.HeaderToHeaderRPC(header)}, nil
 }
 
-func (e *EthereumExecutionModule) GetBodiesByHashes(ctx context.Context, req *executionproto.GetBodiesByHashesRequest) (*executionproto.GetBodiesBatchResponse, error) {
+func (e *ExecModule) GetBodiesByHashes(ctx context.Context, req *executionproto.GetBodiesByHashesRequest) (*executionproto.GetBodiesBatchResponse, error) {
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByHashes: could not begin database tx %w", err)
@@ -163,7 +163,7 @@ func (e *EthereumExecutionModule) GetBodiesByHashes(ctx context.Context, req *ex
 	return &executionproto.GetBodiesBatchResponse{Bodies: bodies}, nil
 }
 
-func (e *EthereumExecutionModule) GetBodiesByRange(ctx context.Context, req *executionproto.GetBodiesByRangeRequest) (*executionproto.GetBodiesBatchResponse, error) {
+func (e *ExecModule) GetBodiesByRange(ctx context.Context, req *executionproto.GetBodiesByRangeRequest) (*executionproto.GetBodiesBatchResponse, error) {
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByRange: could not begin database tx %w", err)
@@ -215,7 +215,7 @@ func (e *EthereumExecutionModule) GetBodiesByRange(ctx context.Context, req *exe
 	}, nil
 }
 
-func (e *EthereumExecutionModule) GetPayloadBodiesByHash(ctx context.Context, req *executionproto.GetPayloadBodiesByHashRequest) (*executionproto.GetPayloadBodiesBatchResponse, error) {
+func (e *ExecModule) GetPayloadBodiesByHash(ctx context.Context, req *executionproto.GetPayloadBodiesByHashRequest) (*executionproto.GetPayloadBodiesBatchResponse, error) {
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByHash: could not begin database tx %w", err)
@@ -264,7 +264,7 @@ func (e *EthereumExecutionModule) GetPayloadBodiesByHash(ctx context.Context, re
 	return &executionproto.GetPayloadBodiesBatchResponse{Bodies: bodies}, nil
 }
 
-func (e *EthereumExecutionModule) GetPayloadBodiesByRange(ctx context.Context, req *executionproto.GetPayloadBodiesByRangeRequest) (*executionproto.GetPayloadBodiesBatchResponse, error) {
+func (e *ExecModule) GetPayloadBodiesByRange(ctx context.Context, req *executionproto.GetPayloadBodiesByRangeRequest) (*executionproto.GetPayloadBodiesBatchResponse, error) {
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByRange: could not begin database tx %w", err)
@@ -324,7 +324,7 @@ func (e *EthereumExecutionModule) GetPayloadBodiesByRange(ctx context.Context, r
 	return &executionproto.GetPayloadBodiesBatchResponse{Bodies: bodies}, nil
 }
 
-func (e *EthereumExecutionModule) GetHeaderHashNumber(ctx context.Context, req *typesproto.H256) (*executionproto.GetHeaderHashNumberResponse, error) {
+func (e *ExecModule) GetHeaderHashNumber(ctx context.Context, req *typesproto.H256) (*executionproto.GetHeaderHashNumberResponse, error) {
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetHeaderHashNumber: could not begin database tx %w", err)
@@ -338,7 +338,7 @@ func (e *EthereumExecutionModule) GetHeaderHashNumber(ctx context.Context, req *
 	return &executionproto.GetHeaderHashNumberResponse{BlockNumber: blockNumber}, nil
 }
 
-func (e *EthereumExecutionModule) isCanonicalHash(ctx context.Context, tx kv.Tx, hash common.Hash) (bool, error) {
+func (e *ExecModule) isCanonicalHash(ctx context.Context, tx kv.Tx, hash common.Hash) (bool, error) {
 	blockNumber, err := e.blockReader.HeaderNumber(ctx, tx, hash)
 	if err != nil {
 		return false, fmt.Errorf("ethereumExecutionModule.isCanonicalHash: HeaderNumber error %w", err)
@@ -361,7 +361,7 @@ func (e *EthereumExecutionModule) isCanonicalHash(ctx context.Context, tx kv.Tx,
 	return expectedHash == hash, nil
 }
 
-func (e *EthereumExecutionModule) IsCanonicalHash(ctx context.Context, req *typesproto.H256) (*executionproto.IsCanonicalResponse, error) {
+func (e *ExecModule) IsCanonicalHash(ctx context.Context, req *typesproto.H256) (*executionproto.IsCanonicalResponse, error) {
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.CanonicalHash: could not begin database tx %w", err)
@@ -376,7 +376,7 @@ func (e *EthereumExecutionModule) IsCanonicalHash(ctx context.Context, req *type
 	return &executionproto.IsCanonicalResponse{Canonical: isCanonical}, nil
 }
 
-func (e *EthereumExecutionModule) CurrentHeader(ctx context.Context, _ *emptypb.Empty) (*executionproto.GetHeaderResponse, error) {
+func (e *ExecModule) CurrentHeader(ctx context.Context, _ *emptypb.Empty) (*executionproto.GetHeaderResponse, error) {
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.CurrentHeader: could not begin database tx %w", err)
@@ -402,7 +402,7 @@ func (e *EthereumExecutionModule) CurrentHeader(ctx context.Context, _ *emptypb.
 	}, nil
 }
 
-func (e *EthereumExecutionModule) GetTD(ctx context.Context, req *executionproto.GetSegmentRequest) (*executionproto.GetTDResponse, error) {
+func (e *ExecModule) GetTD(ctx context.Context, req *executionproto.GetSegmentRequest) (*executionproto.GetTDResponse, error) {
 	// Invalid case: request is invalid.
 	if req == nil || (req.BlockHash == nil && req.BlockNumber == nil) {
 		return nil, errors.New("ethereumExecutionModule.GetTD: bad request")
@@ -431,7 +431,7 @@ func (e *EthereumExecutionModule) GetTD(ctx context.Context, req *executionproto
 	return &executionproto.GetTDResponse{Td: moduleutil.ConvertBigIntToRpc(td)}, nil
 }
 
-func (e *EthereumExecutionModule) GetForkChoice(ctx context.Context, _ *emptypb.Empty) (*executionproto.ForkChoice, error) {
+func (e *ExecModule) GetForkChoice(ctx context.Context, _ *emptypb.Empty) (*executionproto.ForkChoice, error) {
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetForkChoice: could not begin database tx %w", err)
@@ -444,7 +444,7 @@ func (e *EthereumExecutionModule) GetForkChoice(ctx context.Context, _ *emptypb.
 	}, nil
 }
 
-func (e *EthereumExecutionModule) FrozenBlocks(ctx context.Context, _ *emptypb.Empty) (*executionproto.FrozenBlocksResponse, error) {
+func (e *ExecModule) FrozenBlocks(ctx context.Context, _ *emptypb.Empty) (*executionproto.FrozenBlocksResponse, error) {
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetForkChoice: could not begin database tx %w", err)

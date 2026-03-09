@@ -18,7 +18,6 @@ package stagedsync_test
 
 import (
 	"bytes"
-	"math/big"
 	"testing"
 	"time"
 
@@ -30,7 +29,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/execution/tests/mock"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -52,7 +51,7 @@ func TestBodiesCanonical(t *testing.T) {
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
-	m := mock.Mock(t)
+	m := execmoduletester.New(t)
 	require := require.New(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(err)
@@ -73,7 +72,7 @@ func TestBodiesCanonical(t *testing.T) {
 			err = bw.MakeBodiesCanonical(tx, 1)
 			require.NoError(err)
 		}
-		h.Number = new(big.Int).SetUint64(i)
+		h.Number.SetUint64(i)
 		hash := h.Hash()
 		err = rawdb.WriteHeader(tx, h)
 		require.NoError(err)
@@ -96,7 +95,7 @@ func TestBodiesCanonical(t *testing.T) {
 
 func TestBodiesUnwind(t *testing.T) {
 	require := require.New(t)
-	m := mock.Mock(t)
+	m := execmoduletester.New(t)
 	db := m.DB
 	tx, err := db.BeginRw(m.Ctx)
 	require.NoError(err)
@@ -109,7 +108,7 @@ func TestBodiesUnwind(t *testing.T) {
 	defer logEvery.Stop()
 
 	for i := uint64(1); i <= 10; i++ {
-		h.Number = new(big.Int).SetUint64(i)
+		h.Number.SetUint64(i)
 		hash := h.Hash()
 		err = rawdb.WriteHeader(tx, h)
 		require.NoError(err)

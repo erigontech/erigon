@@ -21,7 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
@@ -181,7 +181,7 @@ func ConvertRpcBlockToExecutionPayload(payload *executionproto.Block) *Execution
 	body := payload.Body
 
 	var bloom types.Bloom = gointerfaces.ConvertH2048ToBloom(header.LogsBloom)
-	baseFee := gointerfaces.ConvertH256ToUint256Int(header.BaseFeePerGas).ToBig()
+	baseFee := gointerfaces.ConvertH256ToUint256Int(header.BaseFeePerGas)
 
 	// Convert slice of hexutil.Bytes to a slice of slice of bytes
 	transactions := make([]hexutil.Bytes, len(body.Transactions))
@@ -201,7 +201,7 @@ func ConvertRpcBlockToExecutionPayload(payload *executionproto.Block) *Execution
 		GasUsed:       hexutil.Uint64(header.GasUsed),
 		Timestamp:     hexutil.Uint64(header.Timestamp),
 		ExtraData:     header.ExtraData,
-		BaseFeePerGas: (*hexutil.Big)(baseFee),
+		BaseFeePerGas: (*hexutil.Big)(baseFee.ToBig()),
 		BlockHash:     gointerfaces.ConvertH256ToHash(header.BlockHash),
 		Transactions:  transactions,
 	}
@@ -223,7 +223,7 @@ func ConvertRpcBlockToExecutionPayload(payload *executionproto.Block) *Execution
 
 func ConvertPayloadFromRpc(payload *typesproto.ExecutionPayload) *ExecutionPayload {
 	var bloom types.Bloom = gointerfaces.ConvertH2048ToBloom(payload.LogsBloom)
-	baseFee := gointerfaces.ConvertH256ToUint256Int(payload.BaseFeePerGas).ToBig()
+	baseFee := gointerfaces.ConvertH256ToUint256Int(payload.BaseFeePerGas)
 
 	// Convert slice of hexutil.Bytes to a slice of slice of bytes
 	transactions := make([]hexutil.Bytes, len(payload.Transactions))
@@ -243,7 +243,7 @@ func ConvertPayloadFromRpc(payload *typesproto.ExecutionPayload) *ExecutionPaylo
 		GasUsed:       hexutil.Uint64(payload.GasUsed),
 		Timestamp:     hexutil.Uint64(payload.Timestamp),
 		ExtraData:     payload.ExtraData,
-		BaseFeePerGas: (*hexutil.Big)(baseFee),
+		BaseFeePerGas: (*hexutil.Big)(baseFee.ToBig()),
 		BlockHash:     gointerfaces.ConvertH256ToHash(payload.BlockHash),
 		Transactions:  transactions,
 	}
@@ -330,8 +330,6 @@ func ConvertPayloadId(payloadId uint64) *hexutil.Bytes {
 
 func ExecutionPayloadToBlock(payload *typesproto.ExecutionPayload, parentBeaconBlockRoot *common.Hash) (*types.Block, error) {
 	var bloom types.Bloom = gointerfaces.ConvertH2048ToBloom(payload.LogsBloom)
-	baseFee := gointerfaces.ConvertH256ToUint256Int(payload.BaseFeePerGas).ToBig()
-
 	txRaw := make([][]byte, len(payload.Transactions))
 	for i, tx := range payload.Transactions {
 		txRaw[i] = tx
@@ -344,15 +342,15 @@ func ExecutionPayloadToBlock(payload *typesproto.ExecutionPayload, parentBeaconB
 		ReceiptHash: gointerfaces.ConvertH256ToHash(payload.ReceiptRoot),
 		Bloom:       bloom,
 		MixDigest:   gointerfaces.ConvertH256ToHash(payload.PrevRandao),
-		Number:      new(big.Int).SetUint64(payload.BlockNumber),
+		Number:      *new(uint256.Int).SetUint64(payload.BlockNumber),
 		GasLimit:    payload.GasLimit,
 		GasUsed:     payload.GasUsed,
 		Time:        payload.Timestamp,
 		Extra:       payload.ExtraData,
-		BaseFee:     baseFee,
+		BaseFee:     gointerfaces.ConvertH256ToUint256Int(payload.BaseFeePerGas),
 		TxHash:      types.DeriveSha(types.BinaryTransactions(txRaw)),
 		UncleHash:   empty.UncleHash,
-		Difficulty:  merge.ProofOfStakeDifficulty,
+		Difficulty:  *merge.ProofOfStakeDifficulty,
 		Nonce:       merge.ProofOfStakeNonce,
 	}
 

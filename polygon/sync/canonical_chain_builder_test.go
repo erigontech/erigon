@@ -18,11 +18,10 @@ package sync
 
 import (
 	"context"
-	"errors"
-	"math/big"
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -32,9 +31,6 @@ import (
 type mockDifficultyCalculator struct{}
 
 func (*mockDifficultyCalculator) HeaderDifficulty(_ context.Context, header *types.Header) (uint64, error) {
-	if header.Difficulty == nil {
-		return 0, errors.New("unset header.Difficulty")
-	}
 	return header.Difficulty.Uint64(), nil
 }
 
@@ -47,9 +43,7 @@ func (v *mockHeaderValidator) ValidateHeader(_ context.Context, _ *types.Header,
 func (v *mockHeaderValidator) UpdateLatestVerifiedHeader(header *types.Header) {}
 
 func makeRoot() *types.Header {
-	return &types.Header{
-		Number: big.NewInt(0),
-	}
+	return &types.Header{}
 }
 
 func makeCCB(root *types.Header) *CanonicalChainBuilder {
@@ -80,8 +74,8 @@ func (test *connectCCBTest) makeHeader(parent *types.Header, difficulty uint64) 
 	test.currentHeaderTime++
 	return &types.Header{
 		ParentHash: parent.Hash(),
-		Difficulty: new(big.Int).SetUint64(difficulty),
-		Number:     big.NewInt(parent.Number.Int64() + 1),
+		Difficulty: *uint256.NewInt(difficulty),
+		Number:     *uint256.NewInt(parent.Number.Uint64() + 1),
 		Time:       test.currentHeaderTime,
 		Extra:      make([]byte, types.ExtraVanityLength+types.ExtraSealLength),
 	}
@@ -400,7 +394,7 @@ func TestCCBPruneNode(t *testing.T) {
 	}
 	t.Run("unknown hash", func(t *testing.T) {
 		ex := constructExample()
-		headerU := &types.Header{Number: big.NewInt(777)}
+		headerU := &types.Header{Number: *uint256.NewInt(777)}
 		err := ex.ccb.PruneNode(headerU.Hash())
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "could not find node to prune")
@@ -502,8 +496,8 @@ func TestCCBLowestCommonAncestor(t *testing.T) {
 	_, err = ccb.Connect(ctx, []*types.Header{headerP})
 	require.NoError(t, err)
 	require.Equal(t, headerZ, ccb.Tip())
-	headerU := &types.Header{Number: big.NewInt(777)}
-	headerU2 := &types.Header{Number: big.NewInt(999)}
+	headerU := &types.Header{Number: *uint256.NewInt(777)}
+	headerU2 := &types.Header{Number: *uint256.NewInt(999)}
 	t.Run("LCA(R,U)=nil,false", func(t *testing.T) {
 		assertLca(t, ccb, headerR, headerU, nil, false)
 	})

@@ -18,16 +18,16 @@ package sentinel
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"testing"
+	"time"
 
 	"github.com/golang/snappy"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
-	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/antiquary"
@@ -56,9 +56,50 @@ import (
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
+// noErr panics if err is non-nil. Used with retryTestFunc so recover() can catch it.
+func noErr(err error) {
+	if err != nil {
+		panic(err)
+	}
+}
+
+// assertPanic panics with a formatted message if cond is false.
+func assertPanic(cond bool, format string, args ...any) {
+	if !cond {
+		panic(fmt.Sprintf(format, args...))
+	}
+}
+
+// retryTestFunc retries fn up to maxRetries times if it panics (e.g. from noErr/assertPanic).
+// This works around transient libp2p races where protocol negotiation fails with
+// "failed to negotiate protocol: stream reset" on macOS CI runners.
+func retryTestFunc(t *testing.T, maxRetries int, fn func()) {
+	t.Helper()
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		failed := false
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					failed = true
+					t.Logf("attempt %d/%d failed: %v", attempt, maxRetries, r)
+				}
+			}()
+			fn()
+		}()
+		if !failed {
+			return
+		}
+		time.Sleep(time.Second)
+		if attempt == maxRetries {
+			// Last attempt — run without recovery so it properly fails the test
+			fn()
+		}
+	}
+}
+
 func getEthClock(t *testing.T) eth_clock.EthereumClock {
 	s, err := initial_state.GetGenesisState(chainspec.MainnetChainID)
-	require.NoError(t, err)
+	noErr(err)
 	return eth_clock.NewEthereumClock(s.GenesisTime(), s.GenesisValidatorsRoot(), s.BeaconConfig())
 }
 
@@ -68,18 +109,18 @@ func loadChain(t *testing.T) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, p
 	reader = antiquarytests.LoadChain(blocks, postState, db, t)
 
 	sn := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
-	require.NoError(t, sn.OnHeadState(postState))
+	noErr(sn.OnHeadState(postState))
 
-	ctx := context.Background()
+	ctx := t.Context()
 	vt := state_accessors.NewStaticValidatorTable()
-	a := antiquary.NewAntiquary(ctx, nil, preState, vt, &clparams.MainnetBeaconConfig, datadir.New("/tmp"), nil, db, nil, nil, reader, sn, log.New(), true, true, false, false, nil)
-	require.NoError(t, a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33))
+	a := antiquary.NewAntiquary(ctx, nil, preState, vt, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), nil, db, nil, nil, reader, sn, log.New(), true, true, false, false, nil)
+	noErr(a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33))
 	return
 }
 
 func newTestP2PManager(t *testing.T, ethClock eth_clock.EthereumClock) p2p.P2PManager {
 	networkConfig, beaconConfig := clparams.GetConfigsByNetwork(chainspec.MainnetChainID)
-	pm, err := p2p.NewP2Pmanager(context.Background(), &p2p.P2PConfig{
+	pm, err := p2p.NewP2Pmanager(t.Context(), &p2p.P2PConfig{
 		NetworkConfig: networkConfig,
 		BeaconConfig:  beaconConfig,
 		IpAddr:        "127.0.0.1",
@@ -88,7 +129,7 @@ func newTestP2PManager(t *testing.T, ethClock eth_clock.EthereumClock) p2p.P2PMa
 		NoDiscovery:   true,
 		MaxPeerCount:  100,
 	}, log.New(), ethClock)
-	require.NoError(t, err)
+	noErr(err)
 	t.Cleanup(func() { pm.Host().Close() })
 	return pm
 }
@@ -96,17 +137,17 @@ func newTestP2PManager(t *testing.T, ethClock eth_clock.EthereumClock) p2p.P2PMa
 func newTestSentinel(t *testing.T, ethClock eth_clock.EthereumClock, reader freezeblocks.BeaconSnapshotReader, db kv.RoDB, mockPeerDasStateReader *peerdasstatemock.MockPeerDasStateReader) *Sentinel {
 	networkConfig, beaconConfig := clparams.GetConfigsByNetwork(chainspec.MainnetChainID)
 	pm := newTestP2PManager(t, ethClock)
-	sent, err := New(context.Background(), &SentinelConfig{
+	sent, err := New(t.Context(), &SentinelConfig{
 		NetworkConfig: networkConfig,
 		BeaconConfig:  beaconConfig,
 		EnableBlocks:  true,
 		MaxPeerCount:  100,
 	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{}, nil, mockPeerDasStateReader, pm)
-	require.NoError(t, err)
+	noErr(err)
 	t.Cleanup(func() { sent.Stop() })
 
 	_, err = sent.Start()
-	require.NoError(t, err)
+	noErr(err)
 	return sent
 }
 
@@ -119,9 +160,9 @@ func newMockPeerDasStateReader(t *testing.T) *peerdasstatemock.MockPeerDasStateR
 	return m
 }
 
-func TestSentinelBlocksByRange(t *testing.T) {
+func testSentinelBlocksByRange(t *testing.T) {
 	ethClock := getEthClock(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	db, blocks, _, _, reader := loadChain(t)
 	_, beaconConfig := clparams.GetConfigsByNetwork(chainspec.MainnetChainID)
 
@@ -129,38 +170,31 @@ func TestSentinelBlocksByRange(t *testing.T) {
 	h := sent.Host()
 
 	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
-	require.NoError(t, err)
-	t.Cleanup(func() { host1.Close() })
+	noErr(err)
+	defer host1.Close()
 
-	err = h.Connect(ctx, peer.AddrInfo{
-		ID:    host1.ID(),
-		Addrs: host1.Addrs(),
-	})
-	require.NoError(t, err)
+	noErr(h.Connect(ctx, peer.AddrInfo{ID: host1.ID(), Addrs: host1.Addrs()}))
 
 	stream, err := host1.NewStream(ctx, h.ID(), protocol.ID(communication.BeaconBlocksByRangeProtocolV2))
-	require.NoError(t, err)
+	noErr(err)
+	defer stream.Close()
 
 	req := &cltypes.BeaconBlocksByRangeRequest{
 		StartSlot: blocks[0].Block.Slot,
 		Count:     6,
 	}
-
-	if err := ssz_snappy.EncodeAndWrite(stream, req); err != nil {
-		return
-	}
+	noErr(ssz_snappy.EncodeAndWrite(stream, req))
 
 	code := make([]byte, 1)
 	_, err = stream.Read(code)
-	require.NoError(t, err)
-	require.Equal(t, uint8(0), code[0])
+	noErr(err)
+	assertPanic(code[0] == uint8(0), "expected code[0]=0, got %d", code[0])
 
 	var w bytes.Buffer
 	_, err = io.Copy(&w, stream)
-	require.NoError(t, err)
+	noErr(err)
 
 	responsePacket := make([]*cltypes.SignedBeaconBlock, 0)
-
 	r := bytes.NewReader(w.Bytes())
 	for i := 0; i < len(blocks); i++ {
 		forkDigest := make([]byte, 4)
@@ -168,46 +202,42 @@ func TestSentinelBlocksByRange(t *testing.T) {
 			if err == io.EOF {
 				break
 			}
-			require.NoError(t, err)
+			noErr(err)
 		}
 
 		encodedLn, _, err := ssz_snappy.ReadUvarint(r)
-		require.NoError(t, err)
+		noErr(err)
 
 		raw := make([]byte, encodedLn)
 		sr := snappy.NewReader(r)
 		bytesRead := 0
 		for bytesRead < int(encodedLn) {
 			n, err := sr.Read(raw[bytesRead:])
-			require.NoError(t, err)
+			noErr(err)
 			bytesRead += n
 		}
-		respForkDigest := binary.BigEndian.Uint32(forkDigest)
-		require.NoError(t, err)
 
-		version, err := ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(respForkDigest))
-		require.NoError(t, err)
+		version, err := ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(binary.BigEndian.Uint32(forkDigest)))
+		noErr(err)
 
 		responseChunk := cltypes.NewSignedBeaconBlock(beaconConfig, clparams.DenebVersion)
-		require.NoError(t, responseChunk.DecodeSSZ(raw, int(version)))
+		noErr(responseChunk.DecodeSSZ(raw, int(version)))
 
 		responsePacket = append(responsePacket, responseChunk)
 		r.ReadByte()
 	}
-	require.Len(t, blocks, len(responsePacket))
+	assertPanic(len(blocks) == len(responsePacket), "expected %d blocks, got %d", len(blocks), len(responsePacket))
 	for i := 0; i < len(blocks); i++ {
 		root1, err := responsePacket[i].HashSSZ()
-		require.NoError(t, err)
-
+		noErr(err)
 		root2, err := blocks[i].HashSSZ()
-		require.NoError(t, err)
-
-		require.Equal(t, root1, root2)
+		noErr(err)
+		assertPanic(root1 == root2, "block %d root mismatch: %x != %x", i, root1, root2)
 	}
 }
 
-func TestSentinelBlocksByRoots(t *testing.T) {
-	ctx := context.Background()
+func testSentinelBlocksByRoots(t *testing.T) {
+	ctx := t.Context()
 	db, blocks, _, _, reader := loadChain(t)
 	ethClock := getEthClock(t)
 	_, beaconConfig := clparams.GetConfigsByNetwork(chainspec.MainnetChainID)
@@ -216,42 +246,35 @@ func TestSentinelBlocksByRoots(t *testing.T) {
 	h := sent.Host()
 
 	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
-	require.NoError(t, err)
-	t.Cleanup(func() { host1.Close() })
+	noErr(err)
+	defer host1.Close()
 
-	err = h.Connect(ctx, peer.AddrInfo{
-		ID:    host1.ID(),
-		Addrs: host1.Addrs(),
-	})
-	require.NoError(t, err)
+	noErr(h.Connect(ctx, peer.AddrInfo{ID: host1.ID(), Addrs: host1.Addrs()}))
 
 	stream, err := host1.NewStream(ctx, h.ID(), protocol.ID(communication.BeaconBlocksByRootProtocolV2))
-	require.NoError(t, err)
+	noErr(err)
+	defer stream.Close()
 
 	req := solid.NewHashList(1232)
 	rt, err := blocks[0].Block.HashSSZ()
-	require.NoError(t, err)
-
+	noErr(err)
 	req.Append(rt)
 	rt, err = blocks[1].Block.HashSSZ()
-	require.NoError(t, err)
+	noErr(err)
 	req.Append(rt)
 
-	if err := ssz_snappy.EncodeAndWrite(stream, req); err != nil {
-		return
-	}
+	noErr(ssz_snappy.EncodeAndWrite(stream, req))
 
 	code := make([]byte, 1)
 	_, err = stream.Read(code)
-	require.NoError(t, err)
-	require.Equal(t, uint8(0), code[0])
+	noErr(err)
+	assertPanic(code[0] == uint8(0), "expected code[0]=0, got %d", code[0])
 
 	var w bytes.Buffer
 	_, err = io.Copy(&w, stream)
-	require.NoError(t, err)
+	noErr(err)
 
 	responsePacket := make([]*cltypes.SignedBeaconBlock, 0)
-
 	r := bytes.NewReader(w.Bytes())
 	for i := 0; i < len(blocks); i++ {
 		forkDigest := make([]byte, 4)
@@ -259,47 +282,42 @@ func TestSentinelBlocksByRoots(t *testing.T) {
 			if err == io.EOF {
 				break
 			}
-			require.NoError(t, err)
+			noErr(err)
 		}
 
 		encodedLn, _, err := ssz_snappy.ReadUvarint(r)
-		require.NoError(t, err)
+		noErr(err)
 
 		raw := make([]byte, encodedLn)
 		sr := snappy.NewReader(r)
 		bytesRead := 0
 		for bytesRead < int(encodedLn) {
 			n, err := sr.Read(raw[bytesRead:])
-			require.NoError(t, err)
+			noErr(err)
 			bytesRead += n
 		}
-		respForkDigest := binary.BigEndian.Uint32(forkDigest)
-		require.NoError(t, err)
 
-		version, err := ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(respForkDigest))
-		require.NoError(t, err)
+		version, err := ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(binary.BigEndian.Uint32(forkDigest)))
+		noErr(err)
 
 		responseChunk := cltypes.NewSignedBeaconBlock(beaconConfig, clparams.DenebVersion)
-		require.NoError(t, responseChunk.DecodeSSZ(raw, int(version)))
+		noErr(responseChunk.DecodeSSZ(raw, int(version)))
 
 		responsePacket = append(responsePacket, responseChunk)
 		r.ReadByte()
 	}
-
-	require.Len(t, blocks, len(responsePacket))
+	assertPanic(len(blocks) == len(responsePacket), "expected %d blocks, got %d", len(blocks), len(responsePacket))
 	for i := 0; i < len(responsePacket); i++ {
 		root1, err := responsePacket[i].HashSSZ()
-		require.NoError(t, err)
-
+		noErr(err)
 		root2, err := blocks[i].HashSSZ()
-		require.NoError(t, err)
-
-		require.Equal(t, root1, root2)
+		noErr(err)
+		assertPanic(root1 == root2, "block %d root mismatch: %x != %x", i, root1, root2)
 	}
 }
 
-func TestSentinelStatusRequest(t *testing.T) {
-	ctx := context.Background()
+func testSentinelStatusRequest(t *testing.T) {
+	ctx := t.Context()
 	db, blocks, _, _, reader := loadChain(t)
 	ethClock := getEthClock(t)
 
@@ -307,14 +325,10 @@ func TestSentinelStatusRequest(t *testing.T) {
 	h := sent.Host()
 
 	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
-	require.NoError(t, err)
-	t.Cleanup(func() { host1.Close() })
+	noErr(err)
+	defer host1.Close()
 
-	err = h.Connect(ctx, peer.AddrInfo{
-		ID:    host1.ID(),
-		Addrs: host1.Addrs(),
-	})
-	require.NoError(t, err)
+	noErr(h.Connect(ctx, peer.AddrInfo{ID: host1.ID(), Addrs: host1.Addrs()}))
 
 	req := &cltypes.Status{
 		HeadRoot:       common.Hash(blocks[0].Block.ParentRoot),
@@ -325,23 +339,33 @@ func TestSentinelStatusRequest(t *testing.T) {
 	sent.SetStatus(req)
 
 	stream, err := host1.NewStream(ctx, h.ID(), protocol.ID(communication.StatusProtocolV1))
-	require.NoError(t, err)
+	noErr(err)
+	defer stream.Close()
 
-	if err := ssz_snappy.EncodeAndWrite(stream, req); err != nil {
-		return
-	}
+	noErr(ssz_snappy.EncodeAndWrite(stream, req))
 
 	code := make([]byte, 1)
 	_, err = stream.Read(code)
-	require.NoError(t, err)
-	require.Equal(t, uint8(0), code[0])
+	noErr(err)
+	assertPanic(code[0] == uint8(0), "expected code[0]=0, got %d", code[0])
 
 	resp := &cltypes.Status{}
-	err = ssz_snappy.DecodeAndReadNoForkDigest(stream, resp, 0)
-	require.NoError(t, err)
+	noErr(ssz_snappy.DecodeAndReadNoForkDigest(stream, resp, 0))
 
-	require.Equal(t, req.HeadRoot, resp.HeadRoot)
-	require.Equal(t, req.HeadSlot, resp.HeadSlot)
-	require.Equal(t, req.FinalizedRoot, resp.FinalizedRoot)
-	require.Equal(t, req.FinalizedEpoch, resp.FinalizedEpoch)
+	assertPanic(req.HeadRoot == resp.HeadRoot, "HeadRoot mismatch: %v != %v", req.HeadRoot, resp.HeadRoot)
+	assertPanic(req.HeadSlot == resp.HeadSlot, "HeadSlot mismatch: %v != %v", req.HeadSlot, resp.HeadSlot)
+	assertPanic(req.FinalizedRoot == resp.FinalizedRoot, "FinalizedRoot mismatch: %v != %v", req.FinalizedRoot, resp.FinalizedRoot)
+	assertPanic(req.FinalizedEpoch == resp.FinalizedEpoch, "FinalizedEpoch mismatch: %v != %v", req.FinalizedEpoch, resp.FinalizedEpoch)
+}
+
+func TestSentinelBlocksByRange(t *testing.T) {
+	retryTestFunc(t, 3, func() { testSentinelBlocksByRange(t) })
+}
+
+func TestSentinelBlocksByRoots(t *testing.T) {
+	retryTestFunc(t, 3, func() { testSentinelBlocksByRoots(t) })
+}
+
+func TestSentinelStatusRequest(t *testing.T) {
+	retryTestFunc(t, 3, func() { testSentinelStatusRequest(t) })
 }
