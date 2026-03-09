@@ -581,29 +581,3 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 		}
 	})
 }
-
-func TestBlockGasAccounting(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-	if runtime.GOOS == "windows" {
-		// TODO(yperbasis, mh0lt)
-		t.Skip("fix me on windows please")
-	}
-
-	t.Parallel()
-	defer log.Root().SetHandler(log.Root().GetHandler())
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
-	dir := filepath.Join(eestDir, "blockchain_tests_devnet")
-	bt := new(testMatcher)
-	// to run only tests for 1 eip do:
-	bt.whitelist(`.*eip7778_block_gas_accounting_without_refunds.*`)
-
-	bt.walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
-		// import pre accounts & construct test genesis block & state root
-		test.ExperimentalBAL = true // TODO eventually remove this from BlockTest and run normally
-		if err := bt.checkFailure(t, test.Run(t)); err != nil {
-			t.Error(err)
-		}
-	})
-}

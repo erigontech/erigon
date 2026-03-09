@@ -86,7 +86,7 @@ type StateTransition struct {
 	msg          Message
 	gasRemaining mdgas.MdGas
 	blockGasUsed uint64 // Gas used by the transaction relevant for block limit accounting - see EIP-7778
-	refund       uint64
+	txnGasUsed   uint64
 	gasPrice     *uint256.Int
 	feeCap       *uint256.Int
 	tipCap       *uint256.Int
@@ -410,7 +410,7 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, false)
 
 	result := &evmtypes.ExecutionResult{
-		ReceiptGasUsed:      st.gasUsed(),
+		ReceiptGasUsed:      st.txnGasUsed,
 		BlockGasUsed:        st.blockGasUsed,
 		Err:                 vmerr,
 		Reverted:            errors.Is(vmerr, vm.ErrExecutionReverted),
@@ -601,28 +601,33 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		}
 		mdGasUsed := st.mdGasUsed()
 		gasUsed := mdGasUsed.Total()
-		stateRefund := st.state.GetRefund()
-		st.refund = min(gasUsed/refundQuotient, stateRefund.Total())
 		if rules.IsAmsterdam {
 			// EIP-7778: Block Gas Accounting without Refunds
-			mdGasUsed.Regular = max(mdGasUsed.Regular, intrinsicGasResult.FloorGasCost)
+			refund := min(gasUsed/refundQuotient, st.state.GetRefund().Total())
+			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, gasUsed-refund)
 			// EIP-8037: State Creation Gas Cost Increase
+			mdGasUsed.Regular = max(mdGasUsed.Regular, intrinsicGasResult.FloorGasCost)
 			st.blockGasUsed = mdGasUsed.Bottleneck()
 		} else if rules.IsPrague {
-			st.blockGasUsed = max(intrinsicGasResult.FloorGasCost, gasUsed-st.refund)
+			refund := min(gasUsed/refundQuotient, st.state.GetRefund().Regular)
+			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, gasUsed-refund)
+			st.blockGasUsed = st.txnGasUsed
 		} else {
-			st.blockGasUsed = gasUsed - st.refund
+			st.txnGasUsed = gasUsed
+			st.blockGasUsed = st.txnGasUsed
 		}
 		st.refundGas()
 	} else if rules.IsAmsterdam {
 		mdGasUsed := st.mdGasUsed()
+		st.txnGasUsed = max(mdGasUsed.Total(), intrinsicGasResult.FloorGasCost)
 		mdGasUsed.Regular = max(mdGasUsed.Regular, intrinsicGasResult.FloorGasCost)
 		st.blockGasUsed = mdGasUsed.Bottleneck()
 	} else if rules.IsPrague {
-		st.blockGasUsed = max(intrinsicGasResult.FloorGasCost, st.gasUsed())
-		st.gasRemaining.Regular = st.initialGas.Regular - st.blockGasUsed
+		st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.mdGasUsed().Regular)
+		st.blockGasUsed = st.txnGasUsed
 	} else {
-		st.blockGasUsed = st.gasUsed()
+		st.txnGasUsed = st.mdGasUsed().Regular
+		st.blockGasUsed = st.txnGasUsed
 	}
 	// Also return remaining gas to the block gas counter so it is
 	// available for the next transaction.
@@ -637,7 +642,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		}
 	}
 
-	tipAmount := u256.Mul(u256.U64(st.gasUsed()), effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
+	tipAmount := u256.Mul(u256.U64(st.txnGasUsed), effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
 
 	if !st.noFeeBurnAndTip {
 		if err := st.state.AddBalance(coinbase, tipAmount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
@@ -651,7 +656,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	if !msg.IsFree() && rules.IsLondon {
 		burntContractAddress = st.evm.ChainConfig().GetBurntContract(st.evm.Context.BlockNumber)
 		if !burntContractAddress.IsNil() {
-			burnAmount = u256.Mul(u256.U64(st.gasUsed()), st.evm.Context.BaseFee)
+			burnAmount = u256.Mul(u256.U64(st.txnGasUsed), st.evm.Context.BaseFee)
 
 			if rules.IsAura && rules.IsPrague {
 				// https://github.com/gnosischain/specs/blob/master/network-upgrades/pectra.md#eip-4844-pectra
@@ -665,11 +670,11 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	}
 
 	if dbg.TraceGas || st.state.Trace() || dbg.TraceAccount(st.msg.From().Handle()) {
-		fmt.Printf("%d (%d.%d) Fees %x: tipped: %d, burnt: %d, price: %d, gas: %d\n", st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), &tipAmount, &burnAmount, st.gasPrice, st.gasUsed())
+		fmt.Printf("%d (%d.%d) Fees %x: tipped: %d, burnt: %d, price: %d, gas: %d\n", st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), &tipAmount, &burnAmount, st.gasPrice, st.txnGasUsed)
 	}
 
 	result = &evmtypes.ExecutionResult{
-		ReceiptGasUsed:      st.gasUsed(),
+		ReceiptGasUsed:      st.txnGasUsed,
 		BlockGasUsed:        st.blockGasUsed,
 		Err:                 vmerr,
 		Reverted:            errors.Is(vmerr, vm.ErrExecutionReverted),
@@ -790,16 +795,11 @@ func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contra
 
 func (st *StateTransition) refundGas() {
 	// Return ETH for remaining gas, exchanged at the original rate.
-	remaining := u256.Mul(u256.U64(st.gasRemaining.Total()+st.refund), *st.gasPrice)
+	remaining := u256.Mul(u256.U64(st.initialGas.Total()-st.txnGasUsed), *st.gasPrice)
 	if dbg.TraceGas || st.state.Trace() || dbg.TraceAccount(st.msg.From().Handle()) {
 		fmt.Printf("%d (%d.%d) Refund %x: remaining: %d, price: %d val: %d\n", st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), st.gasRemaining, st.gasPrice, &remaining)
 	}
 	st.state.AddBalance(st.msg.From(), remaining, tracing.BalanceIncreaseGasReturn)
-}
-
-// Gas used by the transaction with refunds (what the user pays) - see EIP-7778
-func (st *StateTransition) gasUsed() uint64 {
-	return st.mdGasUsed().Total() - st.refund
 }
 
 func (st *StateTransition) mdGasUsed() mdgas.MdGas {
