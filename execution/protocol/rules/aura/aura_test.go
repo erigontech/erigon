@@ -152,7 +152,7 @@ func TestEmptySystemAccountCreation(t *testing.T) {
 	ctx := context.Background()
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
-	db := testutil.TemporalDB(t)
+	db := testutil.TemporalDBWithDirs(t, dirs)
 	tx, domains := testutil.TemporalTxSD(t, db)
 
 	// Replay genesis block the same way exec3 does (see txtask.go):

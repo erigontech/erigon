@@ -30,7 +30,11 @@ import (
 )
 
 func TemporalDB(t testing.TB) kv.TemporalRwDB {
-	return temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	return TemporalDBWithDirs(t, datadir.New(t.TempDir()))
+}
+
+func TemporalDBWithDirs(t testing.TB, dirs datadir.Dirs) kv.TemporalRwDB {
+	return temporaltest.NewTestDB(t, dirs)
 }
 
 func TemporalTxSD(t testing.TB, db kv.TemporalRwDB) (kv.TemporalRwTx, *execctx.SharedDomains) {
