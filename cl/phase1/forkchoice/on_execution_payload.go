@@ -97,7 +97,7 @@ func (f *ForkChoiceStore) verifyEnvelopeBuilderSignature(
 	if builders == nil {
 		return errors.New("builders not found in state")
 	}
-	if int(builderIndex) >= builders.Len() {
+	if builderIndex >= uint64(builders.Len()) {
 		return fmt.Errorf("builder index %d out of range (max: %d)", builderIndex, builders.Len())
 	}
 	builder := builders.Get(int(builderIndex))
@@ -306,9 +306,11 @@ func (f *ForkChoiceStore) OnExecutionPayload(ctx context.Context, signedEnvelope
 	}
 
 	// Validate envelope against block (bid matching + signature verification)
-	// This is done regardless of validatePayload flag for security
-	if err := f.validateEnvelopeAgainstBlock(signedEnvelope, block, blockStateCopy); err != nil {
-		return fmt.Errorf("OnExecutionPayload: envelope validation failed: %w", err)
+	// Skip during forward sync (validatePayload=false) when we trust the chain
+	if validatePayload {
+		if err := f.validateEnvelopeAgainstBlock(signedEnvelope, block, blockStateCopy); err != nil {
+			return fmt.Errorf("OnExecutionPayload: envelope validation failed: %w", err)
+		}
 	}
 
 	// Check if blob data is available (skip during forward sync when data comes from snapshots)
