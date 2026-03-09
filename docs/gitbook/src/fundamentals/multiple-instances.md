@@ -20,7 +20,6 @@ To avoid conflicts between instances, you must define **7 essential flags** for 
 * `--authrpc.port` - Engine API port (default: `8551`)
 * `--torrent.port` - BitTorrent protocol port (default: `42069`)
 * `--private.api.addr` - Internal gRPC API address (default: `127.0.0.1:9090`)
-* `--mcp.port` - MCP server port (default: `8553`), or `--mcp.disable` to turn it off
 
 ## Example Configuration
 
@@ -36,7 +35,6 @@ Here's how to run mainnet and sepolia instances simultaneously:
   --authrpc.port=8551 \
   --torrent.port=42069 \
   --private.api.addr=127.0.0.1:9090 \
-  --mcp.port=8553 \
   --http --ws \
   --http.api=eth,debug,net,trace,web3,erigon
 
@@ -49,7 +47,6 @@ Here's how to run mainnet and sepolia instances simultaneously:
   --authrpc.port=8552 \
   --torrent.port=42068 \
   --private.api.addr=127.0.0.1:9091 \
-  --mcp.port=8554 \
   --http --ws \
   --http.api=eth,debug,net,trace,web3,erigon
 ```
@@ -98,7 +95,6 @@ For multiple instances, consider adjusting database parameters to reduce resourc
 | Engine    | 8551         | TCP      | Engine API (Private)     |
 | Sentry    | 30303/30304  | TCP/UDP  | P2P Peering (Public)     |
 | RPCDaemon | 8545         | TCP      | HTTP/WebSocket (Private) |
-| MCP       | 8553         | TCP      | MCP Server (Private)     |
 
 ### 4. Service Separation
 
