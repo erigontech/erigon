@@ -348,6 +348,10 @@ func (ba *BlockAssembler) AssembleBlock(stateReader state.StateReader, ibs *stat
 	}
 
 	if ba.HasBAL() {
+		// Set block-end tx context so that system-call I/O (withdrawals, EIP-7002,
+		// EIP-7251, etc.) is recorded at TxIndex = len(userTxns), matching the
+		// validator path (exec3_parallel.go: ibs.SetTxContext(finalVersion.BlockNum, finalVersion.TxIndex)).
+		ibs.SetTxContext(ba.Header.Number.Uint64(), len(ba.Txns))
 		ibs.ResetVersionedIO()
 	}
 	block, ba.Requests, err = protocol.FinalizeBlockExecution(ba.cfg.Engine, stateReader, ba.Header, ba.Txns, ba.Uncles,

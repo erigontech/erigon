@@ -321,12 +321,7 @@ func TestEngineApiBALMultiTxBlock(t *testing.T) {
 // The test uses two blocks:
 //   - Block 1: deploy Changer contract
 //   - Block 2: ETH transfer + Token deploy + Changer.Change() + withdrawals
-//
-// Known issue: currently fails with BAL mismatch under parallel execution (#19668).
 func TestEngineApiBALMixedBlock(t *testing.T) {
-	if !dbg.Exec3Parallel {
-		t.Skip("requires parallel exec")
-	}
 	eat := engineapitester.DefaultEngineApiTester(t)
 	transferReceiver := common.HexToAddress("0x777")
 	withdrawalReceiver := common.HexToAddress("0x888")
