@@ -327,14 +327,19 @@ func (so *stateObject) updateStorage(stateWriter StateWriter) error {
 
 func (so *stateObject) applyStorageChanges(stateWriter StateWriter, updatedStorage Storage) error {
 	for key, value := range updatedStorage {
-		blockOriginValue := so.blockOriginStorage[key]
+		// Use originStorage[key] (the value as last written to MDBX/pe.rs.accounts within
+		// this block) rather than blockOriginStorage[key] (the value at block start).
+		// blockOriginStorage causes WriteAccountStorage's skip (original==value) to fire
+		// incorrectly when a slot returns to its block-start value mid-block: MDBX already
+		// holds an intermediate value from an earlier tx, so the write must not be skipped.
+		originValue := so.originStorage[key]
 		if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (so.db.trace || dbg.TraceAccount(so.address.Handle()))) {
 			if _, ok := stateWriter.(*NoopWriter); !ok || dbg.TraceNoopIO {
 				fmt.Printf("%d (%d.%d) Update Storage (%T): %x,%x,%s->%s\n", so.db.blockNum, so.db.txIndex, so.db.version,
-					stateWriter, so.address, key, blockOriginValue.Hex(), value.Hex())
+					stateWriter, so.address, key, originValue.Hex(), value.Hex())
 			}
 		}
-		if err := stateWriter.WriteAccountStorage(so.address, so.data.GetIncarnation(), key, blockOriginValue, value); err != nil {
+		if err := stateWriter.WriteAccountStorage(so.address, so.data.GetIncarnation(), key, originValue, value); err != nil {
 			return err
 		}
 		so.originStorage[key] = value
