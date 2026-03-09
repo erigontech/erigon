@@ -86,6 +86,7 @@ type StateTransition struct {
 	msg          Message
 	gasRemaining mdgas.MdGas
 	blockGasUsed uint64 // Gas used by the transaction relevant for block limit accounting - see EIP-7778
+	refund       uint64
 	gasPrice     *uint256.Int
 	feeCap       *uint256.Int
 	tipCap       *uint256.Int
@@ -599,23 +600,19 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 			refundQuotient = params.RefundQuotientEIP3529
 		}
 		mdGasUsed := st.mdGasUsed()
+		gasUsed := mdGasUsed.Total()
 		stateRefund := st.state.GetRefund()
-		refund := mdgas.MdGas{
-			Regular: min(mdGasUsed.Regular/refundQuotient, stateRefund.Regular),
-			State:   min(mdGasUsed.State/refundQuotient, stateRefund.State),
-		}
-		mdGasUsedRefunded := mdGasUsed.Minus(refund)
+		st.refund = min(gasUsed/refundQuotient, stateRefund.Total())
 		if rules.IsAmsterdam {
 			// EIP-7778: Block Gas Accounting without Refunds
 			mdGasUsed.Regular = max(mdGasUsed.Regular, intrinsicGasResult.FloorGasCost)
 			// EIP-8037: State Creation Gas Cost Increase
 			st.blockGasUsed = mdGasUsed.Bottleneck()
 		} else if rules.IsPrague {
-			st.blockGasUsed = max(intrinsicGasResult.FloorGasCost, mdGasUsedRefunded.Regular)
+			st.blockGasUsed = max(intrinsicGasResult.FloorGasCost, gasUsed-st.refund)
 		} else {
-			st.blockGasUsed = mdGasUsedRefunded.Regular
+			st.blockGasUsed = gasUsed - st.refund
 		}
-		st.gasRemaining = st.initialGas.Minus(mdGasUsedRefunded)
 		st.refundGas()
 	} else if rules.IsAmsterdam {
 		mdGasUsed := st.mdGasUsed()
@@ -793,7 +790,7 @@ func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contra
 
 func (st *StateTransition) refundGas() {
 	// Return ETH for remaining gas, exchanged at the original rate.
-	remaining := u256.Mul(u256.U64(st.gasRemaining.Regular), *st.gasPrice)
+	remaining := u256.Mul(u256.U64(st.gasRemaining.Total()+st.refund), *st.gasPrice)
 	if dbg.TraceGas || st.state.Trace() || dbg.TraceAccount(st.msg.From().Handle()) {
 		fmt.Printf("%d (%d.%d) Refund %x: remaining: %d, price: %d val: %d\n", st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), st.gasRemaining, st.gasPrice, &remaining)
 	}
@@ -802,7 +799,7 @@ func (st *StateTransition) refundGas() {
 
 // Gas used by the transaction with refunds (what the user pays) - see EIP-7778
 func (st *StateTransition) gasUsed() uint64 {
-	return st.mdGasUsed().Total()
+	return st.mdGasUsed().Total() - st.refund
 }
 
 func (st *StateTransition) mdGasUsed() mdgas.MdGas {
