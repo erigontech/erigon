@@ -189,7 +189,9 @@ func (f *forkGraphDisk) ReadEnvelopeFromDisk(blockRoot common.Hash) (envelope *c
 	}
 	f.sszBuffer = f.sszBuffer[:n]
 
-	envelope = &cltypes.SignedExecutionPayloadEnvelope{}
+	envelope = &cltypes.SignedExecutionPayloadEnvelope{
+		Message: cltypes.NewExecutionPayloadEnvelope(f.beaconCfg),
+	}
 	if err = envelope.DecodeSSZ(f.sszBuffer, int(clparams.GloasVersion)); err != nil {
 		return nil, fmt.Errorf("failed to decode envelope: %w, root: %x, len: %d", err, blockRoot, n)
 	}

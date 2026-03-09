@@ -734,6 +734,10 @@ func (I *impl) ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedEnv
 	s.SetExecutionPayloadAvailability(s.Slot(), true)
 	s.SetLatestBlockHash(payloadHeader.BlockHash)
 
+	// Clear previousStateRoot cache so that the next transitionSlot() recomputes it
+	// from the post-envelope state (not the stale post-block state root).
+	s.SetPreviousStateRoot(common.Hash{})
+
 	// Verify the state root
 	if I.FullValidation {
 		stateRoot, err := s.HashSSZ()
