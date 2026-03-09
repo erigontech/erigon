@@ -57,7 +57,7 @@ runs:
       shell: bash
       run: |
         if [ "$(uname)" = "Linux" ]; then
-          time rm -rf /usr/local/lib/android \
+          time sudo rm -rf /usr/local/lib/android \
                  /opt/az \
                  /opt/microsoft \
                  /usr/share/dotnet \
