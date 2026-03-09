@@ -1,0 +1,35 @@
+name: Unit tests
+
+on:
+  push:
+    branches:
+      - main
+      - 'release/**'
+  pull_request:
+    branches:
+      - '**'
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+  workflow_dispatch:
+
+jobs:
+  linux:
+    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Tests now run in the 'All tests' workflow"
+
+  win:
+    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
+    strategy:
+      matrix:
+        os: [windows-2025]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Tests now run in the 'All tests' workflow"

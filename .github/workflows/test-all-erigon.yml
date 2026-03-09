@@ -22,7 +22,7 @@ defaults:
     shell: bash
 
 jobs:
-  tests:
+  tests-mac-linux:
     concurrency:
       # concurrency group: there can be at most one running and one pending job in a
       # concurrency group at any time. So for commits on main/release, we use different
