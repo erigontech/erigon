@@ -484,6 +484,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	domains.DiscardWrites(kv.AccountsDomain)
 	domains.DiscardWrites(kv.StorageDomain)
 	domains.DiscardWrites(kv.CodeDomain)
+	domains.SetInMemHistoryReads(false) // plain state reads come from disk history, not in-memory
 	domains.EnableParaTrieDB(rwDb)
 	domains.EnableTrieWarmup(true)
 	useWarmupCache := !dbg.EnvBool("ERIGON_REBUILD_NO_WARMUP_CACHE", false)
@@ -600,6 +601,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		domains.DiscardWrites(kv.AccountsDomain)
 		domains.DiscardWrites(kv.StorageDomain)
 		domains.DiscardWrites(kv.CodeDomain)
+		domains.SetInMemHistoryReads(false) // plain state reads come from disk history, not in-memory
 		domains.EnableParaTrieDB(rwDb)
 		domains.EnableTrieWarmup(true)
 		domains.EnableWarmupCache(useWarmupCache)
