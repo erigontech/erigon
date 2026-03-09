@@ -20,8 +20,16 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 )
 
+// ethProtocolsByVersion lists ETH protocols in ascending version order.
+// Used by MinProtocol to find the lowest version supporting a message.
+var ethProtocolsByVersion = []sentryproto.Protocol{
+	sentryproto.Protocol_ETH68,
+	sentryproto.Protocol_ETH69,
+	sentryproto.Protocol_ETH70,
+}
+
 func MinProtocol(m sentryproto.MessageId) sentryproto.Protocol {
-	for p := sentryproto.Protocol_ETH68; p <= sentryproto.Protocol_ETH70; p++ {
+	for _, p := range ethProtocolsByVersion {
 		if ids, ok := ProtoIds[p]; ok {
 			if _, ok := ids[m]; ok {
 				return p
