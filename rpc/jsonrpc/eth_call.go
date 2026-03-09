@@ -218,26 +218,15 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	} else {
 		feeCap = common.Big0
 	}
-	// Shared state for balance and code-size checks; created lazily and reused if both are needed.
-	var st *state.IntraBlockState
-	getState := func() (*state.IntraBlockState, error) {
-		if st == nil {
-			st = state.New(stateReader)
-			if st == nil {
-				return nil, errors.New("can't get the current state")
-			}
-		}
-		return st, nil
-	}
 
 	// Recap the highest gas limit with account's available balance.
 	if feeCap.Sign() != 0 {
-		s, err := getState()
-		if err != nil {
-			return 0, err
+                state := state.New(stateReader)
+		if state == nil {
+			return 0, errors.New("can't get the current state")
 		}
 
-		balance, err := s.GetBalance(accounts.InternAddress(*args.From)) // from can't be nil
+		balance, err := state.GetBalance(accounts.InternAddress(*args.From)) // from can't be nil
 		if err != nil {
 			return 0, err
 		}
@@ -280,11 +269,11 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	// unused access list items). Ever so slightly wasteful, but safer overall.
 
 	if args.Data == nil && args.To != nil {
-		s, err := getState()
-		if err != nil {
-			return 0, err
+                state := state.New(stateReader)
+		if state == nil {
+			return 0, errors.New("can't get the current state")
 		}
-		codeSize, err := s.GetCodeSize(accounts.InternAddress(*args.To))
+		codeSize, err := state.GetCodeSize(accounts.InternAddress(*args.To))
 		if err != nil {
 			return 0, errors.New("getCodeSize failed")
 		}
