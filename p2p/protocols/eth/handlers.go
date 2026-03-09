@@ -174,57 +174,10 @@ type ReceiptsGetter interface {
 }
 
 type CachedReceipts struct {
-	EncodedReceipts []rlp.RawValue
-	Bytes           int // total size of the encoded receipts
-	PendingIndex    int // index of the first not-found receipt in the query
-}
-
-func AnswerGetReceiptsQueryCacheOnly(ctx context.Context, receiptsGetter ReceiptsGetter, query GetReceiptsPacket, isEth69 bool) (*CachedReceipts, bool, error) {
-	var (
-		numBytes     int
-		pendingIndex int
-		needMore     = true
-	)
-	receiptsList := make([]rlp.RawValue, 0, len(query))
-
-	for lookups, hash := range query {
-		if numBytes >= softResponseLimit || len(receiptsList) >= maxReceiptsServe ||
-			lookups >= 2*maxReceiptsServe {
-			needMore = false
-			break
-		}
-
-		receipts, ok := receiptsGetter.GetCachedReceipts(ctx, hash)
-		if !ok {
-			break
-		}
-
-		var encoded []byte
-		var err error
-		if isEth69 { // eth/69 does not return Bloom field
-			buf := &bytes.Buffer{}
-			if err = receipts.EncodeRLP69(buf); err != nil {
-				return nil, needMore, fmt.Errorf("failed to encode receipt: %w", err)
-			}
-			encoded = buf.Bytes()
-		} else {
-			if encoded, err = rlp.EncodeToBytes(receipts); err != nil {
-				return nil, needMore, fmt.Errorf("failed to encode receipt: %w", err)
-			}
-		}
-
-		receiptsList = append(receiptsList, encoded)
-		numBytes += len(encoded)
-		pendingIndex = lookups + 1
-	}
-	if pendingIndex == len(query) {
-		needMore = false
-	}
-	return &CachedReceipts{
-		EncodedReceipts: receiptsList,
-		Bytes:           numBytes,
-		PendingIndex:    pendingIndex,
-	}, needMore, nil
+	EncodedReceipts     []rlp.RawValue
+	Bytes               int  // total size of the encoded receipts
+	PendingIndex        int  // index of the first not-found receipt in the query
+	LastBlockIncomplete bool // true if the final receipt list is partial (eth/70)
 }
 
 // encodeBlockReceipts69WithLimit encodes block receipts in eth/69 format (no Bloom),
@@ -265,21 +218,26 @@ func encodeBlockReceipts69WithLimit(receipts types.Receipts, totalBytes, sizeLim
 	return encoded, len(encoded), complete, nil
 }
 
-// eth70ResponseSizeLimit is the maximum size of encoded receipt data in an eth/70 response.
-// This leaves room for the packet envelope (request-id, lastBlockIncomplete flag, list prefixes).
-const eth70ResponseSizeLimit = maxMessageSize - 512
+// NoSizeLimit disables per-receipt truncation (used for eth/68 and eth/69).
+const NoSizeLimit = int(^uint(0) >> 1)
 
-// CachedReceipts70 extends CachedReceipts with lastBlockIncomplete for eth/70.
-type CachedReceipts70 struct {
-	EncodedReceipts     []rlp.RawValue
-	Bytes               int  // total size of the encoded receipts
-	PendingIndex        int  // index of the first not-found receipt in the query
-	LastBlockIncomplete bool // true if the final receipt list is partial
+// Eth70ResponseSizeLimit is the maximum size of encoded receipt data in an eth/70 response.
+// This leaves room for the packet envelope (request-id, lastBlockIncomplete flag, list prefixes).
+const Eth70ResponseSizeLimit = maxMessageSize - 512
+
+// ReceiptQueryOpts controls the behavior differences between eth protocol versions
+// when answering GetReceipts queries.
+type ReceiptQueryOpts struct {
+	// IsEth69OrLater uses eth/69 encoding (no Bloom field). False means eth/68 encoding.
+	IsEth69OrLater bool
+	// FirstBlockReceiptIndex skips this many receipts from the first block (eth/70).
+	FirstBlockReceiptIndex uint64
+	// SizeLimit is the maximum encoded response size for per-receipt truncation.
+	// Use NoSizeLimit to disable truncation (eth/68, eth/69).
+	SizeLimit int
 }
 
-// AnswerGetReceiptsQueryCacheOnly70 is the eth/70 version that supports firstBlockReceiptIndex
-// and per-receipt size tracking for lastBlockIncomplete.
-func AnswerGetReceiptsQueryCacheOnly70(ctx context.Context, receiptsGetter ReceiptsGetter, query GetReceiptsPacket, firstBlockReceiptIndex uint64) (*CachedReceipts70, bool, error) {
+func AnswerGetReceiptsQueryCacheOnly(ctx context.Context, receiptsGetter ReceiptsGetter, query GetReceiptsPacket, opts ReceiptQueryOpts) (*CachedReceipts, bool, error) {
 	var (
 		numBytes     int
 		pendingIndex int
@@ -299,16 +257,16 @@ func AnswerGetReceiptsQueryCacheOnly70(ctx context.Context, receiptsGetter Recei
 			break
 		}
 
-		// For the first block, skip receipts before firstBlockReceiptIndex
-		if lookups == 0 && firstBlockReceiptIndex > 0 {
-			if firstBlockReceiptIndex >= uint64(len(receipts)) {
+		// For the first block, skip receipts before firstBlockReceiptIndex (eth/70)
+		if lookups == 0 && opts.FirstBlockReceiptIndex > 0 {
+			if opts.FirstBlockReceiptIndex >= uint64(len(receipts)) {
 				receipts = nil
 			} else {
-				receipts = receipts[firstBlockReceiptIndex:]
+				receipts = receipts[opts.FirstBlockReceiptIndex:]
 			}
 		}
 
-		encoded, encodedLen, complete, err := encodeBlockReceipts69WithLimit(receipts, numBytes, eth70ResponseSizeLimit)
+		encoded, encodedLen, complete, err := encodeBlockReceiptsWithLimit(receipts, numBytes, opts)
 		if err != nil {
 			return nil, false, err
 		}
@@ -317,7 +275,7 @@ func AnswerGetReceiptsQueryCacheOnly70(ctx context.Context, receiptsGetter Recei
 		pendingIndex = lookups + 1
 
 		if !complete {
-			return &CachedReceipts70{
+			return &CachedReceipts{
 				EncodedReceipts:     receiptsList,
 				Bytes:               numBytes,
 				PendingIndex:        pendingIndex,
@@ -328,16 +286,29 @@ func AnswerGetReceiptsQueryCacheOnly70(ctx context.Context, receiptsGetter Recei
 	if pendingIndex == len(query) {
 		needMore = false
 	}
-	return &CachedReceipts70{
+	return &CachedReceipts{
 		EncodedReceipts: receiptsList,
 		Bytes:           numBytes,
 		PendingIndex:    pendingIndex,
 	}, needMore, nil
 }
 
-// AnswerGetReceiptsQuery70 is the eth/70 version that supports firstBlockReceiptIndex
-// and per-receipt size tracking for lastBlockIncomplete.
-func AnswerGetReceiptsQuery70(ctx context.Context, cfg *chain.Config, receiptsGetter ReceiptsGetter, br services.HeaderAndBodyReader, db kv.TemporalTx, query GetReceiptsPacket, firstBlockReceiptIndex uint64, cached *CachedReceipts70) ([]rlp.RawValue, bool, error) {
+// encodeBlockReceiptsWithLimit encodes a block's receipts according to the protocol version.
+// For eth/69+ it uses eth/69 encoding (no Bloom) with optional per-receipt size limiting.
+// For eth/68 it uses standard RLP encoding.
+func encodeBlockReceiptsWithLimit(receipts types.Receipts, totalBytes int, opts ReceiptQueryOpts) (rlp.RawValue, int, bool, error) {
+	if opts.IsEth69OrLater {
+		return encodeBlockReceipts69WithLimit(receipts, totalBytes, opts.SizeLimit)
+	}
+	// eth/68: standard RLP encoding, no size limiting
+	encoded, err := rlp.EncodeToBytes(receipts)
+	if err != nil {
+		return nil, 0, false, fmt.Errorf("failed to encode receipt: %w", err)
+	}
+	return encoded, len(encoded), true, nil
+}
+
+func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGetter ReceiptsGetter, br services.HeaderAndBodyReader, db kv.TemporalTx, query GetReceiptsPacket, cached *CachedReceipts, opts ReceiptQueryOpts) ([]rlp.RawValue, bool, error) {
 	var (
 		numBytes     int
 		receipts     []rlp.RawValue
@@ -383,16 +354,16 @@ func AnswerGetReceiptsQuery70(ctx context.Context, cfg *chain.Config, receiptsGe
 			}
 		}
 
-		// For the first block, skip receipts before firstBlockReceiptIndex
-		if lookups == 0 && firstBlockReceiptIndex > 0 && results != nil {
-			if firstBlockReceiptIndex >= uint64(len(results)) {
+		// For the first block, skip receipts before firstBlockReceiptIndex (eth/70)
+		if lookups == 0 && opts.FirstBlockReceiptIndex > 0 && results != nil {
+			if opts.FirstBlockReceiptIndex >= uint64(len(results)) {
 				results = nil
 			} else {
-				results = results[firstBlockReceiptIndex:]
+				results = results[opts.FirstBlockReceiptIndex:]
 			}
 		}
 
-		encoded, encodedLen, complete, err := encodeBlockReceipts69WithLimit(results, numBytes, eth70ResponseSizeLimit)
+		encoded, encodedLen, complete, err := encodeBlockReceiptsWithLimit(results, numBytes, opts)
 		if err != nil {
 			return nil, false, err
 		}
@@ -404,77 +375,4 @@ func AnswerGetReceiptsQuery70(ctx context.Context, cfg *chain.Config, receiptsGe
 		}
 	}
 	return receipts, false, nil
-}
-
-func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGetter ReceiptsGetter, br services.HeaderAndBodyReader, db kv.TemporalTx, query GetReceiptsPacket, cachedReceipts *CachedReceipts, isEth69 bool) ([]rlp.RawValue, error) { //nolint:unparam
-	// Gather state data until the fetch or network limits is reached
-	var (
-		numBytes     int
-		receipts     []rlp.RawValue
-		pendingIndex int
-	)
-
-	if cachedReceipts != nil {
-		numBytes = cachedReceipts.Bytes
-		receipts = cachedReceipts.EncodedReceipts
-		pendingIndex = cachedReceipts.PendingIndex
-	}
-
-	for lookups := pendingIndex; lookups < len(query); lookups++ {
-		hash := query[lookups]
-		if numBytes >= softResponseLimit || len(receipts) >= maxReceiptsServe ||
-			lookups >= 2*maxReceiptsServe {
-			break
-		}
-		number, _ := br.HeaderNumber(context.Background(), db, hash)
-		if number == nil {
-			return nil, nil
-		}
-		// Retrieve the requested block's receipts
-		b, _, err := br.BlockWithSenders(context.Background(), db, hash, *number)
-		if err != nil {
-			return nil, err
-		}
-		if b == nil {
-			return nil, nil
-		}
-
-		results, err := receiptsGetter.GetReceipts(ctx, cfg, db, b)
-		if err != nil {
-			return nil, err
-		}
-
-		if results == nil {
-			header, err := rawdb.ReadHeaderByHash(db, hash)
-			if err != nil {
-				return nil, err
-			}
-			if header == nil || header.ReceiptHash != empty.RootHash {
-				continue
-			}
-		}
-		// For debug
-		//println("receipts:")
-		//for _, result := range results {
-		//	println(result.String())
-		//}
-
-		// If known, encode and queue for response packet
-		var encoded []byte
-		if isEth69 && results != nil { // if nil use EncodeToBytes for empty byte array
-			buf := &bytes.Buffer{}
-			if err = results.EncodeRLP69(buf); err != nil {
-				return nil, fmt.Errorf("failed to encode receipt: %w", err)
-			}
-			encoded = buf.Bytes()
-		} else {
-			if encoded, err = rlp.EncodeToBytes(results); err != nil {
-				return nil, fmt.Errorf("failed to encode receipt: %w", err)
-			}
-		}
-
-		receipts = append(receipts, encoded)
-		numBytes += len(encoded)
-	}
-	return receipts, nil
 }

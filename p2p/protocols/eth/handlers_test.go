@@ -43,6 +43,15 @@ func makeReceipt(cumulativeGas uint64, logDataSize int) *types.Receipt {
 	return r
 }
 
+// eth70Opts returns ReceiptQueryOpts for eth/70 with the given firstBlockReceiptIndex.
+func eth70Opts(firstBlockReceiptIndex uint64) ReceiptQueryOpts {
+	return ReceiptQueryOpts{
+		IsEth69OrLater:         true,
+		FirstBlockReceiptIndex: firstBlockReceiptIndex,
+		SizeLimit:              Eth70ResponseSizeLimit,
+	}
+}
+
 // receiptEncodedSize returns the eth/69 encoded size of a single receipt
 // wrapped in an RLP list (i.e. the full encoded block-receipts list for one receipt).
 func receiptEncodedSize(r *types.Receipt) int {
@@ -187,7 +196,7 @@ func TestAnswerGetReceiptsQueryCacheOnly70_Basic(t *testing.T) {
 		},
 	}
 	query := GetReceiptsPacket{hash1, hash2}
-	result, needMore, err := AnswerGetReceiptsQueryCacheOnly70(context.Background(), getter, query, 0)
+	result, needMore, err := AnswerGetReceiptsQueryCacheOnly(context.Background(), getter, query, eth70Opts(0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +229,7 @@ func TestAnswerGetReceiptsQueryCacheOnly70_FirstBlockReceiptIndex(t *testing.T) 
 	query := GetReceiptsPacket{hash1}
 
 	// Skip first 2 receipts
-	result, _, err := AnswerGetReceiptsQueryCacheOnly70(context.Background(), getter, query, 2)
+	result, _, err := AnswerGetReceiptsQueryCacheOnly(context.Background(), getter, query, eth70Opts(2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +258,7 @@ func TestAnswerGetReceiptsQueryCacheOnly70_FirstBlockReceiptIndexBeyondEnd(t *te
 	query := GetReceiptsPacket{hash1}
 
 	// Index beyond all receipts
-	result, _, err := AnswerGetReceiptsQueryCacheOnly70(context.Background(), getter, query, 999)
+	result, _, err := AnswerGetReceiptsQueryCacheOnly(context.Background(), getter, query, eth70Opts(999))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,7 +287,7 @@ func TestAnswerGetReceiptsQueryCacheOnly70_FirstBlockReceiptIndexOnlyAppliesToFi
 	query := GetReceiptsPacket{hash1, hash2}
 
 	// Skip 1 receipt from first block only
-	result, _, err := AnswerGetReceiptsQueryCacheOnly70(context.Background(), getter, query, 1)
+	result, _, err := AnswerGetReceiptsQueryCacheOnly(context.Background(), getter, query, eth70Opts(1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -317,7 +326,7 @@ func TestAnswerGetReceiptsQueryCacheOnly70_LastBlockIncomplete(t *testing.T) {
 	}
 	query := GetReceiptsPacket{hash1}
 
-	result, needMore, err := AnswerGetReceiptsQueryCacheOnly70(context.Background(), getter, query, 0)
+	result, needMore, err := AnswerGetReceiptsQueryCacheOnly(context.Background(), getter, query, eth70Opts(0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -360,7 +369,7 @@ func TestAnswerGetReceiptsQueryCacheOnly70_MultipleBlocksTruncatesLast(t *testin
 	}
 	query := GetReceiptsPacket{hash1, hash2}
 
-	result, needMore, err := AnswerGetReceiptsQueryCacheOnly70(context.Background(), getter, query, 0)
+	result, needMore, err := AnswerGetReceiptsQueryCacheOnly(context.Background(), getter, query, eth70Opts(0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -402,7 +411,7 @@ func TestAnswerGetReceiptsQueryCacheOnly70_CacheMiss(t *testing.T) {
 	}
 	query := GetReceiptsPacket{hash1, hash2}
 
-	result, needMore, err := AnswerGetReceiptsQueryCacheOnly70(context.Background(), getter, query, 0)
+	result, needMore, err := AnswerGetReceiptsQueryCacheOnly(context.Background(), getter, query, eth70Opts(0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -421,7 +430,7 @@ func TestAnswerGetReceiptsQueryCacheOnly70_EmptyQuery(t *testing.T) {
 	getter := &mockReceiptsGetter{cached: map[common.Hash]types.Receipts{}}
 	query := GetReceiptsPacket{}
 
-	result, needMore, err := AnswerGetReceiptsQueryCacheOnly70(context.Background(), getter, query, 0)
+	result, needMore, err := AnswerGetReceiptsQueryCacheOnly(context.Background(), getter, query, eth70Opts(0))
 	if err != nil {
 		t.Fatal(err)
 	}
