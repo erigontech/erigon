@@ -14,7 +14,6 @@ defaults:
 
 jobs:
   lint:
-    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     concurrency:
       group: ${{ format('{0}-{1}', github.workflow, github.ref) }}

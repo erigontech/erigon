@@ -1,18 +1,9 @@
 name: Unit tests
 
-on:
-  pull_request:
-    branches:
-      - '**'
-    types:
-      - opened
-      - reopened
-      - synchronize
-      - ready_for_review
+on: pull_request
 
 jobs:
   linux:
-    if: ${{ !github.event.pull_request.draft }}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
@@ -21,7 +12,6 @@ jobs:
       - run: echo "::warning::This job is a stub. Tests now run in the 'All tests' workflow (.github/workflows/test-all-erigon.yml)."
 
   win:
-    if: ${{ !github.event.pull_request.draft }}
     strategy:
       matrix:
         os: [windows-2025]
