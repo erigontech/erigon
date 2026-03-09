@@ -89,8 +89,8 @@ func StageBuilderExecCfg(
 // then computes the state root from the accumulated domain writes.
 //
 // State changes flow through a single execution path:
-//  1. IBS executes transactions, writing state via stateWriter → sd
-//  2. FinalizeBlockExecution commits remaining IBS changes to sd
+//  1. IBS executes transactions using a NoopWriter / in-memory buffer (no per-tx writes to sd)
+//  2. FinalizeBlockExecution applies the accumulated IBS changes to sd via the block assembler writer
 //  3. ComputeCommitment(sd) produces the state root
 //  4. sd is backed by a MemoryBatch (from MiningStep) — discarded on return
 //
