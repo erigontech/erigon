@@ -221,7 +221,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 
 	// Recap the highest gas limit with account's available balance.
 	if feeCap.Sign() != 0 {
-                state := state.New(stateReader)
+		state := state.New(stateReader)
 		if state == nil {
 			return 0, errors.New("can't get the current state")
 		}
@@ -269,7 +269,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	// unused access list items). Ever so slightly wasteful, but safer overall.
 
 	if args.Data == nil && args.To != nil {
-                state := state.New(stateReader)
+		state := state.New(stateReader)
 		if state == nil {
 			return 0, errors.New("can't get the current state")
 		}
