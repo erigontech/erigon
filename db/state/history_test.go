@@ -1724,11 +1724,11 @@ func TestHistoryRange_DBOnly(t *testing.T) {
 	}
 
 	t.Run("large_values", func(t *testing.T) {
-		db, h, _ := filledHistory(t, true, logger)
+		db, h, _ := filledHistory(t, logger)
 		test(t, h, db)
 	})
 	t.Run("small_values", func(t *testing.T) {
-		db, h, _ := filledHistory(t, false, logger)
+		db, h, _ := filledHistory(t, logger)
 		test(t, h, db)
 	})
 }
@@ -1816,11 +1816,11 @@ func TestRangeAsOf_ValuesMatchHistorySeek(t *testing.T) {
 	}
 
 	t.Run("large_values", func(t *testing.T) {
-		db, h, txs := filledHistory(t, true, logger)
+		db, h, txs := filledHistory(t, logger)
 		test(t, h, db, txs)
 	})
 	t.Run("small_values", func(t *testing.T) {
-		db, h, txs := filledHistory(t, false, logger)
+		db, h, txs := filledHistory(t, logger)
 		test(t, h, db, txs)
 	})
 }
@@ -1871,11 +1871,11 @@ func TestHistoryRange_EmptyRange(t *testing.T) {
 	}
 
 	t.Run("large_values", func(t *testing.T) {
-		db, h, txs := filledHistory(t, true, logger)
+		db, h, txs := filledHistory(t, logger)
 		test(t, h, db, txs)
 	})
 	t.Run("small_values", func(t *testing.T) {
-		db, h, txs := filledHistory(t, false, logger)
+		db, h, txs := filledHistory(t, logger)
 		test(t, h, db, txs)
 	})
 }
@@ -1886,7 +1886,7 @@ func BenchmarkHistoryRange(b *testing.B) {
 	logger := log.New()
 	ctx := context.Background()
 
-	db, h, txs := filledHistory(b, true, logger)
+	db, h, txs := filledHistory(b, logger)
 	collateAndMergeHistory(b, db, h, txs, true)
 
 	tx, err := db.BeginRo(ctx)
@@ -1915,7 +1915,7 @@ func BenchmarkRangeAsOf(b *testing.B) {
 	logger := log.New()
 	ctx := context.Background()
 
-	db, h, txs := filledHistory(b, true, logger)
+	db, h, txs := filledHistory(b, logger)
 	collateAndMergeHistory(b, db, h, txs, true)
 
 	tx, err := db.BeginRo(ctx)
@@ -1960,7 +1960,7 @@ func BenchmarkHistoryRange_MultiFile(b *testing.B) {
 	logger := log.New()
 	ctx := context.Background()
 
-	db, h, txs := filledHistory(b, true, logger)
+	db, h, txs := filledHistory(b, logger)
 	collateHistory(b, db, h, txs)
 
 	tx, err := db.BeginRo(ctx)
@@ -1989,7 +1989,7 @@ func BenchmarkRangeAsOf_MultiFile(b *testing.B) {
 	logger := log.New()
 	ctx := context.Background()
 
-	db, h, txs := filledHistory(b, true, logger)
+	db, h, txs := filledHistory(b, logger)
 	collateHistory(b, db, h, txs)
 
 	tx, err := db.BeginRo(ctx)
