@@ -249,8 +249,8 @@ func (oracle *Oracle) fetchBlockPricesParallel(ctx context.Context, head uint64,
 				defer cleanup()
 			}
 			for {
-				if fetchCtx.Err() != nil {
-					return nil
+				if err := fetchCtx.Err(); err != nil {
+					return err
 				}
 				idx := int(atomic.AddUint64(&nextIdx, 1)) - 1
 				if idx >= count {
