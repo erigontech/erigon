@@ -2345,10 +2345,7 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 	defer clean()
-
-	agg.SetCollateAndBuildWorkers(min(8, estimate.StateV3Collate.Workers()))
-	agg.SetMergeWorkers(min(8, estimate.StateV3Collate.Workers()))
-	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+	agg.PresetOfflineMerge()
 	agg.PeriodicalyPrintProcessSet(ctx)
 
 	if err := caplinStateSnaps.BuildMissingIndices(ctx, logger); err != nil {

@@ -102,12 +102,7 @@ Add to `~/.config/claude-desktop/config.json`:
   "mcpServers": {
     "erigon": {
       "command": "/path/to/build/bin/mcp",
-      "args": [
-        "--port",
-        "8545",
-        "--log.dir",
-        "/data/erigon/logs"
-      ]
+      "args": ["--port", "8545", "--log.dir", "/data/erigon/logs"]
     }
   }
 }
@@ -120,10 +115,7 @@ or
   "mcpServers": {
     "erigon": {
       "command": "/path/to/build/bin/mcp",
-      "args": [
-        "--datadir",
-        "path/to/erigon/data"
-      ]
+      "args": ["--datadir", "path/to/erigon/data"]
     }
   }
 }
