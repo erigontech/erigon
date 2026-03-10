@@ -150,3 +150,19 @@ If any are found:
 4. If the user declines, leave them alone.
 
 If none are found, tell the user there are no leftovers.
+
+## Important: Always Wipe, Never Patch
+
+Erigon is **not resilient to partial datadir changes**. It expects all files in a datadir to be fully consistent with each other: the same step_size, the same snapshot set, the same chaindata. Mixing files from different runs, different versions, or different instances will cause panics, slice-bounds errors, or incorrect state.
+
+**Never:**
+- Copy individual files between datadirs (e.g. `erigondb.toml`, snapshot segments, downloader DB)
+- Delete only some snapshot files to force a re-download of just those files
+- Reuse snapshots from an old binary/step_size when starting fresh
+
+**Always:**
+- Wipe the entire datadir (`rm -rf <datadir>/*`) and start from zero when anything seems wrong
+- Let the downloader provide `erigondb.toml` — it knows the correct step_size for the current snapshot set
+- Accept that a full re-download (~30-60 min from webseeds) is cheaper than debugging partial-state corruption
+
+The most common symptom of partial-state corruption is a `panic: runtime error: slice bounds out of range` in `ProcessFrozenBlocks` or similar, caused by a step_size mismatch between `erigondb.toml` and the actual snapshot files.
