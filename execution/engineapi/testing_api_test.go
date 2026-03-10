@@ -595,6 +595,48 @@ func TestBuildBlockV1(t *testing.T) {
 	})
 }
 
+func TestForkchoiceUpdatedV2PayloadAttributesWithdrawalsValidation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("missing withdrawals for Shanghai returns invalid payload attributes", func(t *testing.T) {
+		srv := NewEngineServer(
+			log.New(),
+			preCancunChainConfig(),
+			direct.NewExecutionClientDirect(&stubExecutionServer{}),
+			nil,
+			false,
+			true,
+			true,
+			nil,
+			0,
+			0,
+		)
+
+		err := srv.checkPayloadAttributesWithdrawalsPresence(1001, nil)
+		require.Error(t, err)
+		require.Equal(t, -38003, err.(rpc.Error).ErrorCode())
+	})
+
+	t.Run("withdrawals before Shanghai returns invalid payload attributes", func(t *testing.T) {
+		srv := NewEngineServer(
+			log.New(),
+			preShanghaiChainConfig(),
+			direct.NewExecutionClientDirect(&stubExecutionServer{}),
+			nil,
+			false,
+			true,
+			true,
+			nil,
+			0,
+			0,
+		)
+
+		err := srv.checkPayloadAttributesWithdrawalsPresence(1001, make([]*types.Withdrawal, 0))
+		require.Error(t, err)
+		require.Equal(t, -38003, err.(rpc.Error).ErrorCode())
+	})
+}
+
 func ptrUint64(v uint64) *uint64 {
 	return &v
 }

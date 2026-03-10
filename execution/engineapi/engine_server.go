@@ -187,6 +187,16 @@ func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals types.W
 	return nil
 }
 
+func (s *EngineServer) checkPayloadAttributesWithdrawalsPresence(time uint64, withdrawals types.Withdrawals) error {
+	if !s.config.IsShanghai(time) && withdrawals != nil {
+		return &engine_helpers.InvalidPayloadAttributesErr
+	}
+	if s.config.IsShanghai(time) && withdrawals == nil {
+		return &engine_helpers.InvalidPayloadAttributesErr
+	}
+	return nil
+}
+
 func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, executionRequests []hexutil.Bytes) error {
 	if version < clparams.ElectraVersion {
 		if executionRequests != nil {
@@ -717,6 +727,11 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	}
 	if s.config.IsCancun(timestamp) && version < clparams.DenebVersion { // Not V3 after cancun
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+	}
+	if version >= clparams.CapellaVersion {
+		if err := s.checkPayloadAttributesWithdrawalsPresence(timestamp, payloadAttributes.Withdrawals); err != nil {
+			return nil, err
+		}
 	}
 
 	if !s.proposing {
