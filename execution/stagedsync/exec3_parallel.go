@@ -89,6 +89,9 @@ type parallelExecutor struct {
 	rws            *exec.ResultsQueue
 	workerCount    int
 	blockExecutors map[uint64]*blockExecutor
+	// accumulator for txpool state-diff notifications; set before execLoop
+	// starts so that AuRa system-call nonce changes are emitted per block.
+	accumulator *shards.Accumulator
 }
 
 func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
@@ -114,7 +117,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 		log.Info(fmt.Sprintf("[%s] parallel starting", execStage.LogPrefix()),
 			"from", startBlockNum, "to", maxBlockNum, "limit", startBlockNum+blockLimit-1, "initialTxNum", initialTxNum,
 			"initialBlockTxOffset", offsetFromBlockBeginning, "initialCycle", initialCycle,
-			"isForkValidation", pe.isForkValidation, "isBlockProduction", pe.isBlockProduction, "isApplyingBlocks", pe.isApplyingBlocks)
+			"isForkValidation", pe.isForkValidation, "isApplyingBlocks", pe.isApplyingBlocks)
 	}
 
 	// restoreTxNum must run before pe.run() so that doms.SetTxNum() completes
@@ -123,6 +126,9 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	if err != nil {
 		return nil, rwTx, err
 	}
+
+	// Set accumulator before pe.run() so execLoop sees it without a race.
+	pe.accumulator = accumulator
 
 	executorContext, executorCancel, err := pe.run(ctx)
 	defer executorCancel()
@@ -199,7 +205,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					if applyResult.BlockNum > 0 && !applyResult.isPartial { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 						checkReceipts := !pe.cfg.vmConfig.StatelessExec &&
 							pe.cfg.chainConfig.IsByzantium(applyResult.BlockNum) &&
-							!pe.cfg.vmConfig.NoReceipts && !pe.isBlockProduction
+							!pe.cfg.vmConfig.NoReceipts
 
 						b, err := pe.cfg.blockReader.BlockByHash(ctx, rwTx, applyResult.BlockHash)
 
@@ -221,12 +227,12 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						}
 
 						if err := pe.getPostValidator().Process(applyResult.BlockGasUsed, applyResult.BlobGasUsed, checkReceipts, applyResult.Receipts,
-							lastHeader, pe.isBlockProduction, b.Transactions(), pe.cfg.chainConfig, pe.logger); err != nil {
+							lastHeader, b.Transactions(), pe.cfg.chainConfig, pe.logger); err != nil {
 							dumpTxIODebug(applyResult.BlockNum, applyResult.TxIO)
 							return fmt.Errorf("%w, block=%d, %v", rules.ErrInvalidBlock, applyResult.BlockNum, err) //same as in stage_exec.go
 						}
 
-						if !pe.isBlockProduction && !applyResult.isPartial && !execStage.CurrentSyncCycle.IsInitialCycle {
+						if !applyResult.isPartial && !execStage.CurrentSyncCycle.IsInitialCycle {
 							pe.cfg.notifications.RecentReceipts.Add(applyResult.Receipts, b.Transactions(), lastHeader)
 						}
 					}
@@ -347,7 +353,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							}
 
 							if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) || pe.cfg.experimentalBAL {
-								err = ProcessBAL(rwTx, lastHeader, applyResult.TxIO, pe.isBlockProduction, pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime), pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir)
+								err = ProcessBAL(rwTx, lastHeader, applyResult.TxIO, pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime), pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir)
 								if err != nil {
 									return err
 								}
@@ -358,7 +364,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							}
 							pe.domains().SetChangesetAccumulator(nil)
 
-							if !pe.isBlockProduction && !bytes.Equal(rh, applyResult.StateRoot.Bytes()) {
+							if !bytes.Equal(rh, applyResult.StateRoot.Bytes()) {
 								pe.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", pe.logPrefix, applyResult.BlockNum, rh, applyResult.StateRoot.Bytes(), applyResult.BlockHash))
 								if !dbg.BatchCommitments {
 									for _, line := range captured {
@@ -631,17 +637,23 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						}
 
 						chainReader := consensuschain.NewReader(pe.cfg.chainConfig, applyTx, pe.cfg.blockReader, pe.logger)
-						if pe.isBlockProduction {
-							_, _, err =
-								pe.cfg.engine.FinalizeAndAssemble(
-									pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, blockReceipts,
-									txTask.Withdrawals, chainReader, syscall, nil, pe.logger)
-						} else {
-							_, err =
-								pe.cfg.engine.Finalize(
-									pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles, blockReceipts,
-									txTask.Withdrawals, chainReader, syscall, false, pe.logger)
+
+						// StartChange before Finalize so that AuRa/system-call nonce
+						// changes are emitted into the accumulator for the txpool diff.
+						// Use txTask.Txs (already in memory) instead of reading from DB
+						// to avoid the stale applyTx canonical-hash issue.
+						if pe.accumulator != nil {
+							rawTxs, marshalErr := types.MarshalTransactionsBinary(txTask.Txs)
+							if marshalErr != nil {
+								return state.StateUpdates{}, fmt.Errorf("marshal transactions for accumulator, block %d: %w", blockResult.BlockNum, marshalErr)
+							}
+							pe.accumulator.StartChange(txTask.Header, rawTxs, false)
 						}
+
+						_, err =
+							pe.cfg.engine.Finalize(
+								pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles, blockReceipts,
+								txTask.Withdrawals, chainReader, syscall, false, pe.logger)
 
 						if err != nil {
 							return state.StateUpdates{}, fmt.Errorf("can't finalize block %d: %w", blockResult.BlockNum, err)
@@ -656,7 +668,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 							blockExecutor.versionMap.FlushVersionedWrites(finalWrites, true, "")
 						}
 
-						stateWriter := state.NewBufferedWriter(pe.rs, nil)
+						stateWriter := state.NewBufferedWriter(pe.rs, pe.accumulator)
 						if err = ibs.MakeWriteSet(txTask.EvmBlockContext.Rules(txTask.Config), stateWriter); err != nil {
 							return state.StateUpdates{}, err
 						}
@@ -855,7 +867,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	pe.execWorkers, _, pe.rws, pe.stopWorkers, pe.waitWorkers, err = exec.NewWorkersPool(
 		execLoopCtx, nil, true, pe.cfg.db, nil, nil, nil, pe.in,
 		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine,
-		pe.workerCount+1, pe.taskExecMetrics, pe.cfg.dirs, pe.isBlockProduction, pe.logger)
+		pe.workerCount+1, pe.taskExecMetrics, pe.cfg.dirs, pe.logger)
 
 	if err != nil {
 		return execLoopCtx, execLoopCtxCancel, err
@@ -863,7 +875,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 
 	pe.execLoopGroup.Go(func() error {
 		defer pe.rws.Close()
-		defer pe.in.Close()
+		defer pe.in.Release()
 		pe.resetWorkers(execLoopCtx, pe.rs, nil)
 		return pe.execLoop(execLoopCtx)
 	})
@@ -871,7 +883,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	return execLoopCtx, func() {
 		execLoopCtxCancel()
 		defer pe.stopWorkers()
-		defer pe.in.Close()
+		defer pe.in.Release()
 
 		if err := pe.wait(ctx); err != nil {
 			pe.logger.Debug("exec loop cancel failed", "err", err)
