@@ -6,6 +6,7 @@ jobs:
   inference:
     permissions:
       models: read
+      actions: read
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
