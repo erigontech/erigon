@@ -114,6 +114,8 @@ def main() -> int:
     # It's not yet known whether sorting size descending or ascending is better
     # for cache hit rates — it may not matter much in practice.
     files.sort(reverse=True)
+    # TODO: observe behaviour on the sonar workflow — check whether pruning keeps
+    # the cache warm enough for followup runs given its large coverage-instrumented build.
 
     if args.debug:
         print("{:<12} {:<12} {:<10} {:<11} {}".format("atime", "mtime", "size", "decision", "path"))
