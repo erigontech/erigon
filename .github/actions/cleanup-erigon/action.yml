@@ -4,6 +4,11 @@ description: Save build and module caches, and report uncached test packages
 runs:
   using: composite
   steps:
+    - name: Prune Go build cache
+      if: ${{ always() && env.ERIGON_CI_GOCACHE_PATH != '' }}
+      shell: bash
+      run: python3 tools/prune-gocache "$ERIGON_CI_GOCACHE_PATH"
+
     - uses: ./.github/actions/save-build-cache
       if: ${{ always() && env.ERIGON_CI_GOCACHE_PATH != '' }}
       with:
