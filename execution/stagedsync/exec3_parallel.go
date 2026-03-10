@@ -668,7 +668,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 							blockExecutor.versionMap.FlushVersionedWrites(finalWrites, true, "")
 						}
 
-						collector := state.NewVersionedWriteCollector(pe.rs)
+						collector := state.NewVersionedWriteCollector(pe.rs, pe.accumulator)
 						if err = ibs.MakeWriteSet(txTask.EvmBlockContext.Rules(txTask.Config), collector); err != nil {
 							return nil, err
 						}
@@ -1531,7 +1531,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					}
 				}
 
-				collector := state.NewVersionedWriteCollector(pe.rs)
+				collector := state.NewVersionedWriteCollector(pe.rs, nil)
 
 				_, addReads, addWrites, err := txResult.finalize(prevReceipt, pe.cfg.engine, be.versionMap, stateReader, collector)
 

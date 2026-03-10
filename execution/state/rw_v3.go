@@ -394,15 +394,22 @@ func (s *StateV3Buffered) WithDomains(domains *execctx.SharedDomains) *StateV3Bu
 // It also maintains rs.accounts synchronously for the cross-block timing hole
 // bridge: block N+1 workers may read block N state before the async applyResults
 // goroutine has flushed it to SharedDomains.
+//
+// If accumulator is non-nil, state-change notifications are forwarded to it so
+// that the txpool receives the expected per-block state diffs.  StartChange must
+// be called on the accumulator before MakeWriteSet invokes this collector.
 type versionedWriteCollector struct {
-	rs     *StateV3Buffered
-	writes VersionedWrites
+	rs          *StateV3Buffered
+	writes      VersionedWrites
+	accumulator *shards.Accumulator
 }
 
 // NewVersionedWriteCollector creates a versionedWriteCollector that collects
 // StateWriter calls into a VersionedWrites slice and maintains rs.accounts.
-func NewVersionedWriteCollector(rs *StateV3Buffered) *versionedWriteCollector {
-	return &versionedWriteCollector{rs: rs}
+// accumulator may be nil if txpool notifications are not required (e.g. initial
+// sync).
+func NewVersionedWriteCollector(rs *StateV3Buffered, accumulator *shards.Accumulator) *versionedWriteCollector {
+	return &versionedWriteCollector{rs: rs, accumulator: accumulator}
 }
 
 // Writes returns the collected VersionedWrites for domain apply.
@@ -434,6 +441,11 @@ func (c *versionedWriteCollector) UpdateAccountData(address accounts.Address, or
 		&VersionedWrite{Address: address, Path: CodeHashPath, Val: accountCopy.CodeHash},
 	)
 
+	if c.accumulator != nil {
+		serialised := accounts.SerialiseV3(&accountCopy)
+		c.accumulator.ChangeAccount(address.Value(), accountCopy.Incarnation, serialised)
+	}
+
 	// Maintain rs.accounts for the cross-block timing hole bridge.
 	c.rs.accountsMutex.Lock()
 	obj, ok := c.rs.accounts[address]
@@ -449,6 +461,10 @@ func (c *versionedWriteCollector) UpdateAccountData(address accounts.Address, or
 
 func (c *versionedWriteCollector) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
 	c.writes = append(c.writes, &VersionedWrite{Address: address, Path: CodePath, Val: code})
+
+	if c.accumulator != nil {
+		c.accumulator.ChangeCode(address.Value(), incarnation, code)
+	}
 
 	c.rs.accountsMutex.Lock()
 	obj, ok := c.rs.accounts[address]
@@ -483,6 +499,11 @@ func (c *versionedWriteCollector) WriteAccountStorage(address accounts.Address, 
 	}
 
 	c.writes = append(c.writes, &VersionedWrite{Address: address, Path: StoragePath, Key: key, Val: value})
+
+	if c.accumulator != nil {
+		v := value.Bytes()
+		c.accumulator.ChangeStorage(address.Value(), incarnation, key.Value(), v)
+	}
 
 	c.rs.accountsMutex.Lock()
 	obj, ok := c.rs.accounts[address]
