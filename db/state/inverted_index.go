@@ -1150,7 +1150,6 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 		Version:            versionOfRs,
 		Enums:              true,
 		LessFalsePositives: true,
-		Workers:            ii.CompressorCfg.Workers,
 	}
 
 	// Design decision: `why Enum=true and LessFalsePositives=true`?
