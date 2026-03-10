@@ -21,6 +21,9 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"math/big"
+	"time"
+
+	"github.com/cenkalti/backoff/v4"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -56,12 +59,38 @@ func NewContractsDeployer(
 	}
 }
 
+// waitForPendingNonce polls PendingNonceAt until it reaches expectedNonce. This is
+// necessary because ForkChoiceUpdated persistence is asynchronous: after a block is
+// built and receipts become available, the txpool may not yet have updated its view
+// of the account nonce. Submitting the next transaction before the nonce is committed
+// can result in a stale nonce being used, causing the transaction to revert.
+func (d ContractsDeployer) waitForPendingNonce(ctx context.Context, expectedNonce uint64) error {
+	waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	return backoff.Retry(func() error {
+		nonce, err := d.contractBackend.PendingNonceAt(waitCtx, d.address)
+		if err != nil {
+			return backoff.Permanent(err)
+		}
+		if nonce < expectedNonce {
+			return fmt.Errorf("pending nonce %d not yet at expected %d, retrying", nonce, expectedNonce)
+		}
+		return nil
+	}, backoff.WithContext(backoff.NewConstantBackOff(50*time.Millisecond), waitCtx))
+}
+
 func (d ContractsDeployer) DeployCore(ctx context.Context) (_ ContractsDeployment, err error) {
 	defer func() {
 		if err != nil {
 			fmt.Println("DEPLOY ERR", err, dbg.Stack())
 		}
 	}()
+
+	startNonce, err := d.contractBackend.PendingNonceAt(ctx, d.address)
+	if err != nil {
+		return ContractsDeployment{}, err
+	}
+
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(d.key, d.chainId)
 	if err != nil {
 		return ContractsDeployment{}, err
@@ -103,6 +132,14 @@ func (d ContractsDeployer) DeployCore(ctx context.Context) (_ ContractsDeploymen
 		return ContractsDeployment{}, err
 	}
 
+	// Wait for the 3 deploy txns to be reflected in the pending nonce before
+	// submitting the next transaction. The txpool may briefly return a stale
+	// nonce after ForkChoiceUpdated persistence, causing the Initialize call
+	// to use nonce 0 instead of 3, which would revert.
+	if err = d.waitForPendingNonce(ctx, startNonce+3); err != nil {
+		return ContractsDeployment{}, err
+	}
+
 	ksmInitTxn, err := ksm.Initialize(transactOpts, d.address, d.address)
 	if err != nil {
 		return ContractsDeployment{}, err
@@ -132,6 +169,11 @@ func (d ContractsDeployer) DeployKeyperSet(
 	dep ContractsDeployment,
 	ekg EonKeyGeneration,
 ) (common.Address, *shuttercontracts.KeyperSet, error) {
+	startNonce, err := d.contractBackend.PendingNonceAt(ctx, d.address)
+	if err != nil {
+		return common.Address{}, nil, err
+	}
+
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(d.key, d.chainId)
 	if err != nil {
 		return common.Address{}, nil, err
@@ -149,6 +191,10 @@ func (d ContractsDeployer) DeployKeyperSet(
 
 	err = d.txnInclusionVerifier.VerifyTxnsInclusion(ctx, block, keyperSetDeployTxn.Hash())
 	if err != nil {
+		return common.Address{}, nil, err
+	}
+
+	if err = d.waitForPendingNonce(ctx, startNonce+1); err != nil {
 		return common.Address{}, nil, err
 	}
 
@@ -182,6 +228,10 @@ func (d ContractsDeployer) DeployKeyperSet(
 		return common.Address{}, nil, err
 	}
 
+	if err = d.waitForPendingNonce(ctx, startNonce+5); err != nil {
+		return common.Address{}, nil, err
+	}
+
 	ksm, err := shuttercontracts.NewKeyperSetManager(dep.KsmAddr, d.contractBackend)
 	if err != nil {
 		return common.Address{}, nil, err
@@ -199,6 +249,10 @@ func (d ContractsDeployer) DeployKeyperSet(
 
 	err = d.txnInclusionVerifier.VerifyTxnsInclusion(ctx, block, addKeyperSetTxn.Hash())
 	if err != nil {
+		return common.Address{}, nil, err
+	}
+
+	if err = d.waitForPendingNonce(ctx, startNonce+6); err != nil {
 		return common.Address{}, nil, err
 	}
 
