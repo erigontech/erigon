@@ -71,6 +71,9 @@ type History struct {
 	// _visibleFiles - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
 	_visibleFiles []visibleFile
+
+	// _testBuildVIHook - test-only: called with the recsplit before the build loop in buildVI
+	_testBuildVIHook func(rs *recsplit.RecSplit)
 }
 
 func NewHistory(cfg statecfg.HistCfg, stepSize, stepsInFrozenFile uint64, dirs datadir.Dirs, logger log.Logger) (*History, error) {
@@ -276,6 +279,9 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	}
 	defer rs.Close()
 	rs.LogLvl(log.LvlTrace)
+	if h._testBuildVIHook != nil {
+		h._testBuildVIHook(rs)
+	}
 
 	seq := &multiencseq.SequenceReader{}
 	it := &multiencseq.SequenceIterator{}
