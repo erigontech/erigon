@@ -218,6 +218,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	} else {
 		feeCap = common.Big0
 	}
+
 	// Recap the highest gas limit with account's available balance.
 	if feeCap.Sign() != 0 {
 		state := state.New(stateReader)
@@ -267,7 +268,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	// some tx field combos might bump the price up even for plain transfers (e.g.
 	// unused access list items). Ever so slightly wasteful, but safer overall.
 
-	if args.Data == nil {
+	if args.Data == nil && args.To != nil {
 		state := state.New(stateReader)
 		if state == nil {
 			return 0, errors.New("can't get the current state")
@@ -276,7 +277,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		if err != nil {
 			return 0, errors.New("getCodeSize failed")
 		}
-		if args.To != nil && codeSize == 0 {
+		if codeSize == 0 {
 			failed, _, err := doCall(ctx, caller, params.TxGas, engine)
 			if err == nil && !failed {
 				return hexutil.Uint64(params.TxGas), nil
