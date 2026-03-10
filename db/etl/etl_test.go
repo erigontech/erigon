@@ -18,6 +18,7 @@ package etl
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -28,6 +29,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -675,4 +677,60 @@ func BenchmarkSortableBufferSort(b *testing.B) {
 			}
 		})
 	}
+}
+
+func BenchmarkMemoryDataProviderNext(b *testing.B) {
+	for _, keySize := range []int{20, 32, 64} {
+		for _, valSize := range []int{32, 128, 256, 1024} {
+			name := fmt.Sprintf("key%d_val%d", keySize, valSize)
+			buf := makeSortedBuffer(keySize, valSize, 10_000)
+
+			b.Run(name+"/GetRef", func(b *testing.B) {
+				b.ReportAllocs()
+				var keyBuf, valBuf []byte
+				for i := 0; i < b.N; i++ {
+					p := &memoryDataProvider{buffer: buf, currentIndex: 0}
+					for {
+						var err error
+						keyBuf, valBuf, err = p.Next(keyBuf[:0], valBuf[:0])
+						if err == io.EOF {
+							break
+						}
+						if err != nil {
+							b.Fatal(err)
+						}
+					}
+				}
+				_ = keyBuf
+				_ = valBuf
+			})
+
+			b.Run(name+"/Get_copy", func(b *testing.B) {
+				b.ReportAllocs()
+				var keyBuf, valBuf []byte
+				for i := 0; i < b.N; i++ {
+					idx := 0
+					for idx < buf.Len() {
+						keyBuf, valBuf = buf.Get(idx, keyBuf[:0], valBuf[:0])
+						idx++
+					}
+				}
+				_ = keyBuf
+				_ = valBuf
+			})
+		}
+	}
+}
+
+func makeSortedBuffer(keySize, valSize, n int) *sortableBuffer {
+	buf := NewSortableBuffer(256 * datasize.MB)
+	key := make([]byte, keySize)
+	val := make([]byte, valSize)
+	for i := 0; i < n; i++ {
+		rand.Read(key)
+		rand.Read(val)
+		buf.Put(key, val)
+	}
+	buf.Sort()
+	return buf
 }
