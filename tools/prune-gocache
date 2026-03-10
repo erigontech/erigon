@@ -111,6 +111,8 @@ def main() -> int:
                 pass
 
     # Sort: skip files first (True > False), then most recently used.
+    # It's not yet known whether sorting size descending or ascending is better
+    # for cache hit rates — it may not matter much in practice.
     files.sort(reverse=True)
 
     if args.debug:
