@@ -21,6 +21,25 @@ All workflows should include `workflow_dispatch` so they can be triggered manual
 without code changes. For workflows with inputs (e.g. QA), use dispatch inputs instead
 of separate workflow files.
 
+### Draft PRs
+
+If a job uses `if: ${{ !github.event.pull_request.draft }}` to skip on draft PRs, the
+workflow **must** include `ready_for_review` in its `pull_request` event types:
+
+```yaml
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+```
+
+Without `ready_for_review`, converting a draft PR to ready-for-review fires an event
+the workflow doesn't subscribe to, so the job never runs — the PR appears to have
+skipped CI until the next push.
+
 ### Required checks and path filters
 
 Required checks must always report a status or they block the PR indefinitely.

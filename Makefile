@@ -217,6 +217,11 @@ test-short: test-filtered
 
 test-all: test-filtered
 
+## test-bench:                         check the benchmarks compile and run
+test-bench: override GO_FLAGS += -run=^$$ -bench=. -benchtime=1x
+test-bench:
+	$(GOTEST)
+
 test-all-race: override GO_FLAGS += --timeout 60m -race
 test-all-race: test-filtered
 
