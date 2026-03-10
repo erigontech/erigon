@@ -269,10 +269,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r 
 		return
 	}
 	a.operationsPool.VoluntaryExitsPool.Insert(req.VoluntaryExit.ValidatorIndex, &req)
-	if err := a.gossipManager.Publish(r.Context(), gossip.TopicNameVoluntaryExit, encodedSSZ); err != nil {
-		a.logger.Debug("[Beacon REST] failed to publish voluntary exit to gossip", "err", err)
-	}
-	// Only write 200
+	a.gossipManager.Publish(r.Context(), gossip.TopicNameVoluntaryExit, encodedSSZ)
 	w.WriteHeader(http.StatusOK)
 }
 
