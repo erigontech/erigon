@@ -255,16 +255,27 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	//     (post-beacon-block state, no execution payload was applied)
 	// This ensures the new block builds on the correct canonical state.
 	var parentFullState *state.CachingBeaconState
-	if blockVersion >= clparams.GloasVersion && f.isParentNodeFull(block.Block) {
-		// Check disk for envelope existence (handles both normal operation and restart recovery)
-		if f.forkGraph.HasEnvelope(block.Block.ParentRoot) {
-			// Reconstruct the execution payload state from disk
-			parentFullState, err = f.forkGraph.GetExecutionPayloadState(block.Block.ParentRoot)
-			if err != nil {
-				log.Warn("Failed to get execution payload state for parent", "parentRoot", block.Block.ParentRoot, "err", err)
-				// Fall back to block_state via AddChainSegment's normal path
-				parentFullState = nil
+	if blockVersion >= clparams.GloasVersion {
+		isParentFull := f.isParentNodeFull(block.Block)
+		hasEnvelope := f.forkGraph.HasEnvelope(block.Block.ParentRoot)
+		if isParentFull {
+			if hasEnvelope {
+				// Reconstruct the execution payload state from disk
+				parentFullState, err = f.forkGraph.GetExecutionPayloadState(block.Block.ParentRoot)
+				if err != nil {
+					log.Warn("OnBlock: FULL parent but GetExecutionPayloadState failed",
+						"slot", block.Block.Slot, "parentRoot", block.Block.ParentRoot, "err", err)
+					parentFullState = nil
+				}
+			} else {
+				log.Warn("OnBlock: FULL parent but HasEnvelope=false (envelope missing!)",
+					"slot", block.Block.Slot, "parentRoot", block.Block.ParentRoot)
 			}
+		}
+		if block.Block.Slot%100 == 0 {
+			log.Info("OnBlock GLOAS state debug",
+				"slot", block.Block.Slot, "isParentFull", isParentFull,
+				"hasEnvelope", hasEnvelope, "parentFullState!=nil", parentFullState != nil)
 		}
 	}
 
