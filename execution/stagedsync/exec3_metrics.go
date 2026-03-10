@@ -918,7 +918,6 @@ func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.Sta
 		"alloc", common.ByteCount(m.Alloc),
 		"sys", common.ByteCount(m.Sys),
 		"isForkValidation", te.isForkValidation,
-		"isBlockProduction", te.isBlockProduction,
 		"isApplyingBlocks", te.isApplyingBlocks,
 	}...)
 

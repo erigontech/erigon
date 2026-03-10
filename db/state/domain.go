@@ -95,6 +95,9 @@ type Domain struct {
 	_visible *domainVisible
 
 	checker *DependencyIntegrityChecker
+
+	// _testBuildAccessorHook - test-only: called with the recsplit before the build loop in buildHashMapAccessor
+	_testBuildAccessorHook func(rs *recsplit.RecSplit)
 }
 
 type domainVisible struct {
@@ -1109,7 +1112,7 @@ func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep kv.S
 		NoFsync:    d.noFsync,
 		//Workers:    d.CompressorCfg.Workers,
 	}
-	return buildHashMapAccessor(ctx, data, idxPath, false, cfg, ps, d.logger)
+	return buildHashMapAccessor(ctx, data, idxPath, false, cfg, ps, d.logger, d._testBuildAccessorHook)
 }
 
 func (d *Domain) missedBtreeAccessors(source []*FilesItem, dl dirListing) (l []*FilesItem) {
@@ -1189,7 +1192,7 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 	}
 }
 
-func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) (err error) {
+func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger, testHook func(*recsplit.RecSplit)) (err error) {
 	_, fileName := filepath.Split(idxPath)
 	count := g.Count()
 	if !values {
@@ -1214,8 +1217,13 @@ func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, va
 		}
 	}()
 
-	var keyPos, valPos uint64
+	if testHook != nil {
+		testHook(rs)
+	}
+
 	for {
+		// Reset positions at the start of each iteration to handle collision retries correctly
+		var keyPos, valPos uint64
 		word := make([]byte, 0, 256)
 		if err := ctx.Err(); err != nil {
 			return err

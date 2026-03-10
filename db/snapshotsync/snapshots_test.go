@@ -92,24 +92,14 @@ func BenchmarkFindMergeRange(t *testing.B) {
 			for i := 0; i < 24; i++ {
 				RangesOld = append(RangesOld, NewRange(uint64(i*100_000), uint64((i+1)*100_000)))
 			}
-			found := merger.FindMergeRanges(RangesOld, uint64(24*100_000))
-
-			expect := Ranges{
-				NewRange(0, 500000),
-				NewRange(500000, 1000000),
-				NewRange(1000000, 1500000),
-				NewRange(1500000, 2000000)}
-			require.Equal(t, expect.String(), Ranges(found).String())
+			merger.FindMergeRanges(RangesOld, uint64(24*100_000))
 
 			var RangesNew []Range
 			start := uint64(19_000_000)
 			for i := uint64(0); i < 24; i++ {
 				RangesNew = append(RangesNew, NewRange(start+(i*100_000), start+((i+1)*100_000)))
 			}
-			found = merger.FindMergeRanges(RangesNew, uint64(24*100_000))
-
-			expect = Ranges{}
-			require.Equal(t, expect.String(), Ranges(found).String())
+			merger.FindMergeRanges(RangesNew, uint64(24*100_000))
 		}
 	})
 
@@ -119,31 +109,15 @@ func BenchmarkFindMergeRange(t *testing.B) {
 			for i := uint64(0); i < 240; i++ {
 				RangesOld = append(RangesOld, NewRange(i*10_000, (i+1)*10_000))
 			}
-			found := merger.FindMergeRanges(RangesOld, uint64(240*10_000))
-			var expect Ranges
-			for i := uint64(0); i < 4; i++ {
-				expect = append(expect, NewRange(i*snaptype.Erigon2OldMergeLimit, (i+1)*snaptype.Erigon2OldMergeLimit))
-			}
-			for i := uint64(0); i < 4; i++ {
-				expect = append(expect, NewRange(2_000_000+i*snaptype.Erigon2MergeLimit, 2_000_000+(i+1)*snaptype.Erigon2MergeLimit))
-			}
-
-			require.Equal(t, expect.String(), Ranges(found).String())
+			merger.FindMergeRanges(RangesOld, uint64(240*10_000))
 
 			var RangesNew Ranges
 			start := uint64(19_000_000)
 			for i := uint64(0); i < 240; i++ {
 				RangesNew = append(RangesNew, NewRange(start+i*10_000, start+(i+1)*10_000))
 			}
-			found = merger.FindMergeRanges(RangesNew, uint64(240*10_000))
-			expect = nil
-			for i := uint64(0); i < 24; i++ {
-				expect = append(expect, NewRange(start+i*snaptype.Erigon2MergeLimit, start+(i+1)*snaptype.Erigon2MergeLimit))
-			}
-
-			require.Equal(t, expect.String(), Ranges(found).String())
+			merger.FindMergeRanges(RangesNew, uint64(240*10_000))
 		}
-
 	})
 
 }

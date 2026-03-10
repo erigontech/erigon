@@ -356,6 +356,10 @@ func (c *Config) IsNapoli(num uint64) bool {
 	return (c != nil) && (c.Bor != nil) && c.Bor.IsNapoli(num)
 }
 
+func (c *Config) IsAhmedabad(num uint64) bool {
+	return (c != nil) && (c.Bor != nil) && c.Bor.IsAhmedabad(num)
+}
+
 // Refer to https://forum.polygon.technology/t/pip-63-bhilai-hardfork
 func (c *Config) IsBhilai(num uint64) bool {
 	return (c != nil) && (c.Bor != nil) && c.Bor.IsBhilai(num)
@@ -727,7 +731,7 @@ type Rules struct {
 	IsHomestead, IsTangerineWhistle, IsSpuriousDragon bool
 	IsByzantium, IsConstantinople, IsPetersburg       bool
 	IsIstanbul, IsBerlin, IsLondon, IsShanghai        bool
-	IsCancun, IsNapoli, IsBhilai                      bool
+	IsCancun, IsNapoli, IsAhmedabad, IsBhilai         bool
 	IsPrague, IsOsaka, IsAmsterdam                    bool
 	IsAura                                            bool
 }
