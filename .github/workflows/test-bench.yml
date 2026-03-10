@@ -1,0 +1,52 @@
+name: Benchmarks
+
+on:
+  push:
+    branches:
+      - main
+      - 'release/**'
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  benchmarks:
+    concurrency:
+      group: >-
+        ${{
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) &&
+          format('{0}-{1}', github.workflow, github.run_id) ||
+          format('{0}-{1}', github.workflow, github.ref)
+        }}
+      cancel-in-progress: true
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout custom actions
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - uses: ./.github/actions/setup-erigon
+        id: erigon
+        with:
+          # No submodules, LFS, or space cleanup needed: benchmark
+          # functions only use in-memory or local testdata/ files.
+          # Submodules (legacy-tests, execution-spec-tests) and LFS
+          # fixtures are only read by regular Test* functions.
+
+      - name: Run benchmarks
+        run: make test-bench
+
+      - uses: ./.github/actions/cleanup-erigon
+        if: always()
