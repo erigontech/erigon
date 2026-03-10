@@ -826,7 +826,7 @@ func BenchmarkMemoryDataProviderNext(b *testing.B) {
 					p := &memoryDataProvider{buffer: buf, currentIndex: 0}
 					for {
 						var err error
-						keyBuf, valBuf, err = p.Next(keyBuf[:0], valBuf[:0])
+						keyBuf, valBuf, err = p.Next()
 						if err == io.EOF {
 							break
 						}

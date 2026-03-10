@@ -64,10 +64,9 @@ var LargeSortableBuffers = NewAllocator(&sync.Pool{
 type Buffer interface {
 	// Put does copy `k` and `v`
 	Put(k, v []byte)
-	Get(i int, keyBuf, valBuf []byte) ([]byte, []byte)
-	// GetRef returns direct references to the internal key/value storage without copying.
+	// Get returns direct references to the internal key/value storage without copying.
 	// The returned slices must not be modified by the caller.
-	GetRef(i int) ([]byte, []byte)
+	Get(i int) ([]byte, []byte)
 	Len() int
 	Reset()
 	SizeLimit() int
@@ -136,40 +135,7 @@ func (b *sortableBuffer) Len() int {
 	return len(b.entries)
 }
 
-func (b *sortableBuffer) Get(i int, keyBuf, valBuf []byte) ([]byte, []byte) {
-	e := &b.entries[i]
-	keyLen, valLen := e.keyLen, e.valLen
-	keyOffset := e.offset
-	valOffset := keyOffset
-	if keyLen > 0 {
-		valOffset += keyLen
-	}
-	if keyLen > 0 {
-		keyBuf = append(keyBuf, b.data[keyOffset:keyOffset+keyLen]...)
-	} else if keyLen == 0 {
-		if keyBuf != nil {
-			keyBuf = keyBuf[:0]
-		} else {
-			keyBuf = []byte{}
-		}
-	} else {
-		keyBuf = nil
-	}
-	if valLen > 0 {
-		valBuf = append(valBuf, b.data[valOffset:valOffset+valLen]...)
-	} else if valLen == 0 {
-		if valBuf != nil {
-			valBuf = valBuf[:0]
-		} else {
-			valBuf = []byte{}
-		}
-	} else {
-		valBuf = nil
-	}
-	return keyBuf, valBuf
-}
-
-func (b *sortableBuffer) GetRef(i int) ([]byte, []byte) {
+func (b *sortableBuffer) Get(i int) ([]byte, []byte) {
 	e := &b.entries[i]
 	keyLen, valLen := e.keyLen, e.valLen
 	keyOffset := e.offset
@@ -301,12 +267,7 @@ func (b *appendSortableBuffer) Swap(i, j int) {
 	b.sortedBuf[i], b.sortedBuf[j] = b.sortedBuf[j], b.sortedBuf[i]
 }
 
-func (b *appendSortableBuffer) Get(i int, keyBuf, valBuf []byte) ([]byte, []byte) {
-	keyBuf = append(keyBuf, b.sortedBuf[i].key...)
-	valBuf = append(valBuf, b.sortedBuf[i].value...)
-	return keyBuf, valBuf
-}
-func (b *appendSortableBuffer) GetRef(i int) ([]byte, []byte) {
+func (b *appendSortableBuffer) Get(i int) ([]byte, []byte) {
 	return b.sortedBuf[i].key, b.sortedBuf[i].value
 }
 func (b *appendSortableBuffer) Reset() {
