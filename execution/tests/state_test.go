@@ -51,15 +51,15 @@ func TestStateCornerCases(t *testing.T) {
 
 	st := new(testutil.TestMatcher)
 
-	tmpDir, err := os.MkdirTemp("", "erigon-test-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { dir.RemoveAll(tmpDir) })
-	dirs := datadir.New(tmpDir)
-	db := temporaltest.NewTestDB(t, dirs)
 	testDir := path.Join(cornersDir, "state")
 	st.Walk(t, testDir, func(t *testing.T, name string, test *testutil.StateTest) {
+		tmpDir, err := os.MkdirTemp("", "erigon-test-*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { dir.RemoveAll(tmpDir) })
+		dirs := datadir.New(tmpDir)
+		db := temporaltest.NewTestDB(t, dirs)
 		for _, subtest := range test.Subtests() {
 			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
 			t.Run(key, func(t *testing.T) {
@@ -105,14 +105,14 @@ func TestState(t *testing.T) {
 	// Very slow tests
 	st.SkipLoad(`^stTimeConsuming/`)
 
-	tmpDir, err := os.MkdirTemp("", "erigon-test-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { dir.RemoveAll(tmpDir) })
-	dirs := datadir.New(tmpDir)
-	db := temporaltest.NewTestDB(t, dirs)
 	st.Walk(t, testDir, func(t *testing.T, name string, test *testutil.StateTest) {
+		tmpDir, err := os.MkdirTemp("", "erigon-test-*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { dir.RemoveAll(tmpDir) })
+		dirs := datadir.New(tmpDir)
+		db := temporaltest.NewTestDB(t, dirs)
 		for _, subtest := range test.Subtests() {
 			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
 			t.Run(key, func(t *testing.T) {
