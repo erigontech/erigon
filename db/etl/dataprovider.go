@@ -25,8 +25,6 @@ import (
 	"path/filepath"
 	"sync/atomic"
 
-	"github.com/erigontech/erigon/common/dir"
-
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common/dir"
