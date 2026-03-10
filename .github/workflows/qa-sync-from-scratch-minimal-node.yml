@@ -132,3 +132,29 @@ jobs:
           python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
           
 
+  inference:
+    needs: [minimal-node-sync-from-scratch-test]
+    if: failure()
+    permissions:
+      models: read
+      actions: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: AI failure analysis
+        id: inference
+        uses: actions/ai-inference@v2
+        with:
+          enable-github-mcp: true
+          github-mcp-toolsets: 'context,actions,copilot,pull_requests,repos'
+          prompt: >
+            Analyse the log of this workflow run and identify the root cause,
+            highlight the most relevant error messages, and suggest what to investigate.
+            The repository is: ${{ github.repository }}
+            The workflow run ID is: ${{ github.run_id }}
+
+      - name: Print AI failure analysis
+        if: steps.inference.outcome == 'success'
+        run: |
+          echo "## AI Failure Analysis" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ steps.inference.outputs.response }}" >> "$GITHUB_STEP_SUMMARY"
