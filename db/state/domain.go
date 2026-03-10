@@ -1419,8 +1419,7 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 			fmt.Printf("GetLatest(%s, %x) -> found in file %s\n", dt.name.String(), k, dt.files[i].src.decompressor.FileName())
 		}
 
-		useCache = useCache && ((dt.files[i].endTxNum - dt.files[i].startTxNum) > dt.stepSize)
-
+		//useCache = useCache && ((dt.files[i].endTxNum - dt.files[i].startTxNum) > dt.stepSize)
 		if dt.getFromFileCache != nil && useCache {
 			dt.getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: uint8(i), v: v})
 		}
