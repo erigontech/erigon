@@ -569,8 +569,8 @@ func fetchChainToml(ctx context.Context, source snapshothashes.SnapshotSource, b
 	return res, nil
 }
 
-// LoadRemotePreverifiedForChain fetches and loads snapshot hashes for a single chain only.
-func LoadRemotePreverifiedForChain(ctx context.Context, chainName string) error {
+// LoadRemotePreverified fetches and loads snapshot hashes for a single chain.
+func LoadRemotePreverified(ctx context.Context, chainName string) error {
 	if s, ok := os.LookupEnv(RemotePreverifiedEnvKey); ok {
 		log.Info("Loading local preverified override file", "file", s)
 

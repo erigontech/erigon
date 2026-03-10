@@ -18,7 +18,7 @@ func LoadPreverified(ctx context.Context, flagValue string, dirs *datadir.Dirs, 
 		panicif.Err(os.Setenv(RemotePreverifiedEnvKey, dirs.PreverifiedPath()))
 		fallthrough
 	case "remote":
-		err = LoadRemotePreverifiedForChain(ctx, chainName)
+		err = LoadRemotePreverified(ctx, chainName)
 		if err != nil {
 			// TODO: Check if we should continue? What if we ask for a git revision and
 			// can't get it? What about a branch? Can we reset to the embedded snapshot hashes?
