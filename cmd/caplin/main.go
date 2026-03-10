@@ -88,12 +88,13 @@ func runCaplinNode(cliCtx *cli.Context) error {
 
 	var executionEngine execution_client.ExecutionEngine
 	if cfg.RunEngineAPI {
-		cc, err := execution_client.NewExecutionClientRPC(cfg.JwtSecret, cfg.EngineAPIAddr, cfg.EngineAPIPort)
+		cc, err := execution_client.NewExecutionClientEngineRPC(cfg.JwtSecret, cfg.EngineAPIAddr, cfg.EngineAPIPort)
 		if err != nil {
 			log.Error("could not start engine api", "err", err)
+		} else {
+			log.Info("Started Engine API RPC Client", "addr", cfg.EngineAPIAddr)
+			executionEngine = cc
 		}
-		log.Info("Started Engine API RPC Client", "addr", cfg.EngineAPIAddr)
-		executionEngine = cc
 	}
 	chainName := cliCtx.String(utils.ChainFlag.Name)
 	_, _, networkId, err := clparams.GetConfigsByNetworkName(chainName)
