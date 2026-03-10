@@ -215,7 +215,20 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	}
 
 	if newState == nil {
-		log.Debug("AddChainSegment: missing segment", "block", common.Hash(blockRoot), "slot", block.Slot, "parentRoot", block.ParentRoot)
+		var currentStateRoot common.Hash
+		if f.currentState != nil {
+			currentStateRoot, _ = f.currentState.BlockRoot()
+		}
+		log.Warn("AddChainSegment: missing segment",
+			"slot", block.Slot,
+			"blockRoot", common.Hash(blockRoot),
+			"parentRoot", block.ParentRoot,
+			"currentStateRoot", currentStateRoot,
+			"currentStateSlot", f.currentState.Slot(),
+			"lowestAvail", f.lowestAvailableBlock.Load(),
+			"isCurrentState", isBlockRootTheCurrentState,
+			"parentFullState!=nil", parentFullState != nil,
+		)
 		return nil, MissingSegment, nil
 	}
 	finalizedBlock, hasFinalized := f.GetBlock(newState.FinalizedCheckpoint().Root)
@@ -282,6 +295,19 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 
 	f.currentState = newState
 	f.currentStateBlockRoot = common.Hash(blockRoot)
+
+	// Debug: verify currentState.BlockRoot() matches the actual block root.
+	// If they diverge, it means the state transition used the wrong pre-state
+	// (e.g., block_state instead of execution_payload_state for a FULL parent).
+	if computedRoot, cerr := f.currentState.BlockRoot(); cerr == nil && computedRoot != common.Hash(blockRoot) {
+		log.Warn("AddChainSegment: BlockRoot MISMATCH after TransitionState",
+			"slot", block.Slot,
+			"expectedBlockRoot", common.Hash(blockRoot),
+			"computedBlockRoot", computedRoot,
+			"parentFullState!=nil", parentFullState != nil,
+			"parentRoot", block.ParentRoot,
+		)
+	}
 
 	// update diff storages.
 	if f.rcfg.Beacon || f.rcfg.Validator || f.rcfg.Lighthouse {

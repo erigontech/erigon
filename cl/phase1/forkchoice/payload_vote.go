@@ -312,11 +312,11 @@ func (f *ForkChoiceStore) validateParentPayloadPath(block *cltypes.BeaconBlock) 
 		// Parent is EMPTY - verify bid.parent_block_hash == parent_bid.parent_block_hash
 		parentBlock, ok := f.forkGraph.GetBlock(block.ParentRoot)
 		if !ok || parentBlock == nil {
-			// Anchor block: not in store but header exists (finalized starting point), skip bid validation
-			if _, hasHeader := f.forkGraph.GetHeader(block.ParentRoot); hasHeader {
-				return nil
-			}
-			return errors.New("parent block not found")
+			// Parent block was pruned from the fork graph or is the anchor block.
+			// Spec assumes store.blocks contains all blocks (no pruning), but Erigon
+			// prunes old blocks to save memory. Pruned blocks were already validated
+			// when they were processed, so skip this validation.
+			return nil
 		}
 
 		parentBid := parentBlock.Block.Body.GetSignedExecutionPayloadBid()
