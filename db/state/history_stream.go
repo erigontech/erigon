@@ -423,20 +423,30 @@ func (hi *HistoryChangesIterFiles) advance() error {
 	for hi.h.Len() > 0 {
 		top := hi.h[0] // peek at minimum without removing
 		key, idxVal := top.key, top.val
+
+		// Read next key; defer the val read after the dedup check.
+		// heap.Less compares only key+txNum — never val — so heap.Fix is safe.
 		if top.g.HasNext() {
 			top.key, _ = top.g.Next(nil)
-			if top.g.HasNext() {
-				top.val, _ = top.g.Next(nil)
-			} else {
-				top.val = nil
-			}
 			heap.Fix(&hi.h, 0) // sift-down only, O(log n) vs Pop+Push O(2 log n)
 		} else {
 			heap.Pop(&hi.h)
 		}
 
 		if bytes.Equal(key, hi.nextKey) { // deduplication
+			// Advance getter past the unread val so next iteration reads the correct key.
+			if top.g.HasNext() {
+				top.g.Skip()
+			}
 			continue
+		}
+
+		// Non-duplicate: read val (txNum-sequence) into top.val for future heap use.
+		// idxVal (from top.val at loop start) is still the val for the current key.
+		if top.g.HasNext() {
+			top.val, _ = top.g.Next(nil)
+		} else {
+			top.val = nil
 		}
 
 		hi.seq.Reset(top.startTxNum, idxVal)
