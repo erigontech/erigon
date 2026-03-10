@@ -1401,7 +1401,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return protocol.SysCallContract(contract, data, chainConfig, ibs, header, fullEngine, false /* constCall */, vm.Config{})
 	}
 
-	if _, err = fullEngine.Finalize(chainConfig, types.CopyHeader(header), ibs, block.Uncles(), nil /* receipts */, block.Withdrawals(), chainReader, syscall, true /* skipReceiptsEval */, log.Root()); err != nil {
+	if _, err = fullEngine.Finalize(chainConfig, types.CopyHeader(header), ibs, block.Uncles(), nil /* receipts */, block.Withdrawals(), chainReader, syscall, false /* skipReceiptsEval */, log.Root()); err != nil {
 		return nil, fmt.Errorf("failed to finalize block: %w", err)
 	}
 
@@ -2742,7 +2742,7 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	// only Bor and AuRa engine use ChainReader. And the ChainReader is only used to read headers. This means their
 	// witness may need to be augmented with headers accessed during their engine.Finalize(). This is something that
 	// can be implemented later. For now use ChainReader = nil, as this is sufficient for Ethereum.
-	_, err = engine.Finalize(chainConfig, types.CopyHeader(header), ibs, block.Uncles() /*receipts */, nil, block.Withdrawals() /*chainReader */, nil, syscall /*skipReceiptsEval*/, true, log.Root())
+	_, err = engine.Finalize(chainConfig, types.CopyHeader(header), ibs, block.Uncles() /*receipts */, nil, block.Withdrawals() /*chainReader */, nil, syscall, false /*skipReceiptsEval*/, log.Root())
 	if err != nil {
 		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] engine.Finalize failed: %w", err)
 	}
