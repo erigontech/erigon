@@ -641,7 +641,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			builderstages.BuilderUnwindOrder,
 			builderstages.BuilderPruneOrder,
 			logger,
-			stages.ModeBlockProduction,
+			stages.ModeApplyingBlocks,
 		)
 		// We start the mining step
 		if err := stageloop.MiningStep(ctx, mock.DB, proposingSync, tmpdir, logger); err != nil {
@@ -760,7 +760,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		builderstages.BuilderUnwindOrder,
 		builderstages.BuilderPruneOrder,
 		logger,
-		stages.ModeBlockProduction,
+		stages.ModeApplyingBlocks,
 	)
 
 	mock.StreamWg.Add(1)
