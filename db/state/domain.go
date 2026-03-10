@@ -1219,8 +1219,8 @@ func buildHashMapAccessor(ctx context.Context, decomp *seg.Decompressor, compres
 		}
 	}()
 
-	var keyPos, valPos uint64
 	for {
+		var keyPos, valPos uint64
 		word := make([]byte, 0, 256)
 		if err := ctx.Err(); err != nil {
 			return err
