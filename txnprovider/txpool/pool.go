@@ -161,6 +161,15 @@ type TxPool struct {
 		index   int
 		txnHash common.Hash
 	}
+
+	// Dormancy eviction: tracks the block number of the last on-chain state change (nonce or
+	// balance) for each sender that has transactions in the queued sub-pool. Senders absent
+	// from on-chain activity for longer than cfg.QueuedDormancyDuration are evicted. The timer
+	// resets only on real on-chain state changes — not on new transaction submissions — so
+	// senders cannot game it by re-submitting transactions.
+	senderLastActivity   map[uint64]uint64 // senderID → block of last on-chain state change
+	avgBlockTimeMs       atomic.Int64      // EWMA of block-to-block wall-clock interval (ms); default 12 000
+	lastBlockTimestampMs atomic.Int64      // unix-ms timestamp of the last processed block
 }
 
 type ValidateAA interface {
@@ -248,7 +257,11 @@ func New(
 			index   int
 			txnHash common.Hash
 		}),
+		senderLastActivity: make(map[uint64]uint64),
 	}
+	// Seed the EWMA block time with 12 s (Ethereum mainnet slot time). The tracker adjusts
+	// automatically after a few blocks, so the seed only affects the very first sweep interval.
+	res.avgBlockTimeMs.Store(12_000)
 
 	if chainConfig.ShanghaiTime != nil {
 		if !chainConfig.ShanghaiTime.IsUint64() {
@@ -349,6 +362,16 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 
 	block := stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockHeight
 	baseFee := stateChanges.PendingBlockBaseFee
+
+	// Update EWMA block time (α=0.1) using wall-clock measurements between consecutive blocks.
+	// Ignore gaps >10 min (node was paused/syncing). Done outside the lock — atomics only.
+	nowMs := time.Now().UnixMilli()
+	if prev := p.lastBlockTimestampMs.Load(); prev > 0 {
+		if delta := nowMs - prev; delta > 0 && delta < 600_000 {
+			p.avgBlockTimeMs.Store((9*p.avgBlockTimeMs.Load() + delta) / 10)
+		}
+	}
+	p.lastBlockTimestampMs.Store(nowMs)
 
 	if err = minedTxns.Valid(); err != nil {
 		return err
@@ -1490,6 +1513,12 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 	}
 
 	for senderID := range sendersWithChangedState {
+		// For freshly submitted transactions, initialize the dormancy timer if this sender
+		// has no existing entry. We use blockNum (the current chain tip) as the baseline so
+		// the sender gets the full dormancy grace period from the moment of first submission.
+		if _, ok := p.senderLastActivity[senderID]; !ok {
+			p.senderLastActivity[senderID] = blockNum
+		}
 		nonce, balance, err := senders.info(cacheView, senderID)
 		if err != nil {
 			return announcements, discardReasons, err
@@ -1554,6 +1583,8 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 	}
 
 	for senderID := range sendersWithChangedState {
+		// Reset the dormancy timer: this sender had a real on-chain state change.
+		p.senderLastActivity[senderID] = blockNum
 		nonce, balance, err := senders.info(cacheView, senderID)
 		if err != nil {
 			return announcements, err
@@ -1722,6 +1753,129 @@ func (p *TxPool) discardLocked(mt *metaTxn, reason txpoolcfg.DiscardReason) {
 			delete(p.auths, a)
 		}
 	}
+}
+
+// sweepDormantQueued evicts all queued transactions from senders that have had no on-chain
+// state change for longer than cfg.QueuedDormancyDuration. It also prunes stale entries from
+// the senderLastActivity map (senders that are no longer in the queued sub-pool).
+//
+// Returns the number of senders evicted and the current queued pool size (for interval tuning).
+// Must NOT be called while holding p.lock; it acquires the lock internally.
+func (p *TxPool) sweepDormantQueued(currentBlock uint64, logger log.Logger) (evictedSenders, queuedLen int) {
+	if p.cfg.QueuedDormancyDuration <= 0 {
+		return 0, 0
+	}
+
+	// Compute the dormancy threshold in blocks using the current EWMA block time.
+	avgMs := p.avgBlockTimeMs.Load()
+	if avgMs <= 0 {
+		avgMs = 12_000
+	}
+	dormancyBlocks := uint64(p.cfg.QueuedDormancyDuration.Milliseconds()) / uint64(avgMs)
+	if dormancyBlocks == 0 {
+		dormancyBlocks = 1
+	}
+
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
+	for senderID, lastBlock := range p.senderLastActivity {
+		// Self-healing: remove map entries for senders no longer in the queued pool.
+		hasQueued := false
+		p.all.ascend(senderID, func(mt *metaTxn) bool {
+			if mt.currentSubPool == QueuedSubPool {
+				hasQueued = true
+				return false
+			}
+			return true
+		})
+		if !hasQueued {
+			delete(p.senderLastActivity, senderID)
+			continue
+		}
+
+		// Skip senders still within their grace period.
+		if currentBlock <= lastBlock || currentBlock-lastBlock <= dormancyBlocks {
+			continue
+		}
+
+		// Collect queued txns for this sender then evict.
+		var toEvict []*metaTxn
+		p.all.ascend(senderID, func(mt *metaTxn) bool {
+			if mt.currentSubPool == QueuedSubPool {
+				toEvict = append(toEvict, mt)
+			}
+			return true
+		})
+		for _, mt := range toEvict {
+			p.queued.Remove(mt, "dormant sender", logger)
+			p.discardLocked(mt, txpoolcfg.QueuedDormant)
+		}
+		delete(p.senderLastActivity, senderID)
+		evictedSenders++
+		logger.Debug("[txpool] evicted dormant queued sender",
+			"senderID", senderID,
+			"txns", len(toEvict),
+			"dormantBlocks", currentBlock-lastBlock,
+			"dormancyThreshold", dormancyBlocks,
+		)
+	}
+
+	queuedLen = p.queued.Len()
+
+	if evictedSenders > 0 {
+		logger.Info("[txpool] dormancy sweep evicted senders from queued pool",
+			"senders", evictedSenders,
+			"block", currentBlock,
+			"dormancyBlocks", dormancyBlocks,
+		)
+	}
+	return evictedSenders, queuedLen
+}
+
+// nextDormancySweepInterval computes the wall-clock delay until the next dormancy sweep.
+//
+// Base interval = QueuedDormancyDuration / 10 so that ~10 sweeps occur per dormancy period.
+// Pressure factor: if the queued pool is >50% or >80% full, sweep more aggressively.
+// Back-off: after a clean sweep (no evictions) the interval is stretched by 1.5× (up to 4×
+// the base) to avoid spinning when the pool is stable.
+// All results are clamped to [30 s, 10 min].
+func (p *TxPool) nextDormancySweepInterval(backoff *float64, lastEvicted, queuedLen int) time.Duration {
+	if p.cfg.QueuedDormancyDuration <= 0 {
+		return 24 * time.Hour // effectively disabled
+	}
+
+	base := p.cfg.QueuedDormancyDuration / 10
+
+	// Pressure factor based on queued pool fill ratio.
+	pressure := 1.0
+	if cap := p.cfg.QueuedSubPoolLimit; cap > 0 {
+		fill := float64(queuedLen) / float64(cap)
+		switch {
+		case fill > 0.8:
+			pressure = 0.25 // 4× faster when >80% full
+		case fill > 0.5:
+			pressure = 0.5 // 2× faster when >50% full
+		}
+	}
+
+	// Back-off: grow on clean sweeps, reset on evictions.
+	if lastEvicted == 0 {
+		*backoff = min(*backoff*1.5, 4.0)
+	} else {
+		*backoff = 1.0
+	}
+
+	interval := time.Duration(float64(base) * pressure * *backoff)
+
+	// Clamp to [30 s, 10 min].
+	if interval < 30*time.Second {
+		interval = 30 * time.Second
+	}
+	if interval > 10*time.Minute {
+		interval = 10 * time.Minute
+	}
+	return interval
 }
 
 func (p *TxPool) getBlobsAndProofByBlobHashLocked(blobHashes []common.Hash) []PoolBlobBundle {
@@ -2077,6 +2231,14 @@ func (p *TxPool) Run(ctx context.Context) error {
 	logEvery := time.NewTicker(p.cfg.LogEvery)
 	defer logEvery.Stop()
 
+	// Dormancy sweep: use a one-shot timer (not a ticker) so the interval can be adjusted
+	// dynamically after each sweep based on pool pressure and back-off.
+	sweepBackoff := 1.0
+	initialSweepInterval := p.nextDormancySweepInterval(&sweepBackoff, 0, 0)
+	sweepBackoff = 1.0 // reset after the dry-run call above
+	dormancySweep := time.NewTimer(initialSweepInterval)
+	defer dormancySweep.Stop()
+
 	if err := p.start(ctx); err != nil {
 		p.logger.Error("[txpool] Failed to start", "err", err)
 		return err
@@ -2116,6 +2278,14 @@ func (p *TxPool) Run(ctx context.Context) error {
 				}
 				writeToDBBytesCounter.SetUint64(written)
 				p.logger.Debug("[txpool] Commit", "written_kb", written/1024, "in", time.Since(t))
+			}
+		case <-dormancySweep.C:
+			if p.Started() {
+				evicted, queuedLen := p.sweepDormantQueued(p.lastSeenBlock.Load(), p.logger)
+				next := p.nextDormancySweepInterval(&sweepBackoff, evicted, queuedLen)
+				dormancySweep.Reset(next)
+			} else {
+				dormancySweep.Reset(30 * time.Second)
 			}
 		case announcements := <-p.newPendingTxns:
 			go func() {
@@ -2505,6 +2675,21 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.TemporalTx) err
 		pendingBaseFee, pendingBlobFee, blockGasLimit, false, p.logger); err != nil {
 		return err
 	}
+
+	// Cold-start: assign the current block as the last-activity block for every sender whose
+	// transactions are in the queued sub-pool. We cannot know their true last on-chain activity
+	// after a restart, so we give them a fresh grace period rather than evicting them immediately.
+	coldStartBlock := p.lastSeenBlock.Load()
+	p.all.ascendAll(func(mt *metaTxn) bool {
+		if mt.currentSubPool == QueuedSubPool {
+			senderID := mt.TxnSlot.SenderID
+			if _, ok := p.senderLastActivity[senderID]; !ok {
+				p.senderLastActivity[senderID] = coldStartBlock
+			}
+		}
+		return true
+	})
+
 	// Initialise cached pendingBaseFee values in all queues so that their
 	// comparators use the correct base fee even before the first OnNewBlock.
 	var pendingBaseFee256 uint256.Int
