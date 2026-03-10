@@ -2,17 +2,11 @@ name: Lint
 on:
   workflow_dispatch:
   pull_request:
-    types: [opened, reopened, synchronize, ready_for_review]
     branches:
       - main
       - 'release/**'
       - performance
       - performance-stable
-    types:
-      - opened
-      - reopened
-      - synchronize
-      - ready_for_review
 
 defaults:
   run:

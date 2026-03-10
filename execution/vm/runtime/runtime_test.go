@@ -153,7 +153,7 @@ func BenchmarkCall(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	cfg := &Config{ChainConfig: &chain.Config{}, BlockNumber: 0, Time: 0, Value: *uint256.MustFromBig(big.NewInt(13377))}
+	cfg := &Config{ChainConfig: &chain.Config{}, BlockNumber: 0, Time: 0, Value: *uint256.MustFromBig(big.NewInt(13377)), Difficulty: uint256.NewInt(0)}
 	db := testutil.TemporalDB(b)
 	tx, sd := testutil.TemporalTxSD(b, db)
 	//cfg.w = state.NewWriter(execctx, nil)

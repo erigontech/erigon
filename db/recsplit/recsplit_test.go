@@ -422,6 +422,7 @@ func BenchmarkAddKeyAndBuild(b *testing.B) {
 				}
 				b.StopTimer()
 				rs.Close()
+				b.StartTimer()
 			}
 		})
 	}
