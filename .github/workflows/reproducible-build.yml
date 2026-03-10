@@ -1,0 +1,53 @@
+name: Reproducible build
+
+on:
+  pull_request:
+    branches:
+      - main
+      - 'release/**'
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  reproducible-build:
+    strategy:
+      matrix:
+        os:
+          - ubuntu-24.04
+          - macos-15
+          - windows-2025
+    runs-on: ${{ matrix.os }}
+    concurrency:
+      group: ${{ github.workflow }}-${{ matrix.os }}-${{ github.ref }}
+      cancel-in-progress: true
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ./.github/actions/setup-erigon
+        id: erigon
+
+      - name: Build all
+        run: make all
+
+      - name: Reproducible build test
+        run: |
+          hash() { sha256sum "$1" 2>/dev/null || shasum -a 256 "$1"; }
+          hash ./build/bin/erigon > erigon1.sha256
+          # TODO: Check mtime doesn't interfere with rebuild
+          make -B erigon
+          hash ./build/bin/erigon > erigon2.sha256
+          if ! cmp -s erigon1.sha256 erigon2.sha256; then
+            echo >&2 "Reproducible build broken"; cat erigon1.sha256; cat erigon2.sha256; exit 1
+          fi
+
+      - uses: ./.github/actions/cleanup-erigon
+        if: always()
