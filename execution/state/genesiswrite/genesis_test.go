@@ -65,7 +65,7 @@ func TestGenesisBlockHashes(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		_, block, err := genesiswrite.WriteGenesisBlock(tx, spec.Genesis, nil, nil, false, datadir.New(t.TempDir()), logger)
+		_, block, err := genesiswrite.WriteGenesisBlock(tx, spec.Genesis, network, nil, nil, false, datadir.New(t.TempDir()), logger)
 		require.NoError(t, err)
 
 		expect, err := chainspec.ChainSpecByName(network)
@@ -124,13 +124,13 @@ func TestCommitGenesisIdempotency(t *testing.T) {
 	defer tx.Rollback()
 
 	spec := chainspec.Mainnet
-	_, _, err = genesiswrite.WriteGenesisBlock(tx, spec.Genesis, nil, nil, false, datadir.New(t.TempDir()), logger)
+	_, _, err = genesiswrite.WriteGenesisBlock(tx, spec.Genesis, networkname.Mainnet, nil, nil, false, datadir.New(t.TempDir()), logger)
 	require.NoError(t, err)
 	seq, err := tx.ReadSequence(kv.EthTx)
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), seq)
 
-	_, _, err = genesiswrite.WriteGenesisBlock(tx, spec.Genesis, nil, nil, false, datadir.New(t.TempDir()), logger)
+	_, _, err = genesiswrite.WriteGenesisBlock(tx, spec.Genesis, networkname.Mainnet, nil, nil, false, datadir.New(t.TempDir()), logger)
 	require.NoError(t, err)
 	seq, err = tx.ReadSequence(kv.EthTx)
 	require.NoError(t, err)
@@ -225,7 +225,7 @@ func TestSetupGenesis(t *testing.T) {
 		{
 			name: "genesis without ChainConfig",
 			fn: func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error) {
-				return genesiswrite.CommitGenesisBlock(db, new(types.Genesis), datadir.New(tmpdir), logger)
+				return genesiswrite.CommitGenesisBlock(db, new(types.Genesis), "", datadir.New(tmpdir), logger)
 			},
 			wantErr:    types.ErrGenesisNoConfig,
 			wantConfig: chain.AllProtocolChanges,
@@ -233,7 +233,7 @@ func TestSetupGenesis(t *testing.T) {
 		{
 			name: "no block in DB, genesis == nil",
 			fn: func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error) {
-				return genesiswrite.CommitGenesisBlock(db, nil, datadir.New(tmpdir), logger)
+				return genesiswrite.CommitGenesisBlock(db, nil, networkname.Mainnet, datadir.New(tmpdir), logger)
 			},
 			wantHash:   chainspec.Mainnet.GenesisHash,
 			wantConfig: chainspec.Mainnet.Config,
@@ -241,7 +241,7 @@ func TestSetupGenesis(t *testing.T) {
 		{
 			name: "mainnet block in DB, genesis == nil",
 			fn: func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error) {
-				return genesiswrite.CommitGenesisBlock(db, nil, datadir.New(tmpdir), logger)
+				return genesiswrite.CommitGenesisBlock(db, nil, networkname.Mainnet, datadir.New(tmpdir), logger)
 			},
 			wantHash:   chainspec.Mainnet.GenesisHash,
 			wantConfig: chainspec.Mainnet.Config,
@@ -250,7 +250,7 @@ func TestSetupGenesis(t *testing.T) {
 			name: "custom block in DB, genesis == nil",
 			fn: func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error) {
 				genesiswrite.MustCommitGenesis(&customg, db, datadir.New(tmpdir), logger)
-				return genesiswrite.CommitGenesisBlock(db, nil, datadir.New(tmpdir), logger)
+				return genesiswrite.CommitGenesisBlock(db, nil, "", datadir.New(tmpdir), logger)
 			},
 			wantHash:   customghash,
 			wantConfig: customg.Config,
@@ -259,7 +259,7 @@ func TestSetupGenesis(t *testing.T) {
 			name: "custom block in DB, genesis == sepolia",
 			fn: func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error) {
 				genesiswrite.MustCommitGenesis(&customg, db, datadir.New(tmpdir), logger)
-				return genesiswrite.CommitGenesisBlock(db, chainspec.SepoliaGenesisBlock(), datadir.New(tmpdir), logger)
+				return genesiswrite.CommitGenesisBlock(db, chainspec.SepoliaGenesisBlock(), networkname.Sepolia, datadir.New(tmpdir), logger)
 			},
 			wantErr:    &genesiswrite.GenesisMismatchError{Stored: customghash, New: chainspec.Sepolia.GenesisHash},
 			wantHash:   chainspec.Sepolia.GenesisHash,
@@ -269,7 +269,7 @@ func TestSetupGenesis(t *testing.T) {
 			name: "compatible config in DB",
 			fn: func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error) {
 				genesiswrite.MustCommitGenesis(&oldcustomg, db, datadir.New(tmpdir), logger)
-				return genesiswrite.CommitGenesisBlock(db, &customg, datadir.New(tmpdir), logger)
+				return genesiswrite.CommitGenesisBlock(db, &customg, "", datadir.New(tmpdir), logger)
 			},
 			wantHash:   customghash,
 			wantConfig: customg.Config,
@@ -293,7 +293,7 @@ func TestSetupGenesis(t *testing.T) {
 					return nil, nil, err
 				}
 				// This should return a compatibility error.
-				return genesiswrite.CommitGenesisBlock(m.DB, &customg, datadir.New(tmpdir), logger)
+				return genesiswrite.CommitGenesisBlock(m.DB, &customg, "", datadir.New(tmpdir), logger)
 			},
 			wantHash:   customghash,
 			wantConfig: customg.Config,
