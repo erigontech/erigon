@@ -222,10 +222,6 @@ func encodeBlockReceipts69WithLimit(receipts types.Receipts, totalBytes, sizeLim
 // NoSizeLimit disables per-receipt truncation (used for eth/68 and eth/69).
 const NoSizeLimit = math.MaxInt
 
-// Eth70ResponseSizeLimit is the maximum size of encoded receipt data in an eth/70 response.
-// This leaves room for the packet envelope (request-id, lastBlockIncomplete flag, list prefixes).
-const Eth70ResponseSizeLimit = maxMessageSize - 512
-
 // ReceiptQueryOpts controls the behavior differences between eth protocol versions
 // when answering GetReceipts queries.
 type ReceiptQueryOpts struct {
