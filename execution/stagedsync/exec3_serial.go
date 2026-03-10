@@ -221,6 +221,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			if blockNum%1000 == 0 || blockNum <= 10 {
 				qmroot := se.qmtracker.SyncRoot()
 				log.Info(fmt.Sprintf("[%s] qmtree root", se.logPrefix), "block", blockNum, "root", qmroot, "leaves", se.qmtracker.NextSN)
+				se.qmtracker.Flush()
 			}
 			se.qmtracker.LogStepProgress(se.logPrefix)
 		}
