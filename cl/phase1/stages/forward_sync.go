@@ -152,6 +152,15 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 				}
 				return newHighestBlockProcessed - 1, nil
 			}
+			if errors.Is(err, forkchoice.ErrMissingSegment) {
+				// Parent state not available (e.g. reorg or peer returned incomplete chain).
+				// Return progress so far without error — do not ban the peer.
+				logger.Debug("[Caplin] forward sync missing segment", "blockSlot", block.Block.Slot)
+				if newHighestBlockProcessed == 0 {
+					return 0, nil
+				}
+				return newHighestBlockProcessed, nil
+			}
 			// Return an error if block processing fails
 			err = fmt.Errorf("bad blocks segment received: %w", err)
 			return
