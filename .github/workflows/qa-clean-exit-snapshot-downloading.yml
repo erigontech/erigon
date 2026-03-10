@@ -18,8 +18,8 @@ jobs:
         if: failure()
         uses: actions/ai-inference@v2
         with:
+          model: openai/gpt-5
           enable-github-mcp: true
-          token: ${{ secrets.COPILOT_GITHUB_TOKEN }}
           github-mcp-toolsets: 'context,actions,copilot,pull_requests,repos'
           prompt: >
             Analyse the log of this workflow run and identify the root cause, 
