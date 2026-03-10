@@ -2129,6 +2129,13 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 				// Deletion is propagated upwards
 				hph.touchMap[row-1] |= uint16(1) << nibble
 				hph.afterMap[row-1] &^= uint16(1) << nibble
+
+				// Cascading collapse: the parent row just lost a child.
+				// If it now has exactly 1 child, the branch will collapse
+				// to a shortNode and we need the surviving sibling in the witness.
+				if hph.collapseTracer != nil && bits.OnesCount16(hph.afterMap[row-1]) == 1 {
+					hph.detectCascadingCollapseAtRow(row - 1)
+				}
 			}
 		}
 
@@ -2446,6 +2453,29 @@ func (hph *HexPatriciaHashed) detectCollapseBeforeDelete(hashedKey []byte) {
 	compactSibling := NibblesToString(siblingPath)
 	fmt.Printf("[collapse] FOUND at parentRow=%d depth=%d: deleteNibble=%x, siblingNibble=%x, siblingPath=%s (len=%d), hashLen=%d, extLen=%d\n",
 		parentRow, depth, deleteNibble, siblingNibble, compactSibling, len(siblingPath), siblingCell.hashLen, siblingCell.hashedExtLen)
+
+	hph.collapseTracer(siblingPath)
+}
+
+// detectCascadingCollapseAtRow detects a branch→shortNode collapse caused by
+// a child deletion propagated upward from fold(). Called when afterMap[row]
+// has exactly 1 remaining child after a nibble was cleared.
+func (hph *HexPatriciaHashed) detectCascadingCollapseAtRow(row int) {
+	depth := hph.depths[row] - 1
+	survivingNibble := bits.TrailingZeros16(hph.afterMap[row])
+	survivingCell := &hph.grid[row][survivingNibble]
+
+	// Build the surviving child's full hashed key path
+	siblingPath := make([]byte, int(depth)+1+int(survivingCell.hashedExtLen))
+	copy(siblingPath, hph.currentKey[:depth])
+	siblingPath[depth] = byte(survivingNibble)
+	if survivingCell.hashedExtLen > 0 {
+		copy(siblingPath[int(depth)+1:], survivingCell.hashedExtension[:survivingCell.hashedExtLen])
+	}
+
+	compactSibling := NibblesToString(siblingPath)
+	fmt.Printf("[cascade-collapse] FOUND at row=%d depth=%d: survivingNibble=%x, siblingPath=%s (len=%d), hashLen=%d, extLen=%d\n",
+		row, depth, survivingNibble, compactSibling, len(siblingPath), survivingCell.hashLen, survivingCell.hashedExtLen)
 
 	hph.collapseTracer(siblingPath)
 }

@@ -2613,8 +2613,7 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 		for key := range m {
 			keyHash, _ := common.HashData(key[:])
 			cKey := dbutils.GenerateCompositeTrieKey(addrHash, keyHash)
-			// hashedKeyPath := trie.KeybytesToHex(cKey)
-			// fmt.Printf("DELETING Storage Key at path %x\n", hashedKeyPath)
+			fmt.Printf("DELETING Storage Key at path %x\n", cKey)
 			s.t.Delete(cKey)
 		}
 	}
