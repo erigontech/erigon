@@ -1,10 +1,6 @@
 name: Benchmarks
 
 on:
-  push:
-    branches:
-      - main
-      - 'release/**'
   pull_request:
     branches:
       - main
@@ -13,7 +9,6 @@ on:
       - reopened
       - synchronize
       - ready_for_review
-  workflow_dispatch:
 
 defaults:
   run:
@@ -22,12 +17,7 @@ defaults:
 jobs:
   benchmarks:
     concurrency:
-      group: >-
-        ${{
-          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) &&
-          format('{0}-{1}', github.workflow, github.run_id) ||
-          format('{0}-{1}', github.workflow, github.ref)
-        }}
+      group: ${{ format('{0}-{1}', github.workflow, github.ref) }}
       cancel-in-progress: true
     runs-on: ubuntu-24.04
 
