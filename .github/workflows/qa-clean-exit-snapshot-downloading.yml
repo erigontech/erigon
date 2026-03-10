@@ -8,11 +8,19 @@ jobs:
       models: read
     runs-on: ubuntu-latest
     steps:
-      - name: Test Local Action
-        id: inference
-        uses: actions/ai-inference@v1
+      - name: Check out repository
+        uses: actions/checkout@v6
         with:
-          prompt: 'Hello!'
+          ref: 'v5.4'
+
+      - name: AI failure analysis
+        id: inference
+        if: failure()
+        uses: actions/ai-inference@v2
+        with:
+          prompt: >
+            Analyse the log of this workflow run and identify the root cause, 
+            highlight the most relevant error messages, and suggest what to investigate.
 
       - name: Print Output
         id: output
