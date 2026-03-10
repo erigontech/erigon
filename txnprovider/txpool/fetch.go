@@ -37,6 +37,10 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 )
 
+// errInternalDB wraps errors that originate from local DB lookups (not from the peer's data).
+// This prevents penalizing peers for our own internal failures.
+var errInternalDB = errors.New("internal db error")
+
 // Fetch connects to sentry and implements eth/66 protocol regarding the transaction
 // messages. It tries to "prime" the sentry with StatusData message containing given
 // genesis hash and list of forks, but with zero max block and total difficulty
@@ -292,7 +296,9 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 	case sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_66:
 		hashCount, pos, err := ParseHashesCount(req.Data, 0)
 		if err != nil {
-			return fmt.Errorf("parsing NewPooledTransactionHashes: %w", err)
+			f.logger.Debug("[txpool] penalizing peer for malformed NewPooledTransactionHashes66", "peer", req.PeerId, "err", err)
+			sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
+			return nil
 		}
 
 		const maxHashesPerMsg = 4096 // See https://github.com/ethereum/devp2p/blob/master/caps/eth.md#newpooledtransactionhashes-0x08
@@ -306,7 +312,9 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		hashes := make([]byte, 32*hashCount)
 		for i := 0; i < len(hashes); i += 32 {
 			if _, pos, err = ParseHash(req.Data, pos, hashes[i:]); err != nil {
-				return err
+				f.logger.Debug("[txpool] penalizing peer for malformed NewPooledTransactionHashes66", "peer", req.PeerId, "err", err)
+				sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
+				return nil
 			}
 		}
 		unknownHashes, err := f.pool.FilterKnownIdHashes(tx, hashes)
@@ -330,7 +338,9 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 	case sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68:
 		_, _, hashes, _, err := rlp.ParseAnnouncements(req.Data, 0)
 		if err != nil {
-			return fmt.Errorf("parsing NewPooledTransactionHashes88: %w", err)
+			f.logger.Debug("[txpool] penalizing peer for malformed NewPooledTransactionHashes68", "peer", req.PeerId, "err", err)
+			sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
+			return nil
 		}
 		unknownHashes, err := f.pool.FilterKnownIdHashes(tx, hashes)
 		if err != nil {
@@ -358,7 +368,9 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 		messageID = sentryproto.MessageId_POOLED_TRANSACTIONS_66
 		requestID, hashes, _, err := ParseGetPooledTransactions66(req.Data, 0, nil)
 		if err != nil {
-			return err
+			f.logger.Debug("[txpool] penalizing peer for malformed GetPooledTransactions66", "peer", req.PeerId, "err", err)
+			sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
+			return nil
 		}
 
 		// limit to max 256 transactions in a reply
@@ -408,7 +420,7 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 				if _, err := ParseTransactions(req.Data, 0, parseContext, &txns, func(hash []byte) error {
 					known, err := f.pool.IdHashKnown(tx, hash)
 					if err != nil {
-						return err
+						return fmt.Errorf("%w: %w", errInternalDB, err)
 					}
 					if known {
 						return ErrRejected
@@ -419,14 +431,19 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 				}
 				return nil
 			}); err != nil {
-				return err
+				if errors.Is(err, errInternalDB) {
+					return err
+				}
+				f.logger.Debug("[txpool] penalizing peer for malformed Transactions66", "peer", req.PeerId, "err", err)
+				sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
+				return nil
 			}
 		case sentryproto.MessageId_POOLED_TRANSACTIONS_66:
 			if err := f.threadSafeParsePooledTxn(func(parseContext *TxnParseContext) error {
 				if _, _, err := ParsePooledTransactions66(req.Data, 0, parseContext, &txns, func(hash []byte) error {
 					known, err := f.pool.IdHashKnown(tx, hash)
 					if err != nil {
-						return err
+						return fmt.Errorf("%w: %w", errInternalDB, err)
 					}
 					if known {
 						return ErrRejected
@@ -437,7 +454,12 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 				}
 				return nil
 			}); err != nil {
-				return err
+				if errors.Is(err, errInternalDB) {
+					return err
+				}
+				f.logger.Debug("[txpool] penalizing peer for malformed PooledTransactions66", "peer", req.PeerId, "err", err)
+				sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
+				return nil
 			}
 		default:
 			return fmt.Errorf("unexpected message: %s", req.Id.String())
