@@ -19,6 +19,7 @@ jobs:
         uses: actions/ai-inference@v2
         with:
           enable-github-mcp: true
+          token: ${{ secrets.COPILOT_GITHUB_TOKEN }}
           github-mcp-toolsets: 'context,actions,copilot,pull_requests,repos'
           prompt: >
             Analyse the log of this workflow run and identify the root cause, 
