@@ -1403,6 +1403,8 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 
 	// Collect logs accumulated during transaction execution into a synthetic receipt
 	// so that Finalize can parse EIP-6110 deposit requests from them.
+	//   Finalize only uses receipt.Logs from each receipt — it doesn't read Status, GasUsed, CumulativeGasUsed, or any other field. It just concatenates all logs
+	// into a flat slice and passes them to ParseDepositLogs.
 	allLogs := ibs.Logs()
 	receipts := types.Receipts{&types.Receipt{Logs: allLogs}}
 
