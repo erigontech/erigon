@@ -273,7 +273,7 @@ func (p *memoryDataProvider) Next() ([]byte, []byte, error) {
 	if p.currentIndex >= p.buffer.Len() {
 		return nil, nil, io.EOF
 	}
-	key, value := p.buffer.GetRef(p.currentIndex)
+	key, value := p.buffer.Get(p.currentIndex)
 	p.currentIndex++
 	return key, value, nil
 }
