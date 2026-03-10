@@ -722,13 +722,9 @@ func (cs *MultiClient) getReceiptsInner(ctx context.Context, peerId *typesproto.
 
 	var b []byte
 	if p.ethVersion >= direct.ETH70 {
-		var incomplete uint64
-		if lastBlockIncomplete {
-			incomplete = 1
-		}
 		b, err = rlp.EncodeToBytes(&eth.ReceiptsRLPPacket70{
 			RequestId:           p.id,
-			LastBlockIncomplete: incomplete,
+			LastBlockIncomplete: lastBlockIncomplete,
 			ReceiptsRLPPacket:   receiptsList,
 		})
 	} else {

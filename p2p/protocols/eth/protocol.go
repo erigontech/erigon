@@ -399,10 +399,10 @@ type GetReceiptsPacket70 struct {
 }
 
 // ReceiptsRLPPacket70 is the eth/70 version of ReceiptsRLPPacket.
-// When LastBlockIncomplete is 1, the final receipt list is incomplete.
+// When LastBlockIncomplete is true, the final receipt list is incomplete.
 type ReceiptsRLPPacket70 struct {
 	RequestId           uint64
-	LastBlockIncomplete uint64
+	LastBlockIncomplete bool
 	ReceiptsRLPPacket
 }
 
