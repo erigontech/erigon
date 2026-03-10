@@ -24,4 +24,5 @@ jobs:
 
       - name: Print Output
         id: output
+        if: always()
         run: echo "${{ steps.inference.outputs.response }}"
