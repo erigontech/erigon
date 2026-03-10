@@ -40,6 +40,12 @@ jobs:
           - ubuntu-24.04
           - macos-15
           - windows-2025
+        include:
+          # eest_blockchain tests take ~1190s on the GitHub-hosted windows-2025
+          # runner (right at the 20m limit). Give Windows extra headroom to avoid
+          # marginal timeouts while keeping Linux/macOS at the tighter 20m.
+          - os: windows-2025
+            test_timeout: 30m
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -63,8 +69,9 @@ jobs:
       - name: Run all tests on ${{ matrix.os }}
         env:
           SKIP_FLAKY_TESTS: 'true'
+          TEST_TIMEOUT: ${{ matrix.test_timeout || '20m' }}
         run: |
-          if ! make test-all GO_FLAGS='--timeout 20m'; then
+          if ! make test-all GO_FLAGS="--timeout $TEST_TIMEOUT"; then
             # Retry after clearing the Go build cache. Low disk space can cause
             # severe, non-obvious build/test failures that don't surface a clear
             # "no space left" message. Tuning a cache size limit is too fragile;
@@ -72,7 +79,7 @@ jobs:
             # handles the rest.
             echo "::notice::make test-all failed; clearing Go build cache and retrying"
             time go clean -cache
-            make test-all GO_FLAGS='--timeout 20m'
+            make test-all GO_FLAGS="--timeout $TEST_TIMEOUT"
           fi
 
       - uses: ./.github/actions/cleanup-erigon
