@@ -1118,15 +1118,15 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 }
 
 type accountState struct {
-	changes                *types.AccountChanges
-	balance                *fieldTracker[uint256.Int]
-	nonce                  *fieldTracker[uint64]
-	code                   *fieldTracker[[]byte]
-	balanceValue           *uint256.Int // tracks latest seen balance
-	selfDestructed         bool
-	selfDestructedAt       uint16                              // access index of the selfdestruct
-	storageReadValues      map[accounts.StorageKey]uint256.Int // original read values for net-zero detection
-	nonRevertableUserAccess bool                               // true if any user tx (txIndex >= 0) had non-revertable access
+	changes                 *types.AccountChanges
+	balance                 *fieldTracker[uint256.Int]
+	nonce                   *fieldTracker[uint64]
+	code                    *fieldTracker[[]byte]
+	balanceValue            *uint256.Int // tracks latest seen balance
+	selfDestructed          bool
+	selfDestructedAt        uint16                              // access index of the selfdestruct
+	storageReadValues       map[accounts.StorageKey]uint256.Int // original read values for net-zero detection
+	nonRevertableUserAccess bool                                // true if any user tx (txIndex >= 0) had non-revertable access
 }
 
 // check pre- and post-values, add to BAL if different
