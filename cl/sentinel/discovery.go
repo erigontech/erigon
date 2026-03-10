@@ -141,8 +141,11 @@ func (s *Sentinel) findPeersForSubnets(subnets []subnetSearchState) {
 		s.pidToEnr.Store(peerInfo.ID, node)
 		s.pidToEnodeId.Store(peerInfo.ID, node.ID())
 
-		// Try to connect
-		if err := s.ConnectWithPeer(ctx, *peerInfo, nil); err != nil {
+		// Try to connect (serialize via shared semaphore to avoid peerstore race, see #19603)
+		if err := s.connectSem.Acquire(ctx, 1); err != nil {
+			break
+		}
+		if err := s.ConnectWithPeer(ctx, *peerInfo, s.connectSem); err != nil {
 			log.Trace("[Sentinel] Subnet search: failed to connect", "peer", peerInfo.ID, "err", err)
 			continue
 		}
@@ -446,7 +449,10 @@ func (s *Sentinel) connectWithAllPeers(multiAddrs []multiaddr.Multiaddr) error {
 	}
 	for _, peerInfo := range addrInfos {
 		go func(peerInfo peer.AddrInfo) {
-			if err := s.ConnectWithPeer(s.ctx, peerInfo, nil); err != nil {
+			if err := s.connectSem.Acquire(s.ctx, 1); err != nil {
+				return
+			}
+			if err := s.ConnectWithPeer(s.ctx, peerInfo, s.connectSem); err != nil {
 				log.Debug("[Sentinel] Could not connect with peer", "err", err)
 			} else {
 				log.Debug("[Sentinel] Connected with peer", "peer", peerInfo.ID)
@@ -485,9 +491,6 @@ func (s *Sentinel) listenForPeers() {
 	multiAddresses := convertToMultiAddr(enodes)
 	s.stickToPeers(multiAddresses)
 
-	// limit the number of goroutines opening connection with peers
-	sem := semaphore.NewWeighted(int64(goRoutinesOpeningPeerConnections))
-
 	iterator := s.listener.RandomNodes()
 	defer iterator.Close()
 	for {
@@ -520,7 +523,7 @@ func (s *Sentinel) listenForPeers() {
 			continue
 		}
 
-		if err := sem.Acquire(s.ctx, 1); err != nil {
+		if err := s.connectSem.Acquire(s.ctx, 1); err != nil {
 			if errors.Is(err, context.Canceled) {
 				break
 			}
@@ -529,7 +532,7 @@ func (s *Sentinel) listenForPeers() {
 		}
 
 		go func() {
-			if err := s.ConnectWithPeer(s.ctx, *peerInfo, sem); err != nil {
+			if err := s.ConnectWithPeer(s.ctx, *peerInfo, s.connectSem); err != nil {
 				log.Trace("[Sentinel] Could not connect with peer", "err", err)
 			}
 		}()
