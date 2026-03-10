@@ -345,7 +345,6 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	if err != nil {
 		return err
 	}
-
 	defer coreTx.Rollback()
 
 	block := stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockHeight

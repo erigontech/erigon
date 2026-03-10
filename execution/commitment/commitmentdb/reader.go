@@ -181,8 +181,9 @@ func NewCommitmentReplayStateReader(ttx, tx kv.TemporalTx, tsd sd, plainStateAsO
 }
 
 func (crsr *CommitmentReplayStateReader) Clone(tx kv.TemporalTx) StateReader {
-	// do nothing
-	return crsr
+	return &CommitmentReplayStateReader{
+		SplitStateReader: crsr.SplitStateReader.Clone(tx).(*SplitStateReader),
+	}
 }
 
 // A history reader that reads:

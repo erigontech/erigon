@@ -46,9 +46,10 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	// to run only tests for 1 eip do:
 	//bt.Whitelist(`.*amsterdam/eip8024_dupn_swapn_exchange.*`)
 
+	// only run tests for amsterdam, otherwise this takes too long
+	bt.Whitelist(`.*for_amsterdam/.*`)
 	// static — tested in state test format by TestState
-	bt.SkipLoad(`^static/state_tests/`)
-	bt.SkipLoad(`^prague/eip7702_set_code_tx/test_set_code_to_sstore_then_sload.json`)
+	bt.SkipLoad(`^for_amsterdam/static/state_tests/`)
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7928_block_level_access_lists/test_bal_invalid_`)                                                                  // BAL validation not yet implemented
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_contract_creation_tx.json`)                                                            // gas used by execution: 53064, in header: 131488
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_create_collision_no_log.json`)                                                         // gas used by execution: 197704, in header: 131488
@@ -192,6 +193,7 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip8037_state_creation_gas_cost_increase/test_create_insufficient_balance_returns_reservoir.json`)                    // gas limit too high: address 0x1AD9bc24818784172FF393bb6F89F094D4d2Ca29, gas limit 16814784
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip8037_state_creation_gas_cost_increase/test_create_revert_no_code_deposit_state_gas.json`)                          // gas used by execution: 55232, in header: 131488
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip8037_state_creation_gas_cost_increase/test_create_tx_deploys_contract.json`)                                       // gas used by execution: 53006, in header: 131488
+	bt.SkipLoad(`^for_amsterdam/amsterdam/eip8037_state_creation_gas_cost_increase/test_create_tx_intrinsic_gas_boundary.json`)                                 // gas used by execution: 53006, in header: 131488
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip8037_state_creation_gas_cost_increase/test_create_tx_reservoir.json`)                                              // gas used by execution: 53006, in header: 131488
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip8037_state_creation_gas_cost_increase/test_create_tx_state_gas.json`)                                              // gas used by execution: 53006, in header: 131488
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip8037_state_creation_gas_cost_increase/test_create_with_reservoir.json`)                                            // gas limit too high: address 0x1AD9bc24818784172FF393bb6F89F094D4d2Ca29, gas limit 16908704
@@ -199,6 +201,7 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip8037_state_creation_gas_cost_increase/test_delegation_pointer_new_account_state_gas.json`)                         // gas limit too high: address 0x1AD9bc24818784172FF393bb6F89F094D4d2Ca29, gas limit 17067194
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip8037_state_creation_gas_cost_increase/test_duplicate_signer_authorizations.json`)                                  // gas limit too high: address 0xDD616a20f3b01FC95e6B1701D8a07331D06DD897, gas limit 17094196
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip8037_state_creation_gas_cost_increase/test_existing_account_refund.json`)                                          // gas used by execution: 46000, in header: 28500
+	bt.SkipLoad(`^for_amsterdam/amsterdam/eip8037_state_creation_gas_cost_increase/test_exact_coinbase_fee_simple_sstore.json`)                                 // gas limit too high: address 0x1AD9bc24818784172FF393bb6F89F094D4d2Ca29, gas limit 16814784
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip8037_state_creation_gas_cost_increase/test_existing_account_refund_enables_sstore.json`)                           // gas limit too high: address 0xDD616a20f3b01FC95e6B1701D8a07331D06DD897, gas limit 16973274
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip8037_state_creation_gas_cost_increase/test_gas_opcode_excludes_reservoir.json`)                                    // gas limit too high: address 0x1AD9bc24818784172FF393bb6F89F094D4d2Ca29, gas limit 20534016
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip8037_state_creation_gas_cost_increase/test_invalid_chain_id_auth_still_charges_intrinsic_state_gas.json`)          // gas limit too high: address 0xDD616a20f3b01FC95e6B1701D8a07331D06DD897, gas limit 16935706
@@ -206,8 +209,11 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip8037_state_creation_gas_cost_increase/test_many_authorizations_state_gas.json`)                                    // gas limit too high: address 0x6E019b4cb2cb6feF15a853b3BEaBBeb567E2d75F, gas limit 18362116
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip8037_state_creation_gas_cost_increase/test_mixed_new_and_existing_auths.json`)                                     // gas limit too high: address 0x3c78CA7b116dFA834E58f71F5A20470945F6359B, gas limit 17094196
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip8037_state_creation_gas_cost_increase/test_mixed_valid_and_invalid_auths.json`)                                    // gas limit too high: address 0x3c78CA7b116dFA834E58f71F5A20470945F6359B, gas limit 17094196
+	bt.SkipLoad(`^for_amsterdam/amsterdam/eip8037_state_creation_gas_cost_increase/test_multi_block_mixed_state_operations.json`)                               // gas limit too high: address 0x1AD9bc24818784172FF393bb6F89F094D4d2Ca29, gas limit 16814784
+	bt.SkipLoad(`^for_amsterdam/amsterdam/eip8037_state_creation_gas_cost_increase/test_multi_block_observed_coinbase_balance.json`)                            // gas limit too high: address 0x1AD9bc24818784172FF393bb6F89F094D4d2Ca29, gas limit 16814784
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip8037_state_creation_gas_cost_increase/test_multi_tx_block_auth_refund_and_sstore.json`)                            // gas limit too high: address 0xDD616a20f3b01FC95e6B1701D8a07331D06DD897, gas limit 16935706
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip8037_state_creation_gas_cost_increase/test_nested_calls_reservoir_passing.json`)                                   // gas limit too high: address 0x1AD9bc24818784172FF393bb6F89F094D4d2Ca29, gas limit 16814784
+	bt.SkipLoad(`^for_amsterdam/amsterdam/eip8037_state_creation_gas_cost_increase/test_nested_create_code_deposit_cannot_borrow_parent_gas.json`)              // gas used by execution: 53234, in header: 131488, headerNum=1, fd9ef2de77befdd41c82d08f6300a1505a24b6ba0699a25a9806b041c6d4b9ff
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip8037_state_creation_gas_cost_increase/test_pricing_at_various_gas_limits.json`)                                    // gas limit too high: address 0x1AD9bc24818784172FF393bb6F89F094D4d2Ca29, gas limit 16814784
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip8037_state_creation_gas_cost_increase/test_pricing_changes_with_block_gas_limit.json`)                             // gas limit too high: address 0x1AD9bc24818784172FF393bb6F89F094D4d2Ca29, gas limit 16814784
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip8037_state_creation_gas_cost_increase/test_pricing_minimum_cpsb_floor.json`)                                       // gas used by execution: 43106, in header: 37568
@@ -240,6 +246,8 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	bt.SkipLoad(`^for_amsterdam/berlin/eip2930_access_list/test_account_storage_warm_cold_state.json`)                                                          // gas used by execution: 52163, in header: 37568
 	bt.SkipLoad(`^for_amsterdam/berlin/eip2930_access_list/test_repeated_address_acl.json`)                                                                     // gas used by execution: 69886, in header: 75136
 	bt.SkipLoad(`^for_amsterdam/byzantium/eip196_ec_add_mul/test_valid.json`)                                                                                   // gas used by execution: 87994, in header: 112704
+	bt.SkipLoad(`^for_amsterdam/byzantium/eip197_ec_pairing/test_fail.json`)                                                                                    // gas used by execution: 87994, in header: 112704
+	bt.SkipLoad(`^for_amsterdam/byzantium/eip197_ec_pairing/test_valid.json`)                                                                                   // gas used by execution: 168837, in header: 117537
 	bt.SkipLoad(`^for_amsterdam/byzantium/eip198_modexp_precompile/test_modexp.json`)                                                                           // gas used by execution: 106092, in header: 319328
 	bt.SkipLoad(`^for_amsterdam/byzantium/eip214_staticcall/`)                                                                                                  // gas used by execution: 270033, in header: 235833
 	bt.SkipLoad(`^for_amsterdam/cancun/create/test_create_oog_from_eoa_refunds.json`)                                                                           // gas used by execution: 85538, in header: 170230
@@ -281,14 +289,24 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	bt.SkipLoad(`^for_amsterdam/cancun/eip6780_selfdestruct/`)                                                                                                  // gas used by execution: 265350, in header: 565868
 	bt.SkipLoad(`^for_amsterdam/cancun/eip7516_blobgasfee/`)                                                                                                    // gas used by execution: 45728, in header: 37568
 	bt.SkipLoad(`^for_amsterdam/constantinople/eip1014_create2/`)                                                                                               // gas used by execution: 121788, in header: 206624
+	bt.SkipLoad(`^for_amsterdam/constantinople/eip1052_extcodehash/test_extcodehash_after_selfdestruct.json`)                                                   // gas used by execution: 197565, in header: 359244
+	bt.SkipLoad(`^for_amsterdam/constantinople/eip1052_extcodehash/test_extcodehash_call_to_nonexistent.json`)                                                  // gas used by execution: 50830, in header: 37568
+	bt.SkipLoad(`^for_amsterdam/constantinople/eip1052_extcodehash/test_extcodehash_call_to_selfdestruct.json`)                                                 // gas used by execution: 215827, in header: 198727
+	bt.SkipLoad(`^for_amsterdam/constantinople/eip1052_extcodehash/test_extcodehash_changed_account.json`)                                                      // gas used by execution: 173261, in header: 319328
+	bt.SkipLoad(`^for_amsterdam/constantinople/eip1052_extcodehash/test_extcodehash_created_and_deleted.json`)                                                  // gas used by execution: 215827, in header: 198727
+	bt.SkipLoad(`^for_amsterdam/constantinople/eip1052_extcodehash/test_extcodehash_created_and_deleted_recheck_outer.json`)                                    // gas used by execution: 269632, in header: 473122
 	bt.SkipLoad(`^for_amsterdam/constantinople/eip1052_extcodehash/test_extcodehash_codeless_with_storage.json`)                                                // gas used by execution: 50812, in header: 37568
 	bt.SkipLoad(`^for_amsterdam/constantinople/eip1052_extcodehash/test_extcodehash_dynamic_account_overwrite.json`)                                            // gas used by execution: 254802, in header: 437902
+	bt.SkipLoad(`^for_amsterdam/constantinople/eip1052_extcodehash/test_extcodehash_dynamic_argument.json`)                                                     // gas used by execution: 48458, in header: 37568
 	bt.SkipLoad(`^for_amsterdam/constantinople/eip1052_extcodehash/test_extcodehash_empty_account_variants.json`)                                               // gas used by execution: 55941, in header: 38841
 	bt.SkipLoad(`^for_amsterdam/constantinople/eip1052_extcodehash/test_extcodehash_empty_contract_creation.json`)                                              // gas used by execution: 90777, in header: 169056
 	bt.SkipLoad(`^for_amsterdam/constantinople/eip1052_extcodehash/test_extcodehash_empty_send_value.json`)                                                     // gas used by execution: 82632, in header: 169056
+	bt.SkipLoad(`^for_amsterdam/constantinople/eip1052_extcodehash/test_extcodehash_in_init_code.json`)                                                         // gas used by execution: 100766, in header: 206624
+	bt.SkipLoad(`^for_amsterdam/constantinople/eip1052_extcodehash/test_extcodehash_max_code_size.json`)                                                        // gas used by execution: 67912, in header: 75136
 	bt.SkipLoad(`^for_amsterdam/constantinople/eip1052_extcodehash/test_extcodehash_new_account.json`)                                                          // gas used by execution: 85565, in header: 169056
 	bt.SkipLoad(`^for_amsterdam/constantinople/eip1052_extcodehash/test_extcodehash_of_empty.json`)                                                             // gas used by execution: 50812, in header: 37568
 	bt.SkipLoad(`^for_amsterdam/constantinople/eip1052_extcodehash/test_extcodehash_self.json`)                                                                 // gas used by execution: 65410, in header: 75136
+	bt.SkipLoad(`^for_amsterdam/constantinople/eip1052_extcodehash/test_extcodehash_self_in_init.json`)                                                         // gas used by execution: 77756, in header: 169056
 	bt.SkipLoad(`^for_amsterdam/constantinople/eip1052_extcodehash/test_extcodehash_via_call.json`)                                                             // gas used by execution: 70593, in header: 75136
 	bt.SkipLoad(`^for_amsterdam/constantinople/eip145_bitwise_shift/test_combinations.json`)                                                                    // gas limit too high: address 0x1AD9bc24818784172FF393bb6F89F094D4d2Ca29, gas limit 25000000
 	bt.SkipLoad(`^for_amsterdam/frontier/create/`)                                                                                                              // gas used by execution: 62065, in header: 131488
@@ -305,6 +323,7 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	bt.SkipLoad(`^for_amsterdam/frontier/opcodes/test_constant_gas.json`)                                                                                       // gas used by execution: 95486, in header: 112704
 	bt.SkipLoad(`^for_amsterdam/frontier/opcodes/test_cover_revert.json`)                                                                                       // gas used by execution: 75250, in header: 169056
 	bt.SkipLoad(`^for_amsterdam/frontier/opcodes/test_dup.json`)                                                                                                // gas used by execution: 396805, in header: 638656
+	bt.SkipLoad(`^for_amsterdam/frontier/opcodes/test_extcodecopy_bounds.json`)                                                                                 // gas used by execution: 95067, in header: 75136
 	bt.SkipLoad(`^for_amsterdam/frontier/opcodes/test_gas.json`)                                                                                                // gas used by execution: 101859, in header: 112704
 	bt.SkipLoad(`^for_amsterdam/frontier/opcodes/test_genesis_hash_available.json`)                                                                             // gas used by execution: 45358, in header: 37568
 	bt.SkipLoad(`^for_amsterdam/frontier/opcodes/test_max_stack.json`)                                                                                          // gas limit too high: address 0x1AD9bc24818784172FF393bb6F89F094D4d2Ca29, gas limit 50000000
@@ -448,10 +467,20 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	bt.SkipLoad(`^for_amsterdam/shanghai/eip4895_withdrawals/test_no_evm_execution.json`)                                                                       // gas used by execution: 86210, in header: 75136
 	bt.SkipLoad(`^for_amsterdam/shanghai/eip4895_withdrawals/test_use_value_in_contract.json`)                                                                  // gas used by execution: 52422, in header: 37568
 	bt.SkipLoad(`^for_amsterdam/tangerine_whistle/eip150_operation_gas_costs/`)                                                                                 // gas used by execution: 58040, in header: 131488
+	bt.SkipLoad(`^for_berlin/frontier/validation/test_gas_limit_below_minimum.json`)                                                                            // block (index 0) insertion should have failed due to: BlockException.INVALID_GASLIMIT
 	bt.SkipLoad(`^for_bpo2toamsterdamattime15k/amsterdam/eip7708_eth_transfer_logs/test_burn_log_at_fork_transition.json`)                                      // gas used by execution: 58025, in header: 131488
 	bt.SkipLoad(`^for_bpo2toamsterdamattime15k/amsterdam/eip7954_increase_max_contract_size/`)                                                                  // gas limit too high: address 0xDD616a20f3b01FC95e6B1701D8a07331D06DD897, gas limit 100000000
 	bt.SkipLoad(`^for_bpo2toamsterdamattime15k/amsterdam/eip8037_state_creation_gas_cost_increase/`)                                                            // gas limit too high: address 0x1AD9bc24818784172FF393bb6F89F094D4d2Ca29, gas limit 16814784
-	bt.SkipLoad(`^for_amsterdam/static/state_tests/`)
+	bt.SkipLoad(`^for_byzantium/frontier/validation/test_gas_limit_below_minimum.json`)                                                                         // block (index 0) insertion should have failed due to: BlockException.INVALID_GASLIMIT
+	bt.SkipLoad(`^for_cancun/frontier/validation/test_gas_limit_below_minimum.json`)                                                                            // block 1: block access list too large: 3 items > 2 max (gas limit 5000 / 2000)
+	bt.SkipLoad(`^for_constantinoplefix/frontier/validation/test_gas_limit_below_minimum.json`)                                                                 // block (index 0) insertion should have failed due to: BlockException.INVALID_GASLIMIT
+	bt.SkipLoad(`^for_frontier/frontier/validation/test_gas_limit_below_minimum.json`)                                                                          // block (index 0) insertion should have failed due to: BlockException.INVALID_GASLIMIT
+	bt.SkipLoad(`^for_homestead/frontier/validation/test_gas_limit_below_minimum.json`)                                                                         // block (index 0) insertion should have failed due to: BlockException.INVALID_GASLIMIT
+	bt.SkipLoad(`^for_istanbul/frontier/validation/test_gas_limit_below_minimum.json`)                                                                          // block (index 0) insertion should have failed due to: BlockException.INVALID_GASLIMIT
+	bt.SkipLoad(`^for_london/frontier/validation/test_gas_limit_below_minimum.json`)                                                                            // block (index 0) insertion should have failed due to: BlockException.INVALID_GASLIMIT
+	bt.SkipLoad(`^for_london/london/validation/test_invalid_header.json`)                                                                                       // block (index 0) insertion should have failed due to: BlockException.INVALID_BASEFEE_PER_GAS
+	bt.SkipLoad(`^for_osaka/frontier/validation/test_gas_limit_below_minimum.json`)                                                                             // block 1: block access list too large: 15 items > 2 max (gas limit 5000 / 2000)
+	bt.SkipLoad(`^for_prague/frontier/validation/test_gas_limit_below_minimum.json`)                                                                            // block 1: block access list too large: 15 items > 2 max (gas limit 5000 / 2000)
 
 	bt.Walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root

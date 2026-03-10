@@ -1,11 +1,6 @@
 name: Check large files
 
-on:
-  pull_request:
-    branches:
-      - main
-      - 'release/**'
-    types: [opened, reopened, synchronize, ready_for_review]
+on: pull_request
 
 defaults:
   run:
@@ -13,7 +8,6 @@ defaults:
 
 jobs:
   check:
-    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

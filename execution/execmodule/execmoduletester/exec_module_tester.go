@@ -635,7 +635,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 					cfg.Sync,
 					false, /*experimentalBAL*/
 				),
-				stagedsync.StageSendersCfg(mock.ChainConfig, cfg.Sync, false /* badBlockHalt */, dirs.Tmp, pruneMode, mock.BlockReader, mock.sentriesClient.Hd),
 				builderstages.StageBuilderExecCfg(builderStatePos, nil /* notifier */, mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, interrupt, param.PayloadId, mock.TxPool, mock.BlockReader),
 				builderstages.StageBuilderFinishCfg(mock.ChainConfig, mock.Engine, builderStatePos, miningCancel, mock.BlockReader, latestBlockBuiltStore),
 			),
@@ -755,7 +754,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 				cfg.Sync,
 				/*experimentalBAL*/ false,
 			),
-			stagedsync.StageSendersCfg(mock.ChainConfig, cfg.Sync, false /* badBlockHalt */, dirs.Tmp, pruneMode, mock.BlockReader, mock.sentriesClient.Hd),
 			builderstages.StageBuilderExecCfg(miner, nil, mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, nil, 0, mock.TxPool, mock.BlockReader),
 			builderstages.StageBuilderFinishCfg(mock.ChainConfig, mock.Engine, miner, miningCancel, mock.BlockReader, latestBlockBuiltStore),
 		),
