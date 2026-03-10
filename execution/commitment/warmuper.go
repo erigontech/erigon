@@ -174,8 +174,10 @@ func (w *Warmuper) Start() {
 				defer cleanup()
 			}
 
-			for item := range w.work {
+			var item warmupWorkItem
+			for {
 				select {
+				case item = <-w.work:
 				case <-w.ctx.Done():
 					return w.ctx.Err()
 				default:
@@ -184,7 +186,6 @@ func (w *Warmuper) Start() {
 				w.warmupKey(trieCtx, item.hashedKey, item.startDepth)
 				w.keysProcessed.Add(1)
 			}
-			return nil
 		})
 	}
 }
