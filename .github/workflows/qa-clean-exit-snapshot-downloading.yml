@@ -3,10 +3,7 @@ name: QA - Clean exit (snapshot downloading)
 on: workflow_dispatch
 
 jobs:
-  inference:
-    permissions:
-      models: read
-      actions: read
+  test:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -14,9 +11,16 @@ jobs:
         with:
           ref: 'v5.4'
 
+  inference:
+    needs: [test]
+    if: failure()
+    permissions:
+      models: read
+      actions: read
+    runs-on: ubuntu-latest
+    steps:
       - name: AI failure analysis
         id: inference
-        if: failure()
         uses: actions/ai-inference@v2
         with:
           enable-github-mcp: true
