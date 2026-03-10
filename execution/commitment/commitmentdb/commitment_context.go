@@ -16,6 +16,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -399,7 +400,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		warmupConfig = commitment.WarmupConfig{
 			Enabled:    sdc.trieWarmup,
 			CtxFactory: sdc.trieContextFactory(ctx, sdc.paraTrieDB, txNum),
-			NumWorkers: 16,
+			NumWorkers: estimate.HalfCPUs(),
 			MaxDepth:   commitment.WarmupMaxDepth,
 			LogPrefix:  logPrefix,
 		}
