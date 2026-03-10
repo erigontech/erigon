@@ -112,7 +112,7 @@ func createSentinel(
 	}
 	gossipTopics := []sentinel.GossipTopic{
 		sentinel.BeaconBlockSsz,
-		//sentinel.VoluntaryExitSsz,
+		sentinel.VoluntaryExitSsz,
 		sentinel.ProposerSlashingSsz,
 		sentinel.AttesterSlashingSsz,
 		sentinel.BlsToExecutionChangeSsz,
