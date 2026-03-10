@@ -23,7 +23,7 @@ jobs:
           prompt: >
             Analyse the log of this workflow run and identify the root cause, 
             highlight the most relevant error messages, and suggest what to investigate.
- 
+            The workflow run ID is: ${{ github.run_id }}
 
       - name: Print Output
         id: output
