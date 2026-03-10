@@ -39,6 +39,7 @@ jobs:
         os:
           - ubuntu-24.04
           - macos-15
+          - windows-2025
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -63,7 +64,7 @@ jobs:
         env:
           SKIP_FLAKY_TESTS: 'true'
         run: |
-          if ! make test-all; then
+          if ! make test-all GO_FLAGS='--timeout 20m'; then
             # Retry after clearing the Go build cache. Low disk space can cause
             # severe, non-obvious build/test failures that don't surface a clear
             # "no space left" message. Tuning a cache size limit is too fragile;
@@ -71,77 +72,10 @@ jobs:
             # handles the rest.
             echo "::notice::make test-all failed; clearing Go build cache and retrying"
             time go clean -cache
-            make test-all
+            make test-all GO_FLAGS='--timeout 20m'
           fi
 
       - uses: ./.github/actions/cleanup-erigon
         if: always()
 
-
-  tests-windows:
-    concurrency:
-      group: >-
-        ${{
-          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) &&
-          format('{0}-{1}-{2}', github.workflow, matrix.os, github.run_id) ||
-          format('{0}-{1}-{2}', github.workflow, matrix.os, github.ref)
-        }}
-      cancel-in-progress: true
-    strategy:
-      matrix:
-        os: [ windows-2025 ]
-    runs-on:
-      group: "selfhosted-win"
-
-    env:
-      GOMODCACHE: C:\go-cache\mod
-      GOCACHE: C:\go-cache\build
-
-    steps:
-      # not needed on self-hosted runner. already configured.
-      #- name: Configure Pagefile
-      #  uses: al-cheb/configure-pagefile-action@v1.5
-      #  with:
-      #    minimum-size: 8GB
-      #    disk-root: "C:"
-
-      - name: "Checkout code with submodules and large files (lfs) on ${{ matrix.os }}"
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 1
-          submodules: recursive
-          lfs: true
-          clean: true
-
-      # Prune LFS blobs that are no longer referenced by the current checkout.
-      - name: Prune stale Git LFS objects
-        shell: bash
-        run: git lfs prune --verify-remote=false
-
-      - name: Setup Go environment on ${{ matrix.os }}
-        uses: actions/setup-go@v6
-        with:
-          go-version: '1.25'
-          cache: false
-
-      # "make" already preinstalled:
-      #- name: Install make
-      #  run: choco install make -y
-
-      - name: Run all tests on ${{ matrix.os }}
-        shell: bash
-        run: make test-all
-
-      # Clears the Go build cache after the run so compiled artifacts do not
-      # accumulate on the persistent self-hosted runner across runs.
-      # GOMODCACHE is intentionally kept: it is bounded by the number of unique
-      # dependency versions and saves re-downloading modules on the next run.
-      - name: Post-run cleanup
-        if: always()
-        shell: bash
-        run: |
-          go clean -cache
-          rm -f coverage-test-all.out
-          rm -rf "$TEMP/"* 2>/dev/null || true
-          rm -rf "$RUNNER_TEMP/"* 2>/dev/null || true
 

@@ -8,6 +8,11 @@ on:
       - 'release/**'
       - performance
       - performance-stable
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
 
 defaults:
   run:
