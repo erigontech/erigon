@@ -173,9 +173,10 @@ type RecSplit struct {
 	built              bool // Flag indicating that the hash function has been built and no more keys can be added
 	logger             log.Logger
 
-	noFsync bool // fsync is enabled by default, but tests can manually disable
-	workers int  // Number of parallel goroutines for Build(); 0 or 1 = sequential
-	timings Timings
+	noFsync            bool // fsync is enabled by default, but tests can manually disable
+	forceCollisionOnce bool // test-only: force one collision on the next Build
+	workers            int  // Number of parallel goroutines for Build(); 0 or 1 = sequential
+	timings            Timings
 
 	progress *background.Progress // If set, tracks 0-100%: add-keys fills 0-50%, build fills 50-100%
 }
@@ -875,6 +876,11 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	if rs.keysAdded != rs.keyExpectedCount {
 		return fmt.Errorf("rs %s expected keys %d, got %d", rs.fileName, rs.keyExpectedCount, rs.keysAdded)
 	}
+	if rs.forceCollisionOnce {
+		rs.forceCollisionOnce = false
+		rs.collision = true
+		return fmt.Errorf("%w: forced for testing", ErrCollision)
+	}
 	if rs.timings.Enabled {
 		rs.timings.AddTook = time.Since(rs.timings.AddStart) // assume Adding data into compressor complete
 		rs.timings.BuildStart = time.Now()
@@ -1100,6 +1106,12 @@ func (rs *RecSplit) Stats() (int, int) {
 // RecSplit needs to be reset, re-populated with keys, and rebuilt
 func (rs *RecSplit) Collision() bool {
 	return rs.collision
+}
+
+// ForceCollisionOnce makes the next Build() fail with a collision error.
+// Test-only: used to exercise collision retry paths.
+func (rs *RecSplit) ForceCollisionOnce() {
+	rs.forceCollisionOnce = true
 }
 
 // bucketResultPool is a package-level sync.Pool for reusing bucketResult instances
