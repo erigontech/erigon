@@ -176,6 +176,12 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 			pe.domains().SetChangesetAccumulator(changeSet)
 		}
 
+		// blockUpdateCount/blockApplyCount count individual VersionedWrite entries
+		// (balance, nonce, incarnation, codeHash, code, storage, selfDestruct are
+		// separate entries).  This differs from the old StateUpdates count which
+		// grouped all fields of one account as a single entry.  The values are only
+		// used for an internal consistency check (blockUpdateCount==ApplyCount) and
+		// trace output, so the change in semantics does not affect correctness.
 		blockUpdateCount := 0
 		blockApplyCount := 0
 

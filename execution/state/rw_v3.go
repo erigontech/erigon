@@ -17,8 +17,10 @@
 package state
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 
 	"github.com/holiman/uint256"
@@ -123,7 +125,20 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 			}
 		}
 
-		for addr, d := range perAddr {
+		// Sort addresses before iterating so that trace output is deterministic.
+		// Domain writes are buffered into a sorted BTree by key, so order of
+		// iteration does not affect correctness — only debug reproducibility.
+		addrs := make([]accounts.Address, 0, len(perAddr))
+		for addr := range perAddr {
+			addrs = append(addrs, addr)
+		}
+		slices.SortFunc(addrs, func(a, b accounts.Address) int {
+			av, bv := a.Value(), b.Value()
+			return bytes.Compare(av[:], bv[:])
+		})
+
+		for _, addr := range addrs {
+			d := perAddr[addr]
 			address := addr.Value()
 
 			if d.selfDestruct {
@@ -151,6 +166,10 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 			}
 
 			if d.balance != nil || d.nonce != nil || d.incarnation != nil || d.codeHash != nil || d.code != nil {
+				// versionedWriteCollector.UpdateAccountData always emits all four
+				// account fields (balance, nonce, incarnation, codeHash) so the
+				// reconstruction below produces a complete account.  The nil-guards
+				// remain to defend against partial writes from other code paths.
 				acc := accounts.NewAccount()
 				if d.balance != nil {
 					acc.Balance = *d.balance
