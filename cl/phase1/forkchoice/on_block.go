@@ -47,6 +47,7 @@ var (
 	ErrEIP4844DataNotAvailable       = errors.New("EIP-4844 blob data is not available")
 	ErrEIP7594ColumnDataNotAvailable = errors.New("EIP-7594 column data is not available")
 	ErrNewPayloadNoStatus            = errors.New("newPayload returned no status")
+	ErrMissingSegment                = errors.New("missing segment: parent state not available")
 )
 
 func verifyKzgCommitmentsAgainstTransactions(cfg *clparams.BeaconChainConfig, block *cltypes.BeaconBlock) error {
@@ -295,6 +296,8 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	case fork_graph.BelowAnchor:
 		log.Debug("replay block", "status", status.String())
 		return nil
+	case fork_graph.MissingSegment:
+		return ErrMissingSegment
 	default:
 		return fmt.Errorf("replay block, status %+v", status)
 	}
