@@ -18,6 +18,7 @@ package etl
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -28,6 +29,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -629,6 +631,242 @@ func TestSortable(t *testing.T) {
 	require.Equal([][]byte{{1}, {1}, {1}, {1}, {1}, {1}, {1}, {2}, {2}, {2}}, keys)
 	require.Equal([][]byte{{1}, {2}, {3}, {4}, {5}, {6}, {7}, {1}, {20}, nil}, vals)
 
+}
+
+// TestMixedProvidersMergeSortFiles tests the merge sort with both memoryDataProvider
+// and fileDataProvider, verifying that zero-copy returns from both don't corrupt data.
+func TestMixedProvidersMergeSortFiles(t *testing.T) {
+	logger := log.New()
+	tmpdir := t.TempDir()
+
+	// Create entries that will be split across providers:
+	// - some go into a memoryDataProvider (kept in RAM)
+	// - some go into fileDataProviders (flushed to disk)
+	//
+	// Use a small buffer so most entries flush to file, but the last batch stays in RAM.
+
+	// We'll manually create providers to control the mix.
+	// Provider 0: fileDataProvider with keys "a01".."a05"
+	// Provider 1: memoryDataProvider with keys "b01".."b05"
+
+	// Build file provider
+	fileBuf := NewSortableBuffer(BufferOptimalSize)
+	for i := 0; i < 5; i++ {
+		k := fmt.Appendf(nil, "a%02d", i)
+		v := fmt.Appendf(nil, "file-val-%02d", i)
+		fileBuf.Put(k, v)
+	}
+	fileProvider, err := FlushToDisk("test", fileBuf, tmpdir, log.LvlInfo)
+	require.NoError(t, err)
+	require.NotNil(t, fileProvider)
+
+	// Build memory provider
+	memBuf := NewSortableBuffer(BufferOptimalSize)
+	for i := 0; i < 5; i++ {
+		k := fmt.Appendf(nil, "b%02d", i)
+		v := fmt.Appendf(nil, "mem-val-%02d", i)
+		memBuf.Put(k, v)
+	}
+	memBuf.Sort()
+	memProvider := KeepInRAM(memBuf)
+
+	providers := []dataProvider{fileProvider, memProvider}
+
+	// Collect results
+	var results []sortableBufferEntry
+	loadFunc := func(k, v []byte) error {
+		// Must copy because providers return zero-copy references
+		results = append(results, sortableBufferEntry{
+			key:   common.Copy(k),
+			value: common.Copy(v),
+		})
+		return nil
+	}
+
+	err = mergeSortFiles("test", providers, loadFunc, TransformArgs{}, NewSortableBuffer(1))
+	require.NoError(t, err)
+
+	// Should have all 10 entries in sorted order
+	require.Len(t, results, 10)
+
+	// Verify sorted order and correct values
+	for i := 0; i < 5; i++ {
+		assert.Equal(t, fmt.Sprintf("a%02d", i), string(results[i].key), "file key %d", i)
+		assert.Equal(t, fmt.Sprintf("file-val-%02d", i), string(results[i].value), "file val %d", i)
+	}
+	for i := 0; i < 5; i++ {
+		assert.Equal(t, fmt.Sprintf("b%02d", i), string(results[5+i].key), "mem key %d", i)
+		assert.Equal(t, fmt.Sprintf("mem-val-%02d", i), string(results[5+i].value), "mem val %d", i)
+	}
+
+	// Cleanup
+	for _, p := range providers {
+		p.Dispose()
+	}
+
+	_ = logger
+}
+
+// TestMixedProvidersInterleavedKeys tests merge sort with interleaved keys
+// from both memory and file providers, ensuring correct ordering.
+func TestMixedProvidersInterleavedKeys(t *testing.T) {
+	tmpdir := t.TempDir()
+
+	// File provider: even keys
+	fileBuf := NewSortableBuffer(BufferOptimalSize)
+	for i := 0; i < 10; i += 2 {
+		k := fmt.Appendf(nil, "key-%04d", i)
+		v := fmt.Appendf(nil, "file-%04d", i)
+		fileBuf.Put(k, v)
+	}
+	fileProvider, err := FlushToDisk("test", fileBuf, tmpdir, log.LvlInfo)
+	require.NoError(t, err)
+
+	// Memory provider: odd keys
+	memBuf := NewSortableBuffer(BufferOptimalSize)
+	for i := 1; i < 10; i += 2 {
+		k := fmt.Appendf(nil, "key-%04d", i)
+		v := fmt.Appendf(nil, "mem-%04d", i)
+		memBuf.Put(k, v)
+	}
+	memBuf.Sort()
+	memProvider := KeepInRAM(memBuf)
+
+	providers := []dataProvider{fileProvider, memProvider}
+
+	var keys, vals []string
+	loadFunc := func(k, v []byte) error {
+		keys = append(keys, string(k))
+		vals = append(vals, string(v))
+		return nil
+	}
+
+	err = mergeSortFiles("test", providers, loadFunc, TransformArgs{}, NewSortableBuffer(1))
+	require.NoError(t, err)
+
+	require.Len(t, keys, 10)
+	// Verify interleaved order
+	for i := 0; i < 10; i++ {
+		assert.Equal(t, fmt.Sprintf("key-%04d", i), keys[i])
+		if i%2 == 0 {
+			assert.Equal(t, fmt.Sprintf("file-%04d", i), vals[i])
+		} else {
+			assert.Equal(t, fmt.Sprintf("mem-%04d", i), vals[i])
+		}
+	}
+
+	for _, p := range providers {
+		p.Dispose()
+	}
+}
+
+// TestMixedProvidersZeroCopyIntegrity verifies that zero-copy slices from
+// memoryDataProvider (GetRef) are not corrupted by subsequent Next() calls.
+func TestMixedProvidersZeroCopyIntegrity(t *testing.T) {
+	tmpdir := t.TempDir()
+
+	// File provider with 1 key
+	fileBuf := NewSortableBuffer(BufferOptimalSize)
+	fileBuf.Put([]byte("aaa"), []byte("file-aaa"))
+	fileProvider, err := FlushToDisk("test", fileBuf, tmpdir, log.LvlInfo)
+	require.NoError(t, err)
+
+	// Memory provider with multiple keys - GetRef returns slices into sortableBuffer.data
+	memBuf := NewSortableBuffer(BufferOptimalSize)
+	memBuf.Put([]byte("bbb"), []byte("mem-bbb"))
+	memBuf.Put([]byte("ccc"), []byte("mem-ccc"))
+	memBuf.Put([]byte("ddd"), []byte("mem-ddd"))
+	memBuf.Sort()
+	memProvider := KeepInRAM(memBuf)
+
+	providers := []dataProvider{fileProvider, memProvider}
+
+	// Capture zero-copy references and verify they remain valid
+	type entry struct {
+		key []byte
+		val []byte
+	}
+	var entries []entry
+
+	loadFunc := func(k, v []byte) error {
+		// Intentionally NOT copying - to test that zero-copy refs stay valid
+		entries = append(entries, entry{key: k, val: v})
+		return nil
+	}
+
+	err = mergeSortFiles("test", providers, loadFunc, TransformArgs{}, NewSortableBuffer(1))
+	require.NoError(t, err)
+
+	require.Len(t, entries, 4)
+	// Verify all entries still have correct data (not corrupted by subsequent reads)
+	assert.Equal(t, "aaa", string(entries[0].key))
+	assert.Equal(t, "file-aaa", string(entries[0].val))
+	assert.Equal(t, "bbb", string(entries[1].key))
+	assert.Equal(t, "mem-bbb", string(entries[1].val))
+	assert.Equal(t, "ccc", string(entries[2].key))
+	assert.Equal(t, "mem-ccc", string(entries[2].val))
+	assert.Equal(t, "ddd", string(entries[3].key))
+	assert.Equal(t, "mem-ddd", string(entries[3].val))
+
+	for _, p := range providers {
+		p.Dispose()
+	}
+}
+
+func BenchmarkMemoryDataProviderNext(b *testing.B) {
+	for _, keySize := range []int{20, 32, 64} {
+		for _, valSize := range []int{32, 128, 256, 1024} {
+			name := fmt.Sprintf("key%d_val%d", keySize, valSize)
+			buf := makeSortedBuffer(keySize, valSize, 10_000)
+
+			b.Run(name+"/GetRef", func(b *testing.B) {
+				b.ReportAllocs()
+				var keyBuf, valBuf []byte
+				for i := 0; i < b.N; i++ {
+					p := &memoryDataProvider{buffer: buf, currentIndex: 0}
+					for {
+						var err error
+						keyBuf, valBuf, err = p.Next(keyBuf[:0], valBuf[:0])
+						if err == io.EOF {
+							break
+						}
+						if err != nil {
+							b.Fatal(err)
+						}
+					}
+				}
+				_ = keyBuf
+				_ = valBuf
+			})
+
+			b.Run(name+"/Get_copy", func(b *testing.B) {
+				b.ReportAllocs()
+				var keyBuf, valBuf []byte
+				for i := 0; i < b.N; i++ {
+					idx := 0
+					for idx < buf.Len() {
+						keyBuf, valBuf = buf.Get(idx, keyBuf[:0], valBuf[:0])
+						idx++
+					}
+				}
+				_ = keyBuf
+				_ = valBuf
+			})
+		}
+	}
+}
+
+func makeSortedBuffer(keySize, valSize, n int) *sortableBuffer {
+	buf := NewSortableBuffer(256 * datasize.MB)
+	key := make([]byte, keySize)
+	val := make([]byte, valSize)
+	for i := 0; i < n; i++ {
+		rand.Read(key)
+		rand.Read(val)
+		buf.Put(key, val)
+	}
+	buf.Sort()
+	return buf
 }
 
 func BenchmarkSortableBufferSort(b *testing.B) {

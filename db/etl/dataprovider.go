@@ -269,11 +269,11 @@ func KeepInRAM(buffer Buffer) dataProvider {
 	return &memoryDataProvider{buffer, 0}
 }
 
-func (p *memoryDataProvider) Next(keyBuf, valBuf []byte) ([]byte, []byte, error) {
+func (p *memoryDataProvider) Next(_, _ []byte) ([]byte, []byte, error) {
 	if p.currentIndex >= p.buffer.Len() {
 		return nil, nil, io.EOF
 	}
-	key, value := p.buffer.Get(p.currentIndex, keyBuf, valBuf)
+	key, value := p.buffer.GetRef(p.currentIndex)
 	p.currentIndex++
 	return key, value, nil
 }

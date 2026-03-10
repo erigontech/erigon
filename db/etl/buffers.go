@@ -65,6 +65,9 @@ type Buffer interface {
 	// Put does copy `k` and `v`
 	Put(k, v []byte)
 	Get(i int, keyBuf, valBuf []byte) ([]byte, []byte)
+	// GetRef returns direct references to the internal key/value storage without copying.
+	// The returned slices must not be modified by the caller.
+	GetRef(i int) ([]byte, []byte)
 	Len() int
 	Reset()
 	SizeLimit() int
@@ -164,6 +167,28 @@ func (b *sortableBuffer) Get(i int, keyBuf, valBuf []byte) ([]byte, []byte) {
 		valBuf = nil
 	}
 	return keyBuf, valBuf
+}
+
+func (b *sortableBuffer) GetRef(i int) ([]byte, []byte) {
+	e := &b.entries[i]
+	keyLen, valLen := e.keyLen, e.valLen
+	keyOffset := e.offset
+	valOffset := keyOffset
+	if keyLen > 0 {
+		valOffset += keyLen
+	}
+	var key, val []byte
+	if keyLen > 0 {
+		key = b.data[keyOffset : keyOffset+keyLen]
+	} else if keyLen == 0 {
+		key = []byte{}
+	}
+	if valLen > 0 {
+		val = b.data[valOffset : valOffset+valLen]
+	} else if valLen == 0 {
+		val = []byte{}
+	}
+	return key, val
 }
 
 func (b *sortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) Buffer {
@@ -281,6 +306,9 @@ func (b *appendSortableBuffer) Get(i int, keyBuf, valBuf []byte) ([]byte, []byte
 	valBuf = append(valBuf, b.sortedBuf[i].value...)
 	return keyBuf, valBuf
 }
+func (b *appendSortableBuffer) GetRef(i int) ([]byte, []byte) {
+	return b.sortedBuf[i].key, b.sortedBuf[i].value
+}
 func (b *appendSortableBuffer) Reset() {
 	b.sortedBuf = nil
 	b.entries = make(map[string][]byte)
@@ -382,6 +410,9 @@ func (b *oldestEntrySortableBuffer) Get(i int, keyBuf, valBuf []byte) ([]byte, [
 	keyBuf = append(keyBuf, b.sortedBuf[i].key...)
 	valBuf = append(valBuf, b.sortedBuf[i].value...)
 	return keyBuf, valBuf
+}
+func (b *oldestEntrySortableBuffer) GetRef(i int) ([]byte, []byte) {
+	return b.sortedBuf[i].key, b.sortedBuf[i].value
 }
 func (b *oldestEntrySortableBuffer) Reset() {
 	b.sortedBuf = nil
