@@ -180,7 +180,6 @@ func (w *Warmuper) Start() {
 				case item = <-w.work:
 				case <-w.ctx.Done():
 					return w.ctx.Err()
-				default:
 				}
 
 				w.warmupKey(trieCtx, item.hashedKey, item.startDepth)
