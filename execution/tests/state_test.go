@@ -23,17 +23,20 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path"
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"syscall"
 	"testing"
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
@@ -64,10 +67,7 @@ func TestStateCornerCases(t *testing.T) {
 			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
 			t.Run(key, func(t *testing.T) {
 				withTrace(t, func(vmconfig vm.Config) error {
-					tx, err := db.BeginTemporalRw(context.Background())
-					if err != nil {
-						t.Fatal(err)
-					}
+					tx := beginRwNoContention(t, db)
 					defer tx.Rollback()
 					_, _, err = test.Run(t, tx, subtest, vmconfig, dirs)
 					tx.Rollback()
@@ -117,10 +117,7 @@ func TestState(t *testing.T) {
 			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
 			t.Run(key, func(t *testing.T) {
 				withTrace(t, func(vmconfig vm.Config) error {
-					tx, err := db.BeginTemporalRw(context.Background())
-					if err != nil {
-						t.Fatal(err)
-					}
+					tx := beginRwNoContention(t, db)
 					defer tx.Rollback()
 					_, _, err = test.Run(t, tx, subtest, vmconfig, dirs)
 					tx.Rollback()
@@ -133,6 +130,34 @@ func TestState(t *testing.T) {
 			})
 		}
 	})
+}
+
+// temporalRwTry is implemented by *temporal.DB when the underlying MDBX env
+// supports non-blocking write-tx opens.
+type temporalRwTry interface {
+	BeginTemporalRwTry(ctx context.Context) (kv.TemporalRwTx, error)
+}
+
+// beginRwNoContention opens a write tx and fatals immediately on EBUSY, which
+// indicates that two goroutines are racing on the same DB — a sign of
+// unintended db sharing between parallel subtests.
+func beginRwNoContention(t *testing.T, db kv.TemporalRwDB) kv.TemporalRwTx {
+	t.Helper()
+	if tryDB, ok := db.(temporalRwTry); ok {
+		tx, err := tryDB.BeginTemporalRwTry(context.Background())
+		if err != nil {
+			if errors.Is(err, syscall.EBUSY) {
+				t.Fatal("write lock contention: multiple goroutines sharing one db")
+			}
+			t.Fatal(err)
+		}
+		return tx
+	}
+	tx, err := db.BeginTemporalRw(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tx
 }
 
 func withTrace(t *testing.T, test func(vm.Config) error) {
