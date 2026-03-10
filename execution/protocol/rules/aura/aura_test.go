@@ -17,6 +17,7 @@
 package aura_test
 
 import (
+	"context"
 	"math/big"
 	"strings"
 	"testing"
@@ -30,17 +31,25 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules/aura"
+	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
+	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/rulesconfig"
 )
 
 // Check that the first block of Gnosis Chain, which doesn't have any transactions,
@@ -135,4 +144,56 @@ func TestAuRaSkipGasLimit(t *testing.T) {
 	invalidPostMergeHeader := invalidPreMergeHeader
 	invalidPostMergeHeader.Difficulty.Clear() //zero difficulty detected as PoS
 	require.NoError(m.Engine.Initialize(chainConfig, &blockgen.FakeChainReader{}, invalidPostMergeHeader, nil, syscallCustom, nil, nil))
+}
+
+func TestEmptySystemAccountCreation(t *testing.T) {
+	require := require.New(t)
+	genesis := chainspec.ChiadoGenesisBlock()
+	ctx := context.Background()
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	db := testutil.TemporalDBWithDirs(t, dirs)
+	tx, domains := testutil.TemporalTxSD(t, db)
+
+	// Replay genesis block the same way exec3 does (see txtask.go):
+	// GenesisToBlock populates an IntraBlockState with the alloc,
+	// then MakeWriteSet writes it into the real shared domains.
+	genesisBlock, genesisIbs, err := genesiswrite.GenesisToBlock(t, genesis, dirs, logger)
+	require.NoError(err)
+	domainWriter := state.NewWriter(domains.AsPutDel(tx), nil, 1)
+	err = genesisIbs.MakeWriteSet(&chain.Rules{}, domainWriter)
+	require.NoError(err)
+
+	// Write block headers so ChainReader can look up the genesis header.
+	err = genesiswrite.WriteGenesisBesideState(genesisBlock, tx, genesis)
+	require.NoError(err)
+
+	config := genesis.Config
+	blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap, logger), nil)
+	chainRdr := stagedsync.ChainReader{Cfg: config, Db: tx, BlockReader: blockReader}
+	engine := rulesconfig.CreateRulesEngineBareBones(ctx, config, logger)
+	time := uint64(1)
+	header := builder.MakeEmptyHeader(genesisBlock.Header(), config, time, nil)
+	header.Difficulty = engine.CalcDifficulty(chainRdr, time,
+		0,
+		genesisBlock.Difficulty(),
+		genesisBlock.NumberU64(),
+		genesisBlock.Hash(),
+		genesisBlock.UncleHash(),
+		genesisBlock.Header().AuRaStep,
+	)
+	header.GasLimit = 12500000
+
+	// Set up block 1 state the same way exec3 does for TxIndex == -1:
+	// engine.Initialize + FinalizeTx via InitializeBlockExecution.
+	rs := state.NewStateV3Buffered(state.NewStateV3(domains, ethconfig.Sync{}, logger))
+	reader := state.NewBufferedReader(rs, state.NewReaderV3(rs.Domains().AsGetter(tx)))
+	writer := state.NewBufferedWriter(rs, nil)
+	ibs := state.New(reader)
+	err = protocol.InitializeBlockExecution(engine, chainRdr, header, config, ibs, writer, logger, nil)
+	require.NoError(err)
+	account, err := reader.ReadAccountData(params.SystemAddress)
+	require.NoError(err)
+	require.NotNil(account)
+	require.True(account.Empty())
 }

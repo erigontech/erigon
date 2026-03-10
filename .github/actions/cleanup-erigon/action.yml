@@ -1,5 +1,5 @@
 name: Cleanup Erigon
-description: Save build and module caches, and warn about uncached tests
+description: Save build and module caches, and report uncached test packages
 
 runs:
   using: composite
@@ -19,12 +19,20 @@ runs:
     - name: Save submodule git objects cache
       if: >-
         ${{ always()
-        && env.ERIGON_CI_SUBMODULE_CACHE_KEY != ''
-        && env.ERIGON_CI_SUBMODULE_CACHE_RESTORED_KEY != env.ERIGON_CI_SUBMODULE_CACHE_KEY }}
+        && env.ERIGON_CI_GITOBJECTS_CACHE_KEY != ''
+        && env.ERIGON_CI_GITOBJECTS_CACHE_RESTORED_KEY != env.ERIGON_CI_GITOBJECTS_CACHE_KEY }}
       uses: actions/cache/save@v4
       with:
         path: |
           .git/modules
           .git/lfs
-        key: ${{ env.ERIGON_CI_SUBMODULE_CACHE_KEY }}
+        key: ${{ env.ERIGON_CI_GITOBJECTS_CACHE_KEY }}
+
+    - name: Report uncached test packages
+      if: always()
+      shell: bash
+      run: |
+        test -f run.log || exit 0
+        awk '/^ok/ && !/\(cached\)/ { lines = lines "%0A" $2 " (" $3 ")" }
+             END { if (lines) print "::notice::Packages ran without test cache:" lines }' run.log
 
