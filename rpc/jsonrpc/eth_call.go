@@ -203,8 +203,9 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		// Retrieve the block to act as the gas ceiling
 		hi = header.GasLimit
 	}
-	if hi > params.MaxTxnGasLimit && chainConfig.IsOsaka(header.Time) {
-		// Cap the maximum gas allowance according to EIP-7825 if Osaka
+	if hi > params.MaxTxnGasLimit && chainConfig.IsOsaka(header.Time) && !chainConfig.IsAmsterdam(header.Time) {
+		// Cap the maximum gas allowance according to EIP-7825 if Osaka (but not Amsterdam).
+		// In Amsterdam (EIP-8037), transactions can provide state gas via a total gas limit > MaxTxnGasLimit.
 		hi = params.MaxTxnGasLimit
 	}
 

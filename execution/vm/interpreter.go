@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm/evmtypes/mdgas"
 )
 
 // Config are the configuration options for the Interpreter
@@ -57,6 +58,7 @@ func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
 // but not transients like pc and gas
 type CallContext struct {
 	gas      uint64
+	stateGas uint64
 	input    []byte
 	Memory   Memory
 	Stack    Stack
@@ -71,13 +73,14 @@ var contextPool = sync.Pool{
 	},
 }
 
-func getCallContext(contract Contract, input []byte, gas uint64) *CallContext {
+func getCallContext(contract Contract, input []byte, gas mdgas.MdGas) *CallContext {
 	ctx, ok := contextPool.Get().(*CallContext)
 	if !ok {
 		log.Error("Type assertion failure", "err", "cannot get Stack pointer from stackPool")
 	}
 
-	ctx.gas = gas
+	ctx.gas = gas.Regular
+	ctx.stateGas = gas.State
 	ctx.input = input
 	ctx.Contract = contract
 	return ctx
@@ -99,6 +102,20 @@ func (c *CallContext) useGas(gas uint64, tracer *tracing.Hooks, reason tracing.G
 	return false
 }
 
+func (c *CallContext) useMdGas(evm *EVM, gas uint64, t mdgas.MdGasType, tracer *tracing.Hooks, reason tracing.GasChangeReason) (ok bool) {
+	remaining, ok := useMdGas(evm, c.Gas(), gas, t, tracer, reason)
+	if ok {
+		c.gas = remaining.Regular
+		c.stateGas = remaining.State
+		return true
+	}
+	return false
+}
+
+func (c *CallContext) availableStateGas() uint64 {
+	return c.stateGas + c.gas
+}
+
 func useGas(initial uint64, gas uint64, tracer *tracing.Hooks, reason tracing.GasChangeReason) (remaining uint64, ok bool) {
 	if initial < gas {
 		return initial, false
@@ -109,6 +126,37 @@ func useGas(initial uint64, gas uint64, tracer *tracing.Hooks, reason tracing.Ga
 	}
 
 	return initial - gas, true
+}
+
+func useMdGas(evm *EVM, initial mdgas.MdGas, gas uint64, t mdgas.MdGasType, tracer *tracing.Hooks, reason tracing.GasChangeReason) (mdgas.MdGas, bool) {
+	var ok bool
+	switch t {
+	case mdgas.StateGas:
+		originalGas := gas
+		initial.State, ok = useGas(initial.State, gas, tracer, reason)
+		if ok {
+			if evm != nil {
+				evm.stateGasConsumed += originalGas
+			}
+			return initial, true
+		}
+		// otherwise use up all remaining state gas and try to use some from the regular gas
+		gas = gas - initial.State
+		initial.State = 0
+		initial.Regular, ok = useGas(initial.Regular, gas, tracer, reason)
+		if ok && evm != nil {
+			evm.stateGasConsumed += originalGas
+		}
+		return initial, ok
+	case mdgas.RegularGas:
+		initial.Regular, ok = useGas(initial.Regular, gas, tracer, reason)
+		if ok && evm != nil {
+			evm.regularGasConsumed += gas
+		}
+		return initial, ok
+	default:
+		panic(fmt.Errorf("useMdGas: invalid gas type: %d", t))
+	}
 }
 
 // RefundGas refunds gas to the contract
@@ -166,8 +214,11 @@ func (ctx *CallContext) CodeHash() accounts.CodeHash {
 	return ctx.Contract.CodeHash
 }
 
-func (ctx *CallContext) Gas() uint64 {
-	return ctx.gas
+func (ctx *CallContext) Gas() mdgas.MdGas {
+	return mdgas.MdGas{
+		Regular: ctx.gas,
+		State:   ctx.stateGas,
+	}
 }
 
 func copyJumpTable(jt *JumpTable) *JumpTable {
@@ -237,10 +288,10 @@ func jumpTable(chainRules *chain.Rules, cfg Config) *JumpTable {
 // It's important to note that any errors returned by the interpreter should be
 // considered a revert-and-consume-all-gas operation except for
 // ErrExecutionReverted which means revert-and-keep-gas-left.
-func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) (_ []byte, _ uint64, err error) {
+func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly bool) (_ []byte, _ mdgas.MdGas, err error) {
 	// Don't bother with the execution if there's no code.
 	if len(contract.Code) == 0 {
-		return nil, gas, nil
+		return nil, mdgas.MdGas{}, nil
 	}
 
 	// Reset the previous call's return data. It's unimportant to preserve the old buffer
@@ -326,13 +377,13 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 		cost = operation.constantGas // For tracing
 		// Validate stack
 		if sLen := callContext.Stack.len(); sLen < operation.numPop {
-			return nil, callContext.gas, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
+			return nil, callContext.Gas(), &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
 		} else if sLen > operation.maxStack {
-			return nil, callContext.gas, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			return nil, callContext.Gas(), &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
 		}
 		// for tracing: this gas consumption event is emitted below in the debug section.
 		if callContext.gas < cost {
-			return nil, callContext.gas, ErrOutOfGas
+			return nil, callContext.Gas(), ErrOutOfGas
 		} else {
 			callContext.gas -= cost
 		}
@@ -347,14 +398,16 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 			if operation.memorySize != nil {
 				memSize, overflow := operation.memorySize(callContext)
 				if overflow {
-					return nil, callContext.gas, ErrGasUintOverflow
+					return nil, callContext.Gas(), ErrGasUintOverflow
 				}
 				// memory is expanded in words of 32 bytes. Gas
 				// is also calculated in words.
 				if memorySize, overflow = math.SafeMul(ToWordSize(memSize), 32); overflow {
-					return nil, callContext.gas, ErrGasUintOverflow
+					return nil, callContext.Gas(), ErrGasUintOverflow
 				}
 			}
+			// Reset callGasTemp so we can detect if dynamicGas sets it (CALL variants)
+			evm.callGasTemp = 0
 			// Consume the gas and return an error if not enough gas is available.
 			// cost is explicitly set so that the capture state defer method can get the proper cost
 			var dynamicCost uint64
@@ -363,7 +416,7 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 				if !errors.Is(err, ErrOutOfGas) {
 					err = fmt.Errorf("%w: %v", ErrOutOfGas, err)
 				}
-				return nil, callContext.gas, err
+				return nil, callContext.Gas(), err
 			}
 			cost += dynamicCost // for tracing
 			callGas = operation.constantGas + dynamicCost - evm.CallGasTemp()
@@ -373,9 +426,30 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 
 			// for tracing: this gas consumption event is emitted below in the debug section.
 			if callContext.gas < dynamicCost {
-				return nil, callContext.gas, ErrOutOfGas
+				return nil, callContext.Gas(), ErrOutOfGas
 			} else {
 				callContext.gas -= dynamicCost
+			}
+
+			// EIP-8037: Track regular gas consumed for block-level accounting.
+			// For CALL variants, callGasTemp is the gas forwarded to child (escrow),
+			// so callGas = constantGas + dynamicCost - callGasTemp = parent's actual cost.
+			if evm.chainRules.IsAmsterdam {
+				evm.regularGasConsumed += callGas
+			}
+		} else if evm.chainRules.IsAmsterdam {
+			// Non-dynamic opcodes: just the constant gas
+			evm.regularGasConsumed += operation.constantGas
+		}
+		if operation.stateGas != nil {
+			stateGas, err := operation.stateGas(evm, callContext, callContext.availableStateGas(), memorySize)
+			if err != nil {
+				return nil, callContext.Gas(), err
+			}
+			cost += stateGas
+			ok := callContext.useMdGas(evm, stateGas, mdgas.StateGas, nil, tracing.GasChangeIgnored)
+			if !ok {
+				return nil, callContext.Gas(), ErrOutOfGas
 			}
 		}
 
@@ -420,5 +494,5 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 		err = nil // clear stop token error
 	}
 
-	return res, callContext.gas, err
+	return res, callContext.Gas(), err
 }
