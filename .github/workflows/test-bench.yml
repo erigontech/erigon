@@ -37,13 +37,12 @@ jobs:
         with:
           fetch-depth: 1
 
+      # No submodules, LFS, or space cleanup needed: benchmark functions
+      # only use in-memory or local testdata/ files. Submodules
+      # (legacy-tests, execution-spec-tests) and LFS fixtures are only
+      # read by regular Test* functions.
       - uses: ./.github/actions/setup-erigon
         id: erigon
-        with:
-          # No submodules, LFS, or space cleanup needed: benchmark
-          # functions only use in-memory or local testdata/ files.
-          # Submodules (legacy-tests, execution-spec-tests) and LFS
-          # fixtures are only read by regular Test* functions.
 
       - name: Run benchmarks
         run: make test-bench
