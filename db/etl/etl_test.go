@@ -839,13 +839,13 @@ func BenchmarkMemoryDataProviderNext(b *testing.B) {
 				_ = valBuf
 			})
 
-			b.Run(name+"/Get_copy", func(b *testing.B) {
+			b.Run(name+"/Get", func(b *testing.B) {
 				b.ReportAllocs()
 				var keyBuf, valBuf []byte
 				for i := 0; i < b.N; i++ {
 					idx := 0
 					for idx < buf.Len() {
-						keyBuf, valBuf = buf.Get(idx, keyBuf[:0], valBuf[:0])
+						keyBuf, valBuf = buf.Get(idx)
 						idx++
 					}
 				}
@@ -867,6 +867,97 @@ func makeSortedBuffer(keySize, valSize, n int) *sortableBuffer {
 	}
 	buf.Sort()
 	return buf
+}
+
+func BenchmarkCollect(b *testing.B) {
+	logger := log.New()
+	const keyLen = 32
+	const valLen = 128
+
+	for _, tc := range []struct {
+		name    string
+		count   int
+		bufSize datasize.ByteSize
+	}{
+		{"10k_smallbuf", 10_000, 64 * datasize.KB},
+		{"10k_largebuf", 10_000, 256 * datasize.MB},
+		{"100k_smallbuf", 100_000, 256 * datasize.KB},
+		{"100k_largebuf", 100_000, 256 * datasize.MB},
+	} {
+		// Pre-generate deterministic keys/values
+		keys := make([][]byte, tc.count)
+		vals := make([][]byte, tc.count)
+		for i := range tc.count {
+			k := make([]byte, keyLen)
+			binary.BigEndian.PutUint64(k, uint64(i)*6364136223846793005)
+			keys[i] = k
+			v := make([]byte, valLen)
+			binary.BigEndian.PutUint64(v, uint64(i))
+			vals[i] = v
+		}
+
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			tmpdir := b.TempDir()
+			for b.Loop() {
+				c := NewCollector("bench", tmpdir, NewSortableBuffer(tc.bufSize), logger)
+				for i := range tc.count {
+					if err := c.Collect(keys[i], vals[i]); err != nil {
+						b.Fatal(err)
+					}
+				}
+				c.Close()
+			}
+		})
+	}
+}
+
+func BenchmarkMergeSortFiles(b *testing.B) {
+	logger := log.New()
+	const keyLen = 32
+	const valLen = 128
+
+	for _, tc := range []struct {
+		name         string
+		count        int
+		bufSize      datasize.ByteSize
+		expectOnDisk bool // true when bufSize is small enough to force file providers
+	}{
+		{"mem_only_10k", 10_000, 256 * datasize.MB, false},
+		{"file_only_10k", 10_000, 64 * datasize.KB, true},
+		{"file_only_100k", 100_000, 256 * datasize.KB, true},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			tmpdir := b.TempDir()
+
+			// Pre-generate deterministic keys/values
+			keys := make([][]byte, tc.count)
+			vals := make([][]byte, tc.count)
+			for i := range tc.count {
+				k := make([]byte, keyLen)
+				binary.BigEndian.PutUint64(k, uint64(i)*6364136223846793005)
+				keys[i] = k
+				v := make([]byte, valLen)
+				binary.BigEndian.PutUint64(v, uint64(i))
+				vals[i] = v
+			}
+
+			for b.Loop() {
+				c := NewCollector("bench", tmpdir, NewSortableBuffer(tc.bufSize), logger)
+				for i := range tc.count {
+					if err := c.Collect(keys[i], vals[i]); err != nil {
+						b.Fatal(err)
+					}
+				}
+				if err := c.Load(nil, "", func(k, v []byte, _ CurrentTableReader, next LoadNextFunc) error {
+					return nil
+				}, TransformArgs{}); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
 }
 
 func BenchmarkSortableBufferSort(b *testing.B) {
