@@ -21,7 +21,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"maps"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -37,12 +36,11 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
-	"github.com/erigontech/erigon/rpc/transactions"
 )
 
 type Bundle struct {
 	Transactions  []ethapi.CallArgs
-	BlockOverride transactions.BlockOverrides
+	BlockOverride ethapi.BlockOverrides
 }
 
 type StateContext struct {
@@ -215,27 +213,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 
 	for _, bundle := range bundles {
 		// first change blockContext
-		if bundle.BlockOverride.BlockNumber != nil {
-			blockCtx.BlockNumber = uint64(*bundle.BlockOverride.BlockNumber)
-		}
-		if bundle.BlockOverride.BaseFee != nil {
-			blockCtx.BaseFee = *bundle.BlockOverride.BaseFee
-		}
-		if bundle.BlockOverride.Coinbase != nil {
-			blockCtx.Coinbase = accounts.InternAddress(*bundle.BlockOverride.Coinbase)
-		}
-		if bundle.BlockOverride.Difficulty != nil {
-			blockCtx.Difficulty.SetUint64(uint64(*bundle.BlockOverride.Difficulty))
-		}
-		if bundle.BlockOverride.Timestamp != nil {
-			blockCtx.Time = uint64(*bundle.BlockOverride.Timestamp)
-		}
-		if bundle.BlockOverride.GasLimit != nil {
-			blockCtx.GasLimit = uint64(*bundle.BlockOverride.GasLimit)
-		}
-		if bundle.BlockOverride.BlockHash != nil {
-			maps.Copy(overrideBlockHash, *bundle.BlockOverride.BlockHash)
-		}
+		bundle.BlockOverride.OverrideBlockContext(&blockCtx, ethapi.BlockHashOverrides(overrideBlockHash))
 		results := []map[string]any{}
 		for _, txn := range bundle.Transactions {
 			if txn.Gas == nil || *(txn.Gas) == 0 {

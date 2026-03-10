@@ -10,7 +10,7 @@ metaLinks:
 Erigon use the following default port for each service:
 
 | Component | Port    | Protocol  | Purpose                     | Should Expose |
-| --------- | ------- | --------- | --------------------------- | ------------- |
+|-----------|---------|-----------|-----------------------------|---------------|
 | engine    | `9090`  | TCP       | gRPC Server                 | Private       |
 | engine    | `42069` | TCP & UDP | Snap sync (Bittorrent)      | Public        |
 | engine    | `8551`  | TCP       | Engine API (JWT auth)       | Private       |
@@ -18,6 +18,7 @@ Erigon use the following default port for each service:
 | sentry    | `30304` | TCP & UDP | eth/69 peering              | Public        |
 | sentry    | `9091`  | TCP       | incoming gRPC Connections   | Private       |
 | rpcdaemon | `8545`  | TCP       | HTTP & WebSockets & GraphQL | Private       |
+| mcp       | `8553`  | TCP       | MCP server (AI assistants)  | Private       |
 | shutter   | `23102` | TCP       | Peering                     | Public        |
 
 Typically, `30303` and `30304` are exposed to the internet to allow incoming peering connections. `9090` is exposed only internally for rpcdaemon or other connections, (e.g. rpcdaemon -> erigon). Port `8551` (JWT authenticated) is exposed only internally for Engine API JSON-RPC queries from the Consensus Layer node.
@@ -58,6 +59,14 @@ Here is a comprehensive list of port-related options:
 ### BeaconAPI
 
 * `--beacon.api.port [value]`: Sets the port to listen for beacon api requests (default: `5555`)
+
+### MCP Server
+
+The embedded MCP server is enabled by default. To disable it, pass `--mcp.disable`.
+
+* `--mcp.disable`: Disables the embedded MCP server (default: `false`)
+* `--mcp.addr [value]`: MCP server listening address (default: `127.0.0.1`)
+* `--mcp.port [value]`: MCP server listening port (default: `8553`)
 
 ### Diagnostics
 

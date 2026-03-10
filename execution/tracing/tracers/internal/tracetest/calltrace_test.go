@@ -282,7 +282,6 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 	statedb, _ := testutil.MakePreState(rules, dbTx, test.Genesis.Alloc, uint64(test.Context.Number))
 
 	b.ReportAllocs()
-	b.ResetTimer()
 	for b.Loop() {
 		tracer, err := tracers.New(tracerName, new(tracers.Context), nil)
 		if err != nil {

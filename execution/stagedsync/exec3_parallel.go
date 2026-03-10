@@ -22,7 +22,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
@@ -90,6 +89,9 @@ type parallelExecutor struct {
 	rws            *exec.ResultsQueue
 	workerCount    int
 	blockExecutors map[uint64]*blockExecutor
+	// accumulator for txpool state-diff notifications; set before execLoop
+	// starts so that AuRa system-call nonce changes are emitted per block.
+	accumulator *shards.Accumulator
 }
 
 func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
@@ -115,7 +117,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 		log.Info(fmt.Sprintf("[%s] parallel starting", execStage.LogPrefix()),
 			"from", startBlockNum, "to", maxBlockNum, "limit", startBlockNum+blockLimit-1, "initialTxNum", initialTxNum,
 			"initialBlockTxOffset", offsetFromBlockBeginning, "initialCycle", initialCycle,
-			"isForkValidation", pe.isForkValidation, "isBlockProduction", pe.isBlockProduction, "isApplyingBlocks", pe.isApplyingBlocks)
+			"isForkValidation", pe.isForkValidation, "isApplyingBlocks", pe.isApplyingBlocks)
 	}
 
 	// restoreTxNum must run before pe.run() so that doms.SetTxNum() completes
@@ -124,6 +126,9 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	if err != nil {
 		return nil, rwTx, err
 	}
+
+	// Set accumulator before pe.run() so execLoop sees it without a race.
+	pe.accumulator = accumulator
 
 	executorContext, executorCancel, err := pe.run(ctx)
 	defer executorCancel()
@@ -200,7 +205,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					if applyResult.BlockNum > 0 && !applyResult.isPartial { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 						checkReceipts := !pe.cfg.vmConfig.StatelessExec &&
 							pe.cfg.chainConfig.IsByzantium(applyResult.BlockNum) &&
-							!pe.cfg.vmConfig.NoReceipts && !pe.isBlockProduction
+							!pe.cfg.vmConfig.NoReceipts
 
 						b, err := pe.cfg.blockReader.BlockByHash(ctx, rwTx, applyResult.BlockHash)
 
@@ -221,61 +226,13 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							return fmt.Errorf("block %d: applyCount mismatch: got: %d expected %d", applyResult.BlockNum, blockUpdateCount, applyResult.ApplyCount)
 						}
 
-						// pe.cfg.chainConfig.AmsterdamTime != nil && pe.cfg.chainConfig.AmsterdamTime.Uint64() > 0 is
-						// temporary to allow for initial non bals amsterdam testing before parallel exec is live by default
-						if (pe.cfg.chainConfig.AmsterdamTime != nil && pe.cfg.chainConfig.AmsterdamTime.Uint64() > 0 && pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime)) || pe.cfg.experimentalBAL {
-							bal := CreateBAL(applyResult.BlockNum, applyResult.TxIO, pe.cfg.dirs.DataDir)
-							if err := bal.Validate(); err != nil {
-								return fmt.Errorf("block %d: invalid computed block access list: %w", applyResult.BlockNum, err)
-							}
-							log.Debug("bal", "blockNum", applyResult.BlockNum, "hash", bal.Hash())
-							if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) {
-								if lastHeader.BlockAccessListHash == nil {
-									if pe.isBlockProduction {
-										hash := bal.Hash()
-										lastHeader.BlockAccessListHash = &hash
-									} else {
-										return fmt.Errorf("block %d: missing block access list hash", applyResult.BlockNum)
-									}
-								}
-								headerBALHash := *lastHeader.BlockAccessListHash
-								if !pe.isBlockProduction {
-									dbBALBytes, err := rawdb.ReadBlockAccessListBytes(rwTx, applyResult.BlockHash, applyResult.BlockNum)
-									if err != nil {
-										return fmt.Errorf("block %d: read stored block access list: %w", applyResult.BlockNum, err)
-									}
-									// BAL data may not be stored for blocks downloaded via backward
-									// block downloader (p2p sync) since it does not carry BAL sidecars.
-									// Remove after eth/71 has been implemented.
-									if dbBALBytes != nil {
-										dbBAL, err := types.DecodeBlockAccessListBytes(dbBALBytes)
-										if err != nil {
-											return fmt.Errorf("block %d: read stored block access list: %w", applyResult.BlockNum, err)
-										}
-										if err = dbBAL.Validate(); err != nil {
-											return fmt.Errorf("block %d: db block access list is invalid: %w", applyResult.BlockNum, err)
-										}
-
-										if headerBALHash != dbBAL.Hash() {
-											log.Info(fmt.Sprintf("bal from block: %s", dbBAL.DebugString()))
-											return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", applyResult.BlockNum, dbBAL.Hash(), headerBALHash)
-										}
-									}
-									if headerBALHash != bal.Hash() {
-										log.Info(fmt.Sprintf("computed bal: %s", bal.DebugString()))
-										return fmt.Errorf("%w, block=%d: block access list mismatch: got %s expected %s", rules.ErrInvalidBlock, applyResult.BlockNum, bal.Hash(), headerBALHash)
-									}
-								}
-							}
-						}
-
 						if err := pe.getPostValidator().Process(applyResult.BlockGasUsed, applyResult.BlobGasUsed, checkReceipts, applyResult.Receipts,
-							lastHeader, pe.isBlockProduction, b.Transactions(), pe.cfg.chainConfig, pe.logger); err != nil {
+							lastHeader, b.Transactions(), pe.cfg.chainConfig, pe.logger); err != nil {
 							dumpTxIODebug(applyResult.BlockNum, applyResult.TxIO)
 							return fmt.Errorf("%w, block=%d, %v", rules.ErrInvalidBlock, applyResult.BlockNum, err) //same as in stage_exec.go
 						}
 
-						if !pe.isBlockProduction && !applyResult.isPartial && !execStage.CurrentSyncCycle.IsInitialCycle {
+						if !applyResult.isPartial && !execStage.CurrentSyncCycle.IsInitialCycle {
 							pe.cfg.notifications.RecentReceipts.Add(applyResult.Receipts, b.Transactions(), lastHeader)
 						}
 					}
@@ -395,12 +352,19 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 								return err
 							}
 
+							if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) || pe.cfg.experimentalBAL {
+								err = ProcessBAL(rwTx, lastHeader, applyResult.TxIO, pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime), pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir)
+								if err != nil {
+									return err
+								}
+							}
+
 							if shouldGenerateChangesets {
 								pe.domains().SavePastChangesetAccumulator(applyResult.BlockHash, applyResult.BlockNum, changeSet)
 							}
 							pe.domains().SetChangesetAccumulator(nil)
 
-							if !pe.isBlockProduction && !bytes.Equal(rh, applyResult.StateRoot.Bytes()) {
+							if !bytes.Equal(rh, applyResult.StateRoot.Bytes()) {
 								pe.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", pe.logPrefix, applyResult.BlockNum, rh, applyResult.StateRoot.Bytes(), applyResult.BlockHash))
 								if !dbg.BatchCommitments {
 									for _, line := range captured {
@@ -673,17 +637,23 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						}
 
 						chainReader := consensuschain.NewReader(pe.cfg.chainConfig, applyTx, pe.cfg.blockReader, pe.logger)
-						if pe.isBlockProduction {
-							_, _, err =
-								pe.cfg.engine.FinalizeAndAssemble(
-									pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, blockReceipts,
-									txTask.Withdrawals, chainReader, syscall, nil, pe.logger)
-						} else {
-							_, err =
-								pe.cfg.engine.Finalize(
-									pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles, blockReceipts,
-									txTask.Withdrawals, chainReader, syscall, false, pe.logger)
+
+						// StartChange before Finalize so that AuRa/system-call nonce
+						// changes are emitted into the accumulator for the txpool diff.
+						// Use txTask.Txs (already in memory) instead of reading from DB
+						// to avoid the stale applyTx canonical-hash issue.
+						if pe.accumulator != nil {
+							rawTxs, marshalErr := types.MarshalTransactionsBinary(txTask.Txs)
+							if marshalErr != nil {
+								return state.StateUpdates{}, fmt.Errorf("marshal transactions for accumulator, block %d: %w", blockResult.BlockNum, marshalErr)
+							}
+							pe.accumulator.StartChange(txTask.Header, rawTxs, false)
 						}
+
+						_, err =
+							pe.cfg.engine.Finalize(
+								pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles, blockReceipts,
+								txTask.Withdrawals, chainReader, syscall, false, pe.logger)
 
 						if err != nil {
 							return state.StateUpdates{}, fmt.Errorf("can't finalize block %d: %w", blockResult.BlockNum, err)
@@ -698,7 +668,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 							blockExecutor.versionMap.FlushVersionedWrites(finalWrites, true, "")
 						}
 
-						stateWriter := state.NewBufferedWriter(pe.rs, nil)
+						stateWriter := state.NewBufferedWriter(pe.rs, pe.accumulator)
 						if err = ibs.MakeWriteSet(txTask.EvmBlockContext.Rules(txTask.Config), stateWriter); err != nil {
 							return state.StateUpdates{}, err
 						}
@@ -897,7 +867,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	pe.execWorkers, _, pe.rws, pe.stopWorkers, pe.waitWorkers, err = exec.NewWorkersPool(
 		execLoopCtx, nil, true, pe.cfg.db, nil, nil, nil, pe.in,
 		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine,
-		pe.workerCount+1, pe.taskExecMetrics, pe.cfg.dirs, pe.isBlockProduction, pe.logger)
+		pe.workerCount+1, pe.taskExecMetrics, pe.cfg.dirs, pe.logger)
 
 	if err != nil {
 		return execLoopCtx, execLoopCtxCancel, err
@@ -905,7 +875,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 
 	pe.execLoopGroup.Go(func() error {
 		defer pe.rws.Close()
-		defer pe.in.Close()
+		defer pe.in.Release()
 		pe.resetWorkers(execLoopCtx, pe.rs, nil)
 		return pe.execLoop(execLoopCtx)
 	})
@@ -913,7 +883,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	return execLoopCtx, func() {
 		execLoopCtxCancel()
 		defer pe.stopWorkers()
-		defer pe.in.Close()
+		defer pe.in.Release()
 
 		if err := pe.wait(ctx); err != nil {
 			pe.logger.Debug("exec loop cancel failed", "err", err)
@@ -1098,8 +1068,8 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 				// Use a versionedStateReader to get the coinbase balance
 				// deterministically from the block's version map (which
 				// includes fee-calc writes from prior txs) instead of
-				// reading from pe.rs whose content depends on apply-loop
-				// timing.
+				// reading from stateReader whose content depends on
+				// apply-loop timing.
 				cbReader := state.NewVersionedStateReader(txIndex, nil, vm, stateReader)
 				coinbase, err := cbReader.ReadAccountData(result.Coinbase) // to generate logs we want the initial balance
 
@@ -1577,16 +1547,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 				if len(addWrites) > 0 {
 					// Merge finalization writes with existing execution writes.
-					// The finalization replays result.TxOut via ApplyVersionedWrites
-					// and adds fee calculation changes, but its VersionedWrites(true)
-					// may omit entries when the optimistic execution ran with stale
-					// state (e.g., an EIP-7702 delegation set by a prior tx was not
-					// visible). In that case the re-execution stored the correct
-					// writes in blockIO, but the finalization—which replays the
-					// potentially incomplete TxOut—drops them. Merging ensures that
-					// entries present in the execution writes but absent from the
-					// finalization writes are preserved, while finalization-only
-					// entries (fee calc, post-apply) are added.
 					existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
 					merged := MergeVersionedWrites(existingWrites, addWrites)
 					be.blockIO.RecordWrites(txVersion, merged)
@@ -1595,9 +1555,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					// to the version map so that subsequent per-tx
 					// finalizations see the full post-tx state (execution
 					// + fees) when reading via the version map fallback
-					// chain.  Without this, later txs' fee calc reads the
-					// coinbase balance without prior fees, producing
-					// non-deterministic BAL (EIP-7928) hashes.
+					// chain.
 					be.versionMap.FlushVersionedWrites(merged, true, "")
 				}
 
@@ -1857,17 +1815,4 @@ func MergeVersionedWrites(prev, next state.VersionedWrites) state.VersionedWrite
 		return true
 	})
 	return out
-}
-
-func MergeAccessedAddresses(dst, src map[accounts.Address]struct{}) map[accounts.Address]struct{} {
-	if len(src) == 0 {
-		return dst
-	}
-	if dst == nil {
-		dst = make(map[accounts.Address]struct{}, len(src))
-	}
-	for addr := range src {
-		dst[addr] = struct{}{}
-	}
-	return dst
 }

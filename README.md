@@ -368,16 +368,17 @@ Note: enabling the Beacon API will lead to a 6 GB higher RAM usage
 
 ### Multiple Instances / One Machine
 
-Define 6 flags to avoid conflicts: `--datadir --port --http.port --authrpc.port --torrent.port --private.api.addr`.
+Define 7 flags to avoid conflicts:
+`--datadir --port --http.port --authrpc.port --torrent.port --private.api.addr --mcp.port`.
 Example of multiple chains on the same machine:
 
 ```
 # mainnet
-./build/bin/erigon --datadir="<your_mainnet_data_path>" --chain=mainnet --port=30303 --http.port=8545 --authrpc.port=8551 --torrent.port=42069 --private.api.addr=127.0.0.1:9090 --http --ws --http.api=eth,debug,net,trace,web3,erigon
+./build/bin/erigon --datadir="<your_mainnet_data_path>" --chain=mainnet --port=30303 --http.port=8545 --authrpc.port=8551 --torrent.port=42069 --private.api.addr=127.0.0.1:9090 --mcp.port=8553 --http --ws --http.api=eth,debug,net,trace,web3,erigon
 
 
 # sepolia
-./build/bin/erigon --datadir="<your_sepolia_data_path>" --chain=sepolia --port=30304 --http.port=8546 --authrpc.port=8552 --torrent.port=42068 --private.api.addr=127.0.0.1:9091 --http --ws --http.api=eth,debug,net,trace,web3,erigon
+./build/bin/erigon --datadir="<your_sepolia_data_path>" --chain=sepolia --port=30304 --http.port=8546 --authrpc.port=8552 --torrent.port=42068 --private.api.addr=127.0.0.1:9091 --mcp.port=8554 --http --ws --http.api=eth,debug,net,trace,web3,erigon
 ```
 
 Quote your path if it has spaces.
@@ -458,12 +459,15 @@ go mod tidy
 | sentry    | 30304 | TCP & UDP | eth/69 peering              | Public        |
 | sentry    | 9091  | TCP       | incoming gRPC Connections   | Private       |
 | rpcdaemon | 8545  | TCP       | HTTP & WebSockets & GraphQL | Private       |
+| mcp       | 8553  | TCP       | MCP server (AI assistants)  | Private       |
 | shutter   | 23102 | TCP       | Peering                     | Public        |
 
 Typically, 30303 and 30304 are exposed to the internet to allow incoming peering connections. 9090 is exposed only
 internally for rpcdaemon or other connections, (e.g. rpcdaemon -> erigon).
 Port 8551 (JWT authenticated) is exposed only internally for [Engine API] JSON-RPC queries from the Consensus Layer
 node.
+Port 8553 is the embedded MCP server for AI-assistant integration; it binds to localhost only and should never be
+exposed publicly. To disable it entirely, pass `--mcp.disable`.
 
 #### `caplin` ports
 
@@ -527,13 +531,7 @@ in [IpTables syntax](https://ethereum.stackexchange.com/questions/6386/how-to-pr
 
 ### Run as a separate user - `systemd` example
 
-Running erigon from `build/bin` as a separate user might produce an error:
-
-```sh
-error while loading shared libraries: libsilkworm_capi.so: cannot open shared object file: No such file or directory
-```
-
-The library needs to be *installed* for another user using `make DIST=<path> install`. You could use `$HOME/erigon`
+Running erigon from `build/bin` as a separate user requires the binaries to be *installed* using `make DIST=<path> install`. You could use `$HOME/erigon`
 or `/opt/erigon` as the installation path, for example:
 
 ```sh

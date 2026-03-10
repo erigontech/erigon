@@ -35,6 +35,11 @@ type serialExecutor struct {
 	blobGasUsed     uint64
 	lastBlockResult *blockResult
 	worker          *exec.Worker
+
+	// accumulator for the current block; set at StartChange and used by the
+	// block-end stateWriter so that AuRa system-call nonce changes are
+	// included in the txpool state-diff batch.
+	accumulator *shards.Accumulator
 }
 
 func warmTxsHashes(block *types.Block) {
@@ -71,7 +76,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		log.Info(fmt.Sprintf("[%s] serial starting", execStage.LogPrefix()),
 			"from", blockNum, "to", toBlockNum, "initialTxNum", initialTxNum,
 			"initialBlockTxOffset", offsetFromBlockBeginning, "lastFrozenStep", lastFrozenStep,
-			"initialCycle", initialCycle, "isForkValidation", se.isForkValidation, "isBlockProduction", se.isBlockProduction)
+			"initialCycle", initialCycle, "isForkValidation", se.isForkValidation)
 	}
 
 	for ; blockNum <= maxBlockNum; blockNum++ {
@@ -113,11 +118,8 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		header := b.HeaderNoCopy()
 		getHashFnMutex := sync.Mutex{}
 
-		// se.cfg.chainConfig.AmsterdamTime != nil && se.cfg.chainConfig.AmsterdamTime.Uint64() > 0 is
-		// temporary to allow for inital non bals amsterdam testing before parallel exec is live by defualt
 		if se.cfg.chainConfig.AmsterdamTime != nil && se.cfg.chainConfig.AmsterdamTime.Uint64() > 0 && se.cfg.chainConfig.IsAmsterdam(header.Time) {
 			se.logger.Error(fmt.Sprintf("[%s] BLOCK PROCESSING FAILED: Amsterdam processing is not supported by serial exec", se.logPrefix), "fork-block", blockNum)
-			se.logger.Error(fmt.Sprintf("[%s] Run erigon with either '--experimental.bal' or 'export ERIGON_EXEC3_PARALLEL=true'", se.logPrefix))
 			return nil, rwTx, fmt.Errorf("amsterdam processing is not supported by serial exec from block: %d", blockNum)
 		}
 
@@ -127,6 +129,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			return se.getHeader(ctx, hash, number)
 		}), se.cfg.engine, se.cfg.author, se.cfg.chainConfig)
 
+		se.accumulator = accumulator // keep in sync for executeBlock's stateWriter
 		if accumulator != nil {
 			txs, err := se.cfg.blockReader.RawTransactions(context.Background(), se.applyTx, b.NumberU64(), b.NumberU64())
 			if err != nil {
@@ -197,7 +200,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			}
 			se.doms.SetChangesetAccumulator(nil)
 
-			if !se.isBlockProduction && !bytes.Equal(rh, header.Root.Bytes()) {
+			if !bytes.Equal(rh, header.Root.Bytes()) {
 				se.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", se.logPrefix, header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
 				return b.HeaderNoCopy(), rwTx, fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, blockNum)
 			}
@@ -228,7 +231,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				break
 			}
 			resetExecGauges(ctx)
-			ok, times, err := computeAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), rwTx, se.doms, se.cfg, execStage, false, se.logger, u, se.isBlockProduction)
+			ok, times, err := computeAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), rwTx, se.doms, se.cfg, execStage, false, se.logger, u)
 			if err != nil {
 				return nil, rwTx, err
 			} else if !ok {
@@ -359,7 +362,6 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			se.txCount++
 			se.blockGasUsed += result.ExecutionResult.BlockGasUsed
 			mxExecTransactions.Add(1)
-
 			if txTask.Tx() != nil {
 				se.blobGasUsed += txTask.Tx().GetBlobGas()
 			}
@@ -380,33 +382,30 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 
 				chainReader := consensuschain.NewReader(se.cfg.chainConfig, se.applyTx, se.cfg.blockReader, se.logger)
 
-				if se.isBlockProduction {
-					_, _, err = se.cfg.engine.FinalizeAndAssemble(
-						se.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles,
-						blockReceipts, txTask.Withdrawals, chainReader, syscall, nil, se.logger)
-				} else {
-					_, err = se.cfg.engine.Finalize(
-						se.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles,
-						blockReceipts, txTask.Withdrawals, chainReader, syscall, false, se.logger)
-				}
+				_, err = se.cfg.engine.Finalize(
+					se.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles,
+					blockReceipts, txTask.Withdrawals, chainReader, syscall, false, se.logger)
 
 				if err != nil {
 					return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err)
 				}
 
-				if !se.isBlockProduction && startTxIndex == 0 && !isInitialCycle {
+				if startTxIndex == 0 && !isInitialCycle {
 					se.cfg.notifications.RecentReceipts.Add(blockReceipts, txTask.Txs, txTask.Header)
 				}
-				checkReceipts := !se.cfg.vmConfig.StatelessExec && se.cfg.chainConfig.IsByzantium(txTask.BlockNumber()) && !se.cfg.vmConfig.NoReceipts && !se.isBlockProduction
+				checkReceipts := !se.cfg.vmConfig.StatelessExec && se.cfg.chainConfig.IsByzantium(txTask.BlockNumber()) && !se.cfg.vmConfig.NoReceipts
 
 				if txTask.BlockNumber() > 0 && startTxIndex == 0 {
 					//Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-					if err := se.getPostValidator().Process(se.blockGasUsed, se.blobGasUsed, checkReceipts, blockReceipts, txTask.Header, se.isBlockProduction, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
+					if err := se.getPostValidator().Process(se.blockGasUsed, se.blobGasUsed, checkReceipts, blockReceipts, txTask.Header, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
 						return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 					}
 				}
 
-				stateWriter := state.NewWriter(se.doms.AsPutDel(se.applyTx), nil, txTask.TxNum)
+				// Pass se.accumulator so that AuRa / system-call nonce changes
+				// are included in the txpool state-diff batch (fixes empty block
+				// production on Gnosis Chain caused by stale pending txns).
+				stateWriter := state.NewWriter(se.doms.AsPutDel(se.applyTx), se.accumulator, txTask.TxNum)
 
 				if err = ibs.MakeWriteSet(txTask.Rules(), stateWriter); err != nil {
 					panic(err)
@@ -457,7 +456,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				return false, err
 			}
 			se.logger.Warn(fmt.Sprintf("[%s] Execution failed", se.logPrefix),
-				"block", txTask.BlockNumber(), "txNum", txTask.TxNum, "header-hash", txTask.Header.Hash().String(), "err", err, "isForkValidation", se.isForkValidation, "isBlockProduction", se.isBlockProduction)
+				"block", txTask.BlockNumber(), "txNum", txTask.TxNum, "header-hash", txTask.Header.Hash().String(), "err", err, "isForkValidation", se.isForkValidation)
 			if se.cfg.hd != nil && se.cfg.hd.POSSync() && errors.Is(err, rules.ErrInvalidBlock) {
 				se.cfg.hd.ReportBadHeaderPoS(txTask.Header.Hash(), txTask.Header.ParentHash)
 			}

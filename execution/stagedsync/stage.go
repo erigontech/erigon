@@ -148,10 +148,6 @@ func OperationalErr(err error) UnwindReason {
 	return UnwindReason{ErrOperational: err}
 }
 
-func ForkReset(badBlock common.Hash) UnwindReason {
-	return UnwindReason{Block: &badBlock}
-}
-
 // Unwinder allows the stage to cause an unwind.
 type Unwinder interface {
 	// UnwindTo begins staged sync unwind to the specified block.

@@ -635,7 +635,7 @@ func runWitPeer(
 		}
 
 		switch msg.Code {
-		case wit.GetWitnessMsg | wit.WitnessMsg:
+		case wit.GetWitnessMsg, wit.WitnessMsg:
 			if !hasSubscribers(wit.ToProto[protocol][msg.Code]) {
 				continue
 			}

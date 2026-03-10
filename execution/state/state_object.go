@@ -104,31 +104,6 @@ type stateObject struct {
 	createdContract bool // true if this object represents a newly created contract
 }
 
-func (so *stateObject) deepCopy(db *IntraBlockState) *stateObject {
-	obj := stateObjectPool.Get().(*stateObject)
-	obj.db = db
-	obj.address = so.address
-	obj.data.Copy(&so.data)
-	obj.original.Copy(&so.original)
-	obj.code = so.code
-	// Clear and copy storage maps
-	clear(obj.dirtyStorage)
-	maps.Copy(obj.dirtyStorage, so.dirtyStorage)
-	clear(obj.originStorage)
-	maps.Copy(obj.originStorage, so.originStorage)
-	clear(obj.blockOriginStorage)
-	maps.Copy(obj.blockOriginStorage, so.blockOriginStorage)
-	if so.fakeStorage != nil {
-		obj.fakeStorage = so.fakeStorage.Copy()
-	}
-	obj.selfdestructed = so.selfdestructed
-	obj.dirtyCode = so.dirtyCode
-	obj.deleted = so.deleted
-	obj.newlyCreated = so.newlyCreated
-	obj.createdContract = so.createdContract
-	return obj
-}
-
 // newObject creates a state object from the pool.
 func newObject(db *IntraBlockState, address accounts.Address, data, original *accounts.Account) *stateObject {
 	so := stateObjectPool.Get().(*stateObject)
@@ -272,6 +247,17 @@ func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, forc
 
 	if err != nil {
 		return false, err
+	}
+
+	// When versionedRead resolves the previous value from a cached read
+	// (ReadSetRead) or from the version map (MapRead), the readStorage
+	// callback is never called and commited stays at its zero-value (false).
+	// In both cases there is no versioned write for this key in the current
+	// transaction, so this IS the first write — commited must be true so
+	// that storageChange.revert deletes the versioned write instead of
+	// updating it to the prevalue.
+	if source != WriteSetRead && source != UnknownSource && source != StorageRead {
+		commited = true
 	}
 
 	if !force && source != UnknownSource && prev == value {
