@@ -1122,7 +1122,8 @@ type accountState struct {
 	balance                 *fieldTracker[uint256.Int]
 	nonce                   *fieldTracker[uint64]
 	code                    *fieldTracker[[]byte]
-	balanceValue            *uint256.Int // tracks latest seen balance
+	balanceValue            *uint256.Int                        // tracks latest seen balance
+	initialBalanceValue     *uint256.Int                        // tracks pre-block balance for net-zero detection
 	selfDestructed          bool
 	selfDestructedAt        uint16                              // access index of the selfdestruct
 	storageReadValues       map[accounts.StorageKey]uint256.Int // original read values for net-zero detection
@@ -1262,11 +1263,24 @@ func (account *accountState) updateWrite(vw *VersionedWrite, accessIndex uint16)
 		}
 		// If we haven't seen a balance and the first write is zero, treat it as a touch only.
 		if account.balanceValue == nil && val.IsZero() {
+			if account.initialBalanceValue == nil {
+				v := val
+				account.initialBalanceValue = &v
+			}
 			account.setBalanceValue(val)
 			return
 		}
 		// Skip no-op writes.
 		if account.balanceValue != nil && val.Eq(account.balanceValue) {
+			account.setBalanceValue(val)
+			return
+		}
+		// Skip balance writes that match the pre-block (initial) balance,
+		// but ONLY when no intermediate balance changes have been recorded.
+		// If intermediate changes exist (e.g. tx58 sets balance=0xa141,
+		// tx78 restores initial 0x16ffd), the restoring write MUST be
+		// recorded so parallel executors see the correct value at tx78.
+		if account.initialBalanceValue != nil && val.Eq(account.initialBalanceValue) && len(account.balance.changes.entries) == 0 {
 			account.setBalanceValue(val)
 			return
 		}
@@ -1313,6 +1327,12 @@ func (account *accountState) updateRead(vr *VersionedRead) {
 			account.changes.StorageReads = append(account.changes.StorageReads, vr.Key)
 		case BalancePath:
 			if val, ok := vr.Val.(uint256.Int); ok {
+				// Record the initial (pre-block) balance for net-zero detection.
+				// Only the first read is the original pre-block value.
+				if account.initialBalanceValue == nil {
+					v := val
+					account.initialBalanceValue = &v
+				}
 				// Only update balanceValue from reads when no writes have been
 				// recorded yet. After a write, balanceValue tracks the written
 				// state; a stale read from the DB must not override it, or the
