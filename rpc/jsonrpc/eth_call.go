@@ -781,7 +781,7 @@ type accessListResult struct {
 // If the accesslist creation fails an error is returned.
 // If the transaction itself fails, an vmErr is returned.
 func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, stateOverrides *ethapi2.StateOverrides, optimizeGas *bool) (*accessListResult, error) {
-	bNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
+	bNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 	if blockNrOrHash != nil {
 		bNrOrHash = *blockNrOrHash
 	}
@@ -798,7 +798,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	}
 	engine := api.engine()
 
-	header, latest, err := api.headerByNumberOrHash(ctx, tx, *blockNrOrHash)
+	header, latest, err := api.headerByNumberOrHash(ctx, tx, bNrOrHash)
 	if err != nil {
 		return nil, err
 	}
@@ -882,6 +882,35 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		excl[pc.Value()] = struct{}{}
 	}
 
+	// EIP-7702: authority addresses are pre-warmed in state transition, so exclude them from the access list
+	if len(args.AuthorizationList) > 0 {
+		gasCap := api.GasCap
+		if args.Gas != nil && uint64(*args.Gas) < gasCap {
+			gasCap = uint64(*args.Gas)
+		}
+		if uint64(len(args.AuthorizationList)) > gasCap/params.CallNewAccountGas {
+			return nil, errors.New("insufficient gas to process all authorizations")
+		}
+		var data bytes.Buffer
+		var buf [32]byte
+		rules := blockCtx.Rules(chainConfig)
+		for _, jsonAuth := range args.AuthorizationList {
+			auth, err := jsonAuth.ToAuthorization()
+			if err != nil {
+				continue
+			}
+			if (!auth.ChainID.IsZero() && auth.ChainID.ToBig().Cmp(rules.ChainID) != 0) || auth.Nonce+1 < auth.Nonce {
+				continue
+			}
+			data.Reset()
+			authorityPtr, err := auth.RecoverSigner(&data, buf[:])
+			if err != nil {
+				continue
+			}
+			excl[*authorityPtr] = struct{}{}
+		}
+	}
+
 	// Create an initial tracer
 	prevTracer := logger.NewAccessListTracer(nil, excl, nil)
 	if args.AccessList != nil {
@@ -889,10 +918,10 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	}
 
 	for {
-		state := state.New(stateReader)
+		ibs := state.New(stateReader)
 		// Override the fields of specified contracts before execution.
 		if stateOverrides != nil {
-			if err := stateOverrides.Override(state, nil, blockCtx.Rules(chainConfig)); err != nil {
+			if err := stateOverrides.Override(ibs, nil, blockCtx.Rules(chainConfig)); err != nil {
 				return nil, err
 			}
 		}
@@ -916,11 +945,11 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		}
 
 		// Apply the transaction with the access list tracer
-		tracer := logger.NewAccessListTracer(accessList, excl, state)
+		tracer := logger.NewAccessListTracer(accessList, excl, ibs)
 		config := vm.Config{Tracer: tracer.Hooks(), NoBaseFee: true}
 		txCtx := protocol.NewEVMTxContext(msg)
 
-		evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, config)
+		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, config)
 		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 		res, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 		if err != nil {

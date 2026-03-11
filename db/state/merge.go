@@ -24,6 +24,7 @@ import (
 	"math"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/tidwall/btree"
@@ -649,49 +650,46 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 	// (when CursorHeap cp is empty), there is a need to process the last pair `keyBuf=>valBuf`, because it was one step behind
 	var keyBuf, valBuf []byte
 	var lastKey, lastVal []byte
-	preSeq, mergeSeq := &multiencseq.SequenceReader{}, &multiencseq.SequenceReader{}
-	preIt := &multiencseq.SequenceIterator{}
+	var seqReader multiencseq.SequenceReader
 	builder := &multiencseq.SequenceBuilder{}
+	// sameKeyItems collects all heap items sharing the current key; reused across iterations.
+	var sameKeyItems []*CursorItem
+	// mergeBaseNums and mergeSeqs hold the per-item inputs for MergeSorted in ascending txNum order.
+	var mergeBaseNums []uint64
+	var mergeSeqs [][]byte
 	i := uint64(0)
 	for cp.Len() > 0 {
 		lastKey = append(lastKey[:0], cp[0].key...)
-		lastVal = append(lastVal[:0], cp[0].val...)
 
-		// Pre-rebase the first sequence
-		preSeq.Reset(cp[0].startTxNum, lastVal)
-		preIt.Reset(preSeq, 0)
-		builder.Reset(startTxNum, preSeq.Count(), preSeq.Max())
-		for preIt.HasNext() {
-			v, err := preIt.Next()
-			if err != nil {
-				return nil, err
-			}
-			builder.AddOffset(v)
-		}
-		builder.Build()
-		lastVal = builder.AppendBytes(lastVal[:0])
-		var mergedOnce bool
-
-		// Advance all the items that have this key (including the top)
+		// Collect all items sharing this key. The heap orders same-key items by
+		// descending endTxNum (reverse=true), so sameKeyItems[0] has the highest range.
+		sameKeyItems = sameKeyItems[:0]
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
-			ci1 := heap.Pop(&cp).(*CursorItem)
-			if mergedOnce {
-				mergeSeq.Reset(ci1.startTxNum, ci1.val)
-				preSeq.Reset(startTxNum, lastVal)
-				if mergeErr := builder.Merge(mergeSeq, preSeq, startTxNum); mergeErr != nil {
-					return nil, fmt.Errorf("merge %s inverted index: %w", iit.ii.FilenameBase, mergeErr)
-				}
-				lastVal = builder.AppendBytes(lastVal[:0])
-			} else {
-				mergedOnce = true
-			}
-			// fmt.Printf("multi-way %s [%d] %x\n", ii.KeysTable, ci1.endTxNum, ci1.key)
-			if ci1.kvReader.HasNext() {
-				ci1.key, _ = ci1.kvReader.Next(ci1.key[:0])
-				ci1.val, _ = ci1.kvReader.Next(ci1.val[:0])
+			sameKeyItems = append(sameKeyItems, heap.Pop(&cp).(*CursorItem))
+		}
+
+		// Reverse to ascending txNum order (heap gives descending), then build MergeSorted inputs.
+		slices.Reverse(sameKeyItems)
+		mergeBaseNums = mergeBaseNums[:0]
+		mergeSeqs = mergeSeqs[:0]
+		for _, ci := range sameKeyItems {
+			mergeBaseNums = append(mergeBaseNums, ci.startTxNum)
+			mergeSeqs = append(mergeSeqs, ci.val)
+		}
+
+		// Merge all sequences for this key in a single pass (O(N·C), one EF allocation).
+		if err := builder.MergeSorted(&seqReader, startTxNum, mergeBaseNums, mergeSeqs); err != nil {
+			return nil, err
+		}
+		lastVal = builder.AppendBytes(lastVal[:0])
+
+		// Advance each item's reader and return non-exhausted ones to the heap.
+		for _, ci := range sameKeyItems {
+			if ci.kvReader.HasNext() {
+				ci.key, _ = ci.kvReader.Next(ci.key[:0])
+				ci.val, _ = ci.kvReader.Next(ci.val[:0])
 				i += 2
-				// fmt.Printf("heap next push %s [%d] %x\n", ii.KeysTable, ci1.endTxNum, ci1.key)
-				heap.Push(&cp, ci1)
+				heap.Push(&cp, ci)
 			}
 		}
 		if i%1024 == 0 {

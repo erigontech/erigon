@@ -38,6 +38,7 @@ runs:
       shell: bash
       run: |
         test -f run.log || exit 0
-        awk '/^ok/ && !/\(cached\)/ { lines = lines "%0A" $2 " (" $3 ")" }
-             END { if (lines) print "::notice::Packages ran without test cache:" lines }' run.log
+        awk '/^ok/ && !/\(cached\)/ { t = $3; sub(/s$/, "", t); print t, $2, $3 }' run.log \
+          | sort -rn \
+          | awk 'BEGIN { lines = "" } { lines = lines "%0A" $2 " (" $3 ")" } END { if (lines) print "::notice::Packages ran without test cache:" lines }'
 
