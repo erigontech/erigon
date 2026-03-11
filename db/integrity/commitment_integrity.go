@@ -718,7 +718,7 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br serv
 		return 0, err
 	}
 	defer it.Close()
-	logTicker := time.NewTicker(10 * time.Second)
+	logTicker := time.NewTicker(1 * time.Second)
 	defer logTicker.Stop()
 	var total uint64
 	var integrityErr error
@@ -951,11 +951,8 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 }
 
 // CheckCommitmentStateKeyHistory verifies the "state" key has proper history entries
-// across all commitment history files. For each .v file, it checks:
-//  1. The "state" key appears in the history (via HistoryRange)
-//  2. Each historical "state" value has (txNum, blockNum) within the file's range
-//  3. GetAsOf at sampled txNums within the file returns values with plausible blockNums
-//     (not the latest/head value, which would indicate missing history)
+// across all commitment .v files. Uses lightweight GetAsOf point queries (not full iteration)
+// to check that historical values are present and not falling through to the latest value.
 func CheckCommitmentStateKeyHistory(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, logger log.Logger) error {
 	start := time.Now()
 	tx, err := db.BeginTemporalRo(ctx)
@@ -965,146 +962,123 @@ func CheckCommitmentStateKeyHistory(ctx context.Context, db kv.TemporalRoDB, br 
 	defer tx.Rollback()
 
 	aggTx := state.AggTx(tx)
-	defer aggTx.Close()
 	stepSize := aggTx.StepSize()
 	files := aggTx.Files(kv.CommitmentDomain)
+	aggTx.Close()
 
 	// Get the latest commitment state for comparison
 	latestState, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
 	if err != nil {
 		return fmt.Errorf("GetLatest(commitment, state): %w", err)
 	}
-	var latestBlockNum uint64
+	var latestBlockNum, latestTxNum uint64
 	if len(latestState) >= 16 {
+		latestTxNum = binary.BigEndian.Uint64(latestState[0:8])
 		latestBlockNum = binary.BigEndian.Uint64(latestState[8:16])
 	}
-	logger.Info("[integrity] CommitmentStateKeyHistory: latest state", "latestBlockNum", latestBlockNum, "stateLen", len(latestState))
+	logger.Info("[integrity] CommitmentStateKeyHistory: latest state",
+		"latestBlockNum", latestBlockNum, "latestTxNum", latestTxNum, "stateLen", len(latestState))
 
-	// Check each .v (history value) file
-	var totalStateEntries uint64
-	var checkedFiles int
+	// Collect .v file ranges
+	type fileRange struct {
+		name                 string
+		startTxNum, endTxNum uint64
+	}
+	var vFiles []fileRange
 	for _, file := range files {
 		if !strings.HasSuffix(file.Fullpath(), ".v") {
 			continue
 		}
+		vFiles = append(vFiles, fileRange{
+			name:       filepath.Base(file.Fullpath()),
+			startTxNum: file.StartRootNum(),
+			endTxNum:   file.EndRootNum(),
+		})
+	}
+
+	// For each .v file, probe GetAsOf at several points to check history presence.
+	// Lightweight: just point lookups, no full file iteration.
+	const probesPerFile = 5
+	var checkedFiles, goodFiles, badFiles int
+	for _, vf := range vFiles {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		// Skip files at or near the head — their GetAsOf legitimately returns latest
+		if vf.endTxNum > latestTxNum {
+			continue
+		}
+		rangeSize := vf.endTxNum - vf.startTxNum
+		if rangeSize == 0 {
+			continue
+		}
 
-		fileName := filepath.Base(file.Fullpath())
-		startTxNum := file.StartRootNum()
-		endTxNum := file.EndRootNum()
-
-		// Use a separate tx per file to avoid holding resources too long
 		fileTx, err := db.BeginTemporalRo(ctx)
 		if err != nil {
 			return err
 		}
 
-		// Count "state" key entries in this file's history range
-		it, err := fileTx.HistoryRange(kv.CommitmentDomain, int(startTxNum), int(endTxNum), order.Asc, -1)
-		if err != nil {
-			fileTx.Rollback()
-			return fmt.Errorf("HistoryRange(%s): %w", fileName, err)
-		}
-
-		var stateKeyCount uint64
-		var totalKeys uint64
-		var lastStateBlockNum, lastStateTxNum uint64
-		for it.HasNext() {
-			if ctx.Err() != nil {
-				it.Close()
-				fileTx.Rollback()
-				return ctx.Err()
-			}
-			k, v, err := it.Next()
-			if err != nil {
-				it.Close()
-				fileTx.Rollback()
-				return fmt.Errorf("HistoryRange.Next(%s): %w", fileName, err)
-			}
-			totalKeys++
-
-			if !bytes.Equal(k, commitmentdb.KeyCommitmentState) {
+		var probeOK, probeFail int
+		for i := range probesPerFile {
+			probeTxNum := vf.startTxNum + (rangeSize * uint64(i+1) / uint64(probesPerFile+1))
+			if probeTxNum == 0 {
 				continue
 			}
-			stateKeyCount++
 
-			if len(v) < 16 {
-				it.Close()
-				fileTx.Rollback()
-				return fmt.Errorf("%w: commitment state key in %s has short value: len=%d", ErrIntegrity, fileName, len(v))
-			}
-			stateTxNum := binary.BigEndian.Uint64(v[0:8])
-			stateBlockNum := binary.BigEndian.Uint64(v[8:16])
-			lastStateTxNum = stateTxNum
-			lastStateBlockNum = stateBlockNum
-
-			// The stored blockNum should be plausible for this file's txNum range
-			if stateTxNum > endTxNum {
-				it.Close()
-				fileTx.Rollback()
-				return fmt.Errorf("%w: commitment state key in %s has txNum %d beyond file endTxNum %d (blockNum=%d)",
-					ErrIntegrity, fileName, stateTxNum, endTxNum, stateBlockNum)
-			}
-		}
-		it.Close()
-
-		logger.Info("[integrity] CommitmentStateKeyHistory: file",
-			"file", fileName,
-			"range", fmt.Sprintf("[%d-%d)", startTxNum, endTxNum),
-			"step", fmt.Sprintf("[%d-%d)", startTxNum/stepSize, endTxNum/stepSize),
-			"totalKeys", totalKeys,
-			"stateKeyEntries", stateKeyCount,
-			"lastStateTxNum", lastStateTxNum,
-			"lastStateBlockNum", lastStateBlockNum,
-		)
-
-		if stateKeyCount == 0 {
-			fileTx.Rollback()
-			logger.Warn("[integrity] CommitmentStateKeyHistory: NO state key entries in file",
-				"file", fileName, "range", fmt.Sprintf("[%d-%d)", startTxNum, endTxNum))
-			// Not necessarily an error for very early files, but worth noting
-			checkedFiles++
-			continue
-		}
-
-		totalStateEntries += stateKeyCount
-
-		// Spot-check: GetAsOf at the midpoint of the file range
-		// If the history is correct, this should NOT return the latest value
-		midTxNum := (startTxNum + endTxNum) / 2
-		if midTxNum > 0 && endTxNum < latestBlockNum*2 { // crude check that file is not near head
-			midState, _, err := fileTx.GetAsOf(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, midTxNum)
+			v, _, err := fileTx.GetAsOf(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, probeTxNum)
 			if err != nil {
 				fileTx.Rollback()
-				return fmt.Errorf("GetAsOf(commitment, state, %d): %w", midTxNum, err)
+				return fmt.Errorf("GetAsOf(commitment, state, %d): %w", probeTxNum, err)
 			}
-			if len(midState) >= 16 {
-				midBlockNum := binary.BigEndian.Uint64(midState[8:16])
-				midStateTxNum := binary.BigEndian.Uint64(midState[0:8])
-				if midBlockNum == latestBlockNum && latestBlockNum > 0 {
-					logger.Error("[integrity] CommitmentStateKeyHistory: GetAsOf returned LATEST value (missing history)",
-						"file", fileName, "asOfTxNum", midTxNum,
-						"returnedBlockNum", midBlockNum, "returnedTxNum", midStateTxNum,
-						"latestBlockNum", latestBlockNum)
-					fileTx.Rollback()
-					return fmt.Errorf("%w: GetAsOf(commitment, state, txNum=%d) in file %s returned latest value (block %d) instead of historical value",
-						ErrIntegrity, midTxNum, fileName, latestBlockNum)
-				}
+			if len(v) < 16 {
+				continue // no value — before first commitment write
+			}
+			vTxNum := binary.BigEndian.Uint64(v[0:8])
+			vBlockNum := binary.BigEndian.Uint64(v[8:16])
+
+			if vBlockNum == latestBlockNum && vTxNum == latestTxNum {
+				probeFail++
+				logger.Warn("[integrity] CommitmentStateKeyHistory: GetAsOf returned latest (missing history)",
+					"file", vf.name, "probeTxNum", probeTxNum,
+					"returnedBlockNum", vBlockNum, "returnedTxNum", vTxNum,
+					"latestBlockNum", latestBlockNum)
+			} else if vTxNum > probeTxNum {
+				probeFail++
+				logger.Warn("[integrity] CommitmentStateKeyHistory: GetAsOf returned future value",
+					"file", vf.name, "probeTxNum", probeTxNum,
+					"returnedBlockNum", vBlockNum, "returnedTxNum", vTxNum)
+			} else {
+				probeOK++
 			}
 		}
 
 		fileTx.Rollback()
 		checkedFiles++
+
+		logger.Info("[integrity] CommitmentStateKeyHistory: file",
+			"file", vf.name,
+			"range", fmt.Sprintf("[%d-%d)", vf.startTxNum, vf.endTxNum),
+			"step", fmt.Sprintf("[%d-%d)", vf.startTxNum/stepSize, vf.endTxNum/stepSize),
+			"probeOK", probeOK, "probeFail", probeFail,
+		)
+
+		if probeFail > 0 {
+			badFiles++
+		} else {
+			goodFiles++
+		}
 	}
 
 	logger.Info("[integrity] CommitmentStateKeyHistory: done",
 		"dur", time.Since(start),
 		"checkedFiles", checkedFiles,
-		"totalStateEntries", totalStateEntries,
+		"goodFiles", goodFiles,
+		"badFiles", badFiles,
 		"latestBlockNum", latestBlockNum,
 	)
+	if badFiles > 0 {
+		return fmt.Errorf("%w: %d commitment .v files have missing or corrupted state key history", ErrIntegrity, badFiles)
+	}
 	return nil
 }
 
