@@ -23,7 +23,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -74,19 +73,6 @@ var registry = &preverifiedRegistry{
 	},
 	data:   make(map[string]Preverified),
 	cached: make(map[string]*Cfg),
-}
-
-// All forces parsing of all remaining raw entries and returns a clone of the data map.
-func (r *preverifiedRegistry) All() map[string]Preverified {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for name, rawBytes := range r.raw {
-		if _, ok := r.data[name]; !ok {
-			r.data[name] = fromEmbeddedToml(rawBytes)
-		}
-	}
-	r.raw = nil
-	return maps.Clone(r.data)
 }
 
 func (r *preverifiedRegistry) Get(networkName string) (*Cfg, bool) {
@@ -144,16 +130,6 @@ func (r *preverifiedRegistry) Reset(data map[string]Preverified) {
 	r.data = data
 	r.raw = nil
 	r.cached = make(map[string]*Cfg) // Clear all cached
-	r.mu.Unlock()
-}
-
-// ResetRaw replaces the raw bytes, clearing data and cached. Used after remote loading
-// updates the module-level snapshot hash vars.
-func (r *preverifiedRegistry) ResetRaw(raw map[string][]byte) {
-	r.mu.Lock()
-	r.raw = raw
-	r.data = make(map[string]Preverified)
-	r.cached = make(map[string]*Cfg)
 	r.mu.Unlock()
 }
 
@@ -593,8 +569,8 @@ func fetchChainToml(ctx context.Context, source snapshothashes.SnapshotSource, b
 	return res, nil
 }
 
-// LoadRemotePreverifiedForChain fetches and loads snapshot hashes for a single chain only.
-func LoadRemotePreverifiedForChain(ctx context.Context, chainName string) error {
+// LoadRemotePreverified fetches and loads snapshot hashes for a single chain.
+func LoadRemotePreverified(ctx context.Context, chainName string) error {
 	if s, ok := os.LookupEnv(RemotePreverifiedEnvKey); ok {
 		log.Info("Loading local preverified override file", "file", s)
 
@@ -630,46 +606,6 @@ func LoadRemotePreverifiedForChain(ctx context.Context, chainName string) error 
 	return nil
 }
 
-func LoadRemotePreverified(ctx context.Context) (err error) {
-	if s, ok := os.LookupEnv(RemotePreverifiedEnvKey); ok {
-		log.Info("Loading local preverified override file", "file", s)
-
-		b, err := os.ReadFile(s)
-		if err != nil {
-			return fmt.Errorf("reading remote preverified override file: %w", err)
-		}
-		for _, sh := range snapshotHashPtrs {
-			*sh = bytes.Clone(b)
-		}
-	} else {
-		log.Info("Loading remote snapshot hashes")
-
-		err = snapshothashes.LoadSnapshots(ctx, snapshothashes.R2, snapshotGitBranch)
-		if err != nil {
-			log.Root().Warn("Failed to load snapshot hashes from R2; falling back to GitHub", "err", err)
-
-			// Fallback to GitHub if R2 fails
-			err = snapshothashes.LoadSnapshots(ctx, snapshothashes.Github, snapshotGitBranch)
-			if err != nil {
-				return err
-			}
-		}
-	}
-
-	// Re-load the preverified hashes
-	registry.ResetRaw(map[string][]byte{
-		networkname.Mainnet:    snapshothashes.Mainnet,
-		networkname.Sepolia:    snapshothashes.Sepolia,
-		networkname.Amoy:       snapshothashes.Amoy,
-		networkname.BorMainnet: snapshothashes.BorMainnet,
-		networkname.Gnosis:     snapshothashes.Gnosis,
-		networkname.Chiado:     snapshothashes.Chiado,
-		networkname.Hoodi:      snapshothashes.Hoodi,
-		networkname.Bloatnet:   snapshothashes.Bloatnet,
-	})
-	return
-}
-
 func SetToml(networkName string, toml []byte, local bool) {
 	if registry.Has(networkName) {
 		registry.Set(networkName, Preverified{Local: local, Items: fromToml(toml)})
@@ -681,11 +617,6 @@ func GetToml(networkName string) []byte {
 		return *ptr
 	}
 	return nil
-}
-
-// Gets the current preverified for all chains.
-func GetAllCurrentPreverified() map[string]Preverified {
-	return registry.All()
 }
 
 // Converts webseed value to URL. Mostly this is just stripping v1: for now, as nothing else is in
