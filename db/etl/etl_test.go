@@ -1124,3 +1124,69 @@ func BenchmarkSortableBufferSort(b *testing.B) {
 		})
 	}
 }
+
+func TestVmtouchMmap(t *testing.T) {
+	if _, err := exec.LookPath("vmtouch"); err != nil {
+		t.Skip("vmtouch not installed")
+	}
+
+	tmpdir := t.TempDir()
+	const n = 1_000_000
+	buf := makeSortedBuffer(32, 1024, n) // ~1GB file
+
+	provider, err := FlushToDisk("test", buf, tmpdir, log.LvlInfo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer provider.Dispose()
+
+	files, _ := filepath.Glob(filepath.Join(tmpdir, "*"))
+	if len(files) == 0 {
+		t.Fatal("no temp file found")
+	}
+	fname := files[0]
+
+	vmtouch := func(label string) {
+		fmt.Printf("\n=== %s ===\n", label)
+		cmd := exec.Command("vmtouch", "-v", fname)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Run()
+	}
+
+	vmtouch("BEFORE first Next()")
+
+	// First Next() triggers initMmap + MadviseWillNeed + MadviseSequential
+	_, _, err = provider.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+	vmtouch("AFTER first Next() (initMmap + madvise)")
+
+	// Read 25%
+	for i := 0; i < n/4-1; i++ {
+		provider.Next()
+	}
+	vmtouch("AFTER 25%")
+
+	// Read to 50%
+	for i := 0; i < n/4; i++ {
+		provider.Next()
+	}
+	vmtouch("AFTER 50%")
+
+	// Read to 75%
+	for i := 0; i < n/4; i++ {
+		provider.Next()
+	}
+	vmtouch("AFTER 75%")
+
+	// Read rest
+	for {
+		_, _, err := provider.Next()
+		if err == io.EOF {
+			break
+		}
+	}
+	vmtouch("AFTER full scan")
+}

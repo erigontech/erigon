@@ -33,7 +33,7 @@ import (
 )
 
 type dataProvider interface {
-	Next(keyBuf, valBuf []byte) ([]byte, []byte, error)
+	Next() ([]byte, []byte, error)
 	Dispose()    // Safe for repeated call, doesn't return error - means defer-friendly
 	Wait() error // join point for async providers
 	String() string
@@ -124,7 +124,7 @@ func sortAndFlush(b Buffer, tmpdir string) (*os.File, error) {
 	return bufferFile, nil
 }
 
-func (p *fileDataProvider) Next(keyBuf, valBuf []byte) ([]byte, []byte, error) {
+func (p *fileDataProvider) Next() ([]byte, []byte, error) {
 	if p.mmapReader == nil {
 		if err := p.initMmap(); err != nil {
 			return nil, nil, err
@@ -225,11 +225,11 @@ func KeepInRAM(buffer Buffer) dataProvider {
 	return &memoryDataProvider{buffer, 0}
 }
 
-func (p *memoryDataProvider) Next(keyBuf, valBuf []byte) ([]byte, []byte, error) {
+func (p *memoryDataProvider) Next() ([]byte, []byte, error) {
 	if p.currentIndex >= p.buffer.Len() {
 		return nil, nil, io.EOF
 	}
-	key, value := p.buffer.Get(p.currentIndex, keyBuf, valBuf)
+	key, value := p.buffer.Get(p.currentIndex)
 	p.currentIndex++
 	return key, value, nil
 }
