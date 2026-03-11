@@ -325,7 +325,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 			return nil, mdgas.MdGas{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
 		if !exist {
-			if !isPrecompile && evm.chainRules.IsSpuriousDragon && value.IsZero() && !isSystemCall(caller) {
+			if !isPrecompile && evm.chainRules.IsSpuriousDragon && value.IsZero() && !syscall {
 				return nil, gas, nil
 			}
 			evm.intraBlockState.CreateAccount(addr, false)
