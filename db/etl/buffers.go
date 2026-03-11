@@ -64,7 +64,9 @@ var LargeSortableBuffers = NewAllocator(&sync.Pool{
 type Buffer interface {
 	// Put does copy `k` and `v`
 	Put(k, v []byte)
-	Get(i int, keyBuf, valBuf []byte) ([]byte, []byte)
+	// Get returns direct references to the internal key/value storage without copying.
+	// The returned slices must not be modified by the caller.
+	Get(i int) ([]byte, []byte)
 	Len() int
 	Reset()
 	SizeLimit() int
@@ -133,7 +135,7 @@ func (b *sortableBuffer) Len() int {
 	return len(b.entries)
 }
 
-func (b *sortableBuffer) Get(i int, keyBuf, valBuf []byte) ([]byte, []byte) {
+func (b *sortableBuffer) Get(i int) ([]byte, []byte) {
 	e := &b.entries[i]
 	keyLen, valLen := e.keyLen, e.valLen
 	keyOffset := e.offset
@@ -141,29 +143,18 @@ func (b *sortableBuffer) Get(i int, keyBuf, valBuf []byte) ([]byte, []byte) {
 	if keyLen > 0 {
 		valOffset += keyLen
 	}
+	var key, val []byte
 	if keyLen > 0 {
-		keyBuf = append(keyBuf, b.data[keyOffset:keyOffset+keyLen]...)
+		key = b.data[keyOffset : keyOffset+keyLen]
 	} else if keyLen == 0 {
-		if keyBuf != nil {
-			keyBuf = keyBuf[:0]
-		} else {
-			keyBuf = []byte{}
-		}
-	} else {
-		keyBuf = nil
+		key = []byte{}
 	}
 	if valLen > 0 {
-		valBuf = append(valBuf, b.data[valOffset:valOffset+valLen]...)
+		val = b.data[valOffset : valOffset+valLen]
 	} else if valLen == 0 {
-		if valBuf != nil {
-			valBuf = valBuf[:0]
-		} else {
-			valBuf = []byte{}
-		}
-	} else {
-		valBuf = nil
+		val = []byte{}
 	}
-	return keyBuf, valBuf
+	return key, val
 }
 
 func (b *sortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) Buffer {
@@ -276,10 +267,8 @@ func (b *appendSortableBuffer) Swap(i, j int) {
 	b.sortedBuf[i], b.sortedBuf[j] = b.sortedBuf[j], b.sortedBuf[i]
 }
 
-func (b *appendSortableBuffer) Get(i int, keyBuf, valBuf []byte) ([]byte, []byte) {
-	keyBuf = append(keyBuf, b.sortedBuf[i].key...)
-	valBuf = append(valBuf, b.sortedBuf[i].value...)
-	return keyBuf, valBuf
+func (b *appendSortableBuffer) Get(i int) ([]byte, []byte) {
+	return b.sortedBuf[i].key, b.sortedBuf[i].value
 }
 func (b *appendSortableBuffer) Reset() {
 	b.sortedBuf = nil
@@ -378,10 +367,8 @@ func (b *oldestEntrySortableBuffer) Swap(i, j int) {
 	b.sortedBuf[i], b.sortedBuf[j] = b.sortedBuf[j], b.sortedBuf[i]
 }
 
-func (b *oldestEntrySortableBuffer) Get(i int, keyBuf, valBuf []byte) ([]byte, []byte) {
-	keyBuf = append(keyBuf, b.sortedBuf[i].key...)
-	valBuf = append(valBuf, b.sortedBuf[i].value...)
-	return keyBuf, valBuf
+func (b *oldestEntrySortableBuffer) Get(i int) ([]byte, []byte) {
+	return b.sortedBuf[i].key, b.sortedBuf[i].value
 }
 func (b *oldestEntrySortableBuffer) Reset() {
 	b.sortedBuf = nil
