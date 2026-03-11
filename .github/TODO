@@ -1,3 +1,2 @@
 - Remove/cleanup the stub CI names for the required checks
 - Merge workflows with similar triggers to reduce duplication.
-- Add a workflow that checks benchmarks compile and run without error.

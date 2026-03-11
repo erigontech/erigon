@@ -470,7 +470,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	}
 
 	// Committed genesis will be shared between download and mock sentry
-	_, mock.Genesis, err = genesiswrite.CommitGenesisBlock(mock.DB, gspec, datadir.New(tmpdir), mock.Log)
+	_, mock.Genesis, err = genesiswrite.CommitGenesisBlock(mock.DB, gspec, "", datadir.New(tmpdir), mock.Log)
 	if _, ok := err.(*chain.ConfigCompatError); err != nil && !ok {
 		if tb != nil {
 			tb.Fatal(err)
@@ -641,7 +641,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			builderstages.BuilderUnwindOrder,
 			builderstages.BuilderPruneOrder,
 			logger,
-			stages.ModeBlockProduction,
+			stages.ModeApplyingBlocks,
 		)
 		// We start the mining step
 		if err := stageloop.MiningStep(ctx, mock.DB, proposingSync, tmpdir, logger); err != nil {
@@ -760,7 +760,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		builderstages.BuilderUnwindOrder,
 		builderstages.BuilderPruneOrder,
 		logger,
-		stages.ModeBlockProduction,
+		stages.ModeApplyingBlocks,
 	)
 
 	mock.StreamWg.Add(1)

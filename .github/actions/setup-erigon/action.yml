@@ -26,6 +26,10 @@ inputs:
     description: "Extra segment appended to build cache key (e.g. matrix.test-group)"
     required: false
     default: ''
+  ramdisk:
+    description: "Create a RAM disk and export its path as ERIGON_EXECUTION_TESTS_TMPDIR"
+    required: false
+    default: 'false'
 
 outputs:
   goversion:
@@ -115,7 +119,10 @@ runs:
       if: ${{ inputs.submodules == 'true' }}
       shell: bash
       run: |
-        hash=$(git ls-tree -r HEAD | awk '$2 == "commit" {print $3}' | sort | sha256sum | cut -d' ' -f1)
+        hash=$( {
+          git ls-tree -r HEAD | awk '$2 == "commit" {print $3}'
+          git lfs ls-files --long 2>/dev/null | awk '{print $1}'
+        } | sort | sha256sum | cut -d' ' -f1)
         echo "hash=$hash" >> "$GITHUB_OUTPUT"
 
     - name: Restore submodule git objects cache
@@ -212,6 +219,15 @@ runs:
           find . -name .git -prune -o -printf '%T@ %y %p\n' | sort -k3
         fi
 
+    - name: Create RAM disk
+      if: ${{ inputs.ramdisk == 'true' }}
+      shell: bash
+      run: |
+        path=$(bash tools/create-ramdisk)
+        if [ -n "$path" ]; then
+          echo "ERIGON_EXECUTION_TESTS_TMPDIR=$path" >> "$GITHUB_ENV"
+        fi
+
     - name: Get Go minor version from go.mod
       id: goversion
       shell: bash
@@ -281,8 +297,8 @@ runs:
       if: ${{ inputs.submodules == 'true' }}
       shell: bash
       run: |
-        echo "ERIGON_CI_SUBMODULE_CACHE_KEY=gitobjects|${{ runner.os }}|lfs-${{ inputs.lfs }}|${{ steps.submodule-key.outputs.hash }}" >> "$GITHUB_ENV"
-        echo "ERIGON_CI_SUBMODULE_CACHE_RESTORED_KEY=${{ steps.restore-submodules.outputs.cache-matched-key }}" >> "$GITHUB_ENV"
+        echo "ERIGON_CI_GITOBJECTS_CACHE_KEY=gitobjects|${{ runner.os }}|lfs-${{ inputs.lfs }}|${{ steps.submodule-key.outputs.hash }}" >> "$GITHUB_ENV"
+        echo "ERIGON_CI_GITOBJECTS_CACHE_RESTORED_KEY=${{ steps.restore-submodules.outputs.cache-matched-key }}" >> "$GITHUB_ENV"
 
     - name: Display free disk space after setup
       shell: bash

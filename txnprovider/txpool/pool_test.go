@@ -1728,7 +1728,7 @@ func BenchmarkProcessRemoteTxns(b *testing.B) {
 
 	// Create test transactions for benchmarking
 	var testTxns TxnSlots
-	for i := 0; b.Loop(); i++ {
+	for i := 0; i < b.N; i++ {
 		var addr [20]byte
 		addr[0] = uint8(i%100 + 1)                                          // Use one of our test accounts
 		txnSlot := newTestTxnSlot(uint64(i/100), 0, 300000, 300000, 100000) // Different nonce for each account

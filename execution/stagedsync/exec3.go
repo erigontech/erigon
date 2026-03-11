@@ -115,7 +115,6 @@ func ExecV3(ctx context.Context,
 	parallel bool, //nolint
 	maxBlockNum uint64,
 	logger log.Logger) (execErr error) {
-	isBlockProduction := execStage.SyncMode() == stages.ModeBlockProduction
 	isForkValidation := execStage.SyncMode() == stages.ModeForkValidation
 
 	isApplyingBlocks := execStage.SyncMode() == stages.ModeApplyingBlocks
@@ -130,13 +129,9 @@ func ExecV3(ctx context.Context,
 	agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	if isApplyingBlocks {
 		if initialCycle {
-			agg.SetCollateAndBuildWorkers(dbg.CollateWorkers) //TODO: Need always set to CollateWorkers=2 (on ChainTip too). But need more tests first
-			agg.SetCompressWorkers(dbg.CompressWorkers)
-			agg.SetMergeWorkers(dbg.MergeWorkers) //TODO: Need always set to CollateWorkers=2 (on ChainTip too). But need more tests first
+			agg.PresetNonChainTipConcurrency()
 		} else {
-			agg.SetCollateAndBuildWorkers(1)
-			agg.SetCompressWorkers(dbg.CompressWorkers)
-			agg.SetMergeWorkers(dbg.MergeWorkers) //TODO: Need always set to CollateWorkers=2 (on ChainTip too). But need more tests first
+			agg.PresetChainTipConcurrency()
 		}
 	}
 
@@ -166,7 +161,7 @@ func ExecV3(ctx context.Context,
 		return nil
 	}
 
-	shouldReportToTxPool := cfg.notifications != nil && !isBlockProduction && maxBlockNum <= blockNum+64
+	shouldReportToTxPool := cfg.notifications != nil && maxBlockNum <= blockNum+64
 	var accumulator *shards.Accumulator
 	if shouldReportToTxPool {
 		accumulator = cfg.notifications.Accumulator
@@ -210,10 +205,10 @@ func ExecV3(ctx context.Context,
 	if !isApplyingBlocks {
 		postValidator = newParallelBlockPostExecutionValidator()
 	}
-	// Enable deferred commitment updates only for serial execution (fork validation).
-	// The parallel executor has a subtle interaction with deferred updates that causes
-	// intermittent trie root mismatches during re-org validation.
-	if !parallel && isForkValidation {
+	// Enable deferred commitment updates for fork validation (both serial and parallel).
+	// Deferred updates batch commitment calculations to block boundaries rather than
+	// per-transaction, significantly reducing re-org validation overhead.
+	if isForkValidation {
 		doms.SetDeferCommitmentUpdates(true)
 	}
 	defer doms.SetDeferCommitmentUpdates(false)
@@ -233,7 +228,6 @@ func ExecV3(ctx context.Context,
 				rs:                rs,
 				doms:              doms,
 				agg:               agg,
-				isBlockProduction: isBlockProduction,
 				isForkValidation:  isForkValidation,
 				isApplyingBlocks:  isApplyingBlocks,
 				logger:            logger,
@@ -270,7 +264,6 @@ func ExecV3(ctx context.Context,
 				doms:              doms,
 				agg:               agg,
 				u:                 u,
-				isBlockProduction: isBlockProduction,
 				isForkValidation:  isForkValidation,
 				isApplyingBlocks:  isApplyingBlocks,
 				applyTx:           applyTx,
@@ -297,7 +290,7 @@ func ExecV3(ctx context.Context,
 			if lastHeader != nil {
 				switch {
 				case execErr == nil || errors.Is(execErr, &ErrLoopExhausted{}):
-					_, _, err = computeAndCheckCommitmentV3(ctx, lastHeader, applyTx, se.domains(), cfg, execStage, parallel, logger, u, isBlockProduction)
+					_, _, err = computeAndCheckCommitmentV3(ctx, lastHeader, applyTx, se.domains(), cfg, execStage, parallel, logger, u)
 					if err != nil {
 						return err
 					}
@@ -362,7 +355,7 @@ func ExecV3(ctx context.Context,
 			lastCommittedBlockNum, lastCommittedTxNum, lastCommitedStep)
 	}
 
-	if !shouldReportToTxPool && cfg.notifications != nil && cfg.notifications.Accumulator != nil && !isBlockProduction && lastHeader != nil {
+	if !shouldReportToTxPool && cfg.notifications != nil && cfg.notifications.Accumulator != nil && lastHeader != nil {
 		// No reporting to the txn pool has been done since we are not within the "state-stream" window.
 		// However, we should still at the very least report the last block number to it, so it can update its block progress.
 		// Otherwise, we can get in a deadlock situation when there is a block building request in environments where
@@ -412,21 +405,20 @@ func dumpTxIODebug(blockNum uint64, txIO *state.VersionedIO) {
 
 type txExecutor struct {
 	sync.RWMutex
-	cfg               ExecuteBlockCfg
-	agg               *dbstate.Aggregator
-	rs                *state.StateV3Buffered
-	doms              *execctx.SharedDomains
-	u                 Unwinder
-	isBlockProduction bool
-	isForkValidation  bool
-	isApplyingBlocks  bool
-	applyTx           kv.TemporalTx
-	logger            log.Logger
-	logPrefix         string
-	progress          *Progress
-	taskExecMetrics   *exec.WorkerMetrics
-	blockExecMetrics  *blockExecMetrics
-	hooks             *tracing.Hooks
+	cfg              ExecuteBlockCfg
+	agg              *dbstate.Aggregator
+	rs               *state.StateV3Buffered
+	doms             *execctx.SharedDomains
+	u                Unwinder
+	isForkValidation bool
+	isApplyingBlocks bool
+	applyTx          kv.TemporalTx
+	logger           log.Logger
+	logPrefix        string
+	progress         *Progress
+	taskExecMetrics  *exec.WorkerMetrics
+	blockExecMetrics *blockExecMetrics
+	hooks            *tracing.Hooks
 
 	lastExecutedBlockNum  atomic.Int64
 	lastExecutedTxNum     atomic.Int64
@@ -792,7 +784,7 @@ type FlushAndComputeCommitmentTimes struct {
 }
 
 // computeAndCheckCommitmentV3 - does write state to db and then check commitment
-func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.TemporalRwTx, doms *execctx.SharedDomains, cfg ExecuteBlockCfg, e *StageState, parallel bool, logger log.Logger, u Unwinder, isBlockProduction bool) (ok bool, times FlushAndComputeCommitmentTimes, err error) {
+func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.TemporalRwTx, doms *execctx.SharedDomains, cfg ExecuteBlockCfg, e *StageState, parallel bool, logger log.Logger, u Unwinder) (ok bool, times FlushAndComputeCommitmentTimes, err error) {
 	if header == nil {
 		return false, times, errors.New("header is nil")
 	}
@@ -826,10 +818,6 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 		return false, times, fmt.Errorf("compute commitment: %w", err)
 	}
 
-	if isBlockProduction {
-		header.Root = common.BytesToHash(computedRootHash)
-		return true, times, nil
-	}
 	if !bytes.Equal(computedRootHash, header.Root.Bytes()) {
 		logger.Warn(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), computedRootHash, header.Root.Bytes(), header.Hash()))
 		err = handleIncorrectRootHashError(header.Number.Uint64(), header.Hash(), header.ParentHash, applyTx, cfg, e, logger, u)
