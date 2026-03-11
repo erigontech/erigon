@@ -466,8 +466,8 @@ type TxnSlot struct {
 
 func (tx *TxnSlot) TxType() byte                 { return tx.Txn.Type() }
 func (tx *TxnSlot) GetGas() uint64               { return tx.Txn.GetGasLimit() }
-func (tx *TxnSlot) IsCreation() bool              { return tx.Txn.IsContractDeploy() }
-func (tx *TxnSlot) GetBlobHashes() []common.Hash  { return tx.Txn.GetBlobHashes() }
+func (tx *TxnSlot) IsCreation() bool             { return tx.Txn.IsContractDeploy() }
+func (tx *TxnSlot) GetBlobHashes() []common.Hash { return tx.Txn.GetBlobHashes() }
 
 // uint256 accessors return a zero value when the underlying field is nil,
 // since types.Transaction stores these as *uint256.Int pointers.
@@ -504,7 +504,7 @@ func (tx *TxnSlot) GetDataNonZeroLen() int {
 }
 
 func (tx *TxnSlot) GetAccessListAddrCount() int { return len(tx.Txn.GetAccessList()) }
-func (tx *TxnSlot) GetAccessListStorCount() int  { return tx.Txn.GetAccessList().StorageKeys() }
+func (tx *TxnSlot) GetAccessListStorCount() int { return tx.Txn.GetAccessList().StorageKeys() }
 
 func (tx *TxnSlot) PrintDebug(prefix string) {
 	fmt.Printf("%s: senderID=%d,nonce=%d,tip=%s,v=%s\n", prefix, tx.SenderID, tx.Nonce, tx.GetTip(), tx.GetValue())
