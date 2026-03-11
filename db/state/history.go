@@ -1481,6 +1481,9 @@ func (ht *HistoryRoTx) CheckEfAgainstV(ctx context.Context, probesPerFile int, l
 							"vFile", vFileName,
 							"recsplitOffset", offset)
 						firstVMismatchLogged = true
+
+						// PROOF: sequential scan of the entire .v file to prove the key is missing
+						ht.proofScanVFile(histFile, histKeyBuf, key, txNum, cpvc, logger)
 					}
 				}
 			}
@@ -1503,6 +1506,53 @@ func (ht *HistoryRoTx) CheckEfAgainstV(ctx context.Context, probesPerFile int, l
 		badFiles = append(badFiles, f)
 	}
 	return badFiles, totalMismatches, nil
+}
+
+// proofScanVFile does a full sequential scan of a .v file to prove whether a key
+// exists in the file at all, bypassing all indices. This is the definitive proof
+// that the .v data itself is corrupt (key missing) vs index corruption.
+func (ht *HistoryRoTx) proofScanVFile(histFile visibleFile, histKeyBuf, key []byte, txNum uint64, cpvc int, logger log.Logger) {
+	decomp := histFile.src.decompressor
+	scanReader := seg.NewPagedReader(
+		seg.NewReader(decomp.MakeGetter(), ht.h.Compression),
+		cpvc, cpvc > 1,
+	)
+	scanReader.Reset(0)
+
+	var totalPages, pagesWithKey int
+	var exactMatchCount int
+	var keyMatchSample []uint64 // first few txNums where key appears
+	var buf []byte
+
+	for scanReader.HasNext() {
+		totalPages++
+		k, v, buf2, _ := scanReader.Next2(buf)
+		buf = buf2
+
+		// For paged files, k is the historyKey: txNum(8) + key
+		if len(k) >= 8+len(key) && bytes.Equal(k[8:], key) {
+			pagesWithKey++
+			entryTxNum := binary.BigEndian.Uint64(k[:8])
+			if len(keyMatchSample) < 5 {
+				keyMatchSample = append(keyMatchSample, entryTxNum)
+			}
+			if bytes.Equal(k, histKeyBuf) {
+				exactMatchCount++
+			}
+			_ = v
+		}
+	}
+
+	logger.Warn("[integrity] HistoryEfVsV: PROOF full .v scan result",
+		"domain", ht.h.FilenameBase,
+		"vFile", decomp.FileName(),
+		"searchKey", fmt.Sprintf("%x", key),
+		"searchTxNum", txNum,
+		"totalEntries", totalPages,
+		"entriesWithKey", pagesWithKey,
+		"exactHistKeyMatches", exactMatchCount,
+		"sampleTxNums", keyMatchSample,
+	)
 }
 
 func (ht *HistoryRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
