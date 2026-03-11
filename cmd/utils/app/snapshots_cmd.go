@@ -2888,6 +2888,9 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	if err = agg.BuildFiles(lastTxNum); err != nil {
 		return err
 	}
+	if err = agg.MergeLoop(ctx); err != nil {
+		return err
+	}
 
 	logger.Info("Prune state history")
 	for hasMoreToPrune := true; hasMoreToPrune; {

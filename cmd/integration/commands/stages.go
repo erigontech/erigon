@@ -805,6 +805,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			if err = agg.BuildFiles(lastTxNum); err != nil {
 				return err
 			}
+			go func() { _ = agg.MergeLoop(ctx) }()
 		}
 
 		if !noCommit {
