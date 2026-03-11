@@ -22,6 +22,7 @@ import (
 	"fmt"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -57,6 +58,8 @@ type TxnParseContext struct {
 	validateRlp     func([]byte) error
 	cfg             TxnParseConfig
 	signer          *types.Signer // cached signer for sender recovery (reused across ParseTransaction calls)
+	keccak          keccak.KeccakState
+	bytesReader     bytes.Reader // reusable reader to avoid allocation per parse
 	withSender      bool
 	allowPreEip2s   bool // Allow s > secp256k1n/2; see EIP-2
 	chainIDRequired bool
@@ -68,6 +71,7 @@ func NewTxnParseContext(chainID uint256.Int) *TxnParseContext {
 	}
 	ctx := &TxnParseContext{
 		withSender: true,
+		keccak:     keccak.NewFastKeccak(),
 	}
 
 	// behave as of London enabled
@@ -89,6 +93,54 @@ func (ctx *TxnParseContext) WithAllowPreEip2s(v bool) { ctx.allowPreEip2s = v }
 func (ctx *TxnParseContext) ChainIDRequired() *TxnParseContext {
 	ctx.chainIDRequired = true
 	return ctx
+}
+
+// decodeTxn decodes a transaction from raw bytes using the reusable bytes.Reader
+// on the context to avoid per-call allocations. It dispatches to the right
+// transaction type's DecodeRLP directly instead of going through
+// UnmarshalTransactionFromBinary (which creates a second bytes.Reader + stream
+// for typed txns).
+func (ctx *TxnParseContext) decodeTxn(txBytes []byte) (types.Transaction, error) {
+	var txn types.Transaction
+
+	// Legacy transactions: full RLP list starting with 0xc0..0xff
+	if txBytes[0] >= 0xc0 {
+		ctx.bytesReader.Reset(txBytes)
+		s, done := rlp.NewStreamFromPool(&ctx.bytesReader, uint64(len(txBytes)))
+		defer done()
+		legacy := &types.LegacyTx{}
+		if err := legacy.DecodeRLP(s); err != nil {
+			return nil, err
+		}
+		return legacy, nil
+	}
+
+	// Typed transactions: type byte + RLP body
+	switch txBytes[0] {
+	case AccessListTxnType:
+		txn = &types.AccessListTx{}
+	case DynamicFeeTxnType:
+		txn = &types.DynamicFeeTransaction{}
+	case BlobTxnType:
+		txn = &types.BlobTx{}
+	case SetCodeTxnType:
+		txn = &types.SetCodeTransaction{}
+	case AATxnType:
+		txn = &types.AccountAbstractionTransaction{}
+	default:
+		return nil, fmt.Errorf("unknown transaction type: %d", txBytes[0])
+	}
+
+	ctx.bytesReader.Reset(txBytes[1:]) // skip type byte
+	s, done := rlp.NewStreamFromPool(&ctx.bytesReader, uint64(len(txBytes)-1))
+	defer done()
+	if err := txn.DecodeRLP(s); err != nil {
+		return nil, err
+	}
+	if s.Remaining() != 0 {
+		return nil, fmt.Errorf("trailing bytes after transaction")
+	}
+	return txn, nil
 }
 
 func PeekTransactionType(serialized []byte) (byte, error) {
@@ -183,7 +235,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		copy(innerTxBytes[1:], txBytes[wrapperListPos:innerBodyPos+innerBodyLen])
 
 		// Decode only the inner tx (no blobs/commitments/proofs).
-		txn, err = types.UnmarshalTransactionFromBinary(innerTxBytes, false)
+		txn, err = ctx.decodeTxn(innerTxBytes)
 		if err != nil {
 			return 0, fmt.Errorf("%w: %s", ErrParseTxn, err) //nolint
 		}
@@ -288,13 +340,11 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		if wp != wrapperListPos+wrapperListLen {
 			return 0, fmt.Errorf("%w: extraneous elements in blobs wrapper", ErrParseTxn)
 		}
-	} else if legacy {
-		txn, err = types.DecodeTransaction(txBytes)
 	} else {
-		txn, err = types.UnmarshalTransactionFromBinary(txBytes, false)
-	}
-	if err != nil {
-		return 0, fmt.Errorf("%w: %s", ErrParseTxn, err) //nolint
+		txn, err = ctx.decodeTxn(txBytes)
+		if err != nil {
+			return 0, fmt.Errorf("%w: %s", ErrParseTxn, err) //nolint
+		}
 	}
 
 	// Step 4: Validate chain ID for non-legacy transactions.
@@ -310,9 +360,17 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	}
 
 	// Step 5: Store the decoded transaction and compute hash.
+	// Compute hash directly from raw RLP bytes (avoids re-encoding the transaction
+	// which txn.Hash() would do via rlpHash/prefixedRlpHash + reflection).
+	// For wrapped blob txns, the hash is of the inner tx_payload_body, not the full wrapper.
 	slot.Txn = txn
-	hash := txn.Hash()
-	slot.IDHash = hash
+	ctx.keccak.Reset()
+	if innerTxBytes != nil {
+		ctx.keccak.Write(innerTxBytes) //nolint:errcheck
+	} else {
+		ctx.keccak.Write(txBytes) //nolint:errcheck
+	}
+	ctx.keccak.Read(slot.IDHash[:]) //nolint:errcheck
 
 	if validateHash != nil {
 		if err := validateHash(slot.IDHash[:]); err != nil {
