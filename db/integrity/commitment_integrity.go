@@ -1025,26 +1025,36 @@ func CheckCommitmentStateKeyHistory(ctx context.Context, db kv.TemporalRoDB, br 
 				continue
 			}
 
-			v, _, err := fileTx.GetAsOf(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, probeTxNum)
+			// Use HistorySeek (searches .ef + .v only, no GetLatest fallback)
+			histV, histOK, err := fileTx.HistorySeek(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, probeTxNum)
 			if err != nil {
 				fileTx.Rollback()
-				return fmt.Errorf("GetAsOf(commitment, state, %d): %w", probeTxNum, err)
+				return fmt.Errorf("HistorySeek(commitment, state, %d): %w", probeTxNum, err)
 			}
-			if len(v) < 16 {
-				continue // no value — before first commitment write
-			}
-			vTxNum := binary.BigEndian.Uint64(v[0:8])
-			vBlockNum := binary.BigEndian.Uint64(v[8:16])
-
-			if vBlockNum == latestBlockNum && vTxNum == latestTxNum {
+			if !histOK {
 				probeFail++
-				logger.Warn("[integrity] CommitmentStateKeyHistory: GetAsOf returned latest (missing history)",
+				// Also do GetAsOf to see what it returns (latest fallback)
+				getV, _, _ := fileTx.GetAsOf(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, probeTxNum)
+				var getBlockNum, getTxNum uint64
+				if len(getV) >= 16 {
+					getTxNum = binary.BigEndian.Uint64(getV[0:8])
+					getBlockNum = binary.BigEndian.Uint64(getV[8:16])
+				}
+				logger.Warn("[integrity] CommitmentStateKeyHistory: HistorySeek found nothing (.ef or .v missing)",
 					"file", vf.name, "probeTxNum", probeTxNum,
-					"returnedBlockNum", vBlockNum, "returnedTxNum", vTxNum,
+					"GetAsOfBlockNum", getBlockNum, "GetAsOfTxNum", getTxNum,
 					"latestBlockNum", latestBlockNum)
-			} else if vTxNum > probeTxNum {
+				continue
+			}
+			if len(histV) < 16 {
+				continue // empty marker — key was created at this txNum
+			}
+			vTxNum := binary.BigEndian.Uint64(histV[0:8])
+			vBlockNum := binary.BigEndian.Uint64(histV[8:16])
+
+			if vTxNum > probeTxNum {
 				probeFail++
-				logger.Warn("[integrity] CommitmentStateKeyHistory: GetAsOf returned future value",
+				logger.Warn("[integrity] CommitmentStateKeyHistory: HistorySeek returned future value",
 					"file", vf.name, "probeTxNum", probeTxNum,
 					"returnedBlockNum", vBlockNum, "returnedTxNum", vTxNum)
 			} else {
