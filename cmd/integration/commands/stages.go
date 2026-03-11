@@ -59,6 +59,7 @@ import (
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	chain2 "github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
@@ -123,6 +124,7 @@ var (
 	cmdStageBodies      = makeStageCmd("stage_bodies", stageBodies, true, false, false)
 	cmdStageSenders     = makeStageCmd("stage_senders", stageSenders, true, false, false)
 	cmdStageExec        = makeStageCmd("stage_exec", stageExec, true, true, false)
+	cmdStageExecReplay  = makeStageCmd("stage_exec_replay", stageExecReplay, true, true, false)
 	cmdStageCustomTrace = makeStageCmd("stage_custom_trace", stageCustomTrace, true, true, false)
 	cmdStageTxLookup    = makeStageCmd("stage_tx_lookup", stageTxLookup, true, false, false)
 	cmdPrintStages      = makeStageCmd("print_stages", printAllStages, false, false, true)
@@ -321,6 +323,10 @@ func init() {
 	withTraceFlags(cmdStageExec)
 	withChainTipMode(cmdStageExec)
 	rootCmd.AddCommand(cmdStageExec)
+
+	withStageBase(cmdStageExecReplay)
+	withBlock(cmdStageExecReplay)
+	rootCmd.AddCommand(cmdStageExecReplay)
 
 	withStageBase(cmdStageCustomTrace)
 	withReset(cmdStageCustomTrace)
@@ -604,6 +610,7 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 }
 
 func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
+	dbg.Exec3Parallel = true
 	if chainTipMode && noCommit {
 		return errors.New("--sync.mode.chaintip cannot work with --no-commit to be false")
 	}
@@ -806,6 +813,81 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			break
 		}
 	}
+
+	return nil
+}
+
+// stageExecReplay re-executes historic blocks using conflict-free parallel workers.
+// Each worker reads independently from committed history (HistoryReaderV3) with no
+// shared state and no conflicts. Unlike stage_exec, this does not advance state —
+// it only replays execution for measurement, testing, or side-effect generation.
+func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
+	dirs := datadir.New(datadirCli)
+	if err := datadir.ApplyMigrations(dirs); err != nil {
+		return err
+	}
+
+	_, engine, _, sync := newSync(ctx, db, nil /* miningConfig */, logger)
+	must(sync.SetCurrentStage(stages.Execution))
+
+	chainConfig := fromdb.ChainConfig(db)
+	genesis := readGenesis(chain)
+	blockReader, _ := blocksIO(db, logger)
+
+	var execProgress uint64
+	if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		var err error
+		execProgress, err = stages.GetStageProgress(tx, stages.Execution)
+		return err
+	}); err != nil {
+		return err
+	}
+
+	toBlock := execProgress
+	if block > 0 && block < toBlock {
+		toBlock = block
+	}
+
+	execArgs := &exec.ExecArgs{
+		ChainDB:     db,
+		BlockReader: blockReader,
+		ChainConfig: chainConfig,
+		Dirs:        dirs,
+		Engine:      engine,
+		Genesis:     genesis,
+		Workers:     syncCfg.ExecWorkerCount,
+	}
+
+	logger.Info("[stage_exec_replay] starting conflict-free parallel replay",
+		"from", 0, "to", toBlock, "workers", execArgs.Workers)
+
+	startTime := time.Now()
+	var lastBlockNum uint64
+
+	consumer := exec.TraceConsumerFunc(
+		func(br *exec.BlockResult, result *exec.TxResult, tx kv.TemporalTx) error {
+			if result.Err != nil {
+				return result.Err
+			}
+			txTask := result.Task.(*exec.TxTask)
+			lastBlockNum = txTask.BlockNumber()
+			return nil
+		})
+
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if err := exec.CustomTraceMapReduce(ctx, 0, toBlock, consumer, tx, execArgs, logger); err != nil {
+		return err
+	}
+
+	elapsed := time.Since(startTime)
+	blkPerSec := float64(lastBlockNum) / elapsed.Seconds()
+	logger.Info("[stage_exec_replay] finished",
+		"blocks", lastBlockNum, "elapsed", elapsed, "blk/s", fmt.Sprintf("%.1f", blkPerSec))
 
 	return nil
 }
