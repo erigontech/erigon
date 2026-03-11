@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/execution/vm/evmtypes/mdgas"
 )
 
 const opTestArg = "ABCDEF090807060504030201ffffffffffffffffffffffffffffffffffffffff"
@@ -811,10 +812,10 @@ func TestOpMCopy(t *testing.T) {
 		}
 		// and the dynamic cost
 		var haveGas uint64
-		if dynamicCost, err := gasMcopy(evm, callContext, 0, memorySize); err != nil {
+		if dynamicCost, err := gasMcopy(evm, callContext, mdgas.MdGas{}, memorySize); err != nil {
 			t.Error(err)
 		} else {
-			haveGas = GasFastestStep + dynamicCost
+			haveGas = GasFastestStep + dynamicCost.Regular
 		}
 		// Expand mem
 		if memorySize > 0 {

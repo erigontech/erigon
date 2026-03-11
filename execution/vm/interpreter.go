@@ -112,10 +112,6 @@ func (c *CallContext) useMdGas(evm *EVM, gas uint64, t mdgas.MdGasType, tracer *
 	return false
 }
 
-func (c *CallContext) availableStateGas() uint64 {
-	return c.stateGas + c.gas
-}
-
 func useGas(initial uint64, gas uint64, tracer *tracing.Hooks, reason tracing.GasChangeReason) (remaining uint64, ok bool) {
 	if initial < gas {
 		return initial, false
@@ -410,47 +406,43 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			evm.callGasTemp = 0
 			// Consume the gas and return an error if not enough gas is available.
 			// cost is explicitly set so that the capture state defer method can get the proper cost
-			var dynamicCost uint64
-			dynamicCost, err = operation.dynamicGas(evm, callContext, callContext.gas, memorySize)
+			var dynamicCost mdgas.MdGas
+			dynamicCost, err = operation.dynamicGas(evm, callContext, callContext.Gas(), memorySize)
 			if err != nil {
 				if !errors.Is(err, ErrOutOfGas) {
 					err = fmt.Errorf("%w: %v", ErrOutOfGas, err)
 				}
 				return nil, callContext.Gas(), err
 			}
-			cost += dynamicCost // for tracing
-			callGas = operation.constantGas + dynamicCost - evm.CallGasTemp()
-			if dbg.TraceDynamicGas && dynamicCost > 0 {
+			cost += dynamicCost.Regular // for tracing
+			callGas = operation.constantGas + dynamicCost.Regular - evm.CallGasTemp()
+			if dbg.TraceDynamicGas && dynamicCost.Regular > 0 {
 				fmt.Printf("%d (%d.%d) Dynamic Gas: %d (%s)\n", blockNum, txIndex, txIncarnation, traceGas(op, callGas, cost), op)
 			}
 
 			// for tracing: this gas consumption event is emitted below in the debug section.
-			if callContext.gas < dynamicCost {
+			if callContext.gas < dynamicCost.Regular {
 				return nil, callContext.Gas(), ErrOutOfGas
 			} else {
-				callContext.gas -= dynamicCost
+				callContext.gas -= dynamicCost.Regular
 			}
 
+			if dynamicCost.State > 0 {
+				cost += dynamicCost.State
+				ok := callContext.useMdGas(evm, dynamicCost.State, mdgas.StateGas, nil, tracing.GasChangeIgnored)
+				if !ok {
+					return nil, callContext.Gas(), ErrOutOfGas
+				}
+			}
 			// EIP-8037: Track regular gas consumed for block-level accounting.
 			// For CALL variants, callGasTemp is the gas forwarded to child (escrow),
 			// so callGas = constantGas + dynamicCost - callGasTemp = parent's actual cost.
 			if evm.chainRules.IsAmsterdam {
 				evm.regularGasConsumed += callGas
 			}
-		} else if evm.chainRules.IsAmsterdam {
-			// Non-dynamic opcodes: just the constant gas
-			evm.regularGasConsumed += operation.constantGas
 		}
-		if operation.stateGas != nil {
-			stateGas, err := operation.stateGas(evm, callContext, callContext.availableStateGas(), memorySize)
-			if err != nil {
-				return nil, callContext.Gas(), err
-			}
-			cost += stateGas
-			ok := callContext.useMdGas(evm, stateGas, mdgas.StateGas, nil, tracing.GasChangeIgnored)
-			if !ok {
-				return nil, callContext.Gas(), ErrOutOfGas
-			}
+		if evm.chainRules.IsAmsterdam && operation.constantGas > 0 {
+			evm.regularGasConsumed += operation.constantGas
 		}
 
 		// Do gas tracing before memory expansion
