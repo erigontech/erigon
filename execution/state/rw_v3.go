@@ -419,22 +419,15 @@ func (s *StateV3Buffered) WithDomains(domains *execctx.SharedDomains) *StateV3Bu
 // It also maintains rs.accounts synchronously for the cross-block timing hole
 // bridge: block N+1 workers may read block N state before the async applyResults
 // goroutine has flushed it to SharedDomains.
-//
-// If accumulator is non-nil, state-change notifications are forwarded to it so
-// that the txpool receives the expected per-block state diffs.  StartChange must
-// be called on the accumulator before MakeWriteSet invokes this collector.
 type versionedWriteCollector struct {
-	rs          *StateV3Buffered
-	writes      VersionedWrites
-	accumulator *shards.Accumulator
+	rs     *StateV3Buffered
+	writes VersionedWrites
 }
 
 // NewVersionedWriteCollector creates a versionedWriteCollector that collects
 // StateWriter calls into a VersionedWrites slice and maintains rs.accounts.
-// accumulator may be nil if txpool notifications are not required (e.g. initial
-// sync).
-func NewVersionedWriteCollector(rs *StateV3Buffered, accumulator *shards.Accumulator) *versionedWriteCollector {
-	return &versionedWriteCollector{rs: rs, accumulator: accumulator}
+func NewVersionedWriteCollector(rs *StateV3Buffered) *versionedWriteCollector {
+	return &versionedWriteCollector{rs: rs}
 }
 
 // Writes returns the collected VersionedWrites for domain apply.
@@ -466,11 +459,6 @@ func (c *versionedWriteCollector) UpdateAccountData(address accounts.Address, or
 		&VersionedWrite{Address: address, Path: CodeHashPath, Val: accountCopy.CodeHash},
 	)
 
-	if c.accumulator != nil {
-		serialised := accounts.SerialiseV3(&accountCopy)
-		c.accumulator.ChangeAccount(address.Value(), accountCopy.Incarnation, serialised)
-	}
-
 	// Maintain rs.accounts for the cross-block timing hole bridge.
 	c.rs.accountsMutex.Lock()
 	obj, ok := c.rs.accounts[address]
@@ -486,10 +474,6 @@ func (c *versionedWriteCollector) UpdateAccountData(address accounts.Address, or
 
 func (c *versionedWriteCollector) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
 	c.writes = append(c.writes, &VersionedWrite{Address: address, Path: CodePath, Val: code})
-
-	if c.accumulator != nil {
-		c.accumulator.ChangeCode(address.Value(), incarnation, code)
-	}
 
 	c.rs.accountsMutex.Lock()
 	obj, ok := c.rs.accounts[address]
@@ -525,11 +509,6 @@ func (c *versionedWriteCollector) WriteAccountStorage(address accounts.Address, 
 
 	c.writes = append(c.writes, &VersionedWrite{Address: address, Path: StoragePath, Key: key, Val: value})
 
-	if c.accumulator != nil {
-		v := value.Bytes()
-		c.accumulator.ChangeStorage(address.Value(), incarnation, key.Value(), v)
-	}
-
 	c.rs.accountsMutex.Lock()
 	obj, ok := c.rs.accounts[address]
 	if !ok || obj.data == &deleted {
@@ -548,6 +527,101 @@ func (c *versionedWriteCollector) WriteAccountStorage(address accounts.Address, 
 }
 
 func (c *versionedWriteCollector) CreateContract(_ accounts.Address) error { return nil }
+
+// NotifyAccumulator drives txpool state-diff notifications from VersionedWrites.
+// It reconstructs account state from the per-field writes and calls
+// ChangeAccount/ChangeCode/ChangeStorage on the accumulator. StartChange must
+// have been called on the accumulator before this function is invoked.
+func NotifyAccumulator(accumulator *shards.Accumulator, writes VersionedWrites) {
+	if accumulator == nil || len(writes) == 0 {
+		return
+	}
+
+	type pendingAccount struct {
+		balance     *uint256.Int
+		nonce       *uint64
+		incarnation *uint64
+		codeHash    *accounts.CodeHash
+	}
+
+	pending := make(map[accounts.Address]*pendingAccount, len(writes)/4+1)
+
+	for _, w := range writes {
+		if w.Val == nil {
+			continue
+		}
+		switch w.Path {
+		case BalancePath:
+			p := pending[w.Address]
+			if p == nil {
+				p = &pendingAccount{}
+				pending[w.Address] = p
+			}
+			v := w.Val.(uint256.Int)
+			p.balance = &v
+		case NoncePath:
+			p := pending[w.Address]
+			if p == nil {
+				p = &pendingAccount{}
+				pending[w.Address] = p
+			}
+			v := w.Val.(uint64)
+			p.nonce = &v
+		case IncarnationPath:
+			p := pending[w.Address]
+			if p == nil {
+				p = &pendingAccount{}
+				pending[w.Address] = p
+			}
+			v := w.Val.(uint64)
+			p.incarnation = &v
+		case CodeHashPath:
+			p := pending[w.Address]
+			if p == nil {
+				p = &pendingAccount{}
+				pending[w.Address] = p
+			}
+			v := w.Val.(accounts.CodeHash)
+			p.codeHash = &v
+		case CodePath:
+			code := w.Val.([]byte)
+			var inc uint64
+			if p := pending[w.Address]; p != nil && p.incarnation != nil {
+				inc = *p.incarnation
+			}
+			accumulator.ChangeCode(w.Address.Value(), inc, code)
+		case StoragePath:
+			val := w.Val.(uint256.Int)
+			var inc uint64
+			if p := pending[w.Address]; p != nil && p.incarnation != nil {
+				inc = *p.incarnation
+			}
+			accumulator.ChangeStorage(w.Address.Value(), inc, w.Key.Value(), val.Bytes())
+		}
+	}
+
+	// Flush pending account field groups.
+	for addr, p := range pending {
+		if p.balance == nil && p.nonce == nil {
+			continue // no account fields collected (e.g. only storage/code)
+		}
+		var acc accounts.Account
+		if p.balance != nil {
+			acc.Balance = *p.balance
+		}
+		if p.nonce != nil {
+			acc.Nonce = *p.nonce
+		}
+		if p.incarnation != nil {
+			acc.Incarnation = *p.incarnation
+		}
+		if p.codeHash != nil {
+			acc.CodeHash = *p.codeHash
+		}
+		serialised := accounts.SerialiseV3(&acc)
+		accumulator.ChangeAccount(addr.Value(), acc.Incarnation, serialised)
+	}
+}
 
 // Writer - used by parallel workers to accumulate updates and then send them to conflict-resolution.
 type Writer struct {

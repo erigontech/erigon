@@ -208,6 +208,9 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					if err == nil {
 						err = pe.rs.CommitStepBoundary(ctx, rwTx, applyResult.blockNum, applyResult.txNum)
 					}
+					if err == nil {
+						state.NotifyAccumulator(pe.accumulator, applyResult.writes)
+					}
 					blockApplyCount += len(applyResult.writes)
 					pe.rs.SetTrace(false)
 					if err != nil {
@@ -680,7 +683,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 							blockExecutor.versionMap.FlushVersionedWrites(finalWrites, true, "")
 						}
 
-						collector := state.NewVersionedWriteCollector(pe.rs, pe.accumulator)
+						collector := state.NewVersionedWriteCollector(pe.rs)
 						if err = ibs.MakeWriteSet(txTask.EvmBlockContext.Rules(txTask.Config), collector); err != nil {
 							return nil, err
 						}
@@ -1543,7 +1546,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					}
 				}
 
-				collector := state.NewVersionedWriteCollector(pe.rs, nil)
+				collector := state.NewVersionedWriteCollector(pe.rs)
 
 				_, addReads, addWrites, err := txResult.finalize(prevReceipt, pe.cfg.engine, be.versionMap, stateReader, collector)
 
