@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -207,8 +208,8 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		}
 
 		if dbg.StopAfterBlock > 0 && blockNum == dbg.StopAfterBlock {
-			panic(fmt.Sprintf("stopping: block %d complete", blockNum))
-			//return fmt.Errorf("stopping: block %d complete", blockNum)
+			se.logger.Info(fmt.Sprintf("[%s] STOP_AFTER_BLOCK reached, halting", se.logPrefix), "block", blockNum)
+			os.Exit(0)
 		}
 
 		if offsetFromBlockBeginning > 0 {

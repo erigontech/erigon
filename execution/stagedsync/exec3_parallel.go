@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"os"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -392,7 +393,8 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					blockApplyCount = 0
 
 					if dbg.StopAfterBlock > 0 && applyResult.BlockNum == dbg.StopAfterBlock {
-						return fmt.Errorf("stopping: block %d complete", applyResult.BlockNum)
+						pe.logger.Info(fmt.Sprintf("[%s] STOP_AFTER_BLOCK reached, halting", pe.logPrefix), "block", applyResult.BlockNum)
+						os.Exit(0)
 					}
 
 					if applyResult.BlockNum == maxBlockNum {
