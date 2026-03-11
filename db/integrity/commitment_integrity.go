@@ -1105,8 +1105,8 @@ func CheckCommitmentStateKeyHistory(ctx context.Context, db kv.TemporalRoDB, br 
 // CheckHistoryEfVsV cross-checks .ef entries against .vi+.v for all history domains.
 // For each (key, txNum) recorded in .ef files, it verifies the value can be found
 // via .vi index + .v page lookup. Catches data loss in merged .v files.
-// samplePct controls what percentage of entries to check (1-100, default 5).
-func CheckHistoryEfVsV(ctx context.Context, samplePct int, db kv.TemporalRoDB, br services.FullBlockReader, logger log.Logger) error {
+// probesPerFile controls how many lookups per .ef file (0 = default 1000).
+func CheckHistoryEfVsV(ctx context.Context, probesPerFile int, db kv.TemporalRoDB, br services.FullBlockReader, logger log.Logger) error {
 	start := time.Now()
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -1119,8 +1119,8 @@ func CheckHistoryEfVsV(ctx context.Context, samplePct int, db kv.TemporalRoDB, b
 		return fmt.Errorf("could not get AggregatorRoTx")
 	}
 
-	if samplePct <= 0 {
-		samplePct = 5
+	if probesPerFile <= 0 {
+		probesPerFile = 1000
 	}
 
 	var allBadFiles []string
@@ -1137,8 +1137,8 @@ func CheckHistoryEfVsV(ctx context.Context, samplePct int, db kv.TemporalRoDB, b
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		logger.Info("[integrity] HistoryEfVsV: starting domain", "domain", domain.String(), "samplePct", samplePct)
-		badFiles, mismatches, err := aggTx.CheckHistoryEfAgainstV(ctx, domain, samplePct, logger)
+		logger.Info("[integrity] HistoryEfVsV: starting domain", "domain", domain.String(), "probesPerFile", probesPerFile)
+		badFiles, mismatches, err := aggTx.CheckHistoryEfAgainstV(ctx, domain, probesPerFile, logger)
 		if err != nil {
 			return fmt.Errorf("HistoryEfVsV(%s): %w", domain.String(), err)
 		}

@@ -1302,11 +1302,11 @@ func doIntegrity(cliCtx *cli.Context) error {
 						return err
 					}
 				case integrity.HistoryEfVsV:
-					samplePct := int(sc.SampleRatio * 100)
-					if samplePct <= 0 {
-						samplePct = 5
+					probesPerFile := int(sc.SampleRatio * 10000) // e.g. SampleRatio=0.05 -> 500 probes
+					if probesPerFile <= 0 {
+						probesPerFile = 1000
 					}
-					if err := integrity.CheckHistoryEfVsV(ctx, samplePct, db, blockReader, logger); err != nil {
+					if err := integrity.CheckHistoryEfVsV(ctx, probesPerFile, db, blockReader, logger); err != nil {
 						return err
 					}
 				case integrity.StateRootVerifyByHistory:

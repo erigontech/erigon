@@ -1340,18 +1340,11 @@ func (ht *HistoryRoTx) HistorySeek(key []byte, txNum uint64, roTx kv.Tx) ([]byte
 
 // CheckEfAgainstV iterates .ef files and for each (key, txNum) entry verifies
 // that the corresponding value can be found via .vi index + .v page lookup.
-// samplePct controls what percentage of entries to check (1-100).
+// probesPerFile controls how many random-access lookups per .ef file (0 = use default 1000).
 // Returns list of bad files and total mismatch count.
-func (ht *HistoryRoTx) CheckEfAgainstV(ctx context.Context, samplePct int, logger log.Logger) (badFiles []string, totalMismatches int64, err error) {
-	if samplePct <= 0 {
-		samplePct = 5
-	}
-	if samplePct > 100 {
-		samplePct = 100
-	}
-	sampleInterval := int64(100 / samplePct)
-	if sampleInterval < 1 {
-		sampleInterval = 1
+func (ht *HistoryRoTx) CheckEfAgainstV(ctx context.Context, probesPerFile int, logger log.Logger) (badFiles []string, totalMismatches int64, err error) {
+	if probesPerFile <= 0 {
+		probesPerFile = 1000
 	}
 
 	seq := &multiencseq.SequenceReader{}
@@ -1368,6 +1361,22 @@ func (ht *HistoryRoTx) CheckEfAgainstV(ctx context.Context, samplePct int, logge
 		g := ht.iit.statelessGetter(fileIdx)
 		g.Reset(0)
 
+		// First pass: count total entries to compute sample interval
+		var totalEntries int64
+		for g.HasNext() {
+			_, _ = g.Next(nil)
+			encodedSeq, _ := g.Next(nil)
+			seq.Reset(efFile.startTxNum, encodedSeq)
+			totalEntries += int64(seq.Count())
+		}
+
+		sampleInterval := totalEntries / int64(probesPerFile)
+		if sampleInterval < 1 {
+			sampleInterval = 1
+		}
+
+		// Second pass: sample and check
+		g.Reset(0)
 		var total, checked, mismatches int64
 		var firstMismatchLogged bool
 
@@ -1385,7 +1394,6 @@ func (ht *HistoryRoTx) CheckEfAgainstV(ctx context.Context, samplePct int, logge
 				}
 				total++
 
-				// Deterministic sampling
 				if total%sampleInterval != 0 {
 					continue
 				}
@@ -1444,12 +1452,11 @@ func (ht *HistoryRoTx) CheckEfAgainstV(ctx context.Context, samplePct int, logge
 								"domain", ht.h.FilenameBase, "key", fmt.Sprintf("%x", key),
 								"txNum", txNum, "efFile", g.FileName(),
 								"vFile", vFileName,
-								"recsplitOffset", offset, "rawPageLen", -1)
+								"recsplitOffset", offset)
 							firstMismatchLogged = true
 						}
 					}
 				}
-				// cpvc <= 1: v is the direct value, empty is valid ("key created" marker)
 			}
 		}
 
@@ -1459,7 +1466,6 @@ func (ht *HistoryRoTx) CheckEfAgainstV(ctx context.Context, samplePct int, logge
 			"range", fmt.Sprintf("[%d-%d)", efFile.startTxNum, efFile.endTxNum),
 			"step", fmt.Sprintf("[%d-%d)", efFile.startTxNum/ht.stepSize, efFile.endTxNum/ht.stepSize),
 			"total", total, "checked", checked, "mismatches", mismatches,
-			"samplePct", samplePct,
 		)
 
 		totalMismatches += mismatches
