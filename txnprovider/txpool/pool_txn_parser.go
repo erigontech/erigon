@@ -56,6 +56,7 @@ type TxnParseConfig struct {
 type TxnParseContext struct {
 	validateRlp     func([]byte) error
 	cfg             TxnParseConfig
+	signer          *types.Signer // cached signer for sender recovery (reused across ParseTransaction calls)
 	withSender      bool
 	allowPreEip2s   bool // Allow s > secp256k1n/2; see EIP-2
 	chainIDRequired bool
@@ -71,6 +72,7 @@ func NewTxnParseContext(chainID uint256.Int) *TxnParseContext {
 
 	// behave as of London enabled
 	ctx.cfg.ChainID.Set(&chainID)
+	ctx.signer = types.LatestSignerForChainID(chainID.ToBig())
 	return ctx
 }
 
@@ -253,11 +255,8 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 				}
 			}
 		} else {
-			signer := types.LatestSignerForChainID(ctx.cfg.ChainID.ToBig())
-			if ctx.allowPreEip2s && txn.Type() == types.LegacyTxType {
-				signer.SetMalleable(true)
-			}
-			addr, err := txn.Sender(*signer)
+			ctx.signer.SetMalleable(ctx.allowPreEip2s && txn.Type() == types.LegacyTxType)
+			addr, err := txn.Sender(*ctx.signer)
 			if err != nil {
 				return 0, fmt.Errorf("%w: recovering sender from signature: %s", ErrParseTxn, err) //nolint
 			}
@@ -396,17 +395,15 @@ func (tx *TxnSlot) GetDataNonZeroLen() int {
 	if tx.Txn == nil {
 		return 0
 	}
-	var data []byte
 	if tx.Txn.Type() == types.AccountAbstractionTxType {
 		if aaTx, ok := tx.Txn.(*types.AccountAbstractionTransaction); ok {
-			data = make([]byte, 0, len(aaTx.DeployerData)+len(aaTx.PaymasterData)+len(aaTx.ExecutionData))
-			data = append(data, aaTx.DeployerData...)
-			data = append(data, aaTx.PaymasterData...)
-			data = append(data, aaTx.ExecutionData...)
+			return countNonZero(aaTx.DeployerData) + countNonZero(aaTx.PaymasterData) + countNonZero(aaTx.ExecutionData)
 		}
-	} else {
-		data = tx.Txn.GetData()
 	}
+	return countNonZero(tx.Txn.GetData())
+}
+
+func countNonZero(data []byte) int {
 	count := 0
 	for _, b := range data {
 		if b != 0 {

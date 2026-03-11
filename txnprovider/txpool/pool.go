@@ -1082,7 +1082,8 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 	if txn.IsCreation() {
 		return txpoolcfg.InvalidCreateTxn
 	}
-	blobCount := len(txn.GetBlobHashes())
+	blobHashes := txn.GetBlobHashes()
+	blobCount := len(blobHashes)
 	if blobCount == 0 {
 		return txpoolcfg.NoBlobs
 	}
@@ -1118,7 +1119,7 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 	}
 
 	for i := 0; i < len(commitments); i++ {
-		if libkzg.KZGToVersionedHash(commitments[i]) != libkzg.VersionedHash(txn.GetBlobHashes()[i]) {
+		if libkzg.KZGToVersionedHash(commitments[i]) != libkzg.VersionedHash(blobHashes[i]) {
 			return txpoolcfg.BlobHashCheckFail
 		}
 	}
@@ -1137,7 +1138,7 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 		}
 	}
 
-	if !isLocal && (p.all.blobCount(txn.SenderID)+uint64(len(txn.GetBlobHashes()))) > p.cfg.BlobSlots {
+	if !isLocal && (p.all.blobCount(txn.SenderID)+uint64(blobCount)) > p.cfg.BlobSlots {
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming (too many blobs) idHash=%x slots=%d, limit=%d", txn.IDHash, p.all.count(txn.SenderID), p.cfg.AccountSlots))
 		}
@@ -1698,10 +1699,10 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 	}
 	// All transactions are first added to the queued pool and then immediately promoted from there if required
 	p.queued.Add(mt, "addLocked", p.logger)
-	if mt.TxnSlot.TxType() == BlobTxnType {
+	if blobHashes := mt.TxnSlot.GetBlobHashes(); len(blobHashes) > 0 {
 		t := p.totalBlobsInPool.Load()
-		p.totalBlobsInPool.Store(t + (uint64(len(mt.TxnSlot.GetBlobHashes()))))
-		for i, b := range mt.TxnSlot.GetBlobHashes() {
+		p.totalBlobsInPool.Store(t + uint64(len(blobHashes)))
+		for i, b := range blobHashes {
 			p.blobHashToTxn[b] = struct {
 				index   int
 				txnHash common.Hash
