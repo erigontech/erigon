@@ -727,8 +727,11 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br serv
 		case <-ctx.Done():
 			return 0, ctx.Err()
 		case <-logTicker.C:
+			var m runtime.MemStats
+			dbg.ReadMemStats(&m)
 			rate := float64(total) / time.Since(start).Seconds()
-			logger.Info("[integrity] CommitmentHistVal progress", "at", total, "vals/s", rate, "v", fileName)
+			logger.Info("[integrity] CommitmentHistVal progress", "at", total, "vals/s", rate, "v", fileName, "alloc", common.ByteCount(m.Alloc),
+				"sys", common.ByteCount(m.Sys))
 		default:
 			// no-op
 		}
