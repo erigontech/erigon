@@ -44,14 +44,18 @@ jobs:
       - uses: ./.github/actions/setup-erigon
         id: erigon
         with:
+          # SonarCloud uses JGit for git blame, which cannot lazy-fetch blobs
+          # from partial/blobless clones (known JGit limitation, no fix planned).
+          # A full clone (filter: '') ensures all blobs are present upfront.
           filter: ''
           submodules: true
           lfs: tests
+          ramdisk: true
 
       - name: Run tests with coverage
         env:
           SKIP_FLAKY_TESTS: 'true'
-        run: GOGC=80 make test-sonar-coverage
+        run: make test-sonar-coverage
 
       - name: SonarCloud scan
         uses: SonarSource/sonarqube-scan-action@v7
