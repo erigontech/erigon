@@ -1297,6 +1297,10 @@ func doIntegrity(cliCtx *cli.Context) error {
 					if err := integrity.CheckCommitmentHistVal(ctx, scCopy, db, blockReader, failFast, logger); err != nil {
 						return err
 					}
+				case integrity.CommitmentStateKeyHistory:
+					if err := integrity.CheckCommitmentStateKeyHistory(ctx, db, blockReader, logger); err != nil {
+						return err
+					}
 				case integrity.StateRootVerifyByHistory:
 					to, err := stateProgress(ctx, db, blockReader.TxnumReader())
 					if err != nil {
