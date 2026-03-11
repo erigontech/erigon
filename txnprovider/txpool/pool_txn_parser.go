@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
@@ -189,8 +190,9 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		}
 	}
 
-	// Step 6: Store raw RLP bytes.
+	// Step 6: Store raw RLP bytes and cache size (Rlp may be nilled later after DB flush).
 	slot.Rlp = txBytes
+	slot.Size = uint32(len(txBytes))
 
 	// Step 7: Populate fields that are kept on TxnSlot.
 	slot.Nonce = txn.GetNonce()
@@ -217,8 +219,8 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		if bt.WrapperVersion == 0 && numProofs != numBlobs {
 			return 0, fmt.Errorf("%w: wrong number of proofs for v0 wrapper (%d proofs, %d blobs)", ErrParseTxn, numProofs, numBlobs)
 		}
-		if bt.WrapperVersion == 1 && numProofs != numBlobs*128 {
-			return 0, fmt.Errorf("%w: wrong number of proofs for v1 wrapper (%d proofs, expected %d)", ErrParseTxn, numProofs, numBlobs*128)
+		if bt.WrapperVersion == 1 && numProofs != numBlobs*int(params.CellsPerExtBlob) {
+			return 0, fmt.Errorf("%w: wrong number of proofs for v1 wrapper (%d proofs, expected %d)", ErrParseTxn, numProofs, numBlobs*int(params.CellsPerExtBlob))
 		}
 	}
 
@@ -288,14 +290,13 @@ type TxnSlot struct {
 	Nonce    uint64            // Nonce of the transaction (kept as field for btree search sentinel)
 	IDHash   [32]byte          // Transaction hash for the purposes of using it as a transaction Id
 	Traced   bool              // Whether transaction needs to be traced throughout transaction pool code and generate debug printing
+	Size     uint32            // Cached size of the RLP payload (persists after Rlp is set to nil)
 
 	AuthAndNonces []AuthAndNonce // Indexed authorization signers + nonces for EIP-7702 txns (type-4)
 }
 
 // Accessor methods that delegate to the stored Transaction.
 // These handle nil Txn (used in btree search sentinels and test stubs).
-
-var _zeroUint256 uint256.Int
 
 func (tx *TxnSlot) TxType() byte {
 	if tx.Txn != nil {
@@ -310,7 +311,7 @@ func (tx *TxnSlot) GetTip() *uint256.Int {
 			return v
 		}
 	}
-	return &_zeroUint256
+	return new(uint256.Int)
 }
 
 func (tx *TxnSlot) GetFeeCap() *uint256.Int {
@@ -319,7 +320,7 @@ func (tx *TxnSlot) GetFeeCap() *uint256.Int {
 			return v
 		}
 	}
-	return &_zeroUint256
+	return new(uint256.Int)
 }
 
 func (tx *TxnSlot) GetValue() *uint256.Int {
@@ -328,7 +329,7 @@ func (tx *TxnSlot) GetValue() *uint256.Int {
 			return v
 		}
 	}
-	return &_zeroUint256
+	return new(uint256.Int)
 }
 
 func (tx *TxnSlot) GetGas() uint64 {
@@ -351,7 +352,7 @@ func (tx *TxnSlot) GetChainID() *uint256.Int {
 			return v
 		}
 	}
-	return &_zeroUint256
+	return new(uint256.Int)
 }
 
 func (tx *TxnSlot) GetBlobFeeCap() *uint256.Int {
@@ -367,7 +368,7 @@ func (tx *TxnSlot) GetBlobFeeCap() *uint256.Int {
 			}
 		}
 	}
-	return &_zeroUint256
+	return new(uint256.Int)
 }
 
 func (tx *TxnSlot) GetBlobHashes() []common.Hash {
@@ -377,7 +378,7 @@ func (tx *TxnSlot) GetBlobHashes() []common.Hash {
 	return nil
 }
 
-func (tx *TxnSlot) GetSize() uint32 { return uint32(len(tx.Rlp)) }
+func (tx *TxnSlot) GetSize() uint32 { return tx.Size }
 
 func (tx *TxnSlot) GetDataLen() int {
 	if tx.Txn == nil {
@@ -486,10 +487,10 @@ func (tx *TxnSlot) BlobBundle(i int) (blob []byte, commitment goethkzg.KZGCommit
 	}
 	blob = bt.Blobs[i][:]
 	commitment = goethkzg.KZGCommitment(bt.Commitments[i])
-	// Proofs: for v0 wrappers there's 1 proof per blob, for v1 there are 128 per blob.
+	// Proofs: for v0 wrappers there's 1 proof per blob, for v1 there are CellsPerExtBlob per blob.
 	proofsPerBlob := 1
 	if bt.WrapperVersion == 1 {
-		proofsPerBlob = 128
+		proofsPerBlob = int(params.CellsPerExtBlob)
 	}
 	start := i * proofsPerBlob
 	end := start + proofsPerBlob
