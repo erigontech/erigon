@@ -1020,8 +1020,16 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 		return result.finalizeSystemTx(task, txTask, rules, vm, stateReader, stateWriter)
 	}
 
+	// When BAL is active, the IBS-based finalize path is required because
+	// the BAL hash depends on fine-grained read tracking from the IBS
+	// (initialBalanceValue for net-zero detection, etc.) that the direct
+	// finalize path doesn't replicate.
 	if result.CollectorWrites == nil {
-		return nil, nil, nil, fmt.Errorf("finalize: CollectorWrites unexpectedly nil for tx %d in block %d", txIndex, task.Version().BlockNum)
+		// No LightCollector writes — fall back to IBS-based finalize.
+		return result.finalizeWithIBS(task, txTask, prevReceipt, engine, vm, stateReader, stateWriter,
+			coinbaseDelta, coinbaseDeltaIncrease, hasCoinbaseDelta,
+			burntDelta, burntDeltaIncrease, hasBurntDelta,
+			rules, txTrace, tracePrefix)
 	}
 
 	return result.finalizeTx(task, txTask, prevReceipt, engine, vm, stateReader,
@@ -1058,6 +1066,122 @@ func (result *execResult) finalizeSystemTx(
 		return nil, nil, nil, err
 	}
 	return nil, ibs.VersionedReads(), ibs.VersionedWrites(true), nil
+}
+
+// finalizeWithIBS handles regular TX finalization via full IBS reconstruction.
+// This is the original finalize path used when the direct finalize cannot be
+// applied — specifically when BAL (EIP-7928) is active, because the BAL hash
+// depends on fine-grained read tracking from the IBS that the direct path
+// doesn't replicate.
+func (result *execResult) finalizeWithIBS(
+	task *taskVersion,
+	txTask *exec.TxTask,
+	prevReceipt *types.Receipt,
+	engine rules.Engine,
+	vm *state.VersionMap,
+	stateReader state.StateReader,
+	stateWriter state.StateWriter,
+	coinbaseDelta uint256.Int, coinbaseDeltaIncrease, hasCoinbaseDelta bool,
+	burntDelta uint256.Int, burntDeltaIncrease, hasBurntDelta bool,
+	chainRules *chain.Rules,
+	txTrace bool, tracePrefix string,
+) (*types.Receipt, state.ReadSet, state.VersionedWrites, error) {
+	blockNum := task.Version().BlockNum
+	txIndex := task.Version().TxIndex
+	txIncarnation := task.Version().Incarnation
+
+	ibs := state.New(state.NewVersionedStateReader(txIndex, result.TxIn, vm, stateReader))
+	ibs.SetTxContext(blockNum, txIndex)
+	ibs.SetVersion(txIncarnation)
+	ibs.SetVersionMap(&state.VersionMap{})
+	if err := ibs.ApplyVersionedWrites(result.TxOut); err != nil {
+		return nil, nil, nil, err
+	}
+	ibs.SetTrace(txTask.Trace)
+
+	// Apply the TX's net balance effect on burnt contract (re-based on correct base)
+	if hasBurntDelta {
+		if burntDeltaIncrease {
+			if err := ibs.AddBalance(result.ExecutionResult.BurntContractAddress, burntDelta, tracing.BalanceChangeTransfer); err != nil {
+				return nil, nil, nil, err
+			}
+		} else {
+			if err := ibs.SubBalance(result.ExecutionResult.BurntContractAddress, burntDelta, tracing.BalanceChangeTransfer); err != nil {
+				return nil, nil, nil, err
+			}
+		}
+	}
+	if !result.ExecutionResult.BurntContractAddress.IsNil() && txTask.Config.IsLondon(blockNum) {
+		if err := ibs.AddBalance(result.ExecutionResult.BurntContractAddress, result.ExecutionResult.FeeBurnt, tracing.BalanceDecreaseGasBuy); err != nil {
+			return nil, nil, nil, err
+		}
+	}
+
+	// Apply the TX's net balance effect on coinbase (re-based on correct base)
+	if hasCoinbaseDelta {
+		if coinbaseDeltaIncrease {
+			if err := ibs.AddBalance(result.Coinbase, coinbaseDelta, tracing.BalanceChangeTransfer); err != nil {
+				return nil, nil, nil, err
+			}
+		} else {
+			if err := ibs.SubBalance(result.Coinbase, coinbaseDelta, tracing.BalanceChangeTransfer); err != nil {
+				return nil, nil, nil, err
+			}
+		}
+	}
+	if err := ibs.AddBalance(result.Coinbase, result.ExecutionResult.FeeTipped, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
+		return nil, nil, nil, err
+	}
+
+	if engine != nil {
+		if postApplyMessageFunc := engine.GetPostApplyMessageFunc(); postApplyMessageFunc != nil {
+			execResult := result.ExecutionResult
+			cbReader := state.NewVersionedStateReader(txIndex, nil, vm, stateReader)
+			coinbase, err := cbReader.ReadAccountData(result.Coinbase)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			if coinbase != nil {
+				if txTrace {
+					fmt.Println(blockNum, fmt.Sprintf("(%d.%d)", txIndex, txIncarnation), "CB", fmt.Sprintf("%x", result.Coinbase), fmt.Sprintf("%d", &coinbase.Balance), "nonce", coinbase.Nonce)
+				}
+				execResult.CoinbaseInitBalance = coinbase.Balance
+			}
+			message, err := task.TxMessage()
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			postApplyMessageFunc(
+				ibs,
+				message.From(),
+				result.Coinbase,
+				&execResult,
+				chainRules,
+			)
+			result.Logs = append(result.Logs, ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), blockNum, txTask.BlockHash())...)
+		}
+	}
+
+	if txTrace {
+		vm.SetTrace(true)
+		fmt.Println(tracePrefix, ibs.VersionedWrites(true))
+	}
+
+	allWrites := ibs.VersionedWrites(true)
+	vm.FlushVersionedWrites(allWrites, true, tracePrefix)
+	vm.SetTrace(false)
+	ibs.FinalizeTx(chainRules, stateWriter)
+
+	receipt, err := result.CreateNextReceipt(prevReceipt)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	if hooks := result.TracingHooks(); hooks != nil && hooks.OnTxEnd != nil {
+		hooks.OnTxEnd(receipt, result.Err)
+	}
+
+	return receipt, ibs.VersionedReads(), allWrites, nil
 }
 
 // finalizeTx computes fee-adjusted balances directly on the pre-computed
@@ -1104,10 +1228,12 @@ func (result *execResult) finalizeTx(
 
 	// --- Burnt contract balance ---
 	var newBurntBalance uint256.Int
+	var burntAcc *accounts.Account
 	burntAddr := result.ExecutionResult.BurntContractAddress
 	hasBurnt := !burntAddr.IsNil()
 	if hasBurnt {
-		burntAcc, err := vsReader.ReadAccountData(burntAddr)
+		var err error
+		burntAcc, err = vsReader.ReadAccountData(burntAddr)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -1128,11 +1254,20 @@ func (result *execResult) finalizeTx(
 
 	// Update the pre-computed collector writes with adjusted balances.
 	// These are used for MDBX apply (via applyVersionedWrites).
-	result.CollectorWrites = result.CollectorWrites.SetBalance(
-		result.Coinbase, newCoinbaseBalance, tracing.BalanceIncreaseRewardTransactionFee)
+	// Use SetAccountBalance (not SetBalance) so that when coinbase/burnt
+	// weren't touched during execution (calcFees=false), the full account
+	// fields (nonce, incarnation, codeHash) are emitted alongside the
+	// balance — otherwise applyVersionedWrites would create a partial
+	// account with zeroed fields.
+	//
+	// EIP-161 (SpuriousDragon): if the final account is empty
+	// (balance=0, nonce=0, empty code), delete it instead of writing.
+	emptyRemoval := chainRules.IsSpuriousDragon
+	result.CollectorWrites = result.CollectorWrites.SetAccountBalanceOrDelete(
+		result.Coinbase, coinbaseAcc, newCoinbaseBalance, tracing.BalanceIncreaseRewardTransactionFee, emptyRemoval)
 	if hasBurnt {
-		result.CollectorWrites = result.CollectorWrites.SetBalance(
-			burntAddr, newBurntBalance, tracing.BalanceDecreaseGasBuy)
+		result.CollectorWrites = result.CollectorWrites.SetAccountBalanceOrDelete(
+			burntAddr, burntAcc, newBurntBalance, tracing.BalanceDecreaseGasBuy, emptyRemoval)
 	}
 
 	// Build versionMap writes: the stripped TxOut (IBS-format, no stale
@@ -1217,7 +1352,54 @@ func (result *execResult) finalizeTx(
 		hooks.OnTxEnd(receipt, result.Err)
 	}
 
-	return receipt, nil, allWrites, nil
+	// Build BalancePath reads for ALL unique accounts in TxOut (not just
+	// those with BalancePath writes). The IBS-based finalize path creates
+	// these reads via refreshVersionedAccount, which runs for every account
+	// loaded through GetOrNewStateObject — triggered by ANY write type
+	// (BalancePath, NoncePath, StoragePath, CodePath, etc.).
+	// The BAL uses these reads to set initialBalanceValue for net-zero
+	// detection. Accounts that don't exist (newly created in this block)
+	// are skipped — refreshVersionedAccount isn't called for them either.
+	finalizeReads := make(state.ReadSet, 2)
+	seen := make(map[accounts.Address]struct{}, len(result.TxOut))
+	for _, w := range result.TxOut {
+		if _, ok := seen[w.Address]; ok {
+			continue
+		}
+		seen[w.Address] = struct{}{}
+		acc, err := vsReader.ReadAccountData(w.Address)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if acc != nil {
+			finalizeReads.Set(state.VersionedRead{
+				Address: w.Address,
+				Path:    state.BalancePath,
+				Key:     accounts.NilKey,
+				Val:     acc.Balance,
+			})
+		}
+	}
+	// Also add reads for coinbase/burnt (may not be in TxOut when
+	// calcFees=false and the account wasn't touched during execution).
+	if coinbaseAcc != nil {
+		finalizeReads.Set(state.VersionedRead{
+			Address: result.Coinbase,
+			Path:    state.BalancePath,
+			Key:     accounts.NilKey,
+			Val:     coinbaseAcc.Balance,
+		})
+	}
+	if hasBurnt && burntAcc != nil {
+		finalizeReads.Set(state.VersionedRead{
+			Address: burntAddr,
+			Path:    state.BalancePath,
+			Key:     accounts.NilKey,
+			Val:     burntAcc.Balance,
+		})
+	}
+
+	return receipt, finalizeReads, allWrites, nil
 }
 
 type taskVersion struct {
