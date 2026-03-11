@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"slices"
 	"sync"
 
 	"golang.org/x/sync/errgroup"
@@ -275,6 +276,7 @@ type PagedWriter struct {
 	keys, vals         []byte
 	kLengths, vLengths []int
 
+	pageBuf            []byte // reusable buffer for bytesUncompressedTo in sync path
 	compressionBuf     []byte
 	compressionEnabled bool
 
@@ -411,14 +413,15 @@ func (c *PagedWriter) writePage() error {
 
 	// Synchronous path (single-threaded or disabled workers)
 	if c.numWorkers <= 1 {
-		uncompressedPage, ok := c.bytesUncompressed()
+		var ok bool
+		c.pageBuf, ok = c.bytesUncompressedTo(c.pageBuf[:0])
 		c.resetPage()
 		if !ok {
 			return nil
 		}
 
 		var compressedPage []byte
-		c.compressionBuf, compressedPage = compress.EncodeZstdIfNeed(c.compressionBuf[:0], uncompressedPage, c.compressionEnabled)
+		c.compressionBuf, compressedPage = compress.EncodeZstdIfNeed(c.compressionBuf[:0], c.pageBuf, c.compressionEnabled)
 		if _, err := c.parent.Write(compressedPage); err != nil {
 			return err
 		}
@@ -493,30 +496,18 @@ func (c *PagedWriter) Flush() error {
 	return c.eg.Wait()
 }
 
-func (c *PagedWriter) bytesUncompressed() (wholePage []byte, notEmpty bool) {
-	if len(c.kLengths) == 0 {
-		return nil, false
+func (c *PagedWriter) assertPageKeysNotZero(wholePage []byte) error {
+	cnt := int(wholePage[0])
+	if cnt == 0 {
+		return nil
 	}
-
-	c.keys = append(c.keys, c.vals...)
-	keysAndVals := c.keys
-
-	c.vals = growslice(c.vals[:0], 1+len(c.kLengths)*2*4)
-	wholePage = c.vals
-	clear(wholePage)
-	wholePage[0] = uint8(len(c.kLengths)) // first byte is amount of vals
-	lensBuf := wholePage[1:]
-	for i, l := range c.kLengths {
-		binary.BigEndian.PutUint32(lensBuf[i*4:(i+1)*4], uint32(l))
+	kLens := wholePage[1 : 1+cnt*4]
+	data := wholePage[1+cnt*4*2:]
+	kLen := be.Uint32(kLens[0:4])
+	if kLen > 0 && slices.Max(data[:kLen]) == 0 {
+		return fmt.Errorf("PagedWriter: first key in page is all-zero (len=%d, cnt=%d) in %s", kLen, cnt, c.parent.FileName())
 	}
-	lensBuf = lensBuf[len(c.kLengths)*4:]
-	for i, l := range c.vLengths {
-		binary.BigEndian.PutUint32(lensBuf[i*4:(i+1)*4], uint32(l))
-	}
-
-	wholePage = append(wholePage, keysAndVals...)
-
-	return wholePage, true
+	return nil
 }
 
 // bytesUncompressedTo encodes page into external buffer (no internal state modification)
@@ -525,9 +516,9 @@ func (c *PagedWriter) bytesUncompressedTo(buf []byte) (wholePage []byte, notEmpt
 		return nil, false
 	}
 
-	// Encode page metadata and keys/values into provided buffer
-	neededSize := 1 + len(c.kLengths)*2*4 + len(c.keys) + len(c.vals)
-	wholePage = growslice(buf[:0], neededSize)
+	// Encode page metadata (header only), then append keys and values
+	headerSize := 1 + len(c.kLengths)*2*4
+	wholePage = growslice(buf[:0], headerSize)
 	clear(wholePage)
 
 	wholePage[0] = uint8(len(c.kLengths)) // first byte is amount of vals
@@ -540,7 +531,7 @@ func (c *PagedWriter) bytesUncompressedTo(buf []byte) (wholePage []byte, notEmpt
 		binary.BigEndian.PutUint32(lensBuf[i*4:(i+1)*4], uint32(l))
 	}
 
-	// Append keys and values without modifying internal state
+	// Append keys and values after header (must not be included in pre-allocated size)
 	wholePage = append(wholePage, c.keys...)
 	wholePage = append(wholePage, c.vals...)
 
@@ -549,11 +540,11 @@ func (c *PagedWriter) bytesUncompressedTo(buf []byte) (wholePage []byte, notEmpt
 
 func (c *PagedWriter) bytes() (wholePage []byte, notEmpty bool) {
 	//TODO: alignment,compress+alignment
-	wholePage, notEmpty = c.bytesUncompressed()
+	c.pageBuf, notEmpty = c.bytesUncompressedTo(c.pageBuf[:0])
 	if !notEmpty {
 		return nil, false
 	}
-	c.compressionBuf, wholePage = compress.EncodeZstdIfNeed(c.compressionBuf[:0], wholePage, c.compressionEnabled)
+	c.compressionBuf, wholePage = compress.EncodeZstdIfNeed(c.compressionBuf[:0], c.pageBuf, c.compressionEnabled)
 	return wholePage, true
 }
 
