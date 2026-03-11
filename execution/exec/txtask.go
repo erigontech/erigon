@@ -111,6 +111,12 @@ type TxResult struct {
 	TraceFroms        map[accounts.Address]struct{}
 	TraceTos          map[accounts.Address]struct{}
 	AccessedAddresses state.AccessSet
+
+	// CollectorWrites holds collector-format writes (all 4 account fields per
+	// address) produced by MakeWriteSet during worker execution. Used by the
+	// parallel finalize path to skip full IBS reconstruction: fee-calc balance
+	// adjustments are applied directly to these writes.
+	CollectorWrites state.VersionedWrites
 }
 
 func (r *TxResult) compare(other *TxResult) int {

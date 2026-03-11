@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/holiman/uint256"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
@@ -501,7 +502,7 @@ func (pe *parallelExecutor) resetWorkers(ctx context.Context, rs *state.StateV3B
 
 	for _, worker := range pe.execWorkers {
 		// parallel workers hold thier own tx don't pass in an externals tx
-		worker.ResetState(rs, nil, nil, state.NewNoopWriter(), nil)
+		worker.ResetState(rs, nil, nil, state.NewLightCollector(), nil)
 	}
 
 	return nil
@@ -1013,8 +1014,38 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 		return nil, nil, nil, nil
 	}
 
+	rules := txTask.EvmBlockContext.Rules(txTask.Config)
+
+	if txIndex < 0 || task.IsBlockEnd() {
+		return result.finalizeSystemTx(task, txTask, rules, vm, stateReader, stateWriter)
+	}
+
+	if result.CollectorWrites == nil {
+		return nil, nil, nil, fmt.Errorf("finalize: CollectorWrites unexpectedly nil for tx %d in block %d", txIndex, task.Version().BlockNum)
+	}
+
+	return result.finalizeTx(task, txTask, prevReceipt, engine, vm, stateReader,
+		coinbaseDelta, coinbaseDeltaIncrease, hasCoinbaseDelta,
+		burntDelta, burntDeltaIncrease, hasBurntDelta,
+		rules, txTrace, tracePrefix)
+}
+
+// finalizeSystemTx handles block-end and system TXs (txIndex < 0) via full
+// IBS reconstruction. These are infrequent (1 per block) so the overhead is
+// acceptable.
+func (result *execResult) finalizeSystemTx(
+	task *taskVersion,
+	txTask *exec.TxTask,
+	rules *chain.Rules,
+	vm *state.VersionMap,
+	stateReader state.StateReader,
+	stateWriter state.StateWriter,
+) (*types.Receipt, state.ReadSet, state.VersionedWrites, error) {
+	blockNum := task.Version().BlockNum
+	txIndex := task.Version().TxIndex
+	txIncarnation := task.Version().Incarnation
+
 	ibs := state.New(state.NewVersionedStateReader(txIndex, result.TxIn, vm, stateReader))
-	// defer ibs.Release(true) - do not release this one because it is long lived. TODO: fix.
 	ibs.SetTxContext(blockNum, txIndex)
 	ibs.SetVersion(txIncarnation)
 	ibs.SetVersionMap(&state.VersionMap{})
@@ -1023,106 +1054,161 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 	}
 	ibs.SetTrace(txTask.Trace)
 
-	rules := txTask.EvmBlockContext.Rules(txTask.Config)
+	if err := ibs.FinalizeTx(rules, stateWriter); err != nil {
+		return nil, nil, nil, err
+	}
+	return nil, ibs.VersionedReads(), ibs.VersionedWrites(true), nil
+}
 
-	if task.IsBlockEnd() || txIndex < 0 {
-		if err := ibs.FinalizeTx(rules, stateWriter); err != nil {
+// finalizeTx computes fee-adjusted balances directly on the pre-computed
+// collector writes without reconstructing the full IBS. This avoids the
+// expensive ApplyVersionedWrites → IBS stateObject creation for ALL TX writes.
+// Only the fee-calc accounts (coinbase, burnt contract) are touched.
+func (result *execResult) finalizeTx(
+	task *taskVersion,
+	txTask *exec.TxTask,
+	prevReceipt *types.Receipt,
+	engine rules.Engine,
+	vm *state.VersionMap,
+	stateReader state.StateReader,
+	coinbaseDelta uint256.Int, coinbaseDeltaIncrease, hasCoinbaseDelta bool,
+	burntDelta uint256.Int, burntDeltaIncrease, hasBurntDelta bool,
+	chainRules *chain.Rules,
+	txTrace bool, tracePrefix string,
+) (*types.Receipt, state.ReadSet, state.VersionedWrites, error) {
+	blockNum := task.Version().BlockNum
+	txIndex := task.Version().TxIndex
+	txIncarnation := task.Version().Incarnation
+
+	// Read correct base balances from the version map (bypassing TxIn
+	// which had stale speculative reads).
+	vsReader := state.NewVersionedStateReader(txIndex, nil, vm, stateReader)
+
+	// --- Coinbase balance ---
+	coinbaseAcc, err := vsReader.ReadAccountData(result.Coinbase)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	var newCoinbaseBalance uint256.Int
+	if coinbaseAcc != nil {
+		newCoinbaseBalance = coinbaseAcc.Balance
+	}
+	if hasCoinbaseDelta {
+		if coinbaseDeltaIncrease {
+			newCoinbaseBalance.Add(&newCoinbaseBalance, &coinbaseDelta)
+		} else {
+			newCoinbaseBalance.Sub(&newCoinbaseBalance, &coinbaseDelta)
+		}
+	}
+	newCoinbaseBalance.Add(&newCoinbaseBalance, &result.ExecutionResult.FeeTipped)
+
+	// --- Burnt contract balance ---
+	var newBurntBalance uint256.Int
+	burntAddr := result.ExecutionResult.BurntContractAddress
+	hasBurnt := !burntAddr.IsNil()
+	if hasBurnt {
+		burntAcc, err := vsReader.ReadAccountData(burntAddr)
+		if err != nil {
 			return nil, nil, nil, err
 		}
-		return nil, ibs.VersionedReads(), ibs.VersionedWrites(true), nil
-	}
-
-	if task.shouldDelayFeeCalc {
-		// Apply the TX's net balance effect on burnt contract (re-based on correct base)
+		if burntAcc != nil {
+			newBurntBalance = burntAcc.Balance
+		}
 		if hasBurntDelta {
 			if burntDeltaIncrease {
-				if err := ibs.AddBalance(result.ExecutionResult.BurntContractAddress, burntDelta, tracing.BalanceChangeTransfer); err != nil {
-					return nil, nil, nil, err
-				}
+				newBurntBalance.Add(&newBurntBalance, &burntDelta)
 			} else {
-				if err := ibs.SubBalance(result.ExecutionResult.BurntContractAddress, burntDelta, tracing.BalanceChangeTransfer); err != nil {
-					return nil, nil, nil, err
-				}
+				newBurntBalance.Sub(&newBurntBalance, &burntDelta)
 			}
 		}
-		if !result.ExecutionResult.BurntContractAddress.IsNil() && txTask.Config.IsLondon(blockNum) {
-			if err := ibs.AddBalance(result.ExecutionResult.BurntContractAddress, result.ExecutionResult.FeeBurnt, tracing.BalanceDecreaseGasBuy); err != nil {
+		if txTask.Config.IsLondon(blockNum) {
+			newBurntBalance.Add(&newBurntBalance, &result.ExecutionResult.FeeBurnt)
+		}
+	}
+
+	// Update the pre-computed collector writes with adjusted balances.
+	// These are used for MDBX apply (via applyVersionedWrites).
+	result.CollectorWrites = result.CollectorWrites.SetBalance(
+		result.Coinbase, newCoinbaseBalance, tracing.BalanceIncreaseRewardTransactionFee)
+	if hasBurnt {
+		result.CollectorWrites = result.CollectorWrites.SetBalance(
+			burntAddr, newBurntBalance, tracing.BalanceDecreaseGasBuy)
+	}
+
+	// Build versionMap writes: the stripped TxOut (IBS-format, no stale
+	// coinbase/burnt balances) plus the adjusted balance writes.
+	allWrites := make(state.VersionedWrites, len(result.TxOut), len(result.TxOut)+2)
+	copy(allWrites, result.TxOut)
+	allWrites = append(allWrites, &state.VersionedWrite{
+		Address: result.Coinbase,
+		Path:    state.BalancePath,
+		Val:     newCoinbaseBalance,
+		Reason:  tracing.BalanceIncreaseRewardTransactionFee,
+	})
+	if hasBurnt {
+		allWrites = append(allWrites, &state.VersionedWrite{
+			Address: burntAddr,
+			Path:    state.BalancePath,
+			Val:     newBurntBalance,
+			Reason:  tracing.BalanceDecreaseGasBuy,
+		})
+	}
+
+	// Handle PostApplyMessage with a minimal IBS containing only the
+	// fee-calc accounts. This avoids reconstructing stateObjects for all
+	// TX writes; only coinbase/burnt get loaded.
+	if engine != nil {
+		if postApplyMessageFunc := engine.GetPostApplyMessageFunc(); postApplyMessageFunc != nil {
+			minIBS := state.New(vsReader)
+			minIBS.SetTxContext(blockNum, txIndex)
+			minIBS.SetVersion(txIncarnation)
+			minIBS.SetVersionMap(&state.VersionMap{})
+			// Set adjusted balances so GetRemovedAccountsWithBalance
+			// can detect selfdestructed fee accounts with residual balance.
+			if err := minIBS.SetBalance(result.Coinbase, newCoinbaseBalance, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
 				return nil, nil, nil, err
 			}
-		}
-
-		// Apply the TX's net balance effect on coinbase (re-based on correct base)
-		if hasCoinbaseDelta {
-			if coinbaseDeltaIncrease {
-				if err := ibs.AddBalance(result.Coinbase, coinbaseDelta, tracing.BalanceChangeTransfer); err != nil {
-					return nil, nil, nil, err
-				}
-			} else {
-				if err := ibs.SubBalance(result.Coinbase, coinbaseDelta, tracing.BalanceChangeTransfer); err != nil {
+			if hasBurnt {
+				if err := minIBS.SetBalance(burntAddr, newBurntBalance, tracing.BalanceDecreaseGasBuy); err != nil {
 					return nil, nil, nil, err
 				}
 			}
-		}
-		if err := ibs.AddBalance(result.Coinbase, result.ExecutionResult.FeeTipped, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
-			return nil, nil, nil, err
-		}
 
-		if engine != nil {
-			if postApplyMessageFunc := engine.GetPostApplyMessageFunc(); postApplyMessageFunc != nil {
-				execResult := result.ExecutionResult
-				// Use a versionedStateReader to get the coinbase balance
-				// deterministically from the block's version map (which
-				// includes fee-calc writes from prior txs) instead of
-				// reading from stateReader whose content depends on
-				// apply-loop timing.
-				cbReader := state.NewVersionedStateReader(txIndex, nil, vm, stateReader)
-				coinbase, err := cbReader.ReadAccountData(result.Coinbase) // to generate logs we want the initial balance
-
-				if err != nil {
-					return nil, nil, nil, err
+			execResult := result.ExecutionResult
+			if coinbaseAcc != nil {
+				if txTrace {
+					fmt.Println(blockNum, fmt.Sprintf("(%d.%d)", txIndex, txIncarnation), "CB", fmt.Sprintf("%x", result.Coinbase), fmt.Sprintf("%d", &coinbaseAcc.Balance), "nonce", coinbaseAcc.Nonce)
 				}
-
-				if coinbase != nil {
-					if txTrace {
-						fmt.Println(blockNum, fmt.Sprintf("(%d.%d)", txIndex, txIncarnation), "CB", fmt.Sprintf("%x", result.Coinbase), fmt.Sprintf("%d", &coinbase.Balance), "nonce", coinbase.Nonce)
-					}
-					execResult.CoinbaseInitBalance = coinbase.Balance
-				}
-
-				message, err := task.TxMessage()
-				if err != nil {
-					return nil, nil, nil, err
-				}
-
-				postApplyMessageFunc(
-					ibs,
-					message.From(),
-					result.Coinbase,
-					&execResult,
-					rules,
-				)
-
-				// capture postApplyMessageFunc side affects
-				result.Logs = append(result.Logs, ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), blockNum, txTask.BlockHash())...)
+				execResult.CoinbaseInitBalance = coinbaseAcc.Balance
 			}
+
+			message, err := task.TxMessage()
+			if err != nil {
+				return nil, nil, nil, err
+			}
+
+			postApplyMessageFunc(
+				minIBS,
+				message.From(),
+				result.Coinbase,
+				&execResult,
+				chainRules,
+			)
+
+			// Capture PostApplyMessage side effects (logs).
+			result.Logs = append(result.Logs, minIBS.GetLogs(txTask.TxIndex, txTask.TxHash(), blockNum, txTask.BlockHash())...)
 		}
 	}
 
 	if txTrace {
 		vm.SetTrace(true)
-		fmt.Println(tracePrefix, ibs.VersionedWrites(true))
+		fmt.Println(tracePrefix, allWrites)
 	}
-
-	// we need to flush the finalized writes to the version map so
-	// they are taken into account by subsequent transactions
-	allWrites := ibs.VersionedWrites(true)
 
 	vm.FlushVersionedWrites(allWrites, true, tracePrefix)
 	vm.SetTrace(false)
-	ibs.FinalizeTx(rules, stateWriter)
 
 	receipt, err := result.CreateNextReceipt(prevReceipt)
-
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -1131,7 +1217,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 		hooks.OnTxEnd(receipt, result.Err)
 	}
 
-	return receipt, ibs.VersionedReads(), allWrites, nil
+	return receipt, nil, allWrites, nil
 }
 
 type taskVersion struct {
@@ -1564,7 +1650,14 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					be.versionMap.FlushVersionedWrites(merged, true, "")
 				}
 
-				txResult.writes = collector.Writes()
+				// Use pre-computed collector writes from finalizeDirect
+				// when available; otherwise fall back to the legacy
+				// collector populated by FinalizeTx in the IBS path.
+				if txResult.CollectorWrites != nil {
+					txResult.writes = txResult.CollectorWrites
+				} else {
+					txResult.writes = collector.Writes()
+				}
 
 				be.publishTasks.pushPending(tx)
 			}

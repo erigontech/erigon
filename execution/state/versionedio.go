@@ -577,6 +577,21 @@ func (writes VersionedWrites) StripBalanceWrite(addr accounts.Address, readSet R
 	return
 }
 
+// SetBalance replaces the BalancePath write for addr in the write set with
+// the given value. If no existing BalancePath write is found, a new entry is
+// appended. This is used in the direct finalize path to adjust fee-calc
+// balances in pre-computed collector writes without IBS reconstruction.
+func (writes VersionedWrites) SetBalance(addr accounts.Address, val uint256.Int, reason tracing.BalanceChangeReason) VersionedWrites {
+	for _, w := range writes {
+		if w.Address == addr && w.Path == BalancePath {
+			w.Val = val
+			w.Reason = reason
+			return writes
+		}
+	}
+	return append(writes, &VersionedWrite{Address: addr, Path: BalancePath, Val: val, Reason: reason})
+}
+
 func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path AccountPath, key accounts.StorageKey, commited bool, defaultV T, copyV func(T) T, readStorage func(sdb *stateObject) (T, error)) (T, ReadSource, Version, error) {
 	if s.versionMap == nil {
 		so, err := s.getStateObject(addr, true)
