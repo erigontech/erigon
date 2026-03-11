@@ -287,7 +287,7 @@ func jumpTable(chainRules *chain.Rules, cfg Config) *JumpTable {
 func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly bool) (_ []byte, _ mdgas.MdGas, err error) {
 	// Don't bother with the execution if there's no code.
 	if len(contract.Code) == 0 {
-		return nil, mdgas.MdGas{}, nil
+		return nil, gas, nil
 	}
 
 	// Reset the previous call's return data. It's unimportant to preserve the old buffer
