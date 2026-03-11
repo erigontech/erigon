@@ -444,19 +444,25 @@ func (c *PagedWriter) FileName() string { return c.parent.FileName() }
 func (c *PagedWriter) writePage() error {
 	// When page-level compression is enabled, defer compression to Compress() method
 	if !c.compressionEnabled {
-		bts, ok := c.bytes()
+		bts, ok, err := c.bytes()
 		c.resetPage()
+		if err != nil {
+			return err
+		}
 		if !ok {
 			return nil
 		}
-		_, err := c.parent.Write(bts)
+		_, err = c.parent.Write(bts)
 		return err
 	}
 
 	// Synchronous path (single-threaded or disabled workers)
 	if c.numWorkers <= 1 {
-		uncompressedPage, ok := c.bytesUncompressed()
+		uncompressedPage, ok, err := c.bytesUncompressed()
 		c.resetPage()
+		if err != nil {
+			return err
+		}
 		if !ok {
 			return nil
 		}
@@ -472,8 +478,13 @@ func (c *PagedWriter) writePage() error {
 	// Async path with parallel workers
 	item := getPageWorkItem()
 	var ok bool
-	item.uncompressedData, ok = c.bytesUncompressedTo(item.uncompressedData)
+	var err error
+	item.uncompressedData, ok, err = c.bytesUncompressedTo(item.uncompressedData)
 	c.resetPage()
+	if err != nil {
+		putPageWorkItem(item)
+		return err
+	}
 	if !ok {
 		putPageWorkItem(item)
 		return nil
@@ -499,7 +510,7 @@ func (c *PagedWriter) Add(k, v []byte) (err error) {
 
 	// Assert: key must not be all zeros (catches PagedWriter data loss bugs)
 	if len(k) > 0 && slices.Max(k) == 0 {
-		panic(fmt.Sprintf("PagedWriter.Add: all-zero key of len %d in %s (pairs=%d)", len(k), c.parent.FileName(), c.pairs))
+		return fmt.Errorf("PagedWriter.Add: all-zero key of len %d in %s (pairs=%d)", len(k), c.parent.FileName(), c.pairs)
 	}
 
 	c.pairs++
@@ -542,9 +553,9 @@ func (c *PagedWriter) Flush() error {
 	return c.eg.Wait()
 }
 
-func (c *PagedWriter) bytesUncompressed() (wholePage []byte, notEmpty bool) {
+func (c *PagedWriter) bytesUncompressed() (wholePage []byte, notEmpty bool, err error) {
 	if len(c.kLengths) == 0 {
-		return nil, false
+		return nil, false, nil
 	}
 
 	c.keys = append(c.keys, c.vals...)
@@ -566,28 +577,31 @@ func (c *PagedWriter) bytesUncompressed() (wholePage []byte, notEmpty bool) {
 	wholePage = append(wholePage, keysAndVals...)
 
 	// Assert: verify first key in serialized page isn't all zeros (catches memory corruption)
-	c.assertPageKeysNotZero(wholePage)
+	if err := c.assertPageKeysNotZero(wholePage); err != nil {
+		return nil, false, err
+	}
 
-	return wholePage, true
+	return wholePage, true, nil
 }
 
-func (c *PagedWriter) assertPageKeysNotZero(wholePage []byte) {
+func (c *PagedWriter) assertPageKeysNotZero(wholePage []byte) error {
 	cnt := int(wholePage[0])
 	if cnt == 0 {
-		return
+		return nil
 	}
 	kLens := wholePage[1 : 1+cnt*4]
 	data := wholePage[1+cnt*4*2:]
 	kLen := be.Uint32(kLens[0:4])
 	if kLen > 0 && slices.Max(data[:kLen]) == 0 {
-		panic(fmt.Sprintf("PagedWriter: first key in page is all-zero (len=%d, cnt=%d) in %s", kLen, cnt, c.parent.FileName()))
+		return fmt.Errorf("PagedWriter: first key in page is all-zero (len=%d, cnt=%d) in %s", kLen, cnt, c.parent.FileName())
 	}
+	return nil
 }
 
 // bytesUncompressedTo encodes page into external buffer (no internal state modification)
-func (c *PagedWriter) bytesUncompressedTo(buf []byte) (wholePage []byte, notEmpty bool) {
+func (c *PagedWriter) bytesUncompressedTo(buf []byte) (wholePage []byte, notEmpty bool, err error) {
 	if len(c.kLengths) == 0 {
-		return nil, false
+		return nil, false, nil
 	}
 
 	// Encode page metadata and keys/values into provided buffer
@@ -609,19 +623,21 @@ func (c *PagedWriter) bytesUncompressedTo(buf []byte) (wholePage []byte, notEmpt
 	wholePage = append(wholePage, c.keys...)
 	wholePage = append(wholePage, c.vals...)
 
-	c.assertPageKeysNotZero(wholePage)
+	if err := c.assertPageKeysNotZero(wholePage); err != nil {
+		return nil, false, err
+	}
 
-	return wholePage, true
+	return wholePage, true, nil
 }
 
-func (c *PagedWriter) bytes() (wholePage []byte, notEmpty bool) {
+func (c *PagedWriter) bytes() (wholePage []byte, notEmpty bool, err error) {
 	//TODO: alignment,compress+alignment
-	wholePage, notEmpty = c.bytesUncompressed()
-	if !notEmpty {
-		return nil, false
+	wholePage, notEmpty, err = c.bytesUncompressed()
+	if !notEmpty || err != nil {
+		return nil, false, err
 	}
 	c.compressionBuf, wholePage = compress.EncodeZstdIfNeed(c.compressionBuf[:0], wholePage, c.compressionEnabled)
-	return wholePage, true
+	return wholePage, true, nil
 }
 
 func (c *PagedWriter) DisableFsync() {
