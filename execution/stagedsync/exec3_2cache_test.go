@@ -135,7 +135,7 @@ func TestCrossBlockTimingRace(t *testing.T) {
 	require.Equal(t, uint64(0), rawBal.Uint64(),
 		"plain domain reader must NOT see block N's balance yet (the timing hole)")
 
-	// Simulate ApplyTxState completing (domain apply catches up).
+	// Simulate ApplyStateWrites completing (domain apply catches up).
 	w := state.NewWriter(domains.AsPutDel(tx), nil, 5)
 	ibsApply := state.New(state.NewReaderV3(domains.AsGetter(tx)))
 	ibsApply.SetTxContext(1, 0)

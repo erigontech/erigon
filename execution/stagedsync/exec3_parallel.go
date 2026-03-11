@@ -199,9 +199,15 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						fmt.Println(applyResult.blockNum, "apply", applyResult.txNum, len(applyResult.writes))
 					}
 					blockUpdateCount += len(applyResult.writes)
-					err := pe.rs.ApplyTxState(ctx, rwTx, applyResult.blockNum, applyResult.txNum, applyResult.writes,
-						nil, applyResult.receipt, applyResult.blobGasUsed, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,
-						pe.cfg.chainConfig, applyResult.rules, false)
+					err := pe.rs.ApplyStateWrites(ctx, rwTx, applyResult.blockNum, applyResult.txNum, applyResult.writes,
+						nil, applyResult.rules)
+					if err == nil {
+						err = pe.rs.ApplyTxIndexes(rwTx, applyResult.txNum, applyResult.receipt, applyResult.blobGasUsed,
+							applyResult.logs, applyResult.traceFroms, applyResult.traceTos)
+					}
+					if err == nil {
+						err = pe.rs.CommitStepBoundary(ctx, rwTx, applyResult.blockNum, applyResult.txNum)
+					}
 					blockApplyCount += len(applyResult.writes)
 					pe.rs.SetTrace(false)
 					if err != nil {

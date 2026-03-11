@@ -258,43 +258,49 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 	return nil
 }
 
-func (rs *StateV3) ApplyTxState(ctx context.Context,
+// ApplyStateWrites applies account/storage/code mutations to SharedDomains.
+func (rs *StateV3) ApplyStateWrites(ctx context.Context,
 	roTx kv.TemporalTx,
 	blockNum uint64,
 	txNum uint64,
 	writes VersionedWrites,
 	balanceIncreases map[accounts.Address]uint256.Int,
+	rules *chain.Rules,
+) error {
+	if err := rs.applyVersionedWrites(roTx, blockNum, txNum, writes, balanceIncreases, rules); err != nil {
+		return fmt.Errorf("StateV3.ApplyStateWrites: %w", err)
+	}
+	return nil
+}
+
+// ApplyTxIndexes writes trace indices, log indices, and receipts.
+func (rs *StateV3) ApplyTxIndexes(
+	roTx kv.TemporalTx,
+	txNum uint64,
 	receipt *types.Receipt,
 	cummulativeBlobGas uint64,
 	logs []*types.Log,
 	traceFroms map[accounts.Address]struct{},
 	traceTos map[accounts.Address]struct{},
-	config *chain.Config,
-	rules *chain.Rules,
-	historyExecution bool) error {
-	if historyExecution {
-		return nil
+) error {
+	if err := rs.applyLogsAndTraces4(roTx, txNum, receipt, cummulativeBlobGas, logs, traceFroms, traceTos, false); err != nil {
+		return fmt.Errorf("StateV3.ApplyTxIndexes: %w", err)
 	}
-	//defer rs.domains.BatchHistoryWriteStart().BatchHistoryWriteEnd()
+	return nil
+}
 
-	if err := rs.applyVersionedWrites(roTx, blockNum, txNum, writes, balanceIncreases, rules); err != nil {
-		return fmt.Errorf("StateV3.ApplyState: %w", err)
-	}
-
-	if err := rs.applyLogsAndTraces4(roTx, txNum, receipt, cummulativeBlobGas, logs, traceFroms, traceTos, historyExecution); err != nil {
-		return fmt.Errorf("StateV3.ApplyLogsAndTraces: %w", err)
-	}
-
-	if (txNum+1)%rs.domains.StepSize() == 0 /*&& txTask.TxNum > 0 */ && !dbg.DiscardCommitment() {
-		// We do not update txNum before commitment cuz otherwise committed state will be in the beginning of next file, not in the latest.
-		// That's why we need to make txnum++ on SeekCommitment to get exact txNum for the latest committed state.
-		//fmt.Printf("[commitment] running due to txNum reached aggregation step %d\n", txNum/rs.domains.StepSize())
-		_, err := rs.domains.ComputeCommitment(ctx, roTx, true, blockNum, txNum, fmt.Sprintf("applying step %d", txNum/rs.domains.StepSize()), nil)
+// CommitStepBoundary computes and persists a trie commitment when txNum falls
+// on an aggregation step boundary. This ensures commitment domain snapshots
+// contain a commitment state at each step end, even when the boundary falls
+// mid-block.
+func (rs *StateV3) CommitStepBoundary(ctx context.Context, roTx kv.TemporalTx, blockNum, txNum uint64) error {
+	if (txNum+1)%rs.domains.StepSize() == 0 && !dbg.DiscardCommitment() {
+		_, err := rs.domains.ComputeCommitment(ctx, roTx, true, blockNum, txNum,
+			fmt.Sprintf("applying step %d", txNum/rs.domains.StepSize()), nil)
 		if err != nil {
-			return fmt.Errorf("ParallelExecutionState.ComputeCommitment: %w", err)
+			return fmt.Errorf("StateV3.CommitStepBoundary: %w", err)
 		}
 	}
-
 	return nil
 }
 
