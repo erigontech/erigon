@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"slices"
 	"sync"
 
 	"golang.org/x/sync/errgroup"
@@ -496,6 +497,11 @@ func (c *PagedWriter) Add(k, v []byte) (err error) {
 		return err
 	}
 
+	// Assert: key must not be all zeros (catches PagedWriter data loss bugs)
+	if len(k) > 0 && slices.Max(k) == 0 {
+		panic(fmt.Sprintf("PagedWriter.Add: all-zero key of len %d in %s (pairs=%d)", len(k), c.parent.FileName(), c.pairs))
+	}
+
 	c.pairs++
 	c.kLengths = append(c.kLengths, len(k))
 	c.vLengths = append(c.vLengths, len(v))
@@ -559,7 +565,23 @@ func (c *PagedWriter) bytesUncompressed() (wholePage []byte, notEmpty bool) {
 
 	wholePage = append(wholePage, keysAndVals...)
 
+	// Assert: verify first key in serialized page isn't all zeros (catches memory corruption)
+	c.assertPageKeysNotZero(wholePage)
+
 	return wholePage, true
+}
+
+func (c *PagedWriter) assertPageKeysNotZero(wholePage []byte) {
+	cnt := int(wholePage[0])
+	if cnt == 0 {
+		return
+	}
+	kLens := wholePage[1 : 1+cnt*4]
+	data := wholePage[1+cnt*4*2:]
+	kLen := be.Uint32(kLens[0:4])
+	if kLen > 0 && slices.Max(data[:kLen]) == 0 {
+		panic(fmt.Sprintf("PagedWriter: first key in page is all-zero (len=%d, cnt=%d) in %s", kLen, cnt, c.parent.FileName()))
+	}
 }
 
 // bytesUncompressedTo encodes page into external buffer (no internal state modification)
@@ -586,6 +608,8 @@ func (c *PagedWriter) bytesUncompressedTo(buf []byte) (wholePage []byte, notEmpt
 	// Append keys and values without modifying internal state
 	wholePage = append(wholePage, c.keys...)
 	wholePage = append(wholePage, c.vals...)
+
+	c.assertPageKeysNotZero(wholePage)
 
 	return wholePage, true
 }
