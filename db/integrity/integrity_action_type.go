@@ -90,6 +90,13 @@ const (
 	// consistent. This is a statistical check used to catch corruption without checking every value.
 	CommitmentHistVal Check = "CommitmentHistVal"
 
+	// StateRootVerifyByHistory verifies block state roots against commitment history over a
+	// specific block range. For each sampled block, it reads the commitment trie state from
+	// history snapshots and checks that the re-derived root matches the header's stored state
+	// root. Does NOT re-execute transactions — relies solely on history domain reads.
+	// More targeted than CommitmentHistVal when a particular block range is suspect.
+	StateRootVerifyByHistory Check = "StateRootVerifyByHistory"
+
 	// StateVerify verifies state correspondence between commitment and domains. Checks that
 	// every key in account/storage domains is properly referenced by commitment branches,
 	// and vice versa. Catches missing or extra keys. Uses forward check for base files
@@ -111,13 +118,14 @@ const (
 )
 
 var FastChecks = []Check{
-	Blocks, HeaderNoGaps, BlocksTxnID, InvertedIndex, StateProgress, Publishable, HistoryNoSystemTxs,
-	BorEvents, BorSpans, BorCheckpoints, ReceiptsNoDups, RCacheNoDups, CommitmentRoot,
-	CommitmentKvi,
+	Blocks, HeaderNoGaps, BlocksTxnID, InvertedIndex, StateProgress, HistoryNoSystemTxs,
+	CommitmentKvi, ReceiptsNoDups, RCacheNoDups, CommitmentRoot,
+	CommitmentHistVal, StateRootVerifyByHistory, Publishable,
 }
 
-var SlowChecks = []Check{CommitmentHistVal, StateVerify}
+var SlowChecks = []Check{StateVerify}
 var DeprecatedChecks = []Check{
+	BorEvents, BorSpans, BorCheckpoints,
 	CommitmentKvDeref, //StateVerify - will overcome
 }
 var AllChecks = append(append(append([]Check{}, FastChecks...), SlowChecks...), DeprecatedChecks...)
