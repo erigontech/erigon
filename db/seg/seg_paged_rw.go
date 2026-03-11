@@ -68,6 +68,49 @@ func GetFromPage(key, compressedPage []byte, compressionBuf []byte, compressionE
 	return nil, compressionBuf
 }
 
+// GetFromPageDebug is like GetFromPage but returns diagnostic info when the key is not found.
+// Returns: value, compressionBuf, pageKeyCount, first 3 keys in the page (hex-encoded), last 3 keys.
+func GetFromPageDebug(key, compressedPage []byte, compressionBuf []byte, compressionEnabled bool) (v []byte, compressionBufOut []byte, pageCnt int, firstKeys, lastKeys []string) {
+	var err error
+	var page []byte
+	compressionBuf, page, err = compress.DecodeZstdIfNeed(compressionBuf[:0], compressedPage, compressionEnabled)
+	if err != nil {
+		panic(err)
+	}
+
+	cnt := int(page[0])
+	if cnt == 0 {
+		return nil, compressionBuf, 0, nil, nil
+	}
+	meta, data := page[1:1+cnt*4*2], page[1+cnt*4*2:]
+	kLens, vLens := meta[:cnt*4], meta[cnt*4:]
+	var kOffset, vOffset uint32
+	for i := 0; i < cnt*4; i += 4 {
+		vOffset += be.Uint32(kLens[i:])
+	}
+	keys := data[:vOffset]
+	vals := data[vOffset:]
+	vOffset = 0
+
+	const sample = 3
+	allKeys := make([]string, 0, cnt)
+	for i := 0; i < cnt*4; i += 4 {
+		kLen, vLen := be.Uint32(kLens[i:]), be.Uint32(vLens[i:])
+		foundKey := keys[kOffset : kOffset+kLen]
+		allKeys = append(allKeys, fmt.Sprintf("%x", foundKey))
+		if bytes.Equal(key, foundKey) {
+			return vals[vOffset : vOffset+vLen], compressionBuf, cnt, nil, nil
+		}
+		kOffset += kLen
+		vOffset += vLen
+	}
+
+	if len(allKeys) <= sample*2 {
+		return nil, compressionBuf, cnt, allKeys, nil
+	}
+	return nil, compressionBuf, cnt, allKeys[:sample], allKeys[len(allKeys)-sample:]
+}
+
 type Page struct {
 	i, limit           int
 	kLens, vLens, data []byte

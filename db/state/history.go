@@ -1288,11 +1288,18 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	}
 
 	if compressedPageValuesCount > 1 {
-		v, ht.snappyReadBuffer = seg.GetFromPage(historyKey, v, ht.snappyReadBuffer, true)
 		if ht.trace {
-			log.Info("[dbg] historySeekInFiles: GetFromPage result",
+			var pageCnt int
+			var firstKeys, lastKeys []string
+			v, ht.snappyReadBuffer, pageCnt, firstKeys, lastKeys = seg.GetFromPageDebug(historyKey, v, ht.snappyReadBuffer, true)
+			log.Info("[dbg] historySeekInFiles: GetFromPageDebug result",
 				"domain", ht.h.FilenameBase, "key", fmt.Sprintf("%x", key), "txNum", txNum,
-				"histTxNum", histTxNum, "resultLen", len(v), "resultNil", v == nil)
+				"histTxNum", histTxNum, "resultLen", len(v), "resultNil", v == nil,
+				"pageCnt", pageCnt,
+				"searchKey", fmt.Sprintf("%x", historyKey),
+				"firstKeys", firstKeys, "lastKeys", lastKeys)
+		} else {
+			v, ht.snappyReadBuffer = seg.GetFromPage(historyKey, v, ht.snappyReadBuffer, true)
 		}
 	}
 	return v, true, nil
