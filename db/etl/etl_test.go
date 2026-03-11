@@ -135,19 +135,18 @@ func TestWriteAndReadBufferEntry(t *testing.T) {
 	}
 
 	bb := buffer.Bytes()
-
-	readBuffer := bytes.NewReader(bb)
+	m := &mmapBytesReader{data: bb, pos: 0}
 
 	for i := range entries {
-		k, v, err := readElementFromDisk(readBuffer, readBuffer, nil, nil)
-		if err != nil {
-			t.Error(err)
-		}
+		k, err := readField(m)
+		require.NoError(t, err)
+		v, err := readField(m)
+		require.NoError(t, err)
 		assert.Equal(t, string(entries[i].key), string(k))
 		assert.Equal(t, string(entries[i].value), string(v))
 	}
 
-	_, _, err := readElementFromDisk(readBuffer, readBuffer, nil, nil)
+	_, err := readField(m)
 	assert.Equal(t, io.EOF, err)
 }
 
@@ -950,6 +949,42 @@ func makeSortedBuffer(keySize, valSize, n int) *sortableBuffer {
 	}
 	buf.Sort()
 	return buf
+}
+
+func BenchmarkFileDataProviderNext(b *testing.B) {
+	for _, keySize := range []int{20, 32, 64} {
+		for _, valSize := range []int{32, 128, 256, 1024} {
+			name := fmt.Sprintf("key%d_val%d", keySize, valSize)
+			buf := makeSortedBuffer(keySize, valSize, 10_000)
+
+			b.Run(name, func(b *testing.B) {
+				b.ReportAllocs()
+				tmpdir := b.TempDir()
+				for b.Loop() {
+					b.StopTimer()
+					provider, err := FlushToDisk("bench", buf, tmpdir, log.LvlInfo)
+					if err != nil {
+						b.Fatal(err)
+					}
+					b.StartTimer()
+
+					for {
+						_, _, err := provider.Next()
+						if err == io.EOF {
+							break
+						}
+						if err != nil {
+							b.Fatal(err)
+						}
+					}
+
+					b.StopTimer()
+					provider.Dispose()
+					b.StartTimer()
+				}
+			})
+		}
+	}
 }
 
 func BenchmarkCollect(b *testing.B) {
