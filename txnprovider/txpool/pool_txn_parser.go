@@ -57,7 +57,8 @@ type TxnParseConfig struct {
 type TxnParseContext struct {
 	validateRlp     func([]byte) error
 	cfg             TxnParseConfig
-	signer          *types.Signer // cached signer for sender recovery (reused across ParseTransaction calls)
+	signer          *types.Signer // cached signer for sender recovery (non-malleable)
+	malleableSigner *types.Signer // cached signer that accepts pre-EIP-2 malleable signatures
 	keccak          keccak.KeccakState
 	bytesReader     bytes.Reader // reusable reader to avoid allocation per parse
 	withSender      bool
@@ -77,6 +78,11 @@ func NewTxnParseContext(chainID uint256.Int) *TxnParseContext {
 	// behave as of London enabled
 	ctx.cfg.ChainID.Set(&chainID)
 	ctx.signer = types.LatestSignerForChainID(chainID.ToBig())
+
+	malleable := *ctx.signer
+	malleable.SetMalleable(true)
+	ctx.malleableSigner = &malleable
+
 	return ctx
 }
 
@@ -347,16 +353,16 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		}
 	}
 
-	// Step 4: Validate chain ID for non-legacy transactions.
-	if !legacy {
-		chainID := txn.GetChainID()
-		if chainID == nil || chainID.IsZero() {
-			if ctx.chainIDRequired {
-				return 0, fmt.Errorf("%w: chainID is required", ErrParseTxn)
-			}
-		} else if !chainID.Eq(&ctx.cfg.ChainID) {
-			return 0, fmt.Errorf("%w: %s, %d (expected %d)", ErrParseTxn, "invalid chainID", chainID.Uint64(), ctx.cfg.ChainID.Uint64())
+	// Step 4: Validate chain ID for all transaction types.
+	// For legacy txns, GetChainID() derives chain ID from V (returns zero for pre-EIP-155
+	// unprotected txns, which is valid — chainIDRequired only applies to typed txns).
+	chainID := txn.GetChainID()
+	if chainID == nil || chainID.IsZero() {
+		if !legacy && ctx.chainIDRequired {
+			return 0, fmt.Errorf("%w: chainID is required", ErrParseTxn)
 		}
+	} else if !chainID.Eq(&ctx.cfg.ChainID) {
+		return 0, fmt.Errorf("%w: %s, %s (expected %s)", ErrParseTxn, "invalid chainID", chainID, &ctx.cfg.ChainID)
 	}
 
 	// Step 5: Store the decoded transaction and compute hash.
@@ -416,8 +422,11 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 				}
 			}
 		} else {
-			ctx.signer.SetMalleable(ctx.allowPreEip2s && txn.Type() == types.LegacyTxType)
-			addr, err := txn.Sender(*ctx.signer)
+			signer := ctx.signer
+			if ctx.allowPreEip2s && txn.Type() == types.LegacyTxType {
+				signer = ctx.malleableSigner
+			}
+			addr, err := txn.Sender(*signer)
 			if err != nil {
 				return 0, fmt.Errorf("%w: recovering sender from signature: %s", ErrParseTxn, err) //nolint
 			}
