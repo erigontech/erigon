@@ -578,7 +578,6 @@ func TestParallelMatchesSequential(t *testing.T) {
 	seqSum := fileChecksum(seqFile)
 
 	for _, workers := range []int{2, 4, 8} {
-		workers := workers
 		t.Run(fmt.Sprintf("workers=%d", workers), func(t *testing.T) {
 			parFile := filepath.Join(tmpDir, fmt.Sprintf("par_w%d.idx", workers))
 			build(workers, parFile)

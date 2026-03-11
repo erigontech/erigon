@@ -105,7 +105,6 @@ func CheckKvis(ctx context.Context, tx kv.TemporalTx, domain kv.Domain, checkTyp
 	var successFps [][]fileFingerprint
 	var keyCount atomic.Uint64
 	for _, w := range works {
-		w := w
 		eg.Go(func() error {
 			keys, err := CheckKvi(ctx, w.kviPath, w.kvPath, kvCompression, sc, failFast, logger)
 			if err == nil {
