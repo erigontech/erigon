@@ -226,8 +226,12 @@ func SpawnBuilderCreateBlockStage(s *stagedsync.StageState, sd *execctx.SharedDo
 		family    mapset.Set[common.Hash] // family set (used for checking uncle invalidity)
 		uncles    mapset.Set[common.Hash] // uncle set
 	}
+	var arbosVersion uint64
+	if cfg.chainConfig.IsArbitrum() {
+		arbosVersion = types.GetArbOSVersion(parent, cfg.chainConfig)
+	}
 	env := &envT{
-		signer:    types.MakeSigner(cfg.chainConfig, blockNum, timestamp),
+		signer:    types.MakeSignerArb(cfg.chainConfig, blockNum, timestamp, arbosVersion),
 		ancestors: mapset.NewSet[common.Hash](),
 		family:    mapset.NewSet[common.Hash](),
 		uncles:    mapset.NewSet[common.Hash](),

@@ -276,7 +276,7 @@ func (t *TxTask) TxSender() (accounts.Address, error) {
 		return t.sender, nil
 	}
 	if t.signer == nil {
-		t.signer = types.MakeSigner(t.Config, t.BlockNumber(), t.Header.Time)
+		t.signer = types.MakeSignerArb(t.Config, t.BlockNumber(), t.Header.Time, t.Rules().ArbOSVersion)
 	}
 	sender, err := t.signer.Sender(t.Tx())
 	if err != nil {
@@ -291,7 +291,7 @@ func (t *TxTask) TxMessage() (*types.Message, error) {
 	if t.message == nil {
 		if tx := t.Tx(); tx != nil {
 			if t.signer == nil {
-				t.signer = types.MakeSigner(t.Config, t.BlockNumber(), t.Header.Time)
+				t.signer = types.MakeSignerArb(t.Config, t.BlockNumber(), t.Header.Time, t.Rules().ArbOSVersion)
 			}
 			message, err := tx.AsMessage(*t.signer, t.Header.BaseFee, t.Rules())
 

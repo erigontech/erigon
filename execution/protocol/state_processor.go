@@ -69,7 +69,7 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 
 	rules := evm.ChainRules()
 	blockNum := header.Number.Uint64()
-	msg, err := txn.AsMessage(*types.MakeSigner(config, blockNum, header.Time), header.BaseFee, rules)
+	msg, err := txn.AsMessage(*types.MakeSignerArb(config, blockNum, header.Time, rules.ArbOSVersion), header.BaseFee, rules)
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +163,7 @@ func applyArbTransaction(config *chain.Config, engine rules.EngineReader, gp *Ga
 
 	rules := evm.ChainRules()
 	blockNum := header.Number.Uint64()
-	msg, err := txn.AsMessage(*types.MakeSigner(config, blockNum, header.Time), header.BaseFee, rules)
+	msg, err := txn.AsMessage(*types.MakeSignerArb(config, blockNum, header.Time, rules.ArbOSVersion), header.BaseFee, rules)
 	if err != nil {
 		return nil, nil, err
 	}

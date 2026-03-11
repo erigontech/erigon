@@ -38,8 +38,11 @@ import (
 
 var ErrInvalidChainId = errors.New("invalid chain id for signer")
 
-// MakeSigner returns a Signer based on the given chain config and block number.
-func MakeSigner(config *chain.Config, blockNumber uint64, blockTime uint64) *Signer {
+// MakeSignerArb returns a Signer based on the given chain config, block number, block time,
+// and ArbOS version. For Arbitrum chains, fork activation (Prague, Cancun) is gated on the
+// ArbOS version rather than timestamps, so the caller must provide the current ArbOS version
+// extracted from the block header. Non-Arbitrum callers should use MakeSigner instead.
+func MakeSignerArb(config *chain.Config, blockNumber, blockTime, arbosVersion uint64) *Signer {
 	var signer Signer
 
 	if config != nil {
@@ -52,7 +55,7 @@ func MakeSigner(config *chain.Config, blockNumber uint64, blockTime uint64) *Sig
 		}
 		signer.unprotected = true
 		switch {
-		case config.IsPrague(blockTime, 0):
+		case config.IsPrague(blockTime, arbosVersion):
 			signer.protected = true
 			signer.accessList = true
 			signer.dynamicFee = true
@@ -68,8 +71,7 @@ func MakeSigner(config *chain.Config, blockNumber uint64, blockTime uint64) *Sig
 			signer.setCode = true
 			signer.chainID.Set(&chainId)
 			signer.chainIDMul.Lsh(&chainId, 1) // ×2
-		case config.IsCancun(blockTime, 0):
-			// All transaction types are still supported
+		case config.IsCancun(blockTime, arbosVersion):
 			signer.protected = true
 			signer.accessList = true
 			signer.dynamicFee = true
@@ -93,11 +95,16 @@ func MakeSigner(config *chain.Config, blockNumber uint64, blockTime uint64) *Sig
 			signer.chainIDMul.Lsh(&chainId, 1) // ×2
 		case config.IsHomestead(blockNumber):
 		default:
-			// Only allow malleable transactions in Frontier
 			signer.malleable = true
 		}
 	}
 	return &signer
+}
+
+// MakeSigner returns a Signer based on the given chain config and block number.
+// For Arbitrum chains, use MakeSignerArb with the ArbOS version from the block header.
+func MakeSigner(config *chain.Config, blockNumber uint64, blockTime uint64) *Signer {
+	return MakeSignerArb(config, blockNumber, blockTime, 0)
 }
 
 func MakeFrontierSigner() *Signer {

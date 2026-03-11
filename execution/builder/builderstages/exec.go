@@ -534,7 +534,11 @@ func addTransactionsToBlock(
 	if header.BlobGasUsed != nil {
 		gasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time, 0) - *header.BlobGasUsed)
 	}
-	signer := types.MakeSigner(chainConfig, header.Number.Uint64(), header.Time)
+	var arbosVersion uint64
+	if chainConfig.IsArbitrum() {
+		arbosVersion = types.GetArbOSVersion(header, chainConfig)
+	}
+	signer := types.MakeSignerArb(chainConfig, header.Number.Uint64(), header.Time, arbosVersion)
 
 	var coalescedLogs types.Logs
 	noop := state.NewNoopWriter()

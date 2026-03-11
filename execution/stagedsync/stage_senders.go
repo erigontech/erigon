@@ -273,14 +273,19 @@ Loop:
 		pendingMu.Unlock()
 
 		// Send individual transaction jobs
+		var arbosVersion uint64
+		if cfg.chainConfig.IsArbitrum() {
+			arbosVersion = types.GetArbOSVersion(header, cfg.chainConfig)
+		}
 		for txIdx, txn := range body.Transactions {
 			j := &senderRecoveryJob{
-				txn:         txn,
-				blockNumber: blockNumber,
-				blockTime:   header.Time,
-				blockHash:   blockHash,
-				blockIndex:  blockIndex,
-				txIndex:     txIdx,
+				txn:          txn,
+				blockNumber:  blockNumber,
+				blockTime:    header.Time,
+				arbosVersion: arbosVersion,
+				blockHash:    blockHash,
+				blockIndex:   blockIndex,
+				txIndex:      txIdx,
 			}
 			select {
 			case recoveryErr := <-errCh:
@@ -352,14 +357,15 @@ type senderRecoveryError struct {
 }
 
 type senderRecoveryJob struct {
-	txn         types.Transaction
-	from        accounts.Address
-	blockHash   common.Hash
-	blockNumber uint64
-	blockTime   uint64
-	blockIndex  int // index of the block relative to s.BlockNumber
-	txIndex     int // index of the tx within the block
-	err         error
+	txn          types.Transaction
+	from         accounts.Address
+	blockHash    common.Hash
+	blockNumber  uint64
+	blockTime    uint64
+	arbosVersion uint64
+	blockIndex   int // index of the block relative to s.BlockNumber
+	txIndex      int // index of the tx within the block
+	err          error
 }
 
 func recoverSenders(ctx context.Context, cryptoContext *secp256k1.Context, config *chain.Config, in, out chan *senderRecoveryJob, quit <-chan struct{}) {
@@ -380,7 +386,7 @@ func recoverSenders(ctx context.Context, cryptoContext *secp256k1.Context, confi
 			return
 		}
 
-		signer := types.MakeSigner(config, job.blockNumber, job.blockTime)
+		signer := types.MakeSignerArb(config, job.blockNumber, job.blockTime, job.arbosVersion)
 		from, err := signer.SenderWithContext(cryptoContext, job.txn)
 		if err != nil {
 			job.err = fmt.Errorf("%w: error recovering sender for tx=%x, %v",
