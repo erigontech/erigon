@@ -470,13 +470,11 @@ func (tx *TxnSlot) GetBlobHashes() []common.Hash  { return tx.Txn.GetBlobHashes(
 
 // uint256 accessors return a zero value when the underlying field is nil,
 // since types.Transaction stores these as *uint256.Int pointers.
-var zeroUint256 uint256.Int
-
 func orZero(v *uint256.Int) *uint256.Int {
 	if v != nil {
 		return v
 	}
-	return &zeroUint256
+	return new(uint256.Int)
 }
 
 func (tx *TxnSlot) GetTip() *uint256.Int    { return orZero(tx.Txn.GetTipCap()) }
@@ -487,7 +485,7 @@ func (tx *TxnSlot) GetBlobFeeCap() *uint256.Int {
 	if bt, ok := tx.Txn.(*types.BlobTx); ok {
 		return orZero(bt.MaxFeePerBlobGas)
 	}
-	return &zeroUint256
+	return new(uint256.Int)
 }
 
 func (tx *TxnSlot) GetDataLen() int {
