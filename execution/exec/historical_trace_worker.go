@@ -69,6 +69,13 @@ type HistoricalTraceWorker struct {
 
 	taskGasPool *protocol.GasPool
 
+	// proof-of-execution hashing (enabled via EnableQmtree)
+	qmtreeEnabled    bool
+	hashReader       *hashingReader
+	hashWriter       *hashingWriter
+	transitionHasher *vm.TransitionHasher
+	execHasher       *vm.ExecHasher
+
 	// calculated by .changeBlock()
 	blockHash common.Hash
 	blockNum  uint64
@@ -117,6 +124,21 @@ func NewHistoricalTraceWorker(
 	ie.evm = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, execArgs.ChainConfig, *ie.vmCfg)
 	ie.ibs = state.New(ie.stateReader)
 	return ie
+}
+
+// EnableQmtree enables proof-of-execution hashing for this worker.
+// Must be called before the worker starts processing tasks.
+// When enabled, each TxResult's ExecutionResult will have PreStateHash,
+// StateChangeHash, and TransitionHash populated.
+func (rw *HistoricalTraceWorker) EnableQmtree() {
+	rw.qmtreeEnabled = true
+	rw.hashReader = newHashingReader()
+	rw.hashReader.inner = rw.stateReader
+	rw.hashWriter = newHashingWriter()
+	rw.transitionHasher = vm.GetTransitionHasher()
+	rw.execHasher = vm.GetExecHasher()
+	// Rebuild IBS to read through hashingReader so all state reads are captured.
+	rw.ibs = state.New(rw.hashReader)
 }
 
 func (rw *HistoricalTraceWorker) LogStats() {}
@@ -229,6 +251,16 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 			if rw.vmCfg.TraceJumpDest {
 				txContext.TxHash = txn.Hash()
 			}
+
+			// Attach proof-of-execution hashers before execution.
+			if rw.qmtreeEnabled {
+				rw.hashReader.Reset()
+				rw.execHasher.Reset()
+				rw.evm.SetExecHasher(rw.execHasher)
+				rw.transitionHasher.Reset()
+				rw.evm.SetTransitionHasher(rw.transitionHasher)
+			}
+
 			rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, txContext, ibs, *rw.vmCfg, rules)
 			if hooks != nil && hooks.OnTxStart != nil {
 				hooks.OnTxStart(rw.evm.GetVMContext(), txn, msg.From())
@@ -238,15 +270,33 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 			applyRes, err := protocol.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */, rw.execArgs.Engine)
 			if err != nil {
 				return err
-			} else {
-				result.ExecutionResult = *applyRes
-				// Update the state with pending changes
-				ibs.SoftFinalise()
-
-				result.Logs = ibs.GetRawLogs(txTask.TxIndex)
-				result.TraceFroms = tracer.Froms()
-				result.TraceTos = tracer.Tos()
 			}
+			result.ExecutionResult = *applyRes
+
+			// Detach hashers; TransitionHash already finalised inside ApplyMessage.
+			if rw.qmtreeEnabled {
+				rw.evm.SetExecHasher(nil)
+				rw.evm.SetTransitionHasher(nil)
+			}
+
+			// Update the state with pending changes.
+			ibs.SoftFinalise()
+
+			// Capture proof hashes after SoftFinalise so all dirty objects are tracked.
+			if rw.qmtreeEnabled {
+				result.ExecutionResult.PreStateHash = rw.hashReader.Finalize()
+				rw.hashWriter.inner = rw.stateWriter
+				rw.hashWriter.Reset()
+				if err := ibs.MakeWriteSet(rules, rw.hashWriter); err != nil {
+					return err
+				}
+				result.ExecutionResult.StateChangeHash = rw.hashWriter.Finalize()
+				// TransitionHash is already set on result.ExecutionResult by ApplyMessage via TransitionHasher.
+			}
+
+			result.Logs = ibs.GetRawLogs(txTask.TxIndex)
+			result.TraceFroms = tracer.Froms()
+			result.TraceTos = tracer.Tos()
 			return nil
 		}()
 	}
@@ -348,6 +398,10 @@ type ExecArgs struct {
 	Dirs        datadir.Dirs
 	ChainConfig *chain.Config
 	Workers     int
+	// BuildQmtree enables proof-of-execution hashing in each worker so that
+	// TxResult.ExecutionResult carries PreStateHash/StateChangeHash/TransitionHash.
+	// The caller is responsible for consuming those hashes (e.g. AppendLeaf).
+	BuildQmtree bool
 }
 
 func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx context.Context, toTxNum uint64, in *QueueWithRetry, workerCount int, outputTxNum *atomic.Uint64, logger log.Logger) *errgroup.Group {
@@ -426,6 +480,9 @@ func doHistoryMap(ctx context.Context, consumer TraceConsumer, cfg *ExecArgs, in
 	for i := 0; i < workerCount; i++ {
 		i := i
 		workers[i] = NewHistoricalTraceWorker(ctx, consumer, in, out, true, cfg, logger)
+		if cfg.BuildQmtree {
+			workers[i].EnableQmtree()
+		}
 		mapGroup.Go(func() error {
 			return workers[i].Run()
 		})

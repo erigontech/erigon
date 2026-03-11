@@ -56,9 +56,11 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/stats"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	chain2 "github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/commitment/qmtree"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
@@ -822,6 +824,11 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 // Each worker reads independently from committed history (HistoryReaderV3) with no
 // shared state and no conflicts. Unlike stage_exec, this does not advance state —
 // it only replays execution for measurement, testing, or side-effect generation.
+//
+// When ExecArgs.BuildQmtree is set, each worker computes proof-of-execution hashes
+// per transaction and the consumer feeds them into a qmtree.Tracker, persisting the
+// tree to <datadir>/snapshots/qmtree/. Per-block roots are logged for comparison
+// against the existing commitment domain.
 func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
 	if err := datadir.ApplyMigrations(dirs); err != nil {
@@ -857,13 +864,23 @@ func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 		Engine:      engine,
 		Genesis:     genesis,
 		Workers:     syncCfg.ExecWorkerCount,
+		BuildQmtree: true,
 	}
 
-	logger.Info("[stage_exec_replay] starting conflict-free parallel replay",
-		"from", 0, "to", toBlock, "workers", execArgs.Workers)
+	// Initialise qmtree tracker backed by disk storage under snapshots/qmtree/.
+	tracker, err := qmtree.NewTracker(dirs.Snap, uint64(config3.DefaultStepSize))
+	if err != nil {
+		return fmt.Errorf("init qmtree tracker: %w", err)
+	}
+
+	logger.Info("[stage_exec_replay] starting conflict-free parallel replay with qmtree",
+		"from", 0, "to", toBlock, "workers", execArgs.Workers,
+		"qmtree_dir", dirs.Snap)
 
 	startTime := time.Now()
 	var lastBlockNum uint64
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
 
 	consumer := exec.TraceConsumerFunc(
 		func(br *exec.BlockResult, result *exec.TxResult, tx kv.TemporalTx) error {
@@ -872,23 +889,60 @@ func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 			}
 			txTask := result.Task.(*exec.TxTask)
 			lastBlockNum = txTask.BlockNumber()
+
+			// Feed every non-block-boundary tx into the qmtree.
+			if !txTask.IsBlockEnd() && txTask.TxIndex >= 0 {
+				tracker.AppendLeaf(
+					result.ExecutionResult.PreStateHash,
+					result.ExecutionResult.StateChangeHash,
+					result.ExecutionResult.TransitionHash,
+				)
+			}
+
+			// At block end: log root and flush periodically.
+			if txTask.IsBlockEnd() {
+				blockNum := txTask.BlockNumber()
+				if blockNum%1000 == 0 || blockNum <= 10 {
+					root := tracker.SyncRoot()
+					logger.Info("[stage_exec_replay] qmtree root",
+						"block", blockNum, "root", root, "leaves", tracker.NextSN)
+					tracker.Flush()
+				}
+				tracker.LogStepProgress("[stage_exec_replay]")
+			}
+
+			select {
+			case <-logEvery.C:
+				elapsed := time.Since(startTime)
+				blkPerSec := float64(lastBlockNum) / elapsed.Seconds()
+				logger.Info("[stage_exec_replay] progress",
+					"block", lastBlockNum, "elapsed", elapsed,
+					"blk/s", fmt.Sprintf("%.1f", blkPerSec),
+					"leaves", tracker.NextSN)
+			default:
+			}
+
 			return nil
 		})
 
-	tx, err := db.BeginTemporalRo(ctx)
+	txRo, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer txRo.Rollback()
 
-	if err := exec.CustomTraceMapReduce(ctx, 0, toBlock, consumer, tx, execArgs, logger); err != nil {
+	if err := exec.CustomTraceMapReduce(ctx, 0, toBlock, consumer, txRo, execArgs, logger); err != nil {
 		return err
 	}
 
+	tracker.Flush()
 	elapsed := time.Since(startTime)
 	blkPerSec := float64(lastBlockNum) / elapsed.Seconds()
+	finalRoot := tracker.SyncRoot()
 	logger.Info("[stage_exec_replay] finished",
-		"blocks", lastBlockNum, "elapsed", elapsed, "blk/s", fmt.Sprintf("%.1f", blkPerSec))
+		"blocks", lastBlockNum, "elapsed", elapsed,
+		"blk/s", fmt.Sprintf("%.1f", blkPerSec),
+		"qmtree_leaves", tracker.NextSN, "qmtree_root", finalRoot)
 
 	return nil
 }
