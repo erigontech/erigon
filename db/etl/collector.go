@@ -328,8 +328,7 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 				if err = loadFunc(element.Key, element.Value); err != nil {
 					return err
 				}
-				// Need to copy k because the underlying space will be re-used for the next key
-				prevK = common.Copy(element.Key)
+				prevK = element.Key
 			}
 		} else if args.BufferType == SortableAppendBuffer {
 			if !bytes.Equal(prevK, element.Key) {
@@ -338,9 +337,8 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 						return err
 					}
 				}
-				// Need to copy k because the underlying space will be re-used for the next key
-				prevK = common.Copy(element.Key)
-				prevV = common.Copy(element.Value)
+				prevK = element.Key
+				prevV = common.Copy(element.Value) // copy needed: prevV is mutated by append below
 			} else {
 				prevV = append(prevV, element.Value...)
 			}
