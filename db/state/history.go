@@ -1519,19 +1519,29 @@ func (ht *HistoryRoTx) proofScanVFile(histFile visibleFile, histKeyBuf, key []by
 	)
 	scanReader.Reset(0)
 
-	var totalPages, pagesWithKey int
+	var totalEntries, entriesWithKey int
 	var exactMatchCount int
 	var keyMatchSample []uint64 // first few txNums where key appears
+	var sampleKeys []string     // first few keys from the file (to verify scan works)
+	var nilKeyCount int
 	var buf []byte
 
 	for scanReader.HasNext() {
-		totalPages++
+		totalEntries++
 		k, v, buf2, _ := scanReader.Next2(buf)
 		buf = buf2
 
+		// Sample first entries to verify the scan reads real data
+		if totalEntries <= 3 {
+			sampleKeys = append(sampleKeys, fmt.Sprintf("len=%d:%x", len(k), k))
+		}
+		if len(k) == 0 {
+			nilKeyCount++
+		}
+
 		// For paged files, k is the historyKey: txNum(8) + key
 		if len(k) >= 8+len(key) && bytes.Equal(k[8:], key) {
-			pagesWithKey++
+			entriesWithKey++
 			entryTxNum := binary.BigEndian.Uint64(k[:8])
 			if len(keyMatchSample) < 5 {
 				keyMatchSample = append(keyMatchSample, entryTxNum)
@@ -1546,12 +1556,16 @@ func (ht *HistoryRoTx) proofScanVFile(histFile visibleFile, histKeyBuf, key []by
 	logger.Warn("[integrity] HistoryEfVsV: PROOF full .v scan result",
 		"domain", ht.h.FilenameBase,
 		"vFile", decomp.FileName(),
+		"cpvc", cpvc,
 		"searchKey", fmt.Sprintf("%x", key),
 		"searchTxNum", txNum,
-		"totalEntries", totalPages,
-		"entriesWithKey", pagesWithKey,
+		"searchHistKey", fmt.Sprintf("%x", histKeyBuf),
+		"totalEntries", totalEntries,
+		"nilKeyEntries", nilKeyCount,
+		"entriesWithKey", entriesWithKey,
 		"exactHistKeyMatches", exactMatchCount,
-		"sampleTxNums", keyMatchSample,
+		"sampleTxNums", fmt.Sprint(keyMatchSample),
+		"firstKeys", fmt.Sprint(sampleKeys),
 	)
 }
 
