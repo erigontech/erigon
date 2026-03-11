@@ -422,8 +422,12 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	// BAL: record target address even on failed CREATE/CREATE2 calls
 	evm.intraBlockState.MarkAddressAccess(address, false)
 
-	// Ensure there's no existing contract already at the designated address
-	contractHash, err := evm.intraBlockState.ResolveCodeHash(address)
+	// Ensure there's no existing contract already at the designated address.
+	// Use GetCodeHash (not ResolveCodeHash) so that an EIP-7702 delegation
+	// designator (0xef0100...) is seen as non-empty code, triggering a collision.
+	// This matches geth's behavior: CREATE/CREATE2 must not overwrite a
+	// delegated account even if the delegation target is empty.
+	contractHash, err := evm.intraBlockState.GetCodeHash(address)
 	if err != nil {
 		return nil, accounts.NilAddress, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}

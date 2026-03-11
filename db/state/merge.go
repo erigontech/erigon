@@ -434,7 +434,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		cnt += item.decompressor.Count()
 	}
 
-	p := ps.AddNew("merge "+path.Base(kvFilePath), uint64(cnt)*2) // *2 because after adding words - will happen compression (which also slow)
+	p := ps.AddNew("merge "+path.Base(kvFilePath), uint64(cnt))
 	defer ps.Delete(p)
 
 	var cp CursorHeap
@@ -510,7 +510,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		keyBuf = append(keyBuf[:0], lastKey...)
 		valBuf = append(valBuf[:0], lastVal...)
 		keyFileStartTxNum, keyFileEndTxNum = lastFileStartTxNum, lastFileEndTxNum
-		p.Processed.Store(i)
+		p.Processed.Store(i * 2) // *2 because each heap pop consumes 2 words (key + value)
 	}
 	if keyBuf != nil {
 		if vt != nil {

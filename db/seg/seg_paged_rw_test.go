@@ -210,7 +210,7 @@ func TestPagedWriterCRC32Sequential(t *testing.T) {
 
 	// Now test parallel compression produces same CRC32
 	mock2 := &multyBytesWriter{pageSize: 4}
-	pw2 := NewPagedWriter(t.Context(), mock2, true)
+	pw2 := NewPagedWriterWithWorkers(t.Context(), mock2, true, 4)
 
 	for _, kv := range testData {
 		if err := pw2.Add([]byte(kv.k), []byte(kv.v)); err != nil {
@@ -231,6 +231,45 @@ func TestPagedWriterCRC32Sequential(t *testing.T) {
 
 	if crc32Sequential != crc32Parallel {
 		t.Errorf("CRC32 mismatch: sequential=0x%08x, parallel=0x%08x", crc32Sequential, crc32Parallel)
+	}
+}
+
+func TestBytesUncompressedToMatchesSync(t *testing.T) {
+	// Regression test: bytesUncompressedTo (parallel path) must produce
+	// the same page as bytesUncompressed (sync path).
+	// Bug: bytesUncompressedTo pre-allocated keys+vals in neededSize,
+	// then clear() zeroed them, then append() placed data past the zeroed region.
+	require := require.New(t)
+
+	pageSize := 16
+	testKeys := []string{"account_key_001", "account_key_002", "account_key_003", "account_key_004"}
+	testVals := []string{"val1", "val2", "val3", "val4"}
+
+	// Build page via sync path
+	mock1 := &multyBytesWriter{pageSize: pageSize}
+	pw1 := NewPagedWriter(t.Context(), mock1, false)
+	for i := range testKeys {
+		require.NoError(pw1.Add([]byte(testKeys[i]), []byte(testVals[i])))
+	}
+	syncPage, syncOK := pw1.bytesUncompressed()
+	require.True(syncOK)
+
+	// Build page via async path (bytesUncompressedTo)
+	mock2 := &multyBytesWriter{pageSize: pageSize}
+	pw2 := NewPagedWriter(t.Context(), mock2, false)
+	for i := range testKeys {
+		require.NoError(pw2.Add([]byte(testKeys[i]), []byte(testVals[i])))
+	}
+	asyncPage, asyncOK := pw2.bytesUncompressedTo(nil)
+	require.True(asyncOK)
+
+	require.Equal(syncPage, asyncPage,
+		"bytesUncompressedTo must produce identical page to bytesUncompressed")
+
+	// Verify keys are readable from the async page
+	for i := range testKeys {
+		v, _ := GetFromPage([]byte(testKeys[i]), asyncPage, nil, false)
+		require.Equal(testVals[i], string(v), "key %s not found in async page", testKeys[i])
 	}
 }
 
