@@ -959,8 +959,8 @@ type blockResult struct {
 	Deps         *state.DAG
 	AllDeps      map[int]map[int]bool
 	Exhausted    *ErrLoopExhausted
-	Header *types.Header       // for accumulator.StartChange in apply loop
-	Txs    types.Transactions // for accumulator.StartChange in apply loop
+	Header       *types.Header      // for accumulator.StartChange in apply loop
+	Txs          types.Transactions // for accumulator.StartChange in apply loop
 }
 
 type txResult struct {
