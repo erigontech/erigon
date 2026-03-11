@@ -184,6 +184,9 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 		// trace output, so the change in semantics does not affect correctness.
 		blockUpdateCount := 0
 		blockApplyCount := 0
+		// Collect per-tx writes so we can notify the accumulator AFTER
+		// StartChange (which arrives with the blockResult, after all txResults).
+		var pendingAccumulatorWrites []state.VersionedWrites
 
 		for {
 			select {
@@ -208,8 +211,8 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					if err == nil {
 						err = pe.rs.CommitStepBoundary(ctx, rwTx, applyResult.blockNum, applyResult.txNum)
 					}
-					if err == nil {
-						state.NotifyAccumulator(pe.accumulator, applyResult.writes)
+					if err == nil && pe.accumulator != nil {
+						pendingAccumulatorWrites = append(pendingAccumulatorWrites, applyResult.writes)
 					}
 					blockApplyCount += len(applyResult.writes)
 					pe.rs.SetTrace(false)
@@ -217,6 +220,23 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						return err
 					}
 				case *blockResult:
+					// StartChange + NotifyAccumulator must both run in the apply
+					// goroutine — keeps all accumulator access single-threaded
+					// (avoids data race with the executor goroutine).
+					// StartChange must come BEFORE NotifyAccumulator because it
+					// initialises the latestChange entry that ChangeAccount etc. write into.
+					if pe.accumulator != nil && applyResult.Header != nil {
+						rawTxs, marshalErr := types.MarshalTransactionsBinary(applyResult.Txs)
+						if marshalErr != nil {
+							return fmt.Errorf("marshal transactions for accumulator, block %d: %w", applyResult.BlockNum, marshalErr)
+						}
+						pe.accumulator.StartChange(applyResult.Header, rawTxs, false)
+						for _, writes := range pendingAccumulatorWrites {
+							state.NotifyAccumulator(pe.accumulator, writes)
+						}
+						pendingAccumulatorWrites = pendingAccumulatorWrites[:0]
+					}
+
 					if applyResult.BlockNum > 0 && !applyResult.isPartial { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 						checkReceipts := !pe.cfg.vmConfig.StatelessExec &&
 							pe.cfg.chainConfig.IsByzantium(applyResult.BlockNum) &&
@@ -653,18 +673,6 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 
 						chainReader := consensuschain.NewReader(pe.cfg.chainConfig, applyTx, pe.cfg.blockReader, pe.logger)
 
-						// StartChange before Finalize so that AuRa/system-call nonce
-						// changes are emitted into the accumulator for the txpool diff.
-						// Use txTask.Txs (already in memory) instead of reading from DB
-						// to avoid the stale applyTx canonical-hash issue.
-						if pe.accumulator != nil {
-							rawTxs, marshalErr := types.MarshalTransactionsBinary(txTask.Txs)
-							if marshalErr != nil {
-								return nil, fmt.Errorf("marshal transactions for accumulator, block %d: %w", blockResult.BlockNum, marshalErr)
-							}
-							pe.accumulator.StartChange(txTask.Header, rawTxs, false)
-						}
-
 						_, err =
 							pe.cfg.engine.Finalize(
 								pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles, blockReceipts,
@@ -951,6 +959,8 @@ type blockResult struct {
 	Deps         *state.DAG
 	AllDeps      map[int]map[int]bool
 	Exhausted    *ErrLoopExhausted
+	Header *types.Header       // for accumulator.StartChange in apply loop
+	Txs    types.Transactions // for accumulator.StartChange in apply loop
 }
 
 type txResult struct {
@@ -1673,25 +1683,32 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 		}
 
+		var header *types.Header
+		var txs types.Transactions
+		if tt, ok := txTask.(*exec.TxTask); ok {
+			header = tt.Header
+			txs = tt.Txs
+		}
 		be.result = &blockResult{
-			be.blockNum,
-			txTask.BlockTime(),
-			txTask.BlockHash(),
-			txTask.ParentHash(),
-			txTask.BlockRoot(),
-			nil,
-			be.blockGasUsed,
-			be.blobGasUsed,
-			txTask.Version().TxNum,
-			true,
-			isPartial,
-			be.applyCount,
-			be.blockIO,
-			receipts,
-			be.stats,
-			&deps,
-			allDeps,
-			be.exhausted,
+			BlockNum:     be.blockNum,
+			BlockTime:    txTask.BlockTime(),
+			BlockHash:    txTask.BlockHash(),
+			ParentHash:   txTask.ParentHash(),
+			StateRoot:    txTask.BlockRoot(),
+			BlockGasUsed: be.blockGasUsed,
+			BlobGasUsed:  be.blobGasUsed,
+			lastTxNum:    txTask.Version().TxNum,
+			complete:     true,
+			isPartial:    isPartial,
+			ApplyCount:   be.applyCount,
+			TxIO:         be.blockIO,
+			Receipts:     receipts,
+			Stats:        be.stats,
+			Deps:         &deps,
+			AllDeps:      allDeps,
+			Exhausted:    be.exhausted,
+			Header:       header,
+			Txs:          txs,
 		}
 		return be.result, nil
 	}
@@ -1705,24 +1722,19 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	txTask := be.tasks[0].Task
 
 	return &blockResult{
-		be.blockNum,
-		txTask.BlockTime(),
-		txTask.BlockHash(),
-		txTask.ParentHash(),
-		txTask.BlockRoot(),
-		nil,
-		be.blockGasUsed,
-		be.blobGasUsed,
-		lastTxNum,
-		false,
-		len(be.tasks) > 0 && be.tasks[0].Version().TxIndex != -1,
-		be.applyCount,
-		be.blockIO,
-		nil,
-		be.stats,
-		nil,
-		nil,
-		be.exhausted,
+		BlockNum:     be.blockNum,
+		BlockTime:    txTask.BlockTime(),
+		BlockHash:    txTask.BlockHash(),
+		ParentHash:   txTask.ParentHash(),
+		StateRoot:    txTask.BlockRoot(),
+		BlockGasUsed: be.blockGasUsed,
+		BlobGasUsed:  be.blobGasUsed,
+		lastTxNum:    lastTxNum,
+		isPartial:    len(be.tasks) > 0 && be.tasks[0].Version().TxIndex != -1,
+		ApplyCount:   be.applyCount,
+		TxIO:         be.blockIO,
+		Stats:        be.stats,
+		Exhausted:    be.exhausted,
 	}, nil
 }
 
