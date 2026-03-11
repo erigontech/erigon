@@ -828,6 +828,36 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 		return err
 	}
 	if latestBlockNum > blockNum {
+		// Debug: read the raw commitment "state" key via GetAsOf to see what's stored
+		rawState, _, err2 := tx.GetAsOf(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, toTxNum)
+		if err2 != nil {
+			logger.Error("[integrity] debug: failed to read raw commitment state", "err", err2)
+		} else if len(rawState) >= 16 {
+			rawTxNum := binary.BigEndian.Uint64(rawState[0:8])
+			rawBlockNum := binary.BigEndian.Uint64(rawState[8:16])
+			logger.Error("[integrity] debug: raw commitment state via GetAsOf",
+				"key", "state", "asOfTxNum", toTxNum,
+				"rawTxNum", rawTxNum, "rawBlockNum", rawBlockNum, "stateLen", len(rawState))
+		} else {
+			logger.Error("[integrity] debug: raw commitment state is short/empty",
+				"asOfTxNum", toTxNum, "stateLen", len(rawState))
+		}
+		// Debug: also read the "latest" (non-historical) commitment state for comparison
+		rawLatest, _, err3 := tx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+		if err3 != nil {
+			logger.Error("[integrity] debug: failed to read latest commitment state", "err", err3)
+		} else if len(rawLatest) >= 16 {
+			latTxNum := binary.BigEndian.Uint64(rawLatest[0:8])
+			latBlockNum := binary.BigEndian.Uint64(rawLatest[8:16])
+			logger.Error("[integrity] debug: latest (non-historical) commitment state",
+				"latestTxNum", latTxNum, "latestBlockNum", latBlockNum, "stateLen", len(rawLatest))
+		}
+		// Debug: list commitment domain files
+		aggTx := state.AggTx(tx)
+		commitFiles := aggTx.Files(kv.CommitmentDomain)
+		logger.Error("[integrity] debug: commitment domain files", "count", len(commitFiles), "files", commitFiles.String())
+		aggTx.Close()
+
 		return fmt.Errorf("commitment history at txNum %d (block %d) contains state from future block %d (latestTxNum %d): likely corrupted commitment history due to interrupted flush or snapshot rebuild", toTxNum, blockNum, latestBlockNum, latestTxNum)
 	}
 	if latestBlockNum < blockNum {
