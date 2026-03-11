@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package builderstages
+package builder
 
 import (
 	"fmt"
@@ -23,8 +23,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/services"
-	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
@@ -38,7 +36,7 @@ type BuilderFinishCfg struct {
 	sealCancel            chan struct{}
 	builderState          BuilderState
 	blockReader           services.FullBlockReader
-	latestBlockBuiltStore *builder.LatestBlockBuiltStore
+	latestBlockBuiltStore *LatestBlockBuiltStore
 }
 
 func StageBuilderFinishCfg(
@@ -47,7 +45,7 @@ func StageBuilderFinishCfg(
 	builderState BuilderState,
 	sealCancel chan struct{},
 	blockReader services.FullBlockReader,
-	latestBlockBuiltStore *builder.LatestBlockBuiltStore,
+	latestBlockBuiltStore *LatestBlockBuiltStore,
 ) BuilderFinishCfg {
 	return BuilderFinishCfg{
 		chainConfig:           chainConfig,
@@ -59,8 +57,8 @@ func StageBuilderFinishCfg(
 	}
 }
 
-func SpawnBuilderFinishStage(s *stagedsync.StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg BuilderFinishCfg, quit <-chan struct{}, logger log.Logger) error {
-	logPrefix := s.LogPrefix()
+func finishBlock(tx kv.TemporalTx, cfg BuilderFinishCfg, logger log.Logger) error {
+	const logPrefix = "BuilderFinish"
 	current := cfg.builderState.BuiltBlock
 
 	// Short circuit when receiving duplicate result caused by resubmitting.
