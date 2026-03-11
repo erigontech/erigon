@@ -152,16 +152,16 @@ jobs:
           echo "OK: release_version matches db/version/app.go."
 
       - name: Login to Docker Hub
-        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567  ## v3.3.0
+        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2  ## v4.0.0
         with:
           username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
           password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a  ## v4.0.0
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd  ## v4.0.0
 
       - name: Build and push temporary multiplatform image, store outputs locally for further processing
         env:
@@ -508,7 +508,7 @@ jobs:
         ref: ${{ needs.build-release.outputs.commit-id }}
 
     - name: Login to Docker Hub
-      uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567  ## v3.3.0
+      uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2  ## v4.0.0
       with:
         username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
         password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
