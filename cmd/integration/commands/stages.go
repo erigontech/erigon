@@ -781,6 +781,37 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			return err
 		}
 		doms.ClearRam(true)
+		if !noCommit {
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+		}
+
+		{
+			var lastTxNum uint64
+			if err := db.View(ctx, func(tx kv.Tx) error {
+				execProgress, err := stages.GetStageProgress(tx, stages.Execution)
+				if err != nil {
+					return err
+				}
+				lastTxNum, err = br.TxnumReader().Max(ctx, tx, execProgress)
+				if err != nil {
+					return err
+				}
+				return nil
+			}); err != nil {
+				return err
+			}
+			if err = agg.BuildFiles(lastTxNum); err != nil {
+				return err
+			}
+		}
+
+		if !noCommit {
+			if tx, err = db.BeginTemporalRw(ctx); err != nil {
+				return err
+			}
+		}
 
 		pruneStage, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, s.CurrentSyncCycle.IsInitialCycle)
 		if err != nil {
