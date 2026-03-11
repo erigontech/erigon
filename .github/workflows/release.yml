@@ -427,18 +427,18 @@ jobs:
             else
               ARCH_NOTE=""
             fi
-            cat <<-END > deb-pkg/${APPLICATION}_${VERSION}_${ARCH}/DEBIAN/control
-            Package: ${APPLICATION}
-            Version: ${VERSION}
-            Section: misc
-            Priority: optional
-            Architecture: ${ARCH}
-            Depends: libc6
-            Maintainer: Erigon DevOps [https://github.com/erigontech/erigon/issues]
-            Description: Erigon - Ethereum implementation on the efficiency frontier${ARCH_NOTE}
-            Vcs-Git: https://github.com/erigontech/erigon.git
-            Vcs-Browser: https://github.com/erigontech/erigon
-            END
+            {
+              printf "Package: %s\n" "${APPLICATION}"
+              printf "Version: %s\n" "${VERSION}"
+              printf "Section: misc\n"
+              printf "Priority: optional\n"
+              printf "Architecture: %s\n" "${ARCH}"
+              printf "Depends: libc6\n"
+              printf "Maintainer: Erigon DevOps [https://github.com/erigontech/erigon/issues]\n"
+              printf "Description: Erigon - Ethereum implementation on the efficiency frontier%s\n" "${ARCH_NOTE}"
+              printf "Vcs-Git: https://github.com/erigontech/erigon.git\n"
+              printf "Vcs-Browser: https://github.com/erigontech/erigon\n"
+            } > deb-pkg/${APPLICATION}_${VERSION}_${ARCH}/DEBIAN/control
             install -v -p ${APPLICATION}_v${VERSION}_linux_${ARCH}/* \
                         deb-pkg/${APPLICATION}_${VERSION}_${ARCH}/usr/bin
             dpkg-deb --build --root-owner-group deb-pkg/${APPLICATION}_${VERSION}_${ARCH}
