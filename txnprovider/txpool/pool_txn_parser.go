@@ -48,15 +48,11 @@ var ErrRejected = errors.New("rejected")
 var ErrAlreadyKnown = errors.New("already known")
 var ErrRlpTooBig = errors.New("txn rlp too big")
 
-type TxnParseConfig struct {
-	ChainID uint256.Int
-}
-
 // TxnParseContext is object that is required to parse transactions and turn transaction payload into TxnSlot objects
 // usage of TxContext helps avoid extra memory allocations
 type TxnParseContext struct {
 	validateRlp     func([]byte) error
-	cfg             TxnParseConfig
+	chainID         uint256.Int
 	signer          *types.Signer // cached signer for sender recovery (non-malleable)
 	malleableSigner *types.Signer // cached signer that accepts pre-EIP-2 malleable signatures
 	keccak          keccak.KeccakState
@@ -76,7 +72,7 @@ func NewTxnParseContext(chainID uint256.Int) *TxnParseContext {
 	}
 
 	// behave as of London enabled
-	ctx.cfg.ChainID.Set(&chainID)
+	ctx.chainID.Set(&chainID)
 	ctx.signer = types.LatestSignerForChainID(chainID.ToBig())
 
 	malleable := *ctx.signer
@@ -361,8 +357,8 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		if !legacy && ctx.chainIDRequired {
 			return 0, fmt.Errorf("%w: chainID is required", ErrParseTxn)
 		}
-	} else if !chainID.Eq(&ctx.cfg.ChainID) {
-		return 0, fmt.Errorf("%w: %s, %s (expected %s)", ErrParseTxn, "invalid chainID", chainID, &ctx.cfg.ChainID)
+	} else if !chainID.Eq(&ctx.chainID) {
+		return 0, fmt.Errorf("%w: %s, %s (expected %s)", ErrParseTxn, "invalid chainID", chainID, &ctx.chainID)
 	}
 
 	// Step 5: Store the decoded transaction and compute hash.
@@ -466,103 +462,44 @@ type TxnSlot struct {
 }
 
 // Accessor methods that delegate to the stored Transaction.
-// These handle nil Txn (used in btree search sentinels and test stubs).
 
-func (tx *TxnSlot) TxType() byte {
-	if tx.Txn != nil {
-		return tx.Txn.Type()
+func (tx *TxnSlot) TxType() byte                 { return tx.Txn.Type() }
+func (tx *TxnSlot) GetGas() uint64               { return tx.Txn.GetGasLimit() }
+func (tx *TxnSlot) IsCreation() bool              { return tx.Txn.IsContractDeploy() }
+func (tx *TxnSlot) GetBlobHashes() []common.Hash  { return tx.Txn.GetBlobHashes() }
+
+// uint256 accessors return a zero value when the underlying field is nil,
+// since types.Transaction stores these as *uint256.Int pointers.
+var zeroUint256 uint256.Int
+
+func orZero(v *uint256.Int) *uint256.Int {
+	if v != nil {
+		return v
 	}
-	return 0
+	return &zeroUint256
 }
 
-func (tx *TxnSlot) GetTip() *uint256.Int {
-	if tx.Txn != nil {
-		if v := tx.Txn.GetTipCap(); v != nil {
-			return v
-		}
-	}
-	return new(uint256.Int)
-}
-
-func (tx *TxnSlot) GetFeeCap() *uint256.Int {
-	if tx.Txn != nil {
-		if v := tx.Txn.GetFeeCap(); v != nil {
-			return v
-		}
-	}
-	return new(uint256.Int)
-}
-
-func (tx *TxnSlot) GetValue() *uint256.Int {
-	if tx.Txn != nil {
-		if v := tx.Txn.GetValue(); v != nil {
-			return v
-		}
-	}
-	return new(uint256.Int)
-}
-
-func (tx *TxnSlot) GetGas() uint64 {
-	if tx.Txn != nil {
-		return tx.Txn.GetGasLimit()
-	}
-	return 0
-}
-
-func (tx *TxnSlot) IsCreation() bool {
-	if tx.Txn != nil {
-		return tx.Txn.IsContractDeploy()
-	}
-	return false
-}
-
-func (tx *TxnSlot) GetChainID() *uint256.Int {
-	if tx.Txn != nil {
-		if v := tx.Txn.GetChainID(); v != nil {
-			return v
-		}
-	}
-	return new(uint256.Int)
-}
+func (tx *TxnSlot) GetTip() *uint256.Int    { return orZero(tx.Txn.GetTipCap()) }
+func (tx *TxnSlot) GetFeeCap() *uint256.Int { return orZero(tx.Txn.GetFeeCap()) }
+func (tx *TxnSlot) GetValue() *uint256.Int  { return orZero(tx.Txn.GetValue()) }
 
 func (tx *TxnSlot) GetBlobFeeCap() *uint256.Int {
-	if tx.Txn != nil {
-		if bt, ok := tx.Txn.(*types.BlobTx); ok && bt.MaxFeePerBlobGas != nil {
-			return bt.MaxFeePerBlobGas
-		}
+	if bt, ok := tx.Txn.(*types.BlobTx); ok {
+		return orZero(bt.MaxFeePerBlobGas)
 	}
-	return new(uint256.Int)
+	return &zeroUint256
 }
-
-func (tx *TxnSlot) GetBlobHashes() []common.Hash {
-	if tx.Txn != nil {
-		return tx.Txn.GetBlobHashes()
-	}
-	return nil
-}
-
-func (tx *TxnSlot) GetSize() uint32 { return tx.Size }
 
 func (tx *TxnSlot) GetDataLen() int {
-	if tx.Txn == nil {
-		return 0
-	}
-	if tx.Txn.Type() == types.AccountAbstractionTxType {
-		if aaTx, ok := tx.Txn.(*types.AccountAbstractionTransaction); ok {
-			return len(aaTx.DeployerData) + len(aaTx.PaymasterData) + len(aaTx.ExecutionData)
-		}
+	if aaTx, ok := tx.Txn.(*types.AccountAbstractionTransaction); ok {
+		return len(aaTx.DeployerData) + len(aaTx.PaymasterData) + len(aaTx.ExecutionData)
 	}
 	return len(tx.Txn.GetData())
 }
 
 func (tx *TxnSlot) GetDataNonZeroLen() int {
-	if tx.Txn == nil {
-		return 0
-	}
-	if tx.Txn.Type() == types.AccountAbstractionTxType {
-		if aaTx, ok := tx.Txn.(*types.AccountAbstractionTransaction); ok {
-			return countNonZero(aaTx.DeployerData) + countNonZero(aaTx.PaymasterData) + countNonZero(aaTx.ExecutionData)
-		}
+	if aaTx, ok := tx.Txn.(*types.AccountAbstractionTransaction); ok {
+		return countNonZero(aaTx.DeployerData) + countNonZero(aaTx.PaymasterData) + countNonZero(aaTx.ExecutionData)
 	}
 	return countNonZero(tx.Txn.GetData())
 }
@@ -577,22 +514,11 @@ func countNonZero(data []byte) int {
 	return count
 }
 
-func (tx *TxnSlot) GetAccessListAddrCount() int {
-	if tx.Txn != nil {
-		return len(tx.Txn.GetAccessList())
-	}
-	return 0
-}
-
-func (tx *TxnSlot) GetAccessListStorCount() int {
-	if tx.Txn != nil {
-		return tx.Txn.GetAccessList().StorageKeys()
-	}
-	return 0
-}
+func (tx *TxnSlot) GetAccessListAddrCount() int { return len(tx.Txn.GetAccessList()) }
+func (tx *TxnSlot) GetAccessListStorCount() int  { return tx.Txn.GetAccessList().StorageKeys() }
 
 func (tx *TxnSlot) PrintDebug(prefix string) {
-	fmt.Printf("%s: senderID=%d,nonce=%d,tip=%d,v=%d\n", prefix, tx.SenderID, tx.Nonce, tx.GetTip(), tx.GetValue().Uint64())
+	fmt.Printf("%s: senderID=%d,nonce=%d,tip=%s,v=%s\n", prefix, tx.SenderID, tx.Nonce, tx.GetTip(), tx.GetValue())
 }
 
 func (tx *TxnSlot) Blobs() [][]byte {

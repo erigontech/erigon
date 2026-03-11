@@ -557,7 +557,7 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 			if txn.Traced {
 				p.logger.Info(fmt.Sprintf("TX TRACING: processRemoteTxns promotes idHash=%x, senderId=%d", txn.IDHash, txn.SenderID))
 			}
-			p.promoted.Append(txn.TxType(), txn.GetSize(), txn.IDHash[:])
+			p.promoted.Append(txn.TxType(), txn.Size, txn.IDHash[:])
 		}
 	}
 
@@ -607,7 +607,7 @@ func (p *TxPool) AppendLocalAnnouncements(types []byte, sizes []uint32, hashes [
 			continue
 		}
 		types = append(types, txn.TxnSlot.TxType())
-		sizes = append(sizes, txn.TxnSlot.GetSize())
+		sizes = append(sizes, txn.TxnSlot.Size)
 		hashes = append(hashes, hash...)
 	}
 	return types, sizes, hashes
@@ -622,13 +622,13 @@ func (p *TxPool) AppendRemoteAnnouncements(types []byte, sizes []uint32, hashes 
 			continue
 		}
 		types = append(types, txn.TxnSlot.TxType())
-		sizes = append(sizes, txn.TxnSlot.GetSize())
+		sizes = append(sizes, txn.TxnSlot.Size)
 		hashes = append(hashes, hash...)
 	}
 	for hash, txIdx := range p.unprocessedRemoteByHash {
 		txnSlot := p.unprocessedRemoteTxns.Txns[txIdx]
 		types = append(types, txnSlot.TxType())
-		sizes = append(sizes, txnSlot.GetSize())
+		sizes = append(sizes, txnSlot.Size)
 		hashes = append(hashes, hash...)
 	}
 
@@ -792,8 +792,8 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 			continue
 		}
 
-		if int64(mt.TxnSlot.GetSize()) > int64(availableRlpSpace) {
-			p.logger.Debug("[txpool] skipping txn bigger than available rlp space", "size", int64(mt.TxnSlot.GetSize()), "available", int64(availableRlpSpace))
+		if int64(mt.TxnSlot.Size) > int64(availableRlpSpace) {
+			p.logger.Debug("[txpool] skipping txn bigger than available rlp space", "size", int64(mt.TxnSlot.Size), "available", int64(availableRlpSpace))
 			continue
 		}
 
@@ -1436,7 +1436,7 @@ func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcf
 			if txn.Traced {
 				p.logger.Info(fmt.Sprintf("TX TRACING: AddLocalTxns promotes idHash=%x, senderId=%d", txn.IDHash, txn.SenderID))
 			}
-			p.promoted.Append(txn.TxType(), txn.GetSize(), txn.IDHash[:])
+			p.promoted.Append(txn.TxType(), txn.Size, txn.IDHash[:])
 		}
 	}
 	if p.promoted.Len() > 0 {
@@ -1481,7 +1481,7 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 			discardReasons[i] = txpoolcfg.DuplicateHash
 			// In case if the transition is stuck, "poke" it to rebroadcast
 			if collect && newTxns.IsLocal[i] && (found.currentSubPool == PendingSubPool || found.currentSubPool == BaseFeeSubPool) {
-				announcements.Append(found.TxnSlot.TxType(), found.TxnSlot.GetSize(), found.TxnSlot.IDHash[:])
+				announcements.Append(found.TxnSlot.TxType(), found.TxnSlot.Size, found.TxnSlot.IDHash[:])
 			}
 			continue
 		}
@@ -1629,7 +1629,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 			// Both tip and feecap need to be larger than previously to replace the transaction
 			// In case if the transition is stuck, "poke" it to rebroadcast
 			if mt.subPool&IsLocal != 0 && (found.currentSubPool == PendingSubPool || found.currentSubPool == BaseFeeSubPool) {
-				announcements.Append(found.TxnSlot.TxType(), found.TxnSlot.GetSize(), found.TxnSlot.IDHash[:])
+				announcements.Append(found.TxnSlot.TxType(), found.TxnSlot.Size, found.TxnSlot.IDHash[:])
 			}
 			if bytes.Equal(found.TxnSlot.IDHash[:], mt.TxnSlot.IDHash[:]) {
 				return txpoolcfg.NotSet
@@ -1746,8 +1746,9 @@ func (p *TxPool) getBlobsAndProofByBlobHashLocked(blobHashes []common.Hash) []Po
 		if !ok || mt == nil {
 			continue
 		}
-		blob, commitment, proofs := mt.TxnSlot.BlobBundle(th.index)
-		blobBundles[i] = PoolBlobBundle{Blob: blob, Commitment: commitment, Proofs: proofs}
+		if th.index < len(mt.TxnSlot.BlobBundles) {
+			blobBundles[i] = mt.TxnSlot.BlobBundles[th.index]
+		}
 	}
 	return blobBundles
 }
@@ -2016,7 +2017,7 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 	// Promote best transactions from base fee pool to pending pool while they qualify
 	for best := p.baseFee.Best(); p.baseFee.Len() > 0 && best.subPool >= BaseFeePoolBits && best.minFeeCap.CmpUint64(pendingBaseFee) >= 0 && (best.TxnSlot.TxType() != BlobTxnType || best.TxnSlot.GetBlobFeeCap().CmpUint64(pendingBlobFee) >= 0); best = p.baseFee.Best() {
 		tx := p.baseFee.PopBest()
-		announcements.Append(tx.TxnSlot.TxType(), tx.TxnSlot.GetSize(), tx.TxnSlot.IDHash[:])
+		announcements.Append(tx.TxnSlot.TxType(), tx.TxnSlot.Size, tx.TxnSlot.IDHash[:])
 		p.pending.Add(tx, logger)
 	}
 
@@ -2030,7 +2031,7 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 	for best := p.queued.Best(); p.queued.Len() > 0 && best.subPool >= BaseFeePoolBits; best = p.queued.Best() {
 		tx := p.queued.PopBest()
 		if best.minFeeCap.Cmp(uint256.NewInt(pendingBaseFee)) >= 0 {
-			announcements.Append(tx.TxnSlot.TxType(), tx.TxnSlot.GetSize(), tx.TxnSlot.IDHash[:])
+			announcements.Append(tx.TxnSlot.TxType(), tx.TxnSlot.Size, tx.TxnSlot.IDHash[:])
 			p.pending.Add(tx, logger)
 		} else {
 			p.baseFee.Add(tx, "promote-queued", logger)
@@ -2535,17 +2536,17 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.TemporalTx) err
 func (p *TxPool) printDebug(prefix string) {
 	fmt.Printf("%s.pool.byHash\n", prefix)
 	for _, j := range p.byHash {
-		fmt.Printf("\tsenderID=%d, nonce=%d, tip=%d\n", j.TxnSlot.SenderID, j.TxnSlot.Nonce, *j.TxnSlot.GetTip())
+		fmt.Printf("\tsenderID=%d, nonce=%d, tip=%s\n", j.TxnSlot.SenderID, j.TxnSlot.Nonce, j.TxnSlot.GetTip())
 	}
 	fmt.Printf("%s.pool.queues.len: %d,%d,%d\n", prefix, p.pending.Len(), p.baseFee.Len(), p.queued.Len())
 	for _, mt := range p.pending.best.ms {
-		mt.TxnSlot.PrintDebug(fmt.Sprintf("%s.pending: %b,%d,%d,%d", prefix, mt.subPool, mt.TxnSlot.SenderID, mt.TxnSlot.Nonce, *mt.TxnSlot.GetTip()))
+		mt.TxnSlot.PrintDebug(fmt.Sprintf("%s.pending: %b,%d,%d,%s", prefix, mt.subPool, mt.TxnSlot.SenderID, mt.TxnSlot.Nonce, mt.TxnSlot.GetTip()))
 	}
 	for _, mt := range p.baseFee.best.ms {
-		mt.TxnSlot.PrintDebug(fmt.Sprintf("%s.baseFee : %b,%d,%d,%d", prefix, mt.subPool, mt.TxnSlot.SenderID, mt.TxnSlot.Nonce, *mt.TxnSlot.GetTip()))
+		mt.TxnSlot.PrintDebug(fmt.Sprintf("%s.baseFee : %b,%d,%d,%s", prefix, mt.subPool, mt.TxnSlot.SenderID, mt.TxnSlot.Nonce, mt.TxnSlot.GetTip()))
 	}
 	for _, mt := range p.queued.best.ms {
-		mt.TxnSlot.PrintDebug(fmt.Sprintf("%s.queued : %b,%d,%d,%d", prefix, mt.subPool, mt.TxnSlot.SenderID, mt.TxnSlot.Nonce, *mt.TxnSlot.GetTip()))
+		mt.TxnSlot.PrintDebug(fmt.Sprintf("%s.queued : %b,%d,%d,%s", prefix, mt.subPool, mt.TxnSlot.SenderID, mt.TxnSlot.Nonce, mt.TxnSlot.GetTip()))
 	}
 }
 

@@ -52,7 +52,7 @@ func TestParseTransactionRLP(t *testing.T) {
 						signHash := hexutil.MustDecodeHex(tt.SignHashStr)
 						var computedSignHash common.Hash
 						if txn.Txn.Protected() {
-							computedSignHash = txn.Txn.SigningHash(ctx.cfg.ChainID.ToBig())
+							computedSignHash = txn.Txn.SigningHash(ctx.chainID.ToBig())
 						} else {
 							computedSignHash = txn.Txn.SigningHash(nil)
 						}
@@ -220,7 +220,7 @@ func TestBlobTxnParsing(t *testing.T) {
 	p, err := ctx.ParseTransaction(bodyEnvelope, 0, &thinTxn, nil, hasEnvelope, wrappedWithBlobs, nil)
 	require.NoError(t, err)
 	assert.Equal(t, len(bodyEnvelope), p)
-	assert.Equal(t, len(bodyEnvelope)-len(bodyEnvelopePrefix), int(thinTxn.GetSize()))
+	assert.Equal(t, len(bodyEnvelope)-len(bodyEnvelopePrefix), int(thinTxn.Size))
 	assert.Equal(t, bodyEnvelope[3:], thinTxn.Rlp)
 	assert.Equal(t, BlobTxnType, thinTxn.TxType())
 	assert.Len(t, thinTxn.GetBlobHashes(), 2)
@@ -273,7 +273,7 @@ func TestBlobTxnParsing(t *testing.T) {
 	p, err = ctx.ParseTransaction(wrapperRlp, 0, &fatTxn, nil, hasEnvelope, wrappedWithBlobs, nil)
 	require.NoError(t, err)
 	assert.Equal(t, len(wrapperRlp), p)
-	assert.Equal(t, len(wrapperRlp), int(fatTxn.GetSize()))
+	assert.Equal(t, len(wrapperRlp), int(fatTxn.Size))
 	assert.Equal(t, wrapperRlp, fatTxn.Rlp)
 	assert.Equal(t, BlobTxnType, fatTxn.TxType())
 
@@ -342,7 +342,7 @@ func TestWrapperV1BlobTxnParsing(t *testing.T) {
 	p, err := ctx.ParseTransaction(bodyEnvelope, 0, &thinTxn, nil, hasEnvelope, wrappedWithBlobs, nil)
 	require.NoError(t, err)
 	assert.Equal(t, len(bodyEnvelope), p)
-	assert.Equal(t, len(bodyEnvelope)-len(bodyEnvelopePrefix), int(thinTxn.GetSize()))
+	assert.Equal(t, len(bodyEnvelope)-len(bodyEnvelopePrefix), int(thinTxn.Size))
 	assert.Equal(t, bodyEnvelope[3:], thinTxn.Rlp)
 	assert.Equal(t, BlobTxnType, thinTxn.TxType())
 	assert.Len(t, thinTxn.GetBlobHashes(), 2)
@@ -404,7 +404,7 @@ func TestWrapperV1BlobTxnParsing(t *testing.T) {
 	p, err = ctx.ParseTransaction(wrapperRlp, 0, &fatTxn, nil, hasEnvelope, wrappedWithBlobs, nil)
 	require.NoError(t, err)
 	assert.Equal(t, len(wrapperRlp), p)
-	assert.Equal(t, len(wrapperRlp), int(fatTxn.GetSize()))
+	assert.Equal(t, len(wrapperRlp), int(fatTxn.Size))
 	assert.Equal(t, wrapperRlp, fatTxn.Rlp)
 	assert.Equal(t, BlobTxnType, fatTxn.TxType())
 
