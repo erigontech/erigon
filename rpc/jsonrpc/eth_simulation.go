@@ -122,6 +122,15 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 	if err != nil {
 		return nil, err
 	}
+	// Block number -1 in JSON-RPC means "latest". GetBlockNumber converts it
+	// to math.MaxUint64 (uint64 underflow), so clamp it to the latest block.
+	if blockNumber == math.MaxUint64 {
+		blockNumber = latestBlockNumber
+		blockHash, err = rawdb.ReadCanonicalHash(tx, blockNumber)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if latestBlockNumber < blockNumber {
 		return nil, fmt.Errorf("block number is in the future latest=%d requested=%d", latestBlockNumber, blockNumber)
 	}
