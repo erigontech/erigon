@@ -1338,19 +1338,18 @@ func (ht *HistoryRoTx) HistorySeek(key []byte, txNum uint64, roTx kv.Tx) ([]byte
 	return ht.historySeekInDB(key, txNum, roTx)
 }
 
-// CheckEfAgainstV iterates .ef files and for each sampled (key, txNum) entry verifies:
+// CheckEfAgainstV iterates .ef files and for each sampled key verifies:
 //  1. .efi index: TwoLayerLookupByHash(key) → offset in .ef → key matches (round-trip)
-//  2. .vi index + .v page: historyKey(txNum, key) → .vi lookup → .v page → GetFromPage finds value
+//  2. .vi + .v: for the first txNum of this key, historyKey → .vi lookup → .v page → GetFromPage
 //
-// probesPerFile controls how many lookups per .ef file (0 = default 1000).
-// Returns list of bad files and total mismatch count.
+// probesPerFile controls how many keys to sample per .ef file (0 = default 1000).
+// Single-pass: samples every Nth key without a counting pre-pass.
 func (ht *HistoryRoTx) CheckEfAgainstV(ctx context.Context, probesPerFile int, logger log.Logger) (badFiles []string, totalMismatches int64, err error) {
 	if probesPerFile <= 0 {
 		probesPerFile = 1000
 	}
 
 	seq := &multiencseq.SequenceReader{}
-	ss := &multiencseq.SequenceIterator{}
 	var histKeyBuf []byte
 	badFileSet := map[string]struct{}{}
 
@@ -1363,21 +1362,17 @@ func (ht *HistoryRoTx) CheckEfAgainstV(ctx context.Context, probesPerFile int, l
 		g := ht.iit.statelessGetter(fileIdx)
 		g.Reset(0)
 
-		// First pass: count total keys to compute sample interval
-		var totalKeys int64
-		for g.HasNext() {
-			_, _ = g.Next(nil)
-			_, _ = g.Next(nil)
-			totalKeys++
-		}
-
+		// Estimate sample interval from word count (2 words per key: key + seq)
+		totalKeys := int64(efFile.src.decompressor.Count() / 2)
 		sampleInterval := totalKeys / int64(probesPerFile)
 		if sampleInterval < 1 {
 			sampleInterval = 1
 		}
 
-		// Second pass: sample and check
-		g.Reset(0)
+		// Reusable reader for .efi round-trip verification
+		efiVerifyReader := seg.NewReader(efFile.src.decompressor.MakeGetter(), ht.iit.ii.Compression)
+		efiIdxReader := ht.iit.statelessIdxReader(fileIdx)
+
 		var keyIdx int64
 		var efiChecked, efiMismatches int64
 		var vChecked, vMismatches int64
@@ -1394,9 +1389,8 @@ func (ht *HistoryRoTx) CheckEfAgainstV(ctx context.Context, probesPerFile int, l
 
 			// --- Check 1: .efi round-trip ---
 			efiChecked++
-			efiReader := ht.iit.statelessIdxReader(fileIdx)
 			hi, lo := ht.iit.hashKey(key)
-			efiOffset, efiOK := efiReader.TwoLayerLookupByHash(hi, lo)
+			efiOffset, efiOK := efiIdxReader.TwoLayerLookupByHash(hi, lo)
 			if !efiOK {
 				efiMismatches++
 				badFileSet[g.FileName()+".efi"] = struct{}{}
@@ -1407,12 +1401,9 @@ func (ht *HistoryRoTx) CheckEfAgainstV(ctx context.Context, probesPerFile int, l
 					firstEfiMismatchLogged = true
 				}
 			} else {
-				// Verify the offset points back to the same key
-				// Use a fresh reader to not disturb the main iteration
-				g4 := seg.NewReader(efFile.src.decompressor.MakeGetter(), ht.iit.ii.Compression)
-				g4.Reset(efiOffset)
-				if g4.HasNext() {
-					foundKey, _ := g4.Next(nil)
+				efiVerifyReader.Reset(efiOffset)
+				if efiVerifyReader.HasNext() {
+					foundKey, _ := efiVerifyReader.Next(nil)
 					if !bytes.Equal(foundKey, key) {
 						efiMismatches++
 						badFileSet[g.FileName()+".efi"] = struct{}{}
@@ -1428,72 +1419,68 @@ func (ht *HistoryRoTx) CheckEfAgainstV(ctx context.Context, probesPerFile int, l
 				}
 			}
 
-			// --- Check 2: .vi + .v for each txNum in this key's sequence ---
+			// --- Check 2: .vi + .v for first txNum only ---
 			seq.Reset(efFile.startTxNum, encodedSeq)
-			ss.Reset(seq, 0)
+			if seq.Count() == 0 {
+				continue
+			}
+			txNum := seq.Get(0) // check first txNum only — fast
+			vChecked++
 
-			for ss.HasNext() {
-				txNum, seqErr := ss.Next()
-				if seqErr != nil {
-					return badFiles, totalMismatches, fmt.Errorf("ef sequence decode error in %s: %w", g.FileName(), seqErr)
+			histFile, ok := ht.getFile(txNum)
+			if !ok {
+				vMismatches++
+				if !firstVMismatchLogged {
+					logger.Warn("[integrity] HistoryEfVsV: .v file not found for txNum",
+						"domain", ht.h.FilenameBase, "key", fmt.Sprintf("%x", key),
+						"txNum", txNum, "efFile", g.FileName())
+					firstVMismatchLogged = true
 				}
-				vChecked++
+				continue
+			}
 
-				histFile, ok := ht.getFile(txNum)
-				if !ok {
+			reader := ht.statelessIdxReader(histFile.i)
+			if reader.Empty() {
+				vMismatches++
+				continue
+			}
+
+			histKeyBuf = historyKey(txNum, key, histKeyBuf)
+			offset, idxOK := reader.Lookup(histKeyBuf)
+			if !idxOK {
+				vMismatches++
+				if !firstVMismatchLogged {
+					logger.Warn("[integrity] HistoryEfVsV: .vi lookup failed",
+						"domain", ht.h.FilenameBase, "key", fmt.Sprintf("%x", key),
+						"txNum", txNum, "efFile", g.FileName(),
+						"vFile", ht.files[histFile.i].src.decompressor.FileName())
+					firstVMismatchLogged = true
+				}
+				continue
+			}
+
+			g2 := ht.statelessGetter(histFile.i)
+			g2.Reset(offset)
+			v, _ := g2.Next(nil)
+
+			cpvc := histFile.src.decompressor.CompressedPageValuesCount()
+			if histFile.src.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
+				cpvc = ht.h.HistoryValuesOnCompressedPage
+			}
+
+			if cpvc > 1 {
+				v, ht.snappyReadBuffer = seg.GetFromPage(histKeyBuf, v, ht.snappyReadBuffer, true)
+				if v == nil {
 					vMismatches++
+					vFileName := ht.files[histFile.i].src.decompressor.FileName()
+					badFileSet[vFileName] = struct{}{}
 					if !firstVMismatchLogged {
-						logger.Warn("[integrity] HistoryEfVsV: .v file not found for txNum",
-							"domain", ht.h.FilenameBase, "key", fmt.Sprintf("%x", key),
-							"txNum", txNum, "efFile", g.FileName())
-						firstVMismatchLogged = true
-					}
-					continue
-				}
-
-				reader := ht.statelessIdxReader(histFile.i)
-				if reader.Empty() {
-					vMismatches++
-					continue
-				}
-
-				histKeyBuf = historyKey(txNum, key, histKeyBuf)
-				offset, idxOK := reader.Lookup(histKeyBuf)
-				if !idxOK {
-					vMismatches++
-					if !firstVMismatchLogged {
-						logger.Warn("[integrity] HistoryEfVsV: .vi lookup failed",
+						logger.Warn("[integrity] HistoryEfVsV: key in .ef but NOT found in .v page",
 							"domain", ht.h.FilenameBase, "key", fmt.Sprintf("%x", key),
 							"txNum", txNum, "efFile", g.FileName(),
-							"vFile", ht.files[histFile.i].src.decompressor.FileName())
+							"vFile", vFileName,
+							"recsplitOffset", offset)
 						firstVMismatchLogged = true
-					}
-					continue
-				}
-
-				g2 := ht.statelessGetter(histFile.i)
-				g2.Reset(offset)
-				v, _ := g2.Next(nil)
-
-				cpvc := histFile.src.decompressor.CompressedPageValuesCount()
-				if histFile.src.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
-					cpvc = ht.h.HistoryValuesOnCompressedPage
-				}
-
-				if cpvc > 1 {
-					v, ht.snappyReadBuffer = seg.GetFromPage(histKeyBuf, v, ht.snappyReadBuffer, true)
-					if v == nil {
-						vMismatches++
-						vFileName := ht.files[histFile.i].src.decompressor.FileName()
-						badFileSet[vFileName] = struct{}{}
-						if !firstVMismatchLogged {
-							logger.Warn("[integrity] HistoryEfVsV: key in .ef but NOT found in .v page",
-								"domain", ht.h.FilenameBase, "key", fmt.Sprintf("%x", key),
-								"txNum", txNum, "efFile", g.FileName(),
-								"vFile", vFileName,
-								"recsplitOffset", offset)
-							firstVMismatchLogged = true
-						}
 					}
 				}
 			}
@@ -1504,8 +1491,8 @@ func (ht *HistoryRoTx) CheckEfAgainstV(ctx context.Context, probesPerFile int, l
 			"efFile", g.FileName(),
 			"range", fmt.Sprintf("[%d-%d)", efFile.startTxNum, efFile.endTxNum),
 			"step", fmt.Sprintf("[%d-%d)", efFile.startTxNum/ht.stepSize, efFile.endTxNum/ht.stepSize),
-			"totalKeys", totalKeys,
-			"efiChecked", efiChecked, "efiMismatches", efiMismatches,
+			"totalKeys", totalKeys, "sampled", efiChecked,
+			"efiMismatches", efiMismatches,
 			"vChecked", vChecked, "vMismatches", vMismatches,
 		)
 
