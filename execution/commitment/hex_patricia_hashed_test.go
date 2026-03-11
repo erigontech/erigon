@@ -2735,4 +2735,44 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		require.NotNil(t, rootWitness)
 		require.Equal(t, root, rootWitness, "root witness should match")
 	})
+
+	t.Run("StorageKeyDivergingFromSiblingAccountExtension", func(t *testing.T) {
+		// unfold splits an extension via fillFromUpperCell, copying
+		// account data to a virtual row at a non-leaf depth. toWitnessTrie reads
+		// top-down and misinterprets the stale account data as storage trie content,
+		// producing a corrupted witness with wrong root hash.
+
+		accountA := common.FromHex("cfb9bfcfe7b7866f7336ae3b4adff5bacc9419dd")
+		siblingAt1 := common.FromHex("d25a23572e7495da295d79b6027218a865f27e8b")
+		accountB := common.FromHex("6e36994447827982ee2726976e8e4ee351078220")
+
+		hashA := KeyToNibblizedHash(accountA)
+		hashB := KeyToNibblizedHash(accountB)
+		require.Equal(t, hashA[:6], hashB[:6], "A and B must share 6-nibble prefix")
+		require.NotEqual(t, hashA[6], hashB[6], "A and B must diverge at depth 6")
+		require.Equal(t, hashB[63], hashA[6], "B's last nibble must match A's extension child")
+
+		other0, _ := generateKeyWithHashedPrefix([]byte{0x3}, length.Addr)
+		other1, _ := generateKeyWithHashedPrefix([]byte{0x5, 0x0}, length.Addr)
+		other2, _ := generateKeyWithHashedPrefix([]byte{0x5, 0x2, 0x0}, length.Addr)
+		other3, _ := generateKeyWithHashedPrefix([]byte{0x5, 0x2, 0x8, 0x0}, length.Addr)
+		other4, _ := generateKeyWithHashedPrefix([]byte{0x5, 0x2, 0x8, 0xe, 0x0}, length.Addr)
+
+		storageSlot := make([]byte, length.Hash)
+		fullStorageKey := append(common.Copy(accountB), storageSlot...)
+
+		builder := NewUpdateBuilder()
+		builder.Balance(common.Bytes2Hex(accountA), 100)
+		builder.Storage(common.Bytes2Hex(accountA), "0000000000000000000000000000000000000000000000000000000000000001", "01")
+		builder.Balance(common.Bytes2Hex(siblingAt1), 200)
+		builder.Balance(common.Bytes2Hex(other0), 1)
+		builder.Balance(common.Bytes2Hex(other1), 2)
+		builder.Balance(common.Bytes2Hex(other2), 3)
+		builder.Balance(common.Bytes2Hex(other3), 4)
+		builder.Balance(common.Bytes2Hex(other4), 5)
+
+		buildTrieAndWitness(t, builder,
+			[][]byte{accountA, fullStorageKey},
+			[]bool{true, false})
+	})
 }

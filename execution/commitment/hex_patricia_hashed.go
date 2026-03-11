@@ -1750,6 +1750,19 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 			}
 
 			// there is storage so we need to expand further
+			if pathDivergenceFound {
+				// Same handling as FullNode divergence: set the ShortNode's Val to the
+				// cell's hash so the proof is complete even when the extension diverges.
+				if shortNode, ok := nextNode.(*trie.ShortNode); ok && shortNode.Val == nil {
+					terminalCell := &hph.grid[row][currentNibble]
+					if terminalCell.hashLen > 0 {
+						shortNode.Val = trie.NewHashNode(common.Copy(terminalCell.hash[:terminalCell.hashLen]))
+					} else {
+						cellHash, _, _, _ := hph.witnessComputeCellHashWithStorage(terminalCell, hph.depths[row], nil)
+						shortNode.Val = trie.NewHashNode(common.Copy(cellHash[1:]))
+					}
+				}
+			}
 			accNode.Storage = nextNode
 			if hph.trace {
 				fmt.Printf("[witness] AccountNode (+storage) (%d, %0x, depth=%d) %s proof %+v\n", row, currentNibble, hph.depths[row], cellToExpand.FullString(), accNode)
@@ -2738,6 +2751,19 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 			}
 			if err := hph.unfold(hashedKey, unfolding); err != nil {
 				return fmt.Errorf("unfold: %w", err)
+			}
+		}
+		// If the unfold split an extension (cpl=0) and created a virtual row
+		// where the hashedKey's cell is empty, fold it back. The virtual row
+		// carries stale account/storage data from fillFromUpperCell that
+		// confuses toWitnessTrie (account data at a non-leaf depth).
+		if hph.activeRows > 0 && !hph.branchBefore[hph.activeRows-1] &&
+			hph.currentKeyLen < int16(len(hashedKey)) {
+			divergeNibble := hashedKey[hph.currentKeyLen]
+			if hph.grid[hph.activeRows-1][divergeNibble].IsEmpty() {
+				if err := hph.fold(); err != nil {
+					return fmt.Errorf("fold empty diverging row: %w", err)
+				}
 			}
 		}
 
