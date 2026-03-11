@@ -245,12 +245,16 @@ func (g *PagedReader) Skip() (uint64, int) {
 var workers = dbg.EnvInt("PAGED_WRITER_WORKERS", 1)
 
 func NewPagedWriter(ctx context.Context, parent CompressorI, compressionEnabled bool) *PagedWriter {
+	return NewPagedWriterWithWorkers(ctx, parent, compressionEnabled, workers)
+}
+
+func NewPagedWriterWithWorkers(ctx context.Context, parent CompressorI, compressionEnabled bool, numWorkers int) *PagedWriter {
 	pw := &PagedWriter{
 		parent:             parent,
 		pageSize:           parent.GetValuesOnCompressedPage(),
 		compressionEnabled: compressionEnabled,
 		ctx:                ctx,
-		numWorkers:         workers, //TODO: accept it as a parameter in next PR
+		numWorkers:         numWorkers,
 	}
 	if compressionEnabled && pw.pageSize > 1 {
 		if pw.numWorkers > 1 {
