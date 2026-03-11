@@ -210,7 +210,7 @@ func TestPagedWriterCRC32Sequential(t *testing.T) {
 
 	// Now test parallel compression produces same CRC32
 	mock2 := &multyBytesWriter{pageSize: 4}
-	pw2 := NewPagedWriter(t.Context(), mock2, true)
+	pw2 := NewPagedWriterWithWorkers(t.Context(), mock2, true, 4)
 
 	for _, kv := range testData {
 		if err := pw2.Add([]byte(kv.k), []byte(kv.v)); err != nil {
