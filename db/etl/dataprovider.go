@@ -128,35 +128,39 @@ func sortAndFlush(b Buffer, tmpdir string) (*os.File, error) {
 
 func (p *fileDataProvider) Next(keyBuf, valBuf []byte) ([]byte, []byte, error) {
 	if p.mmapReader == nil {
-		// Get file size by seeking to end
-		size, err := p.file.Seek(0, io.SeekEnd)
-		if err != nil {
+		if err := p.initMmap(); err != nil {
 			return nil, nil, err
 		}
-		if size == 0 {
-			return nil, nil, io.EOF
-		}
-
-		// Memory-map the file
-		p.mmapData, p.mmapHandle2, err = mmap.Mmap(p.file, int(size))
-		if err != nil {
-			return nil, nil, fmt.Errorf("mmap failed: %w", err)
-		}
-
-		// Set sequential read pattern for better performance
-		if err := mmap.MadviseSequential(p.mmapData); err != nil {
-			_ = mmap.Munmap(p.mmapData, p.mmapHandle2)
-			return nil, nil, fmt.Errorf("madvise sequential failed: %w", err)
-		}
-
-		// Create zero-copy reader over mmap'd data
-		p.mmapReader = &mmapBytesReader{data: p.mmapData, pos: 0}
 	}
-	return readElementFromDiskZeroCopy(p.mmapReader)
+	key, err := readField(p.mmapReader)
+	if err != nil {
+		return nil, nil, err
+	}
+	val, err := readField(p.mmapReader)
+	if err != nil {
+		return nil, nil, err
+	}
+	return key, val, nil
 }
 
-// ReadVarint decodes a signed varint directly from mmap data
-func (m *mmapBytesReader) ReadVarint() (int64, error) {
+func (p *fileDataProvider) initMmap() error {
+	fi, err := p.file.Stat()
+	if err != nil {
+		return err
+	}
+	if fi.Size() == 0 {
+		return io.EOF
+	}
+	p.mmapData, p.mmapHandle2, err = mmap.Mmap(p.file, int(fi.Size()))
+	if err != nil {
+		return fmt.Errorf("mmap failed: %w", err)
+	}
+	_ = mmap.MadviseSequential(p.mmapData)
+	p.mmapReader = &mmapBytesReader{data: p.mmapData, pos: 0}
+	return nil
+}
+
+func (m *mmapBytesReader) readVarint() (int, error) {
 	v, n := binary.Varint(m.data[m.pos:])
 	if n <= 0 {
 		if n == 0 {
@@ -165,18 +169,30 @@ func (m *mmapBytesReader) ReadVarint() (int64, error) {
 		return 0, fmt.Errorf("varint overflow")
 	}
 	m.pos += n
-	return v, nil
+	return int(v), nil
 }
 
-// ReadAt returns a slice directly from mmap data (zero-copy) at given length
-// The returned slice points directly into the mmap'd memory
-func (m *mmapBytesReader) ReadAt(length int) ([]byte, error) {
+// readAt returns a zero-copy slice directly from mmap'd memory
+func (m *mmapBytesReader) readAt(length int) ([]byte, error) {
 	if m.pos+length > len(m.data) {
 		return nil, io.ErrUnexpectedEOF
 	}
 	result := m.data[m.pos : m.pos+length]
 	m.pos += length
 	return result, nil
+}
+
+// readField reads a varint-prefixed byte slice from mmap data (zero-copy).
+// Negative length means nil.
+func readField(m *mmapBytesReader) ([]byte, error) {
+	n, err := m.readVarint()
+	if err != nil {
+		return nil, err
+	}
+	if n < 0 {
+		return nil, nil
+	}
+	return m.readAt(n)
 }
 
 func (p *fileDataProvider) Wait() error { return p.wg.Wait() }
@@ -200,66 +216,6 @@ func (p *fileDataProvider) Dispose() {
 
 func (p *fileDataProvider) String() string {
 	return fmt.Sprintf("%T(file: %s)", p, p.file.Name())
-}
-
-// readElementFromDisk reads key-value pairs from an io.Reader for testing
-func readElementFromDisk(r io.Reader, br io.ByteReader, keyBuf, valBuf []byte) ([]byte, []byte, error) {
-	n, err := binary.ReadVarint(br)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	var key []byte
-	if n >= 0 {
-		key = make([]byte, n)
-		if _, err = io.ReadFull(r, key); err != nil {
-			return nil, nil, err
-		}
-	}
-
-	n, err = binary.ReadVarint(br)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	var val []byte
-	if n >= 0 {
-		val = make([]byte, n)
-		if _, err = io.ReadFull(r, val); err != nil {
-			return nil, nil, err
-		}
-	}
-
-	return key, val, nil
-}
-
-// readElementFromDiskZeroCopy reads key-value pairs directly from mmap'd data
-func readElementFromDiskZeroCopy(m *mmapBytesReader) ([]byte, []byte, error) {
-	keyLen, err := m.ReadVarint()
-	if err != nil {
-		return nil, nil, err
-	}
-
-	var keyBuf []byte
-	if keyLen >= 0 {
-		if keyBuf, err = m.ReadAt(int(keyLen)); err != nil {
-			return nil, nil, err
-		}
-	}
-
-	valLen, err := m.ReadVarint()
-	if err != nil {
-		return nil, nil, err
-	}
-
-	var valBuf []byte
-	if valLen >= 0 {
-		if valBuf, err = m.ReadAt(int(valLen)); err != nil {
-			return nil, nil, err
-		}
-	}
-
-	return keyBuf, valBuf, nil
 }
 
 type memoryDataProvider struct {
