@@ -1047,7 +1047,13 @@ func CheckCommitmentStateKeyHistory(ctx context.Context, db kv.TemporalRoDB, br 
 				continue
 			}
 			if len(histV) < 16 {
-				continue // empty marker — key was created at this txNum
+				// Empty/short value means "key didn't exist before this txNum" — suspicious
+				// for the "state" key which should always have a ~715 byte value after genesis.
+				probeFail++
+				logger.Warn("[integrity] CommitmentStateKeyHistory: HistorySeek returned empty/short value",
+					"file", vf.name, "probeTxNum", probeTxNum,
+					"histVLen", len(histV), "histV", fmt.Sprintf("%x", histV))
+				continue
 			}
 			vTxNum := binary.BigEndian.Uint64(histV[0:8])
 			vBlockNum := binary.BigEndian.Uint64(histV[8:16])
