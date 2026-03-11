@@ -97,6 +97,12 @@ const (
 	// More targeted than CommitmentHistVal when a particular block range is suspect.
 	StateRootVerifyByHistory Check = "StateRootVerifyByHistory"
 
+	// CommitmentStateKeyHistory verifies the "state" key has proper history entries in
+	// commitment .v files. Checks that each file contains state key entries with plausible
+	// (txNum, blockNum) values, and that GetAsOf returns historical values (not the latest).
+	// Catches missing history due to PagedWriter data loss or incomplete commitment rebuilds.
+	CommitmentStateKeyHistory Check = "CommitmentStateKeyHistory"
+
 	// StateVerify verifies state correspondence between commitment and domains. Checks that
 	// every key in account/storage domains is properly referenced by commitment branches,
 	// and vice versa. Catches missing or extra keys. Uses forward check for base files
@@ -120,7 +126,7 @@ const (
 var FastChecks = []Check{
 	Blocks, HeaderNoGaps, BlocksTxnID, InvertedIndex, StateProgress, HistoryNoSystemTxs,
 	CommitmentKvi, ReceiptsNoDups, RCacheNoDups, CommitmentRoot,
-	CommitmentHistVal, StateRootVerifyByHistory, Publishable,
+	CommitmentHistVal, CommitmentStateKeyHistory, StateRootVerifyByHistory, Publishable,
 }
 
 var SlowChecks = []Check{StateVerify}
