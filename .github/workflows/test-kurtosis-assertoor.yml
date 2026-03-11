@@ -63,6 +63,13 @@ jobs:
           username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
           password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
 
+      - name: Move Docker volumes to RAM disk
+        run: |
+          sudo systemctl stop docker
+          sudo mkdir -p /var/lib/docker/volumes
+          sudo mount -t tmpfs -o size=4096m tmpfs /var/lib/docker/volumes
+          sudo systemctl start docker
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
