@@ -59,7 +59,7 @@ jobs:
             max-allowed-failures: 0
           - sim: rpc
             sim-limit: compat
-            max-allowed-failures: 23
+            max-allowed-failures: 8 # https://github.com/erigontech/erigon/issues/19758
     steps:
       - name: Checkout Erigon go.mod
         uses: actions/checkout@v6
