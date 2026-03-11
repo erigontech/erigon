@@ -25,6 +25,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -896,45 +898,44 @@ func TestMixedProvidersZeroCopyIntegrity(t *testing.T) {
 }
 
 func BenchmarkMemoryDataProviderNext(b *testing.B) {
-	for _, keySize := range []int{20, 32, 64} {
-		for _, valSize := range []int{32, 128, 256, 1024} {
-			name := fmt.Sprintf("key%d_val%d", keySize, valSize)
-			buf := makeSortedBuffer(keySize, valSize, 10_000)
+	const keySize = 32
+	for _, valSize := range []int{32, 128, 1024} {
+		name := fmt.Sprintf("key%d_val%d", keySize, valSize)
+		buf := makeSortedBuffer(keySize, valSize, 10_000)
 
-			b.Run(name+"/GetRef", func(b *testing.B) {
-				b.ReportAllocs()
-				var keyBuf, valBuf []byte
-				for i := 0; i < b.N; i++ {
-					p := &memoryDataProvider{buffer: buf, currentIndex: 0}
-					for {
-						var err error
-						keyBuf, valBuf, err = p.Next()
-						if err == io.EOF {
-							break
-						}
-						if err != nil {
-							b.Fatal(err)
-						}
+		b.Run(name+"/GetRef", func(b *testing.B) {
+			b.ReportAllocs()
+			var keyBuf, valBuf []byte
+			for i := 0; i < b.N; i++ {
+				p := &memoryDataProvider{buffer: buf, currentIndex: 0}
+				for {
+					var err error
+					keyBuf, valBuf, err = p.Next()
+					if err == io.EOF {
+						break
+					}
+					if err != nil {
+						b.Fatal(err)
 					}
 				}
-				_ = keyBuf
-				_ = valBuf
-			})
+			}
+			_ = keyBuf
+			_ = valBuf
+		})
 
-			b.Run(name+"/Get", func(b *testing.B) {
-				b.ReportAllocs()
-				var keyBuf, valBuf []byte
-				for i := 0; i < b.N; i++ {
-					idx := 0
-					for idx < buf.Len() {
-						keyBuf, valBuf = buf.Get(idx)
-						idx++
-					}
+		b.Run(name+"/Get", func(b *testing.B) {
+			b.ReportAllocs()
+			var keyBuf, valBuf []byte
+			for i := 0; i < b.N; i++ {
+				idx := 0
+				for idx < buf.Len() {
+					keyBuf, valBuf = buf.Get(idx)
+					idx++
 				}
-				_ = keyBuf
-				_ = valBuf
-			})
-		}
+			}
+			_ = keyBuf
+			_ = valBuf
+		})
 	}
 }
 
@@ -952,38 +953,38 @@ func makeSortedBuffer(keySize, valSize, n int) *sortableBuffer {
 }
 
 func BenchmarkFileDataProviderNext(b *testing.B) {
-	for _, keySize := range []int{20, 32, 64} {
-		for _, valSize := range []int{32, 128, 256, 1024} {
-			name := fmt.Sprintf("key%d_val%d", keySize, valSize)
-			buf := makeSortedBuffer(keySize, valSize, 10_000)
+	const keySize = 32
+	for _, valSize := range []int{32, 128, 1024} {
+		name := fmt.Sprintf("key%d_val%d", keySize, valSize)
+		buf := makeSortedBuffer(keySize, valSize, 10_000)
 
-			b.Run(name, func(b *testing.B) {
-				b.ReportAllocs()
-				tmpdir := b.TempDir()
-				for b.Loop() {
-					b.StopTimer()
-					provider, err := FlushToDisk("bench", buf, tmpdir, log.LvlInfo)
+		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				b.StopTimer()
+				tmpdir, _ := os.MkdirTemp("", "bench-fdp-")
+				provider, err := FlushToDisk("bench", buf, tmpdir, log.LvlInfo)
+				if err != nil {
+					b.Fatal(err)
+				}
+				b.StartTimer()
+
+				for {
+					_, _, err := provider.Next()
+					if err == io.EOF {
+						break
+					}
 					if err != nil {
 						b.Fatal(err)
 					}
-					b.StartTimer()
-
-					for {
-						_, _, err := provider.Next()
-						if err == io.EOF {
-							break
-						}
-						if err != nil {
-							b.Fatal(err)
-						}
-					}
-
-					b.StopTimer()
-					provider.Dispose()
-					b.StartTimer()
 				}
-			})
-		}
+
+				b.StopTimer()
+				provider.Dispose()
+				os.RemoveAll(tmpdir)
+				b.StartTimer()
+			}
+		})
 	}
 }
 
@@ -1122,4 +1123,70 @@ func BenchmarkSortableBufferSort(b *testing.B) {
 			}
 		})
 	}
+}
+
+func TestVmtouchMmap(t *testing.T) {
+	if _, err := exec.LookPath("vmtouch"); err != nil {
+		t.Skip("vmtouch not installed")
+	}
+
+	tmpdir := t.TempDir()
+	const n = 1_000_000
+	buf := makeSortedBuffer(32, 1024, n) // ~1GB file
+
+	provider, err := FlushToDisk("test", buf, tmpdir, log.LvlInfo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer provider.Dispose()
+
+	files, _ := filepath.Glob(filepath.Join(tmpdir, "*"))
+	if len(files) == 0 {
+		t.Fatal("no temp file found")
+	}
+	fname := files[0]
+
+	vmtouch := func(label string) {
+		fmt.Printf("\n=== %s ===\n", label)
+		cmd := exec.Command("vmtouch", "-v", fname)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Run()
+	}
+
+	vmtouch("BEFORE first Next()")
+
+	// First Next() triggers initMmap + MadviseWillNeed + MadviseSequential
+	_, _, err = provider.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+	vmtouch("AFTER first Next() (initMmap + madvise)")
+
+	// Read 25%
+	for i := 0; i < n/4-1; i++ {
+		provider.Next()
+	}
+	vmtouch("AFTER 25%")
+
+	// Read to 50%
+	for i := 0; i < n/4; i++ {
+		provider.Next()
+	}
+	vmtouch("AFTER 50%")
+
+	// Read to 75%
+	for i := 0; i < n/4; i++ {
+		provider.Next()
+	}
+	vmtouch("AFTER 75%")
+
+	// Read rest
+	for {
+		_, _, err := provider.Next()
+		if err == io.EOF {
+			break
+		}
+	}
+	vmtouch("AFTER full scan")
 }
