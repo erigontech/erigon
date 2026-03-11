@@ -383,6 +383,10 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		} else {
 			callContext.gas -= cost
 		}
+		// EIP-8037: Track constantGas immediately after deduction for block-level accounting.
+		if evm.chainRules.IsAmsterdam && cost > 0 {
+			evm.regularGasConsumed += cost
+		}
 
 		// All ops with a dynamic memory usage also has a dynamic gas cost.
 		var memorySize uint64
@@ -426,6 +430,12 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			} else {
 				callContext.gas -= dynamicCost.Regular
 			}
+			// EIP-8037: Track dynamic regular gas immediately after deduction.
+			// For CALL variants, callGasTemp is the gas forwarded to child (escrow),
+			// so we subtract it to get parent's actual cost.
+			if evm.chainRules.IsAmsterdam {
+				evm.regularGasConsumed += dynamicCost.Regular - evm.CallGasTemp()
+			}
 
 			if dynamicCost.State > 0 {
 				cost += dynamicCost.State
@@ -434,15 +444,6 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 					return nil, callContext.Gas(), ErrOutOfGas
 				}
 			}
-			// EIP-8037: Track regular gas consumed for block-level accounting.
-			// For CALL variants, callGasTemp is the gas forwarded to child (escrow),
-			// so callGas = constantGas + dynamicCost - callGasTemp = parent's actual cost.
-			if evm.chainRules.IsAmsterdam {
-				evm.regularGasConsumed += callGas
-			}
-		}
-		if evm.chainRules.IsAmsterdam && operation.constantGas > 0 {
-			evm.regularGasConsumed += operation.constantGas
 		}
 
 		// Do gas tracing before memory expansion
