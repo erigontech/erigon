@@ -771,6 +771,23 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	agg.LockWorkersEditing()
 
 	for {
+		pruneStage, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, s.CurrentSyncCycle.IsInitialCycle)
+		if err != nil {
+			return err
+		}
+		if err := stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger); err != nil {
+			return err
+		}
+
+		if !noCommit {
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+			if tx, err = db.BeginTemporalRw(ctx); err != nil {
+				return err
+			}
+		}
+
 		if err := stagedsync.SpawnExecuteBlocksStage(s, sync, doms, tx, block, ctx, cfg, logger); err != nil {
 			if !errors.Is(err, &stagedsync.ErrLoopExhausted{}) {
 				return err
@@ -809,23 +826,6 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		}
 
 		if !noCommit {
-			if tx, err = db.BeginTemporalRw(ctx); err != nil {
-				return err
-			}
-		}
-
-		pruneStage, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, s.CurrentSyncCycle.IsInitialCycle)
-		if err != nil {
-			return err
-		}
-		if err := stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger); err != nil {
-			return err
-		}
-
-		if !noCommit {
-			if err := tx.Commit(); err != nil {
-				return err
-			}
 			if tx, err = db.BeginTemporalRw(ctx); err != nil {
 				return err
 			}
