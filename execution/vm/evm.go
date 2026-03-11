@@ -339,12 +339,27 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 			childStateConsumed := evm.stateGasConsumed - savedStateGasConsumed
 			evm.stateGasConsumed = savedStateGasConsumed
 
-			// Restore spill: state gas charged from child's regular gas goes back
-			// This happens after halt zeroing so spill is preserved even on halt
+			// EIP-8037: State gas is reverted since no state changes took place.
+			// Restore state gas spill (state gas charged from regular gas) back
+			// to gas.Regular, since the state operations were reverted.
 			reservoirUsed := initialChildState - gas.State
 			if childStateConsumed > reservoirUsed {
 				spill := childStateConsumed - reservoirUsed
 				gas.Regular += spill
+			}
+
+			if err != ErrExecutionReverted {
+				// EIP-8037: Preserve state gas reservoir on exceptional halt.
+				// The reservoir is returned to the parent frame or preserved
+				// at the top level for refund.
+				gas.State = initialChildState
+
+				// At the top level (depth == 0), all regular gas is fully consumed
+				// on exceptional halt — including the restored spill.
+				// At subcall level (depth > 0) the spill is returned to the parent.
+				if depth == 0 {
+					gas.Regular = 0
+				}
 			}
 		}
 	}
@@ -465,8 +480,12 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	// BAL: record target address even on failed CREATE/CREATE2 calls
 	evm.intraBlockState.MarkAddressAccess(address, false)
 
-	// Ensure there's no existing contract already at the designated address
-	contractHash, err := evm.intraBlockState.ResolveCodeHash(address)
+	// Ensure there's no existing contract already at the designated address.
+	// Use GetCodeHash (not ResolveCodeHash) so that an EIP-7702 delegation
+	// designator (0xef0100...) is seen as non-empty code, triggering a collision.
+	// This matches geth's behavior: CREATE/CREATE2 must not overwrite a
+	// delegated account even if the delegation target is empty.
+	contractHash, err := evm.intraBlockState.GetCodeHash(address)
 	if err != nil {
 		return nil, accounts.NilAddress, mdgas.MdGas{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
@@ -575,12 +594,21 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 			childStateConsumed := evm.stateGasConsumed - savedStateGasConsumed
 			evm.stateGasConsumed = savedStateGasConsumed
 
-			// Restore spill: state gas charged from child's regular gas goes back
-			// This happens after halt zeroing so spill is preserved even on halt
+			// EIP-8037: State gas is reverted since no state changes took place.
 			reservoirUsed := initialChildState - gasRemaining.State
 			if childStateConsumed > reservoirUsed {
 				spill := childStateConsumed - reservoirUsed
 				gasRemaining.Regular += spill
+			}
+
+			if err != ErrExecutionReverted {
+				// EIP-8037: Preserve state gas reservoir on exceptional halt.
+				gasRemaining.State = initialChildState
+
+				// At the top level (depth == 0), all regular gas is fully consumed.
+				if depth == 0 {
+					gasRemaining.Regular = 0
+				}
 			}
 		}
 	}

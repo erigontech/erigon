@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -3102,4 +3103,120 @@ func TestDomain_IntegrateDirtyFilesNilGuard(t *testing.T) {
 	})
 	require.NotNil(t, foundAfter, "dirty file for step 0 must still exist after nil StaticFiles")
 	require.NotNil(t, foundAfter.decompressor, "dirty file decompressor must not be overwritten by nil StaticFiles")
+}
+
+// filledDomainWithHashMapAccessor creates a domain configured to use AccessorHashMap
+// (like CommitmentDomain) for testing buildHashMapAccessor code paths.
+func filledDomainWithHashMapAccessor(t *testing.T, logger log.Logger) (kv.RwDB, *Domain, uint64) {
+	t.Helper()
+	dirs := datadir2.New(t.TempDir())
+
+	// Start with AccountsDomain config but switch to HashMap accessor
+	cfg := statecfg.Schema.AccountsDomain
+	cfg.Accessors = statecfg.AccessorHashMap // Use HashMap instead of BTree
+
+	// Set version to V1_0_standart to enable HashMap accessor building
+	cfg.FileVersion = statecfg.DomainVersionTypes{
+		DataKV:       version.V1_0_standart,
+		AccessorBT:   version.V1_0_standart,
+		AccessorKVEI: version.V1_0_standart,
+		AccessorKVI:  version.V1_0_standart,
+	}
+	cfg.Hist.IiCfg.FileVersion = statecfg.IIVersionTypes{
+		DataEF:      version.V1_0_standart,
+		AccessorEFI: version.V1_0_standart,
+	}
+
+	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
+	t.Cleanup(db.Close)
+	salt := uint32(1)
+
+	d, err := NewDomain(cfg, 16, config3.DefaultStepsInFrozenFile, dirs, logger)
+	require.NoError(t, err)
+	d.salt.Store(&salt)
+	d.DisableFsync()
+	t.Cleanup(d.Close)
+
+	txs := fillDomain(t, d, db, logger)
+	return db, d, txs
+}
+
+// collateAndMergeWithCollisionRetry is like collateAndMerge but forces a
+// recsplit collision retry on every buildHashMapAccessor call during merge.
+func collateAndMergeWithCollisionRetry(t *testing.T, tx kv.RwTx, d *Domain, txs uint64) {
+	t.Helper()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	ctx := context.Background()
+
+	// Collate without collision forcing first
+	for step := kv.Step(0); step < kv.Step(txs/d.stepSize)-1; step++ {
+		require.NoError(t, d.collateBuildIntegrate(ctx, step, tx, background.NewProgressSet()))
+	}
+
+	// Now set up collision forcing for merge
+	d._testBuildAccessorHook = func(rs *recsplit.RecSplit) {
+		rs.ForceCollisionOnce()
+	}
+
+	domainRoTx := d.BeginFilesRo()
+	defer domainRoTx.Close()
+
+	// Merge with collision retry
+	r := domainRoTx.findMergeRange(d.dirtyFilesEndTxNumMinimax(), d.dirtyFilesEndTxNumMinimax())
+	if r.values.needMerge {
+		valuesOuts, indexOuts, historyOuts := domainRoTx.staticFilesInRange(r)
+		valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, background.NewProgressSet())
+		require.NoError(t, err)
+		d.integrateMergedDirtyFiles(valuesIn, indexIn, historyIn)
+		d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
+	}
+}
+
+// TestDomain_KeyPosResetOnCollisionRetry verifies that keyPos and valPos
+// used in buildHashMapAccessor are reset when the build retries due to a
+// recsplit collision. Without the reset, the .kvi index would contain
+// incorrect offsets on the retry pass.
+func TestDomain_KeyPosResetOnCollisionRetry(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	t.Parallel()
+
+	logger := log.New()
+	db, d, txs := filledDomainWithHashMapAccessor(t, logger)
+
+	ctx := context.Background()
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	// Collate and merge with forced collision retry
+	collateAndMergeWithCollisionRetry(t, tx, d, txs)
+	require.NoError(t, tx.Commit())
+
+	// Verify lookups still work correctly after collision retry
+	roTx, err := db.BeginRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	domainRoTx := d.BeginFilesRo()
+	defer domainRoTx.Close()
+
+	// Check that we can look up keys correctly
+	// If keyPos wasn't reset, the index would have wrong offsets
+	for keyNum := uint64(1); keyNum <= uint64(31); keyNum++ {
+		var k [8]byte
+		binary.BigEndian.PutUint64(k[:], keyNum)
+
+		val, _, found, err := domainRoTx.GetLatest(k[:], roTx)
+		require.NoError(t, err, "key %x", k)
+		require.True(t, found, "key %x should be found", k)
+
+		// Expected value is txs/keyNum
+		var expected [8]byte
+		binary.BigEndian.PutUint64(expected[:], txs/keyNum)
+		require.Equal(t, expected[:], val, "key %x value mismatch", k)
+	}
 }

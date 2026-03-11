@@ -31,6 +31,20 @@ func (g MdGas) Minus(other MdGas) MdGas {
 	}
 }
 
+func (g MdGas) MinusStateGas(sg uint64) (result MdGas, underflow bool) {
+	if g.State >= sg {
+		result.State = g.State - sg
+		result.Regular = g.Regular
+		return result, false
+	}
+	spill := sg - g.State
+	if spill > g.Regular {
+		return result, true
+	}
+	result.Regular = g.Regular - spill
+	return result, false
+}
+
 func (g MdGas) Plus(other MdGas) MdGas {
 	return MdGas{
 		Regular: g.Regular + other.Regular,

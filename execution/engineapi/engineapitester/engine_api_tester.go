@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/engineapi"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
@@ -200,7 +201,7 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 	chainDB, err := node.OpenDatabase(ctx, ethNode.Config(), dbcfg.ChainDB, "", false, logger)
 	require.NoError(t, err)
 	t.Cleanup(chainDB.Close)
-	_, genesisBlock, err := genesiswrite.CommitGenesisBlock(chainDB, genesis, ethNode.Config().Dirs, logger)
+	_, genesisBlock, err := genesiswrite.CommitGenesisBlock(chainDB, genesis, networkname.Mainnet, ethNode.Config().Dirs, logger)
 	require.NoError(t, err)
 	chainDB.Close()
 

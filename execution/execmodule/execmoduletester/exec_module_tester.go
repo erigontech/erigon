@@ -470,7 +470,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	}
 
 	// Committed genesis will be shared between download and mock sentry
-	_, mock.Genesis, err = genesiswrite.CommitGenesisBlock(mock.DB, gspec, datadir.New(tmpdir), mock.Log)
+	_, mock.Genesis, err = genesiswrite.CommitGenesisBlock(mock.DB, gspec, "", datadir.New(tmpdir), mock.Log)
 	if _, ok := err.(*chain.ConfigCompatError); err != nil && !ok {
 		if tb != nil {
 			tb.Fatal(err)
