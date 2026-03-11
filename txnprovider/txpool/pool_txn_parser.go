@@ -159,11 +159,139 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	}
 
 	// Step 3: Decode the transaction using standard types.
+	// For blob wrappers, we parse the wrapper structure manually (zero-copy for
+	// large blob data) and decode only the inner tx_payload_body via the standard
+	// decoder, producing a *types.BlobTx (not *types.BlobTxWrapper).
 	var txn types.Transaction
-	if legacy {
+	var innerTxBytes []byte // only set for wrapped blob txns
+	if !legacy && txBytes[0] == BlobTxnType && wrappedWithBlobs {
+		// Structure: type_byte || rlp([ rlp(tx_body), [wrapper_version], blobs, commitments, proofs ])
+		wrapperListPos, wrapperListLen, err := rlp.ParseList(txBytes, 1)
+		if err != nil {
+			return 0, fmt.Errorf("%w: blob wrapper list: %s", ErrParseTxn, err) //nolint
+		}
+
+		// Parse the inner tx_payload_body (first element of the wrapper list).
+		innerBodyPos, innerBodyLen, err := rlp.ParseList(txBytes, wrapperListPos)
+		if err != nil {
+			return 0, fmt.Errorf("%w: blob tx body in wrapper: %s", ErrParseTxn, err) //nolint
+		}
+		// innerTxBytes = type_byte + rlp_list(tx_body)
+		// The body RLP (with its list prefix) starts at wrapperListPos.
+		innerTxBytes = make([]byte, 1+innerBodyPos+innerBodyLen-wrapperListPos)
+		innerTxBytes[0] = BlobTxnType
+		copy(innerTxBytes[1:], txBytes[wrapperListPos:innerBodyPos+innerBodyLen])
+
+		// Decode only the inner tx (no blobs/commitments/proofs).
+		txn, err = types.UnmarshalTransactionFromBinary(innerTxBytes, false)
+		if err != nil {
+			return 0, fmt.Errorf("%w: %s", ErrParseTxn, err) //nolint
+		}
+
+		// Now parse the remaining wrapper elements: [wrapper_version], blobs, commitments, proofs.
+		wp := innerBodyPos + innerBodyLen // position after inner tx body
+
+		// Check for optional wrapper_version byte.
+		proofsPerBlob := 1
+		_, dvLen, err := rlp.ParseString(txBytes, wp)
+		if err == nil && dvLen == 1 {
+			if txBytes[wp] != 0x01 {
+				return 0, fmt.Errorf("%w: invalid wrapper version: expected 1, got %d", ErrParseTxn, txBytes[wp])
+			}
+			wp++
+			proofsPerBlob = int(params.CellsPerExtBlob)
+		}
+
+		// Parse blobs list (zero-copy: slices point into original payload).
+		blobListPos, blobListLen, err := rlp.ParseList(txBytes, wp)
+		if err != nil {
+			return 0, fmt.Errorf("%w: blobs len: %s", ErrParseTxn, err) //nolint
+		}
+		blobPos := blobListPos
+		blobIdx := 0
+		for blobPos < blobListPos+blobListLen {
+			slot.BlobBundles = append(slot.BlobBundles, PoolBlobBundle{})
+			blobPos, err = rlp.StringOfLen(txBytes, blobPos, params.BlobSize)
+			if err != nil {
+				return 0, fmt.Errorf("%w: blob: %s", ErrParseTxn, err) //nolint
+			}
+			slot.BlobBundles[blobIdx].Blob = txBytes[blobPos : blobPos+params.BlobSize]
+			blobPos += params.BlobSize
+			blobIdx++
+		}
+		if blobPos != blobListPos+blobListLen {
+			return 0, fmt.Errorf("%w: extraneous space in blobs", ErrParseTxn)
+		}
+		wp = blobPos
+
+		// Parse commitments list.
+		commitListPos, commitListLen, err := rlp.ParseList(txBytes, wp)
+		if err != nil {
+			return 0, fmt.Errorf("%w: commitments len: %s", ErrParseTxn, err) //nolint
+		}
+		commitPos := commitListPos
+		blobIdx = 0
+		for commitPos < commitListPos+commitListLen {
+			if blobIdx >= len(slot.BlobBundles) {
+				return 0, fmt.Errorf("%w: more commitments than blobs (%d > %d)", ErrParseTxn, blobIdx+1, len(slot.BlobBundles))
+			}
+			commitPos, err = rlp.StringOfLen(txBytes, commitPos, 48)
+			if err != nil {
+				return 0, fmt.Errorf("%w: commitment: %s", ErrParseTxn, err) //nolint
+			}
+			var commitment goethkzg.KZGCommitment
+			copy(commitment[:], txBytes[commitPos:commitPos+48])
+			slot.BlobBundles[blobIdx].Commitment = commitment
+			commitPos += 48
+			blobIdx++
+		}
+		if blobIdx != len(slot.BlobBundles) {
+			return 0, fmt.Errorf("%w: fewer commitments than blobs (%d < %d)", ErrParseTxn, blobIdx, len(slot.BlobBundles))
+		}
+		if commitPos != commitListPos+commitListLen {
+			return 0, fmt.Errorf("%w: extraneous space in commitments", ErrParseTxn)
+		}
+		wp = commitPos
+
+		// Parse proofs list.
+		proofListPos, proofListLen, err := rlp.ParseList(txBytes, wp)
+		if err != nil {
+			return 0, fmt.Errorf("%w: proofs len: %s", ErrParseTxn, err) //nolint
+		}
+		proofPos := proofListPos
+		proofsList := make([]goethkzg.KZGProof, 0)
+		for proofPos < proofListPos+proofListLen {
+			proofPos, err = rlp.StringOfLen(txBytes, proofPos, 48)
+			if err != nil {
+				return 0, fmt.Errorf("%w: proof: %s", ErrParseTxn, err) //nolint
+			}
+			var proof goethkzg.KZGProof
+			copy(proof[:], txBytes[proofPos:proofPos+48])
+			proofsList = append(proofsList, proof)
+			proofPos += 48
+		}
+		if len(proofsList) != proofsPerBlob*len(slot.BlobBundles) {
+			return 0, fmt.Errorf("%w: unexpected proofs len=%d expected=%d", ErrParseTxn, len(proofsList), proofsPerBlob*len(slot.BlobBundles))
+		}
+		proofsIdx := 0
+		for blobIdx = 0; blobIdx < len(slot.BlobBundles); blobIdx++ {
+			for range proofsPerBlob {
+				slot.BlobBundles[blobIdx].Proofs = append(slot.BlobBundles[blobIdx].Proofs, proofsList[proofsIdx])
+				proofsIdx++
+			}
+		}
+		if proofPos != proofListPos+proofListLen {
+			return 0, fmt.Errorf("%w: extraneous space in proofs", ErrParseTxn)
+		}
+		wp = proofPos
+
+		if wp != wrapperListPos+wrapperListLen {
+			return 0, fmt.Errorf("%w: extraneous elements in blobs wrapper", ErrParseTxn)
+		}
+	} else if legacy {
 		txn, err = types.DecodeTransaction(txBytes)
 	} else {
-		txn, err = types.UnmarshalTransactionFromBinary(txBytes, wrappedWithBlobs)
+		txn, err = types.UnmarshalTransactionFromBinary(txBytes, false)
 	}
 	if err != nil {
 		return 0, fmt.Errorf("%w: %s", ErrParseTxn, err) //nolint
@@ -193,38 +321,13 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	}
 
 	// Step 6: Store raw RLP bytes and cache size (Rlp may be nilled later after DB flush).
+	// For wrapped blob txns, store the full wrapper RLP (needed for PooledTransactions gossip),
+	// but Size reflects the full wrapper.
 	slot.Rlp = txBytes
 	slot.Size = uint32(len(txBytes))
 
 	// Step 7: Populate fields that are kept on TxnSlot.
 	slot.Nonce = txn.GetNonce()
-
-	// Blob-specific validation (EIP-4844).
-	if bt, ok := txn.(*types.BlobTxWrapper); ok {
-		// Validate wrapper version (only 0 and 1 are defined).
-		if bt.WrapperVersion > 1 {
-			return 0, fmt.Errorf("%w: unsupported blob wrapper version %d", ErrParseTxn, bt.WrapperVersion)
-		}
-
-		// Validate commitment/blob count.
-		numBlobs := len(bt.Blobs)
-		numCommitments := len(bt.Commitments)
-		if numCommitments > numBlobs {
-			return 0, fmt.Errorf("%w: more commitments than blobs (%d vs %d)", ErrParseTxn, numCommitments, numBlobs)
-		}
-		if numCommitments < numBlobs {
-			return 0, fmt.Errorf("%w: fewer commitments than blobs (%d vs %d)", ErrParseTxn, numCommitments, numBlobs)
-		}
-
-		// Validate proof count per wrapper version.
-		numProofs := len(bt.Proofs)
-		if bt.WrapperVersion == 0 && numProofs != numBlobs {
-			return 0, fmt.Errorf("%w: wrong number of proofs for v0 wrapper (%d proofs, %d blobs)", ErrParseTxn, numProofs, numBlobs)
-		}
-		if bt.WrapperVersion == 1 && numProofs != numBlobs*int(params.CellsPerExtBlob) {
-			return 0, fmt.Errorf("%w: wrong number of proofs for v1 wrapper (%d proofs, expected %d)", ErrParseTxn, numProofs, numBlobs*int(params.CellsPerExtBlob))
-		}
-	}
 
 	// Authorization signers for SetCode txns (EIP-7702).
 	if txn.Type() == types.SetCodeTxType {
@@ -283,7 +386,7 @@ type PoolBlobBundle struct {
 // TxnSlot contains information extracted from an Ethereum transaction, which is enough to manage it inside the transaction.
 // Also, it contains some auxiliary information, like ephemeral fields, and indices within priority queues
 type TxnSlot struct {
-	Txn      types.Transaction // The decoded standard transaction
+	Txn      types.Transaction // The decoded standard transaction (BlobTx, not BlobTxWrapper, for blob txns)
 	Rlp      []byte            // Is set to nil after flushing to db, frees memory, later we look for it in the db, if needed
 	SenderID uint64            // SenderID - require external mapping to it's address
 	Nonce    uint64            // Nonce of the transaction (kept as field for btree search sentinel)
@@ -291,7 +394,8 @@ type TxnSlot struct {
 	Traced   bool              // Whether transaction needs to be traced throughout transaction pool code and generate debug printing
 	Size     uint32            // Cached size of the RLP payload (persists after Rlp is set to nil)
 
-	AuthAndNonces []AuthAndNonce // Indexed authorization signers + nonces for EIP-7702 txns (type-4)
+	BlobBundles   []PoolBlobBundle // Zero-copy blob data for EIP-4844 wrapped blob txns
+	AuthAndNonces []AuthAndNonce   // Indexed authorization signers + nonces for EIP-7702 txns (type-4)
 }
 
 // Accessor methods that delegate to the stored Transaction.
@@ -356,15 +460,8 @@ func (tx *TxnSlot) GetChainID() *uint256.Int {
 
 func (tx *TxnSlot) GetBlobFeeCap() *uint256.Int {
 	if tx.Txn != nil {
-		switch bt := tx.Txn.(type) {
-		case *types.BlobTxWrapper:
-			if bt.Tx.MaxFeePerBlobGas != nil {
-				return bt.Tx.MaxFeePerBlobGas
-			}
-		case *types.BlobTx:
-			if bt.MaxFeePerBlobGas != nil {
-				return bt.MaxFeePerBlobGas
-			}
+		if bt, ok := tx.Txn.(*types.BlobTx); ok && bt.MaxFeePerBlobGas != nil {
+			return bt.MaxFeePerBlobGas
 		}
 	}
 	return new(uint256.Int)
@@ -431,74 +528,37 @@ func (tx *TxnSlot) PrintDebug(prefix string) {
 	fmt.Printf("%s: senderID=%d,nonce=%d,tip=%d,v=%d\n", prefix, tx.SenderID, tx.Nonce, tx.GetTip(), tx.GetValue().Uint64())
 }
 
-// BlobTxWrapper returns the underlying *types.BlobTxWrapper if this is a blob transaction, or nil.
-func (tx *TxnSlot) BlobTxWrapper() *types.BlobTxWrapper {
-	if tx.Txn == nil {
-		return nil
-	}
-	bt, _ := tx.Txn.(*types.BlobTxWrapper)
-	return bt
-}
-
 func (tx *TxnSlot) Blobs() [][]byte {
-	bt := tx.BlobTxWrapper()
-	if bt == nil {
-		return nil
-	}
-	b := make([][]byte, len(bt.Blobs))
-	for i := range bt.Blobs {
-		b[i] = bt.Blobs[i][:]
+	b := make([][]byte, 0, len(tx.BlobBundles))
+	for _, bb := range tx.BlobBundles {
+		b = append(b, bb.Blob)
 	}
 	return b
 }
 
 func (tx *TxnSlot) Commitments() []goethkzg.KZGCommitment {
-	bt := tx.BlobTxWrapper()
-	if bt == nil {
-		return nil
-	}
-	c := make([]goethkzg.KZGCommitment, len(bt.Commitments))
-	for i := range bt.Commitments {
-		c[i] = goethkzg.KZGCommitment(bt.Commitments[i])
+	c := make([]goethkzg.KZGCommitment, 0, len(tx.BlobBundles))
+	for _, bb := range tx.BlobBundles {
+		c = append(c, bb.Commitment)
 	}
 	return c
 }
 
 func (tx *TxnSlot) Proofs() []goethkzg.KZGProof {
-	bt := tx.BlobTxWrapper()
-	if bt == nil {
-		return nil
-	}
-	p := make([]goethkzg.KZGProof, len(bt.Proofs))
-	for i := range bt.Proofs {
-		p[i] = goethkzg.KZGProof(bt.Proofs[i])
+	p := make([]goethkzg.KZGProof, 0, len(tx.BlobBundles))
+	for _, bb := range tx.BlobBundles {
+		p = append(p, bb.Proofs...)
 	}
 	return p
 }
 
 // BlobBundle returns the blob, commitment, and proofs for the i-th blob.
 func (tx *TxnSlot) BlobBundle(i int) (blob []byte, commitment goethkzg.KZGCommitment, proofs []goethkzg.KZGProof) {
-	bt := tx.BlobTxWrapper()
-	if bt == nil || i >= len(bt.Blobs) {
+	if i >= len(tx.BlobBundles) {
 		return nil, goethkzg.KZGCommitment{}, nil
 	}
-	blob = bt.Blobs[i][:]
-	commitment = goethkzg.KZGCommitment(bt.Commitments[i])
-	// Proofs: for v0 wrappers there's 1 proof per blob, for v1 there are CellsPerExtBlob per blob.
-	proofsPerBlob := 1
-	if bt.WrapperVersion == 1 {
-		proofsPerBlob = int(params.CellsPerExtBlob)
-	}
-	start := i * proofsPerBlob
-	end := start + proofsPerBlob
-	if end > len(bt.Proofs) {
-		end = len(bt.Proofs)
-	}
-	proofs = make([]goethkzg.KZGProof, end-start)
-	for j, p := range bt.Proofs[start:end] {
-		proofs[j] = goethkzg.KZGProof(p)
-	}
-	return blob, commitment, proofs
+	bb := &tx.BlobBundles[i]
+	return bb.Blob, bb.Commitment, bb.Proofs
 }
 
 // ToProtoAccountAbstractionTxn converts a TxnSlot to a typesproto.AccountAbstractionTransaction

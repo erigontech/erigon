@@ -291,9 +291,7 @@ func TestBlobTxnParsing(t *testing.T) {
 	assert.Equal(t, thinTxn.GetBlobFeeCap(), fatTxn.GetBlobFeeCap())
 	assert.Equal(t, thinTxn.GetBlobHashes(), fatTxn.GetBlobHashes())
 
-	bt := fatTxn.BlobTxWrapper()
-	require.NotNil(t, bt)
-	require.Len(t, bt.Blobs, 2)
+	require.Len(t, fatTxn.BlobBundles, 2)
 	blob0b, comm0b, proofs0b := fatTxn.BlobBundle(0)
 	blob1b, comm1b, proofs1b := fatTxn.BlobBundle(1)
 	require.NotEmpty(t, blob0b)
@@ -424,9 +422,7 @@ func TestWrapperV1BlobTxnParsing(t *testing.T) {
 	assert.Equal(t, thinTxn.GetBlobFeeCap(), fatTxn.GetBlobFeeCap())
 	assert.Equal(t, thinTxn.GetBlobHashes(), fatTxn.GetBlobHashes())
 
-	bt := fatTxn.BlobTxWrapper()
-	require.NotNil(t, bt)
-	require.Len(t, bt.Blobs, 2)
+	require.Len(t, fatTxn.BlobBundles, 2)
 	blob0b, comm0b, proofs0b := fatTxn.BlobBundle(0)
 	blob1b, comm1b, proofs1b := fatTxn.BlobBundle(1)
 	require.NotEmpty(t, blob0b)

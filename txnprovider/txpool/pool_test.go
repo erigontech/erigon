@@ -1107,11 +1107,11 @@ func TestBlobTxnReplacement(t *testing.T) {
 		txnSlots := TxnSlots{}
 		blobTxn := makeBlobTxn()
 		blobTxn.Nonce = 0x2
-		w := blobTxn.Txn.(*types.BlobTxWrapper)
-		w.Tx.FeeCap.Mul(uint256.NewInt(2), feeCap)
-		w.Tx.TipCap.Mul(uint256.NewInt(2), tip)
+		w := blobTxn.Txn.(*types.BlobTx)
+		w.FeeCap.Mul(uint256.NewInt(2), feeCap)
+		w.TipCap.Mul(uint256.NewInt(2), tip)
 		//increase blobFeeCap by 10% - no good
-		w.Tx.MaxFeePerBlobGas.Add(blobFeeCap, uint256.NewInt(1).Div(blobFeeCap, uint256.NewInt(10)))
+		w.MaxFeePerBlobGas.Add(blobFeeCap, uint256.NewInt(1).Div(blobFeeCap, uint256.NewInt(10)))
 		blobTxn.IDHash[0] = 0x01
 		txnSlots.Append(&blobTxn, addr[:], true)
 		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
@@ -1151,9 +1151,9 @@ func TestBlobTxnReplacement(t *testing.T) {
 	// Try to replace it with required price bump (configured in pool.cfg.BlobPriceBump for blob txns) to all transaction fields - should be successful only if all are bumped
 	{
 		blobTxn := makeBlobTxn()
-		w := blobTxn.Txn.(*types.BlobTxWrapper)
-		origTip := *w.Tx.TipCap
-		origFee := *w.Tx.FeeCap
+		w := blobTxn.Txn.(*types.BlobTx)
+		origTip := *w.TipCap
+		origFee := *w.FeeCap
 		blobTxn.Nonce = 0x2
 		blobTxn.IDHash[0] = 0x03
 		txnSlots := TxnSlots{}
@@ -1163,38 +1163,38 @@ func TestBlobTxnReplacement(t *testing.T) {
 		requiredPriceBump := pool.cfg.BlobPriceBump
 
 		// Bump the tip only
-		w.Tx.TipCap.MulDivOverflow(tip, uint256.NewInt(requiredPriceBump+100), uint256.NewInt(100))
+		w.TipCap.MulDivOverflow(tip, uint256.NewInt(requiredPriceBump+100), uint256.NewInt(100))
 		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
 		require.NoError(err)
 		assert.Equal(txpoolcfg.ReplaceUnderpriced, reasons[0], reasons[0].String())
 
 		// Bump the fee + tip
-		w.Tx.FeeCap.MulDivOverflow(feeCap, uint256.NewInt(requiredPriceBump+100), uint256.NewInt(100))
+		w.FeeCap.MulDivOverflow(feeCap, uint256.NewInt(requiredPriceBump+100), uint256.NewInt(100))
 		reasons, err = pool.AddLocalTxns(ctx, txnSlots)
 		require.NoError(err)
 		assert.Equal(txpoolcfg.ReplaceUnderpriced, reasons[0], reasons[0].String())
 
 		// Bump only Feecap
-		*w.Tx.TipCap = origTip
+		*w.TipCap = origTip
 		reasons, err = pool.AddLocalTxns(ctx, txnSlots)
 		require.NoError(err)
 		assert.Equal(txpoolcfg.ReplaceUnderpriced, reasons[0], reasons[0].String())
 
 		// Bump fee cap + blobFee cap
-		w.Tx.MaxFeePerBlobGas.MulDivOverflow(blobFeeCap, uint256.NewInt(requiredPriceBump+100), uint256.NewInt(100))
+		w.MaxFeePerBlobGas.MulDivOverflow(blobFeeCap, uint256.NewInt(requiredPriceBump+100), uint256.NewInt(100))
 		reasons, err = pool.AddLocalTxns(ctx, txnSlots)
 		require.NoError(err)
 		assert.Equal(txpoolcfg.NotReplaced, reasons[0], reasons[0].String())
 
 		// Bump only blobFee cap
-		*w.Tx.FeeCap = origFee
+		*w.FeeCap = origFee
 		reasons, err = pool.AddLocalTxns(ctx, txnSlots)
 		require.NoError(err)
 		assert.Equal(txpoolcfg.NotReplaced, reasons[0], reasons[0].String())
 
 		// Bump all prices
-		w.Tx.TipCap.MulDivOverflow(tip, uint256.NewInt(requiredPriceBump+100), uint256.NewInt(100))
-		w.Tx.FeeCap.MulDivOverflow(feeCap, uint256.NewInt(requiredPriceBump+100), uint256.NewInt(100))
+		w.TipCap.MulDivOverflow(tip, uint256.NewInt(requiredPriceBump+100), uint256.NewInt(100))
+		w.FeeCap.MulDivOverflow(feeCap, uint256.NewInt(requiredPriceBump+100), uint256.NewInt(100))
 		reasons, err = pool.AddLocalTxns(ctx, txnSlots)
 		require.NoError(err)
 		assert.Equal(txpoolcfg.Success, reasons[0], reasons[0].String())
@@ -1212,13 +1212,13 @@ func makeBlobTxn() TxnSlot {
 	tctx.WithSender(false)
 	tctx.ParseTransaction(wrapperRlp, 0, &blobTxn, nil, false, true, nil)
 	// Set blob hashes and fee fields on the underlying transaction
-	wrapper := blobTxn.Txn.(*types.BlobTxWrapper)
-	wrapper.Tx.BlobVersionedHashes = make([]common.Hash, 2)
-	wrapper.Tx.BlobVersionedHashes[0] = common.Hash(kzg.KZGToVersionedHash(commitment0))
-	wrapper.Tx.BlobVersionedHashes[1] = common.Hash(kzg.KZGToVersionedHash(commitment1))
-	wrapper.Tx.TipCap = tip
-	wrapper.Tx.FeeCap = feeCap
-	wrapper.Tx.MaxFeePerBlobGas = blobFeeCap
+	bt := blobTxn.Txn.(*types.BlobTx)
+	bt.BlobVersionedHashes = make([]common.Hash, 2)
+	bt.BlobVersionedHashes[0] = common.Hash(kzg.KZGToVersionedHash(commitment0))
+	bt.BlobVersionedHashes[1] = common.Hash(kzg.KZGToVersionedHash(commitment1))
+	bt.TipCap = tip
+	bt.FeeCap = feeCap
+	bt.MaxFeePerBlobGas = blobFeeCap
 	return blobTxn
 }
 
@@ -1566,7 +1566,7 @@ func TestGetBlobs(t *testing.T) {
 	blobTxn := makeBlobTxn() // makes a txn with 2 blobs
 	blobTxn.IDHash[0] = uint8(3)
 	blobTxn.Nonce = 0
-	blobTxn.Txn.(*types.BlobTxWrapper).Tx.GasLimit = 50000
+	blobTxn.Txn.(*types.BlobTx).GasLimit = 50000
 	txnSlots.Append(&blobTxn, addr[:], true)
 	reasons, err := pool.AddLocalTxns(ctx, txnSlots)
 	require.NoError(err)

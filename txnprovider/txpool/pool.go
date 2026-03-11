@@ -1091,12 +1091,11 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 		return txpoolcfg.TooManyBlobs
 	}
 
-	bt := txn.BlobTxWrapper()
-	if bt == nil {
+	if len(txn.BlobBundles) == 0 {
 		return txpoolcfg.UnequalBlobTxExt
 	}
-	if blobCount != len(bt.Blobs) {
-		p.logger.Debug(fmt.Sprintf("TX POOL: blobCount %d != len(blobs) %d", blobCount, len(bt.Blobs)))
+	if blobCount != len(txn.BlobBundles) {
+		p.logger.Debug(fmt.Sprintf("TX POOL: blobCount %d != len(blobs) %d", blobCount, len(txn.BlobBundles)))
 		return txpoolcfg.UnequalBlobTxExt
 	}
 	blobs := txn.Blobs()
