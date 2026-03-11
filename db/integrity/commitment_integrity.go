@@ -718,7 +718,7 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br serv
 		return 0, err
 	}
 	defer it.Close()
-	logTicker := time.NewTicker(30 * time.Second)
+	logTicker := time.NewTicker(10 * time.Second)
 	defer logTicker.Stop()
 	var total uint64
 	var integrityErr error
