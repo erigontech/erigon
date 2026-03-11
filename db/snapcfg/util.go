@@ -58,6 +58,21 @@ type (
 
 var snapshotGitBranch = dbg.EnvString("SNAPS_GIT_BRANCH", ver.DefaultSnapshotGitBranch)
 
+// oldMergeLimitBoundary records the highest block number (exclusive) at which each
+// network used the legacy 500k-block merge limit (Erigon2OldMergeLimit).  Blocks at
+// or above this value use the current 100k-block merge limit (Erigon2MergeLimit).
+//
+// Previously this boundary was inferred by scanning the embedded snapshot-hash TOML
+// (PreverifiedParsed).  Now that the registry no longer pre-loads embedded TOML, we
+// encode it statically here so that MergeLimit() does not require remote data to be
+// fetched before producing the correct answer.
+var oldMergeLimitBoundary = map[string]uint64{
+	networkname.Mainnet:    2_000_000,
+	networkname.Sepolia:    2_000_000,
+	networkname.BorMainnet: 2_000_000,
+	networkname.Gnosis:     2_000_000,
+}
+
 type preverifiedRegistry struct {
 	mu     sync.RWMutex
 	raw    map[string][]byte      // raw TOML bytes (populated by LoadRemotePreverified/SetToml)
@@ -457,6 +472,12 @@ func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 		return snaptype.CaplinMergeLimit
 	}
 	if hasType {
+		// When PreverifiedParsed is empty (e.g. remote hashes not yet loaded) fall back
+		// to the statically-known old-merge-limit boundary so that merge ranges are
+		// computed correctly without requiring TOML data to be fetched first.
+		if boundary, ok := oldMergeLimitBoundary[c.networkName]; ok && fromBlock < boundary {
+			return snaptype.Erigon2OldMergeLimit
+		}
 		return snaptype.Erigon2MergeLimit
 	}
 
