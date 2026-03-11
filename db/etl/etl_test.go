@@ -582,6 +582,89 @@ func TestAppend(t *testing.T) {
 	}, TransformArgs{}))
 }
 
+// TestAppendAcrossProviders tests that SortableAppendBuffer correctly concatenates
+// values for the same key when they span multiple providers (file flushes).
+func TestAppendAcrossProviders(t *testing.T) {
+	tmpdir := t.TempDir()
+	// Use buffer size of 1 to force every Collect to flush to a separate file provider.
+	// Same key {1} appears in multiple providers — merge sort must concatenate values.
+	collector := NewCollector(t.Name(), tmpdir, NewAppendBuffer(1), log.New())
+	defer collector.Close()
+	require := require.New(t)
+	require.NoError(collector.Collect([]byte{1}, []byte{10}))
+	require.NoError(collector.Collect([]byte{1}, []byte{20}))
+	require.NoError(collector.Collect([]byte{1}, []byte{30}))
+	require.NoError(collector.Collect([]byte{2}, []byte{40}))
+	require.NoError(collector.Collect([]byte{2}, []byte{50}))
+
+	require.NoError(collector.Load(nil, "", func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error {
+		if k[0] == 1 {
+			require.Equal([]byte{10, 20, 30}, v, "key 1: values should be concatenated across providers")
+		} else if k[0] == 2 {
+			require.Equal([]byte{40, 50}, v, "key 2: values should be concatenated across providers")
+		}
+		return nil
+	}, TransformArgs{}))
+}
+
+// TestAppendAcrossMemProviders tests that value concatenation works correctly
+// when multiple memoryDataProviders have the same key. GetRef returns zero-copy
+// slices into sortableBuffer.data — appending to prevV without copying would
+// corrupt adjacent entries in the buffer.
+func TestAppendAcrossMemProviders(t *testing.T) {
+	tmpdir := t.TempDir()
+
+	// Provider 0 (file): flushed to disk, read back via mmap zero-copy
+	// Provider 1 (memory): kept in RAM via KeepInRAM
+	// Same keys across both — merge sort must concatenate values.
+	//
+	// Provider 0 (file): {1}→{10}, {3}→{30}, {4}→{100,101}
+	// Provider 1 (mem):  {1}→{20}, {2}→{25}, {4}→{102,103}
+	// Expected merge: {1}→{10,20}, {2}→{25}, {3}→{30}, {4}→{100,101,102,103}
+
+	buf0 := NewAppendBuffer(BufferOptimalSize)
+	buf0.Put([]byte{1}, []byte{10})
+	buf0.Put([]byte{3}, []byte{30})
+	buf0.Put([]byte{4}, []byte{100})
+	buf0.Put([]byte{4}, []byte{101})
+	fileProvider, err := FlushToDisk("test", buf0, tmpdir, log.LvlInfo)
+	require.NoError(t, err)
+
+	buf1 := NewAppendBuffer(BufferOptimalSize)
+	buf1.Put([]byte{1}, []byte{20})
+	buf1.Put([]byte{2}, []byte{25})
+	buf1.Put([]byte{4}, []byte{102})
+	buf1.Put([]byte{4}, []byte{103})
+	buf1.Sort()
+
+	providers := []dataProvider{fileProvider, KeepInRAM(buf1)}
+
+	type kv struct{ k, v []byte }
+	var results []kv
+	loadFunc := func(k, v []byte) error {
+		results = append(results, kv{common.Copy(k), common.Copy(v)})
+		return nil
+	}
+
+	err = mergeSortFiles("test", providers, loadFunc,
+		TransformArgs{BufferType: SortableAppendBuffer}, NewAppendBuffer(1))
+	require.NoError(t, err)
+
+	require.Len(t, results, 4)
+	assert.Equal(t, []byte{1}, results[0].k)
+	assert.Equal(t, []byte{10, 20}, results[0].v, "key 1: values must be concatenated")
+	assert.Equal(t, []byte{2}, results[1].k)
+	assert.Equal(t, []byte{25}, results[1].v)
+	assert.Equal(t, []byte{3}, results[2].k)
+	assert.Equal(t, []byte{30}, results[2].v, "key 3: must not be corrupted by append to key 1's value")
+	assert.Equal(t, []byte{4}, results[3].k)
+	assert.Equal(t, []byte{100, 101, 102, 103}, results[3].v, "key 4: must not be corrupted by append to key 1's value")
+
+	for _, p := range providers {
+		p.Dispose()
+	}
+}
+
 func TestOldest(t *testing.T) {
 	collector := NewCollector(t.Name(), "", NewOldestEntryBuffer(1), log.New())
 	defer collector.Close()
