@@ -1886,6 +1886,12 @@ func (at *AggregatorRoTx) SetTrace(domain kv.Domain, v bool) {
 	at.d[domain].ht.trace = v
 }
 
+// CheckHistoryEfAgainstV cross-checks .ef entries against .vi+.v for the given domain.
+// samplePct controls what percentage of entries to check (1-100).
+func (at *AggregatorRoTx) CheckHistoryEfAgainstV(ctx context.Context, domain kv.Domain, samplePct int, logger log.Logger) (badFiles []string, totalMismatches int64, err error) {
+	return at.d[domain].ht.CheckEfAgainstV(ctx, samplePct, logger)
+}
+
 func (at *AggregatorRoTx) HistorySeek(domain kv.Domain, key []byte, ts uint64, tx kv.Tx) (v []byte, ok bool, err error) {
 	return at.d[domain].ht.HistorySeek(key, ts, tx)
 }

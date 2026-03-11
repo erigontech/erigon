@@ -1102,6 +1102,61 @@ func CheckCommitmentStateKeyHistory(ctx context.Context, db kv.TemporalRoDB, br 
 	return nil
 }
 
+// CheckHistoryEfVsV cross-checks .ef entries against .vi+.v for all history domains.
+// For each (key, txNum) recorded in .ef files, it verifies the value can be found
+// via .vi index + .v page lookup. Catches data loss in merged .v files.
+// samplePct controls what percentage of entries to check (1-100, default 5).
+func CheckHistoryEfVsV(ctx context.Context, samplePct int, db kv.TemporalRoDB, br services.FullBlockReader, logger log.Logger) error {
+	start := time.Now()
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	aggTx := state.AggTx(tx)
+	if aggTx == nil {
+		return fmt.Errorf("could not get AggregatorRoTx")
+	}
+
+	if samplePct <= 0 {
+		samplePct = 5
+	}
+
+	var allBadFiles []string
+	var allMismatches int64
+
+	for _, domain := range []kv.Domain{
+		kv.AccountsDomain,
+		kv.StorageDomain,
+		kv.CodeDomain,
+		kv.CommitmentDomain,
+		kv.ReceiptDomain,
+		kv.RCacheDomain,
+	} {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		logger.Info("[integrity] HistoryEfVsV: starting domain", "domain", domain.String(), "samplePct", samplePct)
+		badFiles, mismatches, err := aggTx.CheckHistoryEfAgainstV(ctx, domain, samplePct, logger)
+		if err != nil {
+			return fmt.Errorf("HistoryEfVsV(%s): %w", domain.String(), err)
+		}
+		allBadFiles = append(allBadFiles, badFiles...)
+		allMismatches += mismatches
+	}
+
+	logger.Info("[integrity] HistoryEfVsV: done",
+		"dur", time.Since(start),
+		"totalMismatches", allMismatches,
+		"badFiles", len(allBadFiles),
+	)
+	if allMismatches > 0 {
+		return fmt.Errorf("%w: HistoryEfVsV found %d mismatches in %d files: %v", ErrIntegrity, allMismatches, len(allBadFiles), allBadFiles)
+	}
+	return nil
+}
+
 func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, br services.FullBlockReader, from, to uint64, logger log.Logger) error {
 	if from >= to {
 		return fmt.Errorf("invalid blk range: %d >= %d", from, to)

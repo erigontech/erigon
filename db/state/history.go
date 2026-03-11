@@ -1338,6 +1338,139 @@ func (ht *HistoryRoTx) HistorySeek(key []byte, txNum uint64, roTx kv.Tx) ([]byte
 	return ht.historySeekInDB(key, txNum, roTx)
 }
 
+// CheckEfAgainstV iterates .ef files and for each (key, txNum) entry verifies
+// that the corresponding value can be found via .vi index + .v page lookup.
+// samplePct controls what percentage of entries to check (1-100).
+// Returns list of bad files and total mismatch count.
+func (ht *HistoryRoTx) CheckEfAgainstV(ctx context.Context, samplePct int, logger log.Logger) (badFiles []string, totalMismatches int64, err error) {
+	if samplePct <= 0 {
+		samplePct = 5
+	}
+	if samplePct > 100 {
+		samplePct = 100
+	}
+	sampleInterval := int64(100 / samplePct)
+	if sampleInterval < 1 {
+		sampleInterval = 1
+	}
+
+	seq := &multiencseq.SequenceReader{}
+	ss := &multiencseq.SequenceIterator{}
+	var histKeyBuf []byte
+	badFileSet := map[string]struct{}{}
+
+	for fileIdx := range ht.iit.files {
+		if err := ctx.Err(); err != nil {
+			return badFiles, totalMismatches, err
+		}
+
+		efFile := ht.iit.files[fileIdx]
+		g := ht.iit.statelessGetter(fileIdx)
+		g.Reset(0)
+
+		var total, checked, mismatches int64
+		var firstMismatchLogged bool
+
+		for g.HasNext() {
+			key, _ := g.Next(nil)
+			encodedSeq, _ := g.Next(nil)
+
+			seq.Reset(efFile.startTxNum, encodedSeq)
+			ss.Reset(seq, 0)
+
+			for ss.HasNext() {
+				txNum, seqErr := ss.Next()
+				if seqErr != nil {
+					return badFiles, totalMismatches, fmt.Errorf("ef sequence decode error in %s: %w", g.FileName(), seqErr)
+				}
+				total++
+
+				// Deterministic sampling
+				if total%sampleInterval != 0 {
+					continue
+				}
+				checked++
+
+				// Find the .v file covering this txNum
+				histFile, ok := ht.getFile(txNum)
+				if !ok {
+					mismatches++
+					if !firstMismatchLogged {
+						logger.Warn("[integrity] HistoryEfVsV: .v file not found for txNum",
+							"domain", ht.h.FilenameBase, "key", fmt.Sprintf("%x", key),
+							"txNum", txNum, "efFile", g.FileName())
+						firstMismatchLogged = true
+					}
+					continue
+				}
+
+				reader := ht.statelessIdxReader(histFile.i)
+				if reader.Empty() {
+					mismatches++
+					continue
+				}
+
+				histKeyBuf = historyKey(txNum, key, histKeyBuf)
+				offset, idxOK := reader.Lookup(histKeyBuf)
+				if !idxOK {
+					mismatches++
+					if !firstMismatchLogged {
+						logger.Warn("[integrity] HistoryEfVsV: .vi lookup failed",
+							"domain", ht.h.FilenameBase, "key", fmt.Sprintf("%x", key),
+							"txNum", txNum, "efFile", g.FileName(),
+							"vFile", ht.files[histFile.i].src.decompressor.FileName())
+						firstMismatchLogged = true
+					}
+					continue
+				}
+
+				g2 := ht.statelessGetter(histFile.i)
+				g2.Reset(offset)
+				v, _ := g2.Next(nil)
+
+				cpvc := histFile.src.decompressor.CompressedPageValuesCount()
+				if histFile.src.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
+					cpvc = ht.h.HistoryValuesOnCompressedPage
+				}
+
+				if cpvc > 1 {
+					v, ht.snappyReadBuffer = seg.GetFromPage(histKeyBuf, v, ht.snappyReadBuffer, true)
+					if v == nil {
+						mismatches++
+						vFileName := ht.files[histFile.i].src.decompressor.FileName()
+						badFileSet[vFileName] = struct{}{}
+						if !firstMismatchLogged {
+							logger.Warn("[integrity] HistoryEfVsV: key in .ef but NOT found in .v page",
+								"domain", ht.h.FilenameBase, "key", fmt.Sprintf("%x", key),
+								"txNum", txNum, "efFile", g.FileName(),
+								"vFile", vFileName,
+								"recsplitOffset", offset, "rawPageLen", -1)
+							firstMismatchLogged = true
+						}
+					}
+				}
+				// cpvc <= 1: v is the direct value, empty is valid ("key created" marker)
+			}
+		}
+
+		logger.Info("[integrity] HistoryEfVsV: file done",
+			"domain", ht.h.FilenameBase,
+			"efFile", g.FileName(),
+			"range", fmt.Sprintf("[%d-%d)", efFile.startTxNum, efFile.endTxNum),
+			"step", fmt.Sprintf("[%d-%d)", efFile.startTxNum/ht.stepSize, efFile.endTxNum/ht.stepSize),
+			"total", total, "checked", checked, "mismatches", mismatches,
+			"samplePct", samplePct,
+		)
+
+		totalMismatches += mismatches
+	}
+
+	for f := range badFileSet {
+		badFiles = append(badFiles, f)
+	}
+	return badFiles, totalMismatches, nil
+}
+
 func (ht *HistoryRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	if ht.valsC != nil {
 		return ht.valsC, nil

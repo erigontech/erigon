@@ -103,6 +103,12 @@ const (
 	// Catches missing history due to PagedWriter data loss or incomplete commitment rebuilds.
 	CommitmentStateKeyHistory Check = "CommitmentStateKeyHistory"
 
+	// HistoryEfVsV cross-checks .ef entries against .vi+.v for all history domains.
+	// For each sampled (key, txNum) in .ef, verifies the value can be found via .vi index
+	// and extracted from the .v compressed page. Catches data loss in merged .v files
+	// where .ef correctly records key changes but .v pages are missing the corresponding values.
+	HistoryEfVsV Check = "HistoryEfVsV"
+
 	// StateVerify verifies state correspondence between commitment and domains. Checks that
 	// every key in account/storage domains is properly referenced by commitment branches,
 	// and vice versa. Catches missing or extra keys. Uses forward check for base files
@@ -126,7 +132,7 @@ const (
 var FastChecks = []Check{
 	Blocks, HeaderNoGaps, BlocksTxnID, InvertedIndex, StateProgress, HistoryNoSystemTxs,
 	CommitmentKvi, ReceiptsNoDups, RCacheNoDups, CommitmentRoot,
-	CommitmentHistVal, CommitmentStateKeyHistory, StateRootVerifyByHistory, Publishable,
+	CommitmentHistVal, CommitmentStateKeyHistory, HistoryEfVsV, StateRootVerifyByHistory, Publishable,
 }
 
 var SlowChecks = []Check{StateVerify}
