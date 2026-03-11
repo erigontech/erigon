@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Creates a RAM-backed temp directory and prints its path on stdout.
+#
+# Linux:   mounts a tmpfs at /mnt/erigon-ramdisk (requires sudo).
+# macOS:   creates an HFS+ RAM disk via hdiutil.
+# Windows: installs ImDisk via Chocolatey and creates a RAM disk at R:\.
+#
+# Optional: RAMDISK_SIZE_MB (default: 4096)
+
+set -euo pipefail
+
+SIZE_MB=${RAMDISK_SIZE_MB:-2048}
+
+case "$(uname -s)" in
+  Linux)
+    mount_point=/mnt/erigon-ramdisk
+    sudo mkdir -p "$mount_point"
+    sudo mount -t tmpfs -o "size=${SIZE_MB}m,uid=$(id -u),gid=$(id -g)" tmpfs "$mount_point"
+    echo "$mount_point"
+    ;;
+
+  Darwin)
+    # hdiutil uses 512-byte sectors; 1 MiB = 2048 sectors.
+    sectors=$(( SIZE_MB * 2048 ))
+    device=$(hdiutil attach -nomount "ram://$sectors" | tr -d '[:space:]')
+    diskutil eraseVolume HFS+ erigontests "$device" >&2
+    diskutil info "$device" | awk -F: '/Mount Point/ { gsub(/^[[:space:]]+/, "", $2); print $2 }'
+    ;;
+
+  MINGW*|MSYS*|CYGWIN*)
+    # Install ImDisk (virtual disk driver) via Chocolatey, then create and
+    # format the RAM disk. Use cmd to run format so that the /fs flag is not
+    # mangled by MSYS path conversion.
+    choco install imdisk -y --no-progress >&2
+    imdisk -a -s "${SIZE_MB}M" -m 'R:' >&2
+    cmd //c 'format R: /fs:NTFS /q /y' >&2
+    echo 'R:/'
+    ;;
+
+  *)
+    echo "create-ramdisk: unsupported OS: $(uname -s)" >&2
+    exit 1
+    ;;
+esac

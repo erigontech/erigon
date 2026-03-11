@@ -117,6 +117,30 @@ tolerated silently in required checks. When a flaky test is identified:
 2. File a bug and fix it separately.
 3. Re-enable it as a required check once it is stable.
 
+## Memory- and disk-intensive tests
+
+Some test packages allocate large databases or hold many files open simultaneously.
+Running too many of them in parallel can exhaust RAM or IOPS and cause OOM kills or
+spurious timeouts.
+
+Use `-p` to limit the number of packages tested in parallel (default: `GOMAXPROCS`),
+and `-parallel` to limit concurrency *within* a single package (default: `GOMAXPROCS`):
+
+```bash
+# At most 2 packages at a time, at most 4 subtests in parallel within each
+go test -p 2 -parallel 4 ./...
+```
+
+These flags can be passed via `GO_FLAGS` in the Makefile:
+
+```bash
+make test-all GO_FLAGS="-p 2 -parallel 4"
+```
+
+Consider setting tighter defaults in the workflow matrix for jobs that are known to
+be memory- or disk-heavy, rather than working around pressure by adjusting unrelated
+constraints like timeouts or GC tuning.
+
 ## Local reproducibility
 
 Every CI job should have a local equivalent so developers can pre-check before pushing.
