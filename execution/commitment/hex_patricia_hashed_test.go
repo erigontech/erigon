@@ -2668,4 +2668,71 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		_, gotValue := witnessTrie.Get(hashedFullStorageKey)
 		require.True(t, gotValue, "storage value not found in witness trie for key %x", fullStorageKey)
 	})
+
+	t.Run("ShortHashedKeyExceedsByExtension", func(t *testing.T) {
+		// when an intermediate hashedKey is shorter than 128 nibbles
+		// (e.g. 66 = 64 account + 2 storage nibbles), and the cell at that position
+		// has a long extension covering the remaining storage path, the slice
+		// hashedKey[keyPos+1 : keyPos+extKeyLength+1] went out of bounds.
+		//
+		// Reproduce by creating an account with two storage groups:
+		//   group A: 2 slots at hash prefix [3] → branch at storage root
+		//   group B: 1 slot at hash prefix [5] → single leaf with long extension
+		// Then witness a 66-nibble key pointing 2 nibbles into the storage trie
+		// at group B's extension cell.
+
+		ctx := context.Background()
+		ms := NewMockState(t)
+		hph := NewHexPatriciaHashed(length.Addr, ms)
+		hph.SetTrace(false)
+
+		targetAddr, _ := generateKeyWithHashedPrefix([]byte{0x5}, length.Addr)
+		otherAddr, _ := generateKeyWithHashedPrefix([]byte{0x9}, length.Addr)
+
+		// Group A: 2 storage keys at hash prefix [3] — creates a branch at storage depth 65
+		storageGroupA, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x3}, length.Hash, 1, 2)
+		// Group B: 1 storage key at hash prefix [5] — single leaf → long extension at depth 65
+		storageGroupB, storageGroupBHashes := generatePlainKeysWithSameHashPrefix(t, []byte{0x5}, length.Hash, 1, 1)
+
+		builder := NewUpdateBuilder()
+		builder.Balance(common.Bytes2Hex(targetAddr), 100)
+		builder.Balance(common.Bytes2Hex(otherAddr), 200)
+		for _, slot := range storageGroupA {
+			builder.Storage(common.Bytes2Hex(targetAddr), common.Bytes2Hex(slot), common.Bytes2Hex(slot))
+		}
+		for _, slot := range storageGroupB {
+			builder.Storage(common.Bytes2Hex(targetAddr), common.Bytes2Hex(slot), common.Bytes2Hex(slot))
+		}
+
+		plainKeys, updates := builder.Build()
+		err := ms.applyPlainUpdates(plainKeys, updates)
+		require.NoError(t, err)
+
+		toProcess := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+		defer toProcess.Close()
+
+		root, err := hph.Process(ctx, toProcess, "", nil, WarmupConfig{})
+		require.NoError(t, err)
+
+		// Build a 66-nibble hashedKey: account_hash(64) + first 2 nibbles of group B's storage hash
+		targetHashedAddr := KeyToNibblizedHash(targetAddr)
+		hashedKey66 := make([]byte, 66)
+		copy(hashedKey66[:64], targetHashedAddr)
+		// Use the actual first 2 nibbles from group B's storage hash
+		copy(hashedKey66[64:], storageGroupBHashes[0][:2])
+
+		toWitness := NewUpdates(ModeDirect, "", KeyToHexNibbleHash)
+		defer toWitness.Close()
+		// Witness the account first (needed for the trie structure)
+		toWitness.TouchPlainKey(string(targetAddr), nil, toProcess.TouchAccount)
+		// Then witness the short 66-nibble key (simulates a collapse-sibling touch)
+		toWitness.TouchHashedKey(hashedKey66)
+
+		// This must not panic with index out of range
+		witnessTrie, rootWitness, err := hph.GenerateWitness(ctx, toWitness, nil, "")
+		require.NoError(t, err)
+		require.NotNil(t, witnessTrie)
+		require.NotNil(t, rootWitness)
+		require.Equal(t, root, rootWitness, "root witness should match")
+	})
 }

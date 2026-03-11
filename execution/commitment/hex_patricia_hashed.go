@@ -1581,8 +1581,11 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 				}
 			}
 			hashedExtKey := cellToExpand.hashedExtension[:extKeyLength]
-			// the corresponding path in the hashed key
-			hashedKeySubstring := hashedKey[keyPos+1 : keyPos+extKeyLength+1]
+			// the corresponding path in the hashed key (clamped to available length,
+			// since hashedKey may be shorter than the extension when witnessing
+			// intermediate/collapse-sibling keys)
+			endPos := min(keyPos+extKeyLength+1, int16(len(hashedKey)))
+			hashedKeySubstring := hashedKey[keyPos+1 : endPos]
 			fullPathLength := int(keyPos+1) + len(hashedExtKey)
 			// the diverging extension node points to a branch node in this case
 			if !bytes.Equal(hashedExtKey, hashedKeySubstring) && fullPathLength != 64 && fullPathLength != 128 {
@@ -1616,16 +1619,21 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 			} else {
 				keyPos += extKeyLength // jump ahead
 
-				if keyPos+1 == int16(len(hashedKey)) || keyPos+1 == 64 {
+				// Terminal position: end of hashedKey, account boundary (64), or storage boundary (128).
+				// The keyPos+1==128 check handles short hashedKeys from collapse-sibling touches
+				// where the extension jumps past len(hashedKey) to the storage leaf position.
+				terminal := keyPos+1 == int16(len(hashedKey)) || keyPos+1 == 64 || keyPos+1 == 128
+
+				if terminal {
 					extKeyLength++ //  +1 for the terminator 0x10 ([16])  byte when on a terminal extension node
 				}
 				extensionKey := make([]byte, extKeyLength)
 				copy(extensionKey, hashedExtKey)
-				if keyPos+1 == int16(len(hashedKey)) || keyPos+1 == 64 {
+				if terminal {
 					extensionKey[len(extensionKey)-1] = terminatorHexByte // append terminator byte
 				}
 				nextNode = &trie.ShortNode{Key: extensionKey} // Value will be in the next iteration
-				if keyPos+1 == int16(len(hashedKey)) || keyPos+1 == 64 {
+				if terminal {
 					if cellToExpand.storageAddrLen > 0 && !depthAdjusted {
 						storageUpdate, err := hph.storageFromCacheOrDB(cellToExpand.storageAddr[:cellToExpand.storageAddrLen])
 						if err != nil {
@@ -1657,7 +1665,7 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 							Val: trie.NewHashNode(common.Copy(cellToExpand.hash[:cellToExpand.hashLen])),
 						}
 					}
-					if keyPos+1 == int16(len(hashedKey)) {
+					if keyPos+1 == int16(len(hashedKey)) || keyPos+1 == 128 {
 						keyPos++
 					}
 				}
@@ -2722,21 +2730,26 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 				return fmt.Errorf("fold non-branch: %w", err)
 			}
 		}
-		// Now unfold until we step on an empty cell
-		for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
+
+		for hph.currentKeyLen < int16(len(hashedKey)) {
+			unfolding := hph.needUnfolding(hashedKey)
+			if unfolding <= 0 {
+				break
+			}
 			if err := hph.unfold(hashedKey, unfolding); err != nil {
 				return fmt.Errorf("unfold: %w", err)
 			}
 		}
 
 		// unfold one more level if necessary
-		lastNibble := int(hashedKey[hph.currentKeyLen])
-		lastCell := &hph.grid[hph.activeRows-1][lastNibble]
-		// if last cell is a branch node, we need to unfold one more level
-		if int16(len(hashedKey)) == hph.depths[hph.activeRows-1] && len(hashedKey) != 64 && len(hashedKey) != 128 && lastCell.hashLen > 0 {
-
-			if err := hph.unfold(hashedKey, 1); err != nil {
-				return fmt.Errorf("extra unfold: %w", err)
+		if hph.currentKeyLen < int16(len(hashedKey)) {
+			lastNibble := int(hashedKey[hph.currentKeyLen])
+			lastCell := &hph.grid[hph.activeRows-1][lastNibble]
+			// if last cell is a branch node, we need to unfold one more level
+			if int16(len(hashedKey)) == hph.depths[hph.activeRows-1] && len(hashedKey) != 64 && len(hashedKey) != 128 && lastCell.hashLen > 0 {
+				if err := hph.unfold(hashedKey, 1); err != nil {
+					return fmt.Errorf("extra unfold: %w", err)
+				}
 			}
 		}
 
