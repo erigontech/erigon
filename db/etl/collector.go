@@ -338,7 +338,7 @@ func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleL
 					}
 				}
 				prevK = element.Key
-				prevV = common.Copy(element.Value) // copy needed: prevV is mutated by append below
+				prevV = common.Copy(element.Value) // copy needed: prevV is mutated by append below; element.Value may point into read-only mmap
 			} else {
 				prevV = append(prevV, element.Value...)
 			}
