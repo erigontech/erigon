@@ -412,6 +412,7 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 			return mdgas.MdGas{}, ErrGasUintOverflow
 		}
 
+		gas.State = statefulBaseGas.State
 		return gas, nil
 	}
 }
