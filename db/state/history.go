@@ -1338,9 +1338,11 @@ func (ht *HistoryRoTx) HistorySeek(key []byte, txNum uint64, roTx kv.Tx) ([]byte
 	return ht.historySeekInDB(key, txNum, roTx)
 }
 
-// CheckEfAgainstV iterates .ef files and for each (key, txNum) entry verifies
-// that the corresponding value can be found via .vi index + .v page lookup.
-// probesPerFile controls how many random-access lookups per .ef file (0 = use default 1000).
+// CheckEfAgainstV iterates .ef files and for each sampled (key, txNum) entry verifies:
+//  1. .efi index: TwoLayerLookupByHash(key) → offset in .ef → key matches (round-trip)
+//  2. .vi index + .v page: historyKey(txNum, key) → .vi lookup → .v page → GetFromPage finds value
+//
+// probesPerFile controls how many lookups per .ef file (0 = default 1000).
 // Returns list of bad files and total mismatch count.
 func (ht *HistoryRoTx) CheckEfAgainstV(ctx context.Context, probesPerFile int, logger log.Logger) (badFiles []string, totalMismatches int64, err error) {
 	if probesPerFile <= 0 {
@@ -1361,29 +1363,72 @@ func (ht *HistoryRoTx) CheckEfAgainstV(ctx context.Context, probesPerFile int, l
 		g := ht.iit.statelessGetter(fileIdx)
 		g.Reset(0)
 
-		// First pass: count total entries to compute sample interval
-		var totalEntries int64
+		// First pass: count total keys to compute sample interval
+		var totalKeys int64
 		for g.HasNext() {
 			_, _ = g.Next(nil)
-			encodedSeq, _ := g.Next(nil)
-			seq.Reset(efFile.startTxNum, encodedSeq)
-			totalEntries += int64(seq.Count())
+			_, _ = g.Next(nil)
+			totalKeys++
 		}
 
-		sampleInterval := totalEntries / int64(probesPerFile)
+		sampleInterval := totalKeys / int64(probesPerFile)
 		if sampleInterval < 1 {
 			sampleInterval = 1
 		}
 
 		// Second pass: sample and check
 		g.Reset(0)
-		var total, checked, mismatches int64
-		var firstMismatchLogged bool
+		var keyIdx int64
+		var efiChecked, efiMismatches int64
+		var vChecked, vMismatches int64
+		var firstEfiMismatchLogged, firstVMismatchLogged bool
 
 		for g.HasNext() {
 			key, _ := g.Next(nil)
 			encodedSeq, _ := g.Next(nil)
+			keyIdx++
 
+			if keyIdx%sampleInterval != 0 {
+				continue
+			}
+
+			// --- Check 1: .efi round-trip ---
+			efiChecked++
+			efiReader := ht.iit.statelessIdxReader(fileIdx)
+			hi, lo := ht.iit.hashKey(key)
+			efiOffset, efiOK := efiReader.TwoLayerLookupByHash(hi, lo)
+			if !efiOK {
+				efiMismatches++
+				badFileSet[g.FileName()+".efi"] = struct{}{}
+				if !firstEfiMismatchLogged {
+					logger.Warn("[integrity] HistoryEfVsV: .efi lookup failed for key present in .ef",
+						"domain", ht.h.FilenameBase, "key", fmt.Sprintf("%x", key),
+						"efFile", g.FileName())
+					firstEfiMismatchLogged = true
+				}
+			} else {
+				// Verify the offset points back to the same key
+				// Use a fresh reader to not disturb the main iteration
+				g4 := seg.NewReader(efFile.src.decompressor.MakeGetter(), ht.iit.ii.Compression)
+				g4.Reset(efiOffset)
+				if g4.HasNext() {
+					foundKey, _ := g4.Next(nil)
+					if !bytes.Equal(foundKey, key) {
+						efiMismatches++
+						badFileSet[g.FileName()+".efi"] = struct{}{}
+						if !firstEfiMismatchLogged {
+							logger.Warn("[integrity] HistoryEfVsV: .efi points to wrong key",
+								"domain", ht.h.FilenameBase,
+								"expectedKey", fmt.Sprintf("%x", key),
+								"foundKey", fmt.Sprintf("%x", foundKey),
+								"efFile", g.FileName(), "efiOffset", efiOffset)
+							firstEfiMismatchLogged = true
+						}
+					}
+				}
+			}
+
+			// --- Check 2: .vi + .v for each txNum in this key's sequence ---
 			seq.Reset(efFile.startTxNum, encodedSeq)
 			ss.Reset(seq, 0)
 
@@ -1392,42 +1437,36 @@ func (ht *HistoryRoTx) CheckEfAgainstV(ctx context.Context, probesPerFile int, l
 				if seqErr != nil {
 					return badFiles, totalMismatches, fmt.Errorf("ef sequence decode error in %s: %w", g.FileName(), seqErr)
 				}
-				total++
+				vChecked++
 
-				if total%sampleInterval != 0 {
-					continue
-				}
-				checked++
-
-				// Find the .v file covering this txNum
 				histFile, ok := ht.getFile(txNum)
 				if !ok {
-					mismatches++
-					if !firstMismatchLogged {
+					vMismatches++
+					if !firstVMismatchLogged {
 						logger.Warn("[integrity] HistoryEfVsV: .v file not found for txNum",
 							"domain", ht.h.FilenameBase, "key", fmt.Sprintf("%x", key),
 							"txNum", txNum, "efFile", g.FileName())
-						firstMismatchLogged = true
+						firstVMismatchLogged = true
 					}
 					continue
 				}
 
 				reader := ht.statelessIdxReader(histFile.i)
 				if reader.Empty() {
-					mismatches++
+					vMismatches++
 					continue
 				}
 
 				histKeyBuf = historyKey(txNum, key, histKeyBuf)
 				offset, idxOK := reader.Lookup(histKeyBuf)
 				if !idxOK {
-					mismatches++
-					if !firstMismatchLogged {
+					vMismatches++
+					if !firstVMismatchLogged {
 						logger.Warn("[integrity] HistoryEfVsV: .vi lookup failed",
 							"domain", ht.h.FilenameBase, "key", fmt.Sprintf("%x", key),
 							"txNum", txNum, "efFile", g.FileName(),
 							"vFile", ht.files[histFile.i].src.decompressor.FileName())
-						firstMismatchLogged = true
+						firstVMismatchLogged = true
 					}
 					continue
 				}
@@ -1444,16 +1483,16 @@ func (ht *HistoryRoTx) CheckEfAgainstV(ctx context.Context, probesPerFile int, l
 				if cpvc > 1 {
 					v, ht.snappyReadBuffer = seg.GetFromPage(histKeyBuf, v, ht.snappyReadBuffer, true)
 					if v == nil {
-						mismatches++
+						vMismatches++
 						vFileName := ht.files[histFile.i].src.decompressor.FileName()
 						badFileSet[vFileName] = struct{}{}
-						if !firstMismatchLogged {
+						if !firstVMismatchLogged {
 							logger.Warn("[integrity] HistoryEfVsV: key in .ef but NOT found in .v page",
 								"domain", ht.h.FilenameBase, "key", fmt.Sprintf("%x", key),
 								"txNum", txNum, "efFile", g.FileName(),
 								"vFile", vFileName,
 								"recsplitOffset", offset)
-							firstMismatchLogged = true
+							firstVMismatchLogged = true
 						}
 					}
 				}
@@ -1465,10 +1504,12 @@ func (ht *HistoryRoTx) CheckEfAgainstV(ctx context.Context, probesPerFile int, l
 			"efFile", g.FileName(),
 			"range", fmt.Sprintf("[%d-%d)", efFile.startTxNum, efFile.endTxNum),
 			"step", fmt.Sprintf("[%d-%d)", efFile.startTxNum/ht.stepSize, efFile.endTxNum/ht.stepSize),
-			"total", total, "checked", checked, "mismatches", mismatches,
+			"totalKeys", totalKeys,
+			"efiChecked", efiChecked, "efiMismatches", efiMismatches,
+			"vChecked", vChecked, "vMismatches", vMismatches,
 		)
 
-		totalMismatches += mismatches
+		totalMismatches += efiMismatches + vMismatches
 	}
 
 	for f := range badFileSet {
