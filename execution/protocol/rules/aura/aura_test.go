@@ -188,7 +188,7 @@ func TestEmptySystemAccountCreation(t *testing.T) {
 	// engine.Initialize + FinalizeTx via InitializeBlockExecution.
 	rs := state.NewStateV3Buffered(state.NewStateV3(domains, ethconfig.Sync{}, logger))
 	reader := state.NewBufferedReader(rs, state.NewReaderV3(rs.Domains().AsGetter(tx)))
-	writer := state.NewBufferedWriter(rs, nil)
+	writer := state.NewVersionedWriteCollector(rs, nil)
 	ibs := state.New(reader)
 	err = protocol.InitializeBlockExecution(engine, chainRdr, header, config, ibs, writer, logger, nil)
 	require.NoError(err)

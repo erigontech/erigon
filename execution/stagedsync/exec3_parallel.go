@@ -49,9 +49,9 @@ Can understand if txn failed or OutOfGas - then revert all changes.
 Each parallel-worker have own IntraBlockState.
 IntraBlockState does commit changes to lower-abstraction-level by method `ibs.MakeWriteSet()`
 
-- BufferedWriter - txs which executed by parallel workers can conflict with each-other.
-This writer does accumulate updates and then send them to conflict-resolution.
-Until conflict-resolution succeed - none of execution updates must pass to lower-abstraction-level.
+- versionedWriteCollector - txs which executed by parallel workers can conflict with each-other.
+This writer collects updates as a flat VersionedWrites slice and sends them to conflict-resolution.
+Until conflict-resolution succeeds - none of execution updates must pass to lower-abstraction-level.
 Object TxTask it's just set of small buffers (readset + writeset) for each transaction.
 Write to TxTask happens by code like `txTask.ReadLists = rw.stateReader.ReadSet()`.
 
@@ -176,6 +176,12 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 			pe.domains().SetChangesetAccumulator(changeSet)
 		}
 
+		// blockUpdateCount/blockApplyCount count individual VersionedWrite entries
+		// (balance, nonce, incarnation, codeHash, code, storage, selfDestruct are
+		// separate entries).  This differs from the old StateUpdates count which
+		// grouped all fields of one account as a single entry.  The values are only
+		// used for an internal consistency check (blockUpdateCount==ApplyCount) and
+		// trace output, so the change in semantics does not affect correctness.
 		blockUpdateCount := 0
 		blockApplyCount := 0
 
@@ -190,13 +196,13 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					uncommittedTransactions++
 					if dbg.TraceApply && dbg.TraceBlock(applyResult.blockNum) {
 						pe.rs.SetTrace(true)
-						fmt.Println(applyResult.blockNum, "apply", applyResult.txNum, applyResult.stateUpdates.UpdateCount())
+						fmt.Println(applyResult.blockNum, "apply", applyResult.txNum, len(applyResult.writes))
 					}
-					blockUpdateCount += applyResult.stateUpdates.UpdateCount()
-					err := pe.rs.ApplyTxState(ctx, rwTx, applyResult.blockNum, applyResult.txNum, applyResult.stateUpdates,
+					blockUpdateCount += len(applyResult.writes)
+					err := pe.rs.ApplyTxState(ctx, rwTx, applyResult.blockNum, applyResult.txNum, applyResult.writes,
 						nil, applyResult.receipt, applyResult.blobGasUsed, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,
 						pe.cfg.chainConfig, applyResult.rules, false)
-					blockApplyCount += applyResult.stateUpdates.UpdateCount()
+					blockApplyCount += len(applyResult.writes)
 					pe.rs.SetTrace(false)
 					if err != nil {
 						return err
@@ -605,7 +611,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 
 					finalTask := blockExecutor.tasks[len(blockExecutor.tasks)-1].Task
 					finalVersion := finalTask.Version()
-					stateUpdates, err := func() (state.StateUpdates, error) {
+					applyWrites, err := func() (state.VersionedWrites, error) {
 						pe.RLock()
 						defer pe.RUnlock()
 
@@ -624,7 +630,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						txTask, ok := result.Task.(*taskVersion).Task.(*exec.TxTask)
 
 						if !ok {
-							return state.StateUpdates{}, nil
+							return nil, nil
 						}
 
 						syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
@@ -645,7 +651,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						if pe.accumulator != nil {
 							rawTxs, marshalErr := types.MarshalTransactionsBinary(txTask.Txs)
 							if marshalErr != nil {
-								return state.StateUpdates{}, fmt.Errorf("marshal transactions for accumulator, block %d: %w", blockResult.BlockNum, marshalErr)
+								return nil, fmt.Errorf("marshal transactions for accumulator, block %d: %w", blockResult.BlockNum, marshalErr)
 							}
 							pe.accumulator.StartChange(txTask.Header, rawTxs, false)
 						}
@@ -656,7 +662,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 								txTask.Withdrawals, chainReader, syscall, false, pe.logger)
 
 						if err != nil {
-							return state.StateUpdates{}, fmt.Errorf("can't finalize block %d: %w", blockResult.BlockNum, err)
+							return nil, fmt.Errorf("can't finalize block %d: %w", blockResult.BlockNum, err)
 						}
 
 						blockExecutor.blockIO.RecordReads(finalVersion, ibs.VersionedReads())
@@ -668,21 +674,20 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 							blockExecutor.versionMap.FlushVersionedWrites(finalWrites, true, "")
 						}
 
-						stateWriter := state.NewBufferedWriter(pe.rs, pe.accumulator)
-						if err = ibs.MakeWriteSet(txTask.EvmBlockContext.Rules(txTask.Config), stateWriter); err != nil {
-							return state.StateUpdates{}, err
+						collector := state.NewVersionedWriteCollector(pe.rs, pe.accumulator)
+						if err = ibs.MakeWriteSet(txTask.EvmBlockContext.Rules(txTask.Config), collector); err != nil {
+							return nil, err
 						}
 
-						return stateWriter.WriteSet(), nil
+						return collector.Writes(), nil
 					}()
 
 					if err != nil {
 						return err
 					}
 
-					blockResult.ApplyCount += stateUpdates.UpdateCount()
+					blockResult.ApplyCount += len(applyWrites)
 					if dbg.TraceApply && dbg.TraceBlock(blockResult.BlockNum) {
-						stateUpdates.TraceBlockUpdates(blockResult.BlockNum, true)
 						fmt.Println(blockResult.BlockNum, "apply count", blockResult.ApplyCount)
 					}
 
@@ -690,7 +695,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						blockNum:              blockResult.BlockNum,
 						txNum:                 blockResult.lastTxNum,
 						rules:                 result.Rules(),
-						stateUpdates:          stateUpdates,
+						writes:                applyWrites,
 						logs:                  result.Logs,
 						traceFroms:            result.TraceFroms,
 						traceTos:              result.TraceTos,
@@ -949,7 +954,7 @@ type txResult struct {
 	logs                  []*types.Log
 	traceFroms            map[accounts.Address]struct{}
 	traceTos              map[accounts.Address]struct{}
-	stateUpdates          state.StateUpdates
+	writes                state.VersionedWrites
 	rules                 *chain.Rules
 }
 
@@ -961,7 +966,7 @@ type execTask struct {
 
 type execResult struct {
 	*exec.TxResult
-	stateUpdates *state.StateUpdates
+	writes state.VersionedWrites
 }
 
 func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engine, vm *state.VersionMap, stateReader state.StateReader, stateWriter state.StateWriter) (*types.Receipt, state.ReadSet, state.VersionedWrites, error) {
@@ -1532,9 +1537,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					}
 				}
 
-				stateWriter := state.NewBufferedWriter(pe.rs, nil)
+				collector := state.NewVersionedWriteCollector(pe.rs, nil)
 
-				_, addReads, addWrites, err := txResult.finalize(prevReceipt, pe.cfg.engine, be.versionMap, stateReader, stateWriter)
+				_, addReads, addWrites, err := txResult.finalize(prevReceipt, pe.cfg.engine, be.versionMap, stateReader, collector)
 
 				if err != nil {
 					return nil, err
@@ -1559,8 +1564,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					be.versionMap.FlushVersionedWrites(merged, true, "")
 				}
 
-				stateUpdates := stateWriter.WriteSet()
-				txResult.stateUpdates = &stateUpdates
+				txResult.writes = collector.Writes()
 
 				be.publishTasks.pushPending(tx)
 			}
@@ -1627,13 +1631,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			be.publishTasks.markComplete(tx)
 
 			pe.lastExecutedTxNum.Store(int64(applyResult.txNum))
-			if result.stateUpdates != nil {
-				applyResult.stateUpdates = *result.stateUpdates
-				if applyResult.stateUpdates.BTreeG != nil {
-					be.applyCount += applyResult.stateUpdates.UpdateCount()
-					if dbg.TraceApply {
-						applyResult.stateUpdates.TraceBlockUpdates(applyResult.blockNum, dbg.TraceBlock(applyResult.blockNum))
-					}
+			if result.writes != nil {
+				applyResult.writes = result.writes
+				if len(applyResult.writes) > 0 {
+					be.applyCount += len(applyResult.writes)
 				}
 			}
 
