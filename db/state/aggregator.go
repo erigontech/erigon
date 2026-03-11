@@ -1882,6 +1882,10 @@ func (at *AggregatorRoTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs
 
 // -- range end
 
+func (at *AggregatorRoTx) SetTrace(domain kv.Domain, v bool) {
+	at.d[domain].ht.trace = v
+}
+
 func (at *AggregatorRoTx) HistorySeek(domain kv.Domain, key []byte, ts uint64, tx kv.Tx) (v []byte, ok bool, err error) {
 	return at.d[domain].ht.HistorySeek(key, ts, tx)
 }

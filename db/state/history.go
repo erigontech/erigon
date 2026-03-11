@@ -1235,6 +1235,10 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 		return nil, false, err
 	}
 	if !ok {
+		if ht.trace {
+			log.Info("[dbg] historySeekInFiles: seekInFiles returned not-found",
+				"domain", ht.h.FilenameBase, "key", fmt.Sprintf("%x", key), "txNum", txNum)
+		}
 		return nil, false, nil
 	}
 	historyItem, ok := ht.getFile(histTxNum)
@@ -1244,10 +1248,21 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	}
 	reader := ht.statelessIdxReader(historyItem.i)
 	if reader.Empty() {
+		if ht.trace {
+			log.Info("[dbg] historySeekInFiles: reader empty",
+				"domain", ht.h.FilenameBase, "key", fmt.Sprintf("%x", key), "txNum", txNum,
+				"histTxNum", histTxNum, "file", historyItem.src.decompressor.FileName())
+		}
 		return nil, false, nil
 	}
 	historyKey := ht.encodeTs(histTxNum, key)
 	offset, ok := reader.Lookup(historyKey)
+	if ht.trace {
+		log.Info("[dbg] historySeekInFiles: recsplit lookup",
+			"domain", ht.h.FilenameBase, "key", fmt.Sprintf("%x", key), "txNum", txNum,
+			"histTxNum", histTxNum, "file", historyItem.src.decompressor.FileName(),
+			"recsplitOffset", offset, "recsplitOK", ok)
+	}
 	if !ok {
 		return nil, false, nil
 	}
@@ -1265,8 +1280,20 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 		compressedPageValuesCount = ht.h.HistoryValuesOnCompressedPage
 	}
 
+	if ht.trace {
+		log.Info("[dbg] historySeekInFiles: raw page data",
+			"domain", ht.h.FilenameBase, "key", fmt.Sprintf("%x", key), "txNum", txNum,
+			"histTxNum", histTxNum, "file", historyItem.src.decompressor.FileName(),
+			"rawPageLen", len(v), "compressedPageValuesCount", compressedPageValuesCount)
+	}
+
 	if compressedPageValuesCount > 1 {
 		v, ht.snappyReadBuffer = seg.GetFromPage(historyKey, v, ht.snappyReadBuffer, true)
+		if ht.trace {
+			log.Info("[dbg] historySeekInFiles: GetFromPage result",
+				"domain", ht.h.FilenameBase, "key", fmt.Sprintf("%x", key), "txNum", txNum,
+				"histTxNum", histTxNum, "resultLen", len(v), "resultNil", v == nil)
+		}
 	}
 	return v, true, nil
 }

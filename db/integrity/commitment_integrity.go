@@ -1017,6 +1017,10 @@ func CheckCommitmentStateKeyHistory(ctx context.Context, db kv.TemporalRoDB, br 
 		if err != nil {
 			return err
 		}
+		// Enable debug tracing on commitment HistorySeek
+		if aggTx := state.AggTx(fileTx); aggTx != nil {
+			aggTx.SetTrace(kv.CommitmentDomain, true)
+		}
 
 		var probeOK, probeFail int
 		for i := range probesPerFile {

@@ -806,6 +806,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 
 		var cp CursorHeap
 		heap.Init(&cp)
+		var expectedPageValuesCount int = -1 // for asserting consistency across source files
 		for _, item := range indexFiles {
 			g := ht.iit.dataReader(item.decompressor)
 			g.Reset(0)
@@ -817,6 +818,22 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 
 						if hi.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
 							compressedPageValuesCount = ht.h.HistoryValuesOnCompressedPage
+						}
+
+						if ht.h.FilenameBase == "commitment" {
+							ht.h.logger.Info("[dbg] commitment history merge: source file",
+								"file", hi.decompressor.FileName(),
+								"compressedPageValuesCount", compressedPageValuesCount,
+								"formatVersion", hi.decompressor.CompressionFormatVersion(),
+								"startTxNum", hi.startTxNum, "endTxNum", hi.endTxNum,
+								"count", hi.decompressor.Count())
+							if expectedPageValuesCount == -1 {
+								expectedPageValuesCount = compressedPageValuesCount
+							} else if expectedPageValuesCount != compressedPageValuesCount {
+								ht.h.logger.Error("[dbg] commitment history merge: pageValuesCount CHANGED between source files!",
+									"expected", expectedPageValuesCount, "got", compressedPageValuesCount,
+									"file", hi.decompressor.FileName())
+							}
 						}
 
 						g2 = seg.NewPagedReader(ht.dataReader(hi.decompressor), compressedPageValuesCount, true)
@@ -868,9 +885,26 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 					}
 
 					var v []byte
-					_, v, valBuf, _ = ci1.hist.Next2(valBuf[:0]) // key from .v file can be empty if file is not compressed -> need to be built from txNum + key
+					var pageKey []byte
+					pageKey, v, valBuf, _ = ci1.hist.Next2(valBuf[:0]) // key from .v file can be empty if file is not compressed -> need to be built from txNum + key
 
 					histKeyBuf = historyKey(txNum, ci1.key, histKeyBuf)
+
+					// Debug: track "state" key values during commitment history merge
+					if ht.h.FilenameBase == "commitment" && bytes.Equal(ci1.key, commitmentdb.KeyCommitmentState) {
+						if len(v) == 0 {
+							ht.h.logger.Warn("[dbg] commitment history merge: EMPTY value for state key",
+								"txNum", txNum, "histKey", fmt.Sprintf("%x", histKeyBuf),
+								"efFile", ci1.kvReader.FileName(), "vFile", ci1.hist.FileName(),
+								"pageKey", fmt.Sprintf("%x", pageKey),
+								"startTxNum", ci1.startTxNum, "endTxNum", ci1.endTxNum)
+						} else {
+							ht.h.logger.Info("[dbg] commitment history merge: state key value",
+								"txNum", txNum, "vLen", len(v),
+								"efFile", ci1.kvReader.FileName(), "vFile", ci1.hist.FileName(),
+								"startTxNum", ci1.startTxNum, "endTxNum", ci1.endTxNum)
+						}
+					}
 
 					if err = pagedWr.Add(histKeyBuf, v); err != nil {
 						return nil, nil, err
@@ -894,6 +928,33 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		if decomp, err = seg.NewDecompressor(datPath); err != nil {
 			return nil, nil, err
 		}
+
+		// Post-merge validation: verify the "state" key's values in the merged commitment .v file
+		if ht.h.FilenameBase == "commitment" {
+			compressedPageValuesCount := decomp.CompressedPageValuesCount()
+			g := seg.NewPagedReader(seg.NewReader(decomp.MakeGetter(), ht.h.Compression), compressedPageValuesCount, compressedPageValuesCount > 1)
+			g.Reset(0)
+			var stateKeyCount, stateKeyEmptyCount int
+			for g.HasNext() {
+				k, v, _, _ := g.Next2(nil)
+				// historyKey format: txNum(8 bytes) + key
+				if len(k) >= 8+len(commitmentdb.KeyCommitmentState) && bytes.Equal(k[8:], commitmentdb.KeyCommitmentState) {
+					stateKeyCount++
+					if len(v) == 0 {
+						stateKeyEmptyCount++
+					}
+				}
+			}
+			ht.h.logger.Info("[dbg] commitment history merge: post-merge validation",
+				"file", path.Base(datPath),
+				"stateKeyEntries", stateKeyCount,
+				"stateKeyEmptyValues", stateKeyEmptyCount,
+				"totalWords", decomp.Count(),
+				"compressedPageValuesCount", compressedPageValuesCount,
+				"pagesCompressed", pagedWr.PagesCompressed(),
+			)
+		}
+
 		ps.Delete(p)
 
 		if err = ht.h.buildVI(ctx, idxPath, decomp, indexIn.decompressor, indexIn.startTxNum, ps); err != nil {
