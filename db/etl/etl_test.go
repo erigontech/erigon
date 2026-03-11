@@ -981,7 +981,7 @@ func BenchmarkFileDataProviderNext(b *testing.B) {
 
 				b.StopTimer()
 				provider.Dispose()
-				os.RemoveAll(tmpdir)
+				dir.RemoveAll(tmpdir)
 				b.StartTimer()
 			}
 		})
