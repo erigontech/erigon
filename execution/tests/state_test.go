@@ -151,12 +151,14 @@ func beginRwNoContention(t *testing.T, db kv.TemporalRwDB) kv.TemporalRwTx {
 			}
 			t.Fatal(err)
 		}
+		t.Cleanup(tx.Rollback)
 		return tx
 	}
 	tx, err := db.BeginTemporalRw(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(tx.Rollback)
 	return tx
 }
 
