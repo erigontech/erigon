@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"slices"
 	"sync"
 
 	"golang.org/x/sync/errgroup"
@@ -494,20 +493,6 @@ func (c *PagedWriter) Flush() error {
 		c.resetPage()
 	}()
 	return c.eg.Wait()
-}
-
-func (c *PagedWriter) assertPageKeysNotZero(wholePage []byte) error {
-	cnt := int(wholePage[0])
-	if cnt == 0 {
-		return nil
-	}
-	kLens := wholePage[1 : 1+cnt*4]
-	data := wholePage[1+cnt*4*2:]
-	kLen := be.Uint32(kLens[0:4])
-	if kLen > 0 && slices.Max(data[:kLen]) == 0 {
-		return fmt.Errorf("PagedWriter: first key in page is all-zero (len=%d, cnt=%d) in %s", kLen, cnt, c.parent.FileName())
-	}
-	return nil
 }
 
 // bytesUncompressedTo encodes page into external buffer (no internal state modification)
