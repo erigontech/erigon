@@ -828,7 +828,7 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 		return err
 	}
 	if latestBlockNum > blockNum {
-		return fmt.Errorf("commitment state blockNum is ahead of blockNum: %d > %d", latestBlockNum, blockNum)
+		return fmt.Errorf("commitment history at txNum %d (block %d) contains state from future block %d (latestTxNum %d): likely corrupted commitment history due to interrupted flush or snapshot rebuild", toTxNum, blockNum, latestBlockNum, latestTxNum)
 	}
 	if latestBlockNum < blockNum {
 		// Commitment state is from an earlier block. This is expected when intermediate blocks
