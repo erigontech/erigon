@@ -26,6 +26,8 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/config3"
+	"github.com/erigontech/erigon/execution/commitment/qmtree"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
@@ -56,7 +58,13 @@ func main() {
 			defer heimdallReader.Close()
 		}
 
-		apiList := jsonrpc.APIList(db, backend, txPool, mining, ff, stateCache, blockReader, cfg, engine, logger, bridgeReader, heimdallReader)
+		var qmTracker *qmtree.Tracker
+		if cfg.Dirs.Snap != "" {
+			if t, err := qmtree.NewTracker(cfg.Dirs.Snap, uint64(config3.DefaultStepSize)); err == nil {
+				qmTracker = t
+			}
+		}
+		apiList := jsonrpc.APIList(db, backend, txPool, mining, ff, stateCache, blockReader, cfg, engine, logger, bridgeReader, heimdallReader, qmTracker)
 		rpc.PreAllocateRPCMetricLabels(apiList)
 		if err := cli.StartRpcServer(ctx, cfg, apiList, logger); err != nil {
 			logger.Error(err.Error())

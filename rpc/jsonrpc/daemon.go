@@ -21,7 +21,9 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/execution/commitment/qmtree"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/clique"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -48,6 +50,7 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 	filters *rpchelper.Filters, stateCache kvcache.Cache,
 	blockReader services.FullBlockReader, cfg *httpcfg.HttpCfg, engine rules.EngineReader,
 	logger log.Logger, bridgeReader bridgeReader, spanProducersReader spanProducersReader,
+	qmTracker *qmtree.Tracker,
 ) (list []rpc.API) {
 	base := NewBaseApi(filters, stateCache, blockReader, cfg.WithDatadir, cfg.EvmCallTimeout, engine, cfg.Dirs, bridgeReader, cfg.RangeLimit)
 	ethImpl := NewEthAPI(base, db, eth, txPool, mining, NewEthApiConfig(cfg), logger)
@@ -76,6 +79,7 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 		}
 	}
 
+	qmImpl := NewQMAPI(db, blockReader, rawdbv3.TxNums, qmTracker, logger)
 	otsImpl := NewOtterscanAPI(base, db, cfg.OtsMaxPageSize)
 	internalImpl := NewInternalAPI(base, db)
 	gqlImpl := NewGraphQLAPI(base, db)
@@ -193,6 +197,13 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 				Namespace: "overlay",
 				Public:    true,
 				Service:   OverlayAPI(overlayImpl),
+				Version:   "1.0",
+			})
+		case "qm":
+			list = append(list, rpc.API{
+				Namespace: "qm",
+				Public:    true,
+				Service:   QMAPI(qmImpl),
 				Version:   "1.0",
 			})
 		}
