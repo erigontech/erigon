@@ -82,8 +82,7 @@ Flags for managing how old chain data is handled and stored.
   * Default: `0`
 * `--prune.distance.blocks value`: Keeps block history for the latest `N` blocks.
   * Default: `0`
-* `--prune.include-commitment-history, --prune.experimental.include-commitment-history, --experimental.commitment-history`: (
-experimental) Enables blazing fast `eth_getProof` for executed blocks by storing commitment history.
+* `--prune.include-commitment-history, --prune.experimental.include-commitment-history, --experimental.commitment-history`: Enables blazing fast `eth_getProof` for executed blocks by storing commitment history.
   * Default: `false`
 * `--snap.keepblocks`: Keeps ancient blocks in the database for debugging.
   * Default: `false`
@@ -161,6 +160,9 @@ Flags for configuring various RPC servers and their behavior.
   * Default: `127.0.0.1:9090`
 * `--private.api.ratelimit value`: Limits the number of simultaneous internal API requests.
   * Default: `31872`
+* `--ipcdisable`: Disables the IPC-RPC server.
+  * Default: `false`
+* `--ipcpath value`: Filename for the IPC socket/pipe within the datadir (explicit paths escape it).
 * `--http`: Enables the JSON-RPC HTTP server.
   * Default: `true`
 * `--http.enabled`: An alternative flag to enable the HTTP server.
@@ -187,10 +189,20 @@ Flags for configuring various RPC servers and their behavior.
   * Default: `eth,erigon,engine`
 * `--ws`: Enables the WS-RPC server.
   * Default: `false`
+* `--ws.addr value`: The WS-RPC server listening interface.
+  * Default: `localhost`
 * `--ws.port value`: The WS-RPC server listening port.
   * Default: `8546`
+* `--ws.api value`: The APIs offered over the WS-RPC interface.
+* `--ws.origins value`: Origins from which to accept WebSocket requests.
 * `--ws.compression`: Enables compression over WebSocket.
   * Default: `true`
+* `--rpc.gethcompat`: Enables Geth-compatible storage iteration order for `debug_storageRangeAt` (sorted by keccak256 hash). Disabled by default for performance.
+  * Default: `false`
+* `--rpc.txsync.defaulttimeout value`: Default timeout for `eth_sendRawTransactionSync`.
+  * Default: `25s`
+* `--rpc.txsync.maxtimeout value`: Maximum allowed timeout for `eth_sendRawTransactionSync`.
+  * Default: `1m0s`
 * `--rpc.batch.concurrency value`: Limits the number of goroutines for batch requests.
   * Default: `2`
 * `--rpc.streaming.disable`: Disables JSON streaming for heavy endpoints.
@@ -309,8 +321,11 @@ Flags related to consensus mechanisms and network forks.
   * Default: `20`
 * `--gpo.percentile value`: The percentile of recent transaction gas prices to use for a suggested gas price.
   * Default: `60`
+* `--gpo.maxprice value`: The maximum gas price recommended by the gas price oracle.
+  * Default: `500000000000` (500 GWei)
 * `--proposer.disable`: Disables the PoS proposer.
   * Default: `false`
+* `--builder.maxblobs value`: Cap the number of blob transactions included in a built block.
 * `--bor.heimdall value`: The URL of the Heimdall service.
   * Default: `http://localhost:1317`
 * `--bor.withoutheimdall`: Runs without the Heimdall service.
