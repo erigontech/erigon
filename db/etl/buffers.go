@@ -89,9 +89,11 @@ var (
 // Key occupies data[offset : offset+keyLen], value follows at data[offset+max(0,keyLen) : ...+valLen].
 // keyLen/valLen of -1 indicates nil.
 type entryLoc struct {
-	offset int
-	keyLen int
-	valLen int
+	offset    int
+	keyLen    int
+	valLen    int
+	seq       int    // insertion order — enables stable sort via unstable SortFunc
+	keyPrefix uint64 // first 8 bytes of key (big-endian) — fast-path comparison
 }
 
 func NewSortableBuffer(bufferOptimalSize datasize.ByteSize) *sortableBuffer {
@@ -117,14 +119,25 @@ func (b *sortableBuffer) Put(k, v []byte) {
 	if v == nil {
 		lv = -1
 	}
+	var prefix uint64
+	if len(k) >= 8 {
+		prefix = binary.BigEndian.Uint64(k)
+	} else if len(k) > 0 {
+		// pad short keys into high bytes so ordering is preserved
+		var buf [8]byte
+		copy(buf[:], k)
+		prefix = binary.BigEndian.Uint64(buf[:])
+	}
 	b.entries = append(b.entries, entryLoc{
-		offset: len(b.data),
-		keyLen: lk,
-		valLen: lv,
+		offset:    len(b.data),
+		keyLen:    lk,
+		valLen:    lv,
+		seq:       len(b.entries),
+		keyPrefix: prefix,
 	})
 	b.data = append(b.data, k...)
 	b.data = append(b.data, v...)
-	b.size += len(k) + len(v) + 24 // 24 = sizeof(entryLoc): 3 ints
+	b.size += len(k) + len(v) + 40 // 40 = sizeof(entryLoc): 3 ints + int + uint64
 }
 
 func (b *sortableBuffer) Size() int { return b.size }
@@ -182,12 +195,21 @@ func (b *sortableBuffer) SizeLimit() int { return b.optimalSize }
 func (b *sortableBuffer) Sort() {
 	data := b.data
 	cmp := func(a, b entryLoc) int {
-		return bytes.Compare(data[a.offset:a.offset+a.keyLen], data[b.offset:b.offset+b.keyLen])
+		if a.keyPrefix != b.keyPrefix {
+			if a.keyPrefix < b.keyPrefix {
+				return -1
+			}
+			return 1
+		}
+		if c := bytes.Compare(data[a.offset:a.offset+a.keyLen], data[b.offset:b.offset+b.keyLen]); c != 0 {
+			return c
+		}
+		return a.seq - b.seq // preserve insertion order for duplicate keys
 	}
 	if slices.IsSortedFunc(b.entries, cmp) {
 		return
 	}
-	slices.SortStableFunc(b.entries, cmp) // Stable: this buffer type can have duplicate keys and must preserve their insertion order
+	slices.SortFunc(b.entries, cmp)
 }
 
 func (b *sortableBuffer) CheckFlushSize() bool {
