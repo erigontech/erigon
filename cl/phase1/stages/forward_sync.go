@@ -21,6 +21,10 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 )
 
+// ErrForwardSyncStale is returned when forward sync makes no progress for an extended period.
+// The stage transition function should skip ForwardSync and go directly to ChainTipSync.
+var ErrForwardSyncStale = errors.New("forward sync stale")
+
 // shouldProcessBlobs checks if any block in the given list of blocks
 // has a version greater than or equal to DenebVersion and contains BlobKzgCommitments.
 func shouldProcessBlobs(blocks []*cltypes.SignedBeaconBlock, cfg *Cfg) bool {
@@ -266,9 +270,27 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 	logger.Info("[Caplin] Forward Sync", "from", currentSlot.Load(), "to", chainTipSlot)
 	prevProgress := currentSlot.Load()
 
+	// Stale progress detection: if no progress for this duration, exit and let ChainTipSync take over.
+	const staleTimeout = 2 * time.Minute
+	lastProgressTime := time.Now()
+	lastProgressSlot := currentSlot.Load()
+
 	// Run the log loop until the highest processed slot reaches the chain tip slot
 	for downloader.GetHighestProcessedSlot() < chainTipSlot {
 		downloader.RequestMore(ctx)
+
+		// Detect stale progress: if no new slots processed for staleTimeout, exit.
+		// ChainTipSync will take over using gossip, which works better near the chain tip.
+		if cur := currentSlot.Load(); cur > lastProgressSlot {
+			lastProgressSlot = cur
+			lastProgressTime = time.Now()
+		} else if time.Since(lastProgressTime) > staleTimeout {
+			logger.Info("[Caplin] Forward sync: no progress, handing off to ChainTipSync",
+				"progress", currentSlot.Load(), "targetSlot", chainTipSlot,
+				"stale", time.Since(lastProgressTime).Round(time.Second))
+			return ErrForwardSyncStale
+		}
+
 		select {
 		case <-ctx.Done():
 			// Return if the context is done
