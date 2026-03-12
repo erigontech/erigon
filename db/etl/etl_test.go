@@ -735,3 +735,42 @@ func BenchmarkSortableBufferSort(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkSortableBufferPutSort(b *testing.B) {
+	const keyLen = 32
+	const valLen = 64
+
+	for _, tc := range []struct {
+		name   string
+		count  int
+		sorted bool
+	}{
+		{"random_100k", 100_000, false},
+		{"random_500k", 500_000, false},
+		{"sorted_100k", 100_000, true},
+		{"sorted_500k", 500_000, true},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			key := make([]byte, keyLen)
+			val := make([]byte, valLen)
+			buf := NewSortableBuffer(256 * 1024 * 1024)
+			buf.Prealloc(tc.count, tc.count*(keyLen+valLen))
+			for b.Loop() {
+				buf.Reset()
+				for i := range tc.count {
+					if tc.sorted {
+						binary.BigEndian.PutUint64(key, uint64(i))
+					} else {
+						x := uint64(i) * 6364136223846793005
+						binary.BigEndian.PutUint64(key, x)
+						binary.BigEndian.PutUint64(key[8:], x^0xdeadbeef)
+					}
+					binary.BigEndian.PutUint64(val, uint64(i))
+					buf.Put(key, val)
+				}
+				buf.Sort()
+			}
+		})
+	}
+}
