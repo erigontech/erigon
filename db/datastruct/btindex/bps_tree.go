@@ -355,6 +355,12 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 		defer func() { fmt.Printf("found %x [%d %d]\n", key, l, r) }()
 	}
 
+	// Use g.Buf as reusable key buffer across Get calls to avoid allocations.
+	// g.Buf is safe because seg.Reader is per-goroutine.
+	// We must NOT use g.Buf for value reads: NextUncompressed may return mmap-backed
+	// slices that would make g.Buf point into read-only memory, corrupting future
+	// compressed reads. Value reads use nil (allocating only on match).
+	g.Buf = g.Buf[:0]
 	var cmp int
 	var m uint64
 	for l < r {
@@ -365,8 +371,8 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 				offset = b.offt.Get(m)
 				g.Reset(offset)
 			}
-			v, _ = g.Next(v[:0])
-			if cmp = bytes.Compare(v, key); cmp > 0 {
+			g.Buf, _ = g.Next(g.Buf[:0])
+			if cmp = bytes.Compare(g.Buf, key); cmp > 0 {
 				return nil, false, 0, err
 			} else if cmp < 0 {
 				g.Skip()
@@ -378,7 +384,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 			return v, true, offset, nil
 		}
 
-		cmp, v, err = b.keyCmpFunc(key, m, g, v[:0])
+		cmp, g.Buf, err = b.keyCmpFunc(key, m, g, g.Buf[:0])
 		if err != nil {
 			return nil, false, 0, err
 		}
@@ -399,7 +405,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 		}
 	}
 
-	cmp, _, err = b.keyCmpFunc(key, l, g, v[:0])
+	cmp, g.Buf, err = b.keyCmpFunc(key, l, g, g.Buf[:0])
 	if err != nil || cmp != 0 {
 		return nil, false, 0, err
 	}
