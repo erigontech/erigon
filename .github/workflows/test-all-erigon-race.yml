@@ -69,16 +69,13 @@ jobs:
           submodules: true
           lfs: tests
           build-cache-extra-key: ${{ matrix.test-group }}
+          ramdisk: true
 
       - name: Run ${{ matrix.test-group }} tests on ${{ matrix.os }}
         env:
           SKIP_FLAKY_TESTS: 'true'
-          GODEBUG: cgocheck=0
-          GOTRACEBACK: 1
-          GOGC: 80
           CGO_CFLAGS: -D__BLST_PORTABLE__
-          GOFLAGS: -race -timeout=60m
-        run: make test-group TEST_GROUP=${{ matrix.test-group }}
+        run: make test-group TEST_GROUP=${{ matrix.test-group }} GO_FLAGS="-race -timeout=60m"
 
       - uses: ./.github/actions/cleanup-erigon
         if: always()
