@@ -201,12 +201,9 @@ func (b *sortableBuffer) Sort() {
 			}
 			return 1
 		}
-		if a.keyLen > 0 && b.keyLen > 0 {
-			if c := bytes.Compare(data[a.offset:a.offset+a.keyLen], data[b.offset:b.offset+b.keyLen]); c != 0 {
-				return c
-			}
-		} else if a.keyLen != b.keyLen {
-			return a.keyLen - b.keyLen // nil (-1) < empty (0) < non-empty
+		aLen, bLen := max(a.keyLen, 0), max(b.keyLen, 0)
+		if c := bytes.Compare(data[a.offset:a.offset+aLen], data[b.offset:b.offset+bLen]); c != 0 {
+			return c
 		}
 		return a.seq - b.seq // preserve insertion order for duplicate keys
 	}

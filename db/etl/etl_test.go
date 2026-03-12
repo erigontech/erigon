@@ -676,16 +676,16 @@ func TestSortableBufferNilAndEmptyKeys(t *testing.T) {
 
 	buf.Sort()
 
-	// nil keys (-1) sort before empty keys (0) which sort before non-empty
-	// within same key, insertion order is preserved
+	// nil and empty keys both sort as zero-length, before non-empty.
+	// Stable sort preserves insertion order among equal keys.
 	_, v0 := buf.Get(0, nil, nil)
 	_, v1 := buf.Get(1, nil, nil)
 	_, v2 := buf.Get(2, nil, nil)
 	_, v3 := buf.Get(3, nil, nil)
 	_, v4 := buf.Get(4, nil, nil)
 	assert.Equal(t, []byte("nil-key"), v0)
-	assert.Equal(t, []byte("nil-key-2"), v1)
-	assert.Equal(t, []byte("empty-key-1"), v2)
+	assert.Equal(t, []byte("empty-key-1"), v1)
+	assert.Equal(t, []byte("nil-key-2"), v2)
 	assert.Equal(t, []byte("empty-key-2"), v3)
 	assert.Equal(t, []byte("normal"), v4)
 }
