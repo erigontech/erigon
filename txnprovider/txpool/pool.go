@@ -851,7 +851,13 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 		availableGas -= intrinsicGas
 		availableRlpSpace -= len(rlpTxn)
 		txns.Txns[count] = rlpTxn
-		txns.ParsedTxn[count] = mt.TxnSlot.Txn
+		// For blob transactions, slot.Txn is the inner BlobTx without the
+		// sidecar (blobs/commitments/proofs). Leave ParsedTxn nil so that
+		// ProvideTxns falls back to DecodeWrappedTransaction on the full
+		// wrapper RLP, which produces a BlobTxWrapper with sidecar intact.
+		if mt.TxnSlot.TxType() != types.BlobTxType {
+			txns.ParsedTxn[count] = mt.TxnSlot.Txn
+		}
 		copy(txns.Senders.At(count), sender.Bytes())
 		txns.IsLocal[count] = isLocal
 		if yielded != nil {
