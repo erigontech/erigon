@@ -10,7 +10,7 @@ Erigon's global transaction number (`txnum`).
 
 ### 1.1 References
 
-- [QMDB Design — General Ideas](https://github.com/LayerZero-Labs/qmdb/blob/main/docs/design.md) — covers entry structure, twig Merkle trees, ActiveBits, pruning, and exclusion proofs
+- [QMDB Design — General Ideas](https://github.com/LayerZero-Labs/qmdb/blob/main/docs/design.md) — covers entry structure, twig Merkle trees, pruning, and exclusion proofs (note: ActiveBits are not used in this implementation — see §2.5)
 - [QMDB Architecture](https://github.com/LayerZero-Labs/qmdb/blob/main/docs/architecture.md) — covers the prefetcher-updater-flusher pipeline, HPFile, TwigFile, EntryFile, B-tree indexer, edge nodes, and batch sync
 - [Go port of qmtree](../execution/commitment/qmtree/) — the tree, twig, proof, and hpfile implementations
 
@@ -137,13 +137,12 @@ Both are computed and logged for analysis. The block-level root is the one that 
 
 ### 2.5 State currency
 
-The original QMDB design uses **ActiveBits** — one bit per leaf indicating whether that entry is still the current value for its key — for state currency proofs and twig pruning. After evaluation, ActiveBits were removed from this implementation because:
+State currency — answering "is this leaf the latest write to key K?" — is served by
+the `KeyIndex` (§5.2) rather than by in-tree metadata. The twig root is therefore
+simply the binary Merkle root over the 2048 leaf hashes.
 
-- The `previousLeafHash` chain already links all leaves for a key in sequence
-- State currency ("is this leaf the latest for key K?") can be answered via the keyset index (§5) without in-tree metadata
-- Twig pruning via head eviction remains future work regardless
-
-The twig root is therefore simply the binary Merkle root over the 2048 leaf hashes (no ActiveBits subtree).
+The `previousLeafHash` chain links all leaves for a key in sequence, so the full
+write history for any key is traversable without additional tree metadata.
 
 ## 3. Proofs and Witnesses
 
@@ -154,12 +153,11 @@ A qmtree proof for serial number `sn` (see `proof.go`) consists of:
 | Component | Size | Purpose |
 |---|---|---|
 | `LeftOfTwig[11]` | 11 x 32 bytes | Sibling hashes through the 2048-leaf Merkle tree |
-| `RightOfTwig[3]` | 3 x 32 bytes | Sibling hashes through the ActiveBits tree |
 | `UpperPath[N]` | N x 32 bytes | Sibling hashes through the upper tree to root |
 | `SerialNum` | 8 bytes | The txnum being proven |
 | `Root` | 32 bytes | The tree root |
 
-Total proof size: `(16 + N) x 32` bytes where N = `log2(num_twigs)`. For 1 billion transactions (~10 years of Ethereum mainnet), N ~ 19, giving **~1120 bytes** per proof.
+Total proof size: `(13 + N) x 32` bytes where N = `log2(num_twigs)`. For 1 billion transactions (~10 years of Ethereum mainnet), N ~ 19, giving **~1024 bytes** per proof.
 
 Compare to hex patricia proofs which are typically 3-5 KB per proof due to RLP-encoded branch nodes.
 
