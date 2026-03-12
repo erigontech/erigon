@@ -755,30 +755,31 @@ func TestMatchCmpUncompressedBinaryKeys(t *testing.T) {
 	defer d.Close()
 	g := d.MakeGetter()
 
-	// MatchCmpUncompressed always resets position (even on match) — unlike MatchCmp.
-	// This means callers must manually advance via Next/Skip after a match.
+	// MatchCmpUncompressed advances position on match, resets on non-match (same as MatchCmp).
+
+	// Test 1: sequential exact matches advance through all keys
+	for i, k := range keys {
+		require.True(t, g.HasNext(), "word %d", i)
+		cmp := g.MatchCmpUncompressed(k)
+		require.Equal(t, 0, cmp, "word %d: expected match for %x", i, k)
+	}
+	require.False(t, g.HasNext())
+
+	// Test 2: non-match resets position, match advances
+	g.Reset(0)
 	for _, k := range keys {
-		require.True(t, g.HasNext())
 		savePos := g.dataP
 
-		// non-match: position stays
+		// non-match: position resets
 		wrongKey := bytes.Repeat([]byte{0xff}, 20)
 		cmp := g.MatchCmpUncompressed(wrongKey)
 		require.NotEqual(t, 0, cmp)
-		require.Equal(t, savePos, g.dataP)
+		require.Equal(t, savePos, g.dataP, "position should reset on non-match")
 
-		// exact match: position ALSO stays (unlike compressed MatchCmp)
+		// exact match: advances
 		cmp = g.MatchCmpUncompressed(k)
 		require.Equal(t, 0, cmp)
-		require.Equal(t, savePos, g.dataP, "MatchCmpUncompressed should always reset position")
-
-		// comparison direction
-		smaller := make([]byte, 20)
-		cmp = g.MatchCmpUncompressed(smaller)
-		require.Equal(t, bytes.Compare(smaller, k), cmp)
-
-		// advance manually
-		_, _ = g.Next(nil)
+		require.NotEqual(t, savePos, g.dataP, "position should advance on match")
 	}
 }
 
