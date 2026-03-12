@@ -329,9 +329,13 @@ func (qt *Tracker) UnwindTo(toSN uint64) {
 // Call this after NewTracker when the snapDir already contains data from a
 // previous run, before calling GetWitness or SyncRoot.
 //
-// Strategy: replay all entries through an in-memory-only tree (nil storage,
-// so no data is re-written to disk), then swap in the real disk handles and
-// call SyncRoot to build the upper-tree node cache.
+// Strategy: truncate the twig file to 0 and rebuild it by replaying all entries
+// from the entry file with correctly-chained leaf hashes. The entry file is the
+// authoritative source of truth (storing raw component triplets); the twig file
+// is a derived structure that must be rebuilt to ensure the twig Merkle trees
+// reflect the correct prevLeaf chain. This handles the case where a prior run
+// was killed mid-twig and restarted without LoadFromDisk (causing the twig file
+// to be written with a reset prevLeaf=0).
 func (qt *Tracker) LoadFromDisk() error {
 	if qt.entryFile == nil {
 		return nil // in-memory only, nothing to load
@@ -345,8 +349,19 @@ func (qt *Tracker) LoadFromDisk() error {
 	}
 	count := uint64(fileSize) / uint64(entrySize)
 
-	// Build a fresh in-memory replay tree (nil storage avoids re-writing files).
-	replayTree := NewTree(qt.hasher, 0, nil, nil)
+	// Truncate the twig file so we rebuild it from scratch with correct leaf hashes.
+	// The entry file stores the authoritative (pre, stateChange, transition) triplets;
+	// the twig file is derived from them and must match the correctly-chained leaf hashes.
+	if qt.twigFile != nil {
+		if err := qt.twigFile.Truncate(0); err != nil {
+			return fmt.Errorf("qmtree LoadFromDisk: truncate twig file: %w", err)
+		}
+	}
+
+	// Build a replay tree with nil entry storage (entries are already on disk;
+	// don't re-append them) and real twig storage so completed twigs are written
+	// to disk with the correctly-computed leaf hashes.
+	replayTree := NewTree(qt.hasher, 0, nil, qt.twigFile)
 
 	var prevLeaf common.Hash
 	leafData := make(map[uint64]LeafData, count)
@@ -370,17 +385,15 @@ func (qt *Tracker) LoadFromDisk() error {
 		prevLeaf = leafHash
 	}
 
-	// Attach the real disk handles to the replay tree, then call SyncAndRoot to
-	// flush newTwigMap → upperTree and compute the upper-tree node cache.
+	// Attach the real entry storage to the replay tree. The caller is responsible
+	// for calling SyncRoot() which will trigger the first (and only) SyncAndRoot
+	// call to build the upper-tree node cache.
 	replayTree.entryStorage = qt.tree.entryStorage
-	replayTree.twigStorage = qt.tree.twigStorage
 
 	qt.tree = replayTree
 	qt.leafData = leafData
 	qt.prevLeaf = prevLeaf
 	qt.NextSN = count
-
-	qt.tree.SyncAndRoot(qt.hasher) // builds upper tree; discard root here
 
 	log.Info("qmtree: loaded from disk",
 		"entries", count,
