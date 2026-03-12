@@ -33,6 +33,7 @@ jobs:
       minor: ${{ steps.parse.outputs.minor }}
       patch: ${{ steps.parse.outputs.patch }}
       docs_branch: ${{ steps.parse.outputs.docs_branch }}
+      release_name: ${{ steps.parse.outputs.release_name }}
 
     steps:
       - name: Parse version and detect pre-releases
@@ -54,13 +55,41 @@ jobs:
           PATCH=$(echo "${VERSION}" | cut -d. -f3)
           DOCS_BRANCH="docs/v${MAJOR}.${MINOR}"
 
-          echo "major=${MAJOR}"       >> "$GITHUB_OUTPUT"
-          echo "minor=${MINOR}"       >> "$GITHUB_OUTPUT"
-          echo "patch=${PATCH}"       >> "$GITHUB_OUTPUT"
-          echo "docs_branch=${DOCS_BRANCH}" >> "$GITHUB_OUTPUT"
-          echo "skip=false"           >> "$GITHUB_OUTPUT"
+          # Release names indexed by minor version (v3.0 = index 0 = Otterly Odyssey, v3.1 = Pebble Paws, ...)
+          RELEASE_NAMES=(
+            "Otterly Odyssey"     # v?.0
+            "Pebble Paws"         # v?.1
+            "Quirky Quests"       # v?.2
+            "Rocky Romp"          # v?.3
+            "Splashing Saga"      # v?.4
+            "Tidal Tails"         # v?.5
+            "Upstream Underbelly" # v?.6
+            "Velvet Vibrissae"    # v?.7
+            "Watery Whiskers"     # v?.8
+            "Xenial Xyloid"       # v?.9
+            "Yawning Yard"        # v?.10
+            "Zippy Zebrawood"     # v?.11
+            "Alder Abode"         # v?.12
+            "Brook Bank"          # v?.13
+            "Coastal Cove"        # v?.14
+            "Dewy Driftwood"      # v?.15
+            "Eddying Estuary"     # v?.16
+            "Fluffy Fur"          # v?.17
+          )
+          RELEASE_NAME="${RELEASE_NAMES[$MINOR]:-}"
 
-          echo "Parsed: ${MAJOR}.${MINOR}.${PATCH}  →  branch: ${DOCS_BRANCH}"
+          echo "major=${MAJOR}"             >> "$GITHUB_OUTPUT"
+          echo "minor=${MINOR}"             >> "$GITHUB_OUTPUT"
+          echo "patch=${PATCH}"             >> "$GITHUB_OUTPUT"
+          echo "docs_branch=${DOCS_BRANCH}" >> "$GITHUB_OUTPUT"
+          echo "release_name=${RELEASE_NAME}" >> "$GITHUB_OUTPUT"
+          echo "skip=false"                 >> "$GITHUB_OUTPUT"
+
+          if [ -n "${RELEASE_NAME}" ]; then
+            echo "Parsed: ${MAJOR}.${MINOR}.${PATCH}  →  branch: ${DOCS_BRANCH}  →  \"${RELEASE_NAME}\""
+          else
+            echo "Parsed: ${MAJOR}.${MINOR}.${PATCH}  →  branch: ${DOCS_BRANCH}  (no release name for minor=${MINOR})"
+          fi
 
       - name: Checkout repository at ${{ inputs.release_version }}
         if: ${{ steps.parse.outputs.skip == 'false' }}
@@ -98,8 +127,13 @@ jobs:
           MAJOR: ${{ needs.update-docs-branch.outputs.major }}
           MINOR: ${{ needs.update-docs-branch.outputs.minor }}
           DOCS_BRANCH: ${{ needs.update-docs-branch.outputs.docs_branch }}
+          RELEASE_NAME: ${{ needs.update-docs-branch.outputs.release_name }}
         run: |
-          VARIANT_TITLE="v${MAJOR}.${MINOR}"
+          if [ -n "${RELEASE_NAME}" ]; then
+            VARIANT_TITLE="v${MAJOR}.${MINOR} – ${RELEASE_NAME}"
+          else
+            VARIANT_TITLE="v${MAJOR}.${MINOR}"
+          fi
 
           echo "Creating Gitbook variant '${VARIANT_TITLE}' linked to branch '${DOCS_BRANCH}' ..."
 
