@@ -319,8 +319,6 @@ func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.
 	}
 }
 func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine rules.Engine, blockReader services.FullBlockReader) error {
-	log.Warn("[dbg] blocks read-ahead", "blockNum", blockNum)
-
 	block, err := blockReader.BlockByNumber(ctx, tx, blockNum)
 	if err != nil {
 		return err
