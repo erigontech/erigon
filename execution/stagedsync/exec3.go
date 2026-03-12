@@ -217,7 +217,6 @@ func ExecV3(ctx context.Context,
 	// can't use OS-level ReadAhead - because Data >> RAM
 	// it also warmsup state a bit - by touching senders/coninbase accounts and code
 	if isApplyingBlocks {
-		log.Warn("[dbg] blocks read-ahead")
 		var clean func()
 
 		readAhead, clean = exec.BlocksReadAhead(ctx, 2, cfg.db, cfg.engine, cfg.blockReader)
