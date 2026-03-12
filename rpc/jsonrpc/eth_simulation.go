@@ -82,7 +82,6 @@ type CallResult struct {
 	ReturnData string          `json:"returnData"`
 	Logs       []*types.RPCLog `json:"logs"`
 	GasUsed    hexutil.Uint64  `json:"gasUsed"`
-	MaxUsedGas hexutil.Uint64  `json:"maxUsedGas"`
 	Status     hexutil.Uint64  `json:"status"`
 	Error      any             `json:"error,omitempty"`
 }
@@ -717,7 +716,7 @@ func (s *simulator) simulateCall(
 		logs = receipt.Logs
 	}
 
-	callResult := CallResult{GasUsed: hexutil.Uint64(result.ReceiptGasUsed), MaxUsedGas: hexutil.Uint64(result.MaxGasUsed)}
+	callResult := CallResult{GasUsed: hexutil.Uint64(result.ReceiptGasUsed)}
 	callResult.Logs = make([]*types.RPCLog, 0, len(logs))
 	for _, l := range logs {
 		rpcLog := &types.RPCLog{
