@@ -257,6 +257,19 @@ func TestSetupGenesis(t *testing.T) {
 			wantConfig: customg.Config,
 		},
 		{
+			// Reproduces the hive EEST consume-rlp scenario:
+			// 1. `erigon init genesis.json` writes a custom genesis + config
+			// 2. `erigon --import` reopens the DB with genesis=nil, chainName="mainnet" (default)
+			// The custom config must be preserved, not overwritten with mainnet's.
+			name: "custom block in DB, genesis == nil, chainName mainnet",
+			fn: func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error) {
+				genesiswrite.MustCommitGenesis(&customg, db, datadir.New(tmpdir), logger)
+				return genesiswrite.CommitGenesisBlock(db, nil, networkname.Mainnet, datadir.New(tmpdir), logger)
+			},
+			wantHash:   customghash,
+			wantConfig: customg.Config,
+		},
+		{
 			name: "custom block in DB, genesis == sepolia",
 			fn: func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error) {
 				genesiswrite.MustCommitGenesis(&customg, db, datadir.New(tmpdir), logger)
