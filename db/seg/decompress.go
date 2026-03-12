@@ -1255,11 +1255,11 @@ func (g *Getter) MatchPrefixUncompressed(prefix []byte) bool {
 	wordLen := g.nextPosClean()
 	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
 	prefixLen := len(prefix)
-	if wordLen == 0 && prefixLen != 0 {
-		return true
+	if wordLen == 0 {
+		return prefixLen == 0 // empty word only matches empty prefix
 	}
 	if prefixLen == 0 {
-		return false
+		return true // empty prefix matches any word
 	}
 
 	g.nextPosClean()
