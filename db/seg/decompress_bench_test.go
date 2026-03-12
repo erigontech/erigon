@@ -92,9 +92,9 @@ func BenchmarkDecompressSkip(b *testing.B) {
 	//})
 }
 
-// prepareBinaryDict creates a compressed file with sorted binary keys (like storage keys).
-// Keys have common prefixes to trigger real huffman compression.
-func prepareBinaryDict(b testing.TB, keyCount int, keySize int) *Decompressor {
+// prepareBinaryDict creates a file with sorted binary keys (like storage keys).
+// If compressed is true, keys are added with AddWord (huffman); otherwise AddUncompressedWord.
+func prepareBinaryDict(b testing.TB, keyCount int, keySize int, compressed bool) *Decompressor {
 	b.Helper()
 	logger := log.New()
 	tmpDir := b.TempDir()
@@ -109,7 +109,6 @@ func prepareBinaryDict(b testing.TB, keyCount int, keySize int) *Decompressor {
 	keys := make([][]byte, keyCount)
 	for i := range keys {
 		k := make([]byte, keySize)
-		// Common 4-byte prefix (simulates contract address prefix) + random suffix
 		binary.BigEndian.PutUint32(k[:4], uint32(i%16))
 		rng.Read(k[4:])
 		binary.BigEndian.PutUint64(k[keySize-8:], uint64(i))
@@ -118,7 +117,11 @@ func prepareBinaryDict(b testing.TB, keyCount int, keySize int) *Decompressor {
 	sort.Slice(keys, func(i, j int) bool { return string(keys[i]) < string(keys[j]) })
 
 	for _, k := range keys {
-		require.NoError(b, c.AddWord(k))
+		if compressed {
+			require.NoError(b, c.AddWord(k))
+		} else {
+			require.NoError(b, c.AddUncompressedWord(k))
+		}
 	}
 	require.NoError(b, c.Compress())
 	c.Close()
@@ -132,7 +135,7 @@ func prepareBinaryDict(b testing.TB, keyCount int, keySize int) *Decompressor {
 func BenchmarkMatchCmp(b *testing.B) {
 	const keyCount = 50_000
 	const keySize = 52
-	d := prepareBinaryDict(b, keyCount, keySize)
+	d := prepareBinaryDict(b, keyCount, keySize, true)
 	defer d.Close()
 
 	// Collect all words and offsets
@@ -201,44 +204,10 @@ func BenchmarkMatchCmp(b *testing.B) {
 	})
 }
 
-// prepareBinaryDictUncompressed creates a file with sorted binary keys added as uncompressed words.
-func prepareBinaryDictUncompressed(b testing.TB, keyCount int, keySize int) *Decompressor {
-	b.Helper()
-	logger := log.New()
-	tmpDir := b.TempDir()
-	file := filepath.Join(tmpDir, "binkeys_uncomp")
-	cfg := DefaultCfg
-	cfg.MinPatternScore = 1
-	cfg.Workers = 2
-	c, err := NewCompressor(context.Background(), b.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
-	require.NoError(b, err)
-
-	rng := rand.New(rand.NewSource(42))
-	keys := make([][]byte, keyCount)
-	for i := range keys {
-		k := make([]byte, keySize)
-		binary.BigEndian.PutUint32(k[:4], uint32(i%16))
-		rng.Read(k[4:])
-		binary.BigEndian.PutUint64(k[keySize-8:], uint64(i))
-		keys[i] = k
-	}
-	sort.Slice(keys, func(i, j int) bool { return string(keys[i]) < string(keys[j]) })
-
-	for _, k := range keys {
-		require.NoError(b, c.AddUncompressedWord(k))
-	}
-	require.NoError(b, c.Compress())
-	c.Close()
-
-	d, err := NewDecompressor(file)
-	require.NoError(b, err)
-	return d
-}
-
 func BenchmarkMatchCmpUncompressed(b *testing.B) {
 	const keyCount = 50_000
 	const keySize = 52
-	d := prepareBinaryDictUncompressed(b, keyCount, keySize)
+	d := prepareBinaryDict(b, keyCount, keySize, false)
 	defer d.Close()
 
 	g := d.MakeGetter()
