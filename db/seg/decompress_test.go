@@ -630,6 +630,197 @@ func prepareRandomDict(t *testing.T) (d *Decompressor, WORDS [N][]byte, WORD_FLA
 	return d, WORDS, WORD_FLAGS, INPUT_FLAGS
 }
 
+// TestMatchCmpCompressedBinaryKeys tests MatchCmp with binary keys similar to real storage keys.
+// Verifies comparison direction, offset advancement on match, and reset on non-match.
+func TestMatchCmpCompressedBinaryKeys(t *testing.T) {
+	logger := log.New()
+	tmpDir := t.TempDir()
+	file := filepath.Join(tmpDir, "binkeys")
+	cfg := DefaultCfg
+	cfg.MinPatternScore = 1
+	cfg.Workers = 2
+	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	require.NoError(t, err)
+
+	// Generate sorted binary keys (20 bytes, like address hashes)
+	keys := make([][]byte, 200)
+	for i := range keys {
+		k := make([]byte, 20)
+		binary.BigEndian.PutUint64(k[12:], uint64(i*37)) // sorted by suffix
+		k[0] = byte(i / 256)
+		k[1] = byte(i % 256)
+		keys[i] = k
+	}
+	slices.SortFunc(keys, bytes.Compare)
+
+	for _, k := range keys {
+		require.NoError(t, c.AddWord(k))
+	}
+	require.NoError(t, c.Compress())
+	c.Close()
+
+	d, err := NewDecompressor(file)
+	require.NoError(t, err)
+	defer d.Close()
+	g := d.MakeGetter()
+
+	// Test 1: exact match advances position
+	for i, k := range keys {
+		require.True(t, g.HasNext(), "word %d", i)
+		cmp := g.MatchCmp(k)
+		require.Equal(t, 0, cmp, "word %d: expected match for %x", i, k)
+	}
+	require.False(t, g.HasNext())
+
+	// Test 2: non-match does NOT advance position
+	g.Reset(0)
+	savePos := g.dataP
+	wrongKey := make([]byte, 20)
+	wrongKey[0] = 0xff // greater than any key
+	cmp := g.MatchCmp(wrongKey)
+	require.NotEqual(t, 0, cmp)
+	require.Equal(t, savePos, g.dataP, "position should reset on non-match")
+
+	// Test 3: comparison direction correctness
+	g.Reset(0)
+	for _, k := range keys {
+		savePos := g.dataP
+
+		// buf < word: build a key strictly smaller than k
+		smaller := make([]byte, len(k))
+		copy(smaller, k)
+		smaller[len(smaller)-1] = 0
+		if bytes.Compare(smaller, k) >= 0 {
+			// k itself ends with 0, use a shorter key
+			smaller = k[:len(k)-1]
+		}
+		if bytes.Compare(smaller, k) < 0 {
+			cmp = g.MatchCmp(smaller)
+			require.Equal(t, -1, cmp, "expected buf < word for key %x vs %x", smaller, k)
+			require.Equal(t, savePos, g.dataP, "position should reset on non-match")
+		}
+
+		// buf > word: build a key strictly greater than k
+		bigger := make([]byte, len(k))
+		copy(bigger, k)
+		bigger[len(bigger)-1] = 0xff
+		if bytes.Compare(bigger, k) <= 0 {
+			bigger = append(k, 0xff)
+		}
+		cmp = g.MatchCmp(bigger)
+		require.Equal(t, 1, cmp, "expected buf > word for key %x vs %x", bigger, k)
+		require.Equal(t, savePos, g.dataP, "position should reset on non-match")
+
+		// exact match → advances
+		cmp = g.MatchCmp(k)
+		require.Equal(t, 0, cmp, "expected exact match for key %x", k)
+	}
+
+	// Test 4: prefix of key should not match
+	g.Reset(0)
+	prefix := keys[0][:10]
+	cmp = g.MatchCmp(prefix)
+	require.NotEqual(t, 0, cmp, "prefix should not match full key")
+}
+
+// TestMatchCmpUncompressedBinaryKeys tests MatchCmpUncompressed directly with binary keys.
+func TestMatchCmpUncompressedBinaryKeys(t *testing.T) {
+	logger := log.New()
+	tmpDir := t.TempDir()
+	file := filepath.Join(tmpDir, "binkeys_uncomp")
+	cfg := DefaultCfg
+	cfg.MinPatternScore = 1
+	cfg.Workers = 2
+	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	require.NoError(t, err)
+
+	keys := make([][]byte, 200)
+	for i := range keys {
+		k := make([]byte, 20)
+		binary.BigEndian.PutUint64(k[12:], uint64(i*37))
+		k[0] = byte(i / 256)
+		k[1] = byte(i % 256)
+		keys[i] = k
+	}
+	slices.SortFunc(keys, bytes.Compare)
+
+	for _, k := range keys {
+		require.NoError(t, c.AddUncompressedWord(k))
+	}
+	require.NoError(t, c.Compress())
+	c.Close()
+
+	d, err := NewDecompressor(file)
+	require.NoError(t, err)
+	defer d.Close()
+	g := d.MakeGetter()
+
+	// MatchCmpUncompressed always resets position (even on match) — unlike MatchCmp.
+	// This means callers must manually advance via Next/Skip after a match.
+	for _, k := range keys {
+		require.True(t, g.HasNext())
+		savePos := g.dataP
+
+		// non-match: position stays
+		wrongKey := bytes.Repeat([]byte{0xff}, 20)
+		cmp := g.MatchCmpUncompressed(wrongKey)
+		require.NotEqual(t, 0, cmp)
+		require.Equal(t, savePos, g.dataP)
+
+		// exact match: position ALSO stays (unlike compressed MatchCmp)
+		cmp = g.MatchCmpUncompressed(k)
+		require.Equal(t, 0, cmp)
+		require.Equal(t, savePos, g.dataP, "MatchCmpUncompressed should always reset position")
+
+		// comparison direction
+		smaller := make([]byte, 20)
+		cmp = g.MatchCmpUncompressed(smaller)
+		require.Equal(t, bytes.Compare(smaller, k), cmp)
+
+		// advance manually
+		_, _ = g.Next(nil)
+	}
+}
+
+// TestMatchCmpEmptyAndNil tests MatchCmp edge cases with empty and nil inputs on compressed data.
+func TestMatchCmpEmptyAndNil(t *testing.T) {
+	logger := log.New()
+	tmpDir := t.TempDir()
+	file := filepath.Join(tmpDir, "empty_nil")
+	cfg := DefaultCfg
+	cfg.MinPatternScore = 1
+	cfg.Workers = 2
+	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	require.NoError(t, err)
+
+	// Write: nil, empty, short, empty, nil
+	require.NoError(t, c.AddWord(nil))
+	require.NoError(t, c.AddWord([]byte{}))
+	require.NoError(t, c.AddWord([]byte{0x01}))
+	require.NoError(t, c.AddWord([]byte{}))
+	require.NoError(t, c.AddWord(nil))
+	require.NoError(t, c.Compress())
+	c.Close()
+
+	d, err := NewDecompressor(file)
+	require.NoError(t, err)
+	defer d.Close()
+	g := d.MakeGetter()
+
+	// word[0] = nil/empty → MatchCmp(nil) and MatchCmp([]byte{}) should both match
+	require.Equal(t, 0, g.MatchCmp(nil))          // advances
+	require.Equal(t, 0, g.MatchCmp([]byte{}))     // word[1] = empty, advances
+	require.Equal(t, 0, g.MatchCmp([]byte{0x01})) // word[2], advances
+	require.Equal(t, 0, g.MatchCmp([]byte{}))     // word[3] = empty, advances
+	require.Equal(t, 0, g.MatchCmp(nil))          // word[4] = nil, advances
+	require.False(t, g.HasNext())
+
+	// Non-empty vs empty word
+	g.Reset(0)
+	cmp := g.MatchCmp([]byte{0x01})
+	require.Equal(t, 1, cmp, "non-empty buf vs empty word should return 1 (buf > word)")
+}
+
 func TestDecompressRandomMatchCmp(t *testing.T) {
 	d, WORDS, _, INPUT_FLAGS := prepareRandomDict(t)
 	defer d.Close()
