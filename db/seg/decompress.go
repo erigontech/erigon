@@ -1269,23 +1269,35 @@ func (g *Getter) MatchPrefixUncompressed(prefix []byte) bool {
 
 func (g *Getter) MatchCmpUncompressed(buf []byte) int {
 	savePos := g.dataP
-	defer func() {
-		g.dataP, g.dataBit = savePos, 0
-	}()
-
 	wordLen := g.nextPosClean()
 	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
 	bufLen := len(buf)
 	if wordLen == 0 && bufLen != 0 {
+		g.dataP, g.dataBit = savePos, 0
 		return 1
 	}
+	if wordLen == 0 && bufLen == 0 {
+		if g.dataBit > 0 {
+			g.dataP++
+			g.dataBit = 0
+		}
+		return 0
+	}
 	if bufLen == 0 {
+		g.dataP, g.dataBit = savePos, 0
 		return -1
 	}
 
 	g.nextPosClean()
 
-	return bytes.Compare(buf, g.data[g.dataP:g.dataP+wordLen])
+	cmp := bytes.Compare(buf, g.data[g.dataP:g.dataP+wordLen])
+	if cmp == 0 {
+		g.dataP += wordLen // advance past the word on match
+		g.dataBit = 0
+	} else {
+		g.dataP, g.dataBit = savePos, 0
+	}
+	return cmp
 }
 
 // BinarySearch - !expecting sorted file - does Seek `g` to key which >= `fromPrefix` by using BinarySearch - means unoptimal and touching many places in file
