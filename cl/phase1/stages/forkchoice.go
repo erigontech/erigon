@@ -103,8 +103,9 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 	}
 
 	oldCanonical := common.Hash{}
-	for i := currentSlot - 1; i > 0; i-- {
-		oldCanonical, err = beacon_indicies.ReadCanonicalBlockRoot(tx, i)
+	// Guard against uint64 underflow: currentSlot=0 → currentSlot-1 = MaxUint64 → infinite loop.
+	for i := currentSlot; i > 1; i-- {
+		oldCanonical, err = beacon_indicies.ReadCanonicalBlockRoot(tx, i-1)
 		if err != nil {
 			return fmt.Errorf("failed to read canonical block root: %w", err)
 		}

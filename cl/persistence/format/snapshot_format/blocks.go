@@ -114,6 +114,10 @@ func ReadBlockFromSnapshot(r io.Reader, executionReader ExecutionBlockReaderByNu
 	if v <= clparams.AltairVersion {
 		return blindedBlock.Full(nil, nil), nil
 	}
+	// No execution reader: return with nil txs/withdrawals (sufficient for block parent lookup).
+	if executionReader == nil {
+		return blindedBlock.Full(nil, nil), nil
+	}
 	blockNumber := blindedBlock.Block.Body.ExecutionPayload.BlockNumber
 	blockHash := blindedBlock.Block.Body.ExecutionPayload.BlockHash
 	txs, err := executionReader.Transactions(blockNumber, blockHash)

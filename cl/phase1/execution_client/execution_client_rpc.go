@@ -275,7 +275,7 @@ func (cc *ExecutionClientRpc) HasBlock(ctx context.Context, hash common.Hash) (b
 
 // Block production
 
-func (cc *ExecutionClientRpc) GetAssembledBlock(ctx context.Context, id []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+func (cc *ExecutionClientRpc) GetAssembledBlock(ctx context.Context, id []byte, _ clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	panic("unimplemented")
 }
 

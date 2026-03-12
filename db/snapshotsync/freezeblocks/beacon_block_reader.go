@@ -198,9 +198,6 @@ func (r *beaconSnapshotReader) ReadBlindedBlockBySlot(ctx context.Context, tx kv
 }
 
 func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, root common.Hash) (*cltypes.SignedBeaconBlock, error) {
-	if r.eth1Getter == nil {
-		return nil, nil
-	}
 	view := r.sn.View()
 	defer view.Close()
 
@@ -213,7 +210,8 @@ func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, ro
 	}
 
 	var buf []byte
-	if *slot > r.sn.BlocksAvailable() {
+	// When no snapshots are available (BlocksAvailable==0) or slot exceeds snapshot range, read from DB.
+	if r.sn.BlocksAvailable() == 0 || *slot > r.sn.BlocksAvailable() {
 		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
 		if err != nil {
 			return nil, err

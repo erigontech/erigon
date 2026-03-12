@@ -105,6 +105,9 @@ type ForkChoiceStore struct {
 	forkGraph            fork_graph.ForkGraph
 	blobStorage          blob_storage.BlobStorage
 	peerDas              das.PeerDas
+	// Per-block unrealized checkpoints (spec: store.unrealized_justifications)
+	unrealizedJustifications sync.Map // blockRoot -> solid.Checkpoint
+	unrealizedFinalizations  sync.Map // blockRoot -> solid.Checkpoint
 	// I use the cache due to the convenient auto-cleanup feauture.
 	checkpointStates   sync.Map // We keep ssz snappy of it as the full beacon state is full of rendundant data.
 	publicKeysRegistry public_keys_registry.PublicKeyRegistry
@@ -354,6 +357,24 @@ func (f *ForkChoiceStore) JustifiedCheckpoint() solid.Checkpoint {
 // FinalizedCheckpoint returns justified checkpoint
 func (f *ForkChoiceStore) JustifiedSlot() uint64 {
 	return f.computeStartSlotAtEpoch(f.justifiedCheckpoint.Load().(solid.Checkpoint).Epoch)
+}
+
+// getUnrealizedJustification returns the per-block unrealized justified checkpoint
+// (spec: store.unrealized_justifications[block_root])
+func (f *ForkChoiceStore) getUnrealizedJustification(blockRoot common.Hash) (solid.Checkpoint, bool) {
+	obj, ok := f.unrealizedJustifications.Load(blockRoot)
+	if !ok {
+		return solid.Checkpoint{}, false
+	}
+	return obj.(solid.Checkpoint), true
+}
+
+func (f *ForkChoiceStore) getUnrealizedFinalization(blockRoot common.Hash) (solid.Checkpoint, bool) {
+	obj, ok := f.unrealizedFinalizations.Load(blockRoot)
+	if !ok {
+		return solid.Checkpoint{}, false
+	}
+	return obj.(solid.Checkpoint), true
 }
 
 // FinalizedCheckpoint returns justified checkpoint

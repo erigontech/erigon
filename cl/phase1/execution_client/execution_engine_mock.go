@@ -14,6 +14,7 @@ import (
 	big "math/big"
 	reflect "reflect"
 
+	clparams "github.com/erigontech/erigon/cl/clparams"
 	cltypes "github.com/erigontech/erigon/cl/cltypes"
 	common "github.com/erigontech/erigon/common"
 	hexutil "github.com/erigontech/erigon/common/hexutil"
@@ -164,9 +165,9 @@ func (c *MockExecutionEngineFrozenBlocksCall) DoAndReturn(f func(context.Context
 }
 
 // GetAssembledBlock mocks base method.
-func (m *MockExecutionEngine) GetAssembledBlock(ctx context.Context, id []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+func (m *MockExecutionEngine) GetAssembledBlock(ctx context.Context, id []byte, version clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetAssembledBlock", ctx, id)
+	ret := m.ctrl.Call(m, "GetAssembledBlock", ctx, id, version)
 	ret0, _ := ret[0].(*cltypes.Eth1Block)
 	ret1, _ := ret[1].(*engine_types.BlobsBundle)
 	ret2, _ := ret[2].(*typesproto.RequestsBundle)
@@ -176,9 +177,9 @@ func (m *MockExecutionEngine) GetAssembledBlock(ctx context.Context, id []byte) 
 }
 
 // GetAssembledBlock indicates an expected call of GetAssembledBlock.
-func (mr *MockExecutionEngineMockRecorder) GetAssembledBlock(ctx, id any) *MockExecutionEngineGetAssembledBlockCall {
+func (mr *MockExecutionEngineMockRecorder) GetAssembledBlock(ctx, id, version any) *MockExecutionEngineGetAssembledBlockCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAssembledBlock", reflect.TypeOf((*MockExecutionEngine)(nil).GetAssembledBlock), ctx, id)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAssembledBlock", reflect.TypeOf((*MockExecutionEngine)(nil).GetAssembledBlock), ctx, id, version)
 	return &MockExecutionEngineGetAssembledBlockCall{Call: call}
 }
 
@@ -194,13 +195,13 @@ func (c *MockExecutionEngineGetAssembledBlockCall) Return(arg0 *cltypes.Eth1Bloc
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockExecutionEngineGetAssembledBlockCall) Do(f func(context.Context, []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error)) *MockExecutionEngineGetAssembledBlockCall {
+func (c *MockExecutionEngineGetAssembledBlockCall) Do(f func(context.Context, []byte, clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error)) *MockExecutionEngineGetAssembledBlockCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockExecutionEngineGetAssembledBlockCall) DoAndReturn(f func(context.Context, []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error)) *MockExecutionEngineGetAssembledBlockCall {
+func (c *MockExecutionEngineGetAssembledBlockCall) DoAndReturn(f func(context.Context, []byte, clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error)) *MockExecutionEngineGetAssembledBlockCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

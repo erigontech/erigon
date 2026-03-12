@@ -150,7 +150,7 @@ func (cc *ExecutionClientEngine) NewPayload(
 		payloadStatus, err = cc.engine.NewPayloadV2(ctx, request)
 	case clparams.DenebVersion:
 		payloadStatus, err = cc.engine.NewPayloadV3(ctx, request, versionedHashes, beaconParentRoot)
-	case clparams.ElectraVersion:
+	case clparams.ElectraVersion, clparams.FuluVersion:
 		payloadStatus, err = cc.engine.NewPayloadV4(ctx, request, versionedHashes, beaconParentRoot, executionRequestsList)
 	default:
 		return PayloadStatusNone, fmt.Errorf("unsupported payload version: %d", payload.Version())
@@ -298,16 +298,83 @@ func (cc *ExecutionClientEngine) HasBlock(ctx context.Context, hash common.Hash)
 	return header != nil, nil
 }
 
-func (cc *ExecutionClientEngine) GetAssembledBlock(ctx context.Context, id []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+func (cc *ExecutionClientEngine) GetAssembledBlock(ctx context.Context, id []byte, version clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	if cc.isLocal() {
 		return cc.chainRW.GetAssembledBlock(binary.LittleEndian.Uint64(id))
 	}
+
+	// Select Engine API version based on CL state version.
+	switch {
+	case version >= clparams.FuluVersion:
+		return cc.getAssembledBlockV5(ctx, id)
+	case version >= clparams.ElectraVersion:
+		return cc.getAssembledBlockV4(ctx, id)
+	default:
+		return cc.getAssembledBlockV3(ctx, id)
+	}
+}
+
+func (cc *ExecutionClientEngine) getAssembledBlockV3(ctx context.Context, id []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+	resp, err := cc.engine.GetPayloadV3(ctx, hexutil.Bytes(id))
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("engine GetPayloadV3 failed: %w", err)
+	}
+	if resp.ExecutionPayload == nil {
+		return nil, nil, nil, nil, errors.New("GetPayloadV3 returned nil execution payload")
+	}
+
+	block, err := executionPayloadToEth1Block(resp.ExecutionPayload)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+
+	var blockValue *big.Int
+	if resp.BlockValue != nil {
+		blockValue = resp.BlockValue.ToInt()
+	}
+
+	return block, resp.BlobsBundle, nil, blockValue, nil
+}
+
+func (cc *ExecutionClientEngine) getAssembledBlockV4(ctx context.Context, id []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	resp, err := cc.engine.GetPayloadV4(ctx, hexutil.Bytes(id))
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("engine GetPayloadV4 failed: %w", err)
 	}
 	if resp.ExecutionPayload == nil {
 		return nil, nil, nil, nil, errors.New("GetPayloadV4 returned nil execution payload")
+	}
+
+	block, err := executionPayloadToEth1Block(resp.ExecutionPayload)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+
+	var blockValue *big.Int
+	if resp.BlockValue != nil {
+		blockValue = resp.BlockValue.ToInt()
+	}
+
+	var requestsBundle *typesproto.RequestsBundle
+	if len(resp.ExecutionRequests) > 0 {
+		requestsBundle = &typesproto.RequestsBundle{
+			Requests: make([][]byte, len(resp.ExecutionRequests)),
+		}
+		for i, req := range resp.ExecutionRequests {
+			requestsBundle.Requests[i] = req
+		}
+	}
+
+	return block, resp.BlobsBundle, requestsBundle, blockValue, nil
+}
+
+func (cc *ExecutionClientEngine) getAssembledBlockV5(ctx context.Context, id []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+	resp, err := cc.engine.GetPayloadV5(ctx, hexutil.Bytes(id))
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("engine GetPayloadV5 failed: %w", err)
+	}
+	if resp.ExecutionPayload == nil {
+		return nil, nil, nil, nil, errors.New("GetPayloadV5 returned nil execution payload")
 	}
 
 	block, err := executionPayloadToEth1Block(resp.ExecutionPayload)
@@ -371,6 +438,26 @@ func executionPayloadToEth1Block(ep *engine_types.ExecutionPayload) (*cltypes.Et
 	}
 	if ep.ExcessBlobGas != nil {
 		block.ExcessBlobGas = uint64(*ep.ExcessBlobGas)
+	}
+
+	// Transactions
+	txBytes := make([][]byte, len(ep.Transactions))
+	for i, tx := range ep.Transactions {
+		txBytes[i] = tx
+	}
+	block.Transactions = solid.NewTransactionsSSZFromTransactions(txBytes)
+
+	// Withdrawals
+	if ep.Withdrawals != nil {
+		block.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](16, 44)
+		for _, w := range ep.Withdrawals {
+			block.Withdrawals.Append(&cltypes.Withdrawal{
+				Index:     w.Index,
+				Validator: w.Validator,
+				Address:   w.Address,
+				Amount:    w.Amount,
+			})
+		}
 	}
 
 	return block, nil
