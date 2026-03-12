@@ -1171,76 +1171,12 @@ func (g *Getter) MatchCmp(buf []byte) int {
 	var lastUncovered int
 	var bufPos int
 
-	if lenBuf >= int(wordLen) {
-		// Fast path: buf is at least as long as the word.
-		// No mid-loop length checks needed since bufPos and patEnd never exceed wordLen <= lenBuf.
-		for pos := g.nextPos(); pos != 0; pos = g.nextPos() {
-			bufPos += int(pos) - 1
-			if bufPos > lastUncovered {
-				dif := uint64(bufPos - lastUncovered)
-				if cmp := bytes.Compare(buf[lastUncovered:bufPos], g.data[postLoopPos:postLoopPos+dif]); cmp != 0 {
-					g.dataP, g.dataBit = savePos, 0
-					return cmp
-				}
-				postLoopPos += dif
-			}
-			pattern := g.nextPattern()
-			if cmp := bytes.Compare(buf[bufPos:bufPos+len(pattern)], pattern); cmp != 0 {
-				g.dataP, g.dataBit = savePos, 0
-				return cmp
-			}
-			lastUncovered = bufPos + len(pattern)
-		}
-		if int(wordLen) > lastUncovered {
-			dif := uint64(int(wordLen) - lastUncovered)
-			if cmp := bytes.Compare(buf[lastUncovered:int(wordLen)], g.data[postLoopPos:postLoopPos+dif]); cmp != 0 {
-				g.dataP, g.dataBit = savePos, 0
-				return cmp
-			}
-			postLoopPos += dif
-		}
-	} else {
-		// Slow path: buf is shorter than the word — need length checks at each segment.
-		for pos := g.nextPos(); pos != 0; pos = g.nextPos() {
-			bufPos += int(pos) - 1
-			if bufPos > lastUncovered {
-				dif := bufPos - lastUncovered
-				cmpLen := dif
-				if lastUncovered+cmpLen > lenBuf {
-					cmpLen = lenBuf - lastUncovered
-				}
-				if cmpLen > 0 {
-					if cmp := bytes.Compare(buf[lastUncovered:lastUncovered+cmpLen], g.data[postLoopPos:postLoopPos+uint64(cmpLen)]); cmp != 0 {
-						g.dataP, g.dataBit = savePos, 0
-						return cmp
-					}
-				}
-				if lenBuf < bufPos {
-					g.dataP, g.dataBit = savePos, 0
-					return -1
-				}
-				postLoopPos += uint64(dif)
-			}
-			pattern := g.nextPattern()
-			patEnd := bufPos + len(pattern)
-			cmpLen := len(pattern)
-			if bufPos+cmpLen > lenBuf {
-				cmpLen = lenBuf - bufPos
-			}
-			if cmpLen > 0 {
-				if cmp := bytes.Compare(buf[bufPos:bufPos+cmpLen], pattern[:cmpLen]); cmp != 0 {
-					g.dataP, g.dataBit = savePos, 0
-					return cmp
-				}
-			}
-			if lenBuf < patEnd {
-				g.dataP, g.dataBit = savePos, 0
-				return -1
-			}
-			lastUncovered = patEnd
-		}
-		if int(wordLen) > lastUncovered {
-			dif := int(wordLen) - lastUncovered
+	for pos := g.nextPos(); pos != 0; pos = g.nextPos() {
+		bufPos += int(pos) - 1
+
+		// Compare uncovered region [lastUncovered, bufPos)
+		if bufPos > lastUncovered {
+			dif := bufPos - lastUncovered
 			cmpLen := dif
 			if lastUncovered+cmpLen > lenBuf {
 				cmpLen = lenBuf - lastUncovered
@@ -1251,8 +1187,48 @@ func (g *Getter) MatchCmp(buf []byte) int {
 					return cmp
 				}
 			}
+			if lenBuf < bufPos {
+				g.dataP, g.dataBit = savePos, 0
+				return -1
+			}
 			postLoopPos += uint64(dif)
 		}
+
+		// Compare pattern region [bufPos, bufPos+len(pattern))
+		pattern := g.nextPattern()
+		patEnd := bufPos + len(pattern)
+		cmpLen := len(pattern)
+		if bufPos+cmpLen > lenBuf {
+			cmpLen = lenBuf - bufPos
+		}
+		if cmpLen > 0 {
+			if cmp := bytes.Compare(buf[bufPos:bufPos+cmpLen], pattern[:cmpLen]); cmp != 0 {
+				g.dataP, g.dataBit = savePos, 0
+				return cmp
+			}
+		}
+		if lenBuf < patEnd {
+			g.dataP, g.dataBit = savePos, 0
+			return -1
+		}
+
+		lastUncovered = patEnd
+	}
+
+	// Remaining uncovered after last pattern
+	if int(wordLen) > lastUncovered {
+		dif := int(wordLen) - lastUncovered
+		cmpLen := dif
+		if lastUncovered+cmpLen > lenBuf {
+			cmpLen = lenBuf - lastUncovered
+		}
+		if cmpLen > 0 {
+			if cmp := bytes.Compare(buf[lastUncovered:lastUncovered+cmpLen], g.data[postLoopPos:postLoopPos+uint64(cmpLen)]); cmp != 0 {
+				g.dataP, g.dataBit = savePos, 0
+				return cmp
+			}
+		}
+		postLoopPos += uint64(dif)
 	}
 
 	// All compared bytes equal — result depends on lengths
