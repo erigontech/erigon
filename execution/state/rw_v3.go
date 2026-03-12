@@ -17,14 +17,17 @@
 package state
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 
 	"github.com/holiman/uint256"
 	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -59,92 +62,170 @@ func (rs *StateV3) SetTrace(trace bool) {
 	rs.trace = trace
 }
 
-func (rs *StateV3) applyUpdates(roTx kv.TemporalTx, blockNum, txNum uint64, stateUpdates StateUpdates, balanceIncreases map[accounts.Address]uint256.Int, rules *chain.Rules) error {
+func (rs *StateV3) Domains() *execctx.SharedDomains {
+	return rs.domains
+}
+
+func (rs *StateV3) SetTxNum(txNum uint64) {
+	rs.txNum = txNum
+}
+
+// applyVersionedWrites applies a VersionedWrites slice directly to the shared
+// domains without any intermediate BTree representation.
+//
+// Writes from versionedWriteCollector carry complete account state (all fields
+// emitted by UpdateAccountData), so no domain reads are needed to reconstruct
+// the full serialised account. SelfDestructPath=true signals either:
+//   - pure account deletion (no account fields follow) — from DeleteAccount
+//   - code+storage cleanup before recreation — from UpdateAccountData when
+//     original.Incarnation > account.Incarnation (followed by account fields)
+func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint64, writes VersionedWrites, balanceIncreases map[accounts.Address]uint256.Int, rules *chain.Rules) error {
 	domains := rs.domains
-	if stateUpdates.BTreeG != nil {
-		var err error
-		stateUpdates.Scan(func(update *stateUpdate) bool {
-			if update.deleteAccount || (update.data != nil && update.originalIncarnation > update.data.Incarnation) {
-				if dbg.TraceApply && (rs.trace || dbg.TraceAccount(update.address.Handle())) {
-					fmt.Printf("%d apply:del code+storage: %x\n", blockNum, update.address)
-				}
-				//del, before create: to clanup code/storage
-				address := update.address.Value()
-				if err = domains.DomainDel(kv.CodeDomain, roTx, address[:], txNum, nil); err != nil {
-					return false
-				}
-				if err = domains.DomainDelPrefix(kv.StorageDomain, roTx, address[:], txNum); err != nil {
-					return false
-				}
+
+	if len(writes) > 0 {
+		type addrState struct {
+			balance      *uint256.Int
+			nonce        *uint64
+			incarnation  *uint64
+			codeHash     *accounts.CodeHash
+			code         []byte
+			selfDestruct bool
+			storage      []storageItem
+		}
+
+		perAddr := make(map[accounts.Address]*addrState, len(writes)/4+1)
+		for _, w := range writes {
+			if w.Val == nil {
+				continue
 			}
-
-			if update.bufferedAccount != nil {
-				if update.data != nil {
-					if dbg.TraceApply && (rs.trace || dbg.TraceAccount(update.address.Handle())) {
-						fmt.Printf("%d apply:put account: %x balance:%d,nonce:%d,codehash:%x\n", blockNum, update.address, &update.data.Balance, update.data.Nonce, update.data.CodeHash)
-					}
-					address := update.address.Value()
-					if err = domains.DomainPut(kv.AccountsDomain, roTx, address[:], accounts.SerialiseV3(update.data), txNum, nil); err != nil {
-						return false
-					}
-				}
-
-				if update.code != nil {
-					if dbg.TraceApply && (rs.trace || dbg.TraceAccount(update.address.Handle())) {
-						code := update.code
-						if len(code) > 40 {
-							code = code[:40]
-						}
-						fmt.Printf("%d apply:put code: %x %x\n", blockNum, update.address, code)
-					}
-					address := update.address.Value()
-					if err = domains.DomainPut(kv.CodeDomain, roTx, address[:], update.code, txNum, nil); err != nil {
-						return false
-					}
-				}
-
-				if update.storage != nil {
-					update.storage.Scan(func(i storageItem) bool {
-						address := update.address.Value()
-						key := i.key.Value()
-						composite := append(address[:], key[:]...)
-						v := i.value.Bytes()
-						if len(v) == 0 {
-							if dbg.TraceApply && (rs.trace || dbg.TraceAccount(update.address.Handle())) {
-								fmt.Printf("%d apply:del storage: %x q%x\n", blockNum, update.address, i.key)
-							}
-							if err = domains.DomainDel(kv.StorageDomain, roTx, composite, txNum, nil); err != nil {
-								return false
-							}
-						} else {
-							if dbg.TraceApply && (rs.trace || dbg.TraceAccount(update.address.Handle())) {
-								fmt.Printf("%d apply:put storage: %x %x %x\n", blockNum, update.address, i.key, &i.value)
-							}
-							if err = domains.DomainPut(kv.StorageDomain, roTx, composite, v, txNum, nil); err != nil {
-								return false
-							}
-						}
-						return true
-					})
-
-					if err != nil {
-						return false
-					}
-				}
-			} else if update.deleteAccount {
-				if dbg.TraceApply && (rs.trace || dbg.TraceAccount(update.address.Handle())) {
-					fmt.Printf("%d apply:del account: %x\n", blockNum, update.address)
-				}
-				address := update.address.Value()
-				if err = domains.DomainDel(kv.AccountsDomain, roTx, address[:], txNum, nil); err != nil {
-					return false
-				}
+			d := perAddr[w.Address]
+			if d == nil {
+				d = &addrState{}
+				perAddr[w.Address] = d
 			}
-			return true
+			switch w.Path {
+			case BalancePath:
+				v := w.Val.(uint256.Int)
+				d.balance = &v
+			case NoncePath:
+				v := w.Val.(uint64)
+				d.nonce = &v
+			case IncarnationPath:
+				v := w.Val.(uint64)
+				d.incarnation = &v
+			case CodeHashPath:
+				v := w.Val.(accounts.CodeHash)
+				d.codeHash = &v
+			case CodePath:
+				d.code = w.Val.([]byte)
+			case SelfDestructPath:
+				d.selfDestruct = w.Val.(bool)
+			case StoragePath:
+				d.storage = append(d.storage, storageItem{w.Key, w.Val.(uint256.Int)})
+			}
+		}
+
+		// Sort addresses before iterating so that trace output is deterministic.
+		// Domain writes are buffered into a sorted BTree by key, so order of
+		// iteration does not affect correctness — only debug reproducibility.
+		addrs := make([]accounts.Address, 0, len(perAddr))
+		for addr := range perAddr {
+			addrs = append(addrs, addr)
+		}
+		slices.SortFunc(addrs, func(a, b accounts.Address) int {
+			av, bv := a.Value(), b.Value()
+			return bytes.Compare(av[:], bv[:])
 		})
 
-		if err != nil {
-			return err
+		for _, addr := range addrs {
+			d := perAddr[addr]
+			address := addr.Value()
+
+			if d.selfDestruct {
+				if dbg.TraceApply && (rs.trace || dbg.TraceAccount(addr.Handle())) {
+					fmt.Printf("%d apply:del code+storage: %x\n", blockNum, addr)
+				}
+				if err := domains.DomainDel(kv.CodeDomain, roTx, address[:], txNum, nil); err != nil {
+					return err
+				}
+				if err := domains.DomainDelPrefix(kv.StorageDomain, roTx, address[:], txNum); err != nil {
+					return err
+				}
+				// Pure delete: no account fields means DeleteAccount was called.
+				if d.balance == nil && d.nonce == nil && d.incarnation == nil && d.codeHash == nil {
+					if dbg.TraceApply && (rs.trace || dbg.TraceAccount(addr.Handle())) {
+						fmt.Printf("%d apply:del account: %x\n", blockNum, addr)
+					}
+					if err := domains.DomainDel(kv.AccountsDomain, roTx, address[:], txNum, nil); err != nil {
+						return err
+					}
+					continue
+				}
+				// Otherwise: cleanup code+storage before recreating account
+				// (originalIncarnation > account.Incarnation case).
+			}
+
+			if d.balance != nil || d.nonce != nil || d.incarnation != nil || d.codeHash != nil || d.code != nil {
+				// versionedWriteCollector.UpdateAccountData always emits all four
+				// account fields (balance, nonce, incarnation, codeHash) so the
+				// reconstruction below produces a complete account.  The nil-guards
+				// remain to defend against partial writes from other code paths.
+				acc := accounts.NewAccount()
+				if d.balance != nil {
+					acc.Balance = *d.balance
+				}
+				if d.nonce != nil {
+					acc.Nonce = *d.nonce
+				}
+				if d.incarnation != nil {
+					acc.Incarnation = *d.incarnation
+				}
+				if d.codeHash != nil {
+					acc.CodeHash = *d.codeHash
+				} else if d.code != nil {
+					acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(d.code))
+				}
+				if dbg.TraceApply && (rs.trace || dbg.TraceAccount(addr.Handle())) {
+					fmt.Printf("%d apply:put account: %x balance:%d,nonce:%d,codehash:%x\n", blockNum, addr, &acc.Balance, acc.Nonce, acc.CodeHash)
+				}
+				if err := domains.DomainPut(kv.AccountsDomain, roTx, address[:], accounts.SerialiseV3(&acc), txNum, nil); err != nil {
+					return err
+				}
+			}
+
+			if d.code != nil {
+				if dbg.TraceApply && (rs.trace || dbg.TraceAccount(addr.Handle())) {
+					code := d.code
+					if len(code) > 40 {
+						code = code[:40]
+					}
+					fmt.Printf("%d apply:put code: %x %x\n", blockNum, addr, code)
+				}
+				if err := domains.DomainPut(kv.CodeDomain, roTx, address[:], d.code, txNum, nil); err != nil {
+					return err
+				}
+			}
+
+			for _, item := range d.storage {
+				key := item.key.Value()
+				composite := append(address[:], key[:]...)
+				v := item.value.Bytes()
+				if len(v) == 0 {
+					if dbg.TraceApply && (rs.trace || dbg.TraceAccount(addr.Handle())) {
+						fmt.Printf("%d apply:del storage: %x %x\n", blockNum, addr, item.key)
+					}
+					if err := domains.DomainDel(kv.StorageDomain, roTx, composite, txNum, nil); err != nil {
+						return err
+					}
+				} else {
+					if dbg.TraceApply && (rs.trace || dbg.TraceAccount(addr.Handle())) {
+						fmt.Printf("%d apply:put storage: %x %x %x\n", blockNum, addr, item.key, &item.value)
+					}
+					if err := domains.DomainPut(kv.StorageDomain, roTx, composite, v, txNum, nil); err != nil {
+						return err
+					}
+				}
+			}
 		}
 	}
 
@@ -164,13 +245,11 @@ func (rs *StateV3) applyUpdates(roTx kv.TemporalTx, blockNum, txNum uint64, stat
 		}
 		acc.Balance.Add(&acc.Balance, &increase)
 		if emptyRemoval && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() {
-			addrValue := addr.Value()
 			if err := domains.DomainDel(kv.AccountsDomain, roTx, addrValue[:], txNum, enc0); err != nil {
 				return err
 			}
 		} else {
 			enc1 := accounts.SerialiseV3(&acc)
-			addrValue := addr.Value()
 			if err := domains.DomainPut(kv.AccountsDomain, roTx, addrValue[:], enc1, txNum, enc0); err != nil {
 				return err
 			}
@@ -179,19 +258,11 @@ func (rs *StateV3) applyUpdates(roTx kv.TemporalTx, blockNum, txNum uint64, stat
 	return nil
 }
 
-func (rs *StateV3) Domains() *execctx.SharedDomains {
-	return rs.domains
-}
-
-func (rs *StateV3) SetTxNum(txNum uint64) {
-	rs.txNum = txNum
-}
-
 func (rs *StateV3) ApplyTxState(ctx context.Context,
 	roTx kv.TemporalTx,
 	blockNum uint64,
 	txNum uint64,
-	accountUpdates StateUpdates,
+	writes VersionedWrites,
 	balanceIncreases map[accounts.Address]uint256.Int,
 	receipt *types.Receipt,
 	cummulativeBlobGas uint64,
@@ -206,7 +277,7 @@ func (rs *StateV3) ApplyTxState(ctx context.Context,
 	}
 	//defer rs.domains.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
-	if err := rs.applyUpdates(roTx, blockNum, txNum, accountUpdates, balanceIncreases, rules); err != nil {
+	if err := rs.applyVersionedWrites(roTx, blockNum, txNum, writes, balanceIncreases, rules); err != nil {
 		return fmt.Errorf("StateV3.ApplyState: %w", err)
 	}
 
@@ -304,93 +375,9 @@ type storageItem struct {
 var deleted accounts.Account
 
 type bufferedAccount struct {
-	originalIncarnation uint64
-	data                *accounts.Account
-	code                []byte
-	storage             *btree.BTreeG[storageItem]
-}
-
-type stateUpdate struct {
-	*bufferedAccount
-	address       accounts.Address
-	deleteAccount bool
-}
-
-func newStateUpdates() StateUpdates {
-	return StateUpdates{
-		btree.NewBTreeGOptions[*stateUpdate](func(a, b *stateUpdate) bool {
-			return a.address.Cmp(b.address) < 0
-		}, btree.Options{NoLocks: true}),
-	}
-}
-
-type StateUpdates struct {
-	*btree.BTreeG[*stateUpdate]
-}
-
-func (v StateUpdates) TraceBlockUpdates(blockNum uint64, traceAll bool) {
-	if v.BTreeG == nil {
-		return
-	}
-
-	v.Scan(func(update *stateUpdate) bool {
-		if traceAll || dbg.TraceAccount(update.address.Handle()) {
-			if update.deleteAccount || (update.data != nil && update.originalIncarnation > update.data.Incarnation) {
-				fmt.Printf("%d del code+storage: %x\n", blockNum, update.address)
-			}
-
-			if update.bufferedAccount != nil {
-				if update.data != nil {
-					fmt.Printf("%d put account: %x Balance:[%d],Nonce:[%d],CodeHash:[%x]\n", blockNum, update.address, &update.data.Balance, update.data.Nonce, update.data.CodeHash)
-				}
-
-				if update.code != nil {
-					code := update.code
-					if len(code) > 40 {
-						code = code[:40]
-					}
-					fmt.Printf("%d put code: %x %x\n", blockNum, update.address, code)
-				}
-
-				if update.storage != nil {
-					update.storage.Scan(func(i storageItem) bool {
-						if i.value.ByteLen() == 0 {
-							fmt.Printf("%d del storage: %x %x\n", blockNum, update.address, i.key)
-						} else {
-							fmt.Printf("%d put storage: %x %x %x\n", blockNum, update.address, i.key, &i.value)
-						}
-						return true
-					})
-				}
-			} else if update.deleteAccount {
-				fmt.Printf("%d del account: %x\n", blockNum, update.address)
-			}
-		}
-		return true
-	})
-}
-
-func (v StateUpdates) UpdateCount() int {
-	updateCount := 0
-
-	if v.BTreeG != nil {
-		v.Scan(func(update *stateUpdate) bool {
-			if update.deleteAccount {
-				updateCount++
-			}
-			if update.bufferedAccount != nil {
-				if update.data != nil {
-					updateCount++
-				}
-				if update.storage != nil {
-					updateCount += update.storage.Len()
-				}
-			}
-			return true
-		})
-	}
-
-	return updateCount
+	data    *accounts.Account
+	code    []byte
+	storage *btree.BTreeG[storageItem]
 }
 
 type StateV3Buffered struct {
@@ -416,188 +403,145 @@ func (s *StateV3Buffered) WithDomains(domains *execctx.SharedDomains) *StateV3Bu
 	}
 }
 
-// BufferedWriter - used by parallel workers to accumulate updates and then send them to conflict-resolution.
-type BufferedWriter struct {
-	rs           *StateV3Buffered
-	trace        bool
-	writeSet     StateUpdates
-	accountPrevs map[string][]byte
-	accountDels  map[string]*accounts.Account
-	storagePrevs map[string][]byte
-	codePrevs    map[string]uint64
-	accumulator  *shards.Accumulator
-	txNum        uint64
+// versionedWriteCollector implements StateWriter and collects writes as a
+// flat VersionedWrites slice for direct domain apply via applyVersionedWrites.
+//
+// When FinalizeTx calls UpdateAccountData, complete account state (all fields)
+// is emitted so that applyVersionedWrites can reconstruct the full serialised
+// account without domain reads. Code and storage writes are collected similarly.
+//
+// It also maintains rs.accounts synchronously for the cross-block timing hole
+// bridge: block N+1 workers may read block N state before the async applyResults
+// goroutine has flushed it to SharedDomains.
+//
+// If accumulator is non-nil, state-change notifications are forwarded to it so
+// that the txpool receives the expected per-block state diffs.  StartChange must
+// be called on the accumulator before MakeWriteSet invokes this collector.
+type versionedWriteCollector struct {
+	rs          *StateV3Buffered
+	writes      VersionedWrites
+	accumulator *shards.Accumulator
 }
 
-func NewBufferedWriter(rs *StateV3Buffered, accumulator *shards.Accumulator) *BufferedWriter {
-	return &BufferedWriter{
-		rs:          rs,
-		writeSet:    newStateUpdates(),
-		accumulator: accumulator,
-		//trace:       true,
-	}
+// NewVersionedWriteCollector creates a versionedWriteCollector that collects
+// StateWriter calls into a VersionedWrites slice and maintains rs.accounts.
+// accumulator may be nil if txpool notifications are not required (e.g. initial
+// sync).
+func NewVersionedWriteCollector(rs *StateV3Buffered, accumulator *shards.Accumulator) *versionedWriteCollector {
+	return &versionedWriteCollector{rs: rs, accumulator: accumulator}
 }
 
-func (w *BufferedWriter) SetTx(tx kv.TemporalTx) {}
+// Writes returns the collected VersionedWrites for domain apply.
+func (c *versionedWriteCollector) Writes() VersionedWrites { return c.writes }
 
-func (w *BufferedWriter) WriteSet() StateUpdates {
-	return w.writeSet
-}
-
-func (w *BufferedWriter) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
-	return w.accountPrevs, w.accountDels, w.storagePrevs, w.codePrevs
-}
-
-func (w *BufferedWriter) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
-	if w.trace {
-		fmt.Printf("BufferedWriter: acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
-	}
-
-	if w.accumulator != nil {
-		w.accumulator.ChangeAccount(address.Value(), account.Incarnation, accounts.SerialiseV3(account))
-	}
-
-	// Copy account data to prevent pointer aliasing with pooled stateObjects.
-	// After tx finalization, the stateObject (and its embedded Account) is returned
-	// to stateObjectPool. Without a copy, subsequent pool reuse overwrites the
-	// Account memory, corrupting data stored in the writeSet and rs.accounts.
+func (c *versionedWriteCollector) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
+	// Copy to prevent aliasing with pooled stateObjects. After tx finalization
+	// the stateObject is returned to the pool and its Account may be overwritten.
 	var accountCopy accounts.Account
 	accountCopy.Copy(account)
 	accountCopy.PrevIncarnation = account.PrevIncarnation
 
-	if update, ok := w.writeSet.Get(&stateUpdate{address: address}); !ok {
-		update = &stateUpdate{&bufferedAccount{
-			originalIncarnation: original.Incarnation,
-			data:                &accountCopy,
-		}, address, false}
-		w.writeSet.Set(update)
-	} else {
-		if original.Incarnation < update.originalIncarnation {
-			update.originalIncarnation = original.Incarnation
-		}
-		update.data = &accountCopy
+	// When the original incarnation was higher than the new incarnation
+	// (pre-existing contract destroyed then recreated at a lower incarnation),
+	// emit a SelfDestructPath write first to signal code+storage cleanup before
+	// the new account state is written. applyVersionedWrites detects the presence
+	// of account fields after SelfDestructPath to distinguish cleanup+recreate
+	// from a pure account deletion.
+	if original.Incarnation > accountCopy.Incarnation {
+		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: SelfDestructPath, Val: true})
 	}
 
-	w.rs.accountsMutex.Lock()
-	obj, ok := w.rs.accounts[address]
+	// Emit complete account state as individual VersionedWrites so that
+	// applyVersionedWrites can reconstruct the full serialised account.
+	c.writes = append(c.writes,
+		&VersionedWrite{Address: address, Path: BalancePath, Val: accountCopy.Balance},
+		&VersionedWrite{Address: address, Path: NoncePath, Val: accountCopy.Nonce},
+		&VersionedWrite{Address: address, Path: IncarnationPath, Val: accountCopy.Incarnation},
+		&VersionedWrite{Address: address, Path: CodeHashPath, Val: accountCopy.CodeHash},
+	)
+
+	if c.accumulator != nil {
+		serialised := accounts.SerialiseV3(&accountCopy)
+		c.accumulator.ChangeAccount(address.Value(), accountCopy.Incarnation, serialised)
+	}
+
+	// Maintain rs.accounts for the cross-block timing hole bridge.
+	c.rs.accountsMutex.Lock()
+	obj, ok := c.rs.accounts[address]
 	if !ok || obj.data == &deleted {
 		obj = &bufferedAccount{}
 	}
-	obj.originalIncarnation = original.Incarnation
 	obj.data = &accountCopy
-	w.rs.accounts[address] = obj
-	w.rs.accountsMutex.Unlock()
+	c.rs.accounts[address] = obj
+	c.rs.accountsMutex.Unlock()
 
 	return nil
 }
 
-func (w *BufferedWriter) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
-	if w.trace {
-		fmt.Printf("code: %x, %x, valLen: %d\n", address, codeHash, len(code))
-	}
-	if w.accumulator != nil {
-		w.accumulator.ChangeCode(address.Value(), incarnation, code)
+func (c *versionedWriteCollector) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
+	c.writes = append(c.writes, &VersionedWrite{Address: address, Path: CodePath, Val: code})
+
+	if c.accumulator != nil {
+		c.accumulator.ChangeCode(address.Value(), incarnation, code)
 	}
 
-	if update, ok := w.writeSet.Get(&stateUpdate{address: address}); !ok {
-		w.writeSet.Set(&stateUpdate{&bufferedAccount{code: code}, address, false})
-	} else {
-		update.code = code
-	}
-
-	w.rs.accountsMutex.Lock()
-	obj, ok := w.rs.accounts[address]
+	c.rs.accountsMutex.Lock()
+	obj, ok := c.rs.accounts[address]
 	if !ok || obj.data == &deleted {
 		obj = &bufferedAccount{}
-		w.rs.accounts[address] = obj
+		c.rs.accounts[address] = obj
 	}
 	obj.code = code
-	w.rs.accountsMutex.Unlock()
+	c.rs.accountsMutex.Unlock()
 
 	return nil
 }
 
-func (w *BufferedWriter) DeleteAccount(address accounts.Address, original *accounts.Account) error {
-	if w.trace {
-		fmt.Printf("del acc: %x\n", address)
-	}
-	if w.accumulator != nil {
-		w.accumulator.DeleteAccount(address.Value())
-	}
+func (c *versionedWriteCollector) DeleteAccount(address accounts.Address, original *accounts.Account) error {
+	c.writes = append(c.writes, &VersionedWrite{Address: address, Path: SelfDestructPath, Val: true})
 
-	if update, ok := w.writeSet.Get(&stateUpdate{address: address}); !ok {
-		w.writeSet.Set(&stateUpdate{nil, address, true})
-	} else {
-		update.bufferedAccount = nil
-		update.deleteAccount = true
-	}
-
-	w.rs.accountsMutex.Lock()
-	obj, ok := w.rs.accounts[address]
+	c.rs.accountsMutex.Lock()
+	obj, ok := c.rs.accounts[address]
 	if !ok {
-		obj = &bufferedAccount{
-			data: &deleted,
-		}
-		w.rs.accounts[address] = obj
+		obj = &bufferedAccount{data: &deleted}
+		c.rs.accounts[address] = obj
 	}
 	*obj = bufferedAccount{data: &deleted}
-	w.rs.accountsMutex.Unlock()
+	c.rs.accountsMutex.Unlock()
+
 	return nil
 }
 
-func (w *BufferedWriter) WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
+func (c *versionedWriteCollector) WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
 	if original == value {
 		return nil
 	}
 
-	update, ok := w.writeSet.Get(&stateUpdate{address: address})
-	if !ok {
-		update = &stateUpdate{&bufferedAccount{}, address, false}
-		w.writeSet.Set(update)
+	c.writes = append(c.writes, &VersionedWrite{Address: address, Path: StoragePath, Key: key, Val: value})
+
+	if c.accumulator != nil {
+		v := value.Bytes()
+		c.accumulator.ChangeStorage(address.Value(), incarnation, key.Value(), v)
 	}
 
-	if update.storage == nil {
-		update.storage = btree.NewBTreeGOptions[storageItem](func(a, b storageItem) bool {
-			return a.key.Cmp(b.key) > 0
-		}, btree.Options{NoLocks: true})
-	}
-
-	update.storage.Set(storageItem{key, value})
-
-	if w.trace {
-		fmt.Printf("BufferedWriter: storage: %x,%x,%x\n", address, key, &value)
-	}
-
-	if w.accumulator != nil {
-		vb := value.Bytes32()
-		w.accumulator.ChangeStorage(address.Value(), incarnation, key.Value(), vb[32-value.ByteLen():])
-	}
-
-	w.rs.accountsMutex.Lock()
-	obj, ok := w.rs.accounts[address]
+	c.rs.accountsMutex.Lock()
+	obj, ok := c.rs.accounts[address]
 	if !ok || obj.data == &deleted {
 		obj = &bufferedAccount{}
-		w.rs.accounts[address] = obj
+		c.rs.accounts[address] = obj
 	}
 	if obj.storage == nil {
 		obj.storage = btree.NewBTreeGOptions[storageItem](func(a, b storageItem) bool {
 			return a.key.Cmp(b.key) > 0
 		}, btree.Options{NoLocks: true})
 	}
-
 	obj.storage.Set(storageItem{key, value})
-
-	w.rs.accountsMutex.Unlock()
-	return nil
-}
-
-func (w *BufferedWriter) CreateContract(address accounts.Address) error {
-	if w.trace {
-		fmt.Printf("create contract: %x\n", address)
-	}
+	c.rs.accountsMutex.Unlock()
 
 	return nil
 }
+
+func (c *versionedWriteCollector) CreateContract(_ accounts.Address) error { return nil }
 
 // Writer - used by parallel workers to accumulate updates and then send them to conflict-resolution.
 type Writer struct {

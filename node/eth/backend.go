@@ -373,7 +373,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			genesisSpec = nil
 		}
 		var genesisErr error
-		chainConfig, genesis, genesisErr = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.OverrideOsakaTime, config.OverrideAmsterdamTime, config.KeepStoredChainConfig, dirs, logger)
+		chainConfig, genesis, genesisErr = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.Snapshot.ChainName, config.OverrideOsakaTime, config.OverrideAmsterdamTime, config.KeepStoredChainConfig, dirs, logger)
 		if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
 			return genesisErr
 		}
@@ -439,6 +439,16 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 		p2pConfig.DiscoveryDNS = backend.config.EthDiscoveryURLs
 
+		// Resolve chain-specific bootnodes and DNS for sentry servers.
+		// Only use them when the actual genesis hash matches the chain spec to avoid
+		// connecting to mainnet bootnodes when running with a custom genesis (e.g. Hive tests).
+		var chainBootnodes []string
+		var chainDNSNetwork string
+		if spec, err := chainspec.ChainSpecByName(config.Snapshot.ChainName); err == nil && spec.GenesisHash == backend.genesisHash {
+			chainBootnodes = spec.Bootnodes
+			chainDNSNetwork = spec.DNSNetwork
+		}
+
 		listenHost, listenPort, err := splitAddrIntoHostAndPort(p2pConfig.ListenAddr)
 		if err != nil {
 			return nil, err
@@ -477,7 +487,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			cfg.ListenAddr = fmt.Sprintf("%s:%d", listenHost, listenPort)
 
 			// TODO: Auto-enable WIT protocol for Bor chains if not explicitly set
-			server := sentry.NewGrpcServer(backend.sentryCtx, nil, readNodeInfo, &cfg, protocol, logger)
+			server := sentry.NewGrpcServer(backend.sentryCtx, nil, readNodeInfo, &cfg, protocol, logger, chainBootnodes, chainDNSNetwork)
 			backend.sentryServers = append(backend.sentryServers, server)
 			var sideProtocols []sentryproto.Protocol
 			if stack.Config().P2P.EnableWitProtocol {
@@ -868,14 +878,13 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 					config.Sync,
 					config.ExperimentalBAL,
 				),
-				stagedsync.StageSendersCfg(chainConfig, config.Sync, false /* badBlockHalt */, dirs.Tmp, config.Prune, blockReader, backend.sentriesClient.Hd),
 				builderstages.StageBuilderExecCfg(builderStatePos, backend.notifications.Events, backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, txnProvider, blockReader),
 				builderstages.StageBuilderFinishCfg(backend.chainConfig, backend.engine, builderStatePos, backend.miningSealingQuit, backend.blockReader, latestBlockBuiltStore),
 			),
 			builderstages.BuilderUnwindOrder,
 			builderstages.BuilderPruneOrder,
 			logger,
-			stages.ModeBlockProduction,
+			stages.ModeApplyingBlocks,
 		)
 		// We start the mining step
 		if err := stageloop.MiningStep(ctx, backend.chainDB, proposingSync, tmpdir, logger); err != nil {

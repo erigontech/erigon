@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+"""Prune the Go build cache to a size limit.
+
+Walks the cache directory, sorts all files by (atime, mtime, size, path)
+descending, accumulates them until the size limit is reached, then deletes
+the remainder.
+"""
+
+import argparse
+import os
+import re
+import subprocess
+import sys
+import time
+
+
+def parse_limit(s: str) -> int:
+    suffixes = {"K": 1024, "M": 1024**2, "G": 1024**3}
+    s = s.strip()
+    if s[-1].upper() in suffixes:
+        return int(s[:-1]) * suffixes[s[-1].upper()]
+    return int(s)
+
+
+def format_ago(ts: float) -> str:
+    secs = time.time() - ts
+    if secs < 60:
+        return "{:.0f}s ago".format(secs)
+    mins = secs / 60
+    if mins < 60:
+        return "{:.0f}m ago".format(mins)
+    hours = mins / 60
+    if hours < 24:
+        return "{:.0f}h ago".format(hours)
+    days = hours / 24
+    if days < 14:
+        return "{:.0f}d ago".format(days)
+    weeks = days / 7
+    if weeks < 52:
+        return "{:.0f}w ago".format(weeks)
+    return "{:.1f}y ago".format(days / 365)
+
+
+def format_size(n: float) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024:
+            fmt = "{:.0f} {}" if n % 1 == 0 else "{:.1f} {}"
+            return fmt.format(n, unit)
+        n /= 1024
+    return "{:.1f} TB".format(n)
+
+
+def gocache_default() -> str:
+    result = subprocess.run(
+        ["go", "env", "GOCACHE"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print("error: go env GOCACHE failed: " + result.stderr.strip(), file=sys.stderr)
+        sys.exit(1)
+    return result.stdout.strip()
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "gocache",
+        nargs="?",
+        metavar="GOCACHE",
+        help="Go build cache path (default: go env GOCACHE)",
+    )
+    parser.add_argument(
+        "--limit",
+        default="10G",
+        type=parse_limit,
+        metavar="N",
+        help="Maximum cache size. Accepts K/M/G suffixes. Default: 10G",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print stats without deleting anything",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Print each file with its atime, mtime, size, and keep/delete decision",
+    )
+    args = parser.parse_args()
+
+    gocache = args.gocache if args.gocache is not None else gocache_default()
+
+    if not os.path.isdir(gocache):
+        print("error: not a directory: " + gocache, file=sys.stderr)
+        return 1
+
+    # Walk files of interest, calculating sort fields.
+    # skip=True for files not directly under a 2-hex subdir; floats to top when sorted.
+    hex2 = re.compile(r'^[0-9a-f]{2}$')
+    files = []
+    for dirpath, dirnames, filenames in os.walk(gocache):
+        first = os.path.relpath(dirpath, gocache).split(os.sep)[0]
+        skip = first == '.' or not hex2.match(first)
+        for filename in filenames:
+            path = os.path.join(dirpath, filename)
+            try:
+                st = os.lstat(path)
+                files.append((skip, st.st_atime, st.st_mtime, st.st_size, path))
+            except OSError:
+                pass
+
+    # Sort: skip files first (True > False), then most recently used.
+    # It's not yet known whether sorting size descending or ascending is better
+    # for cache hit rates — it may not matter much in practice.
+    files.sort(reverse=True)
+
+    if args.debug:
+        print("{:<12} {:<12} {:<10} {:<11} {}".format("atime", "mtime", "size", "decision", "path"))
+
+    total = 0
+    kept = 0
+    deleted = 0
+    deleted_size = 0
+    errors = 0
+    for skip, atime, mtime, size, path in files:
+        if skip:
+            decision = "skip"
+            delete = False
+        else:
+            keep = total + size <= args.limit
+            if keep:
+                total += size
+                kept += 1
+            delete = not keep
+            decision = "retain" if keep else "delete"
+
+        if args.debug:
+            print("{:<12} {:<12} {:<10} {:<11} {}".format(
+                format_ago(atime), format_ago(mtime), format_size(size), decision, path))
+
+        if delete:
+            deleted += 1
+            deleted_size += size
+            if not args.dry_run:
+                try:
+                    os.remove(path)
+                except OSError as e:
+                    print("failed to remove {}: {}".format(path, e), file=sys.stderr)
+                    errors += 1
+
+    action = "would delete" if args.dry_run else "deleted"
+    print("GoCache pruned: kept {} files ({:.2f} GB), {} {} files ({:.2f} GB)".format(
+        kept, total / 1024**3, action, deleted, deleted_size / 1024**3))
+    if errors:
+        print("errors: {}".format(errors), file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
