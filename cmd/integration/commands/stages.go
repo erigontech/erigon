@@ -108,7 +108,9 @@ func makeStageCmd(use string, stageFn func(kv.TemporalRwDB, context.Context, log
 			if timeit {
 				defer func(t time.Time) { logger.Info("total", "took", time.Since(t)) }(time.Now())
 			}
-			if err := stageFn(db, cmd.Context(), logger); err != nil {
+			ctx, cancel := context.WithCancel(cmd.Context())
+			defer cancel()
+			if err := stageFn(db, ctx, logger); err != nil {
 				if !errors.Is(err, context.Canceled) {
 					logger.Error(err.Error())
 				}
@@ -780,6 +782,30 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			return err
 		}
 		doms.ClearRam(true)
+		if !noCommit {
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+		}
+
+		{
+			var lastTxNum uint64
+			if err := db.View(ctx, func(tx kv.Tx) error {
+				execProgress, err := stages.GetStageProgress(tx, stages.Execution)
+				if err != nil {
+					return err
+				}
+				lastTxNum, err = br.TxnumReader().Max(ctx, tx, execProgress)
+				if err != nil {
+					return err
+				}
+				return nil
+			}); err != nil {
+				return err
+			}
+			_ = agg.BuildFiles(lastTxNum)
+			go func() { _ = agg.MergeLoop(ctx) }()
+		}
 
 		pruneStage, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, s.CurrentSyncCycle.IsInitialCycle)
 		if err != nil {
