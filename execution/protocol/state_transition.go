@@ -586,7 +586,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		vmerr error // vm errors do not effect consensus and are therefore not assigned to err
 	)
 
-	st.evm.ResetStateGasConsumed()
+	st.evm.ResetGasConsumed()
 
 	if contractCreation {
 		// The reason why we don't increment nonce here is that we need the original
@@ -605,20 +605,18 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		}
 		mdGasUsed := st.mdGasUsed()
 		if rules.IsAmsterdam {
-			// EIP-8037: Block gas uses actual execution costs (regularGasConsumed/stateGasConsumed),
-			// not gas pool depletion. This correctly separates block gas from receipt gas:
-			// - Receipt gas = tx.gas - gas_left (what user pays)
-			// - Block gas = intrinsic + execution costs (what the network processed)
-			// Bottleneck (max of regular, state) is computed at block level, not per-tx.
-			blockRegular := imdGas.Regular + st.evm.RegularGasConsumed()
+			// EIP-8037 + EIP-7778: Block gas accounting uses two dimensions.
+			// stateGasConsumed tracks ALL state gas charges (including spill
+			// to regular gas) and is NOT restored on depth-0 REVERT.
+			// regularGasConsumed tracks only regular-dimension opcode gas.
 			blockState := imdGas.State + st.evm.StateGasConsumed()
-			// EIP-7778: Block Gas Accounting without Refunds
-			gasUsed := mdGasUsed.Total()
-			refund := min(gasUsed/refundQuotient, st.state.GetRefund().Total())
-			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, gasUsed-refund)
-			// EIP-8037: Floor gas applies to block regular gas
+			blockRegular := imdGas.Regular + st.evm.RegularGasConsumed()
 			st.blockRegularGasUsed = max(blockRegular, intrinsicGasResult.FloorGasCost)
 			st.blockStateGasUsed = blockState
+			// Receipt gasUsed: total gas pool depletion + spill restored on depth-0 REVERT.
+			gasUsed := mdGasUsed.Total() + st.evm.RevertedSpillGas()
+			refund := min(gasUsed/refundQuotient, st.state.GetRefund().Total())
+			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, gasUsed-refund)
 		} else if rules.IsPrague {
 			gasUsed := mdGasUsed.Regular
 			refund := min(gasUsed/refundQuotient, st.state.GetRefund().Regular)
@@ -631,11 +629,12 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		st.refundGas()
 	} else if rules.IsAmsterdam {
 		mdGasUsed := st.mdGasUsed()
-		blockRegular := imdGas.Regular + st.evm.RegularGasConsumed()
 		blockState := imdGas.State + st.evm.StateGasConsumed()
-		st.txnGasUsed = max(mdGasUsed.Total(), intrinsicGasResult.FloorGasCost)
+		blockRegular := imdGas.Regular + st.evm.RegularGasConsumed()
 		st.blockRegularGasUsed = max(blockRegular, intrinsicGasResult.FloorGasCost)
 		st.blockStateGasUsed = blockState
+		gasUsed := mdGasUsed.Total() + st.evm.RevertedSpillGas()
+		st.txnGasUsed = max(gasUsed, intrinsicGasResult.FloorGasCost)
 	} else if rules.IsPrague {
 		st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.mdGasUsed().Regular)
 		st.blockRegularGasUsed = st.txnGasUsed
