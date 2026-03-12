@@ -20,6 +20,8 @@ type DomainCfg struct {
 	// for commitment domain only
 	ReplaceKeysInValues bool
 
+	BuildAccessorsWorkers int // parallel workers for building .kvi accessors (recsplit)
+
 	FileVersion DomainVersionTypes
 }
 
@@ -54,6 +56,8 @@ type HistCfg struct {
 	Compression   seg.FileCompression // defines type of Compression for history files
 	HistoryIdx    kv.InvertedIdx
 
+	BuildAccessorsWorkers int // parallel workers for building .vi accessors (recsplit)
+
 	FileVersion HistVersionTypes
 }
 
@@ -77,7 +81,8 @@ type InvIdxCfg struct {
 	Compression   seg.FileCompression // compression type for inverted index keys and values
 	CompressorCfg seg.Cfg             // advanced configuration for compressor encodings
 
-	Accessors Accessors
+	Accessors             Accessors
+	BuildAccessorsWorkers int // parallel workers for building .efi accessors (recsplit)
 }
 
 type BlockDataFilesCfg struct {
