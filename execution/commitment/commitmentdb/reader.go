@@ -181,8 +181,18 @@ func NewCommitmentReplayStateReader(ttx, tx kv.TemporalTx, tsd sd, plainStateAsO
 }
 
 func (crsr *CommitmentReplayStateReader) Clone(tx kv.TemporalTx) StateReader {
+	// commitmentReader (LatestStateReader) gets the new tx so warmup goroutines
+	// use a fresh read-only transaction on the temp DB.
+	// plainStateReader (HistoryStateReader) keeps its original outer-DB tx:
+	// that tx holds the real account/storage history that GetAsOf needs.
+	// Replacing it with the temp-DB tx (ttx) would make GetAsOf return empty
+	// data and produce wrong post-state roots.
 	return &CommitmentReplayStateReader{
-		SplitStateReader: crsr.SplitStateReader.Clone(tx).(*SplitStateReader),
+		SplitStateReader: NewCommitmentSplitStateReader(
+			crsr.commitmentReader.Clone(tx),
+			crsr.plainStateReader,
+			false,
+		),
 	}
 }
 
