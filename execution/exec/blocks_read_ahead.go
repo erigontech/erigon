@@ -315,7 +315,7 @@ func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.
 	}
 	return readAhead, func() {
 		close(readAhead)
-		_ = g.Wait()
+		//_ = g.Wait()
 	}
 }
 func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine rules.Engine, blockReader services.FullBlockReader) error {
