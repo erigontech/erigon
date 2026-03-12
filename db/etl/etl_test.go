@@ -632,32 +632,37 @@ func TestSortable(t *testing.T) {
 }
 
 func TestSortableBufferStableSort(t *testing.T) {
-	buf := NewSortableBuffer(256 * 1024)
+	buf := NewSortableBuffer(256 * 1024 * 1024)
 
-	// Insert entries with duplicate keys but different values.
-	// Stable sort must preserve insertion order for equal keys.
-	key1 := []byte{0x01, 0x02}
-	key2 := []byte{0x01, 0x02}
-	key3 := []byte{0x00, 0xFF}
+	// Need enough duplicates to trigger pdqsort's partitioning (not just insertion sort).
+	// Insert 1000 entries under each of 4 duplicate keys, interleaved with unique keys.
+	dupKey := []byte{0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05} // same 8-byte prefix
+	const dupsPerKey = 1000
+	val := make([]byte, 8)
 
-	buf.Put(key1, []byte("first"))
-	buf.Put(key2, []byte("second"))
-	buf.Put(key3, []byte("third"))
-	buf.Put(key1, []byte("fourth"))
+	for i := range dupsPerKey {
+		binary.BigEndian.PutUint64(val, uint64(i))
+		buf.Put(dupKey, val)
+		// interleave with unique keys to force reordering
+		uk := make([]byte, 8)
+		binary.BigEndian.PutUint64(uk, uint64(i*3+1))
+		buf.Put(uk, val)
+	}
 
 	buf.Sort()
 
-	// Expected order: key3 (0x00FF) < key1 "first" < key2 "second" < key1 "fourth"
-	k0, v0 := buf.Get(0, nil, nil)
-	assert.Equal(t, key3, k0)
-	assert.Equal(t, []byte("third"), v0)
-
-	_, v1 := buf.Get(1, nil, nil)
-	_, v2 := buf.Get(2, nil, nil)
-	_, v3 := buf.Get(3, nil, nil)
-	assert.Equal(t, []byte("first"), v1)
-	assert.Equal(t, []byte("second"), v2)
-	assert.Equal(t, []byte("fourth"), v3)
+	// Verify: all entries with dupKey must appear in insertion order
+	seq := 0
+	for i := range buf.Len() {
+		k, v := buf.Get(i, nil, nil)
+		if !bytes.Equal(k, dupKey) {
+			continue
+		}
+		got := binary.BigEndian.Uint64(v)
+		require.Equal(t, uint64(seq), got, "duplicate key at position %d: expected seq %d, got %d", i, seq, got)
+		seq++
+	}
+	require.Equal(t, dupsPerKey, seq, "expected %d duplicate entries", dupsPerKey)
 }
 
 func TestSortableBufferNilAndEmptyKeys(t *testing.T) {
@@ -665,20 +670,24 @@ func TestSortableBufferNilAndEmptyKeys(t *testing.T) {
 
 	buf.Put([]byte{0x01}, []byte("normal"))
 	buf.Put(nil, []byte("nil-key"))
-	buf.Put([]byte{}, []byte("empty-key"))
+	buf.Put([]byte{}, []byte("empty-key-1"))
 	buf.Put(nil, []byte("nil-key-2"))
+	buf.Put([]byte{}, []byte("empty-key-2"))
 
 	buf.Sort()
 
 	// nil keys (-1) sort before empty keys (0) which sort before non-empty
+	// within same key, insertion order is preserved
 	_, v0 := buf.Get(0, nil, nil)
 	_, v1 := buf.Get(1, nil, nil)
 	_, v2 := buf.Get(2, nil, nil)
 	_, v3 := buf.Get(3, nil, nil)
+	_, v4 := buf.Get(4, nil, nil)
 	assert.Equal(t, []byte("nil-key"), v0)
 	assert.Equal(t, []byte("nil-key-2"), v1)
-	assert.Equal(t, []byte("empty-key"), v2)
-	assert.Equal(t, []byte("normal"), v3)
+	assert.Equal(t, []byte("empty-key-1"), v2)
+	assert.Equal(t, []byte("empty-key-2"), v3)
+	assert.Equal(t, []byte("normal"), v4)
 }
 
 func BenchmarkSortableBufferSort(b *testing.B) {
