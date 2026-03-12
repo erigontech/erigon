@@ -64,6 +64,7 @@ func NewBlockBuilder(build BlockBuilderFunc, param *Parameters, maxBuildTimeSecs
 		log.Info("Building block...")
 		t := time.Now()
 		result, err = build(param, &builder.interrupt)
+		mxBlockBuildDuration.ObserveDuration(t)
 		if err != nil {
 			log.Warn("Failed to build a block", "err", err)
 		} else {

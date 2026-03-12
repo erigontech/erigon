@@ -6604,6 +6604,128 @@
           ],
           "title": "mgas/s ",
           "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisBorderShow": false,
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "barWidthFactor": 0.6,
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "insertNulls": false,
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 8016
+          },
+          "id": 9301,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "hideZeros": false,
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              },
+              "editorMode": "code",
+              "expr": "block_build_duration_seconds{quantile=\"0.5\",instance=~\"$instance\"}",
+              "format": "time_series",
+              "legendFormat": "p50",
+              "range": true,
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              },
+              "editorMode": "code",
+              "expr": "block_build_duration_seconds{quantile=\"0.99\",instance=~\"$instance\"}",
+              "format": "time_series",
+              "legendFormat": "p99",
+              "range": true,
+              "refId": "B"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+              },
+              "editorMode": "code",
+              "expr": "block_build_duration_seconds{quantile=\"0.999\",instance=~\"$instance\"}",
+              "format": "time_series",
+              "legendFormat": "p999",
+              "range": true,
+              "refId": "C"
+            }
+          ],
+          "title": "Block builder duration (p50/p99/p999)",
+          "type": "timeseries"
         }
       ],
       "title": "Blocks execution",
