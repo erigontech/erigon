@@ -65,6 +65,7 @@ jobs:
           submodules: true
           lfs: tests
           cleanup-space: true
+          ramdisk: true
 
       - name: Run all tests on ${{ matrix.os }}
         env:

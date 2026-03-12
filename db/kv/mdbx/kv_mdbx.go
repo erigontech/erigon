@@ -618,6 +618,12 @@ func (db *MdbxKV) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
 	return db.beginRw(ctx, mdbx.TxNoSync)
 }
 
+// BeginRwTry opens a write transaction without blocking. Returns syscall.EBUSY
+// if another write transaction is already open.
+func (db *MdbxKV) BeginRwTry(ctx context.Context) (kv.RwTx, error) {
+	return db.beginRw(ctx, mdbx.TxTry)
+}
+
 func (db *MdbxKV) beginRw(ctx context.Context, flags uint) (txn kv.RwTx, err error) {
 	select {
 	case <-ctx.Done():

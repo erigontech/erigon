@@ -527,7 +527,9 @@ func MiningStep(ctx context.Context, db kv.TemporalRwDB, mining *stagedsync.Sync
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
 		}
 	}() // avoid crash because Erigon's core does many things
-	tx, err := db.BeginTemporalRw(ctx)
+	// Use a read-only tx: all writes go to the MemoryBatch overlay and are
+	// never committed, so there is no need to hold the MDBX exclusive write lock.
+	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
 	}
