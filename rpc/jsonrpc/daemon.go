@@ -21,7 +21,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/commitment/qmtree"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -79,7 +78,7 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 		}
 	}
 
-	qmImpl := NewQMAPI(db, blockReader, rawdbv3.TxNums, qmTracker, logger)
+	qmImpl := NewQMAPI(base, db, qmTracker, cfg.Gascap, logger)
 	otsImpl := NewOtterscanAPI(base, db, cfg.OtsMaxPageSize)
 	internalImpl := NewInternalAPI(base, db)
 	gqlImpl := NewGraphQLAPI(base, db)

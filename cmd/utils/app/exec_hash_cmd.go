@@ -32,7 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/temporal"
-	"github.com/erigontech/erigon/execution/commitment/qmtree/poc"
+	"github.com/erigontech/erigon/execution/commitment/qmtree/tools"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
@@ -111,7 +111,7 @@ func doExecHash(ctx context.Context, args execHashArgs, logger log.Logger) error
 		toBlock = 0 // Runner interprets 0 as "latest"
 	}
 
-	runner := poc.NewExecRunner(logger, db, blockReader, chainConfig, poc.NilEngine())
+	runner := tools.NewExecRunner(logger, db, blockReader, chainConfig, tools.NilEngine())
 	results, err := runner.RunBlocks(ctx, args.from, toBlock)
 	if err != nil {
 		return err
@@ -124,7 +124,7 @@ func doExecHash(ctx context.Context, args execHashArgs, logger log.Logger) error
 	return nil
 }
 
-func writeExecHashCSV(outputDir string, results []poc.ExecBlockResult) error {
+func writeExecHashCSV(outputDir string, results []tools.ExecBlockResult) error {
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		return err
 	}

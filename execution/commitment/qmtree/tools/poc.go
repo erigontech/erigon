@@ -1,6 +1,6 @@
 // Package poc implements a proof-of-concept that builds a qmtree from
 // Ethereum state history, computing block-level and tx-level roots.
-package poc
+package tools
 
 import (
 	"context"

@@ -32,7 +32,7 @@ func syntheticTracker(t *testing.T, n int) *qmtree.Tracker {
 // verifyOnlyAPI returns a QMAPIImpl with only the tracker set — enough for
 // VerifyProof and VerifyWitness which do not touch the database.
 func verifyOnlyAPI(tracker *qmtree.Tracker) *QMAPIImpl {
-	return &QMAPIImpl{tracker: tracker}
+	return &QMAPIImpl{tracker: tracker, BaseAPI: nil}
 }
 
 // ---------------------------------------------------------------------------
@@ -274,6 +274,188 @@ func TestQMAPI_WitnessInvalidAfterUnwind(t *testing.T) {
 	// sn=3 must still be present.
 	_, err = tracker.GetWitness(3)
 	require.NoError(t, err, "sn=3 must still be present after partial unwind")
+}
+
+// ---------------------------------------------------------------------------
+// QMCallProof structure tests (no database required)
+// ---------------------------------------------------------------------------
+
+// buildCallProofFromWitnesses builds a QMCallProof directly from a list of
+// txNums (simulating what CallProof does after execution), so we can test the
+// twig-grouping logic without a real database or EVM execution.
+func buildCallProofFromWitnesses(t *testing.T, tracker *qmtree.Tracker, txNums []uint64) *QMCallProof {
+	t.Helper()
+	hasher := &qmtree.Keccak256Hasher{}
+	twigIndexMap := map[uint64]int{}
+	var twigs []QMCallProofTwig
+	var leaves []QMCallProofLeaf
+	var root common.Hash
+
+	for _, txNum := range txNums {
+		w, err := tracker.GetWitness(txNum)
+		require.NoError(t, err, "GetWitness sn=%d", txNum)
+
+		sn := w.Proof.SerialNum
+		twigId := sn >> qmtree.TWIG_SHIFT
+		root = w.Proof.Root
+
+		twigIdx, seen := twigIndexMap[twigId]
+		if !seen {
+			upperPeers := make([]hexutil.Bytes, len(w.Proof.UpperPath))
+			for i, node := range w.Proof.UpperPath {
+				h := node.PeerHash
+				upperPeers[i] = h[:]
+			}
+			twigIdx = len(twigs)
+			twigIndexMap[twigId] = twigIdx
+			twigs = append(twigs, QMCallProofTwig{
+				TwigId:          hexutil.Uint64(twigId),
+				UpperPeerHashes: upperPeers,
+			})
+		}
+
+		intraPeers := make([]hexutil.Bytes, len(w.Proof.LeftOfTwig))
+		for i, node := range w.Proof.LeftOfTwig {
+			h := node.PeerHash
+			intraPeers[i] = h[:]
+		}
+		selfHash := w.Proof.LeftOfTwig[0].SelfHash
+		leaves = append(leaves, QMCallProofLeaf{
+			TxNum:               hexutil.Uint64(txNum),
+			TwigIndex:           twigIdx,
+			LeafData: QMLeafData{
+				PreStateHash:     w.PreStateHash,
+				StateChangeHash:  w.StateChangeHash,
+				TransitionHash:   w.TransitionHash,
+				PreviousLeafHash: w.PreviousLeafHash,
+			},
+			SelfHash:            selfHash[:],
+			IntraTwigPeerHashes: intraPeers,
+			Verified:            w.Verify(hasher) == nil,
+		})
+	}
+
+	return &QMCallProof{Root: root, Twigs: twigs, Leaves: leaves}
+}
+
+// TestQMCallProof_TwigGrouping verifies that leaves in the same twig are
+// collapsed to a single Twigs entry, and that the UpperPeerHashes are
+// identical for all leaves in that twig.
+func TestQMCallProof_TwigGrouping(t *testing.T) {
+	// 8 leaves all in twig 0 (serial numbers 0..7, all < LEAF_COUNT_IN_TWIG=2048).
+	tracker := syntheticTracker(t, 8)
+
+	proof := buildCallProofFromWitnesses(t, tracker, []uint64{0, 1, 2, 3, 4, 5, 6, 7})
+
+	// All 8 leaves share twig 0.
+	require.Len(t, proof.Twigs, 1, "expected 1 twig for 8 leaves in twig 0")
+	require.Equal(t, hexutil.Uint64(0), proof.Twigs[0].TwigId)
+	require.Len(t, proof.Leaves, 8)
+
+	for i, leaf := range proof.Leaves {
+		require.Equal(t, 0, leaf.TwigIndex, "leaf %d should reference twig 0", i)
+		require.True(t, leaf.Verified, "leaf %d should verify", i)
+		require.Len(t, leaf.IntraTwigPeerHashes, 11, "leaf %d needs 11 intra-twig peer hashes", i)
+	}
+
+	// All upper paths in the same twig must be identical.
+	for i := 1; i < len(proof.Leaves); i++ {
+		require.Equal(t, proof.Twigs[proof.Leaves[0].TwigIndex].UpperPeerHashes,
+			proof.Twigs[proof.Leaves[i].TwigIndex].UpperPeerHashes,
+			"upper paths must be identical within one twig")
+	}
+}
+
+// TestQMCallProof_SizeVsWitness measures proof size vs witness size.
+func TestQMCallProof_SizeVsWitness(t *testing.T) {
+	const N = 8
+	tracker := syntheticTracker(t, N)
+	hasher := &qmtree.Keccak256Hasher{}
+
+	// Measure individual witness total bytes.
+	witnessBytes := 0
+	for sn := uint64(0); sn < N; sn++ {
+		w, err := tracker.GetWitness(sn)
+		require.NoError(t, err)
+		require.Nil(t, w.Verify(hasher))
+		witnessBytes += 8 + 4*32 + 32 + len(w.Proof.ToBytes()) + 32
+	}
+
+	// Measure compact proof total bytes.
+	proof := buildCallProofFromWitnesses(t, tracker, func() []uint64 {
+		s := make([]uint64, N)
+		for i := range s {
+			s[i] = uint64(i)
+		}
+		return s
+	}())
+	proofBytes := 32 // root
+	for _, tw := range proof.Twigs {
+		proofBytes += 8 + len(tw.UpperPeerHashes)*32
+	}
+	for _, lf := range proof.Leaves {
+		proofBytes += 8 + 4*32 + 32 + len(lf.IntraTwigPeerHashes)*32
+	}
+
+	t.Logf("N=%d leaves (all in same twig): witness=%d bytes, proof=%d bytes, saving=%.0f%%",
+		N, witnessBytes, proofBytes, 100*(1-float64(proofBytes)/float64(witnessBytes)))
+
+	// Proof must be smaller than witnesses when twig is shared.
+	require.Less(t, proofBytes, witnessBytes, "compact proof should be smaller than individual witnesses")
+}
+
+// ---------------------------------------------------------------------------
+// QMCallProof digest tests
+// ---------------------------------------------------------------------------
+
+// TestCallProofDigest_Deterministic verifies that the digest is stable across
+// two calls on the same proof.
+func TestCallProofDigest_Deterministic(t *testing.T) {
+	tracker := syntheticTracker(t, 8)
+	proof := buildCallProofFromWitnesses(t, tracker, []uint64{0, 1, 2, 3})
+
+	d1 := callProofDigest(proof)
+	d2 := callProofDigest(proof)
+	require.Equal(t, d1, d2, "digest must be deterministic")
+	require.NotEqual(t, d1, common.Hash{}, "digest must be non-zero for non-empty proof")
+}
+
+// TestCallProofDigest_ChangesOnTamper verifies that modifying any leaf field
+// changes the digest.
+func TestCallProofDigest_ChangesOnTamper(t *testing.T) {
+	tracker := syntheticTracker(t, 8)
+	proof := buildCallProofFromWitnesses(t, tracker, []uint64{0, 1, 2, 3})
+	original := callProofDigest(proof)
+
+	// Tamper with a leaf's PreStateHash.
+	saved := proof.Leaves[0].LeafData.PreStateHash
+	proof.Leaves[0].LeafData.PreStateHash = common.Hash{0xFF}
+	tampered := callProofDigest(proof)
+	require.NotEqual(t, original, tampered, "digest must change when a leaf is tampered")
+
+	// Restore and verify we get the original digest back.
+	proof.Leaves[0].LeafData.PreStateHash = saved
+	restored := callProofDigest(proof)
+	require.Equal(t, original, restored, "digest must be restored after fixing the tampered field")
+}
+
+// TestCallProofDigest_ChangesOnDifferentLeaves verifies that proofs covering
+// different leaf sets have different digests.
+func TestCallProofDigest_ChangesOnDifferentLeaves(t *testing.T) {
+	tracker := syntheticTracker(t, 8)
+	proof01 := buildCallProofFromWitnesses(t, tracker, []uint64{0, 1})
+	proof23 := buildCallProofFromWitnesses(t, tracker, []uint64{2, 3})
+	d01 := callProofDigest(proof01)
+	d23 := callProofDigest(proof23)
+	require.NotEqual(t, d01, d23, "different leaf sets must produce different digests")
+}
+
+// TestCallProofDigest_MerkleizeEmptyList verifies that merkleizeList behaves
+// correctly for empty inputs and that length-0 vs length-1 lists differ.
+func TestCallProofDigest_MerkleizeEmptyList(t *testing.T) {
+	empty := merkleizeList(nil)
+	one := merkleizeList([]common.Hash{{0x01}})
+	require.NotEqual(t, empty, one, "empty and non-empty list roots must differ")
 }
 
 // ---------------------------------------------------------------------------

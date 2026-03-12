@@ -226,7 +226,7 @@ For the PoC, we persist:
 ### 5.1 Directory Structure
 
 ```
-execution/commitment/qmtree/poc/
+execution/commitment/qmtree/tools/
     poc.go              # Main runner (models backtester pattern)
     state_entry.go      # StateEntry: Entry implementation for state changes
     unwind.go           # Unwind/truncation logic
@@ -301,7 +301,34 @@ The QMDB design (Section 7.0) extends entries with `NextKeyHash` to enable exclu
 
 The PoC does not implement exclusion proofs, but the design accommodates them as a future extension by adding `NextKeyHash` to the `StateEntry` structure.
 
-## 7. Future Work (Beyond PoC)
+## 7. Implemented RPC Namespace
+
+The `qm_` RPC namespace is implemented on the `qmtree-dataset-builder` branch.
+See [qmtree-state-proof-analysis.md](qmtree-state-proof-analysis.md) for full
+API contracts. Quick reference:
+
+| Method | Description |
+|---|---|
+| `qm_getProof(address, block)` | Inclusion proof for the last tx touching `address` |
+| `qm_getWitness(block)` | Range witness for all txs in a block |
+| `qm_getTxWitness(block, txIndex)` | Witness for a single tx by index |
+| `qm_getAccountStateProof(address, slots[], block)` | State values + qmtree witness |
+| `qm_getTxStateProof(address, slots[], block, txIndex)` | Same, pinned to a specific tx |
+| `qm_getLatestStateProof(address, slots[])` | State at chain tip + latest witness |
+| `qm_call(callArgs, block)` | Provable `eth_call` — execution result + combined witness set |
+| `qm_callProof(callArgs, block)` | Same, with compact twig-grouped proof + 32-byte digest |
+| `qm_verifyProof(proofBytes)` | Stateless binary proof verification |
+| `qm_verifyWitness(witnessBytes)` | Stateless binary witness verification |
+
+### `qm_callProof` compact format
+
+`qm_callProof` returns a `QMCallProof` that deduplicates upper-tree peer hashes
+across leaves in the same twig (~34% smaller than individual witnesses on hoodi).
+The response includes a `digest` field: a 32-byte `hash_tree_root`-style Merkle
+commitment over all proof fields, allowing a verifier to store a compact digest
+and later check that a full proof has not been modified.
+
+## 8. Future Work (Beyond PoC)
 
 1. **ActiveBit management** — deactivate old entries when keys are updated; implement compaction (QMDB Section 5.0)
 2. **Exclusion proofs** — add `NextKeyHash` field for negative proofs (QMDB Section 7.0)

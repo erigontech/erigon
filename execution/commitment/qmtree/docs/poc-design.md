@@ -256,7 +256,7 @@ execHasherPool.Put(hasher)
 txTask.ExecHash = execHash
 ```
 
-### 4.6 Leaf Hash (execution/commitment/qmtree/poc/state_entry.go)
+### 4.6 Leaf Hash (execution/commitment/qmtree/tools/state_entry.go)
 
 ```go
 func NewStateEntry(txNum uint64, changes []StateChange, opts LeafHashInputs) *StateEntry {

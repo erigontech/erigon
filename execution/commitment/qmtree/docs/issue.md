@@ -198,16 +198,16 @@ Run against Hoodi and compare with existing commitment.
 
 ```bash
 # Build and run against Hoodi datadir
-go run ./execution/commitment/qmtree/poc \
+go run ./execution/commitment/qmtree/tools \
   --datadir /path/to/hoodi \
   --from 1 --to 10000 \
   --output-dir ./qmtree-poc-results
 
 # Run tests
-go test ./execution/commitment/qmtree/poc/... -v -count=1
+go test ./execution/commitment/qmtree/tools/... -v -count=1
 
 # Run unwind tests specifically
-go test ./execution/commitment/qmtree/poc/... -run TestUnwind -v
+go test ./execution/commitment/qmtree/tools/... -run TestUnwind -v
 ```
 
 ## Labels

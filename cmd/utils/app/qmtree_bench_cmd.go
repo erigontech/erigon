@@ -30,7 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/temporal"
-	"github.com/erigontech/erigon/execution/commitment/qmtree/poc"
+	"github.com/erigontech/erigon/execution/commitment/qmtree/tools"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
@@ -116,7 +116,7 @@ func doQmtreeBench(ctx context.Context, args qmtreeBenchArgs, logger log.Logger)
 		toBlock = 0 // Runner interprets 0 as "latest"
 	}
 
-	runner := poc.NewRunner(logger, db, blockReader, args.outputDir)
+	runner := tools.NewRunner(logger, db, blockReader, args.outputDir)
 	if args.treeDir != "" {
 		runner = runner.WithDataDir(args.treeDir)
 	}
