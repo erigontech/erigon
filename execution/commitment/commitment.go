@@ -1517,6 +1517,39 @@ type Updates struct {
 
 	sortPerNibble bool // if true, use nibbles collectors instead of etl (all-in-one)
 	nibbles       [16]*etl.Collector
+
+	batchSlab []KeyUpdate // grow-only slab for HashSort batch (avoids per-key heap allocs)
+	byteArena []byte      // grow-only byte arena for HashSort key copies
+}
+
+// arenaAlloc appends b to the byte arena and returns the sub-slice.
+// The returned slice is valid until the arena is reset.
+// The arena must have sufficient capacity (via arenaEnsureCap) before
+// accumulating a batch; if capacity is exceeded, arenaAlloc falls back
+// to an independent heap allocation to keep previously returned
+// sub-slices valid.
+func (t *Updates) arenaAlloc(b []byte) []byte {
+	off := len(t.byteArena)
+	needed := off + len(b)
+	if needed > cap(t.byteArena) {
+		// Arena capacity exceeded — fall back to an independent allocation.
+		// This keeps previously returned sub-slices valid while avoiding a
+		// panic that would crash a production node.
+		result := make([]byte, len(b))
+		copy(result, b)
+		return result
+	}
+	t.byteArena = t.byteArena[:needed]
+	copy(t.byteArena[off:], b)
+	return t.byteArena[off:needed]
+}
+
+// arenaEnsureCap ensures the byte arena has at least cap bytes of capacity.
+// Must be called before each batch to prevent mid-batch reallocation.
+func (t *Updates) arenaEnsureCap(c int) {
+	if cap(t.byteArena) < c {
+		t.byteArena = make([]byte, 0, c)
+	}
 }
 
 // Should be called right after updates initialisation. Otherwise could lost some data
@@ -1718,22 +1751,30 @@ const hashSortBatchSize = 10_000
 // Keys are processed in batches of 10k to control memory usage.
 // If warmuper is non-nil, keys are submitted for parallel warming before processing.
 // Caller is responsible for calling warmuper.Wait() after processing completes.
+// IMPORTANT: fn must not retain hk or pk slices after returning; they are backed by
+// reusable arena memory that is invalidated between batches.
 func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, pk []byte, update *Update) error) error {
 	switch t.mode {
 	case ModeDirect:
 		clear(t.keys)
 
-		batch := make([]*KeyUpdate, 0, hashSortBatchSize)
+		t.batchSlab = t.batchSlab[:0]
+		// Pre-allocate arena to avoid mid-batch reallocation that would
+		// invalidate previously returned sub-slices (hk/pk in batchSlab).
+		// Worst case: storage keys produce 128-byte nibblized hashed keys +
+		// 52-byte plain keys = 180 bytes/key. Use 192 with headroom.
+		t.arenaEnsureCap(hashSortBatchSize * 192)
+		t.byteArena = t.byteArena[:0]
 		var prevKey []byte
 
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			if warmuper != nil && warmuper.Cache() != nil {
 				warmuper.Cache().EvictPlainKey(v)
 			}
-			// Make copies since ETL may reuse buffers
-			hk := common.Copy(k)
-			pk := common.Copy(v)
-			batch = append(batch, &KeyUpdate{hashedKey: hk, plainKey: string(pk)})
+			// Copy into arena since ETL may reuse buffers
+			hk := t.arenaAlloc(k)
+			pk := t.arenaAlloc(v)
+			t.batchSlab = append(t.batchSlab, KeyUpdate{hashedKey: hk, plainKey: unsafe.String(unsafe.SliceData(pk), len(pk))})
 
 			// Submit to warmuper with start depth based on divergence from previous key
 			if warmuper != nil {
@@ -1746,25 +1787,26 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 					}
 				}
 				warmuper.WarmKey(hk, startDepth)
-				prevKey = hk
+				prevKey = append(prevKey[:0], hk...)
 			}
 
 			// Process batch when full
-			if len(batch) >= hashSortBatchSize {
-				for _, p := range batch {
+			if len(t.batchSlab) >= hashSortBatchSize {
+				for i := range t.batchSlab {
 					select {
 					case <-ctx.Done():
 						return ctx.Err()
 					default:
 					}
-					if err := fn(p.hashedKey, common.ToBytesZeroCopy(p.plainKey), nil); err != nil {
+					if err := fn(t.batchSlab[i].hashedKey, common.ToBytesZeroCopy(t.batchSlab[i].plainKey), nil); err != nil {
 						return err
 					}
 				}
 				if warmuper != nil {
 					warmuper.DrainPending()
 				}
-				batch = batch[:0]
+				t.batchSlab = t.batchSlab[:0]
+				t.byteArena = t.byteArena[:0]
 			}
 			return nil
 		}, etl.TransformArgs{Quit: ctx.Done()})
@@ -1773,13 +1815,13 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		}
 
 		// Process remaining keys in final batch
-		for _, p := range batch {
+		for i := range t.batchSlab {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			default:
 			}
-			if err := fn(p.hashedKey, common.ToBytesZeroCopy(p.plainKey), nil); err != nil {
+			if err := fn(t.batchSlab[i].hashedKey, common.ToBytesZeroCopy(t.batchSlab[i].plainKey), nil); err != nil {
 				return err
 			}
 		}
@@ -1787,7 +1829,13 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		t.initCollector()
 
 	case ModeUpdate:
-		batch := make([]*KeyUpdate, 0, hashSortBatchSize)
+		t.batchSlab = t.batchSlab[:0]
+		// Pre-allocate arena to avoid mid-batch reallocation that would
+		// invalidate previously returned sub-slices (hk in batchSlab).
+		// ModeUpdate only arenas hashedKey: up to 128 bytes for nibblized
+		// storage key hashes. Use 144 with headroom.
+		t.arenaEnsureCap(hashSortBatchSize * 144)
+		t.byteArena = t.byteArena[:0]
 		var prevKey []byte
 		var processErr error
 
@@ -1799,10 +1847,9 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 			default:
 			}
 
-			// Make copies
-			hk := make([]byte, len(item.hashedKey))
-			copy(hk, item.hashedKey)
-			batch = append(batch, &KeyUpdate{hashedKey: hk, plainKey: item.plainKey, update: item.update})
+			// Copy hashedKey into arena; plainKey references tree item directly
+			hk := t.arenaAlloc(item.hashedKey)
+			t.batchSlab = append(t.batchSlab, KeyUpdate{hashedKey: hk, plainKey: item.plainKey, update: item.update})
 
 			// Submit to warmuper with start depth based on divergence from previous key
 			if warmuper != nil {
@@ -1815,19 +1862,19 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 					}
 				}
 				warmuper.WarmKey(hk, startDepth)
-				prevKey = hk
+				prevKey = append(prevKey[:0], hk...)
 			}
 
 			// Process batch when full
-			if len(batch) >= hashSortBatchSize {
-				for _, p := range batch {
+			if len(t.batchSlab) >= hashSortBatchSize {
+				for i := range t.batchSlab {
 					select {
 					case <-ctx.Done():
 						processErr = ctx.Err()
 						return false
 					default:
 					}
-					if err := fn(p.hashedKey, common.ToBytesZeroCopy(p.plainKey), p.update); err != nil {
+					if err := fn(t.batchSlab[i].hashedKey, common.ToBytesZeroCopy(t.batchSlab[i].plainKey), t.batchSlab[i].update); err != nil {
 						processErr = err
 						return false
 					}
@@ -1835,7 +1882,8 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 				if warmuper != nil {
 					warmuper.DrainPending()
 				}
-				batch = batch[:0]
+				t.batchSlab = t.batchSlab[:0]
+				t.byteArena = t.byteArena[:0]
 			}
 			return true
 		})
@@ -1845,13 +1893,13 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		}
 
 		// Process remaining keys in final batch
-		for _, p := range batch {
+		for i := range t.batchSlab {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			default:
 			}
-			if err := fn(p.hashedKey, common.ToBytesZeroCopy(p.plainKey), p.update); err != nil {
+			if err := fn(t.batchSlab[i].hashedKey, common.ToBytesZeroCopy(t.batchSlab[i].plainKey), t.batchSlab[i].update); err != nil {
 				return err
 			}
 		}
@@ -1874,6 +1922,8 @@ func (t *Updates) Reset() {
 		t.tree.Clear(true)
 	default:
 	}
+	t.batchSlab = t.batchSlab[:0]
+	t.byteArena = t.byteArena[:0]
 }
 
 type KeyUpdate struct {

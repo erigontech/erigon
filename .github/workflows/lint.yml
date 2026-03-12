@@ -2,7 +2,6 @@ name: Lint
 on:
   workflow_dispatch:
   pull_request:
-    types: [opened, reopened, synchronize, ready_for_review]
     branches:
       - main
       - 'release/**'
@@ -15,7 +14,6 @@ defaults:
 
 jobs:
   lint:
-    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     concurrency:
       group: ${{ format('{0}-{1}', github.workflow, github.ref) }}

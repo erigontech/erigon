@@ -5,13 +5,12 @@
 
 set -euo pipefail
 
-# Workflows that use restore-build-cache / save-build-cache.
-WORKFLOWS=(
-  lint.yml
-  sonar.yml
-  test-all-erigon.yml
-  test-all-erigon-race.yml
-  reproducible-build.yml
+# Workflows that use setup-erigon (which manages the build cache).
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+mapfile -t WORKFLOWS < <(
+  grep -rl 'setup-erigon' "$script_dir/workflows/" --include='*.yml' \
+    | xargs -n1 basename \
+    | sort
 )
 
 head_sha=$(gh pr view --json headRefOid --jq .headRefOid)
