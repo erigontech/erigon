@@ -1020,19 +1020,15 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 		return result.finalizeSystemTx(task, txTask, rules, vm, stateReader, stateWriter)
 	}
 
-	// When BAL is active, the IBS-based finalize path is required because
-	// the BAL hash depends on fine-grained read tracking from the IBS
-	// (initialBalanceValue for net-zero detection, etc.) that the direct
-	// finalize path doesn't replicate.
-	if result.CollectorWrites == nil {
-		// No LightCollector writes — fall back to IBS-based finalize.
-		return result.finalizeWithIBS(task, txTask, prevReceipt, engine, vm, stateReader, stateWriter,
-			coinbaseDelta, coinbaseDeltaIncrease, hasCoinbaseDelta,
-			burntDelta, burntDeltaIncrease, hasBurntDelta,
-			rules, txTrace, tracePrefix)
-	}
+	// Clear CollectorWrites so nextResult uses collector.Writes() from
+	// the IBS-based finalize path (which correctly includes fee-calc
+	// adjustments and selfdestruct stripping).
+	// TODO: once finalizeTx produces correct BAL reads/writes and
+	// collector-format writes, gate the direct path on !BAL and
+	// remove this workaround.
+	result.CollectorWrites = nil
 
-	return result.finalizeTx(task, txTask, prevReceipt, engine, vm, stateReader,
+	return result.finalizeWithIBS(task, txTask, prevReceipt, engine, vm, stateReader, stateWriter,
 		coinbaseDelta, coinbaseDeltaIncrease, hasCoinbaseDelta,
 		burntDelta, burntDeltaIncrease, hasBurntDelta,
 		rules, txTrace, tracePrefix)
