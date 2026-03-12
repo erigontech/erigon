@@ -1,8 +1,12 @@
-# QMTree Ethereum State Commitment PoC — Design Document
+# QMTree Ethereum State Commitment — Design
 
 ## 1. Introduction
 
-This document describes a proof-of-concept (PoC) for using the [QMDB Twig Merkle Tree](https://github.com/LayerZero-Labs/qmdb/tree/main/docs) as an alternative state commitment scheme for Ethereum. The goal is to replace the keccak256-hashed hex patricia trie with a sequential, append-only binary Merkle tree indexed by Erigon's global transaction number (`txnum`).
+This document describes the design of QMTree, an alternative state commitment
+scheme for Ethereum that uses the
+[QMDB Twig Merkle Tree](https://github.com/LayerZero-Labs/qmdb/tree/main/docs)
+in place of the keccak256-hashed hex patricia trie. The tree is indexed by
+Erigon's global transaction number (`txnum`).
 
 ### 1.1 References
 
@@ -89,7 +93,7 @@ The upper tree (levels 13+) combines twig roots into the final tree root.
 
 ### 2.4 Block-Level and Tx-Level Hashes
 
-The PoC computes two granularities of commitment:
+The tree supports two granularities of commitment:
 
 - **Tx-level root**: `tree.Root()` after appending leaf for txnum T. This commits to all state changes through transaction T.
 - **Block-level root**: `tree.Root()` after appending the final leaf of block N (at `max_txnum(N)`). This is the candidate "state root" for block N.
@@ -104,7 +108,7 @@ In the PoC, ActiveBits are used for:
 1. **State currency proofs** — proving that a particular state change is the most recent for a given key
 2. **Pruning** — once all entries in a twig are inactive, the twig can be evicted from memory (Section 6.0)
 
-For the initial PoC, we set ActiveBits for all appended entries and do not implement deactivation or pruning. This is Phase 1 functionality; full ActiveBit management is a follow-up.
+ActiveBit deactivation and twig pruning are not yet implemented. Full ActiveBit management is tracked as future work (see Section 8).
 
 ## 3. Proofs and Witnesses
 
@@ -216,67 +220,14 @@ The PoC must support unwinding up to **500 blocks** from the tip. On Ethereum ma
 
 The unwind operation is atomic in the same sense as the QMDB flusher's crash recovery: if interrupted, the stored `max_txnum` in metadata determines the authoritative state, and recovery truncates any data beyond that point.
 
-For the PoC, we persist:
+The implementation persists:
 - `lastCommittedTxNum` — the highest fully-committed txnum
 - `lastCommittedBlock` — the corresponding block number
 - `edgeNodes` — boundary nodes needed for proof construction after pruning (per QMDB architecture, "The edge nodes" section)
 
-## 5. PoC Architecture
+## 5. Keyset and Indexing
 
-### 5.1 Directory Structure
-
-```
-execution/commitment/qmtree/tools/
-    poc.go              # Main runner (models backtester pattern)
-    state_entry.go      # StateEntry: Entry implementation for state changes
-    unwind.go           # Unwind/truncation logic
-    proof.go            # Account/storage proof generation and verification
-    poc_test.go         # Tests
-    README.md           # Usage and results
-```
-
-### 5.2 Data Flow
-
-```
-Hoodi chain (read-only datadir)
-    |
-    v
-TxNumsReader: block -> [fromTxNum, toTxNum]
-    |
-    v
-HistoryRange(domain, fromTxNum, toTxNum):
-    yields (key, value) per txnum
-    |
-    v
-StateEntry{txNum, hash, changes}:
-    sorted, hashed per tx
-    |
-    v
-tree.AppendEntry(entry):
-    leaf inserted at serial number = txnum
-    |
-    v
-tree.Root():
-    block-level commitment after each block
-    |
-    v
-Compare / analyze / generate proofs
-```
-
-### 5.3 Interaction with Existing Backtester
-
-The PoC reuses the backtester's infrastructure:
-
-- `TxNumsReader` for block-to-txnum mapping
-- `HistoryRange` for iterating state changes per block
-- `SharedDomains` for state access
-- Block header reader for canonical root comparison (values will differ but structure is validated)
-
-The PoC does **not** replace the existing commitment system. It runs alongside it, computing qmtree roots for analysis while the hex patricia trie remains authoritative.
-
-## 6. Keyset and Indexing
-
-### 6.1 The Keyset Question
+### 5.1 The keyset question
 
 To verify a state proof, the verifier needs to know **which txnum** last modified a given key. This is the "keyset" — a mapping from `(domain, key)` to `txnum`.
 
@@ -288,24 +239,26 @@ Options explored:
 | **B: In-leaf keyset** | Encoded in leaf preimage | Self-contained but large |
 | **C: Separate commitment** | Second Merkle tree over key->txnum | Trustless but complex |
 
-The PoC uses **Approach A** — Erigon's existing inverted index. This is sufficient for the PoC because:
-- The index already maps `(domain, key) -> [txnums]` efficiently
-- No new storage is needed
-- The focus is on validating the tree structure and hash computation, not building a production-grade light client protocol
+The current implementation uses **Approach A** — Erigon's existing inverted
+index. The index already maps `(domain, key) -> [txnums]` efficiently and
+requires no new storage.
 
-Approach C (a committed key index) is noted as future work for trustless proofs. The QMDB design addresses this via the B-tree indexer (architecture doc, "B-tree" section) which maps key hashes to entry offsets.
+Approach C (a committed key index) is future work for trustless proofs. The
+QMDB design addresses this via its B-tree indexer (architecture doc, "B-tree"
+section) which maps key hashes to entry offsets.
 
-### 6.2 QMDB's Exclusion Proof Extension
+### 5.2 Exclusion proofs
 
-The QMDB design (Section 7.0) extends entries with `NextKeyHash` to enable exclusion proofs — proving that no key exists between two adjacent keys in hash order. This is analogous to what the hex patricia trie provides via its branch/extension node structure.
+The QMDB design (Section 7.0) extends entries with `NextKeyHash` to enable
+exclusion proofs — proving that no key exists between two adjacent keys in hash
+order. This is analogous to what the hex patricia trie provides via its
+branch/extension node structure. Not yet implemented; the `StateEntry` structure
+accommodates it as a future extension.
 
-The PoC does not implement exclusion proofs, but the design accommodates them as a future extension by adding `NextKeyHash` to the `StateEntry` structure.
+## 6. RPC Namespace
 
-## 7. Implemented RPC Namespace
-
-The `qm_` RPC namespace is implemented on the `qmtree-dataset-builder` branch.
-See [qmtree-state-proof-analysis.md](qmtree-state-proof-analysis.md) for full
-API contracts. Quick reference:
+The `qm_` RPC namespace is implemented and wired into rpcdaemon. For complete
+type signatures and request/response formats see [protocol-spec.md](protocol-spec.md).
 
 | Method | Description |
 |---|---|
@@ -316,25 +269,25 @@ API contracts. Quick reference:
 | `qm_getTxStateProof(address, slots[], block, txIndex)` | Same, pinned to a specific tx |
 | `qm_getLatestStateProof(address, slots[])` | State at chain tip + latest witness |
 | `qm_call(callArgs, block)` | Provable `eth_call` — execution result + combined witness set |
-| `qm_callProof(callArgs, block)` | Same, with compact twig-grouped proof + 32-byte digest |
+| `qm_callProof(callArgs, block)` | Compact twig-grouped proof + 32-byte Merkle digest |
 | `qm_verifyProof(proofBytes)` | Stateless binary proof verification |
 | `qm_verifyWitness(witnessBytes)` | Stateless binary witness verification |
 
-### `qm_callProof` compact format
+`qm_callProof` deduplicates upper-tree peer hashes across leaves in the same
+twig (~19–37% smaller than individual witnesses, depending on access pattern).
+The `digest` field is a 32-byte SSZ-inspired `hash_tree_root` commitment over
+all proof fields; a verifier can store the digest and later check that a full
+proof has not been tampered with.
 
-`qm_callProof` returns a `QMCallProof` that deduplicates upper-tree peer hashes
-across leaves in the same twig (~34% smaller than individual witnesses on hoodi).
-The response includes a `digest` field: a 32-byte `hash_tree_root`-style Merkle
-commitment over all proof fields, allowing a verifier to store a compact digest
-and later check that a full proof has not been modified.
+## 7. Future Work
 
-## 8. Future Work (Beyond PoC)
-
-1. **ActiveBit management** — deactivate old entries when keys are updated; implement compaction (QMDB Section 5.0)
-2. **Exclusion proofs** — add `NextKeyHash` field for negative proofs (QMDB Section 7.0)
-3. **Inclusion proofs at arbitrary heights** — add `LastHeight` and `DeactivatedSerialNum` fields (QMDB Section 8.0)
-4. **Head pruning** — prune inactive twigs from SSD using HPFile (QMDB Section 10.0)
-5. **Prefetcher-updater-flusher pipeline** — pipelined execution for production throughput (QMDB architecture, "Timing of the pipeline")
-6. **HybridIndexer** — SSD+DRAM indexing for production memory efficiency (QMDB architecture, "HybridIndexer")
-7. **eth_getProof compatibility** — adapter that translates qmtree proofs to the format expected by existing tooling
-8. **Parallel twig sync** — leverage the 4-shard design for parallel hash computation (tree.go TWIG_SHARD_COUNT=4)
+1. **ActiveBit management** — deactivate old entries when keys are updated; implement twig compaction (QMDB §5)
+2. **Exclusion proofs** — add `NextKeyHash` for negative proofs (QMDB §7)
+3. **Inclusion proofs at arbitrary heights** — `LastHeight` + `DeactivatedSerialNum` fields (QMDB §8)
+4. **Head pruning** — prune inactive twigs using HPFile (QMDB §10)
+5. **Prefetcher-updater-flusher pipeline** — pipelined execution for production throughput
+6. **HybridIndexer** — SSD+DRAM indexing for production memory efficiency
+7. **eth_getProof compatibility** — adapter translating qmtree proofs to the format expected by existing tooling
+8. **Parallel twig sync** — leverage the 4-shard design (TWIG_SHARD_COUNT=4) for parallel hash computation
+9. **SMT state roots** — replace flat keccak preStateHash with an SMT root to enable single-key proofs without full changeset disclosure (see `state-proof-analysis.md §Question 3b`)
+10. **Transition hash** — complete the EVM opcode trace encoding (see `transition-format.md`) for full call binding in `qm_callProof` verification

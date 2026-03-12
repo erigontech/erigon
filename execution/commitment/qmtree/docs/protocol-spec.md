@@ -429,11 +429,9 @@ once `transitionHash` encodes the full EVM opcode trace (see `transition-format.
 
 | Document | Description |
 |---|---|
+| `README.md` | Overview, status, and reading guide |
 | `protocol-spec.md` | **This file** — normative wire format and API reference |
-| `design.md` | Architecture, tree design, keyset indexing, EIP strategy |
-| `state-proof-analysis.md` | Analysis Q&A, RPC implementation details, compact proof sizing |
-| `issue.md` | Original PoC issue (background, motivation, Phase 1-5 plan) |
-| `poc-design.md` | PoC internals (StateEntry, PocRunner, unwind strategy) |
-| `poc-pr-summary.md` | Proof-of-execution PR summary |
-| `transition-design.md` | TransitionHash design rationale |
-| `transition-format.md` | TransitionHash wire format specification |
+| `design.md` | Architecture, tree design, keyset indexing, RPC namespace, future work |
+| `state-proof-analysis.md` | Analysis Q&A, RPC implementation details, compact proof sizing, provable calls vision |
+| `transition-design.md` | Proof-of-transition design rationale |
+| `transition-format.md` | Transition record wire format specification (normative) |
