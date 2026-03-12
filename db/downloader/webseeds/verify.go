@@ -44,11 +44,6 @@ func Verify(
 	if dataDir != "" {
 		dirs = datadir.Open(dataDir)
 	}
-	err = snapcfg.LoadPreverified(ctx, preverifiedFlagValue, &dirs)
-	if err != nil {
-		return
-	}
-	allPreverified := snapcfg.GetAllCurrentPreverified()
 	chains := selectChains(targetChain, snapcfg.EmbeddedWebseedsRaw)
 	if len(chains) == 0 {
 		err = errors.New("no matching chains")
@@ -78,6 +73,11 @@ func Verify(
 	for _, chain := range chains {
 		// Shift left?
 		//
+		err = snapcfg.LoadPreverified(ctx, preverifiedFlagValue, &dirs, chain)
+		if err != nil {
+			return
+		}
+		cfg, _ := snapcfg.KnownCfg(chain)
 		webseeds, _ := snapcfg.GetEmbeddedWebseeds(chain)
 		var baseUrl string
 		err := errors.New("no valid webseeds")
@@ -88,7 +88,7 @@ func Verify(
 			}
 		}
 		panicif.Err(err)
-		preverified := g.MapMustGet(allPreverified, chain)
+		preverified := cfg.Preverified
 		panicif.True(preverified.Local)
 		//
 		// end shift left?
