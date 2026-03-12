@@ -1126,6 +1126,8 @@ func (g *Getter) MatchPrefix(prefix []byte) bool {
 
 // MatchCmp lexicographically compares given buf with the word at the current offset in the file.
 // returns 0 if buf == word, -1 if buf < word, 1 if buf > word
+// On match (0), advances file position past the word. On mismatch, resets position.
+// Compares left-to-right during decode with early exit — no allocation, no full decode on mismatch.
 func (g *Getter) MatchCmp(buf []byte) int {
 	savePos := g.dataP
 	wordLen := g.nextPosClean()
@@ -1135,55 +1137,117 @@ func (g *Getter) MatchCmp(buf []byte) int {
 		g.dataP, g.dataBit = savePos, 0
 		return 1
 	}
-	if wordLen == 0 && lenBuf == 0 {
+	if wordLen == 0 {
 		if g.dataBit > 0 {
 			g.dataP++
 			g.dataBit = 0
 		}
-		return 0
+		if lenBuf == 0 {
+			return 0
+		}
+		g.dataP, g.dataBit = savePos, 0
+		return 1
+	}
+	if lenBuf == 0 {
+		g.dataP, g.dataBit = savePos, 0
+		return -1
 	}
 
-	decoded := make([]byte, wordLen)
-	var bufPos int
-	// In the first pass, we only check patterns
+	// Pass 1: scan patterns to find postLoopPos (where uncovered data starts).
+	// We don't store pattern data — pass 2 re-decodes them via nextPattern().
 	for pos := g.nextPos(); pos != 0; pos = g.nextPos() {
-		bufPos += int(pos) - 1
-		pattern := g.nextPattern()
-		copy(decoded[bufPos:], pattern)
+		g.nextPattern()
 	}
 	if g.dataBit > 0 {
 		g.dataP++
 		g.dataBit = 0
 	}
 	postLoopPos := g.dataP
+
+	// Reset decoder for pass 2
 	g.dataP, g.dataBit = savePos, 0
-	g.nextPosClean() // Reset the state of huffman decoder
-	// Second pass - we check spaces not covered by the patterns
+	g.nextPosClean()
+
+	// Pass 2: compare left-to-right with early exit.
+	// Uncovered regions: compare buf directly against g.data (zero-copy).
+	// Pattern regions: compare buf directly against dictionary slice from nextPattern().
 	var lastUncovered int
-	bufPos = 0
+	var bufPos int
+
 	for pos := g.nextPos(); pos != 0; pos = g.nextPos() {
 		bufPos += int(pos) - 1
-		// fmt.Printf("BUF POS: %d, POS: %d, lastUncovered: %d\n", bufPos, pos, lastUncovered)
+
+		// Compare uncovered region [lastUncovered, bufPos)
 		if bufPos > lastUncovered {
-			dif := uint64(bufPos - lastUncovered)
-			copy(decoded[lastUncovered:bufPos], g.data[postLoopPos:postLoopPos+dif])
-			postLoopPos += dif
+			dif := bufPos - lastUncovered
+			cmpLen := dif
+			if lastUncovered+cmpLen > lenBuf {
+				cmpLen = lenBuf - lastUncovered
+			}
+			if cmpLen > 0 {
+				if cmp := bytes.Compare(buf[lastUncovered:lastUncovered+cmpLen], g.data[postLoopPos:postLoopPos+uint64(cmpLen)]); cmp != 0 {
+					g.dataP, g.dataBit = savePos, 0
+					return cmp
+				}
+			}
+			if lenBuf < bufPos {
+				// buf shorter than word, equal so far
+				g.dataP, g.dataBit = savePos, 0
+				return -1
+			}
+			postLoopPos += uint64(dif)
 		}
-		lastUncovered = bufPos + len(g.nextPattern())
+
+		// Compare pattern region [bufPos, bufPos+len(pattern))
+		pattern := g.nextPattern()
+		patEnd := bufPos + len(pattern)
+		cmpLen := len(pattern)
+		if bufPos+cmpLen > lenBuf {
+			cmpLen = lenBuf - bufPos
+		}
+		if cmpLen > 0 {
+			if cmp := bytes.Compare(buf[bufPos:bufPos+cmpLen], pattern[:cmpLen]); cmp != 0 {
+				g.dataP, g.dataBit = savePos, 0
+				return cmp
+			}
+		}
+		if lenBuf < patEnd {
+			g.dataP, g.dataBit = savePos, 0
+			return -1
+		}
+
+		lastUncovered = patEnd
 	}
 
+	// Remaining uncovered after last pattern
 	if int(wordLen) > lastUncovered {
-		dif := wordLen - uint64(lastUncovered)
-		copy(decoded[lastUncovered:wordLen], g.data[postLoopPos:postLoopPos+dif])
-		postLoopPos += dif
+		dif := int(wordLen) - lastUncovered
+		cmpLen := dif
+		if lastUncovered+cmpLen > lenBuf {
+			cmpLen = lenBuf - lastUncovered
+		}
+		if cmpLen > 0 {
+			if cmp := bytes.Compare(buf[lastUncovered:lastUncovered+cmpLen], g.data[postLoopPos:postLoopPos+uint64(cmpLen)]); cmp != 0 {
+				g.dataP, g.dataBit = savePos, 0
+				return cmp
+			}
+		}
+		postLoopPos += uint64(dif)
 	}
-	cmp := bytes.Compare(buf, decoded)
-	if cmp == 0 {
-		g.dataP, g.dataBit = postLoopPos, 0
-	} else {
+
+	// All compared bytes equal — result depends on lengths
+	if lenBuf < int(wordLen) {
 		g.dataP, g.dataBit = savePos, 0
+		return -1
 	}
-	return cmp
+	if lenBuf > int(wordLen) {
+		g.dataP, g.dataBit = savePos, 0
+		return 1
+	}
+
+	// Exact match — advance position past the word
+	g.dataP, g.dataBit = postLoopPos, 0
+	return 0
 }
 
 func (g *Getter) MatchPrefixUncompressed(prefix []byte) bool {
