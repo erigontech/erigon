@@ -160,6 +160,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig
 	}
 
 	_, engine, vmConfig, stateStages := newSync(ctx, db, &builderConfig, logger1)
+	defer engine.Close()
 	chainConfig, pm := fromdb.ChainConfig(db), fromdb.PruneMode(db)
 
 	tx, err := db.BeginTemporalRw(ctx)
@@ -351,6 +352,7 @@ func loopExec(db kv.TemporalRwDB, ctx context.Context, unwind uint64, logger log
 	chainConfig := fromdb.ChainConfig(db)
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
 	_, engine, vmConfig, sync := newSync(ctx, db, nil, logger)
+	defer engine.Close()
 
 	tx, err := db.BeginTemporalRw(ctx)
 	if err != nil {
