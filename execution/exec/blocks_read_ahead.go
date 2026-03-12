@@ -273,7 +273,7 @@ func ReadBlockWithSendersFromGlobalReadAheader(blockHash common.Hash) (*types.Bl
 }
 
 func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.Engine, blockReader services.FullBlockReader) (chan uint64, context.CancelFunc) {
-	const readAheadBlocks = 100
+	const readAheadBlocks = 500
 	readAhead := make(chan uint64, readAheadBlocks)
 	g, gCtx := errgroup.WithContext(ctx)
 	for workerNum := 0; workerNum < workers; workerNum++ {

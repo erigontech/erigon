@@ -439,10 +439,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 		p2pConfig.DiscoveryDNS = backend.config.EthDiscoveryURLs
 
-		// Resolve chain-specific bootnodes and DNS for sentry servers
+		// Resolve chain-specific bootnodes and DNS for sentry servers.
+		// Only use them when the actual genesis hash matches the chain spec to avoid
+		// connecting to mainnet bootnodes when running with a custom genesis (e.g. Hive tests).
 		var chainBootnodes []string
 		var chainDNSNetwork string
-		if spec, err := chainspec.ChainSpecByName(config.Snapshot.ChainName); err == nil {
+		if spec, err := chainspec.ChainSpecByName(config.Snapshot.ChainName); err == nil && spec.GenesisHash == backend.genesisHash {
 			chainBootnodes = spec.Bootnodes
 			chainDNSNetwork = spec.DNSNetwork
 		}
