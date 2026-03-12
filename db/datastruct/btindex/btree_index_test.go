@@ -426,3 +426,34 @@ func TestNewBtIndex(t *testing.T) {
 		require.NotEmpty(t, bt.bplus.mx[i].key)
 	}
 }
+
+func BenchmarkBtIndex_Get(b *testing.B) {
+	keyCount := 100_000
+	compress := seg.CompressKeys
+
+	kvPath := generateKV(b, b.TempDir(), 20, 10, keyCount, log.New(), compress)
+	keys, err := pivotKeysFromKV(kvPath)
+	require.NoError(b, err)
+
+	indexPath := strings.TrimSuffix(kvPath, ".kv") + ".bt"
+	decomp, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, DefaultBtreeM, compress, false)
+	require.NoError(b, err)
+	defer bt.Close()
+	defer decomp.Close()
+
+	getter := seg.NewReader(decomp.MakeGetter(), compress)
+	rnd := newRnd(uint64(b.N))
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		p := rnd.IntN(len(keys))
+		k, _, _, found, err := bt.Get(keys[p], getter)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if !found || !bytes.Equal(keys[p], k) {
+			b.Fatal("key not found or mismatch")
+		}
+	}
+}
