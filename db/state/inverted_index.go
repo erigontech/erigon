@@ -1008,6 +1008,10 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 		}
 
 		baseTxNum := uint64(step) * ii.stepSize
+		if bitmap.Minimum() < txFrom || bitmap.Maximum() >= txTo {
+			return fmt.Errorf("[inverted_index] collate %s: txNums out of range [%d, %d) for step %d: min=%d, max=%d, key=%x",
+				ii.FilenameBase, txFrom, txTo, step, bitmap.Minimum(), bitmap.Maximum(), prevKey)
+		}
 		ef := multiencseq.NewBuilder(baseTxNum, bitmap.GetCardinality(), bitmap.Maximum())
 		it := bitmap.Iterator()
 		for it.HasNext() {
@@ -1141,6 +1145,7 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 		IndexFile:  idxPath,
 		Salt:       ii.salt.Load(),
 		NoFsync:    ii.noFsync,
+		Workers:    ii.BuildAccessorsWorkers,
 
 		Version:            versionOfRs,
 		Enums:              true,
@@ -1174,7 +1179,7 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 	// each such non-existing key read `MPH` transforms to random
 	// key read. `LessFalsePositives=true` feature filtering-out such cases (with `1/256=0.3%` false-positives).
 
-	if err := buildHashMapAccessor(ctx, data, idxPath, false, cfg, ps, ii.logger); err != nil {
+	if err := buildHashMapAccessor(ctx, data, idxPath, false, cfg, ps, ii.logger, nil); err != nil {
 		return err
 	}
 	return nil

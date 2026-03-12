@@ -82,6 +82,7 @@ type CallResult struct {
 	ReturnData string          `json:"returnData"`
 	Logs       []*types.RPCLog `json:"logs"`
 	GasUsed    hexutil.Uint64  `json:"gasUsed"`
+	MaxUsedGas hexutil.Uint64  `json:"maxUsedGas"`
 	Status     hexutil.Uint64  `json:"status"`
 	Error      any             `json:"error,omitempty"`
 }
@@ -716,7 +717,7 @@ func (s *simulator) simulateCall(
 		logs = receipt.Logs
 	}
 
-	callResult := CallResult{GasUsed: hexutil.Uint64(result.ReceiptGasUsed)}
+	callResult := CallResult{GasUsed: hexutil.Uint64(result.ReceiptGasUsed), MaxUsedGas: hexutil.Uint64(result.MaxGasUsed)}
 	callResult.Logs = make([]*types.RPCLog, 0, len(logs))
 	for _, l := range logs {
 		rpcLog := &types.RPCLog{
@@ -846,12 +847,12 @@ func clientLimitExceededError(message string) error {
 
 func newHistoryCommitmentOnlyReader(roTx kv.TemporalTx, sd *execctx.SharedDomains, limitReadAsOfTxNum uint64) commitmentdb.StateReader {
 	// Commitment values are read from history, whereas account/storage/code values are read from latest state
-	return rpchelper.NewCommitmentSplitStateReader(commitmentdb.NewHistoryStateReader(roTx, limitReadAsOfTxNum), commitmentdb.NewLatestStateReader(roTx, sd), true)
+	return commitmentdb.NewCommitmentSplitStateReader(commitmentdb.NewHistoryStateReader(roTx, limitReadAsOfTxNum), commitmentdb.NewLatestStateReader(roTx, sd), true)
 }
 
 func newSimulateStateReader(ttx, tx kv.TemporalTx, tsd, sd *execctx.SharedDomains) commitmentdb.StateReader {
 	// Both commitment and account/storage/code values are read from latest state *but* on different SharedDomains instances
-	return rpchelper.NewCommitmentSplitStateReader(commitmentdb.NewLatestStateReader(ttx, tsd), commitmentdb.NewLatestStateReader(tx, sd), false)
+	return commitmentdb.NewCommitmentSplitStateReader(commitmentdb.NewLatestStateReader(ttx, tsd), commitmentdb.NewLatestStateReader(tx, sd), false)
 }
 
 // computeCommitmentFromStateHistory calculates the commitment root for simulated block from state history

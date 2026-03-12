@@ -26,11 +26,9 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
-	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -41,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
-	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -88,16 +85,51 @@ func StageBuilderExecCfg(
 	}
 }
 
-// SpawnBuilderExecStage
+// SpawnBuilderExecStage builds a block by executing transactions from the txpool,
+// then computes the state root from the accumulated domain writes.
+//
+// State changes flow through a single execution path:
+//  1. IBS executes transactions using a NoopWriter / in-memory buffer (no per-tx writes to sd)
+//  2. FinalizeBlockExecution applies the accumulated IBS changes to sd via the block assembler writer
+//  3. ComputeCommitment(sd) produces the state root
+//  4. sd is backed by a MemoryBatch (from MiningStep) — discarded on return
+//
 // TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnBuilderExecStage(ctx context0.Context, s *stagedsync.StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg BuilderExecCfg, sendersCfg stagedsync.SendersCfg, execCfg stagedsync.ExecuteBlockCfg, logger log.Logger, u stagedsync.Unwinder) (err error) {
+func SpawnBuilderExecStage(ctx context0.Context, s *stagedsync.StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg BuilderExecCfg, execCfg stagedsync.ExecuteBlockCfg, logger log.Logger) (err error) {
 	cfg.vmConfig.NoReceipts = false
 	chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 	logPrefix := s.LogPrefix()
 	current := cfg.builderState.BuiltBlock
 
+	// sd is already backed by a MemoryBatch (from MiningStep in stageloop.go),
+	// so all writes accumulate there and are discarded when MiningStep returns.
+	// We use sd directly for execution state writes and commitment computation.
+	txNum, _, err := sd.SeekCommitment(ctx, tx)
+	if err != nil {
+		return err
+	}
+	sd.SetTxNum(txNum)
+	sd.GetCommitmentContext().SetDeferBranchUpdates(false)
+
+	stateWriter := state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 	stateReader := state.NewReaderV3(sd.AsGetter(tx))
+
+	// filterSd is a separate SharedDomains used only for filterBadTransactions.
+	// The filter makes speculative nonce/balance writes that may not match actual
+	// execution results (e.g., a tx passes the filter but fails in the EVM).
+	// These speculative writes must NOT pollute sd's commitment computation.
+	// filterSd must be backed by its own MemoryBatch to ensure full isolation.
+	filterMb := membatchwithdb.NewMemoryBatch(tx, cfg.tmpdir, logger)
+	defer filterMb.Close()
+	filterSd, err := execctx.NewSharedDomains(ctx, filterMb, logger)
+	if err != nil {
+		return err
+	}
+	defer filterSd.Close()
+	filterWriter := state.NewWriter(filterSd.AsPutDel(filterMb), nil, txNum)
+	filterReader := state.NewReaderV3(filterSd.AsGetter(filterMb))
+
 	ibs := state.New(stateReader)
 	defer ibs.Release(false)
 	ibs.SetTxContext(current.Header.Number.Uint64(), -1)
@@ -108,6 +140,7 @@ func SpawnBuilderExecStage(ctx context0.Context, s *stagedsync.StageState, sd *e
 		BlockReader:     cfg.blockReader,
 		ExperimentalBAL: execCfg.IsExperimentalBAL(),
 	}, cfg.payloadId, current.ParentHeaderTime, current.Header, current.Uncles, current.Withdrawals)
+	ba.SetStateWriter(stateWriter)
 
 	if ba.HasBAL() {
 		ibs.SetVersionMap(state.NewVersionMap(nil))
@@ -122,19 +155,6 @@ func SpawnBuilderExecStage(ctx context0.Context, s *stagedsync.StageState, sd *e
 		return execCfg.BlockReader().Header(ctx, tx, hash, number)
 	}
 
-	mb := membatchwithdb.NewMemoryBatch(tx, cfg.tmpdir, logger)
-	defer mb.Close()
-	simSd, err := execctx.NewSharedDomains(ctx, mb, logger)
-	if err != nil {
-		return err
-	}
-	defer simSd.Close()
-
-	txNum, _, err := sd.SeekCommitment(ctx, tx)
-	if err != nil {
-		return err
-	}
-
 	if err := ba.Initialize(ibs, tx, logger); err != nil {
 		return err
 	}
@@ -142,8 +162,6 @@ func SpawnBuilderExecStage(ctx context0.Context, s *stagedsync.StageState, sd *e
 	coinbase := accounts.InternAddress(cfg.builderState.BuilderConfig.Etherbase)
 
 	yielded := mapset.NewSet[[32]byte]()
-	simStateWriter := state.NewWriter(simSd.AsPutDel(tx), nil, txNum)
-	simStateReader := state.NewReaderV3(simSd.AsGetter(tx))
 
 	executionAt, err := s.ExecutionAt(tx)
 	if err != nil {
@@ -153,7 +171,7 @@ func SpawnBuilderExecStage(ctx context0.Context, s *stagedsync.StageState, sd *e
 	interrupt := cfg.interrupt
 	const amount = 50
 	for {
-		txns, err := getNextTransactions(ctx, cfg, chainID, current.Header, amount, executionAt, yielded, simStateReader, simStateWriter, logger)
+		txns, err := getNextTransactions(ctx, cfg, chainID, current.Header, amount, executionAt, yielded, filterReader, filterWriter, logger)
 		if err != nil {
 			return err
 		}
@@ -205,8 +223,6 @@ func SpawnBuilderExecStage(ctx context0.Context, s *stagedsync.StageState, sd *e
 	current.Requests = ba.Requests
 	current.BlockAccessList = ba.BlockAccessList
 
-	// Note: This gets reset in BuilderFinish - but we need it here to
-	// process execv3 - when we remove that this becomes redundant
 	header := block.HeaderNoCopy()
 
 	if execCfg.ChainConfig().IsPrague(header.Time) {
@@ -219,92 +235,10 @@ func SpawnBuilderExecStage(ctx context0.Context, s *stagedsync.StageState, sd *e
 
 	blockHeight := block.NumberU64()
 
-	writeBlockForExecution := func(rwTx kv.TemporalRwTx) error {
-		if err = rawdb.WriteHeader(rwTx, block.Header()); err != nil {
-			return fmt.Errorf("cannot write header: %s", err)
-		}
-		// Verify header round-trips correctly through RLP marshaling
-		if readBack := rawdb.ReadHeader(rwTx, block.Hash(), blockHeight); readBack == nil {
-			return fmt.Errorf("header round-trip failed: written header for block %d (hash %x) not readable", blockHeight, block.Hash())
-		}
-		if err = rawdb.WriteCanonicalHash(rwTx, block.Hash(), blockHeight); err != nil {
-			return fmt.Errorf("cannot write canonical hash: %s", err)
-		}
-		if err = rawdb.WriteHeadHeaderHash(rwTx, block.Hash()); err != nil {
-			return err
-		}
-		if _, err = rawdb.WriteRawBodyIfNotExists(rwTx, block.Hash(), blockHeight, block.RawBody()); err != nil {
-			return fmt.Errorf("cannot write body: %s", err)
-		}
-		if err = rawdb.AppendCanonicalTxNums(rwTx, blockHeight); err != nil {
-			return err
-		}
-		if err = stages.SaveStageProgress(rwTx, kv.Headers, blockHeight); err != nil {
-			return err
-		}
-		if err = stages.SaveStageProgress(rwTx, stages.Bodies, blockHeight); err != nil {
-			return err
-		}
-		senderS := &stagedsync.StageState{State: s.State, ID: stages.Senders, BlockNumber: blockHeight - 1}
-		if err = stagedsync.SpawnRecoverSendersStage(sendersCfg, senderS, nil, rwTx, blockHeight, ctx, logger); err != nil {
-			return err
-		}
-		return nil
-	}
-
-	// Simulate the block execution to get the final state root
-	if err = writeBlockForExecution(tx); err != nil {
-		return err
-	}
-
-	// This flag will skip checking the state root
-	execS := &stagedsync.StageState{State: s.State, ID: stages.Execution, BlockNumber: blockHeight - 1}
-	forceParallel := dbg.Exec3Parallel || cfg.chainConfig.IsAmsterdam(current.Header.Time)
-	execTx := tx
-	execSd := sd
-	var execCleanup func()
-	if forceParallel {
-		// get the underlying TemporalTx from MemoryMutation and create temporary SharedDomain
-		if _, ok := tx.(*temporal.RwTx); !ok {
-			type txUnwrapper interface {
-				UnderlyingTx() kv.TemporalTx
-			}
-			if unwrap, ok := tx.(txUnwrapper); ok {
-				if rwTx, ok := unwrap.UnderlyingTx().(kv.TemporalRwTx); ok {
-					tempSd, err := execctx.NewSharedDomains(ctx, rwTx, logger)
-					if err != nil {
-						return err
-					}
-					execTx = rwTx
-					execSd = tempSd
-					execCleanup = func() {
-						tempSd.Close()
-					}
-					if err = writeBlockForExecution(execTx); err != nil {
-						execCleanup()
-						return err
-					}
-				}
-			}
-		}
-		if _, ok := execTx.(*temporal.RwTx); !ok {
-			return fmt.Errorf("parallel execution requires *temporal.RwTx, got %T", execTx)
-		}
-	}
-	if execCleanup != nil {
-		defer execCleanup()
-	}
-
-	if err = stagedsync.ExecV3(ctx, execS, u, execCfg, execSd, execTx, forceParallel, blockHeight, logger); err != nil {
-		logger.Error("cannot execute block execution", "err", err)
-		return err
-	}
-
-	commitmentTxNum, _, err := execSd.SeekCommitment(ctx, execTx)
-	if err != nil {
-		return fmt.Errorf("seek commitment failed: %w", err)
-	}
-	rh, err := execSd.ComputeCommitment(ctx, execTx, true, blockHeight, commitmentTxNum, s.LogPrefix(), nil)
+	// Compute state root directly from the domain writes accumulated during
+	// block assembly. All state changes flow through CommitBlock in
+	// AssembleBlock — no re-execution needed.
+	rh, err := sd.ComputeCommitment(ctx, tx, false, blockHeight, txNum, s.LogPrefix(), nil)
 	if err != nil {
 		return fmt.Errorf("compute commitment failed: %w", err)
 	}

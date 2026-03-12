@@ -120,6 +120,7 @@ type ExecModuleTester struct {
 	SentryClient    direct.SentryClient
 	PeerId          *typesproto.H512
 	streams         map[sentryproto.MessageId][]sentryproto.Sentry_MessagesServer
+	sentMessagesMu  sync.Mutex
 	sentMessages    []*sentryproto.OutboundMessageData
 	StreamWg        sync.WaitGroup
 	ReceiveWg       sync.WaitGroup
@@ -198,22 +199,32 @@ func (emt *ExecModuleTester) HandShake(ctx context.Context, in *emptypb.Empty) (
 	return &sentryproto.HandShakeReply{Protocol: sentryproto.Protocol_ETH69}, nil
 }
 func (emt *ExecModuleTester) SendMessageByMinBlock(_ context.Context, r *sentryproto.SendMessageByMinBlockRequest) (*sentryproto.SentPeers, error) {
+	emt.sentMessagesMu.Lock()
 	emt.sentMessages = append(emt.sentMessages, r.Data)
+	emt.sentMessagesMu.Unlock()
 	return nil, nil
 }
 func (emt *ExecModuleTester) SendMessageById(_ context.Context, r *sentryproto.SendMessageByIdRequest) (*sentryproto.SentPeers, error) {
+	emt.sentMessagesMu.Lock()
 	emt.sentMessages = append(emt.sentMessages, r.Data)
+	emt.sentMessagesMu.Unlock()
 	return nil, nil
 }
 func (emt *ExecModuleTester) SendMessageToRandomPeers(_ context.Context, r *sentryproto.SendMessageToRandomPeersRequest) (*sentryproto.SentPeers, error) {
+	emt.sentMessagesMu.Lock()
 	emt.sentMessages = append(emt.sentMessages, r.Data)
+	emt.sentMessagesMu.Unlock()
 	return nil, nil
 }
 func (emt *ExecModuleTester) SendMessageToAll(_ context.Context, r *sentryproto.OutboundMessageData) (*sentryproto.SentPeers, error) {
+	emt.sentMessagesMu.Lock()
 	emt.sentMessages = append(emt.sentMessages, r)
+	emt.sentMessagesMu.Unlock()
 	return nil, nil
 }
 func (emt *ExecModuleTester) SentMessage(i int) (*sentryproto.OutboundMessageData, error) {
+	emt.sentMessagesMu.Lock()
+	defer emt.sentMessagesMu.Unlock()
 	if i < 0 || i >= len(emt.sentMessages) {
 		return nil, fmt.Errorf("no sent message for index %d found", i)
 	}
@@ -459,7 +470,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	}
 
 	// Committed genesis will be shared between download and mock sentry
-	_, mock.Genesis, err = genesiswrite.CommitGenesisBlock(mock.DB, gspec, datadir.New(tmpdir), mock.Log)
+	_, mock.Genesis, err = genesiswrite.CommitGenesisBlock(mock.DB, gspec, "", datadir.New(tmpdir), mock.Log)
 	if _, ok := err.(*chain.ConfigCompatError); err != nil && !ok {
 		if tb != nil {
 			tb.Fatal(err)
@@ -531,7 +542,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		terseLogger.SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StderrHandler))
 		// Needs its own notifications to not update RPC daemon and txpool about pending blocks
 		stateSync := stageloop.NewInMemoryExecution(mock.Ctx, mock.DB, &cfg, mock.sentriesClient,
-			dirs, notifications, mock.BlockReader, blockWriter, nil, terseLogger)
+			dirs, notifications, mock.BlockReader, blockWriter, terseLogger)
 		chainReader := consensuschain.NewReader(mock.ChainConfig, tx, mock.BlockReader, logger)
 		// We start the mining step
 		if err := stageloop.StateStep(ctx, chainReader, mock.Engine, sd, tx, stateSync, unwindPoint, headersChain, bodiesChain); err != nil {
@@ -622,18 +633,16 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 					mock.sentriesClient.Hd,
 					gspec,
 					cfg.Sync,
-					nil,
 					false, /*experimentalBAL*/
 					false, /*experimentalQmtree*/
 				),
-				stagedsync.StageSendersCfg(mock.ChainConfig, cfg.Sync, false /* badBlockHalt */, dirs.Tmp, pruneMode, mock.BlockReader, mock.sentriesClient.Hd),
 				builderstages.StageBuilderExecCfg(builderStatePos, nil /* notifier */, mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, interrupt, param.PayloadId, mock.TxPool, mock.BlockReader),
 				builderstages.StageBuilderFinishCfg(mock.ChainConfig, mock.Engine, builderStatePos, miningCancel, mock.BlockReader, latestBlockBuiltStore),
 			),
 			builderstages.BuilderUnwindOrder,
 			builderstages.BuilderPruneOrder,
 			logger,
-			stages.ModeBlockProduction,
+			stages.ModeApplyingBlocks,
 		)
 		// We start the mining step
 		if err := stageloop.MiningStep(ctx, mock.DB, proposingSync, tmpdir, logger); err != nil {
@@ -648,7 +657,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		cfg.Sync,
 		stagedsync.DefaultStages(
 			mock.Ctx,
-			stagedsync.StageSnapshotsCfg(mock.DB, mock.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, mock.BlockReader, mock.Notifications, false, false, false, nil, pruneMode),
+			stagedsync.StageSnapshotsCfg(mock.DB, mock.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, mock.BlockReader, mock.Notifications, false, false, false, pruneMode),
 			stagedsync.StageHeadersCfg(mock.sentriesClient.Hd, mock.ChainConfig, cfg.Sync, sendHeaderRequest, propagateNewBlockHashes, penalize, false /* noP2PDiscovery */, mock.BlockReader),
 			stagedsync.StageBlockHashesCfg(mock.Dirs.Tmp, blockWriter),
 			stagedsync.StageBodiesCfg(mock.sentriesClient.Bd, sendBodyRequest, penalize, blockPropagator, cfg.Sync.BodyDownloadTimeoutSeconds, mock.ChainConfig, mock.BlockReader, blockWriter),
@@ -668,7 +677,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 				mock.sentriesClient.Hd,
 				gspec,
 				cfg.Sync,
-				nil,
 				false, /*experimentalBAL*/
 				false, /*experimentalQmtree*/
 			),
@@ -690,7 +698,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	}
 
 	cfg.Genesis = gspec
-	pipelineStages := stageloop.NewPipelineStages(mock.Ctx, db, &cfg, mock.sentriesClient, mock.Notifications, snapDownloader, mock.BlockReader, blockRetire, nil, forkValidator, tracer)
+	pipelineStages := stageloop.NewPipelineStages(mock.Ctx, db, &cfg, mock.sentriesClient, mock.Notifications, snapDownloader, mock.BlockReader, blockRetire, forkValidator, tracer)
 	mock.posStagedSync = stagedsync.New(cfg.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 
 	hook := stageloop.NewHook(mock.Ctx, mock.Notifications, mock.posStagedSync, mock.ChainConfig, logger, nil, nil, nil)
@@ -746,18 +754,16 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 				mock.sentriesClient.Hd,
 				gspec,
 				cfg.Sync,
-				nil,
 				/*experimentalBAL*/ false,
 				/*experimentalQmtree*/ false,
 			),
-			stagedsync.StageSendersCfg(mock.ChainConfig, cfg.Sync, false /* badBlockHalt */, dirs.Tmp, pruneMode, mock.BlockReader, mock.sentriesClient.Hd),
 			builderstages.StageBuilderExecCfg(miner, nil, mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, nil, 0, mock.TxPool, mock.BlockReader),
 			builderstages.StageBuilderFinishCfg(mock.ChainConfig, mock.Engine, miner, miningCancel, mock.BlockReader, latestBlockBuiltStore),
 		),
 		builderstages.BuilderUnwindOrder,
 		builderstages.BuilderPruneOrder,
 		logger,
-		stages.ModeBlockProduction,
+		stages.ModeApplyingBlocks,
 	)
 
 	mock.StreamWg.Add(1)

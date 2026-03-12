@@ -18,12 +18,12 @@ package kvcache
 
 import (
 	"bytes"
-	"cmp"
+
 	"context"
 	"encoding/binary"
 	"fmt"
 	"hash"
-	"slices"
+
 	"sync"
 	"sync/atomic"
 	"time"
@@ -633,29 +633,6 @@ func (c *Coherent) clearCaches(r *CoherentRoot) {
 	r.codeCache.Clear()
 }
 
-type Stat struct {
-	BlockNum  uint64
-	BlockHash [32]byte
-	Lenght    int
-}
-
-func DebugStats(cache Cache) []Stat {
-	res := []Stat{}
-	casted, ok := cache.(*Coherent)
-	if !ok {
-		return res
-	}
-	casted.lock.Lock()
-	for root, r := range casted.roots {
-		res = append(res, Stat{
-			BlockNum: root,
-			Lenght:   r.cache.Len(),
-		})
-	}
-	casted.lock.Unlock()
-	slices.SortFunc(res, func(a, b Stat) int { return cmp.Compare(a.BlockNum, b.BlockNum) })
-	return res
-}
 func AssertCheckValues(ctx context.Context, tx kv.TemporalTx, cache Cache) (int, error) {
 	defer func(t time.Time) { fmt.Printf("AssertCheckValues:327: %s\n", time.Since(t)) }(time.Now())
 	view, err := cache.View(ctx, tx)

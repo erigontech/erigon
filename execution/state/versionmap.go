@@ -381,11 +381,11 @@ func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path Acco
 					valid = vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
 						version, checkVersion, traceInvalid, tracePrefix)
 
-					// When BAL is present, AddressPath is NOT pre-populated
-					// but BalancePath IS. If a prior tx created this account,
-					// the BAL will have a BalancePath entry at a lower txIndex.
-					// A nil AddressPath read from storage is then stale.
-					if valid == VersionValid && vm.HasBAL {
+					// If a prior tx created this account, BalancePath will
+					// have an entry at a lower txIndex (from BAL pre-population
+					// or worker flush). A nil AddressPath read from storage
+					// is then stale and must be invalidated.
+					if valid == VersionValid {
 						balRR := vm.Read(addr, BalancePath, accounts.NilKey, txIndex)
 						if balRR.Status() == MVReadResultDone {
 							valid = VersionInvalid

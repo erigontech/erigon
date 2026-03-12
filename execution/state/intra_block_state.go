@@ -1827,7 +1827,7 @@ func (sdb *IntraBlockState) GetRefund() uint64 {
 	return sdb.refund
 }
 
-func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, addr accounts.Address, stateObject *stateObject, isDirty bool, trace bool, tracingHooks *tracing.Hooks) error {
+func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, addr accounts.Address, stateObject *stateObject, isDirty bool, trace bool, tracingHooks *tracing.Hooks, useBlockOrigin bool) error {
 	emptyRemoval := EIP161Enabled && stateObject.data.Empty() && (!isAura || addr != params.SystemAddress)
 	if stateObject.selfdestructed || (isDirty && emptyRemoval) {
 		balance := stateObject.Balance()
@@ -1857,7 +1857,7 @@ func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, add
 				return err
 			}
 		}
-		if err := stateObject.updateStorage(stateWriter); err != nil {
+		if err := stateObject.updateStorage(stateWriter, useBlockOrigin); err != nil {
 			return err
 		}
 		if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (trace || dbg.TraceAccount(addr.Handle()))) {
@@ -1910,7 +1910,7 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 			continue
 		}
 
-		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, so, true, sdb.trace, sdb.tracingHooks); err != nil {
+		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, so, true, sdb.trace, sdb.tracingHooks, false); err != nil {
 			return err
 		}
 
@@ -2009,7 +2009,7 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 		if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 			fmt.Printf("%d (%d.%d) Update Account %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
 		}
-		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, stateObject, isDirty, sdb.trace, sdb.tracingHooks); err != nil {
+		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, stateObject, isDirty, sdb.trace, sdb.tracingHooks, true); err != nil {
 			return err
 		}
 	}
@@ -2347,13 +2347,12 @@ func (sdb *IntraBlockState) VersionedWrites(checkDirty bool) VersionedWrites {
 				}
 			}
 
-			// If an account was selfdestructed, strip all writes except
-			// SelfDestructPath itself (and any zero-balance BalancePath writes).
-			// Non-zero BalancePath writes after selfdestruct represent residual ETH
-			// (EIP-7708 case 2); these are carried via
-			// ExecutionResult.SelfDestructedWithBalance captured before SoftFinalise
-			// clears the journal, and must NOT appear here to avoid polluting the
-			// EIP-7928 block access list.
+			// If an account was selfdestructed, strip writes that don't affect
+			// state: keep SelfDestructPath, BalancePath (all values — the BAL
+			// needs to see residual balance from EIP-7708 case 2), and
+			// IncarnationPath (so resurrection txs find the prior incarnation).
+			// Other paths (NoncePath, CodePath) are dropped because selfdestruct
+			// resets them.
 			var appends = make(VersionedWrites, 0, len(vwrites))
 			var selfDestructed bool
 			for _, v := range vwrites {
@@ -2362,19 +2361,13 @@ func (sdb *IntraBlockState) VersionedWrites(checkDirty bool) VersionedWrites {
 					prevs := appends
 					appends = VersionedWrites{v}
 					for _, prev := range prevs {
-						if prev.Path == BalancePath && prev.Val.(uint256.Int) == (uint256.Int{}) {
-							appends = append(appends, prev)
-						} else if prev.Path == IncarnationPath {
-							// Preserve incarnation so resurrection txs can find the prior incarnation
+						if prev.Path == BalancePath || prev.Path == IncarnationPath {
 							appends = append(appends, prev)
 						}
 					}
 				} else {
 					if selfDestructed {
-						if v.Path == BalancePath && v.Val.(uint256.Int) == (uint256.Int{}) {
-							appends = append(appends, v)
-						} else if v.Path == IncarnationPath {
-							// Preserve incarnation so resurrection txs can find the prior incarnation
+						if v.Path == BalancePath || v.Path == IncarnationPath {
 							appends = append(appends, v)
 						}
 					} else {
