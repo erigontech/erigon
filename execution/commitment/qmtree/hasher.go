@@ -88,7 +88,7 @@ func (h *Sha256Hasher) initNulls() {
 		twig             Twig
 	}{}
 	h.nulls.mtForTwig = nullMtForTwig(h)
-	h.nulls.twig = nullTwig(h, h.nulls.mtForTwig[1])
+	h.nulls.twig = nullTwig(h.nulls.mtForTwig[1])
 	h.nulls.nodesInHigerTree = nullNodeInHigherTree(h, &h.nulls.twig)
 }
 
@@ -147,7 +147,7 @@ func (h *Keccak256Hasher) initNulls() {
 		twig             Twig
 	}{}
 	h.nulls.mtForTwig = nullMtForTwig(h)
-	h.nulls.twig = nullTwig(h, h.nulls.mtForTwig[1])
+	h.nulls.twig = nullTwig(h.nulls.mtForTwig[1])
 	h.nulls.nodesInHigerTree = nullNodeInHigherTree(h, &h.nulls.twig)
 }
 

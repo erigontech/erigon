@@ -42,22 +42,6 @@ func TestTwigMTCloneIsIndependent(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// ActiveBits exact boundary
-// ---------------------------------------------------------------------------
-
-func TestActiveBitsExactBoundary(t *testing.T) {
-	bits := ActiveBits{}
-	// 2047 is the last valid index
-	require.NotPanics(t, func() { bits.SetBit(2047) })
-	require.NotPanics(t, func() { bits.ClearBit(2047) })
-	require.NotPanics(t, func() { bits.GetBit(2047) })
-	// 2048 must panic (would write ab[256] which is OOB for [256]byte)
-	require.Panics(t, func() { bits.SetBit(2048) })
-	require.Panics(t, func() { bits.ClearBit(2048) })
-	require.Panics(t, func() { bits.GetBit(2048) })
-}
-
-// ---------------------------------------------------------------------------
 // NodePos encoding round-trip
 // ---------------------------------------------------------------------------
 
@@ -157,35 +141,6 @@ func TestNewTreeDoesNotPanic(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// AppendEntry activates the active bit
-// ---------------------------------------------------------------------------
-
-func TestAppendEntryActivatesBit(t *testing.T) {
-	hasher := &Sha256Hasher{}
-	tree := NewTree(hasher, 0, nil, nil)
-
-	_, err := tree.AppendEntry(makeEntry(0))
-	require.NoError(t, err)
-	require.True(t, tree.GetActiveBit(0))
-}
-
-// ---------------------------------------------------------------------------
-// DeactiveEntry clears the active bit
-// ---------------------------------------------------------------------------
-
-func TestDeactiveEntry(t *testing.T) {
-	hasher := &Sha256Hasher{}
-	tree := NewTree(hasher, 0, nil, nil)
-
-	_, err := tree.AppendEntry(makeEntry(0))
-	require.NoError(t, err)
-	require.True(t, tree.GetActiveBit(0))
-
-	tree.DeactiveEntry(0)
-	require.False(t, tree.GetActiveBit(0))
-}
-
-// ---------------------------------------------------------------------------
 // Filling a twig causes rollover to twig 1
 // ---------------------------------------------------------------------------
 
@@ -226,7 +181,6 @@ func TestProofPathBytesRoundtrip(t *testing.T) {
 		Root:      common.Hash{0xFF},
 	}
 	original.LeftOfTwig[0].SelfHash = common.Hash{3}
-	original.RightOfTwig[0].SelfHash = common.Hash{4}
 
 	bz := original.ToBytes()
 	recovered, err := BytesToProofPath(bz)
@@ -236,10 +190,10 @@ func TestProofPathBytesRoundtrip(t *testing.T) {
 	require.Len(t, recovered.UpperPath, len(original.UpperPath))
 }
 
-// syncTree runs the full three-phase sync needed to make proofs verifiable:
-//   1. FlushFiles (Phase 1: sync youngest twig's merkle tree + active bits L1)
-//   2. EvictTwigs (Phase 2: sync active bits L2/L3/Top; no actual eviction here)
-//   3. SyncUpperNodes (update nodes above twig level)
+// syncTree runs the full sync needed to make proofs verifiable:
+//  1. FlushFiles (sync youngest twig's Merkle tree, build dirty-twig nList)
+//  2. EvictTwigs (no-op eviction with 0,0; passes nList through)
+//  3. SyncUpperNodes (update nodes above twig level)
 func syncTree(t *testing.T, tree *Tree, hasher *Sha256Hasher) common.Hash {
 	t.Helper()
 	nList := tree.FlushFiles(0, 0)
@@ -269,41 +223,6 @@ func TestGetProofAndVerify(t *testing.T) {
 		require.NoError(t, err, "GetProof(%d)", i)
 		_, err = CheckProof(hasher, &proof)
 		require.NoError(t, err, "CheckProof(%d)", i)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// End-to-end: proof remains valid after deactivating entries
-// ---------------------------------------------------------------------------
-
-func TestProofAfterDeactivation(t *testing.T) {
-	hasher := &Sha256Hasher{}
-	tree := NewTree(hasher, 0, nil, nil)
-
-	const N = 8
-	for i := uint64(0); i < N; i++ {
-		_, err := tree.AppendEntry(makeEntry(i))
-		require.NoError(t, err)
-	}
-
-	// Deactivate some entries
-	tree.DeactiveEntry(2)
-	tree.DeactiveEntry(5)
-
-	syncTree(t, tree, hasher)
-
-	// Active bits should be reflected correctly
-	require.True(t, tree.GetActiveBit(0))
-	require.False(t, tree.GetActiveBit(2))
-	require.True(t, tree.GetActiveBit(3))
-	require.False(t, tree.GetActiveBit(5))
-
-	// All entries (active or not) should still produce valid proofs
-	for i := uint64(0); i < N; i++ {
-		proof, err := tree.GetProof(i)
-		require.NoError(t, err, "GetProof(%d)", i)
-		_, err = CheckProof(hasher, &proof)
-		require.NoError(t, err, "CheckProof(%d) after deactivation", i)
 	}
 }
 

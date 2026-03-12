@@ -54,107 +54,23 @@ func (mtree TwigMT) Sync(hasher Hasher, start int32, end int32) {
 	}
 }
 
+// Twig holds the Merkle root of a completed twig's leaf-hash tree.
+// The activeBits mechanism has been removed; twigRoot equals leftRoot directly.
 type Twig struct {
-	activeBitsMtl1 [4]common.Hash
-	activeBitsMtl2 [4]common.Hash
-	activeBitsMtl3 common.Hash
-	leftRoot       common.Hash
-	twigRoot       common.Hash
+	leftRoot common.Hash
+	twigRoot common.Hash
 }
 
-func nullTwig(hasher Hasher, nullMtForTwig common.Hash) Twig {
-	var null Twig
-	null.syncL1(hasher, 0, ActiveBits{})
-	null.syncL1(hasher, 1, ActiveBits{})
-	null.syncL1(hasher, 2, ActiveBits{})
-	null.syncL1(hasher, 3, ActiveBits{})
-	null.syncL2(hasher, 0)
-	null.syncL2(hasher, 1)
-	null.syncL3(hasher)
-
-	null.leftRoot = nullMtForTwig
-	null.syncTop(hasher)
-
-	return null
+func nullTwig(nullMtForTwig common.Hash) Twig {
+	return Twig{leftRoot: nullMtForTwig, twigRoot: nullMtForTwig}
 }
 
 func (t Twig) Clone() *Twig {
 	return &t
 }
 
-func (t *Twig) syncL1(hasher Hasher, pos uint64, activeBits ActiveBits) {
-	var hash0 common.Hash
-	var hash1 common.Hash
-	switch pos {
-	case 0:
-		copy(hash0[:], activeBits.GetBits(0, 32))
-		copy(hash1[:], activeBits.GetBits(1, 32))
-		t.activeBitsMtl1[0] = hasher.nodeHash(8, hash0[:], hash1[:])
-	case 1:
-		copy(hash0[:], activeBits.GetBits(2, 32))
-		copy(hash1[:], activeBits.GetBits(3, 32))
-		t.activeBitsMtl1[1] = hasher.nodeHash(8, hash0[:], hash1[:])
-	case 2:
-		copy(hash0[:], activeBits.GetBits(4, 32))
-		copy(hash1[:], activeBits.GetBits(5, 32))
-		t.activeBitsMtl1[2] = hasher.nodeHash(8, hash0[:], hash1[:])
-	case 3:
-		copy(hash0[:], activeBits.GetBits(6, 32))
-		copy(hash1[:], activeBits.GetBits(7, 32))
-		t.activeBitsMtl1[3] = hasher.nodeHash(8, hash0[:], hash1[:])
-	default:
-		panic("invalid twig position")
-	}
-}
-
-func (t *Twig) syncL2(hasher Hasher, pos uint64) {
-	switch pos {
-	case 0:
-		t.activeBitsMtl2[0] = hasher.nodeHash(9, t.activeBitsMtl1[0][:], t.activeBitsMtl1[1][:])
-	case 1:
-		t.activeBitsMtl2[1] = hasher.nodeHash(9, t.activeBitsMtl1[2][:], t.activeBitsMtl1[3][:])
-	default:
-		panic("Can not reach here!")
-	}
-}
-
-func (t *Twig) syncL3(hasher Hasher) {
-	t.activeBitsMtl3 = hasher.nodeHash(10, t.activeBitsMtl2[0][:], t.activeBitsMtl2[1][:])
-}
-
-func (t *Twig) syncTop(hasher Hasher) {
-	t.twigRoot = hasher.nodeHash(11, t.leftRoot[:], t.activeBitsMtl3[:])
-}
-
-type ActiveBits [256]byte
-
-func (ab *ActiveBits) SetBit(offset uint32) {
-	if offset >= LeafCountInTwig {
-		panic("invalid id")
-	}
-	mask := 1 << (offset & 0x7)
-	pos := int(offset >> 3)
-	ab[pos] |= byte(mask)
-}
-
-func (ab *ActiveBits) ClearBit(offset uint32) {
-	if offset >= LeafCountInTwig {
-		panic("invalid id")
-	}
-	mask := 1 << (offset & 0x7)
-	pos := int(offset >> 3)
-	ab[pos] &= byte(^mask) //bit-wise not
-}
-
-func (ab *ActiveBits) GetBit(offset uint32) bool {
-	if offset >= LeafCountInTwig {
-		panic("invalid id")
-	}
-	mask := 1 << (offset & 0x7)
-	pos := int(offset >> 3)
-	return (ab[pos] & byte(mask)) != 0
-}
-
-func (ab *ActiveBits) GetBits(pageNum int, pageSize int) []byte {
-	return ab[pageNum*pageSize : (pageNum+1)*pageSize]
+// syncTop sets twigRoot = leftRoot. The activeBits component has been removed,
+// so the twig root is just the leaf-hash Merkle root.
+func (t *Twig) syncTop() {
+	t.twigRoot = t.leftRoot
 }

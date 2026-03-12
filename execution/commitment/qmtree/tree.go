@@ -13,12 +13,12 @@ import (
 
 /*
              ____TwigRoot___                   Level_12
-            /               \
-           /                 \
-1       leftRoot              activeBitsMTL3   Level_11
-2       Level_10        2     activeBitsMTL2
-4       Level_9         4     activeBitsMTL1
-8       Level_8    8*32bytes  activeBits
+            /
+           /
+1       leftRoot                               Level_11
+2       Level_10
+4       Level_9
+8       Level_8
 16      Level_7
 32      Level_6
 64      Level_5
@@ -27,6 +27,8 @@ import (
 512     Level_2
 1024    Level_1
 2048    Level_0
+
+activeBits have been removed. twigRoot == leftRoot.
 */
 
 /*         1
@@ -263,102 +265,19 @@ func (ut *UpperTree) SyncUpperNodes(hasher Hasher, nList []uint64, youngestTwigI
 	return nList, root
 }
 
+// EvictTwigs moves completed twigs from activeTwigShards into fixed upper-tree
+// nodes and returns the twig-pair indices (twigId/2) for SyncUpperNodes.
+// The nList passed in already contains those pair indices from FlushFiles.
 func (ut *UpperTree) EvictTwigs(hasher Hasher, nList []uint64, twigEvictStart uint64, twigEvictEnd uint64) []uint64 {
-	newList := ut.SyncMtForActiveBitsPhase2(hasher, nList)
-	// run the pending twig-eviction jobs
-	// they were not evicted earlier because sync_mt_for_active_bits_phase2 needs their content
+	// evict the specified twig range
 	for twigId := twigEvictStart; twigId < twigEvictEnd; twigId++ {
-		// evict the twig and store its twigRoot in nodes
 		pos := nodePos(twigRoot_LEVEL, twigId)
 		twig, _ := ut.GetTwig(twigId)
 		ut.SetNode(pos, twig.twigRoot)
 		shardIdx, key := GetShardIdxAndKey(twigId)
 		delete(ut.activeTwigShards[shardIdx], key)
 	}
-	return newList
-}
-
-func (ut *UpperTree) SyncMtForActiveBitsPhase2(hasher Hasher, nList []uint64) []uint64 {
-	newList := make([]uint64, 0, len(nList))
-
-	var wg sync.WaitGroup
-
-	for sid, twigShard := range ut.activeTwigShards {
-		if !slowHashing {
-			nList := nList[:]
-			shardId := sid
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for _, i := range nList {
-					twigId := i >> 1
-					s, k := GetShardIdxAndKey(twigId)
-					if s != shardId {
-						continue
-					}
-					twigShard[k].syncL2(hasher, (i & 1))
-				}
-			}()
-		} else {
-			for _, i := range nList {
-				twigId := i >> 1
-				s, k := GetShardIdxAndKey(twigId)
-				if s != sid {
-					continue
-				}
-				twigShard[k].syncL2(hasher, (i & 1))
-			}
-		}
-	}
-
-	wg.Wait()
-
-	for _, i := range nList {
-		if len(newList) == 0 || newList[len(newList)-1] != i/2 {
-			newList = append(newList, i/2)
-		}
-	}
-
-	nList = newList
-	newList = nil
-
-	for sid, twigShard := range ut.activeTwigShards {
-		if !slowHashing {
-			nList = nList[:]
-			shardId := sid
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for _, twigId := range nList {
-					s, k := GetShardIdxAndKey(twigId)
-					if s != shardId {
-						continue
-					}
-					twigShard[k].syncL3(hasher)
-					twigShard[k].syncTop(hasher)
-				}
-			}()
-		} else {
-			for _, twigId := range nList {
-				s, k := GetShardIdxAndKey(twigId)
-				if s != sid {
-					continue
-				}
-				twigShard[k].syncL3(hasher)
-				twigShard[k].syncTop(hasher)
-			}
-		}
-	}
-
-	wg.Wait()
-
-	for _, i := range nList {
-		if len(newList) == 0 || newList[len(newList)-1] != i/2 {
-			newList = append(newList, i/2)
-		}
-	}
-
-	return newList
+	return nList
 }
 
 func doSyncJob(upperTree *UpperTree, hasher Hasher, nodes map[NodePos][32]byte, level uint8, shardId uint64, nList []uint64) {
@@ -426,14 +345,16 @@ type Tree struct {
 
 	// these variables can be recovered from entry file
 	youngestTwigId uint64
-	// pub activeBitShards: [HashMap<uint64, [u8; 256]>; TWIG_SHARD_COUNT],
-	activeBitShards      [TWIG_SHARD_COUNT]map[uint64]*ActiveBits
+
 	mtreeForYoungestTwig TwigMT
 
 	// The following variables are only used during the execution of one block
 	mtreeForYtChangeStart int32
 	mtreeForYtChangeEnd   int32
-	touchedPosOf512b      map[uint64]struct{}
+
+	// dirtyTwigs tracks which twigs had entries appended since the last FlushFiles.
+	// Used to build the nList for SyncUpperNodes.
+	dirtyTwigs map[uint64]struct{}
 
 	hasher Hasher
 }
@@ -449,11 +370,8 @@ func newEmptyTree(hasher Hasher, shardId int, entryStorage EntryStorage, twigSto
 		mtreeForYoungestTwig:  hasher.nullMtForTwig().Clone(),
 		mtreeForYtChangeStart: -1,
 		mtreeForYtChangeEnd:   -1,
-		touchedPosOf512b:      map[uint64]struct{}{},
+		dirtyTwigs:            map[uint64]struct{}{},
 		hasher:                hasher,
-	}
-	for i := range t.activeBitShards {
-		t.activeBitShards[i] = make(map[uint64]*ActiveBits)
 	}
 	return t
 }
@@ -467,9 +385,8 @@ func NewTree(hasher Hasher, shardId int, entryStorage EntryStorage, twigStorage 
 
 	tree.newTwigMap[0] = hasher.nullTwig().Clone()
 	tree.upperTree.SetNode(nodePos(FIRST_LEVEL_ABOVE_TWIG, 0), [32]byte{})
-	nullTwig := hasher.nullTwig()
-	tree.upperTree.activeTwigShards[0][0] = &nullTwig
-	tree.activeBitShards[0][0] = &ActiveBits{}
+	nullTwigVal := hasher.nullTwig()
+	tree.upperTree.activeTwigShards[0][0] = &nullTwigVal
 
 	return tree
 }
@@ -528,15 +445,7 @@ func (t *Tree) UnwindTo(targetSN uint64, entryHashes []common.Hash) {
 		}
 	}
 
-	// 2. Clear in-memory twigs and active bits beyond youngestAfter.
-	for i := range t.activeBitShards {
-		for key := range t.activeBitShards[i] {
-			twigId := key*TWIG_SHARD_COUNT + uint64(i)
-			if twigId > youngestAfter {
-				delete(t.activeBitShards[i], key)
-			}
-		}
-	}
+	// 2. Clear in-memory twigs beyond youngestAfter.
 	for i := range t.upperTree.activeTwigShards {
 		for key := range t.upperTree.activeTwigShards[i] {
 			twigId := key*TWIG_SHARD_COUNT + uint64(i)
@@ -558,7 +467,7 @@ func (t *Tree) UnwindTo(targetSN uint64, entryHashes []common.Hash) {
 
 	// 4. Reset youngest twig ID.
 	t.youngestTwigId = youngestAfter
-	t.touchedPosOf512b = map[uint64]struct{}{}
+	t.dirtyTwigs = map[uint64]struct{}{}
 
 	s, k := GetShardIdxAndKey(youngestAfter)
 
@@ -568,19 +477,16 @@ func (t *Tree) UnwindTo(targetSN uint64, entryHashes []common.Hash) {
 		t.newTwigMap = map[uint64]*Twig{
 			youngestAfter: t.hasher.nullTwig().Clone(),
 		}
-		t.activeBitShards[s][k] = &ActiveBits{}
 		t.mtreeForYoungestTwig = t.hasher.nullMtForTwig().Clone()
 		t.mtreeForYtChangeStart = -1
 		t.mtreeForYtChangeEnd = -1
 		// Touch the first position of the new empty twig.
-		t.touchPos(youngestAfter << TWIG_SHIFT)
+		t.dirtyTwigs[youngestAfter] = struct{}{}
 	} else {
 		// Rebuild the youngest twig from provided entry hashes.
 		t.newTwigMap = map[uint64]*Twig{
 			targetTwigId: t.hasher.nullTwig().Clone(),
 		}
-		activeBits := &ActiveBits{}
-		t.activeBitShards[s][k] = activeBits
 
 		nullHash := NullEntry{}.Hash()
 		t.mtreeForYoungestTwig = t.hasher.nullMtForTwig().Clone()
@@ -593,28 +499,19 @@ func (t *Tree) UnwindTo(targetSN uint64, entryHashes []common.Hash) {
 
 		for i := 0; i < expectedCount; i++ {
 			t.mtreeForYoungestTwig[LEAF_COUNT_IN_TWIG+i] = entryHashes[i]
-			if entryHashes[i] != nullHash {
-				activeBits.SetBit(uint32(i))
-			}
+			_ = nullHash // activeBit tracking removed
 		}
 
 		t.mtreeForYtChangeStart = 0
 		t.mtreeForYtChangeEnd = int32(posInTwig)
 
-		// Touch all active bit positions.
-		twigBase := targetTwigId << TWIG_SHIFT
-		for i := uint64(0); i <= posInTwig; i++ {
-			t.touchPos(twigBase + i)
-		}
-		if posInTwig < TWIG_MASK {
-			t.touchPos(twigBase + posInTwig + 1)
-		}
+		t.dirtyTwigs[targetTwigId] = struct{}{}
 	}
 
 	// Re-register this twig in the upper tree.
 	t.upperTree.SetNode(nodePos(FIRST_LEVEL_ABOVE_TWIG, 0), [32]byte{})
-	nullTwig := t.hasher.nullTwig()
-	t.upperTree.activeTwigShards[s][k] = &nullTwig
+	nullTwigVal := t.hasher.nullTwig()
+	t.upperTree.activeTwigShards[s][k] = &nullTwigVal
 }
 
 // NextSN returns the next serial number that would be assigned to a new entry.
@@ -670,50 +567,8 @@ func (t *Tree) TruncateFiles(entryFileSize int64, twigFileSize int64) {
 	}
 }
 
-func (t *Tree) GetActiveBits(twigId uint64) (*ActiveBits, bool) {
-	shardIdx, key := GetShardIdxAndKey(twigId)
-	bits, ok := t.activeBitShards[shardIdx][key]
-	return bits, ok
-}
-
-func (t *Tree) getActiveBits(twigId uint64) *ActiveBits {
-	shardIdx, key := GetShardIdxAndKey(twigId)
-	return t.activeBitShards[shardIdx][key]
-}
-
-func (t *Tree) GetActiveBit(sn uint64) bool {
-	twigId := sn >> TWIG_SHIFT
-	pos := uint32(sn & TWIG_MASK)
-	return t.getActiveBits(twigId).GetBit(pos)
-}
-
-func (t *Tree) setEntryActiviation(sn uint64, active bool) {
-	twigId := sn >> TWIG_SHIFT
-	pos := uint32(sn & TWIG_MASK)
-	active_bits := t.getActiveBits(twigId)
-	if active {
-		active_bits.SetBit(pos)
-	} else {
-		active_bits.ClearBit(pos)
-	}
-	t.touchPos(sn)
-}
-
-func (t *Tree) touchPos(sn uint64) {
-	t.touchedPosOf512b[sn/512] = struct{}{}
-}
-
-func (t *Tree) ActiveEntry(sn uint64) {
-	t.setEntryActiviation(sn, true)
-}
-
-func (t *Tree) DeactiveEntry(sn uint64) {
-	t.setEntryActiviation(sn, false)
-}
-
 func (t *Tree) AppendEntry(entry Entry) (int64, error) {
 	sn := entry.SerialNumber()
-	t.ActiveEntry(sn)
 
 	twigId := sn >> TWIG_SHIFT
 	t.youngestTwigId = twigId
@@ -725,6 +580,9 @@ func (t *Tree) AppendEntry(entry Entry) (int64, error) {
 		panic("non-increasing position!")
 	}
 	t.mtreeForYtChangeEnd = position
+
+	// mark this twig as dirty for upper-tree sync
+	t.dirtyTwigs[twigId] = struct{}{}
 
 	var pos int64
 
@@ -746,11 +604,10 @@ func (t *Tree) AppendEntry(entry Entry) (int64, error) {
 		}
 		// allocate new twig as youngest twig
 		t.youngestTwigId += 1
-		s, i := GetShardIdxAndKey(t.youngestTwigId)
 		t.newTwigMap[t.youngestTwigId] = t.hasher.nullTwig().Clone()
-		t.activeBitShards[s][i] = &ActiveBits{}
 		t.mtreeForYoungestTwig = t.hasher.nullMtForTwig()[:]
-		t.touchPos(sn + 1)
+		// mark the new empty twig dirty too
+		t.dirtyTwigs[t.youngestTwigId] = struct{}{}
 	}
 	return pos, nil
 }
@@ -771,6 +628,10 @@ func (t *Tree) PruneTwigs(startId uint64, endId uint64, entryFileSize int64) {
 	}
 }
 
+// FlushFiles flushes disk storage, moves all completed twigs into the upper
+// tree, and returns the nList (sorted unique twigId/2 pair indices) for
+// SyncUpperNodes. With activeBits removed there is no separate phase-1/phase-2
+// active-bit Merkle sync; we just derive nList from dirtyTwigs.
 func (t *Tree) FlushFiles(twigDeleteStart uint64, twigDeleteEnd uint64) []uint64 {
 	entryStorage := t.entryStorage
 	if entryStorage != nil {
@@ -810,68 +671,28 @@ func (t *Tree) FlushFiles(twigDeleteStart uint64, twigDeleteEnd uint64) []uint64
 	}
 	t.upperTree.AddTwigs(oldTwigMap)
 
-	nList := t.syncMtForActiveBitsPhase1()
-	for twigId := twigDeleteStart; twigId < twigDeleteEnd; twigId++ {
-		shardIdx, key := GetShardIdxAndKey(twigId)
-		delete(t.activeBitShards[shardIdx], key)
+	// Build nList: sorted unique twigId/2 for all dirty twigs.
+	pairSet := make(map[uint64]struct{}, len(t.dirtyTwigs))
+	for twigId := range t.dirtyTwigs {
+		pairSet[twigId>>1] = struct{}{}
 	}
-	t.touchedPosOf512b = map[uint64]struct{}{}
+	nList := make([]uint64, 0, len(pairSet))
+	for pair := range pairSet {
+		nList = append(nList, pair)
+	}
+	sort.Slice(nList, func(i, j int) bool { return nList[i] < nList[j] })
+
+	// Delete active bit shards for pruned twigs (activeBits removed — no-op range).
+	_ = twigDeleteStart
+	_ = twigDeleteEnd
+
+	t.dirtyTwigs = map[uint64]struct{}{}
+
+	wg.Wait()
 
 	t.entryStorage = entryStorage
 	t.twigStorage = twigStorage
 	return nList
-}
-
-func (t *Tree) syncMtForActiveBitsPhase1() []uint64 {
-	nList := make([]uint64, 0, len(t.touchedPosOf512b))
-	for n := range t.touchedPosOf512b {
-		nList = append(nList, n)
-	}
-	sort.Slice(nList, func(i, j int) bool { return nList[i] < nList[j] })
-
-	newList := make([]uint64, 0, len(nList))
-	var wg sync.WaitGroup
-
-	for sid, twig_shard := range t.upperTree.activeTwigShards {
-		if !slowHashing {
-			activeBitShards := &t.activeBitShards
-			nList := nList[:]
-			shardId := sid
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for _, i := range nList {
-					twigId := i >> 2
-					s, k := GetShardIdxAndKey(twigId)
-					if s != shardId {
-						continue
-					}
-					activeBits := activeBitShards[s][k]
-					twig_shard[k].syncL1(t.hasher, (i & 3), *activeBits)
-				}
-			}()
-		} else {
-			for _, i := range nList {
-				twigId := i >> 2
-				s, k := GetShardIdxAndKey(twigId)
-				if s != sid {
-					continue
-				}
-				activeBits := t.activeBitShards[s][k]
-				twig_shard[k].syncL1(t.hasher, (i & 3), *activeBits)
-			}
-		}
-	}
-
-	wg.Wait()
-
-	for _, i := range nList {
-		if len(newList) == 0 || newList[len(newList)-1] != i/2 {
-			newList = append(newList, i/2)
-		}
-	}
-
-	return newList
 }
 
 func (t *Tree) syncMtForYoungestTwig(recover_mode bool) {
@@ -889,6 +710,7 @@ func (t *Tree) syncMtForYoungestTwig(recover_mode bool) {
 		youngest_twig = t.newTwigMap[t.youngestTwigId]
 	}
 	youngest_twig.leftRoot = t.mtreeForYoungestTwig[1]
+	youngest_twig.syncTop()
 }
 
 func (t *Tree) LoadMtForNonYoungestTwig(twigId uint64) {
@@ -904,6 +726,7 @@ func (t *Tree) LoadMtForNonYoungestTwig(twigId uint64) {
 			panic(fmt.Sprintf("twigStorage.GetHashRoot twig=%d: %v", twigId, err))
 		}
 		activeTwig.leftRoot = h
+		activeTwig.syncTop()
 	}
 }
 
@@ -987,17 +810,6 @@ func (t *Tree) GetProof(sn uint64) (ProofPath, error) {
 		}
 		path.LeftOfTwig = GetLeftPathOnDisk(t.twigStorage, twigId, sn)
 	}
-	s, k := GetShardIdxAndKey(twigId)
-	twig, ok := t.upperTree.activeTwigShards[s][k]
-	if !ok {
-		nullTwig := t.hasher.nullTwig()
-		twig = &nullTwig
-	}
-	activeBits, ok := t.activeBitShards[s][k]
-	if !ok {
-		activeBits = &ActiveBits{}
-	}
-	path.RightOfTwig = GetRightPath(twig, activeBits, sn)
 
 	return path, nil
 }
@@ -1035,7 +847,7 @@ func (t *Tree) getHashByNode(level uint8, nth uint64, cache map[uint64]common.Ha
 		twigId = nth / levelStride
 	}
 
-	// left tree of twig
+	// left tree of twig (level 0-11, left half)
 	if level <= 11 && (nth%levelStride) < levelStride/2 {
 		isYoungestTwigId := twigId == t.youngestTwigId
 		selfId := nth % levelStride
@@ -1054,38 +866,12 @@ func (t *Tree) getHashByNode(level uint8, nth uint64, cache map[uint64]common.Ha
 		}
 	}
 
-	// right tree of twig
+	// levels 8-11 right side were activeBits — no longer exist; return zero.
 	if level >= 8 && level <= 11 {
-		s, k := GetShardIdxAndKey(twigId)
-		activeBits, ok := t.activeBitShards[s][k]
-		if !ok {
-			activeBits = &ActiveBits{}
-		}
-		selfId := (nth % levelStride) - levelStride/2
-		if level == 8 {
-			bits := activeBits.GetBits(int(selfId), 32)
-			var hash common.Hash
-			copy(hash[:], bits)
-			return hash
-		}
-		twig, ok := t.upperTree.activeTwigShards[s][k]
-		if !ok {
-			nullTwig := t.hasher.nullTwig()
-			twig = &nullTwig
-		}
-
-		if level == 9 {
-			return twig.activeBitsMtl1[selfId]
-		}
-		if level == 10 {
-			return twig.activeBitsMtl2[selfId]
-		}
-		if level == 11 {
-			return twig.activeBitsMtl3
-		}
+		return common.Hash{}
 	}
 
-	// upper tree
+	// upper tree (level 12+)
 	if level == 12 {
 		root, _ := t.upperTree.GetTwigRoot(twigId)
 		return root
@@ -1112,44 +898,4 @@ func GetShardIdxAndKey(twigId uint64) (int, uint64) {
 	idx := int(twigId % TWIG_SHARD_COUNT)
 	key := twigId / TWIG_SHARD_COUNT
 	return idx, key
-}
-
-// debug
-func (t *Tree) Print() {
-	/*var offset int64 = 0
-	  buf := [2048]byte
-	  for twigId := range self.youngestTwigId {
-	      for _sn in twigId * 2048..(twigId + 1) * 2048 {
-	          let n = self.entry_file_wr.entry_file.read_entry(offset, buf);
-	          if n > buf.len() {
-	              buf.resize(n, 0);
-	              self.entry_file_wr.entry_file.read_entry(offset, buf);
-	          }
-	          offset += n as int64;
-
-	          let entry_bz = EntryBz { bz: &buf[0..n] };
-	          let entry = Entry::from_bz(&entry_bz);
-
-	          println!(
-	              "[entry] twig: {}, sn: {}, k: {}, v: {}",
-	              twigId,
-	              entry.serial_number,
-	              hex::encode(entry.key),
-	              hex::encode(entry.value)
-	          );
-	      }
-	  }
-
-	  let mut cache: HashMap<int64, Hash32> = HashMap::new();
-	  for twigId in 0..self.youngestTwigId {
-	      for _sn in twigId * 2048..(twigId + 1) * 2048 {
-	          let _h = self.get_hash_by_node(0, _sn, cache);
-	          println!(
-	              "[hash] level: {}, nth: {}, hash: {}",
-	              0,
-	              _sn,
-	              hex::encode(_h)
-	          );
-	      }
-	  }*/
 }

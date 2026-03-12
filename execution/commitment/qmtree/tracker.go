@@ -370,24 +370,11 @@ func (qt *Tracker) getProof(sn uint64) (ProofPath, error) {
 	}
 	mt := buildTwigMT(qt.hasher, leafHashes)
 
-	// RightOfTwig: from activeTwigShards + activeBitShards (in-memory).
-	s, k := GetShardIdxAndKey(twigId)
-	twig, ok := qt.tree.upperTree.activeTwigShards[s][k]
-	if !ok {
-		nullTwig := qt.tree.hasher.nullTwig()
-		twig = &nullTwig
-	}
-	activeBits, ok := qt.tree.activeBitShards[s][k]
-	if !ok {
-		activeBits = &ActiveBits{}
-	}
-
 	return ProofPath{
-		SerialNum:   sn,
-		LeftOfTwig:  GetLeftPathInMem(mt, sn),
-		RightOfTwig: GetRightPath(twig, activeBits, sn),
-		UpperPath:   upperPath,
-		Root:        common.Hash(root),
+		SerialNum:  sn,
+		LeftOfTwig: GetLeftPathInMem(mt, sn),
+		UpperPath:  upperPath,
+		Root:       common.Hash(root),
 	}, nil
 }
 

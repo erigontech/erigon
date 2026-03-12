@@ -14,28 +14,28 @@ type ProofNode struct {
 	PeerAtLeft bool
 }
 
+// ProofPath contains the Merkle proof for a single leaf.
+// With activeBits removed, the proof is:
+//   - LeftOfTwig [11]ProofNode: path through the twig's leaf-hash Merkle tree
+//   - UpperPath  []ProofNode:   path through the upper (inter-twig) tree
+//   - Root:                     the tree root at the time of proof
 type ProofPath struct {
-	LeftOfTwig  [11]ProofNode
-	RightOfTwig [3]ProofNode
-	UpperPath   []ProofNode
-	SerialNum   uint64
-	Root        common.Hash
+	LeftOfTwig [11]ProofNode
+	UpperPath  []ProofNode
+	SerialNum  uint64
+	Root       common.Hash
 }
 
-const OTHER_NODE_COUNT = 1 + 11 + 1 + 3 + 1
+// OTHER_NODE_COUNT: 1 (LeftOfTwig[0].SelfHash) + 11 (LeftOfTwig PeerHashes) + 1 (Root)
+const OTHER_NODE_COUNT = 1 + 11 + 1
 
 func (p *ProofPath) ToBytes() []byte {
-	res := make([]byte, 0, (8 + (len(p.UpperPath)+OTHER_NODE_COUNT)*32))
+	res := make([]byte, 0, (8+(len(p.UpperPath)+OTHER_NODE_COUNT)*32))
 	res = binary.LittleEndian.AppendUint64(res, p.SerialNum) // 8-byte
 	res = append(res, p.LeftOfTwig[0].SelfHash[:]...)        // 1
 	for i := range p.LeftOfTwig {
 		//11
 		res = append(res, p.LeftOfTwig[i].PeerHash[:]...)
-	}
-	res = append(res, p.RightOfTwig[0].SelfHash[:]...) //1
-	for i := range p.RightOfTwig {
-		//3
-		res = append(res, p.RightOfTwig[i].PeerHash[:]...)
 	}
 	for i := range p.UpperPath {
 		res = append(res, p.UpperPath[i].PeerHash[:]...)
@@ -61,36 +61,14 @@ func (p *ProofPath) Check(hasher Hasher, complete bool) error {
 		}
 	}
 
-	// level 10: produces the left-subtree root
-	leaf_mt_root := hasher.hash2x(
+	// level 10: produces the twig root (= left-subtree root, activeBits removed)
+	twigRoot := hasher.hash2x(
 		10,
 		p.LeftOfTwig[10].SelfHash[:],
 		p.LeftOfTwig[10].PeerHash[:],
 		p.LeftOfTwig[10].PeerAtLeft,
 	)
 
-	for i := range 2 {
-		res := hasher.hash2x(
-			uint8((i + 8)),
-			p.RightOfTwig[i].SelfHash[:],
-			p.RightOfTwig[i].PeerHash[:],
-			p.RightOfTwig[i].PeerAtLeft,
-		)
-		if complete {
-			p.RightOfTwig[i+1].SelfHash = res
-		} else if res != p.RightOfTwig[i+1].SelfHash {
-			return fmt.Errorf("mismatch at right path, level: %d", i)
-		}
-	}
-
-	active_bits_mt_l3 := hasher.hash2x(
-		10,
-		p.RightOfTwig[2].SelfHash[:],
-		p.RightOfTwig[2].PeerHash[:],
-		p.RightOfTwig[2].PeerAtLeft,
-	)
-
-	twigRoot := hasher.hash2(11, leaf_mt_root[:], active_bits_mt_l3[:])
 	if complete {
 		p.UpperPath[0].SelfHash = twigRoot
 	} else if twigRoot != p.UpperPath[0].SelfHash {
@@ -129,7 +107,6 @@ func BytesToProofPath(bz []byte) (*ProofPath, error) {
 	upperPath := make([]ProofNode, 0, upperCount)
 	emptyNode := ProofNode{}
 	leftOfTwig := [11]ProofNode{}
-	rightOfTwig := [3]ProofNode{}
 	serialNum := binary.LittleEndian.Uint64(bz[0:8])
 	bz = bz[8:]
 	copy(leftOfTwig[0].SelfHash[:], bz[:32])
@@ -137,13 +114,6 @@ func BytesToProofPath(bz []byte) (*ProofPath, error) {
 	for i := range leftOfTwig {
 		copy(leftOfTwig[i].PeerHash[:], bz[:32])
 		leftOfTwig[i].PeerAtLeft = (serialNum>>i)&1 == 1
-		bz = bz[32:]
-	}
-	copy(rightOfTwig[0].SelfHash[:], bz[:32])
-	bz = bz[32:]
-	for i := range rightOfTwig {
-		copy(rightOfTwig[i].PeerHash[:], bz[:32])
-		rightOfTwig[i].PeerAtLeft = (serialNum>>(8+i))&1 == 1
 		bz = bz[32:]
 	}
 	for i := range upperCount {
@@ -157,7 +127,6 @@ func BytesToProofPath(bz []byte) (*ProofPath, error) {
 	copy(root[:], bz[:32])
 	return &ProofPath{
 		leftOfTwig,
-		rightOfTwig,
 		upperPath,
 		serialNum,
 		root,
@@ -179,29 +148,6 @@ func CheckProof(hasher Hasher, path *ProofPath) ([]byte, error) {
 		return nil, err
 	}
 	return bz, nil
-}
-
-func GetRightPath(twig *Twig, active_bits *ActiveBits, sn uint64) [3]ProofNode {
-	n := sn & TWIG_MASK
-	right := [3]ProofNode{}
-	selfId := n / 256
-	peer := selfId ^ 1
-	copy(right[0].SelfHash[:], active_bits.GetBits(int(selfId), 32))
-	copy(right[0].PeerHash[:], active_bits.GetBits(int(peer), 32))
-	right[0].PeerAtLeft = (peer & 1) == 0
-
-	selfId = n / 512
-	peer = selfId ^ 1
-	right[1].SelfHash = twig.activeBitsMtl1[selfId]
-	right[1].PeerHash = twig.activeBitsMtl1[peer]
-	right[1].PeerAtLeft = (peer & 1) == 0
-
-	selfId = n / 1024
-	peer = selfId ^ 1
-	right[2].SelfHash = twig.activeBitsMtl2[selfId]
-	right[2].PeerHash = twig.activeBitsMtl2[peer]
-	right[2].PeerAtLeft = (peer & 1) == 0
-	return right
 }
 
 func GetLeftPath(sn uint64, getHash func(uint64) common.Hash) [11]ProofNode {
