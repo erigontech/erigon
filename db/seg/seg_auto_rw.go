@@ -52,11 +52,17 @@ func (g *Reader) MatchPrefix(prefix []byte) bool {
 	return g.Getter.MatchPrefixUncompressed(prefix)
 }
 
-func (g *Reader) MatchCmp(prefix []byte) int {
+func (g *Reader) MatchCmp(buf []byte) int {
+	var cmp int
 	if g.c.Has(CompressKeys) {
-		return g.Getter.MatchCmp(prefix)
+		cmp = g.Getter.MatchCmp(buf)
+	} else {
+		cmp = g.Getter.MatchCmpUncompressed(buf)
 	}
-	return g.Getter.MatchCmpUncompressed(prefix)
+	if cmp == 0 {
+		g.nextValue = true // key consumed, next read is value
+	}
+	return cmp
 }
 
 func (g *Reader) BinarySearch(seek []byte, count int, getOffset func(i uint64) (offset uint64)) (foundOffset uint64, ok bool) {
