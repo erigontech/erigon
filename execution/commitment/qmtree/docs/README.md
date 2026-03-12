@@ -20,6 +20,7 @@ On the `qmtree` branch:
 
 - Core tree, twig, proof, and file storage (`execution/commitment/qmtree/`)
 - Live block execution with qmtree roots (`--experimental.qmtree` flag)
+- 4-component leaf hash: `preStateHash` (DeriveSha MPT), `stateChangeHash` (DeriveSha MPT), `transitionHash` (EVM opcode trace + 25 spec-mandated operations), `previousLeafHash`
 - `qm_` RPC namespace — 10 methods including `qm_call` and `qm_callProof`
 - Compact twig-grouped proof format with 32-byte Merkle digest
 - Format-size analysis and integration benchmarks (`analysis_test.go`)
@@ -52,11 +53,7 @@ These items are needed before qmtree proofs are fully self-contained and verifia
 
 1. **Exclusion proofs** — prove that no state entry exists for a given key (i.e. negative proofs). Without this, a verifier cannot confirm that a key was unmodified; only inclusion can be proven. Requires adding `NextKeyHash` to entries per QMDB §7, and extending the RPC to serve them.
 
-2. **Transition hash completion** — fully implement the EVM opcode-trace encoding (`transitionHash`) so `qm_callProof` verification can bind the call result to the proof. The record types and format are specified in `transition-format.md`; the implementation needs to record all 25 spec-mandated operations.
-
-3. **SMT state roots** — replace the current `DeriveSha_MPT` hash for `preStateHash`/`stateChangeHash` with a Sparse Merkle Tree root. This allows a verifier to check individual state key/value pairs within the proof without disclosing the full changeset. Tracked in `state-proof-analysis.md §Question 3b`.
-
-4. **Integration benchmarks** — run `TestBench_GetWitness` and `TestBench_ProofSizeByTwig` against a fully synced hoodi datadir (set `QMTREE_DATADIR` to the qmtree snap directory). A node is accumulating data on `dev-bm-e3-ethmainnet-n1`.
+2. **Integration benchmarks** — run `TestBench_GetWitness` and `TestBench_ProofSizeByTwig` against a fully synced hoodi datadir (set `QMTREE_DATADIR` to the qmtree snap directory). A node is accumulating data on `dev-bm-e3-ethmainnet-n1`.
 
 ### Future enhancements
 
