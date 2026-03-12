@@ -122,7 +122,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 			"isForkValidation", pe.isForkValidation, "isApplyingBlocks", pe.isApplyingBlocks)
 	}
 
-	// restoreTxNum must run before pe.run() so that doms.SetTxNum() completes
+	// restoreTxNum must run before pe.run() so that txNum is restored
 	// before any goroutine reads txNum (via AsGetter/GetLatest).
 	restoredTxNum, _, _, _, err := restoreTxNum(ctx, &pe.cfg, rwTx, inputTxNum, maxBlockNum)
 	if err != nil {

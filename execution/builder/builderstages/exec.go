@@ -109,7 +109,6 @@ func SpawnBuilderExecStage(ctx context0.Context, s *stagedsync.StageState, sd *e
 	if err != nil {
 		return err
 	}
-	sd.SetTxNum(txNum)
 	sd.GetCommitmentContext().SetDeferBranchUpdates(false)
 
 	stateWriter := state.NewWriter(sd.AsPutDel(tx), nil, txNum)

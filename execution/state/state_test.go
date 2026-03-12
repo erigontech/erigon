@@ -79,7 +79,6 @@ func TestFinalizeTxDoesNotSkipStorageRevertToBlockOrigin(t *testing.T) {
 	txNum := uint64(1)
 	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
-	domains.SetTxNum(txNum)
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 	setup := New(NewReaderV3(domains.AsGetter(tx)))
 	setup.CreateAccount(addr, true)
