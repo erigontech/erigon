@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
+	lru "github.com/hashicorp/golang-lru/v2"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 )
@@ -41,10 +43,18 @@ type Tracker struct {
 	NextSN   uint64
 	prevLeaf common.Hash
 
-	// Leaf component storage for witness generation.
-	// Keyed by serial number. In the future this could be persisted
-	// to disk, but for the PoC it's held in memory.
-	leafData map[uint64]LeafData
+	// leafData is a bounded LRU cache of LeafData keyed by serial number.
+	// PreviousLeafHash is stored in each entry but is NOT persisted to disk;
+	// it is recomputed on cache miss using twigPrevLeaf as an O(twig-size)
+	// anchor, avoiding full-history traversal.
+	leafData *lru.Cache[uint64, LeafData]
+
+	// twigPrevLeaf[twigId] is the prevLeaf value at the START of that twig
+	// (i.e. leafHash of the last entry of the prior twig, or zero for twig 0).
+	// This lets us reconstruct any entry's PreviousLeafHash in at most
+	// LEAF_COUNT_IN_TWIG steps from the entry file. Not persisted — rebuilt
+	// from the entry file during LoadFromDisk.
+	twigPrevLeaf []common.Hash
 
 	// Disk storage handles (nil when in-memory only).
 	entryFile *EntryFile
@@ -71,6 +81,10 @@ const (
 
 	// Twigs per step: ceil(stepSize / LEAF_COUNT_IN_TWIG).
 	trackerTwigsPerStep = 763 // ceil(1_562_500 / 2048)
+
+	// DefaultLeafCacheSize is the default number of LeafData entries to keep
+	// in the bounded LRU cache. Each entry is ~160 bytes, so 200k ≈ 32 MB.
+	DefaultLeafCacheSize = 200_000
 )
 
 // NewTracker creates a qmtree tracker. If snapDir is non-empty, the tree is
@@ -78,14 +92,19 @@ const (
 // the existing snapshot layout (e.g. snapshots/domain/, snapshots/history/).
 //
 // Storage is segmented by step: each HPFile segment covers exactly one step
-// worth of data. Entry segment size = stepSize × 32 bytes. Twig segment
+// worth of data. Entry segment size = stepSize × 96 bytes. Twig segment
 // size = ceil(stepSize/2048) × TWIG_SIZE bytes.
 func NewTracker(snapDir string, stepSize uint64) (*Tracker, error) {
 	hasher := &Keccak256Hasher{}
+	cache, err := lru.New[uint64, LeafData](DefaultLeafCacheSize)
+	if err != nil {
+		return nil, fmt.Errorf("create leaf data cache: %w", err)
+	}
 	qt := &Tracker{
-		hasher:   hasher,
-		leafData: make(map[uint64]LeafData),
-		stepSize: stepSize,
+		hasher:       hasher,
+		leafData:     cache,
+		twigPrevLeaf: []common.Hash{{}}, // twig 0 starts with zero prevLeaf
+		stepSize:     stepSize,
 	}
 
 	if snapDir != "" {
@@ -126,6 +145,16 @@ func NewTracker(snapDir string, stepSize uint64) (*Tracker, error) {
 // it to the qmtree. The preStateHash, stateChangeHash, and transitionHash
 // come from execution; previousLeafHash is chained automatically.
 func (qt *Tracker) AppendLeaf(preStateHash, stateChangeHash, transitionHash common.Hash) {
+	// Record the prevLeaf at the start of each new twig so that cache misses
+	// can be reconstructed in O(LEAF_COUNT_IN_TWIG) steps.
+	if qt.NextSN%LEAF_COUNT_IN_TWIG == 0 {
+		twigId := qt.NextSN / LEAF_COUNT_IN_TWIG
+		for uint64(len(qt.twigPrevLeaf)) <= twigId {
+			qt.twigPrevLeaf = append(qt.twigPrevLeaf, common.Hash{})
+		}
+		qt.twigPrevLeaf[twigId] = qt.prevLeaf
+	}
+
 	ld := LeafData{
 		SerialNum:        qt.NextSN,
 		PreStateHash:     preStateHash,
@@ -138,7 +167,7 @@ func (qt *Tracker) AppendLeaf(preStateHash, stateChangeHash, transitionHash comm
 	entry := &proofEntry{sn: qt.NextSN, hash: leafHash, pre: preStateHash, stateChange: stateChangeHash, transition: transitionHash}
 	qt.tree.AppendEntry(entry)
 
-	qt.leafData[qt.NextSN] = ld
+	qt.leafData.Add(qt.NextSN, ld)
 	qt.prevLeaf = leafHash
 	qt.NextSN++
 }
@@ -194,7 +223,7 @@ type StorageStats struct {
 	EntryBytes    int64  // entry file size
 	TwigBytes     int64  // twig file size
 	TotalBytes    int64  // total storage
-	LeafDataCount int    // in-memory leaf data entries
+	LeafDataCount int    // cached leaf data entries
 }
 
 func (qt *Tracker) StorageStats() StorageStats {
@@ -202,7 +231,7 @@ func (qt *Tracker) StorageStats() StorageStats {
 		Entries:       qt.NextSN,
 		Steps:         qt.completedSteps(),
 		CurrentStep:   qt.currentStep(),
-		LeafDataCount: len(qt.leafData),
+		LeafDataCount: qt.leafData.Len(),
 	}
 	if qt.entryFile != nil {
 		stats.EntryBytes = qt.entryFile.Size()
@@ -214,14 +243,140 @@ func (qt *Tracker) StorageStats() StorageStats {
 	return stats
 }
 
+// twigStartPrevLeaf returns the prevLeaf value at the start of the given twig.
+func (qt *Tracker) twigStartPrevLeaf(twigId uint64) common.Hash {
+	if twigId < uint64(len(qt.twigPrevLeaf)) {
+		return qt.twigPrevLeaf[twigId]
+	}
+	return common.Hash{}
+}
+
+// getLeafData returns LeafData for sn from the LRU cache, reconstructing from
+// the entry file on a cache miss. Reconstruction starts from twigPrevLeaf[twigId]
+// so the chain walk is at most LEAF_COUNT_IN_TWIG (2048) steps.
+func (qt *Tracker) getLeafData(sn uint64) (LeafData, bool) {
+	if ld, ok := qt.leafData.Get(sn); ok {
+		return ld, true
+	}
+	if qt.entryFile == nil {
+		return LeafData{}, false
+	}
+	twigId := sn >> TWIG_SHIFT
+	twigBase := twigId * LEAF_COUNT_IN_TWIG
+	prevLeaf := qt.twigStartPrevLeaf(twigId)
+
+	for s := twigBase; s <= sn; s++ {
+		if _, ok := qt.leafData.Peek(s); ok {
+			// Already cached: get (updates LRU order) and advance prevLeaf.
+			ld, _ := qt.leafData.Get(s)
+			prevLeaf = ld.LeafHash()
+			continue
+		}
+		pre, sc, trans, err := qt.entryFile.ReadComponents(s)
+		if err != nil {
+			return LeafData{}, false
+		}
+		ld := LeafData{
+			SerialNum:        s,
+			PreStateHash:     pre,
+			StateChangeHash:  sc,
+			TransitionHash:   trans,
+			PreviousLeafHash: prevLeaf,
+		}
+		qt.leafData.Add(s, ld)
+		prevLeaf = ld.LeafHash()
+	}
+	ld, ok := qt.leafData.Get(sn)
+	return ld, ok
+}
+
+// getTwigLeafHashes returns all LEAF_COUNT_IN_TWIG leaf hashes for the given twig,
+// using the LRU cache where possible and the entry file for misses.
+// The returned slice always has length LEAF_COUNT_IN_TWIG; positions beyond
+// NextSN-1 are the null entry hash.
+func (qt *Tracker) getTwigLeafHashes(twigId uint64) ([]common.Hash, error) {
+	twigBase := twigId * LEAF_COUNT_IN_TWIG
+	hashes := make([]common.Hash, LEAF_COUNT_IN_TWIG)
+
+	prevLeaf := qt.twigStartPrevLeaf(twigId)
+	end := min(twigBase+LEAF_COUNT_IN_TWIG, qt.NextSN)
+
+	for sn := twigBase; sn < end; sn++ {
+		i := sn - twigBase
+		if ld, ok := qt.leafData.Get(sn); ok {
+			hashes[i] = ld.LeafHash()
+			prevLeaf = hashes[i]
+			continue
+		}
+		if qt.entryFile == nil {
+			return nil, fmt.Errorf("entry file unavailable for sn=%d", sn)
+		}
+		pre, sc, trans, err := qt.entryFile.ReadComponents(sn)
+		if err != nil {
+			return nil, fmt.Errorf("read entry sn=%d: %w", sn, err)
+		}
+		ld := LeafData{
+			SerialNum:        sn,
+			PreStateHash:     pre,
+			StateChangeHash:  sc,
+			TransitionHash:   trans,
+			PreviousLeafHash: prevLeaf,
+		}
+		hashes[i] = ld.LeafHash()
+		qt.leafData.Add(sn, ld)
+		prevLeaf = hashes[i]
+	}
+	return hashes, nil
+}
+
+// buildTwigMT constructs a full TwigMT (4096 nodes) from 2048 leaf hashes
+// by computing all internal Merkle nodes bottom-up.
+func buildTwigMT(hasher Hasher, leafHashes []common.Hash) TwigMT {
+	mt := hasher.nullMtForTwig().Clone()
+	copy(mt[LEAF_COUNT_IN_TWIG:], leafHashes)
+	mt.Sync(hasher, 0, int32(LEAF_COUNT_IN_TWIG-1))
+	return mt
+}
+
+// getProof builds a ProofPath for sn with LeftOfTwig derived from the LRU
+// cache and entry file rather than from the twig file. This ensures correct
+// proofs regardless of the twig file's state (handles datasets written with
+// a stale prevLeaf due to a prior restart without LoadFromDisk).
+//
+// UpperPath and RightOfTwig still come from the tree's in-memory state.
+func (qt *Tracker) getProof(sn uint64) (ProofPath, error) {
+	twigId := sn >> TWIG_SHIFT
+
+	if twigId == qt.tree.youngestTwigId {
+		// Youngest twig: tree already has the correct TwigMT in memory.
+		return qt.tree.GetProof(sn)
+	}
+
+	// For completed twigs: get the proof structure from the tree (UpperPath +
+	// RightOfTwig are correct), then replace LeftOfTwig with the cache-computed
+	// version built from authoritative leaf hashes.
+	proof, err := qt.tree.GetProof(sn)
+	if err != nil {
+		return ProofPath{}, err
+	}
+
+	leafHashes, err := qt.getTwigLeafHashes(twigId)
+	if err != nil {
+		return ProofPath{}, fmt.Errorf("get twig leaf hashes twig=%d: %w", twigId, err)
+	}
+	mt := buildTwigMT(qt.hasher, leafHashes)
+	proof.LeftOfTwig = GetLeftPathInMem(mt, sn)
+	return proof, nil
+}
+
 // GetWitness generates a Witness for a single leaf by serial number.
 // The tree must be synced (SyncRoot called) before calling this.
 func (qt *Tracker) GetWitness(sn uint64) (*Witness, error) {
-	ld, ok := qt.leafData[sn]
+	ld, ok := qt.getLeafData(sn)
 	if !ok {
 		return nil, fmt.Errorf("leaf data not found for sn=%d", sn)
 	}
-	proof, err := qt.tree.GetProof(sn)
+	proof, err := qt.getProof(sn)
 	if err != nil {
 		return nil, fmt.Errorf("get proof for sn=%d: %w", sn, err)
 	}
@@ -243,18 +398,18 @@ func (qt *Tracker) GetRangeWitness(fromSN, toSN uint64) (*RangeWitness, error) {
 
 	leaves := make([]LeafData, 0, toSN-fromSN+1)
 	for sn := fromSN; sn <= toSN; sn++ {
-		ld, ok := qt.leafData[sn]
+		ld, ok := qt.getLeafData(sn)
 		if !ok {
 			return nil, fmt.Errorf("leaf data not found for sn=%d", sn)
 		}
 		leaves = append(leaves, ld)
 	}
 
-	firstProof, err := qt.tree.GetProof(fromSN)
+	firstProof, err := qt.getProof(fromSN)
 	if err != nil {
 		return nil, fmt.Errorf("get first proof for sn=%d: %w", fromSN, err)
 	}
-	lastProof, err := qt.tree.GetProof(toSN)
+	lastProof, err := qt.getProof(toSN)
 	if err != nil {
 		return nil, fmt.Errorf("get last proof for sn=%d: %w", toSN, err)
 	}
@@ -279,29 +434,25 @@ func (qt *Tracker) Flush() {
 }
 
 // UnwindTo truncates the tree and storage back to the given serial number.
-// All entries with sn >= toSN are discarded, and in-memory leaf data for
-// the unwound range is removed. The target SN is the first entry to discard
-// (i.e., entries 0..toSN-1 are kept).
+// All entries with sn >= toSN are discarded. The target SN is the first
+// entry to discard (i.e. entries 0..toSN-1 are kept).
 func (qt *Tracker) UnwindTo(toSN uint64) {
 	if toSN >= qt.NextSN {
 		return // nothing to unwind
 	}
 
 	if toSN == 0 {
-		// Unwind everything — reset tree to empty state.
 		qt.tree.UnwindTo(0, nil)
 	} else {
-		// Tree.UnwindTo(targetSN) keeps entries 0..targetSN.
 		lastKept := toSN - 1
-		twigStart := lastKept &^ TWIG_MASK // first SN in the twig
+		twigStart := lastKept &^ TWIG_MASK
 		posInTwig := lastKept & TWIG_MASK
 
-		// Collect entry hashes for partial twig rebuild.
 		var entryHashes []common.Hash
-		if posInTwig < TWIG_MASK { // partial twig needs rebuild
+		if posInTwig < TWIG_MASK {
 			entryHashes = make([]common.Hash, posInTwig+1)
 			for i := uint64(0); i <= posInTwig; i++ {
-				if ld, ok := qt.leafData[twigStart+i]; ok {
+				if ld, ok := qt.leafData.Peek(twigStart + i); ok {
 					entryHashes[i] = ld.LeafHash()
 				}
 			}
@@ -309,15 +460,25 @@ func (qt *Tracker) UnwindTo(toSN uint64) {
 		qt.tree.UnwindTo(lastKept, entryHashes)
 	}
 
-	// Remove leaf data for unwound entries.
+	// Remove unwound entries from the LRU cache.
 	for sn := toSN; sn < qt.NextSN; sn++ {
-		delete(qt.leafData, sn)
+		qt.leafData.Remove(sn)
 	}
 	qt.NextSN = toSN
 
+	// Truncate twigPrevLeaf to the twigs that remain.
+	if toSN > 0 {
+		lastKeptTwig := (toSN - 1) >> TWIG_SHIFT
+		if lastKeptTwig+1 < uint64(len(qt.twigPrevLeaf)) {
+			qt.twigPrevLeaf = qt.twigPrevLeaf[:lastKeptTwig+1]
+		}
+	} else {
+		qt.twigPrevLeaf = qt.twigPrevLeaf[:1] // keep twig 0's zero anchor
+	}
+
 	// Recompute prevLeaf from the last remaining entry.
 	if toSN > 0 {
-		if ld, ok := qt.leafData[toSN-1]; ok {
+		if ld, ok := qt.getLeafData(toSN - 1); ok {
 			qt.prevLeaf = ld.LeafHash()
 		}
 	} else {
@@ -329,13 +490,10 @@ func (qt *Tracker) UnwindTo(toSN uint64) {
 // Call this after NewTracker when the snapDir already contains data from a
 // previous run, before calling GetWitness or SyncRoot.
 //
-// Strategy: truncate the twig file to 0 and rebuild it by replaying all entries
-// from the entry file with correctly-chained leaf hashes. The entry file is the
-// authoritative source of truth (storing raw component triplets); the twig file
-// is a derived structure that must be rebuilt to ensure the twig Merkle trees
-// reflect the correct prevLeaf chain. This handles the case where a prior run
-// was killed mid-twig and restarted without LoadFromDisk (causing the twig file
-// to be written with a reset prevLeaf=0).
+// Strategy: replay all entries through an in-memory-only tree (nil storage so
+// no data is re-written to disk). The twig file is left unchanged — LeftOfTwig
+// paths for completed twigs are computed from the LRU cache and twigPrevLeaf
+// checkpoints via Tracker.getProof, not from the twig file directly.
 func (qt *Tracker) LoadFromDisk() error {
 	if qt.entryFile == nil {
 		return nil // in-memory only, nothing to load
@@ -349,24 +507,22 @@ func (qt *Tracker) LoadFromDisk() error {
 	}
 	count := uint64(fileSize) / uint64(entrySize)
 
-	// Truncate the twig file so we rebuild it from scratch with correct leaf hashes.
-	// The entry file stores the authoritative (pre, stateChange, transition) triplets;
-	// the twig file is derived from them and must match the correctly-chained leaf hashes.
-	if qt.twigFile != nil {
-		if err := qt.twigFile.Truncate(0); err != nil {
-			return fmt.Errorf("qmtree LoadFromDisk: truncate twig file: %w", err)
-		}
-	}
-
-	// Build a replay tree with nil entry storage (entries are already on disk;
-	// don't re-append them) and real twig storage so completed twigs are written
-	// to disk with the correctly-computed leaf hashes.
-	replayTree := NewTree(qt.hasher, 0, nil, qt.twigFile)
+	// Replay through an in-memory tree (nil storage — don't re-write files).
+	replayTree := NewTree(qt.hasher, 0, nil, nil)
 
 	var prevLeaf common.Hash
-	leafData := make(map[uint64]LeafData, count)
+	twigPrevLeaf := []common.Hash{{}} // twig 0 starts with zero prevLeaf
 
 	for sn := uint64(0); sn < count; sn++ {
+		// Record twig-start prevLeaf checkpoint.
+		if sn > 0 && sn%LEAF_COUNT_IN_TWIG == 0 {
+			twigId := sn / LEAF_COUNT_IN_TWIG
+			for uint64(len(twigPrevLeaf)) <= twigId {
+				twigPrevLeaf = append(twigPrevLeaf, common.Hash{})
+			}
+			twigPrevLeaf[twigId] = prevLeaf
+		}
+
 		pre, stateChange, transition, err := qt.entryFile.ReadComponents(sn)
 		if err != nil {
 			return fmt.Errorf("qmtree LoadFromDisk: read components sn=%d: %w", sn, err)
@@ -381,23 +537,24 @@ func (qt *Tracker) LoadFromDisk() error {
 		leafHash := ld.LeafHash()
 		entry := &proofEntry{sn: sn, hash: leafHash, pre: pre, stateChange: stateChange, transition: transition}
 		replayTree.AppendEntry(entry) //nolint:errcheck
-		leafData[sn] = ld
+		qt.leafData.Add(sn, ld)      // LRU evicts oldest entries automatically
 		prevLeaf = leafHash
 	}
 
-	// Attach the real entry storage to the replay tree. The caller is responsible
-	// for calling SyncRoot() which will trigger the first (and only) SyncAndRoot
-	// call to build the upper-tree node cache.
+	// Attach the real disk handles to the replay tree. The caller is responsible
+	// for calling SyncRoot() to build the upper-tree node cache.
 	replayTree.entryStorage = qt.tree.entryStorage
+	replayTree.twigStorage = qt.tree.twigStorage
 
 	qt.tree = replayTree
-	qt.leafData = leafData
+	qt.twigPrevLeaf = twigPrevLeaf
 	qt.prevLeaf = prevLeaf
 	qt.NextSN = count
 
 	log.Info("qmtree: loaded from disk",
 		"entries", count,
 		"entryStorage", common.ByteCount(uint64(fileSize)),
+		"cachedLeaves", qt.leafData.Len(),
 	)
 	return nil
 }

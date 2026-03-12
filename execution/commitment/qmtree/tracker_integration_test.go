@@ -60,7 +60,7 @@ func TestTracker_LoadFromDisk(t *testing.T) {
 	}
 	for sn := uint64(0); sn < checkCount; sn++ {
 		require.NoError(t, verifySN(sn), "witness should verify for sn=%d", sn)
-		ld := tracker.leafData[sn]
+		ld, _ := tracker.getLeafData(sn)
 		t.Logf("sn=%d verified OK (prevLeaf=%s)", sn, ld.PreviousLeafHash.Hex())
 	}
 
@@ -105,7 +105,7 @@ func findFirstFailing(total, lo uint64, failing func(uint64) bool) uint64 {
 func diagnoseMismatch(t *testing.T, tracker *Tracker, hasher Hasher, sn uint64) {
 	t.Helper()
 
-	ld := tracker.leafData[sn]
+	ld, _ := tracker.getLeafData(sn)
 	computed := ld.LeafHash()
 	t.Logf("=== Diagnosis for failing sn=%d (twig=%d, pos=%d) ===",
 		sn, sn>>TWIG_SHIFT, sn&TWIG_MASK)
@@ -116,7 +116,7 @@ func diagnoseMismatch(t *testing.T, tracker *Tracker, hasher Hasher, sn uint64) 
 	t.Logf("  Computed LeafHash: %s", computed.Hex())
 
 	if sn > 0 {
-		prev := tracker.leafData[sn-1]
+		prev, _ := tracker.getLeafData(sn - 1)
 		prevLeafHash := prev.LeafHash()
 		t.Logf("  leafData[sn-1].LeafHash(): %s", prevLeafHash.Hex())
 		if ld.PreviousLeafHash != prevLeafHash {
@@ -140,11 +140,32 @@ func diagnoseMismatch(t *testing.T, tracker *Tracker, hasher Hasher, sn uint64) 
 		t.Logf("  MISMATCH: computed=%s vs stored=%s", computed.Hex(), storedLeaf.Hex())
 	}
 
-	// Check the proof verification result.
+	// Check the proof verification result with non-complete mode to find exact failure level.
 	proof.LeftOfTwig[0].SelfHash = computed
-	if err := proof.Check(hasher, true); err != nil {
-		t.Logf("  Proof.Check with computed hash: FAIL (%v)", err)
+	if err := proof.Check(hasher, false); err != nil {
+		t.Logf("  Proof.Check(complete=false): FAIL (%v)", err)
 	} else {
-		t.Logf("  Proof.Check with computed hash: OK (computed hash gives valid proof)")
+		t.Logf("  Proof.Check(complete=false): OK")
+	}
+
+	// Use complete=true to fill in all SelfHash values, then compare the computed
+	// root against proof.Root to understand the divergence.
+	proof2, _ := tracker.tree.GetProof(sn)
+	proof2.LeftOfTwig[0].SelfHash = computed
+	_ = proof2.Check(hasher, true) // fills in all SelfHash values
+	t.Logf("  proof.Root:           %s", proof2.Root.Hex())
+
+	// Print the full UpperPath to trace divergence.
+	for i, node := range proof2.UpperPath {
+		t.Logf("  UpperPath[%d]: SelfHash=%s PeerHash=%s PeerAtLeft=%v",
+			i, node.SelfHash.Hex(), node.PeerHash.Hex(), node.PeerAtLeft)
+	}
+
+	// Also print twig root from disk.
+	diskRoot, err := tracker.tree.twigStorage.GetHashRoot(sn >> TWIG_SHIFT)
+	if err != nil {
+		t.Logf("  GetHashRoot error: %v", err)
+	} else {
+		t.Logf("  TwigRoot from disk: %s", diskRoot.Hex())
 	}
 }
