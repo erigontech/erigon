@@ -222,8 +222,7 @@ func BenchmarkHeapPercentile_N20(b *testing.B) {
 		testData[i] = generateUint256Slice(sliceSizeSmall)
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		for j := 0; j < iterations; j++ {
 			values := copyUint256Slice(testData[j])
 			_ = heapPercentile(values, percentile)
@@ -237,8 +236,7 @@ func BenchmarkKthPercentile_N20(b *testing.B) {
 		testData[i] = generateUint256Slice(sliceSizeSmall)
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		for j := 0; j < iterations; j++ {
 			values := copyUint256Slice(testData[j])
 			index := (len(values) - 1) * percentile / 100
@@ -248,27 +246,19 @@ func BenchmarkKthPercentile_N20(b *testing.B) {
 }
 
 func BenchmarkHeapPercentile(b *testing.B) {
-	testData := make([][]*uint256.Int, b.N)
-	for i := 0; i < b.N; i++ {
-		testData[i] = generateUint256Slice(sliceSizeLarge)
-	}
+	testData := generateUint256Slice(sliceSizeLarge)
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		values := copyUint256Slice(testData[i])
+	for b.Loop() {
+		values := copyUint256Slice(testData)
 		_ = heapPercentile(values, percentile)
 	}
 }
 
 func BenchmarkKthPercentile(b *testing.B) {
-	testData := make([][]*uint256.Int, b.N)
-	for i := 0; i < b.N; i++ {
-		testData[i] = generateUint256Slice(sliceSizeLarge)
-	}
+	testData := generateUint256Slice(sliceSizeLarge)
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		values := copyUint256Slice(testData[i])
+	for b.Loop() {
+		values := copyUint256Slice(testData)
 		index := (len(values) - 1) * percentile / 100
 		_ = findKthUint256(values, index)
 	}

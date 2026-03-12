@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Filters noisy go test output, keeping only failures and summary lines.
+# Usage: go test ./... 2>&1 | filter-test-output
+# Two greps: first uses regex (^ anchors), second uses -F for fixed strings (brackets).
+# --line-buffered on both greps prevents block buffering since their stdout is a pipe.
+grep --line-buffered -v -e '^=== CONT ' -e '^=== RUN ' -e '^=== PAUSE ' -e '^PASS' |
+  grep --line-buffered -vF -e '--- PASS:' -e '[no test files]'
+# grep exits 1 when no lines match — that's not an error for a filter.
+# Preserve real failures (exit code 2 = actual error, 141 = SIGPIPE).
+rc=${PIPESTATUS[1]}
+if [ "$rc" -eq 1 ]; then
+  exit 0
+fi
+exit "$rc"

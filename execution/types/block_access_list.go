@@ -31,6 +31,9 @@ const (
 	maxStorageChangesPerSlot    = math.MaxUint16 + 1
 	maxStorageReadsPerAccount   = 1 << 18
 	maxIndexedChangesPerAccount = math.MaxUint16 + 1
+
+	// EIP-7928: bal_items <= block_gas_limit / BalItemCost
+	BalItemCost = 2000
 )
 
 type AccountChanges struct {
@@ -213,9 +216,7 @@ func (ac *AccountChanges) Normalize() {
 }
 
 func (sc *SlotChanges) EncodingSize() int {
-	slot := sc.Slot.Value()
-	slotInt := uint256FromHash(slot)
-	size := rlp.Uint256Len(slotInt)
+	size := rlp.Uint256Len(hashToUint256(sc.Slot.Value())) // minimal slot key
 	changesLen := EncodingSizeGenericList(sc.Changes)
 	size += rlp.ListPrefixLen(changesLen) + changesLen
 	return size
@@ -233,9 +234,7 @@ func (sc *SlotChanges) EncodeRLP(w io.Writer) error {
 	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
-	slot := sc.Slot.Value()
-	slotInt := uint256FromHash(slot)
-	if err := rlp.EncodeUint256(slotInt, w, b[:]); err != nil {
+	if err := rlp.EncodeUint256(hashToUint256(sc.Slot.Value()), w, b[:]); err != nil {
 		return err
 	}
 
@@ -248,7 +247,7 @@ func (sc *SlotChanges) DecodeRLP(s *rlp.Stream) error {
 	} else if size > maxBlockAccessListBytes {
 		return fmt.Errorf("slot changes payload exceeds maximum size (%d bytes)", size)
 	}
-	slot, err := decodeUint256Hash(s)
+	slot, err := decodeMinimalHash(s)
 	if err != nil {
 		return fmt.Errorf("read Slot: %w", err)
 	}
@@ -268,8 +267,7 @@ func (sc *SlotChanges) DecodeRLP(s *rlp.Stream) error {
 
 func (sc *StorageChange) EncodingSize() int {
 	size := rlp.U64Len(uint64(sc.Index))
-	size += rlp.Uint256Len(sc.Value)
-
+	size += rlp.Uint256Len(sc.Value) // minimal storage value
 	return size
 }
 
@@ -299,16 +297,20 @@ func (sc *StorageChange) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("block access index overflow: %d", idx)
 	}
 	sc.Index = uint16(idx)
-	err = s.ReadUint256(&sc.Value)
+	valBytes, err := s.Bytes()
 	if err != nil {
 		return fmt.Errorf("read Value: %w", err)
 	}
+	if len(valBytes) > 32 {
+		return fmt.Errorf("read Value: too large (%d bytes)", len(valBytes))
+	}
+	sc.Value.SetBytes(valBytes)
 	return s.ListEnd()
 }
 
 func (bc *BalanceChange) EncodingSize() int {
 	size := rlp.U64Len(uint64(bc.Index))
-	size += rlp.Uint256Len(bc.Value)
+	size += rlp.Uint256Len(bc.Value) // minimal balance value
 	return size
 }
 
@@ -343,7 +345,7 @@ func (bc *BalanceChange) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("read Value: %w", err)
 	}
 	if len(valBytes) > 32 {
-		return fmt.Errorf("read Value: integer too large")
+		return fmt.Errorf("read Value: integer too large (%d bytes)", len(valBytes))
 	}
 	bc.Value.SetBytes(valBytes)
 	return s.ListEnd()
@@ -495,17 +497,13 @@ func encodeHashList(hashes []accounts.StorageKey, w io.Writer, buf []byte) error
 	}
 	total := 0
 	for i := range hashes {
-		hash := hashes[i].Value()
-		hashInt := uint256FromHash(hash)
-		total += rlp.Uint256Len(hashInt)
+		total += rlp.Uint256Len(hashToUint256(hashes[i].Value()))
 	}
 	if err := rlp.EncodeStructSizePrefix(total, w, buf); err != nil {
 		return err
 	}
 	for i := range hashes {
-		hash := hashes[i].Value()
-		hashInt := uint256FromHash(hash)
-		if err := rlp.EncodeUint256(hashInt, w, buf); err != nil {
+		if err := rlp.EncodeUint256(hashToUint256(hashes[i].Value()), w, buf); err != nil {
 			return err
 		}
 	}
@@ -515,9 +513,7 @@ func encodeHashList(hashes []accounts.StorageKey, w io.Writer, buf []byte) error
 func encodingSizeHashList(hashes []accounts.StorageKey) int {
 	size := 0
 	for i := range hashes {
-		hash := hashes[i].Value()
-		hashInt := uint256FromHash(hash)
-		size += rlp.Uint256Len(hashInt)
+		size += rlp.Uint256Len(hashToUint256(hashes[i].Value()))
 	}
 	return rlp.ListPrefixLen(size) + size
 }
@@ -785,7 +781,7 @@ func decodeStorageKeys(s *rlp.Stream) ([]accounts.StorageKey, error) {
 	var hashes []accounts.StorageKey
 	for {
 		var h common.Hash
-		h, err = decodeUint256Hash(s)
+		h, err = decodeMinimalHash(s)
 		if err != nil {
 			break
 		}
@@ -804,19 +800,24 @@ func decodeStorageKeys(s *rlp.Stream) ([]accounts.StorageKey, error) {
 	return hashes, nil
 }
 
-func uint256FromHash(h common.Hash) uint256.Int {
-	var out uint256.Int
-	out.SetBytes(h[:])
-	return out
+// hashToUint256 converts a common.Hash to a uint256.Int for minimal RLP encoding.
+// EIP-7928 encodes slot keys, storage values, and balance values using standard
+// RLP integer encoding (minimal big-endian, leading zeros stripped).
+func hashToUint256(h common.Hash) uint256.Int {
+	var v uint256.Int
+	v.SetBytes(h[:])
+	return v
 }
 
-func decodeUint256Hash(s *rlp.Stream) (common.Hash, error) {
+// decodeMinimalHash reads an RLP byte string and right-aligns it into a 32-byte hash.
+// Handles minimal-encoded values (leading zeros stripped).
+func decodeMinimalHash(s *rlp.Stream) (common.Hash, error) {
 	raw, err := s.Bytes()
 	if err != nil {
 		return common.Hash{}, err
 	}
 	if len(raw) > 32 {
-		return common.Hash{}, fmt.Errorf("integer too large")
+		return common.Hash{}, fmt.Errorf("hash too large: %d bytes", len(raw))
 	}
 	var out common.Hash
 	copy(out[32-len(raw):], raw)
@@ -864,6 +865,22 @@ func (bal BlockAccessList) Validate() error {
 	return nil
 }
 
+// ValidateMaxItems checks the EIP-7928 constraint: bal_items <= blockGasLimit / BalItemCost
+// where bal_items = count(addresses) + count(storage keys across all accounts).
+func (bal BlockAccessList) ValidateMaxItems(blockGasLimit uint64) error {
+	maxItems := blockGasLimit / BalItemCost
+	var items uint64
+	for _, ac := range bal {
+		items++ // each address counts as 1 item
+		items += uint64(len(ac.StorageChanges))
+		items += uint64(len(ac.StorageReads))
+	}
+	if items > maxItems {
+		return fmt.Errorf("block access list too large: %d items > %d max (gas limit %d / %d)", items, maxItems, blockGasLimit, BalItemCost)
+	}
+	return nil
+}
+
 func (ac *AccountChanges) validate() error {
 	if ac == nil {
 		return errors.New("nil account changes")
@@ -873,6 +890,18 @@ func (ac *AccountChanges) validate() error {
 	}
 	if err := validateStorageReads(ac.StorageReads); err != nil {
 		return fmt.Errorf("storage_reads: %w", err)
+	}
+	// EIP-7928: a slot must not appear in both storage_changes and storage_reads.
+	if len(ac.StorageChanges) > 0 && len(ac.StorageReads) > 0 {
+		changeSlots := make(map[common.Hash]struct{}, len(ac.StorageChanges))
+		for _, sc := range ac.StorageChanges {
+			changeSlots[sc.Slot.Value()] = struct{}{}
+		}
+		for _, key := range ac.StorageReads {
+			if _, exists := changeSlots[key.Value()]; exists {
+				return fmt.Errorf("storage key %s in both changes and reads", key.Value().Hex())
+			}
+		}
 	}
 	if err := validateBalanceChangeList(ac.BalanceChanges); err != nil {
 		return fmt.Errorf("balance_changes: %w", err)

@@ -85,8 +85,7 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 		}
 	}
 
-	aux := make([]byte, 0, 256)
-	return branch.ReplacePlainKeys(aux, func(key []byte, isStorage bool) ([]byte, error) {
+	result, err := branch.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
 		if isStorage {
 			if len(key) == length.Addr+length.Hash {
 				return nil, nil // save storage key as is
@@ -121,6 +120,10 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 		}
 		return apkBuf, nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func DecodeReferenceKey(from []byte) uint64 {
@@ -427,12 +430,11 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 			return shortened, nil
 		}
 
-		temp, err := commitment.BranchData(valBuf).ReplacePlainKeys(dt.comBuf[:0], replacer)
+		branchData, err := commitment.BranchData(valBuf).ReplacePlainKeys(nil, replacer)
 		if err != nil {
 			return nil, err
 		}
-		dt.comBuf = append(dt.comBuf[:0], temp...) // cover branch data case
-		return dt.comBuf, nil
+		return branchData, nil
 	}
 
 	return vt, nil
