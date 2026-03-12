@@ -91,9 +91,26 @@ var (
 // Key occupies data[offset : offset+keyLen], value follows at data[offset+max(0,keyLen) : ...+valLen].
 // keyLen/valLen of -1 indicates nil.
 type entryLoc struct {
-	offset int
-	keyLen int
-	valLen int
+	// first 8 bytes of key, big-endian so uint64 comparison matches bytes.Compare order
+	// Concrete example:
+	//
+	//	A = []byte{0x00, 0xFF, 0, 0, 0, 0, 0, 0}
+	//	B = []byte{0x01, 0x00, 0, 0, 0, 0, 0, 0}
+	//
+	//	bytes.Compare(A, B) → A[0]=0x00 < B[0]=0x01 → A < B ✓
+	//
+	//	BigEndian.Uint64(A) = 0x00FF000000000000 =   71776119061217280
+	//	BigEndian.Uint64(B) = 0x0100000000000000 =   72057594037927936
+	//	                                           A < B ✓  (same answer)
+	//
+	//	If we used LittleEndian instead:
+	//	LittleEndian.Uint64(A) = 0x000000000000FF00 = 65280
+	//	LittleEndian.Uint64(B) = 0x0000000000000001 = 1
+	keyPrefix uint64
+	seq       int // insertion order — enables stable sort via unstable SortFunc
+	offset    int
+	keyLen    int
+	valLen    int
 }
 
 func NewSortableBuffer(bufferOptimalSize datasize.ByteSize) *sortableBuffer {
@@ -119,14 +136,20 @@ func (b *sortableBuffer) Put(k, v []byte) {
 	if v == nil {
 		lv = -1
 	}
+	var prefix uint64
+	if len(k) >= 8 { // shorter keys: for simplicity passing empty prefixes. sort will handle them properly
+		prefix = binary.BigEndian.Uint64(k)
+	}
 	b.entries = append(b.entries, entryLoc{
-		offset: len(b.data),
-		keyLen: lk,
-		valLen: lv,
+		offset:    len(b.data),
+		keyLen:    lk,
+		valLen:    lv,
+		seq:       len(b.entries),
+		keyPrefix: prefix,
 	})
 	b.data = append(b.data, k...)
 	b.data = append(b.data, v...)
-	b.size += len(k) + len(v) + 24 // 24 = sizeof(entryLoc): 3 ints
+	b.size += len(k) + len(v) + 40 // 40 = sizeof(entryLoc)
 }
 
 func (b *sortableBuffer) Size() int { return b.size }
@@ -173,12 +196,22 @@ func (b *sortableBuffer) SizeLimit() int { return b.optimalSize }
 func (b *sortableBuffer) Sort() {
 	data := b.data
 	cmp := func(a, b entryLoc) int {
-		return bytes.Compare(data[a.offset:a.offset+a.keyLen], data[b.offset:b.offset+b.keyLen])
+		if a.keyPrefix != b.keyPrefix {
+			if a.keyPrefix < b.keyPrefix {
+				return -1
+			}
+			return 1
+		}
+		aLen, bLen := max(a.keyLen, 0), max(b.keyLen, 0)
+		if c := bytes.Compare(data[a.offset:a.offset+aLen], data[b.offset:b.offset+bLen]); c != 0 {
+			return c
+		}
+		return a.seq - b.seq // preserve insertion order for duplicate keys
 	}
 	if slices.IsSortedFunc(b.entries, cmp) {
 		return
 	}
-	slices.SortStableFunc(b.entries, cmp) // Stable: this buffer type can have duplicate keys and must preserve their insertion order
+	slices.SortFunc(b.entries, cmp)
 }
 
 func (b *sortableBuffer) CheckFlushSize() bool {
