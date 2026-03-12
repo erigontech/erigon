@@ -343,30 +343,52 @@ func buildTwigMT(hasher Hasher, leafHashes []common.Hash) TwigMT {
 // proofs regardless of the twig file's state (handles datasets written with
 // a stale prevLeaf due to a prior restart without LoadFromDisk).
 //
-// UpperPath and RightOfTwig still come from the tree's in-memory state.
+// For completed twigs the proof is assembled directly from tree internals,
+// never reading the twig file, to avoid EOF panics on incomplete twig data.
 func (qt *Tracker) getProof(sn uint64) (ProofPath, error) {
 	twigId := sn >> TWIG_SHIFT
 
 	if twigId == qt.tree.youngestTwigId {
-		// Youngest twig: tree already has the correct TwigMT in memory.
+		// Youngest twig: tree has the correct TwigMT in memory already.
 		return qt.tree.GetProof(sn)
 	}
 
-	// For completed twigs: get the proof structure from the tree (UpperPath +
-	// RightOfTwig are correct), then replace LeftOfTwig with the cache-computed
-	// version built from authoritative leaf hashes.
-	proof, err := qt.tree.GetProof(sn)
-	if err != nil {
-		return ProofPath{}, err
+	// Completed twig: assemble the proof without touching the twig file.
+	// The twig file may be corrupt (stale prevLeaf) or incomplete (EOF) due
+	// to a prior restart without LoadFromDisk, so we never read it here.
+
+	// UpperPath + Root: from the upper tree (in-memory, always correct after LoadFromDisk).
+	upperPath, root := qt.tree.getUpperPathAndRoot(twigId)
+	if len(upperPath) == 0 {
+		return ProofPath{}, fmt.Errorf("cannot find upper path for twig=%d", twigId)
 	}
 
+	// LeftOfTwig: compute from LRU cache + entry file (authoritative).
 	leafHashes, err := qt.getTwigLeafHashes(twigId)
 	if err != nil {
 		return ProofPath{}, fmt.Errorf("get twig leaf hashes twig=%d: %w", twigId, err)
 	}
 	mt := buildTwigMT(qt.hasher, leafHashes)
-	proof.LeftOfTwig = GetLeftPathInMem(mt, sn)
-	return proof, nil
+
+	// RightOfTwig: from activeTwigShards + activeBitShards (in-memory).
+	s, k := GetShardIdxAndKey(twigId)
+	twig, ok := qt.tree.upperTree.activeTwigShards[s][k]
+	if !ok {
+		nullTwig := qt.tree.hasher.nullTwig()
+		twig = &nullTwig
+	}
+	activeBits, ok := qt.tree.activeBitShards[s][k]
+	if !ok {
+		activeBits = &ActiveBits{}
+	}
+
+	return ProofPath{
+		SerialNum:   sn,
+		LeftOfTwig:  GetLeftPathInMem(mt, sn),
+		RightOfTwig: GetRightPath(twig, activeBits, sn),
+		UpperPath:   upperPath,
+		Root:        common.Hash(root),
+	}, nil
 }
 
 // GetWitness generates a Witness for a single leaf by serial number.
