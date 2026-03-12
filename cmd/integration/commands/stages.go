@@ -788,6 +788,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			}
 		}
 
+		//commit rwtx. build step N files in blocking way. open new rwtx and prune step N
 		{
 			var lastTxNum uint64
 			if err := db.View(ctx, func(tx kv.Tx) error {
@@ -805,6 +806,12 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			}
 			_ = agg.BuildFiles(lastTxNum)
 			go func() { _ = agg.MergeLoop(ctx) }()
+		}
+
+		if !noCommit {
+			if tx, err = db.BeginTemporalRw(ctx); err != nil {
+				return err
+			}
 		}
 
 		pruneStage, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, s.CurrentSyncCycle.IsInitialCycle)
