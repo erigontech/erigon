@@ -558,11 +558,6 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
 	}
 
-	peakGasUsed := st.gasUsed()
-	if rules.IsPrague {
-		peakGasUsed = max(intrinsicGasResult.FloorGasCost, peakGasUsed)
-	}
-
 	if refunds && !gasBailout {
 		refundQuotient := params.RefundQuotient
 		if rules.IsLondon {
@@ -637,7 +632,6 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	result = &evmtypes.ExecutionResult{
 		ReceiptGasUsed:      st.gasUsed(),
 		BlockGasUsed:        st.blockGasUsed,
-		MaxGasUsed:          peakGasUsed,
 		Err:                 vmerr,
 		Reverted:            errors.Is(vmerr, vm.ErrExecutionReverted),
 		ReturnData:          ret,
