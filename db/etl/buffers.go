@@ -137,8 +137,14 @@ func (b *sortableBuffer) Put(k, v []byte) {
 		lv = -1
 	}
 	var prefix uint64
-	if len(k) >= 8 { // shorter keys: for simplicity passing empty prefixes. sort will handle them properly
+	if len(k) >= 8 {
 		prefix = binary.BigEndian.Uint64(k)
+	} else if len(k) > 0 {
+		// Pad short keys with zeros on the right so prefix comparison
+		// matches bytes.Compare order. E.g. key 0x73 → prefix 0x7300000000000000.
+		var buf [8]byte
+		copy(buf[:], k)
+		prefix = binary.BigEndian.Uint64(buf[:])
 	}
 	b.entries = append(b.entries, entryLoc{
 		offset:    len(b.data),
@@ -212,6 +218,13 @@ func (b *sortableBuffer) Sort() {
 		return
 	}
 	slices.SortFunc(b.entries, cmp)
+	if dbg.AssertEnabled {
+		for i := 1; i < len(b.entries); i++ {
+			if cmp(b.entries[i-1], b.entries[i]) > 0 {
+				panic(fmt.Sprintf("etl: sortableBuffer.Sort produced unsorted result at index %d", i))
+			}
+		}
+	}
 }
 
 func (b *sortableBuffer) CheckFlushSize() bool {
