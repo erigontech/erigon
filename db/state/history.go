@@ -272,7 +272,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		IndexFile:  historyIdxPath,
 		Salt:       h.salt.Load(),
 		NoFsync:    h.noFsync,
-		//Workers:    h.CompressorCfg.Workers,
+		Workers:    h.BuildAccessorsWorkers,
 	}, h.logger)
 	if err != nil {
 		return fmt.Errorf("create recsplit: %w", err)
