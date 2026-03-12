@@ -89,11 +89,11 @@ var (
 // Key occupies data[offset : offset+keyLen], value follows at data[offset+max(0,keyLen) : ...+valLen].
 // keyLen/valLen of -1 indicates nil.
 type entryLoc struct {
+	keyPrefix uint64 // first 8 bytes of key, big-endian so uint64 comparison matches bytes.Compare order
 	offset    int
 	keyLen    int
+	seq       int // insertion order — enables stable sort via unstable SortFunc
 	valLen    int
-	seq       int    // insertion order — enables stable sort via unstable SortFunc
-	keyPrefix uint64 // first 8 bytes of key, big-endian so uint64 comparison matches bytes.Compare order
 }
 
 func NewSortableBuffer(bufferOptimalSize datasize.ByteSize) *sortableBuffer {
@@ -201,8 +201,12 @@ func (b *sortableBuffer) Sort() {
 			}
 			return 1
 		}
-		if c := bytes.Compare(data[a.offset:a.offset+a.keyLen], data[b.offset:b.offset+b.keyLen]); c != 0 {
-			return c
+		if a.keyLen > 0 && b.keyLen > 0 {
+			if c := bytes.Compare(data[a.offset:a.offset+a.keyLen], data[b.offset:b.offset+b.keyLen]); c != 0 {
+				return c
+			}
+		} else if a.keyLen != b.keyLen {
+			return a.keyLen - b.keyLen // nil (-1) < empty (0) < non-empty
 		}
 		return a.seq - b.seq // preserve insertion order for duplicate keys
 	}

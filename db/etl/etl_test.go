@@ -631,6 +631,56 @@ func TestSortable(t *testing.T) {
 
 }
 
+func TestSortableBufferStableSort(t *testing.T) {
+	buf := NewSortableBuffer(256 * 1024)
+
+	// Insert entries with duplicate keys but different values.
+	// Stable sort must preserve insertion order for equal keys.
+	key1 := []byte{0x01, 0x02}
+	key2 := []byte{0x01, 0x02}
+	key3 := []byte{0x00, 0xFF}
+
+	buf.Put(key1, []byte("first"))
+	buf.Put(key2, []byte("second"))
+	buf.Put(key3, []byte("third"))
+	buf.Put(key1, []byte("fourth"))
+
+	buf.Sort()
+
+	// Expected order: key3 (0x00FF) < key1 "first" < key2 "second" < key1 "fourth"
+	k0, v0 := buf.Get(0, nil, nil)
+	assert.Equal(t, key3, k0)
+	assert.Equal(t, []byte("third"), v0)
+
+	_, v1 := buf.Get(1, nil, nil)
+	_, v2 := buf.Get(2, nil, nil)
+	_, v3 := buf.Get(3, nil, nil)
+	assert.Equal(t, []byte("first"), v1)
+	assert.Equal(t, []byte("second"), v2)
+	assert.Equal(t, []byte("fourth"), v3)
+}
+
+func TestSortableBufferNilAndEmptyKeys(t *testing.T) {
+	buf := NewSortableBuffer(256 * 1024)
+
+	buf.Put([]byte{0x01}, []byte("normal"))
+	buf.Put(nil, []byte("nil-key"))
+	buf.Put([]byte{}, []byte("empty-key"))
+	buf.Put(nil, []byte("nil-key-2"))
+
+	buf.Sort()
+
+	// nil keys (-1) sort before empty keys (0) which sort before non-empty
+	_, v0 := buf.Get(0, nil, nil)
+	_, v1 := buf.Get(1, nil, nil)
+	_, v2 := buf.Get(2, nil, nil)
+	_, v3 := buf.Get(3, nil, nil)
+	assert.Equal(t, []byte("nil-key"), v0)
+	assert.Equal(t, []byte("nil-key-2"), v1)
+	assert.Equal(t, []byte("empty-key"), v2)
+	assert.Equal(t, []byte("normal"), v3)
+}
+
 func BenchmarkSortableBufferSort(b *testing.B) {
 	const keyLen = 32
 	const valLen = 64
