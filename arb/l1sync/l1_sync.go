@@ -9,6 +9,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/nitro-erigon/arbnode"
 	"github.com/erigontech/nitro-erigon/arbstate/daprovider"
 	"github.com/erigontech/nitro-erigon/execution"
@@ -36,6 +38,9 @@ type L1SyncService struct {
 	dapReaders     []daprovider.Reader
 	exec           execution.ExecutionSequencer
 	db             kv.RwDB
+	temporalDB     kv.TemporalRwDB  // nil when standalone
+	chainConfig    *chain.Config     // nil when standalone
+	lastBlockHeader *types.Header    // tracks parent for block chaining
 	logger         log.Logger
 
 	delayedMessagesRead uint64
@@ -57,6 +62,7 @@ func New(
 	beaconUrl string,
 	exec execution.ExecutionSequencer,
 	db kv.RwDB,
+	chainConfig *chain.Config,
 	logger log.Logger,
 ) (*L1SyncService, error) {
 	seqInbox, err := arbnode.NewSequencerInbox(l1Client, config.SequencerInboxAddr, int64(config.StartL1Block))
@@ -75,6 +81,11 @@ func New(
 		return nil, fmt.Errorf("error initializing blob reader: %w", err)
 	}
 
+	var temporalDB kv.TemporalRwDB
+	if tdb, ok := db.(kv.TemporalRwDB); ok {
+		temporalDB = tdb
+	}
+
 	return &L1SyncService{
 		config:         config,
 		sequencerInbox: seqInbox,
@@ -83,6 +94,8 @@ func New(
 		dapReaders:     []daprovider.Reader{daprovider.NewReaderForBlobReader(blobClient)},
 		exec:           exec,
 		db:             db,
+		temporalDB:     temporalDB,
+		chainConfig:    chainConfig,
 		logger:         logger,
 		chunkSize:      config.L1BlocksPerRequest,
 	}, nil
@@ -133,6 +146,17 @@ func (s *L1SyncService) Start(ctx context.Context) {
 		dmr, err := s.getLastDelayedMessagesRead(ctx, lastBatch)
 		if err == nil {
 			s.delayedMessagesRead = dmr
+		}
+		// Restore last block header for block chaining continuity
+		if e := s.db.View(ctx, func(tx kv.Tx) error {
+			header, e := loadLastBlockHeader(tx)
+			if e != nil {
+				return e
+			}
+			s.lastBlockHeader = header
+			return nil
+		}); e != nil {
+			s.logger.Warn("failed to load last block header", "err", e)
 		}
 		// Load recent batches into memory for finality lookups
 		s.loadRecentBatches(ctx, lastBatch)

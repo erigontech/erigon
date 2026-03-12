@@ -109,6 +109,7 @@ func run(cliCtx *cli.Context) error {
 		cliCtx.String(beaconUrlFlag.Name),
 		nil, // no execution sequencer for now
 		db,
+		nil, // no chainConfig in standalone mode — execution disabled
 		logger,
 	)
 	if err != nil {

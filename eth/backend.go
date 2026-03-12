@@ -1784,7 +1784,7 @@ func (s *Ethereum) Start() error {
 			if err != nil {
 				return fmt.Errorf("[l1sync] failed to connect to L1 RPC: %w", err)
 			}
-			l1syncSvc, err := l1sync.New(s.sentryCtx, l1syncCfg, l1Client, s.config.L1Sync.BeaconURL, nil, s.chainDB, s.logger)
+			l1syncSvc, err := l1sync.New(s.sentryCtx, l1syncCfg, l1Client, s.config.L1Sync.BeaconURL, nil, s.chainDB, s.chainConfig, s.logger)
 			if err != nil {
 				return fmt.Errorf("[l1sync] failed to create service: %w", err)
 			}
