@@ -68,6 +68,8 @@ func (e *StateEntry) Hash() common.Hash    { return e.hash }
 func (e *StateEntry) SerialNumber() uint64 { return e.txNum }
 func (e *StateEntry) Len() int64           { return 0 }
 func (e *StateEntry) Changes() []StateChange { return e.changes }
+// Components is not implemented for PoC StateEntry (hash was computed externally).
+func (e *StateEntry) Components() (pre, stateChange, transition common.Hash) { return }
 
 // sortChanges sorts by (domain, key) lexicographically.
 func sortChanges(changes []StateChange) {

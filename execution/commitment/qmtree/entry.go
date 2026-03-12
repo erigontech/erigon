@@ -9,6 +9,11 @@ type Entry interface {
 	Hash() common.Hash
 	SerialNumber() uint64
 	Len() int64
+	// Components returns the three raw hash inputs used to compute the leaf hash.
+	// These are stored in the entry file (96 bytes) instead of the derived hash,
+	// eliminating a separate leafdata file. PreviousLeafHash is not stored here
+	// as it is derivable by chaining leaf hashes from sn-1.
+	Components() (pre, stateChange, transition common.Hash)
 }
 
 type NullEntry struct {
@@ -24,9 +29,10 @@ var nullEntryHash = common.Hash{
 	0x0e, 0x7e, 0x97, 0xf5, 0x28, 0x30, 0x1c, 0x39,
 }
 
-func (_ NullEntry) Hash() common.Hash {
-	return nullEntryHash
-}
+func (_ NullEntry) Hash() common.Hash                                          { return nullEntryHash }
+func (_ NullEntry) SerialNumber() uint64                                        { return ^uint64(0) }
+func (_ NullEntry) Len() int64                                                  { return 0 }
+func (_ NullEntry) Components() (pre, stateChange, transition common.Hash)      { return }
 
 type EntryStorage interface {
 	Append(entry Entry) (pos int64)

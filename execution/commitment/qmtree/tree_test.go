@@ -17,6 +17,9 @@ type testEntry struct {
 func (e *testEntry) Hash() common.Hash    { return e.hash }
 func (e *testEntry) SerialNumber() uint64 { return e.sn }
 func (e *testEntry) Len() int64           { return 0 }
+func (e *testEntry) Components() (pre, stateChange, transition common.Hash) {
+	return e.hash, common.Hash{}, common.Hash{}
+}
 
 func makeEntry(sn uint64) *testEntry {
 	var h common.Hash

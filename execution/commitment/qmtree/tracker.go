@@ -10,15 +10,22 @@ import (
 )
 
 // proofEntry is a minimal Entry for the production pipeline.
-// It wraps a serial number and a pre-computed leaf hash.
+// It stores the three raw hash components; the leaf hash is computed from them
+// plus the chained previousLeafHash (tracked externally by Tracker.prevLeaf).
 type proofEntry struct {
-	sn   uint64
-	hash common.Hash
+	sn          uint64
+	hash        common.Hash // precomputed leaf hash, used by tree for twig building
+	pre         common.Hash
+	stateChange common.Hash
+	transition  common.Hash
 }
 
 func (e *proofEntry) SerialNumber() uint64 { return e.sn }
 func (e *proofEntry) Hash() common.Hash    { return e.hash }
 func (e *proofEntry) Len() int64           { return 0 }
+func (e *proofEntry) Components() (pre, stateChange, transition common.Hash) {
+	return e.pre, e.stateChange, e.transition
+}
 
 // Tracker holds per-sync qmtree state for the serial executor.
 // When a datadir is provided, the tree is backed by disk files (EntryFile +
@@ -53,10 +60,10 @@ const (
 	trackerEntrySubdir = "entries"
 	trackerTwigSubdir  = "twigs"
 
-	// Entry segments: one step = stepSize entries × 32 bytes/entry.
+	// Entry segments: one step = stepSize entries × 96 bytes/entry (3 × 32B components).
 	// Buffer size chosen so segmentSize % bufferSize == 0.
-	// 50,000,000 / 500,000 = 100.
-	trackerEntryBufSize = 500_000
+	// 150,000,000 / 1,500,000 = 100.
+	trackerEntryBufSize = 1_500_000
 
 	// Twig segments: one step ≈ 763 twigs (ceil(stepSize / 2048)).
 	// Buffer size = TWIG_SIZE so each buffer flush writes exactly one twig.
@@ -92,7 +99,7 @@ func NewTracker(snapDir string, stepSize uint64) (*Tracker, error) {
 			return nil, fmt.Errorf("create qmtree twig dir: %w", err)
 		}
 
-		entrySegSize := stepSize * 32 // one step per segment
+		entrySegSize := stepSize * entrySize // one step per segment (stepSize × 96 bytes)
 		twigSegSize := uint64(trackerTwigsPerStep) * uint64(trackerTwigBufSize)
 
 		ef, err := NewEntryFile(trackerEntryBufSize, entrySegSize, entryDir)
@@ -128,7 +135,7 @@ func (qt *Tracker) AppendLeaf(preStateHash, stateChangeHash, transitionHash comm
 	}
 	leafHash := ld.LeafHash()
 
-	entry := &proofEntry{sn: qt.NextSN, hash: leafHash}
+	entry := &proofEntry{sn: qt.NextSN, hash: leafHash, pre: preStateHash, stateChange: stateChangeHash, transition: transitionHash}
 	qt.tree.AppendEntry(entry)
 
 	qt.leafData[qt.NextSN] = ld
