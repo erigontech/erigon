@@ -55,8 +55,8 @@ and related code, ordered by execution sequence:
 | # | Operation | Covered By |
 |---|-----------|-----------|
 | B1 | **Value transfer** (`Transfer()`) | New: transition record (not an opcode) |
-| B2 | **EVM interpreter loop** | Existing: exec hash (Phase 1-5) |
-| B3 | **Precompile calls** | Existing: exec hash precompile records |
+| B2 | **EVM interpreter loop** | Existing: exec hash (Phase 1-5) — see [design.md §2.2](design.md#execution-hash-per-opcode-record-format-exechasher) for per-opcode record format |
+| B3 | **Precompile calls** | Existing: exec hash precompile records — same section |
 
 Note: `Transfer()` is called inside `evm.Call()` / `evm.Create()` but is
 not an EVM opcode — it's application logic that moves balances. It needs

@@ -42,7 +42,7 @@ committed by the executor:
 ```
 preStateHash     = DeriveSha_MPT({ (domain, key) → value } for all state reads)
 stateChangeHash  = DeriveSha_MPT({ (domain, key) → value } for all state writes)
-transitionHash   = keccak256(EVM opcode trace — see transition-format.md)
+transitionHash   = keccak256(EVM opcode trace + transition records — see transition-format.md)
 previousLeafHash = leafHash(serialNum - 1), or 0x00..00 for sn=0
 ```
 
@@ -405,8 +405,11 @@ Verify that the state values in `Accessed` are consistent with the
 root (see `state-proof-analysis.md §Question 3b`).
 
 ### Step 4 — Call binding (future work)
-Verify that the `Accessed` set and return data match the call's execution trace,
-once `transitionHash` encodes the full EVM opcode trace (see `transition-format.md`).
+Verify that the `Accessed` set and return data match the call's execution trace.
+`transitionHash` already embeds the EVM execution hash (the rolling keccak256 over every
+opcode — see [design.md §2.2](design.md#execution-hash-per-opcode-record-format-exechasher)
+for the per-opcode record format). Full call binding requires completing Step 3 (SMT
+pre-state root) so individual reads can be traced to the opcode that issued them.
 
 ---
 

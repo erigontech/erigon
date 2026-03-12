@@ -43,6 +43,11 @@ type Tracker struct {
 	NextSN   uint64
 	prevLeaf common.Hash
 
+	// keyIndex tracks the latest txNum for each (domain, key) pair written
+	// during execution. It supports exclusion proofs: proving that key K
+	// was last written at txNum T, or was never written at all.
+	keyIndex *KeyIndex
+
 	// leafData is a bounded LRU cache of LeafData keyed by serial number.
 	// PreviousLeafHash is stored in each entry but is NOT persisted to disk;
 	// it is recomputed on cache miss using twigPrevLeaf as an O(twig-size)
@@ -105,6 +110,7 @@ func NewTracker(snapDir string, stepSize uint64) (*Tracker, error) {
 		leafData:     cache,
 		twigPrevLeaf: []common.Hash{{}}, // twig 0 starts with zero prevLeaf
 		stepSize:     stepSize,
+		keyIndex:     NewKeyIndex(),
 	}
 
 	if snapDir != "" {
@@ -175,6 +181,34 @@ func (qt *Tracker) AppendLeaf(preStateHash, stateChangeHash, transitionHash comm
 // SyncRoot computes and returns the current qmtree root.
 func (qt *Tracker) SyncRoot() common.Hash {
 	return common.Hash(qt.tree.SyncAndRoot(qt.hasher))
+}
+
+// NotifyKeyWrites records that each key hash in keyHashes was written at txNum.
+// Call this after AppendLeaf for each transaction with the set of (domain, key)
+// hashes produced by the transaction's state writes.
+// keyHashes is computed as keccak256(domain_byte || key_bytes) per write.
+func (qt *Tracker) NotifyKeyWrites(keyHashes []common.Hash, txNum uint64) {
+	for _, kh := range keyHashes {
+		qt.keyIndex.UpdateKey(kh, txNum)
+	}
+}
+
+// KeyIndexRoot returns the Merkle root of the current key index.
+// This commits to the set {(keyHash, latestTxNum)} for all keys written so far.
+func (qt *Tracker) KeyIndexRoot() common.Hash {
+	return qt.keyIndex.Root()
+}
+
+// KeyIndexLen returns the number of distinct keys in the index.
+func (qt *Tracker) KeyIndexLen() int {
+	return qt.keyIndex.Len()
+}
+
+// GetExclusionProof returns a proof that the given key hash was last written
+// at the returned txNum (inclusion), or was never written (non-membership).
+// The proof is verified against KeyIndexRoot().
+func (qt *Tracker) GetExclusionProof(keyHash common.Hash) *ExclusionProof {
+	return qt.keyIndex.GetProof(keyHash)
 }
 
 // currentStep returns the step number for the current serial number.

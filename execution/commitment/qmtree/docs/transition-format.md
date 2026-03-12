@@ -21,15 +21,17 @@ previous leaf hash provides **ordering** (chain inclusion).
 ### 1.1 Relationship to Execution Hash
 
 The transition hash **embeds** the execution hash (Phase 1-5) as one of
-its records. The execution hash covers the EVM interpreter loop. The
-transition hash covers everything outside the interpreter loop that the
-Ethereum spec mandates.
+its records. The execution hash is a rolling keccak256 over every EVM opcode
+executed in the transaction — see [design.md §2.2](design.md#execution-hash-per-opcode-record-format-exechasher)
+for the per-opcode record format (depth, pc, op, gas, cost, stack inputs/outputs)
+and precompile record format. The transition hash covers everything outside the
+interpreter loop that the Ethereum spec mandates.
 
 ```
 transitionHash = keccak256(record[0] || record[1] || ... || record[N])
 ```
 
-where one of the records is the embedded execution hash.
+where one of the records is the embedded execution hash (see `EXEC_HASH` record type, §3.10).
 
 ### 1.2 Design Principles
 
@@ -312,7 +314,10 @@ the actual balance-movement operation that is outside the EVM interpreter.
 
 ### 3.10 EXEC_HASH
 
-Embeds the execution hash from Phase 1-5.
+Embeds the execution hash from Phase 1-5. The execution hash is a rolling keccak256
+over every EVM opcode executed in the transaction. For the per-opcode record format
+(depth, pc, op, gas, cost, stack inputs/outputs) and precompile handling see
+[design.md §2.2](design.md#execution-hash-per-opcode-record-format-exechasher).
 
 ```
 Tag: 0x11

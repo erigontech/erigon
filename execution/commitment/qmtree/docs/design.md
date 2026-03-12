@@ -70,6 +70,40 @@ leafHash = keccak256(preStateHash || stateChangeHash || transitionHash || previo
 
 **transitionHash** commits to the complete execution trace: the EVM opcode-by-opcode record (the _execution hash_) plus the 25 spec-mandated state transition operations outside the EVM (nonce increment, gas purchase, fee distribution, etc.). The execution hash component makes every opcode and its inputs/outputs part of the leaf commitment, enabling fraud proofs and verifiable `eth_call`. See `transition-format.md` for the exact binary encoding of each record type.
 
+#### Execution hash: per-opcode record format (`ExecHasher`)
+
+The execution hash is a rolling keccak256 over every EVM instruction executed in the transaction. Each instruction produces a variable-length record:
+
+```
+┌─────────┬──────┬────┬──────┬──────┬───────────────────┬────────────────────┐
+│ depth:2 │ pc:8 │ op │ gas:8│cost:8│ stack_in: P × 32  │ stack_out: Q × 32  │
+└─────────┴──────┴────┴──────┴──────┴───────────────────┴────────────────────┘
+```
+
+| Field     | Bytes  | Encoding   | Description                               |
+|-----------|--------|------------|-------------------------------------------|
+| depth     | 2      | uint16 BE  | EVM call depth (0 = top-level)            |
+| pc        | 8      | uint64 BE  | Program counter before execution          |
+| op        | 1      | byte       | Opcode byte (0x00–0xFF)                   |
+| gas       | 8      | uint64 BE  | Gas remaining before this instruction     |
+| cost      | 8      | uint64 BE  | Total gas cost (constant + dynamic)       |
+| stack_in  | P × 32 | uint256 BE | Top P stack items consumed (P = numPop)   |
+| stack_out | Q × 32 | uint256 BE | Top Q stack items produced (Q = numPush)  |
+
+All nested call frames within the transaction feed into the same single rolling hash; the `depth` field disambiguates frames. Reverted inner calls are included — the hash captures what was _executed_, not what was _committed_. Reverts are reflected in `stateChangeHash` (which excludes reverted mutations).
+
+**Precompile calls** bypass the interpreter loop and emit a synthetic record:
+
+```
+┌─────────┬──────────────┬───────────────┬────────────────┬──────┐
+│ depth:2 │ 0xFE (mark.) │ input_hash:32 │ output_hash:32 │ gas:8│
+└─────────┴──────────────┴───────────────┴────────────────┴──────┘
+```
+
+followed by the precompile address (20 bytes). `input_hash` and `output_hash` are keccak256 of the raw input/output bytes.
+
+**Cross-client determinism**: the fields (pc, opcode, gas remaining, gas cost, stack inputs/outputs, call depth) are all Yellow Paper-specified. Any spec-compliant EVM produces identical values for the same transaction against the same pre-state, making the execution hash deterministic across clients.
+
 **previousLeafHash** chains leaves together sequentially, so any tampering with an earlier leaf invalidates all subsequent leaf hashes.
 
 Domains: 0 = accounts, 1 = storage, 2 = code.
@@ -240,21 +274,54 @@ Options explored:
 | **B: In-leaf keyset** | Encoded in leaf preimage | Self-contained but large |
 | **C: Separate commitment** | Second Merkle tree over key->txnum | Trustless but complex |
 
-The current implementation uses **Approach A** — Erigon's existing inverted
-index. The index already maps `(domain, key) -> [txnums]` efficiently and
-requires no new storage.
-
-Approach C (a committed key index) is future work for trustless proofs. The
-QMDB design addresses this via its B-tree indexer (architecture doc, "B-tree"
-section) which maps key hashes to entry offsets.
+The current implementation uses **Approach A** for key lookup (Erigon's existing
+inverted index, which maps `(domain, key) -> [txnums]` efficiently) and
+**Approach C** for committed exclusion proofs (the `KeyIndex` described below).
 
 ### 5.2 Exclusion proofs
 
-The QMDB design (Section 7.0) extends entries with `NextKeyHash` to enable
-exclusion proofs — proving that no key exists between two adjacent keys in hash
-order. This is analogous to what the hex patricia trie provides via its
-branch/extension node structure. Not yet implemented; the `StateEntry` structure
-accommodates it as a future extension.
+An exclusion proof answers: "no transaction between txnum T+1 and max_txnum(B)
+wrote to key K". Without this, a verifier cannot confirm that txnum T is the
+_latest_ write to key K before block B, so an inclusion proof alone is
+insufficient for state currency.
+
+**KeyIndex** — the committed key-set (`keyindex.go`):
+
+The `KeyIndex` maintains a sorted array of `(keyHash, latestTxNum)` pairs where
+`keyHash = keccak256(domain_byte || key_bytes)`. After each transaction,
+`Tracker.NotifyKeyWrites` updates the index with all keys written by that
+transaction. After each block, `KeyIndexRoot()` returns the Merkle root over the
+sorted entries.
+
+Key design choices:
+- **keyHash = keccak256(domain_byte || key_bytes)** — uniform 32-byte identifier
+  for sorting and proof generation across all domains (accounts, storage, code).
+- **Binary Merkle tree** — leaves are `keccak256(keyHash[32] || txNum_LE8[8])`,
+  internal nodes are `keccak256(left[32] || right[32])`. The root plus leaf count
+  commits to the complete key set.
+- **Adjacency proof** — to prove key K was never written, the proof contains the
+  two adjacent entries (prev, next) in sorted order with their Merkle paths and
+  indices. The verifier checks `prev.keyHash < K < next.keyHash` and that
+  `nextIndex == prevIndex + 1` (they are consecutive in the sorted array).
+
+**ExclusionProof** structure (`ExclusionProof` in `keyindex.go`):
+
+```
+// Inclusion (Exists=true):
+KeyHash, TxNum, LeafIndex, Path[]  →  verifies leaf is in KeyIndex at Root
+
+// Non-membership (Exists=false):
+PrevEntry{KeyHash, TxNum}, PrevIndex, PrevPath[]
+NextEntry{KeyHash, TxNum}, NextIndex, NextPath[]  →  NextIndex == PrevIndex+1
+```
+
+Verification: `ExclusionProof.Verify()` checks both Merkle paths against Root,
+the key ordering bounds, and adjacency.
+
+**Unwind**: The `KeyIndex` does not currently support incremental unwind. On a
+reorg the index must be rebuilt from genesis for the affected keys. This is
+acceptable because reorgs are rare and the rebuild is bounded by the total number
+of unique keys written (not all transactions).
 
 ## 6. RPC Namespace
 

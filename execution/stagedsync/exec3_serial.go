@@ -394,6 +394,9 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					result.ExecutionResult.StateChangeHash,
 					result.ExecutionResult.TransitionHash,
 				)
+				if len(result.ExecutionResult.WrittenKeyHashes) > 0 {
+					se.qmtracker.NotifyKeyWrites(result.ExecutionResult.WrittenKeyHashes, txTask.TxNum)
+				}
 			}
 
 			se.txCount++

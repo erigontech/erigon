@@ -76,11 +76,12 @@ type ExecutionResult struct {
 	FeeTipped            uint256.Int
 	FeeBurnt             uint256.Int
 	BurntContractAddress accounts.Address
-	ExecHash             common.Hash // Proof-of-execution hash (zero if disabled)
-	ExecOps              uint64      // Number of EVM opcodes hashed
-	TransitionHash       common.Hash // Proof-of-transition hash (zero if disabled)
-	PreStateHash         common.Hash // Hash of all state reads before execution (zero if disabled)
-	StateChangeHash      common.Hash // Hash of all state changes produced by execution (zero if disabled)
+	ExecHash             common.Hash   // Proof-of-execution hash (zero if disabled)
+	ExecOps              uint64        // Number of EVM opcodes hashed
+	TransitionHash       common.Hash   // Proof-of-transition hash (zero if disabled)
+	PreStateHash         common.Hash   // Hash of all state reads before execution (zero if disabled)
+	StateChangeHash      common.Hash   // Hash of all state changes produced by execution (zero if disabled)
+	WrittenKeyHashes     []common.Hash // keccak256(domain_byte || key_bytes) for each state write (nil if disabled)
 
 	// SelfDestructedWithBalance holds accounts that were selfdestructed during
 	// execution but received ETH after the SELFDESTRUCT opcode ran (EIP-7708).
