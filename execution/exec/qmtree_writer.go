@@ -30,10 +30,10 @@ func (w *hashingWriter) Reset() {
 	w.enabled = true
 }
 
-// Finalize sorts the collected writes and returns their keccak256 hash.
+// Finalize returns the DeriveSha root over the collected writes.
 func (w *hashingWriter) Finalize() common.Hash {
 	w.enabled = false
-	return hashStateOps(w.writes)
+	return stateOpsRoot(w.writes)
 }
 
 func (w *hashingWriter) addWrite(domain kv.Domain, key, value []byte) {

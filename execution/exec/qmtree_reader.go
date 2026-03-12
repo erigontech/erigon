@@ -1,20 +1,23 @@
 package exec
 
 import (
-	"encoding/binary"
+	"bytes"
 	"sort"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
+	ethtypes "github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// stateOp records a single state read or write for hashing.
-// Encoding per entry: [1B domain][2B key_len BE][key][4B val_len BE][value]
+// stateOp records a single state read or write.
+// Sorting follows Block Access List (EIP-7928) ordering rules:
+// primarily by domain (accounts < storage < code), then by key bytes
+// (address strictly increasing; for storage, address then slot strictly increasing).
 type stateOp struct {
 	domain kv.Domain
 	key    []byte
@@ -22,8 +25,7 @@ type stateOp struct {
 }
 
 // hashingReader wraps a StateReader and records all state reads for
-// preStateHash computation. Reads are sorted by (domain, key) before
-// hashing to ensure determinism regardless of read order.
+// preStateHash computation.
 type hashingReader struct {
 	inner   state.StateReader
 	reads   []stateOp
@@ -42,10 +44,10 @@ func (r *hashingReader) Reset() {
 	r.enabled = true
 }
 
-// Finalize sorts the collected reads and returns their keccak256 hash.
+// Finalize returns the DeriveSha root over the collected reads.
 func (r *hashingReader) Finalize() common.Hash {
 	r.enabled = false
-	return hashStateOps(r.reads)
+	return stateOpsRoot(r.reads)
 }
 
 func (r *hashingReader) addRead(domain kv.Domain, key, value []byte) {
@@ -119,33 +121,52 @@ func (r *hashingReader) SetTrace(trace bool, tracePrefix string) {
 func (r *hashingReader) Trace() bool         { return r.inner.Trace() }
 func (r *hashingReader) TracePrefix() string { return r.inner.TracePrefix() }
 
-// --- shared hashing logic ---
+// --- shared Merkle root logic ---
 
-// hashStateOps sorts ops by (domain, key) and returns their keccak256 hash.
-// Encoding per op: [1B domain_id][2B key_len BE][key][4B val_len BE][value]
-func hashStateOps(ops []stateOp) common.Hash {
+// stateOpsRoot returns a DeriveSha root over a set of state operations,
+// using the same Merkle Patricia Trie format as Ethereum's transaction and
+// receipt roots.
+//
+// Ordering follows Block Access List (EIP-7928) rules:
+//   - Sorted first by domain (AccountsDomain < StorageDomain < CodeDomain)
+//   - Within domain, sorted by key bytes ascending
+//     (20-byte address for accounts/code; 52-byte addr+slot for storage)
+//   - This gives addresses strictly increasing and, within each address,
+//     slots strictly increasing — matching the BAL canonical ordering
+//
+// Each item is RLP-encoded as a 3-element list: [domain_uint, key_bytes, value_bytes].
+// The DeriveSha trie keys are the sequential integer indices 0, 1, 2 …
+// (same convention as transactions and receipts).
+//
+// Empty set returns trie.EmptyRoot (not the zero hash) — same as DeriveSha
+// on an empty list.
+func stateOpsRoot(ops []stateOp) common.Hash {
 	sort.Slice(ops, func(i, j int) bool {
 		if ops[i].domain != ops[j].domain {
 			return ops[i].domain < ops[j].domain
 		}
-		return string(ops[i].key) < string(ops[j].key)
+		return bytes.Compare(ops[i].key, ops[j].key) < 0
 	})
+	return ethtypes.DeriveSha(sortedStateOps(ops))
+}
 
-	h := crypto.NewKeccakState()
-	defer crypto.ReturnToPool(h)
+// sortedStateOps implements types.DerivableList over a pre-sorted []stateOp.
+type sortedStateOps []stateOp
 
-	var buf [7]byte
-	for _, op := range ops {
-		buf[0] = byte(op.domain)
-		binary.BigEndian.PutUint16(buf[1:3], uint16(len(op.key)))
-		h.Write(buf[:3])
-		h.Write(op.key)
-		binary.BigEndian.PutUint32(buf[0:4], uint32(len(op.value)))
-		h.Write(buf[:4])
-		h.Write(op.value)
+func (s sortedStateOps) Len() int { return len(s) }
+
+// EncodeIndex writes the RLP encoding of ops[i] as [domain, key, value].
+func (s sortedStateOps) EncodeIndex(i int, w *bytes.Buffer) {
+	op := s[i]
+	if err := rlp.Encode(w, stateOpRLP{Domain: uint(op.domain), Key: op.key, Value: op.value}); err != nil {
+		panic(err) // only fails on OOM
 	}
+}
 
-	var out common.Hash
-	h.Read(out[:])
-	return out
+// stateOpRLP is the canonical wire format for a single state op leaf.
+// RLP-encoded as a 3-element list: [domain_uint, key_bytes, value_bytes].
+type stateOpRLP struct {
+	Domain uint
+	Key    []byte
+	Value  []byte
 }

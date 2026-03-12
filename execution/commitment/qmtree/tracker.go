@@ -325,6 +325,70 @@ func (qt *Tracker) UnwindTo(toSN uint64) {
 	}
 }
 
+// LoadFromDisk rebuilds in-memory tree state from existing entry files on disk.
+// Call this after NewTracker when the snapDir already contains data from a
+// previous run, before calling GetWitness or SyncRoot.
+//
+// Strategy: replay all entries through an in-memory-only tree (nil storage,
+// so no data is re-written to disk), then swap in the real disk handles and
+// call SyncRoot to build the upper-tree node cache.
+func (qt *Tracker) LoadFromDisk() error {
+	if qt.entryFile == nil {
+		return nil // in-memory only, nothing to load
+	}
+	fileSize := qt.entryFile.Size()
+	if fileSize == 0 {
+		return nil // empty, nothing to do
+	}
+	if fileSize%int64(entrySize) != 0 {
+		return fmt.Errorf("qmtree entry file size %d is not aligned to entrySize=%d", fileSize, entrySize)
+	}
+	count := uint64(fileSize) / uint64(entrySize)
+
+	// Build a fresh in-memory replay tree (nil storage avoids re-writing files).
+	replayTree := NewTree(qt.hasher, 0, nil, nil)
+
+	var prevLeaf common.Hash
+	leafData := make(map[uint64]LeafData, count)
+
+	for sn := uint64(0); sn < count; sn++ {
+		pre, stateChange, transition, err := qt.entryFile.ReadComponents(sn)
+		if err != nil {
+			return fmt.Errorf("qmtree LoadFromDisk: read components sn=%d: %w", sn, err)
+		}
+		ld := LeafData{
+			SerialNum:        sn,
+			PreStateHash:     pre,
+			StateChangeHash:  stateChange,
+			TransitionHash:   transition,
+			PreviousLeafHash: prevLeaf,
+		}
+		leafHash := ld.LeafHash()
+		entry := &proofEntry{sn: sn, hash: leafHash, pre: pre, stateChange: stateChange, transition: transition}
+		replayTree.AppendEntry(entry) //nolint:errcheck
+		leafData[sn] = ld
+		prevLeaf = leafHash
+	}
+
+	// Attach the real disk handles to the replay tree, then call SyncAndRoot to
+	// flush newTwigMap → upperTree and compute the upper-tree node cache.
+	replayTree.entryStorage = qt.tree.entryStorage
+	replayTree.twigStorage = qt.tree.twigStorage
+
+	qt.tree = replayTree
+	qt.leafData = leafData
+	qt.prevLeaf = prevLeaf
+	qt.NextSN = count
+
+	qt.tree.SyncAndRoot(qt.hasher) // builds upper tree; discard root here
+
+	log.Info("qmtree: loaded from disk",
+		"entries", count,
+		"entryStorage", common.ByteCount(uint64(fileSize)),
+	)
+	return nil
+}
+
 // Close flushes and closes disk storage.
 // Implements execctx.AppendOnlyFlusher.
 func (qt *Tracker) Close() {
