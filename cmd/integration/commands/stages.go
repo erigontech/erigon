@@ -108,7 +108,9 @@ func makeStageCmd(use string, stageFn func(kv.TemporalRwDB, context.Context, log
 			if timeit {
 				defer func(t time.Time) { logger.Info("total", "took", time.Since(t)) }(time.Now())
 			}
-			if err := stageFn(db, cmd.Context(), logger); err != nil {
+			ctx, cancel := context.WithCancel(cmd.Context())
+			defer cancel()
+			if err := stageFn(db, ctx, logger); err != nil {
 				if !errors.Is(err, context.Canceled) {
 					logger.Error(err.Error())
 				}
