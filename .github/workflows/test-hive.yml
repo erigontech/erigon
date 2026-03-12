@@ -26,6 +26,7 @@ concurrency:
 
 jobs:
   test-hive:
+    name: (${{ matrix.sim }}, ${{ matrix.sim-limit }})
     if: >-
       ${{ github.event_name == 'push'
       || (!github.event.pull_request.draft
