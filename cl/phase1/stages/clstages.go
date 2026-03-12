@@ -18,6 +18,7 @@ package stages
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -310,6 +311,11 @@ func ConsensusClStages(ctx context.Context,
 			ForwardSync: {
 				Description: `if we are 1 or more epochs behind, we download in parallel by epoch`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
+					// If forward sync is stale (no progress), go directly to ChainTipSync
+					// so gossip can deliver blocks that range requests cannot.
+					if errors.Is(err, ErrForwardSyncStale) {
+						return ChainTipSync
+					}
 					if x := MetaCatchingUp(args); x != "" {
 						return x
 					}
