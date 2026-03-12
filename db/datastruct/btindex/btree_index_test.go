@@ -428,32 +428,37 @@ func TestNewBtIndex(t *testing.T) {
 }
 
 func BenchmarkBtIndex_Get(b *testing.B) {
-	keyCount := 100_000
+	keyCount := 1_000_000
 	compress := seg.CompressKeys
 
-	kvPath := generateKV(b, b.TempDir(), 20, 10, keyCount, log.New(), compress)
-	keys, err := pivotKeysFromKV(kvPath)
-	require.NoError(b, err)
+	for _, M := range []uint64{256, 128, 64, 32} {
+		kvPath := generateKV(b, b.TempDir(), 20, 10, keyCount, log.New(), compress)
+		keys, err := pivotKeysFromKV(kvPath)
+		require.NoError(b, err)
 
-	indexPath := strings.TrimSuffix(kvPath, ".kv") + ".bt"
-	decomp, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, DefaultBtreeM, compress, false)
-	require.NoError(b, err)
-	defer bt.Close()
-	defer decomp.Close()
+		indexPath := strings.TrimSuffix(kvPath, ".kv") + ".bt"
 
-	getter := seg.NewReader(decomp.MakeGetter(), compress)
-	rnd := newRnd(uint64(b.N))
+		b.Run(fmt.Sprintf("M%d", M), func(b *testing.B) {
+			decomp, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, M, compress, false)
+			require.NoError(b, err)
+			defer bt.Close()
+			defer decomp.Close()
 
-	b.ReportAllocs()
-	b.ResetTimer()
-	for b.Loop() {
-		p := rnd.IntN(len(keys))
-		k, _, _, found, err := bt.Get(keys[p], getter)
-		if err != nil {
-			b.Fatal(err)
-		}
-		if !found || !bytes.Equal(keys[p], k) {
-			b.Fatal("key not found or mismatch")
-		}
+			getter := seg.NewReader(decomp.MakeGetter(), compress)
+			rnd := newRnd(uint64(b.N))
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				p := rnd.IntN(len(keys))
+				k, _, _, found, err := bt.Get(keys[p], getter)
+				if err != nil {
+					b.Fatal(err)
+				}
+				if !found || !bytes.Equal(keys[p], k) {
+					b.Fatal("key not found or mismatch")
+				}
+			}
+		})
 	}
 }
