@@ -93,7 +93,7 @@ type entryLoc struct {
 	keyLen    int
 	valLen    int
 	seq       int    // insertion order — enables stable sort via unstable SortFunc
-	keyPrefix uint64 // first 8 bytes of key (big-endian) — fast-path comparison
+	keyPrefix uint64 // first 8 bytes of key, big-endian so uint64 comparison matches bytes.Compare order
 }
 
 func NewSortableBuffer(bufferOptimalSize datasize.ByteSize) *sortableBuffer {
