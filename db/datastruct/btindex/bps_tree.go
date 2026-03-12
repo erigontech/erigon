@@ -383,12 +383,6 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 		defer func() { fmt.Printf("found %x [%d %d]\n", key, l, r) }()
 	}
 
-	// Use g.Buf as reusable key buffer across Get calls to avoid allocations.
-	// g.Buf is safe because seg.Reader is per-goroutine.
-	// We must NOT use g.Buf for value reads: NextUncompressed may return mmap-backed
-	// slices that would make g.Buf point into read-only memory, corrupting future
-	// compressed reads. Value reads use nil (allocating only on match).
-	g.Buf = g.Buf[:0]
 	var cmp int
 	var m uint64
 	for l < r {
