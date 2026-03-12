@@ -105,9 +105,9 @@ type entryLoc struct {
 	//	LittleEndian.Uint64(A) = 0x000000000000FF00 = 65280
 	//	LittleEndian.Uint64(B) = 0x0000000000000001 = 1
 	keyPrefix uint64
+	seq       int // insertion order — enables stable sort via unstable SortFunc
 	offset    int
 	keyLen    int
-	seq       int // insertion order — enables stable sort via unstable SortFunc
 	valLen    int
 }
 
@@ -147,7 +147,7 @@ func (b *sortableBuffer) Put(k, v []byte) {
 	})
 	b.data = append(b.data, k...)
 	b.data = append(b.data, v...)
-	b.size += len(k) + len(v)
+	b.size += len(k) + len(v) + 40 // 40 = sizeof(entryLoc)
 }
 
 func (b *sortableBuffer) Size() int { return b.size }
