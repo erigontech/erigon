@@ -557,7 +557,7 @@ func (db *MdbxKV) Close() {
 	if ok := db.closed.CompareAndSwap(false, true); !ok {
 		return
 	}
-	db.waitTxsAllDoneOnClose()
+	//db.waitTxsAllDoneOnClose()
 
 	db.env.Close()
 	db.env = nil
@@ -1253,9 +1253,9 @@ func (tx *MdbxTx) stdCursor(bucket string) (kv.RwCursor, error) {
 
 	// add to auto-cleanup on end of transactions
 	if tx.toCloseMap == nil {
-		tx.toCloseMap = make(map[uint64]kv.Closer)
+		//tx.toCloseMap = make(map[uint64]kv.Closer)
 	}
-	tx.toCloseMap[c.id] = c
+	//tx.toCloseMap[c.id] = c
 	return c, nil
 }
 
@@ -1661,9 +1661,9 @@ func (tx *MdbxTx) Range(table string, fromPrefix, toPrefix []byte, asc order.By,
 	s := &cursor2iter{ctx: tx.ctx, tx: tx, fromPrefix: fromPrefix, toPrefix: toPrefix, orderAscend: asc, limit: int64(limit), id: tx.cursorID}
 	tx.cursorID++
 	if tx.toCloseMap == nil {
-		tx.toCloseMap = make(map[uint64]kv.Closer)
+		//tx.toCloseMap = make(map[uint64]kv.Closer)
 	}
-	tx.toCloseMap[s.id] = s
+	//tx.toCloseMap[s.id] = s
 	if err := s.init(table, tx); err != nil {
 		s.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
@@ -1836,9 +1836,9 @@ func (tx *MdbxTx) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []
 	s := &cursorDup2iter{ctx: tx.ctx, tx: tx, key: key, fromPrefix: fromPrefix, toPrefix: toPrefix, orderAscend: bool(asc), limit: int64(limit), id: tx.cursorID}
 	tx.cursorID++
 	if tx.toCloseMap == nil {
-		tx.toCloseMap = make(map[uint64]kv.Closer)
+		//tx.toCloseMap = make(map[uint64]kv.Closer)
 	}
-	tx.toCloseMap[s.id] = s
+	//tx.toCloseMap[s.id] = s
 	if err := s.init(table, tx); err != nil {
 		s.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
