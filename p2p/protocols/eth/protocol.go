@@ -35,6 +35,7 @@ import (
 var ProtocolToString = map[uint]string{
 	direct.ETH68: "eth68",
 	direct.ETH69: "eth69",
+	direct.ETH70: "eth70",
 }
 
 // ProtocolName is the official short name of the `eth` protocol used during
@@ -45,7 +46,7 @@ const ProtocolName = "eth"
 const maxMessageSize = 10 * 1024 * 1024
 const ProtocolMaxMsgSize = maxMessageSize
 
-var ProtocolLengths = map[uint]uint64{direct.ETH68: 17, direct.ETH69: 18}
+var ProtocolLengths = map[uint]uint64{direct.ETH68: 17, direct.ETH69: 18, direct.ETH70: 18}
 
 const (
 	// Protocol messages in eth/64
@@ -98,6 +99,22 @@ var ToProto = map[uint]map[uint64]sentryproto.MessageId{
 		PooledTransactionsMsg:         sentryproto.MessageId_POOLED_TRANSACTIONS_66,
 		BlockRangeUpdateMsg:           sentryproto.MessageId_BLOCK_RANGE_UPDATE_69, // Modified in eth/69
 	},
+	direct.ETH70: {
+		StatusMsg:                     sentryproto.MessageId_STATUS_69,
+		GetBlockHeadersMsg:            sentryproto.MessageId_GET_BLOCK_HEADERS_66,
+		BlockHeadersMsg:               sentryproto.MessageId_BLOCK_HEADERS_66,
+		GetBlockBodiesMsg:             sentryproto.MessageId_GET_BLOCK_BODIES_66,
+		BlockBodiesMsg:                sentryproto.MessageId_BLOCK_BODIES_66,
+		GetReceiptsMsg:                sentryproto.MessageId_GET_RECEIPTS_70, // Modified in eth/70
+		ReceiptsMsg:                   sentryproto.MessageId_RECEIPTS_70,     // Modified in eth/70
+		NewBlockHashesMsg:             sentryproto.MessageId_NEW_BLOCK_HASHES_66,
+		NewBlockMsg:                   sentryproto.MessageId_NEW_BLOCK_66,
+		TransactionsMsg:               sentryproto.MessageId_TRANSACTIONS_66,
+		NewPooledTransactionHashesMsg: sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68,
+		GetPooledTransactionsMsg:      sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66,
+		PooledTransactionsMsg:         sentryproto.MessageId_POOLED_TRANSACTIONS_66,
+		BlockRangeUpdateMsg:           sentryproto.MessageId_BLOCK_RANGE_UPDATE_69,
+	},
 }
 
 var FromProto = map[uint]map[sentryproto.MessageId]uint64{
@@ -122,6 +139,21 @@ var FromProto = map[uint]map[sentryproto.MessageId]uint64{
 		sentryproto.MessageId_BLOCK_BODIES_66:                  BlockBodiesMsg,
 		sentryproto.MessageId_GET_RECEIPTS_69:                  GetReceiptsMsg,
 		sentryproto.MessageId_RECEIPTS_66:                      ReceiptsMsg,
+		sentryproto.MessageId_NEW_BLOCK_HASHES_66:              NewBlockHashesMsg,
+		sentryproto.MessageId_NEW_BLOCK_66:                     NewBlockMsg,
+		sentryproto.MessageId_TRANSACTIONS_66:                  TransactionsMsg,
+		sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68: NewPooledTransactionHashesMsg,
+		sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66:       GetPooledTransactionsMsg,
+		sentryproto.MessageId_POOLED_TRANSACTIONS_66:           PooledTransactionsMsg,
+		sentryproto.MessageId_BLOCK_RANGE_UPDATE_69:            BlockRangeUpdateMsg,
+	},
+	direct.ETH70: {
+		sentryproto.MessageId_GET_BLOCK_HEADERS_66:             GetBlockHeadersMsg,
+		sentryproto.MessageId_BLOCK_HEADERS_66:                 BlockHeadersMsg,
+		sentryproto.MessageId_GET_BLOCK_BODIES_66:              GetBlockBodiesMsg,
+		sentryproto.MessageId_BLOCK_BODIES_66:                  BlockBodiesMsg,
+		sentryproto.MessageId_GET_RECEIPTS_70:                  GetReceiptsMsg,
+		sentryproto.MessageId_RECEIPTS_70:                      ReceiptsMsg,
 		sentryproto.MessageId_NEW_BLOCK_HASHES_66:              NewBlockHashesMsg,
 		sentryproto.MessageId_NEW_BLOCK_66:                     NewBlockMsg,
 		sentryproto.MessageId_TRANSACTIONS_66:                  TransactionsMsg,
@@ -357,6 +389,23 @@ type ReceiptsRLPPacket66 struct {
 	RequestId uint64
 	ReceiptsRLPPacket
 }
+
+// GetReceiptsPacket70 represents a block receipts query over eth/70.
+// The server omits receipts before FirstBlockReceiptIndex for the first block.
+type GetReceiptsPacket70 struct {
+	RequestId              uint64
+	FirstBlockReceiptIndex uint64
+	GetReceiptsPacket
+}
+
+// ReceiptsRLPPacket70 is the eth/70 version of ReceiptsRLPPacket.
+// When LastBlockIncomplete is true, the final receipt list is incomplete.
+type ReceiptsRLPPacket70 struct {
+	RequestId           uint64
+	LastBlockIncomplete bool
+	ReceiptsRLPPacket
+}
+
 type BlockRangeUpdatePacket struct {
 	Earliest, Latest uint64
 	LatestHash       common.Hash

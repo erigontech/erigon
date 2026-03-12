@@ -21,6 +21,9 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"math/big"
+	"time"
+
+	"github.com/cenkalti/backoff/v4"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -29,6 +32,11 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 	shuttercontracts "github.com/erigontech/erigon/txnprovider/shutter/internal/contracts"
 )
+
+// nonceAtProvider allows reading committed (not pending) account nonce.
+type nonceAtProvider interface {
+	NonceAt(ctx context.Context, account common.Address, blockNumber *big.Int) (uint64, error)
+}
 
 type ContractsDeployer struct {
 	key                  *ecdsa.PrivateKey
@@ -54,6 +62,31 @@ func NewContractsDeployer(
 		chainId:              chainId,
 		txnInclusionVerifier: txnInclusionVerifier,
 	}
+}
+
+// waitForNonceAt waits for the committed nonce (NonceAt with latest block) to reach
+// at least expectedNonce. This ensures the state trie is fully committed after
+// VerifyTxnsInclusion, since fcu persistence is asynchronous.
+func (d ContractsDeployer) waitForNonceAt(ctx context.Context, expectedNonce uint64) error {
+	provider, ok := d.contractBackend.(nonceAtProvider)
+	if !ok {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	bo := backoff.WithContext(backoff.NewConstantBackOff(50*time.Millisecond), ctx)
+	return backoff.Retry(func() error {
+		committed, err := provider.NonceAt(ctx, d.address, nil)
+		if err != nil {
+			return backoff.Permanent(err)
+		}
+		if committed < expectedNonce {
+			return fmt.Errorf("committed nonce %d < expected %d", committed, expectedNonce)
+		}
+		return nil
+	}, bo)
 }
 
 func (d ContractsDeployer) DeployCore(ctx context.Context) (_ ContractsDeployment, err error) {
@@ -93,27 +126,28 @@ func (d ContractsDeployer) DeployCore(ctx context.Context) (_ ContractsDeploymen
 		return ContractsDeployment{}, err
 	}
 
+	// Submit the Initialize txn to the txpool before building the block so it
+	// gets included in the same block as the deploys. This avoids a cross-block
+	// state dependency that is susceptible to the async ForkChoiceUpdated state
+	// flush race: the block builder may open its write transaction before the
+	// previous block's state is fully committed.
+	// Set GasLimit to bypass PendingCodeAt/EstimateGas checks — the contract
+	// code is not yet available at the pending state level (deploy is still
+	// in the txpool), but will exist once the block builder executes the
+	// deploy transaction earlier in the same block.
+	transactOpts.GasLimit = 1_000_000
+	ksmInitTxn, err := ksm.Initialize(transactOpts, d.address, d.address)
+	transactOpts.GasLimit = 0 // reset for subsequent calls
+	if err != nil {
+		return ContractsDeployment{}, err
+	}
+
 	block, err := d.cl.BuildBlock(ctx)
 	if err != nil {
 		return ContractsDeployment{}, err
 	}
 
-	err = d.txnInclusionVerifier.VerifyTxnsInclusion(ctx, block, sequencerDeployTxn.Hash(), ksmDeployTxn.Hash(), keyBroadcastDeployTxn.Hash())
-	if err != nil {
-		return ContractsDeployment{}, err
-	}
-
-	ksmInitTxn, err := ksm.Initialize(transactOpts, d.address, d.address)
-	if err != nil {
-		return ContractsDeployment{}, err
-	}
-
-	block, err = d.cl.BuildBlock(ctx)
-	if err != nil {
-		return ContractsDeployment{}, err
-	}
-
-	err = d.txnInclusionVerifier.VerifyTxnsInclusion(ctx, block, ksmInitTxn.Hash())
+	err = d.txnInclusionVerifier.VerifyTxnsInclusion(ctx, block, sequencerDeployTxn.Hash(), ksmDeployTxn.Hash(), keyBroadcastDeployTxn.Hash(), ksmInitTxn.Hash())
 	if err != nil {
 		return ContractsDeployment{}, err
 	}
@@ -137,20 +171,22 @@ func (d ContractsDeployer) DeployKeyperSet(
 		return common.Address{}, nil, err
 	}
 
+	// DeployCore ended with VerifyTxnsInclusion — wait for committed state (4 txns: 3 deploys + 1 init)
+	if err = d.waitForNonceAt(ctx, 4); err != nil {
+		return common.Address{}, nil, err
+	}
+
 	keyperSetAddr, keyperSetDeployTxn, keyperSet, err := shuttercontracts.DeployKeyperSet(transactOpts, d.contractBackend)
 	if err != nil {
 		return common.Address{}, nil, err
 	}
 
-	block, err := d.cl.BuildBlock(ctx)
-	if err != nil {
-		return common.Address{}, nil, err
-	}
-
-	err = d.txnInclusionVerifier.VerifyTxnsInclusion(ctx, block, keyperSetDeployTxn.Hash())
-	if err != nil {
-		return common.Address{}, nil, err
-	}
+	// Submit all KeyperSet configuration txns before building the block so
+	// they get included in the same block as the deploy. This avoids cross-
+	// block state dependencies susceptible to the async state flush race.
+	// GasLimit is set to bypass PendingCodeAt/EstimateGas — the KeyperSet
+	// contract is in the txpool but not yet committed.
+	transactOpts.GasLimit = 1_000_000
 
 	setPublisherTxn, err := keyperSet.SetPublisher(transactOpts, d.address)
 	if err != nil {
@@ -172,32 +208,15 @@ func (d ContractsDeployer) DeployKeyperSet(
 		return common.Address{}, nil, err
 	}
 
-	block, err = d.cl.BuildBlock(ctx)
-	if err != nil {
-		return common.Address{}, nil, err
-	}
-
-	err = d.txnInclusionVerifier.VerifyTxnsInclusion(ctx, block, setPublisherTxn.Hash(), setThresholdTxn.Hash(), addMembersTxn.Hash(), setFinalizedTxn.Hash())
-	if err != nil {
-		return common.Address{}, nil, err
-	}
-
+	// AddKeyperSet and BroadcastEonKey also go in the same block — they
+	// depend on SetFinalized having run and the KSM/KeyBroadcast contracts
+	// from DeployCore being accessible.
 	ksm, err := shuttercontracts.NewKeyperSetManager(dep.KsmAddr, d.contractBackend)
 	if err != nil {
 		return common.Address{}, nil, err
 	}
 
 	addKeyperSetTxn, err := ksm.AddKeyperSet(transactOpts, ekg.ActivationBlock, keyperSetAddr)
-	if err != nil {
-		return common.Address{}, nil, err
-	}
-
-	block, err = d.cl.BuildBlock(ctx)
-	if err != nil {
-		return common.Address{}, nil, err
-	}
-
-	err = d.txnInclusionVerifier.VerifyTxnsInclusion(ctx, block, addKeyperSetTxn.Hash())
 	if err != nil {
 		return common.Address{}, nil, err
 	}
@@ -212,14 +231,32 @@ func (d ContractsDeployer) DeployKeyperSet(
 		return common.Address{}, nil, err
 	}
 
-	block, err = d.cl.BuildBlock(ctx)
+	transactOpts.GasLimit = 0 // reset for any future calls
+
+	block, err := d.cl.BuildBlock(ctx)
 	if err != nil {
 		return common.Address{}, nil, err
 	}
 
-	err = d.txnInclusionVerifier.VerifyTxnsInclusion(ctx, block, broadcastKeyTxn.Hash())
+	err = d.txnInclusionVerifier.VerifyTxnsInclusion(ctx, block,
+		keyperSetDeployTxn.Hash(),
+		setPublisherTxn.Hash(),
+		setThresholdTxn.Hash(),
+		addMembersTxn.Hash(),
+		setFinalizedTxn.Hash(),
+		addKeyperSetTxn.Hash(),
+		broadcastKeyTxn.Hash(),
+	)
 	if err != nil {
 		return common.Address{}, nil, err
+	}
+
+	// Build 3 empty blocks to maintain the expected block count (4 total).
+	// Callers compute keyper set activation blocks based on this count.
+	for range 3 {
+		if _, err = d.cl.BuildBlock(ctx); err != nil {
+			return common.Address{}, nil, err
+		}
 	}
 
 	return keyperSetAddr, keyperSet, nil
