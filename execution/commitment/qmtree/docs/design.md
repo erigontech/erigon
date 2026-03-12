@@ -12,7 +12,7 @@ Erigon's global transaction number (`txnum`).
 
 - [QMDB Design — General Ideas](https://github.com/LayerZero-Labs/qmdb/blob/main/docs/design.md) — covers entry structure, twig Merkle trees, ActiveBits, pruning, and exclusion proofs
 - [QMDB Architecture](https://github.com/LayerZero-Labs/qmdb/blob/main/docs/architecture.md) — covers the prefetcher-updater-flusher pipeline, HPFile, TwigFile, EntryFile, B-tree indexer, edge nodes, and batch sync
-- [Go port of qmtree](../execution/commitment/qmtree/) — the tree, twig, proof, and hpfile implementations used by this PoC
+- [Go port of qmtree](../execution/commitment/qmtree/) — the tree, twig, proof, and hpfile implementations
 
 ### 1.2 Motivation
 
@@ -51,45 +51,46 @@ Each txnum maps 1:1 to a qmtree serial number. This gives us:
 
 ### 2.2 Leaf Hash Construction
 
-Each leaf at serial number `txnum` contains a deterministic hash of that transaction's state changes. The leaf hash is computed as:
+Each leaf at serial number `txnum` commits to four 32-byte fields:
 
 ```
-leaf_hash = SHA256(canonical_encoding(sorted_changes))
+preStateHash     = DeriveSha_MPT({ (domain, key) → value } for all state reads by this tx)
+stateChangeHash  = DeriveSha_MPT({ (domain, key) → value } for all state writes by this tx)
+transitionHash   = keccak256(transition record sequence — see transition-format.md)
+previousLeafHash = leafHash(txnum - 1),  or 0x00..00 for txnum = 0
 ```
 
-Where `sorted_changes` is the lexicographically sorted list of `(domain, key, value)` tuples modified by that transaction. The domains are AccountsDomain and StorageDomain (matching Erigon's existing domain structure).
+The leaf hash is:
 
-**Encoding format** (per change):
 ```
-[1 byte: domain_id] [2 bytes: key_length] [key_bytes] [4 bytes: value_length] [value_bytes]
+leafHash = keccak256(preStateHash || stateChangeHash || transitionHash || previousLeafHash)
 ```
 
-Changes are sorted by `(domain_id, key_bytes)` before hashing. This ensures determinism regardless of the order state changes are produced during execution.
+**preStateHash and stateChangeHash** use Ethereum's `DeriveSha` MPT construction over a sorted map of `(domain, key) → value` pairs. This means each hash is itself a Merkle root that can prove individual key/value pairs without disclosing the full changeset (see `state-proof-analysis.md §Question 3b`).
 
-**Empty transactions** (no state changes) produce a leaf hash of `SHA256([])` — the hash of the empty byte sequence.
+**transitionHash** commits to the complete execution trace: the EVM opcode-by-opcode record (the _execution hash_) plus the 25 spec-mandated state transition operations outside the EVM (nonce increment, gas purchase, fee distribution, etc.). The execution hash component makes every opcode and its inputs/outputs part of the leaf commitment, enabling fraud proofs and verifiable `eth_call`. See `transition-format.md` for the exact binary encoding of each record type.
+
+**previousLeafHash** chains leaves together sequentially, so any tampering with an earlier leaf invalidates all subsequent leaf hashes.
+
+Domains: 0 = accounts, 1 = storage, 2 = code.
 
 ### 2.3 Tree Structure
 
-The tree follows the QMDB twig Merkle tree design (Sections 2.0 and 4.0):
+The tree is a binary Merkle tree over twigs:
 
 ```
                     Root
                    /    \
             Upper Tree (levels 13+)
            /          \
-     TwigRoot_0     TwigRoot_1    ...
-      /     \         /     \
-  LeftRoot  ABRoot  LeftRoot  ABRoot    (level 12)
-   /    \    / \
- ...    ...          (levels 0-11: 2048-leaf binary Merkle tree)
+     TwigRoot_0     TwigRoot_1    ...   (level 12)
+       /    \           /    \
+     ...    ...       ...    ...        (levels 0-11: 2048-leaf binary Merkle tree)
 ```
 
-Each twig contains:
-- **Left subtree** (levels 0-11): Binary Merkle tree over 2048 leaf hashes
-- **Right subtree** (levels 8-11): ActiveBits tree (2048 bits indicating which entries are current)
-- **TwigRoot** (level 12): `hash(11, leftRoot, activeBitsRoot)`
+Each **twig** is a 2048-leaf binary Merkle tree (levels 0–11). The twig root at level 12 is `keccak256([12] || leftChild || rightChild)`. The upper tree (levels 13+) combines twig roots into the final tree root using the same hash function.
 
-The upper tree (levels 13+) combines twig roots into the final tree root.
+Internal nodes are computed as `keccak256([level_byte] || left || right)`. The level prefix prevents second-preimage attacks between tree levels.
 
 ### 2.4 Block-Level and Tx-Level Hashes
 
@@ -100,15 +101,15 @@ The tree supports two granularities of commitment:
 
 Both are computed and logged for analysis. The block-level root is the one that would replace the current hex patricia state root in block headers.
 
-### 2.5 ActiveBits and State Currency
+### 2.5 State currency
 
-Per QMDB design Section 3.0, each leaf has an ActiveBit indicating whether the entry represents the **current** value for its key. When a key is updated by a later transaction, the earlier entry's ActiveBit is cleared.
+The original QMDB design uses **ActiveBits** — one bit per leaf indicating whether that entry is still the current value for its key — for state currency proofs and twig pruning. After evaluation, ActiveBits were removed from this implementation because:
 
-In the PoC, ActiveBits are used for:
-1. **State currency proofs** — proving that a particular state change is the most recent for a given key
-2. **Pruning** — once all entries in a twig are inactive, the twig can be evicted from memory (Section 6.0)
+- The `previousLeafHash` chain already links all leaves for a key in sequence
+- State currency ("is this leaf the latest for key K?") can be answered via the keyset index (§5) without in-tree metadata
+- Twig pruning via head eviction remains future work regardless
 
-ActiveBit deactivation and twig pruning are not yet implemented. Full ActiveBit management is tracked as future work (see Section 8).
+The twig root is therefore simply the binary Merkle root over the 2048 leaf hashes (no ActiveBits subtree).
 
 ## 3. Proofs and Witnesses
 
@@ -279,15 +280,6 @@ The `digest` field is a 32-byte SSZ-inspired `hash_tree_root` commitment over
 all proof fields; a verifier can store the digest and later check that a full
 proof has not been tampered with.
 
-## 7. Future Work
+## 7. Roadmap
 
-1. **ActiveBit management** — deactivate old entries when keys are updated; implement twig compaction (QMDB §5)
-2. **Exclusion proofs** — add `NextKeyHash` for negative proofs (QMDB §7)
-3. **Inclusion proofs at arbitrary heights** — `LastHeight` + `DeactivatedSerialNum` fields (QMDB §8)
-4. **Head pruning** — prune inactive twigs using HPFile (QMDB §10)
-5. **Prefetcher-updater-flusher pipeline** — pipelined execution for production throughput
-6. **HybridIndexer** — SSD+DRAM indexing for production memory efficiency
-7. **eth_getProof compatibility** — adapter translating qmtree proofs to the format expected by existing tooling
-8. **Parallel twig sync** — leverage the 4-shard design (TWIG_SHARD_COUNT=4) for parallel hash computation
-9. **SMT state roots** — replace flat keccak preStateHash with an SMT root to enable single-key proofs without full changeset disclosure (see `state-proof-analysis.md §Question 3b`)
-10. **Transition hash** — complete the EVM opcode trace encoding (see `transition-format.md`) for full call binding in `qm_callProof` verification
+See [README.md](README.md) for the full roadmap and task breakdown.
