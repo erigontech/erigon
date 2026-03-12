@@ -388,13 +388,13 @@ func (b *mockIndexReader) dataLookup(di uint64, g *seg.Reader) (k, v []byte, off
 // comparing `k` with item of index `di`. using buffer `kBuf` to avoid allocations
 func (b *mockIndexReader) keyCmp(k []byte, di uint64, g *seg.Reader, resBuf []byte) (int, []byte, error) {
 	if di >= b.ef.Count() {
-		return 0, nil, fmt.Errorf("%w: keyCount=%d, but key %d requested. file: %s", ErrBtIndexLookupBounds, b.ef.Count(), di+1, g.FileName())
+		return 0, resBuf, fmt.Errorf("%w: keyCount=%d, but key %d requested. file: %s", ErrBtIndexLookupBounds, b.ef.Count(), di+1, g.FileName())
 	}
 
 	offset := b.ef.Get(di)
 	g.Reset(offset)
 	if !g.HasNext() {
-		return 0, nil, fmt.Errorf("key at %d/%d not found, file: %s", di, b.ef.Count(), g.FileName())
+		return 0, resBuf, fmt.Errorf("key at %d/%d not found, file: %s", di, b.ef.Count(), g.FileName())
 	}
 
 	resBuf, _ = g.Next(resBuf)
