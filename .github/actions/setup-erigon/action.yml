@@ -26,6 +26,10 @@ inputs:
     description: "Extra segment appended to build cache key (e.g. matrix.test-group)"
     required: false
     default: ''
+  ramdisk:
+    description: "Create a RAM disk and export its path as ERIGON_EXECUTION_TESTS_TMPDIR"
+    required: false
+    default: 'false'
 
 outputs:
   goversion:
@@ -213,6 +217,15 @@ runs:
           find . -name .git -prune -o -print0 | xargs -0 stat -f '%m %HT %N' | sort -k3
         else
           find . -name .git -prune -o -printf '%T@ %y %p\n' | sort -k3
+        fi
+
+    - name: Create RAM disk
+      if: ${{ inputs.ramdisk == 'true' }}
+      shell: bash
+      run: |
+        path=$(bash tools/create-ramdisk)
+        if [ -n "$path" ]; then
+          echo "ERIGON_EXECUTION_TESTS_TMPDIR=$path" >> "$GITHUB_ENV"
         fi
 
     - name: Get Go minor version from go.mod
