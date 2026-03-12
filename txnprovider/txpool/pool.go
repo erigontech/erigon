@@ -364,7 +364,12 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	baseFee := stateChanges.PendingBlockBaseFee
 
 	// Update EWMA block time (α=0.1) using wall-clock measurements between consecutive blocks.
-	// Ignore gaps >10 min (node was paused/syncing). Done outside the lock — atomics only.
+	// Gaps >10 min are ignored: they indicate the node was paused, restarted, or fast-syncing
+	// (during fast-sync the txpool receives block batches with large wall-clock gaps between
+	// them, so individual inter-block deltas are not meaningful). As a result the EWMA only
+	// tracks real-time block arrivals at chain tip. Seeded at 12 s (Ethereum mainnet slot time);
+	// converges to actual observed block time (~13 s on mainnet due to missed slots) after ~30
+	// chain-tip blocks. Done outside the lock — atomics only.
 	nowMs := time.Now().UnixMilli()
 	if prev := p.lastBlockTimestampMs.Load(); prev > 0 {
 		if delta := nowMs - prev; delta > 0 && delta < 600_000 {
@@ -1759,6 +1764,20 @@ func (p *TxPool) discardLocked(mt *metaTxn, reason txpoolcfg.DiscardReason) {
 // state change for longer than cfg.QueuedDormancyDuration. It also prunes stale entries from
 // the senderLastActivity map (senders that are no longer in the queued sub-pool).
 //
+// The dormancy threshold is expressed in blocks, not wall-clock time. It is computed as:
+//
+//	dormancyBlocks = QueuedDormancyDuration / avgBlockTimeMs  (EWMA of real block-to-block intervals)
+//
+// This means dormancyBlocks adapts to actual network conditions. On Ethereum mainnet the
+// configured 3 h maps to ~900 blocks at the seeded 12 s/block, but once the node reaches
+// chain tip and the EWMA updates with real inter-block timings (~13 s on mainnet due to
+// missed slots), dormancyBlocks converges to ~830. In wall-clock terms the dormancy
+// remains ~3 h; only the block count changes. The log line includes "avgBlockMs" so the
+// derivation is transparent without needing to inspect the source.
+//
+// During fast-sync the EWMA does not update: inter-block gaps as seen by the txpool exceed
+// the 10-min filter, so the block time stays at the 12 s seed and dormancyBlocks stays at 900.
+//
 // Returns the number of senders evicted and the current queued pool size (for interval tuning).
 // Must NOT be called while holding p.lock; it acquires the lock internally.
 func (p *TxPool) sweepDormantQueued(currentBlock uint64, logger log.Logger) (evictedSenders, queuedLen int) {
@@ -1824,10 +1843,15 @@ func (p *TxPool) sweepDormantQueued(currentBlock uint64, logger log.Logger) (evi
 	queuedLen = p.queued.Len()
 
 	if evictedSenders > 0 {
+		// dormancyBlocks is derived from the EWMA block time (avgMs): dormancyBlocks = QueuedDormancyDuration / avgMs.
+		// It adapts to real network conditions (e.g. mainnet averages ~13 s/block due to missed slots, not 12 s),
+		// so dormancyBlocks may differ slightly from the naive 3 h / 12 s = 900 value. avgBlockMs is logged
+		// alongside dormancyBlocks so the derivation is transparent without needing to inspect the source.
 		logger.Info("[txpool] dormancy sweep evicted senders from queued pool",
 			"senders", evictedSenders,
 			"block", currentBlock,
 			"dormancyBlocks", dormancyBlocks,
+			"avgBlockMs", avgMs,
 		)
 	}
 	return evictedSenders, queuedLen
