@@ -520,7 +520,6 @@ func (h *Hook) maybeAnnounceBlockRange(finishStageBeforeSync, finishStageAfterSy
 	h.lastAnnouncedBlockRangeTime = time.Now()
 }
 
-
 func addAndVerifyBlockStep(batch kv.RwTx, engine rules.Engine, chainReader rules.ChainReader, currentHeader *types.Header, currentBody *types.RawBody) error {
 	currentHeight := currentHeader.Number.Uint64()
 	currentHash := currentHeader.Hash()
