@@ -124,6 +124,7 @@ func NewSortableBuffer(bufferOptimalSize datasize.ByteSize) *sortableBuffer {
 
 type sortableBuffer struct {
 	entries     []entryLoc
+	prefixes    []uint64
 	data        []byte
 	optimalSize int
 }
@@ -194,6 +195,7 @@ func (b *sortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) Buffer
 
 func (b *sortableBuffer) Reset() {
 	b.entries = b.entries[:0]
+	b.prefixes = b.prefixes[:0]
 	b.data = b.data[:0]
 }
 func (b *sortableBuffer) SizeLimit() int { return b.optimalSize }
@@ -202,7 +204,8 @@ func (b *sortableBuffer) Sort() {
 	// Compute keyPrefix before sorting.
 	// This keeps .Put() fast - because Sort often called in background
 	// Also: O(n) cost, which is negligible vs the O(n log n) sort.
-	prefixes := make([]uint64, len(b.entries))
+	prefixes := slices.Grow(b.prefixes[:0], len(b.entries))[:len(b.entries)]
+	clear(prefixes)
 	for i := range b.entries {
 		e := &b.entries[i]
 		if e.keyLen >= 8 {
@@ -213,6 +216,7 @@ func (b *sortableBuffer) Sort() {
 			prefixes[e.seq] = binary.BigEndian.Uint64(buf[:])
 		}
 	}
+	b.prefixes = prefixes
 	cmp := func(a, b entryLoc) int {
 		if prefixes[a.seq] != prefixes[b.seq] {
 			if prefixes[a.seq] < prefixes[b.seq] {
