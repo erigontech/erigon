@@ -320,7 +320,7 @@ Algorithm:
 
 **File**: `mpt2/state.go`
 
-Eliminate `KeyCommitmentState`. Instead, every trie node — including the root — is stored under its nibble path in the commitment domain using the same `path -> (NodeData, txnum)` schema.
+Eliminate `KeyCommitmentState`. Instead, every trie node — including the root — is stored under its nibble path in the commitment domain.
 
 ### Root Node Lookup Key
 
@@ -333,11 +333,26 @@ All other trie nodes are keyed by `hexToCompact(nibblePath)`:
 - A branch at nibble `[0xa, 0xb]` → compact key `[0x00, 0xab]` (even, two nibbles packed)
 - A leaf at depth 64 → compact key is the 33-byte compact encoding of the full 64-nibble path with terminator
 
-### Root Node Value
+### Root Node Value — Special Case
 
-The root is encoded as regular `NodeData` — it could be a `BranchNode`, `ExtensionNode`, or even a leaf (single-account trie). No special wrapper. The `txnum` comes from the domain value envelope, not from the `NodeData` payload.
+Non-root nodes are stored as plain `NodeData`.
 
-For an **empty trie**, no root record exists. `SeekCommitment` returns `EmptyRoot` in that case.
+The root node is a special case: it needs to carry the **exact `txnum`** of the last commitment. This is necessary because the domain system only stores a coarse `step` (`step = txNum / stepSize`), which loses precision — `step.ToTxNum(stepSize)` gives the start of the step range, not the exact transaction. `SeekCommitment` needs the exact txnum to know where to resume execution.
+
+The root node value format:
+
+```
+Root value = [txnum:8 big-endian][NodeData...]
+```
+
+- `txnum` (8 bytes): exact transaction number of the last commitment
+- `NodeData` (variable): the root node's regular NodeData encoding (branch, extension, or leaf)
+
+`blocknum` is **not stored** — it is derived from `txnum` via `rawdbv3.TxNums` at read time.
+
+This is handled at the **mpt2 application layer** — inside `Committer.Commit()` when writing the root, and `SeekCommitment()` when reading it. The domain system is unchanged; it just sees an opaque value blob. All other (non-root) nodes are stored as plain `NodeData` with no txnum prefix.
+
+For an **empty trie**, no root record exists. `SeekCommitment` returns `(0, EmptyRoot)` in that case.
 
 ### SeekCommitment Flow
 
@@ -347,14 +362,17 @@ func (m *MPT2) SeekCommitment() (txnum uint64, rootHash common.Hash, err error)
 
 1. Read root node at empty compact path: `reader.ReadNode([]byte{0x00})`
 2. If not found → return `(0, EmptyRoot, nil)` (fresh/empty state)
-3. If found → decode `NodeData`, compute its hash via `Hasher.Hash()`, extract `txnum` from the domain step
-4. Return `(txnum, rootHash, nil)`
+3. If found → strip first 8 bytes to extract `txnum`
+4. Decode remaining bytes as `NodeData`, compute root hash via `Hasher.Hash()`
+5. Return `(txnum, rootHash, nil)`
 
-For `blockNum`: derive from txnum via `rawdbv3.TxNums` (same as the current fallback path).
+The caller derives `blocknum` from `txnum` via `rawdbv3.TxNums` when needed.
 
-### Why This Works
+### Why txnum Lives in the Root NodeData (Not in the Domain Layer)
 
-The domain system already stores `(value, step)` for every key. The `step` encodes the transaction number at which the value was written. So `SeekCommitment` simply reads the root's step to know the last committed position — no separate `KeyCommitmentState` sentinel needed.
+The domain system stores `key -> (step + value)` where `step = txNum / stepSize`. This is by design — domains don't track individual transactions, only step-granularity. `step.ToTxNum(stepSize)` gives the start of the step range, not the exact transaction. Changing the domain layer to store exact txnums for one domain would break the storage abstraction.
+
+Instead, the mpt2 package encodes txnum in the root node's value — the same way the current implementation stores txnum inside the `KeyCommitmentState` blob. The difference is that there's no separate sentinel key; the metadata lives directly on the root node. Only the root carries this overhead (8 bytes); the other ~millions of nodes are stored as compact `NodeData` with no extra metadata.
 
 ---
 
