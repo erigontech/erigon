@@ -56,7 +56,9 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, req *executionproto.Inser
 	}
 	defer sd.Close()
 
-	sd.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp)
+	if err := sd.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
+		return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: %w", err)
+	}
 	blockOverlay := sd.BlockOverlay()
 
 	type balKey struct {

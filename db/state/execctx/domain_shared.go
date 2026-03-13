@@ -304,11 +304,16 @@ func (sd *SharedDomains) BlockOverlay() *membatchwithdb.MemoryMutation { return 
 // InitBlockOverlay creates (or replaces) the block-level metadata overlay backed by
 // the given base transaction. Writes to the overlay are visible to subsequent reads
 // and are flushed atomically alongside domain state via Flush().
-func (sd *SharedDomains) InitBlockOverlay(tx kv.TemporalTx, tmpDir string) {
+func (sd *SharedDomains) InitBlockOverlay(tx kv.TemporalTx, tmpDir string) error {
 	if sd.blockOverlay != nil {
 		sd.blockOverlay.Close()
 	}
-	sd.blockOverlay = membatchwithdb.NewMemoryBatch(tx, tmpDir, sd.logger)
+	var err error
+	sd.blockOverlay, err = membatchwithdb.NewMemoryBatch(tx, tmpDir, sd.logger)
+	if err != nil {
+		return fmt.Errorf("init block overlay: %w", err)
+	}
+	return nil
 }
 func (sd *SharedDomains) GetCommitmentCtx() *commitmentdb.SharedDomainsCommitmentContext {
 	return sd.sdCtx
