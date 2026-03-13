@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
-	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -78,7 +77,7 @@ func (r readerMock) FrozenBorBlocks(align bool) uint64 { return 0 }
 // and nonce so we are gonna test those
 func TestVerifyHeaderDifficulty(t *testing.T) {
 	header := &types.Header{
-		Difficulty: big.NewInt(1),
+		Difficulty: *common.Num1,
 		Time:       1,
 	}
 
@@ -100,7 +99,7 @@ func TestVerifyHeaderDifficulty(t *testing.T) {
 func TestVerifyHeaderNonce(t *testing.T) {
 	header := &types.Header{
 		Nonce:      types.BlockNonce{1, 0, 0, 0, 0, 0, 0, 0},
-		Difficulty: big.NewInt(0),
+		Difficulty: *common.Num0,
 		Time:       1,
 	}
 
@@ -122,7 +121,7 @@ func TestVerifyHeaderNonce(t *testing.T) {
 func TestNullParentBeaconBlockRootDoesNotPanic(t *testing.T) {
 	chainConfig := chainspec.Mainnet.Config
 	header := &types.Header{ // fake PoS header *after* Cancun fork
-		Difficulty: misc.ProofOfStakeDifficulty,
+		Difficulty: *ProofOfStakeDifficulty,
 		Time:       chainConfig.CancunTime.Uint64() + 1,
 	}
 	logger := log.New()

@@ -214,7 +214,7 @@ func makeDecoder(typ reflect.Type, tags rlpstruct.Tags) (dec decoder, err error)
 		return decodeU256, nil
 	case typ == u256Int:
 		return decodeU256NoPtr, nil
-	case kind == reflect.Ptr:
+	case kind == reflect.Pointer:
 		return makePtrDecoder(typ, tags)
 	case reflect.PointerTo(typ).Implements(decoderInterface):
 		return decodeDecoder, nil
@@ -374,10 +374,7 @@ func decodeSliceElems(s *Stream, val reflect.Value, elemdec decoder) error {
 	for ; ; i++ {
 		// grow slice if necessary
 		if i >= val.Cap() {
-			newcap := val.Cap() + val.Cap()/2
-			if newcap < 4 {
-				newcap = 4
-			}
+			newcap := max(val.Cap()+val.Cap()/2, 4)
 			newv := reflect.MakeSlice(val.Type(), val.Len(), newcap)
 			reflect.Copy(newv, val)
 			val.Set(newv)
@@ -1044,7 +1041,7 @@ func (s *Stream) Decode(val interface{}) error {
 	}
 	rval := reflect.ValueOf(val)
 	rtyp := rval.Type()
-	if rtyp.Kind() != reflect.Ptr {
+	if rtyp.Kind() != reflect.Pointer {
 		return errNoPointer
 	}
 	if rval.IsNil() {

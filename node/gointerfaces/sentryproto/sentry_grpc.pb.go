@@ -38,6 +38,8 @@ const (
 	Sentry_PeerEvents_FullMethodName               = "/sentry.Sentry/PeerEvents"
 	Sentry_AddPeer_FullMethodName                  = "/sentry.Sentry/AddPeer"
 	Sentry_RemovePeer_FullMethodName               = "/sentry.Sentry/RemovePeer"
+	Sentry_AddTrustedPeer_FullMethodName           = "/sentry.Sentry/AddTrustedPeer"
+	Sentry_RemoveTrustedPeer_FullMethodName        = "/sentry.Sentry/RemoveTrustedPeer"
 	Sentry_NodeInfo_FullMethodName                 = "/sentry.Sentry/NodeInfo"
 )
 
@@ -69,6 +71,8 @@ type SentryClient interface {
 	PeerEvents(ctx context.Context, in *PeerEventsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[PeerEvent], error)
 	AddPeer(ctx context.Context, in *AddPeerRequest, opts ...grpc.CallOption) (*AddPeerReply, error)
 	RemovePeer(ctx context.Context, in *RemovePeerRequest, opts ...grpc.CallOption) (*RemovePeerReply, error)
+	AddTrustedPeer(ctx context.Context, in *AddPeerRequest, opts ...grpc.CallOption) (*AddPeerReply, error)
+	RemoveTrustedPeer(ctx context.Context, in *RemovePeerRequest, opts ...grpc.CallOption) (*RemovePeerReply, error)
 	// NodeInfo returns a collection of metadata known about the host.
 	NodeInfo(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*typesproto.NodeInfoReply, error)
 }
@@ -269,6 +273,26 @@ func (c *sentryClient) RemovePeer(ctx context.Context, in *RemovePeerRequest, op
 	return out, nil
 }
 
+func (c *sentryClient) AddTrustedPeer(ctx context.Context, in *AddPeerRequest, opts ...grpc.CallOption) (*AddPeerReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AddPeerReply)
+	err := c.cc.Invoke(ctx, Sentry_AddTrustedPeer_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sentryClient) RemoveTrustedPeer(ctx context.Context, in *RemovePeerRequest, opts ...grpc.CallOption) (*RemovePeerReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RemovePeerReply)
+	err := c.cc.Invoke(ctx, Sentry_RemoveTrustedPeer_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *sentryClient) NodeInfo(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*typesproto.NodeInfoReply, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(typesproto.NodeInfoReply)
@@ -307,6 +331,8 @@ type SentryServer interface {
 	PeerEvents(*PeerEventsRequest, grpc.ServerStreamingServer[PeerEvent]) error
 	AddPeer(context.Context, *AddPeerRequest) (*AddPeerReply, error)
 	RemovePeer(context.Context, *RemovePeerRequest) (*RemovePeerReply, error)
+	AddTrustedPeer(context.Context, *AddPeerRequest) (*AddPeerReply, error)
+	RemoveTrustedPeer(context.Context, *RemovePeerRequest) (*RemovePeerReply, error)
 	// NodeInfo returns a collection of metadata known about the host.
 	NodeInfo(context.Context, *emptypb.Empty) (*typesproto.NodeInfoReply, error)
 	mustEmbedUnimplementedSentryServer()
@@ -369,6 +395,12 @@ func (UnimplementedSentryServer) AddPeer(context.Context, *AddPeerRequest) (*Add
 }
 func (UnimplementedSentryServer) RemovePeer(context.Context, *RemovePeerRequest) (*RemovePeerReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method RemovePeer not implemented")
+}
+func (UnimplementedSentryServer) AddTrustedPeer(context.Context, *AddPeerRequest) (*AddPeerReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method AddTrustedPeer not implemented")
+}
+func (UnimplementedSentryServer) RemoveTrustedPeer(context.Context, *RemovePeerRequest) (*RemovePeerReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method RemoveTrustedPeer not implemented")
 }
 func (UnimplementedSentryServer) NodeInfo(context.Context, *emptypb.Empty) (*typesproto.NodeInfoReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method NodeInfo not implemented")
@@ -686,6 +718,42 @@ func _Sentry_RemovePeer_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Sentry_AddTrustedPeer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AddPeerRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SentryServer).AddTrustedPeer(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Sentry_AddTrustedPeer_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SentryServer).AddTrustedPeer(ctx, req.(*AddPeerRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Sentry_RemoveTrustedPeer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RemovePeerRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SentryServer).RemoveTrustedPeer(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Sentry_RemoveTrustedPeer_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SentryServer).RemoveTrustedPeer(ctx, req.(*RemovePeerRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Sentry_NodeInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(emptypb.Empty)
 	if err := dec(in); err != nil {
@@ -770,6 +838,14 @@ var Sentry_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RemovePeer",
 			Handler:    _Sentry_RemovePeer_Handler,
+		},
+		{
+			MethodName: "AddTrustedPeer",
+			Handler:    _Sentry_AddTrustedPeer_Handler,
+		},
+		{
+			MethodName: "RemoveTrustedPeer",
+			Handler:    _Sentry_RemoveTrustedPeer_Handler,
 		},
 		{
 			MethodName: "NodeInfo",

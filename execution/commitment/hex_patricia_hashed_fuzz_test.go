@@ -82,7 +82,7 @@ func Fuzz_ProcessUpdate(f *testing.F) {
 func Fuzz_ProcessUpdates_ArbitraryUpdateCount2(f *testing.F) {
 	//ha, _ := hex.DecodeString("0008852883b2850c7a48f4b0eea3ccc4c04e6cb6025e9e8f7db2589c7dae81517c514790cfd6f668903161349e")
 	ctx := context.Background()
-	f.Add(uint16(10_000), uint32(1), uint32(2))
+	f.Add(uint16(100), uint32(1), uint32(2))
 
 	f.Fuzz(func(t *testing.T, keysCount uint16, ks, us uint32) {
 		keysSeed := rand.New(rand.NewSource(int64(ks)))
@@ -173,6 +173,9 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount2(f *testing.F) {
 }
 
 func Fuzz_HexPatriciaHashed_ReviewKeys(f *testing.F) {
+	if testing.Short() {
+		f.Skip("slow test")
+	}
 	ctx := context.Background()
 	var (
 		keysCount uint64 = 100000

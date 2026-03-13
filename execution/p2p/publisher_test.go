@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/exp/maps"
@@ -78,7 +79,7 @@ func TestPublisher(t *testing.T) {
 		})
 
 		// we hear about block1 from peers 1,2,3,4
-		header1 := &types.Header{Number: big.NewInt(1)}
+		header1 := &types.Header{Number: *uint256.NewInt(1)}
 		block1 := types.NewBlockWithHeader(header1)
 		td1 := big.NewInt(5)
 		waitPeersMayMissHash := func(peersCount int) func() bool {

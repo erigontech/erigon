@@ -24,118 +24,139 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 )
 
+type IntrinsicGasCalcArgs struct {
+	Data               []byte
+	DataNonZeroLen     uint64
+	AuthorizationsLen  uint64
+	AccessListLen      uint64
+	StorageKeysLen     uint64
+	IsContractCreation bool
+	IsEIP2             bool
+	IsEIP2028          bool
+	IsEIP3860          bool
+	IsEIP7623          bool
+	IsAATxn            bool
+}
+
+type IntrinsicGasCalcResult struct {
+	RegularGas   uint64
+	FloorGasCost uint64
+}
+
 // IntrinsicGas computes the 'intrinsic gas' for a message with the given data.
-// TODO: convert the input to a struct
-func IntrinsicGas(data []byte, accessListLen, storageKeysLen uint64, isContractCreation bool, isEIP2, isEIP2028, isEIP3860, isEIP7623, isAATxn bool, authorizationsLen uint64) (uint64, uint64, bool) {
+// It counts the non-zero bytes in args.Data and then calls CalcIntrinsicGas.
+func IntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) {
 	// Zero and non-zero bytes are priced differently
-	dataLen := uint64(len(data))
-	dataNonZeroLen := uint64(0)
-	for _, byt := range data {
+	args.DataNonZeroLen = 0
+	for _, byt := range args.Data {
 		if byt != 0 {
-			dataNonZeroLen++
+			args.DataNonZeroLen++
 		}
 	}
 
-	return CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen, accessListLen, storageKeysLen, isContractCreation, isEIP2, isEIP2028, isEIP3860, isEIP7623, isAATxn)
+	return CalcIntrinsicGas(args)
 }
 
 // CalcIntrinsicGas computes the 'intrinsic gas' for a message with the given data.
-func CalcIntrinsicGas(dataLen, dataNonZeroLen, authorizationsLen, accessListLen, storageKeysLen uint64, isContractCreation, isEIP2, isEIP2028, isEIP3860, isEIP7623, isAATxn bool) (gas uint64, floorGas7623 uint64, overflow bool) {
+// Unlike IntrinsicGas, it expects args.DataNonZeroLen to be pre-computed by the caller.
+func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) {
+	var result IntrinsicGasCalcResult
+	dataLen := uint64(len(args.Data))
 	// Set the starting gas for the raw transaction
-	if isContractCreation && isEIP2 {
-		gas = params.TxGasContractCreation
-	} else if isAATxn {
-		gas = params.TxAAGas
+	if args.IsContractCreation && args.IsEIP2 {
+		result.RegularGas = params.TxGasContractCreation
+	} else if args.IsAATxn {
+		result.RegularGas = params.TxAAGas
 	} else {
-		gas = params.TxGas
+		result.RegularGas = params.TxGas
 	}
-	floorGas7623 = params.TxGas
+	result.FloorGasCost = params.TxGas
 	// Bump the required gas by the amount of transactional data
 	if dataLen > 0 {
 		// Zero and non-zero bytes are priced differently
-		nz := dataNonZeroLen
+		nz := args.DataNonZeroLen
 		// Make sure we don't exceed uint64 for all data combinations
 		nonZeroGas := params.TxDataNonZeroGasFrontier
-		if isEIP2028 {
+		if args.IsEIP2028 {
 			nonZeroGas = params.TxDataNonZeroGasEIP2028
 		}
 
 		product, overflow := math.SafeMul(nz, nonZeroGas)
 		if overflow {
-			return 0, 0, true
+			return IntrinsicGasCalcResult{}, true
 		}
-		gas, overflow = math.SafeAdd(gas, product)
+		result.RegularGas, overflow = math.SafeAdd(result.RegularGas, product)
 		if overflow {
-			return 0, 0, true
+			return IntrinsicGasCalcResult{}, true
 		}
 
 		z := dataLen - nz
 
 		product, overflow = math.SafeMul(z, params.TxDataZeroGas)
 		if overflow {
-			return 0, 0, true
+			return IntrinsicGasCalcResult{}, true
 		}
-		gas, overflow = math.SafeAdd(gas, product)
+		result.RegularGas, overflow = math.SafeAdd(result.RegularGas, product)
 		if overflow {
-			return 0, 0, true
+			return IntrinsicGasCalcResult{}, true
 		}
 
-		if isContractCreation && isEIP3860 {
+		if args.IsContractCreation && args.IsEIP3860 {
 			numWords := toWordSize(dataLen)
 			product, overflow = math.SafeMul(numWords, params.InitCodeWordGas)
 			if overflow {
-				return 0, 0, true
+				return IntrinsicGasCalcResult{}, true
 			}
-			gas, overflow = math.SafeAdd(gas, product)
+			result.RegularGas, overflow = math.SafeAdd(result.RegularGas, product)
 			if overflow {
-				return 0, 0, true
+				return IntrinsicGasCalcResult{}, true
 			}
 		}
 
-		if isEIP7623 {
+		if args.IsEIP7623 {
 			tokenLen := dataLen + 3*nz
 			dataGas, overflow := math.SafeMul(tokenLen, params.TxTotalCostFloorPerToken)
 			if overflow {
-				return 0, 0, true
+				return IntrinsicGasCalcResult{}, true
 			}
-			floorGas7623, overflow = math.SafeAdd(floorGas7623, dataGas)
+			result.FloorGasCost, overflow = math.SafeAdd(result.FloorGasCost, dataGas)
 			if overflow {
-				return 0, 0, true
+				return IntrinsicGasCalcResult{}, true
 			}
 		}
 	}
-	if accessListLen > 0 {
-		product, overflow := math.SafeMul(accessListLen, params.TxAccessListAddressGas)
+	if args.AccessListLen > 0 {
+		product, overflow := math.SafeMul(args.AccessListLen, params.TxAccessListAddressGas)
 		if overflow {
-			return 0, 0, true
+			return IntrinsicGasCalcResult{}, true
 		}
-		gas, overflow = math.SafeAdd(gas, product)
+		result.RegularGas, overflow = math.SafeAdd(result.RegularGas, product)
 		if overflow {
-			return 0, 0, true
+			return IntrinsicGasCalcResult{}, true
 		}
 
-		product, overflow = math.SafeMul(storageKeysLen, params.TxAccessListStorageKeyGas)
+		product, overflow = math.SafeMul(args.StorageKeysLen, params.TxAccessListStorageKeyGas)
 		if overflow {
-			return 0, 0, true
+			return IntrinsicGasCalcResult{}, true
 		}
-		gas, overflow = math.SafeAdd(gas, product)
+		result.RegularGas, overflow = math.SafeAdd(result.RegularGas, product)
 		if overflow {
-			return 0, 0, true
+			return IntrinsicGasCalcResult{}, true
 		}
 	}
 
 	// Add the cost of authorizations
-	product, overflow := math.SafeMul(authorizationsLen, params.PerEmptyAccountCost)
+	product, overflow := math.SafeMul(args.AuthorizationsLen, params.PerEmptyAccountCost)
 	if overflow {
-		return 0, 0, true
+		return IntrinsicGasCalcResult{}, true
 	}
 
-	gas, overflow = math.SafeAdd(gas, product)
+	result.RegularGas, overflow = math.SafeAdd(result.RegularGas, product)
 	if overflow {
-		return 0, 0, true
+		return IntrinsicGasCalcResult{}, true
 	}
 
-	return gas, floorGas7623, false
+	return result, false
 }
 
 // toWordSize returns the ceiled word size required for memory expansion.

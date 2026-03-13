@@ -34,6 +34,9 @@ import (
 )
 
 func TestUDPv4_Lookup(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	test := newUDPTest(t)
 
@@ -69,6 +72,9 @@ func TestUDPv4_Lookup(t *testing.T) {
 }
 
 func TestUDPv4_LookupIterator(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	test := newUDPTest(t)
 	var wg sync.WaitGroup

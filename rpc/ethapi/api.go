@@ -426,7 +426,7 @@ func FormatLogs(logs []logger.StructLog) []StructLogRes {
 // RPCMarshalHeader converts the given header to the RPC output .
 func RPCMarshalHeader(head *types.Header) map[string]any {
 	result := map[string]any{
-		"number":           (*hexutil.Big)(head.Number),
+		"number":           (*hexutil.Big)(head.Number.ToBig()),
 		"hash":             head.Hash(),
 		"parentHash":       head.ParentHash,
 		"nonce":            head.Nonce,
@@ -435,7 +435,7 @@ func RPCMarshalHeader(head *types.Header) map[string]any {
 		"logsBloom":        head.Bloom,
 		"stateRoot":        head.Root,
 		"miner":            head.Coinbase,
-		"difficulty":       (*hexutil.Big)(head.Difficulty),
+		"difficulty":       (*hexutil.Big)(head.Difficulty.ToBig()),
 		"extraData":        hexutil.Bytes(head.Extra),
 		"size":             hexutil.Uint64(head.Size()),
 		"gasLimit":         hexutil.Uint64(head.GasLimit),
@@ -445,7 +445,7 @@ func RPCMarshalHeader(head *types.Header) map[string]any {
 		"receiptsRoot":     head.ReceiptHash,
 	}
 	if head.BaseFee != nil {
-		result["baseFeePerGas"] = (*hexutil.Big)(head.BaseFee)
+		result["baseFeePerGas"] = (*hexutil.Big)(head.BaseFee.ToBig())
 	}
 	if head.WithdrawalsHash != nil {
 		result["withdrawalsRoot"] = head.WithdrawalsHash
@@ -564,7 +564,7 @@ type RPCTransaction struct {
 
 // NewRPCTransaction returns a transaction that will serialize to the RPC
 // representation, with the given location metadata set (if available).
-func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime uint64, blockNumber uint64, index uint64, baseFee *big.Int) *RPCTransaction {
+func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime uint64, blockNumber uint64, index uint64, baseFee *uint256.Int) *RPCTransaction {
 	// Determine the signer. For replay-protected transactions, use the most permissive
 	// signer, because we assume that signers are backwards-compatible with old
 	// transactions. For non-protected transactions, the homestead signer is used
@@ -643,11 +643,10 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime u
 	return result
 }
 
-func computeGasPrice(txn types.Transaction, blockHash common.Hash, baseFee *big.Int) *hexutil.Big {
-	fee, overflow := uint256.FromBig(baseFee)
-	if fee != nil && !overflow && blockHash != (common.Hash{}) {
+func computeGasPrice(txn types.Transaction, blockHash common.Hash, baseFee *uint256.Int) *hexutil.Big {
+	if baseFee != nil && blockHash != (common.Hash{}) {
 		// price = min(tip + baseFee, gasFeeCap)
-		price := u256.Min(u256.Add(*txn.GetTipCap(), *fee), *txn.GetFeeCap())
+		price := u256.Min(u256.Add(*txn.GetTipCap(), *baseFee), *txn.GetFeeCap())
 		return (*hexutil.Big)(price.ToBig())
 	}
 	return nil

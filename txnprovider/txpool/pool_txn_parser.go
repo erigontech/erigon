@@ -26,9 +26,9 @@ import (
 	"math/bits"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/erigontech/secp256k1"
 	"github.com/holiman/uint256"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -88,8 +88,8 @@ func NewTxnParseContext(chainID uint256.Int) *TxnParseContext {
 	}
 	ctx := &TxnParseContext{
 		withSender: true,
-		Keccak1:    sha3.NewLegacyKeccak256(),
-		Keccak2:    sha3.NewLegacyKeccak256(),
+		Keccak1:    keccak.NewFastKeccak(),
+		Keccak2:    keccak.NewFastKeccak(),
 	}
 
 	// behave as of London enabled

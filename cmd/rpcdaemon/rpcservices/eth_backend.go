@@ -415,6 +415,22 @@ func (back *RemoteBackend) RemovePeer(ctx context.Context, request *remoteproto.
 	return result, nil
 }
 
+func (back *RemoteBackend) AddTrustedPeer(ctx context.Context, request *remoteproto.AddPeerRequest) (*remoteproto.AddPeerReply, error) {
+	result, err := back.remoteEthBackend.AddTrustedPeer(ctx, request)
+	if err != nil {
+		return nil, fmt.Errorf("ETHBACKENDClient.AddTrustedPeer() error: %w", err)
+	}
+	return result, nil
+}
+
+func (back *RemoteBackend) RemoveTrustedPeer(ctx context.Context, request *remoteproto.RemovePeerRequest) (*remoteproto.RemovePeerReply, error) {
+	result, err := back.remoteEthBackend.RemoveTrustedPeer(ctx, request)
+	if err != nil {
+		return nil, fmt.Errorf("ETHBACKENDClient.RemoveTrustedPeer() error: %w", err)
+	}
+	return result, nil
+}
+
 func (back *RemoteBackend) Peers(ctx context.Context) ([]*p2p.PeerInfo, error) {
 	rpcPeers, err := back.remoteEthBackend.Peers(ctx, &emptypb.Empty{})
 	if err != nil {

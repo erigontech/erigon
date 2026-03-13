@@ -22,6 +22,7 @@ import (
 	"fmt"
 
 	"github.com/RoaringBitmap/roaring/v2"
+
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 
 	"github.com/erigontech/erigon/common"
@@ -32,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/ethutils"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
@@ -72,10 +72,6 @@ func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.Temp
 
 func (api *BaseAPI) getReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
 	return api.receiptsGenerator.GetReceiptsGasUsed(ctx, tx, block, api._txNumReader)
-}
-
-func (api *BaseAPI) getCachedReceipt(ctx context.Context, hash common.Hash) (*types.Receipt, bool) {
-	return api.receiptsGenerator.GetCachedReceipt(ctx, hash)
 }
 
 func (api *BaseAPI) getCachedReceipts(ctx context.Context, hash common.Hash) (types.Receipts, bool) {
@@ -192,6 +188,10 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		return nil, fmt.Errorf("node is still initializing")
 	}
 
+	if err = api.BaseAPI.checkReceiptsAvailable(ctx, tx, begin); err != nil {
+		return nil, err
+	}
+
 	erigonLogs, err := api.getLogsV3(ctx, tx, begin, end, crit, api.BaseAPI.rangeLimit)
 	if err != nil {
 		return nil, err
@@ -225,9 +225,6 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 		fromTxNum, err = txNumsReader.Min(context.Background(), tx, begin)
 		if err != nil {
 			return out, err
-		}
-		if minTxNum := state.StateHistoryStartTxNum(tx); fromTxNum < minTxNum {
-			return out, fmt.Errorf("%w: from tx: %d, min tx: %d", state.PrunedError, fromTxNum, minTxNum)
 		}
 	}
 
@@ -355,20 +352,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				}
 
 				borLogs = borLogs.Filter(addrMap, crit.Topics, 0)
-				for _, filteredLog := range borLogs {
-					logs = append(logs, &types.ErigonLog{
-						Address:     filteredLog.Address,
-						Topics:      filteredLog.Topics,
-						Data:        filteredLog.Data,
-						BlockNumber: filteredLog.BlockNumber,
-						TxHash:      filteredLog.TxHash,
-						TxIndex:     filteredLog.TxIndex,
-						BlockHash:   filteredLog.BlockHash,
-						Index:       filteredLog.Index,
-						Removed:     filteredLog.Removed,
-						Timestamp:   header.Time,
-					})
-				}
+				logs = append(logs, borLogs.ToErigonLogs(header.Time)...)
 			}
 
 			continue
@@ -391,21 +375,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			return nil, err
 		}
 		filtered := r.Logs.Filter(addrMap, crit.Topics, 0)
-
-		for _, filteredLog := range filtered {
-			logs = append(logs, &types.ErigonLog{
-				Address:     filteredLog.Address,
-				Topics:      filteredLog.Topics,
-				Data:        filteredLog.Data,
-				BlockNumber: filteredLog.BlockNumber,
-				TxHash:      filteredLog.TxHash,
-				TxIndex:     filteredLog.TxIndex,
-				BlockHash:   filteredLog.BlockHash,
-				Index:       filteredLog.Index,
-				Removed:     filteredLog.Removed,
-				Timestamp:   header.Time,
-			})
-		}
+		logs = append(logs, filtered.ToErigonLogs(header.Time)...)
 	}
 
 	return logs, nil
@@ -481,7 +451,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, nil
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkReceiptsAvailable(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -584,7 +554,15 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 		return nil, err
 	}
 	defer tx.Rollback()
-	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(ctx, numberOrHash, tx, api._blockReader, api.filters)
+
+	// Pending block receipts are only available if the miner has a pending block
+	// with executed transactions. Erigon receives only header+txs from the miner
+	// and cannot compute receipts on-the-fly.
+	if numberOrHash.BlockNumber != nil && *numberOrHash.BlockNumber == rpc.PendingBlockNumber {
+		return nil, errors.New("pending receipts are not available")
+	}
+
+	blockNum, blockHash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, numberOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return nil, nil // waiting for spec: not error, see Geth and https://github.com/erigontech/erigon/issues/1645
@@ -592,7 +570,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkReceiptsAvailable(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}

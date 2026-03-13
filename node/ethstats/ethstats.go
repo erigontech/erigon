@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -480,7 +481,7 @@ func (s *Service) reportLatency(conn *connWrapper) error {
 
 // blockStats is the information to report about individual blocks.
 type blockStats struct {
-	Number     *big.Int       `json:"number"`
+	Number     uint256.Int    `json:"number"`
 	Hash       common.Hash    `json:"hash"`
 	ParentHash common.Hash    `json:"parentHash"`
 	Timestamp  *big.Int       `json:"timestamp"`

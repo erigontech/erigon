@@ -65,15 +65,31 @@ func (i *Item) Add(n int) int {
 type Pool struct {
 	host host.Host
 
-	bannedPeers *lru.CacheWithTTL[peer.ID, struct{}]
+	bannedPeers       *lru.CacheWithTTL[peer.ID, struct{}]
+	handshakeFailures *lru.CacheWithTTL[peer.ID, int]
 
 	mu sync.Mutex
 }
 
 func NewPool(h host.Host) *Pool {
 	return &Pool{
-		host:        h,
-		bannedPeers: lru.NewWithTTL[peer.ID, struct{}]("bannedPeers", 100_000, 30*time.Minute),
+		host:              h,
+		bannedPeers:       lru.NewWithTTL[peer.ID, struct{}]("bannedPeers", 100_000, 30*time.Minute),
+		handshakeFailures: lru.NewWithTTL[peer.ID, int]("handshakeFailures", 10_000, 10*time.Minute),
+	}
+}
+
+// RecordHandshakeFailure increments the failure count. After 3 failures within 10 minutes, the peer is banned.
+func (p *Pool) RecordHandshakeFailure(pid peer.ID) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	count, _ := p.handshakeFailures.Get(pid)
+	count++
+	if count >= 3 {
+		p.bannedPeers.Add(pid, struct{}{})
+		p.handshakeFailures.Remove(pid)
+	} else {
+		p.handshakeFailures.Add(pid, count)
 	}
 }
 

@@ -22,8 +22,8 @@ import (
 	"io"
 	"math/bits"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
 	length2 "github.com/erigontech/erigon/common/length"
@@ -42,7 +42,7 @@ type HashBuilder struct {
 	hashStack []byte                // Stack of sub-slices, each 33 bytes each, containing RLP encodings of node hashes (or of nodes themselves, if shorter than 32 bytes)
 	nodeStack []Node                // Stack of nodes
 	acc       accounts.Account      // Working account instance (to avoid extra allocations)
-	sha       keccakState           // Keccak primitive that can absorb data (Write), and get squeezed to the hash out (Read)
+	sha       keccak.KeccakState    // Keccak primitive that can absorb data (Write), and get squeezed to the hash out (Read)
 	hashBuf   [hashStackStride]byte // RLP representation of hash (or un-hashes value)
 	keyPrefix [1]byte
 	lenPrefix [9]byte
@@ -62,7 +62,7 @@ type HashBuilder struct {
 // NewHashBuilder creates a new HashBuilder
 func NewHashBuilder(trace bool) *HashBuilder {
 	return &HashBuilder{
-		sha:             sha3.NewLegacyKeccak256().(keccakState),
+		sha:             keccak.NewFastKeccak(),
 		byteArrayWriter: &ByteArrayWriter{},
 		trace:           trace,
 	}

@@ -104,31 +104,6 @@ type stateObject struct {
 	createdContract bool // true if this object represents a newly created contract
 }
 
-func (so *stateObject) deepCopy(db *IntraBlockState) *stateObject {
-	obj := stateObjectPool.Get().(*stateObject)
-	obj.db = db
-	obj.address = so.address
-	obj.data.Copy(&so.data)
-	obj.original.Copy(&so.original)
-	obj.code = so.code
-	// Clear and copy storage maps
-	clear(obj.dirtyStorage)
-	maps.Copy(obj.dirtyStorage, so.dirtyStorage)
-	clear(obj.originStorage)
-	maps.Copy(obj.originStorage, so.originStorage)
-	clear(obj.blockOriginStorage)
-	maps.Copy(obj.blockOriginStorage, so.blockOriginStorage)
-	if so.fakeStorage != nil {
-		obj.fakeStorage = so.fakeStorage.Copy()
-	}
-	obj.selfdestructed = so.selfdestructed
-	obj.dirtyCode = so.dirtyCode
-	obj.deleted = so.deleted
-	obj.newlyCreated = so.newlyCreated
-	obj.createdContract = so.createdContract
-	return obj
-}
-
 // newObject creates a state object from the pool.
 func newObject(db *IntraBlockState, address accounts.Address, data, original *accounts.Account) *stateObject {
 	so := stateObjectPool.Get().(*stateObject)
@@ -274,6 +249,17 @@ func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, forc
 		return false, err
 	}
 
+	// When versionedRead resolves the previous value from a cached read
+	// (ReadSetRead) or from the version map (MapRead), the readStorage
+	// callback is never called and commited stays at its zero-value (false).
+	// In both cases there is no versioned write for this key in the current
+	// transaction, so this IS the first write — commited must be true so
+	// that storageChange.revert deletes the versioned write instead of
+	// updating it to the prevalue.
+	if source != WriteSetRead && source != UnknownSource && source != StorageRead {
+		commited = true
+	}
+
 	if !force && source != UnknownSource && prev == value {
 		return false, nil
 	}
@@ -316,7 +302,12 @@ func (so *stateObject) setState(key accounts.StorageKey, value uint256.Int) {
 }
 
 // updateStorage writes cached storage modifications into the object's storage trie.
-func (so *stateObject) updateStorage(stateWriter StateWriter) error {
+// useBlockOrigin selects which baseline to compare against when deciding whether to skip
+// a write: false → use originStorage (last value written to MDBX within this block,
+// correct for per-tx FinalizeTx writes); true → use blockOriginStorage (value at block
+// start, correct for CommitBlock's system-txNum write which must not be skipped even
+// when a slot returned to its block-start value mid-block).
+func (so *stateObject) updateStorage(stateWriter StateWriter, useBlockOrigin bool) error {
 	// When using full state override, only the fake storage matters (see also SetStorage)
 	if so.fakeStorage != nil {
 		// First, delete the account to wipe out the original storage
@@ -325,30 +316,46 @@ func (so *stateObject) updateStorage(stateWriter StateWriter) error {
 			return err
 		}
 		// Then, we need to apply the fake storage changes to compute the state root correctly
-		err = so.applyStorageChanges(stateWriter, so.fakeStorage)
+		err = so.applyStorageChanges(stateWriter, so.fakeStorage, useBlockOrigin)
 		if err != nil {
 			return err
 		}
 		return nil
 	}
 	// Normal behaviour, apply the dirty storage changes
-	err := so.applyStorageChanges(stateWriter, so.dirtyStorage)
+	err := so.applyStorageChanges(stateWriter, so.dirtyStorage, useBlockOrigin)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (so *stateObject) applyStorageChanges(stateWriter StateWriter, updatedStorage Storage) error {
+func (so *stateObject) applyStorageChanges(stateWriter StateWriter, updatedStorage Storage, useBlockOrigin bool) error {
 	for key, value := range updatedStorage {
-		blockOriginValue := so.blockOriginStorage[key]
+		// Choose the baseline for the skip-if-unchanged check:
+		//
+		//   useBlockOrigin=false (FinalizeTx): use originStorage[key], the last value
+		//   written to MDBX within this block. This avoids a stale-MDBX bug when a
+		//   slot returns to its block-start value mid-block (A→B→A): blockOriginStorage
+		//   would falsely report "no change" while MDBX still holds B from an earlier tx.
+		//
+		//   useBlockOrigin=true (CommitBlock): use blockOriginStorage[key]. After all
+		//   FinalizeTx calls, originStorage[key] already equals the final dirty value, so
+		//   using it would always skip the write. The CommitBlock write at system_txNum is
+		//   required by ComputeCommitment and must not be skipped.
+		var originValue uint256.Int
+		if useBlockOrigin {
+			originValue = so.blockOriginStorage[key]
+		} else {
+			originValue = so.originStorage[key]
+		}
 		if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (so.db.trace || dbg.TraceAccount(so.address.Handle()))) {
 			if _, ok := stateWriter.(*NoopWriter); !ok || dbg.TraceNoopIO {
 				fmt.Printf("%d (%d.%d) Update Storage (%T): %x,%x,%s->%s\n", so.db.blockNum, so.db.txIndex, so.db.version,
-					stateWriter, so.address, key, blockOriginValue.Hex(), value.Hex())
+					stateWriter, so.address, key, originValue.Hex(), value.Hex())
 			}
 		}
-		if err := stateWriter.WriteAccountStorage(so.address, so.data.GetIncarnation(), key, blockOriginValue, value); err != nil {
+		if err := stateWriter.WriteAccountStorage(so.address, so.data.GetIncarnation(), key, originValue, value); err != nil {
 			return err
 		}
 		so.originStorage[key] = value

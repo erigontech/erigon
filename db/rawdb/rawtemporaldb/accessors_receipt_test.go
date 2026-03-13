@@ -27,25 +27,17 @@ func TestAppendReceipt(t *testing.T) {
 	require.NoError(err)
 	defer doms.Close()
 
-	doms.SetTxNum(0)                                                   // block1
 	err = rawtemporaldb.AppendReceipt(doms.AsPutDel(ttx), 1, 10, 0, 0) // 1 log
 	require.NoError(err)
 
-	doms.SetTxNum(1)                                                   // block1
 	err = rawtemporaldb.AppendReceipt(doms.AsPutDel(ttx), 1, 11, 0, 1) // 0 log
 	require.NoError(err)
 
-	doms.SetTxNum(2) // block1
-
-	doms.SetTxNum(3)                                                   // block2
 	err = rawtemporaldb.AppendReceipt(doms.AsPutDel(ttx), 4, 12, 0, 3) // 3 logs
 	require.NoError(err)
 
-	doms.SetTxNum(4)                                                   // block2
 	err = rawtemporaldb.AppendReceipt(doms.AsPutDel(ttx), 4, 14, 0, 4) // 0 log
 	require.NoError(err)
-
-	doms.SetTxNum(5) // block2
 
 	err = doms.Flush(context.Background(), tx)
 	require.NoError(err)

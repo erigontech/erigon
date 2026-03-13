@@ -352,10 +352,32 @@ func (c *JsonRpcClient) GetPayloadBodiesByHashV1(ctx context.Context, hashes []c
 	}, c.backOff(ctx))
 }
 
+func (c *JsonRpcClient) GetPayloadBodiesByHashV2(ctx context.Context, hashes []common.Hash) ([]*enginetypes.ExecutionPayloadBodyV2, error) {
+	return backoff.RetryWithData(func() ([]*enginetypes.ExecutionPayloadBodyV2, error) {
+		var result []*enginetypes.ExecutionPayloadBodyV2
+		err := c.rpcClient.CallContext(ctx, &result, "engine_getPayloadBodiesByHashV2", hashes)
+		if err != nil {
+			return nil, c.maybeMakePermanent(err)
+		}
+		return result, nil
+	}, c.backOff(ctx))
+}
+
 func (c *JsonRpcClient) GetPayloadBodiesByRangeV1(ctx context.Context, start, count hexutil.Uint64) ([]*enginetypes.ExecutionPayloadBody, error) {
 	return backoff.RetryWithData(func() ([]*enginetypes.ExecutionPayloadBody, error) {
 		var result []*enginetypes.ExecutionPayloadBody
 		err := c.rpcClient.CallContext(ctx, &result, "engine_getPayloadBodiesByRangeV1", start, count)
+		if err != nil {
+			return nil, c.maybeMakePermanent(err)
+		}
+		return result, nil
+	}, c.backOff(ctx))
+}
+
+func (c *JsonRpcClient) GetPayloadBodiesByRangeV2(ctx context.Context, start, count hexutil.Uint64) ([]*enginetypes.ExecutionPayloadBodyV2, error) {
+	return backoff.RetryWithData(func() ([]*enginetypes.ExecutionPayloadBodyV2, error) {
+		var result []*enginetypes.ExecutionPayloadBodyV2
+		err := c.rpcClient.CallContext(ctx, &result, "engine_getPayloadBodiesByRangeV2", start, count)
 		if err != nil {
 			return nil, c.maybeMakePermanent(err)
 		}

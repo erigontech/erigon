@@ -32,6 +32,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -39,7 +41,6 @@ import (
 	"github.com/erigontech/erigon/p2p/discover/v5wire"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
-	"github.com/stretchr/testify/require"
 )
 
 // Real sockets, real crypto: this test checks end-to-end connectivity for UDPv5.
@@ -56,7 +57,7 @@ func TestUDPv5_lookupE2E(t *testing.T) {
 		}
 		node := startLocalhostV5(t, cfg)
 		nodes = append(nodes, node)
-		defer node.Close()
+		t.Cleanup(node.Close)
 	}
 	last := nodes[N-1]
 	target := nodes[rand.Intn(N-2)].Self()
@@ -293,6 +294,9 @@ func (test *udpV5Test) expectNodes(wantReqID []byte, wantTotal uint8, wantNodes 
 
 // This test checks that outgoing PING calls work.
 func TestUDPv5_pingCall(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	test := newUDPV5Test(t)
 	defer test.close()
@@ -509,6 +513,9 @@ func TestUDPv5_callResend(t *testing.T) {
 
 // This test ensures we don't allow multiple rounds of WHOAREYOU for a single call.
 func TestUDPv5_multipleHandshakeRounds(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	test := newUDPV5Test(t)
 	defer test.close()
@@ -535,6 +542,9 @@ func TestUDPv5_multipleHandshakeRounds(t *testing.T) {
 
 // This test checks that calls with n replies may take up to n * respTimeout.
 func TestUDPv5_callTimeoutReset(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	test := newUDPV5Test(t)
 	defer test.close()
@@ -624,6 +634,9 @@ func TestUDPv5_talkHandling(t *testing.T) {
 
 // This test checks that outgoing TALKREQ calls work.
 func TestUDPv5_talkRequest(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	test := newUDPV5Test(t)
 	defer test.close()
@@ -722,6 +735,9 @@ func TestUDPv5_lookupDistances(t *testing.T) {
 
 // This test checks that lookup works.
 func TestUDPv5_lookup(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	test := newUDPV5Test(t)
 

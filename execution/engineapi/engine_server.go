@@ -29,6 +29,8 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
@@ -99,7 +101,7 @@ func NewEngineServer(
 	fcuTimeout time.Duration,
 	maxReorgDepth uint64,
 ) *EngineServer {
-	chainRW := chainreader.NewChainReaderEth1(config, executionService, uint64(fcuTimeout.Milliseconds()))
+	chainRW := chainreader.NewChainReaderEth1(config, executionService, fcuTimeout)
 	srv := &EngineServer{
 		logger:            logger,
 		config:            config,
@@ -153,6 +155,16 @@ func (e *EngineServer) Start(
 			Service:   EngineAPI(e),
 			Version:   "1.0",
 		}}
+
+	if httpConfig.TestingEnabled {
+		e.logger.Warn("[EngineServer] testing_ RPC namespace is ENABLED — do not use on production networks")
+		apiList = append(apiList, rpc.API{
+			Namespace: "testing",
+			Public:    false,
+			Service:   TestingAPI(NewTestingImpl(e, true)),
+			Version:   "1.0",
+		})
+	}
 
 	eg.Go(func() error {
 		defer e.logger.Debug("[EngineServer] engine rpc server goroutine terminated")
@@ -218,15 +230,15 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		Coinbase:    req.FeeRecipient,
 		Root:        req.StateRoot,
 		Bloom:       bloom,
-		BaseFee:     (*big.Int)(req.BaseFeePerGas),
+		BaseFee:     uint256.MustFromBig(req.BaseFeePerGas.ToInt()),
 		Extra:       req.ExtraData,
-		Number:      big.NewInt(0).SetUint64(req.BlockNumber.Uint64()),
+		Number:      *uint256.NewInt(req.BlockNumber.Uint64()),
 		GasUsed:     uint64(req.GasUsed),
 		GasLimit:    uint64(req.GasLimit),
 		Time:        uint64(req.Timestamp),
 		MixDigest:   req.PrevRandao,
 		UncleHash:   empty.UncleHash,
-		Difficulty:  merge.ProofOfStakeDifficulty,
+		Difficulty:  *merge.ProofOfStakeDifficulty,
 		Nonce:       merge.ProofOfStakeNonce,
 		ReceiptHash: req.ReceiptsRoot,
 		TxHash:      types.DeriveSha(types.BinaryTransactions(txs)),
@@ -287,20 +299,27 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		if req.BlockAccessList == nil {
 			return nil, &rpc.InvalidParamsError{Message: "blockAccessList missing"}
 		}
-		if len(*req.BlockAccessList) == 0 {
+		if len(req.BlockAccessList) == 0 {
 			blockAccessList = nil
 			header.BlockAccessListHash = &empty.BlockAccessListHash
 		} else {
-			blockAccessList, err = types.DecodeBlockAccessListBytes(*req.BlockAccessList)
+			blockAccessList, err = types.DecodeBlockAccessListBytes(req.BlockAccessList)
 			if err != nil {
-				s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(*req.BlockAccessList))
-				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid blockAccessList decode: %v", err)}
+				s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(req.BlockAccessList))
+				return &engine_types.PayloadStatus{
+					Status:          engine_types.InvalidStatus,
+					ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("invalid block access list decode: %v", err)),
+				}, nil
 			}
 			if err := blockAccessList.Validate(); err != nil {
-				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid blockAccessList validate: %v", err)}
+				return &engine_types.PayloadStatus{
+					Status:          engine_types.InvalidStatus,
+					ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("invalid block access list validate: %v", err)),
+				}, nil
 			}
-			hash := crypto.Keccak256Hash(*req.BlockAccessList)
+			hash := crypto.Keccak256Hash(req.BlockAccessList)
 			header.BlockAccessListHash = &hash
+			blockAccessListBytes = req.BlockAccessList
 		}
 		if req.SlotNumber != nil {
 			slotNumber := uint64(*req.SlotNumber)
@@ -584,6 +603,10 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 	}
 
 	data := resp.Data
+	if data.ExecutionPayload == nil {
+		s.logger.Warn("Payload build failed (nil ExecutionPayload)", "payloadId", payloadId)
+		return nil, &engine_helpers.UnknownPayloadErr
+	}
 	var executionRequests []hexutil.Bytes
 	if version >= clparams.ElectraVersion {
 		executionRequests = make([]hexutil.Bytes, 0)

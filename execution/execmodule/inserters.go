@@ -30,7 +30,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 )
 
-func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executionproto.InsertBlocksRequest) (*executionproto.InsertionResult, error) {
+func (e *ExecModule) InsertBlocks(ctx context.Context, req *executionproto.InsertBlocksRequest) (*executionproto.InsertionResult, error) {
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.InsertBlocks: ExecutionStatus_Busy")
 		return &executionproto.InsertionResult{
@@ -94,7 +94,7 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 		metrics.UpdateBlockConsumerBodyDownloadDelay(header.Time, height, e.logger)
 
 		// Sum TDs.
-		td := parentTd.Add(parentTd, header.Difficulty)
+		td := parentTd.Add(parentTd, header.Difficulty.ToBig())
 		if err := rawdb.WriteHeader(tx, header); err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeHeader: %s", err)
 		}

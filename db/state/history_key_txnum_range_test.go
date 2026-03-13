@@ -69,6 +69,9 @@ func collectKeyTxNumRange(t *testing.T, it stream.KU64) []string {
 }
 
 func TestHistoryKeyTxNumRange(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 
 	logger := log.New()
@@ -117,6 +120,9 @@ func TestHistoryKeyTxNumRange(t *testing.T) {
 }
 
 func TestHistoryKeyTxNumRange_EdgeCases(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 
 	logger := log.New()
@@ -236,6 +242,9 @@ func TestHistoryKeyTxNumRange_DBOnly(t *testing.T) {
 }
 
 func TestHistoryKeyTxNumRange_RandomRanges(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 
 	logger := log.New()

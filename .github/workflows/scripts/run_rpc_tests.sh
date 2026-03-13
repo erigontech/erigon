@@ -103,7 +103,7 @@ set +e # Disable exit on error for test run
 cd ..
 retries=0
 while true; do
-   go run ./cmd/integration --blockchain "$CHAIN" --port 8545 --engine-port 8545 --continue --display-only-fail $OPTIONAL_FLAGS --exclude-api-list "$DISABLED_TESTS" | tee "$LOG_FILE"
+   go run ./cmd/integration --blockchain "$CHAIN" --port 8545 --engine-port 8545 --continue --display-only-fail --verbose 1 $OPTIONAL_FLAGS --exclude-api-list "$DISABLED_TESTS" | tee "$LOG_FILE"
    RUN_TESTS_EXIT_CODE=${PIPESTATUS[0]}
 
    if [ "$RUN_TESTS_EXIT_CODE" -eq 0 ]; then

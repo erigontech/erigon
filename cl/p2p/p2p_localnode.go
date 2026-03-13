@@ -26,18 +26,42 @@ func newLocalNode(
 	}
 	localNode := enode.NewLocalNode(db, privKey)
 
-	ipEntry := enr.IP(ipAddr)
 	udpEntry := enr.UDP(udpPort)
 	tcpEntry := enr.TCP(tcpPort)
 
-	localNode.Set(ipEntry)
 	localNode.Set(udpEntry)
 	localNode.Set(tcpEntry)
-
-	localNode.SetFallbackIP(ipAddr)
 	localNode.SetFallbackUDP(udpPort)
 
+	if ipAddr.IsUnspecified() {
+		if detected := detectOutboundIP(ipAddr); detected != nil {
+			logger.Info("[Caplin] Discovery address is unspecified, using detected outbound IP for ENR. Set --caplin.discovery.addr explicitly to override", "detected", detected)
+			ipAddr = detected
+		} else {
+			logger.Warn("[Caplin] Discovery address is unspecified and outbound IP detection failed, ENR will have no IP. Set --caplin.discovery.addr to your public IP")
+		}
+	}
+	if !ipAddr.IsUnspecified() {
+		localNode.Set(enr.IP(ipAddr))
+		localNode.SetFallbackIP(ipAddr)
+	}
+
 	return localNode, nil
+}
+
+// detectOutboundIP determines the preferred outbound IP address by asking the
+// OS routing table (no actual traffic is sent). Returns nil if detection fails.
+func detectOutboundIP(unspecified net.IP) net.IP {
+	network, target := "udp4", "8.8.8.8:80"
+	if unspecified.To4() == nil {
+		network, target = "udp6", "[2001:4860:4860::8888]:80"
+	}
+	conn, err := net.Dial(network, target)
+	if err != nil {
+		return nil
+	}
+	defer conn.Close()
+	return conn.LocalAddr().(*net.UDPAddr).IP
 }
 
 func NewUDPv5Listener(ctx context.Context, cfg *P2PConfig, discCfg discover.Config, logger log.Logger) (*discover.UDPv5, error) {

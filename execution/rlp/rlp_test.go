@@ -25,17 +25,18 @@ import (
 	"math/big"
 	"testing"
 
-	"golang.org/x/crypto/sha3"
+	keccak "github.com/erigontech/fastkeccak"
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -53,7 +54,7 @@ func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir 
 			Alloc:  types.GenesisAlloc{address: {Balance: funds}},
 		}
 	)
-	m := mock.MockWithGenesis(tb, gspec, key)
+	m := execmoduletester.New(tb, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 	genesis := m.Genesis
 	db := m.DB
 
@@ -67,7 +68,7 @@ func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir 
 				b.AddTx(tx)
 			}
 			for i := 0; i < uncles; i++ {
-				b.AddUncle(&types.Header{ParentHash: b.PrevBlock(n - 1 - i).Hash(), Number: big.NewInt(int64(n - i))})
+				b.AddUncle(&types.Header{ParentHash: b.PrevBlock(n - 1 - i).Hash(), Number: *uint256.NewInt(uint64(n - i))})
 			}
 		}
 	})
@@ -78,6 +79,9 @@ func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir 
 // TestRlpIterator tests that individual transactions can be picked out
 // from blocks without full unmarshalling/marshalling
 func TestRlpIterator(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	for _, tt := range []struct {
 		txs      int
@@ -160,7 +164,7 @@ func BenchmarkHashing(b *testing.B) {
 		blockRlp, _ = rlp.EncodeToBytes(block)
 	}
 	var got common.Hash
-	var hasher = sha3.NewLegacyKeccak256()
+	var hasher = keccak.NewFastKeccak()
 	b.Run("iteratorhashing", func(b *testing.B) {
 		b.ResetTimer()
 		for b.Loop() {
@@ -206,5 +210,14 @@ func BenchmarkHashing(b *testing.B) {
 	})
 	if got != exp {
 		b.Fatalf("hash wrong, got %x exp %x", got, exp)
+	}
+}
+
+func BenchmarkBlockEncoding(b *testing.B) {
+	block := getBlock(b, 200, 2, 50, "", log.Root())
+	for b.Loop() {
+		if _, err := rlp.EncodeToBytes(block); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
