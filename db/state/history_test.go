@@ -326,23 +326,13 @@ func TestHistoryBuildVI_PageCounterResetOnCollisionRetry(t *testing.T) {
 	t.Parallel()
 
 	logger := log.New()
+	db, h, txs := filledHistory(t, logger)
 
-	test := func(t *testing.T, largeValues bool) {
-		t.Helper()
-		db, h, txs := filledHistory(t, largeValues, logger)
-
-		// Force collision retries during buildVI calls.
-		// Set the hook AFTER collation but BEFORE merge, so only merge's
-		// buildVI calls get the forced collision.
-		collateAndMergeHistoryWithCollisionRetry(t, db, h, txs)
-		checkHistoryHistory(t, h, txs)
-	}
-	t.Run("large_values", func(t *testing.T) {
-		test(t, true)
-	})
-	t.Run("small_values", func(t *testing.T) {
-		test(t, false)
-	})
+	// Force collision retries during buildVI calls.
+	// Set the hook AFTER collation but BEFORE merge, so only merge's
+	// buildVI calls get the forced collision.
+	collateAndMergeHistoryWithCollisionRetry(t, db, h, txs)
+	checkHistoryHistory(t, h, txs)
 }
 
 func TestHistoryAfterPrune(t *testing.T) {
