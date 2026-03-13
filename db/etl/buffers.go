@@ -26,11 +26,13 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 const (
@@ -119,6 +121,7 @@ func NewSortableBuffer(bufferOptimalSize datasize.ByteSize) *sortableBuffer {
 	}
 	return &sortableBuffer{
 		optimalSize: int(bufferOptimalSize.Bytes()),
+		createdAt:   dbg.Stack(),
 	}
 }
 
@@ -127,6 +130,7 @@ type sortableBuffer struct {
 	prefixes    []uint64
 	data        []byte
 	optimalSize int
+	createdAt   string // stack trace of where buffer was created/reset
 }
 
 // Put adds key and value to the buffer. These slices will not be accessed later,
@@ -196,10 +200,12 @@ func (b *sortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) Buffer
 func (b *sortableBuffer) Reset() {
 	b.entries = b.entries[:0]
 	b.prefixes = b.prefixes[:0]
+	b.createdAt = dbg.Stack()
 	b.data = b.data[:0]
 }
 func (b *sortableBuffer) SizeLimit() int { return b.optimalSize }
 func (b *sortableBuffer) Sort() {
+	t := time.Now()
 	data := b.data
 	// Trick to speedup sort: cast 8 first bytes of key to u64 and use arithmetic comparison instead of bytes.Compare
 	// it will greatly reduce amount of `bytes.Compare` calls
@@ -238,6 +244,13 @@ func (b *sortableBuffer) Sort() {
 		return
 	}
 	slices.SortFunc(b.entries, cmp)
+	if took := time.Since(t); took >= 10*time.Millisecond {
+		var kLen, vLen int32
+		if len(b.entries) > 0 {
+			kLen, vLen = b.entries[0].keyLen, b.entries[0].valLen
+		}
+		log.Warn("[dbg] etl.Sort", "keys", len(b.entries), "keyLen", kLen, "valLen", vLen, "sorted", false, "took", took, "createdAt", b.createdAt)
+	}
 }
 
 func (b *sortableBuffer) CheckFlushSize() bool {
