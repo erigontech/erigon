@@ -339,7 +339,6 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 				evm.Config().Tracer.OnGasChange(gas.Regular, 0, tracing.GasChangeCallFailedExecution)
 			}
 			gas.Regular = 0
-			gas.State = 0
 		}
 
 		if evm.chainRules.IsAmsterdam {
@@ -367,9 +366,10 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 
 			if err != ErrExecutionReverted {
 				// EIP-8037: Preserve state gas reservoir on exceptional halt.
-				gas.State = initialChildState
 				if depth == 0 {
 					gas.Regular = 0
+				} else {
+					gas.State = initialChildState
 				}
 			}
 		}
@@ -628,6 +628,8 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 				gasRemaining.State = initialChildState
 				if depth == 0 {
 					gasRemaining.Regular = 0
+				} else {
+					gasRemaining.State = initialChildState
 				}
 			}
 		}

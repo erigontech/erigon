@@ -395,6 +395,12 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 		State:   intrinsicGasResult.StateGas - stateIgasRefund,
 	}
 	st.gasRemaining = SplitIntoMdGas(st.msg.Gas(), imdGas, rules)
+	// EIP-8037 × EIP-7702: move the authority-exists refund from regular gas
+	// back into the state reservoir so execution-time state ops draw from it.
+	if stateIgasRefund > 0 && rules.IsAmsterdam {
+		st.gasRemaining.Regular -= stateIgasRefund
+		st.gasRemaining.State += stateIgasRefund
+	}
 	st.initialGas = st.gasRemaining.Plus(imdGas)
 
 	// Execute the preparatory steps for state transition which includes:
@@ -548,9 +554,13 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 
 	imdGas := mdgas.MdGas{
 		Regular: intrinsicGasResult.RegularGas,
-		State:   intrinsicGasResult.StateGas - stateIgasRefund,
+		State:   intrinsicGasResult.StateGas,
 	}
 	st.gasRemaining = SplitIntoMdGas(st.msg.Gas(), imdGas, rules)
+	if rules.IsAmsterdam && stateIgasRefund > 0 {
+		imdGas.State -= stateIgasRefund
+		st.gasRemaining.State += stateIgasRefund
+	}
 	st.initialGas = st.gasRemaining.Plus(imdGas)
 
 	if t := st.evm.Config().Tracer; t != nil && t.OnGasChange != nil {
