@@ -205,12 +205,11 @@ func (b *sortableBuffer) Sort() {
 	prefixes := make([]uint64, len(b.entries))
 	for i := range b.entries {
 		e := &b.entries[i]
-		off, kLen := e.offset, e.keyLen
-		if kLen >= 8 {
-			prefixes[e.seq] = binary.BigEndian.Uint64(data[off:])
-		} else if kLen > 0 {
+		if e.keyLen >= 8 {
+			prefixes[e.seq] = binary.BigEndian.Uint64(data[e.offset:])
+		} else if e.keyLen > 0 {
 			var buf [8]byte
-			copy(buf[:], data[off:])
+			copy(buf[:], data[e.offset:])
 			prefixes[e.seq] = binary.BigEndian.Uint64(buf[:])
 		}
 	}
