@@ -98,7 +98,13 @@ func finishBlock(tx kv.TemporalTx, cfg BuilderFinishCfg, logger log.Logger) erro
 		}
 	}
 
-	cfg.builderState.PendingResultCh <- block
+	select {
+	case cfg.builderState.PendingResultCh <- block:
+	default:
+		// PendingResultCh is a best-effort notification channel; drop if nobody is reading.
+		// This prevents deadlock when Build is called again before the previous pending
+		// block has been consumed (e.g. in tests or when the broadcaster is slow).
+	}
 
 	if block.Transactions().Len() > 0 {
 		logger.Info(fmt.Sprintf("[%s] block ready for seal", logPrefix),
