@@ -130,21 +130,20 @@ type sortableBuffer struct {
 // Put adds key and value to the buffer. These slices will not be accessed later,
 // so no copying is necessary
 func (b *sortableBuffer) Put(k, v []byte) {
-	lk, lv := int32(len(k)), int32(len(v))
+	e := entryLoc{
+		offset: int32(len(b.data)),    //nolint:gosec
+		keyLen: int32(len(k)),         //nolint:gosec
+		valLen: int32(len(v)),         //nolint:gosec
+		seq:    int32(len(b.entries)), //nolint:gosec
+	}
 	if k == nil {
-		lk = -1
+		e.keyLen = -1
 	}
 	if v == nil {
-		lv = -1
+		e.valLen = -1
 	}
-	b.entries = append(b.entries, entryLoc{
-		offset: int32(len(b.data)),
-		keyLen: lk,
-		valLen: lv,
-		seq:    int32(len(b.entries)),
-	})
-	b.data = append(b.data, k...)
-	b.data = append(b.data, v...)
+	b.entries = append(b.entries, e)
+	b.data = append(append(b.data, k...), v...)
 }
 
 func (b *sortableBuffer) Size() int { return len(b.data) + len(b.entries)*24 }
