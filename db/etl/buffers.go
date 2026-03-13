@@ -208,8 +208,6 @@ func (b *sortableBuffer) Sort() {
 	// Calculate prefixes here - to keep .Put() method fast - because .Sort() often called in background
 	// Also: O(n) cost, which is negligible vs the O(n log n) sort.
 	prefixes := slices.Grow(b.prefixes[:0], len(b.entries))[:len(b.entries)] // sortableBuffer object is reusable (by sync.Pool)
-	b.prefixes = prefixes
-	clear(prefixes)
 	for i := range b.entries {
 		e := &b.entries[i]
 		if e.keyLen >= 8 {
