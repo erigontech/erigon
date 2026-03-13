@@ -1736,6 +1736,10 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs, chainDB kv.RoDB) error 
 		log.Warn("[integrity] This installation doesn't persist commitment history; ignoring commitment history checks")
 	}
 
+	return checkStateSnapshotFiles(dirs, persistReceiptCache, commitmentHistory)
+}
+
+func checkStateSnapshotFiles(dirs datadir.Dirs, persistReceiptCache, commitmentHistory bool) error {
 	var maxStepDomain uint64 // across all files in SnapDomain
 	var accFiles []snaptype.FileInfo
 
