@@ -44,6 +44,8 @@ const (
 
 	//BufIOSize - 128 pages | default is 1 page | increasing over `64 * 4096` doesn't show speedup on SSD/NVMe, but show speedup in cloud drives
 	BufIOSize = 128 * 4096
+
+	entryLocSize = 24 // sizeof(entryLoc): keyPrefix(8) + seq(4) + offset(4) + keyLen(4) + valLen(4)
 )
 
 var BufferOptimalSize = dbg.EnvDataSize("ETL_OPTIMAL", 256*datasize.MB) /*  var because we want to sometimes change it from tests or command-line flags */
@@ -146,7 +148,7 @@ func (b *sortableBuffer) Put(k, v []byte) {
 	b.data = append(append(b.data, k...), v...)
 }
 
-func (b *sortableBuffer) Size() int { return len(b.data) + len(b.entries)*24 }
+func (b *sortableBuffer) Size() int { return len(b.data) + len(b.entries)*entryLocSize }
 
 func (b *sortableBuffer) Len() int {
 	return len(b.entries)
@@ -203,7 +205,7 @@ func (b *sortableBuffer) Sort() {
 	// Also: O(n) cost, which is negligible vs the O(n log n) sort.
 	for i := range b.entries {
 		e := &b.entries[i]
-		off, kLen := int(e.offset), int(e.keyLen)
+		off, kLen := e.offset, e.keyLen
 		if kLen >= 8 {
 			e.keyPrefix = binary.BigEndian.Uint64(data[off:])
 		} else if kLen > 0 {
