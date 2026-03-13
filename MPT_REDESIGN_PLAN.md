@@ -522,4 +522,4 @@ Phase 5 (schema evolution):
 2. **Cross-validation**: `go test -run TestCrossValidate ./execution/commitment/mpt2/...` — computes roots with both old and new implementations; must be identical
 3. **Lint**: `make lint`
 4. **Build**: `make erigon`
-5. **Integration**: Run erigon with `--no-downloader --chain=dev` and verify it produces blocks with correct state roots using the new trie variant
+5. **Integration**: Run erigon with `--no-downloader --chain=hoodi` and verify it produces blocks with correct state roots using the new trie variant
