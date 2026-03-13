@@ -87,7 +87,30 @@ Copy pure functions from `execution/commitment/trie/encoding.go`:
 
 **File**: `mpt2/nodedata.go`
 
-Compact binary format for commitment domain values:
+### Domain key: `hexToCompact(nibblePath)`
+
+Every trie node is stored in the commitment domain keyed by the compact-encoded (Hex-Prefix) nibble path from the root to that node.
+
+Compact encoding recap (Yellow Paper Appendix C):
+- First byte high nibble: `0x0` = even non-term, `0x1` = odd non-term, `0x2` = even term, `0x3` = odd term
+- If odd, the first byte's low nibble holds the first data nibble
+- Remaining nibbles packed two per byte
+
+```
+Nibble path        Compact key bytes     Breakdown
+─────────────────  ────────────────────  ──────────────────────────────
+[]                 [00]                  flag=0x00 (even,0 nibs) | no data bytes → 1 byte total
+[0]                [10]                  flag=0x10 (odd,1 nib)   | nib 0 in low nibble → 1 byte total
+[0,0]              [00, 00]              flag=0x00 (even,2 nibs) | pack(0,0)=0x00 → 2 bytes total
+[a]                [1a]                  flag=0x10 (odd,1 nib)   | nib a in low nibble → 1 byte total
+[a,b]              [00, ab]              flag=0x00 (even,2 nibs) | pack(a,b)=0xab → 2 bytes total
+[a,b,c]            [1a, bc]              flag=0x1a (odd,3 nibs)  | pack(b,c)=0xbc → 2 bytes total
+[a,b,…,term]       [2a, b…]              flag=0x2a (odd+term)    | … → N bytes total
+```
+
+**No collisions**: compact encoding is injective. The key insight is that **the byte length differs**: the root `[]` produces 1 byte (`[0x00]`), while path `[0,0]` produces 2 bytes (`[0x00, 0x00]`). Even though both start with `0x00`, they differ in length. Paths `[]` and `[0]` both produce 1 byte, but differ in content (`0x00` vs `0x10`). In general, for N nibbles the compact encoding is `ceil((N+1)/2)` bytes, and the flag byte disambiguates even/odd counts at the same byte length.
+
+### Domain value: `NodeData` (compact binary)
 
 ```
 byte 0: type tag (0=branch, 1=extension, 2=account_leaf, 3=storage_leaf, 4=hash)
@@ -98,6 +121,8 @@ AccountLeaf:[keyLen:varint][key:bytes][20-byte address]
 StorageLeaf:[keyLen:varint][key:bytes][valueLen:varint][value:bytes]
 Hash:       [32-byte hash]
 ```
+
+The `txnum` is stored by the domain system alongside the value (not inside NodeData).
 
 Functions:
 - `EncodeNodeData(n Node) ([]byte, error)`
@@ -291,23 +316,45 @@ Algorithm:
 
 ---
 
-## Step 9: SeekCommitment Replacement
+## Step 9: SeekCommitment Replacement & Root Node Encoding
 
 **File**: `mpt2/state.go`
 
-Eliminate `KeyCommitmentState`. The root node lives at path `[]byte{}` (empty path) in the commitment domain. The domain system already stores `(value, step/txnum)`.
+Eliminate `KeyCommitmentState`. Instead, every trie node — including the root — is stored under its nibble path in the commitment domain using the same `path -> (NodeData, txnum)` schema.
+
+### Root Node Lookup Key
+
+The root node's lookup key is the **empty compact-encoded path**: `[]byte{0x00}`.
+
+This is what `hexToCompact([]byte{})` produces — a single byte `0x00` meaning "even length, no terminator, zero nibbles". It is a valid, unambiguous key that cannot collide with any non-root node (which always has at least one nibble in its path).
+
+All other trie nodes are keyed by `hexToCompact(nibblePath)`:
+- A branch at nibble `[0xa]` → compact key `[0x1a]` (odd flag + nibble a)
+- A branch at nibble `[0xa, 0xb]` → compact key `[0x00, 0xab]` (even, two nibbles packed)
+- A leaf at depth 64 → compact key is the 33-byte compact encoding of the full 64-nibble path with terminator
+
+### Root Node Value
+
+The root is encoded as regular `NodeData` — it could be a `BranchNode`, `ExtensionNode`, or even a leaf (single-account trie). No special wrapper. The `txnum` comes from the domain value envelope, not from the `NodeData` payload.
+
+For an **empty trie**, no root record exists. `SeekCommitment` returns `EmptyRoot` in that case.
+
+### SeekCommitment Flow
 
 ```go
 func (m *MPT2) SeekCommitment() (txnum uint64, rootHash common.Hash, err error)
 ```
 
-1. Read root node at empty path: `reader.ReadNode([]byte{})`
-2. Decode `NodeData` → extract root hash
-3. Return `(step * stepSize, rootHash)`
+1. Read root node at empty compact path: `reader.ReadNode([]byte{0x00})`
+2. If not found → return `(0, EmptyRoot, nil)` (fresh/empty state)
+3. If found → decode `NodeData`, compute its hash via `Hasher.Hash()`, extract `txnum` from the domain step
+4. Return `(txnum, rootHash, nil)`
 
 For `blockNum`: derive from txnum via `rawdbv3.TxNums` (same as the current fallback path).
 
-The root `NodeData` at `[]byte{}` contains the trie root hash (from the branch/extension/leaf at the root). Its associated `txnum` in the domain tells us the last committed position.
+### Why This Works
+
+The domain system already stores `(value, step)` for every key. The `step` encodes the transaction number at which the value was written. So `SeekCommitment` simply reads the root's step to know the last committed position — no separate `KeyCommitmentState` sentinel needed.
 
 ---
 
