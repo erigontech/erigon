@@ -107,11 +107,10 @@ type entryLoc struct {
 	//	If we used LittleEndian instead:
 	//	LittleEndian.Uint64(A) = 0x000000000000FF00 = 65280
 	//	LittleEndian.Uint64(B) = 0x0000000000000001 = 1
-	keyPrefix uint64
-	seq       int32 // insertion order — enables stable sort via unstable SortFunc
-	offset    int32
-	keyLen    int32
-	valLen    int32
+	seq    int32 // insertion order — enables stable sort via unstable SortFunc
+	offset int32
+	keyLen int32
+	valLen int32
 }
 
 func NewSortableBuffer(bufferOptimalSize datasize.ByteSize) *sortableBuffer {
@@ -203,20 +202,21 @@ func (b *sortableBuffer) Sort() {
 	// Compute keyPrefix before sorting.
 	// This keeps .Put() fast - because Sort often called in background
 	// Also: O(n) cost, which is negligible vs the O(n log n) sort.
+	prefixes := make([]uint64, len(b.entries))
 	for i := range b.entries {
 		e := &b.entries[i]
 		off, kLen := e.offset, e.keyLen
 		if kLen >= 8 {
-			e.keyPrefix = binary.BigEndian.Uint64(data[off:])
+			prefixes[e.seq] = binary.BigEndian.Uint64(data[off:])
 		} else if kLen > 0 {
-			var buf [8]byte
-			copy(buf[:], data[off:off+kLen])
-			e.keyPrefix = binary.BigEndian.Uint64(buf[:])
+			var buf [4]byte
+			copy(buf[:], data[off:])
+			prefixes[e.seq] = binary.BigEndian.Uint64(buf[:])
 		}
 	}
 	cmp := func(a, b entryLoc) int {
-		if a.keyPrefix != b.keyPrefix {
-			if a.keyPrefix < b.keyPrefix {
+		if prefixes[a.seq] != prefixes[b.seq] {
+			if prefixes[a.seq] < prefixes[b.seq] {
 				return -1
 			}
 			return 1
