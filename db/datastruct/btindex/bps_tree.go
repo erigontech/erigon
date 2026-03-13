@@ -360,7 +360,7 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 			cmpNew := b.compareKey(g, seekKey, m)
 			// keyCmpOld returns Compare(fileKey, seekKey), compareKey returns Compare(seekKey, fileKey)
 			if cmpOld != -cmpNew {
-				log.Root().Error("[DBG] Seek: comparison mismatch",
+				log.Root().Warn("[DBG] Seek: comparison mismatch",
 					"file", g.FileName(), "di", m, "l", l, "r", r,
 					"seekKey", fmt.Sprintf("%x", seekKey), "fileKey", fmt.Sprintf("%x", fk),
 					"keyCmpOld", cmpOld, "compareKey", cmpNew, "expected", -cmpOld)
@@ -390,14 +390,14 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 	err = cur.Reset(m, g)
 	if err != nil || bytes.Compare(cur.Key(), seekKey) < 0 {
 		if dbgMatchCmp {
-			log.Root().Debug("[DBG] Seek: returning nil",
+			log.Root().Warn("[DBG] Seek: returning nil",
 				"file", g.FileName(), "m", m, "seekKey", fmt.Sprintf("%x", seekKey),
 				"curKey", fmt.Sprintf("%x", cur.Key()), "err", err)
 		}
 		return nil, err
 	}
 	if dbgMatchCmp {
-		log.Root().Debug("[DBG] Seek: result",
+		log.Root().Warn("[DBG] Seek: result",
 			"file", g.FileName(), "m", m, "seekKey", fmt.Sprintf("%x", seekKey),
 			"foundKey", fmt.Sprintf("%x", cur.Key()))
 	}
@@ -456,7 +456,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 			cmpOld, fk := b.keyCmpOld(g, key, m)
 			cmpNew := b.compareKey(g, key, m)
 			if cmpOld != -cmpNew {
-				log.Root().Error("[DBG] Get: comparison mismatch",
+				log.Root().Warn("[DBG] Get: comparison mismatch",
 					"file", g.FileName(), "di", m, "l", l, "r", r,
 					"key", fmt.Sprintf("%x", key), "fileKey", fmt.Sprintf("%x", fk),
 					"keyCmpOld", cmpOld, "compareKey", cmpNew, "expected", -cmpOld)
@@ -489,7 +489,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 		cmpOld, fk := b.keyCmpOld(g, key, l)
 		cmpNew := b.compareKey(g, key, l)
 		if cmpOld != -cmpNew {
-			log.Root().Error("[DBG] Get post-loop: comparison mismatch",
+			log.Root().Warn("[DBG] Get post-loop: comparison mismatch",
 				"file", g.FileName(), "di", l,
 				"key", fmt.Sprintf("%x", key), "fileKey", fmt.Sprintf("%x", fk),
 				"keyCmpOld", cmpOld, "compareKey", cmpNew, "expected", -cmpOld)
