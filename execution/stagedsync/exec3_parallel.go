@@ -702,7 +702,8 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						fmt.Println(blockResult.BlockNum, "apply count", blockResult.ApplyCount)
 					}
 
-					blockExecutor.applyResults <- &txResult{
+					select {
+					case blockExecutor.applyResults <- &txResult{
 						blockNum:              blockResult.BlockNum,
 						txNum:                 blockResult.lastTxNum,
 						rules:                 result.Rules(),
@@ -711,6 +712,9 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						traceFroms:            result.TraceFroms,
 						traceTos:              result.TraceTos,
 						cumulativeBlobGasUsed: blockExecutor.blobGasUsed,
+					}:
+					case <-ctx.Done():
+						return ctx.Err()
 					}
 				}
 
@@ -718,7 +722,11 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					pe.blockExecMetrics.Duration.Add(time.Since(blockExecutor.execStarted))
 					pe.blockExecMetrics.BlockCount.Add(1)
 				}
-				blockExecutor.applyResults <- blockResult
+				select {
+				case blockExecutor.applyResults <- blockResult:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
 				pe.Lock()
 				delete(pe.blockExecutors, blockResult.BlockNum)
 				pe.Unlock()
@@ -1657,7 +1665,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 			}
 
-			be.applyResults <- &applyResult
+			select {
+			case be.applyResults <- &applyResult:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
 		}
 	}
 
