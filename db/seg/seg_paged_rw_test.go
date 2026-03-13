@@ -234,6 +234,31 @@ func TestPagedWriterCRC32Sequential(t *testing.T) {
 	}
 }
 
+func TestBytesUncompressedToKeysReadable(t *testing.T) {
+	// Regression test: bytesUncompressedTo must produce pages where keys are readable.
+	// Bug: bytesUncompressedTo pre-allocated keys+vals in neededSize,
+	// then clear() zeroed them, then append() placed data past the zeroed region.
+	require := require.New(t)
+
+	pageSize := 16
+	testKeys := []string{"account_key_001", "account_key_002", "account_key_003", "account_key_004"}
+	testVals := []string{"val1", "val2", "val3", "val4"}
+
+	mock := &multyBytesWriter{pageSize: pageSize}
+	pw := NewPagedWriter(t.Context(), mock, false)
+	for i := range testKeys {
+		require.NoError(pw.Add([]byte(testKeys[i]), []byte(testVals[i])))
+	}
+	page, ok := pw.bytesUncompressedTo(nil)
+	require.True(ok)
+
+	// Verify all keys are readable from the page
+	for i := range testKeys {
+		v, _ := GetFromPage([]byte(testKeys[i]), page, nil, false)
+		require.Equal(testVals[i], string(v), "key %s not found in page", testKeys[i])
+	}
+}
+
 func BenchmarkName(b *testing.B) {
 	buf := &multyBytesWriter{pageSize: 16}
 	w := NewPagedWriter(b.Context(), buf, false)
