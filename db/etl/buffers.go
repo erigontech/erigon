@@ -205,7 +205,7 @@ func (b *sortableBuffer) Sort() {
 		e := &b.entries[i]
 		off, kLen := int(e.offset), int(e.keyLen)
 		if kLen >= 8 {
-			e.keyPrefix = binary.BigEndian.Uint64(data[off : off+8])
+			e.keyPrefix = binary.BigEndian.Uint64(data[off:])
 		} else if kLen > 0 {
 			var buf [8]byte
 			copy(buf[:], data[off:off+kLen])
