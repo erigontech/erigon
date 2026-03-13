@@ -821,7 +821,7 @@ func BenchmarkSortableBufferPutSortLoad(b *testing.B) {
 	}
 }
 
-func BenchmarkSortableBufferPut(b *testing.B) {
+func BenchmarkSortableBufferPutOnly(b *testing.B) {
 	const keyLen = 32
 	const valLen = 64
 
