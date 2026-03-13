@@ -106,6 +106,19 @@ func (b *BpsTree) compareKey(g *seg.Reader, key []byte, di uint64) int {
 	return g.MatchCmp(key)
 }
 
+// keyCmpOld reproduces the old keyCmpFunc behavior: decode key via g.Next, then bytes.Compare(fileKey, key).
+// Returns Compare(fileKey, key) and the decoded fileKey.
+func (b *BpsTree) keyCmpOld(g *seg.Reader, key []byte, di uint64) (cmp int, fileKey []byte) {
+	if di >= b.offt.Count() {
+		panic(fmt.Errorf("keyCmpOld: di=%d >= count=%d, file: %s", di, b.offt.Count(), g.FileName()))
+	}
+	g.Reset(b.offt.Get(di))
+	fileKey, _ = g.Next(nil)
+	return bytes.Compare(fileKey, key), fileKey
+}
+
+var dbgMatchCmp = dbg.EnvBool("DBG_MATCH_CMP", false)
+
 type cursorGetter func(k, v []byte, di uint64, g *seg.Reader) *Cursor
 
 type BpsTreeIterator struct {
@@ -342,7 +355,21 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 			return cur, err
 		}
 
-		cmp = b.compareKey(g, seekKey, m)
+		if dbgMatchCmp {
+			cmpOld, fk := b.keyCmpOld(g, seekKey, m)
+			cmpNew := b.compareKey(g, seekKey, m)
+			// keyCmpOld returns Compare(fileKey, seekKey), compareKey returns Compare(seekKey, fileKey)
+			if cmpOld != -cmpNew {
+				log.Root().Error("[DBG] Seek: comparison mismatch",
+					"file", g.FileName(), "di", m, "l", l, "r", r,
+					"seekKey", fmt.Sprintf("%x", seekKey), "fileKey", fmt.Sprintf("%x", fk),
+					"keyCmpOld", cmpOld, "compareKey", cmpNew, "expected", -cmpOld)
+				panic("Seek: keyCmpOld and compareKey disagree")
+			}
+			cmp = cmpNew
+		} else {
+			cmp = b.compareKey(g, seekKey, m)
+		}
 		if b.trace {
 			fmt.Printf("[%d %d] cmp: %d\n", l, r, cmp)
 		}
@@ -362,7 +389,17 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 
 	err = cur.Reset(m, g)
 	if err != nil || bytes.Compare(cur.Key(), seekKey) < 0 {
+		if dbgMatchCmp {
+			log.Root().Debug("[DBG] Seek: returning nil",
+				"file", g.FileName(), "m", m, "seekKey", fmt.Sprintf("%x", seekKey),
+				"curKey", fmt.Sprintf("%x", cur.Key()), "err", err)
+		}
 		return nil, err
+	}
+	if dbgMatchCmp {
+		log.Root().Debug("[DBG] Seek: result",
+			"file", g.FileName(), "m", m, "seekKey", fmt.Sprintf("%x", seekKey),
+			"foundKey", fmt.Sprintf("%x", cur.Key()))
 	}
 	return cur, nil
 }
@@ -415,7 +452,20 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 			return v, true, offset, nil
 		}
 
-		cmp = b.compareKey(g, key, m)
+		if dbgMatchCmp {
+			cmpOld, fk := b.keyCmpOld(g, key, m)
+			cmpNew := b.compareKey(g, key, m)
+			if cmpOld != -cmpNew {
+				log.Root().Error("[DBG] Get: comparison mismatch",
+					"file", g.FileName(), "di", m, "l", l, "r", r,
+					"key", fmt.Sprintf("%x", key), "fileKey", fmt.Sprintf("%x", fk),
+					"keyCmpOld", cmpOld, "compareKey", cmpNew, "expected", -cmpOld)
+				panic("Get: keyCmpOld and compareKey disagree")
+			}
+			cmp = cmpNew
+		} else {
+			cmp = b.compareKey(g, key, m)
+		}
 		if cmp == 0 {
 			if !g.HasNext() {
 				return nil, false, 0, fmt.Errorf("pair %d/%d key not found in %s", m, b.offt.Count(), g.FileName())
@@ -435,7 +485,20 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 	if l >= b.offt.Count() {
 		return nil, false, 0, nil
 	}
-	cmp = b.compareKey(g, key, l)
+	if dbgMatchCmp {
+		cmpOld, fk := b.keyCmpOld(g, key, l)
+		cmpNew := b.compareKey(g, key, l)
+		if cmpOld != -cmpNew {
+			log.Root().Error("[DBG] Get post-loop: comparison mismatch",
+				"file", g.FileName(), "di", l,
+				"key", fmt.Sprintf("%x", key), "fileKey", fmt.Sprintf("%x", fk),
+				"keyCmpOld", cmpOld, "compareKey", cmpNew, "expected", -cmpOld)
+			panic("Get post-loop: keyCmpOld and compareKey disagree")
+		}
+		cmp = cmpNew
+	} else {
+		cmp = b.compareKey(g, key, l)
+	}
 	if cmp != 0 {
 		return nil, false, 0, nil
 	}
