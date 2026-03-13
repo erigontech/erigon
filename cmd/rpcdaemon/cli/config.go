@@ -629,11 +629,11 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		if !txPoolService.EnsureVersionCompatibility() {
 			rootCancel()
 		}
-		cc, err := readChainConfigFromDB(context.Background(), remoteKv)
-		if err != nil {
-			logger.Error("Failed to read remote chain config", "err", err)
-			rootCancel()
-		}
+		//cc, err := readChainConfigFromDB(context.Background(), remoteKv)
+		//if err != nil {
+		//	logger.Error("Failed to read remote chain config", "err", err)
+		//	rootCancel()
+		//}
 		//if cc.Bor != nil && remoteBridgeReader != nil && !remoteBridgeReader.EnsureVersionCompatibility() {
 		//	rootCancel()
 		//}
