@@ -324,6 +324,11 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 	n, l, r := b.bs(seekKey) // l===r when key is found
 	if l == r {
 		cur.Reset(n.di, g)
+		if dbgMatchCmp {
+			log.Root().Warn("[DBG] Seek: bs exact match",
+				"file", g.FileName(), "di", n.di, "seekKey", fmt.Sprintf("%x", seekKey),
+				"foundKey", fmt.Sprintf("%x", cur.Key()))
+		}
 		return cur, nil
 	}
 
@@ -352,6 +357,11 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 			}
 
 			cur.value, _ = g.Next(cur.value[:0])
+			if dbgMatchCmp {
+				log.Root().Warn("[DBG] Seek: linear scan result",
+					"file", g.FileName(), "di", cur.d, "l", l, "seekKey", fmt.Sprintf("%x", seekKey),
+					"foundKey", fmt.Sprintf("%x", cur.key))
+			}
 			return cur, err
 		}
 
