@@ -25,13 +25,11 @@ import (
 	"sort"
 	"strconv"
 	"sync"
-	"time"
 
 	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/common/log/v3"
 )
 
 const (
@@ -185,29 +183,14 @@ func (b *sortableBuffer) Reset() {
 }
 func (b *sortableBuffer) SizeLimit() int { return b.optimalSize }
 func (b *sortableBuffer) Sort() {
-	t := time.Now()
 	data := b.data
 	cmp := func(a, b entryLoc) int {
 		return bytes.Compare(data[a.offset:a.offset+a.keyLen], data[b.offset:b.offset+b.keyLen])
 	}
 	if slices.IsSortedFunc(b.entries, cmp) {
-		if took := time.Since(t); took >= 10*time.Millisecond {
-			var kLen, vLen int
-			if len(b.entries) > 0 {
-				kLen, vLen = b.entries[0].keyLen, b.entries[0].valLen
-			}
-			log.Warn("[dbg] etl.Sort", "keys", len(b.entries), "keyLen", kLen, "valLen", vLen, "sorted", true, "took", took, "createdAt", b.createdAt)
-		}
 		return
 	}
 	slices.SortStableFunc(b.entries, cmp) // Stable: this buffer type can have duplicate keys and must preserve their insertion order
-	if took := time.Since(t); took >= 10*time.Millisecond {
-		var kLen, vLen int
-		if len(b.entries) > 0 {
-			kLen, vLen = b.entries[0].keyLen, b.entries[0].valLen
-		}
-		log.Warn("[dbg] etl.Sort", "keys", len(b.entries), "keyLen", kLen, "valLen", vLen, "sorted", false, "took", took, "createdAt", b.createdAt)
-	}
 }
 
 func (b *sortableBuffer) CheckFlushSize() bool {
