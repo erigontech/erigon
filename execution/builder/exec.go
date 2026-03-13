@@ -99,7 +99,10 @@ func StageBuilderExecCfg(
 func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx, executionAt uint64, cfg BuilderExecCfg, execCfg stagedsync.ExecuteBlockCfg, logger log.Logger) (err error) {
 	const logPrefix = "BuilderExec"
 
-	cfg.vmConfig.NoReceipts = false
+	// Copy vmConfig to avoid mutating the shared struct across concurrent Build calls.
+	vmConfig := *cfg.vmConfig
+	vmConfig.NoReceipts = false
+	cfg.vmConfig = &vmConfig
 	chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 	current := cfg.builderState.BuiltBlock
 

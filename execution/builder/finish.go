@@ -129,7 +129,8 @@ func finishBlock(tx kv.TemporalTx, cfg BuilderFinishCfg, logger log.Logger) erro
 	}
 	chain := stagedsync.ChainReader{Cfg: cfg.chainConfig, Db: tx, BlockReader: cfg.blockReader, Logger: logger}
 	if err := cfg.engine.Seal(chain, blockWithReceipts, cfg.builderState.BuilderResultCh, cfg.sealCancel); err != nil {
-		logger.Warn("Block sealing failed", "err", err)
+		// Return the error so Build sees it and doesn't block reading BuilderResultCh.
+		return fmt.Errorf("block sealing failed: %w", err)
 	}
 
 	return nil
