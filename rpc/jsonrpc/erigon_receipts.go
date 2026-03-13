@@ -164,10 +164,10 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 	}
 
 	if api.getLogsMaxResults != 0 && logOptions.LogCount > uint64(api.getLogsMaxResults) {
-		return nil, &rpc.CustomError{Message: fmt.Sprintf("%s: %d", errExceedLogResults, api.getLogsMaxResults), Code: rpc.ErrCodeInvalidParams}
+		return nil, &rpc.CustomError{Message: fmt.Sprintf("%s: requested %d, maximum %d", errRequestedLogCountExceedsLimit, logOptions.LogCount, api.getLogsMaxResults), Code: rpc.ErrCodeInvalidParams}
 	}
 	if api.blockRangeLimit != 0 && logOptions.BlockCount > uint64(api.blockRangeLimit) {
-		return nil, &rpc.CustomError{Message: fmt.Sprintf("%s: %d", errExceedBlockRange, api.blockRangeLimit), Code: rpc.ErrCodeInvalidParams}
+		return nil, &rpc.CustomError{Message: fmt.Sprintf("%s: requested %d, maximum %d", errRequestedBlockCountExceedsLimit, logOptions.BlockCount, api.blockRangeLimit), Code: rpc.ErrCodeInvalidParams}
 	}
 
 	erigonLogs := types.ErigonLogs{}

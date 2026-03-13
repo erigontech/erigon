@@ -285,7 +285,7 @@ func TestGetLatestLogs_LogCountExceedsMaxResults(t *testing.T) {
 		LogCount: 10,
 	})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), errExceedLogResults)
+	assert.Contains(t, err.Error(), errRequestedLogCountExceedsLimit)
 }
 
 // TestGetLatestLogs_BlockCountExceedsRangeLimit verifies that erigon_getLatestLogs
@@ -297,7 +297,7 @@ func TestGetLatestLogs_BlockCountExceedsRangeLimit(t *testing.T) {
 		BlockCount: 10,
 	})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), errExceedBlockRange)
+	assert.Contains(t, err.Error(), errRequestedBlockCountExceedsLimit)
 }
 
 // TestGetLatestLogs_ExplicitRangeExceedsLimit verifies that erigon_getLatestLogs

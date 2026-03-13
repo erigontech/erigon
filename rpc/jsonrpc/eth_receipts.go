@@ -42,13 +42,15 @@ import (
 )
 
 var (
-	errInvalidBlockRange    = "invalid block range params"
-	errExceedBlockRange     = "exceed maximum block range"
-	errBlockRangeIntoFuture = "block range extends beyond current head block"
-	errBlockHashWithRange   = "can't specify fromBlock/toBlock with blockHash"
-	errExceedMaxTopics      = "exceed max topics"
-	errExceedLogQueryLimit  = "exceed max addresses or topics per search position"
-	errExceedLogResults     = "exceed maximum log results"
+	errInvalidBlockRange               = "invalid block range params"
+	errExceedBlockRange                = "query block range exceeds server limit, narrow your filter"
+	errBlockRangeIntoFuture            = "block range extends beyond current head block"
+	errBlockHashWithRange              = "can't specify fromBlock/toBlock with blockHash"
+	errExceedMaxTopics                 = "exceed max topics"
+	errExceedLogQueryLimit             = "exceed max addresses or topics per search position"
+	errExceedLogResults                = "query returns too many logs, narrow your filter"
+	errRequestedBlockCountExceedsLimit = "requested blockCount exceeds server limit"
+	errRequestedLogCountExceedsLimit   = "requested logCount exceeds server limit"
 )
 
 const (

@@ -721,6 +721,8 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		"grpc", cfg.GRPCServerEnabled,
 		"http", cfg.HttpServerEnabled,
 		"ws", cfg.WebsocketEnabled,
+		"rpc.blockrange.limit", cfg.BlockRangeLimit,
+		"rpc.logs.maxresults", cfg.GetLogsMaxResults,
 	}
 
 	if cfg.SocketServerEnabled {
