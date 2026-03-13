@@ -84,7 +84,14 @@ GOBUILD = $(GO_BUILD_ENV) $(GO) build $(GO_RELEASE_FLAGS) $(GO_FLAGS) -tags $(BU
 DLV_GO_FLAGS := -gcflags='all="-N -l" -trimpath=false'
 GO_BUILD_DEBUG = $(GO_BUILD_ENV) CGO_CFLAGS="$(CGO_CFLAGS) -DMDBX_DEBUG=1" $(GO) build $(DLV_GO_FLAGS) $(GO_FLAGS) -tags $(BUILD_TAGS),debug
 GODEBUG ?= cgocheck=0
-GOTEST = $(GO_BUILD_ENV) GODEBUG=$(GODEBUG) GOTRACEBACK=1 $(GO) test $(GO_FLAGS) ./...
+
+# Defaults suitable for local use on a reasonable machine; adjust as conditions
+# change. CI can override via GO_FLAGS.
+default_test_timeout      := 20m
+default_test_race_timeout := 60m
+
+GOTEST_PACKAGES = ./...
+GOTEST = $(GO_BUILD_ENV) GODEBUG=$(GODEBUG) GOTRACEBACK=1 $(GO) test $(GO_FLAGS) $(GOTEST_PACKAGES)
 
 GOINSTALL = go install -trimpath
 
@@ -215,6 +222,7 @@ test-filtered:
 test-short: override GO_FLAGS += -short -failfast
 test-short: test-filtered
 
+test-all: override GO_FLAGS := -timeout $(default_test_timeout) $(GO_FLAGS)
 test-all: test-filtered
 
 ## test-bench:                         check the benchmarks compile and run
@@ -222,7 +230,7 @@ test-bench: override GO_FLAGS += -run=^$$ -bench=. -benchtime=1x
 test-bench:
 	$(GOTEST)
 
-test-all-race: override GO_FLAGS += --timeout 60m -race
+test-all-race: override GO_FLAGS := -timeout $(default_test_race_timeout) $(GO_FLAGS) -race
 test-all-race: test-filtered
 
 ## check-generated:                     verify go.mod/go.sum are tidy
@@ -248,10 +256,10 @@ check-large-files:
 	fi
 
 ## test-group TEST_GROUP=<name>			run a named CI test group
-test-group:
-	(set -o pipefail && $(GO_BUILD_ENV) GODEBUG=$(GODEBUG) GOTRACEBACK=1 go test $(GO_FLAGS) $$(go list ./... | ./tools/test-groups packages $(TEST_GROUP)) 2>&1 | ./tools/filter-test-output | tee -a run.log)
+test-group: override GOTEST_PACKAGES = $(shell go list ./... | ./tools/test-groups packages $(TEST_GROUP))
+test-group: test-filtered
 
-test-sonar-coverage: override GO_FLAGS += --timeout 60m -coverprofile=coverage-test-all.out
+test-sonar-coverage: override GO_FLAGS += -timeout $(default_test_race_timeout) -coverprofile=coverage-test-all.out
 test-sonar-coverage: test-filtered
 
 ## test-hive						run the hive tests locally off nektos/act workflows simulator
