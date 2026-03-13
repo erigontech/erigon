@@ -634,12 +634,12 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			logger.Error("Failed to read remote chain config", "err", err)
 			rootCancel()
 		}
-		if cc.Bor != nil && remoteBridgeReader != nil && !remoteBridgeReader.EnsureVersionCompatibility() {
-			rootCancel()
-		}
-		if cc.Bor != nil && remoteHeimdallReader != nil && !remoteHeimdallReader.EnsureVersionCompatibility() {
-			rootCancel()
-		}
+		//if cc.Bor != nil && remoteBridgeReader != nil && !remoteBridgeReader.EnsureVersionCompatibility() {
+		//	rootCancel()
+		//}
+		//if cc.Bor != nil && remoteHeimdallReader != nil && !remoteHeimdallReader.EnsureVersionCompatibility() {
+		//	rootCancel()
+		//}
 		if remoteCE != nil {
 			if err := remoteCE.init(db, blockReader, remoteKvClient, logger); err != nil {
 				logger.Error("Failed to initialize remote rules engine", "err", err)
