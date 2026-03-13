@@ -46,15 +46,36 @@ type MemoryMutation struct {
 	statelessCursors map[string]kv.RwCursor
 }
 
-// NewMemoryBatch - starts in-mem batch
+// NewMemoryBatch creates a pure Go in-memory batch with no OS-thread affinity.
+// This is safe to hold across goroutine migrations (e.g. between Engine API calls).
 //
 // Common pattern:
 //
-// batch := NewMemoryBatch(db, tmpDir)
-// defer batch.Close()
-// ... some calculations on `batch`
-// batch.Commit()
-func NewMemoryBatch(tx kv.TemporalTx, tmpDir string, logger log.Logger) (mm *MemoryMutation, err error) {
+//	batch := NewMemoryBatch(db, tmpDir)
+//	defer batch.Close()
+//	... some calculations on `batch`
+//	batch.Commit()
+func NewMemoryBatch(tx kv.TemporalTx, tmpDir string, logger log.Logger) (*MemoryMutation, error) {
+	mem := newMemStore()
+	memDB := &memStoreDB{store: mem}
+	if err := initSequences(tx, mem); err != nil {
+		return nil, fmt.Errorf("NewMemoryBatch: init sequences: %w", err)
+	}
+
+	return &MemoryMutation{
+		db:             tx,
+		memDb:          memDB,
+		memTx:          mem,
+		deletedEntries: make(map[string]map[string]struct{}),
+		deletedDups:    map[string]map[string]map[string]struct{}{},
+		clearedTables:  make(map[string]struct{}),
+	}, nil
+}
+
+// NewMemoryBatchMDBX creates an MDBX-backed in-memory batch. The MDBX write
+// transaction pins the goroutine to an OS thread via runtime.LockOSThread(),
+// so this variant must not be held across goroutine migrations.
+func NewMemoryBatchMDBX(tx kv.TemporalTx, tmpDir string, logger log.Logger) (mm *MemoryMutation, err error) {
 	tmpDB := mdbx.New(dbcfg.TemporaryDB, logger).InMem(nil, tmpDir).GrowthStep(64 * datasize.MB).MapSize(512 * datasize.GB).MustOpen()
 	defer func() {
 		if err != nil {
@@ -63,11 +84,11 @@ func NewMemoryBatch(tx kv.TemporalTx, tmpDir string, logger log.Logger) (mm *Mem
 	}()
 	memTx, err := tmpDB.BeginRw(context.Background()) // nolint:gocritic
 	if err != nil {
-		return nil, fmt.Errorf("NewMemoryBatch: begin tx: %w", err)
+		return nil, fmt.Errorf("NewMemoryBatchMDBX: begin tx: %w", err)
 	}
 	if err = initSequences(tx, memTx); err != nil {
 		memTx.Rollback()
-		return nil, fmt.Errorf("NewMemoryBatch: init sequences: %w", err)
+		return nil, fmt.Errorf("NewMemoryBatchMDBX: init sequences: %w", err)
 	}
 
 	return &MemoryMutation{
