@@ -135,7 +135,7 @@ func (b *blockCollector) Flush(ctx context.Context) error {
 		if len(blocksBatch) >= batchSize {
 			b.logger.Info("[Caplin] Inserting blocks", "from", blocksBatch[0].NumberU64(), "to", blocksBatch[len(blocksBatch)-1].NumberU64())
 			if err := b.engine.InsertBlocks(ctx, blocksBatch, true); err != nil {
-				b.logger.Warn("failed to insert blocks", "err", err)
+				return fmt.Errorf("failed to insert blocks: %w", err)
 			}
 			inserted += uint64(len(blocksBatch))
 			b.logger.Info("[Caplin] Inserted blocks", "progress", blocksBatch[len(blocksBatch)-1].NumberU64())
@@ -162,7 +162,7 @@ func (b *blockCollector) Flush(ctx context.Context) error {
 	}
 	if len(blocksBatch) > 0 {
 		if err := b.engine.InsertBlocks(ctx, blocksBatch, true); err != nil {
-			b.logger.Warn("failed to insert blocks", "err", err)
+			return fmt.Errorf("failed to insert blocks: %w", err)
 		}
 		b.logger.Info("[Caplin] Inserted blocks", "progress", blocksBatch[len(blocksBatch)-1].NumberU64())
 	}
