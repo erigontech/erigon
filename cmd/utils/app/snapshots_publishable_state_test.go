@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/stretchr/testify/require"
 )
@@ -30,7 +31,7 @@ func createMockFile(t *testing.T, dir string, name string) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("DUMMY-CONTENT"), 0644))
 }
 
-func setupHoodiStateMockDatadir(t *testing.T) datadir.Dirs {
+func setupWorkingStateMockDatadir(t *testing.T) datadir.Dirs {
 	t.Helper()
 	dirs := datadir.New(t.TempDir())
 
@@ -488,8 +489,276 @@ func setupHoodiStateMockDatadir(t *testing.T) datadir.Dirs {
 	return dirs
 }
 
-func Test_CheckStateSnapshotFiles_HoodiSuccess(t *testing.T) {
-	dirs := setupHoodiStateMockDatadir(t)
+func removeMockFile(t *testing.T, dir string, name string) {
+	t.Helper()
+	require.NoError(t, dir2.RemoveFile(filepath.Join(dir, name)))
+}
+
+func Test_CheckStateSnapshotFiles_SuccessCase(t *testing.T) {
+	dirs := setupWorkingStateMockDatadir(t)
 	err := checkStateSnapshotFiles(dirs, false, false)
 	require.NoError(t, err)
+}
+
+func Test_CheckStateSnapshotFiles_WithPersistReceiptCache(t *testing.T) {
+	dirs := setupWorkingStateMockDatadir(t)
+	// Add rcache domain files (.kv + .kvi for each range)
+	createMockFile(t, dirs.SnapDomain, "v1.1-rcache.0-128.kv")
+	createMockFile(t, dirs.SnapDomain, "v1.1-rcache.0-128.kv.torrent")
+	createMockFile(t, dirs.SnapDomain, "v1.1-rcache.0-128.kvi")
+	createMockFile(t, dirs.SnapDomain, "v1.1-rcache.0-128.kvi.torrent")
+	createMockFile(t, dirs.SnapDomain, "v1.1-rcache.128-192.kv")
+	createMockFile(t, dirs.SnapDomain, "v1.1-rcache.128-192.kv.torrent")
+	createMockFile(t, dirs.SnapDomain, "v1.1-rcache.128-192.kvi")
+	createMockFile(t, dirs.SnapDomain, "v1.1-rcache.128-192.kvi.torrent")
+	createMockFile(t, dirs.SnapDomain, "v1.1-rcache.192-200.kv")
+	createMockFile(t, dirs.SnapDomain, "v1.1-rcache.192-200.kv.torrent")
+	createMockFile(t, dirs.SnapDomain, "v1.1-rcache.192-200.kvi")
+	createMockFile(t, dirs.SnapDomain, "v1.1-rcache.192-200.kvi.torrent")
+	createMockFile(t, dirs.SnapDomain, "v1.1-rcache.200-202.kv")
+	createMockFile(t, dirs.SnapDomain, "v1.1-rcache.200-202.kv.torrent")
+	createMockFile(t, dirs.SnapDomain, "v1.1-rcache.200-202.kvi")
+	createMockFile(t, dirs.SnapDomain, "v1.1-rcache.200-202.kvi.torrent")
+	// Add rcache idx files (.ef)
+	createMockFile(t, dirs.SnapIdx, "v2.0-rcache.0-128.ef")
+	createMockFile(t, dirs.SnapIdx, "v2.0-rcache.0-128.ef.torrent")
+	createMockFile(t, dirs.SnapIdx, "v2.0-rcache.128-192.ef")
+	createMockFile(t, dirs.SnapIdx, "v2.0-rcache.128-192.ef.torrent")
+	createMockFile(t, dirs.SnapIdx, "v2.0-rcache.192-200.ef")
+	createMockFile(t, dirs.SnapIdx, "v2.0-rcache.192-200.ef.torrent")
+	createMockFile(t, dirs.SnapIdx, "v2.0-rcache.200-202.ef")
+	createMockFile(t, dirs.SnapIdx, "v2.0-rcache.200-202.ef.torrent")
+	// Add rcache accessor files (.efi + .vi)
+	createMockFile(t, dirs.SnapAccessors, "v1.1-rcache.0-128.efi")
+	createMockFile(t, dirs.SnapAccessors, "v1.1-rcache.0-128.efi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v1.1-rcache.0-128.vi")
+	createMockFile(t, dirs.SnapAccessors, "v1.1-rcache.0-128.vi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v1.1-rcache.128-192.efi")
+	createMockFile(t, dirs.SnapAccessors, "v1.1-rcache.128-192.efi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v1.1-rcache.128-192.vi")
+	createMockFile(t, dirs.SnapAccessors, "v1.1-rcache.128-192.vi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v1.1-rcache.192-200.efi")
+	createMockFile(t, dirs.SnapAccessors, "v1.1-rcache.192-200.efi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v1.1-rcache.192-200.vi")
+	createMockFile(t, dirs.SnapAccessors, "v1.1-rcache.192-200.vi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v1.1-rcache.200-202.efi")
+	createMockFile(t, dirs.SnapAccessors, "v1.1-rcache.200-202.efi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v1.1-rcache.200-202.vi")
+	createMockFile(t, dirs.SnapAccessors, "v1.1-rcache.200-202.vi.torrent")
+	// Add rcache history files (.v)
+	createMockFile(t, dirs.SnapHistory, "v1.1-rcache.0-128.v")
+	createMockFile(t, dirs.SnapHistory, "v1.1-rcache.0-128.v.torrent")
+	createMockFile(t, dirs.SnapHistory, "v1.1-rcache.128-192.v")
+	createMockFile(t, dirs.SnapHistory, "v1.1-rcache.128-192.v.torrent")
+	createMockFile(t, dirs.SnapHistory, "v1.1-rcache.192-200.v")
+	createMockFile(t, dirs.SnapHistory, "v1.1-rcache.192-200.v.torrent")
+	createMockFile(t, dirs.SnapHistory, "v1.1-rcache.200-202.v")
+	createMockFile(t, dirs.SnapHistory, "v1.1-rcache.200-202.v.torrent")
+	err := checkStateSnapshotFiles(dirs, true, false)
+	require.NoError(t, err)
+}
+
+func Test_CheckStateSnapshotFiles_WithCommitmentHistory(t *testing.T) {
+	dirs := setupWorkingStateMockDatadir(t)
+	// Add commitment idx files (.ef)
+	createMockFile(t, dirs.SnapIdx, "v2.0-commitment.0-128.ef")
+	createMockFile(t, dirs.SnapIdx, "v2.0-commitment.0-128.ef.torrent")
+	createMockFile(t, dirs.SnapIdx, "v2.0-commitment.128-192.ef")
+	createMockFile(t, dirs.SnapIdx, "v2.0-commitment.128-192.ef.torrent")
+	createMockFile(t, dirs.SnapIdx, "v2.0-commitment.192-200.ef")
+	createMockFile(t, dirs.SnapIdx, "v2.0-commitment.192-200.ef.torrent")
+	createMockFile(t, dirs.SnapIdx, "v2.0-commitment.200-202.ef")
+	createMockFile(t, dirs.SnapIdx, "v2.0-commitment.200-202.ef.torrent")
+	// Add commitment accessor files (.efi + .vi)
+	createMockFile(t, dirs.SnapAccessors, "v1.1-commitment.0-128.efi")
+	createMockFile(t, dirs.SnapAccessors, "v1.1-commitment.0-128.efi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v1.1-commitment.0-128.vi")
+	createMockFile(t, dirs.SnapAccessors, "v1.1-commitment.0-128.vi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v1.1-commitment.128-192.efi")
+	createMockFile(t, dirs.SnapAccessors, "v1.1-commitment.128-192.efi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v1.1-commitment.128-192.vi")
+	createMockFile(t, dirs.SnapAccessors, "v1.1-commitment.128-192.vi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v1.1-commitment.192-200.efi")
+	createMockFile(t, dirs.SnapAccessors, "v1.1-commitment.192-200.efi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v1.1-commitment.192-200.vi")
+	createMockFile(t, dirs.SnapAccessors, "v1.1-commitment.192-200.vi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v1.1-commitment.200-202.efi")
+	createMockFile(t, dirs.SnapAccessors, "v1.1-commitment.200-202.efi.torrent")
+	createMockFile(t, dirs.SnapAccessors, "v1.1-commitment.200-202.vi")
+	createMockFile(t, dirs.SnapAccessors, "v1.1-commitment.200-202.vi.torrent")
+	// Add commitment history files (.v)
+	createMockFile(t, dirs.SnapHistory, "v1.1-commitment.0-128.v")
+	createMockFile(t, dirs.SnapHistory, "v1.1-commitment.0-128.v.torrent")
+	createMockFile(t, dirs.SnapHistory, "v1.1-commitment.128-192.v")
+	createMockFile(t, dirs.SnapHistory, "v1.1-commitment.128-192.v.torrent")
+	createMockFile(t, dirs.SnapHistory, "v1.1-commitment.192-200.v")
+	createMockFile(t, dirs.SnapHistory, "v1.1-commitment.192-200.v.torrent")
+	createMockFile(t, dirs.SnapHistory, "v1.1-commitment.200-202.v")
+	createMockFile(t, dirs.SnapHistory, "v1.1-commitment.200-202.v.torrent")
+	err := checkStateSnapshotFiles(dirs, false, true)
+	require.NoError(t, err)
+}
+
+// --- Domain checks ---
+
+func Test_CheckStateSnapshotFiles_DomainUnparseableFile(t *testing.T) {
+	dirs := setupWorkingStateMockDatadir(t)
+	createMockFile(t, dirs.SnapDomain, "garbage.txt")
+	err := checkStateSnapshotFiles(dirs, false, false)
+	require.ErrorContains(t, err, "failed to parse filename")
+}
+
+func Test_CheckStateSnapshotFiles_DomainNoAccountKV(t *testing.T) {
+	dirs := setupWorkingStateMockDatadir(t)
+	removeMockFile(t, dirs.SnapDomain, "v1.1-accounts.0-128.kv")
+	removeMockFile(t, dirs.SnapDomain, "v1.1-accounts.128-192.kv")
+	removeMockFile(t, dirs.SnapDomain, "v1.1-accounts.192-200.kv")
+	removeMockFile(t, dirs.SnapDomain, "v1.1-accounts.200-202.kv")
+	err := checkStateSnapshotFiles(dirs, false, false)
+	require.ErrorContains(t, err, "no account snapshot files (.kv) found")
+}
+
+func Test_CheckStateSnapshotFiles_DomainGapAtStart(t *testing.T) {
+	dirs := setupWorkingStateMockDatadir(t)
+	removeMockFile(t, dirs.SnapDomain, "v1.1-accounts.0-128.kv")
+	err := checkStateSnapshotFiles(dirs, false, false)
+	require.ErrorContains(t, err, "gap at start")
+}
+
+func Test_CheckStateSnapshotFiles_DomainOverlapSameFrom(t *testing.T) {
+	dirs := setupWorkingStateMockDatadir(t)
+	createMockFile(t, dirs.SnapDomain, "v1.1-accounts.0-64.kv")
+	err := checkStateSnapshotFiles(dirs, false, false)
+	require.ErrorContains(t, err, "possibly overlapped")
+}
+
+func Test_CheckStateSnapshotFiles_DomainOverlap(t *testing.T) {
+	dirs := setupWorkingStateMockDatadir(t)
+	createMockFile(t, dirs.SnapDomain, "v1.1-accounts.64-200.kv")
+	err := checkStateSnapshotFiles(dirs, false, false)
+	require.ErrorContains(t, err, "overlap detected")
+}
+
+func Test_CheckStateSnapshotFiles_DomainGap(t *testing.T) {
+	dirs := setupWorkingStateMockDatadir(t)
+	removeMockFile(t, dirs.SnapDomain, "v1.1-accounts.128-192.kv")
+	err := checkStateSnapshotFiles(dirs, false, false)
+	require.ErrorContains(t, err, "gap detected")
+}
+
+func Test_CheckStateSnapshotFiles_MissingDomainKV(t *testing.T) {
+	dirs := setupWorkingStateMockDatadir(t)
+	removeMockFile(t, dirs.SnapDomain, "v1.1-storage.128-192.kv")
+	err := checkStateSnapshotFiles(dirs, false, false)
+	require.ErrorContains(t, err, "missing file")
+}
+
+func Test_CheckStateSnapshotFiles_MissingDomainBT(t *testing.T) {
+	dirs := setupWorkingStateMockDatadir(t)
+	removeMockFile(t, dirs.SnapDomain, "v1.1-accounts.128-192.bt")
+	err := checkStateSnapshotFiles(dirs, false, false)
+	require.ErrorContains(t, err, "missing file")
+}
+
+func Test_CheckStateSnapshotFiles_MissingDomainKVEI(t *testing.T) {
+	dirs := setupWorkingStateMockDatadir(t)
+	removeMockFile(t, dirs.SnapDomain, "v1.1-accounts.128-192.kvei")
+	err := checkStateSnapshotFiles(dirs, false, false)
+	require.ErrorContains(t, err, "missing file")
+}
+
+func Test_CheckStateSnapshotFiles_MissingDomainKVI(t *testing.T) {
+	dirs := setupWorkingStateMockDatadir(t)
+	removeMockFile(t, dirs.SnapDomain, "v1.1-commitment.128-192.kvi")
+	err := checkStateSnapshotFiles(dirs, false, false)
+	require.ErrorContains(t, err, "missing file")
+}
+
+func Test_CheckStateSnapshotFiles_DomainMaxStepMismatch(t *testing.T) {
+	dirs := setupWorkingStateMockDatadir(t)
+	createMockFile(t, dirs.SnapDomain, "v1.1-storage.202-210.kv")
+	err := checkStateSnapshotFiles(dirs, false, false)
+	require.ErrorContains(t, err, "accounts domain max step")
+}
+
+// --- Idx checks ---
+
+func Test_CheckStateSnapshotFiles_IdxUnparseableFile(t *testing.T) {
+	dirs := setupWorkingStateMockDatadir(t)
+	createMockFile(t, dirs.SnapIdx, "garbage.txt")
+	err := checkStateSnapshotFiles(dirs, false, false)
+	require.ErrorContains(t, err, "failed to parse filename")
+}
+
+func Test_CheckStateSnapshotFiles_IdxNoAccountEF(t *testing.T) {
+	dirs := setupWorkingStateMockDatadir(t)
+	removeMockFile(t, dirs.SnapIdx, "v2.0-accounts.0-128.ef")
+	removeMockFile(t, dirs.SnapIdx, "v2.0-accounts.128-192.ef")
+	removeMockFile(t, dirs.SnapIdx, "v2.0-accounts.192-200.ef")
+	removeMockFile(t, dirs.SnapIdx, "v2.0-accounts.200-202.ef")
+	err := checkStateSnapshotFiles(dirs, false, false)
+	require.ErrorContains(t, err, "no account inverted index files (.ef) found")
+}
+
+func Test_CheckStateSnapshotFiles_IdxGapAtStart(t *testing.T) {
+	dirs := setupWorkingStateMockDatadir(t)
+	removeMockFile(t, dirs.SnapIdx, "v2.0-accounts.0-128.ef")
+	err := checkStateSnapshotFiles(dirs, false, false)
+	require.ErrorContains(t, err, "gap at start")
+}
+
+func Test_CheckStateSnapshotFiles_IdxOverlapSameFrom(t *testing.T) {
+	dirs := setupWorkingStateMockDatadir(t)
+	createMockFile(t, dirs.SnapIdx, "v2.0-accounts.0-64.ef")
+	err := checkStateSnapshotFiles(dirs, false, false)
+	require.ErrorContains(t, err, "possibly overlapped")
+}
+
+func Test_CheckStateSnapshotFiles_IdxOverlap(t *testing.T) {
+	dirs := setupWorkingStateMockDatadir(t)
+	createMockFile(t, dirs.SnapIdx, "v2.0-accounts.64-200.ef")
+	err := checkStateSnapshotFiles(dirs, false, false)
+	require.ErrorContains(t, err, "overlap detected")
+}
+
+func Test_CheckStateSnapshotFiles_IdxGap(t *testing.T) {
+	dirs := setupWorkingStateMockDatadir(t)
+	removeMockFile(t, dirs.SnapIdx, "v2.0-accounts.128-192.ef")
+	err := checkStateSnapshotFiles(dirs, false, false)
+	require.ErrorContains(t, err, "gap detected")
+}
+
+func Test_CheckStateSnapshotFiles_MissingIdxEF(t *testing.T) {
+	dirs := setupWorkingStateMockDatadir(t)
+	removeMockFile(t, dirs.SnapIdx, "v2.0-logtopics.128-192.ef")
+	err := checkStateSnapshotFiles(dirs, false, false)
+	require.ErrorContains(t, err, "missing file")
+}
+
+func Test_CheckStateSnapshotFiles_MissingAccessorEFI(t *testing.T) {
+	dirs := setupWorkingStateMockDatadir(t)
+	removeMockFile(t, dirs.SnapAccessors, "v1.1-accounts.128-192.efi")
+	err := checkStateSnapshotFiles(dirs, false, false)
+	require.ErrorContains(t, err, "missing file")
+}
+
+func Test_CheckStateSnapshotFiles_MissingAccessorVI(t *testing.T) {
+	dirs := setupWorkingStateMockDatadir(t)
+	removeMockFile(t, dirs.SnapAccessors, "v1.1-accounts.128-192.vi")
+	err := checkStateSnapshotFiles(dirs, false, false)
+	require.ErrorContains(t, err, "missing file")
+}
+
+func Test_CheckStateSnapshotFiles_MissingHistoryV(t *testing.T) {
+	dirs := setupWorkingStateMockDatadir(t)
+	removeMockFile(t, dirs.SnapHistory, "v1.1-accounts.128-192.v")
+	err := checkStateSnapshotFiles(dirs, false, false)
+	require.ErrorContains(t, err, "missing file")
+}
+
+func Test_CheckStateSnapshotFiles_IdxDomainMaxStepMismatch(t *testing.T) {
+	dirs := setupWorkingStateMockDatadir(t)
+	removeMockFile(t, dirs.SnapIdx, "v2.0-accounts.200-202.ef")
+	err := checkStateSnapshotFiles(dirs, false, false)
+	require.ErrorContains(t, err, "accounts domain max step")
 }
