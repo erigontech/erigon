@@ -205,15 +205,29 @@ func (b *sortableBuffer) Reset() {
 }
 func (b *sortableBuffer) SizeLimit() int { return b.optimalSize }
 func (b *sortableBuffer) Sort() {
-	t := time.Now()
 	data := b.data
-	// Trick to speedup sort: cast 8 first bytes of key to u64 and use arithmetic comparison instead of bytes.Compare
-	// it will greatly reduce amount of `bytes.Compare` calls
-	// also it will work with compact datastructure: 8-bytes/key instead of large `b.data`
 
-	// Calculate prefixes here - to keep .Put() method fast - because .Sort() often called in background
-	// Also: O(n) cost, which is negligible vs the O(n log n) sort.
-	prefixes := slices.Grow(b.prefixes[:0], len(b.entries))[:len(b.entries)] // sortableBuffer object is reusable (by sync.Pool)
+	// --- Sort WITHOUT prefixes (on a copy) ---
+	entriesCopy := make([]entryLoc, len(b.entries))
+	copy(entriesCopy, b.entries)
+
+	cmpNoPfx := func(a, b entryLoc) int {
+		aKey := data[a.offset : a.offset+max(a.keyLen, 0)]
+		bKey := data[b.offset : b.offset+max(b.keyLen, 0)]
+		if c := bytes.Compare(aKey, bKey); c != 0 {
+			return c
+		}
+		return int(a.insertionOrder - b.insertionOrder)
+	}
+	t1 := time.Now()
+	sorted := slices.IsSortedFunc(entriesCopy, cmpNoPfx)
+	if !sorted {
+		slices.SortFunc(entriesCopy, cmpNoPfx)
+	}
+	tookNoPfx := time.Since(t1)
+
+	// --- Sort WITH prefixes (on original) ---
+	prefixes := slices.Grow(b.prefixes[:0], len(b.entries))[:len(b.entries)]
 	b.prefixes = prefixes
 	clear(prefixes)
 	for i := range b.entries {
@@ -226,7 +240,7 @@ func (b *sortableBuffer) Sort() {
 			prefixes[e.insertionOrder] = binary.BigEndian.Uint64(buf[:])
 		}
 	}
-	cmp := func(a, b entryLoc) int {
+	cmpPfx := func(a, b entryLoc) int {
 		if prefixes[a.insertionOrder] != prefixes[b.insertionOrder] {
 			if prefixes[a.insertionOrder] < prefixes[b.insertionOrder] {
 				return -1
@@ -238,18 +252,20 @@ func (b *sortableBuffer) Sort() {
 		if c := bytes.Compare(aKey, bKey); c != 0 {
 			return c
 		}
-		return int(a.insertionOrder - b.insertionOrder) // StableSort: preserve insertion order for duplicate keys
+		return int(a.insertionOrder - b.insertionOrder)
 	}
-	if slices.IsSortedFunc(b.entries, cmp) {
-		return
+	t2 := time.Now()
+	if !slices.IsSortedFunc(b.entries, cmpPfx) {
+		slices.SortFunc(b.entries, cmpPfx)
 	}
-	slices.SortFunc(b.entries, cmp)
-	if took := time.Since(t); took >= 10*time.Millisecond {
+	tookPfx := time.Since(t2)
+
+	if tookNoPfx >= 10*time.Millisecond || tookPfx >= 10*time.Millisecond {
 		var kLen, vLen int32
 		if len(b.entries) > 0 {
 			kLen, vLen = b.entries[0].keyLen, b.entries[0].valLen
 		}
-		log.Warn("[dbg] etl.Sort", "keys", len(b.entries), "keyLen", kLen, "valLen", vLen, "sorted", false, "took", took, "createdAt", b.createdAt)
+		log.Warn("[dbg] etl.Sort", "keys", len(b.entries), "keyLen", kLen, "valLen", vLen, "sorted", sorted, "noPfx", tookNoPfx, "withPfx", tookPfx, "createdAt", b.createdAt)
 	}
 }
 
