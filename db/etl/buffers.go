@@ -201,8 +201,11 @@ func (b *sortableBuffer) Reset() {
 func (b *sortableBuffer) SizeLimit() int { return b.optimalSize }
 func (b *sortableBuffer) Sort() {
 	data := b.data
-	// Compute keyPrefix before sorting.
-	// This keeps .Put() fast - because Sort often called in background
+	// Trick to speedup sort: cast 8 first bytes of key to u64 and use arithmetic comparison instead of bytes.Compare
+	// it will greatly reduce amount of `bytes.Compare` calls
+	// also it will work with compact datastructure: 8-bytes/key instead of large `b.data`
+
+	// Calculate prefixes here - to keep .Put() method fast - because .Sort() often called in background
 	// Also: O(n) cost, which is negligible vs the O(n log n) sort.
 	prefixes := slices.Grow(b.prefixes[:0], len(b.entries))[:len(b.entries)] // sortableBuffer object is reusable (by sync.Pool)
 	b.prefixes = prefixes
