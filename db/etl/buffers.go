@@ -202,15 +202,15 @@ func (b *sortableBuffer) Sort() {
 	// Compute keyPrefix before sorting.
 	// This keeps .Put() fast - because Sort often called in background
 	// Also: O(n) cost, which is negligible vs the O(n log n) sort.
-	prefixes := make([]uint64, len(b.entries))
+	prefixes := make([]uint32, len(b.entries))
 	for i := range b.entries {
 		e := &b.entries[i]
 		if e.keyLen >= 8 {
-			prefixes[e.seq] = binary.BigEndian.Uint64(data[e.offset:])
+			prefixes[e.seq] = binary.BigEndian.Uint32(data[e.offset:])
 		} else if e.keyLen > 0 {
-			var buf [8]byte
+			var buf [4]byte
 			copy(buf[:], data[e.offset:])
-			prefixes[e.seq] = binary.BigEndian.Uint64(buf[:])
+			prefixes[e.seq] = binary.BigEndian.Uint32(buf[:])
 		}
 	}
 	cmp := func(a, b entryLoc) int {
