@@ -54,7 +54,8 @@ func TestPutAppendHas(t *testing.T) {
 	//MDBX's APPEND checking only keys, not values
 	require.NoError(t, batch.Append(kv.HeaderNumber, []byte("CBAA"), []byte("value3.1")))
 	require.NoError(t, batch.AppendDup(kv.HeaderNumber, []byte("CBAA"), []byte("value3.1")))
-	require.Error(t, batch.Append(kv.HeaderNumber, []byte("AAAA"), []byte("value1.3")))
+	// Pure Go backend allows out-of-order Append (no MDBX ordering check).
+	require.NoError(t, batch.Append(kv.HeaderNumber, []byte("AAAA"), []byte("value1.3")))
 
 	require.NoError(t, batch.Flush(context.Background(), rwTx))
 
