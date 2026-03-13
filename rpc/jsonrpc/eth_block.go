@@ -149,6 +149,11 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	// Get a new instance of the EVM
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{})
 
+	// evmPtr is updated atomically each time evm is recreated in the loop,
+	// so the watcher goroutine always cancels the current instance.
+	var evmPtr atomic.Pointer[vm.EVM]
+	evmPtr.Store(evm)
+
 	timeoutMilliSeconds := int64(5000)
 	if timeoutMilliSecondsPtr != nil {
 		timeoutMilliSeconds = *timeoutMilliSecondsPtr
@@ -174,7 +179,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		select {
 		case <-ctx.Done():
 			timedOut.Store(true)
-			evm.Cancel()
+			evmPtr.Load().Cancel()
 		case <-done:
 		}
 	}()
@@ -196,6 +201,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		msg.SetCheckGas(false)
 		// Recreate EVM with the correct txCtx for this transaction
 		evm = vm.NewEVM(blockCtx, protocol.NewEVMTxContext(msg), ibs, chainConfig, vm.Config{})
+		evmPtr.Store(evm)
 		// Execute the transaction message
 		result, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 		if err != nil {

@@ -151,6 +151,11 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	signer := types.MakeSigner(chainConfig, blockNum, blockCtx.Time)
 	rules := evm.ChainRules()
 
+	// evmPtr is updated atomically each time evm is recreated in the loops,
+	// so the watcher goroutine always cancels the current instance.
+	var evmPtr atomic.Pointer[vm.EVM]
+	evmPtr.Store(evm)
+
 	timeout := api.evmCallTimeout
 
 	if timeoutMilliSecondsPtr != nil && *timeoutMilliSecondsPtr > 0 {
@@ -177,7 +182,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		select {
 		case <-ctx.Done():
 			timedOut.Store(true)
-			evm.Cancel()
+			evmPtr.Load().Cancel()
 		case <-done:
 		}
 	}()
@@ -193,6 +198,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		}
 		txCtx = protocol.NewEVMTxContext(msg)
 		evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{})
+		evmPtr.Store(evm)
 		// Execute the transaction message
 		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, api.engine())
 		if err != nil {
@@ -232,6 +238,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			}
 			txCtx = protocol.NewEVMTxContext(msg)
 			evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{})
+			evmPtr.Store(evm)
 			result, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, api.engine())
 			if err != nil {
 				return nil, err
