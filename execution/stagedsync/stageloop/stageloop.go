@@ -98,6 +98,13 @@ func StageLoop(
 			if errors.Is(err, common.ErrStopped) || errors.Is(err, context.Canceled) {
 				return
 			}
+			// During parallel execution, an invalid block in initial sync is unrecoverable:
+			// retrying hits the same block forever, pushing Caplin's backward target further back.
+			// Stop the stage loop so the operator can investigate.
+			if dbg.Exec3Parallel && initialCycle && errors.Is(err, rules.ErrInvalidBlock) {
+				logger.Error("Invalid block during parallel initial sync — stopping stage loop", "err", err)
+				return
+			}
 			logger.Error("Staged Sync", "err", err)
 			if recoveryErr := hd.RecoverFromDb(db); recoveryErr != nil {
 				logger.Error("Failed to recover header sentriesClient", "err", recoveryErr)

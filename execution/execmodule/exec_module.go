@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"math/big"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -495,6 +496,14 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 	if err := stageloop.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline, hook, e.onlySnapDownloadOnStart, e.logger); err != nil {
 		if !errors.Is(err, context.Canceled) {
 			e.logger.Error("Could not start execution service", "err", err)
+		}
+		// During parallel execution, an invalid block in initial sync (ProcessFrozenBlocks)
+		// is unrecoverable: the parallel executor cannot unwind and retrying will hit the
+		// same block forever, pushing Caplin's backward target further back.
+		// Exit the process so the operator can investigate.
+		if dbg.Exec3Parallel && errors.Is(err, rules.ErrInvalidBlock) {
+			e.logger.Error("Invalid block during parallel initial sync — halting process")
+			os.Exit(1)
 		}
 	}
 }

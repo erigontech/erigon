@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -342,6 +343,13 @@ func ExecV3(ctx context.Context,
 
 	if false && !isForkValidation {
 		dumpPlainStateDebug(applyTx, doms)
+	}
+
+	// If execution already failed with ErrInvalidBlock, skip the step-frozen check
+	// and propagate the original error directly. The step-frozen check only makes
+	// sense when execution succeeded partially and we need to persist the commitment.
+	if execErr != nil && errors.Is(execErr, rules.ErrInvalidBlock) {
+		return execErr
 	}
 
 	lastCommitedStep := kv.Step((lastCommittedTxNum) / doms.StepSize())

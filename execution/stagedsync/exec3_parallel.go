@@ -472,8 +472,12 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	}
 
 	// Wait for all goroutines to complete before reading shared state
-	if err := pe.wait(ctx); err != nil {
-		return nil, rwTx, err
+	if waitErr := pe.wait(ctx); waitErr != nil {
+		// Executor goroutine errors (e.g. nonce mismatch) arrive here, not through execErr.
+		// Merge into execErr so the single error-handling path below catches both.
+		if execErr == nil {
+			execErr = waitErr
+		}
 	}
 
 	if !hasLoggedCommittments.Load() && !commitStart.IsZero() {
@@ -482,6 +486,20 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 	if execErr != nil {
 		if !(errors.Is(execErr, context.Canceled) || errors.Is(execErr, &ErrLoopExhausted{})) {
+			pe.logger.Warn(fmt.Sprintf("[%s] Execution failed", pe.logPrefix), "err", execErr)
+			if errors.Is(execErr, rules.ErrInvalidBlock) {
+				if pe.cfg.hd != nil && pe.cfg.hd.POSSync() && lastHeader != nil {
+					pe.cfg.hd.ReportBadHeaderPoS(lastHeader.Hash(), lastHeader.ParentHash)
+				}
+				if pe.cfg.badBlockHalt {
+					return nil, rwTx, execErr
+				}
+				if u != nil && lastHeader != nil {
+					if err := u.UnwindTo(lastHeader.Number.Uint64()-1, BadBlock(lastHeader.Hash(), execErr), rwTx); err != nil {
+						return nil, rwTx, err
+					}
+				}
+			}
 			return nil, rwTx, execErr
 		}
 	}
