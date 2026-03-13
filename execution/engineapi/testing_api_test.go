@@ -194,6 +194,7 @@ func newTestingAPI(cfg *chain.Config, stub *stubExecutionServer, enabled bool) T
 		direct.NewExecutionClientDirect(stub),
 		nil,   // blockDownloader
 		false, // caplin
+		false, // internalCL
 		false, // proposing
 		true,  // consuming
 		nil,   // txPool
