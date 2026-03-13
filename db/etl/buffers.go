@@ -227,13 +227,6 @@ func (b *sortableBuffer) Sort() {
 		return
 	}
 	slices.SortFunc(b.entries, cmp)
-	if dbg.AssertEnabled {
-		for i := 1; i < len(b.entries); i++ {
-			if cmp(b.entries[i-1], b.entries[i]) > 0 {
-				panic(fmt.Sprintf("etl: sortableBuffer.Sort produced unsorted result at index %d", i))
-			}
-		}
-	}
 }
 
 func (b *sortableBuffer) CheckFlushSize() bool {
