@@ -743,7 +743,7 @@ func (q *QueueWithRetry) RetryTxNumsList() (out []uint64) {
 }
 func (q *QueueWithRetry) Len() (l int) { return q.RetriesLen() + q.NewTasksLen() }
 
-// Add "new task" (which was never executed yet). May block internal channel is full.
+// Add "new task" (which was never executed yet). May block if internal channel is full.
 // Expecting already-ordered tasks.
 func (q *QueueWithRetry) Add(ctx context.Context, t Task) {
 	q.lock.Lock()
@@ -757,6 +757,26 @@ func (q *QueueWithRetry) Add(ctx context.Context, t Task) {
 			return
 		case newTasks <- t:
 		}
+	}
+}
+
+// TryAdd attempts to add a task without blocking. Returns true if the task was
+// enqueued, false if the channel is full or the queue is closed.
+func (q *QueueWithRetry) TryAdd(t Task) bool {
+	q.lock.Lock()
+	closed := q.closed
+	newTasks := q.newTasks
+	q.lock.Unlock()
+
+	if closed {
+		return false
+	}
+
+	select {
+	case newTasks <- t:
+		return true
+	default:
+		return false
 	}
 }
 
