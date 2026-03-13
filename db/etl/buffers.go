@@ -209,7 +209,7 @@ func (b *sortableBuffer) Sort() {
 		if kLen >= 8 {
 			prefixes[e.seq] = binary.BigEndian.Uint64(data[off:])
 		} else if kLen > 0 {
-			var buf [4]byte
+			var buf [8]byte
 			copy(buf[:], data[off:])
 			prefixes[e.seq] = binary.BigEndian.Uint64(buf[:])
 		}
