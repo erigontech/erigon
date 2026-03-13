@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonstream"
@@ -65,6 +66,7 @@ type PrivateDebugAPI interface {
 	GetRawReceipts(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) ([]hexutil.Bytes, error)
 	GetBadBlocks(ctx context.Context) ([]map[string]any, error)
 	GetRawTransaction(ctx context.Context, hash common.Hash) (hexutil.Bytes, error)
+	SetHead(ctx context.Context, number hexutil.Uint64) error
 	FreeOSMemory()
 	SetGCPercent(v int) int
 	SetMemoryLimit(limit int64) int64
@@ -76,21 +78,51 @@ type PrivateDebugAPI interface {
 type DebugAPIImpl struct {
 	*BaseAPI
 	db                kv.TemporalRoDB
+	ethBackend        rpchelper.ApiBackend
 	GasCap            uint64
 	gethCompatibility bool // Geth-compatible storage iteration order for debug_storageRangeAt
 }
 
 // NewPrivateDebugAPI returns PrivateDebugAPIImpl instance
-func NewPrivateDebugAPI(base *BaseAPI, db kv.TemporalRoDB, gascap uint64, gethCompatibility bool) *DebugAPIImpl {
+func NewPrivateDebugAPI(base *BaseAPI, db kv.TemporalRoDB, ethBackend rpchelper.ApiBackend, gascap uint64, gethCompatibility bool) *DebugAPIImpl {
 	return &DebugAPIImpl{
 		BaseAPI:           base,
 		db:                db,
+		ethBackend:        ethBackend,
 		GasCap:            gascap,
 		gethCompatibility: gethCompatibility,
 	}
 }
 
-// storageRangeAt implements debug_storageRangeAt. Returns information about a range of storage locations (if any) for the given address.
+// SetHead implements debug_setHead. Rewinds the local chain to the specified block number.
+func (api *DebugAPIImpl) SetHead(ctx context.Context, number hexutil.Uint64) error {
+	blockNum := number.Uint64()
+
+	tx, err := api.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	currentHead, err := rpchelper.GetLatestBlockNumber(tx)
+	if err != nil {
+		return err
+	}
+	if blockNum > currentHead {
+		return fmt.Errorf("block number %d is in the future: current head is %d", blockNum, currentHead)
+	}
+
+	if err := api.BaseAPI.checkPruneHistory(ctx, tx, blockNum); err != nil {
+		return err
+	}
+
+	tx.Rollback() // release read tx before the backend opens write tx
+
+	_, err = api.ethBackend.SetHead(ctx, &remoteproto.SetHeadRequest{BlockNumber: blockNum})
+	return err
+}
+
+// StorageRangeAt implements debug_storageRangeAt. Returns information about a range of storage locations (if any) for the given address.
 func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
