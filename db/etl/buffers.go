@@ -191,11 +191,23 @@ func (b *sortableBuffer) Sort() {
 		return bytes.Compare(data[a.offset:a.offset+a.keyLen], data[b.offset:b.offset+b.keyLen])
 	}
 	if slices.IsSortedFunc(b.entries, cmp) {
-		log.Warn("[dbg] etl.Sort", "keys", len(b.entries), "sorted", true, "took", time.Since(t), "createdAt", b.createdAt)
+		if took := time.Since(t); took >= 10*time.Millisecond {
+			var kLen, vLen int
+			if len(b.entries) > 0 {
+				kLen, vLen = b.entries[0].keyLen, b.entries[0].valLen
+			}
+			log.Warn("[dbg] etl.Sort", "keys", len(b.entries), "keyLen", kLen, "valLen", vLen, "sorted", true, "took", took, "createdAt", b.createdAt)
+		}
 		return
 	}
 	slices.SortStableFunc(b.entries, cmp) // Stable: this buffer type can have duplicate keys and must preserve their insertion order
-	log.Warn("[dbg] etl.Sort", "keys", len(b.entries), "sorted", false, "took", time.Since(t), "createdAt", b.createdAt)
+	if took := time.Since(t); took >= 10*time.Millisecond {
+		var kLen, vLen int
+		if len(b.entries) > 0 {
+			kLen, vLen = b.entries[0].keyLen, b.entries[0].valLen
+		}
+		log.Warn("[dbg] etl.Sort", "keys", len(b.entries), "keyLen", kLen, "valLen", vLen, "sorted", false, "took", took, "createdAt", b.createdAt)
+	}
 }
 
 func (b *sortableBuffer) CheckFlushSize() bool {
