@@ -230,6 +230,7 @@ func (b *sortableBuffer) Sort() {
 	prefixes := slices.Grow(b.prefixes[:0], len(b.entries))[:len(b.entries)]
 	b.prefixes = prefixes
 	clear(prefixes)
+	t2 := time.Now()
 	for i := range b.entries {
 		e := &b.entries[i]
 		if e.keyLen >= 8 {
@@ -254,7 +255,6 @@ func (b *sortableBuffer) Sort() {
 		}
 		return int(a.insertionOrder - b.insertionOrder)
 	}
-	t2 := time.Now()
 	if !slices.IsSortedFunc(b.entries, cmpPfx) {
 		slices.SortFunc(b.entries, cmpPfx)
 	}
