@@ -392,8 +392,11 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					blockUpdateCount = 0
 					blockApplyCount = 0
 
+					// Intentional debug halt: exit without committing so the DB state is preserved
+					// exactly at the point before this block was applied. This allows re-running
+					// from the same state to reproduce the stop point. Not for production use.
 					if dbg.StopAfterBlock > 0 && applyResult.BlockNum == dbg.StopAfterBlock {
-						pe.logger.Info(fmt.Sprintf("[%s] STOP_AFTER_BLOCK reached, halting", pe.logPrefix), "block", applyResult.BlockNum)
+						pe.logger.Warn(fmt.Sprintf("[%s] STOP_AFTER_BLOCK reached, exiting without commit (debug mode)", pe.logPrefix), "block", applyResult.BlockNum)
 						os.Exit(0)
 					}
 

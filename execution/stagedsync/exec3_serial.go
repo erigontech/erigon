@@ -208,7 +208,10 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		}
 
 		if dbg.StopAfterBlock > 0 && blockNum == dbg.StopAfterBlock {
-			se.logger.Info(fmt.Sprintf("[%s] STOP_AFTER_BLOCK reached, halting", se.logPrefix), "block", blockNum)
+			// Intentional debug halt: exit without committing so the DB state is preserved
+			// exactly at the point before this block was applied. This allows re-running
+			// from the same state to reproduce the stop point. Not for production use.
+			se.logger.Warn(fmt.Sprintf("[%s] STOP_AFTER_BLOCK reached, exiting without commit (debug mode)", se.logPrefix), "block", blockNum)
 			os.Exit(0)
 		}
 
@@ -462,7 +465,13 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				se.cfg.hd.ReportBadHeaderPoS(txTask.Header.Hash(), txTask.Header.ParentHash)
 			}
 			if se.cfg.badBlockHalt {
-				return false, err
+				// Intentional debug halt: exit without committing so the DB state is preserved
+				// exactly at the point before the bad block was applied. This allows re-running
+				// from the same state to reproduce the invalid block. Not for production use.
+				// We must not return an error here — the stage loop would retry indefinitely.
+				se.logger.Error(fmt.Sprintf("[%s] BAD_BLOCK_HALT: halting on invalid block", se.logPrefix),
+					"block", txTask.BlockNumber(), "hash", txTask.Header.Hash(), "err", err)
+				os.Exit(1)
 			}
 
 			if se.u != nil {

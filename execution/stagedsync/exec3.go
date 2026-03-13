@@ -263,7 +263,12 @@ func ExecV3(ctx context.Context,
 				}
 			}
 			if cfg.badBlockHalt {
-				logger.Error(fmt.Sprintf("[%s] BAD_BLOCK_HALT: halting on invalid block", execStage.LogPrefix()), "err", execErr)
+				// Intentional debug halt: exit without committing so the DB state is preserved
+				// exactly at the point where the invalid block was encountered. This allows
+				// re-running from the same state to reproduce the bad block. Not for production use.
+				// In production (BAD_BLOCK_HALT unset), the error propagates to the stage loop
+				// which unwinds and lets the CL provide a corrected block via fork choice.
+				logger.Error(fmt.Sprintf("[%s] BAD_BLOCK_HALT: halting on invalid block (debug mode, no commit)", execStage.LogPrefix()), "err", execErr)
 				os.Exit(1)
 			}
 		}
