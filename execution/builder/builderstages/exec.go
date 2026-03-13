@@ -18,7 +18,6 @@ package builderstages
 
 import (
 	context0 "context"
-	"errors"
 	"fmt"
 	"sync/atomic"
 	"time"
@@ -27,12 +26,9 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
-	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -40,16 +36,13 @@ import (
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/metrics"
 	"github.com/erigontech/erigon/execution/protocol"
-	"github.com/erigontech/erigon/execution/protocol/aa"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
-	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
-	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/txnprovider"
 )
 
@@ -92,32 +85,67 @@ func StageBuilderExecCfg(
 	}
 }
 
-// SpawnBuilderExecStage
+// SpawnBuilderExecStage builds a block by executing transactions from the txpool,
+// then computes the state root from the accumulated domain writes.
+//
+// State changes flow through a single execution path:
+//  1. IBS executes transactions using a NoopWriter / in-memory buffer (no per-tx writes to sd)
+//  2. FinalizeBlockExecution applies the accumulated IBS changes to sd via the block assembler writer
+//  3. ComputeCommitment(sd) produces the state root
+//  4. sd is backed by a MemoryBatch (from MiningStep) — discarded on return
+//
 // TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnBuilderExecStage(ctx context0.Context, s *stagedsync.StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg BuilderExecCfg, sendersCfg stagedsync.SendersCfg, execCfg stagedsync.ExecuteBlockCfg, logger log.Logger, u stagedsync.Unwinder) (err error) {
+func SpawnBuilderExecStage(ctx context0.Context, s *stagedsync.StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg BuilderExecCfg, execCfg stagedsync.ExecuteBlockCfg, logger log.Logger) (err error) {
 	cfg.vmConfig.NoReceipts = false
 	chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 	logPrefix := s.LogPrefix()
 	current := cfg.builderState.BuiltBlock
-	needBAL := execCfg.ChainConfig().IsAmsterdam(current.Header.Time) || execCfg.IsExperimentalBAL()
 
+	// sd is already backed by a MemoryBatch (from MiningStep in stageloop.go),
+	// so all writes accumulate there and are discarded when MiningStep returns.
+	// We use sd directly for execution state writes and commitment computation.
+	txNum, _, err := sd.SeekCommitment(ctx, tx)
+	if err != nil {
+		return err
+	}
+	sd.SetTxNum(txNum)
+	sd.GetCommitmentContext().SetDeferBranchUpdates(false)
+
+	stateWriter := state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 	stateReader := state.NewReaderV3(sd.AsGetter(tx))
+
+	// filterSd is a separate SharedDomains used only for filterBadTransactions.
+	// The filter makes speculative nonce/balance writes that may not match actual
+	// execution results (e.g., a tx passes the filter but fails in the EVM).
+	// These speculative writes must NOT pollute sd's commitment computation.
+	// filterSd must be backed by its own MemoryBatch to ensure full isolation.
+	filterMb := membatchwithdb.NewMemoryBatch(tx, cfg.tmpdir, logger)
+	defer filterMb.Close()
+	filterSd, err := execctx.NewSharedDomains(ctx, filterMb, logger)
+	if err != nil {
+		return err
+	}
+	defer filterSd.Close()
+	filterWriter := state.NewWriter(filterSd.AsPutDel(filterMb), nil, txNum)
+	filterReader := state.NewReaderV3(filterSd.AsGetter(filterMb))
+
 	ibs := state.New(stateReader)
 	defer ibs.Release(false)
 	ibs.SetTxContext(current.Header.Number.Uint64(), -1)
-	var balIO *state.VersionedIO
-	var systemReads state.ReadSet
-	var systemWrites state.VersionedWrites
-	var systemAccess state.AccessSet
-	if needBAL {
+
+	ba := exec.NewBlockAssembler(exec.AssemblerCfg{
+		ChainConfig:     cfg.chainConfig,
+		Engine:          cfg.engine,
+		BlockReader:     cfg.blockReader,
+		ExperimentalBAL: execCfg.IsExperimentalBAL(),
+	}, cfg.payloadId, current.ParentHeaderTime, current.Header, current.Uncles, current.Withdrawals)
+	ba.SetStateWriter(stateWriter)
+
+	if ba.HasBAL() {
 		ibs.SetVersionMap(state.NewVersionMap(nil))
-		balIO = &state.VersionedIO{}
 	}
-	// Clique consensus needs forced author in the evm context
-	//if cfg.chainConfig.Consensus == chain.CliqueConsensus {
-	//	execCfg.author = &cfg.builderState.BuilderConfig.Etherbase
-	//}
+
 	execCfg = execCfg.WithAuthor(accounts.InternAddress(cfg.builderState.BuilderConfig.Etherbase))
 
 	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
@@ -127,34 +155,13 @@ func SpawnBuilderExecStage(ctx context0.Context, s *stagedsync.StageState, sd *e
 		return execCfg.BlockReader().Header(ctx, tx, hash, number)
 	}
 
-	mb := membatchwithdb.NewMemoryBatch(tx, cfg.tmpdir, logger)
-	defer mb.Close()
-	simSd, err := execctx.NewSharedDomains(ctx, mb, logger)
-	if err != nil {
+	if err := ba.Initialize(ibs, tx, logger); err != nil {
 		return err
-	}
-	defer simSd.Close()
-
-	chainReader := exec.NewChainReader(cfg.chainConfig, tx, cfg.blockReader, logger)
-
-	txNum, _, err := sd.SeekCommitment(ctx, tx)
-	if err != nil {
-		return err
-	}
-
-	protocol.InitializeBlockExecution(cfg.engine, chainReader, current.Header, cfg.chainConfig, ibs, &state.NoopWriter{}, logger, nil)
-	if needBAL {
-		systemReads = stagedsync.MergeReadSets(systemReads, ibs.VersionedReads())
-		systemWrites = stagedsync.MergeVersionedWrites(systemWrites, ibs.VersionedWrites(false))
-		systemAccess = systemAccess.Merge(ibs.AccessedAddresses())
-		ibs.ResetVersionedIO()
 	}
 
 	coinbase := accounts.InternAddress(cfg.builderState.BuilderConfig.Etherbase)
 
 	yielded := mapset.NewSet[[32]byte]()
-	simStateWriter := state.NewWriter(simSd.AsPutDel(tx), nil, txNum)
-	simStateReader := state.NewReaderV3(simSd.AsGetter(tx))
 
 	executionAt, err := s.ExecutionAt(tx)
 	if err != nil {
@@ -164,13 +171,13 @@ func SpawnBuilderExecStage(ctx context0.Context, s *stagedsync.StageState, sd *e
 	interrupt := cfg.interrupt
 	const amount = 50
 	for {
-		txns, err := getNextTransactions(ctx, cfg, chainID, current.Header, amount, executionAt, yielded, simStateReader, simStateWriter, logger)
+		txns, err := getNextTransactions(ctx, cfg, chainID, current.Header, amount, executionAt, yielded, filterReader, filterWriter, logger)
 		if err != nil {
 			return err
 		}
 
 		if len(txns) > 0 {
-			logs, stop, err := addTransactionsToBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, txns, coinbase, ibs, balIO, interrupt, cfg.payloadId, logger)
+			logs, stop, err := ba.AddTransactions(ctx, getHeader, txns, coinbase, cfg.vmConfig, ibs, interrupt, logPrefix, logger)
 			if err != nil {
 				return err
 			}
@@ -194,32 +201,28 @@ func SpawnBuilderExecStage(ctx context0.Context, s *stagedsync.StageState, sd *e
 
 	metrics.UpdateBlockProducerProductionDelay(current.ParentHeaderTime, current.Header.Number.Uint64(), logger)
 
-	logger.Debug("SpawnBuilderExecStage", "block", current.Header.Number, "txn", current.Txns.Len(), "payload", cfg.payloadId)
-	if current.Uncles == nil {
-		current.Uncles = []*types.Header{}
+	logger.Debug("SpawnBuilderExecStage", "block", current.Header.Number, "txn", ba.Txns.Len(), "payload", cfg.payloadId)
+	if ba.Uncles == nil {
+		ba.Uncles = []*types.Header{}
 	}
-	if current.Txns == nil {
-		current.Txns = []types.Transaction{}
+	if ba.Txns == nil {
+		ba.Txns = []types.Transaction{}
 	}
-	if current.Receipts == nil {
-		current.Receipts = types.Receipts{}
+	if ba.Receipts == nil {
+		ba.Receipts = types.Receipts{}
 	}
 
-	if err := cfg.engine.Prepare(chainReader, current.Header, ibs); err != nil {
+	block, err := ba.AssembleBlock(stateReader, ibs, tx, logger)
+	if err != nil {
 		return err
 	}
 
-	var block *types.Block
-	if needBAL {
-		ibs.ResetVersionedIO()
-	}
-	block, current.Requests, err = protocol.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txns, current.Uncles, &state.NoopWriter{}, cfg.chainConfig, ibs, current.Receipts, current.Withdrawals, chainReader, true, logger, nil)
-	if err != nil {
-		return fmt.Errorf("cannot finalize block execution: %s", err)
-	}
+	// Copy results back to BuiltBlock
+	current.Txns = ba.Txns
+	current.Receipts = ba.Receipts
+	current.Requests = ba.Requests
+	current.BlockAccessList = ba.BlockAccessList
 
-	// Note: This gets reset in BuilderFinish - but we need it here to
-	// process execv3 - when we remove that this becomes redundant
 	header := block.HeaderNoCopy()
 
 	if execCfg.ChainConfig().IsPrague(header.Time) {
@@ -231,111 +234,11 @@ func SpawnBuilderExecStage(ctx context0.Context, s *stagedsync.StageState, sd *e
 	}
 
 	blockHeight := block.NumberU64()
-	if needBAL {
-		systemReads = stagedsync.MergeReadSets(systemReads, ibs.VersionedReads())
-		systemWrites = stagedsync.MergeVersionedWrites(systemWrites, ibs.VersionedWrites(false))
-		systemAccess = systemAccess.Merge(ibs.AccessedAddresses())
-		ibs.ResetVersionedIO()
 
-		systemVersion := state.Version{BlockNum: blockHeight, TxIndex: -1}
-		balIO.RecordReads(systemVersion, systemReads)
-		balIO.RecordWrites(systemVersion, systemWrites)
-		balIO.RecordAccesses(systemVersion, systemAccess)
-		current.BlockAccessList = stagedsync.CreateBAL(blockHeight, balIO, execCfg.DirsDataDir())
-		// Note: This gets reset in BuilderFinish - but we need it here to
-		// process execv3 - when we remove that this becomes redundant
-		hash := current.BlockAccessList.Hash()
-		header.BlockAccessListHash = &hash
-	} else {
-		// Note: This gets reset in BuilderFinish - but we need it here to
-		// process execv3 - when we remove that this becomes redundant
-		if execCfg.ChainConfig().IsAmsterdam(current.Header.Time) {
-			header.BlockAccessListHash = &empty.BlockAccessListHash
-		}
-	}
-
-	writeBlockForExecution := func(rwTx kv.TemporalRwTx) error {
-		if err = rawdb.WriteHeader(rwTx, block.Header()); err != nil {
-			return fmt.Errorf("cannot write header: %s", err)
-		}
-		if err = rawdb.WriteCanonicalHash(rwTx, block.Hash(), blockHeight); err != nil {
-			return fmt.Errorf("cannot write canonical hash: %s", err)
-		}
-		if err = rawdb.WriteHeadHeaderHash(rwTx, block.Hash()); err != nil {
-			return err
-		}
-		if _, err = rawdb.WriteRawBodyIfNotExists(rwTx, block.Hash(), blockHeight, block.RawBody()); err != nil {
-			return fmt.Errorf("cannot write body: %s", err)
-		}
-		if err = rawdb.AppendCanonicalTxNums(rwTx, blockHeight); err != nil {
-			return err
-		}
-		if err = stages.SaveStageProgress(rwTx, kv.Headers, blockHeight); err != nil {
-			return err
-		}
-		if err = stages.SaveStageProgress(rwTx, stages.Bodies, blockHeight); err != nil {
-			return err
-		}
-		senderS := &stagedsync.StageState{State: s.State, ID: stages.Senders, BlockNumber: blockHeight - 1}
-		if err = stagedsync.SpawnRecoverSendersStage(sendersCfg, senderS, nil, rwTx, blockHeight, ctx, logger); err != nil {
-			return err
-		}
-		return nil
-	}
-
-	// Simulate the block execution to get the final state root
-	if err = writeBlockForExecution(tx); err != nil {
-		return err
-	}
-
-	// This flag will skip checking the state root
-	execS := &stagedsync.StageState{State: s.State, ID: stages.Execution, BlockNumber: blockHeight - 1}
-	forceParallel := dbg.Exec3Parallel /*|| cfg.chainConfig.IsAmsterdam(current.Header.Time)*/ // TODO Re-enable after bals testing
-	execTx := tx
-	execSd := sd
-	var execCleanup func()
-	if forceParallel {
-		// get the underlying TemporalTx from MemoryMutation and create temporary SharedDomain
-		if _, ok := tx.(*temporal.RwTx); !ok {
-			type txUnwrapper interface {
-				UnderlyingTx() kv.TemporalTx
-			}
-			if unwrap, ok := tx.(txUnwrapper); ok {
-				if rwTx, ok := unwrap.UnderlyingTx().(kv.TemporalRwTx); ok {
-					tempSd, err := execctx.NewSharedDomains(ctx, rwTx, logger)
-					if err != nil {
-						return err
-					}
-					execTx = rwTx
-					execSd = tempSd
-					execCleanup = func() {
-						tempSd.Close()
-					}
-					if err = writeBlockForExecution(execTx); err != nil {
-						execCleanup()
-						return err
-					}
-				}
-			}
-		}
-		if _, ok := execTx.(*temporal.RwTx); !ok {
-			return fmt.Errorf("parallel execution requires *temporal.RwTx, got %T", execTx)
-		}
-	}
-	if execCleanup != nil {
-		defer execCleanup()
-	}
-
-	if err = stagedsync.ExecV3(ctx, execS, u, execCfg, execSd, execTx, forceParallel, blockHeight, logger); err != nil {
-		logger.Error("cannot execute block execution", "err", err)
-		return err
-	}
-
-	commitmentTxNum, _, err := execSd.SeekCommitment(ctx, execTx)
-	if err != nil {
-		return fmt.Errorf("seek commitment failed: %w", err)
-	}
-	rh, err := execSd.ComputeCommitment(ctx, execTx, true, blockHeight, commitmentTxNum, s.LogPrefix(), nil)
+	// Compute state root directly from the domain writes accumulated during
+	// block assembly. All state changes flow through CommitBlock in
+	// AssembleBlock — no re-execution needed.
+	rh, err := sd.ComputeCommitment(ctx, tx, false, blockHeight, txNum, s.LogPrefix(), nil)
 	if err != nil {
 		return fmt.Errorf("compute commitment failed: %w", err)
 	}
@@ -545,199 +448,6 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 	}
 	logger.Info("Filtration", "initial", initialCnt, "no sender", noSenderCnt, "no account", noAccountCnt, "nonce too low", nonceTooLowCnt, "nonceTooHigh", missedTxs, "sender not EOA", notEOACnt, "fee too low", feeTooLowCnt, "overflow", overflowCnt, "balance too low", balanceTooLowCnt, "bad chain id", badChainId, "filtered", len(filtered))
 	return filtered, nil
-}
-
-func addTransactionsToBlock(
-	ctx context0.Context,
-	logPrefix string,
-	current *BuiltBlock,
-	chainConfig *chain.Config,
-	vmConfig *vm.Config,
-	getHeader func(hash common.Hash, number uint64) (*types.Header, error),
-	engine rules.Engine,
-	txns types.Transactions,
-	coinbase accounts.Address,
-	ibs *state.IntraBlockState,
-	balIO *state.VersionedIO,
-	interrupt *atomic.Bool,
-	payloadId uint64,
-	logger log.Logger,
-) (types.Logs, bool, error) {
-	header := current.Header
-	txnIdx := ibs.TxnIndex() + 1
-	gasPool := new(protocol.GasPool).AddGas(header.GasLimit - header.GasUsed)
-	if header.BlobGasUsed != nil {
-		gasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time) - *header.BlobGasUsed)
-	}
-	signer := types.MakeSigner(chainConfig, header.Number.Uint64(), header.Time)
-
-	var coalescedLogs types.Logs
-	noop := state.NewNoopWriter()
-	recordTxIO := func() {
-		if balIO == nil {
-			return
-		}
-		version := ibs.Version()
-		balIO.RecordReads(version, ibs.VersionedReads())
-		balIO.RecordWrites(version, ibs.VersionedWrites(false))
-		balIO.RecordAccesses(version, ibs.AccessedAddresses())
-		ibs.ResetVersionedIO()
-	}
-	clearTxIO := func() {
-		if balIO == nil {
-			return
-		}
-		ibs.AccessedAddresses()
-		ibs.ResetVersionedIO()
-	}
-
-	var builderCommitTx = func(txn types.Transaction, coinbase accounts.Address, vmConfig *vm.Config, chainConfig *chain.Config, ibs *state.IntraBlockState, current *BuiltBlock) ([]*types.Log, error) {
-		ibs.SetTxContext(current.Header.Number.Uint64(), txnIdx)
-		gasSnap := gasPool.Gas()
-		blobGasSnap := gasPool.BlobGas()
-		snap := ibs.PushSnapshot()
-		defer ibs.PopSnapshot(snap)
-
-		if txn.Type() == types.AccountAbstractionTxType {
-			aaTxn := txn.(*types.AccountAbstractionTransaction)
-			blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, getHeader), engine, coinbase, chainConfig)
-			evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, chainConfig, *vmConfig)
-			paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, ibs, gasPool, header, evm, chainConfig)
-			if err != nil {
-				ibs.RevertToSnapshot(snap, err)
-				gasPool = new(protocol.GasPool).AddGas(gasSnap).AddBlobGas(blobGasSnap) // restore gasPool as well as ibs
-				return nil, err
-			}
-
-			status, gasUsed, err := aa.ExecuteAATransaction(aaTxn, paymasterContext, validationGasUsed, gasPool, evm, header, ibs)
-			if err != nil {
-				ibs.RevertToSnapshot(snap, err)
-				gasPool = new(protocol.GasPool).AddGas(gasSnap).AddBlobGas(blobGasSnap) // restore gasPool as well as ibs
-				return nil, err
-			}
-
-			header.GasUsed += gasUsed
-			logs := ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), header.Number.Uint64(), header.Hash())
-			receipt := aa.CreateAAReceipt(txn.Hash(), status, gasUsed, header.GasUsed, header.Number.Uint64(), uint64(ibs.TxnIndex()), logs)
-
-			current.AddTxn(txn)
-			current.Receipts = append(current.Receipts, receipt)
-			return receipt.Logs, nil
-		}
-
-		gasUsed := protocol.NewGasUsed(header, current.Receipts.CumulativeGasUsed())
-		receipt, err := protocol.ApplyTransaction(chainConfig, protocol.GetHashFn(header, getHeader), engine, coinbase, gasPool, ibs, noop, header, txn, gasUsed, *vmConfig)
-		if err != nil {
-			ibs.RevertToSnapshot(snap, err)
-			gasPool = new(protocol.GasPool).AddGas(gasSnap).AddBlobGas(blobGasSnap) // restore gasPool as well as ibs
-			return nil, err
-		}
-		protocol.SetGasUsed(header, gasUsed)
-		current.AddTxn(txn)
-		current.Receipts = append(current.Receipts, receipt)
-		return receipt.Logs, nil
-	}
-
-	var stopped *time.Ticker
-	defer func() {
-		if stopped != nil {
-			stopped.Stop()
-		}
-	}()
-
-	done := false
-
-LOOP:
-	for _, txn := range txns {
-		// see if we need to stop now
-		if stopped != nil {
-			select {
-			case <-stopped.C:
-				done = true
-				break LOOP
-			default:
-			}
-		}
-
-		if err := common.Stopped(ctx.Done()); err != nil {
-			return nil, true, err
-		}
-
-		if interrupt != nil && interrupt.Load() && stopped == nil {
-			logger.Debug("Transaction adding was requested to stop", "payload", payloadId)
-			// ensure we run for at least 500ms after the request to stop comes in from GetPayload
-			stopped = time.NewTicker(500 * time.Millisecond)
-		}
-		// If we don't have enough gas for any further transactions then we're done
-		if gasPool.Gas() < params.TxGas {
-			logger.Debug(fmt.Sprintf("[%s] Not enough gas for further transactions", logPrefix), "have", gasPool, "want", params.TxGas)
-			done = true
-			break
-		}
-
-		rlpSpacePostTxn := current.AvailableRlpSpace(chainConfig, txn)
-		if rlpSpacePostTxn < 0 {
-			rlpSpacePreTxn := current.AvailableRlpSpace(chainConfig)
-			logger.Debug(
-				fmt.Sprintf("[%s] Skipping transaction since it does not fit in available rlp space", logPrefix),
-				"hash", txn.Hash(),
-				"pre", rlpSpacePreTxn,
-				"post", rlpSpacePostTxn,
-			)
-			continue
-		}
-
-		// We use the eip155 signer regardless of the env hf.
-		from, err := txn.Sender(*signer)
-		if err != nil {
-			logger.Warn(fmt.Sprintf("[%s] Could not recover transaction sender", logPrefix), "hash", txn.Hash(), "err", err)
-			continue
-		}
-
-		// Check whether the txn is replay protected. If we're not in the EIP155 (Spurious Dragon) hf
-		// phase, start ignoring the sender until we do.
-		if txn.Protected() && !chainConfig.IsSpuriousDragon(header.Number.Uint64()) {
-			logger.Debug(fmt.Sprintf("[%s] Ignoring replay protected transaction", logPrefix), "hash", txn.Hash(), "eip155", chainConfig.SpuriousDragonBlock)
-			continue
-		}
-
-		// Start executing the transaction
-		logs, err := builderCommitTx(txn, coinbase, vmConfig, chainConfig, ibs, current)
-		if err == nil {
-			recordTxIO()
-		} else {
-			clearTxIO()
-		}
-		if errors.Is(err, protocol.ErrGasLimitReached) {
-			// Skip the env out-of-gas transaction
-			logger.Debug(fmt.Sprintf("[%s] Gas limit exceeded for env block", logPrefix), "hash", txn.Hash(), "sender", from)
-		} else if errors.Is(err, protocol.ErrNonceTooLow) {
-			// New head notification data race between the transaction pool and builder, skip
-			logger.Debug(fmt.Sprintf("[%s] Skipping transaction with low nonce", logPrefix), "hash", txn.Hash(), "sender", from, "nonce", txn.GetNonce(), "err", err)
-		} else if errors.Is(err, protocol.ErrNonceTooHigh) {
-			// Reorg notification data race between the transaction pool and builder, skip
-			logger.Debug(fmt.Sprintf("[%s] Skipping transaction with high nonce", logPrefix), "hash", txn.Hash(), "sender", from, "nonce", txn.GetNonce())
-		} else if err == nil {
-			// Everything ok, collect the logs and proceed to the next transaction
-			logger.Trace(fmt.Sprintf("[%s] Added transaction", logPrefix), "hash", txn.Hash(), "sender", from, "nonce", txn.GetNonce(), "payload", payloadId)
-			coalescedLogs = append(coalescedLogs, logs...)
-			txnIdx++
-		} else {
-			// Strange error, discard the transaction and get the next in line (note, the
-			// nonce-too-high clause will prevent us from executing in vain).
-			logger.Debug(fmt.Sprintf("[%s] Skipping transaction", logPrefix), "hash", txn.Hash(), "sender", from, "err", err)
-		}
-	}
-
-	/*
-		// Notify resubmit loop to decrease resubmitting interval if env interval is larger
-		// than the user-specified one.
-		if interrupt != nil {
-			w.resubmitAdjustCh <- &intervalAdjust{inc: false}
-		}
-	*/
-	return coalescedLogs, done, nil
-
 }
 
 func NotifyPendingLogs(logPrefix string, notifier stagedsync.ChainEventNotifier, logs types.Logs, logger log.Logger) {

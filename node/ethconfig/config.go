@@ -115,6 +115,7 @@ var Defaults = Config{
 	FcuTimeout:          1 * time.Second,
 	FcuBackgroundPrune:  true,
 	FcuBackgroundCommit: false, // to enable, we need to 1) have rawdb API go via execctx and 2) revive Coherent cache for rpcdaemon
+	ExperimentalBAL:     false,
 }
 
 const DefaultChainDBPageSize = 16 * datasize.KB
@@ -251,20 +252,6 @@ type Config struct {
 
 	// Whether to avoid overriding chain config already stored in the DB
 	KeepStoredChainConfig bool
-
-	// Embedded Silkworm support
-	SilkwormExecution            bool
-	SilkwormRpcDaemon            bool
-	SilkwormSentry               bool
-	SilkwormVerbosity            string
-	SilkwormNumContexts          uint32
-	SilkwormRpcLogEnabled        bool
-	SilkwormRpcLogDirPath        string
-	SilkwormRpcLogMaxFileSize    uint16
-	SilkwormRpcLogMaxFiles       uint16
-	SilkwormRpcLogDumpResponse   bool
-	SilkwormRpcNumWorkers        uint32
-	SilkwormRpcJsonCompatibility bool
 
 	// PoS Single Slot finality
 	PolygonPosSingleSlotFinality        bool

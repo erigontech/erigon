@@ -64,13 +64,6 @@ func Uint64SSZDecode(buf []byte) uint64 {
 	return binary.LittleEndian.Uint64(buf)
 }
 
-func BoolSSZ(b bool) byte {
-	if b {
-		return 1
-	}
-	return 0
-}
-
 func OffsetSSZ(x uint32) []byte {
 	b := make([]byte, 4)
 	binary.LittleEndian.PutUint32(b, x)
@@ -188,28 +181,6 @@ func DecodeNumbersList(bytes []byte, start, end uint32, _max uint64) ([]uint64, 
 		objs[i] = UnmarshalUint64SSZ(buf[i*length.BlockNum:])
 	}
 	return objs, nil
-}
-
-func CalculateIndiciesLimit(maxCapacity, numItems, size uint64) uint64 {
-	limit := (maxCapacity*size + 31) / 32
-	if limit != 0 {
-		return limit
-	}
-	if numItems == 0 {
-		return 1
-	}
-	return numItems
-}
-
-func DecodeString(bytes []byte, start, end, _max uint64) ([]byte, error) {
-	if start > end || len(bytes) < int(end) {
-		return nil, ErrBadOffset
-	}
-	buf := bytes[start:end]
-	if uint64(len(buf)) > _max {
-		return nil, errors.Join(ErrTooBigList, fmt.Errorf("DecodeString: expected %d bytes, got %d", _max, len(buf)))
-	}
-	return buf, nil
 }
 
 func EncodeDynamicList[T Marshaler](buf []byte, objs []T) (dst []byte, err error) {

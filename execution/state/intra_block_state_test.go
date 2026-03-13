@@ -773,6 +773,12 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	assert.Equal(t, uint256.Int{}, v)
 
 	// Tx2 read
+	// Clear cached reads and state objects from Tx2's SetState call above —
+	// those reads were recorded when Tx1 hadn't flushed yet (Tx0's version).
+	// Now that Tx1 has flushed, re-reading without stale cache simulates a
+	// re-execution that the scheduler would trigger on dependency.
+	states[2].stateObjects = map[accounts.Address]*stateObject{}
+	states[2].versionedReads = nil
 	v, err = states[2].GetState(addr, key2)
 	assert.NoError(t, err)
 	assert.Equal(t, val2, v)

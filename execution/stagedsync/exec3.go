@@ -115,7 +115,6 @@ func ExecV3(ctx context.Context,
 	parallel bool, //nolint
 	maxBlockNum uint64,
 	logger log.Logger) (execErr error) {
-	isBlockProduction := execStage.SyncMode() == stages.ModeBlockProduction
 	isForkValidation := execStage.SyncMode() == stages.ModeForkValidation
 
 	isApplyingBlocks := execStage.SyncMode() == stages.ModeApplyingBlocks
@@ -130,13 +129,9 @@ func ExecV3(ctx context.Context,
 	agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	if isApplyingBlocks {
 		if initialCycle {
-			agg.SetCollateAndBuildWorkers(dbg.CollateWorkers) //TODO: Need always set to CollateWorkers=2 (on ChainTip too). But need more tests first
-			agg.SetCompressWorkers(dbg.CompressWorkers)
-			agg.SetMergeWorkers(dbg.MergeWorkers) //TODO: Need always set to CollateWorkers=2 (on ChainTip too). But need more tests first
+			agg.PresetNonChainTipConcurrency()
 		} else {
-			agg.SetCollateAndBuildWorkers(1)
-			agg.SetCompressWorkers(dbg.CompressWorkers)
-			agg.SetMergeWorkers(dbg.MergeWorkers) //TODO: Need always set to CollateWorkers=2 (on ChainTip too). But need more tests first
+			agg.PresetChainTipConcurrency()
 		}
 	}
 
@@ -166,7 +161,7 @@ func ExecV3(ctx context.Context,
 		return nil
 	}
 
-	shouldReportToTxPool := cfg.notifications != nil && !isBlockProduction && maxBlockNum <= blockNum+64
+	shouldReportToTxPool := cfg.notifications != nil && maxBlockNum <= blockNum+64
 	var accumulator *shards.Accumulator
 	if shouldReportToTxPool {
 		accumulator = cfg.notifications.Accumulator
@@ -203,26 +198,24 @@ func ExecV3(ctx context.Context,
 
 	doms.EnableParaTrieDB(cfg.db)
 	doms.EnableTrieWarmup(true)
-	isChainTip := maxBlockNum == startBlockNum
 	// Do it only for chain-tip blocks!
-	doms.EnableWarmupCache(isChainTip)
-	//log.Debug("Warmup Cache", "enabled", isChainTip)
+	doms.EnableWarmupCache(!isApplyingBlocks)
 	postValidator := newBlockPostExecutionValidator()
 	doms.SetDeferCommitmentUpdates(false)
-	if isChainTip {
+	if !isApplyingBlocks {
 		postValidator = newParallelBlockPostExecutionValidator()
 	}
-	// Enable deferred commitment updates only for serial execution (fork validation).
-	// The parallel executor has a subtle interaction with deferred updates that causes
-	// intermittent trie root mismatches during re-org validation.
-	if !parallel && isForkValidation {
+	// Enable deferred commitment updates for fork validation (both serial and parallel).
+	// Deferred updates batch commitment calculations to block boundaries rather than
+	// per-transaction, significantly reducing re-org validation overhead.
+	if isForkValidation {
 		doms.SetDeferCommitmentUpdates(true)
 	}
 	defer doms.SetDeferCommitmentUpdates(false)
 	// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
 	// can't use OS-level ReadAhead - because Data >> RAM
 	// it also warmsup state a bit - by touching senders/coninbase accounts and code
-	if !execStage.CurrentSyncCycle.IsInitialCycle && !isChainTip {
+	if isApplyingBlocks {
 		var clean func()
 
 		readAhead, clean = exec.BlocksReadAhead(ctx, 2, cfg.db, cfg.engine, cfg.blockReader)
@@ -235,7 +228,6 @@ func ExecV3(ctx context.Context,
 				rs:                rs,
 				doms:              doms,
 				agg:               agg,
-				isBlockProduction: isBlockProduction,
 				isForkValidation:  isForkValidation,
 				isApplyingBlocks:  isApplyingBlocks,
 				logger:            logger,
@@ -272,7 +264,6 @@ func ExecV3(ctx context.Context,
 				doms:              doms,
 				agg:               agg,
 				u:                 u,
-				isBlockProduction: isBlockProduction,
 				isForkValidation:  isForkValidation,
 				isApplyingBlocks:  isApplyingBlocks,
 				applyTx:           applyTx,
@@ -287,7 +278,7 @@ func ExecV3(ctx context.Context,
 		se.lastCommittedBlockNum.Store(blockNum)
 
 		defer func() {
-			if !isChainTip {
+			if isApplyingBlocks {
 				se.LogComplete(stepsInDb)
 			}
 		}()
@@ -299,7 +290,7 @@ func ExecV3(ctx context.Context,
 			if lastHeader != nil {
 				switch {
 				case execErr == nil || errors.Is(execErr, &ErrLoopExhausted{}):
-					_, _, err = computeAndCheckCommitmentV3(ctx, lastHeader, applyTx, se.domains(), cfg, execStage, parallel, logger, u, isBlockProduction)
+					_, _, err = computeAndCheckCommitmentV3(ctx, lastHeader, applyTx, se.domains(), cfg, execStage, parallel, logger, u)
 					if err != nil {
 						return err
 					}
@@ -364,7 +355,7 @@ func ExecV3(ctx context.Context,
 			lastCommittedBlockNum, lastCommittedTxNum, lastCommitedStep)
 	}
 
-	if !shouldReportToTxPool && cfg.notifications != nil && cfg.notifications.Accumulator != nil && !isBlockProduction && lastHeader != nil {
+	if !shouldReportToTxPool && cfg.notifications != nil && cfg.notifications.Accumulator != nil && lastHeader != nil {
 		// No reporting to the txn pool has been done since we are not within the "state-stream" window.
 		// However, we should still at the very least report the last block number to it, so it can update its block progress.
 		// Otherwise, we can get in a deadlock situation when there is a block building request in environments where
@@ -414,21 +405,20 @@ func dumpTxIODebug(blockNum uint64, txIO *state.VersionedIO) {
 
 type txExecutor struct {
 	sync.RWMutex
-	cfg               ExecuteBlockCfg
-	agg               *dbstate.Aggregator
-	rs                *state.StateV3Buffered
-	doms              *execctx.SharedDomains
-	u                 Unwinder
-	isBlockProduction bool
-	isForkValidation  bool
-	isApplyingBlocks  bool
-	applyTx           kv.TemporalTx
-	logger            log.Logger
-	logPrefix         string
-	progress          *Progress
-	taskExecMetrics   *exec.WorkerMetrics
-	blockExecMetrics  *blockExecMetrics
-	hooks             *tracing.Hooks
+	cfg              ExecuteBlockCfg
+	agg              *dbstate.Aggregator
+	rs               *state.StateV3Buffered
+	doms             *execctx.SharedDomains
+	u                Unwinder
+	isForkValidation bool
+	isApplyingBlocks bool
+	applyTx          kv.TemporalTx
+	logger           log.Logger
+	logPrefix        string
+	progress         *Progress
+	taskExecMetrics  *exec.WorkerMetrics
+	blockExecMetrics *blockExecMetrics
+	hooks            *tracing.Hooks
 
 	lastExecutedBlockNum  atomic.Int64
 	lastExecutedTxNum     atomic.Int64
@@ -599,9 +589,11 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 
 			var dbBAL types.BlockAccessList
 			var data []byte
-			if err = tx.Apply(ctx, func(applyTx kv.Tx) error {
+			// Use a fresh read tx (not tx.Apply) so we can see BAL data
+			// committed by InsertBlocks after this execution's tx was opened.
+			if err = te.cfg.db.View(ctx, func(roTx kv.Tx) error {
 				var e error
-				data, e = rawdb.ReadBlockAccessListBytes(applyTx, b.Hash(), blockNum)
+				data, e = rawdb.ReadBlockAccessListBytes(roTx, b.Hash(), blockNum)
 				return e
 			}); err != nil {
 				return err
@@ -675,13 +667,13 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 					exhausted = &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
 				}
 			}
-
-			te.execRequests <- &execRequest{
-				b.NumberU64(), b.Hash(),
+			select {
+			case te.execRequests <- &execRequest{b.NumberU64(), b.Hash(),
 				protocol.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time())),
-				dbBAL, txTasks, applyResults, false, exhausted,
+				dbBAL, txTasks, applyResults, false, exhausted}:
+			case <-ctx.Done():
+				break
 			}
-
 			mxExecBlocks.Add(1)
 
 			if exhausted != nil {
@@ -792,7 +784,7 @@ type FlushAndComputeCommitmentTimes struct {
 }
 
 // computeAndCheckCommitmentV3 - does write state to db and then check commitment
-func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.TemporalRwTx, doms *execctx.SharedDomains, cfg ExecuteBlockCfg, e *StageState, parallel bool, logger log.Logger, u Unwinder, isBlockProduction bool) (ok bool, times FlushAndComputeCommitmentTimes, err error) {
+func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.TemporalRwTx, doms *execctx.SharedDomains, cfg ExecuteBlockCfg, e *StageState, parallel bool, logger log.Logger, u Unwinder) (ok bool, times FlushAndComputeCommitmentTimes, err error) {
 	if header == nil {
 		return false, times, errors.New("header is nil")
 	}
@@ -826,10 +818,6 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 		return false, times, fmt.Errorf("compute commitment: %w", err)
 	}
 
-	if isBlockProduction {
-		header.Root = common.BytesToHash(computedRootHash)
-		return true, times, nil
-	}
 	if !bytes.Equal(computedRootHash, header.Root.Bytes()) {
 		logger.Warn(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), computedRootHash, header.Root.Bytes(), header.Hash()))
 		err = handleIncorrectRootHashError(header.Number.Uint64(), header.Hash(), header.ParentHash, applyTx, cfg, e, logger, u)
