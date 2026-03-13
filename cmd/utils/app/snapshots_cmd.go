@@ -1736,6 +1736,20 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs, chainDB kv.RoDB) error 
 		log.Warn("[integrity] This installation doesn't persist commitment history; ignoring commitment history checks")
 	}
 
+	return checkStateSnapshotFiles(dirs, persistReceiptCache, commitmentHistory)
+}
+
+var (
+	ErrSnapParseFilename   = errors.New("unparseable snapshot filename")
+	ErrSnapNoAccountFiles  = errors.New("no account snapshot files found")
+	ErrSnapGapAtStart      = errors.New("gap at start of snapshot range")
+	ErrSnapOverlap         = errors.New("overlapping snapshot ranges")
+	ErrSnapGap             = errors.New("gap in snapshot ranges")
+	ErrSnapMissingFile     = errors.New("missing snapshot file")
+	ErrSnapMaxStepMismatch = errors.New("max step mismatch across directories")
+)
+
+func checkStateSnapshotFiles(dirs datadir.Dirs, persistReceiptCache, commitmentHistory bool) error {
 	var maxStepDomain uint64 // across all files in SnapDomain
 	var accFiles []snaptype.FileInfo
 
@@ -1752,7 +1766,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs, chainDB kv.RoDB) error 
 
 		res, _, ok := snaptype.ParseFileName(dirs.SnapDomain, info.Name())
 		if !ok {
-			return fmt.Errorf("failed to parse filename %s", info.Name())
+			return fmt.Errorf("%w: %s", ErrSnapParseFilename, info.Name())
 		}
 		maxStepDomain = max(maxStepDomain, res.To)
 
@@ -1770,23 +1784,23 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs, chainDB kv.RoDB) error 
 		return (accFiles[i].From < accFiles[j].From) || (accFiles[i].From == accFiles[j].From && accFiles[i].To < accFiles[j].To)
 	})
 	if len(accFiles) == 0 {
-		return fmt.Errorf("no account snapshot files (.kv) found in %s", dirs.SnapDomain)
+		return fmt.Errorf("%w (.kv) in %s", ErrSnapNoAccountFiles, dirs.SnapDomain)
 	}
 	if accFiles[0].From != 0 {
-		return fmt.Errorf("gap at start: state snaps start at (%d-%d). snaptype: accounts", accFiles[0].From, accFiles[0].To)
+		return fmt.Errorf("%w: state snaps start at (%d-%d), snaptype: accounts", ErrSnapGapAtStart, accFiles[0].From, accFiles[0].To)
 	}
 
 	prevFrom, prevTo := accFiles[0].From, accFiles[0].To
 	for i := 1; i < len(accFiles); i++ {
 		res := accFiles[i]
 		if prevFrom == res.From {
-			return fmt.Errorf("state file %s is possibly overlapped by previous file %s (maybe run remove_overlaps)", accFiles[i-1].Path, res.Path)
+			return fmt.Errorf("%w: %s possibly overlapped by %s (maybe run remove_overlaps)", ErrSnapOverlap, accFiles[i-1].Path, res.Path)
 		}
 		if res.From < prevTo {
-			return fmt.Errorf("overlap detected between %s and %s", res.Path, accFiles[i-1].Path)
+			return fmt.Errorf("%w: between %s and %s", ErrSnapOverlap, res.Path, accFiles[i-1].Path)
 		}
 		if res.From > prevTo {
-			return fmt.Errorf("gap detected between %s and %s", accFiles[i-1].Path, res.Path)
+			return fmt.Errorf("%w: between %s and %s", ErrSnapGap, accFiles[i-1].Path, res.Path)
 		}
 		prevFrom, prevTo = res.From, res.To
 	}
@@ -1795,7 +1809,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs, chainDB kv.RoDB) error 
 		// do a range check over all snapshots types (sanitizes domain and history folder)
 		accName, err := version.ReplaceVersionWithMask(res.Name())
 		if err != nil {
-			return fmt.Errorf("failed to replace version file %s: %w", res.Name(), err)
+			return fmt.Errorf("%w: failed to replace version in %s: %v", ErrSnapParseFilename, res.Name(), err)
 		}
 		for snapType := kv.Domain(0); snapType < kv.DomainLen; snapType++ {
 			// skip rcache check if this datadir doesn't produce it
@@ -1806,7 +1820,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs, chainDB kv.RoDB) error 
 			schemaVersionMinSup := statecfg.Schema.GetDomainCfg(snapType).GetVersions().Domain.DataKV.MinSupported
 			expectedFileName := strings.Replace(accName, "accounts", snapType.String(), 1)
 			if err = version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapDomain, expectedFileName), schemaVersionMinSup); err != nil {
-				return fmt.Errorf("missing file %s at path %s with err %w", expectedFileName, filepath.Join(dirs.SnapDomain, expectedFileName), err)
+				return fmt.Errorf("%w: %s at %s: %v", ErrSnapMissingFile, expectedFileName, filepath.Join(dirs.SnapDomain, expectedFileName), err)
 			}
 
 			// check that the index file exist
@@ -1815,7 +1829,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs, chainDB kv.RoDB) error 
 				fileName := strings.Replace(expectedFileName, ".kv", ".bt", 1)
 				err := version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapDomain, fileName), schemaVersionMinSup)
 				if err != nil {
-					return fmt.Errorf("missing file %s at path %s with err %w", expectedFileName, filepath.Join(dirs.SnapDomain, fileName), err)
+					return fmt.Errorf("%w: %s at %s: %v", ErrSnapMissingFile, expectedFileName, filepath.Join(dirs.SnapDomain, fileName), err)
 				}
 			}
 			if statecfg.Schema.GetDomainCfg(snapType).Accessors.Has(statecfg.AccessorExistence) {
@@ -1823,7 +1837,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs, chainDB kv.RoDB) error 
 				fileName := strings.Replace(expectedFileName, ".kv", ".kvei", 1)
 				err := version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapDomain, fileName), schemaVersionMinSup)
 				if err != nil {
-					return fmt.Errorf("missing file %s at path %s with err %w", expectedFileName, filepath.Join(dirs.SnapDomain, fileName), err)
+					return fmt.Errorf("%w: %s at %s: %v", ErrSnapMissingFile, expectedFileName, filepath.Join(dirs.SnapDomain, fileName), err)
 				}
 			}
 			if statecfg.Schema.GetDomainCfg(snapType).Accessors.Has(statecfg.AccessorHashMap) {
@@ -1831,14 +1845,14 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs, chainDB kv.RoDB) error 
 				fileName := strings.Replace(expectedFileName, ".kv", ".kvi", 1)
 				err := version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapDomain, fileName), schemaVersionMinSup)
 				if err != nil {
-					return fmt.Errorf("missing file %s at path %s with err %w", expectedFileName, filepath.Join(dirs.SnapDomain, fileName), err)
+					return fmt.Errorf("%w: %s at %s: %v", ErrSnapMissingFile, expectedFileName, filepath.Join(dirs.SnapDomain, fileName), err)
 				}
 			}
 		}
 	}
 
 	if maxStepDomain != accFiles[len(accFiles)-1].To {
-		return fmt.Errorf("accounts domain max step (=%d) is different to SnapDomain files max step (=%d)", accFiles[len(accFiles)-1].To, maxStepDomain)
+		return fmt.Errorf("%w: accounts domain max step (=%d) differs from SnapDomain files max step (=%d)", ErrSnapMaxStepMismatch, accFiles[len(accFiles)-1].To, maxStepDomain)
 	}
 
 	var maxStepII uint64 // across all files in SnapIdx
@@ -1857,7 +1871,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs, chainDB kv.RoDB) error 
 
 		res, _, ok := snaptype.ParseFileName(dirs.SnapIdx, info.Name())
 		if !ok {
-			return fmt.Errorf("failed to parse filename %s: %w", info.Name(), err)
+			return fmt.Errorf("%w: %s", ErrSnapParseFilename, info.Name())
 		}
 
 		maxStepII = max(maxStepII, res.To)
@@ -1877,23 +1891,23 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs, chainDB kv.RoDB) error 
 		return (accFiles[i].From < accFiles[j].From) || (accFiles[i].From == accFiles[j].From && accFiles[i].To < accFiles[j].To)
 	})
 	if len(accFiles) == 0 {
-		return fmt.Errorf("no account inverted index files (.ef) found in %s", dirs.SnapIdx)
+		return fmt.Errorf("%w (.ef) in %s", ErrSnapNoAccountFiles, dirs.SnapIdx)
 	}
 	if accFiles[0].From != 0 {
-		return fmt.Errorf("gap at start: state ef snaps start at (%d-%d). snaptype: accounts", accFiles[0].From, accFiles[0].To)
+		return fmt.Errorf("%w: state ef snaps start at (%d-%d), snaptype: accounts", ErrSnapGapAtStart, accFiles[0].From, accFiles[0].To)
 	}
 
 	prevFrom, prevTo = accFiles[0].From, accFiles[0].To
 	for i := 1; i < len(accFiles); i++ {
 		res := accFiles[i]
 		if prevFrom == res.From {
-			return fmt.Errorf("state file %s is possibly overlapped by previous file %s (maybe run remove_overlaps)", accFiles[i-1].Path, res.Path)
+			return fmt.Errorf("%w: %s possibly overlapped by %s (maybe run remove_overlaps)", ErrSnapOverlap, accFiles[i-1].Path, res.Path)
 		}
 		if res.From < prevTo {
-			return fmt.Errorf("overlap detected between %s and %s", res.Path, accFiles[i-1].Path)
+			return fmt.Errorf("%w: between %s and %s", ErrSnapOverlap, res.Path, accFiles[i-1].Path)
 		}
 		if res.From > prevTo {
-			return fmt.Errorf("gap detected between %s and %s", accFiles[i-1].Path, res.Path)
+			return fmt.Errorf("%w: between %s and %s", ErrSnapGap, accFiles[i-1].Path, res.Path)
 		}
 
 		prevFrom, prevTo = res.From, res.To
@@ -1912,7 +1926,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs, chainDB kv.RoDB) error 
 	for _, res := range accFiles {
 		accName, err := version.ReplaceVersionWithMask(res.Name())
 		if err != nil {
-			return fmt.Errorf("failed to replace version file %s: %w", res.Name(), err)
+			return fmt.Errorf("%w: failed to replace version in %s: %v", ErrSnapParseFilename, res.Name(), err)
 		}
 		// do a range check over all snapshots types (sanitizes domain and history folder)
 		for _, snapType := range iiTypes {
@@ -1924,13 +1938,13 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs, chainDB kv.RoDB) error 
 			schemaVersionMinSup := versioned.GetVersions().II.DataEF.MinSupported
 			expectedFileName := strings.Replace(accName, "accounts", snapType, 1)
 			if err = version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapIdx, expectedFileName), schemaVersionMinSup); err != nil {
-				return fmt.Errorf("missing file %s at path %s with err %w", expectedFileName, filepath.Join(dirs.SnapIdx, expectedFileName), err)
+				return fmt.Errorf("%w: %s at %s: %v", ErrSnapMissingFile, expectedFileName, filepath.Join(dirs.SnapIdx, expectedFileName), err)
 			}
 			// Check accessors
 			schemaVersionMinSup = versioned.GetVersions().II.AccessorEFI.MinSupported
 			fileName := strings.Replace(expectedFileName, ".ef", ".efi", 1)
 			if err = version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapAccessors, fileName), schemaVersionMinSup); err != nil {
-				return fmt.Errorf("missing file %s at path %s with err %w", fileName, filepath.Join(dirs.SnapAccessors, fileName), err)
+				return fmt.Errorf("%w: %s at %s: %v", ErrSnapMissingFile, fileName, filepath.Join(dirs.SnapAccessors, fileName), err)
 			}
 			if !slices.Contains(viTypes, snapType) {
 				continue
@@ -1938,19 +1952,19 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs, chainDB kv.RoDB) error 
 			schemaVersionMinSup = versioned.GetVersions().Hist.AccessorVI.MinSupported
 			fileName = strings.Replace(expectedFileName, ".ef", ".vi", 1)
 			if err = version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapAccessors, fileName), schemaVersionMinSup); err != nil {
-				return fmt.Errorf("missing file %s at path %s with err %w", fileName, filepath.Join(dirs.SnapAccessors, fileName), err)
+				return fmt.Errorf("%w: %s at %s: %v", ErrSnapMissingFile, fileName, filepath.Join(dirs.SnapAccessors, fileName), err)
 			}
 			schemaVersionMinSup = versioned.GetVersions().Hist.DataV.MinSupported
 			// check that .v
 			fileName = strings.Replace(expectedFileName, ".ef", ".v", 1)
 			if err = version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapHistory, fileName), schemaVersionMinSup); err != nil {
-				return fmt.Errorf("missing file %s at path %s with err %w", fileName, filepath.Join(dirs.SnapHistory, fileName), err)
+				return fmt.Errorf("%w: %s at %s: %v", ErrSnapMissingFile, fileName, filepath.Join(dirs.SnapHistory, fileName), err)
 			}
 		}
 	}
 
 	if maxStepDomain != accFiles[len(accFiles)-1].To {
-		return fmt.Errorf("accounts domain max step (=%d) is different to SnapIdx files max step (=%d)", accFiles[len(accFiles)-1].To, maxStepDomain)
+		return fmt.Errorf("%w: accounts domain max step (=%d) differs from SnapIdx files max step (=%d)", ErrSnapMaxStepMismatch, accFiles[len(accFiles)-1].To, maxStepDomain)
 	}
 	return nil
 }
