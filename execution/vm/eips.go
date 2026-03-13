@@ -369,3 +369,13 @@ func enable8024(jt *JumpTable) {
 		numPush:     0,
 	}
 }
+
+// enable7843 applies EIP-7843 (SLOTNUM)
+func enable7843(jt *JumpTable) {
+	jt[SLOTNUM] = &operation{
+		execute:     opSlotNum,
+		constantGas: GasQuickStep,
+		numPop:      0,
+		numPush:     1,
+	}
+}

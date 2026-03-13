@@ -43,10 +43,6 @@ var (
 	WitnessProcessing SyncStage = "WitnessProcessing" // Process buffered witness data for Polygon chains
 	TxLookup          SyncStage = "TxLookup"          // Generating transactions lookup index
 	Finish            SyncStage = "Finish"            // Nominal stage after all other stages
-
-	MiningCreateBlock SyncStage = "MiningCreateBlock"
-	MiningExecution   SyncStage = "MiningExecution"
-	MiningFinish      SyncStage = "MiningFinish"
 )
 
 var AllStages = []SyncStage{

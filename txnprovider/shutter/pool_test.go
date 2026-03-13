@@ -27,6 +27,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -41,7 +42,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/synctest"
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/chain/networkname"
@@ -200,6 +200,9 @@ func TestPoolCleanupShouldNotDeleteNewEncTxnsDueToConsecutiveEmptyDecrMsgs(t *te
 
 //goland:noinspection DuplicatedCode
 func TestPoolSkipsBlobTxns(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	pt := PoolTest{t}
 	pt.Run(func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle) {
@@ -556,7 +559,7 @@ func (cb *MockContractBackend) PrepareMocks() {
 
 	cb.EXPECT().
 		CallContract(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(ctx context.Context, msg ethereum.CallMsg, b *big.Int) ([]byte, error) {
+		DoAndReturn(func(ctx context.Context, msg ethereum.CallMsg, b *uint256.Int) ([]byte, error) {
 			cb.mu.Lock()
 			defer cb.mu.Unlock()
 			results := cb.mockedCallResults[*msg.To]

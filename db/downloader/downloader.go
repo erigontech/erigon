@@ -24,7 +24,6 @@ import (
 	"io"
 	"io/fs"
 	"iter"
-	"maps"
 	"math"
 	"net"
 	"net/http"
@@ -64,6 +63,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
 )
 
@@ -142,33 +142,14 @@ type AggStats struct {
 	HashRate, FlushRate       uint64
 }
 
-func (me *AggStats) AllTorrentsComplete() bool {
-	return me.TorrentsCompleted == me.NumTorrents
-}
-
 type requestHandler struct {
 	// Separated this rather than embedded it to ensure our wrapper RoundTrip is called.
 	rt http.RoundTripper
 }
 
-var cloudflareHeaders = http.Header{
-	"lsjdjwcush6jbnjj3jnjscoscisoc5s": []string{"I%OSJDNFKE783DDHHJD873EFSIVNI7384R78SSJBJBCCJBC32JABBJCBJK45"},
-}
-
-func insertCloudflareHeaders(req *http.Request) {
-	// Note this is clobbering the headers.
-	maps.Copy(req.Header, cloudflareHeaders)
-}
-
-type roundTripperFunc func(req *http.Request) (*http.Response, error)
-
-func (me roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
-	return me(req)
-}
-
 // TODO(anacrolix): Upstream any logic that works reliably.
 func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err error) {
-	insertCloudflareHeaders(req)
+	snapcfg.InsertCloudflareHeaders(req)
 
 	resp, err = r.rt.RoundTrip(req)
 	if err != nil {
@@ -427,7 +408,7 @@ func (d *Downloader) snapshotDataLooksComplete(info *metainfo.Info) bool {
 // Log the names of torrents missing metainfo. We can pass a level in to scale the urgency of the
 // situation.
 func (d *Downloader) logNoMetadata(lvl log.Lvl, torrents []snapshot) {
-	var noMetadata []string
+	noMetadata := make([]string, 0, len(torrents))
 
 	for _, ps := range torrents {
 		t, ok := d.torrentClient.Torrent(ps.InfoHash)
@@ -842,18 +823,24 @@ func (d *Downloader) logDownload(
 ) {
 	startTime := time.Now()
 	stats := d.newStats(AggStats{}, ts)
+
+	// Log initial sync stats immediately so the user sees that a download has started.
+	// Don't log "No metadata yet" on the first pass — metadata tasks haven't had time to
+	// complete, so it would always fire and produce noisy (and potentially duplicate) output
+	// when sequential download batches each start their own logging goroutine.
+	stats = d.newStats(stats, ts)
+	d.logSyncStats(startTime, stats, target)
+
 	interval := time.Second
 	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(interval):
+		}
 		stats = d.newStats(stats, ts)
 		d.logSyncStats(startTime, stats, target)
 		d.logNoMetadata(getNoMetadataLvl(), ts)
-		if ctx.Err() != nil {
-			return
-		}
-		select {
-		case <-ctx.Done():
-		case <-time.After(interval):
-		}
 		interval = min(interval*2, 15*time.Second)
 	}
 }
@@ -925,6 +912,24 @@ func (d *Downloader) addPreverifiedSnapshotForDownload(
 	defer d.lock.Unlock()
 	t, ok, err := d.getExistingSnapshotTorrent(name, infoHash)
 	if err != nil {
+		// If a torrent for this name is already loaded with a different infohash, keep the
+		// existing local torrent and skip the preverified download. This handles the case where
+		// a node already has a valid local snapshot (e.g. re-compressed release with new hash,
+		// or a file rebuilt by background recsplit) — the existing file is usable.
+		//
+		// NOTE: The root cause of infohash mismatches on restart (stale .torrent files loaded
+		// by AddTorrentsFromDisk before initial sync runs) is tracked separately. The proper fix
+		// is to run initial sync before AddTorrentsFromDisk so the preverified TOML hashes can
+		// always take precedence. See: https://github.com/erigontech/erigon/issues/19435
+		if existingT, nameOk := d.torrentsByName[name]; nameOk && existingT.InfoHash() != infoHash {
+			d.log(log.LvlWarn, "snapshot already loaded with different infohash, keeping existing local torrent (preverified skipped)",
+				"name", name,
+				"existing_infohash", existingT.InfoHash().HexString(),
+				"preverified_infohash", infoHash.HexString())
+			t = existingT
+			err = nil
+			return
+		}
 		return
 	}
 	// We can invalidate data if a torrent isn't yet loaded.
@@ -1074,7 +1079,7 @@ func (d *Downloader) fetchMetainfoFromWebseeds(ctx context.Context, name string,
 		buf.Reset()
 		var mi metainfo.MetaInfo
 		var w io.Writer = &buf
-		mi, err = GetMetainfoFromWebseed(ctx, base, base, d.metainfoHttpClient, w)
+		mi, err = GetMetainfoFromWebseed(ctx, base, name, d.metainfoHttpClient, w)
 		if err != nil {
 			d.log(log.LvlDebug, "error fetching metainfo from webseed", "err", err, "name", name, "webseed", base)
 			// Whither error?

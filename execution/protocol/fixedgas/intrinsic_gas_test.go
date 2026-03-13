@@ -77,13 +77,20 @@ func TestShanghaiIntrinsicGas(t *testing.T) {
 
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			// Todo (@somnathb1) - Factor in EIP-7623
-			gas, _, overflow := CalcIntrinsicGas(c.dataLen, c.dataNonZeroLen, c.authorizationsLen, 0, 0, c.creation, true, true, c.isShanghai, false, false)
+			result, overflow := CalcIntrinsicGas(IntrinsicGasCalcArgs{
+				Data:               make([]byte, c.dataLen),
+				DataNonZeroLen:     c.dataNonZeroLen,
+				AuthorizationsLen:  c.authorizationsLen,
+				IsContractCreation: c.creation,
+				IsEIP2:             true,
+				IsEIP2028:          true,
+				IsEIP3860:          c.isShanghai,
+			})
 			if overflow {
 				t.Errorf("expected success but got uint overflow")
 			}
-			if gas != c.expected {
-				t.Errorf("expected %v but got %v", c.expected, gas)
+			if result.RegularGas != c.expected {
+				t.Errorf("expected %v but got %v", c.expected, result.RegularGas)
 			}
 		})
 	}
@@ -91,8 +98,13 @@ func TestShanghaiIntrinsicGas(t *testing.T) {
 
 func TestZeroDataIntrinsicGas(t *testing.T) {
 	assert := assert.New(t)
-	gas, floorGas7623, overflow := CalcIntrinsicGas(0, 0, 0, 0, 0, false, true, true, true, true, false)
+	result, overflow := CalcIntrinsicGas(IntrinsicGasCalcArgs{
+		IsEIP2:    true,
+		IsEIP2028: true,
+		IsEIP3860: true,
+		IsEIP7623: true,
+	})
 	assert.False(overflow)
-	assert.Equal(params.TxGas, gas)
-	assert.Equal(params.TxGas, floorGas7623)
+	assert.Equal(params.TxGas, result.RegularGas)
+	assert.Equal(params.TxGas, result.FloorGasCost)
 }

@@ -1199,6 +1199,44 @@ Returns the value from a storage position at a given address.
    * - ``DATA``
      - The value at this storage position
 
+--------------------
+
+eth_getStorageValues
+--------------------
+
+Returns the values of multiple storage slots for multiple accounts in a single request.
+
+**Parameters**
+
+.. list-table::
+   :widths: 25 75
+   :header-rows: 1
+
+   * - Type
+     - Description
+   * - ``OBJECT``
+     - Map of addresses (``DATA, 20 BYTES``) to arrays of storage slot keys (``DATA, 32 BYTES``)
+   * - ``QUANTITY | TAG``
+     - Integer block number or one of "earliest", "latest" or "pending"
+
+
+**Example**
+
+::
+
+   curl -s --data '{"jsonrpc":"2.0","method":"eth_getStorageValues","params":[{"0xdAC17F958D2ee523a2206206994597C13D831ec7":["0x0000000000000000000000000000000000000000000000000000000000000002","0x0000000000000000000000000000000000000000000000000000000000000006"],"0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48":["0x0000000000000000000000000000000000000000000000000000000000000003"]},"latest"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
+
+**Returns**
+
+.. list-table::
+   :widths: 25 75
+   :header-rows: 1
+
+   * - Type
+     - Description
+   * - ``OBJECT``
+     - Map of addresses to arrays of storage values (``DATA, 32 BYTES``) in the same order as the requested keys
+
 --------------
 
 eth_blockNumber

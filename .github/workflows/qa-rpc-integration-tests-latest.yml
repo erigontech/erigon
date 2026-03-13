@@ -8,18 +8,11 @@ on:
         type: boolean
         required: false
         default: false
+  schedule:
+    - cron: '0 0 * * *'  # Run nightly at 00:00 AM UTC
   push:
     branches:
-      - main
-  pull_request:
-    branches:
-      - main
-    types:
-      - opened
-      - reopened
-      - synchronize
-      - ready_for_review
-
+      - 'release/3.*'
 
 jobs:
   mainnet-rpc-integ-tests-latest:
@@ -33,10 +26,9 @@ jobs:
       cancel-in-progress: true
     runs-on: [ self-hosted, qa, Ethereum, rpc-latest-erigon ]
     env:
-      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
-      TOTAL_TIME_SECONDS: 900 # 15 minutes
+      TOTAL_TIME_SECONDS: 1800 # 30 minutes
       REFERENCE_SYSTEM_HOST_ADDRESS: 157.180.55.78:8545
       ERIGON_ASSERT: true
       RPC_PAST_TEST_DIR: /opt/rpc-past-tests
@@ -46,6 +38,21 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
 
+      - name: Set reference data dir based on branch
+        run: |
+          # For pull_request events base_ref is the target branch name; for push/dispatch parse from ref.
+          BRANCH="${{ github.base_ref }}"
+          if [ -z "$BRANCH" ]; then
+            BRANCH="${{ github.ref }}"
+            BRANCH="${BRANCH#refs/heads/}"
+          fi
+          if [[ "$BRANCH" == release/* ]]; then
+            VERSION="${BRANCH#release/}"
+            echo "ERIGON_REFERENCE_DATA_DIR=/opt/erigon-versions/reference-version-${VERSION}/datadir" >> $GITHUB_ENV
+          else
+            echo "ERIGON_REFERENCE_DATA_DIR=/opt/erigon-versions/reference-version/datadir" >> $GITHUB_ENV
+          fi
+
       - name: Clean Erigon Build Directory
         run: |
           make clean
@@ -54,6 +61,27 @@ jobs:
         run: |
           make erigon integration
         working-directory: ${{ github.workspace }}
+
+      - name: Wait for current Erigon instance to reach the tip
+        id: preparing_step
+        run: |
+          ERIGON_PID=$(pgrep -x erigon | head -1)
+          if [ -z "$ERIGON_PID" ]; then
+            echo "Could not find running Erigon process dedicated to db maintenance"
+          else
+            echo "Found Erigon process dedicated to db maintenance, PID: $ERIGON_PID"
+            python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-sync/run_and_chase_tip.py \
+              --total-time=$TOTAL_TIME_SECONDS \
+              --stop-erigon=False \
+              --erigon-pid=$ERIGON_PID
+          fi
+
+      - name: Upload preparing-step logs on failure
+        if: failure() && steps.preparing_step.outcome == 'failure'
+        uses: actions/upload-artifact@v6
+        with:
+          name: preparing-step-logs
+          path: ${{ env.ERIGON_REFERENCE_DATA_DIR }}/logs/
 
       - name: Pause the Erigon instance dedicated to db maintenance
         run: |
@@ -78,7 +106,7 @@ jobs:
           echo "Running migrations on datadir..."
           ./integration run_migrations --datadir $ERIGON_TESTBED_DATA_DIR --chain $CHAIN
 
-      - name: Run Erigon version and wait for sync
+      - name: Run Erigon and wait for sync
         id: pre_test_step
         run: |
           set +e # Disable exit on error
@@ -95,9 +123,6 @@ jobs:
           # Capture monitoring script exit status
           test_exit_status=$?
           
-          # Save the subsection reached status
-          echo "test_executed=true" >> $GITHUB_OUTPUT
-          
           # Check test runner script exit status
           if [ $test_exit_status -eq 0 ]; then
              echo "Tip-chasing completed successfully"
@@ -107,6 +132,13 @@ jobs:
              echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
              exit 1
           fi
+
+      - name: Upload pre-test logs on failure
+        if: failure() && steps.pre_test_step.outcome == 'failure'
+        uses: actions/upload-artifact@v6
+        with:
+          name: pre-test-logs
+          path: ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/
 
       - name: Run RPC Integration Tests
         id: test_step
@@ -198,7 +230,7 @@ jobs:
             db_version="no-version"
           fi
           
-          python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py --repo erigon --commit $(git rev-parse HEAD) --branch ${{ github.ref_name }} --test_name rpc-integration-tests --chain $CHAIN --runner ${{ runner.name }} --db_version $db_version --outcome $TEST_RESULT #--result_file ${{ github.workspace }}/result-$CHAIN.json
+          python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py --repo erigon --commit $(git rev-parse HEAD) --branch ${{ github.ref_name }} --test_name rpc-integration-tests-latest --chain $CHAIN --runner ${{ runner.name }} --db_version $db_version --outcome $TEST_RESULT #--result_file ${{ github.workspace }}/result-$CHAIN.json
 
       - name: Delete Erigon Testbed Data Directory
         if: always() && steps.save_datadir_step.outputs.datadir_saved == 'true'

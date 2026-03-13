@@ -139,7 +139,7 @@ func InitMiner(
 		NetworkID: genesis.Config.ChainID.Uint64(),
 		TxPool:    txpoolcfg.DefaultConfig,
 		GPO:       ethconfig.Defaults.GPO,
-		Miner: buildercfg.MiningConfig{
+		Builder: buildercfg.BuilderConfig{
 			Etherbase:  crypto.PubkeyToAddress(privKey.PublicKey),
 			GasLimit:   &genesis.GasLimit,
 			EnabledPOS: true,

@@ -25,6 +25,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/execution_client/rpc_helper"
@@ -85,7 +87,7 @@ func (cc *ExecutionClientRpc) NewPayload(
 	for i, j := 0, len(reversedBaseFeePerGas)-1; i < j; i, j = i+1, j-1 {
 		reversedBaseFeePerGas[i], reversedBaseFeePerGas[j] = reversedBaseFeePerGas[j], reversedBaseFeePerGas[i]
 	}
-	baseFee := new(big.Int).SetBytes(reversedBaseFeePerGas)
+	baseFee := new(uint256.Int).SetBytes(reversedBaseFeePerGas)
 	var engineMethod string
 	// determine the engine method
 	switch payload.Version() {
@@ -117,8 +119,7 @@ func (cc *ExecutionClientRpc) NewPayload(
 		BlockHash:    payload.BlockHash,
 	}
 
-	request.BaseFeePerGas = new(hexutil.Big)
-	*request.BaseFeePerGas = hexutil.Big(*baseFee)
+	request.BaseFeePerGas = (*hexutil.Big)(baseFee.ToBig())
 	payloadBody := payload.Body()
 	// Setup transactionbody
 	request.Withdrawals = payloadBody.Withdrawals

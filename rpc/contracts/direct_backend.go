@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/holiman/uint256"
+
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -46,13 +48,13 @@ func NewDirectBackend(api jsonrpc.EthAPI) DirectBackend {
 	}
 }
 
-func (b DirectBackend) CodeAt(ctx context.Context, account common.Address, blockNum *big.Int) ([]byte, error) {
+func (b DirectBackend) CodeAt(ctx context.Context, account common.Address, blockNum *uint256.Int) ([]byte, error) {
 	return b.api.GetCode(ctx, account, BlockNumArg(blockNum))
 }
 
-func (b DirectBackend) CallContract(ctx context.Context, callMsg ethereum.CallMsg, blockNum *big.Int) ([]byte, error) {
+func (b DirectBackend) CallContract(ctx context.Context, callMsg ethereum.CallMsg, blockNum *uint256.Int) ([]byte, error) {
 	blockNumberOrHash := BlockNumArg(blockNum)
-	var blockNumberOrHashRef *rpc.BlockNumberOrHash = &blockNumberOrHash
+	var blockNumberOrHashRef = &blockNumberOrHash
 
 	return b.api.Call(ctx, CallArgsFromCallMsg(callMsg), blockNumberOrHashRef, nil, nil)
 }
@@ -63,6 +65,22 @@ func (b DirectBackend) PendingCodeAt(ctx context.Context, account common.Address
 
 func (b DirectBackend) PendingNonceAt(ctx context.Context, account common.Address) (uint64, error) {
 	count, err := b.api.GetTransactionCount(ctx, account, PendingBlockNumArg())
+	if err != nil {
+		return 0, err
+	}
+
+	return uint64(*count), nil
+}
+
+func (b DirectBackend) NonceAt(ctx context.Context, account common.Address, blockNumber *big.Int) (uint64, error) {
+	var blockRef rpc.BlockReference
+	if blockNumber == nil {
+		blockRef = rpc.LatestBlock
+	} else {
+		blockRef = rpc.BlockNumber(blockNumber.Int64()).AsBlockReference()
+	}
+
+	count, err := b.api.GetTransactionCount(ctx, account, rpc.BlockNumberOrHash(blockRef))
 	if err != nil {
 		return 0, err
 	}
@@ -153,7 +171,7 @@ func (b DirectBackend) SubscribeFilterLogs(ctx context.Context, query ethereum.F
 	return sub, nil
 }
 
-func BlockNumArg(blockNum *big.Int) rpc.BlockNumberOrHash {
+func BlockNumArg(blockNum *uint256.Int) rpc.BlockNumberOrHash {
 	var blockRef rpc.BlockReference
 	if blockNum == nil {
 		blockRef = rpc.LatestBlock
