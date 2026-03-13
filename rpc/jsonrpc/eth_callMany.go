@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -168,11 +169,17 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	// this makes sure resources are cleaned up.
 	defer cancel()
 
-	// Wait for the context to be done and cancel the evm. Even if the
-	// EVM has finished, cancelling may be done (repeatedly)
+	done := make(chan struct{})
+	defer close(done)
+
+	var timedOut atomic.Bool
 	go func() {
-		<-ctx.Done()
-		evm.Cancel()
+		select {
+		case <-ctx.Done():
+			timedOut.Store(true)
+			evm.Cancel()
+		case <-done:
+		}
 	}()
 
 	// Setup the gas pool (also for unmetered requests)
@@ -195,7 +202,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		_ = st.FinalizeTx(rules, state.NewNoopWriter())
 
 		// If the timer caused an abort, return an appropriate error message
-		if evm.Cancelled() {
+		if timedOut.Load() {
 			return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
 		}
 	}
