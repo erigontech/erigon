@@ -275,7 +275,7 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 }
 
 // Computing commitment root hash. If possible, use parallel commitment and after evaluation decides, if it can be used next time
-func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress, warmup WarmupConfig) (rootHash []byte, err error) {
+func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string, onProgress func(*CommitProgress), warmup WarmupConfig) (rootHash []byte, err error) {
 	start := time.Now()
 	wasConcurrent := updates.IsConcurrentCommitment()
 	updatesCount := updates.Size()
@@ -302,7 +302,7 @@ func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates
 			return nil, err
 		}
 	default:
-		rootHash, err = p.root.Process(ctx, updates, logPrefix, progress, warmup)
+		rootHash, err = p.root.Process(ctx, updates, logPrefix, onProgress, warmup)
 		if err != nil {
 			return nil, err
 		}
