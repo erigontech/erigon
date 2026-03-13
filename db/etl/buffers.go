@@ -128,32 +128,38 @@ type sortableBuffer struct {
 // so no copying is necessary
 func (b *sortableBuffer) Put(k, v []byte) {
 	lk, lv := len(k), len(v)
-	if k == nil {
-		lk = -1
-	}
-	if v == nil {
-		lv = -1
-	}
+
 	var prefix uint64
-	if len(k) >= 8 {
+	if lk >= 8 {
 		prefix = binary.BigEndian.Uint64(k)
-	} else if len(k) > 0 {
+	} else if lk > 0 {
 		// Pad short keys with zeros on the right so prefix comparison
 		// matches bytes.Compare order. E.g. key 0x73 → prefix 0x7300000000000000.
 		var buf [8]byte
 		copy(buf[:], k)
 		prefix = binary.BigEndian.Uint64(buf[:])
+	} else if k == nil {
+		lk = -1
 	}
+	if v == nil {
+		lv = -1
+	}
+
+	off := len(b.data)
+	need := len(k) + len(v) // use original slice lengths (always >= 0)
+	b.data = slices.Grow(b.data, need)
+	b.data = b.data[:off+need]
+	copy(b.data[off:], k)
+	copy(b.data[off+len(k):], v)
+
 	b.entries = append(b.entries, entryLoc{
-		offset:    len(b.data),
+		offset:    off,
 		keyLen:    lk,
 		valLen:    lv,
 		seq:       len(b.entries),
 		keyPrefix: prefix,
 	})
-	b.data = append(b.data, k...)
-	b.data = append(b.data, v...)
-	b.size += len(k) + len(v) + 40 // 40 = sizeof(entryLoc)
+	b.size += need + 40 // 40 = sizeof(entryLoc)
 }
 
 func (b *sortableBuffer) Size() int { return b.size }
