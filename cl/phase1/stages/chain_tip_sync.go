@@ -233,6 +233,7 @@ MainLoop:
 				// Process the block
 				if err := processBlock(ctx, cfg, cfg.indiciesDB, block, true, true, true); err != nil {
 					log.Debug("bad blocks segment received", "err", err, "blockSlot", block.Block.Slot)
+					seenBlockRoots[blockRoot] = struct{}{}
 					continue
 				}
 
