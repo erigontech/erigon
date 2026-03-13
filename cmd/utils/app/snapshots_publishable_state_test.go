@@ -495,12 +495,14 @@ func removeMockFile(t *testing.T, dir string, name string) {
 }
 
 func Test_CheckStateSnapshotFiles_SuccessCase(t *testing.T) {
+	t.Parallel()
 	dirs := setupWorkingStateMockDatadir(t)
 	err := checkStateSnapshotFiles(dirs, false, false)
 	require.NoError(t, err)
 }
 
 func Test_CheckStateSnapshotFiles_WithPersistReceiptCache(t *testing.T) {
+	t.Parallel()
 	dirs := setupWorkingStateMockDatadir(t)
 	// Add rcache domain files (.kv + .kvi for each range)
 	createMockFile(t, dirs.SnapDomain, "v1.1-rcache.0-128.kv")
@@ -559,6 +561,7 @@ func Test_CheckStateSnapshotFiles_WithPersistReceiptCache(t *testing.T) {
 }
 
 func Test_CheckStateSnapshotFiles_WithCommitmentHistory(t *testing.T) {
+	t.Parallel()
 	dirs := setupWorkingStateMockDatadir(t)
 	// Add commitment idx files (.ef)
 	createMockFile(t, dirs.SnapIdx, "v2.0-commitment.0-128.ef")
@@ -603,6 +606,7 @@ func Test_CheckStateSnapshotFiles_WithCommitmentHistory(t *testing.T) {
 
 // A file in the domain directory that doesn't match the snapshot naming convention should be rejected.
 func Test_CheckStateSnapshotFiles_DomainUnparseableFile(t *testing.T) {
+	t.Parallel()
 	dirs := setupWorkingStateMockDatadir(t)
 	createMockFile(t, dirs.SnapDomain, "garbage.txt")
 	err := checkStateSnapshotFiles(dirs, false, false)
@@ -611,6 +615,7 @@ func Test_CheckStateSnapshotFiles_DomainUnparseableFile(t *testing.T) {
 
 // When all account .kv files are missing, the check should report that no account snapshots were found.
 func Test_CheckStateSnapshotFiles_DomainNoAccountKV(t *testing.T) {
+	t.Parallel()
 	dirs := setupWorkingStateMockDatadir(t)
 	removeMockFile(t, dirs.SnapDomain, "v1.1-accounts.0-128.kv")
 	removeMockFile(t, dirs.SnapDomain, "v1.1-accounts.128-192.kv")
@@ -622,6 +627,7 @@ func Test_CheckStateSnapshotFiles_DomainNoAccountKV(t *testing.T) {
 
 // If the first account .kv range doesn't start at step 0, a gap-at-start error is expected.
 func Test_CheckStateSnapshotFiles_DomainGapAtStart(t *testing.T) {
+	t.Parallel()
 	dirs := setupWorkingStateMockDatadir(t)
 	removeMockFile(t, dirs.SnapDomain, "v1.1-accounts.0-128.kv")
 	err := checkStateSnapshotFiles(dirs, false, false)
@@ -630,6 +636,7 @@ func Test_CheckStateSnapshotFiles_DomainGapAtStart(t *testing.T) {
 
 // Two account .kv files sharing the same From value should be flagged as a possible overlap.
 func Test_CheckStateSnapshotFiles_DomainOverlapSameFrom(t *testing.T) {
+	t.Parallel()
 	dirs := setupWorkingStateMockDatadir(t)
 	createMockFile(t, dirs.SnapDomain, "v1.1-accounts.0-64.kv")
 	err := checkStateSnapshotFiles(dirs, false, false)
@@ -638,6 +645,7 @@ func Test_CheckStateSnapshotFiles_DomainOverlapSameFrom(t *testing.T) {
 
 // An account .kv file whose range overlaps with an existing range should be detected.
 func Test_CheckStateSnapshotFiles_DomainOverlap(t *testing.T) {
+	t.Parallel()
 	dirs := setupWorkingStateMockDatadir(t)
 	createMockFile(t, dirs.SnapDomain, "v1.1-accounts.64-200.kv")
 	err := checkStateSnapshotFiles(dirs, false, false)
@@ -646,6 +654,7 @@ func Test_CheckStateSnapshotFiles_DomainOverlap(t *testing.T) {
 
 // Removing a middle account .kv file creates a gap between consecutive ranges.
 func Test_CheckStateSnapshotFiles_DomainGap(t *testing.T) {
+	t.Parallel()
 	dirs := setupWorkingStateMockDatadir(t)
 	removeMockFile(t, dirs.SnapDomain, "v1.1-accounts.128-192.kv")
 	err := checkStateSnapshotFiles(dirs, false, false)
@@ -654,6 +663,7 @@ func Test_CheckStateSnapshotFiles_DomainGap(t *testing.T) {
 
 // Each account range must have a corresponding .kv file for every domain type; removing one triggers a missing-file error.
 func Test_CheckStateSnapshotFiles_MissingDomainKV(t *testing.T) {
+	t.Parallel()
 	dirs := setupWorkingStateMockDatadir(t)
 	removeMockFile(t, dirs.SnapDomain, "v1.1-storage.128-192.kv")
 	err := checkStateSnapshotFiles(dirs, false, false)
@@ -662,6 +672,7 @@ func Test_CheckStateSnapshotFiles_MissingDomainKV(t *testing.T) {
 
 // Domains with AccessorBTree (accounts, storage, code, receipt) require a .bt file for each range.
 func Test_CheckStateSnapshotFiles_MissingDomainBT(t *testing.T) {
+	t.Parallel()
 	dirs := setupWorkingStateMockDatadir(t)
 	removeMockFile(t, dirs.SnapDomain, "v1.1-accounts.128-192.bt")
 	err := checkStateSnapshotFiles(dirs, false, false)
@@ -670,6 +681,7 @@ func Test_CheckStateSnapshotFiles_MissingDomainBT(t *testing.T) {
 
 // Domains with AccessorExistence (accounts, storage, code, receipt) require a .kvei file for each range.
 func Test_CheckStateSnapshotFiles_MissingDomainKVEI(t *testing.T) {
+	t.Parallel()
 	dirs := setupWorkingStateMockDatadir(t)
 	removeMockFile(t, dirs.SnapDomain, "v1.1-accounts.128-192.kvei")
 	err := checkStateSnapshotFiles(dirs, false, false)
@@ -678,6 +690,7 @@ func Test_CheckStateSnapshotFiles_MissingDomainKVEI(t *testing.T) {
 
 // The commitment domain uses AccessorHashMap and requires a .kvi file for each range.
 func Test_CheckStateSnapshotFiles_MissingDomainKVI(t *testing.T) {
+	t.Parallel()
 	dirs := setupWorkingStateMockDatadir(t)
 	removeMockFile(t, dirs.SnapDomain, "v1.1-commitment.128-192.kvi")
 	err := checkStateSnapshotFiles(dirs, false, false)
@@ -686,6 +699,7 @@ func Test_CheckStateSnapshotFiles_MissingDomainKVI(t *testing.T) {
 
 // If a non-account domain file extends beyond the account range, the maxStep check detects the mismatch.
 func Test_CheckStateSnapshotFiles_DomainMaxStepMismatch(t *testing.T) {
+	t.Parallel()
 	dirs := setupWorkingStateMockDatadir(t)
 	createMockFile(t, dirs.SnapDomain, "v1.1-storage.202-210.kv")
 	err := checkStateSnapshotFiles(dirs, false, false)
@@ -696,6 +710,7 @@ func Test_CheckStateSnapshotFiles_DomainMaxStepMismatch(t *testing.T) {
 
 // A file in the idx directory that doesn't match the snapshot naming convention should be rejected.
 func Test_CheckStateSnapshotFiles_IdxUnparseableFile(t *testing.T) {
+	t.Parallel()
 	dirs := setupWorkingStateMockDatadir(t)
 	createMockFile(t, dirs.SnapIdx, "garbage.txt")
 	err := checkStateSnapshotFiles(dirs, false, false)
@@ -704,6 +719,7 @@ func Test_CheckStateSnapshotFiles_IdxUnparseableFile(t *testing.T) {
 
 // When all account .ef files are missing, the check should report that no inverted index files were found.
 func Test_CheckStateSnapshotFiles_IdxNoAccountEF(t *testing.T) {
+	t.Parallel()
 	dirs := setupWorkingStateMockDatadir(t)
 	removeMockFile(t, dirs.SnapIdx, "v2.0-accounts.0-128.ef")
 	removeMockFile(t, dirs.SnapIdx, "v2.0-accounts.128-192.ef")
@@ -715,6 +731,7 @@ func Test_CheckStateSnapshotFiles_IdxNoAccountEF(t *testing.T) {
 
 // If the first account .ef range doesn't start at step 0, a gap-at-start error is expected.
 func Test_CheckStateSnapshotFiles_IdxGapAtStart(t *testing.T) {
+	t.Parallel()
 	dirs := setupWorkingStateMockDatadir(t)
 	removeMockFile(t, dirs.SnapIdx, "v2.0-accounts.0-128.ef")
 	err := checkStateSnapshotFiles(dirs, false, false)
@@ -723,6 +740,7 @@ func Test_CheckStateSnapshotFiles_IdxGapAtStart(t *testing.T) {
 
 // Two account .ef files sharing the same From value should be flagged as a possible overlap.
 func Test_CheckStateSnapshotFiles_IdxOverlapSameFrom(t *testing.T) {
+	t.Parallel()
 	dirs := setupWorkingStateMockDatadir(t)
 	createMockFile(t, dirs.SnapIdx, "v2.0-accounts.0-64.ef")
 	err := checkStateSnapshotFiles(dirs, false, false)
@@ -731,6 +749,7 @@ func Test_CheckStateSnapshotFiles_IdxOverlapSameFrom(t *testing.T) {
 
 // An account .ef file whose range overlaps with an existing range should be detected.
 func Test_CheckStateSnapshotFiles_IdxOverlap(t *testing.T) {
+	t.Parallel()
 	dirs := setupWorkingStateMockDatadir(t)
 	createMockFile(t, dirs.SnapIdx, "v2.0-accounts.64-200.ef")
 	err := checkStateSnapshotFiles(dirs, false, false)
@@ -739,6 +758,7 @@ func Test_CheckStateSnapshotFiles_IdxOverlap(t *testing.T) {
 
 // Removing a middle account .ef file creates a gap between consecutive ranges.
 func Test_CheckStateSnapshotFiles_IdxGap(t *testing.T) {
+	t.Parallel()
 	dirs := setupWorkingStateMockDatadir(t)
 	removeMockFile(t, dirs.SnapIdx, "v2.0-accounts.128-192.ef")
 	err := checkStateSnapshotFiles(dirs, false, false)
@@ -747,6 +767,7 @@ func Test_CheckStateSnapshotFiles_IdxGap(t *testing.T) {
 
 // Each account range must have a corresponding .ef file for every II type; removing one triggers a missing-file error.
 func Test_CheckStateSnapshotFiles_MissingIdxEF(t *testing.T) {
+	t.Parallel()
 	dirs := setupWorkingStateMockDatadir(t)
 	removeMockFile(t, dirs.SnapIdx, "v2.0-logtopics.128-192.ef")
 	err := checkStateSnapshotFiles(dirs, false, false)
@@ -755,6 +776,7 @@ func Test_CheckStateSnapshotFiles_MissingIdxEF(t *testing.T) {
 
 // Every II type requires a corresponding .efi accessor file for each range.
 func Test_CheckStateSnapshotFiles_MissingAccessorEFI(t *testing.T) {
+	t.Parallel()
 	dirs := setupWorkingStateMockDatadir(t)
 	removeMockFile(t, dirs.SnapAccessors, "v1.1-accounts.128-192.efi")
 	err := checkStateSnapshotFiles(dirs, false, false)
@@ -763,6 +785,7 @@ func Test_CheckStateSnapshotFiles_MissingAccessorEFI(t *testing.T) {
 
 // Value-index types (accounts, storage, code, receipt) require a .vi accessor file for each range.
 func Test_CheckStateSnapshotFiles_MissingAccessorVI(t *testing.T) {
+	t.Parallel()
 	dirs := setupWorkingStateMockDatadir(t)
 	removeMockFile(t, dirs.SnapAccessors, "v1.1-accounts.128-192.vi")
 	err := checkStateSnapshotFiles(dirs, false, false)
@@ -771,6 +794,7 @@ func Test_CheckStateSnapshotFiles_MissingAccessorVI(t *testing.T) {
 
 // Value-index types require a .v history file for each range.
 func Test_CheckStateSnapshotFiles_MissingHistoryV(t *testing.T) {
+	t.Parallel()
 	dirs := setupWorkingStateMockDatadir(t)
 	removeMockFile(t, dirs.SnapHistory, "v1.1-accounts.128-192.v")
 	err := checkStateSnapshotFiles(dirs, false, false)
@@ -779,6 +803,7 @@ func Test_CheckStateSnapshotFiles_MissingHistoryV(t *testing.T) {
 
 // If the account idx range is shorter than the domain maxStep, the cross-directory maxStep check fails.
 func Test_CheckStateSnapshotFiles_IdxDomainMaxStepMismatch(t *testing.T) {
+	t.Parallel()
 	dirs := setupWorkingStateMockDatadir(t)
 	removeMockFile(t, dirs.SnapIdx, "v2.0-accounts.200-202.ef")
 	err := checkStateSnapshotFiles(dirs, false, false)
