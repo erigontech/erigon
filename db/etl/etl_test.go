@@ -659,7 +659,7 @@ func TestSortableBufferStableSort(t *testing.T) {
 			continue
 		}
 		got := binary.BigEndian.Uint64(v)
-		require.Equal(t, uint64(seq), got, "duplicate key at position %d: expected seq %d, got %d", i, seq, got)
+		require.Equal(t, uint64(seq), got, "duplicate key at position %d: expected insertionOrder %d, got %d", i, seq, got)
 		seq++
 	}
 	require.Equal(t, dupsPerKey, seq, "expected %d duplicate entries", dupsPerKey)

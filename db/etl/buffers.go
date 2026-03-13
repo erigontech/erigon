@@ -45,7 +45,7 @@ const (
 	//BufIOSize - 128 pages | default is 1 page | increasing over `64 * 4096` doesn't show speedup on SSD/NVMe, but show speedup in cloud drives
 	BufIOSize = 128 * 4096
 
-	entryLocSize = 24 // sizeof(entryLoc): keyPrefix(8) + seq(4) + offset(4) + keyLen(4) + valLen(4)
+	entryLocSize = 16 // sizeof(entryLoc): insertionOrder(4) + offset(4) + keyLen(4) + valLen(4)
 )
 
 var BufferOptimalSize = dbg.EnvDataSize("ETL_OPTIMAL", 256*datasize.MB) /*  var because we want to sometimes change it from tests or command-line flags */
@@ -107,11 +107,10 @@ type entryLoc struct {
 	//	If we used LittleEndian instead:
 	//	LittleEndian.Uint64(A) = 0x000000000000FF00 = 65280
 	//	LittleEndian.Uint64(B) = 0x0000000000000001 = 1
-	keyPrefix uint64
-	seq       int32 // insertion order — enables stable sort via unstable SortFunc
-	offset    int32
-	keyLen    int32
-	valLen    int32
+	insertionOrder int32 // enables stable sort via unstable SortFunc
+	offset         int32
+	keyLen         int32
+	valLen         int32
 }
 
 func NewSortableBuffer(bufferOptimalSize datasize.ByteSize) *sortableBuffer {
@@ -125,6 +124,7 @@ func NewSortableBuffer(bufferOptimalSize datasize.ByteSize) *sortableBuffer {
 
 type sortableBuffer struct {
 	entries     []entryLoc
+	prefixes    []uint64
 	data        []byte
 	optimalSize int
 }
@@ -133,10 +133,10 @@ type sortableBuffer struct {
 // so no copying is necessary
 func (b *sortableBuffer) Put(k, v []byte) {
 	e := entryLoc{
-		offset: int32(len(b.data)),    //nolint:gosec
-		keyLen: int32(len(k)),         //nolint:gosec
-		valLen: int32(len(v)),         //nolint:gosec
-		seq:    int32(len(b.entries)), //nolint:gosec
+		offset:         int32(len(b.data)),    //nolint:gosec
+		keyLen:         int32(len(k)),         //nolint:gosec
+		valLen:         int32(len(v)),         //nolint:gosec
+		insertionOrder: int32(len(b.entries)), //nolint:gosec
 	}
 	if k == nil {
 		e.keyLen = -1
@@ -195,6 +195,7 @@ func (b *sortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) Buffer
 
 func (b *sortableBuffer) Reset() {
 	b.entries = b.entries[:0]
+	b.prefixes = b.prefixes[:0]
 	b.data = b.data[:0]
 }
 func (b *sortableBuffer) SizeLimit() int { return b.optimalSize }
@@ -203,20 +204,22 @@ func (b *sortableBuffer) Sort() {
 	// Compute keyPrefix before sorting.
 	// This keeps .Put() fast - because Sort often called in background
 	// Also: O(n) cost, which is negligible vs the O(n log n) sort.
+	prefixes := slices.Grow(b.prefixes[:0], len(b.entries))[:len(b.entries)] // sortableBuffer object is reusable (by sync.Pool)
+	b.prefixes = prefixes
+	clear(prefixes)
 	for i := range b.entries {
 		e := &b.entries[i]
-		off, kLen := e.offset, e.keyLen
-		if kLen >= 8 {
-			e.keyPrefix = binary.BigEndian.Uint64(data[off:])
-		} else if kLen > 0 {
+		if e.keyLen >= 8 {
+			prefixes[e.insertionOrder] = binary.BigEndian.Uint64(data[e.offset:])
+		} else if e.keyLen > 0 {
 			var buf [8]byte
-			copy(buf[:], data[off:off+kLen])
-			e.keyPrefix = binary.BigEndian.Uint64(buf[:])
+			copy(buf[:], data[e.offset:])
+			prefixes[e.insertionOrder] = binary.BigEndian.Uint64(buf[:])
 		}
 	}
 	cmp := func(a, b entryLoc) int {
-		if a.keyPrefix != b.keyPrefix {
-			if a.keyPrefix < b.keyPrefix {
+		if prefixes[a.insertionOrder] != prefixes[b.insertionOrder] {
+			if prefixes[a.insertionOrder] < prefixes[b.insertionOrder] {
 				return -1
 			}
 			return 1
@@ -226,7 +229,7 @@ func (b *sortableBuffer) Sort() {
 		if c := bytes.Compare(aKey, bKey); c != 0 {
 			return c
 		}
-		return int(a.seq - b.seq) // StableSort: preserve insertion order for duplicate keys
+		return int(a.insertionOrder - b.insertionOrder) // StableSort: preserve insertion order for duplicate keys
 	}
 	if slices.IsSortedFunc(b.entries, cmp) {
 		return
