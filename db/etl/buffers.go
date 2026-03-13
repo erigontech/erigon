@@ -92,21 +92,6 @@ var (
 // Key occupies data[offset : offset+keyLen], value follows at data[offset+max(0,keyLen) : ...+valLen].
 // keyLen/valLen of -1 indicates nil.
 type entryLoc struct {
-	// first 8 bytes of key, big-endian so uint64 comparison matches bytes.Compare order
-	// Concrete example:
-	//
-	//	A = []byte{0x00, 0xFF, 0, 0, 0, 0, 0, 0}
-	//	B = []byte{0x01, 0x00, 0, 0, 0, 0, 0, 0}
-	//
-	//	bytes.Compare(A, B) → A[0]=0x00 < B[0]=0x01 → A < B ✓
-	//
-	//	BigEndian.Uint64(A) = 0x00FF000000000000 =   71776119061217280
-	//	BigEndian.Uint64(B) = 0x0100000000000000 =   72057594037927936
-	//	                                           A < B ✓  (same answer)
-	//
-	//	If we used LittleEndian instead:
-	//	LittleEndian.Uint64(A) = 0x000000000000FF00 = 65280
-	//	LittleEndian.Uint64(B) = 0x0000000000000001 = 1
 	insertionOrder int32 // enables stable sort via unstable SortFunc
 	offset         int32
 	keyLen         int32
@@ -124,9 +109,24 @@ func NewSortableBuffer(bufferOptimalSize datasize.ByteSize) *sortableBuffer {
 
 type sortableBuffer struct {
 	entries     []entryLoc
-	prefixes    []uint64
 	data        []byte
 	optimalSize int
+	// first 8 bytes of key, big-endian so uint64 comparison matches bytes.Compare order
+	// Concrete example:
+	//
+	//	A = []byte{0x00, 0xFF, 0, 0, 0, 0, 0, 0}
+	//	B = []byte{0x01, 0x00, 0, 0, 0, 0, 0, 0}
+	//
+	//	bytes.Compare(A, B) → A[0]=0x00 < B[0]=0x01 → A < B ✓
+	//
+	//	BigEndian.Uint64(A) = 0x00FF000000000000 =   71776119061217280
+	//	BigEndian.Uint64(B) = 0x0100000000000000 =   72057594037927936
+	//	                                           A < B ✓  (same answer)
+	//
+	//	If we used LittleEndian instead:
+	//	LittleEndian.Uint64(A) = 0x000000000000FF00 = 65280
+	//	LittleEndian.Uint64(B) = 0x0000000000000001 = 1
+	prefixes []uint64
 }
 
 // Put adds key and value to the buffer. These slices will not be accessed later,
