@@ -193,7 +193,6 @@ func (c *Codec) Encode(id enode.ID, addr string, packet Packet, challenge *Whoar
 	)
 	switch {
 	case packet.Kind() == WhoareyouPacket:
-		// just send the WHOAREYOU packet raw again, rather than the re-encoded challenge data
 		w := packet.(*Whoareyou)
 		if len(w.ChallengeData) > 0 {
 			// This WHOAREYOU packet was encoded before, so it's a resend.
