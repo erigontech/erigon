@@ -19,6 +19,7 @@ package execmodule
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
 	"strings"
 	"sync"
@@ -259,6 +260,27 @@ func NewExecModule(
 	return em
 }
 
+// consumeBlockOverlay flushes any block-level metadata accumulated by
+// InsertBlocks (via currentContext.BlockOverlay()) into the given RwTx
+// and closes the overlay. After this call the block data is visible in tx.
+func (e *ExecModule) consumeBlockOverlay(ctx context.Context, tx kv.RwTx) error {
+	e.lock.RLock()
+	sd := e.currentContext
+	e.lock.RUnlock()
+	if sd == nil {
+		return nil
+	}
+	overlay := sd.BlockOverlay()
+	if overlay == nil {
+		return nil
+	}
+	if err := overlay.Flush(ctx, tx); err != nil {
+		return fmt.Errorf("consumeBlockOverlay: flush: %w", err)
+	}
+	overlay.Close()
+	return nil
+}
+
 func (e *ExecModule) getHeader(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*types.Header, error) {
 	if e.blockReader == nil {
 		return rawdb.ReadHeader(tx, blockHash, blockNumber), nil
@@ -360,21 +382,44 @@ func (e *ExecModule) ValidateChain(ctx context.Context, req *executionproto.Vali
 		currentBlockNumber *uint64
 		err                error
 	)
-	if err := e.db.View(ctx, func(tx kv.Tx) error {
-		header, err = e.blockReader.Header(ctx, tx, blockHash, req.Number)
+	// Read header/body from the block overlay on currentContext if available
+	// (block data written by InsertBlocks hasn't been flushed to DB yet),
+	// falling back to a plain DB read otherwise.
+	if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
+		overlay := e.currentContext.BlockOverlay()
+		roTx, err := e.db.BeginTemporalRo(ctx)
 		if err != nil {
-			return err
+			return nil, err
 		}
-
-		body, err = e.blockReader.BodyWithTransactions(ctx, tx, blockHash, req.Number)
+		defer roTx.Rollback()
+		overlay.UpdateTxn(roTx)
+		header, err = e.blockReader.Header(ctx, overlay, blockHash, req.Number)
 		if err != nil {
-			return err
+			return nil, err
+		}
+		body, err = e.blockReader.BodyWithTransactions(ctx, overlay, blockHash, req.Number)
+		if err != nil {
+			return nil, err
 		}
 		exec.AddHeaderAndBodyToGlobalReadAheader(ctx, e.db, header, body)
-		currentBlockNumber = rawdb.ReadCurrentBlockNumber(tx)
-		return nil
-	}); err != nil {
-		return nil, err
+		currentBlockNumber = rawdb.ReadCurrentBlockNumber(overlay)
+	} else {
+		if err := e.db.View(ctx, func(tx kv.Tx) error {
+			header, err = e.blockReader.Header(ctx, tx, blockHash, req.Number)
+			if err != nil {
+				return err
+			}
+
+			body, err = e.blockReader.BodyWithTransactions(ctx, tx, blockHash, req.Number)
+			if err != nil {
+				return err
+			}
+			exec.AddHeaderAndBodyToGlobalReadAheader(ctx, e.db, header, body)
+			currentBlockNumber = rawdb.ReadCurrentBlockNumber(tx)
+			return nil
+		}); err != nil {
+			return nil, err
+		}
 	}
 	if header == nil || body == nil {
 		return &executionproto.ValidationReceipt{
@@ -443,6 +488,10 @@ func (e *ExecModule) ValidateChain(ctx context.Context, req *executionproto.Vali
 	if isInvalidChain {
 		e.logger.Warn("ethereumExecutionModule.ValidateChain: chain is invalid", "hash", common.Hash(blockHash))
 		validationStatus = executionproto.ExecutionStatus_BadBlock
+		// Discard the block overlay — it may contain the bad block's data.
+		if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
+			e.currentContext.BlockOverlay().Close()
+		}
 	}
 	validationReceipt := &executionproto.ValidationReceipt{
 		ValidationStatus: validationStatus,
