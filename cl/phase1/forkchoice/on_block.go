@@ -169,6 +169,9 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		monitor.ObserveNewPayloadTime(timeStartExec)
 		log.Debug("[OnBlock] NewPayload", "status", payloadStatus, "blockSlot", block.Block.Slot)
 		switch payloadStatus {
+		case execution_client.PayloadStatusNone:
+			log.Warn("OnBlock: EL failed to process block", "block", common.Hash(blockRoot), "err", err)
+			return fmt.Errorf("newPayload returned no status: %w", err)
 		case execution_client.PayloadStatusNotValidated:
 			log.Debug("OnBlock: block is not validated yet", "block", common.Hash(blockRoot))
 			// optimistic block candidate
