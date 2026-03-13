@@ -465,13 +465,17 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				se.cfg.hd.ReportBadHeaderPoS(txTask.Header.Hash(), txTask.Header.ParentHash)
 			}
 			if se.cfg.badBlockHalt {
-				// Intentional debug halt: exit without committing so the DB state is preserved
-				// exactly at the point before the bad block was applied. This allows re-running
-				// from the same state to reproduce the invalid block. Not for production use.
-				// We must not return an error here — the stage loop would retry indefinitely.
-				se.logger.Error(fmt.Sprintf("[%s] BAD_BLOCK_HALT: halting on invalid block", se.logPrefix),
-					"block", txTask.BlockNumber(), "hash", txTask.Header.Hash(), "err", err)
-				os.Exit(1)
+				if dbg.BadBlockHalt {
+					// BAD_BLOCK_HALT env var: exit without committing so the DB state is preserved
+					// exactly at the point before the bad block was applied. Allows re-running
+					// from the same state to reproduce the invalid block. Debug use only.
+					se.logger.Error(fmt.Sprintf("[%s] BAD_BLOCK_HALT: halting on invalid block", se.logPrefix),
+						"block", txTask.BlockNumber(), "hash", txTask.Header.Hash(), "err", err)
+					os.Exit(1)
+				}
+				// badBlockHalt=true without env var: used by fork validation (NewInMemoryExecution).
+				// Return the error so the caller can handle it (e.g. ReportBadHeaderPoS).
+				return false, err
 			}
 
 			if se.u != nil {

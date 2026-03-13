@@ -262,12 +262,11 @@ func ExecV3(ctx context.Context,
 					cfg.hd.ReportBadHeaderPoS(lastHeader.Hash(), lastHeader.ParentHash)
 				}
 			}
-			if cfg.badBlockHalt {
-				// Intentional debug halt: exit without committing so the DB state is preserved
-				// exactly at the point where the invalid block was encountered. This allows
-				// re-running from the same state to reproduce the bad block. Not for production use.
-				// In production (BAD_BLOCK_HALT unset), the error propagates to the stage loop
-				// which unwinds and lets the CL provide a corrected block via fork choice.
+			if cfg.badBlockHalt && dbg.BadBlockHalt {
+				// BAD_BLOCK_HALT env var: exit without committing so the DB state is preserved
+				// exactly at the point where the invalid block was encountered. Debug use only.
+				// When badBlockHalt=true but env var is not set (e.g. fork validation via
+				// NewInMemoryExecution), fall through so execErr propagates to the caller.
 				logger.Error(fmt.Sprintf("[%s] BAD_BLOCK_HALT: halting on invalid block (debug mode, no commit)", execStage.LogPrefix()), "err", execErr)
 				os.Exit(1)
 			}
