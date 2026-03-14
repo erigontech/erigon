@@ -7,6 +7,7 @@ package state
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -17,10 +18,6 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 )
-
-func newFile(path string) (*os.File, error) {
-	return os.Create(path)
-}
 
 // TestFilesWithMissedAccessors_BTree verifies that when a .kv data file exists
 // but its .bt accessor is missing, FilesWithMissedAccessors reports it.
@@ -161,7 +158,7 @@ func TestFileNamingRoundTrip_Domain(t *testing.T) {
 		// Data file round-trip
 		dataPath, err := schema.DataFile(ver.Current, from, to)
 		require.NoError(t, err)
-		info, ok := schema.Parse(fileBaseName(dataPath))
+		info, ok := schema.Parse(filepath.Base(dataPath))
 		require.True(t, ok, "data file name must be parseable: %s", dataPath)
 		require.Equal(t, c.from, info.From)
 		require.Equal(t, c.to, info.To)
@@ -170,7 +167,7 @@ func TestFileNamingRoundTrip_Domain(t *testing.T) {
 		// BTree index round-trip
 		btPath, err := schema.BtIdxFile(ver.Current, from, to)
 		require.NoError(t, err)
-		info, ok = schema.Parse(fileBaseName(btPath))
+		info, ok = schema.Parse(filepath.Base(btPath))
 		require.True(t, ok, "bt file name must be parseable: %s", btPath)
 		require.Equal(t, c.from, info.From)
 		require.Equal(t, c.to, info.To)
@@ -179,7 +176,7 @@ func TestFileNamingRoundTrip_Domain(t *testing.T) {
 		// Existence file round-trip
 		exPath, err := schema.ExistenceFile(ver.Current, from, to)
 		require.NoError(t, err)
-		info, ok = schema.Parse(fileBaseName(exPath))
+		info, ok = schema.Parse(filepath.Base(exPath))
 		require.True(t, ok, "existence file name must be parseable: %s", exPath)
 		require.Equal(t, c.from, info.From)
 		require.Equal(t, c.to, info.To)
@@ -202,7 +199,7 @@ func TestFileNamingRoundTrip_History(t *testing.T) {
 
 		dataPath, err := schema.DataFile(ver.Current, from, to)
 		require.NoError(t, err)
-		info, ok := schema.Parse(fileBaseName(dataPath))
+		info, ok := schema.Parse(filepath.Base(dataPath))
 		require.True(t, ok, "history data file name must be parseable: %s", dataPath)
 		require.Equal(t, c.from, info.From)
 		require.Equal(t, c.to, info.To)
@@ -210,7 +207,7 @@ func TestFileNamingRoundTrip_History(t *testing.T) {
 
 		accPath, err := schema.AccessorIdxFile(ver.Current, from, to, 0)
 		require.NoError(t, err)
-		info, ok = schema.Parse(fileBaseName(accPath))
+		info, ok = schema.Parse(filepath.Base(accPath))
 		require.True(t, ok, "history accessor file name must be parseable: %s", accPath)
 		require.Equal(t, c.from, info.From)
 		require.Equal(t, c.to, info.To)
@@ -233,7 +230,7 @@ func TestFileNamingRoundTrip_II(t *testing.T) {
 
 		dataPath, err := schema.DataFile(ver.Current, from, to)
 		require.NoError(t, err)
-		info, ok := schema.Parse(fileBaseName(dataPath))
+		info, ok := schema.Parse(filepath.Base(dataPath))
 		require.True(t, ok, "II data file name must be parseable: %s", dataPath)
 		require.Equal(t, c.from, info.From)
 		require.Equal(t, c.to, info.To)
@@ -241,7 +238,7 @@ func TestFileNamingRoundTrip_II(t *testing.T) {
 
 		accPath, err := schema.AccessorIdxFile(ver.Current, from, to, 0)
 		require.NoError(t, err)
-		info, ok = schema.Parse(fileBaseName(accPath))
+		info, ok = schema.Parse(filepath.Base(accPath))
 		require.True(t, ok, "II accessor file name must be parseable: %s", accPath)
 		require.Equal(t, c.from, info.From)
 		require.Equal(t, c.to, info.To)
@@ -489,7 +486,7 @@ func TestRealFileCreation_DomainDataFile(t *testing.T) {
 	require.Equal(t, 2, decomp.Count())
 
 	// Verify: filename parses back correctly
-	info, ok := schema.Parse(fileBaseName(dataPath))
+	info, ok := schema.Parse(filepath.Base(dataPath))
 	require.True(t, ok)
 	require.Equal(t, uint64(from), info.From)
 	require.Equal(t, uint64(to), info.To)
@@ -547,7 +544,7 @@ func TestFileNamingRoundTrip_AllStepSizes(t *testing.T) {
 		dataPath, err := schema.DataFile(ver.Current, from, to)
 		require.NoError(t, err)
 
-		info, ok := schema.Parse(fileBaseName(dataPath))
+		info, ok := schema.Parse(filepath.Base(dataPath))
 		require.True(t, ok, "stepSize=%d: data file name must parse correctly", stepSize)
 		require.Equal(t, uint64(from), info.From, "stepSize=%d: from mismatch", stepSize)
 		require.Equal(t, uint64(to), info.To, "stepSize=%d: to mismatch", stepSize)
@@ -651,7 +648,7 @@ func TestProductionSchemas_ValidNamesAndRoundTrip(t *testing.T) {
 			require.NoError(t, err, "%s: DataFile must not error", sc.name)
 			require.NotEmpty(t, dataPath, "%s: DataFile must return non-empty path", sc.name)
 
-			info, ok := sc.schema.Parse(fileBaseName(dataPath))
+			info, ok := sc.schema.Parse(filepath.Base(dataPath))
 			require.True(t, ok, "%s: generated data filename must parse correctly: %s", sc.name, dataPath)
 			require.Equal(t, rc.from, info.From, "%s: from mismatch", sc.name)
 			require.Equal(t, rc.to, info.To, "%s: to mismatch", sc.name)
@@ -707,7 +704,7 @@ func TestOpenFolder_UnrelatedFilesIgnored(t *testing.T) {
 	}
 	for _, f := range garbageFiles {
 		// Create zero-byte placeholder
-		if fp, err := newFile(f); err == nil {
+		if fp, err := os.Create(f); err == nil {
 			fp.Close()
 		}
 	}
@@ -820,7 +817,7 @@ func TestFindFilesBySearchVersion_VersionRangeFiltering(t *testing.T) {
 	foundPath, err := schema.DataFile(version.SearchVersion, from, to)
 	require.NoError(t, err, "SearchVersion must find a file in the supported range")
 
-	info, ok := schema.Parse(fileBaseName(foundPath))
+	info, ok := schema.Parse(filepath.Base(foundPath))
 	require.True(t, ok)
 	require.Equal(t, version.V1_1, info.Version,
 		"SearchVersion must select the highest version within the supported range")
@@ -936,11 +933,11 @@ func TestFindAccessorFilesBySearchVersion(t *testing.T) {
 
 	btPath, err := domainSchema.BtIdxFile(version.SearchVersion, from, to)
 	require.NoError(t, err, "SearchVersion must find .bt accessor file on disk")
-	require.Contains(t, fileBaseName(btPath), ".bt")
+	require.Contains(t, filepath.Base(btPath), ".bt")
 
 	exPath, err := domainSchema.ExistenceFile(version.SearchVersion, from, to)
 	require.NoError(t, err, "SearchVersion must find .kvei existence file on disk")
-	require.Contains(t, fileBaseName(exPath), ".kvei")
+	require.Contains(t, filepath.Base(exPath), ".kvei")
 
 	// II schema (HashMap → .efi)
 	iiSchema := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
@@ -953,7 +950,7 @@ func TestFindAccessorFilesBySearchVersion(t *testing.T) {
 
 	efiPath, err := iiSchema.AccessorIdxFile(version.SearchVersion, from, to, 0)
 	require.NoError(t, err, "SearchVersion must find .efi accessor file on disk")
-	require.Contains(t, fileBaseName(efiPath), ".efi")
+	require.Contains(t, filepath.Base(efiPath), ".efi")
 }
 
 // TestFileNamingRoundTrip_AllAccessorTypes verifies round-trip for all accessor
@@ -971,13 +968,13 @@ func TestFileNamingRoundTrip_AllAccessorTypes(t *testing.T) {
 		BtIndex(ver).Existence(ver).Build()
 
 	btPath, _ := domainSchema.BtIdxFile(ver.Current, from, to)
-	info, ok := domainSchema.Parse(fileBaseName(btPath))
+	info, ok := domainSchema.Parse(filepath.Base(btPath))
 	require.True(t, ok, ".bt file must parse correctly")
 	require.Equal(t, ".bt", info.Ext)
 	require.Equal(t, uint64(from), info.From)
 
 	exPath, _ := domainSchema.ExistenceFile(ver.Current, from, to)
-	info, ok = domainSchema.Parse(fileBaseName(exPath))
+	info, ok = domainSchema.Parse(filepath.Base(exPath))
 	require.True(t, ok, ".kvei file must parse correctly")
 	require.Equal(t, ".kvei", info.Ext)
 
@@ -986,7 +983,7 @@ func TestFileNamingRoundTrip_AllAccessorTypes(t *testing.T) {
 		Data(dirs.SnapDomain, "commitments", DataExtensionKv, seg.CompressNone, ver).
 		Accessor(dirs.SnapDomain, ver).Build()
 	kviPath, _ := commitSchema.AccessorIdxFile(ver.Current, from, to, 0)
-	info, ok = commitSchema.Parse(fileBaseName(kviPath))
+	info, ok = commitSchema.Parse(filepath.Base(kviPath))
 	require.True(t, ok, ".kvi file must parse correctly")
 	require.Equal(t, string(AccessorExtensionKvi), info.Ext)
 
@@ -995,7 +992,7 @@ func TestFileNamingRoundTrip_AllAccessorTypes(t *testing.T) {
 		Data(dirs.SnapHistory, "accounts", DataExtensionV, seg.CompressNone, ver).
 		Accessor(dirs.SnapAccessors, ver).Build()
 	viPath, _ := histSchema.AccessorIdxFile(ver.Current, from, to, 0)
-	info, ok = histSchema.Parse(fileBaseName(viPath))
+	info, ok = histSchema.Parse(filepath.Base(viPath))
 	require.True(t, ok, ".vi file must parse correctly")
 	require.Equal(t, string(AccessorExtensionVi), info.Ext)
 
@@ -1004,7 +1001,7 @@ func TestFileNamingRoundTrip_AllAccessorTypes(t *testing.T) {
 		Data(dirs.SnapIdx, "logaddrs", DataExtensionEf, seg.CompressNone, ver).
 		Accessor(dirs.SnapAccessors, ver).Build()
 	efiPath, _ := iiSchema.AccessorIdxFile(ver.Current, from, to, 0)
-	info, ok = iiSchema.Parse(fileBaseName(efiPath))
+	info, ok = iiSchema.Parse(filepath.Base(efiPath))
 	require.True(t, ok, ".efi file must parse correctly")
 	require.Equal(t, string(AccessorExtensionEfi), info.Ext)
 }
@@ -1108,8 +1105,9 @@ func TestFileCreationLifecycle_FullCycle(t *testing.T) {
 
 	require.Equal(t, 1, repo.dirtyFiles.Len(), "data file must be tracked in dirty files")
 	require.Len(t, repo.DirtyFilesWithNoBtreeAccessors(), 1, "BTree accessor must be detected as missing")
-	require.NotEmpty(t, repo.FilesWithMissedAccessors().Get(statecfg.AccessorBTree), "must report missing BTree")
-	require.NotEmpty(t, repo.FilesWithMissedAccessors().Get(statecfg.AccessorExistence), "must report missing Existence")
+	missedPhase1 := repo.FilesWithMissedAccessors()
+	require.NotEmpty(t, missedPhase1.Get(statecfg.AccessorBTree), "must report missing BTree")
+	require.NotEmpty(t, missedPhase1.Get(statecfg.AccessorExistence), "must report missing Existence")
 
 	repo.RecalcVisibleFiles(RootNum(MaxUint64))
 	require.Empty(t, repo.VisibleFiles(), "file with missing accessors must NOT be visible to readers")
@@ -1284,7 +1282,7 @@ func TestE2Schema_FileNamingRoundTrip(t *testing.T) {
 		dataPath, err := c.schema.DataFile(version.V1_0, RootNum(c.from), RootNum(c.to))
 		require.NoError(t, err, "%s: DataFile must not error", c.name)
 
-		info, ok := c.schema.Parse(fileBaseName(dataPath))
+		info, ok := c.schema.Parse(filepath.Base(dataPath))
 		require.True(t, ok, "%s: generated filename must parse correctly", c.name)
 		require.Equal(t, c.from, info.From, "%s: from mismatch", c.name)
 		require.Equal(t, c.to, info.To, "%s: to mismatch", c.name)
@@ -1292,7 +1290,7 @@ func TestE2Schema_FileNamingRoundTrip(t *testing.T) {
 		// Accessor file round-trip for index 0
 		accPath, err := c.schema.AccessorIdxFile(version.V1_0, RootNum(c.from), RootNum(c.to), 0)
 		require.NoError(t, err, "%s: AccessorIdxFile must not error", c.name)
-		info, ok = c.schema.Parse(fileBaseName(accPath))
+		info, ok = c.schema.Parse(filepath.Base(accPath))
 		require.True(t, ok, "%s: accessor filename must parse correctly", c.name)
 		require.Equal(t, c.from, info.From, "%s accessor: from mismatch", c.name)
 		require.Equal(t, c.to, info.To, "%s accessor: to mismatch", c.name)
@@ -1331,14 +1329,4 @@ func TestVisibleFiles_MergedFilePrefersOverConstituents(t *testing.T) {
 	require.Len(t, visible, 1, "merged file must replace constituent small files in visible set")
 	require.Equal(t, uint64(0), visible[0].StartRootNum(), "merged file must start at 0")
 	require.Equal(t, uint64(2*repo.stepSize), visible[0].EndRootNum(), "merged file must cover full range")
-}
-
-// fileBaseName returns the base name from a full file path.
-func fileBaseName(path string) string {
-	for i := len(path) - 1; i >= 0; i-- {
-		if path[i] == '/' || path[i] == '\\' {
-			return path[i+1:]
-		}
-	}
-	return path
 }
