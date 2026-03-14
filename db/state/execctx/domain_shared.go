@@ -161,7 +161,7 @@ type changesetSwitcher interface {
 	SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet)
 }
 
-func (sd *SharedDomains) Merge(sdTxNum uint64, other *SharedDomains, otherTxNum uint64) error {
+func (sd *SharedDomains) Merge(ctx context.Context, sdTxNum uint64, other *SharedDomains, otherTxNum uint64) error {
 	if sdTxNum > otherTxNum {
 		return fmt.Errorf("can't merge backwards: txnum: %d > %d", sdTxNum, otherTxNum)
 	}
@@ -173,7 +173,7 @@ func (sd *SharedDomains) Merge(sdTxNum uint64, other *SharedDomains, otherTxNum 
 	// Merge block-level metadata from other's overlay into ours by flushing
 	// other's overlay writes directly into our overlay (which implements kv.RwTx).
 	if other.blockOverlay != nil && sd.blockOverlay != nil {
-		if err := other.blockOverlay.Flush(context.Background(), sd.blockOverlay); err != nil {
+		if err := other.blockOverlay.Flush(ctx, sd.blockOverlay); err != nil {
 			return fmt.Errorf("blockOverlay merge: %w", err)
 		}
 	}

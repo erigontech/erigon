@@ -44,6 +44,7 @@ func TestPutAppendHas(t *testing.T) {
 
 	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
 	require.NoError(t, err)
+	defer batch.Close()
 	require.NoError(t, batch.Append(kv.HeaderNumber, []byte("AAAA"), []byte("value1.5")))
 	//MDBX's APPEND checking only keys, not values
 	require.NoError(t, batch.Append(kv.HeaderNumber, []byte("AAAA"), []byte("value1.3")))
@@ -77,6 +78,7 @@ func TestLastMiningDB(t *testing.T) {
 
 	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
 	require.NoError(t, err)
+	defer batch.Close()
 	batch.Put(kv.HeaderNumber, []byte("BAAA"), []byte("value4"))
 	batch.Put(kv.HeaderNumber, []byte("BCAA"), []byte("value5"))
 
@@ -103,6 +105,7 @@ func TestLastMiningMem(t *testing.T) {
 
 	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
 	require.NoError(t, err)
+	defer batch.Close()
 	batch.Put(kv.HeaderNumber, []byte("BAAA"), []byte("value4"))
 	batch.Put(kv.HeaderNumber, []byte("DCAA"), []byte("value5"))
 
@@ -128,6 +131,7 @@ func TestDeleteMining(t *testing.T) {
 	initializeDbNonDupSort(rwTx)
 	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
 	require.NoError(t, err)
+	defer batch.Close()
 	batch.Put(kv.HeaderNumber, []byte("BAAA"), []byte("value4"))
 	batch.Put(kv.HeaderNumber, []byte("DCAA"), []byte("value5"))
 	batch.Put(kv.HeaderNumber, []byte("FCAA"), []byte("value5"))
@@ -156,6 +160,7 @@ func TestFlush(t *testing.T) {
 	initializeDbNonDupSort(rwTx)
 	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
 	require.NoError(t, err)
+	defer batch.Close()
 	batch.Put(kv.HeaderNumber, []byte("BAAA"), []byte("value4"))
 	batch.Put(kv.HeaderNumber, []byte("AAAA"), []byte("value5"))
 	batch.Put(kv.HeaderNumber, []byte("FCAA"), []byte("value5"))
@@ -178,6 +183,7 @@ func TestForEach(t *testing.T) {
 
 	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
 	require.NoError(t, err)
+	defer batch.Close()
 	batch.Put(kv.HeaderNumber, []byte("FCAA"), []byte("value5"))
 	require.NoError(t, batch.Flush(context.Background(), rwTx))
 

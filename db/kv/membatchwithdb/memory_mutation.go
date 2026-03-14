@@ -54,16 +54,19 @@ type MemoryMutation struct {
 // defer batch.Close()
 // ... some calculations on `batch`
 // batch.Commit()
-func NewMemoryBatch(tx kv.TemporalTx, tmpDir string, logger log.Logger) (*MemoryMutation, error) {
+func NewMemoryBatch(tx kv.TemporalTx, tmpDir string, logger log.Logger) (mm *MemoryMutation, err error) {
 	tmpDB := mdbx.New(dbcfg.TemporaryDB, logger).InMem(nil, tmpDir).GrowthStep(64 * datasize.MB).MapSize(512 * datasize.GB).MustOpen()
+	defer func() {
+		if err != nil {
+			tmpDB.Close()
+		}
+	}()
 	memTx, err := tmpDB.BeginRw(context.Background()) // nolint:gocritic
 	if err != nil {
-		tmpDB.Close()
 		return nil, fmt.Errorf("NewMemoryBatch: begin tx: %w", err)
 	}
-	if err := initSequences(tx, memTx); err != nil {
+	if err = initSequences(tx, memTx); err != nil {
 		memTx.Rollback()
-		tmpDB.Close()
 		return nil, fmt.Errorf("NewMemoryBatch: init sequences: %w", err)
 	}
 
