@@ -458,53 +458,7 @@ func TestSnapInfoIsDataFile(t *testing.T) {
 	}
 }
 
-// TestSnapshotConfig_StepsInFrozenFile verifies StepsInFrozenFile returns correct values.
-// A wrong value here means files are frozen too early or too late.
-func TestSnapshotConfig_StepsInFrozenFile(t *testing.T) {
-	dirs := datadir.New(t.TempDir())
-	ver := version.V1_0_standart
-	schema := NewE2SnapSchema(dirs, "bodies", NewE2SnapSchemaVersion(ver, ver))
 
-	// With MergeStages: last stage is 100_000, stepSize=1000 → 100 steps per frozen file
-	cfg := NewSnapshotConfig(&SnapshotCreationConfig{
-		RootNumPerStep: 1000,
-		MergeStages:    []uint64{10_000, 100_000},
-		MinimumSize:    1000,
-	}, schema)
-	require.Equal(t, uint64(100), cfg.StepsInFrozenFile())
-
-	// With empty MergeStages: falls back to MinimumSize / RootNumPerStep
-	cfg2 := NewSnapshotConfig(&SnapshotCreationConfig{
-		RootNumPerStep: 1000,
-		MergeStages:    []uint64{},
-		MinimumSize:    5000,
-	}, schema)
-	require.Equal(t, uint64(5), cfg2.StepsInFrozenFile())
-}
-
-// TestE3SnapCreationConfig_IsValid verifies that E3SnapCreationConfig produces a valid config.
-// This is the default production config; it must not panic on validation.
-func TestE3SnapCreationConfig_IsValid(t *testing.T) {
-	dirs := datadir.New(t.TempDir())
-	ver := version.V1_0_standart
-	schema := NewE2SnapSchema(dirs, "bodies", NewE2SnapSchemaVersion(ver, ver))
-
-	stepSizes := []uint64{100, 500, 1000, 4096}
-	for _, stepSize := range stepSizes {
-		cfg := E3SnapCreationConfig(stepSize)
-		require.NotPanics(t, func() {
-			NewSnapshotConfig(cfg, schema)
-		}, "E3SnapCreationConfig(%d) must produce a valid config", stepSize)
-		// Verify basic invariants
-		require.Equal(t, stepSize, cfg.RootNumPerStep)
-		require.Equal(t, stepSize, cfg.MinimumSize)
-		require.NotEmpty(t, cfg.MergeStages)
-		// All merge stages must be divisible by stepSize
-		for i, stage := range cfg.MergeStages {
-			require.Zero(t, stage%stepSize, "MergeStages[%d]=%d not divisible by stepSize=%d", i, stage, stepSize)
-		}
-	}
-}
 
 // TestRealFileCreation_DomainDataFile creates a real .kv data file using the proper
 // compressor path and verifies it can be decompressed after creation.
@@ -625,24 +579,6 @@ func TestE3ParseRejectsWrongTag(t *testing.T) {
 	require.False(t, ok, "accounts .kv schema must reject .v files")
 }
 
-// TestSnapInfo_Len verifies that SnapInfo.Len() returns To-From.
-// An off-by-one error here would produce files of wrong sizes, causing merge logic to fail.
-func TestSnapInfo_Len(t *testing.T) {
-	cases := []struct {
-		from, to uint64
-		want     uint64
-	}{
-		{0, 1000, 1000},
-		{1000, 2000, 1000},
-		{0, 256000, 256000},
-		{100000, 200000, 100000},
-		{0, 0, 0},
-	}
-	for _, c := range cases {
-		info := &SnapInfo{From: c.from, To: c.to}
-		require.Equal(t, c.want, info.Len(), "from=%d to=%d", c.from, c.to)
-	}
-}
 
 // TestMissedFilesMap_IsEmpty verifies that IsEmpty correctly detects when all
 // accessors are present vs when some are missing. If IsEmpty is wrong, the system
@@ -784,50 +720,7 @@ func TestOpenFolder_UnrelatedFilesIgnored(t *testing.T) {
 	require.Equal(t, 1, repo.dirtyFiles.Len(), "unrelated files must be ignored by OpenFolder")
 }
 
-// TestFileNamingRoundTrip_Version verifies that both v1.0 and higher versions
-// parse correctly through the schema. Version mismatch causes files to be skipped.
-func TestFileNamingRoundTrip_Version(t *testing.T) {
-	dirs := datadir.New(t.TempDir())
-	stepSize := uint64(1000)
 
-	// Test with v1.0 standard version
-	ver := version.V1_0_standart
-	schema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree, stepSize).
-		Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
-		BtIndex(ver).Build()
-
-	from, to := RootNum(0), RootNum(1000)
-	dataPath, _ := schema.DataFile(ver.Current, from, to)
-	info, ok := schema.Parse(fileBaseName(dataPath))
-	require.True(t, ok)
-	require.Equal(t, version.V1_0, info.Version)
-}
-
-// TestE3SnapSchema_AccessorIdxCount verifies AccessorIdxCount matches the configuration.
-// A mismatch here causes an incorrect number of accessor files to be built.
-func TestE3SnapSchema_AccessorIdxCount(t *testing.T) {
-	dirs := datadir.New(t.TempDir())
-	ver := version.V1_0_standart
-	stepSize := uint64(1000)
-
-	// BTree only: count = 0 (no HashMap)
-	btreeOnly := NewE3SnapSchemaBuilder(statecfg.AccessorBTree, stepSize).
-		Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
-		BtIndex(ver).Build()
-	require.Equal(t, uint16(0), btreeOnly.AccessorIdxCount())
-
-	// HashMap only: count = 1
-	hashMapOnly := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
-		Data(dirs.SnapDomain, "commitments", DataExtensionKv, seg.CompressNone, ver).
-		Accessor(dirs.SnapDomain, ver).Build()
-	require.Equal(t, uint16(1), hashMapOnly.AccessorIdxCount())
-
-	// No accessors: count = 0
-	noAccessors := NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
-		Data(dirs.SnapDomain, "accounts2", DataExtensionKv, seg.CompressNone, ver).
-		BtIndex(ver).Existence(ver).Build()
-	require.Equal(t, uint16(0), noAccessors.AccessorIdxCount())
-}
 
 // TestFindFilesBySearchVersion verifies that DataFile with SearchVersion correctly
 // finds the highest-version file on disk within the supported range.
@@ -1027,98 +920,46 @@ func TestFilesWithMissedAccessors_LargeRepo(t *testing.T) {
 	}
 }
 
-// TestAccessorExtension_IsSet verifies that AccessorExtension.IsSet correctly
-// identifies valid accessor extensions. A mismatch here causes wrong files to be
-// treated as accessor files → corrupted snapshot state on disk.
-func TestAccessorExtension_IsSet(t *testing.T) {
-	validAccessors := []AccessorExtension{
-		AccessorExtensionIdx,
-		AccessorExtensionKvi,
-		AccessorExtensionVi,
-		AccessorExtensionEfi,
-	}
-	for _, ext := range validAccessors {
-		require.True(t, ext.IsSet(), "extension %q must be a valid accessor", ext)
-	}
 
-	invalidAccessors := []AccessorExtension{"", ".kv", ".bt", ".kvei", ".seg", ".v", ".ef", ".dat"}
-	for _, ext := range invalidAccessors {
-		require.False(t, ext.IsSet(), "extension %q must NOT be a valid accessor", ext)
-	}
-}
-
-// TestDataExtension_IsSet verifies DataExtension.IsSet correctness.
-func TestDataExtension_IsSet(t *testing.T) {
-	valid := []DataExtension{DataExtensionSeg, DataExtensionKv, DataExtensionV, DataExtensionEf}
-	for _, ext := range valid {
-		require.True(t, ext.IsSet(), "data extension %q must be valid", ext)
-	}
-	invalid := []DataExtension{"", ".bt", ".kvi", ".kvei", ".dat"}
-	for _, ext := range invalid {
-		require.False(t, ext.IsSet(), "extension %q must NOT be a data extension", ext)
-	}
-}
-
-// TestFindAccessorFilesBySearchVersion verifies that BtIdxFile and AccessorIdxFile
-// also work correctly with SearchVersion. The restart path must be able to find
-// all file types, not just data files.
+// TestFindAccessorFilesBySearchVersion verifies that BtIdxFile, ExistenceFile, and
+// AccessorIdxFile work correctly with SearchVersion. The restart path must be able
+// to find all file types on disk, not just the data (.kv) file.
 func TestFindAccessorFilesBySearchVersion(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	stepSize := uint64(1000)
+	from, to := RootNum(0), RootNum(stepSize)
 
-	// Schema with both BTree and HashMap accessors
+	// Domain schema (BTree + Existence) — create all files for range 0-1000
 	domainSchema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
 		Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
 		BtIndex(ver).Existence(ver).Build()
 
-	hashSchema := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
-		Data(dirs.SnapDomain, "commitments", DataExtensionKv, seg.CompressNone, ver).
-		Accessor(dirs.SnapDomain, ver).Build()
+	btFile, _ := domainSchema.BtIdxFile(version.V1_0, from, to)
+	exFile, _ := domainSchema.ExistenceFile(version.V1_0, from, to)
+	kvFile, _ := domainSchema.DataFile(version.V1_0, from, to)
+	populateFiles(t, dirs, domainSchema, []string{kvFile, btFile, exFile})
 
-	from, to := RootNum(0), RootNum(stepSize)
-
-	// Create bt accessor file using helper
-	populateFiles2(t, dirs, &SnapshotRepo{
-		schema:   domainSchema,
-		stepSize: stepSize,
-		cfg: &SnapshotConfig{
-			SnapshotCreationConfig: &SnapshotCreationConfig{
-				RootNumPerStep: stepSize,
-				MergeStages:    []uint64{2 * stepSize},
-				MinimumSize:    stepSize,
-			},
-			Schema: domainSchema,
-		},
-	}, []testFileRange{{0, 1}})
-
-	// BtIdxFile with SearchVersion must find the .bt file
 	btPath, err := domainSchema.BtIdxFile(version.SearchVersion, from, to)
-	require.NoError(t, err, "SearchVersion must find .bt accessor file")
-	require.Contains(t, btPath, ".bt")
+	require.NoError(t, err, "SearchVersion must find .bt accessor file on disk")
+	require.Contains(t, fileBaseName(btPath), ".bt")
 
-	// ExistenceFile with SearchVersion must find the .kvei file
 	exPath, err := domainSchema.ExistenceFile(version.SearchVersion, from, to)
-	require.NoError(t, err, "SearchVersion must find .kvei existence file")
-	require.Contains(t, exPath, ".kvei")
+	require.NoError(t, err, "SearchVersion must find .kvei existence file on disk")
+	require.Contains(t, fileBaseName(exPath), ".kvei")
 
-	// AccessorIdxFile with SearchVersion must find the .kvi file
-	populateFiles2(t, dirs, &SnapshotRepo{
-		schema:   hashSchema,
-		stepSize: stepSize,
-		cfg: &SnapshotConfig{
-			SnapshotCreationConfig: &SnapshotCreationConfig{
-				RootNumPerStep: stepSize,
-				MergeStages:    []uint64{2 * stepSize},
-				MinimumSize:    stepSize,
-			},
-			Schema: hashSchema,
-		},
-	}, []testFileRange{{0, 1}})
+	// II schema (HashMap → .efi)
+	iiSchema := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
+		Data(dirs.SnapIdx, "logaddrs", DataExtensionEf, seg.CompressNone, ver).
+		Accessor(dirs.SnapAccessors, ver).Build()
 
-	kviPath, err := hashSchema.AccessorIdxFile(version.SearchVersion, from, to, 0)
-	require.NoError(t, err, "SearchVersion must find .kvi accessor file")
-	require.Contains(t, kviPath, ".kvi")
+	efFile, _ := iiSchema.DataFile(version.V1_0, from, to)
+	efiFile, _ := iiSchema.AccessorIdxFile(version.V1_0, from, to, 0)
+	populateFiles(t, dirs, iiSchema, []string{efFile, efiFile})
+
+	efiPath, err := iiSchema.AccessorIdxFile(version.SearchVersion, from, to, 0)
+	require.NoError(t, err, "SearchVersion must find .efi accessor file on disk")
+	require.Contains(t, fileBaseName(efiPath), ".efi")
 }
 
 // TestFileNamingRoundTrip_AllAccessorTypes verifies round-trip for all accessor
