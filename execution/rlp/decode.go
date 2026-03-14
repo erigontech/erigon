@@ -1302,6 +1302,8 @@ func DecodeOptionalAddress(dst **common.Address, s *Stream) error {
 	case kind == String && size == 20:
 		*dst = &common.Address{}
 		return s.ReadBytes((*dst)[:])
+	case kind == List:
+		return fmt.Errorf("expected string for address, got list")
 	case kind == Byte:
 		return fmt.Errorf("wrong size for address: 1")
 	default:
