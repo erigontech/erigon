@@ -238,7 +238,7 @@ func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeRead
 
 // ComputeCommitment Evaluates commitment for gathered updates.
 // If warmup was set via EnableTrieWarmup, pre-warms MDBX page cache by reading Branch data in parallel before processing.
-func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveState bool, blockNum uint64, txNum uint64, logPrefix string, commitProgress chan *commitment.CommitProgress) (rootHash []byte, err error) {
+func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveState bool, blockNum uint64, txNum uint64, logPrefix string, onProgress func(*commitment.CommitProgress)) (rootHash []byte, err error) {
 	if dbg.KVReadLevelledMetrics {
 		mxCommitmentRunning.Inc()
 		defer mxCommitmentRunning.Dec()
@@ -292,7 +292,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		defer hph.SetLeaveDeferredForCaller(false)
 	}
 
-	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, commitProgress, warmupConfig)
+	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, onProgress, warmupConfig)
 	if err != nil {
 		return nil, err
 	}

@@ -670,7 +670,10 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return nil, err
 	}
 	defer roTx2.Rollback()
-	txBatch2 := membatchwithdb.NewMemoryBatch(roTx2, "", logger)
+	txBatch2, err := membatchwithdb.NewMemoryBatch(roTx2, "", logger)
+	if err != nil {
+		return nil, err
+	}
 	defer txBatch2.Rollback()
 
 	domains, err := execctx.NewSharedDomains(ctx, txBatch2, log.New())
