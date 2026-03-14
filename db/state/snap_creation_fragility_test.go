@@ -1416,3 +1416,81 @@ func TestVisibleFiles_PartialAccessors_StillInvisible(t *testing.T) {
 	repo.RecalcVisibleFiles(RootNum(MaxUint64))
 	require.Len(t, repo.VisibleFiles(), 1, "file with both bt and existence must be visible")
 }
+
+// TestDeleteFilesAfterMerge_ImmediateRemoval verifies that when a file has no active readers
+// (refcount == 0), DeleteFilesAfterMerge immediately removes it from disk.
+// This ensures that stale constituent files are not left on disk after a merge completes.
+func TestDeleteFilesAfterMerge_ImmediateRemoval(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ver := version.V1_0_standart
+	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (string, SnapNameSchema) {
+		schema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
+			Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+			BtIndex(ver).Existence(ver).Build()
+		return "accounts", schema
+	})
+
+	populateFiles2(t, dirs, repo, []testFileRange{{0, 1}})
+	require.NoError(t, repo.OpenFolder())
+
+	// Get the constituent file item and its data path before deletion.
+	var item *FilesItem
+	repo.dirtyFiles.Walk(func(items []*FilesItem) bool {
+		item = items[0]
+		return false
+	})
+	require.NotNil(t, item)
+	dataPath := item.decompressor.FilePath()
+
+	// Verify the file exists on disk before deletion.
+	_, err := os.Stat(dataPath)
+	require.NoError(t, err, "data file must exist before DeleteFilesAfterMerge")
+	require.Equal(t, int32(0), item.refcount.Load(), "refcount must be 0 (no active readers)")
+
+	repo.DeleteFilesAfterMerge([]*FilesItem{item})
+
+	// File must be removed from dirty files.
+	require.Equal(t, 0, repo.dirtyFiles.Len(), "dirty files must be empty after deletion")
+	// File must be physically removed from disk (refcount was 0 → immediate removal).
+	_, err = os.Stat(dataPath)
+	require.True(t, os.IsNotExist(err), "data file must be removed from disk when refcount is 0")
+}
+
+// TestDeleteFilesAfterMerge_DeferredRemoval verifies that when a file has active readers
+// (refcount > 0), DeleteFilesAfterMerge marks it canDelete=true but does NOT remove it from
+// disk immediately. The file remains accessible to existing readers until they close.
+func TestDeleteFilesAfterMerge_DeferredRemoval(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ver := version.V1_0_standart
+	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (string, SnapNameSchema) {
+		schema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
+			Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+			BtIndex(ver).Existence(ver).Build()
+		return "accounts", schema
+	})
+
+	populateFiles2(t, dirs, repo, []testFileRange{{0, 1}})
+	require.NoError(t, repo.OpenFolder())
+
+	var item *FilesItem
+	repo.dirtyFiles.Walk(func(items []*FilesItem) bool {
+		item = items[0]
+		return false
+	})
+	require.NotNil(t, item)
+	dataPath := item.decompressor.FilePath()
+
+	// Simulate an active reader by incrementing refcount.
+	item.refcount.Add(1)
+	defer item.refcount.Add(-1)
+
+	repo.DeleteFilesAfterMerge([]*FilesItem{item})
+
+	// File must be removed from dirty files (repo no longer tracks it).
+	require.Equal(t, 0, repo.dirtyFiles.Len(), "dirty files must be empty after deletion call")
+	// canDelete must be set so the last reader knows to clean up.
+	require.True(t, item.canDelete.Load(), "canDelete must be true after DeleteFilesAfterMerge")
+	// But the file must still be on disk — the active reader needs it.
+	_, err := os.Stat(dataPath)
+	require.NoError(t, err, "data file must still exist on disk while readers hold a reference")
+}
