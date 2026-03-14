@@ -1374,3 +1374,45 @@ func TestMergeInProgress_ConstituentFilesStillVisible(t *testing.T) {
 	require.Equal(t, uint64(0), repo.VisibleFiles()[0].StartRootNum())
 	require.Equal(t, uint64(2*stepSize), repo.VisibleFiles()[0].EndRootNum())
 }
+
+// TestVisibleFiles_PartialAccessors_StillInvisible verifies the AND logic of checkForVisibility:
+// a file that has ONE accessor built but is still missing another required accessor must remain
+// invisible. This catches a regression where the visibility gate would OR accessors instead of AND.
+//
+// Scenario: schema requires BTree AND Existence. Data file + Existence are present, BTree is absent.
+// The file must be invisible until ALL required accessors are present.
+//
+// Note: The bt index helper (CreateBtreeIndexWithDecompressor) also creates the existence filter as
+// a side effect — so this test uses existence-only first, then adds bt to reach the visible state.
+func TestVisibleFiles_PartialAccessors_StillInvisible(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ver := version.V1_0_standart
+	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (string, SnapNameSchema) {
+		schema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
+			Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+			BtIndex(ver).Existence(ver).Build()
+		return "accounts", schema
+	})
+
+	from, to := RootNum(0), RootNum(repo.stepSize)
+
+	// Create data + existence filter only (BTree deliberately absent).
+	dataFile, _ := repo.schema.DataFile(version.V1_0, from, to)
+	exFile, _ := repo.schema.ExistenceFile(version.V1_0, from, to)
+	populateFiles(t, dirs, repo.schema, []string{dataFile, exFile})
+
+	require.NoError(t, repo.OpenFolder())
+	require.Equal(t, 1, repo.dirtyFiles.Len(), "data file must be tracked")
+
+	repo.RecalcVisibleFiles(RootNum(MaxUint64))
+	// existence loaded (not nil), but bindex is nil → checkForVisibility returns false → not visible.
+	require.Empty(t, repo.VisibleFiles(), "file with existence but missing bt must NOT be visible")
+
+	// Now add the bt index — file must become visible.
+	// Note: CreateBtreeIndexWithDecompressor also creates/overwrites existence, which is fine here.
+	btFile, _ := repo.schema.BtIdxFile(version.V1_0, from, to)
+	populateFiles(t, dirs, repo.schema, []string{btFile})
+	require.NoError(t, repo.OpenFolder())
+	repo.RecalcVisibleFiles(RootNum(MaxUint64))
+	require.Len(t, repo.VisibleFiles(), 1, "file with both bt and existence must be visible")
+}
