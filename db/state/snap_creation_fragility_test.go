@@ -897,6 +897,136 @@ func TestOpenFolder_CorruptedDataFile(t *testing.T) {
 		"corrupted file must be excluded from dirty files; only valid file should remain")
 }
 
+// TestFindFilesBySearchVersion_VersionRangeFiltering verifies that SearchVersion
+// selects the highest-version file within [MinSupported, Current] and rejects files
+// outside that range. If an unsupported version is selected, data can be misread.
+func TestFindFilesBySearchVersion_VersionRangeFiltering(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	stepSize := uint64(1000)
+
+	// Schema supports V1_1 as current, V1_0 as min supported
+	// → V1_0 and V1_1 files should be found; V1_2 file (above current) should be ignored
+	ver := version.V1_1_standart
+	schema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree, stepSize).
+		Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+		BtIndex(ver).Build()
+
+	from, to := RootNum(0), RootNum(stepSize)
+
+	makeFile := func(v version.Version) {
+		path, err := schema.DataFile(v, from, to)
+		require.NoError(t, err)
+		comp, err := seg.NewCompressor(context.Background(), t.Name(), path, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+		require.NoError(t, err)
+		comp.DisableFsync()
+		require.NoError(t, comp.AddWord([]byte("word")))
+		require.NoError(t, comp.Compress())
+		comp.Close()
+	}
+
+	// Create v1.0 and v1.1 files — both are within [V1_0, V1_1] range
+	makeFile(version.V1_0)
+	makeFile(version.V1_1)
+
+	// SearchVersion must return the highest version (V1_1)
+	foundPath, err := schema.DataFile(version.SearchVersion, from, to)
+	require.NoError(t, err, "SearchVersion must find a file in the supported range")
+
+	info, ok := schema.Parse(fileBaseName(foundPath))
+	require.True(t, ok)
+	require.Equal(t, version.V1_1, info.Version,
+		"SearchVersion must select the highest version within the supported range")
+}
+
+// TestFindFilesByStrictSearchVersion verifies that StrictSearchVersion:
+// - returns a match when exactly one file exists
+// - errors when multiple files exist (strict = no ambiguity)
+func TestFindFilesByStrictSearchVersion(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ver := version.V1_0_standart
+	stepSize := uint64(1000)
+	schema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree, stepSize).
+		Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+		BtIndex(ver).Build()
+
+	from, to := RootNum(0), RootNum(stepSize)
+
+	makeFile := func(v version.Version) {
+		path, err := schema.DataFile(v, from, to)
+		require.NoError(t, err)
+		comp, err := seg.NewCompressor(context.Background(), t.Name(), path, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+		require.NoError(t, err)
+		comp.DisableFsync()
+		require.NoError(t, comp.AddWord([]byte("word")))
+		require.NoError(t, comp.Compress())
+		comp.Close()
+	}
+
+	// Exactly one file: strict search must succeed
+	makeFile(version.V1_0)
+	_, err := schema.DataFile(version.StrictSearchVersion, from, to)
+	require.NoError(t, err, "StrictSearchVersion must succeed when exactly one file exists")
+
+	// Two files: strict search must fail (ambiguous)
+	// Note: V1_1_standart schema needed to allow two different versions
+	ver2 := version.V1_1_standart
+	schema2 := NewE3SnapSchemaBuilder(statecfg.AccessorBTree, stepSize).
+		Data(dirs.SnapDomain, "storage", DataExtensionKv, seg.CompressNone, ver2).
+		BtIndex(ver2).Build()
+	makeFileFn := func(v version.Version) {
+		path, err := schema2.DataFile(v, from, to)
+		require.NoError(t, err)
+		comp, err := seg.NewCompressor(context.Background(), t.Name(), path, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+		require.NoError(t, err)
+		comp.DisableFsync()
+		require.NoError(t, comp.AddWord([]byte("word")))
+		require.NoError(t, comp.Compress())
+		comp.Close()
+	}
+	makeFileFn(version.V1_0)
+	makeFileFn(version.V1_1)
+
+	_, err = schema2.DataFile(version.StrictSearchVersion, from, to)
+	require.Error(t, err, "StrictSearchVersion must error when multiple files exist for the same range")
+}
+
+// TestFilesWithMissedAccessors_LargeRepo verifies that missed accessor detection
+// scales correctly — only files with missing accessors are reported, even in a
+// larger set with many complete files.
+func TestFilesWithMissedAccessors_LargeRepo(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ver := version.V1_0_standart
+	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
+		name = "accounts"
+		schema = NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
+			Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone, ver).
+			BtIndex(ver).Existence(ver).Build()
+		return name, schema
+	})
+	defer repo.Close()
+
+	// 5 complete files + 2 incomplete (data only)
+	populateFiles2(t, dirs, repo, []testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}})
+	for _, r := range []testFileRange{{5, 6}, {6, 7}} {
+		from, to := RootNum(r.fromStep*repo.stepSize), RootNum(r.toStep*repo.stepSize)
+		dataFile, _ := repo.schema.DataFile(version.V1_0, from, to)
+		populateFiles(t, dirs, repo.schema, []string{dataFile})
+	}
+
+	require.NoError(t, repo.OpenFolder())
+	require.Equal(t, 7, repo.dirtyFiles.Len())
+
+	missed := repo.FilesWithMissedAccessors()
+	btMissed := missed.Get(statecfg.AccessorBTree)
+	require.Len(t, btMissed, 2, "only the 2 incomplete files must be reported as missing BTree accessor")
+
+	// Verify the reported missing files are the correct ones
+	for _, item := range btMissed {
+		require.GreaterOrEqual(t, item.startTxNum, uint64(5*repo.stepSize),
+			"missing files must be from the incomplete ranges (5-6 and 6-7)")
+	}
+}
+
 // fileBaseName returns the base name from a full file path.
 func fileBaseName(path string) string {
 	for i := len(path) - 1; i >= 0; i-- {
