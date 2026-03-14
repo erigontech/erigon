@@ -1015,6 +1015,79 @@ func TestFileNamingRoundTrip_AllAccessorTypes(t *testing.T) {
 	require.Equal(t, string(AccessorExtensionEfi), info.Ext)
 }
 
+// TestVisibleFiles_RequiresCompleteAccessors verifies the critical safety property:
+// a data file is NOT included in visible files unless ALL its required accessors are present.
+// This prevents incomplete file creation from causing incorrect state reads in prod.
+// A file created without its accessor must be invisible to readers — it cannot be used
+// until the accessor is built, even if the data file is valid.
+func TestVisibleFiles_RequiresCompleteAccessors(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ver := version.V1_0_standart
+	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
+		name = "accounts"
+		schema = NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
+			Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone, ver).
+			BtIndex(ver).Existence(ver).Build()
+		return name, schema
+	})
+	defer repo.Close()
+
+	// Create a data file for 0-1 WITHOUT its .bt and .kvei accessors
+	from, to := RootNum(0), RootNum(repo.stepSize)
+	dataFile, _ := repo.schema.DataFile(version.V1_0, from, to)
+	populateFiles(t, dirs, repo.schema, []string{dataFile})
+	require.NoError(t, repo.OpenFolder())
+	require.Equal(t, 1, repo.dirtyFiles.Len(), "data file must be in dirty files")
+
+	// RecalcVisibleFiles must NOT include the file — it's missing its BTree accessor
+	maxRootNum := repo.RecalcVisibleFiles(RootNum(MaxUint64))
+	vf := repo.VisibleFiles()
+	require.Empty(t, vf, "file with missing BTree accessor must NOT be visible")
+	require.Equal(t, RootNum(0), maxRootNum, "max root num must be 0 when no visible files")
+
+	// Now add the complete accessors
+	btFile, _ := repo.schema.BtIdxFile(version.V1_0, from, to)
+	exFile, _ := repo.schema.ExistenceFile(version.V1_0, from, to)
+	populateFiles(t, dirs, repo.schema, []string{btFile, exFile})
+
+	// Re-open to load the newly created accessor files
+	require.NoError(t, repo.OpenFolder())
+	maxRootNum = repo.RecalcVisibleFiles(RootNum(MaxUint64))
+	vf = repo.VisibleFiles()
+	require.Len(t, vf, 1, "file with all accessors present must be visible")
+	require.Greater(t, uint64(maxRootNum), uint64(0), "max root num must advance once file is visible")
+}
+
+// TestVisibleFiles_HashMap verifies the safety property for HashMap accessor.
+func TestVisibleFiles_HashMap(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ver := version.V1_0_standart
+	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
+		name = "commitment"
+		schema = NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
+			Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone, ver).
+			Accessor(dirs.SnapDomain, ver).Build()
+		return name, schema
+	})
+	defer repo.Close()
+
+	from, to := RootNum(0), RootNum(repo.stepSize)
+	dataFile, _ := repo.schema.DataFile(version.V1_0, from, to)
+	populateFiles(t, dirs, repo.schema, []string{dataFile})
+	require.NoError(t, repo.OpenFolder())
+
+	// File must be invisible: HashMap accessor (.kvi) is missing
+	repo.RecalcVisibleFiles(RootNum(MaxUint64))
+	require.Empty(t, repo.VisibleFiles(), "file with missing .kvi accessor must NOT be visible")
+
+	// Add the accessor, file must become visible
+	kviFile, _ := repo.schema.AccessorIdxFile(version.V1_0, from, to, 0)
+	populateFiles(t, dirs, repo.schema, []string{kviFile})
+	require.NoError(t, repo.OpenFolder())
+	repo.RecalcVisibleFiles(RootNum(MaxUint64))
+	require.Len(t, repo.VisibleFiles(), 1, "file becomes visible once its accessor is present")
+}
+
 // fileBaseName returns the base name from a full file path.
 func fileBaseName(path string) string {
 	for i := len(path) - 1; i >= 0; i-- {
