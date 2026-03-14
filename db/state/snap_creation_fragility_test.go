@@ -1494,3 +1494,38 @@ func TestDeleteFilesAfterMerge_DeferredRemoval(t *testing.T) {
 	_, err := os.Stat(dataPath)
 	require.NoError(t, err, "data file must still exist on disk while readers hold a reference")
 }
+
+// TestOpenFolder_ExternallyDeletedFile verifies resilience when a file disappears from disk
+// between two OpenFolder calls. This simulates a sysadmin manually deleting a file, or a
+// crash mid-deletion. The second OpenFolder must evict the stale entry from dirty files
+// instead of leaving a dangling open file handle.
+func TestOpenFolder_ExternallyDeletedFile(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ver := version.V1_0_standart
+	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (string, SnapNameSchema) {
+		schema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
+			Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+			BtIndex(ver).Existence(ver).Build()
+		return "accounts", schema
+	})
+
+	populateFiles2(t, dirs, repo, []testFileRange{{0, 1}, {1, 2}})
+	require.NoError(t, repo.OpenFolder())
+	require.Equal(t, 2, repo.dirtyFiles.Len(), "both files must load on first OpenFolder")
+
+	// Externally delete the first file from disk.
+	var victim *FilesItem
+	repo.dirtyFiles.Walk(func(items []*FilesItem) bool {
+		victim = items[0]
+		return false
+	})
+	require.NotNil(t, victim)
+	victimPath := victim.decompressor.FilePath()
+	require.NoError(t, os.Remove(victimPath), "must be able to remove data file from disk")
+
+	// Second OpenFolder — must handle the missing file gracefully.
+	require.NoError(t, repo.OpenFolder(), "OpenFolder must not error when a file was externally deleted")
+
+	// The deleted file must be evicted from dirty files.
+	require.Equal(t, 1, repo.dirtyFiles.Len(), "externally deleted file must be evicted from dirty files")
+}
