@@ -1313,3 +1313,64 @@ func TestVisibleFiles_MergedFilePrefersOverConstituents(t *testing.T) {
 	require.Equal(t, uint64(0), visible[0].StartRootNum(), "merged file must start at 0")
 	require.Equal(t, uint64(2*repo.stepSize), visible[0].EndRootNum(), "merged file must cover full range")
 }
+
+// TestMergeInProgress_ConstituentFilesStillVisible tests the critical safety invariant
+// during an active merge: when the merged data file exists on disk but its accessors
+// have not yet been built, the merged file must NOT be visible and constituent small
+// files must REMAIN visible so reads continue without interruption.
+//
+// If this invariant breaks, a node mid-merge would have a gap: the merged file is
+// invisible (no accessors) and the small files are also invisible (subset-removed).
+// This would cause "key not found" errors for all data in the merged range.
+func TestMergeInProgress_ConstituentFilesStillVisible(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ver := version.V1_0_standart
+	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (string, SnapNameSchema) {
+		schema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
+			Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+			BtIndex(ver).Existence(ver).Build()
+		return "accounts", schema
+	})
+	stepSize := repo.stepSize
+
+	// Phase 1: two complete constituent files (0-1 and 1-2), both fully visible.
+	populateFiles2(t, dirs, repo, []testFileRange{{0, 1}, {1, 2}})
+	require.NoError(t, repo.OpenFolder())
+	repo.RecalcVisibleFiles(RootNum(MaxUint64))
+	require.Len(t, repo.VisibleFiles(), 2, "both constituent files must be visible before merge starts")
+
+	// Phase 2: merged data file appears (0-2) but NO accessors yet (simulates merge in progress).
+	// Only create the data file using a compressor, leave bindex/existence absent.
+	mergedDataPath, err := repo.schema.DataFile(version.V1_0, RootNum(0), RootNum(2*stepSize))
+	require.NoError(t, err)
+	comp, err := seg.NewCompressor(context.Background(), t.Name(), mergedDataPath, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+	require.NoError(t, err)
+	comp.DisableFsync()
+	require.NoError(t, comp.AddWord([]byte("merged-key")))
+	require.NoError(t, comp.Compress())
+	comp.Close()
+
+	// Re-open folder — merged data file present but bindex/existence missing.
+	require.NoError(t, repo.OpenFolder())
+	repo.RecalcVisibleFiles(RootNum(MaxUint64))
+	visible := repo.VisibleFiles()
+
+	// CRITICAL SAFETY CHECK: constituent files must still be visible.
+	// The merged file is incomplete (no accessors) so it must not enter the visible set.
+	// If this fails, there is a read gap during merge and the node would serve stale/missing data.
+	require.Len(t, visible, 2, "constituent files must remain visible while merged file lacks accessors")
+	require.Equal(t, uint64(0), visible[0].StartRootNum())
+	require.Equal(t, uint64(stepSize), visible[0].EndRootNum())
+	require.Equal(t, uint64(stepSize), visible[1].StartRootNum())
+	require.Equal(t, uint64(2*stepSize), visible[1].EndRootNum())
+
+	// Phase 3: merge completes — accessor files are created for the merged file.
+	populateFiles2(t, dirs, repo, []testFileRange{{0, 2}})
+	require.NoError(t, repo.OpenFolder())
+	repo.RecalcVisibleFiles(RootNum(MaxUint64))
+
+	// Now only the merged file must be visible (constituents subsumed).
+	require.Len(t, repo.VisibleFiles(), 1, "merged file must replace constituents after accessors are built")
+	require.Equal(t, uint64(0), repo.VisibleFiles()[0].StartRootNum())
+	require.Equal(t, uint64(2*stepSize), repo.VisibleFiles()[0].EndRootNum())
+}
