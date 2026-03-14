@@ -34,7 +34,6 @@ func TestFilesWithMissedAccessors_BTree(t *testing.T) {
 			Build()
 		return name, schema
 	})
-	defer repo.Close()
 
 	// Populate only data files (no .bt or .kvei accessor files)
 	ranges := []testFileRange{{0, 1}, {1, 2}}
@@ -66,7 +65,6 @@ func TestFilesWithMissedAccessors_Existence(t *testing.T) {
 			Build()
 		return name, schema
 	})
-	defer repo.Close()
 
 	ranges := []testFileRange{{0, 1}}
 	for _, r := range ranges {
@@ -95,7 +93,6 @@ func TestFilesWithMissedAccessors_HashMap(t *testing.T) {
 			Build()
 		return name, schema
 	})
-	defer repo.Close()
 
 	ranges := []testFileRange{{0, 1}, {1, 2}}
 	for _, r := range ranges {
@@ -125,7 +122,6 @@ func TestFilesWithMissedAccessors_AllPresent(t *testing.T) {
 			Build()
 		return name, schema
 	})
-	defer repo.Close()
 
 	populateFiles2(t, dirs, repo, []testFileRange{{0, 1}, {1, 2}})
 	require.NoError(t, repo.OpenFolder())
@@ -334,7 +330,6 @@ func TestDirtyFilesWithNoBtreeAccessors(t *testing.T) {
 			Build()
 		return name, schema
 	})
-	defer repo.Close()
 
 	// Create data files only (no .bt accessors)
 	for _, r := range []testFileRange{{0, 1}, {1, 2}} {
@@ -362,7 +357,6 @@ func TestDirtyFilesWithNoHashAccessors(t *testing.T) {
 			Build()
 		return name, schema
 	})
-	defer repo.Close()
 
 	for _, r := range []testFileRange{{0, 1}, {1, 2}} {
 		from, to := RootNum(r.fromStep*repo.stepSize), RootNum(r.toStep*repo.stepSize)
@@ -389,7 +383,6 @@ func TestDirtyFilesWithAccessors_NoneWhenPresent(t *testing.T) {
 			Build()
 		return name, schema
 	})
-	defer repo.Close()
 
 	populateFiles2(t, dirs, repo, []testFileRange{{0, 1}, {1, 2}})
 	require.NoError(t, repo.OpenFolder())
@@ -412,7 +405,6 @@ func TestOpenFolder_PartialFiles_StillOpens(t *testing.T) {
 			Build()
 		return name, schema
 	})
-	defer repo.Close()
 
 	// First file: fully created (data + all accessors)
 	populateFiles2(t, dirs, repo, []testFileRange{{0, 1}})
@@ -506,7 +498,6 @@ func TestFilesWithMissedAccessors_PartialBTree(t *testing.T) {
 			Build()
 		return name, schema
 	})
-	defer repo.Close()
 
 	// First range: complete (data + bt + kvei)
 	populateFiles2(t, dirs, repo, []testFileRange{{0, 1}})
@@ -670,7 +661,6 @@ func TestFilesWithMissedAccessors_EmptyRepo(t *testing.T) {
 			BtIndex(ver).Existence(ver).Build()
 		return name, schema
 	})
-	defer repo.Close()
 
 	missed := repo.FilesWithMissedAccessors()
 	require.NotNil(t, missed)
@@ -690,7 +680,6 @@ func TestOpenFolder_UnrelatedFilesIgnored(t *testing.T) {
 			BtIndex(ver).Existence(ver).Build()
 		return name, schema
 	})
-	defer repo.Close()
 
 	// Create valid data files
 	populateFiles2(t, dirs, repo, []testFileRange{{0, 1}})
@@ -762,7 +751,6 @@ func TestOpenFolder_CorruptedDataFile(t *testing.T) {
 			BtIndex(ver).Existence(ver).Build()
 		return name, schema
 	})
-	defer repo.Close()
 
 	// Create a valid file and a corrupted (empty) file
 	populateFiles2(t, dirs, repo, []testFileRange{{0, 1}})
@@ -888,7 +876,6 @@ func TestFilesWithMissedAccessors_LargeRepo(t *testing.T) {
 			BtIndex(ver).Existence(ver).Build()
 		return name, schema
 	})
-	defer repo.Close()
 
 	// 5 complete files + 2 incomplete (data only)
 	populateFiles2(t, dirs, repo, []testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}})
@@ -1021,7 +1008,6 @@ func TestVisibleFiles_RequiresCompleteAccessors(t *testing.T) {
 			BtIndex(ver).Existence(ver).Build()
 		return name, schema
 	})
-	defer repo.Close()
 
 	// Create a data file for 0-1 WITHOUT its .bt and .kvei accessors
 	from, to := RootNum(0), RootNum(repo.stepSize)
@@ -1060,7 +1046,6 @@ func TestVisibleFiles_HashMap(t *testing.T) {
 			Accessor(dirs.SnapDomain, ver).Build()
 		return name, schema
 	})
-	defer repo.Close()
 
 	from, to := RootNum(0), RootNum(repo.stepSize)
 	dataFile, _ := repo.schema.DataFile(version.V1_0, from, to)
@@ -1093,7 +1078,6 @@ func TestFileCreationLifecycle_FullCycle(t *testing.T) {
 			BtIndex(ver).Existence(ver).Build()
 		return name, schema
 	})
-	defer repo.Close()
 
 	from, to := RootNum(0), RootNum(repo.stepSize)
 	v := version.V1_0
@@ -1141,7 +1125,6 @@ func TestDirtyFilesMaxRootNum(t *testing.T) {
 			BtIndex(ver).Existence(ver).Build()
 		return name, schema
 	})
-	defer repo.Close()
 
 	// Empty repo: max root num must be 0
 	require.Equal(t, RootNum(0), repo.DirtyFilesMaxRootNum())
@@ -1176,7 +1159,7 @@ func TestNodeRestart_PartialFileCreation(t *testing.T) {
 			BtIndex(ver).Existence(ver).Build()
 		return name, schema
 	})
-	defer repo.Close()
+
 	v := version.V1_0
 
 	// Simulate "previous successful runs": 3 complete files (data + all accessors)
@@ -1227,7 +1210,7 @@ func TestAllFilesDataOnly_NoneVisible(t *testing.T) {
 			BtIndex(ver).Existence(ver).Build()
 		return name, schema
 	})
-	defer repo.Close()
+
 	v := version.V1_0
 
 	// Create 5 data files, no accessors at all
