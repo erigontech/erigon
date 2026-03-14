@@ -111,22 +111,6 @@ type sortableBuffer struct {
 	entries     []entryLoc
 	data        []byte
 	optimalSize int
-	// first 8 bytes of key, big-endian so uint64 comparison matches bytes.Compare order
-	// Concrete example:
-	//
-	//	A = []byte{0x00, 0xFF, 0, 0, 0, 0, 0, 0}
-	//	B = []byte{0x01, 0x00, 0, 0, 0, 0, 0, 0}
-	//
-	//	bytes.Compare(A, B) → A[0]=0x00 < B[0]=0x01 → A < B ✓
-	//
-	//	BigEndian.Uint64(A) = 0x00FF000000000000 =   71776119061217280
-	//	BigEndian.Uint64(B) = 0x0100000000000000 =   72057594037927936
-	//	                                           A < B ✓  (same answer)
-	//
-	//	If we used LittleEndian instead:
-	//	LittleEndian.Uint64(A) = 0x000000000000FF00 = 65280
-	//	LittleEndian.Uint64(B) = 0x0000000000000001 = 1
-	prefixes []uint64
 }
 
 // Put adds key and value to the buffer. These slices will not be accessed later,
@@ -195,38 +179,12 @@ func (b *sortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) Buffer
 
 func (b *sortableBuffer) Reset() {
 	b.entries = b.entries[:0]
-	b.prefixes = b.prefixes[:0]
 	b.data = b.data[:0]
 }
 func (b *sortableBuffer) SizeLimit() int { return b.optimalSize }
 func (b *sortableBuffer) Sort() {
 	data := b.data
-	// Trick to speedup sort: cast 8 first bytes of key to u64 and use arithmetic comparison instead of bytes.Compare
-	// it will greatly reduce amount of `bytes.Compare` calls
-	// also it will work with compact datastructure: 8-bytes/key instead of large `b.data`
-
-	// Calculate prefixes here - to keep .Put() method fast - because .Sort() often called in background
-	// Also: O(n) cost, which is negligible vs the O(n log n) sort.
-	prefixes := slices.Grow(b.prefixes[:0], len(b.entries))[:len(b.entries)] // sortableBuffer object is reusable (by sync.Pool)
-	clear(prefixes)
-	b.prefixes = prefixes
-	for i := range b.entries {
-		e := &b.entries[i]
-		if e.keyLen >= 8 {
-			prefixes[e.insertionOrder] = binary.BigEndian.Uint64(data[e.offset:])
-		} else if e.keyLen > 0 {
-			var buf [8]byte
-			copy(buf[:], data[e.offset:e.offset+e.keyLen]) // only key bytes; buf is zero-padded beyond keyLen
-			prefixes[e.insertionOrder] = binary.BigEndian.Uint64(buf[:])
-		} // else keyLen<=0: clear(prefixes) already zeroed the slot
-	}
 	cmp := func(a, b entryLoc) int {
-		if prefixes[a.insertionOrder] != prefixes[b.insertionOrder] {
-			if prefixes[a.insertionOrder] < prefixes[b.insertionOrder] {
-				return -1
-			}
-			return 1
-		}
 		aKey := data[a.offset : a.offset+max(a.keyLen, 0)]
 		bKey := data[b.offset : b.offset+max(b.keyLen, 0)]
 		if c := bytes.Compare(aKey, bKey); c != 0 {
@@ -238,18 +196,6 @@ func (b *sortableBuffer) Sort() {
 		return
 	}
 	slices.SortFunc(b.entries, cmp)
-	if dbg.AssertEnabled {
-		if !slices.IsSortedFunc(b.entries, func(a, b entryLoc) int {
-			aKey := data[a.offset : a.offset+max(a.keyLen, 0)]
-			bKey := data[b.offset : b.offset+max(b.keyLen, 0)]
-			if c := bytes.Compare(aKey, bKey); c != 0 {
-				return c
-			}
-			return int(a.insertionOrder - b.insertionOrder)
-		}) {
-			panic("etl: sortableBuffer.Sort() produced incorrect order")
-		}
-	}
 }
 
 func (b *sortableBuffer) CheckFlushSize() bool {
