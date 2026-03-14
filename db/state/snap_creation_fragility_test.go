@@ -1088,6 +1088,85 @@ func TestVisibleFiles_HashMap(t *testing.T) {
 	require.Len(t, repo.VisibleFiles(), 1, "file becomes visible once its accessor is present")
 }
 
+// TestFileCreationLifecycle_FullCycle tests the complete file creation lifecycle:
+// create data file → detected as missing accessor → invisible to readers →
+// create accessor → no longer missing → visible to readers.
+// This is the key end-to-end flow for catching file creation bugs early.
+func TestFileCreationLifecycle_FullCycle(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ver := version.V1_0_standart
+	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
+		name = "accounts"
+		schema = NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
+			Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone, ver).
+			BtIndex(ver).Existence(ver).Build()
+		return name, schema
+	})
+	defer repo.Close()
+
+	from, to := RootNum(0), RootNum(repo.stepSize)
+	v := version.V1_0
+
+	// Phase 1: Only data file created (simulates interrupted file creation)
+	dataFile, _ := repo.schema.DataFile(v, from, to)
+	populateFiles(t, dirs, repo.schema, []string{dataFile})
+	require.NoError(t, repo.OpenFolder())
+
+	require.Equal(t, 1, repo.dirtyFiles.Len(), "data file must be tracked in dirty files")
+	require.Len(t, repo.DirtyFilesWithNoBtreeAccessors(), 1, "BTree accessor must be detected as missing")
+	require.NotEmpty(t, repo.FilesWithMissedAccessors().Get(statecfg.AccessorBTree), "must report missing BTree")
+	require.NotEmpty(t, repo.FilesWithMissedAccessors().Get(statecfg.AccessorExistence), "must report missing Existence")
+
+	repo.RecalcVisibleFiles(RootNum(MaxUint64))
+	require.Empty(t, repo.VisibleFiles(), "file with missing accessors must NOT be visible to readers")
+
+	// Phase 2: Add accessor files (simulates completing interrupted file creation)
+	btFile, _ := repo.schema.BtIdxFile(v, from, to)
+	exFile, _ := repo.schema.ExistenceFile(v, from, to)
+	populateFiles(t, dirs, repo.schema, []string{btFile, exFile})
+	require.NoError(t, repo.OpenFolder())
+
+	require.Empty(t, repo.DirtyFilesWithNoBtreeAccessors(), "no missing BTree accessors after creation")
+	require.True(t, repo.FilesWithMissedAccessors().IsEmpty(), "no missed accessors after all files present")
+
+	repo.RecalcVisibleFiles(RootNum(MaxUint64))
+	vf := repo.VisibleFiles()
+	require.Len(t, vf, 1, "complete file must now be visible to readers")
+	require.Equal(t, uint64(from), vf[0].StartRootNum())
+	require.Equal(t, uint64(to), vf[0].EndRootNum())
+}
+
+// TestDirtyFilesMaxRootNum verifies that DirtyFilesMaxRootNum correctly tracks the
+// end boundary of the last file. This value is used to determine how far file
+// creation has progressed — a wrong value causes gaps or duplicate file creation.
+func TestDirtyFilesMaxRootNum(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ver := version.V1_0_standart
+	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
+		name = "accounts"
+		schema = NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
+			Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone, ver).
+			BtIndex(ver).Existence(ver).Build()
+		return name, schema
+	})
+	defer repo.Close()
+
+	// Empty repo: max root num must be 0
+	require.Equal(t, RootNum(0), repo.DirtyFilesMaxRootNum())
+
+	// Add files for ranges 0-1, 1-2, 2-3 (only data files, no accessors needed for DirtyFilesMaxRootNum)
+	for _, r := range []testFileRange{{0, 1}, {1, 2}, {2, 3}} {
+		from, to := RootNum(r.fromStep*repo.stepSize), RootNum(r.toStep*repo.stepSize)
+		dataFile, _ := repo.schema.DataFile(version.V1_0, from, to)
+		populateFiles(t, dirs, repo.schema, []string{dataFile})
+	}
+	require.NoError(t, repo.OpenFolder())
+
+	maxRootNum := repo.DirtyFilesMaxRootNum()
+	require.Equal(t, RootNum(3*repo.stepSize), maxRootNum,
+		"DirtyFilesMaxRootNum must return end of the last file (3*stepSize)")
+}
+
 // fileBaseName returns the base name from a full file path.
 func fileBaseName(path string) string {
 	for i := len(path) - 1; i >= 0; i-- {
