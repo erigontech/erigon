@@ -723,6 +723,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		cfg.FcuBackgroundPrune,
 		cfg.FcuBackgroundCommit,
 		onlySnapDownloadOnStart,
+		func() error { return nil },
 	)
 
 	mock.sentriesClient.Hd.StartPoSDownloader(mock.Ctx, sendHeaderRequest, penalize)

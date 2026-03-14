@@ -991,6 +991,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		config.FcuBackgroundPrune,
 		config.FcuBackgroundCommit,
 		onlySnapDownloadOnStart,
+		backend.stopNode,
 	)
 	executionRpc := direct.NewExecutionClientDirect(backend.execModule)
 

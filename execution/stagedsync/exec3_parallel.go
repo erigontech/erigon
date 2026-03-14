@@ -477,6 +477,8 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 		// Merge into execErr so the single error-handling path below catches both.
 		if execErr == nil {
 			execErr = waitErr
+		} else {
+			execErr = errors.Join(execErr, waitErr)
 		}
 	}
 
@@ -486,7 +488,11 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 	if execErr != nil {
 		if !(errors.Is(execErr, context.Canceled) || errors.Is(execErr, &ErrLoopExhausted{})) {
-			pe.logger.Warn(fmt.Sprintf("[%s] Execution failed", pe.logPrefix), "err", execErr)
+			if lastHeader != nil {
+				pe.logger.Warn(fmt.Sprintf("[%s] Execution failed", pe.logPrefix), "err", execErr, "block", lastHeader.Number.Uint64(), "hash", lastHeader.Hash())
+			} else {
+				pe.logger.Warn(fmt.Sprintf("[%s] Execution failed", pe.logPrefix), "err", execErr)
+			}
 			if errors.Is(execErr, rules.ErrInvalidBlock) {
 				if pe.cfg.hd != nil && pe.cfg.hd.POSSync() && lastHeader != nil {
 					pe.cfg.hd.ReportBadHeaderPoS(lastHeader.Hash(), lastHeader.ParentHash)
@@ -495,7 +501,11 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					return nil, rwTx, execErr
 				}
 				if u != nil && lastHeader != nil {
-					if err := u.UnwindTo(lastHeader.Number.Uint64()-1, BadBlock(lastHeader.Hash(), execErr), rwTx); err != nil {
+					unwindTo := uint64(0)
+					if lastHeader.Number.Uint64() > 0 {
+						unwindTo = lastHeader.Number.Uint64() - 1
+					}
+					if err := u.UnwindTo(unwindTo, BadBlock(lastHeader.Hash(), execErr), rwTx); err != nil {
 						return nil, rwTx, err
 					}
 				}

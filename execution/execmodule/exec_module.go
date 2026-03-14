@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"math/big"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -206,6 +205,8 @@ type ExecModule struct {
 	// stateCache is a cache for state data (accounts, storage, code)
 	stateCache *cache.StateCache
 
+	stopNode func() error
+
 	executionproto.UnimplementedExecutionServer
 }
 
@@ -228,6 +229,7 @@ func NewExecModule(
 	fcuBackgroundPrune bool,
 	fcuBackgroundCommit bool,
 	onlySnapDownloadOnStart bool,
+	stopNode func() error,
 ) *ExecModule {
 	domainCache := cache.NewDefaultStateCache()
 
@@ -252,6 +254,7 @@ func NewExecModule(
 		fcuBackgroundCommit:     fcuBackgroundCommit,
 		onlySnapDownloadOnStart: onlySnapDownloadOnStart,
 		stateCache:              domainCache,
+		stopNode:                stopNode,
 	}
 
 	if stateCache != nil {
@@ -503,7 +506,12 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 		// Exit the process so the operator can investigate.
 		if dbg.Exec3Parallel && errors.Is(err, rules.ErrInvalidBlock) {
 			e.logger.Error("Invalid block during parallel initial sync — halting process")
-			os.Exit(1)
+			go func() {
+				if stopErr := e.stopNode(); stopErr != nil {
+					e.logger.Error("Could not stop node on invalid block", "err", stopErr)
+				}
+			}()
+			return
 		}
 	}
 }
