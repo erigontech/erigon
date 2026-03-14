@@ -1027,6 +1027,153 @@ func TestFilesWithMissedAccessors_LargeRepo(t *testing.T) {
 	}
 }
 
+// TestAccessorExtension_IsSet verifies that AccessorExtension.IsSet correctly
+// identifies valid accessor extensions. A mismatch here causes wrong files to be
+// treated as accessor files → corrupted snapshot state on disk.
+func TestAccessorExtension_IsSet(t *testing.T) {
+	validAccessors := []AccessorExtension{
+		AccessorExtensionIdx,
+		AccessorExtensionKvi,
+		AccessorExtensionVi,
+		AccessorExtensionEfi,
+	}
+	for _, ext := range validAccessors {
+		require.True(t, ext.IsSet(), "extension %q must be a valid accessor", ext)
+	}
+
+	invalidAccessors := []AccessorExtension{"", ".kv", ".bt", ".kvei", ".seg", ".v", ".ef", ".dat"}
+	for _, ext := range invalidAccessors {
+		require.False(t, ext.IsSet(), "extension %q must NOT be a valid accessor", ext)
+	}
+}
+
+// TestDataExtension_IsSet verifies DataExtension.IsSet correctness.
+func TestDataExtension_IsSet(t *testing.T) {
+	valid := []DataExtension{DataExtensionSeg, DataExtensionKv, DataExtensionV, DataExtensionEf}
+	for _, ext := range valid {
+		require.True(t, ext.IsSet(), "data extension %q must be valid", ext)
+	}
+	invalid := []DataExtension{"", ".bt", ".kvi", ".kvei", ".dat"}
+	for _, ext := range invalid {
+		require.False(t, ext.IsSet(), "extension %q must NOT be a data extension", ext)
+	}
+}
+
+// TestFindAccessorFilesBySearchVersion verifies that BtIdxFile and AccessorIdxFile
+// also work correctly with SearchVersion. The restart path must be able to find
+// all file types, not just data files.
+func TestFindAccessorFilesBySearchVersion(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ver := version.V1_0_standart
+	stepSize := uint64(1000)
+
+	// Schema with both BTree and HashMap accessors
+	domainSchema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
+		Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+		BtIndex(ver).Existence(ver).Build()
+
+	hashSchema := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
+		Data(dirs.SnapDomain, "commitments", DataExtensionKv, seg.CompressNone, ver).
+		Accessor(dirs.SnapDomain, ver).Build()
+
+	from, to := RootNum(0), RootNum(stepSize)
+
+	// Create bt accessor file using helper
+	populateFiles2(t, dirs, &SnapshotRepo{
+		schema:   domainSchema,
+		stepSize: stepSize,
+		cfg: &SnapshotConfig{
+			SnapshotCreationConfig: &SnapshotCreationConfig{
+				RootNumPerStep: stepSize,
+				MergeStages:    []uint64{2 * stepSize},
+				MinimumSize:    stepSize,
+			},
+			Schema: domainSchema,
+		},
+	}, []testFileRange{{0, 1}})
+
+	// BtIdxFile with SearchVersion must find the .bt file
+	btPath, err := domainSchema.BtIdxFile(version.SearchVersion, from, to)
+	require.NoError(t, err, "SearchVersion must find .bt accessor file")
+	require.Contains(t, btPath, ".bt")
+
+	// ExistenceFile with SearchVersion must find the .kvei file
+	exPath, err := domainSchema.ExistenceFile(version.SearchVersion, from, to)
+	require.NoError(t, err, "SearchVersion must find .kvei existence file")
+	require.Contains(t, exPath, ".kvei")
+
+	// AccessorIdxFile with SearchVersion must find the .kvi file
+	populateFiles2(t, dirs, &SnapshotRepo{
+		schema:   hashSchema,
+		stepSize: stepSize,
+		cfg: &SnapshotConfig{
+			SnapshotCreationConfig: &SnapshotCreationConfig{
+				RootNumPerStep: stepSize,
+				MergeStages:    []uint64{2 * stepSize},
+				MinimumSize:    stepSize,
+			},
+			Schema: hashSchema,
+		},
+	}, []testFileRange{{0, 1}})
+
+	kviPath, err := hashSchema.AccessorIdxFile(version.SearchVersion, from, to, 0)
+	require.NoError(t, err, "SearchVersion must find .kvi accessor file")
+	require.Contains(t, kviPath, ".kvi")
+}
+
+// TestFileNamingRoundTrip_AllAccessorTypes verifies round-trip for all accessor
+// file types (.kvi, .vi, .efi, .bt, .kvei). A naming bug in any of these causes
+// the accessor to not be found on restart → full rebuild required.
+func TestFileNamingRoundTrip_AllAccessorTypes(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ver := version.V1_0_standart
+	stepSize := uint64(1000)
+	from, to := RootNum(0), RootNum(stepSize)
+
+	// BTree (.bt) + Existence (.kvei)
+	domainSchema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
+		Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+		BtIndex(ver).Existence(ver).Build()
+
+	btPath, _ := domainSchema.BtIdxFile(ver.Current, from, to)
+	info, ok := domainSchema.Parse(fileBaseName(btPath))
+	require.True(t, ok, ".bt file must parse correctly")
+	require.Equal(t, ".bt", info.Ext)
+	require.Equal(t, uint64(from), info.From)
+
+	exPath, _ := domainSchema.ExistenceFile(ver.Current, from, to)
+	info, ok = domainSchema.Parse(fileBaseName(exPath))
+	require.True(t, ok, ".kvei file must parse correctly")
+	require.Equal(t, ".kvei", info.Ext)
+
+	// HashMap accessor (.kvi for domain)
+	commitSchema := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
+		Data(dirs.SnapDomain, "commitments", DataExtensionKv, seg.CompressNone, ver).
+		Accessor(dirs.SnapDomain, ver).Build()
+	kviPath, _ := commitSchema.AccessorIdxFile(ver.Current, from, to, 0)
+	info, ok = commitSchema.Parse(fileBaseName(kviPath))
+	require.True(t, ok, ".kvi file must parse correctly")
+	require.Equal(t, string(AccessorExtensionKvi), info.Ext)
+
+	// HashMap accessor (.vi for history)
+	histSchema := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
+		Data(dirs.SnapHistory, "accounts", DataExtensionV, seg.CompressNone, ver).
+		Accessor(dirs.SnapAccessors, ver).Build()
+	viPath, _ := histSchema.AccessorIdxFile(ver.Current, from, to, 0)
+	info, ok = histSchema.Parse(fileBaseName(viPath))
+	require.True(t, ok, ".vi file must parse correctly")
+	require.Equal(t, string(AccessorExtensionVi), info.Ext)
+
+	// HashMap accessor (.efi for inverted index)
+	iiSchema := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
+		Data(dirs.SnapIdx, "logaddrs", DataExtensionEf, seg.CompressNone, ver).
+		Accessor(dirs.SnapAccessors, ver).Build()
+	efiPath, _ := iiSchema.AccessorIdxFile(ver.Current, from, to, 0)
+	info, ok = iiSchema.Parse(fileBaseName(efiPath))
+	require.True(t, ok, ".efi file must parse correctly")
+	require.Equal(t, string(AccessorExtensionEfi), info.Ext)
+}
+
 // fileBaseName returns the base name from a full file path.
 func fileBaseName(path string) string {
 	for i := len(path) - 1; i >= 0; i-- {
