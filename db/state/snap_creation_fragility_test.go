@@ -1719,3 +1719,33 @@ func TestCloseVisibleFilesAfterRootNum(t *testing.T) {
 	// Dirty files are unchanged — CloseVisibleFilesAfterRootNum only affects the cache.
 	require.Equal(t, 3, repo.dirtyFiles.Len(), "dirty files must be unaffected")
 }
+
+// TestFilesInRange_NeedMergeGate verifies that FilesInRange returns empty when
+// MergeRange.needMerge is false. This gate prevents accidental file reads during
+// periods when no merge should occur, protecting against spurious merge operations.
+func TestFilesInRange_NeedMergeGate(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ver := version.V1_0_standart
+	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (string, SnapNameSchema) {
+		schema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree, stepSize).
+			Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+			BtIndex(ver).Build()
+		return "accounts", schema
+	})
+	stepSize := repo.stepSize
+
+	populateFiles2(t, dirs, repo, []testFileRange{{0, 1}, {1, 2}})
+	require.NoError(t, repo.OpenFolder())
+	repo.RecalcVisibleFiles(RootNum(MaxUint64))
+	vf := repo.visibleFiles()
+
+	// MergeRange with needMerge=false — FilesInRange must return empty regardless of from/to.
+	emptyRange := MergeRange{needMerge: false, from: 0, to: 2 * stepSize}
+	items := repo.FilesInRange(emptyRange, vf)
+	require.Empty(t, items, "FilesInRange must return empty when needMerge is false")
+
+	// MergeRange with needMerge=true — must return the matching files.
+	validRange := MergeRange{needMerge: true, from: 0, to: 2 * stepSize}
+	items = repo.FilesInRange(validRange, vf)
+	require.Len(t, items, 2, "FilesInRange must return both files for the 0-2 range")
+}
