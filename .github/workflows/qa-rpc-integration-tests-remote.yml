@@ -140,6 +140,12 @@ jobs:
             exit 1
           fi
 
+      - name: Restore rpc-tests cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.workspace }}/rpc-tests
+          key: rpc-tests-${{ runner.os }}-${{ runner.arch }}-v1.121.0
+
       - name: Run RPC Integration Tests
         id: test_step
         run: |
