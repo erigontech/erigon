@@ -1529,3 +1529,38 @@ func TestOpenFolder_ExternallyDeletedFile(t *testing.T) {
 	// The deleted file must be evicted from dirty files.
 	require.Equal(t, 1, repo.dirtyFiles.Len(), "externally deleted file must be evicted from dirty files")
 }
+
+// TestRecalcVisibleFiles_ToLimit verifies that RecalcVisibleFiles correctly excludes files
+// whose endTxNum exceeds the 'to' parameter. This is critical for rollback safety: when
+// the chain rolls back to a specific root number, only files within that range must be
+// visible. Files beyond the rollback point must be excluded even if they exist on disk.
+func TestRecalcVisibleFiles_ToLimit(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ver := version.V1_0_standart
+	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (string, SnapNameSchema) {
+		schema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
+			Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+			BtIndex(ver).Existence(ver).Build()
+		return "accounts", schema
+	})
+	stepSize := repo.stepSize
+
+	// Create 3 consecutive files: 0-1, 1-2, 2-3 (all fully indexed).
+	populateFiles2(t, dirs, repo, []testFileRange{{0, 1}, {1, 2}, {2, 3}})
+	require.NoError(t, repo.OpenFolder())
+	require.Equal(t, 3, repo.dirtyFiles.Len())
+
+	// Limit visibility to 1*stepSize — only 0-1 file should be visible.
+	repo.RecalcVisibleFiles(RootNum(stepSize))
+	require.Len(t, repo.VisibleFiles(), 1, "only the first file must be visible with to=stepSize")
+	require.Equal(t, uint64(0), repo.VisibleFiles()[0].StartRootNum())
+	require.Equal(t, uint64(stepSize), repo.VisibleFiles()[0].EndRootNum())
+
+	// Expand limit to 2*stepSize — files 0-1 and 1-2 should be visible.
+	repo.RecalcVisibleFiles(RootNum(2 * stepSize))
+	require.Len(t, repo.VisibleFiles(), 2, "two files must be visible with to=2*stepSize")
+
+	// Full limit — all 3 files visible.
+	repo.RecalcVisibleFiles(RootNum(MaxUint64))
+	require.Len(t, repo.VisibleFiles(), 3, "all three files must be visible with to=MaxUint64")
+}
