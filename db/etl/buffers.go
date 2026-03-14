@@ -254,7 +254,7 @@ func (b *sortableBuffer) Sort() {
 		return int(a.insertionOrder - b.insertionOrder)
 	}
 	cmp := cmpNoPrefix
-	if prefixDiversity >= 0.1 {
+	if prefixDiversity >= 0.5 {
 		cmp = func(a, b entryLoc) int {
 			if prefixes[a.insertionOrder] != prefixes[b.insertionOrder] {
 				if prefixes[a.insertionOrder] < prefixes[b.insertionOrder] {
@@ -274,30 +274,39 @@ func (b *sortableBuffer) Sort() {
 		return
 	}
 
-	unsorted := slices.Clone(b.entries) // keep original order for fair no-prefix timing below
+	if prefixDiversity >= 0.5 {
+		// Compare prefix vs no-prefix timing to detect regressions.
+		// Only runs when the prefix optimization is actually active; when
+		// prefixDiversity < 0.5 cmp==cmpNoPrefix and both legs would measure
+		// the same function — cache warmup would always make the second appear
+		// faster, producing a spurious warning.
+		unsorted := slices.Clone(b.entries) // keep original order for fair no-prefix timing
 
-	t1 := time.Now()
-	slices.SortFunc(b.entries, cmp)
-	prefixDur := time.Since(t1)
+		t1 := time.Now()
+		slices.SortFunc(b.entries, cmp)
+		prefixDur := time.Since(t1)
 
-	t2 := time.Now()
-	slices.SortFunc(unsorted, cmpNoPrefix)
-	noPrefixDur := time.Since(t2)
+		t2 := time.Now()
+		slices.SortFunc(unsorted, cmpNoPrefix)
+		noPrefixDur := time.Since(t2)
 
-	if prefixDur > noPrefixDur {
-		ratio := float64(prefixDur) / float64(max(noPrefixDur, 1))
-		var sample []string
-		if ratio > 1.2 {
-			for i, e := range b.entries {
-				if i >= 10 {
-					break
+		if prefixDur > noPrefixDur {
+			ratio := float64(prefixDur) / float64(max(noPrefixDur, 1))
+			var sample []string
+			if ratio > 1.2 {
+				for i, e := range b.entries {
+					if i >= 10 {
+						break
+					}
+					sample = append(sample, fmt.Sprintf("%x", data[e.offset:e.offset+max(e.keyLen, 0)]))
 				}
-				sample = append(sample, fmt.Sprintf("%x", data[e.offset:e.offset+max(e.keyLen, 0)]))
+				log.Warn("etl sort: prefix slower than noPrefix", "n", len(b.entries), "prefix", prefixDur, "noPrefix", noPrefixDur, "keys", sample, "stack", dbg.Stack())
+			} else {
+				log.Warn("etl sort: prefix slower than noPrefix", "n", len(b.entries), "prefix", prefixDur, "noPrefix", noPrefixDur)
 			}
-			log.Warn("etl sort: prefix slower than noPrefix", "n", len(b.entries), "prefix", prefixDur, "noPrefix", noPrefixDur, "keys", sample, "stack", dbg.Stack())
-		} else {
-			log.Warn("etl sort: prefix slower than noPrefix", "n", len(b.entries), "prefix", prefixDur, "noPrefix", noPrefixDur)
 		}
+	} else {
+		slices.SortFunc(b.entries, cmp)
 	}
 	if dbg.AssertEnabled {
 		if !slices.IsSortedFunc(b.entries, func(a, b entryLoc) int {
