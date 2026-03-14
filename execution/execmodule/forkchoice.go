@@ -199,13 +199,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
 
-	// Flush any block metadata accumulated by InsertBlocks into this tx
-	// so that all subsequent reads (HeaderByHash, etc.) see the inserted data.
-	if err := e.consumeBlockOverlay(ctx, tx); err != nil {
-		tx.Rollback()
-		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-	}
-
 	rollbackOnReturn := true
 
 	defer func() {

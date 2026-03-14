@@ -19,7 +19,6 @@ package execmodule
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math/big"
 	"strings"
 	"sync"
@@ -262,27 +261,6 @@ func NewExecModule(
 		stateCache.execModule = em
 	}
 	return em
-}
-
-// consumeBlockOverlay flushes any block-level metadata accumulated by
-// InsertBlocks (via currentContext.BlockOverlay()) into the given RwTx
-// and closes the overlay. After this call the block data is visible in tx.
-func (e *ExecModule) consumeBlockOverlay(ctx context.Context, tx kv.RwTx) error {
-	e.lock.RLock()
-	sd := e.currentContext
-	e.lock.RUnlock()
-	if sd == nil {
-		return nil
-	}
-	overlay := sd.BlockOverlay()
-	if overlay == nil {
-		return nil
-	}
-	if err := overlay.Flush(ctx, tx); err != nil {
-		return fmt.Errorf("consumeBlockOverlay: flush: %w", err)
-	}
-	overlay.Close()
-	return nil
 }
 
 func (e *ExecModule) getHeader(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*types.Header, error) {
