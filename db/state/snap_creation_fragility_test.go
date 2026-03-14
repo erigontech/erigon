@@ -1661,3 +1661,31 @@ func TestLatestMergedRange(t *testing.T) {
 	require.Equal(t, uint64(0), lmr.from, "merged range must start at 0")
 	require.Equal(t, uint64(4*stepSize), lmr.to, "4-step file (shardSize=4 > 2) must be the latest merged range")
 }
+
+// TestRecalcVisibleFiles_ExactBoundary verifies that files are included when the 'to'
+// limit equals their endTxNum (inclusive boundary). This is important for the "frozen
+// state" case where the node processes exactly N steps and all files up to N*stepSize
+// must be visible.
+func TestRecalcVisibleFiles_ExactBoundary(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ver := version.V1_0_standart
+	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (string, SnapNameSchema) {
+		schema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
+			Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+			BtIndex(ver).Existence(ver).Build()
+		return "accounts", schema
+	})
+	stepSize := repo.stepSize
+
+	// Create file covering 0-2 steps.
+	populateFiles2(t, dirs, repo, []testFileRange{{0, 2}})
+	require.NoError(t, repo.OpenFolder())
+
+	// to = exactly 2*stepSize (the file's endTxNum): file must be visible.
+	repo.RecalcVisibleFiles(RootNum(2 * stepSize))
+	require.Len(t, repo.VisibleFiles(), 1, "file must be visible when to == file.endTxNum")
+
+	// to = 2*stepSize - 1 (one before boundary): file must be excluded.
+	repo.RecalcVisibleFiles(RootNum(2*stepSize - 1))
+	require.Empty(t, repo.VisibleFiles(), "file must be excluded when to < file.endTxNum")
+}
