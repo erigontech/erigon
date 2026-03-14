@@ -421,7 +421,7 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	if err = decodeOptionalAddress(&tx.Deployer, s); err != nil {
+	if err = rlp.DecodeOptionalAddress(&tx.Deployer, s); err != nil {
 		return err
 	}
 
@@ -429,7 +429,7 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	if err = decodeOptionalAddress(&tx.Paymaster, s); err != nil {
+	if err = rlp.DecodeOptionalAddress(&tx.Paymaster, s); err != nil {
 		return err
 	}
 

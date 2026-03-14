@@ -344,7 +344,7 @@ func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
 	if tx.GasLimit, err = s.Uint(); err != nil {
 		return fmt.Errorf("read GasLimit: %w", err)
 	}
-	if err = decodeOptionalAddress(&tx.To, s); err != nil {
+	if err = rlp.DecodeOptionalAddress(&tx.To, s); err != nil {
 		return fmt.Errorf("read To: %w", err)
 	}
 	tx.Value = new(uint256.Int)

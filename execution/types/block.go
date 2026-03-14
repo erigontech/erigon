@@ -1587,24 +1587,3 @@ func checkErrListEnd(s *rlp.Stream, err error) error {
 	return nil
 }
 
-// decodeOptionalAddress reads an RLP-encoded optional address (0 or 20 bytes)
-// directly into dst without intermediate allocation.
-func decodeOptionalAddress(dst **common.Address, s *rlp.Stream) error {
-	kind, size, err := s.Kind()
-	if err != nil {
-		return err
-	}
-	switch {
-	case kind == rlp.String && size == 0:
-		*dst = nil
-		return s.ReadBytes(nil)
-	case kind == rlp.String && size == 20:
-		*dst = &common.Address{}
-		return s.ReadBytes((*dst)[:])
-	case kind == rlp.Byte:
-		return fmt.Errorf("wrong size for address: 1")
-	default:
-		return fmt.Errorf("wrong size for address: %d", size)
-	}
-}
-

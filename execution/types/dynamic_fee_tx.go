@@ -275,7 +275,7 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 	if tx.GasLimit, err = s.Uint(); err != nil {
 		return err
 	}
-	if err = decodeOptionalAddress(&tx.To, s); err != nil {
+	if err = rlp.DecodeOptionalAddress(&tx.To, s); err != nil {
 		return err
 	}
 	tx.Value = new(uint256.Int)
