@@ -1078,18 +1078,15 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 			account.updateWrite(vw, accessIndex)
 		}
 
+		isUserTx := txIndex >= 0
 		for addr, opts := range io.AccessedAddresses(txIndex) {
 			if addr.IsNil() {
 				continue
 			}
 
 			account := ensureAccountState(ac, addr)
-			// Track non-revertable access from user transactions (txIndex >= 0).
-			// This determines whether the system address should be included in
-			// the BAL even when it has no actual state changes (e.g. a BALANCE
-			// opcode reading the system address in a non-reverted context).
-			if txIndex >= 0 && opts != nil && !opts.revertable {
-				account.nonRevertableUserAccess = true
+			if isUserTx && opts != nil {
+				account.userAccess = true
 			}
 		}
 	}
@@ -1098,13 +1095,11 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 	for _, account := range ac {
 		account.finalize()
 		account.changes.Normalize()
-		// The system address (0xff...fe) is touched during system calls (EIP-4788
-		// beacon root) because it is msg.sender. Exclude it when it has no actual
-		// state changes, but keep it when a user tx sends real ETH to it
-		// (e.g. SELFDESTRUCT to the system address or a plain value transfer).
-		// System contracts (BeaconRoots, HistoryStorage, etc.) are NOT excluded
-		// because they have real state changes that belong in the BAL.
-		if account.changes.Address == params.SystemAddress && !hasAccountChanges(account.changes) && !account.nonRevertableUserAccess {
+		// The system address (0xff...fe) is touched during every block's system
+		// call (EIP-4788 beacon root) because it is msg.sender. Filter it out
+		// unless it has actual state changes or a user tx performed a
+		// non-revertable access to it.
+		if account.changes.Address == params.SystemAddress && !hasAccountChanges(account.changes) && !account.userAccess {
 			continue
 		}
 		bal = append(bal, account.changes)
@@ -1117,22 +1112,30 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 	return bal
 }
 
+// hasAccountChanges returns true if the account has any state changes
+// (storage, balance, nonce, or code) that belong in the BAL.
+func hasAccountChanges(ac *types.AccountChanges) bool {
+	return len(ac.StorageChanges) > 0 || len(ac.StorageReads) > 0 ||
+		len(ac.BalanceChanges) > 0 || len(ac.NonceChanges) > 0 ||
+		len(ac.CodeChanges) > 0
+}
+
 type accountState struct {
 	changes                 *types.AccountChanges
 	balance                 *fieldTracker[uint256.Int]
 	nonce                   *fieldTracker[uint64]
 	code                    *fieldTracker[[]byte]
-	balanceValue            *uint256.Int                        // tracks latest seen balance
-	initialBalanceValue     *uint256.Int                        // tracks pre-block balance for net-zero detection
+	balanceValue            *uint256.Int // tracks latest seen balance
+	initialBalanceValue     *uint256.Int // tracks pre-block balance for net-zero detection
 	selfDestructed          bool
 	selfDestructedAt        uint16                              // access index of the selfdestruct
 	storageReadValues       map[accounts.StorageKey]uint256.Int // original read values for net-zero detection
-	nonRevertableUserAccess bool                                // true if any user tx (txIndex >= 0) had non-revertable access
+	userAccess              bool                                // true if a user tx (txIndex >= 0) accessed this account
 }
 
 // check pre- and post-values, add to BAL if different
 func (a *accountState) finalize() {
-	applyToBalance(a.balance, a.changes)
+	applyToBalance(a.balance, a.changes, a.initialBalanceValue)
 	applyToNonce(a.nonce, a.changes)
 	applyToCode(a.code, a.changes)
 }
@@ -1149,8 +1152,20 @@ func newBalanceTracker() *fieldTracker[uint256.Int] {
 	return &fieldTracker[uint256.Int]{}
 }
 
-func applyToBalance(bt *fieldTracker[uint256.Int], ac *types.AccountChanges) {
+func applyToBalance(bt *fieldTracker[uint256.Int], ac *types.AccountChanges, initialBalance *uint256.Int) {
+	// Get the sorted indices to identify the first (lowest-index) entry.
+	// If the first entry equals the pre-block balance, it's a net-zero
+	// change from a reverted tx (e.g. CALL with value then revert) and
+	// must be excluded. Geth's scope-based BAL builder handles this via
+	// ExitScope which converts reverted writes to reads.
+	firstFiltered := false
 	bt.changes.apply(func(idx uint16, value uint256.Int) {
+		if !firstFiltered {
+			firstFiltered = true
+			if initialBalance != nil && value.Eq(initialBalance) {
+				return
+			}
+		}
 		ac.BalanceChanges = append(ac.BalanceChanges, &types.BalanceChange{
 			Index: idx,
 			Value: value,
@@ -1396,11 +1411,6 @@ func removeStorageRead(ac *types.AccountChanges, slot accounts.StorageKey) {
 	} else {
 		ac.StorageReads = out
 	}
-}
-
-func hasAccountChanges(ac *types.AccountChanges) bool {
-	return len(ac.BalanceChanges) > 0 || len(ac.NonceChanges) > 0 ||
-		len(ac.CodeChanges) > 0 || len(ac.StorageChanges) > 0
 }
 
 type versionedReadSet struct {
