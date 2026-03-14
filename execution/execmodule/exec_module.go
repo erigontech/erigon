@@ -364,44 +364,21 @@ func (e *ExecModule) ValidateChain(ctx context.Context, req *executionproto.Vali
 		currentBlockNumber *uint64
 		err                error
 	)
-	// Read header/body from the block overlay on currentContext if available
-	// (block data written by InsertBlocks hasn't been flushed to DB yet),
-	// falling back to a plain DB read otherwise.
-	if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
-		overlay := e.currentContext.BlockOverlay()
-		roTx, err := e.db.BeginTemporalRo(ctx)
+	if err := e.db.View(ctx, func(tx kv.Tx) error {
+		header, err = e.blockReader.Header(ctx, tx, blockHash, req.Number)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		defer roTx.Rollback()
-		overlay.UpdateTxn(roTx)
-		header, err = e.blockReader.Header(ctx, overlay, blockHash, req.Number)
+
+		body, err = e.blockReader.BodyWithTransactions(ctx, tx, blockHash, req.Number)
 		if err != nil {
-			return nil, err
-		}
-		body, err = e.blockReader.BodyWithTransactions(ctx, overlay, blockHash, req.Number)
-		if err != nil {
-			return nil, err
+			return err
 		}
 		exec.AddHeaderAndBodyToGlobalReadAheader(ctx, e.db, header, body)
-		currentBlockNumber = rawdb.ReadCurrentBlockNumber(overlay)
-	} else {
-		if err := e.db.View(ctx, func(tx kv.Tx) error {
-			header, err = e.blockReader.Header(ctx, tx, blockHash, req.Number)
-			if err != nil {
-				return err
-			}
-
-			body, err = e.blockReader.BodyWithTransactions(ctx, tx, blockHash, req.Number)
-			if err != nil {
-				return err
-			}
-			exec.AddHeaderAndBodyToGlobalReadAheader(ctx, e.db, header, body)
-			currentBlockNumber = rawdb.ReadCurrentBlockNumber(tx)
-			return nil
-		}); err != nil {
-			return nil, err
-		}
+		currentBlockNumber = rawdb.ReadCurrentBlockNumber(tx)
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	if header == nil || body == nil {
 		return &executionproto.ValidationReceipt{
@@ -470,10 +447,6 @@ func (e *ExecModule) ValidateChain(ctx context.Context, req *executionproto.Vali
 	if isInvalidChain {
 		e.logger.Warn("ethereumExecutionModule.ValidateChain: chain is invalid", "hash", common.Hash(blockHash))
 		validationStatus = executionproto.ExecutionStatus_BadBlock
-		// Discard the block overlay — it may contain the bad block's data.
-		if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
-			e.currentContext.BlockOverlay().Close()
-		}
 	}
 	validationReceipt := &executionproto.ValidationReceipt{
 		ValidationStatus: validationStatus,

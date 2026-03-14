@@ -36,26 +36,6 @@ import (
 
 var errNotFound = errors.New("notfound")
 
-// beginOverlayOrRo returns the block overlay tx if a persistent SharedDomains
-// with an active block overlay exists, otherwise opens a fresh RO tx from DB.
-// The caller must call the returned cleanup function when done.
-func (e *ExecModule) beginOverlayOrRo(ctx context.Context) (kv.Tx, func(), error) {
-	e.lock.RLock()
-	if e.currentContext != nil {
-		if overlay := e.currentContext.BlockOverlay(); overlay != nil {
-			e.lock.RUnlock()
-			return overlay, func() {}, nil
-		}
-	}
-	e.lock.RUnlock()
-
-	tx, err := e.db.BeginRo(ctx) //nolint:gocritic
-	if err != nil {
-		return nil, nil, err
-	}
-	return tx, func() { tx.Rollback() }, nil
-}
-
 func (e *ExecModule) parseSegmentRequest(ctx context.Context, tx kv.Tx, req *executionproto.GetSegmentRequest) (blockHash common.Hash, blockNumber uint64, err error) {
 	switch {
 	// Case 1: Only hash is given.
@@ -90,11 +70,11 @@ func (e *ExecModule) GetBody(ctx context.Context, req *executionproto.GetSegment
 	if req == nil || (req.BlockHash == nil && req.BlockNumber == nil) {
 		return nil, errors.New("ethereumExecutionModule.GetBody: bad request")
 	}
-	tx, cleanup, err := e.beginOverlayOrRo(ctx)
+	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetBody: could not begin database tx %w", err)
 	}
-	defer cleanup()
+	defer tx.Rollback()
 
 	blockHash, blockNumber, err := e.parseSegmentRequest(ctx, tx, req)
 	if errors.Is(err, errNotFound) {
@@ -120,11 +100,11 @@ func (e *ExecModule) GetHeader(ctx context.Context, req *executionproto.GetSegme
 	if req == nil || (req.BlockHash == nil && req.BlockNumber == nil) {
 		return nil, errors.New("ethereumExecutionModule.GetHeader: bad request")
 	}
-	tx, cleanup, err := e.beginOverlayOrRo(ctx)
+	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: could not begin database tx %w", err)
 	}
-	defer cleanup()
+	defer tx.Rollback()
 
 	blockHash, blockNumber, err := e.parseSegmentRequest(ctx, tx, req)
 	if errors.Is(err, errNotFound) {
@@ -143,11 +123,11 @@ func (e *ExecModule) GetHeader(ctx context.Context, req *executionproto.GetSegme
 }
 
 func (e *ExecModule) GetBodiesByHashes(ctx context.Context, req *executionproto.GetBodiesByHashesRequest) (*executionproto.GetBodiesBatchResponse, error) {
-	tx, cleanup, err := e.beginOverlayOrRo(ctx)
+	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByHashes: could not begin database tx %w", err)
 	}
-	defer cleanup()
+	defer tx.Rollback()
 
 	bodies := make([]*executionproto.BlockBody, 0, len(req.Hashes))
 
@@ -184,11 +164,11 @@ func (e *ExecModule) GetBodiesByHashes(ctx context.Context, req *executionproto.
 }
 
 func (e *ExecModule) GetBodiesByRange(ctx context.Context, req *executionproto.GetBodiesByRangeRequest) (*executionproto.GetBodiesBatchResponse, error) {
-	tx, cleanup, err := e.beginOverlayOrRo(ctx)
+	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByRange: could not begin database tx %w", err)
 	}
-	defer cleanup()
+	defer tx.Rollback()
 
 	bodies := make([]*executionproto.BlockBody, 0, req.Count)
 
@@ -236,11 +216,11 @@ func (e *ExecModule) GetBodiesByRange(ctx context.Context, req *executionproto.G
 }
 
 func (e *ExecModule) GetPayloadBodiesByHash(ctx context.Context, req *executionproto.GetPayloadBodiesByHashRequest) (*executionproto.GetPayloadBodiesBatchResponse, error) {
-	tx, cleanup, err := e.beginOverlayOrRo(ctx)
+	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByHash: could not begin database tx %w", err)
 	}
-	defer cleanup()
+	defer tx.Rollback()
 
 	bodies := make([]*typesproto.ExecutionPayloadBody, 0, len(req.Hashes))
 	for _, hash := range req.Hashes {
@@ -285,11 +265,11 @@ func (e *ExecModule) GetPayloadBodiesByHash(ctx context.Context, req *executionp
 }
 
 func (e *ExecModule) GetPayloadBodiesByRange(ctx context.Context, req *executionproto.GetPayloadBodiesByRangeRequest) (*executionproto.GetPayloadBodiesBatchResponse, error) {
-	tx, cleanup, err := e.beginOverlayOrRo(ctx)
+	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByRange: could not begin database tx %w", err)
 	}
-	defer cleanup()
+	defer tx.Rollback()
 
 	bodies := make([]*typesproto.ExecutionPayloadBody, 0, req.Count)
 
@@ -345,11 +325,11 @@ func (e *ExecModule) GetPayloadBodiesByRange(ctx context.Context, req *execution
 }
 
 func (e *ExecModule) GetHeaderHashNumber(ctx context.Context, req *typesproto.H256) (*executionproto.GetHeaderHashNumberResponse, error) {
-	tx, cleanup, err := e.beginOverlayOrRo(ctx)
+	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetHeaderHashNumber: could not begin database tx %w", err)
 	}
-	defer cleanup()
+	defer tx.Rollback()
 
 	blockNumber, err := e.blockReader.HeaderNumber(ctx, tx, gointerfaces.ConvertH256ToHash(req))
 	if err != nil {
@@ -382,11 +362,11 @@ func (e *ExecModule) isCanonicalHash(ctx context.Context, tx kv.Tx, hash common.
 }
 
 func (e *ExecModule) IsCanonicalHash(ctx context.Context, req *typesproto.H256) (*executionproto.IsCanonicalResponse, error) {
-	tx, cleanup, err := e.beginOverlayOrRo(ctx)
+	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.CanonicalHash: could not begin database tx %w", err)
 	}
-	defer cleanup()
+	defer tx.Rollback()
 
 	isCanonical, err := e.isCanonicalHash(ctx, tx, gointerfaces.ConvertH256ToHash(req))
 	if err != nil {
@@ -397,11 +377,11 @@ func (e *ExecModule) IsCanonicalHash(ctx context.Context, req *typesproto.H256) 
 }
 
 func (e *ExecModule) CurrentHeader(ctx context.Context, _ *emptypb.Empty) (*executionproto.GetHeaderResponse, error) {
-	tx, cleanup, err := e.beginOverlayOrRo(ctx)
+	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.CurrentHeader: could not begin database tx %w", err)
 	}
-	defer cleanup()
+	defer tx.Rollback()
 	hash := rawdb.ReadHeadHeaderHash(tx)
 	number, err := e.blockReader.HeaderNumber(ctx, tx, hash)
 	if err != nil {
@@ -427,11 +407,11 @@ func (e *ExecModule) GetTD(ctx context.Context, req *executionproto.GetSegmentRe
 	if req == nil || (req.BlockHash == nil && req.BlockNumber == nil) {
 		return nil, errors.New("ethereumExecutionModule.GetTD: bad request")
 	}
-	tx, cleanup, err := e.beginOverlayOrRo(ctx)
+	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetTD: could not begin database tx %w", err)
 	}
-	defer cleanup()
+	defer tx.Rollback()
 
 	blockHash, blockNumber, err := e.parseSegmentRequest(ctx, tx, req)
 	if errors.Is(err, errNotFound) {
@@ -452,11 +432,11 @@ func (e *ExecModule) GetTD(ctx context.Context, req *executionproto.GetSegmentRe
 }
 
 func (e *ExecModule) GetForkChoice(ctx context.Context, _ *emptypb.Empty) (*executionproto.ForkChoice, error) {
-	tx, cleanup, err := e.beginOverlayOrRo(ctx)
+	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetForkChoice: could not begin database tx %w", err)
 	}
-	defer cleanup()
+	defer tx.Rollback()
 	return &executionproto.ForkChoice{
 		HeadBlockHash:      gointerfaces.ConvertHashToH256(rawdb.ReadForkchoiceHead(tx)),
 		FinalizedBlockHash: gointerfaces.ConvertHashToH256(rawdb.ReadForkchoiceFinalized(tx)),
@@ -465,11 +445,11 @@ func (e *ExecModule) GetForkChoice(ctx context.Context, _ *emptypb.Empty) (*exec
 }
 
 func (e *ExecModule) FrozenBlocks(ctx context.Context, _ *emptypb.Empty) (*executionproto.FrozenBlocksResponse, error) {
-	tx, cleanup, err := e.beginOverlayOrRo(ctx)
+	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetForkChoice: could not begin database tx %w", err)
 	}
-	defer cleanup()
+	defer tx.Rollback()
 
 	firstNonGenesisBlockNumber, ok, err := rawdb.ReadFirstNonGenesisHeaderNumber(tx)
 	if err != nil {
