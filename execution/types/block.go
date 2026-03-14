@@ -476,15 +476,12 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("read BlockAccessListHash: %w", err)
 	}
 
+	if !s.MoreDataInList() {
+		h.SlotNumber = nil
+		return s.ListEnd()
+	}
 	var slotNumber uint64
 	if slotNumber, err = s.Uint(); err != nil {
-		if errors.Is(err, rlp.EOL) {
-			h.SlotNumber = nil
-			if err := s.ListEnd(); err != nil {
-				return fmt.Errorf("close header struct (no SlotNumber): %w", err)
-			}
-			return nil
-		}
 		return fmt.Errorf("read SlotNumber: %w", err)
 	}
 	h.SlotNumber = &slotNumber
