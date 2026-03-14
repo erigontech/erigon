@@ -352,7 +352,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 									uncommittedTransactions-prevCommittedTransactions,
 									uint64(uncommittedGas)-prevCommitedGas, stepsInDb, lastProgress)
 							}
-
 							captured := pe.doms.SetTrace(false, false)
 							if err != nil {
 								return err
