@@ -1333,6 +1333,45 @@ func TestVisibleFiles_MergedFilePrefersOverConstituents(t *testing.T) {
 	require.Equal(t, uint64(2*repo.stepSize), visible[0].EndRootNum(), "merged file must cover full range")
 }
 
+// TestRecalcVisibleFiles_BoundaryExclusion verifies that RecalcVisibleFiles(to) correctly
+// excludes files whose endTxNum exceeds the boundary. This is a critical consistency
+// guarantee: readers must never see data beyond the agreed-upon committed point.
+// If this boundary is ignored, readers on different nodes would see different state,
+// causing consensus failures.
+func TestRecalcVisibleFiles_BoundaryExclusion(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ver := version.V1_0_standart
+	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (string, SnapNameSchema) {
+		schema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
+			Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+			BtIndex(ver).Existence(ver).Build()
+		return "accounts", schema
+	})
+	stepSize := repo.stepSize
+
+	// Create 3 files covering [0, stepSize], [stepSize, 2*stepSize], [2*stepSize, 3*stepSize]
+	populateFiles2(t, dirs, repo, []testFileRange{{0, 1}, {1, 2}, {2, 3}})
+	require.NoError(t, repo.OpenFolder())
+	require.Equal(t, 3, repo.dirtyFiles.Len())
+
+	// With boundary = 2*stepSize, only the first two files should be visible.
+	repo.RecalcVisibleFiles(RootNum(2 * stepSize))
+	visible := repo.VisibleFiles()
+	require.Len(t, visible, 2, "file beyond boundary must be excluded from visible set")
+	require.Equal(t, uint64(0), visible[0].StartRootNum())
+	require.Equal(t, uint64(stepSize), visible[0].EndRootNum())
+	require.Equal(t, uint64(stepSize), visible[1].StartRootNum())
+	require.Equal(t, uint64(2*stepSize), visible[1].EndRootNum())
+
+	// With boundary = 3*stepSize, all three files must be visible.
+	repo.RecalcVisibleFiles(RootNum(3 * stepSize))
+	require.Len(t, repo.VisibleFiles(), 3, "all files within boundary must be visible")
+
+	// With boundary = stepSize, only the first file must be visible.
+	repo.RecalcVisibleFiles(RootNum(1 * stepSize))
+	require.Len(t, repo.VisibleFiles(), 1, "only files within tight boundary must be visible")
+}
+
 // fileBaseName returns the base name from a full file path.
 func fileBaseName(path string) string {
 	for i := len(path) - 1; i >= 0; i-- {
