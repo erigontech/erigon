@@ -1689,3 +1689,33 @@ func TestRecalcVisibleFiles_ExactBoundary(t *testing.T) {
 	repo.RecalcVisibleFiles(RootNum(2*stepSize - 1))
 	require.Empty(t, repo.VisibleFiles(), "file must be excluded when to < file.endTxNum")
 }
+
+// TestCloseVisibleFilesAfterRootNum verifies that visible files beyond a root number are
+// immediately excluded from the visible set. This is used during rollbacks to restrict
+// the visible set without needing a full recalculation. The dirty files are unaffected
+// — only the cached visible files slice is truncated.
+func TestCloseVisibleFilesAfterRootNum(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ver := version.V1_0_standart
+	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (string, SnapNameSchema) {
+		schema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
+			Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+			BtIndex(ver).Existence(ver).Build()
+		return "accounts", schema
+	})
+	stepSize := repo.stepSize
+
+	// Three files fully visible.
+	populateFiles2(t, dirs, repo, []testFileRange{{0, 1}, {1, 2}, {2, 3}})
+	require.NoError(t, repo.OpenFolder())
+	repo.RecalcVisibleFiles(RootNum(MaxUint64))
+	require.Len(t, repo.VisibleFiles(), 3)
+
+	// Restrict visible files to those ending at or before 1*stepSize.
+	repo.CloseVisibleFilesAfterRootNum(RootNum(stepSize))
+	require.Len(t, repo.VisibleFiles(), 1, "only the 0-1 file must remain after restricting to 1*stepSize")
+	require.Equal(t, uint64(stepSize), repo.VisibleFiles()[0].EndRootNum())
+
+	// Dirty files are unchanged — CloseVisibleFilesAfterRootNum only affects the cache.
+	require.Equal(t, 3, repo.dirtyFiles.Len(), "dirty files must be unaffected")
+}
