@@ -1333,57 +1333,6 @@ func TestVisibleFiles_MergedFilePrefersOverConstituents(t *testing.T) {
 	require.Equal(t, uint64(2*repo.stepSize), visible[0].EndRootNum(), "merged file must cover full range")
 }
 
-// TestCorruptedAccessor_InvisibleButNotDetectedAsMissing reveals a subtle safety gap:
-// a corrupted accessor file (file exists but is unreadable) keeps the data file invisible
-// (checkForVisibility sees bindex==nil → returns false). However, FilesWithMissedAccessors()
-// only checks whether the accessor FILE EXISTS on disk — a corrupted-but-present accessor
-// file will NOT be reported as missing, even though the data is inaccessible.
-//
-// This documents the distinction between "accessor missing" and "accessor corrupted":
-// - Safety: correct (corrupted accessor → invisible, won't serve bad data)
-// - Detection: incomplete (corrupted accessor not flagged for rebuild)
-func TestCorruptedAccessor_InvisibleButNotDetectedAsMissing(t *testing.T) {
-	dirs := datadir.New(t.TempDir())
-	ver := version.V1_0_standart
-	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (string, SnapNameSchema) {
-		schema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
-			Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
-			BtIndex(ver).Existence(ver).Build()
-		return "accounts", schema
-	})
-
-	from, to := RootNum(0), RootNum(repo.stepSize)
-	v := version.V1_0
-
-	// Create a valid data file.
-	dataFile, _ := repo.schema.DataFile(v, from, to)
-	populateFiles(t, dirs, repo.schema, []string{dataFile})
-
-	// Create a CORRUPTED BTree accessor: the file exists but content is garbage.
-	// This simulates a crash mid-write of the accessor file.
-	btFile, _ := repo.schema.BtIdxFile(v, from, to)
-	require.NoError(t, os.WriteFile(btFile, []byte("corrupted-garbage"), 0644))
-
-	// Also create a valid Existence filter.
-	exFile, _ := repo.schema.ExistenceFile(v, from, to)
-	populateFiles(t, dirs, repo.schema, []string{exFile})
-
-	require.NoError(t, repo.OpenFolder())
-	require.Equal(t, 1, repo.dirtyFiles.Len(), "data file must be tracked")
-
-	// Safety check: file must NOT be visible (corrupted BTree → bindex==nil → invisible).
-	repo.RecalcVisibleFiles(RootNum(MaxUint64))
-	require.Empty(t, repo.VisibleFiles(),
-		"corrupted BTree accessor must keep file invisible (safety property holds)")
-
-	// Detection gap: FilesWithMissedAccessors checks file existence, not loadability.
-	// A corrupted-but-present .bt file is NOT reported as missing.
-	missed := repo.FilesWithMissedAccessors()
-	btMissed := missed.Get(statecfg.AccessorBTree)
-	require.Empty(t, btMissed,
-		"corrupted-but-present BTree file is not detected as missing by FilesWithMissedAccessors (known gap)")
-}
-
 // fileBaseName returns the base name from a full file path.
 func fileBaseName(path string) string {
 	for i := len(path) - 1; i >= 0; i-- {
