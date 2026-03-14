@@ -207,28 +207,26 @@ func (b *sortableBuffer) Sort() {
 
 	// Calculate prefixes here - to keep .Put() method fast - because .Sort() often called in background
 	// Also: O(n) cost, which is negligible vs the O(n log n) sort.
-	//prefixes := slices.Grow(b.prefixes[:0], len(b.entries))[:len(b.entries)] // sortableBuffer object is reusable (by sync.Pool)
-	//clear(prefixes)
-	//b.prefixes = prefixes
-	//for i := range b.entries {
-	//	e := &b.entries[i]
-	//	if e.keyLen >= 8 {
-	//		prefixes[e.insertionOrder] = binary.BigEndian.Uint64(data[e.offset:])
-	//	} else if e.keyLen > 0 {
-	//		var buf [8]byte
-	//		copy(buf[:], data[e.offset:])
-	//		prefixes[e.insertionOrder] = binary.BigEndian.Uint64(buf[:])
-	//	} else {
-	//		prefixes[e.insertionOrder] = 0
-	//	}
-	//}
+	prefixes := slices.Grow(b.prefixes[:0], len(b.entries))[:len(b.entries)] // sortableBuffer object is reusable (by sync.Pool)
+	clear(prefixes)
+	b.prefixes = prefixes
+	for i := range b.entries {
+		e := &b.entries[i]
+		if e.keyLen >= 8 {
+			prefixes[e.insertionOrder] = binary.BigEndian.Uint64(data[e.offset:])
+		} else if e.keyLen > 0 {
+			var buf [8]byte
+			copy(buf[:], data[e.offset:e.offset+e.keyLen]) // only key bytes; buf is zero-padded beyond keyLen
+			prefixes[e.insertionOrder] = binary.BigEndian.Uint64(buf[:])
+		} // else keyLen<=0: clear(prefixes) already zeroed the slot
+	}
 	cmp := func(a, b entryLoc) int {
-		//if prefixes[a.insertionOrder] != prefixes[b.insertionOrder] {
-		//	if prefixes[a.insertionOrder] < prefixes[b.insertionOrder] {
-		//		return -1
-		//	}
-		//	return 1
-		//}
+		if prefixes[a.insertionOrder] != prefixes[b.insertionOrder] {
+			if prefixes[a.insertionOrder] < prefixes[b.insertionOrder] {
+				return -1
+			}
+			return 1
+		}
 		aKey := data[a.offset : a.offset+max(a.keyLen, 0)]
 		bKey := data[b.offset : b.offset+max(b.keyLen, 0)]
 		if c := bytes.Compare(aKey, bKey); c != 0 {

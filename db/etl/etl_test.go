@@ -858,3 +858,55 @@ func BenchmarkSortableBufferPutOnly(b *testing.B) {
 		})
 	}
 }
+
+// TestSortableBufferShortKeyPrefix verifies that prefix computation for keys shorter
+// than 8 bytes does not bleed into value bytes, corrupting sort order.
+//
+// Bug: copy(buf[:], data[e.offset:]) reads past the key into the value.
+// E.g. key=[0x01] with value=[0xFF×7] gets prefix 0x01FFFFFFFFFFFFFF,
+// which is greater than key=[0x01,0x00]'s prefix 0x0100000000000000,
+// so it sorts AFTER — wrong.
+func TestSortableBufferShortKeyPrefix(t *testing.T) {
+	buf := NewSortableBuffer(1 * datasize.MB)
+
+	// key [0x01] with a value full of 0xFF — without the fix, value bytes
+	// bleed into the 8-byte prefix window and inflate it.
+	buf.Put([]byte{0x01}, bytes.Repeat([]byte{0xFF}, 7))
+	// key [0x01, 0x00] must sort AFTER [0x01] by bytes.Compare
+	buf.Put([]byte{0x01, 0x00}, []byte{0x00})
+
+	buf.Sort()
+
+	k0, _ := buf.Get(0, nil, nil)
+	k1, _ := buf.Get(1, nil, nil)
+	require.Equal(t, []byte{0x01}, k0, "short key must sort before longer key with same prefix bytes")
+	require.Equal(t, []byte{0x01, 0x00}, k1)
+}
+
+// TestSortableBufferStalePrefixAfterReset verifies that reusing a sortableBuffer
+// (as sync.Pool does) does not leave stale prefix values for nil/empty-key entries.
+//
+// Bug: without clear(prefixes), slots for nil-key entries keep their old uint64
+// value from the previous sort, producing wrong order.
+func TestSortableBufferStalePrefixAfterReset(t *testing.T) {
+	buf := NewSortableBuffer(1 * datasize.MB)
+
+	// First use: put entries so the prefixes backing array is allocated and populated.
+	buf.Put([]byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}, []byte{1})
+	buf.Put([]byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE}, []byte{2})
+	buf.Sort()
+
+	// Simulate pool reuse: Reset keeps the backing arrays.
+	buf.Reset()
+
+	// Second use: nil key (insertionOrder=0) must not inherit the old 0xFFFF... prefix.
+	buf.Put(nil, []byte{1})                                                    // nil key, insertionOrder=0
+	buf.Put([]byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}, []byte{2}) // insertionOrder=1
+
+	buf.Sort()
+
+	k0, _ := buf.Get(0, nil, nil)
+	k1, _ := buf.Get(1, nil, nil)
+	require.Nil(t, k0, "nil key must sort first")
+	require.Equal(t, []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}, k1)
+}
