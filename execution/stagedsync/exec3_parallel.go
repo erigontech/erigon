@@ -701,7 +701,8 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						fmt.Println(blockResult.BlockNum, "apply count", blockResult.ApplyCount)
 					}
 
-					blockExecutor.applyResults <- &txResult{
+					select {
+					case blockExecutor.applyResults <- &txResult{
 						blockNum:              blockResult.BlockNum,
 						txNum:                 blockResult.lastTxNum,
 						rules:                 result.Rules(),
@@ -710,6 +711,9 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						traceFroms:            result.TraceFroms,
 						traceTos:              result.TraceTos,
 						cumulativeBlobGasUsed: blockExecutor.blobGasUsed,
+					}:
+					case <-ctx.Done():
+						return ctx.Err()
 					}
 				}
 
@@ -717,7 +721,11 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					pe.blockExecMetrics.Duration.Add(time.Since(blockExecutor.execStarted))
 					pe.blockExecMetrics.BlockCount.Add(1)
 				}
-				blockExecutor.applyResults <- blockResult
+				select {
+				case blockExecutor.applyResults <- blockResult:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
 				pe.Lock()
 				delete(pe.blockExecutors, blockResult.BlockNum)
 				pe.Unlock()
@@ -1656,7 +1664,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 			}
 
-			be.applyResults <- &applyResult
+			select {
+			case be.applyResults <- &applyResult:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
 		}
 	}
 
@@ -1748,9 +1760,8 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 	for i := 0; i < len(toExecute); i++ {
 		nextTx := toExecute[i]
 		execTask := be.tasks[nextTx]
-		if nextTx == maxValidated+1 {
-			be.skipCheck[nextTx] = true
-		} else {
+		isNextValidated := nextTx == maxValidated+1
+		if !isNextValidated {
 			txIndex := execTask.Version().TxIndex
 			if be.txIncarnations[nextTx] > 0 &&
 				(be.execAborted[nextTx] > 0 || be.execFailed[nextTx] > 0 || !be.blockIO.HasReads(txIndex) ||
@@ -1765,6 +1776,40 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 				be.execTasks.pushPending(nextTx)
 				continue
 			}
+		}
+
+		tv := &taskVersion{
+			execTask:   execTask,
+			versionMap: be.versionMap,
+			profile:    be.profile,
+			stats:      be.stats,
+			statsMutex: &be.Mutex,
+		}
+
+		if incarnation := be.txIncarnations[nextTx]; incarnation == 0 {
+			tv.version = execTask.Version()
+			// Use TryAdd to avoid blocking the execLoop goroutine.
+			// If the input queue is full, return remaining tasks to
+			// pending — they will be scheduled on the next call to
+			// scheduleExecution (triggered by each processed result).
+			if !pe.in.TryAdd(tv) {
+				be.execTasks.pushPending(nextTx)
+				for j := i + 1; j < len(toExecute); j++ {
+					be.execTasks.pushPending(toExecute[j])
+				}
+				return
+			}
+		} else {
+			version := execTask.Version()
+			version.Incarnation = incarnation
+			tv.version = version
+			pe.in.ReTry(tv)
+		}
+
+		// Commit side-effects only after successful enqueue.
+		if isNextValidated {
+			be.skipCheck[nextTx] = true
+		} else {
 			be.cntSpecExec++
 		}
 
@@ -1773,26 +1818,6 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 		}
 
 		be.cntExec++
-
-		if incarnation := be.txIncarnations[nextTx]; incarnation == 0 {
-			pe.in.Add(ctx, &taskVersion{
-				execTask:   execTask,
-				version:    execTask.Version(),
-				versionMap: be.versionMap,
-				profile:    be.profile,
-				stats:      be.stats,
-				statsMutex: &be.Mutex})
-		} else {
-			version := execTask.Version()
-			version.Incarnation = incarnation
-			pe.in.ReTry(&taskVersion{
-				execTask:   execTask,
-				version:    version,
-				versionMap: be.versionMap,
-				profile:    be.profile,
-				stats:      be.stats,
-				statsMutex: &be.Mutex})
-		}
 	}
 }
 
