@@ -1608,12 +1608,3 @@ func decodeOptionalAddress(dst **common.Address, s *rlp.Stream) error {
 	}
 }
 
-// decodeMandatoryAddress reads an RLP-encoded 20-byte address
-// directly into dst without intermediate allocation.
-func decodeMandatoryAddress(dst **common.Address, s *rlp.Stream) error {
-	*dst = &common.Address{}
-	if err := s.ReadBytes((*dst)[:]); err != nil {
-		return err
-	}
-	return nil
-}

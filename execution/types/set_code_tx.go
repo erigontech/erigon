@@ -266,7 +266,8 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 	if tx.GasLimit, err = s.Uint(); err != nil {
 		return err
 	}
-	if err = decodeMandatoryAddress(&tx.To, s); err != nil {
+	tx.To = &common.Address{}
+	if err = s.ReadBytes(tx.To[:]); err != nil {
 		return err
 	}
 	tx.Value = new(uint256.Int)

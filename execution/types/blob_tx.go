@@ -373,7 +373,8 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 	if stx.GasLimit, err = s.Uint(); err != nil {
 		return err
 	}
-	if err = decodeMandatoryAddress(&stx.To, s); err != nil {
+	stx.To = &common.Address{}
+	if err = s.ReadBytes(stx.To[:]); err != nil {
 		return err
 	}
 	stx.Value = new(uint256.Int)
