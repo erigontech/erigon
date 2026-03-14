@@ -1749,3 +1749,36 @@ func TestFilesInRange_NeedMergeGate(t *testing.T) {
 	items = repo.FilesInRange(validRange, vf)
 	require.Len(t, items, 2, "FilesInRange must return both files for the 0-2 range")
 }
+
+// TestCanDelete_FileExcludedFromVisibility verifies that a file marked canDelete=true
+// is immediately excluded from the visible set on the next RecalcVisibleFiles call.
+// This ensures that no new reads see a file that is scheduled for deletion.
+func TestCanDelete_FileExcludedFromVisibility(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ver := version.V1_0_standart
+	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (string, SnapNameSchema) {
+		schema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree, stepSize).
+			Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+			BtIndex(ver).Build()
+		return "accounts", schema
+	})
+
+	populateFiles2(t, dirs, repo, []testFileRange{{0, 1}})
+	require.NoError(t, repo.OpenFolder())
+	repo.RecalcVisibleFiles(RootNum(MaxUint64))
+	require.Len(t, repo.VisibleFiles(), 1, "file must be visible before canDelete is set")
+
+	// Manually mark the file as scheduled for deletion without removing from dirty files.
+	// This simulates a race window where the file is marked but not yet deleted.
+	var item *FilesItem
+	repo.dirtyFiles.Walk(func(items []*FilesItem) bool {
+		item = items[0]
+		return false
+	})
+	require.NotNil(t, item)
+	item.canDelete.Store(true)
+
+	// RecalcVisibleFiles must exclude the canDelete file.
+	repo.RecalcVisibleFiles(RootNum(MaxUint64))
+	require.Empty(t, repo.VisibleFiles(), "file with canDelete=true must be excluded from visible set")
+}
