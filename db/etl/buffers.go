@@ -26,11 +26,13 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 const (
@@ -237,7 +239,34 @@ func (b *sortableBuffer) Sort() {
 	if slices.IsSortedFunc(b.entries, cmp) {
 		return
 	}
+
+	unsorted := slices.Clone(b.entries) // keep original order for fair no-prefix timing below
+
+	t1 := time.Now()
 	slices.SortFunc(b.entries, cmp)
+	prefixDur := time.Since(t1)
+
+	if prefixDur < time.Millisecond {
+		cmpNoPrefix := func(a, b entryLoc) int {
+			aKey := data[a.offset : a.offset+max(a.keyLen, 0)]
+			bKey := data[b.offset : b.offset+max(b.keyLen, 0)]
+			if c := bytes.Compare(aKey, bKey); c != 0 {
+				return c
+			}
+			return int(a.insertionOrder - b.insertionOrder)
+		}
+		t2 := time.Now()
+		slices.SortFunc(unsorted, cmpNoPrefix)
+		noPrefixDur := time.Since(t2)
+
+		var speedup string
+		if prefixDur <= noPrefixDur {
+			speedup = fmt.Sprintf("+%.1fx", float64(max(noPrefixDur, 1))/float64(max(prefixDur, 1)))
+		} else {
+			speedup = "-"
+		}
+		log.Warn("etl sort", "prefix_speedup", speedup, "n", len(b.entries), "prefix", prefixDur, "noPrefix", noPrefixDur)
+	}
 	if dbg.AssertEnabled {
 		if !slices.IsSortedFunc(b.entries, func(a, b entryLoc) int {
 			aKey := data[a.offset : a.offset+max(a.keyLen, 0)]
