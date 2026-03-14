@@ -527,7 +527,8 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, met
 			rs:     state.NewStateV3Buffered(state.NewStateV3(domains, ethconfig.Sync{}, logger)),
 			logger: logger,
 		},
-		workerCount: runtime.NumCPU() - 1,
+		workerCount:  runtime.NumCPU() - 1,
+		blockApplied: make(chan struct{}, 1),
 	}
 
 	executorContext, executorCancel, err := pe.run(context.Background())
@@ -650,7 +651,8 @@ func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propert
 			rs:     state.NewStateV3Buffered(state.NewStateV3(domains, ethconfig.Sync{}, logger)),
 			logger: logger,
 		},
-		workerCount: runtime.NumCPU() - 1,
+		workerCount:  runtime.NumCPU() - 1,
+		blockApplied: make(chan struct{}, 1),
 	}
 
 	executorContext, executorCancel, err := pe.run(context.Background())

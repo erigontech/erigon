@@ -92,6 +92,13 @@ type parallelExecutor struct {
 	// accumulator for txpool state-diff notifications; set before execLoop
 	// starts so that AuRa system-call nonce changes are emitted per block.
 	accumulator *shards.Accumulator
+	// blockApplied synchronises the execLoop and apply goroutines at block
+	// boundaries. The apply goroutine sends on this channel after it has
+	// finished processing a blockResult (i.e. all of block N's state writes
+	// are visible in pe.rs). The execLoop waits on this channel before
+	// scheduling execution of block N+1, preventing workers from reading
+	// stale state.
+	blockApplied chan struct{}
 }
 
 func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
@@ -403,6 +410,14 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 					blockUpdateCount = 0
 					blockApplyCount = 0
+
+					// Signal that block N is fully applied — all state writes
+					// are now visible in pe.rs. The execLoop waits for this
+					// before scheduling block N+1's workers.
+					select {
+					case pe.blockApplied <- struct{}{}:
+					default:
+					}
 
 					if dbg.StopAfterBlock > 0 && applyResult.BlockNum == dbg.StopAfterBlock {
 						return fmt.Errorf("stopping: block %d complete", applyResult.BlockNum)
@@ -729,6 +744,16 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				pe.Lock()
 				delete(pe.blockExecutors, blockResult.BlockNum)
 				pe.Unlock()
+			}
+
+			// Wait for the apply goroutine to finish processing block N's
+			// results before scheduling block N+1. Without this, workers
+			// for block N+1 can read stale state from pe.rs because block
+			// N's writes haven't been applied yet.
+			select {
+			case <-pe.blockApplied:
+			case <-ctx.Done():
+				return ctx.Err()
 			}
 
 			pe.RLock()
