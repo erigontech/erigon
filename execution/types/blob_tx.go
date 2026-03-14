@@ -355,44 +355,31 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	var b []byte
-	if b, err = s.Uint256Bytes(); err != nil {
+	stx.ChainID = new(uint256.Int)
+	if err = s.ReadUint256(stx.ChainID); err != nil {
 		return err
 	}
-	stx.ChainID = new(uint256.Int).SetBytes(b)
-
 	if stx.Nonce, err = s.Uint(); err != nil {
 		return err
 	}
-
-	if b, err = s.Uint256Bytes(); err != nil {
+	stx.TipCap = new(uint256.Int)
+	if err = s.ReadUint256(stx.TipCap); err != nil {
 		return err
 	}
-	stx.TipCap = new(uint256.Int).SetBytes(b)
-
-	if b, err = s.Uint256Bytes(); err != nil {
+	stx.FeeCap = new(uint256.Int)
+	if err = s.ReadUint256(stx.FeeCap); err != nil {
 		return err
 	}
-	stx.FeeCap = new(uint256.Int).SetBytes(b)
-
 	if stx.GasLimit, err = s.Uint(); err != nil {
 		return err
 	}
-
-	if b, err = s.Bytes(); err != nil {
+	if err = decodeMandatoryAddress(&stx.To, s); err != nil {
 		return err
 	}
-	if len(b) != 20 {
-		return fmt.Errorf("wrong size for To: %d", len(b))
-	}
-	stx.To = &common.Address{}
-	copy((*stx.To)[:], b)
-
-	if b, err = s.Uint256Bytes(); err != nil {
+	stx.Value = new(uint256.Int)
+	if err = s.ReadUint256(stx.Value); err != nil {
 		return err
 	}
-	stx.Value = new(uint256.Int).SetBytes(b)
-
 	if stx.Data, err = s.Bytes(); err != nil {
 		return err
 	}
@@ -402,10 +389,10 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode MaxFeePerBlobGas
-	if b, err = s.Uint256Bytes(); err != nil {
+	stx.MaxFeePerBlobGas = new(uint256.Int)
+	if err = s.ReadUint256(stx.MaxFeePerBlobGas); err != nil {
 		return err
 	}
-	stx.MaxFeePerBlobGas = new(uint256.Int).SetBytes(b)
 	// decode BlobVersionedHashes
 	stx.BlobVersionedHashes = []common.Hash{}
 	if err = decodeBlobVersionedHashes(&stx.BlobVersionedHashes, s); err != nil {
@@ -415,22 +402,15 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 		return errors.New("a blob stx must contain at least one blob")
 	}
 	// decode V
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&stx.V); err != nil {
 		return err
 	}
-	stx.V.SetBytes(b)
-
-	// decode R
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&stx.R); err != nil {
 		return err
 	}
-	stx.R.SetBytes(b)
-
-	// decode S
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&stx.S); err != nil {
 		return err
 	}
-	stx.S.SetBytes(b)
 	return s.ListEnd()
 }
 
