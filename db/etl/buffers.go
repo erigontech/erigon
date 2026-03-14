@@ -212,6 +212,7 @@ func (b *sortableBuffer) Sort() {
 	prefixes := slices.Grow(b.prefixes[:0], len(b.entries))[:len(b.entries)] // sortableBuffer object is reusable (by sync.Pool)
 	clear(prefixes)
 	b.prefixes = prefixes
+	allSamePrefix := true
 	for i := range b.entries {
 		e := &b.entries[i]
 		if e.keyLen >= 8 {
@@ -221,20 +222,34 @@ func (b *sortableBuffer) Sort() {
 			copy(buf[:], data[e.offset:e.offset+e.keyLen]) // only key bytes; buf is zero-padded beyond keyLen
 			prefixes[e.insertionOrder] = binary.BigEndian.Uint64(buf[:])
 		} // else keyLen<=0: clear(prefixes) already zeroed the slot
-	}
-	cmp := func(a, b entryLoc) int {
-		if prefixes[a.insertionOrder] != prefixes[b.insertionOrder] {
-			if prefixes[a.insertionOrder] < prefixes[b.insertionOrder] {
-				return -1
-			}
-			return 1
+		if allSamePrefix && i > 0 && prefixes[e.insertionOrder] != prefixes[b.entries[0].insertionOrder] {
+			allSamePrefix = false
 		}
+	}
+	cmpNoPrefix := func(a, b entryLoc) int {
 		aKey := data[a.offset : a.offset+max(a.keyLen, 0)]
 		bKey := data[b.offset : b.offset+max(b.keyLen, 0)]
 		if c := bytes.Compare(aKey, bKey); c != 0 {
 			return c
 		}
-		return int(a.insertionOrder - b.insertionOrder) // StableSort: preserve insertion order for duplicate keys
+		return int(a.insertionOrder - b.insertionOrder)
+	}
+	cmp := cmpNoPrefix
+	if !allSamePrefix {
+		cmp = func(a, b entryLoc) int {
+			if prefixes[a.insertionOrder] != prefixes[b.insertionOrder] {
+				if prefixes[a.insertionOrder] < prefixes[b.insertionOrder] {
+					return -1
+				}
+				return 1
+			}
+			aKey := data[a.offset : a.offset+max(a.keyLen, 0)]
+			bKey := data[b.offset : b.offset+max(b.keyLen, 0)]
+			if c := bytes.Compare(aKey, bKey); c != 0 {
+				return c
+			}
+			return int(a.insertionOrder - b.insertionOrder) // StableSort: preserve insertion order for duplicate keys
+		}
 	}
 	if slices.IsSortedFunc(b.entries, cmp) {
 		return
@@ -246,14 +261,6 @@ func (b *sortableBuffer) Sort() {
 	slices.SortFunc(b.entries, cmp)
 	prefixDur := time.Since(t1)
 
-	cmpNoPrefix := func(a, b entryLoc) int {
-		aKey := data[a.offset : a.offset+max(a.keyLen, 0)]
-		bKey := data[b.offset : b.offset+max(b.keyLen, 0)]
-		if c := bytes.Compare(aKey, bKey); c != 0 {
-			return c
-		}
-		return int(a.insertionOrder - b.insertionOrder)
-	}
 	t2 := time.Now()
 	slices.SortFunc(unsorted, cmpNoPrefix)
 	noPrefixDur := time.Since(t2)
