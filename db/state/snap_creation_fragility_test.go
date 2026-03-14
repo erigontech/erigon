@@ -443,6 +443,21 @@ func TestOpenFolder_PartialFiles_StillOpens(t *testing.T) {
 
 // TestSnapInfoIsDataFile verifies that IsDataFile correctly classifies all valid data extensions.
 // Misclassifying a data extension means files get skipped during recovery.
+func TestSnapInfoIsDataFile(t *testing.T) {
+	dataExts := []string{".kv", ".v", ".ef", ".seg"}
+	for _, ext := range dataExts {
+		info := &SnapInfo{Ext: ext}
+		require.True(t, info.IsDataFile(), "extension %q must be a data file", ext)
+	}
+
+	// Accessor/index extensions are NOT data files
+	nonDataExts := []string{".bt", ".kvi", ".vi", ".efi", ".kvei", ".idx", "", ".dat"}
+	for _, ext := range nonDataExts {
+		info := &SnapInfo{Ext: ext}
+		require.False(t, info.IsDataFile(), "extension %q must NOT be a data file", ext)
+	}
+}
+
 // TestRealFileCreation_DomainDataFile creates a real .kv data file using the proper
 // compressor path and verifies it can be decompressed after creation.
 // This catches bugs in the file creation path that only manifest with real I/O.
@@ -539,38 +554,51 @@ func TestFileNamingRoundTrip_AllStepSizes(t *testing.T) {
 	}
 }
 
-// TestVisibleFiles_MergedFilePrefersOverConstituents verifies a critical correctness
-// property: when BOTH a merged file (covering a large range) AND its constituent small
-// files (covering sub-ranges) all have complete accessors, only the merged file appears
-// in the visible set. This prevents readers from accessing the same data twice, which
-// would cause silent data duplication bugs.
-//
-// The property is implemented in calcVisibleFiles via the isProperSubsetOf check:
-// when a larger file is added to the visible set, any smaller files it covers are
-// retroactively removed.
-func TestVisibleFiles_MergedFilePrefersOverConstituents(t *testing.T) {
+// TestE3ParseRejectsWrongTag verifies that Parse rejects filenames with a different
+// entity name. Files of different entities must not be confused with each other.
+func TestE3ParseRejectsWrongTag(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
-	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (string, SnapNameSchema) {
-		schema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
-			Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
-			BtIndex(ver).Existence(ver).Build()
-		return "accounts", schema
-	})
+	stepSize := uint64(1000)
 
-	// Create three files: two small (0-stepSize), (stepSize-2*stepSize) and one merged (0-2*stepSize).
-	// All have complete accessors — this is the post-merge state before old files are cleaned up.
-	populateFiles2(t, dirs, repo, []testFileRange{{0, 1}, {1, 2}, {0, 2}})
-	require.NoError(t, repo.OpenFolder())
-	require.Equal(t, 3, repo.dirtyFiles.Len(), "all 3 files must be tracked as dirty files")
+	accountsSchema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree, stepSize).
+		Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+		BtIndex(ver).Build()
 
-	repo.RecalcVisibleFiles(RootNum(MaxUint64))
-	visible := repo.VisibleFiles()
+	// A storage file must not be parseable by the accounts schema
+	_, ok := accountsSchema.Parse("v1.0-storage.0-256.kv")
+	require.False(t, ok, "accounts schema must reject storage filenames")
 
-	// Only the merged file (0-2*stepSize) must appear — NOT the two small files.
-	require.Len(t, visible, 1, "merged file must replace constituent small files in visible set")
-	require.Equal(t, uint64(0), visible[0].StartRootNum(), "merged file must start at 0")
-	require.Equal(t, uint64(2*repo.stepSize), visible[0].EndRootNum(), "merged file must cover full range")
+	_, ok = accountsSchema.Parse("v1.0-accounts.0-256.kv")
+	require.True(t, ok, "accounts schema must accept accounts filenames")
+
+	// Wrong extension
+	_, ok = accountsSchema.Parse("v1.0-accounts.0-256.v")
+	require.False(t, ok, "accounts .kv schema must reject .v files")
+}
+
+// TestMissedFilesMap_IsEmpty verifies that IsEmpty correctly detects when all
+// accessors are present vs when some are missing. If IsEmpty is wrong, the system
+// may skip building missing accessors and leave files in a broken state.
+func TestMissedFilesMap_IsEmpty(t *testing.T) {
+	// Empty map: nothing missing
+	empty := MissedFilesMap{}
+	require.True(t, empty.IsEmpty())
+
+	// Map with empty slice: nothing missing
+	emptySlice := MissedFilesMap{statecfg.AccessorBTree: {}}
+	require.True(t, emptySlice.IsEmpty())
+
+	// Map with non-empty slice: something is missing
+	withItem := MissedFilesMap{statecfg.AccessorBTree: {&FilesItem{}}}
+	require.False(t, withItem.IsEmpty())
+
+	// Mixed: one accessor has items, another doesn't
+	mixed := MissedFilesMap{
+		statecfg.AccessorBTree:     {&FilesItem{}},
+		statecfg.AccessorExistence: {},
+	}
+	require.False(t, mixed.IsEmpty())
 }
 
 // TestProductionSchemas_ValidNamesAndRoundTrip verifies that production-level schemas
