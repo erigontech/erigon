@@ -120,7 +120,10 @@ func SpawnBuilderExecStage(ctx context0.Context, s *stagedsync.StageState, sd *e
 	// execution results (e.g., a tx passes the filter but fails in the EVM).
 	// These speculative writes must NOT pollute sd's commitment computation.
 	// filterSd must be backed by its own MemoryBatch to ensure full isolation.
-	filterMb := membatchwithdb.NewMemoryBatch(tx, cfg.tmpdir, logger)
+	filterMb, err := membatchwithdb.NewMemoryBatch(tx, cfg.tmpdir, logger)
+	if err != nil {
+		return err
+	}
 	defer filterMb.Close()
 	filterSd, err := execctx.NewSharedDomains(ctx, filterMb, logger)
 	if err != nil {
