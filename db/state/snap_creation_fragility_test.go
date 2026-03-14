@@ -1628,3 +1628,36 @@ func TestDuplicateRange_BtreeDeduplication(t *testing.T) {
 	// Only one file should exist in dirty files (btree deduplicates by range key).
 	require.Equal(t, 1, repo.dirtyFiles.Len(), "duplicate range must be deduplicated in btree")
 }
+
+// TestLatestMergedRange verifies the LatestMergedRange function correctly identifies
+// the most recent large merged file (shardSize > 2). This function drives merge
+// scheduling in the aggregator: an incorrect result would cause missed or redundant merges.
+func TestLatestMergedRange(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ver := version.V1_0_standart
+	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (string, SnapNameSchema) {
+		schema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
+			Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+			BtIndex(ver).Existence(ver).Build()
+		return "accounts", schema
+	})
+	stepSize := repo.stepSize
+
+	// Case 1: only small single-step files — LatestMergedRange returns zero values (no large file).
+	// LatestMergedRange requires shardSize > 2 to count as a "latest merged range".
+	populateFiles2(t, dirs, repo, []testFileRange{{0, 1}, {1, 2}})
+	require.NoError(t, repo.OpenFolder())
+	repo.RecalcVisibleFiles(RootNum(MaxUint64))
+	lmr := repo.visibleFiles().LatestMergedRange(stepSize)
+	require.Equal(t, uint64(0), lmr.from, "single-step files: no large merged range, from must be 0")
+	require.Equal(t, uint64(0), lmr.to, "single-step files: no large merged range, to must be 0")
+
+	// Case 2: add a large merged file (4 steps) — LatestMergedRange must return it.
+	// Note: LatestMergedRange doesn't set needMerge; detect by non-zero to.
+	populateFiles2(t, dirs, repo, []testFileRange{{0, 4}})
+	require.NoError(t, repo.OpenFolder())
+	repo.RecalcVisibleFiles(RootNum(MaxUint64))
+	lmr = repo.visibleFiles().LatestMergedRange(stepSize)
+	require.Equal(t, uint64(0), lmr.from, "merged range must start at 0")
+	require.Equal(t, uint64(4*stepSize), lmr.to, "4-step file (shardSize=4 > 2) must be the latest merged range")
+}
