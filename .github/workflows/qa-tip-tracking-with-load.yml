@@ -47,7 +47,7 @@ jobs:
     runs-on: ${{ matrix.runs-on }}
     timeout-minutes: 300 # 5 hours
     env:
-      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version-main/datadir
+      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TRACKING_TIME_SECONDS: 7200 # 2 hours
@@ -244,7 +244,7 @@ jobs:
           branch_name="release"
           commit=$(git -C $GETH_INSTALL_DIR rev-parse --short HEAD)
         fi
-                
+        
         # Detect the pre-built db version
         if [ "$client" == "erigon" ]; then
           db_version=$(python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/prod_info.py $ERIGON_REFERENCE_DATA_DIR/../production.ini production erigon_repo_commit)

@@ -1,7 +1,6 @@
 package commitment
 
 import (
-	"encoding/hex"
 	"testing"
 
 	keccak "github.com/erigontech/fastkeccak"
@@ -79,7 +78,7 @@ func TestVerifyBranchHashes_RoundTrip(t *testing.T) {
 
 	// Verify the branch hashes
 	accountValues := map[string][]byte{
-		hex.EncodeToString(addr[:]): accVal,
+		string(addr[:]): accVal,
 	}
 	storageValues := map[string][]byte{}
 
@@ -94,7 +93,7 @@ func TestVerifyBranchHashes_RoundTrip(t *testing.T) {
 	}
 	corruptedVal := accounts.SerialiseV3(&corruptedAcc)
 	corruptedAccountValues := map[string][]byte{
-		hex.EncodeToString(addr[:]): corruptedVal,
+		string(addr[:]): corruptedVal,
 	}
 
 	err = VerifyBranchHashes(branchKey, BranchData(branchData), corruptedAccountValues, storageValues)
@@ -184,11 +183,10 @@ func TestVerifyBranchHashes_Singleton(t *testing.T) {
 	// Build domain values maps
 	accVal := accounts.SerialiseV3(&acc)
 	accountValues := map[string][]byte{
-		hex.EncodeToString(addr[:]): accVal,
+		string(addr[:]): accVal,
 	}
-	stoKey := hex.EncodeToString(c.storageAddr[:c.storageAddrLen])
 	storageValues := map[string][]byte{
-		stoKey: storageVal,
+		string(c.storageAddr[:c.storageAddrLen]): storageVal,
 	}
 
 	err = VerifyBranchHashes(branchKey, BranchData(branchData), accountValues, storageValues)
@@ -270,11 +268,10 @@ func TestVerifyBranchHashes_SingletonDepth1(t *testing.T) {
 	// Build domain values maps
 	accVal := accounts.SerialiseV3(&acc)
 	accountValues := map[string][]byte{
-		hex.EncodeToString(addr[:]): accVal,
+		string(addr[:]): accVal,
 	}
-	stoKey := hex.EncodeToString(c.storageAddr[:c.storageAddrLen])
 	storageValues := map[string][]byte{
-		stoKey: storageVal,
+		string(c.storageAddr[:c.storageAddrLen]): storageVal,
 	}
 
 	err = VerifyBranchHashes(branchKey, BranchData(branchData), accountValues, storageValues)
@@ -345,9 +342,8 @@ func TestVerifyBranchHashes_Storage(t *testing.T) {
 	branchKey := HexNibblesToCompactBytes(nibbles[:])
 
 	// Build domain values map
-	stoKey := hex.EncodeToString(c.storageAddr[:c.storageAddrLen])
 	storageValues := map[string][]byte{
-		stoKey: storageVal,
+		string(c.storageAddr[:c.storageAddrLen]): storageVal,
 	}
 
 	err = VerifyBranchHashes(branchKey, BranchData(branchData), map[string][]byte{}, storageValues)

@@ -365,7 +365,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 	}
 	engine := api.engine()
 
-	blockNumber, hash, isLatest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, dbtx, api._blockReader, api.filters)
+	blockNumber, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, dbtx, api._blockReader, api.filters)
 	if err != nil {
 		return fmt.Errorf("get block number: %v", err)
 	}
@@ -551,13 +551,21 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	}
 
 	blockCtx = protocol.NewEVMBlockContext(header, getHash, api.engine(), accounts.NilAddress /* author */, chainConfig)
+	// Apply global block overrides as the baseline for all bundles.
+	if config.BlockOverrides != nil {
+		if err := config.BlockOverrides.Override(&blockCtx); err != nil {
+			return err
+		}
+	}
 	// Get a new instance of the EVM
 	evm = vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{})
 	rules := evm.ChainRules()
 
+	var precompiles vm.PrecompiledContracts
 	// after replaying the txns, we want to overload the state
 	if config.StateOverrides != nil {
-		err = config.StateOverrides.Override(ibs, nil, rules)
+		precompiles = vm.ActivePrecompiledContracts(rules)
+		err = config.StateOverrides.Override(ibs, precompiles, rules)
 		if err != nil {
 			return err
 		}
@@ -585,7 +593,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 			txCtx = protocol.NewEVMTxContext(msg)
 			ibs := evm.IntraBlockState()
 			ibs.SetTxContext(blockCtx.BlockNumber, txnIndex)
-			_, err = transactions.TraceTx(ctx, api.engine(), transaction, msg, blockCtx, txCtx, nil, common.Hash{}, txnIndex, evm.IntraBlockState(), config, chainConfig, stream, api.evmCallTimeout, nil)
+			_, err = transactions.TraceTx(ctx, api.engine(), transaction, msg, blockCtx, txCtx, nil, common.Hash{}, txnIndex, evm.IntraBlockState(), config, chainConfig, stream, api.evmCallTimeout, precompiles)
 			if err != nil {
 				return err
 			}

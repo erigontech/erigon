@@ -21,6 +21,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
@@ -41,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	eth1utils "github.com/erigontech/erigon/execution/execmodule/moduleutil"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -63,7 +65,12 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 		},
 	}
 	stepSize := uint64(5) // 2 for block 0 (0,1) and 3 for block 1 (2,3,4)
-	m := execmoduletester.NewWithGenesis(t, genesis, privKey, execmoduletester.WithStepSize(stepSize))
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(genesis),
+		execmoduletester.WithKey(privKey),
+		execmoduletester.WithStepSize(stepSize),
+	)
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(0, senderAddr, uint256.NewInt(0), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
@@ -129,7 +136,7 @@ func TestValidateChainAndUpdateForkChoiceWithSideForksThatGoBackAndForwardInHeig
 			senderAddr2: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.NewWithGenesis(t, genesis, privKey)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
 	longerFork, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
@@ -199,7 +206,7 @@ func addTwoTxnsToPool(ctx context.Context, startingNonce uint64, t *testing.T, m
 func TestAssembleBlock(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	m := execmoduletester.NewWithTxPoolAllProtocolChanges(t)
+	m := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
 	exec := m.ExecModule
 	txpool := m.TxPoolGrpcServer
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
@@ -241,7 +248,7 @@ func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
 	}
 	t.Parallel()
 	ctx := t.Context()
-	m := execmoduletester.NewWithTxPoolAllProtocolChanges(t)
+	m := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
 	exec := m.ExecModule
 	txpool := m.TxPoolGrpcServer
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
@@ -393,4 +400,341 @@ func retryBusy[T any](ctx context.Context, f func() (T, bool, error)) (T, error)
 		},
 		b,
 	)
+}
+
+func randomHash() common.Hash {
+	var h common.Hash
+	_, _ = rand.Read(h[:])
+	return h
+}
+
+func TestAssembleEmptyBlock(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	m := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	exec := m.ExecModule
+
+	// Build 1 block with 1 tx as genesis state.
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
+		tx, txErr := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		require.NoError(t, txErr)
+		gen.AddTx(tx)
+	})
+	require.NoError(t, err)
+	err = m.InsertChain(chainPack)
+	require.NoError(t, err)
+
+	// Don't add any txns to pool — assemble empty block.
+	payloadId, err := assembleBlock(ctx, exec, &executionproto.AssembleBlockRequest{
+		ParentHash:            gointerfaces.ConvertHashToH256(chainPack.TopBlock.Hash()),
+		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		PrevRandao:            gointerfaces.ConvertHashToH256(chainPack.TopBlock.Header().MixDigest),
+		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(common.Address{1}),
+		Withdrawals:           make([]*typesproto.Withdrawal, 0),
+		ParentBeaconBlockRoot: gointerfaces.ConvertHashToH256(randomHash()),
+	})
+	require.NoError(t, err)
+
+	block, err := getAssembledBlock(ctx, exec, payloadId)
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), block.NumberU64())
+	require.Empty(t, block.Transactions())
+
+	// Insert + validate + FCU — validates state root is correct.
+	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
+	require.NoError(t, err)
+}
+
+func TestAssembleBlockWithStateVerification(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	m := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	exec := m.ExecModule
+	txpool := m.TxPoolGrpcServer
+
+	// Build 1 block with 1 tx as genesis state.
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
+		tx, txErr := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		require.NoError(t, txErr)
+		gen.AddTx(tx)
+	})
+	require.NoError(t, err)
+	err = m.InsertChain(chainPack)
+	require.NoError(t, err)
+
+	baseFee := chainPack.TopBlock.BaseFee().Uint64()
+	addTwoTxnsToPool(ctx, 1, t, m, txpool, baseFee)
+
+	payloadId, err := assembleBlock(ctx, exec, &executionproto.AssembleBlockRequest{
+		ParentHash:            gointerfaces.ConvertHashToH256(chainPack.TopBlock.Hash()),
+		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		PrevRandao:            gointerfaces.ConvertHashToH256(chainPack.TopBlock.Header().MixDigest),
+		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(common.Address{1}),
+		Withdrawals:           make([]*typesproto.Withdrawal, 0),
+		ParentBeaconBlockRoot: gointerfaces.ConvertHashToH256(randomHash()),
+	})
+	require.NoError(t, err)
+
+	block, err := getAssembledBlock(ctx, exec, payloadId)
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), block.NumberU64())
+	require.Len(t, block.Transactions(), 2)
+
+	// Validate the block and update fork choice.
+	// insertValidateAndUfc1By1 verifies the state root is correct, which proves
+	// that the assembled block's execution produced the exact expected state.
+	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
+	require.NoError(t, err)
+
+	// Build a second block (block 3) with 2 more txns to verify multi-block assembly.
+	addTwoTxnsToPool(ctx, 3, t, m, txpool, baseFee)
+	payloadId2, err := assembleBlock(ctx, exec, &executionproto.AssembleBlockRequest{
+		ParentHash:            gointerfaces.ConvertHashToH256(block.Hash()),
+		Timestamp:             block.Header().Time + 1,
+		PrevRandao:            gointerfaces.ConvertHashToH256(block.Header().MixDigest),
+		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(common.Address{1}),
+		Withdrawals:           make([]*typesproto.Withdrawal, 0),
+		ParentBeaconBlockRoot: gointerfaces.ConvertHashToH256(randomHash()),
+	})
+	require.NoError(t, err)
+
+	block2, err := getAssembledBlock(ctx, exec, payloadId2)
+	require.NoError(t, err)
+	require.Equal(t, uint64(3), block2.NumberU64())
+	require.Len(t, block2.Transactions(), 2)
+
+	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block2})
+	require.NoError(t, err)
+}
+
+func TestAssembleBlockWithContractCreation(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	m := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	exec := m.ExecModule
+	txpool := m.TxPoolGrpcServer
+
+	// Build 1 block with 1 tx as genesis state.
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
+		tx, txErr := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		require.NoError(t, txErr)
+		gen.AddTx(tx)
+	})
+	require.NoError(t, err)
+	err = m.InsertChain(chainPack)
+	require.NoError(t, err)
+
+	// Add a contract creation tx to the pool.
+	baseFee := chainPack.TopBlock.BaseFee().Uint64()
+	changerBytecode, err := hex.DecodeString(contracts.ChangerBin[2:]) // strip "0x" prefix
+	require.NoError(t, err)
+
+	contractTx, err := types.SignTx(
+		types.NewContractCreation(1, uint256.NewInt(0), 200_000, uint256.NewInt(baseFee), changerBytecode),
+		*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key,
+	)
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	err = contractTx.EncodeRLP(&buf)
+	require.NoError(t, err)
+	r, err := txpool.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{buf.Bytes()}})
+	require.NoError(t, err)
+	require.Len(t, r.Errors, 1)
+	require.Equal(t, "success", r.Errors[0])
+
+	// Assemble block.
+	payloadId, err := assembleBlock(ctx, exec, &executionproto.AssembleBlockRequest{
+		ParentHash:            gointerfaces.ConvertHashToH256(chainPack.TopBlock.Hash()),
+		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		PrevRandao:            gointerfaces.ConvertHashToH256(chainPack.TopBlock.Header().MixDigest),
+		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(common.Address{1}),
+		Withdrawals:           make([]*typesproto.Withdrawal, 0),
+		ParentBeaconBlockRoot: gointerfaces.ConvertHashToH256(randomHash()),
+	})
+	require.NoError(t, err)
+
+	block, err := getAssembledBlock(ctx, exec, payloadId)
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), block.NumberU64())
+	require.Len(t, block.Transactions(), 1)
+
+	// Insert + validate + FCU — validates state root which proves
+	// contract deployment was executed correctly.
+	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
+	require.NoError(t, err)
+}
+
+func TestAssembleBlockGasOverflow(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
+	genesis := &types.Genesis{
+		Config:   chain.AllProtocolChanges,
+		GasLimit: 150_000, // ~7 simple transfers at 21K gas
+		Alloc: types.GenesisAlloc{
+			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+		},
+	}
+	m := execmoduletester.New(t,
+		execmoduletester.WithGenesisSpec(genesis),
+		execmoduletester.WithKey(privKey),
+		execmoduletester.WithTxPool(),
+	)
+	exec := m.ExecModule
+	txpool := m.TxPoolGrpcServer
+
+	// Generate 1 empty block as initial chain state.
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1,
+		func(i int, gen *blockgen.BlockGen) {})
+	require.NoError(t, err)
+	err = m.InsertChain(chainPack)
+	require.NoError(t, err)
+
+	// Add 10 txns to pool (each 21K gas, only ~7 fit per block).
+	baseFee := chainPack.TopBlock.BaseFee().Uint64()
+	rlpTxs := make([][]byte, 10)
+	for i := range rlpTxs {
+		tx, txErr := types.SignTx(
+			types.NewTransaction(uint64(i), common.Address{1}, uint256.NewInt(100),
+				params.TxGas, uint256.NewInt(baseFee), nil),
+			*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		require.NoError(t, txErr)
+		var buf bytes.Buffer
+		err = tx.EncodeRLP(&buf)
+		require.NoError(t, err)
+		rlpTxs[i] = buf.Bytes()
+	}
+	r, err := txpool.Add(ctx, &txpoolproto.AddRequest{RlpTxs: rlpTxs})
+	require.NoError(t, err)
+	for _, e := range r.Errors {
+		require.Equal(t, "success", e)
+	}
+
+	// Assemble block 2 — should be gas-limited.
+	payloadId, err := assembleBlock(ctx, exec, &executionproto.AssembleBlockRequest{
+		ParentHash:            gointerfaces.ConvertHashToH256(chainPack.TopBlock.Hash()),
+		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		PrevRandao:            gointerfaces.ConvertHashToH256(chainPack.TopBlock.Header().MixDigest),
+		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(common.Address{1}),
+		Withdrawals:           make([]*typesproto.Withdrawal, 0),
+		ParentBeaconBlockRoot: gointerfaces.ConvertHashToH256(randomHash()),
+	})
+	require.NoError(t, err)
+	block, err := getAssembledBlock(ctx, exec, payloadId)
+	require.NoError(t, err)
+	b2TxCount := len(block.Transactions())
+	require.Greater(t, b2TxCount, 0)
+	require.Less(t, b2TxCount, 10) // not all fit
+
+	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
+	require.NoError(t, err)
+
+	// Assemble block 3 — remaining txns spill over.
+	payloadId2, err := assembleBlock(ctx, exec, &executionproto.AssembleBlockRequest{
+		ParentHash:            gointerfaces.ConvertHashToH256(block.Hash()),
+		Timestamp:             block.Header().Time + 1,
+		PrevRandao:            gointerfaces.ConvertHashToH256(block.Header().MixDigest),
+		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(common.Address{1}),
+		Withdrawals:           make([]*typesproto.Withdrawal, 0),
+		ParentBeaconBlockRoot: gointerfaces.ConvertHashToH256(randomHash()),
+	})
+	require.NoError(t, err)
+	block2, err := getAssembledBlock(ctx, exec, payloadId2)
+	require.NoError(t, err)
+	b3TxCount := len(block2.Transactions())
+	require.Greater(t, b3TxCount, 0)
+
+	// All 10 transactions should be included across the 2 blocks.
+	require.Equal(t, 10, b2TxCount+b3TxCount)
+
+	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block2})
+	require.NoError(t, err)
+}
+
+func TestAssembleBlockMixedTxTypes(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	m := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	exec := m.ExecModule
+	txpool := m.TxPoolGrpcServer
+
+	// Build 1 block with 1 tx as genesis state.
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
+		tx, txErr := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		require.NoError(t, txErr)
+		gen.AddTx(tx)
+	})
+	require.NoError(t, err)
+	err = m.InsertChain(chainPack)
+	require.NoError(t, err)
+
+	baseFee := chainPack.TopBlock.BaseFee().Uint64()
+
+	// nonce 1: simple transfer
+	tx1, err := types.SignTx(
+		types.NewTransaction(1, common.Address{2}, uint256.NewInt(5_000), params.TxGas, uint256.NewInt(baseFee), nil),
+		*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+	require.NoError(t, err)
+
+	// nonce 2: contract creation (Changer bytecode)
+	changerBytecode, err := hex.DecodeString(contracts.ChangerBin[2:])
+	require.NoError(t, err)
+	tx2, err := types.SignTx(
+		types.NewContractCreation(2, uint256.NewInt(0), 200_000, uint256.NewInt(baseFee), changerBytecode),
+		*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+	require.NoError(t, err)
+
+	// nonce 3: simple transfer
+	tx3, err := types.SignTx(
+		types.NewTransaction(3, common.Address{3}, uint256.NewInt(3_000), params.TxGas, uint256.NewInt(baseFee), nil),
+		*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+	require.NoError(t, err)
+
+	// Add all 3 to pool.
+	rlpTxs := make([][]byte, 3)
+	for i, tx := range []types.Transaction{tx1, tx2, tx3} {
+		var buf bytes.Buffer
+		err = tx.EncodeRLP(&buf)
+		require.NoError(t, err)
+		rlpTxs[i] = buf.Bytes()
+	}
+	addR, err := txpool.Add(ctx, &txpoolproto.AddRequest{RlpTxs: rlpTxs})
+	require.NoError(t, err)
+	for _, e := range addR.Errors {
+		require.Equal(t, "success", e)
+	}
+
+	// Assemble block.
+	payloadId, err := assembleBlock(ctx, exec, &executionproto.AssembleBlockRequest{
+		ParentHash:            gointerfaces.ConvertHashToH256(chainPack.TopBlock.Hash()),
+		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		PrevRandao:            gointerfaces.ConvertHashToH256(chainPack.TopBlock.Header().MixDigest),
+		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(common.Address{1}),
+		Withdrawals:           make([]*typesproto.Withdrawal, 0),
+		ParentBeaconBlockRoot: gointerfaces.ConvertHashToH256(randomHash()),
+	})
+	require.NoError(t, err)
+	block, err := getAssembledBlock(ctx, exec, payloadId)
+	require.NoError(t, err)
+	require.Len(t, block.Transactions(), 3)
+
+	// Verify we have both transfer and contract creation tx types.
+	hasTransfer := false
+	hasContractCreation := false
+	for _, tx := range block.Transactions() {
+		if tx.GetTo() == nil {
+			hasContractCreation = true
+		} else {
+			hasTransfer = true
+		}
+	}
+	require.True(t, hasTransfer, "block should contain transfer transactions")
+	require.True(t, hasContractCreation, "block should contain contract creation transaction")
+
+	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
+	require.NoError(t, err)
 }

@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"math"
 	"time"
-	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 
@@ -51,7 +50,6 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/shards"
-	"github.com/erigontech/erigon/node/silkworm"
 )
 
 const (
@@ -86,7 +84,6 @@ type ExecuteBlockCfg struct {
 	syncCfg   ethconfig.Sync
 	genesis   *types.Genesis
 
-	silkworm        *silkworm.Silkworm
 	experimentalBAL bool
 }
 
@@ -106,7 +103,6 @@ func StageExecuteBlocksCfg(
 	hd headerDownloader,
 	genesis *types.Genesis,
 	syncCfg ethconfig.Sync,
-	silkworm *silkworm.Silkworm,
 	experimentalBAL bool,
 ) ExecuteBlockCfg {
 	if dirs.SnapDomain == "" {
@@ -129,7 +125,6 @@ func StageExecuteBlocksCfg(
 		genesis:         genesis,
 		historyV3:       true,
 		syncCfg:         syncCfg,
-		silkworm:        silkworm,
 		experimentalBAL: experimentalBAL,
 	}
 }
@@ -306,31 +301,24 @@ func unwindExec3State(ctx context.Context,
 			if dbg.TraceUnwinds && dbg.TraceDomain(uint16(kv.AccountsDomain)) {
 				address := entry.Key[:len(entry.Key)-8]
 				keyStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
-				prevStep := ^binary.BigEndian.Uint64(entry.PrevStepBytes)
-				if len(entry.Value) > 0 {
+				if entry.Value != nil && len(entry.Value) > 0 {
 					var account accounts.Account
 					if err := accounts.DeserialiseV3(&account, entry.Value); err == nil {
-						fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}, step: %d, prev: %d\n", blockUnwindTo, txUnwindTo, address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash, keyStep, prevStep)
+						fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}, step: %d\n", blockUnwindTo, txUnwindTo, address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash, keyStep)
 					}
+				} else if entry.Value == nil {
+					fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: [different step], step: %d\n", blockUnwindTo, txUnwindTo, address, keyStep)
 				} else {
-					if keyStep != prevStep {
-						if prevStep == 0 {
-							fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: [empty], step: %d\n", blockUnwindTo, txUnwindTo, address, keyStep)
-						} else {
-							fmt.Printf("unwind (Block:%d,Tx:%d): acc: %x, in prev step: {key: %d, prev: %d}\n", blockUnwindTo, txUnwindTo, address, keyStep, prevStep)
-						}
-					} else {
-						fmt.Printf("unwind (Block:%d,Tx:%d): del acc: %x, step: %d\n", blockUnwindTo, txUnwindTo, address, keyStep)
-					}
+					fmt.Printf("unwind (Block:%d,Tx:%d): del acc: %x, step: %d\n", blockUnwindTo, txUnwindTo, address, keyStep)
 				}
 			}
-			if err := stateChanges.Collect(toBytesZeroCopy(entry.Key)[:length.Addr], entry.Value); err != nil {
+			if err := stateChanges.Collect(common.ToBytesZeroCopy(entry.Key)[:length.Addr], entry.Value); err != nil {
 				return err
 			}
 		}
 		storageDiffs := changeset[kv.StorageDomain]
 		for _, kv := range storageDiffs {
-			if err := stateChanges.Collect(toBytesZeroCopy(kv.Key), kv.Value); err != nil {
+			if err := stateChanges.Collect(common.ToBytesZeroCopy(kv.Key), kv.Value); err != nil {
 				return err
 			}
 		}
@@ -361,8 +349,6 @@ func unwindExec3State(ctx context.Context,
 	sd.SetTxNum(txUnwindTo)
 	return nil
 }
-
-func toBytesZeroCopy(s string) []byte { return unsafe.Slice(unsafe.StringData(s), len(s)) }
 
 func stageProgress(tx kv.Tx, db kv.RoDB, stage stages.SyncStage) (prevStageProgress uint64, err error) {
 	if tx != nil {

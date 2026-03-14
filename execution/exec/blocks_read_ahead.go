@@ -115,20 +115,14 @@ func (bra *blockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 
 	balLen := len(bal)
 	if balLen > 0 {
-		balWorkers := workers
-		if balWorkers > balLen {
-			balWorkers = balLen
-		}
+		balWorkers := min(workers, balLen)
 
 		// Pre-divide work: each worker gets a dedicated range of BAL entries
 		entriesPerWorker := (balLen + balWorkers - 1) / balWorkers
 
 		for w := 0; w < balWorkers; w++ {
 			start := w * entriesPerWorker
-			end := start + entriesPerWorker
-			if end > balLen {
-				end = balLen
-			}
+			end := min(start+entriesPerWorker, balLen)
 			if start >= balLen {
 				break
 			}
@@ -192,10 +186,7 @@ func (bra *blockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 
 	for w := 0; w < workers; w++ {
 		start := w * txnsPerWorker
-		end := start + txnsPerWorker
-		if end > txnLen {
-			end = txnLen
-		}
+		end := min(start+txnsPerWorker, txnLen)
 		if start >= txnLen {
 			break
 		}
@@ -282,7 +273,7 @@ func ReadBlockWithSendersFromGlobalReadAheader(blockHash common.Hash) (*types.Bl
 }
 
 func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.Engine, blockReader services.FullBlockReader) (chan uint64, context.CancelFunc) {
-	const readAheadBlocks = 100
+	const readAheadBlocks = 500
 	readAhead := make(chan uint64, readAheadBlocks)
 	g, gCtx := errgroup.WithContext(ctx)
 	for workerNum := 0; workerNum < workers; workerNum++ {

@@ -6,12 +6,13 @@ import (
 	"slices"
 	"time"
 
-	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/seg"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
+
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/seg"
 )
 
 func segInfo(cliCtx *cli.Context) error {

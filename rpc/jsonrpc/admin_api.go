@@ -40,6 +40,12 @@ type AdminAPI interface {
 
 	// RemovePeer requests connecting to a remote node.
 	RemovePeer(ctx context.Context, url string) (bool, error)
+
+	// AddTrustedPeer allows a remote node to always connect, even if slots are full.
+	AddTrustedPeer(ctx context.Context, url string) (bool, error)
+
+	// RemoveTrustedPeer removes a remote node from the trusted peer set.
+	RemoveTrustedPeer(ctx context.Context, url string) (bool, error)
 }
 
 // AdminAPIImpl data structure to store things needed for admin_* commands.
@@ -89,6 +95,28 @@ func (api *AdminAPIImpl) RemovePeer(ctx context.Context, url string) (bool, erro
 	}
 	if result == nil {
 		return false, errors.New("nil removePeer response")
+	}
+	return result.Success, nil
+}
+
+func (api *AdminAPIImpl) AddTrustedPeer(ctx context.Context, url string) (bool, error) {
+	result, err := api.ethBackend.AddTrustedPeer(ctx, &remoteproto.AddPeerRequest{Url: url})
+	if err != nil {
+		return false, err
+	}
+	if result == nil {
+		return false, errors.New("nil addTrustedPeer response")
+	}
+	return result.Success, nil
+}
+
+func (api *AdminAPIImpl) RemoveTrustedPeer(ctx context.Context, url string) (bool, error) {
+	result, err := api.ethBackend.RemoveTrustedPeer(ctx, &remoteproto.RemovePeerRequest{Url: url})
+	if err != nil {
+		return false, err
+	}
+	if result == nil {
+		return false, errors.New("nil removeTrustedPeer response")
 	}
 	return result.Success, nil
 }

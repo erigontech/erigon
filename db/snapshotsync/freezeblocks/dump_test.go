@@ -65,7 +65,6 @@ func TestDump(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-
 	type test struct {
 		chainConfig *chain.Config
 		chainSize   int
@@ -260,7 +259,7 @@ func TestDump(t *testing.T) {
 			snConfig, _ := snapcfg.KnownCfg(networkname.Mainnet)
 			snConfig.ExpectBlocks = math.MaxUint64
 
-			err := freezeblocks.DumpBlocks(m.Ctx, 0, uint64(test.chainSize), m.ChainConfig, tmpDir, snapDir, m.DB, 1, log.LvlInfo, logger, m.BlockReader)
+			err := freezeblocks.DumpBlocks(m.Ctx, 0, uint64(test.chainSize), m.ChainConfig, tmpDir, snapDir, m.DB, 1, log.LvlInfo, logger, m.BlockReader, snConfig)
 			require.NoError(err)
 		})
 	}
@@ -277,7 +276,13 @@ func createDumpTestKV(t *testing.T, chainConfig *chain.Config, chainSize int) *e
 		signer = types.LatestSigner(gspec.Config)
 	)
 
-	m := execmoduletester.NewWithGenesisPruneMode(t, gspec, key, chainSize, prune.DefaultMode)
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(gspec),
+		execmoduletester.WithKey(key),
+		execmoduletester.WithBlockBufferSize(chainSize),
+		execmoduletester.WithPruneMode(prune.DefaultMode),
+	)
 
 	// Generate testing blocks
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(i int, b *blockgen.BlockGen) {

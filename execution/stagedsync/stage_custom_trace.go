@@ -317,7 +317,6 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 				cumulativeBlobGasUsedInBlock += txTask.Tx().GetBlobGas()
 			}
 
-			doms.SetTxNum(txTask.TxNum)
 			putter := doms.AsPutDel(tx)
 
 			if produce.ReceiptDomain {

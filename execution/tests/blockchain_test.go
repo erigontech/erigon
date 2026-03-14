@@ -473,8 +473,8 @@ func TestChainTxReorgs(t *testing.T) {
 		signer = types.LatestSigner(gspec.Config)
 	)
 
-	m := execmoduletester.NewWithGenesis(t, gspec, key1)
-	m2 := execmoduletester.NewWithGenesis(t, gspec, key1)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key1))
+	m2 := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key1))
 	defer m2.DB.Close()
 
 	// Create two transactions shared between the chains:
@@ -681,7 +681,7 @@ func TestEIP155Transition(t *testing.T) {
 			Alloc:  types.GenesisAlloc{address: {Balance: funds}, deleteAddr: {Balance: new(big.Int)}},
 		}
 	)
-	m := execmoduletester.NewWithGenesis(t, gspec, key)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
 	chain, chainErr := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *blockgen.BlockGen) {
 		var (
@@ -800,7 +800,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 			Alloc:  types.GenesisAlloc{address: {Balance: funds}, deleteAddr: {Balance: new(big.Int)}},
 		}
 	)
-	m := execmoduletester.NewWithGenesisPruneMode(t, gspec, key, 128, pm)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key), execmoduletester.WithBlockBufferSize(128), execmoduletester.WithPruneMode(pm))
 
 	head := uint64(4)
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, int(head), func(i int, block *blockgen.BlockGen) {
@@ -982,7 +982,7 @@ func TestEIP161AccountRemoval(t *testing.T) {
 			Alloc: types.GenesisAlloc{address: {Balance: funds}},
 		}
 	)
-	m := execmoduletester.NewWithGenesis(t, gspec, key)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *blockgen.BlockGen) {
 		var (
@@ -1079,7 +1079,7 @@ func TestDoubleAccountRemoval(t *testing.T) {
 			Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds}},
 		}
 	)
-	m := execmoduletester.NewWithGenesis(t, gspec, bankKey)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(bankKey))
 
 	var theAddr common.Address
 
@@ -1398,7 +1398,7 @@ func TestDeleteCreateRevert(t *testing.T) {
 			},
 		}
 	)
-	m := execmoduletester.NewWithGenesis(t, gspec, key)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
@@ -1508,7 +1508,7 @@ func TestDeleteRecreateSlots(t *testing.T) {
 			},
 		},
 	}
-	m := execmoduletester.NewWithGenesis(t, gspec, key)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AA, to kill it
@@ -1633,7 +1633,7 @@ func TestCVE2020_26265(t *testing.T) {
 			},
 		},
 	}
-	m := execmoduletester.NewWithGenesis(t, gspec, key)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
@@ -1707,7 +1707,7 @@ func TestDeleteRecreateAccount(t *testing.T) {
 			},
 		},
 	}
-	m := execmoduletester.NewWithGenesis(t, gspec, key)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
@@ -1839,7 +1839,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 			},
 		},
 	}
-	m := execmoduletester.NewWithGenesis(t, gspec, key)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 	var nonce uint64
 
 	type expectation struct {
@@ -2039,7 +2039,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 			},
 		},
 	}
-	m := execmoduletester.NewWithGenesis(t, gspec, key)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 	nonce := uint64(0)
 
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, b *blockgen.BlockGen) {
@@ -2128,7 +2128,7 @@ func TestEIP2718Transition(t *testing.T) {
 			},
 		}
 	)
-	m := execmoduletester.NewWithGenesis(t, gspec, key)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
@@ -2224,7 +2224,7 @@ func TestEIP1559Transition(t *testing.T) {
 		}
 		signer = types.LatestSigner(gspec.Config)
 	)
-	m := execmoduletester.NewWithGenesis(t, gspec, key1)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key1))
 
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 501, func(i int, b *blockgen.BlockGen) {
 		if i == 500 {

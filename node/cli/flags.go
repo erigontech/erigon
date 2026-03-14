@@ -118,6 +118,7 @@ var (
 	ExperimentalBALFlag = cli.BoolFlag{
 		Name:  "experimental.bal",
 		Usage: "generate block access list",
+		Value: false,
 	}
 
 	// Throttling Flags

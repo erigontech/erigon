@@ -62,7 +62,7 @@ func (ms *MockState) TempDir() string {
 	return ms.t.TempDir()
 }
 
-func (ms *MockState) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep kv.Step) error {
+func (ms *MockState) PutBranch(prefix []byte, data []byte, prevData []byte) error {
 	// updates already merged by trie
 	if ms.concurrent.Load() {
 		ms.mu.Lock()
@@ -449,7 +449,7 @@ func WrapKeyUpdatesParallel(tb testing.TB, mode Mode, hasher keyHasher, keys [][
 	upd := NewUpdates(mode, tb.TempDir(), hasher)
 	upd.SetConcurrentCommitment(true)
 	for i, key := range keys {
-		ks := toStringZeroCopy(key)
+		ks := common.ToStringZeroCopy(key)
 		upd.TouchPlainKey(ks, nil, func(c *KeyUpdate, _ []byte) {
 			c.plainKey = ks
 			c.hashedKey = hasher(key)

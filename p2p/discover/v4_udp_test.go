@@ -543,7 +543,7 @@ func TestUDPv4_smallNetConvergence(t *testing.T) {
 			cfg.Bootnodes = []*enode.Node{bn}
 		}
 		nodes[i] = startLocalhostV4(t, cfg)
-		defer nodes[i].Close()
+		t.Cleanup(nodes[i].Close)
 	}
 
 	// Run through the iterator on all nodes until

@@ -23,7 +23,6 @@ package crypto
 
 import (
 	"crypto/ecdsa"
-	"crypto/elliptic"
 	"errors"
 	"fmt"
 	"math/big"
@@ -162,7 +161,7 @@ func CompressPubkey(pubkey *ecdsa.PublicKey) []byte {
 }
 
 // S256 returns an instance of the secp256k1 curve.
-func S256() elliptic.Curve {
+func S256() EllipticCurve {
 	return btCurve{secp256k1.S256()}
 }
 

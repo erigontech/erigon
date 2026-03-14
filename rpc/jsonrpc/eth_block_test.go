@@ -80,7 +80,7 @@ func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
 }
 
 func TestGetBlockByNumberWithPendingTag(t *testing.T) {
-	m := execmoduletester.NewWithTxPool(t)
+	m := execmoduletester.New(t, execmoduletester.WithTxPool())
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)

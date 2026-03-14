@@ -26,7 +26,11 @@ concurrency:
 
 jobs:
   test-hive:
-    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
+    name: test-hive (${{ matrix.sim }}, ${{ matrix.sim-limit }})
+    if: >-
+      ${{ github.event_name == 'push'
+      || (!github.event.pull_request.draft
+      && !contains(github.event.pull_request.labels.*.name, 'skip-uncaching')) }}
     runs-on:
       group: hive
     strategy:
@@ -56,7 +60,7 @@ jobs:
             max-allowed-failures: 0
           - sim: rpc
             sim-limit: compat
-            max-allowed-failures: 23
+            max-allowed-failures: 57 # 56 missing eth_simulateV1 MaxGasUsed in Hive tests + 1 https://github.com/erigontech/erigon/issues/19758
     steps:
       - name: Checkout Erigon go.mod
         uses: actions/checkout@v6
@@ -83,10 +87,13 @@ jobs:
         # Only login if we can. Workflow works without it but we want to avoid
         # rate limiting by Docker Hub when possible. External repos don't
         # have access to our Docker secrets.
+        # continue-on-error: transient Docker Hub network timeouts should not
+        # abort the entire workflow — the run proceeds without login (unlogged pull).
         if: |
           github.repository == 'erigontech/erigon' && 
           github.actor != 'dependabot[bot]' &&
           (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork)
+        continue-on-error: true
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
@@ -111,7 +118,7 @@ jobs:
           sed -i "s/^ARG tag=main$/ARG tag=${branch_name}/" clients/erigon/Dockerfile
           go_version=$(go mod edit -json ../erigon-src/go.mod | jq -r .Go)
           echo "Patching builder Go version to ${go_version}"
-          sed -i "s|golang:[0-9.]*-alpine|golang:${go_version}-alpine|" clients/erigon/Dockerfile
+          sed -i "s|golang:[0-9.]*-|golang:${go_version}-|" clients/erigon/Dockerfile
           go build . >> buildlogs.log
       # Depends on the last line of hive output that prints the number of suites, tests and failed
       # Currently, we fail even if suites and tests are too few, indicating the tests did not run

@@ -27,6 +27,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -41,7 +42,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/synctest"
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/chain/networkname"
