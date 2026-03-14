@@ -1215,6 +1215,90 @@ func TestNodeRestart_PartialFileCreation(t *testing.T) {
 	}
 }
 
+// TestAllFilesDataOnly_NoneVisible tests the worst-case prod scenario:
+// an entire snapshot directory was populated with data files only (all accessor builds
+// failed or haven't started yet). In this state, NO files should be visible to readers.
+// This prevents serving incorrect state from files without their lookup indexes.
+func TestAllFilesDataOnly_NoneVisible(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ver := version.V1_0_standart
+	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
+		name = "accounts"
+		schema = NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
+			Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone, ver).
+			BtIndex(ver).Existence(ver).Build()
+		return name, schema
+	})
+	defer repo.Close()
+	v := version.V1_0
+
+	// Create 5 data files, no accessors at all
+	numFiles := 5
+	for i := 0; i < numFiles; i++ {
+		from, to := RootNum(uint64(i)*repo.stepSize), RootNum(uint64(i+1)*repo.stepSize)
+		dataFile, _ := repo.schema.DataFile(v, from, to)
+		populateFiles(t, dirs, repo.schema, []string{dataFile})
+	}
+	require.NoError(t, repo.OpenFolder())
+	require.Equal(t, numFiles, repo.dirtyFiles.Len())
+
+	// All files must be detected as missing accessors
+	missed := repo.FilesWithMissedAccessors()
+	require.Equal(t, numFiles, len(missed.Get(statecfg.AccessorBTree)),
+		"all files must be flagged as missing BTree accessor")
+	require.Equal(t, numFiles, len(missed.Get(statecfg.AccessorExistence)),
+		"all files must be flagged as missing Existence accessor")
+	require.Equal(t, numFiles, len(repo.DirtyFilesWithNoBtreeAccessors()),
+		"all dirty files must be reported as lacking BTree accessor")
+
+	// Zero files visible — entire snapshot is unusable until accessors are built
+	repo.RecalcVisibleFiles(RootNum(MaxUint64))
+	require.Empty(t, repo.VisibleFiles(),
+		"no files must be visible when all accessor builds are missing")
+}
+
+// TestE2Schema_FileNamingRoundTrip verifies that E2 schema generates parseable
+// filenames. E2 schemas are used for block-level snapshots; a bug here would
+// prevent block headers/bodies from being found after they're snapshotted.
+func TestE2Schema_FileNamingRoundTrip(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ver := NewE2SnapSchemaVersion(version.V1_0_standart, version.V1_0_standart)
+	stepSize := uint64(1000)
+
+	bodies := NewE2SnapSchemaWithStep(dirs, "bodies", []string{"bodies"}, stepSize, ver)
+	headers := NewE2SnapSchemaWithStep(dirs, "headers", []string{"headers"}, stepSize, ver)
+	txns := NewE2SnapSchemaWithIndexTag(dirs, "transactions",
+		[]string{"transactions", "transactions-to-block"}, ver)
+
+	cases := []struct {
+		schema   SnapNameSchema
+		name     string
+		from, to uint64
+	}{
+		{bodies, "bodies", 0, 500000},
+		{headers, "headers", 500000, 1000000},
+		{txns, "transactions", 0, 500000},
+	}
+
+	for _, c := range cases {
+		dataPath, err := c.schema.DataFile(version.V1_0, RootNum(c.from), RootNum(c.to))
+		require.NoError(t, err, "%s: DataFile must not error", c.name)
+
+		info, ok := c.schema.Parse(fileBaseName(dataPath))
+		require.True(t, ok, "%s: generated filename must parse correctly", c.name)
+		require.Equal(t, c.from, info.From, "%s: from mismatch", c.name)
+		require.Equal(t, c.to, info.To, "%s: to mismatch", c.name)
+
+		// Accessor file round-trip for index 0
+		accPath, err := c.schema.AccessorIdxFile(version.V1_0, RootNum(c.from), RootNum(c.to), 0)
+		require.NoError(t, err, "%s: AccessorIdxFile must not error", c.name)
+		info, ok = c.schema.Parse(fileBaseName(accPath))
+		require.True(t, ok, "%s: accessor filename must parse correctly", c.name)
+		require.Equal(t, c.from, info.From, "%s accessor: from mismatch", c.name)
+		require.Equal(t, c.to, info.To, "%s accessor: to mismatch", c.name)
+	}
+}
+
 // fileBaseName returns the base name from a full file path.
 func fileBaseName(path string) string {
 	for i := len(path) - 1; i >= 0; i-- {
