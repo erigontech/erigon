@@ -460,6 +460,9 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 			}
 		}
 	}
+
+	// Property: no consecutive duplicate values per key in history
+	checkHistoryNoDuplicates(t, domainRoTx.ht)
 }
 
 func TestHistory(t *testing.T) {

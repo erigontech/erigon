@@ -1014,6 +1014,47 @@ func checkHistoryHistory(t *testing.T, h *History, txs uint64) {
 			}
 		}
 	}
+
+	// Property: no consecutive duplicate values per key in history.
+	// For each key, iterating history entries in txNum order, two adjacent entries
+	// must have different values. A duplicate means a no-op write leaked into history.
+	checkHistoryNoDuplicates(t, hc)
+}
+
+// checkHistoryNoDuplicates verifies that for every key in frozen history files,
+// no two consecutive history entries have the same value.
+func checkHistoryNoDuplicates(t *testing.T, hc *HistoryRoTx) {
+	t.Helper()
+
+	it, err := hc.iterateKeyTxNumFrozen(0, -1, order.Asc, -1)
+	require.NoError(t, err)
+	defer it.Close()
+
+	// Track previous value per key to detect consecutive duplicates.
+	type prevEntry struct {
+		val   []byte
+		txNum uint64
+	}
+	prevByKey := map[string]prevEntry{}
+
+	for it.HasNext() {
+		key, txNum, err := it.Next()
+		require.NoError(t, err)
+
+		val, ok, err := hc.historySeekInFiles(key, txNum+1)
+		require.NoError(t, err)
+		if !ok {
+			continue
+		}
+
+		ks := string(key)
+		if prev, exists := prevByKey[ks]; exists {
+			require.False(t, bytes.Equal(prev.val, val),
+				"duplicate history entry for key %x: same value %x at txNum=%d and txNum=%d",
+				key, val, prev.txNum, txNum)
+		}
+		prevByKey[ks] = prevEntry{val: common.Copy(val), txNum: txNum}
+	}
 }
 
 func TestHistoryHistory(t *testing.T) {
