@@ -1015,14 +1015,43 @@ func checkHistoryHistory(t *testing.T, h *History, txs uint64) {
 		}
 	}
 
-	// Property: no consecutive duplicate values per key in history.
-	// For each key, iterating history entries in txNum order, two adjacent entries
-	// must have different values. A duplicate means a no-op write leaked into history.
-	checkHistoryNoDuplicates(t, hc)
+	checkHistoryProperties(t, hc)
 }
 
-// checkHistoryNoDuplicates verifies that for every key in frozen history files,
-// no two consecutive history entries have the same value.
+// checkHistoryProperties verifies structural invariants of frozen history files:
+// checkHistoryProperties runs all structural invariant checks on frozen history files.
+func checkHistoryProperties(t *testing.T, hc *HistoryRoTx) {
+	t.Helper()
+	checkHistoryFileCoverage(t, hc)
+	checkHistoryNoDuplicates(t, hc)
+	checkHistoryIndexConsistency(t, hc)
+}
+
+// checkHistoryFileCoverage verifies that history and index files tile the txNum range
+// without gaps or overlaps. Adjacent files must satisfy file[i-1].endTxNum == file[i].startTxNum.
+func checkHistoryFileCoverage(t *testing.T, hc *HistoryRoTx) {
+	t.Helper()
+	for _, label := range []struct {
+		name  string
+		files visibleFiles
+	}{
+		{"history", hc.files},
+		{"index", hc.iit.files},
+	} {
+		files := label.files
+		for i := 1; i < len(files); i++ {
+			require.Equal(t, files[i-1].endTxNum, files[i].startTxNum,
+				"%s files: gap or overlap between file %d [%d-%d) and file %d [%d-%d)",
+				label.name, i-1, files[i-1].startTxNum, files[i-1].endTxNum,
+				i, files[i].startTxNum, files[i].endTxNum)
+		}
+	}
+}
+
+// checkHistoryNoDuplicates iterates all (key, txNum) entries from frozen inverted index files
+// and verifies two properties per key:
+//   - Monotonic ordering: txNums must be strictly increasing.
+//   - No consecutive duplicates: adjacent entries must have different values.
 func checkHistoryNoDuplicates(t *testing.T, hc *HistoryRoTx) {
 	t.Helper()
 
@@ -1030,7 +1059,6 @@ func checkHistoryNoDuplicates(t *testing.T, hc *HistoryRoTx) {
 	require.NoError(t, err)
 	defer it.Close()
 
-	// Track previous value per key to detect consecutive duplicates.
 	type prevEntry struct {
 		val   []byte
 		txNum uint64
@@ -1049,11 +1077,38 @@ func checkHistoryNoDuplicates(t *testing.T, hc *HistoryRoTx) {
 
 		ks := string(key)
 		if prev, exists := prevByKey[ks]; exists {
+			require.Greater(t, txNum, prev.txNum,
+				"non-monotonic txNum for key %x: txNum=%d after txNum=%d",
+				key, txNum, prev.txNum)
+
 			require.False(t, bytes.Equal(prev.val, val),
 				"duplicate history entry for key %x: same value %x at txNum=%d and txNum=%d",
 				key, val, prev.txNum, txNum)
 		}
 		prevByKey[ks] = prevEntry{val: common.Copy(val), txNum: txNum}
+	}
+}
+
+// checkHistoryIndexConsistency verifies that every (key, txNum) from the inverted index
+// that falls within the history files' range is covered by a history file.
+func checkHistoryIndexConsistency(t *testing.T, hc *HistoryRoTx) {
+	t.Helper()
+
+	it, err := hc.iterateKeyTxNumFrozen(0, -1, order.Asc, -1)
+	require.NoError(t, err)
+	defer it.Close()
+
+	histEndTxNum := hc.files.EndTxNum()
+	for it.HasNext() {
+		key, txNum, err := it.Next()
+		require.NoError(t, err)
+		if txNum >= histEndTxNum {
+			continue // index may cover more txNums than history files
+		}
+		_, ok := hc.getFile(txNum)
+		require.True(t, ok,
+			"index has entry for key %x txNum=%d but no history file covers it (histEndTxNum=%d)",
+			key, txNum, histEndTxNum)
 	}
 }
 
