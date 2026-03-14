@@ -292,7 +292,7 @@ func uint256Handle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName str
 	}
 
 	// size
-	fmt.Fprintf(b1, "    size += rlp.Uint256Len(&obj.%s)\n", fieldName)
+	fmt.Fprintf(b1, "    size += rlp.Uint256Len(obj.%s)\n", fieldName)
 
 	// encode
 	fmt.Fprintf(b2, "    if err := rlp.EncodeUint256(obj.%s, w, b[:]); err != nil {\n", fieldName)
@@ -300,11 +300,9 @@ func uint256Handle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName str
 	fmt.Fprintf(b2, "    }\n")
 
 	// decode
-	addDecodeBuf(b3)
-	fmt.Fprintf(b3, "    if b, err = s.Uint256Bytes(); err != nil {\n")
+	fmt.Fprintf(b3, "    if err = s.ReadUint256(&obj.%s); err != nil {\n", fieldName)
 	fmt.Fprintf(b3, "        %s\n", decodeErrorMsg(fieldName))
 	fmt.Fprintf(b3, "    }\n")
-	fmt.Fprintf(b3, "    obj.%s = *(new(uint256.Int).SetBytes(b))\n", fieldName)
 }
 
 func uint256PtrHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName string) {
@@ -327,11 +325,10 @@ func uint256PtrHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName 
 	fmt.Fprintf(b2, "    }\n")
 
 	// decode
-	addDecodeBuf(b3)
-	fmt.Fprintf(b3, "    if b, err = s.Uint256Bytes(); err != nil {\n")
+	fmt.Fprintf(b3, "    obj.%s = new(uint256.Int)\n", fieldName)
+	fmt.Fprintf(b3, "    if err = s.ReadUint256(obj.%s); err != nil {\n", fieldName)
 	fmt.Fprintf(b3, "        %s\n", decodeErrorMsg(fieldName))
 	fmt.Fprintf(b3, "    }\n")
-	fmt.Fprintf(b3, "    obj.%s = new(uint256.Int).SetBytes(b)\n", fieldName)
 }
 
 func _shortArrayHandle(b1, b2, b3 *bytes.Buffer, fieldName string, size int) { // TODO change the name

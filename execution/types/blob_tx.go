@@ -420,21 +420,15 @@ func decodeBlobVersionedHashes(hashes *[]common.Hash, s *rlp.Stream) error {
 	if err != nil {
 		return fmt.Errorf("open BlobVersionedHashes: %w", err)
 	}
-	var b []byte
-	_hash := common.Hash{}
-
-	for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
-		if len(b) == 32 {
-			copy((_hash)[:], b)
-			*hashes = append(*hashes, _hash)
-		} else {
-			return fmt.Errorf("wrong size for blobVersionedHashes: %d", len(b))
+	for s.MoreDataInList() {
+		var h common.Hash
+		if err = s.ReadBytes(h[:]); err != nil {
+			return fmt.Errorf("read blobVersionedHash: %w", err)
 		}
+		*hashes = append(*hashes, h)
 	}
-
 	if err = s.ListEnd(); err != nil {
 		return fmt.Errorf("close BlobVersionedHashes: %w", err)
 	}
-
 	return nil
 }

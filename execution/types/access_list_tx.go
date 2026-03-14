@@ -284,7 +284,6 @@ func decodeAccessList(al *AccessList, s *rlp.Stream) error {
 	if err != nil {
 		return fmt.Errorf("open accessList: %w", err)
 	}
-	var b []byte
 	i := 0
 	for _, err = s.List(); err == nil; _, err = s.List() {
 		// decode tuple
@@ -296,15 +295,12 @@ func decodeAccessList(al *AccessList, s *rlp.Stream) error {
 		if _, err = s.List(); err != nil {
 			return fmt.Errorf("open StorageKeys: %w", err)
 		}
-		for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
-			tuple.StorageKeys = append(tuple.StorageKeys, common.Hash{})
-			if len(b) != 32 {
-				return fmt.Errorf("wrong size for StorageKey: %d", len(b))
+		for s.MoreDataInList() {
+			var key common.Hash
+			if err = s.ReadBytes(key[:]); err != nil {
+				return fmt.Errorf("read StorageKey: %w", err)
 			}
-			copy(tuple.StorageKeys[len(tuple.StorageKeys)-1][:], b)
-		}
-		if !errors.Is(err, rlp.EOL) {
-			return fmt.Errorf("read StorageKey: %w", err)
+			tuple.StorageKeys = append(tuple.StorageKeys, key)
 		}
 		// end of StorageKeys list
 		if err = s.ListEnd(); err != nil {

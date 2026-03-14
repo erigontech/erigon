@@ -26,6 +26,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/holiman/uint256"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
@@ -295,11 +296,11 @@ func (nbp *NewBlockPacket) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode TD
-	var b []byte
-	if b, err = s.Uint256Bytes(); err != nil {
+	var td uint256.Int
+	if err = s.ReadUint256(&td); err != nil {
 		return fmt.Errorf("read TD: %w", err)
 	}
-	nbp.TD = new(big.Int).SetBytes(b)
+	nbp.TD = td.ToBig()
 	if err = s.ListEnd(); err != nil {
 		return err
 	}
