@@ -1583,4 +1583,3 @@ func checkErrListEnd(s *rlp.Stream, err error) error {
 	}
 	return nil
 }
-
