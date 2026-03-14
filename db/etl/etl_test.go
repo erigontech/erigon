@@ -903,16 +903,20 @@ func TestBufferSortShortKey(t *testing.T) {
 
 // TestBufferSortAfterReset verifies that reusing a buffer after Load (as sync.Pool
 // does for sortableBuffer) produces correct sort order on the second use.
-// For sortableBuffer this guards against stale prefix values for nil/empty-key entries
-// when clear(prefixes) is missing.
+// For sortableBuffer this guards against stale prefix values when clear(prefixes) is missing:
+// nil/empty-key slots inherit the old uint64 from the previous sort.
 func TestBufferSortAfterReset(t *testing.T) {
+	// First use: populate backing arrays with large prefix values (0xFFFF...).
 	firstPairs := [][2][]byte{
 		{{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}, {1}},
 		{{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE}, {2}},
 	}
+	// Second use: nil and empty keys must sort before any non-empty key,
+	// not inherit the stale 0xFFFF... prefix from the first sort.
 	secondPairs := [][2][]byte{
 		{nil, {1}},
-		{{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}, {2}},
+		{[]byte{}, {2}},
+		{{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}, {3}},
 	}
 	for _, bt := range allBufferTypes {
 		t.Run(bt.name, func(t *testing.T) {
