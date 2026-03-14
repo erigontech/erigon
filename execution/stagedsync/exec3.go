@@ -205,10 +205,12 @@ func ExecV3(ctx context.Context,
 	if !isApplyingBlocks {
 		postValidator = newParallelBlockPostExecutionValidator()
 	}
-	// Enable deferred commitment updates for fork validation (both serial and parallel).
+	// Enable deferred commitment updates for fork validation and parallel initial sync.
 	// Deferred updates batch commitment calculations to block boundaries rather than
 	// per-transaction, significantly reducing re-org validation overhead.
-	if isForkValidation {
+	// For the parallel path during initial sync, Flush() now includes pending updates,
+	// so they are no longer silently discarded between StageLoopIteration cycles.
+	if isForkValidation || (parallel && isApplyingBlocks) {
 		doms.SetDeferCommitmentUpdates(true)
 	}
 	defer doms.SetDeferCommitmentUpdates(false)
