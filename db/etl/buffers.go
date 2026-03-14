@@ -212,7 +212,6 @@ func (b *sortableBuffer) Sort() {
 	prefixes := slices.Grow(b.prefixes[:0], len(b.entries))[:len(b.entries)] // sortableBuffer object is reusable (by sync.Pool)
 	clear(prefixes)
 	b.prefixes = prefixes
-	allSamePrefix := true
 	for i := range b.entries {
 		e := &b.entries[i]
 		if e.keyLen >= 8 {
@@ -222,10 +221,30 @@ func (b *sortableBuffer) Sort() {
 			copy(buf[:], data[e.offset:e.offset+e.keyLen]) // only key bytes; buf is zero-padded beyond keyLen
 			prefixes[e.insertionOrder] = binary.BigEndian.Uint64(buf[:])
 		} // else keyLen<=0: clear(prefixes) already zeroed the slot
-		if allSamePrefix && i > 0 && prefixes[e.insertionOrder] != prefixes[b.entries[0].insertionOrder] {
-			allSamePrefix = false
+	}
+	// Estimate prefix diversity using the first 64 entries (O(64²), no allocation).
+	// If < 10% distinct prefixes in the sample, the uint64 fast-path rarely fires
+	// and the closure overhead makes the prefix sort slower than plain bytes.Compare.
+	const diversitySample = 64
+	distinct := [diversitySample]uint64{}
+	distinctN := 0
+	sampleN := min(diversitySample, len(b.entries))
+	for i := range sampleN {
+		p := prefixes[b.entries[i].insertionOrder]
+		isNew := true
+		for j := range distinctN {
+			if distinct[j] == p {
+				isNew = false
+				break
+			}
+		}
+		if isNew {
+			distinct[distinctN] = p
+			distinctN++
 		}
 	}
+	prefixDiversity := float64(distinctN) / float64(sampleN) // 1.0 = all unique, 0.0 = all same
+
 	cmpNoPrefix := func(a, b entryLoc) int {
 		aKey := data[a.offset : a.offset+max(a.keyLen, 0)]
 		bKey := data[b.offset : b.offset+max(b.keyLen, 0)]
@@ -235,7 +254,7 @@ func (b *sortableBuffer) Sort() {
 		return int(a.insertionOrder - b.insertionOrder)
 	}
 	cmp := cmpNoPrefix
-	if !allSamePrefix {
+	if prefixDiversity >= 0.1 {
 		cmp = func(a, b entryLoc) int {
 			if prefixes[a.insertionOrder] != prefixes[b.insertionOrder] {
 				if prefixes[a.insertionOrder] < prefixes[b.insertionOrder] {
