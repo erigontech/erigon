@@ -496,30 +496,15 @@ func (obj *TestingStruct) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return fmt.Errorf("error decoding field l - expected list start, err: %w", err)
 	}
-	var listLen int
 	if l > 0 {
-		listLen = int(l / (1 + 32))   // Each hash: 1-byte RLP prefix + 32-byte hash
-		preAlloc := min(128, listLen) // Hard limit against DoS
-		obj.l = make([]common.Hash, 0, preAlloc)
+		obj.l = make([]common.Hash, l/(1+32))
+		for i := range obj.l {
+			if err = s.ReadBytes(obj.l[i][:]); err != nil {
+				return err
+			}
+		}
 	} else {
 		obj.l = []common.Hash{}
-	}
-	if listLen <= 128 {
-		// Fast-path: within pre-alloc limit, use pre-allocated buffer
-		obj.l = obj.l[:listLen]
-		for i := 0; i < listLen; i++ {
-			if err = s.ReadBytes(obj.l[i][:]); err != nil {
-				return err
-			}
-		}
-	} else if listLen > 128 {
-		// Slow-path: exceeded pre-alloc limit, allocate exact size and use direct ReadBytes
-		obj.l = make([]common.Hash, listLen)
-		for i := 0; i < listLen; i++ {
-			if err = s.ReadBytes(obj.l[i][:]); err != nil {
-				return err
-			}
-		}
 	}
 	if err = s.ListEnd(); err != nil {
 		return fmt.Errorf("error decoding field l - fail to close list, err: %w", err)
