@@ -1210,6 +1210,10 @@ func (sdb *IntraBlockState) SetCode(addr accounts.Address, code []byte) error {
 	if err != nil {
 		return err
 	}
+	if sdb.blockNum == 110807 && len(code) > 0 {
+		fmt.Printf("[BAL SC] block=%d tx=%d.%d addr=%x SetCode len=%d written=%v origCodeHash=%x newCodeHash=%x match=%v\n",
+			sdb.blockNum, sdb.txIndex, sdb.version, addr, len(code), written, stateObject.original.CodeHash, codeHash, codeHash == stateObject.original.CodeHash)
+	}
 	if written {
 		if codeHash == stateObject.original.CodeHash {
 			sdb.versionedWrites.Delete(addr, AccountKey{Path: CodePath})
