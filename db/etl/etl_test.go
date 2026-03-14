@@ -860,54 +860,67 @@ func BenchmarkSortableBufferPutOnly(b *testing.B) {
 	}
 }
 
-// TestSortableBufferShortKeyPrefix verifies that prefix computation for keys shorter
-// than 8 bytes does not bleed into value bytes, corrupting sort order.
-//
-// Bug: copy(buf[:], data[e.offset:]) reads past the key into the value.
-// E.g. key=[0x01] with value=[0xFF×7] gets prefix 0x01FFFFFFFFFFFFFF,
-// which is greater than key=[0x01,0x00]'s prefix 0x0100000000000000,
-// so it sorts AFTER — wrong.
-func TestSortableBufferShortKeyPrefix(t *testing.T) {
-	buf := NewSortableBuffer(1 * datasize.MB)
-
-	// key [0x01] with a value full of 0xFF — without the fix, value bytes
-	// bleed into the 8-byte prefix window and inflate it.
-	buf.Put([]byte{0x01}, bytes.Repeat([]byte{0xFF}, 7))
-	// key [0x01, 0x00] must sort AFTER [0x01] by bytes.Compare
-	buf.Put([]byte{0x01, 0x00}, []byte{0x00})
-
-	buf.Sort()
-
-	k0, _ := buf.Get(0, nil, nil)
-	k1, _ := buf.Get(1, nil, nil)
-	require.Equal(t, []byte{0x01}, k0, "short key must sort before longer key with same prefix bytes")
-	require.Equal(t, []byte{0x01, 0x00}, k1)
+var allBufferTypes = []struct {
+	name string
+	new  func() Buffer
+}{
+	{"sortable", func() Buffer { return NewSortableBuffer(1 * datasize.MB) }},
+	{"append", func() Buffer { return NewAppendBuffer(1 * datasize.MB) }},
+	{"oldest", func() Buffer { return NewOldestEntryBuffer(1 * datasize.MB) }},
 }
 
-// TestSortableBufferStalePrefixAfterReset verifies that reusing a sortableBuffer
-// (as sync.Pool does) does not leave stale prefix values for nil/empty-key entries.
-//
-// Bug: without clear(prefixes), slots for nil-key entries keep their old uint64
-// value from the previous sort, producing wrong order.
-func TestSortableBufferStalePrefixAfterReset(t *testing.T) {
-	buf := NewSortableBuffer(1 * datasize.MB)
+func collectSorted(t *testing.T, buf Buffer, pairs [][2][]byte) [][]byte {
+	t.Helper()
+	c := NewCollector(t.Name(), "", buf, log.New())
+	defer c.Close()
+	for _, p := range pairs {
+		require.NoError(t, c.Collect(p[0], p[1]))
+	}
+	var got [][]byte
+	require.NoError(t, c.Load(nil, "", func(k, v []byte, _ CurrentTableReader, _ LoadNextFunc) error {
+		got = append(got, bytes.Clone(k))
+		return nil
+	}, TransformArgs{}))
+	return got
+}
 
-	// First use: put entries so the prefixes backing array is allocated and populated.
-	buf.Put([]byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}, []byte{1})
-	buf.Put([]byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE}, []byte{2})
-	buf.Sort()
+// TestBufferSortShortKey verifies that keys shorter than 8 bytes sort correctly.
+// For sortableBuffer this guards against the prefix optimization reading past the
+// key into value bytes: e.g. key=[0x01] with value=[0xFF×7] must still sort
+// before key=[0x01,0x00].
+func TestBufferSortShortKey(t *testing.T) {
+	pairs := [][2][]byte{
+		{{0x01}, bytes.Repeat([]byte{0xFF}, 7)},
+		{{0x01, 0x00}, {0x00}},
+	}
+	for _, bt := range allBufferTypes {
+		t.Run(bt.name, func(t *testing.T) {
+			got := collectSorted(t, bt.new(), pairs)
+			require.True(t, slices.IsSortedFunc(got, bytes.Compare), "keys not sorted: %x", got)
+		})
+	}
+}
 
-	// Simulate pool reuse: Reset keeps the backing arrays.
-	buf.Reset()
-
-	// Second use: nil key (insertionOrder=0) must not inherit the old 0xFFFF... prefix.
-	buf.Put(nil, []byte{1})                                                    // nil key, insertionOrder=0
-	buf.Put([]byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}, []byte{2}) // insertionOrder=1
-
-	buf.Sort()
-
-	k0, _ := buf.Get(0, nil, nil)
-	k1, _ := buf.Get(1, nil, nil)
-	require.Nil(t, k0, "nil key must sort first")
-	require.Equal(t, []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}, k1)
+// TestBufferSortAfterReset verifies that reusing a buffer after Load (as sync.Pool
+// does for sortableBuffer) produces correct sort order on the second use.
+// For sortableBuffer this guards against stale prefix values for nil/empty-key entries
+// when clear(prefixes) is missing.
+func TestBufferSortAfterReset(t *testing.T) {
+	firstPairs := [][2][]byte{
+		{{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}, {1}},
+		{{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE}, {2}},
+	}
+	secondPairs := [][2][]byte{
+		{nil, {1}},
+		{{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}, {2}},
+	}
+	for _, bt := range allBufferTypes {
+		t.Run(bt.name, func(t *testing.T) {
+			buf := bt.new()
+			collectSorted(t, buf, firstPairs) // warms up backing arrays
+			buf.Reset()                       // explicit reset, as sync.Pool reuse does
+			got := collectSorted(t, buf, secondPairs)
+			require.True(t, slices.IsSortedFunc(got, bytes.Compare), "keys not sorted after reset: %x", got)
+		})
+	}
 }
