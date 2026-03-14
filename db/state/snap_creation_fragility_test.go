@@ -6,6 +6,7 @@ package state
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -16,6 +17,10 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 )
+
+func newFile(path string) (*os.File, error) {
+	return os.Create(path)
+}
 
 // TestFilesWithMissedAccessors_BTree verifies that when a .kv data file exists
 // but its .bt accessor is missing, FilesWithMissedAccessors reports it.
@@ -618,6 +623,210 @@ func TestE3ParseRejectsWrongTag(t *testing.T) {
 	// Wrong extension
 	_, ok = accountsSchema.Parse("v1.0-accounts.0-256.v")
 	require.False(t, ok, "accounts .kv schema must reject .v files")
+}
+
+// TestSnapInfo_Len verifies that SnapInfo.Len() returns To-From.
+// An off-by-one error here would produce files of wrong sizes, causing merge logic to fail.
+func TestSnapInfo_Len(t *testing.T) {
+	cases := []struct {
+		from, to uint64
+		want     uint64
+	}{
+		{0, 1000, 1000},
+		{1000, 2000, 1000},
+		{0, 256000, 256000},
+		{100000, 200000, 100000},
+		{0, 0, 0},
+	}
+	for _, c := range cases {
+		info := &SnapInfo{From: c.from, To: c.to}
+		require.Equal(t, c.want, info.Len(), "from=%d to=%d", c.from, c.to)
+	}
+}
+
+// TestMissedFilesMap_IsEmpty verifies that IsEmpty correctly detects when all
+// accessors are present vs when some are missing. If IsEmpty is wrong, the system
+// may skip building missing accessors and leave files in a broken state.
+func TestMissedFilesMap_IsEmpty(t *testing.T) {
+	// Empty map: nothing missing
+	empty := MissedFilesMap{}
+	require.True(t, empty.IsEmpty())
+
+	// Map with empty slice: nothing missing
+	emptySlice := MissedFilesMap{statecfg.AccessorBTree: {}}
+	require.True(t, emptySlice.IsEmpty())
+
+	// Map with non-empty slice: something is missing
+	withItem := MissedFilesMap{statecfg.AccessorBTree: {&FilesItem{}}}
+	require.False(t, withItem.IsEmpty())
+
+	// Mixed: one accessor has items, another doesn't
+	mixed := MissedFilesMap{
+		statecfg.AccessorBTree:      {&FilesItem{}},
+		statecfg.AccessorExistence:  {},
+	}
+	require.False(t, mixed.IsEmpty())
+}
+
+// TestProductionSchemas_ValidNamesAndRoundTrip verifies that production-level schemas
+// (domain, history, II) generate parseable filenames. Schema changes that break
+// filename compatibility cause prod nodes to fail to find their existing data files.
+func TestProductionSchemas_ValidNamesAndRoundTrip(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ver := version.V1_0_standart
+	stepSize := uint64(1000)
+
+	type schemaCase struct {
+		name   string
+		schema SnapNameSchema
+	}
+
+	cases := []schemaCase{
+		{
+			"accounts-domain",
+			NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
+				Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+				BtIndex(ver).Existence(ver).Build(),
+		},
+		{
+			"commitment-domain",
+			NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
+				Data(dirs.SnapDomain, "commitments", DataExtensionKv, seg.CompressNone, ver).
+				Accessor(dirs.SnapDomain, ver).Build(),
+		},
+		{
+			"accounts-history",
+			NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
+				Data(dirs.SnapHistory, "accounts", DataExtensionV, seg.CompressNone, ver).
+				Accessor(dirs.SnapAccessors, ver).Build(),
+		},
+		{
+			"logaddrs-ii",
+			NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
+				Data(dirs.SnapIdx, "logaddrs", DataExtensionEf, seg.CompressNone, ver).
+				Accessor(dirs.SnapAccessors, ver).Build(),
+		},
+	}
+
+	rangeCases := []struct{ from, to uint64 }{{0, 1000}, {1000, 2000}, {256000, 512000}}
+
+	for _, sc := range cases {
+		for _, rc := range rangeCases {
+			from, to := RootNum(rc.from), RootNum(rc.to)
+
+			dataPath, err := sc.schema.DataFile(ver.Current, from, to)
+			require.NoError(t, err, "%s: DataFile must not error", sc.name)
+			require.NotEmpty(t, dataPath, "%s: DataFile must return non-empty path", sc.name)
+
+			info, ok := sc.schema.Parse(fileBaseName(dataPath))
+			require.True(t, ok, "%s: generated data filename must parse correctly: %s", sc.name, dataPath)
+			require.Equal(t, rc.from, info.From, "%s: from mismatch", sc.name)
+			require.Equal(t, rc.to, info.To, "%s: to mismatch", sc.name)
+			require.True(t, info.IsDataFile(), "%s: data file must be classified as data file", sc.name)
+		}
+	}
+}
+
+// TestFilesWithMissedAccessors_EmptyRepo verifies that FilesWithMissedAccessors
+// returns empty for an empty repo (no dirty files). This is a boundary case
+// that must not panic.
+func TestFilesWithMissedAccessors_EmptyRepo(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ver := version.V1_0_standart
+	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
+		name = "accounts"
+		schema = NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
+			Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone, ver).
+			BtIndex(ver).Existence(ver).Build()
+		return name, schema
+	})
+	defer repo.Close()
+
+	missed := repo.FilesWithMissedAccessors()
+	require.NotNil(t, missed)
+	require.True(t, missed.IsEmpty(), "empty repo must report no missed accessors")
+}
+
+// TestOpenFolder_UnrelatedFilesIgnored verifies that files with wrong names or
+// extensions in the snapshot directory are silently ignored. This prevents
+// accidental files (temp files, README, etc.) from causing parse panics.
+func TestOpenFolder_UnrelatedFilesIgnored(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ver := version.V1_0_standart
+	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
+		name = "accounts"
+		schema = NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
+			Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone, ver).
+			BtIndex(ver).Existence(ver).Build()
+		return name, schema
+	})
+	defer repo.Close()
+
+	// Create valid data files
+	populateFiles2(t, dirs, repo, []testFileRange{{0, 1}})
+
+	// Create garbage files in the same directory — should be silently ignored
+	garbageFiles := []string{
+		dirs.SnapDomain + "/README.txt",
+		dirs.SnapDomain + "/v1.0-accounts.0-1.wrongext",
+		dirs.SnapDomain + "/not-a-snapshot-file.kv",
+		dirs.SnapDomain + "/v1.0-storage.0-1.kv", // wrong entity name
+	}
+	for _, f := range garbageFiles {
+		// Create zero-byte placeholder
+		if fp, err := newFile(f); err == nil {
+			fp.Close()
+		}
+	}
+
+	require.NoError(t, repo.OpenFolder())
+	// Only the valid account file should be loaded
+	require.Equal(t, 1, repo.dirtyFiles.Len(), "unrelated files must be ignored by OpenFolder")
+}
+
+// TestFileNamingRoundTrip_Version verifies that both v1.0 and higher versions
+// parse correctly through the schema. Version mismatch causes files to be skipped.
+func TestFileNamingRoundTrip_Version(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	stepSize := uint64(1000)
+
+	// Test with v1.0 standard version
+	ver := version.V1_0_standart
+	schema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree, stepSize).
+		Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+		BtIndex(ver).Build()
+
+	from, to := RootNum(0), RootNum(1000)
+	dataPath, _ := schema.DataFile(ver.Current, from, to)
+	info, ok := schema.Parse(fileBaseName(dataPath))
+	require.True(t, ok)
+	require.Equal(t, version.V1_0, info.Version)
+}
+
+// TestE3SnapSchema_AccessorIdxCount verifies AccessorIdxCount matches the configuration.
+// A mismatch here causes an incorrect number of accessor files to be built.
+func TestE3SnapSchema_AccessorIdxCount(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ver := version.V1_0_standart
+	stepSize := uint64(1000)
+
+	// BTree only: count = 0 (no HashMap)
+	btreeOnly := NewE3SnapSchemaBuilder(statecfg.AccessorBTree, stepSize).
+		Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+		BtIndex(ver).Build()
+	require.Equal(t, uint16(0), btreeOnly.AccessorIdxCount())
+
+	// HashMap only: count = 1
+	hashMapOnly := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
+		Data(dirs.SnapDomain, "commitments", DataExtensionKv, seg.CompressNone, ver).
+		Accessor(dirs.SnapDomain, ver).Build()
+	require.Equal(t, uint16(1), hashMapOnly.AccessorIdxCount())
+
+	// No accessors: count = 0
+	noAccessors := NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
+		Data(dirs.SnapDomain, "accounts2", DataExtensionKv, seg.CompressNone, ver).
+		BtIndex(ver).Existence(ver).Build()
+	require.Equal(t, uint16(0), noAccessors.AccessorIdxCount())
 }
 
 // fileBaseName returns the base name from a full file path.
