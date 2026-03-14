@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
@@ -199,32 +198,16 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		hash   common.Hash
 		number uint64
 	}
-	rwTx, err := e.db.BeginTemporalRw(ctx) //nolint
+	tx, err := e.db.BeginTemporalRw(ctx) //nolint
 	if err != nil {
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
 
 	rollbackOnReturn := true
 
-	// Chain reads through the parent block overlay (written by InsertBlocks)
-	// so the pipeline and blockReader can see block data without an intermediate
-	// DB commit. Reads cascade: overlay (block data) → rwTx (DB data).
-	// Writes go to the overlay's local store and are flushed to rwTx at commit.
-	var parentOverlay *membatchwithdb.MemoryMutation
-	var tx kv.TemporalRwTx = rwTx
-	if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
-		parentOverlay = e.currentContext.BlockOverlay()
-		parentOverlay.UpdateTxn(rwTx)
-		tx = parentOverlay
-	}
-
 	defer func() {
 		if rollbackOnReturn {
-			rwTx.Rollback()
-			// On failure, the parent overlay still has block data from
-			// InsertBlocks. Its base tx (rwTx) is now invalid, but
-			// the next InsertBlocks/ValidateChain call rebinds it to
-			// a fresh tx via UpdateTxn before any reads.
+			tx.Rollback()
 		}
 	}()
 
@@ -290,8 +273,8 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	}()
 
 	if fcuHeader.Number.Sign() > 0 {
-		if canonicalHash == blockHash {
-			// if block hash is part of the canonical chain treat it as no-op.
+		if canonicalHash == blockHash && fcuHeader.Number.Uint64() >= finishProgressBefore {
+			// if block hash is part of the canonical chain and execution is not ahead, treat as no-op.
 			writeForkChoiceHashes(tx, blockHash, safeHash, finalizedHash)
 			valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
 			if err != nil {
@@ -495,23 +478,12 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				return sendError("updateForkChoice:flush sd after hasMore", err)
 			}
 			currentContext.ClearRam(true)
-			// Flush overlay writes to the underlying RW tx before committing.
-			if parentOverlay != nil {
-				if err := parentOverlay.Flush(ctx, rwTx); err != nil {
-					return sendError("updateForkChoice: flush overlay after hasMore", err)
-				}
-			}
-			if err = rwTx.Commit(); err != nil {
+			if err = tx.Commit(); err != nil {
 				return sendError("updateForkChoice: tx commit after hasMore", err)
 			}
-			rwTx, err = e.db.BeginTemporalRw(ctx) //nolint:gocritic
+			tx, err = e.db.BeginTemporalRw(ctx)
 			if err != nil {
 				return sendError("updateForkChoice: begin tx after has more", err)
-			}
-			tx = rwTx
-			if parentOverlay != nil {
-				parentOverlay.UpdateTxn(rwTx)
-				tx = parentOverlay
 			}
 		}
 	}
@@ -574,26 +546,12 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		}
 
 		e.logHeadUpdated(blockHash, fcuHeader, txnum, "head updated", stateFlushingInParallel)
-
-		// Flush the parent overlay writes (block data from InsertBlocks) into
-		// the RW tx and close the parent SD before the final commit.
-		if parentOverlay != nil {
-			if err := parentOverlay.Flush(ctx, rwTx); err != nil {
-				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
-			}
-			e.currentContext.Close()
-			e.lock.Lock()
-			e.currentContext = nil
-			e.lock.Unlock()
-			parentOverlay = nil
-		}
-
 		if e.fcuBackgroundCommit {
 			// TODO: (20/12/25) we really want to commit all changes with the shared domains but
 			// to do that we need to remove all of the rawdb methods and call them via
 			// the domains - which will happen after they transiaiotn to an ExecutionContext
 			// for the moment just commit what we have
-			if err = rwTx.Commit(); err != nil {
+			if err = tx.Commit(); err != nil {
 				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 			}
 			e.lock.Lock()
@@ -601,7 +559,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			e.lock.Unlock()
 			rollbackOnReturn = false
 		} else {
-			timings, err := e.runForkchoiceCommit(currentContext, rwTx, finishProgressBefore, isSynced)
+			timings, err := e.runForkchoiceCommit(currentContext, tx, finishProgressBefore, isSynced)
 			if err != nil {
 				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 			}
