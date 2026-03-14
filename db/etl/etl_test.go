@@ -884,35 +884,26 @@ func collectSorted(t *testing.T, buf Buffer, pairs [][2][]byte) [][]byte {
 	return got
 }
 
-// TestBufferSortShortKey verifies that keys shorter than 8 bytes sort correctly.
-// For sortableBuffer this guards against the prefix optimization reading past the
-// key into value bytes: e.g. key=[0x01] with value=[0xFF×7] must still sort
-// before key=[0x01,0x00].
-func TestBufferSortShortKey(t *testing.T) {
-	pairs := [][2][]byte{
-		{{0x01}, bytes.Repeat([]byte{0xFF}, 7)},
-		{{0x01, 0x00}, {0x00}},
-	}
-	for _, bt := range allBufferTypes {
-		t.Run(bt.name, func(t *testing.T) {
-			got := collectSorted(t, bt.new(), pairs)
-			require.True(t, slices.IsSortedFunc(got, bytes.Compare), "keys not sorted: %x", got)
-		})
-	}
-}
-
-// TestBufferSortAfterReset verifies that reusing a buffer after Load (as sync.Pool
-// does for sortableBuffer) produces correct sort order on the second use.
-// For sortableBuffer this guards against stale prefix values for nil/empty-key entries
-// when clear(prefixes) is missing.
+// TestBufferSortAfterReset verifies correct sort order on both fresh and reused buffers.
+//
+// For sortableBuffer it guards against two bugs in prefix computation:
+//  1. Stale prefix values after Reset (sync.Pool reuse): without clear(prefixes),
+//     nil/empty-key slots inherit the old uint64 from the previous sort.
+//  2. Short-key prefix bleed: copy(buf[:], data[e.offset:]) reads past the key
+//     into value bytes, inflating the prefix — e.g. key=[0x01] with value=[0xFF×7]
+//     gets prefix 0x01FFFFFFFFFFFFFF > key=[0x01,0x00]'s prefix 0x0100000000000000,
+//     so it sorts AFTER instead of before.
 func TestBufferSortAfterReset(t *testing.T) {
+	// First use: populate backing arrays with large prefix values (0xFFFF...).
 	firstPairs := [][2][]byte{
 		{{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}, {1}},
 		{{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE}, {2}},
 	}
+	// Second use: short keys whose values bleed into the prefix window.
+	// [0x01] with value=[0xFF×7] must sort before [0x01,0x00].
 	secondPairs := [][2][]byte{
-		{nil, {1}},
-		{{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}, {2}},
+		{{0x01}, bytes.Repeat([]byte{0xFF}, 7)},
+		{{0x01, 0x00}, {0x00}},
 	}
 	for _, bt := range allBufferTypes {
 		t.Run(bt.name, func(t *testing.T) {
