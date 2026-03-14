@@ -458,8 +458,6 @@ func TestSnapInfoIsDataFile(t *testing.T) {
 	}
 }
 
-
-
 // TestRealFileCreation_DomainDataFile creates a real .kv data file using the proper
 // compressor path and verifies it can be decompressed after creation.
 // This catches bugs in the file creation path that only manifest with real I/O.
@@ -579,7 +577,6 @@ func TestE3ParseRejectsWrongTag(t *testing.T) {
 	require.False(t, ok, "accounts .kv schema must reject .v files")
 }
 
-
 // TestMissedFilesMap_IsEmpty verifies that IsEmpty correctly detects when all
 // accessors are present vs when some are missing. If IsEmpty is wrong, the system
 // may skip building missing accessors and leave files in a broken state.
@@ -598,8 +595,8 @@ func TestMissedFilesMap_IsEmpty(t *testing.T) {
 
 	// Mixed: one accessor has items, another doesn't
 	mixed := MissedFilesMap{
-		statecfg.AccessorBTree:      {&FilesItem{}},
-		statecfg.AccessorExistence:  {},
+		statecfg.AccessorBTree:     {&FilesItem{}},
+		statecfg.AccessorExistence: {},
 	}
 	require.False(t, mixed.IsEmpty())
 }
@@ -719,8 +716,6 @@ func TestOpenFolder_UnrelatedFilesIgnored(t *testing.T) {
 	// Only the valid account file should be loaded
 	require.Equal(t, 1, repo.dirtyFiles.Len(), "unrelated files must be ignored by OpenFolder")
 }
-
-
 
 // TestFindFilesBySearchVersion verifies that DataFile with SearchVersion correctly
 // finds the highest-version file on disk within the supported range.
@@ -919,7 +914,6 @@ func TestFilesWithMissedAccessors_LargeRepo(t *testing.T) {
 			"missing files must be from the incomplete ranges (5-6 and 6-7)")
 	}
 }
-
 
 // TestFindAccessorFilesBySearchVersion verifies that BtIdxFile, ExistenceFile, and
 // AccessorIdxFile work correctly with SearchVersion. The restart path must be able
