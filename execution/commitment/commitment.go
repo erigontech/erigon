@@ -111,7 +111,8 @@ type Trie interface {
 	ResetContext(ctx PatriciaContext)
 
 	// Process updates. If warmup.Enabled is true, pre-warms MDBX page cache in parallel.
-	Process(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress, warmup WarmupConfig) (rootHash []byte, err error)
+	// onProgress (optional) is called periodically with commitment progress info.
+	Process(ctx context.Context, updates *Updates, logPrefix string, onProgress func(*CommitProgress), warmup WarmupConfig) (rootHash []byte, err error)
 
 	// Release returns the trie to a pool for reuse. After calling Release,
 	// the caller must not use the trie.
