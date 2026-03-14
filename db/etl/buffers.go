@@ -259,7 +259,17 @@ func (b *sortableBuffer) Sort() {
 	noPrefixDur := time.Since(t2)
 
 	if prefixDur > noPrefixDur {
-		log.Warn("etl sort: prefix slower than noPrefix", "n", len(b.entries), "prefix", prefixDur, "noPrefix", noPrefixDur)
+		ratio := float64(prefixDur) / float64(max(noPrefixDur, 1))
+		var sample []string
+		if ratio > 1.2 {
+			for i, e := range b.entries {
+				if i >= 10 {
+					break
+				}
+				sample = append(sample, fmt.Sprintf("%x", data[e.offset:e.offset+max(e.keyLen, 0)]))
+			}
+		}
+		log.Warn("etl sort: prefix slower than noPrefix", "n", len(b.entries), "prefix", prefixDur, "noPrefix", noPrefixDur, "keys", sample)
 	}
 	if dbg.AssertEnabled {
 		if !slices.IsSortedFunc(b.entries, func(a, b entryLoc) int {
