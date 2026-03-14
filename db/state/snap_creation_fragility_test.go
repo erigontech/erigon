@@ -1603,3 +1603,28 @@ func TestGarbageCleanup_AfterKillDuringMergeCleanup(t *testing.T) {
 	repo.DeleteFilesAfterMerge(garbage)
 	require.Equal(t, 1, repo.dirtyFiles.Len(), "only merged file remains in dirty files after cleanup")
 }
+
+// TestDuplicateRange_BtreeDeduplication verifies that integrating two FilesItem with the
+// same range into the btree results in only one item being kept (btree key deduplication).
+// This prevents double-counting of files and ensures that a second writer for the same
+// range doesn't corrupt the dirty files tracking.
+func TestDuplicateRange_BtreeDeduplication(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ver := version.V1_0_standart
+	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (string, SnapNameSchema) {
+		schema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree, stepSize).
+			Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+			BtIndex(ver).Build()
+		return "accounts", schema
+	})
+
+	// Create two FilesItem for the same range 0-1 (simulating duplicate integration).
+	item1 := newFilesItemWithSnapConfig(0, repo.stepSize, repo.cfg)
+	item2 := newFilesItemWithSnapConfig(0, repo.stepSize, repo.cfg)
+
+	repo.IntegrateDirtyFile(item1)
+	repo.IntegrateDirtyFile(item2) // same range — should replace item1 in the btree
+
+	// Only one file should exist in dirty files (btree deduplicates by range key).
+	require.Equal(t, 1, repo.dirtyFiles.Len(), "duplicate range must be deduplicated in btree")
+}
