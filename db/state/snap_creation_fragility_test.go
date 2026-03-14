@@ -1161,6 +1161,60 @@ func TestDirtyFilesMaxRootNum(t *testing.T) {
 		"DirtyFilesMaxRootNum must return end of the last file (3*stepSize)")
 }
 
+// TestNodeRestart_PartialFileCreation simulates the hard-to-detect prod scenario:
+// a node was building new snapshot files when it crashed. On restart, the repo
+// must correctly distinguish between:
+// (a) previously-completed files that are safe to serve to readers, and
+// (b) newly-started files whose accessor build was interrupted.
+// Without this detection, a restarted node might serve data from files with
+// missing accessors (causing reads to silently fail or return wrong results).
+func TestNodeRestart_PartialFileCreation(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ver := version.V1_0_standart
+	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
+		name = "accounts"
+		schema = NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
+			Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone, ver).
+			BtIndex(ver).Existence(ver).Build()
+		return name, schema
+	})
+	defer repo.Close()
+	v := version.V1_0
+
+	// Simulate "previous successful runs": 3 complete files (data + all accessors)
+	populateFiles2(t, dirs, repo, []testFileRange{{0, 1}, {1, 2}, {2, 3}})
+
+	// Simulate "interrupted run": data file created, accessor build crashed
+	// This is the most common prod scenario for file creation fragility
+	interruptedFrom, interruptedTo := RootNum(3*repo.stepSize), RootNum(4*repo.stepSize)
+	dataOnlyFile, _ := repo.schema.DataFile(v, interruptedFrom, interruptedTo)
+	populateFiles(t, dirs, repo.schema, []string{dataOnlyFile})
+
+	// Node restart: OpenFolder
+	require.NoError(t, repo.OpenFolder(), "restart must succeed even with interrupted file creation")
+	require.Equal(t, 4, repo.dirtyFiles.Len(), "all files (complete + interrupted) must be tracked")
+
+	// Only the interrupted file should be flagged as needing accessor build
+	missed := repo.FilesWithMissedAccessors()
+	require.False(t, missed.IsEmpty(), "interrupted file must be detected as needing accessor build")
+
+	btMissed := missed.Get(statecfg.AccessorBTree)
+	require.Len(t, btMissed, 1, "only the interrupted file should need BTree accessor")
+	require.Equal(t, uint64(interruptedFrom), btMissed[0].startTxNum)
+	require.Equal(t, uint64(interruptedTo), btMissed[0].endTxNum)
+
+	// The 3 complete files must be visible; the interrupted file must NOT be visible
+	repo.RecalcVisibleFiles(RootNum(MaxUint64))
+	vf := repo.VisibleFiles()
+	require.Len(t, vf, 3, "only complete files must be visible; interrupted file must be invisible")
+	for _, f := range vf {
+		require.LessOrEqual(t, f.EndRootNum(), uint64(interruptedFrom),
+			"interrupted file range must not appear in visible files")
+		require.Less(t, f.StartRootNum(), uint64(interruptedFrom),
+			"visible files must be from completed ranges only")
+	}
+}
+
 // fileBaseName returns the base name from a full file path.
 func fileBaseName(path string) string {
 	for i := len(path) - 1; i >= 0; i-- {
