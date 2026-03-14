@@ -268,8 +268,10 @@ func (b *sortableBuffer) Sort() {
 				}
 				sample = append(sample, fmt.Sprintf("%x", data[e.offset:e.offset+max(e.keyLen, 0)]))
 			}
+			log.Warn("etl sort: prefix slower than noPrefix", "n", len(b.entries), "prefix", prefixDur, "noPrefix", noPrefixDur, "keys", sample, "stack", dbg.Stack())
+		} else {
+			log.Warn("etl sort: prefix slower than noPrefix", "n", len(b.entries), "prefix", prefixDur, "noPrefix", noPrefixDur)
 		}
-		log.Warn("etl sort: prefix slower than noPrefix", "n", len(b.entries), "prefix", prefixDur, "noPrefix", noPrefixDur, "keys", sample)
 	}
 	if dbg.AssertEnabled {
 		if !slices.IsSortedFunc(b.entries, func(a, b entryLoc) int {
