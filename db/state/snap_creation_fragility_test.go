@@ -829,6 +829,74 @@ func TestE3SnapSchema_AccessorIdxCount(t *testing.T) {
 	require.Equal(t, uint16(0), noAccessors.AccessorIdxCount())
 }
 
+// TestFindFilesBySearchVersion verifies that DataFile with SearchVersion correctly
+// finds the highest-version file on disk within the supported range.
+// This function is used to re-open snapshot files after restart. A bug here means
+// a node restart fails to find its existing files → falls back to full re-download.
+func TestFindFilesBySearchVersion(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ver := version.V1_0_standart
+	stepSize := uint64(1000)
+	schema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree, stepSize).
+		Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+		BtIndex(ver).Build()
+
+	from, to := RootNum(0), RootNum(stepSize)
+
+	// Create v1.0 file on disk using a real compressor
+	v10Path, err := schema.DataFile(version.V1_0, from, to)
+	require.NoError(t, err)
+	comp, err := seg.NewCompressor(context.Background(), t.Name(), v10Path, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+	require.NoError(t, err)
+	comp.DisableFsync()
+	require.NoError(t, comp.AddWord([]byte("key1")))
+	require.NoError(t, comp.Compress())
+	comp.Close()
+
+	// SearchVersion must find the file
+	foundPath, err := schema.DataFile(version.SearchVersion, from, to)
+	require.NoError(t, err, "SearchVersion must find v1.0 file on disk")
+	require.Equal(t, v10Path, foundPath, "SearchVersion must return the v1.0 file path")
+
+	// SearchVersion with no file on disk must error
+	_, err = schema.DataFile(version.SearchVersion, RootNum(stepSize), RootNum(2*stepSize))
+	require.Error(t, err, "SearchVersion must error when no file exists for that range")
+}
+
+// TestOpenFolder_CorruptedDataFile verifies that OpenFolder handles a corrupted
+// (empty/truncated) data file gracefully: the file is excluded from dirty files
+// instead of crashing the node. If a file creation was interrupted before content
+// was written, the node must still start up correctly.
+func TestOpenFolder_CorruptedDataFile(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ver := version.V1_0_standart
+	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
+		name = "accounts"
+		schema = NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
+			Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone, ver).
+			BtIndex(ver).Existence(ver).Build()
+		return name, schema
+	})
+	defer repo.Close()
+
+	// Create a valid file and a corrupted (empty) file
+	populateFiles2(t, dirs, repo, []testFileRange{{0, 1}})
+
+	// Add a corrupted data file for range 1-2 (empty file, not a valid seg)
+	corruptPath, _ := repo.schema.DataFile(version.V1_0, RootNum(repo.stepSize), RootNum(2*repo.stepSize))
+	f, err := os.Create(corruptPath)
+	require.NoError(t, err)
+	f.Close()
+
+	// OpenFolder must not crash on corrupted file
+	err = repo.OpenFolder()
+	require.NoError(t, err, "OpenFolder must succeed even with a corrupted data file")
+
+	// Only the valid file should remain in dirty files
+	require.Equal(t, 1, repo.dirtyFiles.Len(),
+		"corrupted file must be excluded from dirty files; only valid file should remain")
+}
+
 // fileBaseName returns the base name from a full file path.
 func fileBaseName(path string) string {
 	for i := len(path) - 1; i >= 0; i-- {
