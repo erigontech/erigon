@@ -1299,6 +1299,40 @@ func TestE2Schema_FileNamingRoundTrip(t *testing.T) {
 	}
 }
 
+// TestVisibleFiles_MergedFilePrefersOverConstituents verifies a critical correctness
+// property of calcVisibleFiles: when both a merged file (large range) AND its constituent
+// small files all have complete accessors, only the merged file appears in the visible set.
+// This prevents readers from seeing the same data twice, which would cause silent duplication.
+//
+// The btree ordering places (10-20) before (0-20) [same endTxNum, higher start wins].
+// When (0-20) is processed, it removes both (0-10) and (10-20) from newVisibleFiles via
+// the isProperSubsetOf check — this is the critical subset-removal invariant.
+func TestVisibleFiles_MergedFilePrefersOverConstituents(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ver := version.V1_0_standart
+	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (string, SnapNameSchema) {
+		schema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
+			Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+			BtIndex(ver).Existence(ver).Build()
+		return "accounts", schema
+	})
+
+	// Create three files: two small + one merged covering same range, all with complete accessors.
+	// This simulates the state between merge completion and old-file cleanup.
+	populateFiles2(t, dirs, repo, []testFileRange{{0, 1}, {1, 2}, {0, 2}})
+	require.NoError(t, repo.OpenFolder())
+	require.Equal(t, 3, repo.dirtyFiles.Len(), "all 3 files must be tracked as dirty files")
+
+	repo.RecalcVisibleFiles(RootNum(MaxUint64))
+	visible := repo.VisibleFiles()
+
+	// Only the merged file (0-2*stepSize) must appear — NOT the two small files.
+	// If this fails, the system would serve the same data twice to readers.
+	require.Len(t, visible, 1, "merged file must replace constituent small files in visible set")
+	require.Equal(t, uint64(0), visible[0].StartRootNum(), "merged file must start at 0")
+	require.Equal(t, uint64(2*repo.stepSize), visible[0].EndRootNum(), "merged file must cover full range")
+}
+
 // fileBaseName returns the base name from a full file path.
 func fileBaseName(path string) string {
 	for i := len(path) - 1; i >= 0; i-- {
