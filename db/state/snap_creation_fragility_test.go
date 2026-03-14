@@ -1564,3 +1564,42 @@ func TestRecalcVisibleFiles_ToLimit(t *testing.T) {
 	repo.RecalcVisibleFiles(RootNum(MaxUint64))
 	require.Len(t, repo.VisibleFiles(), 3, "all three files must be visible with to=MaxUint64")
 }
+
+// TestGarbageCleanup_AfterKillDuringMergeCleanup simulates the scenario where a node
+// was kill-9'd between merge completion and constituent file cleanup. On restart:
+// - The merged file (0-2) is fully indexed and visible
+// - The old constituent files (0-1 and 1-2) still exist on disk
+// The Garbage() function must identify them as garbage, and DeleteFilesAfterMerge must
+// remove them — restoring the disk to a clean post-merge state.
+func TestGarbageCleanup_AfterKillDuringMergeCleanup(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ver := version.V1_0_standart
+	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (string, SnapNameSchema) {
+		schema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
+			Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+			BtIndex(ver).Existence(ver).Build()
+		return "accounts", schema
+	})
+	stepSize := repo.stepSize
+
+	// Simulate post-kill-9 state: all three files present (merge done, cleanup didn't run).
+	populateFiles2(t, dirs, repo, []testFileRange{{0, 1}, {1, 2}, {0, 2}})
+	require.NoError(t, repo.OpenFolder())
+	require.Equal(t, 3, repo.dirtyFiles.Len(), "all 3 files must be loaded on restart")
+
+	// Merged file wins: only the merged (0-2) file should be visible.
+	repo.RecalcVisibleFiles(RootNum(MaxUint64))
+	vf := repo.visibleFiles()
+	require.Len(t, vf, 1, "only merged file must be visible")
+	require.Equal(t, uint64(0), vf[0].startTxNum)
+	require.Equal(t, uint64(2*stepSize), vf[0].endTxNum)
+
+	// Garbage detection: passing nil merged file detects subsets of visible files.
+	// This is the recovery path after a kill-9 during cleanup.
+	garbage := repo.Garbage(vf, nil)
+	require.Len(t, garbage, 2, "both constituent files must be identified as garbage")
+
+	// Cleanup: remove constituent files from dirty files and disk.
+	repo.DeleteFilesAfterMerge(garbage)
+	require.Equal(t, 1, repo.dirtyFiles.Len(), "only merged file remains in dirty files after cleanup")
+}
