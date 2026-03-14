@@ -733,6 +733,7 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 		t.Logf("stat=%v", stat)
 
 		assertResults(t, h, rwTx, hc)
+		checkHistoryDBCleanliness(t, h, hc, rwTx, nonPruned)
 	})
 
 	t.Run("scan_prune", func(t *testing.T) {
@@ -763,6 +764,7 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 		t.Logf("stat=%v", stat)
 
 		assertResults(t, h, rwTx, hc)
+		checkHistoryDBCleanliness(t, h, hc, rwTx, nonPruned)
 	})
 }
 
@@ -1022,15 +1024,19 @@ func checkHistoryHistory(t *testing.T, h *History, txs uint64) {
 // checkHistoryProperties runs all structural invariant checks on frozen history files.
 func checkHistoryProperties(t *testing.T, hc *HistoryRoTx) {
 	t.Helper()
-	checkHistoryFileCoverage(t, hc)
+	checkHistoryFileMetadata(t, hc)
 	checkHistoryNoDuplicates(t, hc)
 	checkHistoryIndexConsistency(t, hc)
 }
 
-// checkHistoryFileCoverage verifies that history and index files tile the txNum range
-// without gaps or overlaps. Adjacent files must satisfy file[i-1].endTxNum == file[i].startTxNum.
-func checkHistoryFileCoverage(t *testing.T, hc *HistoryRoTx) {
+// checkHistoryFileMetadata verifies structural invariants on file metadata:
+//   - No empty files: startTxNum < endTxNum for every file.
+//   - Step alignment: startTxNum and endTxNum are multiples of stepSize.
+//   - No gaps or overlaps: adjacent files satisfy file[i-1].endTxNum == file[i].startTxNum.
+//   - Symmetric coverage: history and index files cover the exact same set of ranges.
+func checkHistoryFileMetadata(t *testing.T, hc *HistoryRoTx) {
 	t.Helper()
+
 	for _, label := range []struct {
 		name  string
 		files visibleFiles
@@ -1039,11 +1045,92 @@ func checkHistoryFileCoverage(t *testing.T, hc *HistoryRoTx) {
 		{"index", hc.iit.files},
 	} {
 		files := label.files
-		for i := 1; i < len(files); i++ {
-			require.Equal(t, files[i-1].endTxNum, files[i].startTxNum,
-				"%s files: gap or overlap between file %d [%d-%d) and file %d [%d-%d)",
-				label.name, i-1, files[i-1].startTxNum, files[i-1].endTxNum,
-				i, files[i].startTxNum, files[i].endTxNum)
+		for i, f := range files {
+			require.Less(t, f.startTxNum, f.endTxNum,
+				"%s file %d: empty range [%d, %d)", label.name, i, f.startTxNum, f.endTxNum)
+
+			require.Zero(t, f.startTxNum%hc.stepSize,
+				"%s file %d: startTxNum=%d not aligned to stepSize=%d",
+				label.name, i, f.startTxNum, hc.stepSize)
+
+			require.Zero(t, f.endTxNum%hc.stepSize,
+				"%s file %d: endTxNum=%d not aligned to stepSize=%d",
+				label.name, i, f.endTxNum, hc.stepSize)
+
+			if i > 0 {
+				require.Equal(t, files[i-1].endTxNum, f.startTxNum,
+					"%s files: gap or overlap between file %d [%d-%d) and file %d [%d-%d)",
+					label.name, i-1, files[i-1].startTxNum, files[i-1].endTxNum,
+					i, f.startTxNum, f.endTxNum)
+			}
+		}
+	}
+
+	// History and index must cover the identical set of ranges.
+	require.Equal(t, len(hc.files), len(hc.iit.files),
+		"history has %d files but index has %d files", len(hc.files), len(hc.iit.files))
+	for i := range hc.files {
+		hf, idx := hc.files[i], hc.iit.files[i]
+		require.Equal(t, hf.startTxNum, idx.startTxNum,
+			"file %d: history range [%d-%d) != index range [%d-%d)",
+			i, hf.startTxNum, hf.endTxNum, idx.startTxNum, idx.endTxNum)
+		require.Equal(t, hf.endTxNum, idx.endTxNum,
+			"file %d: history range [%d-%d) != index range [%d-%d)",
+			i, hf.startTxNum, hf.endTxNum, idx.startTxNum, idx.endTxNum)
+	}
+}
+
+// checkHistoryDBCleanliness verifies that after pruning [0, prunedUpTo), the history
+// ValuesTable, II KeysTable, and II ValuesTable contain no entries for txNum < prunedUpTo.
+// This complements prune-correctness tests that only check the first remaining entry.
+func checkHistoryDBCleanliness(t *testing.T, h *History, hc *HistoryRoTx, tx kv.Tx, prunedUpTo uint64) {
+	t.Helper()
+
+	// History ValuesTable: keys encode txNum in the last 8 bytes.
+	{
+		c, err := tx.CursorDupSort(h.ValuesTable)
+		require.NoError(t, err)
+		defer c.Close()
+		for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+			require.NoError(t, err)
+			txNum := binary.BigEndian.Uint64(k[len(k)-8:])
+			require.GreaterOrEqual(t, txNum, prunedUpTo,
+				"history ValuesTable has entry with txNum=%d below prunedUpTo=%d (key=%x)",
+				txNum, prunedUpTo, k)
+		}
+	}
+
+	// II KeysTable: keys start with txNum (8 bytes).
+	{
+		c, err := tx.CursorDupSort(hc.iit.ii.KeysTable)
+		require.NoError(t, err)
+		defer c.Close()
+		for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+			require.NoError(t, err)
+			if len(k) < 8 {
+				continue
+			}
+			txNum := binary.BigEndian.Uint64(k[:8])
+			require.GreaterOrEqual(t, txNum, prunedUpTo,
+				"II KeysTable has entry with txNum=%d below prunedUpTo=%d (key=%x)",
+				txNum, prunedUpTo, k)
+		}
+	}
+
+	// II ValuesTable: values encode txNum as 8 bytes.
+	{
+		c, err := tx.CursorDupSort(hc.iit.ii.ValuesTable)
+		require.NoError(t, err)
+		defer c.Close()
+		for _, v, err := c.First(); v != nil; _, v, err = c.Next() {
+			require.NoError(t, err)
+			if len(v) < 8 {
+				continue
+			}
+			txNum := binary.BigEndian.Uint64(v[:8])
+			require.GreaterOrEqual(t, txNum, prunedUpTo,
+				"II ValuesTable has entry with txNum=%d below prunedUpTo=%d (val=%x)",
+				txNum, prunedUpTo, v)
 		}
 	}
 }
