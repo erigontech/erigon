@@ -1299,6 +1299,106 @@ func TestE2Schema_FileNamingRoundTrip(t *testing.T) {
 	}
 }
 
+// TestMergeInProgress_SmallFilesStillVisible verifies the critical merge safety property:
+// when a merge creates the merged data file but crashes before creating its accessors,
+// the original small files (which have complete accessors) remain visible to readers.
+// This is the most common real-world file creation failure mode.
+func TestMergeInProgress_SmallFilesStillVisible(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ver := version.V1_0_standart
+	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (string, SnapNameSchema) {
+		schema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
+			Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+			BtIndex(ver).Existence(ver).
+			Build()
+		return "accounts", schema
+	})
+	stepSize := repo.stepSize
+
+	// Step 1: Create two small files (0-stepSize) and (stepSize-2*stepSize) with COMPLETE accessors.
+	// These represent successfully built snapshot files before the merge.
+	populateFiles2(t, dirs, repo, []testFileRange{{0, 1}, {1, 2}})
+	require.NoError(t, repo.OpenFolder())
+	repo.RecalcVisibleFiles(RootNum(2 * stepSize))
+	smallVisible := repo.VisibleFiles()
+	require.Equal(t, 2, len(smallVisible), "both small files should be visible before merge")
+
+	// Step 2: Simulate merge crash — write the merged data file but NO accessors.
+	// This is exactly what happens when a merge crashes after creating the data file
+	// but before creating its BTree/Existence accessors.
+	// The merged data file must be a valid compressed file (same as real production).
+	mergedDataFile, _ := repo.schema.DataFile(version.V1_0, RootNum(0), RootNum(2*stepSize))
+	populateFiles(t, dirs, repo.schema, []string{mergedDataFile})
+
+	// Step 3: Reopen and recalculate visible files.
+	require.NoError(t, repo.OpenFolder())
+	repo.RecalcVisibleFiles(RootNum(2 * stepSize))
+
+	// Step 4: Verify safety properties.
+	// The merged file should NOT be visible — it has no accessors.
+	// The small files SHOULD still be visible.
+	afterMerge := repo.VisibleFiles()
+	require.Equal(t, 2, len(afterMerge),
+		"merged file (no accessors) must not appear; small files must remain visible")
+
+	// Verify the merged file is detected as having missed accessors.
+	missed := repo.FilesWithMissedAccessors()
+	require.False(t, missed.IsEmpty(), "merged data file without accessors must be detected")
+	btMissed := missed.Get(statecfg.AccessorBTree)
+	require.NotEmpty(t, btMissed, "BTree accessor missing for merged file must be detected")
+
+	// Verify the visible range still covers the full [0, 2*stepSize] through the small files.
+	require.Equal(t, uint64(0), afterMerge[0].StartRootNum())
+	require.Equal(t, uint64(2*stepSize), afterMerge[len(afterMerge)-1].EndRootNum())
+}
+
+// TestSourceFilesRemovedBeforeAccessors tests the unrecoverable data loss scenario:
+// if source small files are deleted after creating the merged data file but before
+// writing its accessors, the system correctly detects zero visible files.
+func TestSourceFilesRemovedBeforeAccessors_DataLossDetected(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	ver := version.V1_0_standart
+	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (string, SnapNameSchema) {
+		schema := NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
+			Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressNone, ver).
+			BtIndex(ver).Existence(ver).
+			Build()
+		return "accounts", schema
+	})
+	stepSize := repo.stepSize
+
+	// Create small files with full accessors, verify visible.
+	populateFiles2(t, dirs, repo, []testFileRange{{0, 1}, {1, 2}})
+	require.NoError(t, repo.OpenFolder())
+	repo.RecalcVisibleFiles(RootNum(2 * stepSize))
+	require.Equal(t, 2, len(repo.VisibleFiles()))
+
+	// Simulate the dangerous sequence:
+	// 1. Write merged data file (valid compressed file, as in real production)
+	mergedDataFile, _ := repo.schema.DataFile(version.V1_0, RootNum(0), RootNum(2*stepSize))
+	populateFiles(t, dirs, repo.schema, []string{mergedDataFile})
+
+	// 2. Delete the source small files (merge cleanup happened prematurely before accessors)
+	small0, _ := repo.schema.DataFile(version.V1_0, RootNum(0), RootNum(1*stepSize))
+	small1, _ := repo.schema.DataFile(version.V1_0, RootNum(1*stepSize), RootNum(2*stepSize))
+	os.Remove(small0)
+	os.Remove(small1)
+
+	// 3. Crash — no accessors written for the merged file
+
+	// After restart: merged file exists (no accessors), small files gone.
+	// Result: ZERO files visible. System correctly refuses to serve partial data.
+	require.NoError(t, repo.OpenFolder())
+	repo.RecalcVisibleFiles(RootNum(2 * stepSize))
+	visible := repo.VisibleFiles()
+	require.Equal(t, 0, len(visible),
+		"with source files deleted and merged file lacking accessors, zero files must be visible")
+
+	// The missing accessors for the merged file must be detectable.
+	missed := repo.FilesWithMissedAccessors()
+	require.False(t, missed.IsEmpty(), "accessor gap for merged file must be detected")
+}
+
 // fileBaseName returns the base name from a full file path.
 func fileBaseName(path string) string {
 	for i := len(path) - 1; i >= 0; i-- {
