@@ -785,7 +785,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		if err := doms.Flush(ctx, tx); err != nil {
 			return err
 		}
-		log.Warn("[dbg] doms.flush", "in", time.Since(t), "sz", datasize.ByteSize(sz).String())
+		log.Warn("[dbg] doms.flush", "in", time.Since(t), "sz", datasize.ByteSize(sz).HR())
 
 		doms.ClearRam(true)
 
