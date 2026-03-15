@@ -74,6 +74,9 @@ func (tx *DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 			Data:            common.Copy(tx.Data),
 			GasLimit:        tx.GasLimit,
 			Value:           tx.Value,
+			V:               tx.V,
+			R:               tx.R,
+			S:               tx.S,
 		},
 		ChainID:    tx.ChainID,
 		AccessList: make(AccessList, len(tx.AccessList)),
@@ -81,9 +84,6 @@ func (tx *DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 		FeeCap:     tx.FeeCap,
 	}
 	copy(cpy.AccessList, tx.AccessList)
-	cpy.V.Set(&tx.V)
-	cpy.R.Set(&tx.R)
-	cpy.S.Set(&tx.S)
 	return cpy
 }
 

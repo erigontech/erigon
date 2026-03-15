@@ -69,6 +69,9 @@ func (tx *AccessListTx) copy() *AccessListTx {
 				Data:            common.Copy(tx.Data),
 				GasLimit:        tx.GasLimit,
 				Value:           tx.Value,
+				V:               tx.V,
+				R:               tx.R,
+				S:               tx.S,
 			},
 			GasPrice: tx.GasPrice,
 		},
@@ -76,9 +79,6 @@ func (tx *AccessListTx) copy() *AccessListTx {
 		AccessList: make(AccessList, len(tx.AccessList)),
 	}
 	copy(cpy.AccessList, tx.AccessList)
-	cpy.V.Set(&tx.V)
-	cpy.R.Set(&tx.R)
-	cpy.S.Set(&tx.S)
 	return cpy
 }
 
