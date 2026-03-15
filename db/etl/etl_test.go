@@ -1250,7 +1250,7 @@ func BenchmarkSortableBufferPutOnly(b *testing.B) {
 	}
 }
 
-func BenchmarkSortableBufferLoadOnly(b *testing.B) {
+func BenchmarkSortableBufferInmemLoadOnly(b *testing.B) {
 	const keyLen = 32
 	const valLen = 64
 
@@ -1286,6 +1286,60 @@ func BenchmarkSortableBufferLoadOnly(b *testing.B) {
 				for i := range buf.Len() {
 					_, _ = buf.Get(i)
 				}
+			}
+		})
+	}
+}
+
+func BenchmarkSortableBufferLoadOnly(b *testing.B) {
+	const keyLen = 32
+	const valLen = 64
+	logger := log.New()
+
+	// bufSize is chosen to produce ~5 disk providers per run:
+	// 100k entries × 96 bytes ≈ 9.6 MB → bufSize = 2 MB → ~5 flushes
+	// 500k entries × 96 bytes ≈ 48 MB → bufSize = 10 MB → ~5 flushes
+	for _, tc := range []struct {
+		name    string
+		count   int
+		sorted  bool
+		bufSize datasize.ByteSize
+	}{
+		{"random_100k", 100_000, false, 2 * datasize.MB},
+		{"random_500k", 500_000, false, 10 * datasize.MB},
+		{"sorted_100k", 100_000, true, 2 * datasize.MB},
+		{"sorted_500k", 500_000, true, 10 * datasize.MB},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			key := make([]byte, keyLen)
+			val := make([]byte, valLen)
+			tmpdir := b.TempDir()
+			for b.Loop() {
+				b.StopTimer()
+				c := NewCollector(b.Name(), tmpdir, NewSortableBuffer(tc.bufSize), logger)
+				for i := range tc.count {
+					if tc.sorted {
+						binary.BigEndian.PutUint64(key, uint64(i))
+					} else {
+						x := uint64(i) * 6364136223846793005
+						binary.BigEndian.PutUint64(key, x)
+						binary.BigEndian.PutUint64(key[8:], x^0xdeadbeef)
+					}
+					binary.BigEndian.PutUint64(val, uint64(i))
+					if err := c.Collect(key, val); err != nil {
+						b.Fatal(err)
+					}
+				}
+				b.StartTimer()
+				if err := c.Load(nil, "", func(k, v []byte, _ CurrentTableReader, next LoadNextFunc) error {
+					return next(k, k, v)
+				}, TransformArgs{}); err != nil {
+					b.Fatal(err)
+				}
+				b.StopTimer()
+				c.Close()
+				b.StartTimer()
 			}
 		})
 	}
