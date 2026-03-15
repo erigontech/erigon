@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -318,15 +319,16 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 
 	logger.Info("Opening Database", "label", name, "path", dbPath)
 	openFunc := func(exclusive bool) (kv.RwDB, error) {
-		roTxLimit := int64(32)
+		roTxLimit := int64(max(10, runtime.GOMAXPROCS(-1)*4))
 		if config.Http.DBReadConcurrency > 0 {
 			roTxLimit = int64(config.Http.DBReadConcurrency)
 		}
 		roTxsLimiter := semaphore.NewWeighted(roTxLimit) // 1 less than max to allow unlocking to happen
+		execLimiter := semaphore.NewWeighted(int64(runtime.GOMAXPROCS(-1) * 2))
 		opts := mdbx.New(label, logger).
 			Path(dbPath).
 			GrowthStep(16 * datasize.MB).
-			DBVerbosity(config.DatabaseVerbosity).RoTxsLimiter(roTxsLimiter).
+			DBVerbosity(config.DatabaseVerbosity).RoTxsLimiter(roTxsLimiter).ExecutionLimiter(execLimiter).
 			WriteMap(config.MdbxWriteMap).
 			Readonly(readonly).
 			Exclusive(exclusive)

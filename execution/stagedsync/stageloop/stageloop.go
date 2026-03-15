@@ -69,6 +69,10 @@ func StageLoop(
 ) {
 	defer close(waitForDone)
 
+	// Tag the execution context so BeginRo uses the dedicated executionLimiter,
+	// guaranteeing that staged sync always gets DB read slots regardless of RPC load.
+	ctx = kv.WithTxPriority(ctx, kv.TxPriorityExecution)
+
 	if err := ProcessFrozenBlocks(ctx, db, blockReader, sync, hook, false /* onlySnapDownload */, logger); err != nil {
 		if errors.Is(err, common.ErrStopped) || errors.Is(err, context.Canceled) {
 			return

@@ -85,6 +85,11 @@ type MdbxOpts struct {
 	// There is way to increase the 10,000 thread limit: https://golang.org/pkg/runtime/debug/#SetMaxThreads
 	roTxsLimiter *semaphore.Weighted
 
+	// executionLimiter is a small dedicated semaphore for the execution layer (staged sync).
+	// It is never shared with RPC, guaranteeing that execution can always acquire a read slot.
+	// Default: GOMAXPROCS * 2 (staged sync is mostly sequential, rarely needs more).
+	executionLimiter *semaphore.Weighted
+
 	metrics bool
 }
 
@@ -124,10 +129,14 @@ func (opts MdbxOpts) GetPageSize() datasize.ByteSize { return opts.pageSize }
 // Setters
 func (opts MdbxOpts) DirtySpace(s uint64) MdbxOpts                { opts.dirtySpace = s; return opts }
 func (opts MdbxOpts) RoTxsLimiter(l *semaphore.Weighted) MdbxOpts { opts.roTxsLimiter = l; return opts }
-func (opts MdbxOpts) PageSize(v datasize.ByteSize) MdbxOpts       { opts.pageSize = v; return opts }
-func (opts MdbxOpts) GrowthStep(v datasize.ByteSize) MdbxOpts     { opts.growthStep = v; return opts }
-func (opts MdbxOpts) Path(path string) MdbxOpts                   { opts.path = path; return opts }
-func (opts MdbxOpts) SyncPeriod(period time.Duration) MdbxOpts    { opts.syncPeriod = period; return opts }
+func (opts MdbxOpts) ExecutionLimiter(l *semaphore.Weighted) MdbxOpts {
+	opts.executionLimiter = l
+	return opts
+}
+func (opts MdbxOpts) PageSize(v datasize.ByteSize) MdbxOpts    { opts.pageSize = v; return opts }
+func (opts MdbxOpts) GrowthStep(v datasize.ByteSize) MdbxOpts  { opts.growthStep = v; return opts }
+func (opts MdbxOpts) Path(path string) MdbxOpts                { opts.path = path; return opts }
+func (opts MdbxOpts) SyncPeriod(period time.Duration) MdbxOpts { opts.syncPeriod = period; return opts }
 func (opts MdbxOpts) SyncBytes(threshold datasize.ByteSize) MdbxOpts {
 	opts.syncBytes = &threshold
 	return opts
@@ -355,16 +364,20 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		targetSemCount := int64(runtime.GOMAXPROCS(-1) * 16)
 		opts.roTxsLimiter = semaphore.NewWeighted(targetSemCount) // 1 less than max to allow unlocking to happen
 	}
+	if opts.executionLimiter == nil {
+		opts.executionLimiter = semaphore.NewWeighted(int64(runtime.GOMAXPROCS(-1) * 2))
+	}
 
 	txsCountMutex := &sync.Mutex{}
 
 	db := &MdbxKV{
-		opts:         opts,
-		env:          env,
-		log:          opts.log,
-		buckets:      kv.TableCfg{},
-		txSize:       dirtyPagesLimit * opts.pageSize.Bytes(),
-		roTxsLimiter: opts.roTxsLimiter,
+		opts:             opts,
+		env:              env,
+		log:              opts.log,
+		buckets:          kv.TableCfg{},
+		txSize:           dirtyPagesLimit * opts.pageSize.Bytes(),
+		roTxsLimiter:     opts.roTxsLimiter,
+		executionLimiter: opts.executionLimiter,
 
 		txsCountMutex:         txsCountMutex,
 		txsAllDoneOnCloseCond: sync.NewCond(txsCountMutex),
@@ -437,14 +450,15 @@ func (opts MdbxOpts) MustOpen() kv.RwDB {
 }
 
 type MdbxKV struct {
-	log          log.Logger
-	env          *mdbx.Env
-	buckets      kv.TableCfg
-	roTxsLimiter *semaphore.Weighted // does limit amount of concurrent Ro transactions - in most casess runtime.NumCPU() is good value for this channel capacity - this channel can be shared with other components (like Decompressor)
-	opts         MdbxOpts
-	txSize       uint64
-	closed       atomic.Bool
-	path         string
+	log              log.Logger
+	env              *mdbx.Env
+	buckets          kv.TableCfg
+	roTxsLimiter     *semaphore.Weighted // does limit amount of concurrent Ro transactions - in most casess runtime.NumCPU() is good value for this channel capacity - this channel can be shared with other components (like Decompressor)
+	executionLimiter *semaphore.Weighted // dedicated pool for execution layer (staged sync) — never shared with RPC
+	opts             MdbxOpts
+	txSize           uint64
+	closed           atomic.Bool
+	path             string
 
 	txsCount              uint
 	txsCountMutex         *sync.Mutex
@@ -582,17 +596,39 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		return nil, errors.New("db closed")
 	}
 
-	// will return nil err if context is cancelled (may appear to acquire the semaphore)
-	if semErr := db.roTxsLimiter.Acquire(ctx, 1); semErr != nil {
-		db.trackTxEnd()
-		return nil, fmt.Errorf("mdbx.MdbxKV.BeginRo: roTxsLimiter error %w", semErr)
+	// Three priority paths:
+	//   TxPriorityExecution — dedicated executionLimiter (blocking, guaranteed, never shared with RPC)
+	//   TxPriorityRPC       — shared roTxsLimiter with TryAcquire (fail-fast → ErrServerOverloaded)
+	//   TxPriorityDefault   — shared roTxsLimiter with blocking Acquire (internal tasks, safe default)
+	priority := kv.TxPriorityFrom(ctx)
+	switch priority {
+	case kv.TxPriorityExecution:
+		if semErr := db.executionLimiter.Acquire(ctx, 1); semErr != nil {
+			db.trackTxEnd()
+			return nil, fmt.Errorf("mdbx.MdbxKV.BeginRo: executionLimiter error %w", semErr)
+		}
+	case kv.TxPriorityRPC:
+		if !db.roTxsLimiter.TryAcquire(1) {
+			db.trackTxEnd()
+			return nil, kv.ErrServerOverloaded
+		}
+	default:
+		// will return nil err if context is cancelled (may appear to acquire the semaphore)
+		if semErr := db.roTxsLimiter.Acquire(ctx, 1); semErr != nil {
+			db.trackTxEnd()
+			return nil, fmt.Errorf("mdbx.MdbxKV.BeginRo: roTxsLimiter error %w", semErr)
+		}
 	}
 
 	defer func() {
 		if txn == nil {
 			// on error, or if there is whatever reason that we don't return a tx,
 			// we need to free up the limiter slot, otherwise it could lead to deadlocks
-			db.roTxsLimiter.Release(1)
+			if priority == kv.TxPriorityExecution {
+				db.executionLimiter.Release(1)
+			} else {
+				db.roTxsLimiter.Release(1)
+			}
 			db.trackTxEnd()
 		}
 	}()
@@ -607,6 +643,7 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		db:       db,
 		tx:       tx,
 		readOnly: true,
+		priority: priority,
 		traceID:  db.leakDetector.Add(),
 	}, nil
 }
@@ -658,6 +695,7 @@ type MdbxTx struct {
 	statelessCursors map[string]kv.RwCursor
 	readOnly         bool
 	ctx              context.Context
+	priority         kv.TxPriority // which limiter was acquired — used in Rollback/Commit to release the right one
 
 	toCloseMap map[uint64]kv.Closer
 	cursorID   uint64
@@ -1009,7 +1047,11 @@ func (tx *MdbxTx) Commit() error {
 		tx.tx = nil
 		tx.db.trackTxEnd()
 		if tx.readOnly {
-			tx.db.roTxsLimiter.Release(1)
+			if tx.priority == kv.TxPriorityExecution {
+				tx.db.executionLimiter.Release(1)
+			} else {
+				tx.db.roTxsLimiter.Release(1)
+			}
 		} else {
 			runtime.UnlockOSThread()
 		}
@@ -1052,7 +1094,11 @@ func (tx *MdbxTx) Rollback() {
 	tx.tx = nil
 	tx.db.trackTxEnd()
 	if tx.readOnly {
-		tx.db.roTxsLimiter.Release(1)
+		if tx.priority == kv.TxPriorityExecution {
+			tx.db.executionLimiter.Release(1)
+		} else {
+			tx.db.roTxsLimiter.Release(1)
+		}
 	} else {
 		runtime.UnlockOSThread()
 	}

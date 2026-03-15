@@ -135,6 +135,9 @@ func (s *KvServer) begin(ctx context.Context) (id uint64, err error) {
 	}
 	s.txsMapLock.Lock()
 	defer s.txsMapLock.Unlock()
+	// All gRPC KV clients are RPC callers — tag with RPC priority so BeginTemporalRo uses TryAcquire.
+	// Context values do not cross gRPC network boundaries, so we re-tag here on the server side.
+	ctx = kv.WithTxPriority(ctx, kv.TxPriorityRPC)
 	tx, errBegin := s.kv.BeginTemporalRo(ctx) //nolint:gocritic
 	if errBegin != nil {
 		return 0, errBegin
@@ -157,6 +160,8 @@ func (s *KvServer) renew(ctx context.Context, id uint64) (err error) {
 		defer tx.Unlock()
 		tx.Rollback()
 	}
+	// Re-tag as RPC priority (context values do not cross gRPC boundaries)
+	ctx = kv.WithTxPriority(ctx, kv.TxPriorityRPC)
 	newTx, errBegin := s.kv.BeginTemporalRo(ctx) //nolint:gocritic
 	if errBegin != nil {
 		return fmt.Errorf("kvserver: %w", errBegin)

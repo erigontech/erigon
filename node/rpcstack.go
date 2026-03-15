@@ -35,6 +35,7 @@ import (
 	"github.com/rs/cors"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
@@ -46,6 +47,10 @@ type httpConfig struct {
 	Vhosts             []string
 	Compression        bool
 	prefix             string // path prefix on which to mount http handler
+	// RpcConcurrencyLimit is the maximum number of concurrent HTTP RPC requests.
+	// Requests beyond this limit receive an immediate 503 before touching any middleware.
+	// 0 means unlimited (admission control disabled).
+	RpcConcurrencyLimit int64
 }
 
 // wsConfig is the JSON-RPC/Websocket configuration
@@ -280,7 +285,7 @@ func (h *httpServer) enableRPC(apis []rpc.API, config httpConfig, allowList rpc.
 	}
 	h.httpConfig = config
 	h.httpHandler.Store(&rpcHandler{
-		Handler: NewHTTPHandlerStack(srv, config.CorsAllowedOrigins, config.Vhosts, config.Compression),
+		Handler: NewHTTPHandlerStack(srv, config.CorsAllowedOrigins, config.Vhosts, config.Compression, config.RpcConcurrencyLimit),
 		server:  srv,
 	})
 	return nil
@@ -346,14 +351,53 @@ func isWebsocket(r *http.Request) bool {
 }
 
 // NewHTTPHandlerStack returns wrapped http-related handlers
-func NewHTTPHandlerStack(srv http.Handler, cors []string, vhosts []string, compression bool) http.Handler {
+func NewHTTPHandlerStack(srv http.Handler, cors []string, vhosts []string, compression bool, rpcConcurrencyLimit int64) http.Handler {
 	// Wrap the CORS-handler within a host-handler
 	handler := newCorsHandler(srv, cors)
 	handler = newVHostHandler(vhosts, handler)
 	if compression {
 		handler = newGzipHandler(handler)
 	}
+	// Always installed: tags every request with TxPriorityRPC so BeginRo uses TryAcquire.
+	// When rpcConcurrencyLimit > 0 it also enforces admission control (503 if inflight > limit).
+	// When rpcConcurrencyLimit == 0 only the tag is applied, no request is ever rejected here.
+	handler = newRPCAdmissionHandler(rpcConcurrencyLimit, handler)
 	return handler
+}
+
+// rpcAdmissionHandler limits the number of concurrent HTTP RPC requests.
+// Requests that exceed the limit receive an immediate HTTP 503 without going
+// through CORS, gzip, or JSON decoding.
+// Accepted requests have their context tagged with kv.TxPriorityRPC so that
+// BeginRo uses TryAcquire (fail-fast) instead of blocking on the semaphore.
+type rpcAdmissionHandler struct {
+	inflight atomic.Int64
+	limit    int64
+	next     http.Handler
+}
+
+var rpcOverloadedResponse = []byte(`{"jsonrpc":"2.0","error":{"code":-32603,"message":"server overloaded, retry later"}}`)
+
+func newRPCAdmissionHandler(limit int64, next http.Handler) http.Handler {
+	return &rpcAdmissionHandler{limit: limit, next: next}
+}
+
+func (h *rpcAdmissionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Always tag the context with TxPriorityRPC so BeginRo uses TryAcquire (fail-fast)
+	// regardless of whether admission control (limit) is configured.
+	ctx := kv.WithTxPriority(r.Context(), kv.TxPriorityRPC)
+	if h.limit > 0 {
+		if h.inflight.Add(1) > h.limit {
+			h.inflight.Add(-1)
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write(rpcOverloadedResponse) //nolint:errcheck
+			return
+		}
+		defer h.inflight.Add(-1)
+	}
+	h.next.ServeHTTP(w, r.WithContext(ctx))
 }
 
 func newCorsHandler(srv http.Handler, allowedOrigins []string) http.Handler {
