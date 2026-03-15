@@ -40,8 +40,6 @@ import (
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
 
-func newUint64(v uint64) *uint64 { return &v }
-
 func TestGenerateChain(t *testing.T) {
 	t.Parallel()
 	var (

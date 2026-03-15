@@ -27,8 +27,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func newUint64(v uint64) *uint64 { return &v }
-
 // Reported in https://audits.sherlock.xyz/contests/1140/voting/70
 func TestBuiltBlock_AvailableRlpSpace_BugReproduction(t *testing.T) {
 	// Simulate post-Osaka scenario: block number < timestamp, but timestamp > Osaka activation
@@ -44,7 +42,7 @@ func TestBuiltBlock_AvailableRlpSpace_BugReproduction(t *testing.T) {
 	}
 
 	config := &chain.Config{
-		OsakaTime: newUint64(1764800000),
+		OsakaTime: chain.NewUint64(1764800000),
 	}
 
 	// See EIP-7934: EIP-7934: RLP Execution Block Size Limit

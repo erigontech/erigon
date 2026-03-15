@@ -49,8 +49,6 @@ import (
 	"github.com/erigontech/erigon/execution/vm/program"
 )
 
-func newUint64(v uint64) *uint64 { return &v }
-
 func TestDefaults(t *testing.T) {
 	t.Parallel()
 	cfg := new(Config)
@@ -200,11 +198,11 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 		BlockNumber: 1,
 		ChainConfig: &chain.Config{
 			ChainID:               big.NewInt(1),
-			HomesteadBlock:        newUint64(0),
-			ByzantiumBlock:        newUint64(0),
-			ConstantinopleBlock:   newUint64(0),
-			TangerineWhistleBlock: newUint64(0),
-			SpuriousDragonBlock:   newUint64(0),
+			HomesteadBlock:        chain.NewUint64(0),
+			ByzantiumBlock:        chain.NewUint64(0),
+			ConstantinopleBlock:   chain.NewUint64(0),
+			TangerineWhistleBlock: chain.NewUint64(0),
+			SpuriousDragonBlock:   chain.NewUint64(0),
 		},
 		EVMConfig: vm.Config{
 			//JumpDestCache: vm.NewJumpDestCache(128),
@@ -392,7 +390,8 @@ func TestBlockhash(t *testing.T) {
 		BlockNumber: header.Number.Uint64(),
 	}
 	setDefaults(cfg)
-	cfg.ChainConfig.PragueTime = newUint64(1)
+	pragueTime := uint64(1)
+	cfg.ChainConfig.PragueTime = &pragueTime
 	ret, _, err := Execute(data, input, cfg, t.TempDir())
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)

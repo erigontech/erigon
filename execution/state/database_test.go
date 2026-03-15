@@ -45,8 +45,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-func newUint64(v uint64) *uint64 { return &v }
-
 // Create revival problem
 func TestCreate2Revive(t *testing.T) {
 
@@ -60,9 +58,9 @@ func TestCreate2Revive(t *testing.T) {
 				ChainID:               big.NewInt(1),
 				HomesteadBlock:        new(uint64),
 				TangerineWhistleBlock: new(uint64),
-				SpuriousDragonBlock:   newUint64(1),
-				ByzantiumBlock:        newUint64(1),
-				ConstantinopleBlock:   newUint64(1),
+				SpuriousDragonBlock:   chain.NewUint64(1),
+				ByzantiumBlock:        chain.NewUint64(1),
+				ConstantinopleBlock:   chain.NewUint64(1),
 			},
 			Alloc: types.GenesisAlloc{
 				address.Value(): types.GenesisAccount{Balance: funds},
@@ -244,9 +242,9 @@ func TestCreate2Polymorth(t *testing.T) {
 				ChainID:               big.NewInt(1),
 				HomesteadBlock:        new(uint64),
 				TangerineWhistleBlock: new(uint64),
-				SpuriousDragonBlock:   newUint64(1),
-				ByzantiumBlock:        newUint64(1),
-				ConstantinopleBlock:   newUint64(1),
+				SpuriousDragonBlock:   chain.NewUint64(1),
+				ByzantiumBlock:        chain.NewUint64(1),
+				ConstantinopleBlock:   chain.NewUint64(1),
 			},
 			Alloc: types.GenesisAlloc{
 				address.Value(): types.GenesisAccount{Balance: funds},
@@ -508,9 +506,9 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 				ChainID:               big.NewInt(1),
 				HomesteadBlock:        new(uint64),
 				TangerineWhistleBlock: new(uint64),
-				SpuriousDragonBlock:   newUint64(1),
-				ByzantiumBlock:        newUint64(1),
-				ConstantinopleBlock:   newUint64(1),
+				SpuriousDragonBlock:   chain.NewUint64(1),
+				ByzantiumBlock:        chain.NewUint64(1),
+				ConstantinopleBlock:   chain.NewUint64(1),
 			},
 			Alloc: types.GenesisAlloc{
 				address.Value(): types.GenesisAccount{Balance: funds},
@@ -671,9 +669,9 @@ func TestReorgOverStateChange(t *testing.T) {
 				ChainID:               big.NewInt(1),
 				HomesteadBlock:        new(uint64),
 				TangerineWhistleBlock: new(uint64),
-				SpuriousDragonBlock:   newUint64(1),
-				ByzantiumBlock:        newUint64(1),
-				ConstantinopleBlock:   newUint64(1),
+				SpuriousDragonBlock:   chain.NewUint64(1),
+				ByzantiumBlock:        chain.NewUint64(1),
+				ConstantinopleBlock:   chain.NewUint64(1),
 			},
 			Alloc: types.GenesisAlloc{
 				address.Value(): {Balance: funds},
@@ -835,9 +833,9 @@ func TestCreateOnExistingStorage(t *testing.T) {
 				ChainID:               big.NewInt(1),
 				HomesteadBlock:        new(uint64),
 				TangerineWhistleBlock: new(uint64),
-				SpuriousDragonBlock:   newUint64(1),
-				ByzantiumBlock:        newUint64(1),
-				ConstantinopleBlock:   newUint64(1),
+				SpuriousDragonBlock:   chain.NewUint64(1),
+				ByzantiumBlock:        chain.NewUint64(1),
+				ConstantinopleBlock:   chain.NewUint64(1),
 			},
 			Alloc: types.GenesisAlloc{
 				address.Value(): {Balance: funds},
@@ -979,11 +977,11 @@ func TestEip2200Gas(t *testing.T) {
 				ChainID:               big.NewInt(1),
 				HomesteadBlock:        new(uint64),
 				TangerineWhistleBlock: new(uint64),
-				SpuriousDragonBlock:   newUint64(1),
-				ByzantiumBlock:        newUint64(1),
-				PetersburgBlock:       newUint64(1),
-				ConstantinopleBlock:   newUint64(1),
-				IstanbulBlock:         newUint64(1),
+				SpuriousDragonBlock:   chain.NewUint64(1),
+				ByzantiumBlock:        chain.NewUint64(1),
+				PetersburgBlock:       chain.NewUint64(1),
+				ConstantinopleBlock:   chain.NewUint64(1),
+				IstanbulBlock:         chain.NewUint64(1),
 			},
 			Alloc: types.GenesisAlloc{
 				address.Value(): {Balance: funds},
@@ -1087,7 +1085,7 @@ func TestWrongIncarnation(t *testing.T) {
 				ChainID:               big.NewInt(1),
 				HomesteadBlock:        new(uint64),
 				TangerineWhistleBlock: new(uint64),
-				SpuriousDragonBlock:   newUint64(1),
+				SpuriousDragonBlock:   chain.NewUint64(1),
 			},
 			Alloc: types.GenesisAlloc{
 				address.Value(): types.GenesisAccount{Balance: funds},
@@ -1211,7 +1209,7 @@ func TestWrongIncarnation2(t *testing.T) {
 				ChainID:               big.NewInt(1),
 				HomesteadBlock:        new(uint64),
 				TangerineWhistleBlock: new(uint64),
-				SpuriousDragonBlock:   newUint64(1),
+				SpuriousDragonBlock:   chain.NewUint64(1),
 			},
 			Alloc: types.GenesisAlloc{
 				address.Value(): types.GenesisAccount{Balance: funds},
@@ -1705,9 +1703,9 @@ func TestTxLookupUnwind(t *testing.T) {
 				ChainID:               big.NewInt(1),
 				HomesteadBlock:        new(uint64),
 				TangerineWhistleBlock: new(uint64),
-				SpuriousDragonBlock:   newUint64(1),
-				ByzantiumBlock:        newUint64(1),
-				ConstantinopleBlock:   newUint64(1),
+				SpuriousDragonBlock:   chain.NewUint64(1),
+				ByzantiumBlock:        chain.NewUint64(1),
+				ConstantinopleBlock:   chain.NewUint64(1),
 			},
 			Alloc: types.GenesisAlloc{
 				address.Value(): types.GenesisAccount{Balance: funds},

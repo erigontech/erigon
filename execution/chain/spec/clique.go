@@ -8,24 +8,22 @@ import (
 	"github.com/erigontech/erigon/node/paths"
 )
 
-func newUint64(v uint64) *uint64 { return &v }
-
 var (
 	// AllCliqueProtocolChanges contains every protocol change (EIPs) introduced
 	// and accepted by the Ethereum core developers into the Clique consensus.
 	AllCliqueProtocolChanges = &chain.Config{
 		ChainID:               big.NewInt(1337),
 		Rules:                 chain.CliqueRules,
-		HomesteadBlock:        newUint64(0),
-		TangerineWhistleBlock: newUint64(0),
-		SpuriousDragonBlock:   newUint64(0),
-		ByzantiumBlock:        newUint64(0),
-		ConstantinopleBlock:   newUint64(0),
-		PetersburgBlock:       newUint64(0),
-		IstanbulBlock:         newUint64(0),
-		MuirGlacierBlock:      newUint64(0),
-		BerlinBlock:           newUint64(0),
-		LondonBlock:           newUint64(0),
+		HomesteadBlock:        chain.NewUint64(0),
+		TangerineWhistleBlock: chain.NewUint64(0),
+		SpuriousDragonBlock:   chain.NewUint64(0),
+		ByzantiumBlock:        chain.NewUint64(0),
+		ConstantinopleBlock:   chain.NewUint64(0),
+		PetersburgBlock:       chain.NewUint64(0),
+		IstanbulBlock:         chain.NewUint64(0),
+		MuirGlacierBlock:      chain.NewUint64(0),
+		BerlinBlock:           chain.NewUint64(0),
+		LondonBlock:           chain.NewUint64(0),
 		Clique:                &chain.CliqueConfig{Period: 0, Epoch: 30000},
 	}
 
