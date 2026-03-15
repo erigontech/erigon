@@ -650,7 +650,7 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 		if segment.Type.Enum() != snaptype.CaplinEnums.BeaconBlocks && segment.Type.Enum() != snaptype.CaplinEnums.BlobSidecars {
 			continue
 		}
-		if segment.Type.HasIndexFilesFromEntries(segment, dirEntries, logger) {
+		if segment.Type.HasIndexFiles(segment, dirEntries, logger) {
 			continue
 		}
 		p := &background.Progress{}

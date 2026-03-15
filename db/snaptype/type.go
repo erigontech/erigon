@@ -194,56 +194,6 @@ func (i Index) HasFileFromEntries(info FileInfo, dirEntries []string, logger log
 	return true
 }
 
-func (i Index) HasFile(info FileInfo, logger log.Logger) bool {
-	dir := info.Dir()
-	// segment, err := seg.NewDecompressor(info.Path)
-
-	// if err != nil {
-	// 	return false
-	// }
-
-	// defer segment.Close()
-
-	// Let's actually
-	if _, err := os.Stat(info.Path); err != nil {
-		logger.Debug("[ind] HasFile: seg file didn't found", "path", info.Path, "dir", dir, "err", err)
-		return false
-	}
-
-	fNameMask := IdxFileMask(info.From, info.To, i.Name)
-	fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(filepath.Join(dir, fNameMask))
-	if err != nil {
-		logger.Debug("[ind] HasFile: files by pattern didn't found", "f", fNameMask, "dir", dir, "err", err)
-		return false
-	}
-
-	if !ok {
-		_, fName := filepath.Split(fPath)
-		logger.Debug("[ind] HasFile: file does not exists", "f", fName)
-		return false
-	}
-	// file ver 1.2.4 and i.ver 1.2.3 should be okay
-	if fileVer.Major != i.Version.Current.Major {
-		if !fileVer.Less(i.Version.MinSupported) {
-			i.Version.Current = fileVer
-		} else {
-			panic("FileVersion is too low, try to rm idx files")
-			//return false
-		}
-	}
-
-	idx, err := recsplit.OpenIndex(fPath)
-
-	if err != nil {
-		logger.Debug("[ind] HasFile: opening index", "path", fPath, "err", err)
-		return false
-	}
-
-	defer idx.Close()
-
-	return true // idx.ModTime().After(segment.ModTime())
-}
-
 type Type interface {
 	Enum() Enum
 	Versions() Versions
@@ -254,8 +204,7 @@ type Type interface {
 	IdxFileName(version Version, from uint64, to uint64, index ...Index) string
 	IdxFileNames(from uint64, to uint64) []string
 	Indexes() []Index
-	HasIndexFiles(info FileInfo, logger log.Logger) bool
-	HasIndexFilesFromEntries(info FileInfo, dirEntries []string, logger log.Logger) bool
+	HasIndexFiles(info FileInfo, dirEntries []string, logger log.Logger) bool
 	BuildIndexes(ctx context.Context, info FileInfo, indexBuilder IndexBuilder, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error
 	ExtractRange(ctx context.Context, info FileInfo, rangeExtractor RangeExtractor, indexBuilder IndexBuilder, firstKeyGetter FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger, hashResolver BlockHashResolver) (uint64, error)
 
@@ -370,17 +319,7 @@ func (s SnapType) BuildIndexes(ctx context.Context, info FileInfo, indexBuilder 
 	return indexBuilder.Build(ctx, info, salt, chainConfig, tmpDir, p, lvl, logger)
 }
 
-func (s SnapType) HasIndexFiles(info FileInfo, logger log.Logger) bool {
-	for _, index := range s.indexes {
-		if !index.HasFile(info, logger) {
-			return false
-		}
-	}
-
-	return true
-}
-
-func (s SnapType) HasIndexFilesFromEntries(info FileInfo, dirEntries []string, logger log.Logger) bool {
+func (s SnapType) HasIndexFiles(info FileInfo, dirEntries []string, logger log.Logger) bool {
 	for _, index := range s.indexes {
 		if !index.HasFileFromEntries(info, dirEntries, logger) {
 			return false
@@ -486,12 +425,8 @@ func (e Enum) FileInfo(dir string, from uint64, to uint64) FileInfo {
 	return f
 }
 
-func (e Enum) HasIndexFiles(info FileInfo, logger log.Logger) bool {
-	return e.Type().HasIndexFiles(info, logger)
-}
-
-func (e Enum) HasIndexFilesFromEntries(info FileInfo, dirEntries []string, logger log.Logger) bool {
-	return e.Type().HasIndexFilesFromEntries(info, dirEntries, logger)
+func (e Enum) HasIndexFiles(info FileInfo, dirEntries []string, logger log.Logger) bool {
+	return e.Type().HasIndexFiles(info, dirEntries, logger)
 }
 
 func (e Enum) BuildIndexes(ctx context.Context, info FileInfo, indexBuilder IndexBuilder, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
