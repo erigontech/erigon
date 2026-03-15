@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
@@ -526,42 +525,6 @@ func (h *Hook) maybeAnnounceBlockRange(finishStageBeforeSync, finishStageAfterSy
 	h.blockRangePublisher.PublishBlockRangeUpdate(packet)
 	h.lastAnnouncedBlockRangeLatestNumber = packet.Latest
 	h.lastAnnouncedBlockRangeTime = time.Now()
-}
-
-func MiningStep(ctx context.Context, db kv.TemporalRwDB, mining *stagedsync.Sync, tmpDir string, logger log.Logger) (err error) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
-		}
-	}() // avoid crash because Erigon's core does many things
-	// Use a read-only tx: all writes go to the MemoryBatch overlay and are
-	// never committed, so there is no need to hold the MDBX exclusive write lock.
-	tx, err := db.BeginTemporalRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	mb, err := membatchwithdb.NewMemoryBatch(tx, tmpDir, logger)
-	if err != nil {
-		return err
-	}
-	defer mb.Close()
-
-	sd, err := execctx.NewSharedDomains(ctx, mb, logger)
-	if err != nil {
-		return err
-	}
-	defer sd.Close()
-
-	hasMore, err := mining.Run(sd, mb, false /* firstCycle */, false)
-	if err != nil {
-		return err
-	}
-	if hasMore {
-		return errors.New("unexpected mining step has more work")
-	}
-	return nil
 }
 
 func addAndVerifyBlockStep(batch kv.RwTx, engine rules.Engine, chainReader rules.ChainReader, currentHeader *types.Header, currentBody *types.RawBody) error {
