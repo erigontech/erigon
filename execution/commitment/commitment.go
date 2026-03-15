@@ -454,7 +454,6 @@ func ApplyDeferredBranchUpdates(
 	if numWorkers <= 1 {
 		numWorkers = 1
 	}
-	numWorkers = 1
 
 	// Sequential fast path: avoids goroutine and channel overhead for small batches.
 	if numWorkers == 1 || len(deferred) <= numWorkers {
