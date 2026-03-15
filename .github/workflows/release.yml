@@ -70,6 +70,24 @@ jobs:
           rm -rf * ${GITHUB_WORKSPACE}/docker-build-output
           docker buildx prune --verbose -f -a
 
+      - name: Check GitHub Release ${{ inputs.release_version }} does not already exist
+        if: ${{ inputs.perform_release && inputs.release_version != '' }}
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ env.APP_REPO }}/releases/tags/${RELEASE_VERSION}")
+          if [ "${HTTP_CODE}" -eq "200" ]; then
+            echo "ERROR: GitHub Release for tag ${RELEASE_VERSION} already exists."
+            echo "ERROR: This is likely an operator error — delete the existing release and tag before re-running."
+            echo "ERROR: https://github.com/${{ env.APP_REPO }}/releases/tag/${RELEASE_VERSION}"
+            exit 1
+          fi
+          echo "OK: No existing GitHub Release found for ${RELEASE_VERSION}. Proceeding."
+
       - name: Checkout git repository ${{ env.APP_REPO }} reference ${{ inputs.checkout_ref }}
         uses: actions/checkout@v6
         with:
@@ -84,7 +102,7 @@ jobs:
           RELEASE_VERSION: ${{ inputs.release_version }}
         run: |
           cd erigon
-          if git ls-remote --exit-code --quiet --tags origin '${RELEASE_VERSION}'; then
+          if git ls-remote --exit-code --quiet --tags origin "${RELEASE_VERSION}"; then
             echo "ERROR: tag ${RELEASE_VERSION} exists and workflow is performing release. Exit."
             exit 1
           else
@@ -134,16 +152,16 @@ jobs:
           echo "OK: release_version matches db/version/app.go."
 
       - name: Login to Docker Hub
-        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567  ## v3.3.0
+        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2  ## v4.0.0
         with:
           username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
           password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a  ## v4.0.0
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd  ## v4.0.0
 
       - name: Build and push temporary multiplatform image, store outputs locally for further processing
         env:
@@ -206,12 +224,37 @@ jobs:
           echo Content of release directory:
           find . -type f -ls
 
+      - name: Verify release artifacts before upload
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
+        run: |
+          echo "=== Verifying release artifacts ==="
+          FAILED=0
+          for PLATFORM in arm64 amd64 amd64v2; do
+            FILE="${GITHUB_WORKSPACE}/release/${APPLICATION}_${RELEASE_VERSION}_linux_${PLATFORM}.tar"
+            if [ ! -f "${FILE}" ]; then
+              echo "ERROR: Missing artifact: ${FILE}"
+              FAILED=1
+            elif [ ! -s "${FILE}" ]; then
+              echo "ERROR: Empty artifact: ${FILE}"
+              FAILED=1
+            else
+              SIZE=$(wc -c < "${FILE}")
+              echo "OK: ${APPLICATION}_${RELEASE_VERSION}_linux_${PLATFORM}.tar (${SIZE} bytes)"
+            fi
+          done
+          if [ $FAILED -ne 0 ]; then
+            echo "ERROR: One or more artifacts are missing or empty. Aborting."
+            exit 1
+          fi
+          echo "=== All artifacts verified OK ==="
+
       - name: Upload artifact -- linux/arm64
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  ## v6.0.0
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar
           path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar
-          retention-days: 3
+          retention-days: 7
           compression-level: 0
           if-no-files-found: error
 
@@ -220,7 +263,7 @@ jobs:
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar
           path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar
-          retention-days: 3
+          retention-days: 7
           compression-level: 0
           if-no-files-found: error
 
@@ -229,7 +272,7 @@ jobs:
         with:
           name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
           path: ${{ github.workspace }}/release/${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
-          retention-days: 3
+          retention-days: 7
           compression-level: 0
           if-no-files-found: error
 
@@ -332,10 +375,119 @@ jobs:
     name: Debian packages
     needs: [ build-release, test-release ]
     if: always() && contains(needs.build-release.result, 'success') && !contains(needs.test-release.result, 'failure')
-    uses: ./.github/workflows/reusable-release-build-debian-pkg.yml
-    with:
-      application: ${{ needs.build-release.outputs.application }}
-      version: ${{ needs.build-release.outputs.parsed-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Download arm64 artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar
+
+      - name: Download amd64v2 artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
+
+      - name: Install required packages
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -q -y dpkg-dev debhelper
+
+      - name: Extract archives and prepare binaries
+        env:
+          VERSION: ${{ needs.build-release.outputs.parsed-version }}
+        run: |
+          tar xvf ${APPLICATION}_v${VERSION}_linux_amd64v2.tar
+          mv -v ${APPLICATION}_v${VERSION}_linux_amd64v2 ${APPLICATION}_v${VERSION}_linux_amd64
+          tar xvf ${APPLICATION}_v${VERSION}_linux_arm64.tar
+          cat <<'POSTINST' > postinst.template
+          #!/bin/sh
+          set -e
+          case "$1" in
+            configure)
+              echo "NOTE: This package installs Erigon binaries only."
+              echo "No configuration files or system services are included."
+              echo "Configure and run Erigon manually according to your setup."
+              echo "Documentation: https://docs.erigon.tech/"
+              ;;
+          esac
+          POSTINST
+
+      - name: Build debian packages for amd64 and arm64
+        env:
+          VERSION: ${{ needs.build-release.outputs.parsed-version }}
+        run: |
+          for ARCH in amd64 arm64; do
+            mkdir -p deb-pkg/${APPLICATION}_${VERSION}_${ARCH}/usr/bin \
+                     deb-pkg/${APPLICATION}_${VERSION}_${ARCH}/DEBIAN
+            install postinst.template deb-pkg/${APPLICATION}_${VERSION}_${ARCH}/DEBIAN/postinst
+            if [ "${ARCH}" = "amd64" ]; then
+              ARCH_NOTE=" This amd64 package is compiled for x86-64-v2 or newer CPUs (requires SSE4.2, POPCNT). All modern server CPUs qualify: Intel 2nd gen Core+ (2011), AMD Bulldozer+ (2012). It will not run on older hardware."
+            else
+              ARCH_NOTE=""
+            fi
+            {
+              printf "Package: %s\n" "${APPLICATION}"
+              printf "Version: %s\n" "${VERSION}"
+              printf "Section: misc\n"
+              printf "Priority: optional\n"
+              printf "Architecture: %s\n" "${ARCH}"
+              printf "Depends: libc6\n"
+              printf "Maintainer: Erigon DevOps [https://github.com/erigontech/erigon/issues]\n"
+              printf "Description: Erigon - Ethereum implementation on the efficiency frontier%s\n" "${ARCH_NOTE}"
+              printf "Vcs-Git: https://github.com/erigontech/erigon.git\n"
+              printf "Vcs-Browser: https://github.com/erigontech/erigon\n"
+            } > deb-pkg/${APPLICATION}_${VERSION}_${ARCH}/DEBIAN/control
+            install -v -p ${APPLICATION}_v${VERSION}_linux_${ARCH}/* \
+                        deb-pkg/${APPLICATION}_${VERSION}_${ARCH}/usr/bin
+            dpkg-deb --build --root-owner-group deb-pkg/${APPLICATION}_${VERSION}_${ARCH}
+            echo "Built: deb-pkg/${APPLICATION}_${VERSION}_${ARCH}.deb"
+          done
+
+      - name: Verify debian packages
+        env:
+          VERSION: ${{ needs.build-release.outputs.parsed-version }}
+        run: |
+          echo "=== Verifying debian packages ==="
+          FAILED=0
+          for ARCH in amd64 arm64; do
+            FILE="deb-pkg/${APPLICATION}_${VERSION}_${ARCH}.deb"
+            if [ ! -f "${FILE}" ]; then
+              echo "ERROR: Missing package: ${FILE}"
+              FAILED=1
+            elif [ ! -s "${FILE}" ]; then
+              echo "ERROR: Empty package: ${FILE}"
+              FAILED=1
+            else
+              SIZE=$(wc -c < "${FILE}")
+              echo "OK: ${FILE} (${SIZE} bytes)"
+              dpkg-deb --info "${FILE}"
+            fi
+          done
+          if [ $FAILED -ne 0 ]; then
+            echo "ERROR: One or more debian packages are missing or empty. Aborting."
+            exit 1
+          fi
+          echo "=== All debian packages verified OK ==="
+
+      - name: Upload artifact amd64.deb
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  ## v6.0.0
+        with:
+          name: ${{ env.APPLICATION }}_${{ needs.build-release.outputs.parsed-version }}_amd64.deb
+          path: ./deb-pkg/${{ env.APPLICATION }}_${{ needs.build-release.outputs.parsed-version }}_amd64.deb
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Upload artifact arm64.deb
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  ## v6.0.0
+        with:
+          name: ${{ env.APPLICATION }}_${{ needs.build-release.outputs.parsed-version }}_arm64.deb
+          path: ./deb-pkg/${{ env.APPLICATION }}_${{ needs.build-release.outputs.parsed-version }}_arm64.deb
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: error
 
 
   publish-docker-image:
@@ -355,23 +507,8 @@ jobs:
         sparse-checkout-cone-mode: false
         ref: ${{ needs.build-release.outputs.commit-id }}
 
-    - name: Download arm64 artifact
-      uses: actions/download-artifact@v7
-      with:
-        name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_arm64.tar
-
-    - name: Download amd64 artifact
-      uses: actions/download-artifact@v7
-      with:
-        name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64.tar
-
-    - name: Download amd64v2 artifact
-      uses: actions/download-artifact@v7
-      with:
-        name: ${{ env.APPLICATION }}_${{ inputs.release_version }}_linux_amd64v2.tar
-
     - name: Login to Docker Hub
-      uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567  ## v3.3.0
+      uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2  ## v4.0.0
       with:
         username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
         password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
@@ -390,8 +527,16 @@ jobs:
           echo Publishing latest tag:
           skopeo copy --multi-arch all docker://${{ env.DOCKER_URL_TMP }}:${RELEASE_VERSION} docker://${{ env.DOCKER_URL }}:latest
         fi
-        echo -n Deleting temporary image:
-        skopeo delete docker://${{ env.DOCKER_URL_TMP }}:${RELEASE_VERSION} && echo " ...done"
+        echo -n "Deleting temporary image: "
+        set +e
+        skopeo delete docker://${{ env.DOCKER_URL_TMP }}:${RELEASE_VERSION}
+        SKOPEO_DELETE_EXIT=$?
+        set -e
+        if [ $SKOPEO_DELETE_EXIT -ne 0 ]; then
+          echo "::warning::Failed to delete temporary Docker image ${DOCKER_URL_TMP}:${RELEASE_VERSION} (exit ${SKOPEO_DELETE_EXIT}). Please delete it manually."
+        else
+          echo "done."
+        fi
 
   publish-release:
     needs: [ build-debian-pkg, publish-docker-image, build-release ]
@@ -401,6 +546,15 @@ jobs:
     name: Publish release notes
 
     steps:
+    - name: Generate GitHub App token for release publishing
+      id: generate_token
+      if: ${{ inputs.perform_release }}
+      uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf  ## v2.2.1
+      with:
+        app-id: ${{ vars.RELEASE_BOT_APP_ID }}
+        private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
+        repositories: "erigon"
+
     - name: Download linux/arm64 artifact
       uses: actions/download-artifact@v7
       with:
@@ -431,18 +585,53 @@ jobs:
         name: ${{ env.APPLICATION }}_${{ needs.build-release.outputs.parsed-version }}_amd64.deb
         path: dist/
 
+    - name: Verify downloaded artifacts
+      env:
+        RELEASE_VERSION: ${{ inputs.release_version }}
+        PARSED_VERSION: ${{ needs.build-release.outputs.parsed-version }}
+      run: |
+        echo "=== Verifying downloaded artifacts in dist/ ==="
+        ls -lah dist/
+        FAILED=0
+        for FILE in \
+          "dist/${{ env.APPLICATION }}_${RELEASE_VERSION}_linux_arm64.tar" \
+          "dist/${{ env.APPLICATION }}_${RELEASE_VERSION}_linux_amd64.tar" \
+          "dist/${{ env.APPLICATION }}_${RELEASE_VERSION}_linux_amd64v2.tar" \
+          "dist/${{ env.APPLICATION }}_${PARSED_VERSION}_arm64.deb" \
+          "dist/${{ env.APPLICATION }}_${PARSED_VERSION}_amd64.deb"; do
+          if [ ! -f "${FILE}" ]; then
+            echo "ERROR: Missing artifact: ${FILE}"
+            FAILED=1
+          elif [ ! -s "${FILE}" ]; then
+            echo "ERROR: Empty artifact: ${FILE}"
+            FAILED=1
+          else
+            SIZE=$(wc -c < "${FILE}")
+            echo "OK: ${FILE} (${SIZE} bytes)"
+          fi
+        done
+        if [ $FAILED -ne 0 ]; then
+          echo "ERROR: One or more artifacts are missing or empty. Cannot proceed with release."
+          exit 1
+        fi
+        echo "=== All artifacts verified OK ==="
+
     - name: Publish draft of the Release notes with assets in case perform_release is set
       if: ${{ inputs.perform_release }}
       env:
-        GH_TOKEN: ${{ github.token }}
+        GH_TOKEN: ${{ steps.generate_token.outputs.token }}
         GH_REPO: ${{ github.repository }}
         RELEASE_VERSION: ${{ inputs.release_version }}
         DOCKER_TAGS: "${{ env.DOCKERHUB_REPOSITORY }}:${{ inputs.release_version }}"
         GITHUB_RELEASE_TARGET: ${{ inputs.checkout_ref }}
       run: |
         cd dist
-        for archive in *.tar; do gzip $archive; echo Artifact $archive compressed; done
+        for archive in *.tar; do gzip $archive; echo "Artifact $archive compressed"; done
         sha256sum *.tar.gz *.deb > ${HOME}/${{ env.APPLICATION }}_${RELEASE_VERSION}_checksums.txt
+        echo "=== Artifacts to be published ==="
+        ls -lah *.tar.gz *.deb ${HOME}/${{ env.APPLICATION }}_${RELEASE_VERSION}_checksums.txt
+        echo "=================================="
+        set +e
         gh release create \
           --target ${GITHUB_RELEASE_TARGET} \
           --draft=true \
@@ -450,12 +639,44 @@ jobs:
           --notes "**Please generate notes in WEB UI and copy-paste here**<br>**Improvements:**<br>- ...coming soon <br><br>**Bugfixes:**<br><br>- ...coming soon<br><br>**Docker images:**<br><br>Docker image released:<br> ${DOCKER_TAGS}<br><br>... coming soon<br>" \
           "${RELEASE_VERSION}" \
           *.tar.gz *.deb ${HOME}/${{ env.APPLICATION }}_${RELEASE_VERSION}_checksums.txt
+        GH_EXIT=$?
+        set -e
+        if [ $GH_EXIT -ne 0 ]; then
+          echo "::warning::gh release create failed (exit ${GH_EXIT}). All artifacts are ready — publish manually using the instructions below."
+          echo ""
+          echo "=== MANUAL RELEASE INSTRUCTIONS ==="
+          echo "Ensure you have a GitHub token with 'contents: write' permission, then run:"
+          echo ""
+          echo "  cd dist"
+          echo "  gh release create \\"
+          echo "    --repo ${{ env.APP_REPO }} \\"
+          echo "    --target ${GITHUB_RELEASE_TARGET} \\"
+          echo "    --draft=true \\"
+          echo "    --title \"${RELEASE_VERSION}\" \\"
+          echo "    \"${RELEASE_VERSION}\" \\"
+          echo "    *.tar.gz *.deb"
+          echo ""
+          echo "Checksums file: ${HOME}/${{ env.APPLICATION }}_${RELEASE_VERSION}_checksums.txt"
+          echo "=== END MANUAL INSTRUCTIONS ==="
+        else
+          echo "Release draft created successfully."
+          gh release view "${RELEASE_VERSION}" --repo ${{ env.APP_REPO }}
+        fi
 
 
   In-case-of-failure:
     name: "In case of failure: remove remote git tag pointing to the new version."
     needs: [ publish-release, build-release, test-release, build-debian-pkg, publish-docker-image ]
-    if: always() && !contains(needs.build-release.result, 'success') && contains(needs.test-release.result, 'failure') && !contains(needs.publish-release.result, 'success') && !contains(needs.build-debian-pkg.result, 'success') && !contains(needs.publish-docker-image.result, 'success')
+    if: >-
+      always() &&
+      inputs.perform_release &&
+      contains(needs.build-release.result, 'success') &&
+      (
+        contains(needs.test-release.result, 'failure') ||
+        contains(needs.build-debian-pkg.result, 'failure') ||
+        contains(needs.publish-docker-image.result, 'failure') ||
+        contains(needs.publish-release.result, 'failure')
+      )
     runs-on: ubuntu-latest
     env:
       RELEASE_VERSION: ${{ inputs.release_version }}

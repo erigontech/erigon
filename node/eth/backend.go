@@ -785,7 +785,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.engine,
 		httpRpcCfg.Dirs,
 		backend.polygonBridge,
-		httpRpcCfg.RangeLimit,
+		httpRpcCfg.BlockRangeLimit,
+		httpRpcCfg.GetLogsMaxResults,
 	)
 	ethApiConfig := &jsonrpc.EthApiConfig{
 		GasCap:                      httpRpcCfg.Gascap,
@@ -1434,6 +1435,10 @@ func (s *Ethereum) RemoveTrustedPeer(ctx context.Context, req *remoteproto.Remov
 		}
 	}
 	return &remoteproto.RemovePeerReply{Success: true}, nil
+}
+
+func (s *Ethereum) SetHead(ctx context.Context, targetBlock uint64) error {
+	return s.execModule.SetHead(ctx, targetBlock)
 }
 
 // Protocols returns all the currently configured
