@@ -33,6 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -44,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -717,4 +719,130 @@ func BenchmarkEVM_SWAP1(b *testing.B) {
 			}
 		}
 	})
+}
+
+// TestCreate2CollisionWithEIP7702Delegation verifies that CREATE2 to an address
+// with an EIP-7702 delegation designator triggers ErrContractAddressCollision,
+// matching geth's behavior. The delegation designator (0xef0100 ++ address) is
+// non-empty code and must be treated as an occupied account.
+// See https://github.com/ethereum-bounty/erigon/issues/2
+func TestCreate2CollisionWithEIP7702Delegation(t *testing.T) {
+	t.Parallel()
+
+	db := testTemporalDB(t)
+	tx, domains := testTemporalTxSD(t, db)
+	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1234"))
+	statedb.CreateAccount(sender, true)
+	statedb.AddBalance(sender, *uint256.NewInt(1e18), tracing.BalanceChangeUnspecified)
+
+	// Initcode that just returns empty runtime code (PUSH1 0, PUSH1 0, RETURN).
+	initcode := []byte{byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.RETURN)}
+
+	// Compute the CREATE2 target address: keccak256(0xff ++ factory ++ salt ++ keccak256(initcode))[12:]
+	salt := uint256.NewInt(0)
+	factoryAddr := common.HexToAddress("0xfac0")
+	create2Addr := types.CreateAddress2(factoryAddr, salt.Bytes32(), accounts.InternCodeHash(crypto.Keccak256Hash(initcode)))
+	delegatedAddr := accounts.InternAddress(create2Addr)
+
+	// Set an EIP-7702 delegation on the target address (points to some arbitrary empty account).
+	delegationTarget := common.HexToAddress("0xdead")
+	delegationCode := types.AddressToDelegation(accounts.InternAddress(delegationTarget))
+	statedb.CreateAccount(delegatedAddr, true)
+	statedb.SetCode(delegatedAddr, delegationCode)
+
+	// Build a factory contract that executes CREATE2 with the initcode and salt=0.
+	// The factory is placed at factoryAddr.
+	factory := program.New()
+	factory.Create2(initcode, salt)
+	// Push the result to storage slot 0 for inspection.
+	factory.Push(0).Op(vm.SSTORE)
+
+	statedb.CreateAccount(accounts.InternAddress(factoryAddr), true)
+	statedb.SetCode(accounts.InternAddress(factoryAddr), factory.Bytes())
+
+	cfg := &Config{
+		State:  statedb,
+		Origin: sender,
+	}
+
+	_, _, err := Call(accounts.InternAddress(factoryAddr), nil, cfg)
+	require.NoError(t, err) // the CALL itself succeeds; CREATE2 failure is internal
+
+	// The CREATE2 should have failed (collision), so the factory's SSTORE
+	// should have stored the zero address (CREATE2 returns 0 on failure).
+	val, err := statedb.GetState(accounts.InternAddress(factoryAddr), accounts.StorageKey{})
+	require.NoError(t, err)
+	require.True(t, val.IsZero(), "CREATE2 should have returned 0 (collision), but got %x", val)
+
+	// Also verify that the delegation code on the target address is still intact.
+	code, err := statedb.GetCode(delegatedAddr)
+	require.NoError(t, err)
+	require.Equal(t, delegationCode, code, "delegation code should be unchanged")
+}
+
+// TestCreateCollisionWithEIP7702Delegation verifies that CREATE (not just CREATE2)
+// also collides with an EIP-7702 delegated account.
+func TestCreateCollisionWithEIP7702Delegation(t *testing.T) {
+	t.Parallel()
+
+	db := testTemporalDB(t)
+	tx, domains := testTemporalTxSD(t, db)
+	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1234"))
+	statedb.CreateAccount(sender, true)
+	statedb.AddBalance(sender, *uint256.NewInt(1e18), tracing.BalanceChangeUnspecified)
+
+	// Initcode that returns empty runtime code.
+	initcode := []byte{byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.RETURN)}
+
+	// Compute the CREATE target address: keccak256(rlp([factory, nonce]))[12:]
+	// Factory nonce starts at 1 (after SpuriousDragon sets it during create).
+	// But for the factory contract already deployed, its nonce is 0 initially;
+	// CREATE uses current nonce then increments. So target = CreateAddress(factory, 1)
+	// because the factory itself has nonce=1 set by SpuriousDragon during deployment.
+	// We'll use a simpler approach: just precompute and set delegation on the target.
+	factoryAddr := common.HexToAddress("0xfac1")
+	factoryAcct := accounts.InternAddress(factoryAddr)
+
+	// Factory nonce will be 1 (set by SpuriousDragon on CreateAccount).
+	// CREATE uses nonce of the calling contract. The factory already exists with nonce=0.
+	// EVM increments nonce before CREATE, but here the factory's nonce is 0.
+	// Actually in the EVM, CREATE does: target = CreateAddress(caller, callerNonce), then increments.
+	// Since our factory is pre-deployed with nonce 0, CREATE target = CreateAddress(factoryAddr, 0).
+	createAddr := types.CreateAddress(factoryAddr, 0)
+	delegatedAddr := accounts.InternAddress(createAddr)
+
+	// Set an EIP-7702 delegation on the target address.
+	delegationTarget := common.HexToAddress("0xdead")
+	delegationCode := types.AddressToDelegation(accounts.InternAddress(delegationTarget))
+	statedb.CreateAccount(delegatedAddr, true)
+	statedb.SetCode(delegatedAddr, delegationCode)
+
+	// Build a factory that executes CREATE with the initcode.
+	factory := program.New()
+	factory.MstoreSmall(initcode, 0)
+	factory.Push(len(initcode)). // size
+					Push(32 - len(initcode)). // offset (right-aligned in the 32-byte word)
+					Push(0).                  // value
+					Op(vm.CREATE)
+	factory.Push(0).Op(vm.SSTORE) // store result in slot 0
+
+	statedb.CreateAccount(factoryAcct, true)
+	statedb.SetCode(factoryAcct, factory.Bytes())
+
+	cfg := &Config{
+		State:  statedb,
+		Origin: sender,
+	}
+
+	_, _, err := Call(factoryAcct, nil, cfg)
+	require.NoError(t, err)
+
+	// CREATE should have failed (collision), returning 0.
+	val, err := statedb.GetState(factoryAcct, accounts.StorageKey{})
+	require.NoError(t, err)
+	require.True(t, val.IsZero(), "CREATE should have returned 0 (collision), but got %x", val)
 }

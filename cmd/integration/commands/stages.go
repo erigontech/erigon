@@ -108,7 +108,9 @@ func makeStageCmd(use string, stageFn func(kv.TemporalRwDB, context.Context, log
 			if timeit {
 				defer func(t time.Time) { logger.Info("total", "took", time.Since(t)) }(time.Now())
 			}
-			if err := stageFn(db, cmd.Context(), logger); err != nil {
+			ctx, cancel := context.WithCancel(cmd.Context())
+			defer cancel()
+			if err := stageFn(db, ctx, logger); err != nil {
 				if !errors.Is(err, context.Canceled) {
 					logger.Error(err.Error())
 				}
@@ -487,7 +489,8 @@ func stageHeaders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 
 func stageBodies(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	chainConfig := fromdb.ChainConfig(db)
-	_, _, _, sync := newSync(ctx, db, nil /* miningConfig */, logger)
+	_, engine, _, sync := newSync(ctx, db, nil /* miningConfig */, logger)
+	defer engine.Close()
 	br, bw := blocksIO(db, logger)
 
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
@@ -522,7 +525,8 @@ func stageBodies(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) err
 func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	tmpdir := datadir.New(datadirCli).Tmp
 	chainConfig := fromdb.ChainConfig(db)
-	_, _, _, sync := newSync(ctx, db, nil /* miningConfig */, logger)
+	_, engine, _, sync := newSync(ctx, db, nil /* miningConfig */, logger)
+	defer engine.Close()
 
 	must(sync.SetCurrentStage(stages.Senders))
 
@@ -613,6 +617,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	}
 
 	_, engine, vmConfig, sync := newSync(ctx, db, nil /* miningConfig */, logger)
+	defer engine.Close()
 	must(sync.SetCurrentStage(stages.Execution))
 	if reset {
 		if err := rawdbreset.ResetExec(ctx, db); err != nil {
@@ -816,6 +821,7 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	}
 
 	br, engine, vmConfig, sync := newSync(ctx, db, nil /* miningConfig */, logger)
+	defer engine.Close()
 	must(sync.SetCurrentStage(stages.Execution))
 
 	chainConfig := fromdb.ChainConfig(db)
@@ -860,7 +866,9 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 
 func stageTxLookup(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
-	_, _, _, sync := newSync(ctx, db, nil /* miningConfig */, logger)
+	_, engine, _, sync := newSync(ctx, db, nil /* miningConfig */, logger)
+	defer engine.Close()
+
 	must(sync.SetCurrentStage(stages.TxLookup))
 	if reset {
 		return db.Update(ctx, rawdbreset.ResetTxLookup)

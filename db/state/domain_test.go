@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/spaolacci/murmur3"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -457,6 +458,149 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 				require.True(found, label)
 				require.NoError(err)
 				require.Equal(v[:], val, label)
+			}
+		}
+	}
+
+	// Structural invariants: no duplicates, monotonic txNums, index-history consistency, etc.
+	checkHistoryProperties(t, domainRoTx.ht)
+	// Domain file invariants: key-count, accessor presence, frozen flag, sort order, alignment, bloom.
+	checkDomainFileProperties(t, domainRoTx)
+}
+
+// checkDomainFileProperties runs all structural invariant checks on visible domain files.
+func checkDomainFileProperties(t *testing.T, dt *DomainRoTx) {
+	t.Helper()
+	checkDomainFileKeyCountConsistency(t, dt)
+	checkDomainFileAccessorsPresent(t, dt)
+	checkDomainFileFrozenFlagConsistency(t, dt)
+	checkDomainFileSortedKeyOrder(t, dt)
+	checkDomainHistoryRangeAlignment(t, dt)
+	checkDomainExistenceFilterNoFalseNegatives(t, dt)
+}
+
+// checkDomainFileKeyCountConsistency verifies (property 5):
+// bindex.KeyCount() == decompressor.Count()/2 for every domain file with AccessorBTree.
+// index.KeyCount() == decompressor.Count()/2 for every domain file with AccessorHashMap.
+func checkDomainFileKeyCountConsistency(t *testing.T, dt *DomainRoTx) {
+	t.Helper()
+	for i, f := range dt.files {
+		d := f.src.decompressor
+		require.Zero(t, d.Count()%2,
+			"file %d [%d-%d): Count()=%d is odd (must be even for key+val pairs)",
+			i, f.startTxNum, f.endTxNum, d.Count())
+		expectedKeys := uint64(d.Count() / 2)
+		if dt.d.Accessors.Has(statecfg.AccessorBTree) && f.src.bindex != nil {
+			require.Equal(t, expectedKeys, f.src.bindex.KeyCount(),
+				"file %d [%d-%d): bindex.KeyCount()=%d != Count()/2=%d",
+				i, f.startTxNum, f.endTxNum, f.src.bindex.KeyCount(), expectedKeys)
+		}
+		if dt.d.Accessors.Has(statecfg.AccessorHashMap) && f.src.index != nil {
+			require.Equal(t, expectedKeys, f.src.index.KeyCount(),
+				"file %d [%d-%d): index.KeyCount()=%d != Count()/2=%d",
+				i, f.startTxNum, f.endTxNum, f.src.index.KeyCount(), expectedKeys)
+		}
+	}
+}
+
+// checkDomainFileAccessorsPresent verifies (property 6):
+// every visible domain file has non-nil accessors for all configured Accessors flags.
+func checkDomainFileAccessorsPresent(t *testing.T, dt *DomainRoTx) {
+	t.Helper()
+	for i, f := range dt.files {
+		if dt.d.Accessors.Has(statecfg.AccessorBTree) {
+			require.NotNil(t, f.src.bindex,
+				"file %d [%d-%d): AccessorBTree configured but bindex is nil",
+				i, f.startTxNum, f.endTxNum)
+		}
+		if dt.d.Accessors.Has(statecfg.AccessorHashMap) {
+			require.NotNil(t, f.src.index,
+				"file %d [%d-%d): AccessorHashMap configured but index is nil",
+				i, f.startTxNum, f.endTxNum)
+		}
+		if dt.d.Accessors.Has(statecfg.AccessorExistence) {
+			require.NotNil(t, f.src.existence,
+				"file %d [%d-%d): AccessorExistence configured but existence is nil",
+				i, f.startTxNum, f.endTxNum)
+		}
+	}
+}
+
+// checkDomainFileFrozenFlagConsistency verifies (property 7):
+// file.frozen == (endStep - startStep >= stepsInFrozenFile).
+func checkDomainFileFrozenFlagConsistency(t *testing.T, dt *DomainRoTx) {
+	t.Helper()
+	for i, f := range dt.files {
+		startStep := f.startTxNum / dt.stepSize
+		endStep := f.endTxNum / dt.stepSize
+		expectedFrozen := (endStep - startStep) >= dt.stepsInFrozenFile
+		require.Equal(t, expectedFrozen, f.src.frozen,
+			"file %d [%d-%d): frozen=%v but expected frozen=%v (steps=%d, stepsInFrozenFile=%d)",
+			i, f.startTxNum, f.endTxNum, f.src.frozen, expectedFrozen, endStep-startStep, dt.stepsInFrozenFile)
+	}
+}
+
+// checkDomainFileSortedKeyOrder verifies (property 8):
+// keys read from each domain file's decompressor are strictly increasing.
+func checkDomainFileSortedKeyOrder(t *testing.T, dt *DomainRoTx) {
+	t.Helper()
+	for i, f := range dt.files {
+		r := dt.dataReader(f.src.decompressor)
+		r.Reset(0)
+		var prevKey []byte
+		pairIdx := 0
+		for r.HasNext() {
+			key, _ := r.Next(nil)
+			if prevKey != nil {
+				require.Positive(t, bytes.Compare(key, prevKey),
+					"file %d [%d-%d) pair %d: key %x not > prevKey %x",
+					i, f.startTxNum, f.endTxNum, pairIdx, key, prevKey)
+			}
+			prevKey = common.Copy(key)
+			if r.HasNext() {
+				r.Skip() // skip value
+			}
+			pairIdx++
+		}
+	}
+}
+
+// checkDomainHistoryRangeAlignment verifies (property 9):
+// domain visible files and history visible files cover the same [startTxNum, endTxNum) ranges.
+func checkDomainHistoryRangeAlignment(t *testing.T, dt *DomainRoTx) {
+	t.Helper()
+	domainFiles := dt.files
+	histFiles := dt.ht.files
+	require.Equal(t, len(domainFiles), len(histFiles),
+		"domain has %d visible files but history has %d visible files", len(domainFiles), len(histFiles))
+	for i := range domainFiles {
+		require.Equal(t, domainFiles[i].startTxNum, histFiles[i].startTxNum,
+			"file %d: domain startTxNum=%d != history startTxNum=%d",
+			i, domainFiles[i].startTxNum, histFiles[i].startTxNum)
+		require.Equal(t, domainFiles[i].endTxNum, histFiles[i].endTxNum,
+			"file %d: domain endTxNum=%d != history endTxNum=%d",
+			i, domainFiles[i].endTxNum, histFiles[i].endTxNum)
+	}
+}
+
+// checkDomainExistenceFilterNoFalseNegatives verifies (property 10):
+// for every key in a domain file, existence.ContainsHash(murmur3(key, salt)) returns true.
+func checkDomainExistenceFilterNoFalseNegatives(t *testing.T, dt *DomainRoTx) {
+	t.Helper()
+	for i, f := range dt.files {
+		if f.src.existence == nil {
+			continue
+		}
+		r := dt.dataReader(f.src.decompressor)
+		r.Reset(0)
+		for r.HasNext() {
+			key, _ := r.Next(nil)
+			hi, _ := murmur3.Sum128WithSeed(key, *dt.salt)
+			require.True(t, f.src.existence.ContainsHash(hi),
+				"file %d [%d-%d): existence filter false negative for key %x",
+				i, f.startTxNum, f.endTxNum, key)
+			if r.HasNext() {
+				r.Skip() // skip value
 			}
 		}
 	}
