@@ -254,15 +254,12 @@ func (r *Receipt) decodePayload(s *rlp.Stream) error {
 		if _, err = s.List(); err != nil {
 			return fmt.Errorf("open Topics: %w", err)
 		}
-		for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
-			log.Topics = append(log.Topics, common.Hash{})
-			if len(b) != 32 {
-				return fmt.Errorf("wrong size for Topic: %d", len(b))
+		for s.MoreDataInList() {
+			var topic common.Hash
+			if err = s.ReadBytes(topic[:]); err != nil {
+				return fmt.Errorf("read Topic: %w", err)
 			}
-			copy(log.Topics[len(log.Topics)-1][:], b)
-		}
-		if !errors.Is(err, rlp.EOL) {
-			return fmt.Errorf("read Topic: %w", err)
+			log.Topics = append(log.Topics, topic)
 		}
 		// end of Topics list
 		if err = s.ListEnd(); err != nil {

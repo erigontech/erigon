@@ -121,26 +121,18 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 	if err != nil {
 		return fmt.Errorf("open authorizations: %w", err)
 	}
-	var b []byte
 	i := 0
 	for _, err = s.List(); err == nil; _, err = s.List() {
 		auth := Authorization{}
 
-		var chainId []byte
-		if chainId, err = s.Uint256Bytes(); err != nil {
+		if err = s.ReadUint256(&auth.ChainID); err != nil {
 			return err
 		}
-		auth.ChainID.SetBytes(chainId)
 
 		// address
-		if b, err = s.Bytes(); err != nil {
+		if err = s.ReadBytes(auth.Address[:]); err != nil {
 			return err
 		}
-
-		if len(b) != 20 {
-			return fmt.Errorf("wrong size for Address: %d", len(b))
-		}
-		auth.Address = common.BytesToAddress(b)
 
 		// nonce
 		if auth.Nonce, err = s.Uint(); err != nil {
@@ -158,16 +150,14 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 		auth.YParity = uint8(yParity)
 
 		// r
-		if b, err = s.Uint256Bytes(); err != nil {
+		if err = s.ReadUint256(&auth.R); err != nil {
 			return err
 		}
-		auth.R.SetBytes(b)
 
 		// s
-		if b, err = s.Uint256Bytes(); err != nil {
+		if err = s.ReadUint256(&auth.S); err != nil {
 			return err
 		}
-		auth.S.SetBytes(b)
 
 		*auths = append(*auths, auth)
 		// end of authorization

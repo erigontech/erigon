@@ -564,6 +564,9 @@ func (be *BranchEncoder) CollectUpdate(
 
 	if be.cache != nil {
 		prev, foundInCache = be.cache.GetAndEvictBranch(prefix)
+		if foundInCache && be.metrics != nil {
+			be.metrics.cacheBranch.Add(1)
+		}
 	}
 	if !foundInCache {
 		prev, _, err = ctx.Branch(prefix)
@@ -642,6 +645,9 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 
 	if be.cache != nil {
 		prev, foundInCache = be.cache.GetAndEvictBranch(prefix)
+		if foundInCache && be.metrics != nil {
+			be.metrics.cacheBranch.Add(1)
+		}
 	}
 	if !foundInCache {
 		prev, _, err = ctx.Branch(prefix)
