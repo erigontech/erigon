@@ -3,7 +3,6 @@ package types
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"io"
 	"math/big"
 
@@ -398,59 +397,40 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	var b []byte
 
-	if b, err = s.Uint256Bytes(); err != nil {
+	tx.ChainID = new(uint256.Int)
+	if err = s.ReadUint256(tx.ChainID); err != nil {
 		return err
 	}
-	tx.ChainID = new(uint256.Int).SetBytes(b)
 
-	if b, err = s.Uint256Bytes(); err != nil {
+	tx.NonceKey = new(uint256.Int)
+	if err = s.ReadUint256(tx.NonceKey); err != nil {
 		return err
 	}
-	tx.NonceKey = new(uint256.Int).SetBytes(b)
 
 	if tx.Nonce, err = s.Uint(); err != nil {
 		return err
 	}
 
-	if b, err = s.Bytes(); err != nil {
+	var senderAddress common.Address
+	if err = s.ReadBytes(senderAddress[:]); err != nil {
 		return err
 	}
-	if len(b) != 20 {
-		return fmt.Errorf("wrong size for SenderAddress: %d", len(b))
-	}
-	var senderAddress common.Address
-	copy(senderAddress[:], b)
 	tx.SenderAddress = accounts.InternAddress(senderAddress)
 	if tx.SenderValidationData, err = s.Bytes(); err != nil {
 		return err
 	}
 
-	if b, err = s.Bytes(); err != nil {
+	if err = rlp.DecodeOptionalAddress(&tx.Deployer, s); err != nil {
 		return err
-	}
-
-	if len(b) == 20 {
-		tx.Deployer = &common.Address{}
-		copy((*tx.Deployer)[:], b)
-	} else if len(b) != 0 {
-		return fmt.Errorf("wrong size for Deployer: %d", len(b))
 	}
 
 	if tx.DeployerData, err = s.Bytes(); err != nil {
 		return err
 	}
 
-	if b, err = s.Bytes(); err != nil {
+	if err = rlp.DecodeOptionalAddress(&tx.Paymaster, s); err != nil {
 		return err
-	}
-
-	if len(b) == 20 {
-		tx.Paymaster = &common.Address{}
-		copy((*tx.Paymaster)[:], b)
-	} else if len(b) != 0 {
-		return fmt.Errorf("wrong size for Paymaster: %d", len(b))
 	}
 
 	if tx.PaymasterData, err = s.Bytes(); err != nil {
@@ -461,20 +441,20 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	if b, err = s.Uint256Bytes(); err != nil {
+	tx.BuilderFee = new(uint256.Int)
+	if err = s.ReadUint256(tx.BuilderFee); err != nil {
 		return err
 	}
-	tx.BuilderFee = new(uint256.Int).SetBytes(b)
 
-	if b, err = s.Uint256Bytes(); err != nil {
+	tx.Tip = new(uint256.Int)
+	if err = s.ReadUint256(tx.Tip); err != nil {
 		return err
 	}
-	tx.Tip = new(uint256.Int).SetBytes(b)
 
-	if b, err = s.Uint256Bytes(); err != nil {
+	tx.FeeCap = new(uint256.Int)
+	if err = s.ReadUint256(tx.FeeCap); err != nil {
 		return err
 	}
-	tx.FeeCap = new(uint256.Int).SetBytes(b)
 
 	if tx.ValidationGasLimit, err = s.Uint(); err != nil {
 		return err

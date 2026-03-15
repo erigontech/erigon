@@ -93,22 +93,16 @@ func (li *BlobKzgs) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return fmt.Errorf("open BlobKzgs (Commitments): %w", err)
 	}
-	var b []byte
-	cmtmt := KZGCommitment{}
-
-	for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
-		if len(b) == LEN_48 {
-			copy((cmtmt)[:], b)
-			*li = append(*li, cmtmt)
-		} else {
-			return fmt.Errorf("wrong size for BlobKzgs (Commitments): %d, %v", len(b), b[0])
+	for s.MoreDataInList() {
+		var cmtmt KZGCommitment
+		if err = s.ReadBytes(cmtmt[:]); err != nil {
+			return fmt.Errorf("read BlobKzgs (Commitment): %w", err)
 		}
+		*li = append(*li, cmtmt)
 	}
-
 	if err = s.ListEnd(); err != nil {
 		return fmt.Errorf("close BlobKzgs (Commitments): %w", err)
 	}
-
 	return nil
 }
 
@@ -138,26 +132,19 @@ func (li KZGProofs) encodePayload(w io.Writer, b []byte, payloadSize int) error 
 
 func (li *KZGProofs) DecodeRLP(s *rlp.Stream) error {
 	_, err := s.List()
-
 	if err != nil {
 		return fmt.Errorf("open KZGProofs (Proofs): %w", err)
 	}
-	var b []byte
-	proof := KZGProof{}
-
-	for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
-		if len(b) == LEN_48 {
-			copy((proof)[:], b)
-			*li = append(*li, proof)
-		} else {
-			return fmt.Errorf("wrong size for KZGProofs (Proofs): %d, %v", len(b), b[0])
+	for s.MoreDataInList() {
+		var proof KZGProof
+		if err = s.ReadBytes(proof[:]); err != nil {
+			return fmt.Errorf("read KZGProof: %w", err)
 		}
+		*li = append(*li, proof)
 	}
-
 	if err = s.ListEnd(); err != nil {
 		return fmt.Errorf("close KZGProofs (Proofs): %w", err)
 	}
-
 	return nil
 }
 
@@ -193,22 +180,16 @@ func (blobs *Blobs) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return fmt.Errorf("open Blobs: %w", err)
 	}
-	var b []byte
-	blob := Blob{}
-
-	for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
-		if len(b) == params.BlobSize {
-			copy((blob)[:], b)
-			*blobs = append(*blobs, blob)
-		} else {
-			return fmt.Errorf("wrong size for Blobs: %d, %v", len(b), b[0])
+	for s.MoreDataInList() {
+		var blob Blob
+		if err = s.ReadBytes(blob[:]); err != nil {
+			return fmt.Errorf("read Blob: %w", err)
 		}
+		*blobs = append(*blobs, blob)
 	}
-
 	if err = s.ListEnd(); err != nil {
 		return fmt.Errorf("close Blobs: %w", err)
 	}
-
 	return nil
 }
 

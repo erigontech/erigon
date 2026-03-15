@@ -785,7 +785,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.engine,
 		httpRpcCfg.Dirs,
 		backend.polygonBridge,
-		httpRpcCfg.RangeLimit,
+		httpRpcCfg.BlockRangeLimit,
+		httpRpcCfg.GetLogsMaxResults,
 	)
 	ethApiConfig := &jsonrpc.EthApiConfig{
 		GasCap:                      httpRpcCfg.Gascap,
@@ -991,6 +992,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		config.FcuBackgroundPrune,
 		config.FcuBackgroundCommit,
 		onlySnapDownloadOnStart,
+		backend.stopNode,
 	)
 	executionRpc := direct.NewExecutionClientDirect(backend.execModule)
 
