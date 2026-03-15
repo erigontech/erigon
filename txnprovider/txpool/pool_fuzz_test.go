@@ -232,7 +232,7 @@ func poolsFromFuzzBytes(rawTxnNonce, rawValues, rawTips, rawFeeCap, rawSender []
 
 // fakeRlpTxn add anything what identifying txn to `data` to make hash unique
 func fakeRlpTxn(slot *TxnSlot, data []byte) []byte {
-	tip := *slot.GetTip()
+	tip := *slot.GetTipCap()
 	feeCap := *slot.GetFeeCap()
 	value := *slot.GetValue()
 

@@ -478,7 +478,7 @@ func orZero(v *uint256.Int) *uint256.Int {
 	return new(uint256.Int)
 }
 
-func (tx *TxnSlot) GetTip() *uint256.Int    { return orZero(tx.Txn.GetTipCap()) }
+func (tx *TxnSlot) GetTipCap() *uint256.Int { return orZero(tx.Txn.GetTipCap()) }
 func (tx *TxnSlot) GetFeeCap() *uint256.Int { return orZero(tx.Txn.GetFeeCap()) }
 func (tx *TxnSlot) GetValue() *uint256.Int  { return orZero(tx.Txn.GetValue()) }
 
@@ -507,7 +507,7 @@ func (tx *TxnSlot) GetAccessListAddrCount() int { return len(tx.Txn.GetAccessLis
 func (tx *TxnSlot) GetAccessListStorCount() int { return tx.Txn.GetAccessList().StorageKeys() }
 
 func (tx *TxnSlot) PrintDebug(prefix string) {
-	fmt.Printf("%s: senderID=%d,nonce=%d,tip=%s,v=%s\n", prefix, tx.SenderID, tx.Nonce, tx.GetTip(), tx.GetValue())
+	fmt.Printf("%s: senderID=%d,nonce=%d,tip=%s,v=%s\n", prefix, tx.SenderID, tx.Nonce, tx.GetTipCap(), tx.GetValue())
 }
 
 func (tx *TxnSlot) Blobs() [][]byte {

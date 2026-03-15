@@ -1621,7 +1621,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 
 		//Regular txn threshold checks
 		tipThreshold := uint256.NewInt(0)
-		tipThreshold = tipThreshold.Mul(found.TxnSlot.GetTip(), uint256.NewInt(100+priceBump))
+		tipThreshold = tipThreshold.Mul(found.TxnSlot.GetTipCap(), uint256.NewInt(100+priceBump))
 		tipThreshold.Div(tipThreshold, &u256.N100)
 		feecapThreshold := uint256.NewInt(0)
 		feecapThreshold.Mul(found.TxnSlot.GetFeeCap(), uint256.NewInt(100+priceBump))
@@ -1631,7 +1631,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 			//Potential latent overdraft attack
 			tipThreshold.Mul(tipThreshold, uint256.NewInt(uint64(p.all.count(mt.TxnSlot.SenderID))))
 		}
-		if mt.TxnSlot.GetTip().Cmp(tipThreshold) < 0 || mt.TxnSlot.GetFeeCap().Cmp(feecapThreshold) < 0 {
+		if mt.TxnSlot.GetTipCap().Cmp(tipThreshold) < 0 || mt.TxnSlot.GetFeeCap().Cmp(feecapThreshold) < 0 {
 			// Both tip and feecap need to be larger than previously to replace the transaction
 			// In case if the transition is stuck, "poke" it to rebroadcast
 			if mt.subPool&IsLocal != 0 && (found.currentSubPool == PendingSubPool || found.currentSubPool == BaseFeeSubPool) {
@@ -1939,8 +1939,8 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 			*minFeeCap = *mt.TxnSlot.GetFeeCap()
 		}
 		mt.minFeeCap = *minFeeCap
-		if mt.TxnSlot.GetTip().IsUint64() {
-			minTip = min(minTip, mt.TxnSlot.GetTip().Uint64())
+		if mt.TxnSlot.GetTipCap().IsUint64() {
+			minTip = min(minTip, mt.TxnSlot.GetTipCap().Uint64())
 		}
 		mt.minTip = minTip
 
@@ -2542,17 +2542,17 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.TemporalTx) err
 func (p *TxPool) printDebug(prefix string) {
 	fmt.Printf("%s.pool.byHash\n", prefix)
 	for _, j := range p.byHash {
-		fmt.Printf("\tsenderID=%d, nonce=%d, tip=%s\n", j.TxnSlot.SenderID, j.TxnSlot.Nonce, j.TxnSlot.GetTip())
+		fmt.Printf("\tsenderID=%d, nonce=%d, tip=%s\n", j.TxnSlot.SenderID, j.TxnSlot.Nonce, j.TxnSlot.GetTipCap())
 	}
 	fmt.Printf("%s.pool.queues.len: %d,%d,%d\n", prefix, p.pending.Len(), p.baseFee.Len(), p.queued.Len())
 	for _, mt := range p.pending.best.ms {
-		mt.TxnSlot.PrintDebug(fmt.Sprintf("%s.pending: %b,%d,%d,%s", prefix, mt.subPool, mt.TxnSlot.SenderID, mt.TxnSlot.Nonce, mt.TxnSlot.GetTip()))
+		mt.TxnSlot.PrintDebug(fmt.Sprintf("%s.pending: %b,%d,%d,%s", prefix, mt.subPool, mt.TxnSlot.SenderID, mt.TxnSlot.Nonce, mt.TxnSlot.GetTipCap()))
 	}
 	for _, mt := range p.baseFee.best.ms {
-		mt.TxnSlot.PrintDebug(fmt.Sprintf("%s.baseFee : %b,%d,%d,%s", prefix, mt.subPool, mt.TxnSlot.SenderID, mt.TxnSlot.Nonce, mt.TxnSlot.GetTip()))
+		mt.TxnSlot.PrintDebug(fmt.Sprintf("%s.baseFee : %b,%d,%d,%s", prefix, mt.subPool, mt.TxnSlot.SenderID, mt.TxnSlot.Nonce, mt.TxnSlot.GetTipCap()))
 	}
 	for _, mt := range p.queued.best.ms {
-		mt.TxnSlot.PrintDebug(fmt.Sprintf("%s.queued : %b,%d,%d,%s", prefix, mt.subPool, mt.TxnSlot.SenderID, mt.TxnSlot.Nonce, mt.TxnSlot.GetTip()))
+		mt.TxnSlot.PrintDebug(fmt.Sprintf("%s.queued : %b,%d,%d,%s", prefix, mt.subPool, mt.TxnSlot.SenderID, mt.TxnSlot.Nonce, mt.TxnSlot.GetTipCap()))
 	}
 }
 

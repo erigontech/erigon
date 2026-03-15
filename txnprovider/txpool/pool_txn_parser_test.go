@@ -278,7 +278,7 @@ func TestBlobTxnParsing(t *testing.T) {
 	assert.Equal(t, BlobTxnType, fatTxn.TxType())
 
 	assert.Equal(t, thinTxn.GetValue(), fatTxn.GetValue())
-	assert.Equal(t, thinTxn.GetTip(), fatTxn.GetTip())
+	assert.Equal(t, thinTxn.GetTipCap(), fatTxn.GetTipCap())
 	assert.Equal(t, thinTxn.GetFeeCap(), fatTxn.GetFeeCap())
 	assert.Equal(t, thinTxn.Nonce, fatTxn.Nonce)
 	assert.Equal(t, thinTxn.GetDataLen(), fatTxn.GetDataLen())
@@ -409,7 +409,7 @@ func TestWrapperV1BlobTxnParsing(t *testing.T) {
 	assert.Equal(t, BlobTxnType, fatTxn.TxType())
 
 	assert.Equal(t, thinTxn.GetValue(), fatTxn.GetValue())
-	assert.Equal(t, thinTxn.GetTip(), fatTxn.GetTip())
+	assert.Equal(t, thinTxn.GetTipCap(), fatTxn.GetTipCap())
 	assert.Equal(t, thinTxn.GetFeeCap(), fatTxn.GetFeeCap())
 	assert.Equal(t, thinTxn.Nonce, fatTxn.Nonce)
 	assert.Equal(t, thinTxn.GetDataLen(), fatTxn.GetDataLen())
