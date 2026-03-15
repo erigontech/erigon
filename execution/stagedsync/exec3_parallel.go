@@ -414,10 +414,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					// Signal that block N is fully applied — all state writes
 					// are now visible in pe.rs. The execLoop waits for this
 					// before scheduling block N+1's workers.
-					select {
-					case pe.blockApplied <- struct{}{}:
-					default:
-					}
+					pe.blockApplied <- struct{}{}
 
 					if dbg.StopAfterBlock > 0 && applyResult.BlockNum == dbg.StopAfterBlock {
 						return fmt.Errorf("stopping: block %d complete", applyResult.BlockNum)
