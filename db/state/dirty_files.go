@@ -210,11 +210,9 @@ func (i *FilesItem) closeFilesAndRemove() {
 	if i == nil {
 		return
 	}
-	// Delete accessors before the decompressor. If the process is killed between
-	// deleting the decompressor and deleting accessors, the accessor files become
-	// permanently orphaned (no .kv means no FilesItem on next startup to own them).
-	// Deleting accessors first means a crash leaves the .kv file intact, which is
-	// recoverable on restart.
+	// Delete accessors before the data file. If the process is killed between
+	// deleting the data file and accessors, the accessor files become
+	// permanently orphaned.
 	if i.index != nil {
 		i.index.Close()
 		// paranoic-mode on: don't delete frozen files
