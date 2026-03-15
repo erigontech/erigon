@@ -2706,7 +2706,6 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		}
 	}
 
-	t := time.Now()
 	err = updates.HashSort(ctx, warmuper, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
 		select {
 		case <-logEvery.C:
@@ -2766,7 +2765,6 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		}
 		return nil
 	})
-	log.Warn("[dbg] hashsort", "in", time.Since(t))
 	if err != nil {
 		return nil, fmt.Errorf("hash sort failed: %w", err)
 	}

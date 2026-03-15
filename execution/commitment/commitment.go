@@ -457,7 +457,6 @@ func ApplyDeferredBranchUpdates(
 
 	// Sequential fast path: avoids goroutine and channel overhead for small batches.
 	if numWorkers == 1 || len(deferred) <= numWorkers {
-		t := time.Now()
 
 		encoder := workerEncoderPool.Get().(*BranchEncoder)
 		merger := workerMergerPool.Get().(*BranchMerger)
@@ -478,11 +477,8 @@ func ApplyDeferredBranchUpdates(
 			written++
 		}
 		mxTrieBranchesUpdated.AddInt(written)
-		log.Warn("[dbg] took3", "in", time.Since(t), "l", len(deferred))
 		return written, nil
 	}
-
-	t := time.Now()
 
 	// Pipeline: workers encode in parallel, results sent to channel, main goroutine writes sequentially.
 	type result struct {
@@ -524,7 +520,6 @@ func ApplyDeferredBranchUpdates(
 		close(workCh)
 	}()
 
-	t2 := time.Now()
 	// Process results as they come in - write to storage immediately
 	var firstErr error
 	var written int
@@ -546,12 +541,6 @@ func ApplyDeferredBranchUpdates(
 			continue
 		}
 		written++
-	}
-	took := time.Since(t2)
-	if took > time.Millisecond {
-		log.Warn("[dbg] took2", "in", took, "in1", time.Since(t), "l", len(deferred))
-	} else {
-		log.Warn("[dbg] took1", "in", took, "in1", time.Since(t), "l", len(deferred))
 	}
 	mxTrieBranchesUpdated.AddInt(written)
 	return written, firstErr
