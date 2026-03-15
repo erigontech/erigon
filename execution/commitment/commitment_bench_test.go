@@ -383,8 +383,8 @@ func makeBenchCells() ([16]cell, uint16) {
 func makeDeferredUpdates(n int, prev []byte) []*DeferredBranchUpdate {
 	cells, bitmap := makeBenchCells()
 	updates := make([]*DeferredBranchUpdate, n)
-	prefix := make([]byte, 4)
 	for i := 0; i < n; i++ {
+		prefix := make([]byte, 4)
 		binary.BigEndian.PutUint32(prefix, uint32(i))
 		updates[i] = getDeferredUpdate(prefix, bitmap, bitmap, bitmap, &cells, 4, prev)
 	}
