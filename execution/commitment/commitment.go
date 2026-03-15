@@ -28,6 +28,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unsafe"
 
 	keccak "github.com/erigontech/fastkeccak"
@@ -516,6 +517,7 @@ func ApplyDeferredBranchUpdates(
 		}
 	}
 
+	t := time.Now()
 	// putBranch must be called sequentially (MDBX writes are single-threaded).
 	var written int
 	for _, upd := range deferred {
@@ -526,6 +528,12 @@ func ApplyDeferredBranchUpdates(
 			return written, err
 		}
 		written++
+	}
+	took := time.Since(t)
+	if took > time.Millisecond {
+		log.Warn("[dbg] took2", "in", took)
+	} else {
+		log.Warn("[dbg] took1", "in", took)
 	}
 	mxTrieBranchesUpdated.AddInt(written)
 	return written, nil
