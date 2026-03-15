@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
@@ -485,8 +486,7 @@ func ApplyDeferredBranchUpdates(
 		upd *DeferredBranchUpdate
 		err error
 	}
-	// Size channels to actual batch length, not the 50K max.
-	resultCh := make(chan result, len(deferred))
+	resultCh := make(chan result, numWorkers*8)
 	workCh := make(chan *DeferredBranchUpdate, len(deferred))
 
 	// Start workers with pooled encoders/mergers.
@@ -636,7 +636,7 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	}
 
 	if needsFlush {
-		if err := be.ApplyDeferredUpdates(16, ctx.PutBranch); err != nil {
+		if err := be.ApplyDeferredUpdates(estimate.HalfCPUs(), ctx.PutBranch); err != nil {
 			return err
 		}
 		be.ClearDeferred()
