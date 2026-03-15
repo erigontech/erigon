@@ -2359,6 +2359,7 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 	defer clean()
+	agg.PresetOfflineMerge()
 
 	if err := caplinStateSnaps.BuildMissingIndices(ctx, logger); err != nil {
 		return err
