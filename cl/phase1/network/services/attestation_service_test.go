@@ -371,4 +371,3 @@ func TestAttestation(t *testing.T) {
 
 	suite.Run(t, &attestationTestSuite{})
 }
-
