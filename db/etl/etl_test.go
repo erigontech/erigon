@@ -1331,9 +1331,11 @@ func BenchmarkSortableBufferLoadOnly(b *testing.B) {
 						b.Fatal(err)
 					}
 				}
+				c.buf.Sort()
 				b.StartTimer()
 				if err := c.Load(nil, "", func(k, v []byte, _ CurrentTableReader, next LoadNextFunc) error {
-					return next(k, k, v)
+					return nil
+					//return next(k, k, v)
 				}, TransformArgs{}); err != nil {
 					b.Fatal(err)
 				}
