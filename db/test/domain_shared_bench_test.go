@@ -294,6 +294,7 @@ func BenchmarkPruneSmallBatches(b *testing.B) {
 
 	rwTx, err := db.BeginTemporalRw(ctx)
 	require.NoError(b, err)
+	defer rwTx.Rollback()
 
 	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(b, err)
@@ -322,7 +323,7 @@ func BenchmarkPruneSmallBatches(b *testing.B) {
 
 	for b.Loop() {
 		b.StopTimer()
-		pruneTx, err := db.BeginTemporalRw(ctx)
+		pruneTx, err := db.BeginTemporalRw(ctx) //nolint:gocritic
 		require.NoError(b, err)
 		b.StartTimer()
 
