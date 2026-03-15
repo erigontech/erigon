@@ -781,7 +781,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			}
 		}
 
-		t := 0
+		t := time.Now()
 		if err := doms.Flush(ctx, tx); err != nil {
 			return err
 		}
