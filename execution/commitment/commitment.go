@@ -454,9 +454,12 @@ func ApplyDeferredBranchUpdates(
 	if numWorkers <= 1 {
 		numWorkers = 1
 	}
+	numWorkers = 1
 
 	// Sequential fast path: avoids goroutine and channel overhead for small batches.
 	if numWorkers == 1 || len(deferred) <= numWorkers {
+		t := time.Now()
+
 		encoder := workerEncoderPool.Get().(*BranchEncoder)
 		merger := workerMergerPool.Get().(*BranchMerger)
 		defer workerEncoderPool.Put(encoder)
@@ -476,6 +479,7 @@ func ApplyDeferredBranchUpdates(
 			written++
 		}
 		mxTrieBranchesUpdated.AddInt(written)
+		log.Warn("[dbg] took3", "in", time.Since(t), "l", len(deferred))
 		return written, nil
 	}
 
@@ -636,7 +640,6 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	}
 
 	if needsFlush {
-		log.Warn("[dbg] ")
 		if err := be.ApplyDeferredUpdates(estimate.HalfCPUs(), ctx.PutBranch); err != nil {
 			return err
 		}
