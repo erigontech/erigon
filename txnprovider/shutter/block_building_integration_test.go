@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/common/testlog"
-	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 	"github.com/erigontech/erigon/execution/types"
@@ -220,9 +219,9 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	chainConfig := genesis.Config
 	chainConfig.ChainName = "shutter-devnet"
 	chainConfig.TerminalTotalDifficulty = big.NewInt(0)
-	chainConfig.ShanghaiTime = chain.NewUint64(0)
-	chainConfig.CancunTime = chain.NewUint64(0)
-	chainConfig.PragueTime = chain.NewUint64(0)
+	chainConfig.ShanghaiTime = common.NewUint64(0)
+	chainConfig.CancunTime = common.NewUint64(0)
+	chainConfig.PragueTime = common.NewUint64(0)
 	genesis.Timestamp = uint64(time.Now().Unix() - 1)
 	// 1_000 ETH in wei in the bank
 	bank := testhelpers.NewBank(new(big.Int).Exp(big.NewInt(10), big.NewInt(21), nil))

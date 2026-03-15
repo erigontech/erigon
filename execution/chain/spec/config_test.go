@@ -25,6 +25,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 )
 
@@ -38,8 +39,8 @@ func TestCheckCompatible(t *testing.T) {
 		{stored: chain.AllProtocolChanges, new: chain.AllProtocolChanges, head: 0, wantErr: nil},
 		{stored: chain.AllProtocolChanges, new: chain.AllProtocolChanges, head: 100, wantErr: nil},
 		{
-			stored:  &chain.Config{TangerineWhistleBlock: chain.NewUint64(10)},
-			new:     &chain.Config{TangerineWhistleBlock: chain.NewUint64(20)},
+			stored:  &chain.Config{TangerineWhistleBlock: common.NewUint64(10)},
+			new:     &chain.Config{TangerineWhistleBlock: common.NewUint64(20)},
 			head:    9,
 			wantErr: nil,
 		},
@@ -49,47 +50,47 @@ func TestCheckCompatible(t *testing.T) {
 			head:   3,
 			wantErr: &chain.ConfigCompatError{
 				What:         "Homestead fork block",
-				StoredConfig: chain.NewUint64(0),
+				StoredConfig: common.NewUint64(0),
 				NewConfig:    nil,
 				RewindTo:     0,
 			},
 		},
 		{
 			stored: chain.AllProtocolChanges,
-			new:    &chain.Config{HomesteadBlock: chain.NewUint64(1)},
+			new:    &chain.Config{HomesteadBlock: common.NewUint64(1)},
 			head:   3,
 			wantErr: &chain.ConfigCompatError{
 				What:         "Homestead fork block",
-				StoredConfig: chain.NewUint64(0),
-				NewConfig:    chain.NewUint64(1),
+				StoredConfig: common.NewUint64(0),
+				NewConfig:    common.NewUint64(1),
 				RewindTo:     0,
 			},
 		},
 		{
-			stored: &chain.Config{HomesteadBlock: chain.NewUint64(30), TangerineWhistleBlock: chain.NewUint64(10)},
-			new:    &chain.Config{HomesteadBlock: chain.NewUint64(25), TangerineWhistleBlock: chain.NewUint64(20)},
+			stored: &chain.Config{HomesteadBlock: common.NewUint64(30), TangerineWhistleBlock: common.NewUint64(10)},
+			new:    &chain.Config{HomesteadBlock: common.NewUint64(25), TangerineWhistleBlock: common.NewUint64(20)},
 			head:   25,
 			wantErr: &chain.ConfigCompatError{
 				What:         "Tangerine Whistle fork block",
-				StoredConfig: chain.NewUint64(10),
-				NewConfig:    chain.NewUint64(20),
+				StoredConfig: common.NewUint64(10),
+				NewConfig:    common.NewUint64(20),
 				RewindTo:     9,
 			},
 		},
 		{
-			stored:  &chain.Config{ConstantinopleBlock: chain.NewUint64(30)},
-			new:     &chain.Config{ConstantinopleBlock: chain.NewUint64(30), PetersburgBlock: chain.NewUint64(30)},
+			stored:  &chain.Config{ConstantinopleBlock: common.NewUint64(30)},
+			new:     &chain.Config{ConstantinopleBlock: common.NewUint64(30), PetersburgBlock: common.NewUint64(30)},
 			head:    40,
 			wantErr: nil,
 		},
 		{
-			stored: &chain.Config{ConstantinopleBlock: chain.NewUint64(30)},
-			new:    &chain.Config{ConstantinopleBlock: chain.NewUint64(30), PetersburgBlock: chain.NewUint64(31)},
+			stored: &chain.Config{ConstantinopleBlock: common.NewUint64(30)},
+			new:    &chain.Config{ConstantinopleBlock: common.NewUint64(30), PetersburgBlock: common.NewUint64(31)},
 			head:   40,
 			wantErr: &chain.ConfigCompatError{
 				What:         "Petersburg fork block",
 				StoredConfig: nil,
-				NewConfig:    chain.NewUint64(31),
+				NewConfig:    common.NewUint64(31),
 				RewindTo:     30,
 			},
 		},

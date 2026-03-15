@@ -64,81 +64,81 @@ func init() {
 	Forks["Frontier"] = c
 
 	c = configCopy(c)
-	c.HomesteadBlock = chain.NewUint64(5)
+	c.HomesteadBlock = common.NewUint64(5)
 	Forks["FrontierToHomesteadAt5"] = c
 
 	c = configCopy(c)
-	c.HomesteadBlock = chain.NewUint64(0)
+	c.HomesteadBlock = common.NewUint64(0)
 	Forks["Homestead"] = c
 
 	c = configCopy(c)
-	c.DAOForkBlock = chain.NewUint64(5)
+	c.DAOForkBlock = common.NewUint64(5)
 	Forks["HomesteadToDaoAt5"] = c
 
 	c = configCopy(c)
 	c.DAOForkBlock = nil
-	c.TangerineWhistleBlock = chain.NewUint64(5)
+	c.TangerineWhistleBlock = common.NewUint64(5)
 	Forks["HomesteadToEIP150At5"] = c
 
 	c = configCopy(c)
-	c.TangerineWhistleBlock = chain.NewUint64(0)
+	c.TangerineWhistleBlock = common.NewUint64(0)
 	Forks["EIP150"] = c
 
 	c = configCopy(c)
-	c.SpuriousDragonBlock = chain.NewUint64(0)
+	c.SpuriousDragonBlock = common.NewUint64(0)
 	Forks["EIP158"] = c
 
 	c = configCopy(c)
-	c.ByzantiumBlock = chain.NewUint64(5)
+	c.ByzantiumBlock = common.NewUint64(5)
 	Forks["EIP158ToByzantiumAt5"] = c
 
 	c = configCopy(c)
-	c.ByzantiumBlock = chain.NewUint64(0)
+	c.ByzantiumBlock = common.NewUint64(0)
 	Forks["Byzantium"] = c
 
 	c = configCopy(c)
-	c.ConstantinopleBlock = chain.NewUint64(5)
+	c.ConstantinopleBlock = common.NewUint64(5)
 	Forks["ByzantiumToConstantinopleAt5"] = c
 
 	c = configCopy(c)
-	c.PetersburgBlock = chain.NewUint64(5)
+	c.PetersburgBlock = common.NewUint64(5)
 	Forks["ByzantiumToConstantinopleFixAt5"] = c
 
 	c = configCopy(c)
-	c.ConstantinopleBlock = chain.NewUint64(0)
+	c.ConstantinopleBlock = common.NewUint64(0)
 	c.PetersburgBlock = nil
 	Forks["Constantinople"] = c
 
 	c = configCopy(c)
-	c.PetersburgBlock = chain.NewUint64(0)
+	c.PetersburgBlock = common.NewUint64(0)
 	Forks["ConstantinopleFix"] = c
 
 	c = configCopy(c)
-	c.IstanbulBlock = chain.NewUint64(5)
+	c.IstanbulBlock = common.NewUint64(5)
 	Forks["ConstantinopleFixToIstanbulAt5"] = c
 
 	c = configCopy(c)
-	c.IstanbulBlock = chain.NewUint64(0)
+	c.IstanbulBlock = common.NewUint64(0)
 	Forks["Istanbul"] = c
 
 	c = configCopy(c)
-	c.MuirGlacierBlock = chain.NewUint64(0)
+	c.MuirGlacierBlock = common.NewUint64(0)
 	Forks["EIP2384"] = c
 
 	c = configCopy(c)
-	c.BerlinBlock = chain.NewUint64(0)
+	c.BerlinBlock = common.NewUint64(0)
 	Forks["Berlin"] = c
 
 	c = configCopy(c)
-	c.LondonBlock = chain.NewUint64(5)
+	c.LondonBlock = common.NewUint64(5)
 	Forks["BerlinToLondonAt5"] = c
 
 	c = configCopy(c)
-	c.LondonBlock = chain.NewUint64(0)
+	c.LondonBlock = common.NewUint64(0)
 	Forks["London"] = c
 
 	c = configCopy(c)
-	c.ArrowGlacierBlock = chain.NewUint64(0)
+	c.ArrowGlacierBlock = common.NewUint64(0)
 	Forks["ArrowGlacier"] = c
 
 	c = configCopy(c)
@@ -147,7 +147,7 @@ func init() {
 
 	c = configCopy(c)
 	c.TerminalTotalDifficulty = nil
-	c.GrayGlacierBlock = chain.NewUint64(0)
+	c.GrayGlacierBlock = common.NewUint64(0)
 	Forks["GrayGlacier"] = c
 
 	c = configCopy(c)
@@ -157,81 +157,81 @@ func init() {
 
 	c = configCopy(c)
 	c.TerminalTotalDifficultyPassed = true
-	c.ShanghaiTime = chain.NewUint64(15_000)
+	c.ShanghaiTime = common.NewUint64(15_000)
 	Forks["ParisToShanghaiAtTime15k"] = c
 
 	c = configCopy(c)
-	c.ShanghaiTime = chain.NewUint64(0)
+	c.ShanghaiTime = common.NewUint64(0)
 	Forks["Shanghai"] = c
 
 	c = configCopy(c)
-	c.CancunTime = chain.NewUint64(15_000)
+	c.CancunTime = common.NewUint64(15_000)
 	Forks["ShanghaiToCancunAtTime15k"] = c
 
 	c = configCopy(c)
-	c.CancunTime = chain.NewUint64(0)
+	c.CancunTime = common.NewUint64(0)
 	Forks["Cancun"] = c
 
 	c = configCopy(c)
-	c.PragueTime = chain.NewUint64(15_000)
+	c.PragueTime = common.NewUint64(15_000)
 	c.DepositContract = common.HexToAddress("0x00000000219ab540356cBB839Cbe05303d7705Fa")
 	Forks["CancunToPragueAtTime15k"] = c
 
 	c = configCopy(c)
-	c.PragueTime = chain.NewUint64(0)
+	c.PragueTime = common.NewUint64(0)
 	Forks["Prague"] = c
 
 	c = configCopy(c)
-	c.OsakaTime = chain.NewUint64(15_000)
+	c.OsakaTime = common.NewUint64(15_000)
 	Forks["PragueToOsakaAtTime15k"] = c
 
 	c = configCopy(c)
-	c.OsakaTime = chain.NewUint64(0)
+	c.OsakaTime = common.NewUint64(0)
 	Forks["Osaka"] = c
 
 	c = configCopy(c)
 	c.BlobSchedule = blobSchedule
-	c.Bpo1Time = chain.NewUint64(15_000)
+	c.Bpo1Time = common.NewUint64(15_000)
 	Forks["OsakaToBPO1AtTime15k"] = c
 
 	c = configCopy(c)
-	c.Bpo1Time = chain.NewUint64(0)
+	c.Bpo1Time = common.NewUint64(0)
 	Forks["BPO1"] = c
 
 	c = configCopy(c)
-	c.Bpo2Time = chain.NewUint64(15_000)
+	c.Bpo2Time = common.NewUint64(15_000)
 	Forks["BPO1ToBPO2AtTime15k"] = c
 
 	c = configCopy(c)
-	c.Bpo2Time = chain.NewUint64(0)
+	c.Bpo2Time = common.NewUint64(0)
 	Forks["BPO2"] = c
 
 	// Amsterdam branches from BPO2 (not BPO3/BPO4).
 	// In EEST, Amsterdam inherits Osaka blob params; the devnet test fixtures
 	// were generated with BPO2's blob schedule (target=14, max=21, fraction=11684671).
 	cAms := configCopy(c)
-	cAms.AmsterdamTime = chain.NewUint64(15_000)
+	cAms.AmsterdamTime = common.NewUint64(15_000)
 	Forks["BPO2ToAmsterdamAtTime15k"] = cAms
 
 	cAms = configCopy(cAms)
-	cAms.AmsterdamTime = chain.NewUint64(0)
+	cAms.AmsterdamTime = common.NewUint64(0)
 	Forks["Amsterdam"] = cAms
 
 	// BPO3/BPO4 continue from BPO2 as a separate chain
 	c = configCopy(c)
-	c.Bpo3Time = chain.NewUint64(15_000)
+	c.Bpo3Time = common.NewUint64(15_000)
 	Forks["BPO2ToBPO3AtTime15k"] = c
 
 	c = configCopy(c)
-	c.Bpo3Time = chain.NewUint64(0)
+	c.Bpo3Time = common.NewUint64(0)
 	Forks["BPO3"] = c
 
 	c = configCopy(c)
-	c.Bpo4Time = chain.NewUint64(15_000)
+	c.Bpo4Time = common.NewUint64(15_000)
 	Forks["BPO3ToBPO4AtTime15k"] = c
 
 	c = configCopy(c)
-	c.Bpo4Time = chain.NewUint64(0)
+	c.Bpo4Time = common.NewUint64(0)
 	Forks["BPO4"] = c
 }
 

@@ -4,6 +4,7 @@ import (
 	"math/big"
 	"path"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/node/paths"
 )
@@ -14,16 +15,16 @@ var (
 	AllCliqueProtocolChanges = &chain.Config{
 		ChainID:               big.NewInt(1337),
 		Rules:                 chain.CliqueRules,
-		HomesteadBlock:        chain.NewUint64(0),
-		TangerineWhistleBlock: chain.NewUint64(0),
-		SpuriousDragonBlock:   chain.NewUint64(0),
-		ByzantiumBlock:        chain.NewUint64(0),
-		ConstantinopleBlock:   chain.NewUint64(0),
-		PetersburgBlock:       chain.NewUint64(0),
-		IstanbulBlock:         chain.NewUint64(0),
-		MuirGlacierBlock:      chain.NewUint64(0),
-		BerlinBlock:           chain.NewUint64(0),
-		LondonBlock:           chain.NewUint64(0),
+		HomesteadBlock:        common.NewUint64(0),
+		TangerineWhistleBlock: common.NewUint64(0),
+		SpuriousDragonBlock:   common.NewUint64(0),
+		ByzantiumBlock:        common.NewUint64(0),
+		ConstantinopleBlock:   common.NewUint64(0),
+		PetersburgBlock:       common.NewUint64(0),
+		IstanbulBlock:         common.NewUint64(0),
+		MuirGlacierBlock:      common.NewUint64(0),
+		BerlinBlock:           common.NewUint64(0),
+		LondonBlock:           common.NewUint64(0),
 		Clique:                &chain.CliqueConfig{Period: 0, Epoch: 30000},
 	}
 

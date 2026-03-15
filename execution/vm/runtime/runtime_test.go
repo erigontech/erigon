@@ -198,11 +198,11 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 		BlockNumber: 1,
 		ChainConfig: &chain.Config{
 			ChainID:               big.NewInt(1),
-			HomesteadBlock:        chain.NewUint64(0),
-			ByzantiumBlock:        chain.NewUint64(0),
-			ConstantinopleBlock:   chain.NewUint64(0),
-			TangerineWhistleBlock: chain.NewUint64(0),
-			SpuriousDragonBlock:   chain.NewUint64(0),
+			HomesteadBlock:        common.NewUint64(0),
+			ByzantiumBlock:        common.NewUint64(0),
+			ConstantinopleBlock:   common.NewUint64(0),
+			TangerineWhistleBlock: common.NewUint64(0),
+			SpuriousDragonBlock:   common.NewUint64(0),
 		},
 		EVMConfig: vm.Config{
 			//JumpDestCache: vm.NewJumpDestCache(128),
