@@ -374,6 +374,13 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	stx.To = &common.Address{}
+	if kind, size, err := s.Kind(); err != nil {
+		return err
+	} else if kind == rlp.Byte {
+		return fmt.Errorf("wrong size for To: 1")
+	} else if size != 20 {
+		return fmt.Errorf("wrong size for To: %d", size)
+	}
 	if err = s.ReadBytes(stx.To[:]); err != nil {
 		return err
 	}

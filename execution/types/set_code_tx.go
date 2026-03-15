@@ -19,6 +19,7 @@ package types
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
 
@@ -267,6 +268,13 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	tx.To = &common.Address{}
+	if kind, size, err := s.Kind(); err != nil {
+		return err
+	} else if kind == rlp.Byte {
+		return fmt.Errorf("wrong size for To: 1")
+	} else if size != 20 {
+		return fmt.Errorf("wrong size for To: %d", size)
+	}
 	if err = s.ReadBytes(tx.To[:]); err != nil {
 		return err
 	}
