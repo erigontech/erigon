@@ -781,11 +781,12 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			}
 		}
 
-		t := time.Now()
+		t, sz := time.Now(), doms.Size()
 		if err := doms.Flush(ctx, tx); err != nil {
 			return err
 		}
-		log.Warn("[dbg] doms.flush", "in", time.Since(t))
+		log.Warn("[dbg] doms.flush", "in", time.Since(t), "sz", datasize.ByteSize(sz).String())
+
 		doms.ClearRam(true)
 
 		pruneStage, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, s.CurrentSyncCycle.IsInitialCycle)
