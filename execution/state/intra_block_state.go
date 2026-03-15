@@ -362,8 +362,12 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.txIndex = 0
 	sdb.logSize = 0
 	sdb.versionMap = nil
-	clearReadSet(sdb.versionedReads)
-	clearWriteSet(sdb.versionedWrites)
+	// Do not clear the maps in place — result.TxIn / result.TxOut may still
+	// reference them from a prior execution (used by finalize in another
+	// goroutine). Setting to nil lets the GC collect the old maps once all
+	// references are dropped, while the next execution lazily allocates fresh ones.
+	sdb.versionedReads = nil
+	sdb.versionedWrites = nil
 	sdb.accountReadDuration = 0
 	sdb.accountReadCount = 0
 	sdb.storageReadDuration = 0

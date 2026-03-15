@@ -95,20 +95,6 @@ func (rs ReadSet) Set(v VersionedRead) {
 	}
 }
 
-func clearReadSet(rs ReadSet) {
-	for addr, inner := range rs {
-		clear(inner)
-		delete(rs, addr)
-	}
-}
-
-func clearWriteSet(ws WriteSet) {
-	for addr, inner := range ws {
-		clear(inner)
-		delete(ws, addr)
-	}
-}
-
 func (s ReadSet) Scan(yield func(input *VersionedRead) bool) {
 	for _, reads := range s {
 		for _, v := range reads {
