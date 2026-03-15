@@ -797,6 +797,7 @@ func TestDomain_ScanFiles(t *testing.T) {
 	scanDirsRes, err := scanDirs(d.dirs)
 	require.NoError(t, err)
 	require.NoError(t, d.openFolder(scanDirsRes))
+	d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 
 	// Check the history
 	checkHistory(t, db, d, txs)
