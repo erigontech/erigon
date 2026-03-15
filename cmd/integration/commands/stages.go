@@ -681,7 +681,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		return err
 	}
 
-	defer tx.Rollback()
+	defer func() { tx.Rollback() }()
 
 	if pruneTo > 0 {
 		p, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, true)
