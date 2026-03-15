@@ -32,7 +32,6 @@ import (
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fp"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	"github.com/consensys/gnark-crypto/ecc/bn254"
-	patched_big "github.com/ethereum/go-bigmodexpfix/src/math/big"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -47,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm/modexp"
 
 	//lint:ignore SA1019 Needed for precompile
 	"golang.org/x/crypto/ripemd160"
@@ -566,7 +566,6 @@ var (
 	errModExpBaseLengthTooLarge     = errors.New("base length is too large")
 	errModExpExponentLengthTooLarge = errors.New("exponent length is too large")
 	errModExpModulusLengthTooLarge  = errors.New("modulus length is too large")
-	patchedBig1                     = patched_big.NewInt(1)
 )
 
 func (c *bigModExp) Run(input []byte) ([]byte, error) {
@@ -611,21 +610,11 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 	}
 	// Retrieve the operands and execute the exponentiation
 	var (
-		base = new(patched_big.Int).SetBytes(getData(input, 0, baseLen))
-		exp  = new(patched_big.Int).SetBytes(getData(input, baseLen, expLen))
-		mod  = new(patched_big.Int).SetBytes(getData(input, baseLen+expLen, modLen))
-		v    []byte
+		baseBytes = getData(input, 0, baseLen)
+		expBytes  = getData(input, baseLen, expLen)
+		modBytes  = getData(input, baseLen+expLen, modLen)
 	)
-	switch {
-	case mod.Cmp(patchedBig1) <= 0:
-		// Leave the result as zero for mod 0 (undefined) and 1
-	case base.Cmp(patchedBig1) == 0:
-		// If base == 1 (and mod > 1), then the result is 1
-		v = patchedBig1.Bytes()
-	default:
-		v = base.Exp(base, exp, mod).Bytes()
-	}
-	return common.LeftPadBytes(v, int(modLen)), nil
+	return modexp.Exp(baseBytes, expBytes, modBytes), nil
 }
 
 func (c *bigModExp) Name() string {
