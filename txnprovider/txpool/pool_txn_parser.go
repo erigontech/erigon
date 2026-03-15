@@ -58,6 +58,9 @@ type TxnParseContext struct {
 	malleableSigner *types.Signer // cached signer that accepts pre-EIP-2 malleable signatures
 	keccak          keccak.KeccakState
 	bytesReader     bytes.Reader // reusable reader to avoid allocation per parse
+	authBuf         bytes.Buffer // reusable buffer for authorization signer recovery
+	authHashBuf     [32]byte     // reusable hash buffer for authorization signer recovery
+	innerTxBuf      []byte       // reusable buffer for blob wrapper inner tx bytes
 	withSender      bool
 	allowPreEip2s   bool // Allow s > secp256k1n/2; see EIP-2
 	chainIDRequired bool
@@ -233,7 +236,11 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		}
 		// innerTxBytes = type_byte + rlp_list(tx_body)
 		// The body RLP (with its list prefix) starts at wrapperListPos.
-		innerTxBytes = make([]byte, 1+innerBodyPos+innerBodyLen-wrapperListPos)
+		innerLen := 1 + innerBodyPos + innerBodyLen - wrapperListPos
+		if cap(ctx.innerTxBuf) < innerLen {
+			ctx.innerTxBuf = make([]byte, innerLen)
+		}
+		innerTxBytes = ctx.innerTxBuf[:innerLen]
 		innerTxBytes[0] = BlobTxnType
 		copy(innerTxBytes[1:], txBytes[wrapperListPos:innerBodyPos+innerBodyLen])
 
@@ -314,7 +321,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 			return 0, fmt.Errorf("%w: proofs len: %s", ErrParseTxn, err) //nolint
 		}
 		proofPos := proofListPos
-		proofsList := make([]goethkzg.KZGProof, 0)
+		proofsList := make([]goethkzg.KZGProof, 0, proofsPerBlob*len(slot.BlobBundles))
 		for proofPos < proofListPos+proofListLen {
 			proofPos, err = rlp.StringOfLen(txBytes, proofPos, 48)
 			if err != nil {
@@ -394,13 +401,13 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	if txn.Type() == types.SetCodeTxType {
 		auths := txn.GetAuthorizations()
 		slot.AuthAndNonces = make([]AuthAndNonce, 0, len(auths))
-		var hashBuf [32]byte
 		for _, auth := range auths {
 			if !auth.ChainID.IsUint64() {
 				return 0, fmt.Errorf("%w: authorization chainId is too big: %s", ErrParseTxn, &auth.ChainID)
 			}
 			authCopy := auth
-			authority, err := authCopy.RecoverSigner(bytes.NewBuffer(nil), hashBuf[:])
+			ctx.authBuf.Reset()
+			authority, err := authCopy.RecoverSigner(&ctx.authBuf, ctx.authHashBuf[:])
 			if err != nil {
 				return 0, fmt.Errorf("%w: recover authorization signer: %s stack: %s", ErrParseTxn, err, dbg.Stack()) //nolint
 			}
@@ -448,7 +455,8 @@ type PoolBlobBundle struct {
 }
 
 // TxnSlot contains information extracted from an Ethereum transaction, which is enough to manage it inside the transaction.
-// Also, it contains some auxiliary information, like ephemeral fields, and indices within priority queues
+// Also, it contains some auxiliary information, like ephemeral fields, and indices within priority queues.
+// Txn must be non-nil for all slots except the btree search sentinel (which only uses SenderID and Nonce).
 type TxnSlot struct {
 	Txn      types.Transaction // The decoded standard transaction (BlobTx, not BlobTxWrapper, for blob txns)
 	Rlp      []byte            // Is set to nil after flushing to db, frees memory, later we look for it in the db, if needed
