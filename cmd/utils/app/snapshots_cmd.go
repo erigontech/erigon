@@ -2918,6 +2918,15 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
+	if err := db.Update(ctx, func(tx kv.RwTx) error {
+		t := time.Now()
+		_, err = tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, 30*time.Second)
+		logger.Info("[dbg] prune when nothing to prune", "took", time.Since(t))
+		return err
+	}); err != nil {
+		return err
+	}
+
 	return nil
 }
 
