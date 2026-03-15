@@ -535,7 +535,10 @@ func MiningStep(ctx context.Context, db kv.TemporalRwDB, mining *stagedsync.Sync
 	}
 	defer tx.Rollback()
 
-	mb := membatchwithdb.NewMemoryBatch(tx, tmpDir, logger)
+	mb, err := membatchwithdb.NewMemoryBatch(tx, tmpDir, logger)
+	if err != nil {
+		return err
+	}
 	defer mb.Close()
 
 	sd, err := execctx.NewSharedDomains(ctx, mb, logger)

@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"sync/atomic"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -82,6 +83,7 @@ type CallResult struct {
 	ReturnData string          `json:"returnData"`
 	Logs       []*types.RPCLog `json:"logs"`
 	GasUsed    hexutil.Uint64  `json:"gasUsed"`
+	MaxUsedGas hexutil.Uint64  `json:"maxUsedGas"`
 	Status     hexutil.Uint64  `json:"status"`
 	Error      any             `json:"error,omitempty"`
 }
@@ -689,10 +691,17 @@ func (s *simulator) simulateCall(
 	// It is possible to override precompiles with EVM bytecode or move them to another address.
 	evm.SetPrecompiles(precompiles)
 
-	// Wait for the context to be done and cancel the EVM. Even if the EVM has finished, cancelling may be done (repeatedly)
+	done := make(chan struct{})
+	defer close(done)
+
+	var timedOut atomic.Bool
 	go func() {
-		<-ctx.Done()
-		evm.Cancel()
+		select {
+		case <-ctx.Done():
+			timedOut.Store(true)
+			evm.Cancel()
+		case <-done:
+		}
 	}()
 
 	s.gasPool.AddBlobGas(msg.BlobGas())
@@ -702,7 +711,7 @@ func (s *simulator) simulateCall(
 	}
 
 	// If the timer caused an abort, return an appropriate error message
-	if evm.Cancelled() {
+	if timedOut.Load() {
 		return nil, nil, nil, fmt.Errorf("execution aborted (timeout = %v)", s.evmCallTimeout)
 	}
 	*cumulativeGasUsed += result.ReceiptGasUsed
@@ -716,7 +725,7 @@ func (s *simulator) simulateCall(
 		logs = receipt.Logs
 	}
 
-	callResult := CallResult{GasUsed: hexutil.Uint64(result.ReceiptGasUsed)}
+	callResult := CallResult{GasUsed: hexutil.Uint64(result.ReceiptGasUsed), MaxUsedGas: hexutil.Uint64(result.MaxGasUsed)}
 	callResult.Logs = make([]*types.RPCLog, 0, len(logs))
 	for _, l := range logs {
 		rpcLog := &types.RPCLog{
