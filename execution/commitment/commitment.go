@@ -28,6 +28,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unsafe"
 
 	keccak "github.com/erigontech/fastkeccak"
@@ -477,6 +478,8 @@ func ApplyDeferredBranchUpdates(
 		return written, nil
 	}
 
+	t := time.Now()
+
 	// Pipeline: workers encode in parallel, results sent to channel, main goroutine writes sequentially.
 	type result struct {
 		upd *DeferredBranchUpdate
@@ -518,6 +521,7 @@ func ApplyDeferredBranchUpdates(
 		close(workCh)
 	}()
 
+	t2 := time.Now()
 	// Process results as they come in - write to storage immediately
 	var firstErr error
 	var written int
@@ -539,6 +543,12 @@ func ApplyDeferredBranchUpdates(
 			continue
 		}
 		written++
+	}
+	took := time.Since(t2)
+	if took > time.Millisecond {
+		log.Warn("[dbg] took2", "in", took, "in1", time.Since(t), "l", len(deferred))
+	} else {
+		log.Warn("[dbg] took1", "in", took, "in1", time.Since(t), "l", len(deferred))
 	}
 	mxTrieBranchesUpdated.AddInt(written)
 	return written, firstErr
