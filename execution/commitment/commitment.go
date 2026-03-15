@@ -532,9 +532,9 @@ func ApplyDeferredBranchUpdates(
 	}
 	took := time.Since(t2)
 	if took > time.Millisecond {
-		log.Warn("[dbg] took2", "in", took, "t1", time.Since(t2), "l", len(deferred))
+		log.Warn("[dbg] took2", "in", took, "t1", time.Since(t), "l", len(deferred))
 	} else {
-		log.Warn("[dbg] took1", "in", took, "t1", time.Since(t2), "l", len(deferred))
+		log.Warn("[dbg] took1", "in", took, "t1", time.Since(t), "l", len(deferred))
 	}
 	mxTrieBranchesUpdated.AddInt(written)
 	return written, nil
