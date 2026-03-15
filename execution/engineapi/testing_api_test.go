@@ -38,6 +38,8 @@ import (
 	"github.com/erigontech/erigon/rpc"
 )
 
+func newUint64(v uint64) *uint64 { return &v }
+
 // ---------------------------------------------------------------------------
 // Minimal stub implementing executionproto.ExecutionServer for unit tests.
 // Only the methods called by BuildBlockV1 (GetHeader, AssembleBlock,
@@ -82,25 +84,25 @@ func (s *stubExecutionServer) GetAssembledBlock(ctx context.Context, in *executi
 func allForksChainConfig() *chain.Config {
 	return &chain.Config{
 		ChainID:                       big.NewInt(1337),
-		HomesteadBlock:                big.NewInt(0),
-		TangerineWhistleBlock:         big.NewInt(0),
-		SpuriousDragonBlock:           big.NewInt(0),
-		ByzantiumBlock:                big.NewInt(0),
-		ConstantinopleBlock:           big.NewInt(0),
-		PetersburgBlock:               big.NewInt(0),
-		IstanbulBlock:                 big.NewInt(0),
-		MuirGlacierBlock:              big.NewInt(0),
-		BerlinBlock:                   big.NewInt(0),
-		LondonBlock:                   big.NewInt(0),
-		ArrowGlacierBlock:             big.NewInt(0),
-		GrayGlacierBlock:              big.NewInt(0),
+		HomesteadBlock:                newUint64(0),
+		TangerineWhistleBlock:         newUint64(0),
+		SpuriousDragonBlock:           newUint64(0),
+		ByzantiumBlock:                newUint64(0),
+		ConstantinopleBlock:           newUint64(0),
+		PetersburgBlock:               newUint64(0),
+		IstanbulBlock:                 newUint64(0),
+		MuirGlacierBlock:              newUint64(0),
+		BerlinBlock:                   newUint64(0),
+		LondonBlock:                   newUint64(0),
+		ArrowGlacierBlock:             newUint64(0),
+		GrayGlacierBlock:              newUint64(0),
 		TerminalTotalDifficulty:       big.NewInt(0),
 		TerminalTotalDifficultyPassed: true,
-		ShanghaiTime:                  big.NewInt(0),
-		CancunTime:                    big.NewInt(0),
-		PragueTime:                    big.NewInt(0),
-		OsakaTime:                     big.NewInt(0),
-		AmsterdamTime:                 big.NewInt(0),
+		ShanghaiTime:                  newUint64(0),
+		CancunTime:                    newUint64(0),
+		PragueTime:                    newUint64(0),
+		OsakaTime:                     newUint64(0),
+		AmsterdamTime:                 newUint64(0),
 		Ethash:                        new(chain.EthashConfig),
 	}
 }

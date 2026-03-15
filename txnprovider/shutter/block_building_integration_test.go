@@ -46,6 +46,8 @@ import (
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 )
 
+func newUint64(v uint64) *uint64 { return &v }
+
 func TestShutterBlockBuilding(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -219,9 +221,9 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 	chainConfig := genesis.Config
 	chainConfig.ChainName = "shutter-devnet"
 	chainConfig.TerminalTotalDifficulty = big.NewInt(0)
-	chainConfig.ShanghaiTime = big.NewInt(0)
-	chainConfig.CancunTime = big.NewInt(0)
-	chainConfig.PragueTime = big.NewInt(0)
+	chainConfig.ShanghaiTime = newUint64(0)
+	chainConfig.CancunTime = newUint64(0)
+	chainConfig.PragueTime = newUint64(0)
 	genesis.Timestamp = uint64(time.Now().Unix() - 1)
 	// 1_000 ETH in wei in the bank
 	bank := testhelpers.NewBank(new(big.Int).Exp(big.NewInt(10), big.NewInt(21), nil))

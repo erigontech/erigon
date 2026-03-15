@@ -54,6 +54,8 @@ import (
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
 
+func newUint64(v uint64) *uint64 { return &v }
+
 var (
 	canonicalSeed = 1
 	forkSeed      = 2
@@ -677,7 +679,7 @@ func TestEIP155Transition(t *testing.T) {
 		funds      = big.NewInt(1000000000)
 		deleteAddr = common.Address{1}
 		gspec      = &types.Genesis{
-			Config: &libchain.Config{ChainID: big.NewInt(1), TangerineWhistleBlock: big.NewInt(0), SpuriousDragonBlock: big.NewInt(2), HomesteadBlock: new(big.Int)},
+			Config: &libchain.Config{ChainID: big.NewInt(1), TangerineWhistleBlock: newUint64(0), SpuriousDragonBlock: newUint64(2), HomesteadBlock: newUint64(0)},
 			Alloc:  types.GenesisAlloc{address: {Balance: funds}, deleteAddr: {Balance: new(big.Int)}},
 		}
 	)
@@ -750,7 +752,7 @@ func TestEIP155Transition(t *testing.T) {
 	}
 
 	// generate an invalid chain id transaction
-	config := &libchain.Config{ChainID: big.NewInt(2), TangerineWhistleBlock: big.NewInt(0), SpuriousDragonBlock: big.NewInt(2), HomesteadBlock: new(big.Int)}
+	config := &libchain.Config{ChainID: big.NewInt(2), TangerineWhistleBlock: newUint64(0), SpuriousDragonBlock: newUint64(2), HomesteadBlock: newUint64(0)}
 	chain, chainErr = blockgen.GenerateChain(config, chain.TopBlock, m.Engine, m.DB, 4, func(i int, block *blockgen.BlockGen) {
 		var (
 			basicTx = func(signer types.Signer) (types.Transaction, error) {
@@ -796,7 +798,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 		funds      = big.NewInt(1000000000)
 		deleteAddr = common.Address{1}
 		gspec      = &types.Genesis{
-			Config: &libchain.Config{ChainID: big.NewInt(1), TangerineWhistleBlock: big.NewInt(0), SpuriousDragonBlock: big.NewInt(2), HomesteadBlock: new(big.Int)},
+			Config: &libchain.Config{ChainID: big.NewInt(1), TangerineWhistleBlock: newUint64(0), SpuriousDragonBlock: newUint64(2), HomesteadBlock: newUint64(0)},
 			Alloc:  types.GenesisAlloc{address: {Balance: funds}, deleteAddr: {Balance: new(big.Int)}},
 		}
 	)
@@ -975,9 +977,9 @@ func TestEIP161AccountRemoval(t *testing.T) {
 		gspec   = &types.Genesis{
 			Config: &libchain.Config{
 				ChainID:               big.NewInt(1),
-				HomesteadBlock:        new(big.Int),
-				TangerineWhistleBlock: new(big.Int),
-				SpuriousDragonBlock:   big.NewInt(2),
+				HomesteadBlock:        newUint64(0),
+				TangerineWhistleBlock: newUint64(0),
+				SpuriousDragonBlock:   newUint64(2),
 			},
 			Alloc: types.GenesisAlloc{address: {Balance: funds}},
 		}

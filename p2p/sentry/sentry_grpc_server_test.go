@@ -34,6 +34,8 @@ import (
 	"github.com/erigontech/erigon/p2p/protocols/wit"
 )
 
+func newUint64(v uint64) *uint64 { return &v }
+
 // Handles RLP encoding/decoding for p2p.Msg
 type MockMsgReadWriter struct {
 	readBuf  *bytes.Buffer
@@ -585,13 +587,13 @@ func TestForkIDSplit68(t *testing.T) {
 func testForkIDSplit(t *testing.T, protocol uint) {
 	var (
 		ctx           = context.Background()
-		configNoFork  = &chain.Config{HomesteadBlock: big.NewInt(1), ChainID: big.NewInt(1)}
+		configNoFork  = &chain.Config{HomesteadBlock: newUint64(1), ChainID: big.NewInt(1)}
 		configProFork = &chain.Config{
 			ChainID:               big.NewInt(1),
-			HomesteadBlock:        big.NewInt(1),
-			TangerineWhistleBlock: big.NewInt(2),
-			SpuriousDragonBlock:   big.NewInt(2),
-			ByzantiumBlock:        big.NewInt(3),
+			HomesteadBlock:        newUint64(1),
+			TangerineWhistleBlock: newUint64(2),
+			SpuriousDragonBlock:   newUint64(2),
+			ByzantiumBlock:        newUint64(3),
 		}
 		dbNoFork  = temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 		dbProFork = temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
@@ -685,7 +687,7 @@ func TestSentryServerImpl_SetStatusInitPanic(t *testing.T) {
 		}
 	}()
 
-	configNoFork := &chain.Config{HomesteadBlock: big.NewInt(1), ChainID: big.NewInt(1)}
+	configNoFork := &chain.Config{HomesteadBlock: newUint64(1), ChainID: big.NewInt(1)}
 	dbNoFork := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	gspecNoFork := &types.Genesis{Config: configNoFork}
 	genesisNoFork := genesiswrite.MustCommitGenesis(gspecNoFork, dbNoFork, datadir.New(t.TempDir()), log.Root())

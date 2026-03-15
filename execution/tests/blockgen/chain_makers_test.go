@@ -40,6 +40,8 @@ import (
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
 
+func newUint64(v uint64) *uint64 { return &v }
+
 func TestGenerateChain(t *testing.T) {
 	t.Parallel()
 	var (
@@ -59,7 +61,7 @@ func TestGenerateChain(t *testing.T) {
 
 	// Ensure that key1 has some funds in the genesis block.
 	gspec := &types.Genesis{
-		Config:     &chain.Config{HomesteadBlock: new(big.Int), ChainID: big.NewInt(1)},
+		Config:     &chain.Config{HomesteadBlock: new(uint64), ChainID: big.NewInt(1)},
 		Difficulty: uint256.NewInt(0),
 		Alloc:      types.GenesisAlloc{addr1: {Balance: big.NewInt(1000000)}},
 	}

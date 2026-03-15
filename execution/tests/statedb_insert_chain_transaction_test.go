@@ -881,11 +881,11 @@ func getGenesis(funds ...*big.Int) initialData {
 		genesisSpec: &types.Genesis{
 			Config: &chain.Config{
 				ChainID:               big.NewInt(1),
-				HomesteadBlock:        new(big.Int),
-				TangerineWhistleBlock: new(big.Int),
-				SpuriousDragonBlock:   big.NewInt(1),
-				ByzantiumBlock:        big.NewInt(1),
-				ConstantinopleBlock:   big.NewInt(1),
+				HomesteadBlock:        new(uint64),
+				TangerineWhistleBlock: new(uint64),
+				SpuriousDragonBlock:   newUint64(1),
+				ByzantiumBlock:        newUint64(1),
+				ConstantinopleBlock:   newUint64(1),
 			},
 			Alloc: allocs,
 		},

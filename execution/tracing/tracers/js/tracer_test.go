@@ -38,6 +38,8 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
+func newUint64(v uint64) *uint64 { return &v }
+
 type vmContext struct {
 	blockCtx evmtypes.BlockContext
 	txCtx    evmtypes.TxContext
@@ -227,10 +229,10 @@ func TestNoStepExec(t *testing.T) {
 }
 
 func TestIsPrecompile(t *testing.T) {
-	chaincfg := &chain.Config{ChainID: big.NewInt(1), HomesteadBlock: big.NewInt(0), DAOForkBlock: nil, TangerineWhistleBlock: big.NewInt(0), SpuriousDragonBlock: big.NewInt(0), ByzantiumBlock: big.NewInt(100), ConstantinopleBlock: big.NewInt(0), PetersburgBlock: big.NewInt(0), IstanbulBlock: big.NewInt(200), MuirGlacierBlock: big.NewInt(0), BerlinBlock: big.NewInt(300), LondonBlock: big.NewInt(0), TerminalTotalDifficulty: nil, Ethash: new(chain.EthashConfig), Clique: nil}
-	chaincfg.ByzantiumBlock = big.NewInt(100)
-	chaincfg.IstanbulBlock = big.NewInt(200)
-	chaincfg.BerlinBlock = big.NewInt(300)
+	chaincfg := &chain.Config{ChainID: big.NewInt(1), HomesteadBlock: newUint64(0), DAOForkBlock: nil, TangerineWhistleBlock: newUint64(0), SpuriousDragonBlock: newUint64(0), ByzantiumBlock: newUint64(100), ConstantinopleBlock: newUint64(0), PetersburgBlock: newUint64(0), IstanbulBlock: newUint64(200), MuirGlacierBlock: newUint64(0), BerlinBlock: newUint64(300), LondonBlock: newUint64(0), TerminalTotalDifficulty: nil, Ethash: new(chain.EthashConfig), Clique: nil}
+	chaincfg.ByzantiumBlock = newUint64(100)
+	chaincfg.IstanbulBlock = newUint64(200)
+	chaincfg.BerlinBlock = newUint64(300)
 	txCtx := evmtypes.TxContext{GasPrice: *uint256.NewInt(100000)}
 	tracer, err := newJsTracer("{addr: toAddress('0000000000000000000000000000000000000009'), res: null, step: function() { this.res = isPrecompiled(this.addr); }, fault: function() {}, result: function() { return this.res; }}", nil, nil)
 	if err != nil {
