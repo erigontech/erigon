@@ -437,39 +437,7 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 		d.dirtyFiles.Delete(item)
 	}
 
-	d.cleanOrphanedAccessors(dirEntries)
 	return nil
-}
-
-// cleanOrphanedAccessors removes .bt and .kvei accessor files that have no
-// corresponding .kv FilesItem. These can be left behind when a process is
-// killed between deleting the .kv file and deleting its accessor files during
-// merge cleanup (closeFilesAndRemove). Without a .kv file on disk, no FilesItem
-// is ever created for that step range, so the accessors are never cleaned up.
-func (d *Domain) cleanOrphanedAccessors(dirEntries []string) {
-	re := regexp.MustCompile(`^v(\d+(?:\.\d+)?)-` + d.FilenameBase + `\.(\d+)-(\d+)\.(bt|kvei)$`)
-	for _, name := range dirEntries {
-		subs := re.FindStringSubmatch(name)
-		if len(subs) != 5 {
-			continue
-		}
-		startStep, err1 := strconv.ParseUint(subs[2], 10, 64)
-		endStep, err2 := strconv.ParseUint(subs[3], 10, 64)
-		if err1 != nil || err2 != nil {
-			continue
-		}
-		startTxNum := startStep * d.stepSize
-		endTxNum := endStep * d.stepSize
-		if _, found := d.dirtyFiles.Get(&FilesItem{startTxNum: startTxNum, endTxNum: endTxNum}); found {
-			continue
-		}
-		fPath := filepath.Join(d.dirs.SnapDomain, name)
-		d.logger.Debug("[agg] Domain.openDirtyFiles: removing orphaned accessor", "f", name)
-		if err := dir.RemoveFile(fPath); err != nil {
-			d.logger.Warn("[agg] Domain.openDirtyFiles: failed to remove orphaned accessor", "err", err, "f", name)
-		}
-		dir.RemoveFile(fPath + ".torrent") //nolint:errcheck
-	}
 }
 
 func (h *History) openDirtyFiles(dataEntries, accessorEntries []string) error {
