@@ -1,5 +1,13 @@
 package modexp
 
+import "math/big"
+
+// smallExpThreshold is the max exponent byte length for which we use
+// big.Int.Exp directly instead of our Montgomery path. For small exponents,
+// big.Int.Exp is faster because Montgomery setup (computeRR, table building)
+// dominates the cost.
+const smallExpThreshold = 8
+
 // Exp computes base^exp mod mod and returns the result as a byte slice
 // of length equal to len(modBytes). Edge cases per EIP-198:
 //   - mod == 0 → zero-length result (caller should handle)
@@ -32,11 +40,27 @@ func Exp(base, exp, modBytes []byte) []byte {
 		return make([]byte, modLen)
 	}
 
+	// For small exponents, big.Int.Exp is faster (avoids Montgomery setup cost).
+	expLen := len(stripLeadingZeros(exp))
+	if expLen <= smallExpThreshold {
+		return expBigInt(base, exp, modBytes)
+	}
+
 	// Route based on odd/even modulus
 	if mod.odd {
 		return expOdd(base, exp, mod, modLen)
 	}
 	return expEven(base, exp, modBytes)
+}
+
+// expBigInt uses math/big.Int.Exp for small exponents where Montgomery
+// setup cost would dominate.
+func expBigInt(base, exp, mod []byte) []byte {
+	b := new(big.Int).SetBytes(base)
+	e := new(big.Int).SetBytes(exp)
+	m := new(big.Int).SetBytes(mod)
+	result := new(big.Int).Exp(b, e, m)
+	return leftPad(result.Bytes(), len(mod))
 }
 
 // expOdd computes base^exp mod m where m is odd, using Montgomery exponentiation.
