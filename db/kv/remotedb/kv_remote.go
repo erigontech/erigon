@@ -164,14 +164,8 @@ func (db *DB) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	default:
 	}
 
-	if kv.TxPriorityFrom(ctx) == kv.TxPriorityRPC {
-		if !db.roTxsLimiter.TryAcquire(1) {
-			return nil, kv.ErrServerOverloaded
-		}
-	} else {
-		if semErr := db.roTxsLimiter.Acquire(ctx, 1); semErr != nil {
-			return nil, fmt.Errorf("remotedb.DB.BeginRo: roTxsLimiter error %w", semErr)
-		}
+	if semErr := db.roTxsLimiter.Acquire(ctx, 1); semErr != nil {
+		return nil, fmt.Errorf("remotedb.DB.BeginRo: roTxsLimiter error %w", semErr)
 	}
 
 	defer func() {
