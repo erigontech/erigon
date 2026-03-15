@@ -791,11 +791,9 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			}
 		}
 
-		t := 0
 		if err := doms.Flush(ctx, tx); err != nil {
 			return err
 		}
-		log.Warn("[dbg] doms.Flush", "in", time.Since(t))
 		doms.ClearRam(true)
 
 		pruneStage, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, s.CurrentSyncCycle.IsInitialCycle)
