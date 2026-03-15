@@ -483,8 +483,8 @@ func ApplyDeferredBranchUpdates(
 		upd *DeferredBranchUpdate
 		err error
 	}
-	resultCh := make(chan result, numWorkers*8)
-	workCh := make(chan *DeferredBranchUpdate, len(deferred))
+	resultCh := make(chan result, len(deferred))
+	workCh := make(chan *DeferredBranchUpdate, numWorkers*8)
 
 	// Start workers with pooled encoders/mergers.
 	var wg sync.WaitGroup
