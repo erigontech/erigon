@@ -23,8 +23,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
 )
 
 func BenchmarkBranchMerger_Merge(b *testing.B) {
@@ -405,13 +406,13 @@ func BenchmarkApplyDeferredBranchUpdates(b *testing.B) {
 		return common.Copy(upd.encoded)
 	}()
 
-	for _, n := range []int{10, 100, 1000, 10000} {
+	for _, n := range []int{100, 10_000} {
 		// No-merge variant: prev=nil, exercises only encode+write path.
 		updatesNoMerge := makeDeferredUpdates(n, nil)
 		// Merge variant: prev=valid encoded branch data.
 		updatesMerge := makeDeferredUpdates(n, validPrev)
 
-		for _, workers := range []int{1, 4, 8} {
+		for _, workers := range []int{1, 8} {
 			b.Run(fmt.Sprintf("NoMerge/n=%d/workers=%d", n, workers), func(b *testing.B) {
 				b.ReportAllocs()
 				for b.Loop() {
