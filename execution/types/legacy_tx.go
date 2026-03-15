@@ -290,43 +290,32 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream) error {
 	if tx.Nonce, err = s.Uint(); err != nil {
 		return fmt.Errorf("read Nonce: %w", err)
 	}
-	var b []byte
-	if b, err = s.Uint256Bytes(); err != nil {
+	tx.GasPrice = new(uint256.Int)
+	if err = s.ReadUint256(tx.GasPrice); err != nil {
 		return fmt.Errorf("read GasPrice: %w", err)
 	}
-	tx.GasPrice = new(uint256.Int).SetBytes(b)
 	if tx.GasLimit, err = s.Uint(); err != nil {
 		return fmt.Errorf("read GasLimit: %w", err)
 	}
-	if b, err = s.Bytes(); err != nil {
+	if err = rlp.DecodeOptionalAddress(&tx.To, s); err != nil {
 		return fmt.Errorf("read To: %w", err)
 	}
-	if len(b) > 0 && len(b) != 20 {
-		return fmt.Errorf("wrong size for To: %d", len(b))
-	}
-	if len(b) > 0 {
-		tx.To = &common.Address{}
-		copy((*tx.To)[:], b)
-	}
-	if b, err = s.Uint256Bytes(); err != nil {
+	tx.Value = new(uint256.Int)
+	if err = s.ReadUint256(tx.Value); err != nil {
 		return fmt.Errorf("read Value: %w", err)
 	}
-	tx.Value = new(uint256.Int).SetBytes(b)
 	if tx.Data, err = s.Bytes(); err != nil {
 		return fmt.Errorf("read Data: %w", err)
 	}
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&tx.V); err != nil {
 		return fmt.Errorf("read V: %w", err)
 	}
-	tx.V.SetBytes(b)
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&tx.R); err != nil {
 		return fmt.Errorf("read R: %w", err)
 	}
-	tx.R.SetBytes(b)
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&tx.S); err != nil {
 		return fmt.Errorf("read S: %w", err)
 	}
-	tx.S.SetBytes(b)
 	if err = s.ListEnd(); err != nil {
 		return fmt.Errorf("close txn struct: %w", err)
 	}

@@ -31,6 +31,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/rlp/internal/rlpstruct"
 	"github.com/holiman/uint256"
 )
@@ -1285,6 +1286,29 @@ func (s *Stream) listLimit() (inList bool, limit uint64) {
 		return false, 0
 	}
 	return true, s.stack[len(s.stack)-1]
+}
+
+// DecodeOptionalAddress reads an RLP-encoded optional address (0 or 20 bytes)
+// directly into dst without intermediate allocation.
+func DecodeOptionalAddress(dst **common.Address, s *Stream) error {
+	kind, size, err := s.Kind()
+	if err != nil {
+		return err
+	}
+	switch {
+	case kind == String && size == 0:
+		*dst = nil
+		return s.ReadBytes(nil)
+	case kind == String && size == 20:
+		*dst = &common.Address{}
+		return s.ReadBytes((*dst)[:])
+	case kind == List:
+		return fmt.Errorf("expected string for address, got list")
+	case kind == Byte:
+		return fmt.Errorf("wrong size for address: 1")
+	default:
+		return fmt.Errorf("wrong size for address: %d", size)
+	}
 }
 
 type sliceReader []byte

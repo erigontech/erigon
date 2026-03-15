@@ -322,6 +322,22 @@ func BenchmarkEncodeBlock(b *testing.B) {
 	}
 }
 
+func BenchmarkDecodeBlock(b *testing.B) {
+	block := makeBenchBlock()
+	encoded, err := rlp.EncodeToBytes(block)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ResetTimer()
+
+	for b.Loop() {
+		var decoded Block
+		if err := rlp.DecodeBytes(encoded, &decoded); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func makeBenchBlock() *Block {
 	var (
 		key, _   = crypto.GenerateKey()

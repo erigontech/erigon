@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package builderstages
+package builder
 
 import (
 	context0 "context"
@@ -85,25 +85,28 @@ func StageBuilderExecCfg(
 	}
 }
 
-// SpawnBuilderExecStage builds a block by executing transactions from the txpool,
+// execBlock builds a block by executing transactions from the txpool,
 // then computes the state root from the accumulated domain writes.
 //
 // State changes flow through a single execution path:
 //  1. IBS executes transactions using a NoopWriter / in-memory buffer (no per-tx writes to sd)
 //  2. FinalizeBlockExecution applies the accumulated IBS changes to sd via the block assembler writer
 //  3. ComputeCommitment(sd) produces the state root
-//  4. sd is backed by a MemoryBatch (from MiningStep) — discarded on return
+//  4. sd writes are discarded when Builder.Build returns (tx is read-only, sd is never flushed)
 //
 // TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnBuilderExecStage(ctx context0.Context, s *stagedsync.StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg BuilderExecCfg, execCfg stagedsync.ExecuteBlockCfg, logger log.Logger) (err error) {
-	cfg.vmConfig.NoReceipts = false
+func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx, executionAt uint64, cfg BuilderExecCfg, execCfg stagedsync.ExecuteBlockCfg, logger log.Logger) (err error) {
+	const logPrefix = "BuilderExec"
+
+	// Copy vmConfig to avoid mutating the shared struct across concurrent Build calls.
+	vmConfig := *cfg.vmConfig
+	vmConfig.NoReceipts = false
+	cfg.vmConfig = &vmConfig
 	chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
-	logPrefix := s.LogPrefix()
 	current := cfg.builderState.BuiltBlock
 
-	// sd is already backed by a MemoryBatch (from MiningStep in stageloop.go),
-	// so all writes accumulate there and are discarded when MiningStep returns.
+	// sd writes accumulate in-memory and are discarded when Build returns.
 	// We use sd directly for execution state writes and commitment computation.
 	txNum, _, err := sd.SeekCommitment(ctx, tx)
 	if err != nil {
@@ -165,11 +168,6 @@ func SpawnBuilderExecStage(ctx context0.Context, s *stagedsync.StageState, sd *e
 	coinbase := accounts.InternAddress(cfg.builderState.BuilderConfig.Etherbase)
 
 	yielded := mapset.NewSet[[32]byte]()
-
-	executionAt, err := s.ExecutionAt(tx)
-	if err != nil {
-		return err
-	}
 
 	interrupt := cfg.interrupt
 	const amount = 50
@@ -241,7 +239,7 @@ func SpawnBuilderExecStage(ctx context0.Context, s *stagedsync.StageState, sd *e
 	// Compute state root directly from the domain writes accumulated during
 	// block assembly. All state changes flow through CommitBlock in
 	// AssembleBlock — no re-execution needed.
-	rh, err := sd.ComputeCommitment(ctx, tx, false, blockHeight, txNum, s.LogPrefix(), nil)
+	rh, err := sd.ComputeCommitment(ctx, tx, false, blockHeight, txNum, logPrefix, nil)
 	if err != nil {
 		return fmt.Errorf("compute commitment failed: %w", err)
 	}
