@@ -262,6 +262,12 @@ test-group: test-filtered
 test-sonar-coverage: override GO_FLAGS += -timeout $(default_test_race_timeout) -coverprofile=coverage-test-all.out
 test-sonar-coverage: test-filtered
 
+## test-rpc DATADIR=<path> [CHAIN=mainnet]		run QA RPC integration tests locally against a synced datadir
+test-rpc: rpcdaemon integration
+	.github/workflows/scripts/run_rpc_tests_local.sh \
+		$(if $(DATADIR),--datadir $(DATADIR)) \
+		$(if $(CHAIN),--chain $(CHAIN))
+
 ## test-hive						run the hive tests locally off nektos/act workflows simulator
 test-hive:
 	@if ! command -v act >/dev/null 2>&1; then \
