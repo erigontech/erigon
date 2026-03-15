@@ -243,6 +243,7 @@ type cell struct {
 	storageAddrLen  int16     // length of the storage plain key
 	hashLen         int16     // Length of the hash (or embedded)
 	stateHashLen    int16     // stateHash length, if > 0 can reuse
+	hashDeriveDepth int16     // >=0: deriveHashedKeys pending at this depth; -1: already derived or not needed
 	loaded          loadFlags // folded Cell have only hash, unfolded have all fields
 	Update                    // state update
 }
@@ -304,6 +305,7 @@ func (cell *cell) reset() {
 	cell.extLen = 0
 	cell.hashLen = 0
 	cell.stateHashLen = 0
+	cell.hashDeriveDepth = -1
 	cell.loaded = cellLoadNone
 	clear(cell.hashedExtension[:])
 	clear(cell.extension[:])
@@ -456,6 +458,16 @@ func (cell *cell) fillFromLowerCell(lowCell *cell, lowDepth int16, preExtension 
 		copy(cell.hash[:], lowCell.hash[:lowCell.hashLen])
 	}
 	cell.loaded = lowCell.loaded
+}
+
+// ensureDerivedHashedKeys performs lazy derivation of hashed keys if pending.
+func (hph *HexPatriciaHashed) ensureDerivedHashedKeys(cell *cell) error {
+	if cell.hashDeriveDepth >= 0 {
+		depth := cell.hashDeriveDepth
+		cell.hashDeriveDepth = -1
+		return cell.deriveHashedKeys(depth, hph.keccak, hph.accountKeyLen, hph.cellHashBuf[:])
+	}
+	return nil
 }
 
 func (cell *cell) deriveHashedKeys(depth int16, keccak keccak.KeccakState, accountKeyLen int16, hashBuf []byte) error {
@@ -1314,6 +1326,11 @@ func (hph *HexPatriciaHashed) needUnfolding(hashedKey []byte) int16 {
 		nibble := int(hashedKey[hph.currentKeyLen])
 		cell = &hph.grid[hph.activeRows-1][nibble]
 		depth = hph.depths[hph.activeRows-1]
+		// Lazy derivation: ensure hashed keys are derived before reading hashedExtension
+		if err := hph.ensureDerivedHashedKeys(cell); err != nil {
+			log.Warn("ensureDerivedHashedKeys in needUnfolding", "err", err)
+			return 0
+		}
 		if hph.trace {
 			fmt.Printf("currentKey [%x] needUnfolding cell (%d, %x, depth=%d) cell.hash=[%x]\n", hph.currentKey[:hph.currentKeyLen], hph.activeRows-1, nibble, depth, cell.hash[:cell.hashLen])
 		}
@@ -1714,8 +1731,10 @@ func (hph *HexPatriciaHashed) readBranchAndCheckForFlushing(prefix []byte) ([]by
 	return hph.branchFromCacheOrDB(prefix)
 }
 
-// unfoldBranchNode returns true if unfolding has been done
-func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bool) error {
+// unfoldBranchNode returns true if unfolding has been done.
+// targetNibble is the child we are descending into; only that child gets
+// immediate deriveHashedKeys, siblings are deferred (lazy).
+func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bool, targetNibble int) error {
 	key := HexNibblesToCompactBytes(hph.currentKey[:hph.currentKeyLen])
 	hph.metrics.BranchLoad(hph.currentKey[:hph.currentKeyLen])
 
@@ -1771,9 +1790,14 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 			fmt.Printf("cell (%d, %x, depth=%d) %s\n", row, nibble, depth, cell.FullString())
 		}
 
-		// relies on plain account/storage key so need to be dereferenced before hashing
-		if err = cell.deriveHashedKeys(depth, hph.keccak, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
-			return err
+		// Derive hashed keys eagerly only for the target child we're descending
+		// into; defer siblings until they are actually needed (lazy derivation).
+		if nibble == targetNibble {
+			if err = cell.deriveHashedKeys(depth, hph.keccak, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
+				return err
+			}
+		} else {
+			cell.hashDeriveDepth = depth
 		}
 		bitset ^= bit
 	}
@@ -1804,6 +1828,10 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int16) error {
 		upDepth = hph.depths[upRow]
 		upNibble := hashedKey[upDepth-1]
 		upCell = &hph.grid[upRow][upNibble]
+		// Lazy derivation: ensure hashed keys are derived before reading hashedExtension
+		if err := hph.ensureDerivedHashedKeys(upCell); err != nil {
+			return err
+		}
 
 		touched = hph.touchMap[upRow]&(uint16(1)<<upNibble) != 0
 		present = hph.afterMap[upRow]&(uint16(1)<<upNibble) != 0
@@ -1821,7 +1849,11 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int16) error {
 
 	if upCell.hashedExtLen == 0 {
 		depth = upDepth + 1
-		return hph.unfoldBranchNode(row, depth, touched && !present)
+		target := -1
+		if int(depth-1) < len(hashedKey) {
+			target = int(hashedKey[depth-1])
+		}
+		return hph.unfoldBranchNode(row, depth, touched && !present, target)
 	}
 
 	var nibble uint8
