@@ -2138,14 +2138,14 @@ func TestEIP2718Transition(t *testing.T) {
 		// One transaction to 0xAAAA
 		signer := types.LatestSigner(gspec.Config)
 		tx, _ := types.SignNewTx(key, *signer, &types.AccessListTx{
-			ChainID: chainID,
+			ChainID: *chainID,
 			LegacyTx: types.LegacyTx{
 				CommonTx: types.CommonTx{
 					Nonce:    0,
 					To:       &aa,
 					GasLimit: 30000,
 				},
-				GasPrice: gasPrice,
+				GasPrice: *gasPrice,
 			},
 			AccessList: types.AccessList{{
 				Address:     aa,
@@ -2248,9 +2248,9 @@ func TestEIP1559Transition(t *testing.T) {
 					GasLimit: 30000,
 					Data:     []byte{},
 				},
-				ChainID:    &chainID,
-				FeeCap:     new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(common.GWei)),
-				TipCap:     &u256.Num2,
+				ChainID:    chainID,
+				FeeCap:     *new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(common.GWei)),
+				TipCap:     u256.Num2,
 				AccessList: accesses,
 			}
 			txn, _ = types.SignTx(txn, *signer, key1)

@@ -422,11 +422,11 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 				CommonTx: types.CommonTx{
 					Nonce:    uint64(txJson.Nonce),
 					To:       txJson.To,
-					Value:    value,
+					Value:    *value,
 					GasLimit: uint64(txJson.Gas),
 					Data:     txJson.Input,
 				},
-				GasPrice: gasPrice,
+				GasPrice: *gasPrice,
 			}, nil
 		}
 
@@ -435,13 +435,13 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 				CommonTx: types.CommonTx{
 					Nonce:    uint64(txJson.Nonce),
 					To:       txJson.To,
-					Value:    value,
+					Value:    *value,
 					GasLimit: uint64(txJson.Gas),
 					Data:     txJson.Input,
 				},
-				GasPrice: gasPrice,
+				GasPrice: *gasPrice,
 			},
-			ChainID:    chainId,
+			ChainID:    *chainId,
 			AccessList: *txJson.Accesses,
 		}, nil
 	} else if txJson.Type == types.DynamicFeeTxType || txJson.Type == types.SetCodeTxType {
@@ -466,13 +466,13 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 				CommonTx: types.CommonTx{
 					Nonce:    uint64(txJson.Nonce),
 					To:       txJson.To,
-					Value:    value,
+					Value:    *value,
 					GasLimit: uint64(txJson.Gas),
 					Data:     txJson.Input,
 				},
-				ChainID:    chainId,
-				TipCap:     tipCap,
-				FeeCap:     feeCap,
+				ChainID:    *chainId,
+				TipCap:     *tipCap,
+				FeeCap:     *feeCap,
 				AccessList: *txJson.Accesses,
 			}, nil
 		}
@@ -492,13 +492,13 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 				CommonTx: types.CommonTx{
 					Nonce:    uint64(txJson.Nonce),
 					To:       txJson.To,
-					Value:    value,
+					Value:    *value,
 					GasLimit: uint64(txJson.Gas),
 					Data:     txJson.Input,
 				},
-				ChainID:    chainId,
-				TipCap:     tipCap,
-				FeeCap:     feeCap,
+				ChainID:    *chainId,
+				TipCap:     *tipCap,
+				FeeCap:     *feeCap,
 				AccessList: *txJson.Accesses,
 			},
 			Authorizations: auths,
