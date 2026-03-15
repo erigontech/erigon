@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
@@ -477,71 +478,57 @@ func ApplyDeferredBranchUpdates(
 		return written, nil
 	}
 
-	// Pipeline: workers encode in parallel, results sent to channel, main goroutine writes sequentially.
-	type result struct {
-		upd *DeferredBranchUpdate
-		err error
-	}
-	// Size channels to actual batch length, not the 50K max.
-	resultCh := make(chan result, len(deferred))
-	workCh := make(chan *DeferredBranchUpdate, len(deferred))
-
-	// Start workers with pooled encoders/mergers.
+	// Partition the slice across workers; each worker encodes its own chunk in-place.
+	// No channels needed: workers write only to their own sub-slice elements (.encoded),
+	// and the main goroutine reads those fields only after wg.Wait().
+	chunkSize := (len(deferred) + numWorkers - 1) / numWorkers
+	errs := make([]error, numWorkers)
 	var wg sync.WaitGroup
 	for i := 0; i < numWorkers; i++ {
+		start := i * chunkSize
+		if start >= len(deferred) {
+			break
+		}
+		end := start + chunkSize
+		if end > len(deferred) {
+			end = len(deferred)
+		}
 		wg.Add(1)
-		go func() {
+		go func(chunk []*DeferredBranchUpdate, idx int) {
 			defer wg.Done()
 			encoder := workerEncoderPool.Get().(*BranchEncoder)
 			merger := workerMergerPool.Get().(*BranchMerger)
 			defer workerEncoderPool.Put(encoder)
 			defer workerMergerPool.Put(merger)
-
-			for upd := range workCh {
-				err := encodeDeferredUpdate(upd, encoder, merger)
-				resultCh <- result{upd: upd, err: err}
+			for _, upd := range chunk {
+				if err := encodeDeferredUpdate(upd, encoder, merger); err != nil {
+					errs[idx] = err
+					return
+				}
 			}
-		}()
+		}(deferred[start:end], i)
+	}
+	wg.Wait()
+
+	for _, err := range errs {
+		if err != nil {
+			return 0, err
+		}
 	}
 
-	// Close resultCh when all workers are done
-	go func() {
-		wg.Wait()
-		close(resultCh)
-	}()
-
-	// Send work in background
-	go func() {
-		for _, upd := range deferred {
-			workCh <- upd
-		}
-		close(workCh)
-	}()
-
-	// Process results as they come in - write to storage immediately
-	var firstErr error
+	// putBranch must be called sequentially (MDBX writes are single-threaded).
 	var written int
-	for res := range resultCh {
-		if res.err != nil {
-			if firstErr == nil {
-				firstErr = res.err
-			}
+	for _, upd := range deferred {
+		if upd.encoded == nil {
 			continue
 		}
-		if res.upd.encoded == nil {
-			continue // skip unchanged
-		}
-		if firstErr != nil {
-			continue // drain channel but don't write after error
-		}
-		if err := putBranch(res.upd.prefix, res.upd.encoded, res.upd.prev); err != nil {
-			firstErr = err
-			continue
+		if err := putBranch(upd.prefix, upd.encoded, upd.prev); err != nil {
+			return written, err
 		}
 		written++
 	}
 	mxTrieBranchesUpdated.AddInt(written)
-	return written, firstErr
+	return written, nil
 }
 
 func (be *BranchEncoder) setMetrics(metrics *Metrics) {
@@ -626,7 +613,7 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	}
 
 	if needsFlush {
-		if err := be.ApplyDeferredUpdates(16, ctx.PutBranch); err != nil {
+		if err := be.ApplyDeferredUpdates(estimate.HalfCPUs(), ctx.PutBranch); err != nil {
 			return err
 		}
 		be.ClearDeferred()
