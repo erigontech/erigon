@@ -225,7 +225,7 @@ var (
 	}
 	TxPoolQueuedDormancyFlag = cli.DurationFlag{
 		Name:  "txpool.queued.dormancy",
-		Usage: "Evict queued transactions from senders with no on-chain state changes for this duration (0 to disable, default 3h)",
+		Usage: "Evict queued transactions from senders with no on-chain state changes for this duration (e.g. 3h, 2h30m; 0 to disable)",
 		Value: txpoolcfg.DefaultConfig.QueuedDormancyDuration,
 	}
 

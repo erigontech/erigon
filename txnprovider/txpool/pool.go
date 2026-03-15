@@ -1780,7 +1780,7 @@ func (p *TxPool) discardLocked(mt *metaTxn, reason txpoolcfg.DiscardReason) {
 //
 // Returns the number of senders evicted and the current queued pool size (for interval tuning).
 // Must NOT be called while holding p.lock; it acquires the lock internally.
-func (p *TxPool) sweepDormantQueued(currentBlock uint64, logger log.Logger) (evictedSenders, queuedLen int) {
+func (p *TxPool) sweepDormantQueued(ctx context.Context, currentBlock uint64, logger log.Logger) (evictedSenders, queuedLen int) {
 	if p.cfg.QueuedDormancyDuration <= 0 {
 		return 0, 0
 	}
@@ -1795,52 +1795,64 @@ func (p *TxPool) sweepDormantQueued(currentBlock uint64, logger log.Logger) (evi
 		dormancyBlocks = 1
 	}
 
-	p.lock.Lock()
-	defer p.lock.Unlock()
+	// snapshot is populated inside the lock and persisted outside it, following the same
+	// pattern as flushLocked: hold the lock only for in-memory operations.
+	var snapshot map[uint64]uint64
 
-	for senderID, lastBlock := range p.senderLastActivity {
-		// Self-healing: remove map entries for senders no longer in the queued pool.
-		hasQueued := false
-		p.all.ascend(senderID, func(mt *metaTxn) bool {
-			if mt.currentSubPool == QueuedSubPool {
-				hasQueued = true
-				return false
+	func() {
+		p.lock.Lock()
+		defer p.lock.Unlock()
+
+		for senderID, lastBlock := range p.senderLastActivity {
+			// Self-healing: remove map entries for senders no longer in the queued pool.
+			hasQueued := false
+			p.all.ascend(senderID, func(mt *metaTxn) bool {
+				if mt.currentSubPool == QueuedSubPool {
+					hasQueued = true
+					return false
+				}
+				return true
+			})
+			if !hasQueued {
+				delete(p.senderLastActivity, senderID)
+				continue
 			}
-			return true
-		})
-		if !hasQueued {
+
+			// Skip senders still within their grace period.
+			if currentBlock <= lastBlock || currentBlock-lastBlock <= dormancyBlocks {
+				continue
+			}
+
+			// Collect queued txns for this sender then evict.
+			var toEvict []*metaTxn
+			p.all.ascend(senderID, func(mt *metaTxn) bool {
+				if mt.currentSubPool == QueuedSubPool {
+					toEvict = append(toEvict, mt)
+				}
+				return true
+			})
+			for _, mt := range toEvict {
+				p.queued.Remove(mt, "dormant sender", logger)
+				p.discardLocked(mt, txpoolcfg.QueuedDormant)
+			}
 			delete(p.senderLastActivity, senderID)
-			continue
+			evictedSenders++
+			logger.Debug("[txpool] evicted dormant queued sender",
+				"senderID", senderID,
+				"txns", len(toEvict),
+				"dormantBlocks", currentBlock-lastBlock,
+				"dormancyThreshold", dormancyBlocks,
+			)
 		}
 
-		// Skip senders still within their grace period.
-		if currentBlock <= lastBlock || currentBlock-lastBlock <= dormancyBlocks {
-			continue
-		}
+		queuedLen = p.queued.Len()
 
-		// Collect queued txns for this sender then evict.
-		var toEvict []*metaTxn
-		p.all.ascend(senderID, func(mt *metaTxn) bool {
-			if mt.currentSubPool == QueuedSubPool {
-				toEvict = append(toEvict, mt)
-			}
-			return true
-		})
-		for _, mt := range toEvict {
-			p.queued.Remove(mt, "dormant sender", logger)
-			p.discardLocked(mt, txpoolcfg.QueuedDormant)
+		// Snapshot the map for DB persistence while still holding the lock.
+		snapshot = make(map[uint64]uint64, len(p.senderLastActivity))
+		for k, v := range p.senderLastActivity {
+			snapshot[k] = v
 		}
-		delete(p.senderLastActivity, senderID)
-		evictedSenders++
-		logger.Debug("[txpool] evicted dormant queued sender",
-			"senderID", senderID,
-			"txns", len(toEvict),
-			"dormantBlocks", currentBlock-lastBlock,
-			"dormancyThreshold", dormancyBlocks,
-		)
-	}
-
-	queuedLen = p.queued.Len()
+	}()
 
 	if evictedSenders > 0 {
 		// dormancyBlocks is derived from the EWMA block time (avgMs): dormancyBlocks = QueuedDormancyDuration / avgMs.
@@ -1854,6 +1866,15 @@ func (p *TxPool) sweepDormantQueued(currentBlock uint64, logger log.Logger) (evi
 			"avgBlockMs", avgMs,
 		)
 	}
+
+	// Persist the snapshot outside the lock. At sweep frequency (~10 min) this is cheap;
+	// a 10-min staleness window is negligible against the 3 h dormancy grace period.
+	if err := p.poolDB.Update(ctx, func(tx kv.RwTx) error {
+		return SaveSenderLastActivity(tx, snapshot)
+	}); err != nil {
+		logger.Warn("[txpool] failed to persist sender last activity", "err", err)
+	}
+
 	return evictedSenders, queuedLen
 }
 
@@ -2305,7 +2326,7 @@ func (p *TxPool) Run(ctx context.Context) error {
 			}
 		case <-dormancySweep.C:
 			if p.Started() {
-				evicted, queuedLen := p.sweepDormantQueued(p.lastSeenBlock.Load(), p.logger)
+				evicted, queuedLen := p.sweepDormantQueued(ctx, p.lastSeenBlock.Load(), p.logger)
 				next := p.nextDormancySweepInterval(&sweepBackoff, evicted, queuedLen)
 				dormancySweep.Reset(next)
 			} else {
@@ -2700,9 +2721,18 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.TemporalTx) err
 		return err
 	}
 
-	// Cold-start: assign the current block as the last-activity block for every sender whose
-	// transactions are in the queued sub-pool. We cannot know their true last on-chain activity
-	// after a restart, so we give them a fresh grace period rather than evicting them immediately.
+	// Restore persisted dormancy state. On the first run after this feature was introduced
+	// the table is empty, so persistedActivity will be empty and all senders fall through
+	// to the cold-start block below.
+	if persistedActivity, err := LoadSenderLastActivity(tx); err != nil {
+		p.logger.Warn("[txpool] failed to load sender last activity from db, using cold-start fallback", "err", err)
+	} else {
+		p.senderLastActivity = persistedActivity
+	}
+
+	// Cold-start fallback: for any queued sender not found in the persisted map, assign
+	// the current block as the baseline so they receive a full grace period. This covers
+	// the first run after feature introduction and senders added after the last sweep.
 	coldStartBlock := p.lastSeenBlock.Load()
 	p.all.ascendAll(func(mt *metaTxn) bool {
 		if mt.currentSubPool == QueuedSubPool {
