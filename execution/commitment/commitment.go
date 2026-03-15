@@ -478,57 +478,70 @@ func ApplyDeferredBranchUpdates(
 		return written, nil
 	}
 
-	// Partition the slice across workers; each worker encodes its own chunk in-place.
-	// No channels needed: workers write only to their own sub-slice elements (.encoded),
-	// and the main goroutine reads those fields only after wg.Wait().
-	chunkSize := (len(deferred) + numWorkers - 1) / numWorkers
-	errs := make([]error, numWorkers)
+	// Pipeline: workers encode in parallel, results sent to channel, main goroutine writes sequentially.
+	type result struct {
+		upd *DeferredBranchUpdate
+		err error
+	}
+	resultCh := make(chan result, numWorkers*8)
+	workCh := make(chan *DeferredBranchUpdate, len(deferred))
+
+	// Start workers with pooled encoders/mergers.
 	var wg sync.WaitGroup
 	for i := 0; i < numWorkers; i++ {
-		start := i * chunkSize
-		if start >= len(deferred) {
-			break
-		}
-		end := start + chunkSize
-		if end > len(deferred) {
-			end = len(deferred)
-		}
 		wg.Add(1)
-		go func(chunk []*DeferredBranchUpdate, idx int) {
+		go func() {
 			defer wg.Done()
 			encoder := workerEncoderPool.Get().(*BranchEncoder)
 			merger := workerMergerPool.Get().(*BranchMerger)
 			defer workerEncoderPool.Put(encoder)
 			defer workerMergerPool.Put(merger)
-			for _, upd := range chunk {
-				if err := encodeDeferredUpdate(upd, encoder, merger); err != nil {
-					errs[idx] = err
-					return
-				}
+
+			for upd := range workCh {
+				err := encodeDeferredUpdate(upd, encoder, merger)
+				resultCh <- result{upd: upd, err: err}
 			}
-		}(deferred[start:end], i)
+		}()
 	}
-	wg.Wait()
 
-	for _, err := range errs {
-		if err != nil {
-			return 0, err
+	// Close resultCh when all workers are done
+	go func() {
+		wg.Wait()
+		close(resultCh)
+	}()
+
+	// Send work in background
+	go func() {
+		for _, upd := range deferred {
+			workCh <- upd
 		}
-	}
+		close(workCh)
+	}()
 
-	// putBranch must be called sequentially (MDBX writes are single-threaded).
+	// Process results as they come in - write to storage immediately
+	var firstErr error
 	var written int
-	for _, upd := range deferred {
-		if upd.encoded == nil {
+	for res := range resultCh {
+		if res.err != nil {
+			if firstErr == nil {
+				firstErr = res.err
+			}
 			continue
 		}
-		if err := putBranch(upd.prefix, upd.encoded, upd.prev); err != nil {
-			return written, err
+		if res.upd.encoded == nil {
+			continue // skip unchanged
+		}
+		if firstErr != nil {
+			continue // drain channel but don't write after error
+		}
+		if err := putBranch(res.upd.prefix, res.upd.encoded, res.upd.prev); err != nil {
+			firstErr = err
+			continue
 		}
 		written++
 	}
 	mxTrieBranchesUpdated.AddInt(written)
-	return written, nil
+	return written, firstErr
 }
 
 func (be *BranchEncoder) setMetrics(metrics *Metrics) {
