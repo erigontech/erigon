@@ -23,8 +23,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
 )
 
 func BenchmarkBranchMerger_Merge(b *testing.B) {
@@ -342,5 +343,102 @@ func BenchmarkHashSort_ModeUpdate(b *testing.B) {
 				}
 			}
 		})
+	}
+}
+
+// makeBenchCells builds a cell grid and bitmap for benchmarks.
+func makeBenchCells() ([16]cell, uint16) {
+	var cells [16]cell
+	var bitmap uint16
+	for i := 0; i < 16; i++ {
+		c := &cells[i]
+		c.hashLen = 32
+		for j := 0; j < 32; j++ {
+			c.hash[j] = byte(i*32 + j)
+		}
+		switch i % 3 {
+		case 0:
+			c.accountAddrLen = 20
+			for j := 0; j < 20; j++ {
+				c.accountAddr[j] = byte(i + j)
+			}
+		case 1:
+			c.storageAddrLen = 52
+			for j := 0; j < 52; j++ {
+				c.storageAddr[j] = byte(i + j)
+			}
+		case 2:
+			c.extLen = 8
+			for j := 0; j < 8; j++ {
+				c.extension[j] = byte(i + j)
+			}
+		}
+		bitmap |= uint16(1 << i)
+	}
+	return cells, bitmap
+}
+
+// makeDeferredUpdates builds n synthetic DeferredBranchUpdate objects with all 16 cells set.
+// prev is the encoded branch data to merge against (nil = no merge path).
+func makeDeferredUpdates(n int, prev []byte) []*DeferredBranchUpdate {
+	cells, bitmap := makeBenchCells()
+	updates := make([]*DeferredBranchUpdate, n)
+	prefix := make([]byte, 4)
+	for i := 0; i < n; i++ {
+		binary.BigEndian.PutUint32(prefix, uint32(i))
+		updates[i] = getDeferredUpdate(prefix, bitmap, bitmap, bitmap, &cells, 4, prev)
+	}
+	return updates
+}
+
+func BenchmarkApplyDeferredBranchUpdates(b *testing.B) {
+	noop := func(_, _, _ []byte) error { return nil }
+
+	// validPrev is a properly encoded branch used to exercise the merge path.
+	validPrev := func() []byte {
+		cells, bitmap := makeBenchCells()
+		upd := getDeferredUpdate(nil, bitmap, bitmap>>1, bitmap>>1, &cells, 4, nil)
+		encoder := NewBranchEncoder(1024)
+		merger := NewHexBranchMerger(512)
+		if err := encodeDeferredUpdate(upd, encoder, merger); err != nil {
+			b.Fatal(err)
+		}
+		return common.Copy(upd.encoded)
+	}()
+
+	for _, n := range []int{100, 10_000} {
+		// No-merge variant: prev=nil, exercises only encode+write path.
+		updatesNoMerge := makeDeferredUpdates(n, nil)
+		// Merge variant: prev=valid encoded branch data.
+		updatesMerge := makeDeferredUpdates(n, validPrev)
+
+		for _, workers := range []int{1, 8} {
+			b.Run(fmt.Sprintf("NoMerge/n=%d/workers=%d", n, workers), func(b *testing.B) {
+				b.ReportAllocs()
+				for b.Loop() {
+					b.StopTimer()
+					for _, u := range updatesNoMerge {
+						u.encoded = nil
+					}
+					b.StartTimer()
+					if _, err := ApplyDeferredBranchUpdates(updatesNoMerge, workers, noop); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+			b.Run(fmt.Sprintf("WithMerge/n=%d/workers=%d", n, workers), func(b *testing.B) {
+				b.ReportAllocs()
+				for b.Loop() {
+					b.StopTimer()
+					for _, u := range updatesMerge {
+						u.encoded = nil
+					}
+					b.StartTimer()
+					if _, err := ApplyDeferredBranchUpdates(updatesMerge, workers, noop); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+		}
 	}
 }
