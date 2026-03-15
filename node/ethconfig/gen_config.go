@@ -3,7 +3,7 @@
 package ethconfig
 
 import (
-"time"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon/cl/clparams"

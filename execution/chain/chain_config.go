@@ -691,8 +691,15 @@ func newCompatError(what string, storedblock, newblock *uint64) *ConfigCompatErr
 	return err
 }
 
+func uint64PtrStr(p *uint64) string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("%d", *p)
+}
+
 func (err *ConfigCompatError) Error() string {
-	return fmt.Sprintf("mismatching %s in database (have %v, want %v, rewindto %d)", err.What, err.StoredConfig, err.NewConfig, err.RewindTo)
+	return fmt.Sprintf("mismatching %s in database (have %s, want %s, rewindto %d)", err.What, uint64PtrStr(err.StoredConfig), uint64PtrStr(err.NewConfig), err.RewindTo)
 }
 
 // EthashConfig is the rules engine configs for proof-of-work based sealing.

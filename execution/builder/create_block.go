@@ -269,7 +269,7 @@ func createBlock(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalT
 	// If we are care about TheDAO hard-fork check whether to override the extra-data or not
 	if daoBlock := cfg.chainConfig.DAOForkBlock; daoBlock != nil {
 		// Check whether the block is among the fork extra-override range
-		if header.Number.Uint64() >= *daoBlock && header.Number.Uint64() < *daoBlock+10 {
+		if header.Number.Uint64() >= *daoBlock && header.Number.Uint64() < *daoBlock+misc.DAOForkExtraRange {
 			header.Extra = common.Copy(misc.DAOForkBlockExtra)
 		}
 	}
