@@ -28,6 +28,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -631,6 +632,65 @@ func TestSortable(t *testing.T) {
 
 }
 
+func TestSortableBufferStableSort(t *testing.T) {
+	buf := NewSortableBuffer(256 * 1024 * 1024)
+
+	// Need enough duplicates to trigger pdqsort's partitioning (not just insertion sort).
+	// Insert 1000 entries under each of 4 duplicate keys, interleaved with unique keys.
+	dupKey := []byte{0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05, 0x05} // same 8-byte prefix
+	const dupsPerKey = 1000
+	val := make([]byte, 8)
+
+	for i := range dupsPerKey {
+		binary.BigEndian.PutUint64(val, uint64(i))
+		buf.Put(dupKey, val)
+		// interleave with unique keys to force reordering
+		uk := make([]byte, 8)
+		binary.BigEndian.PutUint64(uk, uint64(i*3+1))
+		buf.Put(uk, val)
+	}
+
+	buf.Sort()
+
+	// Verify: all entries with dupKey must appear in insertion order
+	seq := 0
+	for i := range buf.Len() {
+		k, v := buf.Get(i, nil, nil)
+		if !bytes.Equal(k, dupKey) {
+			continue
+		}
+		got := binary.BigEndian.Uint64(v)
+		require.Equal(t, uint64(seq), got, "duplicate key at position %d: expected insertionOrder %d, got %d", i, seq, got)
+		seq++
+	}
+	require.Equal(t, dupsPerKey, seq, "expected %d duplicate entries", dupsPerKey)
+}
+
+func TestSortableBufferNilAndEmptyKeys(t *testing.T) {
+	buf := NewSortableBuffer(256 * 1024)
+
+	buf.Put([]byte{0x01}, []byte("normal"))
+	buf.Put(nil, []byte("nil-key"))
+	buf.Put([]byte{}, []byte("empty-key-1"))
+	buf.Put(nil, []byte("nil-key-2"))
+	buf.Put([]byte{}, []byte("empty-key-2"))
+
+	buf.Sort()
+
+	// nil and empty keys both sort as zero-length, before non-empty.
+	// Stable sort preserves insertion order among equal keys.
+	_, v0 := buf.Get(0, nil, nil)
+	_, v1 := buf.Get(1, nil, nil)
+	_, v2 := buf.Get(2, nil, nil)
+	_, v3 := buf.Get(3, nil, nil)
+	_, v4 := buf.Get(4, nil, nil)
+	assert.Equal(t, []byte("nil-key"), v0)
+	assert.Equal(t, []byte("empty-key-1"), v1)
+	assert.Equal(t, []byte("nil-key-2"), v2)
+	assert.Equal(t, []byte("empty-key-2"), v3)
+	assert.Equal(t, []byte("normal"), v4)
+}
+
 func BenchmarkSortableBufferSort(b *testing.B) {
 	const keyLen = 32
 	const valLen = 64
@@ -673,6 +733,198 @@ func BenchmarkSortableBufferSort(b *testing.B) {
 				b.StartTimer()
 				ref.Sort()
 			}
+		})
+	}
+}
+
+func BenchmarkSortableBufferPutSort(b *testing.B) {
+	const keyLen = 32
+	const valLen = 64
+
+	for _, tc := range []struct {
+		name   string
+		count  int
+		sorted bool
+	}{
+		{"random_100k", 100_000, false},
+		{"random_500k", 500_000, false},
+		{"sorted_100k", 100_000, true},
+		{"sorted_500k", 500_000, true},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			key := make([]byte, keyLen)
+			val := make([]byte, valLen)
+			buf := NewSortableBuffer(256 * 1024 * 1024)
+			buf.Prealloc(tc.count, tc.count*(keyLen+valLen))
+			for b.Loop() {
+				buf.Reset()
+				for i := range tc.count {
+					if tc.sorted {
+						binary.BigEndian.PutUint64(key, uint64(i))
+					} else {
+						x := uint64(i) * 6364136223846793005
+						binary.BigEndian.PutUint64(key, x)
+						binary.BigEndian.PutUint64(key[8:], x^0xdeadbeef)
+					}
+					binary.BigEndian.PutUint64(val, uint64(i))
+					buf.Put(key, val)
+				}
+				buf.Sort()
+			}
+		})
+	}
+}
+
+func BenchmarkSortableBufferPutSortLoad(b *testing.B) {
+	const keyLen = 32
+	const valLen = 64
+
+	for _, tc := range []struct {
+		name   string
+		count  int
+		sorted bool
+	}{
+		{"random_100k", 100_000, false},
+		{"random_500k", 500_000, false},
+		{"sorted_100k", 100_000, true},
+		{"sorted_500k", 500_000, true},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			key := make([]byte, keyLen)
+			val := make([]byte, valLen)
+			buf := NewSortableBuffer(256 * 1024 * 1024)
+			buf.Prealloc(tc.count, tc.count*(keyLen+valLen))
+			for b.Loop() {
+				buf.Reset()
+				for i := range tc.count {
+					if tc.sorted {
+						binary.BigEndian.PutUint64(key, uint64(i))
+					} else {
+						x := uint64(i) * 6364136223846793005
+						binary.BigEndian.PutUint64(key, x)
+						binary.BigEndian.PutUint64(key[8:], x^0xdeadbeef)
+					}
+					binary.BigEndian.PutUint64(val, uint64(i))
+					buf.Put(key, val)
+				}
+				buf.Sort()
+				// Load phase: iterate sorted buffer like ETL load does
+				var keyBuf, valBuf []byte
+				for i := range buf.Len() {
+					keyBuf, valBuf = buf.Get(i, keyBuf[:0], valBuf[:0])
+				}
+				_ = keyBuf
+				_ = valBuf
+			}
+		})
+	}
+}
+
+func BenchmarkSortableBufferPutOnly(b *testing.B) {
+	const keyLen = 32
+	const valLen = 64
+
+	for _, tc := range []struct {
+		name   string
+		count  int
+		sorted bool
+	}{
+		{"random_100k", 100_000, false},
+		{"random_500k", 500_000, false},
+		{"sorted_100k", 100_000, true},
+		{"sorted_500k", 500_000, true},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			key := make([]byte, keyLen)
+			val := make([]byte, valLen)
+			buf := NewSortableBuffer(256 * 1024 * 1024)
+			buf.Prealloc(tc.count, tc.count*(keyLen+valLen))
+			for b.Loop() {
+				buf.Reset()
+				for i := range tc.count {
+					if tc.sorted {
+						binary.BigEndian.PutUint64(key, uint64(i))
+					} else {
+						x := uint64(i) * 6364136223846793005
+						binary.BigEndian.PutUint64(key, x)
+						binary.BigEndian.PutUint64(key[8:], x^0xdeadbeef)
+					}
+					binary.BigEndian.PutUint64(val, uint64(i))
+					buf.Put(key, val)
+				}
+			}
+		})
+	}
+}
+
+var allBufferTypes = []struct {
+	name string
+	new  func() Buffer
+}{
+	{"sortable", func() Buffer { return NewSortableBuffer(1 * datasize.MB) }},
+	{"append", func() Buffer { return NewAppendBuffer(1 * datasize.MB) }},
+	{"oldest", func() Buffer { return NewOldestEntryBuffer(1 * datasize.MB) }},
+}
+
+func collectSorted(t *testing.T, buf Buffer, pairs [][2][]byte) [][]byte {
+	t.Helper()
+	c := NewCollector(t.Name(), "", buf, log.New())
+	defer c.Close()
+	for _, p := range pairs {
+		require.NoError(t, c.Collect(p[0], p[1]))
+	}
+	var got [][]byte
+	require.NoError(t, c.Load(nil, "", func(k, v []byte, _ CurrentTableReader, _ LoadNextFunc) error {
+		got = append(got, bytes.Clone(k))
+		return nil
+	}, TransformArgs{}))
+	return got
+}
+
+// TestBufferSortShortKey verifies that keys shorter than 8 bytes sort correctly.
+// For sortableBuffer this guards against the prefix optimization reading past the
+// key into value bytes: e.g. key=[0x01] with value=[0xFF×7] must still sort
+// before key=[0x01,0x00].
+func TestBufferSortShortKey(t *testing.T) {
+	pairs := [][2][]byte{
+		{{0x01}, bytes.Repeat([]byte{0xFF}, 7)},
+		{{0x01, 0x00}, {0x00}},
+	}
+	for _, bt := range allBufferTypes {
+		t.Run(bt.name, func(t *testing.T) {
+			got := collectSorted(t, bt.new(), pairs)
+			require.True(t, slices.IsSortedFunc(got, bytes.Compare), "keys not sorted: %x", got)
+		})
+	}
+}
+
+// TestBufferSortAfterReset verifies that reusing a buffer after Load (as sync.Pool
+// does for sortableBuffer) produces correct sort order on the second use.
+// For sortableBuffer this guards against stale prefix values when clear(prefixes) is missing:
+// nil/empty-key slots inherit the old uint64 from the previous sort.
+func TestBufferSortAfterReset(t *testing.T) {
+	// First use: populate backing arrays with large prefix values (0xFFFF...).
+	firstPairs := [][2][]byte{
+		{{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}, {1}},
+		{{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE}, {2}},
+	}
+	// Second use: nil and empty keys must sort before any non-empty key,
+	// not inherit the stale 0xFFFF... prefix from the first sort.
+	secondPairs := [][2][]byte{
+		{nil, {1}},
+		{[]byte{}, {2}},
+		{{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}, {3}},
+	}
+	for _, bt := range allBufferTypes {
+		t.Run(bt.name, func(t *testing.T) {
+			buf := bt.new()
+			collectSorted(t, buf, firstPairs) // warms up backing arrays
+			buf.Reset()                       // explicit reset, as sync.Pool reuse does
+			got := collectSorted(t, buf, secondPairs)
+			require.True(t, slices.IsSortedFunc(got, bytes.Compare), "keys not sorted after reset: %x", got)
 		})
 	}
 }
