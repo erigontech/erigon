@@ -335,12 +335,8 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 		if len(proofsList) != proofsPerBlob*len(slot.BlobBundles) {
 			return 0, fmt.Errorf("%w: unexpected proofs len=%d expected=%d", ErrParseTxn, len(proofsList), proofsPerBlob*len(slot.BlobBundles))
 		}
-		proofsIdx := 0
 		for blobIdx = 0; blobIdx < len(slot.BlobBundles); blobIdx++ {
-			for range proofsPerBlob {
-				slot.BlobBundles[blobIdx].Proofs = append(slot.BlobBundles[blobIdx].Proofs, proofsList[proofsIdx])
-				proofsIdx++
-			}
+			slot.BlobBundles[blobIdx].Proofs = proofsList[blobIdx*proofsPerBlob : (blobIdx+1)*proofsPerBlob]
 		}
 		if proofPos != proofListPos+proofListLen {
 			return 0, fmt.Errorf("%w: extraneous space in proofs", ErrParseTxn)
