@@ -42,12 +42,15 @@ import (
 )
 
 var (
-	errInvalidBlockRange    = "invalid block range params"
-	errExceedBlockRange     = "exceed maximum block range"
-	errBlockRangeIntoFuture = "block range extends beyond current head block"
-	errBlockHashWithRange   = "can't specify fromBlock/toBlock with blockHash"
-	errExceedMaxTopics      = "exceed max topics"
-	errExceedLogQueryLimit  = "exceed max addresses or topics per search position"
+	errInvalidBlockRange               = "invalid block range params"
+	errExceedBlockRange                = "query block range exceeds server limit, narrow your filter"
+	errBlockRangeIntoFuture            = "block range extends beyond current head block"
+	errBlockHashWithRange              = "can't specify fromBlock/toBlock with blockHash"
+	errExceedMaxTopics                 = "exceed max topics"
+	errExceedLogQueryLimit             = "exceed max addresses or topics per search position"
+	errExceedLogResults                = "query returns too many logs, narrow your filter"
+	errRequestedBlockCountExceedsLimit = "requested blockCount exceeds server limit"
+	errRequestedLogCountExceedsLimit   = "requested logCount exceeds server limit"
 )
 
 const (
@@ -192,7 +195,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		return nil, err
 	}
 
-	erigonLogs, err := api.getLogsV3(ctx, tx, begin, end, crit, api.BaseAPI.rangeLimit)
+	erigonLogs, err := api.getLogsV3(ctx, tx, begin, end, crit, api.BaseAPI.blockRangeLimit, api.BaseAPI.getLogsMaxResults)
 	if err != nil {
 		return nil, err
 	}
@@ -280,7 +283,7 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 	return out, nil
 }
 
-func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria, rangeLimit int) ([]*types.ErigonLog, error) {
+func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria, rangeLimit int, maxResults int) ([]*types.ErigonLog, error) {
 	logs := []*types.ErigonLog{} //nolint
 
 	if rangeLimit != 0 && (end-begin) > uint64(rangeLimit) {
@@ -352,7 +355,24 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				}
 
 				borLogs = borLogs.Filter(addrMap, crit.Topics, 0)
-				logs = append(logs, borLogs.ToErigonLogs(header.Time)...)
+
+				for _, filteredLog := range borLogs {
+					if maxResults != 0 && len(logs) >= maxResults {
+						return nil, fmt.Errorf("%s: %d", errExceedLogResults, maxResults)
+					}
+					logs = append(logs, &types.ErigonLog{
+						Address:     filteredLog.Address,
+						Topics:      filteredLog.Topics,
+						Data:        filteredLog.Data,
+						BlockNumber: filteredLog.BlockNumber,
+						TxHash:      filteredLog.TxHash,
+						TxIndex:     filteredLog.TxIndex,
+						BlockHash:   filteredLog.BlockHash,
+						Index:       filteredLog.Index,
+						Removed:     filteredLog.Removed,
+						Timestamp:   header.Time,
+					})
+				}
 			}
 
 			continue
@@ -375,7 +395,24 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			return nil, err
 		}
 		filtered := r.Logs.Filter(addrMap, crit.Topics, 0)
-		logs = append(logs, filtered.ToErigonLogs(header.Time)...)
+
+		for _, filteredLog := range filtered {
+			if maxResults != 0 && len(logs) >= maxResults {
+				return nil, fmt.Errorf("%s: %d", errExceedLogResults, maxResults)
+			}
+			logs = append(logs, &types.ErigonLog{
+				Address:     filteredLog.Address,
+				Topics:      filteredLog.Topics,
+				Data:        filteredLog.Data,
+				BlockNumber: filteredLog.BlockNumber,
+				TxHash:      filteredLog.TxHash,
+				TxIndex:     filteredLog.TxIndex,
+				BlockHash:   filteredLog.BlockHash,
+				Index:       filteredLog.Index,
+				Removed:     filteredLog.Removed,
+				Timestamp:   header.Time,
+			})
+		}
 	}
 
 	return logs, nil

@@ -301,70 +301,39 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							}
 							pe.doms.SetTrace(trace, !dbg.BatchCommitments)
 
-							commitProgress := make(chan *commitment.CommitProgress, 100)
-							LogCommitmentsDone := make(chan struct{})
 							commitStart = time.Now()
+							var prevCommitedBlocks uint64
+							var prevCommittedTransactions uint64
+							var prevCommitedGas uint64
 
-							go func() {
-								defer close(LogCommitmentsDone)
-								logEvery := time.NewTicker(20 * time.Second)
+							onProgress := func(p *commitment.CommitProgress) {
+								lastProgress = *p
+								// this is an approximation of block progress - it assumes an
+								// even distribution of keys to blocks
+								if p.KeyIndex > 0 && p.KeyIndex < p.UpdateCount {
+									progress := float64(p.KeyIndex) / float64(p.UpdateCount)
+									committedGas := uint64(math.Round(float64(uncommittedGas) * progress))
+									committedTransactions := uint64(math.Round(float64(uncommittedTransactions) * progress))
+									commitedBlocks := uint64(math.Round(float64(uncommittedBlocks) * progress))
 
-								defer logEvery.Stop()
-								var prevCommitedBlocks uint64
-								var prevCommittedTransactions uint64
-								var prevCommitedGas uint64
-
-								LogCommitments := func(commitProgress commitment.CommitProgress) {
-									// this is an approximation of blcok prgress - it assumnes an
-									// even distribution of keys to blocks
-									if commitProgress.KeyIndex > 0 && commitProgress.KeyIndex < commitProgress.UpdateCount {
-										progress := float64(commitProgress.KeyIndex) / float64(commitProgress.UpdateCount)
-										committedGas := uint64(math.Round(float64(uncommittedGas) * progress))
-										committedTransactions := uint64(math.Round(float64(uncommittedTransactions) * progress))
-										commitedBlocks := uint64(math.Round(float64(uncommittedBlocks) * progress))
-
-										if commitedBlocks > prevCommitedBlocks {
-											hasLoggedCommittments.Store(true)
-											pe.LogCommitments(commitStart,
-												commitedBlocks-prevCommitedBlocks,
-												committedTransactions-prevCommittedTransactions,
-												committedGas-prevCommitedGas, stepsInDb, commitProgress)
-										}
-
-										lastCommitedLog = time.Now()
-										prevCommitedBlocks = commitedBlocks
-										prevCommittedTransactions = committedTransactions
-										prevCommitedGas = committedGas
+									if commitedBlocks > prevCommitedBlocks {
+										hasLoggedCommittments.Store(true)
+										pe.LogCommitments(commitStart,
+											commitedBlocks-prevCommitedBlocks,
+											committedTransactions-prevCommittedTransactions,
+											committedGas-prevCommitedGas, stepsInDb, *p)
 									}
 
-									if pe.agg.HasBackgroundFilesBuild() {
-										pe.logger.Info(fmt.Sprintf("[%s] Background files build", pe.logPrefix), "progress", pe.agg.BackgroundProgress())
-									}
+									lastCommitedLog = time.Now()
+									prevCommitedBlocks = commitedBlocks
+									prevCommittedTransactions = committedTransactions
+									prevCommitedGas = committedGas
 								}
 
-								for {
-									select {
-									case <-ctx.Done():
-										return
-									case progress, ok := <-commitProgress:
-										if !ok {
-											if !hasLoggedCommittments.Load() || time.Since(lastCommitedLog) > logInterval/20 {
-												hasLoggedCommittments.Store(true)
-												pe.LogCommitments(commitStart,
-													uint64(uncommittedBlocks)-prevCommitedBlocks,
-													uncommittedTransactions-prevCommittedTransactions,
-													uint64(uncommittedGas)-prevCommitedGas, stepsInDb, lastProgress)
-											}
-											return
-										}
-										lastProgress = *progress
-									case <-logEvery.C:
-										if time.Since(lastCommitedLog) > logInterval-(logInterval/90) {
-											LogCommitments(lastProgress)
-										}
-									}
+								if pe.agg.HasBackgroundFilesBuild() {
+									pe.logger.Info(fmt.Sprintf("[%s] Background files build", pe.logPrefix), "progress", pe.agg.BackgroundProgress())
 								}
-							}()
+							}
 
 							if time.Since(lastExecutedLog) > logInterval/50 {
 								hasLoggedExecution = true
@@ -373,9 +342,16 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							}
 
 							// Warmup is enabled via EnableTrieWarmup at executor init
-							rh, err := pe.doms.ComputeCommitment(ctx, rwTx, true, applyResult.BlockNum, applyResult.lastTxNum, pe.logPrefix, commitProgress)
-							close(commitProgress)
-							<-LogCommitmentsDone // wait for logging goroutine before any early returns
+							rh, err := pe.doms.ComputeCommitment(ctx, rwTx, true, applyResult.BlockNum, applyResult.lastTxNum, pe.logPrefix, onProgress)
+
+							// Log final commitment progress
+							if !hasLoggedCommittments.Load() || time.Since(lastCommitedLog) > logInterval/20 {
+								hasLoggedCommittments.Store(true)
+								pe.LogCommitments(commitStart,
+									uint64(uncommittedBlocks)-prevCommitedBlocks,
+									uncommittedTransactions-prevCommittedTransactions,
+									uint64(uncommittedGas)-prevCommitedGas, stepsInDb, lastProgress)
+							}
 							captured := pe.doms.SetTrace(false, false)
 							if err != nil {
 								return err
@@ -472,8 +448,14 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	}
 
 	// Wait for all goroutines to complete before reading shared state
-	if err := pe.wait(ctx); err != nil {
-		return nil, rwTx, err
+	if waitErr := pe.wait(ctx); waitErr != nil {
+		// Executor goroutine errors (e.g. nonce mismatch) arrive here, not through execErr.
+		// Merge into execErr so the single error-handling path below catches both.
+		if execErr == nil {
+			execErr = waitErr
+		} else {
+			execErr = errors.Join(execErr, waitErr)
+		}
 	}
 
 	if !hasLoggedCommittments.Load() && !commitStart.IsZero() {
@@ -482,6 +464,28 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 	if execErr != nil {
 		if !(errors.Is(execErr, context.Canceled) || errors.Is(execErr, &ErrLoopExhausted{})) {
+			if lastHeader != nil {
+				pe.logger.Warn(fmt.Sprintf("[%s] Execution failed", pe.logPrefix), "err", execErr, "block", lastHeader.Number.Uint64(), "hash", lastHeader.Hash())
+			} else {
+				pe.logger.Warn(fmt.Sprintf("[%s] Execution failed", pe.logPrefix), "err", execErr)
+			}
+			if errors.Is(execErr, rules.ErrInvalidBlock) {
+				if pe.cfg.hd != nil && pe.cfg.hd.POSSync() && lastHeader != nil {
+					pe.cfg.hd.ReportBadHeaderPoS(lastHeader.Hash(), lastHeader.ParentHash)
+				}
+				if pe.cfg.badBlockHalt {
+					return nil, rwTx, execErr
+				}
+				if u != nil && lastHeader != nil {
+					unwindTo := uint64(0)
+					if lastHeader.Number.Uint64() > 0 {
+						unwindTo = lastHeader.Number.Uint64() - 1
+					}
+					if err := u.UnwindTo(unwindTo, BadBlock(lastHeader.Hash(), execErr), rwTx); err != nil {
+						return nil, rwTx, err
+					}
+				}
+			}
 			return nil, rwTx, execErr
 		}
 	}
@@ -725,7 +729,8 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						fmt.Println(blockResult.BlockNum, "apply count", blockResult.ApplyCount)
 					}
 
-					blockExecutor.applyResults <- &txResult{
+					select {
+					case blockExecutor.applyResults <- &txResult{
 						blockNum:              blockResult.BlockNum,
 						txNum:                 blockResult.lastTxNum,
 						rules:                 result.Rules(),
@@ -734,6 +739,9 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						traceFroms:            result.TraceFroms,
 						traceTos:              result.TraceTos,
 						cumulativeBlobGasUsed: blockExecutor.blobGasUsed,
+					}:
+					case <-ctx.Done():
+						return ctx.Err()
 					}
 				}
 
@@ -741,7 +749,11 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					pe.blockExecMetrics.Duration.Add(time.Since(blockExecutor.execStarted))
 					pe.blockExecMetrics.BlockCount.Add(1)
 				}
-				blockExecutor.applyResults <- blockResult
+				select {
+				case blockExecutor.applyResults <- blockResult:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
 				pe.Lock()
 				delete(pe.blockExecutors, blockResult.BlockNum)
 				pe.Unlock()
@@ -1680,7 +1692,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 			}
 
-			be.applyResults <- &applyResult
+			select {
+			case be.applyResults <- &applyResult:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
 		}
 	}
 
@@ -1772,9 +1788,8 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 	for i := 0; i < len(toExecute); i++ {
 		nextTx := toExecute[i]
 		execTask := be.tasks[nextTx]
-		if nextTx == maxValidated+1 {
-			be.skipCheck[nextTx] = true
-		} else {
+		isNextValidated := nextTx == maxValidated+1
+		if !isNextValidated {
 			txIndex := execTask.Version().TxIndex
 			if be.txIncarnations[nextTx] > 0 &&
 				(be.execAborted[nextTx] > 0 || be.execFailed[nextTx] > 0 || !be.blockIO.HasReads(txIndex) ||
@@ -1789,6 +1804,40 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 				be.execTasks.pushPending(nextTx)
 				continue
 			}
+		}
+
+		tv := &taskVersion{
+			execTask:   execTask,
+			versionMap: be.versionMap,
+			profile:    be.profile,
+			stats:      be.stats,
+			statsMutex: &be.Mutex,
+		}
+
+		if incarnation := be.txIncarnations[nextTx]; incarnation == 0 {
+			tv.version = execTask.Version()
+			// Use TryAdd to avoid blocking the execLoop goroutine.
+			// If the input queue is full, return remaining tasks to
+			// pending — they will be scheduled on the next call to
+			// scheduleExecution (triggered by each processed result).
+			if !pe.in.TryAdd(tv) {
+				be.execTasks.pushPending(nextTx)
+				for j := i + 1; j < len(toExecute); j++ {
+					be.execTasks.pushPending(toExecute[j])
+				}
+				return
+			}
+		} else {
+			version := execTask.Version()
+			version.Incarnation = incarnation
+			tv.version = version
+			pe.in.ReTry(tv)
+		}
+
+		// Commit side-effects only after successful enqueue.
+		if isNextValidated {
+			be.skipCheck[nextTx] = true
+		} else {
 			be.cntSpecExec++
 		}
 
@@ -1797,26 +1846,6 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 		}
 
 		be.cntExec++
-
-		if incarnation := be.txIncarnations[nextTx]; incarnation == 0 {
-			pe.in.Add(ctx, &taskVersion{
-				execTask:   execTask,
-				version:    execTask.Version(),
-				versionMap: be.versionMap,
-				profile:    be.profile,
-				stats:      be.stats,
-				statsMutex: &be.Mutex})
-		} else {
-			version := execTask.Version()
-			version.Incarnation = incarnation
-			pe.in.ReTry(&taskVersion{
-				execTask:   execTask,
-				version:    version,
-				versionMap: be.versionMap,
-				profile:    be.profile,
-				stats:      be.stats,
-				statsMutex: &be.Mutex})
-		}
 	}
 }
 
