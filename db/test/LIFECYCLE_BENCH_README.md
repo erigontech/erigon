@@ -1,15 +1,10 @@
-# db/test — Aggregator Integration Tests & Benchmarks
-
-This package contains integration tests and benchmarks that exercise the full
-aggregator data lifecycle: domain writes, commitment (trie hashing), flush to
-MDBX, file collation, pruning, and merge. These complement the unit-level
-benchmarks in `db/state/` and `execution/commitment/` by testing cross-component
-interactions at realistic scale.
-
-## Lifecycle Benchmarks
+# Lifecycle Benchmarks
 
 `lifecycle_bench_test.go` provides a benchmark harness that drives data through
-every phase of the aggregator pipeline with independently timed phases:
+every phase of the aggregator pipeline with independently timed phases.
+It complements the unit-level benchmarks in `db/state/` and
+`execution/commitment/` by testing cross-component interactions at realistic
+scale.
 
 ```
 Execute (DomainPut) → Commit (ComputeCommitment) → Flush (mem→MDBX)
@@ -78,17 +73,7 @@ full EVM execution. This drives optimisation work for commitment parallelisation
 (16-way root decomposition) and background DB scheduling (merge/prune impact on
 execution throughput).
 
-## Other test files
-
-| File | Purpose |
-|------|---------|
-| `domain_shared_bench_test.go` | SharedDomains benchmarks: GetLatest, HistorySeek, ComputeCommitment |
-| `aggregator_ext_test.go` | Aggregator restart-from-files, data recovery |
-| `domains_restart_test.go` | Domain persistence across restart cycles |
-| `marked_forkable_test.go` | Forkable aggregator (marked variant) |
-| `unmarked_forkable_test.go` | Forkable aggregator (unmarked variant) |
-
-## Related benchmarks elsewhere
+## Related benchmarks
 
 | Package | Benchmarks | Focus |
 |---------|-----------|-------|
