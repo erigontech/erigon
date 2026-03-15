@@ -638,6 +638,11 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 	if err != nil {
 		return err
 	}
+	dirEntries, err := readDirNames(s.dir)
+	if err != nil {
+		return err
+	}
+
 	noneDone := true
 	for index := range segments {
 		segment := segments[index]
@@ -645,7 +650,7 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 		if segment.Type.Enum() != snaptype.CaplinEnums.BeaconBlocks && segment.Type.Enum() != snaptype.CaplinEnums.BlobSidecars {
 			continue
 		}
-		if segment.Type.HasIndexFiles(segment, logger) {
+		if segment.Type.HasIndexFilesFromEntries(segment, dirEntries, logger) {
 			continue
 		}
 		p := &background.Progress{}
@@ -760,4 +765,17 @@ func (s *CaplinSnapshots) FrozenBlobs() uint64 {
 	}
 
 	return ret
+}
+
+// readDirNames returns the base filenames of all entries in dir.
+func readDirNames(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, len(entries))
+	for i, e := range entries {
+		names[i] = e.Name()
+	}
+	return names, nil
 }

@@ -157,6 +157,43 @@ var CaplinIndexes = struct {
 	BlobSidecarSlot: Index{Name: "blocksidecars", Version: version.V1_1_standart},
 }
 
+// HasFileFromEntries is like HasFile but searches within a pre-scanned list of
+// filenames (not full paths) instead of calling filepath.Glob on every invocation.
+// Use this in hot loops to avoid repeated directory reads.
+func (i Index) HasFileFromEntries(info FileInfo, dirEntries []string, logger log.Logger) bool {
+	if _, err := os.Stat(info.Path); err != nil {
+		logger.Debug("[ind] HasFile: seg file didn't found", "path", info.Path, "err", err)
+		return false
+	}
+
+	dir := info.Dir()
+	fNameMask := IdxFileMask(info.From, info.To, i.Name)
+	fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, dirEntries, dir)
+	if err != nil {
+		logger.Debug("[ind] HasFile: files by pattern didn't found", "f", fNameMask, "dir", dir, "err", err)
+		return false
+	}
+	if !ok {
+		logger.Debug("[ind] HasFile: file does not exists", "f", fNameMask)
+		return false
+	}
+	if fileVer.Major != i.Version.Current.Major {
+		if !fileVer.Less(i.Version.MinSupported) {
+			i.Version.Current = fileVer
+		} else {
+			panic("FileVersion is too low, try to rm idx files")
+		}
+	}
+
+	idx, err := recsplit.OpenIndex(fPath)
+	if err != nil {
+		logger.Debug("[ind] HasFile: opening index", "path", fPath, "err", err)
+		return false
+	}
+	defer idx.Close()
+	return true
+}
+
 func (i Index) HasFile(info FileInfo, logger log.Logger) bool {
 	dir := info.Dir()
 	// segment, err := seg.NewDecompressor(info.Path)
@@ -218,6 +255,7 @@ type Type interface {
 	IdxFileNames(from uint64, to uint64) []string
 	Indexes() []Index
 	HasIndexFiles(info FileInfo, logger log.Logger) bool
+	HasIndexFilesFromEntries(info FileInfo, dirEntries []string, logger log.Logger) bool
 	BuildIndexes(ctx context.Context, info FileInfo, indexBuilder IndexBuilder, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error
 	ExtractRange(ctx context.Context, info FileInfo, rangeExtractor RangeExtractor, indexBuilder IndexBuilder, firstKeyGetter FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger, hashResolver BlockHashResolver) (uint64, error)
 
@@ -342,6 +380,15 @@ func (s SnapType) HasIndexFiles(info FileInfo, logger log.Logger) bool {
 	return true
 }
 
+func (s SnapType) HasIndexFilesFromEntries(info FileInfo, dirEntries []string, logger log.Logger) bool {
+	for _, index := range s.indexes {
+		if !index.HasFileFromEntries(info, dirEntries, logger) {
+			return false
+		}
+	}
+	return true
+}
+
 func (s SnapType) IdxFileNames(from uint64, to uint64) []string {
 	fileNames := make([]string, len(s.indexes))
 	for i, index := range s.indexes {
@@ -441,6 +488,10 @@ func (e Enum) FileInfo(dir string, from uint64, to uint64) FileInfo {
 
 func (e Enum) HasIndexFiles(info FileInfo, logger log.Logger) bool {
 	return e.Type().HasIndexFiles(info, logger)
+}
+
+func (e Enum) HasIndexFilesFromEntries(info FileInfo, dirEntries []string, logger log.Logger) bool {
+	return e.Type().HasIndexFilesFromEntries(info, dirEntries, logger)
 }
 
 func (e Enum) BuildIndexes(ctx context.Context, info FileInfo, indexBuilder IndexBuilder, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
