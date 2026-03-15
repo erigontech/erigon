@@ -20,16 +20,12 @@ func Exp(base, exp, modBytes []byte) []byte {
 		return nil
 	}
 
-	// Check if mod is zero or one
-	mod := newModulus(modBytes)
-	if mod == nil {
-		// mod <= 1
-		return make([]byte, modLen)
-	}
-
-	// Check if exp is all zeros
+	// Check if exp is all zeros (before any expensive parsing)
 	if isAllZero(exp) {
-		// base^0 = 1 mod m (for m > 1)
+		// base^0 mod m: result is 1 if m > 1, else 0
+		if isModOne(modBytes) {
+			return make([]byte, modLen)
+		}
 		out := make([]byte, modLen)
 		out[modLen-1] = 1
 		return out
@@ -40,17 +36,34 @@ func Exp(base, exp, modBytes []byte) []byte {
 		return make([]byte, modLen)
 	}
 
-	// For small exponents, big.Int.Exp is faster (avoids Montgomery setup cost).
+	// For small exponents, use big.Int.Exp directly (avoids Montgomery setup).
+	// Also handles even moduli efficiently.
 	expLen := len(stripLeadingZeros(exp))
 	if expLen <= smallExpThreshold {
 		return expBigInt(base, exp, modBytes)
 	}
 
-	// Route based on odd/even modulus
+	// For larger exponents, use Montgomery path (faster per-multiplication).
+	mod := newModulus(modBytes)
+	if mod == nil {
+		// mod <= 1
+		return make([]byte, modLen)
+	}
+
 	if mod.odd {
 		return expOdd(base, exp, mod, modLen)
 	}
 	return expEven(base, exp, modBytes)
+}
+
+// isModOne checks if mod is 0 or 1 without full parsing.
+func isModOne(mod []byte) bool {
+	for i := 0; i < len(mod)-1; i++ {
+		if mod[i] != 0 {
+			return false
+		}
+	}
+	return len(mod) == 0 || mod[len(mod)-1] <= 1
 }
 
 // expBigInt uses math/big.Int.Exp for small exponents where Montgomery
@@ -59,6 +72,9 @@ func expBigInt(base, exp, mod []byte) []byte {
 	b := new(big.Int).SetBytes(base)
 	e := new(big.Int).SetBytes(exp)
 	m := new(big.Int).SetBytes(mod)
+	if m.Sign() <= 0 {
+		return make([]byte, len(mod))
+	}
 	result := new(big.Int).Exp(b, e, m)
 	return leftPad(result.Bytes(), len(mod))
 }
