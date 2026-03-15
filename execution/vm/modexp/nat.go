@@ -6,6 +6,7 @@
 package modexp
 
 import (
+	"math/big"
 	"math/bits"
 )
 
@@ -237,34 +238,28 @@ func minusInverseModW(x uint) uint {
 }
 
 // computeRR computes R*R mod m where R = 2^(_W * n).
+// Uses big.Int for the modular reduction (one-time setup cost).
 func computeRR(m *modulus) *nat {
 	n := m.size()
+
+	// Convert m to big.Int (little-endian limbs → big.Int words).
+	bigM := new(big.Int)
+	mWords := make([]big.Word, n)
+	for i := 0; i < n; i++ {
+		mWords[i] = big.Word(m.nat.limbs[i])
+	}
+	bigM.SetBits(mWords)
+
+	// R = 2^(_W * n), R^2 = 2^(2 * _W * n).
+	bigRR := new(big.Int).Lsh(big.NewInt(1), uint(2*_W*n))
+	bigRR.Mod(bigRR, bigM)
+
+	// Convert back to nat.
 	rr := newNat(n)
-	mLen := uint(m.bitLen())
-	logR := uint(_W) * uint(n)
-
-	// Start with 2^(mLen-1) which is < m
-	rr.limbs[n-1] = 1 << ((mLen - 1) % uint(_W))
-	// Double to get R mod m
-	for i := mLen - 1; i < logR; i++ {
-		// rr = rr + rr; if rr >= m, rr -= m
-		carry := rr.add(rr)
-		if carry != 0 || rr.cmpGeq(m.nat) == 1 {
-			rr.sub(m.nat)
-		}
+	rrWords := bigRR.Bits()
+	for i := 0; i < len(rrWords) && i < n; i++ {
+		rr.limbs[i] = uint(rrWords[i])
 	}
-
-	// Now rr = R mod m. Square log2(R) times to get R^2 mod m.
-	// More efficient: repeatedly square-and-double.
-	// We compute R^2 by squaring R via Montgomery: rr = montMul(rr, rr, m) * R
-	// Actually, simpler: double rr another logR times.
-	for i := uint(0); i < logR; i++ {
-		carry := rr.add(rr)
-		if carry != 0 || rr.cmpGeq(m.nat) == 1 {
-			rr.sub(m.nat)
-		}
-	}
-
 	return rr
 }
 

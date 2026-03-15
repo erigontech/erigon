@@ -44,32 +44,61 @@ func (x *nat) montgomeryReduction(m *modulus, T []uint, one *nat) *nat {
 func (out *nat) exp(base *nat, e []byte, m *modulus) *nat {
 	n := m.size()
 
+	// Scan exponent to find max nibble (for lazy table building)
+	// and first non-zero nibble position (to skip leading zeros).
+	var maxNibble byte
+	for _, b := range e {
+		hi := (b >> 4) & 0xf
+		lo := b & 0xf
+		if hi > maxNibble {
+			maxNibble = hi
+		}
+		if lo > maxNibble {
+			maxNibble = lo
+		}
+	}
+	tableLen := int(maxNibble) // table[0..maxNibble-1]
+	if tableLen == 0 {
+		tableLen = 1 // always need at least table[0] for montgomeryRepresentation
+	}
+
 	// Single allocation for all working storage:
-	// T (2n) + one (n) + table (15*n) + tmp (n) = 19n limbs
-	slab := make([]uint, 19*n)
+	// T (2n) + one (n) + table (tableLen*n) + tmp (n)
+	slabSize := (3 + tableLen + 1) * n
+	slab := make([]uint, slabSize)
 	T := slab[:2*n]
 	oneLimbs := slab[2*n : 3*n]
 	oneLimbs[0] = 1
 	one := &nat{limbs: oneLimbs}
 
-	// Build table[i] = base^(i+1) * R mod m
+	// Build table[i] = base^(i+1) * R mod m, only up to maxNibble
 	var table [15]*nat
-	for i := range table {
+	for i := 0; i < tableLen; i++ {
 		off := (3 + i) * n
 		table[i] = &nat{limbs: slab[off : off+n]}
 	}
 	table[0].set(base).montgomeryRepresentation(m, T)
-	for i := 1; i < len(table); i++ {
+	for i := 1; i < tableLen; i++ {
 		table[i].montgomeryMul(table[i-1], table[0], m, T)
 	}
 
-	out.reset(n)
-	out.limbs[0] = 1
-	out.montgomeryRepresentation(m, T)
+	tmp := &nat{limbs: slab[(3+tableLen)*n : (3+tableLen+1)*n]}
 
-	tmp := &nat{limbs: slab[18*n : 19*n]}
+	// Find first non-zero nibble to seed out, skipping leading zero squarings.
+	started := false
+	out.reset(n)
 	for _, b := range e {
 		for _, j := range [2]int{4, 0} {
+			k := (b >> j) & 0xf
+			if !started {
+				if k == 0 {
+					continue
+				}
+				// First non-zero nibble: seed out directly from table
+				copy(out.limbs, table[k-1].limbs)
+				started = true
+				continue
+			}
 			// Square four times
 			out.montgomeryMul(out, out, m, T)
 			out.montgomeryMul(out, out, m, T)
@@ -77,12 +106,17 @@ func (out *nat) exp(base *nat, e []byte, m *modulus) *nat {
 			out.montgomeryMul(out, out, m, T)
 
 			// Multiply by table[k-1] if k != 0
-			k := (b >> j) & 0xf
 			if k != 0 {
 				tmp.montgomeryMul(out, table[k-1], m, T)
 				copy(out.limbs, tmp.limbs)
 			}
 		}
+	}
+
+	if !started {
+		// exp == 0: result is 1 mod m
+		out.limbs[0] = 1
+		out.montgomeryRepresentation(m, T)
 	}
 
 	return out.montgomeryReduction(m, T, one)
