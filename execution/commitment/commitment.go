@@ -479,6 +479,7 @@ func ApplyDeferredBranchUpdates(
 		return written, nil
 	}
 
+	t := time.Now()
 	// Partition the slice across workers; each worker encodes its own chunk in-place.
 	// No channels needed: workers write only to their own sub-slice elements (.encoded),
 	// and the main goroutine reads those fields only after wg.Wait().
@@ -517,7 +518,7 @@ func ApplyDeferredBranchUpdates(
 		}
 	}
 
-	t := time.Now()
+	t2 := time.Now()
 	// putBranch must be called sequentially (MDBX writes are single-threaded).
 	var written int
 	for _, upd := range deferred {
@@ -529,11 +530,11 @@ func ApplyDeferredBranchUpdates(
 		}
 		written++
 	}
-	took := time.Since(t)
+	took := time.Since(t2)
 	if took > time.Millisecond {
-		log.Warn("[dbg] took2", "in", took)
+		log.Warn("[dbg] took2", "in", took, "t1", time.Since(t2), "l", len(deferred))
 	} else {
-		log.Warn("[dbg] took1", "in", took)
+		log.Warn("[dbg] took1", "in", took, "t1", time.Since(t2), "l", len(deferred))
 	}
 	mxTrieBranchesUpdated.AddInt(written)
 	return written, nil
