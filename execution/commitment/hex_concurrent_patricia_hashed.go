@@ -213,6 +213,7 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(16)
+	t := time.Now()
 
 	for n := 0; n < len(t.nibbles); n++ {
 		nib := t.nibbles[n]
@@ -249,6 +250,7 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 	if err := g.Wait(); err != nil {
 		return nil, err
 	}
+	log.Warn("[dbg] ParallelHashSort", "t", time.Since(t))
 
 	if pph.root.trace {
 		fmt.Printf("======= folding ROOT trie =========\n")
