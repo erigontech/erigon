@@ -636,6 +636,7 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	}
 
 	if needsFlush {
+		log.Warn("[dbg] ")
 		if err := be.ApplyDeferredUpdates(estimate.HalfCPUs(), ctx.PutBranch); err != nil {
 			return err
 		}
