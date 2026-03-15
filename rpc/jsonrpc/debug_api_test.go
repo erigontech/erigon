@@ -88,7 +88,7 @@ func TestTraceBlockByNumber(t *testing.T) {
 	}
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0)
+	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
 	ethApi := newEthApiForTest(baseApi, m.DB, nil, nil)
 	api := NewPrivateDebugAPI(baseApi, m.DB, nil, 0, false)
 	for _, tt := range debugTraceTransactionTests {
