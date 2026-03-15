@@ -379,7 +379,7 @@ func (c *PagedWriter) writeInOrder() error {
 }
 
 func (c *PagedWriter) Empty() bool              { return c.pairs == 0 }
-func (c *PagedWriter) IsAsyncCompression() bool { return c.numWorkers > 1 }
+func (c *PagedWriter) IsAsyncCompression() bool { return c.workCh != nil }
 func (c *PagedWriter) PagesCompressed() int     { return c.pagesCompressed }
 func (c *PagedWriter) Close() {
 	c.parent.Close()
@@ -414,7 +414,7 @@ func (c *PagedWriter) writePage() error {
 	}
 
 	// Synchronous path (single-threaded or disabled workers)
-	if c.numWorkers <= 1 {
+	if c.workCh == nil {
 		uncompressedPage, ok := c.bytesUncompressed()
 		c.resetPage()
 		if !ok {
@@ -481,7 +481,7 @@ func (c *PagedWriter) Flush() error {
 	if err := c.writePage(); err != nil {
 		return err
 	}
-	if c.numWorkers <= 1 {
+	if c.workCh == nil {
 		c.resetPage()
 		return nil
 	}
