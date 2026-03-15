@@ -417,13 +417,11 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 
 	// Step 8: Recover sender if needed.
 	if ctx.withSender && len(sender) == length.Addr {
-		if txn.Type() == types.AccountAbstractionTxType {
-			if aaTx, ok := txn.(*types.AccountAbstractionTransaction); ok {
-				senderAddr := aaTx.SenderAddress.Value()
-				copy(sender, senderAddr[:])
-				if aaTx.Paymaster != nil {
-					copy(sender, aaTx.Paymaster[:])
-				}
+		if aaTx, ok := txn.(*types.AccountAbstractionTransaction); ok {
+			senderAddr := aaTx.SenderAddress.Value()
+			copy(sender, senderAddr[:])
+			if aaTx.Paymaster != nil {
+				copy(sender, aaTx.Paymaster[:])
 			}
 		} else {
 			signer := ctx.signer
