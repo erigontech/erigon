@@ -24,19 +24,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # consume-engine: split by fork for parallelism (61k+ tests total)
+          # consume-engine: split by fork for parallelism (61k+ tests total).
           # Engine API tests only exist from Paris (The Merge) onwards.
+          # Pattern format: "<suite-regex>/<test-regex>" — the leading ".*/""
+          # matches the suite name (eest/consume-engine) while the remainder
+          # filters individual pytest test IDs by fork parameter.
           - sim: consume-engine
-            sim-limit: "fork_Paris|fork_Shanghai"
+            sim-limit: ".*/.*fork_(Paris|Shanghai)"
             shard: paris+shanghai
           - sim: consume-engine
-            sim-limit: "fork_Cancun"
+            sim-limit: ".*/.*fork_Cancun"
             shard: cancun
           - sim: consume-engine
-            sim-limit: "fork_Prague"
+            sim-limit: ".*/.*fork_Prague"
             shard: prague
           - sim: consume-engine
-            sim-limit: "fork_Osaka"
+            sim-limit: ".*/.*fork_Osaka"
             shard: osaka
           - sim: consume-rlp
             sim-limit: ".*eip2930_access_list.*" # all tests take too long
