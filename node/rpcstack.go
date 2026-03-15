@@ -285,7 +285,7 @@ func (h *httpServer) enableRPC(apis []rpc.API, config httpConfig, allowList rpc.
 	}
 	h.httpConfig = config
 	h.httpHandler.Store(&rpcHandler{
-		Handler: NewHTTPHandlerStack(srv, config.CorsAllowedOrigins, config.Vhosts, config.Compression, config.RpcConcurrencyLimit),
+		Handler: NewHTTPHandlerStack(srv, config.CorsAllowedOrigins, config.Vhosts, config.Compression, config.RpcConcurrencyLimit, true),
 		server:  srv,
 	})
 	return nil
@@ -350,18 +350,22 @@ func isWebsocket(r *http.Request) bool {
 		strings.Contains(strings.ToLower(r.Header.Get("Connection")), "upgrade")
 }
 
-// NewHTTPHandlerStack returns wrapped http-related handlers
-func NewHTTPHandlerStack(srv http.Handler, cors []string, vhosts []string, compression bool, rpcConcurrencyLimit int64) http.Handler {
+// NewHTTPHandlerStack returns wrapped http-related handlers.
+// tagAsRPC controls whether requests are tagged with TxPriorityRPC (fail-fast BeginRo).
+// Pass true for the JSON-RPC port (user RPC), false for the engine/auth port (CL protocol).
+func NewHTTPHandlerStack(srv http.Handler, cors []string, vhosts []string, compression bool, rpcConcurrencyLimit int64, tagAsRPC bool) http.Handler {
 	// Wrap the CORS-handler within a host-handler
 	handler := newCorsHandler(srv, cors)
 	handler = newVHostHandler(vhosts, handler)
 	if compression {
 		handler = newGzipHandler(handler)
 	}
-	// Always installed: tags every request with TxPriorityRPC so BeginRo uses TryAcquire.
+	// When tagAsRPC: tags every request with TxPriorityRPC so BeginRo uses TryAcquire (fail-fast).
 	// When rpcConcurrencyLimit > 0 it also enforces admission control (503 if inflight > limit).
-	// When rpcConcurrencyLimit == 0 only the tag is applied, no request is ever rejected here.
-	handler = newRPCAdmissionHandler(rpcConcurrencyLimit, handler)
+	// Engine API port (tagAsRPC=false) skips the tag so execution-engine DB calls use blocking Acquire.
+	if tagAsRPC {
+		handler = newRPCAdmissionHandler(rpcConcurrencyLimit, handler)
+	}
 	return handler
 }
 
