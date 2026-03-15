@@ -179,15 +179,21 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		return fmt.Errorf("semaphore timeout")
 	}
 	shouldReleaseSema := true
+
+	// Cleanup defers — declared first so they run LAST (LIFO order).
+	// These do not need the semaphore; they have their own internal locks.
+	defer UpdateForkChoiceDuration(time.Now())
+	defer e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
+	defer e.currentContext.ResetPendingUpdates()
+
+	// Semaphore release — declared after cleanup defers so it runs FIRST
+	// (LIFO order), minimising the time the semaphore is held and preventing
+	// "execution module is busy" errors in concurrent callers like SetHead.
 	defer func() {
 		if shouldReleaseSema {
 			e.semaphore.Release(1)
 		}
 	}()
-
-	defer UpdateForkChoiceDuration(time.Now())
-	defer e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
-	defer e.currentContext.ResetPendingUpdates()
 
 	var validationError string
 	type canonicalEntry struct {
