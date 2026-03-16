@@ -138,11 +138,7 @@ func (db *DB) View(ctx context.Context, f func(tx kv.Tx) error) error {
 	return f(tx)
 }
 
-func (db *DB) BeginTemporalRw(ctx context.Context) (kv.TemporalRwTx, error) {
-	kvTx, err := db.RwDB.BeginRw(ctx) //nolint:gocritic
-	if err != nil {
-		return nil, err
-	}
+func (db *DB) newRwTx(kvTx kv.RwTx, ctx context.Context) *RwTx {
 	tx := &RwTx{RwTx: kvTx, tx: tx{db: db, ctx: ctx}}
 	tx.aggtx = db.stateFiles.BeginFilesRo()
 	if len(db.forkaggs) > 0 {
@@ -151,7 +147,15 @@ func (db *DB) BeginTemporalRw(ctx context.Context) (kv.TemporalRwTx, error) {
 			tx.forkaggs[i] = forkagg.BeginTemporalTx()
 		}
 	}
-	return tx, nil
+	return tx
+}
+
+func (db *DB) BeginTemporalRw(ctx context.Context) (kv.TemporalRwTx, error) {
+	kvTx, err := db.RwDB.BeginRw(ctx) //nolint:gocritic
+	if err != nil {
+		return nil, err
+	}
+	return db.newRwTx(kvTx, ctx), nil
 }
 func (db *DB) BeginRw(ctx context.Context) (kv.RwTx, error) {
 	return db.BeginTemporalRw(ctx)
@@ -185,18 +189,29 @@ func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.TemporalRwTx, error
 	if err != nil {
 		return nil, err
 	}
-	tx := &RwTx{RwTx: kvTx, tx: tx{db: db, ctx: ctx}}
-	tx.aggtx = db.stateFiles.BeginFilesRo()
-	if len(db.forkaggs) > 0 {
-		tx.forkaggs = make([]*state.ForkableAggTemporalTx, len(db.forkaggs))
-		for i, forkagg := range db.forkaggs {
-			tx.forkaggs[i] = forkagg.BeginTemporalTx()
-		}
-	}
-	return tx, nil
+	return db.newRwTx(kvTx, ctx), nil
 }
 func (db *DB) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
 	return db.BeginTemporalRwNosync(ctx) //nolint:gocritic
+}
+
+// rwTry is satisfied by DBs whose write-transaction open can be made non-blocking.
+type rwTry interface {
+	BeginRwTry(ctx context.Context) (kv.RwTx, error)
+}
+
+// BeginTemporalRwTry opens a write transaction without blocking. Returns
+// syscall.EBUSY if another write transaction is already open.
+func (db *DB) BeginTemporalRwTry(ctx context.Context) (kv.TemporalRwTx, error) {
+	tryDB, ok := db.RwDB.(rwTry)
+	if !ok {
+		return nil, errors.New("underlying db does not support non-blocking write tx")
+	}
+	kvTx, err := tryDB.BeginRwTry(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return db.newRwTx(kvTx, ctx), nil
 }
 func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error {
 	tx, err := db.BeginTemporalRwNosync(ctx)

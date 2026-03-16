@@ -43,17 +43,21 @@ type IntrinsicGasCalcResult struct {
 	FloorGasCost uint64
 }
 
+// CountNonZeroBytes returns the number of non-zero bytes in data.
+func CountNonZeroBytes(data []byte) int {
+	count := 0
+	for _, b := range data {
+		if b != 0 {
+			count++
+		}
+	}
+	return count
+}
+
 // IntrinsicGas computes the 'intrinsic gas' for a message with the given data.
 // It counts the non-zero bytes in args.Data and then calls CalcIntrinsicGas.
 func IntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) {
-	// Zero and non-zero bytes are priced differently
-	args.DataNonZeroLen = 0
-	for _, byt := range args.Data {
-		if byt != 0 {
-			args.DataNonZeroLen++
-		}
-	}
-
+	args.DataNonZeroLen = uint64(CountNonZeroBytes(args.Data))
 	return CalcIntrinsicGas(args)
 }
 
