@@ -213,9 +213,9 @@ func poolsFromFuzzBytes(rawTxnNonce, rawValues, rawTips, rawFeeCap, rawSender []
 		txns.Txns[i] = &TxnSlot{
 			Nonce: txnNonce[i],
 			Txn: &types.DynamicFeeTransaction{
-				CommonTx: types.CommonTx{Value: values[i%len(values)].Clone(), To: &common.Address{1}},
-				TipCap:   uint256.NewInt(tips[i%len(tips)]),
-				FeeCap:   uint256.NewInt(feeCap[i%len(feeCap)]),
+				CommonTx: types.CommonTx{Value: values[i%len(values)], To: &common.Address{1}},
+				TipCap:   *uint256.NewInt(tips[i%len(tips)]),
+				FeeCap:   *uint256.NewInt(feeCap[i%len(feeCap)]),
 			},
 		}
 		txnRlp := fakeRlpTxn(txns.Txns[i], senders.At(i%senders.Len()))

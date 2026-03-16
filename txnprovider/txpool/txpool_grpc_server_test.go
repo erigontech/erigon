@@ -98,8 +98,8 @@ func TestQueryAllWithoutPanicUnknown(t *testing.T) {
 		s := &TxnSlot{
 			Txn: &types.DynamicFeeTransaction{
 				CommonTx: types.CommonTx{GasLimit: 21000, To: &to},
-				TipCap:   uint256.NewInt(tip),
-				FeeCap:   uint256.NewInt(tip),
+				TipCap:   *uint256.NewInt(tip),
+				FeeCap:   *uint256.NewInt(tip),
 			},
 			Nonce: 0,
 			Rlp:   []byte{id}, // ensure All() doesn't need DB to fetch
