@@ -58,10 +58,7 @@ func EncodeListPrefix(dataLen int, to []byte) int {
 }
 
 func u32Len(i uint32) int {
-	if i < 128 {
-		return 1
-	}
-	return 1 + common.BitLenToByteLen(bits.Len32(i))
+	return U64Len(uint64(i))
 }
 
 func U64Len(i uint64) int {
@@ -72,19 +69,7 @@ func U64Len(i uint64) int {
 }
 
 func EncodeU32(i uint32, to []byte) int {
-	if i == 0 {
-		to[0] = 128
-		return 1
-	}
-	if i < 128 {
-		to[0] = byte(i) // fits single byte
-		return 1
-	}
-	binary.BigEndian.PutUint32(to[1:], i)
-	size := common.BitLenToByteLen(bits.Len32(i))
-	copy(to[1:], to[5-size:5])
-	to[0] = 128 + byte(size)
-	return 1 + size
+	return EncodeU64(uint64(i), to)
 }
 
 func EncodeU64(i uint64, to []byte) int {

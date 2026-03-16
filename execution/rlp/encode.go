@@ -577,20 +577,7 @@ func EncodeString(s []byte, w io.Writer, buffer []byte) error {
 }
 
 func EncodeStringSizePrefix(size int, w io.Writer, buffer []byte) error {
-	if size >= 56 {
-		beSize := common.BitLenToByteLen(bits.Len(uint(size)))
-		binary.BigEndian.PutUint64(buffer[1:], uint64(size))
-		buffer[8-beSize] = byte(beSize) + 183
-		if _, err := w.Write(buffer[8-beSize : 9]); err != nil {
-			return err
-		}
-	} else {
-		buffer[0] = byte(size) + 128
-		if _, err := w.Write(buffer[:1]); err != nil {
-			return err
-		}
-	}
-	return nil
+	return encodeSizePrefix(size, w, buffer, 0x80, 0xB7)
 }
 
 func EncodeOptionalAddress(addr *common.Address, w io.Writer, buffer []byte) error {
@@ -606,20 +593,20 @@ func EncodeOptionalAddress(addr *common.Address, w io.Writer, buffer []byte) err
 }
 
 func EncodeStructSizePrefix(size int, w io.Writer, buffer []byte) error {
+	return encodeSizePrefix(size, w, buffer, 0xC0, 0xF7)
+}
+
+func encodeSizePrefix(size int, w io.Writer, buffer []byte, smallTag, largeTag byte) error {
 	if size >= 56 {
 		beSize := common.BitLenToByteLen(bits.Len(uint(size)))
 		binary.BigEndian.PutUint64(buffer[1:], uint64(size))
-		buffer[8-beSize] = byte(beSize) + 247
-		if _, err := w.Write(buffer[8-beSize : 9]); err != nil {
-			return err
-		}
-	} else {
-		buffer[0] = byte(size) + 192
-		if _, err := w.Write(buffer[:1]); err != nil {
-			return err
-		}
+		buffer[8-beSize] = byte(beSize) + largeTag
+		_, err := w.Write(buffer[8-beSize : 9])
+		return err
 	}
-	return nil
+	buffer[0] = byte(size) + smallTag
+	_, err := w.Write(buffer[:1])
+	return err
 }
 
 func ByteSliceSliceSize(bb [][]byte) int {

@@ -53,18 +53,7 @@ func StringSize(s string) uint64 {
 
 // BytesSize returns the encoded size of a byte slice.
 func BytesSize(b []byte) uint64 {
-	switch n := len(b); n {
-	case 0:
-		return 1
-	case 1:
-		if b[0] <= 0x7f {
-			return 1
-		} else {
-			return 2
-		}
-	default:
-		return uint64(headsize(uint64(n)) + n)
-	}
+	return uint64(StringLen(b))
 }
 
 // ListSize returns the encoded size of an RLP list with the given
@@ -76,10 +65,7 @@ func ListSize(contentSize uint64) uint64 {
 // IntSize returns the encoded size of the integer x. Note: The return type of this
 // function is 'int' for backwards-compatibility reasons. The result is always positive.
 func IntSize(x uint64) int {
-	if x < 0x80 {
-		return 1
-	}
-	return 1 + intsize(x)
+	return U64Len(x)
 }
 
 // Split returns the content of first RLP value and any
