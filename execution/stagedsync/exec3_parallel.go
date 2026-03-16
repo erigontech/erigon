@@ -93,6 +93,13 @@ type parallelExecutor struct {
 	// accumulator for txpool state-diff notifications; set before execLoop
 	// starts so that AuRa system-call nonce changes are emitted per block.
 	accumulator *shards.Accumulator
+	// blockApplied synchronises the execLoop and apply goroutines at block
+	// boundaries. The apply goroutine sends on this channel after it has
+	// finished processing a blockResult (i.e. all of block N's state writes
+	// are visible in pe.rs). The execLoop waits on this channel before
+	// scheduling execution of block N+1, preventing workers from reading
+	// stale state.
+	blockApplied chan struct{}
 }
 
 func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
@@ -405,6 +412,11 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					blockUpdateCount = 0
 					blockApplyCount = 0
 
+					// Signal that block N is fully applied — all state writes
+					// are now visible in pe.rs. The execLoop waits for this
+					// before scheduling block N+1's workers.
+					pe.blockApplied <- struct{}{}
+
 					if dbg.StopAfterBlock > 0 && applyResult.BlockNum == dbg.StopAfterBlock {
 						return fmt.Errorf("stopping: block %d complete", applyResult.BlockNum)
 					}
@@ -449,8 +461,14 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	}
 
 	// Wait for all goroutines to complete before reading shared state
-	if err := pe.wait(ctx); err != nil {
-		return nil, rwTx, err
+	if waitErr := pe.wait(ctx); waitErr != nil {
+		// Executor goroutine errors (e.g. nonce mismatch) arrive here, not through execErr.
+		// Merge into execErr so the single error-handling path below catches both.
+		if execErr == nil {
+			execErr = waitErr
+		} else {
+			execErr = errors.Join(execErr, waitErr)
+		}
 	}
 
 	if !hasLoggedCommittments.Load() && !commitStart.IsZero() {
@@ -459,6 +477,28 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 	if execErr != nil {
 		if !(errors.Is(execErr, context.Canceled) || errors.Is(execErr, &ErrLoopExhausted{})) {
+			if lastHeader != nil {
+				pe.logger.Warn(fmt.Sprintf("[%s] Execution failed", pe.logPrefix), "err", execErr, "block", lastHeader.Number.Uint64(), "hash", lastHeader.Hash())
+			} else {
+				pe.logger.Warn(fmt.Sprintf("[%s] Execution failed", pe.logPrefix), "err", execErr)
+			}
+			if errors.Is(execErr, rules.ErrInvalidBlock) {
+				if pe.cfg.hd != nil && pe.cfg.hd.POSSync() && lastHeader != nil {
+					pe.cfg.hd.ReportBadHeaderPoS(lastHeader.Hash(), lastHeader.ParentHash)
+				}
+				if pe.cfg.badBlockHalt {
+					return nil, rwTx, execErr
+				}
+				if u != nil && lastHeader != nil {
+					unwindTo := uint64(0)
+					if lastHeader.Number.Uint64() > 0 {
+						unwindTo = lastHeader.Number.Uint64() - 1
+					}
+					if err := u.UnwindTo(unwindTo, BadBlock(lastHeader.Hash(), execErr), rwTx); err != nil {
+						return nil, rwTx, err
+					}
+				}
+			}
 			return nil, rwTx, execErr
 		}
 	}
@@ -730,6 +770,16 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				pe.Lock()
 				delete(pe.blockExecutors, blockResult.BlockNum)
 				pe.Unlock()
+			}
+
+			// Wait for the apply goroutine to finish processing block N's
+			// results before scheduling block N+1. Without this, workers
+			// for block N+1 can read stale state from pe.rs because block
+			// N's writes haven't been applied yet.
+			select {
+			case <-pe.blockApplied:
+			case <-ctx.Done():
+				return ctx.Err()
 			}
 
 			pe.RLock()

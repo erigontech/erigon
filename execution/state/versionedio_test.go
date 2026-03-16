@@ -183,8 +183,8 @@ func TestAsBlockAccessList_SystemAddressIncludedWithStateChanges(t *testing.T) {
 }
 
 // TestAsBlockAccessList_SystemAddressRevertableFromSystemCallOnly verifies that
-// a revertable access from a system call (txIndex = -1) does NOT set the
-// nonRevertableUserAccess flag, so the system address is still excluded.
+// an access from a system call (txIndex = -1) does NOT set the userAccess
+// flag, so the system address is still excluded when it has no state changes.
 func TestAsBlockAccessList_SystemAddressRevertableFromSystemCallOnly(t *testing.T) {
 	t.Parallel()
 
@@ -226,30 +226,24 @@ func TestAsBlockAccessList_SystemAddressRevertableFromSystemCallOnly(t *testing.
 	}
 }
 
-// TestAsBlockAccessList_NonRevertableOverridesRevertable verifies that if the
-// system address first gets a revertable access from a user tx, then a
-// non-revertable access from another user tx, the non-revertable wins and the
-// address is included.
-func TestAsBlockAccessList_NonRevertableOverridesRevertable(t *testing.T) {
+// TestAsBlockAccessList_RevertableUserAccessIncludesSystemAddress verifies that
+// even a revertable access from a user tx is enough to include the system
+// address in the BAL (matching geth's OnAccountRead behavior).
+func TestAsBlockAccessList_RevertableUserAccessIncludesSystemAddress(t *testing.T) {
 	t.Parallel()
 
 	sysAddr := params.SystemAddress
 
-	io := NewVersionedIO(2) // 3 slots: system call at -1, user tx 0, user tx 1
+	io := NewVersionedIO(1) // 2 slots: system call at -1, user tx 0
 
 	// System call: revertable.
 	io.RecordAccesses(Version{TxIndex: -1}, AccessSet{
 		sysAddr: &accessOptions{revertable: true},
 	})
 
-	// User tx 0: revertable access (e.g. gas calc).
+	// User tx 0: revertable access (e.g. gas calc versionRead).
 	io.RecordAccesses(Version{TxIndex: 0}, AccessSet{
 		sysAddr: &accessOptions{revertable: true},
-	})
-
-	// User tx 1: non-revertable access (e.g. BALANCE opcode).
-	io.RecordAccesses(Version{TxIndex: 1}, AccessSet{
-		sysAddr: &accessOptions{revertable: false},
 	})
 
 	bal := io.AsBlockAccessList()
@@ -262,7 +256,7 @@ func TestAsBlockAccessList_NonRevertableOverridesRevertable(t *testing.T) {
 		}
 	}
 	require.True(t, found,
-		"system address should be included: non-revertable user access overrides earlier revertable access")
+		"system address should be included: any user tx access (even revertable) triggers inclusion")
 }
 
 // TestVersionedIO_BalanceNetZeroWriteOmittedFromBAL verifies that a balance
