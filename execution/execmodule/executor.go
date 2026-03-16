@@ -18,12 +18,16 @@ package execmodule
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/stagedsync"
+	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
 
 // PipelineExecutor runs the staged sync pipeline in a hasMore loop,
@@ -32,13 +36,15 @@ import (
 // between calls — callers provide their own tx/SD lifecycle and commit
 // strategy via callbacks.
 type PipelineExecutor struct {
-	sync   *stagedsync.Sync
-	logger log.Logger
+	sync        *stagedsync.Sync
+	db          kv.TemporalRwDB
+	blockReader services.FullBlockReader
+	logger      log.Logger
 }
 
 // NewPipelineExecutor creates a new executor wrapping the given pipeline.
-func NewPipelineExecutor(sync *stagedsync.Sync, logger log.Logger) *PipelineExecutor {
-	return &PipelineExecutor{sync: sync, logger: logger}
+func NewPipelineExecutor(sync *stagedsync.Sync, db kv.TemporalRwDB, blockReader services.FullBlockReader, logger log.Logger) *PipelineExecutor {
+	return &PipelineExecutor{sync: sync, db: db, blockReader: blockReader, logger: logger}
 }
 
 // CommitCycleFn is called between hasMore iterations to persist accumulated
@@ -117,4 +123,109 @@ func (pe *PipelineExecutor) RunLoop(ctx context.Context, cfg RunLoopConfig) (Run
 		}
 	}
 	return RunLoopResult{FinalTx: tx}, nil
+}
+
+// ProcessFrozenBlocks runs the pipeline over snapshot blocks at startup.
+// It downloads block files, then executes them in a hasMore loop until
+// all frozen blocks are processed.
+func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stageloop.Hook, onlySnapDownload bool) error {
+	sawZeroBlocksTimes := 0
+	tx, err := pe.db.BeginTemporalRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Run snapshots stage — downloads block files.
+	if err = pe.sync.RunSnapshots(nil, tx); err != nil {
+		return err
+	}
+	if onlySnapDownload {
+		return nil
+	}
+
+	// If domains are ahead of block files, nothing to execute.
+	if execctx.IsDomainAheadOfBlocks(ctx, tx, pe.logger) {
+		return tx.Commit()
+	}
+
+	doms, err := execctx.NewSharedDomains(ctx, tx, pe.logger)
+	if err != nil {
+		return err
+	}
+	defer doms.Close()
+
+	var finishStageBeforeSync uint64
+	if hook != nil {
+		finishStageBeforeSync, err = stages.GetStageProgress(tx, stages.Finish)
+		if err != nil {
+			return err
+		}
+		if err = hook.BeforeRun(tx, false); err != nil {
+			return err
+		}
+	}
+
+	result, err := pe.RunLoop(ctx, RunLoopConfig{
+		SD:           doms,
+		Tx:           tx,
+		InitialCycle: true,
+		FirstCycle:   false,
+		PruneTimeout: 0,
+		CommitCycle: func(ctx context.Context, sd *execctx.SharedDomains) (kv.TemporalRwTx, error) {
+			if err := sd.Flush(ctx, tx); err != nil {
+				return nil, fmt.Errorf("ProcessFrozenBlocks: flush: %w", err)
+			}
+			sd.ClearRam(true)
+			if err := tx.Commit(); err != nil {
+				return nil, err
+			}
+			newTx, err := pe.db.BeginTemporalRw(ctx) //nolint:gocritic
+			if err != nil {
+				return nil, err
+			}
+			tx = newTx
+			return newTx, nil
+		},
+		ShouldBreak: func(curTx kv.TemporalRwTx) (bool, error) {
+			if pe.blockReader.FrozenBlocks() > 0 {
+				p, err := stages.GetStageProgress(curTx, stages.Finish)
+				if err != nil {
+					return false, err
+				}
+				return p >= pe.blockReader.FrozenBlocks(), nil
+			}
+			sawZeroBlocksTimes++
+			return sawZeroBlocksTimes > 2, nil
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("ProcessFrozenBlocks: %w", err)
+	}
+	tx = result.FinalTx
+
+	if err := doms.Flush(ctx, tx); err != nil {
+		return fmt.Errorf("ProcessFrozenBlocks: final flush: %w", err)
+	}
+	doms.ClearRam(true)
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	if hook != nil {
+		if err := pe.db.View(ctx, func(tx kv.Tx) error {
+			headersProgress, err := stages.GetStageProgress(tx, stages.Headers)
+			if err != nil {
+				return err
+			}
+			if err = hook.AfterRun(tx, finishStageBeforeSync, false); err != nil {
+				return err
+			}
+			hook.LastNewBlockSeen(headersProgress)
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
