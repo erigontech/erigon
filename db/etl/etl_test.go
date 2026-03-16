@@ -429,11 +429,12 @@ func testLoadFromMapDoubleFunc(k []byte, v []byte, _ CurrentTableReader, next Lo
 	}
 	realValue := valueMap["value"]
 
-	err = next(k, append(k, 0xAA), append(realValue, 0xAA))
+	// Must copy k before appending: k points into the ETL buffer (must not be modified).
+	err = next(k, append(common.Copy(k), 0xAA), append(realValue, 0xAA))
 	if err != nil {
 		return err
 	}
-	return next(k, append(k, 0xBB), append(realValue, 0xBB))
+	return next(k, append(common.Copy(k), 0xBB), append(realValue, 0xBB))
 }
 
 func compareBuckets(t *testing.T, db kv.Tx, b1, b2 string, startKey []byte) {
@@ -487,9 +488,10 @@ func TestReuseCollectorAfterLoad(t *testing.T) {
 	require.Equal(t, 1, see)
 
 	// buffers are not lost
-	require.Empty(t, buf.data)
+	require.Empty(t, buf.keys)
+	require.Empty(t, buf.vals)
 	require.Empty(t, buf.entries)
-	require.NotZero(t, cap(buf.data))
+	require.NotZero(t, cap(buf.keys))
 	require.NotZero(t, cap(buf.entries))
 
 	// teset that no data visible
