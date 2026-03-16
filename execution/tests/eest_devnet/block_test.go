@@ -57,7 +57,6 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7954_increase_max_contract_size/test_max_code_size_deposit_gas.json`)           // block=1, receiptHash mismatch: 34f408ef6c0c284659b1f6f2bb262a45afacfb0ada3448163a7c3bf0520d86ee != 5fe22104aa4dcbec000a57a18ba9a64d6a92ee73be758990a928e1d9491f3b21, headerNum=1, 47df0d324522b1e6279320d6ff23ae61ce9453527cee8d0e01e5d59e998384b7
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7954_increase_max_contract_size/test_max_initcode_size_via_create.json`)        // block=1, gas used by execution: 16777216, in header: 16645728
 	bt.SkipLoad(`^for_amsterdam/cancun/eip6780_selfdestruct/test_selfdestruct_created_in_same_tx_with_revert.json`)          // block=1, receiptHash mismatch: 7e9ba0f7c8ae60792b17cd8f66f4927758071ecc540c3301216a72c38c4ef675 != 835cf74995cac576a1287823eea113f304339b92915937c89204aecabd7bbba0, headerNum=1, 9589cba9978ab301fe6728c7239ca232ee5bdda5c3df0c520b7cfd4fbaaeb7a5
-	bt.SkipLoad(`^for_amsterdam/frontier/opcodes/test_value_transfer_gas_calculation.json`)                                  // block=1, gas used by execution: 168931, in header: 37443                      // gas used by execution: 168931, in header: 37443
 
 	bt.Walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root

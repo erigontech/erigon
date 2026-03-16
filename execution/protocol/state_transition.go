@@ -617,8 +617,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		mdGasUsed := st.mdGasUsed()
 		if rules.IsAmsterdam {
 			// EIP-8037 + EIP-7778: Block gas accounting uses two dimensions.
-			// stateGasConsumed tracks ALL state gas charges (including spill
-			// to regular gas) and is NOT restored on depth-0 REVERT.
+			// stateGasConsumed tracks ALL state gas charges (including spill to regular gas).
 			// regularGasConsumed tracks only regular-dimension opcode gas.
 			blockState := imdGas.State + st.evm.StateGasConsumed()
 			blockRegular := imdGas.Regular + st.evm.RegularGasConsumed()

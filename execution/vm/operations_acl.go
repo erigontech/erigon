@@ -385,16 +385,18 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 			evm.intraBlockState.AddAddressToAccessList(dd)
 		}
 
-		availableGas.Regular = availableGas.Regular - accessGas - delegationGas
-		if availableGas.Regular < statefulBaseGas.Regular {
-			return mdgas.MdGas{}, ErrOutOfGas
-		}
+		// EIP-8037: Charge state gas directly from the gas pool BEFORE computing the 63/64 rule.
 		if statefulBaseGas.State > 0 {
-			var underflow bool
-			availableGas, underflow = availableGas.MinusStateGas(statefulBaseGas.State)
-			if underflow {
+			ok := callContext.useMdGas(evm, statefulBaseGas.State, mdgas.StateGas, nil, tracing.GasChangeIgnored)
+			if !ok {
 				return mdgas.MdGas{}, ErrOutOfGas
 			}
+			availableGas = callContext.Gas()
+		}
+
+		availableGas.Regular -= accessGas + delegationGas
+		if availableGas.Regular < statefulBaseGas.Regular {
+			return mdgas.MdGas{}, ErrOutOfGas
 		}
 		// Call the old calculator, which takes into account
 		// - 63/64ths rule
@@ -412,7 +414,6 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 			return mdgas.MdGas{}, ErrGasUintOverflow
 		}
 
-		gas.State = statefulBaseGas.State
 		return gas, nil
 	}
 }
