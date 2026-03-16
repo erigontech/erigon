@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
@@ -210,10 +211,12 @@ func poolsFromFuzzBytes(rawTxnNonce, rawValues, rawTips, rawFeeCap, rawSender []
 	parseCtx.WithSender(false)
 	for i := range txnNonce {
 		txns.Txns[i] = &TxnSlot{
-			Nonce:  txnNonce[i],
-			Value:  values[i%len(values)],
-			Tip:    *uint256.NewInt(tips[i%len(tips)]),
-			FeeCap: *uint256.NewInt(feeCap[i%len(feeCap)]),
+			Nonce: txnNonce[i],
+			Txn: &types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{Value: values[i%len(values)].Clone(), To: &common.Address{1}},
+				TipCap:   uint256.NewInt(tips[i%len(tips)]),
+				FeeCap:   uint256.NewInt(feeCap[i%len(feeCap)]),
+			},
 		}
 		txnRlp := fakeRlpTxn(txns.Txns[i], senders.At(i%senders.Len()))
 		_, err := parseCtx.ParseTransaction(txnRlp, 0, txns.Txns[i], nil, false /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
@@ -229,11 +232,15 @@ func poolsFromFuzzBytes(rawTxnNonce, rawValues, rawTips, rawFeeCap, rawSender []
 
 // fakeRlpTxn add anything what identifying txn to `data` to make hash unique
 func fakeRlpTxn(slot *TxnSlot, data []byte) []byte {
+	tip := *slot.GetTipCap()
+	feeCap := *slot.GetFeeCap()
+	value := *slot.GetValue()
+
 	dataLen := rlp.U64Len(1) + //chainID
-		rlp.U64Len(slot.Nonce) + rlp.Uint256Len(slot.Tip) + rlp.Uint256Len(slot.FeeCap) +
+		rlp.U64Len(slot.Nonce) + rlp.Uint256Len(tip) + rlp.Uint256Len(feeCap) +
 		rlp.U64Len(0) + // gas
 		rlp.StringLen([]byte{}) + // dest addr
-		rlp.Uint256Len(slot.Value) +
+		rlp.Uint256Len(value) +
 		rlp.StringLen(data) + // data
 		rlp.ListPrefixLen(0) + //access list
 		+3 // v,r,s
@@ -245,16 +252,16 @@ func fakeRlpTxn(slot *TxnSlot, data []byte) []byte {
 	p += rlp.EncodeU64(1, buf[p:]) //chainID
 	p += rlp.EncodeU64(slot.Nonce, buf[p:])
 	bb := bytes.NewBuffer(buf[p:p])
-	_ = slot.Tip.EncodeRLP(bb)
-	p += rlp.Uint256Len(slot.Tip)
+	_ = tip.EncodeRLP(bb)
+	p += rlp.Uint256Len(tip)
 	bb = bytes.NewBuffer(buf[p:p])
-	_ = slot.FeeCap.EncodeRLP(bb)
-	p += rlp.Uint256Len(slot.FeeCap)
+	_ = feeCap.EncodeRLP(bb)
+	p += rlp.Uint256Len(feeCap)
 	p += rlp.EncodeU64(0, buf[p:])            //gas
 	p += rlp.EncodeString2([]byte{}, buf[p:]) //destrination addr
 	bb = bytes.NewBuffer(buf[p:p])
-	_ = slot.Value.EncodeRLP(bb)
-	p += rlp.Uint256Len(slot.Value)
+	_ = value.EncodeRLP(bb)
+	p += rlp.Uint256Len(value)
 	p += rlp.EncodeString2(data, buf[p:]) //data
 	p += rlp.EncodeListPrefix(0, buf[p:]) // access list
 	p += rlp.EncodeU64(1, buf[p:])        //v
@@ -353,7 +360,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 					assert.GreaterOrEqual(i.Nonce, senders[i.SenderID].nonce, msg, i.SenderID)
 				}
 				if txn.subPool&EnoughFeeCapBlock > 0 {
-					assert.LessOrEqual(pendingBaseFee, txn.TxnSlot.FeeCap, msg)
+					assert.True(txn.TxnSlot.GetFeeCap().Cmp(uint256.NewInt(pendingBaseFee)) >= 0, msg)
 				}
 
 				// side data structures must have all txns
@@ -386,7 +393,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 					assert.GreaterOrEqual(i.Nonce, senders[i.SenderID].nonce, msg)
 				}
 				if txn.subPool&EnoughFeeCapBlock > 0 {
-					assert.LessOrEqual(pendingBaseFee, txn.TxnSlot.FeeCap, msg)
+					assert.True(txn.TxnSlot.GetFeeCap().Cmp(uint256.NewInt(pendingBaseFee)) >= 0, msg)
 				}
 
 				assert.True(pool.all.has(txn), msg)
@@ -404,13 +411,13 @@ func FuzzOnNewBlocks(f *testing.F) {
 					assert.GreaterOrEqual(i.Nonce, senders[i.SenderID].nonce, msg, i.SenderID, senders[i.SenderID].nonce)
 				}
 				if txn.subPool&EnoughFeeCapBlock > 0 {
-					assert.LessOrEqual(pendingBaseFee, txn.TxnSlot.FeeCap, msg)
+					assert.True(txn.TxnSlot.GetFeeCap().Cmp(uint256.NewInt(pendingBaseFee)) >= 0, msg)
 				}
 
 				assert.True(pool.all.has(txn), "%s, %d, %x", msg, txn.TxnSlot.Nonce, txn.TxnSlot.IDHash)
 				_, ok = pool.byHash[string(i.IDHash[:])]
 				assert.True(ok, msg)
-				assert.GreaterOrEqual(txn.TxnSlot.FeeCap, pool.cfg.MinFeeCap)
+				assert.True(txn.TxnSlot.GetFeeCap().Cmp(uint256.NewInt(pool.cfg.MinFeeCap)) >= 0)
 			})
 
 			// all txns in side data structures must be in some queue

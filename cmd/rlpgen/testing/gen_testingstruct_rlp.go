@@ -356,59 +356,34 @@ func (obj *TestingStruct) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("error decoding field bb, err: %w", err)
 	}
 	obj.bb = new(big.Int).SetBytes(b)
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&obj.c); err != nil {
 		return fmt.Errorf("error decoding field c, err: %w", err)
 	}
-	obj.c = *(new(uint256.Int).SetBytes(b))
-	if b, err = s.Uint256Bytes(); err != nil {
+	obj.cc = new(uint256.Int)
+	if err = s.ReadUint256(obj.cc); err != nil {
 		return fmt.Errorf("error decoding field cc, err: %w", err)
 	}
-	obj.cc = new(uint256.Int).SetBytes(b)
-	if b, err = s.Bytes(); err != nil {
+	if err = s.ReadBytes(obj.d[:]); err != nil {
 		return fmt.Errorf("error decoding field d, err: %w", err)
 	}
-	if len(b) > 0 && len(b) != 8 {
-		return fmt.Errorf("error decoded length mismatch, expected: 8, got: %d", len(b))
-	}
-	copy(obj.d[:], b)
-	if b, err = s.Bytes(); err != nil {
+	obj.dd = &types.BlockNonce{}
+	if err = s.ReadBytes((*obj.dd)[:]); err != nil {
 		return fmt.Errorf("error decoding field dd, err: %w", err)
 	}
-	if len(b) > 0 && len(b) != 8 {
-		return fmt.Errorf("error decoded length mismatch, expected: 8, got: %d", len(b))
-	}
-	obj.dd = &types.BlockNonce{}
-	copy((*obj.dd)[:], b)
-	if b, err = s.Bytes(); err != nil {
+	if err = s.ReadBytes(obj.e[:]); err != nil {
 		return fmt.Errorf("error decoding field e, err: %w", err)
 	}
-	if len(b) > 0 && len(b) != 20 {
-		return fmt.Errorf("error decoded length mismatch, expected: 20, got: %d", len(b))
-	}
-	copy(obj.e[:], b)
-	if b, err = s.Bytes(); err != nil {
+	obj.ee = &common.Address{}
+	if err = s.ReadBytes((*obj.ee)[:]); err != nil {
 		return fmt.Errorf("error decoding field ee, err: %w", err)
 	}
-	if len(b) > 0 && len(b) != 20 {
-		return fmt.Errorf("error decoded length mismatch, expected: 20, got: %d", len(b))
-	}
-	obj.ee = &common.Address{}
-	copy((*obj.ee)[:], b)
-	if b, err = s.Bytes(); err != nil {
+	if err = s.ReadBytes(obj.f[:]); err != nil {
 		return fmt.Errorf("error decoding field f, err: %w", err)
 	}
-	if len(b) > 0 && len(b) != 32 {
-		return fmt.Errorf("error decoded length mismatch, expected: 32, got: %d", len(b))
-	}
-	copy(obj.f[:], b)
-	if b, err = s.Bytes(); err != nil {
+	obj.ff = &common.Hash{}
+	if err = s.ReadBytes((*obj.ff)[:]); err != nil {
 		return fmt.Errorf("error decoding field ff, err: %w", err)
 	}
-	if len(b) > 0 && len(b) != 32 {
-		return fmt.Errorf("error decoded length mismatch, expected: 32, got: %d", len(b))
-	}
-	obj.ff = &common.Hash{}
-	copy((*obj.ff)[:], b)
 	if b, err = s.Bytes(); err != nil {
 		return fmt.Errorf("error decoding field g, err: %w", err)
 	}
@@ -517,18 +492,19 @@ func (obj *TestingStruct) DecodeRLP(s *rlp.Stream) error {
 	if err = s.ListEnd(); err != nil {
 		return fmt.Errorf("error decoding field kk - fail to close list, err: %w", err)
 	}
-	_, err = s.List()
+	l, err := s.List()
 	if err != nil {
 		return fmt.Errorf("error decoding field l - expected list start, err: %w", err)
 	}
-	obj.l = []common.Hash{}
-	for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
-		if len(b) > 0 && len(b) != 32 {
-			return fmt.Errorf("error decoded length mismatch, expected: 32, got: %d", len(b))
+	if l > 0 {
+		obj.l = make([]common.Hash, l/(1+32))
+		for i := range obj.l {
+			if err = s.ReadBytes(obj.l[i][:]); err != nil {
+				return err
+			}
 		}
-		var s common.Hash
-		copy(s[:], b)
-		obj.l = append(obj.l, s)
+	} else {
+		obj.l = []common.Hash{}
 	}
 	if err = s.ListEnd(); err != nil {
 		return fmt.Errorf("error decoding field l - fail to close list, err: %w", err)
