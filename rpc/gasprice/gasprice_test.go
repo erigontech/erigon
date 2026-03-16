@@ -368,7 +368,7 @@ func TestSuggestTipCap_SparseBlocks(t *testing.T) {
 		Default:    uint256.NewInt(common.GWei),
 	}
 	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewDummy(), m.BlockReader, false,
-		rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0)
+		rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
 
 	dbTx, txErr := m.DB.BeginTemporalRo(m.Ctx)
 	require.NoError(t, txErr)
@@ -406,7 +406,7 @@ func TestSuggestTipCap_AllEmptyBlocks(t *testing.T) {
 		Default:    uint256.NewInt(common.GWei),
 	}
 	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewDummy(), m.BlockReader, false,
-		rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0)
+		rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
 
 	dbTx, txErr := m.DB.BeginTemporalRo(m.Ctx)
 	require.NoError(t, txErr)
