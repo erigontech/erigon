@@ -57,7 +57,7 @@ func EncodeListPrefix(dataLen int, to []byte) int {
 	return 1
 }
 
-func U32Len(i uint32) int {
+func u32Len(i uint32) int {
 	if i < 128 {
 		return 1
 	}
@@ -166,11 +166,6 @@ func EncodeHash(h, to []byte) int {
 	return 33
 }
 
-func HashesLen(hashes []byte) int {
-	hashesLen := len(hashes) / 32 * 33
-	return ListPrefixLen(hashesLen) + hashesLen
-}
-
 func EncodeHashes(hashes []byte, encodeBuf []byte) int {
 	pos := 0
 	hashesLen := len(hashes) / 32 * 33
@@ -188,7 +183,7 @@ func AnnouncementsLen(types []byte, sizes []uint32, hashes []byte) int {
 	typesLen := StringLen(types)
 	var sizesLen int
 	for _, size := range sizes {
-		sizesLen += U32Len(size)
+		sizesLen += u32Len(size)
 	}
 	hashesLen := len(hashes) / 32 * 33
 	totalLen := typesLen + sizesLen + ListPrefixLen(sizesLen) + hashesLen + ListPrefixLen(hashesLen)
@@ -208,7 +203,7 @@ func EncodeAnnouncements(types []byte, sizes []uint32, hashes []byte, encodeBuf 
 	typesLen := StringLen(types)
 	var sizesLen int
 	for _, size := range sizes {
-		sizesLen += U32Len(size)
+		sizesLen += u32Len(size)
 	}
 	hashesLen := len(hashes) / 32 * 33
 	totalLen := typesLen + sizesLen + ListPrefixLen(sizesLen) + hashesLen + ListPrefixLen(hashesLen)
