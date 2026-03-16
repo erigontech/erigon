@@ -120,7 +120,6 @@ mdbx.lck
 
 .claude/settings.local.json
 .claude/projects/
-.claude/skills/**/skill.md
 
 # Prevent accidental commit of locally-built binaries
 /erigon

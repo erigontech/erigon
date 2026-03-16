@@ -1269,10 +1269,6 @@ func doIntegrity(cliCtx *cli.Context) error {
 					if err := integrity.CheckRCacheNoDups(ctx, sc, db, blockReader, failFast); err != nil {
 						return err
 					}
-				case integrity.StateProgress:
-					if err := integrity.CheckStateProgress(ctx, db, blockReader, failFast); err != nil {
-						return err
-					}
 				case integrity.Publishable:
 					if err := doPublishable(cliCtx, chainDB); err != nil {
 						return err
@@ -2359,6 +2355,7 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 	defer clean()
+	agg.PresetOfflineMerge()
 
 	if err := caplinStateSnaps.BuildMissingIndices(ctx, logger); err != nil {
 		return err

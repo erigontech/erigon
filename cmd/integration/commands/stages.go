@@ -681,7 +681,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		return err
 	}
 
-	defer tx.Rollback()
+	defer func() { tx.Rollback() }()
 
 	if pruneTo > 0 {
 		p, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, true)
@@ -726,6 +726,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	if err != nil {
 		return err
 	}
+	doms.SetInMemHistoryReads(false)
 
 	if chainTipMode {
 		//if chainTip = true, forced noCommit = false

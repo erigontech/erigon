@@ -642,14 +642,13 @@ func (m *MemoryMutation) Diff() (*MemoryDiff, error) {
 	return memDiff, nil
 }
 
-// Check if a bucket is dupsorted and has dupsort conversion off
+// Check if a bucket is a pure DupSort table
 func isTablePurelyDupsort(bucket string) bool {
 	config, ok := kv.ChaindataTablesCfg[bucket]
-	// If we do not have the configuration we assume it is not dupsorted
 	if !ok {
 		return false
 	}
-	return !config.AutoDupSortKeysConversion && config.Flags == kv.DupSort
+	return config.Flags == kv.DupSort
 }
 
 func (m *MemoryMutation) MemDB() kv.TemporalRwDB {
