@@ -148,11 +148,12 @@ func (s *L1SyncService) ProcessBatch(ctx context.Context, seqNum uint64, data []
 		}
 		if block != nil {
 			if temporalTx != nil {
-				if err := s.executeBlock(block, temporalTx); err != nil {
+				if err := s.executeBlock(block, temporalTx, msg.DelayedMessagesRead); err != nil {
 					return fmt.Errorf("failed to execute block %d (batch %d, msg %d): %w", block.NumberU64(), seqNum, i, err)
 				}
 			}
 			s.lastBlockHeader = block.Header()
+			s.cacheHeader(s.lastBlockHeader)
 		}
 	}
 
@@ -297,7 +298,7 @@ func createBlockFromMessage(msg *arbostypes.MessageWithMetadata, lastBlockHeader
 
 	// Prepend a tx before all others to touch up the osState (update the L1 block num, pricing pools, etc)
 	startTx := arbos.InternalTxStartBlock(chainID, l1Header.L1BaseFee, l1BlockNum, header, lastBlockHeader)
-	txes = append(types.Transactions{startTx}, txes...)
+	txes = append(types.Transactions{types.NewArbTx(startTx)}, txes...)
 
 	block := types.NewBlock(header, txes, nil, nil, nil)
 
