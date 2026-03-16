@@ -423,26 +423,25 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			if dbg.TraceDynamicGas && dynamicCost.Regular > 0 {
 				fmt.Printf("%d (%d.%d) Dynamic Gas: %d (%s)\n", blockNum, txIndex, txIncarnation, traceGas(op, callGas, cost), op)
 			}
-
+			if dynamicCost.State > 0 {
+				// EIP-8037: Charge state gas before regular gas
+				cost += dynamicCost.State
+				ok := callContext.useMdGas(evm, dynamicCost.State, mdgas.StateGas, nil, tracing.GasChangeIgnored)
+				if !ok {
+					return nil, callContext.Gas(), ErrOutOfGas
+				}
+			}
 			// for tracing: this gas consumption event is emitted below in the debug section.
 			if callContext.gas < dynamicCost.Regular {
 				return nil, callContext.Gas(), ErrOutOfGas
 			} else {
 				callContext.gas -= dynamicCost.Regular
 			}
-			// EIP-8037: Track dynamic regular gas immediately after deduction.
-			// For CALL variants, callGasTemp is the gas forwarded to child (escrow),
-			// so we subtract it to get parent's actual cost.
 			if evm.chainRules.IsAmsterdam {
+				// EIP-8037: Track dynamic regular gas immediately after deduction.
+				// For CALL variants, callGasTemp is the gas forwarded to child (escrow),
+				// so we subtract it to get parent's actual cost.
 				evm.regularGasConsumed += dynamicCost.Regular - evm.CallGasTemp()
-			}
-
-			if dynamicCost.State > 0 {
-				cost += dynamicCost.State
-				ok := callContext.useMdGas(evm, dynamicCost.State, mdgas.StateGas, nil, tracing.GasChangeIgnored)
-				if !ok {
-					return nil, callContext.Gas(), ErrOutOfGas
-				}
 			}
 		}
 
