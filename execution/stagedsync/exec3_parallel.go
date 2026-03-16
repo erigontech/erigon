@@ -1192,7 +1192,9 @@ func (result *execResult) finalizeWithIBS(
 	allWrites := ibs.VersionedWrites(true)
 	vm.FlushVersionedWrites(allWrites, true, tracePrefix)
 	vm.SetTrace(false)
-	ibs.FinalizeTx(chainRules, stateWriter)
+	if err := ibs.FinalizeTx(chainRules, stateWriter); err != nil {
+		return nil, nil, nil, err
+	}
 
 	receipt, err := result.CreateNextReceipt(prevReceipt)
 	if err != nil {
