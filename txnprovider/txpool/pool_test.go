@@ -60,8 +60,8 @@ func newTestTxnSlot(nonce uint64, senderID uint64, tip, feeCap uint64, gas uint6
 			GasLimit: gas,
 			To:       &to,
 		},
-		TipCap: uint256.NewInt(tip),
-		FeeCap: uint256.NewInt(feeCap),
+		TipCap: *uint256.NewInt(tip),
+		FeeCap: *uint256.NewInt(feeCap),
 	}
 	return &TxnSlot{
 		Txn:      txn,
@@ -79,8 +79,8 @@ func newTestSetCodeTxnSlot(nonce uint64, senderID uint64, tip, feeCap uint64, ga
 				GasLimit: gas,
 				To:       &to,
 			},
-			TipCap: uint256.NewInt(tip),
-			FeeCap: uint256.NewInt(feeCap),
+			TipCap: *uint256.NewInt(tip),
+			FeeCap: *uint256.NewInt(feeCap),
 		},
 	}
 	return &TxnSlot{
@@ -905,7 +905,7 @@ func TestShanghaiValidateTxn(t *testing.T) {
 						Data:     make([]byte, test.dataLen),
 						To:       to,
 					},
-					FeeCap: uint256.NewInt(21000),
+					FeeCap: *uint256.NewInt(21000),
 				},
 				SenderID: 0,
 			}
@@ -1132,8 +1132,8 @@ func TestBlobTxnReplacement(t *testing.T) {
 					GasLimit: 500000,
 					Data:     make([]byte, 32),
 				},
-				FeeCap: uint256.NewInt(1).Mul(uint256.NewInt(10), feeCap),
-				TipCap: uint256.NewInt(1).Mul(uint256.NewInt(10), tip),
+				FeeCap: *uint256.NewInt(1).Mul(uint256.NewInt(10), feeCap),
+				TipCap: *uint256.NewInt(1).Mul(uint256.NewInt(10), tip),
 			},
 			Nonce:    0x2,
 			SenderID: 0,
@@ -1152,8 +1152,8 @@ func TestBlobTxnReplacement(t *testing.T) {
 	{
 		blobTxn := makeBlobTxn()
 		w := blobTxn.Txn.(*types.BlobTx)
-		origTip := *w.TipCap
-		origFee := *w.FeeCap
+		origTip := w.TipCap
+		origFee := w.FeeCap
 		blobTxn.Nonce = 0x2
 		blobTxn.IDHash[0] = 0x03
 		txnSlots := TxnSlots{}
@@ -1175,7 +1175,7 @@ func TestBlobTxnReplacement(t *testing.T) {
 		assert.Equal(txpoolcfg.ReplaceUnderpriced, reasons[0], reasons[0].String())
 
 		// Bump only Feecap
-		*w.TipCap = origTip
+		w.TipCap = origTip
 		reasons, err = pool.AddLocalTxns(ctx, txnSlots)
 		require.NoError(err)
 		assert.Equal(txpoolcfg.ReplaceUnderpriced, reasons[0], reasons[0].String())
@@ -1187,7 +1187,7 @@ func TestBlobTxnReplacement(t *testing.T) {
 		assert.Equal(txpoolcfg.NotReplaced, reasons[0], reasons[0].String())
 
 		// Bump only blobFee cap
-		*w.FeeCap = origFee
+		w.FeeCap = origFee
 		reasons, err = pool.AddLocalTxns(ctx, txnSlots)
 		require.NoError(err)
 		assert.Equal(txpoolcfg.NotReplaced, reasons[0], reasons[0].String())
@@ -1216,9 +1216,9 @@ func makeBlobTxn() TxnSlot {
 	bt.BlobVersionedHashes = make([]common.Hash, 2)
 	bt.BlobVersionedHashes[0] = common.Hash(kzg.KZGToVersionedHash(commitment0))
 	bt.BlobVersionedHashes[1] = common.Hash(kzg.KZGToVersionedHash(commitment1))
-	bt.TipCap = tip
-	bt.FeeCap = feeCap
-	bt.MaxFeePerBlobGas = blobFeeCap
+	bt.TipCap = *tip
+	bt.FeeCap = *feeCap
+	bt.MaxFeePerBlobGas = *blobFeeCap
 	return blobTxn
 }
 
@@ -1237,14 +1237,14 @@ func makeWrappedBlobTxnRlpWithCellProofs(t *testing.T, chainID *uint256.Int, blo
 					Nonce:    0,
 					To:       &common.Address{1},
 					GasLimit: 1_000_000,
-					Value:    uint256.NewInt(0),
+					Value:    *uint256.NewInt(0),
 					Data:     []byte{0x01},
 				},
-				ChainID: chainID,
-				TipCap:  tipCap,
-				FeeCap:  feeCap,
+				ChainID: *chainID,
+				TipCap:  *tipCap,
+				FeeCap:  *feeCap,
 			},
-			MaxFeePerBlobGas: maxFeePerBlobGas,
+			MaxFeePerBlobGas: *maxFeePerBlobGas,
 		},
 		WrapperVersion: 1,
 		Commitments:    make(types.BlobKzgs, blobCount),
