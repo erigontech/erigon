@@ -202,7 +202,7 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	}
 
 	var canUseAppend bool
-	isDupSort := kv.ChaindataTablesCfg[bucket].Flags&kv.DupSort != 0 && !kv.ChaindataTablesCfg[bucket].AutoDupSortKeysConversion
+	isDupSort := kv.ChaindataTablesCfg[bucket].Flags&kv.DupSort != 0
 
 	i := 0
 	loadNextFunc := func(_, k, v []byte) error {
