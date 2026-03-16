@@ -374,8 +374,8 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	var fromTxNum, toTxNum uint64
 	var err error
 
-	if api.rangeLimit != 0 && (toBlock-fromBlock) > uint64(api.rangeLimit) {
-		return fmt.Errorf("%s: %d", errExceedBlockRange, api.rangeLimit)
+	if api.blockRangeLimit != 0 && (toBlock-fromBlock) > uint64(api.blockRangeLimit) {
+		return fmt.Errorf("%s: %d", errExceedBlockRange, api.blockRangeLimit)
 	}
 
 	if fromBlock > 0 {

@@ -292,7 +292,7 @@ func uint256Handle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName str
 	}
 
 	// size
-	fmt.Fprintf(b1, "    size += rlp.Uint256Len(&obj.%s)\n", fieldName)
+	fmt.Fprintf(b1, "    size += rlp.Uint256Len(obj.%s)\n", fieldName)
 
 	// encode
 	fmt.Fprintf(b2, "    if err := rlp.EncodeUint256(obj.%s, w, b[:]); err != nil {\n", fieldName)
@@ -300,11 +300,9 @@ func uint256Handle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName str
 	fmt.Fprintf(b2, "    }\n")
 
 	// decode
-	addDecodeBuf(b3)
-	fmt.Fprintf(b3, "    if b, err = s.Uint256Bytes(); err != nil {\n")
+	fmt.Fprintf(b3, "    if err = s.ReadUint256(&obj.%s); err != nil {\n", fieldName)
 	fmt.Fprintf(b3, "        %s\n", decodeErrorMsg(fieldName))
 	fmt.Fprintf(b3, "    }\n")
-	fmt.Fprintf(b3, "    obj.%s = *(new(uint256.Int).SetBytes(b))\n", fieldName)
 }
 
 func uint256PtrHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName string) {
@@ -327,11 +325,10 @@ func uint256PtrHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName 
 	fmt.Fprintf(b2, "    }\n")
 
 	// decode
-	addDecodeBuf(b3)
-	fmt.Fprintf(b3, "    if b, err = s.Uint256Bytes(); err != nil {\n")
+	fmt.Fprintf(b3, "    obj.%s = new(uint256.Int)\n", fieldName)
+	fmt.Fprintf(b3, "    if err = s.ReadUint256(obj.%s); err != nil {\n", fieldName)
 	fmt.Fprintf(b3, "        %s\n", decodeErrorMsg(fieldName))
 	fmt.Fprintf(b3, "    }\n")
-	fmt.Fprintf(b3, "    obj.%s = new(uint256.Int).SetBytes(b)\n", fieldName)
 }
 
 func _shortArrayHandle(b1, b2, b3 *bytes.Buffer, fieldName string, size int) { // TODO change the name
@@ -706,9 +703,6 @@ func hashSliceHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName s
 }
 
 func hashSliceHandleOptimized(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName string) {
-	// Optimized handler for []common.Hash with pre-allocation limit to prevent DoS attacks
-	// Similar to decodeTopics2 in log.go - limits pre-allocation to 128 elements
-
 	var typ string
 	if slc, ok := fieldType.(*types.Slice); !ok {
 		_exit("hashSliceHandleOptimized: expected fieldType to be Slice")
@@ -737,40 +731,20 @@ func hashSliceHandleOptimized(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fi
 	fmt.Fprintf(b2, "        }\n")
 	fmt.Fprintf(b2, "    }\n")
 
-	// decode - with pre-allocation optimization and fast-path for common cases
-	// Calculate expected list length and apply hard limit of 128 to prevent DoS
-	// Only call s.List() ONCE to get size, calculate listLen once
-	// No buffer needed since both paths use direct ReadBytes
+	// decode - use list size to pre-allocate and read directly into elements
 	fmt.Fprintf(b3, "    l, err := s.List()\n")
 	fmt.Fprintf(b3, "    if err != nil {\n")
 	fmt.Fprintf(b3, "        return fmt.Errorf(\"error decoding field %s - expected list start, err: %%w\", err)\n", fieldName)
 	fmt.Fprintf(b3, "    }\n")
-	fmt.Fprintf(b3, "    var listLen int\n")
 	fmt.Fprintf(b3, "    if l > 0 {\n")
-	fmt.Fprintf(b3, "        listLen = int(l / (1 + 32))  // Each hash: 1-byte RLP prefix + 32-byte hash\n")
-	fmt.Fprintf(b3, "        preAlloc := min(128, listLen) // Hard limit against DoS\n")
-	fmt.Fprintf(b3, "        obj.%s = make([]%s, 0, preAlloc)\n", fieldName, typ)
+	fmt.Fprintf(b3, "        obj.%s = make([]%s, l/(1+32))\n", fieldName, typ)
+	fmt.Fprintf(b3, "        for i := range obj.%s {\n", fieldName)
+	fmt.Fprintf(b3, "            if err = s.ReadBytes(obj.%s[i][:]); err != nil {\n", fieldName)
+	fmt.Fprintf(b3, "                return err\n")
+	fmt.Fprintf(b3, "            }\n")
+	fmt.Fprintf(b3, "        }\n")
 	fmt.Fprintf(b3, "    } else {\n")
 	fmt.Fprintf(b3, "        obj.%s = []%s{}\n", fieldName, typ)
-	fmt.Fprintf(b3, "    }\n")
-	// Fast-path: Read directly into pre-allocated slice (zero-alloc, zero-copy)
-	// Slow-path: Still use direct ReadBytes but allocate full size needed
-	fmt.Fprintf(b3, "    if listLen <= 128 {\n")
-	fmt.Fprintf(b3, "        // Fast-path: within pre-alloc limit, use pre-allocated buffer\n")
-	fmt.Fprintf(b3, "        obj.%s = obj.%s[:listLen]\n", fieldName, fieldName)
-	fmt.Fprintf(b3, "        for i := 0; i < listLen; i++ {\n")
-	fmt.Fprintf(b3, "            if err = s.ReadBytes(obj.%s[i][:]); err != nil {\n", fieldName)
-	fmt.Fprintf(b3, "                return err\n")
-	fmt.Fprintf(b3, "            }\n")
-	fmt.Fprintf(b3, "        }\n")
-	fmt.Fprintf(b3, "    } else if listLen > 128 {\n")
-	fmt.Fprintf(b3, "        // Slow-path: exceeded pre-alloc limit, allocate exact size and use direct ReadBytes\n")
-	fmt.Fprintf(b3, "        obj.%s = make([]%s, listLen)\n", fieldName, typ)
-	fmt.Fprintf(b3, "        for i := 0; i < listLen; i++ {\n")
-	fmt.Fprintf(b3, "            if err = s.ReadBytes(obj.%s[i][:]); err != nil {\n", fieldName)
-	fmt.Fprintf(b3, "                return err\n")
-	fmt.Fprintf(b3, "            }\n")
-	fmt.Fprintf(b3, "        }\n")
 	fmt.Fprintf(b3, "    }\n")
 
 	endListDecode(b3, fieldName)

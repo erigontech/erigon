@@ -19,14 +19,31 @@ jobs:
   test-hive-eest:
     runs-on:
       group: hive
+    name: test-hive-eest (${{ matrix.shard }})
     strategy:
       fail-fast: false
       matrix:
         include:
+          # consume-engine: split by fork for parallelism (61k+ tests total).
+          # Engine API tests only exist from Paris (The Merge) onwards.
+          # Pattern format: "<suite-regex>/<test-regex>" — the leading ".*/""
+          # matches the suite name (eest/consume-engine) while the remainder
+          # filters individual pytest test IDs by fork parameter.
           - sim: consume-engine
-            sim-limit: ""
+            sim-limit: ".*/.*fork_(Paris|Shanghai)"
+            shard: paris+shanghai
+          - sim: consume-engine
+            sim-limit: ".*/.*fork_Cancun"
+            shard: cancun
+          - sim: consume-engine
+            sim-limit: ".*/.*fork_Prague"
+            shard: prague
+          - sim: consume-engine
+            sim-limit: ".*/.*fork_Osaka"
+            shard: osaka
           - sim: consume-rlp
             sim-limit: ".*eip2930_access_list.*" # all tests take too long
+            shard: rlp
     steps:
       - name: Clean docker system
         run: |
@@ -120,28 +137,28 @@ jobs:
             failed=$(echo "$status_line" | sed -n 's/.*failed=\([0-9]*\).*/\1/p')
 
             echo -e "\n"
-            message="-----------   Results for ${1}    -----------\nTests: $tests, Failed: $failed\n\n============================================================"
+            message="-----------   Results for ${1} (${{ matrix.shard }})    -----------\nTests: $tests, Failed: $failed\n\n============================================================"
             echo -e "$message"
             echo -e "$message" >> result.log
 
             if (( tests < 4 )); then
-              echo "Too few tests run for suite ${1} - ${tests} tests"
+              echo "Too few tests run for ${{ matrix.shard }} - ${tests} tests"
               echo "failed" > failed.log
               exit 1
             fi
             if (( failed > 0 )); then
-              echo "Too many failures for suite ${1} - ${failed} failed out of ${tests}"
+              echo "Too many failures for ${{ matrix.shard }} - ${failed} failed out of ${tests}"
               echo "failed" > failed.log
               exit 1
             fi
           }
-          run_suite ${{ matrix.sim }} ${{ matrix.sim-limit }}
+          run_suite "${{ matrix.sim }}" "${{ matrix.sim-limit }}"
         continue-on-error: true
       - name: Upload output log
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: hive-workspace-log-${{ matrix.sim }}
+          name: hive-workspace-log-${{ matrix.shard }}
           path: hive/workspace/logs
           if-no-files-found: ignore
       - name: Test Results

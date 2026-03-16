@@ -29,6 +29,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
@@ -227,10 +228,10 @@ func TestNoStepExec(t *testing.T) {
 }
 
 func TestIsPrecompile(t *testing.T) {
-	chaincfg := &chain.Config{ChainID: big.NewInt(1), HomesteadBlock: big.NewInt(0), DAOForkBlock: nil, TangerineWhistleBlock: big.NewInt(0), SpuriousDragonBlock: big.NewInt(0), ByzantiumBlock: big.NewInt(100), ConstantinopleBlock: big.NewInt(0), PetersburgBlock: big.NewInt(0), IstanbulBlock: big.NewInt(200), MuirGlacierBlock: big.NewInt(0), BerlinBlock: big.NewInt(300), LondonBlock: big.NewInt(0), TerminalTotalDifficulty: nil, Ethash: new(chain.EthashConfig), Clique: nil}
-	chaincfg.ByzantiumBlock = big.NewInt(100)
-	chaincfg.IstanbulBlock = big.NewInt(200)
-	chaincfg.BerlinBlock = big.NewInt(300)
+	chaincfg := &chain.Config{ChainID: big.NewInt(1), HomesteadBlock: common.NewUint64(0), DAOForkBlock: nil, TangerineWhistleBlock: common.NewUint64(0), SpuriousDragonBlock: common.NewUint64(0), ByzantiumBlock: common.NewUint64(100), ConstantinopleBlock: common.NewUint64(0), PetersburgBlock: common.NewUint64(0), IstanbulBlock: common.NewUint64(200), MuirGlacierBlock: common.NewUint64(0), BerlinBlock: common.NewUint64(300), LondonBlock: common.NewUint64(0), TerminalTotalDifficulty: nil, Ethash: new(chain.EthashConfig), Clique: nil}
+	chaincfg.ByzantiumBlock = common.NewUint64(100)
+	chaincfg.IstanbulBlock = common.NewUint64(200)
+	chaincfg.BerlinBlock = common.NewUint64(300)
 	txCtx := evmtypes.TxContext{GasPrice: *uint256.NewInt(100000)}
 	tracer, err := newJsTracer("{addr: toAddress('0000000000000000000000000000000000000009'), res: null, step: function() { this.res = isPrecompiled(this.addr); }, fault: function() {}, result: function() { return this.res; }}", nil, nil)
 	if err != nil {
