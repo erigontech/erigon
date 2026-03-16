@@ -261,7 +261,9 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	if err := mergeSortFiles(c.logPrefix, c.dataProviders, simpleLoad, args, c.buf); err != nil {
 		return fmt.Errorf("loadIntoTable %s: %w", toBucket, err)
 	}
-	log.Warn(fmt.Sprintf("[dbg.%s] ETL load", c.logPrefix), "bucket", toBucket, "records", i, "took", time.Since(t))
+	if i > 0 {
+		log.Warn(fmt.Sprintf("[dbg.%s] ETL load", c.logPrefix), "bucket", toBucket, "records", i, "took", time.Since(t))
+	}
 	return nil
 }
 
