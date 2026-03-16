@@ -356,75 +356,79 @@ func (i *beaconStatesCollector) collectInactivityScores(slot uint64, inactivityS
 }
 
 func (i *beaconStatesCollector) flush(ctx context.Context, tx kv.RwTx) error {
-	if err := i.effectiveBalanceCollector.Load(tx, kv.ValidatorEffectiveBalance, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	loadfunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		return next(k, k, v)
+	}
+
+	if err := i.effectiveBalanceCollector.Load(tx, kv.ValidatorEffectiveBalance, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := i.randaoMixesCollector.Load(tx, kv.RandaoMixes, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := i.randaoMixesCollector.Load(tx, kv.RandaoMixes, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := i.balancesCollector.Load(tx, kv.ValidatorBalance, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := i.balancesCollector.Load(tx, kv.ValidatorBalance, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 
-	if err := i.slashingsCollector.Load(tx, kv.ValidatorSlashings, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := i.slashingsCollector.Load(tx, kv.ValidatorSlashings, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := i.blockRootsCollector.Load(tx, kv.BlockRoot, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := i.blockRootsCollector.Load(tx, kv.BlockRoot, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := i.stateRootsCollector.Load(tx, kv.StateRoot, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := i.stateRootsCollector.Load(tx, kv.StateRoot, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := i.activeValidatorIndiciesCollector.Load(tx, kv.ActiveValidatorIndicies, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := i.activeValidatorIndiciesCollector.Load(tx, kv.ActiveValidatorIndicies, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := i.slotDataCollector.Load(tx, kv.SlotData, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := i.slotDataCollector.Load(tx, kv.SlotData, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := i.inactivityScoresCollector.Load(tx, kv.InactivityScores, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := i.inactivityScoresCollector.Load(tx, kv.InactivityScores, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := i.intraRandaoMixesCollector.Load(tx, kv.IntraRandaoMixes, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := i.intraRandaoMixesCollector.Load(tx, kv.IntraRandaoMixes, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := i.epochDataCollector.Load(tx, kv.EpochData, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := i.epochDataCollector.Load(tx, kv.EpochData, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := i.nextSyncCommitteeCollector.Load(tx, kv.NextSyncCommittee, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := i.nextSyncCommitteeCollector.Load(tx, kv.NextSyncCommittee, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := i.currentSyncCommitteeCollector.Load(tx, kv.CurrentSyncCommittee, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := i.currentSyncCommitteeCollector.Load(tx, kv.CurrentSyncCommittee, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := i.eth1DataVotesCollector.Load(tx, kv.Eth1DataVotes, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := i.eth1DataVotesCollector.Load(tx, kv.Eth1DataVotes, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := i.stateEventsCollector.Load(tx, kv.StateEvents, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := i.stateEventsCollector.Load(tx, kv.StateEvents, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := i.effectiveBalancesDumpCollector.Load(tx, kv.EffectiveBalancesDump, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := i.effectiveBalancesDumpCollector.Load(tx, kv.EffectiveBalancesDump, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := i.pendingDepositsCollector.Load(tx, kv.PendingDeposits, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := i.pendingDepositsCollector.Load(tx, kv.PendingDeposits, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := i.pendingConsolidationsCollector.Load(tx, kv.PendingConsolidations, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := i.pendingConsolidationsCollector.Load(tx, kv.PendingConsolidations, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := i.pendingWithdrawalsCollector.Load(tx, kv.PendingPartialWithdrawals, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := i.pendingWithdrawalsCollector.Load(tx, kv.PendingPartialWithdrawals, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := i.pendingDepositsCollectorDump.Load(tx, kv.PendingDepositsDump, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := i.pendingDepositsCollectorDump.Load(tx, kv.PendingDepositsDump, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := i.pendingConsolidationsCollectorDump.Load(tx, kv.PendingConsolidationsDump, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := i.pendingConsolidationsCollectorDump.Load(tx, kv.PendingConsolidationsDump, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := i.pendingWithdrawalsCollectorDump.Load(tx, kv.PendingPartialWithdrawalsDump, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := i.pendingWithdrawalsCollectorDump.Load(tx, kv.PendingPartialWithdrawalsDump, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 
-	return i.balancesDumpsCollector.Load(tx, kv.BalancesDump, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()})
+	return i.balancesDumpsCollector.Load(tx, kv.BalancesDump, loadfunc, etl.TransformArgs{Quit: ctx.Done()})
 }
 
 func (i *beaconStatesCollector) close() {
