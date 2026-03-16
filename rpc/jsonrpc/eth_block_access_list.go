@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -20,104 +20,15 @@ import (
 	"context"
 	"errors"
 
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
-// RPC response types for eth_getBlockAccessList (EIP-7928).
-
-type rpcStorageChange struct {
-	Index hexutil.Uint64 `json:"index"`
-	Value common.Hash    `json:"value"`
-}
-
-type rpcSlotChanges struct {
-	Key     common.Hash         `json:"key"`
-	Changes []*rpcStorageChange `json:"changes"`
-}
-
-type rpcBalanceChange struct {
-	Index hexutil.Uint64 `json:"index"`
-	Value *hexutil.Big   `json:"value"`
-}
-
-type rpcNonceChange struct {
-	Index hexutil.Uint64 `json:"index"`
-	Value hexutil.Uint64 `json:"value"`
-}
-
-type rpcCodeChange struct {
-	Index hexutil.Uint64 `json:"index"`
-	Code  hexutil.Bytes  `json:"code"`
-}
-
-type rpcAccountAccess struct {
-	Address        common.Address      `json:"address"`
-	StorageChanges []*rpcSlotChanges   `json:"storageChanges"`
-	StorageReads   []common.Hash       `json:"storageReads"`
-	BalanceChanges []*rpcBalanceChange `json:"balanceChanges"`
-	NonceChanges   []*rpcNonceChange   `json:"nonceChanges"`
-	CodeChanges    []*rpcCodeChange    `json:"codeChanges"`
-}
-
-// marshalBlockAccessList converts a types.BlockAccessList into the JSON-RPC response format.
-func marshalBlockAccessList(bal types.BlockAccessList) []*rpcAccountAccess {
-	result := make([]*rpcAccountAccess, len(bal))
-	for i, ac := range bal {
-		entry := &rpcAccountAccess{
-			Address:        ac.Address.Value(),
-			StorageChanges: make([]*rpcSlotChanges, len(ac.StorageChanges)),
-			StorageReads:   make([]common.Hash, len(ac.StorageReads)),
-			BalanceChanges: make([]*rpcBalanceChange, len(ac.BalanceChanges)),
-			NonceChanges:   make([]*rpcNonceChange, len(ac.NonceChanges)),
-			CodeChanges:    make([]*rpcCodeChange, len(ac.CodeChanges)),
-		}
-		for j, sc := range ac.StorageChanges {
-			slot := &rpcSlotChanges{
-				Key:     sc.Slot.Value(),
-				Changes: make([]*rpcStorageChange, len(sc.Changes)),
-			}
-			for k, ch := range sc.Changes {
-				slot.Changes[k] = &rpcStorageChange{
-					Index: hexutil.Uint64(ch.Index),
-					Value: ch.Value.Bytes32(),
-				}
-			}
-			entry.StorageChanges[j] = slot
-		}
-		for j, sr := range ac.StorageReads {
-			entry.StorageReads[j] = sr.Value()
-		}
-		for j, bc := range ac.BalanceChanges {
-			v := bc.Value.ToBig()
-			entry.BalanceChanges[j] = &rpcBalanceChange{
-				Index: hexutil.Uint64(bc.Index),
-				Value: (*hexutil.Big)(v),
-			}
-		}
-		for j, nc := range ac.NonceChanges {
-			entry.NonceChanges[j] = &rpcNonceChange{
-				Index: hexutil.Uint64(nc.Index),
-				Value: hexutil.Uint64(nc.Value),
-			}
-		}
-		for j, cc := range ac.CodeChanges {
-			entry.CodeChanges[j] = &rpcCodeChange{
-				Index: hexutil.Uint64(cc.Index),
-				Code:  cc.Bytecode,
-			}
-		}
-		result[i] = entry
-	}
-	return result
-}
-
 // GetBlockAccessList returns the block access list for a given block (EIP-7928).
-func (api *APIImpl) GetBlockAccessList(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) ([]*rpcAccountAccess, error) {
+func (api *APIImpl) GetBlockAccessList(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) ([]*ethapi.RPCAccountAccess, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -168,5 +79,5 @@ func (api *APIImpl) GetBlockAccessList(ctx context.Context, numberOrHash rpc.Blo
 		return nil, err
 	}
 
-	return marshalBlockAccessList(bal), nil
+	return ethapi.MarshalBlockAccessList(bal), nil
 }

@@ -78,7 +78,7 @@ type EthAPI interface {
 	GetBlockReceipts(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) ([]map[string]any, error)
 
 	// Block access list related (see ./eth_block_access_list.go)
-	GetBlockAccessList(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) ([]*rpcAccountAccess, error)
+	GetBlockAccessList(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) ([]*ethapi.RPCAccountAccess, error)
 
 	// Uncle related (see ./eth_uncles.go)
 	GetUncleByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, index hexutil.Uint) (map[string]any, error)

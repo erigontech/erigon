@@ -1,4 +1,4 @@
-package jsonrpc
+package ethapi
 
 import (
 	"encoding/json"
@@ -38,7 +38,7 @@ func TestMarshalBlockAccessList(t *testing.T) {
 		},
 	}
 
-	result := marshalBlockAccessList(bal)
+	result := MarshalBlockAccessList(bal)
 	data, err := json.Marshal(result)
 	require.NoError(t, err)
 
@@ -94,7 +94,7 @@ func TestMarshalBlockAccessList(t *testing.T) {
 }
 
 func TestMarshalBlockAccessListEmpty(t *testing.T) {
-	result := marshalBlockAccessList(types.BlockAccessList{})
+	result := MarshalBlockAccessList(types.BlockAccessList{})
 	data, err := json.Marshal(result)
 	require.NoError(t, err)
 	require.Equal(t, "[]", string(data))
@@ -114,7 +114,7 @@ func TestMarshalBlockAccessListWithCode(t *testing.T) {
 		},
 	}
 
-	result := marshalBlockAccessList(bal)
+	result := MarshalBlockAccessList(bal)
 	data, err := json.Marshal(result)
 	require.NoError(t, err)
 
