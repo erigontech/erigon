@@ -55,7 +55,7 @@ type EliasFano struct {
 	lowerBitsMask  uint64
 	count          uint64
 	u              uint64
-	l              uint64
+	l              uint64 //  number of lower bits per element. = floor(log2(average gap between elements))
 	maxOffset      uint64
 	i              uint64
 	wordsUpperBits int
@@ -80,7 +80,7 @@ func (ef *EliasFano) Size() datasize.ByteSize { return datasize.ByteSize(len(ef.
 func (ef *EliasFano) AddOffset(offset uint64) {
 	//fmt.Printf("0x%x,\n", offset)
 	if ef.l != 0 {
-		setBits(ef.lowerBits, ef.i*ef.l, int(ef.l), offset&ef.lowerBitsMask)
+		setBits(ef.lowerBits, ef.i*ef.l, offset&ef.lowerBitsMask)
 	}
 	//pos := ((offset - ef.delta) >> ef.l) + ef.i
 	set(ef.upperBits, (offset>>ef.l)+ef.i)
@@ -108,8 +108,12 @@ func (ef *EliasFano) deriveFields() int {
 	jumpWords := ef.jumpSizeWords()
 	totalWords := wordsLowerBits + wordsUpperBits + jumpWords
 	//fmt.Printf("EF: %d, %d,%d,%d\n", totalWords, wordsLowerBits, wordsUpperBits, jumpWords)
-	if ef.data == nil {
-		ef.data = make([]uint64, totalWords)
+	if cap(ef.data) < totalWords {
+		alloc := totalWords
+		if c := cap(ef.data); c > 0 { // means `ef` object is used as re-usable buffer. then re-alloc in `append()` style: grow at-least 2x times - to amortize future re-allocs
+			alloc = max(totalWords, c*2)
+		}
+		ef.data = make([]uint64, totalWords, alloc)
 	} else {
 		ef.data = ef.data[:totalWords]
 	}
@@ -120,13 +124,25 @@ func (ef *EliasFano) deriveFields() int {
 	return wordsUpperBits
 }
 
+// ResetForWrite reinitializes the EliasFano for writing a new sequence, reusing
+// the existing data slice if it has sufficient capacity (avoiding allocation).
+// The caller must call Build() after all AddOffset calls, same as with NewEliasFano.
+func (ef *EliasFano) ResetForWrite(count, maxOffset uint64) {
+	ef.count = count - 1
+	ef.maxOffset = maxOffset
+	ef.u = maxOffset + 1
+	ef.i = 0
+	ef.wordsUpperBits = ef.deriveFields()
+	// Zero out the backing array so OR-style setBits starts from a clean slate.
+	// deriveFields() may have resliced ef.data without zeroing it.
+	clear(ef.data)
+}
+
 // Build construct Elias Fano index for a given sequences
 func (ef *EliasFano) Build() {
 	for i, c, lastSuperQ := uint64(0), uint64(0), uint64(0); i < uint64(ef.wordsUpperBits); i++ {
-		for b := uint64(0); b < 64; b++ {
-			if ef.upperBits[i]&(uint64(1)<<b) == 0 {
-				continue
-			}
+		for word := ef.upperBits[i]; word != 0; word &= word - 1 { // iterate over set bits only; word &= word-1 clears the lowest set bit
+			b := uint64(bits.TrailingZeros64(word))
 			if (c & superQMask) == 0 {
 				// When c is multiple of 2^14 (4096)
 				lastSuperQ = i*64 + b
@@ -156,16 +172,18 @@ func (ef *EliasFano) Build() {
 }
 
 func (ef *EliasFano) get(i uint64) (val uint64, window uint64, sel int, currWord uint64, lower uint64) {
-	lower = i * ef.l
-	idx64, shift := lower/64, lower%64
-	lower = ef.lowerBits[idx64] >> shift
-	if shift > 0 {
-		lower |= ef.lowerBits[idx64+1] << (64 - shift)
+	if ef.l != 0 {
+		lowerPos := i * ef.l
+		idx64, shift := lowerPos/64, lowerPos%64
+		lower = ef.lowerBits[idx64] >> shift
+		if shift > 0 {
+			lower |= ef.lowerBits[idx64+1] << (64 - shift)
+		}
 	}
 
 	jumpSuperQ := (i / superQ) * superQSize
 	jumpInsideSuperQ := (i % superQ) / q
-	idx64, shift = jumpSuperQ+1+(jumpInsideSuperQ>>1), 32*(jumpInsideSuperQ%2)
+	idx64, shift := jumpSuperQ+1+(jumpInsideSuperQ>>1), 32*(jumpInsideSuperQ%2)
 	mask := uint64(0xffffffff) << shift
 	jump := ef.jump[jumpSuperQ] + (ef.jump[idx64]&mask)>>shift
 
@@ -234,22 +252,31 @@ func Seek(data []byte, n uint64) (uint64, bool) {
 
 func (ef *EliasFano) searchForward(v uint64) (nextV uint64, nextI uint64, ok bool) {
 	if v == 0 {
-		return ef.Min(), 0, true
+		return ef.Min(), 0, true // .Min() touching `mmap`
 	}
-	// TODO: large EF on mmap can be cold and calling `Max` in the begin of `Seek` can be a mistake (PageFault at the end). But need careful test in another ticket
 	_max := ef.Max()
 	if v == _max {
 		return _max, ef.count, true
 	}
-	if v > _max {
+	if v > _max { // ~3% search-miss on mainnet (up to 15% at certain block ranges)
 		return 0, 0, false
 	}
 
 	hi := v >> ef.l
-	i := sort.Search(int(ef.count+1), func(i int) bool {
-		return ef.upper(uint64(i)) >= hi
-	})
-	for j := uint64(i); j <= ef.count; j++ {
+	var lo uint64
+
+	// Real-data (eth-mainnet):
+	//   - 80% of seeks are on tiny EFs: 35% upperBits=8bytes, 45% upperBits=8-24bytes ( 1–3 words = 8–24 bytes, fits in one cache line)
+	//   - 63% have upper(0) >= hi
+	found := ef.upper(0) >= hi // fast-lane
+	if !found {
+		// interpolation-sort showed good results, but keeping `sort.Sort` for simplicity now
+		i := sort.Search(int(ef.count), func(i int) bool {
+			return ef.upper(uint64(i+1)) >= hi
+		})
+		lo = uint64(i + 1)
+	}
+	for j := lo; j <= ef.count; j++ {
 		val, _, _, _, _ := ef.get(j)
 		if val >= v {
 			return val, j, true
@@ -257,21 +284,29 @@ func (ef *EliasFano) searchForward(v uint64) (nextV uint64, nextI uint64, ok boo
 	}
 	return 0, 0, false
 }
-
 func (ef *EliasFano) searchReverse(v uint64) (nextV uint64, nextI uint64, ok bool) {
 	if v == 0 {
-		return 0, 0, ef.Min() == 0
+		return 0, 0, ef.Min() == 0 // .Max() touching `mmap`
 	}
-	_max := ef.Max()
-	if v >= _max {
+	_max := ef.Max() // .Max() doesn't touch `mmap`
+	if v == _max {
+		return _max, ef.count, true
+	}
+	if v > _max { // reverse: v beyond range still returns max (not a miss)
 		return _max, ef.count, true
 	}
 
 	hi := v >> ef.l
-	i := sort.Search(int(ef.count+1), func(i int) bool {
-		return ef.upper(ef.count-uint64(i)) <= hi
-	})
-	for j := uint64(i); j <= ef.count; j++ {
+	var lo uint64
+
+	found := ef.upper(ef.count) <= hi // fast-lane. 60% hit-rate
+	if !found {
+		i := sort.Search(int(ef.count+1), func(i int) bool {
+			return ef.upper(ef.count-uint64(i)) <= hi
+		})
+		lo = uint64(i)
+	}
+	for j := lo; j <= ef.count; j++ {
 		idx := ef.count - j
 		val, _, _, _, _ := ef.get(idx)
 		if val <= v {
@@ -697,7 +732,7 @@ func (ef *DoubleEliasFano) Build(cumKeys []uint64, position []uint64) {
 	for i, cumDelta, bitDelta := uint64(0), uint64(0), uint64(0); i <= ef.numBuckets; i, cumDelta, bitDelta = i+1, cumDelta+ef.cumKeysMinDelta, bitDelta+ef.posMinDelta {
 		if ef.lCumKeys != 0 {
 			//fmt.Printf("i=%d, set_bits cum for %d = %b\n", i, cumKeys[i]-cumDelta, (cumKeys[i]-cumDelta)&ef.lowerBitsMaskCumKeys)
-			setBits(ef.lowerBits, i*(ef.lCumKeys+ef.lPosition), int(ef.lCumKeys), (cumKeys[i]-cumDelta)&ef.lowerBitsMaskCumKeys)
+			setBits(ef.lowerBits, i*(ef.lCumKeys+ef.lPosition), (cumKeys[i]-cumDelta)&ef.lowerBitsMaskCumKeys)
 			//fmt.Printf("loweBits %b\n", ef.lowerBits)
 		}
 		set(ef.upperBitsCumKeys, ((cumKeys[i]-cumDelta)>>ef.lCumKeys)+i)
@@ -705,7 +740,7 @@ func (ef *DoubleEliasFano) Build(cumKeys []uint64, position []uint64) {
 
 		if ef.lPosition != 0 {
 			//fmt.Printf("i=%d, set_bits pos for %d = %b\n", i, position[i]-bitDelta, (position[i]-bitDelta)&ef.lowerBitsMaskPosition)
-			setBits(ef.lowerBits, i*(ef.lCumKeys+ef.lPosition)+ef.lCumKeys, int(ef.lPosition), (position[i]-bitDelta)&ef.lowerBitsMaskPosition)
+			setBits(ef.lowerBits, i*(ef.lCumKeys+ef.lPosition)+ef.lCumKeys, (position[i]-bitDelta)&ef.lowerBitsMaskPosition)
 			//fmt.Printf("lowerBits %b\n", ef.lowerBits)
 		}
 		set(ef.upperBitsPosition, ((position[i]-bitDelta)>>ef.lPosition)+i)
@@ -720,10 +755,8 @@ func (ef *DoubleEliasFano) Build(cumKeys []uint64, position []uint64) {
 	// c/superQ is the index of the current 4096 block of bits
 	// superQSize is how many words is required to encode one block of 4096 bits. It is 17 words which is 1088 bits
 	for i, c, lastSuperQ := uint64(0), uint64(0), uint64(0); i < uint64(wordsCumKeys); i++ {
-		for b := uint64(0); b < 64; b++ {
-			if ef.upperBitsCumKeys[i]&(uint64(1)<<b) == 0 {
-				continue
-			}
+		for word := ef.upperBitsCumKeys[i]; word != 0; word &= word - 1 { // iterate over set bits only; word &= word-1 clears the lowest set bit
+			b := uint64(bits.TrailingZeros64(word))
 			if (c & superQMask) == 0 {
 				// When c is multiple of 2^14 (4096)
 				lastSuperQ = i*64 + b
@@ -749,11 +782,8 @@ func (ef *DoubleEliasFano) Build(cumKeys []uint64, position []uint64) {
 	}
 
 	for i, c, lastSuperQ := uint64(0), uint64(0), uint64(0); i < uint64(wordsPosition); i++ {
-		for b := uint64(0); b < 64; b++ {
-			if ef.upperBitsPosition[i]&(uint64(1)<<b) == 0 {
-				continue
-			}
-
+		for word := ef.upperBitsPosition[i]; word != 0; word &= word - 1 { // iterate over set bits only; word &= word-1 clears the lowest set bit
+			b := uint64(bits.TrailingZeros64(word))
 			if (c & superQMask) == 0 {
 				lastSuperQ = i*64 + b
 				ef.jump[(c/superQ)*(superQSize*2)+1] = lastSuperQ
@@ -776,18 +806,16 @@ func (ef *DoubleEliasFano) Build(cumKeys []uint64, position []uint64) {
 	//fmt.Printf("jump: %x\n", ef.jump)
 }
 
-// setBits assumes that bits are set in monotonic order, so that
-// we can skip the masking for the second word
-func setBits(bits []uint64, start uint64, width int, value uint64) {
+// setBits stores a value at bit position start.
+// All callers write in monotonic order, so target bits are guaranteed zero
+// and we can use |= instead of clear-and-set. The lowerBits slice always
+// has +1 padding word, making the unconditional second write safe.
+// When shift+width <= 64, value>>(64-shift) == 0, so the write is a no-op.
+func setBits(bits []uint64, start uint64, value uint64) {
 	idx64, shift := start>>6, int(start&63)
-	mask := (uint64(1)<<width - 1) << shift
-	//fmt.Printf("mask = %b, idx64 = %d\n", mask, idx64)
-	bits[idx64] = (bits[idx64] &^ mask) | (value << shift)
-	//fmt.Printf("start = %d, width = %d, shift + width = %d\n", start, width, shift+width)
-	if shift+width > 64 {
-		// changes two 64-bit words
-		bits[idx64+1] = value >> (64 - shift)
-	}
+	_ = bits[idx64+1] // BCE hint: proves both accesses are in-bounds
+	bits[idx64] |= value << shift
+	bits[idx64+1] |= value >> (64 - shift)
 }
 
 func set(bits []uint64, pos uint64) {

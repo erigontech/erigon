@@ -28,9 +28,10 @@ import (
 	"math/bits"
 	"reflect"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/rlp/internal/rlpstruct"
-	"github.com/holiman/uint256"
 )
 
 const (
@@ -160,7 +161,7 @@ func makeWriter(typ reflect.Type, ts rlpstruct.Tags) (writer, error) {
 		return writeU256IntPtr, nil
 	case typ == u256Int:
 		return writeU256IntNoPtr, nil
-	case kind == reflect.Ptr:
+	case kind == reflect.Pointer:
 		return makePtrWriter(typ, ts)
 	case reflect.PointerTo(typ).Implements(encoderInterface):
 		return makeEncoderWriter(typ), nil
@@ -575,24 +576,33 @@ func EncodeBigInt(i *big.Int, w io.Writer, buffer []byte) error {
 }
 
 func EncodeUint256(i uint256.Int, w io.Writer, buffer []byte) error {
-	buffer[0] = 0x80
 	nBits := i.BitLen()
 	if nBits == 0 {
+		buffer[0] = 0x80
 		_, err := w.Write(buffer[:1])
 		return err
 	}
-	buffer[0] = byte(i[0])
 	if nBits <= 7 {
+		buffer[0] = byte(i[0])
 		_, err := w.Write(buffer[:1])
 		return err
 	}
-	nBytes := byte(common.BitLenToByteLen(nBits))
-	buffer[0] = 0x80 + nBytes
+	nBytes := common.BitLenToByteLen(nBits)
+	if nBytes < 32 {
+		i.PutUint256(buffer)
+		// Overwrite the last leading zero byte with the RLP size prefix,
+		// producing [prefix, value...] in a single contiguous write.
+		buffer[31-nBytes] = 0x80 + byte(nBytes)
+		_, err := w.Write(buffer[31-nBytes : 32])
+		return err
+	}
+	// nBytes == 32 (rare: value >= 2^248): prefix can't fit before the value.
+	buffer[0] = 0x80 + 32
 	if _, err := w.Write(buffer[:1]); err != nil {
 		return err
 	}
 	i.PutUint256(buffer)
-	_, err := w.Write(buffer[32-nBytes : 32])
+	_, err := w.Write(buffer[:32])
 	return err
 }
 
@@ -644,20 +654,13 @@ func EncodeStringSizePrefix(size int, w io.Writer, buffer []byte) error {
 func EncodeOptionalAddress(addr *common.Address, w io.Writer, buffer []byte) error {
 	if addr == nil {
 		buffer[0] = 128
-	} else {
-		buffer[0] = 128 + 20
-	}
-
-	if _, err := w.Write(buffer[:1]); err != nil {
+		_, err := w.Write(buffer[:1])
 		return err
 	}
-	if addr != nil {
-		if _, err := w.Write(addr[:]); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	buffer[0] = 128 + 20
+	copy(buffer[1:21], addr[:])
+	_, err := w.Write(buffer[:21])
+	return err
 }
 
 func EncodeStructSizePrefix(size int, w io.Writer, buffer []byte) error {

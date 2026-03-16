@@ -41,6 +41,9 @@ import (
 )
 
 func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	data := getGenesis()
 	from := data.addresses[0]
 	fromKey := data.keys[0]
@@ -125,6 +128,9 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 }
 
 func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	data := getGenesis()
 	from := data.addresses[0]
 	fromKey := data.keys[0]
@@ -730,6 +736,9 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 }
 
 func TestAccountDeleteIncorrectRoot(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	data := getGenesis()
 	from := data.addresses[0]
 	fromKey := data.keys[0]
@@ -872,11 +881,11 @@ func getGenesis(funds ...*big.Int) initialData {
 		genesisSpec: &types.Genesis{
 			Config: &chain.Config{
 				ChainID:               big.NewInt(1),
-				HomesteadBlock:        new(big.Int),
-				TangerineWhistleBlock: new(big.Int),
-				SpuriousDragonBlock:   big.NewInt(1),
-				ByzantiumBlock:        big.NewInt(1),
-				ConstantinopleBlock:   big.NewInt(1),
+				HomesteadBlock:        new(uint64),
+				TangerineWhistleBlock: new(uint64),
+				SpuriousDragonBlock:   common.NewUint64(1),
+				ByzantiumBlock:        common.NewUint64(1),
+				ConstantinopleBlock:   common.NewUint64(1),
 			},
 			Alloc: allocs,
 		},
@@ -890,7 +899,7 @@ type txn struct {
 
 func GenerateBlocks(t *testing.T, gspec *types.Genesis, txs map[int]txn) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack, error) {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	m := execmoduletester.NewWithGenesis(t, gspec, key)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 

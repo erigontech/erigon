@@ -46,6 +46,11 @@ func (ref *RebasedEliasFano) Seek(v uint64) (uint64, bool) {
 	return ref.baseNum + n, found
 }
 
+func (ref *RebasedEliasFano) Has(v uint64) bool {
+	n, ok := ref.Seek(v)
+	return ok && n == v
+}
+
 func (ref *RebasedEliasFano) Iterator() *RebasedIterWrapper {
 	it := &RebasedIterWrapper{}
 	it.Reset(ref, false)

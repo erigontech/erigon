@@ -29,6 +29,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 )
@@ -196,35 +198,6 @@ func (bn BlockNumber) string(base int) string {
 	return strconv.FormatUint(bn.Uint64(), base)
 }
 
-func AsBlockNumber(no any) BlockNumber {
-	switch no := no.(type) {
-	case *big.Int:
-		return BlockNumber(no.Int64())
-	case BlockNumber:
-		return no
-	case *BlockNumber:
-		return *no
-	case int:
-		return BlockNumber(no)
-	case int64:
-		return BlockNumber(no)
-	case uint64:
-		return BlockNumber(no)
-	case string:
-		var bn BlockNumber
-		if err := json.Unmarshal([]byte(strconv.Quote(no)), &bn); err == nil {
-			return bn
-		}
-	case fmt.Stringer:
-		var bn BlockNumber
-		if err := json.Unmarshal([]byte(strconv.Quote(no.String())), &bn); err == nil {
-			return bn
-		}
-	}
-
-	return LatestExecutedBlockNumber - 1
-}
-
 type BlockNumberOrHash struct {
 	BlockNumber      *BlockNumber `json:"blockNumber,omitempty"`
 	BlockHash        *common.Hash `json:"blockHash,omitempty"`
@@ -375,6 +348,12 @@ func AsBlockReference(ref any) BlockReference {
 	switch ref := ref.(type) {
 	case *big.Int:
 		return IntBlockReference(ref)
+	case *uint256.Int:
+		if ref == nil {
+			return BlockReference{}
+		}
+		bn := BlockNumber(ref.Uint64())
+		return BlockReference{BlockNumber: &bn}
 	case BlockNumber:
 		return BlockReference{BlockNumber: &ref}
 	case *BlockNumber:

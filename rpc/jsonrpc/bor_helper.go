@@ -17,7 +17,6 @@
 package jsonrpc
 
 import (
-	"bytes"
 	"cmp"
 	"context"
 	"errors"
@@ -123,43 +122,7 @@ func ecrecover(header *types.Header, c *borcfg.BorConfig) (common.Address, error
 	return signer, nil
 }
 
-// validatorContains checks for a validator in given validator set
-func validatorContains(a []*heimdall.Validator, x *heimdall.Validator) (*heimdall.Validator, bool) {
-	for _, n := range a {
-		if bytes.Equal(n.Address.Bytes(), x.Address.Bytes()) {
-			return n, true
-		}
-	}
-	return nil, false
-}
-
 type ValidatorSet = heimdall.ValidatorSet
-
-// getUpdatedValidatorSet applies changes to a validator set and returns a new validator set
-func getUpdatedValidatorSet(oldValidatorSet *ValidatorSet, newVals []*heimdall.Validator) *ValidatorSet {
-	v := oldValidatorSet
-	oldVals := v.Validators
-
-	changes := make([]*heimdall.Validator, 0, len(oldVals))
-	for _, ov := range oldVals {
-		if f, ok := validatorContains(newVals, ov); ok {
-			ov.VotingPower = f.VotingPower
-		} else {
-			ov.VotingPower = 0
-		}
-
-		changes = append(changes, ov)
-	}
-
-	for _, nv := range newVals {
-		if _, ok := validatorContains(changes, nv); !ok {
-			changes = append(changes, nv)
-		}
-	}
-
-	v.UpdateWithChangeSet(changes)
-	return v
-}
 
 // author returns the Ethereum address recovered
 // from the signature in the header's extra-data section.

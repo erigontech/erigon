@@ -17,8 +17,6 @@
 package evmtypes
 
 import (
-	"math/big"
-
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -46,7 +44,7 @@ type BlockContext struct {
 	MaxGasLimit bool             // Use GasLimit override for 2^256-1 (to be compatible with OpenEthereum's trace_call)
 	BlockNumber uint64           // Provides information for NUMBER
 	Time        uint64           // Provides information for TIME
-	Difficulty  *big.Int         // Provides information for DIFFICULTY
+	Difficulty  uint256.Int      // Provides information for DIFFICULTY
 	BaseFee     uint256.Int      // Provides information for BASEFEE
 	PrevRanDao  *common.Hash     // Provides information for PREVRANDAO
 	BlobBaseFee uint256.Int      // Provides information for BLOBBASEFEE
@@ -69,6 +67,7 @@ type TxContext struct {
 type ExecutionResult struct {
 	ReceiptGasUsed       uint64 // Gas used by the transaction with refunds (what the user pays) - see EIP-7778
 	BlockGasUsed         uint64 // Gas used for block limit accounting - see EIP-7778
+	MaxGasUsed           uint64
 	Err                  error  // Any error encountered during the execution(listed in core/vm/errors.go)
 	Reverted             bool   // Whether the execution was aborted by `REVERT`
 	ReturnData           []byte // Returned data from evm(function result or data supplied with revert opcode)

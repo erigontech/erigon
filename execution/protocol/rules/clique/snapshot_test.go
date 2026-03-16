@@ -437,7 +437,7 @@ func TestClique(t *testing.T) {
 			engine := clique.New(&config, chainspec.CliqueSnapshot, cliqueDB, log.New())
 			engine.FakeDiff = true
 			// Create a pristine blockchain with the genesis injected
-			m := execmoduletester.NewWithGenesisEngine(t, genesis, engine)
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithEngine(engine))
 
 			chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, len(tt.votes), func(j int, gen *blockgen.BlockGen) {
 				// Cast the vote contained in this block
@@ -463,7 +463,7 @@ func TestClique(t *testing.T) {
 					header.Extra = make([]byte, clique.ExtraVanity+len(auths)*length.Addr+clique.ExtraSeal)
 					accounts.checkpoint(header, auths)
 				}
-				header.Difficulty = clique.DiffInTurn // Ignored, we just need a valid number
+				header.Difficulty.SetUint64(clique.DiffInTurn) // Ignored, we just need a valid number
 
 				// Generate the signature, embed it into the header and the block
 				accounts.sign(header, tt.votes[j].signer)

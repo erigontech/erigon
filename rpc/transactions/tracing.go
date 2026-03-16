@@ -22,8 +22,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
 	"time"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
@@ -110,7 +111,7 @@ func TraceTx(
 	message protocol.Message,
 	blockCtx evmtypes.BlockContext,
 	txCtx evmtypes.TxContext,
-	blockNumber *big.Int,
+	blockNumber *uint256.Int,
 	blockHash common.Hash,
 	txnIndex int,
 	ibs *state.IntraBlockState,
@@ -158,7 +159,7 @@ func AssembleTracer(
 	ctx context.Context,
 	config *tracersConfig.TraceConfig,
 	txHash common.Hash,
-	blockNumber *big.Int,
+	blockNumber *uint256.Int,
 	blockHash common.Hash,
 	txnIndex int,
 	stream jsonstream.Stream,

@@ -31,6 +31,9 @@ import (
 )
 
 func TestCustomTraceReceiptDomain(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	require := require.New(t)
 	assert := assert.New(t)
 	ctx := context.Background()
@@ -85,6 +88,9 @@ func TestCustomTraceInvalidProduceMode(t *testing.T) {
 }
 
 func TestCustomTraceDomainProgressConsistency(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	require := require.New(t)
 	assert := assert.New(t)
 	ctx := context.Background()

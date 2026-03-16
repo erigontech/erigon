@@ -17,9 +17,9 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
-	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
@@ -356,15 +356,15 @@ func TestReplayBlockTransactions(t *testing.T) {
 
 func TestOeTracer(t *testing.T) {
 	type callContext struct {
-		Number              math.HexOrDecimal64   `json:"number"`
-		Hash                common.Hash           `json:"hash"`
-		Difficulty          *math.HexOrDecimal256 `json:"difficulty"`
-		Time                math.HexOrDecimal64   `json:"timestamp"`
-		GasLimit            math.HexOrDecimal64   `json:"gasLimit"`
-		BaseFee             *math.HexOrDecimal256 `json:"baseFeePerGas"`
-		Miner               common.Address        `json:"miner"`
-		TransactionHash     common.Hash           `json:"transactionHash"`
-		TransactionPosition uint64                `json:"transactionPosition"`
+		Number              math.HexOrDecimal64 `json:"number"`
+		Hash                common.Hash         `json:"hash"`
+		Difficulty          *uint256.Int        `json:"difficulty"`
+		Time                math.HexOrDecimal64 `json:"timestamp"`
+		GasLimit            math.HexOrDecimal64 `json:"gasLimit"`
+		BaseFee             *uint256.Int        `json:"baseFeePerGas"`
+		Miner               common.Address      `json:"miner"`
+		TransactionHash     common.Hash         `json:"transactionHash"`
+		TransactionPosition uint64              `json:"transactionPosition"`
 	}
 
 	type testcase struct {
@@ -402,11 +402,13 @@ func TestOeTracer(t *testing.T) {
 				Coinbase:    accounts.InternAddress(test.Context.Miner),
 				BlockNumber: uint64(test.Context.Number),
 				Time:        uint64(test.Context.Time),
-				Difficulty:  (*big.Int)(test.Context.Difficulty),
 				GasLimit:    uint64(test.Context.GasLimit),
 			}
+			if test.Context.Difficulty != nil {
+				context.Difficulty = *test.Context.Difficulty
+			}
 			if test.Context.BaseFee != nil {
-				baseFee, _ := uint256.FromBig((*big.Int)(test.Context.BaseFee))
+				baseFee := test.Context.BaseFee
 				context.BaseFee = *baseFee
 			}
 			rules := context.Rules(test.Genesis.Config)
@@ -417,7 +419,7 @@ func TestOeTracer(t *testing.T) {
 			defer dbTx.Rollback()
 
 			statedb, _ := testutil.MakePreState(rules, dbTx, test.Genesis.Alloc, context.BlockNumber)
-			msg, err := tx.AsMessage(*signer, (*big.Int)(test.Context.BaseFee), rules)
+			msg, err := tx.AsMessage(*signer, test.Context.BaseFee, rules)
 			require.NoError(t, err)
 			txContext := protocol.NewEVMTxContext(msg)
 
@@ -457,4 +459,32 @@ func TestOeTracer(t *testing.T) {
 			require.Equal(t, string(want), string(have))
 		})
 	}
+}
+
+func TestRawTransaction(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+
+	// Read a transaction from block 6 and re-encode it as raw bytes.
+	var encodedTx []byte
+	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
+		b, err := m.BlockReader.BlockByNumber(m.Ctx, tx, 6)
+		if err != nil {
+			return err
+		}
+		txn := b.Transactions()[0]
+		var buf bytes.Buffer
+		if err = txn.MarshalBinary(&buf); err != nil {
+			return err
+		}
+		encodedTx = buf.Bytes()
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := api.RawTransaction(context.Background(), encodedTx, []string{"trace"})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotEmpty(t, result.Trace)
 }

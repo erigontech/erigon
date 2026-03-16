@@ -17,12 +17,7 @@
 package diaglib
 
 import (
-	"context"
-	"encoding/json"
-	"io"
 	"sync"
-
-	"github.com/erigontech/erigon/common/log/v3"
 )
 
 type BlockEexcStatsData struct {
@@ -42,47 +37,4 @@ type BlockExecutionStatistics struct {
 	Alloc       uint64  `json:"alloc"`
 	Sys         uint64  `json:"sys"`
 	TimeElapsed float64 `json:"timeElapsed"`
-}
-
-func (b *BlockEexcStatsData) SetData(d BlockExecutionStatistics) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.data = d
-}
-
-func (b *BlockEexcStatsData) Data() (d BlockExecutionStatistics) {
-	b.mu.Lock()
-	d = b.data
-	b.mu.Unlock()
-	return
-}
-
-func (d *DiagnosticClient) setupBlockExecutionDiagnostics(rootCtx context.Context) {
-	d.runBlockExecutionListener(rootCtx)
-}
-
-func (d *DiagnosticClient) runBlockExecutionListener(rootCtx context.Context) {
-	go func() {
-		ctx, ch, closeChannel := Context[BlockExecutionStatistics](rootCtx, 1)
-		defer closeChannel()
-
-		StartProviders(ctx, TypeOf(BlockExecutionStatistics{}), log.Root())
-		for {
-			select {
-			case <-rootCtx.Done():
-				return
-			case info := <-ch:
-				d.BlockExecution.SetData(info)
-				if d.syncStats.SyncFinished {
-					return
-				}
-			}
-		}
-	}()
-}
-
-func (d *DiagnosticClient) BlockExecutionInfoJson(w io.Writer) {
-	if err := json.NewEncoder(w).Encode(d.BlockExecution.Data()); err != nil {
-		log.Debug("[diagnostics] BlockExecutionInfoJson", "err", err)
-	}
 }

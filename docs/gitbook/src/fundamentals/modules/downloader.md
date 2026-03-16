@@ -105,12 +105,12 @@ Flags:
       --pprof.port int                     pprof HTTP server listening port (default 6060)
       --seedbox                            Turns downloader into independent (doesn't need Erigon) software which discover/download/seed new files - useful for Erigon network, and can work on very cheap hardware. It will: 1) download .torrent from webseed 2) download new files after upgrade 3) we planing add discovery of new files soon
       --torrent.conns.perfile int          Number of connections per file (default 10)
-      --torrent.download.rate string       Bytes per second, example: 32mb (default "128mb")
-      --torrent.download.slots int         Amount of files to download in parallel. (default 128)
+      --torrent.download.rate string       Bytes per second, example: 32mb (default "512mb")
+      --torrent.download.slots int         (DEPRECATED: No longer has any effect) Amount of files to download in parallel. (default 32)
       --torrent.maxpeers int               Unused parameter (reserved for future use) (default 100)
       --torrent.port int                   Port to listen and serve BitTorrent protocol (default 42069)
       --torrent.staticpeers string         Comma separated host:port to connect to
-      --torrent.upload.rate string         Bytes per second, example: 32mb (default "4mb")
+      --torrent.upload.rate string         Bytes per second, example: 32mb (default "16mb")
       --torrent.verbosity int              0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (must set --verbosity to equal or higher level and has default: 2) (default 2)
       --trace string                       Write execution trace to the given file
       --verbosity string                   Set the log level for console logs (default "info")

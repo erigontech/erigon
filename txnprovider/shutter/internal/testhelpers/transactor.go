@@ -95,7 +95,7 @@ func (et EncryptedTransactor) SubmitEncryptedTransfer(
 		return EncryptedSubmission{}, err
 	}
 
-	opts.Value = new(big.Int).Mul(block.BaseFee, gasLimit)
+	opts.Value = new(big.Int).Mul(block.BaseFee.ToBig(), gasLimit)
 	sigma, err := shuttercrypto.RandomSigma(rand.Reader)
 	if err != nil {
 		return EncryptedSubmission{}, err

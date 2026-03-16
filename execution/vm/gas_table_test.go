@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -117,8 +118,10 @@ func TestEIP2200(t *testing.T) {
 			t.Parallel()
 
 			tx, sd := testTemporalTxSD(t)
+			txNum, _, err := sd.SeekCommitment(t.Context(), tx)
+			require.NoError(t, err)
 
-			r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, sd.TxNum())
+			r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 			s := state.New(r)
 
 			address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
@@ -166,7 +169,7 @@ var createGasTests = []struct {
 
 func TestCreateGas(t *testing.T) {
 	t.Parallel()
-	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db := testutil.TemporalDB(t)
 	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()

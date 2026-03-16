@@ -7,6 +7,8 @@ import (
 	"errors"
 	"math/big"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/math"
@@ -45,7 +47,9 @@ func (g Genesis) MarshalJSON() ([]byte, error) {
 	enc.Timestamp = math.HexOrDecimal64(g.Timestamp)
 	enc.ExtraData = g.ExtraData
 	enc.GasLimit = math.HexOrDecimal64(g.GasLimit)
-	enc.Difficulty = (*math.HexOrDecimal256)(g.Difficulty)
+	if g.Difficulty != nil {
+		enc.Difficulty = (*math.HexOrDecimal256)(g.Difficulty.ToBig())
+	}
 	enc.Mixhash = g.Mixhash
 	enc.Coinbase = g.Coinbase
 	if g.Alloc != nil {
@@ -58,7 +62,9 @@ func (g Genesis) MarshalJSON() ([]byte, error) {
 	enc.Number = math.HexOrDecimal64(g.Number)
 	enc.GasUsed = math.HexOrDecimal64(g.GasUsed)
 	enc.ParentHash = g.ParentHash
-	enc.BaseFee = (*math.HexOrDecimal256)(g.BaseFee)
+	if g.BaseFee != nil {
+		enc.BaseFee = (*math.HexOrDecimal256)(g.BaseFee.ToBig())
+	}
 	enc.BlobGasUsed = (*math.HexOrDecimal64)(g.BlobGasUsed)
 	enc.ExcessBlobGas = (*math.HexOrDecimal64)(g.ExcessBlobGas)
 	enc.ParentBeaconBlockRoot = g.ParentBeaconBlockRoot
@@ -115,7 +121,7 @@ func (g *Genesis) UnmarshalJSON(input []byte) error {
 	if dec.Difficulty == nil {
 		return errors.New("missing required field 'difficulty' for Genesis")
 	}
-	g.Difficulty = (*big.Int)(dec.Difficulty)
+	g.Difficulty = uint256.MustFromBig((*big.Int)(dec.Difficulty))
 	if dec.Mixhash != nil {
 		g.Mixhash = *dec.Mixhash
 	}
@@ -141,7 +147,7 @@ func (g *Genesis) UnmarshalJSON(input []byte) error {
 		g.ParentHash = *dec.ParentHash
 	}
 	if dec.BaseFee != nil {
-		g.BaseFee = (*big.Int)(dec.BaseFee)
+		g.BaseFee = uint256.MustFromBig((*big.Int)(dec.BaseFee))
 	}
 	if dec.BlobGasUsed != nil {
 		g.BlobGasUsed = (*uint64)(dec.BlobGasUsed)

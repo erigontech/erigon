@@ -40,6 +40,9 @@ import (
 )
 
 func TestGasPrice(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 
 	cases := []struct {
 		description   string
@@ -79,6 +82,9 @@ func TestGasPrice(t *testing.T) {
 }
 
 func TestEthConfig(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	toTimeArg := func(t hexutil.Uint64) *hexutil.Uint64 { return &t }
 	for _, test := range []struct {
@@ -152,7 +158,7 @@ func TestEthConfig(t *testing.T) {
 		{
 			name:                 "mainnet prague scheduled but not activated no osaka no bpos with head at shanghai",
 			genesisFilePath:      path.Join(".", "testdata", "eth_config", "mainnet_prague_scheduled_no_osaka_no_bpos_genesis.json"),
-			head:                 &types.Header{Number: big.NewInt(123), Time: 1710338135 - 1000},
+			head:                 &types.Header{Number: *uint256.NewInt(123), Time: 1710338135 - 1000},
 			wantResponseFilePath: path.Join(".", "testdata", "eth_config", "mainnet_prague_scheduled_no_osaka_no_bpos_response_head_at_shanghai.json"),
 		},
 		{
@@ -173,7 +179,7 @@ func TestEthConfig(t *testing.T) {
 			var genesis types.Genesis
 			err = json.Unmarshal(genesisBytes, &genesis)
 			require.NoError(t, err)
-			m := execmoduletester.NewWithGenesis(t, &genesis, key)
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&genesis), execmoduletester.WithKey(key))
 			defer m.Close()
 			eth := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 			if test.head != nil {
@@ -212,7 +218,7 @@ func createGasPriceTestKV(t *testing.T, chainSize int) *execmoduletester.ExecMod
 		}
 		signer = types.LatestSigner(gspec.Config)
 	)
-	m := execmoduletester.NewWithGenesis(t, gspec, key)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
 	// Generate testing blocks
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(i int, b *blockgen.BlockGen) {

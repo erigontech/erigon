@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
+	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
 	"google.golang.org/grpc"
 
@@ -135,11 +136,15 @@ func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOpti
 	}
 	parentBeaconBlockRoot := common.BigToHash(cl.state.ParentClBlockRoot)
 	slotNumber := cl.state.NextSlotNumber()
+	withdrawals := make([]*types.Withdrawal, 0)
+	if options.withdrawals != nil {
+		withdrawals = options.withdrawals
+	}
 	payloadAttributes := enginetypes.PayloadAttributes{
 		Timestamp:             hexutil.Uint64(timestamp),
 		PrevRandao:            common.BigToHash(cl.state.ParentRandao),
 		SuggestedFeeRecipient: cl.suggestedFeeRecipient,
-		Withdrawals:           make([]*types.Withdrawal, 0),
+		Withdrawals:           withdrawals,
 		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
 		SlotNumber:            (*hexutil.Uint64)(&slotNumber),
 	}
@@ -179,9 +184,16 @@ func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOpti
 func (cl *MockCl) InsertNewPayload(ctx context.Context, p *MockClPayload) (*enginetypes.PayloadStatus, error) {
 	elPayload := p.ExecutionPayload
 	clParentBlockRoot := p.ParentBeaconBlockRoot
+	// Forward execution requests from GetPayload to NewPayload.
+	// Without this, blocks containing real execution requests (e.g. withdrawal
+	// requests from EIP-7002) would fail validation due to requestsHash mismatch.
+	executionRequests := p.ExecutionRequests
+	if executionRequests == nil {
+		executionRequests = []hexutil.Bytes{}
+	}
 	return RetryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, nil,
 		func() (*enginetypes.PayloadStatus, enginetypes.EngineStatus, error) {
-			r, err := cl.engineApiClient.NewPayloadV5(ctx, elPayload, []common.Hash{}, clParentBlockRoot, []hexutil.Bytes{})
+			r, err := cl.engineApiClient.NewPayloadV5(ctx, elPayload, []common.Hash{}, clParentBlockRoot, executionRequests)
 			if err != nil {
 				return nil, "", err
 			}
@@ -245,9 +257,16 @@ func WithWaitUntilTimestamp() BlockBuildingOption {
 	}
 }
 
+func WithWithdrawals(withdrawals []*types.Withdrawal) BlockBuildingOption {
+	return func(opts *blockBuildingOptions) {
+		opts.withdrawals = withdrawals
+	}
+}
+
 type blockBuildingOptions struct {
 	timestamp          *uint64
 	waitUntilTimestamp bool
+	withdrawals        []*types.Withdrawal
 }
 
 func RetryEngine[T any](ctx context.Context, retryStatuses []enginetypes.EngineStatus, retryErrors []error,
@@ -324,15 +343,15 @@ func MockClPayloadToHeader(p *MockClPayload) *types.Header {
 		Coinbase:              elPayload.FeeRecipient,
 		Root:                  elPayload.StateRoot,
 		Bloom:                 bloom,
-		BaseFee:               (*big.Int)(elPayload.BaseFeePerGas),
+		BaseFee:               uint256.MustFromBig(elPayload.BaseFeePerGas.ToInt()),
 		Extra:                 elPayload.ExtraData,
-		Number:                big.NewInt(0).SetUint64(elPayload.BlockNumber.Uint64()),
+		Number:                *uint256.NewInt(elPayload.BlockNumber.Uint64()),
 		GasUsed:               uint64(elPayload.GasUsed),
 		GasLimit:              uint64(elPayload.GasLimit),
 		Time:                  uint64(elPayload.Timestamp),
 		MixDigest:             elPayload.PrevRandao,
 		UncleHash:             empty.UncleHash,
-		Difficulty:            merge.ProofOfStakeDifficulty,
+		Difficulty:            *merge.ProofOfStakeDifficulty,
 		Nonce:                 merge.ProofOfStakeNonce,
 		ReceiptHash:           elPayload.ReceiptsRoot,
 		TxHash:                types.DeriveSha(txns),

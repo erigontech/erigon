@@ -25,7 +25,6 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/hmac"
 	"crypto/rand"
 	"encoding/binary"
@@ -37,8 +36,8 @@ import (
 	"net"
 	"time"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/golang/snappy"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/crypto/ecies"
@@ -490,10 +489,10 @@ func (h *handshakeState) secrets(auth, authResp []byte) (Secrets, error) {
 	}
 
 	// setup sha3 instances for the MACs
-	mac1 := sha3.NewLegacyKeccak256()
+	mac1 := keccak.NewFastKeccak()
 	mac1.Write(xor(s.MAC, h.respNonce))
 	mac1.Write(auth)
-	mac2 := sha3.NewLegacyKeccak256()
+	mac2 := keccak.NewFastKeccak()
 	mac2.Write(xor(s.MAC, h.initNonce))
 	mac2.Write(authResp)
 	if h.initiator {
@@ -666,7 +665,10 @@ func exportPubkey(pub *ecies.PublicKey) []byte {
 	if pub == nil {
 		panic("nil pubkey")
 	}
-	return elliptic.Marshal(pub.Curve, pub.X, pub.Y)[1:]
+	if curve, ok := pub.Curve.(crypto.EllipticCurve); ok {
+		return curve.Marshal(pub.X, pub.Y)[1:]
+	}
+	return []byte{}
 }
 
 func xor(one, other []byte) (xor []byte) {

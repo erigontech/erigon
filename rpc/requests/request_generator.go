@@ -26,9 +26,8 @@ import (
 	"net"
 	"net/http"
 	"strings"
-	"time"
-
 	"sync"
+	"time"
 
 	"github.com/valyala/fastjson"
 

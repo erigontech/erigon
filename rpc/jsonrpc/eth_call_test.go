@@ -56,6 +56,9 @@ import (
 )
 
 func TestEstimateGas(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, execmoduletester.New(t))
@@ -576,7 +579,7 @@ func chainWithDeployedContract(t *testing.T) (*execmoduletester.ExecModuleTester
 	_, fillerPublicKeys, err := generatePseudoRandomECDSAKeyPairs(rng, nFillerAccounts)
 	require.NoError(t, err)
 
-	m := execmoduletester.NewWithGenesis(t, gspec, bankKey)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(bankKey))
 	db := m.DB
 
 	var contractAddr common.Address
