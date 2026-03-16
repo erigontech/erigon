@@ -35,12 +35,6 @@ type TransactionalRangeIndexer interface {
 	WithTx(tx kv.Tx) RangeIndexer
 }
 
-type RangeIndexFunc func(ctx context.Context, blockNum uint64) (uint64, bool, error)
-
-func (f RangeIndexFunc) Lookup(ctx context.Context, blockNum uint64) (uint64, bool, error) {
-	return f(ctx, blockNum)
-}
-
 type RangeIndexer interface {
 	RangeIndex
 	Put(ctx context.Context, r ClosedRange, id uint64) error

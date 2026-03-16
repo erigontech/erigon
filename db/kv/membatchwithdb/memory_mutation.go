@@ -19,6 +19,7 @@ package membatchwithdb
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"time"
 	"unsafe"
 
@@ -53,14 +54,20 @@ type MemoryMutation struct {
 // defer batch.Close()
 // ... some calculations on `batch`
 // batch.Commit()
-func NewMemoryBatch(tx kv.TemporalTx, tmpDir string, logger log.Logger) *MemoryMutation {
+func NewMemoryBatch(tx kv.TemporalTx, tmpDir string, logger log.Logger) (mm *MemoryMutation, err error) {
 	tmpDB := mdbx.New(dbcfg.TemporaryDB, logger).InMem(nil, tmpDir).GrowthStep(64 * datasize.MB).MapSize(512 * datasize.GB).MustOpen()
+	defer func() {
+		if err != nil {
+			tmpDB.Close()
+		}
+	}()
 	memTx, err := tmpDB.BeginRw(context.Background()) // nolint:gocritic
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("NewMemoryBatch: begin tx: %w", err)
 	}
-	if err := initSequences(tx, memTx); err != nil {
-		return nil
+	if err = initSequences(tx, memTx); err != nil {
+		memTx.Rollback()
+		return nil, fmt.Errorf("NewMemoryBatch: init sequences: %w", err)
 	}
 
 	return &MemoryMutation{
@@ -70,7 +77,7 @@ func NewMemoryBatch(tx kv.TemporalTx, tmpDir string, logger log.Logger) *MemoryM
 		deletedEntries: make(map[string]map[string]struct{}),
 		deletedDups:    map[string]map[string]map[string]struct{}{},
 		clearedTables:  make(map[string]struct{}),
-	}
+	}, nil
 }
 
 func (m *MemoryMutation) UnderlyingTx() kv.TemporalTx {

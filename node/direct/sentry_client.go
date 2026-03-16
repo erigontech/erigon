@@ -34,6 +34,7 @@ import (
 const (
 	ETH68 = 68
 	ETH69 = 69
+	ETH70 = 70
 
 	WIT0 = 1
 )
@@ -42,10 +43,12 @@ var (
 	ProtocolToUintMap = map[sentryproto.Protocol]uint{
 		sentryproto.Protocol_ETH68: ETH68,
 		sentryproto.Protocol_ETH69: ETH69,
+		sentryproto.Protocol_ETH70: ETH70,
 	}
 	UintToProtocolMap = map[uint]sentryproto.Protocol{
 		ETH68: sentryproto.Protocol_ETH68,
 		ETH69: sentryproto.Protocol_ETH69,
+		ETH70: sentryproto.Protocol_ETH70,
 	}
 	SupportedSideProtocols = map[sentryproto.Protocol]struct{}{
 		sentryproto.Protocol_WIT0: {},

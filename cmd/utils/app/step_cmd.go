@@ -27,7 +27,7 @@ func stepRebase(cliCtx *cli.Context) error {
 	defer ticker.Stop()
 
 	dirs := datadir.Open(cliCtx.String("datadir"))
-	settings, err := state.CreateOrReadErigonDBSettings(dirs, logger)
+	settings, err := state.ResolveErigonDBSettings(dirs, logger, true)
 	if err != nil {
 		return err
 	}
@@ -111,7 +111,11 @@ func stepRebase(cliCtx *cli.Context) error {
 	dels = append(dels, idxTorrents...)
 
 	// include whole chaindata directory for deletion
-	dels = append(dels, dirs.Chaindata)
+	dels = append(dels, dirs.Chaindata) //nolint:gocritic
+
+	// include erigondb.toml.torrent which is invalidated by the rebase
+	dels = append(dels, filepath.Join(dirs.Snap, "erigondb.toml.torrent"))
+
 	for _, f := range dels {
 		fmt.Printf("D: %s\n", f)
 	}

@@ -987,7 +987,6 @@ func BenchmarkDB_BeginRO(b *testing.B) {
 	_db := BaseCaseDBForBenchmark(b)
 	db := _db.(*MdbxKV)
 
-	b.ResetTimer()
 	for b.Loop() {
 		tx, _ := db.BeginRo(context.Background())
 		tx.Rollback()
@@ -1010,7 +1009,6 @@ func BenchmarkDB_Get(b *testing.B) {
 	// Ensure data is correct.
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		key := u64tob(uint64(1))
-		b.ResetTimer()
 		for b.Loop() {
 			v, err := tx.GetOne(table, key)
 			if err != nil {
@@ -1031,13 +1029,12 @@ func BenchmarkDB_Put(b *testing.B) {
 	table := "Table"
 	db := _db.(*MdbxKV)
 
-	// Ensure data is correct.
-	keys := make([][]byte, b.N)
-	for i := 1; i <= b.N; i++ {
+	const keyCount = 10000
+	keys := make([][]byte, keyCount)
+	for i := 1; i <= keyCount; i++ {
 		keys[i-1] = u64tob(uint64(i))
 	}
 
-	b.ResetTimer()
 	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
 		var idx int
 		for b.Loop() {
@@ -1082,8 +1079,9 @@ func BenchmarkDB_Delete(b *testing.B) {
 	table := "Table"
 	db := _db.(*MdbxKV)
 
-	keys := make([][]byte, b.N)
-	for i := 1; i <= b.N; i++ {
+	const keyCount = 10000
+	keys := make([][]byte, keyCount)
+	for i := 1; i <= keyCount; i++ {
 		keys[i-1] = u64tob(uint64(i))
 	}
 
@@ -1099,8 +1097,6 @@ func BenchmarkDB_Delete(b *testing.B) {
 		b.Fatal(err)
 	}
 
-	// Ensure data is correct.
-	b.ResetTimer()
 	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
 		var idx int
 		for b.Loop() {
