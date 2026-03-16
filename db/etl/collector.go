@@ -24,6 +24,7 @@ import (
 	"io"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 
@@ -122,7 +123,9 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 	}
 
 	if canStoreInRam && len(c.dataProviders) == 0 {
+		t := time.Now()
 		c.buf.Sort()
+		log.Trace(fmt.Sprintf("[%s] ETL sort", c.logPrefix), "keys", c.buf.Len(), "took", time.Since(t))
 		provider := KeepInRAM(c.buf)
 		c.allFlushed = true
 		c.dataProviders = append(c.dataProviders, provider)
@@ -254,10 +257,11 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	simpleLoad := func(k, v []byte) error {
 		return loadFunc(k, v, currentTable, loadNextFunc)
 	}
+	t := time.Now()
 	if err := mergeSortFiles(c.logPrefix, c.dataProviders, simpleLoad, args, c.buf); err != nil {
 		return fmt.Errorf("loadIntoTable %s: %w", toBucket, err)
 	}
-	//logger.Trace(fmt.Sprintf("[%s] ETL Load done", c.logPrefix), "bucket", bucket, "records", i)
+	log.Warn(fmt.Sprintf("[dbg.%s] ETL load", c.logPrefix), "bucket", toBucket, "records", i, "took", time.Since(t))
 	return nil
 }
 

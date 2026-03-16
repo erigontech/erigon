@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync/atomic"
+	"time"
 
 	"github.com/erigontech/erigon/common/dir"
 
@@ -63,7 +64,7 @@ func FlushToDiskAsync(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl, al
 			}
 			inProgress.Store(false)
 		}()
-		provider.file, err = sortAndFlush(b, tmpdir)
+		provider.file, err = sortAndFlush(logPrefix, b, tmpdir)
 		if err != nil {
 			return err
 		}
@@ -83,7 +84,7 @@ func FlushToDisk(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl) (dataPr
 
 	var err error
 	provider := &fileDataProvider{reader: nil, wg: &errgroup.Group{}}
-	provider.file, err = sortAndFlush(b, tmpdir)
+	provider.file, err = sortAndFlush(logPrefix, b, tmpdir)
 	if err != nil {
 		return nil, err
 	}
@@ -92,8 +93,10 @@ func FlushToDisk(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl) (dataPr
 	return provider, nil
 }
 
-func sortAndFlush(b Buffer, tmpdir string) (*os.File, error) {
+func sortAndFlush(logPrefix string, b Buffer, tmpdir string) (*os.File, error) {
+	t := time.Now()
 	b.Sort()
+	log.Warn(fmt.Sprintf("[dbg.%s] ETL sort", logPrefix), "keys", b.Len(), "took", time.Since(t))
 
 	// if we are going to create files in the system temp dir, we don't need any
 	// subfolders.
