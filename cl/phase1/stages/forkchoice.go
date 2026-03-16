@@ -315,8 +315,22 @@ func saveHeadStateOnDiskIfNeeded(cfg *Cfg, headState *state.CachingBeaconState) 
 // postForkchoiceOperations performs the post fork choice operations such as updating the head state, producing and caching attestation data,
 // these sets of operations can take as long as they need to run, as by-now we are already synced.
 func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger, cfg *Cfg, headSlot uint64, headRoot common.Hash) error {
-	// Retrieve the head state
-	headState, err := cfg.forkChoice.GetStateAtBlockRoot(headRoot, false)
+	// Retrieve the head state.
+	// [Modified in Gloas:EIP7732] For GLOAS FULL blocks, use the post-envelope state so that
+	// LatestBlockHash is up-to-date. Without this, a restart would restore a stale LatestBlockHash
+	// causing "parent block hash mismatch" errors on the next block.
+	var headState *state.CachingBeaconState
+	var err error
+	headVersion := cfg.beaconCfg.GetCurrentStateVersion(headSlot / cfg.beaconCfg.SlotsPerEpoch)
+	if headVersion >= clparams.GloasVersion {
+		headState, err = cfg.forkChoice.GetFullStateAtBlockRoot(headRoot)
+		if err != nil || headState == nil {
+			// Fallback to block state if envelope state not available (e.g. EMPTY block)
+			headState, err = cfg.forkChoice.GetStateAtBlockRoot(headRoot, false)
+		}
+	} else {
+		headState, err = cfg.forkChoice.GetStateAtBlockRoot(headRoot, false)
+	}
 	if err != nil {
 		return fmt.Errorf("failed to get state at block root: %w", err)
 	}

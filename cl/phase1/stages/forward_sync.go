@@ -157,36 +157,17 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 				return newHighestBlockProcessed - 1, nil
 			}
 			if errors.Is(err, forkchoice.ErrMissingSegment) {
-				// Parent state not available (e.g. reorg or peer returned incomplete chain).
-				// Return progress so far without error — do not ban the peer.
-				logger.Debug("[Caplin] forward sync missing segment", "blockSlot", block.Block.Slot)
-				if newHighestBlockProcessed == 0 {
-					return 0, nil
-				}
-				return newHighestBlockProcessed, nil
+				// Parent state not available — likely peer returned incomplete chain.
+				// Do NOT advance progress: return the initial highestBlockProcessed so the
+				// downloader retries from the same position with a (potentially different) peer.
+				// The 2-minute stale timeout in forwardSync will hand off to ChainTipSync
+				// if retries never succeed (e.g. all peers lack these blocks).
+				logger.Debug("[Caplin] forward sync missing segment, will retry", "blockSlot", block.Block.Slot)
+				return highestBlockProcessed, nil
 			}
 			// Return an error if block processing fails
 			err = fmt.Errorf("bad blocks segment received: %w", err)
 			return
-		}
-
-		if !hasSignedHeaderInDB && block.Block.Slot%(cfg.beaconCfg.SlotsPerEpoch*2) == 0 {
-			var st *state.CachingBeaconState
-			// Perform post-processing on the block
-			st, err = cfg.forkChoice.GetStateAtBlockRoot(blockRoot, false)
-			if err == nil && st != nil {
-				// Dump the beacon state on disk if conditions are met
-				if err = cfg.forkChoice.DumpBeaconStateOnDisk(st); err != nil {
-					// Return an error if dumping the state fails
-					err = fmt.Errorf("failed to dump state: %w", err)
-					return
-				}
-				if err = saveHeadStateOnDiskIfNeeded(cfg, st); err != nil {
-					// Return an error if saving the head state fails
-					err = fmt.Errorf("failed to save head state: %w", err)
-					return
-				}
-			}
 		}
 
 		// Update the highest block processed if the current block's slot is higher
@@ -209,8 +190,42 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 					}
 				}
 			}
+			// [Modified in Gloas:EIP7732] Dump state AFTER envelope processing so that the
+			// persisted state includes the LatestBlockHash update from ProcessExecutionPayloadEnvelope.
+			// Without this, a restart would restore a stale LatestBlockHash, causing
+			// "parent block hash mismatch" errors when processing the next block's bid.
+			if !hasSignedHeaderInDB && block.Block.Slot%(cfg.beaconCfg.SlotsPerEpoch*2) == 0 {
+				var st *state.CachingBeaconState
+				st, err = cfg.forkChoice.GetStateAtBlockRoot(blockRoot, false)
+				if err == nil && st != nil {
+					if err = cfg.forkChoice.DumpBeaconStateOnDisk(st); err != nil {
+						err = fmt.Errorf("failed to dump state: %w", err)
+						return
+					}
+					if err = saveHeadStateOnDiskIfNeeded(cfg, st); err != nil {
+						err = fmt.Errorf("failed to save head state: %w", err)
+						return
+					}
+				}
+			}
 			// EMPTY block: OnBlock already correctly inherits the parent EL hash in eth2Roots.
 			continue
+		}
+
+		// Pre-GLOAS: dump state after block processing (envelope is part of the beacon block).
+		if !hasSignedHeaderInDB && block.Block.Slot%(cfg.beaconCfg.SlotsPerEpoch*2) == 0 {
+			var st *state.CachingBeaconState
+			st, err = cfg.forkChoice.GetStateAtBlockRoot(blockRoot, false)
+			if err == nil && st != nil {
+				if err = cfg.forkChoice.DumpBeaconStateOnDisk(st); err != nil {
+					err = fmt.Errorf("failed to dump state: %w", err)
+					return
+				}
+				if err = saveHeadStateOnDiskIfNeeded(cfg, st); err != nil {
+					err = fmt.Errorf("failed to save head state: %w", err)
+					return
+				}
+			}
 		}
 
 		// If block version is less than BellatrixVersion or shouldInsert is false, skip insertion
