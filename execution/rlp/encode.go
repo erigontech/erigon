@@ -451,60 +451,11 @@ func makeEncoderWriter(typ reflect.Type) writer {
 // putint writes i to the beginning of b in big endian byte
 // order, using the least number of bytes needed to represent i.
 func putint(b []byte, i uint64) (size int) {
-	switch {
-	case i < (1 << 8):
-		b[0] = byte(i)
-		return 1
-	case i < (1 << 16):
-		b[0] = byte(i >> 8)
-		b[1] = byte(i)
-		return 2
-	case i < (1 << 24):
-		b[0] = byte(i >> 16)
-		b[1] = byte(i >> 8)
-		b[2] = byte(i)
-		return 3
-	case i < (1 << 32):
-		b[0] = byte(i >> 24)
-		b[1] = byte(i >> 16)
-		b[2] = byte(i >> 8)
-		b[3] = byte(i)
-		return 4
-	case i < (1 << 40):
-		b[0] = byte(i >> 32)
-		b[1] = byte(i >> 24)
-		b[2] = byte(i >> 16)
-		b[3] = byte(i >> 8)
-		b[4] = byte(i)
-		return 5
-	case i < (1 << 48):
-		b[0] = byte(i >> 40)
-		b[1] = byte(i >> 32)
-		b[2] = byte(i >> 24)
-		b[3] = byte(i >> 16)
-		b[4] = byte(i >> 8)
-		b[5] = byte(i)
-		return 6
-	case i < (1 << 56):
-		b[0] = byte(i >> 48)
-		b[1] = byte(i >> 40)
-		b[2] = byte(i >> 32)
-		b[3] = byte(i >> 24)
-		b[4] = byte(i >> 16)
-		b[5] = byte(i >> 8)
-		b[6] = byte(i)
-		return 7
-	default:
-		b[0] = byte(i >> 56)
-		b[1] = byte(i >> 48)
-		b[2] = byte(i >> 40)
-		b[3] = byte(i >> 32)
-		b[4] = byte(i >> 24)
-		b[5] = byte(i >> 16)
-		b[6] = byte(i >> 8)
-		b[7] = byte(i)
-		return 8
-	}
+	var tmp [8]byte
+	binary.BigEndian.PutUint64(tmp[:], i)
+	size = common.BitLenToByteLen(bits.Len64(i))
+	copy(b, tmp[8-size:])
+	return size
 }
 
 // intsize computes the minimum number of bytes required to store i.

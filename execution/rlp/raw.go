@@ -20,8 +20,12 @@
 package rlp
 
 import (
+	"encoding/binary"
 	"io"
+	"math/bits"
 	"reflect"
+
+	"github.com/erigontech/erigon/common"
 )
 
 // RawValue represents an encoded RLP value and can be used to delay
@@ -241,25 +245,9 @@ func readSize(b []byte, slen byte) (uint64, error) {
 	if int(slen) > len(b) {
 		return 0, io.ErrUnexpectedEOF
 	}
-	var s uint64
-	switch slen {
-	case 1:
-		s = uint64(b[0])
-	case 2:
-		s = uint64(b[0])<<8 | uint64(b[1])
-	case 3:
-		s = uint64(b[0])<<16 | uint64(b[1])<<8 | uint64(b[2])
-	case 4:
-		s = uint64(b[0])<<24 | uint64(b[1])<<16 | uint64(b[2])<<8 | uint64(b[3])
-	case 5:
-		s = uint64(b[0])<<32 | uint64(b[1])<<24 | uint64(b[2])<<16 | uint64(b[3])<<8 | uint64(b[4])
-	case 6:
-		s = uint64(b[0])<<40 | uint64(b[1])<<32 | uint64(b[2])<<24 | uint64(b[3])<<16 | uint64(b[4])<<8 | uint64(b[5])
-	case 7:
-		s = uint64(b[0])<<48 | uint64(b[1])<<40 | uint64(b[2])<<32 | uint64(b[3])<<24 | uint64(b[4])<<16 | uint64(b[5])<<8 | uint64(b[6])
-	case 8:
-		s = uint64(b[0])<<56 | uint64(b[1])<<48 | uint64(b[2])<<40 | uint64(b[3])<<32 | uint64(b[4])<<24 | uint64(b[5])<<16 | uint64(b[6])<<8 | uint64(b[7])
-	}
+	var buf [8]byte
+	copy(buf[8-slen:], b[:slen])
+	s := binary.BigEndian.Uint64(buf[:])
 	// Reject sizes < 56 (shouldn't have separate size) and sizes with
 	// leading zero bytes.
 	if s < 56 || b[0] == 0 {
@@ -275,66 +263,9 @@ func AppendUint64(b []byte, i uint64) []byte {
 	} else if i < 128 {
 		return append(b, byte(i))
 	}
-	switch {
-	case i < (1 << 8):
-		return append(b, 0x81, byte(i))
-	case i < (1 << 16):
-		return append(b, 0x82,
-			byte(i>>8),
-			byte(i),
-		)
-	case i < (1 << 24):
-		return append(b, 0x83,
-			byte(i>>16),
-			byte(i>>8),
-			byte(i),
-		)
-	case i < (1 << 32):
-		return append(b, 0x84,
-			byte(i>>24),
-			byte(i>>16),
-			byte(i>>8),
-			byte(i),
-		)
-	case i < (1 << 40):
-		return append(b, 0x85,
-			byte(i>>32),
-			byte(i>>24),
-			byte(i>>16),
-			byte(i>>8),
-			byte(i),
-		)
-
-	case i < (1 << 48):
-		return append(b, 0x86,
-			byte(i>>40),
-			byte(i>>32),
-			byte(i>>24),
-			byte(i>>16),
-			byte(i>>8),
-			byte(i),
-		)
-	case i < (1 << 56):
-		return append(b, 0x87,
-			byte(i>>48),
-			byte(i>>40),
-			byte(i>>32),
-			byte(i>>24),
-			byte(i>>16),
-			byte(i>>8),
-			byte(i),
-		)
-
-	default:
-		return append(b, 0x88,
-			byte(i>>56),
-			byte(i>>48),
-			byte(i>>40),
-			byte(i>>32),
-			byte(i>>24),
-			byte(i>>16),
-			byte(i>>8),
-			byte(i),
-		)
-	}
+	var buf [9]byte
+	binary.BigEndian.PutUint64(buf[1:], i)
+	size := common.BitLenToByteLen(bits.Len64(i))
+	buf[8-size] = 0x80 + byte(size)
+	return append(b, buf[8-size:]...)
 }
