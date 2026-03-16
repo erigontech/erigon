@@ -341,6 +341,16 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 	// [GLOAS] When caught up on blocks, check for missing execution payload envelopes.
 	// The gossip service has a 30-second window to deliver envelopes; this is the fallback
 	// for when gossip permanently failed but the CL block arrived on time.
+	// Flush any collected blocks to the execution engine before proceeding.
+	// This must happen before ForkChoice, which calls engine_forkchoiceUpdated —
+	// the EL needs the execution payloads that ForwardSync collected via
+	// blockCollector.AddGloasBlock / AddBlock (with newPayload=false).
+	if cfg.executionClient != nil && cfg.executionClient.SupportInsertion() {
+		if err := cfg.blockCollector.Flush(context.Background()); err != nil {
+			return err
+		}
+	}
+
 	if args.seenSlot >= args.targetSlot {
 		recoverMissingEnvelopes(ctx, cfg)
 		return nil
@@ -360,12 +370,6 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 	}
 
 	log.Debug("[chainTipSync] execution engine is ready")
-
-	if cfg.executionClient != nil && cfg.executionClient.SupportInsertion() {
-		if err := cfg.blockCollector.Flush(context.Background()); err != nil {
-			return err
-		}
-	}
 
 	logger.Debug("waiting for blocks...",
 		"seenSlot", args.seenSlot,

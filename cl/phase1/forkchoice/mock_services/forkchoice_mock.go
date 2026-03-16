@@ -266,6 +266,10 @@ func (f *ForkChoiceStorageMock) GetStateAtBlockRoot(
 	return f.StateAtBlockRootVal[blockRoot], nil
 }
 
+func (f *ForkChoiceStorageMock) GetFullStateAtBlockRoot(blockRoot common.Hash) (*state.CachingBeaconState, error) {
+	return f.StateAtBlockRootVal[blockRoot], nil
+}
+
 func (f *ForkChoiceStorageMock) GetFinalityCheckpoints(
 	blockRoot common.Hash,
 ) (solid.Checkpoint, solid.Checkpoint, solid.Checkpoint, bool) {

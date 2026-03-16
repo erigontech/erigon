@@ -332,8 +332,10 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		f.payloadTimelinessVote.Store(common.Hash(blockRoot), [clparams.PtcSize]bool{})
 		f.payloadDataAvailabilityVote.Store(common.Hash(blockRoot), [clparams.PtcSize]bool{})
 
-		// Notify PTC messages from payload attestations in the block
-		if block.Block.Body.PayloadAttestations != nil {
+		// Notify PTC messages from payload attestations in the block.
+		// Skip during forward sync (newPayload=false) — PTC votes only matter
+		// for fork choice at the chain tip, not for historical blocks.
+		if block.Block.Body.PayloadAttestations != nil && newPayload {
 			f.notifyPtcMessages(lastProcessedState, block.Block.Body.PayloadAttestations)
 		}
 	}
