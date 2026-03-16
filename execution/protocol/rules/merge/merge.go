@@ -364,7 +364,8 @@ func (s *Merge) verifyHeader(chain rules.ChainHeaderReader, header, parent *type
 			//return rules.ErrMissingSlotNumber
 		}
 		if header.BlockAccessListHash == nil {
-			return rules.ErrMissingBlockAccessListHash
+			// TODO: BAL not yet required - optional for early devnets (e.g. epbs-devnet-0)
+			//return rules.ErrMissingBlockAccessListHash
 		}
 	} else {
 		if header.SlotNumber != nil {
