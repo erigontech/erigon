@@ -19,8 +19,8 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
+	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/nitro-erigon/util/containers"
 
 	libcommon "github.com/erigontech/erigon/common"

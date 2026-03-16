@@ -583,7 +583,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	st.gasRemaining -= gas
 	usedMultiGas = usedMultiGas.SaturatingAdd(intrinsicMultiGas)
 
-	if dbg.ArbTrace() {
+	if dbg.ArbTrace {
 		fmt.Printf("[TransitionDb] block=%d txIdx=%d initialGas=%d intrinsicGas=%d gasAfterIntrinsic=%d isArbitrum=%t hookIsArbitrum=%t\n",
 			st.evm.Context.BlockNumber, st.state.TxIndex(), st.initialGas, gas, st.gasRemaining, rules.IsArbitrum, st.evm.ProcessingHook.IsArbitrum())
 	}
@@ -594,7 +594,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	}
 	usedMultiGas = usedMultiGas.SaturatingAdd(hookMultiGas)
 
-	if dbg.ArbTrace() {
+	if dbg.ArbTrace {
 		fmt.Printf("[TransitionDb] block=%d txIdx=%d gasAfterHook=%d\n",
 			st.evm.Context.BlockNumber, st.state.TxIndex(), st.gasRemaining)
 	}
@@ -657,7 +657,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		usedMultiGas = usedMultiGas.SaturatingAdd(execMultiGas)
 	}
 
-	if dbg.ArbTrace() {
+	if dbg.ArbTrace {
 		fmt.Printf("[TransitionDb] block=%d txIdx=%d gasAfterEVM=%d vmerr=%v evmRefund=%d arbRevertHandled=%t\n",
 			st.evm.Context.BlockNumber, st.state.TxIndex(), st.gasRemaining, vmerr, st.state.GetRefund(), arbRevertHandled)
 	}
@@ -683,7 +683,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 				usedMultiGas = usedMultiGas.WithRefund(refund)
 			}
 
-			if dbg.ArbTrace() {
+			if dbg.ArbTrace {
 				fmt.Printf("[TransitionDb] block=%d txIdx=%d REFUND: forceRefund=%d nonrefundable=%d sstoreRefund=%d evmRefundCounter=%d gasAfterRefund=%d gasUsed=%d isPrague=%t\n",
 					st.evm.Context.BlockNumber, st.state.TxIndex(), forceRefund, nonrefundable, sstoreRefund, st.state.GetRefund(), st.gasRemaining, st.gasUsed(), rules.IsPrague)
 			}
