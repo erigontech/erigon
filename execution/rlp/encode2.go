@@ -81,10 +81,11 @@ func EncodeU64(i uint64, to []byte) int {
 		to[0] = byte(i) // fits single byte
 		return 1
 	}
-	binary.BigEndian.PutUint64(to[1:], i)
+	var buf [8]byte
+	binary.BigEndian.PutUint64(buf[:], i)
 	size := common.BitLenToByteLen(bits.Len64(i))
-	copy(to[1:], to[9-size:9])
 	to[0] = 128 + byte(size)
+	copy(to[1:], buf[8-size:])
 	return 1 + size
 }
 
