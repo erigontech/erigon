@@ -237,7 +237,7 @@ func (ch selfdestructChange) revert(s *IntraBlockState) error {
 			if ch.wasCommited {
 				if trace {
 					if v, ok := s.versionedWrites[ch.account][AccountKey{Path: SelfDestructPath}]; ok {
-						fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, v.Val, &ch.prev)
+						fmt.Printf("%s WRT Revert %x: %v -> %v\n", tracePrefix, ch.account, v.Val, &ch.prev)
 					}
 					if v, ok := s.versionedWrites[ch.account][AccountKey{Path: BalancePath}]; ok {
 						val := v.Val.(uint256.Int)
@@ -248,12 +248,16 @@ func (ch selfdestructChange) revert(s *IntraBlockState) error {
 				s.versionedWrites.Delete(ch.account, AccountKey{Path: SelfDestructPath})
 			} else {
 				if v, ok := s.versionedWrites[ch.account][AccountKey{Path: SelfDestructPath}]; ok {
-					fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, v.Val, &ch.prev)
+					if trace {
+						fmt.Printf("%s WRT Revert %x: %v -> %v\n", tracePrefix, ch.account, v.Val, &ch.prev)
+					}
 					v.Val = ch.prev
 				}
 				if v, ok := s.versionedWrites[ch.account][AccountKey{Path: BalancePath}]; ok {
 					val := v.Val.(uint256.Int)
-					fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, &val, &ch.prevbalance)
+					if trace {
+						fmt.Printf("%s WRT Revert %x: %d -> %d\n", tracePrefix, ch.account, &val, &ch.prevbalance)
+					}
 					v.Val = ch.prevbalance
 				}
 			}
@@ -270,16 +274,12 @@ func (ch selfdestructChange) dirtied() (accounts.Address, bool) {
 var ripemd = accounts.InternAddress(common.HexToAddress("0000000000000000000000000000000000000003"))
 
 func (ch touchAccount) revert(s *IntraBlockState) error {
-	if reads, ok := s.versionedReads[ch.account]; ok {
-		if len(reads) == 1 {
-			if _, ok := reads[AccountKey{Path: AddressPath}]; ok {
-				if opts, ok := s.addressAccess[ch.account]; !ok || opts.revertable {
-					delete(s.versionedReads, ch.account)
-					delete(s.addressAccess, ch.account)
-				}
-			}
-		}
-	}
+	// Do NOT delete versionedReads here.  Even though the touch is being
+	// reverted (e.g. a CREATE that ran out of gas), the read that triggered
+	// the touch already happened — the tx observed the account's state and
+	// branched on it (e.g. Empty() returning true vs false).  Removing the
+	// read-set entry causes ValidateVersion to miss the dependency, allowing
+	// stale reads to pass validation and produce incorrect results.
 	return nil
 }
 

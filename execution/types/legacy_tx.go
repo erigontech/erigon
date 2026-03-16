@@ -43,6 +43,23 @@ type CommonTx struct {
 	V, R, S  uint256.Int     // signature values
 }
 
+// copyData returns a copy of CommonTx where the TransactionMisc cache fields
+// (hash, from) are not copied directly but rebuilt field-by-field, avoiding
+// go vet copylocks warnings on the embedded sync/atomic.Pointer.
+// The caches will be recomputed on demand if needed (both are deterministic).
+func (ct *CommonTx) copyData() CommonTx {
+	return CommonTx{
+		Nonce:    ct.Nonce,
+		GasLimit: ct.GasLimit,
+		To:       ct.To,
+		Value:    ct.Value,
+		Data:     ct.Data,
+		V:        ct.V,
+		R:        ct.R,
+		S:        ct.S,
+	}
+}
+
 func (ct *CommonTx) GetNonce() uint64 {
 	return ct.Nonce
 }
@@ -233,18 +250,8 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize int) error 
 	if err := rlp.EncodeInt(tx.GasLimit, w, b); err != nil {
 		return err
 	}
-	if tx.To == nil {
-		b[0] = 128
-	} else {
-		b[0] = 128 + 20
-	}
-	if _, err := w.Write(b[:1]); err != nil {
+	if err := rlp.EncodeOptionalAddress(tx.To, w, b); err != nil {
 		return err
-	}
-	if tx.To != nil {
-		if _, err := w.Write(tx.To[:]); err != nil {
-			return err
-		}
 	}
 	if err := rlp.EncodeUint256(*tx.Value, w, b); err != nil {
 		return err
@@ -283,43 +290,32 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream) error {
 	if tx.Nonce, err = s.Uint(); err != nil {
 		return fmt.Errorf("read Nonce: %w", err)
 	}
-	var b []byte
-	if b, err = s.Uint256Bytes(); err != nil {
+	tx.GasPrice = new(uint256.Int)
+	if err = s.ReadUint256(tx.GasPrice); err != nil {
 		return fmt.Errorf("read GasPrice: %w", err)
 	}
-	tx.GasPrice = new(uint256.Int).SetBytes(b)
 	if tx.GasLimit, err = s.Uint(); err != nil {
 		return fmt.Errorf("read GasLimit: %w", err)
 	}
-	if b, err = s.Bytes(); err != nil {
+	if err = rlp.DecodeOptionalAddress(&tx.To, s); err != nil {
 		return fmt.Errorf("read To: %w", err)
 	}
-	if len(b) > 0 && len(b) != 20 {
-		return fmt.Errorf("wrong size for To: %d", len(b))
-	}
-	if len(b) > 0 {
-		tx.To = &common.Address{}
-		copy((*tx.To)[:], b)
-	}
-	if b, err = s.Uint256Bytes(); err != nil {
+	tx.Value = new(uint256.Int)
+	if err = s.ReadUint256(tx.Value); err != nil {
 		return fmt.Errorf("read Value: %w", err)
 	}
-	tx.Value = new(uint256.Int).SetBytes(b)
 	if tx.Data, err = s.Bytes(); err != nil {
 		return fmt.Errorf("read Data: %w", err)
 	}
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&tx.V); err != nil {
 		return fmt.Errorf("read V: %w", err)
 	}
-	tx.V.SetBytes(b)
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&tx.R); err != nil {
 		return fmt.Errorf("read R: %w", err)
 	}
-	tx.R.SetBytes(b)
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&tx.S); err != nil {
 		return fmt.Errorf("read S: %w", err)
 	}
-	tx.S.SetBytes(b)
 	if err = s.ListEnd(); err != nil {
 		return fmt.Errorf("close txn struct: %w", err)
 	}
@@ -327,7 +323,7 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream) error {
 }
 
 // AsMessage returns the transaction as a core.Message.
-func (tx *LegacyTx) AsMessage(s Signer, _ *big.Int, _ *chain.Rules) (*Message, error) {
+func (tx *LegacyTx) AsMessage(s Signer, _ *uint256.Int, _ *chain.Rules) (*Message, error) {
 	var to accounts.Address
 	if tx.To == nil {
 		to = accounts.NilAddress

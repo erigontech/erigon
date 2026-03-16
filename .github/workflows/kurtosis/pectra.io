@@ -14,7 +14,7 @@ network_params:
   min_validator_withdrawability_delay: 1
   shard_committee_period: 1
   churn_limit_quotient: 16
-  seconds_per_slot: 4
+  seconds_per_slot: 8
   genesis_delay: 90
 
 additional_services:
@@ -24,6 +24,7 @@ snooper_enabled: false
 assertoor_params:
   run_stability_check: true
   run_block_proposal_check: true
+  image: ethpandaops/assertoor:v0.0.17
   tests:
     - file: https://raw.githubusercontent.com/erigontech/erigon/refs/heads/main/.github/workflows/kurtosis/deposit-request.io
     - file: https://raw.githubusercontent.com/erigontech/erigon/refs/heads/main/.github/workflows/kurtosis/el-triggered-consolidations-test.io

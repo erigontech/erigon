@@ -80,9 +80,20 @@ func (tt *TransactionTest) Run(chainID *big.Int) error {
 		if stx, ok := tx.(*types.SetCodeTransaction); ok {
 			authorizationsLen = uint64(len(stx.GetAuthorizations()))
 		}
-		requiredGas, floorGas, overflow := fixedgas.IntrinsicGas(msg.Data(), uint64(len(msg.AccessList())), uint64(msg.AccessList().StorageKeys()), msg.To().IsNil(), rules.IsHomestead, rules.IsIstanbul, rules.IsShanghai, rules.IsPrague, false, authorizationsLen)
-		if rules.IsPrague && floorGas > requiredGas {
-			requiredGas = floorGas
+		intrinsicGasResult, overflow := fixedgas.IntrinsicGas(fixedgas.IntrinsicGasCalcArgs{
+			Data:               msg.Data(),
+			AuthorizationsLen:  authorizationsLen,
+			AccessListLen:      uint64(len(msg.AccessList())),
+			StorageKeysLen:     uint64(msg.AccessList().StorageKeys()),
+			IsContractCreation: msg.To().IsNil(),
+			IsEIP2:             rules.IsHomestead,
+			IsEIP2028:          rules.IsIstanbul,
+			IsEIP3860:          rules.IsShanghai,
+			IsEIP7623:          rules.IsPrague,
+		})
+		requiredGas := intrinsicGasResult.RegularGas
+		if rules.IsPrague && intrinsicGasResult.FloorGasCost > requiredGas {
+			requiredGas = intrinsicGasResult.FloorGasCost
 		}
 		if overflow {
 			return nil, nil, 0, protocol.ErrGasUintOverflow

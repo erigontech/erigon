@@ -115,7 +115,7 @@ func (tx *SetCodeTransaction) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
-func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
+func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules) (*Message, error) {
 	var to accounts.Address
 	if tx.To == nil {
 		to = accounts.NilAddress
@@ -140,10 +140,7 @@ func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		return nil, errors.New("SetCodeTransaction is only supported in Prague")
 	}
 	if baseFee != nil {
-		overflow := msg.gasPrice.SetFromBig(baseFee)
-		if overflow {
-			return nil, errors.New("gasPrice higher than 2^256-1")
-		}
+		msg.gasPrice.Set(baseFee)
 	}
 	msg.gasPrice.Add(&msg.gasPrice, tx.TipCap)
 	if msg.gasPrice.Gt(tx.FeeCap) {
@@ -252,37 +249,39 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	var b []byte
-	if b, err = s.Uint256Bytes(); err != nil {
+	tx.ChainID = new(uint256.Int)
+	if err = s.ReadUint256(tx.ChainID); err != nil {
 		return err
 	}
-	tx.ChainID = new(uint256.Int).SetBytes(b)
 	if tx.Nonce, err = s.Uint(); err != nil {
 		return err
 	}
-	if b, err = s.Uint256Bytes(); err != nil {
+	tx.TipCap = new(uint256.Int)
+	if err = s.ReadUint256(tx.TipCap); err != nil {
 		return err
 	}
-	tx.TipCap = new(uint256.Int).SetBytes(b)
-	if b, err = s.Uint256Bytes(); err != nil {
+	tx.FeeCap = new(uint256.Int)
+	if err = s.ReadUint256(tx.FeeCap); err != nil {
 		return err
 	}
-	tx.FeeCap = new(uint256.Int).SetBytes(b)
 	if tx.GasLimit, err = s.Uint(); err != nil {
 		return err
 	}
-	if b, err = s.Bytes(); err != nil {
-		return err
-	}
-	if len(b) != 20 {
-		return fmt.Errorf("wrong size for To: %d", len(b))
-	}
 	tx.To = &common.Address{}
-	copy((*tx.To)[:], b)
-	if b, err = s.Uint256Bytes(); err != nil {
+	if kind, size, err := s.Kind(); err != nil {
+		return err
+	} else if kind == rlp.Byte {
+		return fmt.Errorf("wrong size for To: 1")
+	} else if size != 20 {
+		return fmt.Errorf("wrong size for To: %d", size)
+	}
+	if err = s.ReadBytes(tx.To[:]); err != nil {
 		return err
 	}
-	tx.Value = new(uint256.Int).SetBytes(b)
+	tx.Value = new(uint256.Int)
+	if err = s.ReadUint256(tx.Value); err != nil {
+		return err
+	}
 	if tx.Data, err = s.Bytes(); err != nil {
 		return err
 	}
@@ -299,18 +298,15 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 	}
 
 	// decode V
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&tx.V); err != nil {
 		return err
 	}
-	tx.V.SetBytes(b)
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&tx.R); err != nil {
 		return err
 	}
-	tx.R.SetBytes(b)
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&tx.S); err != nil {
 		return err
 	}
-	tx.S.SetBytes(b)
 	return s.ListEnd()
 }
 

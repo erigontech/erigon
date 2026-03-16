@@ -122,3 +122,4 @@ func (mr *MockP2PManagerMockRecorder) UpdateENRSyncNets(subnetIndex, on any) *go
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateENRSyncNets", reflect.TypeOf((*MockP2PManager)(nil).UpdateENRSyncNets), subnetIndex, on)
 }
+

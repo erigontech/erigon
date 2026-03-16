@@ -41,7 +41,7 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 		},
 		"error_without_stream_write": {
 			params:   []byte("[2]"),
-			expected: `{"jsonrpc":"2.0","id":1,"result":null,"error":{"code":-32000,"message":"id 2"}}`,
+			expected: `{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"id 2"}}`,
 		},
 		"no_error": {
 			params:   []byte("[3]"),

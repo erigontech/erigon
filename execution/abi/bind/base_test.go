@@ -26,6 +26,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/holiman/uint256"
+
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -37,18 +39,18 @@ import (
 )
 
 type mockCaller struct {
-	codeAtBlockNumber         *big.Int
-	callContractBlockNumber   *big.Int
+	codeAtBlockNumber         *uint256.Int
+	callContractBlockNumber   *uint256.Int
 	pendingCodeAtCalled       bool
 	pendingCallContractCalled bool
 }
 
-func (mc *mockCaller) CodeAt(ctx context.Context, contract common.Address, blockNumber *big.Int) ([]byte, error) {
+func (mc *mockCaller) CodeAt(ctx context.Context, contract common.Address, blockNumber *uint256.Int) ([]byte, error) {
 	mc.codeAtBlockNumber = blockNumber
 	return []byte{1, 2, 3}, nil
 }
 
-func (mc *mockCaller) CallContract(ctx context.Context, call ethereum.CallMsg, blockNumber *big.Int) ([]byte, error) {
+func (mc *mockCaller) CallContract(ctx context.Context, call ethereum.CallMsg, blockNumber *uint256.Int) ([]byte, error) {
 	mc.callContractBlockNumber = blockNumber
 	return nil, nil
 }
@@ -75,7 +77,7 @@ func TestPassingBlockNumber(t *testing.T) {
 		},
 	}, mc, nil, nil)
 
-	blockNumber := big.NewInt(42)
+	blockNumber := uint256.NewInt(42)
 
 	bc.Call(&bind.CallOpts{BlockNumber: blockNumber}, nil, "something") //nolint:errcheck
 

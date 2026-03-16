@@ -3,7 +3,6 @@ package types
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"io"
 	"math/big"
 
@@ -107,13 +106,9 @@ func (tx *AccountAbstractionTransaction) GetPrice() *uint256.Int {
 	return tx.Tip
 }
 
-func (tx *AccountAbstractionTransaction) GetTip() *uint256.Int {
-	return tx.Tip
-}
-
 func (tx *AccountAbstractionTransaction) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
 	if baseFee == nil {
-		return tx.GetTip()
+		return tx.GetTipCap()
 	}
 	gasFeeCap := tx.GetFeeCap()
 	// return 0 because effectiveFee cant be < 0
@@ -121,8 +116,8 @@ func (tx *AccountAbstractionTransaction) GetEffectiveGasTip(baseFee *uint256.Int
 		return uint256.NewInt(0)
 	}
 	effectiveFee := new(uint256.Int).Sub(gasFeeCap, baseFee)
-	if tx.GetTip().Lt(effectiveFee) {
-		return tx.GetTip()
+	if tx.GetTipCap().Lt(effectiveFee) {
+		return tx.GetTipCap()
 	} else {
 		return effectiveFee
 	}
@@ -137,7 +132,7 @@ func (tx *AccountAbstractionTransaction) GetGasLimit() uint64 {
 }
 
 func (tx *AccountAbstractionTransaction) GetTipCap() *uint256.Int {
-	return uint256.NewInt(0)
+	return tx.Tip
 }
 
 func (tx *AccountAbstractionTransaction) GetBlobHashes() []common.Hash {
@@ -164,7 +159,7 @@ func (tx *AccountAbstractionTransaction) Type() byte {
 	return AccountAbstractionTxType
 }
 
-func (tx *AccountAbstractionTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
+func (tx *AccountAbstractionTransaction) AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules) (*Message, error) {
 	return &Message{
 		to:         accounts.NilAddress,
 		gasPrice:   *tx.FeeCap,
@@ -398,59 +393,40 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	var b []byte
 
-	if b, err = s.Uint256Bytes(); err != nil {
+	tx.ChainID = new(uint256.Int)
+	if err = s.ReadUint256(tx.ChainID); err != nil {
 		return err
 	}
-	tx.ChainID = new(uint256.Int).SetBytes(b)
 
-	if b, err = s.Uint256Bytes(); err != nil {
+	tx.NonceKey = new(uint256.Int)
+	if err = s.ReadUint256(tx.NonceKey); err != nil {
 		return err
 	}
-	tx.NonceKey = new(uint256.Int).SetBytes(b)
 
 	if tx.Nonce, err = s.Uint(); err != nil {
 		return err
 	}
 
-	if b, err = s.Bytes(); err != nil {
+	var senderAddress common.Address
+	if err = s.ReadBytes(senderAddress[:]); err != nil {
 		return err
 	}
-	if len(b) != 20 {
-		return fmt.Errorf("wrong size for SenderAddress: %d", len(b))
-	}
-	var senderAddress common.Address
-	copy(senderAddress[:], b)
 	tx.SenderAddress = accounts.InternAddress(senderAddress)
 	if tx.SenderValidationData, err = s.Bytes(); err != nil {
 		return err
 	}
 
-	if b, err = s.Bytes(); err != nil {
+	if err = rlp.DecodeOptionalAddress(&tx.Deployer, s); err != nil {
 		return err
-	}
-
-	if len(b) == 20 {
-		tx.Deployer = &common.Address{}
-		copy((*tx.Deployer)[:], b)
-	} else if len(b) != 0 {
-		return fmt.Errorf("wrong size for Deployer: %d", len(b))
 	}
 
 	if tx.DeployerData, err = s.Bytes(); err != nil {
 		return err
 	}
 
-	if b, err = s.Bytes(); err != nil {
+	if err = rlp.DecodeOptionalAddress(&tx.Paymaster, s); err != nil {
 		return err
-	}
-
-	if len(b) == 20 {
-		tx.Paymaster = &common.Address{}
-		copy((*tx.Paymaster)[:], b)
-	} else if len(b) != 0 {
-		return fmt.Errorf("wrong size for Paymaster: %d", len(b))
 	}
 
 	if tx.PaymasterData, err = s.Bytes(); err != nil {
@@ -461,20 +437,20 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	if b, err = s.Uint256Bytes(); err != nil {
+	tx.BuilderFee = new(uint256.Int)
+	if err = s.ReadUint256(tx.BuilderFee); err != nil {
 		return err
 	}
-	tx.BuilderFee = new(uint256.Int).SetBytes(b)
 
-	if b, err = s.Uint256Bytes(); err != nil {
+	tx.Tip = new(uint256.Int)
+	if err = s.ReadUint256(tx.Tip); err != nil {
 		return err
 	}
-	tx.Tip = new(uint256.Int).SetBytes(b)
 
-	if b, err = s.Uint256Bytes(); err != nil {
+	tx.FeeCap = new(uint256.Int)
+	if err = s.ReadUint256(tx.FeeCap); err != nil {
 		return err
 	}
-	tx.FeeCap = new(uint256.Int).SetBytes(b)
 
 	if tx.ValidationGasLimit, err = s.Uint(); err != nil {
 		return err
@@ -529,13 +505,23 @@ func (tx *AccountAbstractionTransaction) PreTransactionGasCost(rules *chain.Rule
 	data = append(data, tx.DeployerData...)
 	data = append(data, tx.ExecutionData...)
 	data = append(data, tx.PaymasterData...)
-	gas, _, overflow := fixedgas.IntrinsicGas(data, uint64(len(tx.AccessList)), uint64(tx.AccessList.StorageKeys()), false, rules.IsHomestead, rules.IsIstanbul, hasEIP3860, rules.IsPrague, true, uint64(len(tx.Authorizations)))
+	intrinsicGasResult, overflow := fixedgas.IntrinsicGas(fixedgas.IntrinsicGasCalcArgs{
+		Data:              data,
+		AuthorizationsLen: uint64(len(tx.Authorizations)),
+		AccessListLen:     uint64(len(tx.AccessList)),
+		StorageKeysLen:    uint64(tx.AccessList.StorageKeys()),
+		IsEIP2:            rules.IsHomestead,
+		IsEIP2028:         rules.IsIstanbul,
+		IsEIP3860:         hasEIP3860,
+		IsEIP7623:         rules.IsPrague,
+		IsAATxn:           true,
+	})
 
 	if overflow {
 		return 0, errors.New("overflow")
 	}
 
-	return gas, nil
+	return intrinsicGasResult.RegularGas, nil
 }
 
 func (tx *AccountAbstractionTransaction) DeployerFrame(rules *chain.Rules, hasEIP3860 bool) *Message {

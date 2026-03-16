@@ -59,7 +59,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 	// --- check 2: storage exists in DB - TemporalTx.HasPrefix should catch this ---
 	{
 		// write to storage
-		err = sd.DomainPut(kv.StorageDomain, rwTtx1, storageK1, []byte{1}, 1, nil, 0)
+		err = sd.DomainPut(kv.StorageDomain, rwTtx1, storageK1, []byte{1}, 1, nil)
 		require.NoError(t, err)
 		err = sd.Flush(ctx, rwTtx1)
 		require.NoError(t, err)
@@ -115,7 +115,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		rwTtx2, err := temporalDb.BeginTemporalRw(ctx)
 		require.NoError(t, err)
 		defer rwTtx2.Rollback()
-		err = sd.DomainPut(kv.StorageDomain, rwTtx2, storageK2, []byte{2}, 2, nil, 0)
+		err = sd.DomainPut(kv.StorageDomain, rwTtx2, storageK2, []byte{2}, 2, nil)
 		require.NoError(t, err)
 		err = sd.Flush(ctx, rwTtx2)
 		require.NoError(t, err)
@@ -197,7 +197,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		rwTtx5, err := temporalDb.BeginTemporalRw(ctx)
 		require.NoError(t, err)
 		defer rwTtx5.Rollback()
-		err = sd.DomainPut(kv.StorageDomain, rwTtx5, storageK1, []byte{3}, 4, nil, 0)
+		err = sd.DomainPut(kv.StorageDomain, rwTtx5, storageK1, []byte{3}, 4, nil)
 		require.NoError(t, err)
 		err = sd.Flush(ctx, rwTtx5)
 		require.NoError(t, err)
@@ -245,7 +245,7 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	require.NoError(t, err)
 	defer sd.Close()
 
-	err = sd.DomainPut(kv.StorageDomain, rwTtx1, storageK1, []byte{1}, 1, nil, 0)
+	err = sd.DomainPut(kv.StorageDomain, rwTtx1, storageK1, []byte{1}, 1, nil)
 	require.NoError(t, err)
 	err = sd.Flush(ctx, rwTtx1)
 	require.NoError(t, err)
@@ -255,7 +255,7 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	rwTtx2, err := temporalDb.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer rwTtx2.Rollback()
-	err = sd.DomainPut(kv.StorageDomain, rwTtx2, storageK1, []byte{2}, 2, nil, 0)
+	err = sd.DomainPut(kv.StorageDomain, rwTtx2, storageK1, []byte{2}, 2, nil)
 	require.NoError(t, err)
 	err = sd.Flush(ctx, rwTtx2)
 	require.NoError(t, err)
@@ -276,7 +276,7 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTtx4.Rollback()
 
-	err = sd.DomainPut(kv.StorageDomain, rwTtx4, storageK1, []byte{3}, 4, nil, 0)
+	err = sd.DomainPut(kv.StorageDomain, rwTtx4, storageK1, []byte{3}, 4, nil)
 	require.NoError(t, err)
 	err = sd.Flush(ctx, rwTtx4)
 	require.NoError(t, err)

@@ -48,13 +48,13 @@ var (
 func TestLightClientOptimistic(t *testing.T) {
 	ctx := context.Background()
 
-	listenAddrHost := "/ip4/127.0.0.1/tcp/6011"
-	host, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost))
+	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
+	t.Cleanup(func() { host.Close() })
 
-	listenAddrHost1 := "/ip4/127.0.0.1/tcp/6013"
-	host1, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost1))
+	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
+	t.Cleanup(func() { host1.Close() })
 
 	err = host.Connect(ctx, peer.AddrInfo{
 		ID:    host1.ID(),
@@ -119,13 +119,13 @@ func TestLightClientOptimistic(t *testing.T) {
 func TestLightClientFinality(t *testing.T) {
 	ctx := context.Background()
 
-	listenAddrHost := "/ip4/127.0.0.1/tcp/6005"
-	host, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost))
+	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
+	t.Cleanup(func() { host.Close() })
 
-	listenAddrHost1 := "/ip4/127.0.0.1/tcp/6006"
-	host1, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost1))
+	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
+	t.Cleanup(func() { host1.Close() })
 
 	err = host.Connect(ctx, peer.AddrInfo{
 		ID:    host1.ID(),
@@ -192,13 +192,13 @@ func TestLightClientBootstrap(t *testing.T) {
 	ctx := context.Background()
 	ethClock := getEthClock(t)
 
-	listenAddrHost := "/ip4/127.0.0.1/tcp/6007"
-	host, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost))
+	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
+	t.Cleanup(func() { host.Close() })
 
-	listenAddrHost1 := "/ip4/127.0.0.1/tcp/6008"
-	host1, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost1))
+	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
+	t.Cleanup(func() { host1.Close() })
 
 	err = host.Connect(ctx, peer.AddrInfo{
 		ID:    host1.ID(),
@@ -275,13 +275,13 @@ func TestLightClientBootstrap(t *testing.T) {
 func TestLightClientUpdates(t *testing.T) {
 	ctx := context.Background()
 
-	listenAddrHost := "/ip4/127.0.0.1/tcp/6009"
-	host, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost))
+	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
+	t.Cleanup(func() { host.Close() })
 
-	listenAddrHost1 := "/ip4/127.0.0.1/tcp/6041"
-	host1, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost1))
+	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
+	t.Cleanup(func() { host1.Close() })
 
 	err = host.Connect(ctx, peer.AddrInfo{
 		ID:    host1.ID(),
@@ -409,7 +409,7 @@ func BenchmarkLightClientPrefixConstruction(b *testing.B) {
 
 	b.Run("Optimized", func(b *testing.B) {
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			var prefix [5]byte
 			prefix[0] = SuccessfulResponsePrefix
 			copy(prefix[1:], forkDigest[:])
@@ -419,7 +419,7 @@ func BenchmarkLightClientPrefixConstruction(b *testing.B) {
 
 	b.Run("Old", func(b *testing.B) {
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			prefix := append([]byte{SuccessfulResponsePrefix}, forkDigest[:]...)
 			_ = prefix
 		}
