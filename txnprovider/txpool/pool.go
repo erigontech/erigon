@@ -250,13 +250,7 @@ func New(
 		}),
 	}
 
-	if chainConfig.ShanghaiTime != nil {
-		if !chainConfig.ShanghaiTime.IsUint64() {
-			return nil, errors.New("shanghaiTime overflow")
-		}
-		shanghaiTimeU64 := chainConfig.ShanghaiTime.Uint64()
-		res.shanghaiTime = &shanghaiTimeU64
-	}
+	res.shanghaiTime = chainConfig.ShanghaiTime
 	if chainConfig.Bor != nil {
 		agraBlock := chainConfig.Bor.GetAgraBlock()
 		if agraBlock != nil {
@@ -275,34 +269,10 @@ func New(
 			res.bhilaiBlock = &bhilaiBlockU64
 		}
 	}
-	if chainConfig.CancunTime != nil {
-		if !chainConfig.CancunTime.IsUint64() {
-			return nil, errors.New("cancunTime overflow")
-		}
-		cancunTimeU64 := chainConfig.CancunTime.Uint64()
-		res.cancunTime = &cancunTimeU64
-	}
-	if chainConfig.PragueTime != nil {
-		if !chainConfig.PragueTime.IsUint64() {
-			return nil, errors.New("pragueTime overflow")
-		}
-		pragueTimeU64 := chainConfig.PragueTime.Uint64()
-		res.pragueTime = &pragueTimeU64
-	}
-	if chainConfig.OsakaTime != nil {
-		if !chainConfig.OsakaTime.IsUint64() {
-			return nil, errors.New("osakaTime overflow")
-		}
-		osakaTimeU64 := chainConfig.OsakaTime.Uint64()
-		res.osakaTime = &osakaTimeU64
-	}
-	if chainConfig.AmsterdamTime != nil {
-		if !chainConfig.AmsterdamTime.IsUint64() {
-			return nil, errors.New("amsterdamTime overflow")
-		}
-		amsterdamTimeU64 := chainConfig.AmsterdamTime.Uint64()
-		res.amsterdamTime = &amsterdamTimeU64
-	}
+	res.cancunTime = chainConfig.CancunTime
+	res.pragueTime = chainConfig.PragueTime
+	res.osakaTime = chainConfig.OsakaTime
+	res.amsterdamTime = chainConfig.AmsterdamTime
 
 	res.p2pFetcher = NewFetch(ctx, sentryClients, res, stateChangesClient, poolDB, res.chainID, logger, opts...)
 	res.p2pSender = NewSend(ctx, sentryClients, logger, opts...)

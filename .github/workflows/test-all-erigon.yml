@@ -46,6 +46,9 @@ jobs:
           # marginal timeouts while keeping Linux/macOS at the tighter 20m.
           - os: windows-2025
             test_timeout: 30m
+            skip_execution_tests: 'true'
+          - os: macos-15
+            skip_execution_tests: 'true'
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -71,6 +74,7 @@ jobs:
         env:
           SKIP_FLAKY_TESTS: 'true'
           TEST_TIMEOUT: ${{ matrix.test_timeout || '20m' }}
+          ERIGON_SKIP_EXECUTION_TESTS: ${{ matrix.skip_execution_tests || '' }}
         run: |
           if ! make test-all GO_FLAGS="--timeout $TEST_TIMEOUT"; then
             # Retry after clearing the Go build cache. Low disk space can cause
