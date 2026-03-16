@@ -654,22 +654,28 @@ func CheckCommitmentHistVal(ctx context.Context, sc SamplerCfg, db kv.TemporalRo
 	// numBuckets controls granularity; sampleRatio controls how many buckets per file to check.
 	// e.g. sampleRatio=0.05 → ~50 out of 1000 buckets → ~5% of each file, as sequential scans.
 	const numBuckets = 10000
+	var completedBuckets atomic.Uint64
 	var totalVals atomic.Uint64
+	var filesChecked int
+	var totalBuckets uint64
 	for i, file := range files {
 		if !strings.HasSuffix(file.Fullpath(), ".v") {
 			continue
 		}
+		filesChecked++
 		// XOR file index into seed so bucket selection is reproducible per file.
 		sampler := NewSampler(sc.Seed^int64(i), sc.SampleRatio)
 		for bucket := range sampler.Buckets(0, numBuckets) {
+			totalBuckets++
 			eg.Go(func() error {
 				tx, err := db.BeginTemporalRo(ctx)
 				if err != nil {
 					return err
 				}
 				defer tx.Rollback()
-				n, err := checkCommitmentHistValBucket(ctx, tx, br, file, bucket, failFast, logger)
+				n, err := checkCommitmentHistValBucket(ctx, tx, br, file, bucket, failFast, log.LvlDebug, logger)
 				totalVals.Add(n)
+				completedBuckets.Add(1)
 				if err != nil && !failFast {
 					logger.Warn(err.Error())
 				}
@@ -677,18 +683,50 @@ func CheckCommitmentHistVal(ctx context.Context, sc SamplerCfg, db kv.TemporalRo
 			})
 		}
 	}
+	progressCtx, cancelProgress := context.WithCancel(ctx)
+	defer cancelProgress()
+	if totalBuckets > 0 {
+		logTicker := time.NewTicker(20 * time.Second)
+		defer logTicker.Stop()
+		go func() {
+			for {
+				select {
+				case <-progressCtx.Done():
+					return
+				case <-logTicker.C:
+					vals := totalVals.Load()
+					elapsed := time.Since(start).Seconds()
+					rate := 0.0
+					if elapsed > 0 {
+						rate = float64(vals) / elapsed
+					}
+					logger.Info("[integrity] CommitmentHistVal progress",
+						"buckets", fmt.Sprintf("%d/%d", completedBuckets.Load(), totalBuckets),
+						"vals", vals,
+						"vals/s", rate,
+						"seed", sc.Seed,
+						"sampleRatio", sc.SampleRatio,
+					)
+				}
+			}
+		}()
+	}
 	err = eg.Wait()
+	cancelProgress()
 	if err != nil {
 		return err
 	}
 	dur := time.Since(start)
 	total := totalVals.Load()
-	rate := float64(total) / dur.Seconds()
-	logger.Info("[integrity] CommitmentHistVal", "dur", time.Since(start), "files", len(files), "vals", total, "vals/s", rate, "seed", sc.Seed)
+	rate := 0.0
+	if dur.Seconds() > 0 {
+		rate = float64(total) / dur.Seconds()
+	}
+	logger.Info("[integrity] CommitmentHistVal", "dur", dur, "files", filesChecked, "buckets", totalBuckets, "vals", total, "vals/s", rate, "seed", sc.Seed, "sampleRatio", sc.SampleRatio)
 	return nil
 }
 
-func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, file state.VisibleFile, bucket int, failFast bool, logger log.Logger) (uint64, error) {
+func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, file state.VisibleFile, bucket int, failFast bool, lvl log.Lvl, logger log.Logger) (uint64, error) {
 	const numBuckets = 10000
 	start := time.Now()
 	fileName := filepath.Base(file.Fullpath())
@@ -701,7 +739,8 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br serv
 	bucketSize := txCount / numBuckets
 	bucketStart := startTxNum + uint64(bucket)*bucketSize
 	bucketEnd := min(bucketStart+bucketSize, endTxNum)
-	logger.Info(
+	logger.Log(
+		lvl,
 		"[integrity] CommitmentHistVal",
 		"v", fileName,
 		"startTxNum", startTxNum,
@@ -728,7 +767,7 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br serv
 			return 0, ctx.Err()
 		case <-logTicker.C:
 			rate := float64(total) / time.Since(start).Seconds()
-			logger.Info("[integrity] CommitmentHistVal progress", "at", total, "vals/s", rate, "v", fileName)
+			logger.Log(lvl, "[integrity] CommitmentHistVal progress", "at", total, "vals/s", rate, "v", fileName)
 		default:
 			// no-op
 		}
@@ -746,7 +785,7 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br serv
 				return 0, err
 			}
 			if txNum < maxTxNum {
-				logger.Info("[integrity] CommitmentHistVal skipping partial block", "blockNum", blockNum, "txNum", txNum, "maxTxNum", maxTxNum, "v", fileName)
+				logger.Log(lvl, "[integrity] CommitmentHistVal skipping partial block", "blockNum", blockNum, "txNum", txNum, "maxTxNum", maxTxNum, "v", fileName)
 				continue
 			}
 			if txNum != maxTxNum {
@@ -786,7 +825,7 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br serv
 	}
 	dur := time.Since(start)
 	rate := float64(total) / dur.Seconds()
-	logger.Info("[integrity] CommitmentHistVal done", "dur", dur, "vals", total, "vals/s", rate, "v", fileName)
+	logger.Log(lvl, "[integrity] CommitmentHistVal done", "dur", dur, "vals", total, "vals/s", rate, "v", fileName)
 	return total, integrityErr
 }
 
