@@ -39,7 +39,6 @@ const (
 	EmptyListCode   = 0xc0
 )
 
-
 var ErrNegativeBigInt = errors.New("rlp: cannot encode negative big.Int")
 
 // Encoder is implemented by types that require custom
