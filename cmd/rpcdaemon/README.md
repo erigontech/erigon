@@ -259,7 +259,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | eth_maxPriorityFeePerGas                   | Yes     |                                                       |
 | eth_feeHistory                             | Yes     |                                                       |
 | eth_blobBaseFee                            | Yes     |                                                       |
-| eth_config                                 | Yes     | Erigon method                                         |
+| eth_config                                 | Yes     | EIP-7910                                              |
 |                                            |         |                                                       |
 | eth_getBlockByHash                         | Yes     |                                                       |
 | eth_getBlockByNumber                       | Yes     |                                                       |
