@@ -40,6 +40,23 @@ Without `ready_for_review`, converting a draft PR to ready-for-review fires an e
 the workflow doesn't subscribe to, so the job never runs — the PR appears to have
 skipped CI until the next push.
 
+### CI gate and workflow_call
+
+All PR and merge-queue checks run through `.github/workflows/ci-gate.yml`. It calls
+each sub-workflow via `uses:` (reusable workflow call) rather than inlining the job
+definitions. This avoids duplicating job definitions that also appear in standalone
+`push`/`schedule` runs.
+
+Use `workflow_call:` on a workflow (and call it from ci-gate) when the workflow has
+other triggers besides PRs — `push` to `main`, `schedule`, etc. — so there is one
+source of truth for the job definition.
+
+Only inline job definitions directly into ci-gate if the workflow is exclusively
+PR-gated with no other triggers, since there is then no duplication concern.
+
+Workflows called by ci-gate must not have `pull_request:` triggers — ci-gate owns
+PR coverage and a `pull_request:` trigger would cause every job to run twice.
+
 ### Required checks and path filters
 
 Required checks must always report a status or they block the PR indefinitely.
