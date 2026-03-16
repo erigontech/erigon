@@ -287,7 +287,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | eth_getStorageAt                           | Yes     |                                                       |
 | eth_getStorageValues                       | Yes     | Erigon method                                         |
 | eth_call                                   | Yes     |                                                       |
-| eth_callMany                               | Yes     | Erigon method                                         |
+| eth_callMany                               | Yes     |                                                       |
 | eth_callBundle                             | Yes     |                                                       |
 | eth_createAccessList                       | Yes     |                                                       |
 | eth_simulateV1                             | Yes     |                                                       |
