@@ -51,6 +51,9 @@ type ForkChoiceStorageReader interface {
 		blockRoot common.Hash,
 		alwaysCopy bool,
 	) (*state.CachingBeaconState, error)
+	// GetFullStateAtBlockRoot returns the post-envelope state for GLOAS FULL blocks,
+	// or the post-beacon-block state for EMPTY/pre-GLOAS blocks. [New in Gloas:EIP7732]
+	GetFullStateAtBlockRoot(blockRoot common.Hash) (*state.CachingBeaconState, error)
 	GetFinalityCheckpoints(
 		blockRoot common.Hash,
 	) (solid.Checkpoint, solid.Checkpoint, solid.Checkpoint, bool)

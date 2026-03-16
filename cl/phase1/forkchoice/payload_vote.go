@@ -31,8 +31,39 @@ func (f *ForkChoiceStore) notifyPtcMessages(
 		return
 	}
 
+	// Pre-compute state and PTC per unique blockRoot to avoid redundant GetState + GetPTC
+	// calls for every attesting validator (PtcSize can be 512).
+	type cachedPTC struct {
+		state *state.CachingBeaconState
+		ptc   []uint64
+	}
+	ptcCache := make(map[common.Hash]*cachedPTC)
+
 	for i := 0; i < payloadAttestations.Len(); i++ {
 		payloadAttestation := payloadAttestations.Get(i)
+		if payloadAttestation.Data == nil {
+			continue
+		}
+		data := payloadAttestation.Data
+		blockRoot := data.BeaconBlockRoot
+
+		cached, ok := ptcCache[blockRoot]
+		if !ok {
+			blockState, err := f.forkGraph.GetState(blockRoot, false)
+			if err != nil || blockState == nil {
+				continue
+			}
+			ptc, err := blockState.GetPTC(data.Slot)
+			if err != nil {
+				continue
+			}
+			if data.Slot != blockState.Slot() {
+				continue
+			}
+			cached = &cachedPTC{state: blockState, ptc: ptc}
+			ptcCache[blockRoot] = cached
+		}
+
 		indexedPayloadAttestation, err := s.GetIndexedPayloadAttestation(payloadAttestation)
 		if err != nil {
 			continue
@@ -41,15 +72,46 @@ func (f *ForkChoiceStore) notifyPtcMessages(
 		attestingIndices := indexedPayloadAttestation.AttestingIndices
 		for j := 0; j < attestingIndices.Length(); j++ {
 			idx := attestingIndices.Get(j)
-			msg := &cltypes.PayloadAttestationMessage{
-				ValidatorIndex: idx,
-				Data:           payloadAttestation.Data,
-				Signature:      common.Bytes96{}, // Empty signature since it's from block
-			}
-			// Ignore errors for in-block attestations - they've already been validated
-			_ = f.OnPayloadAttestationMessage(msg, true)
+			f.applyPayloadAttestationVote(idx, data, blockRoot, cached.ptc)
 		}
 	}
+}
+
+// applyPayloadAttestationVote updates PTC vote tracking for a single validator.
+// Used by notifyPtcMessages with pre-computed PTC to avoid redundant GetState/GetPTC calls.
+func (f *ForkChoiceStore) applyPayloadAttestationVote(
+	validatorIndex uint64,
+	data *cltypes.PayloadAttestationData,
+	blockRoot common.Hash,
+	ptc []uint64,
+) {
+	// Find the validator's position in the PTC
+	ptcIndex := -1
+	for i, idx := range ptc {
+		if idx == validatorIndex {
+			ptcIndex = i
+			break
+		}
+	}
+	if ptcIndex == -1 {
+		return
+	}
+
+	// Update the payload timeliness vote
+	var timelinessVotes [clparams.PtcSize]bool
+	if existing, ok := f.payloadTimelinessVote.Load(blockRoot); ok {
+		timelinessVotes = existing.([clparams.PtcSize]bool)
+	}
+	timelinessVotes[ptcIndex] = data.PayloadPresent
+	f.payloadTimelinessVote.Store(blockRoot, timelinessVotes)
+
+	// Update the data availability vote
+	var dataAvailabilityVotes [clparams.PtcSize]bool
+	if existing, ok := f.payloadDataAvailabilityVote.Load(blockRoot); ok {
+		dataAvailabilityVotes = existing.([clparams.PtcSize]bool)
+	}
+	dataAvailabilityVotes[ptcIndex] = data.BlobDataAvailable
+	f.payloadDataAvailabilityVote.Store(blockRoot, dataAvailabilityVotes)
 }
 
 // isPayloadTimely returns whether the execution payload for the beacon block with root
