@@ -145,7 +145,7 @@ func (oracle *Oracle) SuggestTipCap(ctx context.Context) (*uint256.Int, error) {
 	}
 
 	number := head.Number.Uint64()
-	txPrices := make([]*uint256.Int, 0, sampleNumber*oracle.checkBlocks)
+	txPrices := make([]*uint256.Int, 0, 2*sampleNumber*oracle.checkBlocks)
 
 	// Phase 1: fetch checkBlocks blocks in parallel (or sequentially when Fork
 	// is not supported by the backend).
