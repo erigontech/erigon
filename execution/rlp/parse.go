@@ -102,7 +102,7 @@ func Prefix(payload []byte, pos int) (dataPos int, dataLen int, isList bool, err
 		dataLen, err = beInt(payload, pos+1, beLen)
 		isList = true
 		if dataLen < 56 {
-			err = fmt.Errorf("%w: : non-canonical size information", ErrParse)
+			err = fmt.Errorf("%w: non-canonical size information", ErrParse)
 		}
 	}
 	if err == nil {
