@@ -538,11 +538,11 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 	}
 	defer e.semaphore.Release(1)
 
-	if err := stageloop.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline, hook, e.onlySnapDownloadOnStart, e.logger); err != nil {
+	if err := e.processFrozenBlocks(ctx, hook); err != nil {
 		if !errors.Is(err, context.Canceled) {
 			e.logger.Error("Could not start execution service", "err", err)
 		}
-		// During parallel execution, an invalid block in initial sync (ProcessFrozenBlocks)
+		// During parallel execution, an invalid block in initial sync (processFrozenBlocks)
 		// is unrecoverable: the parallel executor cannot unwind and retrying will hit the
 		// same block forever, pushing Caplin's backward target further back.
 		// Exit the process so the operator can investigate.
@@ -556,6 +556,111 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 			return
 		}
 	}
+}
+
+// processFrozenBlocks runs the pipeline over snapshot blocks at startup,
+// using PipelineExecutor for the hasMore loop.
+func (e *ExecModule) processFrozenBlocks(ctx context.Context, hook *stageloop.Hook) error {
+	sawZeroBlocksTimes := 0
+	tx, err := e.db.BeginTemporalRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Run snapshots stage — downloads block files.
+	if err = e.executionPipeline.RunSnapshots(nil, tx); err != nil {
+		return err
+	}
+	if e.onlySnapDownloadOnStart {
+		return nil
+	}
+
+	// If domains are ahead of block files, nothing to execute.
+	if execctx.IsDomainAheadOfBlocks(ctx, tx, e.logger) {
+		return tx.Commit()
+	}
+
+	doms, err := execctx.NewSharedDomains(ctx, tx, e.logger)
+	if err != nil {
+		return err
+	}
+	defer doms.Close()
+
+	var finishStageBeforeSync uint64
+	if hook != nil {
+		finishStageBeforeSync, err = stages.GetStageProgress(tx, stages.Finish)
+		if err != nil {
+			return err
+		}
+		if err = hook.BeforeRun(tx, false); err != nil {
+			return err
+		}
+	}
+
+	pe := NewPipelineExecutor(e.executionPipeline, e.logger)
+	result, err := pe.RunLoop(ctx, RunLoopConfig{
+		SD:           doms,
+		Tx:           tx,
+		InitialCycle: true,
+		FirstCycle:   false,
+		PruneTimeout: 0,
+		CommitCycle: func(ctx context.Context, sd *execctx.SharedDomains) (kv.TemporalRwTx, error) {
+			if err := sd.Flush(ctx, tx); err != nil {
+				return nil, fmt.Errorf("processFrozenBlocks: flush: %w", err)
+			}
+			sd.ClearRam(true)
+			if err := tx.Commit(); err != nil {
+				return nil, err
+			}
+			newTx, err := e.db.BeginTemporalRw(ctx) //nolint:gocritic
+			if err != nil {
+				return nil, err
+			}
+			tx = newTx
+			return newTx, nil
+		},
+		ShouldBreak: func(curTx kv.TemporalRwTx) (bool, error) {
+			if e.blockReader.FrozenBlocks() > 0 {
+				p, err := stages.GetStageProgress(curTx, stages.Finish)
+				if err != nil {
+					return false, err
+				}
+				return p >= e.blockReader.FrozenBlocks(), nil
+			}
+			sawZeroBlocksTimes++
+			return sawZeroBlocksTimes > 2, nil
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("processFrozenBlocks: %w", err)
+	}
+	tx = result.FinalTx
+
+	if err := doms.Flush(ctx, tx); err != nil {
+		return fmt.Errorf("processFrozenBlocks: final flush: %w", err)
+	}
+	doms.ClearRam(true)
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	if hook != nil {
+		if err := e.db.View(ctx, func(tx kv.Tx) error {
+			headersProgress, err := stages.GetStageProgress(tx, stages.Headers)
+			if err != nil {
+				return err
+			}
+			if err = hook.AfterRun(tx, finishStageBeforeSync, false); err != nil {
+				return err
+			}
+			hook.LastNewBlockSeen(headersProgress)
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (e *ExecModule) Ready(ctx context.Context, _ *emptypb.Empty) (*executionproto.ReadyResponse, error) {
