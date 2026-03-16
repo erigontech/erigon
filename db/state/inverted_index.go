@@ -341,12 +341,6 @@ type InvertedIndexBufferedWriter struct {
 	name       kv.InvertedIdx
 }
 
-// loadFunc - is analog of etl.Identity, but it signaling to etl - use .Put instead of .AppendDup - to allow duplicates
-// maybe in future we will improve etl, to sort dupSort values in the way that allow use .AppendDup
-func loadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-	return next(k, k, v)
-}
-
 // Add - !NotThreadSafe. Must use WalRLock/BatchHistoryWriteEnd
 func (w *InvertedIndexBufferedWriter) Add(key []byte, txNum uint64) error {
 	return w.add(key, key, txNum)
@@ -372,10 +366,10 @@ func (w *InvertedIndexBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) err
 		return nil
 	}
 
-	if err := w.index.Load(tx, w.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := w.index.Load(tx, w.indexTable, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := w.indexKeys.Load(tx, w.indexKeysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := w.indexKeys.Load(tx, w.indexKeysTable, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 	w.close()
