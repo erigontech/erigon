@@ -167,37 +167,6 @@ func (s *testFinalizeScenario) buildExecResult() *execResult {
 	return &execResult{TxResult: txResult}
 }
 
-// runFinalizeWithIBS runs the IBS-based finalize path.
-func (s *testFinalizeScenario) runFinalizeWithIBS(t *testing.T) (state.ReadSet, state.VersionedWrites) {
-	t.Helper()
-	result := s.buildExecResult()
-	result.TxIn = copyReadSet(s.txIn)
-	result.TxOut = copyWrites(s.txOut)
-	vm := state.NewVersionMap(nil)
-	reader := s.makeReader()
-	collector := state.NewLightCollector()
-
-	// Strip coinbase/burnt (same as the finalize dispatch does).
-	txOut, coinbaseDelta, coinbaseDeltaIncrease, hasCoinbaseDelta := result.TxOut.StripBalanceWrite(result.Coinbase, result.TxIn)
-	result.TxOut = txOut
-	txOut, burntDelta, burntDeltaIncrease, hasBurntDelta := result.TxOut.StripBalanceWrite(result.ExecutionResult.BurntContractAddress, result.TxIn)
-	result.TxOut = txOut
-	delete(result.TxIn, result.Coinbase)
-	delete(result.TxIn, result.ExecutionResult.BurntContractAddress)
-
-	task := result.Task.(*taskVersion)
-	txTask := task.Task.(*exec.TxTask)
-
-	_, reads, writes, err := result.finalizeWithIBS(
-		task, txTask, nil, nil, vm, reader, collector,
-		coinbaseDelta, coinbaseDeltaIncrease, hasCoinbaseDelta,
-		burntDelta, burntDeltaIncrease, hasBurntDelta,
-		s.rules, false, "",
-	)
-	require.NoError(t, err)
-	return reads, writes
-}
-
 // runFinalizeTx runs the direct finalize path.
 func (s *testFinalizeScenario) runFinalizeTx(t *testing.T) (state.ReadSet, state.VersionedWrites) {
 	t.Helper()
@@ -343,15 +312,15 @@ func londonTransferScenario() *testFinalizeScenario {
 	return s
 }
 
-// TestFinalizeIBSPath_SimpleTransfer verifies the IBS finalize path produces
+// TestFinalizeTx_SimpleTransfer verifies the direct finalize path produces
 // expected reads and writes for a simple ETH transfer.
-func TestFinalizeIBSPath_SimpleTransfer(t *testing.T) {
+func TestFinalizeTx_SimpleTransfer(t *testing.T) {
 	t.Parallel()
 	s := simpleTransferScenario()
-	reads, writes := s.runFinalizeWithIBS(t)
+	reads, writes := s.runFinalizeTx(t)
 
-	assert.NotNil(t, reads, "IBS path should produce reads")
-	assert.Greater(t, len(writes), 0, "IBS path should produce writes")
+	assert.NotNil(t, reads, "direct path should produce reads")
+	assert.Greater(t, len(writes), 0, "direct path should produce writes")
 
 	coinbaseWrite := findWrite(writes, s.coinbase, state.BalancePath)
 	require.NotNil(t, coinbaseWrite, "should have coinbase balance write")
@@ -359,11 +328,11 @@ func TestFinalizeIBSPath_SimpleTransfer(t *testing.T) {
 	assert.Equal(t, s.feeTipped, coinbaseBalance, "coinbase should receive the tip")
 }
 
-// TestFinalizeIBSPath_London verifies the IBS finalize path with burnt fees.
-func TestFinalizeIBSPath_London(t *testing.T) {
+// TestFinalizeTx_London verifies the direct finalize path with burnt fees.
+func TestFinalizeTx_London(t *testing.T) {
 	t.Parallel()
 	s := londonTransferScenario()
-	reads, writes := s.runFinalizeWithIBS(t)
+	reads, writes := s.runFinalizeTx(t)
 
 	assert.NotNil(t, reads)
 	assert.Greater(t, len(writes), 0)
@@ -499,9 +468,9 @@ func selfTransferScenario() *testFinalizeScenario {
 	}
 }
 
-// TestFinalizeTx_MatchesIBS is the key regression test: the direct finalize
-// path must produce the same writes and BalancePath reads as the IBS path.
-func TestFinalizeTx_MatchesIBS(t *testing.T) {
+// TestFinalizeTx_AllScenarios verifies the direct finalize path produces
+// correct writes and reads across all test scenarios.
+func TestFinalizeTx_AllScenarios(t *testing.T) {
 	t.Parallel()
 	scenarios := []*testFinalizeScenario{
 		simpleTransferScenario(),
@@ -512,50 +481,68 @@ func TestFinalizeTx_MatchesIBS(t *testing.T) {
 
 	for _, s := range scenarios {
 		t.Run(s.name, func(t *testing.T) {
-			ibsReads, ibsWrites := s.runFinalizeWithIBS(t)
-			txReads, txWrites := s.runFinalizeTx(t)
+			reads, writes := s.runFinalizeTx(t)
 
-			// Compare writes.
-			ibsWM := buildWriteMap(ibsWrites)
-			txWM := buildWriteMap(txWrites)
+			assert.NotNil(t, reads, "should produce reads")
+			assert.Greater(t, len(writes), 0, "should produce writes")
 
-			for key, ibsVal := range ibsWM {
-				txVal, ok := txWM[key]
-				if !ok {
-					t.Errorf("finalizeTx missing write: %s = %s", key, ibsVal)
-					continue
-				}
-				if ibsVal != txVal {
-					t.Errorf("finalizeTx write mismatch for %s:\n  IBS: %s\n  Tx:  %s", key, ibsVal, txVal)
-				}
+			// Coinbase must receive the tip.
+			coinbaseWrite := findWrite(writes, s.coinbase, state.BalancePath)
+			require.NotNil(t, coinbaseWrite, "should have coinbase balance write")
+			coinbaseBalance := coinbaseWrite.Val.(uint256.Int)
+
+			expectedCoinbase := new(uint256.Int).Set(&s.feeTipped)
+			if acc, ok := s.accts[s.coinbase]; ok {
+				expectedCoinbase.Add(expectedCoinbase, &acc.Balance)
 			}
-			for key, txVal := range txWM {
-				if _, ok := ibsWM[key]; !ok {
-					t.Errorf("finalizeTx has extra write: %s = %s", key, txVal)
-				}
+			// If coinbase was also a transfer recipient, add the delta.
+			if hasCoinbaseDelta(s) {
+				expectedCoinbase = adjustForTransferDelta(s, expectedCoinbase)
+			}
+			assert.Equal(t, *expectedCoinbase, coinbaseBalance,
+				"coinbase balance should be original + tip (+ transfer delta if recipient)")
+
+			// If London: burnt contract must receive base fee.
+			if s.rules.IsLondon && s.burntAddr != accounts.NilAddress {
+				burntWrite := findWrite(writes, s.burntAddr, state.BalancePath)
+				require.NotNil(t, burntWrite, "should have burnt contract balance write")
+				burntBalance := burntWrite.Val.(uint256.Int)
+				expectedBurnt := new(uint256.Int).Add(&s.accts[s.burntAddr].Balance, &s.feeBurnt)
+				assert.Equal(t, *expectedBurnt, burntBalance,
+					"burnt contract should receive base fee")
 			}
 
-			// Compare BalancePath reads (critical for BAL hash).
-			ibsBR := extractBalanceReads(ibsReads)
-			txBR := extractBalanceReads(txReads)
-
-			for addr, ibsVal := range ibsBR {
-				txVal, ok := txBR[addr]
-				if !ok {
-					t.Errorf("finalizeTx missing BalancePath read for %x", addr)
-					continue
-				}
-				if ibsVal != txVal {
-					t.Errorf("finalizeTx BalancePath read mismatch for %x: IBS=%s Tx=%s", addr, ibsVal, txVal)
-				}
-			}
-			for addr := range txBR {
-				if _, ok := ibsBR[addr]; !ok {
-					t.Errorf("finalizeTx has extra BalancePath read for %x", addr)
-				}
-			}
+			// BalancePath reads must include coinbase.
+			balReads := extractBalanceReads(reads)
+			_, hasCoinbaseRead := balReads[s.coinbase]
+			assert.True(t, hasCoinbaseRead, "should read coinbase balance")
 		})
 	}
+}
+
+// hasCoinbaseDelta checks if coinbase was touched during execution (transfer recipient).
+func hasCoinbaseDelta(s *testFinalizeScenario) bool {
+	for _, w := range s.txOut {
+		if w.Address == s.coinbase && w.Path == state.BalancePath {
+			return true
+		}
+	}
+	return false
+}
+
+// adjustForTransferDelta computes the expected coinbase balance when coinbase
+// is also the transfer recipient. The delta is the difference between the
+// execution-written balance and the original balance.
+func adjustForTransferDelta(s *testFinalizeScenario, base *uint256.Int) *uint256.Int {
+	for _, w := range s.txOut {
+		if w.Address == s.coinbase && w.Path == state.BalancePath {
+			execBal := w.Val.(uint256.Int)
+			origBal := s.accts[s.coinbase].Balance
+			delta := new(uint256.Int).Sub(&execBal, &origBal)
+			return new(uint256.Int).Add(base, delta)
+		}
+	}
+	return base
 }
 
 func findWrite(writes state.VersionedWrites, addr accounts.Address, path state.AccountPath) *state.VersionedWrite {

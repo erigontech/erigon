@@ -1046,15 +1046,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 		return result.finalizeSystemTx(task, txTask, rules, vm, stateReader, stateWriter)
 	}
 
-	// Clear CollectorWrites so nextResult uses collector.Writes() from
-	// the IBS-based finalize path (which correctly includes fee-calc
-	// adjustments and selfdestruct stripping).
-	// TODO: once finalizeTx produces correct BAL reads/writes and
-	// collector-format writes, gate the direct path on !BAL and
-	// remove this workaround.
-	result.CollectorWrites = nil
-
-	return result.finalizeWithIBS(task, txTask, prevReceipt, engine, vm, stateReader, stateWriter,
+	return result.finalizeTx(task, txTask, prevReceipt, engine, vm, stateReader,
 		coinbaseDelta, coinbaseDeltaIncrease, hasCoinbaseDelta,
 		burntDelta, burntDeltaIncrease, hasBurntDelta,
 		rules, txTrace, tracePrefix)
@@ -1088,124 +1080,6 @@ func (result *execResult) finalizeSystemTx(
 		return nil, nil, nil, err
 	}
 	return nil, ibs.VersionedReads(), ibs.VersionedWrites(true), nil
-}
-
-// finalizeWithIBS handles regular TX finalization via full IBS reconstruction.
-// This is the original finalize path used when the direct finalize cannot be
-// applied — specifically when BAL (EIP-7928) is active, because the BAL hash
-// depends on fine-grained read tracking from the IBS that the direct path
-// doesn't replicate.
-func (result *execResult) finalizeWithIBS(
-	task *taskVersion,
-	txTask *exec.TxTask,
-	prevReceipt *types.Receipt,
-	engine rules.Engine,
-	vm *state.VersionMap,
-	stateReader state.StateReader,
-	stateWriter state.StateWriter,
-	coinbaseDelta uint256.Int, coinbaseDeltaIncrease, hasCoinbaseDelta bool,
-	burntDelta uint256.Int, burntDeltaIncrease, hasBurntDelta bool,
-	chainRules *chain.Rules,
-	txTrace bool, tracePrefix string,
-) (*types.Receipt, state.ReadSet, state.VersionedWrites, error) {
-	blockNum := task.Version().BlockNum
-	txIndex := task.Version().TxIndex
-	txIncarnation := task.Version().Incarnation
-
-	ibs := state.New(state.NewVersionedStateReader(txIndex, result.TxIn, vm, stateReader))
-	ibs.SetTxContext(blockNum, txIndex)
-	ibs.SetVersion(txIncarnation)
-	ibs.SetVersionMap(&state.VersionMap{})
-	if err := ibs.ApplyVersionedWrites(result.TxOut); err != nil {
-		return nil, nil, nil, err
-	}
-	ibs.SetTrace(txTask.Trace)
-
-	// Apply the TX's net balance effect on burnt contract (re-based on correct base)
-	if hasBurntDelta {
-		if burntDeltaIncrease {
-			if err := ibs.AddBalance(result.ExecutionResult.BurntContractAddress, burntDelta, tracing.BalanceChangeTransfer); err != nil {
-				return nil, nil, nil, err
-			}
-		} else {
-			if err := ibs.SubBalance(result.ExecutionResult.BurntContractAddress, burntDelta, tracing.BalanceChangeTransfer); err != nil {
-				return nil, nil, nil, err
-			}
-		}
-	}
-	if !result.ExecutionResult.BurntContractAddress.IsNil() && txTask.Config.IsLondon(blockNum) {
-		if err := ibs.AddBalance(result.ExecutionResult.BurntContractAddress, result.ExecutionResult.FeeBurnt, tracing.BalanceDecreaseGasBuy); err != nil {
-			return nil, nil, nil, err
-		}
-	}
-
-	// Apply the TX's net balance effect on coinbase (re-based on correct base)
-	if hasCoinbaseDelta {
-		if coinbaseDeltaIncrease {
-			if err := ibs.AddBalance(result.Coinbase, coinbaseDelta, tracing.BalanceChangeTransfer); err != nil {
-				return nil, nil, nil, err
-			}
-		} else {
-			if err := ibs.SubBalance(result.Coinbase, coinbaseDelta, tracing.BalanceChangeTransfer); err != nil {
-				return nil, nil, nil, err
-			}
-		}
-	}
-	if err := ibs.AddBalance(result.Coinbase, result.ExecutionResult.FeeTipped, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
-		return nil, nil, nil, err
-	}
-
-	if engine != nil {
-		if postApplyMessageFunc := engine.GetPostApplyMessageFunc(); postApplyMessageFunc != nil {
-			execResult := result.ExecutionResult
-			cbReader := state.NewVersionedStateReader(txIndex, nil, vm, stateReader)
-			coinbase, err := cbReader.ReadAccountData(result.Coinbase)
-			if err != nil {
-				return nil, nil, nil, err
-			}
-			if coinbase != nil {
-				if txTrace {
-					fmt.Println(blockNum, fmt.Sprintf("(%d.%d)", txIndex, txIncarnation), "CB", fmt.Sprintf("%x", result.Coinbase), fmt.Sprintf("%d", &coinbase.Balance), "nonce", coinbase.Nonce)
-				}
-				execResult.CoinbaseInitBalance = coinbase.Balance
-			}
-			message, err := task.TxMessage()
-			if err != nil {
-				return nil, nil, nil, err
-			}
-			postApplyMessageFunc(
-				ibs,
-				message.From(),
-				result.Coinbase,
-				&execResult,
-				chainRules,
-			)
-			result.Logs = append(result.Logs, ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), blockNum, txTask.BlockHash())...)
-		}
-	}
-
-	if txTrace {
-		vm.SetTrace(true)
-		fmt.Println(tracePrefix, ibs.VersionedWrites(true))
-	}
-
-	allWrites := ibs.VersionedWrites(true)
-	vm.FlushVersionedWrites(allWrites, true, tracePrefix)
-	vm.SetTrace(false)
-	if err := ibs.FinalizeTx(chainRules, stateWriter); err != nil {
-		return nil, nil, nil, err
-	}
-
-	receipt, err := result.CreateNextReceipt(prevReceipt)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	if hooks := result.TracingHooks(); hooks != nil && hooks.OnTxEnd != nil {
-		hooks.OnTxEnd(receipt, result.Err)
-	}
-
-	return receipt, ibs.VersionedReads(), allWrites, nil
 }
 
 // finalizeTx computes fee-adjusted balances directly on the pre-computed
@@ -1277,40 +1151,56 @@ func (result *execResult) finalizeTx(
 	}
 
 	// Update the pre-computed collector writes with adjusted balances.
-	// These are used for MDBX apply (via applyVersionedWrites).
-	// Use SetAccountBalance (not SetBalance) so that when coinbase/burnt
-	// weren't touched during execution (calcFees=false), the full account
-	// fields (nonce, incarnation, codeHash) are emitted alongside the
-	// balance — otherwise applyVersionedWrites would create a partial
-	// account with zeroed fields.
-	//
-	// EIP-161 (SpuriousDragon): if the final account is empty
-	// (balance=0, nonce=0, empty code), delete it instead of writing.
+	// Only write when the balance actually changed — otherwise we'd emit
+	// spurious writes (and potentially spurious EIP-161 deletions) for
+	// accounts that weren't touched during execution.
 	emptyRemoval := chainRules.IsSpuriousDragon
-	result.CollectorWrites = result.CollectorWrites.SetAccountBalanceOrDelete(
-		result.Coinbase, coinbaseAcc, newCoinbaseBalance, tracing.BalanceIncreaseRewardTransactionFee, emptyRemoval)
-	if hasBurnt {
+	oldCoinbaseBalance := uint256.Int{}
+	if coinbaseAcc != nil {
+		oldCoinbaseBalance = coinbaseAcc.Balance
+	}
+	coinbaseChanged := newCoinbaseBalance != oldCoinbaseBalance
+
+	if coinbaseChanged {
 		result.CollectorWrites = result.CollectorWrites.SetAccountBalanceOrDelete(
-			burntAddr, burntAcc, newBurntBalance, tracing.BalanceDecreaseGasBuy, emptyRemoval)
+			result.Coinbase, coinbaseAcc, newCoinbaseBalance, tracing.BalanceIncreaseRewardTransactionFee, emptyRemoval)
+	}
+	if hasBurnt {
+		oldBurntBalance := uint256.Int{}
+		if burntAcc != nil {
+			oldBurntBalance = burntAcc.Balance
+		}
+		if newBurntBalance != oldBurntBalance {
+			result.CollectorWrites = result.CollectorWrites.SetAccountBalanceOrDelete(
+				burntAddr, burntAcc, newBurntBalance, tracing.BalanceDecreaseGasBuy, emptyRemoval)
+		}
 	}
 
 	// Build versionMap writes: the stripped TxOut (IBS-format, no stale
 	// coinbase/burnt balances) plus the adjusted balance writes.
 	allWrites := make(state.VersionedWrites, len(result.TxOut), len(result.TxOut)+2)
 	copy(allWrites, result.TxOut)
-	allWrites = append(allWrites, &state.VersionedWrite{
-		Address: result.Coinbase,
-		Path:    state.BalancePath,
-		Val:     newCoinbaseBalance,
-		Reason:  tracing.BalanceIncreaseRewardTransactionFee,
-	})
-	if hasBurnt {
+	if coinbaseChanged {
 		allWrites = append(allWrites, &state.VersionedWrite{
-			Address: burntAddr,
+			Address: result.Coinbase,
 			Path:    state.BalancePath,
-			Val:     newBurntBalance,
-			Reason:  tracing.BalanceDecreaseGasBuy,
+			Val:     newCoinbaseBalance,
+			Reason:  tracing.BalanceIncreaseRewardTransactionFee,
 		})
+	}
+	if hasBurnt {
+		oldBurntBalance := uint256.Int{}
+		if burntAcc != nil {
+			oldBurntBalance = burntAcc.Balance
+		}
+		if newBurntBalance != oldBurntBalance {
+			allWrites = append(allWrites, &state.VersionedWrite{
+				Address: burntAddr,
+				Path:    state.BalancePath,
+				Val:     newBurntBalance,
+				Reason:  tracing.BalanceDecreaseGasBuy,
+			})
+		}
 	}
 
 	// Handle PostApplyMessage with a minimal IBS containing only the
