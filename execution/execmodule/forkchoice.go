@@ -490,71 +490,69 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	initialCycle := limitedBigJump
 	firstCycle := false
 
-	sendError := func(msg string, err error) error {
-		err = fmt.Errorf("%s: %w", msg, err)
-		e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
-		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
-	}
-
-	for hasMore := true; hasMore; {
-		currentContext.SetStateCache(e.stateCache)
-		hasMore, err = e.executionPipeline.Run(currentContext, tx, initialCycle, firstCycle)
-		if err != nil {
-			err = fmt.Errorf("updateForkChoice: %w", err)
-			e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
-			if errors.Is(err, rules.ErrInvalidBlock) {
-				return sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{
-					Status:          executionproto.ExecutionStatus_BadBlock,
-					ValidationError: err.Error(),
-					LatestValidHash: gointerfaces.ConvertHashToH256(rawdb.ReadHeadBlockHash(tx)),
-				}, stateFlushingInParallel)
-			}
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
-		}
-		if hasMore {
-			err = e.executionPipeline.RunPrune(ctx, tx, initialCycle, 500*time.Millisecond)
-			if err != nil {
-				return sendError("updateForkChoice: RunPrune after hasMore", err)
-			}
+	pe := NewPipelineExecutor(e.executionPipeline, e.logger)
+	result, err := pe.RunLoop(ctx, RunLoopConfig{
+		SD:           currentContext,
+		Tx:           tx,
+		InitialCycle: initialCycle,
+		FirstCycle:   firstCycle,
+		PruneTimeout: 500 * time.Millisecond,
+		BeforeIteration: func(sd *execctx.SharedDomains) {
+			sd.SetStateCache(e.stateCache)
+		},
+		CommitCycle: func(ctx context.Context, sd *execctx.SharedDomains) (kv.TemporalRwTx, error) {
 			// Flush SD + overlay to a brief RwTx to relieve memory pressure.
 			commitRwTx, err := e.db.BeginTemporalRw(ctx) //nolint:gocritic
 			if err != nil {
-				return sendError("updateForkChoice: begin rw after hasMore", err)
+				return nil, err
 			}
-			if err := currentContext.Flush(ctx, commitRwTx); err != nil {
+			if err := sd.Flush(ctx, commitRwTx); err != nil {
 				commitRwTx.Rollback()
-				return sendError("updateForkChoice: flush sd after hasMore", err)
+				return nil, err
 			}
 			if err := fcuOverlay.Flush(ctx, commitRwTx); err != nil {
 				commitRwTx.Rollback()
-				return sendError("updateForkChoice: flush overlay after hasMore", err)
+				return nil, err
 			}
-			currentContext.ClearRam(true)
+			sd.ClearRam(true)
 			if err = commitRwTx.Commit(); err != nil {
-				return sendError("updateForkChoice: tx commit after hasMore", err)
+				return nil, err
 			}
 			// Recreate RO tx + overlay on the fresh committed state.
 			fcuOverlay.Close()
 			roTx.Rollback()
 			roTx, err = e.db.BeginTemporalRo(ctx) //nolint:gocritic
 			if err != nil {
-				return sendError("updateForkChoice: begin ro after hasMore", err)
+				return nil, err
 			}
 			fcuOverlay, err = membatchwithdb.NewMemoryBatch(roTx, roTx.Debug().Dirs().Tmp, e.logger)
 			if err != nil {
 				roTx.Rollback()
-				return sendError("updateForkChoice: new overlay after hasMore", err)
+				return nil, err
 			}
-			tx = fcuOverlay
 			// Re-flush InsertBlocks data into the fresh overlay.
 			if hasOverlay {
 				e.currentContext.BlockOverlay().UpdateTxn(roTx)
 				if err := e.currentContext.BlockOverlay().Flush(ctx, fcuOverlay); err != nil {
-					return sendError("updateForkChoice: re-flush overlay after hasMore", err)
+					return nil, err
 				}
 			}
+			return fcuOverlay, nil
+		},
+	})
+	if err != nil {
+		err = fmt.Errorf("updateForkChoice: %w", err)
+		e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
+		if errors.Is(err, rules.ErrInvalidBlock) {
+			return sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{
+				Status:          executionproto.ExecutionStatus_BadBlock,
+				ValidationError: err.Error(),
+				LatestValidHash: gointerfaces.ConvertHashToH256(rawdb.ReadHeadBlockHash(result.FinalTx)),
+			}, stateFlushingInParallel)
 		}
+		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 	}
+	tx = result.FinalTx
 
 	// if head hash was set then success otherwise no
 	headHash := rawdb.ReadHeadBlockHash(tx)
