@@ -25,7 +25,6 @@ import (
 	"errors"
 	"hash/crc32"
 	"math"
-	"math/big"
 	"reflect"
 	"slices"
 	"strings"
@@ -213,19 +212,18 @@ func GatherForks(config *chain.Config, genesisTime uint64) (heightForks []uint64
 			}
 			time = true
 		}
-		if field.Type != reflect.TypeFor[*big.Int]() {
+		if field.Type != reflect.TypeFor[*uint64]() {
 			continue
 		}
 		// Extract the fork rule block number and aggregate it
-		rule := conf.Field(i).Interface().(*big.Int)
+		rule := conf.Field(i).Interface().(*uint64)
 		if rule != nil {
 			if time {
-				t := rule.Uint64()
-				if t > genesisTime {
-					timeForks = append(timeForks, t)
+				if *rule > genesisTime {
+					timeForks = append(timeForks, *rule)
 				}
 			} else {
-				heightForks = append(heightForks, rule.Uint64())
+				heightForks = append(heightForks, *rule)
 			}
 		}
 	}

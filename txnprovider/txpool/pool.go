@@ -251,9 +251,7 @@ func New(
 		}),
 	}
 
-	if res.shanghaiTime, err = bigIntToOptionalUint64(chainConfig.ShanghaiTime, "shanghaiTime"); err != nil {
-		return nil, err
-	}
+	res.shanghaiTime = chainConfig.ShanghaiTime
 	if chainConfig.Bor != nil {
 		if res.agraBlock, err = bigIntToOptionalUint64(chainConfig.Bor.GetAgraBlock(), "agraBlock"); err != nil {
 			return nil, err
@@ -262,18 +260,10 @@ func New(
 			return nil, err
 		}
 	}
-	if res.cancunTime, err = bigIntToOptionalUint64(chainConfig.CancunTime, "cancunTime"); err != nil {
-		return nil, err
-	}
-	if res.pragueTime, err = bigIntToOptionalUint64(chainConfig.PragueTime, "pragueTime"); err != nil {
-		return nil, err
-	}
-	if res.osakaTime, err = bigIntToOptionalUint64(chainConfig.OsakaTime, "osakaTime"); err != nil {
-		return nil, err
-	}
-	if res.amsterdamTime, err = bigIntToOptionalUint64(chainConfig.AmsterdamTime, "amsterdamTime"); err != nil {
-		return nil, err
-	}
+	res.cancunTime = chainConfig.CancunTime
+	res.pragueTime = chainConfig.PragueTime
+	res.osakaTime = chainConfig.OsakaTime
+	res.amsterdamTime = chainConfig.AmsterdamTime
 
 	res.p2pFetcher = NewFetch(ctx, sentryClients, res, stateChangesClient, poolDB, res.chainID, logger, opts...)
 	res.p2pSender = NewSend(ctx, sentryClients, logger, opts...)
