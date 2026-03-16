@@ -948,8 +948,29 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}()
 
+	// This adds completed snapshots on disk after sync, so that we don't unnecessarily report
+	// incomplete torrents. There's still the issue of having torrents not in the preverified set:
+	// snapshots not in that set could cause issues. That's an unsolved issue and probably requires
+	// always resetting before resuming/starting a sync.
+	var afterSnapshotDownload func(ctx context.Context) error
+	if backend.downloader != nil {
+		afterSnapshotDownload = func(ctx context.Context) (err error) {
+			incomplete, err := backend.downloader.AddTorrentsFromDisk(ctx)
+			if err != nil {
+				err = fmt.Errorf("adding torrents from disk: %w", err)
+				return
+			}
+			if incomplete != 0 {
+				// Sync just completed, so incomplete snapshots are unexpected. They may be
+				// aberrations from torrents not in the preverified set; see comment above.
+				backend.logger.Warn("Downloader detected incomplete snapshots after sync", "count", incomplete)
+			}
+			return
+		}
+	}
+
 	backend.syncStages = stageloop.NewDefaultStages(backend.sentryCtx, backend.chainDB, p2pConfig, config, backend.sentriesClient, backend.notifications, backend.downloaderClient,
-		blockReader, blockRetire, backend.forkValidator, tracer)
+		blockReader, blockRetire, backend.forkValidator, tracer, afterSnapshotDownload)
 	backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
 	backend.syncPruneOrder = stagedsync.DefaultPruneOrder
 
@@ -957,7 +978,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	hook := stageloop.NewHook(backend.sentryCtx, backend.notifications, backend.stagedSync, backend.chainConfig, backend.logger, backend.sentriesClient.SetStatus, statusDataProvider, executionPublisher)
 
-	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, backend.forkValidator, tracer)
+	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, backend.forkValidator, tracer, afterSnapshotDownload)
 	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 	// for polygon, we only need to download snapshots on start so that all driver components are correctly initialised before any block execution begins
 	onlySnapDownloadOnStart := chainConfig.Bor != nil
@@ -1287,25 +1308,6 @@ func (s *Ethereum) initDownloader(
 		return
 	}
 	s.downloader.HandleTorrentClientStatus(nodeCfg.DebugMux)
-
-	// This adds completed snapshots on disk. Ideally we'd do this after completing sync, so that we
-	// don't unnecessarily report incomplete torrents. But to do that we need access to
-	// Downloader.AddTorrentsFromDisk in the sync stage, which only has the GPRC client. There's
-	// also the issue of having torrents not in the preverified set: If we are performing a sync for
-	// missing snapshots, any snapshots not in that set could cause issues. That's an unsolved issue
-	// and probably requires always resetting before resuming/starting a sync.
-	incomplete, err := s.downloader.AddTorrentsFromDisk(ctx)
-	if err != nil {
-		err = fmt.Errorf("adding torrents from disk: %w", err)
-		return
-	}
-
-	if incomplete != 0 {
-		// This is fine if we're resuming a sync. If not, there are files that will just float
-		// around. See the comment about resetting above. If that is resolved, we could delete or
-		// ignore incomplete torrents as aberrations.
-		s.logger.Warn("Downloader detected incomplete snapshots", "count", incomplete)
-	}
 
 	bittorrentServer, err := downloader.NewGrpcServer(s.downloader)
 	if err != nil {
