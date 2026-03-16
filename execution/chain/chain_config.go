@@ -52,46 +52,46 @@ type Config struct {
 
 	// ETH mainnet upgrades
 	// See https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades
-	HomesteadBlock        *big.Int `json:"homesteadBlock,omitempty"`
-	DAOForkBlock          *big.Int `json:"daoForkBlock,omitempty"`
-	TangerineWhistleBlock *big.Int `json:"eip150Block,omitempty"`
-	SpuriousDragonBlock   *big.Int `json:"eip155Block,omitempty"`
-	ByzantiumBlock        *big.Int `json:"byzantiumBlock,omitempty"`
-	ConstantinopleBlock   *big.Int `json:"constantinopleBlock,omitempty"`
-	PetersburgBlock       *big.Int `json:"petersburgBlock,omitempty"`
-	IstanbulBlock         *big.Int `json:"istanbulBlock,omitempty"`
-	MuirGlacierBlock      *big.Int `json:"muirGlacierBlock,omitempty"`
-	BerlinBlock           *big.Int `json:"berlinBlock,omitempty"`
-	LondonBlock           *big.Int `json:"londonBlock,omitempty"`
-	ArrowGlacierBlock     *big.Int `json:"arrowGlacierBlock,omitempty"`
-	GrayGlacierBlock      *big.Int `json:"grayGlacierBlock,omitempty"`
+	HomesteadBlock        *uint64 `json:"homesteadBlock,omitempty"`
+	DAOForkBlock          *uint64 `json:"daoForkBlock,omitempty"`
+	TangerineWhistleBlock *uint64 `json:"eip150Block,omitempty"`
+	SpuriousDragonBlock   *uint64 `json:"eip155Block,omitempty"`
+	ByzantiumBlock        *uint64 `json:"byzantiumBlock,omitempty"`
+	ConstantinopleBlock   *uint64 `json:"constantinopleBlock,omitempty"`
+	PetersburgBlock       *uint64 `json:"petersburgBlock,omitempty"`
+	IstanbulBlock         *uint64 `json:"istanbulBlock,omitempty"`
+	MuirGlacierBlock      *uint64 `json:"muirGlacierBlock,omitempty"`
+	BerlinBlock           *uint64 `json:"berlinBlock,omitempty"`
+	LondonBlock           *uint64 `json:"londonBlock,omitempty"`
+	ArrowGlacierBlock     *uint64 `json:"arrowGlacierBlock,omitempty"`
+	GrayGlacierBlock      *uint64 `json:"grayGlacierBlock,omitempty"`
 
 	// EIP-3675: Upgrade consensus to Proof-of-Stake (a.k.a. "Paris", "The Merge")
 	TerminalTotalDifficulty       *big.Int `json:"terminalTotalDifficulty,omitempty"`       // The merge happens when terminal total difficulty is reached
 	TerminalTotalDifficultyPassed bool     `json:"terminalTotalDifficultyPassed,omitempty"` // Disable PoW sync for networks that have already passed through the Merge
-	MergeNetsplitBlock            *big.Int `json:"mergeNetsplitBlock,omitempty"`            // Virtual fork after The Merge to use as a network splitter; see FORK_NEXT_VALUE in EIP-3675
-	MergeHeight                   *big.Int `json:"mergeBlock,omitempty"`                    // The Merge block number
+	MergeNetsplitBlock            *uint64  `json:"mergeNetsplitBlock,omitempty"`            // Virtual fork after The Merge to use as a network splitter; see FORK_NEXT_VALUE in EIP-3675
+	MergeHeight                   *uint64  `json:"mergeBlock,omitempty"`                    // The Merge block number
 
 	// Mainnet fork scheduling switched from block numbers to timestamps after The Merge
-	ShanghaiTime  *big.Int `json:"shanghaiTime,omitempty"`
-	CancunTime    *big.Int `json:"cancunTime,omitempty"`
-	PragueTime    *big.Int `json:"pragueTime,omitempty"`
-	OsakaTime     *big.Int `json:"osakaTime,omitempty"`
-	AmsterdamTime *big.Int `json:"amsterdamTime,omitempty"`
+	ShanghaiTime  *uint64 `json:"shanghaiTime,omitempty"`
+	CancunTime    *uint64 `json:"cancunTime,omitempty"`
+	PragueTime    *uint64 `json:"pragueTime,omitempty"`
+	OsakaTime     *uint64 `json:"osakaTime,omitempty"`
+	AmsterdamTime *uint64 `json:"amsterdamTime,omitempty"`
 
 	// Optional EIP-4844 parameters (see also EIP-7691, EIP-7840, EIP-7892)
 	MinBlobGasPrice       *uint64                       `json:"minBlobGasPrice,omitempty"`
 	BlobSchedule          map[string]*params.BlobConfig `json:"blobSchedule,omitempty"`
-	Bpo1Time              *big.Int                      `json:"bpo1Time,omitempty"`
-	Bpo2Time              *big.Int                      `json:"bpo2Time,omitempty"`
-	Bpo3Time              *big.Int                      `json:"bpo3Time,omitempty"`
-	Bpo4Time              *big.Int                      `json:"bpo4Time,omitempty"`
-	Bpo5Time              *big.Int                      `json:"bpo5Time,omitempty"`
+	Bpo1Time              *uint64                       `json:"bpo1Time,omitempty"`
+	Bpo2Time              *uint64                       `json:"bpo2Time,omitempty"`
+	Bpo3Time              *uint64                       `json:"bpo3Time,omitempty"`
+	Bpo4Time              *uint64                       `json:"bpo4Time,omitempty"`
+	Bpo5Time              *uint64                       `json:"bpo5Time,omitempty"`
 	parseBlobScheduleOnce sync.Once                     `copier:"-"`
 	parsedBlobSchedule    map[uint64]*params.BlobConfig
 
 	// Balancer fork (Gnosis Chain). See https://hackmd.io/@filoozom/rycoQITlWl
-	BalancerTime            *big.Int                         `json:"balancerTime,omitempty"`
+	BalancerTime            *uint64                          `json:"balancerTime,omitempty"`
 	BalancerRewriteBytecode map[common.Address]hexutil.Bytes `json:"balancerRewriteBytecode,omitempty"`
 
 	// (Optional) governance contract where EIP-1559 fees will be sent to, which otherwise would be burnt since the London fork.
@@ -122,31 +122,31 @@ var (
 	TestChainConfig = &Config{
 		ChainID:               big.NewInt(1337),
 		Rules:                 EtHashRules,
-		HomesteadBlock:        big.NewInt(0),
-		TangerineWhistleBlock: big.NewInt(0),
-		SpuriousDragonBlock:   big.NewInt(0),
-		ByzantiumBlock:        big.NewInt(0),
-		ConstantinopleBlock:   big.NewInt(0),
-		PetersburgBlock:       big.NewInt(0),
-		IstanbulBlock:         big.NewInt(0),
-		MuirGlacierBlock:      big.NewInt(0),
-		BerlinBlock:           big.NewInt(0),
+		HomesteadBlock:        common.NewUint64(0),
+		TangerineWhistleBlock: common.NewUint64(0),
+		SpuriousDragonBlock:   common.NewUint64(0),
+		ByzantiumBlock:        common.NewUint64(0),
+		ConstantinopleBlock:   common.NewUint64(0),
+		PetersburgBlock:       common.NewUint64(0),
+		IstanbulBlock:         common.NewUint64(0),
+		MuirGlacierBlock:      common.NewUint64(0),
+		BerlinBlock:           common.NewUint64(0),
 		Ethash:                new(EthashConfig),
 	}
 
 	TestChainAuraConfig = &Config{
 		ChainID:               big.NewInt(1),
 		Rules:                 AuRaRules,
-		HomesteadBlock:        big.NewInt(0),
-		TangerineWhistleBlock: big.NewInt(0),
-		SpuriousDragonBlock:   big.NewInt(0),
-		ByzantiumBlock:        big.NewInt(0),
-		ConstantinopleBlock:   big.NewInt(0),
-		PetersburgBlock:       big.NewInt(0),
-		IstanbulBlock:         big.NewInt(0),
-		MuirGlacierBlock:      big.NewInt(0),
-		BerlinBlock:           big.NewInt(0),
-		LondonBlock:           big.NewInt(0),
+		HomesteadBlock:        common.NewUint64(0),
+		TangerineWhistleBlock: common.NewUint64(0),
+		SpuriousDragonBlock:   common.NewUint64(0),
+		ByzantiumBlock:        common.NewUint64(0),
+		ConstantinopleBlock:   common.NewUint64(0),
+		PetersburgBlock:       common.NewUint64(0),
+		IstanbulBlock:         common.NewUint64(0),
+		MuirGlacierBlock:      common.NewUint64(0),
+		BerlinBlock:           common.NewUint64(0),
+		LondonBlock:           common.NewUint64(0),
 		Aura:                  &AuRaConfig{},
 	}
 
@@ -155,25 +155,25 @@ var (
 	AllProtocolChanges = &Config{
 		ChainID:                       big.NewInt(1337),
 		Rules:                         EtHashRules,
-		HomesteadBlock:                big.NewInt(0),
-		TangerineWhistleBlock:         big.NewInt(0),
-		SpuriousDragonBlock:           big.NewInt(0),
-		ByzantiumBlock:                big.NewInt(0),
-		ConstantinopleBlock:           big.NewInt(0),
-		PetersburgBlock:               big.NewInt(0),
-		IstanbulBlock:                 big.NewInt(0),
-		MuirGlacierBlock:              big.NewInt(0),
-		BerlinBlock:                   big.NewInt(0),
-		LondonBlock:                   big.NewInt(0),
-		ArrowGlacierBlock:             big.NewInt(0),
-		GrayGlacierBlock:              big.NewInt(0),
+		HomesteadBlock:                common.NewUint64(0),
+		TangerineWhistleBlock:         common.NewUint64(0),
+		SpuriousDragonBlock:           common.NewUint64(0),
+		ByzantiumBlock:                common.NewUint64(0),
+		ConstantinopleBlock:           common.NewUint64(0),
+		PetersburgBlock:               common.NewUint64(0),
+		IstanbulBlock:                 common.NewUint64(0),
+		MuirGlacierBlock:              common.NewUint64(0),
+		BerlinBlock:                   common.NewUint64(0),
+		LondonBlock:                   common.NewUint64(0),
+		ArrowGlacierBlock:             common.NewUint64(0),
+		GrayGlacierBlock:              common.NewUint64(0),
 		TerminalTotalDifficulty:       big.NewInt(0),
 		TerminalTotalDifficultyPassed: true,
-		ShanghaiTime:                  big.NewInt(0),
-		CancunTime:                    big.NewInt(0),
-		PragueTime:                    big.NewInt(0),
-		OsakaTime:                     big.NewInt(0),
-		AmsterdamTime:                 big.NewInt(0),
+		ShanghaiTime:                  common.NewUint64(0),
+		CancunTime:                    common.NewUint64(0),
+		PragueTime:                    common.NewUint64(0),
+		OsakaTime:                     common.NewUint64(0),
+		AmsterdamTime:                 common.NewUint64(0),
 		DepositContract:               common.HexToAddress("0x00000000219ab540356cBB839Cbe05303d7705Fa"),
 		Ethash:                        new(EthashConfig),
 	}
@@ -197,8 +197,8 @@ type BorConfig interface {
 	CalculateCoinbase(number uint64) accounts.Address
 }
 
-func timestampToTime(unixSec int64) *time.Time {
-	t := time.Unix(unixSec, 0).UTC()
+func timestampToTime(unixSec uint64) *time.Time {
+	t := time.Unix(int64(unixSec), 0).UTC()
 	return &t
 }
 
@@ -220,37 +220,37 @@ func (c *Config) String() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "{ChainID: %v, Terminal Total Difficulty: %v", c.ChainID, c.TerminalTotalDifficulty)
 	if c.ShanghaiTime != nil {
-		fmt.Fprintf(&b, ", Shapella: %v", timestampToTime(c.ShanghaiTime.Int64()))
+		fmt.Fprintf(&b, ", Shapella: %v", timestampToTime(*c.ShanghaiTime))
 	}
 	if c.CancunTime != nil {
-		fmt.Fprintf(&b, ", Dencun: %v", timestampToTime(c.CancunTime.Int64()))
+		fmt.Fprintf(&b, ", Dencun: %v", timestampToTime(*c.CancunTime))
 	}
 	if c.PragueTime != nil {
-		fmt.Fprintf(&b, ", Pectra: %v", timestampToTime(c.PragueTime.Int64()))
+		fmt.Fprintf(&b, ", Pectra: %v", timestampToTime(*c.PragueTime))
 	}
 	if c.OsakaTime != nil {
-		fmt.Fprintf(&b, ", Fusaka: %v", timestampToTime(c.OsakaTime.Int64()))
+		fmt.Fprintf(&b, ", Fusaka: %v", timestampToTime(*c.OsakaTime))
 	}
 	if c.Bpo1Time != nil {
-		fmt.Fprintf(&b, ", BPO1: %v", timestampToTime(c.Bpo1Time.Int64()))
+		fmt.Fprintf(&b, ", BPO1: %v", timestampToTime(*c.Bpo1Time))
 	}
 	if c.Bpo2Time != nil {
-		fmt.Fprintf(&b, ", BPO2: %v", timestampToTime(c.Bpo2Time.Int64()))
+		fmt.Fprintf(&b, ", BPO2: %v", timestampToTime(*c.Bpo2Time))
 	}
 	if c.Bpo3Time != nil {
-		fmt.Fprintf(&b, ", BPO3: %v", timestampToTime(c.Bpo3Time.Int64()))
+		fmt.Fprintf(&b, ", BPO3: %v", timestampToTime(*c.Bpo3Time))
 	}
 	if c.Bpo4Time != nil {
-		fmt.Fprintf(&b, ", BPO4: %v", timestampToTime(c.Bpo4Time.Int64()))
+		fmt.Fprintf(&b, ", BPO4: %v", timestampToTime(*c.Bpo4Time))
 	}
 	if c.Bpo5Time != nil {
-		fmt.Fprintf(&b, ", BPO5: %v", timestampToTime(c.Bpo5Time.Int64()))
+		fmt.Fprintf(&b, ", BPO5: %v", timestampToTime(*c.Bpo5Time))
 	}
 	if c.BalancerTime != nil {
-		fmt.Fprintf(&b, ", Balancer: %v", timestampToTime(c.BalancerTime.Int64()))
+		fmt.Fprintf(&b, ", Balancer: %v", timestampToTime(*c.BalancerTime))
 	}
 	if c.AmsterdamTime != nil {
-		fmt.Fprintf(&b, ", Glamsterdam: %v", timestampToTime(c.AmsterdamTime.Int64()))
+		fmt.Fprintf(&b, ", Glamsterdam: %v", timestampToTime(*c.AmsterdamTime))
 	}
 	fmt.Fprintf(&b, ", Engine: %v}", engine)
 	return b.String()
@@ -405,48 +405,48 @@ func (c *Config) GetBlobConfig(time uint64) *params.BlobConfig {
 		// Populate with default values
 		c.parsedBlobSchedule = make(map[uint64]*params.BlobConfig)
 		if c.CancunTime != nil {
-			c.parsedBlobSchedule[c.CancunTime.Uint64()] = &params.DefaultCancunBlobConfig
+			c.parsedBlobSchedule[*c.CancunTime] = &params.DefaultCancunBlobConfig
 		}
 		if c.PragueTime != nil {
-			c.parsedBlobSchedule[c.PragueTime.Uint64()] = &params.DefaultPragueBlobConfig
+			c.parsedBlobSchedule[*c.PragueTime] = &params.DefaultPragueBlobConfig
 		}
 
 		// Override with supplied values
 		val, ok := c.BlobSchedule["cancun"]
 		if ok && c.CancunTime != nil {
-			c.parsedBlobSchedule[c.CancunTime.Uint64()] = val
+			c.parsedBlobSchedule[*c.CancunTime] = val
 		}
 		val, ok = c.BlobSchedule["prague"]
 		if ok && c.PragueTime != nil {
-			c.parsedBlobSchedule[c.PragueTime.Uint64()] = val
+			c.parsedBlobSchedule[*c.PragueTime] = val
 		}
 		val, ok = c.BlobSchedule["osaka"]
 		if ok && c.OsakaTime != nil {
-			c.parsedBlobSchedule[c.OsakaTime.Uint64()] = val
+			c.parsedBlobSchedule[*c.OsakaTime] = val
 		}
 		val, ok = c.BlobSchedule["gloas"]
 		if ok && c.AmsterdamTime != nil {
-			c.parsedBlobSchedule[c.AmsterdamTime.Uint64()] = val
+			c.parsedBlobSchedule[*c.AmsterdamTime] = val
 		}
 		val, ok = c.BlobSchedule["bpo1"]
 		if ok && c.Bpo1Time != nil {
-			c.parsedBlobSchedule[c.Bpo1Time.Uint64()] = val
+			c.parsedBlobSchedule[*c.Bpo1Time] = val
 		}
 		val, ok = c.BlobSchedule["bpo2"]
 		if ok && c.Bpo2Time != nil {
-			c.parsedBlobSchedule[c.Bpo2Time.Uint64()] = val
+			c.parsedBlobSchedule[*c.Bpo2Time] = val
 		}
 		val, ok = c.BlobSchedule["bpo3"]
 		if ok && c.Bpo3Time != nil {
-			c.parsedBlobSchedule[c.Bpo3Time.Uint64()] = val
+			c.parsedBlobSchedule[*c.Bpo3Time] = val
 		}
 		val, ok = c.BlobSchedule["bpo4"]
 		if ok && c.Bpo4Time != nil {
-			c.parsedBlobSchedule[c.Bpo4Time.Uint64()] = val
+			c.parsedBlobSchedule[*c.Bpo4Time] = val
 		}
 		val, ok = c.BlobSchedule["bpo5"]
 		if ok && c.Bpo5Time != nil {
-			c.parsedBlobSchedule[c.Bpo5Time.Uint64()] = val
+			c.parsedBlobSchedule[*c.Bpo5Time] = val
 		}
 	})
 
@@ -529,7 +529,7 @@ func (c *Config) CheckCompatible(newcfg *Config, height uint64) *ConfigCompatErr
 
 type forkBlockNumber struct {
 	name        string
-	blockNumber *big.Int
+	blockNumber *uint64
 	optional    bool // if true, the fork may be nil and next fork is still allowed
 }
 
@@ -565,12 +565,12 @@ func (c *Config) CheckConfigForkOrder() error {
 			// Next one must be higher number
 			if lastFork.blockNumber == nil && fork.blockNumber != nil {
 				return fmt.Errorf("unsupported fork ordering: %v not enabled, but %v enabled at %v",
-					lastFork.name, fork.name, fork.blockNumber)
+					lastFork.name, fork.name, *fork.blockNumber)
 			}
 			if lastFork.blockNumber != nil && fork.blockNumber != nil {
-				if lastFork.blockNumber.Cmp(fork.blockNumber) > 0 {
+				if *lastFork.blockNumber > *fork.blockNumber {
 					return fmt.Errorf("unsupported fork ordering: %v enabled at %v, but %v enabled at %v",
-						lastFork.name, lastFork.blockNumber, fork.name, fork.blockNumber)
+						lastFork.name, *lastFork.blockNumber, fork.name, *fork.blockNumber)
 				}
 			}
 			// If it was optional and not set, then ignore it
@@ -584,7 +584,7 @@ func (c *Config) CheckConfigForkOrder() error {
 
 func (c *Config) checkCompatible(newcfg *Config, head uint64) *ConfigCompatError {
 	// returns true if a fork scheduled at s1 cannot be rescheduled to block s2 because head is already past the fork.
-	incompatible := func(s1, s2 *big.Int, head uint64) bool {
+	incompatible := func(s1, s2 *uint64, head uint64) bool {
 		return (isForked(s1, head) || isForked(s2, head)) && !numEqual(s1, s2)
 	}
 
@@ -601,7 +601,7 @@ func (c *Config) checkCompatible(newcfg *Config, head uint64) *ConfigCompatError
 	if incompatible(c.SpuriousDragonBlock, newcfg.SpuriousDragonBlock, head) {
 		return newCompatError("Spurious Dragon fork block", c.SpuriousDragonBlock, newcfg.SpuriousDragonBlock)
 	}
-	if c.IsSpuriousDragon(head) && !numEqual(c.ChainID, newcfg.ChainID) {
+	if c.IsSpuriousDragon(head) && !bigEqual(c.ChainID, newcfg.ChainID) {
 		return newCompatError("EIP155 chain ID", c.SpuriousDragonBlock, newcfg.SpuriousDragonBlock)
 	}
 	if incompatible(c.ByzantiumBlock, newcfg.ByzantiumBlock, head) {
@@ -642,12 +642,22 @@ func (c *Config) checkCompatible(newcfg *Config, head uint64) *ConfigCompatError
 	return nil
 }
 
-func numEqual(x, y *big.Int) bool {
+func numEqual(x, y *uint64) bool {
 	if x == nil {
 		return y == nil
 	}
 	if y == nil {
-		return x == nil
+		return false
+	}
+	return *x == *y
+}
+
+func bigEqual(x, y *big.Int) bool {
+	if x == nil {
+		return y == nil
+	}
+	if y == nil {
+		return false
 	}
 	return x.Cmp(y) == 0
 }
@@ -657,30 +667,37 @@ func numEqual(x, y *big.Int) bool {
 type ConfigCompatError struct {
 	What string
 	// block numbers of the stored and new configurations
-	StoredConfig, NewConfig *big.Int
+	StoredConfig, NewConfig *uint64
 	// the block number to which the local chain must be rewound to correct the error
 	RewindTo uint64
 }
 
-func newCompatError(what string, storedblock, newblock *big.Int) *ConfigCompatError {
-	var rew *big.Int
+func newCompatError(what string, storedblock, newblock *uint64) *ConfigCompatError {
+	var rew *uint64
 	switch {
 	case storedblock == nil:
 		rew = newblock
-	case newblock == nil || storedblock.Cmp(newblock) < 0:
+	case newblock == nil || *storedblock < *newblock:
 		rew = storedblock
 	default:
 		rew = newblock
 	}
 	err := &ConfigCompatError{what, storedblock, newblock, 0}
-	if rew != nil && rew.Sign() > 0 {
-		err.RewindTo = rew.Uint64() - 1
+	if rew != nil && *rew > 0 {
+		err.RewindTo = *rew - 1
 	}
 	return err
 }
 
+func uint64PtrStr(p *uint64) string {
+	if p == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("%d", *p)
+}
+
 func (err *ConfigCompatError) Error() string {
-	return fmt.Sprintf("mismatching %s in database (have %d, want %d, rewindto %d)", err.What, err.StoredConfig, err.NewConfig, err.RewindTo)
+	return fmt.Sprintf("mismatching %s in database (have %s, want %s, rewindto %d)", err.What, uint64PtrStr(err.StoredConfig), uint64PtrStr(err.NewConfig), err.RewindTo)
 }
 
 // EthashConfig is the rules engine configs for proof-of-work based sealing.
@@ -737,13 +754,13 @@ type Rules struct {
 }
 
 // isForked returns whether a fork scheduled at block s is active at the given head block.
-func isForked(s *big.Int, head uint64) bool {
+func isForked(s *uint64, head uint64) bool {
 	if s == nil {
 		return false
 	}
-	return s.Uint64() <= head
+	return *s <= head
 }
 
 func (c *Config) IsPreMerge(blockNumber uint64) bool {
-	return c.MergeHeight != nil && blockNumber < c.MergeHeight.Uint64()
+	return c.MergeHeight != nil && blockNumber < *c.MergeHeight
 }

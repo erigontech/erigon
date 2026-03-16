@@ -50,20 +50,10 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	bt.Whitelist(`.*for_amsterdam/.*`)
 	// static — tested in state test format by TestState
 	bt.SkipLoad(`^for_amsterdam/static/state_tests/`)
-	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_finalization_burn_logs.json`)                          // receiptHash mismatch
-	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7708_eth_transfer_logs/test_selfdestruct_finalization_after_priority_fee.json`)    // receiptHash mismatch
-	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7928_block_level_access_lists/test_bal_sstore_and_oog.json`)                       // gas used by execution: 63573, in header: 37568
-	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7954_increase_max_contract_size/test_max_code_size.json`)                          // eip7954 not yet implemented
-	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7954_increase_max_contract_size/test_max_code_size_deposit_gas.json`)              // eip7954 not yet implemented
-	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7954_increase_max_contract_size/test_max_initcode_size_via_create.json`)           // eip7954 not yet implemented
-	bt.SkipLoad(`^for_amsterdam/cancun/eip6780_selfdestruct/test_selfdestruct_created_in_same_tx_with_revert.json`)             // receiptHash mismatch
-	bt.SkipLoad(`^for_amsterdam/frontier/opcodes/test_value_transfer_gas_calculation.json`)                                     // gas used by execution: 168931, in header: 37443
-	bt.SkipLoad(`^for_amsterdam/prague/eip7702_set_code_tx/test_call_pointer_to_created_from_create_after_oog_call_again.json`) // gas used by execution: 471814, in header: 473869
-	bt.SkipLoad(`^for_amsterdam/prague/eip7702_set_code_tx/test_delegation_clearing_failing_tx.json`)                           // gas used by execution: 472998, in header: 341510
-	bt.SkipLoad(`^for_amsterdam/prague/eip7702_set_code_tx/test_pointer_reentry.json`)                                          // gas used by execution: 252410, in header: 477818
-	bt.SkipLoad(`^for_amsterdam/prague/eip7702_set_code_tx/test_pointer_to_pointer.json`)                                       // gas used by execution: 945996, in header: 683020
-	bt.SkipLoad(`^for_amsterdam/prague/eip7702_set_code_tx/test_self_sponsored_set_code.json`)                                  // gas used by execution: 9897862, in header: 9841510
-	bt.SkipLoad(`^for_amsterdam/prague/eip7702_set_code_tx/test_set_code_to_sstore.json`)                                       // gas used by execution: 397862, in header: 341510
+	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7928_block_level_access_lists/test_bal_sstore_and_oog.json`)             // block=1, gas used by execution: 63573, in header: 37568
+	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7954_increase_max_contract_size/test_max_code_size.json`)                // block=1, gas used by execution: 16777216, in header: 38602294
+	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7954_increase_max_contract_size/test_max_code_size_deposit_gas.json`)    // block=1, receiptHash mismatch: 34f408ef6c0c284659b1f6f2bb262a45afacfb0ada3448163a7c3bf0520d86ee != 5fe22104aa4dcbec000a57a18ba9a64d6a92ee73be758990a928e1d9491f3b21, headerNum=1, 47df0d324522b1e6279320d6ff23ae61ce9453527cee8d0e01e5d59e998384b7
+	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7954_increase_max_contract_size/test_max_initcode_size_via_create.json`) // block=1, gas used by execution: 16777216, in header: 16645728
 
 	bt.Walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root
