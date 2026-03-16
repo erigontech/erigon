@@ -50,7 +50,6 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	bt.Whitelist(`.*for_amsterdam/.*`)
 	// static — tested in state test format by TestState
 	bt.SkipLoad(`^for_amsterdam/static/state_tests/`)
-	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7928_block_level_access_lists/test_bal_sstore_and_oog.json`)             // block=1, gas used by execution: 63573, in header: 37568
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7954_increase_max_contract_size/test_max_code_size.json`)                // block=1, gas used by execution: 16777216, in header: 38602294
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7954_increase_max_contract_size/test_max_code_size_deposit_gas.json`)    // block=1, receiptHash mismatch: 34f408ef6c0c284659b1f6f2bb262a45afacfb0ada3448163a7c3bf0520d86ee != 5fe22104aa4dcbec000a57a18ba9a64d6a92ee73be758990a928e1d9491f3b21, headerNum=1, 47df0d324522b1e6279320d6ff23ae61ce9453527cee8d0e01e5d59e998384b7
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7954_increase_max_contract_size/test_max_initcode_size_via_create.json`) // block=1, gas used by execution: 16777216, in header: 16645728
