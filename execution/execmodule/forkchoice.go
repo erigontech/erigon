@@ -490,8 +490,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	initialCycle := limitedBigJump
 	firstCycle := false
 
-	pe := NewPipelineExecutor(e.executionPipeline, e.logger)
-	result, err := pe.RunLoop(ctx, RunLoopConfig{
+	result, err := e.pipelineExecutor.RunLoop(ctx, RunLoopConfig{
 		SD:           currentContext,
 		Tx:           tx,
 		InitialCycle: initialCycle,
