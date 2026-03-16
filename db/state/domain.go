@@ -453,18 +453,10 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 			return err
 		}
 		if len(foundVal) == 0 || !bytes.Equal(foundVal[:8], v[:8]) {
-			if err := valuesCursor.Put(k, v); err != nil {
-				return err
-			}
-			return nil
+			return valuesCursor.Put(k, v)
 		}
-		if err := valuesCursor.DeleteCurrent(); err != nil {
-			return err
-		}
-		if err := valuesCursor.Put(k, v); err != nil {
-			return err
-		}
-		return nil
+		// Exact step match: replace in-place (1 CGo call vs DeleteCurrent+Put).
+		return valuesCursor.PutCurrent(k, v)
 	}, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 		return err
 	}
