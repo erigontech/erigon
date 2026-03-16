@@ -70,7 +70,8 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, ams
 		return fmt.Errorf("%w, block %d: %w", rules.ErrInvalidBlock, blockNum, err)
 	}
 	if h.BlockAccessListHash == nil {
-		return fmt.Errorf("block %d: missing block access list hash", blockNum)
+		log.Warn("block access list hash missing in header, skipping BAL validation", "blockNum", blockNum)
+		return nil
 	}
 	headerBALHash := *h.BlockAccessListHash
 	dbBALBytes, err := rawdb.ReadBlockAccessListBytes(tx, blockHash, blockNum)
