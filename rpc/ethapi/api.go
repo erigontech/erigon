@@ -200,9 +200,13 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*typ
 
 // ToTransaction converts CallArgs to the Transaction type used by the core evm
 func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (types.Transaction, error) {
-	chainID, overflow := uint256.FromBig((*big.Int)(args.ChainID))
-	if overflow {
-		return nil, errors.New("chainId field caused an overflow (uint256)")
+	var chainID uint256.Int
+	if args.ChainID != nil {
+		cid, overflow := uint256.FromBig((*big.Int)(args.ChainID))
+		if overflow {
+			return nil, errors.New("chainId field caused an overflow (uint256)")
+		}
+		chainID = *cid
 	}
 
 	msg, err := args.ToMessage(globalGasCap, baseFee)
@@ -236,7 +240,7 @@ func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (
 					Value:    *msg.Value(),
 					Data:     msg.Data(),
 				},
-				ChainID:    *chainID,
+				ChainID:    chainID,
 				FeeCap:     *msg.FeeCap(),
 				TipCap:     *msg.TipCap(),
 				AccessList: al,
@@ -257,7 +261,7 @@ func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (
 					Value:    *msg.Value(),
 					Data:     msg.Data(),
 				},
-				ChainID:    *chainID,
+				ChainID:    chainID,
 				FeeCap:     *msg.FeeCap(),
 				TipCap:     *msg.TipCap(),
 				AccessList: al,
@@ -278,7 +282,7 @@ func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (
 				Value:    *msg.Value(),
 				Data:     msg.Data(),
 			},
-			ChainID:    *chainID,
+			ChainID:    chainID,
 			FeeCap:     *msg.FeeCap(),
 			TipCap:     *msg.TipCap(),
 			AccessList: al,
@@ -299,7 +303,7 @@ func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (
 				},
 				GasPrice: *msg.GasPrice(),
 			},
-			ChainID:    *chainID,
+			ChainID:    chainID,
 			AccessList: al,
 		}
 	default:
