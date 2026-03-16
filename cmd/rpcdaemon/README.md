@@ -285,7 +285,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | eth_getCode                                | Yes     |                                                       |
 | eth_getTransactionCount                    | Yes     |                                                       |
 | eth_getStorageAt                           | Yes     |                                                       |
-| eth_getStorageValues                       | Yes     | Erigon method                                         |
+| eth_getStorageValues                       | Yes     |                                                       |
 | eth_call                                   | Yes     |                                                       |
 | eth_callMany                               | Yes     |                                                       |
 | eth_callBundle                             | Yes     |                                                       |
@@ -365,7 +365,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | debug_traceBlockByNumber                   | Yes     | Streaming (can handle huge results)                   |
 | debug_traceTransaction                     | Yes     | Streaming (can handle huge results)                   |
 | debug_traceCall                            | Yes     | Streaming (can handle huge results)                   |
-| debug_traceCallMany                        | Yes     | Erigon method                                         |
+| debug_traceCallMany                        | Yes     |                                                       |
 | debug_freeOSMemory                         | Yes     |                                                       |
 | debug_setGCPercent                         | Yes     |                                                       |
 | debug_setMemoryLimit                       | Yes     |                                                       |
