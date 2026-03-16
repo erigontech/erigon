@@ -6,14 +6,8 @@ name: Benchmarks
 # If we ever care about benchmark results over time, that would be a separate
 # workflow on main that tracks performance trends, not this one.
 on:
-  pull_request:
-    branches:
-      - main
-    types:
-      - opened
-      - reopened
-      - synchronize
-      - ready_for_review
+  workflow_dispatch:
+  workflow_call:
 
 defaults:
   run:

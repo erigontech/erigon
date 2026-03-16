@@ -1,12 +1,7 @@
 name: Lint
 on:
   workflow_dispatch:
-  pull_request:
-    branches:
-      - main
-      - 'release/**'
-      - performance
-      - performance-stable
+  workflow_call:
 
 defaults:
   run:
