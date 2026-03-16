@@ -207,6 +207,18 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 	return 0, false
 }
 
+// lookupVisibleFileByRange searches only among visible files (those in the RoTx snapshot).
+// Use this during merge operations where constituent files are guaranteed to be visible.
+func (dt *DomainRoTx) lookupVisibleFileByRange(txFrom, txTo uint64) (*FilesItem, error) {
+	for _, f := range dt.files {
+		if f.startTxNum == txFrom && f.endTxNum == txTo && f.src != nil {
+			return f.src, nil
+		}
+	}
+	return nil, fmt.Errorf("file %s-%s.%d-%d.kv not found in visible files",
+		dt.d.FileVersion.DataKV.String(), dt.d.FilenameBase, txFrom/dt.d.stepSize, txTo/dt.d.stepSize)
+}
+
 // rawLookupFileByRange searches for a file that contains the given range of tx numbers.
 // Given range should exactly match the range of some file, so expected to be multiple of stepSize.
 // At first it checks range among visible files, then among dirty files.
@@ -344,11 +356,11 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 		}
 		sig, ok := storageFileMap[keyFromTxNum][keyEndTxNum]
 		if !ok {
-			dirty := storage.lookupDirtyFileByItsRange(keyFromTxNum, keyEndTxNum)
-			if dirty == nil {
-				return nil, fmt.Errorf("dirty storage file not found %d-%d", keyFromTxNum/dt.d.stepSize, keyEndTxNum/dt.d.stepSize)
+			f, err := storage.lookupVisibleFileByRange(keyFromTxNum, keyEndTxNum)
+			if err != nil {
+				return nil, fmt.Errorf("storage file not found in visible files: %w", err)
 			}
-			sig = storage.dataReader(dirty.decompressor)
+			sig = storage.dataReader(f.decompressor)
 			storageFileMap[keyFromTxNum][keyEndTxNum] = sig
 		}
 
@@ -357,11 +369,11 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 		}
 		aig, ok := accountFileMap[keyFromTxNum][keyEndTxNum]
 		if !ok {
-			dirty := accounts.lookupDirtyFileByItsRange(keyFromTxNum, keyEndTxNum)
-			if dirty == nil {
-				return nil, fmt.Errorf("dirty account file not found %d-%d", keyFromTxNum/dt.d.stepSize, keyEndTxNum/dt.d.stepSize)
+			f, err := accounts.lookupVisibleFileByRange(keyFromTxNum, keyEndTxNum)
+			if err != nil {
+				return nil, fmt.Errorf("account file not found in visible files: %w", err)
 			}
-			aig = accounts.dataReader(dirty.decompressor)
+			aig = accounts.dataReader(f.decompressor)
 			accountFileMap[keyFromTxNum][keyEndTxNum] = aig
 		}
 

@@ -25,6 +25,7 @@ import (
 	"math"
 	"math/big"
 	"strings"
+	"sync/atomic"
 
 	"github.com/holiman/uint256"
 
@@ -304,11 +305,11 @@ func (args *TraceCallParam) ToTransaction(globalGasCap uint64, baseFee *uint256.
 				Nonce:    msg.Nonce(),
 				GasLimit: msg.Gas(),
 				To:       args.To,
-				Value:    msg.Value(),
+				Value:    *msg.Value(),
 				Data:     msg.Data(),
 			},
-			FeeCap:     msg.FeeCap(),
-			TipCap:     msg.TipCap(),
+			FeeCap:     *msg.FeeCap(),
+			TipCap:     *msg.TipCap(),
 			AccessList: al,
 		}
 	case args.AccessList != nil:
@@ -318,10 +319,10 @@ func (args *TraceCallParam) ToTransaction(globalGasCap uint64, baseFee *uint256.
 					Nonce:    msg.Nonce(),
 					GasLimit: msg.Gas(),
 					To:       args.To,
-					Value:    msg.Value(),
+					Value:    *msg.Value(),
 					Data:     msg.Data(),
 				},
-				GasPrice: msg.GasPrice(),
+				GasPrice: *msg.GasPrice(),
 			},
 			AccessList: *args.AccessList,
 		}
@@ -331,10 +332,10 @@ func (args *TraceCallParam) ToTransaction(globalGasCap uint64, baseFee *uint256.
 				Nonce:    msg.Nonce(),
 				GasLimit: msg.Gas(),
 				To:       args.To,
-				Value:    msg.Value(),
+				Value:    *msg.Value(),
 				Data:     msg.Data(),
 			},
-			GasPrice: msg.GasPrice(),
+			GasPrice: *msg.GasPrice(),
 		}
 	}
 	return tx, nil
@@ -1178,11 +1179,17 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		evm.SetPrecompiles(precompiles)
 	}
 
-	// Wait for the context to be done and cancel the evm. Even if the
-	// EVM has finished, cancelling may be done (repeatedly)
+	done := make(chan struct{})
+	defer close(done)
+
+	var timedOut atomic.Bool
 	go func() {
-		<-ctx.Done()
-		evm.Cancel()
+		select {
+		case <-ctx.Done():
+			timedOut.Store(true)
+			evm.Cancel()
+		case <-done:
+		}
 	}()
 
 	gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
@@ -1217,7 +1224,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	}
 
 	// If the timer caused an abort, return an appropriate error message
-	if evm.Cancelled() {
+	if timedOut.Load() {
 		return nil, fmt.Errorf("execution aborted (timeout = %v)", api.evmCallTimeout)
 	}
 
@@ -1860,9 +1867,17 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Tracer: ot.Tracer().Hooks})
 
+	done := make(chan struct{})
+	defer close(done)
+
+	var timedOut atomic.Bool
 	go func() {
-		<-ctx.Done()
-		evm.Cancel()
+		select {
+		case <-ctx.Done():
+			timedOut.Store(true)
+			evm.Cancel()
+		case <-done:
+		}
 	}()
 
 	gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
@@ -1896,7 +1911,7 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 		sd.CompareStates(initialIbs, ibs)
 	}
 
-	if evm.Cancelled() {
+	if timedOut.Load() {
 		return nil, fmt.Errorf("execution aborted (timeout = %v)", api.evmCallTimeout)
 	}
 

@@ -400,10 +400,10 @@ func TestEngineApiBuiltBlockWithWithdrawalRequest(t *testing.T) {
 				Nonce:    nonce.Uint64(),
 				GasLimit: 1_000_000,
 				To:       &withdrawalRequestAddr,
-				Value:    uint256.NewInt(500_000_000_000_000_000), // 0.5 ETH
+				Value:    *uint256.NewInt(500_000_000_000_000_000), // 0.5 ETH
 				Data:     calldata,
 			},
-			GasPrice: gasPriceU256,
+			GasPrice: *gasPriceU256,
 		}
 		signer := types.LatestSignerForChainID(eat.ChainConfig.ChainID)
 		signedTxn, err := types.SignTx(txn, *signer, eat.CoinbaseKey)
