@@ -1736,7 +1736,12 @@ func (s *Ethereum) Start() error {
 		})
 	} else {
 		diaglib.Send(diaglib.SyncStageList{StagesList: diaglib.InitStagesFromList(s.stagedSync.StagesIdsList())})
-		go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockReader, hook)
+		// TODO: temporary — skip staged sync when l1sync handles execution
+		if s.config.L1Sync.L1RPC == "" {
+			go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockReader, hook)
+		} else {
+			s.logger.Info("[l1sync] staged sync loop disabled — l1sync handles execution")
+		}
 	}
 
 	if s.silkwormRPCDaemonService != nil {
