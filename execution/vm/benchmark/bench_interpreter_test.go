@@ -1,6 +1,7 @@
 package benchmark
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/erigontech/erigon/execution/vm"
@@ -12,7 +13,7 @@ import (
 // dispatch loop in interpreter.go:Run().
 func BenchmarkPureArithmetic(b *testing.B) {
 	for _, gas := range []uint64{1_000_000, 10_000_000, 100_000_000} {
-		name := gasName(gas)
+		name := formatGas(gas)
 		// JUMPDEST, PUSH1 1, PUSH1 2, ADD, POP, JUMP(0)
 		p, lbl := program.New().Jumpdest()
 		code := p.Push(1).Push(2).Op(vm.ADD, vm.POP).Jump(lbl).Bytes()
@@ -22,7 +23,7 @@ func BenchmarkPureArithmetic(b *testing.B) {
 			cfg, statedb := benchConfig(b, gas)
 			deployContract(statedb, addrContract, code)
 			// Warmup
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
 			for b.Loop() {
 				prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
 			}
@@ -36,7 +37,7 @@ func BenchmarkPureArithmetic(b *testing.B) {
 		b.ReportAllocs()
 		cfg, statedb := benchConfig(b, 100_000_000)
 		deployContract(statedb, addrContract, mulCode)
-		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
 		for b.Loop() {
 			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
 		}
@@ -57,7 +58,7 @@ func BenchmarkStackOps(b *testing.B) {
 		b.ReportAllocs()
 		cfg, statedb := benchConfig(b, 100_000_000)
 		deployContract(statedb, addrContract, code)
-		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
 		for b.Loop() {
 			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
 		}
@@ -76,7 +77,7 @@ func BenchmarkMemoryOps(b *testing.B) {
 		b.ReportAllocs()
 		cfg, statedb := benchConfig(b, 100_000_000)
 		deployContract(statedb, addrContract, code)
-		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
 		for b.Loop() {
 			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
 		}
@@ -90,16 +91,16 @@ func BenchmarkMemoryOps(b *testing.B) {
 		Push(0xFF).    // value
 		Op(vm.DUP2).   // offset
 		Op(vm.MSTORE). // MSTORE(offset, value)
-		Push(32).       // 32
-		Op(vm.ADD).     // offset += 32
-		Jump(jdPos).    // jump back to JUMPDEST
+		Push(32).      // 32
+		Op(vm.ADD).    // offset += 32
+		Jump(jdPos).   // jump back to JUMPDEST
 		Bytes()
 
 	b.Run("mstore-growing/10M", func(b *testing.B) {
 		b.ReportAllocs()
 		cfg, statedb := benchConfig(b, 10_000_000)
 		deployContract(statedb, addrContract, growCode)
-		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
 		for b.Loop() {
 			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
 		}
@@ -113,11 +114,11 @@ func BenchmarkKeccak256(b *testing.B) {
 		p, lbl := program.New().Jumpdest()
 		code := p.Push(size).Push(0).Op(vm.KECCAK256, vm.POP).Jump(lbl).Bytes()
 
-		b.Run(sizeName(size)+"/100M", func(b *testing.B) {
+		b.Run(formatSize(size)+"/100M", func(b *testing.B) {
 			b.ReportAllocs()
 			cfg, statedb := benchConfig(b, 100_000_000)
 			deployContract(statedb, addrContract, code)
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
 			for b.Loop() {
 				prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
 			}
@@ -146,35 +147,29 @@ func BenchmarkMixedCompute(b *testing.B) {
 		b.ReportAllocs()
 		cfg, statedb := benchConfig(b, 100_000_000)
 		deployContract(statedb, addrContract, code)
-		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
 		for b.Loop() {
 			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
 		}
 	})
 }
 
-func gasName(gas uint64) string {
+func formatGas(gas uint64) string {
 	switch {
 	case gas >= 1_000_000_000:
-		return "1B"
-	case gas >= 100_000_000:
-		return "100M"
-	case gas >= 10_000_000:
-		return "10M"
+		return fmt.Sprintf("%dB", gas/1_000_000_000)
 	case gas >= 1_000_000:
-		return "1M"
+		return fmt.Sprintf("%dM", gas/1_000_000)
 	default:
-		return "low"
+		return fmt.Sprintf("%d", gas)
 	}
 }
 
-func sizeName(size int) string {
+func formatSize(size int) string {
 	switch {
-	case size >= 4096:
-		return "4KB"
-	case size >= 256:
-		return "256B"
+	case size >= 1024:
+		return fmt.Sprintf("%dKB", size/1024)
 	default:
-		return "32B"
+		return fmt.Sprintf("%dB", size)
 	}
 }

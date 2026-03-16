@@ -1,6 +1,7 @@
 package benchmark
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -11,6 +12,7 @@ import (
 
 // BenchmarkSLOADCold measures cold SLOAD (2100 gas each, EIP-2929).
 // Pre-populates N storage slots and reads them in a single call.
+// Uses PushSnapshot/RevertToSnapshot to ensure slots are cold each iteration.
 func BenchmarkSLOADCold(b *testing.B) {
 	for _, n := range []int{10, 50, 100, 500} {
 		// Build code: for each slot i, PUSH i, SLOAD, POP
@@ -24,15 +26,17 @@ func BenchmarkSLOADCold(b *testing.B) {
 		// STOP at the end
 		code := p.Op(vm.STOP).Bytes()
 
-		b.Run(slotName(n), func(b *testing.B) {
+		b.Run(fmt.Sprintf("%dslots", n), func(b *testing.B) {
 			b.ReportAllocs()
 			// Gas: 2100 per cold SLOAD + overhead
 			cfg, statedb := benchConfig(b, uint64(n)*2200+100_000)
 			deployContract(statedb, addrContract, code)
 			setStorage(statedb, addrContract, slots)
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
 			for b.Loop() {
+				snap := statedb.PushSnapshot()
 				prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+				statedb.RevertToSnapshot(snap, nil)
+				statedb.PopSnapshot(snap)
 			}
 		})
 	}
@@ -52,12 +56,12 @@ func BenchmarkSLOADWarm(b *testing.B) {
 		}
 		code := p.Jump(lbl).Bytes()
 
-		b.Run(slotName(n), func(b *testing.B) {
+		b.Run(fmt.Sprintf("%dslots", n), func(b *testing.B) {
 			b.ReportAllocs()
 			cfg, statedb := benchConfig(b, 100_000_000)
 			deployContract(statedb, addrContract, code)
 			setStorage(statedb, addrContract, slots)
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
 			for b.Loop() {
 				prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
 			}
@@ -66,6 +70,8 @@ func BenchmarkSLOADWarm(b *testing.B) {
 }
 
 // BenchmarkSSTORE measures SSTORE cost for different state transitions.
+// Each sub-benchmark uses PushSnapshot/RevertToSnapshot to restore storage
+// between iterations, ensuring every iteration measures the intended transition.
 func BenchmarkSSTORE(b *testing.B) {
 	// zero-to-nonzero: most expensive (20k gas) — fresh slot
 	b.Run("zero-to-nonzero", func(b *testing.B) {
@@ -80,9 +86,11 @@ func BenchmarkSSTORE(b *testing.B) {
 		b.ReportAllocs()
 		cfg, statedb := benchConfig(b, uint64(n)*22_100+100_000)
 		deployContract(statedb, addrContract, code)
-		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
 		for b.Loop() {
+			snap := statedb.PushSnapshot()
 			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+			statedb.RevertToSnapshot(snap, nil)
+			statedb.PopSnapshot(snap)
 		}
 	})
 
@@ -102,9 +110,11 @@ func BenchmarkSSTORE(b *testing.B) {
 		cfg, statedb := benchConfig(b, uint64(n)*5200+100_000)
 		deployContract(statedb, addrContract, code)
 		setStorage(statedb, addrContract, slots)
-		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
 		for b.Loop() {
+			snap := statedb.PushSnapshot()
 			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+			statedb.RevertToSnapshot(snap, nil)
+			statedb.PopSnapshot(snap)
 		}
 	})
 
@@ -124,9 +134,11 @@ func BenchmarkSSTORE(b *testing.B) {
 		cfg, statedb := benchConfig(b, uint64(n)*5200+100_000)
 		deployContract(statedb, addrContract, code)
 		setStorage(statedb, addrContract, slots)
-		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
 		for b.Loop() {
+			snap := statedb.PushSnapshot()
 			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+			statedb.RevertToSnapshot(snap, nil)
+			statedb.PopSnapshot(snap)
 		}
 	})
 }
@@ -144,11 +156,11 @@ func BenchmarkTransientStorage(b *testing.B) {
 		}
 		code := p.Jump(lbl).Bytes()
 
-		b.Run(slotName(n), func(b *testing.B) {
+		b.Run(fmt.Sprintf("%dslots", n), func(b *testing.B) {
 			b.ReportAllocs()
 			cfg, statedb := benchConfig(b, 100_000_000)
 			deployContract(statedb, addrContract, code)
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
 			for b.Loop() {
 				prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
 			}
@@ -156,7 +168,8 @@ func BenchmarkTransientStorage(b *testing.B) {
 	}
 }
 
-// BenchmarkStorageDiversity measures many unique slot accesses (simulates balances mapping).
+// BenchmarkStorageDiversity measures many unique cold slot accesses (simulates balances mapping).
+// Uses PushSnapshot/RevertToSnapshot to ensure slots are cold each iteration.
 func BenchmarkStorageDiversity(b *testing.B) {
 	for _, n := range []int{100, 1000} {
 		// Pre-populate N slots, then read them all in one call
@@ -165,34 +178,21 @@ func BenchmarkStorageDiversity(b *testing.B) {
 		for i := 0; i < n; i++ {
 			key := uint256.NewInt(uint64(i + 1000)) // offset to avoid slot 0
 			slots[*key] = *uint256.NewInt(uint64(i * 100))
-			p.Push(i + 1000).Op(vm.SLOAD, vm.POP)
+			p.Push(i+1000).Op(vm.SLOAD, vm.POP)
 		}
 		code := p.Op(vm.STOP).Bytes()
 
-		b.Run(slotName(n), func(b *testing.B) {
+		b.Run(fmt.Sprintf("%dslots", n), func(b *testing.B) {
 			b.ReportAllocs()
 			cfg, statedb := benchConfig(b, uint64(n)*2200+100_000)
 			deployContract(statedb, addrContract, code)
 			setStorage(statedb, addrContract, slots)
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
 			for b.Loop() {
+				snap := statedb.PushSnapshot()
 				prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+				statedb.RevertToSnapshot(snap, nil)
+				statedb.PopSnapshot(snap)
 			}
 		})
-	}
-}
-
-func slotName(n int) string {
-	switch {
-	case n >= 1000:
-		return "1000slots"
-	case n >= 500:
-		return "500slots"
-	case n >= 100:
-		return "100slots"
-	case n >= 50:
-		return "50slots"
-	default:
-		return "10slots"
 	}
 }

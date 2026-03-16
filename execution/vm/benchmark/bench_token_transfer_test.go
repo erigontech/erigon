@@ -1,6 +1,7 @@
 package benchmark
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -33,22 +34,22 @@ func BenchmarkERC20Transfer(b *testing.B) {
 	p, lbl := program.New().Jumpdest()
 	code := p.
 		// SLOAD from_balance
-		Push(0).Op(vm.SLOAD). // [fromBal]
+		Push(0).Op(vm.SLOAD).  // [fromBal]
 		Push(100).             // [fromBal, 100]
-		Op(vm.SWAP1, vm.SUB). // [fromBal-100]
+		Op(vm.SWAP1, vm.SUB).  // [fromBal-100]
 		Push(0).Op(vm.SSTORE). // SSTORE(0, fromBal-100)
 		// SLOAD to_balance
-		Push(1).Op(vm.SLOAD). // [toBal]
+		Push(1).Op(vm.SLOAD).  // [toBal]
 		Push(100).             // [toBal, 100]
 		Op(vm.ADD).            // [toBal+100]
 		Push(1).Op(vm.SSTORE). // SSTORE(1, toBal+100)
 		// LOG3: Transfer(from, to, amount) — 3 topics + 32 bytes data
 		Push(100).Push(0).Op(vm.MSTORE). // store amount in memory
-		Push(0xDEAD).                     // topic2 (to)
-		Push(0xCAFE).                     // topic1 (from)
-		Push(transferEventSig). // Transfer event sig
-		Push(32). // data size
-		Push(0).  // data offset
+		Push(0xDEAD).                    // topic2 (to)
+		Push(0xCAFE).                    // topic1 (from)
+		Push(transferEventSig).          // Transfer event sig
+		Push(32).                        // data size
+		Push(0).                         // data offset
 		Op(vm.LOG3).
 		Jump(lbl).Bytes()
 
@@ -62,7 +63,7 @@ func BenchmarkERC20Transfer(b *testing.B) {
 		cfg, statedb := benchConfig(b, 100_000_000)
 		deployContract(statedb, addrContract, code)
 		setStorage(statedb, addrContract, slots)
-		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
 		for b.Loop() {
 			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
 		}
@@ -74,9 +75,9 @@ func BenchmarkERC20TransferFrom(b *testing.B) {
 	p, lbl := program.New().Jumpdest()
 	code := p.
 		// Check allowance: SLOAD(2)
-		Push(2).Op(vm.SLOAD). // [allowance]
+		Push(2).Op(vm.SLOAD).  // [allowance]
 		Push(100).             // [allowance, 100]
-		Op(vm.SWAP1, vm.SUB). // [allowance-100]
+		Op(vm.SWAP1, vm.SUB).  // [allowance-100]
 		Push(2).Op(vm.SSTORE). // update allowance
 		// Transfer: same as above
 		Push(0).Op(vm.SLOAD).
@@ -104,7 +105,7 @@ func BenchmarkERC20TransferFrom(b *testing.B) {
 		cfg, statedb := benchConfig(b, 100_000_000)
 		deployContract(statedb, addrContract, code)
 		setStorage(statedb, addrContract, slots)
-		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
 		for b.Loop() {
 			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
 		}
@@ -128,7 +129,7 @@ func BenchmarkERC20BalanceOf(b *testing.B) {
 		cfg, statedb := benchConfig(b, 100_000_000)
 		deployContract(statedb, addrContract, code)
 		setStorage(statedb, addrContract, slots)
-		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
 		for b.Loop() {
 			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
 		}
@@ -149,37 +150,28 @@ func BenchmarkERC20BatchTransfers(b *testing.B) {
 			toSlot := uint64(i + 1)
 			slots[*uint256.NewInt(toSlot)] = *uint256.NewInt(0) // to balance starts at 0
 			p.
-				Push(0).Op(vm.SLOAD).          // from balance
+				Push(0).Op(vm.SLOAD).           // from balance
 				Push(100).Op(vm.SWAP1, vm.SUB). // subtract
 				Push(0).Op(vm.SSTORE).          // write back
 				Push(toSlot).Op(vm.SLOAD).      // to balance
-				Push(100).Op(vm.ADD).            // add
+				Push(100).Op(vm.ADD).           // add
 				Push(toSlot).Op(vm.SSTORE)      // write back
 		}
 		code := p.Op(vm.STOP).Bytes()
 
-		b.Run(batchName(n), func(b *testing.B) {
+		b.Run(fmt.Sprintf("batch-%d", n), func(b *testing.B) {
 			b.ReportAllocs()
 			// Each transfer ~= 2 SLOAD + 2 SSTORE
 			gas := uint64(n)*30_000 + 100_000
 			cfg, statedb := benchConfig(b, gas)
 			deployContract(statedb, addrContract, code)
 			setStorage(statedb, addrContract, slots)
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
 			for b.Loop() {
+				snap := statedb.PushSnapshot()
 				prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+				statedb.RevertToSnapshot(snap, nil)
+				statedb.PopSnapshot(snap)
 			}
 		})
-	}
-}
-
-func batchName(n int) string {
-	switch {
-	case n >= 50:
-		return "batch-50"
-	case n >= 10:
-		return "batch-10"
-	default:
-		return "batch-5"
 	}
 }

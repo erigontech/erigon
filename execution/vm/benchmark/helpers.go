@@ -27,7 +27,6 @@ var (
 	addrPair     = accounts.InternAddress(common.HexToAddress("0x5002"))
 	addrTokenA   = accounts.InternAddress(common.HexToAddress("0x5003"))
 	addrTokenB   = accounts.InternAddress(common.HexToAddress("0x5004"))
-	addrEOA      = accounts.InternAddress(common.HexToAddress("0xE0A0"))
 )
 
 // cancunConfig returns a chain config with all forks enabled through Cancun.
@@ -100,12 +99,6 @@ func setStorage(statedb *state.IntraBlockState, addr accounts.Address, slots map
 		key := accounts.InternKey(k.Bytes32())
 		statedb.SetState(addr, key, v)
 	}
-}
-
-// callContract executes a CALL from sender to addr with the given config and input.
-// Returns (output, gasLeft, error).
-func callContract(cfg *runtime.Config, addr accounts.Address, input []byte) ([]byte, uint64, error) {
-	return runtime.Call(addr, input, cfg)
 }
 
 // prepareAndCall sets up EVM access lists and calls the contract.

@@ -1,6 +1,7 @@
 package benchmark
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -24,13 +25,13 @@ var (
 // Each contract does minimal work (PUSH+POP) then STATICCALLs the next.
 func BenchmarkNestedStaticCalls(b *testing.B) {
 	for _, depth := range []int{2, 4, 8, 16} {
-		b.Run(depthName(depth), func(b *testing.B) {
+		b.Run(fmt.Sprintf("depth-%d", depth), func(b *testing.B) {
 			b.ReportAllocs()
 			cfg, statedb := benchConfig(b, 100_000_000)
 
 			// Deploy depth chain: addr[0] → addr[1] → ... → addr[depth-1]
 			addrs := makeAddrs(depth)
-			deployCallChain(statedb, addrs, false) // staticcall chain
+			deployCallChain(statedb, addrs) // staticcall chain
 
 			// Entry point loops: JUMPDEST, STATICCALL(addr[0]), POP, JUMP
 			entry, lbl := program.New().Jumpdest()
@@ -40,7 +41,7 @@ func BenchmarkNestedStaticCalls(b *testing.B) {
 				Jump(lbl).Bytes()
 			deployContract(statedb, addrContract, entryCode)
 
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
 			for b.Loop() {
 				prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
 			}
@@ -51,7 +52,7 @@ func BenchmarkNestedStaticCalls(b *testing.B) {
 // BenchmarkDelegateCallProxy measures DELEGATECALL proxy layers.
 func BenchmarkDelegateCallProxy(b *testing.B) {
 	for _, layers := range []int{1, 2, 4} {
-		b.Run(layerName(layers), func(b *testing.B) {
+		b.Run(fmt.Sprintf("%d-layers", layers), func(b *testing.B) {
 			b.ReportAllocs()
 			cfg, statedb := benchConfig(b, 100_000_000)
 
@@ -66,7 +67,7 @@ func BenchmarkDelegateCallProxy(b *testing.B) {
 				Jump(lbl).Bytes()
 			deployContract(statedb, addrContract, entryCode)
 
-			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
 			for b.Loop() {
 				prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
 			}
@@ -89,7 +90,7 @@ func BenchmarkCallWithValue(b *testing.B) {
 		code := p.Call(nil, rawPair, 0, 0, 0, 0, 0).Op(vm.POP).Jump(lbl).Bytes()
 		deployContract(statedb, addrContract, code)
 
-		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
 		for b.Loop() {
 			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
 		}
@@ -107,7 +108,7 @@ func BenchmarkCallWithValue(b *testing.B) {
 		code := p.Call(nil, rawPair, 1, 0, 0, 0, 0).Op(vm.POP).Jump(lbl).Bytes()
 		deployContractWithBalance(statedb, addrContract, code, uint256.NewInt(1_000_000_000))
 
-		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
 		for b.Loop() {
 			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
 		}
@@ -131,7 +132,7 @@ func BenchmarkDeFiSwapChain(b *testing.B) {
 			Jump(lbl).Bytes()
 		deployContract(statedb, addrContract, entryCode)
 
-		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
 		for b.Loop() {
 			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
 		}
@@ -160,7 +161,7 @@ func makeAddrs(n int) []chainAddr {
 
 // deployCallChain deploys a chain where each contract STATICCALLs the next.
 // The last contract just does PUSH+POP+STOP.
-func deployCallChain(statedb *state.IntraBlockState, addrs []chainAddr, _ bool) {
+func deployCallChain(statedb *state.IntraBlockState, addrs []chainAddr) {
 	for i, a := range addrs {
 		if i == len(addrs)-1 {
 			// Leaf: minimal work
@@ -236,32 +237,4 @@ func deployDeFiContracts(statedb *state.IntraBlockState) {
 		Call(nil, rawTokenB, 0, 0, 0, 0, 0).Op(vm.POP).
 		Op(vm.STOP).Bytes()
 	deployContract(statedb, addrRouter, routerCode)
-}
-
-func depthName(d int) string {
-	switch d {
-	case 2:
-		return "depth-2"
-	case 4:
-		return "depth-4"
-	case 8:
-		return "depth-8"
-	case 16:
-		return "depth-16"
-	default:
-		return "depth-N"
-	}
-}
-
-func layerName(l int) string {
-	switch l {
-	case 1:
-		return "1-layer"
-	case 2:
-		return "2-layers"
-	case 4:
-		return "4-layers"
-	default:
-		return "N-layers"
-	}
 }
