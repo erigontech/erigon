@@ -2629,7 +2629,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 	return witnessTrie, witnessTrieRootHash, nil
 }
 
-func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress, warmup WarmupConfig) (rootHash []byte, err error) {
+func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string, onProgress func(*CommitProgress), warmup WarmupConfig) (rootHash []byte, err error) {
 	var (
 		m  runtime.MemStats
 		ki uint64
@@ -2676,12 +2676,12 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	err = updates.HashSort(ctx, warmuper, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
 		select {
 		case <-logEvery.C:
-			if progress != nil {
-				progress <- &CommitProgress{
+			if onProgress != nil {
+				onProgress(&CommitProgress{
 					KeyIndex:    ki,
 					UpdateCount: updatesCount,
 					Metrics:     hph.metrics.AsValues(),
-				}
+				})
 			} else {
 				dbg.ReadMemStats(&m)
 				log.Info(fmt.Sprintf("[%s][agg] computing trie", logPrefix),
@@ -2723,12 +2723,12 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 			return fmt.Errorf("followAndUpdate: %w", err)
 		}
 		ki++
-		if progress != nil && ki == updatesCount {
-			progress <- &CommitProgress{
+		if onProgress != nil && ki == updatesCount {
+			onProgress(&CommitProgress{
 				KeyIndex:    ki,
 				UpdateCount: updatesCount,
 				Metrics:     hph.metrics.AsValues(),
-			}
+			})
 		}
 		return nil
 	})
