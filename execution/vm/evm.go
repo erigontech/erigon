@@ -85,6 +85,10 @@ type EVM struct {
 	// available gas is calculated in gasCall* according to the 63/64 rule and later
 	// applied in opCall*.
 	callGasTemp uint64
+	// callAddrTemp caches the interned callee address between the gas calculation
+	// (gasCall*/gasStaticCall* etc.) and the instruction handler (opCall*/opStaticCall* etc.),
+	// avoiding redundant unique.Make calls for the same address.
+	callAddrTemp accounts.Address
 	// optional overridden set of precompiled contracts
 	precompiles PrecompiledContracts
 
@@ -161,6 +165,19 @@ func (evm *EVM) CallGasTemp() uint64 {
 // SetCallGasTemp sets the callGasTemp for the EVM
 func (evm *EVM) SetCallGasTemp(gas uint64) {
 	evm.callGasTemp = gas
+}
+
+// consumeCallAddr returns the cached interned callee address set during gas
+// calculation and resets the cache to NilAddress. If the cache is empty
+// (fallback path for pre-EIP-2929 chains or defensive scenarios), it interns
+// the address directly from the stack word.
+func (evm *EVM) consumeCallAddr(stackAddr *uint256.Int) accounts.Address {
+	addr := evm.callAddrTemp
+	evm.callAddrTemp = accounts.NilAddress
+	if addr.IsNil() {
+		return accounts.InternAddress(stackAddr.Bytes20())
+	}
+	return addr
 }
 
 // SetPrecompiles sets the precompiles for the EVM

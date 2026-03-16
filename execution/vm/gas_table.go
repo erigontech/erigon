@@ -439,7 +439,13 @@ func statelessGasCall(evm *EVM, callContext *CallContext, availableGas uint64, m
 
 func statefulGasCall(evm *EVM, callContext *CallContext, gas uint64, availableGas uint64, transfersValue bool) (uint64, error) {
 	var accountGas uint64
-	var address = accounts.InternAddress(callContext.Stack.Back(1).Bytes20())
+	var address accounts.Address
+	if !evm.callAddrTemp.IsNil() {
+		address = evm.callAddrTemp
+	} else {
+		address = accounts.InternAddress(callContext.Stack.Back(1).Bytes20())
+		evm.callAddrTemp = address
+	}
 	if evm.ChainRules().IsSpuriousDragon {
 		empty, err := evm.IntraBlockState().Empty(address)
 		if err != nil {

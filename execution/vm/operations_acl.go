@@ -162,6 +162,7 @@ func gasEip2929AccountCheck(evm *EVM, callContext *CallContext, scopeGas uint64,
 func makeCallVariantGasCallEIP2929(oldCalculator gasFunc) gasFunc {
 	return func(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (uint64, error) {
 		addr := accounts.InternAddress(callContext.Stack.Back(1).Bytes20())
+		evm.callAddrTemp = addr
 		// The WarmStorageReadCostEIP2929 (100) is already deducted in the form of a constant cost, so
 		// the cost to charge for cold access, if any, is Cold - Warm
 		coldCost := params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
@@ -290,6 +291,7 @@ var (
 func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefulCalculator statefulGasFunc) gasFunc {
 	return func(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
 		addr := accounts.InternAddress(callContext.Stack.Back(1).Bytes20())
+		evm.callAddrTemp = addr
 		// Check slot presence in the access list
 		var gas uint64
 		var accessGas uint64
