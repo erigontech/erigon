@@ -24,7 +24,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/big"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -253,12 +252,8 @@ func New(
 
 	res.shanghaiTime = chainConfig.ShanghaiTime
 	if chainConfig.Bor != nil {
-		if res.agraBlock, err = bigIntToOptionalUint64(chainConfig.Bor.GetAgraBlock(), "agraBlock"); err != nil {
-			return nil, err
-		}
-		if res.bhilaiBlock, err = bigIntToOptionalUint64(chainConfig.Bor.GetBhilaiBlock(), "bhilaiBlock"); err != nil {
-			return nil, err
-		}
+		res.agraBlock = chainConfig.Bor.GetAgraBlock()
+		res.bhilaiBlock = chainConfig.Bor.GetBhilaiBlock()
 	}
 	res.cancunTime = chainConfig.CancunTime
 	res.pragueTime = chainConfig.PragueTime
@@ -1093,17 +1088,6 @@ func requiredBalance(txn *TxnSlot) *uint256.Int {
 		return maxUint256
 	}
 	return total
-}
-
-func bigIntToOptionalUint64(v *big.Int, name string) (*uint64, error) {
-	if v == nil {
-		return nil, nil
-	}
-	if !v.IsUint64() {
-		return nil, fmt.Errorf("%s overflow", name)
-	}
-	u := v.Uint64()
-	return &u, nil
 }
 
 func isTimeBasedForkActivated(isPostFlag *atomic.Bool, forkTime *uint64) bool {
