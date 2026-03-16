@@ -1269,6 +1269,10 @@ func doIntegrity(cliCtx *cli.Context) error {
 					if err := integrity.CheckRCacheNoDups(ctx, sc, db, blockReader, failFast); err != nil {
 						return err
 					}
+				case integrity.ReceiptRootIntegrity:
+					if err := integrity.CheckReceiptRootIntegrity(ctx, sc, db, blockReader, failFast); err != nil {
+						return err
+					}
 				case integrity.StateProgress:
 					if err := integrity.CheckStateProgress(ctx, db, blockReader, failFast); err != nil {
 						return err

@@ -115,12 +115,18 @@ const (
 	// snapshots, and required metadata files (salt files). This is the final check before
 	// publishing snapshots for external distribution.
 	Publishable Check = "Publishable"
+
+	// ReceiptRootIntegrity verifies that receipts from RCache domain produce receipt roots
+	// matching block headers. Reads receipts from RCache, computes the receipt root via
+	// DeriveSha, and compares it with block.header.ReceiptHash. Similar to StateRootVerifyByHistory
+	// but for receipt roots instead of state roots.
+	ReceiptRootIntegrity Check = "ReceiptRootIntegrity"
 )
 
 var FastChecks = []Check{
 	Blocks, HeaderNoGaps, BlocksTxnID, InvertedIndex, StateProgress, HistoryNoSystemTxs,
 	CommitmentKvi, ReceiptsNoDups, RCacheNoDups, CommitmentRoot,
-	CommitmentHistVal, StateRootVerifyByHistory, Publishable,
+	CommitmentHistVal, StateRootVerifyByHistory, ReceiptRootIntegrity, Publishable,
 }
 
 var SlowChecks = []Check{StateVerify}
