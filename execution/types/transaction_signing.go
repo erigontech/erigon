@@ -359,6 +359,10 @@ func (sg Signer) ChainID() *uint256.Int {
 	return &sg.chainID
 }
 
+// SetMalleable sets whether the signer accepts malleable (pre-EIP-2) signatures
+// where S > secp256k1n/2. Only relevant for legacy transactions.
+func (sg *Signer) SetMalleable(v bool) { sg.malleable = v }
+
 // Equal returns true if the given signer is the same as the receiver.
 func (sg Signer) Equal(other Signer) bool {
 	return sg.chainID.Eq(&other.chainID) &&

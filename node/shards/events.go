@@ -88,6 +88,8 @@ func (e *Events) AddReceiptsSubscription() (chan []*remoteproto.SubscribeReceipt
 	id := e.id
 	e.receiptsSubscriptions[id] = ch
 	return ch, func() {
+		e.lock.Lock()
+		defer e.lock.Unlock()
 		delete(e.receiptsSubscriptions, id)
 		close(ch)
 	}
@@ -113,6 +115,8 @@ func (e *Events) AddNewSnapshotSubscription() (chan struct{}, func()) {
 	id := e.id
 	e.newSnapshotSubscription[id] = ch
 	return ch, func() {
+		e.lock.Lock()
+		defer e.lock.Unlock()
 		delete(e.newSnapshotSubscription, id)
 		close(ch)
 	}
@@ -126,6 +130,8 @@ func (e *Events) AddRetirementStartSubscription() (chan bool, func()) {
 	id := e.id
 	e.retirementStartSubscription[id] = ch
 	return ch, func() {
+		e.lock.Lock()
+		defer e.lock.Unlock()
 		delete(e.retirementStartSubscription, id)
 		close(ch)
 	}
@@ -139,6 +145,8 @@ func (e *Events) AddRetirementDoneSubscription() (chan struct{}, func()) {
 	id := e.id
 	e.retirementDoneSubscription[id] = ch
 	return ch, func() {
+		e.lock.Lock()
+		defer e.lock.Unlock()
 		delete(e.retirementDoneSubscription, id)
 		close(ch)
 	}
@@ -152,6 +160,8 @@ func (e *Events) AddLogsSubscription() (chan []*remoteproto.SubscribeLogsReply, 
 	id := e.id
 	e.logsSubscriptions[id] = ch
 	return ch, func() {
+		e.lock.Lock()
+		defer e.lock.Unlock()
 		delete(e.logsSubscriptions, id)
 		close(ch)
 	}
