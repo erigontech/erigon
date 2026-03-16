@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package builderstages
+package builder
 
 import (
 	"context"
@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
@@ -128,7 +127,7 @@ type BuilderCreateBlockCfg struct {
 	builder                BuilderState
 	chainConfig            *chain.Config
 	engine                 rules.Engine
-	blockBuilderParameters *builder.Parameters
+	blockBuilderParameters *Parameters
 	blockReader            services.FullBlockReader
 }
 
@@ -136,7 +135,7 @@ func StageBuilderCreateBlockCfg(
 	builder BuilderState,
 	chainConfig *chain.Config,
 	engine rules.Engine,
-	blockBuilderParameters *builder.Parameters,
+	blockBuilderParameters *Parameters,
 	blockReader services.FullBlockReader,
 ) BuilderCreateBlockCfg {
 	return BuilderCreateBlockCfg{
@@ -148,10 +147,12 @@ func StageBuilderCreateBlockCfg(
 	}
 }
 
-// SpawnBuilderCreateBlockStage
+// createBlock constructs the block header and selects uncles.
 // TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnBuilderCreateBlockStage(s *stagedsync.StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg BuilderCreateBlockCfg, quit <-chan struct{}, logger log.Logger) (err error) {
+func createBlock(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalTx, executionAt uint64, cfg BuilderCreateBlockCfg, logger log.Logger) (err error) {
+	const logPrefix = "BuilderCreateBlock"
+
 	current := cfg.builder.BuiltBlock
 	*current = BuiltBlock{}             // always start with a clean state
 	var txPoolLocals []accounts.Address //txPoolV2 has no concept of local addresses (yet?)
@@ -162,11 +163,6 @@ func SpawnBuilderCreateBlockStage(s *stagedsync.StageState, sd *execctx.SharedDo
 		staleThreshold = 7
 	)
 
-	logPrefix := s.LogPrefix()
-	executionAt, err := s.ExecutionAt(tx)
-	if err != nil {
-		return fmt.Errorf("getting last executed block: %w", err)
-	}
 	parent := rawdb.ReadHeaderByNumber(tx, executionAt)
 	if parent == nil { // todo: how to return error and don't stop Erigon?
 		return fmt.Errorf("empty block %d", executionAt)
@@ -233,7 +229,7 @@ func SpawnBuilderCreateBlockStage(s *stagedsync.StageState, sd *execctx.SharedDo
 		uncles:    mapset.NewSet[common.Hash](),
 	}
 
-	header := builder.MakeEmptyHeader(parent, cfg.chainConfig, timestamp, cfg.builder.BuilderConfig.GasLimit)
+	header := MakeEmptyHeader(parent, cfg.chainConfig, timestamp, cfg.builder.BuilderConfig.GasLimit)
 	if err := misc.VerifyGaslimit(parent.GasLimit, header.GasLimit); err != nil {
 		logger.Warn("Failed to verify gas limit given by the validator, defaulting to parent gas limit", "err", err)
 		header.GasLimit = parent.GasLimit
@@ -358,7 +354,7 @@ func readNonCanonicalHeaders(tx kv.Tx, blockNum uint64, engine rules.Engine, coi
 		return
 	}
 	for _, u := range nonCanonicalBlocks {
-		if builder.IsLocalBlock(engine, coinbase, txPoolLocals, u) {
+		if IsLocalBlock(engine, coinbase, txPoolLocals, u) {
 			localUncles[u.Hash()] = u
 		} else {
 			remoteUncles[u.Hash()] = u

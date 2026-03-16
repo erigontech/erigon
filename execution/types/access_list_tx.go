@@ -284,7 +284,6 @@ func decodeAccessList(al *AccessList, s *rlp.Stream) error {
 	if err != nil {
 		return fmt.Errorf("open accessList: %w", err)
 	}
-	var b []byte
 	i := 0
 	for _, err = s.List(); err == nil; _, err = s.List() {
 		// decode tuple
@@ -296,15 +295,12 @@ func decodeAccessList(al *AccessList, s *rlp.Stream) error {
 		if _, err = s.List(); err != nil {
 			return fmt.Errorf("open StorageKeys: %w", err)
 		}
-		for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
-			tuple.StorageKeys = append(tuple.StorageKeys, common.Hash{})
-			if len(b) != 32 {
-				return fmt.Errorf("wrong size for StorageKey: %d", len(b))
+		for s.MoreDataInList() {
+			var key common.Hash
+			if err = s.ReadBytes(key[:]); err != nil {
+				return fmt.Errorf("read StorageKey: %w", err)
 			}
-			copy(tuple.StorageKeys[len(tuple.StorageKeys)-1][:], b)
-		}
-		if !errors.Is(err, rlp.EOL) {
-			return fmt.Errorf("read StorageKey: %w", err)
+			tuple.StorageKeys = append(tuple.StorageKeys, key)
 		}
 		// end of StorageKeys list
 		if err = s.ListEnd(); err != nil {
@@ -330,35 +326,27 @@ func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	var b []byte
-	if b, err = s.Uint256Bytes(); err != nil {
+	tx.ChainID = new(uint256.Int)
+	if err = s.ReadUint256(tx.ChainID); err != nil {
 		return fmt.Errorf("read ChainID: %w", err)
 	}
-	tx.ChainID = new(uint256.Int).SetBytes(b)
 	if tx.Nonce, err = s.Uint(); err != nil {
 		return fmt.Errorf("read Nonce: %w", err)
 	}
-	if b, err = s.Uint256Bytes(); err != nil {
+	tx.GasPrice = new(uint256.Int)
+	if err = s.ReadUint256(tx.GasPrice); err != nil {
 		return fmt.Errorf("read GasPrice: %w", err)
 	}
-	tx.GasPrice = new(uint256.Int).SetBytes(b)
 	if tx.GasLimit, err = s.Uint(); err != nil {
 		return fmt.Errorf("read GasLimit: %w", err)
 	}
-	if b, err = s.Bytes(); err != nil {
+	if err = rlp.DecodeOptionalAddress(&tx.To, s); err != nil {
 		return fmt.Errorf("read To: %w", err)
 	}
-	if len(b) > 0 && len(b) != 20 {
-		return fmt.Errorf("wrong size for To: %d", len(b))
-	}
-	if len(b) > 0 {
-		tx.To = &common.Address{}
-		copy((*tx.To)[:], b)
-	}
-	if b, err = s.Uint256Bytes(); err != nil {
+	tx.Value = new(uint256.Int)
+	if err = s.ReadUint256(tx.Value); err != nil {
 		return fmt.Errorf("read Value: %w", err)
 	}
-	tx.Value = new(uint256.Int).SetBytes(b)
 	if tx.Data, err = s.Bytes(); err != nil {
 		return fmt.Errorf("read Data: %w", err)
 	}
@@ -368,18 +356,15 @@ func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("read AccessList: %w", err)
 	}
 	// decode V
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&tx.V); err != nil {
 		return fmt.Errorf("read V: %w", err)
 	}
-	tx.V.SetBytes(b)
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&tx.R); err != nil {
 		return fmt.Errorf("read R: %w", err)
 	}
-	tx.R.SetBytes(b)
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&tx.S); err != nil {
 		return fmt.Errorf("read S: %w", err)
 	}
-	tx.S.SetBytes(b)
 	if err := s.ListEnd(); err != nil {
 		return fmt.Errorf("close AccessListTx: %w", err)
 	}

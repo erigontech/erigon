@@ -520,10 +520,18 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			}
 		}
 
-		if err := se.rs.ApplyTxState(ctx, se.applyTx, txTask.BlockNumber(), txTask.TxNum, nil,
-			txTask.BalanceIncreaseSet, applyReceipt, se.blobGasUsed, result.Logs, result.TraceFroms, result.TraceTos,
-			se.cfg.chainConfig, txTask.Rules(), txTask.HistoryExecution); err != nil {
-			return false, err
+		if !txTask.HistoryExecution {
+			if err := se.rs.ApplyStateWrites(ctx, se.applyTx, txTask.BlockNumber(), txTask.TxNum, nil,
+				txTask.BalanceIncreaseSet, txTask.Rules()); err != nil {
+				return false, err
+			}
+			if err := se.rs.ApplyTxIndexes(se.applyTx, txTask.TxNum, applyReceipt, se.blobGasUsed,
+				result.Logs, result.TraceFroms, result.TraceTos); err != nil {
+				return false, err
+			}
+			if err := se.rs.CommitStepBoundary(ctx, se.applyTx, txTask.BlockNumber(), txTask.TxNum); err != nil {
+				return false, err
+			}
 		}
 
 		se.doms.SetTxNum(txTask.TxNum)

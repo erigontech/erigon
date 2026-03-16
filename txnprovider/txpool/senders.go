@@ -138,9 +138,9 @@ func (b *BySenderAndNonce) delete(mt *metaTxn, reason txpoolcfg.DiscardReason, l
 			delete(b.senderIDTxnCount, senderID)
 		}
 
-		if mt.TxnSlot.Type == BlobTxnType && mt.TxnSlot.BlobBundles != nil {
+		if blobHashes := mt.TxnSlot.GetBlobHashes(); len(blobHashes) > 0 {
 			accBlobCount := b.senderIDBlobCount[senderID]
-			txnBlobCount := uint64(len(mt.TxnSlot.BlobBundles))
+			txnBlobCount := uint64(len(blobHashes))
 			if accBlobCount > txnBlobCount {
 				b.senderIDBlobCount[senderID] = accBlobCount - txnBlobCount
 			} else {
@@ -165,8 +165,8 @@ func (b *BySenderAndNonce) replaceOrInsert(mt *metaTxn, logger log.Logger) *meta
 	}
 
 	b.senderIDTxnCount[mt.TxnSlot.SenderID]++
-	if mt.TxnSlot.Type == BlobTxnType && mt.TxnSlot.BlobBundles != nil {
-		b.senderIDBlobCount[mt.TxnSlot.SenderID] += uint64(len(mt.TxnSlot.BlobBundles))
+	if blobHashes := mt.TxnSlot.GetBlobHashes(); len(blobHashes) > 0 {
+		b.senderIDBlobCount[mt.TxnSlot.SenderID] += uint64(len(blobHashes))
 	}
 	return nil
 }

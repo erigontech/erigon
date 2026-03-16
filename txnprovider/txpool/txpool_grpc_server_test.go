@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/types"
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
@@ -93,12 +94,15 @@ func TestQueryAllWithoutPanicUnknown(t *testing.T) {
 
 	// Prepare two alternating local transactions with the same nonce to exercise replacement
 	mkSlot := func(id byte, tip uint64) *TxnSlot {
+		to := common.Address{1}
 		s := &TxnSlot{
-			Tip:    *uint256.NewInt(tip),
-			FeeCap: *uint256.NewInt(tip),
-			Gas:    21000,
-			Nonce:  0,
-			Rlp:    []byte{id}, // ensure All() doesn't need DB to fetch
+			Txn: &types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{GasLimit: 21000, To: &to},
+				TipCap:   uint256.NewInt(tip),
+				FeeCap:   uint256.NewInt(tip),
+			},
+			Nonce: 0,
+			Rlp:   []byte{id}, // ensure All() doesn't need DB to fetch
 		}
 		s.IDHash[0] = id
 		return s

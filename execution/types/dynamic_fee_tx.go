@@ -21,7 +21,6 @@ package types
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"math/big"
 
@@ -258,39 +257,31 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	var b []byte
-	if b, err = s.Uint256Bytes(); err != nil {
+	tx.ChainID = new(uint256.Int)
+	if err = s.ReadUint256(tx.ChainID); err != nil {
 		return err
 	}
-	tx.ChainID = new(uint256.Int).SetBytes(b)
 	if tx.Nonce, err = s.Uint(); err != nil {
 		return err
 	}
-	if b, err = s.Uint256Bytes(); err != nil {
+	tx.TipCap = new(uint256.Int)
+	if err = s.ReadUint256(tx.TipCap); err != nil {
 		return err
 	}
-	tx.TipCap = new(uint256.Int).SetBytes(b)
-	if b, err = s.Uint256Bytes(); err != nil {
+	tx.FeeCap = new(uint256.Int)
+	if err = s.ReadUint256(tx.FeeCap); err != nil {
 		return err
 	}
-	tx.FeeCap = new(uint256.Int).SetBytes(b)
 	if tx.GasLimit, err = s.Uint(); err != nil {
 		return err
 	}
-	if b, err = s.Bytes(); err != nil {
+	if err = rlp.DecodeOptionalAddress(&tx.To, s); err != nil {
 		return err
 	}
-	if len(b) > 0 && len(b) != 20 {
-		return fmt.Errorf("wrong size for To: %d", len(b))
-	}
-	if len(b) > 0 {
-		tx.To = &common.Address{}
-		copy((*tx.To)[:], b)
-	}
-	if b, err = s.Uint256Bytes(); err != nil {
+	tx.Value = new(uint256.Int)
+	if err = s.ReadUint256(tx.Value); err != nil {
 		return err
 	}
-	tx.Value = new(uint256.Int).SetBytes(b)
 	if tx.Data, err = s.Bytes(); err != nil {
 		return err
 	}
@@ -300,18 +291,15 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode V
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&tx.V); err != nil {
 		return err
 	}
-	tx.V.SetBytes(b)
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&tx.R); err != nil {
 		return err
 	}
-	tx.R.SetBytes(b)
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.ReadUint256(&tx.S); err != nil {
 		return err
 	}
-	tx.S.SetBytes(b)
 	return s.ListEnd()
 }
 
