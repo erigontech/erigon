@@ -11,7 +11,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     concurrency:
-      group: ${{ format('{0}-{1}-{2}', github.workflow, github.job, github.ref) }}
+      group: ${{ format('{0}-lint-{1}', github.workflow, github.ref) }}
       cancel-in-progress: true
 
     steps:
