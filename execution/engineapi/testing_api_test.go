@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
@@ -612,8 +613,10 @@ func TestForkchoiceUpdatedV2PayloadAttributesWithdrawalsValidation(t *testing.T)
 			0,
 		)
 
-		err := srv.checkPayloadAttributesWithdrawalsPresence(1001, nil)
+		err := srv.checkWithdrawalsPresence(1001, nil)
 		require.Error(t, err)
+		require.Equal(t, &rpc.InvalidParamsError{Message: "missing withdrawals list"}, err)
+		err = &engine_helpers.InvalidPayloadAttributesErr
 		require.Equal(t, -38003, err.(rpc.Error).ErrorCode())
 	})
 
@@ -631,8 +634,10 @@ func TestForkchoiceUpdatedV2PayloadAttributesWithdrawalsValidation(t *testing.T)
 			0,
 		)
 
-		err := srv.checkPayloadAttributesWithdrawalsPresence(1001, make([]*types.Withdrawal, 0))
+		err := srv.checkWithdrawalsPresence(1001, make([]*types.Withdrawal, 0))
 		require.Error(t, err)
+		require.Equal(t, &rpc.InvalidParamsError{Message: "withdrawals before Shanghai"}, err)
+		err = &engine_helpers.InvalidPayloadAttributesErr
 		require.Equal(t, -38003, err.(rpc.Error).ErrorCode())
 	})
 }

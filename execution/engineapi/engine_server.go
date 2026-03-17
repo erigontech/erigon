@@ -178,23 +178,20 @@ func (e *EngineServer) Start(
 }
 
 func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals types.Withdrawals) error {
-	if !s.config.IsShanghai(time) && withdrawals != nil {
+	if s.isWithdrawalsPresenceValid(time, withdrawals) {
+		return nil
+	}
+	if !s.config.IsShanghai(time) {
 		return &rpc.InvalidParamsError{Message: "withdrawals before Shanghai"}
 	}
-	if s.config.IsShanghai(time) && withdrawals == nil {
-		return &rpc.InvalidParamsError{Message: "missing withdrawals list"}
-	}
-	return nil
+	return &rpc.InvalidParamsError{Message: "missing withdrawals list"}
 }
 
-func (s *EngineServer) checkPayloadAttributesWithdrawalsPresence(time uint64, withdrawals types.Withdrawals) error {
-	if !s.config.IsShanghai(time) && withdrawals != nil {
-		return &engine_helpers.InvalidPayloadAttributesErr
+func (s *EngineServer) isWithdrawalsPresenceValid(time uint64, withdrawals types.Withdrawals) bool {
+	if !s.config.IsShanghai(time) {
+		return withdrawals == nil
 	}
-	if s.config.IsShanghai(time) && withdrawals == nil {
-		return &engine_helpers.InvalidPayloadAttributesErr
-	}
-	return nil
+	return withdrawals != nil
 }
 
 func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, executionRequests []hexutil.Bytes) error {
@@ -729,8 +726,8 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 	if version >= clparams.CapellaVersion {
-		if err := s.checkPayloadAttributesWithdrawalsPresence(timestamp, payloadAttributes.Withdrawals); err != nil {
-			return nil, err
+		if err := s.checkWithdrawalsPresence(timestamp, payloadAttributes.Withdrawals); err != nil {
+			return nil, &engine_helpers.InvalidPayloadAttributesErr
 		}
 	}
 
