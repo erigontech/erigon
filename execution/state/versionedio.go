@@ -61,7 +61,7 @@ const (
 	ReadSetRead
 )
 
-type ReadSet map[accounts.Address]map[AccountKey]*VersionedRead
+type ReadSet map[accounts.Address]map[AccountKey]VersionedRead
 
 func (a ReadSet) Merge(b ReadSet) ReadSet {
 	if a == nil && b == nil {
@@ -87,22 +87,18 @@ func (rs ReadSet) Set(v VersionedRead) {
 	reads, ok := rs[v.Address]
 
 	if !ok {
-		rs[v.Address] = map[AccountKey]*VersionedRead{
-			{v.Path, v.Key}: &v,
+		rs[v.Address] = map[AccountKey]VersionedRead{
+			{v.Path, v.Key}: v,
 		}
 	} else {
-		if read, ok := reads[AccountKey{v.Path, v.Key}]; ok {
-			*read = v
-		} else {
-			reads[AccountKey{v.Path, v.Key}] = &v
-		}
+		reads[AccountKey{v.Path, v.Key}] = v
 	}
 }
 
 func (s ReadSet) Scan(yield func(input *VersionedRead) bool) {
 	for _, reads := range s {
 		for _, v := range reads {
-			if !yield(v) {
+			if !yield(&v) {
 				return
 			}
 		}
@@ -126,22 +122,30 @@ func (s ReadSet) Delete(addr accounts.Address, key AccountKey) {
 	}
 }
 
-type WriteSet map[accounts.Address]map[AccountKey]*VersionedWrite
+type WriteSet map[accounts.Address]map[AccountKey]VersionedWrite
 
 func (s WriteSet) Set(v VersionedWrite) {
 	writes, ok := s[v.Address]
 
 	if !ok {
-		s[v.Address] = map[AccountKey]*VersionedWrite{
-			{v.Path, v.Key}: &v,
+		s[v.Address] = map[AccountKey]VersionedWrite{
+			{v.Path, v.Key}: v,
 		}
 	} else {
-		if write, ok := writes[AccountKey{v.Path, v.Key}]; ok {
-			*write = v
-		} else {
-			writes[AccountKey{v.Path, v.Key}] = &v
+		writes[AccountKey{v.Path, v.Key}] = v
+	}
+}
+
+// UpdateVal updates the Val field of an existing entry. Returns true if the entry was found.
+func (s WriteSet) UpdateVal(addr accounts.Address, key AccountKey, val any) bool {
+	if writes, ok := s[addr]; ok {
+		if v, ok := writes[key]; ok {
+			v.Val = val
+			writes[key] = v
+			return true
 		}
 	}
+	return false
 }
 
 func (s WriteSet) Delete(addr accounts.Address, key AccountKey) {
@@ -164,7 +168,7 @@ func (s WriteSet) Len() int {
 func (s WriteSet) Scan(yield func(input *VersionedWrite) bool) {
 	for _, writes := range s {
 		for _, v := range writes {
-			if !yield(v) {
+			if !yield(&v) {
 				return
 			}
 		}
