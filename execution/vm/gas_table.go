@@ -645,6 +645,7 @@ func gasSelfdestruct(evm *EVM, callContext *CallContext, availableGas uint64, me
 	if evm.ChainRules().IsTangerineWhistle {
 		gas = params.SelfdestructGasEIP150
 		var address = accounts.InternAddress(callContext.Stack.Back(0).Bytes20())
+		callContext.callAddrTmp = address
 
 		if evm.ChainRules().IsSpuriousDragon {
 			// if empty and transfers value

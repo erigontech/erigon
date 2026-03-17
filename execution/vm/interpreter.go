@@ -97,12 +97,10 @@ func (c *CallContext) put() {
 // already interned it (EIP-2929+), the cached value is returned; otherwise
 // addrVal is interned on the spot (pre-Berlin fallback).
 func (c *CallContext) takeCallAddr(addrVal uint256.Int) accounts.Address {
-	addr := c.callAddrTmp
-	c.callAddrTmp = accounts.NilAddress
-	if addr.IsNil() {
-		addr = accounts.InternAddress(addrVal.Bytes20())
+	if c.callAddrTmp.IsNil() {
+		c.callAddrTmp = accounts.InternAddress(addrVal.Bytes20())
 	}
-	return addr
+	return c.callAddrTmp
 }
 
 // UseGas attempts the use gas and subtracts it and returns true on success
