@@ -2994,7 +2994,10 @@ func (hph *HexPatriciaHashed) Reset() {
 	hph.rootChecked = false
 	hph.rootPresent = true
 
-	if hph.branchCache != nil {
+	// Clear persistent branch cache on reset (fork/unwind) — but only
+	// for the root trie. Mounted subtries share the root's cache, so
+	// clearing once from the root is sufficient.
+	if hph.branchCache != nil && !hph.mounted {
 		hph.branchCache.Clear()
 	}
 }
