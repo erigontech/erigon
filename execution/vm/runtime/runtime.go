@@ -113,8 +113,8 @@ var contractAsAddress = accounts.InternAddress(common.BytesToAddress([]byte("con
 func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.IntraBlockState, error) {
 	if cfg == nil {
 		cfg = new(Config)
-		setDefaults(cfg)
 	}
+	setDefaults(cfg)
 
 	externalState := cfg.State != nil
 	if !externalState {
