@@ -19,14 +19,20 @@ import (
 	"github.com/erigontech/erigon/execution/vm/runtime"
 )
 
-// Well-known test addresses
+// Well-known test addresses (raw common.Address for use in program builders;
+// interned accounts.Address for use with IntraBlockState).
 var (
+	rawRouter = common.HexToAddress("0x5001")
+	rawPair   = common.HexToAddress("0x5002")
+	rawTokenA = common.HexToAddress("0x5003")
+	rawTokenB = common.HexToAddress("0x5004")
+
 	addrSender   = accounts.InternAddress(common.HexToAddress("0xCafe01"))
 	addrContract = accounts.InternAddress(common.HexToAddress("0xC0DE01"))
-	addrRouter   = accounts.InternAddress(common.HexToAddress("0x5001"))
-	addrPair     = accounts.InternAddress(common.HexToAddress("0x5002"))
-	addrTokenA   = accounts.InternAddress(common.HexToAddress("0x5003"))
-	addrTokenB   = accounts.InternAddress(common.HexToAddress("0x5004"))
+	addrRouter   = accounts.InternAddress(rawRouter)
+	addrPair     = accounts.InternAddress(rawPair)
+	addrTokenA   = accounts.InternAddress(rawTokenA)
+	addrTokenB   = accounts.InternAddress(rawTokenB)
 )
 
 // cancunConfig returns a chain config with all forks enabled through Cancun.
@@ -88,8 +94,7 @@ func deployContract(statedb *state.IntraBlockState, addr accounts.Address, code 
 
 // deployContractWithBalance deploys code and sets an ETH balance.
 func deployContractWithBalance(statedb *state.IntraBlockState, addr accounts.Address, code []byte, balance *uint256.Int) {
-	statedb.CreateAccount(addr, true)
-	statedb.SetCode(addr, code)
+	deployContract(statedb, addr, code)
 	statedb.SetBalance(addr, *balance, 0)
 }
 

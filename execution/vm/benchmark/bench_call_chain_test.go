@@ -13,14 +13,6 @@ import (
 	"github.com/erigontech/erigon/execution/vm/program"
 )
 
-// Cross-contract call addresses (raw, for Push)
-var (
-	rawRouter = common.HexToAddress("0x5001")
-	rawPair   = common.HexToAddress("0x5002")
-	rawTokenA = common.HexToAddress("0x5003")
-	rawTokenB = common.HexToAddress("0x5004")
-)
-
 // BenchmarkNestedStaticCalls measures STATICCALL overhead at various depths.
 // Each contract does minimal work (PUSH+POP) then STATICCALLs the next.
 func BenchmarkNestedStaticCalls(b *testing.B) {
@@ -31,7 +23,9 @@ func BenchmarkNestedStaticCalls(b *testing.B) {
 
 			// Deploy depth chain: addr[0] → addr[1] → ... → addr[depth-1]
 			addrs := makeAddrs(depth)
-			deployCallChain(statedb, addrs) // staticcall chain
+			deployChain(statedb, addrs, func(p *program.Program, next common.Address) *program.Program {
+				return p.StaticCall(nil, next, 0, 0, 0, 0)
+			})
 
 			// Entry point loops: JUMPDEST, STATICCALL(addr[0]), POP, JUMP
 			entry, lbl := program.New().Jumpdest()
@@ -57,7 +51,9 @@ func BenchmarkDelegateCallProxy(b *testing.B) {
 			cfg, statedb := benchConfig(b, 100_000_000)
 
 			addrs := makeAddrs(layers)
-			deployDelegateChain(statedb, addrs)
+			deployChain(statedb, addrs, func(p *program.Program, next common.Address) *program.Program {
+				return p.DelegateCall(nil, next, 0, 0, 0, 0)
+			})
 
 			// Entry: loop calling first proxy
 			entry, lbl := program.New().Jumpdest()
@@ -159,34 +155,24 @@ func makeAddrs(n int) []chainAddr {
 	return addrs
 }
 
-// deployCallChain deploys a chain where each contract STATICCALLs the next.
-// The last contract just does PUSH+POP+STOP.
-func deployCallChain(statedb *state.IntraBlockState, addrs []chainAddr) {
+// chainCallFn builds the intermediate-node bytecode for a call chain.
+// It receives a fresh program and the next contract's address, and must return the program
+// after emitting the call opcode (without the trailing POP+STOP, which deployChain appends).
+type chainCallFn func(p *program.Program, next common.Address) *program.Program
+
+// deployChain deploys a call chain where each intermediate contract invokes the next
+// using the call opcode produced by build. The leaf contract does PUSH+POP+STOP.
+func deployChain(statedb *state.IntraBlockState, addrs []chainAddr, build chainCallFn) {
 	for i, a := range addrs {
+		var code []byte
 		if i == len(addrs)-1 {
 			// Leaf: minimal work
-			code := program.New().Push(42).Op(vm.POP, vm.STOP).Bytes()
-			deployContract(statedb, a.interned, code)
+			code = program.New().Push(42).Op(vm.POP, vm.STOP).Bytes()
 		} else {
-			// Intermediate: STATICCALL next, POP result, STOP
-			p := program.New()
-			code := p.StaticCall(nil, addrs[i+1].raw, 0, 0, 0, 0).Op(vm.POP, vm.STOP).Bytes()
-			deployContract(statedb, a.interned, code)
+			// Intermediate: call next, POP result, STOP
+			code = build(program.New(), addrs[i+1].raw).Op(vm.POP, vm.STOP).Bytes()
 		}
-	}
-}
-
-// deployDelegateChain deploys a chain where each contract DELEGATECALLs the next.
-func deployDelegateChain(statedb *state.IntraBlockState, addrs []chainAddr) {
-	for i, a := range addrs {
-		if i == len(addrs)-1 {
-			code := program.New().Push(42).Op(vm.POP, vm.STOP).Bytes()
-			deployContract(statedb, a.interned, code)
-		} else {
-			p := program.New()
-			code := p.DelegateCall(nil, addrs[i+1].raw, 0, 0, 0, 0).Op(vm.POP, vm.STOP).Bytes()
-			deployContract(statedb, a.interned, code)
-		}
+		deployContract(statedb, a.interned, code)
 	}
 }
 

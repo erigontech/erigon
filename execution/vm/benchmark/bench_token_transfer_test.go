@@ -63,9 +63,11 @@ func BenchmarkERC20Transfer(b *testing.B) {
 		cfg, statedb := benchConfig(b, 100_000_000)
 		deployContract(statedb, addrContract, code)
 		setStorage(statedb, addrContract, slots)
-		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
 		for b.Loop() {
+			snap := statedb.PushSnapshot()
 			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+			statedb.RevertToSnapshot(snap, nil)
+			statedb.PopSnapshot(snap)
 		}
 	})
 }
@@ -105,9 +107,11 @@ func BenchmarkERC20TransferFrom(b *testing.B) {
 		cfg, statedb := benchConfig(b, 100_000_000)
 		deployContract(statedb, addrContract, code)
 		setStorage(statedb, addrContract, slots)
-		prepareAndCall(cfg, addrContract, nil) //nolint:errcheck // OOG is expected termination for looping benchmarks
 		for b.Loop() {
+			snap := statedb.PushSnapshot()
 			prepareAndCall(cfg, addrContract, nil) //nolint:errcheck
+			statedb.RevertToSnapshot(snap, nil)
+			statedb.PopSnapshot(snap)
 		}
 	})
 }
