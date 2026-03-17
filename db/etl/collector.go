@@ -225,7 +225,6 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	var canUseAppend bool
 	isDupSort := kv.ChaindataTablesCfg[bucket].Flags&kv.DupSort != 0
 
-	var putCount, appendCount, appendDupCount, dupSkipCount int
 	// prevLoadK/prevLoadV track the previous (key, value) to skip duplicates for DupSort AppendDup.
 	// Put handles duplicates idempotently, but AppendDup rejects them with MDBX_EKEYMISMATCH.
 	var prevLoadK, prevLoadV []byte
@@ -257,17 +256,14 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 				// Skip duplicate (key, value) pairs — data is sorted by (key, value),
 				// so duplicates are always adjacent.
 				if bytes.Equal(k, prevLoadK) && bytes.Equal(v, prevLoadV) {
-					dupSkipCount++
 					return nil
 				}
 				prevLoadK = append(prevLoadK[:0], k...)
 				prevLoadV = append(prevLoadV[:0], v...)
-				appendDupCount++
 				if err := cursor.(kv.RwCursorDupSort).AppendDup(k, v); err != nil {
 					return fmt.Errorf("%s: bucket: %s, appendDup: k=%x, %w", c.logPrefix, bucket, k, err)
 				}
 			} else {
-				appendCount++
 				if err := cursor.Append(k, v); err != nil {
 					return fmt.Errorf("%s: bucket: %s, append: k=%x, v=%x, %w", c.logPrefix, bucket, k, v, err)
 				}
@@ -275,7 +271,6 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 
 			return nil
 		}
-		putCount++
 		if err := cursor.Put(k, v); err != nil {
 			return fmt.Errorf("%s: put: k=%x, %w", c.logPrefix, k, err)
 		}
@@ -293,20 +288,6 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	heapSortValues := haveSortingGuaranties && isDupSort && c.sortValues
 	if err := mergeSortFiles(c.logPrefix, c.dataProviders, simpleLoad, args, c.buf, heapSortValues); err != nil {
 		return fmt.Errorf("loadIntoTable %s: %w", toBucket, err)
-	}
-	if bucket != "" && i > 0 {
-		total := putCount + appendCount + appendDupCount
-		appendRatio := 0
-		if total > 0 {
-			appendRatio = (appendCount + appendDupCount) * 100 / total
-		}
-		log.Log(log.LvlInfo, fmt.Sprintf("[%s] ETL Load stats", c.logPrefix),
-			"bucket", bucket, "records", i,
-			"put", putCount, "append", appendCount, "appendDup", appendDupCount,
-			"dupSkip", dupSkipCount,
-			"appendRatio", fmt.Sprintf("%d%%", appendRatio),
-			"isDupSort", isDupSort, "sortValues", c.sortValues,
-		)
 	}
 	return nil
 }
