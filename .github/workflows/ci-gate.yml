@@ -30,6 +30,7 @@ concurrency:
 
 jobs:
   lint:
+    if: github.event_name == 'pull_request'
     uses: ./.github/workflows/lint.yml
     secrets: inherit
 
