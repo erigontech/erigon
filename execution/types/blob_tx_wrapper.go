@@ -432,6 +432,7 @@ func (txw *BlobTxWrapper) MarshalBinaryWrapped(w io.Writer) error {
 	}
 	return nil
 }
+
 // ConvertToV1 converts a legacy (wrapper_version=0) blob sidecar into
 // wrapper_version=1 by computing EIP-7594 cell proofs from the blobs.
 // Returns the re-encoded wrapped transaction bytes.
