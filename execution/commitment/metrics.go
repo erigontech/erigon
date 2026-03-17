@@ -23,26 +23,25 @@ type CsvMetrics interface {
 }
 
 type Metrics struct {
-	Accounts        *AccountMetrics
-	Branches        *BranchMetrics
-	updates         atomic.Uint64
-	addressKeys     atomic.Uint64
-	storageKeys     atomic.Uint64
-	loadBranch      atomic.Uint64
-	loadAccount     atomic.Uint64
-	loadStorage     atomic.Uint64
-	cacheBranch     atomic.Uint64
-	cacheAccount    atomic.Uint64
-	cacheStorage    atomic.Uint64
-	missBranch      atomic.Uint64
-	missAccount     atomic.Uint64
-	missStorage     atomic.Uint64
-	updateBranch    atomic.Uint64
-	loadDepths      [10]uint64
-	unfolds         atomic.Uint64
-	spentUnfolding  time.Duration
-	spentFolding    time.Duration
-	spentProcessing time.Duration
+	Accounts         *AccountMetrics
+	Branches         *BranchMetrics
+	updates          atomic.Uint64
+	addressKeys      atomic.Uint64
+	storageKeys      atomic.Uint64
+	loadBranch       atomic.Uint64
+	loadAccount      atomic.Uint64
+	loadStorage      atomic.Uint64
+	cacheBranch      atomic.Uint64
+	cacheAccount     atomic.Uint64
+	cacheStorage     atomic.Uint64
+	pCacheBranchHit  atomic.Uint64 // persistent branch cache hits
+	pCacheBranchMiss atomic.Uint64 // persistent branch cache misses
+	updateBranch     atomic.Uint64
+	loadDepths       [10]uint64
+	unfolds          atomic.Uint64
+	spentUnfolding   time.Duration
+	spentFolding     time.Duration
+	spentProcessing  time.Duration
 	// metric config related
 	metricsFilePrefix        string
 	collectCommitmentMetrics bool
@@ -50,27 +49,26 @@ type Metrics struct {
 }
 
 type MetricValues struct {
-	mu              *sync.RWMutex
-	Accounts        map[string]*AccountStats
-	Branches        map[string]*BranchStats
-	Updates         uint64
-	AddressKeys     uint64
-	StorageKeys     uint64
-	LoadBranch      uint64
-	LoadAccount     uint64
-	LoadStorage     uint64
-	CacheBranch     uint64
-	CacheAccount    uint64
-	CacheStorage    uint64
-	MissBranch      uint64
-	MissAccount     uint64
-	MissStorage     uint64
-	UpdateBranch    uint64
-	LoadDepths      [10]uint64
-	Unfolds         uint64
-	SpentUnfolding  time.Duration
-	SpentFolding    time.Duration
-	SpentProcessing time.Duration
+	mu               *sync.RWMutex
+	Accounts         map[string]*AccountStats
+	Branches         map[string]*BranchStats
+	Updates          uint64
+	AddressKeys      uint64
+	StorageKeys      uint64
+	LoadBranch       uint64
+	LoadAccount      uint64
+	LoadStorage      uint64
+	CacheBranch      uint64
+	CacheAccount     uint64
+	CacheStorage     uint64
+	PCacheBranchHit  uint64
+	PCacheBranchMiss uint64
+	UpdateBranch     uint64
+	LoadDepths       [10]uint64
+	Unfolds          uint64
+	SpentUnfolding   time.Duration
+	SpentFolding     time.Duration
+	SpentProcessing  time.Duration
 }
 
 func (m MetricValues) RLock() {
@@ -108,27 +106,26 @@ func (m *Metrics) EnableCsvMetrics(filePathPrefix string) {
 
 func (m *Metrics) AsValues() MetricValues {
 	return MetricValues{
-		mu:              &m.Accounts.m,
-		Accounts:        m.Accounts.AccountStats,
-		Branches:        m.Branches.BranchStats,
-		Updates:         m.updates.Load(),
-		AddressKeys:     m.addressKeys.Load(),
-		StorageKeys:     m.storageKeys.Load(),
-		LoadBranch:      m.loadBranch.Load(),
-		LoadAccount:     m.loadAccount.Load(),
-		LoadStorage:     m.loadStorage.Load(),
-		CacheBranch:     m.cacheBranch.Load(),
-		CacheAccount:    m.cacheAccount.Load(),
-		CacheStorage:    m.cacheStorage.Load(),
-		MissBranch:      m.missBranch.Load(),
-		MissAccount:     m.missAccount.Load(),
-		MissStorage:     m.missStorage.Load(),
-		UpdateBranch:    m.updateBranch.Load(),
-		LoadDepths:      m.loadDepths,
-		Unfolds:         m.unfolds.Load(),
-		SpentUnfolding:  m.spentUnfolding,
-		SpentFolding:    m.spentFolding,
-		SpentProcessing: m.spentProcessing,
+		mu:               &m.Accounts.m,
+		Accounts:         m.Accounts.AccountStats,
+		Branches:         m.Branches.BranchStats,
+		Updates:          m.updates.Load(),
+		AddressKeys:      m.addressKeys.Load(),
+		StorageKeys:      m.storageKeys.Load(),
+		LoadBranch:       m.loadBranch.Load(),
+		LoadAccount:      m.loadAccount.Load(),
+		LoadStorage:      m.loadStorage.Load(),
+		CacheBranch:      m.cacheBranch.Load(),
+		CacheAccount:     m.cacheAccount.Load(),
+		CacheStorage:     m.cacheStorage.Load(),
+		PCacheBranchHit:  m.pCacheBranchHit.Load(),
+		PCacheBranchMiss: m.pCacheBranchMiss.Load(),
+		UpdateBranch:     m.updateBranch.Load(),
+		LoadDepths:       m.loadDepths,
+		Unfolds:          m.unfolds.Load(),
+		SpentUnfolding:   m.spentUnfolding,
+		SpentFolding:     m.spentFolding,
+		SpentProcessing:  m.spentProcessing,
 	}
 }
 
@@ -154,8 +151,7 @@ func (m *Metrics) logMetrics() []any {
 		"rds", common.PrettyCounter(m.loadStorage.Load()), "wrb", common.PrettyCounter(m.updateBranch.Load()),
 		"cb", common.PrettyCounter(m.cacheBranch.Load()), "ca", common.PrettyCounter(m.cacheAccount.Load()),
 		"cs", common.PrettyCounter(m.cacheStorage.Load()),
-		"mb", common.PrettyCounter(m.missBranch.Load()), "ma", common.PrettyCounter(m.missAccount.Load()),
-		"ms", common.PrettyCounter(m.missStorage.Load()),
+		"pbh", common.PrettyCounter(m.pCacheBranchHit.Load()), "pbm", common.PrettyCounter(m.pCacheBranchMiss.Load()),
 		"fld", common.PrettyCounter(m.unfolds.Load()), "pdur", common.Round(m.spentProcessing, 0).String(),
 		"fdur", common.Round(m.spentFolding, 0).String(), "ufdur", common.Round(m.spentUnfolding, 0),
 	}
@@ -279,9 +275,8 @@ func (m *Metrics) Reset() {
 	m.loadAccount.Store(0)
 	m.loadStorage.Store(0)
 	m.updateBranch.Store(0)
-	m.missBranch.Store(0)
-	m.missAccount.Store(0)
-	m.missStorage.Store(0)
+	m.pCacheBranchHit.Store(0)
+	m.pCacheBranchMiss.Store(0)
 	m.unfolds.Store(0)
 
 	if !m.collectCommitmentMetrics {

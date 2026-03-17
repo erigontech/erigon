@@ -104,6 +104,10 @@ type HexPatriciaHashed struct {
 	cache             *WarmupCache
 	enableWarmupCache bool // if true, enables warmup cache during Process (false by default)
 
+	// Persistent branch cache that survives across Process() calls.
+	// Populated on-demand during reads, invalidated on branch writes in fold().
+	branchCache *BranchCache
+
 	// leaveDeferredForCaller when true, Process() leaves deferred updates on the branchEncoder
 	// for the caller to handle via TakeDeferredUpdates(). When false (default), Process()
 	// applies deferred updates inline.
@@ -2052,6 +2056,9 @@ func (hph *HexPatriciaHashed) foldBranch(row int, nibble, upDepth, depth int16, 
 	if hph.trace {
 		fmt.Printf("} [%x]\n", upCell.hash[:])
 	}
+	if hph.branchCache != nil {
+		hph.branchCache.Invalidate(updateKey)
+	}
 	return nil
 }
 
@@ -2212,6 +2219,9 @@ func (hph *HexPatriciaHashed) collectDeleteUpdate(updateKey []byte, row int, evi
 		}
 		if evictCache && hph.cache != nil {
 			hph.cache.EvictBranch(updateKey)
+		}
+		if evictCache && hph.branchCache != nil {
+			hph.branchCache.Invalidate(updateKey)
 		}
 	}
 	return nil
@@ -2916,9 +2926,11 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	return rootHash, nil
 }
 
-func (hph *HexPatriciaHashed) SetTrace(trace bool)           { hph.trace = trace }
-func (hph *HexPatriciaHashed) SetTraceDomain(trace bool)     { hph.traceDomain = trace }
-func (hph *HexPatriciaHashed) EnableWarmupCache(enable bool) { hph.enableWarmupCache = enable }
+func (hph *HexPatriciaHashed) SetTrace(trace bool)               { hph.trace = trace }
+func (hph *HexPatriciaHashed) SetTraceDomain(trace bool)         { hph.traceDomain = trace }
+func (hph *HexPatriciaHashed) EnableWarmupCache(enable bool)     { hph.enableWarmupCache = enable }
+func (hph *HexPatriciaHashed) SetBranchCache(cache *BranchCache) { hph.branchCache = cache }
+func (hph *HexPatriciaHashed) BranchCache() *BranchCache         { return hph.branchCache }
 
 func (hph *HexPatriciaHashed) GetCapture(truncate bool) []string {
 	capture := hph.capture
@@ -2993,6 +3005,7 @@ func (hph *HexPatriciaHashed) Cache() *WarmupCache {
 
 // branchFromCacheOrDB reads branch data from cache if available, otherwise from DB.
 func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
+	// Level 1: ephemeral warmup cache (populated by warmup workers ahead of Process)
 	if hph.cache != nil {
 		if data, found := hph.cache.GetBranch(key); found {
 			if hph.metrics != nil {
@@ -3000,11 +3013,32 @@ func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 			}
 			return data, nil
 		}
+		}
+
+	// Level 2: persistent branch cache (survives across Process calls)
+	if hph.branchCache != nil {
+		if data, found := hph.branchCache.Get(key); found {
+			if hph.metrics != nil {
+				hph.metrics.pCacheBranchHit.Add(1)
+			}
+			return data, nil
+		}
 		if hph.metrics != nil {
-			hph.metrics.missBranch.Add(1)
+			hph.metrics.pCacheBranchMiss.Add(1)
 		}
 	}
+
+	// Level 3: DB read
 	data, _, err := hph.ctx.Branch(key)
+	if err != nil {
+		return nil, err
+	}
+
+	// Populate persistent cache on miss
+	if hph.branchCache != nil && len(data) > 0 {
+		hph.branchCache.Put(key, data)
+	}
+
 	return data, err
 }
 
@@ -3016,9 +3050,6 @@ func (hph *HexPatriciaHashed) accountFromCacheOrDB(plainKey []byte) (*Update, er
 				hph.metrics.cacheAccount.Add(1)
 			}
 			return update, nil
-		}
-		if hph.metrics != nil {
-			hph.metrics.missAccount.Add(1)
 		}
 	}
 	return hph.ctx.Account(plainKey)
@@ -3032,9 +3063,6 @@ func (hph *HexPatriciaHashed) storageFromCacheOrDB(plainKey []byte) (*Update, er
 				hph.metrics.cacheStorage.Add(1)
 			}
 			return update, nil
-		}
-		if hph.metrics != nil {
-			hph.metrics.missStorage.Add(1)
 		}
 	}
 	return hph.ctx.Storage(plainKey)

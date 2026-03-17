@@ -100,6 +100,8 @@ type Trie interface {
 	EnableCsvMetrics(filePathPrefix string)
 	// EnableWarmupCache enables/disables warmup cache during Process (false by default)
 	EnableWarmupCache(bool)
+	// SetBranchCache sets a persistent branch cache that survives across Process() calls.
+	SetBranchCache(*BranchCache)
 
 	// Variant returns commitment trie variant
 	Variant() TrieVariant
@@ -151,10 +153,13 @@ const (
 )
 
 func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *Updates) {
+	branchCache := NewBranchCache(DefaultBranchCacheSize)
+
 	switch tv {
 	case VariantConcurrentHexPatricia:
 		root := NewHexPatriciaHashed(length.Addr, nil)
 		trie := NewConcurrentPatriciaHashed(root, nil)
+		trie.SetBranchCache(branchCache)
 		tree := NewUpdates(mode, tmpdir, KeyToHexNibbleHash)
 		// tree.SetConcurrentCommitment(true) // first run always sequential
 		return trie, tree
@@ -169,6 +174,7 @@ func InitializeTrieAndUpdates(tv TrieVariant, mode Mode, tmpdir string) (Trie, *
 	default:
 
 		trie := NewHexPatriciaHashed(length.Addr, nil)
+		trie.SetBranchCache(branchCache)
 		tree := NewUpdates(mode, tmpdir, KeyToHexNibbleHash)
 		return trie, tree
 	}

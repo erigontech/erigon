@@ -170,6 +170,14 @@ func (p *ConcurrentPatriciaHashed) EnableWarmupCache(b bool) {
 		p.mounts[i].EnableWarmupCache(b)
 	}
 }
+func (p *ConcurrentPatriciaHashed) SetBranchCache(cache *BranchCache) {
+	p.root.SetBranchCache(cache)
+	// Subtries share the root's persistent cache — reads are LRU-safe,
+	// and keys naturally partition by first nibble so contention is minimal.
+	for i := range p.mounts {
+		p.mounts[i].SetBranchCache(cache)
+	}
+}
 func (p *ConcurrentPatriciaHashed) GetCapture(truncate bool) []string {
 	capture := p.root.GetCapture(truncate)
 	if truncate {
