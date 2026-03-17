@@ -2883,6 +2883,9 @@ func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 			}
 			return data, nil
 		}
+		if hph.metrics != nil {
+			hph.metrics.missBranch.Add(1)
+		}
 	}
 	data, _, err := hph.ctx.Branch(key)
 	return data, err
@@ -2897,6 +2900,9 @@ func (hph *HexPatriciaHashed) accountFromCacheOrDB(plainKey []byte) (*Update, er
 			}
 			return update, nil
 		}
+		if hph.metrics != nil {
+			hph.metrics.missAccount.Add(1)
+		}
 	}
 	return hph.ctx.Account(plainKey)
 }
@@ -2909,6 +2915,9 @@ func (hph *HexPatriciaHashed) storageFromCacheOrDB(plainKey []byte) (*Update, er
 				hph.metrics.cacheStorage.Add(1)
 			}
 			return update, nil
+		}
+		if hph.metrics != nil {
+			hph.metrics.missStorage.Add(1)
 		}
 	}
 	return hph.ctx.Storage(plainKey)
