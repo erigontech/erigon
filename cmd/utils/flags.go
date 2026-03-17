@@ -118,11 +118,11 @@ var (
 		Name:  "whitelist",
 		Usage: "Comma separated block number-to-hash mappings to enforce (<number>=<hash>)",
 	}
-	OverrideOsakaFlag = flags.BigFlag{
+	OverrideOsakaFlag = cli.Uint64Flag{
 		Name:  "override.osaka",
 		Usage: "Manually specify the Osaka fork time, overriding the bundled setting",
 	}
-	OverrideAmsterdamFlag = flags.BigFlag{
+	OverrideAmsterdamFlag = cli.Uint64Flag{
 		Name:  "override.amsterdam",
 		Usage: "Manually specify the Amsterdam fork time, overriding the bundled setting",
 	}
@@ -402,7 +402,12 @@ var (
 	RpcBlockRangeLimit = cli.IntFlag{
 		Name:  "rpc.blockrange.limit",
 		Usage: "Maximum block range (end - begin) allowed for range queries (0 = unlimited)",
-		Value: 0,
+		Value: 1_000,
+	}
+	RpcGetLogsMaxResults = cli.IntFlag{
+		Name:  "rpc.logs.maxresults",
+		Usage: "Maximum number of logs returned by eth_getLogs, erigon_getLogs, erigon_getLatestLogs (0 = unlimited)",
+		Value: 20_000,
 	}
 	RpcTraceCompatFlag = cli.BoolFlag{
 		Name:  "trace.compat",
@@ -930,59 +935,6 @@ var (
 		Value: 25,
 	}
 
-	SilkwormExecutionFlag = cli.BoolFlag{
-		Name:  "silkworm.exec",
-		Usage: "Enable Silkworm block execution",
-	}
-	SilkwormRpcDaemonFlag = cli.BoolFlag{
-		Name:  "silkworm.rpc",
-		Usage: "Enable embedded Silkworm RPC service",
-	}
-	SilkwormSentryFlag = cli.BoolFlag{
-		Name:  "silkworm.sentry",
-		Usage: "Enable embedded Silkworm Sentry service",
-	}
-	SilkwormVerbosityFlag = cli.StringFlag{
-		Name:  "silkworm.verbosity",
-		Usage: "Set the log level for Silkworm console logs",
-		Value: log.LvlInfo.String(),
-	}
-	SilkwormNumContextsFlag = cli.UintFlag{
-		Name:  "silkworm.contexts",
-		Usage: "Number of I/O contexts used in embedded Silkworm RPC and Sentry services (zero means use default in Silkworm)",
-		Value: 0,
-	}
-	SilkwormRpcLogEnabledFlag = cli.BoolFlag{
-		Name:  "silkworm.rpc.log",
-		Usage: "Enable interface log for embedded Silkworm RPC service",
-		Value: false,
-	}
-	SilkwormRpcLogMaxFileSizeFlag = cli.UintFlag{
-		Name:  "silkworm.rpc.log.maxsize",
-		Usage: "Max interface log file size in MB for embedded Silkworm RPC service",
-		Value: 1,
-	}
-	SilkwormRpcLogMaxFilesFlag = cli.UintFlag{
-		Name:  "silkworm.rpc.log.maxfiles",
-		Usage: "Max interface log files for embedded Silkworm RPC service",
-		Value: 100,
-	}
-	SilkwormRpcLogDumpResponseFlag = cli.BoolFlag{
-		Name:  "silkworm.rpc.log.response",
-		Usage: "Dump responses in interface logs for embedded Silkworm RPC service",
-		Value: false,
-	}
-	SilkwormRpcNumWorkersFlag = cli.UintFlag{
-		Name:  "silkworm.rpc.workers",
-		Usage: "Number of worker threads used in embedded Silkworm RPC service (zero means use default in Silkworm)",
-		Value: 0,
-	}
-	SilkwormRpcJsonCompatibilityFlag = cli.BoolFlag{
-		Name:  "silkworm.rpc.compatibility",
-		Usage: "Preserve JSON-RPC compatibility using embedded Silkworm RPC service",
-		Value: true,
-	}
-
 	BeaconAPIFlag = cli.StringSliceFlag{
 		Name:  "beacon.api",
 		Usage: "Enable beacon API (available endpoints: beacon, builder, config, debug, events, node, validator, lighthouse)",
@@ -1292,6 +1244,8 @@ func NewP2PConfig(
 		enodeDBPath = filepath.Join(dirs.Nodes, "eth68")
 	case direct.ETH69:
 		enodeDBPath = filepath.Join(dirs.Nodes, "eth69")
+	case direct.ETH70:
+		enodeDBPath = filepath.Join(dirs.Nodes, "eth70")
 	default:
 		return nil, fmt.Errorf("unknown protocol: %v", protocol)
 	}
@@ -1807,21 +1761,6 @@ func setCaplin(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.CaplinConfig.CustomGenesisStatePath = ctx.String(CaplinCustomGenesisFlag.Name)
 }
 
-func setSilkworm(ctx *cli.Context, cfg *ethconfig.Config) {
-	cfg.SilkwormExecution = ctx.Bool(SilkwormExecutionFlag.Name)
-	cfg.SilkwormRpcDaemon = ctx.Bool(SilkwormRpcDaemonFlag.Name)
-	cfg.SilkwormSentry = ctx.Bool(SilkwormSentryFlag.Name)
-	cfg.SilkwormVerbosity = ctx.String(SilkwormVerbosityFlag.Name)
-	cfg.SilkwormNumContexts = uint32(ctx.Uint64(SilkwormNumContextsFlag.Name))
-	cfg.SilkwormRpcLogEnabled = ctx.Bool(SilkwormRpcLogEnabledFlag.Name)
-	cfg.SilkwormRpcLogDirPath = logging.LogDirPath(ctx)
-	cfg.SilkwormRpcLogMaxFileSize = uint16(ctx.Uint64(SilkwormRpcLogMaxFileSizeFlag.Name))
-	cfg.SilkwormRpcLogMaxFiles = uint16(ctx.Uint(SilkwormRpcLogMaxFilesFlag.Name))
-	cfg.SilkwormRpcLogDumpResponse = ctx.Bool(SilkwormRpcLogDumpResponseFlag.Name)
-	cfg.SilkwormRpcNumWorkers = uint32(ctx.Uint64(SilkwormRpcNumWorkersFlag.Name))
-	cfg.SilkwormRpcJsonCompatibility = ctx.Bool(SilkwormRpcJsonCompatibilityFlag.Name)
-}
-
 // CheckExclusive verifies that only a single instance of the provided flags was
 // set by the user. Each flag might optionally be followed by a string type to
 // specialize it further.
@@ -1947,7 +1886,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	setBuilder(ctx, &cfg.Builder)
 	setWhitelist(ctx, cfg)
 	setBorConfig(ctx, cfg, nodeConfig, logger)
-	setSilkworm(ctx, cfg)
 	if err := setBeaconAPI(ctx, cfg); err != nil {
 		log.Error("Failed to set beacon API", "err", err)
 	}
@@ -1995,10 +1933,10 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 			return
 		}
 		cfg.Genesis = spec.Genesis
-		SetDNSDiscoveryDefaults(cfg, spec.GenesisHash)
+		SetDNSDiscoveryDefaults(cfg, spec)
 	case "":
 		if cfg.NetworkID == 1 {
-			SetDNSDiscoveryDefaults(cfg, chainspec.Mainnet.GenesisHash)
+			SetDNSDiscoveryDefaults(cfg, chainspec.Mainnet)
 		}
 	case networkname.Dev:
 		// Create new developer account or reuse existing one
@@ -2014,10 +1952,12 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	}
 
 	if ctx.IsSet(OverrideOsakaFlag.Name) {
-		cfg.OverrideOsakaTime = flags.GlobalBig(ctx, OverrideOsakaFlag.Name)
+		v := ctx.Uint64(OverrideOsakaFlag.Name)
+		cfg.OverrideOsakaTime = &v
 	}
 	if ctx.IsSet(OverrideAmsterdamFlag.Name) {
-		cfg.OverrideAmsterdamTime = flags.GlobalBig(ctx, OverrideAmsterdamFlag.Name)
+		v := ctx.Uint64(OverrideAmsterdamFlag.Name)
+		cfg.OverrideAmsterdamTime = &v
 	}
 	cfg.KeepStoredChainConfig = ctx.Bool(KeepStoredChainConfigFlag.Name)
 
@@ -2042,7 +1982,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 			// Unfortunately we don't take webseed URL here in the native format.
 			webseedsList = common.CliString2Array(ctx.String(WebSeedsFlag.Name))
 		} else {
-			if known, ok := snapcfg.KnownWebseeds[chain]; ok {
+			if known, ok := snapcfg.GetEmbeddedWebseeds(chain); ok {
 				webseedsList = append(webseedsList, known...)
 			}
 		}
@@ -2113,16 +2053,11 @@ func boolFlagOpt(ctx *cli.Context, flag *cli.BoolFlag) g.Option[bool] {
 
 // SetDNSDiscoveryDefaults configures DNS discovery with the given URL if
 // no URLs are set.
-func SetDNSDiscoveryDefaults(cfg *ethconfig.Config, genesis common.Hash) {
+func SetDNSDiscoveryDefaults(cfg *ethconfig.Config, spec chainspec.Spec) {
 	if cfg.EthDiscoveryURLs != nil {
 		return // already set through flags/config
 	}
-	s, err := chainspec.ChainSpecByGenesisHash(genesis)
-	if err != nil {
-		log.Warn("Failed to set DNS discovery defaults", "genesis", genesis, "err", err)
-		return
-	}
-	if url := s.DNSNetwork; url != "" {
+	if url := spec.DNSNetwork; url != "" {
 		cfg.EthDiscoveryURLs = []string{url}
 	}
 }

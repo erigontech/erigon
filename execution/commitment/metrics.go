@@ -31,6 +31,9 @@ type Metrics struct {
 	loadBranch      atomic.Uint64
 	loadAccount     atomic.Uint64
 	loadStorage     atomic.Uint64
+	cacheBranch     atomic.Uint64
+	cacheAccount    atomic.Uint64
+	cacheStorage    atomic.Uint64
 	updateBranch    atomic.Uint64
 	loadDepths      [10]uint64
 	unfolds         atomic.Uint64
@@ -53,6 +56,9 @@ type MetricValues struct {
 	LoadBranch      uint64
 	LoadAccount     uint64
 	LoadStorage     uint64
+	CacheBranch     uint64
+	CacheAccount    uint64
+	CacheStorage    uint64
 	UpdateBranch    uint64
 	LoadDepths      [10]uint64
 	Unfolds         uint64
@@ -105,6 +111,9 @@ func (m *Metrics) AsValues() MetricValues {
 		LoadBranch:      m.loadBranch.Load(),
 		LoadAccount:     m.loadAccount.Load(),
 		LoadStorage:     m.loadStorage.Load(),
+		CacheBranch:     m.cacheBranch.Load(),
+		CacheAccount:    m.cacheAccount.Load(),
+		CacheStorage:    m.cacheStorage.Load(),
 		UpdateBranch:    m.updateBranch.Load(),
 		LoadDepths:      m.loadDepths,
 		Unfolds:         m.unfolds.Load(),
@@ -134,6 +143,8 @@ func (m *Metrics) logMetrics() []any {
 		"akeys", common.PrettyCounter(m.addressKeys.Load()), "skeys", common.PrettyCounter(m.storageKeys.Load()),
 		"rdb", common.PrettyCounter(m.loadBranch.Load()), "rda", common.PrettyCounter(m.loadAccount.Load()),
 		"rds", common.PrettyCounter(m.loadStorage.Load()), "wrb", common.PrettyCounter(m.updateBranch.Load()),
+		"cb", common.PrettyCounter(m.cacheBranch.Load()), "ca", common.PrettyCounter(m.cacheAccount.Load()),
+		"cs", common.PrettyCounter(m.cacheStorage.Load()),
 		"fld", common.PrettyCounter(m.unfolds.Load()), "pdur", common.Round(m.spentProcessing, 0).String(),
 		"fdur", common.Round(m.spentFolding, 0).String(), "ufdur", common.Round(m.spentUnfolding, 0),
 	}
@@ -148,6 +159,9 @@ func metricsHeaders() []string {
 		"PatriciaContext.Account()",
 		"PatriciaContext.Storage()",
 		"PatriciaContext.PutBranch()",
+		"CacheHit.Branch",
+		"CacheHit.Account",
+		"CacheHit.Storage",
 		"L0 - Load Account/Storage",
 		"L1 - Load Account/Storage",
 		"L2 - Load Account/Storage",
@@ -174,6 +188,9 @@ func (m *Metrics) Values() [][]string {
 			strconv.FormatUint(m.loadAccount.Load(), 10),
 			strconv.FormatUint(m.loadStorage.Load(), 10),
 			strconv.FormatUint(m.updateBranch.Load(), 10),
+			strconv.FormatUint(m.cacheBranch.Load(), 10),
+			strconv.FormatUint(m.cacheAccount.Load(), 10),
+			strconv.FormatUint(m.cacheStorage.Load(), 10),
 			strconv.FormatUint(m.loadDepths[0], 10) + "/" + strconv.FormatUint(m.loadDepths[1], 10),
 			strconv.FormatUint(m.loadDepths[2], 10) + "/" + strconv.FormatUint(m.loadDepths[3], 10),
 			strconv.FormatUint(m.loadDepths[4], 10) + "/" + strconv.FormatUint(m.loadDepths[5], 10),
@@ -210,6 +227,12 @@ func UnmarshallMetricsCsv(filePath string) ([]*Metrics, error) {
 			current.loadStorage.Store(mustParseUintCsvCell(row, col, filePath))
 			col++
 			current.updateBranch.Store(mustParseUintCsvCell(row, col, filePath))
+			col++
+			current.cacheBranch.Store(mustParseUintCsvCell(row, col, filePath))
+			col++
+			current.cacheAccount.Store(mustParseUintCsvCell(row, col, filePath))
+			col++
+			current.cacheStorage.Store(mustParseUintCsvCell(row, col, filePath))
 			col++
 			for k := range 5 {
 				depthsPair := row[col]

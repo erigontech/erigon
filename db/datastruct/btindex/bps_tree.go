@@ -105,34 +105,6 @@ type BpsTreeIterator struct {
 	i uint64
 }
 
-// Di returns ordinal number of current key in the tree
-func (it *BpsTreeIterator) Di() uint64 {
-	return it.i
-}
-
-func (it *BpsTreeIterator) KVFromGetter(g *seg.Reader) ([]byte, []byte, error) {
-	if it == nil {
-		return nil, nil, errors.New("iterator is nil")
-	}
-	//fmt.Printf("kv from %p getter %p tree %p offt %d\n", it, g, it.t, it.i)
-	k, v, _, err := it.t.dataLookupFunc(it.i, g)
-	if err != nil {
-		if errors.Is(err, ErrBtIndexLookupBounds) {
-			return nil, nil, nil
-		}
-		return nil, nil, err
-	}
-	return k, v, nil
-}
-
-func (it *BpsTreeIterator) Next() bool {
-	if it.i+1 == it.t.offt.Count() {
-		return false
-	}
-	it.i++
-	return true
-}
-
 //// If data[i] == key, returns 0 (equal) and value, nil err
 //// if data[i] <> key, returns comparation result and nil value and error -- to be able to compare later
 //func (b *BpsTree) matchKeyValue(g ArchiveGetter, i uint64, key []byte) (int, []byte, error) {
@@ -393,8 +365,8 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 				offset = b.offt.Get(m)
 				g.Reset(offset)
 			}
-			v, _ = g.Next(v[:0])
-			if cmp = bytes.Compare(v, key); cmp > 0 {
+			g.Buf, _ = g.Next(g.Buf[:0])
+			if cmp = bytes.Compare(g.Buf, key); cmp > 0 {
 				return nil, false, 0, err
 			} else if cmp < 0 {
 				g.Skip()
@@ -406,7 +378,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 			return v, true, offset, nil
 		}
 
-		cmp, v, err = b.keyCmpFunc(key, m, g, v[:0])
+		cmp, g.Buf, err = b.keyCmpFunc(key, m, g, g.Buf[:0])
 		if err != nil {
 			return nil, false, 0, err
 		}
@@ -427,7 +399,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 		}
 	}
 
-	cmp, _, err = b.keyCmpFunc(key, l, g, v[:0])
+	cmp, g.Buf, err = b.keyCmpFunc(key, l, g, g.Buf[:0])
 	if err != nil || cmp != 0 {
 		return nil, false, 0, err
 	}

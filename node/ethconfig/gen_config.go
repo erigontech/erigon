@@ -3,7 +3,6 @@
 package ethconfig
 
 import (
-	"math/big"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -52,21 +51,9 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		WithoutHeimdall                     bool
 		Ethstats                            string
 		InternalCL                          bool
-		OverrideOsakaTime                   *big.Int `toml:",omitempty"`
-		OverrideAmsterdamTime               *big.Int `toml:",omitempty"`
+		OverrideOsakaTime                   *uint64 `toml:",omitempty"`
+		OverrideAmsterdamTime               *uint64 `toml:",omitempty"`
 		KeepStoredChainConfig               bool
-		SilkwormExecution                   bool
-		SilkwormRpcDaemon                   bool
-		SilkwormSentry                      bool
-		SilkwormVerbosity                   string
-		SilkwormNumContexts                 uint32
-		SilkwormRpcLogEnabled               bool
-		SilkwormRpcLogDirPath               string
-		SilkwormRpcLogMaxFileSize           uint16
-		SilkwormRpcLogMaxFiles              uint16
-		SilkwormRpcLogDumpResponse          bool
-		SilkwormRpcNumWorkers               uint32
-		SilkwormRpcJsonCompatibility        bool
 		PolygonPosSingleSlotFinality        bool
 		PolygonPosSingleSlotFinalityBlockAt uint64
 		AllowAA                             bool
@@ -106,18 +93,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.OverrideOsakaTime = c.OverrideOsakaTime
 	enc.OverrideAmsterdamTime = c.OverrideAmsterdamTime
 	enc.KeepStoredChainConfig = c.KeepStoredChainConfig
-	enc.SilkwormExecution = c.SilkwormExecution
-	enc.SilkwormRpcDaemon = c.SilkwormRpcDaemon
-	enc.SilkwormSentry = c.SilkwormSentry
-	enc.SilkwormVerbosity = c.SilkwormVerbosity
-	enc.SilkwormNumContexts = c.SilkwormNumContexts
-	enc.SilkwormRpcLogEnabled = c.SilkwormRpcLogEnabled
-	enc.SilkwormRpcLogDirPath = c.SilkwormRpcLogDirPath
-	enc.SilkwormRpcLogMaxFileSize = c.SilkwormRpcLogMaxFileSize
-	enc.SilkwormRpcLogMaxFiles = c.SilkwormRpcLogMaxFiles
-	enc.SilkwormRpcLogDumpResponse = c.SilkwormRpcLogDumpResponse
-	enc.SilkwormRpcNumWorkers = c.SilkwormRpcNumWorkers
-	enc.SilkwormRpcJsonCompatibility = c.SilkwormRpcJsonCompatibility
 	enc.PolygonPosSingleSlotFinality = c.PolygonPosSingleSlotFinality
 	enc.PolygonPosSingleSlotFinalityBlockAt = c.PolygonPosSingleSlotFinalityBlockAt
 	enc.AllowAA = c.AllowAA
@@ -158,21 +133,9 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		WithoutHeimdall                     *bool
 		Ethstats                            *string
 		InternalCL                          *bool
-		OverrideOsakaTime                   *big.Int `toml:",omitempty"`
-		OverrideAmsterdamTime               *big.Int `toml:",omitempty"`
+		OverrideOsakaTime                   *uint64 `toml:",omitempty"`
+		OverrideAmsterdamTime               *uint64 `toml:",omitempty"`
 		KeepStoredChainConfig               *bool
-		SilkwormExecution                   *bool
-		SilkwormRpcDaemon                   *bool
-		SilkwormSentry                      *bool
-		SilkwormVerbosity                   *string
-		SilkwormNumContexts                 *uint32
-		SilkwormRpcLogEnabled               *bool
-		SilkwormRpcLogDirPath               *string
-		SilkwormRpcLogMaxFileSize           *uint16
-		SilkwormRpcLogMaxFiles              *uint16
-		SilkwormRpcLogDumpResponse          *bool
-		SilkwormRpcNumWorkers               *uint32
-		SilkwormRpcJsonCompatibility        *bool
 		PolygonPosSingleSlotFinality        *bool
 		PolygonPosSingleSlotFinalityBlockAt *uint64
 		AllowAA                             *bool
@@ -274,42 +237,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.KeepStoredChainConfig != nil {
 		c.KeepStoredChainConfig = *dec.KeepStoredChainConfig
-	}
-	if dec.SilkwormExecution != nil {
-		c.SilkwormExecution = *dec.SilkwormExecution
-	}
-	if dec.SilkwormRpcDaemon != nil {
-		c.SilkwormRpcDaemon = *dec.SilkwormRpcDaemon
-	}
-	if dec.SilkwormSentry != nil {
-		c.SilkwormSentry = *dec.SilkwormSentry
-	}
-	if dec.SilkwormVerbosity != nil {
-		c.SilkwormVerbosity = *dec.SilkwormVerbosity
-	}
-	if dec.SilkwormNumContexts != nil {
-		c.SilkwormNumContexts = *dec.SilkwormNumContexts
-	}
-	if dec.SilkwormRpcLogEnabled != nil {
-		c.SilkwormRpcLogEnabled = *dec.SilkwormRpcLogEnabled
-	}
-	if dec.SilkwormRpcLogDirPath != nil {
-		c.SilkwormRpcLogDirPath = *dec.SilkwormRpcLogDirPath
-	}
-	if dec.SilkwormRpcLogMaxFileSize != nil {
-		c.SilkwormRpcLogMaxFileSize = *dec.SilkwormRpcLogMaxFileSize
-	}
-	if dec.SilkwormRpcLogMaxFiles != nil {
-		c.SilkwormRpcLogMaxFiles = *dec.SilkwormRpcLogMaxFiles
-	}
-	if dec.SilkwormRpcLogDumpResponse != nil {
-		c.SilkwormRpcLogDumpResponse = *dec.SilkwormRpcLogDumpResponse
-	}
-	if dec.SilkwormRpcNumWorkers != nil {
-		c.SilkwormRpcNumWorkers = *dec.SilkwormRpcNumWorkers
-	}
-	if dec.SilkwormRpcJsonCompatibility != nil {
-		c.SilkwormRpcJsonCompatibility = *dec.SilkwormRpcJsonCompatibility
 	}
 	if dec.PolygonPosSingleSlotFinality != nil {
 		c.PolygonPosSingleSlotFinality = *dec.PolygonPosSingleSlotFinality

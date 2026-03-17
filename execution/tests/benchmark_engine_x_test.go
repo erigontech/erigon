@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
+	"github.com/erigontech/erigon/execution/tests/testutil"
 )
 
 func TestBenchmarkEngineXInstruction(t *testing.T) {
@@ -56,19 +57,19 @@ func benchmarkCategory(t *testing.T, category string, whitelist string, skipload
 	preAllocDir := filepath.Join(engineXDir, "pre_alloc")
 	engineXRunner, err := NewEngineXTestRunner(t, logger, preAllocDir)
 	require.NoError(t, err)
-	tm := testMatcher{
+	tm := testutil.TestMatcher{
 		// we re-use the same engine for tests,
 		// and we want to do sequential new payloads
 		// without getting SYNCING responses
-		noparallel: true,
+		NoParallel: true,
 	}
 	if whitelist != "" {
-		tm.whitelist(whitelist)
+		tm.Whitelist(whitelist)
 	}
 	for _, s := range skipload {
-		tm.skipLoad(s)
+		tm.SkipLoad(s)
 	}
-	tm.walk(t, testsDir, func(t *testing.T, name string, test EngineXTestDefinition) {
+	tm.Walk(t, testsDir, func(t *testing.T, name string, test EngineXTestDefinition) {
 		err := engineXRunner.Run(t.Context(), test)
 		require.NoError(t, err)
 	})

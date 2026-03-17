@@ -23,7 +23,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unsafe"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -155,12 +154,12 @@ func deserializeDiffSetV1(in []byte) []kv.DomainEntryDiff {
 			value := in[:valueLen]
 			in = in[valueLen:]
 			diffSet[i] = kv.DomainEntryDiff{
-				Key:   toStringZeroCopy(key),
+				Key:   common.ToStringZeroCopy(key),
 				Value: value,
 			}
 		} else {
 			diffSet[i] = kv.DomainEntryDiff{
-				Key:   toStringZeroCopy(key),
+				Key:   common.ToStringZeroCopy(key),
 				Value: nil, // delete only
 			}
 		}
@@ -201,7 +200,7 @@ func deserializeDiffSetV0(in []byte) []kv.DomainEntryDiff {
 		// Skip dictIdx (1 byte) — PrevStepBytes is discarded
 		in = in[1:]
 		diffSet[i] = kv.DomainEntryDiff{
-			Key:   toStringZeroCopy(key),
+			Key:   common.ToStringZeroCopy(key),
 			Value: value, // nil when valueLen == 0 (don't restore)
 		}
 	}
@@ -449,14 +448,6 @@ func ReadLowestUnwindableBlock(tx kv.Tx) (uint64, error) {
 	return blockNumber, nil
 
 }
-func toStringZeroCopy(v []byte) string {
-	if len(v) == 0 {
-		return ""
-	}
-	return unsafe.String(&v[0], len(v))
-}
-
-func toBytesZeroCopy(s string) []byte { return unsafe.Slice(unsafe.StringData(s), len(s)) }
 
 type DomainIOMetrics struct {
 	CacheReadCount    int64

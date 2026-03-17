@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync"
-	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/state"
@@ -46,7 +45,6 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/shards"
-	"github.com/erigontech/erigon/node/silkworm"
 )
 
 type SnapshotsCfg struct {
@@ -60,9 +58,10 @@ type SnapshotsCfg struct {
 	caplin             bool
 	blobs              bool
 	caplinState        bool
-	silkworm           *silkworm.Silkworm
 	syncConfig         ethconfig.Sync
 	prune              prune.Mode
+	// Called once after snapshot downloads complete on the first sync cycle.
+	afterDownload func(ctx context.Context) error
 }
 
 // Returns a seeder client for block management, a noop implementation if no downloader is attached.
@@ -84,8 +83,8 @@ func StageSnapshotsCfg(db kv.TemporalRwDB,
 	caplin bool,
 	blobs bool,
 	caplinState bool,
-	silkworm *silkworm.Silkworm,
 	prune prune.Mode,
+	afterDownload func(ctx context.Context) error,
 ) SnapshotsCfg {
 	cfg := SnapshotsCfg{
 		db:                 db,
@@ -96,11 +95,11 @@ func StageSnapshotsCfg(db kv.TemporalRwDB,
 		blockReader:        blockReader,
 		notifier:           notifier,
 		caplin:             caplin,
-		silkworm:           silkworm,
 		syncConfig:         syncConfig,
 		blobs:              blobs,
 		prune:              prune,
 		caplinState:        caplinState,
+		afterDownload:      afterDownload,
 	}
 
 	return cfg
@@ -214,7 +213,11 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
-	// want to add remaining snapshots here?
+	if cfg.afterDownload != nil {
+		if err := cfg.afterDownload(ctx); err != nil {
+			return fmt.Errorf("after snapshot download: %w", err)
+		}
+	}
 
 	{ // Now can open all files
 		if err := cfg.blockReader.Snapshots().OpenFolder(); err != nil {
@@ -269,18 +272,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cfg.notifier.Events.OnNewSnapshot()
 	}
 
-	if cfg.silkworm != nil {
-		repository := silkworm.NewSnapshotsRepository(
-			cfg.silkworm,
-			cfg.blockReader.Snapshots().(*freezeblocks.RoSnapshots),
-			agg,
-			logger,
-		)
-		if err := repository.Update(); err != nil {
-			return err
-		}
-	}
-
 	frozenBlocks := cfg.blockReader.FrozenBlocks()
 	if s.BlockNumber < frozenBlocks { // allow genesis
 		if err := s.Update(tx, frozenBlocks); err != nil {
@@ -328,7 +319,7 @@ func buildOrDeferE2Indices(ctx context.Context, s *StageState, cfg SnapshotsCfg,
 			return err
 		}
 	} else {
-		log.Info(fmt.Sprintf("[%s] Deferring E2 indexing to background", s.LogPrefix()), "reason", "restart", "headersProgress", headersProgress)
+		log.Debug(fmt.Sprintf("[%s] Deferring E2 indexing to background", s.LogPrefix()), "reason", "restart", "headersProgress", headersProgress)
 	}
 	return nil
 }
@@ -352,7 +343,7 @@ func buildOrDeferE3Accessors(ctx context.Context, s *StageState, cfg SnapshotsCf
 			return err
 		}
 	} else {
-		log.Info(fmt.Sprintf("[%s] Deferring E3 indexing to background", s.LogPrefix()), "reason", "restart", "headersProgress", headersProgress)
+		log.Debug(fmt.Sprintf("[%s] Deferring E3 indexing to background", s.LogPrefix()), "reason", "restart", "headersProgress", headersProgress)
 	}
 	return nil
 }

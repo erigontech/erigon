@@ -142,19 +142,9 @@ type AggStats struct {
 	HashRate, FlushRate       uint64
 }
 
-func (me *AggStats) AllTorrentsComplete() bool {
-	return me.TorrentsCompleted == me.NumTorrents
-}
-
 type requestHandler struct {
 	// Separated this rather than embedded it to ensure our wrapper RoundTrip is called.
 	rt http.RoundTripper
-}
-
-type roundTripperFunc func(req *http.Request) (*http.Response, error)
-
-func (me roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
-	return me(req)
 }
 
 // TODO(anacrolix): Upstream any logic that works reliably.
