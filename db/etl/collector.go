@@ -227,8 +227,7 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 
 	var putCount, appendCount, appendDupCount, dupSkipCount int
 	// prevLoadK/prevLoadV track the previous (key, value) to skip duplicates for DupSort AppendDup.
-	// The parallel executor can retry transactions, producing duplicate (txNum, address) entries.
-	// Put handles these idempotently, but AppendDup rejects them with MDBX_EKEYMISMATCH.
+	// Put handles duplicates idempotently, but AppendDup rejects them with MDBX_EKEYMISMATCH.
 	var prevLoadK, prevLoadV []byte
 	i := 0
 	loadNextFunc := func(_, k, v []byte) error {
