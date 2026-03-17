@@ -14,9 +14,9 @@ jobs:
     concurrency:
       group: >-
         ${{
-          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 
-          format('{0}-{1}', github.workflow, github.run_id) ||
-          format('{0}-{1}', github.workflow, github.ref)
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) &&
+          format('{0}-{1}-{2}', github.workflow, github.job, github.run_id) ||
+          format('{0}-{1}-{2}', github.workflow, github.job, github.ref)
         }}
       cancel-in-progress: true
     runs-on: [ self-hosted, qa, Gnosis, rpc-integration ]
