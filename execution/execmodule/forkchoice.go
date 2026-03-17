@@ -187,25 +187,72 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 
 	defer UpdateForkChoiceDuration(time.Now())
 	defer e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
-	defer e.currentContext.ResetPendingUpdates()
+	defer func() {
+		if e.currentContext != nil {
+			e.currentContext.ResetPendingUpdates()
+		}
+	}()
 
 	var validationError string
 	type canonicalEntry struct {
 		hash   common.Hash
 		number uint64
 	}
-	tx, err := e.db.BeginTemporalRw(ctx) //nolint
+
+	// Open a RO tx as the base for all reads. Writes accumulate in the block
+	// overlay (MemoryMutation) which implements kv.TemporalRwTx. No MDBX write
+	// lock is held during pipeline execution — a brief RwTx is opened only at
+	// commit time to flush everything atomically.
+	roTx, err := e.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
+	defer roTx.Rollback()
 
-	rollbackOnReturn := true
+	closeOnReturn := true
+
+	// Check if InsertBlocks already created a block overlay with data
+	// (headers, bodies, TDs, canonical hashes).
+	var hasOverlay bool
+	if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
+		hasOverlay = true
+	}
+
+	// Create SharedDomains on the raw RO tx. Domain state (accounts,
+	// storage, code, commitment) is read from the committed DB state.
+	var isDomainAheadOfBlocks bool
+	currentContext, err := execctx.NewSharedDomains(ctx, roTx, e.logger)
+	if err != nil {
+		// we handle isDomainAheadOfBlocks=true after AppendCanonicalTxNums to allow the node to catch up
+		isDomainAheadOfBlocks = errors.Is(err, commitmentdb.ErrBehindCommitment)
+		if !isDomainAheadOfBlocks {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+		}
+	}
 
 	defer func() {
-		if rollbackOnReturn {
-			tx.Rollback()
+		if closeOnReturn && currentContext != nil {
+			currentContext.Close()
 		}
 	}()
+
+	// Initialize the SD's block overlay for table-level writes (canonical
+	// hashes, stage progress, forkchoice markers, TxNums, etc.). All
+	// pipeline reads cascade through the overlay to the RO tx; writes
+	// stay in memory until commit.
+	if err := currentContext.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
+		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("updateForkChoice: init block overlay: %w", err), false)
+	}
+	var tx kv.TemporalRwTx = currentContext.BlockOverlay()
+
+	// If InsertBlocks wrote block data, flush it into the block overlay
+	// so the pipeline can see it. The InsertBlocks overlay retains its data.
+	if hasOverlay {
+		e.currentContext.BlockOverlay().UpdateTxn(roTx)
+		if err := e.currentContext.BlockOverlay().Flush(ctx, tx); err != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("updateForkChoice: flush block overlay: %w", err), false)
+		}
+	}
 
 	blockHash := originalBlockHash
 
@@ -252,25 +299,9 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
 
-	var isDomainAheadOfBlocks bool
-	currentContext, err := execctx.NewSharedDomains(ctx, tx, e.logger)
-	if err != nil {
-		// we handle isDomainAheadOfBlocks=true after AppendCanonicalTxNums to allow the node to catch up
-		isDomainAheadOfBlocks = errors.Is(err, commitmentdb.ErrBehindCommitment)
-		if !isDomainAheadOfBlocks {
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-		}
-	}
-
-	defer func() {
-		if rollbackOnReturn && currentContext != nil {
-			currentContext.Close()
-		}
-	}()
-
 	if fcuHeader.Number.Sign() > 0 {
-		if canonicalHash == blockHash {
-			// if block hash is part of the canonical chain treat it as no-op.
+		if canonicalHash == blockHash && fcuHeader.Number.Uint64() >= finishProgressBefore {
+			// if block hash is part of the canonical chain and execution is not ahead, treat as no-op.
 			writeForkChoiceHashes(tx, blockHash, safeHash, finalizedHash)
 			valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
 			if err != nil {
@@ -338,7 +369,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			unwindTarget = minUnwindableBlock
 		}
 
-		// if unwindTarget <
 		if err := e.executionPipeline.UnwindTo(unwindTarget, stagedsync.ForkChoice, tx); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
@@ -357,9 +387,8 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
 		// Mark all new canonicals as canonicals
+		chainReader := consensuschain.NewReader(e.config, tx, e.blockReader, e.logger)
 		for _, canonicalSegment := range newCanonicals {
-			chainReader := consensuschain.NewReader(e.config, tx, e.blockReader, e.logger)
-
 			b, _, _ := rawdb.ReadBody(tx, canonicalSegment.hash, canonicalSegment.number)
 			h := rawdb.ReadHeader(tx, canonicalSegment.hash, canonicalSegment.number)
 
@@ -394,11 +423,17 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		}
 	}
 	if isDomainAheadOfBlocks {
-		if err := currentContext.Flush(ctx, tx); err != nil {
+		// Open a brief RwTx to flush accumulated overlay + SD state atomically.
+		commitRwTx, err := e.db.BeginTemporalRw(ctx)
+		if err != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("isDomainAhead: begin rw: %w", err), false)
+		}
+		defer commitRwTx.Rollback()
+		if err := currentContext.Flush(ctx, commitRwTx); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
 		currentContext.ClearRam(true)
-		if err := tx.Commit(); err != nil {
+		if err := commitRwTx.Commit(); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
 		return sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{
@@ -470,16 +505,36 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			if err != nil {
 				return sendError("updateForkChoice: RunPrune after hasMore", err)
 			}
-			if err := currentContext.Flush(ctx, tx); err != nil {
-				return sendError("updateForkChoice:flush sd after hasMore", err)
+			// Flush SD (block overlay + domain mem) to a brief RwTx to relieve memory pressure.
+			commitRwTx, err := e.db.BeginTemporalRw(ctx) //nolint:gocritic
+			if err != nil {
+				return sendError("updateForkChoice: begin rw after hasMore", err)
+			}
+			if err := currentContext.Flush(ctx, commitRwTx); err != nil {
+				commitRwTx.Rollback()
+				return sendError("updateForkChoice: flush sd after hasMore", err)
 			}
 			currentContext.ClearRam(true)
-			if err = tx.Commit(); err != nil {
+			if err = commitRwTx.Commit(); err != nil {
 				return sendError("updateForkChoice: tx commit after hasMore", err)
 			}
-			tx, err = e.db.BeginTemporalRw(ctx)
+			// Recreate RO tx + block overlay on the fresh committed state.
+			roTx.Rollback()
+			roTx, err = e.db.BeginTemporalRo(ctx) //nolint:gocritic
 			if err != nil {
-				return sendError("updateForkChoice: begin tx after has more", err)
+				return sendError("updateForkChoice: begin ro after hasMore", err)
+			}
+			if err := currentContext.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
+				roTx.Rollback()
+				return sendError("updateForkChoice: init overlay after hasMore", err)
+			}
+			tx = currentContext.BlockOverlay()
+			// Re-flush InsertBlocks data into the fresh overlay.
+			if hasOverlay {
+				e.currentContext.BlockOverlay().UpdateTxn(roTx)
+				if err := e.currentContext.BlockOverlay().Flush(ctx, tx); err != nil {
+					return sendError("updateForkChoice: re-flush overlay after hasMore", err)
+				}
 			}
 		}
 	}
@@ -542,20 +597,36 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		}
 
 		e.logHeadUpdated(blockHash, fcuHeader, txnum, "head updated", stateFlushingInParallel)
+
+		// Close the persistent SD (overlay was already flushed into rwTx at
+		// the start of updateForkChoice). Clear e.currentContext so InsertBlocks
+		// creates a fresh overlay for the next block cycle.
+		if hasOverlay {
+			e.currentContext.Close()
+			e.lock.Lock()
+			e.currentContext = nil
+			e.lock.Unlock()
+		}
+
 		if e.fcuBackgroundCommit {
-			// TODO: (20/12/25) we really want to commit all changes with the shared domains but
-			// to do that we need to remove all of the rawdb methods and call them via
-			// the domains - which will happen after they transiaiotn to an ExecutionContext
-			// for the moment just commit what we have
-			if err = tx.Commit(); err != nil {
+			// Background commit: open a brief RwTx, flush SD (overlay + domain mem), commit.
+			commitRwTx, err := e.db.BeginTemporalRw(ctx)
+			if err != nil {
+				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("fcu bg commit: begin rw: %w", err), stateFlushingInParallel)
+			}
+			defer commitRwTx.Rollback()
+			if err := currentContext.Flush(ctx, commitRwTx); err != nil {
+				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("fcu bg commit: flush sd: %w", err), stateFlushingInParallel)
+			}
+			if err = commitRwTx.Commit(); err != nil {
 				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 			}
 			e.lock.Lock()
 			e.currentContext = currentContext
 			e.lock.Unlock()
-			rollbackOnReturn = false
+			closeOnReturn = false
 		} else {
-			timings, err := e.runForkchoiceCommit(currentContext, tx, finishProgressBefore, isSynced)
+			timings, err := e.runForkchoiceCommitOverlay(currentContext, finishProgressBefore, isSynced)
 			if err != nil {
 				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 			}
@@ -628,6 +699,41 @@ func (e *ExecModule) runPostForkchoice(sd *execctx.SharedDomains, finishProgress
 		e.logger.Info("Timings: Post-Forkchoice", timings...)
 	}
 	return nil
+}
+
+// runForkchoiceCommitOverlay opens a brief RwTx, flushes the SharedDomains
+// (block overlay + domain mem) into it, and commits atomically.
+func (e *ExecModule) runForkchoiceCommitOverlay(sd *execctx.SharedDomains, finishProgressBefore uint64, isSynced bool) ([]any, error) {
+	var timings []any
+	rwTx, err := e.db.BeginTemporalRw(e.bacgroundCtx)
+	if err != nil {
+		return nil, fmt.Errorf("runForkchoiceCommitOverlay: begin rw: %w", err)
+	}
+	defer rwTx.Rollback()
+	flushStart := time.Now()
+	if err := sd.Flush(e.bacgroundCtx, rwTx); err != nil {
+		return nil, err
+	}
+	timings = append(timings, "flush", common.Round(time.Since(flushStart), 0))
+	commitStart := time.Now()
+	if err := rwTx.Commit(); err != nil {
+		return nil, err
+	}
+	timings = append(timings, "commit", common.Round(time.Since(commitStart), 0))
+	if e.hook != nil {
+		if err := e.db.View(e.bacgroundCtx, func(tx kv.Tx) error {
+			return e.hook.AfterRun(tx, finishProgressBefore, isSynced)
+		}); err != nil {
+			return nil, err
+		}
+	}
+	// force fsync after notifications are sent
+	if err := e.db.Update(e.bacgroundCtx, func(tx kv.RwTx) error {
+		return kv.IncrementKey(tx, kv.DatabaseInfo, []byte("chaindata_force"))
+	}); err != nil {
+		return nil, err
+	}
+	return timings, nil
 }
 
 func (e *ExecModule) runForkchoiceCommit(sd *execctx.SharedDomains, tx kv.TemporalRwTx, finishProgressBefore uint64, isSynced bool) ([]any, error) {

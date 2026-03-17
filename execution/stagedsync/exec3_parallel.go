@@ -92,6 +92,13 @@ type parallelExecutor struct {
 	// accumulator for txpool state-diff notifications; set before execLoop
 	// starts so that AuRa system-call nonce changes are emitted per block.
 	accumulator *shards.Accumulator
+	// blockApplied synchronises the execLoop and apply goroutines at block
+	// boundaries. The apply goroutine sends on this channel after it has
+	// finished processing a blockResult (i.e. all of block N's state writes
+	// are visible in pe.rs). The execLoop waits on this channel before
+	// scheduling execution of block N+1, preventing workers from reading
+	// stale state.
+	blockApplied chan struct{}
 }
 
 func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
@@ -107,6 +114,10 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 		temporalTx := applyTx.AsyncClone(mdbx.NewAsyncRwTx(applyTx.RwTx, 1000))
 		asyncTxChan = temporalTx.ApplyChan()
 		asyncTx = temporalTx
+	case kv.TemporalTx:
+		// MemoryMutation overlay — pure Go, no thread affinity.
+		// No asyncTx needed; exec goroutine reads directly from the overlay.
+		asyncTx = applyTx
 	default:
 		return nil, rwTx, fmt.Errorf("expected *temporal.RwTx: got %T", rwTx)
 	}
@@ -403,6 +414,11 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 					blockUpdateCount = 0
 					blockApplyCount = 0
+
+					// Signal that block N is fully applied — all state writes
+					// are now visible in pe.rs. The execLoop waits for this
+					// before scheduling block N+1's workers.
+					pe.blockApplied <- struct{}{}
 
 					if dbg.StopAfterBlock > 0 && applyResult.BlockNum == dbg.StopAfterBlock {
 						return fmt.Errorf("stopping: block %d complete", applyResult.BlockNum)
@@ -757,6 +773,16 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				pe.Lock()
 				delete(pe.blockExecutors, blockResult.BlockNum)
 				pe.Unlock()
+			}
+
+			// Wait for the apply goroutine to finish processing block N's
+			// results before scheduling block N+1. Without this, workers
+			// for block N+1 can read stale state from pe.rs because block
+			// N's writes haven't been applied yet.
+			select {
+			case <-pe.blockApplied:
+			case <-ctx.Done():
+				return ctx.Err()
 			}
 
 			pe.RLock()
@@ -1850,23 +1876,18 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 }
 
 func MergeReadSets(a state.ReadSet, b state.ReadSet) state.ReadSet {
-	if a == nil && b == nil {
-		return nil
+	if b == nil {
+		return a
 	}
-	out := make(state.ReadSet)
-	if a != nil {
-		a.Scan(func(vr *state.VersionedRead) bool {
-			out.Set(*vr)
-			return true
-		})
+	if a == nil {
+		return b
 	}
-	if b != nil {
-		b.Scan(func(vr *state.VersionedRead) bool {
-			out.Set(*vr)
-			return true
-		})
-	}
-	return out
+	// Merge b into a in-place — a is being replaced by the caller anyway
+	b.Scan(func(vr *state.VersionedRead) bool {
+		a.Set(*vr)
+		return true
+	})
+	return a
 }
 
 func MergeVersionedWrites(prev, next state.VersionedWrites) state.VersionedWrites {
@@ -1876,6 +1897,7 @@ func MergeVersionedWrites(prev, next state.VersionedWrites) state.VersionedWrite
 	if len(next) == 0 {
 		return prev
 	}
+	// Build merged set using prev as base, overwriting with next
 	merged := state.WriteSet{}
 	for _, v := range prev {
 		merged.Set(*v)

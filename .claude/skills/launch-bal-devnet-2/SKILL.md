@@ -173,6 +173,104 @@ bash $WORKDIR/clean.sh
 
 This runs `stop.sh`, removes erigon chain data (chaindata, snapshots, txpool, nodes, temp) and lighthouse data, then re-initializes genesis. After clean, start again with Steps 4-5.
 
+## A/B Testing: BAL vs Non-BAL Parallel Execution
+
+Compare parallel execution throughput with and without BAL scheduling optimization.
+
+### Overview
+
+- **Instance A (BAL)**: Default `bal-devnet-2` instance at `$WORKDIR` — uses BAL to pre-populate version maps and schedule transactions optimistically
+- **Instance B (No-BAL)**: Second instance at `$WORKDIR-nobal` — sets `IGNORE_BAL=true` to force dependency-tracking scheduling path
+
+Both instances sync the same chain, enabling direct throughput comparison.
+
+### Instance B Port Assignments (offset +400)
+
+| Service | Port | Protocol |
+|---------|------|----------|
+| Erigon HTTP RPC | 8945 | TCP |
+| Erigon Engine API (authrpc) | 8951 | TCP |
+| Erigon WebSocket | 8946 | TCP |
+| Erigon P2P | 30703 | TCP+UDP |
+| Erigon gRPC | 9490 | TCP |
+| Erigon Torrent | 42469 | TCP+UDP |
+| Erigon pprof | 6460 | TCP |
+| Erigon metrics | 6461 | TCP |
+| Lighthouse P2P | 9100 | TCP+UDP |
+| Lighthouse QUIC | 9101 | UDP |
+| Lighthouse HTTP API | 5352 | TCP |
+| Lighthouse metrics | 5464 | TCP |
+
+### Setup Instance B
+
+1. Create working directory and copy config:
+   ```bash
+   NOBAL_DIR=${WORKDIR}-nobal
+   mkdir -p $NOBAL_DIR/erigon-data $NOBAL_DIR/lighthouse-data
+   cp -r $WORKDIR/testnet-config $NOBAL_DIR/
+   cp $WORKDIR/genesis.json $NOBAL_DIR/
+   ```
+
+2. Build a binary with `IGNORE_BAL` support (requires bal-devnet-2 branch with commit `45625d09`+):
+   ```bash
+   # Build from bal-devnet-2 branch (or use existing binary if already up to date)
+   make erigon
+   ```
+
+3. Initialize genesis:
+   ```bash
+   ./build/bin/erigon init --datadir=$NOBAL_DIR/erigon-data $NOBAL_DIR/genesis.json
+   ```
+
+4. Create start scripts — same as Instance A but with:
+   - `export IGNORE_BAL=true` in `start-erigon.sh`
+   - Port offsets from the table above
+   - Docker container name: `bal-devnet-2-nobal-lighthouse`
+   - `--execution-endpoint=http://127.0.0.1:8951` in Lighthouse
+   - `--disable-enr-auto-update` in Lighthouse (second instance on same host)
+
+5. Start Instance B (erigon first, then Lighthouse):
+   ```bash
+   cd $NOBAL_DIR && nohup bash start-erigon.sh > erigon-console.log 2>&1 &
+   # Wait for jwt.hex
+   cd $NOBAL_DIR && nohup bash start-lighthouse.sh > lighthouse-console.log 2>&1 &
+   ```
+
+### Metrics to Compare
+
+Once both instances reach chain tip, compare at-head execution metrics:
+
+| Metric | Source | What it measures |
+|--------|--------|------------------|
+| `gas/s` | Execution log lines | Raw execution throughput |
+| `repeat%` | Execution log lines | Speculative re-execution rate (lower = better dependency prediction) |
+| `abort` | Execution log lines | Number of aborted transactions per batch |
+| `invalid` | Execution log lines | Transactions invalidated by conflict detection |
+| `blk/s` | Execution log lines | Block processing rate |
+
+**Expected**: BAL instance should have lower `repeat%` and `abort` counts because BAL pre-populates the version map, reducing false conflicts. The `gas/s` difference shows the net throughput impact.
+
+### Monitoring Script
+
+```bash
+# Side-by-side log comparison
+echo "=== BAL (Instance A) ===" && \
+grep -E "parallel (executed|done)" $WORKDIR/erigon-data/logs/erigon.log | tail -3 && \
+echo "" && \
+echo "=== No-BAL (Instance B) ===" && \
+grep -E "parallel (executed|done)" ${WORKDIR}-nobal/erigon-data/logs/erigon.log | tail -3
+```
+
+### Cleanup
+
+```bash
+# Stop Instance B
+docker stop bal-devnet-2-nobal-lighthouse 2>/dev/null
+pkill -f "datadir.*bal-devnet-2-nobal/erigon-data"
+# Optionally remove data
+rm -rf ${WORKDIR}-nobal
+```
+
 ## Troubleshooting
 
 | Problem | Solution |

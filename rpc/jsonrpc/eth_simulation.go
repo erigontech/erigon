@@ -859,8 +859,18 @@ func newHistoryCommitmentOnlyReader(roTx kv.TemporalTx, sd *execctx.SharedDomain
 }
 
 func newSimulateStateReader(ttx, tx kv.TemporalTx, tsd, sd *execctx.SharedDomains) commitmentdb.StateReader {
-	// Both commitment and account/storage/code values are read from latest state *but* on different SharedDomains instances
-	return commitmentdb.NewCommitmentSplitStateReader(commitmentdb.NewLatestStateReader(ttx, tsd), commitmentdb.NewLatestStateReader(tx, sd), false)
+	// Both commitment and account/storage/code values are read from latest state *but* on different SharedDomains instances.
+	// We use CommitmentReplayStateReader (not a plain SplitStateReader) so that Clone() only propagates the new tx to
+	// the commitment (temp DB) reader, keeping the plain state (main DB) reader pointing at the original outer-DB tx.
+	// This is critical: accounts whose data didn't change during simulation are not written to sd.mem, so when the trie
+	// reads them it must fall back to the real DB (via the original tx), not to the empty temp DB (via ttx).
+	return &commitmentdb.CommitmentReplayStateReader{
+		SplitStateReader: commitmentdb.NewCommitmentSplitStateReader(
+			commitmentdb.NewLatestStateReader(ttx, tsd),
+			commitmentdb.NewLatestStateReader(tx, sd),
+			false,
+		),
+	}
 }
 
 // computeCommitmentFromStateHistory calculates the commitment root for simulated block from state history

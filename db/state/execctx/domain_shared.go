@@ -396,6 +396,13 @@ func (sd *SharedDomains) Close() {
 
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	defer mxFlushTook.ObserveDuration(time.Now())
+	if sd.sdCtx.HasPendingUpdate() {
+		if ttx, ok := tx.(kv.TemporalTx); ok {
+			if err := sd.FlushPendingUpdates(ctx, ttx); err != nil {
+				return err
+			}
+		}
+	}
 	if sd.blockOverlay != nil {
 		if err := sd.blockOverlay.Flush(ctx, tx); err != nil {
 			return err

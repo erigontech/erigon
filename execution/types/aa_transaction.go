@@ -106,13 +106,9 @@ func (tx *AccountAbstractionTransaction) GetPrice() *uint256.Int {
 	return tx.Tip
 }
 
-func (tx *AccountAbstractionTransaction) GetTip() *uint256.Int {
-	return tx.Tip
-}
-
 func (tx *AccountAbstractionTransaction) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
 	if baseFee == nil {
-		return tx.GetTip()
+		return tx.GetTipCap()
 	}
 	gasFeeCap := tx.GetFeeCap()
 	// return 0 because effectiveFee cant be < 0
@@ -120,8 +116,8 @@ func (tx *AccountAbstractionTransaction) GetEffectiveGasTip(baseFee *uint256.Int
 		return uint256.NewInt(0)
 	}
 	effectiveFee := new(uint256.Int).Sub(gasFeeCap, baseFee)
-	if tx.GetTip().Lt(effectiveFee) {
-		return tx.GetTip()
+	if tx.GetTipCap().Lt(effectiveFee) {
+		return tx.GetTipCap()
 	} else {
 		return effectiveFee
 	}
@@ -136,7 +132,7 @@ func (tx *AccountAbstractionTransaction) GetGasLimit() uint64 {
 }
 
 func (tx *AccountAbstractionTransaction) GetTipCap() *uint256.Int {
-	return uint256.NewInt(0)
+	return tx.Tip
 }
 
 func (tx *AccountAbstractionTransaction) GetBlobHashes() []common.Hash {
@@ -408,7 +404,7 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	if tx.Nonce, err = s.Uint(); err != nil {
+	if tx.Nonce, err = s.Uint64(); err != nil {
 		return err
 	}
 
@@ -456,19 +452,19 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	if tx.ValidationGasLimit, err = s.Uint(); err != nil {
+	if tx.ValidationGasLimit, err = s.Uint64(); err != nil {
 		return err
 	}
 
-	if tx.PaymasterValidationGasLimit, err = s.Uint(); err != nil {
+	if tx.PaymasterValidationGasLimit, err = s.Uint64(); err != nil {
 		return err
 	}
 
-	if tx.PostOpGasLimit, err = s.Uint(); err != nil {
+	if tx.PostOpGasLimit, err = s.Uint64(); err != nil {
 		return err
 	}
 
-	if tx.GasLimit, err = s.Uint(); err != nil {
+	if tx.GasLimit, err = s.Uint64(); err != nil {
 		return err
 	}
 

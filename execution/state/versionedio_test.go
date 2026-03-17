@@ -263,6 +263,7 @@ func TestAsBlockAccessList_NonRevertableOverridesRevertable(t *testing.T) {
 	}
 	require.True(t, found,
 		"system address should be included: non-revertable user access overrides earlier revertable access")
+
 }
 
 // TestVersionedIO_BalanceNetZeroWriteOmittedFromBAL verifies that a balance

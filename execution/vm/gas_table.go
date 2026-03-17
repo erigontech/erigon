@@ -455,21 +455,20 @@ func statefulGasCall(evm *EVM, callContext *CallContext, gas uint64, availableGa
 		if err != nil {
 			return 0, err
 		}
+		// Empty() reads account state for gas calculation — record for BAL
+		// tracking unconditionally, since the read happens regardless of
+		// whether the CALL proceeds or transfers value.
+		evm.IntraBlockState().MarkAddressAccess(address, false)
 		if transfersValue && empty {
 			accountGas = params.CallNewAccountGas
-			// Record the address access for BAL tracking, but only when the CALL
-			// will actually proceed. In read-only (STATICCALL) context, CALL with
-			// value > 0 will be rejected by ErrWriteProtection before evm.Call()
-			// runs, so the target is never truly accessed.
-			if !evm.readOnly {
-				evm.IntraBlockState().MarkAddressAccess(address, false)
-			}
 		}
 	} else {
 		exists, err := evm.IntraBlockState().Exist(address)
 		if err != nil {
 			return 0, err
 		}
+		// Exist() reads account state for gas calculation — record for BAL.
+		evm.IntraBlockState().MarkAddressAccess(address, false)
 		if !exists {
 			accountGas = params.CallNewAccountGas
 		}
@@ -661,6 +660,8 @@ func gasSelfdestruct(evm *EVM, callContext *CallContext, availableGas uint64, me
 			if err != nil {
 				return 0, err
 			}
+			// Empty() reads account state for gas calculation — record for BAL.
+			evm.IntraBlockState().MarkAddressAccess(address, false)
 			balance, err := evm.IntraBlockState().GetBalance(callContext.Address())
 			if err != nil {
 				return 0, err
@@ -673,6 +674,8 @@ func gasSelfdestruct(evm *EVM, callContext *CallContext, availableGas uint64, me
 			if err != nil {
 				return 0, err
 			}
+			// Exist() reads account state for gas calculation — record for BAL.
+			evm.IntraBlockState().MarkAddressAccess(address, false)
 			if !exist {
 				gas += params.CreateBySelfdestructGas
 			}
