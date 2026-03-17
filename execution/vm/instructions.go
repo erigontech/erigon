@@ -1088,11 +1088,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	gas := evm.CallGasTemp()
 	// Pop other call parameters.
 	addrVal, value, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
-	toAddr := scope.callAddrTmp // interned by the gas function
-	scope.callAddrTmp = accounts.NilAddress
-	if toAddr.IsNil() {
-		toAddr = accounts.InternAddress(addrVal.Bytes20())
-	}
+	toAddr := scope.takeCallAddr(addrVal)
 	// Get the arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
@@ -1146,11 +1142,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	gas := evm.CallGasTemp()
 	// Pop other call parameters.
 	addrVal, value, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
-	toAddr := scope.callAddrTmp // interned by the gas function
-	scope.callAddrTmp = accounts.NilAddress
-	if toAddr.IsNil() {
-		toAddr = accounts.InternAddress(addrVal.Bytes20())
-	}
+	toAddr := scope.takeCallAddr(addrVal)
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
@@ -1194,11 +1186,7 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	gas := evm.CallGasTemp()
 	// Pop other call parameters.
 	addrVal, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
-	toAddr := scope.callAddrTmp // interned by the gas function
-	scope.callAddrTmp = accounts.NilAddress
-	if toAddr.IsNil() {
-		toAddr = accounts.InternAddress(addrVal.Bytes20())
-	}
+	toAddr := scope.takeCallAddr(addrVal)
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
@@ -1238,11 +1226,7 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	gas := evm.CallGasTemp()
 	// Pop other call parameters.
 	addrVal, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
-	toAddr := scope.callAddrTmp // interned by the gas function
-	scope.callAddrTmp = accounts.NilAddress
-	if toAddr.IsNil() {
-		toAddr = accounts.InternAddress(addrVal.Bytes20())
-	}
+	toAddr := scope.takeCallAddr(addrVal)
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
