@@ -1,13 +1,17 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"math/big"
 	"time"
 
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
+
 	"github.com/erigontech/erigon/common"
+	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/types"
@@ -56,8 +60,21 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 		}
 	}
 
+	// [EIP-7594] Convert legacy (v0) blob sidecar to v1 cell proofs when Osaka is active.
+	// This allows users with tooling that has not yet been updated for PeerDAS to still
+	// submit blob transactions. The node computes the cell proofs on their behalf.
+	// TODO: remove once ecosystem tooling fully supports wrapper_version=1.
+	txBytes := []byte(encodedTx)
+	if wrapper, ok := txn.(*types.BlobTxWrapper); ok && wrapper.WrapperVersion == 0 && cc.IsOsaka(uint64(time.Now().Unix())) {
+		converted, err := convertBlobSidecarToV1(wrapper)
+		if err != nil {
+			return common.Hash{}, fmt.Errorf("blob sidecar v0→v1 conversion failed: %w", err)
+		}
+		txBytes = converted
+	}
+
 	hash := txn.Hash()
-	res, err := api.txPool.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{encodedTx}})
+	res, err := api.txPool.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{txBytes}})
 	if err != nil {
 		return common.Hash{}, err
 	}
@@ -118,6 +135,41 @@ func (api *APIImpl) SendRawTransactionSync(ctx context.Context, encodedTx hexuti
 // SendTransaction implements eth_sendTransaction. Creates new message call transaction or a contract creation if the data field contains code.
 func (api *APIImpl) SendTransaction(_ context.Context, _ any) (common.Hash, error) {
 	return common.Hash{0}, fmt.Errorf(NotImplemented, "eth_sendTransaction")
+}
+
+// convertBlobSidecarToV1 converts a legacy (wrapper_version=0) blob transaction
+// into wrapper_version=1 by computing EIP-7594 cell proofs from the blobs.
+func convertBlobSidecarToV1(wrapper *types.BlobTxWrapper) ([]byte, error) {
+	kzgCtx := libkzg.Ctx()
+
+	cellProofs := make(types.KZGProofs, 0, len(wrapper.Blobs)*int(goethkzg.CellsPerExtBlob))
+	for i := range wrapper.Blobs {
+		_, proofs, err := kzgCtx.ComputeCellsAndKZGProofs((*goethkzg.Blob)(&wrapper.Blobs[i]), 4)
+		if err != nil {
+			return nil, fmt.Errorf("compute cell proofs for blob %d: %w", i, err)
+		}
+		for _, p := range &proofs {
+			cellProofs = append(cellProofs, types.KZGProof(p))
+		}
+	}
+
+	// Mutate the wrapper in-place: swap version and proofs, marshal, then restore.
+	origVersion := wrapper.WrapperVersion
+	origProofs := wrapper.Proofs
+	wrapper.WrapperVersion = 1
+	wrapper.Proofs = cellProofs
+
+	var buf bytes.Buffer
+	err := wrapper.MarshalBinaryWrapped(&buf)
+
+	// Restore original values so the caller's object is unchanged.
+	wrapper.WrapperVersion = origVersion
+	wrapper.Proofs = origProofs
+
+	if err != nil {
+		return nil, fmt.Errorf("marshal converted wrapper: %w", err)
+	}
+	return buf.Bytes(), nil
 }
 
 // checkTxFee is an internal function used to check whether the fee of
