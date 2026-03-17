@@ -258,7 +258,7 @@ func TestHeaderToMatchesSync(t *testing.T) {
 	for i := range testKeys {
 		require.NoError(pw2.Add([]byte(testKeys[i]), []byte(testVals[i])))
 	}
-	asyncPage := pw2.headerTo(nil)
+	asyncPage := pageHeaderTo(nil, pw2.kLengths, pw2.vLengths, 0)
 	asyncPage = append(asyncPage, pw2.keys...)
 	asyncPage = append(asyncPage, pw2.vals...)
 
