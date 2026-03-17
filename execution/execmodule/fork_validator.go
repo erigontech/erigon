@@ -252,7 +252,7 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 	fv.sharedDom = sd
 	fv.extendingForkNotifications = shards.NewNotifications(nil)
 	status, latestValidHash, validationError, criticalError =
-		fv.validateAndStorePayload(fv.ctx, fv.sharedDom, tx, header, body, unwindPoint, headersChain, bodiesChain, fv.extendingForkNotifications)
+		fv.validateAndStorePayload(fv.ctx, fv.sharedDom, tx, header, body, unwindPoint, headersChain, bodiesChain)
 
 	if fv.sharedDom != nil &&
 		(criticalError != nil || status == engine_types.InvalidStatus) {
@@ -284,13 +284,13 @@ func (fv *ForkValidator) ClearWithUnwind(accumulator *shards.Accumulator, c shar
 
 // validateAndStorePayload validate and store a payload fork chain if such chain results valid.
 func (fv *ForkValidator) validateAndStorePayload(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
-	notifications *shards.Notifications) (status engine_types.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
+) (status engine_types.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
 	start := time.Now()
 	headersChain = append(headersChain, header)
 	bodiesChain = append(bodiesChain, body)
 	hash := header.Hash()
 	number := header.Number.Uint64()
-	if err := fv.executor.StateStep(ctx, sd, tx, unwindPoint, headersChain, bodiesChain, notifications); err != nil {
+	if err := fv.executor.StateStep(ctx, sd, tx, unwindPoint, headersChain, bodiesChain); err != nil {
 		if errors.Is(err, rules.ErrInvalidBlock) {
 			validationError = err
 		} else {

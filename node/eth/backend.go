@@ -951,12 +951,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, tracer, afterSnapshotDownload)
 	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 
-	// Create NewValidationSyncFn — factory that creates fresh validation pipelines.
-	newValidationSync := func(notifications *shards.Notifications) *stagedsync.Sync {
-		return stageloop.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentriesClient,
-			dirs, notifications, blockReader, blockWriter, logger)
-	}
-	pipelineExecutor := execmodule.NewPipelineExecutor(backend.pipelineStagedSync, backend.chainDB, blockReader, chainConfig, backend.engine, newValidationSync, logger)
+	validationSync := stageloop.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentriesClient,
+		dirs, shards.NewNotifications(nil), blockReader, blockWriter, logger)
+	pipelineExecutor := execmodule.NewPipelineExecutor(backend.pipelineStagedSync, backend.chainDB, blockReader, chainConfig, backend.engine, validationSync, logger)
 	backend.forkValidator = execmodule.NewForkValidator(ctx, currentBlockNumber, pipelineExecutor, tmpdir, backend.blockReader, config.MaxReorgDepth)
 
 	// for polygon, we only need to download snapshots on start so that all driver components are correctly initialised before any block execution begins

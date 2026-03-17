@@ -169,11 +169,10 @@ type ExecModule struct {
 	blockReader services.FullBlockReader
 
 	// MDBX database
-	db                kv.TemporalRwDB // main database
-	semaphore         *semaphore.Weighted
-	executionPipeline *stagedsync.Sync
-	forkValidator     *ForkValidator
-	pipelineExecutor  *PipelineExecutor
+	db               kv.TemporalRwDB // main database
+	semaphore        *semaphore.Weighted
+	forkValidator    *ForkValidator
+	pipelineExecutor *PipelineExecutor
 
 	logger log.Logger
 	// Block building
@@ -237,7 +236,6 @@ func NewExecModule(
 	em := &ExecModule{
 		blockReader:             blockReader,
 		db:                      db,
-		executionPipeline:       pipelineExecutor.sync,
 		logger:                  logger,
 		forkValidator:           forkValidator,
 		pipelineExecutor:        pipelineExecutor,
@@ -336,10 +334,10 @@ func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.Te
 		return err
 	}
 
-	if err := e.executionPipeline.UnwindTo(unwindPoint, stagedsync.ExecUnwind, tx); err != nil {
+	if err := e.pipelineExecutor.sync.UnwindTo(unwindPoint, stagedsync.ExecUnwind, tx); err != nil {
 		return err
 	}
-	if err := e.executionPipeline.RunUnwind(sd, tx); err != nil {
+	if err := e.pipelineExecutor.sync.RunUnwind(sd, tx); err != nil {
 		return err
 	}
 	return nil

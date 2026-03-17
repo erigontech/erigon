@@ -33,27 +33,22 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/shards"
 )
-
-// NewValidationSyncFn creates a fresh *stagedsync.Sync for fork validation.
-// A new sync is needed each call because the validation pipeline is stateful.
-type NewValidationSyncFn func(notifications *shards.Notifications) *stagedsync.Sync
 
 // PipelineExecutor centralises all staged sync pipeline invocations:
 // ProcessFrozenBlocks (startup), RunLoop (FCU catchup), and StateStep
 // (fork validation). It is created once and stored on ExecModule.
 type PipelineExecutor struct {
-	sync              *stagedsync.Sync
-	db                kv.TemporalRwDB
-	blockReader       services.FullBlockReader
-	chainConfig       *chain.Config
-	engine            rules.Engine
-	newValidationSync NewValidationSyncFn
-	logger            log.Logger
+	sync           *stagedsync.Sync
+	db             kv.TemporalRwDB
+	blockReader    services.FullBlockReader
+	chainConfig    *chain.Config
+	engine         rules.Engine
+	validationSync *stagedsync.Sync
+	logger         log.Logger
 }
 
-// NewPipelineExecutor creates a new executor. newValidationSync may be nil
+// NewPipelineExecutor creates a new executor. validationSync may be nil
 // if fork validation is not needed (e.g. in tests that skip ValidateChain).
 func NewPipelineExecutor(
 	sync *stagedsync.Sync,
@@ -61,17 +56,17 @@ func NewPipelineExecutor(
 	blockReader services.FullBlockReader,
 	chainConfig *chain.Config,
 	engine rules.Engine,
-	newValidationSync NewValidationSyncFn,
+	validationSync *stagedsync.Sync,
 	logger log.Logger,
 ) *PipelineExecutor {
 	return &PipelineExecutor{
-		sync:              sync,
-		db:                db,
-		blockReader:       blockReader,
-		chainConfig:       chainConfig,
-		engine:            engine,
-		newValidationSync: newValidationSync,
-		logger:            logger,
+		sync:           sync,
+		db:             db,
+		blockReader:    blockReader,
+		chainConfig:    chainConfig,
+		engine:         engine,
+		validationSync: validationSync,
+		logger:         logger,
 	}
 }
 
@@ -259,17 +254,14 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 }
 
 // StateStep executes a fork validation by running the pipeline block-by-block
-// over a side fork. All pipeline execution goes through PipelineExecutor —
-// this replaces the validatePayloadFunc closure that was previously defined
-// in backend.go.
-func (pe *PipelineExecutor) StateStep(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody, notifications *shards.Notifications) error {
+// over a side fork. All pipeline execution goes through PipelineExecutor.
+func (pe *PipelineExecutor) StateStep(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) error {
 	terseLogger := log.New()
 	terseLogger.SetHandler(log.LvlFilterHandler(log.Lvl(dbg.ExecTerseLoggerLevel), log.StderrHandler))
 
-	stateSync := pe.newValidationSync(notifications)
 	chainReader := consensuschain.NewReader(pe.chainConfig, tx, pe.blockReader, terseLogger)
 
-	if err := stageloop.StateStep(ctx, chainReader, pe.engine, sd, tx, stateSync, unwindPoint, headersChain, bodiesChain); err != nil {
+	if err := stageloop.StateStep(ctx, chainReader, pe.engine, sd, tx, pe.validationSync, unwindPoint, headersChain, bodiesChain); err != nil {
 		pe.logger.Warn("Could not validate block", "err", err)
 		return err
 	}

@@ -658,12 +658,10 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	pipelineStages := stageloop.NewPipelineStages(mock.Ctx, db, &cfg, mock.sentriesClient, mock.Notifications, snapDownloader, mock.BlockReader, blockRetire, tracer, nil)
 	mock.posStagedSync = stagedsync.New(cfg.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 
-	// Create NewValidationSyncFn, PipelineExecutor, and ForkValidator.
-	newValidationSync := func(notifications *shards.Notifications) *stagedsync.Sync {
-		return stageloop.NewInMemoryExecution(mock.Ctx, mock.DB, &cfg, mock.sentriesClient,
-			dirs, notifications, mock.BlockReader, blockWriter, logger)
-	}
-	pipelineExecutor := execmodule.NewPipelineExecutor(mock.posStagedSync, mock.DB, mock.BlockReader, mock.ChainConfig, mock.Engine, newValidationSync, logger)
+	// Create validation Sync, PipelineExecutor, and ForkValidator.
+	validationSync := stageloop.NewInMemoryExecution(mock.Ctx, mock.DB, &cfg, mock.sentriesClient,
+		dirs, shards.NewNotifications(nil), mock.BlockReader, blockWriter, logger)
+	pipelineExecutor := execmodule.NewPipelineExecutor(mock.posStagedSync, mock.DB, mock.BlockReader, mock.ChainConfig, mock.Engine, validationSync, logger)
 	forkValidator := execmodule.NewForkValidator(ctx, 1, pipelineExecutor, dirs.Tmp, mock.BlockReader, cfg.MaxReorgDepth)
 	mock.ForkValidator = forkValidator
 
