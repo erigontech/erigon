@@ -136,9 +136,11 @@ const (
 	ElasticityMultiplier               = 2          // Bounds the maximum gas limit an EIP-1559 block may have.
 	InitialBaseFee                     = 1000000000 // Initial base fee for EIP-1559 blocks.
 
-	MaxCodeSize              = 24576           // Maximum bytecode to permit for a contract
-	MaxCodeSizePostAhmedabad = 32768           // Maximum bytecode to permit for a contract post Ahmedabad hard fork (bor / polygon pos) (32KB)
-	MaxInitCodeSize          = 2 * MaxCodeSize // Maximum initcode to permit in a creation transaction and create instructions
+	MaxCodeSize              = 24 * 1024                // Maximum bytecode to permit for a contract
+	MaxCodeSizeAhmedabad     = 32 * 1024                // Maximum bytecode to permit for a contract post Ahmedabad hard fork (bor / polygon pos) (32KB)
+	MaxInitCodeSize          = 2 * MaxCodeSize          // Maximum initcode to permit in a creation transaction and create instructions
+	MaxCodeSizeAmsterdam     = 32 * 1024                // EIP-7954: Increase Maximum Contract Size
+	MaxInitCodeSizeAmsterdam = 2 * MaxCodeSizeAmsterdam // EIP-7954: Increase Maximum Contract Size
 
 	// Precompiled contract gas prices
 

@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -336,7 +337,7 @@ func (a *Aggregator) AddDependencyBtwnDomains(dependency kv.Domain, dependent kv
 	// only corresponding files should be included. e.g. commitment + account -
 	// cannot have merged account visibleFile, and unmerged commitment visibleFile for same step range.
 	if a.checker == nil {
-		a.checker = NewDependencyIntegrityChecker(a.dirs, a.logger)
+		a.checker = NewDependencyIntegrityChecker(a.logger)
 	}
 
 	a.checker.AddDependency(FromDomain(dependency), &DependentInfo{
@@ -356,7 +357,7 @@ func (a *Aggregator) AddDependencyBtwnHistoryII(domain kv.Domain) {
 	}
 
 	if a.checker == nil {
-		a.checker = NewDependencyIntegrityChecker(a.dirs, a.logger)
+		a.checker = NewDependencyIntegrityChecker(a.logger)
 	}
 
 	h := dd.History
@@ -565,6 +566,62 @@ func (a *Aggregator) SetCompressWorkers(i int) {
 		ii.CompressorCfg.Workers = i
 	}
 }
+
+func (a *Aggregator) SetBuildAccessorsWorkers(i int) {
+	if a.lockWorkersEditing {
+		return
+	}
+	for _, d := range a.d {
+		if d == nil {
+			continue
+		}
+		d.BuildAccessorsWorkers = i
+		if d.History != nil {
+			d.History.BuildAccessorsWorkers = i
+			d.History.InvertedIndex.BuildAccessorsWorkers = i
+		}
+	}
+	for _, ii := range a.iis {
+		ii.BuildAccessorsWorkers = i
+	}
+}
+
+// PresetChainTipConcurrency configures workers for live chain-tip syncing:
+// minimal collate workers to avoid competing with block execution.
+func (a *Aggregator) PresetChainTipConcurrency() {
+	a.SetCollateAndBuildWorkers(1)
+	a.SetMergeWorkers(dbg.MergeWorkers)
+	a.SetCompressWorkers(dbg.CompressWorkers)
+	a.SetBuildAccessorsWorkers(dbg.CompressWorkers)
+}
+
+// PresetNonChainTipConcurrency configures workers for initial sync (not at chain tip):
+// allows more collate/merge parallelism via env-var overrides.
+func (a *Aggregator) PresetNonChainTipConcurrency() {
+	a.SetCollateAndBuildWorkers(dbg.CollateWorkers)
+	a.SetMergeWorkers(dbg.MergeWorkers)
+	a.SetCompressWorkers(dbg.CompressWorkers)
+	a.SetBuildAccessorsWorkers(dbg.CompressWorkers)
+}
+
+// PresetOfflineMerge configures workers for offline merge operations:
+// uses RAM/CPU estimates to maximise merge and compression throughput.
+func (a *Aggregator) PresetOfflineMerge() {
+	a.SetCollateAndBuildWorkers(estimate.StateV3Collate.Workers())
+	a.SetMergeWorkers(min(4, estimate.StateV3Collate.Workers()))
+	a.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+	a.SetBuildAccessorsWorkers(estimate.CompressSnapshot.Workers())
+}
+
+// PresetOfflineExecution configures workers for offline execution (e.g. integration tool):
+// uses RAM/CPU estimates to maximise collate/build and compression throughput.
+func (a *Aggregator) PresetOfflineExecution() {
+	a.SetCollateAndBuildWorkers(min(4, estimate.StateV3Collate.Workers()))
+	a.SetMergeWorkers(min(2, estimate.StateV3Collate.Workers()))
+	a.SetCompressWorkers(estimate.CompressSnapshot.WorkersHalf())
+	a.SetBuildAccessorsWorkers(estimate.CompressSnapshot.WorkersHalf())
+}
+
 func (a *Aggregator) LockWorkersEditing()   { a.lockWorkersEditing = true }
 func (a *Aggregator) UnlockWorkersEditing() { a.lockWorkersEditing = false }
 
@@ -1512,7 +1569,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 			}
 			// commitment waits until storage and account are merged so it may be a bit behind (if merge was interrupted before)
 			if !dr.values.needMerge || cr.values.to < dr.values.from {
-				if mf := at.d[kd].lookupDirtyFileByItsRange(cr.values.from, cr.values.to); mf != nil {
+				if _, err := at.d[kd].lookupVisibleFileByRange(cr.values.from, cr.values.to); err == nil {
 					// file for required range exists, hold this domain from merge but allow to merge comitemnt
 					r.domain[k].values = MergeRange{}
 					at.a.logger.Debug("findMergeRange: commitment range is different but file exists in domain, hold further merge",

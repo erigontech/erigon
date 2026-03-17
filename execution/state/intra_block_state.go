@@ -362,6 +362,10 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.txIndex = 0
 	sdb.logSize = 0
 	sdb.versionMap = nil
+	// Do not clear the maps in place — result.TxIn / result.TxOut may still
+	// reference them from a prior execution (used by finalize in another
+	// goroutine). Setting to nil lets the GC collect the old maps once all
+	// references are dropped, while the next execution lazily allocates fresh ones.
 	sdb.versionedReads = nil
 	sdb.versionedWrites = nil
 	sdb.accountReadDuration = 0
@@ -1827,7 +1831,7 @@ func (sdb *IntraBlockState) GetRefund() uint64 {
 	return sdb.refund
 }
 
-func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, addr accounts.Address, stateObject *stateObject, isDirty bool, trace bool, tracingHooks *tracing.Hooks) error {
+func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, addr accounts.Address, stateObject *stateObject, isDirty bool, trace bool, tracingHooks *tracing.Hooks, useBlockOrigin bool) error {
 	emptyRemoval := EIP161Enabled && stateObject.data.Empty() && (!isAura || addr != params.SystemAddress)
 	if stateObject.selfdestructed || (isDirty && emptyRemoval) {
 		balance := stateObject.Balance()
@@ -1857,7 +1861,7 @@ func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, add
 				return err
 			}
 		}
-		if err := stateObject.updateStorage(stateWriter); err != nil {
+		if err := stateObject.updateStorage(stateWriter, useBlockOrigin); err != nil {
 			return err
 		}
 		if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (trace || dbg.TraceAccount(addr.Handle()))) {
@@ -1910,7 +1914,7 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 			continue
 		}
 
-		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, so, true, sdb.trace, sdb.tracingHooks); err != nil {
+		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, so, true, sdb.trace, sdb.tracingHooks, false); err != nil {
 			return err
 		}
 
@@ -2009,7 +2013,7 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 		if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 			fmt.Printf("%d (%d.%d) Update Account %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
 		}
-		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, stateObject, isDirty, sdb.trace, sdb.tracingHooks); err != nil {
+		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, stateObject, isDirty, sdb.trace, sdb.tracingHooks, true); err != nil {
 			return err
 		}
 	}
@@ -2277,19 +2281,19 @@ func versionRead[T any](sdb *IntraBlockState, addr accounts.Address, path Accoun
 	}
 }
 
-func (sdb *IntraBlockState) versionedWrite(addr accounts.Address, path AccountPath, key accounts.StorageKey) (*VersionedWrite, bool) {
+func (sdb *IntraBlockState) versionedWrite(addr accounts.Address, path AccountPath, key accounts.StorageKey) (VersionedWrite, bool) {
 	if sdb.versionMap == nil || sdb.versionedWrites == nil {
-		return nil, false
+		return VersionedWrite{}, false
 	}
 
 	v, ok := sdb.versionedWrites[addr][AccountKey{Path: path, Key: key}]
 
 	if !ok {
-		return nil, ok
+		return VersionedWrite{}, false
 	}
 
 	if _, isDirty := sdb.journal.dirties[addr]; !isDirty {
-		return nil, false
+		return VersionedWrite{}, false
 	}
 
 	return v, ok
@@ -2356,10 +2360,11 @@ func (sdb *IntraBlockState) VersionedWrites(checkDirty bool) VersionedWrites {
 			var appends = make(VersionedWrites, 0, len(vwrites))
 			var selfDestructed bool
 			for _, v := range vwrites {
+				v := v // local copy for pointer
 				if v.Path == SelfDestructPath && v.Val.(bool) {
 					selfDestructed = true
 					prevs := appends
-					appends = VersionedWrites{v}
+					appends = VersionedWrites{&v}
 					for _, prev := range prevs {
 						if prev.Path == BalancePath || prev.Path == IncarnationPath {
 							appends = append(appends, prev)
@@ -2368,10 +2373,10 @@ func (sdb *IntraBlockState) VersionedWrites(checkDirty bool) VersionedWrites {
 				} else {
 					if selfDestructed {
 						if v.Path == BalancePath || v.Path == IncarnationPath {
-							appends = append(appends, v)
+							appends = append(appends, &v)
 						}
 					} else {
-						appends = append(appends, v)
+						appends = append(appends, &v)
 					}
 				}
 			}

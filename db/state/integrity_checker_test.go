@@ -40,7 +40,7 @@ func TestDependency(t *testing.T) {
 		accessors:   statecfg.AccessorHashMap,
 	}
 
-	checker := NewDependencyIntegrityChecker(dirs, logger)
+	checker := NewDependencyIntegrityChecker(logger)
 	checker.AddDependency(AccountDomainUniversal, dinfo)
 	// not adding dependency for storage
 
@@ -82,7 +82,7 @@ func TestDependency_UnindexedMerged(t *testing.T) {
 		accessors:   statecfg.AccessorHashMap,
 	}
 
-	checker := NewDependencyIntegrityChecker(dirs, logger)
+	checker := NewDependencyIntegrityChecker(logger)
 	checker.AddDependency(AccountDomainUniversal, dinfo)
 	// not adding dependency for storage
 
