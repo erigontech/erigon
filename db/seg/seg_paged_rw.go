@@ -124,7 +124,9 @@ func WordsAmount2PagesAmount(wordsAmount int, pageSize int) (pagesAmount int) {
 
 type pageWorkItem struct {
 	seq              int
-	uncompressedData []byte // copy of uncompressed page; returned to pool after compression
+	uncompressedData []byte // header bytes (producer), then concatenated page (worker)
+	keys             []byte // raw keys data, swapped from producer
+	vals             []byte // raw vals data, swapped from producer
 }
 
 type pageResult struct {
@@ -322,6 +324,10 @@ func (c *PagedWriter) compressionWorker(ctx context.Context) error {
 	processItem := func(item *pageWorkItem) {
 		defer putPageWorkItem(item)
 
+		// Concatenate header + keys + vals (moved from producer to parallel worker)
+		item.uncompressedData = append(item.uncompressedData, item.keys...)
+		item.uncompressedData = append(item.uncompressedData, item.vals...)
+
 		result := getPageResult()
 		result.seq = item.seq
 
@@ -429,15 +435,25 @@ func (c *PagedWriter) writePage() error {
 		return nil
 	}
 
-	// Async path with parallel workers
-	item := getPageWorkItem()
-	var ok bool
-	item.uncompressedData, ok = c.bytesUncompressedTo(item.uncompressedData)
-	c.resetPage()
-	if !ok {
-		putPageWorkItem(item)
+	// Async path: build header, swap key/val buffers to worker (zero-copy producer)
+	if len(c.kLengths) == 0 {
 		return nil
 	}
+
+	item := getPageWorkItem()
+
+	// Pre-grow to full page size so worker appends don't realloc
+	totalSize := 1 + len(c.kLengths)*2*4 + len(c.keys) + len(c.vals)
+	if cap(item.uncompressedData) < totalSize {
+		item.uncompressedData = make([]byte, 0, totalSize)
+	}
+	item.uncompressedData = c.headerTo(item.uncompressedData)
+
+	// Swap key/val buffers: give ours to worker, take recycled ones (zero copy)
+	item.keys, c.keys = c.keys, item.keys
+	item.vals, c.vals = c.vals, item.vals
+
+	c.resetPage()
 
 	item.seq = c.seqIn
 	c.seqIn++
@@ -505,37 +521,19 @@ func (c *PagedWriter) bytesUncompressed() (wholePage []byte, notEmpty bool) {
 	c.keys = append(c.keys, c.vals...)
 	keysAndVals := c.keys
 
-	c.vals = growslice(c.vals[:0], 1+len(c.kLengths)*2*4)
-	wholePage = c.vals
-	clear(wholePage)
-	wholePage[0] = uint8(len(c.kLengths)) // first byte is amount of vals
-	lensBuf := wholePage[1:]
-	for i, l := range c.kLengths {
-		binary.BigEndian.PutUint32(lensBuf[i*4:(i+1)*4], uint32(l))
-	}
-	lensBuf = lensBuf[len(c.kLengths)*4:]
-	for i, l := range c.vLengths {
-		binary.BigEndian.PutUint32(lensBuf[i*4:(i+1)*4], uint32(l))
-	}
-
+	wholePage = c.headerTo(c.vals)
 	wholePage = append(wholePage, keysAndVals...)
 
 	return wholePage, true
 }
 
-// bytesUncompressedTo encodes page into external buffer (no internal state modification)
-func (c *PagedWriter) bytesUncompressedTo(buf []byte) (wholePage []byte, notEmpty bool) {
-	if len(c.kLengths) == 0 {
-		return nil, false
-	}
-
-	// Pre-allocate full size: header + keys + values (single allocation, no append re-grow)
+// headerTo encodes page header (count + key/value lengths) into buf.
+// Returns the sized header slice.
+func (c *PagedWriter) headerTo(buf []byte) []byte {
 	headerSize := 1 + len(c.kLengths)*2*4
-	totalSize := headerSize + len(c.keys) + len(c.vals)
-	wholePage = growslice(buf[:0], totalSize)
-
-	wholePage[0] = uint8(len(c.kLengths)) // first byte is amount of vals
-	lensBuf := wholePage[1:]
+	buf = growslice(buf[:0], headerSize)
+	buf[0] = uint8(len(c.kLengths))
+	lensBuf := buf[1:]
 	for i, l := range c.kLengths {
 		binary.BigEndian.PutUint32(lensBuf[i*4:(i+1)*4], uint32(l))
 	}
@@ -543,12 +541,7 @@ func (c *PagedWriter) bytesUncompressedTo(buf []byte) (wholePage []byte, notEmpt
 	for i, l := range c.vLengths {
 		binary.BigEndian.PutUint32(lensBuf[i*4:(i+1)*4], uint32(l))
 	}
-
-	// Copy keys and values into pre-allocated space (no reallocation)
-	copy(wholePage[headerSize:], c.keys)
-	copy(wholePage[headerSize+len(c.keys):], c.vals)
-
-	return wholePage, true
+	return buf
 }
 
 func (c *PagedWriter) bytes() (wholePage []byte, notEmpty bool) {
@@ -597,6 +590,8 @@ func putPageWorkItem(item *pageWorkItem) {
 	}
 	item.seq = 0
 	item.uncompressedData = item.uncompressedData[:0]
+	item.keys = item.keys[:0]
+	item.vals = item.vals[:0]
 	pageWorkItemPool.Put(item)
 }
 
