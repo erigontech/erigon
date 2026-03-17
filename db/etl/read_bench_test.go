@@ -13,12 +13,8 @@ import (
 	"github.com/erigontech/erigon/common/mmap"
 )
 
-type mmapBytesReader struct {
-	data []byte
-	pos  int
-}
-
-func readField(m *mmapBytesReader) ([]byte, error) {
+// readFieldU16 reads a uint16-prefixed field from mmap data (zero-copy, bench only).
+func readFieldU16(m *mmapBytesReader) ([]byte, error) {
 	if m.pos+2 > len(m.data) {
 		return nil, io.EOF
 	}
@@ -160,10 +156,10 @@ func benchMmapU16(b *testing.B, fname string) {
 
 	m := &mmapBytesReader{data: data, pos: 0}
 	for {
-		if _, err := readField(m); err != nil {
+		if _, err := readFieldU16(m); err != nil {
 			break
 		}
-		if _, err := readField(m); err != nil {
+		if _, err := readFieldU16(m); err != nil {
 			break
 		}
 	}
