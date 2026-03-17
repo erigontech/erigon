@@ -51,7 +51,7 @@ func BenchmarkStackOps(b *testing.B) {
 	code := p.Push(0x42).
 		Op(vm.DUP1, vm.DUP2, vm.DUP3, vm.DUP4, vm.DUP5, vm.DUP6, vm.DUP7, vm.DUP8).
 		Op(vm.SWAP1, vm.SWAP2, vm.SWAP3, vm.SWAP4).
-		Op(vm.POP, vm.POP, vm.POP, vm.POP, vm.POP, vm.POP, vm.POP, vm.POP).
+		Op(vm.POP, vm.POP, vm.POP, vm.POP, vm.POP, vm.POP, vm.POP, vm.POP, vm.POP).
 		Jump(lbl).Bytes()
 
 	b.Run("dup-swap/100M", func(b *testing.B) {
@@ -140,7 +140,7 @@ func BenchmarkMixedCompute(b *testing.B) {
 		Push(0).Op(vm.MSTORE).
 		Push(0).Op(vm.MLOAD).
 		// Clean up and control flow (10%)
-		Op(vm.POP, vm.POP, vm.POP, vm.POP).
+		Op(vm.POP, vm.POP, vm.POP, vm.POP, vm.POP).
 		Jump(lbl).Bytes()
 
 	b.Run("mixed/100M", func(b *testing.B) {

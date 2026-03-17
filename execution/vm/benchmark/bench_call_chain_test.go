@@ -101,8 +101,6 @@ func BenchmarkCallWithValue(b *testing.B) {
 		cfg, statedb := benchConfig(b, 100_000_000)
 
 		deployContract(statedb, addrPair, targetCode)
-		// Give caller ETH
-		deployContractWithBalance(statedb, addrContract, nil, uint256.NewInt(1_000_000_000))
 		// Caller loops: CALL with value=1 wei
 		p, lbl := program.New().Jumpdest()
 		code := p.Call(nil, rawPair, 1, 0, 0, 0, 0).Op(vm.POP).Jump(lbl).Bytes()
@@ -225,8 +223,8 @@ func deployDeFiContracts(statedb *state.IntraBlockState) {
 	for _, addr := range []accounts.Address{addrTokenA, addrTokenB} {
 		deployContract(statedb, addr, tokenCode)
 		setStorage(statedb, addr, map[uint256.Int]uint256.Int{
-			*uint256.NewInt(0): *uint256.NewInt(500_000),
-			*uint256.NewInt(1): *uint256.NewInt(500_000),
+			*uint256.NewInt(0): *uint256.NewInt(1_000_000_000),
+			*uint256.NewInt(1): *uint256.NewInt(1_000_000_000),
 		})
 	}
 
