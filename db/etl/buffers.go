@@ -212,6 +212,175 @@ func (b *sortableBuffer) SortByKeyAndValue() {
 	slices.SortFunc(b.entries, cmp)
 }
 
+// SortByKeyAndValueGrouped sorts entries by (key, value, insertionOrder) using a
+// single-pass approach optimised for the common case where entries are already
+// key-sorted (e.g. txNum-keyed tables where txNums always increase during exec).
+//
+// Algorithm:
+//  1. Scan entries pairwise. As long as keys are non-decreasing, sort each
+//     completed equal-key group by value using an inline insertion sort with the
+//     key length pre-computed once per group (avoids per-comparison overhead).
+//  2. If a key is ever found to decrease (data not key-sorted), fall back to a
+//     full O(n log n) sort by (key, value, insertionOrder).
+//
+// Compared to the naive SortByKeyAndValue, this avoids:
+//   - The O(n) IsSortedFunc scan that nearly always fails for txNum data
+//     (values within a key group are in insertion order, not value-sorted)
+//   - A redundant second O(n) scan for group boundaries
+//   - Per-comparison max(keyLen,0) arithmetic (precomputed once per group)
+//   - slices.SortFunc call overhead for small groups (inline insertion sort)
+func (b *sortableBuffer) SortByKeyAndValueGrouped() {
+	data := b.data
+	entries := b.entries
+	if len(entries) <= 1 {
+		return
+	}
+
+	start := 0
+	for i := 1; i <= len(entries); i++ {
+		if i < len(entries) {
+			ci, prev := entries[i], entries[i-1]
+			// Fast path: if both keys are 8 bytes (the txNum case), compare as
+			// big-endian uint64 inline to avoid the bytes.Compare function-call
+			// overhead (~3-5 ns per call × 500k iterations is meaningful).
+			var c int
+			if ci.keyLen == 8 && prev.keyLen == 8 {
+				ck := binary.BigEndian.Uint64(data[ci.offset:])
+				pk := binary.BigEndian.Uint64(data[prev.offset:])
+				if ck < pk {
+					c = -1
+				} else if ck > pk {
+					c = 1
+				}
+			} else {
+				kl := max(ci.keyLen, 0)
+				prevKl := max(prev.keyLen, 0)
+				c = bytes.Compare(
+					data[ci.offset:ci.offset+kl],
+					data[prev.offset:prev.offset+prevKl],
+				)
+			}
+			if c == 0 {
+				continue // same key — extend current group
+			}
+			if c > 0 {
+				// Key advanced — current group is complete
+				if i-start > 1 {
+					sortGroupByVal(entries[start:i], data, int(max(entries[start].keyLen, 0)))
+				}
+				start = i
+				continue
+			}
+			// c < 0: key went backwards — data is not key-sorted; fall back.
+		} else {
+			// End of entries — flush final group.
+			if i-start > 1 {
+				sortGroupByVal(entries[start:i], data, int(max(entries[start].keyLen, 0)))
+			}
+			return
+		}
+
+		// Full fallback: sort everything by (key, value, insertionOrder).
+		// Groups already value-sorted above remain valid; the full sort is correct
+		// regardless of intermediate state.
+		slices.SortFunc(entries, func(a, b entryLoc) int {
+			aKey := data[a.offset : a.offset+max(a.keyLen, 0)]
+			bKey := data[b.offset : b.offset+max(b.keyLen, 0)]
+			if c := bytes.Compare(aKey, bKey); c != 0 {
+				return c
+			}
+			aValOff := a.offset + max(a.keyLen, 0)
+			bValOff := b.offset + max(b.keyLen, 0)
+			aVal := data[aValOff : aValOff+max(a.valLen, 0)]
+			bVal := data[bValOff : bValOff+max(b.valLen, 0)]
+			if c := bytes.Compare(aVal, bVal); c != 0 {
+				return c
+			}
+			return int(a.insertionOrder - b.insertionOrder)
+		})
+		return
+	}
+}
+
+// sortGroupByVal sorts a slice of entryLoc by (value, insertionOrder).
+// kl is the pre-computed key length shared by all entries in the group.
+//
+// For small groups (≤ insertionSortThreshold) uses an inline insertion sort with
+// all comparison logic expanded directly in the loop — no function-call overhead.
+// Uses a uint64 prefix fast-path: when both values are ≥8 bytes, loads and compares
+// the first 8 bytes as a big-endian uint64 without calling bytes.Compare (~3-5 ns
+// per call saved). The current element's 8-byte prefix (ep) is hoisted out of the
+// inner loop so it is loaded only once per outer iteration. Falls back to
+// bytes.Compare when prefixes are equal or values are <8 bytes.
+const insertionSortThreshold = 24
+
+func sortGroupByVal(group []entryLoc, data []byte, kl int) {
+	if len(group) <= insertionSortThreshold {
+		for i := 1; i < len(group); i++ {
+			e := group[i]
+			eVOff := int(e.offset) + kl
+			eVLen := int(max(e.valLen, 0))
+			// Hoist the current element's uint64 prefix out of the inner loop.
+			var ep uint64
+			eHas8 := eVLen >= 8
+			if eHas8 {
+				ep = binary.BigEndian.Uint64(data[eVOff:])
+			}
+			j := i - 1
+			for j >= 0 {
+				f := group[j]
+				fVOff := int(f.offset) + kl
+				fVLen := int(max(f.valLen, 0))
+				var c int
+				if eHas8 && fVLen >= 8 {
+					fp := binary.BigEndian.Uint64(data[fVOff:])
+					if fp != ep {
+						if fp < ep {
+							c = -1
+						} else {
+							c = 1
+						}
+					} else {
+						c = bytes.Compare(data[fVOff:fVOff+fVLen], data[eVOff:eVOff+eVLen])
+					}
+				} else {
+					c = bytes.Compare(data[fVOff:fVOff+fVLen], data[eVOff:eVOff+eVLen])
+				}
+				if c == 0 {
+					c = int(f.insertionOrder - e.insertionOrder)
+				}
+				if c <= 0 {
+					break
+				}
+				group[j+1] = group[j]
+				j--
+			}
+			group[j+1] = e
+		}
+		return
+	}
+	slices.SortFunc(group, func(a, b entryLoc) int {
+		aVOff := int(a.offset) + kl
+		bVOff := int(b.offset) + kl
+		aVLen := int(max(a.valLen, 0))
+		bVLen := int(max(b.valLen, 0))
+		if aVLen >= 8 && bVLen >= 8 {
+			ap := binary.BigEndian.Uint64(data[aVOff:])
+			bp := binary.BigEndian.Uint64(data[bVOff:])
+			if ap != bp {
+				if ap < bp {
+					return -1
+				}
+				return 1
+			}
+		}
+		if c := bytes.Compare(data[aVOff:aVOff+aVLen], data[bVOff:bVOff+bVLen]); c != 0 {
+			return c
+		}
+		return int(a.insertionOrder - b.insertionOrder)
+	})
+}
+
 func (b *sortableBuffer) CheckFlushSize() bool {
 	return b.Size() >= b.optimalSize
 }

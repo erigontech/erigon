@@ -955,6 +955,121 @@ func BenchmarkSortByKeyAndValue(b *testing.B) {
 				ref.SortByKeyAndValue()
 			}
 		})
+		b.Run("SortByKeyAndValueGrouped_"+tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				b.StopTimer()
+				ref := makeBuffer(tc.count)
+				b.StartTimer()
+				ref.SortByKeyAndValueGrouped()
+			}
+		})
+	}
+}
+
+// BenchmarkSortByKeyAndValueGroupedRealistic benchmarks Sort, SortByKeyAndValue,
+// and SortByKeyAndValueGrouped under realistic txNum-keyed data: keys are sequential
+// txNums (already in order, the common case), each with valuesPerKey random-value
+// entries. This matches the ii/history keys tables that motivated SortByKeyAndValue.
+func BenchmarkSortByKeyAndValueGroupedRealistic(b *testing.B) {
+	const txNumLen = 8 // key = txNum (8 bytes)
+	const addrLen = 20 // value = address (20 bytes, random)
+	const valuesPerKey = 5
+
+	for _, tc := range []struct {
+		name      string
+		numTxNums int
+	}{
+		{"txnums_20k_vals_100k", 20_000},
+		{"txnums_100k_vals_500k", 100_000},
+	} {
+		totalEntries := tc.numTxNums * valuesPerKey
+
+		makeBuffer := func() *sortableBuffer {
+			buf := NewSortableBuffer(256 * 1024 * 1024)
+			buf.Prealloc(totalEntries, totalEntries*(txNumLen+addrLen))
+			key := make([]byte, txNumLen)
+			val := make([]byte, addrLen)
+			for txn := range tc.numTxNums {
+				binary.BigEndian.PutUint64(key, uint64(txn))
+				for v := range valuesPerKey {
+					x := uint64(txn*valuesPerKey+v) * 6364136223846793005
+					binary.BigEndian.PutUint64(val, x)
+					binary.BigEndian.PutUint64(val[8:], x^0xcafebabe)
+					copy(val[16:], key[:4])
+					buf.Put(key, val)
+				}
+			}
+			return buf
+		}
+
+		b.Run(tc.name+"/Sort", func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				b.StopTimer()
+				buf := makeBuffer()
+				b.StartTimer()
+				buf.Sort()
+			}
+		})
+		b.Run(tc.name+"/SortByKeyAndValue", func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				b.StopTimer()
+				buf := makeBuffer()
+				b.StartTimer()
+				buf.SortByKeyAndValue()
+			}
+		})
+		b.Run(tc.name+"/SortByKeyAndValueGrouped", func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				b.StopTimer()
+				buf := makeBuffer()
+				b.StartTimer()
+				buf.SortByKeyAndValueGrouped()
+			}
+		})
+	}
+}
+
+func TestSortByKeyAndValueGroupedMatchesSortByKeyAndValue(t *testing.T) {
+	// Verify SortByKeyAndValueGrouped produces the same order as SortByKeyAndValue
+	// for txNum-style data: sequential keys with multiple random values per key.
+	const txNumLen = 8
+	const addrLen = 20
+	const valuesPerKey = 5
+	const numTxNums = 1000
+
+	fill := func(buf *sortableBuffer) {
+		key := make([]byte, txNumLen)
+		val := make([]byte, addrLen)
+		for txn := range numTxNums {
+			binary.BigEndian.PutUint64(key, uint64(txn))
+			for v := range valuesPerKey {
+				x := uint64(txn*valuesPerKey+v) * 6364136223846793005
+				binary.BigEndian.PutUint64(val, x)
+				binary.BigEndian.PutUint64(val[8:], x^0xcafebabe)
+				copy(val[16:], key[:4])
+				buf.Put(key, val)
+			}
+		}
+	}
+
+	buf1 := NewSortableBuffer(256 * 1024 * 1024)
+	buf2 := NewSortableBuffer(256 * 1024 * 1024)
+	fill(buf1)
+	fill(buf2)
+
+	buf1.SortByKeyAndValue()
+	buf2.SortByKeyAndValueGrouped()
+
+	require.Equal(t, buf1.Len(), buf2.Len())
+	for i := range buf1.Len() {
+		k1, v1 := buf1.Get(i)
+		k2, v2 := buf2.Get(i)
+		require.Equal(t, k1, k2, "key mismatch at index %d", i)
+		require.Equal(t, v1, v2, "value mismatch at index %d", i)
 	}
 }
 
