@@ -861,15 +861,24 @@ func (m *MemoryMutation) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum 
 }
 
 func (m *MemoryMutation) UnmarkedRw(id kv.ForkableId) kv.UnmarkedRwTx {
-	return m.db.(kv.TemporalRwTx).UnmarkedRw(id)
+	if rwTx, ok := m.db.(kv.TemporalRwTx); ok {
+		return rwTx.UnmarkedRw(id)
+	}
+	return nil // overlay backed by RO tx
 }
 
 func (m *MemoryMutation) PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error) {
-	return m.db.(kv.TemporalRwTx).PruneSmallBatches(ctx, timeout)
+	if rwTx, ok := m.db.(kv.TemporalRwTx); ok {
+		return rwTx.PruneSmallBatches(ctx, timeout)
+	}
+	return false, nil // overlay backed by RO tx — prune deferred to commit window
 }
 
 func (m *MemoryMutation) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
-	return m.db.(kv.TemporalRwTx).Unwind(ctx, txNumUnwindTo, changeset)
+	if rwTx, ok := m.db.(kv.TemporalRwTx); ok {
+		return rwTx.Unwind(ctx, txNumUnwindTo, changeset)
+	}
+	return fmt.Errorf("unwind requires TemporalRwTx, got %T", m.db)
 }
 
 // OverlayReadView provides a read-only view that checks the MemoryMutation's
