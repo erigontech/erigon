@@ -529,10 +529,10 @@ func (c *PagedWriter) bytesUncompressedTo(buf []byte) (wholePage []byte, notEmpt
 		return nil, false
 	}
 
-	// Encode page metadata (header only), then append keys and values
+	// Pre-allocate full size: header + keys + values (single allocation, no append re-grow)
 	headerSize := 1 + len(c.kLengths)*2*4
-	wholePage = growslice(buf[:0], headerSize)
-	clear(wholePage)
+	totalSize := headerSize + len(c.keys) + len(c.vals)
+	wholePage = growslice(buf[:0], totalSize)
 
 	wholePage[0] = uint8(len(c.kLengths)) // first byte is amount of vals
 	lensBuf := wholePage[1:]
@@ -544,9 +544,9 @@ func (c *PagedWriter) bytesUncompressedTo(buf []byte) (wholePage []byte, notEmpt
 		binary.BigEndian.PutUint32(lensBuf[i*4:(i+1)*4], uint32(l))
 	}
 
-	// Append keys and values after header (must not be included in pre-allocated size)
-	wholePage = append(wholePage, c.keys...)
-	wholePage = append(wholePage, c.vals...)
+	// Copy keys and values into pre-allocated space (no reallocation)
+	copy(wholePage[headerSize:], c.keys)
+	copy(wholePage[headerSize+len(c.keys):], c.vals)
 
 	return wholePage, true
 }
