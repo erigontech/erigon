@@ -41,7 +41,6 @@ import (
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -173,7 +172,7 @@ type ExecModule struct {
 	db                kv.TemporalRwDB // main database
 	semaphore         *semaphore.Weighted
 	executionPipeline *stagedsync.Sync
-	forkValidator     *engine_helpers.ForkValidator
+	forkValidator     *ForkValidator
 	pipelineExecutor  *PipelineExecutor
 
 	logger log.Logger
@@ -216,8 +215,8 @@ func NewExecModule(
 	ctx context.Context,
 	blockReader services.FullBlockReader,
 	db kv.TemporalRwDB,
-	executionPipeline *stagedsync.Sync,
-	forkValidator *engine_helpers.ForkValidator,
+	pipelineExecutor *PipelineExecutor,
+	forkValidator *ForkValidator,
 	config *chain.Config,
 	builderFunc builder.BlockBuilderFunc,
 	hook *stageloop.Hook,
@@ -238,10 +237,10 @@ func NewExecModule(
 	em := &ExecModule{
 		blockReader:             blockReader,
 		db:                      db,
-		executionPipeline:       executionPipeline,
+		executionPipeline:       pipelineExecutor.sync,
 		logger:                  logger,
 		forkValidator:           forkValidator,
-		pipelineExecutor:        NewPipelineExecutor(executionPipeline, db, blockReader, logger),
+		pipelineExecutor:        pipelineExecutor,
 		builders:                make(map[uint64]*builder.BlockBuilder),
 		builderFunc:             builderFunc,
 		config:                  config,
@@ -557,6 +556,17 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 			}()
 			return
 		}
+	}
+	// Notify the fork validator of the current execution height after startup sync.
+	if err := e.db.View(ctx, func(tx kv.Tx) error {
+		progress, err := stages.GetStageProgress(tx, stages.Execution)
+		if err != nil {
+			return err
+		}
+		e.forkValidator.NotifyCurrentHeight(progress)
+		return nil
+	}); err != nil {
+		e.logger.Warn("Could not notify fork validator of current height", "err", err)
 	}
 }
 

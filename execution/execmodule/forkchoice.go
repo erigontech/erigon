@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
-	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/metrics"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
@@ -559,6 +558,9 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	if err != nil {
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 	}
+	if headNumber != nil {
+		e.forkValidator.NotifyCurrentHeight(*headNumber)
+	}
 
 	var status executionproto.ExecutionStatus
 
@@ -828,12 +830,12 @@ func (e *ExecModule) logHeadUpdated(blockHash common.Hash, fcuHeader *types.Head
 		logArgs = append(logArgs, "txnum", txnum)
 	}
 	logArgs = append(logArgs, "age", common.PrettyAge(time.Unix(int64(fcuHeader.Time), 0)),
-		"execution", common.Round(blockTimings[engine_helpers.BlockTimingsValidationIndex], 0))
+		"execution", common.Round(blockTimings[BlockTimingsValidationIndex], 0))
 
 	if !debug {
-		totalTime := blockTimings[engine_helpers.BlockTimingsValidationIndex]
+		totalTime := blockTimings[BlockTimingsValidationIndex]
 		if !e.syncCfg.ParallelStateFlushing {
-			totalTime += blockTimings[engine_helpers.BlockTimingsFlushExtendingFork]
+			totalTime += blockTimings[BlockTimingsFlushExtendingFork]
 		}
 		gasUsedMgas := float64(fcuHeader.GasUsed) / 1e6
 		mgasPerSec := gasUsedMgas / totalTime.Seconds()

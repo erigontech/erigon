@@ -21,30 +21,58 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/shards"
 )
 
-// PipelineExecutor runs the staged sync pipeline in a hasMore loop,
-// abstracting the common pattern shared by ProcessFrozenBlocks (startup
-// catchup) and updateForkChoice (FCU catchup). The executor is stateless
-// between calls — callers provide their own tx/SD lifecycle and commit
-// strategy via callbacks.
+// NewValidationSyncFn creates a fresh *stagedsync.Sync for fork validation.
+// A new sync is needed each call because the validation pipeline is stateful.
+type NewValidationSyncFn func(notifications *shards.Notifications) *stagedsync.Sync
+
+// PipelineExecutor centralises all staged sync pipeline invocations:
+// ProcessFrozenBlocks (startup), RunLoop (FCU catchup), and StateStep
+// (fork validation). It is created once and stored on ExecModule.
 type PipelineExecutor struct {
-	sync        *stagedsync.Sync
-	db          kv.TemporalRwDB
-	blockReader services.FullBlockReader
-	logger      log.Logger
+	sync              *stagedsync.Sync
+	db                kv.TemporalRwDB
+	blockReader       services.FullBlockReader
+	chainConfig       *chain.Config
+	engine            rules.Engine
+	newValidationSync NewValidationSyncFn
+	logger            log.Logger
 }
 
-// NewPipelineExecutor creates a new executor wrapping the given pipeline.
-func NewPipelineExecutor(sync *stagedsync.Sync, db kv.TemporalRwDB, blockReader services.FullBlockReader, logger log.Logger) *PipelineExecutor {
-	return &PipelineExecutor{sync: sync, db: db, blockReader: blockReader, logger: logger}
+// NewPipelineExecutor creates a new executor. newValidationSync may be nil
+// if fork validation is not needed (e.g. in tests that skip ValidateChain).
+func NewPipelineExecutor(
+	sync *stagedsync.Sync,
+	db kv.TemporalRwDB,
+	blockReader services.FullBlockReader,
+	chainConfig *chain.Config,
+	engine rules.Engine,
+	newValidationSync NewValidationSyncFn,
+	logger log.Logger,
+) *PipelineExecutor {
+	return &PipelineExecutor{
+		sync:              sync,
+		db:                db,
+		blockReader:       blockReader,
+		chainConfig:       chainConfig,
+		engine:            engine,
+		newValidationSync: newValidationSync,
+		logger:            logger,
+	}
 }
 
 // CommitCycleFn is called between hasMore iterations to persist accumulated
@@ -226,6 +254,33 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		}); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// StateStep executes a fork validation by running the pipeline block-by-block
+// over a side fork. All pipeline execution goes through PipelineExecutor —
+// this replaces the validatePayloadFunc closure that was previously defined
+// in backend.go.
+func (pe *PipelineExecutor) StateStep(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody, notifications *shards.Notifications) error {
+	terseLogger := log.New()
+	terseLogger.SetHandler(log.LvlFilterHandler(log.Lvl(dbg.ExecTerseLoggerLevel), log.StderrHandler))
+
+	stateSync := pe.newValidationSync(notifications)
+	chainReader := consensuschain.NewReader(pe.chainConfig, tx, pe.blockReader, terseLogger)
+
+	if err := stageloop.StateStep(ctx, chainReader, pe.engine, sd, tx, stateSync, unwindPoint, headersChain, bodiesChain); err != nil {
+		pe.logger.Warn("Could not validate block", "err", err)
+		return err
+	}
+
+	progress, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return err
+	}
+	lastNum := headersChain[len(headersChain)-1].Number.Uint64()
+	if progress < lastNum {
+		return fmt.Errorf("unsuccessful execution, progress %d < expected %d", progress, lastNum)
 	}
 	return nil
 }
