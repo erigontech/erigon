@@ -725,10 +725,8 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	if s.config.IsCancun(timestamp) && version < clparams.DenebVersion { // Not V3 after cancun
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
-	if version >= clparams.CapellaVersion {
-		if err := s.checkWithdrawalsPresence(timestamp, payloadAttributes.Withdrawals); err != nil {
-			return nil, &engine_helpers.InvalidPayloadAttributesErr
-		}
+	if version >= clparams.CapellaVersion && !s.isWithdrawalsPresenceValid(timestamp, payloadAttributes.Withdrawals) {
+		return nil, &engine_helpers.InvalidPayloadAttributesErr
 	}
 
 	if !s.proposing {
