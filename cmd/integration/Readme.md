@@ -129,6 +129,8 @@ integration stage_exec
 
 ## How to re-gen CommitmentDomain
 
+To gen Latest (not historical) Commitment files from Latest Acc/Storage/Code files
+
 ```sh
 integration commitment rebuild
 ```
