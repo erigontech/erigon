@@ -199,7 +199,9 @@ func ExecV3(ctx context.Context,
 
 	doms.EnableParaTrieDB(cfg.db)
 	doms.EnableTrieWarmup(true)
-	doms.EnableWarmupCache(true)
+	// Do it only for chain-tip blocks!
+	doms.EnableWarmupCache(!isApplyingBlocks)
+	doms.StartBranchPrefetcher(ctx)
 	postValidator := newBlockPostExecutionValidator()
 	doms.SetDeferCommitmentUpdates(false)
 	if !isApplyingBlocks {

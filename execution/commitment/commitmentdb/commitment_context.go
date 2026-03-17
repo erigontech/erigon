@@ -57,6 +57,9 @@ type SharedDomainsCommitmentContext struct {
 	deferCommitmentUpdates bool
 	// pendingUpdate stores a single deferred branch update to be flushed at the next ComputeCommitment call.
 	pendingUpdate *commitment.PendingCommitmentUpdate
+
+	// branchPrefetcher pre-fetches branch nodes into the persistent cache at TouchKey time
+	branchPrefetcher *commitment.BranchPrefetcher
 }
 
 // SetStateReader can be used to set a custom state reader (otherwise the default one is set in SharedDomainsCommitmentContext.trieContext).
@@ -73,6 +76,39 @@ func (sdc *SharedDomainsCommitmentContext) EnableTrieWarmup(trieWarmup bool) {
 
 func (sdc *SharedDomainsCommitmentContext) EnableParaTrieDB(db kv.TemporalRoDB) {
 	sdc.paraTrieDB = db
+}
+
+// StartBranchPrefetcher starts a background prefetcher that populates the persistent
+// BranchCache at TouchKey time, well before Process/HashSort needs the data.
+// Requires EnableParaTrieDB to have been called first.
+func (sdc *SharedDomainsCommitmentContext) StartBranchPrefetcher(ctx context.Context) {
+	if sdc.paraTrieDB == nil {
+		return
+	}
+	branchCache := sdc.patriciaTrie.GetBranchCache()
+	if branchCache == nil {
+		return
+	}
+	if sdc.branchPrefetcher != nil {
+		sdc.branchPrefetcher.Stop()
+	}
+
+	txNum := sdc.sharedDomains.TxNum()
+	factory := sdc.trieContextFactory(ctx, sdc.paraTrieDB, txNum)
+	sdc.branchPrefetcher = commitment.NewBranchPrefetcher(branchCache, factory, 4, commitment.WarmupMaxDepth)
+	sdc.branchPrefetcher.Start()
+
+	// Wire the callback so TouchPlainKey feeds hashed keys to the prefetcher
+	sdc.updates.SetOnHashedKey(sdc.branchPrefetcher.Submit)
+}
+
+// StopBranchPrefetcher stops the background prefetcher and disconnects the callback.
+func (sdc *SharedDomainsCommitmentContext) StopBranchPrefetcher() {
+	if sdc.branchPrefetcher != nil {
+		sdc.updates.SetOnHashedKey(nil)
+		sdc.branchPrefetcher.Stop()
+		sdc.branchPrefetcher = nil
+	}
 }
 
 func (sdc *SharedDomainsCommitmentContext) SetDeferBranchUpdates(deferBranchUpdates bool) {
@@ -193,6 +229,7 @@ func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNu
 }
 
 func (sdc *SharedDomainsCommitmentContext) Close() {
+	sdc.StopBranchPrefetcher()
 	sdc.updates.Close()
 	sdc.patriciaTrie.Release()
 }
@@ -302,6 +339,9 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 			sdc.patriciaTrie.SetCapture([]string{})
 		}
 	}
+
+	// Stop background prefetcher before Process to avoid DB contention.
+	sdc.StopBranchPrefetcher()
 
 	trieContext := sdc.trieContext(tx, blockNum, txNum)
 

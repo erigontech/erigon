@@ -1535,6 +1535,10 @@ type Updates struct {
 
 	batchSlab []KeyUpdate // grow-only slab for HashSort batch (avoids per-key heap allocs)
 	byteArena []byte      // grow-only byte arena for HashSort key copies
+
+	// onHashedKey is called with the hashed key after TouchPlainKey computes it.
+	// Used by the branch prefetcher to pre-warm the persistent cache.
+	onHashedKey func(hashedKey []byte)
 }
 
 // arenaAlloc appends b to the byte arena and returns the sub-slice.
@@ -1649,6 +1653,9 @@ func (t *Updates) PlainKeys() map[string]struct{} {
 	return cp
 }
 
+// SetOnHashedKey sets a callback invoked with each hashed key during TouchPlainKey.
+func (t *Updates) SetOnHashedKey(fn func(hashedKey []byte)) { t.onHashedKey = fn }
+
 func (t *Updates) Size() (updates uint64) {
 	switch t.mode {
 	case ModeDirect:
@@ -1683,6 +1690,10 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 		if _, ok := t.keys[key]; !ok {
 			keyBytes := common.ToBytesZeroCopy(key)
 			hashedKey := t.hasher(keyBytes)
+
+			if t.onHashedKey != nil {
+				t.onHashedKey(hashedKey)
+			}
 
 			var err error
 			if !t.sortPerNibble {

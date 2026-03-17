@@ -75,6 +75,11 @@ func (c *BranchCache) Invalidate(key []byte) {
 	c.branches.Delete(key)
 }
 
+// Contains checks if a key exists in the cache without updating recency or counters.
+func (c *BranchCache) Contains(key []byte) bool {
+	return c.branches.Contains(key)
+}
+
 // Len returns the number of entries in the cache.
 func (c *BranchCache) Len() int {
 	return c.branches.Len()

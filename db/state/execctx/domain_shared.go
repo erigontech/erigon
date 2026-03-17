@@ -719,6 +719,16 @@ func (sd *SharedDomains) ClearWarmupCache() {
 	sd.sdCtx.ClearWarmupCache()
 }
 
+// StartBranchPrefetcher starts background branch prefetching at TouchKey time.
+func (sd *SharedDomains) StartBranchPrefetcher(ctx context.Context) {
+	sd.sdCtx.StartBranchPrefetcher(ctx)
+}
+
+// StopBranchPrefetcher stops the background branch prefetcher.
+func (sd *SharedDomains) StopBranchPrefetcher() {
+	sd.sdCtx.StopBranchPrefetcher()
+}
+
 // SetDeferCommitmentUpdates enables or disables deferred commitment updates.
 // When enabled, commitment branch updates are stored in the commitment context
 // instead of being applied inline, and must be flushed later via FlushPendingUpdates.
