@@ -489,9 +489,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	initialCycle := limitedBigJump
 	firstCycle := false
 
-	result, err := e.pipelineExecutor.RunLoop(ctx, RunLoopConfig{
-		SD:           currentContext,
-		Tx:           tx,
+	tx, err = e.pipelineExecutor.RunLoop(ctx, currentContext, tx, RunLoopConfig{
 		InitialCycle: initialCycle,
 		FirstCycle:   firstCycle,
 		PruneTimeout: 500 * time.Millisecond,
@@ -545,12 +543,11 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			return sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{
 				Status:          executionproto.ExecutionStatus_BadBlock,
 				ValidationError: err.Error(),
-				LatestValidHash: gointerfaces.ConvertHashToH256(rawdb.ReadHeadBlockHash(result.FinalTx)),
+				LatestValidHash: gointerfaces.ConvertHashToH256(rawdb.ReadHeadBlockHash(tx)),
 			}, stateFlushingInParallel)
 		}
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 	}
-	tx = result.FinalTx
 
 	// if head hash was set then success otherwise no
 	headHash := rawdb.ReadHeadBlockHash(tx)

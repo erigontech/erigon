@@ -26,7 +26,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -707,7 +706,6 @@ func NewInMemoryExecution(
 	db kv.TemporalRwDB,
 	cfg *ethconfig.Config,
 	controlServer *sentry_multi_client.MultiClient,
-	dirs datadir.Dirs,
 	notifications *shards.Notifications,
 	blockReader services.FullBlockReader,
 	blockWriter *blockio.BlockWriter,
@@ -718,8 +716,8 @@ func NewInMemoryExecution(
 		stagedsync.StateStages(ctx,
 			stagedsync.StageHeadersCfg(controlServer.Hd, controlServer.ChainConfig, cfg.Sync, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, false /* noP2PDiscovery */, blockReader),
 			stagedsync.StageBodiesCfg(controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, controlServer.ChainConfig, blockReader, blockWriter),
-			stagedsync.StageBlockHashesCfg(dirs.Tmp, blockWriter),
-			stagedsync.StageSendersCfg(controlServer.ChainConfig, cfg.Sync, true /* badBlockHalt */, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd),
+			stagedsync.StageBlockHashesCfg(cfg.Dirs.Tmp, blockWriter),
+			stagedsync.StageSendersCfg(controlServer.ChainConfig, cfg.Sync, true /* badBlockHalt */, cfg.Dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd),
 			stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{}, notifications, cfg.StateStream, true, cfg.Dirs, blockReader, controlServer.Hd, cfg.Genesis, cfg.Sync, cfg.ExperimentalBAL),
 		),
 		stagedsync.StateUnwindOrder,

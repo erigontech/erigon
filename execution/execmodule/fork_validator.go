@@ -57,12 +57,11 @@ type ForkValidator struct {
 	extendingForkHeadHash common.Hash
 	extendingForkNumber   uint64
 	maxReorgDepth         uint64
-	// pipeline executor used for fork validation (StateStep).
+	// pipeline executor used for fork validation (ValidateBlock).
 	executor    *PipelineExecutor
 	blockReader services.FullBlockReader
 	// this is the current point where we processed the chain so far.
 	currentHeight uint64
-	tmpDir        string
 	// block hashes that are deemed valid
 	validHashes *lru.Cache[common.Hash, bool]
 
@@ -74,7 +73,7 @@ type ForkValidator struct {
 	timingsCache *lru.Cache[common.Hash, BlockTimings]
 }
 
-func NewForkValidator(ctx context.Context, currentHeight uint64, executor *PipelineExecutor, tmpDir string, blockReader services.FullBlockReader, maxReorgDepth uint64) *ForkValidator {
+func newForkValidator(ctx context.Context, currentHeight uint64, executor *PipelineExecutor, blockReader services.FullBlockReader, maxReorgDepth uint64) *ForkValidator {
 	validHashes, err := lru.New[common.Hash, bool]("validHashes", int(maxReorgDepth)*8)
 	if err != nil {
 		panic(err)
@@ -87,7 +86,6 @@ func NewForkValidator(ctx context.Context, currentHeight uint64, executor *Pipel
 	return &ForkValidator{
 		executor:      executor,
 		currentHeight: currentHeight,
-		tmpDir:        tmpDir,
 		blockReader:   blockReader,
 		ctx:           ctx,
 		validHashes:   validHashes,
@@ -290,7 +288,7 @@ func (fv *ForkValidator) validateAndStorePayload(ctx context.Context, sd *execct
 	bodiesChain = append(bodiesChain, body)
 	hash := header.Hash()
 	number := header.Number.Uint64()
-	if err := fv.executor.StateStep(ctx, sd, tx, unwindPoint, headersChain, bodiesChain); err != nil {
+	if err := fv.executor.ValidateBlock(ctx, sd, tx, unwindPoint, headersChain, bodiesChain); err != nil {
 		if errors.Is(err, rules.ErrInvalidBlock) {
 			validationError = err
 		} else {

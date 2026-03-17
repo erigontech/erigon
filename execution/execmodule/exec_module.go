@@ -215,7 +215,7 @@ func NewExecModule(
 	blockReader services.FullBlockReader,
 	db kv.TemporalRwDB,
 	pipelineExecutor *PipelineExecutor,
-	forkValidator *ForkValidator,
+	currentBlockNumber uint64,
 	config *chain.Config,
 	builderFunc builder.BlockBuilderFunc,
 	hook *stageloop.Hook,
@@ -232,6 +232,7 @@ func NewExecModule(
 	stopNode func() error,
 ) *ExecModule {
 	domainCache := cache.NewDefaultStateCache()
+	forkValidator := newForkValidator(ctx, currentBlockNumber, pipelineExecutor, blockReader, syncCfg.MaxReorgDepth)
 
 	em := &ExecModule{
 		blockReader:             blockReader,
@@ -262,6 +263,9 @@ func NewExecModule(
 	}
 	return em
 }
+
+// ForkValidator returns the fork validator owned by this module.
+func (e *ExecModule) ForkValidator() *ForkValidator { return e.forkValidator }
 
 func (e *ExecModule) getHeader(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*types.Header, error) {
 	if e.blockReader == nil {

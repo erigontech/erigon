@@ -36,7 +36,7 @@ import (
 )
 
 // PipelineExecutor centralises all staged sync pipeline invocations:
-// ProcessFrozenBlocks (startup), RunLoop (FCU catchup), and StateStep
+// ProcessFrozenBlocks (startup), RunLoop (FCU catchup), and ValidateBlock
 // (fork validation). It is created once and stored on ExecModule.
 type PipelineExecutor struct {
 	sync           *stagedsync.Sync
@@ -84,21 +84,12 @@ type BeforeIterationFn func(sd *execctx.SharedDomains)
 
 // RunLoopConfig configures a single RunLoop invocation.
 type RunLoopConfig struct {
-	SD              *execctx.SharedDomains
-	Tx              kv.TemporalRwTx
 	InitialCycle    bool
 	FirstCycle      bool
 	PruneTimeout    time.Duration
 	CommitCycle     CommitCycleFn     // required when hasMore
 	ShouldBreak     ShouldBreakFn     // optional early exit
 	BeforeIteration BeforeIterationFn // optional per-iteration setup
-}
-
-// RunLoopResult contains the state after RunLoop completes.
-type RunLoopResult struct {
-	// FinalTx is the tx after the last iteration. May differ from the
-	// input Tx if CommitCycle was called (which returns a fresh tx).
-	FinalTx kv.TemporalRwTx
 }
 
 // RunLoop executes the pipeline in a hasMore loop:
@@ -108,44 +99,43 @@ type RunLoopResult struct {
 //	}
 //
 // The loop continues until Run returns hasMore=false, ShouldBreak returns
-// true, or an error occurs. On error, FinalTx is the tx from the last
-// iteration (may be used by the caller for error recovery reads).
-func (pe *PipelineExecutor) RunLoop(ctx context.Context, cfg RunLoopConfig) (RunLoopResult, error) {
-	tx := cfg.Tx
+// true, or an error occurs. The returned tx may differ from the input tx
+// if CommitCycle was called (which returns a fresh tx).
+func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg RunLoopConfig) (kv.TemporalRwTx, error) {
 	for hasMore := true; hasMore; {
 		if cfg.BeforeIteration != nil {
-			cfg.BeforeIteration(cfg.SD)
+			cfg.BeforeIteration(sd)
 		}
 
 		var err error
-		hasMore, err = pe.sync.Run(cfg.SD, tx, cfg.InitialCycle, cfg.FirstCycle)
+		hasMore, err = pe.sync.Run(sd, tx, cfg.InitialCycle, cfg.FirstCycle)
 		if err != nil {
-			return RunLoopResult{FinalTx: tx}, err
+			return tx, err
 		}
 
 		if hasMore {
 			if err := pe.sync.RunPrune(ctx, tx, cfg.InitialCycle, cfg.PruneTimeout); err != nil {
-				return RunLoopResult{FinalTx: tx}, err
+				return tx, err
 			}
 
 			if cfg.ShouldBreak != nil {
 				stop, err := cfg.ShouldBreak(tx)
 				if err != nil {
-					return RunLoopResult{FinalTx: tx}, err
+					return tx, err
 				}
 				if stop {
 					break
 				}
 			}
 
-			newTx, err := cfg.CommitCycle(ctx, cfg.SD)
+			newTx, err := cfg.CommitCycle(ctx, sd)
 			if err != nil {
-				return RunLoopResult{FinalTx: tx}, err
+				return tx, err
 			}
 			tx = newTx
 		}
 	}
-	return RunLoopResult{FinalTx: tx}, nil
+	return tx, nil
 }
 
 // ProcessFrozenBlocks runs the pipeline over snapshot blocks at startup.
@@ -189,9 +179,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		}
 	}
 
-	result, err := pe.RunLoop(ctx, RunLoopConfig{
-		SD:           doms,
-		Tx:           tx,
+	tx, err = pe.RunLoop(ctx, doms, tx, RunLoopConfig{
 		InitialCycle: true,
 		FirstCycle:   false,
 		PruneTimeout: 0,
@@ -225,7 +213,6 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 	if err != nil {
 		return fmt.Errorf("ProcessFrozenBlocks: %w", err)
 	}
-	tx = result.FinalTx
 
 	if err := doms.Flush(ctx, tx); err != nil {
 		return fmt.Errorf("ProcessFrozenBlocks: final flush: %w", err)
@@ -253,9 +240,9 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 	return nil
 }
 
-// StateStep executes a fork validation by running the pipeline block-by-block
+// ValidateBlock executes a fork validation by running the pipeline block-by-block
 // over a side fork. All pipeline execution goes through PipelineExecutor.
-func (pe *PipelineExecutor) StateStep(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) error {
+func (pe *PipelineExecutor) ValidateBlock(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) error {
 	terseLogger := log.New()
 	terseLogger.SetHandler(log.LvlFilterHandler(log.Lvl(dbg.ExecTerseLoggerLevel), log.StderrHandler))
 

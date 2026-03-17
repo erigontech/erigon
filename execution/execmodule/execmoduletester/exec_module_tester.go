@@ -658,12 +658,10 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	pipelineStages := stageloop.NewPipelineStages(mock.Ctx, db, &cfg, mock.sentriesClient, mock.Notifications, snapDownloader, mock.BlockReader, blockRetire, tracer, nil)
 	mock.posStagedSync = stagedsync.New(cfg.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 
-	// Create validation Sync, PipelineExecutor, and ForkValidator.
+	// Create validation Sync and PipelineExecutor.
 	validationSync := stageloop.NewInMemoryExecution(mock.Ctx, mock.DB, &cfg, mock.sentriesClient,
-		dirs, shards.NewNotifications(nil), mock.BlockReader, blockWriter, logger)
+		shards.NewNotifications(nil), mock.BlockReader, blockWriter, logger)
 	pipelineExecutor := execmodule.NewPipelineExecutor(mock.posStagedSync, mock.DB, mock.BlockReader, mock.ChainConfig, mock.Engine, validationSync, logger)
-	forkValidator := execmodule.NewForkValidator(ctx, 1, pipelineExecutor, dirs.Tmp, mock.BlockReader, cfg.MaxReorgDepth)
-	mock.ForkValidator = forkValidator
 
 	hook := stageloop.NewHook(mock.Ctx, mock.Notifications, mock.posStagedSync, mock.ChainConfig, logger, nil, nil, nil)
 
@@ -675,7 +673,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		mock.BlockReader,
 		mock.DB,
 		pipelineExecutor,
-		forkValidator,
+		1, // currentBlockNumber
 		mock.ChainConfig,
 		blkBuilder.Build,
 		hook,
@@ -691,6 +689,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		onlySnapDownloadOnStart,
 		func() error { return nil },
 	)
+	mock.ForkValidator = mock.ExecModule.ForkValidator()
 
 	mock.sentriesClient.Hd.StartPoSDownloader(mock.Ctx, sendHeaderRequest, penalize)
 
