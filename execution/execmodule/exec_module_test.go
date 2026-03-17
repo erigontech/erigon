@@ -855,6 +855,8 @@ func TestAssembleBlockWithWithdrawalRequest(t *testing.T) {
 	require.NoError(t, err)
 	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
 	require.NoError(t, err)
+}
+
 // TestNotificationDispatchForegroundCommit verifies that after FCU returns
 // Success with the default foreground commit path:
 // 1. Header notifications have been dispatched (subscribers receive them)

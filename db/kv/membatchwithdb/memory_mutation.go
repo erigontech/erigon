@@ -957,6 +957,11 @@ func (m *MemoryMutation) Unwind(ctx context.Context, txNumUnwindTo uint64, chang
 	return fmt.Errorf("unwind requires TemporalRwTx, got %T", m.db)
 }
 
+// OverlayReadView is the overlay-aware read-only view returned by NewReadView.
+// It is a type alias for MemoryMutation so that callers can embed it by name
+// (e.g. OverlayTemporalReadView) while sharing MemoryMutation's full method set.
+type OverlayReadView = MemoryMutation
+
 // NewReadView creates a lightweight read-only view of this overlay backed by
 // the given tx for fallback reads. The view shares the same in-memory data
 // (memTx, deletedEntries, clearedTables) and the parent's mutex, but has its
@@ -964,7 +969,7 @@ func (m *MemoryMutation) Unwind(ctx context.Context, txNumUnwindTo uint64, chang
 // naturally — memTx first, then db fallback.
 //
 // The caller must not Close the returned view (it doesn't own the memDb).
-func (m *MemoryMutation) NewReadView(tx kv.Tx) *MemoryMutation {
+func (m *MemoryMutation) NewReadView(tx kv.Tx) *OverlayReadView {
 	var dbTx kv.TemporalTx
 	if t, ok := tx.(kv.TemporalTx); ok {
 		dbTx = t
@@ -978,54 +983,6 @@ func (m *MemoryMutation) NewReadView(tx kv.Tx) *MemoryMutation {
 		clearedTables:  m.clearedTables,
 		db:             dbTx,
 	}
-}
-
-func (v *OverlayReadView) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
-	c, err := v.Cursor(bucket)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-
-	k, val, err := c.Seek(fromPrefix)
-	if err != nil {
-		return err
-	}
-	for ; k != nil; k, val, err = c.Next() {
-		if err != nil {
-			return err
-		}
-		if err := walker(k, val); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (v *OverlayReadView) ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, val []byte) error) error {
-	if amount == 0 {
-		return nil
-	}
-	c, err := v.Cursor(bucket)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-
-	k, val, err := c.Seek(prefix)
-	if err != nil {
-		return err
-	}
-	for ; k != nil && amount > 0; k, val, err = c.Next() {
-		if err != nil {
-			return err
-		}
-		if err := walker(k, val); err != nil {
-			return err
-		}
-		amount--
-	}
-	return nil
 }
 
 // OverlayTemporalReadView extends OverlayReadView with kv.TemporalTx support.
