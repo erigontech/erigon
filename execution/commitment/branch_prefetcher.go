@@ -105,6 +105,18 @@ func (p *BranchPrefetcher) Submit(hashedKey []byte) {
 	}
 }
 
+// SubmitPlainKey hashes a plain key (address or address+slot) and submits it for prefetch.
+func (p *BranchPrefetcher) SubmitPlainKey(plainKey []byte) {
+	if !p.started.Load() || p.closed.Load() {
+		return
+	}
+	hashedKey := KeyToHexNibbleHash(plainKey)
+	select {
+	case p.work <- hashedKey:
+	default:
+	}
+}
+
 // Prefetched returns the number of branch nodes prefetched into cache.
 func (p *BranchPrefetcher) Prefetched() uint64 {
 	return p.prefetched.Load()

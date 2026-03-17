@@ -729,6 +729,11 @@ func (sd *SharedDomains) StopBranchPrefetcher() {
 	sd.sdCtx.StopBranchPrefetcher()
 }
 
+// PrefetchPlainKey submits a plain key for background branch cache warming.
+func (sd *SharedDomains) PrefetchPlainKey(plainKey []byte) {
+	sd.sdCtx.PrefetchPlainKey(plainKey)
+}
+
 // SetDeferCommitmentUpdates enables or disables deferred commitment updates.
 // When enabled, commitment branch updates are stored in the commitment context
 // instead of being applied inline, and must be flushed later via FlushPendingUpdates.

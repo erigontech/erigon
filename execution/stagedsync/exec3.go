@@ -617,6 +617,21 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 				}
 			}
 
+			// Pre-warm persistent branch cache from BAL write set.
+			// Addresses and storage keys that will be modified are known
+			// before execution, so prefetch trie branches now.
+			for _, ac := range dbBAL {
+				addr := ac.Address.Value()
+				te.doms.PrefetchPlainKey(addr[:])
+				for _, sc := range ac.StorageChanges {
+					var storageKey [52]byte // 20-byte address + 32-byte slot
+					copy(storageKey[:20], addr[:])
+					slot := sc.Slot.Value()
+					copy(storageKey[20:], slot[:])
+					te.doms.PrefetchPlainKey(storageKey[:])
+				}
+			}
+
 			txs := b.Transactions()
 			header := b.HeaderNoCopy()
 

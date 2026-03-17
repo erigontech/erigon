@@ -111,6 +111,14 @@ func (sdc *SharedDomainsCommitmentContext) StopBranchPrefetcher() {
 	}
 }
 
+// PrefetchPlainKey submits a plain key (address or address+slot) to the branch
+// prefetcher for background cache warming. No-op if prefetcher is not running.
+func (sdc *SharedDomainsCommitmentContext) PrefetchPlainKey(plainKey []byte) {
+	if sdc.branchPrefetcher != nil {
+		sdc.branchPrefetcher.SubmitPlainKey(plainKey)
+	}
+}
+
 func (sdc *SharedDomainsCommitmentContext) SetDeferBranchUpdates(deferBranchUpdates bool) {
 	if sdc.patriciaTrie.Variant() == commitment.VariantHexPatriciaTrie {
 		sdc.patriciaTrie.(*commitment.HexPatriciaHashed).SetDeferBranchUpdates(deferBranchUpdates)
