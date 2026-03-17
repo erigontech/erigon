@@ -114,6 +114,10 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 		temporalTx := applyTx.AsyncClone(mdbx.NewAsyncRwTx(applyTx.RwTx, 1000))
 		asyncTxChan = temporalTx.ApplyChan()
 		asyncTx = temporalTx
+	case kv.TemporalTx:
+		// MemoryMutation overlay — pure Go, no thread affinity.
+		// No asyncTx needed; exec goroutine reads directly from the overlay.
+		asyncTx = applyTx
 	default:
 		return nil, rwTx, fmt.Errorf("expected *temporal.RwTx: got %T", rwTx)
 	}
