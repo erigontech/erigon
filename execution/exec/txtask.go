@@ -1033,7 +1033,8 @@ func (q *PriorityQueue[T]) Drain(ctx context.Context, item T) (bool, error) {
 	if q.resultCh == nil {
 		return q.results.Len() == 0, nil
 	} else if q.closed && len(q.resultCh) == 0 {
-		close(q.resultCh)
+		// Don't close(resultCh) — Add() may be sending on it outside the lock.
+		// Nil the reference so consumers know we're done; the channel is GC'd.
 		q.resultCh = nil
 		return q.results.Len() == 0, nil
 	}
@@ -1048,7 +1049,6 @@ func (q *PriorityQueue[T]) Drain(ctx context.Context, item T) (bool, error) {
 			}
 			if next.isNil() {
 				if q.closed && len(q.resultCh) == 0 {
-					close(q.resultCh)
 					q.resultCh = nil
 					return q.results.Len() == 0, nil
 				}
@@ -1056,7 +1056,6 @@ func (q *PriorityQueue[T]) Drain(ctx context.Context, item T) (bool, error) {
 			}
 			heap.Push(q.results, next)
 			if q.closed && len(q.resultCh) == 0 {
-				close(q.resultCh)
 				q.resultCh = nil
 				return false, nil
 			}
@@ -1102,11 +1101,9 @@ func (q *PriorityQueue[T]) Close() {
 		return
 	}
 	q.closed = true
-
-	if len(q.resultCh) == 0 {
-		close(q.resultCh)
-		q.resultCh = nil
-	}
+	// Don't close resultCh here — Add() may be concurrently sending on it
+	// outside the lock.  Drain() will nil the reference when it detects
+	// closed && empty, and the channel will be GC'd.
 }
 
 func (q *PriorityQueue[T]) Len() (l int) {
