@@ -103,7 +103,7 @@ func boolHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName string
 	fmt.Fprintf(b2, "    }\n")
 
 	// decode
-	fmt.Fprintf(b3, "    if n, err := s.Uint(); err != nil {\n")
+	fmt.Fprintf(b3, "    if n, err := s.Uint64(); err != nil {\n")
 	fmt.Fprintf(b3, "        %s\n", decodeErrorMsg(fieldName))
 	fmt.Fprintf(b3, "    } else {\n")
 	fmt.Fprintf(b3, "        obj.%s = n != 0\n", fieldName)
@@ -132,7 +132,7 @@ func boolPtrHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName str
 	fmt.Fprintf(b2, "    }\n")
 
 	// decode
-	fmt.Fprintf(b3, "    if n, err := s.Uint(); err != nil {\n")
+	fmt.Fprintf(b3, "    if n, err := s.Uint64(); err != nil {\n")
 	fmt.Fprintf(b3, "        %s\n", decodeErrorMsg(fieldName))
 	fmt.Fprintf(b3, "    } else {\n")
 	fmt.Fprintf(b3, "        bval := n != 0\n")
@@ -188,14 +188,14 @@ func uintHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName string
 	// decode
 	if kind != types.Uint64 {
 		cast := uint64CastTo(kind)
-		fmt.Fprintf(b3, "    if n, err := s.Uint(); err != nil {\n")
+		fmt.Fprintf(b3, "    if n, err := s.Uint64(); err != nil {\n")
 		fmt.Fprintf(b3, "        %s\n", decodeErrorMsg(fieldName))
 		fmt.Fprintf(b3, "    } else {\n")
 		fmt.Fprintf(b3, "        %s\n", cast)
 		fmt.Fprintf(b3, "        obj.%s = i\n", fieldName)
 		fmt.Fprintf(b3, "    }\n")
 	} else {
-		fmt.Fprintf(b3, "    if obj.%s, err = s.Uint(); err != nil {\n", fieldName)
+		fmt.Fprintf(b3, "    if obj.%s, err = s.Uint64(); err != nil {\n", fieldName)
 		fmt.Fprintf(b3, "        %s\n", decodeErrorMsg(fieldName))
 		fmt.Fprintf(b3, "    }\n")
 	}
@@ -227,7 +227,7 @@ func uintPtrHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName str
 
 	// decode
 	cast := uint64CastTo(kind)
-	fmt.Fprintf(b3, "    if n, err := s.Uint(); err != nil {\n")
+	fmt.Fprintf(b3, "    if n, err := s.Uint64(); err != nil {\n")
 	fmt.Fprintf(b3, "        %s\n", decodeErrorMsg(fieldName))
 	fmt.Fprintf(b3, "    } else {\n")
 	fmt.Fprintf(b3, "        %s\n", cast)

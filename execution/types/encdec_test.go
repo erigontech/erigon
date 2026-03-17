@@ -231,7 +231,7 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 		Nonce:    *tr.RandUint64(),
 		GasLimit: *tr.RandUint64(),
 		To:       to,
-		Value:    uint256.NewInt(*tr.RandUint64()), // wei amount
+		Value:    *uint256.NewInt(*tr.RandUint64()), // wei amount
 		Data:     tr.RandBytes(tr.RandIntInRange(128, 1024)),
 		V:        *tr.RandUint256(),
 		R:        *tr.RandUint256(),
@@ -241,23 +241,23 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 	case LegacyTxType:
 		return &LegacyTx{
 			CommonTx: commonTx.copyData(),
-			GasPrice: uint256.NewInt(*tr.RandUint64()),
+			GasPrice: *uint256.NewInt(*tr.RandUint64()),
 		}
 	case AccessListTxType:
 		return &AccessListTx{
 			LegacyTx: LegacyTx{
 				CommonTx: commonTx.copyData(),
-				GasPrice: uint256.NewInt(*tr.RandUint64()),
+				GasPrice: *uint256.NewInt(*tr.RandUint64()),
 			},
-			ChainID:    uint256.NewInt(*tr.RandUint64()),
+			ChainID:    *uint256.NewInt(*tr.RandUint64()),
 			AccessList: tr.RandAccessList(tr.RandIntInRange(1, 5)),
 		}
 	case DynamicFeeTxType:
 		return &DynamicFeeTransaction{
 			CommonTx:   commonTx.copyData(),
-			ChainID:    uint256.NewInt(*tr.RandUint64()),
-			TipCap:     uint256.NewInt(*tr.RandUint64()),
-			FeeCap:     uint256.NewInt(*tr.RandUint64()),
+			ChainID:    *uint256.NewInt(*tr.RandUint64()),
+			TipCap:     *uint256.NewInt(*tr.RandUint64()),
+			FeeCap:     *uint256.NewInt(*tr.RandUint64()),
 			AccessList: tr.RandAccessList(tr.RandIntInRange(1, 5)),
 		}
 	case BlobTxType:
@@ -265,21 +265,21 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 		return &BlobTx{
 			DynamicFeeTransaction: DynamicFeeTransaction{
 				CommonTx:   commonTx.copyData(),
-				ChainID:    uint256.NewInt(*tr.RandUint64()),
-				TipCap:     uint256.NewInt(*tr.RandUint64()),
-				FeeCap:     uint256.NewInt(*tr.RandUint64()),
+				ChainID:    *uint256.NewInt(*tr.RandUint64()),
+				TipCap:     *uint256.NewInt(*tr.RandUint64()),
+				FeeCap:     *uint256.NewInt(*tr.RandUint64()),
 				AccessList: tr.RandAccessList(tr.RandIntInRange(1, 5)),
 			},
-			MaxFeePerBlobGas:    uint256.NewInt(r),
+			MaxFeePerBlobGas:    *uint256.NewInt(r),
 			BlobVersionedHashes: tr.RandHashes(tr.RandIntInRange(1, 2)),
 		}
 	case SetCodeTxType:
 		return &SetCodeTransaction{
 			DynamicFeeTransaction: DynamicFeeTransaction{
 				CommonTx:   commonTx.copyData(),
-				ChainID:    uint256.NewInt(*tr.RandUint64()),
-				TipCap:     uint256.NewInt(*tr.RandUint64()),
-				FeeCap:     uint256.NewInt(*tr.RandUint64()),
+				ChainID:    *uint256.NewInt(*tr.RandUint64()),
+				TipCap:     *uint256.NewInt(*tr.RandUint64()),
+				FeeCap:     *uint256.NewInt(*tr.RandUint64()),
 				AccessList: tr.RandAccessList(tr.RandIntInRange(1, 5)),
 			},
 			Authorizations: tr.RandAuthorizations(tr.RandIntInRange(0, 5)),

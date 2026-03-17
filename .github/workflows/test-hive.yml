@@ -50,7 +50,7 @@ jobs:
             max-allowed-failures: 0
           - sim: rpc
             sim-limit: compat
-            max-allowed-failures: 57 # 56 missing eth_simulateV1 MaxGasUsed in Hive tests + 1 https://github.com/erigontech/erigon/issues/19758
+            max-allowed-failures: 56 # 56 missing eth_simulateV1 MaxGasUsed in Hive tests 
     steps:
       - name: Checkout Erigon go.mod
         uses: actions/checkout@v6
@@ -64,7 +64,7 @@ jobs:
         with:
           repository: ethereum/hive
           # version hive and update periodically/on-demand to prevent upstream changes in Hive affecting us with red CI
-          ref: 0ee187ce394720a5902c135324ac7de4240cbb37
+          ref: 88786d9744dabb08bdaec8d8b53142cde6e6b79a
           path: hive
 
       - name: Setup go env and cache
