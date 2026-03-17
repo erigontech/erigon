@@ -330,7 +330,7 @@ func (m *MemoryMutation) StreamDescend(table string, fromPrefix, toPrefix []byte
 }
 
 func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
-	s := &rangeIter{orderAscend: true, limit: int64(limit)}
+	s := &rangeIter{orderAscend: bool(asc), limit: int64(limit)}
 	var err error
 	if s.iterDb, err = m.db.Range(table, fromPrefix, toPrefix, asc, limit); err != nil {
 		return s, err
@@ -887,10 +887,14 @@ func (m *MemoryMutation) Unwind(ctx context.Context, txNumUnwindTo uint64, chang
 // parent mutation's RWMutex, and the DB fallback uses the view's own tx (not
 // the parent's potentially-stale backing tx).
 //
+// All read methods (GetOne, Has, Range, Cursor, etc.) merge overlay data with
+// the DB tx. The embedded kv.Tx is used only for methods that have no overlay
+// equivalent (e.g. ViewID, CHandle).
+//
 // Use NewReadView to create an OverlayReadView. The caller is responsible for
 // rolling back the underlying dbTx when done.
 type OverlayReadView struct {
-	kv.Tx   // embedded for Cursor, Range, and other methods that don't need overlay
+	kv.Tx   // embedded for methods with no overlay equivalent
 	overlay *MemoryMutation
 }
 
@@ -943,6 +947,71 @@ func (v *OverlayReadView) Has(table string, key []byte) (bool, error) {
 		return has, err
 	}
 	return v.Tx.Has(table, key)
+}
+
+func (v *OverlayReadView) Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
+	s := &rangeIter{orderAscend: bool(asc), limit: int64(limit)}
+	var err error
+	if s.iterDb, err = v.Tx.Range(table, fromPrefix, toPrefix, asc, limit); err != nil {
+		return s, err
+	}
+	if s.iterMem, err = v.overlay.memTx.Range(table, fromPrefix, toPrefix, asc, limit); err != nil {
+		return s, err
+	}
+	if _, err := s.init(); err != nil {
+		s.Close()
+		return nil, err
+	}
+	return s, nil
+}
+
+func (v *OverlayReadView) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
+	s := &rangeDupSortIter{key: key, orderAscend: bool(asc), limit: int64(limit)}
+	var err error
+	if s.iterDb, err = v.Tx.RangeDupSort(table, key, fromPrefix, toPrefix, asc, limit); err != nil {
+		return s, err
+	}
+	if s.iterMem, err = v.overlay.memTx.RangeDupSort(table, key, fromPrefix, toPrefix, asc, limit); err != nil {
+		return s, err
+	}
+	if err := s.init(); err != nil {
+		s.Close()
+		return nil, err
+	}
+	return s, nil
+}
+
+func (v *OverlayReadView) Prefix(table string, prefix []byte) (stream.KV, error) {
+	nextPrefix, ok := kv.NextSubtree(prefix)
+	if !ok {
+		return v.Range(table, prefix, nil, order.Asc, kv.Unlim)
+	}
+	return v.Range(table, prefix, nextPrefix, order.Asc, kv.Unlim)
+}
+
+func (v *OverlayReadView) Cursor(bucket string) (kv.Cursor, error) {
+	return v.makeCursor(bucket)
+}
+
+func (v *OverlayReadView) CursorDupSort(bucket string) (kv.CursorDupSort, error) {
+	return v.makeCursor(bucket)
+}
+
+func (v *OverlayReadView) makeCursor(bucket string) (kv.CursorDupSort, error) {
+	c := &memoryMutationCursor{pureDupSort: isTablePurelyDupsort(bucket)}
+	c.table = bucket
+
+	var err error
+	c.cursor, err = v.Tx.CursorDupSort(bucket) //nolint:gocritic
+	if err != nil {
+		return nil, err
+	}
+	c.memCursor, err = v.overlay.memTx.RwCursorDupSort(bucket) //nolint:gocritic
+	if err != nil {
+		return nil, err
+	}
+	c.mutation = v.overlay
+	return c, err
 }
 
 type temporaldb struct {

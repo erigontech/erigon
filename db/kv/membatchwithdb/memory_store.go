@@ -269,6 +269,10 @@ func (s *memStore) ResetSequence(bucket string, newValue uint64) error {
 	return nil
 }
 
+// Append delegates to Put. Unlike MDBX's Append (which requires keys in
+// ascending order and errors on out-of-order inserts), the in-memory btree
+// accepts keys in any order. Callers that rely on Append-order enforcement
+// must validate ordering themselves.
 func (s *memStore) Append(table string, k, v []byte) error {
 	return s.Put(table, k, v)
 }
@@ -337,7 +341,10 @@ func (s *memStore) CursorDupSort(table string) (kv.CursorDupSort, error) {
 func (s *memStore) Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	t := s.getOrCreateTable(table)
+	t, ok := s.tables[table]
+	if !ok {
+		return &memStoreSliceIter{}, nil
+	}
 	return s.collectRange(t, fromPrefix, toPrefix, bool(asc), int64(limit)), nil
 }
 
@@ -352,7 +359,10 @@ func (s *memStore) Prefix(table string, prefix []byte) (stream.KV, error) {
 func (s *memStore) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	t := s.getOrCreateTable(table)
+	t, ok := s.tables[table]
+	if !ok {
+		return &memStoreSliceIter{}, nil
+	}
 	return s.collectRangeDupSort(t, key, fromPrefix, toPrefix, bool(asc), int64(limit)), nil
 }
 
