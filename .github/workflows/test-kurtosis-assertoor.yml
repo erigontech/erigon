@@ -31,14 +31,6 @@ jobs:
             package_args: .github/workflows/kurtosis/regular-assertoor.io
           - suite: pectra
             package_args: .github/workflows/kurtosis/pectra.io
-    concurrency:
-      group: >-
-        ${{
-          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) &&
-          format('{0}-{1}-{2}', github.workflow, matrix.suite, github.run_id) ||
-          format('{0}-{1}-{2}', github.workflow, matrix.suite, github.ref)
-        }}
-      cancel-in-progress: true
 
     steps:
       - name: Fast checkout git repository

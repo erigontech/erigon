@@ -15,9 +15,6 @@ defaults:
 
 jobs:
   benchmarks:
-    concurrency:
-      group: ${{ format('{0}-bench-{1}', github.workflow, github.ref) }}
-      cancel-in-progress: true
     runs-on: ubuntu-24.04
 
     steps:

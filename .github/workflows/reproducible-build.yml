@@ -17,9 +17,6 @@ jobs:
           - macos-15
           - windows-2025
     runs-on: ${{ matrix.os }}
-    concurrency:
-      group: ${{ github.workflow }}-reproducible-build-${{ matrix.os }}-${{ github.ref }}
-      cancel-in-progress: true
 
     steps:
       - uses: actions/checkout@v6

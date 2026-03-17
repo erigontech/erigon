@@ -57,6 +57,13 @@ PR-gated with no other triggers, since there is then no duplication concern.
 Workflows called by ci-gate must not have `pull_request:` triggers — ci-gate owns
 PR coverage and a `pull_request:` trigger would cause every job to run twice.
 
+ci-gate has a workflow-level `concurrency:` group that cancels the entire previous
+run (all sub-workflow jobs) when a new PR push or merge_group event arrives. Sub-
+workflows called via `workflow_call` must **not** define their own job-level
+`concurrency:` for this purpose — `github.workflow` and `github.job` resolve to
+the caller's values (or empty) in a `workflow_call` context, which causes collisions
+that cancel sibling jobs within the same run.
+
 ### Required checks and path filters
 
 Required checks must always report a status or they block the PR indefinitely.

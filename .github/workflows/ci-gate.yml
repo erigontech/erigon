@@ -10,16 +10,20 @@ on:
       - reopened
       - synchronize
       - ready_for_review
+  push:
+    branches:
+      - main
+      - 'release/**'
   merge_group:
   workflow_dispatch:
 
 concurrency:
-  # For PRs: one run per PR; new push cancels the old run.
-  # For merge_group/workflow_dispatch: unique per run so runs never cancel each other.
+  # For PRs: one run per branch; new push cancels the old run.
+  # For push/merge_group/workflow_dispatch: unique per run so runs never cancel each other.
   group: >-
     ${{
       github.event_name == 'pull_request' &&
-      format('{0}-pr-{1}', github.workflow, github.event.pull_request.number) ||
+      format('{0}-{1}', github.workflow, github.head_ref) ||
       format('{0}-{1}', github.workflow, github.run_id)
     }}
   cancel-in-progress: true

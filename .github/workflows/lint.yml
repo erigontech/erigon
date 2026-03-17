@@ -10,9 +10,6 @@ defaults:
 jobs:
   lint:
     runs-on: ubuntu-latest
-    concurrency:
-      group: ${{ format('{0}-lint-{1}', github.workflow, github.ref) }}
-      cancel-in-progress: true
 
     steps:
       - name: Checkout custom actions
