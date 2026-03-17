@@ -119,7 +119,7 @@ jobs:
         if: always() && steps.test_step.outputs.test_executed == 'true'
         uses: actions/upload-artifact@v6
         with:
-          name: test-results
+          name: test-results-gnosis
           path: ${{ env.TEST_RESULT_DIR }}
 
       - name: Save test results
