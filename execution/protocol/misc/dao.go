@@ -22,7 +22,6 @@ package misc
 import (
 	"bytes"
 	"errors"
-	"math/big"
 
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/chain"
@@ -56,8 +55,8 @@ func VerifyDAOHeaderExtraData(config *chain.Config, header *types.Header) error 
 		return nil
 	}
 	// Make sure the block is within the fork's modified extra-data range
-	limit := new(big.Int).Add(config.DAOForkBlock, DAOForkExtraRange)
-	if header.Number.CmpBig(config.DAOForkBlock) < 0 || header.Number.CmpBig(limit) >= 0 {
+	daoBlock := *config.DAOForkBlock
+	if header.Number.Uint64() < daoBlock || header.Number.Uint64() >= daoBlock+DAOForkExtraRange {
 		return nil
 	}
 	if !bytes.Equal(header.Extra, DAOForkBlockExtra) {

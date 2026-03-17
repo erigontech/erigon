@@ -601,7 +601,7 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remoteproto.
 					if err != nil {
 						return err
 					}
-					if utx.Type == BlobTxnType {
+					if utx.TxType() == BlobTxnType {
 						unwindBlobTxns.Append(utx, sender, false)
 					} else {
 						unwindTxns.Append(utx, sender, false)
