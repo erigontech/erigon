@@ -1872,23 +1872,18 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 }
 
 func MergeReadSets(a state.ReadSet, b state.ReadSet) state.ReadSet {
-	if a == nil && b == nil {
-		return nil
+	if b == nil {
+		return a
 	}
-	out := make(state.ReadSet)
-	if a != nil {
-		a.Scan(func(vr *state.VersionedRead) bool {
-			out.Set(*vr)
-			return true
-		})
+	if a == nil {
+		return b
 	}
-	if b != nil {
-		b.Scan(func(vr *state.VersionedRead) bool {
-			out.Set(*vr)
-			return true
-		})
-	}
-	return out
+	// Merge b into a in-place — a is being replaced by the caller anyway
+	b.Scan(func(vr *state.VersionedRead) bool {
+		a.Set(*vr)
+		return true
+	})
+	return a
 }
 
 func MergeVersionedWrites(prev, next state.VersionedWrites) state.VersionedWrites {
@@ -1898,6 +1893,7 @@ func MergeVersionedWrites(prev, next state.VersionedWrites) state.VersionedWrite
 	if len(next) == 0 {
 		return prev
 	}
+	// Build merged set using prev as base, overwriting with next
 	merged := state.WriteSet{}
 	for _, v := range prev {
 		merged.Set(*v)

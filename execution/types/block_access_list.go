@@ -289,7 +289,7 @@ func (sc *StorageChange) DecodeRLP(s *rlp.Stream) error {
 	if _, err := s.List(); err != nil {
 		return err
 	}
-	idx, err := s.Uint()
+	idx, err := s.Uint64()
 	if err != nil {
 		return fmt.Errorf("read Index: %w", err)
 	}
@@ -332,7 +332,7 @@ func (bc *BalanceChange) DecodeRLP(s *rlp.Stream) error {
 	if _, err := s.List(); err != nil {
 		return err
 	}
-	idx, err := s.Uint()
+	idx, err := s.Uint64()
 	if err != nil {
 		return fmt.Errorf("read Index: %w", err)
 	}
@@ -375,7 +375,7 @@ func (nc *NonceChange) DecodeRLP(s *rlp.Stream) error {
 	if _, err := s.List(); err != nil {
 		return err
 	}
-	idx, err := s.Uint()
+	idx, err := s.Uint64()
 	if err != nil {
 		return fmt.Errorf("read Index: %w", err)
 	}
@@ -383,7 +383,7 @@ func (nc *NonceChange) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("block access index overflow: %d", idx)
 	}
 	nc.Index = uint16(idx)
-	value, err := s.Uint()
+	value, err := s.Uint64()
 	if err != nil {
 		return fmt.Errorf("read Value: %w", err)
 	}
@@ -415,7 +415,7 @@ func (cc *CodeChange) DecodeRLP(s *rlp.Stream) error {
 	if _, err := s.List(); err != nil {
 		return err
 	}
-	idx, err := s.Uint()
+	idx, err := s.Uint64()
 	if err != nil {
 		return fmt.Errorf("read Index: %w", err)
 	}

@@ -609,7 +609,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 			}); err != nil {
 				return err
 			}
-			if len(data) > 0 {
+			if len(data) > 0 && !dbg.IgnoreBAL {
 				dbBAL, err = types.DecodeBlockAccessListBytes(data)
 				if err != nil {
 					return fmt.Errorf("decode block access list: %w", err)

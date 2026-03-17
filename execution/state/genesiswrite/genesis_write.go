@@ -24,7 +24,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"runtime"
 	"slices"
 	"strings"
@@ -94,7 +93,7 @@ func CommitGenesisBlock(db kv.RwDB, genesis *types.Genesis, chainName string, di
 	return CommitGenesisBlockWithOverride(db, genesis, chainName, nil, nil, false, dirs, logger)
 }
 
-func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, chainName string, overrideOsakaTime, overrideAmsterdamTime *big.Int, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
+func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, chainName string, overrideOsakaTime, overrideAmsterdamTime *uint64, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return nil, nil, err
@@ -124,7 +123,7 @@ func configOrDefault(g *types.Genesis, chainName string, genesisHash common.Hash
 	return chain.AllProtocolChanges
 }
 
-func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, overrideOsakaTime, overrideAmsterdamTime *big.Int, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
+func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, overrideOsakaTime, overrideAmsterdamTime *uint64, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
 	if err := rawdb.WriteGenesisIfNotExist(tx, genesis); err != nil {
 		return nil, nil, err
 	}

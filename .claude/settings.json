@@ -16,7 +16,13 @@
       "Bash(git lfs ls-files:*)",
       "Bash(grep:*)",
       "Bash(git add:*)",
-      "WebFetch(domain:pypi.org)"
+      "WebFetch(domain:pypi.org)",
+      "Bash(ls erigon/client-45d48e09*.log)",
+      "Bash(cat erigon/client-45d48e09*.log)",
+      "Bash(ls -la /tmp/hive-test-AEx38h/hive/workspace/logs/*.json)",
+      "Bash(ls -lt /tmp/hive-test-AEx38h/hive/workspace/logs/*.json)",
+      "Bash(rsync -a --delete --exclude='.git' --exclude='build/' --exclude='temp/' \"$ERIGON_PATH/\" \"$WORKDIR/hive/clients/erigon/erigon/\")",
+      "Bash(tee /tmp/hive-test-AEx38h/engine-api-fv.log)"
     ]
   }
 }

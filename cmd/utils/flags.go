@@ -118,11 +118,11 @@ var (
 		Name:  "whitelist",
 		Usage: "Comma separated block number-to-hash mappings to enforce (<number>=<hash>)",
 	}
-	OverrideOsakaFlag = flags.BigFlag{
+	OverrideOsakaFlag = cli.Uint64Flag{
 		Name:  "override.osaka",
 		Usage: "Manually specify the Osaka fork time, overriding the bundled setting",
 	}
-	OverrideAmsterdamFlag = flags.BigFlag{
+	OverrideAmsterdamFlag = cli.Uint64Flag{
 		Name:  "override.amsterdam",
 		Usage: "Manually specify the Amsterdam fork time, overriding the bundled setting",
 	}
@@ -1952,10 +1952,12 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	}
 
 	if ctx.IsSet(OverrideOsakaFlag.Name) {
-		cfg.OverrideOsakaTime = flags.GlobalBig(ctx, OverrideOsakaFlag.Name)
+		v := ctx.Uint64(OverrideOsakaFlag.Name)
+		cfg.OverrideOsakaTime = &v
 	}
 	if ctx.IsSet(OverrideAmsterdamFlag.Name) {
-		cfg.OverrideAmsterdamTime = flags.GlobalBig(ctx, OverrideAmsterdamFlag.Name)
+		v := ctx.Uint64(OverrideAmsterdamFlag.Name)
+		cfg.OverrideAmsterdamTime = &v
 	}
 	cfg.KeepStoredChainConfig = ctx.Bool(KeepStoredChainConfigFlag.Name)
 

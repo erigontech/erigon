@@ -61,7 +61,7 @@ const (
 	ReadSetRead
 )
 
-type ReadSet map[accounts.Address]map[AccountKey]*VersionedRead
+type ReadSet map[accounts.Address]map[AccountKey]VersionedRead
 
 func (a ReadSet) Merge(b ReadSet) ReadSet {
 	if a == nil && b == nil {
@@ -87,22 +87,18 @@ func (rs ReadSet) Set(v VersionedRead) {
 	reads, ok := rs[v.Address]
 
 	if !ok {
-		rs[v.Address] = map[AccountKey]*VersionedRead{
-			{v.Path, v.Key}: &v,
+		rs[v.Address] = map[AccountKey]VersionedRead{
+			{v.Path, v.Key}: v,
 		}
 	} else {
-		if read, ok := reads[AccountKey{v.Path, v.Key}]; ok {
-			*read = v
-		} else {
-			reads[AccountKey{v.Path, v.Key}] = &v
-		}
+		reads[AccountKey{v.Path, v.Key}] = v
 	}
 }
 
 func (s ReadSet) Scan(yield func(input *VersionedRead) bool) {
 	for _, reads := range s {
 		for _, v := range reads {
-			if !yield(v) {
+			if !yield(&v) {
 				return
 			}
 		}
@@ -126,22 +122,30 @@ func (s ReadSet) Delete(addr accounts.Address, key AccountKey) {
 	}
 }
 
-type WriteSet map[accounts.Address]map[AccountKey]*VersionedWrite
+type WriteSet map[accounts.Address]map[AccountKey]VersionedWrite
 
 func (s WriteSet) Set(v VersionedWrite) {
 	writes, ok := s[v.Address]
 
 	if !ok {
-		s[v.Address] = map[AccountKey]*VersionedWrite{
-			{v.Path, v.Key}: &v,
+		s[v.Address] = map[AccountKey]VersionedWrite{
+			{v.Path, v.Key}: v,
 		}
 	} else {
-		if write, ok := writes[AccountKey{v.Path, v.Key}]; ok {
-			*write = v
-		} else {
-			writes[AccountKey{v.Path, v.Key}] = &v
+		writes[AccountKey{v.Path, v.Key}] = v
+	}
+}
+
+// UpdateVal updates the Val field of an existing entry. Returns true if the entry was found.
+func (s WriteSet) UpdateVal(addr accounts.Address, key AccountKey, val any) bool {
+	if writes, ok := s[addr]; ok {
+		if v, ok := writes[key]; ok {
+			v.Val = val
+			writes[key] = v
+			return true
 		}
 	}
+	return false
 }
 
 func (s WriteSet) Delete(addr accounts.Address, key AccountKey) {
@@ -164,7 +168,7 @@ func (s WriteSet) Len() int {
 func (s WriteSet) Scan(yield func(input *VersionedWrite) bool) {
 	for _, writes := range s {
 		for _, v := range writes {
-			if !yield(v) {
+			if !yield(&v) {
 				return
 			}
 		}
@@ -1085,14 +1089,8 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 			}
 
 			account := ensureAccountState(ac, addr)
-			// A non-revertable access means the address was the target of
-			// an actual EVM operation (evm.Call, evm.Create, SELFDESTRUCT
-			// with non-zero balance, BALANCE, EXTCODESIZE, etc.) — not just
-			// a gas-calculation read. This is used to distinguish real state
-			// access from incidental reads (e.g. Empty() in gas calc) for
-			// the system address filter.
-			if isUserTx && opts != nil && !opts.revertable {
-				account.nonRevertableUserAccess = true
+			if isUserTx && opts != nil {
+				account.userAccess = true
 			}
 		}
 	}
@@ -1102,14 +1100,9 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 		account.finalize()
 		account.changes.Normalize()
 		// The system address (0xff...fe) is touched during every block's system
-		// call (EIP-4788 beacon root) because it is msg.sender. Per EIP-7928,
-		// "SYSTEM_ADDRESS MUST NOT be included unless it experiences state access
-		// itself." We use the non-revertable access flag from MarkAddressAccess
-		// to distinguish real state access (evm.Call target, SELFDESTRUCT
-		// beneficiary, BALANCE opcode, etc.) from incidental gas-calculation
-		// reads (Empty() in statefulGasCall). Keep it when it has actual state
-		// changes or when a user tx performed a non-revertable access to it.
-		if account.changes.Address == params.SystemAddress && !hasAccountChanges(account.changes) && !account.nonRevertableUserAccess {
+		// call (EIP-4788 beacon root) because it is msg.sender. Filter it out
+		// unless it has actual state changes or a user tx accessed it.
+		if account.changes.Address == params.SystemAddress && !hasAccountChanges(account.changes) && !account.userAccess {
 			continue
 		}
 		bal = append(bal, account.changes)
@@ -1122,22 +1115,30 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 	return bal
 }
 
+// hasAccountChanges returns true if the account has any state changes
+// (storage, balance, nonce, or code) that belong in the BAL.
+func hasAccountChanges(ac *types.AccountChanges) bool {
+	return len(ac.StorageChanges) > 0 || len(ac.StorageReads) > 0 ||
+		len(ac.BalanceChanges) > 0 || len(ac.NonceChanges) > 0 ||
+		len(ac.CodeChanges) > 0
+}
+
 type accountState struct {
-	changes                 *types.AccountChanges
-	balance                 *fieldTracker[uint256.Int]
-	nonce                   *fieldTracker[uint64]
-	code                    *fieldTracker[[]byte]
-	balanceValue            *uint256.Int                        // tracks latest seen balance
-	initialBalanceValue     *uint256.Int                        // tracks pre-block balance for net-zero detection
-	selfDestructed          bool                                //
-	selfDestructedAt        uint16                              // access index of the selfdestruct
-	storageReadValues       map[accounts.StorageKey]uint256.Int // original read values for net-zero detection
-	nonRevertableUserAccess bool                                // true if a user tx (txIndex >= 0) has non-revertable access
+	changes             *types.AccountChanges
+	balance             *fieldTracker[uint256.Int]
+	nonce               *fieldTracker[uint64]
+	code                *fieldTracker[[]byte]
+	balanceValue        *uint256.Int // tracks latest seen balance
+	initialBalanceValue *uint256.Int // tracks pre-block balance for net-zero detection
+	selfDestructed      bool
+	selfDestructedAt    uint16                              // access index of the selfdestruct
+	storageReadValues   map[accounts.StorageKey]uint256.Int // original read values for net-zero detection
+	userAccess          bool                                // true if a user tx (txIndex >= 0) accessed this account
 }
 
 // check pre- and post-values, add to BAL if different
 func (a *accountState) finalize() {
-	applyToBalance(a.balance, a.changes)
+	applyToBalance(a.balance, a.changes, a.initialBalanceValue)
 	applyToNonce(a.nonce, a.changes)
 	applyToCode(a.code, a.changes)
 }
@@ -1154,8 +1155,20 @@ func newBalanceTracker() *fieldTracker[uint256.Int] {
 	return &fieldTracker[uint256.Int]{}
 }
 
-func applyToBalance(bt *fieldTracker[uint256.Int], ac *types.AccountChanges) {
+func applyToBalance(bt *fieldTracker[uint256.Int], ac *types.AccountChanges, initialBalance *uint256.Int) {
+	// Get the sorted indices to identify the first (lowest-index) entry.
+	// If the first entry equals the pre-block balance, it's a net-zero
+	// change from a reverted tx (e.g. CALL with value then revert) and
+	// must be excluded. Geth's scope-based BAL builder handles this via
+	// ExitScope which converts reverted writes to reads.
+	firstFiltered := false
 	bt.changes.apply(func(idx uint16, value uint256.Int) {
+		if !firstFiltered {
+			firstFiltered = true
+			if initialBalance != nil && value.Eq(initialBalance) {
+				return
+			}
+		}
 		ac.BalanceChanges = append(ac.BalanceChanges, &types.BalanceChange{
 			Index: idx,
 			Value: value,
@@ -1401,11 +1414,6 @@ func removeStorageRead(ac *types.AccountChanges, slot accounts.StorageKey) {
 	} else {
 		ac.StorageReads = out
 	}
-}
-
-func hasAccountChanges(ac *types.AccountChanges) bool {
-	return len(ac.BalanceChanges) > 0 || len(ac.NonceChanges) > 0 ||
-		len(ac.CodeChanges) > 0 || len(ac.StorageChanges) > 0
 }
 
 type versionedReadSet struct {

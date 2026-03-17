@@ -60,7 +60,7 @@ jobs:
             max-allowed-failures: 0
           - sim: rpc
             sim-limit: compat
-            max-allowed-failures: 57 # 56 missing eth_simulateV1 MaxGasUsed in Hive tests + 1 https://github.com/erigontech/erigon/issues/19758
+            max-allowed-failures: 56 # 56 missing eth_simulateV1 MaxGasUsed in Hive tests 
     steps:
       - name: Checkout Erigon go.mod
         uses: actions/checkout@v6
