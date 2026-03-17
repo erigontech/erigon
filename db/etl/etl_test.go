@@ -631,6 +631,531 @@ func TestSortable(t *testing.T) {
 
 }
 
+// ==================== Phase 1: DupSort Value Sorting Tests ====================
+
+func TestSortByKeyAndValue(t *testing.T) {
+	// Verify that SortByKeyAndValue sorts entries by (key, value) pairs
+	buf := NewSortableBuffer(BufferOptimalSize)
+
+	// Add entries with same key but different values in reverse order
+	buf.Put([]byte{0x01}, []byte{0x03})
+	buf.Put([]byte{0x01}, []byte{0x01})
+	buf.Put([]byte{0x01}, []byte{0x02})
+	// Add entries with different keys
+	buf.Put([]byte{0x02}, []byte{0x02})
+	buf.Put([]byte{0x02}, []byte{0x01})
+
+	buf.SortByKeyAndValue()
+
+	// Verify order: (0x01,0x01), (0x01,0x02), (0x01,0x03), (0x02,0x01), (0x02,0x02)
+	expected := []struct{ k, v []byte }{
+		{[]byte{0x01}, []byte{0x01}},
+		{[]byte{0x01}, []byte{0x02}},
+		{[]byte{0x01}, []byte{0x03}},
+		{[]byte{0x02}, []byte{0x01}},
+		{[]byte{0x02}, []byte{0x02}},
+	}
+	require.Equal(t, len(expected), buf.Len())
+	for i, exp := range expected {
+		k, v := buf.Get(i, nil, nil)
+		require.Equal(t, exp.k, k, "key mismatch at index %d", i)
+		require.Equal(t, exp.v, v, "value mismatch at index %d", i)
+	}
+}
+
+func TestDupSortValueSorting(t *testing.T) {
+	// Test that loading into a DupSort table with values in reverse order succeeds
+	// (would fail with MDBX_EKEYMISMATCH without Phase 1 sorting)
+	logger := log.New()
+	_, tx := memdb.NewTestTx(t)
+
+	table := kv.TblAccountIdx // DupSort table
+
+	collector := NewCollector(t.Name(), "", NewSortableBuffer(BufferOptimalSize), logger)
+	defer collector.Close()
+
+	// Collect entries with same key but values in reverse order
+	key := []byte{0x00, 0x00, 0x00, 0x01}
+	require.NoError(t, collector.Collect(key, []byte{0x00, 0x00, 0x00, 0x03}))
+	require.NoError(t, collector.Collect(key, []byte{0x00, 0x00, 0x00, 0x01}))
+	require.NoError(t, collector.Collect(key, []byte{0x00, 0x00, 0x00, 0x02}))
+
+	// Load should succeed — Phase 1 sorts by (key, value) for DupSort tables
+	require.NoError(t, collector.Load(tx, table, IdentityLoadFunc, TransformArgs{}))
+
+	// Verify entries are in correct order using DupSort cursor
+	cur, err := tx.CursorDupSort(table)
+	require.NoError(t, err)
+	defer cur.Close()
+
+	var keys, vals [][]byte
+	for k, v, err := cur.First(); k != nil; k, v, err = cur.Next() {
+		require.NoError(t, err)
+		keys = append(keys, common.Copy(k))
+		vals = append(vals, common.Copy(v))
+	}
+	require.Equal(t, 3, len(keys))
+	require.Equal(t, []byte{0x00, 0x00, 0x00, 0x01}, vals[0])
+	require.Equal(t, []byte{0x00, 0x00, 0x00, 0x02}, vals[1])
+	require.Equal(t, []byte{0x00, 0x00, 0x00, 0x03}, vals[2])
+}
+
+func TestDupSortMixedKeys(t *testing.T) {
+	// Test multiple keys each with multiple values in random/reverse order
+	logger := log.New()
+	_, tx := memdb.NewTestTx(t)
+
+	table := kv.TblAccountIdx // DupSort table
+
+	collector := NewCollector(t.Name(), "", NewSortableBuffer(BufferOptimalSize), logger)
+	defer collector.Close()
+
+	// Key 2 values in reverse
+	require.NoError(t, collector.Collect([]byte{0x02}, []byte{0x03}))
+	require.NoError(t, collector.Collect([]byte{0x02}, []byte{0x01}))
+	// Key 1 values in reverse
+	require.NoError(t, collector.Collect([]byte{0x01}, []byte{0x02}))
+	require.NoError(t, collector.Collect([]byte{0x01}, []byte{0x01}))
+	// Key 3 values in reverse
+	require.NoError(t, collector.Collect([]byte{0x03}, []byte{0x02}))
+	require.NoError(t, collector.Collect([]byte{0x03}, []byte{0x01}))
+
+	require.NoError(t, collector.Load(tx, table, IdentityLoadFunc, TransformArgs{}))
+
+	// Verify all entries present and correctly ordered
+	cur, err := tx.CursorDupSort(table)
+	require.NoError(t, err)
+	defer cur.Close()
+
+	type kv2 struct{ k, v byte }
+	var results []kv2
+	for k, v, err := cur.First(); k != nil; k, v, err = cur.Next() {
+		require.NoError(t, err)
+		results = append(results, kv2{k[0], v[0]})
+	}
+	expected := []kv2{
+		{0x01, 0x01}, {0x01, 0x02},
+		{0x02, 0x01}, {0x02, 0x03},
+		{0x03, 0x01}, {0x03, 0x02},
+	}
+	require.Equal(t, expected, results)
+}
+
+func TestDupSortMultipleFlushes(t *testing.T) {
+	// Test with very small buffer to force multiple disk flushes
+	// This exercises the DupSort-aware heap merge
+	logger := log.New()
+	_, tx := memdb.NewTestTx(t)
+
+	table := kv.TblAccountIdx // DupSort table
+
+	// Very small buffer to force disk flushes
+	collector := NewCollector(t.Name(), t.TempDir(), NewSortableBuffer(1), logger)
+	defer collector.Close()
+
+	// Same key, values spread across flushes
+	key := []byte{0x00, 0x01}
+	require.NoError(t, collector.Collect(key, []byte{0x05}))
+	require.NoError(t, collector.Collect(key, []byte{0x03}))
+	require.NoError(t, collector.Collect(key, []byte{0x01}))
+	require.NoError(t, collector.Collect(key, []byte{0x04}))
+	require.NoError(t, collector.Collect(key, []byte{0x02}))
+
+	require.NoError(t, collector.Load(tx, table, IdentityLoadFunc, TransformArgs{}))
+
+	// Verify correct ordering
+	cur, err := tx.CursorDupSort(table)
+	require.NoError(t, err)
+	defer cur.Close()
+
+	var vals []byte
+	for k, v, err := cur.First(); k != nil; k, v, err = cur.Next() {
+		require.NoError(t, err)
+		vals = append(vals, v[0])
+	}
+	require.Equal(t, []byte{0x01, 0x02, 0x03, 0x04, 0x05}, vals)
+}
+
+func TestNonDupSortUnaffected(t *testing.T) {
+	// Verify that non-DupSort tables are unaffected by the changes
+	logger := log.New()
+	_, tx := memdb.NewTestTx(t)
+
+	table := kv.ChaindataTables[0] // Non-DupSort table
+
+	collector := NewCollector(t.Name(), "", NewSortableBuffer(BufferOptimalSize), logger)
+	defer collector.Close()
+
+	// Collect entries in reverse key order
+	require.NoError(t, collector.Collect([]byte{0x03}, []byte{0x30}))
+	require.NoError(t, collector.Collect([]byte{0x01}, []byte{0x10}))
+	require.NoError(t, collector.Collect([]byte{0x02}, []byte{0x20}))
+
+	require.NoError(t, collector.Load(tx, table, IdentityLoadFunc, TransformArgs{}))
+
+	// Verify entries sorted by key only
+	v, err := tx.GetOne(table, []byte{0x01})
+	require.NoError(t, err)
+	require.Equal(t, []byte{0x10}, v)
+
+	v, err = tx.GetOne(table, []byte{0x02})
+	require.NoError(t, err)
+	require.Equal(t, []byte{0x20}, v)
+
+	v, err = tx.GetOne(table, []byte{0x03})
+	require.NoError(t, err)
+	require.Equal(t, []byte{0x30}, v)
+}
+
+// ==================== Phase 2: Dynamic canUseAppend Tests ====================
+
+func TestDynamicCanUseAppend_OverlapThenAppend(t *testing.T) {
+	// Test that dynamic canUseAppend transitions from Put to Append
+	// when ETL keys pass the last key in the table
+	t.Setenv("ETL_DYNAMIC_APPEND", "1")
+	// Reset the package-level var for this test
+	origVal := useDynamicAppend
+	useDynamicAppend = true
+	defer func() { useDynamicAppend = origVal }()
+
+	logger := log.New()
+	_, tx := memdb.NewTestTx(t)
+
+	table := kv.ChaindataTables[0] // Non-DupSort table
+
+	// Pre-populate table with keys 0x01..0x05
+	for i := byte(1); i <= 5; i++ {
+		require.NoError(t, tx.Put(table, []byte{i}, []byte{i * 10}))
+	}
+
+	collector := NewCollector(t.Name(), "", NewSortableBuffer(BufferOptimalSize), logger)
+	defer collector.Close()
+
+	// ETL keys: 0x03..0x08 (overlap: 0x03-0x05, append: 0x06-0x08)
+	for i := byte(3); i <= 8; i++ {
+		require.NoError(t, collector.Collect([]byte{i}, []byte{i * 20}))
+	}
+
+	require.NoError(t, collector.Load(tx, table, IdentityLoadFunc, TransformArgs{}))
+
+	// Verify all keys present with correct values
+	for i := byte(1); i <= 2; i++ {
+		v, err := tx.GetOne(table, []byte{i})
+		require.NoError(t, err)
+		require.Equal(t, []byte{i * 10}, v, "key %d should have original value", i)
+	}
+	for i := byte(3); i <= 8; i++ {
+		v, err := tx.GetOne(table, []byte{i})
+		require.NoError(t, err)
+		require.Equal(t, []byte{i * 20}, v, "key %d should have ETL value", i)
+	}
+}
+
+func TestDynamicCanUseAppend_DupSort(t *testing.T) {
+	// Test dynamic canUseAppend with DupSort tables
+	t.Setenv("ETL_DYNAMIC_APPEND", "1")
+	origVal := useDynamicAppend
+	useDynamicAppend = true
+	defer func() { useDynamicAppend = origVal }()
+
+	logger := log.New()
+	_, tx := memdb.NewTestTx(t)
+
+	table := kv.TblAccountIdx // DupSort table
+
+	// Pre-populate with key=0x01, values=0x01,0x02
+	dupCur, err := tx.RwCursorDupSort(table)
+	require.NoError(t, err)
+	require.NoError(t, dupCur.Put([]byte{0x01}, []byte{0x01}))
+	require.NoError(t, dupCur.Put([]byte{0x01}, []byte{0x02}))
+	require.NoError(t, dupCur.Put([]byte{0x02}, []byte{0x01}))
+	dupCur.Close()
+
+	collector := NewCollector(t.Name(), "", NewSortableBuffer(BufferOptimalSize), logger)
+	defer collector.Close()
+
+	// ETL: add new values for existing keys and new keys
+	require.NoError(t, collector.Collect([]byte{0x01}, []byte{0x03})) // extends existing key
+	require.NoError(t, collector.Collect([]byte{0x02}, []byte{0x02})) // extends existing key
+	require.NoError(t, collector.Collect([]byte{0x03}, []byte{0x01})) // new key
+
+	require.NoError(t, collector.Load(tx, table, IdentityLoadFunc, TransformArgs{}))
+
+	// Verify all entries
+	cur, err := tx.CursorDupSort(table)
+	require.NoError(t, err)
+	defer cur.Close()
+
+	type kv2 struct{ k, v byte }
+	var results []kv2
+	for k, v, err := cur.First(); k != nil; k, v, err = cur.Next() {
+		require.NoError(t, err)
+		results = append(results, kv2{k[0], v[0]})
+	}
+	expected := []kv2{
+		{0x01, 0x01}, {0x01, 0x02}, {0x01, 0x03},
+		{0x02, 0x01}, {0x02, 0x02},
+		{0x03, 0x01},
+	}
+	require.Equal(t, expected, results)
+}
+
+func TestDynamicCanUseAppend_EmptyTable(t *testing.T) {
+	// Test that empty table uses Append from the start
+	t.Setenv("ETL_DYNAMIC_APPEND", "1")
+	origVal := useDynamicAppend
+	useDynamicAppend = true
+	defer func() { useDynamicAppend = origVal }()
+
+	logger := log.New()
+	_, tx := memdb.NewTestTx(t)
+
+	table := kv.ChaindataTables[0]
+
+	collector := NewCollector(t.Name(), "", NewSortableBuffer(BufferOptimalSize), logger)
+	defer collector.Close()
+
+	for i := byte(1); i <= 10; i++ {
+		require.NoError(t, collector.Collect([]byte{i}, []byte{i}))
+	}
+
+	require.NoError(t, collector.Load(tx, table, IdentityLoadFunc, TransformArgs{}))
+
+	// Verify all entries present
+	for i := byte(1); i <= 10; i++ {
+		v, err := tx.GetOne(table, []byte{i})
+		require.NoError(t, err)
+		require.Equal(t, []byte{i}, v)
+	}
+}
+
+func TestDynamicCanUseAppend_AllOverlap(t *testing.T) {
+	// Test when all ETL keys overlap with existing data (all Put, no Append)
+	t.Setenv("ETL_DYNAMIC_APPEND", "1")
+	origVal := useDynamicAppend
+	useDynamicAppend = true
+	defer func() { useDynamicAppend = origVal }()
+
+	logger := log.New()
+	_, tx := memdb.NewTestTx(t)
+
+	table := kv.ChaindataTables[0]
+
+	// Pre-populate with keys 0x01..0x10
+	for i := byte(1); i <= 0x10; i++ {
+		require.NoError(t, tx.Put(table, []byte{i}, []byte{i}))
+	}
+
+	collector := NewCollector(t.Name(), "", NewSortableBuffer(BufferOptimalSize), logger)
+	defer collector.Close()
+
+	// ETL keys all within existing range
+	for i := byte(1); i <= 5; i++ {
+		require.NoError(t, collector.Collect([]byte{i}, []byte{i * 2}))
+	}
+
+	require.NoError(t, collector.Load(tx, table, IdentityLoadFunc, TransformArgs{}))
+
+	// Verify updated values
+	for i := byte(1); i <= 5; i++ {
+		v, err := tx.GetOne(table, []byte{i})
+		require.NoError(t, err)
+		require.Equal(t, []byte{i * 2}, v)
+	}
+	// Verify untouched values
+	for i := byte(6); i <= 0x10; i++ {
+		v, err := tx.GetOne(table, []byte{i})
+		require.NoError(t, err)
+		require.Equal(t, []byte{i}, v)
+	}
+}
+
+func TestDynamicCanUseAppend_NoSortingGuaranties(t *testing.T) {
+	// Test that custom loadFunc (no sorting guarantees) still uses Put
+	t.Setenv("ETL_DYNAMIC_APPEND", "1")
+	origVal := useDynamicAppend
+	useDynamicAppend = true
+	defer func() { useDynamicAppend = origVal }()
+
+	logger := log.New()
+	_, tx := memdb.NewTestTx(t)
+
+	table := kv.ChaindataTables[0]
+
+	collector := NewCollector(t.Name(), "", NewSortableBuffer(BufferOptimalSize), logger)
+	defer collector.Close()
+
+	require.NoError(t, collector.Collect([]byte{0x01}, []byte{0x01}))
+	require.NoError(t, collector.Collect([]byte{0x02}, []byte{0x02}))
+
+	// Use custom loadFunc (not IdentityLoadFunc) — should force Put path
+	customLoad := func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error {
+		return next(k, k, v)
+	}
+	require.NoError(t, collector.Load(tx, table, customLoad, TransformArgs{}))
+
+	v, err := tx.GetOne(table, []byte{0x01})
+	require.NoError(t, err)
+	require.Equal(t, []byte{0x01}, v)
+}
+
+func TestDynamicCanUseAppend_FeatureFlag(t *testing.T) {
+	// Test that without ETL_DYNAMIC_APPEND, behavior is unchanged (one-shot check)
+	origVal := useDynamicAppend
+	useDynamicAppend = false
+	defer func() { useDynamicAppend = origVal }()
+
+	logger := log.New()
+	_, tx := memdb.NewTestTx(t)
+
+	table := kv.ChaindataTables[0]
+
+	// Pre-populate with key 0x05
+	require.NoError(t, tx.Put(table, []byte{0x05}, []byte{0x50}))
+
+	collector := NewCollector(t.Name(), "", NewSortableBuffer(BufferOptimalSize), logger)
+	defer collector.Close()
+
+	// ETL keys start before lastKey — one-shot check should set canUseAppend=false
+	require.NoError(t, collector.Collect([]byte{0x03}, []byte{0x30}))
+	require.NoError(t, collector.Collect([]byte{0x06}, []byte{0x60}))
+	require.NoError(t, collector.Collect([]byte{0x07}, []byte{0x70}))
+
+	// Should succeed (all via Put since canUseAppend=false from first key)
+	require.NoError(t, collector.Load(tx, table, IdentityLoadFunc, TransformArgs{}))
+
+	v, err := tx.GetOne(table, []byte{0x03})
+	require.NoError(t, err)
+	require.Equal(t, []byte{0x30}, v)
+	v, err = tx.GetOne(table, []byte{0x06})
+	require.NoError(t, err)
+	require.Equal(t, []byte{0x60}, v)
+}
+
+func TestDynamicCanUseAppend_DupSort_Duplicates(t *testing.T) {
+	// Test that duplicate (key, value) pairs are skipped for DupSort tables
+	t.Setenv("ETL_DYNAMIC_APPEND", "1")
+	origVal := useDynamicAppend
+	useDynamicAppend = true
+	defer func() { useDynamicAppend = origVal }()
+
+	logger := log.New()
+	_, tx := memdb.NewTestTx(t)
+
+	table := kv.TblAccountIdx // DupSort table
+
+	collector := NewCollector(t.Name(), "", NewSortableBuffer(BufferOptimalSize), logger)
+	defer collector.Close()
+
+	// Collect duplicate (key, value) pairs
+	require.NoError(t, collector.Collect([]byte{0x01}, []byte{0x01}))
+	require.NoError(t, collector.Collect([]byte{0x01}, []byte{0x01})) // duplicate
+	require.NoError(t, collector.Collect([]byte{0x01}, []byte{0x02}))
+	require.NoError(t, collector.Collect([]byte{0x01}, []byte{0x02})) // duplicate
+
+	require.NoError(t, collector.Load(tx, table, IdentityLoadFunc, TransformArgs{}))
+
+	// Verify only unique entries
+	cur, err := tx.CursorDupSort(table)
+	require.NoError(t, err)
+	defer cur.Close()
+
+	var vals []byte
+	for k, v, err := cur.First(); k != nil; k, v, err = cur.Next() {
+		require.NoError(t, err)
+		vals = append(vals, v[0])
+	}
+	require.Equal(t, []byte{0x01, 0x02}, vals)
+}
+
+func TestDynamicCanUseAppend_DupSort_DuplicatesAcrossFlushes(t *testing.T) {
+	// Test duplicate detection across multiple disk flushes
+	t.Setenv("ETL_DYNAMIC_APPEND", "1")
+	origVal := useDynamicAppend
+	useDynamicAppend = true
+	defer func() { useDynamicAppend = origVal }()
+
+	logger := log.New()
+	_, tx := memdb.NewTestTx(t)
+
+	table := kv.TblAccountIdx // DupSort table
+
+	// Very small buffer to force disk flushes
+	collector := NewCollector(t.Name(), t.TempDir(), NewSortableBuffer(1), logger)
+	defer collector.Close()
+
+	// Entries that will end up as duplicates after merge-sort
+	require.NoError(t, collector.Collect([]byte{0x01}, []byte{0x01}))
+	require.NoError(t, collector.Collect([]byte{0x01}, []byte{0x01})) // duplicate in different flush
+	require.NoError(t, collector.Collect([]byte{0x01}, []byte{0x02}))
+	require.NoError(t, collector.Collect([]byte{0x02}, []byte{0x01}))
+
+	require.NoError(t, collector.Load(tx, table, IdentityLoadFunc, TransformArgs{}))
+
+	// Verify correct entries
+	cur, err := tx.CursorDupSort(table)
+	require.NoError(t, err)
+	defer cur.Close()
+
+	type kv2 struct{ k, v byte }
+	var results []kv2
+	for k, v, err := cur.First(); k != nil; k, v, err = cur.Next() {
+		require.NoError(t, err)
+		results = append(results, kv2{k[0], v[0]})
+	}
+	expected := []kv2{
+		{0x01, 0x01}, {0x01, 0x02},
+		{0x02, 0x01},
+	}
+	require.Equal(t, expected, results)
+}
+
+// ==================== Benchmarks ====================
+
+func BenchmarkSortByKeyAndValue(b *testing.B) {
+	const keyLen = 8
+	const valLen = 8
+
+	makeBuffer := func(n int, sameKey bool) *sortableBuffer {
+		buf := NewSortableBuffer(256 * 1024 * 1024)
+		buf.Prealloc(n, n*(keyLen+valLen))
+		key := make([]byte, keyLen)
+		val := make([]byte, valLen)
+		for i := range n {
+			if sameKey {
+				binary.BigEndian.PutUint64(key, 1) // all same key
+			} else {
+				binary.BigEndian.PutUint64(key, uint64(i/3)) // ~3 values per key
+			}
+			// Values in reverse order to force sorting
+			binary.BigEndian.PutUint64(val, uint64(n-i))
+			buf.Put(key, val)
+		}
+		return buf
+	}
+
+	for _, tc := range []struct {
+		name    string
+		count   int
+		sameKey bool
+	}{
+		{"mixed_keys_10k", 10_000, false},
+		{"mixed_keys_100k", 100_000, false},
+		{"same_key_10k", 10_000, true},
+		{"same_key_100k", 100_000, true},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				b.StopTimer()
+				ref := makeBuffer(tc.count, tc.sameKey)
+				b.StartTimer()
+				ref.SortByKeyAndValue()
+			}
+		})
+	}
+}
+
 func BenchmarkSortableBufferSort(b *testing.B) {
 	const keyLen = 32
 	const valLen = 64

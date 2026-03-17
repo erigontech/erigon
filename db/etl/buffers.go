@@ -190,6 +190,28 @@ func (b *sortableBuffer) Sort() {
 	slices.SortStableFunc(b.entries, cmp) // Stable: this buffer type can have duplicate keys and must preserve their insertion order
 }
 
+// SortByKeyAndValue sorts entries by (key, value) pairs. Used for DupSort tables
+// where AppendDup requires both key and value to be in ascending order.
+func (b *sortableBuffer) SortByKeyAndValue() {
+	data := b.data
+	cmp := func(a, bEntry entryLoc) int {
+		// Compare keys first
+		aKeyEnd := a.offset + max(0, a.keyLen)
+		bKeyEnd := bEntry.offset + max(0, bEntry.keyLen)
+		if c := bytes.Compare(data[a.offset:aKeyEnd], data[bEntry.offset:bKeyEnd]); c != 0 {
+			return c
+		}
+		// Keys equal, compare values
+		aValEnd := aKeyEnd + max(0, a.valLen)
+		bValEnd := bKeyEnd + max(0, bEntry.valLen)
+		return bytes.Compare(data[aKeyEnd:aValEnd], data[bKeyEnd:bValEnd])
+	}
+	if slices.IsSortedFunc(b.entries, cmp) {
+		return
+	}
+	slices.SortStableFunc(b.entries, cmp)
+}
+
 func (b *sortableBuffer) CheckFlushSize() bool {
 	return b.Size() >= b.optimalSize
 }

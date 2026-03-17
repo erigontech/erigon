@@ -22,8 +22,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 
@@ -31,6 +33,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 )
+
+var useDynamicAppend = os.Getenv("ETL_DYNAMIC_APPEND") != ""
 
 type LoadNextFunc func(originalK, k, v []byte) error
 type LoadFunc func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error
@@ -204,11 +208,58 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	var canUseAppend bool
 	isDupSort := kv.ChaindataTablesCfg[bucket].Flags&kv.DupSort != 0 && !kv.ChaindataTablesCfg[bucket].AutoDupSortKeysConversion
 
+	// Phase 1: Re-sort in-RAM providers by (key, value) for DupSort tables
+	if isDupSort {
+		for _, p := range c.dataProviders {
+			if mp, ok := p.(*memoryDataProvider); ok {
+				if sb, ok := mp.buffer.(*sortableBuffer); ok {
+					sb.SortByKeyAndValue()
+				}
+			}
+		}
+	}
+
+	// Phase 2: For DupSort tables, fetch last value for proper AppendDup comparison
+	var lastValue []byte
+	if useDynamicAppend && isDupSort && lastKey != nil {
+		dupCursor := cursor.(kv.RwCursorDupSort)
+		_, lastValue, _ = dupCursor.SeekExact(lastKey)
+		if lastValue != nil {
+			lastValue, _ = dupCursor.LastDup()
+		}
+	}
+
+	// Track last inserted (key, value) for DupSort tables to skip duplicates
+	var lastInsertedKey, lastInsertedValue []byte
+
+	// Metrics counters
+	var putCount, appendCount, appendDupCount uint64
+	loadStart := time.Now()
+
+	// For non-DupSort dynamic append: track the effective last key (may change after Put)
+	effectiveLastKey := common.Copy(lastKey)
+
 	i := 0
 	loadNextFunc := func(_, k, v []byte) error {
-		if i == 0 {
-			isEndOfBucket := lastKey == nil || bytes.Compare(lastKey, k) == -1
-			canUseAppend = haveSortingGuaranties && isEndOfBucket
+		if useDynamicAppend {
+			if !canUseAppend && haveSortingGuaranties {
+				if isDupSort {
+					cmpKey := bytes.Compare(effectiveLastKey, k)
+					if effectiveLastKey == nil || cmpKey == -1 {
+						canUseAppend = true
+					} else if cmpKey == 0 && lastValue != nil {
+						// Same key, compare values
+						canUseAppend = bytes.Compare(lastValue, v) == -1
+					}
+				} else {
+					canUseAppend = effectiveLastKey == nil || bytes.Compare(effectiveLastKey, k) == -1
+				}
+			}
+		} else {
+			if i == 0 {
+				isEndOfBucket := lastKey == nil || bytes.Compare(lastKey, k) == -1
+				canUseAppend = haveSortingGuaranties && isEndOfBucket
+			}
 		}
 		i++
 
@@ -229,19 +280,35 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 		}
 		if canUseAppend {
 			if isDupSort {
+				// Skip duplicates - AppendDup fails if (key, value) already exists
+				if bytes.Equal(lastInsertedKey, k) && bytes.Equal(lastInsertedValue, v) {
+					return nil // Duplicate entry, skip it
+				}
 				if err := cursor.(kv.RwCursorDupSort).AppendDup(k, v); err != nil {
 					return fmt.Errorf("%s: bucket: %s, appendDup: k=%x, %w", c.logPrefix, bucket, k, err)
 				}
+				// Track last inserted for duplicate detection
+				lastInsertedKey = common.Copy(k)
+				lastInsertedValue = common.Copy(v)
+				appendDupCount++
 			} else {
 				if err := cursor.Append(k, v); err != nil {
 					return fmt.Errorf("%s: bucket: %s, append: k=%x, v=%x, %w", c.logPrefix, bucket, k, v, err)
 				}
+				appendCount++
 			}
 
 			return nil
 		}
 		if err := cursor.Put(k, v); err != nil {
 			return fmt.Errorf("%s: put: k=%x, %w", c.logPrefix, k, err)
+		}
+		putCount++
+		// For non-DupSort dynamic append: update effectiveLastKey if this Put key is greater
+		if useDynamicAppend && !isDupSort {
+			if effectiveLastKey == nil || bytes.Compare(k, effectiveLastKey) > 0 {
+				effectiveLastKey = common.Copy(k)
+			}
 		}
 		return nil
 	}
@@ -254,10 +321,27 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	simpleLoad := func(k, v []byte) error {
 		return loadFunc(k, v, currentTable, loadNextFunc)
 	}
-	if err := mergeSortFiles(c.logPrefix, c.dataProviders, simpleLoad, args, c.buf); err != nil {
+	if err := mergeSortFiles(c.logPrefix, c.dataProviders, simpleLoad, args, c.buf, isDupSort); err != nil {
 		return fmt.Errorf("loadIntoTable %s: %w", toBucket, err)
 	}
-	//logger.Trace(fmt.Sprintf("[%s] ETL Load done", c.logPrefix), "bucket", bucket, "records", i)
+
+	// Log metrics for loads with significant entry counts
+	total := putCount + appendCount + appendDupCount
+	if total >= 100 {
+		appendTotal := appendCount + appendDupCount
+		appendRatio := float64(appendTotal) / float64(total) * 100
+		c.logger.Info("[etl] Load stats",
+			"table", bucket,
+			"total", total,
+			"put", putCount,
+			"append", appendCount,
+			"appendDup", appendDupCount,
+			"appendRatio", fmt.Sprintf("%.1f%%", appendRatio),
+			"duration", time.Since(loadStart),
+			"dynamicAppend", useDynamicAppend,
+		)
+	}
+
 	return nil
 }
 
@@ -286,14 +370,14 @@ func (c *Collector) Close() {
 // for the next item, which is then added back to the heap.
 // The subsequent iterations pop the heap again and load up the provider associated with it to get the next element after processing LoadFunc.
 // this continues until all providers have reached their EOF.
-func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleLoadFunc, args TransformArgs, buf Buffer) (err error) {
+func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleLoadFunc, args TransformArgs, buf Buffer, isDupSort bool) (err error) {
 	for _, provider := range providers {
 		if err := provider.Wait(); err != nil {
 			return err
 		}
 	}
 
-	h := &Heap{}
+	h := &Heap{dupSort: isDupSort}
 	heapInit(h)
 	for i, provider := range providers {
 		if key, value, err := provider.Next(nil, nil); err == nil {
