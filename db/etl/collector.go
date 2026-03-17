@@ -209,7 +209,8 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	isDupSort := kv.ChaindataTablesCfg[bucket].Flags&kv.DupSort != 0 && !kv.ChaindataTablesCfg[bucket].AutoDupSortKeysConversion
 
 	// Phase 1: Re-sort in-RAM providers by (key, value) for DupSort tables
-	if isDupSort {
+	// Only when haveSortingGuaranties (IdentityLoadFunc) — custom loadFuncs may depend on insertion order
+	if isDupSort && haveSortingGuaranties {
 		for _, p := range c.dataProviders {
 			if mp, ok := p.(*memoryDataProvider); ok {
 				if sb, ok := mp.buffer.(*sortableBuffer); ok {
@@ -321,7 +322,7 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	simpleLoad := func(k, v []byte) error {
 		return loadFunc(k, v, currentTable, loadNextFunc)
 	}
-	if err := mergeSortFiles(c.logPrefix, c.dataProviders, simpleLoad, args, c.buf, isDupSort); err != nil {
+	if err := mergeSortFiles(c.logPrefix, c.dataProviders, simpleLoad, args, c.buf, isDupSort && haveSortingGuaranties); err != nil {
 		return fmt.Errorf("loadIntoTable %s: %w", toBucket, err)
 	}
 
