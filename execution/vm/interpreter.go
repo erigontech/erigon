@@ -56,11 +56,12 @@ func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
 // CallContext contains the things that are per-call, such as stack and memory,
 // but not transients like pc and gas
 type CallContext struct {
-	gas      uint64
-	input    []byte
-	Memory   Memory
-	Stack    Stack
-	Contract Contract
+	gas         uint64
+	input       []byte
+	callAddrTmp accounts.Address // interned CALL target, set by gas func, read by op*Call
+	Memory      Memory
+	Stack       Stack
+	Contract    Contract
 }
 
 var contextPool = sync.Pool{
@@ -84,6 +85,7 @@ func getCallContext(contract Contract, input []byte, gas uint64) *CallContext {
 }
 
 func (c *CallContext) put() {
+	c.callAddrTmp = accounts.NilAddress
 	c.Memory.reset()
 	c.Stack.Reset()
 	contextPool.Put(c)
