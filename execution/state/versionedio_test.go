@@ -849,7 +849,8 @@ func findRead(reads ReadSet, addr accounts.Address, path AccountPath) *Versioned
 	}
 	for _, r := range addrReads {
 		if r.Path == path {
-			return r
+			r := r // local copy for address
+			return &r
 		}
 	}
 	return nil

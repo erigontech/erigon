@@ -586,7 +586,6 @@ func (c *LightCollector) WriteAccountStorage(address accounts.Address, _ uint64,
 
 func (c *LightCollector) CreateContract(_ accounts.Address) error { return nil }
 
-
 // NotifyAccumulator drives txpool state-diff notifications from VersionedWrites.
 // It reconstructs account state from the per-field writes and calls
 // ChangeAccount/ChangeCode/ChangeStorage on the accumulator. StartChange must

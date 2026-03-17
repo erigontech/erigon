@@ -98,10 +98,9 @@ type testFinalizeScenario struct {
 func copyReadSet(rs state.ReadSet) state.ReadSet {
 	out := make(state.ReadSet, len(rs))
 	for addr, keys := range rs {
-		out[addr] = make(map[state.AccountKey]*state.VersionedRead, len(keys))
+		out[addr] = make(map[state.AccountKey]state.VersionedRead, len(keys))
 		for k, v := range keys {
-			cpy := *v
-			out[addr][k] = &cpy
+			out[addr][k] = v
 		}
 	}
 	return out
@@ -293,7 +292,7 @@ func londonTransferScenario() *testFinalizeScenario {
 	s := simpleTransferScenario()
 	s.name = "simple_transfer_london"
 	s.rules.IsLondon = true
-	s.config.LondonBlock = big.NewInt(0)
+	s.config.LondonBlock = new(uint64) // 0
 
 	burntAddr := fAddr("burntcontract")
 	baseFee := uint256.NewInt(10_000)
