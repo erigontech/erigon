@@ -358,7 +358,7 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 	if err = s.ReadUint256(&stx.ChainID); err != nil {
 		return err
 	}
-	if stx.Nonce, err = s.Uint(); err != nil {
+	if stx.Nonce, err = s.Uint64(); err != nil {
 		return err
 	}
 	if err = s.ReadUint256(&stx.TipCap); err != nil {
@@ -367,7 +367,7 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 	if err = s.ReadUint256(&stx.FeeCap); err != nil {
 		return err
 	}
-	if stx.GasLimit, err = s.Uint(); err != nil {
+	if stx.GasLimit, err = s.Uint64(); err != nil {
 		return err
 	}
 	stx.To = &common.Address{}
