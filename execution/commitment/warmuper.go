@@ -41,6 +41,7 @@ type WarmupConfig struct {
 	NumWorkers        int
 	MaxDepth          int
 	LogPrefix         string
+	BranchCache       *BranchCache // Persistent branch cache; warmup populates it on DB miss
 }
 
 const WarmupMaxDepth = 128 // covers full key paths for both account keys (64 nibbles) and storage keys (128 nibbles)
@@ -66,7 +67,8 @@ type Warmuper struct {
 	g *errgroup.Group
 
 	// Cache for storing warmed data to be used during trie processing
-	cache *WarmupCache
+	cache       *WarmupCache
+	branchCache *BranchCache // persistent branch cache shared with trie
 
 	// Stats
 	keysProcessed atomic.Uint64
@@ -96,6 +98,7 @@ func NewWarmuper(ctx context.Context, cfg WarmupConfig) *Warmuper {
 	if cfg.EnableWarmupCache {
 		w.cache = NewWarmupCache()
 	}
+	w.branchCache = cfg.BranchCache
 	return w
 }
 
@@ -104,19 +107,37 @@ func (w *Warmuper) Cache() *WarmupCache {
 	return w.cache
 }
 
-// branchFromCacheOrDB reads branch data from cache if available, otherwise from DB and caches it.
+// branchFromCacheOrDB reads branch data from warmup cache → persistent cache → DB.
+// On DB miss, populates both persistent cache and warmup cache.
 func (w *Warmuper) branchFromCacheOrDB(trieCtx PatriciaContext, prefix []byte) ([]byte, error) {
+	// Level 1: ephemeral warmup cache (populated by previous warmup calls this Process)
 	if w.cache != nil {
 		if data, found := w.cache.GetBranch(prefix); found {
 			return data, nil
 		}
 	}
+	// Level 2: persistent branch cache (survives across Process calls)
+	if w.branchCache != nil {
+		if data, found := w.branchCache.Get(prefix); found {
+			if w.cache != nil {
+				w.cache.PutBranch(prefix, data)
+			}
+			return data, nil
+		}
+	}
+	// Level 3: DB read
 	branchData, _, err := trieCtx.Branch(prefix)
 	if err != nil {
 		return nil, err
 	}
-	if w.cache != nil && len(branchData) > 0 {
-		w.cache.PutBranch(prefix, branchData)
+	if len(branchData) > 0 {
+		// Populate persistent cache on DB read
+		if w.branchCache != nil {
+			w.branchCache.Put(prefix, branchData)
+		}
+		if w.cache != nil {
+			w.cache.PutBranch(prefix, branchData)
+		}
 	}
 	return branchData, nil
 }

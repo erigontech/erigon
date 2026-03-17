@@ -380,11 +380,12 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	var warmupConfig commitment.WarmupConfig
 	if sdc.paraTrieDB != nil {
 		warmupConfig = commitment.WarmupConfig{
-			Enabled:    sdc.trieWarmup,
-			CtxFactory: sdc.trieContextFactory(ctx, sdc.paraTrieDB, txNum),
-			NumWorkers: 16,
-			MaxDepth:   commitment.WarmupMaxDepth,
-			LogPrefix:  logPrefix,
+			Enabled:     sdc.trieWarmup,
+			CtxFactory:  sdc.trieContextFactory(ctx, sdc.paraTrieDB, txNum),
+			NumWorkers:  16,
+			MaxDepth:    commitment.WarmupMaxDepth,
+			LogPrefix:   logPrefix,
+			BranchCache: sdc.patriciaTrie.GetBranchCache(),
 		}
 	}
 

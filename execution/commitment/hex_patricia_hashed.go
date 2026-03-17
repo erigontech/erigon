@@ -2931,6 +2931,7 @@ func (hph *HexPatriciaHashed) SetTraceDomain(trace bool)         { hph.traceDoma
 func (hph *HexPatriciaHashed) EnableWarmupCache(enable bool)     { hph.enableWarmupCache = enable }
 func (hph *HexPatriciaHashed) SetBranchCache(cache *BranchCache) { hph.branchCache = cache }
 func (hph *HexPatriciaHashed) BranchCache() *BranchCache         { return hph.branchCache }
+func (hph *HexPatriciaHashed) GetBranchCache() *BranchCache      { return hph.branchCache }
 
 func (hph *HexPatriciaHashed) GetCapture(truncate bool) []string {
 	capture := hph.capture

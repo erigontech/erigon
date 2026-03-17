@@ -178,6 +178,9 @@ func (p *ConcurrentPatriciaHashed) SetBranchCache(cache *BranchCache) {
 		p.mounts[i].SetBranchCache(cache)
 	}
 }
+func (p *ConcurrentPatriciaHashed) GetBranchCache() *BranchCache {
+	return p.root.branchCache
+}
 func (p *ConcurrentPatriciaHashed) GetCapture(truncate bool) []string {
 	capture := p.root.GetCapture(truncate)
 	if truncate {

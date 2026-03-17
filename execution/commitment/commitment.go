@@ -102,6 +102,8 @@ type Trie interface {
 	EnableWarmupCache(bool)
 	// SetBranchCache sets a persistent branch cache that survives across Process() calls.
 	SetBranchCache(*BranchCache)
+	// GetBranchCache returns the persistent branch cache, or nil.
+	GetBranchCache() *BranchCache
 
 	// Variant returns commitment trie variant
 	Variant() TrieVariant
