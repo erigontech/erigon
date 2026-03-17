@@ -68,6 +68,9 @@ type Warmuper struct {
 	// Cache for storing warmed data to be used during trie processing
 	cache *WarmupCache
 
+	// byte arena for key copies (single-writer: only WarmKey writes)
+	byteArena []byte
+
 	// Stats
 	keysProcessed atomic.Uint64
 	startTime     time.Time
@@ -265,14 +268,33 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 	}
 }
 
+// arenaAlloc copies b into the warmuper's byte arena and returns the copy.
+// Must only be called from the single goroutine that calls WarmKey.
+func (w *Warmuper) arenaAlloc(b []byte) []byte {
+	off := len(w.byteArena)
+	needed := off + len(b)
+	if needed > cap(w.byteArena) {
+		// Grow: allocate a new backing array (old one stays alive via
+		// in-flight slice headers until workers finish).
+		newCap := max(needed*2, 4096)
+		w.byteArena = make([]byte, needed, newCap)
+		copy(w.byteArena[off:], b)
+		return w.byteArena[off:needed]
+	}
+	w.byteArena = w.byteArena[:needed]
+	copy(w.byteArena[off:], b)
+	return w.byteArena[off:needed]
+}
+
 // WarmKey submits a hashed key for warming. Call Start() first.
 // startDepth indicates the depth from which to start warming (based on divergence from previous key).
 func (w *Warmuper) WarmKey(hashedKey []byte, startDepth int) {
 	if !w.started.Load() || w.numWorkers <= 0 || w.closed.Load() {
 		return
 	}
+	keyCopy := w.arenaAlloc(hashedKey)
 	select {
-	case w.work <- warmupWorkItem{hashedKey: hashedKey, startDepth: startDepth}:
+	case w.work <- warmupWorkItem{hashedKey: keyCopy, startDepth: startDepth}:
 	case <-w.ctx.Done():
 	default: // non-blocking
 	}
@@ -312,6 +334,9 @@ func (w *Warmuper) DrainPending() {
 		select {
 		case <-w.work:
 		default:
+			// Release the arena backing array; in-flight workers still hold
+			// valid slice headers into the old array until they finish.
+			w.byteArena = nil
 			return
 		}
 	}
