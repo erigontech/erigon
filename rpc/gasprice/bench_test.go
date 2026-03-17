@@ -50,10 +50,12 @@ func newTestBackendN(tb testing.TB, n int) *execmoduletester.ExecModuleTester {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	addr := crypto.PubkeyToAddress(key.PublicKey)
 	// Balance large enough for txsPerBlock × n blocks at up to 100 GWei each.
-	// 100 txs × avg 50 GWei × 21000 gas × 64 blocks ≈ 6.7e18 wei < MaxInt64.
+	// 100 txs × 100 GWei × 21000 gas × 200 blocks = 4.2e19 wei > MaxInt64 (9.2e18).
+	// Use MaxInt64 × 100 to cover the largest benchmark (200 blocks).
+	balance := new(big.Int).Mul(big.NewInt(math.MaxInt64), big.NewInt(100))
 	gspec := &types.Genesis{
 		Config: chain.TestChainConfig,
-		Alloc:  types.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
+		Alloc:  types.GenesisAlloc{addr: {Balance: balance}},
 	}
 	signer := types.LatestSigner(gspec.Config)
 	m := execmoduletester.New(tb, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
