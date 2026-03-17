@@ -124,7 +124,11 @@ func WordsAmount2PagesAmount(wordsAmount int, pageSize int) (pagesAmount int) {
 
 type pageWorkItem struct {
 	seq              int
-	uncompressedData []byte // copy of uncompressed page; returned to pool after compression
+	uncompressedData []byte   // assembled page: [header][keys][vals] (built by worker)
+	keys             []byte   // raw keys data, swapped from producer
+	vals             []byte   // raw vals data, swapped from producer
+	kLengths         []uint32 // key lengths, swapped from producer
+	vLengths         []uint32 // val lengths, swapped from producer
 }
 
 type pageResult struct {
@@ -245,12 +249,16 @@ func (g *PagedReader) Skip() (uint64, int) {
 var workers = dbg.EnvInt("PAGED_WRITER_WORKERS", 1)
 
 func NewPagedWriter(ctx context.Context, parent CompressorI, compressionEnabled bool) *PagedWriter {
+	return NewPagedWriterWithWorkers(ctx, parent, compressionEnabled, workers)
+}
+
+func NewPagedWriterWithWorkers(ctx context.Context, parent CompressorI, compressionEnabled bool, numWorkers int) *PagedWriter {
 	pw := &PagedWriter{
 		parent:             parent,
 		pageSize:           parent.GetValuesOnCompressedPage(),
 		compressionEnabled: compressionEnabled,
 		ctx:                ctx,
-		numWorkers:         workers, //TODO: accept it as a parameter in next PR
+		numWorkers:         numWorkers,
 	}
 	if compressionEnabled && pw.pageSize > 1 {
 		if pw.numWorkers > 1 {
@@ -273,7 +281,7 @@ type PagedWriter struct {
 	parent             CompressorI
 	pageSize           int
 	keys, vals         []byte
-	kLengths, vLengths []int
+	kLengths, vLengths []uint32
 
 	pageBuf            []byte // reusable buffer for bytesUncompressedTo in sync path
 	compressionBuf     []byte
@@ -318,6 +326,12 @@ func (c *PagedWriter) initWorkers() {
 func (c *PagedWriter) compressionWorker(ctx context.Context) error {
 	processItem := func(item *pageWorkItem) {
 		defer putPageWorkItem(item)
+
+		// Build full page: header + keys + vals (all work in parallel worker)
+		totalSize := 1 + len(item.kLengths)*2*4 + len(item.keys) + len(item.vals)
+		item.uncompressedData = pageHeaderTo(item.uncompressedData[:0], item.kLengths, item.vLengths, totalSize)
+		item.uncompressedData = append(item.uncompressedData, item.keys...)
+		item.uncompressedData = append(item.uncompressedData, item.vals...)
 
 		result := getPageResult()
 		result.seq = item.seq
@@ -376,7 +390,7 @@ func (c *PagedWriter) writeInOrder() error {
 }
 
 func (c *PagedWriter) Empty() bool              { return c.pairs == 0 }
-func (c *PagedWriter) IsAsyncCompression() bool { return c.numWorkers > 1 }
+func (c *PagedWriter) IsAsyncCompression() bool { return c.workCh != nil }
 func (c *PagedWriter) PagesCompressed() int     { return c.pagesCompressed }
 func (c *PagedWriter) Close() {
 	c.parent.Close()
@@ -411,31 +425,35 @@ func (c *PagedWriter) writePage() error {
 	}
 
 	// Synchronous path (single-threaded or disabled workers)
-	if c.numWorkers <= 1 {
-		var ok bool
-		c.pageBuf, ok = c.bytesUncompressedTo(c.pageBuf[:0])
+	if c.workCh == nil {
+		uncompressedPage, ok := c.bytesUncompressed()
 		c.resetPage()
 		if !ok {
 			return nil
 		}
 
 		var compressedPage []byte
-		c.compressionBuf, compressedPage = compress.EncodeZstdIfNeed(c.compressionBuf[:0], c.pageBuf, c.compressionEnabled)
+		c.compressionBuf, compressedPage = compress.EncodeZstdIfNeed(c.compressionBuf[:0], uncompressedPage, c.compressionEnabled)
 		if _, err := c.parent.Write(compressedPage); err != nil {
 			return err
 		}
 		return nil
 	}
 
-	// Async path with parallel workers
-	item := getPageWorkItem()
-	var ok bool
-	item.uncompressedData, ok = c.bytesUncompressedTo(item.uncompressedData)
-	c.resetPage()
-	if !ok {
-		putPageWorkItem(item)
+	// Async path: swap all buffers to worker (zero-copy producer)
+	if len(c.kLengths) == 0 {
 		return nil
 	}
+
+	item := getPageWorkItem()
+
+	// Swap all buffers: give ours to worker, take recycled ones
+	item.keys, c.keys = c.keys, item.keys
+	item.vals, c.vals = c.vals, item.vals
+	item.kLengths, c.kLengths = c.kLengths, item.kLengths
+	item.vLengths, c.vLengths = c.vLengths, item.vLengths
+
+	c.resetPage()
 
 	item.seq = c.seqIn
 	c.seqIn++
@@ -456,8 +474,8 @@ func (c *PagedWriter) Add(k, v []byte) (err error) {
 	}
 
 	c.pairs++
-	c.kLengths = append(c.kLengths, len(k))
-	c.vLengths = append(c.vLengths, len(v))
+	c.kLengths = append(c.kLengths, uint32(len(k)))
+	c.vLengths = append(c.vLengths, uint32(len(v)))
 	c.keys = append(c.keys, k...)
 	c.vals = append(c.vals, v...)
 	isFull := c.pairs%c.pageSize == 0
@@ -479,7 +497,7 @@ func (c *PagedWriter) Flush() error {
 	if err := c.writePage(); err != nil {
 		return err
 	}
-	if c.numWorkers <= 1 {
+	if c.workCh == nil {
 		c.resetPage()
 		return nil
 	}
@@ -495,42 +513,45 @@ func (c *PagedWriter) Flush() error {
 	return c.eg.Wait()
 }
 
-// bytesUncompressedTo encodes page into external buffer (no internal state modification)
-func (c *PagedWriter) bytesUncompressedTo(buf []byte) (wholePage []byte, notEmpty bool) {
+func (c *PagedWriter) bytesUncompressed() (wholePage []byte, notEmpty bool) {
 	if len(c.kLengths) == 0 {
 		return nil, false
 	}
 
-	// Encode page metadata (header only), then append keys and values
-	headerSize := 1 + len(c.kLengths)*2*4
-	wholePage = growslice(buf[:0], headerSize)
-	clear(wholePage)
+	c.keys = append(c.keys, c.vals...)
+	keysAndVals := c.keys
 
-	wholePage[0] = uint8(len(c.kLengths)) // first byte is amount of vals
-	lensBuf := wholePage[1:]
-	for i, l := range c.kLengths {
-		binary.BigEndian.PutUint32(lensBuf[i*4:(i+1)*4], uint32(l))
-	}
-	lensBuf = lensBuf[len(c.kLengths)*4:]
-	for i, l := range c.vLengths {
-		binary.BigEndian.PutUint32(lensBuf[i*4:(i+1)*4], uint32(l))
-	}
-
-	// Append keys and values after header (must not be included in pre-allocated size)
-	wholePage = append(wholePage, c.keys...)
-	wholePage = append(wholePage, c.vals...)
+	wholePage = pageHeaderTo(c.vals, c.kLengths, c.vLengths, 0)
+	wholePage = append(wholePage, keysAndVals...)
 
 	return wholePage, true
 }
 
+// pageHeaderTo encodes page header (count + key/value lengths) into buf.
+// capacityHint, if > 0, pre-allocates buf to that size (for callers that know the full page size).
+func pageHeaderTo(buf []byte, kLengths, vLengths []uint32, capacityHint int) []byte {
+	headerSize := 1 + len(kLengths)*2*4
+	if capacityHint > headerSize {
+		buf = growslice(buf, capacityHint)[:headerSize]
+	} else {
+		buf = growslice(buf, headerSize)
+	}
+	buf[0] = uint8(len(kLengths))
+	lensBuf := buf[1:]
+	for i, l := range kLengths {
+		binary.BigEndian.PutUint32(lensBuf[i*4:(i+1)*4], l)
+	}
+	lensBuf = lensBuf[len(kLengths)*4:]
+	for i, l := range vLengths {
+		binary.BigEndian.PutUint32(lensBuf[i*4:(i+1)*4], l)
+	}
+
+	return buf
+}
+
 func (c *PagedWriter) bytes() (wholePage []byte, notEmpty bool) {
 	//TODO: alignment,compress+alignment
-	c.pageBuf, notEmpty = c.bytesUncompressedTo(c.pageBuf[:0])
-	if !notEmpty {
-		return nil, false
-	}
-	c.compressionBuf, wholePage = compress.EncodeZstdIfNeed(c.compressionBuf[:0], c.pageBuf, c.compressionEnabled)
-	return wholePage, true
+	return c.bytesUncompressed()
 }
 
 func (c *PagedWriter) DisableFsync() {
@@ -569,6 +590,10 @@ func putPageWorkItem(item *pageWorkItem) {
 	}
 	item.seq = 0
 	item.uncompressedData = item.uncompressedData[:0]
+	item.keys = item.keys[:0]
+	item.vals = item.vals[:0]
+	item.kLengths = item.kLengths[:0]
+	item.vLengths = item.vLengths[:0]
 	pageWorkItemPool.Put(item)
 }
 
