@@ -27,7 +27,8 @@ type HeapElem struct {
 }
 
 type Heap struct {
-	elems []*HeapElem
+	elems      []*HeapElem
+	sortValues bool // when true, compare values for equal keys (DupSort tables)
 }
 
 func (h *Heap) Len() int {
@@ -37,6 +38,11 @@ func (h *Heap) Len() int {
 func (h *Heap) Less(i, j int) bool {
 	if c := bytes.Compare(h.elems[i].Key, h.elems[j].Key); c != 0 {
 		return c < 0
+	}
+	if h.sortValues {
+		if c := bytes.Compare(h.elems[i].Value, h.elems[j].Value); c != 0 {
+			return c < 0
+		}
 	}
 	return h.elems[i].TimeIdx < h.elems[j].TimeIdx
 }

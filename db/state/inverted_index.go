@@ -375,7 +375,7 @@ func (w *InvertedIndexBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) err
 	if err := w.index.Load(tx, w.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := w.indexKeys.Load(tx, w.indexKeysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := w.indexKeys.Load(tx, w.indexKeysTable, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 	w.close()
@@ -410,7 +410,7 @@ func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *InvertedIn
 	if !discard {
 		// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
 		w.indexKeys = etl.NewCollectorWithAllocator(w.filenameBase+".ii.keys", tmpdir, etl.SmallSortableBuffers, iit.ii.logger).
-			LogLvl(log.LvlTrace).SortAndFlushInBackground(true)
+			LogLvl(log.LvlTrace).SortAndFlushInBackground(true).SortValues(true)
 		w.index = etl.NewCollectorWithAllocator(w.filenameBase+".ii.vals", tmpdir, etl.SmallSortableBuffers, iit.ii.logger).
 			LogLvl(log.LvlTrace).SortAndFlushInBackground(true)
 	}

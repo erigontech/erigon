@@ -189,6 +189,29 @@ func (b *sortableBuffer) Sort() {
 	slices.SortFunc(b.entries, cmp)
 }
 
+func (b *sortableBuffer) SortByKeyAndValue() {
+	data := b.data
+	cmp := func(a, b entryLoc) int {
+		aKey := data[a.offset : a.offset+max(a.keyLen, 0)]
+		bKey := data[b.offset : b.offset+max(b.keyLen, 0)]
+		if c := bytes.Compare(aKey, bKey); c != 0 {
+			return c
+		}
+		aValOff := a.offset + max(a.keyLen, 0)
+		bValOff := b.offset + max(b.keyLen, 0)
+		aVal := data[aValOff : aValOff+max(a.valLen, 0)]
+		bVal := data[bValOff : bValOff+max(b.valLen, 0)]
+		if c := bytes.Compare(aVal, bVal); c != 0 {
+			return c
+		}
+		return int(a.insertionOrder - b.insertionOrder)
+	}
+	if slices.IsSortedFunc(b.entries, cmp) {
+		return
+	}
+	slices.SortFunc(b.entries, cmp)
+}
+
 func (b *sortableBuffer) CheckFlushSize() bool {
 	return b.Size() >= b.optimalSize
 }

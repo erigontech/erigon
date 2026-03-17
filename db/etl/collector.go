@@ -74,6 +74,10 @@ type Collector struct {
 	sortAndFlushInBackground       bool
 	sortAndFlushInBackgroundActive atomic.Bool // allow only 1 bg sort per Collector
 
+	// sortValues causes flush to use SortByKeyAndValue() instead of Sort() for sortableBuffer.
+	// This enables AppendDup for DupSort tables where values need to be sorted (e.g. ii/history keys).
+	sortValues bool
+
 	allocator *Allocator
 }
 
@@ -89,6 +93,23 @@ func NewCollector(logPrefix, tmpdir string, sortableBuffer Buffer, logger log.Lo
 func (c *Collector) SortAndFlushInBackground(v bool) *Collector {
 	c.sortAndFlushInBackground = v
 	return c
+}
+
+func (c *Collector) SortValues(v bool) *Collector {
+	c.sortValues = v
+	return c
+}
+
+// sortBuf sorts the collector's buffer, using SortByKeyAndValue when sortValues is set
+// and the buffer supports it, otherwise falling back to Sort().
+func (c *Collector) sortBuf() {
+	if c.sortValues {
+		if sb, ok := c.buf.(*sortableBuffer); ok {
+			sb.SortByKeyAndValue()
+			return
+		}
+	}
+	c.buf.Sort()
 }
 
 func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
@@ -122,7 +143,7 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 	}
 
 	if canStoreInRam && len(c.dataProviders) == 0 {
-		c.buf.Sort()
+		c.sortBuf()
 		provider := KeepInRAM(c.buf)
 		c.allFlushed = true
 		c.dataProviders = append(c.dataProviders, provider)
@@ -132,7 +153,7 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 	// go bg - but without server overloading
 	doInBackground := c.sortAndFlushInBackground && c.sortAndFlushInBackgroundActive.CompareAndSwap(false, true)
 	if !doInBackground {
-		provider, err := FlushToDisk(c.logPrefix, c.buf, c.tmpdir, c.logLvl)
+		provider, err := FlushToDisk(c.logPrefix, c.buf, c.tmpdir, c.logLvl, c.sortValues)
 		if err != nil {
 			return err
 		}
@@ -149,7 +170,7 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 		c.buf = getBufferByType(c.bufType, datasize.ByteSize(fullBuf.SizeLimit()))
 		c.buf.Prealloc(prevLen/8, prevSize/8)
 	}
-	provider, err := FlushToDiskAsync(c.logPrefix, fullBuf, c.tmpdir, c.logLvl, c.allocator, &c.sortAndFlushInBackgroundActive)
+	provider, err := FlushToDiskAsync(c.logPrefix, fullBuf, c.tmpdir, c.logLvl, c.allocator, &c.sortAndFlushInBackgroundActive, c.sortValues)
 	if err != nil {
 		return err
 	}
@@ -204,6 +225,11 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	var canUseAppend bool
 	isDupSort := kv.ChaindataTablesCfg[bucket].Flags&kv.DupSort != 0
 
+	var putCount, appendCount, appendDupCount, dupSkipCount int
+	// prevLoadK/prevLoadV track the previous (key, value) to skip duplicates for DupSort AppendDup.
+	// The parallel executor can retry transactions, producing duplicate (txNum, address) entries.
+	// Put handles these idempotently, but AppendDup rejects them with MDBX_EKEYMISMATCH.
+	var prevLoadK, prevLoadV []byte
 	i := 0
 	loadNextFunc := func(_, k, v []byte) error {
 		if i == 0 {
@@ -229,10 +255,20 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 		}
 		if canUseAppend {
 			if isDupSort {
+				// Skip duplicate (key, value) pairs — data is sorted by (key, value),
+				// so duplicates are always adjacent.
+				if bytes.Equal(k, prevLoadK) && bytes.Equal(v, prevLoadV) {
+					dupSkipCount++
+					return nil
+				}
+				prevLoadK = append(prevLoadK[:0], k...)
+				prevLoadV = append(prevLoadV[:0], v...)
+				appendDupCount++
 				if err := cursor.(kv.RwCursorDupSort).AppendDup(k, v); err != nil {
 					return fmt.Errorf("%s: bucket: %s, appendDup: k=%x, %w", c.logPrefix, bucket, k, err)
 				}
 			} else {
+				appendCount++
 				if err := cursor.Append(k, v); err != nil {
 					return fmt.Errorf("%s: bucket: %s, append: k=%x, v=%x, %w", c.logPrefix, bucket, k, v, err)
 				}
@@ -240,6 +276,7 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 
 			return nil
 		}
+		putCount++
 		if err := cursor.Put(k, v); err != nil {
 			return fmt.Errorf("%s: put: k=%x, %w", c.logPrefix, k, err)
 		}
@@ -254,10 +291,24 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	simpleLoad := func(k, v []byte) error {
 		return loadFunc(k, v, currentTable, loadNextFunc)
 	}
-	if err := mergeSortFiles(c.logPrefix, c.dataProviders, simpleLoad, args, c.buf); err != nil {
+	heapSortValues := haveSortingGuaranties && isDupSort && c.sortValues
+	if err := mergeSortFiles(c.logPrefix, c.dataProviders, simpleLoad, args, c.buf, heapSortValues); err != nil {
 		return fmt.Errorf("loadIntoTable %s: %w", toBucket, err)
 	}
-	//logger.Trace(fmt.Sprintf("[%s] ETL Load done", c.logPrefix), "bucket", bucket, "records", i)
+	if bucket != "" && i > 0 {
+		total := putCount + appendCount + appendDupCount
+		appendRatio := 0
+		if total > 0 {
+			appendRatio = (appendCount + appendDupCount) * 100 / total
+		}
+		log.Log(log.LvlInfo, fmt.Sprintf("[%s] ETL Load stats", c.logPrefix),
+			"bucket", bucket, "records", i,
+			"put", putCount, "append", appendCount, "appendDup", appendDupCount,
+			"dupSkip", dupSkipCount,
+			"appendRatio", fmt.Sprintf("%d%%", appendRatio),
+			"isDupSort", isDupSort, "sortValues", c.sortValues,
+		)
+	}
 	return nil
 }
 
@@ -286,14 +337,14 @@ func (c *Collector) Close() {
 // for the next item, which is then added back to the heap.
 // The subsequent iterations pop the heap again and load up the provider associated with it to get the next element after processing LoadFunc.
 // this continues until all providers have reached their EOF.
-func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleLoadFunc, args TransformArgs, buf Buffer) (err error) {
+func mergeSortFiles(logPrefix string, providers []dataProvider, loadFunc simpleLoadFunc, args TransformArgs, buf Buffer, sortValues ...bool) (err error) {
 	for _, provider := range providers {
 		if err := provider.Wait(); err != nil {
 			return err
 		}
 	}
 
-	h := &Heap{}
+	h := &Heap{sortValues: len(sortValues) > 0 && sortValues[0]}
 	heapInit(h)
 	for i, provider := range providers {
 		if key, value, err := provider.Next(); err == nil {

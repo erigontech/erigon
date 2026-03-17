@@ -494,7 +494,11 @@ func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if err := w.ii.Flush(ctx, tx); err != nil {
 		return err
 	}
-	if err := w.historyVals.Load(tx, w.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	historyLoadFunc := loadFunc // DupSort tables: forces Put (random keys, AppendDup rarely applies)
+	if w.largeValues {
+		historyLoadFunc = etl.IdentityLoadFunc // non-DupSort tables: enables Append (keys ascending)
+	}
+	if err := w.historyVals.Load(tx, w.historyValsTable, historyLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 	w.close()

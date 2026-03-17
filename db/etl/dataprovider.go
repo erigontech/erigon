@@ -54,7 +54,7 @@ type mmapBytesReader struct {
 }
 
 // FlushToDiskAsync - `doFsync` is true only for 'critical' collectors (which should not loose).
-func FlushToDiskAsync(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl, allocator *Allocator, inProgress *atomic.Bool) (dataProvider, error) {
+func FlushToDiskAsync(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl, allocator *Allocator, inProgress *atomic.Bool, sortValues bool) (dataProvider, error) {
 	if b.Len() == 0 {
 		if allocator != nil {
 			allocator.Put(b)
@@ -70,7 +70,7 @@ func FlushToDiskAsync(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl, al
 			}
 			inProgress.Store(false)
 		}()
-		provider.file, err = sortAndFlush(b, tmpdir)
+		provider.file, err = sortAndFlush(b, tmpdir, sortValues)
 		if err != nil {
 			return err
 		}
@@ -83,14 +83,14 @@ func FlushToDiskAsync(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl, al
 }
 
 // FlushToDisk - `doFsync` is true only for 'critical' collectors (which should not loose).
-func FlushToDisk(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl) (dataProvider, error) {
+func FlushToDisk(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl, sortValues bool) (dataProvider, error) {
 	if b.Len() == 0 {
 		return nil, nil
 	}
 
 	var err error
 	provider := &fileDataProvider{wg: &errgroup.Group{}}
-	provider.file, err = sortAndFlush(b, tmpdir)
+	provider.file, err = sortAndFlush(b, tmpdir, sortValues)
 	if err != nil {
 		return nil, err
 	}
@@ -99,8 +99,16 @@ func FlushToDisk(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl) (dataPr
 	return provider, nil
 }
 
-func sortAndFlush(b Buffer, tmpdir string) (*os.File, error) {
-	b.Sort()
+func sortAndFlush(b Buffer, tmpdir string, sortValues bool) (*os.File, error) {
+	if sortValues {
+		if sb, ok := b.(*sortableBuffer); ok {
+			sb.SortByKeyAndValue()
+		} else {
+			b.Sort()
+		}
+	} else {
+		b.Sort()
+	}
 
 	// if we are going to create files in the system temp dir, we don't need any
 	// subfolders.

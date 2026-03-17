@@ -631,7 +631,7 @@ func TestAppendAcrossMemProviders(t *testing.T) {
 	buf0.Put([]byte{3}, []byte{30})
 	buf0.Put([]byte{4}, []byte{100})
 	buf0.Put([]byte{4}, []byte{101})
-	fileProvider, err := FlushToDisk("test", buf0, tmpdir, log.LvlInfo)
+	fileProvider, err := FlushToDisk("test", buf0, tmpdir, log.LvlInfo, false)
 	require.NoError(t, err)
 
 	buf1 := NewAppendBuffer(BufferOptimalSize)
@@ -777,6 +777,187 @@ func TestSortableBufferNilAndEmptyKeys(t *testing.T) {
 	assert.Equal(t, []byte("normal"), v4)
 }
 
+func TestSortByKeyAndValue(t *testing.T) {
+	buf := NewSortableBuffer(256 * 1024)
+
+	// Same key, different values — should be sorted by value after SortByKeyAndValue
+	buf.Put([]byte{1}, []byte{30})
+	buf.Put([]byte{1}, []byte{10})
+	buf.Put([]byte{1}, []byte{20})
+	// Different keys — should be sorted by key first
+	buf.Put([]byte{2}, []byte{5})
+	buf.Put([]byte{0}, []byte{99})
+
+	buf.SortByKeyAndValue()
+
+	type kv struct{ k, v []byte }
+	var got []kv
+	for i := range buf.Len() {
+		k, v := buf.Get(i)
+		got = append(got, kv{bytes.Clone(k), bytes.Clone(v)})
+	}
+
+	expected := []kv{
+		{[]byte{0}, []byte{99}},
+		{[]byte{1}, []byte{10}},
+		{[]byte{1}, []byte{20}},
+		{[]byte{1}, []byte{30}},
+		{[]byte{2}, []byte{5}},
+	}
+	require.Equal(t, expected, got)
+}
+
+func TestSortByKeyAndValueStable(t *testing.T) {
+	buf := NewSortableBuffer(256 * 1024)
+
+	// Same key+value — insertion order must be preserved
+	buf.Put([]byte{1}, []byte{10})
+	buf.Put([]byte{1}, []byte{10})
+	buf.Put([]byte{1}, []byte{10})
+
+	buf.SortByKeyAndValue()
+
+	// All entries identical — just verify no panics and length preserved
+	require.Equal(t, 3, buf.Len())
+	for i := range buf.Len() {
+		k, v := buf.Get(i)
+		require.Equal(t, []byte{1}, k)
+		require.Equal(t, []byte{10}, v)
+	}
+}
+
+func TestCollectorSortValuesRAMPath(t *testing.T) {
+	// Small enough to stay in RAM (single provider, no disk flush)
+	collector := NewCollector(t.Name(), "", NewSortableBuffer(1*datasize.MB), log.New())
+	collector.SortValues(true)
+	defer collector.Close()
+
+	// Same key with values in reverse order
+	require.NoError(t, collector.Collect([]byte{1}, []byte{30}))
+	require.NoError(t, collector.Collect([]byte{1}, []byte{10}))
+	require.NoError(t, collector.Collect([]byte{1}, []byte{20}))
+	require.NoError(t, collector.Collect([]byte{2}, []byte{5}))
+
+	var keys, vals [][]byte
+	require.NoError(t, collector.Load(nil, "", func(k, v []byte, _ CurrentTableReader, _ LoadNextFunc) error {
+		keys = append(keys, bytes.Clone(k))
+		vals = append(vals, bytes.Clone(v))
+		return nil
+	}, TransformArgs{}))
+
+	require.Equal(t, [][]byte{{1}, {1}, {1}, {2}}, keys)
+	require.Equal(t, [][]byte{{10}, {20}, {30}, {5}}, vals)
+}
+
+func TestCollectorSortValuesDiskPath(t *testing.T) {
+	tmpdir := t.TempDir()
+	// Tiny buffer forces disk flush after each entry
+	collector := NewCollector(t.Name(), tmpdir, NewSortableBuffer(1), log.New())
+	collector.SortValues(true)
+	defer collector.Close()
+
+	// Values deliberately out of order within same key
+	require.NoError(t, collector.Collect([]byte{1}, []byte{30}))
+	require.NoError(t, collector.Collect([]byte{1}, []byte{10}))
+	require.NoError(t, collector.Collect([]byte{1}, []byte{20}))
+	require.NoError(t, collector.Collect([]byte{2}, []byte{5}))
+
+	var keys, vals [][]byte
+	require.NoError(t, collector.Load(nil, "", func(k, v []byte, _ CurrentTableReader, _ LoadNextFunc) error {
+		keys = append(keys, bytes.Clone(k))
+		vals = append(vals, bytes.Clone(v))
+		return nil
+	}, TransformArgs{}))
+
+	// Each file has 1 entry, merge-sort by key only (no haveSortingGuaranties since custom loadFunc)
+	// Values within same key may not be sorted since heap sortValues requires IdentityLoadFunc
+	require.Equal(t, [][]byte{{1}, {1}, {1}, {2}}, keys)
+	// All values present
+	require.ElementsMatch(t, [][]byte{{10}, {20}, {30}}, vals[:3])
+}
+
+func TestHeapSortValues(t *testing.T) {
+	// Test that heap with sortValues=true orders by value when keys are equal
+	h := &Heap{sortValues: true}
+	heapInit(h)
+
+	heapPush(h, &HeapElem{Key: []byte{1}, Value: []byte{30}, TimeIdx: 0})
+	heapPush(h, &HeapElem{Key: []byte{1}, Value: []byte{10}, TimeIdx: 1})
+	heapPush(h, &HeapElem{Key: []byte{1}, Value: []byte{20}, TimeIdx: 2})
+	heapPush(h, &HeapElem{Key: []byte{2}, Value: []byte{5}, TimeIdx: 3})
+
+	var vals [][]byte
+	for h.Len() > 0 {
+		e := heapPop(h)
+		vals = append(vals, bytes.Clone(e.Value))
+	}
+	require.Equal(t, [][]byte{{10}, {20}, {30}, {5}}, vals)
+}
+
+func TestHeapNoSortValues(t *testing.T) {
+	// Without sortValues, equal keys use TimeIdx ordering
+	h := &Heap{sortValues: false}
+	heapInit(h)
+
+	heapPush(h, &HeapElem{Key: []byte{1}, Value: []byte{30}, TimeIdx: 0})
+	heapPush(h, &HeapElem{Key: []byte{1}, Value: []byte{10}, TimeIdx: 1})
+	heapPush(h, &HeapElem{Key: []byte{1}, Value: []byte{20}, TimeIdx: 2})
+
+	var vals [][]byte
+	for h.Len() > 0 {
+		e := heapPop(h)
+		vals = append(vals, bytes.Clone(e.Value))
+	}
+	// TimeIdx order: 0, 1, 2
+	require.Equal(t, [][]byte{{30}, {10}, {20}}, vals)
+}
+
+func BenchmarkSortByKeyAndValue(b *testing.B) {
+	const keyLen = 8
+	const valLen = 32
+
+	makeBuffer := func(n int) *sortableBuffer {
+		buf := NewSortableBuffer(256 * 1024 * 1024)
+		buf.Prealloc(n, n*(keyLen+valLen))
+		key := make([]byte, keyLen)
+		val := make([]byte, valLen)
+		for i := range n {
+			// Many duplicate keys (simulate txNum keys with multiple values)
+			binary.BigEndian.PutUint64(key, uint64(i/10))
+			binary.BigEndian.PutUint64(val, uint64(n-i)) // reverse order values
+			buf.Put(key, val)
+		}
+		return buf
+	}
+
+	for _, tc := range []struct {
+		name  string
+		count int
+	}{
+		{"100k", 100_000},
+		{"500k", 500_000},
+	} {
+		b.Run("Sort_"+tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				b.StopTimer()
+				ref := makeBuffer(tc.count)
+				b.StartTimer()
+				ref.Sort()
+			}
+		})
+		b.Run("SortByKeyAndValue_"+tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				b.StopTimer()
+				ref := makeBuffer(tc.count)
+				b.StartTimer()
+				ref.SortByKeyAndValue()
+			}
+		})
+	}
+}
+
 // TestMixedProvidersMergeSortFiles tests the merge sort with both memoryDataProvider
 // and fileDataProvider, verifying that zero-copy returns from both don't corrupt data.
 func TestMixedProvidersMergeSortFiles(t *testing.T) {
@@ -800,7 +981,7 @@ func TestMixedProvidersMergeSortFiles(t *testing.T) {
 		v := fmt.Appendf(nil, "file-val-%02d", i)
 		fileBuf.Put(k, v)
 	}
-	fileProvider, err := FlushToDisk("test", fileBuf, tmpdir, log.LvlInfo)
+	fileProvider, err := FlushToDisk("test", fileBuf, tmpdir, log.LvlInfo, false)
 	require.NoError(t, err)
 	require.NotNil(t, fileProvider)
 
@@ -863,7 +1044,7 @@ func TestMixedProvidersInterleavedKeys(t *testing.T) {
 		v := fmt.Appendf(nil, "file-%04d", i)
 		fileBuf.Put(k, v)
 	}
-	fileProvider, err := FlushToDisk("test", fileBuf, tmpdir, log.LvlInfo)
+	fileProvider, err := FlushToDisk("test", fileBuf, tmpdir, log.LvlInfo, false)
 	require.NoError(t, err)
 
 	// Memory provider: odd keys
@@ -912,7 +1093,7 @@ func TestMixedProvidersZeroCopyIntegrity(t *testing.T) {
 	// File provider with 1 key
 	fileBuf := NewSortableBuffer(BufferOptimalSize)
 	fileBuf.Put([]byte("aaa"), []byte("file-aaa"))
-	fileProvider, err := FlushToDisk("test", fileBuf, tmpdir, log.LvlInfo)
+	fileProvider, err := FlushToDisk("test", fileBuf, tmpdir, log.LvlInfo, false)
 	require.NoError(t, err)
 
 	// Memory provider with multiple keys - GetRef returns slices into sortableBuffer.data
@@ -968,7 +1149,7 @@ func BenchmarkFileDataProviderNext(b *testing.B) {
 			for b.Loop() {
 				b.StopTimer()
 				tmpdir, _ := os.MkdirTemp("", "bench-fdp-")
-				provider, err := FlushToDisk("bench", buf, tmpdir, log.LvlInfo)
+				provider, err := FlushToDisk("bench", buf, tmpdir, log.LvlInfo, false)
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -1472,7 +1653,7 @@ func TestVmtouchMmap(t *testing.T) {
 	const n = 1_000_000
 	buf := makeSortedBuffer(32, 1024, n) // ~1GB file
 
-	provider, err := FlushToDisk("test", buf, tmpdir, log.LvlInfo)
+	provider, err := FlushToDisk("test", buf, tmpdir, log.LvlInfo, false)
 	if err != nil {
 		t.Fatal(err)
 	}
