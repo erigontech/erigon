@@ -1158,7 +1158,26 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	blockCtx.GasLimit = math.MaxUint64
 	blockCtx.MaxGasLimit = true
 
+	var precompiles vm.PrecompiledContracts
+	if traceConfig != nil {
+		if traceConfig.BlockOverrides != nil {
+			if err := traceConfig.BlockOverrides.Override(&blockCtx); err != nil {
+				return nil, err
+			}
+		}
+		if traceConfig.StateOverrides != nil {
+			rules := blockCtx.Rules(chainConfig)
+			precompiles = vm.ActivePrecompiledContracts(rules)
+			if err := traceConfig.StateOverrides.Override(ibs, precompiles, rules); err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Tracer: ot.Tracer().Hooks})
+	if precompiles != nil {
+		evm.SetPrecompiles(precompiles)
+	}
 
 	done := make(chan struct{})
 	defer close(done)

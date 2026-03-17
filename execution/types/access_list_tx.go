@@ -319,13 +319,13 @@ func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
 	if err = s.ReadUint256(&tx.ChainID); err != nil {
 		return fmt.Errorf("read ChainID: %w", err)
 	}
-	if tx.Nonce, err = s.Uint(); err != nil {
+	if tx.Nonce, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read Nonce: %w", err)
 	}
 	if err = s.ReadUint256(&tx.GasPrice); err != nil {
 		return fmt.Errorf("read GasPrice: %w", err)
 	}
-	if tx.GasLimit, err = s.Uint(); err != nil {
+	if tx.GasLimit, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read GasLimit: %w", err)
 	}
 	if err = rlp.DecodeOptionalAddress(&tx.To, s); err != nil {
