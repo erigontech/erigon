@@ -743,6 +743,16 @@ func (e *ExecModule) runForkchoiceCommitOverlay(sd *execctx.SharedDomains, finis
 
 func (e *ExecModule) runForkchoiceCommit(sd *execctx.SharedDomains, tx kv.TemporalRwTx, finishProgressBefore uint64, isSynced bool) ([]any, error) {
 	var timings []any
+	// Send notifications before commit. All notification consumers use the
+	// payload data directly and never read back from the DB, so this is safe.
+	// The tx already contains all pipeline writes (headers, stage progress,
+	// forkchoice hashes, state version) and satisfies kv.Tx for reads.
+	// See #19623 for the broader move toward SD as the authoritative read layer.
+	if e.hook != nil {
+		if err := e.hook.AfterRun(tx, finishProgressBefore, isSynced); err != nil {
+			return nil, err
+		}
+	}
 	flushStart := time.Now()
 	if err := sd.Flush(e.bacgroundCtx, tx); err != nil {
 		return nil, err
@@ -753,14 +763,7 @@ func (e *ExecModule) runForkchoiceCommit(sd *execctx.SharedDomains, tx kv.Tempor
 		return nil, err
 	}
 	timings = append(timings, "commit", common.Round(time.Since(commitStart), 0))
-	if e.hook != nil {
-		if err := e.db.View(e.bacgroundCtx, func(tx kv.Tx) error {
-			return e.hook.AfterRun(tx, finishProgressBefore, isSynced)
-		}); err != nil {
-			return nil, err
-		}
-	}
-	// force fsync after notifications are sent
+	// force fsync after commit
 	if err := e.db.Update(e.bacgroundCtx, func(tx kv.RwTx) error {
 		return kv.IncrementKey(tx, kv.DatabaseInfo, []byte("chaindata_force"))
 	}); err != nil {

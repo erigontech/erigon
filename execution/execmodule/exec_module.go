@@ -94,6 +94,19 @@ func GetBlockHashFromMissingSegmentError(err error) (common.Hash, bool) {
 	return common.HexToHash(hashStr), true
 }
 
+// Cache bridges RPC reads to the execution module's in-memory state via
+// SharedDomains. When View is called, it grabs the current SD under a read
+// lock so that domain reads (accounts, storage, code) see uncommitted writes
+// from the pipeline, falling through to the caller's DB tx for committed data.
+//
+// OnNewBlock is intentionally a no-op: in the embedded (non-remote) rpcdaemon
+// the SD is the authoritative source, so the coherent cache's state-tracking
+// machinery is unnecessary.
+//
+// This shim predates SharedDomains' current capabilities and will be simplified
+// as part of #19623 (2-cache IBS rationalization) once the StateReader/CacheView
+// interfaces stabilize. See also #19798 (event stream extraction) and #19855
+// (TransactionState/BlockState separation).
 type Cache struct {
 	execModule *ExecModule
 }

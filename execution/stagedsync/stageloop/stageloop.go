@@ -211,25 +211,23 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 
 	doms.ClearRam(true)
 
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-
+	// Send notifications before commit. All notification consumers use the
+	// payload data directly and never read back from the DB, so this is safe.
+	// The tx has all pipeline writes and satisfies kv.Tx for reads.
+	// See #19623 for the broader move toward SD as the authoritative read layer.
 	if hook != nil {
-		if err := db.View(ctx, func(tx kv.Tx) error {
-			headersProgress, _, _, err := stagesHeadersAndFinish(tx)
-			if err != nil {
-				return err
-			}
-			err = hook.AfterRun(tx, finishStageBeforeSync, false)
-			if err != nil {
-				return err
-			}
-			hook.LastNewBlockSeen(headersProgress)
-			return nil
-		}); err != nil {
+		headersProgress, _, _, err := stagesHeadersAndFinish(tx)
+		if err != nil {
 			return err
 		}
+		if err = hook.AfterRun(tx, finishStageBeforeSync, false); err != nil {
+			return err
+		}
+		hook.LastNewBlockSeen(headersProgress)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
 	}
 	return nil
 }
