@@ -61,6 +61,10 @@ type CallContext struct {
 	Memory   Memory
 	Stack    Stack
 	Contract Contract
+	// cachedCallAddr holds the interned callee address set during gas calculation
+	// and consumed by the instruction handler, avoiding redundant unique.Make calls.
+	// Scoped to this frame — inner call frames use their own CallContext.
+	cachedCallAddr accounts.Address
 }
 
 var contextPool = sync.Pool{
@@ -86,7 +90,20 @@ func getCallContext(contract Contract, input []byte, gas uint64) *CallContext {
 func (c *CallContext) put() {
 	c.Memory.reset()
 	c.Stack.Reset()
+	c.cachedCallAddr = accounts.NilAddress
 	contextPool.Put(c)
+}
+
+// consumeCallAddr returns the interned callee address cached during gas
+// calculation, resetting the cache. Falls back to interning stackAddr directly
+// when the cache is empty (pre-EIP-2929 chains or defensive path).
+func (c *CallContext) consumeCallAddr(stackAddr *uint256.Int) accounts.Address {
+	addr := c.cachedCallAddr
+	c.cachedCallAddr = accounts.NilAddress
+	if addr.IsNil() {
+		return accounts.InternAddress(stackAddr.Bytes20())
+	}
+	return addr
 }
 
 // UseGas attempts the use gas and subtracts it and returns true on success
