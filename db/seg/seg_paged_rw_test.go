@@ -234,11 +234,9 @@ func TestPagedWriterCRC32Sequential(t *testing.T) {
 	}
 }
 
-func TestBytesUncompressedToMatchesSync(t *testing.T) {
-	// Regression test: bytesUncompressedTo (parallel path) must produce
+func TestHeaderToMatchesSync(t *testing.T) {
+	// Regression test: headerTo + keys/vals concatenation (parallel path) must produce
 	// the same page as bytesUncompressed (sync path).
-	// Bug: bytesUncompressedTo pre-allocated keys+vals in neededSize,
-	// then clear() zeroed them, then append() placed data past the zeroed region.
 	require := require.New(t)
 
 	pageSize := 16
@@ -254,17 +252,18 @@ func TestBytesUncompressedToMatchesSync(t *testing.T) {
 	syncPage, syncOK := pw1.bytesUncompressed()
 	require.True(syncOK)
 
-	// Build page via async path (bytesUncompressedTo)
+	// Build page via async path (headerTo + concatenation, same as worker does)
 	mock2 := &multyBytesWriter{pageSize: pageSize}
 	pw2 := NewPagedWriter(t.Context(), mock2, false)
 	for i := range testKeys {
 		require.NoError(pw2.Add([]byte(testKeys[i]), []byte(testVals[i])))
 	}
-	asyncPage, asyncOK := pw2.bytesUncompressedTo(nil)
-	require.True(asyncOK)
+	asyncPage := pageHeaderTo(nil, pw2.kLengths, pw2.vLengths, 0)
+	asyncPage = append(asyncPage, pw2.keys...)
+	asyncPage = append(asyncPage, pw2.vals...)
 
 	require.Equal(syncPage, asyncPage,
-		"bytesUncompressedTo must produce identical page to bytesUncompressed")
+		"headerTo+concat must produce identical page to bytesUncompressed")
 
 	// Verify keys are readable from the async page
 	for i := range testKeys {
@@ -419,6 +418,40 @@ func TestPagedReaderSortedKeyOrder(t *testing.T) {
 		i++
 	}
 	require.Equal(len(sortedPairs), i, "should have read all %d pairs", len(sortedPairs))
+}
+
+func BenchmarkPagedWriterAdd(b *testing.B) {
+	const pageSize = 16
+	key := make([]byte, 20)
+	val := make([]byte, 100)
+	for i := range key {
+		key[i] = byte(i)
+	}
+	for i := range val {
+		val[i] = byte(i)
+	}
+
+	cases := []struct {
+		name       string
+		compress   bool
+		numWorkers int
+	}{
+		{"noCompression", false, 1},
+		{"compression_sync", true, 1},
+		{"compression_workers2", true, 2},
+		{"compression_workers4", true, 4},
+	}
+	for _, tc := range cases {
+		b.Run(tc.name, func(b *testing.B) {
+			buf := &multyBytesWriter{pageSize: pageSize}
+			w := NewPagedWriterWithWorkers(b.Context(), buf, tc.compress, tc.numWorkers)
+			b.ResetTimer()
+			for b.Loop() {
+				w.Add(key, val) //nolint:errcheck
+			}
+			w.Flush() //nolint:errcheck
+		})
+	}
 }
 
 func BenchmarkName(b *testing.B) {
