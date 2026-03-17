@@ -444,9 +444,7 @@ func (c *PagedWriter) writePage() error {
 
 	// Pre-grow to full page size so worker appends don't realloc
 	totalSize := 1 + len(c.kLengths)*2*4 + len(c.keys) + len(c.vals)
-	if cap(item.uncompressedData) < totalSize {
-		item.uncompressedData = make([]byte, 0, totalSize)
-	}
+	item.uncompressedData = growslice(item.uncompressedData[:0], totalSize)[:0]
 	item.uncompressedData = c.headerTo(item.uncompressedData)
 
 	// Swap key/val buffers: give ours to worker, take recycled ones (zero copy)
