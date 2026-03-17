@@ -98,9 +98,11 @@ func (c *CallContext) put() {
 // addrVal is interned on the spot (pre-Berlin fallback).
 func (c *CallContext) takeCallAddr(addrVal uint256.Int) accounts.Address {
 	if c.callAddrTmp.IsNil() {
-		c.callAddrTmp = accounts.InternAddress(addrVal.Bytes20())
+		return accounts.InternAddress(addrVal.Bytes20())
 	}
-	return c.callAddrTmp
+	addr := c.callAddrTmp
+	c.callAddrTmp = accounts.NilAddress
+	return addr
 }
 
 // UseGas attempts the use gas and subtracts it and returns true on success
