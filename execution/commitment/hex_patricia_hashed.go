@@ -2993,6 +2993,10 @@ func (hph *HexPatriciaHashed) Reset() {
 	hph.rootTouched = false
 	hph.rootChecked = false
 	hph.rootPresent = true
+
+	if hph.branchCache != nil {
+		hph.branchCache.Clear()
+	}
 }
 
 func (hph *HexPatriciaHashed) ResetContext(ctx PatriciaContext) {
