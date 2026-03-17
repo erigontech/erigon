@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package engine_helpers
+package execmodule
 
 import (
 	"context"
@@ -48,8 +48,6 @@ const (
 
 const timingsCacheSize = 16
 
-type validatePayloadFunc func(*execctx.SharedDomains, kv.TemporalRwTx, uint64, []*types.Header, []*types.RawBody, *shards.Notifications) error
-
 type ForkValidator struct {
 	// current memory batch containing chain head that extend canonical fork.
 	sharedDom *execctx.SharedDomains
@@ -59,9 +57,9 @@ type ForkValidator struct {
 	extendingForkHeadHash common.Hash
 	extendingForkNumber   uint64
 	maxReorgDepth         uint64
-	// this is the function we use to perform payload validation.
-	validatePayload validatePayloadFunc
-	blockReader     services.FullBlockReader
+	// pipeline executor used for fork validation (StateStep).
+	executor    *PipelineExecutor
+	blockReader services.FullBlockReader
 	// this is the current point where we processed the chain so far.
 	currentHeight uint64
 	tmpDir        string
@@ -76,7 +74,7 @@ type ForkValidator struct {
 	timingsCache *lru.Cache[common.Hash, BlockTimings]
 }
 
-func NewForkValidator(ctx context.Context, currentHeight uint64, validatePayload validatePayloadFunc, tmpDir string, blockReader services.FullBlockReader, maxReorgDepth uint64) *ForkValidator {
+func NewForkValidator(ctx context.Context, currentHeight uint64, executor *PipelineExecutor, tmpDir string, blockReader services.FullBlockReader, maxReorgDepth uint64) *ForkValidator {
 	validHashes, err := lru.New[common.Hash, bool]("validHashes", int(maxReorgDepth)*8)
 	if err != nil {
 		panic(err)
@@ -87,14 +85,14 @@ func NewForkValidator(ctx context.Context, currentHeight uint64, validatePayload
 		panic(err)
 	}
 	return &ForkValidator{
-		validatePayload: validatePayload,
-		currentHeight:   currentHeight,
-		tmpDir:          tmpDir,
-		blockReader:     blockReader,
-		ctx:             ctx,
-		validHashes:     validHashes,
-		timingsCache:    timingsCache,
-		maxReorgDepth:   maxReorgDepth,
+		executor:      executor,
+		currentHeight: currentHeight,
+		tmpDir:        tmpDir,
+		blockReader:   blockReader,
+		ctx:           ctx,
+		validHashes:   validHashes,
+		timingsCache:  timingsCache,
+		maxReorgDepth: maxReorgDepth,
 	}
 }
 
@@ -113,7 +111,7 @@ func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 		return
 	}
 	fv.currentHeight = currentHeight
-	// If the head changed,e previous assumptions on head are incorrect now.
+	// If the head changed, previous assumptions on head are incorrect now.
 	if fv.sharedDom != nil {
 		fv.sharedDom.Close()
 	}
@@ -169,7 +167,7 @@ type HasDiff interface {
 func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header, body *types.RawBody, logger log.Logger) (status engine_types.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
-	if fv.validatePayload == nil {
+	if fv.executor == nil {
 		status = engine_types.AcceptedStatus
 		return
 	}
@@ -254,7 +252,7 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 	fv.sharedDom = sd
 	fv.extendingForkNotifications = shards.NewNotifications(nil)
 	status, latestValidHash, validationError, criticalError =
-		fv.validateAndStorePayload(fv.sharedDom, tx, header, body, unwindPoint, headersChain, bodiesChain, fv.extendingForkNotifications)
+		fv.validateAndStorePayload(fv.ctx, fv.sharedDom, tx, header, body, unwindPoint, headersChain, bodiesChain, fv.extendingForkNotifications)
 
 	if fv.sharedDom != nil &&
 		(criticalError != nil || status == engine_types.InvalidStatus) {
@@ -265,7 +263,7 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 	return
 }
 
-// Clear wipes out current extending fork data, this method is called after fcu is called,
+// clear wipes out current extending fork data, this method is called after fcu is called,
 // because fcu decides what the head is and after the call is done all the non-chosen forks are
 // to be considered obsolete.
 func (fv *ForkValidator) clear() {
@@ -277,7 +275,7 @@ func (fv *ForkValidator) clear() {
 	fv.sharedDom = nil
 }
 
-// Clear wipes out current extending fork data.
+// ClearWithUnwind wipes out current extending fork data.
 func (fv *ForkValidator) ClearWithUnwind(accumulator *shards.Accumulator, c shards.StateChangeConsumer) {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
@@ -285,14 +283,14 @@ func (fv *ForkValidator) ClearWithUnwind(accumulator *shards.Accumulator, c shar
 }
 
 // validateAndStorePayload validate and store a payload fork chain if such chain results valid.
-func (fv *ForkValidator) validateAndStorePayload(sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
+func (fv *ForkValidator) validateAndStorePayload(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
 	notifications *shards.Notifications) (status engine_types.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
 	start := time.Now()
 	headersChain = append(headersChain, header)
 	bodiesChain = append(bodiesChain, body)
 	hash := header.Hash()
 	number := header.Number.Uint64()
-	if err := fv.validatePayload(sd, tx, unwindPoint, headersChain, bodiesChain, notifications); err != nil {
+	if err := fv.executor.StateStep(ctx, sd, tx, unwindPoint, headersChain, bodiesChain, notifications); err != nil {
 		if errors.Is(err, rules.ErrInvalidBlock) {
 			validationError = err
 		} else {
