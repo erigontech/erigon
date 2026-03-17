@@ -80,13 +80,7 @@ func IsInvalidRLPError(err error) bool {
 		errors.Is(err, errNotInList) ||
 		errors.Is(err, errNotAtEOL) ||
 		errors.Is(err, errUintOverflow) ||
-		errors.Is(err, errUint256Large) ||
-		// wrapStreamError produces *decodeError which doesn't implement Is()
-		strings.Contains(err.Error(), "rlp: input list has too many elements") ||
-		strings.Contains(err.Error(), "rlp: expected input string or byte") ||
-		strings.Contains(err.Error(), "rlp: expected input list") ||
-		strings.Contains(err.Error(), "rlp: non-canonical size information") ||
-		strings.Contains(err.Error(), "rlp: non-canonical integer (leading zero bytes)")
+		errors.Is(err, errUint256Large)
 }
 
 // Decoder is implemented by types that require custom RLP decoding rules or need to decode
@@ -138,35 +132,40 @@ type decodeError struct {
 	msg string
 	typ reflect.Type
 	ctx []string
+	err error // original sentinel error, if any
 }
 
-func (err *decodeError) Error() string {
+func (e *decodeError) Error() string {
 	ctx := ""
-	if len(err.ctx) > 0 {
+	if len(e.ctx) > 0 {
 		ctx = ", decoding into "
-		for i := len(err.ctx) - 1; i >= 0; i-- {
-			ctx += err.ctx[i]
+		for i := len(e.ctx) - 1; i >= 0; i-- {
+			ctx += e.ctx[i]
 		}
 	}
-	return fmt.Sprintf("rlp: %s for %v%s", err.msg, err.typ, ctx)
+	return fmt.Sprintf("rlp: %s for %v%s", e.msg, e.typ, ctx)
+}
+
+func (e *decodeError) Unwrap() error {
+	return e.err
 }
 
 func wrapStreamError(err error, typ reflect.Type) error {
 	switch {
 	case errors.Is(err, ErrCanonInt):
-		return &decodeError{msg: "non-canonical integer (leading zero bytes)", typ: typ}
+		return &decodeError{msg: "non-canonical integer (leading zero bytes)", typ: typ, err: err}
 	case errors.Is(err, ErrCanonSize):
-		return &decodeError{msg: "non-canonical size information", typ: typ}
+		return &decodeError{msg: "non-canonical size information", typ: typ, err: err}
 	case errors.Is(err, ErrExpectedList):
-		return &decodeError{msg: "expected input list", typ: typ}
+		return &decodeError{msg: "expected input list", typ: typ, err: err}
 	case errors.Is(err, ErrExpectedString):
-		return &decodeError{msg: "expected input string or byte", typ: typ}
+		return &decodeError{msg: "expected input string or byte", typ: typ, err: err}
 	case errors.Is(err, errUintOverflow):
-		return &decodeError{msg: "input string too long", typ: typ}
+		return &decodeError{msg: "input string too long", typ: typ, err: err}
 	case errors.Is(err, errUint256Large):
-		return &decodeError{msg: "input string too long", typ: typ}
+		return &decodeError{msg: "input string too long", typ: typ, err: err}
 	case errors.Is(err, errNotAtEOL):
-		return &decodeError{msg: "input list has too many elements", typ: typ}
+		return &decodeError{msg: "input list has too many elements", typ: typ, err: err}
 	}
 	return err
 }
@@ -682,16 +681,6 @@ func NewStream(r io.Reader, inputLimit uint64) *Stream {
 	return s
 }
 
-// NewListStream creates a new stream that pretends to be positioned
-// at an encoded list of the given length.
-func NewListStream(r io.Reader, len uint64) *Stream {
-	s := new(Stream)
-	s.Reset(r, len)
-	s.kind = List
-	s.size = len
-	return s
-}
-
 // NewStreamFromPool returns a Stream from the pool.
 func NewStreamFromPool(r io.Reader, inputLimit uint64) (stream *Stream, done func()) {
 	stream = streamPool.Get().(*Stream)
@@ -781,15 +770,6 @@ func (s *Stream) Raw() ([]byte, error) {
 		puthead(buf, 0xC0, 0xF7, size)
 	}
 	return buf, nil
-}
-
-// Uint reads an RLP string of up to 8 bytes and returns its contents
-// as an unsigned integer. If the input does not contain an RLP string, the
-// returned error will be ErrExpectedString.
-//
-// Deprecated: use s.Uint64 instead.
-func (s *Stream) Uint() (uint64, error) {
-	return s.uint(64)
 }
 
 func (s *Stream) Uint64() (uint64, error) {

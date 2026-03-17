@@ -252,7 +252,7 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 	if err = s.ReadUint256(&tx.ChainID); err != nil {
 		return err
 	}
-	if tx.Nonce, err = s.Uint(); err != nil {
+	if tx.Nonce, err = s.Uint64(); err != nil {
 		return err
 	}
 	if err = s.ReadUint256(&tx.TipCap); err != nil {
@@ -261,7 +261,7 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 	if err = s.ReadUint256(&tx.FeeCap); err != nil {
 		return err
 	}
-	if tx.GasLimit, err = s.Uint(); err != nil {
+	if tx.GasLimit, err = s.Uint64(); err != nil {
 		return err
 	}
 	tx.To = &common.Address{}
