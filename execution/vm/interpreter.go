@@ -98,7 +98,7 @@ func (c *CallContext) put() {
 // or interns stackAddr directly when the cache is empty (pre-EIP-2929 chains).
 func (c *CallContext) callee(stackAddr *uint256.Int) accounts.Address {
 	if c.cachedCallAddr.IsNil() {
-		c.cachedCallAddr = accounts.InternAddress(stackAddr.Bytes20())
+		return accounts.InternAddress(stackAddr.Bytes20())
 	}
 	return c.cachedCallAddr
 }
