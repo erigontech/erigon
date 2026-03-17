@@ -24,6 +24,10 @@ var (
 		MuirGlacierBlock:      big.NewInt(0),
 		BerlinBlock:           big.NewInt(0),
 		LondonBlock:           big.NewInt(0),
+		ShanghaiTime:          big.NewInt(0),
+		CancunTime:            big.NewInt(0),
+		PragueTime:            big.NewInt(0),
+		OsakaTime:             big.NewInt(0),
 		Clique:                &chain.CliqueConfig{Period: 0, Epoch: 30000},
 	}
 

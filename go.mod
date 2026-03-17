@@ -15,6 +15,7 @@ require (
 	gfx.cafe/util/go/generic v0.0.0-20230721185457-c559e86c829c
 	github.com/99designs/gqlgen v0.17.83
 	github.com/FastFilter/xorfilter v0.5.1
+	github.com/Giulio2002/pq-eth-precompiles/go v0.3.0
 	github.com/Masterminds/sprig/v3 v3.2.3
 	github.com/RoaringBitmap/roaring/v2 v2.14.4
 	github.com/alecthomas/kong v0.8.1

@@ -226,6 +226,16 @@ var PrecompiledContractsOsaka = PrecompiledContracts{
 	accounts.InternAddress(common.BytesToAddress([]byte{0x10})):       &bls12381MapFpToG1{},
 	accounts.InternAddress(common.BytesToAddress([]byte{0x11})):       &bls12381MapFp2ToG2{},
 	accounts.InternAddress(common.BytesToAddress([]byte{0x01, 0x00})): &p256Verify{eip7951: true},
+	accounts.InternAddress(common.BytesToAddress([]byte{0x12})):       &nttFw{},
+	accounts.InternAddress(common.BytesToAddress([]byte{0x13})):       &nttInv{},
+	accounts.InternAddress(common.BytesToAddress([]byte{0x14})):       &nttVecMulMod{},
+	accounts.InternAddress(common.BytesToAddress([]byte{0x15})):       &nttVecAddMod{},
+	accounts.InternAddress(common.BytesToAddress([]byte{0x16})):       &shake256Precompile{},
+	accounts.InternAddress(common.BytesToAddress([]byte{0x17})):       &falconVerifyPrecompile{},
+	accounts.InternAddress(common.BytesToAddress([]byte{0x18})):       &lpNormPrecompile{},
+	accounts.InternAddress(common.BytesToAddress([]byte{0x19})):       &nttVecSubMod{},
+	accounts.InternAddress(common.BytesToAddress([]byte{0x1a})):       &expandAVecMulPrecompile{},
+	accounts.InternAddress(common.BytesToAddress([]byte{0x1b})):       &dilithiumVerifyPrecompile{},
 }
 
 var (

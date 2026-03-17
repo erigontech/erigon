@@ -54,6 +54,7 @@ WORKDIR /erigon
 COPY --from=xx / /
 
 COPY go.mod go.sum /erigon/
+COPY ntt_local/ /erigon/ntt_local/
 
 ## Make sure required dependencies are installed (some packages required only for arm64):
 RUN xx-apt-get install -y libc6-dev g++ && \
