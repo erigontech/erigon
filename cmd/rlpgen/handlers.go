@@ -542,7 +542,7 @@ func byteSlicePtrHandle(b1, b2, b3 *bytes.Buffer, _ types.Type, fieldName string
 
 func byteSliceSliceHandle(b1, b2, b3 *bytes.Buffer, _ types.Type, fieldName string) {
 	// size
-	fmt.Fprintf(b1, "    size += rlp.StringListSize(obj.%s)\n", fieldName)
+	fmt.Fprintf(b1, "    size += rlp.StringListLen(obj.%s)\n", fieldName)
 
 	// encode
 	fmt.Fprintf(b2, "    if err := rlp.EncodeStringList(obj.%s, w, b[:]); err != nil {\n", fieldName)

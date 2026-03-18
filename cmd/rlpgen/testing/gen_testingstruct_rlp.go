@@ -49,7 +49,7 @@ func (obj *TestingStruct) EncodingSize() (size int) {
 	} else {
 		size += 1
 	}
-	size += rlp.StringListSize(obj.i)
+	size += rlp.StringListLen(obj.i)
 	gidx := 0
 	gidx = (8 + 1) * len(obj.j)
 	size += rlp.ListPrefixLen(gidx) + gidx

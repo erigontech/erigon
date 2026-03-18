@@ -706,8 +706,8 @@ func EncodeListSizePrefix(size int, w io.Writer, buffer []byte) error {
 
 // --- Composite helpers ---
 
-// StringListSize returns the RLP-encoded size of a [][]byte as a list of strings.
-func StringListSize(bb [][]byte) int {
+// StringListLen returns the RLP-encoded size of a [][]byte as a list of strings.
+func StringListLen(bb [][]byte) int {
 	size := 0
 	for i := 0; i < len(bb); i++ {
 		size += StringLen(bb[i])
