@@ -236,7 +236,7 @@ test-all: override GO_FLAGS := -timeout $(default_test_timeout) $(GO_FLAGS)
 test-all: test-filtered
 
 ## test-bench:                         check the benchmarks compile and run
-test-bench: override GO_FLAGS += -run=^$$ -bench=. -benchtime=1x -short -timeout=5m
+test-bench: override GO_FLAGS += -run=^$$ -bench=. -benchtime=2x
 test-bench:
 	$(GOTEST)
 
