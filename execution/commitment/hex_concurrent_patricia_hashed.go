@@ -12,7 +12,65 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
+	"github.com/erigontech/erigon/db/kv"
 )
+
+// bufferedTrieContext wraps a PatriciaContext and buffers PutBranch writes
+// so that concurrent goroutines in ParallelHashSort don't write to the shared
+// MemBatch.  Branch reads check the local buffer first, falling through to
+// the inner context on miss.  After all goroutines finish, the buffered writes
+// are flushed sequentially through the root context.
+type bufferedTrieContext struct {
+	inner  PatriciaContext
+	writes map[string][]byte // compact prefix → branch data
+	prev   map[string][]byte // compact prefix → prev branch data
+}
+
+func newBufferedTrieContext(inner PatriciaContext) *bufferedTrieContext {
+	return &bufferedTrieContext{
+		inner:  inner,
+		writes: make(map[string][]byte),
+		prev:   make(map[string][]byte),
+	}
+}
+
+func (b *bufferedTrieContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
+	if data, ok := b.writes[string(prefix)]; ok {
+		return data, 0, nil
+	}
+	return b.inner.Branch(prefix)
+}
+
+func (b *bufferedTrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {
+	key := string(prefix)
+	b.writes[key] = data
+	if _, exists := b.prev[key]; !exists {
+		b.prev[key] = prevData
+	}
+	return nil
+}
+
+func (b *bufferedTrieContext) Account(plainKey []byte) (*Update, error) {
+	return b.inner.Account(plainKey)
+}
+
+func (b *bufferedTrieContext) Storage(plainKey []byte) (*Update, error) {
+	return b.inner.Storage(plainKey)
+}
+
+func (b *bufferedTrieContext) TxNum() uint64 {
+	return b.inner.TxNum()
+}
+
+// flush writes all buffered PutBranch calls through the target context.
+func (b *bufferedTrieContext) flush(target PatriciaContext) error {
+	for key, data := range b.writes {
+		if err := target.PutBranch([]byte(key), data, b.prev[key]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // if nibble set is -1 then subtrie is not mounted to the nibble, but limited by depth: eg do not fold mounted trie above depth 63
 func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) {
@@ -235,6 +293,12 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(16)
 
+	// Each goroutine buffers PutBranch writes to avoid concurrent writes to
+	// the shared MemBatch.  Reads still go through MemBatch (read-only during
+	// this phase) with local buffer checked first for consistency.
+	var bufMu sync.Mutex
+	buffers := make([]*bufferedTrieContext, len(t.nibbles))
+
 	for n := 0; n < len(t.nibbles); n++ {
 		nib := t.nibbles[n]
 		phnib := pph.mounts[n]
@@ -248,7 +312,11 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 			}
 			trieCtx, trieCtxClose := trieCtxFactory()
 			defer trieCtxClose()
-			phnib.ResetContext(trieCtx)
+			bufCtx := newBufferedTrieContext(trieCtx)
+			bufMu.Lock()
+			buffers[ni] = bufCtx
+			bufMu.Unlock()
+			phnib.ResetContext(bufCtx)
 			cnt := 0
 			err := nib.Load(nil, "", func(hashedKey, plainKey []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 				cnt++
@@ -274,6 +342,16 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 	}
 	if err := g.Wait(); err != nil {
 		return nil, err
+	}
+
+	// Flush buffered branch writes sequentially through the root context
+	for _, buf := range buffers {
+		if buf == nil {
+			continue
+		}
+		if err := buf.flush(pph.root.ctx); err != nil {
+			return nil, err
+		}
 	}
 
 	if pph.root.trace {
