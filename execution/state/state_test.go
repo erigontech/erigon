@@ -140,7 +140,7 @@ func TestSnapshot(t *testing.T) {
 	state.SetState(stateobjaddr, storageaddr, *data2)
 	state.RevertToSnapshot(snapshot, nil)
 	state.PopSnapshot(snapshot)
-	value, err := state.GetState(stateobjaddr, storageaddr)
+	value, err := state.GetState(stateobjaddr.Value(), storageaddr.Value())
 	require.NoError(t, err)
 	require.Equal(t, *data1, value)
 	value, err = state.GetCommittedState(stateobjaddr.Value(), storageaddr.Value())
@@ -150,7 +150,7 @@ func TestSnapshot(t *testing.T) {
 	// revert up to the genesis state and ensure correct content
 	state.RevertToSnapshot(genesis, nil)
 	state.PopSnapshot(genesis)
-	value, err = state.GetState(stateobjaddr, storageaddr)
+	value, err = state.GetState(stateobjaddr.Value(), storageaddr.Value())
 	require.NoError(t, err)
 	require.Equal(t, uint256.Int{}, value)
 	value, err = state.GetCommittedState(stateobjaddr.Value(), storageaddr.Value())
