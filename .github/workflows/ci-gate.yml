@@ -81,6 +81,7 @@ jobs:
     secrets: inherit
 
   ci-gate:
+    name: Required
     if: always()
     needs:
       - lint

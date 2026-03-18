@@ -1,9 +1,5 @@
 name: Consensus spec
 on:
-  push:
-    branches:
-      - main
-      - 'release/**'
   workflow_dispatch:
   workflow_call:
 

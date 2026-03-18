@@ -1,10 +1,6 @@
 name: All tests
 
 on:
-  push:
-    branches:
-      - main
-      - 'release/**'
   workflow_dispatch:
   workflow_call:
 
