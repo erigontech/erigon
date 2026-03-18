@@ -153,7 +153,7 @@ func TestSelfDestructReceive(t *testing.T) {
 		if !exist {
 			t.Error("expected contractAddress to exist at the block 2", contractAddress.String())
 		}
-		code, err := st.GetCode(accounts.InternAddress(contractAddress))
+		code, err := st.GetCode(contractAddress)
 		if err != nil {
 			t.Error(err)
 		}

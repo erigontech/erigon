@@ -210,7 +210,7 @@ func (b *SimulatedBackend) CodeAt(ctx context.Context, contract common.Address, 
 	}
 	defer tx.Rollback()
 	stateDB := b.stateByBlockNumber(tx, blockNumber)
-	return stateDB.GetCode(accounts.InternAddress(contract))
+	return stateDB.GetCode(contract)
 }
 
 // BalanceAt returns the wei balance of a certain account in the blockchain.
@@ -526,7 +526,7 @@ func (b *SimulatedBackend) PendingCodeAt(ctx context.Context, contract common.Ad
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	return b.pendingState.GetCode(accounts.InternAddress(contract))
+	return b.pendingState.GetCode(contract)
 }
 
 func newRevertError(result *evmtypes.ExecutionResult) *revertError {

@@ -293,7 +293,7 @@ func TestCodeResolve(t *testing.T) {
 	_, ok, err := state1.GetDelegatedDesignation(stateobjaddr0)
 	require.NoError(t, err)
 	require.True(t, ok)
-	code, err := state1.GetCode(stateobjaddr0)
+	code, err := state1.GetCode(stateobjaddr0.Value())
 	require.NoError(t, err)
 	require.Equal(t, del, code)
 	code, err = state1.ResolveCode(stateobjaddr0)
