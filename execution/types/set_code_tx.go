@@ -308,7 +308,7 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 
 func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen, authorizationsLen int) error {
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+	if err := rlp.EncodeListSizePrefix(payloadSize, w, b); err != nil {
 		return err
 	}
 	// encode ChainID
@@ -344,7 +344,7 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 		return err
 	}
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(accessListLen, w, b); err != nil {
+	if err := rlp.EncodeListSizePrefix(accessListLen, w, b); err != nil {
 		return err
 	}
 	// encode AccessList
@@ -352,7 +352,7 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 		return err
 	}
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(authorizationsLen, w, b); err != nil {
+	if err := rlp.EncodeListSizePrefix(authorizationsLen, w, b); err != nil {
 		return err
 	}
 	// encode Authorizations

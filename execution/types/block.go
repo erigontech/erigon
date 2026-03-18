@@ -182,7 +182,7 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
 	// Prefix
-	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+	if err := rlp.EncodeListSizePrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
 	b[0] = 128 + 32
@@ -811,11 +811,11 @@ func (rb RawBody) EncodeRLP(w io.Writer) error {
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
+	if err := rlp.EncodeListSizePrefix(payloadSize, w, b[:]); err != nil {
 		return err
 	}
 	// encode Transactions
-	if err := rlp.EncodeStructSizePrefix(txsLen, w, b[:]); err != nil {
+	if err := rlp.EncodeListSizePrefix(txsLen, w, b[:]); err != nil {
 		return err
 	}
 	for _, txn := range rb.Transactions {
@@ -895,7 +895,7 @@ func (bfs BodyForStorage) EncodeRLP(w io.Writer) error {
 	defer pooledBuf.Put(b)
 
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
+	if err := rlp.EncodeListSizePrefix(payloadSize, w, b[:]); err != nil {
 		return err
 	}
 
@@ -979,7 +979,7 @@ func (bb Body) EncodeRLP(w io.Writer) error {
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
+	if err := rlp.EncodeListSizePrefix(payloadSize, w, b[:]); err != nil {
 		return err
 	}
 	// encode Transactions
@@ -1239,7 +1239,7 @@ func (bb *Block) EncodeRLP(w io.Writer) error {
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
+	if err := rlp.EncodeListSizePrefix(payloadSize, w, b[:]); err != nil {
 		return err
 	}
 	// encode Header
@@ -1516,7 +1516,7 @@ func EncodingSizeGenericList[T rlpEncodable](arr []T) (_len int) {
 }
 
 func encodeRLPGeneric[T rlpEncodable](arr []T, _len int, w io.Writer, b []byte) error {
-	if err := rlp.EncodeStructSizePrefix(_len, w, b); err != nil {
+	if err := rlp.EncodeListSizePrefix(_len, w, b); err != nil {
 		return err
 	}
 	for _, item := range arr {

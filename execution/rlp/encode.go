@@ -682,7 +682,7 @@ func EncodeOptionalAddress(addr *common.Address, w io.Writer, buffer []byte) err
 	return err
 }
 
-// --- List/struct encoding ---
+// --- List encoding ---
 
 // ListPrefixLen returns the RLP list-header length for a list of the given data length.
 func ListPrefixLen(dataLen int) int {
@@ -697,8 +697,8 @@ func EncodeListPrefix(dataLen int, to []byte) int {
 	return encodePrefixToBuf(dataLen, to, 0xC0, 0xF7)
 }
 
-// EncodeStructSizePrefix writes a list-type size prefix via w.
-func EncodeStructSizePrefix(size int, w io.Writer, buffer []byte) error {
+// EncodeListSizePrefix writes a list-type size prefix via w.
+func EncodeListSizePrefix(size int, w io.Writer, buffer []byte) error {
 	n := EncodeListPrefix(size, buffer)
 	_, err := w.Write(buffer[:n])
 	return err
@@ -722,7 +722,7 @@ func EncodeByteSliceSlice(bb [][]byte, w io.Writer, b []byte) error {
 		totalSize += StringLen(bb[i])
 	}
 
-	if err := EncodeStructSizePrefix(totalSize, w, b); err != nil {
+	if err := EncodeListSizePrefix(totalSize, w, b); err != nil {
 		return err
 	}
 

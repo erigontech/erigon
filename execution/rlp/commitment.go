@@ -230,6 +230,6 @@ func EncodeByteArrayAsRlp(raw []byte, w io.Writer, prefixBuf []byte) (int, error
 	return generateRlpPrefixLen(len(raw)) + len(raw), nil
 }
 
-func GenerateStructLen(buffer []byte, l int) int {
+func GenerateListLen(buffer []byte, l int) int {
 	return EncodeListPrefix(l, buffer)
 }
