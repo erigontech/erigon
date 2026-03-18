@@ -391,7 +391,7 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 		vmerr error // vm errors do not effect consensus and are therefore not assigned to err
 	)
 
-	ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, false)
+	ret, st.gasRemaining, vmerr = st.evm.Call(sender.Value(), st.to().Value(), st.data, st.gasRemaining, st.value, false)
 
 	result := &evmtypes.ExecutionResult{
 		ReceiptGasUsed:      st.gasUsed(),
@@ -555,7 +555,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		// of the contract's address, but before the execution of the code.
 		ret, _, st.gasRemaining, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, bailout)
 	} else {
-		ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
+		ret, st.gasRemaining, vmerr = st.evm.Call(sender.Value(), st.to().Value(), st.data, st.gasRemaining, st.value, bailout)
 	}
 
 	if refunds && !gasBailout {

@@ -313,7 +313,9 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 // parameters. It also handles any necessary value transfer required and takes
 // the necessary steps to create accounts and reverses the state in case of an
 // execution error or failed value transfer.
-func (evm *EVM) Call(caller accounts.Address, addr accounts.Address, input []byte, gas uint64, value uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {
+func (evm *EVM) Call(rawCaller common.Address, rawAddr common.Address, input []byte, gas uint64, value uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {
+	caller := evm.intraBlockState.InternAddress(rawCaller)
+	addr := evm.intraBlockState.InternAddress(rawAddr)
 	return evm.call(CALL, caller, caller, addr, input, gas, value, bailout)
 }
 
@@ -324,7 +326,9 @@ func (evm *EVM) Call(caller accounts.Address, addr accounts.Address, input []byt
 //
 // CallCode differs from Call in the sense that it executes the given address'
 // code with the caller as context.
-func (evm *EVM) CallCode(caller accounts.Address, addr accounts.Address, input []byte, gas uint64, value uint256.Int) (ret []byte, leftOverGas uint64, err error) {
+func (evm *EVM) CallCode(rawCaller common.Address, rawAddr common.Address, input []byte, gas uint64, value uint256.Int) (ret []byte, leftOverGas uint64, err error) {
+	caller := evm.intraBlockState.InternAddress(rawCaller)
+	addr := evm.intraBlockState.InternAddress(rawAddr)
 	return evm.call(CALLCODE, caller, caller, addr, input, gas, value, false)
 }
 
@@ -333,7 +337,10 @@ func (evm *EVM) CallCode(caller accounts.Address, addr accounts.Address, input [
 //
 // DelegateCall differs from CallCode in the sense that it executes the given address'
 // code with the caller as context and the caller is set to the caller of the caller.
-func (evm *EVM) DelegateCall(caller accounts.Address, callerAddress accounts.Address, addr accounts.Address, input []byte, value uint256.Int, gas uint64) (ret []byte, leftOverGas uint64, err error) {
+func (evm *EVM) DelegateCall(rawCaller common.Address, rawCallerAddress common.Address, rawAddr common.Address, input []byte, value uint256.Int, gas uint64) (ret []byte, leftOverGas uint64, err error) {
+	caller := evm.intraBlockState.InternAddress(rawCaller)
+	callerAddress := evm.intraBlockState.InternAddress(rawCallerAddress)
+	addr := evm.intraBlockState.InternAddress(rawAddr)
 	return evm.call(DELEGATECALL, caller, callerAddress, addr, input, gas, value, false)
 }
 
@@ -341,7 +348,9 @@ func (evm *EVM) DelegateCall(caller accounts.Address, callerAddress accounts.Add
 // as parameters while disallowing any modifications to the state during the call.
 // Opcodes that attempt to perform such modifications will result in exceptions
 // instead of performing the modifications.
-func (evm *EVM) StaticCall(caller accounts.Address, addr accounts.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error) {
+func (evm *EVM) StaticCall(rawCaller common.Address, rawAddr common.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error) {
+	caller := evm.intraBlockState.InternAddress(rawCaller)
+	addr := evm.intraBlockState.InternAddress(rawAddr)
 	return evm.call(STATICCALL, caller, caller, addr, input, gas, uint256.Int{}, false)
 }
 

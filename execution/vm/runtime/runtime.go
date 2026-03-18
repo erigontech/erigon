@@ -150,8 +150,8 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 		cfg.EVMConfig.Tracer.OnTxStart(&tracing.VMContext{IntraBlockState: cfg.State}, nil, accounts.ZeroAddress)
 	}
 	ret, _, err := vmenv.Call(
-		sender,
-		contractAsAddress,
+		sender.Value(),
+		contractAsAddress.Value(),
 		input,
 		cfg.GasLimit,
 		cfg.Value,
@@ -237,8 +237,8 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, uint64, 
 
 	// Call the code with the given configuration.
 	ret, leftOverGas, err := vmenv.Call(
-		sender.Address(),
-		address,
+		sender.Address().Value(),
+		address.Value(),
 		input,
 		cfg.GasLimit,
 		cfg.Value,

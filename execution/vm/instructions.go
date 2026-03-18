@@ -1088,7 +1088,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	gas := evm.CallGasTemp()
 	// Pop other call parameters.
 	addrVal, value, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
-	toAddr := evm.intraBlockState.InternAddress(addrVal.Bytes20())
+	toRawAddr := addrVal.Bytes20()
 	// Get the arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
@@ -1099,13 +1099,13 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 			// as internal so they are kept for conflict detection but
 			// excluded from the block access list — the CALL never
 			// actually executes.
-			evm.intraBlockState.MarkReadsInternal(toAddr.Value())
+			evm.intraBlockState.MarkReadsInternal(toRawAddr)
 			return pc, nil, ErrWriteProtection
 		}
 		gas += params.CallStipend
 	}
 
-	ret, returnGas, err := evm.Call(scope.Contract.Address(), toAddr, args, gas, value, false /* bailout */)
+	ret, returnGas, err := evm.Call(scope.Contract.Address().Value(), toRawAddr, args, gas, value, false /* bailout */)
 
 	if err != nil {
 		temp.Clear()
@@ -1142,7 +1142,6 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	gas := evm.CallGasTemp()
 	// Pop other call parameters.
 	addrVal, value, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
-	toAddr := evm.intraBlockState.InternAddress(addrVal.Bytes20())
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
@@ -1150,7 +1149,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 		gas += params.CallStipend
 	}
 
-	ret, returnGas, err := evm.CallCode(scope.Contract.Address(), toAddr, args, gas, value)
+	ret, returnGas, err := evm.CallCode(scope.Contract.Address().Value(), addrVal.Bytes20(), args, gas, value)
 	if err != nil {
 		temp.Clear()
 	} else {
@@ -1186,11 +1185,10 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	gas := evm.CallGasTemp()
 	// Pop other call parameters.
 	addrVal, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
-	toAddr := evm.intraBlockState.InternAddress(addrVal.Bytes20())
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
-	ret, returnGas, err := evm.DelegateCall(scope.Contract.addr, scope.Contract.caller, toAddr, args, scope.Contract.value, gas)
+	ret, returnGas, err := evm.DelegateCall(scope.Contract.addr.Value(), scope.Contract.caller.Value(), addrVal.Bytes20(), args, scope.Contract.value, gas)
 	if err != nil {
 		temp.Clear()
 	} else {
@@ -1226,11 +1224,10 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	gas := evm.CallGasTemp()
 	// Pop other call parameters.
 	addrVal, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
-	toAddr := evm.intraBlockState.InternAddress(addrVal.Bytes20())
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
-	ret, returnGas, err := evm.StaticCall(scope.Contract.Address(), toAddr, args, gas)
+	ret, returnGas, err := evm.StaticCall(scope.Contract.Address().Value(), addrVal.Bytes20(), args, gas)
 	if err != nil {
 		temp.Clear()
 	} else {
