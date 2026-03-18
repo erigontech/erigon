@@ -847,8 +847,25 @@ func TestCreateCollisionWithEIP7702Delegation(t *testing.T) {
 	require.True(t, val.IsZero(), "CREATE should have returned 0 (collision), but got %x", val)
 }
 
-// BenchmarkEVM_SLOAD exercises the EIP-2929 SLOAD hot path (address+key interning, access-list
-// check). Each b.Loop() iteration executes 1000 SLOAD opcodes against slot 0: the first is cold
+// benchmarkEVMContract runs contract code in a loop, one Call per b.Loop() iteration.
+// Each Call starts with a fresh access-list (statedb.Prepare is called inside Call).
+func benchmarkEVMContract(b *testing.B, name string, code []byte) {
+	b.Helper()
+	db := testTemporalDB(b)
+	tx, domains := testTemporalTxSD(b, db)
+	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
+	contractAddr := accounts.InternAddress(common.BytesToAddress([]byte(name)))
+	statedb.SetCode(contractAddr, code)
+	for b.Loop() {
+		_, _, err := Call(contractAddr, nil, &Config{State: statedb, GasLimit: 1_000_000})
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkEVM_SLOAD exercises the EIP-2929 SLOAD hot path (key interning, access-list check).
+// Each b.Loop() iteration executes 1000 SLOAD opcodes against slot 0: the first is cold
 // (2100 gas), all subsequent are warm (100 gas).
 func BenchmarkEVM_SLOAD(b *testing.B) {
 	const n = 1000
@@ -857,20 +874,7 @@ func BenchmarkEVM_SLOAD(b *testing.B) {
 	for i := 0; i < n; i++ {
 		contract = append(contract, byte(vm.PUSH1), 0x00, byte(vm.SLOAD), byte(vm.POP))
 	}
-	contract = append(contract, byte(vm.STOP))
-
-	db := testTemporalDB(b)
-	tx, domains := testTemporalTxSD(b, db)
-	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
-	contractAddr := accounts.InternAddress(common.BytesToAddress([]byte("sload-bench")))
-	statedb.SetCode(contractAddr, contract)
-
-	for b.Loop() {
-		_, _, err := Call(contractAddr, nil, &Config{State: statedb, GasLimit: 1_000_000})
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
+	benchmarkEVMContract(b, "sload-bench", append(contract, byte(vm.STOP)))
 }
 
 // BenchmarkEVM_SSTORE exercises the EIP-2929 SSTORE hot path. Each b.Loop() iteration executes
@@ -882,20 +886,7 @@ func BenchmarkEVM_SSTORE(b *testing.B) {
 	for i := 0; i < n; i++ {
 		contract = append(contract, byte(vm.PUSH1), 0x01, byte(vm.PUSH1), 0x00, byte(vm.SSTORE))
 	}
-	contract = append(contract, byte(vm.STOP))
-
-	db := testTemporalDB(b)
-	tx, domains := testTemporalTxSD(b, db)
-	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
-	contractAddr := accounts.InternAddress(common.BytesToAddress([]byte("sstore-bench")))
-	statedb.SetCode(contractAddr, contract)
-
-	for b.Loop() {
-		_, _, err := Call(contractAddr, nil, &Config{State: statedb, GasLimit: 1_000_000})
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
+	benchmarkEVMContract(b, "sstore-bench", append(contract, byte(vm.STOP)))
 }
 
 // BenchmarkEVM_BALANCE exercises the EIP-2929 BALANCE/EXTCODESIZE hot path (account-level access
@@ -911,18 +902,5 @@ func BenchmarkEVM_BALANCE(b *testing.B) {
 		contract = append(contract, targetAddr[:]...)
 		contract = append(contract, byte(vm.BALANCE), byte(vm.POP))
 	}
-	contract = append(contract, byte(vm.STOP))
-
-	db := testTemporalDB(b)
-	tx, domains := testTemporalTxSD(b, db)
-	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
-	contractAddr := accounts.InternAddress(common.BytesToAddress([]byte("balance-bench")))
-	statedb.SetCode(contractAddr, contract)
-
-	for b.Loop() {
-		_, _, err := Call(contractAddr, nil, &Config{State: statedb, GasLimit: 1_000_000})
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
+	benchmarkEVMContract(b, "balance-bench", append(contract, byte(vm.STOP)))
 }
