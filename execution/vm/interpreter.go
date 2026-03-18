@@ -61,13 +61,6 @@ type CallContext struct {
 	Memory   Memory
 	Stack    Stack
 	Contract Contract
-
-	// slotAddr/slotKey: interned form of the address/key from the designated stack slot.
-	// Set by the interpreter loop for opcodes where operation.hasAddrSlot/hasKeySlot is true
-	// (EIP-2929+ state-access ops). Nil for all other opcodes. Gas functions must not write here.
-	// internAddr()/internKey() use these as a fast path; pre-Berlin ops see nil and intern inline.
-	slotAddr accounts.Address
-	slotKey  accounts.StorageKey
 }
 
 // cancelCheckInterval is the number of opcodes between checks for context cancellation.
@@ -90,38 +83,14 @@ func getCallContext(contract Contract, input []byte, gas uint64) *CallContext {
 
 	ctx.gas = gas
 	ctx.input = input
-	ctx.slotAddr = accounts.NilAddress
-	ctx.slotKey = accounts.NilKey
 	ctx.Contract = contract
 	return ctx
 }
 
 func (c *CallContext) put() {
-	c.slotAddr = accounts.NilAddress
-	c.slotKey = accounts.NilKey
 	c.Memory.reset()
 	c.Stack.Reset()
 	contextPool.Put(c)
-}
-
-// internAddr returns the interned address for this opcode.
-// EIP-2929+: interpreter pre-set slotAddr → zero-cost lookup.
-// Pre-Berlin: slotAddr is nil → intern val inline (two interns total for CALL/SELFDESTRUCT, accepted).
-func (c *CallContext) internAddr(val *uint256.Int) accounts.Address {
-	if !c.slotAddr.IsNil() {
-		return c.slotAddr
-	}
-	return accounts.InternAddress(val.Bytes20())
-}
-
-// internKey returns the interned storage key for this opcode.
-// EIP-2929+: interpreter pre-set slotKey → zero-cost lookup.
-// Pre-Berlin: slotKey is nil → intern val inline.
-func (c *CallContext) internKey(val *uint256.Int) accounts.StorageKey {
-	if !c.slotKey.IsNil() {
-		return c.slotKey
-	}
-	return accounts.InternKey(val.Bytes32())
 }
 
 // UseGas attempts the use gas and subtracts it and returns true on success
@@ -374,18 +343,6 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 		// All ops with a dynamic memory usage also has a dynamic gas cost.
 		var memorySize uint64
 		if operation.dynamicGas != nil {
-			// Pre-intern address/key for EIP-2929+ ops (hasAddrSlot/hasKeySlot set).
-			// All slot ops have dynamicGas, so this block is the natural home: zero overhead
-			// for the ~90% of opcodes with no dynamic gas. Gas functions must not write to
-			// slotAddr/slotKey — the interpreter is the sole owner for one dispatch cycle.
-			if operation.hasAddrSlot {
-				callContext.slotAddr = evm.internAddress(
-					callContext.Stack.Back(int(operation.addrSlot)).Bytes20())
-			}
-			if operation.hasKeySlot {
-				callContext.slotKey = evm.internKey(
-					callContext.Stack.Back(int(operation.keySlot)).Bytes32())
-			}
 			// calculate the new memory size and expand the memory to fit
 			// the operation
 			// Memory check needs to be done prior to evaluating the dynamic gas portion,

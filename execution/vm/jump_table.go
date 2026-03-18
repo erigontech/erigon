@@ -51,18 +51,6 @@ type operation struct {
 	// memorySize returns the memory size required for the operation
 	memorySize memorySizeFunc
 	string     stringer
-
-	// hasAddrSlot: if true, the interpreter pre-interns Stack.Back(addrSlot).Bytes20()
-	// before gas/op execution and stores it in callContext.slotAddr.
-	// Only set on EIP-2929+ ops where both gas func and op func need the same address.
-	hasAddrSlot bool
-	addrSlot    uint8
-
-	// hasKeySlot: if true, the interpreter pre-interns Stack.Back(keySlot).Bytes32()
-	// before gas/op execution and stores it in callContext.slotKey.
-	// Only set on EIP-2929+ ops (SLOAD, SSTORE).
-	hasKeySlot bool
-	keySlot    uint8
 }
 
 var (

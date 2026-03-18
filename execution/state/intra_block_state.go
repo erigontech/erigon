@@ -488,7 +488,8 @@ func (sdb *IntraBlockState) SubRefund(gas uint64) error {
 
 // Exist reports whether the given account address exists in the state.
 // Notably this also returns true for self destructed accounts.
-func (sdb *IntraBlockState) Exist(addr accounts.Address) (exists bool, err error) {
+func (sdb *IntraBlockState) Exist(rawAddr common.Address) (exists bool, err error) {
+	addr := sdb.InternAddress(rawAddr)
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 		defer func() {
 			fmt.Printf("%d (%d.%d) Exists %x: %v\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, exists)
@@ -520,7 +521,8 @@ var emptyAccount = accounts.NewAccount()
 
 // Empty returns whether the state object is either non-existent
 // or empty according to the EIP161 specification (balance = nonce = code = 0)
-func (sdb *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error) {
+func (sdb *IntraBlockState) Empty(rawAddr common.Address) (empty bool, err error) {
+	addr := sdb.InternAddress(rawAddr)
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 		defer func() {
 			fmt.Printf("%d (%d.%d) Empty %x: %v\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, empty)

@@ -95,17 +95,6 @@ type EVM struct {
 	returnData []byte // Last CALL's return data for subsequent reuse
 }
 
-// internAddress returns the interned handle for a via the IBS-level cache.
-// The IBS is block-scoped, so the cache outlives individual nested CALLs.
-func (evm *EVM) internAddress(a common.Address) accounts.Address {
-	return evm.intraBlockState.InternAddress(a)
-}
-
-// internKey returns the interned handle for h via the IBS-level cache.
-func (evm *EVM) internKey(h common.Hash) accounts.StorageKey {
-	return evm.intraBlockState.InternKey(h)
-}
-
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
 // only ever be used *once*.
 func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state.IntraBlockState, chainConfig *chain.Config, vmConfig Config) *EVM {
@@ -238,7 +227,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	defer evm.intraBlockState.PopSnapshot(snapshot)
 
 	if typ == CALL {
-		exist, err := evm.intraBlockState.Exist(addr)
+		exist, err := evm.intraBlockState.Exist(addr.Value())
 		if err != nil {
 			return nil, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}

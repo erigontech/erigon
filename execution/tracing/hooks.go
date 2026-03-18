@@ -49,7 +49,7 @@ type IntraBlockState interface {
 	GetNonce(accounts.Address) (uint64, error)
 	GetCode(accounts.Address) ([]byte, error)
 	GetState(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error)
-	Exist(accounts.Address) (bool, error)
+	Exist(common.Address) (bool, error)
 	GetRefund() uint64
 }
 
