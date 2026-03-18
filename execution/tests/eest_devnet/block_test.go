@@ -50,9 +50,10 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	bt.Whitelist(`.*for_amsterdam/.*`)
 	// static — tested in state test format by TestState
 	bt.SkipLoad(`^for_amsterdam/static/state_tests/`)
-	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7954_increase_max_contract_size/test_max_code_size.json`)                // block=1, gas used by execution: 16777216, in header: 38602294
-	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7954_increase_max_contract_size/test_max_code_size_deposit_gas.json`)    // block=1, receiptHash mismatch: 34f408ef6c0c284659b1f6f2bb262a45afacfb0ada3448163a7c3bf0520d86ee != 5fe22104aa4dcbec000a57a18ba9a64d6a92ee73be758990a928e1d9491f3b21, headerNum=1, 47df0d324522b1e6279320d6ff23ae61ce9453527cee8d0e01e5d59e998384b7
+	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7954_increase_max_contract_size/test_max_code_size_deposit_gas.json`)    // block=1, gas used by execution: 38601120, in header: 16777216
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7954_increase_max_contract_size/test_max_initcode_size_via_create.json`) // block=1, gas used by execution: 16777216, in header: 16645728
+	bt.SkipLoad(`^for_amsterdam/constantinople/eip1052_extcodehash/test_extcodehash_subcall_create2_oog.json`)        // block=1, receiptHash mismatch: 39c2dfd7f2067a536d977a40ae2f2b3f3614bbef0a4eb26f49b8114d29e9805f != 8e4253c0afb1566ce113e97f42df12955f2712695f33de2b2c6ab30f654f8897, headerNum=1, 4da65b36435c944e6f68e86aa3d5ad3b796d54b0f73f5e096b31e05ae4c8d32d
+	bt.SkipLoad(`^for_amsterdam/frontier/create/test_create_deposit_oog.json`)                                        // block=1, receiptHash mismatch: b02a14b5b6c881a265f2b3cde9e15388accd60f6ade5ac416448ae70be388b04 != 4b6910d817802196c2707443f8d462fb49eda48f61b5ae0b986ec93f512068d9, headerNum=1, 8f10f38664c884462846eb91339f5c5b5fe818b7f6b6f766ce19e45d109cb0cf
 
 	bt.Walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root

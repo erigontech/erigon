@@ -514,6 +514,13 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	}
 	if nonce != 0 || !contractHash.IsEmpty() || hasStorage {
 		err = ErrContractAddressCollision
+		// EIP-8037: At depth > 0, track collision-burned gas in regularGasConsumed
+		// so 2D block gas accounting reflects the gas consumed on EIP-684 collision.
+		// At depth 0 (CREATE transaction), the burned gas is accounted for through
+		// the zero-gas return in state_transition.go (regular_gas_used=0 per spec).
+		if evm.chainRules.IsAmsterdam && depth > 0 {
+			evm.regularGasConsumed += gasRemaining.Regular
+		}
 		if evm.config.Tracer != nil && evm.config.Tracer.OnGasChange != nil {
 			evm.Config().Tracer.OnGasChange(gasRemaining.Regular, 0, tracing.GasChangeCallFailedExecution)
 		}
