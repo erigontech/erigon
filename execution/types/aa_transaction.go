@@ -271,7 +271,7 @@ func (tx *AccountAbstractionTransaction) EncodeRLP(w io.Writer) error {
 	b := rlp.NewEncodingBuf()
 	defer b.Release()
 	// encode envelope size
-	if err := rlp.EncodeStringSizePrefix(envelopSize, w, b[:]); err != nil {
+	if err := rlp.EncodeStringPrefix(envelopSize, w, b[:]); err != nil {
 		return err
 	}
 	// encode TxType
@@ -289,7 +289,7 @@ func (tx *AccountAbstractionTransaction) EncodeRLP(w io.Writer) error {
 
 func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen, authorizationsLen int) error {
 	// prefix
-	if err := rlp.EncodeListSizePrefix(payloadSize, w, b); err != nil {
+	if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
 		return err
 	}
 
@@ -368,7 +368,7 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 	}
 
 	// prefix
-	if err := rlp.EncodeListSizePrefix(accessListLen, w, b); err != nil {
+	if err := rlp.EncodeListPrefix(accessListLen, w, b); err != nil {
 		return err
 	}
 	// encode AccessList
@@ -377,7 +377,7 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 	}
 
 	// prefix
-	if err := rlp.EncodeListSizePrefix(authorizationsLen, w, b); err != nil {
+	if err := rlp.EncodeListPrefix(authorizationsLen, w, b); err != nil {
 		return err
 	}
 	// encode Authorizations

@@ -150,13 +150,13 @@ func encodeAccessList(al AccessList, w io.Writer, b []byte) error {
 		// Each storage key takes 33 bytes
 		storageLen := 33 * len(al[i].StorageKeys)
 		tupleLen += rlp.ListPrefixLen(storageLen) + storageLen
-		if err := rlp.EncodeListSizePrefix(tupleLen, w, b); err != nil {
+		if err := rlp.EncodeListPrefix(tupleLen, w, b); err != nil {
 			return err
 		}
 		if err := rlp.EncodeOptionalAddress(&al[i].Address, w, b); err != nil { // TODO(racytech): change addr to []byte?
 			return err
 		}
-		if err := rlp.EncodeListSizePrefix(storageLen, w, b); err != nil {
+		if err := rlp.EncodeListPrefix(storageLen, w, b); err != nil {
 			return err
 		}
 		b[0] = 128 + 32
@@ -192,7 +192,7 @@ func (tx *AccessListTx) MarshalBinary(w io.Writer) error {
 
 func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen int) error {
 	// prefix
-	if err := rlp.EncodeListSizePrefix(payloadSize, w, b); err != nil {
+	if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
 		return err
 	}
 	// encode ChainID
@@ -224,7 +224,7 @@ func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, access
 		return err
 	}
 	// prefix
-	if err := rlp.EncodeListSizePrefix(accessListLen, w, b); err != nil {
+	if err := rlp.EncodeListPrefix(accessListLen, w, b); err != nil {
 		return err
 	}
 	// encode AccessList
@@ -255,7 +255,7 @@ func (tx *AccessListTx) EncodeRLP(w io.Writer) error {
 	b := rlp.NewEncodingBuf()
 	defer b.Release()
 	// envelope
-	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
+	if err := rlp.EncodeStringPrefix(envelopeSize, w, b[:]); err != nil {
 		return err
 	}
 	// encode TxType

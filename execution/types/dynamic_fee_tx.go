@@ -160,7 +160,7 @@ func (tx *DynamicFeeTransaction) MarshalBinary(w io.Writer) error {
 
 func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen int) error {
 	// prefix
-	if err := rlp.EncodeListSizePrefix(payloadSize, w, b); err != nil {
+	if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
 		return err
 	}
 	// encode ChainID
@@ -196,7 +196,7 @@ func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSiz
 		return err
 	}
 	// prefix
-	if err := rlp.EncodeListSizePrefix(accessListLen, w, b); err != nil {
+	if err := rlp.EncodeListPrefix(accessListLen, w, b); err != nil {
 		return err
 	}
 	// encode AccessList
@@ -225,7 +225,7 @@ func (tx *DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
 	b := rlp.NewEncodingBuf()
 	defer b.Release()
 	// envelope
-	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
+	if err := rlp.EncodeStringPrefix(envelopeSize, w, b[:]); err != nil {
 		return err
 	}
 	// encode TxType

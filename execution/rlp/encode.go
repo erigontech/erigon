@@ -653,7 +653,7 @@ func EncodeString(s []byte, w io.Writer, buffer []byte) error {
 			return err
 		}
 	default:
-		if err := EncodeStringSizePrefix(len(s), w, buffer); err != nil {
+		if err := EncodeStringPrefix(len(s), w, buffer); err != nil {
 			return err
 		}
 		if _, err := w.Write(s); err != nil {
@@ -663,8 +663,8 @@ func EncodeString(s []byte, w io.Writer, buffer []byte) error {
 	return nil
 }
 
-// EncodeStringSizePrefix writes a string-type size prefix via w.
-func EncodeStringSizePrefix(size int, w io.Writer, buffer []byte) error {
+// EncodeStringPrefix writes a string-type size prefix via w.
+func EncodeStringPrefix(size int, w io.Writer, buffer []byte) error {
 	n := encodePrefixToBuf(size, buffer, 0x80, 0xB7)
 	_, err := w.Write(buffer[:n])
 	return err
@@ -703,8 +703,8 @@ func EncodeListPrefixToBuf(dataLen int, to []byte) int {
 	return encodePrefixToBuf(dataLen, to, 0xC0, 0xF7)
 }
 
-// EncodeListSizePrefix writes a list-type size prefix via w.
-func EncodeListSizePrefix(size int, w io.Writer, buffer []byte) error {
+// EncodeListPrefix writes a list-type size prefix via w.
+func EncodeListPrefix(size int, w io.Writer, buffer []byte) error {
 	n := EncodeListPrefixToBuf(size, buffer)
 	_, err := w.Write(buffer[:n])
 	return err
@@ -728,7 +728,7 @@ func EncodeStringList(bb [][]byte, w io.Writer, b []byte) error {
 		totalSize += StringLen(bb[i])
 	}
 
-	if err := EncodeListSizePrefix(totalSize, w, b); err != nil {
+	if err := EncodeListPrefix(totalSize, w, b); err != nil {
 		return err
 	}
 

@@ -240,7 +240,7 @@ func (tx *LegacyTx) MarshalBinary(w io.Writer) error {
 
 func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize int) error {
 	// prefix
-	if err := rlp.EncodeListSizePrefix(payloadSize, w, b); err != nil {
+	if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
 		return err
 	}
 	if err := rlp.EncodeU64(tx.Nonce, w, b); err != nil {

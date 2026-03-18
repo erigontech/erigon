@@ -581,7 +581,7 @@ func _shortArraySliceHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fiel
 	// encode
 	addIntEncode(b2)
 	fmt.Fprintf(b2, "    gidx = (%d + 1) * len(obj.%s)\n", size, fieldName)
-	fmt.Fprintf(b2, "    if err := rlp.EncodeListSizePrefix(gidx, w, b[:]); err != nil {\n")
+	fmt.Fprintf(b2, "    if err := rlp.EncodeListPrefix(gidx, w, b[:]); err != nil {\n")
 	fmt.Fprintf(b2, "        return err\n")
 	fmt.Fprintf(b2, "    }\n")
 	fmt.Fprintf(b2, "    for i := 0; i < len(obj.%s); i++ {\n", fieldName)
@@ -645,7 +645,7 @@ func _shortArrayPtrSliceHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, f
 	fmt.Fprintf(b2, "            gidx += 1\n")
 	fmt.Fprintf(b2, "        }\n")
 	fmt.Fprintf(b2, "    }\n")
-	fmt.Fprintf(b2, "    if err := rlp.EncodeListSizePrefix(gidx, w, b[:]); err != nil {\n")
+	fmt.Fprintf(b2, "    if err := rlp.EncodeListPrefix(gidx, w, b[:]); err != nil {\n")
 	fmt.Fprintf(b2, "        return err\n")
 	fmt.Fprintf(b2, "    }\n")
 	fmt.Fprintf(b2, "    for i := 0; i < len(obj.%s); i++ {\n", fieldName)
@@ -722,7 +722,7 @@ func hashSliceHandleOptimized(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fi
 	// encode
 	addIntEncode(b2)
 	fmt.Fprintf(b2, "    gidx = (32 + 1) * len(obj.%s)\n", fieldName)
-	fmt.Fprintf(b2, "    if err := rlp.EncodeListSizePrefix(gidx, w, b[:]); err != nil {\n")
+	fmt.Fprintf(b2, "    if err := rlp.EncodeListPrefix(gidx, w, b[:]); err != nil {\n")
 	fmt.Fprintf(b2, "        return err\n")
 	fmt.Fprintf(b2, "    }\n")
 	fmt.Fprintf(b2, "    for i := 0; i < len(obj.%s); i++ {\n", fieldName)

@@ -234,7 +234,7 @@ func encodeBlobVersionedHashes(hashes []common.Hash, w io.Writer, b []byte) erro
 
 func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen, blobHashesLen int) error {
 	// prefix
-	if err := rlp.EncodeListSizePrefix(payloadSize, w, b); err != nil {
+	if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
 		return err
 	}
 	// encode ChainID
@@ -274,7 +274,7 @@ func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, accessListL
 		return err
 	}
 	// prefix
-	if err := rlp.EncodeListSizePrefix(accessListLen, w, b); err != nil {
+	if err := rlp.EncodeListPrefix(accessListLen, w, b); err != nil {
 		return err
 	}
 	// encode AccessList
@@ -286,7 +286,7 @@ func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, accessListL
 		return err
 	}
 	// prefix
-	if err := rlp.EncodeListSizePrefix(blobHashesLen, w, b); err != nil {
+	if err := rlp.EncodeListPrefix(blobHashesLen, w, b); err != nil {
 		return err
 	}
 	// encode BlobVersionedHashes
@@ -318,7 +318,7 @@ func (stx *BlobTx) EncodeRLP(w io.Writer) error {
 	b := rlp.NewEncodingBuf()
 	defer b.Release()
 	// envelope
-	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
+	if err := rlp.EncodeStringPrefix(envelopeSize, w, b[:]); err != nil {
 		return err
 	}
 	// encode TxType
