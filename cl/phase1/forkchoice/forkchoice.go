@@ -82,7 +82,8 @@ type preverifiedAppendListsSizes struct {
 
 type ForkChoiceStore struct {
 	time        atomic.Uint64
-	highestSeen atomic.Uint64
+	highestSeen     atomic.Uint64
+	highestSeenRoot atomic.Value // common.Hash
 	// all of *solid.Checkpoint type
 	justifiedCheckpoint           atomic.Value
 	finalizedCheckpoint           atomic.Value
@@ -382,6 +383,14 @@ func (f *ForkChoiceStore) GetRecentExecutionPayloadStatus(executionBlockHash com
 // Highest seen returns highest seen slot
 func (f *ForkChoiceStore) HighestSeen() uint64 {
 	return f.highestSeen.Load()
+}
+
+// HighestSeenRoot returns the block root of the highest seen slot.
+func (f *ForkChoiceStore) HighestSeenRoot() common.Hash {
+	if v := f.highestSeenRoot.Load(); v != nil {
+		return v.(common.Hash)
+	}
+	return common.Hash{}
 }
 
 func (f *ForkChoiceStore) children(parent common.Hash) []common.Hash {

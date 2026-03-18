@@ -425,6 +425,26 @@ func recoverMissingEnvelopes(ctx context.Context, cfg *Cfg) {
 	}
 }
 
+// pollForEnvelope polls HasEnvelope until the envelope arrives or the timeout expires.
+func pollForEnvelope(ctx context.Context, cfg *Cfg, headRoot common.Hash, timeout time.Duration) {
+	pollCtx, pollCancel := context.WithTimeout(ctx, timeout)
+	defer pollCancel()
+
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-pollCtx.Done():
+			return
+		case <-ticker.C:
+			if cfg.forkChoice.HasEnvelope(headRoot) {
+				return
+			}
+		}
+	}
+}
+
 // chainTipSync synchronizes the chain tip by fetching blocks from the highest seen block up to the target slot by listening to incoming blocks.
 // or by fetching blocks that might have been missed by gossip after a delay.
 func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
@@ -442,7 +462,16 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 	}
 
 	if args.seenSlot >= args.targetSlot {
-		// recoverMissingEnvelopes(ctx, cfg)
+		// [GLOAS] Wait for the head's execution payload envelope before proceeding to ForkChoice.
+		// The block was already processed by gossip during SleepForSlot, but the envelope
+		// may still be in-flight. Without this, FCU sends the parent's execution hash.
+		headEpoch := args.targetSlot / cfg.beaconCfg.SlotsPerEpoch
+		if cfg.beaconCfg.GetCurrentStateVersion(headEpoch) >= clparams.GloasVersion {
+			headRoot := cfg.forkChoice.HighestSeenRoot()
+			if headRoot != (common.Hash{}) && !cfg.forkChoice.HasEnvelope(headRoot) {
+				pollForEnvelope(ctx, cfg, headRoot, 2*time.Second)
+			}
+		}
 		return nil
 	}
 
