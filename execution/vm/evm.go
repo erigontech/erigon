@@ -94,12 +94,18 @@ type EVM struct {
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
 
-	// addrCache/keyCache: direct-mapped L1-style caches for accounts.InternAddress/InternKey.
-	// Avoids hitting the global unique.Make sync.Map for addresses/keys seen repeatedly within
-	// one transaction (same EVM instance spans all nested CALLs). 64 entries, indexed by the
-	// last byte of the raw value — zero-alloc, ~2ns per hit vs ~50-100ns for unique.Make.
-	addrCache [64]addrInternEntry
-	keyCache  [64]keyInternEntry
+	// caches is lazily allocated on first address/key intern (i.e. first state-access opcode).
+	// Nil for EVMs that never touch state (pure computation, RETURN-only, etc.) — zero overhead.
+	// One allocation per EVM instance; shared across all nested CALLs within a transaction.
+	caches *internCaches
+}
+
+// internCaches holds direct-mapped caches for InternAddress and InternKey.
+// 64 entries each, indexed by the last byte of the raw value. On a collision the old entry is
+// evicted and correctness is preserved: the e.raw == x guard prevents false hits.
+type internCaches struct {
+	addrs [64]addrInternEntry
+	keys  [64]keyInternEntry
 }
 
 type addrInternEntry struct {
@@ -112,9 +118,13 @@ type keyInternEntry struct {
 	val accounts.StorageKey
 }
 
-// internAddress returns the interned handle for a, using the per-EVM direct-mapped cache.
+// internAddress returns the interned handle for a, using the per-EVM cache to avoid repeated
+// global unique.Make (sync.Map) lookups for the same address within a transaction.
 func (evm *EVM) internAddress(a common.Address) accounts.Address {
-	e := &evm.addrCache[a[19]&63]
+	if evm.caches == nil {
+		evm.caches = new(internCaches)
+	}
+	e := &evm.caches.addrs[a[19]&63]
 	if e.raw == a && !e.val.IsNil() {
 		return e.val
 	}
@@ -123,9 +133,12 @@ func (evm *EVM) internAddress(a common.Address) accounts.Address {
 	return v
 }
 
-// internKey returns the interned handle for h, using the per-EVM direct-mapped cache.
+// internKey returns the interned handle for h, using the per-EVM cache.
 func (evm *EVM) internKey(h common.Hash) accounts.StorageKey {
-	e := &evm.keyCache[h[31]&63]
+	if evm.caches == nil {
+		evm.caches = new(internCaches)
+	}
+	e := &evm.caches.keys[h[31]&63]
 	if e.raw == h && !e.val.IsNil() {
 		return e.val
 	}
