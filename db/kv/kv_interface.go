@@ -106,7 +106,6 @@ Example:
 		return err
 	}
 */
-
 type RoDB interface {
 	Closer
 	BeginRo(ctx context.Context) (Tx, error)
