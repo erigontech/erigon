@@ -1017,7 +1017,7 @@ func TestEIP161AccountRemoval(t *testing.T) {
 		return
 	}
 	defer tx.Rollback()
-	exist, err := state.New(m.NewStateReader(tx)).Exist(theAddr)
+	exist, err := state.New(m.NewStateReader(tx)).Exist(theAddr.Value())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1031,7 +1031,7 @@ func TestEIP161AccountRemoval(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
-		exist, err := state.New(m.NewStateReader(tx)).Exist(theAddr)
+		exist, err := state.New(m.NewStateReader(tx)).Exist(theAddr.Value())
 		if err != nil {
 			return err
 		}
@@ -1048,7 +1048,7 @@ func TestEIP161AccountRemoval(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
-		exist, err := state.New(m.NewStateReader(tx)).Exist(theAddr)
+		exist, err := state.New(m.NewStateReader(tx)).Exist(theAddr.Value())
 		if err != nil {
 			return err
 		}
@@ -1121,25 +1121,25 @@ func TestDoubleAccountRemoval(t *testing.T) {
 
 	st := state.New(m.NewStateReader(tx))
 	require.NoError(t, err)
-	exist, err := st.Exist(accounts.InternAddress(theAddr))
+	exist, err := st.Exist(theAddr.Value())
 	require.NoError(t, err)
 	assert.False(t, exist, "Contract should've been removed")
 
 	st = state.New(m.NewHistoryStateReader(1, tx))
 	require.NoError(t, err)
-	exist, err = st.Exist(accounts.InternAddress(theAddr))
+	exist, err = st.Exist(theAddr.Value())
 	require.NoError(t, err)
 	assert.False(t, exist, "Contract should not exist at block #0")
 
 	st = state.New(m.NewHistoryStateReader(2, tx))
 	require.NoError(t, err)
-	exist, err = st.Exist(accounts.InternAddress(theAddr))
+	exist, err = st.Exist(theAddr.Value())
 	require.NoError(t, err)
 	assert.True(t, exist, "Contract should exist at block #1")
 
 	st = state.New(m.NewHistoryStateReader(3, tx))
 	require.NoError(t, err)
-	exist, err = st.Exist(accounts.InternAddress(theAddr))
+	exist, err = st.Exist(theAddr.Value())
 	require.NoError(t, err)
 	assert.True(t, exist, "Contract should exist at block #2")
 }
@@ -1535,26 +1535,26 @@ func TestDeleteRecreateSlots(t *testing.T) {
 
 	// If all is correct, then slot 1 and 2 are zero
 	key1 := accounts.InternKey(common.HexToHash("01"))
-	got, err := statedb.GetState(aa, key1)
+	got, err := statedb.GetState(aa.Value(), key1.Value())
 	require.NoError(t, err)
 	if !got.IsZero() {
 		t.Errorf("got %d exp %d", got.Uint64(), 0)
 	}
 	key2 := accounts.InternKey(common.HexToHash("02"))
-	got, err = statedb.GetState(aa, key2)
+	got, err = statedb.GetState(aa.Value(), key2.Value())
 	require.NoError(t, err)
 	if !got.IsZero() {
 		t.Errorf("got %d exp %d", got.Uint64(), 0)
 	}
 	// Also, 3 and 4 should be set
 	key3 := accounts.InternKey(common.HexToHash("03"))
-	got, err = statedb.GetState(aa, key3)
+	got, err = statedb.GetState(aa.Value(), key3.Value())
 	require.NoError(t, err)
 	if got.Uint64() != 3 {
 		t.Errorf("got %d exp %d", got.Uint64(), 3)
 	}
 	key4 := accounts.InternKey(common.HexToHash("04"))
-	got, err = statedb.GetState(aa, key4)
+	got, err = statedb.GetState(aa.Value(), key4.Value())
 	require.NoError(t, err)
 	if got.Uint64() != 4 {
 		t.Errorf("got %d exp %d", got.Uint64(), 4)
@@ -1732,13 +1732,13 @@ func TestDeleteRecreateAccount(t *testing.T) {
 
 		// If all is correct, then both slots are zero
 		key1 := accounts.InternKey(common.HexToHash("01"))
-		got, err := statedb.GetState(aa, key1)
+		got, err := statedb.GetState(aa.Value(), key1.Value())
 		require.NoError(t, err)
 		if !got.IsZero() {
 			t.Errorf("got %x exp %x", got, 0)
 		}
 		key2 := accounts.InternKey(common.HexToHash("02"))
-		got, err = statedb.GetState(aa, key2)
+		got, err = statedb.GetState(aa.Value(), key2.Value())
 		require.NoError(t, err)
 		if !got.IsZero() {
 			t.Errorf("got %x exp %x", got, 0)
@@ -1916,20 +1916,20 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 			statedb := state.New(m.NewStateReader(tx))
 			// If all is correct, then slot 1 and 2 are zero
 			key1 := accounts.InternKey(common.HexToHash("01"))
-			got, err := statedb.GetState(aa, key1)
+			got, err := statedb.GetState(aa.Value(), key1.Value())
 			require.NoError(t, err)
 			if !got.IsZero() {
 				t.Errorf("block %d, got %x exp %x", blockNum, got, 0)
 			}
 			key2 := accounts.InternKey(common.HexToHash("02"))
-			got, err = statedb.GetState(aa, key2)
+			got, err = statedb.GetState(aa.Value(), key2.Value())
 			require.NoError(t, err)
 			if !got.IsZero() {
 				t.Errorf("block %d, got %x exp %x", blockNum, got, 0)
 			}
 			exp := expectations[i]
 			if exp.exist {
-				exist, err := statedb.Exist(aa)
+				exist, err := statedb.Exist(aa.Value())
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -1938,14 +1938,14 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 				}
 				for slot, val := range exp.values {
 					key := accounts.InternKey(asHash(slot))
-					gotValue, err := statedb.GetState(aa, key)
+					gotValue, err := statedb.GetState(aa.Value(), key.Value())
 					require.NoError(t, err)
 					if gotValue.Uint64() != uint64(val) {
 						t.Fatalf("block %d, slot %d, got %x exp %x", blockNum, slot, gotValue, val)
 					}
 				}
 			} else {
-				exist, err := statedb.Exist(aa)
+				exist, err := statedb.Exist(aa.Value())
 				if err != nil {
 					t.Fatal(err)
 				}
