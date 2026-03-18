@@ -180,7 +180,7 @@ func (t *prestateTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scop
 		t.lookupAccount(addr)
 		// Lookup the delegation target
 		if t.env.ChainConfig.IsPrague(t.env.Time) {
-			code, _ := t.env.IntraBlockState.GetCode(addr)
+			code, _ := t.env.IntraBlockState.GetCode(addr.Value())
 			if target, ok := types.ParseDelegation(code); ok {
 				t.lookupAccount(target)
 			}
@@ -220,7 +220,7 @@ func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 		t.create = false
 		// Lookup the delegation target
 		if t.env.ChainConfig.IsPrague(t.env.Time) {
-			code, _ := t.env.IntraBlockState.GetCode(t.to)
+			code, _ := t.env.IntraBlockState.GetCode(t.to.Value())
 			if target, ok := types.ParseDelegation(code); ok {
 				t.lookupAccount(target)
 			}

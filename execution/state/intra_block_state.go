@@ -640,8 +640,8 @@ func (sdb *IntraBlockState) TxnIndex() int {
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) GetCode(addr accounts.Address) ([]byte, error) {
-	return sdb.getCode(addr, false)
+func (sdb *IntraBlockState) GetCode(rawAddr common.Address) ([]byte, error) {
+	return sdb.getCode(sdb.InternAddress(rawAddr), false)
 }
 
 func (sdb *IntraBlockState) getCode(addr accounts.Address, commited bool) ([]byte, error) {
@@ -1417,7 +1417,7 @@ func (sdb *IntraBlockState) IsNewContract(addr accounts.Address) (bool, error) {
 	if !stateObject.newlyCreated {
 		return false, nil
 	}
-	code, err := sdb.GetCode(addr)
+	code, err := sdb.GetCode(addr.Value())
 	if err != nil {
 		return false, err
 	}
