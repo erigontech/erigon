@@ -1,10 +1,6 @@
 name: All tests (with -race)
 
 on:
-  push:
-    branches:
-      - 'release/**'
-      - main
   workflow_dispatch:
   workflow_call:
 

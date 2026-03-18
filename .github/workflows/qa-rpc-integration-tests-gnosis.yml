@@ -3,10 +3,6 @@ name: QA - RPC Integration Tests (Gnosis)
 on:
   workflow_dispatch:     # Run manually
   workflow_call:
-  push:
-    branches:
-      - main
-      - 'release/3.*'
 
 
 jobs:

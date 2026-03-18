@@ -1,11 +1,5 @@
 name: Manifest Check
 on:
-  push:
-    branches:
-      - main
-      - 'release/**'
-    paths:
-      - 'go.mod'
   workflow_dispatch:
   workflow_call:
 

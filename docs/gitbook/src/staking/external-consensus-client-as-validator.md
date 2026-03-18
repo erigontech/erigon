@@ -18,7 +18,7 @@ Once you have Erigon and a CL client up and running, you can proceed to set up a
 
 To set up a VC, follow the instructions provided in the official documentation, such as:
 
-[https://lighthouse-book.sigmaprime.io/mainnet-validator.html](https://lighthouse-book.sigmaprime.io/mainnet-validator.html).
+[https://lighthouse-book.sigmaprime.io/validator_management.html](https://lighthouse-book.sigmaprime.io/validator_management.html).
 
 This guide will walk you through the process of setting up a VC, including:
 

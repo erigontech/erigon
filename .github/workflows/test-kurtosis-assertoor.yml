@@ -11,10 +11,6 @@ env:
   ASSERTOOR_IMAGE: "ethpandaops/assertoor:v0.0.17"
 
 on:
-  push:
-    branches:
-        - main
-        - 'release/**'
   workflow_dispatch:
   workflow_call:
 
