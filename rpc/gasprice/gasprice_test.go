@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/gasprice"
 	"github.com/erigontech/erigon/rpc/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
@@ -262,4 +263,159 @@ func BenchmarkKthPercentile(b *testing.B) {
 		index := (len(values) - 1) * percentile / 100
 		_ = findKthUint256(values, index)
 	}
+}
+
+// mockOracleBackend is a minimal OracleBackend for unit tests.
+// HeaderByNumber intentionally ignores ctx cancellation so the oracle can
+// proceed past the head-lookup even when the caller's context is already
+// cancelled, allowing us to verify that cancellation propagates correctly
+// through fetchBlockPricesParallel.
+type mockOracleBackend struct {
+	head *types.Header
+}
+
+func (m *mockOracleBackend) HeaderByNumber(_ context.Context, _ rpc.BlockNumber) (*types.Header, error) {
+	return m.head, nil
+}
+
+func (m *mockOracleBackend) BlockByNumber(ctx context.Context, _ rpc.BlockNumber) (*types.Block, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return types.NewBlock(m.head, nil, nil, nil, nil), nil
+}
+
+func (m *mockOracleBackend) ChainConfig() *chain.Config { return chain.TestChainConfig }
+
+func (m *mockOracleBackend) GetLatestBlockNumber() (uint64, error) {
+	return m.head.Number.Uint64(), nil
+}
+
+func (m *mockOracleBackend) GetReceiptsGasUsed(_ context.Context, _ *types.Block) (types.Receipts, error) {
+	return nil, nil
+}
+
+func (m *mockOracleBackend) PendingBlockAndReceipts() (*types.Block, types.Receipts) {
+	return nil, nil
+}
+
+func (m *mockOracleBackend) Fork(_ context.Context) (gasprice.OracleBackend, func(), error) {
+	return nil, nil, nil // sequential mode
+}
+
+// TestSuggestTipCap_ContextCancelled verifies that a cancelled caller context is
+// propagated as an error rather than silently returning partial/stale results.
+func TestSuggestTipCap_ContextCancelled(t *testing.T) {
+	head := types.NewEmptyHeaderForAssembling()
+	head.Number.SetUint64(10)
+
+	backend := &mockOracleBackend{head: head}
+	cfg := gaspricecfg.Config{
+		Blocks:     5,
+		Percentile: 60,
+		Default:    uint256.NewInt(common.GWei),
+	}
+
+	cache := jsonrpc.NewGasPriceCache()
+	oracle := gasprice.NewOracle(backend, cfg, cache, nil, log.New())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel before the call
+
+	_, err := oracle.SuggestTipCap(ctx)
+	require.Error(t, err, "cancelled context must propagate as an error, not return partial results")
+}
+
+// TestSuggestTipCap_SparseBlocks verifies that the oracle does not panic or error
+// on a chain where most blocks are empty and only one has transactions.
+// This exercises the two-phase scan and empty-block fallback (fix for #17617).
+func TestSuggestTipCap_SparseBlocks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	addr := crypto.PubkeyToAddress(key.PublicKey)
+	gspec := &types.Genesis{
+		Config: chain.TestChainConfig,
+		Alloc:  types.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
+	}
+	signer := types.LatestSigner(gspec.Config)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
+
+	// 10 blocks: only the last one (index 9) has a transaction; all others are empty.
+	const totalBlocks = 10
+	ch, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, totalBlocks, func(i int, b *blockgen.BlockGen) {
+		b.SetCoinbase(common.Address{1})
+		if i == totalBlocks-1 {
+			tx, txErr := types.SignTx(
+				types.NewTransaction(b.TxNonce(addr), common.HexToAddress("deadbeef"),
+					uint256.NewInt(100), 21000, uint256.NewInt(42*common.GWei), nil),
+				*signer, key,
+			)
+			if txErr != nil {
+				t.Fatalf("failed to create tx: %v", txErr)
+			}
+			b.AddTx(tx)
+		}
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(ch))
+
+	cfg := gaspricecfg.Config{
+		Blocks:     5,
+		Percentile: 60,
+		Default:    uint256.NewInt(common.GWei),
+	}
+	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewDummy(), m.BlockReader, false,
+		rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
+
+	dbTx, txErr := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, txErr)
+	defer dbTx.Rollback()
+
+	cache := jsonrpc.NewGasPriceCache()
+	oracle := gasprice.NewOracle(jsonrpc.NewGasPriceOracleBackend(nil, dbTx, baseApi), cfg, cache, nil, log.New())
+
+	got, err := oracle.SuggestTipCap(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, got, "oracle must return a non-nil price for a sparse chain with at least one transaction")
+}
+
+// TestSuggestTipCap_AllEmptyBlocks verifies that the oracle handles a fully empty chain
+// (no transactions in any block) without panicking or returning an error.
+func TestSuggestTipCap_AllEmptyBlocks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	gspec := &types.Genesis{Config: chain.TestChainConfig}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
+
+	const totalBlocks = 5
+	ch, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, totalBlocks, func(_ int, b *blockgen.BlockGen) {
+		b.SetCoinbase(common.Address{1})
+		// no transactions — all blocks are empty
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(ch))
+
+	cfg := gaspricecfg.Config{
+		Blocks:     5,
+		Percentile: 60,
+		Default:    uint256.NewInt(common.GWei),
+	}
+	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewDummy(), m.BlockReader, false,
+		rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
+
+	dbTx, txErr := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, txErr)
+	defer dbTx.Rollback()
+
+	cache := jsonrpc.NewGasPriceCache()
+	oracle := gasprice.NewOracle(jsonrpc.NewGasPriceOracleBackend(nil, dbTx, baseApi), cfg, cache, nil, log.New())
+
+	// With no transactions anywhere, the oracle returns (nil, nil): no price, no error.
+	_, err = oracle.SuggestTipCap(context.Background())
+	require.NoError(t, err)
 }

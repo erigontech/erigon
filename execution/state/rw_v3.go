@@ -528,6 +528,64 @@ func (c *versionedWriteCollector) WriteAccountStorage(address accounts.Address, 
 
 func (c *versionedWriteCollector) CreateContract(_ accounts.Address) error { return nil }
 
+// LightCollector is a lightweight StateWriter that accumulates VersionedWrites
+// without the rs.accounts locking of versionedWriteCollector. It is used by
+// parallel workers to capture MakeWriteSet output (collector-format writes with
+// all 4 account fields per address) alongside the normal IBS VersionedWrites.
+// The captured writes are later used in finalize to skip full IBS reconstruction.
+type LightCollector struct {
+	writes VersionedWrites
+}
+
+func NewLightCollector() *LightCollector {
+	return &LightCollector{}
+}
+
+// TakeWrites returns the accumulated writes and resets the collector.
+func (c *LightCollector) TakeWrites() VersionedWrites {
+	writes := c.writes
+	c.writes = nil
+	return writes
+}
+
+func (c *LightCollector) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
+	var accountCopy accounts.Account
+	accountCopy.Copy(account)
+	accountCopy.PrevIncarnation = account.PrevIncarnation
+
+	if original.Incarnation > accountCopy.Incarnation {
+		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: SelfDestructPath, Val: true})
+	}
+
+	c.writes = append(c.writes,
+		&VersionedWrite{Address: address, Path: BalancePath, Val: accountCopy.Balance},
+		&VersionedWrite{Address: address, Path: NoncePath, Val: accountCopy.Nonce},
+		&VersionedWrite{Address: address, Path: IncarnationPath, Val: accountCopy.Incarnation},
+		&VersionedWrite{Address: address, Path: CodeHashPath, Val: accountCopy.CodeHash},
+	)
+	return nil
+}
+
+func (c *LightCollector) UpdateAccountCode(address accounts.Address, _ uint64, _ accounts.CodeHash, code []byte) error {
+	c.writes = append(c.writes, &VersionedWrite{Address: address, Path: CodePath, Val: code})
+	return nil
+}
+
+func (c *LightCollector) DeleteAccount(address accounts.Address, _ *accounts.Account) error {
+	c.writes = append(c.writes, &VersionedWrite{Address: address, Path: SelfDestructPath, Val: true})
+	return nil
+}
+
+func (c *LightCollector) WriteAccountStorage(address accounts.Address, _ uint64, key accounts.StorageKey, original, value uint256.Int) error {
+	if original == value {
+		return nil
+	}
+	c.writes = append(c.writes, &VersionedWrite{Address: address, Path: StoragePath, Key: key, Val: value})
+	return nil
+}
+
+func (c *LightCollector) CreateContract(_ accounts.Address) error { return nil }
+
 // NotifyAccumulator drives txpool state-diff notifications from VersionedWrites.
 // It reconstructs account state from the per-field writes and calls
 // ChangeAccount/ChangeCode/ChangeStorage on the accumulator. StartChange must
