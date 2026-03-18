@@ -20,6 +20,8 @@
 package state
 
 import (
+	"maps"
+
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -43,9 +45,8 @@ func newAccessList() *accessList {
 // The slots backing array is retained; cleared inner maps are reused by
 // subsequent AddSlot calls without new allocations.
 func (al *accessList) Reset() {
-	for i, s := range al.slots {
+	for _, s := range al.slots {
 		clear(s)
-		al.slots[i] = s // keep the cleared map in the backing array for reuse
 	}
 	al.slots = al.slots[:0]
 	clear(al.addresses)
@@ -74,18 +75,11 @@ func (al *accessList) Contains(address accounts.Address, slot accounts.StorageKe
 // Copy creates an independent copy of an accessList.
 func (al *accessList) Copy() *accessList {
 	cp := &accessList{
-		addresses: make(map[accounts.Address]int, len(al.addresses)),
+		addresses: maps.Clone(al.addresses),
 		slots:     make([]map[accounts.StorageKey]struct{}, len(al.slots)),
 	}
-	for k, v := range al.addresses {
-		cp.addresses[k] = v
-	}
 	for i, slotMap := range al.slots {
-		m := make(map[accounts.StorageKey]struct{}, len(slotMap))
-		for k := range slotMap {
-			m[k] = struct{}{}
-		}
-		cp.slots[i] = m
+		cp.slots[i] = maps.Clone(slotMap)
 	}
 	return cp
 }
