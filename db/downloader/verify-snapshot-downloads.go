@@ -28,7 +28,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	g "github.com/anacrolix/generics"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
 	"github.com/pelletier/go-toml/v2"
@@ -324,22 +323,15 @@ func checkDataFile(
 	return issues, true
 }
 
-// verifyPieceHashes hashes each torrent piece using the mmap/sparse-read storage layer and
-// compares to the piece hashes recorded in the torrent info dict.
+// verifyPieceHashes hashes each torrent piece using the same mmap/sparse-read storage
+// configuration as the main downloader and compares against the piece hashes in the torrent info.
 func verifyPieceHashes(
 	ctx context.Context,
 	snapDir string,
 	info *metainfo.Info,
 	infoHash metainfo.Hash,
 ) (issues []SnapshotVerifyIssue) {
-	// NewFileOpts with UsePartFiles=false uses the mmap-based fileIo (defaultFileIo).
-	// The mmap layer implements seekDataOrEof via SEEK_DATA/SEEK_HOLE, enabling efficient
-	// sparse-file reads that skip holes instead of reading zeroes.
-	client := storage.NewFileOpts(storage.NewFileClientOpts{
-		ClientBaseDir:   snapDir,
-		UsePartFiles:    g.Some(false),
-		PieceCompletion: storage.NewMapPieceCompletion(),
-	})
+	client := newSnapStorage(snapDir, nil)
 	defer client.Close()
 
 	t, err := client.OpenTorrent(ctx, info, infoHash)
