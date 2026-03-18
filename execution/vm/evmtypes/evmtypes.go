@@ -134,7 +134,7 @@ type AddressAndBalance struct {
 type IntraBlockState interface {
 	SubBalance(accounts.Address, uint256.Int, tracing.BalanceChangeReason) error
 	AddBalance(accounts.Address, uint256.Int, tracing.BalanceChangeReason) error
-	GetBalance(accounts.Address) (uint256.Int, error)
+	GetBalance(common.Address) (uint256.Int, error)
 
 	GetRemovedAccountsWithBalance() []AddressAndBalance
 
