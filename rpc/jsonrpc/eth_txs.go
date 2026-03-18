@@ -229,9 +229,11 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 	}
 
 	txs := block.Transactions()
-	if uint64(txIndex) > uint64(len(txs)) {
+	idx := uint64(txIndex)
+	n := uint64(len(txs))
+	if idx > n {
 		return nil, nil // not error
-	} else if uint64(txIndex) == uint64(len(txs)) {
+	} else if idx == n {
 		borTx, borTxHash, err := api.lookupBorTx(ctx, chainConfig, block.NumberU64(), block.Hash())
 		if err != nil {
 			return nil, err
@@ -239,10 +241,10 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 		if borTx == nil {
 			return nil, nil // not error
 		}
-		return ethapi.NewRPCBorTransaction(borTx, borTxHash, block.Hash(), block.NumberU64(), uint64(txIndex), chainConfig.ChainID), nil
+		return ethapi.NewRPCBorTransaction(borTx, borTxHash, block.Hash(), block.NumberU64(), idx, chainConfig.ChainID), nil
 	}
 
-	return ethapi.NewRPCTransaction(txs[txIndex], block.Hash(), block.Time(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil
+	return ethapi.NewRPCTransaction(txs[txIndex], block.Hash(), block.Time(), block.NumberU64(), idx, block.BaseFee()), nil
 }
 
 // GetRawTransactionByBlockHashAndIndex returns the bytes of the transaction for the given block hash and index.
@@ -324,9 +326,11 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 	}
 
 	txs := block.Transactions()
-	if uint64(txIndex) > uint64(len(txs)) {
+	idx := uint64(txIndex)
+	n := uint64(len(txs))
+	if idx > n {
 		return nil, nil // not error
-	} else if uint64(txIndex) == uint64(len(txs)) {
+	} else if idx == n {
 		borTx, borTxHash, err := api.lookupBorTx(ctx, chainConfig, blockNum, hash)
 		if err != nil {
 			return nil, err
@@ -334,10 +338,10 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 		if borTx == nil {
 			return nil, nil
 		}
-		return ethapi.NewRPCBorTransaction(borTx, borTxHash, hash, blockNum, uint64(txIndex), chainConfig.ChainID), nil
+		return ethapi.NewRPCBorTransaction(borTx, borTxHash, hash, blockNum, idx, chainConfig.ChainID), nil
 	}
 
-	return ethapi.NewRPCTransaction(txs[txIndex], hash, block.Time(), blockNum, uint64(txIndex), block.BaseFee()), nil
+	return ethapi.NewRPCTransaction(txs[txIndex], hash, block.Time(), blockNum, idx, block.BaseFee()), nil
 }
 
 // GetRawTransactionByBlockNumberAndIndex returns the bytes of the transaction for the given block number and index.
