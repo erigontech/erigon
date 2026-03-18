@@ -299,7 +299,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 
 	if st.msg.CheckTransaction() {
 		// Make sure the sender is an EOA (EIP-3607)
-		codeHash, err := st.state.GetCodeHash(from)
+		codeHash, err := st.state.GetCodeHash(from.Value())
 		if err != nil {
 			return fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 		}
@@ -683,7 +683,7 @@ func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contra
 			st.state.MarkAddressAccess(authority.Value(), false)
 
 			// 4. authority code should be empty or already delegated
-			codeHash, err := st.state.GetCodeHash(authority)
+			codeHash, err := st.state.GetCodeHash(authority.Value())
 			if err != nil {
 				return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 			}

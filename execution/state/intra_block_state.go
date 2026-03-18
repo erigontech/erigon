@@ -758,7 +758,8 @@ func (sdb *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) GetCodeHash(addr accounts.Address) (accounts.CodeHash, error) {
+func (sdb *IntraBlockState) GetCodeHash(rawAddr common.Address) (accounts.CodeHash, error) {
+	addr := sdb.InternAddress(rawAddr)
 	if sdb.versionMap == nil {
 		stateObject, err := sdb.getStateObject(addr, true)
 		if err != nil {
@@ -786,14 +787,14 @@ func (sdb *IntraBlockState) ResolveCodeHash(addr accounts.Address) (accounts.Cod
 	dd, ok, err := sdb.GetDelegatedDesignation(addr)
 
 	if ok {
-		return sdb.GetCodeHash(dd)
+		return sdb.GetCodeHash(dd.Value())
 	}
 
 	if err != nil {
 		return accounts.NilCodeHash, err
 	}
 
-	return sdb.GetCodeHash(addr)
+	return sdb.GetCodeHash(addr.Value())
 }
 
 func (sdb *IntraBlockState) ResolveCode(addr accounts.Address) ([]byte, error) {

@@ -427,7 +427,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	// designator (0xef0100...) is seen as non-empty code, triggering a collision.
 	// This matches geth's behavior: CREATE/CREATE2 must not overwrite a
 	// delegated account even if the delegation target is empty.
-	contractHash, err := evm.intraBlockState.GetCodeHash(address)
+	contractHash, err := evm.intraBlockState.GetCodeHash(address.Value())
 	if err != nil {
 		return nil, accounts.NilAddress, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
