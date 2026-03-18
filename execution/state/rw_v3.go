@@ -525,9 +525,10 @@ func (c *versionedWriteCollector) DeleteAccount(address accounts.Address, origin
 	return nil
 }
 
-func (c *versionedWriteCollector) WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, _, value uint256.Int) error {
-	// No skip — same rationale as LightCollector.WriteAccountStorage.
-	// DomainPut's internal bytes.Equal skip handles the no-change case.
+func (c *versionedWriteCollector) WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
+	if original == value {
+		return nil
+	}
 	c.writes = append(c.writes, &VersionedWrite{Address: address, Path: StoragePath, Key: key, Val: value})
 
 	c.rs.accountsMutex.Lock()
@@ -611,13 +612,10 @@ func (c *LightCollector) DeleteAccount(address accounts.Address, _ *accounts.Acc
 	return nil
 }
 
-func (c *LightCollector) WriteAccountStorage(address accounts.Address, _ uint64, key accounts.StorageKey, _, value uint256.Int) error {
-	// Always emit storage writes. In the parallel executor, `original` comes
-	// from blockOriginStorage (pre-block value) via MakeWriteSet(useBlockOrigin=true).
-	// Skipping when original==value misses the revert case: TX N writes slot
-	// S=X, TX M reverts S to the block-origin value Y — the skip leaves the
-	// domain with X instead of Y. DomainPut's internal skip (bytes.Equal on
-	// the serialized value) handles the true no-change case correctly.
+func (c *LightCollector) WriteAccountStorage(address accounts.Address, _ uint64, key accounts.StorageKey, original, value uint256.Int) error {
+	if original == value {
+		return nil
+	}
 	c.writes = append(c.writes, &VersionedWrite{Address: address, Path: StoragePath, Key: key, Val: value})
 	return nil
 }
