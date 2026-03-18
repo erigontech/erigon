@@ -441,8 +441,6 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	// Disable ReplaceKeysInValues before main loop; will be re-enabled for squeeze pass
 	a.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
 
-	batchSize := dbg.EnvDataSize("ERIGON_COMMITMENT_REBUILD_BATCH_SIZE", 12*datasize.GB)
-
 	// Determine block range to process
 	var execProgress uint64
 	rwTx, err := rwDb.BeginTemporalRw(ctx)
@@ -471,6 +469,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	}
 
 	blockTo := execProgress
+	stepSize := a.StepSize()
 
 	start := time.Now()
 	logEvery := time.NewTicker(20 * time.Second)
@@ -508,9 +507,6 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	if blockFrom > 0 {
 		blockFrom++ // SeekCommitment returns last committed block; start from next
 	}
-	const minBatchBlockCount uint64 = 500
-	const maxBatchBlockCount uint64 = 100_000
-	batchBlockCount := minBatchBlockCount
 
 	{
 		startFromTxNum, err := txNumsReader.Min(ctx, rwTx, blockFrom)
@@ -522,8 +518,8 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 			return nil, err
 		}
 		logger.Info("[rebuild_commitment_history] starting", "blockFrom", blockFrom, "blockTo", blockTo,
-			"txNumFrom", startFromTxNum, "txNumTo", endToTxNum, "batchSize", batchSize.HR(),
-			"batchBlocks", minBatchBlockCount, "warmupCache", useWarmupCache, "debugBlock", debugBlock)
+			"txNumFrom", startFromTxNum, "txNumTo", endToTxNum, "stepSize", stepSize,
+			"warmupCache", useWarmupCache, "debugBlock", debugBlock)
 	}
 	flushAtBlock := uint64(dbg.EnvInt("ERIGON_REBUILD_FLUSH_AT", 0))
 
@@ -660,7 +656,6 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 				"block", fmt.Sprintf("%d/%d", blockNum, blockTo),
 				"blk/s", fmt.Sprintf("%.1f", blkPerSec),
 				"keys", common.PrettyCounter(totalKeysProcessed),
-				"batchBlocks", batchBlockCount,
 				"root", hex.EncodeToString(rh),
 				"memBatch", common.ByteCount(domains.Size()),
 				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
@@ -670,7 +665,25 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	}
 
 	for blockFrom <= blockTo {
-		batchEnd := min(blockFrom+batchBlockCount-1, blockTo)
+		// Find the end of the current step: the last block whose max txNum < nextStepTxNum.
+		fromTxNum, err := txNumsReader.Min(ctx, rwTx, blockFrom)
+		if err != nil {
+			return nil, err
+		}
+		currentStep := fromTxNum / stepSize
+		nextStepTxNum := (currentStep + 1) * stepSize // first txNum of next step
+
+		// Find the last block that fits within this step.
+		batchEnd, ok, err := txNumsReader.FindBlockNum(ctx, rwTx, nextStepTxNum-1)
+		if err != nil {
+			return nil, fmt.Errorf("FindBlockNum for step %d boundary: %w", currentStep, err)
+		}
+		if !ok || batchEnd > blockTo {
+			batchEnd = blockTo // last step: just go to the end
+		}
+
+		logger.Info("[rebuild_commitment_history] step start",
+			"step", currentStep, "blockFrom", blockFrom, "blockTo", batchEnd)
 
 		//nolint:gocritic
 		roTx, err := rwDb.BeginTemporalRo(ctx)
@@ -767,14 +780,6 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 			}
 		}
 		batch.Close()
-
-		// Adapt batch block count based on memBatch vs target size.
-		memBatchSize := domains.Size()
-		if memBatchSize < uint64(batchSize) {
-			batchBlockCount = min(batchBlockCount*3/2, maxBatchBlockCount) // grow 50%, cap at maximum
-		} else {
-			batchBlockCount = max(batchBlockCount*2/3, minBatchBlockCount) // shrink 50%, floor at minimum
-		}
 
 		blockFrom = batchEnd + 1
 
