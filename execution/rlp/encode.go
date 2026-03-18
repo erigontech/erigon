@@ -482,11 +482,10 @@ func EncodeU64ToBuf(i uint64, to []byte) int {
 		to[0] = byte(i) // fits single byte
 		return 1
 	}
-	var buf [8]byte
-	binary.BigEndian.PutUint64(buf[:], i)
 	size := common.BitLenToByteLen(bits.Len64(i))
+	binary.BigEndian.PutUint64(to[1:9], i)
 	to[0] = EmptyStringCode + byte(size)
-	copy(to[1:], buf[8-size:])
+	copy(to[1:], to[9-size:9])
 	return 1 + size
 }
 
@@ -536,11 +535,8 @@ func EncodeBigInt(i *big.Int, w io.Writer, buffer []byte) error {
 
 	size := common.BitLenToByteLen(bitLen)
 	buffer[0] = EmptyStringCode + byte(size)
-	if _, err := w.Write(buffer[:1]); err != nil {
-		return err
-	}
-	i.FillBytes(buffer[:size])
-	_, err := w.Write(buffer[:size])
+	i.FillBytes(buffer[1 : 1+size])
+	_, err := w.Write(buffer[:1+size])
 	return err
 }
 
@@ -639,31 +635,27 @@ func EncodeStringToBuf(src []byte, dst []byte) int {
 
 // EncodeString encodes s as an RLP string via w.
 func EncodeString(s []byte, w io.Writer, buffer []byte) error {
-	switch len(s) {
-	case 0:
+	switch {
+	case len(s) == 0:
 		buffer[0] = EmptyStringCode
-		if _, err := w.Write(buffer[:1]); err != nil {
-			return err
-		}
-	case 1:
-		if s[0] >= SingleByteThreshold {
-			buffer[0] = EmptyStringCode + 1
-			if _, err := w.Write(buffer[:1]); err != nil {
-				return err
-			}
-		}
-		if _, err := w.Write(s); err != nil {
-			return err
-		}
+		_, err := w.Write(buffer[:1])
+		return err
+	case len(s) == 1 && s[0] < SingleByteThreshold:
+		_, err := w.Write(s)
+		return err
+	case len(s) < len(buffer)-1:
+		// Short string: assemble prefix + data in buffer for a single write.
+		buffer[0] = EmptyStringCode + byte(len(s))
+		copy(buffer[1:], s)
+		_, err := w.Write(buffer[:1+len(s)])
+		return err
 	default:
 		if err := EncodeStringPrefix(len(s), w, buffer); err != nil {
 			return err
 		}
-		if _, err := w.Write(s); err != nil {
-			return err
-		}
+		_, err := w.Write(s)
+		return err
 	}
-	return nil
 }
 
 // EncodeStringPrefix writes a string-type size prefix via w.
