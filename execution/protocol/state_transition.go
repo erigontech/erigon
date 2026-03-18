@@ -711,7 +711,7 @@ func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contra
 			}
 
 			// 6. Add PER_EMPTY_ACCOUNT_COST - PER_AUTH_BASE_COST gas to the global refund counter if authority exists in the trie.
-			exists, err := st.state.Exist(authority)
+			exists, err := st.state.Exist(authority.Value())
 			if err != nil {
 				return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 			}

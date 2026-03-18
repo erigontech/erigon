@@ -212,7 +212,7 @@ func (b *BlockGen) TxNonce(addr common.Address) uint64 {
 	if b.versionMap != nil {
 		b.ibs.SetTxContext(b.header.Number.Uint64(), len(b.txs))
 	}
-	exist, err := b.ibs.Exist(accounts.InternAddress(addr))
+	exist, err := b.ibs.Exist(addr)
 	if err != nil {
 		panic(fmt.Sprintf("can't get account: %s", err))
 	}

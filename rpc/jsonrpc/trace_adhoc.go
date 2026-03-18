@@ -740,11 +740,11 @@ func (sd *StateDiff) CreateContract(address accounts.Address) error {
 func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error {
 	var toRemove []accounts.Address
 	for addr, accountDiff := range sd.sdMap {
-		initialExist, err := initialIbs.Exist(addr)
+		initialExist, err := initialIbs.Exist(addr.Value())
 		if err != nil {
 			return err
 		}
-		exist, err := ibs.Exist(addr)
+		exist, err := ibs.Exist(addr.Value())
 		if err != nil {
 			return err
 		}

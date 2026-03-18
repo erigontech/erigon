@@ -790,8 +790,7 @@ func (do *dbObj) Exists(addrSlice goja.Value) bool {
 		do.vm.Interrupt(err)
 		return false
 	}
-	addr := accounts.InternAddress(common.BytesToAddress(a))
-	exists, err := do.ibs.Exist(addr)
+	exists, err := do.ibs.Exist(common.BytesToAddress(a))
 	if err != nil {
 		do.vm.Interrupt(err)
 		return false
