@@ -244,7 +244,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		if err != nil {
 			return nil, err
 		}
-		code, err := evm.IntraBlockState().GetCode(accounts.InternAddress(address))
+		code, err := evm.IntraBlockState().GetCode(address)
 		if err != nil {
 			return nil, err
 		}

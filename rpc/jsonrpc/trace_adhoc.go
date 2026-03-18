@@ -769,11 +769,11 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error
 					accountDiff.Balance = m
 					allEqual = false
 				}
-				fromCode, err := initialIbs.GetCode(addr)
+				fromCode, err := initialIbs.GetCode(addr.Value())
 				if err != nil {
 					return err
 				}
-				toCode, err := ibs.GetCode(addr)
+				toCode, err := ibs.GetCode(addr.Value())
 				if err != nil {
 					return err
 				}
@@ -815,7 +815,7 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error
 					accountDiff.Balance = m
 				}
 				{
-					code, err := initialIbs.GetCode(addr)
+					code, err := initialIbs.GetCode(addr.Value())
 					if err != nil {
 						return err
 					}
@@ -844,7 +844,7 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error
 				accountDiff.Balance = m
 			}
 			{
-				code, err := ibs.GetCode(addr)
+				code, err := ibs.GetCode(addr.Value())
 				if err != nil {
 					return err
 				}
