@@ -257,6 +257,7 @@ var Schema = SchemaGen{
 	CommitmentDomain: DomainCfg{
 		Name: kv.CommitmentDomain, ValuesTable: kv.TblCommitmentVals,
 		CompressCfg: DomainCompressCfg, Compression: seg.CompressKeys,
+		LargeValues: true,
 
 		Accessors:           AccessorHashMap,
 		ReplaceKeysInValues: AggregatorSqueezeCommitmentValues, // when true, keys are replaced in values during merge once file range reaches threshold
@@ -267,7 +268,7 @@ var Schema = SchemaGen{
 			HistoryIdx: kv.CommitmentHistoryIdx,
 			Accessors:  AccessorHashMap,
 
-			HistoryLargeValues:            false,
+			HistoryLargeValues:            true,
 			HistoryValuesOnCompressedPage: 64,
 
 			SnapshotsDisabled: true,
