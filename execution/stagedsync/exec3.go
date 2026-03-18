@@ -156,6 +156,7 @@ func ExecV3(ctx context.Context,
 
 	if maxTxNum == 0 {
 		// nothing to exec, make sure the stage is in sync with the sd
+		// TODO: route through block overlay once serial path initialises one
 		if execStage.BlockNumber < blockNum {
 			return execStage.Update(rwTx, blockNum)
 		}
@@ -546,7 +547,7 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 	}
 }
 
-func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, inputTxNum uint64, readAhead chan uint64, initialCycle bool, applyResults chan applyResult) error {
+func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, inputTxNum uint64, readAhead chan uint64, initialCycle bool, applyResults chan applyResult) error {
 	if te.execLoopGroup == nil {
 		return errors.New("no exec group")
 	}
@@ -562,7 +563,42 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 			}
 		}()
 
-		lastFrozenStep := tx.StepsInFiles(kv.CommitmentDomain)
+		// Open a thread-local roTx for DB reads (StepsInFiles, block metadata
+		// fallthrough). Block metadata reads go through an overlay read-view:
+		// checks the in-memory overlay first (InsertBlocks writes at chain tip),
+		// then falls through to this local roTx for snapshot/DB data.
+		execRoTx, err := te.cfg.db.BeginTemporalRo(ctx)
+		if err != nil {
+			return fmt.Errorf("executeBlocks: open roTx: %w", err)
+		}
+		defer execRoTx.Rollback()
+
+		var blockTx kv.Tx
+		if overlay := te.doms.BlockOverlay(); overlay != nil {
+			blockTx = overlay.NewReadView(execRoTx)
+		} else {
+			blockTx = execRoTx
+		}
+
+		// Use the max of all state domain steps (not just commitment) to
+		// determine which txNums need history reads. State domains (accounts,
+		// storage, code) can be ahead of commitment — TXs in those extra steps
+		// have their state in snapshot files but haven't been commitment-verified.
+		// Without marking them historic, workers use GetLatest which returns
+		// values from beyond the current execution point, causing nonce mismatches.
+		// Verify that state domain snapshot files are aligned with commitment.
+		// If state domains are ahead of commitment, GetLatest returns values
+		// from beyond the committed point, causing nonce mismatches.
+		cmtStep := execRoTx.StepsInFiles(kv.CommitmentDomain)
+		acctStep := execRoTx.StepsInFiles(kv.AccountsDomain)
+		storStep := execRoTx.StepsInFiles(kv.StorageDomain)
+		codeStep := execRoTx.StepsInFiles(kv.CodeDomain)
+		maxStateStep := max(acctStep, storStep, codeStep)
+		if maxStateStep > cmtStep {
+			return fmt.Errorf("snapshot step misalignment: state domains (accounts=%d, storage=%d, code=%d) ahead of commitment=%d — snapshot files need rebuilding",
+				acctStep, storStep, codeStep, cmtStep)
+		}
+		lastFrozenStep := cmtStep
 
 		var lastFrozenTxNum uint64
 		if lastFrozenStep > 0 {
@@ -576,19 +612,13 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 			}
 
 			var canonicalHash common.Hash
-			if err = tx.Apply(ctx, func(applyTx kv.Tx) error {
-				var e error
-				canonicalHash, e = rawdb.ReadCanonicalHash(applyTx, blockNum)
-				return e
-			}); err != nil {
+			canonicalHash, err = rawdb.ReadCanonicalHash(blockTx, blockNum)
+			if err != nil {
 				return err
 			}
 			b, ok := exec.ReadBlockWithSendersFromGlobalReadAheader(canonicalHash)
 			if b == nil || !ok {
-				err = tx.Apply(ctx, func(tx kv.Tx) error {
-					b, err = exec.BlockWithSenders(ctx, te.cfg.db, tx, te.cfg.blockReader, blockNum)
-					return err
-				})
+				b, err = exec.BlockWithSenders(ctx, te.cfg.db, blockTx, te.cfg.blockReader, blockNum)
 			}
 			if err != nil {
 				return err
@@ -795,6 +825,7 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 	start := time.Now()
 	// E2 state root check was in another stage - means we did flush state even if state root will not match
 	// And Unwind expecting it
+	// TODO: route stage updates through block overlay once serial path initialises one
 	if !parallel {
 		if err := e.Update(applyTx, header.Number.Uint64()); err != nil {
 			return false, times, err
@@ -808,13 +839,21 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 		return true, times, nil
 	}
 
+	// Open a thread-local roTx for domain reads during commitment.
+	// The rwTx (applyTx) is only needed for stage updates above.
+	commitRoTx, err := cfg.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return false, times, fmt.Errorf("commitment: open roTx: %w", err)
+	}
+	defer commitRoTx.Rollback()
+
 	// Get current txNum from the block being committed
 	txNumsReader := cfg.blockReader.TxnumReader()
-	blockTxNum, err := txNumsReader.Max(ctx, applyTx, header.Number.Uint64())
+	blockTxNum, err := txNumsReader.Max(ctx, commitRoTx, header.Number.Uint64())
 	if err != nil {
 		return false, times, err
 	}
-	computedRootHash, err := doms.ComputeCommitment(ctx, applyTx, true, header.Number.Uint64(), blockTxNum, e.LogPrefix(), nil)
+	computedRootHash, err := doms.ComputeCommitment(ctx, commitRoTx, true, header.Number.Uint64(), blockTxNum, e.LogPrefix(), nil)
 
 	times.ComputeCommitment = time.Since(start)
 	if err != nil {

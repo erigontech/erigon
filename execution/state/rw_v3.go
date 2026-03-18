@@ -166,11 +166,21 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 			}
 
 			if d.balance != nil || d.nonce != nil || d.incarnation != nil || d.codeHash != nil || d.code != nil {
-				// versionedWriteCollector.UpdateAccountData always emits all four
-				// account fields (balance, nonce, incarnation, codeHash) so the
-				// reconstruction below produces a complete account.  The nil-guards
-				// remain to defend against partial writes from other code paths.
-				acc := accounts.NewAccount()
+				// Read the current account from the domain as the base, then
+				// overlay only the fields present in the writes. LightCollector
+				// only emits fields that actually changed (see UpdateAccountData),
+				// so unchanged fields (e.g., nonce for a balance-only transfer)
+				// are nil and preserved from the domain state.
+				var acc accounts.Account
+				enc0, _, err := domains.GetLatest(kv.AccountsDomain, roTx, address[:])
+				if err != nil {
+					return err
+				}
+				if len(enc0) > 0 {
+					if err := accounts.DeserialiseV3(&acc, enc0); err != nil {
+						return err
+					}
+				}
 				if d.balance != nil {
 					acc.Balance = *d.balance
 				}
@@ -401,6 +411,19 @@ func NewStateV3Buffered(state *StateV3) *StateV3Buffered {
 	return bufferedState
 }
 
+// ClearAccountsCache drops all entries from the cross-block account cache.
+// Must be called after a block's state writes are fully applied to SharedDomains
+// (sd.mem) and before the next block's workers start reading. Without this,
+// stale entries from the previous block's versionedWriteCollector (populated
+// during engine.Finalize → MakeWriteSet) leak into subsequent blocks, causing
+// workers to read outdated nonces/balances from the BufferedReader cache
+// instead of the correct values in sd.mem.
+func (s *StateV3Buffered) ClearAccountsCache() {
+	s.accountsMutex.Lock()
+	clear(s.accounts)
+	s.accountsMutex.Unlock()
+}
+
 func (s *StateV3Buffered) WithDomains(domains *execctx.SharedDomains) *StateV3Buffered {
 	return &StateV3Buffered{
 		StateV3:       NewStateV3(domains, s.syncCfg, s.logger),
@@ -557,12 +580,26 @@ func (c *LightCollector) UpdateAccountData(address accounts.Address, original, a
 		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: SelfDestructPath, Val: true})
 	}
 
+	// Only emit fields that actually changed from the original. In the
+	// parallel executor, `original` comes from blockOriginStorage (pre-block
+	// values) via MakeWriteSet(useBlockOrigin=true). If we unconditionally
+	// emit all fields, a balance-only change (e.g., transfer TO the account)
+	// carries the pre-block nonce — overwriting a nonce increment from an
+	// earlier TX in the same block when ApplyStateWrites processes writes
+	// in txNum order. The domain-level DomainPut compares full serialized
+	// blobs, so it can't detect that only balance changed.
 	c.writes = append(c.writes,
 		&VersionedWrite{Address: address, Path: BalancePath, Val: accountCopy.Balance},
-		&VersionedWrite{Address: address, Path: NoncePath, Val: accountCopy.Nonce},
-		&VersionedWrite{Address: address, Path: IncarnationPath, Val: accountCopy.Incarnation},
-		&VersionedWrite{Address: address, Path: CodeHashPath, Val: accountCopy.CodeHash},
 	)
+	if accountCopy.Nonce != original.Nonce {
+		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: NoncePath, Val: accountCopy.Nonce})
+	}
+	if accountCopy.Incarnation != original.Incarnation {
+		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: IncarnationPath, Val: accountCopy.Incarnation})
+	}
+	if accountCopy.CodeHash != original.CodeHash {
+		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: CodeHashPath, Val: accountCopy.CodeHash})
+	}
 	return nil
 }
 
@@ -576,10 +613,15 @@ func (c *LightCollector) DeleteAccount(address accounts.Address, _ *accounts.Acc
 	return nil
 }
 
-func (c *LightCollector) WriteAccountStorage(address accounts.Address, _ uint64, key accounts.StorageKey, original, value uint256.Int) error {
-	if original == value {
-		return nil
-	}
+func (c *LightCollector) WriteAccountStorage(address accounts.Address, _ uint64, key accounts.StorageKey, _, value uint256.Int) error {
+	// Do NOT skip writes when original == value. In the parallel executor,
+	// `original` comes from blockOriginStorage (pre-block value) via
+	// MakeWriteSet(useBlockOrigin=true). But an earlier TX in the same block
+	// may have written a different value to this slot. If the current TX
+	// reverts the slot to the block-start value, skipping the write leaves
+	// the domain with the earlier TX's value — causing incorrect state for
+	// subsequent blocks (wrong SSTORE gas, trie root mismatch).
+	// The domain-level DomainPut handles actual skip logic via GetLatest.
 	c.writes = append(c.writes, &VersionedWrite{Address: address, Path: StoragePath, Key: key, Val: value})
 	return nil
 }

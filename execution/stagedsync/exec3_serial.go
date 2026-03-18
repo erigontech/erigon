@@ -56,12 +56,30 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 	se.resetWorkers(ctx, se.rs, se.applyTx)
 
+	// Thread-local roTx for domain reads (ComputeCommitment) in the exec loop.
+	// The rwTx is only needed for flush/unwind/stage-update.
+	execDomainRoTx, err := se.cfg.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return nil, rwTx, fmt.Errorf("serial exec loop: open domain roTx: %w", err)
+	}
+	defer execDomainRoTx.Rollback()
+
 	havePartialBlock := false
 	blockNum := startBlockNum
 
 	var b *types.Block
 
-	lastFrozenStep := se.applyTx.StepsInFiles(kv.CommitmentDomain)
+	// Verify state domain snapshot files are aligned with commitment.
+	cmtStep := se.applyTx.StepsInFiles(kv.CommitmentDomain)
+	acctStep := se.applyTx.StepsInFiles(kv.AccountsDomain)
+	storStep := se.applyTx.StepsInFiles(kv.StorageDomain)
+	codeStep := se.applyTx.StepsInFiles(kv.CodeDomain)
+	maxStateStep := max(acctStep, storStep, codeStep)
+	if maxStateStep > cmtStep {
+		return nil, rwTx, fmt.Errorf("snapshot step misalignment: state domains (accounts=%d, storage=%d, code=%d) ahead of commitment=%d — snapshot files need rebuilding",
+			acctStep, storStep, codeStep, cmtStep)
+	}
+	lastFrozenStep := cmtStep
 
 	var lastFrozenTxNum uint64
 	if lastFrozenStep > 0 {
@@ -188,7 +206,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				se.doms.SetTrace(true, false)
 			}
 			// Warmup is enabled via EnableTrieWarmup at executor init
-			rh, err := se.doms.ComputeCommitment(ctx, se.applyTx, true, blockNum, inputTxNum-1, se.logPrefix, nil)
+			rh, err := se.doms.ComputeCommitment(ctx, execDomainRoTx, true, blockNum, inputTxNum-1, se.logPrefix, nil)
 			se.doms.SetTrace(false, false)
 
 			if err != nil {
@@ -318,6 +336,14 @@ func (se *serialExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buf
 }
 
 func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, isInitialCycle bool, profile bool) (cont bool, err error) {
+	// Open a thread-local read-only tx for domain operations. Domain reads
+	// should not go through the rwTx — the rwTx is only needed for flush/unwind.
+	domainRoTx, err := se.cfg.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return false, fmt.Errorf("serial exec: open domain roTx: %w", err)
+	}
+	defer domainRoTx.Rollback()
+
 	blockReceipts := make([]*types.Receipt, 0, len(tasks))
 	var startTxIndex int
 
@@ -521,15 +547,15 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 		}
 
 		if !txTask.HistoryExecution {
-			if err := se.rs.ApplyStateWrites(ctx, se.applyTx, txTask.BlockNumber(), txTask.TxNum, nil,
+			if err := se.rs.ApplyStateWrites(ctx, domainRoTx, txTask.BlockNumber(), txTask.TxNum, nil,
 				txTask.BalanceIncreaseSet, txTask.Rules()); err != nil {
 				return false, err
 			}
-			if err := se.rs.ApplyTxIndexes(se.applyTx, txTask.TxNum, applyReceipt, se.blobGasUsed,
+			if err := se.rs.ApplyTxIndexes(domainRoTx, txTask.TxNum, applyReceipt, se.blobGasUsed,
 				result.Logs, result.TraceFroms, result.TraceTos); err != nil {
 				return false, err
 			}
-			if err := se.rs.CommitStepBoundary(ctx, se.applyTx, txTask.BlockNumber(), txTask.TxNum); err != nil {
+			if err := se.rs.CommitStepBoundary(ctx, domainRoTx, txTask.BlockNumber(), txTask.TxNum); err != nil {
 				return false, err
 			}
 		}
