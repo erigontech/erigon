@@ -1657,7 +1657,7 @@ func TestCVE2020_26265(t *testing.T) {
 		reader := m.NewHistoryStateReader(2, tx)
 		statedb := state.New(reader)
 
-		got, err := statedb.GetBalance(aa)
+		got, err := statedb.GetBalance(aa.Value())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2058,7 +2058,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 
 		// Import the canonical chain
 		statedb := state.New(m.NewHistoryStateReader(2, tx))
-		got, err := statedb.GetBalance(aa)
+		got, err := statedb.GetBalance(aa.Value())
 		if err != nil {
 			return err
 		}
@@ -2072,7 +2072,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 				t.Fatalf("block %d: failed to insert into chain: %v", block.NumberU64(), err)
 			}
 			statedb = state.New(m.NewHistoryStateReader(1, tx))
-			got, err := statedb.GetBalance(aa)
+			got, err := statedb.GetBalance(aa.Value())
 			if err != nil {
 				return err
 			}
@@ -2279,7 +2279,7 @@ func TestEIP1559Transition(t *testing.T) {
 		statedb := state.New(m.NewHistoryStateReader(1, tx))
 
 		// 3: Ensure that miner received only the tx's tip.
-		actual, err := statedb.GetBalance(accounts.InternAddress(block.Coinbase()))
+		actual, err := statedb.GetBalance(block.Coinbase())
 		if err != nil {
 			return err
 		}
@@ -2329,7 +2329,7 @@ func TestEIP1559Transition(t *testing.T) {
 		effectiveTip := block.Transactions()[0].GetEffectiveGasTip(baseFee).Uint64()
 
 		// 6+5: Ensure that miner received only the tx's effective tip.
-		actual, err := statedb.GetBalance(accounts.InternAddress(block.Coinbase()))
+		actual, err := statedb.GetBalance(block.Coinbase())
 		if err != nil {
 			return err
 		}
