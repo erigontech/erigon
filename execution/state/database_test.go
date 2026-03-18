@@ -175,7 +175,7 @@ func TestCreate2Revive(t *testing.T) {
 		}
 		// We expect number 0x42 in the position [2], because it is the block number 2
 		key2 = accounts.InternKey(common.BigToHash(big.NewInt(2)))
-		check2, err = st.GetState(create2address, key2)
+		check2, err = st.GetState(create2address.Value(), key2.Value())
 		require.NoError(t, err)
 		if check2.Uint64() != 0x42 {
 			t.Errorf("expected 0x42 in position 2, got: %x", check2.Uint64())
@@ -212,13 +212,13 @@ func TestCreate2Revive(t *testing.T) {
 		}
 		// We expect number 0x42 in the position [4], because it is the block number 4
 		key4 := accounts.InternKey(common.BigToHash(big.NewInt(4)))
-		check4, err := st.GetState(create2address, key4)
+		check4, err := st.GetState(create2address.Value(), key4.Value())
 		require.NoError(t, err)
 		if check4.Uint64() != 0x42 {
 			t.Errorf("expected 0x42 in position 4, got: %x", check4.Uint64())
 		}
 		// We expect number 0x0 in the position [2], because it is the block number 4
-		check2, err = st.GetState(create2address, key2)
+		check2, err = st.GetState(create2address.Value(), key2.Value())
 		require.NoError(t, err)
 		if !check2.IsZero() {
 			t.Errorf("expected 0x0 in position 2, got: %x", check2)
@@ -612,7 +612,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		}
 
 		// Remember value of field "x" (storage item 0) after the first block, to check after rewinding
-		correctValueX, err = st.GetState(accounts.InternAddress(contractAddress), key0)
+		correctValueX, err = st.GetState(contractAddress, key0.Value())
 		require.NoError(t, err)
 		return nil
 	})
@@ -644,7 +644,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		} else if !exist {
 			t.Error("expected contractAddress to exist at the block 4", contractAddress.String())
 		}
-		valueX, err := st.GetState(accounts.InternAddress(contractAddress), key0)
+		valueX, err := st.GetState(contractAddress, key0.Value())
 		require.NoError(t, err)
 		if valueX != correctValueX {
 			t.Fatalf("storage value has changed after reorg: %x, expected %x", valueX, correctValueX)
@@ -769,7 +769,7 @@ func TestReorgOverStateChange(t *testing.T) {
 		}
 
 		// Remember value of field "x" (storage item 0) after the first block, to check after rewinding
-		correctValueX, err = st.GetState(accounts.InternAddress(contractAddress), key0)
+		correctValueX, err = st.GetState(contractAddress, key0.Value())
 		require.NoError(t, err)
 		return nil
 	})
@@ -793,7 +793,7 @@ func TestReorgOverStateChange(t *testing.T) {
 		}
 
 		// Reload blockchain from the database
-		valueX, err := st.GetState(accounts.InternAddress(contractAddress), key0)
+		valueX, err := st.GetState(contractAddress, key0.Value())
 		require.NoError(t, err)
 		if valueX != correctValueX {
 			t.Fatalf("storage value has changed after reorg: %x, expected %x", valueX, correctValueX)
@@ -905,7 +905,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
 		}
 
-		check0, err = st.GetState(accounts.InternAddress(contractAddress), key0)
+		check0, err = st.GetState(contractAddress, key0.Value())
 		require.NoError(t, err)
 		if !check0.IsZero() {
 			t.Errorf("expected 0x00 in position 0, got: %x", check0.Bytes())
@@ -1637,7 +1637,7 @@ func TestRecreateAndRewind(t *testing.T) {
 			t.Errorf("expected phoenix %x to exist after first insert", phoenixAddress)
 		}
 
-		check0, _ := st.GetState(accounts.InternAddress(phoenixAddress), key0)
+		check0, _ := st.GetState(phoenixAddress, key0.Value())
 		if check0.Cmp(uint256.NewInt(2)) != 0 {
 			t.Errorf("expected 0x02 in position 0, got: 0x%x", check0.Bytes())
 		}
@@ -1658,7 +1658,7 @@ func TestRecreateAndRewind(t *testing.T) {
 			t.Errorf("expected phoenix %x to exist after second insert", phoenixAddress)
 		}
 
-		check0, err = st.GetState(accounts.InternAddress(phoenixAddress), key0)
+		check0, err = st.GetState(phoenixAddress, key0.Value())
 		require.NoError(t, err)
 		if check0.Cmp(uint256.NewInt(1)) != 0 {
 			t.Errorf("expected 0x01 in position 0, got: 0x%x", check0.Bytes())
@@ -1679,7 +1679,7 @@ func TestRecreateAndRewind(t *testing.T) {
 			t.Errorf("expected phoenix %x to exist after second insert", phoenixAddress)
 		}
 
-		check0, err = st.GetState(accounts.InternAddress(phoenixAddress), key0)
+		check0, err = st.GetState(phoenixAddress, key0.Value())
 		require.NoError(t, err)
 		if check0.Cmp(uint256.NewInt(0)) != 0 {
 			t.Errorf("expected 0x00 in position 0, got: 0x%x", check0.Bytes())
