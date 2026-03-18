@@ -149,8 +149,6 @@ func listenToIncomingBlocksUntilANewBlockIsReceived(ctx context.Context, logger 
 
 	// Map to keep track of seen block roots
 	seenBlockRoots := make(map[common.Hash]struct{})
-	// [GLOAS] Track the latest envelope fetch goroutine so we can wait for it before returning.
-	var envelopeDone chan struct{}
 MainLoop:
 	for {
 		select {
@@ -169,15 +167,11 @@ MainLoop:
 			if blocks == nil {
 				continue
 			}
-			// [GLOAS] Fetch missing execution payload envelopes for confirmed FULL parents.
-			// Runs concurrently so block processing is not blocked; we wait via envelopeDone after MainLoop.
-			if fullRoots := findMissingEnvelopeRoots(cfg, blocks.Data); len(fullRoots) > 0 {
-				envelopeDone = make(chan struct{})
-				go func(done chan struct{}) {
-					defer close(done)
-					fetchAndApplyEnvelopes(ctx, cfg, fullRoots)
-				}(envelopeDone)
-			}
+
+			// [GLOAS] Batch-determine and fetch parent envelopes before processing blocks.
+			envelopeRoots := determineParentEnvelopeRoots(cfg, blocks.Data)
+			envelopes := fetchParentEnvelopes(ctx, cfg, envelopeRoots)
+
 			// Handle blocks received on the response channel
 			for _, block := range blocks.Data {
 				// Check if the parent block is known
@@ -201,6 +195,17 @@ MainLoop:
 					continue
 				}
 
+				// [GLOAS] Apply parent's envelope before processBlock so that
+				// latestBlockHash is up-to-date for bid validation.
+				if block.Version() >= clparams.GloasVersion && len(envelopes) > 0 {
+					parentRoot := block.Block.ParentRoot
+					if env, ok := envelopes[common.Hash(parentRoot)]; ok {
+						if envErr := cfg.forkChoice.OnExecutionPayload(ctx, env, false, true); envErr != nil {
+							log.Debug("[chainTipSync] failed to apply parent envelope", "slot", block.Block.Slot, "err", envErr)
+						}
+					}
+				}
+
 				// Process the block - DA can be downloaded later if we are behind (see blobHistoryDownloader)
 				if err := processBlock(ctx, cfg, cfg.indiciesDB, block, true, true, false); err != nil {
 					log.Debug("bad blocks segment received", "err", err, "blockSlot", block.Block.Slot)
@@ -220,9 +225,6 @@ MainLoop:
 			// Log progress periodically
 			logger.Info("[Caplin] Progress", "progress", cfg.forkChoice.HighestSeen(), "from", args.seenSlot, "to", args.targetSlot)
 		}
-	}
-	if envelopeDone != nil {
-		<-envelopeDone
 	}
 	return nil
 }
@@ -247,7 +249,7 @@ func findMissingEnvelopeRoots(cfg *Cfg, blocks []*cltypes.SignedBeaconBlock) [][
 		}
 		parentBlock, ok := cfg.forkChoice.GetBlock(parentRoot)
 		if !ok {
-			log.Debug("[chainTipSync] parent block not in fork choice (possible reorg)", "slot", block.Block.Slot, "parentRoot", common.Hash(parentRoot))
+			log.Trace("[findMissingEnvelopeRoots] parent block not in fork choice", "slot", block.Block.Slot, "parentRoot", common.Hash(parentRoot))
 			continue
 		}
 		parentBid := parentBlock.Block.Body.GetSignedExecutionPayloadBid()
@@ -273,6 +275,94 @@ func fetchAndApplyEnvelopes(ctx context.Context, cfg *Cfg, roots [][32]byte) {
 			log.Debug("[chainTipSync] failed to apply GLOAS envelope", "beaconBlockRoot", env.Message.BeaconBlockRoot, "err", err)
 		}
 	}
+}
+
+// determineParentEnvelopeRoots identifies parent blocks that were FULL but missing their
+// execution payload envelope. It checks parents in fork choice AND within the current batch
+// using the bid chain: if child.bid.ParentBlockHash == parent.bid.BlockHash, parent was FULL.
+func determineParentEnvelopeRoots(cfg *Cfg, blocks []*cltypes.SignedBeaconBlock) [][32]byte {
+	batchBlockByRoot := make(map[common.Hash]*cltypes.SignedBeaconBlock)
+	for _, b := range blocks {
+		if r, err := b.Block.HashSSZ(); err == nil {
+			batchBlockByRoot[common.Hash(r)] = b
+		}
+	}
+
+	var roots [][32]byte
+	seen := make(map[[32]byte]struct{})
+	for _, block := range blocks {
+		if block.Version() < clparams.GloasVersion {
+			continue
+		}
+		bid := block.Block.Body.GetSignedExecutionPayloadBid()
+		if bid == nil || bid.Message == nil {
+			continue
+		}
+		parentRoot := block.Block.ParentRoot
+		if cfg.forkChoice.HasEnvelope(common.Hash(parentRoot)) {
+			continue
+		}
+		if _, ok := seen[parentRoot]; ok {
+			continue
+		}
+		// Look up parent bid from fork choice or current batch
+		var parentBlock *cltypes.SignedBeaconBlock
+		if pb, ok := cfg.forkChoice.GetBlock(common.Hash(parentRoot)); ok {
+			parentBlock = pb
+		} else if pb, ok := batchBlockByRoot[common.Hash(parentRoot)]; ok {
+			parentBlock = pb
+		}
+		if parentBlock == nil {
+			continue
+		}
+		parentBid := parentBlock.Block.Body.GetSignedExecutionPayloadBid()
+		if parentBid == nil || parentBid.Message == nil {
+			continue
+		}
+		if bid.Message.ParentBlockHash == parentBid.Message.BlockHash {
+			roots = append(roots, parentRoot)
+			seen[parentRoot] = struct{}{}
+		}
+	}
+	return roots
+}
+
+// fetchParentEnvelopes batch-fetches execution payload envelopes for the given roots.
+// It retries until all envelopes are obtained or the context is cancelled.
+func fetchParentEnvelopes(ctx context.Context, cfg *Cfg, roots [][32]byte) map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope {
+	if len(roots) == 0 {
+		return nil
+	}
+	envelopes := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
+	remaining := make([][32]byte, len(roots))
+	copy(remaining, roots)
+
+	const maxAttempts = 10
+	for attempt := 0; attempt < maxAttempts && len(remaining) > 0; attempt++ {
+		if ctx.Err() != nil {
+			return envelopes
+		}
+		result, err := network.RequestEnvelopesFrantically(ctx, cfg.rpc, remaining)
+		if err != nil {
+			log.Debug("[chainTipSync] envelope fetch attempt failed", "err", err, "attempt", attempt+1, "remaining", len(remaining))
+			continue
+		}
+		for k, v := range result {
+			envelopes[k] = v
+		}
+		// Recalculate remaining
+		var stillMissing [][32]byte
+		for _, root := range remaining {
+			if _, ok := envelopes[common.Hash(root)]; !ok {
+				stillMissing = append(stillMissing, root)
+			}
+		}
+		remaining = stillMissing
+	}
+	if len(remaining) > 0 {
+		log.Debug("[chainTipSync] some parent envelopes still missing after retries", "missing", len(remaining))
+	}
+	return envelopes
 }
 
 // recoverMissingEnvelopes walks backwards from the current fork choice head
@@ -352,7 +442,7 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 	}
 
 	if args.seenSlot >= args.targetSlot {
-		recoverMissingEnvelopes(ctx, cfg)
+		// recoverMissingEnvelopes(ctx, cfg)
 		return nil
 	}
 

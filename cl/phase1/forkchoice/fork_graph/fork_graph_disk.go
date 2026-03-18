@@ -183,7 +183,7 @@ func (f *forkGraphDisk) isBlockRootTheCurrentState(blockRoot common.Hash) bool {
 // Add a new node and edge to the graph
 // parentFullState: if non-nil, use this as the starting state instead of looking up from block_states.
 // [Modified in Gloas:EIP7732] Allows passing execution_payload_states when parent is FULL.
-func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool, parentFullState *state.CachingBeaconState) (*state.CachingBeaconState, ChainSegmentInsertionResult, error) {
+func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool, parentFullState *state.CachingBeaconState, latestBlockHashOverride common.Hash) (*state.CachingBeaconState, ChainSegmentInsertionResult, error) {
 	block := signedBlock.Block
 	blockRoot, err := block.HashSSZ()
 	if err != nil {
@@ -212,6 +212,11 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		if err != nil {
 			return nil, LogisticError, fmt.Errorf("AddChainSegment: %w, parentRoot: %x", err, block.ParentRoot)
 		}
+	}
+
+	// [GLOAS] Patch latestBlockHash if an override is provided (checkpoint sync fallback).
+	if newState != nil && latestBlockHashOverride != (common.Hash{}) {
+		newState.SetLatestBlockHash(latestBlockHashOverride)
 	}
 
 	if newState == nil {
