@@ -313,11 +313,11 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 			return err
 		}
 		checkeq("HasSelfdestructed", ssd, csd)
-		sb, err := state.GetBalance(addr)
+		sb, err := state.GetBalance(addr.Value())
 		if err != nil {
 			return err
 		}
-		cb, err := checkstate.GetBalance(addr)
+		cb, err := checkstate.GetBalance(addr.Value())
 		if err != nil {
 			return err
 		}
@@ -459,7 +459,7 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	// Tx1 read
 	v, err = states[1].GetState(addr.Value(), key.Value())
 	assert.NoError(t, err)
-	b, err := states[1].GetBalance(addr)
+	b, err := states[1].GetBalance(addr.Value())
 	assert.NoError(t, err)
 	assert.Equal(t, val, v)
 	assert.Equal(t, balance, b)
@@ -467,7 +467,7 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	// Tx2 read
 	v, err = states[2].GetState(addr.Value(), key.Value())
 	assert.NoError(t, err)
-	b, err = states[2].GetBalance(addr)
+	b, err = states[2].GetBalance(addr.Value())
 	assert.NoError(t, err)
 	assert.Equal(t, val, v)
 	assert.Equal(t, balance, b)
@@ -490,7 +490,7 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	// Tx4 read
 	v, err = states[4].GetState(addr.Value(), key.Value())
 	assert.NoError(t, err)
-	b, err = states[4].GetBalance(addr)
+	b, err = states[4].GetBalance(addr.Value())
 	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, v)
 	assert.Equal(t, uint256.Int{}, b)
@@ -531,7 +531,7 @@ func TestVersionMapRevert(t *testing.T) {
 	states[1].SetState(addr, key, u256.U64(1))
 	v, err := states[1].GetState(addr.Value(), key.Value())
 	assert.NoError(t, err)
-	b, err := states[1].GetBalance(addr)
+	b, err := states[1].GetBalance(addr.Value())
 	assert.NoError(t, err)
 	assert.Equal(t, u256.U64(200), b)
 	assert.Equal(t, u256.U64(1), v)
@@ -543,7 +543,7 @@ func TestVersionMapRevert(t *testing.T) {
 
 	v, err = states[1].GetState(addr.Value(), key.Value())
 	assert.NoError(t, err)
-	b, err = states[1].GetBalance(addr)
+	b, err = states[1].GetBalance(addr.Value())
 	assert.NoError(t, err)
 	assert.Equal(t, val, v)
 	assert.Equal(t, balance, b)
@@ -553,7 +553,7 @@ func TestVersionMapRevert(t *testing.T) {
 	// Tx2 check the state and balance
 	v, err = states[2].GetState(addr.Value(), key.Value())
 	assert.NoError(t, err)
-	b, err = states[2].GetBalance(addr)
+	b, err = states[2].GetBalance(addr.Value())
 	assert.NoError(t, err)
 	assert.Equal(t, val, v)
 	assert.Equal(t, balance, b)
@@ -601,7 +601,7 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	// Tx2 read
 	v, err = states[2].GetState(addr.Value(), key.Value())
 	assert.NoError(t, err)
-	b, err := states[2].GetBalance(addr)
+	b, err := states[2].GetBalance(addr.Value())
 	assert.NoError(t, err)
 	assert.Equal(t, val, v)
 	assert.Equal(t, balance, b)
@@ -623,7 +623,7 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	v, err = states[2].GetState(addr.Value(), key.Value())
 	assert.NoError(t, err)
 	assert.Equal(t, u256.U64(1), v)
-	states[2].GetBalance(addr)
+	states[2].GetBalance(addr.Value())
 
 	// Tx1 read again should get Tx0 vals
 	v, err = states[1].GetState(addr.Value(), key.Value())
@@ -666,7 +666,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 	states[1].SetBalance(addr, balance2, tracing.BalanceChangeUnspecified)
 	v, err := states[1].GetState(addr.Value(), key.Value())
 	assert.NoError(t, err)
-	b, err := states[1].GetBalance(addr)
+	b, err := states[1].GetBalance(addr.Value())
 	assert.NoError(t, err)
 	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(true), true, "")
 
@@ -676,7 +676,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 	// Tx2 read should get Tx1's value
 	v, err = states[2].GetState(addr.Value(), key.Value())
 	assert.NoError(t, err)
-	b, err = states[2].GetBalance(addr)
+	b, err = states[2].GetBalance(addr.Value())
 	assert.NoError(t, err)
 	assert.Equal(t, val2, v)
 	assert.Equal(t, balance2, b)
@@ -692,7 +692,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 	states[2].versionedReads = nil
 	v, err = states[2].GetState(addr.Value(), key.Value())
 	assert.NoError(t, err)
-	b, err = states[2].GetBalance(addr)
+	b, err = states[2].GetBalance(addr.Value())
 	assert.NoError(t, err)
 	assert.Equal(t, val1, v)
 	assert.Equal(t, balance1, b)
@@ -700,7 +700,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 	// Tx1 read should get Tx0's value
 	v, err = states[1].GetState(addr.Value(), key.Value())
 	assert.NoError(t, err)
-	b, err = states[1].GetBalance(addr)
+	b, err = states[1].GetBalance(addr.Value())
 	assert.NoError(t, err)
 	assert.Equal(t, val1, v)
 	assert.Equal(t, balance1, b)
@@ -716,7 +716,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 	states[2].versionedReads = nil
 	v, err = states[2].GetState(addr.Value(), key.Value())
 	assert.NoError(t, err)
-	b, err = states[2].GetBalance(addr)
+	b, err = states[2].GetBalance(addr.Value())
 	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, v)
 	assert.Equal(t, uint256.Int{}, b)
@@ -764,7 +764,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	v, err := states[1].GetState(addr.Value(), key1.Value())
 	assert.NoError(t, err)
 	assert.Equal(t, val1, v)
-	b, err := states[1].GetBalance(addr)
+	b, err := states[1].GetBalance(addr.Value())
 	assert.NoError(t, err)
 	assert.Equal(t, balance1, b)
 	// Tx1 should see empty value in key2
@@ -786,7 +786,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	v, err = states[2].GetState(addr.Value(), key1.Value())
 	assert.NoError(t, err)
 	assert.Equal(t, val1, v)
-	b, err = states[2].GetBalance(addr)
+	b, err = states[2].GetBalance(addr.Value())
 	assert.NoError(t, err)
 	assert.Equal(t, balance1, b)
 
@@ -797,7 +797,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	v, err = states[3].GetState(addr.Value(), key2.Value())
 	assert.NoError(t, err)
 	assert.Equal(t, val2, v)
-	b, err = states[3].GetBalance(addr)
+	b, err = states[3].GetBalance(addr.Value())
 	assert.NoError(t, err)
 	assert.Equal(t, balance1, b)
 
@@ -813,7 +813,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	v, err = states[3].GetState(addr.Value(), key1.Value())
 	assert.NoError(t, err)
 	assert.Equal(t, val1, v)
-	b, err = states[3].GetBalance(addr)
+	b, err = states[3].GetBalance(addr.Value())
 	assert.NoError(t, err)
 	assert.Equal(t, balance1, b)
 	// Tx3 should see empty value in key2
@@ -841,7 +841,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	v, err = states[3].GetState(addr.Value(), key2.Value())
 	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, v)
-	b, err = states[3].GetBalance(addr)
+	b, err = states[3].GetBalance(addr.Value())
 	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, b)
 
@@ -860,7 +860,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	v, err = states[3].GetState(addr.Value(), key2.Value())
 	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, v)
-	b, err = states[3].GetBalance(addr)
+	b, err = states[3].GetBalance(addr.Value())
 	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, b)
 }

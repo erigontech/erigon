@@ -1038,7 +1038,7 @@ func TestEip2200Gas(t *testing.T) {
 		} else if exist {
 			t.Error("expected contractAddress to not exist before block 0", contractAddress.String())
 		}
-		balanceBefore, err = st.GetBalance(address)
+		balanceBefore, err = st.GetBalance(address.Value())
 		return err
 	})
 	require.NoError(t, err)
@@ -1055,7 +1055,7 @@ func TestEip2200Gas(t *testing.T) {
 		} else if !exist {
 			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
 		}
-		balanceAfter, err := st.GetBalance(address)
+		balanceAfter, err := st.GetBalance(address.Value())
 		if err != nil {
 			return err
 		}

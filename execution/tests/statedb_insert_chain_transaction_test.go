@@ -104,7 +104,7 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 		t.Error("expected account to exist")
 	}
 
-	balance, err := st.GetBalance(accounts.InternAddress(from))
+	balance, err := st.GetBalance(from)
 	if err != nil {
 		t.Error(err)
 	}
@@ -118,7 +118,7 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	if balance.Uint64() != 999995000 {
 		t.Fatalf("got %v, expected %v", balance, 999995000)
 	}
-	balance, err = st.GetBalance(accounts.InternAddress(to))
+	balance, err = st.GetBalance(to)
 	if err != nil {
 		t.Error(err)
 	}
@@ -191,14 +191,14 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 		t.Error("expected account to exist")
 	}
 
-	balance, err := st.GetBalance(accounts.InternAddress(from))
+	balance, err := st.GetBalance(from)
 	if err != nil {
 		t.Error(err)
 	}
 	if balance.Uint64() != 999995000 {
 		t.Fatalf("got %v, expected %v", balance, 999995000)
 	}
-	balance, err = st.GetBalance(accounts.InternAddress(to))
+	balance, err = st.GetBalance(to)
 	if err != nil {
 		t.Error(err)
 	}
@@ -265,14 +265,14 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 		t.Error("expected account to exist")
 	}
 
-	balance, err := st.GetBalance(accounts.InternAddress(from))
+	balance, err := st.GetBalance(from)
 	if err != nil {
 		t.Error(err)
 	}
 	if balance.Uint64() != 999999000 {
 		t.Fatalf("got %v, expected %v", balance, 999999000)
 	}
-	balance, err = st.GetBalance(accounts.InternAddress(to))
+	balance, err = st.GetBalance(to)
 	if err != nil {
 		t.Error(err)
 	}
@@ -339,14 +339,14 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 		t.Error("expected account to exist")
 	}
 
-	balance, err := st.GetBalance(accounts.InternAddress(from))
+	balance, err := st.GetBalance(from)
 	if err != nil {
 		t.Error(err)
 	}
 	if balance.Uint64() != 2000 {
 		t.Fatalf("got %v, expected %v", balance, 2000)
 	}
-	balance, err = st.GetBalance(accounts.InternAddress(to))
+	balance, err = st.GetBalance(to)
 	if err != nil {
 		t.Error(err)
 	}
@@ -413,14 +413,14 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 		t.Error("expected account to exist")
 	}
 
-	balance, err := st.GetBalance(accounts.InternAddress(from))
+	balance, err := st.GetBalance(from)
 	if err != nil {
 		t.Error(err)
 	}
 	if balance.Uint64() != 2000 {
 		t.Fatalf("got %v, expected %v", balance, 2000)
 	}
-	balance, err = st.GetBalance(accounts.InternAddress(to))
+	balance, err = st.GetBalance(to)
 	if err != nil {
 		t.Error(err)
 	}

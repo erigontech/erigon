@@ -233,7 +233,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 				}
 			}
 		}
-		balance, err := st.state.GetBalance(st.msg.From())
+		balance, err := st.state.GetBalance(st.msg.From().Value())
 		if err != nil {
 			return err
 		}
@@ -350,11 +350,11 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 // ApplyFrame is similar to TransitionDb but without gas accounting, for use in RIP-7560 transactions
 func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	coinbase := st.evm.Context.Coinbase
-	senderInitBalance, err := st.state.GetBalance(st.msg.From())
+	senderInitBalance, err := st.state.GetBalance(st.msg.From().Value())
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 	}
-	coinbaseInitBalance, err := st.state.GetBalance(coinbase)
+	coinbaseInitBalance, err := st.state.GetBalance(coinbase.Value())
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 	}
@@ -444,14 +444,14 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	}
 
 	coinbase := st.evm.Context.Coinbase
-	senderInitBalance, err := st.state.GetBalance(st.msg.From())
+	senderInitBalance, err := st.state.GetBalance(st.msg.From().Value())
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 	}
 
 	var coinbaseInitBalance uint256.Int
 	if !st.noFeeBurnAndTip {
-		coinbaseInitBalance, err = st.state.GetBalance(coinbase)
+		coinbaseInitBalance, err = st.state.GetBalance(coinbase.Value())
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 		}

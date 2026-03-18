@@ -497,7 +497,7 @@ func (bt *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 		if err != nil {
 			return err
 		}
-		balance2, err := statedb.GetBalance(address)
+		balance2, err := statedb.GetBalance(address.Value())
 		if err != nil {
 			return err
 		}

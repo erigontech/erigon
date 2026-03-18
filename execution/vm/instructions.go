@@ -382,11 +382,11 @@ func opAddress(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 
 func opBalance(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	slot := scope.Stack.peek()
-	address := evm.intraBlockState.InternAddress(slot.Bytes20())
+	rawAddr := slot.Bytes20()
 	// BAL: BALANCE is a real state access per EIP-7928 — mark as non-revertable
 	// so the system address is included when explicitly queried by user txs.
-	evm.IntraBlockState().MarkAddressAccess(address.Value(), false)
-	balance, err := evm.IntraBlockState().GetBalance(address)
+	evm.IntraBlockState().MarkAddressAccess(rawAddr, false)
+	balance, err := evm.IntraBlockState().GetBalance(rawAddr)
 	if err != nil {
 		return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
@@ -1286,7 +1286,7 @@ func opSelfdestruct(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	self := scope.Contract.Address()
 	beneficiaryAddr := evm.intraBlockState.InternAddress(beneficiary.Bytes20())
 	ibs := evm.IntraBlockState()
-	balance, err := ibs.GetBalance(self)
+	balance, err := ibs.GetBalance(self.Value())
 	if err != nil {
 		return pc, nil, err
 	}
@@ -1311,7 +1311,7 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 	self := scope.Contract.Address()
 	beneficiaryAddr := evm.intraBlockState.InternAddress(beneficiary.Bytes20())
 	ibs := evm.IntraBlockState()
-	balance, err := ibs.GetBalance(self)
+	balance, err := ibs.GetBalance(self.Value())
 	if err != nil {
 		return pc, nil, err
 	}

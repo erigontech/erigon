@@ -223,7 +223,7 @@ func (b *SimulatedBackend) BalanceAt(ctx context.Context, contract common.Addres
 	}
 	defer tx.Rollback()
 	stateDB := b.stateByBlockNumber(tx, blockNumber)
-	balance, err := stateDB.GetBalance(accounts.InternAddress(contract))
+	balance, err := stateDB.GetBalance(contract)
 	return &balance, err
 }
 
@@ -643,7 +643,7 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 	}
 	// Recap the highest gas allowance with account's balance.
 	if call.GasPrice != nil && !call.GasPrice.IsZero() {
-		balance, err := b.pendingState.GetBalance(accounts.InternAddress(call.From)) // from can't be nil
+		balance, err := b.pendingState.GetBalance(call.From) // from can't be nil
 		if err != nil {
 			return 0, err
 		}

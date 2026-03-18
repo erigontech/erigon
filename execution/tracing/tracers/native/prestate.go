@@ -275,7 +275,7 @@ func (t *prestateTracer) processDiffState() {
 		}
 		modified := false
 		postAccount := &account{Storage: make(map[common.Hash]common.Hash)}
-		newBalance, _ := t.env.IntraBlockState.GetBalance(addr)
+		newBalance, _ := t.env.IntraBlockState.GetBalance(addr.Value())
 		newNonce, _ := t.env.IntraBlockState.GetNonce(addr)
 		newCode, _ := t.env.IntraBlockState.GetCode(addr.Value())
 		newCodeHash := common.Hash{}
@@ -371,7 +371,7 @@ func (t *prestateTracer) lookupAccount(addr accounts.Address) {
 		return
 	}
 
-	balance, _ := t.env.IntraBlockState.GetBalance(addr)
+	balance, _ := t.env.IntraBlockState.GetBalance(addr.Value())
 	nonce, _ := t.env.IntraBlockState.GetNonce(addr)
 	code, _ := t.env.IntraBlockState.GetCode(addr.Value())
 

@@ -567,8 +567,8 @@ func (sdb *IntraBlockState) Empty(rawAddr common.Address) (empty bool, err error
 
 // GetBalance retrieves the balance from the given address or 0 if object not found
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) GetBalance(addr accounts.Address) (uint256.Int, error) {
-	balance, _, err := sdb.getBalance(addr)
+func (sdb *IntraBlockState) GetBalance(rawAddr common.Address) (uint256.Int, error) {
+	balance, _, err := sdb.getBalance(sdb.InternAddress(rawAddr))
 	return balance, err
 }
 
@@ -979,7 +979,7 @@ func (sdb *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 		defer func() {
-			bal, _ := sdb.GetBalance(addr)
+			bal, _ := sdb.GetBalance(addr.Value())
 			prev := prev     // avoid capture allocation unless we're tracing
 			amount := amount // avoid capture allocation unless we're tracing
 			expected := (&uint256.Int{}).Add(&prev, &amount)
@@ -1153,7 +1153,7 @@ func (sdb *IntraBlockState) SubBalance(addr accounts.Address, amount uint256.Int
 
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 		defer func() {
-			bal, _ := sdb.GetBalance(addr)
+			bal, _ := sdb.GetBalance(addr.Value())
 			prev := prev     // avoid capture allocation unless we're tracing
 			amount := amount // avoid capture allocation unless we're tracing
 			fmt.Printf("%d (%d.%d) SubBalance %x, %d-%d=%d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, &prev, &amount, &bal)

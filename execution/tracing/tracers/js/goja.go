@@ -713,8 +713,7 @@ func (do *dbObj) GetBalance(addrSlice goja.Value) goja.Value {
 		do.vm.Interrupt(err)
 		return nil
 	}
-	addr := accounts.InternAddress(common.BytesToAddress(a))
-	value, err := do.ibs.GetBalance(addr)
+	value, err := do.ibs.GetBalance(common.BytesToAddress(a))
 	if err != nil {
 		do.vm.Interrupt(err)
 		return nil

@@ -1278,22 +1278,22 @@ func (c *Bor) CommitStates(
 // BorTransfer transfer in Bor
 func BorTransfer(db evmtypes.IntraBlockState, sender, recipient accounts.Address, amount uint256.Int, bailout bool, cr *chain.Rules) error {
 	// get inputs before
-	input1, err := db.GetBalance(sender)
+	input1, err := db.GetBalance(sender.Value())
 	if err != nil {
 		return err
 	}
-	input2, err := db.GetBalance(recipient)
+	input2, err := db.GetBalance(recipient.Value())
 	if err != nil {
 		return err
 	}
 
 	misc.Transfer(db, sender, recipient, amount, bailout, cr)
 
-	output1, err := db.GetBalance(sender)
+	output1, err := db.GetBalance(sender.Value())
 	if err != nil {
 		return err
 	}
-	output2, err := db.GetBalance(recipient)
+	output2, err := db.GetBalance(recipient.Value())
 	if err != nil {
 		return err
 	}

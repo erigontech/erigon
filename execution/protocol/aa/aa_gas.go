@@ -30,7 +30,7 @@ func chargeGas(
 	preCharge = preCharge.Mul(preCharge, effectiveGasPrice)
 
 	chargeFrom := tx.GasPayer()
-	balance, err := ibs.GetBalance(chargeFrom)
+	balance, err := ibs.GetBalance(chargeFrom.Value())
 	if err != nil {
 		return err
 	}

@@ -45,7 +45,7 @@ type OpContext interface {
 
 // IntraBlockState gives tracers access to the whole state.
 type IntraBlockState interface {
-	GetBalance(accounts.Address) (uint256.Int, error)
+	GetBalance(common.Address) (uint256.Int, error)
 	GetNonce(accounts.Address) (uint64, error)
 	GetCode(common.Address) ([]byte, error)
 	GetState(addr common.Address, key common.Hash) (uint256.Int, error)

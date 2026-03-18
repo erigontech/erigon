@@ -82,7 +82,7 @@ func ApplyDAOHardFork(statedb *state.IntraBlockState) error {
 
 	// Move every DAO account and extra-balance account funds into the refund contract
 	for _, addr := range DAODrainList() {
-		balance, err := statedb.GetBalance(addr)
+		balance, err := statedb.GetBalance(addr.Value())
 		if err != nil {
 			return err
 		}

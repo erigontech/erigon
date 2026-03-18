@@ -646,7 +646,7 @@ func gasSelfdestruct(evm *EVM, callContext *CallContext, availableGas uint64, me
 			if err != nil {
 				return 0, err
 			}
-			balance, err := evm.IntraBlockState().GetBalance(callContext.Address())
+			balance, err := evm.IntraBlockState().GetBalance(callContext.Address().Value())
 			if err != nil {
 				return 0, err
 			}
