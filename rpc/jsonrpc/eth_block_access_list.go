@@ -47,7 +47,7 @@ func (api *APIImpl) GetBlockAccessList(ctx context.Context, numberOrHash rpc.Blo
 		return nil, err
 	}
 
-	header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNum)
+	header, err := api._blockReader.Header(ctx, tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
