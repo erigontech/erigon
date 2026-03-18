@@ -6,18 +6,8 @@ on:
       - 'release/**'
     paths:
       - 'go.mod'
-  pull_request:
-    branches:
-      - main
-      - 'release/**'
-    paths:
-      - 'go.mod'
-    types:
-      - opened
-      - reopened
-      - synchronize
-      - ready_for_review
   workflow_dispatch:
+  workflow_call:
 
 jobs:
   ManifestCheck:
