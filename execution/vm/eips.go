@@ -164,6 +164,23 @@ func enable2929(jt *JumpTable) {
 	// factor here
 	jt[SELFDESTRUCT].constantGas = params.SelfdestructGasEIP150
 	jt[SELFDESTRUCT].dynamicGas = gasSelfdestructEIP2929
+
+	// Address interning metadata: interpreter pre-interns Stack.Back(addrSlot).Bytes20()
+	// once before gas func and op func, eliminating duplicate InternAddress calls.
+	jt[EXTCODECOPY].hasAddrSlot, jt[EXTCODECOPY].addrSlot = true, 0
+	jt[EXTCODESIZE].hasAddrSlot, jt[EXTCODESIZE].addrSlot = true, 0
+	jt[EXTCODEHASH].hasAddrSlot, jt[EXTCODEHASH].addrSlot = true, 0
+	jt[BALANCE].hasAddrSlot, jt[BALANCE].addrSlot = true, 0
+	jt[CALL].hasAddrSlot, jt[CALL].addrSlot = true, 1
+	jt[CALLCODE].hasAddrSlot, jt[CALLCODE].addrSlot = true, 1
+	jt[STATICCALL].hasAddrSlot, jt[STATICCALL].addrSlot = true, 1
+	jt[DELEGATECALL].hasAddrSlot, jt[DELEGATECALL].addrSlot = true, 1
+	jt[SELFDESTRUCT].hasAddrSlot, jt[SELFDESTRUCT].addrSlot = true, 0
+
+	// Storage key interning metadata: interpreter pre-interns Stack.Back(keySlot).Bytes32()
+	// once before gas func and op func, eliminating duplicate InternKey calls.
+	jt[SLOAD].hasKeySlot, jt[SLOAD].keySlot = true, 0
+	jt[SSTORE].hasKeySlot, jt[SSTORE].keySlot = true, 0
 }
 
 func enable3529(jt *JumpTable) {

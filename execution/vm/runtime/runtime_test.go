@@ -846,3 +846,83 @@ func TestCreateCollisionWithEIP7702Delegation(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, val.IsZero(), "CREATE should have returned 0 (collision), but got %x", val)
 }
+
+// BenchmarkEVM_SLOAD exercises the EIP-2929 SLOAD hot path (address+key interning, access-list
+// check). Each b.Loop() iteration executes 1000 SLOAD opcodes against slot 0: the first is cold
+// (2100 gas), all subsequent are warm (100 gas).
+func BenchmarkEVM_SLOAD(b *testing.B) {
+	const n = 1000
+	// PUSH1 <slot=0>, SLOAD, POP  — repeated n times
+	contract := make([]byte, 0, n*4+1)
+	for i := 0; i < n; i++ {
+		contract = append(contract, byte(vm.PUSH1), 0x00, byte(vm.SLOAD), byte(vm.POP))
+	}
+	contract = append(contract, byte(vm.STOP))
+
+	db := testTemporalDB(b)
+	tx, domains := testTemporalTxSD(b, db)
+	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
+	contractAddr := accounts.InternAddress(common.BytesToAddress([]byte("sload-bench")))
+	statedb.SetCode(contractAddr, contract)
+
+	for b.Loop() {
+		_, _, err := Call(contractAddr, nil, &Config{State: statedb, GasLimit: 1_000_000})
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkEVM_SSTORE exercises the EIP-2929 SSTORE hot path. Each b.Loop() iteration executes
+// 1000 SSTORE opcodes writing value 1 to slot 0: the first is cold+set, subsequent are warm no-ops.
+func BenchmarkEVM_SSTORE(b *testing.B) {
+	const n = 1000
+	// PUSH1 <val=1>, PUSH1 <slot=0>, SSTORE  — repeated n times
+	contract := make([]byte, 0, n*5+1)
+	for i := 0; i < n; i++ {
+		contract = append(contract, byte(vm.PUSH1), 0x01, byte(vm.PUSH1), 0x00, byte(vm.SSTORE))
+	}
+	contract = append(contract, byte(vm.STOP))
+
+	db := testTemporalDB(b)
+	tx, domains := testTemporalTxSD(b, db)
+	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
+	contractAddr := accounts.InternAddress(common.BytesToAddress([]byte("sstore-bench")))
+	statedb.SetCode(contractAddr, contract)
+
+	for b.Loop() {
+		_, _, err := Call(contractAddr, nil, &Config{State: statedb, GasLimit: 1_000_000})
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkEVM_BALANCE exercises the EIP-2929 BALANCE/EXTCODESIZE hot path (account-level access
+// list check + address interning). Each b.Loop() iteration executes 1000 BALANCE opcodes against
+// the same target address: the first is cold, all subsequent are warm.
+func BenchmarkEVM_BALANCE(b *testing.B) {
+	const n = 1000
+	targetAddr := common.BytesToAddress([]byte("balance-target"))
+	// PUSH20 <addr>, BALANCE, POP  — repeated n times
+	contract := make([]byte, 0, n*23+1)
+	for i := 0; i < n; i++ {
+		contract = append(contract, byte(vm.PUSH20))
+		contract = append(contract, targetAddr[:]...)
+		contract = append(contract, byte(vm.BALANCE), byte(vm.POP))
+	}
+	contract = append(contract, byte(vm.STOP))
+
+	db := testTemporalDB(b)
+	tx, domains := testTemporalTxSD(b, db)
+	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
+	contractAddr := accounts.InternAddress(common.BytesToAddress([]byte("balance-bench")))
+	statedb.SetCode(contractAddr, contract)
+
+	for b.Loop() {
+		_, _, err := Call(contractAddr, nil, &Config{State: statedb, GasLimit: 1_000_000})
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}

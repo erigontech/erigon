@@ -62,7 +62,8 @@ type CallContext struct {
 	Stack    Stack
 	Contract Contract
 
-	callAddrTmp accounts.Address // interned CALL target, set by gas func, consumed by op*Call
+	callAddrTmp accounts.Address    // pre-interned address for this opcode (EIP-2929+), managed by interpreter
+	callKeyTmp  accounts.StorageKey // pre-interned storage key for this opcode (EIP-2929+), managed by interpreter
 }
 
 var contextPool = sync.Pool{
@@ -82,27 +83,35 @@ func getCallContext(contract Contract, input []byte, gas uint64) *CallContext {
 	ctx.gas = gas
 	ctx.input = input
 	ctx.callAddrTmp = accounts.NilAddress
+	ctx.callKeyTmp = accounts.NilKey
 	ctx.Contract = contract
 	return ctx
 }
 
 func (c *CallContext) put() {
 	c.callAddrTmp = accounts.NilAddress
+	c.callKeyTmp = accounts.NilKey
 	c.Memory.reset()
 	c.Stack.Reset()
 	contextPool.Put(c)
 }
 
-// takeCallAddr returns the interned CALL target address.  If the gas function
-// already interned it (EIP-2929+), the cached value is returned; otherwise
-// addrVal is interned on the spot (pre-Berlin fallback).
-func (c *CallContext) takeCallAddr(addrVal uint256.Int) accounts.Address {
-	if c.callAddrTmp.IsNil() {
-		return accounts.InternAddress(addrVal.Bytes20())
+// internAddr returns the pre-interned address for the current opcode (EIP-2929+ path).
+// Falls back to interning val on the spot for pre-Berlin opcodes where callAddrTmp is NilAddress.
+func (c *CallContext) internAddr(val uint256.Int) accounts.Address {
+	if !c.callAddrTmp.IsNil() {
+		return c.callAddrTmp
 	}
-	addr := c.callAddrTmp
-	c.callAddrTmp = accounts.NilAddress
-	return addr
+	return accounts.InternAddress(val.Bytes20())
+}
+
+// internKey returns the pre-interned storage key for the current opcode (EIP-2929+ path).
+// Falls back to interning val on the spot for pre-Berlin opcodes where callKeyTmp is NilKey.
+func (c *CallContext) internKey(val uint256.Int) accounts.StorageKey {
+	if !c.callKeyTmp.IsNil() {
+		return c.callKeyTmp
+	}
+	return accounts.InternKey(val.Bytes32())
 }
 
 // UseGas attempts the use gas and subtracts it and returns true on success
@@ -351,6 +360,22 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 			return nil, callContext.gas, ErrOutOfGas
 		} else {
 			callContext.gas -= cost
+		}
+
+		// Pre-intern address and/or storage key for EIP-2929+ opcodes.
+		// The interpreter owns this interning: both the gas func and op func read
+		// callAddrTmp/callKeyTmp directly instead of calling InternAddress/InternKey.
+		if operation.hasAddrSlot {
+			callContext.callAddrTmp = accounts.InternAddress(
+				callContext.Stack.Back(int(operation.addrSlot)).Bytes20())
+		} else {
+			callContext.callAddrTmp = accounts.NilAddress
+		}
+		if operation.hasKeySlot {
+			callContext.callKeyTmp = accounts.InternKey(
+				callContext.Stack.Back(int(operation.keySlot)).Bytes32())
+		} else {
+			callContext.callKeyTmp = accounts.NilKey
 		}
 
 		// All ops with a dynamic memory usage also has a dynamic gas cost.
