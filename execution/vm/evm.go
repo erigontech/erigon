@@ -126,10 +126,12 @@ func (evm *EVM) internAddress(a common.Address) accounts.Address {
 	}
 	e := &evm.caches.addrs[a[19]&63]
 	if e.raw == a && !e.val.IsNil() {
-		return e.val
+		return e.val // cache hit
 	}
+	// Cache miss: either cold entry or collision eviction (two addresses share the same slot).
+	// Eviction causes a miss, not a wrong return — correctness is guaranteed by the e.raw == a check.
 	v := accounts.InternAddress(a)
-	e.raw, e.val = a, v
+	e.raw, e.val = a, v // install; evicts previous occupant if any
 	return v
 }
 
@@ -140,8 +142,9 @@ func (evm *EVM) internKey(h common.Hash) accounts.StorageKey {
 	}
 	e := &evm.caches.keys[h[31]&63]
 	if e.raw == h && !e.val.IsNil() {
-		return e.val
+		return e.val // cache hit
 	}
+	// Cache miss: cold or collision eviction — same correctness argument as internAddress.
 	v := accounts.InternKey(h)
 	e.raw, e.val = h, v
 	return v
