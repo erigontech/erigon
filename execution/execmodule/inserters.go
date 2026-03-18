@@ -74,9 +74,15 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, req *executionproto.Inser
 		balEntries[balKey{hash: hash, number: entry.BlockNumber}] = entry
 	}
 
+	e.logger.Info("[InsertBlocks] batch start",
+		"blocks", len(req.Blocks), "frozenBlocks", frozenBlocks)
+	var prevHash common.Hash
+	var prevHeight uint64
+	skipped := 0
 	for _, block := range req.Blocks {
 		// Skip frozen blocks.
 		if block.Header.BlockNumber < frozenBlocks {
+			skipped++
 			continue
 		}
 		header, err := moduleutil.HeaderRpcToHeader(block.Header)
@@ -94,10 +100,52 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, req *executionproto.Inser
 		}
 		var parentTd *big.Int
 		height := header.Number.Uint64()
+
+		// Detect parentHash discontinuity
+		if prevHeight > 0 && height == prevHeight+1 && header.ParentHash != prevHash {
+			e.logger.Error("[InsertBlocks] PARENT HASH MISMATCH",
+				"blockNum", height, "blockHash", header.Hash(),
+				"parentHash", header.ParentHash,
+				"prevBlockNum", prevHeight, "prevBlockHash", prevHash)
+		}
+
+		// Detect block number gap (non-sequential heights)
+		if prevHeight > 0 && height != prevHeight+1 {
+			e.logger.Error("[InsertBlocks] BLOCK NUMBER GAP",
+				"blockNum", height, "prevBlockNum", prevHeight,
+				"gap", int64(height)-int64(prevHeight),
+				"blockHash", header.Hash(), "parentHash", header.ParentHash)
+		}
+
+		// Detect duplicate block numbers
+		if prevHeight > 0 && height == prevHeight {
+			e.logger.Error("[InsertBlocks] DUPLICATE BLOCK NUMBER",
+				"blockNum", height, "blockHash", header.Hash(),
+				"prevBlockHash", prevHash)
+		}
+
 		if height > 0 {
+			// For the first non-skipped block in this batch, check if parent TD exists in base DB
+			if prevHeight == 0 {
+				baseTd, baseErr := rawdb.ReadTd(roTx, header.ParentHash, height-1)
+				e.logger.Info("[InsertBlocks] first block parent TD check",
+					"blockNum", height, "parentHash", header.ParentHash,
+					"parentHeight", height-1,
+					"parentTdInBaseDB", baseTd, "baseErr", baseErr)
+			}
+
 			// Parent's total difficulty — reads from overlay first, then base RO tx.
 			parentTd, err = rawdb.ReadTd(blockOverlay, header.ParentHash, height-1)
 			if err != nil || parentTd == nil {
+				// Try reading from base DB directly to distinguish overlay vs base issue
+				baseTd, baseErr := rawdb.ReadTd(roTx, header.ParentHash, height-1)
+				e.logger.Error("[InsertBlocks] parent TD not found",
+					"blockNum", height, "blockHash", header.Hash(),
+					"parentHash", header.ParentHash, "parentHeight", height-1,
+					"prevWrittenHash", prevHash, "prevWrittenHeight", prevHeight,
+					"skippedByFrozen", skipped,
+					"parentTdInBaseDB", baseTd, "baseErr", baseErr,
+					"err", err)
 				return nil, fmt.Errorf("parent's total difficulty not found with hash %x and height %d: %v", header.ParentHash, height-1, err)
 			}
 		} else {
@@ -109,11 +157,20 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, req *executionproto.Inser
 
 		// Sum TDs.
 		td := parentTd.Add(parentTd, header.Difficulty.ToBig())
+		prevHash = header.Hash()
+		prevHeight = height
 		if err := rawdb.WriteHeader(blockOverlay, header); err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeHeader: %s", err)
 		}
 		if err := rawdb.WriteTd(blockOverlay, header.Hash(), height, td); err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeTd: %s", err)
+		}
+		// Verify WriteTd read-back from overlay
+		verifyTd, verifyErr := rawdb.ReadTd(blockOverlay, header.Hash(), height)
+		if verifyErr != nil || verifyTd == nil {
+			e.logger.Error("[InsertBlocks] WRITE-TD READBACK FAILED",
+				"blockNum", height, "blockHash", header.Hash(),
+				"writtenTd", td, "readBackTd", verifyTd, "readBackErr", verifyErr)
 		}
 		if _, err := rawdb.WriteRawBodyIfNotExists(blockOverlay, header.Hash(), height, body); err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBody: %s", err)
@@ -134,8 +191,19 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, req *executionproto.Inser
 				return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBlockAccessList, block %d: %s", height, err)
 			}
 		}
+		// Log every block in the 3220-3250 range for debugging
+		if height >= 3220 && height <= 3250 {
+			e.logger.Info("[InsertBlocks] block detail",
+				"blockNum", height, "blockHash", header.Hash(),
+				"parentHash", header.ParentHash, "td", td)
+		}
 		e.logger.Trace("Inserted block", "hash", header.Hash(), "number", header.Number)
 	}
+
+	e.logger.Info("[InsertBlocks] batch end",
+		"lastBlockNum", prevHeight, "lastBlockHash", prevHash,
+		"skippedByFrozen", skipped,
+		"processedBlocks", len(req.Blocks)-skipped)
 
 	// Brief RwTx only for flushing accumulated writes to disk.
 	rwTx, err := e.db.BeginRw(ctx)
