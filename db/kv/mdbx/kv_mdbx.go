@@ -27,6 +27,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -386,6 +388,8 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 
 		MaxBatchSize:  DefaultMaxBatchSize,
 		MaxBatchDelay: DefaultMaxBatchDelay,
+
+		stopDebugCh: make(chan struct{}), // DEBUG — remove before merge
 	}
 
 	customBuckets := opts.bucketsCfg(kv.TablesCfgByLabel(opts.label))
@@ -438,6 +442,32 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 			return nil, err
 		}
 	}
+	// DEBUG: start background goroutine to log RPC stats every 10s — remove before merge
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-db.stopDebugCh:
+				return
+			case <-ticker.C:
+				total := db.rpcTotal.Load()
+				s503 := db.rpc503.Load()
+				var pct float64
+				if total > 0 {
+					pct = float64(s503) * 100.0 / float64(total)
+				}
+				vmRSS, cpuIdle := debugSysInfo()
+				db.log.Warn("[DEBUG] rpc stats",
+					"total_req", total, "total_503", s503,
+					"503_pct", fmt.Sprintf("%.1f%%", pct),
+					"rpc_inflight", db.rpcInflight.Load(),
+					"exec_inflight", db.execInflight.Load(),
+					"vmRSS_MB", vmRSS, "cpu_idle%", fmt.Sprintf("%.1f", cpuIdle))
+			}
+		}
+	}()
+
 	return db, nil
 }
 
@@ -465,6 +495,17 @@ type MdbxKV struct {
 	txsAllDoneOnCloseCond *sync.Cond
 
 	leakDetector *dbg.LeakDetector
+
+	// DEBUG: measure peak concurrent execution BeginRo — remove before merge
+	execInflight atomic.Int64
+	execPeak     atomic.Int64
+
+	// DEBUG: measure peak concurrent RPC BeginRo — remove before merge
+	rpcInflight  atomic.Int64
+	rpcPeak      atomic.Int64
+	rpcTotal     atomic.Int64 // total BeginRo attempts with TxPriorityRPC
+	rpc503       atomic.Int64 // total TryAcquire failures (503 returned)
+	stopDebugCh  chan struct{} // closed on DB close to stop the debug logger goroutine
 
 	// MaxBatchSize is the maximum size of a batch. Default value is
 	// copied from DefaultMaxBatchSize in Open.
@@ -571,6 +612,9 @@ func (db *MdbxKV) Close() {
 	if ok := db.closed.CompareAndSwap(false, true); !ok {
 		return
 	}
+	if db.stopDebugCh != nil {
+		close(db.stopDebugCh) // DEBUG — remove before merge
+	}
 	db.waitTxsAllDoneOnClose()
 
 	db.env.Close()
@@ -581,6 +625,43 @@ func (db *MdbxKV) Close() {
 			db.log.Warn("failed to remove in-mem db file", "err", err)
 		}
 	}
+}
+
+// debugSysInfo returns VmRSS (MB) and CPU idle% from /proc — DEBUG, remove before merge
+func debugSysInfo() (vmRSSMB int64, cpuIdlePct float64) {
+	// VmRSS from /proc/self/status
+	if data, err := os.ReadFile("/proc/self/status"); err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			if strings.HasPrefix(line, "VmRSS:") {
+				fields := strings.Fields(line)
+				if len(fields) >= 2 {
+					if kb, err := strconv.ParseInt(fields[1], 10, 64); err == nil {
+						vmRSSMB = kb / 1024
+					}
+				}
+				break
+			}
+		}
+	}
+	// CPU idle% from /proc/stat (first line)
+	if data, err := os.ReadFile("/proc/stat"); err == nil {
+		line := strings.SplitN(string(data), "\n", 2)[0]
+		fields := strings.Fields(line)
+		if len(fields) >= 5 {
+			var total, idle int64
+			for i, f := range fields[1:] {
+				v, _ := strconv.ParseInt(f, 10, 64)
+				total += v
+				if i == 3 { // idle is 4th field (index 3 after "cpu")
+					idle = v
+				}
+			}
+			if total > 0 {
+				cpuIdlePct = float64(idle) * 100.0 / float64(total)
+			}
+		}
+	}
+	return
 }
 
 func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
@@ -607,10 +688,24 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 			db.trackTxEnd()
 			return nil, fmt.Errorf("mdbx.MdbxKV.BeginRo: executionLimiter error %w", semErr)
 		}
+		// DEBUG: track peak concurrent execution BeginRo — remove before merge
+		if cur := db.execInflight.Add(1); cur > db.execPeak.Load() {
+			db.execPeak.Store(cur)
+			vmRSS, cpuIdle := debugSysInfo()
+			db.log.Warn("[DEBUG] executionLimiter peak", "peak", cur, "vmRSS_MB", vmRSS, "cpu_idle%", fmt.Sprintf("%.1f", cpuIdle))
+		}
 	case kv.TxPriorityRPC:
+		db.rpcTotal.Add(1) // DEBUG — remove before merge
 		if !db.roTxsLimiter.TryAcquire(1) {
+			db.rpc503.Add(1) // DEBUG — remove before merge
 			db.trackTxEnd()
 			return nil, kv.ErrServerOverloaded
+		}
+		// DEBUG: track peak concurrent RPC BeginRo — remove before merge
+		if cur := db.rpcInflight.Add(1); cur > db.rpcPeak.Load() {
+			db.rpcPeak.Store(cur)
+			vmRSS, cpuIdle := debugSysInfo()
+			db.log.Warn("[DEBUG] roTxsLimiter peak", "peak", cur, "vmRSS_MB", vmRSS, "cpu_idle%", fmt.Sprintf("%.1f", cpuIdle))
 		}
 	default:
 		// will return nil err if context is cancelled (may appear to acquire the semaphore)
@@ -625,8 +720,11 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 			// on error, or if there is whatever reason that we don't return a tx,
 			// we need to free up the limiter slot, otherwise it could lead to deadlocks
 			if priority == kv.TxPriorityExecution {
-				db.executionLimiter.Release(1)
+				db.execInflight.Add(-1); db.executionLimiter.Release(1) // DEBUG — remove before merge
 			} else {
+				if priority == kv.TxPriorityRPC {
+					db.rpcInflight.Add(-1) // DEBUG — remove before merge
+				}
 				db.roTxsLimiter.Release(1)
 			}
 			db.trackTxEnd()
@@ -1048,8 +1146,12 @@ func (tx *MdbxTx) Commit() error {
 		tx.db.trackTxEnd()
 		if tx.readOnly {
 			if tx.priority == kv.TxPriorityExecution {
+				tx.db.execInflight.Add(-1) // DEBUG — remove before merge
 				tx.db.executionLimiter.Release(1)
 			} else {
+				if tx.priority == kv.TxPriorityRPC {
+					tx.db.rpcInflight.Add(-1) // DEBUG — remove before merge
+				}
 				tx.db.roTxsLimiter.Release(1)
 			}
 		} else {
@@ -1095,8 +1197,12 @@ func (tx *MdbxTx) Rollback() {
 	tx.db.trackTxEnd()
 	if tx.readOnly {
 		if tx.priority == kv.TxPriorityExecution {
+			tx.db.execInflight.Add(-1) // DEBUG — remove before merge
 			tx.db.executionLimiter.Release(1)
 		} else {
+			if tx.priority == kv.TxPriorityRPC {
+				tx.db.rpcInflight.Add(-1) // DEBUG — remove before merge
+			}
 			tx.db.roTxsLimiter.Release(1)
 		}
 	} else {
