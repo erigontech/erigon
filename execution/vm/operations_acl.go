@@ -127,7 +127,7 @@ func gasExtCodeCopyEIP2929(evm *EVM, callContext *CallContext, scopeGas uint64, 
 	}
 	addr := evm.intraBlockState.InternAddress(callContext.Stack.Back(0).Bytes20())
 	// Check slot presence in the access list
-	if evm.IntraBlockState().AddAddressToAccessList(addr) {
+	if evm.IntraBlockState().AddAddressToAccessList(addr.Value()) {
 		var overflow bool
 		// We charge (cold-warm), since 'warm' is already charged as constantGas
 		if gas, overflow = math.SafeAdd(gas, params.ColdAccountAccessCostEIP2929-params.WarmStorageReadCostEIP2929); overflow {
@@ -148,7 +148,7 @@ func gasExtCodeCopyEIP2929(evm *EVM, callContext *CallContext, scopeGas uint64, 
 func gasEip2929AccountCheck(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (uint64, error) {
 	addr := evm.intraBlockState.InternAddress(callContext.Stack.Back(0).Bytes20())
 	// If the caller cannot afford the cost, this change will be rolled back
-	if evm.IntraBlockState().AddAddressToAccessList(addr) {
+	if evm.IntraBlockState().AddAddressToAccessList(addr.Value()) {
 		// The warm storage read cost is already charged as constantGas
 		return params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929, nil
 	}
@@ -168,7 +168,7 @@ func makeCallVariantGasCallEIP2929(oldCalculator gasFunc) gasFunc {
 			if _, ok := useGas(scopeGas, coldCost, evm.Config().Tracer, tracing.GasChangeCallStorageColdAccess); !ok {
 				return 0, ErrOutOfGas
 			}
-			evm.IntraBlockState().AddAddressToAccessList(addr)
+			evm.IntraBlockState().AddAddressToAccessList(addr.Value())
 			scopeGas -= coldCost
 		}
 
@@ -230,7 +230,7 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 			if _, ok := useGas(scopeGas, gas, evm.Config().Tracer, tracing.GasChangeCallStorageColdAccess); !ok {
 				return 0, ErrOutOfGas
 			}
-			evm.IntraBlockState().AddAddressToAccessList(address)
+			evm.IntraBlockState().AddAddressToAccessList(address.Value())
 		}
 
 		// if empty and transfers value
@@ -299,7 +299,7 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 				return 0, ErrOutOfGas
 			}
 
-			evm.intraBlockState.AddAddressToAccessList(addr)
+			evm.intraBlockState.AddAddressToAccessList(addr.Value())
 		}
 
 		// Call the old calculator, which takes into account
@@ -354,7 +354,7 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 			if availableGas < gas {
 				return 0, ErrOutOfGas
 			}
-			evm.intraBlockState.AddAddressToAccessList(dd)
+			evm.intraBlockState.AddAddressToAccessList(dd.Value())
 		}
 
 		if availableGas-accessGas-delegationGas < statefulBaseGas {

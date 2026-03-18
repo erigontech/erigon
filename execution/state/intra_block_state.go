@@ -2149,7 +2149,7 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 	}
 	if rules.IsPrague {
 		for _, addr := range authorities {
-			sdb.AddAddressToAccessList(addr)
+			sdb.AddAddressToAccessList(addr.Value())
 		}
 
 		if !dst.IsNil() {
@@ -2158,7 +2158,7 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 				return err
 			}
 			if ok {
-				sdb.AddAddressToAccessList(dd)
+				sdb.AddAddressToAccessList(dd.Value())
 			}
 		}
 	}
@@ -2170,7 +2170,8 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 }
 
 // AddAddressToAccessList adds the given address to the access list
-func (sdb *IntraBlockState) AddAddressToAccessList(addr accounts.Address) (addrMod bool) {
+func (sdb *IntraBlockState) AddAddressToAccessList(rawAddr common.Address) (addrMod bool) {
+	addr := sdb.InternAddress(rawAddr)
 	addrMod = sdb.accessList.AddAddress(addr)
 	if addrMod {
 		sdb.journal.append(accessListAddAccountChange{addr})
@@ -2179,7 +2180,8 @@ func (sdb *IntraBlockState) AddAddressToAccessList(addr accounts.Address) (addrM
 }
 
 // AddSlotToAccessList adds the given (address, slot)-tuple to the access list
-func (sdb *IntraBlockState) AddSlotToAccessList(addr accounts.Address, rawSlot common.Hash) (addrMod, slotMod bool) {
+func (sdb *IntraBlockState) AddSlotToAccessList(rawAddr common.Address, rawSlot common.Hash) (addrMod, slotMod bool) {
+	addr := sdb.InternAddress(rawAddr)
 	slot := sdb.InternKey(rawSlot)
 	addrMod, slotMod = sdb.accessList.AddSlot(addr, slot)
 	if addrMod {
