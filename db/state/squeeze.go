@@ -545,7 +545,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		}
 
 		fromStep := kv.Step(a.EndTxNumMinimax() / a.StepSize())
-		toStep := kv.Step(lastToTxNum / a.StepSize())
+		toStep := kv.Step((lastToTxNum + 1) / a.StepSize()) // +1 because lastToTxNum is inclusive (last txNum of step)
 		logger.Info("[rebuild_commitment_history] build files", "fromStep", fromStep, "toStep", toStep, "lastToTxNum", lastToTxNum)
 		if err = a.BuildFiles2(ctx, fromStep, toStep, false); err != nil {
 			return err
