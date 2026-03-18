@@ -71,8 +71,8 @@ func EncodeGetPooledTransactions66(hashes []byte, requestID uint64, encodeBuf []
 	dataLen := rlp.ListPrefixLen(hashesLen) + hashesLen + rlp.U64Len(requestID)
 	encodeBuf = common.EnsureEnoughSize(encodeBuf, rlp.ListPrefixLen(dataLen)+dataLen)
 	// Length Prefix for the entire structure
-	pos += rlp.EncodeListPrefix(dataLen, encodeBuf[pos:])
-	pos += rlp.EncodeU64(requestID, encodeBuf[pos:])
+	pos += rlp.EncodeListPrefixToBuf(dataLen, encodeBuf[pos:])
+	pos += rlp.EncodeU64ToBuf(requestID, encodeBuf[pos:])
 	pos += encodeHashList(hashes, encodeBuf[pos:])
 	_ = pos
 	return encodeBuf, nil
@@ -123,9 +123,9 @@ func EncodePooledTransactions66(txnsRlp [][]byte, requestID uint64, encodeBuf []
 	encodeBuf = common.EnsureEnoughSize(encodeBuf, rlp.ListPrefixLen(dataLen)+dataLen)
 
 	// Length Prefix for the entire structure
-	pos += rlp.EncodeListPrefix(dataLen, encodeBuf[pos:])
-	pos += rlp.EncodeU64(requestID, encodeBuf[pos:])
-	pos += rlp.EncodeListPrefix(txnsRlpLen, encodeBuf[pos:])
+	pos += rlp.EncodeListPrefixToBuf(dataLen, encodeBuf[pos:])
+	pos += rlp.EncodeU64ToBuf(requestID, encodeBuf[pos:])
+	pos += rlp.EncodeListPrefixToBuf(txnsRlpLen, encodeBuf[pos:])
 	for i := range txnsRlp {
 		_, _, isLegacy, _ := rlp.Prefix(txnsRlp[i], 0)
 		if isLegacy {
@@ -154,7 +154,7 @@ func EncodeTransactions(txnsRlp [][]byte, encodeBuf []byte) []byte {
 
 	encodeBuf = common.EnsureEnoughSize(encodeBuf, rlp.ListPrefixLen(dataLen)+dataLen)
 	// Length Prefix for the entire structure
-	pos += rlp.EncodeListPrefix(dataLen, encodeBuf[pos:])
+	pos += rlp.EncodeListPrefixToBuf(dataLen, encodeBuf[pos:])
 	for i := range txnsRlp {
 		_, _, isLegacy, _ := rlp.Prefix(txnsRlp[i], 0)
 		if isLegacy {

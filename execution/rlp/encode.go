@@ -469,8 +469,8 @@ func U64Len(i uint64) int {
 	return 1 + common.BitLenToByteLen(bits.Len64(i))
 }
 
-// EncodeU64 encodes i as an RLP string into to and returns the number of bytes written.
-func EncodeU64(i uint64, to []byte) int {
+// EncodeU64ToBuf encodes i as an RLP string into to and returns the number of bytes written.
+func EncodeU64ToBuf(i uint64, to []byte) int {
 	if i == 0 {
 		to[0] = 128
 		return 1
@@ -487,15 +487,15 @@ func EncodeU64(i uint64, to []byte) int {
 	return 1 + size
 }
 
-// EncodeU32 encodes i as an RLP string into to and returns the number of bytes written.
-func EncodeU32(i uint32, to []byte) int {
-	return EncodeU64(uint64(i), to)
+// EncodeU32ToBuf encodes i as an RLP string into to and returns the number of bytes written.
+func EncodeU32ToBuf(i uint32, to []byte) int {
+	return EncodeU64ToBuf(uint64(i), to)
 }
 
 // EncodeInt encodes i as an RLP string via w.
 // precondition: len(buffer) >= 9
 func EncodeInt(i uint64, w io.Writer, buffer []byte) error {
-	n := EncodeU64(i, buffer)
+	n := EncodeU64ToBuf(i, buffer)
 	_, err := w.Write(buffer[:n])
 	return err
 }
@@ -698,14 +698,14 @@ func ListPrefixLen(dataLen int) int {
 	return 1
 }
 
-// EncodeListPrefix encodes a list-type size prefix into to and returns the number of bytes written.
-func EncodeListPrefix(dataLen int, to []byte) int {
+// EncodeListPrefixToBuf encodes a list-type size prefix into to and returns the number of bytes written.
+func EncodeListPrefixToBuf(dataLen int, to []byte) int {
 	return encodePrefixToBuf(dataLen, to, 0xC0, 0xF7)
 }
 
 // EncodeListSizePrefix writes a list-type size prefix via w.
 func EncodeListSizePrefix(size int, w io.Writer, buffer []byte) error {
-	n := EncodeListPrefix(size, buffer)
+	n := EncodeListPrefixToBuf(size, buffer)
 	_, err := w.Write(buffer[:n])
 	return err
 }

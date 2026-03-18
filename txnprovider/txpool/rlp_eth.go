@@ -39,7 +39,7 @@ func encodeHash(h, to []byte) int {
 func encodeHashList(hashes []byte, encodeBuf []byte) int {
 	pos := 0
 	hashesLen := len(hashes) / 32 * 33
-	pos += rlp.EncodeListPrefix(hashesLen, encodeBuf)
+	pos += rlp.EncodeListPrefixToBuf(hashesLen, encodeBuf)
 	for i := 0; i < len(hashes); i += 32 {
 		pos += encodeHash(hashes[i:], encodeBuf[pos:])
 	}
@@ -87,13 +87,13 @@ func encodeAnnouncements(types []byte, sizes []uint32, hashes []byte, encodeBuf 
 	}
 	hashesLen := len(hashes) / 32 * 33
 	totalLen := typesLen + sizesLen + rlp.ListPrefixLen(sizesLen) + hashesLen + rlp.ListPrefixLen(hashesLen)
-	pos += rlp.EncodeListPrefix(totalLen, encodeBuf)
+	pos += rlp.EncodeListPrefixToBuf(totalLen, encodeBuf)
 	pos += rlp.EncodeStringToBuf(types, encodeBuf[pos:])
-	pos += rlp.EncodeListPrefix(sizesLen, encodeBuf[pos:])
+	pos += rlp.EncodeListPrefixToBuf(sizesLen, encodeBuf[pos:])
 	for _, size := range sizes {
-		pos += rlp.EncodeU32(size, encodeBuf[pos:])
+		pos += rlp.EncodeU32ToBuf(size, encodeBuf[pos:])
 	}
-	pos += rlp.EncodeListPrefix(hashesLen, encodeBuf[pos:])
+	pos += rlp.EncodeListPrefixToBuf(hashesLen, encodeBuf[pos:])
 	for i := 0; i < len(hashes); i += 32 {
 		pos += encodeHash(hashes[i:], encodeBuf[pos:])
 	}

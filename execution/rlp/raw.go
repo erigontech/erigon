@@ -170,6 +170,6 @@ func readSize(b []byte, slen byte) (uint64, error) {
 // AppendUint64 appends the RLP encoding of i to b, and returns the resulting slice.
 func AppendUint64(b []byte, i uint64) []byte {
 	var buf [9]byte
-	n := EncodeU64(i, buf[:])
+	n := EncodeU64ToBuf(i, buf[:])
 	return append(b, buf[:n]...)
 }
