@@ -439,11 +439,11 @@ func statelessGasCall(evm *EVM, callContext *CallContext, availableGas uint64, m
 
 func statefulGasCall(evm *EVM, callContext *CallContext, gas uint64, availableGas uint64, transfersValue bool) (uint64, error) {
 	var accountGas uint64
-	address := callContext.callAddrTmp
+	address := callContext.internedAddr
 	if address.IsNil() {
 		// Pre-EIP2929 path: no wrapper set the address yet.
 		address = accounts.InternAddress(callContext.Stack.Back(1).Bytes20())
-		callContext.callAddrTmp = address
+		callContext.internedAddr = address
 	}
 	if evm.ChainRules().IsSpuriousDragon {
 		empty, err := evm.IntraBlockState().Empty(address)
@@ -645,7 +645,7 @@ func gasSelfdestruct(evm *EVM, callContext *CallContext, availableGas uint64, me
 	if evm.ChainRules().IsTangerineWhistle {
 		gas = params.SelfdestructGasEIP150
 		var address = accounts.InternAddress(callContext.Stack.Back(0).Bytes20())
-		callContext.callAddrTmp = address
+		callContext.internedAddr = address
 
 		if evm.ChainRules().IsSpuriousDragon {
 			// if empty and transfers value

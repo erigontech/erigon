@@ -53,13 +53,13 @@ type operation struct {
 	string     stringer
 
 	// hasAddrSlot: if true, the interpreter pre-interns Stack.Back(addrSlot).Bytes20()
-	// before gas/op execution and stores it in callContext.callAddrTmp.
+	// before gas/op execution and stores it in callContext.opcodeAddr.
 	// Only set on EIP-2929+ ops where both gas func and op func need the same address.
 	hasAddrSlot bool
 	addrSlot    uint8
 
 	// hasKeySlot: if true, the interpreter pre-interns Stack.Back(keySlot).Bytes32()
-	// before gas/op execution and stores it in callContext.callKeyTmp.
+	// before gas/op execution and stores it in callContext.opcodeKey.
 	// Only set on EIP-2929+ ops (SLOAD, SSTORE).
 	hasKeySlot bool
 	keySlot    uint8
