@@ -172,7 +172,18 @@ Loop:
 			envelopes, envErr = RequestEnvelopesFrantically(ctx, f.rpc, fullRoots)
 			if envErr != nil {
 				log.Debug("[ForwardBeaconDownloader] failed to get envelopes", "err", envErr)
-				// Non-fatal: blocks without envelopes will be treated as EMPTY.
+			}
+			log.Debug("[ForwardBeaconDownloader] envelope fetch result",
+				"requested", len(fullRoots), "received", len(envelopes),
+				"batchBlocks", len(processBlocks),
+				"firstSlot", processBlocks[0].Block.Slot,
+				"lastSlot", processBlocks[len(processBlocks)-1].Block.Slot)
+			// Trim batch at the first definitively FULL block whose envelope is missing.
+			// A FULL block's EL payload must be in the DB for subsequent blocks' TD chain;
+			// skipping it would create an unrecoverable gap.
+			processBlocks = trimAtMissingEnvelope(processBlocks, extraBlock, envelopes)
+			if len(processBlocks) == 0 {
+				return
 			}
 		}
 	}
@@ -240,6 +251,49 @@ func determineFullGloasRoots(blocks []*cltypes.SignedBeaconBlock, extraBlock *cl
 		}
 	}
 	return fullRoots
+}
+
+// trimAtMissingEnvelope trims the block list at the first definitively FULL GLOAS block
+// whose envelope was not obtained. A block is definitively FULL when the next block's
+// bid.ParentBlockHash matches this block's bid.BlockHash (confirmed by lookahead).
+// Blocks without a lookahead (last block, no extraBlock) are treated optimistically.
+func trimAtMissingEnvelope(blocks []*cltypes.SignedBeaconBlock, extraBlock *cltypes.SignedBeaconBlock, envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) []*cltypes.SignedBeaconBlock {
+	for i, block := range blocks {
+		if block.Version() < clparams.GloasVersion {
+			continue
+		}
+		bid := block.Block.Body.GetSignedExecutionPayloadBid()
+		if bid == nil || bid.Message == nil {
+			continue
+		}
+		var nextBlock *cltypes.SignedBeaconBlock
+		if i+1 < len(blocks) {
+			nextBlock = blocks[i+1]
+		} else {
+			nextBlock = extraBlock
+		}
+		if nextBlock == nil {
+			continue
+		}
+		nextBid := nextBlock.Block.Body.GetSignedExecutionPayloadBid()
+		if nextBid == nil || nextBid.Message == nil {
+			continue
+		}
+		if nextBid.Message.ParentBlockHash != bid.Message.BlockHash {
+			continue
+		}
+		// Definitively FULL — envelope is required
+		root, err := block.Block.HashSSZ()
+		if err != nil {
+			continue
+		}
+		if _, ok := envelopes[common.Hash(root)]; !ok {
+			log.Debug("[ForwardBeaconDownloader] FULL block envelope missing, trimming batch",
+				"slot", block.Block.Slot, "blocksBeforeTrim", len(blocks), "trimmedAt", i)
+			return blocks[:i]
+		}
+	}
+	return blocks
 }
 
 // GetHighestProcessedSlot retrieve the highest processed slot we accumulated.

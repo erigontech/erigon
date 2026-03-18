@@ -256,9 +256,11 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	//     (post-beacon-block state, no execution payload was applied)
 	// This ensures the new block builds on the correct canonical state.
 	var parentFullState *state.CachingBeaconState
+	var latestBlockHashOverride common.Hash
 	if blockVersion >= clparams.GloasVersion {
 		isParentFull := f.isParentNodeFull(block.Block)
 		hasEnvelope := f.forkGraph.HasEnvelope(block.Block.ParentRoot)
+		_, parentInForkChoice := f.forkGraph.GetBlock(block.Block.ParentRoot)
 		if isParentFull {
 			if hasEnvelope {
 				// Reconstruct the execution payload state from disk
@@ -268,19 +270,35 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 						"slot", block.Block.Slot, "parentRoot", block.Block.ParentRoot, "err", err)
 					parentFullState = nil
 				}
-			} else {
-				log.Warn("OnBlock: FULL parent but HasEnvelope=false (envelope missing!)",
-					"slot", block.Block.Slot, "parentRoot", block.Block.ParentRoot)
+			} else if parentInForkChoice {
+				// Fallback: envelope missing but parent was FULL and in fork choice.
+				// Patch latestBlockHash from the parent bid's BlockHash.
+				parentBlock, _ := f.forkGraph.GetBlock(block.Block.ParentRoot)
+				if parentBlock != nil {
+					parentBid := parentBlock.Block.Body.GetSignedExecutionPayloadBid()
+					if parentBid != nil && parentBid.Message != nil {
+						log.Warn("OnBlock: FULL parent envelope missing, using latestBlockHash override",
+							"slot", block.Block.Slot, "parentRoot", block.Block.ParentRoot,
+							"bidBlockHash", parentBid.Message.BlockHash)
+						latestBlockHashOverride = parentBid.Message.BlockHash
+					}
+				}
 			}
 		}
-		if block.Block.Slot%100 == 0 {
-			log.Info("OnBlock GLOAS state debug",
-				"slot", block.Block.Slot, "isParentFull", isParentFull,
-				"hasEnvelope", hasEnvelope, "parentFullState!=nil", parentFullState != nil)
+		// Checkpoint sync fallback: parent block not in fork choice (e.g. synced from checkpoint
+		// at a GLOAS slot where envelope was already processed). The state's latestBlockHash
+		// may be stale. Patch it from the bid's ParentBlockHash since we trust the chain.
+		if !parentInForkChoice && parentFullState == nil {
+			bid := block.Block.Body.GetSignedExecutionPayloadBid()
+			if bid != nil && bid.Message != nil {
+				log.Debug("OnBlock: parent not in fork choice, using latestBlockHash override from bid",
+					"slot", block.Block.Slot, "bidParentBlockHash", bid.Message.ParentBlockHash)
+				latestBlockHashOverride = bid.Message.ParentBlockHash
+			}
 		}
 	}
 
-	lastProcessedState, status, err := f.forkGraph.AddChainSegment(block, fullValidation, parentFullState)
+	lastProcessedState, status, err := f.forkGraph.AddChainSegment(block, fullValidation, parentFullState, latestBlockHashOverride)
 	if err != nil {
 		return err
 	}
