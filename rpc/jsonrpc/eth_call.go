@@ -839,6 +839,10 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	// lists and we'll need to reestimate every time
 	nogas := args.Gas == nil
 
+	if args.From == nil {
+		args.From = &common.Address{}
+	}
+
 	var to common.Address
 	if args.To != nil {
 		to = *args.To
@@ -868,10 +872,6 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 			args.Nonce = (*hexutil.Uint64)(&nonce)
 		}
 		to = types.CreateAddress(*args.From, uint64(*args.Nonce))
-	}
-
-	if args.From == nil {
-		args.From = &common.Address{}
 	}
 
 	// Retrieve the precompiles since they don't need to be added to the access list

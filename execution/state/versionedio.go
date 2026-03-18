@@ -581,6 +581,64 @@ func (writes VersionedWrites) StripBalanceWrite(addr accounts.Address, readSet R
 	return
 }
 
+// SetBalance replaces the BalancePath write for addr in the write set with
+// the given value. If no existing BalancePath write is found, a new entry is
+// appended. This is used in the direct finalize path to adjust fee-calc
+// balances in pre-computed collector writes without IBS reconstruction.
+func (writes VersionedWrites) SetBalance(addr accounts.Address, val uint256.Int, reason tracing.BalanceChangeReason) VersionedWrites {
+	for _, w := range writes {
+		if w.Address == addr && w.Path == BalancePath {
+			w.Val = val
+			w.Reason = reason
+			return writes
+		}
+	}
+	return append(writes, &VersionedWrite{Address: addr, Path: BalancePath, Val: val, Reason: reason})
+}
+
+// SetAccountBalanceOrDelete replaces the BalancePath write for addr. If the
+// address has no existing writes in the set, all four account fields (balance,
+// nonce, incarnation, codeHash) are emitted so that applyVersionedWrites can
+// reconstruct a complete account. Without the full set, it would create an
+// account with nonce=0, incarnation=0, empty codeHash — wiping the real values.
+//
+// When emptyRemoval is true (EIP-161 SpuriousDragon), if the final account
+// would be empty (balance=0, nonce=0, empty code), the existing writes for
+// this address are stripped and a SelfDestructPath entry is emitted instead.
+func (writes VersionedWrites) SetAccountBalanceOrDelete(addr accounts.Address, acc *accounts.Account, val uint256.Int, reason tracing.BalanceChangeReason, emptyRemoval bool) VersionedWrites {
+	if acc == nil {
+		a := accounts.NewAccount()
+		acc = &a
+	}
+
+	// EIP-161: if the final account is empty, delete it.
+	if emptyRemoval && val.IsZero() && acc.Nonce == 0 && acc.IsEmptyCodeHash() {
+		// Strip any existing writes for this address and emit a delete.
+		filtered := make(VersionedWrites, 0, len(writes)+1)
+		for _, w := range writes {
+			if w.Address != addr {
+				filtered = append(filtered, w)
+			}
+		}
+		return append(filtered, &VersionedWrite{Address: addr, Path: SelfDestructPath, Val: true})
+	}
+
+	for _, w := range writes {
+		if w.Address == addr && w.Path == BalancePath {
+			w.Val = val
+			w.Reason = reason
+			return writes
+		}
+	}
+	// Account not in writes — emit complete account fields.
+	return append(writes,
+		&VersionedWrite{Address: addr, Path: BalancePath, Val: val, Reason: reason},
+		&VersionedWrite{Address: addr, Path: NoncePath, Val: acc.Nonce},
+		&VersionedWrite{Address: addr, Path: IncarnationPath, Val: acc.Incarnation},
+		&VersionedWrite{Address: addr, Path: CodeHashPath, Val: acc.CodeHash},
+	)
+}
+
 func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path AccountPath, key accounts.StorageKey, commited bool, defaultV T, copyV func(T) T, readStorage func(sdb *stateObject) (T, error)) (T, ReadSource, Version, error) {
 	if s.versionMap == nil {
 		so, err := s.getStateObject(addr, true)
