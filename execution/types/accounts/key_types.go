@@ -111,6 +111,7 @@ func (a Address) Cmp(o Address) int {
 	return a.Value().Cmp(o.Value())
 }
 
+type StorageKeyRaw common.Hash
 type StorageKey unique.Handle[common.Hash]
 
 var ZeroKey = InternKey(common.Hash{})

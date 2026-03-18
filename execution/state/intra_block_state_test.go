@@ -293,11 +293,11 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 			return true
 		}
 		// Check basic accessor methods.
-		se, err := state.Exist(addr)
+		se, err := state.Exist(addr.Value())
 		if err != nil {
 			return err
 		}
-		ce, err := checkstate.Exist(addr)
+		ce, err := checkstate.Exist(addr.Value())
 		if err != nil {
 			return err
 		}
