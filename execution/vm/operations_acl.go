@@ -346,7 +346,7 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 			} else {
 				delegationGas = params.WarmStorageReadCostEIP2929
 			}
-			_, err := evm.intraBlockState.GetCode(addr)
+			_, err := evm.intraBlockState.GetCode(rawAddr)
 			if err != nil {
 				return 0, err
 			}

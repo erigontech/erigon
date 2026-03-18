@@ -748,8 +748,7 @@ func (do *dbObj) GetCode(addrSlice goja.Value) goja.Value {
 		do.vm.Interrupt(err)
 		return nil
 	}
-	addr := accounts.InternAddress(common.BytesToAddress(a))
-	code, err := do.ibs.GetCode(addr)
+	code, err := do.ibs.GetCode(common.BytesToAddress(a))
 	if err != nil {
 		do.vm.Interrupt(err)
 		return nil

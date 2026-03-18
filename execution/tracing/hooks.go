@@ -47,7 +47,7 @@ type OpContext interface {
 type IntraBlockState interface {
 	GetBalance(accounts.Address) (uint256.Int, error)
 	GetNonce(accounts.Address) (uint64, error)
-	GetCode(accounts.Address) ([]byte, error)
+	GetCode(common.Address) ([]byte, error)
 	GetState(addr common.Address, key common.Hash) (uint256.Int, error)
 	Exist(common.Address) (bool, error)
 	GetRefund() uint64
