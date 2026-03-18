@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -37,6 +38,11 @@ import (
 var _ kv.TemporalRwTx = &MemoryMutation{}
 
 type MemoryMutation struct {
+	// mu protects concurrent access to the mutation's maps and backing tx.
+	// Read methods (GetOne, Has) acquire RLock; write methods (Put, Delete,
+	// ClearTable, UpdateTxn) acquire Lock. Cursor-based methods are NOT
+	// protected and must only be called single-threaded (under the semaphore).
+	mu               sync.RWMutex
 	memTx            kv.RwTx
 	memDb            kv.RwDB
 	deletedEntries   map[string]map[string]struct{}
@@ -46,15 +52,36 @@ type MemoryMutation struct {
 	statelessCursors map[string]kv.RwCursor
 }
 
-// NewMemoryBatch - starts in-mem batch
+// NewMemoryBatch creates a pure Go in-memory batch with no OS-thread affinity.
+// This is safe to hold across goroutine migrations (e.g. between Engine API calls).
 //
 // Common pattern:
 //
-// batch := NewMemoryBatch(db, tmpDir)
-// defer batch.Close()
-// ... some calculations on `batch`
-// batch.Commit()
-func NewMemoryBatch(tx kv.TemporalTx, tmpDir string, logger log.Logger) (mm *MemoryMutation, err error) {
+//	batch := NewMemoryBatch(db, tmpDir)
+//	defer batch.Close()
+//	... some calculations on `batch`
+//	batch.Commit()
+func NewMemoryBatch(tx kv.TemporalTx, tmpDir string, logger log.Logger) (*MemoryMutation, error) {
+	mem := newMemStore()
+	memDB := &memStoreDB{store: mem}
+	if err := initSequences(tx, mem); err != nil {
+		return nil, fmt.Errorf("NewMemoryBatch: init sequences: %w", err)
+	}
+
+	return &MemoryMutation{
+		db:             tx,
+		memDb:          memDB,
+		memTx:          mem,
+		deletedEntries: make(map[string]map[string]struct{}),
+		deletedDups:    map[string]map[string]map[string]struct{}{},
+		clearedTables:  make(map[string]struct{}),
+	}, nil
+}
+
+// NewMemoryBatchMDBX creates an MDBX-backed in-memory batch. The MDBX write
+// transaction pins the goroutine to an OS thread via runtime.LockOSThread(),
+// so this variant must not be held across goroutine migrations.
+func NewMemoryBatchMDBX(tx kv.TemporalTx, tmpDir string, logger log.Logger) (mm *MemoryMutation, err error) {
 	tmpDB := mdbx.New(dbcfg.TemporaryDB, logger).InMem(nil, tmpDir).GrowthStep(64 * datasize.MB).MapSize(512 * datasize.GB).MustOpen()
 	defer func() {
 		if err != nil {
@@ -63,11 +90,11 @@ func NewMemoryBatch(tx kv.TemporalTx, tmpDir string, logger log.Logger) (mm *Mem
 	}()
 	memTx, err := tmpDB.BeginRw(context.Background()) // nolint:gocritic
 	if err != nil {
-		return nil, fmt.Errorf("NewMemoryBatch: begin tx: %w", err)
+		return nil, fmt.Errorf("NewMemoryBatchMDBX: begin tx: %w", err)
 	}
 	if err = initSequences(tx, memTx); err != nil {
 		memTx.Rollback()
-		return nil, fmt.Errorf("NewMemoryBatch: init sequences: %w", err)
+		return nil, fmt.Errorf("NewMemoryBatchMDBX: init sequences: %w", err)
 	}
 
 	return &MemoryMutation{
@@ -85,6 +112,8 @@ func (m *MemoryMutation) UnderlyingTx() kv.TemporalTx {
 }
 
 func (m *MemoryMutation) UpdateTxn(tx kv.TemporalTx) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.db = tx
 	m.statelessCursors = nil
 }
@@ -138,14 +167,20 @@ func initSequences(db kv.Tx, memTx kv.RwTx) error {
 }
 
 func (m *MemoryMutation) IncrementSequence(bucket string, amount uint64) (uint64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.memTx.IncrementSequence(bucket, amount)
 }
 
 func (m *MemoryMutation) ReadSequence(bucket string) (uint64, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.memTx.ReadSequence(bucket)
 }
 
 func (m *MemoryMutation) ResetSequence(bucket string, newValue uint64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.memTx.ResetSequence(bucket, newValue)
 }
 
@@ -187,42 +222,71 @@ func (m *MemoryMutation) statelessCursor(table string) (kv.RwCursor, error) {
 	return c, nil
 }
 
-// Can only be called from the worker thread
+// GetOne returns the value for a key from the mutation overlay, falling back to the
+// underlying DB transaction. Thread-safe: acquires RLock to allow concurrent reads
+// while writes are serialized by Lock.
 func (m *MemoryMutation) GetOne(table string, key []byte) ([]byte, error) {
-	c, err := m.statelessCursor(table)
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	// If table was cleared, only mem layer has valid data.
+	if m.isTableCleared(table) {
+		return m.memTx.GetOne(table, key)
+	}
+	// If key was explicitly deleted, check mem layer only (may have been re-Put).
+	if m.isEntryDeleted(table, key) {
+		return m.memTx.GetOne(table, key)
+	}
+	// Try mem layer first.
+	v, err := m.memTx.GetOne(table, key)
 	if err != nil {
 		return nil, err
 	}
-	_, v, err := c.SeekExact(key)
-	return v, err
+	if v != nil {
+		return v, nil
+	}
+	// Fall back to underlying DB.
+	return m.db.GetOne(table, key)
 }
 
 func (m *MemoryMutation) Last(table string) ([]byte, []byte, error) {
 	panic("not implemented. (MemoryMutation.Last)")
 }
 
-// Has return whether a key is present in a certain table.
+// Has returns whether a key is present in the mutation overlay or underlying DB.
+// Thread-safe: acquires RLock.
 func (m *MemoryMutation) Has(table string, key []byte) (bool, error) {
-	c, err := m.statelessCursor(table)
-	if err != nil {
-		return false, err
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if m.isTableCleared(table) {
+		return m.memTx.Has(table, key)
 	}
-	k, _, err := c.Seek(key)
-	if err != nil {
-		return false, err
+	if m.isEntryDeleted(table, key) {
+		return m.memTx.Has(table, key)
 	}
-	return bytes.Equal(key, k), nil
+	has, err := m.memTx.Has(table, key)
+	if err != nil || has {
+		return has, err
+	}
+	return m.db.Has(table, key)
 }
 
 func (m *MemoryMutation) Put(table string, k, v []byte) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.memTx.Put(table, k, v)
 }
 
 func (m *MemoryMutation) Append(table string, key []byte, value []byte) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.memTx.Append(table, key, value)
 }
 
 func (m *MemoryMutation) AppendDup(table string, key []byte, value []byte) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	c, err := m.statelessCursor(table)
 	if err != nil {
 		return err
@@ -266,7 +330,7 @@ func (m *MemoryMutation) StreamDescend(table string, fromPrefix, toPrefix []byte
 }
 
 func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
-	s := &rangeIter{orderAscend: true, limit: int64(limit)}
+	s := &rangeIter{orderAscend: bool(asc), limit: int64(limit)}
 	var err error
 	if s.iterDb, err = m.db.Range(table, fromPrefix, toPrefix, asc, limit); err != nil {
 		return s, err
@@ -433,6 +497,8 @@ func (s *rangeDupSortIter) Next() (k, v []byte, err error) {
 }
 
 func (m *MemoryMutation) Delete(table string, k []byte) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	t, ok := m.deletedEntries[table]
 	if !ok {
 		t = make(map[string]struct{})
@@ -492,6 +558,8 @@ func (m *MemoryMutation) ListTables() ([]string, error) {
 }
 
 func (m *MemoryMutation) ClearTable(bucket string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.clearedTables[bucket] = struct{}{}
 	return m.memTx.ClearTable(bucket)
 }
@@ -792,15 +860,157 @@ func (m *MemoryMutation) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum 
 }
 
 func (m *MemoryMutation) UnmarkedRw(id kv.ForkableId) kv.UnmarkedRwTx {
-	return m.db.(kv.TemporalRwTx).UnmarkedRw(id)
+	if rwTx, ok := m.db.(kv.TemporalRwTx); ok {
+		return rwTx.UnmarkedRw(id)
+	}
+	return nil // overlay backed by RO tx
 }
 
 func (m *MemoryMutation) PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error) {
-	return m.db.(kv.TemporalRwTx).PruneSmallBatches(ctx, timeout)
+	if rwTx, ok := m.db.(kv.TemporalRwTx); ok {
+		return rwTx.PruneSmallBatches(ctx, timeout)
+	}
+	return false, nil // overlay backed by RO tx — prune deferred to commit window
 }
 
 func (m *MemoryMutation) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
-	return m.db.(kv.TemporalRwTx).Unwind(ctx, txNumUnwindTo, changeset)
+	if rwTx, ok := m.db.(kv.TemporalRwTx); ok {
+		return rwTx.Unwind(ctx, txNumUnwindTo, changeset)
+	}
+	return fmt.Errorf("unwind requires TemporalRwTx, got %T", m.db)
+}
+
+// OverlayReadView provides a read-only view that checks the MemoryMutation's
+// in-memory layer first, then falls back to its own independent DB transaction.
+// This is thread-safe for concurrent use: the mem layer is protected by the
+// parent mutation's RWMutex, and the DB fallback uses the view's own tx (not
+// the parent's potentially-stale backing tx).
+//
+// All read methods (GetOne, Has, Range, Cursor, etc.) merge overlay data with
+// the DB tx. The embedded kv.Tx is used only for methods that have no overlay
+// equivalent (e.g. ViewID, CHandle).
+//
+// Use NewReadView to create an OverlayReadView. The caller is responsible for
+// rolling back the underlying dbTx when done.
+type OverlayReadView struct {
+	kv.Tx   // embedded for methods with no overlay equivalent
+	overlay *MemoryMutation
+}
+
+// NewReadView creates a read-only view that checks the overlay's mem layer first,
+// then falls back to dbTx for DB reads. The dbTx must be a fresh, independently-opened
+// read transaction — it is NOT shared with the overlay's internal backing tx.
+func (m *MemoryMutation) NewReadView(dbTx kv.Tx) *OverlayReadView {
+	return &OverlayReadView{Tx: dbTx, overlay: m}
+}
+
+func (v *OverlayReadView) GetOne(table string, key []byte) ([]byte, error) {
+	v.overlay.mu.RLock()
+	if v.overlay.isTableCleared(table) {
+		val, err := v.overlay.memTx.GetOne(table, key)
+		v.overlay.mu.RUnlock()
+		return val, err
+	}
+	if v.overlay.isEntryDeleted(table, key) {
+		val, err := v.overlay.memTx.GetOne(table, key)
+		v.overlay.mu.RUnlock()
+		return val, err
+	}
+	val, err := v.overlay.memTx.GetOne(table, key)
+	v.overlay.mu.RUnlock()
+	if err != nil {
+		return nil, err
+	}
+	if val != nil {
+		return val, nil
+	}
+	// Fall back to our own independent DB tx.
+	return v.Tx.GetOne(table, key)
+}
+
+func (v *OverlayReadView) Has(table string, key []byte) (bool, error) {
+	v.overlay.mu.RLock()
+	if v.overlay.isTableCleared(table) {
+		has, err := v.overlay.memTx.Has(table, key)
+		v.overlay.mu.RUnlock()
+		return has, err
+	}
+	if v.overlay.isEntryDeleted(table, key) {
+		has, err := v.overlay.memTx.Has(table, key)
+		v.overlay.mu.RUnlock()
+		return has, err
+	}
+	has, err := v.overlay.memTx.Has(table, key)
+	v.overlay.mu.RUnlock()
+	if err != nil || has {
+		return has, err
+	}
+	return v.Tx.Has(table, key)
+}
+
+func (v *OverlayReadView) Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
+	s := &rangeIter{orderAscend: bool(asc), limit: int64(limit)}
+	var err error
+	if s.iterDb, err = v.Tx.Range(table, fromPrefix, toPrefix, asc, limit); err != nil {
+		return s, err
+	}
+	if s.iterMem, err = v.overlay.memTx.Range(table, fromPrefix, toPrefix, asc, limit); err != nil {
+		return s, err
+	}
+	if _, err := s.init(); err != nil {
+		s.Close()
+		return nil, err
+	}
+	return s, nil
+}
+
+func (v *OverlayReadView) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
+	s := &rangeDupSortIter{key: key, orderAscend: bool(asc), limit: int64(limit)}
+	var err error
+	if s.iterDb, err = v.Tx.RangeDupSort(table, key, fromPrefix, toPrefix, asc, limit); err != nil {
+		return s, err
+	}
+	if s.iterMem, err = v.overlay.memTx.RangeDupSort(table, key, fromPrefix, toPrefix, asc, limit); err != nil {
+		return s, err
+	}
+	if err := s.init(); err != nil {
+		s.Close()
+		return nil, err
+	}
+	return s, nil
+}
+
+func (v *OverlayReadView) Prefix(table string, prefix []byte) (stream.KV, error) {
+	nextPrefix, ok := kv.NextSubtree(prefix)
+	if !ok {
+		return v.Range(table, prefix, nil, order.Asc, kv.Unlim)
+	}
+	return v.Range(table, prefix, nextPrefix, order.Asc, kv.Unlim)
+}
+
+func (v *OverlayReadView) Cursor(bucket string) (kv.Cursor, error) {
+	return v.makeCursor(bucket)
+}
+
+func (v *OverlayReadView) CursorDupSort(bucket string) (kv.CursorDupSort, error) {
+	return v.makeCursor(bucket)
+}
+
+func (v *OverlayReadView) makeCursor(bucket string) (kv.CursorDupSort, error) {
+	c := &memoryMutationCursor{pureDupSort: isTablePurelyDupsort(bucket)}
+	c.table = bucket
+
+	var err error
+	c.cursor, err = v.Tx.CursorDupSort(bucket) //nolint:gocritic
+	if err != nil {
+		return nil, err
+	}
+	c.memCursor, err = v.overlay.memTx.RwCursorDupSort(bucket) //nolint:gocritic
+	if err != nil {
+		return nil, err
+	}
+	c.mutation = v.overlay
+	return c, err
 }
 
 type temporaldb struct {

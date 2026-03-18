@@ -50,14 +50,23 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, req *executionproto.Inser
 	}
 	defer roTx.Rollback()
 
-	sd, err := execctx.NewSharedDomains(ctx, roTx, e.logger)
-	if err != nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not create shared domains: %s", err)
+	// Ensure currentContext has a block overlay for accumulating writes.
+	sd := e.currentContext
+	if sd == nil {
+		sd, err = execctx.NewSharedDomains(ctx, roTx, e.logger)
+		if err != nil {
+			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not create shared domains: %s", err)
+		}
+		e.lock.Lock()
+		e.currentContext = sd
+		e.lock.Unlock()
 	}
-	defer sd.Close()
-
-	if err := sd.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: %w", err)
+	if sd.BlockOverlay() == nil {
+		if err := sd.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
+			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: %w", err)
+		}
+	} else {
+		sd.BlockOverlay().UpdateTxn(roTx)
 	}
 	blockOverlay := sd.BlockOverlay()
 
@@ -137,19 +146,9 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, req *executionproto.Inser
 		e.logger.Trace("Inserted block", "hash", header.Hash(), "number", header.Number)
 	}
 
-	// Brief RwTx only for flushing accumulated writes to disk.
-	rwTx, err := e.db.BeginRw(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not begin write transaction: %s", err)
-	}
-	defer rwTx.Rollback()
-	if err := sd.Flush(ctx, rwTx); err != nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not flush: %s", err)
-	}
-	if err := rwTx.Commit(); err != nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not commit: %s", err)
-	}
-
+	// Writes stay in the block overlay on currentContext — no flush or commit here.
+	// ValidateChain reads from the overlay; UpdateForkChoice flushes everything
+	// in a single commit at the end.
 	return &executionproto.InsertionResult{
 		Result: executionproto.ExecutionStatus_Success,
 	}, nil
