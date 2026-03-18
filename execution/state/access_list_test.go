@@ -188,3 +188,52 @@ func TestAccessList(t *testing.T) {
 		t.Fatalf("expected empty, got %d", got)
 	}
 }
+
+func BenchmarkAccessListReset(b *testing.B) {
+	sender := accounts.InternAddress(common.HexToAddress("0x1111"))
+	dst := accounts.InternAddress(common.HexToAddress("0x2222"))
+	precompiles := []accounts.Address{
+		accounts.InternAddress(common.HexToAddress("0x0001")),
+		accounts.InternAddress(common.HexToAddress("0x0002")),
+		accounts.InternAddress(common.HexToAddress("0x0003")),
+		accounts.InternAddress(common.HexToAddress("0x0004")),
+		accounts.InternAddress(common.HexToAddress("0x0005")),
+		accounts.InternAddress(common.HexToAddress("0x0006")),
+		accounts.InternAddress(common.HexToAddress("0x0007")),
+		accounts.InternAddress(common.HexToAddress("0x0008")),
+		accounts.InternAddress(common.HexToAddress("0x0009")),
+	}
+	slots := []accounts.StorageKey{
+		accounts.InternKey(common.HexToHash("0xabc1")),
+		accounts.InternKey(common.HexToHash("0xabc2")),
+		accounts.InternKey(common.HexToHash("0xabc3")),
+	}
+
+	populate := func(al *accessList) {
+		al.AddAddress(sender)
+		al.AddAddress(dst)
+		for _, p := range precompiles {
+			al.AddAddress(p)
+		}
+		for _, s := range slots {
+			al.AddSlot(dst, s)
+		}
+	}
+
+	b.Run("new", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			al := newAccessList()
+			populate(al)
+		}
+	})
+
+	b.Run("reset", func(b *testing.B) {
+		b.ReportAllocs()
+		al := newAccessList()
+		for i := 0; i < b.N; i++ {
+			al.Reset()
+			populate(al)
+		}
+	})
+}
