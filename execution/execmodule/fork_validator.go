@@ -248,7 +248,12 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 		fv.sharedDom.Close()
 	}
 	fv.sharedDom = sd
-	fv.extendingForkNotifications = shards.NewNotifications(nil)
+	// Use the validation pipeline's own notifications object so that state
+	// changes accumulated by exec3 during ValidateBlock are visible here.
+	// On each call we reset the accumulator to match main's behaviour of
+	// creating a fresh Sync (and thus fresh notifications) per validation.
+	fv.extendingForkNotifications = fv.executor.ValidationNotifications()
+	fv.extendingForkNotifications.Accumulator.Reset(0)
 	status, latestValidHash, validationError, criticalError =
 		fv.validateAndStorePayload(fv.ctx, fv.sharedDom, tx, header, body, unwindPoint, headersChain, bodiesChain)
 

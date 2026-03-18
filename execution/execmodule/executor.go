@@ -33,23 +33,28 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/shards"
 )
 
 // PipelineExecutor centralises all staged sync pipeline invocations:
 // ProcessFrozenBlocks (startup), RunLoop (FCU catchup), and ValidateBlock
 // (fork validation). It is created once and stored on ExecModule.
 type PipelineExecutor struct {
-	sync           *stagedsync.Sync
-	db             kv.TemporalRwDB
-	blockReader    services.FullBlockReader
-	chainConfig    *chain.Config
-	engine         rules.Engine
-	validationSync *stagedsync.Sync
-	logger         log.Logger
+	sync                    *stagedsync.Sync
+	db                      kv.TemporalRwDB
+	blockReader             services.FullBlockReader
+	chainConfig             *chain.Config
+	engine                  rules.Engine
+	validationSync          *stagedsync.Sync
+	validationNotifications *shards.Notifications
+	logger                  log.Logger
 }
 
 // NewPipelineExecutor creates a new executor. validationSync may be nil
 // if fork validation is not needed (e.g. in tests that skip ValidateChain).
+// validationNotifications must be the same object that was passed to
+// NewInMemoryExecution when creating validationSync, so that state changes
+// accumulated during fork validation are visible to the ForkValidator.
 func NewPipelineExecutor(
 	sync *stagedsync.Sync,
 	db kv.TemporalRwDB,
@@ -57,17 +62,27 @@ func NewPipelineExecutor(
 	chainConfig *chain.Config,
 	engine rules.Engine,
 	validationSync *stagedsync.Sync,
+	validationNotifications *shards.Notifications,
 	logger log.Logger,
 ) *PipelineExecutor {
 	return &PipelineExecutor{
-		sync:           sync,
-		db:             db,
-		blockReader:    blockReader,
-		chainConfig:    chainConfig,
-		engine:         engine,
-		validationSync: validationSync,
-		logger:         logger,
+		sync:                    sync,
+		db:                      db,
+		blockReader:             blockReader,
+		chainConfig:             chainConfig,
+		engine:                  engine,
+		validationSync:          validationSync,
+		validationNotifications: validationNotifications,
+		logger:                  logger,
 	}
+}
+
+// ValidationNotifications returns the notifications object used by the
+// validation pipeline. The ForkValidator uses this as extendingForkNotifications
+// so that state changes accumulated during ValidateBlock are available for
+// MergeExtendingFork to copy to the main accumulator.
+func (pe *PipelineExecutor) ValidationNotifications() *shards.Notifications {
+	return pe.validationNotifications
 }
 
 // CommitCycleFn is called between hasMore iterations to persist accumulated
