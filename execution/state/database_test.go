@@ -1631,7 +1631,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	var check0 uint256.Int
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		if exist, err := st.Exist(phoenixAddress.Value()); err != nil {
+		if exist, err := st.Exist(phoenixAddress); err != nil {
 			t.Error(err)
 		} else if !exist {
 			t.Errorf("expected phoenix %x to exist after first insert", phoenixAddress)
@@ -1652,7 +1652,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 
 		st := state.New(m.NewStateReader(tx))
-		if exist, err := st.Exist(phoenixAddress.Value()); err != nil {
+		if exist, err := st.Exist(phoenixAddress); err != nil {
 			t.Error(err)
 		} else if !exist {
 			t.Errorf("expected phoenix %x to exist after second insert", phoenixAddress)
@@ -1673,7 +1673,7 @@ func TestRecreateAndRewind(t *testing.T) {
 	}
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		if exist, err := st.Exist(phoenixAddress.Value()); err != nil {
+		if exist, err := st.Exist(phoenixAddress); err != nil {
 			t.Error(err)
 		} else if !exist {
 			t.Errorf("expected phoenix %x to exist after second insert", phoenixAddress)
