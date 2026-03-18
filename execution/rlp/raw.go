@@ -117,30 +117,30 @@ func readKind(buf []byte) (k Kind, tagsize, contentsize uint64, err error) {
 	}
 	b := buf[0]
 	switch {
-	case b < 0x80:
+	case b < SingleByteThreshold:
 		k = Byte
 		tagsize = 0
 		contentsize = 1
-	case b < 0xB8:
+	case b < LongStringCode+1:
 		k = String
 		tagsize = 1
-		contentsize = uint64(b - 0x80)
+		contentsize = uint64(b - EmptyStringCode)
 		// Reject strings that should've been single bytes.
-		if contentsize == 1 && len(buf) > 1 && buf[1] < 128 {
+		if contentsize == 1 && len(buf) > 1 && buf[1] < SingleByteThreshold {
 			return 0, 0, 0, ErrCanonSize
 		}
-	case b < 0xC0:
+	case b < EmptyListCode:
 		k = String
-		tagsize = uint64(b-0xB7) + 1
-		contentsize, err = readSize(buf[1:], b-0xB7)
-	case b < 0xF8:
+		tagsize = uint64(b-LongStringCode) + 1
+		contentsize, err = readSize(buf[1:], b-LongStringCode)
+	case b < LongListCode+1:
 		k = List
 		tagsize = 1
-		contentsize = uint64(b - 0xC0)
+		contentsize = uint64(b - EmptyListCode)
 	default:
 		k = List
-		tagsize = uint64(b-0xF7) + 1
-		contentsize, err = readSize(buf[1:], b-0xF7)
+		tagsize = uint64(b-LongListCode) + 1
+		contentsize, err = readSize(buf[1:], b-LongListCode)
 	}
 	if err != nil {
 		return 0, 0, 0, err

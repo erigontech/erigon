@@ -765,9 +765,9 @@ func (s *Stream) Raw() ([]byte, error) {
 		return nil, err
 	}
 	if kind == String {
-		encodePrefixToBuf(int(size), buf, 0x80, 0xB7)
+		encodePrefixToBuf(int(size), buf, EmptyStringCode, LongStringCode)
 	} else {
-		encodePrefixToBuf(int(size), buf, 0xC0, 0xF7)
+		encodePrefixToBuf(int(size), buf, EmptyListCode, LongListCode)
 	}
 	return buf, nil
 }
@@ -1139,42 +1139,39 @@ func (s *Stream) readKind() (kind Kind, size uint64, err error) {
 	}
 	s.byteval = 0
 	switch {
-	case b < 0x80:
+	case b < SingleByteThreshold:
 		// For a single byte whose value is in the [0x00, 0x7F] range, that byte
 		// is its own RLP encoding.
 		s.byteval = b
 		return Byte, 0, nil
-	case b < 0xB8:
+	case b < LongStringCode+1:
 		// Otherwise, if a string is 0-55 bytes long, the RLP encoding consists
-		// of a single byte with value 0x80 plus the length of the string
-		// followed by the string. The range of the first byte is thus [0x80, 0xB7].
-		return String, uint64(b - 0x80), nil
-	case b < 0xC0:
+		// of a single byte with value EmptyStringCode plus the length of the string
+		// followed by the string.
+		return String, uint64(b - EmptyStringCode), nil
+	case b < EmptyListCode:
 		// If a string is more than 55 bytes long, the RLP encoding consists of a
-		// single byte with value 0xB7 plus the length of the length of the
+		// single byte with value LongStringCode plus the length of the length of the
 		// string in binary form, followed by the length of the string, followed
-		// by the string. For example, a length-1024 string would be encoded as
-		// 0xB90400 followed by the string. The range of the first byte is thus
-		// [0xB8, 0xBF].
-		size, err = s.readUint(b - 0xB7)
+		// by the string.
+		size, err = s.readUint(b - LongStringCode)
 		if err == nil && size < 56 {
 			err = ErrCanonSize
 		}
 		return String, size, err
-	case b < 0xF8:
+	case b < LongListCode+1:
 		// If the total payload of a list (i.e. the combined length of all its
 		// items) is 0-55 bytes long, the RLP encoding consists of a single byte
-		// with value 0xC0 plus the length of the list followed by the
-		// concatenation of the RLP encodings of the items. The range of the
-		// first byte is thus [0xC0, 0xF7].
-		return List, uint64(b - 0xC0), nil
+		// with value EmptyListCode plus the length of the list followed by the
+		// concatenation of the RLP encodings of the items.
+		return List, uint64(b - EmptyListCode), nil
 	default:
 		// If the total payload of a list is more than 55 bytes long, the RLP
-		// encoding consists of a single byte with value 0xF7 plus the length of
+		// encoding consists of a single byte with value LongListCode plus the length of
 		// the length of the payload in binary form, followed by the length of
 		// the payload, followed by the concatenation of the RLP encodings of
-		// the items. The range of the first byte is thus [0xF8, 0xFF].
-		size, err = s.readUint(b - 0xF7)
+		// the items.
+		size, err = s.readUint(b - LongListCode)
 		if err == nil && size < 56 {
 			err = ErrCanonSize
 		}
