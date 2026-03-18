@@ -208,7 +208,7 @@ func (h *History) missedMapAccessors(source []*FilesItem, dl dirListing) (l []*F
 			panic(err)
 		}
 		return []string{fPath}
-	})
+	}, h.FilenameBase, h.logger)
 }
 
 func (h *History) buildVi(ctx context.Context, item *FilesItem, ps *background.ProgressSet) (err error) {

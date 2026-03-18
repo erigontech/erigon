@@ -258,7 +258,7 @@ func (ii *InvertedIndex) missedMapAccessors(source []*FilesItem, dl dirListing) 
 			panic(err)
 		}
 		return []string{fPath}
-	})
+	}, ii.FilenameBase, ii.logger)
 }
 
 func (ii *InvertedIndex) buildEfAccessor(ctx context.Context, item *FilesItem, ps *background.ProgressSet) (err error) {

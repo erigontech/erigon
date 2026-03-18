@@ -56,8 +56,8 @@ import (
 )
 
 var (
-	asserts          = dbg.EnvBool("AGG_ASSERTS", false)
-	traceFileLife    = dbg.EnvString("AGG_TRACE_FILE_LIFE", "")
+	asserts              = dbg.EnvBool("AGG_ASSERTS", false)
+	traceFileLife, traceFileLifeSet = dbg.EnvStringLookup("AGG_TRACE_FILE_LIFE")
 	traceGetAsOf     = dbg.EnvString("AGG_TRACE_GET_AS_OF", "")
 	tracePutWithPrev = dbg.EnvString("AGG_TRACE_PUT_WITH_PREV", "")
 )
@@ -1129,7 +1129,7 @@ func (d *Domain) missedBtreeAccessors(source []*FilesItem, dl dirListing) (l []*
 			panic(err)
 		}
 		return []string{btF, exF}
-	})
+	}, d.FilenameBase, d.logger)
 }
 
 func (d *Domain) MissedMapAccessors() (l []*FilesItem) {
@@ -1146,7 +1146,7 @@ func (d *Domain) missedMapAccessors(source []*FilesItem, dl dirListing) (l []*Fi
 			panic(err)
 		}
 		return []string{fPath}
-	})
+	}, d.FilenameBase, d.logger)
 	//return fileItemsWithMissedAccessors(source, d.stepSize, func(fromStep, toStep uint64) []string {
 	//	var files []string
 	//	if d.Accessors.Has(AccessorHashMap) {

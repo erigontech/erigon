@@ -806,8 +806,42 @@ func readDirNames(dir string) dirListing {
 
 // fileItemsWithMissedAccessors returns list of files with missed accessors
 // here "accessors" are generated dynamically by `accessorsFor`
-func fileItemsWithMissedAccessors(dirtyFiles []*FilesItem, aggregationStep uint64, accessorsFor func(fromStep, toStep kv.Step) []string) (l []*FilesItem) {
-	for _, item := range dirtyFiles {
+func fileItemsWithMissedAccessors(
+	dirtyFiles []*FilesItem,
+	aggregationStep uint64,
+	accessorsFor func(fromStep, toStep kv.Step) []string,
+	filenameBase string,
+	logger log.Logger,
+) (l []*FilesItem) {
+	for i, item := range dirtyFiles {
+		// Skip items that are proper subsets of other dirty files.
+		// After a merge, old sub-range data files stay on disk while held open by
+		// active readers; OpenFolder/scanDirtyFiles re-adds them to dirtyFiles.
+		// Rebuilding their accessors creates orphaned .efi files and triggers false
+		// "Removed file unexpectedly exists" warnings.
+		var coveringItem *FilesItem
+		for j, other := range dirtyFiles {
+			if i != j && item.isProperSubsetOf(other) {
+				coveringItem = other
+				break
+			}
+		}
+		if coveringItem != nil {
+			if traceFileLifeSet && (traceFileLife == "" || strings.Contains(filenameBase, traceFileLife)) {
+				logger.Warn("[agg.dbg] fileItemsWithMissedAccessors: skipping subset item",
+					"f", filenameBase,
+					"item", fmt.Sprintf("%d-%d", item.startTxNum/aggregationStep, item.endTxNum/aggregationStep),
+					"coveredBy", fmt.Sprintf("%d-%d", coveringItem.startTxNum/aggregationStep, coveringItem.endTxNum/aggregationStep),
+				)
+			} else {
+				logger.Debug("[agg.dbg] fileItemsWithMissedAccessors: skipping subset item",
+					"f", filenameBase,
+					"item", fmt.Sprintf("%d-%d", item.startTxNum/aggregationStep, item.endTxNum/aggregationStep),
+					"coveredBy", fmt.Sprintf("%d-%d", coveringItem.startTxNum/aggregationStep, coveringItem.endTxNum/aggregationStep),
+				)
+			}
+			continue
+		}
 		for _, fName := range accessorsFor(item.StepRange(aggregationStep)) {
 			exists, err := dir.FileExist(fName)
 			if err != nil {

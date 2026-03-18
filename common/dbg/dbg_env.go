@@ -59,6 +59,12 @@ func EnvString(envVarName string, defaultVal string) string {
 	return defaultVal
 }
 
+// EnvStringLookup returns the value of the env var and whether it was set.
+// Unlike EnvString, it distinguishes between "not set" and "set to empty string".
+func EnvStringLookup(envVarName string) (string, bool) {
+	return envLookup(envVarName)
+}
+
 func EnvStrings(envVarName string, sep string, defaultVal []string) []string {
 	if v, _ := envLookup(envVarName); v != "" {
 		return strings.Split(v, sep)

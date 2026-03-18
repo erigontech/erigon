@@ -181,7 +181,7 @@ func (f *SnapshotRepo) DirtyFilesWithNoBtreeAccessors() (l []*FilesItem) {
 		fname, _ := p.BtIdxFile(v, from, to)
 		existenceFile, _ := p.ExistenceFile(v, from, to)
 		return []string{fname, existenceFile}
-	})
+	}, f.schema.DataTag(), f.logger)
 }
 
 func (f *SnapshotRepo) DirtyFilesWithNoHashAccessors() (l []*FilesItem) {
@@ -199,7 +199,7 @@ func (f *SnapshotRepo) DirtyFilesWithNoHashAccessors() (l []*FilesItem) {
 			files[i], _ = p.AccessorIdxFile(v, RootNum(fromStep.ToTxNum(ss)), RootNum(toStep.ToTxNum(ss)), i)
 		}
 		return files
-	})
+	}, f.schema.DataTag(), f.logger)
 }
 
 func (f *SnapshotRepo) EndRootNum() RootNum {
@@ -331,7 +331,7 @@ func (f *SnapshotRepo) FilesWithMissedAccessors() *MissedFilesMap {
 			fileItemsWithMissedAccessors(f.dirtyFiles.Items(), f.stepSize, func(fromStep, toStep kv.Step) []string {
 				file, _ := f.schema.BtIdxFile(version.V1_0, RootNum(fromStep*kv.Step(f.stepSize)), RootNum(toStep*kv.Step(f.stepSize)))
 				return []string{file}
-			})
+			}, f.schema.DataTag(), f.logger)
 	}
 
 	if f.accessors.Has(statecfg.AccessorHashMap) {
@@ -339,7 +339,7 @@ func (f *SnapshotRepo) FilesWithMissedAccessors() *MissedFilesMap {
 			fileItemsWithMissedAccessors(f.dirtyFiles.Items(), f.stepSize, func(fromStep, toStep kv.Step) []string {
 				file, _ := f.schema.AccessorIdxFile(version.V1_0, RootNum(fromStep*kv.Step(f.stepSize)), RootNum(toStep*kv.Step(f.stepSize)), 0)
 				return []string{file}
-			})
+			}, f.schema.DataTag(), f.logger)
 	}
 
 	if f.accessors.Has(statecfg.AccessorExistence) {
@@ -347,7 +347,7 @@ func (f *SnapshotRepo) FilesWithMissedAccessors() *MissedFilesMap {
 			fileItemsWithMissedAccessors(f.dirtyFiles.Items(), f.stepSize, func(fromStep, toStep kv.Step) []string {
 				file, _ := f.schema.ExistenceFile(version.V1_0, RootNum(fromStep*kv.Step(f.stepSize)), RootNum(toStep*kv.Step(f.stepSize)))
 				return []string{file}
-			})
+			}, f.schema.DataTag(), f.logger)
 	}
 
 	return (*MissedFilesMap)(&mf)

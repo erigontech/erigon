@@ -10,6 +10,7 @@ import (
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -93,7 +94,7 @@ func TestFileItemWithMissedAccessor(t *testing.T) {
 		defer dir.RemoveFile(fname)
 	}
 
-	fileItems := fileItemsWithMissedAccessors(btree.Items(), aggStep, accessorFor)
+	fileItems := fileItemsWithMissedAccessors(btree.Items(), aggStep, accessorFor, "", log.New())
 	require.Len(t, fileItems, 1)
 	require.Equal(t, f3, fileItems[0])
 }
