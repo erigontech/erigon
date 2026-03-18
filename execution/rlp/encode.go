@@ -498,17 +498,13 @@ func EncodeU32ToBuf(i uint32, to []byte) int {
 // EncodeU64 encodes i as an RLP string via w.
 // precondition: len(buffer) >= 9
 func EncodeU64(i uint64, w io.Writer, buffer []byte) error {
-	if i == 0 {
-		buffer[0] = EmptyStringCode
-		_, err := w.Write(buffer[:1])
-		return err
-	}
-	if i < SingleByteThreshold {
+	if 0 < i && i < SingleByteThreshold {
 		buffer[0] = byte(i)
 		_, err := w.Write(buffer[:1])
 		return err
 	}
-	// Write big-endian directly into buffer (callers provide >= 9 bytes).
+	// i == 0 is handled here: PutUint64 writes zeros, BitLenToByteLen(Len64(0)) == 0,
+	// so buffer[8] = EmptyStringCode and we write the single byte 0x80.
 	binary.BigEndian.PutUint64(buffer[1:], i)
 	size := common.BitLenToByteLen(bits.Len64(i))
 	buffer[8-size] = EmptyStringCode + byte(size)
