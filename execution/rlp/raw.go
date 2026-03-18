@@ -22,10 +22,7 @@ package rlp
 import (
 	"encoding/binary"
 	"io"
-	"math/bits"
 	"reflect"
-
-	"github.com/erigontech/erigon/common"
 )
 
 // RawValue represents an encoded RLP value and can be used to delay
@@ -172,14 +169,7 @@ func readSize(b []byte, slen byte) (uint64, error) {
 
 // AppendUint64 appends the RLP encoding of i to b, and returns the resulting slice.
 func AppendUint64(b []byte, i uint64) []byte {
-	if i == 0 {
-		return append(b, 0x80)
-	} else if i < 128 {
-		return append(b, byte(i))
-	}
 	var buf [9]byte
-	binary.BigEndian.PutUint64(buf[1:], i)
-	size := common.BitLenToByteLen(bits.Len64(i))
-	buf[8-size] = 0x80 + byte(size)
-	return append(b, buf[8-size:]...)
+	n := EncodeU64(i, buf[:])
+	return append(b, buf[:n]...)
 }
