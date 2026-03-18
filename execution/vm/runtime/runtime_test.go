@@ -772,7 +772,7 @@ func TestCreate2CollisionWithEIP7702Delegation(t *testing.T) {
 
 	// The CREATE2 should have failed (collision), so the factory's SSTORE
 	// should have stored the zero address (CREATE2 returns 0 on failure).
-	val, err := statedb.GetState(accounts.InternAddress(factoryAddr), accounts.StorageKey{})
+	val, err := statedb.GetState(factoryAddr, common.Hash{})
 	require.NoError(t, err)
 	require.True(t, val.IsZero(), "CREATE2 should have returned 0 (collision), but got %x", val)
 
@@ -842,7 +842,7 @@ func TestCreateCollisionWithEIP7702Delegation(t *testing.T) {
 	require.NoError(t, err)
 
 	// CREATE should have failed (collision), returning 0.
-	val, err := statedb.GetState(factoryAcct, accounts.StorageKey{})
+	val, err := statedb.GetState(factoryAcct.Value(), common.Hash{})
 	require.NoError(t, err)
 	require.True(t, val.IsZero(), "CREATE should have returned 0 (collision), but got %x", val)
 }

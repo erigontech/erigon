@@ -178,11 +178,11 @@ func TestAllocConstructor(t *testing.T) {
 	assert.Equal(common.FromHex("5f355f55"), code)
 
 	key0 := accounts.InternKey(common.HexToHash("0000000000000000000000000000000000000000000000000000000000000000"))
-	storage0, err := state.GetState(address, key0)
+	storage0, err := state.GetState(address.Value(), key0.Value())
 	require.NoError(err)
 	assert.Equal(u256.U64(0x2a), storage0)
 	key1 := accounts.InternKey(common.HexToHash("0000000000000000000000000000000000000000000000000000000000000001"))
-	storage1, err := state.GetState(address, key1)
+	storage1, err := state.GetState(address.Value(), key1.Value())
 	require.NoError(err)
 	assert.Equal(u256.U64(0x01c9), storage1)
 }

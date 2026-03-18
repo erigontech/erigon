@@ -252,7 +252,7 @@ func (b *SimulatedBackend) StorageAt(ctx context.Context, contract common.Addres
 	defer tx.Rollback()
 
 	stateDB := b.stateByBlockNumber(tx, blockNumber)
-	val, err := stateDB.GetState(accounts.InternAddress(contract), accounts.InternKey(key))
+	val, err := stateDB.GetState(contract, key)
 	if err != nil {
 		return nil, err
 	}
