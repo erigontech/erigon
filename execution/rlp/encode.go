@@ -473,7 +473,6 @@ func U64Len(i uint64) int {
 }
 
 // EncodeU64ToBuf encodes i as an RLP string into to and returns the number of bytes written.
-// precondition: len(to) >= 9
 func EncodeU64ToBuf(i uint64, to []byte) int {
 	if i == 0 {
 		to[0] = EmptyStringCode
@@ -483,10 +482,11 @@ func EncodeU64ToBuf(i uint64, to []byte) int {
 		to[0] = byte(i) // fits single byte
 		return 1
 	}
+	var buf [8]byte
+	binary.BigEndian.PutUint64(buf[:], i)
 	size := common.BitLenToByteLen(bits.Len64(i))
-	binary.BigEndian.PutUint64(to[1:9], i)
 	to[0] = EmptyStringCode + byte(size)
-	copy(to[1:], to[9-size:9])
+	copy(to[1:], buf[8-size:])
 	return 1 + size
 }
 
