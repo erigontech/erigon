@@ -171,7 +171,7 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 				// only emits fields that actually changed (see UpdateAccountData),
 				// so unchanged fields (e.g., nonce for a balance-only transfer)
 				// are nil and preserved from the domain state.
-				var acc accounts.Account
+				acc := accounts.NewAccount()
 				enc0, _, err := domains.GetLatest(kv.AccountsDomain, roTx, address[:])
 				if err != nil {
 					return err

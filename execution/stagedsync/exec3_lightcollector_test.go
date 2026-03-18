@@ -172,3 +172,61 @@ func TestLightCollectorNoncePreservationCrossBlock(t *testing.T) {
 	require.Equal(t, uint64(5200), finalAcc.Balance.Uint64(),
 		"block N: balance must reflect the last transfer")
 }
+
+// TestLightCollectorNewAccountCodeHash verifies that a balance-only write to
+// an account that doesn't exist in the domain produces a correctly-serialized
+// account with EmptyCodeHash (not zero CodeHash).
+//
+// applyVersionedWrites reads the domain base before overlaying fields from the
+// write. For a new account, the domain returns empty bytes. The base must use
+// accounts.NewAccount() (which sets CodeHash=EmptyCodeHash), not a zero-value
+// Account (which has CodeHash=0x000...). Otherwise SerialiseV3 encodes 32
+// zero bytes for CodeHash instead of omitting it, producing a different blob
+// that causes receiptHash mismatches downstream.
+func TestLightCollectorNewAccountCodeHash(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires mdbx")
+	}
+
+	tx, domains := setup2CacheTest(t)
+	lgr := log.New()
+
+	rs := state.NewStateV3Buffered(state.NewStateV3(domains, ethconfig.Sync{}, lgr))
+
+	addr := accounts.InternAddress(common.HexToAddress("0xNEW1"))
+	addrVal := addr.Value()
+
+	// Do NOT seed the domain — addr is a brand-new account.
+
+	// A transfer creates the account with balance only.
+	// LightCollector emits balance (changed), nonce (unchanged from zero original),
+	// incarnation (unchanged), codeHash (unchanged).
+	// With partial writes: only balance is emitted.
+	lc := state.NewLightCollector()
+	original := &accounts.Account{} // zero — account didn't exist
+	account := &accounts.Account{Balance: *uint256.NewInt(1000)}
+	err := lc.UpdateAccountData(addr, original, account)
+	require.NoError(t, err)
+
+	err = rs.ApplyStateWrites(context.Background(), tx, 1, 1, lc.TakeWrites(), nil, &chain.Rules{})
+	require.NoError(t, err)
+
+	// Read back and verify CodeHash is EmptyCodeHash, not zero.
+	enc, _, err := domains.GetLatest(kv.AccountsDomain, tx, addrVal[:])
+	require.NoError(t, err)
+	require.NotEmpty(t, enc)
+
+	var finalAcc accounts.Account
+	err = accounts.DeserialiseV3(&finalAcc, enc)
+	require.NoError(t, err)
+
+	require.Equal(t, uint64(1000), finalAcc.Balance.Uint64())
+	require.Equal(t, uint64(0), finalAcc.Nonce)
+	require.True(t, finalAcc.IsEmptyCodeHash(),
+		"new account must have EmptyCodeHash, not zero CodeHash")
+
+	// Verify round-trip: SerialiseV3(DeserialiseV3(enc)) == enc
+	reEncoded := accounts.SerialiseV3(&finalAcc)
+	require.Equal(t, enc, reEncoded,
+		"account serialization must be idempotent (EmptyCodeHash serializes as 0-byte, not 32 zero bytes)")
+}
