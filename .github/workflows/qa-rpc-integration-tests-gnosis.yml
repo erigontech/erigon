@@ -2,31 +2,15 @@ name: QA - RPC Integration Tests (Gnosis)
 
 on:
   workflow_dispatch:     # Run manually
+  workflow_call:
   push:
     branches:
       - main
       - 'release/3.*'
-  pull_request:
-    branches:
-      - main
-      - 'release/3.*'
-    types:
-      - opened
-      - reopened
-      - synchronize
-      - ready_for_review
 
 
 jobs:
   gnosis-rpc-integ-tests:
-    concurrency:
-      group: >-
-        ${{
-          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 
-          format('{0}-{1}', github.workflow, github.run_id) ||
-          format('{0}-{1}', github.workflow, github.ref)
-        }}
-      cancel-in-progress: true
     runs-on: [ self-hosted, qa, Gnosis, rpc-integration ]
     env:
       ERIGON_TESTBED_AREA: /opt/erigon-testbed
@@ -135,7 +119,7 @@ jobs:
         if: always() && steps.test_step.outputs.test_executed == 'true'
         uses: actions/upload-artifact@v6
         with:
-          name: test-results
+          name: test-results-gnosis
           path: ${{ env.TEST_RESULT_DIR }}
 
       - name: Save test results

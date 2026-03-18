@@ -15,16 +15,13 @@ on:
     branches:
         - main
         - 'release/**'
-  pull_request:
-    branches:
-      - main
-  workflow_call:
   workflow_dispatch:
+  workflow_call:
 
 jobs:
   assertoor_test:
     name: assertoor_${{ matrix.suite }}_test
-    if: ${{ github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'skip-uncaching') }}
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'skip-uncaching') }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -34,14 +31,6 @@ jobs:
             package_args: .github/workflows/kurtosis/regular-assertoor.io
           - suite: pectra
             package_args: .github/workflows/kurtosis/pectra.io
-    concurrency:
-      group: >-
-        ${{
-          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) &&
-          format('{0}-{1}-{2}', github.workflow, matrix.suite, github.run_id) ||
-          format('{0}-{1}-{2}', github.workflow, matrix.suite, github.ref)
-        }}
-      cancel-in-progress: true
 
     steps:
       - name: Fast checkout git repository
@@ -56,7 +45,7 @@ jobs:
         if: |
           github.repository == 'erigontech/erigon' &&
           github.actor != 'dependabot[bot]' &&
-          (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork)
+          !github.event.pull_request.head.repo.fork
         continue-on-error: true
         uses: docker/login-action@v3
         with:

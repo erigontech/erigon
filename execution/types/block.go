@@ -374,13 +374,13 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 	if err = s.ReadUint256(&h.Number); err != nil {
 		return fmt.Errorf("read Number: %w", err)
 	}
-	if h.GasLimit, err = s.Uint(); err != nil {
+	if h.GasLimit, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read GasLimit: %w", err)
 	}
-	if h.GasUsed, err = s.Uint(); err != nil {
+	if h.GasUsed, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read GasUsed: %w", err)
 	}
-	if h.Time, err = s.Uint(); err != nil {
+	if h.Time, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read Time: %w", err)
 	}
 	if h.Extra, err = s.Bytes(); err != nil {
@@ -392,7 +392,7 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("read MixDigest: %w", err)
 	}
 	if size != 32 { // AuRa
-		if h.AuRaStep, err = s.Uint(); err != nil {
+		if h.AuRaStep, err = s.Uint64(); err != nil {
 			return fmt.Errorf("read AuRaStep: %w", err)
 		}
 		if h.AuRaSeal, err = s.Bytes(); err != nil {
@@ -431,7 +431,7 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		return s.ListEnd()
 	}
 	var blobGasUsed uint64
-	if blobGasUsed, err = s.Uint(); err != nil {
+	if blobGasUsed, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read BlobGasUsed: %w", err)
 	}
 	h.BlobGasUsed = &blobGasUsed
@@ -441,7 +441,7 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		return s.ListEnd()
 	}
 	var excessBlobGas uint64
-	if excessBlobGas, err = s.Uint(); err != nil {
+	if excessBlobGas, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read ExcessBlobGas: %w", err)
 	}
 	h.ExcessBlobGas = &excessBlobGas
@@ -481,7 +481,7 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		return s.ListEnd()
 	}
 	var slotNumber uint64
-	if slotNumber, err = s.Uint(); err != nil {
+	if slotNumber, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read SlotNumber: %w", err)
 	}
 	h.SlotNumber = &slotNumber

@@ -1409,10 +1409,7 @@ func (rs *RecSplit) buildWithWorkers(ctx context.Context) error {
 	if consumerErr != nil {
 		return consumerErr
 	}
-	if producerErr != nil && !errors.Is(producerErr, context.Canceled) {
-		return producerErr
-	}
-	return nil
+	return producerErr
 }
 
 // Erigon doesn't create tons of bufio readers/writers, but it has tons of

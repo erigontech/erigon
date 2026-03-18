@@ -252,22 +252,8 @@ func New(
 
 	res.shanghaiTime = chainConfig.ShanghaiTime
 	if chainConfig.Bor != nil {
-		agraBlock := chainConfig.Bor.GetAgraBlock()
-		if agraBlock != nil {
-			if !agraBlock.IsUint64() {
-				return nil, errors.New("agraBlock overflow")
-			}
-			agraBlockU64 := agraBlock.Uint64()
-			res.agraBlock = &agraBlockU64
-		}
-		bhilaiBlock := chainConfig.Bor.GetBhilaiBlock()
-		if bhilaiBlock != nil {
-			if !bhilaiBlock.IsUint64() {
-				return nil, errors.New("bhilaiBlock overflow")
-			}
-			bhilaiBlockU64 := bhilaiBlock.Uint64()
-			res.bhilaiBlock = &bhilaiBlockU64
-		}
+		res.agraBlock = chainConfig.Bor.GetAgraBlock()
+		res.bhilaiBlock = chainConfig.Bor.GetBhilaiBlock()
 	}
 	res.cancunTime = chainConfig.CancunTime
 	res.pragueTime = chainConfig.PragueTime
@@ -355,16 +341,10 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	}
 
 	pendingBaseFee, baseFeeChanged := p.setBaseFee(baseFee)
-	// Update pendingBase for all pool queues and slices
 	if baseFeeChanged {
 		var pendingBaseFee256 uint256.Int
 		pendingBaseFee256.SetUint64(pendingBaseFee)
-		p.pending.best.pendingBaseFee = pendingBaseFee256
-		p.pending.worst.pendingBaseFee = pendingBaseFee256
-		p.baseFee.best.pendingBaseFee = pendingBaseFee256
-		p.baseFee.worst.pendingBaseFee = pendingBaseFee256
-		p.queued.best.pendingBaseFee = pendingBaseFee256
-		p.queued.worst.pendingBaseFee = pendingBaseFee256
+		p.setPendingBaseFeeOnQueues(pendingBaseFee256)
 	}
 
 	pendingBlobFee := stateChanges.PendingBlobFeePerGas
@@ -373,31 +353,12 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	oldGasLimit := p.blockGasLimit.Swap(stateChanges.BlockGasLimit)
 	if oldGasLimit != stateChanges.BlockGasLimit {
 		p.all.ascendAll(func(mt *metaTxn) bool {
-			var updated bool
 			if mt.TxnSlot.GetGas() < stateChanges.BlockGasLimit {
-				updated = (mt.subPool & NotTooMuchGas) > 0
 				mt.subPool |= NotTooMuchGas
 			} else {
-				updated = (mt.subPool & NotTooMuchGas) == 0
 				mt.subPool &^= NotTooMuchGas
 			}
-
-			if mt.TxnSlot.Traced {
-				p.logger.Info("TX TRACING: on block gas limit update", "idHash", fmt.Sprintf("%x", mt.TxnSlot.IDHash), "senderId", mt.TxnSlot.SenderID, "nonce", mt.TxnSlot.Nonce, "subPool", mt.currentSubPool, "updated", updated)
-			}
-
-			if !updated {
-				return true
-			}
-
-			switch mt.currentSubPool {
-			case PendingSubPool:
-				p.pending.Updated(mt)
-			case BaseFeeSubPool:
-				p.baseFee.Updated(mt)
-			case QueuedSubPool:
-				p.queued.Updated(mt)
-			}
+			p.updateInSubPool(mt)
 			return true
 		})
 	}
@@ -569,28 +530,10 @@ func (p *TxPool) GetRlp(tx kv.Tx, hash []byte) ([]byte, error) {
 	return common.Copy(rlpTx), err
 }
 
-func (p *TxPool) AppendLocalAnnouncements(types []byte, sizes []uint32, hashes []byte) ([]byte, []uint32, []byte) {
+func (p *TxPool) AppendAllAnnouncements(types []byte, sizes []uint32, hashes []byte) ([]byte, []uint32, []byte) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	for hash, txn := range p.byHash {
-		if txn.subPool&IsLocal == 0 {
-			continue
-		}
-		types = append(types, txn.TxnSlot.TxType())
-		sizes = append(sizes, txn.TxnSlot.Size)
-		hashes = append(hashes, hash...)
-	}
-	return types, sizes, hashes
-}
-
-func (p *TxPool) AppendRemoteAnnouncements(types []byte, sizes []uint32, hashes []byte) ([]byte, []uint32, []byte) {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-
-	for hash, txn := range p.byHash {
-		if txn.subPool&IsLocal != 0 {
-			continue
-		}
 		types = append(types, txn.TxnSlot.TxType())
 		sizes = append(sizes, txn.TxnSlot.Size)
 		hashes = append(hashes, hash...)
@@ -601,13 +544,6 @@ func (p *TxPool) AppendRemoteAnnouncements(types []byte, sizes []uint32, hashes 
 		sizes = append(sizes, txnSlot.Size)
 		hashes = append(hashes, hash...)
 	}
-
-	return types, sizes, hashes
-}
-
-func (p *TxPool) AppendAllAnnouncements(types []byte, sizes []uint32, hashes []byte) ([]byte, []uint32, []byte) {
-	types, sizes, hashes = p.AppendLocalAnnouncements(types, sizes, hashes)
-	types, sizes, hashes = p.AppendRemoteAnnouncements(types, sizes, hashes)
 	return types, sizes, hashes
 }
 
@@ -849,7 +785,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 func (p *TxPool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
 	provideOptions := txnprovider.ApplyProvideOptions(opts...)
 	var txnsRlp TxnsRlp
-	_, _, err := p.YieldBest(
+	_, _, err := p.best(
 		ctx,
 		provideOptions.Amount,
 		&txnsRlp,
@@ -883,13 +819,9 @@ func (p *TxPool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOpt
 	return txns, nil
 }
 
-func (p *TxPool) YieldBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availableGas, availableBlobGas uint64, toSkip mapset.Set[[32]byte], availableRlpSpace int) (bool, int, error) {
-	return p.best(ctx, n, txns, onTopOf, availableGas, availableBlobGas, toSkip, availableRlpSpace)
-}
-
 func (p *TxPool) PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availableGas, availableBlobGas uint64, availableRlpSpace int) (bool, error) {
 	set := mapset.NewThreadUnsafeSet[[32]byte]()
-	onTime, _, err := p.YieldBest(ctx, n, txns, onTopOf, availableGas, availableBlobGas, set, availableRlpSpace)
+	onTime, _, err := p.best(ctx, n, txns, onTopOf, availableGas, availableBlobGas, set, availableRlpSpace)
 	return onTime, err
 }
 
@@ -1332,17 +1264,7 @@ func (p *TxPool) punishSpammer(spammer uint64) {
 		})
 
 		for _, mt := range txnsToDelete {
-			switch mt.currentSubPool {
-			case PendingSubPool:
-				p.pending.Remove(mt, "punishSpammer", p.logger)
-			case BaseFeeSubPool:
-				p.baseFee.Remove(mt, "punishSpammer", p.logger)
-			case QueuedSubPool:
-				p.queued.Remove(mt, "punishSpammer", p.logger)
-			default:
-				//already removed
-			}
-
+			p.removeFromSubPool(mt, "punishSpammer")
 			p.discardLocked(mt, txpoolcfg.Spammer) // can't call it while iterating by all
 		}
 	}
@@ -1390,14 +1312,13 @@ func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcf
 
 	announcements, addReasons, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, p.senders, newTxns,
 		p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), p.blockGasLimit.Load(), true, p.logger)
-	if err == nil {
-		for i, reason := range addReasons {
-			if reason != txpoolcfg.NotSet {
-				reasons[i] = reason
-			}
-		}
-	} else {
+	if err != nil {
 		return nil, err
+	}
+	for i, reason := range addReasons {
+		if reason != txpoolcfg.NotSet {
+			reasons[i] = reason
+		}
 	}
 	p.promoted.Reset()
 	p.promoted.AppendOther(announcements)
@@ -1561,6 +1482,40 @@ func (p *TxPool) setBlobFee(blobFee uint64) {
 	}
 }
 
+// setPendingBaseFeeOnQueues propagates the pending base fee to all sub-pool comparators.
+func (p *TxPool) setPendingBaseFeeOnQueues(fee uint256.Int) {
+	p.pending.best.pendingBaseFee = fee
+	p.pending.worst.pendingBaseFee = fee
+	p.baseFee.best.pendingBaseFee = fee
+	p.baseFee.worst.pendingBaseFee = fee
+	p.queued.best.pendingBaseFee = fee
+	p.queued.worst.pendingBaseFee = fee
+}
+
+// removeFromSubPool removes a metaTxn from whichever sub-pool it currently belongs to.
+func (p *TxPool) removeFromSubPool(mt *metaTxn, reason string) {
+	switch mt.currentSubPool {
+	case PendingSubPool:
+		p.pending.Remove(mt, reason, p.logger)
+	case BaseFeeSubPool:
+		p.baseFee.Remove(mt, reason, p.logger)
+	case QueuedSubPool:
+		p.queued.Remove(mt, reason, p.logger)
+	}
+}
+
+// updateInSubPool notifies the sub-pool that a metaTxn's ephemeral fields have changed.
+func (p *TxPool) updateInSubPool(mt *metaTxn) {
+	switch mt.currentSubPool {
+	case PendingSubPool:
+		p.pending.Updated(mt)
+	case BaseFeeSubPool:
+		p.baseFee.Updated(mt)
+	case QueuedSubPool:
+		p.queued.Updated(mt)
+	}
+}
+
 func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.DiscardReason {
 	// Insert to pending pool, if pool doesn't have txn with same Nonce and bigger Tip
 	found := p.all.get(mt.TxnSlot.SenderID, mt.TxnSlot.Nonce)
@@ -1610,17 +1565,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 			return txpoolcfg.NotReplaced
 		}
 
-		switch found.currentSubPool {
-		case PendingSubPool:
-			p.pending.Remove(found, "add", p.logger)
-		case BaseFeeSubPool:
-			p.baseFee.Remove(found, "add", p.logger)
-		case QueuedSubPool:
-			p.queued.Remove(found, "add", p.logger)
-		default:
-			//already removed
-		}
-
+		p.removeFromSubPool(found, "add")
 		p.discardLocked(found, txpoolcfg.ReplacedByHigherTip)
 	}
 
@@ -1802,9 +1747,6 @@ func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxns []*TxnSlot) er
 	var toDel []*metaTxn // can't delete items while iterate them
 
 	discarded := 0
-	pendingRemoved := 0
-	baseFeeRemoved := 0
-	queuedRemoved := 0
 
 	for senderID, nonce := range noncesToRemove {
 		byNonce.ascend(senderID, func(mt *metaTxn) bool {
@@ -1821,20 +1763,7 @@ func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxns []*TxnSlot) er
 			}
 
 			toDel = append(toDel, mt)
-			// del from sub-pool
-			switch mt.currentSubPool {
-			case PendingSubPool:
-				pendingRemoved++
-				p.pending.Remove(mt, "remove-mined", p.logger)
-			case BaseFeeSubPool:
-				baseFeeRemoved++
-				p.baseFee.Remove(mt, "remove-mined", p.logger)
-			case QueuedSubPool:
-				queuedRemoved++
-				p.queued.Remove(mt, "remove-mined", p.logger)
-			default:
-				//already removed
-			}
+			p.removeFromSubPool(mt, "remove-mined")
 			return true
 		})
 
@@ -1847,7 +1776,7 @@ func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxns []*TxnSlot) er
 	}
 
 	if discarded > 0 {
-		p.logger.Debug("Discarded transactions", "count", discarded, "pending", pendingRemoved, "baseFee", baseFeeRemoved, "queued", queuedRemoved)
+		p.logger.Debug("Discarded transactions", "count", discarded)
 	}
 
 	return nil
@@ -1886,17 +1815,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 			if mt.TxnSlot.Traced {
 				logger.Info("TX TRACING: onSenderStateChange loop iteration remove", "idHash", fmt.Sprintf("%x", mt.TxnSlot.IDHash), "senderID", senderID, "senderNonce", senderNonce, "txn.nonce", mt.TxnSlot.Nonce, "currentSubPool", mt.currentSubPool, "reason", deleteAndContinueReasonLog)
 			}
-			// del from sub-pool
-			switch mt.currentSubPool {
-			case PendingSubPool:
-				p.pending.Remove(mt, deleteAndContinueReasonLog, p.logger)
-			case BaseFeeSubPool:
-				p.baseFee.Remove(mt, deleteAndContinueReasonLog, p.logger)
-			case QueuedSubPool:
-				p.queued.Remove(mt, deleteAndContinueReasonLog, p.logger)
-			default:
-				//already removed
-			}
+			p.removeFromSubPool(mt, deleteAndContinueReasonLog)
 			toDel = append(toDel, mt)
 			toDelReasons = append(toDelReasons, discardReason)
 			return true
@@ -1956,14 +1875,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 		}
 
 		// Some fields of mt might have changed, need to fix the invariants in the subpool best and worst queues
-		switch mt.currentSubPool {
-		case PendingSubPool:
-			p.pending.Updated(mt)
-		case BaseFeeSubPool:
-			p.baseFee.Updated(mt)
-		case QueuedSubPool:
-			p.queued.Updated(mt)
-		}
+		p.updateInSubPool(mt)
 		return true
 	})
 
@@ -2493,12 +2405,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.TemporalTx) err
 	// comparators use the correct base fee even before the first OnNewBlock.
 	var pendingBaseFee256 uint256.Int
 	pendingBaseFee256.SetUint64(pendingBaseFee)
-	p.pending.best.pendingBaseFee = pendingBaseFee256
-	p.pending.worst.pendingBaseFee = pendingBaseFee256
-	p.baseFee.best.pendingBaseFee = pendingBaseFee256
-	p.baseFee.worst.pendingBaseFee = pendingBaseFee256
-	p.queued.best.pendingBaseFee = pendingBaseFee256
-	p.queued.worst.pendingBaseFee = pendingBaseFee256
+	p.setPendingBaseFeeOnQueues(pendingBaseFee256)
 	p.pendingBaseFee.Store(pendingBaseFee)
 	p.pendingBlobFee.Store(pendingBlobFee)
 	p.blockGasLimit.Store(blockGasLimit)
