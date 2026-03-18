@@ -36,20 +36,25 @@ type (
 )
 
 type operation struct {
+	// Hot fields — accessed on every opcode dispatch (keep in first cache line).
+
 	// execute is the operation function
 	execute     executionFunc
 	constantGas uint64
-	dynamicGas  gasFunc
+	// numPop tells how many stack items are required
+	numPop int // δ in the Yellow Paper
 	// maxStack specifies the max length the stack can have for this operation
 	// to not overflow the stack.
-	maxStack int
+	maxStack   int
+	dynamicGas gasFunc
 
-	// numPop tells how many stack items are required
-	numPop  int // δ in the Yellow Paper
-	numPush int // α in the Yellow Paper
+	// Cold fields — memorySize/string only when dynamicGas!=nil or tracing;
+	// numPush only during validateAndFillMaxStack setup.
+	// hasAddrSlot/hasKeySlot (future) go here too.
 
 	// memorySize returns the memory size required for the operation
 	memorySize memorySizeFunc
+	numPush    int // α in the Yellow Paper
 	string     stringer
 }
 
