@@ -70,10 +70,12 @@ func verifySlots(t *testing.T, s *IntraBlockState, addrString string, slotString
 		}
 	}
 	// Check that no extra elements are in the access list
-	stateSlots := s.accessList.addresses[address]
-	for s := range stateSlots {
-		if _, slotPresent := slotMap[s]; !slotPresent {
-			t.Fatalf("scope has extra slot %v (address %v)", s, addrString)
+	idx := s.accessList.addresses[address]
+	if idx >= 0 {
+		for s := range s.accessList.slots[idx] {
+			if _, slotPresent := slotMap[s]; !slotPresent {
+				t.Fatalf("scope has extra slot %v (address %v)", s, addrString)
+			}
 		}
 	}
 }
@@ -91,7 +93,7 @@ func TestAccessList(t *testing.T) {
 
 	state := New(NewReaderV3(domains.AsGetter(tx)))
 
-	state.accessList = newAccessList()
+	state.accessList.Reset()
 
 	state.AddAddressToAccessList(addr("aa"))          // 1
 	state.AddSlotToAccessList(addr("bb"), slot("01")) // 2,3
