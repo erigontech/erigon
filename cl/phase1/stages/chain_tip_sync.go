@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"time"
 
@@ -57,9 +58,23 @@ func waitForExecutionEngineToBeFinished(ctx context.Context, cfg *Cfg) (ready bo
 // It sends a request to fetch the blocks, verifies the associated blobs, and inserts them into the blob store.
 // It returns a PeeredObject containing the blocks and the peer ID, or an error if something goes wrong.
 func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count uint64) (*peers.PeeredObject[[]*cltypes.SignedBeaconBlock], error) {
-	// spam requests to fetch blocks by range from the execution client
 	blocks, pid, err := cfg.rpc.SendBeaconBlocksByRangeReq(ctx, from, count)
 	for err != nil {
+		// Respect context cancellation to avoid infinite loops.
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+		if errors.Is(err, peers.ErrNoPeers) {
+			// Back off when no peers are available to avoid CPU-burning tight loops.
+			log.Debug("[Caplin] no peers available, backing off before retrying block request", "from", from, "count", count)
+			select {
+			case <-time.After(2 * time.Second):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
 		blocks, pid, err = cfg.rpc.SendBeaconBlocksByRangeReq(ctx, from, count)
 	}
 

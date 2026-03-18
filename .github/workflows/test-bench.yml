@@ -1,10 +1,9 @@
 name: Benchmarks
 
-# We only run benchmarks on pull requests to catch accidental breakage early.
-# We don't run on push to main/release because benchmarks aren't actively used
-# for anything right now — if they break post-merge it's not a release blocker.
-# If we ever care about benchmark results over time, that would be a separate
-# workflow on main that tracks performance trends, not this one.
+# Run benchmarks on pull requests to catch accidental breakage, and on push
+# to main/release to keep a warm build cache. Without a push trigger,
+# test-bench never runs on main and every new PR starts from a cold cache,
+# because GitHub's cache fallback chain only reaches the base branch.
 on:
   pull_request:
     branches:
@@ -14,6 +13,17 @@ on:
       - reopened
       - synchronize
       - ready_for_review
+  push:
+    # Cache warming only — benchmarks are not re-run on push to main/release.
+    # GitHub's cache isolation means PR and merge-queue runs can only fall back
+    # to the base-branch cache. Without this trigger, test-bench never runs on
+    # main so every new PR starts cold. The push run compiles test binaries
+    # (warming GOCACHE and GOMODCACHE) but does not execute them; correctness
+    # is already guaranteed by the merge queue before the commit lands here.
+    branches:
+      - main
+      - release/**
+  workflow_dispatch:
 
 defaults:
   run:
@@ -40,7 +50,12 @@ jobs:
         id: erigon
 
       - name: Run benchmarks
+        if: github.event_name == 'pull_request'
         run: make test-bench
+
+      - name: Build test binaries (cache warming)
+        if: github.event_name != 'pull_request'
+        run: go test -run=^$ ./...
 
       - uses: ./.github/actions/cleanup-erigon
         if: always()

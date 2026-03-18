@@ -67,7 +67,7 @@ func (m *MockMsgReadWriter) ReadMsg() (p2p.Msg, error) {
 		return p2p.Msg{}, fmt.Errorf("failed to read RLP list: %w", err)
 	}
 
-	code, err := s.Uint()
+	code, err := s.Uint64()
 	if err != nil {
 		return p2p.Msg{}, fmt.Errorf("failed to read message code: %w", err)
 	}
