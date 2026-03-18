@@ -451,7 +451,7 @@ func statefulGasCall(evm *EVM, callContext *CallContext, gas uint64, availableGa
 			// value > 0 will be rejected by ErrWriteProtection before evm.Call()
 			// runs, so the target is never truly accessed.
 			if !evm.readOnly {
-				evm.IntraBlockState().MarkAddressAccess(address, false)
+				evm.IntraBlockState().MarkAddressAccess(address.Value(), false)
 			}
 		}
 	} else {

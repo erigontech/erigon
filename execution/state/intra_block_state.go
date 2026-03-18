@@ -2263,7 +2263,7 @@ func (sdb *IntraBlockState) accountRead(addr accounts.Address, account *accounts
 }
 
 func versionWritten[T any](sdb *IntraBlockState, addr accounts.Address, path AccountPath, key accounts.StorageKey, val T) {
-	sdb.MarkAddressAccess(addr, true)
+	sdb.MarkAddressAccess(addr.Value(), true)
 	if sdb.versionMap != nil {
 		if sdb.versionedWrites == nil {
 			sdb.versionedWrites = WriteSet{}
@@ -2288,7 +2288,7 @@ func versionWritten[T any](sdb *IntraBlockState, addr accounts.Address, path Acc
 }
 
 func versionRead[T any](sdb *IntraBlockState, addr accounts.Address, path AccountPath, key accounts.StorageKey, source ReadSource, version Version, val any) {
-	sdb.MarkAddressAccess(addr, true)
+	sdb.MarkAddressAccess(addr.Value(), true)
 	if sdb.versionMap != nil {
 		if sdb.versionedReads == nil {
 			sdb.versionedReads = ReadSet{}

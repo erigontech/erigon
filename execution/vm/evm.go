@@ -201,7 +201,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	}
 
 	// BAL: record address access even if call fails due to gas/call depth/insufficient balance
-	evm.intraBlockState.MarkAddressAccess(addr, false)
+	evm.intraBlockState.MarkAddressAccess(addr.Value(), false)
 
 	if evm.config.NoRecursion && depth > 0 {
 		return nil, gas, nil
@@ -420,7 +420,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 		evm.intraBlockState.AddAddressToAccessList(address.Value())
 	}
 	// BAL: record target address even on failed CREATE/CREATE2 calls
-	evm.intraBlockState.MarkAddressAccess(address, false)
+	evm.intraBlockState.MarkAddressAccess(address.Value(), false)
 
 	// Ensure there's no existing contract already at the designated address.
 	// Use GetCodeHash (not ResolveCodeHash) so that an EIP-7702 delegation

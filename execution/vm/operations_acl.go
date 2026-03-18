@@ -248,7 +248,7 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 		// block access list.  Skip in read-only context (STATICCALL) where
 		// SELFDESTRUCT will be rejected by ErrWriteProtection.
 		if !evm.readOnly && !balance.IsZero() {
-			evm.IntraBlockState().MarkAddressAccess(address, false)
+			evm.IntraBlockState().MarkAddressAccess(address.Value(), false)
 		}
 		// When balance is zero OR we're in a read-only (STATICCALL) context,
 		// and the beneficiary differs from self, mark the beneficiary's reads
@@ -258,7 +258,7 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 		// (read-only).  Skip when beneficiary == self to avoid incorrectly
 		// marking the contract's own legitimate reads.
 		if (balance.IsZero() || evm.readOnly) && address != callContext.Address() {
-			evm.IntraBlockState().MarkReadsInternal(address)
+			evm.IntraBlockState().MarkReadsInternal(address.Value())
 		}
 		if empty && !balance.IsZero() {
 			gas += params.CreateBySelfdestructGas
