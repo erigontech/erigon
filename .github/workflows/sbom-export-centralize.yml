@@ -1,0 +1,123 @@
+name: SBOM Export & Centralize
+
+on:
+  push:
+    branches:
+      - main
+      - 'release/**'
+  schedule:
+    - cron: '50 21 * * 2'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  generate-and-upload:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    env:
+      CDXGEN_IMAGE: ghcr.io/cdxgen/cdxgen:v12.1.1
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Check for recent changes
+        id: check
+        run: |
+          set -euo pipefail
+
+          if [ -z "$(git rev-list -1 --since='7 days ago' HEAD)" ]; then
+            echo "No commits in the last 7 days, skipping SBOM generation."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Validate Dependency-Track configuration
+        if: steps.check.outputs.skip != 'true'
+        env:
+          DEPENDENCY_TRACK_API_KEY: ${{ secrets.ORG_DEPENDENCY_TRACK_API_KEY }}
+          DEPENDENCY_TRACK_URL: ${{ secrets.ORG_DEPENDENCY_TRACK_URL }}
+        run: |
+          set -euo pipefail
+
+          missing=0
+          for var in DEPENDENCY_TRACK_API_KEY DEPENDENCY_TRACK_URL; do
+            if [ -z "${!var:-}" ]; then
+              echo "::error::Required secret ${var} is not configured."
+              missing=1
+            fi
+          done
+
+          if [ "${missing}" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Generate CycloneDX SBOM via cdxgen
+        if: steps.check.outputs.skip != 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            -v /tmp:/tmp \
+            -v "${{ github.workspace }}:/app:rw" \
+            -e FETCH_LICENSE=true \
+            -e GITHUB_TOKEN \
+            "${CDXGEN_IMAGE}" \
+            -r /app \
+            -o /app/sbom.cdx.json \
+            --no-install-deps \
+            --spec-version 1.6
+
+          if [ ! -s sbom.cdx.json ]; then
+            echo "::error::cdxgen SBOM generation failed or returned empty."
+            exit 1
+          fi
+
+          echo "SBOM generated successfully:"
+          ls -lh sbom.cdx.json
+
+      - name: Upload generated SBOM artifact
+        if: steps.check.outputs.skip != 'true'
+        uses: actions/upload-artifact@v6
+        with:
+          name: sbom-cdx-${{ github.ref_name }}
+          path: sbom.cdx.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload SBOM to Dependency Track
+        if: steps.check.outputs.skip != 'true'
+        env:
+          DEPENDENCY_TRACK_API_KEY: ${{ secrets.ORG_DEPENDENCY_TRACK_API_KEY }}
+          DEPENDENCY_TRACK_URL: ${{ secrets.ORG_DEPENDENCY_TRACK_URL }}
+        run: |
+          set -euo pipefail
+
+          DEPENDENCY_TRACK_URL="${DEPENDENCY_TRACK_URL%/}"
+
+          curl --fail-with-body --silent --show-error \
+            --retry 3 --retry-all-errors \
+            --connect-timeout 10 --max-time 300 \
+            -X POST "${DEPENDENCY_TRACK_URL}/api/v1/bom" \
+            -H "X-Api-Key: ${DEPENDENCY_TRACK_API_KEY}" \
+            -F "autoCreate=true" \
+            -F "projectName=${{ github.event.repository.name }}" \
+            -F "projectVersion=${{ github.ref_name }}" \
+            -F "bom=@sbom.cdx.json"
+
+          echo "SBOM uploaded to Dependency Track for ${{ github.event.repository.name }}@${{ github.ref_name }}"
