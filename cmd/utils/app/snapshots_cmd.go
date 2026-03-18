@@ -557,7 +557,7 @@ var snapshotCommand = cli.Command{
 					return fmt.Errorf("verify snapshot downloads: %w", err)
 				}
 				log.Root().Info("[snapshots verify] done",
-					"torrents", summary.Torrents,
+					"snapshots", summary.Total,
 					"errors", summary.Errors,
 					"warnings", summary.Warnings,
 				)
