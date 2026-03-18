@@ -2175,7 +2175,8 @@ func (sdb *IntraBlockState) AddAddressToAccessList(addr accounts.Address) (addrM
 }
 
 // AddSlotToAccessList adds the given (address, slot)-tuple to the access list
-func (sdb *IntraBlockState) AddSlotToAccessList(addr accounts.Address, slot accounts.StorageKey) (addrMod, slotMod bool) {
+func (sdb *IntraBlockState) AddSlotToAccessList(addr accounts.Address, rawSlot common.Hash) (addrMod, slotMod bool) {
+	slot := sdb.InternKey(rawSlot)
 	addrMod, slotMod = sdb.accessList.AddSlot(addr, slot)
 	if addrMod {
 		// In practice, this should not happen, since there is no way to enter the
@@ -2198,8 +2199,8 @@ func (sdb *IntraBlockState) AddressInAccessList(addr accounts.Address) bool {
 	return sdb.accessList.ContainsAddress(addr)
 }
 
-func (sdb *IntraBlockState) SlotInAccessList(addr accounts.Address, slot accounts.StorageKey) (addressPresent bool, slotPresent bool) {
-	return sdb.accessList.Contains(addr, slot)
+func (sdb *IntraBlockState) SlotInAccessList(addr accounts.Address, rawSlot common.Hash) (addressPresent bool, slotPresent bool) {
+	return sdb.accessList.Contains(addr, sdb.InternKey(rawSlot))
 }
 
 func (sdb *IntraBlockState) MarkAddressAccess(addr accounts.Address, revertable bool) {

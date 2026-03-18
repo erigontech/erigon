@@ -56,15 +56,15 @@ func verifySlots(t *testing.T, s *IntraBlockState, addrString string, slotString
 	}
 	var address = accounts.InternAddress(common.HexToAddress(addrString))
 
-	slots := make([]accounts.StorageKey, 0, len(slotStrings))
+	rawSlots := make([]common.Hash, 0, len(slotStrings))
 	var slotMap = make(map[accounts.StorageKey]struct{})
 	for _, slotString := range slotStrings {
-		s := accounts.InternKey(common.HexToHash(slotString))
-		slots = append(slots, s)
-		slotMap[s] = struct{}{}
+		h := common.HexToHash(slotString)
+		rawSlots = append(rawSlots, h)
+		slotMap[accounts.InternKey(h)] = struct{}{}
 	}
 	// Check that the expected items are in the access list
-	for i, slot := range slots {
+	for i, slot := range rawSlots {
 		if _, slotPresent := s.SlotInAccessList(address, slot); !slotPresent {
 			t.Fatalf("input %d: scope missing slot %v (address %v)", i, slot, addrString)
 		}
@@ -82,7 +82,7 @@ func TestAccessList(t *testing.T) {
 	t.Parallel()
 	// Some helpers
 	addr := func(a string) accounts.Address { return accounts.InternAddress(common.HexToAddress(a)) }
-	slot := func(s string) accounts.StorageKey { return accounts.InternKey(common.HexToHash(s)) }
+	slot := func(s string) common.Hash { return common.HexToHash(s) }
 
 	_, tx, domains := NewTestRwTx(t)
 

@@ -169,7 +169,7 @@ func newTestAction(addr accounts.Address, r *rand.Rand) testAction {
 			name: "AddSlotToAccessList",
 			fn: func(a testAction, s *IntraBlockState) {
 				s.AddSlotToAccessList(addr,
-					accounts.InternKey(common.Hash{byte(a.args[0])}))
+					common.Hash{byte(a.args[0])})
 			},
 			args: make([]int64, 1),
 		},
