@@ -124,6 +124,16 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		return blocks[i].Block.Slot < blocks[j].Block.Slot
 	})
 
+	// // [GLOAS] Before processing blocks, fetch missing parent envelopes so that
+	// // latestBlockHash is up-to-date when we validate subsequent bids.
+	// // DISABLED: with trimAtMissingEnvelope in beacon_downloader.go, this path should
+	// // never trigger. It also has a bug: fetchAndApplyEnvelopes only calls
+	// // OnExecutionPayload but not AddGloasBlock, which would create an EL chain gap.
+	// if missingRoots := findMissingEnvelopeRoots(cfg, blocks); len(missingRoots) > 0 {
+	// 	logger.Debug("[Caplin] forward sync: fetching missing parent envelopes", "count", len(missingRoots))
+	// 	fetchAndApplyEnvelopes(ctx, cfg, missingRoots)
+	// }
+
 	var blockRoot common.Hash
 	newHighestBlockProcessed = highestBlockProcessed
 	// Iterate over each block in the sorted list
@@ -188,6 +198,11 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 						err = fmt.Errorf("failed to add gloas block to collector: %w", err)
 						return
 					}
+				}
+			} else {
+				bid := block.Block.Body.GetSignedExecutionPayloadBid()
+				if bid != nil && bid.Message != nil {
+					logger.Debug("[Caplin] forward sync: GLOAS block without envelope (treated as EMPTY)", "slot", block.Block.Slot, "bidBlockHash", bid.Message.BlockHash)
 				}
 			}
 			// [Modified in Gloas:EIP7732] Dump state AFTER envelope processing so that the
