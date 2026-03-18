@@ -31,6 +31,7 @@ jobs:
       TRACKING_TIME_SECONDS: 3600 # 1 hour
       TOTAL_TIME_SECONDS: 28800 # 8 hours
       ERIGON_ASSERT: true
+      ERIGON_AGG_TRACE_FILE_LIFE: ""
       LIGHTHOUSE_VERSION: v8.1.0
 
     steps:
