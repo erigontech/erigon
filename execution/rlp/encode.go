@@ -27,6 +27,7 @@ import (
 	"math/big"
 	"math/bits"
 	"reflect"
+	"sync"
 
 	"github.com/holiman/uint256"
 
@@ -456,6 +457,23 @@ func encodePrefixToBuf(size int, to []byte, smallTag, largeTag byte) int {
 	}
 	to[0] = smallTag + byte(size)
 	return 1
+}
+
+// --- Encoding scratch buffer ---
+
+// EncodingBuf is a pooled scratch buffer for hand-written EncodeRLP methods.
+type EncodingBuf [32]byte
+
+var encodingBufPool = sync.Pool{
+	New: func() any { return new(EncodingBuf) },
+}
+
+func NewEncodingBuf() *EncodingBuf {
+	return encodingBufPool.Get().(*EncodingBuf)
+}
+
+func (b *EncodingBuf) Release() {
+	encodingBufPool.Put(b)
 }
 
 // --- Integer encoding ---

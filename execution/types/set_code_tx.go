@@ -102,8 +102,8 @@ func (tx *SetCodeTransaction) MarshalBinary(w io.Writer) error {
 		return ErrNilToFieldTx
 	}
 	payloadSize, accessListLen, authorizationsLen := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 	// encode TxType
 	b[0] = SetCodeTxType
 	if _, err := w.Write(b[:1]); err != nil {
@@ -229,8 +229,8 @@ func (tx *SetCodeTransaction) EncodeRLP(w io.Writer) error {
 	}
 	payloadSize, accessListLen, authorizationsLen := tx.payloadSize()
 	envelopSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 	// encode envelope size
 	if err := rlp.EncodeStringSizePrefix(envelopSize, w, b[:]); err != nil {
 		return err

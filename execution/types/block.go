@@ -179,8 +179,8 @@ func (h *Header) EncodingSize() int {
 func (h *Header) EncodeRLP(w io.Writer) error {
 	encodingSize := h.EncodingSize()
 
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 	// Prefix
 	if err := rlp.EncodeListSizePrefix(encodingSize, w, b[:]); err != nil {
 		return err
@@ -808,8 +808,8 @@ func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen 
 
 func (rb RawBody) EncodeRLP(w io.Writer) error {
 	payloadSize, txsLen, unclesLen, withdrawalsLen := rb.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 	// prefix
 	if err := rlp.EncodeListSizePrefix(payloadSize, w, b[:]); err != nil {
 		return err
@@ -891,8 +891,8 @@ func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen 
 
 func (bfs BodyForStorage) EncodeRLP(w io.Writer) error {
 	payloadSize, unclesLen, withdrawalsLen := bfs.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 
 	// prefix
 	if err := rlp.EncodeListSizePrefix(payloadSize, w, b[:]); err != nil {
@@ -976,8 +976,8 @@ func (bb Body) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen
 func (bb Body) EncodeRLP(w io.Writer) error {
 	payloadSize, txsLen, unclesLen, withdrawalsLen := bb.payloadSize()
 
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 	// prefix
 	if err := rlp.EncodeListSizePrefix(payloadSize, w, b[:]); err != nil {
 		return err
@@ -1236,8 +1236,8 @@ func (bb *Block) EncodingSize() int {
 func (bb *Block) EncodeRLP(w io.Writer) error {
 	payloadSize, txsLen, unclesLen, withdrawalsLen := bb.payloadSize()
 
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 	// prefix
 	if err := rlp.EncodeListSizePrefix(payloadSize, w, b[:]); err != nil {
 		return err

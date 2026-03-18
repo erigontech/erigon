@@ -397,8 +397,8 @@ func (txw *BlobTxWrapper) payloadSize() (payloadSize int) {
 	return
 }
 func (txw *BlobTxWrapper) MarshalBinaryWrapped(w io.Writer) error {
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 	// encode TxType
 	b[0] = BlobTxType
 	if _, err := w.Write(b[:1]); err != nil {

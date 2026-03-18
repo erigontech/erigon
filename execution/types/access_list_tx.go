@@ -177,8 +177,8 @@ func encodeAccessList(al AccessList, w io.Writer, b []byte) error {
 // transactions, it returns the type and payload.
 func (tx *AccessListTx) MarshalBinary(w io.Writer) error {
 	payloadSize, accessListLen := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 	// encode TxType
 	b[0] = AccessListTxType
 	if _, err := w.Write(b[:1]); err != nil {
@@ -252,8 +252,8 @@ func (tx *AccessListTx) EncodeRLP(w io.Writer) error {
 	payloadSize, accessListLen := tx.payloadSize()
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 	// envelope
 	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
 		return err

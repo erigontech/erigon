@@ -53,8 +53,8 @@ func (obj *Withdrawal) EncodeRLP(w io.Writer) error {
 
 	encodingSize := obj.EncodingSize()
 
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 
 	if err := rlp.EncodeListSizePrefix(encodingSize, w, b[:]); err != nil {
 		return err
