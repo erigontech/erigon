@@ -439,31 +439,19 @@ func intsize(i uint64) (size int) {
 // headsize returns the size of a list or string header
 // for a value of the given size.
 func headsize(size uint64) int {
-	if size < 56 {
-		return 1
-	}
-	return 1 + intsize(size)
+	return ListPrefixLen(int(size))
 }
 
 // puthead writes a list or string header to buf.
 // buf must be at least 9 bytes long.
 func puthead(buf []byte, smalltag, largetag byte, size uint64) int {
-	if size < 56 {
-		buf[0] = smalltag + byte(size)
-		return 1
-	}
-	sizesize := putint(buf[1:], size)
-	buf[0] = largetag + byte(sizesize)
-	return sizesize + 1
+	return encodePrefixToBuf(int(size), buf, smalltag, largetag)
 }
 
 func encodePrefixToBuf(size int, to []byte, smallTag, largeTag byte) int {
 	if size >= 56 {
-		_ = to[9]
-		beLen := common.BitLenToByteLen(bits.Len64(uint64(size)))
-		binary.BigEndian.PutUint64(to[1:], uint64(size))
-		to[8-beLen] = largeTag + byte(beLen)
-		copy(to, to[8-beLen:9])
+		beLen := putint(to[1:], uint64(size))
+		to[0] = largeTag + byte(beLen)
 		return 1 + beLen
 	}
 	to[0] = smallTag + byte(size)
