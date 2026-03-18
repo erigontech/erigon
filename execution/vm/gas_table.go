@@ -439,7 +439,7 @@ func statelessGasCall(evm *EVM, callContext *CallContext, availableGas uint64, m
 
 func statefulGasCall(evm *EVM, callContext *CallContext, gas uint64, availableGas uint64, transfersValue bool) (uint64, error) {
 	var accountGas uint64
-	address := callContext.internAddr(*callContext.Stack.Back(1))
+	address := callContext.internAddr(callContext.Stack.Back(1))
 	if evm.ChainRules().IsSpuriousDragon {
 		empty, err := evm.IntraBlockState().Empty(address)
 		if err != nil {
@@ -639,7 +639,7 @@ func gasSelfdestruct(evm *EVM, callContext *CallContext, availableGas uint64, me
 	// TangerineWhistle (EIP150) gas reprice fork:
 	if evm.ChainRules().IsTangerineWhistle {
 		gas = params.SelfdestructGasEIP150
-		address := callContext.internAddr(*callContext.Stack.Back(0))
+		address := callContext.internAddr(callContext.Stack.Back(0))
 
 		if evm.ChainRules().IsSpuriousDragon {
 			// if empty and transfers value

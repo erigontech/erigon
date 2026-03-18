@@ -107,7 +107,7 @@ func (c *CallContext) put() {
 // internAddr returns the interned address for this opcode.
 // EIP-2929+: interpreter pre-set slotAddr → zero-cost lookup.
 // Pre-Berlin: slotAddr is nil → intern val inline (two interns total for CALL/SELFDESTRUCT, accepted).
-func (c *CallContext) internAddr(val uint256.Int) accounts.Address {
+func (c *CallContext) internAddr(val *uint256.Int) accounts.Address {
 	if !c.slotAddr.IsNil() {
 		return c.slotAddr
 	}
@@ -117,7 +117,7 @@ func (c *CallContext) internAddr(val uint256.Int) accounts.Address {
 // internKey returns the interned storage key for this opcode.
 // EIP-2929+: interpreter pre-set slotKey → zero-cost lookup.
 // Pre-Berlin: slotKey is nil → intern val inline.
-func (c *CallContext) internKey(val uint256.Int) accounts.StorageKey {
+func (c *CallContext) internKey(val *uint256.Int) accounts.StorageKey {
 	if !c.slotKey.IsNil() {
 		return c.slotKey
 	}
