@@ -54,7 +54,7 @@ Commit messages: prefix with package(s) modified, e.g., `eth, rpc: make trace co
 
 Cherry-pick PRs: when opening a PR that cherry-picks a commit to a `release/X.Y` branch, prepend the PR title with `[rX.Y]`, e.g., a cherry-pick to `release/3.4` → `[r3.4] eth, rpc: make trace configs optional`
 
-**Important**: Always run `make lint` after making code changes and before committing. Fix any linter errors before proceeding. PRs must pass `make lint` before being opened or updated.
+**CRITICAL**: Always run `make lint` after making code changes and before committing or pushing. Fix ALL linter errors before proceeding. PRs must pass `make lint` before being opened or updated — this is non-negotiable.
 
 ## Pull Requests & Workflows
 
@@ -62,7 +62,7 @@ When manually dispatching a workflow that is not part of the PR's automatic chec
 
 ## Pre-push
 
-Before running `git push`, always run `make lint` first and fix all issues. Run lint multiple times if needed — it is non-deterministic.
+**MANDATORY**: Before running `git push` or `gh pr create` or any PR update command, you MUST run `make lint` and fix ALL issues. Do not skip this under any circumstances — CI will fail and the PR will be blocked. Run lint multiple times if needed — it is non-deterministic and new issues may appear on each run.
 
 ## Lint Notes
 

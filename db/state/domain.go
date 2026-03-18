@@ -56,10 +56,10 @@ import (
 )
 
 var (
-	asserts              = dbg.EnvBool("AGG_ASSERTS", false)
+	asserts                         = dbg.EnvBool("AGG_ASSERTS", false)
 	traceFileLife, traceFileLifeSet = dbg.EnvStringLookup("AGG_TRACE_FILE_LIFE")
-	traceGetAsOf     = dbg.EnvString("AGG_TRACE_GET_AS_OF", "")
-	tracePutWithPrev = dbg.EnvString("AGG_TRACE_PUT_WITH_PREV", "")
+	traceGetAsOf                    = dbg.EnvString("AGG_TRACE_GET_AS_OF", "")
+	tracePutWithPrev                = dbg.EnvString("AGG_TRACE_PUT_WITH_PREV", "")
 )
 var traceGetLatest, _ = kv.String2Domain(dbg.EnvString("AGG_TRACE_GET_LATEST", ""))
 
