@@ -153,7 +153,7 @@ func encodeAccessList(al AccessList, w io.Writer, b []byte) error {
 		if err := rlp.EncodeListPrefix(tupleLen, w, b); err != nil {
 			return err
 		}
-		if err := rlp.EncodeOptionalAddress(&al[i].Address, w, b); err != nil { // TODO(racytech): change addr to []byte?
+		if err := EncodeOptionalAddress(&al[i].Address, w, b); err != nil { // TODO(racytech): change addr to []byte?
 			return err
 		}
 		if err := rlp.EncodeListPrefix(storageLen, w, b); err != nil {
@@ -212,7 +212,7 @@ func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, access
 		return err
 	}
 	// encode To
-	if err := rlp.EncodeOptionalAddress(tx.To, w, b); err != nil {
+	if err := EncodeOptionalAddress(tx.To, w, b); err != nil {
 		return err
 	}
 	// encode Value
@@ -328,7 +328,7 @@ func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
 	if tx.GasLimit, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read GasLimit: %w", err)
 	}
-	if err = rlp.DecodeOptionalAddress(&tx.To, s); err != nil {
+	if err = DecodeOptionalAddress(&tx.To, s); err != nil {
 		return fmt.Errorf("read To: %w", err)
 	}
 	if err = s.ReadUint256(&tx.Value); err != nil {

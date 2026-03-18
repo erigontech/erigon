@@ -184,7 +184,7 @@ func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSiz
 		return err
 	}
 	// encode To
-	if err := rlp.EncodeOptionalAddress(tx.To, w, b); err != nil {
+	if err := EncodeOptionalAddress(tx.To, w, b); err != nil {
 		return err
 	}
 	// encode Value
@@ -259,7 +259,7 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 	if tx.GasLimit, err = s.Uint64(); err != nil {
 		return err
 	}
-	if err = rlp.DecodeOptionalAddress(&tx.To, s); err != nil {
+	if err = DecodeOptionalAddress(&tx.To, s); err != nil {
 		return err
 	}
 	if err = s.ReadUint256(&tx.Value); err != nil {

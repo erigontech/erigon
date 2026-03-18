@@ -54,7 +54,7 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, buf []byte) (*common
 		return nil, err
 	}
 
-	if err := rlp.EncodeOptionalAddress(&ath.Address, data, buf); err != nil {
+	if err := EncodeOptionalAddress(&ath.Address, data, buf); err != nil {
 		return nil, err
 	}
 
@@ -187,7 +187,7 @@ func encodeAuthorizations(authorizations []Authorization, w io.Writer, b []byte)
 			return err
 		}
 		// 2. encode Address
-		if err := rlp.EncodeOptionalAddress(&authorizations[i].Address, w, b); err != nil {
+		if err := EncodeOptionalAddress(&authorizations[i].Address, w, b); err != nil {
 			return err
 		}
 		// 3. encode Nonce

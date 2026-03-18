@@ -252,7 +252,7 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize int) error 
 	if err := rlp.EncodeU64(tx.GasLimit, w, b); err != nil {
 		return err
 	}
-	if err := rlp.EncodeOptionalAddress(tx.To, w, b); err != nil {
+	if err := EncodeOptionalAddress(tx.To, w, b); err != nil {
 		return err
 	}
 	if err := rlp.EncodeUint256(tx.Value, w, b); err != nil {
@@ -298,7 +298,7 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream) error {
 	if tx.GasLimit, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read GasLimit: %w", err)
 	}
-	if err = rlp.DecodeOptionalAddress(&tx.To, s); err != nil {
+	if err = DecodeOptionalAddress(&tx.To, s); err != nil {
 		return fmt.Errorf("read To: %w", err)
 	}
 	if err = s.ReadUint256(&tx.Value); err != nil {

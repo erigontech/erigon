@@ -673,19 +673,6 @@ func EncodeStringPrefix(size int, w io.Writer, buffer []byte) error {
 	return err
 }
 
-// EncodeOptionalAddress encodes an optional 20-byte address via w.
-func EncodeOptionalAddress(addr *common.Address, w io.Writer, buffer []byte) error {
-	if addr == nil {
-		buffer[0] = EmptyStringCode
-		_, err := w.Write(buffer[:1])
-		return err
-	}
-	buffer[0] = EmptyStringCode + 20
-	copy(buffer[1:21], addr[:])
-	_, err := w.Write(buffer[:21])
-	return err
-}
-
 // --- List encoding ---
 
 // ListLen returns the RLP-encoded length of a list with the given content length.

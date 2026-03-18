@@ -332,7 +332,7 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 		return err
 	}
 	// encode To
-	if err := rlp.EncodeOptionalAddress(tx.To, w, b); err != nil {
+	if err := EncodeOptionalAddress(tx.To, w, b); err != nil {
 		return err
 	}
 	// encode Value

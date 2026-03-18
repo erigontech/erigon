@@ -311,7 +311,7 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 		senderAddress = &senderValue
 
 	}
-	if err := rlp.EncodeOptionalAddress(senderAddress, w, b); err != nil {
+	if err := EncodeOptionalAddress(senderAddress, w, b); err != nil {
 		return err
 	}
 
@@ -319,7 +319,7 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 		return err
 	}
 
-	if err := rlp.EncodeOptionalAddress(tx.Deployer, w, b); err != nil {
+	if err := EncodeOptionalAddress(tx.Deployer, w, b); err != nil {
 		return err
 	}
 
@@ -327,7 +327,7 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 		return err
 	}
 
-	if err := rlp.EncodeOptionalAddress(tx.Paymaster, w, b); err != nil {
+	if err := EncodeOptionalAddress(tx.Paymaster, w, b); err != nil {
 		return err
 	}
 
@@ -417,7 +417,7 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	if err = rlp.DecodeOptionalAddress(&tx.Deployer, s); err != nil {
+	if err = DecodeOptionalAddress(&tx.Deployer, s); err != nil {
 		return err
 	}
 
@@ -425,7 +425,7 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	if err = rlp.DecodeOptionalAddress(&tx.Paymaster, s); err != nil {
+	if err = DecodeOptionalAddress(&tx.Paymaster, s); err != nil {
 		return err
 	}
 
