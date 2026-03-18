@@ -1715,6 +1715,7 @@ func (t *Updates) TouchStorage(c *KeyUpdate, val []byte) {
 	if len(val) == 0 {
 		c.update.Flags = DeleteUpdate
 	} else {
+		c.update.Flags &^= DeleteUpdate
 		c.update.Flags |= StorageUpdate
 		copy(c.update.Storage[:], val)
 	}
@@ -2010,6 +2011,9 @@ func (u *Update) Merge(b *Update) {
 	if b.Flags == DeleteUpdate {
 		u.Flags = DeleteUpdate
 		return
+	}
+	if b.Flags&(BalanceUpdate|NonceUpdate|CodeUpdate|StorageUpdate) != 0 {
+		u.Flags &^= DeleteUpdate
 	}
 	if b.Flags&BalanceUpdate != 0 {
 		u.Flags |= BalanceUpdate

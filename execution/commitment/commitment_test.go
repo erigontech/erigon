@@ -491,3 +491,28 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 	err = warmuper2.Wait()
 	require.NoError(t, err)
 }
+
+func TestUpdates_TouchStorageClearsDeleteOnRewrite(t *testing.T) {
+	t.Parallel()
+
+	updates := NewUpdates(ModeUpdate, t.TempDir(), keyHasherNoop)
+	key := "storage-key"
+
+	updates.TouchPlainKey(key, nil, updates.TouchStorage)
+	updates.TouchPlainKey(key, []byte("value"), updates.TouchStorage)
+
+	var got *Update
+	pivot := &KeyUpdate{plainKey: key}
+	updates.tree.DescendLessOrEqual(pivot, func(item *KeyUpdate) bool {
+		if item.plainKey == key {
+			got = item.update
+		}
+		return false
+	})
+
+	require.NotNil(t, got)
+	require.Equal(t, StorageUpdate, got.Flags)
+	require.False(t, got.Deleted())
+	require.Equal(t, int8(len("value")), got.StorageLen)
+	require.Equal(t, []byte("value"), got.Storage[:got.StorageLen])
+}

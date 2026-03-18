@@ -1657,6 +1657,11 @@ func TestUpdate_Merge(t *testing.T) {
 			b: Update{Flags: DeleteUpdate, CodeHash: empty.CodeHash},
 			e: Update{Flags: DeleteUpdate, CodeHash: empty.CodeHash},
 		},
+		{
+			a: Update{Flags: DeleteUpdate, CodeHash: empty.CodeHash},
+			b: Update{Flags: StorageUpdate, Storage: common.Hash{0x21, 0x22, 0x23, 0x24}, StorageLen: 4, CodeHash: empty.CodeHash},
+			e: Update{Flags: StorageUpdate, Storage: common.Hash{0x21, 0x22, 0x23, 0x24}, StorageLen: 4, CodeHash: empty.CodeHash},
+		},
 	}
 
 	var numBuf [10]byte
