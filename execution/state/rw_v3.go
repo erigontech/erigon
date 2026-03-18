@@ -614,14 +614,12 @@ func (c *LightCollector) DeleteAccount(address accounts.Address, _ *accounts.Acc
 }
 
 func (c *LightCollector) WriteAccountStorage(address accounts.Address, _ uint64, key accounts.StorageKey, _, value uint256.Int) error {
-	// Do NOT skip writes when original == value. In the parallel executor,
-	// `original` comes from blockOriginStorage (pre-block value) via
-	// MakeWriteSet(useBlockOrigin=true). But an earlier TX in the same block
-	// may have written a different value to this slot. If the current TX
-	// reverts the slot to the block-start value, skipping the write leaves
-	// the domain with the earlier TX's value — causing incorrect state for
-	// subsequent blocks (wrong SSTORE gas, trie root mismatch).
-	// The domain-level DomainPut handles actual skip logic via GetLatest.
+	// Always emit storage writes. In the parallel executor, `original` comes
+	// from blockOriginStorage (pre-block value) via MakeWriteSet(useBlockOrigin=true).
+	// Skipping when original==value misses the revert case: TX N writes slot
+	// S=X, TX M reverts S to the block-origin value Y — the skip leaves the
+	// domain with X instead of Y. DomainPut's internal skip (bytes.Equal on
+	// the serialized value) handles the true no-change case correctly.
 	c.writes = append(c.writes, &VersionedWrite{Address: address, Path: StoragePath, Key: key, Val: value})
 	return nil
 }
