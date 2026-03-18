@@ -5,14 +5,8 @@ name: Benchmarks
 # test-bench never runs on main and every new PR starts from a cold cache,
 # because GitHub's cache fallback chain only reaches the base branch.
 on:
-  pull_request:
-    branches:
-      - main
-    types:
-      - opened
-      - reopened
-      - synchronize
-      - ready_for_review
+  workflow_dispatch:
+  workflow_call:
   push:
     # Cache warming only — benchmarks are not re-run on push to main/release.
     # GitHub's cache isolation means PR and merge-queue runs can only fall back
@@ -23,7 +17,6 @@ on:
     branches:
       - main
       - release/**
-  workflow_dispatch:
 
 defaults:
   run:
@@ -31,9 +24,6 @@ defaults:
 
 jobs:
   benchmarks:
-    concurrency:
-      group: ${{ format('{0}-{1}', github.workflow, github.ref) }}
-      cancel-in-progress: true
     runs-on: ubuntu-24.04
 
     steps:

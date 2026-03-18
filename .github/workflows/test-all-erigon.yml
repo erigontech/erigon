@@ -5,17 +5,8 @@ on:
     branches:
       - main
       - 'release/**'
-  pull_request:
-    branches:
-      - main
-    types:
-      - opened
-      - reopened
-      - synchronize
-      - ready_for_review
-  schedule:
-    - cron: '20 16 * * *' # daily at 16:20 UTC 😙🤌
   workflow_dispatch:
+  workflow_call:
 
 defaults:
   run:
@@ -23,17 +14,6 @@ defaults:
 
 jobs:
   tests-mac-linux:
-    concurrency:
-      # concurrency group: there can be at most one running and one pending job in a
-      # concurrency group at any time. So for commits on main/release, we use different
-      # concurrency group per commit; for other branches, we use a branch-level CG.
-      group: >-
-        ${{
-          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) &&
-          format('{0}-{1}-{2}', github.workflow, matrix.os, github.run_id) ||
-          format('{0}-{1}-{2}', github.workflow, matrix.os, github.ref)
-        }}
-      cancel-in-progress: true
     strategy:
       matrix:
         os:
