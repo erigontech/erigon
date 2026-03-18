@@ -706,8 +706,8 @@ func EncodeListSizePrefix(size int, w io.Writer, buffer []byte) error {
 
 // --- Composite helpers ---
 
-// ByteSliceSliceSize returns the RLP-encoded size of a [][]byte as a list of strings.
-func ByteSliceSliceSize(bb [][]byte) int {
+// StringListSize returns the RLP-encoded size of a [][]byte as a list of strings.
+func StringListSize(bb [][]byte) int {
 	size := 0
 	for i := 0; i < len(bb); i++ {
 		size += StringLen(bb[i])
@@ -715,8 +715,8 @@ func ByteSliceSliceSize(bb [][]byte) int {
 	return size + ListPrefixLen(size)
 }
 
-// EncodeByteSliceSlice encodes a [][]byte as an RLP list of strings via w.
-func EncodeByteSliceSlice(bb [][]byte, w io.Writer, b []byte) error {
+// EncodeStringList encodes a [][]byte as an RLP list of strings via w.
+func EncodeStringList(bb [][]byte, w io.Writer, b []byte) error {
 	totalSize := 0
 	for i := 0; i < len(bb); i++ {
 		totalSize += StringLen(bb[i])

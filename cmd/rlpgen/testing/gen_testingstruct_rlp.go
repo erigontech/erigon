@@ -49,7 +49,7 @@ func (obj *TestingStruct) EncodingSize() (size int) {
 	} else {
 		size += 1
 	}
-	size += rlp.ByteSliceSliceSize(obj.i)
+	size += rlp.StringListSize(obj.i)
 	gidx := 0
 	gidx = (8 + 1) * len(obj.j)
 	size += rlp.ListPrefixLen(gidx) + gidx
@@ -219,7 +219,7 @@ func (obj *TestingStruct) EncodeRLP(w io.Writer) error {
 			return err
 		}
 	}
-	if err := rlp.EncodeByteSliceSlice(obj.i, w, b[:]); err != nil {
+	if err := rlp.EncodeStringList(obj.i, w, b[:]); err != nil {
 		return err
 	}
 	gidx := 0
