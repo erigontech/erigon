@@ -19,6 +19,7 @@ package downloader
 import (
 	"context"
 	"crypto/sha1" //nolint:gosec
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -26,43 +27,87 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
 	"github.com/pelletier/go-toml/v2"
+	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/preverified"
 )
 
-// SnapshotVerifyIssue represents a problem found during snapshot download verification.
+// SnapshotVerifyIssue is one finding emitted as a JSON line to stdout during verification.
 type SnapshotVerifyIssue struct {
 	// "error" or "warn"
-	Severity string
-	// Relative path within the snap dir, or preverified.toml item name.
-	File string
+	Severity string `json:"severity"`
+	// .torrent path relative to the snap dir.
+	Torrent string `json:"torrent,omitempty"`
+	// Data file path relative to the snap dir.
+	File string `json:"file,omitempty"`
 	// Human-readable description.
-	Message string
+	Message string `json:"message"`
 }
 
-func (i SnapshotVerifyIssue) String() string {
-	return fmt.Sprintf("[%s] %s: %s", i.Severity, i.File, i.Message)
+// SnapshotVerifySummary is printed as a single JSON line to stdout after all checks complete.
+type SnapshotVerifySummary struct {
+	Torrents int `json:"torrents"`
+	Errors   int `json:"errors"`
+	Warnings int `json:"warnings"`
 }
 
-// VerifySnapshotDownloads checks the contents of the snapshot directory against .torrent files and
-// an optional preverified.toml. It uses the mixed file/mmap storage from anacrolix/torrent to
-// efficiently read piece data with sparse-file support via SEEK_DATA/SEEK_HOLE.
+// issueEmitter is safe for concurrent use.
+type issueEmitter struct {
+	enc      *json.Encoder
+	mu       sync.Mutex
+	errors   atomic.Int64
+	warnings atomic.Int64
+}
+
+func newIssueEmitter(out io.Writer) *issueEmitter {
+	return &issueEmitter{enc: json.NewEncoder(out)}
+}
+
+func (e *issueEmitter) emit(issue SnapshotVerifyIssue) {
+	e.mu.Lock()
+	_ = e.enc.Encode(issue) //nolint:errcheck
+	e.mu.Unlock()
+	switch issue.Severity {
+	case "error":
+		e.errors.Add(1)
+	case "warn":
+		e.warnings.Add(1)
+	}
+}
+
+func (e *issueEmitter) summary(torrents int) SnapshotVerifySummary {
+	return SnapshotVerifySummary{
+		Torrents: torrents,
+		Errors:   int(e.errors.Load()),
+		Warnings: int(e.warnings.Load()),
+	}
+}
+
+// VerifySnapshotDownloads checks snapshot downloads against .torrent files and preverified.toml.
+// Findings are written as JSON lines to out as they are discovered. A summary JSON object is
+// written last. Torrent files are verified in a pool of workers for concurrency.
 //
 // Checks performed:
-//   - For each .torrent file: infohash matches preverified.toml (if present).
-//   - For each file listed in a .torrent: path is safe (no directory traversal), data file exists,
-//     file permissions are appropriate.
-//   - Piece hashes of present data files match the torrent metadata.
-//   - Preverified.toml entries that have no corresponding .torrent file on disk.
-func VerifySnapshotDownloads(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (issues []SnapshotVerifyIssue, err error) {
+//   - Infohash of each .torrent matches preverified.toml (if present).
+//   - File paths within torrents are safe (no directory traversal).
+//   - Data files exist, have the right size, and appropriate permissions.
+//   - Piece hashes via mmap/sparse-read storage (SEEK_DATA/SEEK_HOLE).
+//   - Preverified.toml entries with no corresponding .torrent on disk.
+func VerifySnapshotDownloads(ctx context.Context, dirs datadir.Dirs, workers int, out io.Writer) (summary SnapshotVerifySummary, err error) {
+	if workers <= 0 {
+		workers = max(1, runtime.GOMAXPROCS(0)/2)
+	}
 	snapDir := dirs.Snap
+	emitter := newIssueEmitter(out)
 
 	// Load preverified.toml if present.
 	var pvItems preverified.SortedItems
@@ -75,20 +120,16 @@ func VerifySnapshotDownloads(ctx context.Context, dirs datadir.Dirs, logger log.
 			return
 		}
 		pvItems = preverified.ItemsFromMap(rawMap)
-		logger.Info("loaded preverified.toml", "items", len(pvItems))
 	} else if !errors.Is(pvErr, fs.ErrNotExist) {
 		err = fmt.Errorf("reading %s: %w", datadir.PreverifiedFileName, pvErr)
 		return
 	}
 
-	// Walk the snap dir for .torrent files (they may be in subdirectories).
-	torrentNamesSeen := make(map[string]bool)
+	// Collect all .torrent names first (walk is fast; this lets us track seen names cleanly).
+	var torrentNames []string
 	walkErr := fs.WalkDir(os.DirFS(snapDir), ".", func(relPath string, de fs.DirEntry, walkFileErr error) error {
-		if ctx.Err() != nil {
-			return context.Cause(ctx)
-		}
 		if walkFileErr != nil {
-			issues = append(issues, SnapshotVerifyIssue{
+			emitter.emit(SnapshotVerifyIssue{
 				Severity: "warn",
 				File:     relPath,
 				Message:  fmt.Sprintf("walk error: %v", walkFileErr),
@@ -102,49 +143,72 @@ func VerifySnapshotDownloads(ctx context.Context, dirs datadir.Dirs, logger log.
 		if !isTorrent {
 			return nil
 		}
-		torrentNamesSeen[snapshotName] = true
-
-		torrentIssues := verifyTorrentFile(ctx, snapDir, snapshotName, pvItems)
-		issues = append(issues, torrentIssues...)
+		torrentNames = append(torrentNames, snapshotName)
 		return nil
 	})
-	if walkErr != nil && !errors.Is(walkErr, context.Canceled) {
+	if walkErr != nil {
 		err = fmt.Errorf("walking snap dir %q: %w", snapDir, walkErr)
 		return
 	}
 
-	// Report preverified items that have no .torrent file on disk.
+	// Report preverified entries with no .torrent file on disk.
+	torrentNameSet := make(map[string]bool, len(torrentNames))
+	for _, name := range torrentNames {
+		torrentNameSet[name] = true
+	}
 	for _, item := range pvItems {
-		if torrentNamesSeen[item.Name] {
-			continue
+		if !torrentNameSet[item.Name] {
+			emitter.emit(SnapshotVerifyIssue{
+				Severity: "warn",
+				Torrent:  item.Name + ".torrent",
+				Message:  "preverified.toml entry has no corresponding .torrent file on disk",
+			})
 		}
-		issues = append(issues, SnapshotVerifyIssue{
-			Severity: "warn",
-			File:     item.Name + ".torrent",
-			Message:  "preverified.toml entry has no corresponding .torrent file on disk",
-		})
 	}
 
-	return issues, ctx.Err()
+	// Verify each .torrent file in a worker pool.
+	eg, egCtx := errgroup.WithContext(ctx)
+	eg.SetLimit(workers)
+	for _, snapshotName := range torrentNames {
+		eg.Go(func() error {
+			verifyOneTorrent(egCtx, snapDir, snapshotName, pvItems, emitter)
+			return nil
+		})
+	}
+	_ = eg.Wait()
+
+	summary = emitter.summary(len(torrentNames))
+	e := emitter.enc
+	emitter.mu.Lock()
+	_ = e.Encode(summary) //nolint:errcheck
+	emitter.mu.Unlock()
+
+	if ctx.Err() != nil {
+		err = ctx.Err()
+	}
+	return
 }
 
-// verifyTorrentFile performs all checks for one .torrent file and its associated data files.
-// snapshotName is the path relative to snapDir, without the ".torrent" suffix (unix slash style).
-func verifyTorrentFile(
+// verifyOneTorrent performs all checks for one .torrent file and its data files.
+// snapshotName is the unix-slash path relative to snapDir, without the ".torrent" suffix.
+func verifyOneTorrent(
 	ctx context.Context,
 	snapDir string,
 	snapshotName string,
 	pvItems preverified.SortedItems,
-) (issues []SnapshotVerifyIssue) {
-	torrentFilePath := filepath.Join(snapDir, filepath.FromSlash(snapshotName+".torrent"))
+	emitter *issueEmitter,
+) {
+	torrentRel := snapshotName + ".torrent"
+	torrentFilePath := filepath.Join(snapDir, filepath.FromSlash(torrentRel))
 
 	mi, err := metainfo.LoadFromFile(torrentFilePath)
 	if err != nil {
-		return []SnapshotVerifyIssue{{
+		emitter.emit(SnapshotVerifyIssue{
 			Severity: "error",
-			File:     snapshotName + ".torrent",
+			Torrent:  torrentRel,
 			Message:  fmt.Sprintf("failed to load torrent file: %v", err),
-		}}
+		})
+		return
 	}
 
 	infoHash := mi.HashInfoBytes()
@@ -154,16 +218,16 @@ func verifyTorrentFile(
 	if pvItems != nil {
 		if pvItem, ok := pvItems.Get(snapshotName); ok {
 			if pvItem.Hash != infoHashHex {
-				issues = append(issues, SnapshotVerifyIssue{
+				emitter.emit(SnapshotVerifyIssue{
 					Severity: "error",
-					File:     snapshotName + ".torrent",
+					Torrent:  torrentRel,
 					Message:  fmt.Sprintf("infohash mismatch: preverified=%s actual=%s", pvItem.Hash, infoHashHex),
 				})
 			}
 		} else {
-			issues = append(issues, SnapshotVerifyIssue{
+			emitter.emit(SnapshotVerifyIssue{
 				Severity: "warn",
-				File:     snapshotName + ".torrent",
+				Torrent:  torrentRel,
 				Message:  "not present in preverified.toml",
 			})
 		}
@@ -171,94 +235,87 @@ func verifyTorrentFile(
 
 	info, err := mi.UnmarshalInfo()
 	if err != nil {
-		issues = append(issues, SnapshotVerifyIssue{
+		emitter.emit(SnapshotVerifyIssue{
 			Severity: "error",
-			File:     snapshotName + ".torrent",
+			Torrent:  torrentRel,
 			Message:  fmt.Sprintf("failed to unmarshal info dict: %v", err),
 		})
 		return
 	}
 
-	// Validate the info.Name safe path (protects against directory traversal in the torrent).
+	// Validate info.Name is a safe path.
 	infoName := info.BestName()
 	if infoName != metainfo.NoName {
 		if _, pathErr := storage.ToSafeFilePath(infoName); pathErr != nil {
-			issues = append(issues, SnapshotVerifyIssue{
+			emitter.emit(SnapshotVerifyIssue{
 				Severity: "error",
-				File:     snapshotName + ".torrent",
+				Torrent:  torrentRel,
 				Message:  fmt.Sprintf("info.Name %q is unsafe: %v", infoName, pathErr),
 			})
 			return
 		}
 	}
 
-	// Check expected name: torrent file basename should match info.Name.
+	// info.Name should match the torrent filename.
 	baseName := path.Base(snapshotName)
 	if infoName != metainfo.NoName && infoName != baseName {
-		issues = append(issues, SnapshotVerifyIssue{
+		emitter.emit(SnapshotVerifyIssue{
 			Severity: "warn",
-			File:     snapshotName + ".torrent",
+			Torrent:  torrentRel,
 			Message:  fmt.Sprintf("info.Name %q doesn't match torrent filename %q", infoName, baseName),
 		})
 	}
 
-	// Check each data file listed in the torrent.
-	allFilesPresent := true
+	// Check each data file.
+	allPresent := true
 	for _, fi := range info.UpvertedFiles() {
-		fileIssues, present := checkDataFile(snapDir, snapshotName, &info, &fi, pvItems)
-		issues = append(issues, fileIssues...)
-		if !present {
-			allFilesPresent = false
+		if !checkDataFile(snapDir, snapshotName, torrentRel, &info, &fi, pvItems, emitter) {
+			allPresent = false
 		}
 	}
 
-	// Verify piece hashes using sparse-aware storage (mmap + SEEK_DATA/SEEK_HOLE).
-	if allFilesPresent && ctx.Err() == nil {
-		pieceIssues := verifyPieceHashes(ctx, snapDir, &info, infoHash)
-		issues = append(issues, pieceIssues...)
+	if allPresent && ctx.Err() == nil {
+		verifyPieceHashes(ctx, snapDir, snapshotName, torrentRel, &info, infoHash, emitter)
 	}
-	return
 }
 
-// checkDataFile checks a single file within a torrent for existence, path safety, and permissions.
-// Returns whether the file is present.
+// checkDataFile checks one data file from a torrent for existence, size, and permissions.
+// Returns true if the file is present and the right size.
 func checkDataFile(
 	snapDir string,
 	snapshotName string,
+	torrentRel string,
 	info *metainfo.Info,
 	fi *metainfo.FileInfo,
 	pvItems preverified.SortedItems,
-) (issues []SnapshotVerifyIssue, present bool) {
+	emitter *issueEmitter,
+) (present bool) {
 	infoName := info.BestName()
 
-	// Compute the data file path using the same logic as the torrent storage client.
-	// Single-file: {snapDir}/{info.Name}
-	// Multi-file:  {snapDir}/{info.Name}/{file.BestPath()}
 	var relSlashPath string
 	if len(fi.BestPath()) == 0 {
-		// Single-file torrent: info.Name is the file.
+		// Single-file torrent.
 		if infoName == metainfo.NoName {
 			relSlashPath = snapshotName
 		} else {
 			relSlashPath = infoName
 		}
 	} else {
-		// Multi-file torrent: validate each path component.
 		safePath, pathErr := storage.ToSafeFilePath(fi.BestPath()...)
 		if pathErr != nil {
-			issues = append(issues, SnapshotVerifyIssue{
+			emitter.emit(SnapshotVerifyIssue{
 				Severity: "error",
-				File:     snapshotName,
+				Torrent:  torrentRel,
 				Message:  fmt.Sprintf("unsafe file path %v in torrent: %v", fi.BestPath(), pathErr),
 			})
-			return issues, false
+			return false
 		}
 		relSlashPath = path.Join(infoName, safePath)
 	}
 
 	dataFilePath := filepath.Join(snapDir, filepath.FromSlash(relSlashPath))
-
 	stat, statErr := os.Stat(dataFilePath)
+
 	if errors.Is(statErr, fs.ErrNotExist) {
 		severity := "warn"
 		msg := "data file missing"
@@ -268,90 +325,97 @@ func checkDataFile(
 				msg = "data file missing (listed in preverified.toml)"
 			}
 		}
-		issues = append(issues, SnapshotVerifyIssue{
+		emitter.emit(SnapshotVerifyIssue{
 			Severity: severity,
+			Torrent:  torrentRel,
 			File:     relSlashPath,
 			Message:  msg,
 		})
-		return issues, false
+		return false
 	}
 	if statErr != nil {
-		issues = append(issues, SnapshotVerifyIssue{
+		emitter.emit(SnapshotVerifyIssue{
 			Severity: "error",
+			Torrent:  torrentRel,
 			File:     relSlashPath,
 			Message:  fmt.Sprintf("stat failed: %v", statErr),
 		})
-		return issues, false
+		return false
 	}
 
-	// Check file size matches torrent metadata.
 	if stat.Size() != fi.Length {
-		issues = append(issues, SnapshotVerifyIssue{
+		emitter.emit(SnapshotVerifyIssue{
 			Severity: "error",
+			Torrent:  torrentRel,
 			File:     relSlashPath,
 			Message:  fmt.Sprintf("size mismatch: on-disk=%d torrent=%d", stat.Size(), fi.Length),
 		})
+		// Size mismatch means piece verification won't be meaningful, treat as absent.
+		return false
 	}
 
-	// Check file permissions.
 	perm := stat.Mode().Perm()
-	// All files should be readable by owner.
 	if perm&0o400 == 0 {
-		issues = append(issues, SnapshotVerifyIssue{
+		emitter.emit(SnapshotVerifyIssue{
 			Severity: "error",
+			Torrent:  torrentRel,
 			File:     relSlashPath,
-			Message:  fmt.Sprintf("file not readable by owner (mode=%v)", perm),
+			Message:  fmt.Sprintf("not readable by owner (mode=%v)", perm),
 		})
 	}
-	// Completed snapshot files should not be writable (they're promoted to read-only on completion).
 	if perm&0o222 != 0 {
-		issues = append(issues, SnapshotVerifyIssue{
+		emitter.emit(SnapshotVerifyIssue{
 			Severity: "warn",
+			Torrent:  torrentRel,
 			File:     relSlashPath,
-			Message:  fmt.Sprintf("file is writable (mode=%v); completed snapshots are expected to be read-only", perm),
+			Message:  fmt.Sprintf("writable (mode=%v); completed snapshots are expected read-only", perm),
 		})
 	}
-	// World-writable is a stronger concern.
 	if perm&0o002 != 0 {
-		issues = append(issues, SnapshotVerifyIssue{
+		emitter.emit(SnapshotVerifyIssue{
 			Severity: "error",
+			Torrent:  torrentRel,
 			File:     relSlashPath,
-			Message:  fmt.Sprintf("file is world-writable (mode=%v)", perm),
+			Message:  fmt.Sprintf("world-writable (mode=%v)", perm),
 		})
 	}
 
-	return issues, true
+	return true
 }
 
-// verifyPieceHashes hashes each torrent piece using the same mmap/sparse-read storage
-// configuration as the main downloader and compares against the piece hashes in the torrent info.
+// verifyPieceHashes hashes each piece via the mmap/sparse-read storage (SEEK_DATA/SEEK_HOLE)
+// using the same configuration as the main downloader, and reports hash mismatches.
 func verifyPieceHashes(
 	ctx context.Context,
 	snapDir string,
+	snapshotName string,
+	torrentRel string,
 	info *metainfo.Info,
 	infoHash metainfo.Hash,
-) (issues []SnapshotVerifyIssue) {
+	emitter *issueEmitter,
+) {
 	client := newSnapStorage(snapDir, nil)
 	defer client.Close()
 
 	t, err := client.OpenTorrent(ctx, info, infoHash)
 	if err != nil {
-		return []SnapshotVerifyIssue{{
+		emitter.emit(SnapshotVerifyIssue{
 			Severity: "error",
-			File:     info.BestName(),
+			Torrent:  torrentRel,
 			Message:  fmt.Sprintf("failed to open torrent storage for piece verification: %v", err),
-		}}
+		})
+		return
 	}
 	defer t.Close()
 
 	for i := range info.NumPieces() {
 		if ctx.Err() != nil {
-			break
+			return
 		}
 		p := info.Piece(i)
-		// Only v1 torrents carry piece hashes; v2 uses merkle trees (not handled here).
 		expectedHash := p.V1Hash()
 		if !expectedHash.Ok {
+			// v2 torrents use merkle trees; no v1 piece hash to check.
 			continue
 		}
 
@@ -359,7 +423,7 @@ func verifyPieceHashes(
 		h := sha1.New()
 		piece := t.Piece(p)
 
-		// filePieceImpl implements io.WriterTo which uses seekDataOrEof for sparse reads.
+		// filePieceImpl implements io.WriterTo, which uses seekDataOrEof for sparse reads.
 		var written int64
 		var readErr error
 		if wt, ok := piece.(io.WriterTo); ok {
@@ -369,18 +433,20 @@ func verifyPieceHashes(
 		}
 
 		if readErr != nil {
-			issues = append(issues, SnapshotVerifyIssue{
+			emitter.emit(SnapshotVerifyIssue{
 				Severity: "error",
-				File:     info.BestName(),
+				Torrent:  torrentRel,
+				File:     snapshotName,
 				Message:  fmt.Sprintf("piece %d: read error: %v", i, readErr),
 			})
 			continue
 		}
 		if written < p.Length() {
-			issues = append(issues, SnapshotVerifyIssue{
+			emitter.emit(SnapshotVerifyIssue{
 				Severity: "error",
-				File:     info.BestName(),
-				Message:  fmt.Sprintf("piece %d: short read: got %d bytes, expected %d (file may be incomplete or sparse)", i, written, p.Length()),
+				Torrent:  torrentRel,
+				File:     snapshotName,
+				Message:  fmt.Sprintf("piece %d: short read: got %d of %d bytes (sparse or incomplete)", i, written, p.Length()),
 			})
 			continue
 		}
@@ -388,12 +454,12 @@ func verifyPieceHashes(
 		var actualHash metainfo.Hash
 		h.Sum(actualHash[:0])
 		if actualHash != expectedHash.Value {
-			issues = append(issues, SnapshotVerifyIssue{
+			emitter.emit(SnapshotVerifyIssue{
 				Severity: "error",
-				File:     info.BestName(),
+				Torrent:  torrentRel,
+				File:     snapshotName,
 				Message:  fmt.Sprintf("piece %d: hash mismatch: expected %x got %x", i, expectedHash.Value, actualHash),
 			})
 		}
 	}
-	return
 }
