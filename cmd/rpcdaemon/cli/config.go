@@ -129,7 +129,6 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().BoolVar(&cfg.RpcStreamingDisable, utils.RpcStreamingDisableFlag.Name, false, utils.RpcStreamingDisableFlag.Usage)
 	rootCmd.PersistentFlags().BoolVar(&cfg.DebugSingleRequest, utils.HTTPDebugSingleFlag.Name, false, utils.HTTPDebugSingleFlag.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.DBReadConcurrency, utils.DBReadConcurrencyFlag.Name, utils.DBReadConcurrencyFlag.Value, utils.DBReadConcurrencyFlag.Usage)
-	rootCmd.PersistentFlags().IntVar(&cfg.RpcMaxConcurrentRequests, utils.RpcMaxConcurrentRequestsFlag.Name, utils.RpcMaxConcurrentRequestsFlag.Value, utils.RpcMaxConcurrentRequestsFlag.Usage)
 	rootCmd.PersistentFlags().BoolVar(&cfg.TraceCompatibility, "trace.compat", false, "Bug for bug compatibility with OE for trace_ routines")
 	rootCmd.PersistentFlags().BoolVar(&cfg.GethCompatibility, "rpc.gethcompat", false, "Enables Geth-compatible storage iteration order for debug_storageRangeAt (sorted by keccak256 hash). Disabled by default for performance.")
 	rootCmd.PersistentFlags().BoolVar(&cfg.TestingEnabled, "rpc.testing", false, "Enables the testing_ RPC namespace (testing_buildBlockV1). WARNING: do not enable on production networks.")
@@ -748,13 +747,8 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		logger.Info("Socket Endpoint opened", "url", socketUrl)
 	}
 
-	// RPC admission limit: use --rpc.max.concurrent if set; otherwise fall back to DBReadConcurrency
-	// so the HTTP gate matches the DB semaphore size (prevents goroutine pile-up under load).
-	rpcConcurrencyLimit := int64(cfg.RpcMaxConcurrentRequests)
-	if rpcConcurrencyLimit == 0 {
-		rpcConcurrencyLimit = int64(cfg.DBReadConcurrency)
-	}
-	httpHandler := node.NewHTTPHandlerStack(srv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression, rpcConcurrencyLimit, true)
+	// RPC admission limit matches the DB semaphore size to prevent goroutine pile-up under load.
+	httpHandler := node.NewHTTPHandlerStack(srv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression, int64(cfg.DBReadConcurrency), true)
 	var wsHandler http.Handler
 	if cfg.WebsocketEnabled {
 		wsHandler = srv.WebsocketHandler([]string{"*"}, nil, cfg.WebsocketCompression, logger)

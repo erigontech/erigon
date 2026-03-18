@@ -72,7 +72,6 @@ type HttpCfg struct {
 	RpcStreamingDisable               bool
 	RpcFiltersConfig                  rpchelper.FiltersConfig
 	DBReadConcurrency                 int
-	RpcMaxConcurrentRequests          int  // 0 = unlimited (derived from DBReadConcurrency)
 	TraceCompatibility                bool // Bug for bug compatibility for trace_ routines with OpenEthereum
 	GethCompatibility                 bool // Geth-compatible storage iteration order for debug_storageRangeAt
 	TxPoolApiAddr                     string
