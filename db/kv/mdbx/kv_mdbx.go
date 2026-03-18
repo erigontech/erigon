@@ -442,7 +442,10 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 			return nil, err
 		}
 	}
-	// DEBUG: start background goroutine to log RPC stats every 10s — remove before merge
+	// DEBUG: start background goroutine to log RPC stats every 10s (chaindata only) — remove before merge
+	if string(opts.label) != dbcfg.ChainDB {
+		return db, nil
+	}
 	go func() {
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
