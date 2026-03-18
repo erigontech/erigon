@@ -111,7 +111,7 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	if balance.Uint64() != 1000000000 {
 		t.Fatalf("got %v, expected %v", balance, 1000000000)
 	}
-	balance, err = st.GetBalance(accounts.InternAddress(data.addresses[1]))
+	balance, err = st.GetBalance(data.addresses[1])
 	if err != nil {
 		t.Error(err)
 	}
