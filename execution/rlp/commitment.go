@@ -17,7 +17,6 @@
 package rlp
 
 import (
-	"encoding/binary"
 	"io"
 	"math/bits"
 
@@ -70,16 +69,7 @@ func multiByteHeaderPrefixOfLen(l int) byte {
 }
 
 func generateByteArrayLen(buffer []byte, pos int, l int) int {
-	if l < 56 {
-		buffer[pos] = byte(0x80 + l)
-		return pos + 1
-	}
-	var tmp [8]byte
-	binary.BigEndian.PutUint64(tmp[:], uint64(l))
-	size := common.BitLenToByteLen(bits.Len64(uint64(l)))
-	buffer[pos] = multiByteHeaderPrefixOfLen(size)
-	copy(buffer[pos+1:], tmp[8-size:])
-	return pos + 1 + size
+	return pos + encodePrefixToBuf(l, buffer[pos:], 0x80, 0xB7)
 }
 
 func generateByteArrayLenDouble(buffer []byte, pos int, l int) int {
@@ -241,14 +231,5 @@ func EncodeByteArrayAsRlp(raw []byte, w io.Writer, prefixBuf []byte) (int, error
 }
 
 func GenerateStructLen(buffer []byte, l int) int {
-	if l < 56 {
-		buffer[0] = byte(192 + l)
-		return 1
-	}
-	var tmp [8]byte
-	binary.BigEndian.PutUint64(tmp[:], uint64(l))
-	size := common.BitLenToByteLen(bits.Len64(uint64(l)))
-	buffer[0] = byte(247 + size)
-	copy(buffer[1:], tmp[8-size:])
-	return 1 + size
+	return EncodeListPrefix(l, buffer)
 }
