@@ -70,6 +70,10 @@ type CallContext struct {
 	slotKey  accounts.StorageKey
 }
 
+// cancelCheckInterval is the number of opcodes between checks for context cancellation.
+// Must be a power of two so the compiler reduces % to a bitwise AND.
+const cancelCheckInterval = 65_536
+
 var contextPool = sync.Pool{
 	New: func() any {
 		return &CallContext{
@@ -340,12 +344,9 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 	}
 
 	for {
-		cancelCheck--
-		if cancelCheck == 0 {
-			cancelCheck = 50_000
-			if evm.Cancelled() {
-				break
-			}
+		steps++
+		if steps%65_536 == 0 && evm.Cancelled() {
+			break
 		}
 		if dbg.TraceDynamicGas || debug || trace {
 			// Capture pre-execution values for tracing.
