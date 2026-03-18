@@ -82,14 +82,14 @@ func Transfer(db evmtypes.IntraBlockState, sender, recipient accounts.Address, a
 	if err != nil {
 		return err
 	}
-	if rules.IsAmsterdam && !amount.IsZero() && sender != recipient { // EIP-7708
+	if rules.IsEIP7708 && !amount.IsZero() && sender != recipient { // EIP-7708
 		db.AddLog(EthTransferLog(sender.Value(), recipient.Value(), amount))
 	}
 	return nil
 }
 
 func LogSelfDestructedAccounts(ibs evmtypes.IntraBlockState, sender accounts.Address, coinbase accounts.Address, result *evmtypes.ExecutionResult, rules *chain.Rules) {
-	if !rules.IsAmsterdam {
+	if !rules.IsEIP7708 {
 		return
 	}
 	// Emit burn logs for selfdestructed accounts that hold a positive balance at

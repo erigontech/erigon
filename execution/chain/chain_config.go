@@ -114,6 +114,9 @@ type Config struct {
 	Bor     BorConfig       `json:"-"`
 	BorJSON json.RawMessage `json:"bor,omitempty"`
 
+	// Disable EIP-7708 ETH transfer logs (for devnets where the reference client doesn't support it)
+	DisableEIP7708 bool `json:"disableEIP7708,omitempty"`
+
 	// Account Abstraction
 	AllowAA bool
 }
@@ -733,6 +736,7 @@ type Rules struct {
 	IsIstanbul, IsBerlin, IsLondon, IsShanghai        bool
 	IsCancun, IsNapoli, IsAhmedabad, IsBhilai         bool
 	IsPrague, IsOsaka, IsAmsterdam                    bool
+	IsEIP7708                                         bool
 	IsAura                                            bool
 }
 
