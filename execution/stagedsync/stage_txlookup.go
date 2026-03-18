@@ -224,6 +224,16 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 		blockTo = cfg.blockReader.CanPruneTo(s.ForwardProgress)
 	}
 
+	// At chain tip, cap the number of blocks pruned per cycle to bound the
+	// time spent inside a single DB transaction. Each block adds ~150 random
+	// key deletions to TxLookup, so 100 blocks ≈ 15 000 deletes — a few
+	// tens of milliseconds. During initial sync there is no slot budget
+	// pressure, so we let it run unrestricted.
+	if !s.CurrentSyncCycle.IsInitialCycle {
+		const maxBlocksPerCycle = 100
+		blockTo = min(blockTo, blockFrom+maxBlocksPerCycle)
+	}
+
 	if blockFrom >= blockTo {
 		return nil
 	}
