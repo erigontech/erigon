@@ -351,66 +351,35 @@ func isWebsocket(r *http.Request) bool {
 }
 
 // NewHTTPHandlerStack returns wrapped http-related handlers.
-// tagAsRPC controls whether requests are tagged with TxPriorityRPC (fail-fast BeginRo).
-// Pass true for the JSON-RPC port (user RPC), false for the engine/auth port (CL protocol).
+// When tagAsRPC is true and rpcConcurrencyLimit > 0, enforces admission control
+// (503 if inflight > limit) to prevent goroutine pile-up under load.
 func NewHTTPHandlerStack(srv http.Handler, cors []string, vhosts []string, compression bool, rpcConcurrencyLimit int64, tagAsRPC bool) http.Handler {
-	// Wrap the CORS-handler within a host-handler
 	handler := newCorsHandler(srv, cors)
 	handler = newVHostHandler(vhosts, handler)
 	if compression {
 		handler = newGzipHandler(handler)
 	}
-	// When tagAsRPC: tags every request with TxPriorityRPC so BeginRo uses TryAcquire (fail-fast).
-	// When rpcConcurrencyLimit > 0 it also enforces admission control (503 if inflight > limit).
-	// Engine API port (tagAsRPC=false): tags with TxPriorityExecution so BeginRo uses the dedicated
-	// executionLimiter, guaranteeing CL→EL calls are never blocked by RPC load on roTxsLimiter.
 	if tagAsRPC {
 		handler = newRPCAdmissionHandler(rpcConcurrencyLimit, handler)
-	} else {
-		handler = newEngineAdmissionHandler(handler)
 	}
 	return handler
-}
-
-// engineAdmissionHandler tags Engine API requests with TxPriorityExecution so that BeginRo
-// uses the dedicated executionLimiter instead of the shared roTxsLimiter.
-// This guarantees CL→EL protocol calls (newPayload, forkchoiceUpdated, …) are never
-// starved by concurrent RPC load.
-type engineAdmissionHandler struct {
-	next http.Handler
-}
-
-func newEngineAdmissionHandler(next http.Handler) http.Handler {
-	return &engineAdmissionHandler{next: next}
-}
-
-func (h *engineAdmissionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	ctx := kv.WithTxPriority(r.Context(), kv.TxPriorityExecution)
-	h.next.ServeHTTP(w, r.WithContext(ctx))
 }
 
 // rpcAdmissionHandler limits the number of concurrent HTTP RPC requests.
 // Requests that exceed the limit receive an immediate HTTP 503 without going
 // through CORS, gzip, or JSON decoding.
-// Accepted requests have their context tagged with kv.TxPriorityRPC so that
-// BeginRo uses TryAcquire (fail-fast) instead of blocking on the semaphore.
 type rpcAdmissionHandler struct {
 	inflight atomic.Int64
 	limit    int64
 	next     http.Handler
 }
 
-
 func newRPCAdmissionHandler(limit int64, next http.Handler) http.Handler {
 	return &rpcAdmissionHandler{limit: limit, next: next}
 }
 
-
 func (h *rpcAdmissionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Always tag the context with TxPriorityRPC so BeginRo uses TryAcquire (fail-fast)
-	// regardless of whether admission control (limit) is configured.
 	kv.DebugHTTPTotal.Add(1) // DEBUG — remove before merge
-	ctx := kv.WithTxPriority(r.Context(), kv.TxPriorityRPC)
 	if h.limit > 0 {
 		if h.inflight.Add(1) > h.limit {
 			h.inflight.Add(-1)
@@ -420,7 +389,7 @@ func (h *rpcAdmissionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		}
 		defer h.inflight.Add(-1)
 	}
-	h.next.ServeHTTP(w, r.WithContext(ctx))
+	h.next.ServeHTTP(w, r)
 }
 
 func newCorsHandler(srv http.Handler, allowedOrigins []string) http.Handler {

@@ -107,36 +107,6 @@ Example:
 		return err
 	}
 */
-// TxPriority is used to tag a context with the priority of the BeginRo caller.
-// TxPriorityRPC causes BeginRo to use TryAcquire (fail-fast) on the roTxsLimiter,
-// returning ErrServerOverloaded instead of blocking, so that the HTTP layer can
-// respond with 503 without holding a goroutine.
-type TxPriority uint8
-
-const (
-	TxPriorityDefault   TxPriority = iota // blocking Acquire on roTxsLimiter — safe default for internal callers
-	TxPriorityRPC                         // non-blocking TryAcquire on roTxsLimiter — used by HTTP handlers
-	TxPriorityExecution                   // blocking Acquire on dedicated executionLimiter — used by staged sync
-)
-
-type txPriorityKey struct{}
-
-// WithTxPriority attaches a TxPriority to the context.
-func WithTxPriority(ctx context.Context, p TxPriority) context.Context {
-	return context.WithValue(ctx, txPriorityKey{}, p)
-}
-
-// TxPriorityFrom returns the TxPriority stored in ctx, or TxPriorityDefault.
-func TxPriorityFrom(ctx context.Context) TxPriority {
-	if p, ok := ctx.Value(txPriorityKey{}).(TxPriority); ok {
-		return p
-	}
-	return TxPriorityDefault
-}
-
-// ErrServerOverloaded is returned by BeginRo when the roTxsLimiter is full and
-// the caller used TxPriorityRPC (TryAcquire). The HTTP layer maps this to 503.
-var ErrServerOverloaded = errors.New("server overloaded, retry later")
 
 type RoDB interface {
 	Closer
