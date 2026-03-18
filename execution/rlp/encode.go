@@ -476,18 +476,9 @@ func Uint256Len(i uint256.Int) int {
 }
 
 // precondition: len(buffer) >= 9
-// TODO(yperbasis): replace with EncodeU64?
 func EncodeInt(i uint64, w io.Writer, buffer []byte) error {
-	if 0 < i && i < 0x80 {
-		buffer[0] = byte(i)
-		_, err := w.Write(buffer[:1])
-		return err
-	}
-
-	binary.BigEndian.PutUint64(buffer[1:], i)
-	size := intsize(i)
-	buffer[8-size] = 0x80 + byte(size)
-	_, err := w.Write(buffer[8-size : 9])
+	n := EncodeU64(i, buffer)
+	_, err := w.Write(buffer[:n])
 	return err
 }
 
