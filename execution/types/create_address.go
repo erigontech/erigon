@@ -32,9 +32,7 @@ func CreateAddress(a common.Address, nonce uint64) common.Address {
 	listLen := 21 + rlp.U64Len(nonce)
 	data := make([]byte, listLen+1)
 	pos := rlp.EncodeListPrefixToBuf(listLen, data)
-	data[pos] = 128 + 20
-	copy(data[pos+1:pos+21], a[:])
-	pos += 21
+	pos += rlp.EncodeStringToBuf(a[:], data[pos:])
 	rlp.EncodeU64ToBuf(nonce, data[pos:])
 	return common.BytesToAddress(crypto.Keccak256(data)[12:])
 }
