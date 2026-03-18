@@ -643,7 +643,7 @@ func EncodeString(s []byte, w io.Writer, buffer []byte) error {
 	case len(s) == 1 && s[0] < SingleByteThreshold:
 		_, err := w.Write(s)
 		return err
-	case len(s) < len(buffer)-1:
+	case len(s) < len(buffer):
 		// Short string: assemble prefix + data in buffer for a single write.
 		buffer[0] = EmptyStringCode + byte(len(s))
 		copy(buffer[1:], s)
