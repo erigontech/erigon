@@ -34,7 +34,6 @@ import (
 // General rules:
 //      - functions to calculate prefix len are fast (and pure). it's ok to call them multiple times during encoding of large object for readability.
 //      - rlp has 2 data types: List and String (bytes array), and low-level funcs are operate with this types.
-//      - but for convenience and performance - provided higher-level functions (for example for EncodeHash - for []byte of len 32)
 //      - functions to Parse (Decode) data - using data type as name (without any prefix): rlp.String(), rlp.List, rlp.U64(), rlp.U256()
 //
 
@@ -55,10 +54,6 @@ func EncodeListPrefix(dataLen int, to []byte) int {
 	}
 	to[0] = 192 + byte(dataLen)
 	return 1
-}
-
-func u32Len(i uint32) int {
-	return U64Len(uint64(i))
 }
 
 func U64Len(i uint64) int {
@@ -136,72 +131,3 @@ func EncodeString2(src []byte, dst []byte) int {
 	}
 }
 
-// EncodeAddress assumes that `to` buffer is already 21-bytes long
-func EncodeAddress(a, to []byte) int {
-	_ = to[20] // early bounds check to guarantee safety of writes below
-	to[0] = 128 + 20
-	copy(to[1:21], a[:20])
-	return 21
-}
-
-// EncodeHash assumes that `to` buffer is already 33-bytes long
-func EncodeHash(h, to []byte) int {
-	_ = to[32] // early bounds check to guarantee safety of writes below
-	to[0] = 128 + 32
-	copy(to[1:33], h[:32])
-	return 33
-}
-
-func EncodeHashes(hashes []byte, encodeBuf []byte) int {
-	pos := 0
-	hashesLen := len(hashes) / 32 * 33
-	pos += EncodeListPrefix(hashesLen, encodeBuf)
-	for i := 0; i < len(hashes); i += 32 {
-		pos += EncodeHash(hashes[i:], encodeBuf[pos:])
-	}
-	return pos
-}
-
-func AnnouncementsLen(types []byte, sizes []uint32, hashes []byte) int {
-	if len(types) == 0 {
-		return 4
-	}
-	typesLen := StringLen(types)
-	var sizesLen int
-	for _, size := range sizes {
-		sizesLen += u32Len(size)
-	}
-	hashesLen := len(hashes) / 32 * 33
-	totalLen := typesLen + sizesLen + ListPrefixLen(sizesLen) + hashesLen + ListPrefixLen(hashesLen)
-	return ListPrefixLen(totalLen) + totalLen
-}
-
-// EIP-5793: eth/68 - Add txn type to txn announcement
-func EncodeAnnouncements(types []byte, sizes []uint32, hashes []byte, encodeBuf []byte) int {
-	if len(types) == 0 {
-		encodeBuf[0] = 0xc3
-		encodeBuf[1] = 0x80
-		encodeBuf[2] = 0xc0
-		encodeBuf[3] = 0xc0
-		return 4
-	}
-	pos := 0
-	typesLen := StringLen(types)
-	var sizesLen int
-	for _, size := range sizes {
-		sizesLen += u32Len(size)
-	}
-	hashesLen := len(hashes) / 32 * 33
-	totalLen := typesLen + sizesLen + ListPrefixLen(sizesLen) + hashesLen + ListPrefixLen(hashesLen)
-	pos += EncodeListPrefix(totalLen, encodeBuf)
-	pos += EncodeString2(types, encodeBuf[pos:])
-	pos += EncodeListPrefix(sizesLen, encodeBuf[pos:])
-	for _, size := range sizes {
-		pos += EncodeU32(size, encodeBuf[pos:])
-	}
-	pos += EncodeListPrefix(hashesLen, encodeBuf[pos:])
-	for i := 0; i < len(hashes); i += 32 {
-		pos += EncodeHash(hashes[i:], encodeBuf[pos:])
-	}
-	return pos
-}

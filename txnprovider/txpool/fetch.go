@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
@@ -336,7 +335,7 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 			}
 		}
 	case sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68:
-		_, _, hashes, _, err := rlp.ParseAnnouncements(req.Data, 0)
+		_, _, hashes, _, err := parseAnnouncements(req.Data, 0)
 		if err != nil {
 			f.logger.Debug("[txpool] penalizing peer for malformed NewPooledTransactionHashes68", "peer", req.PeerId, "err", err)
 			sentryClient.PenalizePeer(ctx, &sentryproto.PenalizePeerRequest{PeerId: req.PeerId, Penalty: sentryproto.PenaltyKind_Kick})
