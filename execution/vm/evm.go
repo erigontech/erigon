@@ -370,12 +370,14 @@ func (c *codeAndHash) Hash() accounts.CodeHash {
 	return c.hash
 }
 
-func (evm *EVM) OverlayCreate(caller accounts.Address, codeAndHash *codeAndHash, gas uint64, value uint256.Int, address accounts.Address, typ OpCode, incrementNonce bool) ([]byte, accounts.Address, uint64, error) {
-	return evm.create(caller, codeAndHash, gas, value, address, typ, incrementNonce, false)
+func (evm *EVM) OverlayCreate(rawCaller common.Address, codeAndHash *codeAndHash, gas uint64, value uint256.Int, rawAddress common.Address, typ OpCode, incrementNonce bool) ([]byte, accounts.Address, uint64, error) {
+	return evm.create(rawCaller, codeAndHash, gas, value, rawAddress, typ, incrementNonce, false)
 }
 
 // create creates a new contract using code as deployment code.
-func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRemaining uint64, value uint256.Int, address accounts.Address, typ OpCode, incrementNonce bool, bailout bool) (ret []byte, createAddress accounts.Address, leftOverGas uint64, err error) {
+func (evm *EVM) create(rawCaller common.Address, codeAndHash *codeAndHash, gasRemaining uint64, value uint256.Int, rawAddress common.Address, typ OpCode, incrementNonce bool, bailout bool) (ret []byte, createAddress accounts.Address, leftOverGas uint64, err error) {
+	caller := evm.intraBlockState.InternAddress(rawCaller)
+	address := evm.intraBlockState.InternAddress(rawAddress)
 	if dbg.TraceTransactionIO && (evm.intraBlockState.Trace() || dbg.TraceAccount(caller.Handle())) {
 		defer func() {
 			version := evm.intraBlockState.Version()
@@ -534,13 +536,14 @@ func (evm *EVM) maxCodeSize() int {
 
 // Create creates a new contract using code as deployment code.
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
-func (evm *EVM) Create(caller accounts.Address, code []byte, gasRemaining uint64, endowment uint256.Int, bailout bool) (ret []byte, contractAddr accounts.Address, leftOverGas uint64, err error) {
-	nonce, err := evm.intraBlockState.GetNonce(caller)
+func (evm *EVM) Create(rawCaller common.Address, code []byte, gasRemaining uint64, endowment uint256.Int, bailout bool) (ret []byte, contractAddr accounts.Address, leftOverGas uint64, err error) {
+	nonce, err := evm.intraBlockState.GetNonce(evm.intraBlockState.InternAddress(rawCaller))
 	if err != nil {
 		return nil, accounts.NilAddress, 0, err
 	}
-	contractAddr = accounts.InternAddress(types.CreateAddress(caller.Value(), nonce))
-	return evm.create(caller, &codeAndHash{code: code}, gasRemaining, endowment, contractAddr, CREATE, true /* incrementNonce */, bailout)
+	rawContractAddr := types.CreateAddress(rawCaller, nonce)
+	ret, contractAddr, leftOverGas, err = evm.create(rawCaller, &codeAndHash{code: code}, gasRemaining, endowment, rawContractAddr, CREATE, true /* incrementNonce */, bailout)
+	return
 }
 
 // Create2 creates a new contract using code as deployment code.
@@ -548,16 +551,16 @@ func (evm *EVM) Create(caller accounts.Address, code []byte, gasRemaining uint64
 // The different between Create2 with Create is Create2 uses keccak256(0xff ++ msg.sender ++ salt ++ keccak256(init_code))[12:]
 // instead of the usual sender-and-nonce-hash as the address where the contract is initialized at.
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
-func (evm *EVM) Create2(caller accounts.Address, code []byte, gasRemaining uint64, endowment uint256.Int, salt *uint256.Int, bailout bool) (ret []byte, contractAddr accounts.Address, leftOverGas uint64, err error) {
+func (evm *EVM) Create2(rawCaller common.Address, code []byte, gasRemaining uint64, endowment uint256.Int, salt *uint256.Int, bailout bool) (ret []byte, contractAddr accounts.Address, leftOverGas uint64, err error) {
 	codeAndHash := &codeAndHash{code: code}
-	contractAddr = accounts.InternAddress(types.CreateAddress2(caller.Value(), salt.Bytes32(), codeAndHash.Hash()))
-	return evm.create(caller, codeAndHash, gasRemaining, endowment, contractAddr, CREATE2, true /* incrementNonce */, bailout)
+	rawContractAddr := types.CreateAddress2(rawCaller, salt.Bytes32(), codeAndHash.Hash())
+	return evm.create(rawCaller, codeAndHash, gasRemaining, endowment, rawContractAddr, CREATE2, true /* incrementNonce */, bailout)
 }
 
 // SysCreate is a special (system) contract creation methods for genesis constructors.
 // Unlike the normal Create & Create2, it doesn't increment caller's nonce.
-func (evm *EVM) SysCreate(caller accounts.Address, code []byte, gas uint64, endowment uint256.Int, contractAddr accounts.Address) (ret []byte, leftOverGas uint64, err error) {
-	ret, _, leftOverGas, err = evm.create(caller, &codeAndHash{code: code}, gas, endowment, contractAddr, CREATE, false /* incrementNonce */, false)
+func (evm *EVM) SysCreate(rawCaller common.Address, code []byte, gas uint64, endowment uint256.Int, rawContractAddr common.Address) (ret []byte, leftOverGas uint64, err error) {
+	ret, _, leftOverGas, err = evm.create(rawCaller, &codeAndHash{code: code}, gas, endowment, rawContractAddr, CREATE, false /* incrementNonce */, false)
 	return
 }
 

@@ -993,7 +993,7 @@ func opCreate(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 
 	scope.useGas(gas, evm.Config().Tracer, tracing.GasChangeCallContractCreation)
 
-	res, addr, returnGas, suberr := evm.Create(scope.Contract.Address(), input, gas, value, false)
+	res, addr, returnGas, suberr := evm.Create(scope.Contract.Address().Value(), input, gas, value, false)
 
 	// Push item on the stack based on the returned error. If the ruleset is
 	// homestead we must check for CodeStoreOutOfGasError (homestead only
@@ -1047,7 +1047,7 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 	scope.useGas(gas, evm.Config().Tracer, tracing.GasChangeCallContractCreation2)
 	// reuse size int for stackvalue
 	stackValue := size
-	res, addr, returnGas, suberr := evm.Create2(scope.Contract.Address(), input, gas, endowment, &salt, false)
+	res, addr, returnGas, suberr := evm.Create2(scope.Contract.Address().Value(), input, gas, endowment, &salt, false)
 
 	// Push item on the stack based on the returned error.
 	if suberr != nil {
