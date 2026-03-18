@@ -141,7 +141,7 @@ func gasSStore(evm *EVM, callContext *CallContext, availableGas uint64, memorySi
 	if current.Eq(value) { // noop (1)
 		return params.NetSstoreNoopGas, nil
 	}
-	var original, _ = evm.IntraBlockState().GetCommittedState(callContext.Address(), key)
+	var original, _ = evm.IntraBlockState().GetCommittedState(callContext.Address().Value(), key.Value())
 	if original == current {
 		if original.IsZero() { // create slot (2.1.1)
 			return params.NetSstoreInitGas, nil
@@ -196,7 +196,7 @@ func gasSStoreEIP2200(evm *EVM, callContext *CallContext, availableGas uint64, m
 		return params.SloadGasEIP2200, nil
 	}
 
-	var original, _ = evm.IntraBlockState().GetCommittedState(callContext.Address(), key)
+	var original, _ = evm.IntraBlockState().GetCommittedState(callContext.Address().Value(), key.Value())
 	if original == current {
 		if original.IsZero() { // create slot (2.1.1)
 			return params.SstoreSetGasEIP2200, nil

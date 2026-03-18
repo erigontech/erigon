@@ -71,7 +71,7 @@ func TestNull(t *testing.T) {
 	err = state.CommitBlock(&chain.Rules{}, w)
 	require.NoError(t, err)
 
-	value, err = state.GetCommittedState(address, accounts.ZeroKey)
+	value, err = state.GetCommittedState(address.Value(), common.Hash{})
 	require.NoError(t, err)
 
 	if !value.IsZero() {
@@ -143,7 +143,7 @@ func TestSnapshot(t *testing.T) {
 	value, err := state.GetState(stateobjaddr, storageaddr)
 	require.NoError(t, err)
 	require.Equal(t, *data1, value)
-	value, err = state.GetCommittedState(stateobjaddr, storageaddr)
+	value, err = state.GetCommittedState(stateobjaddr.Value(), storageaddr.Value())
 	require.NoError(t, err)
 	require.Equal(t, uint256.Int{}, value)
 
@@ -153,7 +153,7 @@ func TestSnapshot(t *testing.T) {
 	value, err = state.GetState(stateobjaddr, storageaddr)
 	require.NoError(t, err)
 	require.Equal(t, uint256.Int{}, value)
-	value, err = state.GetCommittedState(stateobjaddr, storageaddr)
+	value, err = state.GetCommittedState(stateobjaddr.Value(), storageaddr.Value())
 	require.NoError(t, err)
 	require.Equal(t, uint256.Int{}, value)
 }
