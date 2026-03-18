@@ -128,9 +128,8 @@ func gasExtCodeCopyEIP2929(evm *EVM, callContext *CallContext, scopeGas uint64, 
 	if err != nil {
 		return 0, err
 	}
-	addr := evm.intraBlockState.InternAddress(callContext.Stack.Back(0).Bytes20())
 	// Check slot presence in the access list
-	if evm.IntraBlockState().AddAddressToAccessList(addr.Value()) {
+	if evm.IntraBlockState().AddAddressToAccessList(callContext.Stack.Back(0).Bytes20()) {
 		var overflow bool
 		// We charge (cold-warm), since 'warm' is already charged as constantGas
 		if gas, overflow = math.SafeAdd(gas, params.ColdAccountAccessCostEIP2929-params.WarmStorageReadCostEIP2929); overflow {
@@ -149,9 +148,8 @@ func gasExtCodeCopyEIP2929(evm *EVM, callContext *CallContext, scopeGas uint64, 
 // - extcodesize,
 // - (ext) balance
 func gasEip2929AccountCheck(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (uint64, error) {
-	addr := evm.intraBlockState.InternAddress(callContext.Stack.Back(0).Bytes20())
 	// If the caller cannot afford the cost, this change will be rolled back
-	if evm.IntraBlockState().AddAddressToAccessList(addr.Value()) {
+	if evm.IntraBlockState().AddAddressToAccessList(callContext.Stack.Back(0).Bytes20()) {
 		// The warm storage read cost is already charged as constantGas
 		return params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929, nil
 	}
@@ -160,18 +158,18 @@ func gasEip2929AccountCheck(evm *EVM, callContext *CallContext, scopeGas uint64,
 
 func makeCallVariantGasCallEIP2929(oldCalculator gasFunc) gasFunc {
 	return func(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (uint64, error) {
-		addr := evm.intraBlockState.InternAddress(callContext.Stack.Back(1).Bytes20())
+		rawAddr := callContext.Stack.Back(1).Bytes20()
 		// The WarmStorageReadCostEIP2929 (100) is already deducted in the form of a constant cost, so
 		// the cost to charge for cold access, if any, is Cold - Warm
 		coldCost := params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
-		warmAccess := evm.IntraBlockState().AddressInAccessList(addr.Value())
+		warmAccess := evm.IntraBlockState().AddressInAccessList(rawAddr)
 		if !warmAccess {
 			// Charge the remaining difference here already, to correctly calculate available
 			// gas for call
 			if _, ok := useGas(scopeGas, coldCost, evm.Config().Tracer, tracing.GasChangeCallStorageColdAccess); !ok {
 				return 0, ErrOutOfGas
 			}
-			evm.IntraBlockState().AddAddressToAccessList(addr.Value())
+			evm.IntraBlockState().AddAddressToAccessList(rawAddr)
 			scopeGas -= coldCost
 		}
 
@@ -225,19 +223,19 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 	gasFunc := func(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (uint64, error) {
 		var (
 			gas     uint64
-			address = evm.intraBlockState.InternAddress(callContext.Stack.Back(0).Bytes20())
+			rawAddr = callContext.Stack.Back(0).Bytes20()
 		)
 		// If the caller cannot afford the cost, this change will be rolled back
-		if !evm.IntraBlockState().AddressInAccessList(address.Value()) {
+		if !evm.IntraBlockState().AddressInAccessList(rawAddr) {
 			gas = params.ColdAccountAccessCostEIP2929
 			if _, ok := useGas(scopeGas, gas, evm.Config().Tracer, tracing.GasChangeCallStorageColdAccess); !ok {
 				return 0, ErrOutOfGas
 			}
-			evm.IntraBlockState().AddAddressToAccessList(address.Value())
+			evm.IntraBlockState().AddAddressToAccessList(rawAddr)
 		}
 
 		// if empty and transfers value
-		empty, err := evm.IntraBlockState().Empty(address.Value())
+		empty, err := evm.IntraBlockState().Empty(rawAddr)
 		if err != nil {
 			return 0, err
 		}
@@ -251,7 +249,7 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 		// block access list.  Skip in read-only context (STATICCALL) where
 		// SELFDESTRUCT will be rejected by ErrWriteProtection.
 		if !evm.readOnly && !balance.IsZero() {
-			evm.IntraBlockState().MarkAddressAccess(address.Value(), false)
+			evm.IntraBlockState().MarkAddressAccess(rawAddr, false)
 		}
 		// When balance is zero OR we're in a read-only (STATICCALL) context,
 		// and the beneficiary differs from self, mark the beneficiary's reads
@@ -260,8 +258,8 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 		// actually transferred (zero balance) or SELFDESTRUCT will be rejected
 		// (read-only).  Skip when beneficiary == self to avoid incorrectly
 		// marking the contract's own legitimate reads.
-		if (balance.IsZero() || evm.readOnly) && address != callContext.Address() {
-			evm.IntraBlockState().MarkReadsInternal(address.Value())
+		if (balance.IsZero() || evm.readOnly) && rawAddr != callContext.Address().Value() {
+			evm.IntraBlockState().MarkReadsInternal(rawAddr)
 		}
 		if empty && !balance.IsZero() {
 			gas += params.CreateBySelfdestructGas
@@ -288,11 +286,11 @@ var (
 
 func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefulCalculator statefulGasFunc) gasFunc {
 	return func(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
-		addr := evm.intraBlockState.InternAddress(callContext.Stack.Back(1).Bytes20())
+		rawAddr := callContext.Stack.Back(1).Bytes20()
 		// Check slot presence in the access list
 		var gas uint64
 		var accessGas uint64
-		if !evm.intraBlockState.AddressInAccessList(addr.Value()) {
+		if !evm.intraBlockState.AddressInAccessList(rawAddr) {
 			// The WarmStorageReadCostEIP2929 (100) is already deducted in the form of a constant cost, so
 			// the cost to charge for cold access, if any, is Cold - Warm
 			accessGas = params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
@@ -302,7 +300,7 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 				return 0, ErrOutOfGas
 			}
 
-			evm.intraBlockState.AddAddressToAccessList(addr.Value())
+			evm.intraBlockState.AddAddressToAccessList(rawAddr)
 		}
 
 		// Call the old calculator, which takes into account
@@ -335,6 +333,7 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 		}
 
 		// Check if code is a delegation and if so, charge for resolution.
+		addr := evm.intraBlockState.InternAddress(rawAddr)
 		dd, ok, err := evm.intraBlockState.GetDelegatedDesignation(addr)
 		if err != nil {
 			return 0, err
