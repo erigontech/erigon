@@ -43,14 +43,15 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		// Gas sentry honoured, do the actual gas calculation based on the stored value
 		var (
 			y       = callContext.Stack.Back(1)
-			slot    = evm.intraBlockState.InternKey(callContext.Stack.Back(0).Bytes32())
+			rawAddr = callContext.Address().Value()
+			rawKey  = callContext.Stack.Back(0).Bytes32()
 			current uint256.Int
 			cost    = uint64(0)
 		)
 
-		current, _ = evm.IntraBlockState().GetState(callContext.Address(), slot)
+		current, _ = evm.IntraBlockState().GetState(rawAddr, rawKey)
 		// If the caller cannot afford the cost, this change will be rolled back
-		if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(callContext.Address(), callContext.Stack.Back(0).Bytes32()); slotMod {
+		if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(callContext.Address(), rawKey); slotMod {
 			cost = params.ColdSloadCostEIP2929
 		}
 		var value uint256.Int
@@ -62,7 +63,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 			return cost + params.WarmStorageReadCostEIP2929, nil // SLOAD_GAS
 		}
 
-		var original, _ = evm.IntraBlockState().GetCommittedState(callContext.Address().Value(), slot.Value())
+		var original, _ = evm.IntraBlockState().GetCommittedState(rawAddr, rawKey)
 		if original.Eq(&current) {
 			if original.IsZero() { // create slot (2.1.1)
 				return cost + params.SstoreSetGasEIP2200, nil
