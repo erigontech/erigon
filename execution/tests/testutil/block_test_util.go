@@ -493,7 +493,7 @@ func (bt *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 	for addr, acct := range bt.json.Post {
 		// address is indirectly verified by the other fields, as it's the db key
 		address := accounts.InternAddress(addr)
-		code2, err := statedb.GetCode(address)
+		code2, err := statedb.GetCode(address.Value())
 		if err != nil {
 			return err
 		}

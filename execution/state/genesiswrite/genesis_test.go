@@ -173,7 +173,7 @@ func TestAllocConstructor(t *testing.T) {
 	balance, err := state.GetBalance(address)
 	require.NoError(err)
 	assert.Equal(funds, balance.ToBig())
-	code, err := state.GetCode(address)
+	code, err := state.GetCode(address.Value())
 	require.NoError(err)
 	assert.Equal(common.FromHex("5f355f55"), code)
 

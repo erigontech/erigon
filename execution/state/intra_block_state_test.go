@@ -331,11 +331,11 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 			return err
 		}
 		checkeq("GetNonce", sn, cn)
-		sc, err := state.GetCode(addr)
+		sc, err := state.GetCode(addr.Value())
 		if err != nil {
 			return err
 		}
-		cc, err := checkstate.GetCode(addr)
+		cc, err := checkstate.GetCode(addr.Value())
 		if err != nil {
 			return err
 		}

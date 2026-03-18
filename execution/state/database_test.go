@@ -390,7 +390,7 @@ func TestCreate2Polymorth(t *testing.T) {
 		} else if !exist {
 			t.Error("expected create2address to exist at the block 2", create2address.String())
 		}
-		code, err := st.GetCode(create2address)
+		code, err := st.GetCode(create2address.Value())
 		if err != nil {
 			return err
 		}
@@ -436,7 +436,7 @@ func TestCreate2Polymorth(t *testing.T) {
 		} else if !exist {
 			t.Error("expected create2address to exist at the block 4", create2address.String())
 		}
-		code, err := st.GetCode(create2address)
+		code, err := st.GetCode(create2address.Value())
 		if err != nil {
 			return err
 		}
@@ -467,7 +467,7 @@ func TestCreate2Polymorth(t *testing.T) {
 		} else if !exist {
 			t.Error("expected create2address to exist at the block 5", create2address.String())
 		}
-		code, err := st.GetCode(create2address)
+		code, err := st.GetCode(create2address.Value())
 		if err != nil {
 			return err
 		}

@@ -777,7 +777,7 @@ func TestCreate2CollisionWithEIP7702Delegation(t *testing.T) {
 	require.True(t, val.IsZero(), "CREATE2 should have returned 0 (collision), but got %x", val)
 
 	// Also verify that the delegation code on the target address is still intact.
-	code, err := statedb.GetCode(delegatedAddr)
+	code, err := statedb.GetCode(delegatedAddr.Value())
 	require.NoError(t, err)
 	require.Equal(t, delegationCode, code, "delegation code should be unchanged")
 }
