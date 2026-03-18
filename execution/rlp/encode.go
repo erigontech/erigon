@@ -684,6 +684,11 @@ func EncodeOptionalAddress(addr *common.Address, w io.Writer, buffer []byte) err
 
 // --- List encoding ---
 
+// ListLen returns the RLP-encoded length of a list with the given content length.
+func ListLen(contentLen int) int {
+	return ListPrefixLen(contentLen) + contentLen
+}
+
 // ListPrefixLen returns the RLP list-header length for a list of the given data length.
 func ListPrefixLen(dataLen int) int {
 	if dataLen >= 56 {

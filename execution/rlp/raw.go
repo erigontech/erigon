@@ -35,39 +35,6 @@ type RawValue []byte
 
 var rawValueType = reflect.TypeFor[RawValue]()
 
-// StringSize returns the encoded size of a string.
-func StringSize(s string) uint64 {
-	switch n := len(s); n {
-	case 0:
-		return 1
-	case 1:
-		if s[0] <= 0x7f {
-			return 1
-		} else {
-			return 2
-		}
-	default:
-		return uint64(headsize(uint64(n)) + n)
-	}
-}
-
-// BytesSize returns the encoded size of a byte slice.
-func BytesSize(b []byte) uint64 {
-	return uint64(StringLen(b))
-}
-
-// ListSize returns the encoded size of an RLP list with the given
-// content size.
-func ListSize(contentSize uint64) uint64 {
-	return uint64(headsize(contentSize)) + contentSize
-}
-
-// IntSize returns the encoded size of the integer x. Note: The return type of this
-// function is 'int' for backwards-compatibility reasons. The result is always positive.
-func IntSize(x uint64) int {
-	return U64Len(x)
-}
-
 // Split returns the content of first RLP value and any
 // bytes after the value as subslices of b.
 func Split(b []byte) (k Kind, content, rest []byte, err error) {

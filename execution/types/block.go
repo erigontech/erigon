@@ -1180,7 +1180,7 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	bb.size.Store(rlp.ListSize(size))
+	bb.size.Store(uint64(rlp.ListLen(int(size))))
 
 	// decode header
 	var h Header
