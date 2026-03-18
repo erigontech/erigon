@@ -1121,25 +1121,25 @@ func TestDoubleAccountRemoval(t *testing.T) {
 
 	st := state.New(m.NewStateReader(tx))
 	require.NoError(t, err)
-	exist, err := st.Exist(theAddr.Value())
+	exist, err := st.Exist(theAddr)
 	require.NoError(t, err)
 	assert.False(t, exist, "Contract should've been removed")
 
 	st = state.New(m.NewHistoryStateReader(1, tx))
 	require.NoError(t, err)
-	exist, err = st.Exist(theAddr.Value())
+	exist, err = st.Exist(theAddr)
 	require.NoError(t, err)
 	assert.False(t, exist, "Contract should not exist at block #0")
 
 	st = state.New(m.NewHistoryStateReader(2, tx))
 	require.NoError(t, err)
-	exist, err = st.Exist(theAddr.Value())
+	exist, err = st.Exist(theAddr)
 	require.NoError(t, err)
 	assert.True(t, exist, "Contract should exist at block #1")
 
 	st = state.New(m.NewHistoryStateReader(3, tx))
 	require.NoError(t, err)
-	exist, err = st.Exist(theAddr.Value())
+	exist, err = st.Exist(theAddr)
 	require.NoError(t, err)
 	assert.True(t, exist, "Contract should exist at block #2")
 }
