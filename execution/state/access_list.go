@@ -33,12 +33,10 @@ func (al *accessList) ContainsAddress(address accounts.Address) bool {
 	return ok
 }
 
-// Reset
-//func (al *accessList) Reset() {
-//	clear(al.addresses)
-//	clear(al.slots)
-//	al.slots = al.slots[:0]
-//}
+// Reset clears the access list for reuse.
+func (al *accessList) Reset() {
+	clear(al.addresses)
+}
 
 // Contains checks if a slot within an account is present in the access list, returning
 // separate flags for the presence of the account and the slot respectively.
@@ -62,11 +60,6 @@ func newAccessList() *accessList {
 		addresses: map[accounts.Address]map[accounts.StorageKey]struct{}{},
 	}
 }
-
-//func (al *accessList) Reset() {
-//	clear(al.addresses)
-//	clear(al.slots)
-//}
 
 // Copy creates an independent copy of an accessList.
 func (al *accessList) Copy() *accessList {

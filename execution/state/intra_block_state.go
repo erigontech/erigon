@@ -2100,10 +2100,12 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 	}
 	if rules.IsBerlin {
 		// Clear out any leftover from previous executions
-		al := newAccessList()
-		sdb.accessList = al
-		//sdb.accessList.Reset()
-		//al := sdb.accessList
+		if sdb.accessList == nil {
+			sdb.accessList = newAccessList()
+		} else {
+			sdb.accessList.Reset()
+		}
+		al := sdb.accessList
 
 		al.AddAddress(sender)
 		if !dst.IsNil() {
