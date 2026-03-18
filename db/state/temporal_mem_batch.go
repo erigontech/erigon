@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"maps"
 	"sort"
+	"strings"
 	"sync"
 
 	btree2 "github.com/anacrolix/btree"
@@ -60,7 +61,7 @@ type TemporalMemBatch struct {
 
 	latestStateLock sync.RWMutex
 	domains         [kv.DomainLen]map[string][]dataWithTxNum
-	storage         *btree2.Map[string, []dataWithTxNum] // TODO: replace hardcoded domain name to per-config configuration of available Guarantees/AccessMethods (range vs get)
+	storage         btree2.Map[string, []dataWithTxNum] // TODO: replace hardcoded domain name to per-config configuration of available Guarantees/AccessMethods (range vs get)
 
 	domainWriters   [kv.DomainLen]*DomainBufferedWriter
 	iiWriters       []*InvertedIndexBufferedWriter
@@ -79,22 +80,9 @@ type TemporalMemBatch struct {
 	metrics *changeset.DomainMetrics
 }
 
-func newStringDataMap() *btree2.Map[string, []dataWithTxNum] {
-	m := btree2.MakeMap[string, []dataWithTxNum](func(a, b string) int {
-		if a == b {
-			return 0
-		}
-		if a < b {
-			return -1
-		}
-		return 1
-	})
-	return &m
-}
-
 func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics any) *TemporalMemBatch {
 	sd := &TemporalMemBatch{
-		storage:           newStringDataMap(),
+		storage:           btree2.MakeMap[string, []dataWithTxNum](strings.Compare),
 		metrics:           ioMetrics.(*changeset.DomainMetrics),
 		inMemHistoryReads: true,
 	}
@@ -321,13 +309,12 @@ func (sd *TemporalMemBatch) ClearRam() {
 func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step kv.Step) (cont bool, err error)) error {
 	sd.latestStateLock.RLock()
 	defer sd.latestStateLock.RUnlock()
-	var ramIter *btree2.MapIterator[string, []dataWithTxNum]
+	var storageMap *btree2.Map[string, []dataWithTxNum]
 	if domain == kv.StorageDomain {
-		iter := sd.storage.Iterator()
-		ramIter = &iter
+		storageMap = &sd.storage
 	}
 
-	return AggTx(roTx).d[domain].debugIteratePrefixLatest(prefix, ramIter, it, roTx)
+	return AggTx(roTx).d[domain].debugIteratePrefixLatest(prefix, storageMap, it, roTx)
 }
 
 func (sd *TemporalMemBatch) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]byte, []byte, bool, error) {
