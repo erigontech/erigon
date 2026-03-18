@@ -554,6 +554,8 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		if err = a.BuildFiles2(ctx, fromStep, toStep, false); err != nil {
 			return err
 		}
+		a.WaitForFiles()
+		logger.Info("[rebuild_commitment_history] build files done", "fromStep", fromStep, "toStep", toStep)
 
 		pruneRwTx, err := rwDb.BeginTemporalRw(ctx)
 		if err != nil {
