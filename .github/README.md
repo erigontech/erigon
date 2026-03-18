@@ -94,6 +94,58 @@ unnecessary re-runs.
 This is also why the `execution/tests/` package is broken into focused sub-packages
 rather than one monolithic package.
 
+### Cache warming and GitHub's cache isolation rules
+
+GitHub Actions caches are scoped by branch. A workflow run can restore caches from:
+
+1. **Its own branch** — caches saved by earlier runs on the same branch.
+2. **The base branch** (`main`) — caches saved by any workflow run on `main`.
+
+It cannot access caches from other PRs or other branches.
+
+**The cold-start problem** — If a workflow only triggers on `pull_request`, it never
+runs on `main` and therefore never populates the base-branch cache. Every new PR
+opens to a cold cache, even if the codebase hasn't changed at all. Subsequent pushes
+to the *same* PR do find each other's caches, but only until the GitHub-hosted cache
+is evicted (repos share a 10 GB limit; busy repos evict older entries within hours).
+
+**The fix** — add `push: {branches: [main, release/**]}` as a trigger. After each
+merge, a run warms the build and module caches on `main`. All future PR first-pushes
+restore from that warm base-branch cache instead of starting cold.
+
+**Cache warming without test validation** — For workflows where correctness is already
+enforced by the merge queue, the push-to-main run exists purely for cache warming. To
+prevent benchmark or test flakiness from showing as failures on main commits, use
+compile-only steps on non-PR events:
+
+```yaml
+- name: Run benchmarks
+  if: github.event_name == 'pull_request'
+  run: make test-bench
+
+- name: Build test binaries (cache warming)
+  if: github.event_name != 'pull_request'
+  run: go test -run=^$ ./...
+```
+
+`go test -run=^$` compiles every test binary (identical GOCACHE entries to a full
+run) but executes nothing. The job always succeeds, and the commit on `main` shows
+green. If a benchmark were broken post-merge it would have been caught by the PR or
+merge queue run before landing.
+
+**Merge queues** — `merge_group` runs use a temporary synthetic branch
+(`refs/heads/gh-readonly-queue/main/pr-N-SHA`). They can read from the base-branch
+(`main`) cache, so they benefit from the warm cache created by the `push` trigger.
+However, caches *saved* during a merge-group run are stored under that temporary
+branch and become inaccessible once the merge group completes — they do not
+contribute to the `main` cache. Only the `push`-triggered run after the merge creates
+a durable base-branch cache.
+
+**Implication for workflow design**: any workflow that should benefit from caching
+across PRs and merge queue runs needs a `push` trigger on `main` (or a nightly
+schedule on `main`). Without it, each PR and each merge-queue batch is always a cold
+start.
+
 ## Required checks
 
 Required checks exist to block *regressions*, not to enforce perfection.
