@@ -748,7 +748,8 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		logger.Info("Socket Endpoint opened", "url", socketUrl)
 	}
 
-	// Compute RPC admission limit: use --rpc.max.concurrent if set, otherwise derive from DBReadConcurrency.
+	// RPC admission limit: use --rpc.max.concurrent if set; otherwise fall back to DBReadConcurrency
+	// so the HTTP gate matches the DB semaphore size (prevents goroutine pile-up under load).
 	rpcConcurrencyLimit := int64(cfg.RpcMaxConcurrentRequests)
 	if rpcConcurrencyLimit == 0 {
 		rpcConcurrencyLimit = int64(cfg.DBReadConcurrency)

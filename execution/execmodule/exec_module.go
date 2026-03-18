@@ -581,7 +581,7 @@ func (e *ExecModule) Ready(ctx context.Context, _ *emptypb.Empty) (*executionpro
 }
 
 func (e *ExecModule) HasBlock(ctx context.Context, in *executionproto.GetSegmentRequest) (*executionproto.HasBlockResponse, error) {
-	tx, err := e.db.BeginRo(ctx)
+	tx, err := e.db.BeginRo(kv.WithTxPriority(ctx, kv.TxPriorityExecution))
 	if err != nil {
 		return nil, err
 	}

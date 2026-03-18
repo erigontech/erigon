@@ -362,11 +362,31 @@ func NewHTTPHandlerStack(srv http.Handler, cors []string, vhosts []string, compr
 	}
 	// When tagAsRPC: tags every request with TxPriorityRPC so BeginRo uses TryAcquire (fail-fast).
 	// When rpcConcurrencyLimit > 0 it also enforces admission control (503 if inflight > limit).
-	// Engine API port (tagAsRPC=false) skips the tag so execution-engine DB calls use blocking Acquire.
+	// Engine API port (tagAsRPC=false): tags with TxPriorityExecution so BeginRo uses the dedicated
+	// executionLimiter, guaranteeing CL→EL calls are never blocked by RPC load on roTxsLimiter.
 	if tagAsRPC {
 		handler = newRPCAdmissionHandler(rpcConcurrencyLimit, handler)
+	} else {
+		handler = newEngineAdmissionHandler(handler)
 	}
 	return handler
+}
+
+// engineAdmissionHandler tags Engine API requests with TxPriorityExecution so that BeginRo
+// uses the dedicated executionLimiter instead of the shared roTxsLimiter.
+// This guarantees CL→EL protocol calls (newPayload, forkchoiceUpdated, …) are never
+// starved by concurrent RPC load.
+type engineAdmissionHandler struct {
+	next http.Handler
+}
+
+func newEngineAdmissionHandler(next http.Handler) http.Handler {
+	return &engineAdmissionHandler{next: next}
+}
+
+func (h *engineAdmissionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	ctx := kv.WithTxPriority(r.Context(), kv.TxPriorityExecution)
+	h.next.ServeHTTP(w, r.WithContext(ctx))
 }
 
 // rpcAdmissionHandler limits the number of concurrent HTTP RPC requests.
@@ -380,23 +400,22 @@ type rpcAdmissionHandler struct {
 	next     http.Handler
 }
 
-var rpcOverloadedResponse = []byte(`{"jsonrpc":"2.0","error":{"code":-32603,"message":"server overloaded, retry later"}}`)
 
 func newRPCAdmissionHandler(limit int64, next http.Handler) http.Handler {
 	return &rpcAdmissionHandler{limit: limit, next: next}
 }
 
+
 func (h *rpcAdmissionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Always tag the context with TxPriorityRPC so BeginRo uses TryAcquire (fail-fast)
 	// regardless of whether admission control (limit) is configured.
+	kv.DebugHTTPTotal.Add(1) // DEBUG — remove before merge
 	ctx := kv.WithTxPriority(r.Context(), kv.TxPriorityRPC)
 	if h.limit > 0 {
 		if h.inflight.Add(1) > h.limit {
 			h.inflight.Add(-1)
-			w.Header().Set("Content-Type", "application/json")
-			w.Header().Set("Retry-After", "1")
-			w.WriteHeader(http.StatusServiceUnavailable)
-			w.Write(rpcOverloadedResponse) //nolint:errcheck
+			kv.DebugHTTPRejected.Add(1) // DEBUG — remove before merge
+			http.Error(w, "server overloaded, retry later", http.StatusServiceUnavailable)
 			return
 		}
 		defer h.inflight.Add(-1)

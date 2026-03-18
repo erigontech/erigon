@@ -43,6 +43,7 @@ var errNotFound = errors.New("notfound")
 // getters never share MDBX internal state.
 // The caller must call the returned cleanup function when done.
 func (e *ExecModule) beginOverlayOrRo(ctx context.Context) (kv.Tx, func(), error) {
+	ctx = kv.WithTxPriority(ctx, kv.TxPriorityExecution)
 	e.lock.RLock()
 	if e.currentContext != nil {
 		if overlay := e.currentContext.BlockOverlay(); overlay != nil {

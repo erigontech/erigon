@@ -461,11 +461,18 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 					pct = float64(s503) * 100.0 / float64(total)
 				}
 				vmRSS, cpuIdle := debugSysInfo()
+				httpTotal := kv.DebugHTTPTotal.Load()
+				httpRejected := kv.DebugHTTPRejected.Load()
+				var httpRejectedPct float64
+				if httpTotal > 0 {
+					httpRejectedPct = float64(httpRejected) * 100.0 / float64(httpTotal)
+				}
 				db.log.Warn("[DEBUG] rpc stats",
 					"total_req", total, "total_503", s503,
 					"503_pct", fmt.Sprintf("%.1f%%", pct),
-					"rpc_inflight", db.rpcInflight.Load(),
-					"exec_inflight", db.execInflight.Load(),
+					"http_total", httpTotal, "http_rejected", httpRejected, "http_rejected_pct", fmt.Sprintf("%.1f%%", httpRejectedPct),
+					"rpc_total", total, "rpc_inflight", db.rpcInflight.Load(), "rpc_peak", db.rpcPeak.Load(),
+					"exec_total", db.execTotal.Load(), "exec_inflight", db.execInflight.Load(), "exec_peak", db.execPeak.Load(),
 					"vmRSS_MB", vmRSS, "cpu_idle%", fmt.Sprintf("%.1f", cpuIdle))
 			}
 		}
@@ -502,6 +509,7 @@ type MdbxKV struct {
 	// DEBUG: measure peak concurrent execution BeginRo — remove before merge
 	execInflight atomic.Int64
 	execPeak     atomic.Int64
+	execTotal    atomic.Int64 // total BeginRo calls with TxPriorityExecution
 
 	// DEBUG: measure peak concurrent RPC BeginRo — remove before merge
 	rpcInflight  atomic.Int64
@@ -687,6 +695,7 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	priority := kv.TxPriorityFrom(ctx)
 	switch priority {
 	case kv.TxPriorityExecution:
+		db.execTotal.Add(1) // DEBUG — remove before merge
 		if semErr := db.executionLimiter.Acquire(ctx, 1); semErr != nil {
 			db.trackTxEnd()
 			return nil, fmt.Errorf("mdbx.MdbxKV.BeginRo: executionLimiter error %w", semErr)
@@ -694,8 +703,6 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		// DEBUG: track peak concurrent execution BeginRo — remove before merge
 		if cur := db.execInflight.Add(1); cur > db.execPeak.Load() {
 			db.execPeak.Store(cur)
-			vmRSS, cpuIdle := debugSysInfo()
-			db.log.Warn("[DEBUG] executionLimiter peak", "peak", cur, "vmRSS_MB", vmRSS, "cpu_idle%", fmt.Sprintf("%.1f", cpuIdle))
 		}
 	case kv.TxPriorityRPC:
 		db.rpcTotal.Add(1) // DEBUG — remove before merge
@@ -707,8 +714,6 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		// DEBUG: track peak concurrent RPC BeginRo — remove before merge
 		if cur := db.rpcInflight.Add(1); cur > db.rpcPeak.Load() {
 			db.rpcPeak.Store(cur)
-			vmRSS, cpuIdle := debugSysInfo()
-			db.log.Warn("[DEBUG] roTxsLimiter peak", "peak", cur, "vmRSS_MB", vmRSS, "cpu_idle%", fmt.Sprintf("%.1f", cpuIdle))
 		}
 	default:
 		// will return nil err if context is cancelled (may appear to acquire the semaphore)
