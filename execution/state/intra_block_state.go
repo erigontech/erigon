@@ -2209,10 +2209,11 @@ func (sdb *IntraBlockState) SlotInAccessList(rawAddr common.Address, rawSlot com
 	return sdb.accessList.Contains(sdb.InternAddress(rawAddr), sdb.InternKey(rawSlot))
 }
 
-func (sdb *IntraBlockState) MarkAddressAccess(addr accounts.Address, revertable bool) {
+func (sdb *IntraBlockState) MarkAddressAccess(rawAddr common.Address, revertable bool) {
 	if !sdb.recordAccess || sdb.addressAccess == nil {
 		return
 	}
+	addr := sdb.InternAddress(rawAddr)
 	if opts, ok := sdb.addressAccess[addr]; ok {
 		if opts.revertable && !revertable {
 			opts.revertable = false
@@ -2227,10 +2228,11 @@ func (sdb *IntraBlockState) MarkAddressAccess(addr accounts.Address, revertable 
 // but excluded from the block access list (BAL).  This is used when
 // a state read was performed for gas calculation but the operation
 // was rejected (e.g. CALL with value inside STATICCALL).
-func (sdb *IntraBlockState) MarkReadsInternal(addr accounts.Address) {
+func (sdb *IntraBlockState) MarkReadsInternal(rawAddr common.Address) {
 	if sdb.versionedReads == nil {
 		return
 	}
+	addr := sdb.InternAddress(rawAddr)
 	for key, vr := range sdb.versionedReads[addr] {
 		vr.internal = true
 		sdb.versionedReads[addr][key] = vr
