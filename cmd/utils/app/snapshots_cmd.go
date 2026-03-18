@@ -547,6 +547,37 @@ var snapshotCommand = cli.Command{
 			},
 		},
 		{
+			Name:        "verify",
+			Description: "verify snapshot downloads against .torrent files and preverified.toml",
+			Action: func(cliCtx *cli.Context) (err error) {
+				dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+				logger := log.Root()
+				issues, err := downloader.VerifySnapshotDownloads(cliCtx.Context, dirs, logger)
+				if err != nil {
+					return fmt.Errorf("verify snapshot downloads: %w", err)
+				}
+				errorCount, warnCount := 0, 0
+				for _, issue := range issues {
+					switch issue.Severity {
+					case "error":
+						logger.Error("[snapshots verify] "+issue.Message, "file", issue.File)
+						errorCount++
+					case "warn":
+						logger.Warn("[snapshots verify] "+issue.Message, "file", issue.File)
+						warnCount++
+					}
+				}
+				logger.Info("[snapshots verify] done", "errors", errorCount, "warnings", warnCount)
+				if errorCount > 0 {
+					return fmt.Errorf("%d error(s) found during snapshot verification", errorCount)
+				}
+				return nil
+			},
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+			}),
+		},
+		{
 			Name: "preverified",
 			Action: func(cliCtx *cli.Context) (err error) {
 				var dataDir string
