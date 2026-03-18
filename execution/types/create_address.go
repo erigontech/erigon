@@ -30,11 +30,13 @@ import (
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func CreateAddress(a common.Address, nonce uint64) common.Address {
 	listLen := 21 + rlp.U64Len(nonce)
-	data := make([]byte, listLen+1)
-	pos := rlp.EncodeListPrefixToBuf(listLen, data)
+	// 31 bytes covers the max RLP output (1 list prefix + 21 address + 9 nonce)
+	// and satisfies EncodeU64ToBuf's 9-byte scratch requirement.
+	var data [31]byte
+	pos := rlp.EncodeListPrefixToBuf(listLen, data[:])
 	pos += rlp.EncodeStringToBuf(a[:], data[pos:])
 	rlp.EncodeU64ToBuf(nonce, data[pos:])
-	return common.BytesToAddress(crypto.Keccak256(data)[12:])
+	return common.BytesToAddress(crypto.Keccak256(data[:1+listLen])[12:])
 }
 
 var createAddress2Prefix = []byte{0xff}
