@@ -738,6 +738,12 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 	}
 	if call.Gas == 0 {
 		call.Gas = 50000000
+		if call.Gas > params.MaxTxnGasLimit && b.m.ChainConfig.IsOsaka(block.Time()) {
+			call.Gas = params.MaxTxnGasLimit
+		}
+	}
+	if call.MaxFeePerBlobGas == nil {
+		call.MaxFeePerBlobGas = new(uint256.Int)
 	}
 	if call.Value == nil {
 		call.Value = new(uint256.Int)

@@ -1020,6 +1020,42 @@ func TestSimulatedBackend_PendingAndCallContract(t *testing.T) {
 	}
 }
 
+func TestSimulatedBackend_CallContractDefaultGasRespectsOsakaCap(t *testing.T) {
+	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
+	contractAddr := common.HexToAddress("0x1000000000000000000000000000000000000001")
+	sim := NewSimulatedBackendWithConfig(t, types.GenesisAlloc{
+		testAddr:     {Balance: big.NewInt(common.Ether)},
+		contractAddr: {Balance: big.NewInt(0), Code: common.FromHex(deployedCode)},
+	}, chain.AllProtocolChanges, params.MaxTxnGasLimit+1_000_000)
+	bgCtx := context.Background()
+
+	require.True(t, sim.m.ChainConfig.IsOsaka(sim.pendingBlock.Time()))
+
+	parsed, err := abi.JSON(strings.NewReader(abiJSON))
+	require.NoError(t, err)
+
+	input, err := parsed.Pack("receive", []byte("X"))
+	require.NoError(t, err)
+
+	res, err := sim.PendingCallContract(bgCtx, ethereum.CallMsg{
+		From: testAddr,
+		To:   &contractAddr,
+		Data: input,
+	})
+	require.NoError(t, err)
+	require.Equal(t, expectedReturn, res)
+
+	sim.Commit()
+
+	res, err = sim.CallContract(bgCtx, ethereum.CallMsg{
+		From: testAddr,
+		To:   &contractAddr,
+		Data: input,
+	}, nil)
+	require.NoError(t, err)
+	require.Equal(t, expectedReturn, res)
+}
+
 // This test is based on the following contract:
 /*
 contract Reverter {
