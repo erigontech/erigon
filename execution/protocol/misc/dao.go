@@ -72,7 +72,7 @@ func VerifyDAOHeaderExtraData(config *chain.Config, header *types.Header) error 
 // contract.
 func ApplyDAOHardFork(statedb *state.IntraBlockState) error {
 	// Retrieve the contract to refund balances into
-	exist, err := statedb.Exist(DAORefundContract)
+	exist, err := statedb.Exist(DAORefundContract.Value())
 	if err != nil {
 		return err
 	}
