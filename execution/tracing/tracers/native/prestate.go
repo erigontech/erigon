@@ -277,7 +277,7 @@ func (t *prestateTracer) processDiffState() {
 		postAccount := &account{Storage: make(map[common.Hash]common.Hash)}
 		newBalance, _ := t.env.IntraBlockState.GetBalance(addr)
 		newNonce, _ := t.env.IntraBlockState.GetNonce(addr)
-		newCode, _ := t.env.IntraBlockState.GetCode(addr)
+		newCode, _ := t.env.IntraBlockState.GetCode(addr.Value())
 		newCodeHash := common.Hash{}
 		if len(newCode) > 0 {
 			newCodeHash = crypto.Keccak256Hash(newCode)
@@ -303,7 +303,7 @@ func (t *prestateTracer) processDiffState() {
 		}
 
 		if !t.config.DisableCode {
-			newCode, _ := t.env.IntraBlockState.GetCode(addr)
+			newCode, _ := t.env.IntraBlockState.GetCode(addr.Value())
 			if !bytes.Equal(newCode, t.pre[addr].Code) {
 				modified = true
 				postAccount.Code = newCode
@@ -373,7 +373,7 @@ func (t *prestateTracer) lookupAccount(addr accounts.Address) {
 
 	balance, _ := t.env.IntraBlockState.GetBalance(addr)
 	nonce, _ := t.env.IntraBlockState.GetNonce(addr)
-	code, _ := t.env.IntraBlockState.GetCode(addr)
+	code, _ := t.env.IntraBlockState.GetCode(addr.Value())
 
 	t.pre[addr] = &account{
 		Balance: balance.ToBig(),
