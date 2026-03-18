@@ -447,6 +447,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		RpcBatchConcurrency:       ctx.Uint(utils.RpcBatchConcurrencyFlag.Name),
 		RpcStreamingDisable:       ctx.Bool(utils.RpcStreamingDisableFlag.Name),
 		DBReadConcurrency:         ctx.Int(utils.DBReadConcurrencyFlag.Name),
+		RpcMaxConcurrentRequests:  ctx.Int(utils.RpcMaxConcurrentRequestsFlag.Name),
 		RpcAllowListFilePath:      ctx.String(utils.RpcAccessListFlag.Name),
 		RpcFiltersConfig: rpchelper.FiltersConfig{
 			RpcSubscriptionFiltersMaxLogs:      ctx.Int(RpcSubscriptionFiltersMaxLogsFlag.Name),

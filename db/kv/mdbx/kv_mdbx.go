@@ -372,7 +372,6 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 
 		MaxBatchSize:  DefaultMaxBatchSize,
 		MaxBatchDelay: DefaultMaxBatchDelay,
-
 	}
 
 	customBuckets := opts.bucketsCfg(kv.TablesCfgByLabel(opts.label))
