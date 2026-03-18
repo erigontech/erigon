@@ -204,7 +204,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 
 	// Call the code with the given configuration.
 	code, address, leftOverGas, err := vmenv.Create(
-		sender,
+		sender.Value(),
 		input,
 		cfg.GasLimit,
 		cfg.Value,

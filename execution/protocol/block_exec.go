@@ -313,11 +313,11 @@ func SysCreate(contract accounts.Address, data []byte, chainConfig *chain.Config
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 
 	ret, _, err := evm.SysCreate(
-		msg.From(),
+		msg.From().Value(),
 		msg.Data(),
 		msg.Gas(),
 		*msg.Value(),
-		contract,
+		contract.Value(),
 	)
 	return ret, err
 }
