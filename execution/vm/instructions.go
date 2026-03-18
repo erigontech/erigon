@@ -638,14 +638,14 @@ func opExtCodeCopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, err
 // equal the result of calling extcodehash on the account directly.
 func opExtCodeHash(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	slot := scope.Stack.peek()
-	address := evm.intraBlockState.InternAddress(slot.Bytes20())
+	rawAddr := slot.Bytes20()
 
 	// BAL: EXTCODEHASH is a real state access per EIP-7928 — mark as
 	// non-revertable.  Also ensures non-existent accounts appear in the BAL
 	// when Empty() returns true and GetCodeHash is never called.
-	evm.IntraBlockState().MarkAddressAccess(address.Value(), false)
+	evm.IntraBlockState().MarkAddressAccess(rawAddr, false)
 
-	empty, err := evm.IntraBlockState().Empty(address.Value())
+	empty, err := evm.IntraBlockState().Empty(rawAddr)
 	if err != nil {
 		return pc, nil, err
 	}
@@ -653,7 +653,7 @@ func opExtCodeHash(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, err
 		slot.Clear()
 	} else {
 		var codeHash accounts.CodeHash
-		codeHash, err = evm.IntraBlockState().GetCodeHash(address)
+		codeHash, err = evm.IntraBlockState().GetCodeHash(rawAddr)
 		if err != nil {
 			return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}

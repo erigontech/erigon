@@ -340,11 +340,11 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 			return err
 		}
 		checkeq("GetCode", sc, cc)
-		sch, err := state.GetCodeHash(addr)
+		sch, err := state.GetCodeHash(addr.Value())
 		if err != nil {
 			return err
 		}
-		cch, err := checkstate.GetCodeHash(addr)
+		cch, err := checkstate.GetCodeHash(addr.Value())
 		if err != nil {
 			return err
 		}
