@@ -892,13 +892,25 @@ func (s *simulator) computeCommitmentFromStateHistory(
 		storageFullKey := make([]byte, length.Addr+length.Hash)
 		for address, locations := range touched {
 			addressKey := address.Value().Bytes()
-			tsd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(addressKey), nil)
+			// Read the actual account value from the main shared domains where the
+			// simulation wrote its results. Passing nil here would cause the commitment
+			// algorithm to treat the key as a deletion (DeleteUpdate flag) instead of
+			// an update, producing an incorrect state root.
+			accountVal, _, err := sd.GetLatest(kv.AccountsDomain, tx, addressKey)
+			if err != nil {
+				return nil, fmt.Errorf("read account for commitment: %w", err)
+			}
+			tsd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(addressKey), accountVal)
 			s.logger.Debug("Touch key", "domain", kv.AccountsDomain, "key", address.Value().Hex()[2:])
 			for _, loc := range locations {
 				locationKey := loc.Value().Bytes()
 				copy(storageFullKey[:length.Addr], addressKey)
 				copy(storageFullKey[length.Addr:], locationKey)
-				tsd.GetCommitmentCtx().TouchKey(kv.StorageDomain, string(storageFullKey), nil)
+				storageVal, _, err := sd.GetLatest(kv.StorageDomain, tx, storageFullKey)
+				if err != nil {
+					return nil, fmt.Errorf("read storage for commitment: %w", err)
+				}
+				tsd.GetCommitmentCtx().TouchKey(kv.StorageDomain, string(storageFullKey), storageVal)
 				s.logger.Debug("Touch key", "domain", kv.StorageDomain, "key", address.Value().Hex()[2:]+loc.Value().Hex()[2:])
 			}
 		}
