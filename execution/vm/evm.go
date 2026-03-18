@@ -93,61 +93,17 @@ type EVM struct {
 
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
-
-	// caches is lazily allocated on first address/key intern (i.e. first state-access opcode).
-	// Nil for EVMs that never touch state (pure computation, RETURN-only, etc.) — zero overhead.
-	// One allocation per EVM instance; shared across all nested CALLs within a transaction.
-	caches *internCaches
 }
 
-// internCaches holds direct-mapped caches for InternAddress and InternKey.
-// 64 entries each, indexed by the last byte of the raw value. On a collision the old entry is
-// evicted and correctness is preserved: the e.raw == x guard prevents false hits.
-type internCaches struct {
-	addrs [64]addrInternEntry
-	keys  [64]keyInternEntry
-}
-
-type addrInternEntry struct {
-	raw common.Address
-	val accounts.Address
-}
-
-type keyInternEntry struct {
-	raw common.Hash
-	val accounts.StorageKey
-}
-
-// internAddress returns the interned handle for a, using the per-EVM cache to avoid repeated
-// global unique.Make (sync.Map) lookups for the same address within a transaction.
+// internAddress returns the interned handle for a via the IBS-level cache.
+// The IBS is block-scoped, so the cache outlives individual nested CALLs.
 func (evm *EVM) internAddress(a common.Address) accounts.Address {
-	if evm.caches == nil {
-		evm.caches = new(internCaches)
-	}
-	e := &evm.caches.addrs[a[19]&63]
-	if e.raw == a && !e.val.IsNil() {
-		return e.val // cache hit
-	}
-	// Cache miss: either cold entry or collision eviction (two addresses share the same slot).
-	// Eviction causes a miss, not a wrong return — correctness is guaranteed by the e.raw == a check.
-	v := accounts.InternAddress(a)
-	e.raw, e.val = a, v // install; evicts previous occupant if any
-	return v
+	return evm.intraBlockState.InternAddress(a)
 }
 
-// internKey returns the interned handle for h, using the per-EVM cache.
+// internKey returns the interned handle for h via the IBS-level cache.
 func (evm *EVM) internKey(h common.Hash) accounts.StorageKey {
-	if evm.caches == nil {
-		evm.caches = new(internCaches)
-	}
-	e := &evm.caches.keys[h[31]&63]
-	if e.raw == h && !e.val.IsNil() {
-		return e.val // cache hit
-	}
-	// Cache miss: cold or collision eviction — same correctness argument as internAddress.
-	v := accounts.InternKey(h)
-	e.raw, e.val = h, v
-	return v
+	return evm.intraBlockState.InternKey(h)
 }
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should

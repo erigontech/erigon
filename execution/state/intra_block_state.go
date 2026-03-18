@@ -197,6 +197,23 @@ type IntraBlockState struct {
 	codeReadCount       int64
 	version             int
 	dep                 int
+
+	// Direct-mapped caches for address and key interning (64 entries each).
+	// Indexed by the last byte of the raw value; collision evicts the old entry.
+	// Correctness: e.raw==x guard prevents false hits on eviction.
+	// Block-scoped: IBS outlives individual EVM instances → better hit rate than per-EVM caches.
+	internAddrs [64]addrInternEntry
+	internKeys  [64]keyInternEntry
+}
+
+type addrInternEntry struct {
+	raw common.Address
+	val accounts.Address
+}
+
+type keyInternEntry struct {
+	raw common.Hash
+	val accounts.StorageKey
 }
 
 // Create a new state from a given trie
@@ -2506,4 +2523,29 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 		}
 	}
 	return nil
+}
+
+// InternAddress returns the interned handle for a, using the IBS-level cache to avoid
+// repeated global unique.Make (sync.Map) lookups for the same address within a block.
+func (sdb *IntraBlockState) InternAddress(a common.Address) accounts.Address {
+	e := &sdb.internAddrs[a[19]&63]
+	if e.raw == a && !e.val.IsNil() {
+		return e.val
+	}
+	// Cache miss: cold entry or collision eviction. Correctness guaranteed by e.raw==a check.
+	v := accounts.InternAddress(a)
+	e.raw, e.val = a, v
+	return v
+}
+
+// InternKey returns the interned handle for h, using the IBS-level cache.
+func (sdb *IntraBlockState) InternKey(h common.Hash) accounts.StorageKey {
+	e := &sdb.internKeys[h[31]&63]
+	if e.raw == h && !e.val.IsNil() {
+		return e.val
+	}
+	// Cache miss: cold entry or collision eviction — same correctness argument as InternAddress.
+	v := accounts.InternKey(h)
+	e.raw, e.val = h, v
+	return v
 }
