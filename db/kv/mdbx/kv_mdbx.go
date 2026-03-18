@@ -355,6 +355,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		targetSemCount := int64(runtime.GOMAXPROCS(-1) * 16)
 		opts.roTxsLimiter = semaphore.NewWeighted(targetSemCount) // 1 less than max to allow unlocking to happen
 	}
+
 	txsCountMutex := &sync.Mutex{}
 
 	db := &MdbxKV{
@@ -581,6 +582,7 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		return nil, errors.New("db closed")
 	}
 
+	// will return nil err if context is cancelled (may appear to acquire the semaphore)
 	if semErr := db.roTxsLimiter.Acquire(ctx, 1); semErr != nil {
 		db.trackTxEnd()
 		return nil, fmt.Errorf("mdbx.MdbxKV.BeginRo: roTxsLimiter error %w", semErr)
