@@ -40,7 +40,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/das"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
-	"github.com/erigontech/erigon/cl/p2p"
+	clp2p "github.com/erigontech/erigon/cl/p2p"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
@@ -294,7 +294,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		return err
 	}
 	activeIndicies := state.GetActiveValidatorsIndices(state.Slot() / beaconConfig.SlotsPerEpoch)
-	p2p, err := p2p.NewP2Pmanager(ctx, &p2p.P2PConfig{
+	p2p, err := clp2p.NewP2Pmanager(ctx, &clp2p.P2PConfig{
 		IpAddr:     config.CaplinDiscoveryAddr,
 		Port:       int(config.CaplinDiscoveryPort),
 		TCPPort:    uint(config.CaplinDiscoveryTCPPort),
@@ -315,20 +315,22 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	peerDasState := peerdasstate.NewPeerDasState(beaconConfig, networkConfig)
 	columnStorage := blob_storage.NewDataColumnStore(afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinColumnData), pruneBlobDistance, beaconConfig, ethClock, emitters)
 	sentinel, localNode, err := service.StartSentinelService(&sentinel.SentinelConfig{
-		IpAddr:                       config.CaplinDiscoveryAddr,
-		Port:                         int(config.CaplinDiscoveryPort),
-		TCPPort:                      uint(config.CaplinDiscoveryTCPPort),
-		EnableUPnP:                   config.EnableUPnP,
+		P2PConfig: clp2p.P2PConfig{
+			IpAddr:        config.CaplinDiscoveryAddr,
+			Port:          int(config.CaplinDiscoveryPort),
+			TCPPort:       uint(config.CaplinDiscoveryTCPPort),
+			EnableUPnP:    config.EnableUPnP,
+			NetworkConfig: networkConfig,
+			BeaconConfig:  beaconConfig,
+			TmpDir:        dirs.Tmp,
+			MaxPeerCount:  config.MaxPeerCount,
+		},
 		MaxInboundTrafficPerPeer:     config.MaxInboundTrafficPerPeer,
 		MaxOutboundTrafficPerPeer:    config.MaxOutboundTrafficPerPeer,
 		AdaptableTrafficRequirements: config.AdptableTrafficRequirements,
 		SubscribeAllTopics:           config.SubscribeAllTopics,
-		NetworkConfig:                networkConfig,
-		BeaconConfig:                 beaconConfig,
-		TmpDir:                       dirs.Tmp,
 		EnableBlocks:                 true,
 		ActiveIndicies:               uint64(len(activeIndicies)),
-		MaxPeerCount:                 config.MaxPeerCount,
 	}, rcsn, blobStorage, indexDB, &service.ServerConfig{
 		Network: "tcp",
 		Addr:    fmt.Sprintf("%s:%d", config.SentinelAddr, config.SentinelPort),
