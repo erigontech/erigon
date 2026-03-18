@@ -483,12 +483,6 @@ func TestEncodeToReaderReturnToPool(t *testing.T) {
 
 var sink any
 
-func BenchmarkIntsize(b *testing.B) {
-	for b.Loop() {
-		sink = intsize(0x12345678)
-	}
-}
-
 func BenchmarkPutint(b *testing.B) {
 	buf := make([]byte, 8)
 	for b.Loop() {

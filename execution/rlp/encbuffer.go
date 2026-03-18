@@ -196,7 +196,7 @@ func (buf *encBuffer) listEnd(index int) {
 	if lh.size < 56 {
 		buf.lhsize++ // length encoded into kind tag
 	} else {
-		buf.lhsize += 1 + intsize(uint64(lh.size))
+		buf.lhsize += ListPrefixLen(lh.size)
 	}
 }
 

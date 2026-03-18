@@ -759,15 +759,15 @@ func (s *Stream) Raw() ([]byte, error) {
 	}
 	// The original header has already been read and is no longer
 	// available. Read content and put a new header in front of it.
-	start := headsize(size)
+	start := ListPrefixLen(int(size))
 	buf := make([]byte, uint64(start)+size)
 	if err := s.readFull(buf[start:]); err != nil {
 		return nil, err
 	}
 	if kind == String {
-		puthead(buf, 0x80, 0xB7, size)
+		encodePrefixToBuf(int(size), buf, 0x80, 0xB7)
 	} else {
-		puthead(buf, 0xC0, 0xF7, size)
+		encodePrefixToBuf(int(size), buf, 0xC0, 0xF7)
 	}
 	return buf, nil
 }

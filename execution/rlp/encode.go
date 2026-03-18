@@ -114,7 +114,7 @@ type listhead struct {
 // encode writes head to the given buffer, which must be at least
 // 9 bytes long. It returns the encoded bytes.
 func (head *listhead) encode(buf []byte) []byte {
-	return buf[:puthead(buf, 0xC0, 0xF7, uint64(head.size))]
+	return buf[:encodePrefixToBuf(head.size, buf, 0xC0, 0xF7)]
 }
 
 var encoderInterface = reflect.TypeFor[Encoder]()
@@ -430,23 +430,6 @@ func putint(b []byte, i uint64) (size int) {
 	size = common.BitLenToByteLen(bits.Len64(i))
 	copy(b, tmp[8-size:])
 	return size
-}
-
-// intsize computes the minimum number of bytes required to store i.
-func intsize(i uint64) (size int) {
-	return common.BitLenToByteLen(bits.Len64(i))
-}
-
-// headsize returns the size of a list or string header
-// for a value of the given size.
-func headsize(size uint64) int {
-	return ListPrefixLen(int(size))
-}
-
-// puthead writes a list or string header to buf.
-// buf must be at least 9 bytes long.
-func puthead(buf []byte, smalltag, largetag byte, size uint64) int {
-	return encodePrefixToBuf(int(size), buf, smalltag, largetag)
 }
 
 func encodePrefixToBuf(size int, to []byte, smallTag, largeTag byte) int {
