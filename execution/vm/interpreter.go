@@ -297,6 +297,7 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 		trace                  = dbg.TraceInstructions && evm.intraBlockState.Trace()
 		blockNum               uint64
 		txIndex, txIncarnation int
+		steps                  uint64
 	)
 
 	// Make sure the readOnly is only set if we aren't in readOnly yet.
@@ -329,8 +330,6 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 	// explicit STOP, RETURN or SELFDESTRUCT is executed, an error occurred during
 	// the execution of one of the operations or until the done flag is set by the
 	// parent context.
-	steps := 0
-
 	var traceGas = func(op OpCode, callGas, cost uint64) uint64 {
 		switch op {
 		case CALL, CALLCODE, DELEGATECALL, STATICCALL:
@@ -341,9 +340,12 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 	}
 
 	for {
-		steps++
-		if steps%50_000 == 0 && evm.Cancelled() {
-			break
+		cancelCheck--
+		if cancelCheck == 0 {
+			cancelCheck = 50_000
+			if evm.Cancelled() {
+				break
+			}
 		}
 		if dbg.TraceDynamicGas || debug || trace {
 			// Capture pre-execution values for tracing.
@@ -368,24 +370,21 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 			callContext.gas -= cost
 		}
 
-		// Pre-intern address and/or storage key for EIP-2929+ opcodes.
-		// The interpreter owns this interning: both the gas func and op func read
-		// slotAddr/slotKey directly instead of calling InternAddress/InternKey.
-		// Only EIP-2929+ opcodes with hasAddrSlot/hasKeySlot set trigger this — all other
-		// opcodes leave the fields nil (pool-init value) or stale-but-unused from a prior slot op.
-		// Gas functions must NOT write to slotAddr/slotKey to avoid stale-value bugs.
-		if operation.hasAddrSlot {
-			callContext.slotAddr = accounts.InternAddress(
-				callContext.Stack.Back(int(operation.addrSlot)).Bytes20())
-		}
-		if operation.hasKeySlot {
-			callContext.slotKey = accounts.InternKey(
-				callContext.Stack.Back(int(operation.keySlot)).Bytes32())
-		}
-
 		// All ops with a dynamic memory usage also has a dynamic gas cost.
 		var memorySize uint64
 		if operation.dynamicGas != nil {
+			// Pre-intern address/key for EIP-2929+ ops (hasAddrSlot/hasKeySlot set).
+			// All slot ops have dynamicGas, so this block is the natural home: zero overhead
+			// for the ~90% of opcodes with no dynamic gas. Gas functions must not write to
+			// slotAddr/slotKey — the interpreter is the sole owner for one dispatch cycle.
+			if operation.hasAddrSlot {
+				callContext.slotAddr = accounts.InternAddress(
+					callContext.Stack.Back(int(operation.addrSlot)).Bytes20())
+			}
+			if operation.hasKeySlot {
+				callContext.slotKey = accounts.InternKey(
+					callContext.Stack.Back(int(operation.keySlot)).Bytes32())
+			}
 			// calculate the new memory size and expand the memory to fit
 			// the operation
 			// Memory check needs to be done prior to evaluating the dynamic gas portion,
