@@ -492,9 +492,9 @@ func EncodeU32ToBuf(i uint32, to []byte) int {
 	return EncodeU64ToBuf(uint64(i), to)
 }
 
-// EncodeInt encodes i as an RLP string via w.
+// EncodeU64 encodes i as an RLP string via w.
 // precondition: len(buffer) >= 9
-func EncodeInt(i uint64, w io.Writer, buffer []byte) error {
+func EncodeU64(i uint64, w io.Writer, buffer []byte) error {
 	n := EncodeU64ToBuf(i, buffer)
 	_, err := w.Write(buffer[:n])
 	return err

@@ -301,7 +301,7 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 		return err
 	}
 
-	if err := rlp.EncodeInt(tx.Nonce, w, b); err != nil {
+	if err := rlp.EncodeU64(tx.Nonce, w, b); err != nil {
 		return err
 	}
 
@@ -351,19 +351,19 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 		return err
 	}
 
-	if err := rlp.EncodeInt(tx.ValidationGasLimit, w, b); err != nil {
+	if err := rlp.EncodeU64(tx.ValidationGasLimit, w, b); err != nil {
 		return err
 	}
 
-	if err := rlp.EncodeInt(tx.PaymasterValidationGasLimit, w, b); err != nil {
+	if err := rlp.EncodeU64(tx.PaymasterValidationGasLimit, w, b); err != nil {
 		return err
 	}
 
-	if err := rlp.EncodeInt(tx.PostOpGasLimit, w, b); err != nil {
+	if err := rlp.EncodeU64(tx.PostOpGasLimit, w, b); err != nil {
 		return err
 	}
 
-	if err := rlp.EncodeInt(tx.GasLimit, w, b); err != nil {
+	if err := rlp.EncodeU64(tx.GasLimit, w, b); err != nil {
 		return err
 	}
 

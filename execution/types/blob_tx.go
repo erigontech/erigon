@@ -242,7 +242,7 @@ func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, accessListL
 		return err
 	}
 	// encode Nonce
-	if err := rlp.EncodeInt(stx.Nonce, w, b); err != nil {
+	if err := rlp.EncodeU64(stx.Nonce, w, b); err != nil {
 		return err
 	}
 	// encode MaxPriorityFeePerGas
@@ -254,7 +254,7 @@ func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, accessListL
 		return err
 	}
 	// encode GasLimit
-	if err := rlp.EncodeInt(stx.GasLimit, w, b); err != nil {
+	if err := rlp.EncodeU64(stx.GasLimit, w, b); err != nil {
 		return err
 	}
 	// encode To

@@ -60,10 +60,10 @@ func (obj *Withdrawal) EncodeRLP(w io.Writer) error {
 		return err
 	}
 
-	if err := rlp.EncodeInt(obj.Index, w, b[:]); err != nil {
+	if err := rlp.EncodeU64(obj.Index, w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(obj.Validator, w, b[:]); err != nil {
+	if err := rlp.EncodeU64(obj.Validator, w, b[:]); err != nil {
 		return err
 	}
 
@@ -75,7 +75,7 @@ func (obj *Withdrawal) EncodeRLP(w io.Writer) error {
 		return err
 	}
 
-	return rlp.EncodeInt(obj.Amount, w, b[:])
+	return rlp.EncodeU64(obj.Amount, w, b[:])
 }
 
 func (obj *Withdrawal) DecodeRLP(s *rlp.Stream) error {

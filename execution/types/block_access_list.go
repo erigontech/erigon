@@ -279,7 +279,7 @@ func (sc *StorageChange) EncodeRLP(w io.Writer) error {
 	if err := rlp.EncodeListSizePrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(uint64(sc.Index), w, b[:]); err != nil {
+	if err := rlp.EncodeU64(uint64(sc.Index), w, b[:]); err != nil {
 		return err
 	}
 	return rlp.EncodeUint256(sc.Value, w, b[:])
@@ -322,7 +322,7 @@ func (bc *BalanceChange) EncodeRLP(w io.Writer) error {
 	if err := rlp.EncodeListSizePrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(uint64(bc.Index), w, b[:]); err != nil {
+	if err := rlp.EncodeU64(uint64(bc.Index), w, b[:]); err != nil {
 		return err
 	}
 	return rlp.EncodeUint256(bc.Value, w, b[:])
@@ -365,10 +365,10 @@ func (nc *NonceChange) EncodeRLP(w io.Writer) error {
 	if err := rlp.EncodeListSizePrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(uint64(nc.Index), w, b[:]); err != nil {
+	if err := rlp.EncodeU64(uint64(nc.Index), w, b[:]); err != nil {
 		return err
 	}
-	return rlp.EncodeInt(nc.Value, w, b[:])
+	return rlp.EncodeU64(nc.Value, w, b[:])
 }
 
 func (nc *NonceChange) DecodeRLP(s *rlp.Stream) error {
@@ -405,7 +405,7 @@ func (cc *CodeChange) EncodeRLP(w io.Writer) error {
 	if err := rlp.EncodeListSizePrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(uint64(cc.Index), w, b[:]); err != nil {
+	if err := rlp.EncodeU64(uint64(cc.Index), w, b[:]); err != nil {
 		return err
 	}
 	return rlp.EncodeString(cc.Bytecode, w, b[:])

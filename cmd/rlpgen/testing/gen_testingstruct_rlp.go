@@ -99,11 +99,11 @@ func (obj *TestingStruct) EncodeRLP(w io.Writer) error {
 	if err := rlp.EncodeListSizePrefix(obj.EncodingSize(), w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(uint64(obj.a), w, b[:]); err != nil {
+	if err := rlp.EncodeU64(uint64(obj.a), w, b[:]); err != nil {
 		return err
 	}
 	if obj.aa != nil {
-		if err := rlp.EncodeInt(uint64(*obj.aa), w, b[:]); err != nil {
+		if err := rlp.EncodeU64(uint64(*obj.aa), w, b[:]); err != nil {
 			return err
 		}
 	}
