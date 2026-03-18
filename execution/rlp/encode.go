@@ -457,17 +457,17 @@ func puthead(buf []byte, smalltag, largetag byte, size uint64) int {
 	return sizesize + 1
 }
 
-func encodeSizePrefix(size int, w io.Writer, buffer []byte, smallTag, largeTag byte) error {
+func encodePrefixToBuf(size int, to []byte, smallTag, largeTag byte) int {
 	if size >= 56 {
-		beSize := common.BitLenToByteLen(bits.Len(uint(size)))
-		binary.BigEndian.PutUint64(buffer[1:], uint64(size))
-		buffer[8-beSize] = byte(beSize) + largeTag
-		_, err := w.Write(buffer[8-beSize : 9])
-		return err
+		_ = to[9]
+		beLen := common.BitLenToByteLen(bits.Len64(uint64(size)))
+		binary.BigEndian.PutUint64(to[1:], uint64(size))
+		to[8-beLen] = largeTag + byte(beLen)
+		copy(to, to[8-beLen:9])
+		return 1 + beLen
 	}
-	buffer[0] = byte(size) + smallTag
-	_, err := w.Write(buffer[:1])
-	return err
+	to[0] = smallTag + byte(size)
+	return 1
 }
 
 // --- Integer encoding ---
@@ -676,7 +676,9 @@ func EncodeString(s []byte, w io.Writer, buffer []byte) error {
 
 // EncodeStringSizePrefix writes a string-type size prefix via w.
 func EncodeStringSizePrefix(size int, w io.Writer, buffer []byte) error {
-	return encodeSizePrefix(size, w, buffer, 0x80, 0xB7)
+	n := encodePrefixToBuf(size, buffer, 0x80, 0xB7)
+	_, err := w.Write(buffer[:n])
+	return err
 }
 
 // EncodeOptionalAddress encodes an optional 20-byte address via w.
@@ -704,21 +706,14 @@ func ListPrefixLen(dataLen int) int {
 
 // EncodeListPrefix encodes a list-type size prefix into to and returns the number of bytes written.
 func EncodeListPrefix(dataLen int, to []byte) int {
-	if dataLen >= 56 {
-		_ = to[9]
-		beLen := common.BitLenToByteLen(bits.Len64(uint64(dataLen)))
-		binary.BigEndian.PutUint64(to[1:], uint64(dataLen))
-		to[8-beLen] = 247 + byte(beLen)
-		copy(to, to[8-beLen:9])
-		return 1 + beLen
-	}
-	to[0] = 192 + byte(dataLen)
-	return 1
+	return encodePrefixToBuf(dataLen, to, 0xC0, 0xF7)
 }
 
 // EncodeStructSizePrefix writes a list-type size prefix via w.
 func EncodeStructSizePrefix(size int, w io.Writer, buffer []byte) error {
-	return encodeSizePrefix(size, w, buffer, 0xC0, 0xF7)
+	n := EncodeListPrefix(size, buffer)
+	_, err := w.Write(buffer[:n])
+	return err
 }
 
 // --- Composite helpers ---
