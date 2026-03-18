@@ -2,10 +2,6 @@ name: QA - RPC Integration Tests
 
 on:
   workflow_dispatch:     # Run manually
-  push:
-    branches:
-      - main
-      - 'release/3.*'
   pull_request:
     branches:
       - main
