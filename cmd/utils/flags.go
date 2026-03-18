@@ -390,7 +390,7 @@ var (
 		Value: min(max(10, runtime.GOMAXPROCS(-1)*64), 9_000),
 	}
 	RpcMaxConcurrentRequestsFlag = cli.IntFlag{
-		Name:  "rpc.max.concurrentRequests",
+		Name:  "rpc.max.concurrent-requests",
 		Usage: "Maximum number of concurrent HTTP RPC requests (HTTP admission control). 0 = use db.read.concurrency, -1 = unlimited (no admission control)",
 		Value: 0,
 	}
