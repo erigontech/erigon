@@ -674,9 +674,7 @@ func EncodeString(s []byte, w io.Writer, buffer []byte) error {
 
 // EncodeStringPrefix writes a string-type size prefix via w.
 func EncodeStringPrefix(size int, w io.Writer, buffer []byte) error {
-	n := encodePrefixToBuf(size, buffer, EmptyStringCode, LongStringCode)
-	_, err := w.Write(buffer[:n])
-	return err
+	return encodePrefix(size, w, buffer, EmptyStringCode, LongStringCode)
 }
 
 // --- List encoding ---
@@ -701,7 +699,13 @@ func EncodeListPrefixToBuf(dataLen int, to []byte) int {
 
 // EncodeListPrefix writes a list-type size prefix via w.
 func EncodeListPrefix(size int, w io.Writer, buffer []byte) error {
-	n := EncodeListPrefixToBuf(size, buffer)
+	return encodePrefix(size, w, buffer, EmptyListCode, LongListCode)
+}
+
+// encodePrefix writes a size prefix via w. Kept as a separate non-inlined function
+// so that the thin wrappers (EncodeListPrefix, EncodeStringPrefix) stay inlineable.
+func encodePrefix(size int, w io.Writer, buffer []byte, smallTag, largeTag byte) error {
+	n := encodePrefixToBuf(size, buffer, smallTag, largeTag)
 	_, err := w.Write(buffer[:n])
 	return err
 }
