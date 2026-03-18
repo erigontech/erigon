@@ -230,3 +230,159 @@ func TestLightCollectorNewAccountCodeHash(t *testing.T) {
 	require.Equal(t, enc, reEncoded,
 		"account serialization must be idempotent (EmptyCodeHash serializes as 0-byte, not 32 zero bytes)")
 }
+
+// TestLightCollectorStorageReentrancyGuard verifies that the storage skip
+// removal in LightCollector.WriteAccountStorage correctly handles the
+// reentrancy guard pattern: TX A writes slot S=X, TX B SSTOREs S=V (same
+// as block origin — the reentrancy guard reset). The domain should have X
+// after applying both TXs (TX B's SSTORE(S,V) should be a DomainPut no-op
+// since prevVal=X ≠ V means it WOULD write, but TX B's dirtyStorage has V
+// which matches block origin → skip in old code. With skip removed, DomainPut
+// writes V, reverting TX A's change).
+//
+// Actually: if TX B explicitly SSTOREs V, the correct final value IS V.
+// The test verifies both the "unchanged" case (where DomainPut should skip)
+// and the "revert" case (where DomainPut should write).
+func TestLightCollectorStorageReentrancyGuard(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires mdbx")
+	}
+
+	tx, domains := setup2CacheTest(t)
+	lgr := log.New()
+
+	rs := state.NewStateV3Buffered(state.NewStateV3(domains, ethconfig.Sync{}, lgr))
+
+	contract := accounts.InternAddress(common.HexToAddress("0xC0NTRACT"))
+	contractVal := contract.Value()
+	slotKey := accounts.InternKey(common.HexToHash("0xcb")) // reentrancy guard slot
+
+	// Seed: contract exists with storage slot cb = 1
+	seedAccount := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(0)}
+	err := domains.DomainPut(kv.AccountsDomain, tx, contractVal[:],
+		accounts.SerialiseV3(&seedAccount), 0, nil)
+	require.NoError(t, err)
+
+	slotHash := slotKey.Value()
+	composite := append(contractVal[:], slotHash[:]...)
+	one := uint256.NewInt(1)
+	err = domains.DomainPut(kv.StorageDomain, tx, composite, one.Bytes(), 0, nil)
+	require.NoError(t, err)
+
+	// Verify seed
+	v, _, err := domains.GetLatest(kv.StorageDomain, tx, composite)
+	require.NoError(t, err)
+	require.Equal(t, one.Bytes(), v)
+
+	// --- Case 1: TX A writes slot to different value, TX B writes same as block origin ---
+	// TX A (txNum 10): SSTORE(cb, 2) — changes from 1 to 2
+	lc1 := state.NewLightCollector()
+	err = lc1.WriteAccountStorage(contract, 1, slotKey, *uint256.NewInt(1), *uint256.NewInt(2))
+	require.NoError(t, err)
+	err = rs.ApplyStateWrites(context.Background(), tx, 1, 10, lc1.TakeWrites(), nil, &chain.Rules{})
+	require.NoError(t, err)
+
+	// Verify domain has 2
+	v, _, err = domains.GetLatest(kv.StorageDomain, tx, composite)
+	require.NoError(t, err)
+	require.Equal(t, uint256.NewInt(2).Bytes(), v, "after TX A: slot should be 2")
+
+	// TX B (txNum 11): SSTORE(cb, 1) — reentrancy guard reset to block origin
+	// LightCollector with original = blockOrigin = 1, value = 1
+	// With skip: dropped. With skip removed: emitted.
+	lc2 := state.NewLightCollector()
+	err = lc2.WriteAccountStorage(contract, 1, slotKey, *uint256.NewInt(1), *uint256.NewInt(1))
+	require.NoError(t, err)
+	writes2 := lc2.TakeWrites()
+
+	// With the skip, writes2 is empty (original == value).
+	// Without the skip, writes2 has one entry.
+	// Either way, ApplyStateWrites should handle it correctly.
+	err = rs.ApplyStateWrites(context.Background(), tx, 1, 11, writes2, nil, &chain.Rules{})
+	require.NoError(t, err)
+
+	// TX B explicitly SSTORed 1. If the write was emitted, DomainPut reads
+	// prevVal=2 (from TX A), sees 2≠1, writes 1. Domain has 1.
+	// If the write was skipped (old code), domain keeps 2 from TX A.
+	// The CORRECT value depends on whether TX B intended to revert:
+	// - If TX B executed SSTORE(cb, 1), the correct value is 1.
+	// - The LightCollector skip removal ensures this case is handled.
+	v, _, err = domains.GetLatest(kv.StorageDomain, tx, composite)
+	require.NoError(t, err)
+
+	// With skip removed: domain should have 1 (TX B's explicit revert)
+	require.Equal(t, one.Bytes(), v,
+		"after TX B revert: slot should be 1 (TX B explicitly SSTORed the block-origin value)")
+}
+
+// TestLightCollectorStorageUnchangedSlot verifies that when a TX touches a
+// storage slot but doesn't change its value from the block origin, and NO
+// other TX in the block wrote to that slot, the domain value is preserved.
+func TestLightCollectorStorageUnchangedSlot(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires mdbx")
+	}
+
+	tx, domains := setup2CacheTest(t)
+	lgr := log.New()
+
+	rs := state.NewStateV3Buffered(state.NewStateV3(domains, ethconfig.Sync{}, lgr))
+
+	contract := accounts.InternAddress(common.HexToAddress("0xC0NTRACT2"))
+	contractVal := contract.Value()
+	slotKey := accounts.InternKey(common.HexToHash("0xcb"))
+
+	// Seed: slot cb = 1
+	seedAccount := accounts.Account{Nonce: 1}
+	err := domains.DomainPut(kv.AccountsDomain, tx, contractVal[:],
+		accounts.SerialiseV3(&seedAccount), 0, nil)
+	require.NoError(t, err)
+
+	slotHash := slotKey.Value()
+	composite := append(contractVal[:], slotHash[:]...)
+	one := uint256.NewInt(1)
+	err = domains.DomainPut(kv.StorageDomain, tx, composite, one.Bytes(), 0, nil)
+	require.NoError(t, err)
+
+	// TX A (txNum 10): SSTORE(cb, 1) — same as block origin (reentrancy guard)
+	// LightCollector: original = blockOrigin = 1, value = 1
+	lc := state.NewLightCollector()
+	err = lc.WriteAccountStorage(contract, 1, slotKey, *uint256.NewInt(1), *uint256.NewInt(1))
+	require.NoError(t, err)
+	writes := lc.TakeWrites()
+
+	err = rs.ApplyStateWrites(context.Background(), tx, 1, 10, writes, nil, &chain.Rules{})
+	require.NoError(t, err)
+
+	// Domain should still have 1 — the write was a no-op (DomainPut skip).
+	v, _, err := domains.GetLatest(kv.StorageDomain, tx, composite)
+	require.NoError(t, err)
+	require.Equal(t, one.Bytes(), v,
+		"unchanged slot should preserve domain value")
+
+	// Now verify a DIFFERENT slot on the same contract is unaffected
+	slotKey2 := accounts.InternKey(common.HexToHash("0xfe"))
+	slotHash2 := slotKey2.Value()
+	composite2 := append(contractVal[:], slotHash2[:]...)
+	thirtySeven := uint256.NewInt(37)
+	err = domains.DomainPut(kv.StorageDomain, tx, composite2, thirtySeven.Bytes(), 0, nil)
+	require.NoError(t, err)
+
+	// TX B writes a different slot but also has the reentrancy guard
+	lc2 := state.NewLightCollector()
+	err = lc2.WriteAccountStorage(contract, 1, slotKey, *uint256.NewInt(1), *uint256.NewInt(1)) // guard
+	require.NoError(t, err)
+	err = lc2.WriteAccountStorage(contract, 1, slotKey2, *uint256.NewInt(37), *uint256.NewInt(42)) // actual change
+	require.NoError(t, err)
+
+	err = rs.ApplyStateWrites(context.Background(), tx, 1, 11, lc2.TakeWrites(), nil, &chain.Rules{})
+	require.NoError(t, err)
+
+	v, _, err = domains.GetLatest(kv.StorageDomain, tx, composite)
+	require.NoError(t, err)
+	require.Equal(t, one.Bytes(), v, "guard slot still 1")
+
+	v2, _, err := domains.GetLatest(kv.StorageDomain, tx, composite2)
+	require.NoError(t, err)
+	require.Equal(t, uint256.NewInt(42).Bytes(), v2, "changed slot should be 42")
+}

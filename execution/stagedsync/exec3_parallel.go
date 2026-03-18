@@ -21,8 +21,6 @@ import (
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
@@ -107,22 +105,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
 	stepsInDb float64, accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
 
-	var asyncTxChan mdbx.TxApplyChan
-	var asyncTx kv.TemporalTx
-
-	switch applyTx := rwTx.(type) {
-	case *temporal.RwTx:
-		temporalTx := applyTx.AsyncClone(mdbx.NewAsyncRwTx(applyTx.RwTx, 1000))
-		asyncTxChan = temporalTx.ApplyChan()
-		asyncTx = temporalTx
-	case kv.TemporalTx:
-		// MemoryMutation overlay — pure Go, no thread affinity.
-		// No asyncTx needed; exec goroutine reads directly from the overlay.
-		asyncTx = applyTx
-	default:
-		return nil, rwTx, fmt.Errorf("expected *temporal.RwTx: got %T", rwTx)
-	}
-
 	// applyResults receives completed block/tx results from execLoop for the apply goroutine.
 	// Keep bounded to avoid accumulating large result objects ahead of the apply loop.
 	applyResults := make(chan applyResult, 2_048)
@@ -155,12 +137,11 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 		return nil, rwTx, err
 	}
 
-	if err := pe.executeBlocks(executorContext, asyncTx, startBlockNum, maxBlockNum, blockLimit, initialTxNum, restoredTxNum, readAhead, initialCycle, applyResults); err != nil {
+	if err := pe.executeBlocks(executorContext, startBlockNum, maxBlockNum, blockLimit, initialTxNum, restoredTxNum, readAhead, initialCycle, applyResults); err != nil {
 		return nil, rwTx, err
 	}
 
 	var lastExecutedLog time.Time
-	var lastCommitedLog time.Time
 	var lastBlockResult blockResult
 	var lastHeader *types.Header
 	var uncommittedBlocks int64
@@ -184,6 +165,15 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 			}
 		}()
 
+		// Open a thread-local read-only tx for domain operations. The apply loop
+		// must not use the rwTx for domain reads — rwTx is thread-bound to the
+		// caller goroutine and will be used only for flush/unwind/stage-update.
+		applyRoTx, err := pe.cfg.db.BeginTemporalRo(ctx)
+		if err != nil {
+			return fmt.Errorf("apply loop: open roTx: %w", err)
+		}
+		defer applyRoTx.Rollback()
+
 		shouldGenerateChangesets := shouldGenerateChangeSets(pe.cfg, startBlockNum, maxBlockNum, initialCycle)
 		changeSet := &changeset.StateChangeSet{}
 		if shouldGenerateChangesets && startBlockNum > 0 {
@@ -204,8 +194,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 		for {
 			select {
-			case request := <-asyncTxChan:
-				request.Apply()
 			case applyResult := <-applyResults:
 				switch applyResult := applyResult.(type) {
 				case *txResult:
@@ -216,14 +204,14 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						fmt.Println(applyResult.blockNum, "apply", applyResult.txNum, len(applyResult.writes))
 					}
 					blockUpdateCount += len(applyResult.writes)
-					err := pe.rs.ApplyStateWrites(ctx, rwTx, applyResult.blockNum, applyResult.txNum, applyResult.writes,
+					err := pe.rs.ApplyStateWrites(ctx, applyRoTx, applyResult.blockNum, applyResult.txNum, applyResult.writes,
 						nil, applyResult.rules)
 					if err == nil {
-						err = pe.rs.ApplyTxIndexes(rwTx, applyResult.txNum, applyResult.receipt, applyResult.blobGasUsed,
+						err = pe.rs.ApplyTxIndexes(applyRoTx, applyResult.txNum, applyResult.receipt, applyResult.blobGasUsed,
 							applyResult.logs, applyResult.traceFroms, applyResult.traceTos)
 					}
 					if err == nil {
-						err = pe.rs.CommitStepBoundary(ctx, rwTx, applyResult.blockNum, applyResult.txNum)
+						err = pe.rs.CommitStepBoundary(ctx, applyRoTx, applyResult.blockNum, applyResult.txNum)
 					}
 					if err == nil && pe.accumulator != nil {
 						pendingAccumulatorWrites = append(pendingAccumulatorWrites, applyResult.writes)
@@ -294,6 +282,20 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 					flushPending = pe.rs.SizeEstimateBeforeCommitment() > pe.cfg.batchSize.Bytes()
 
+					blockUpdateCount = 0
+					blockApplyCount = 0
+
+					// Clear the account cache so block N+1's workers read
+					// fresh state from sd.mem (via ReaderV3) instead of stale
+					// entries left by block N's versionedWriteCollector during
+					// engine.Finalize → MakeWriteSet.
+					pe.rs.ClearAccountsCache()
+
+					// Signal that block N is fully applied — all state writes
+					// are now visible in pe.rs. The execLoop can schedule
+					// block N+1's workers while commitment runs in parallel.
+					pe.blockApplied <- struct{}{}
+
 					if !dbg.DiscardCommitment() {
 						if !dbg.BatchCommitments || shouldGenerateChangesets || lastBlockResult.BlockNum == maxBlockNum ||
 							applyResult.Exhausted != nil ||
@@ -314,32 +316,22 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							pe.doms.SetTrace(trace, !dbg.BatchCommitments)
 
 							commitStart = time.Now()
-							var prevCommitedBlocks uint64
-							var prevCommittedTransactions uint64
-							var prevCommitedGas uint64
 
 							onProgress := func(p *commitment.CommitProgress) {
 								lastProgress = *p
-								// this is an approximation of block progress - it assumes an
-								// even distribution of keys to blocks
 								if p.KeyIndex > 0 && p.KeyIndex < p.UpdateCount {
 									progress := float64(p.KeyIndex) / float64(p.UpdateCount)
-									committedGas := uint64(math.Round(float64(uncommittedGas) * progress))
-									committedTransactions := uint64(math.Round(float64(uncommittedTransactions) * progress))
 									commitedBlocks := uint64(math.Round(float64(uncommittedBlocks) * progress))
 
-									if commitedBlocks > prevCommitedBlocks {
+									if commitedBlocks > 0 {
 										hasLoggedCommittments.Store(true)
+										committedGas := uint64(math.Round(float64(uncommittedGas) * progress))
+										committedTransactions := uint64(math.Round(float64(uncommittedTransactions) * progress))
 										pe.LogCommitments(commitStart,
-											commitedBlocks-prevCommitedBlocks,
-											committedTransactions-prevCommittedTransactions,
-											committedGas-prevCommitedGas, stepsInDb, *p)
+											commitedBlocks, committedTransactions,
+											committedGas, stepsInDb, *p)
 									}
 
-									lastCommitedLog = time.Now()
-									prevCommitedBlocks = commitedBlocks
-									prevCommittedTransactions = committedTransactions
-									prevCommitedGas = committedGas
 								}
 
 								if pe.agg.HasBackgroundFilesBuild() {
@@ -353,35 +345,23 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 								lastExecutedLog = time.Now()
 							}
 
-							// Warmup is enabled via EnableTrieWarmup at executor init
-							rh, err := pe.doms.ComputeCommitment(ctx, rwTx, true, applyResult.BlockNum, applyResult.lastTxNum, pe.logPrefix, onProgress)
+							// Swap the updates buffer so ComputeCommitment processes
+							// the accumulated TouchKey updates from this block.
+							pe.doms.GetCommitmentContext().SwapUpdates()
 
-							// Log final commitment progress
-							if !hasLoggedCommittments.Load() || time.Since(lastCommitedLog) > logInterval/20 {
-								hasLoggedCommittments.Store(true)
-								pe.LogCommitments(commitStart,
-									uint64(uncommittedBlocks)-prevCommitedBlocks,
-									uncommittedTransactions-prevCommittedTransactions,
-									uint64(uncommittedGas)-prevCommitedGas, stepsInDb, lastProgress)
+							// Submit BAL validation to the post validator — runs in
+							// parallel alongside receipt validation and commitment.
+							if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) || pe.cfg.experimentalBAL {
+								if err := pe.getPostValidator().ProcessBAL(rwTx, lastHeader, applyResult.TxIO, pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime), pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir); err != nil {
+									return err
+								}
 							}
-							captured := pe.doms.SetTrace(false, false)
-							if err != nil {
-								return err
-							}
-							resetCommitmentGauges(ctx)
 
-							// on chain tip we run receipt root verification in parallel alongside commitment computation
-							// make sure to wait for it to finish and check for an error
+							// Wait for all post-execution validation (receipts, BAL)
+							// to complete before submitting commitment work.
 							err = pe.getPostValidator().Wait()
 							if err != nil {
 								return err
-							}
-
-							if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) || pe.cfg.experimentalBAL {
-								err = ProcessBAL(rwTx, lastHeader, applyResult.TxIO, pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime), pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir)
-								if err != nil {
-									return err
-								}
 							}
 
 							if shouldGenerateChangesets {
@@ -389,46 +369,43 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							}
 							pe.domains().SetChangesetAccumulator(nil)
 
-							if !bytes.Equal(rh, applyResult.StateRoot.Bytes()) {
-								pe.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", pe.logPrefix, applyResult.BlockNum, rh, applyResult.StateRoot.Bytes(), applyResult.BlockHash))
-								if !dbg.BatchCommitments {
-									for _, line := range captured {
-										fmt.Println(line)
-									}
-
-									dumpTxIODebug(applyResult.BlockNum, applyResult.TxIO)
-								}
-
-								return handleIncorrectRootHashError(
-									applyResult.BlockNum, applyResult.BlockHash, applyResult.ParentHash,
-									rwTx, pe.cfg, execStage, pe.logger, u)
+							// Compute commitment synchronously — async commitment requires
+							// separate in-memory state snapshots to avoid racing with ApplyStateWrites.
+							rh, err := pe.doms.ComputeCommitment(ctx, applyRoTx, true, applyResult.BlockNum, applyResult.lastTxNum, pe.logPrefix, onProgress)
+							pe.doms.SetTrace(false, false)
+							if err != nil {
+								return err
 							}
-
-							// fix these here - they will contain estimates after commit logging
-							pe.txExecutor.lastCommittedBlockNum.Store(lastBlockResult.BlockNum)
-							pe.txExecutor.lastCommittedTxNum.Store(lastBlockResult.lastTxNum)
-							uncommittedBlocks = 0
-							uncommittedGas = 0
-							uncommittedTransactions = 0
+							if !bytes.Equal(rh, applyResult.StateRoot.Bytes()) {
+								pe.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x",
+									pe.logPrefix, applyResult.BlockNum, rh, applyResult.StateRoot.Bytes(), applyResult.BlockHash))
+								return handleIncorrectRootHashError(applyResult.BlockNum, applyResult.BlockHash, applyResult.ParentHash, rwTx, pe.cfg, execStage, pe.logger, u)
+							}
+							pe.txExecutor.lastCommittedBlockNum.Store(applyResult.BlockNum)
+							pe.txExecutor.lastCommittedTxNum.Store(applyResult.lastTxNum)
 						}
 					}
 
-					blockUpdateCount = 0
-					blockApplyCount = 0
-
-					// Signal that block N is fully applied — all state writes
-					// are now visible in pe.rs. The execLoop waits for this
-					// before scheduling block N+1's workers.
-					pe.blockApplied <- struct{}{}
+					// drainBeforeExit is a no-op with synchronous commitment —
+					// commitment already ran inline above.
+					drainBeforeExit := func() error {
+						return nil
+					}
 
 					if dbg.StopAfterBlock > 0 && applyResult.BlockNum == dbg.StopAfterBlock {
+						if err := drainBeforeExit(); err != nil {
+							return err
+						}
 						return fmt.Errorf("stopping: block %d complete", applyResult.BlockNum)
 					}
 
 					if applyResult.BlockNum == maxBlockNum {
-						return nil
+						return drainBeforeExit()
 					}
 					if applyResult.Exhausted != nil {
+						if err := drainBeforeExit(); err != nil {
+							return err
+						}
 						return applyResult.Exhausted
 					}
 					if shouldGenerateChangesets && applyResult.BlockNum > 0 {
@@ -436,6 +413,9 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						pe.domains().SetChangesetAccumulator(changeSet)
 					}
 					if flushPending {
+						if err := drainBeforeExit(); err != nil {
+							return err
+						}
 						return &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult.BlockNum, Reason: "block batch is full"}
 					}
 				}
@@ -507,8 +487,17 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 		}
 	}
 
-	if err = execStage.Update(rwTx, pe.lastCommittedBlockNum.Load()); err != nil {
-		return nil, rwTx, err
+	// Stage progress goes through the block overlay — it will be flushed
+	// to the rwTx together with block metadata at commit time.
+	overlay := pe.doms.BlockOverlay()
+	if overlay != nil {
+		if err = execStage.Update(overlay, pe.lastCommittedBlockNum.Load()); err != nil {
+			return nil, rwTx, err
+		}
+	} else {
+		if err = execStage.Update(rwTx, pe.lastCommittedBlockNum.Load()); err != nil {
+			return nil, rwTx, err
+		}
 	}
 
 	return lastHeader, rwTx, execErr
@@ -535,6 +524,23 @@ func (pe *parallelExecutor) LogCommitments(commitStart time.Time, committedBlock
 	for domain, domainMetrics := range pe.domains().DomainLogMetrics() {
 		pe.logger.Debug(fmt.Sprintf("[%s] %s", pe.logPrefix, domain), domainMetrics...)
 	}
+}
+
+// collectCommitmentResult drains the commitment calculator, verifies the root
+// hash, and updates progress counters. Called from the apply loop before
+// submitting new commitment work and before flush/exit.
+func collectCommitmentResult(ctx context.Context, cc *commitmentCalculator, pe *parallelExecutor, rwTx kv.TemporalRwTx, execStage *StageState, u Unwinder) error {
+	r := cc.Drain(ctx)
+	if r == nil {
+		return nil // context cancelled
+	}
+	if r.err != nil {
+		pe.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x", pe.logPrefix, r.blockNum, r.rootHash))
+		return handleIncorrectRootHashError(r.blockNum, common.Hash{}, common.Hash{}, rwTx, pe.cfg, execStage, pe.logger, u)
+	}
+	pe.txExecutor.lastCommittedBlockNum.Store(r.blockNum)
+	pe.txExecutor.lastCommittedTxNum.Store(r.txNum)
+	return nil
 }
 
 func (pe *parallelExecutor) LogComplete(stepsInDb float64) {
@@ -683,12 +689,12 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						defer pe.RUnlock()
 
 						var reader state.StateReader
-						if finalTask.IsHistoric() {
-							reader = state.NewHistoryReaderV3(applyTx, finalVersion.TxNum)
-						} else {
-							reader = state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx))
-						}
-						ibs := state.New(state.NewBufferedReader(pe.rs, reader))
+					if finalTask.IsHistoric() {
+						reader = state.NewHistoryReaderV3(applyTx, finalVersion.TxNum)
+					} else {
+						reader = state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx))
+					}
+					ibs := state.New(state.NewBufferedReader(pe.rs, reader))
 						ibs.SetVersion(finalVersion.Incarnation)
 						localVersionMap := state.NewVersionMap(nil)
 						ibs.SetVersionMap(localVersionMap)

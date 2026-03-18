@@ -525,11 +525,9 @@ func (c *versionedWriteCollector) DeleteAccount(address accounts.Address, origin
 	return nil
 }
 
-func (c *versionedWriteCollector) WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
-	if original == value {
-		return nil
-	}
-
+func (c *versionedWriteCollector) WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, _, value uint256.Int) error {
+	// No skip — same rationale as LightCollector.WriteAccountStorage.
+	// DomainPut's internal bytes.Equal skip handles the no-change case.
 	c.writes = append(c.writes, &VersionedWrite{Address: address, Path: StoragePath, Key: key, Val: value})
 
 	c.rs.accountsMutex.Lock()
