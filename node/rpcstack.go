@@ -35,7 +35,6 @@ import (
 	"github.com/rs/cors"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
@@ -379,11 +378,9 @@ func newRPCAdmissionHandler(limit int64, next http.Handler) http.Handler {
 }
 
 func (h *rpcAdmissionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	kv.DebugHTTPTotal.Add(1) // DEBUG — remove before merge
 	if h.limit > 0 {
 		if h.inflight.Add(1) > h.limit {
 			h.inflight.Add(-1)
-			kv.DebugHTTPRejected.Add(1) // DEBUG — remove before merge
 			http.Error(w, "server overloaded, retry later", http.StatusServiceUnavailable)
 			return
 		}

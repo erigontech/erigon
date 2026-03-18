@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"sync"
-	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -693,12 +692,6 @@ var (
 	//DbGcSelfPnlMergeVolume = metrics.NewCounter(`db_gc_pnl{phase="self_merge_volume"}`)               //nolint
 	//DbGcSelfPnlMergeCalls  = metrics.NewCounter(`db_gc_pnl{phase="slef_merge_calls"}`)                //nolint
 )
-
-// DebugHTTPTotal counts all HTTP requests entering rpcAdmissionHandler — DEBUG, remove before merge
-var DebugHTTPTotal atomic.Int64
-
-// DebugHTTPRejected counts requests rejected by rpcAdmissionHandler (inflight > limit) — DEBUG, remove before merge
-var DebugHTTPRejected atomic.Int64
 
 type Closer interface {
 	Close()

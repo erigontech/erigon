@@ -373,7 +373,6 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		MaxBatchSize:  DefaultMaxBatchSize,
 		MaxBatchDelay: DefaultMaxBatchDelay,
 
-		stopDebugCh: make(chan struct{}), // DEBUG — remove before merge
 	}
 
 	customBuckets := opts.bucketsCfg(kv.TablesCfgByLabel(opts.label))
@@ -426,30 +425,6 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 			return nil, err
 		}
 	}
-	// DEBUG: start background goroutine to log RPC stats every 10s (chaindata only) — remove before merge
-	if string(opts.label) != dbcfg.ChainDB {
-		return db, nil
-	}
-	go func() {
-		ticker := time.NewTicker(10 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-db.stopDebugCh:
-				return
-			case <-ticker.C:
-				httpTotal := kv.DebugHTTPTotal.Load()
-				httpRejected := kv.DebugHTTPRejected.Load()
-				var httpRejectedPct float64
-				if httpTotal > 0 {
-					httpRejectedPct = float64(httpRejected) * 100.0 / float64(httpTotal)
-				}
-				db.log.Warn("[DEBUG] rpc stats",
-					"http_total", httpTotal, "http_rejected", httpRejected, "http_rejected_pct", fmt.Sprintf("%.1f%%", httpRejectedPct))
-			}
-		}
-	}()
-
 	return db, nil
 }
 
@@ -476,8 +451,6 @@ type MdbxKV struct {
 	txsAllDoneOnCloseCond *sync.Cond
 
 	leakDetector *dbg.LeakDetector
-
-	stopDebugCh chan struct{} // closed on DB close to stop the debug logger goroutine
 
 	// MaxBatchSize is the maximum size of a batch. Default value is
 	// copied from DefaultMaxBatchSize in Open.
@@ -583,9 +556,6 @@ func (db *MdbxKV) waitTxsAllDoneOnClose() {
 func (db *MdbxKV) Close() {
 	if ok := db.closed.CompareAndSwap(false, true); !ok {
 		return
-	}
-	if db.stopDebugCh != nil {
-		close(db.stopDebugCh) // DEBUG — remove before merge
 	}
 	db.waitTxsAllDoneOnClose()
 
