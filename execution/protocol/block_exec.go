@@ -275,8 +275,8 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 
 	ret, _, err := evm.Call(
-		msg.From(),
-		msg.To(),
+		msg.From().Value(),
+		msg.To().Value(),
 		msg.Data(),
 		msg.Gas(),
 		*msg.Value(),
