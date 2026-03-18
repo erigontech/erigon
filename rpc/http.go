@@ -271,6 +271,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// The context might be cancelled if the client's connection was closed while waiting for ServeHTTP.
 	if common.FastContextErr(ctx) != nil {
+		// TODO: introduce an log message for all possible cases
+		// s.logger.Warn("rpc.Server.ServeHTTP: client connection was lost. Check if the server is able to keep up with the request rate.", "url", r.URL.String())
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
