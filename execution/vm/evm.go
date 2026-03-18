@@ -93,6 +93,45 @@ type EVM struct {
 
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
+
+	// addrCache/keyCache: direct-mapped L1-style caches for accounts.InternAddress/InternKey.
+	// Avoids hitting the global unique.Make sync.Map for addresses/keys seen repeatedly within
+	// one transaction (same EVM instance spans all nested CALLs). 64 entries, indexed by the
+	// last byte of the raw value — zero-alloc, ~2ns per hit vs ~50-100ns for unique.Make.
+	addrCache [64]addrInternEntry
+	keyCache  [64]keyInternEntry
+}
+
+type addrInternEntry struct {
+	raw common.Address
+	val accounts.Address
+}
+
+type keyInternEntry struct {
+	raw common.Hash
+	val accounts.StorageKey
+}
+
+// internAddress returns the interned handle for a, using the per-EVM direct-mapped cache.
+func (evm *EVM) internAddress(a common.Address) accounts.Address {
+	e := &evm.addrCache[a[19]&63]
+	if e.raw == a && !e.val.IsNil() {
+		return e.val
+	}
+	v := accounts.InternAddress(a)
+	e.raw, e.val = a, v
+	return v
+}
+
+// internKey returns the interned handle for h, using the per-EVM direct-mapped cache.
+func (evm *EVM) internKey(h common.Hash) accounts.StorageKey {
+	e := &evm.keyCache[h[31]&63]
+	if e.raw == h && !e.val.IsNil() {
+		return e.val
+	}
+	v := accounts.InternKey(h)
+	e.raw, e.val = h, v
+	return v
 }
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should

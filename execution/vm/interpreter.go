@@ -379,11 +379,11 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 			// for the ~90% of opcodes with no dynamic gas. Gas functions must not write to
 			// slotAddr/slotKey — the interpreter is the sole owner for one dispatch cycle.
 			if operation.hasAddrSlot {
-				callContext.slotAddr = accounts.InternAddress(
+				callContext.slotAddr = evm.internAddress(
 					callContext.Stack.Back(int(operation.addrSlot)).Bytes20())
 			}
 			if operation.hasKeySlot {
-				callContext.slotKey = accounts.InternKey(
+				callContext.slotKey = evm.internKey(
 					callContext.Stack.Back(int(operation.keySlot)).Bytes32())
 			}
 			// calculate the new memory size and expand the memory to fit
