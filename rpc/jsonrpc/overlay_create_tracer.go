@@ -62,7 +62,7 @@ func (ct *OverlayCreateTracer) OnEnter(depth int, typ byte, from accounts.Addres
 		if err != nil {
 			ct.err = err
 		} else {
-			if result, err := ct.evm.IntraBlockState().GetCode(ct.contractAddress); err != nil {
+			if result, err := ct.evm.IntraBlockState().GetCode(ct.contractAddress.Value()); err != nil {
 				ct.resultCode = result
 			} else {
 				ct.err = err
