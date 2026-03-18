@@ -222,10 +222,9 @@ func encodeBytesAsRlpToWriter(source []byte, w io.Writer, prefixGenFunc func([]b
 	return err
 }
 
-func EncodeByteArrayAsRlp(raw []byte, w io.Writer, prefixBuf []byte) (int, error) {
-	err := encodeBytesAsRlpToWriter(raw, w, generateByteArrayLen, prefixBuf)
-	if err != nil {
+func EncodeStringWithLen(raw []byte, w io.Writer, prefixBuf []byte) (int, error) {
+	if err := EncodeString(raw, w, prefixBuf); err != nil {
 		return 0, err
 	}
-	return generateRlpPrefixLen(len(raw)) + len(raw), nil
+	return StringLen(raw), nil
 }
