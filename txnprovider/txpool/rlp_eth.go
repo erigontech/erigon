@@ -30,7 +30,7 @@ const parseHashErrorPrefix = "parse hash payload"
 // Assumes that to is at least 33 bytes long.
 func encodeHash(h, to []byte) int {
 	_ = to[32] // early bounds check to guarantee safety of writes below
-	to[0] = 128 + 32
+	to[0] = rlp.EmptyStringCode + 32
 	copy(to[1:33], h[:32])
 	return 33
 }
@@ -73,10 +73,10 @@ func announcementsLen(types []byte, sizes []uint32, hashes []byte) int {
 // encodeAnnouncements encodes an ETH/68 (EIP-5793) transaction announcement.
 func encodeAnnouncements(types []byte, sizes []uint32, hashes []byte, encodeBuf []byte) int {
 	if len(types) == 0 {
-		encodeBuf[0] = 0xc3
-		encodeBuf[1] = 0x80
-		encodeBuf[2] = 0xc0
-		encodeBuf[3] = 0xc0
+		encodeBuf[0] = rlp.EmptyListCode + 3 // list of 3 bytes
+		encodeBuf[1] = rlp.EmptyStringCode   // empty types string
+		encodeBuf[2] = rlp.EmptyListCode     // empty sizes list
+		encodeBuf[3] = rlp.EmptyListCode     // empty hashes list
 		return 4
 	}
 	pos := 0

@@ -176,4 +176,3 @@ func ParseU32(payload []byte, pos int) (int, uint32, error) {
 	}
 	return dataPos + dataLen, r, nil
 }
-

@@ -36,10 +36,10 @@ import (
 )
 
 const (
-	EmptyStringCode    = 0x80 // short string prefix (length 0–55)
-	LongStringCode     = 0xB7 // long string prefix (length 56+)
-	EmptyListCode      = 0xC0 // short list prefix (length 0–55)
-	LongListCode       = 0xF7 // long list prefix (length 56+)
+	EmptyStringCode     = 0x80 // short string prefix (length 0–55)
+	LongStringCode      = 0xB7 // long string prefix (length 56+)
+	EmptyListCode       = 0xC0 // short list prefix (length 0–55)
+	LongListCode        = 0xF7 // long list prefix (length 56+)
 	SingleByteThreshold = 0x80 // values below this are encoded as themselves
 )
 
@@ -473,6 +473,7 @@ func U64Len(i uint64) int {
 }
 
 // EncodeU64ToBuf encodes i as an RLP string into to and returns the number of bytes written.
+// precondition: len(to) >= 9
 func EncodeU64ToBuf(i uint64, to []byte) int {
 	if i == 0 {
 		to[0] = EmptyStringCode
