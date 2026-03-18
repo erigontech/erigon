@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/protocol/params"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // memoryGasCost calculates the quadratic gas for memory expansion. It does so

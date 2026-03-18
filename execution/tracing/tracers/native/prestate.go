@@ -317,7 +317,7 @@ func (t *prestateTracer) processDiffState() {
 					delete(t.pre[addr].Storage, key)
 				}
 
-				var newVal, _ = t.env.IntraBlockState.GetState(addr, accounts.InternKey(key))
+				var newVal, _ = t.env.IntraBlockState.GetState(addr.Value(), key)
 				if new(uint256.Int).SetBytes(val[:]).Eq(&newVal) {
 					// Omit unchanged slots
 					delete(t.pre[addr].Storage, key)
@@ -405,6 +405,6 @@ func (t *prestateTracer) lookupStorage(addr accounts.Address, key common.Hash) {
 	if _, ok := t.pre[addr].Storage[key]; ok {
 		return
 	}
-	var val, _ = t.env.IntraBlockState.GetState(addr, accounts.InternKey(key))
+	var val, _ = t.env.IntraBlockState.GetState(addr.Value(), key)
 	t.pre[addr].Storage[key] = val.Bytes32()
 }

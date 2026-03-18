@@ -123,11 +123,11 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 		// capture SLOAD opcodes and record the read entry in the local storage
 		if op == vm.SLOAD && len(stack) >= 1 {
 			var (
-				address = accounts.InternKey(stack[len(stack)-1].Bytes32())
+				address = common.Hash(stack[len(stack)-1].Bytes32())
 				value   uint256.Int
 			)
-			value, _ = l.env.IntraBlockState.GetState(contractAddr, address)
-			l.storage[contractAddr][address.Value()] = value.Bytes32()
+			value, _ = l.env.IntraBlockState.GetState(contractAddr.Value(), address)
+			l.storage[contractAddr][address] = value.Bytes32()
 			outputStorage = true
 		}
 		// capture SSTORE opcodes and record the written entry in the local storage.

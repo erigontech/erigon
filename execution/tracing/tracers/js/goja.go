@@ -768,14 +768,12 @@ func (do *dbObj) GetState(addrSlice goja.Value, hashSlice goja.Value) goja.Value
 		do.vm.Interrupt(err)
 		return nil
 	}
-	addr := accounts.InternAddress(common.BytesToAddress(a))
 	h, err := do.fromBuf(do.vm, hashSlice, false)
 	if err != nil {
 		do.vm.Interrupt(err)
 		return nil
 	}
-	hash := accounts.InternKey(common.BytesToHash(h))
-	var outValue, _ = do.ibs.GetState(addr, hash)
+	var outValue, _ = do.ibs.GetState(common.BytesToAddress(a), common.BytesToHash(h))
 	res, err := do.toBuf(do.vm, outValue.PaddedBytes(32))
 	if err != nil {
 		do.vm.Interrupt(err)

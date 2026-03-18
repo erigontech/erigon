@@ -222,7 +222,7 @@ func (l *StructLogger) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scope 
 				address = common.Hash(stack[stackLen-1].Bytes32())
 				value   uint256.Int
 			)
-			value, _ = l.env.IntraBlockState.GetState(contractAddr, accounts.InternKey(address))
+			value, _ = l.env.IntraBlockState.GetState(contractAddr.Value(), address)
 			l.storage[contractAddr][address] = value.Bytes32()
 		}
 		// capture SSTORE opcodes and record the written entry in the local storage.
