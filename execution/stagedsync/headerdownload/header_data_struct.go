@@ -23,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/btree"
+	btree "github.com/anacrolix/btree"
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/erigontech/erigon/common"
@@ -279,11 +279,11 @@ type HeaderDownload struct {
 	anchors                map[common.Hash]*Anchor // Mapping from parentHash to collection of anchors
 	links                  map[common.Hash]*Link   // Links by header hash
 	engine                 rules.Engine
-	insertQueue            InsertQueue            // Priority queue of non-persisted links that need to be verified and can be inserted
-	seenAnnounces          *SeenAnnounces         // External announcement hashes, after header verification if hash is in this set - will broadcast it further
-	persistedLinkQueue     LinkQueue              // Priority queue of persisted links used to limit their number
-	linkQueue              LinkQueue              // Priority queue of non-persisted links used to limit their number
-	anchorTree             *btree.BTreeG[*Anchor] // anchors sorted by block height
+	insertQueue            InsertQueue                  // Priority queue of non-persisted links that need to be verified and can be inserted
+	seenAnnounces          *SeenAnnounces               // External announcement hashes, after header verification if hash is in this set - will broadcast it further
+	persistedLinkQueue     LinkQueue                    // Priority queue of persisted links used to limit their number
+	linkQueue              LinkQueue                    // Priority queue of non-persisted links used to limit their number
+	anchorTree             *btree.Map[*Anchor, *Anchor] // anchors sorted by block height
 	DeliveryNotify         chan struct{}
 	toAnnounce             []Announce
 	lock                   sync.RWMutex
@@ -339,14 +339,25 @@ func NewHeaderDownload(
 		anchorLimit:        anchorLimit,
 		engine:             engine,
 		links:              make(map[common.Hash]*Link),
-		anchorTree:         btree.NewG[*Anchor](32, func(a, b *Anchor) bool { return a.blockHeight < b.blockHeight }),
-		seenAnnounces:      NewSeenAnnounces(),
-		DeliveryNotify:     make(chan struct{}, 1),
-		QuitPoWMining:      make(chan struct{}),
-		ShutdownCh:         make(chan struct{}),
-		headerReader:       headerReader,
-		badPoSHeaders:      make(map[common.Hash]common.Hash),
-		logger:             logger,
+		anchorTree: func() *btree.Map[*Anchor, *Anchor] {
+			m := btree.MakeMap[*Anchor, *Anchor](func(a, b *Anchor) int {
+				if a.blockHeight < b.blockHeight {
+					return -1
+				}
+				if a.blockHeight > b.blockHeight {
+					return 1
+				}
+				return 0
+			})
+			return &m
+		}(),
+		seenAnnounces:  NewSeenAnnounces(),
+		DeliveryNotify: make(chan struct{}, 1),
+		QuitPoWMining:  make(chan struct{}),
+		ShutdownCh:     make(chan struct{}),
+		headerReader:   headerReader,
+		badPoSHeaders:  make(map[common.Hash]common.Hash),
+		logger:         logger,
 	}
 	heap.Init(&hd.persistedLinkQueue)
 	heap.Init(&hd.linkQueue)

@@ -55,7 +55,13 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 			// - make sure there is no canDelete file
 			hc := h.BeginFilesRo()
 
-			lastOnFs, _ := h.dirtyFiles.Max()
+			var lastOnFs *FilesItem
+			{
+				iter := h.dirtyFiles.Iterator()
+				if iter.Last(); iter.Valid() {
+					lastOnFs = iter.Cur()
+				}
+			}
 			require.False(lastOnFs.frozen) // prepared dataset must have some non-frozen files. or it's bad dataset.
 			deleteMergeFile(h.dirtyFiles, []*FilesItem{lastOnFs}, "", h.logger)
 			require.NotNil(lastOnFs.decompressor)
@@ -84,7 +90,13 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 			hc.Close()
 			require.Nil(lastOnFs.decompressor)
 
-			nonDeletedOnFs, _ := h.dirtyFiles.Max()
+			var nonDeletedOnFs *FilesItem
+			{
+				iter := h.dirtyFiles.Iterator()
+				if iter.Last(); iter.Valid() {
+					nonDeletedOnFs = iter.Cur()
+				}
+			}
 			require.False(nonDeletedOnFs.frozen)
 			require.NotNil(nonDeletedOnFs.decompressor) // non-canDelete files are not closed
 
@@ -104,7 +116,13 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 			// - del cold file
 			// - new reader must not see canDelete file
 			hc := h.BeginFilesRo()
-			lastOnFs, _ := h.dirtyFiles.Max()
+			var lastOnFs *FilesItem
+			{
+				iter := h.dirtyFiles.Iterator()
+				if iter.Last(); iter.Valid() {
+					lastOnFs = iter.Cur()
+				}
+			}
 			require.False(lastOnFs.frozen) // prepared dataset must have some non-frozen files. or it's bad dataset.
 			deleteMergeFile(h.dirtyFiles, []*FilesItem{lastOnFs}, "", h.logger)
 
@@ -154,7 +172,13 @@ func TestDomainGCReadAfterRemoveFile(t *testing.T) {
 			// - make sure there is no canDelete file
 			hc := h.BeginFilesRo()
 			_ = hc
-			lastOnFs, _ := h.dirtyFiles.Max()
+			var lastOnFs *FilesItem
+			{
+				iter := h.dirtyFiles.Iterator()
+				if iter.Last(); iter.Valid() {
+					lastOnFs = iter.Cur()
+				}
+			}
 			require.False(lastOnFs.frozen) // prepared dataset must have some non-frozen files. or it's bad dataset.
 
 			deleteMergeFile(h.dirtyFiles, []*FilesItem{lastOnFs}, "", h.logger)
@@ -177,7 +201,13 @@ func TestDomainGCReadAfterRemoveFile(t *testing.T) {
 			hc.Close()
 			require.Nil(lastOnFs.decompressor)
 
-			nonDeletedOnFs, _ := h.dirtyFiles.Max()
+			var nonDeletedOnFs *FilesItem
+			{
+				iter := h.dirtyFiles.Iterator()
+				if iter.Last(); iter.Valid() {
+					nonDeletedOnFs = iter.Cur()
+				}
+			}
 			require.False(nonDeletedOnFs.frozen)
 			require.NotNil(nonDeletedOnFs.decompressor) // non-canDelete files are not closed
 
@@ -197,7 +227,13 @@ func TestDomainGCReadAfterRemoveFile(t *testing.T) {
 			// - del cold file
 			// - new reader must not see canDelete file
 			hc := h.BeginFilesRo()
-			lastOnFs, _ := h.dirtyFiles.Max()
+			var lastOnFs *FilesItem
+			{
+				iter := h.dirtyFiles.Iterator()
+				if iter.Last(); iter.Valid() {
+					lastOnFs = iter.Cur()
+				}
+			}
 			require.False(lastOnFs.frozen) // prepared dataset must have some non-frozen files. or it's bad dataset.
 			deleteMergeFile(h.dirtyFiles, []*FilesItem{lastOnFs}, "", h.logger)
 			h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())

@@ -97,8 +97,8 @@ github.com/alingse/asasalint v0.0.11 h1:SFwnQXJ49Kx/1GghOFz1XGqHYKp21Kq1nHad/0WQ
 github.com/alingse/asasalint v0.0.11/go.mod h1:nCaoMhw7a9kSJObvQyVzNTPBDbNpdocqrSP7t/cW5+I=
 github.com/alingse/nilnesserr v0.2.0 h1:raLem5KG7EFVb4UIDAXgrv3N2JIaffeKNtcEXkEWd/w=
 github.com/alingse/nilnesserr v0.2.0/go.mod h1:1xJPrXonEtX7wyTq8Dytns5P2hNzoWymVUIaKm4HNFg=
-github.com/anacrolix/btree v0.1.1 h1:igdFPLrt82L6qovzbEGSMkTeiwcU3EFIGl2K8XWocAc=
-github.com/anacrolix/btree v0.1.1/go.mod h1:KHWYRZuUULATjUGJC4dQDXx/BPOnWrJozGR6TndjOmc=
+github.com/anacrolix/btree v0.1.2-0.20260319222333-22e04f09edf5 h1:NMkpe+hmh3vGlIoOIu29kyWR9c0VuFcd+XbfZzxYYS0=
+github.com/anacrolix/btree v0.1.2-0.20260319222333-22e04f09edf5/go.mod h1:KHWYRZuUULATjUGJC4dQDXx/BPOnWrJozGR6TndjOmc=
 github.com/anacrolix/chansync v0.7.0 h1:wgwxbsJRmOqNjil4INpxHrDp4rlqQhECxR8/WBP4Et0=
 github.com/anacrolix/chansync v0.7.0/go.mod h1:DZsatdsdXxD0WiwcGl0nJVwyjCKMDv+knl1q2iBjA2k=
 github.com/anacrolix/dht/v2 v2.23.0 h1:EuD17ykTTEkAMPLjBsS5QjGOwuBgLTdQhds6zPAjeVY=

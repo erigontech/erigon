@@ -28,8 +28,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/anacrolix/btree"
 	"github.com/klauspost/compress/zstd"
-	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -59,8 +59,8 @@ var sidecarSSZSize = (&cltypes.BlobSidecar{}).EncodingSizeSSZ()
 type CaplinSnapshots struct {
 	Salt uint32
 
-	dirtyLock sync.RWMutex                                // guards `dirty` field
-	dirty     []*btree.BTreeG[*snapshotsync.DirtySegment] // ordered map `type.Enum()` -> DirtySegments
+	dirtyLock sync.RWMutex                                                         // guards `dirty` field
+	dirty     []*btree.Map[*snapshotsync.DirtySegment, *snapshotsync.DirtySegment] // ordered map `type.Enum()` -> DirtySegments
 
 	visibleLock sync.RWMutex                   // guards  `visible` field
 	visible     []snapshotsync.VisibleSegments // ordered map `type.Enum()` -> VisbileSegments
@@ -85,11 +85,13 @@ func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.Beacon
 		log.Debug("[dbg] NewCaplinSnapshots created with empty ChainName", "stack", dbg.Stack())
 	}
 	c := &CaplinSnapshots{dir: dirs.Snap, tmpdir: dirs.Tmp, cfg: cfg, logger: logger, beaconCfg: beaconCfg,
-		dirty:   make([]*btree.BTreeG[*snapshotsync.DirtySegment], snaptype.MaxEnum),
+		dirty:   make([]*btree.Map[*snapshotsync.DirtySegment, *snapshotsync.DirtySegment], snaptype.MaxEnum),
 		visible: make([]snapshotsync.VisibleSegments, snaptype.MaxEnum),
 	}
-	c.dirty[snaptype.BeaconBlocks.Enum()] = btree.NewBTreeGOptions[*snapshotsync.DirtySegment](snapshotsync.DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
-	c.dirty[snaptype.BlobSidecars.Enum()] = btree.NewBTreeGOptions[*snapshotsync.DirtySegment](snapshotsync.DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
+	m1 := btree.MakeMap[*snapshotsync.DirtySegment, *snapshotsync.DirtySegment](snapshotsync.DirtySegmentCmp)
+	c.dirty[snaptype.BeaconBlocks.Enum()] = &m1
+	m2 := btree.MakeMap[*snapshotsync.DirtySegment, *snapshotsync.DirtySegment](snapshotsync.DirtySegmentCmp)
+	c.dirty[snaptype.BlobSidecars.Enum()] = &m2
 	c.recalcVisibleFiles()
 	return c
 }
@@ -185,19 +187,18 @@ Loop:
 		case snaptype.CaplinEnums.BeaconBlocks:
 			var sn *snapshotsync.DirtySegment
 			var exists bool
-			s.dirty[snaptype.BeaconBlocks.Enum()].Walk(func(segments []*snapshotsync.DirtySegment) bool {
-				for _, sn2 := range segments {
-					if sn2.Decompressor == nil { // it's ok if some segment was not able to open
-						continue
-					}
-					if fName == sn2.FileName() {
-						sn = sn2
-						exists = true
-						break
-					}
+			iter := s.dirty[snaptype.BeaconBlocks.Enum()].Iterator()
+			for iter.First(); iter.Valid(); iter.Next() {
+				sn2 := iter.Cur()
+				if sn2.Decompressor == nil { // it's ok if some segment was not able to open
+					continue
 				}
-				return true
-			})
+				if fName == sn2.FileName() {
+					sn = sn2
+					exists = true
+					break
+				}
+			}
 			if !exists {
 				sn = snapshotsync.NewDirtySegment(
 					snaptype.BeaconBlocks,
@@ -224,7 +225,7 @@ Loop:
 			if !exists {
 				// it's possible to iterate over .seg file even if you don't have index
 				// then make segment available even if index open may fail
-				s.dirty[snaptype.BeaconBlocks.Enum()].Set(sn)
+				s.dirty[snaptype.BeaconBlocks.Enum()].Upsert(sn, sn)
 			}
 			if err := sn.OpenIdxIfNeed(s.dir, optimistic, dirEntries); err != nil {
 				return err
@@ -241,19 +242,18 @@ Loop:
 		case snaptype.CaplinEnums.BlobSidecars:
 			var sn *snapshotsync.DirtySegment
 			var exists bool
-			s.dirty[snaptype.BlobSidecars.Enum()].Walk(func(segments []*snapshotsync.DirtySegment) bool {
-				for _, sn2 := range segments {
-					if sn2.Decompressor == nil { // it's ok if some segment was not able to open
-						continue
-					}
-					if fName == sn2.FileName() {
-						sn = sn2
-						exists = true
-						break
-					}
+			iter2 := s.dirty[snaptype.BlobSidecars.Enum()].Iterator()
+			for iter2.First(); iter2.Valid(); iter2.Next() {
+				sn2 := iter2.Cur()
+				if sn2.Decompressor == nil { // it's ok if some segment was not able to open
+					continue
 				}
-				return true
-			})
+				if fName == sn2.FileName() {
+					sn = sn2
+					exists = true
+					break
+				}
+			}
 			if !exists {
 				sn = snapshotsync.NewDirtySegment(
 					snaptype.BlobSidecars,
@@ -280,7 +280,7 @@ Loop:
 			if !exists {
 				// it's possible to iterate over .seg file even if you don't have index
 				// then make segment available even if index open may fail
-				s.dirty[snaptype.BlobSidecars.Enum()].Set(sn)
+				s.dirty[snaptype.BlobSidecars.Enum()].Upsert(sn, sn)
 			}
 			if err := sn.OpenIdxIfNeed(s.dir, optimistic, dirEntries); err != nil {
 				return err
@@ -334,38 +334,36 @@ func (s *CaplinSnapshots) closeWhatNotInList(l []string) {
 		protectFiles[fName] = struct{}{}
 	}
 	toClose := make([]*snapshotsync.DirtySegment, 0)
-	s.dirty[snaptype.BeaconBlocks.Enum()].Walk(func(segments []*snapshotsync.DirtySegment) bool {
-		for _, sn := range segments {
-			if sn.Decompressor == nil {
-				continue
-			}
-			_, name := filepath.Split(sn.FilePath())
-			if _, ok := protectFiles[name]; ok {
-				continue
-			}
-			toClose = append(toClose, sn)
+	iter := s.dirty[snaptype.BeaconBlocks.Enum()].Iterator()
+	for iter.First(); iter.Valid(); iter.Next() {
+		sn := iter.Cur()
+		if sn.Decompressor == nil {
+			continue
 		}
-		return true
-	})
+		_, name := filepath.Split(sn.FilePath())
+		if _, ok := protectFiles[name]; ok {
+			continue
+		}
+		toClose = append(toClose, sn)
+	}
 	for _, sn := range toClose {
 		sn.Close()
 		s.dirty[snaptype.BeaconBlocks.Enum()].Delete(sn)
 	}
 
 	toClose = make([]*snapshotsync.DirtySegment, 0)
-	s.dirty[snaptype.BlobSidecars.Enum()].Walk(func(segments []*snapshotsync.DirtySegment) bool {
-		for _, sn := range segments {
-			if sn.Decompressor == nil {
-				continue
-			}
-			_, name := filepath.Split(sn.FilePath())
-			if _, ok := protectFiles[name]; ok {
-				continue
-			}
-			toClose = append(toClose, sn)
+	iter2 := s.dirty[snaptype.BlobSidecars.Enum()].Iterator()
+	for iter2.First(); iter2.Valid(); iter2.Next() {
+		sn := iter2.Cur()
+		if sn.Decompressor == nil {
+			continue
 		}
-		return true
-	})
+		_, name := filepath.Split(sn.FilePath())
+		if _, ok := protectFiles[name]; ok {
+			continue
+		}
+		toClose = append(toClose, sn)
+	}
 	for _, sn := range toClose {
 		sn.Close()
 		s.dirty[snaptype.BlobSidecars.Enum()].Delete(sn)

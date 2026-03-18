@@ -420,13 +420,12 @@ func TestOpenFolder_PartialFiles_StillOpens(t *testing.T) {
 	// The fully-formed file's accessors should be loaded
 	// The partial file's accessors should be nil (not panic)
 	count := 0
-	repo.dirtyFiles.Walk(func(items []*FilesItem) bool {
-		for _, item := range items {
-			require.NotNil(t, item.decompressor, "decompressor must be open for all dirty files")
-			count++
-		}
-		return true
-	})
+	iter := repo.dirtyFiles.Iterator()
+	for iter.First(); iter.Valid(); iter.Next() {
+		item := iter.Cur()
+		require.NotNil(t, item.decompressor, "decompressor must be open for all dirty files")
+		count++
+	}
 	require.Equal(t, 2, count)
 }
 

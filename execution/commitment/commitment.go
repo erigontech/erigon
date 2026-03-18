@@ -30,8 +30,8 @@ import (
 	"sync/atomic"
 	"unsafe"
 
+	btree "github.com/anacrolix/btree"
 	keccak "github.com/erigontech/fastkeccak"
-	"github.com/google/btree"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -1516,9 +1516,9 @@ func (m Mode) String() string {
 
 type Updates struct {
 	hasher keyHasher
-	keys   map[string]struct{}       // plain keys to keep only unique keys in etl
-	etl    *etl.Collector            // all-in-one collector
-	tree   *btree.BTreeG[*KeyUpdate] // TODO since it's thread safe to read, maybe instead of all collectors we can use one tree
+	keys   map[string]struct{}                // plain keys to keep only unique keys in etl
+	etl    *etl.Collector                     // all-in-one collector
+	tree   *btree.Map[*KeyUpdate, *KeyUpdate] // TODO since it's thread safe to read, maybe instead of all collectors we can use one tree
 	mode   Mode
 	tmpdir string
 
@@ -1584,7 +1584,8 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 		t.keys = make(map[string]struct{})
 		t.initCollector()
 	} else if t.mode == ModeUpdate {
-		t.tree = btree.NewG(64, keyUpdateLessFn)
+		m := btree.MakeMap[*KeyUpdate, *KeyUpdate](keyUpdateCmpFn)
+		t.tree = &m
 	}
 	return t
 }
@@ -1595,7 +1596,8 @@ func (t *Updates) SetMode(m Mode) {
 		t.keys = make(map[string]struct{})
 		t.initCollector()
 	} else if t.mode == ModeUpdate && t.tree == nil {
-		t.tree = btree.NewG(64, keyUpdateLessFn)
+		newTree := btree.MakeMap[*KeyUpdate, *KeyUpdate](keyUpdateCmpFn)
+		t.tree = &newTree
 	}
 	t.Reset()
 }
@@ -1659,17 +1661,24 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 	case ModeUpdate:
 		pivot, updated := &KeyUpdate{plainKey: key, update: new(Update)}, false
 
-		t.tree.DescendLessOrEqual(pivot, func(item *KeyUpdate) bool {
+		iter := t.tree.Iterator()
+		iter.SeekGE(pivot)
+		if iter.Valid() && iter.Compare(iter.Cur(), pivot) > 0 {
+			iter.Prev()
+		} else if !iter.Valid() {
+			iter.Last()
+		}
+		if iter.Valid() {
+			item := iter.Cur()
 			if item.plainKey == pivot.plainKey {
 				fn(item, val)
 				updated = true
 			}
-			return false
-		})
+		}
 		if !updated {
 			pivot.hashedKey = t.hasher(common.ToBytesZeroCopy(pivot.plainKey))
 			fn(pivot, val)
-			t.tree.ReplaceOrInsert(pivot)
+			t.tree.Upsert(pivot, pivot)
 		}
 	case ModeDirect:
 		if _, ok := t.keys[key]; !ok {
@@ -1751,7 +1760,7 @@ func (t *Updates) Close() {
 		clear(t.keys)
 	}
 	if t.tree != nil {
-		t.tree.Clear(true)
+		t.tree.Reset()
 		t.tree = nil
 	}
 	if t.etl != nil {
@@ -1860,12 +1869,16 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		var prevKey []byte
 		var processErr error
 
-		t.tree.Ascend(func(item *KeyUpdate) bool {
+		treeIter := t.tree.Iterator()
+		for treeIter.First(); treeIter.Valid(); treeIter.Next() {
+			item := treeIter.Cur()
 			select {
 			case <-ctx.Done():
 				processErr = ctx.Err()
-				return false
 			default:
+			}
+			if processErr != nil {
+				break
 			}
 
 			// Copy hashedKey into arena; plainKey references tree item directly
@@ -1892,12 +1905,14 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 					select {
 					case <-ctx.Done():
 						processErr = ctx.Err()
-						return false
 					default:
+					}
+					if processErr != nil {
+						break
 					}
 					if err := fn(t.batchSlab[i].hashedKey, common.ToBytesZeroCopy(t.batchSlab[i].plainKey), t.batchSlab[i].update); err != nil {
 						processErr = err
-						return false
+						break
 					}
 				}
 				if warmuper != nil {
@@ -1906,8 +1921,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 				t.batchSlab = t.batchSlab[:0]
 				t.byteArena = t.byteArena[:0]
 			}
-			return true
-		})
+		}
 
 		if processErr != nil {
 			return processErr
@@ -1924,7 +1938,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 				return err
 			}
 		}
-		t.tree.Clear(true)
+		t.tree.Reset()
 
 	default:
 		return nil
@@ -1943,7 +1957,7 @@ func (t *Updates) Reset() {
 		}
 		t.initCollector()
 	case ModeUpdate:
-		t.tree.Clear(true)
+		t.tree.Reset()
 	default:
 	}
 	t.batchSlab = t.batchSlab[:0]
@@ -1958,6 +1972,16 @@ type KeyUpdate struct {
 
 func keyUpdateLessFn(i, j *KeyUpdate) bool {
 	return i.plainKey < j.plainKey
+}
+
+func keyUpdateCmpFn(i, j *KeyUpdate) int {
+	if keyUpdateLessFn(i, j) {
+		return -1
+	}
+	if keyUpdateLessFn(j, i) {
+		return 1
+	}
+	return 0
 }
 
 type UpdateFlags uint8

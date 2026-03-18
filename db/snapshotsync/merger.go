@@ -243,20 +243,19 @@ func (m *Merger) integrateMergedDirtyFiles(snapshots *RoSnapshots, in, out map[s
 	for enum, newSegs := range in {
 		dirtySegments := snapshots.dirty[enum]
 		for _, newSeg := range newSegs {
-			dirtySegments.Set(newSeg)
+			dirtySegments.Upsert(newSeg, newSeg)
 			if newSeg.frozen {
-				dirtySegments.Walk(func(items []*DirtySegment) bool {
-					for _, item := range items {
-						if item.frozen || item.to > newSeg.to {
-							continue
-						}
-						if out[enum] == nil {
-							out[enum] = make([]*DirtySegment, 0, 1)
-						}
-						out[enum] = append(out[enum], item)
+				iter := dirtySegments.Iterator()
+				for iter.First(); iter.Valid(); iter.Next() {
+					item := iter.Cur()
+					if item.frozen || item.to > newSeg.to {
+						continue
 					}
-					return true
-				})
+					if out[enum] == nil {
+						out[enum] = make([]*DirtySegment, 0, 1)
+					}
+					out[enum] = append(out[enum], item)
+				}
 			}
 		}
 	}

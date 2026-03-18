@@ -18,6 +18,7 @@ require (
 	github.com/Masterminds/sprig/v3 v3.2.3
 	github.com/RoaringBitmap/roaring/v2 v2.14.4
 	github.com/alecthomas/kong v0.8.1
+	github.com/anacrolix/btree v0.1.2-0.20260319222333-22e04f09edf5
 	github.com/anacrolix/envpprof v1.5.0
 	github.com/anacrolix/generics v0.2.0
 	github.com/anacrolix/go-libutp v1.3.3-0.20251121015447-f294e5ed5b4d
@@ -53,7 +54,6 @@ require (
 	github.com/gofrs/flock v0.13.0
 	github.com/golang-jwt/jwt/v4 v4.5.2
 	github.com/golang/snappy v1.0.0
-	github.com/google/btree v1.1.3
 	github.com/google/cel-go v0.26.1
 	github.com/google/go-cmp v0.7.0
 	github.com/google/gofuzz v1.2.0
@@ -158,7 +158,6 @@ require (
 	github.com/alfatraining/structtag v1.0.0 // indirect
 	github.com/alingse/asasalint v0.0.11 // indirect
 	github.com/alingse/nilnesserr v0.2.0 // indirect
-	github.com/anacrolix/btree v0.1.1 // indirect
 	github.com/anacrolix/chansync v0.7.0 // indirect
 	github.com/anacrolix/dht/v2 v2.23.0 // indirect
 	github.com/anacrolix/missinggo v1.3.0 // indirect
@@ -254,6 +253,7 @@ require (
 	github.com/golangci/revgrep v0.8.0 // indirect
 	github.com/golangci/swaggoswag v0.0.0-20250504205917-77f2aca3143e // indirect
 	github.com/golangci/unconvert v0.0.0-20250410112200-a129a6e6413e // indirect
+	github.com/google/btree v1.1.3 // indirect
 	github.com/google/pprof v0.0.0-20250820193118-f64d9cf942d6 // indirect
 	github.com/gordonklaus/ineffassign v0.2.0 // indirect
 	github.com/gostaticanalysis/analysisutil v0.7.1 // indirect

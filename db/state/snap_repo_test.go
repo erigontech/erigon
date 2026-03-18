@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	btree2 "github.com/anacrolix/btree"
 	"github.com/stretchr/testify/require"
-	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dir"
@@ -53,8 +53,10 @@ func TestOpenFolder_AccountsDomain(t *testing.T) {
 	require.NoError(t, err)
 
 	// check dirty files
-	repo.dirtyFiles.Walk(func(items []*FilesItem) bool {
-		for _, item := range items {
+	{
+		iter := repo.dirtyFiles.Iterator()
+		for iter.First(); iter.Valid(); iter.Next() {
+			item := iter.Cur()
 			filename := item.decompressor.FileName()
 			require.Contains(t, filename, name)
 			require.NotContains(t, filename, "torrent")
@@ -72,9 +74,7 @@ func TestOpenFolder_AccountsDomain(t *testing.T) {
 				accessorCount--
 			}
 		}
-
-		return true
-	})
+	}
 
 	require.Equal(t, 0, dataCount)
 	require.Equal(t, 0, btCount)
@@ -106,8 +106,10 @@ func TestOpenFolder_CodeII(t *testing.T) {
 	require.NoError(t, err)
 
 	// check dirty files
-	repo.dirtyFiles.Walk(func(items []*FilesItem) bool {
-		for _, item := range items {
+	{
+		iter := repo.dirtyFiles.Iterator()
+		for iter.First(); iter.Valid(); iter.Next() {
+			item := iter.Cur()
 			filename := item.decompressor.FileName()
 			require.Contains(t, filename, name)
 			require.NotContains(t, filename, "torrent")
@@ -125,9 +127,7 @@ func TestOpenFolder_CodeII(t *testing.T) {
 				accessorCount--
 			}
 		}
-
-		return true
-	})
+	}
 
 	require.Equal(t, 0, dataCount)
 	require.Equal(t, 0, btCount)
@@ -211,32 +211,32 @@ func TestCloseFilesAfterRootNum(t *testing.T) {
 	// all but 1
 	require.NoError(t, repo.OpenFolder())
 	repo.CloseFilesAfterRootNum(stepToRootNum(t, 10, repo))
-	require.Len(t, repo.dirtyFiles.Items(), 1)
+	require.Len(t, dirtyFilesItems(repo.dirtyFiles), 1)
 
 	// all but 1
 	require.NoError(t, repo.OpenFolder())
 	repo.CloseFilesAfterRootNum(stepToRootNum(t, 256, repo))
-	require.Len(t, repo.dirtyFiles.Items(), 1)
+	require.Len(t, dirtyFilesItems(repo.dirtyFiles), 1)
 
 	// all but 2
 	require.NoError(t, repo.OpenFolder())
 	repo.CloseFilesAfterRootNum(stepToRootNum(t, 270, repo))
-	require.Len(t, repo.dirtyFiles.Items(), 2)
+	require.Len(t, dirtyFilesItems(repo.dirtyFiles), 2)
 
 	// all but 2
 	require.NoError(t, repo.OpenFolder())
 	repo.CloseFilesAfterRootNum(stepToRootNum(t, 288, repo))
-	require.Len(t, repo.dirtyFiles.Items(), 2)
+	require.Len(t, dirtyFilesItems(repo.dirtyFiles), 2)
 
 	// all but 3
 	require.NoError(t, repo.OpenFolder())
 	repo.CloseFilesAfterRootNum(stepToRootNum(t, 290, repo))
-	require.Len(t, repo.dirtyFiles.Items(), 3)
+	require.Len(t, dirtyFilesItems(repo.dirtyFiles), 3)
 
 	// all still open
 	require.NoError(t, repo.OpenFolder())
 	repo.CloseFilesAfterRootNum(stepToRootNum(t, 297, repo))
-	require.Len(t, repo.dirtyFiles.Items(), 4)
+	require.Len(t, dirtyFilesItems(repo.dirtyFiles), 4)
 }
 
 func TestMergeRangeSnapRepo(t *testing.T) {
@@ -364,7 +364,7 @@ func TestReferencingIntegrityChecker(t *testing.T) {
 	accountsR.integrity.AddDependency(FromDomain(kv.AccountsDomain), &DependentInfo{
 		entity: FromDomain(kv.CommitmentDomain),
 		//filesGetter: ,
-		filesGetter: func() *btree.BTreeG[*FilesItem] {
+		filesGetter: func() *btree2.Map[*FilesItem, *FilesItem] {
 			return commitmentR.dirtyFiles
 		},
 		accessors: commitmentR.accessors,

@@ -21,7 +21,7 @@ import (
 	"math"
 	"math/bits"
 
-	"github.com/google/btree"
+	btree "github.com/anacrolix/btree"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -40,8 +40,18 @@ import (
 // Performances decisions:
 //   - All senders stored inside 1 large BTree - because iterate over 1 BTree is faster than over map[senderId]BTree
 //   - sortByNonce used as non-pointer wrapper - because iterate over BTree of pointers is 2x slower
+func sortByNonceCmp(a, b *metaTxn) int {
+	if SortByNonceLess(a, b) {
+		return -1
+	}
+	if SortByNonceLess(b, a) {
+		return 1
+	}
+	return 0
+}
+
 type BySenderAndNonce struct {
-	tree              *btree.BTreeG[*metaTxn]
+	tree              *btree.Map[*metaTxn, *metaTxn]
 	search            *metaTxn
 	senderIDTxnCount  map[uint64]int    // count of sender's txns in the pool - may differ from nonce
 	senderIDBlobCount map[uint64]uint64 // count of sender's total number of blobs in the pool
@@ -52,44 +62,69 @@ func (b *BySenderAndNonce) nonce(senderID uint64) (nonce uint64, ok bool) {
 	s.TxnSlot.SenderID = senderID
 	s.TxnSlot.Nonce = math.MaxUint64
 
-	b.tree.DescendLessOrEqual(s, func(mt *metaTxn) bool {
+	iter := b.tree.Iterator()
+	iter.SeekGE(s)
+	if iter.Valid() && iter.Compare(iter.Cur(), s) > 0 {
+		iter.Prev()
+	} else if !iter.Valid() {
+		iter.Last()
+	}
+	if iter.Valid() {
+		mt := iter.Cur()
 		if mt.TxnSlot.SenderID == senderID {
 			nonce = mt.TxnSlot.Nonce
 			ok = true
 		}
-		return false
-	})
+	}
 	return nonce, ok
 }
 
 func (b *BySenderAndNonce) ascendAll(f func(*metaTxn) bool) {
-	b.tree.Ascend(func(mt *metaTxn) bool {
-		return f(mt)
-	})
+	iter := b.tree.Iterator()
+	for iter.First(); iter.Valid(); iter.Next() {
+		if !f(iter.Cur()) {
+			break
+		}
+	}
 }
 
 func (b *BySenderAndNonce) ascend(senderID uint64, f func(*metaTxn) bool) {
 	s := b.search
 	s.TxnSlot.SenderID = senderID
 	s.TxnSlot.Nonce = 0
-	b.tree.AscendGreaterOrEqual(s, func(mt *metaTxn) bool {
+	iter := b.tree.Iterator()
+	iter.SeekGE(s)
+	for ; iter.Valid(); iter.Next() {
+		mt := iter.Cur()
 		if mt.TxnSlot.SenderID != senderID {
-			return false
+			break
 		}
-		return f(mt)
-	})
+		if !f(mt) {
+			break
+		}
+	}
 }
 
 func (b *BySenderAndNonce) descend(senderID uint64, f func(*metaTxn) bool) {
 	s := b.search
 	s.TxnSlot.SenderID = senderID
 	s.TxnSlot.Nonce = math.MaxUint64
-	b.tree.DescendLessOrEqual(s, func(mt *metaTxn) bool {
+	iter := b.tree.Iterator()
+	iter.SeekGE(s)
+	if iter.Valid() && iter.Compare(iter.Cur(), s) > 0 {
+		iter.Prev()
+	} else if !iter.Valid() {
+		iter.Last()
+	}
+	for ; iter.Valid(); iter.Prev() {
+		mt := iter.Cur()
 		if mt.TxnSlot.SenderID != senderID {
-			return false
+			break
 		}
-		return f(mt)
-	})
+		if !f(mt) {
+			break
+		}
+	}
 }
 
 func (b *BySenderAndNonce) count(senderID uint64) int {
@@ -108,7 +143,8 @@ func (b *BySenderAndNonce) get(senderID, txNonce uint64) *metaTxn {
 	s := b.search
 	s.TxnSlot.SenderID = senderID
 	s.TxnSlot.Nonce = txNonce
-	if found, ok := b.tree.Get(s); ok {
+	found, ok := b.tree.Get(s)
+	if ok {
 		return found
 	}
 	return nil
@@ -116,11 +152,12 @@ func (b *BySenderAndNonce) get(senderID, txNonce uint64) *metaTxn {
 
 // nolint
 func (b *BySenderAndNonce) has(mt *metaTxn) bool {
-	return b.tree.Has(mt)
+	_, ok := b.tree.Get(mt)
+	return ok
 }
 
 func (b *BySenderAndNonce) delete(mt *metaTxn, reason txpoolcfg.DiscardReason, logger log.Logger) {
-	if _, ok := b.tree.Delete(mt); ok {
+	if _, _, ok := b.tree.Delete(mt); ok {
 		if mt.TxnSlot.Traced {
 			logger.Info("TX TRACING: Deleted txn by nonce", "idHash", fmt.Sprintf("%x", mt.TxnSlot.IDHash), "sender", mt.TxnSlot.SenderID, "nonce", mt.TxnSlot.Nonce, "reason", reason)
 		}
@@ -146,7 +183,7 @@ func (b *BySenderAndNonce) delete(mt *metaTxn, reason txpoolcfg.DiscardReason, l
 }
 
 func (b *BySenderAndNonce) replaceOrInsert(mt *metaTxn, logger log.Logger) *metaTxn {
-	it, ok := b.tree.ReplaceOrInsert(mt)
+	_, it, ok := b.tree.Upsert(mt, mt)
 
 	if ok {
 		if mt.TxnSlot.Traced {

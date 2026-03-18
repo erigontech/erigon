@@ -500,12 +500,10 @@ func TestOnNewBlockCodeHashKey(t *testing.T) {
 	require.Equal(uint64(1), c.latestStateVersionID)
 
 	var elems []*Element
-	c.latestStateView.codeCache.Walk(func(items []*Element) bool {
-		if len(items) > 0 {
-			elems = append(elems, items...)
-		}
-		return true
-	})
+	iter := c.latestStateView.codeCache.Iterator()
+	for iter.First(); iter.Valid(); iter.Next() {
+		elems = append(elems, iter.Cur())
+	}
 
 	require.Len(elems, 1)
 

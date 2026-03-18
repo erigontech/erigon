@@ -27,7 +27,7 @@ import (
 	"strings"
 	"time"
 
-	btree2 "github.com/tidwall/btree"
+	btree2 "github.com/anacrolix/btree"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
@@ -66,7 +66,7 @@ type History struct {
 	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
 	//
 	// BeginRo() using _visibleFiles in zero-copy way
-	dirtyFiles *btree2.BTreeG[*FilesItem]
+	dirtyFiles *btree2.Map[*FilesItem, *FilesItem]
 
 	// _visibleFiles - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
@@ -83,8 +83,11 @@ func NewHistory(cfg statecfg.HistCfg, stepSize, stepsInFrozenFile uint64, dirs d
 	}
 
 	h := History{
-		HistCfg:       cfg,
-		dirtyFiles:    btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		HistCfg: cfg,
+		dirtyFiles: func() *btree2.Map[*FilesItem, *FilesItem] {
+			m := btree2.MakeMap[*FilesItem, *FilesItem](filesItemCmp)
+			return &m
+		}(),
 		_visibleFiles: []visibleFile{},
 	}
 
@@ -166,7 +169,7 @@ func (h *History) scanDirtyFiles(fileNames []string) {
 	}
 	for _, dirtyFile := range filterDirtyFiles(fileNames, h.stepSize, h.stepsInFrozenFile, h.FilenameBase, "v", h.logger) {
 		if _, has := h.dirtyFiles.Get(dirtyFile); !has {
-			h.dirtyFiles.Set(dirtyFile)
+			h.dirtyFiles.Upsert(dirtyFile, dirtyFile)
 		}
 	}
 }
@@ -195,7 +198,7 @@ func (ht *HistoryRoTx) Files() (res VisibleFiles) {
 }
 
 func (h *History) MissedMapAccessors() (l []*FilesItem) {
-	return h.missedMapAccessors(h.dirtyFiles.Items(), readDirNames(h.dirs.SnapAccessors))
+	return h.missedMapAccessors(dirtyFilesItems(h.dirtyFiles), readDirNames(h.dirs.SnapAccessors))
 }
 
 func (h *History) missedMapAccessors(source []*FilesItem, dl dirListing) (l []*FilesItem) {
@@ -865,7 +868,7 @@ func (h *History) integrateDirtyFiles(sf HistoryFiles, txNumFrom, txNumTo uint64
 	fi := newFilesItem(txNumFrom, txNumTo, h.stepSize, h.stepsInFrozenFile)
 	fi.decompressor = sf.historyDecomp
 	fi.index = sf.historyIdx
-	h.dirtyFiles.Set(fi)
+	h.dirtyFiles.Upsert(fi, fi)
 }
 
 func (h *History) dataReader(f *seg.Decompressor) *seg.Reader {

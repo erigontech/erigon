@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	btree2 "github.com/anacrolix/btree"
 	"github.com/stretchr/testify/require"
-	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/kv"
@@ -70,10 +70,10 @@ func TestFileItemWithMissedAccessor(t *testing.T) {
 	}
 	aggStep := uint64(10)
 
-	btree := btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false})
-	btree.Set(f1)
-	btree.Set(f2)
-	btree.Set(f3)
+	m := btree2.MakeMap[*FilesItem, *FilesItem](filesItemCmp)
+	m.Upsert(f1, f1)
+	m.Upsert(f2, f2)
+	m.Upsert(f3, f3)
 
 	accessorFor := func(fromStep, toStep kv.Step) []string {
 		return []string{
@@ -93,7 +93,7 @@ func TestFileItemWithMissedAccessor(t *testing.T) {
 		defer dir.RemoveFile(fname)
 	}
 
-	fileItems := fileItemsWithMissedAccessors(btree.Items(), aggStep, accessorFor)
+	fileItems := fileItemsWithMissedAccessors(dirtyFilesItems(&m), aggStep, accessorFor)
 	require.Len(t, fileItems, 1)
 	require.Equal(t, f3, fileItems[0])
 }

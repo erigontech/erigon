@@ -24,8 +24,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/btree"
 	"github.com/holiman/uint256"
+
+	btree "github.com/anacrolix/btree"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
@@ -50,7 +51,7 @@ type KsmEonTracker struct {
 	keyBroadcastContract *contracts.KeyBroadcastContract
 	mu                   sync.RWMutex
 	currentEon           *Eon
-	recentEons           *btree.BTreeG[Eon]
+	recentEons           *btree.Map[Eon, Eon]
 	cleanupThreshold     uint64
 	lastCleanupBlockNum  uint64
 }
@@ -75,7 +76,7 @@ func NewKsmEonTracker(logger log.Logger, config shuttercfg.Config, bl *BlockList
 		ksmContract:          ksmContract,
 		keyBroadcastContract: keyBroadcastContract,
 		cleanupThreshold:     config.ReorgDepthAwareness,
-		recentEons:           btree.NewG[Eon](2, EonLess),
+		recentEons:           func() *btree.Map[Eon, Eon] { m := btree.MakeMap[Eon, Eon](eonCmp); return &m }(),
 	}
 }
 
@@ -128,18 +129,29 @@ func (et *KsmEonTracker) EonByBlockNum(blockNum uint64) (Eon, bool) {
 
 	var eon Eon
 	var found bool
-	et.recentEons.Descend(func(e Eon) bool {
+	iter := et.recentEons.Iterator()
+	for iter.Last(); iter.Valid(); iter.Prev() {
+		e := iter.Cur()
 		if blockNum >= e.ActivationBlock {
 			eon, found = e, true
-			return false // stop
+			break
 		}
-		return true // continue
-	})
+	}
 	return eon, found
 }
 
 func (et *KsmEonTracker) recentEon(index EonIndex) (Eon, bool) {
 	return et.recentEons.Get(Eon{Index: index})
+}
+
+func eonCmp(a, b Eon) int {
+	if EonLess(a, b) {
+		return -1
+	}
+	if EonLess(b, a) {
+		return 1
+	}
+	return 0
 }
 
 func (et *KsmEonTracker) trackCurrentEon(ctx context.Context) error {
@@ -186,7 +198,7 @@ func (et *KsmEonTracker) handleBlockEvent(blockEvent BlockEvent) error {
 	}
 
 	et.currentEon = &eon
-	et.recentEons.ReplaceOrInsert(eon)
+	et.recentEons.Upsert(eon, eon)
 	et.maybeCleanup(blockNum)
 	return nil
 }
@@ -311,13 +323,15 @@ func (et *KsmEonTracker) maybeCleanup(blockNum uint64) {
 	}
 
 	var cleanedEons []Eon
-	et.recentEons.Ascend(func(eon Eon) bool {
+	iter := et.recentEons.Iterator()
+	for iter.First(); iter.Valid(); iter.Next() {
+		eon := iter.Cur()
 		if eon.Index < et.currentEon.Index && eon.ActivationBlock < cleanUpTo {
 			cleanedEons = append(cleanedEons, eon)
-			return true // continue
+		} else {
+			break
 		}
-		return false // stop
-	})
+	}
 
 	for _, eon := range cleanedEons {
 		et.recentEons.Delete(eon)
@@ -379,7 +393,7 @@ func (et *KsmEonTracker) handleKeyperSetAddedEvent(event *contracts.KeyperSetMan
 		return nil
 	}
 
-	et.recentEons.ReplaceOrInsert(eon)
+	et.recentEons.Upsert(eon, eon)
 	return nil
 }
 

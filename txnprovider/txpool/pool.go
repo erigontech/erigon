@@ -28,10 +28,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	btree "github.com/anacrolix/btree"
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/go-stack/stack"
-	"github.com/google/btree"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
 
@@ -207,8 +207,9 @@ func New(
 		return nil, err
 	}
 
+	byNonceTree := btree.MakeMap[*metaTxn, *metaTxn](sortByNonceCmp)
 	byNonce := &BySenderAndNonce{
-		tree:              btree.NewG[*metaTxn](32, SortByNonceLess),
+		tree:              &byNonceTree,
 		search:            &metaTxn{TxnSlot: &TxnSlot{}},
 		senderIDTxnCount:  map[uint64]int{},
 		senderIDBlobCount: map[uint64]uint64{},

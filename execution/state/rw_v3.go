@@ -23,8 +23,8 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/anacrolix/btree"
 	"github.com/holiman/uint256"
-	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -383,7 +383,7 @@ var deleted accounts.Account
 type bufferedAccount struct {
 	data       *accounts.Account
 	code       []byte
-	storage    *btree.BTreeG[storageItem]
+	storage    *btree.Map[storageItem, storageItem]
 	wasDeleted bool // set when DeleteAccount was called; survives UpdateAccountCode overwrite
 }
 
@@ -532,11 +532,13 @@ func (c *versionedWriteCollector) WriteAccountStorage(address accounts.Address, 
 		c.rs.accounts[address] = obj
 	}
 	if obj.storage == nil {
-		obj.storage = btree.NewBTreeGOptions[storageItem](func(a, b storageItem) bool {
-			return a.key.Cmp(b.key) > 0
-		}, btree.Options{NoLocks: true})
+		m := btree.MakeMap[storageItem, storageItem](func(a, b storageItem) int {
+			return a.key.Cmp(b.key) * -1
+		})
+		obj.storage = &m
 	}
-	obj.storage.Set(storageItem{key, value})
+	item := storageItem{key, value}
+	obj.storage.Upsert(item, item)
 	c.rs.accountsMutex.Unlock()
 
 	return nil

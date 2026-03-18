@@ -123,13 +123,12 @@ func (ac *aggDirtyFilesRoTx) Close() {
 
 func (d *Domain) DebugBeginDirtyFilesRo() *domainDirtyFilesRoTx {
 	var files []*FilesItem
-	d.dirtyFiles.Walk(func(items []*FilesItem) bool {
-		files = append(files, items...)
-		for _, item := range items {
-			item.refcount.Add(1)
-		}
-		return true
-	})
+	iter := d.dirtyFiles.Iterator()
+	for iter.First(); iter.Valid(); iter.Next() {
+		item := iter.Cur()
+		files = append(files, item)
+		item.refcount.Add(1)
+	}
 	return &domainDirtyFilesRoTx{
 		d:       d,
 		files:   files,
@@ -164,13 +163,12 @@ func (d *domainDirtyFilesRoTx) Close() {
 
 func (h *History) DebugBeginDirtyFilesRo() *historyDirtyFilesRoTx {
 	var files []*FilesItem
-	h.dirtyFiles.Walk(func(items []*FilesItem) bool {
-		files = append(files, items...)
-		for _, item := range items {
-			item.refcount.Add(1)
-		}
-		return true
-	})
+	iter := h.dirtyFiles.Iterator()
+	for iter.First(); iter.Valid(); iter.Next() {
+		item := iter.Cur()
+		files = append(files, item)
+		item.refcount.Add(1)
+	}
 	return &historyDirtyFilesRoTx{
 		h:     h,
 		files: files,
@@ -204,13 +202,12 @@ func (f *historyDirtyFilesRoTx) Close() {
 
 func (ii *InvertedIndex) DebugBeginDirtyFilesRo() *iiDirtyFilesRoTx {
 	var files []*FilesItem
-	ii.dirtyFiles.Walk(func(items []*FilesItem) bool {
-		files = append(files, items...)
-		for _, item := range items {
-			item.refcount.Add(1)
-		}
-		return true
-	})
+	iter := ii.dirtyFiles.Iterator()
+	for iter.First(); iter.Valid(); iter.Next() {
+		item := iter.Cur()
+		files = append(files, item)
+		item.refcount.Add(1)
+	}
 	return &iiDirtyFilesRoTx{
 		ii:    ii,
 		files: files,

@@ -24,8 +24,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/btree"
 	"golang.org/x/sync/errgroup"
+
+	btree "github.com/anacrolix/btree"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -40,7 +41,7 @@ type EncryptedTxnsPool struct {
 	sequencerContract *contracts.Sequencer
 	blockListener     *BlockListener
 	mu                sync.RWMutex
-	submissions       *btree.BTreeG[EncryptedTxnSubmission]
+	submissions       *btree.Map[EncryptedTxnSubmission, EncryptedTxnSubmission]
 	initialLoadDone   chan struct{}
 }
 
@@ -56,8 +57,11 @@ func NewEncryptedTxnsPool(logger log.Logger, config shuttercfg.Config, cb bind.C
 		config:            config,
 		sequencerContract: sequencerContract,
 		blockListener:     bl,
-		submissions:       btree.NewG[EncryptedTxnSubmission](32, EncryptedTxnSubmissionLess),
-		initialLoadDone:   make(chan struct{}),
+		submissions: func() *btree.Map[EncryptedTxnSubmission, EncryptedTxnSubmission] {
+			m := btree.MakeMap[EncryptedTxnSubmission, EncryptedTxnSubmission](encryptedTxnSubmissionCmp)
+			return &m
+		}(),
+		initialLoadDone: make(chan struct{}),
 	}
 }
 
@@ -106,7 +110,10 @@ func (etp *EncryptedTxnsPool) Txns(eon EonIndex, from, to TxnIndex, gasLimit uin
 	var err error
 	etp.mu.RLock()
 	defer etp.mu.RUnlock()
-	etp.submissions.AscendRange(fromKey, toKey, func(item EncryptedTxnSubmission) bool {
+	iter := etp.submissions.Iterator()
+	iter.SeekGE(fromKey)
+	for ; iter.Valid() && encryptedTxnSubmissionCmp(iter.Cur(), toKey) < 0; iter.Next() {
+		item := iter.Cur()
 		newTotalGasLimit := totalGasLimit + item.GasLimit.Uint64()
 		if newTotalGasLimit > gasLimit {
 			etp.logger.Warn(
@@ -119,7 +126,7 @@ func (etp *EncryptedTxnsPool) Txns(eon EonIndex, from, to TxnIndex, gasLimit uin
 				"totalGasLimit", totalGasLimit,
 				"newTotalGasLimit", newTotalGasLimit,
 			)
-			return false // break
+			break
 		}
 
 		totalGasLimit = newTotalGasLimit
@@ -127,7 +134,7 @@ func (etp *EncryptedTxnsPool) Txns(eon EonIndex, from, to TxnIndex, gasLimit uin
 		if item.TxnIndex < nextTxnIndex {
 			// this should never happen - highlights bug in the logic somewhere
 			err = fmt.Errorf("unexpected item txn index lt next txn index: %d < %d", item.TxnIndex, nextTxnIndex)
-			return false // break
+			break
 		}
 
 		if item.TxnIndex > nextTxnIndex {
@@ -141,13 +148,12 @@ func (etp *EncryptedTxnsPool) Txns(eon EonIndex, from, to TxnIndex, gasLimit uin
 				"to", to,
 			)
 			idxOffset += item.TxnIndex - nextTxnIndex + 1
-			return true // continue
+			continue
 		}
 
 		idxOffset++
 		txns = append(txns, item)
-		return true // continue
-	})
+	}
 
 	return txns, err
 }
@@ -156,10 +162,10 @@ func (etp *EncryptedTxnsPool) AllSubmissions() []EncryptedTxnSubmission {
 	etp.mu.RLock()
 	defer etp.mu.RUnlock()
 	submissions := make([]EncryptedTxnSubmission, 0, etp.submissions.Len())
-	etp.submissions.Ascend(func(item EncryptedTxnSubmission) bool {
-		submissions = append(submissions, item)
-		return true
-	})
+	iter := etp.submissions.Iterator()
+	for iter.First(); iter.Valid(); iter.Next() {
+		submissions = append(submissions, iter.Cur())
+	}
 	return submissions
 }
 
@@ -169,10 +175,10 @@ func (etp *EncryptedTxnsPool) DeleteUpTo(eon EonIndex, to TxnIndex) {
 
 	var toDelete []EncryptedTxnSubmission
 	pivot := EncryptedTxnSubmission{EonIndex: eon, TxnIndex: to}
-	etp.submissions.AscendLessThan(pivot, func(item EncryptedTxnSubmission) bool {
-		toDelete = append(toDelete, item)
-		return true
-	})
+	iter := etp.submissions.Iterator()
+	for iter.First(); iter.Valid() && encryptedTxnSubmissionCmp(iter.Cur(), pivot) < 0; iter.Next() {
+		toDelete = append(toDelete, iter.Cur())
+	}
 
 	if len(toDelete) == 0 {
 		return
@@ -240,7 +246,13 @@ func (etp *EncryptedTxnsPool) handleEncryptedTxnSubmissionEvent(event *contracts
 		return nil
 	}
 
-	lastEncryptedTxnSubmission, ok := etp.submissions.Max()
+	iter := etp.submissions.Iterator()
+	iter.Last()
+	ok := iter.Valid()
+	var lastEncryptedTxnSubmission EncryptedTxnSubmission
+	if ok {
+		lastEncryptedTxnSubmission = iter.Cur()
+	}
 	if ok && encryptedTxnSubmission.TxnIndex <= lastEncryptedTxnSubmission.TxnIndex {
 		etp.logger.Warn("submission is behind last known", "last", lastEncryptedTxnSubmission.TxnIndex, "event", encryptedTxnSubmission.TxnIndex)
 		return nil
@@ -371,10 +383,12 @@ func (etp *EncryptedTxnsPool) loadSubmissions(start, end uint64) error {
 }
 
 func (etp *EncryptedTxnsPool) addSubmission(submission EncryptedTxnSubmission) {
-	etp.submissions.ReplaceOrInsert(submission)
+	etp.submissions.Upsert(submission, submission)
 	submissionsLen := etp.submissions.Len()
 	if submissionsLen > etp.config.MaxPooledEncryptedTxns {
-		del, _ := etp.submissions.Min()
+		minIter := etp.submissions.Iterator()
+		minIter.First()
+		del := minIter.Cur()
 		etp.deleteSubmission(del)
 	}
 

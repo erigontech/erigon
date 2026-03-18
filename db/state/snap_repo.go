@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	btree2 "github.com/tidwall/btree"
+	btree2 "github.com/anacrolix/btree"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
@@ -30,7 +30,7 @@ import (
 // NOTE: not thread safe; synchronization done on the caller side
 // specially when accessing dirtyFiles or current.
 type SnapshotRepo struct {
-	dirtyFiles *btree2.BTreeG[*FilesItem]
+	dirtyFiles *btree2.Map[*FilesItem, *FilesItem]
 
 	// latest version of visible files (derived from dirtyFiles)
 	// when repo is used in the context of rotx, one might want to think
@@ -55,14 +55,17 @@ func NewSnapshotRepoForForkable(id kv.ForkableId, logger log.Logger) *SnapshotRe
 
 func NewSnapshotRepo(name string, entity UniversalEntity, cfg *SnapshotConfig, logger log.Logger) *SnapshotRepo {
 	return &SnapshotRepo{
-		dirtyFiles: btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		name:       name,
-		entity:     entity,
-		cfg:        cfg,
-		schema:     cfg.Schema,
-		stepSize:   cfg.RootNumPerStep,
-		accessors:  cfg.Schema.AccessorList(),
-		logger:     logger,
+		dirtyFiles: func() *btree2.Map[*FilesItem, *FilesItem] {
+			m := btree2.MakeMap[*FilesItem, *FilesItem](filesItemCmp)
+			return &m
+		}(),
+		name:      name,
+		entity:    entity,
+		cfg:       cfg,
+		schema:    cfg.Schema,
+		stepSize:  cfg.RootNumPerStep,
+		accessors: cfg.Schema.AccessorList(),
+		logger:    logger,
 	}
 }
 
@@ -94,20 +97,20 @@ func (f *SnapshotRepo) IntegrateDirtyFile(file *FilesItem) {
 	if file == nil {
 		return
 	}
-	f.dirtyFiles.Set(file)
+	f.dirtyFiles.Upsert(file, file)
 }
 
 func (f *SnapshotRepo) IntegrateDirtyFiles(files []*FilesItem) {
 	for _, file := range files {
 		if file != nil {
-			f.dirtyFiles.Set(file)
+			f.dirtyFiles.Upsert(file, file)
 		}
 	}
 }
 
 func (f *SnapshotRepo) IntegrateMergedFiles(dfs []*FilesItem, mergedFile *FilesItem) {
 	if mergedFile != nil {
-		f.dirtyFiles.Set(mergedFile)
+		f.dirtyFiles.Upsert(mergedFile, mergedFile)
 	}
 }
 
@@ -138,11 +141,12 @@ func (f *SnapshotRepo) DeleteFilesAfterMerge(files []*FilesItem) {
 }
 
 func (f *SnapshotRepo) DirtyFilesMaxRootNum() RootNum {
-	fi, found := f.dirtyFiles.Max()
-	if !found {
+	iter := f.dirtyFiles.Iterator()
+	iter.Last()
+	if !iter.Valid() {
 		return 0
 	}
-	return RootNum(fi.endTxNum)
+	return RootNum(iter.Cur().endTxNum)
 }
 
 func (f *SnapshotRepo) RecalcVisibleFiles(to RootNum) (maxRootNum RootNum) {
@@ -176,7 +180,7 @@ func (f *SnapshotRepo) DirtyFilesWithNoBtreeAccessors() (l []*FilesItem) {
 	ss := f.stepSize
 	v := version.V1_0
 
-	return fileItemsWithMissedAccessors(f.dirtyFiles.Items(), f.stepSize, func(fromStep, toStep kv.Step) []string {
+	return fileItemsWithMissedAccessors(dirtyFilesItems(f.dirtyFiles), f.stepSize, func(fromStep, toStep kv.Step) []string {
 		from, to := RootNum(uint64(fromStep)*ss), RootNum(uint64(toStep)*ss)
 		fname, _ := p.BtIdxFile(v, from, to)
 		existenceFile, _ := p.ExistenceFile(v, from, to)
@@ -194,7 +198,7 @@ func (f *SnapshotRepo) DirtyFilesWithNoHashAccessors() (l []*FilesItem) {
 	accCount := f.schema.AccessorIdxCount()
 	files := make([]string, accCount)
 
-	return fileItemsWithMissedAccessors(f.dirtyFiles.Items(), f.stepSize, func(fromStep, toStep kv.Step) []string {
+	return fileItemsWithMissedAccessors(dirtyFilesItems(f.dirtyFiles), f.stepSize, func(fromStep, toStep kv.Step) []string {
 		for i := uint16(0); i < accCount; i++ {
 			files[i], _ = p.AccessorIdxFile(v, RootNum(fromStep.ToTxNum(ss)), RootNum(toStep.ToTxNum(ss)), i)
 		}
@@ -217,12 +221,13 @@ func (f *SnapshotRepo) Close() {
 func (f *SnapshotRepo) CloseFilesAfterRootNum(after RootNum) {
 	var toClose []*FilesItem
 	rootNum := uint64(after)
-	f.dirtyFiles.Scan(func(item *FilesItem) bool {
+	iter := f.dirtyFiles.Iterator()
+	for iter.First(); iter.Valid(); iter.Next() {
+		item := iter.Cur()
 		if item.startTxNum >= rootNum {
 			toClose = append(toClose, item)
 		}
-		return true
-	})
+	}
 	for _, item := range toClose {
 		f.dirtyFiles.Delete(item)
 		fName := ""
@@ -328,7 +333,7 @@ func (f *SnapshotRepo) FilesWithMissedAccessors() *MissedFilesMap {
 	mf := make(map[statecfg.Accessors][]*FilesItem)
 	if f.accessors.Has(statecfg.AccessorBTree) {
 		mf[statecfg.AccessorBTree] =
-			fileItemsWithMissedAccessors(f.dirtyFiles.Items(), f.stepSize, func(fromStep, toStep kv.Step) []string {
+			fileItemsWithMissedAccessors(dirtyFilesItems(f.dirtyFiles), f.stepSize, func(fromStep, toStep kv.Step) []string {
 				file, _ := f.schema.BtIdxFile(version.V1_0, RootNum(fromStep*kv.Step(f.stepSize)), RootNum(toStep*kv.Step(f.stepSize)))
 				return []string{file}
 			})
@@ -336,7 +341,7 @@ func (f *SnapshotRepo) FilesWithMissedAccessors() *MissedFilesMap {
 
 	if f.accessors.Has(statecfg.AccessorHashMap) {
 		mf[statecfg.AccessorHashMap] =
-			fileItemsWithMissedAccessors(f.dirtyFiles.Items(), f.stepSize, func(fromStep, toStep kv.Step) []string {
+			fileItemsWithMissedAccessors(dirtyFilesItems(f.dirtyFiles), f.stepSize, func(fromStep, toStep kv.Step) []string {
 				file, _ := f.schema.AccessorIdxFile(version.V1_0, RootNum(fromStep*kv.Step(f.stepSize)), RootNum(toStep*kv.Step(f.stepSize)), 0)
 				return []string{file}
 			})
@@ -344,7 +349,7 @@ func (f *SnapshotRepo) FilesWithMissedAccessors() *MissedFilesMap {
 
 	if f.accessors.Has(statecfg.AccessorExistence) {
 		mf[statecfg.AccessorExistence] =
-			fileItemsWithMissedAccessors(f.dirtyFiles.Items(), f.stepSize, func(fromStep, toStep kv.Step) []string {
+			fileItemsWithMissedAccessors(dirtyFilesItems(f.dirtyFiles), f.stepSize, func(fromStep, toStep kv.Step) []string {
 				file, _ := f.schema.ExistenceFile(version.V1_0, RootNum(fromStep*kv.Step(f.stepSize)), RootNum(toStep*kv.Step(f.stepSize)))
 				return []string{file}
 			})
@@ -360,74 +365,73 @@ func (f *SnapshotRepo) openDirtyFiles(dirEntries []string) error {
 	invalidFileItems := make([]*FilesItem, 0)
 	p := f.schema
 	dir := f.schema.DataDirectory()
-	f.dirtyFiles.Walk(func(items []*FilesItem) bool {
-		for _, item := range items {
-			if item.decompressor == nil {
-				fPathGen, _ := p.DataFile(version.V1_0, RootNum(item.startTxNum), RootNum(item.endTxNum))
-				fPathMask, _ := version.ReplaceVersionWithMask(fPathGen)
-				_, fNameMask := filepath.Split(fPathMask)
-				fPath, _, ok, err := version.MatchVersionedFile(fNameMask, dirEntries, dir)
-				if err != nil || !ok {
-					_, fName := filepath.Split(fPath)
-					if err == nil {
-						f.logger.Debug("SnapshotRepo.openDirtyFiles: file doesn't exist", "f", fName)
-					} else {
-						f.logger.Debug("SnapshotRepo.openDirtyFiles: FileExist", "f", fName, "err", err)
-					}
-					invalidFilesMu.Lock()
-					invalidFileItems = append(invalidFileItems, item)
-					invalidFilesMu.Unlock()
-					continue
-				}
-				if item.decompressor, err = seg.NewDecompressorWithMetadata(fPath, f.cfg.HasMetadata); err != nil {
-					_, fName := filepath.Split(fPath)
-					f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
-					invalidFilesMu.Lock()
-					invalidFileItems = append(invalidFileItems, item)
-					invalidFilesMu.Unlock()
-					continue
-				}
-			}
-
-			accessors := p.AccessorList()
-
-			if item.index == nil && accessors.Has(statecfg.AccessorHashMap) {
-				fPath, err := p.AccessorIdxFile(version.SearchVersion, RootNum(item.startTxNum), RootNum(item.endTxNum), 0)
-				if err != nil {
-					f.logger.Error("SnapshotRepo.openDirtyFiles accessor path", "err", err, "f", fPath)
-				} else if item.index, err = recsplit.OpenIndex(fPath); err != nil {
-					_, fName := filepath.Split(fPath)
-					f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
-					// don't interrupt on error. other files maybe good
-				}
-			}
-
-			if item.bindex == nil && accessors.Has(statecfg.AccessorBTree) {
-				fPath, err := p.BtIdxFile(version.SearchVersion, RootNum(item.startTxNum), RootNum(item.endTxNum))
-				if err != nil {
-					f.logger.Error("SnapshotRepo.openDirtyFiles btindex path", "err", err, "f", fPath)
+	iter := f.dirtyFiles.Iterator()
+	for iter.First(); iter.Valid(); iter.Next() {
+		item := iter.Cur()
+		if item.decompressor == nil {
+			fPathGen, _ := p.DataFile(version.V1_0, RootNum(item.startTxNum), RootNum(item.endTxNum))
+			fPathMask, _ := version.ReplaceVersionWithMask(fPathGen)
+			_, fNameMask := filepath.Split(fPathMask)
+			fPath, _, ok, err := version.MatchVersionedFile(fNameMask, dirEntries, dir)
+			if err != nil || !ok {
+				_, fName := filepath.Split(fPath)
+				if err == nil {
+					f.logger.Debug("SnapshotRepo.openDirtyFiles: file doesn't exist", "f", fName)
 				} else {
-					r := seg.NewReader(item.decompressor.MakeGetter(), p.DataFileCompression())
-					if item.bindex, err = btindex.OpenBtreeIndexWithDecompressor(fPath, btindex.DefaultBtreeM, r); err != nil {
-						_, fName := filepath.Split(fPath)
-						f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
-						// don't interrupt on error. other files maybe good
-					}
+					f.logger.Debug("SnapshotRepo.openDirtyFiles: FileExist", "f", fName, "err", err)
 				}
+				invalidFilesMu.Lock()
+				invalidFileItems = append(invalidFileItems, item)
+				invalidFilesMu.Unlock()
+				continue
 			}
-			if item.existence == nil && accessors.Has(statecfg.AccessorExistence) {
-				fPath, err := p.ExistenceFile(version.SearchVersion, RootNum(item.startTxNum), RootNum(item.endTxNum))
-				if err != nil {
-					f.logger.Error("SnapshotRepo.openDirtyFiles existence path", "err", err, "f", fPath)
-				} else if item.existence, err = existence.OpenFilter(fPath, false); err != nil {
+			if item.decompressor, err = seg.NewDecompressorWithMetadata(fPath, f.cfg.HasMetadata); err != nil {
+				_, fName := filepath.Split(fPath)
+				f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
+				invalidFilesMu.Lock()
+				invalidFileItems = append(invalidFileItems, item)
+				invalidFilesMu.Unlock()
+				continue
+			}
+		}
+
+		accessors := p.AccessorList()
+
+		if item.index == nil && accessors.Has(statecfg.AccessorHashMap) {
+			fPath, err := p.AccessorIdxFile(version.SearchVersion, RootNum(item.startTxNum), RootNum(item.endTxNum), 0)
+			if err != nil {
+				f.logger.Error("SnapshotRepo.openDirtyFiles accessor path", "err", err, "f", fPath)
+			} else if item.index, err = recsplit.OpenIndex(fPath); err != nil {
+				_, fName := filepath.Split(fPath)
+				f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
+				// don't interrupt on error. other files maybe good
+			}
+		}
+
+		if item.bindex == nil && accessors.Has(statecfg.AccessorBTree) {
+			fPath, err := p.BtIdxFile(version.SearchVersion, RootNum(item.startTxNum), RootNum(item.endTxNum))
+			if err != nil {
+				f.logger.Error("SnapshotRepo.openDirtyFiles btindex path", "err", err, "f", fPath)
+			} else {
+				r := seg.NewReader(item.decompressor.MakeGetter(), p.DataFileCompression())
+				if item.bindex, err = btindex.OpenBtreeIndexWithDecompressor(fPath, btindex.DefaultBtreeM, r); err != nil {
 					_, fName := filepath.Split(fPath)
 					f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
 					// don't interrupt on error. other files maybe good
 				}
 			}
 		}
-		return true
-	})
+		if item.existence == nil && accessors.Has(statecfg.AccessorExistence) {
+			fPath, err := p.ExistenceFile(version.SearchVersion, RootNum(item.startTxNum), RootNum(item.endTxNum))
+			if err != nil {
+				f.logger.Error("SnapshotRepo.openDirtyFiles existence path", "err", err, "f", fPath)
+			} else if item.existence, err = existence.OpenFilter(fPath, false); err != nil {
+				_, fName := filepath.Split(fPath)
+				f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
+				// don't interrupt on error. other files maybe good
+			}
+		}
+	}
 
 	for _, item := range invalidFileItems {
 		item.closeFiles()
@@ -455,7 +459,7 @@ func (f *SnapshotRepo) loadDirtyFiles(aps []string) {
 		dirtyFile := newFilesItemWithSnapConfig(fileInfo.From, fileInfo.To, f.cfg)
 
 		if _, has := f.dirtyFiles.Get(dirtyFile); !has {
-			f.dirtyFiles.Set(dirtyFile)
+			f.dirtyFiles.Upsert(dirtyFile, dirtyFile)
 		}
 	}
 }

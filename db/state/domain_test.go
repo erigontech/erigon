@@ -2848,15 +2848,14 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 
 	findFile := func(start, end uint64) *FilesItem {
 		var foundFile *FilesItem
-		domainRoTx.d.dirtyFiles.Walk(func(items []*FilesItem) bool {
-			for _, item := range items {
-				if item.startTxNum == start && item.endTxNum == end {
-					foundFile = item
-					return false
-				}
+		iter := domainRoTx.d.dirtyFiles.Iterator()
+		for iter.First(); iter.Valid(); iter.Next() {
+			item := iter.Cur()
+			if item.startTxNum == start && item.endTxNum == end {
+				foundFile = item
+				break
 			}
-			return true
-		})
+		}
 		return foundFile
 	}
 
@@ -3340,15 +3339,16 @@ func TestDomain_IntegrateDirtyFilesNilGuard(t *testing.T) {
 
 	// verify the dirty file has a non-nil decompressor
 	var foundGood *FilesItem
-	d.dirtyFiles.Walk(func(items []*FilesItem) bool {
-		for _, item := range items {
+	{
+		iter := d.dirtyFiles.Iterator()
+		for iter.First(); iter.Valid(); iter.Next() {
+			item := iter.Cur()
 			if item.startTxNum == 0 && item.endTxNum == d.stepSize {
 				foundGood = item
-				return false
+				break
 			}
 		}
-		return true
-	})
+	}
 	require.NotNil(t, foundGood, "dirty file for step 0 must exist")
 	require.NotNil(t, foundGood.decompressor, "dirty file must have non-nil decompressor")
 
@@ -3358,15 +3358,16 @@ func TestDomain_IntegrateDirtyFilesNilGuard(t *testing.T) {
 
 	// regression check: dirty file must still have its non-nil decompressor
 	var foundAfter *FilesItem
-	d.dirtyFiles.Walk(func(items []*FilesItem) bool {
-		for _, item := range items {
+	{
+		iter := d.dirtyFiles.Iterator()
+		for iter.First(); iter.Valid(); iter.Next() {
+			item := iter.Cur()
 			if item.startTxNum == 0 && item.endTxNum == d.stepSize {
 				foundAfter = item
-				return false
+				break
 			}
 		}
-		return true
-	})
+	}
 	require.NotNil(t, foundAfter, "dirty file for step 0 must still exist after nil StaticFiles")
 	require.NotNil(t, foundAfter.decompressor, "dirty file decompressor must not be overwritten by nil StaticFiles")
 }

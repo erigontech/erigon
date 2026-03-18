@@ -29,7 +29,7 @@ import (
 	"sync"
 	"time"
 
-	btree2 "github.com/tidwall/btree"
+	btree2 "github.com/anacrolix/btree"
 	"golang.org/x/sync/errgroup"
 
 	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
@@ -88,7 +88,7 @@ type Domain struct {
 	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
 	//
 	// BeginRo() using _visible in zero-copy way
-	dirtyFiles *btree2.BTreeG[*FilesItem]
+	dirtyFiles *btree2.Map[*FilesItem, *FilesItem]
 
 	// _visible - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
@@ -114,9 +114,10 @@ func NewDomain(cfg statecfg.DomainCfg, stepSize, stepsInFrozenFile uint64, dirs 
 		panic("assert: emtpy `filenameBase`" + cfg.Name.String())
 	}
 
+	dirtyFilesMap := btree2.MakeMap[*FilesItem, *FilesItem](filesItemCmp)
 	d := &Domain{
 		DomainCfg:  cfg,
-		dirtyFiles: btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		dirtyFiles: &dirtyFilesMap,
 		_visible:   newDomainVisible(cfg.Name, []visibleFile{}),
 	}
 
@@ -261,12 +262,13 @@ func (d *Domain) openFolder(r *ScanDirsResult) error {
 
 func (d *Domain) closeFilesAfterStep(lowerBound kv.Step) {
 	var toClose []*FilesItem
-	d.dirtyFiles.Scan(func(item *FilesItem) bool {
+	iter := d.dirtyFiles.Iterator()
+	for iter.First(); iter.Valid(); iter.Next() {
+		item := iter.Cur()
 		if item.StartStep(d.stepSize) >= lowerBound {
 			toClose = append(toClose, item)
 		}
-		return true
-	})
+	}
 	for _, item := range toClose {
 		d.dirtyFiles.Delete(item)
 		fName := ""
@@ -278,12 +280,13 @@ func (d *Domain) closeFilesAfterStep(lowerBound kv.Step) {
 	}
 
 	toClose = toClose[:0]
-	d.History.dirtyFiles.Scan(func(item *FilesItem) bool {
+	iter = d.History.dirtyFiles.Iterator()
+	for iter.First(); iter.Valid(); iter.Next() {
+		item := iter.Cur()
 		if item.StartStep(d.stepSize) >= lowerBound {
 			toClose = append(toClose, item)
 		}
-		return true
-	})
+	}
 	for _, item := range toClose {
 		d.History.dirtyFiles.Delete(item)
 		fName := ""
@@ -295,12 +298,13 @@ func (d *Domain) closeFilesAfterStep(lowerBound kv.Step) {
 	}
 
 	toClose = toClose[:0]
-	d.History.InvertedIndex.dirtyFiles.Scan(func(item *FilesItem) bool {
+	iter = d.History.InvertedIndex.dirtyFiles.Iterator()
+	for iter.First(); iter.Valid(); iter.Next() {
+		item := iter.Cur()
 		if item.StartStep(d.stepSize) >= lowerBound {
 			toClose = append(toClose, item)
 		}
-		return true
-	})
+	}
 	for _, item := range toClose {
 		d.History.InvertedIndex.dirtyFiles.Delete(item)
 		fName := ""
@@ -321,7 +325,7 @@ func (d *Domain) scanDirtyFiles(fileNames []string) (garbageFiles []*FilesItem) 
 		dirtyFile.frozen = false
 
 		if _, has := d.dirtyFiles.Get(dirtyFile); !has {
-			d.dirtyFiles.Set(dirtyFile)
+			d.dirtyFiles.Upsert(dirtyFile, dirtyFile)
 		}
 	}
 	return garbageFiles
@@ -1133,7 +1137,7 @@ func (d *Domain) missedBtreeAccessors(source []*FilesItem, dl dirListing) (l []*
 }
 
 func (d *Domain) MissedMapAccessors() (l []*FilesItem) {
-	return d.missedMapAccessors(d.dirtyFiles.Items(), readDirNames(d.dirs.SnapDomain))
+	return d.missedMapAccessors(dirtyFilesItems(d.dirtyFiles), readDirNames(d.dirs.SnapDomain))
 }
 
 func (d *Domain) missedMapAccessors(source []*FilesItem, dl dirListing) (l []*FilesItem) {
@@ -1279,7 +1283,7 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 	fi.index = sf.valuesIdx
 	fi.bindex = sf.valuesBt
 	fi.existence = sf.existenceFilter
-	d.dirtyFiles.Set(fi)
+	d.dirtyFiles.Upsert(fi, fi)
 }
 
 // unwind is similar to prune but the difference is that it restores domain values from the history as of txFrom

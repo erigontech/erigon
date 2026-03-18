@@ -26,8 +26,7 @@ import (
 	"sync"
 
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
-	"github.com/google/btree"
-	btree2 "github.com/tidwall/btree"
+	btree2 "github.com/anacrolix/btree"
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/state"
@@ -39,8 +38,6 @@ type reconPair struct {
 	val        []byte
 }
 
-func (i reconPair) Less(than btree.Item) bool { return ReconnLess(i, than.(reconPair)) }
-
 func ReconnLess(i, thanItem reconPair) bool {
 	if i.txNum == thanItem.txNum {
 		c1 := bytes.Compare(i.key1, thanItem.key1)
@@ -51,6 +48,16 @@ func ReconnLess(i, thanItem reconPair) bool {
 		return c1 < 0
 	}
 	return i.txNum < thanItem.txNum
+}
+
+func reconnCmp(i, j reconPair) int {
+	if ReconnLess(i, j) {
+		return -1
+	}
+	if ReconnLess(j, i) {
+		return 1
+	}
+	return 0
 }
 
 type ReconnWork struct {
@@ -68,8 +75,7 @@ type ReconState struct {
 	*ReconnWork //has it's own mutex. allow avoid lock-contention between state.Get() and work.Done() methods
 
 	lock         sync.RWMutex
-	changes      map[string]*btree2.BTreeG[reconPair] // table => [] (txNum; key1; key2; val)
-	hints        map[string]*btree2.PathHint
+	changes      map[string]*btree2.Map[reconPair, reconPair] // table => [] (txNum; key1; key2; val)
 	sizeEstimate int
 }
 
@@ -79,8 +85,7 @@ func NewReconState(workCh chan *TxTask) *ReconState {
 			workCh:   workCh,
 			triggers: map[uint64][]*TxTask{},
 		},
-		changes: map[string]*btree2.BTreeG[reconPair]{},
-		hints:   map[string]*btree2.PathHint{},
+		changes: map[string]*btree2.Map[reconPair, reconPair]{},
 	}
 	return rs
 }
@@ -103,14 +108,14 @@ func (rs *ReconState) Put(table string, key1, key2, val []byte, txNum uint64) {
 	defer rs.lock.Unlock()
 	t, ok := rs.changes[table]
 	if !ok {
-		t = btree2.NewBTreeGOptions[reconPair](ReconnLess, btree2.Options{Degree: 128, NoLocks: true})
+		m := btree2.MakeMap[reconPair, reconPair](reconnCmp)
+		t = &m
 		rs.changes[table] = t
-		rs.hints[table] = &btree2.PathHint{}
 	}
 	item := reconPair{key1: key1, key2: key2, val: val, txNum: txNum}
-	old, ok := t.SetHint(item, rs.hints[table])
+	_, old, replaced := t.Upsert(item, item)
 	rs.sizeEstimate += len(key1) + len(key2) + len(val)
-	if ok {
+	if replaced {
 		rs.sizeEstimate -= len(old.key1) + len(old.key2) + len(old.val)
 	}
 }
@@ -120,14 +125,14 @@ func (rs *ReconState) Delete(table string, key1, key2 []byte, txNum uint64) {
 	defer rs.lock.Unlock()
 	t, ok := rs.changes[table]
 	if !ok {
-		t = btree2.NewBTreeGOptions[reconPair](ReconnLess, btree2.Options{Degree: 128, NoLocks: true})
+		m := btree2.MakeMap[reconPair, reconPair](reconnCmp)
+		t = &m
 		rs.changes[table] = t
-		rs.hints[table] = &btree2.PathHint{}
 	}
 	item := reconPair{key1: key1, key2: key2, val: nil, txNum: txNum}
-	old, ok := t.SetHint(item, rs.hints[table])
+	_, old, replaced := t.Upsert(item, item)
 	rs.sizeEstimate += len(key1) + len(key2)
-	if ok {
+	if replaced {
 		rs.sizeEstimate -= len(old.key1) + len(old.key2) + len(old.val)
 	}
 }
@@ -139,16 +144,22 @@ func (rs *ReconState) RemoveAll(table string, key1 []byte) {
 	if !ok {
 		return
 	}
-	t.Ascend(reconPair{key1: key1, key2: nil}, func(item reconPair) bool {
+	var toDelete []reconPair
+	iter := t.Iterator()
+	iter.SeekGE(reconPair{key1: key1, key2: nil})
+	for ; iter.Valid(); iter.Next() {
+		item := iter.Cur()
 		if !bytes.Equal(item.key1, key1) {
-			return false
+			break
 		}
 		if item.key2 == nil {
-			return true
+			continue
 		}
+		toDelete = append(toDelete, item)
+	}
+	for _, item := range toDelete {
 		t.Delete(item)
-		return true
-	})
+	}
 }
 
 func (rs *ReconState) Get(table string, key1, key2 []byte, txNum uint64) []byte {
@@ -169,35 +180,30 @@ func (rs *ReconState) Flush(rwTx kv.RwTx) error {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 	for table, t := range rs.changes {
-		var err error
-		t.Walk(func(items []reconPair) bool {
-			for _, item := range items {
-				var composite []byte
-				if item.key2 == nil {
-					composite = make([]byte, 8+len(item.key1))
-				} else {
-					composite = make([]byte, 8+len(item.key1)+8+len(item.key2))
-					binary.BigEndian.PutUint64(composite[8+len(item.key1):], state.FirstContractIncarnation)
-					copy(composite[8+len(item.key1)+8:], item.key2)
+		iter := t.Iterator()
+		for iter.First(); iter.Valid(); iter.Next() {
+			item := iter.Cur()
+			var composite []byte
+			if item.key2 == nil {
+				composite = make([]byte, 8+len(item.key1))
+			} else {
+				composite = make([]byte, 8+len(item.key1)+8+len(item.key2))
+				binary.BigEndian.PutUint64(composite[8+len(item.key1):], state.FirstContractIncarnation)
+				copy(composite[8+len(item.key1)+8:], item.key2)
+			}
+			binary.BigEndian.PutUint64(composite, item.txNum)
+			copy(composite[8:], item.key1)
+			if len(item.val) == 0 {
+				if err := rwTx.Put(table, composite[:8], composite[8:]); err != nil {
+					return err
 				}
-				binary.BigEndian.PutUint64(composite, item.txNum)
-				copy(composite[8:], item.key1)
-				if len(item.val) == 0 {
-					if err = rwTx.Put(table, composite[:8], composite[8:]); err != nil {
-						return false
-					}
-				} else {
-					if err = rwTx.Put(table, composite, item.val); err != nil {
-						return false
-					}
+			} else {
+				if err := rwTx.Put(table, composite, item.val); err != nil {
+					return err
 				}
 			}
-			return true
-		})
-		if err != nil {
-			return err
 		}
-		t.Clear()
+		t.Reset()
 	}
 	rs.sizeEstimate = 0
 	return nil

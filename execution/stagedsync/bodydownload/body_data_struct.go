@@ -18,7 +18,7 @@ package bodydownload
 
 import (
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
-	"github.com/google/btree"
+	btree "github.com/anacrolix/btree"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
@@ -63,7 +63,7 @@ type BodyDownload struct {
 	requestedLow     uint64 // Lower bound of block number for outstanding requests
 	deliveredCount   float64
 	wastedCount      float64
-	bodyCache        *btree.BTreeG[BodyTreeItem]
+	bodyCache        *btree.Map[BodyTreeItem, BodyTreeItem]
 	bodyCacheSize    int
 	bodyCacheLimit   int // Limit of body Cache size
 	blockBufferSize  int
@@ -123,9 +123,20 @@ func NewBodyDownload(engine rules.Engine, blockBufferSize, bodyCacheLimit int, b
 		DeliveryNotify: make(chan struct{}, 1),
 		// delivery channel needs to have enough capacity not to create contention
 		// between delivery and collections
-		deliveryCh:      make(chan Delivery, 2*MaxBodiesInRequest),
-		Engine:          engine,
-		bodyCache:       btree.NewG[BodyTreeItem](32, func(a, b BodyTreeItem) bool { return a.blockNum < b.blockNum }),
+		deliveryCh: make(chan Delivery, 2*MaxBodiesInRequest),
+		Engine:     engine,
+		bodyCache: func() *btree.Map[BodyTreeItem, BodyTreeItem] {
+			m := btree.MakeMap[BodyTreeItem, BodyTreeItem](func(a, b BodyTreeItem) int {
+				if a.blockNum < b.blockNum {
+					return -1
+				}
+				if a.blockNum > b.blockNum {
+					return 1
+				}
+				return 0
+			})
+			return &m
+		}(),
 		br:              br,
 		blockBufferSize: blockBufferSize,
 		logger:          logger,

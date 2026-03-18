@@ -92,8 +92,8 @@ func TestOpenFolder(t *testing.T) {
 	}
 
 	headerF, bodyF := agg.marked[0], agg.marked[1]
-	headerItems := headerF.snaps.dirtyFiles.Items()
-	bodyItems := bodyF.snaps.dirtyFiles.Items()
+	headerItems := dirtyFilesItems(headerF.snaps.dirtyFiles)
+	bodyItems := dirtyFilesItems(bodyF.snaps.dirtyFiles)
 	require.Equal(t, 5, len(headerItems))
 	require.Equal(t, 5, len(bodyItems))
 	for i := range headerItems {
@@ -128,8 +128,8 @@ func TestOpenFolder(t *testing.T) {
 
 	require.NoError(t, agg.OpenFolder())
 	headerF, bodyF = agg.marked[0], agg.marked[1]
-	headerItems = headerF.snaps.dirtyFiles.Items()
-	bodyItems = bodyF.snaps.dirtyFiles.Items()
+	headerItems = dirtyFilesItems(headerF.snaps.dirtyFiles)
+	bodyItems = dirtyFilesItems(bodyF.snaps.dirtyFiles)
 	require.Equal(t, 5, len(headerItems))
 	require.Equal(t, 5, len(bodyItems))
 	for i := range headerItems {
@@ -182,7 +182,7 @@ func TestRecalcVisibleFilesAligned(t *testing.T) {
 	}
 
 	// delete last bodies file...
-	bodiesFiles := agg.marked[1].snaps.dirtyFiles.Items()
+	bodiesFiles := dirtyFilesItems(agg.marked[1].snaps.dirtyFiles)
 	require.Equal(t, 3, len(bodiesFiles))
 	lastBodyFile := bodiesFiles[len(bodiesFiles)-1].decompressor.FilePath()
 	agg.Close()
@@ -244,7 +244,7 @@ func TestRecalcVisibleFilesUnaligned(t *testing.T) {
 	}
 
 	// delete last bodies file...
-	bodiesFiles := agg.marked[1].snaps.dirtyFiles.Items()
+	bodiesFiles := dirtyFilesItems(agg.marked[1].snaps.dirtyFiles)
 	require.Equal(t, 3, len(bodiesFiles))
 	lastBodyFile := bodiesFiles[len(bodiesFiles)-1].decompressor.FilePath()
 	agg.Close()
@@ -324,12 +324,13 @@ func TestClose(t *testing.T) {
 
 	checkRefCnt := func(expected int32) {
 		for _, marked := range agg.marked {
-			marked.snaps.dirtyFiles.Walk(func(f []*FilesItem) bool {
-				for _, f := range f {
+			{
+				iter := marked.snaps.dirtyFiles.Iterator()
+				for iter.First(); iter.Valid(); iter.Next() {
+					f := iter.Cur()
 					require.Equal(t, expected, f.refcount.Load())
 				}
-				return true
-			})
+			}
 		}
 	}
 
@@ -422,8 +423,8 @@ func TestMergedFileGet(t *testing.T) {
 
 	// check dirty files count
 	headerF, bodyF := agg.marked[0], agg.marked[1]
-	headerItems := headerF.snaps.dirtyFiles.Items()
-	bodyItems := bodyF.snaps.dirtyFiles.Items()
+	headerItems := dirtyFilesItems(headerF.snaps.dirtyFiles)
+	bodyItems := dirtyFilesItems(bodyF.snaps.dirtyFiles)
 	require.Equal(t, nDirtyFiles, len(headerItems))
 	require.Equal(t, nDirtyFiles, len(bodyItems))
 

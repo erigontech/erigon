@@ -412,10 +412,16 @@ func (bd *BodyDownload) addBodyToCache(key uint64, body *types.RawBody) {
 	if item, ok := bd.bodyCache.Get(BodyTreeItem{blockNum: key}); ok {
 		bd.bodyCacheSize -= item.payloadSize // It will be replaced, so subtracting
 	}
-	bd.bodyCache.ReplaceOrInsert(BodyTreeItem{payloadSize: size, blockNum: key, rawBody: body})
+	bd.bodyCache.Upsert(BodyTreeItem{payloadSize: size, blockNum: key, rawBody: body}, BodyTreeItem{payloadSize: size, blockNum: key, rawBody: body})
 	bd.bodyCacheSize += size
 	for bd.bodyCacheSize > bd.bodyCacheLimit {
-		item, _ := bd.bodyCache.DeleteMax()
+		iter := bd.bodyCache.Iterator()
+		iter.Last()
+		if !iter.Valid() {
+			break
+		}
+		item := iter.Cur()
+		bd.bodyCache.Delete(item)
 		bd.bodyCacheSize -= item.payloadSize
 		delete(bd.requests, item.blockNum)
 		dataflow.BlockBodyDownloadStates.AddChange(item.blockNum, dataflow.BlockBodyEvicted)
@@ -424,7 +430,7 @@ func (bd *BodyDownload) addBodyToCache(key uint64, body *types.RawBody) {
 
 func (bd *BodyDownload) GetBodyFromCache(blockNum uint64, del bool) *types.RawBody {
 	if del {
-		if item, ok := bd.bodyCache.Delete(BodyTreeItem{blockNum: blockNum}); ok {
+		if _, item, ok := bd.bodyCache.Delete(BodyTreeItem{blockNum: blockNum}); ok {
 			bd.bodyCacheSize -= item.payloadSize
 			return item.rawBody
 		}
@@ -437,7 +443,7 @@ func (bd *BodyDownload) GetBodyFromCache(blockNum uint64, del bool) *types.RawBo
 }
 
 func (bd *BodyDownload) ClearBodyCache() {
-	bd.bodyCache.Clear(true)
+	bd.bodyCache.Reset()
 }
 
 func (bd *BodyDownload) BodyCacheSize() int {

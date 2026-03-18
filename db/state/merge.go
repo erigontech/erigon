@@ -27,7 +27,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tidwall/btree"
+	btree2 "github.com/anacrolix/btree"
 
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
@@ -49,10 +49,14 @@ func (d *Domain) dirtyFilesEndTxNumMinimax() uint64 {
 	}
 
 	minimax := d.History.dirtyFilesEndTxNumMinimax()
-	if _max, ok := d.dirtyFiles.Max(); ok {
-		endTxNum := _max.endTxNum
-		if minimax == 0 || endTxNum < minimax {
-			minimax = endTxNum
+	{
+		iter := d.dirtyFiles.Iterator()
+		iter.Last()
+		if iter.Valid() {
+			endTxNum := iter.Cur().endTxNum
+			if minimax == 0 || endTxNum < minimax {
+				minimax = endTxNum
+			}
 		}
 	}
 	return minimax
@@ -60,8 +64,10 @@ func (d *Domain) dirtyFilesEndTxNumMinimax() uint64 {
 
 func (ii *InvertedIndex) dirtyFilesEndTxNumMinimax() uint64 {
 	var minimax uint64
-	if _max, ok := ii.dirtyFiles.Max(); ok {
-		endTxNum := _max.endTxNum
+	iter := ii.dirtyFiles.Iterator()
+	iter.Last()
+	if iter.Valid() {
+		endTxNum := iter.Cur().endTxNum
 		if minimax == 0 || endTxNum < minimax {
 			minimax = endTxNum
 		}
@@ -73,10 +79,14 @@ func (h *History) dirtyFilesEndTxNumMinimax() uint64 {
 		return math.MaxUint64
 	}
 	minimax := h.InvertedIndex.dirtyFilesEndTxNumMinimax()
-	if _max, ok := h.dirtyFiles.Max(); ok {
-		endTxNum := _max.endTxNum
-		if minimax == 0 || endTxNum < minimax {
-			minimax = endTxNum
+	{
+		iter := h.dirtyFiles.Iterator()
+		iter.Last()
+		if iter.Valid() {
+			endTxNum := iter.Cur().endTxNum
+			if minimax == 0 || endTxNum < minimax {
+				minimax = endTxNum
+			}
 		}
 	}
 	return minimax
@@ -923,13 +933,13 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 func (d *Domain) integrateMergedDirtyFiles(valuesIn, indexIn, historyIn *FilesItem) {
 	d.History.integrateMergedDirtyFiles(indexIn, historyIn)
 	if valuesIn != nil {
-		d.dirtyFiles.Set(valuesIn)
+		d.dirtyFiles.Upsert(valuesIn, valuesIn)
 	}
 }
 
 func (ii *InvertedIndex) integrateMergedDirtyFiles(in *FilesItem) {
 	if in != nil {
-		ii.dirtyFiles.Set(in)
+		ii.dirtyFiles.Upsert(in, in)
 	}
 }
 
@@ -937,7 +947,7 @@ func (h *History) integrateMergedDirtyFiles(indexIn, historyIn *FilesItem) {
 	h.InvertedIndex.integrateMergedDirtyFiles(indexIn)
 	//TODO: handle collision
 	if historyIn != nil {
-		h.dirtyFiles.Set(historyIn)
+		h.dirtyFiles.Upsert(historyIn, historyIn)
 	}
 }
 
@@ -1019,38 +1029,37 @@ func (iit *InvertedIndexRoTx) garbage(merged *FilesItem) (outs []*FilesItem) {
 	return garbage(iit.ii.dirtyFiles, iit.files, merged, checker)
 }
 
-func garbage(dirtyFiles *btree.BTreeG[*FilesItem], visibleFiles []visibleFile, merged *FilesItem, checker func(startTxNum, endTxNum uint64) bool) (outs []*FilesItem) {
+func garbage(dirtyFiles *btree2.Map[*FilesItem, *FilesItem], visibleFiles []visibleFile, merged *FilesItem, checker func(startTxNum, endTxNum uint64) bool) (outs []*FilesItem) {
 	// `kill -9` may leave some garbage
 	// AggRoTx doesn't have such files, only Agg.files does
-	dirtyFiles.Walk(func(items []*FilesItem) bool {
-		for _, item := range items {
-			if item.frozen {
-				continue
-			}
+	iter := dirtyFiles.Iterator()
+	for iter.First(); iter.Valid(); iter.Next() {
+		item := iter.Cur()
+		if item.frozen {
+			continue
+		}
 
-			if merged == nil {
-				if hasCoverVisibleFile(visibleFiles, item) {
-					outs = append(outs, item)
-				}
-				continue
-			}
-			// this case happens when in previous process run, the merged file was created,
-			// but the processed ended before subsumed files could be deleted.
-			// delete garbage file only if it's before merged range and it has bigger file (which indexed and visible for user now - using `DomainRoTx`)
-			if item.isBefore(merged) && hasCoverVisibleFile(visibleFiles, item) {
+		if merged == nil {
+			if hasCoverVisibleFile(visibleFiles, item) {
 				outs = append(outs, item)
-				continue
 			}
+			continue
+		}
+		// this case happens when in previous process run, the merged file was created,
+		// but the processed ended before subsumed files could be deleted.
+		// delete garbage file only if it's before merged range and it has bigger file (which indexed and visible for user now - using `DomainRoTx`)
+		if item.isBefore(merged) && hasCoverVisibleFile(visibleFiles, item) {
+			outs = append(outs, item)
+			continue
+		}
 
-			if item.isProperSubsetOf(merged) {
-				if checker == nil || !checker(item.startTxNum, item.endTxNum) {
-					// no dependent file is present for item, can delete safely...
-					outs = append(outs, item)
-				}
+		if item.isProperSubsetOf(merged) {
+			if checker == nil || !checker(item.startTxNum, item.endTxNum) {
+				// no dependent file is present for item, can delete safely...
+				outs = append(outs, item)
 			}
 		}
-		return true
-	})
+	}
 	return outs
 }
 

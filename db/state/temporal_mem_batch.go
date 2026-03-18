@@ -25,7 +25,7 @@ import (
 	"sort"
 	"sync"
 
-	btree2 "github.com/tidwall/btree"
+	btree2 "github.com/anacrolix/btree"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
@@ -79,9 +79,22 @@ type TemporalMemBatch struct {
 	metrics *changeset.DomainMetrics
 }
 
+func newStringDataMap() *btree2.Map[string, []dataWithTxNum] {
+	m := btree2.MakeMap[string, []dataWithTxNum](func(a, b string) int {
+		if a == b {
+			return 0
+		}
+		if a < b {
+			return -1
+		}
+		return 1
+	})
+	return &m
+}
+
 func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics any) *TemporalMemBatch {
 	sd := &TemporalMemBatch{
-		storage:           btree2.NewMap[string, []dataWithTxNum](128),
+		storage:           newStringDataMap(),
 		metrics:           ioMetrics.(*changeset.DomainMetrics),
 		inMemHistoryReads: true,
 	}
@@ -158,14 +171,14 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 	if domain == kv.StorageDomain {
 		if old, ok := sd.storage.Get(key); ok {
 			if sd.inMemHistoryReads {
-				sd.storage.Set(key, append(old, valWithStep))
+				sd.storage.Upsert(key, append(old, valWithStep))
 				putValueSize += len(val)
 			} else {
 				putValueSize += len(val) - len(old[len(old)-1].data)
-				sd.storage.Set(key, []dataWithTxNum{valWithStep})
+				sd.storage.Upsert(key, []dataWithTxNum{valWithStep})
 			}
 		} else {
-			sd.storage.Set(key, []dataWithTxNum{valWithStep})
+			sd.storage.Upsert(key, []dataWithTxNum{valWithStep})
 			putKeySize += len(key)
 			putValueSize += len(val)
 		}
@@ -287,7 +300,7 @@ func (sd *TemporalMemBatch) ClearRam() {
 		sd.domains[i] = map[string][]dataWithTxNum{}
 	}
 
-	sd.storage = btree2.NewMap[string, []dataWithTxNum](128)
+	sd.storage.Reset()
 	sd.unwindToTxNum = 0
 	sd.unwindChangeset = nil
 
@@ -308,9 +321,10 @@ func (sd *TemporalMemBatch) ClearRam() {
 func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step kv.Step) (cont bool, err error)) error {
 	sd.latestStateLock.RLock()
 	defer sd.latestStateLock.RUnlock()
-	var ramIter btree2.MapIter[string, []dataWithTxNum]
+	var ramIter *btree2.MapIterator[string, []dataWithTxNum]
 	if domain == kv.StorageDomain {
-		ramIter = sd.storage.Iter()
+		iter := sd.storage.Iterator()
+		ramIter = &iter
 	}
 
 	return AggTx(roTx).d[domain].debugIteratePrefixLatest(prefix, ramIter, it, roTx)
@@ -462,10 +476,10 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 		maps.Copy(entries, otherEntries)
 	}
 
-	other.storage.Scan(func(key string, value []dataWithTxNum) bool {
-		sd.storage.Set(key, value)
-		return true
-	})
+	storageIter := other.storage.Iterator()
+	for storageIter.First(); storageIter.Valid(); storageIter.Next() {
+		sd.storage.Upsert(storageIter.Cur(), storageIter.Value())
+	}
 
 	for domain, writer := range other.domainWriters {
 		sd.pastDomainWriters[domain] = append(sd.pastDomainWriters[domain], writer)

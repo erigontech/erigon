@@ -5,11 +5,33 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/tidwall/btree"
+	"github.com/anacrolix/btree"
 
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+func intWriteCellMapKeys(m *btree.Map[int, *WriteCell]) []int {
+	var keys []int
+	iter := m.Iterator()
+	for iter.First(); iter.Valid(); iter.Next() {
+		keys = append(keys, iter.Cur())
+	}
+	return keys
+}
+
+func newIntWriteCellMap() *btree.Map[int, *WriteCell] {
+	m := btree.MakeMap[int, *WriteCell](func(a, b int) int {
+		if a < b {
+			return -1
+		}
+		if a > b {
+			return 1
+		}
+		return 0
+	})
+	return &m
+}
 
 type statusFlag uint
 
@@ -142,7 +164,7 @@ func (vm *VersionMap) Write(addr accounts.Address, path AccountPath, key account
 func (vm *VersionMap) writeLocked(addr accounts.Address, path AccountPath, key accounts.StorageKey, v Version, data any, complete bool) {
 	cells := vm.getKeyCells(addr, path, key, func(addr accounts.Address, path AccountPath, key accounts.StorageKey) (cells *btree.Map[int, *WriteCell]) {
 		it, ok := vm.s[addr]
-		cells = &btree.Map[int, *WriteCell]{}
+		cells = newIntWriteCellMap()
 		if ok {
 			it[AccountKey{path, key}] = cells
 		} else {
@@ -171,7 +193,7 @@ func (vm *VersionMap) writeLocked(addr accounts.Address, path AccountPath, key a
 		ci.data = data
 	} else {
 		if ci, ok = cells.Get(v.TxIndex); !ok {
-			cells.Set(v.TxIndex, &WriteCell{
+			cells.Upsert(v.TxIndex, &WriteCell{
 				flag:        flag,
 				incarnation: v.Incarnation,
 				data:        data,
@@ -203,11 +225,17 @@ func (vm *VersionMap) Read(addr accounts.Address, path AccountPath, key accounts
 
 	var floor = func(i int) (key int, val *WriteCell) {
 		key = UnknownDep
-		cells.Descend(i, func(k int, v *WriteCell) bool {
-			key = k
-			val = v
-			return false
-		})
+		iter := cells.Iterator()
+		iter.SeekGE(i)
+		if iter.Valid() && iter.Compare(iter.Cur(), i) > 0 {
+			iter.Prev()
+		} else if !iter.Valid() {
+			iter.Last()
+		}
+		if iter.Valid() {
+			key = iter.Cur()
+			val = iter.Value()
+		}
 		return key, val
 	}
 
@@ -259,7 +287,7 @@ func (vm *VersionMap) MarkEstimate(addr accounts.Address, path AccountPath, key 
 	})
 
 	if ci, ok := cells.Get(txIdx); !ok {
-		panic(fmt.Sprintf("should not happen - cell should be present for path. TxIndex: %v, path, %x %s, cells keys: %v", txIdx, addr, AccountKey{path, key}, cells.Keys()))
+		panic(fmt.Sprintf("should not happen - cell should be present for path. TxIndex: %v, path, %x %s, cells keys: %v", txIdx, addr, AccountKey{path, key}, intWriteCellMapKeys(cells)))
 	} else {
 		ci.flag = FlagEstimate
 	}
@@ -274,7 +302,7 @@ func (vm *VersionMap) MarkComplete(addr accounts.Address, path AccountPath, key 
 	})
 
 	if ci, ok := cells.Get(txIdx); !ok {
-		panic(fmt.Sprintf("should not happen - cell should be present for path. TxIndex: %v, path, %x s, cells keys: %v", txIdx, AccountKey{path, key}, cells.Keys()))
+		panic(fmt.Sprintf("should not happen - cell should be present for path. TxIndex: %v, path, %x s, cells keys: %v", txIdx, AccountKey{path, key}, intWriteCellMapKeys(cells)))
 	} else {
 		ci.flag = FlagDone
 	}

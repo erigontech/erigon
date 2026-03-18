@@ -1025,10 +1025,13 @@ func TestCtxFiles(t *testing.T) {
 	}
 	ii.scanDirtyFiles(files)
 	require.Equal(t, 10, ii.dirtyFiles.Len())
-	ii.dirtyFiles.Scan(func(item *FilesItem) bool {
-		item.decompressor = &seg.Decompressor{}
-		return true
-	})
+	{
+		iter := ii.dirtyFiles.Iterator()
+		for iter.First(); iter.Valid(); iter.Next() {
+			item := iter.Cur()
+			item.decompressor = &seg.Decompressor{}
+		}
+	}
 
 	visibleFiles := calcVisibleFiles(ii.dirtyFiles, 0, nil, false, ii.dirtyFilesEndTxNumMinimax())
 	for i, item := range visibleFiles {

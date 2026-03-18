@@ -35,7 +35,7 @@ import (
 
 	"github.com/erigontech/erigon/db/kv/prune"
 
-	"github.com/tidwall/btree"
+	btree2 "github.com/anacrolix/btree"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
@@ -342,7 +342,7 @@ func (a *Aggregator) AddDependencyBtwnDomains(dependency kv.Domain, dependent kv
 
 	a.checker.AddDependency(FromDomain(dependency), &DependentInfo{
 		entity:      FromDomain(dependent),
-		filesGetter: func() *btree.BTreeG[*FilesItem] { return dd.dirtyFiles },
+		filesGetter: func() *btree2.Map[*FilesItem, *FilesItem] { return dd.dirtyFiles },
 		accessors:   dd.Accessors,
 	})
 	a.d[dependency].SetChecker(a.checker)
@@ -364,7 +364,7 @@ func (a *Aggregator) AddDependencyBtwnHistoryII(domain kv.Domain) {
 	ue := FromII(dd.InvertedIndex.InvIdxCfg.Name)
 	a.checker.AddDependency(ue, &DependentInfo{
 		entity: ue,
-		filesGetter: func() *btree.BTreeG[*FilesItem] {
+		filesGetter: func() *btree2.Map[*FilesItem, *FilesItem] {
 			return h.dirtyFiles
 		},
 		accessors: h.Accessors,
@@ -657,16 +657,15 @@ func (a *Aggregator) Files() []string {
 	return ac.AllFiles().Fullpaths()
 }
 func (a *Aggregator) LS() {
-	doLS := func(dirtyFiles *btree.BTreeG[*FilesItem]) {
-		dirtyFiles.Walk(func(items []*FilesItem) bool {
-			for _, item := range items {
-				if item.decompressor == nil {
-					continue
-				}
-				a.logger.Info("[agg] ", "f", item.decompressor.FileName(), "words", item.decompressor.Count())
+	doLS := func(dirtyFiles *btree2.Map[*FilesItem, *FilesItem]) {
+		iter := dirtyFiles.Iterator()
+		for iter.First(); iter.Valid(); iter.Next() {
+			item := iter.Cur()
+			if item.decompressor == nil {
+				continue
 			}
-			return true
-		})
+			a.logger.Info("[agg] ", "f", item.decompressor.FileName(), "words", item.decompressor.Count())
+		}
 	}
 
 	a.dirtyFilesLock.Lock()
@@ -2129,18 +2128,18 @@ func (a *Aggregator) MadvNormal() *Aggregator {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	for _, d := range a.d {
-		for _, f := range d.dirtyFiles.Items() {
+		for _, f := range dirtyFilesItems(d.dirtyFiles) {
 			f.MadvNormal()
 		}
-		for _, f := range d.History.dirtyFiles.Items() {
+		for _, f := range dirtyFilesItems(d.History.dirtyFiles) {
 			f.MadvNormal()
 		}
-		for _, f := range d.History.InvertedIndex.dirtyFiles.Items() {
+		for _, f := range dirtyFilesItems(d.History.InvertedIndex.dirtyFiles) {
 			f.MadvNormal()
 		}
 	}
 	for _, ii := range a.iis {
-		for _, f := range ii.dirtyFiles.Items() {
+		for _, f := range dirtyFilesItems(ii.dirtyFiles) {
 			f.MadvNormal()
 		}
 	}
@@ -2150,18 +2149,18 @@ func (a *Aggregator) DisableReadAhead() {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	for _, d := range a.d {
-		for _, f := range d.dirtyFiles.Items() {
+		for _, f := range dirtyFilesItems(d.dirtyFiles) {
 			f.DisableReadAhead()
 		}
-		for _, f := range d.History.dirtyFiles.Items() {
+		for _, f := range dirtyFilesItems(d.History.dirtyFiles) {
 			f.DisableReadAhead()
 		}
-		for _, f := range d.History.InvertedIndex.dirtyFiles.Items() {
+		for _, f := range dirtyFilesItems(d.History.InvertedIndex.dirtyFiles) {
 			f.DisableReadAhead()
 		}
 	}
 	for _, ii := range a.iis {
-		for _, f := range ii.dirtyFiles.Items() {
+		for _, f := range dirtyFilesItems(ii.dirtyFiles) {
 			f.DisableReadAhead()
 		}
 	}

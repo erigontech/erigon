@@ -30,7 +30,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/tidwall/btree"
+	"github.com/anacrolix/btree"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
@@ -139,8 +139,8 @@ type CaplinStateSnapshots struct {
 	// BeaconBlocks *segments
 	// BlobSidecars *segments
 	// Segments      map[string]*segments
-	dirtyLock sync.RWMutex                            // guards `dirty` field
-	dirty     map[string]*btree.BTreeG[*DirtySegment] // ordered map `type.Enum()` -> DirtySegments
+	dirtyLock sync.RWMutex                                        // guards `dirty` field
+	dirty     map[string]*btree.Map[*DirtySegment, *DirtySegment] // ordered map `type.Enum()` -> DirtySegments
 
 	visibleLock sync.RWMutex // guards  `visible` field
 	visible     sync.Map
@@ -187,9 +187,10 @@ func NewCaplinStateSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.B
 	// 		DirtySegments: btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false}),
 	// 	}
 	// }
-	dirty := make(map[string]*btree.BTreeG[*DirtySegment])
+	dirty := make(map[string]*btree.Map[*DirtySegment, *DirtySegment])
 	for k := range snapshotTypes.KeyValueGetters {
-		dirty[k] = btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
+		m := btree.MakeMap[*DirtySegment, *DirtySegment](DirtySegmentCmp)
+		dirty[k] = &m
 	}
 
 	c := &CaplinStateSnapshots{snapshotTypes: snapshotTypes, dir: dirs.SnapCaplin, tmpdir: dirs.Tmp, cfg: cfg, dirty: dirty, logger: logger, beaconCfg: beaconCfg}
@@ -294,19 +295,18 @@ Loop:
 			continue
 		}
 		filePath := filepath.Join(s.dir, fName)
-		dirtySegments.Walk(func(segments []*DirtySegment) bool {
-			for _, sn2 := range segments {
-				if sn2.Decompressor == nil { // it's ok if some segment was not able to open
-					continue
-				}
-				if filePath == sn2.filePath {
-					sn = sn2
-					exists = true
-					break
-				}
+		iter := dirtySegments.Iterator()
+		for iter.First(); iter.Valid(); iter.Next() {
+			sn2 := iter.Cur()
+			if sn2.Decompressor == nil { // it's ok if some segment was not able to open
+				continue
 			}
-			return true
-		})
+			if filePath == sn2.filePath {
+				sn = sn2
+				exists = true
+				break
+			}
+		}
 		if !exists {
 			sn = &DirtySegment{
 				// segType: f.Type, Unsupported
@@ -335,7 +335,7 @@ Loop:
 		if !exists {
 			// it's possible to iterate over .seg file even if you don't have index
 			// then make segment available even if index open may fail
-			dirtySegments.Set(sn)
+			dirtySegments.Upsert(sn, sn)
 		}
 		if err := openIdxForCaplinStateIfNeeded(sn, filePath, optimistic); err != nil {
 			return err
@@ -416,28 +416,27 @@ func (s *CaplinStateSnapshots) recalcVisibleFiles() {
 	s.visibleLock.Lock()
 	defer s.visibleLock.Unlock()
 
-	getNewVisibleSegments := func(dirtySegments *btree.BTreeG[*DirtySegment]) []*VisibleSegment {
+	getNewVisibleSegments := func(dirtySegments *btree.Map[*DirtySegment, *DirtySegment]) []*VisibleSegment {
 		newVisibleSegments := make([]*VisibleSegment, 0, dirtySegments.Len())
-		dirtySegments.Walk(func(segments []*DirtySegment) bool {
-			for _, sn := range segments {
-				if sn.canDelete.Load() {
-					continue
-				}
-				if !isIndexed(sn) {
-					continue
-				}
-				for len(newVisibleSegments) > 0 && newVisibleSegments[len(newVisibleSegments)-1].src.isSubSetOf(sn) {
-					newVisibleSegments[len(newVisibleSegments)-1].src = nil
-					newVisibleSegments = newVisibleSegments[:len(newVisibleSegments)-1]
-				}
-				newVisibleSegments = append(newVisibleSegments, &VisibleSegment{
-					Range:   sn.Range,
-					segType: sn.segType,
-					src:     sn,
-				})
+		iter := dirtySegments.Iterator()
+		for iter.First(); iter.Valid(); iter.Next() {
+			sn := iter.Cur()
+			if sn.canDelete.Load() {
+				continue
 			}
-			return true
-		})
+			if !isIndexed(sn) {
+				continue
+			}
+			for len(newVisibleSegments) > 0 && newVisibleSegments[len(newVisibleSegments)-1].src.isSubSetOf(sn) {
+				newVisibleSegments[len(newVisibleSegments)-1].src = nil
+				newVisibleSegments = newVisibleSegments[:len(newVisibleSegments)-1]
+			}
+			newVisibleSegments = append(newVisibleSegments, &VisibleSegment{
+				Range:   sn.Range,
+				segType: sn.segType,
+				src:     sn,
+			})
+		}
 		return newVisibleSegments
 	}
 
@@ -511,19 +510,18 @@ func (s *CaplinStateSnapshots) closeWhatNotInList(l []string) {
 
 	for _, dirtySegments := range s.dirty {
 		toClose := make([]*DirtySegment, 0)
-		dirtySegments.Walk(func(segments []*DirtySegment) bool {
-			for _, sn := range segments {
-				if sn.Decompressor == nil {
-					continue
-				}
-				_, name := filepath.Split(sn.FilePath())
-				if _, ok := protectFiles[name]; ok {
-					continue
-				}
-				toClose = append(toClose, sn)
+		iter := dirtySegments.Iterator()
+		for iter.First(); iter.Valid(); iter.Next() {
+			sn := iter.Cur()
+			if sn.Decompressor == nil {
+				continue
 			}
-			return true
-		})
+			_, name := filepath.Split(sn.FilePath())
+			if _, ok := protectFiles[name]; ok {
+				continue
+			}
+			toClose = append(toClose, sn)
+		}
 		for _, sn := range toClose {
 			sn.close()
 			dirtySegments.Delete(sn)
@@ -707,7 +705,11 @@ func (s *CaplinStateSnapshots) BuildMissingIndices(ctx context.Context, logger l
 	noneDone := true
 
 	for caplinType, filesTree := range s.dirty {
-		files := filesTree.Items()
+		var files []*DirtySegment
+		iter := filesTree.Iterator()
+		for iter.First(); iter.Valid(); iter.Next() {
+			files = append(files, iter.Cur())
+		}
 		_, ok := s.snapshotTypes.KeyValueGetters[caplinType]
 		if !ok {
 			s.logger.Warn("no kv getter for caplin state snapshot type", "type", caplinType)

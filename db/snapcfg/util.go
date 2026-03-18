@@ -31,10 +31,10 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/anacrolix/btree"
 	snapshothashes "github.com/erigontech/erigon-snapshot"
 	"github.com/erigontech/erigon-snapshot/webseed"
 	"github.com/pelletier/go-toml/v2"
-	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/db/preverified"
 
@@ -170,15 +170,23 @@ type Preverified struct {
 }
 
 func (p Preverified) Typed(types []snaptype.Type) Preverified {
-	var bestVersions btree.Map[string, PreverifiedItem]
+	bestVersions := btree.MakeMap[string, PreverifiedItem](func(a, b string) int {
+		if a < b {
+			return -1
+		}
+		if a > b {
+			return 1
+		}
+		return 0
+	})
 
 	for _, p := range p.Items {
 		if strings.HasPrefix(p.Name, "salt") && strings.HasSuffix(p.Name, "txt") {
-			bestVersions.Set(p.Name, p)
+			bestVersions.Upsert(p.Name, p)
 			continue
 		}
 		if p.Name == "erigondb.toml" {
-			bestVersions.Set(p.Name, p)
+			bestVersions.Upsert(p.Name, p)
 			continue
 		}
 
@@ -188,7 +196,7 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 		}
 
 		if strings.HasPrefix(p.Name, "caplin") {
-			bestVersions.Set(p.Name, p)
+			bestVersions.Upsert(p.Name, p)
 			continue
 		}
 
@@ -208,7 +216,7 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 
 		if countSep < 2 {
 			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") || strings.HasPrefix(p.Name, "accessor") {
-				bestVersions.Set(p.Name, p)
+				bestVersions.Upsert(p.Name, p)
 				continue
 			}
 			continue
@@ -263,10 +271,10 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 			cv, _ := ver.ParseVersion(v)
 
 			if cv.Less(version) {
-				bestVersions.Set(name, p)
+				bestVersions.Upsert(name, p)
 			}
 		} else {
-			bestVersions.Set(name, p)
+			bestVersions.Upsert(name, p)
 		}
 	}
 
@@ -274,10 +282,10 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 
 	// Scanning this can introduce an unexpected order to preverified items as it's not keyed on the
 	// item name.
-	bestVersions.Scan(func(key string, value PreverifiedItem) bool {
-		versioned = append(versioned, value)
-		return true
-	})
+	iter := bestVersions.Iterator()
+	for iter.First(); iter.Valid(); iter.Next() {
+		versioned = append(versioned, iter.Value())
+	}
 	slices.SortFunc(versioned, func(i, j PreverifiedItem) int {
 		return strings.Compare(i.Name, j.Name)
 	})

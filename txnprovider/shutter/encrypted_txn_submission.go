@@ -54,6 +54,16 @@ func EncryptedTxnSubmissionFromLogEvent(event *contracts.SequencerTransactionSub
 	}
 }
 
+func encryptedTxnSubmissionCmp(a, b EncryptedTxnSubmission) int {
+	if EncryptedTxnSubmissionLess(a, b) {
+		return -1
+	}
+	if EncryptedTxnSubmissionLess(b, a) {
+		return 1
+	}
+	return 0
+}
+
 func EncryptedTxnSubmissionLess(a, b EncryptedTxnSubmission) bool {
 	if a.EonIndex < b.EonIndex {
 		return true

@@ -394,22 +394,25 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime time.Time) (*HeaderRequ
 	var penalties []PenaltyItem
 	var req *HeaderRequest
 
-	hd.anchorTree.Ascend(func(anchor *Anchor) bool {
+	var toInvalidate []*Anchor
+	iter := hd.anchorTree.Iterator()
+	for iter.First(); iter.Valid(); iter.Next() {
+		anchor := iter.Cur()
 		if anchor.blockHeight == 0 { //has no parent
-			return true
+			continue
 		}
 		if anchor.nextRetryTime.After(currentTime) {
 			// We are not ready to retry this anchor yet
 			dataflow.HeaderDownloadStates.AddChange(anchor.blockHeight-1, dataflow.HeaderRetryNotReady)
-			return true
+			continue
 		}
 		if anchor.timeouts >= 10 {
 			// Ancestors of this anchor seem to be unavailable, invalidate and move on
-			hd.invalidateAnchor(anchor, "suspected unavailability")
+			toInvalidate = append(toInvalidate, anchor)
 			// Add header invalidate
 			dataflow.HeaderDownloadStates.AddChange(anchor.blockHeight-1, dataflow.HeaderInvalidated)
 			penalties = append(penalties, PenaltyItem{Penalty: AbandonedAnchorPenalty, PeerID: anchor.peerID})
-			return true
+			continue
 		}
 		req = &HeaderRequest{
 			Anchor:  anchor,
@@ -420,8 +423,11 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime time.Time) (*HeaderRequ
 			Reverse: true,
 		}
 		// Add header requested
-		return false
-	})
+		break
+	}
+	for _, anchor := range toInvalidate {
+		hd.invalidateAnchor(anchor, "suspected unavailability")
+	}
 	return req, penalties
 }
 
@@ -1084,7 +1090,7 @@ func (hd *HeaderDownload) ProcessHeader(sh ChainSegmentHeader, newBlock bool, pe
 		}
 		anchor.fLink = link
 		hd.anchors[anchor.parentHash] = anchor
-		hd.anchorTree.ReplaceOrInsert(anchor)
+		hd.anchorTree.Upsert(anchor, anchor)
 		return true
 	}
 	return false

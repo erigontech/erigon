@@ -22,8 +22,6 @@ import (
 	"math/bits"
 	"unsafe"
 
-	"github.com/google/btree"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -56,11 +54,11 @@ type AccountHashWriteItem struct {
 func (awi *AccountHashWriteItem) GetCacheItem() CacheItem     { return awi.ai }
 func (awi *AccountHashWriteItem) SetCacheItem(item CacheItem) { awi.ai = item.(*AccountHashItem) }
 func (awi *AccountHashWriteItem) GetSize() int                { return accountHashWriteItemSize }
-func (awi *AccountHashWriteItem) Less(than btree.Item) bool {
+func (awi *AccountHashWriteItem) Less(than cacheTreeItem) bool {
 	return awi.ai.Less(than)
 }
 
-func (ahi *AccountHashItem) Less(than btree.Item) bool {
+func (ahi *AccountHashItem) Less(than cacheTreeItem) bool {
 	switch i := than.(type) {
 	case *AccountHashItem:
 		return bytes.Compare(ahi.addrHashPrefix, i.addrHashPrefix) < 0
@@ -112,11 +110,11 @@ type StorageHashItem struct {
 func (wi *StorageHashWriteItem) GetCacheItem() CacheItem     { return wi.i }
 func (wi *StorageHashWriteItem) SetCacheItem(item CacheItem) { wi.i = item.(*StorageHashItem) }
 func (wi *StorageHashWriteItem) GetSize() int                { return storageHashWriteItemSize }
-func (wi *StorageHashWriteItem) Less(than btree.Item) bool {
+func (wi *StorageHashWriteItem) Less(than cacheTreeItem) bool {
 	return wi.i.Less(than.(*StorageHashWriteItem).i)
 }
 
-func (shi *StorageHashItem) Less(than btree.Item) bool {
+func (shi *StorageHashItem) Less(than cacheTreeItem) bool {
 	i := than.(*StorageHashItem)
 	c := bytes.Compare(shi.addrHash.Bytes(), i.addrHash.Bytes())
 	if c != 0 {
@@ -303,12 +301,12 @@ func (sc *StateCache) AccountHashCount() int {
 
 func (sc *StateCache) HasAccountHashWithPrefix(addrHashPrefix []byte) bool {
 	seek := &AccountHashItem{addrHashPrefix: addrHashPrefix}
-	var found bool
-	sc.readWrites[id(seek)].AscendGreaterOrEqual(seek, func(i btree.Item) bool {
-		found = bytes.HasPrefix(i.(*AccountHashItem).addrHashPrefix, addrHashPrefix)
-		return false
-	})
-	return found
+	iter := sc.readWrites[id(seek)].Iterator()
+	iter.SeekGE(seek)
+	if iter.Valid() {
+		return bytes.HasPrefix(iter.Cur().(*AccountHashItem).addrHashPrefix, addrHashPrefix)
+	}
+	return false
 }
 
 func (sc *StateCache) GetAccountHash(prefix []byte) ([]byte, uint16, uint16, uint16, []common.Hash, bool) {
@@ -340,8 +338,9 @@ func (sc *StateCache) DebugPrintAccounts() error {
 	var cur *AccountHashItem
 	id := id(cur)
 	rw := sc.writes[id]
-	rw.Ascend(func(i btree.Item) bool {
-		it := i.(*AccountHashWriteItem)
+	iter := rw.Iterator()
+	for iter.First(); iter.Valid(); iter.Next() {
+		it := iter.Cur().(*AccountHashWriteItem)
 		if it.ai.HasFlag(AbsentFlag) || it.ai.HasFlag(DeletedFlag) {
 			fmt.Printf("deleted: %x\n", it.ai.addrHashPrefix)
 		} else if it.ai.HasFlag(ModifiedFlag) {
@@ -349,8 +348,7 @@ func (sc *StateCache) DebugPrintAccounts() error {
 		} else {
 			fmt.Printf("normal: %x\n", it.ai.addrHashPrefix)
 		}
-		return true
-	})
+	}
 
 	return nil
 }
@@ -595,14 +593,16 @@ func (sc *StateCache) AccountHashesSeek(prefix []byte) ([]byte, uint16, uint16, 
 	seek := &AccountHashItem{}
 	id := id(seek)
 	seek.addrHashPrefix = append(seek.addrHashPrefix[:0], prefix...)
-	sc.readWrites[id].AscendGreaterOrEqual(seek, func(i btree.Item) bool {
-		it := i.(*AccountHashItem)
+	iter := sc.readWrites[id].Iterator()
+	iter.SeekGE(seek)
+	for ; iter.Valid(); iter.Next() {
+		it := iter.Cur().(*AccountHashItem)
 		if it.HasFlag(AbsentFlag) || it.HasFlag(DeletedFlag) {
-			return true
+			continue
 		}
 		cur = it // found
-		return false
-	})
+		break
+	}
 	if cur == nil {
 		return nil, 0, 0, 0, nil
 	}
@@ -616,20 +616,22 @@ func (sc *StateCache) StorageHashesSeek(addrHash common.Hash, incarnation uint64
 	seek.addrHash.SetBytes(addrHash.Bytes())
 	seek.incarnation = incarnation
 	seek.locHashPrefix = prefix
-	sc.readWrites[id].AscendGreaterOrEqual(seek, func(i btree.Item) bool {
-		it := i.(*StorageHashItem)
+	iter := sc.readWrites[id].Iterator()
+	iter.SeekGE(seek)
+	for ; iter.Valid(); iter.Next() {
+		it := iter.Cur().(*StorageHashItem)
 		if it.HasFlag(AbsentFlag) || it.HasFlag(DeletedFlag) {
-			return true
+			continue
 		}
 		if it.addrHash != addrHash {
-			return false
+			break
 		}
 		if it.incarnation != incarnation {
-			return false
+			break
 		}
 		cur = it
-		return false
-	})
+		break
+	}
 	if cur == nil {
 		return nil, 0, 0, 0, nil
 	}
@@ -638,79 +640,81 @@ func (sc *StateCache) StorageHashesSeek(addrHash common.Hash, incarnation uint64
 
 func (sc *StateCache) WalkStorageHashes(walker func(addrHash common.Hash, incarnation uint64, prefix []byte, hasStat, hasTree, hasHash uint16, h []common.Hash) error) error {
 	id := id(&StorageHashItem{})
-	sc.readWrites[id].Ascend(func(i btree.Item) bool {
-		it, ok := i.(*StorageHashItem)
+	iter := sc.readWrites[id].Iterator()
+	for iter.First(); iter.Valid(); iter.Next() {
+		it, ok := iter.Cur().(*StorageHashItem)
 		if !ok {
-			return true
+			continue
 		}
 		if it.HasFlag(AbsentFlag) || it.HasFlag(DeletedFlag) {
-			return true
+			continue
 		}
 		if err := walker(it.addrHash, it.incarnation, it.locHashPrefix, it.hasState, it.hasTree, it.hasHash, it.hashes); err != nil {
 			panic(err)
 		}
-		return true
-	})
+	}
 	return nil
 }
 
 func (sc *StateCache) WalkStorage(addrHash common.Hash, incarnation uint64, prefix []byte, walker func(locHash common.Hash, val []byte) error) error {
 	seek := &StorageSeek{seek: prefix}
 	id := id(seek)
-	sc.readWrites[id].AscendGreaterOrEqual(seek, func(i btree.Item) bool {
-		switch it := i.(type) {
+	iter := sc.readWrites[id].Iterator()
+	iter.SeekGE(seek)
+	for ; iter.Valid(); iter.Next() {
+		switch it := iter.Cur().(type) {
 		case *StorageItem:
 			if it.HasFlag(AbsentFlag) || it.HasFlag(DeletedFlag) {
-				return true
+				continue
 			}
 			if it.addrHash != addrHash || it.incarnation != incarnation {
-				return false
+				return nil
 			}
 			if err := walker(it.locHash, it.value.Bytes()); err != nil {
 				panic(err)
 			}
 		case *StorageWriteItem:
 			if it.si.HasFlag(AbsentFlag) || it.si.HasFlag(DeletedFlag) {
-				return true
+				continue
 			}
 			if it.si.addrHash != addrHash || it.si.incarnation != incarnation {
-				return false
+				return nil
 			}
 			if err := walker(it.si.locHash, it.si.value.Bytes()); err != nil {
 				panic(err)
 			}
 		}
-		return true
-	})
+	}
 	return nil
 }
 
 func (sc *StateCache) WalkAccounts(prefix []byte, walker func(addrHash common.Hash, acc *accounts.Account) (bool, error)) error {
 	seek := &AccountSeek{seek: prefix}
 	id := id(seek)
-	sc.readWrites[id].AscendGreaterOrEqual(seek, func(i btree.Item) bool {
-		switch it := i.(type) {
+	iter := sc.readWrites[id].Iterator()
+	iter.SeekGE(seek)
+	for ; iter.Valid(); iter.Next() {
+		switch it := iter.Cur().(type) {
 		case *AccountItem:
 			if it.HasFlag(AbsentFlag) || it.HasFlag(DeletedFlag) {
-				return true
+				continue
 			}
 			if goOn, err := walker(it.addrHash, &it.account); err != nil {
 				panic(err)
 			} else if !goOn {
-				return false
+				return nil
 			}
 		case *AccountWriteItem:
 			if it.ai.HasFlag(AbsentFlag) || it.ai.HasFlag(DeletedFlag) {
-				return true
+				continue
 			}
 			if goOn, err := walker(it.ai.addrHash, &it.ai.account); err != nil {
 				panic(err)
 			} else if !goOn {
-				return false
+				return nil
 			}
 		}
-		return true
-	})
+	}
 	return nil
 }
 

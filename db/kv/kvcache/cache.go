@@ -28,9 +28,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	btree2 "github.com/anacrolix/btree"
 	"github.com/c2h5oh/datasize"
 	keccak "github.com/erigontech/fastkeccak"
-	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
@@ -123,8 +123,8 @@ type Coherent struct {
 }
 
 type CoherentRoot struct {
-	cache           *btree2.BTreeG[*Element]
-	codeCache       *btree2.BTreeG[*Element]
+	cache           *btree2.Map[*Element, *Element]
+	codeCache       *btree2.Map[*Element, *Element]
 	ready           chan struct{} // close when ready
 	readyChanClosed atomic.Bool   // quick check if ready channel is closed
 	closeOnce       sync.Once     // protecting `ready` field from double-close
@@ -223,8 +223,8 @@ func (c *Coherent) selectOrCreateRoot(versionID uint64) *CoherentRoot {
 
 	r = &CoherentRoot{
 		ready:     make(chan struct{}),
-		cache:     btree2.NewBTreeG(Less),
-		codeCache: btree2.NewBTreeG(Less),
+		cache:     newElementMap(),
+		codeCache: newElementMap(),
 	}
 	c.roots[versionID] = r
 	return r
@@ -246,28 +246,26 @@ func (c *Coherent) advanceRoot(stateVersionID uint64) (r *CoherentRoot) {
 
 	if prevView, ok := c.roots[stateVersionID-1]; ok && prevView.isCanonical {
 		//log.Info("advance: clone", "from", viewID-1, "to", viewID)
-		r.cache = prevView.cache.Copy()
-		r.codeCache = prevView.codeCache.Copy()
+		cacheClone := prevView.cache.Clone()
+		r.cache = &cacheClone
+		codeCacheClone := prevView.codeCache.Clone()
+		r.codeCache = &codeCacheClone
 	} else {
 		c.stateEvict.Init()
 		c.codeEvict.Init()
 		if r.cache == nil {
 			//log.Info("advance: new", "to", viewID)
-			r.cache = btree2.NewBTreeG(Less)
-			r.codeCache = btree2.NewBTreeG(Less)
+			r.cache = newElementMap()
+			r.codeCache = newElementMap()
 		} else {
-			r.cache.Walk(func(items []*Element) bool {
-				for _, i := range items {
-					c.stateEvict.PushFront(i)
-				}
-				return true
-			})
-			r.codeCache.Walk(func(items []*Element) bool {
-				for _, i := range items {
-					c.codeEvict.PushFront(i)
-				}
-				return true
-			})
+			iter := r.cache.Iterator()
+			for iter.First(); iter.Valid(); iter.Next() {
+				c.stateEvict.PushFront(iter.Value())
+			}
+			iter = r.codeCache.Iterator()
+			for iter.First(); iter.Valid(); iter.Next() {
+				c.codeEvict.PushFront(iter.Value())
+			}
 		}
 	}
 	r.isCanonical = true
@@ -466,7 +464,8 @@ func (c *Coherent) removeOldestCode(r *CoherentRoot) {
 func (c *Coherent) add(k, v []byte, r *CoherentRoot, id uint64) *Element {
 	it := &Element{K: k, V: v}
 
-	replaced, _ := r.cache.Set(it)
+	replaced, _ := r.cache.Get(it)
+	r.cache.Upsert(it, it)
 	if c.latestStateVersionID != id {
 		//fmt.Printf("add to non-last viewID: %d<%d\n", c.latestViewID, id)
 		return it
@@ -485,7 +484,8 @@ func (c *Coherent) add(k, v []byte, r *CoherentRoot, id uint64) *Element {
 }
 func (c *Coherent) addCode(k, v []byte, r *CoherentRoot, id uint64) *Element {
 	it := &Element{K: k, V: v}
-	replaced, _ := r.codeCache.Set(it)
+	replaced, _ := r.codeCache.Get(it)
+	r.codeCache.Upsert(it, it)
 	if c.latestStateVersionID != id {
 		//fmt.Printf("add to non-last viewID: %d<%d\n", c.latestViewID, id)
 		return it
@@ -548,14 +548,17 @@ func (c *Coherent) ValidateCurrentRoot(ctx context.Context, tx kv.TemporalTx) (*
 
 	clearCache := false
 
-	compare := func(cache *btree2.BTreeG[*Element], domain kv.Domain) (bool, [][]byte, error) {
+	compare := func(cache *btree2.Map[*Element, *Element], domain kv.Domain) (bool, [][]byte, error) {
 		keys := make([][]byte, 0)
 
 		for {
-			val, ok := cache.PopMax()
-			if !ok {
+			iter := cache.Iterator()
+			iter.Last()
+			if !iter.Valid() {
 				break
 			}
+			val := iter.Value()
+			cache.Delete(iter.Cur())
 
 			// check the db
 			inDb, _, err := tx.GetLatest(domain, val.K)
@@ -618,19 +621,21 @@ func (c *Coherent) ValidateCurrentRoot(ctx context.Context, tx kv.TemporalTx) (*
 	return result, nil
 }
 
-func (c *Coherent) cloneCaches(r *CoherentRoot) (cache *btree2.BTreeG[*Element], codeCache *btree2.BTreeG[*Element]) {
+func (c *Coherent) cloneCaches(r *CoherentRoot) (cache *btree2.Map[*Element, *Element], codeCache *btree2.Map[*Element, *Element]) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
-	cache = r.cache.Copy()
-	codeCache = r.codeCache.Copy()
+	cacheClone := r.cache.Clone()
+	cache = &cacheClone
+	codeCacheClone := r.codeCache.Clone()
+	codeCache = &codeCacheClone
 	return cache, codeCache
 }
 
 func (c *Coherent) clearCaches(r *CoherentRoot) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
-	r.cache.Clear()
-	r.codeCache.Clear()
+	r.cache = newElementMap()
+	r.codeCache = newElementMap()
 }
 
 func AssertCheckValues(ctx context.Context, tx kv.TemporalTx, cache Cache) (int, error) {
@@ -655,22 +660,21 @@ func AssertCheckValues(ctx context.Context, tx kv.TemporalTx, cache Cache) (int,
 	if !ok {
 		return 0, nil
 	}
-	root.cache.Walk(func(items []*Element) bool {
-		for _, i := range items {
-			k, v := i.K, i.V
-			var dbV []byte
-			dbV, err = tx.GetOne(kv.PlainState, k)
-			if err != nil {
-				return false
-			}
-			if !bytes.Equal(dbV, v) {
-				err = fmt.Errorf("key: %x, has different values: %x != %x", k, v, dbV)
-				return false
-			}
-			checked++
+	iter := root.cache.Iterator()
+	for iter.First(); iter.Valid(); iter.Next() {
+		i := iter.Value()
+		k, v := i.K, i.V
+		var dbV []byte
+		dbV, err = tx.GetOne(kv.PlainState, k)
+		if err != nil {
+			break
 		}
-		return true
-	})
+		if !bytes.Equal(dbV, v) {
+			err = fmt.Errorf("key: %x, has different values: %x != %x", k, v, dbV)
+			break
+		}
+		checked++
+	}
 	return checked, err
 }
 func (c *Coherent) evictRoots() {
@@ -721,6 +725,13 @@ type Element struct {
 func (e *Element) Size() int { return len(e.K) + len(e.V) }
 
 func Less(a, b *Element) bool { return bytes.Compare(a.K, b.K) < 0 }
+
+func elementCmp(a, b *Element) int { return bytes.Compare(a.K, b.K) }
+
+func newElementMap() *btree2.Map[*Element, *Element] {
+	m := btree2.MakeMap[*Element, *Element](elementCmp)
+	return &m
+}
 
 type ThreadSafeEvictionList struct {
 	l    *List

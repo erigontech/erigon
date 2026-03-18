@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"testing"
 
+	btree2 "github.com/anacrolix/btree"
 	"github.com/stretchr/testify/require"
-	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -24,14 +24,16 @@ func TestDependency(t *testing.T) {
 
 	dirs := datadir.New(t.TempDir())
 	logger := log.New()
-	dfs := btree.NewBTreeGOptions(filesItemLess, btree.Options{Degree: 128, NoLocks: false})
+	dfsMap := btree2.MakeMap[*FilesItem, *FilesItem](filesItemCmp)
+	dfs := &dfsMap
 	df1 := getPopulatedCommitmentFilesItem(t, dirs, 0, 1, false, logger)
 	df2 := getPopulatedCommitmentFilesItem(t, dirs, 1, 2, false, logger)
-	dfs.Set(df1)
-	dfs.Set(df2)
-	fg := func() *btree.BTreeG[*FilesItem] {
+	dfs.Upsert(df1, df1)
+	dfs.Upsert(df2, df2)
+	fg := func() *btree2.Map[*FilesItem, *FilesItem] {
 		// only commitment files
-		return dfs.Copy()
+		m := dfs.Clone()
+		return &m
 	}
 
 	dinfo := &DependentInfo{
@@ -64,16 +66,18 @@ func TestDependency_UnindexedMerged(t *testing.T) {
 
 	dirs := datadir.New(t.TempDir())
 	logger := log.New()
-	dfs := btree.NewBTreeGOptions(filesItemLess, btree.Options{Degree: 128, NoLocks: false})
+	dfsMap := btree2.MakeMap[*FilesItem, *FilesItem](filesItemCmp)
+	dfs := &dfsMap
 	df1 := getPopulatedCommitmentFilesItem(t, dirs, 0, 1, false, logger)
 	df2 := getPopulatedCommitmentFilesItem(t, dirs, 1, 2, false, logger)
 	df3 := getPopulatedCommitmentFilesItem(t, dirs, 0, 2, true, logger)
-	dfs.Set(df1)
-	dfs.Set(df2)
-	dfs.Set(df3)
-	fg := func() *btree.BTreeG[*FilesItem] {
+	dfs.Upsert(df1, df1)
+	dfs.Upsert(df2, df2)
+	dfs.Upsert(df3, df3)
+	fg := func() *btree2.Map[*FilesItem, *FilesItem] {
 		// only commitment files
-		return dfs.Copy()
+		m := dfs.Clone()
+		return &m
 	}
 
 	dinfo := &DependentInfo{

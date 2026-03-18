@@ -19,7 +19,7 @@ package dataflow
 import (
 	"sync"
 
-	"github.com/google/btree"
+	btree "github.com/anacrolix/btree"
 )
 
 var BlockBodyDownloadStates *States = NewStates(64 * 1024)
@@ -58,7 +58,7 @@ type States struct {
 	window       int
 	ids          []uint64
 	states       []byte
-	snapshot     *btree.BTreeG[SnapshotItem]
+	snapshot     *btree.Map[SnapshotItem, SnapshotItem]
 	snapshotTick int
 	idx          int
 }
@@ -68,9 +68,18 @@ func NewStates(window int) *States {
 		window: window,
 		ids:    make([]uint64, window),
 		states: make([]byte, window),
-		snapshot: btree.NewG[SnapshotItem](16, func(a, b SnapshotItem) bool {
-			return a.id < b.id
-		}),
+		snapshot: func() *btree.Map[SnapshotItem, SnapshotItem] {
+			m := btree.MakeMap[SnapshotItem, SnapshotItem](func(a, b SnapshotItem) int {
+				if a.id < b.id {
+					return -1
+				}
+				if a.id > b.id {
+					return 1
+				}
+				return 0
+			})
+			return &m
+		}(),
 		idx: 0,
 	}
 	return s
@@ -102,7 +111,8 @@ func (s *States) makeSnapshot() {
 		if state == 0 {
 			s.snapshot.Delete(SnapshotItem{id: id})
 		} else {
-			s.snapshot.ReplaceOrInsert(SnapshotItem{id: id, state: state})
+			item := SnapshotItem{id: id, state: state}
+			s.snapshot.Upsert(item, item)
 		}
 	}
 	s.idx = 0

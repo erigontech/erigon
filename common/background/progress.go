@@ -22,7 +22,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	btree2 "github.com/tidwall/btree"
+	btree2 "github.com/anacrolix/btree"
 )
 
 // Progress - tracks background job progress
@@ -40,13 +40,21 @@ func (p *Progress) percent() int {
 
 // ProgressSet - tracks multiple background job progress
 type ProgressSet struct {
-	list *btree2.Map[int, *Progress]
+	list btree2.Map[int, *Progress]
 	i    int
 	lock sync.RWMutex
 }
 
 func NewProgressSet() *ProgressSet {
-	return &ProgressSet{list: btree2.NewMap[int, *Progress](128)}
+	return &ProgressSet{list: btree2.MakeMap[int, *Progress](func(a, b int) int {
+		if a < b {
+			return -1
+		}
+		if a > b {
+			return 1
+		}
+		return 0
+	})}
 }
 func (s *ProgressSet) AddNew(fName string, total uint64) *Progress {
 	p := &Progress{}
@@ -60,7 +68,7 @@ func (s *ProgressSet) Add(p *Progress) {
 	defer s.lock.Unlock()
 	s.i++
 	p.i = s.i
-	s.list.Set(p.i, p)
+	s.list.Upsert(p.i, p)
 }
 
 func (s *ProgressSet) Delete(p *Progress) {
@@ -79,21 +87,22 @@ func (s *ProgressSet) String() string {
 	defer s.lock.RUnlock()
 	var sb strings.Builder
 	var i int
-	s.list.Scan(func(_ int, p *Progress) bool {
+	iter := s.list.Iterator()
+	for iter.First(); iter.Valid(); iter.Next() {
+		p := iter.Value()
 		if p == nil {
-			return true
+			continue
 		}
 		namePtr := p.Name.Load()
 		if namePtr == nil {
-			return true
+			continue
 		}
 		sb.WriteString(fmt.Sprintf("%s=%d%%", *namePtr, p.percent()))
 		i++
 		if i != s.list.Len() {
 			sb.WriteString(", ")
 		}
-		return true
-	})
+	}
 	return sb.String()
 }
 
@@ -101,16 +110,17 @@ func (s *ProgressSet) DiagnosticsData() map[string]int {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 	var arr = make(map[string]int, s.list.Len())
-	s.list.Scan(func(_ int, p *Progress) bool {
+	iter := s.list.Iterator()
+	for iter.First(); iter.Valid(); iter.Next() {
+		p := iter.Value()
 		if p == nil {
-			return true
+			continue
 		}
 		namePtr := p.Name.Load()
 		if namePtr == nil {
-			return true
+			continue
 		}
 		arr[*namePtr] = p.percent()
-		return true
-	})
+	}
 	return arr
 }

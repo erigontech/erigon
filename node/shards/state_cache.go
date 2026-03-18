@@ -23,8 +23,9 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/google/btree"
 	"github.com/holiman/uint256"
+
+	btree "github.com/anacrolix/btree"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -58,6 +59,35 @@ const (
 	codeItemSize         = int(unsafe.Sizeof(CodeItem{}) + 16)
 	codeWriteItemSize    = int(unsafe.Sizeof(CodeWriteItem{})+16) + codeItemSize
 )
+
+// cacheTreeItem is the common interface for all items stored in the B-trees (both readWrites and writes).
+// It allows mixing different concrete types in the same B-tree via an interface key.
+type cacheTreeItem interface {
+	Less(other cacheTreeItem) bool
+}
+
+func cacheTreeItemCmp(a, b cacheTreeItem) int {
+	if a.Less(b) {
+		return -1
+	}
+	if b.Less(a) {
+		return 1
+	}
+	return 0
+}
+
+// cacheMapGet looks up key in m and returns the stored item (the key, not the value).
+// anacrolix/btree v0.1.1 has a bug where node.clone() doesn't copy the values array,
+// so Value() returns nil after Clone()+mutation. Since we always Upsert(item, item),
+// the key IS the stored item and is correctly preserved across Clone().
+func cacheMapGet(m *btree.Map[cacheTreeItem, cacheTreeItem], key cacheTreeItem) (cacheTreeItem, bool) {
+	it := m.Iterator()
+	it.SeekGE(key)
+	if it.Valid() && cacheTreeItemCmp(it.Cur(), key) == 0 {
+		return it.Cur(), true
+	}
+	return nil, false
+}
 
 // AccountSeek allows to traverse sub-tree
 type AccountSeek struct {
@@ -126,7 +156,7 @@ type CodeWriteItem struct {
 }
 
 type CacheItem interface {
-	btree.Item
+	cacheTreeItem
 	GetSequence() int
 	SetSequence(sequence int)
 	GetSize() int
@@ -140,7 +170,7 @@ type CacheItem interface {
 }
 
 type CacheWriteItem interface {
-	btree.Item
+	cacheTreeItem
 	GetCacheItem() CacheItem
 	SetCacheItem(item CacheItem)
 	GetSize() int
@@ -160,7 +190,7 @@ func compare_code_code(i1 *CodeItem, i2 *CodeItem) int {
 	return 1
 }
 
-func (r *AccountSeek) Less(than btree.Item) bool {
+func (r *AccountSeek) Less(than cacheTreeItem) bool {
 	switch i := than.(type) {
 	case *AccountItem:
 		return bytes.Compare(r.seek, i.addrHash.Bytes()) < 0
@@ -171,7 +201,7 @@ func (r *AccountSeek) Less(than btree.Item) bool {
 	}
 }
 
-func (r *StorageSeek) Less(than btree.Item) bool {
+func (r *StorageSeek) Less(than cacheTreeItem) bool {
 	switch i := than.(type) {
 	case *StorageItem:
 		c := bytes.Compare(r.addrHash.Bytes(), i.addrHash.Bytes())
@@ -196,7 +226,7 @@ func (r *StorageSeek) Less(than btree.Item) bool {
 	}
 }
 
-func (ai *AccountItem) Less(than btree.Item) bool {
+func (ai *AccountItem) Less(than cacheTreeItem) bool {
 	switch i := than.(type) {
 	case *AccountItem:
 		return bytes.Compare(ai.addrHash.Bytes(), i.addrHash.Bytes()) < 0
@@ -212,7 +242,7 @@ func (ai *AccountItem) Less(than btree.Item) bool {
 func (awi *AccountWriteItem) GetCacheItem() CacheItem     { return awi.ai }
 func (awi *AccountWriteItem) SetCacheItem(item CacheItem) { awi.ai = item.(*AccountItem) }
 func (awi *AccountWriteItem) GetSize() int                { return accountWriteItemSize }
-func (awi *AccountWriteItem) Less(than btree.Item) bool {
+func (awi *AccountWriteItem) Less(than cacheTreeItem) bool {
 	return awi.ai.Less(than)
 }
 
@@ -234,14 +264,14 @@ func (ai *AccountItem) CopyValueFrom(item CacheItem) {
 	ai.account.Copy(&otherAi.account)
 }
 
-func (swi *StorageWriteItem) Less(than btree.Item) bool {
+func (swi *StorageWriteItem) Less(than cacheTreeItem) bool {
 	return swi.si.Less(than.(*StorageWriteItem).si)
 }
 func (swi *StorageWriteItem) GetCacheItem() CacheItem     { return swi.si }
 func (swi *StorageWriteItem) SetCacheItem(item CacheItem) { swi.si = item.(*StorageItem) }
 func (swi *StorageWriteItem) GetSize() int                { return storageWriteItemSize }
 
-func (si *StorageItem) Less(than btree.Item) bool {
+func (si *StorageItem) Less(than cacheTreeItem) bool {
 	switch i := than.(type) {
 	case *StorageItem:
 		c := bytes.Compare(si.addrHash.Bytes(), i.addrHash.Bytes())
@@ -294,11 +324,11 @@ func (si *StorageItem) CopyValueFrom(item CacheItem) {
 	si.value.Set(&otherSi.value)
 }
 
-func (ci *CodeItem) Less(than btree.Item) bool {
+func (ci *CodeItem) Less(than cacheTreeItem) bool {
 	return compare_code_code(ci, than.(*CodeItem)) < 0
 }
 
-func (cwi *CodeWriteItem) Less(than btree.Item) bool {
+func (cwi *CodeWriteItem) Less(than cacheTreeItem) bool {
 	i := than.(*CodeWriteItem)
 	c := bytes.Compare(cwi.address.Bytes(), i.address.Bytes())
 	if c == 0 {
@@ -361,10 +391,10 @@ func (rh *ReadHeap) Pop() any {
 
 // StateCache is the structure containing B-trees and priority queues for the state cache
 type StateCache struct {
-	readWrites [5]*btree.BTree   // Mixed reads and writes
-	writes     [5]*btree.BTree   // Only writes for the effective iteration
-	readQueue  [5]ReadHeap       // Priority queue of read elements eligible for eviction (sorted by sequence)
-	limit      datasize.ByteSize // Total size of the readQueue (if new item causes the size to go over the limit, some existing items are evicted)
+	readWrites [5]*btree.Map[cacheTreeItem, cacheTreeItem] // Mixed reads and writes
+	writes     [5]*btree.Map[cacheTreeItem, cacheTreeItem] // Only writes for the effective iteration
+	readQueue  [5]ReadHeap                                 // Priority queue of read elements eligible for eviction (sorted by sequence)
+	limit      datasize.ByteSize                           // Total size of the readQueue (if new item causes the size to go over the limit, some existing items are evicted)
 	readSize   int
 	writeSize  int
 	sequence   int // Current sequence assigned to any item that has been "touched" (created, deleted, read). Incremented after every touch
@@ -388,14 +418,16 @@ func id(a any) uint8 {
 }
 
 // NewStateCache create a new state cache based on the B-trees of specific degree. The second and the third parameters are the limit on the number of reads and writes to cache, respectively
-func NewStateCache(degree int, limit datasize.ByteSize) *StateCache {
+func NewStateCache(_ int, limit datasize.ByteSize) *StateCache {
 	var sc StateCache
 	sc.limit = limit
 	for i := 0; i < len(sc.readWrites); i++ {
-		sc.readWrites[i] = btree.New(degree)
+		m := btree.MakeMap[cacheTreeItem, cacheTreeItem](cacheTreeItemCmp)
+		sc.readWrites[i] = &m
 	}
 	for i := 0; i < len(sc.writes); i++ {
-		sc.writes[i] = btree.New(degree)
+		m := btree.MakeMap[cacheTreeItem, cacheTreeItem](cacheTreeItemCmp)
+		sc.writes[i] = &m
 	}
 	for i := 0; i < len(sc.readQueue); i++ {
 		heap.Init(&sc.readQueue[i])
@@ -407,18 +439,20 @@ func NewStateCache(degree int, limit datasize.ByteSize) *StateCache {
 func (sc *StateCache) Clone() *StateCache {
 	var clone StateCache
 	for i := range clone.readWrites {
-		clone.readWrites[i] = sc.readWrites[i].Clone()
-		clone.writes[i] = sc.writes[i].Clone()
+		rw := sc.readWrites[i].Clone()
+		clone.readWrites[i] = &rw
+		w := sc.writes[i].Clone()
+		clone.writes[i] = &w
 		clone.limit = sc.limit
 		heap.Init(&clone.readQueue[i])
 	}
 	return &clone
 }
 
-func (sc *StateCache) get(key btree.Item) (CacheItem, bool) {
+func (sc *StateCache) get(key cacheTreeItem) (CacheItem, bool) {
 	WritesRead.Inc()
-	item := sc.readWrites[id(key)].Get(key)
-	if item == nil {
+	item, ok := cacheMapGet(sc.readWrites[id(key)], key)
+	if !ok {
 		return nil, false
 	}
 	cacheItem := item.(CacheItem)
@@ -452,10 +486,11 @@ func (sc *StateCache) HasAccountWithInPrefix(addrHashPrefix []byte) bool {
 	AccRead.Inc()
 	seek := &AccountSeek{seek: addrHashPrefix}
 	var found bool
-	sc.readWrites[id(seek)].AscendGreaterOrEqual(seek, func(i btree.Item) bool {
-		found = bytes.HasPrefix(i.(*AccountItem).addrHash.Bytes(), addrHashPrefix)
-		return false
-	})
+	iter := sc.readWrites[id(seek)].Iterator()
+	iter.SeekGE(seek)
+	if iter.Valid() {
+		found = bytes.HasPrefix(iter.Cur().(*AccountItem).addrHash.Bytes(), addrHashPrefix)
+	}
 	return found
 }
 
@@ -468,8 +503,8 @@ func (sc *StateCache) GetDeletedAccount(address []byte) *accounts.Account {
 	h.Sha.Write(address)
 	//nolint:errcheck
 	h.Sha.Read(key.addrHash[:])
-	item := sc.readWrites[id(key)].Get(key)
-	if item == nil {
+	item, ok := cacheMapGet(sc.readWrites[id(key)], key)
+	if !ok {
 		return nil
 	}
 	ai := item.(*AccountItem)
@@ -527,7 +562,7 @@ func (sc *StateCache) GetCode(address []byte, incarnation uint64) ([]byte, bool)
 
 func (sc *StateCache) setRead(item CacheItem, absent bool) {
 	id := id(item)
-	if sc.readWrites[id].Get(item) != nil {
+	if _, ok := cacheMapGet(sc.readWrites[id], item); ok {
 		panic(fmt.Sprintf("item must not be present in the cache before doing setRead: %s", item))
 	}
 	item.SetSequence(sc.sequence)
@@ -549,7 +584,7 @@ func (sc *StateCache) setRead(item CacheItem, absent bool) {
 	}
 	// Push new element on the read queue
 	heap.Push(&sc.readQueue[id], item)
-	sc.readWrites[id].ReplaceOrInsert(item)
+	sc.readWrites[id].Upsert(item, item)
 	sc.readSize += item.GetSize()
 }
 
@@ -616,7 +651,7 @@ func (sc *StateCache) SetAccountAbsent(address []byte) {
 func (sc *StateCache) setWrite(item CacheItem, writeItem CacheWriteItem, del bool) {
 	id := id(item)
 	// Check if this is going to be modification of the existing entry
-	if existing := sc.writes[id].Get(writeItem); existing != nil {
+	if existing, ok := cacheMapGet(sc.writes[id], writeItem); ok {
 		cacheWriteItem := existing.(CacheWriteItem)
 		cacheItem := cacheWriteItem.GetCacheItem()
 		sc.readSize += item.GetSize()
@@ -634,7 +669,7 @@ func (sc *StateCache) setWrite(item CacheItem, writeItem CacheWriteItem, del boo
 		return
 	}
 	// Now see if there is such item in the readWrite B-tree - then we replace read entry with write entry
-	if existing := sc.readWrites[id].Get(item); existing != nil {
+	if existing, ok := cacheMapGet(sc.readWrites[id], item); ok {
 		cacheItem := existing.(CacheItem)
 		// Remove seek the reads queue
 		if sc.readQueue[id].Len() > 0 {
@@ -653,7 +688,7 @@ func (sc *StateCache) setWrite(item CacheItem, writeItem CacheWriteItem, del boo
 		cacheItem.SetSequence(sc.sequence)
 		sc.sequence++
 		writeItem.SetCacheItem(cacheItem)
-		sc.writes[id].ReplaceOrInsert(writeItem)
+		sc.writes[id].Upsert(writeItem, writeItem)
 		sc.writeSize += writeItem.GetSize()
 		return
 	}
@@ -674,10 +709,10 @@ func (sc *StateCache) setWrite(item CacheItem, writeItem CacheWriteItem, del boo
 	} else {
 		item.ClearFlags(DeletedFlag)
 	}
-	sc.readWrites[id].ReplaceOrInsert(item)
+	sc.readWrites[id].Upsert(item, item)
 	sc.readSize += item.GetSize()
 	writeItem.SetCacheItem(item)
-	sc.writes[id].ReplaceOrInsert(writeItem)
+	sc.writes[id].Upsert(writeItem, writeItem)
 	sc.writeSize += writeItem.GetSize()
 }
 
@@ -851,28 +886,30 @@ func (sc *StateCache) SetCodeDelete(address []byte, incarnation uint64) {
 	sc.setWrite(&ci, &cwi, true /* delete */)
 }
 
-func (sc *StateCache) PrepareWrites() [5]*btree.BTree {
-	var writes [5]*btree.BTree
+func (sc *StateCache) PrepareWrites() [5]*btree.Map[cacheTreeItem, cacheTreeItem] {
+	var writes [5]*btree.Map[cacheTreeItem, cacheTreeItem]
 	for i := 0; i < len(sc.writes); i++ {
-		sc.writes[i].Ascend(func(i btree.Item) bool {
-			writeItem := i.(CacheWriteItem)
+		iter := sc.writes[i].Iterator()
+		for iter.First(); iter.Valid(); iter.Next() {
+			writeItem := iter.Cur().(CacheWriteItem)
 			cacheItem := writeItem.GetCacheItem()
 			cacheItem.ClearFlags(ModifiedFlag)
 			if cacheItem.HasFlag(DeletedFlag) {
 				cacheItem.ClearFlags(DeletedFlag)
 				cacheItem.SetFlags(AbsentFlag)
 			}
-			return true
-		})
-		writes[i] = sc.writes[i].Clone()
-		sc.writes[i].Clear(true /* addNodesToFreeList */)
+		}
+		cloned := sc.writes[i].Clone()
+		writes[i] = &cloned
+		newMap := btree.MakeMap[cacheTreeItem, cacheTreeItem](cacheTreeItemCmp)
+		sc.writes[i] = &newMap
 		sc.writeSize = 0
 	}
 	return writes
 }
 
 func WalkWrites(
-	writes [5]*btree.BTree,
+	writes [5]*btree.Map[cacheTreeItem, cacheTreeItem],
 	accountWrite func(address []byte, account *accounts.Account) error,
 	accountDelete func(address []byte, original *accounts.Account) error,
 	storageWrite func(address []byte, incarnation uint64, location []byte, value []byte) error,
@@ -882,58 +919,58 @@ func WalkWrites(
 ) error {
 	var err error
 	for i := 0; i < len(writes); i++ {
-		writes[i].Ascend(func(i btree.Item) bool {
-			switch it := i.(type) {
+		iter := writes[i].Iterator()
+		for iter.First(); iter.Valid(); iter.Next() {
+			switch it := iter.Cur().(type) {
 			case *AccountWriteItem:
 				if it.ai.flags&AbsentFlag != 0 {
 					if err = accountDelete(it.address.Bytes(), &it.ai.account); err != nil {
-						return false
+						return err
 					}
 				} else {
 					if err = accountWrite(it.address.Bytes(), &it.ai.account); err != nil {
-						return false
+						return err
 					}
 				}
 			case *StorageWriteItem:
 				if it.si.flags&AbsentFlag != 0 {
 					if err = storageDelete(it.address.Bytes(), it.si.incarnation, it.location.Bytes()); err != nil {
-						return false
+						return err
 					}
 				} else {
 					if err = storageWrite(it.address.Bytes(), it.si.incarnation, it.location.Bytes(), it.si.value.Bytes()); err != nil {
-						return false
+						return err
 					}
 				}
 			case *CodeWriteItem:
 				if it.ci.flags&AbsentFlag != 0 {
 					if err = codeDelete(it.address.Bytes(), it.ci.incarnation); err != nil {
-						return false
+						return err
 					}
 				} else {
 					if err = codeWrite(it.address.Bytes(), it.ci.incarnation, it.ci.code); err != nil {
-						return false
+						return err
 					}
 				}
 			}
-			return true
-		})
+		}
 	}
 
 	return err
 }
 
-func (sc *StateCache) TurnWritesToReads(writes [5]*btree.BTree) {
+func (sc *StateCache) TurnWritesToReads(writes [5]*btree.Map[cacheTreeItem, cacheTreeItem]) {
 	for i := 0; i < len(writes); i++ {
 		readQueue := &sc.readQueue[i]
-		writes[i].Ascend(func(it btree.Item) bool {
-			cacheWriteItem := it.(CacheWriteItem)
+		iter := writes[i].Iterator()
+		for iter.First(); iter.Valid(); iter.Next() {
+			cacheWriteItem := iter.Cur().(CacheWriteItem)
 			cacheItem := cacheWriteItem.GetCacheItem()
 			if !cacheItem.HasFlag(ModifiedFlag) {
 				// Cannot touch items that have been modified since we have taken away the writes
 				heap.Push(readQueue, cacheItem)
 			}
-			return true
-		})
+		}
 	}
 }
 

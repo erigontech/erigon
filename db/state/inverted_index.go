@@ -31,8 +31,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	btree2 "github.com/anacrolix/btree"
 	"github.com/spaolacci/murmur3"
-	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
@@ -75,7 +75,7 @@ type InvertedIndex struct {
 	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
 	//
 	// BeginRo() using _visible in zero-copy way
-	dirtyFiles *btree2.BTreeG[*FilesItem]
+	dirtyFiles *btree2.Map[*FilesItem, *FilesItem]
 
 	// `_visible.files` - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
@@ -105,12 +105,15 @@ func NewInvertedIndex(cfg statecfg.InvIdxCfg, stepSize, stepsInFrozenFile uint64
 	}
 
 	ii := InvertedIndex{
-		InvIdxCfg:  cfg,
-		dirs:       dirs,
-		salt:       &atomic.Pointer[uint32]{},
-		dirtyFiles: btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		_visible:   newIIVisible(cfg.FilenameBase, []visibleFile{}),
-		logger:     logger,
+		InvIdxCfg: cfg,
+		dirs:      dirs,
+		salt:      &atomic.Pointer[uint32]{},
+		dirtyFiles: func() *btree2.Map[*FilesItem, *FilesItem] {
+			m := btree2.MakeMap[*FilesItem, *FilesItem](filesItemCmp)
+			return &m
+		}(),
+		_visible: newIIVisible(cfg.FilenameBase, []visibleFile{}),
+		logger:   logger,
 
 		stepSize:          stepSize,
 		stepsInFrozenFile: stepsInFrozenFile,
@@ -223,7 +226,7 @@ func (ii *InvertedIndex) scanDirtyFiles(fileNames []string) {
 	}
 	for _, dirtyFile := range filterDirtyFiles(fileNames, ii.stepSize, ii.stepsInFrozenFile, ii.FilenameBase, "ef", ii.logger) {
 		if _, has := ii.dirtyFiles.Get(dirtyFile); !has {
-			ii.dirtyFiles.Set(dirtyFile)
+			ii.dirtyFiles.Upsert(dirtyFile, dirtyFile)
 		}
 	}
 }
@@ -245,7 +248,7 @@ func (ii *InvertedIndex) reCalcVisibleFiles(toTxNum uint64) {
 }
 
 func (ii *InvertedIndex) MissedMapAccessors() (l []*FilesItem) {
-	return ii.missedMapAccessors(ii.dirtyFiles.Items(), readDirNames(ii.dirs.SnapAccessors))
+	return ii.missedMapAccessors(dirtyFilesItems(ii.dirtyFiles), readDirNames(ii.dirs.SnapAccessors))
 }
 
 func (ii *InvertedIndex) missedMapAccessors(source []*FilesItem, dl dirListing) (l []*FilesItem) {
@@ -1207,7 +1210,7 @@ func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumT
 	fi.decompressor = sf.decomp
 	fi.index = sf.index
 	fi.existence = sf.existence
-	ii.dirtyFiles.Set(fi)
+	ii.dirtyFiles.Upsert(fi, fi)
 }
 
 func (iit *InvertedIndexRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
