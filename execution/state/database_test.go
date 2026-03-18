@@ -134,7 +134,7 @@ func TestCreate2Revive(t *testing.T) {
 		} else if !exist {
 			t.Error("expected account to exist")
 		}
-		if exist, err := st.Exist(contractAddress.Value()); err != nil {
+		if exist, err := st.Exist(contractAddress); err != nil {
 			t.Error(err)
 		} else if exist {
 			t.Error("expected contractAddress to not exist before block 0", contractAddress.String())
@@ -150,7 +150,7 @@ func TestCreate2Revive(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		if exist, err := st.Exist(contractAddress.Value()); err != nil {
+		if exist, err := st.Exist(contractAddress); err != nil {
 			t.Error(err)
 		} else if !exist {
 			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
@@ -353,7 +353,7 @@ func TestCreate2Polymorth(t *testing.T) {
 		} else if !exist {
 			t.Error("expected account to exist")
 		}
-		if exist, err := st.Exist(contractAddress.Value()); err != nil {
+		if exist, err := st.Exist(contractAddress); err != nil {
 			t.Error(err)
 		} else if exist {
 			t.Error("expected contractAddress to not exist before block 0", contractAddress.String())
@@ -369,7 +369,7 @@ func TestCreate2Polymorth(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		if exist, err := st.Exist(contractAddress.Value()); err != nil {
+		if exist, err := st.Exist(contractAddress); err != nil {
 			t.Error(err)
 		} else if !exist {
 			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
@@ -587,7 +587,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		} else if !exist {
 			t.Error("expected account to exist")
 		}
-		if exist, err := st.Exist(contractAddress.Value()); err != nil {
+		if exist, err := st.Exist(contractAddress); err != nil {
 			t.Error(err)
 		} else if exist {
 			t.Error("expected contractAddress to not exist before block 0", contractAddress.String())
@@ -604,7 +604,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	var correctValueX uint256.Int
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		if exist, err := st.Exist(contractAddress.Value()); err != nil {
+		if exist, err := st.Exist(contractAddress); err != nil {
 			t.Error(err)
 		} else if !exist {
 
@@ -625,7 +625,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		if exist, err := st.Exist(contractAddress.Value()); err != nil {
+		if exist, err := st.Exist(contractAddress); err != nil {
 			t.Error(err)
 		} else if exist {
 			t.Error("expected contractAddress to not exist at the block 3", contractAddress.String())
@@ -639,7 +639,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	}
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		if exist, err := st.Exist(contractAddress.Value()); err != nil {
+		if exist, err := st.Exist(contractAddress); err != nil {
 			t.Error(err)
 		} else if !exist {
 			t.Error("expected contractAddress to exist at the block 4", contractAddress.String())
@@ -742,7 +742,7 @@ func TestReorgOverStateChange(t *testing.T) {
 		} else if !exist {
 			t.Error("expected account to exist")
 		}
-		if exist, err := st.Exist(contractAddress.Value()); err != nil {
+		if exist, err := st.Exist(contractAddress); err != nil {
 			t.Error(err)
 		} else if exist {
 
@@ -761,7 +761,7 @@ func TestReorgOverStateChange(t *testing.T) {
 	var correctValueX uint256.Int
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		if exist, err := st.Exist(contractAddress.Value()); err != nil {
+		if exist, err := st.Exist(contractAddress); err != nil {
 			t.Error(err)
 		} else if !exist {
 
@@ -786,7 +786,7 @@ func TestReorgOverStateChange(t *testing.T) {
 	}
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		if exist, err := st.Exist(contractAddress.Value()); err != nil {
+		if exist, err := st.Exist(contractAddress); err != nil {
 			t.Error(err)
 		} else if !exist {
 			t.Error("expected contractAddress to exist at the block 4", contractAddress.String())
@@ -899,7 +899,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	var check0 uint256.Int
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		if exist, err := st.Exist(contractAddress.Value()); err != nil {
+		if exist, err := st.Exist(contractAddress); err != nil {
 			t.Error(err)
 		} else if !exist {
 			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
@@ -1033,7 +1033,7 @@ func TestEip2200Gas(t *testing.T) {
 		} else if !exist {
 			t.Error("expected account to exist")
 		}
-		if exist, err := st.Exist(contractAddress.Value()); err != nil {
+		if exist, err := st.Exist(contractAddress); err != nil {
 			t.Error(err)
 		} else if exist {
 			t.Error("expected contractAddress to not exist before block 0", contractAddress.String())
@@ -1050,7 +1050,7 @@ func TestEip2200Gas(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		if exist, err := st.Exist(contractAddress.Value()); err != nil {
+		if exist, err := st.Exist(contractAddress); err != nil {
 			t.Error(err)
 		} else if !exist {
 			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
@@ -1133,7 +1133,7 @@ func TestWrongIncarnation(t *testing.T) {
 		} else if !exist {
 			t.Error("expected account to exist")
 		}
-		if exist, err := st.Exist(contractAddress.Value()); err != nil {
+		if exist, err := st.Exist(contractAddress); err != nil {
 			t.Error(err)
 		} else if exist {
 			t.Error("expected contractAddress to not exist before block 0", contractAddress.String())
@@ -1162,7 +1162,7 @@ func TestWrongIncarnation(t *testing.T) {
 		}
 
 		st := state.New(stateReader)
-		if exist, err := st.Exist(contractAddress.Value()); err != nil {
+		if exist, err := st.Exist(contractAddress); err != nil {
 			t.Error(err)
 		} else if !exist {
 			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
@@ -1309,7 +1309,7 @@ func TestWrongIncarnation2(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		if exist, err := st.Exist(contractAddress.Value()); err != nil {
+		if exist, err := st.Exist(contractAddress); err != nil {
 			t.Error(err)
 		} else if !exist {
 			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
