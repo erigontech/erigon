@@ -88,7 +88,7 @@ func encodeAnnouncements(types []byte, sizes []uint32, hashes []byte, encodeBuf 
 	hashesLen := len(hashes) / 32 * 33
 	totalLen := typesLen + sizesLen + rlp.ListPrefixLen(sizesLen) + hashesLen + rlp.ListPrefixLen(hashesLen)
 	pos += rlp.EncodeListPrefix(totalLen, encodeBuf)
-	pos += rlp.EncodeString2(types, encodeBuf[pos:])
+	pos += rlp.EncodeStringToBuf(types, encodeBuf[pos:])
 	pos += rlp.EncodeListPrefix(sizesLen, encodeBuf[pos:])
 	for _, size := range sizes {
 		pos += rlp.EncodeU32(size, encodeBuf[pos:])

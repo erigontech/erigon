@@ -132,7 +132,7 @@ func EncodePooledTransactions66(txnsRlp [][]byte, requestID uint64, encodeBuf []
 			copy(encodeBuf[pos:], txnsRlp[i])
 			pos += len(txnsRlp[i])
 		} else {
-			pos += rlp.EncodeString2(txnsRlp[i], encodeBuf[pos:])
+			pos += rlp.EncodeStringToBuf(txnsRlp[i], encodeBuf[pos:])
 		}
 	}
 	_ = pos
@@ -161,7 +161,7 @@ func EncodeTransactions(txnsRlp [][]byte, encodeBuf []byte) []byte {
 			copy(encodeBuf[pos:], txnsRlp[i])
 			pos += len(txnsRlp[i])
 		} else {
-			pos += rlp.EncodeString2(txnsRlp[i], encodeBuf[pos:])
+			pos += rlp.EncodeStringToBuf(txnsRlp[i], encodeBuf[pos:])
 		}
 	}
 	_ = pos
