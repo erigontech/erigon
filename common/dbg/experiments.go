@@ -110,6 +110,11 @@ var (
 	TraceDeletion         = EnvBool("TRACE_DELETION", false)
 
 	RpcDropResponse = EnvBool("RPC_DROP_RESPONSE", false)
+
+	// AssertNoOrphanedAccessors panics when accessor files (.bt/.kvei/.kvi) with no
+	// corresponding .kv file are detected. Useful to catch the race between
+	// BuildMissedAccessors and merge cleanup in dev/test environments.
+	AssertNoOrphanedAccessors = EnvBool("ASSERT_NO_ORPHANED_ACCESSORS", false)
 )
 
 func ReadMemStats(m *runtime.MemStats) {

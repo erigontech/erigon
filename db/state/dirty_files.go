@@ -32,6 +32,7 @@ import (
 
 	btree2 "github.com/tidwall/btree"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
@@ -210,6 +211,16 @@ func (i *FilesItem) closeFilesAndRemove() {
 	if i == nil {
 		return
 	}
+	// Save accessor paths before closing so we can assert they weren't re-created
+	// by a concurrent BuildMissedAccessors goroutine after we delete the .kv.
+	var btPath, exPath string
+	if i.bindex != nil {
+		btPath = i.bindex.FilePath()
+	}
+	if i.existence != nil {
+		exPath = i.existence.FilePath
+	}
+
 	// Delete accessors before the data file. If the process is killed between
 	// deleting the data file and accessors, the accessor files become
 	// permanently orphaned.
@@ -228,20 +239,20 @@ func (i *FilesItem) closeFilesAndRemove() {
 	}
 	if i.bindex != nil {
 		i.bindex.Close()
-		if err := dir.RemoveFile(i.bindex.FilePath()); err != nil {
+		if err := dir.RemoveFile(btPath); err != nil {
 			log.Trace("remove after close", "err", err, "file", i.bindex.FileName())
 		}
-		if err := dir.RemoveFile(i.bindex.FilePath() + ".torrent"); err != nil {
+		if err := dir.RemoveFile(btPath + ".torrent"); err != nil {
 			log.Trace("remove after close", "err", err, "file", i.bindex.FileName())
 		}
 		i.bindex = nil
 	}
 	if i.existence != nil {
 		i.existence.Close()
-		if err := dir.RemoveFile(i.existence.FilePath); err != nil {
+		if err := dir.RemoveFile(exPath); err != nil {
 			log.Trace("remove after close", "err", err, "file", i.existence.FileName)
 		}
-		if err := dir.RemoveFile(i.existence.FilePath + ".torrent"); err != nil {
+		if err := dir.RemoveFile(exPath + ".torrent"); err != nil {
 			log.Trace("remove after close", "err", err, "file", i.existence.FilePath)
 		}
 		i.existence = nil
@@ -258,6 +269,21 @@ func (i *FilesItem) closeFilesAndRemove() {
 			}
 		}
 		i.decompressor = nil
+	}
+
+	// After removing the .kv, assert that accessor files were not re-created by a
+	// concurrent BuildMissedAccessors goroutine during the deletion window.
+	if dbg.AssertNoOrphanedAccessors && !i.frozen {
+		if btPath != "" {
+			if exists, _ := dir.FileExist(btPath); exists {
+				panic(fmt.Sprintf("[agg] closeFilesAndRemove: .bt re-appeared after deletion (BuildMissedAccessors race?): %s", btPath))
+			}
+		}
+		if exPath != "" {
+			if exists, _ := dir.FileExist(exPath); exists {
+				panic(fmt.Sprintf("[agg] closeFilesAndRemove: .kvei re-appeared after deletion (BuildMissedAccessors race?): %s", exPath))
+			}
+		}
 	}
 }
 
@@ -437,7 +463,58 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 		d.dirtyFiles.Delete(item)
 	}
 
+	d.removeOrphanedAccessors(dirEntries)
 	return nil
+}
+
+// removeOrphanedAccessors removes accessor files (.bt, .kvei, .kvi) whose corresponding .kv data
+// file no longer exists. This can happen when BuildMissedAccessors races with merge cleanup:
+// after the merge deletes the old .bt, a concurrent BuildMissedAccessors goroutine may finish
+// writing a new .bt using the still-open decompressor, leaving an accessor with no .kv.
+func (d *Domain) removeOrphanedAccessors(dirEntries []string) {
+	type accessorSpec struct {
+		ext     string
+		enabled bool
+	}
+	specs := []accessorSpec{
+		{"bt", d.Accessors.Has(statecfg.AccessorBTree)},
+		{"kvei", d.Accessors.Has(statecfg.AccessorExistence)},
+		{"kvi", d.Accessors.Has(statecfg.AccessorHashMap)},
+	}
+	for _, spec := range specs {
+		if !spec.enabled {
+			continue
+		}
+		re := regexp.MustCompile(`^v\d+(?:\.\d+)?-` + d.FilenameBase + `\.(\d+)-(\d+)\.` + spec.ext + `$`)
+		for _, name := range dirEntries {
+			subs := re.FindStringSubmatch(name)
+			if len(subs) != 3 {
+				continue
+			}
+			startStep, err := strconv.ParseUint(subs[1], 10, 64)
+			if err != nil {
+				continue
+			}
+			endStep, err := strconv.ParseUint(subs[2], 10, 64)
+			if err != nil {
+				continue
+			}
+			probe := newFilesItem(startStep*d.stepSize, endStep*d.stepSize, d.stepSize, d.stepsInFrozenFile)
+			if _, has := d.dirtyFiles.Get(probe); has {
+				continue // corresponding .kv exists in dirtyFiles, not orphaned
+			}
+			fPath := filepath.Join(d.dirs.SnapDomain, name)
+			if dbg.AssertNoOrphanedAccessors {
+				panic(fmt.Sprintf("[agg] orphaned accessor found (no matching .kv): %s", fPath))
+			}
+			if err := dir.RemoveFile(fPath); err != nil {
+				d.logger.Warn("[agg] removeOrphanedAccessors", "err", err, "f", name)
+			} else {
+				d.logger.Debug("[removing] removing orphaned accessor", "path", fPath)
+			}
+			_ = dir.RemoveFile(fPath + ".torrent")
+		}
+	}
 }
 
 func (h *History) openDirtyFiles(dataEntries, accessorEntries []string) error {

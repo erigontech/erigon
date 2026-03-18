@@ -1165,9 +1165,22 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 		item := item
 
 		g.Go(func() error {
-			idxPath := d.kvBtAccessorNewFilePath(item.StepRange(d.stepSize))
+			fromStep, toStep := item.StepRange(d.stepSize)
+			idxPath := d.kvBtAccessorNewFilePath(fromStep, toStep)
 			if err := btindex.BuildBtreeIndexWithDecompressor(idxPath, d.dataReader(item.decompressor), ps, d.dirs.Tmp, *d.salt.Load(), d.logger, d.noFsync, d.Accessors); err != nil {
 				return fmt.Errorf("failed to build btree index for %s:  %w", item.decompressor.FileName(), err)
+			}
+			// The item may have been merged away while we were building. If so the newly
+			// created accessor files have no corresponding .kv and must be cleaned up now.
+			if _, stillPresent := d.dirtyFiles.Get(item); !stillPresent {
+				if dbg.AssertNoOrphanedAccessors {
+					panic(fmt.Sprintf("[agg] BuildMissedAccessors: item merged away during build, accessor orphaned: %s %d-%d", d.FilenameBase, fromStep, toStep))
+				}
+				exPath := d.kvExistenceIdxNewFilePath(fromStep, toStep)
+				_ = dir.RemoveFile(idxPath)
+				_ = dir.RemoveFile(idxPath + ".torrent")
+				_ = dir.RemoveFile(exPath)
+				_ = dir.RemoveFile(exPath + ".torrent")
 			}
 			return nil
 		})
