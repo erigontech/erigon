@@ -71,7 +71,10 @@ func (api *APIImpl) GetBlockAccessList(ctx context.Context, numberOrHash rpc.Blo
 		return nil, err
 	}
 	if data == nil {
-		return nil, nil
+		return nil, &rpc.CustomError{
+			Code:    4444,
+			Message: "pruned history unavailable",
+		}
 	}
 
 	bal, err := types.DecodeBlockAccessListBytes(data)
