@@ -162,13 +162,13 @@ func newTestAction(addr accounts.Address, r *rand.Rand) testAction {
 		{
 			name: "AddAddressToAccessList",
 			fn: func(a testAction, s *IntraBlockState) {
-				s.AddAddressToAccessList(addr)
+				s.AddAddressToAccessList(addr.Value())
 			},
 		},
 		{
 			name: "AddSlotToAccessList",
 			fn: func(a testAction, s *IntraBlockState) {
-				s.AddSlotToAccessList(addr,
+				s.AddSlotToAccessList(addr.Value(),
 					common.Hash{byte(a.args[0])})
 			},
 			args: make([]int64, 1),

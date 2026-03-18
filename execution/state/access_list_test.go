@@ -28,18 +28,17 @@ import (
 
 func verifyAddrs(t *testing.T, s *IntraBlockState, astrings ...string) {
 	t.Helper()
-	// convert to common.Address form
-	addresses := make([]accounts.Address, 0, len(astrings))
+	rawAddrs := make([]common.Address, 0, len(astrings))
 	var addressMap = make(map[accounts.Address]struct{})
 	for _, astring := range astrings {
-		address := accounts.InternAddress(common.HexToAddress(astring))
-		addresses = append(addresses, address)
-		addressMap[address] = struct{}{}
+		raw := common.HexToAddress(astring)
+		rawAddrs = append(rawAddrs, raw)
+		addressMap[accounts.InternAddress(raw)] = struct{}{}
 	}
 	// Check that the given addresses are in the access list
-	for _, address := range addresses {
-		if !s.AddressInAccessList(address) {
-			t.Fatalf("expected %x to be in access list", address)
+	for _, raw := range rawAddrs {
+		if !s.AddressInAccessList(raw) {
+			t.Fatalf("expected %x to be in access list", raw)
 		}
 	}
 	// Check that only the expected addresses are present in the acesslist
@@ -51,10 +50,10 @@ func verifyAddrs(t *testing.T, s *IntraBlockState, astrings ...string) {
 }
 
 func verifySlots(t *testing.T, s *IntraBlockState, addrString string, slotStrings ...string) {
-	if !s.AddressInAccessList(accounts.InternAddress(common.HexToAddress(addrString))) {
+	rawAddr := common.HexToAddress(addrString)
+	if !s.AddressInAccessList(rawAddr) {
 		t.Fatalf("scope missing address/slots %v", addrString)
 	}
-	var address = accounts.InternAddress(common.HexToAddress(addrString))
 
 	rawSlots := make([]common.Hash, 0, len(slotStrings))
 	var slotMap = make(map[accounts.StorageKey]struct{})
@@ -65,12 +64,12 @@ func verifySlots(t *testing.T, s *IntraBlockState, addrString string, slotString
 	}
 	// Check that the expected items are in the access list
 	for i, slot := range rawSlots {
-		if _, slotPresent := s.SlotInAccessList(address, slot); !slotPresent {
+		if _, slotPresent := s.SlotInAccessList(rawAddr, slot); !slotPresent {
 			t.Fatalf("input %d: scope missing slot %v (address %v)", i, slot, addrString)
 		}
 	}
 	// Check that no extra elements are in the access list
-	stateSlots := s.accessList.addresses[address]
+	stateSlots := s.accessList.addresses[accounts.InternAddress(rawAddr)]
 	for s := range stateSlots {
 		if _, slotPresent := slotMap[s]; !slotPresent {
 			t.Fatalf("scope has extra slot %v (address %v)", s, addrString)
@@ -81,7 +80,7 @@ func verifySlots(t *testing.T, s *IntraBlockState, addrString string, slotString
 func TestAccessList(t *testing.T) {
 	t.Parallel()
 	// Some helpers
-	addr := func(a string) accounts.Address { return accounts.InternAddress(common.HexToAddress(a)) }
+	addr := func(a string) common.Address { return common.HexToAddress(a) }
 	slot := func(s string) common.Hash { return common.HexToHash(s) }
 
 	_, tx, domains := NewTestRwTx(t)

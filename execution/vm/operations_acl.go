@@ -161,7 +161,7 @@ func makeCallVariantGasCallEIP2929(oldCalculator gasFunc) gasFunc {
 		// The WarmStorageReadCostEIP2929 (100) is already deducted in the form of a constant cost, so
 		// the cost to charge for cold access, if any, is Cold - Warm
 		coldCost := params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
-		warmAccess := evm.IntraBlockState().AddressInAccessList(addr)
+		warmAccess := evm.IntraBlockState().AddressInAccessList(addr.Value())
 		if !warmAccess {
 			// Charge the remaining difference here already, to correctly calculate available
 			// gas for call
@@ -225,7 +225,7 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 			address = evm.intraBlockState.InternAddress(callContext.Stack.Back(0).Bytes20())
 		)
 		// If the caller cannot afford the cost, this change will be rolled back
-		if !evm.IntraBlockState().AddressInAccessList(address) {
+		if !evm.IntraBlockState().AddressInAccessList(address.Value()) {
 			gas = params.ColdAccountAccessCostEIP2929
 			if _, ok := useGas(scopeGas, gas, evm.Config().Tracer, tracing.GasChangeCallStorageColdAccess); !ok {
 				return 0, ErrOutOfGas
@@ -289,7 +289,7 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 		// Check slot presence in the access list
 		var gas uint64
 		var accessGas uint64
-		if !evm.intraBlockState.AddressInAccessList(addr) {
+		if !evm.intraBlockState.AddressInAccessList(addr.Value()) {
 			// The WarmStorageReadCostEIP2929 (100) is already deducted in the form of a constant cost, so
 			// the cost to charge for cold access, if any, is Cold - Warm
 			accessGas = params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
@@ -339,7 +339,7 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 
 		var delegationGas uint64
 		if ok {
-			if !evm.intraBlockState.AddressInAccessList(dd) {
+			if !evm.intraBlockState.AddressInAccessList(dd.Value()) {
 				delegationGas = params.ColdAccountAccessCostEIP2929
 			} else {
 				delegationGas = params.WarmStorageReadCostEIP2929

@@ -96,7 +96,7 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	defer tx.Rollback()
 
 	st := state.New(m.NewStateReader(tx))
-	exist, err := st.Exist(accounts.InternAddress(to))
+	exist, err := st.Exist(to)
 	if err != nil {
 		t.Error(err)
 	}
@@ -183,7 +183,7 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 	defer tx.Rollback()
 
 	st := state.New(m.NewStateReader(tx))
-	exist, err := st.Exist(accounts.InternAddress(to))
+	exist, err := st.Exist(to)
 	if err != nil {
 		t.Error(err)
 	}
@@ -257,7 +257,7 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 	defer tx.Rollback()
 
 	st := state.New(m.NewStateReader(tx))
-	exist, err := st.Exist(accounts.InternAddress(to))
+	exist, err := st.Exist(to)
 	if err != nil {
 		t.Error(err)
 	}
@@ -331,7 +331,7 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 	defer tx.Rollback()
 
 	st := state.New(m.NewStateReader(tx))
-	exist, err := st.Exist(accounts.InternAddress(to))
+	exist, err := st.Exist(to)
 	if err != nil {
 		t.Error(err)
 	}
@@ -405,7 +405,7 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 	defer tx.Rollback()
 
 	st := state.New(m.NewStateReader(tx))
-	exist, err := st.Exist(accounts.InternAddress(to))
+	exist, err := st.Exist(to)
 	if err != nil {
 		t.Error(err)
 	}
@@ -458,14 +458,14 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	}
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		exist, err := st.Exist(accounts.InternAddress(from))
+		exist, err := st.Exist(from)
 		if err != nil {
 			return err
 		}
 		if !exist {
 			t.Error("expected account to exist")
 		}
-		exist, err = st.Exist(accounts.InternAddress(contractAddress))
+		exist, err = st.Exist(contractAddress)
 		if err != nil {
 			return err
 		}
@@ -488,7 +488,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		exist, err := st.Exist(accounts.InternAddress(from))
+		exist, err := st.Exist(from)
 		if err != nil {
 			return err
 		}
@@ -496,7 +496,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 			t.Error("expected account to exist")
 		}
 
-		exist, err = st.Exist(accounts.InternAddress(contractAddress))
+		exist, err = st.Exist(contractAddress)
 		if err != nil {
 			return err
 		}
@@ -514,7 +514,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		exist, err := st.Exist(accounts.InternAddress(from))
+		exist, err := st.Exist(from)
 		if err != nil {
 			return err
 		}
@@ -522,7 +522,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 			t.Error("expected account to exist")
 		}
 
-		exist, err = st.Exist(accounts.InternAddress(contractAddress))
+		exist, err = st.Exist(contractAddress)
 		if err != nil {
 			return err
 		}
@@ -568,7 +568,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		exist, err := st.Exist(accounts.InternAddress(from))
+		exist, err := st.Exist(from)
 		if err != nil {
 			return err
 		}
@@ -576,7 +576,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 			t.Error("expected account to exist")
 		}
 
-		exist, err = st.Exist(accounts.InternAddress(contractAddress))
+		exist, err = st.Exist(contractAddress)
 		if err != nil {
 			return err
 		}
@@ -594,7 +594,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	}
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		exist, err := st.Exist(accounts.InternAddress(from))
+		exist, err := st.Exist(from)
 		if err != nil {
 			return err
 		}
@@ -602,7 +602,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 			t.Error("expected account to exist")
 		}
 
-		exist, err = st.Exist(accounts.InternAddress(contractAddress))
+		exist, err = st.Exist(contractAddress)
 		if err != nil {
 			return err
 		}
@@ -668,7 +668,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		exist, err := st.Exist(accounts.InternAddress(from))
+		exist, err := st.Exist(from)
 		if err != nil {
 			return err
 		}
@@ -676,7 +676,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 			t.Error("expected account to exist")
 		}
 
-		exist, err = st.Exist(accounts.InternAddress(contractAddress))
+		exist, err = st.Exist(contractAddress)
 		if err != nil {
 			return err
 		}
@@ -695,7 +695,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		exist, err := st.Exist(accounts.InternAddress(from))
+		exist, err := st.Exist(from)
 		if err != nil {
 			return err
 		}
@@ -703,7 +703,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 			t.Error("expected account to exist")
 		}
 
-		exist, err = st.Exist(accounts.InternAddress(contractAddress))
+		exist, err = st.Exist(contractAddress)
 		if err != nil {
 			return err
 		}
@@ -776,7 +776,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		exist, err := st.Exist(accounts.InternAddress(from))
+		exist, err := st.Exist(from)
 		if err != nil {
 			return err
 		}
@@ -784,7 +784,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 			t.Error("expected account to exist")
 		}
 
-		exist, err = st.Exist(accounts.InternAddress(contractAddress))
+		exist, err = st.Exist(contractAddress)
 		if err != nil {
 			return err
 		}
@@ -802,7 +802,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
-		exist, err := st.Exist(accounts.InternAddress(from))
+		exist, err := st.Exist(from)
 		if err != nil {
 			return err
 		}
@@ -810,7 +810,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 			t.Error("expected account to exist")
 		}
 
-		exist, err = st.Exist(accounts.InternAddress(contractAddress))
+		exist, err = st.Exist(contractAddress)
 		if err != nil {
 			return err
 		}

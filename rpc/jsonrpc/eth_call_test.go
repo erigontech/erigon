@@ -651,7 +651,7 @@ func chainWithDeployedContract(t *testing.T) (*execmoduletester.ExecModuleTester
 	require.NoError(t, err)
 	st := state.New(stateReader)
 	require.NoError(t, err)
-	exist, err := st.Exist(accounts.InternAddress(contractAddr))
+	exist, err := st.Exist(contractAddr)
 	require.NoError(t, err)
 	assert.False(t, exist, "Contract should not exist at block #1")
 
@@ -659,7 +659,7 @@ func chainWithDeployedContract(t *testing.T) (*execmoduletester.ExecModuleTester
 	require.NoError(t, err)
 	st = state.New(stateReader)
 	require.NoError(t, err)
-	exist, err = st.Exist(accounts.InternAddress(contractAddr))
+	exist, err = st.Exist(contractAddr)
 	require.NoError(t, err)
 	assert.True(t, exist, "Contract should exist at block #2")
 

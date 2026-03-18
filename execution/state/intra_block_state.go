@@ -2201,12 +2201,12 @@ func (sdb *IntraBlockState) AddSlotToAccessList(rawAddr common.Address, rawSlot 
 }
 
 // AddressInAccessList returns true if the given address is in the access list.
-func (sdb *IntraBlockState) AddressInAccessList(addr accounts.Address) bool {
-	return sdb.accessList.ContainsAddress(addr)
+func (sdb *IntraBlockState) AddressInAccessList(rawAddr common.Address) bool {
+	return sdb.accessList.ContainsAddress(sdb.InternAddress(rawAddr))
 }
 
-func (sdb *IntraBlockState) SlotInAccessList(addr accounts.Address, rawSlot common.Hash) (addressPresent bool, slotPresent bool) {
-	return sdb.accessList.Contains(addr, sdb.InternKey(rawSlot))
+func (sdb *IntraBlockState) SlotInAccessList(rawAddr common.Address, rawSlot common.Hash) (addressPresent bool, slotPresent bool) {
+	return sdb.accessList.Contains(sdb.InternAddress(rawAddr), sdb.InternKey(rawSlot))
 }
 
 func (sdb *IntraBlockState) MarkAddressAccess(addr accounts.Address, revertable bool) {

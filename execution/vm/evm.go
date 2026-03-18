@@ -417,7 +417,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	// We add this to the access list _before_ taking a snapshot. Even if the creation fails,
 	// the access-list change should not be rolled back
 	if evm.chainRules.IsBerlin {
-		evm.intraBlockState.AddAddressToAccessList(address)
+		evm.intraBlockState.AddAddressToAccessList(address.Value())
 	}
 	// BAL: record target address even on failed CREATE/CREATE2 calls
 	evm.intraBlockState.MarkAddressAccess(address, false)
