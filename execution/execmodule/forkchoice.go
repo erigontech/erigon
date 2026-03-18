@@ -376,14 +376,14 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			unwindTarget = minUnwindableBlock
 		}
 
-		if err := e.pipelineExecutor.sync.UnwindTo(unwindTarget, stagedsync.ForkChoice, tx); err != nil {
+		if err := e.pipelineExecutor.UnwindTo(unwindTarget, stagedsync.ForkChoice, tx); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
 		if err = e.hook.BeforeRun(tx, isSynced); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
 		// Run the unwind
-		if err := e.pipelineExecutor.sync.RunUnwind(currentContext, tx); err != nil {
+		if err := e.pipelineExecutor.RunUnwind(currentContext, tx); err != nil {
 			err = fmt.Errorf("updateForkChoice: %w", err)
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
@@ -787,7 +787,7 @@ func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
 		}
 
 		pruneTimeout := time.Duration(e.config.SecondsPerSlot()*1000/3) * time.Millisecond / 2
-		if err := e.pipelineExecutor.sync.RunPrune(e.bacgroundCtx, tx, initialCycle, pruneTimeout); err != nil {
+		if err := e.pipelineExecutor.RunPrune(e.bacgroundCtx, tx, initialCycle, pruneTimeout); err != nil {
 			return err
 		}
 		return nil

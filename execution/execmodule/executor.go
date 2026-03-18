@@ -85,6 +85,21 @@ func (pe *PipelineExecutor) ValidationNotifications() *shards.Notifications {
 	return pe.validationNotifications
 }
 
+// UnwindTo sets the unwind point on the main pipeline.
+func (pe *PipelineExecutor) UnwindTo(unwindPoint uint64, reason stagedsync.UnwindReason, tx kv.Tx) error {
+	return pe.sync.UnwindTo(unwindPoint, reason, tx)
+}
+
+// RunUnwind executes a pending unwind on the main pipeline.
+func (pe *PipelineExecutor) RunUnwind(sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
+	return pe.sync.RunUnwind(sd, tx)
+}
+
+// RunPrune executes pruning on the main pipeline.
+func (pe *PipelineExecutor) RunPrune(ctx context.Context, tx kv.RwTx, initialCycle bool, timeout time.Duration) error {
+	return pe.sync.RunPrune(ctx, tx, initialCycle, timeout)
+}
+
 // CommitCycleFn is called between hasMore iterations to persist accumulated
 // state and obtain a fresh tx for the next iteration. Implementations must
 // flush the SharedDomains, commit, and return a fresh kv.TemporalRwTx.
@@ -110,12 +125,14 @@ type RunLoopConfig struct {
 // RunLoop executes the pipeline in a hasMore loop:
 //
 //	for hasMore {
-//	    [BeforeIteration] → sync.Run → if hasMore { RunPrune → [ShouldBreak] → CommitCycle }
+//	    [BeforeIteration] → sync.Run → RunPrune → [ShouldBreak] → if hasMore { CommitCycle }
 //	}
 //
-// The loop continues until Run returns hasMore=false, ShouldBreak returns
-// true, or an error occurs. The returned tx may differ from the input tx
-// if CommitCycle was called (which returns a fresh tx).
+// RunPrune runs unconditionally on every iteration (including the last) to
+// match the original stageloop.ProcessFrozenBlocks behaviour. The loop
+// continues until Run returns hasMore=false, ShouldBreak returns true, or
+// an error occurs. The returned tx may differ from the input tx if
+// CommitCycle was called (which returns a fresh tx).
 func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg RunLoopConfig) (kv.TemporalRwTx, error) {
 	for hasMore := true; hasMore; {
 		if cfg.BeforeIteration != nil {
@@ -128,21 +145,21 @@ func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomai
 			return tx, err
 		}
 
-		if hasMore {
-			if err := pe.sync.RunPrune(ctx, tx, cfg.InitialCycle, cfg.PruneTimeout); err != nil {
+		if err := pe.sync.RunPrune(ctx, tx, cfg.InitialCycle, cfg.PruneTimeout); err != nil {
+			return tx, err
+		}
+
+		if cfg.ShouldBreak != nil {
+			stop, err := cfg.ShouldBreak(tx)
+			if err != nil {
 				return tx, err
 			}
-
-			if cfg.ShouldBreak != nil {
-				stop, err := cfg.ShouldBreak(tx)
-				if err != nil {
-					return tx, err
-				}
-				if stop {
-					break
-				}
+			if stop {
+				break
 			}
+		}
 
+		if hasMore {
 			newTx, err := cfg.CommitCycle(ctx, sd)
 			if err != nil {
 				return tx, err
@@ -182,6 +199,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		return err
 	}
 	defer doms.Close()
+	doms.SetInMemHistoryReads(false)
 
 	var finishStageBeforeSync uint64
 	if hook != nil {
@@ -258,6 +276,11 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 // ValidateBlock executes a fork validation by running the pipeline block-by-block
 // over a side fork. All pipeline execution goes through PipelineExecutor.
 func (pe *PipelineExecutor) ValidateBlock(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody) error {
+	// Use a terse logger to suppress low-level noise during fork validation.
+	// Defaults to LvlWarn (matching the original hard-coded level), but can
+	// be overridden via dbg.ExecTerseLoggerLevel for debugging — Erigon's
+	// logging has no per-subsystem level control, so this env-var-driven
+	// override is the only way to selectively expose validation internals.
 	terseLogger := log.New()
 	terseLogger.SetHandler(log.LvlFilterHandler(log.Lvl(dbg.ExecTerseLoggerLevel), log.StderrHandler))
 

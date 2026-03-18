@@ -338,10 +338,10 @@ func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.Te
 		return err
 	}
 
-	if err := e.pipelineExecutor.sync.UnwindTo(unwindPoint, stagedsync.ExecUnwind, tx); err != nil {
+	if err := e.pipelineExecutor.UnwindTo(unwindPoint, stagedsync.ExecUnwind, tx); err != nil {
 		return err
 	}
-	if err := e.pipelineExecutor.sync.RunUnwind(sd, tx); err != nil {
+	if err := e.pipelineExecutor.RunUnwind(sd, tx); err != nil {
 		return err
 	}
 	return nil
