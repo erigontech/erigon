@@ -103,8 +103,8 @@ var (
 
 func gasSStore(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
 	value, x := callContext.Stack.Back(1), callContext.Stack.Back(0)
-	key := accounts.InternKey(x.Bytes32())
-	current, _ := evm.IntraBlockState().GetState(callContext.Address(), key)
+	rawAddr, rawKey := callContext.Address().Value(), x.Bytes32()
+	current, _ := evm.IntraBlockState().GetState(rawAddr, rawKey)
 	// The legacy gas metering only takes into consideration the current state
 	// Legacy rules should be applied if we are in Petersburg (removal of EIP-1283)
 	// OR Constantinople is not active
@@ -141,7 +141,7 @@ func gasSStore(evm *EVM, callContext *CallContext, availableGas uint64, memorySi
 	if current.Eq(value) { // noop (1)
 		return params.NetSstoreNoopGas, nil
 	}
-	var original, _ = evm.IntraBlockState().GetCommittedState(callContext.Address().Value(), key.Value())
+	var original, _ = evm.IntraBlockState().GetCommittedState(rawAddr, rawKey)
 	if original == current {
 		if original.IsZero() { // create slot (2.1.1)
 			return params.NetSstoreInitGas, nil
@@ -189,14 +189,14 @@ func gasSStoreEIP2200(evm *EVM, callContext *CallContext, availableGas uint64, m
 	}
 	// Gas sentry honoured, do the actual gas calculation based on the stored value
 	value, x := callContext.Stack.Back(1), callContext.Stack.Back(0)
-	key := accounts.InternKey(x.Bytes32())
-	current, _ := evm.IntraBlockState().GetState(callContext.Address(), key)
+	rawAddr, rawKey := callContext.Address().Value(), x.Bytes32()
+	current, _ := evm.IntraBlockState().GetState(rawAddr, rawKey)
 
 	if current.Eq(value) { // noop (1)
 		return params.SloadGasEIP2200, nil
 	}
 
-	var original, _ = evm.IntraBlockState().GetCommittedState(callContext.Address().Value(), key.Value())
+	var original, _ = evm.IntraBlockState().GetCommittedState(rawAddr, rawKey)
 	if original == current {
 		if original.IsZero() { // create slot (2.1.1)
 			return params.SstoreSetGasEIP2200, nil
