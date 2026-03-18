@@ -62,8 +62,12 @@ type CallContext struct {
 	Stack    Stack
 	Contract Contract
 
-	internedAddr accounts.Address    // pre-interned address for this opcode (EIP-2929+), managed by interpreter
-	internedKey  accounts.StorageKey // pre-interned storage key for this opcode (EIP-2929+), managed by interpreter
+	// slotAddr/slotKey: interned form of the address/key from the designated stack slot.
+	// Set by the interpreter loop for opcodes where operation.hasAddrSlot/hasKeySlot is true
+	// (EIP-2929+ state-access ops). Nil for all other opcodes. Gas functions must not write here.
+	// internAddr()/internKey() use these as a fast path; pre-Berlin ops see nil and intern inline.
+	slotAddr accounts.Address
+	slotKey  accounts.StorageKey
 }
 
 var contextPool = sync.Pool{
@@ -82,34 +86,36 @@ func getCallContext(contract Contract, input []byte, gas uint64) *CallContext {
 
 	ctx.gas = gas
 	ctx.input = input
-	ctx.internedAddr = accounts.NilAddress
-	ctx.internedKey = accounts.NilKey
+	ctx.slotAddr = accounts.NilAddress
+	ctx.slotKey = accounts.NilKey
 	ctx.Contract = contract
 	return ctx
 }
 
 func (c *CallContext) put() {
-	c.internedAddr = accounts.NilAddress
-	c.internedKey = accounts.NilKey
+	c.slotAddr = accounts.NilAddress
+	c.slotKey = accounts.NilKey
 	c.Memory.reset()
 	c.Stack.Reset()
 	contextPool.Put(c)
 }
 
-// internAddr returns the pre-interned address for the current opcode (EIP-2929+ path).
-// Falls back to interning val on the spot for pre-Berlin opcodes where internedAddr is NilAddress.
+// internAddr returns the interned address for this opcode.
+// EIP-2929+: interpreter pre-set slotAddr → zero-cost lookup.
+// Pre-Berlin: slotAddr is nil → intern val inline (two interns total for CALL/SELFDESTRUCT, accepted).
 func (c *CallContext) internAddr(val uint256.Int) accounts.Address {
-	if !c.internedAddr.IsNil() {
-		return c.internedAddr
+	if !c.slotAddr.IsNil() {
+		return c.slotAddr
 	}
 	return accounts.InternAddress(val.Bytes20())
 }
 
-// internKey returns the pre-interned storage key for the current opcode (EIP-2929+ path).
-// Falls back to interning val on the spot for pre-Berlin opcodes where internedKey is NilKey.
+// internKey returns the interned storage key for this opcode.
+// EIP-2929+: interpreter pre-set slotKey → zero-cost lookup.
+// Pre-Berlin: slotKey is nil → intern val inline.
 func (c *CallContext) internKey(val uint256.Int) accounts.StorageKey {
-	if !c.internedKey.IsNil() {
-		return c.internedKey
+	if !c.slotKey.IsNil() {
+		return c.slotKey
 	}
 	return accounts.InternKey(val.Bytes32())
 }
@@ -364,18 +370,17 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 
 		// Pre-intern address and/or storage key for EIP-2929+ opcodes.
 		// The interpreter owns this interning: both the gas func and op func read
-		// internedAddr/internedKey directly instead of calling InternAddress/InternKey.
+		// slotAddr/slotKey directly instead of calling InternAddress/InternKey.
+		// Only EIP-2929+ opcodes with hasAddrSlot/hasKeySlot set trigger this — all other
+		// opcodes leave the fields nil (pool-init value) or stale-but-unused from a prior slot op.
+		// Gas functions must NOT write to slotAddr/slotKey to avoid stale-value bugs.
 		if operation.hasAddrSlot {
-			callContext.internedAddr = accounts.InternAddress(
+			callContext.slotAddr = accounts.InternAddress(
 				callContext.Stack.Back(int(operation.addrSlot)).Bytes20())
-		} else {
-			callContext.internedAddr = accounts.NilAddress
 		}
 		if operation.hasKeySlot {
-			callContext.internedKey = accounts.InternKey(
+			callContext.slotKey = accounts.InternKey(
 				callContext.Stack.Back(int(operation.keySlot)).Bytes32())
-		} else {
-			callContext.internedKey = accounts.NilKey
 		}
 
 		// All ops with a dynamic memory usage also has a dynamic gas cost.
