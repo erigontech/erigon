@@ -98,6 +98,15 @@ int32_t eth_ntt_falcon_verify(
     const uint8_t *input, size_t input_len,
     uint8_t **output_out, size_t *output_len_out);
 
+/* SHAKE256 Hash-to-Point with rejection sampling.
+ * Input: output_len(32 BE) | data(var)
+ * output_len must be even. Produces output_len/2 rejection-sampled
+ * coefficients mod Q=12289, packed as uint16 BE.
+ * Returns output_len bytes. */
+int32_t eth_ntt_shake256_htp(
+    const uint8_t *input, size_t input_len,
+    uint8_t **output_out, size_t *output_len_out);
+
 /* ML-DSA-44 (Dilithium2) full verification.
  * Input: pk(1312) | sig(2420) | msg(var)
  * Output: 32 bytes (0x00..01 valid, 0x00..00 invalid) */
