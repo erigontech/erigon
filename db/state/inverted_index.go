@@ -31,8 +31,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/spaolacci/murmur3"
 	"github.com/RoaringBitmap/roaring/v2"
+	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
