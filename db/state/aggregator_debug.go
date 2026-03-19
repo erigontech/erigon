@@ -109,8 +109,6 @@ func (ac *aggDirtyFilesRoTx) Close() {
 	if ac.agg == nil {
 		return
 	}
-	// not doing closeAndRemove() because that needs dirtyFilesLock.
-	// if canDelete is true, it'll get removed in the AggRoTx.Close() path.
 	for _, d := range ac.domain {
 		d.Close()
 	}
@@ -155,7 +153,10 @@ func (d *domainDirtyFilesRoTx) Close() {
 	}
 	d.history.Close()
 	for _, item := range d.files {
-		item.refcount.Add(-1)
+		refCnt := item.refcount.Add(-1)
+		if refCnt == 0 && item.canDelete.Load() {
+			item.closeFilesAndRemove()
+		}
 	}
 	d.files = nil
 	d.d = nil
@@ -192,7 +193,10 @@ func (f *historyDirtyFilesRoTx) Close() {
 	}
 	f.ii.Close()
 	for _, item := range f.files {
-		item.refcount.Add(-1)
+		refCnt := item.refcount.Add(-1)
+		if refCnt == 0 && item.canDelete.Load() {
+			item.closeFilesAndRemove()
+		}
 	}
 	f.files = nil
 	f.h = nil
@@ -226,7 +230,10 @@ func (f *iiDirtyFilesRoTx) Close() {
 		return
 	}
 	for _, item := range f.files {
-		item.refcount.Add(-1)
+		refCnt := item.refcount.Add(-1)
+		if refCnt == 0 && item.canDelete.Load() {
+			item.closeFilesAndRemove()
+		}
 	}
 	f.files = nil
 	f.ii = nil
