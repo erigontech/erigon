@@ -397,6 +397,7 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 					_, fName := filepath.Split(fPath)
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 				}
+				log.Warn("[dbg] openDirtyFiles", "fPath", fPath)
 				if ok {
 					if fileVer.Less(d.FileVersion.AccessorBT.MinSupported) {
 						_, fName := filepath.Split(fPath)
