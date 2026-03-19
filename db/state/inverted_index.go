@@ -1024,11 +1024,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 			return fmt.Errorf("[inverted_index] collate %s: txNums out of range [%d, %d) for step %d: min=%d, max=%d, key=%x",
 				ii.FilenameBase, txFrom, txTo, step, bitmap.Minimum(), bitmap.Maximum(), prevKey)
 		}
-		if ef == nil {
-			ef = multiencseq.NewBuilder(baseTxNum, bitmap.GetCardinality(), bitmap.Maximum())
-		} else {
-			ef.Reset(baseTxNum, bitmap.GetCardinality(), bitmap.Maximum())
-		}
+		ef.Reset(baseTxNum, bitmap.GetCardinality(), bitmap.Maximum())
 		it := bitmap.Iterator()
 		for it.HasNext() {
 			ef.AddOffset(it.Next())
