@@ -307,6 +307,9 @@ func BenchmarkLifecycle(b *testing.B) {
 	}
 
 	for _, cfg := range configs {
+		if testing.Short() {
+			cfg.totalSteps = min(cfg.totalSteps, 10)
+		}
 		b.Run(cfg.name, func(b *testing.B) {
 			for b.Loop() {
 				timings, _, _ := runLifecycle(b, cfg)
@@ -491,8 +494,12 @@ func BenchmarkLifecycle_PhaseIsolation(b *testing.B) {
 // BenchmarkReadAfterLifecycle runs the lifecycle to build state with files,
 // then benchmarks read operations against the resulting persisted state.
 func BenchmarkReadAfterLifecycle(b *testing.B) {
+	totalSteps := 200
+	if testing.Short() {
+		totalSteps = 10
+	}
 	cfg := lifecycleConfig{
-		totalSteps:    200,
+		totalSteps:    totalSteps,
 		keysPerTx:     20,
 		txsPerBlock:   10,
 		blocksPerStep: 2,
@@ -576,10 +583,14 @@ func BenchmarkReadAfterLifecycle(b *testing.B) {
 // keys-per-block, keeping total steps constant. This reveals the commitment
 // scaling curve relevant to bloatnet (33k keys/block vs mainnet ~1.4k).
 func BenchmarkLifecycle_KeyDensity(b *testing.B) {
+	totalSteps := 100
+	if testing.Short() {
+		totalSteps = 10
+	}
 	for _, keysPerTx := range []int{10, 50, 200, 500} {
 		b.Run(fmt.Sprintf("keys=%d", keysPerTx), func(b *testing.B) {
 			cfg := lifecycleConfig{
-				totalSteps:    100,
+				totalSteps:    totalSteps,
 				keysPerTx:     keysPerTx,
 				txsPerBlock:   10,
 				blocksPerStep: 2,
