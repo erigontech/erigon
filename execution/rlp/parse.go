@@ -19,18 +19,15 @@ package rlp
 import (
 	"errors"
 	"fmt"
-
-	"github.com/holiman/uint256"
 )
 
 var (
-	ErrBase   = errors.New("rlp")
-	ErrParse  = fmt.Errorf("%w parse", ErrBase)
-	ErrDecode = fmt.Errorf("%w decode", ErrBase)
+	errBase  = errors.New("rlp")
+	ErrParse = fmt.Errorf("%w parse", errBase)
 )
 
-// BeInt parses Big Endian representation of an integer from given payload at given position
-func BeInt(payload []byte, pos, length int) (int, error) {
+// beInt parses Big Endian representation of an integer from given payload at given position
+func beInt(payload []byte, pos, length int) (int, error) {
 	var r int
 	if pos+length > len(payload) {
 		return 0, fmt.Errorf("%w: unexpected end of payload", ErrParse)
@@ -78,7 +75,7 @@ func Prefix(payload []byte, pos int) (dataPos int, dataLen int, isList bool, err
 		// the first byte is thus [0xB8, 0xBF].
 		beLen := int(first) - 183
 		dataPos = pos + 1 + beLen
-		dataLen, err = BeInt(payload, pos+1, beLen)
+		dataLen, err = beInt(payload, pos+1, beLen)
 		isList = false
 		if dataLen < 56 {
 			err = fmt.Errorf("%w: non-canonical size information", ErrParse)
@@ -102,10 +99,10 @@ func Prefix(payload []byte, pos int) (dataPos int, dataLen int, isList bool, err
 		// range of the first byte is thus [0xF8, 0xFF].
 		beLen := int(first) - 247
 		dataPos = pos + 1 + beLen
-		dataLen, err = BeInt(payload, pos+1, beLen)
+		dataLen, err = beInt(payload, pos+1, beLen)
 		isList = true
 		if dataLen < 56 {
-			err = fmt.Errorf("%w: : non-canonical size information", ErrParse)
+			err = fmt.Errorf("%w: non-canonical size information", ErrParse)
 		}
 	}
 	if err == nil {
@@ -194,22 +191,6 @@ func ParseU32(payload []byte, pos int) (int, uint32, error) {
 	return dataPos + dataLen, r, nil
 }
 
-// U256 parses uint256 number from given payload at given position
-func ParseU256(payload []byte, pos int, x *uint256.Int) (int, error) {
-	dataPos, dataLen, err := ParseString(payload, pos)
-	if err != nil {
-		return 0, err
-	}
-	if dataLen > 32 {
-		return 0, fmt.Errorf("%w: uint256 must not be more than 32 bytes long, got %d", ErrParse, dataLen)
-	}
-	if dataLen > 0 && payload[dataPos] == 0 {
-		return 0, fmt.Errorf("%w: integer encoding for RLP must not have leading zeros: %x", ErrParse, payload[dataPos:dataPos+dataLen])
-	}
-	x.SetBytes(payload[dataPos : dataPos+dataLen])
-	return dataPos + dataLen, nil
-}
-
 func ParseHash(payload []byte, pos int, hashbuf []byte) (int, error) {
 	pos, err := StringOfLen(payload, pos, 32)
 	if err != nil {
@@ -221,7 +202,7 @@ func ParseHash(payload []byte, pos int, hashbuf []byte) (int, error) {
 
 const ParseHashErrorPrefix = "parse hash payload"
 
-const ParseAnnouncementsErrorPrefix = "parse announcement payload"
+const parseAnnouncementsErrorPrefix = "parse announcement payload"
 
 func ParseAnnouncements(payload []byte, pos int) ([]byte, []uint32, []byte, int, error) {
 	pos, totalLen, err := ParseList(payload, pos)
@@ -229,14 +210,14 @@ func ParseAnnouncements(payload []byte, pos int) ([]byte, []uint32, []byte, int,
 		return nil, nil, nil, pos, err
 	}
 	if pos+totalLen > len(payload) {
-		return nil, nil, nil, pos, fmt.Errorf("%s: totalLen %d is beyond the end of payload", ParseAnnouncementsErrorPrefix, totalLen)
+		return nil, nil, nil, pos, fmt.Errorf("%s: totalLen %d is beyond the end of payload", parseAnnouncementsErrorPrefix, totalLen)
 	}
 	pos, typesLen, err := ParseString(payload, pos)
 	if err != nil {
 		return nil, nil, nil, pos, err
 	}
 	if pos+typesLen > len(payload) {
-		return nil, nil, nil, pos, fmt.Errorf("%s: typesLen %d is beyond the end of payload", ParseAnnouncementsErrorPrefix, typesLen)
+		return nil, nil, nil, pos, fmt.Errorf("%s: typesLen %d is beyond the end of payload", parseAnnouncementsErrorPrefix, typesLen)
 	}
 	types := payload[pos : pos+typesLen]
 	pos += typesLen
@@ -245,7 +226,7 @@ func ParseAnnouncements(payload []byte, pos int) ([]byte, []uint32, []byte, int,
 		return nil, nil, nil, pos, err
 	}
 	if pos+sizesLen > len(payload) {
-		return nil, nil, nil, pos, fmt.Errorf("%s: sizesLen %d is beyond the end of payload", ParseAnnouncementsErrorPrefix, sizesLen)
+		return nil, nil, nil, pos, fmt.Errorf("%s: sizesLen %d is beyond the end of payload", parseAnnouncementsErrorPrefix, sizesLen)
 	}
 	sizes := make([]uint32, typesLen)
 	for i := 0; i < len(sizes); i++ {
@@ -258,7 +239,7 @@ func ParseAnnouncements(payload []byte, pos int) ([]byte, []uint32, []byte, int,
 		return nil, nil, nil, pos, err
 	}
 	if pos+hashesLen > len(payload) {
-		return nil, nil, nil, pos, fmt.Errorf("%s: hashesLen %d is beyond the end of payload", ParseAnnouncementsErrorPrefix, hashesLen)
+		return nil, nil, nil, pos, fmt.Errorf("%s: hashesLen %d is beyond the end of payload", parseAnnouncementsErrorPrefix, hashesLen)
 	}
 	hashes := make([]byte, 32*(hashesLen/33))
 	for i := 0; i < len(hashes); i += 32 {

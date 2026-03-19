@@ -359,7 +359,7 @@ func (cs *MultiClient) blockHeaders66(ctx context.Context, in *sentryproto.Inbou
 	if _, err := rlpStream.List(); err != nil { // Now stream is at the beginning of 66 object
 		return fmt.Errorf("decode 1 BlockHeadersPacket66: %w", err)
 	}
-	if _, err := rlpStream.Uint(); err != nil { // Now stream is at the requestID field
+	if _, err := rlpStream.Uint64(); err != nil { // Now stream is at the requestID field
 		return fmt.Errorf("decode 2 BlockHeadersPacket66: %w", err)
 	}
 	// Now stream is at the BlockHeadersPacket, which is list of headers
