@@ -74,7 +74,7 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 	if args.IsEIP8037 && args.IsContractCreation {
 		// EIP-8037: GAS_CREATE = 112*cpsb (state) + 9000 (regular), plus TxGas (21000)
 		result.RegularGas = params.TxGas + params.CreateGasEIP8037
-		stateGas += 112 * args.CostPerStateByte
+		stateGas += params.StateBytesNewAccount * args.CostPerStateByte
 	} else if args.IsContractCreation && args.IsEIP2 {
 		stateGas += params.TxGasContractCreation
 	} else if args.IsAATxn {
@@ -167,7 +167,7 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
-		authCost, overflow := math.SafeMul(135, args.CostPerStateByte)
+		authCost, overflow := math.SafeMul(params.StateBytesNewAccount+params.StateBytesAuthBase, args.CostPerStateByte)
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}

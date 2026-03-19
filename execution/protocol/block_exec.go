@@ -166,7 +166,7 @@ func ExecuteBlockEphemerally(
 
 	// EIP-8037: compute block-level Bottleneck for Amsterdam.
 	// Pre-Amsterdam: blockStateGasUsed is 0, so this is a no-op.
-	blockGasUsed := max(gasUsed.BlockRegular, gasUsed.BlockState)
+	blockGasUsed := gasUsed.BlockGasUsed()
 	if !vmConfig.StatelessExec && blockGasUsed != header.GasUsed {
 		return nil, fmt.Errorf("gas used by execution: %d, in header: %d", blockGasUsed, header.GasUsed)
 	}

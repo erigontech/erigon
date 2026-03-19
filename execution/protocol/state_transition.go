@@ -745,7 +745,7 @@ func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contra
 	var stateIgasRefund uint64
 	var stateIgasRefundInc uint64
 	if st.evm.ChainRules().IsAmsterdam {
-		stateIgasRefundInc = 112 * st.evm.Context.CostPerStateByte
+		stateIgasRefundInc = params.StateBytesNewAccount * st.evm.Context.CostPerStateByte
 	}
 	verifiedAuthorities := make([]accounts.Address, 0)
 	if len(auths) > 0 {

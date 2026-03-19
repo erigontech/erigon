@@ -336,7 +336,7 @@ func gasCreateEip3860(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 		return mdgas.MdGas{}, ErrGasUintOverflow
 	}
 	if evm.chainRules.IsAmsterdam {
-		gas.State += 112 * evm.Context.CostPerStateByte
+		gas.State += params.StateBytesNewAccount * evm.Context.CostPerStateByte
 	}
 	return gas, nil
 }
@@ -361,7 +361,7 @@ func gasCreate2Eip3860(evm *EVM, callContext *CallContext, availableGas mdgas.Md
 		return mdgas.MdGas{}, ErrGasUintOverflow
 	}
 	if evm.chainRules.IsAmsterdam {
-		gas.State += 112 * evm.Context.CostPerStateByte
+		gas.State += params.StateBytesNewAccount * evm.Context.CostPerStateByte
 	}
 	return gas, nil
 }
@@ -470,7 +470,7 @@ func statefulGasCall(evm *EVM, callContext *CallContext, gas mdgas.MdGas, availa
 		evm.IntraBlockState().MarkAddressAccess(address, false)
 		if transfersValue && empty {
 			if rules.IsAmsterdam {
-				stateGas = 112 * evm.Context.CostPerStateByte
+				stateGas = params.StateBytesNewAccount * evm.Context.CostPerStateByte
 			} else {
 				accountGas = params.CallNewAccountGas
 			}

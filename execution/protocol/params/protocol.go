@@ -216,6 +216,9 @@ const (
 	Create2GasEIP8037               = CallValueTransferGas
 	SstoreSetGasEIP8037             = 2_900 // SstoreResetGasEIP2200 - ColdSloadCostEIP2929
 	PerAuthBaseCostEIP8037          = 7_500
+	StateBytesNewAccount            = 112 // bytes per new account creation
+	StateBytesStorageSet            = 32  // bytes per storage slot set
+	StateBytesAuthBase              = 23  // bytes per authorization base cost
 )
 
 // EIP-7702: Set EOA account code
