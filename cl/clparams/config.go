@@ -374,6 +374,7 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 	},
 	chainspec.ChiadoChainID: {
 		"https://checkpoint.chiadochain.net/eth/v2/debug/beacon/states/finalized",
+		"https://checkpoint-sync.chiado.gnosis.dao/eth/v2/debug/beacon/states/finalized",
 	},
 	chainspec.HoodiChainID: {
 		"https://checkpoint-sync.hoodi.ethpandaops.io/eth/v2/debug/beacon/states/finalized",

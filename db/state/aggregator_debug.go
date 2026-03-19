@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
@@ -154,7 +155,19 @@ func (d *domainDirtyFilesRoTx) Close() {
 	d.history.Close()
 	for _, item := range d.files {
 		refCnt := item.refcount.Add(-1)
+		if item.decompressor != nil {
+			log.Warn("[dbg] domainDirtyFilesRoTx.Close", "name", item.decompressor.FileName(), "refcnt", refCnt)
+		} else if item.index != nil {
+			log.Warn("[dbg] domainDirtyFilesRoTx.Close", "name", item.index.FileName(), "refcnt", refCnt)
+		} else if item.decompressor != nil {
+			log.Warn("[dbg] domainDirtyFilesRoTx.Close", "name", item.bindex.FileName(), "refcnt", refCnt)
+		} else if item.bindex != nil {
+
+		}
 		if refCnt == 0 && item.canDelete.Load() {
+			if traceFileLife != "" && d.d.FilenameBase == traceFileLife {
+				d.d.logger.Warn("[agg.dbg] real remove at domainDirtyFilesRoTx.Close", "file", item.decompressor.FileName())
+			}
 			item.closeFilesAndRemove()
 		}
 	}
@@ -195,6 +208,9 @@ func (f *historyDirtyFilesRoTx) Close() {
 	for _, item := range f.files {
 		refCnt := item.refcount.Add(-1)
 		if refCnt == 0 && item.canDelete.Load() {
+			if traceFileLife != "" && f.h.FilenameBase == traceFileLife {
+				f.h.logger.Warn("[agg.dbg] real remove at historyDirtyFilesRoTx.Close", "file", item.decompressor.FileName())
+			}
 			item.closeFilesAndRemove()
 		}
 	}
@@ -232,6 +248,9 @@ func (f *iiDirtyFilesRoTx) Close() {
 	for _, item := range f.files {
 		refCnt := item.refcount.Add(-1)
 		if refCnt == 0 && item.canDelete.Load() {
+			if traceFileLife != "" && f.ii.FilenameBase == traceFileLife {
+				f.ii.logger.Warn("[agg.dbg] real remove at iiDirtyFilesRoTx.Close", "file", item.decompressor.FileName())
+			}
 			item.closeFilesAndRemove()
 		}
 	}
