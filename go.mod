@@ -477,3 +477,5 @@ tool (
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc
 	google.golang.org/protobuf/cmd/protoc-gen-go
 )
+
+replace github.com/Giulio2002/pq-eth-precompiles/go => ./ntt_local

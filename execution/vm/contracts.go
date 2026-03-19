@@ -236,6 +236,7 @@ var PrecompiledContractsOsaka = PrecompiledContracts{
 	accounts.InternAddress(common.BytesToAddress([]byte{0x19})):       &nttVecSubMod{},
 	accounts.InternAddress(common.BytesToAddress([]byte{0x1a})):       &expandAVecMulPrecompile{},
 	accounts.InternAddress(common.BytesToAddress([]byte{0x1b})):       &dilithiumVerifyPrecompile{},
+	accounts.InternAddress(common.BytesToAddress([]byte{0x1c})):       &shake256HTPPrecompile{},
 }
 
 var (

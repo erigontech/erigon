@@ -107,6 +107,30 @@ func (c *expandAVecMulPrecompile) Run(input []byte) ([]byte, error) {
 }
 func (c *expandAVecMulPrecompile) Name() string { return "EXPAND_A_VECMUL" }
 
+// ── SHAKE256_HTP (address 0x1c) ──
+// SHAKE256 Hash-to-Point with rejection sampling.
+// Input: output_len(32 BE) | data(var)
+// Returns output_len bytes of rejection-sampled coefficients mod Q=12289, packed as uint16 BE.
+// Gas: 2x the SHAKE256 precompile cost.
+
+type shake256HTPPrecompile struct{}
+
+func (c *shake256HTPPrecompile) RequiredGas(input []byte) uint64 {
+	// 2x the SHAKE256 precompile gas
+	dataLen := 0
+	if len(input) > 32 {
+		dataLen = len(input) - 32
+	}
+	blocks := uint64((dataLen + 135) / 136)
+	return 2 * (150 + 3*blocks)
+}
+
+func (c *shake256HTPPrecompile) Run(input []byte) ([]byte, error) {
+	return ntt.Shake256HTPPrecompile(input)
+}
+
+func (c *shake256HTPPrecompile) Name() string { return "SHAKE256_HTP" }
+
 // ── DILITHIUM_VERIFY (address 0x1b) ──
 // Full ML-DSA-44 signature verification.
 // Input: pk(1312) | sig(2420) | msg(var)
