@@ -555,9 +555,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				result.Logs, result.TraceFroms, result.TraceTos); err != nil {
 				return false, err
 			}
-			if err := se.rs.CommitStepBoundary(ctx, domainRoTx, txTask.BlockNumber(), txTask.TxNum); err != nil {
-				return false, err
-			}
+			// CommitStepBoundary is now called inside ApplyStateWrites.
 		}
 
 		se.doms.SetTxNum(txTask.TxNum)

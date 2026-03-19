@@ -228,26 +228,10 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 						return err
 					}
 				} else {
-					// Pre-check: skip if domain already has this value.
-					// This avoids calling DomainPut (and its TouchKey) for
-					// unchanged slots (e.g., reentrancy guards SSTOREing the
-					// same value). LightCollector emits all dirty storage
-					// because it can't distinguish the "revert" case (TX N
-					// wrote X, TX M writes back to block-origin Y) from the
-					// "unchanged" case — blockOriginStorage is stale. We
-					// check the actual domain value here instead.
-					// Pass prevVal to DomainPut to avoid a redundant GetLatest.
-					prevVal, _, err := domains.GetLatest(kv.StorageDomain, roTx, composite)
-					if err != nil {
-						return err
-					}
-					if bytes.Equal(prevVal, v) {
-						continue
-					}
 					if dbg.TraceApply && (rs.trace || dbg.TraceAccount(addr.Handle())) {
 						fmt.Printf("%d apply:put storage: %x %x %x\n", blockNum, addr, item.key, &item.value)
 					}
-					if err := domains.DomainPut(kv.StorageDomain, roTx, composite, v, txNum, prevVal); err != nil {
+					if err := domains.DomainPut(kv.StorageDomain, roTx, composite, v, txNum, nil); err != nil {
 						return err
 					}
 				}
@@ -293,8 +277,19 @@ func (rs *StateV3) ApplyStateWrites(ctx context.Context,
 	balanceIncreases map[accounts.Address]uint256.Int,
 	rules *chain.Rules,
 ) error {
+	if len(writes) == 0 && len(balanceIncreases) == 0 {
+		return nil
+	}
 	if err := rs.applyVersionedWrites(roTx, blockNum, txNum, writes, balanceIncreases, rules); err != nil {
 		return fmt.Errorf("StateV3.ApplyStateWrites: %w", err)
+	}
+	// Compute commitment at step boundaries — must follow state writes.
+	if (txNum+1)%rs.domains.StepSize() == 0 && !dbg.DiscardCommitment() {
+		_, err := rs.domains.ComputeCommitment(ctx, roTx, true, blockNum, txNum,
+			fmt.Sprintf("applying step %d", txNum/rs.domains.StepSize()), nil)
+		if err != nil {
+			return fmt.Errorf("StateV3.ApplyStateWrites: step boundary: %w", err)
+		}
 	}
 	return nil
 }

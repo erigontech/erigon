@@ -204,15 +204,11 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						fmt.Println(applyResult.blockNum, "apply", applyResult.txNum, len(applyResult.writes))
 					}
 					blockUpdateCount += len(applyResult.writes)
-					err := pe.rs.ApplyStateWrites(ctx, applyRoTx, applyResult.blockNum, applyResult.txNum, applyResult.writes,
-						nil, applyResult.rules)
-					if err == nil {
-						err = pe.rs.ApplyTxIndexes(applyRoTx, applyResult.txNum, applyResult.receipt, applyResult.blobGasUsed,
-							applyResult.logs, applyResult.traceFroms, applyResult.traceTos)
-					}
-					if err == nil {
-						err = pe.rs.CommitStepBoundary(ctx, applyRoTx, applyResult.blockNum, applyResult.txNum)
-					}
+					// ApplyStateWrites (including step-boundary commitment) already
+					// ran on the producer side (execLoop) before the result crossed
+					// the channel. Only indexes remain for the apply loop.
+					err := pe.rs.ApplyTxIndexes(applyRoTx, applyResult.txNum, applyResult.receipt, applyResult.blobGasUsed,
+						applyResult.logs, applyResult.traceFroms, applyResult.traceTos)
 					if err == nil && pe.accumulator != nil {
 						pendingAccumulatorWrites = append(pendingAccumulatorWrites, applyResult.writes)
 					}
@@ -2007,6 +2003,16 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				if len(applyResult.writes) > 0 {
 					be.applyCount += len(applyResult.writes)
 				}
+			}
+
+			// Apply state writes (including step-boundary commitment) on the
+			// producer side (execLoop goroutine) BEFORE sending through the
+			// channel. This ensures the domain-base merge in applyVersionedWrites
+			// reads sd.mem in the same goroutine that owns the versionMap,
+			// avoiding cross-thread races on sd.mem.
+			if err := pe.rs.ApplyStateWrites(ctx, applyTx, applyResult.blockNum, applyResult.txNum, applyResult.writes,
+				nil, applyResult.rules); err != nil {
+				return nil, err
 			}
 
 			select {
