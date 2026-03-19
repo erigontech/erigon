@@ -107,6 +107,10 @@ func getBufioWriter(w io.Writer) *bufio.Writer {
 	bw.Reset(w)
 	return bw
 }
+
+// Reset(nil) before Put is required: without it the pool entry retains a
+// reference to the underlying io.Writer/io.Reader, keeping it alive until the
+// next GC cycle or until the entry is reused — whichever comes first.
 func putBufioWriter(w *bufio.Writer) { w.Reset(nil); bufioWriterPool.Put(w) }
 
 func sortAndFlush(b Buffer, tmpdir string) (*os.File, error) {
