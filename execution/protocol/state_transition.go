@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/execution/protocol/fixedgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -376,7 +375,7 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 		}
 	}
 
-	intrinsicGasResult, overflow := fixedgas.IntrinsicGas(fixedgas.IntrinsicGasCalcArgs{
+	intrinsicGasResult, overflow := mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
 		Data:               st.data,
 		AuthorizationsLen:  uint64(len(auths)),
 		AccessListLen:      uint64(len(accessTuples)),
@@ -525,7 +524,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	auths := msg.Authorizations()
 
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
-	intrinsicGasResult, overflow := fixedgas.IntrinsicGas(fixedgas.IntrinsicGasCalcArgs{
+	intrinsicGasResult, overflow := mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
 		Data:               st.data,
 		AuthorizationsLen:  uint64(len(auths)),
 		AccessListLen:      uint64(len(accessTuples)),
