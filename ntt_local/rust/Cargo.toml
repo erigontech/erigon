@@ -6,7 +6,7 @@ description = "Post-quantum lattice precompiles for Ethereum: NTT, SHAKE256, Fal
 license = "MIT"
 
 [lib]
-crate-type = ["rlib", "staticlib", "cdylib"]
+crate-type = ["rlib", "staticlib"]
 
 [dependencies]
 num-bigint = "0.4"
