@@ -61,6 +61,8 @@ type CallContext struct {
 	Memory   Memory
 	Stack    Stack
 	Contract Contract
+
+	callAddrTmp accounts.Address // interned CALL target, set by gas func, consumed by op*Call
 }
 
 var contextPool = sync.Pool{
@@ -79,14 +81,28 @@ func getCallContext(contract Contract, input []byte, gas uint64) *CallContext {
 
 	ctx.gas = gas
 	ctx.input = input
+	ctx.callAddrTmp = accounts.NilAddress
 	ctx.Contract = contract
 	return ctx
 }
 
 func (c *CallContext) put() {
+	c.callAddrTmp = accounts.NilAddress
 	c.Memory.reset()
 	c.Stack.Reset()
 	contextPool.Put(c)
+}
+
+// takeCallAddr returns the interned CALL target address.  If the gas function
+// already interned it (EIP-2929+), the cached value is returned; otherwise
+// addrVal is interned on the spot (pre-Berlin fallback).
+func (c *CallContext) takeCallAddr(addrVal uint256.Int) accounts.Address {
+	if c.callAddrTmp.IsNil() {
+		return accounts.InternAddress(addrVal.Bytes20())
+	}
+	addr := c.callAddrTmp
+	c.callAddrTmp = accounts.NilAddress
+	return addr
 }
 
 // UseGas attempts the use gas and subtracts it and returns true on success

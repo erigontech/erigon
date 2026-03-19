@@ -23,6 +23,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 
 	"golang.org/x/sync/errgroup"
@@ -99,6 +100,19 @@ func FlushToDisk(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl) (dataPr
 	return provider, nil
 }
 
+var bufioWriterPool = sync.Pool{New: func() any { return bufio.NewWriterSize(nil, BufIOSize) }}
+
+func getBufioWriter(w io.Writer) *bufio.Writer {
+	bw := bufioWriterPool.Get().(*bufio.Writer)
+	bw.Reset(w)
+	return bw
+}
+
+// Reset(nil) before Put is required: without it the pool entry retains a
+// reference to the underlying io.Writer/io.Reader, keeping it alive until the
+// next GC cycle or until the entry is reused — whichever comes first.
+func putBufioWriter(w *bufio.Writer) { w.Reset(nil); bufioWriterPool.Put(w) }
+
 func sortAndFlush(b Buffer, tmpdir string) (*os.File, error) {
 	b.Sort()
 
@@ -115,11 +129,14 @@ func sortAndFlush(b Buffer, tmpdir string) (*os.File, error) {
 		return nil, err
 	}
 
-	w := bufio.NewWriterSize(bufferFile, BufIOSize)
-	defer w.Flush() //nolint:errcheck
+	w := getBufioWriter(bufferFile)
+	defer putBufioWriter(w)
 
 	if err = b.Write(w); err != nil {
 		return bufferFile, fmt.Errorf("error writing entries to disk: %w", err)
+	}
+	if err = w.Flush(); err != nil {
+		return bufferFile, fmt.Errorf("error flushing buffer to disk: %w", err)
 	}
 	return bufferFile, nil
 }

@@ -327,6 +327,8 @@ func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyF
 	}
 
 	if r.history.needMerge {
+		// Get history files from HistoryRoTx (no "garbage/overalps"), but index files not from InvertedIndexRoTx
+		// because index files may already be merged (before `kill -9`) and it means not visible in InvertedIndexRoTx
 		for _, item := range ht.files {
 			if item.startTxNum < r.history.from {
 				continue
@@ -336,21 +338,13 @@ func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyF
 			}
 
 			historyFiles = append(historyFiles, item.src)
-
-			found := false
-			for _, iiItem := range ht.iit.files {
-				if iiItem.startTxNum == item.startTxNum && iiItem.endTxNum == item.endTxNum {
-					indexFiles = append(indexFiles, iiItem.src)
-					found = true
-					break
-				}
+			idxFile, ok := ht.h.InvertedIndex.dirtyFiles.Get(item.src)
+			if ok {
+				indexFiles = append(indexFiles, idxFile)
+			} else {
+				walkErr := fmt.Errorf("History.staticFilesInRange: required file not found: %s-%s.%d-%d.efi", ht.h.InvertedIndex.FileVersion.AccessorEFI.String(), ht.h.FilenameBase, item.startTxNum/ht.stepSize, item.endTxNum/ht.stepSize)
+				return nil, nil, walkErr
 			}
-			if found {
-				continue
-			}
-
-			walkErr := fmt.Errorf("History.staticFilesInRange: required file not found: %s-%s.%d-%d.efi", ht.h.InvertedIndex.FileVersion.AccessorEFI.String(), ht.h.FilenameBase, item.startTxNum/ht.stepSize, item.endTxNum/ht.stepSize)
-			return nil, nil, walkErr
 		}
 
 		for _, f := range historyFiles {
@@ -440,7 +434,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		cnt += item.decompressor.Count()
 	}
 
-	p := ps.AddNew("merge "+path.Base(kvFilePath), uint64(cnt)*2) // *2 because after adding words - will happen compression (which also slow)
+	p := ps.AddNew("merge "+path.Base(kvFilePath), uint64(cnt))
 	defer ps.Delete(p)
 
 	var cp CursorHeap
@@ -657,7 +651,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 	var keyBuf, valBuf []byte
 	var lastKey, lastVal []byte
 	var seqReader multiencseq.SequenceReader
-	builder := &multiencseq.SequenceBuilder{}
+	var builder multiencseq.SequenceBuilder
 	// sameKeyItems collects all heap items sharing the current key; reused across iterations.
 	var sameKeyItems []*CursorItem
 	// mergeBaseNums and mergeSeqs hold the per-item inputs for MergeSorted in ascending txNum order.
