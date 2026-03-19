@@ -43,14 +43,6 @@ type GasUsed struct {
 // Pre-Amsterdam blockStateGasUsed is 0, so this equals BlockRegular.
 func (gu *GasUsed) BlockGasUsed() uint64 { return max(gu.BlockRegular, gu.BlockState) }
 
-func NewGasUsed(h *types.Header, receiptGas uint64) *GasUsed {
-	gu := &GasUsed{Receipt: receiptGas, BlockRegular: h.GasUsed}
-	if h.BlobGasUsed != nil {
-		gu.Blob = *h.BlobGasUsed
-	}
-	return gu
-}
-
 func SetGasUsed(h *types.Header, gu *GasUsed) {
 	h.GasUsed = gu.BlockGasUsed()
 	if h.BlobGasUsed != nil {
