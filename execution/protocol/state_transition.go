@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/protocol/fixedgas"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
@@ -394,7 +395,7 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 		Regular: intrinsicGasResult.RegularGas,
 		State:   intrinsicGasResult.StateGas - stateIgasRefund,
 	}
-	st.gasRemaining = SplitIntoMdGas(st.msg.Gas(), imdGas, rules)
+	st.gasRemaining = misc.SplitIntoMdGas(st.msg.Gas(), imdGas, rules)
 	// EIP-8037 × EIP-7702: move the authority-exists refund from regular gas
 	// back into the state reservoir so execution-time state ops draw from it.
 	if stateIgasRefund > 0 && rules.IsAmsterdam {
@@ -556,7 +557,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		Regular: intrinsicGasResult.RegularGas,
 		State:   intrinsicGasResult.StateGas,
 	}
-	st.gasRemaining = SplitIntoMdGas(st.msg.Gas(), imdGas, rules)
+	st.gasRemaining = misc.SplitIntoMdGas(st.msg.Gas(), imdGas, rules)
 	if rules.IsAmsterdam && stateIgasRefund > 0 {
 		imdGas.State -= stateIgasRefund
 		st.gasRemaining.State += stateIgasRefund
