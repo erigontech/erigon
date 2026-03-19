@@ -1,6 +1,7 @@
 name: QA - RPC Integration Tests Latest
 
 on:
+  workflow_call:
   workflow_dispatch:     # Run manually
     inputs:
       force_dump_response:

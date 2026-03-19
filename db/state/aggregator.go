@@ -966,7 +966,7 @@ Loop:
 }
 
 // [from, to)
-func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step) error {
+func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step, doMerge bool) error {
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
 		return nil
 	}
@@ -991,11 +991,13 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step) 
 			a.onFilesChange(nil)
 		}
 
-		go func() {
-			if err := a.MergeLoop(ctx); err != nil {
-				panic(err)
-			}
-		}()
+		if doMerge {
+			go func() {
+				if err := a.MergeLoop(ctx); err != nil {
+					panic(err)
+				}
+			}()
+		}
 	}()
 	return nil
 }
@@ -1894,6 +1896,10 @@ func (at *AggregatorRoTx) HistorySeek(domain kv.Domain, key []byte, ts uint64, t
 
 func (at *AggregatorRoTx) HistoryRange(domain kv.Domain, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (it stream.KV, err error) {
 	return at.d[domain].ht.HistoryRange(fromTs, toTs, asc, limit, tx)
+}
+
+func (at *AggregatorRoTx) HistoryKeyTxNumRange(domain kv.Domain, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (stream.KU64, error) {
+	return at.d[domain].ht.HistoryKeyTxNumRange(fromTs, toTs, asc, limit, tx)
 }
 
 func (at *AggregatorRoTx) KeyCountInFiles(d kv.Domain, start, end uint64) (totalKeys uint64) {
