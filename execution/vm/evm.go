@@ -370,10 +370,10 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 
 			if err != ErrExecutionReverted {
 				// EIP-8037: Preserve state gas reservoir on exceptional halt.
+				// State changes are reverted, so no state was actually grown.
+				gas.State = initialChildState
 				if depth == 0 {
 					gas.Regular = 0
-				} else {
-					gas.State = initialChildState
 				}
 			}
 		}
@@ -636,11 +636,10 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 
 			if err != ErrExecutionReverted {
 				// EIP-8037: Preserve state gas reservoir on exceptional halt.
+				// State changes are reverted, so no state was actually grown.
 				gasRemaining.State = initialChildState
 				if depth == 0 {
 					gasRemaining.Regular = 0
-				} else {
-					gasRemaining.State = initialChildState
 				}
 			}
 		}
