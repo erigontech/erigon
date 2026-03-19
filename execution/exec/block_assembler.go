@@ -243,19 +243,13 @@ func (ba *BlockAssembler) AddTransactions(
 		}
 
 		// Snapshot cumulative gas so we can restore on tx failure.
-		gasSnapshotRegular := gasUsed.BlockRegular
-		gasSnapshotState := gasUsed.BlockState
-		gasSnapshotReceipt := gasUsed.Receipt
-		gasSnapshotBlob := gasUsed.Blob
+		gasSnapshot := *gasUsed
 
 		receipt, err := protocol.ApplyTransaction(chainConfig, protocol.GetHashFn(header, getHeader),
 			ba.cfg.Engine, coinbase, gasPool, ibs, writer, header, txn, gasUsed, *vmConfig)
 		if err != nil {
 			// Restore cumulative gas to pre-tx values.
-			gasUsed.BlockRegular = gasSnapshotRegular
-			gasUsed.BlockState = gasSnapshotState
-			gasUsed.Receipt = gasSnapshotReceipt
-			gasUsed.Blob = gasSnapshotBlob
+			*gasUsed = gasSnapshot
 			ibs.RevertToSnapshot(snap, err)
 			gasPool = new(protocol.GasPool).AddGas(gasSnap).AddBlobGas(blobGasSnap)
 			return nil, err
