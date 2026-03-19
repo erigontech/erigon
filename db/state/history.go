@@ -617,7 +617,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 		numBuf = make([]byte, 8)
 		// offsets: stores (txNum-baseTxNum) values; ETL delivers txNums sorted per key
 		// so no dedup/sort needed. Safe: collate covers exactly one step so values < stepSize < math.MaxUint32.
-		// Worst case: one key touched every txNum in the step → stepSize entries (default 1_562_500 × 4B = 6.25 MB).
+		// Worst case: one key touched every txNum in the step → stepSize entries (390_625 × 4B ≈ 1.56 MB).
 		offsets    = make([]uint32, 0, 64)
 		prevEf     []byte
 		prevKey    []byte
@@ -639,7 +639,6 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 
 		if bytes.Equal(prevKey, k) {
 			offsets = append(offsets, uint32(txNum-baseTxNum))
-			prevKey = append(prevKey[:0], k...)
 			return nil
 		}
 		seqBuilder.Reset(baseTxNum, uint64(len(offsets)), baseTxNum+uint64(offsets[len(offsets)-1]))
