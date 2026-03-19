@@ -205,10 +205,12 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 					logger.Debug("[Caplin] forward sync: GLOAS block without envelope (treated as EMPTY)", "slot", block.Block.Slot, "bidBlockHash", bid.Message.BlockHash)
 				}
 			}
-			// [Modified in Gloas:EIP7732] Dump state AFTER envelope processing so that the
-			// persisted state includes the LatestBlockHash update from ProcessExecutionPayloadEnvelope.
-			// Without this, a restart would restore a stale LatestBlockHash, causing
-			// "parent block hash mismatch" errors when processing the next block's bid.
+			// [Modified in Gloas:EIP7732] Dump state and save head state for restart.
+			// DumpBeaconStateOnDisk uses pre-envelope state (block_state) so that the
+			// filename computed by BlockRoot() is correct.
+			// saveHeadStateOnDiskIfNeeded uses post-envelope state (execution_payload_state)
+			// so that a restart loads the full state with correct LatestBlockHash and
+			// LatestBlockHeader.Root — preventing "parent block hash mismatch" errors.
 			if !hasSignedHeaderInDB && block.Block.Slot%(cfg.beaconCfg.SlotsPerEpoch*2) == 0 {
 				var st *state.CachingBeaconState
 				st, err = cfg.forkChoice.GetStateAtBlockRoot(blockRoot, false)
@@ -217,7 +219,17 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 						err = fmt.Errorf("failed to dump state: %w", err)
 						return
 					}
-					if err = saveHeadStateOnDiskIfNeeded(cfg, st); err != nil {
+				}
+				// Use post-envelope state for the restart checkpoint (latest.ssz_snappy).
+				var fullSt *state.CachingBeaconState
+				fullSt, err = cfg.forkChoice.GetFullStateAtBlockRoot(blockRoot)
+				if err != nil || fullSt == nil {
+					// Fallback to pre-envelope state if envelope is not available (EMPTY block).
+					fullSt = st
+					err = nil
+				}
+				if fullSt != nil {
+					if err = saveHeadStateOnDiskIfNeeded(cfg, fullSt); err != nil {
 						err = fmt.Errorf("failed to save head state: %w", err)
 						return
 					}

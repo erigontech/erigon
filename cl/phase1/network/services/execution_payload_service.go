@@ -137,6 +137,9 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 	if !ok || block == nil {
 		// Block hasn't arrived yet, queue envelope for later processing
 		s.queuePendingEnvelope(beaconBlockRoot, signedEnvelope)
+		// Also store in forkchoice's pendingEnvelopes so OnBlock can process it immediately
+		// when the block arrives, instead of waiting for the 100ms polling loop.
+		s.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, false, false)
 		log.Debug("Queued execution payload envelope for later processing",
 			"beaconBlockRoot", beaconBlockRoot,
 			"builderIndex", builderIndex)
