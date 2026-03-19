@@ -634,7 +634,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 			st.blockRegularGasUsed = st.txnGasUsed
 		} else {
 			st.txnGasUsedB4Refunds = mdGasUsed.Regular
-			st.txnGasUsed = st.txnGasUsedB4Refunds
+			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Regular)
+			st.txnGasUsed = st.txnGasUsedB4Refunds - refund
 			st.blockRegularGasUsed = st.txnGasUsed
 		}
 		st.refundGas()
