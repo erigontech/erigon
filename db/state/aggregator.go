@@ -752,6 +752,7 @@ func (a *Aggregator) BuildMissedAccessorsInBackground(workers int) bool {
 	if !a.rebuildingAccessors.CompareAndSwap(false, true) {
 		return false
 	}
+	log.Warn("[agg] BuildMissedAccessorsInBackground", "stack", dbg.Stack())
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
