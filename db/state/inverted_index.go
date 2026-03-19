@@ -1003,7 +1003,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 		prevKey     []byte
 		initialized bool
 		bitmap      = bitmapdb.NewBitmap64()
-		ef          *multiencseq.SequenceBuilder
+		ef          multiencseq.SequenceBuilder
 	)
 	defer bitmapdb.ReturnToPool64(bitmap)
 
