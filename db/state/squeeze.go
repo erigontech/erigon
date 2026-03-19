@@ -479,17 +479,15 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	if err != nil {
 		return nil, err
 	}
-	defer func() { domains.Close() }()
+	defer domains.Close()
 	domains.DiscardWrites(kv.AccountsDomain)
 	domains.DiscardWrites(kv.StorageDomain)
 	domains.DiscardWrites(kv.CodeDomain)
-	domains.SetInMemHistoryReads(false) // plain state reads come from disk history, not in-memory
+	domains.SetInMemHistoryReads(false)
 	domains.EnableParaTrieDB(rwDb)
 	domains.EnableTrieWarmup(true)
 	useWarmupCache := !dbg.EnvBool("ERIGON_REBUILD_NO_WARMUP_CACHE", false)
 	domains.EnableWarmupCache(useWarmupCache)
-
-	debugBlock := uint64(dbg.EnvInt("ERIGON_REBUILD_DEBUG_BLOCK", 0))
 
 	_, seekBlockNum, err := domains.SeekCommitment(ctx, rwTx)
 	if err != nil {
@@ -519,10 +517,8 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		}
 		logger.Info("[rebuild_commitment_history] starting", "blockFrom", blockFrom, "blockTo", blockTo,
 			"txNumFrom", startFromTxNum, "txNumTo", endToTxNum, "stepSize", stepSize,
-			"warmupCache", useWarmupCache, "debugBlock", debugBlock)
+			"warmupCache", useWarmupCache)
 	}
-	flushAtBlock := uint64(dbg.EnvInt("ERIGON_REBUILD_FLUSH_AT", 0))
-
 	var totalKeysProcessed uint64
 	var rh []byte
 	var lastToTxNum uint64
@@ -545,7 +541,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		}
 
 		fromStep := kv.Step(a.EndTxNumMinimax() / a.StepSize())
-		toStep := kv.Step((lastToTxNum + 1) / a.StepSize()) // +1 because lastToTxNum is inclusive (last txNum of step)
+		toStep := kv.Step((lastToTxNum + 1) / a.StepSize())
 		logger.Info("[rebuild_commitment_history] build files", "fromStep", fromStep, "toStep", toStep, "lastToTxNum", lastToTxNum)
 		if err = a.BuildFiles2(ctx, fromStep, toStep, false); err != nil {
 			return err
@@ -599,7 +595,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		domains.DiscardWrites(kv.AccountsDomain)
 		domains.DiscardWrites(kv.StorageDomain)
 		domains.DiscardWrites(kv.CodeDomain)
-		domains.SetInMemHistoryReads(false) // plain state reads come from disk history, not in-memory
+		domains.SetInMemHistoryReads(false)
 		domains.EnableParaTrieDB(rwDb)
 		domains.EnableTrieWarmup(true)
 		domains.EnableWarmupCache(useWarmupCache)
@@ -610,11 +606,6 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	finalizeBlock := func(blockNum, toTxNum uint64) error {
 		domains.SetTxNum(toTxNum)
 		domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewRebuildStateReader(rwTx, domains, toTxNum+1))
-
-		if debugBlock > 0 && blockNum >= debugBlock-2 && blockNum <= debugBlock+2 {
-			logger.Info("[rebuild_debug] finalizeBlock",
-				"block", blockNum, "toTxNum", toTxNum, "memBatch", common.ByteCount(domains.Size()))
-		}
 
 		var err error
 		rh, err = domains.ComputeCommitment(ctx, rwTx, true, blockNum, toTxNum, "[rebuild_commitment_history]", nil)
@@ -637,11 +628,6 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 				"prevBlock", blockNum-1, "memBatch", common.ByteCount(domains.Size()))
 			return fmt.Errorf("[rebuild_commitment_history] root mismatch at block %d (toTxNum=%d): computed %x, expected %x",
 				blockNum, toTxNum, rh, header.Root)
-		}
-
-		if debugBlock > 0 && blockNum >= debugBlock-2 && blockNum <= debugBlock+2 {
-			logger.Info("[rebuild_debug] block OK",
-				"block", blockNum, "root", hex.EncodeToString(rh))
 		}
 
 		select {
@@ -697,31 +683,21 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		}
 
 		curBlock := ^uint64(0) // sentinel: no block started yet
-		var blockKeyCount uint64
-		err = batch.Load(ctx, func(blockNum uint64, rawKey []byte) error {
+		if err := batch.Load(ctx, func(blockNum uint64, rawKey []byte) error {
 			if blockNum != curBlock {
 				// Finalize the previous keyed block (or, on first key, start from blockFrom).
 				prevEnd := blockFrom
 				if curBlock != ^uint64(0) {
-					if debugBlock > 0 && curBlock >= debugBlock-5 && curBlock <= debugBlock+5 {
-						logger.Info("[rebuild_debug] finalizing block from Load",
-							"block", curBlock, "toTxNum", batch.TxNum(curBlock), "keysInBlock", blockKeyCount)
-					}
 					if err := finalizeBlock(curBlock, batch.TxNum(curBlock)); err != nil {
 						return err
 					}
 					prevEnd = curBlock + 1
 				}
 				for b := prevEnd; b < blockNum; b++ {
-					if debugBlock > 0 && b >= debugBlock-5 && b <= debugBlock+5 {
-						logger.Info("[rebuild_debug] finalizing empty block from Load",
-							"block", b, "toTxNum", batch.TxNum(b))
-					}
 					if err := finalizeBlock(b, batch.TxNum(b)); err != nil {
 						return err
 					}
 				}
-				blockKeyCount = 0
 				// Set correct state reader and clear stale warmup cache before TouchKey calls begin.
 				toTxNum := batch.TxNum(blockNum)
 				domains.SetTxNum(toTxNum)
@@ -739,23 +715,10 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 				return fmt.Errorf("[rebuild_commitment_history] block %d: unexpected rawKey length %d (hex %s)",
 					blockNum, len(rawKey), hex.EncodeToString(rawKey))
 			}
-			if debugBlock > 0 && blockNum >= debugBlock-2 && blockNum <= debugBlock+2 {
-				toTxNumDbg := batch.TxNum(blockNum)
-				valDbg, _, errDbg := rwTx.GetAsOf(domain, rawKey, toTxNumDbg+1)
-				valHex := hex.EncodeToString(valDbg)
-				if errDbg != nil {
-					valHex = "ERROR:" + errDbg.Error()
-				}
-				logger.Info("[rebuild_debug] TouchKey",
-					"block", blockNum, "domain", domain, "key", hex.EncodeToString(rawKey),
-					"stateReaderVal", valHex)
-			}
 			domains.GetCommitmentCtx().TouchKey(domain, string(rawKey), nil)
-			blockKeyCount++
 			totalKeysProcessed++
 			return nil
-		})
-		if err != nil {
+		}); err != nil {
 			batch.Close()
 			return nil, err
 		}
@@ -763,10 +726,6 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		// Finalize the last block that received keys (if any), then remaining empty blocks.
 		firstUnfinalized := blockFrom
 		if curBlock != ^uint64(0) {
-			if debugBlock > 0 && curBlock >= debugBlock-5 && curBlock <= debugBlock+5 {
-				logger.Info("[rebuild_debug] finalizing last keyed block",
-					"block", curBlock, "toTxNum", batch.TxNum(curBlock), "keysInBlock", blockKeyCount)
-			}
 			if err := finalizeBlock(curBlock, batch.TxNum(curBlock)); err != nil {
 				batch.Close()
 				return nil, err
@@ -785,10 +744,6 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 
 		if err := flushDomainsAndRebuild(); err != nil {
 			return nil, err
-		}
-		if flushAtBlock > 0 && blockFrom > flushAtBlock {
-			logger.Info("[rebuild_commitment_history] stopping at flush-at block", "flushAtBlock", flushAtBlock, "nextBlockFrom", blockFrom)
-			return rh, nil
 		}
 	}
 
