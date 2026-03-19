@@ -385,9 +385,9 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 								return err
 							}
 
-							amsterdam := pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime)
-							if (amsterdam || pe.cfg.experimentalBAL) && !applyResult.isPartial {
-								err = ProcessBAL(rwTx, lastHeader, applyResult.TxIO, amsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir)
+							isEIP7928 := pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) && !pe.cfg.chainConfig.IsEIPDisabled(7928)
+							if (isEIP7928 || pe.cfg.experimentalBAL) && !applyResult.isPartial {
+								err = ProcessBAL(rwTx, lastHeader, applyResult.TxIO, isEIP7928, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir)
 								if err != nil {
 									return err
 								}
