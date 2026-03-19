@@ -2878,6 +2878,9 @@ func (hph *HexPatriciaHashed) ResetContext(ctx PatriciaContext) {
 func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 	if hph.cache != nil {
 		if data, found := hph.cache.GetBranch(key); found {
+			if hph.metrics != nil {
+				hph.metrics.cacheBranch.Add(1)
+			}
 			return data, nil
 		}
 	}
@@ -2889,6 +2892,9 @@ func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 func (hph *HexPatriciaHashed) accountFromCacheOrDB(plainKey []byte) (*Update, error) {
 	if hph.cache != nil {
 		if update, found := hph.cache.GetAccount(plainKey); found {
+			if hph.metrics != nil {
+				hph.metrics.cacheAccount.Add(1)
+			}
 			return update, nil
 		}
 	}
@@ -2899,6 +2905,9 @@ func (hph *HexPatriciaHashed) accountFromCacheOrDB(plainKey []byte) (*Update, er
 func (hph *HexPatriciaHashed) storageFromCacheOrDB(plainKey []byte) (*Update, error) {
 	if hph.cache != nil {
 		if update, found := hph.cache.GetStorage(plainKey); found {
+			if hph.metrics != nil {
+				hph.metrics.cacheStorage.Add(1)
+			}
 			return update, nil
 		}
 	}

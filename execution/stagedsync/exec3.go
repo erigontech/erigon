@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -205,17 +206,19 @@ func ExecV3(ctx context.Context,
 	if !isApplyingBlocks {
 		postValidator = newParallelBlockPostExecutionValidator()
 	}
-	// Enable deferred commitment updates for fork validation (both serial and parallel).
+	// Enable deferred commitment updates for fork validation and parallel initial sync.
 	// Deferred updates batch commitment calculations to block boundaries rather than
 	// per-transaction, significantly reducing re-org validation overhead.
-	if isForkValidation {
+	// For the parallel path during initial sync, Flush() now includes pending updates,
+	// so they are no longer silently discarded between StageLoopIteration cycles.
+	if isForkValidation || (parallel && isApplyingBlocks) {
 		doms.SetDeferCommitmentUpdates(true)
 	}
 	defer doms.SetDeferCommitmentUpdates(false)
 	// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
 	// can't use OS-level ReadAhead - because Data >> RAM
 	// it also warmsup state a bit - by touching senders/coninbase accounts and code
-	if isApplyingBlocks {
+	if !execStage.CurrentSyncCycle.IsInitialCycle && isApplyingBlocks {
 		var clean func()
 
 		readAhead, clean = exec.BlocksReadAhead(ctx, 2, cfg.db, cfg.engine, cfg.blockReader)
@@ -237,7 +240,8 @@ func ExecV3(ctx context.Context,
 				hooks:             hooks,
 				postValidator:     postValidator,
 			},
-			workerCount: cfg.syncCfg.ExecWorkerCount,
+			workerCount:  cfg.syncCfg.ExecWorkerCount,
+			blockApplied: make(chan struct{}, 1),
 		}
 		pe.lastCommittedTxNum.Store(inputTxNum)
 		// blockNum is the next block to execute (from doms.BlockNum()), so the last
@@ -342,6 +346,13 @@ func ExecV3(ctx context.Context,
 
 	if false && !isForkValidation {
 		dumpPlainStateDebug(applyTx, doms)
+	}
+
+	// If execution already failed with ErrInvalidBlock, skip the step-frozen check
+	// and propagate the original error directly. The step-frozen check only makes
+	// sense when execution succeeded partially and we need to persist the commitment.
+	if execErr != nil && errors.Is(execErr, rules.ErrInvalidBlock) {
+		return execErr
 	}
 
 	lastCommitedStep := kv.Step((lastCommittedTxNum) / doms.StepSize())
@@ -598,7 +609,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 			}); err != nil {
 				return err
 			}
-			if len(data) > 0 {
+			if len(data) > 0 && !dbg.IgnoreBAL {
 				dbBAL, err = types.DecodeBlockAccessListBytes(data)
 				if err != nil {
 					return fmt.Errorf("decode block access list: %w", err)
@@ -610,21 +621,13 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 
 			txs := b.Transactions()
 			header := b.HeaderNoCopy()
-			getHashFnMutex := sync.Mutex{}
 
-			blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, func(hash common.Hash, number uint64) (h *types.Header, err error) {
-				getHashFnMutex.Lock()
-				defer getHashFnMutex.Unlock()
-				err = tx.Apply(ctx, func(tx kv.Tx) (err error) {
-					h, err = te.cfg.blockReader.Header(ctx, tx, hash, number)
-					return err
-				})
-
-				if err != nil {
-					return nil, err
-				}
-
-				return h, err
+			// BLOCKHASH looks back at most 256 blocks — those headers are always
+			// in frozen snapshots. Pass nil tx so blockReader skips MDBX/overlay
+			// and reads directly from snapshots. This is thread-safe without a
+			// mutex and avoids races with fcuOverlay lifecycle.
+			blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
+				return te.cfg.blockReader.Header(ctx, nil, hash, number)
 			}), te.cfg.engine, te.cfg.author, te.cfg.chainConfig)
 
 			var txTasks []exec.Task

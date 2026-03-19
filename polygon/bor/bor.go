@@ -619,7 +619,7 @@ func (c *Bor) VerifyUncles(_ rules.ChainReader, _ *types.Header, uncles []*types
 
 // VerifySeal implements rules.Engine, checking whether the signature contained
 // in the header satisfies the consensus protocol requirements.
-func (c *Bor) VerifySeal(chain ChainHeaderReader, header *types.Header) error {
+func (c *Bor) VerifySeal(chain rules.ChainHeaderReader, header *types.Header) error {
 	v, err := c.spanReader.Producers(context.Background(), header.Number.Uint64())
 	if err != nil {
 		return err
@@ -632,7 +632,7 @@ func (c *Bor) VerifySeal(chain ChainHeaderReader, header *types.Header) error {
 // consensus protocol requirements. The method accepts an optional list of parent
 // headers that aren't yet part of the local blockchain to generate the snapshots
 // from.
-func (c *Bor) verifySeal(chain ChainHeaderReader, header *types.Header, parents []*types.Header, validatorSet *heimdall.ValidatorSet) error {
+func (c *Bor) verifySeal(chain rules.ChainHeaderReader, header *types.Header, parents []*types.Header, validatorSet *heimdall.ValidatorSet) error {
 	// Verifying the genesis block is not supported
 	number := header.Number.Uint64()
 	if number == 0 {
