@@ -663,14 +663,9 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		st.blockStateGasUsed = blockState
 		st.txnGasUsedB4Refunds = mdGasUsed.Total() + st.evm.RevertedSpillGas()
 		st.txnGasUsed = max(st.txnGasUsedB4Refunds, intrinsicGasResult.FloorGasCost)
-	} else if rules.IsPrague {
-		// No-refund path for Prague: gasBailout (trace_call) or !refunds.
-		// Apply EIP-7623 floor cost but no refunds.
-		st.txnGasUsedB4Refunds = st.mdGasUsed().Regular
-		st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds)
-		st.blockRegularGasUsed = st.msg.Gas() // match pre-refactor: consume full gas limit from pool
 	} else {
-		// No-refund path pre-Prague: gasBailout (trace_call) or !refunds.
+		// No-refund path: gasBailout (trace_call) or !refunds.
+		// Don't apply Prague floor or refunds — just record raw gas used.
 		st.txnGasUsedB4Refunds = st.mdGasUsed().Regular
 		st.txnGasUsed = st.txnGasUsedB4Refunds
 		st.blockRegularGasUsed = st.msg.Gas() // match pre-refactor: consume full gas limit from pool
