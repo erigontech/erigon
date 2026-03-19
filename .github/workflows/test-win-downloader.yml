@@ -1,9 +1,0 @@
-name: Windows downloader tests
-
-on: pull_request
-
-jobs:
-  win-downloader:
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "::warning::This job is a stub. Tests now run in the 'All tests' workflow (.github/workflows/test-all-erigon.yml)."

@@ -210,7 +210,7 @@ func TestPagedWriterCRC32Sequential(t *testing.T) {
 
 	// Now test parallel compression produces same CRC32
 	mock2 := &multyBytesWriter{pageSize: 4}
-	pw2 := NewPagedWriter(t.Context(), mock2, true)
+	pw2 := NewPagedWriterWithWorkers(t.Context(), mock2, true, 4)
 
 	for _, kv := range testData {
 		if err := pw2.Add([]byte(kv.k), []byte(kv.v)); err != nil {
@@ -234,28 +234,223 @@ func TestPagedWriterCRC32Sequential(t *testing.T) {
 	}
 }
 
-func TestBytesUncompressedToKeysReadable(t *testing.T) {
-	// Regression test: bytesUncompressedTo must produce pages where keys are readable.
-	// Bug: bytesUncompressedTo pre-allocated keys+vals in neededSize,
-	// then clear() zeroed them, then append() placed data past the zeroed region.
+func TestHeaderToMatchesSync(t *testing.T) {
+	// Regression test: headerTo + keys/vals concatenation (parallel path) must produce
+	// the same page as bytesUncompressed (sync path).
 	require := require.New(t)
 
 	pageSize := 16
 	testKeys := []string{"account_key_001", "account_key_002", "account_key_003", "account_key_004"}
 	testVals := []string{"val1", "val2", "val3", "val4"}
 
+	// Build page via sync path
+	mock1 := &multyBytesWriter{pageSize: pageSize}
+	pw1 := NewPagedWriter(t.Context(), mock1, false)
+	for i := range testKeys {
+		require.NoError(pw1.Add([]byte(testKeys[i]), []byte(testVals[i])))
+	}
+	syncPage, syncOK := pw1.bytesUncompressed()
+	require.True(syncOK)
+
+	// Build page via async path (headerTo + concatenation, same as worker does)
+	mock2 := &multyBytesWriter{pageSize: pageSize}
+	pw2 := NewPagedWriter(t.Context(), mock2, false)
+	for i := range testKeys {
+		require.NoError(pw2.Add([]byte(testKeys[i]), []byte(testVals[i])))
+	}
+	asyncPage := pageHeaderTo(nil, pw2.kLengths, pw2.vLengths, 0)
+	asyncPage = append(asyncPage, pw2.keys...)
+	asyncPage = append(asyncPage, pw2.vals...)
+
+	require.Equal(syncPage, asyncPage,
+		"headerTo+concat must produce identical page to bytesUncompressed")
+
+	// Verify keys are readable from the async page
+	for i := range testKeys {
+		v, _ := GetFromPage([]byte(testKeys[i]), asyncPage, nil, false)
+		require.Equal(testVals[i], string(v), "key %s not found in async page", testKeys[i])
+	}
+}
+
+// TestDecompressorEmptyWordsInvariant verifies (property 1):
+// emptyWordsCount <= Count() for any decompressor produced by PagedWriter.
+func TestDecompressorEmptyWordsInvariant(t *testing.T) {
+	// uncompressed pages
+	d := prepareLoremDictOnPagedWriter(t, 4, false)
+	defer d.Close()
+	require.LessOrEqual(t, d.EmptyWordsCount(), d.Count(),
+		"emptyWordsCount=%d > Count()=%d", d.EmptyWordsCount(), d.Count())
+
+	// compressed pages
+	d2 := prepareLoremDictOnPagedWriter(t, 4, true)
+	defer d2.Close()
+	require.LessOrEqual(t, d2.EmptyWordsCount(), d2.Count(),
+		"compressed: emptyWordsCount=%d > Count()=%d", d2.EmptyWordsCount(), d2.Count())
+}
+
+// TestPageLayoutConsistency verifies (property 2):
+// every raw page satisfies: len(page) == 1 + cnt*8 + sum(kLens) + sum(vLens).
+func TestPageLayoutConsistency(t *testing.T) {
+	const pageSize = 4
 	mock := &multyBytesWriter{pageSize: pageSize}
 	pw := NewPagedWriter(t.Context(), mock, false)
-	for i := range testKeys {
-		require.NoError(pw.Add([]byte(testKeys[i]), []byte(testVals[i])))
-	}
-	page, ok := pw.bytesUncompressedTo(nil)
-	require.True(ok)
 
-	// Verify all keys are readable from the page
-	for i := range testKeys {
-		v, _ := GetFromPage([]byte(testKeys[i]), page, nil, false)
-		require.Equal(testVals[i], string(v), "key %s not found in page", testKeys[i])
+	testPairs := []struct{ k, v string }{
+		{"alpha", "one"}, {"beta", "two"}, {"gamma", "three"},
+		{"delta", "four"}, {"epsilon", "five"}, {"zeta", "six"},
+		{"eta", "seven"}, {"theta", "eight"}, {"iota", "nine"},
+	}
+	for _, kv := range testPairs {
+		require.NoError(t, pw.Add([]byte(kv.k), []byte(kv.v)))
+	}
+	require.NoError(t, pw.Flush())
+
+	for pageIdx, page := range mock.Bytes() {
+		require.NotEmpty(t, page, "page %d is empty", pageIdx)
+		cnt := int(page[0])
+		require.Positive(t, cnt, "page %d: cnt must be > 0", pageIdx)
+		require.LessOrEqual(t, cnt, 255, "page %d: cnt=%d overflows byte", pageIdx, cnt)
+
+		metaLen := cnt * 4 * 2 // kLens + vLens, each cnt*4 bytes
+		require.GreaterOrEqual(t, len(page), 1+metaLen,
+			"page %d: too short for metadata (len=%d, need %d)", pageIdx, len(page), 1+metaLen)
+
+		kLens := page[1 : 1+cnt*4]
+		vLens := page[1+cnt*4 : 1+metaLen]
+		data := page[1+metaLen:]
+
+		var totalKeys, totalVals uint32
+		for i := 0; i < cnt*4; i += 4 {
+			totalKeys += be.Uint32(kLens[i:])
+			totalVals += be.Uint32(vLens[i:])
+		}
+		require.Equal(t, int(totalKeys+totalVals), len(data),
+			"page %d: data len=%d but sum(kLens)+sum(vLens)=%d",
+			pageIdx, len(data), totalKeys+totalVals)
+	}
+}
+
+// TestPagedWriterRoundTripParallel verifies (property 3):
+// parallel PagedWriter (workers > 1) round-trips key-value content identically to sequential.
+func TestPagedWriterRoundTripParallel(t *testing.T) {
+	require := require.New(t)
+
+	testPairs := []struct{ k, v []byte }{
+		{[]byte("aaa"), []byte("111")},
+		{[]byte("bbb"), []byte("222")},
+		{[]byte("ccc"), []byte("333")},
+		{[]byte("ddd"), []byte("444")},
+		{[]byte("eee"), []byte("555")},
+		{[]byte("fff"), []byte("666")},
+		{[]byte("ggg"), []byte("")}, // empty value
+		{[]byte("hhh"), []byte("888")},
+	}
+
+	write := func(workers int) [][]byte {
+		mock := &multyBytesWriter{pageSize: 3}
+		var pw *PagedWriter
+		if workers == 1 {
+			pw = NewPagedWriter(t.Context(), mock, true)
+		} else {
+			pw = NewPagedWriterWithWorkers(t.Context(), mock, true, workers)
+		}
+		for _, kv := range testPairs {
+			require.NoError(pw.Add(kv.k, kv.v))
+		}
+		require.NoError(pw.Compress())
+		return mock.Bytes()
+	}
+
+	seqPages := write(1)
+	parPages := write(4)
+	require.Equal(len(seqPages), len(parPages), "page count mismatch: seq=%d par=%d", len(seqPages), len(parPages))
+	for i := range seqPages {
+		require.Equal(seqPages[i], parPages[i], "page %d content differs between sequential and parallel", i)
+	}
+}
+
+// TestPagedReaderSortedKeyOrder verifies (property 4):
+// keys returned by PagedReader.Next2 are strictly increasing within the written sequence
+// when keys are written in sorted order (as domain collation always does).
+func TestPagedReaderSortedKeyOrder(t *testing.T) {
+	require := require.New(t)
+
+	// Keys written in strictly increasing lexicographic order.
+	sortedPairs := []struct{ k, v string }{
+		{"a", "v1"}, {"b", "v2"}, {"c", "v3"},
+		{"d", "v4"}, {"e", "v5"}, {"f", "v6"},
+		{"g", "v7"}, {"h", "v8"},
+	}
+
+	tmpDir := t.TempDir()
+	file := filepath.Join(tmpDir, "sorted_keys")
+	logger := log.New()
+	cfg := DefaultCfg.WithValuesOnCompressedPage(3)
+	cfg.MinPatternScore = 1
+	cfg.Workers = 1
+	c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, logger)
+	require.NoError(err)
+	defer c.Close()
+
+	pw := NewPagedWriter(t.Context(), NewWriter(c, CompressNone), false)
+	for _, kv := range sortedPairs {
+		require.NoError(pw.Add([]byte(kv.k), []byte(kv.v)))
+	}
+	require.NoError(pw.Flush())
+	require.NoError(pw.Compress())
+
+	d, err := NewDecompressor(file)
+	require.NoError(err)
+	defer d.Close()
+
+	g := NewPagedReader(d.MakeGetter(), 3, false)
+	var buf []byte
+	var prevKey []byte
+	i := 0
+	for g.HasNext() {
+		var key []byte
+		key, _, buf, _ = g.Next2(buf[:0])
+		if prevKey != nil {
+			require.Positive(strings.Compare(string(key), string(prevKey)),
+				"pair %d: key %q not strictly greater than prevKey %q", i, key, prevKey)
+		}
+		prevKey = append(prevKey[:0], key...)
+		i++
+	}
+	require.Equal(len(sortedPairs), i, "should have read all %d pairs", len(sortedPairs))
+}
+
+func BenchmarkPagedWriterAdd(b *testing.B) {
+	const pageSize = 16
+	key := make([]byte, 20)
+	val := make([]byte, 100)
+	for i := range key {
+		key[i] = byte(i)
+	}
+	for i := range val {
+		val[i] = byte(i)
+	}
+
+	cases := []struct {
+		name       string
+		compress   bool
+		numWorkers int
+	}{
+		{"noCompression", false, 1},
+		{"compression_sync", true, 1},
+		{"compression_workers2", true, 2},
+		{"compression_workers4", true, 4},
+	}
+	for _, tc := range cases {
+		b.Run(tc.name, func(b *testing.B) {
+			buf := &multyBytesWriter{pageSize: pageSize}
+			w := NewPagedWriterWithWorkers(b.Context(), buf, tc.compress, tc.numWorkers)
+			b.ResetTimer()
+			for b.Loop() {
+				w.Add(key, val) //nolint:errcheck
+			}
+			w.Flush() //nolint:errcheck
+		})
 	}
 }
 

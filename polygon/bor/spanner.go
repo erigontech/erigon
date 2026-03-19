@@ -25,7 +25,6 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -96,12 +95,6 @@ func (c *ChainSpanner) GetCurrentSpan(syscall rules.SystemCall) (*heimdall.Span,
 	}
 
 	return &span, nil
-}
-
-type ChainHeaderReader interface {
-	GetHeaderByNumber(number uint64) *types.Header
-	GetHeader(hash common.Hash, number uint64) *types.Header
-	FrozenBlocks() uint64
 }
 
 func (c *ChainSpanner) CommitSpan(heimdallSpan heimdall.Span, syscall rules.SystemCall) error {
