@@ -473,8 +473,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		b.header = makeHeader(chainreader, parent, ibs, b.engine)
 		// Mutate the state and block according to any hard-fork specs
 		if daoBlock := config.DAOForkBlock; daoBlock != nil {
-			limit := new(big.Int).Add(daoBlock, misc.DAOForkExtraRange)
-			if b.header.Number.CmpBig(daoBlock) >= 0 && b.header.Number.CmpBig(limit) < 0 {
+			if b.header.Number.Uint64() >= *daoBlock && b.header.Number.Uint64() < *daoBlock+misc.DAOForkExtraRange {
 				b.header.Extra = common.Copy(misc.DAOForkBlockExtra)
 			}
 		}

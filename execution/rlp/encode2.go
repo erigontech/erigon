@@ -57,11 +57,8 @@ func EncodeListPrefix(dataLen int, to []byte) int {
 	return 1
 }
 
-func U32Len(i uint32) int {
-	if i < 128 {
-		return 1
-	}
-	return 1 + common.BitLenToByteLen(bits.Len32(i))
+func u32Len(i uint32) int {
+	return U64Len(uint64(i))
 }
 
 func U64Len(i uint64) int {
@@ -72,42 +69,7 @@ func U64Len(i uint64) int {
 }
 
 func EncodeU32(i uint32, to []byte) int {
-	if i == 0 {
-		to[0] = 128
-		return 1
-	}
-	if i < 128 {
-		to[0] = byte(i) // fits single byte
-		return 1
-	}
-
-	b := to[1:]
-	var l int
-
-	// writes i to b in big endian byte order, using the least number of bytes needed to represent i.
-	switch {
-	case i < (1 << 8):
-		b[0] = byte(i)
-		l = 1
-	case i < (1 << 16):
-		b[0] = byte(i >> 8)
-		b[1] = byte(i)
-		l = 2
-	case i < (1 << 24):
-		b[0] = byte(i >> 16)
-		b[1] = byte(i >> 8)
-		b[2] = byte(i)
-		l = 3
-	default:
-		b[0] = byte(i >> 24)
-		b[1] = byte(i >> 16)
-		b[2] = byte(i >> 8)
-		b[3] = byte(i)
-		l = 4
-	}
-
-	to[0] = 128 + byte(l)
-	return 1 + l
+	return EncodeU64(uint64(i), to)
 }
 
 func EncodeU64(i uint64, to []byte) int {
@@ -119,68 +81,12 @@ func EncodeU64(i uint64, to []byte) int {
 		to[0] = byte(i) // fits single byte
 		return 1
 	}
-
-	b := to[1:]
-	var l int
-
-	// writes i to b in big endian byte order, using the least number of bytes needed to represent i.
-	switch {
-	case i < (1 << 8):
-		b[0] = byte(i)
-		l = 1
-	case i < (1 << 16):
-		b[0] = byte(i >> 8)
-		b[1] = byte(i)
-		l = 2
-	case i < (1 << 24):
-		b[0] = byte(i >> 16)
-		b[1] = byte(i >> 8)
-		b[2] = byte(i)
-		l = 3
-	case i < (1 << 32):
-		b[0] = byte(i >> 24)
-		b[1] = byte(i >> 16)
-		b[2] = byte(i >> 8)
-		b[3] = byte(i)
-		l = 4
-	case i < (1 << 40):
-		b[0] = byte(i >> 32)
-		b[1] = byte(i >> 24)
-		b[2] = byte(i >> 16)
-		b[3] = byte(i >> 8)
-		b[4] = byte(i)
-		l = 5
-	case i < (1 << 48):
-		b[0] = byte(i >> 40)
-		b[1] = byte(i >> 32)
-		b[2] = byte(i >> 24)
-		b[3] = byte(i >> 16)
-		b[4] = byte(i >> 8)
-		b[5] = byte(i)
-		l = 6
-	case i < (1 << 56):
-		b[0] = byte(i >> 48)
-		b[1] = byte(i >> 40)
-		b[2] = byte(i >> 32)
-		b[3] = byte(i >> 24)
-		b[4] = byte(i >> 16)
-		b[5] = byte(i >> 8)
-		b[6] = byte(i)
-		l = 7
-	default:
-		b[0] = byte(i >> 56)
-		b[1] = byte(i >> 48)
-		b[2] = byte(i >> 40)
-		b[3] = byte(i >> 32)
-		b[4] = byte(i >> 24)
-		b[5] = byte(i >> 16)
-		b[6] = byte(i >> 8)
-		b[7] = byte(i)
-		l = 8
-	}
-
-	to[0] = 128 + byte(l)
-	return 1 + l
+	var buf [8]byte
+	binary.BigEndian.PutUint64(buf[:], i)
+	size := common.BitLenToByteLen(bits.Len64(i))
+	to[0] = 128 + byte(size)
+	copy(to[1:], buf[8-size:])
+	return 1 + size
 }
 
 func StringLen(s []byte) int {
@@ -246,11 +152,6 @@ func EncodeHash(h, to []byte) int {
 	return 33
 }
 
-func HashesLen(hashes []byte) int {
-	hashesLen := len(hashes) / 32 * 33
-	return ListPrefixLen(hashesLen) + hashesLen
-}
-
 func EncodeHashes(hashes []byte, encodeBuf []byte) int {
 	pos := 0
 	hashesLen := len(hashes) / 32 * 33
@@ -268,7 +169,7 @@ func AnnouncementsLen(types []byte, sizes []uint32, hashes []byte) int {
 	typesLen := StringLen(types)
 	var sizesLen int
 	for _, size := range sizes {
-		sizesLen += U32Len(size)
+		sizesLen += u32Len(size)
 	}
 	hashesLen := len(hashes) / 32 * 33
 	totalLen := typesLen + sizesLen + ListPrefixLen(sizesLen) + hashesLen + ListPrefixLen(hashesLen)
@@ -288,7 +189,7 @@ func EncodeAnnouncements(types []byte, sizes []uint32, hashes []byte, encodeBuf 
 	typesLen := StringLen(types)
 	var sizesLen int
 	for _, size := range sizes {
-		sizesLen += U32Len(size)
+		sizesLen += u32Len(size)
 	}
 	hashesLen := len(hashes) / 32 * 33
 	totalLen := typesLen + sizesLen + ListPrefixLen(sizesLen) + hashesLen + ListPrefixLen(hashesLen)
