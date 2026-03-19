@@ -318,6 +318,32 @@ func TestDeleteSnapshots(t *testing.T) {
 	}
 }
 
+func TestDeleteSnapshotsIsIdempotent(t *testing.T) {
+	logger := testlog.Logger(t, log.LvlCrit)
+	dir := t.TempDir()
+	require := require.New(t)
+
+	for _, snT := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFile(t, 0, 10_000, snT.Enum(), dir, version.V1_0, logger)
+	}
+
+	s := NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, true, logger)
+	defer s.Close()
+	require.NoError(s.OpenFolder())
+
+	fileName := snaptype.SegmentFileName(version.V1_0, 0, 10_000, snaptype2.Bodies.Enum())
+
+	require.NoError(s.Delete(fileName))
+	require.False(slices.Contains(s.Files(), fileName))
+
+	require.NotPanics(func() {
+		require.NoError(s.Delete(fileName))
+	})
+	require.NotPanics(func() {
+		require.NoError(s.Delete("v1.0-999999-1000000-bodies.seg"))
+	})
+}
+
 func TestRemoveOverlaps(t *testing.T) {
 	mustSeeFile := func(files []string, fileNameWithoutVersion string) bool { //file-version agnostic
 		for _, f := range files {

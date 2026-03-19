@@ -84,16 +84,16 @@ func (obj *Withdrawal) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	if obj.Index, err = s.Uint(); err != nil {
+	if obj.Index, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read Index: %w", err)
 	}
-	if obj.Validator, err = s.Uint(); err != nil {
+	if obj.Validator, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read Validator: %w", err)
 	}
 	if err = s.ReadBytes(obj.Address[:]); err != nil {
 		return fmt.Errorf("read Address: %w", err)
 	}
-	if obj.Amount, err = s.Uint(); err != nil {
+	if obj.Amount, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read Amount: %w", err)
 	}
 

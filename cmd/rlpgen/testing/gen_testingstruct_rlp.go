@@ -338,10 +338,10 @@ func (obj *TestingStruct) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	if obj.a, err = s.Uint(); err != nil {
+	if obj.a, err = s.Uint64(); err != nil {
 		return fmt.Errorf("error decoding field a, err: %w", err)
 	}
-	if n, err := s.Uint(); err != nil {
+	if n, err := s.Uint64(); err != nil {
 		return fmt.Errorf("error decoding field aa, err: %w", err)
 	} else {
 		i := n

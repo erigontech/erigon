@@ -101,12 +101,7 @@ func (b *BySenderAndNonce) blobCount(senderID uint64) uint64 {
 }
 
 func (b *BySenderAndNonce) hasTxns(senderID uint64) bool {
-	has := false
-	b.ascend(senderID, func(*metaTxn) bool {
-		has = true
-		return false
-	})
-	return has
+	return b.senderIDTxnCount[senderID] > 0
 }
 
 func (b *BySenderAndNonce) get(senderID, txNonce uint64) *metaTxn {

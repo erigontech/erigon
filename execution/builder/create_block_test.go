@@ -17,12 +17,12 @@
 package builder
 
 import (
-	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
@@ -43,7 +43,7 @@ func TestBuiltBlock_AvailableRlpSpace_BugReproduction(t *testing.T) {
 	}
 
 	config := &chain.Config{
-		OsakaTime: big.NewInt(1764800000),
+		OsakaTime: common.NewUint64(1764800000),
 	}
 
 	// See EIP-7934: EIP-7934: RLP Execution Block Size Limit
