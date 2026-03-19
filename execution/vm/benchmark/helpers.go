@@ -12,10 +12,12 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes/mdgas"
 	"github.com/erigontech/erigon/execution/vm/runtime"
 )
 
@@ -102,9 +104,9 @@ func setStorage(statedb *state.IntraBlockState, addr accounts.Address, slots map
 }
 
 // prepareAndCall sets up EVM access lists and calls the contract.
-func prepareAndCall(cfg *runtime.Config, addr accounts.Address, input []byte) ([]byte, uint64, error) {
+func prepareAndCall(cfg *runtime.Config, addr accounts.Address, input []byte) ([]byte, mdgas.MdGas, error) {
 	vmenv := runtime.NewEnv(cfg)
 	rules := vmenv.ChainRules()
 	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, addr, vm.ActivePrecompiles(rules), nil, nil)
-	return vmenv.Call(cfg.Origin, addr, input, cfg.GasLimit, cfg.Value, false)
+	return vmenv.Call(cfg.Origin, addr, input, protocol.SplitIntoMdGas(cfg.GasLimit, mdgas.MdGas{}, rules), cfg.Value, false)
 }
