@@ -72,6 +72,10 @@ jobs:
     uses: ./.github/workflows/reproducible-build.yml
     secrets: inherit
 
+  qa-rpc:
+    uses: ./.github/workflows/qa-rpc-integration-tests.yml
+    secrets: inherit
+
   qa-rpc-gnosis:
     uses: ./.github/workflows/qa-rpc-integration-tests-gnosis.yml
     secrets: inherit
@@ -93,6 +97,7 @@ jobs:
       - kurtosis
       - manifest
       - repro
+      - qa-rpc
       - qa-rpc-gnosis
       - qa-rpc-remote
     runs-on: ubuntu-latest
