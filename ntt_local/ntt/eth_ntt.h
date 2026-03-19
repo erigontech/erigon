@@ -91,6 +91,13 @@ int32_t eth_ntt_shake(
     const uint8_t *input, size_t input_len,
     uint8_t **output_out, size_t *output_len_out);
 
+/* SHAKE256 hash-to-point with rejection sampling mod Q=12289.
+ * Input: output_len(32 BE) | data(var)
+ * Returns output_len bytes of rejection-sampled uint16 BE coefficients mod 12289. */
+int32_t eth_ntt_shake256_htp(
+    const uint8_t *input, size_t input_len,
+    uint8_t **output_out, size_t *output_len_out);
+
 /* Falcon-512 verify: SHAKE256 HTP + NTT + VECMUL + INTT + norm check.
  * Input: s2(1024, 512×uint16 BE) | ntth(1024, 512×uint16 BE) | salt_msg(var)
  * Output: 32 bytes (0x00..01 valid, 0x00..00 invalid) */
