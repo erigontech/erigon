@@ -29,17 +29,27 @@ import (
 )
 
 // BlockRoot computes the block root for the state.
+// If LatestBlockHeader.Root is already set (e.g. filled by transitionSlot), use it directly.
+// Otherwise (Root == 0x0, i.e. the header was just written by processBlockHeader),
+// compute the state root via HashSSZ().
+// This distinction matters in GLOAS (EIP-7732): after ProcessExecutionPayloadEnvelope
+// the state has changed but LatestBlockHeader.Root still holds the pre-envelope state root,
+// which is the correct value for computing the block root.
 func (b *BeaconState) BlockRoot() ([32]byte, error) {
-	stateRoot, err := b.HashSSZ()
-	if err != nil {
-		return [32]byte{}, err
+	root := b.latestBlockHeader.Root
+	if root == [32]byte{} {
+		var err error
+		root, err = b.HashSSZ()
+		if err != nil {
+			return [32]byte{}, err
+		}
 	}
 	return (&cltypes.BeaconBlockHeader{
 		Slot:          b.latestBlockHeader.Slot,
 		ProposerIndex: b.latestBlockHeader.ProposerIndex,
 		BodyRoot:      b.latestBlockHeader.BodyRoot,
 		ParentRoot:    b.latestBlockHeader.ParentRoot,
-		Root:          stateRoot,
+		Root:          root,
 	}).HashSSZ()
 }
 
