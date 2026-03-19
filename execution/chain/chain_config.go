@@ -122,6 +122,9 @@ type Config struct {
 	// Disable EIP-7708 ETH transfer logs (for devnets where the reference client doesn't support it)
 	DisableEIP7708 bool `json:"disableEIP7708,omitempty"`
 
+	// Disable EIP-7778 block gas accounting without refunds (for devnets where the reference client doesn't support it)
+	DisableEIP7778 bool `json:"disableEIP7778,omitempty"`
+
 	// Account Abstraction
 	AllowAA bool
 }
@@ -789,6 +792,7 @@ type Rules struct {
 	IsCancun, IsNapoli, IsAhmedabad, IsBhilai         bool
 	IsPrague, IsOsaka, IsAmsterdam                    bool
 	IsEIP7708                                         bool
+	IsEIP7778                                         bool
 	IsAura                                            bool
 }
 
