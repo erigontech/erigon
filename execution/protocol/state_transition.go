@@ -576,7 +576,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		if rules.IsPrague {
 			gasUsed = max(intrinsicGasResult.FloorGasCost, gasUsed)
 		}
-		if rules.IsAmsterdam {
+		if rules.IsEIP7778 {
 			// EIP-7778: Block Gas Accounting without Refunds
 			st.blockGasUsed = max(intrinsicGasResult.FloorGasCost, st.blockGasUsed)
 		} else {
