@@ -345,23 +345,26 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 								lastExecutedLog = time.Now()
 							}
 
-							// Swap the updates buffer so ComputeCommitment processes
-							// the accumulated TouchKey updates from this block.
-							pe.doms.GetCommitmentContext().SwapUpdates()
-
-							// Submit BAL validation to the post validator — runs in
-							// parallel alongside receipt validation and commitment.
-							if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) || pe.cfg.experimentalBAL {
-								if err := pe.getPostValidator().ProcessBAL(rwTx, lastHeader, applyResult.TxIO, pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime), pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir); err != nil {
-									return err
-								}
+							// Warmup is enabled via EnableTrieWarmup at executor init
+							rh, err := pe.doms.ComputeCommitment(ctx, applyRoTx, true, applyResult.BlockNum, applyResult.lastTxNum, pe.logPrefix, onProgress)
+							pe.doms.SetTrace(false, false)
+							if err != nil {
+								return err
 							}
+							resetCommitmentGauges(ctx)
 
-							// Wait for all post-execution validation (receipts, BAL)
-							// to complete before submitting commitment work.
+							// on chain tip we run receipt root verification in parallel alongside commitment computation
+							// make sure to wait for it to finish and check for an error
 							err = pe.getPostValidator().Wait()
 							if err != nil {
 								return err
+							}
+
+							if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) || pe.cfg.experimentalBAL {
+								err = ProcessBAL(rwTx, lastHeader, applyResult.TxIO, pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime), pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir)
+								if err != nil {
+									return err
+								}
 							}
 
 							if shouldGenerateChangesets {
@@ -369,13 +372,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							}
 							pe.domains().SetChangesetAccumulator(nil)
 
-							// Compute commitment synchronously — async commitment requires
-							// separate in-memory state snapshots to avoid racing with ApplyStateWrites.
-							rh, err := pe.doms.ComputeCommitment(ctx, applyRoTx, true, applyResult.BlockNum, applyResult.lastTxNum, pe.logPrefix, onProgress)
-							pe.doms.SetTrace(false, false)
-							if err != nil {
-								return err
-							}
 							if !bytes.Equal(rh, applyResult.StateRoot.Bytes()) {
 								pe.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x",
 									pe.logPrefix, applyResult.BlockNum, rh, applyResult.StateRoot.Bytes(), applyResult.BlockHash))
@@ -527,22 +523,6 @@ func (pe *parallelExecutor) LogCommitments(commitStart time.Time, committedBlock
 }
 
 // collectCommitmentResult drains the commitment calculator, verifies the root
-// hash, and updates progress counters. Called from the apply loop before
-// submitting new commitment work and before flush/exit.
-func collectCommitmentResult(ctx context.Context, cc *commitmentCalculator, pe *parallelExecutor, rwTx kv.TemporalRwTx, execStage *StageState, u Unwinder) error {
-	r := cc.Drain(ctx)
-	if r == nil {
-		return nil // context cancelled
-	}
-	if r.err != nil {
-		pe.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x", pe.logPrefix, r.blockNum, r.rootHash))
-		return handleIncorrectRootHashError(r.blockNum, common.Hash{}, common.Hash{}, rwTx, pe.cfg, execStage, pe.logger, u)
-	}
-	pe.txExecutor.lastCommittedBlockNum.Store(r.blockNum)
-	pe.txExecutor.lastCommittedTxNum.Store(r.txNum)
-	return nil
-}
-
 func (pe *parallelExecutor) LogComplete(stepsInDb float64) {
 	pe.progress.LogComplete(pe.rs.StateV3, pe, stepsInDb)
 	if domainMetrics := pe.domains().LogMetrics(); len(domainMetrics) > 0 {
