@@ -1229,14 +1229,9 @@ func (tx *MdbxTx) DBSize() (uint64, error) {
 
 func (tx *MdbxTx) RwCursor(bucket string) (kv.RwCursor, error) {
 	b := tx.db.buckets[bucket]
-	if b.AutoDupSortKeysConversion {
-		return tx.stdCursor(bucket)
-	}
-
 	if b.Flags&kv.DupSort != 0 {
 		return tx.RwCursorDupSort(bucket)
 	}
-
 	return tx.stdCursor(bucket)
 }
 

@@ -157,6 +157,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		return err
 	}
 	defer doms.Close()
+	doms.SetInMemHistoryReads(false)
 
 	var finishStageBeforeSync uint64
 	if hook != nil {

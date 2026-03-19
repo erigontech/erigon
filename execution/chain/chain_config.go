@@ -182,15 +182,15 @@ var (
 type BorConfig interface {
 	fmt.Stringer
 	IsAgra(num uint64) bool
-	GetAgraBlock() *big.Int
+	GetAgraBlock() *uint64
 	IsNapoli(num uint64) bool
-	GetNapoliBlock() *big.Int
+	GetNapoliBlock() *uint64
 	IsAhmedabad(number uint64) bool
-	GetAhmedabadBlock() *big.Int
+	GetAhmedabadBlock() *uint64
 	IsBhilai(num uint64) bool
-	GetBhilaiBlock() *big.Int
+	GetBhilaiBlock() *uint64
 	IsRio(num uint64) bool
-	GetRioBlock() *big.Int
+	GetRioBlock() *uint64
 	StateReceiverContractAddress() accounts.Address
 	CalculateSprintNumber(number uint64) uint64
 	CalculateSprintLength(number uint64) uint64
@@ -206,13 +206,13 @@ func (c *Config) String() string {
 	engine := c.getEngine()
 
 	if c.Bor != nil {
-		return fmt.Sprintf("{ChainID: %v, Agra: %v, Napoli: %v, Ahmedabad: %v, Bhilai: %v, Rio: %v, Engine: %v}",
+		return fmt.Sprintf("{ChainID: %v, Agra: %s, Napoli: %s, Ahmedabad: %s, Bhilai: %s, Rio: %s, Engine: %v}",
 			c.ChainID,
-			c.Bor.GetAgraBlock(),
-			c.Bor.GetNapoliBlock(),
-			c.Bor.GetAhmedabadBlock(),
-			c.Bor.GetBhilaiBlock(),
-			c.Bor.GetRioBlock(),
+			uint64PtrStr(c.Bor.GetAgraBlock()),
+			uint64PtrStr(c.Bor.GetNapoliBlock()),
+			uint64PtrStr(c.Bor.GetAhmedabadBlock()),
+			uint64PtrStr(c.Bor.GetBhilaiBlock()),
+			uint64PtrStr(c.Bor.GetRioBlock()),
 			engine,
 		)
 	}

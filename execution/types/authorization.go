@@ -135,13 +135,13 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 		}
 
 		// nonce
-		if auth.Nonce, err = s.Uint(); err != nil {
+		if auth.Nonce, err = s.Uint64(); err != nil {
 			return err
 		}
 
 		// yParity
 		var yParity uint64
-		if yParity, err = s.Uint(); err != nil {
+		if yParity, err = s.Uint64(); err != nil {
 			return err
 		}
 		if yParity >= 1<<8 {
