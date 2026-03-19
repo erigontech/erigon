@@ -2,15 +2,7 @@ name: QA - RPC Integration Tests
 
 on:
   workflow_dispatch:     # Run manually
-  pull_request:
-    branches:
-      - main
-      - 'release/3.*'
-    types:
-      - opened
-      - reopened
-      - synchronize
-      - ready_for_review
+  workflow_call:
 
 
 jobs:
