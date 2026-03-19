@@ -228,10 +228,26 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 						return err
 					}
 				} else {
+					// Pre-check: skip if domain already has this value.
+					// This avoids calling DomainPut (and its TouchKey) for
+					// unchanged slots (e.g., reentrancy guards SSTOREing the
+					// same value). LightCollector emits all dirty storage
+					// because it can't distinguish the "revert" case (TX N
+					// wrote X, TX M writes back to block-origin Y) from the
+					// "unchanged" case — blockOriginStorage is stale. We
+					// check the actual domain value here instead.
+					// Pass prevVal to DomainPut to avoid a redundant GetLatest.
+					prevVal, _, err := domains.GetLatest(kv.StorageDomain, roTx, composite)
+					if err != nil {
+						return err
+					}
+					if bytes.Equal(prevVal, v) {
+						continue
+					}
 					if dbg.TraceApply && (rs.trace || dbg.TraceAccount(addr.Handle())) {
 						fmt.Printf("%d apply:put storage: %x %x %x\n", blockNum, addr, item.key, &item.value)
 					}
-					if err := domains.DomainPut(kv.StorageDomain, roTx, composite, v, txNum, nil); err != nil {
+					if err := domains.DomainPut(kv.StorageDomain, roTx, composite, v, txNum, prevVal); err != nil {
 						return err
 					}
 				}
@@ -612,10 +628,9 @@ func (c *LightCollector) DeleteAccount(address accounts.Address, _ *accounts.Acc
 	return nil
 }
 
-func (c *LightCollector) WriteAccountStorage(address accounts.Address, _ uint64, key accounts.StorageKey, original, value uint256.Int) error {
-	if original == value {
-		return nil
-	}
+func (c *LightCollector) WriteAccountStorage(address accounts.Address, _ uint64, key accounts.StorageKey, _, value uint256.Int) error {
+	// Always emit — the blockOriginStorage skip is wrong for the revert case.
+	// applyVersionedWrites pre-checks domain state to avoid spurious DomainPut/TouchKey.
 	c.writes = append(c.writes, &VersionedWrite{Address: address, Path: StoragePath, Key: key, Val: value})
 	return nil
 }

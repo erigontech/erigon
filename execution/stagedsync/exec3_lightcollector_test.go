@@ -310,16 +310,13 @@ func TestLightCollectorStorageReentrancyGuard(t *testing.T) {
 	v, _, err = domains.GetLatest(kv.StorageDomain, tx, composite)
 	require.NoError(t, err)
 
-	// KNOWN LIMITATION: With the storage skip (original == value) active,
-	// TX B's write is dropped because original (blockOriginStorage) == value.
-	// The domain keeps 2 from TX A. The correct value would be 1 (TX B's
-	// explicit revert), but fixing this requires removing the storage skip
-	// which causes cascading TouchKey issues in the parallel executor.
-	// This results in a 17,100 gas mismatch at block 24,363,954.
-	// TODO: fix by using domain-current value instead of blockOriginStorage
-	// for the skip check, or by moving TouchKey after DomainPut's skip.
-	require.Equal(t, uint256.NewInt(2).Bytes(), v,
-		"KNOWN BUG: domain keeps TX A's value because TX B's revert was skipped")
+	// With the pre-check in applyVersionedWrites (reading domain value before
+	// calling DomainPut), the revert case is handled correctly: DomainPut is
+	// only called when the domain value differs from the write value.
+	// TX B's write (value=1) differs from domain (value=2 from TX A), so
+	// the write proceeds and the domain gets 1 (TX B's explicit revert).
+	require.Equal(t, one.Bytes(), v,
+		"after TX B revert: slot should be 1 (TX B explicitly SSTORed the block-origin value)")
 }
 
 // TestLightCollectorStorageUnchangedSlot verifies that when a TX touches a
