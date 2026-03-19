@@ -175,11 +175,15 @@ func benchInitBtreeIndex(b *testing.B, params bTreeParameters, compression seg.F
 
 func Benchmark_BTree_SeekVsGetCompressedV(b *testing.B) {
 	compress := seg.CompressVals
+	keyCount := 1_000_000
+	if testing.Short() {
+		keyCount = 10_000
+	}
 	kv, bt, keys, _ := benchInitBtreeIndex(b, bTreeParameters{
 		M:         1024,
 		KeySize:   64,
 		ValueSize: 1024,
-		KeyCount:  1_000_000, // .kv file size about 550 MB
+		KeyCount:  keyCount,
 	}, compress)
 	rnd := newRnd(uint64(time.Now().UnixNano()))
 	getter := seg.NewReader(kv.MakeGetter(), compress)
@@ -217,11 +221,15 @@ func Benchmark_BTree_SeekVsGetCompressedV(b *testing.B) {
 
 func Benchmark_BTree_SeekVsGetCompressedK(b *testing.B) {
 	compress := seg.CompressKeys
+	keyCount := 1_000_000
+	if testing.Short() {
+		keyCount = 10_000
+	}
 	kv, bt, keys, _ := benchInitBtreeIndex(b, bTreeParameters{
 		M:         1024,
 		KeySize:   64,
 		ValueSize: 1024,
-		KeyCount:  1_000_000, // .kv file size about 550 MB
+		KeyCount:  keyCount,
 	}, compress)
 	rnd := newRnd(uint64(time.Now().UnixNano()))
 	getter := seg.NewReader(kv.MakeGetter(), compress)
@@ -259,11 +267,15 @@ func Benchmark_BTree_SeekVsGetCompressedK(b *testing.B) {
 
 func Benchmark_BTree_SeekVsGetCompressedKV(b *testing.B) {
 	compress := seg.CompressKeys | seg.CompressVals
+	keyCount := 1_000_000
+	if testing.Short() {
+		keyCount = 10_000
+	}
 	kv, bt, keys, _ := benchInitBtreeIndex(b, bTreeParameters{
 		M:         1024,
 		KeySize:   64,
 		ValueSize: 1024,
-		KeyCount:  1_000_000, // .kv file size about 550 MB
+		KeyCount:  keyCount,
 	}, compress)
 	rnd := newRnd(uint64(time.Now().UnixNano()))
 	getter := seg.NewReader(kv.MakeGetter(), compress)
@@ -301,11 +313,15 @@ func Benchmark_BTree_SeekVsGetCompressedKV(b *testing.B) {
 
 func Benchmark_BTree_SeekVsGetUncompressed(b *testing.B) {
 	compress := seg.CompressNone
+	keyCount := 1_000_000
+	if testing.Short() {
+		keyCount = 10_000
+	}
 	kv, bt, keys, _ := benchInitBtreeIndex(b, bTreeParameters{
 		M:         1024,
 		KeySize:   64,
 		ValueSize: 1024,
-		KeyCount:  1_000_000, // .kv file size about 550 MB
+		KeyCount:  keyCount,
 	}, compress)
 	rnd := newRnd(uint64(time.Now().UnixNano()))
 	getter := seg.NewReader(kv.MakeGetter(), compress)
@@ -343,11 +359,15 @@ func Benchmark_BTree_SeekVsGetUncompressed(b *testing.B) {
 
 func Benchmark_BTree_SeekThenNext(b *testing.B) {
 	compress := seg.CompressNone
+	keyCount := 1_000_000
+	if testing.Short() {
+		keyCount = 10_000
+	}
 	kv, bt, keys, _ := benchInitBtreeIndex(b, bTreeParameters{
 		M:         1024,
 		KeySize:   64,
 		ValueSize: 1024,
-		KeyCount:  1_000_000, // .kv file size about 550 MB
+		KeyCount:  keyCount,
 	}, compress)
 	rnd := newRnd(uint64(time.Now().UnixNano()))
 	getter := seg.NewReader(kv.MakeGetter(), compress)
@@ -489,6 +509,9 @@ func BenchmarkAggregator_BeginFilesRo_Throughput(b *testing.B) {
 }
 
 func BenchmarkDb_BeginFiles_Throughput(b *testing.B) {
+	if testing.Short() {
+		b.Skip("throughput experiment, not a smoke test")
+	}
 	// RESULT: deteriorates after 2^21 goroutines.
 
 	/**
