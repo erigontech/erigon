@@ -1963,6 +1963,7 @@ func (p *TxPool) Run(ctx context.Context) error {
 	}()
 	p.p2pFetcher.ConnectCore()
 	p.p2pFetcher.ConnectSentries()
+	defer p.p2pFetcher.Wait()
 
 	syncToNewPeersEvery := time.NewTicker(p.cfg.SyncToNewPeersEvery)
 	defer syncToNewPeersEvery.Stop()
