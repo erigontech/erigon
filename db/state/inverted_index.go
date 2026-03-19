@@ -997,11 +997,13 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 	}
 	coll.writer = seg.NewWriter(comp, ii.Compression)
 
+	baseTxNum := uint64(step) * ii.stepSize
 	var (
 		prevEf      []byte
 		prevKey     []byte
 		initialized bool
 		bitmap      = bitmapdb.NewBitmap64()
+		ef          *multiencseq.SequenceBuilder
 	)
 	defer bitmapdb.ReturnToPool64(bitmap)
 
@@ -1018,12 +1020,15 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 			return nil
 		}
 
-		baseTxNum := uint64(step) * ii.stepSize
 		if bitmap.Minimum() < txFrom || bitmap.Maximum() >= txTo {
 			return fmt.Errorf("[inverted_index] collate %s: txNums out of range [%d, %d) for step %d: min=%d, max=%d, key=%x",
 				ii.FilenameBase, txFrom, txTo, step, bitmap.Minimum(), bitmap.Maximum(), prevKey)
 		}
-		ef := multiencseq.NewBuilder(baseTxNum, bitmap.GetCardinality(), bitmap.Maximum())
+		if ef == nil {
+			ef = multiencseq.NewBuilder(baseTxNum, bitmap.GetCardinality(), bitmap.Maximum())
+		} else {
+			ef.Reset(baseTxNum, bitmap.GetCardinality(), bitmap.Maximum())
+		}
 		it := bitmap.Iterator()
 		for it.HasNext() {
 			ef.AddOffset(it.Next())

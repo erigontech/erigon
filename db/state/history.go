@@ -613,11 +613,12 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 	}
 
 	var (
-		keyBuf  = make([]byte, 0, 256)
-		numBuf  = make([]byte, 8)
-		bitmap  = bitmapdb.NewBitmap64()
-		prevEf  []byte
-		prevKey []byte
+		keyBuf     = make([]byte, 0, 256)
+		numBuf     = make([]byte, 8)
+		bitmap     = bitmapdb.NewBitmap64()
+		prevEf     []byte
+		prevKey    []byte
+		seqBuilder multiencseq.SequenceBuilder
 
 		initialized bool
 	)
@@ -641,7 +642,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 			return nil
 		}
 
-		seqBuilder := multiencseq.NewBuilder(baseTxNum, bitmap.GetCardinality(), bitmap.Maximum())
+		seqBuilder.Reset(baseTxNum, bitmap.GetCardinality(), bitmap.Maximum())
 		it := bitmap.Iterator()
 
 		for it.HasNext() {
