@@ -260,7 +260,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	} else {
 		rs.salt = *args.Salt
 	}
-	rs.bucketCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.LargeSortableBuffers, logger)
+	rs.bucketCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.SmallSortableBuffers, logger)
 	rs.bucketCollector.SortAndFlushInBackground(rs.workers > 1)
 	rs.bucketCollector.LogLvl(log.LvlDebug)
 	var err error
@@ -1409,10 +1409,7 @@ func (rs *RecSplit) buildWithWorkers(ctx context.Context) error {
 	if consumerErr != nil {
 		return consumerErr
 	}
-	if producerErr != nil && !errors.Is(producerErr, context.Canceled) {
-		return producerErr
-	}
-	return nil
+	return producerErr
 }
 
 // Erigon doesn't create tons of bufio readers/writers, but it has tons of

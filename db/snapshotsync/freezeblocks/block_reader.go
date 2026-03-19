@@ -1332,6 +1332,14 @@ func (r *BlockReader) IntegrityTxnID(failFast bool) error {
 		}
 		firstBlockNum := snb.Src().Index().BaseDataID()
 		sn, _ := view.TxsSegment(firstBlockNum)
+		if sn == nil || sn.Src() == nil {
+			err := fmt.Errorf("[integrity] BlocksTxnID: missing txs segment for bn=%d", firstBlockNum)
+			if failFast {
+				return err
+			}
+			log.Error(err.Error())
+			continue
+		}
 		b, _, err := BodyForTxnFromSnapshot(firstBlockNum, snb, nil)
 		if err != nil {
 			return err

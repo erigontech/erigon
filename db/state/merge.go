@@ -434,7 +434,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		cnt += item.decompressor.Count()
 	}
 
-	p := ps.AddNew("merge "+path.Base(kvFilePath), uint64(cnt)*2) // *2 because after adding words - will happen compression (which also slow)
+	p := ps.AddNew("merge "+path.Base(kvFilePath), uint64(cnt))
 	defer ps.Delete(p)
 
 	var cp CursorHeap
@@ -651,7 +651,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 	var keyBuf, valBuf []byte
 	var lastKey, lastVal []byte
 	var seqReader multiencseq.SequenceReader
-	builder := &multiencseq.SequenceBuilder{}
+	var builder multiencseq.SequenceBuilder
 	// sameKeyItems collects all heap items sharing the current key; reused across iterations.
 	var sameKeyItems []*CursorItem
 	// mergeBaseNums and mergeSeqs hold the per-item inputs for MergeSorted in ascending txNum order.

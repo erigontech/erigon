@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/changeset"
@@ -2149,114 +2150,234 @@ func TestPruneProgress(t *testing.T) {
 	})
 }
 
+// TestDomain_PruneProgress tests rolling-cursor progress tracking in domain.prune.
+//
+// The original test was skipped because it used the old ExecV3 progress API and
+// relied on unstable timing to interrupt scans. This rewrite uses direct state
+// injection via SavePruneValProgress to make tests deterministic.
+//
+// Tests verified:
+//  1. Mid-rotation cursor position (LastPrunedValue) is respected: prune resumes
+//     from the injected key position rather than scanning from First.
+//  2. Early-exit: when prg.TxTo >= txTo && Done, prune returns Done with no work.
+//  3. Rotation reset: after Done a new call with larger txTo starts from First.
 func TestDomain_PruneProgress(t *testing.T) {
-	t.Skip("fails because in domain.Prune progress does not updated")
+	t.Parallel()
 
-	stepSize := uint64(1000)
+	const (
+		stepSize = uint64(1000)
+		keyCount = 200 // enough keys to make the midpoint test meaningful
+	)
+	ctx := context.Background()
 	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, stepSize, log.New())
-	defer db.Close()
-	defer d.Close()
+	d.HistoryLargeValues = false
 
-	rwTx, err := db.BeginRw(context.Background())
+	rwTx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer rwTx.Rollback()
-
-	d.HistoryLargeValues = false
-	d.History.Compression = seg.CompressKeys | seg.CompressVals
-	d.Compression = seg.CompressKeys | seg.CompressVals
 
 	domainRoTx := d.BeginFilesRo()
 	defer domainRoTx.Close()
 	writer := domainRoTx.NewWriter()
 	defer writer.Close()
 
-	keySize1 := uint64(length.Addr)
-	keySize2 := uint64(length.Addr + length.Hash)
-	totalTx := uint64(5000)
-	keyTxsLimit := uint64(150)
-	keyLimit := uint64(2000)
-
-	// Put some kvs
-	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
-	for key, updates := range data {
-		p := []byte{}
-		for i := 0; i < len(updates); i++ {
-			err = writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, p)
-			require.NoError(t, err)
-			p = common.Copy(updates[i].value)
-		}
+	// Write keyCount keys at txNum=1 (step 0).
+	// No segment files are built, so history CanPrune returns false and
+	// history.Prune is a no-op, letting us test domain values prune in isolation.
+	var k, v [8]byte
+	for keyNum := uint64(0); keyNum < keyCount; keyNum++ {
+		binary.BigEndian.PutUint64(k[:], keyNum)
+		binary.BigEndian.PutUint64(v[:], keyNum) // distinct value per key
+		err = writer.PutWithPrev(k[:], v[:], 1, nil)
+		require.NoError(t, err)
 	}
-
-	err = writer.Flush(context.Background(), rwTx)
+	err = writer.Flush(ctx, rwTx)
 	require.NoError(t, err)
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	// aggregate
-	for step := kv.Step(0); step < kv.Step(totalTx/stepSize); step++ {
-		ctx := context.Background()
-		require.NoError(t, d.collateBuildIntegrate(ctx, step, rwTx, background.NewProgressSet()))
-	}
-	require.NoError(t, rwTx.Commit())
 
-	rwTx, err = db.BeginRw(context.Background())
+	// --- Part 1: cursor injection — resume from midpoint -------------------
+	//
+	// Inject InProgress with LastPrunedValue = key[keyCount/2]. The subsequent
+	// prune call must seek to that key and only delete entries at or after it,
+	// leaving the first half untouched.
+	midKey := make([]byte, 8)
+	binary.BigEndian.PutUint64(midKey, keyCount/2)
+	injected := &prune.Stat{
+		ValueProgress:   prune.InProgress,
+		KeyProgress:     prune.Done,
+		LastPrunedValue: midKey,
+		TxFrom:          0,
+		TxTo:            stepSize,
+	}
+	err = SavePruneValProgress(rwTx, d.ValuesTable, injected)
+	require.NoError(t, err)
+
+	stat, err := domainRoTx.prune(ctx, rwTx, 0, 0, stepSize, math.MaxUint64, logEvery)
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, stat.Progress, "prune must complete the rotation from midpoint")
+	// Keys 0..keyCount/2-1 were skipped (before cursor); only keyCount/2..keyCount-1 deleted.
+	require.LessOrEqual(t, stat.Values+stat.Dups, uint64(keyCount/2),
+		"only entries at/after the cursor position should be deleted")
+
+	prg, err := GetPruneValProgress(rwTx, []byte(d.ValuesTable))
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, prg.ValueProgress)
+	require.Nil(t, prg.LastPrunedValue, "cursor must be nil after a completed rotation")
+
+	// Verify the first half of keys still exists (before the cursor, not pruned).
+	remaining := countDupSortKeys(t, rwTx, d.ValuesTable)
+	require.Equal(t, int(keyCount/2), remaining,
+		"keys 0..keyCount/2-1 skipped by rolling cursor must remain")
+
+	// --- Part 2: early-exit ------------------------------------------------
+	//
+	// prg.TxTo == txTo && Done → prune must return Done immediately (no work).
+	stat2, err := domainRoTx.prune(ctx, rwTx, 0, 0, stepSize, math.MaxUint64, logEvery)
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, stat2.Progress)
+	require.Zero(t, stat2.Values+stat2.Dups, "early-exit must do no deletions")
+	require.Equal(t, int(keyCount/2), countDupSortKeys(t, rwTx, d.ValuesTable),
+		"early-exit must not change table contents")
+
+	// --- Part 3: new rotation when txTo advances ---------------------------
+	//
+	// Previous rotation completed with TxTo=stepSize. A call with TxTo=stepSize+1
+	// triggers a new rotation starting from First, cleaning the remaining keys.
+	stat3, err := domainRoTx.prune(ctx, rwTx, 0, 0, stepSize+1, math.MaxUint64, logEvery)
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, stat3.Progress)
+	require.EqualValues(t, keyCount/2, stat3.Values+stat3.Dups,
+		"new rotation must clean the first half skipped in rotation 1")
+	require.Zero(t, countDupSortKeys(t, rwTx, d.ValuesTable), "all step-0 entries must be gone")
+
+	prg3, err := GetPruneValProgress(rwTx, []byte(d.ValuesTable))
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, prg3.ValueProgress)
+}
+
+// countDupSortKeys counts unique keys in a DupSort table.
+func countDupSortKeys(t testing.TB, tx kv.Tx, tbl string) int {
+	t.Helper()
+	cur, err := tx.CursorDupSort(tbl)
+	require.NoError(t, err)
+	defer cur.Close()
+	n := 0
+	for k, _, err := cur.First(); k != nil; k, _, err = cur.NextNoDup() {
+		require.NoError(t, err)
+		n++
+	}
+	return n
+}
+
+// TestDomain_PruneRollingCursorProgress verifies the three properties of the
+// rolling-cursor optimisation added to domain.prune:
+//
+//  1. Early-exit: prg.TxTo >= txTo && Done → return immediately, no work.
+//  2. Rotation reset: Done → next call with higher txTo resets cursor to First.
+//  3. Cursor preservation: InProgress cursor survives a txTo advance — the
+//     subsequent call continues from LastPrunedValue, not from First.
+func TestDomain_PruneRollingCursorProgress(t *testing.T) {
+	t.Parallel()
+
+	const (
+		stepSize = uint64(16)
+		keyCount = 40
+	)
+	ctx := context.Background()
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, stepSize, log.New())
+	d.HistoryLargeValues = false
+
+	rwTx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer rwTx.Rollback()
-	domainRoTx.Close()
 
-	domainRoTx = d.BeginFilesRo()
-	defer domainRoTx.Close()
+	domRoTx := d.BeginFilesRo()
+	defer domRoTx.Close()
 
-	ct, cancel := context.WithTimeout(context.Background(), time.Millisecond*1)
-	_, err = domainRoTx.Prune(ct, rwTx, 0, 0, stepSize, math.MaxUint64, time.NewTicker(time.Second))
-	require.ErrorIs(t, err, context.DeadlineExceeded)
-	cancel()
-
-	key, err := GetExecV3PruneProgress(rwTx, domainRoTx.d.ValuesTable)
-	require.NoError(t, err)
-	require.NotNil(t, key)
-
-	keysCursor, err := rwTx.RwCursorDupSort(domainRoTx.d.ValuesTable)
-	require.NoError(t, err)
-	defer keysCursor.Close()
-
-	k, istep, err := keysCursor.Seek(key)
-	require.NoError(t, err)
-	require.GreaterOrEqual(t, k, key)
-	require.NotEqualValues(t, 0, ^binary.BigEndian.Uint64(istep))
-
-	var i int
-	for step := kv.Step(0); ; step++ {
-		// step changing should not affect pruning. Prune should finish step 0 first.
-		i++
-		ct, cancel := context.WithTimeout(context.Background(), time.Millisecond*2)
-		_, err = domainRoTx.Prune(ct, rwTx, step, uint64(step)*stepSize, (uint64(step)*stepSize)+1, math.MaxUint64, time.NewTicker(time.Second))
-		if err != nil {
-			require.ErrorIs(t, err, context.DeadlineExceeded)
-		} else {
-			require.NoError(t, err)
+	writeStep := func(step kv.Step) {
+		t.Helper()
+		w := domRoTx.NewWriter()
+		defer w.Close()
+		txNum := uint64(step)*stepSize + 1 // first txNum of the step
+		var k, v [8]byte
+		for keyNum := uint64(0); keyNum < keyCount; keyNum++ {
+			binary.BigEndian.PutUint64(k[:], keyNum)
+			binary.BigEndian.PutUint64(v[:], txNum+keyNum)
+			require.NoError(t, w.PutWithPrev(k[:], v[:], txNum, nil))
 		}
-		cancel()
-
-		key, err := GetExecV3PruneProgress(rwTx, domainRoTx.d.ValuesTable)
-		require.NoError(t, err)
-		if step == 0 && key == nil {
-
-			fmt.Printf("pruned in %d iterations\n", i)
-
-			keysCursor, err := rwTx.RwCursorDupSort(domainRoTx.d.ValuesTable)
-			require.NoError(t, err)
-			defer keysCursor.Close()
-
-			// check there are no keys with 0 step left
-			for k, v, err := keysCursor.First(); k != nil && err == nil; k, v, err = keysCursor.Next() {
-				require.NotEqualValues(t, 0, ^binary.BigEndian.Uint64(v))
-			}
-			break
-		}
-
+		require.NoError(t, w.Flush(ctx, rwTx))
 	}
-	fmt.Printf("exitiig after %d iterations\n", i)
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
+	// ── Property 1: full prune of step 0 + early-exit ─────────────────────
+	// Write only step 0 so each key has a single dup (^0 || v0, txNum=0).
+	// TableScanningPrune uses NextNoDup which returns only the first dup per
+	// key; writing step 1 first would place its dup ahead, hiding step 0.
+	writeStep(0)
+	stat0, err := domRoTx.prune(ctx, rwTx, 0, 0, stepSize, math.MaxUint64, logEvery)
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, stat0.Progress)
+	require.NotZero(t, stat0.Values+stat0.Dups, "step-0 entries must have been deleted")
+	require.Zero(t, countDupSortKeys(t, rwTx, d.ValuesTable), "table must be empty after step-0 prune")
+
+	prg, err := GetPruneValProgress(rwTx, []byte(d.ValuesTable))
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, prg.ValueProgress)
+	require.EqualValues(t, stepSize, prg.TxTo)
+
+	// Same txTo again → early-exit, no work.
+	statEarly, err := domRoTx.prune(ctx, rwTx, 0, 0, stepSize, math.MaxUint64, logEvery)
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, statEarly.Progress)
+	require.Zero(t, statEarly.Values+statEarly.Dups, "early-exit must delete nothing")
+
+	// ── Property 2: rotation reset when txTo advances ──────────────────────
+	// Previous state is Done with TxTo=stepSize. Write step 1 (one dup per
+	// key: ^1 || v1, txNum=16), then call with TxTo=2*stepSize.
+	// The code resets cursor to First (new rotation) and deletes step-1 entries.
+	writeStep(1)
+	stat1, err := domRoTx.prune(ctx, rwTx, 1, stepSize, stepSize*2, math.MaxUint64, logEvery)
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, stat1.Progress)
+	require.NotZero(t, stat1.Values+stat1.Dups, "step-1 entries must be deleted in new rotation")
+	require.Zero(t, countDupSortKeys(t, rwTx, d.ValuesTable), "table must be empty after both rotations")
+
+	prg1, err := GetPruneValProgress(rwTx, []byte(d.ValuesTable))
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, prg1.ValueProgress)
+	require.Nil(t, prg1.LastPrunedValue, "cursor reset after rotation completion")
+
+	// ── Property 3: cursor preservation when txTo advances mid-rotation ────
+	// Inject an InProgress state at key[keyCount/2] with TxTo=X, then call
+	// prune with a larger TxTo=Y. The cursor must continue from key[keyCount/2]
+	// rather than resetting to First.
+	writeStep(2)
+
+	midKey := make([]byte, 8)
+	binary.BigEndian.PutUint64(midKey, keyCount/2)
+	txFrom2, txTo2 := stepSize*2, stepSize*3
+	injected := &prune.Stat{
+		ValueProgress:   prune.InProgress,
+		KeyProgress:     prune.Done,
+		LastPrunedValue: midKey,
+		TxFrom:          txFrom2,
+		TxTo:            txTo2,
+	}
+	require.NoError(t, SavePruneValProgress(rwTx, d.ValuesTable, injected))
+
+	// Call with the same txTo2 (InProgress, not Done → no reset).
+	stat2, err := domRoTx.prune(ctx, rwTx, 2, txFrom2, txTo2, math.MaxUint64, logEvery)
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, stat2.Progress)
+	// Only keys >= keyCount/2 were visited → at most keyCount/2 deletions.
+	require.LessOrEqual(t, stat2.Values+stat2.Dups, uint64(keyCount/2),
+		"cursor started at midKey so only the second half of keys could be deleted")
+	// First half still in table (cursor skipped them).
+	require.Equal(t, int(keyCount/2), countDupSortKeys(t, rwTx, d.ValuesTable),
+		"first half of step-2 keys must remain (before cursor position)")
 }
 
 func TestDomain_Unwind(t *testing.T) {

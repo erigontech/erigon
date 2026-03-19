@@ -168,7 +168,7 @@ type IntraBlockState struct {
 	logSize  uint
 
 	// Per-transaction access list
-	accessList *accessList
+	accessList accessList
 
 	// Transient storage
 	transientStorage transientStorage
@@ -208,7 +208,7 @@ func New(stateReader StateReader) *IntraBlockState {
 		nilAccounts:       map[accounts.Address]struct{}{},
 		logs:              []types.Logs{},
 		journal:           newJournal(),
-		accessList:        newAccessList(),
+		accessList:        accessList{addresses: make(map[accounts.Address]int)},
 		transientStorage:  newTransientStorage(),
 		balanceInc:        map[accounts.Address]*BalanceIncrease{},
 		addressAccess:     nil,
@@ -2100,10 +2100,8 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 	}
 	if rules.IsBerlin {
 		// Clear out any leftover from previous executions
-		al := newAccessList()
-		sdb.accessList = al
-		//sdb.accessList.Reset()
-		//al := sdb.accessList
+		sdb.accessList.Reset()
+		al := &sdb.accessList
 
 		al.AddAddress(sender)
 		if !dst.IsNil() {

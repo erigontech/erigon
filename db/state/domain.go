@@ -1910,10 +1910,22 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	if err != nil {
 		return stat, err
 	}
-	if prg != nil && prg.TxFrom == txFrom && prg.TxTo == txTo && prg.ValueProgress == prune.Done {
+	if prg != nil && prg.TxTo >= txTo && prg.ValueProgress == prune.Done {
 		stat.Progress = prune.Done
 		return stat, nil
 	}
+	if prg == nil {
+		prg = &prune.Stat{}
+	}
+	// Rolling scan: preserve the B-tree key cursor across txTo advances.
+	// Only reset to First when the previous rotation completed.
+	if prg.ValueProgress == prune.Done {
+		prg.ValueProgress = prune.First
+		prg.LastPrunedValue = nil
+		prg.LastPrunedKey = nil
+	}
+	prg.TxFrom = txFrom
+	prg.TxTo = txTo
 
 	mxPruneInProgress.Inc()
 	defer mxPruneInProgress.Dec()
