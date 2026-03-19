@@ -404,7 +404,7 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	if tx.Nonce, err = s.Uint(); err != nil {
+	if tx.Nonce, err = s.Uint64(); err != nil {
 		return err
 	}
 
@@ -452,19 +452,19 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	if tx.ValidationGasLimit, err = s.Uint(); err != nil {
+	if tx.ValidationGasLimit, err = s.Uint64(); err != nil {
 		return err
 	}
 
-	if tx.PaymasterValidationGasLimit, err = s.Uint(); err != nil {
+	if tx.PaymasterValidationGasLimit, err = s.Uint64(); err != nil {
 		return err
 	}
 
-	if tx.PostOpGasLimit, err = s.Uint(); err != nil {
+	if tx.PostOpGasLimit, err = s.Uint64(); err != nil {
 		return err
 	}
 
-	if tx.GasLimit, err = s.Uint(); err != nil {
+	if tx.GasLimit, err = s.Uint64(); err != nil {
 		return err
 	}
 

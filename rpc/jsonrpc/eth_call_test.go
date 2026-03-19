@@ -27,6 +27,8 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/grpc"
+
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -73,6 +75,27 @@ func TestEstimateGas(t *testing.T) {
 	}, nil, nil, nil); err != nil {
 		t.Errorf("calling EstimateGas: %v", err)
 	}
+}
+
+type stubTxPoolClient struct{ txpoolproto.TxpoolClient }
+
+func (stubTxPoolClient) Nonce(context.Context, *txpoolproto.NonceRequest, ...grpc.CallOption) (*txpoolproto.NonceReply, error) {
+	return &txpoolproto.NonceReply{}, nil
+}
+
+func TestCreateAccessListContractCreationWithoutFromDoesNotPanic(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+
+	var (
+		res *accessListResult
+		err error
+	)
+	require.NotPanics(t, func() {
+		res, err = api.CreateAccessList(context.Background(), ethapi.CallArgs{}, nil, nil, nil)
+	})
+	require.NoError(t, err)
+	require.NotNil(t, res)
 }
 
 func TestEthCallNonCanonical(t *testing.T) {

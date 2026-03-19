@@ -464,18 +464,15 @@ func statefulGasCall(evm *EVM, callContext *CallContext, gas mdgas.MdGas, availa
 		if err != nil {
 			return mdgas.MdGas{}, err
 		}
+		// Empty() reads account state for gas calculation — record for BAL
+		// tracking unconditionally, since the read happens regardless of
+		// whether the CALL proceeds or transfers value.
+		evm.IntraBlockState().MarkAddressAccess(address, false)
 		if transfersValue && empty {
 			if rules.IsAmsterdam {
 				stateGas = 112 * evm.Context.CostPerStateByte
 			} else {
 				accountGas = params.CallNewAccountGas
-			}
-			// Record the address access for BAL tracking, but only when the CALL
-			// will actually proceed. In read-only (STATICCALL) context, CALL with
-			// value > 0 will be rejected by ErrWriteProtection before evm.Call()
-			// runs, so the target is never truly accessed.
-			if !evm.readOnly {
-				evm.IntraBlockState().MarkAddressAccess(address, false)
 			}
 		}
 	} else {
@@ -483,6 +480,8 @@ func statefulGasCall(evm *EVM, callContext *CallContext, gas mdgas.MdGas, availa
 		if err != nil {
 			return mdgas.MdGas{}, err
 		}
+		// Exist() reads account state for gas calculation — record for BAL.
+		evm.IntraBlockState().MarkAddressAccess(address, false)
 		if !exists {
 			// note this doesn't need updating for amsterdam since
 			// this branch is only for paths before spurious dragon
@@ -683,6 +682,8 @@ func gasSelfdestruct(evm *EVM, callContext *CallContext, availableGas mdgas.MdGa
 			if err != nil {
 				return mdgas.MdGas{}, err
 			}
+			// Empty() reads account state for gas calculation — record for BAL.
+			evm.IntraBlockState().MarkAddressAccess(address, false)
 			balance, err := evm.IntraBlockState().GetBalance(callContext.Address())
 			if err != nil {
 				return mdgas.MdGas{}, err
@@ -695,6 +696,8 @@ func gasSelfdestruct(evm *EVM, callContext *CallContext, availableGas mdgas.MdGa
 			if err != nil {
 				return mdgas.MdGas{}, err
 			}
+			// Exist() reads account state for gas calculation — record for BAL.
+			evm.IntraBlockState().MarkAddressAccess(address, false)
 			if !exist {
 				gas.Regular += params.CreateBySelfdestructGas
 			}
