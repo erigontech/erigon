@@ -509,8 +509,13 @@ func BenchmarkAggregator_BeginFilesRo_Throughput(b *testing.B) {
 }
 
 func BenchmarkDb_BeginFiles_Throughput(b *testing.B) {
+	// Skipped under -short rather than reduced: the work per iteration is a
+	// time.Sleep whose duration is the point of the benchmark. There is no
+	// meaningful smaller version — a shorter sleep measures something different.
+	// This benchmark is designed to be run manually with explicit -bench.parallel
+	// and -bench.loopv flags; it has no useful default invocation for CI.
 	if testing.Short() {
-		b.Skip("throughput experiment, not a smoke test")
+		b.Skip("manual throughput experiment; no meaningful short form")
 	}
 	// RESULT: deteriorates after 2^21 goroutines.
 
