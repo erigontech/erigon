@@ -1,11 +1,8 @@
 name: Hive EEST tests
 
 on:
-  push:
-    branches:
-        - 'release/**'
-        - main
   workflow_dispatch:
+  workflow_call:
 
 env:
   EEST_VERSION: 'v5.3.0'

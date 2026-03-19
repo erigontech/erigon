@@ -43,6 +43,7 @@ jobs:
     secrets: inherit
 
   hive:
+    if: github.event_name != 'push'
     uses: ./.github/workflows/test-hive.yml
     secrets: inherit
 
@@ -84,6 +85,15 @@ jobs:
     uses: ./.github/workflows/qa-rpc-integration-tests-remote.yml
     secrets: inherit
 
+  sonar:
+    uses: ./.github/workflows/sonar.yml
+    secrets: inherit
+
+  hive-eest:
+    if: github.event_name == 'merge_group'
+    uses: ./.github/workflows/test-hive-eest.yml
+    secrets: inherit
+
   ci-gate:
     if: always()
     needs:
@@ -100,6 +110,8 @@ jobs:
       - qa-rpc
       - qa-rpc-gnosis
       - qa-rpc-remote
+      - sonar
+      - hive-eest
     runs-on: ubuntu-latest
     steps:
       - name: Check all required jobs
