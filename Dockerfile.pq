@@ -39,17 +39,19 @@ RUN rustup target add aarch64-unknown-linux-gnu x86_64-unknown-linux-gnu
 WORKDIR /pq-precompiles
 COPY ntt_local/rust/ /pq-precompiles/
 
-# Build for the target architecture
+# Build for the target architecture. cdylib link may fail cross-compile but staticlib is still produced.
 RUN if [ "${TARGETARCH}" = "arm64" ]; then \
         export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc && \
-        cargo build --release --target aarch64-unknown-linux-gnu && \
+        cargo build --release --target aarch64-unknown-linux-gnu || true && \
         mkdir -p /output && \
-        cp target/aarch64-unknown-linux-gnu/release/libpq_eth_precompiles.a /output/libeth_ntt.a; \
+        cp target/aarch64-unknown-linux-gnu/release/libpq_eth_precompiles.a /output/libeth_ntt.a && \
+        nm /output/libeth_ntt.a | grep -c "T.*eth_ntt" && echo "FFI symbols OK"; \
     else \
         export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=x86_64-linux-gnu-gcc && \
-        cargo build --release --target x86_64-unknown-linux-gnu && \
+        cargo build --release --target x86_64-unknown-linux-gnu || true && \
         mkdir -p /output && \
-        cp target/x86_64-unknown-linux-gnu/release/libpq_eth_precompiles.a /output/libeth_ntt.a; \
+        cp target/x86_64-unknown-linux-gnu/release/libpq_eth_precompiles.a /output/libeth_ntt.a && \
+        nm /output/libeth_ntt.a | grep -c "T.*eth_ntt" && echo "FFI symbols OK"; \
     fi
 
 ### Erigon Builder section:
