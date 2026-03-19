@@ -955,8 +955,9 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		return txpoolcfg.GasLimitTooHigh
 	}
 	if p.isAmsterdam() {
-		// EIP-8037: total gas can exceed MaxTxnGasLimit (excess becomes state gas); only cap intrinsic regular gas.
-		if gas.Total() > params.MaxTxnGasLimit {
+		// EIP-8037: only intrinsic regular gas (including calldata floor) is capped;
+		// state gas lives in a separate dimension and must not be included.
+		if gas.Regular > params.MaxTxnGasLimit {
 			if txn.Traced {
 				p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic regular gas > max gas limit idHash=%x gas=%d", txn.IDHash, gas))
 			}
