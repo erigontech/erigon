@@ -616,6 +616,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 		keyBuf     = make([]byte, 0, 256)
 		numBuf     = make([]byte, 8)
 		bitmap     = bitmapdb.NewBitmap64()
+		txNums     = make([]uint64, 0, 256)
 		prevEf     []byte
 		prevKey    []byte
 		seqBuilder multiencseq.SequenceBuilder
@@ -637,11 +638,13 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 		}
 
 		if bytes.Equal(prevKey, k) {
-			bitmap.Add(txNum)
+			txNums = append(txNums, txNum)
 			prevKey = append(prevKey[:0], k...)
 			return nil
 		}
 
+		bitmap.AddMany(txNums)
+		txNums = txNums[:0]
 		seqBuilder.Reset(baseTxNum, bitmap.GetCardinality(), bitmap.Maximum())
 		it := bitmap.Iterator()
 
@@ -696,7 +699,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 
 		prevKey = append(prevKey[:0], k...)
 		txNum = binary.BigEndian.Uint64(v)
-		bitmap.Add(txNum)
+		txNums = append(txNums, txNum)
 
 		return nil
 	}
@@ -705,7 +708,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 	if err != nil {
 		return HistoryCollation{}, err
 	}
-	if !bitmap.IsEmpty() {
+	if len(txNums) > 0 {
 		if err = loadBitmapsFunc(nil, make([]byte, 8), nil, nil); err != nil {
 			return HistoryCollation{}, err
 		}

@@ -1003,6 +1003,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 		prevKey     []byte
 		initialized bool
 		bitmap      = bitmapdb.NewBitmap64()
+		txNums      = make([]uint64, 0, 256)
 		ef          multiencseq.SequenceBuilder
 	)
 	defer bitmapdb.ReturnToPool64(bitmap)
@@ -1015,11 +1016,13 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 		}
 
 		if bytes.Equal(prevKey, k) {
-			bitmap.Add(txNum)
+			txNums = append(txNums, txNum)
 			prevKey = append(prevKey[:0], k...)
 			return nil
 		}
 
+		bitmap.AddMany(txNums)
+		txNums = txNums[:0]
 		if bitmap.Minimum() < txFrom || bitmap.Maximum() >= txTo {
 			return fmt.Errorf("[inverted_index] collate %s: txNums out of range [%d, %d) for step %d: min=%d, max=%d, key=%x",
 				ii.FilenameBase, txFrom, txTo, step, bitmap.Minimum(), bitmap.Maximum(), prevKey)
@@ -1043,7 +1046,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 
 		prevKey = append(prevKey[:0], k...)
 		txNum = binary.BigEndian.Uint64(v)
-		bitmap.Add(txNum)
+		txNums = append(txNums, txNum)
 
 		return nil
 	}
@@ -1052,7 +1055,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 	if err != nil {
 		return InvertedIndexCollation{}, err
 	}
-	if !bitmap.IsEmpty() {
+	if len(txNums) > 0 {
 		if err = loadBitmapsFunc(nil, make([]byte, 8), nil, nil); err != nil {
 			return InvertedIndexCollation{}, err
 		}
