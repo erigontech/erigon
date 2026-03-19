@@ -429,6 +429,9 @@ func TestNewBtIndex(t *testing.T) {
 
 func BenchmarkBtIndex_Get(b *testing.B) {
 	keyCount := 1_000_000
+	if testing.Short() {
+		keyCount = 10_000
+	}
 	compress := seg.CompressKeys
 
 	for _, M := range []uint64{256, 128, 64, 32} {
