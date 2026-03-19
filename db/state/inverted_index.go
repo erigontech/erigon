@@ -44,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/bitmapdb"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/stream"
@@ -997,13 +996,17 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 	}
 	coll.writer = seg.NewWriter(comp, ii.Compression)
 
+	baseTxNum := uint64(step) * ii.stepSize
 	var (
 		prevEf      []byte
 		prevKey     []byte
 		initialized bool
-		bitmap      = bitmapdb.NewBitmap64()
+		// offsets: stores (txNum-baseTxNum) values; ETL delivers txNums sorted per key
+		// so no dedup/sort needed. Safe: collate covers exactly one step so values < stepSize < math.MaxUint32.
+		// Worst case: one key touched every txNum in the step → stepSize entries (390_625 × 4B ≈ 1.56 MB).
+		offsets = make([]uint32, 0, 64)
+		ef      multiencseq.SequenceBuilder
 	)
-	defer bitmapdb.ReturnToPool64(bitmap)
 
 	loadBitmapsFunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		txNum := binary.BigEndian.Uint64(v)
@@ -1013,22 +1016,19 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 		}
 
 		if bytes.Equal(prevKey, k) {
-			bitmap.Add(txNum)
-			prevKey = append(prevKey[:0], k...)
+			offsets = append(offsets, uint32(txNum-baseTxNum))
 			return nil
 		}
-
-		baseTxNum := uint64(step) * ii.stepSize
-		if bitmap.Minimum() < txFrom || bitmap.Maximum() >= txTo {
+		absMin, absMax := baseTxNum+uint64(offsets[0]), baseTxNum+uint64(offsets[len(offsets)-1])
+		if absMin < txFrom || absMax >= txTo {
 			return fmt.Errorf("[inverted_index] collate %s: txNums out of range [%d, %d) for step %d: min=%d, max=%d, key=%x",
-				ii.FilenameBase, txFrom, txTo, step, bitmap.Minimum(), bitmap.Maximum(), prevKey)
+				ii.FilenameBase, txFrom, txTo, step, absMin, absMax, prevKey)
 		}
-		ef := multiencseq.NewBuilder(baseTxNum, bitmap.GetCardinality(), bitmap.Maximum())
-		it := bitmap.Iterator()
-		for it.HasNext() {
-			ef.AddOffset(it.Next())
+		ef.Reset(baseTxNum, uint64(len(offsets)), absMax)
+		for _, off := range offsets {
+			ef.AddOffset(baseTxNum + uint64(off))
 		}
-		bitmap.Clear()
+		offsets = offsets[:0]
 		ef.Build()
 
 		prevEf = ef.AppendBytes(prevEf[:0])
@@ -1042,7 +1042,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 
 		prevKey = append(prevKey[:0], k...)
 		txNum = binary.BigEndian.Uint64(v)
-		bitmap.Add(txNum)
+		offsets = append(offsets[:0], uint32(txNum-baseTxNum))
 
 		return nil
 	}
@@ -1051,7 +1051,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 	if err != nil {
 		return InvertedIndexCollation{}, err
 	}
-	if !bitmap.IsEmpty() {
+	if len(offsets) > 0 {
 		if err = loadBitmapsFunc(nil, make([]byte, 8), nil, nil); err != nil {
 			return InvertedIndexCollation{}, err
 		}
