@@ -123,4 +123,4 @@ mdbx.lck
 
 # Prevent accidental commit of locally-built binaries
 /erigon
-
+.claude/worktrees/
