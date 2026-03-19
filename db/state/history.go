@@ -615,18 +615,17 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 
 	baseTxNum := uint64(step) * h.stepSize
 	var (
-		keyBuf     = make([]byte, 0, 256)
-		numBuf     = make([]byte, 8)
-		// bitmap32: stores (txNum-baseTxNum) offsets; safe because collate covers exactly
-		// one step so offsets are at most stepSize < math.MaxUint32.
-		bitmap     = bitmapdb.NewBitmap32()
+		keyBuf = make([]byte, 0, 256)
+		numBuf = make([]byte, 8)
+		// offsets: stores (txNum-baseTxNum) values; ETL delivers txNums sorted per key
+		// so no dedup/sort needed. Safe: collate covers exactly one step so values < stepSize < math.MaxUint32.
+		offsets    = make([]uint32, 0, 64)
 		prevEf     []byte
 		prevKey    []byte
 		seqBuilder multiencseq.SequenceBuilder
 
 		initialized bool
 	)
-	defer bitmapdb.ReturnToPool32(bitmap)
 
 	cnt := 0
 	var histKeyBuf []byte
@@ -640,17 +639,15 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 		}
 
 		if bytes.Equal(prevKey, k) {
-			bitmap.Add(uint32(txNum - baseTxNum))
+			offsets = append(offsets, uint32(txNum-baseTxNum))
 			prevKey = append(prevKey[:0], k...)
 			return nil
 		}
-		seqBuilder.Reset(baseTxNum, bitmap.GetCardinality(), baseTxNum+uint64(bitmap.Maximum()))
-		var it roaring.IntIterator
-		it.Initialize(bitmap)
+		seqBuilder.Reset(baseTxNum, uint64(len(offsets)), baseTxNum+uint64(offsets[len(offsets)-1]))
 
-		for it.HasNext() {
+		for _, off := range offsets {
 			cnt++
-			vTxNum := baseTxNum + uint64(it.Next())
+			vTxNum := baseTxNum + uint64(off)
 			seqBuilder.AddOffset(vTxNum)
 
 			binary.BigEndian.PutUint64(numBuf, vTxNum)
@@ -685,7 +682,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 				return fmt.Errorf("add %s history val [%x]: %w", h.FilenameBase, key, err)
 			}
 		}
-		bitmap.Clear()
+		offsets = offsets[:0]
 		seqBuilder.Build()
 
 		prevEf = seqBuilder.AppendBytes(prevEf[:0])
@@ -699,7 +696,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 
 		prevKey = append(prevKey[:0], k...)
 		txNum = binary.BigEndian.Uint64(v)
-		bitmap.Add(uint32(txNum - baseTxNum))
+		offsets = append(offsets[:0], uint32(txNum-baseTxNum))
 
 		return nil
 	}
@@ -708,7 +705,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 	if err != nil {
 		return HistoryCollation{}, err
 	}
-	if !bitmap.IsEmpty() {
+	if len(offsets) > 0 {
 		if err = loadBitmapsFunc(nil, make([]byte, 8), nil, nil); err != nil {
 			return HistoryCollation{}, err
 		}
