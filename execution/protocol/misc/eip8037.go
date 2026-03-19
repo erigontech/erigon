@@ -21,8 +21,8 @@ import (
 	"math/bits"
 
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/params"
 )
 
 func CostPerStateByte(gasLimit uint64) uint64 {

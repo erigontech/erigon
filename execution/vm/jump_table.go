@@ -22,8 +22,8 @@ package vm
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/params"
 )
 
 type (
