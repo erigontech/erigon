@@ -360,12 +360,13 @@ func (s *Merge) verifyHeader(chain rules.ChainHeaderReader, header, parent *type
 	amsterdam := chain.Config().IsAmsterdam(header.Time)
 	if amsterdam {
 		if header.SlotNumber == nil {
-			// TODO: No Slot Error Yet - Treate it as optional for hive testing
+			// TODO: No Slot Error Yet - Treat it as optional for hive testing
 			//return rules.ErrMissingSlotNumber
 		}
-		if header.BlockAccessListHash == nil {
-			// TODO: BAL not yet required - optional for early devnets (e.g. epbs-devnet-0)
-			//return rules.ErrMissingBlockAccessListHash
+		if !chain.Config().IsEIPDisabled(7928) {
+			if header.BlockAccessListHash == nil {
+				return rules.ErrMissingBlockAccessListHash
+			}
 		}
 	} else {
 		if header.SlotNumber != nil {

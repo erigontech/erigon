@@ -118,9 +118,10 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		header := b.HeaderNoCopy()
 		getHashFnMutex := sync.Mutex{}
 
-		if se.cfg.chainConfig.AmsterdamTime != nil && se.cfg.chainConfig.AmsterdamTime.Uint64() > 0 && se.cfg.chainConfig.IsAmsterdam(header.Time) {
-			se.logger.Error(fmt.Sprintf("[%s] BLOCK PROCESSING FAILED: Amsterdam processing is not supported by serial exec", se.logPrefix), "fork-block", blockNum)
-			return nil, rwTx, fmt.Errorf("amsterdam processing is not supported by serial exec from block: %d", blockNum)
+		isEIP7928 := se.cfg.chainConfig.IsAmsterdam(header.Time) && !se.cfg.chainConfig.IsEIPDisabled(7928)
+		if se.cfg.chainConfig.AmsterdamTime != nil && se.cfg.chainConfig.AmsterdamTime.Uint64() > 0 && isEIP7928 {
+			se.logger.Error(fmt.Sprintf("[%s] BLOCK PROCESSING FAILED: BAL (EIP-7928) requires parallel exec", se.logPrefix), "fork-block", blockNum)
+			return nil, rwTx, fmt.Errorf("BAL (EIP-7928) requires parallel exec from block: %d", blockNum)
 		}
 
 		blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {

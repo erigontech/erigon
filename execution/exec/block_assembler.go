@@ -107,7 +107,8 @@ type BlockAssembler struct {
 func NewBlockAssembler(cfg AssemblerCfg, payloadId, parentTime uint64, header *types.Header, uncles []*types.Header, withdrawals []*types.Withdrawal) *BlockAssembler {
 	var balIO *state.VersionedIO
 
-	if cfg.ChainConfig.IsAmsterdam(header.Time) || cfg.ExperimentalBAL {
+	isEIP7928 := cfg.ChainConfig.IsAmsterdam(header.Time) && !cfg.ChainConfig.IsEIPDisabled(7928)
+	if isEIP7928 || cfg.ExperimentalBAL {
 		balIO = &state.VersionedIO{}
 	}
 	return &BlockAssembler{
@@ -375,7 +376,7 @@ func (ba *BlockAssembler) AssembleBlock(stateReader state.StateReader, ibs *stat
 		// header RLP encoding is positional and skipping intermediate nil
 		// fields (BlobGasUsed, ExcessBlobGas, etc.) would cause a
 		// marshaling mismatch on decode.
-		if ba.cfg.ChainConfig.IsAmsterdam(header.Time) {
+		if ba.cfg.ChainConfig.IsAmsterdam(header.Time) && !ba.cfg.ChainConfig.IsEIPDisabled(7928) {
 			balHash := ba.BlockAccessList.Hash()
 			header.BlockAccessListHash = &balHash
 		}
