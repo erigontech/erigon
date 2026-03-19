@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/bitmapdb"
 	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -612,18 +611,21 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 		defer cd.Close()
 	}
 
+	baseTxNum := uint64(step) * h.stepSize
 	var (
-		keyBuf  = make([]byte, 0, 256)
-		numBuf  = make([]byte, 8)
-		bitmap  = bitmapdb.NewBitmap64()
-		prevEf  []byte
-		prevKey []byte
+		keyBuf = make([]byte, 0, 256)
+		numBuf = make([]byte, 8)
+		// offsets: stores (txNum-baseTxNum) values; ETL delivers txNums sorted per key
+		// so no dedup/sort needed. Safe: collate covers exactly one step so values < stepSize < math.MaxUint32.
+		// Worst case: one key touched every txNum in the step → stepSize entries (390_625 × 4B ≈ 1.56 MB).
+		offsets    = make([]uint32, 0, 64)
+		prevEf     []byte
+		prevKey    []byte
+		seqBuilder multiencseq.SequenceBuilder
 
 		initialized bool
 	)
-	defer bitmapdb.ReturnToPool64(bitmap)
 
-	baseTxNum := uint64(step) * h.stepSize
 	cnt := 0
 	var histKeyBuf []byte
 	//log.Warn("[dbg] collate", "name", h.filenameBase, "sampling", h.historyValuesOnCompressedPage)
@@ -636,17 +638,14 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 		}
 
 		if bytes.Equal(prevKey, k) {
-			bitmap.Add(txNum)
-			prevKey = append(prevKey[:0], k...)
+			offsets = append(offsets, uint32(txNum-baseTxNum))
 			return nil
 		}
+		seqBuilder.Reset(baseTxNum, uint64(len(offsets)), baseTxNum+uint64(offsets[len(offsets)-1]))
 
-		seqBuilder := multiencseq.NewBuilder(baseTxNum, bitmap.GetCardinality(), bitmap.Maximum())
-		it := bitmap.Iterator()
-
-		for it.HasNext() {
+		for _, off := range offsets {
 			cnt++
-			vTxNum := it.Next()
+			vTxNum := baseTxNum + uint64(off)
 			seqBuilder.AddOffset(vTxNum)
 
 			binary.BigEndian.PutUint64(numBuf, vTxNum)
@@ -681,7 +680,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 				return fmt.Errorf("add %s history val [%x]: %w", h.FilenameBase, key, err)
 			}
 		}
-		bitmap.Clear()
+		offsets = offsets[:0]
 		seqBuilder.Build()
 
 		prevEf = seqBuilder.AppendBytes(prevEf[:0])
@@ -695,7 +694,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 
 		prevKey = append(prevKey[:0], k...)
 		txNum = binary.BigEndian.Uint64(v)
-		bitmap.Add(txNum)
+		offsets = append(offsets[:0], uint32(txNum-baseTxNum))
 
 		return nil
 	}
@@ -704,7 +703,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 	if err != nil {
 		return HistoryCollation{}, err
 	}
-	if !bitmap.IsEmpty() {
+	if len(offsets) > 0 {
 		if err = loadBitmapsFunc(nil, make([]byte, 8), nil, nil); err != nil {
 			return HistoryCollation{}, err
 		}
