@@ -327,8 +327,6 @@ func buildOrDeferE2Indices(ctx context.Context, s *StageState, cfg SnapshotsCfg,
 		if err := cfg.blockRetire.BuildMissedIndicesIfNeed(ctx, s.LogPrefix(), cfg.notifier.Events); err != nil {
 			return err
 		}
-	} else {
-		log.Debug(fmt.Sprintf("[%s] Deferring E2 indexing to background", s.LogPrefix()), "reason", "restart", "headersProgress", headersProgress)
 	}
 	return nil
 }
@@ -351,8 +349,6 @@ func buildOrDeferE3Accessors(ctx context.Context, s *StageState, cfg SnapshotsCf
 		if err := agg.BuildMissedAccessors(ctx, indexWorkers); err != nil {
 			return err
 		}
-	} else {
-		log.Debug(fmt.Sprintf("[%s] Deferring E3 indexing to background", s.LogPrefix()), "reason", "restart", "headersProgress", headersProgress)
 	}
 	return nil
 }
