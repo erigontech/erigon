@@ -101,7 +101,8 @@ type BlockAssembler struct {
 	*AssembledBlock
 	cfg         AssemblerCfg
 	balIO       *state.VersionedIO
-	stateWriter state.StateWriter // optional: if set, domain writes go here instead of NoopWriter
+	stateWriter state.StateWriter  // optional: if set, domain writes go here instead of NoopWriter
+	gasUsed     protocol.GasUsed   // EIP-8037: cumulative per-dimension gas across AddTransactions calls
 }
 
 func NewBlockAssembler(cfg AssemblerCfg, payloadId, parentTime uint64, header *types.Header, uncles []*types.Header, withdrawals []*types.Withdrawal) *BlockAssembler {
@@ -203,10 +204,7 @@ func (ba *BlockAssembler) AddTransactions(
 		ibs.ResetVersionedIO()
 	}
 
-	// EIP-8037: track cumulative block gas per dimension. The header stores
-	// max(regular, state), so we cannot recover individual dimensions from it.
-	// Keep running totals here and patch GasUsed before writing to the header.
-	gasUsed := new(protocol.GasUsed)
+	gasUsed := &ba.gasUsed
 
 	var commitTx = func(txn types.Transaction, coinbase accounts.Address, vmConfig *vm.Config, chainConfig *chain.Config, ibs *state.IntraBlockState, current *AssembledBlock) ([]*types.Log, error) {
 		ibs.SetTxContext(current.Header.Number.Uint64(), txnIdx)
