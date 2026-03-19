@@ -45,6 +45,12 @@ func CostPerStateByte(gasLimit uint64) uint64 {
 	return rounded - params.CpsbOffset
 }
 
+// SplitIntoMdGas splits a transaction's gas limit into regular and state dimensions.
+// EIP-8037: when tx.gas > TX_MAX_GAS_LIMIT, excess gas beyond the regular budget
+// becomes the state gas reservoir, which state-creation opcodes (SSTORE, CREATE,
+// code deposit) draw from before spilling to regular gas.
+// Pre-Amsterdam: all gas is regular (state reservoir is 0).
+// See process_transaction in EIP-8037.
 func SplitIntoMdGas(txnGasLimit uint64, igas mdgas.MdGas, rules *chain.Rules) mdgas.MdGas {
 	if rules.IsAmsterdam {
 		//intrinsic_gas = intrinsic_regular_gas + intrinsic_state_gas
