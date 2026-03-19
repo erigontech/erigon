@@ -664,14 +664,12 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		st.blockStateGasUsed = blockState
 		st.txnGasUsedB4Refunds = mdGasUsed.Total() + st.evm.RevertedSpillGas()
 		st.txnGasUsed = max(st.txnGasUsedB4Refunds, intrinsicGasResult.FloorGasCost)
-	} else if rules.IsPrague {
-		st.txnGasUsedB4Refunds = st.mdGasUsed().Regular
-		st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds)
-		st.blockRegularGasUsed = st.txnGasUsed
 	} else {
+		// No-refund path: gasBailout (trace_call) or !refunds.
+		// Don't apply Prague floor or refunds — just record raw gas used.
 		st.txnGasUsedB4Refunds = st.mdGasUsed().Regular
 		st.txnGasUsed = st.txnGasUsedB4Refunds
-		st.blockRegularGasUsed = st.txnGasUsed
+		st.blockRegularGasUsed = st.msg.Gas() // match pre-refactor: consume full gas limit from pool
 	}
 	// Also return remaining gas to the block gas counter so it is
 	// available for the next transaction.
@@ -722,7 +720,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		ReceiptGasUsed:      st.txnGasUsed,
 		BlockRegularGasUsed: st.blockRegularGasUsed,
 		BlockStateGasUsed:   st.blockStateGasUsed,
-		MaxGasUsed:          st.txnGasUsedB4Refunds,
+		MaxGasUsed:          max(st.txnGasUsedB4Refunds, intrinsicGasResult.FloorGasCost),
 		Err:                 vmerr,
 		Reverted:            errors.Is(vmerr, vm.ErrExecutionReverted),
 		ReturnData:          ret,
