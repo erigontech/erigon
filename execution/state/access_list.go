@@ -27,11 +27,11 @@ import (
 
 // accessList tracks addresses and storage slots accessed during a transaction.
 // addresses maps each address to its index in slots (-1 if address-only, no slots).
-// This layout matches go-ethereum's design: the slots slice backing array is
-// reused across transactions via Reset, eliminating per-tx slot-map allocations.
+// slots[i] is the ordered list of slots for the address at index i; nil = warm, no slots.
+// Slots are appended in order and removed in LIFO order by the journal.
 type accessList struct {
 	addresses map[accounts.Address]int
-	slots     []map[accounts.StorageKey]struct{}
+	slots     [][]accounts.StorageKey // slots[i] is the slot set for addrs[i]; nil = warm, no slots
 }
 
 // newAccessList creates a new accessList.
@@ -42,11 +42,11 @@ func newAccessList() *accessList {
 }
 
 // Reset clears the access list for reuse, keeping allocated memory.
-// The slots backing array is retained; cleared inner maps are reused by
+// Inner slices are truncated to zero; their backing arrays are reused by
 // subsequent AddSlot calls without new allocations.
 func (al *accessList) Reset() {
-	for _, s := range al.slots {
-		clear(s)
+	for i := range al.slots {
+		al.slots[i] = al.slots[i][:0]
 	}
 	al.slots = al.slots[:0]
 	clear(al.addresses)
@@ -68,18 +68,22 @@ func (al *accessList) Contains(address accounts.Address, slot accounts.StorageKe
 	if idx == -1 {
 		return true, false
 	}
-	_, slotPresent = al.slots[idx][slot]
-	return true, slotPresent
+	for _, s := range al.slots[idx] {
+		if s == slot {
+			return true, true
+		}
+	}
+	return true, false
 }
 
 // Copy creates an independent copy of an accessList.
 func (al *accessList) Copy() *accessList {
 	cp := &accessList{
 		addresses: maps.Clone(al.addresses),
-		slots:     make([]map[accounts.StorageKey]struct{}, len(al.slots)),
+		slots:     make([][]accounts.StorageKey, len(al.slots)),
 	}
-	for i, slotMap := range al.slots {
-		cp.slots[i] = maps.Clone(slotMap)
+	for i, s := range al.slots {
+		cp.slots[i] = append([]accounts.StorageKey(nil), s...)
 	}
 	return cp
 }
@@ -103,26 +107,23 @@ func (al *accessList) AddSlot(address accounts.Address, slot accounts.StorageKey
 	idx, addrPresent := al.addresses[address]
 	if !addrPresent || idx == -1 {
 		// Address not present, or addr present but no slots yet.
-		// Reuse a cleared slot map from the backing array if available.
+		// Reuse a truncated inner slice from the backing array if available.
 		newIdx := len(al.slots)
 		al.addresses[address] = newIdx
-		var slotmap map[accounts.StorageKey]struct{}
+		var s []accounts.StorageKey
 		if newIdx < cap(al.slots) {
-			slotmap = al.slots[:cap(al.slots)][newIdx]
+			s = al.slots[:cap(al.slots)][newIdx]
 		}
-		if slotmap == nil {
-			slotmap = make(map[accounts.StorageKey]struct{})
-		}
-		slotmap[slot] = struct{}{}
-		al.slots = append(al.slots, slotmap)
+		al.slots = append(al.slots, append(s, slot))
 		return !addrPresent, true
 	}
-	slotmap := al.slots[idx]
-	if _, ok := slotmap[slot]; !ok {
-		slotmap[slot] = struct{}{}
-		return false, true
+	for _, s := range al.slots[idx] {
+		if s == slot {
+			return false, false
+		}
 	}
-	return false, false
+	al.slots[idx] = append(al.slots[idx], slot)
+	return false, true
 }
 
 // DeleteSlot removes an (address, slot)-tuple from the access list.
@@ -130,15 +131,21 @@ func (al *accessList) AddSlot(address accounts.Address, slot accounts.StorageKey
 // This method is meant to be used by the journal, which maintains ordering of
 // operations.
 func (al *accessList) DeleteSlot(address accounts.Address, slot accounts.StorageKey) {
+	al.PopSlot(address)
+	_ = slot // journal is LIFO: the slot being deleted is always the last one added
+}
+
+// PopSlot removes the last slot added for address. Must be called in LIFO order
+// matching AddSlot calls, as maintained by the journal.
+func (al *accessList) PopSlot(address accounts.Address) {
 	idx, addrOk := al.addresses[address]
 	if !addrOk {
 		panic("reverting slot change, address not present in list")
 	}
-	slotmap := al.slots[idx]
-	delete(slotmap, slot)
-	// Since additions and rollbacks are always in LIFO order, when a slot map
+	al.slots[idx] = al.slots[idx][:len(al.slots[idx])-1]
+	// Since additions and rollbacks are always in LIFO order, when a slot list
 	// becomes empty it must be the last one appended — truncate the slice.
-	if len(slotmap) == 0 {
+	if len(al.slots[idx]) == 0 {
 		al.slots = al.slots[:idx]
 		al.addresses[address] = -1
 	}
