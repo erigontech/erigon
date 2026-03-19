@@ -392,6 +392,14 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
+	intrinsicGas, overflow := math.SafeAdd(intrinsicGasResult.RegularGas, intrinsicGasResult.StateGas)
+	if overflow {
+		return nil, ErrGasUintOverflow
+	}
+	if st.msg.Gas() < intrinsicGas {
+		return nil, fmt.Errorf("%w: have %d, want regular %d + state %d = %d",
+			ErrIntrinsicGas, st.msg.Gas(), intrinsicGasResult.RegularGas, intrinsicGasResult.StateGas, intrinsicGas)
+	}
 	imdGas := mdgas.MdGas{
 		Regular: intrinsicGasResult.RegularGas,
 		State:   intrinsicGasResult.StateGas,
