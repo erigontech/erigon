@@ -610,7 +610,6 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			refundQuotient = params.RefundQuotientEIP3529
 		}
 		if rules.IsAmsterdam {
-			// EIP-8037 + EIP-7778: Block gas accounting uses two dimensions.
 			blockState := imdGas.State + st.evm.StateGasConsumed()
 			blockRegular := imdGas.Regular + st.evm.RegularGasConsumed()
 			st.blockRegularGasUsed = max(blockRegular, intrinsicGasResult.FloorGasCost)

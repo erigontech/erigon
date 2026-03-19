@@ -396,7 +396,7 @@ func (ba *BlockAssembler) AssembleBlock(stateReader state.StateReader, ibs *stat
 		// header RLP encoding is positional and skipping intermediate nil
 		// fields (BlobGasUsed, ExcessBlobGas, etc.) would cause a
 		// marshaling mismatch on decode.
-		if ba.cfg.ChainConfig.IsAmsterdam(header.Time) {
+		if ba.cfg.ChainConfig.IsAmsterdam(header.Time) && !ba.cfg.ChainConfig.IsEIPDisabled(7928) {
 			balHash := ba.BlockAccessList.Hash()
 			header.BlockAccessListHash = &balHash
 		}
