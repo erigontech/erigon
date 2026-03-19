@@ -666,7 +666,23 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, err err
 	return false, false, nil
 }
 
-func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelete, dryRun bool, stepRange string, domainNames ...string) error {
+type DeleteStateSnapshotsArgs struct {
+	Dirs                   datadir.Dirs
+	RemoveLatest           bool
+	PromptUserBeforeDelete bool
+	DryRun                 bool
+	StepRange              string
+	DomainNames            []string
+}
+
+func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
+	dirs := args.Dirs
+	removeLatest := args.RemoveLatest
+	promptUserBeforeDelete := args.PromptUserBeforeDelete
+	dryRun := args.DryRun
+	stepRange := args.StepRange
+	domainNames := args.DomainNames
+
 	_maxFrom := uint64(0)
 	_maxTo := uint64(0)
 	files := make([]snaptype.FileInfo, 0)
@@ -916,7 +932,14 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 	domainNames := cliCtx.StringSlice("domain")
 	dryRun := cliCtx.Bool("dry-run")
 	promptUser := true // CLI should always prompt the user
-	return DeleteStateSnapshots(dirs, removeLatest, promptUser, dryRun, stepRange, domainNames...)
+	return DeleteStateSnapshots(DeleteStateSnapshotsArgs{
+		Dirs:                   dirs,
+		RemoveLatest:           removeLatest,
+		PromptUserBeforeDelete: promptUser,
+		DryRun:                 dryRun,
+		StepRange:              stepRange,
+		DomainNames:            domainNames,
+	})
 }
 
 func doRollbackSnapshotsToBlock(ctx context.Context, blockNum uint64, prompt bool, dataDir string, logger log.Logger) error {
