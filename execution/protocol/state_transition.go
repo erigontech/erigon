@@ -28,6 +28,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
@@ -532,8 +533,15 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
-	if st.msg.Gas() < intrinsicGasResult.RegularGas || st.msg.Gas() < intrinsicGasResult.FloorGasCost || st.msg.Gas() < intrinsicGasResult.StateGas {
-		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.msg.Gas(), max(intrinsicGasResult.RegularGas, intrinsicGasResult.FloorGasCost, intrinsicGasResult.StateGas))
+	// EIP-8037: intrinsic_gas = intrinsic_regular_gas + intrinsic_state_gas.
+	// The tx must cover the sum, not just each component individually.
+	intrinsicGas, overflow := math.SafeAdd(intrinsicGasResult.RegularGas, intrinsicGasResult.StateGas)
+	if overflow {
+		return nil, ErrGasUintOverflow
+	}
+	if st.msg.Gas() < intrinsicGas || st.msg.Gas() < intrinsicGasResult.FloorGasCost {
+		return nil, fmt.Errorf("%w: have %d, want regular %d + state %d = %d, floor %d", ErrIntrinsicGas,
+			st.msg.Gas(), intrinsicGasResult.RegularGas, intrinsicGasResult.StateGas, intrinsicGas, intrinsicGasResult.FloorGasCost)
 	}
 	// EIP-7825: Transaction Gas Limit Cap
 	if st.msg.CheckGas() {
