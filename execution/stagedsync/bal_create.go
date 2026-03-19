@@ -47,8 +47,8 @@ func writeBALToFile(bal types.BlockAccessList, blockNum uint64, dataDir string) 
 	bal.DebugPrint(file)
 }
 
-func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, amsterdam bool, experimental bool, dataDir string) error {
-	if !amsterdam && !experimental {
+func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, isEIP7928 bool, experimental bool, dataDir string) error {
+	if !isEIP7928 && !experimental {
 		return nil
 	}
 	if h == nil {
@@ -65,12 +65,11 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, ams
 		return fmt.Errorf("%w, block %d: %w", rules.ErrInvalidBlock, blockNum, err)
 	}
 	log.Debug("bal", "blockNum", blockNum, "hash", bal.Hash())
-	if !amsterdam {
+	if !isEIP7928 {
 		return nil
 	}
 	if h.BlockAccessListHash == nil {
-		log.Warn("block access list hash missing in header, skipping BAL validation", "blockNum", blockNum)
-		return nil
+		return fmt.Errorf("block %d: EIP-7928 active but BlockAccessListHash is nil in header", blockNum)
 	}
 	headerBALHash := *h.BlockAccessListHash
 	dbBALBytes, err := rawdb.ReadBlockAccessListBytes(tx, blockHash, blockNum)
