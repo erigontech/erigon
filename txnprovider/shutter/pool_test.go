@@ -27,6 +27,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -41,7 +42,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/synctest"
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/chain/networkname"
@@ -903,9 +903,9 @@ func MockEncryptedTxn(t *testing.T, chainId *uint256.Int, eon shutter.Eon) testh
 			Nonce:    uint64(99),
 			GasLimit: 21_000,
 			To:       &senderAddr, // send to self
-			Value:    uint256.NewInt(123),
+			Value:    *uint256.NewInt(123),
 		},
-		GasPrice: uint256.NewInt(555),
+		GasPrice: *uint256.NewInt(555),
 	}
 	signer := types.LatestSignerForChainID(chainId.ToBig())
 	signedTxn, err := types.SignTx(txn, *signer, senderPrivKey)

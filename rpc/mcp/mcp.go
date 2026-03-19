@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"os"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -13,12 +14,22 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/execution/chain/spec"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/filters"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 )
+
+// Version is the MCP server version reported to clients.
+const Version = "0.0.2"
+
+// MCPTransport is the common interface for both embedded and standalone MCP servers.
+type MCPTransport interface {
+	Serve() error
+	ServeContext(ctx context.Context) error
+	ServeSSE(addr string) error
+}
 
 // ErigonMCPServer wraps Erigon APIs with MCP server capabilities.
 type ErigonMCPServer struct {
@@ -40,7 +51,7 @@ func NewErigonMCPServer(ethAPI jsonrpc.EthAPI, erigonAPI jsonrpc.ErigonAPI, otsA
 
 	e.mcpServer = server.NewMCPServer(
 		"ErigonMCP",
-		"0.0.1",
+		Version,
 		server.WithResourceCapabilities(true, true),
 		server.WithToolCapabilities(true),
 		server.WithPromptCapabilities(true),
@@ -165,6 +176,13 @@ func (e *ErigonMCPServer) registerTools() {
 		mcp.WithString("position", mcp.Required(), mcp.Description("Storage position")),
 		mcp.WithString("blockNumber", mcp.Description("Block number")),
 	), e.handleGetStorageAt)
+
+	// eth_getStorageValues
+	e.mcpServer.AddTool(mcp.NewTool("eth_getStorageValues",
+		mcp.WithDescription("Get multiple storage slot values for multiple accounts in a single request"),
+		mcp.WithString("requests", mcp.Required(), mcp.Description("JSON object mapping addresses to arrays of storage slot keys")),
+		mcp.WithString("blockNumber", mcp.Description("Block number or tag (latest, earliest, pending)")),
+	), e.handleGetStorageValues)
 
 	// eth_getTransactionCount
 	e.mcpServer.AddTool(mcp.NewTool("eth_getTransactionCount",
@@ -578,10 +596,11 @@ func (e *ErigonMCPServer) handleGetLogs(ctx context.Context, req mcp.CallToolReq
 	if addr := req.GetString("address", ""); addr != "" {
 		if strings.HasPrefix(addr, "[") {
 			var addrs []string
-			if json.Unmarshal([]byte(addr), &addrs) == nil {
-				for _, a := range addrs {
-					crit.Addresses = append(crit.Addresses, common.HexToAddress(a))
-				}
+			if err := json.Unmarshal([]byte(addr), &addrs); err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("invalid address JSON array: %v", err)), nil
+			}
+			for _, a := range addrs {
+				crit.Addresses = append(crit.Addresses, common.HexToAddress(a))
 			}
 		} else {
 			crit.Addresses = []common.Address{common.HexToAddress(addr)}
@@ -589,9 +608,10 @@ func (e *ErigonMCPServer) handleGetLogs(ctx context.Context, req mcp.CallToolReq
 	}
 	if topics := req.GetString("topics", ""); topics != "" {
 		var t [][]common.Hash
-		if json.Unmarshal([]byte(topics), &t) == nil {
-			crit.Topics = t
+		if err := json.Unmarshal([]byte(topics), &t); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("invalid topics JSON: %v", err)), nil
 		}
+		crit.Topics = t
 	}
 	if bh := req.GetString("blockHash", ""); bh != "" {
 		h := common.HexToHash(bh)
@@ -629,6 +649,43 @@ func (e *ErigonMCPServer) handleGetStorageAt(ctx context.Context, req mcp.CallTo
 	return mcp.NewToolResultText(fmt.Sprintf("Storage: %s", result)), nil
 }
 
+func (e *ErigonMCPServer) handleGetStorageValues(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	rawRequests := req.GetString("requests", "{}")
+	blockNumOrHash, _ := parseBlockNumberOrHash(req.GetString("blockNumber", "latest"))
+
+	// Parse the JSON requests map
+	var parsed map[string][]string
+	if err := json.Unmarshal([]byte(rawRequests), &parsed); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("invalid requests format: %v", err)), nil
+	}
+
+	// Convert to map[common.Address][]common.Hash
+	requests := make(map[common.Address][]common.Hash, len(parsed))
+	for addrStr, keys := range parsed {
+		addr := common.HexToAddress(addrStr)
+		hashes := make([]common.Hash, len(keys))
+		for i, k := range keys {
+			hashes[i] = common.HexToHash(k)
+		}
+		requests[addr] = hashes
+	}
+
+	result, err := e.ethAPI.GetStorageValues(ctx, requests, blockNumOrHash)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	// Format output
+	var sb strings.Builder
+	for addr, vals := range result {
+		sb.WriteString(fmt.Sprintf("Address: %s\n", addr.Hex()))
+		for i, v := range vals {
+			sb.WriteString(fmt.Sprintf("  Slot %d: %s\n", i, common.BytesToHash(v).Hex()))
+		}
+	}
+	return mcp.NewToolResultText(sb.String()), nil
+}
+
 func (e *ErigonMCPServer) handleGetTransactionCount(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	addr := common.HexToAddress(req.GetString("address", ""))
 	blockNumOrHash, _ := parseBlockNumberOrHash(req.GetString("blockNumber", "latest"))
@@ -645,7 +702,10 @@ func (e *ErigonMCPServer) handleCall(ctx context.Context, req mcp.CallToolReques
 	args.To = &to
 
 	if data := req.GetString("data", ""); data != "" {
-		d := hexutil.MustDecode(data)
+		d, err := hexutil.Decode(data)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("invalid data hex: %v", err)), nil
+		}
 		args.Data = (*hexutil.Bytes)(&d)
 	}
 	if from := req.GetString("from", ""); from != "" {
@@ -653,7 +713,10 @@ func (e *ErigonMCPServer) handleCall(ctx context.Context, req mcp.CallToolReques
 		args.From = &f
 	}
 	if val := req.GetString("value", ""); val != "" {
-		v := hexutil.MustDecodeBig(val)
+		v, err := hexutil.DecodeBig(val)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("invalid value hex: %v", err)), nil
+		}
 		args.Value = (*hexutil.Big)(v)
 	}
 	if gas := req.GetString("gas", ""); gas != "" {
@@ -679,7 +742,10 @@ func (e *ErigonMCPServer) handleEstimateGas(ctx context.Context, req mcp.CallToo
 		args.To = &t
 	}
 	if data := req.GetString("data", ""); data != "" {
-		d := hexutil.MustDecode(data)
+		d, err := hexutil.Decode(data)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("invalid data hex: %v", err)), nil
+		}
 		args.Data = (*hexutil.Bytes)(&d)
 	}
 	if from := req.GetString("from", ""); from != "" {
@@ -687,7 +753,10 @@ func (e *ErigonMCPServer) handleEstimateGas(ctx context.Context, req mcp.CallToo
 		args.From = &f
 	}
 	if val := req.GetString("value", ""); val != "" {
-		v := hexutil.MustDecodeBig(val)
+		v, err := hexutil.DecodeBig(val)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("invalid value hex: %v", err)), nil
+		}
 		args.Value = (*hexutil.Big)(v)
 	}
 
@@ -741,7 +810,9 @@ func (e *ErigonMCPServer) handleGetProof(ctx context.Context, req mcp.CallToolRe
 	addr := common.HexToAddress(req.GetString("address", ""))
 	var keys []hexutil.Bytes
 	if k := req.GetString("storageKeys", ""); k != "" {
-		json.Unmarshal([]byte(k), &keys)
+		if err := json.Unmarshal([]byte(k), &keys); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("invalid storageKeys JSON: %v", err)), nil
+		}
 	}
 	blockNumOrHash, _ := parseBlockNumberOrHash(req.GetString("blockNumber", "latest"))
 	result, err := e.ethAPI.GetProof(ctx, addr, keys, blockNumOrHash)
@@ -929,7 +1000,9 @@ func (e *ErigonMCPServer) handleErigonGetLogs(ctx context.Context, req mcp.CallT
 	}
 	if topics := req.GetString("topics", ""); topics != "" {
 		var t [][]common.Hash
-		json.Unmarshal([]byte(topics), &t)
+		if err := json.Unmarshal([]byte(topics), &t); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("invalid topics JSON: %v", err)), nil
+		}
 		crit.Topics = t
 	}
 	result, err := e.erigonAPI.GetLogs(ctx, crit)
@@ -1113,9 +1186,16 @@ func (e *ErigonMCPServer) handleOtsGetContractCreator(ctx context.Context, req m
 
 // Metrics gathering functions are now in metrics/gather.go
 
-// Serve starts MCP server in stdio mode
+// Serve starts MCP server in stdio mode with its own signal handling.
 func (e *ErigonMCPServer) Serve() error {
 	return server.ServeStdio(e.mcpServer)
+}
+
+// ServeContext starts MCP server in stdio mode using the provided context
+// for lifecycle management, avoiding duplicate signal handlers.
+func (e *ErigonMCPServer) ServeContext(ctx context.Context) error {
+	s := server.NewStdioServer(e.mcpServer)
+	return s.Listen(ctx, os.Stdin, os.Stdout)
 }
 
 // ServeSSE starts MCP server with SSE transport

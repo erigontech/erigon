@@ -47,7 +47,7 @@ func TestHeaderVerification(t *testing.T) {
 		engine = ethash.NewFaker()
 	)
 	logger := testlog.Logger(t, log.LvlInfo)
-	m := execmoduletester.NewWithGenesisEngine(t, gspec, engine)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithEngine(engine))
 
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, nil)
 	if err != nil {
@@ -98,7 +98,7 @@ func TestHeaderWithSealVerification(t *testing.T) {
 		engine = ethash.NewFaker()
 	)
 	logger := testlog.Logger(t, log.LvlInfo)
-	m := execmoduletester.NewWithGenesisEngine(t, gspec, engine)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithEngine(engine))
 
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, nil)
 	if err != nil {

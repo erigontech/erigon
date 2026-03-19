@@ -23,12 +23,10 @@ import (
 	"math/big"
 	"os"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sync/errgroup"
@@ -56,13 +54,13 @@ import (
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder"
-	"github.com/erigontech/erigon/execution/builder/builderstages"
 	"github.com/erigontech/erigon/execution/chain"
 	enginehelpers "github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
+	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/bodydownload"
 	"github.com/erigontech/erigon/execution/stagedsync/headerdownload"
@@ -120,6 +118,7 @@ type ExecModuleTester struct {
 	SentryClient    direct.SentryClient
 	PeerId          *typesproto.H512
 	streams         map[sentryproto.MessageId][]sentryproto.Sentry_MessagesServer
+	sentMessagesMu  sync.Mutex
 	sentMessages    []*sentryproto.OutboundMessageData
 	StreamWg        sync.WaitGroup
 	ReceiveWg       sync.WaitGroup
@@ -149,6 +148,9 @@ type ExecModuleTester struct {
 
 func (emt *ExecModuleTester) Close() {
 	emt.cancel()
+	if err := emt.bgComponentsEg.Wait(); err != nil {
+		require.Equal(emt.tb, context.Canceled, err) // upon waiting for clean exit we should get ctx cancelled
+	}
 	if emt.Engine != nil {
 		emt.Engine.Close()
 	}
@@ -157,9 +159,6 @@ func (emt *ExecModuleTester) Close() {
 	}
 	if emt.DB != nil {
 		emt.DB.Close()
-	}
-	if err := emt.bgComponentsEg.Wait(); err != nil {
-		require.Equal(emt.tb, context.Canceled, err) // upon waiting for clean exit we should get ctx cancelled
 	}
 }
 
@@ -198,22 +197,32 @@ func (emt *ExecModuleTester) HandShake(ctx context.Context, in *emptypb.Empty) (
 	return &sentryproto.HandShakeReply{Protocol: sentryproto.Protocol_ETH69}, nil
 }
 func (emt *ExecModuleTester) SendMessageByMinBlock(_ context.Context, r *sentryproto.SendMessageByMinBlockRequest) (*sentryproto.SentPeers, error) {
+	emt.sentMessagesMu.Lock()
 	emt.sentMessages = append(emt.sentMessages, r.Data)
+	emt.sentMessagesMu.Unlock()
 	return nil, nil
 }
 func (emt *ExecModuleTester) SendMessageById(_ context.Context, r *sentryproto.SendMessageByIdRequest) (*sentryproto.SentPeers, error) {
+	emt.sentMessagesMu.Lock()
 	emt.sentMessages = append(emt.sentMessages, r.Data)
+	emt.sentMessagesMu.Unlock()
 	return nil, nil
 }
 func (emt *ExecModuleTester) SendMessageToRandomPeers(_ context.Context, r *sentryproto.SendMessageToRandomPeersRequest) (*sentryproto.SentPeers, error) {
+	emt.sentMessagesMu.Lock()
 	emt.sentMessages = append(emt.sentMessages, r.Data)
+	emt.sentMessagesMu.Unlock()
 	return nil, nil
 }
 func (emt *ExecModuleTester) SendMessageToAll(_ context.Context, r *sentryproto.OutboundMessageData) (*sentryproto.SentPeers, error) {
+	emt.sentMessagesMu.Lock()
 	emt.sentMessages = append(emt.sentMessages, r)
+	emt.sentMessagesMu.Unlock()
 	return nil, nil
 }
 func (emt *ExecModuleTester) SentMessage(i int) (*sentryproto.OutboundMessageData, error) {
+	emt.sentMessagesMu.Lock()
+	defer emt.sentMessagesMu.Unlock()
 	if i < 0 || i >= len(emt.sentMessages) {
 		return nil, fmt.Errorf("no sent message for index %d found", i)
 	}
@@ -254,8 +263,6 @@ func (emt *ExecModuleTester) NodeInfo(context.Context, *emptypb.Empty) (*typespr
 	return nil, nil
 }
 
-const blockBufferSize = 128
-
 type Option func(*options)
 
 func WithStepSize(stepSize uint64) Option {
@@ -270,43 +277,109 @@ func WithExperimentalBAL() Option {
 	}
 }
 
+func WithGenesisSpec(gspec *types.Genesis) Option {
+	return func(opts *options) {
+		opts.genesis = gspec
+	}
+}
+
+func WithKey(key *ecdsa.PrivateKey) Option {
+	return func(opts *options) {
+		opts.key = key
+	}
+}
+
+func WithEngine(engine rules.Engine) Option {
+	return func(opts *options) {
+		opts.engine = engine
+	}
+}
+
+func WithPruneMode(pm prune.Mode) Option {
+	return func(opts *options) {
+		opts.pruneMode = &pm
+	}
+}
+
+func WithBlockBufferSize(size int) Option {
+	return func(opts *options) {
+		opts.blockBufferSize = size
+	}
+}
+
+func WithTxPool() Option {
+	return func(opts *options) {
+		opts.withTxPool = true
+	}
+}
+
+func WithChainConfig(cfg *chain.Config) Option {
+	return func(opts *options) {
+		opts.chainConfig = cfg
+	}
+}
+
 type options struct {
 	stepSize        *uint64
 	experimentalBAL bool
+	genesis         *types.Genesis
+	chainConfig     *chain.Config
+	key             *ecdsa.PrivateKey
+	engine          rules.Engine
+	pruneMode       *prune.Mode
+	blockBufferSize int
+	withTxPool      bool
 }
 
 func applyOptions(opts []Option) options {
-	var opt options
+	defaultKey, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	defaultPruneMode := prune.MockMode
+	opt := options{
+		key:             defaultKey,
+		pruneMode:       &defaultPruneMode,
+		blockBufferSize: 128,
+		chainConfig:     chain.TestChainConfig,
+		experimentalBAL: false,
+	}
 	for _, o := range opts {
 		o(&opt)
+	}
+	// genesis depends on key and chainConfig
+	if opt.genesis == nil {
+		address := crypto.PubkeyToAddress(opt.key.PublicKey)
+		opt.genesis = &types.Genesis{
+			Config: opt.chainConfig,
+			Alloc: types.GenesisAlloc{
+				address: {Balance: big.NewInt(1 * common.Ether)},
+			},
+		}
+	}
+	// engine depends on genesis
+	if opt.engine == nil {
+		switch {
+		case opt.genesis.Config.Bor != nil:
+			opt.engine = bor.NewFaker()
+		case opt.genesis.Config.TerminalTotalDifficultyPassed:
+			opt.engine = merge.NewFaker(ethash.NewFaker())
+		default:
+			opt.engine = ethash.NewFaker()
+		}
 	}
 	return opt
 }
 
-func NewWithGenesis(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, opts ...Option) *ExecModuleTester {
-	return NewWithGenesisPruneMode(tb, gspec, key, blockBufferSize, prune.MockMode, opts...)
-}
-
-func NewWithGenesisEngine(tb testing.TB, gspec *types.Genesis, engine rules.Engine, opts ...Option) *ExecModuleTester {
-	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	return NewWithEverything(tb, gspec, key, prune.MockMode, engine, blockBufferSize, false, opts...)
-}
-
-func NewWithGenesisPruneMode(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, blockBufferSize int, prune prune.Mode, opts ...Option) *ExecModuleTester {
-	var engine rules.Engine
-
-	switch {
-	case gspec.Config.Bor != nil:
-		engine = bor.NewFaker()
-	default:
-		engine = ethash.NewFaker()
-	}
-
-	return NewWithEverything(tb, gspec, key, prune, engine, blockBufferSize, false, opts...)
-}
-
-func NewWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine rules.Engine, blockBufferSize int, withTxPool bool, opts ...Option) *ExecModuleTester {
+// New creates an ExecModuleTester. When called with no options, it uses
+// sensible defaults (TestChainConfig, 1 Ether alloc, ethash.NewFaker, etc.).
+// Use With* options to customise.
+func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	opt := applyOptions(opts)
+
+	gspec := opt.genesis
+	key := opt.key
+	engine := opt.engine
+	pruneMode := *opt.pruneMode
+	blockBufferSize := opt.blockBufferSize
+	withTxPool := opt.withTxPool
 	tmpdir, err := os.MkdirTemp("", "mock-sentry-*")
 	if err != nil {
 		panic(err)
@@ -332,8 +405,10 @@ func NewWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKe
 	cfg.ChaosMonkey = false
 	cfg.Snapshot.ChainName = gspec.Config.ChainName
 	cfg.Genesis = gspec
-	cfg.Prune = prune
+	cfg.Prune = pruneMode
 	cfg.ExperimentalBAL = opt.experimentalBAL
+	cfg.FcuBackgroundPrune = false
+	cfg.FcuBackgroundCommit = false
 
 	logLvl := log.LvlError
 	if lvl, ok := os.LookupEnv("MOCK_SENTRY_LOG_LEVEL"); ok {
@@ -393,12 +468,25 @@ func NewWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKe
 	}
 
 	// Committed genesis will be shared between download and mock sentry
-	_, mock.Genesis, err = genesiswrite.CommitGenesisBlock(mock.DB, gspec, datadir.New(tmpdir), mock.Log)
+	_, mock.Genesis, err = genesiswrite.CommitGenesisBlock(mock.DB, gspec, "", datadir.New(tmpdir), mock.Log)
 	if _, ok := err.(*chain.ConfigCompatError); err != nil && !ok {
 		if tb != nil {
 			tb.Fatal(err)
 		} else {
 			panic(err)
+		}
+	}
+
+	// Deploy Prague system contracts (EIP-7002, EIP-7251) when Prague is active.
+	// These are required for the Merge engine's FinalizeAndAssemble to process
+	// withdrawal and consolidation requests.
+	if gspec.Config.IsPrague(0) {
+		if err := blockgen.InitPraguePreDeploys(mock.DB, mock.Log); err != nil {
+			if tb != nil {
+				tb.Fatal(err)
+			} else {
+				panic(err)
+			}
 		}
 	}
 
@@ -452,7 +540,7 @@ func NewWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKe
 		terseLogger.SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StderrHandler))
 		// Needs its own notifications to not update RPC daemon and txpool about pending blocks
 		stateSync := stageloop.NewInMemoryExecution(mock.Ctx, mock.DB, &cfg, mock.sentriesClient,
-			dirs, notifications, mock.BlockReader, blockWriter, nil, terseLogger)
+			dirs, notifications, mock.BlockReader, blockWriter, terseLogger)
 		chainReader := consensuschain.NewReader(mock.ChainConfig, tx, mock.BlockReader, logger)
 		// We start the mining step
 		if err := stageloop.StateStep(ctx, chainReader, mock.Engine, sd, tx, stateSync, unwindPoint, headersChain, bodiesChain); err != nil {
@@ -511,71 +599,58 @@ func NewWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKe
 
 	snapDownloader := mockDownloader(ctrl, mock.Dirs.Snap)
 
-	miningConfig := cfg.Builder
-	miningConfig.Etherbase = mock.Address
 	miningCancel := make(chan struct{})
 	go func() {
 		<-mock.Ctx.Done()
 		close(miningCancel)
 	}()
 
-	// proof-of-stake block building
-	assembleBlockPOS := func(param *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
-		builderStatePos := builderstages.NewBuilderState(&cfg.Builder)
-		builderStatePos.BuilderConfig.Etherbase = param.SuggestedFeeRecipient
-		proposingSync := stagedsync.New(
+	blkBuilder := builder.NewBuilder(
+		mock.Ctx,
+		mock.DB,
+		&cfg.Builder,
+		mock.ChainConfig,
+		mock.Engine,
+		mock.BlockReader,
+		stagedsync.StageExecuteBlocksCfg(
+			mock.DB,
+			pruneMode,
+			cfg.BatchSize,
+			mock.ChainConfig,
+			mock.Engine,
+			&vm.Config{},
+			mock.Notifications,
+			cfg.StateStream,
+			false, /*badBlockHalt*/
+			dirs,
+			mock.BlockReader,
+			mock.sentriesClient.Hd,
+			gspec,
 			cfg.Sync,
-			builderstages.BuilderStages(
-				mock.Ctx,
-				builderstages.StageBuilderCreateBlockCfg(builderStatePos, mock.ChainConfig, mock.Engine, param, mock.BlockReader),
-				stagedsync.StageExecuteBlocksCfg(
-					mock.DB,
-					prune,
-					cfg.BatchSize,
-					mock.ChainConfig,
-					mock.Engine,
-					&vm.Config{},
-					mock.Notifications,
-					cfg.StateStream,
-					false, /*badBlockHalt*/
-					dirs,
-					mock.BlockReader,
-					mock.sentriesClient.Hd,
-					gspec,
-					cfg.Sync,
-					nil,
-					false, /*experimentalBAL*/
-				),
-				stagedsync.StageSendersCfg(mock.ChainConfig, cfg.Sync, false /* badBlockHalt */, dirs.Tmp, prune, mock.BlockReader, mock.sentriesClient.Hd),
-				builderstages.StageBuilderExecCfg(builderStatePos, nil /* notifier */, mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, interrupt, param.PayloadId, mock.TxPool, mock.BlockReader),
-				builderstages.StageBuilderFinishCfg(mock.ChainConfig, mock.Engine, builderStatePos, miningCancel, mock.BlockReader, latestBlockBuiltStore),
-			),
-			builderstages.BuilderUnwindOrder,
-			builderstages.BuilderPruneOrder,
-			logger,
-			stages.ModeBlockProduction,
-		)
-		// We start the mining step
-		if err := stageloop.MiningStep(ctx, mock.DB, proposingSync, tmpdir, logger); err != nil {
-			return nil, err
-		}
-		block := <-builderStatePos.BuilderResultCh
-		return block, nil
-	}
+			false, /*experimentalBAL*/
+		),
+		nil, /*notifier*/
+		&vm.Config{},
+		dirs.Tmp,
+		mock.TxPool,
+		miningCancel,
+		latestBlockBuiltStore,
+		logger,
+	)
 
 	blockRetire := freezeblocks.NewBlockRetire(1, dirs, mock.BlockReader, blockWriter, mock.DB, nil, nil, mock.ChainConfig, &cfg, mock.Notifications.Events, nil, logger)
 	mock.Sync = stagedsync.New(
 		cfg.Sync,
 		stagedsync.DefaultStages(
 			mock.Ctx,
-			stagedsync.StageSnapshotsCfg(mock.DB, mock.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, mock.BlockReader, mock.Notifications, false, false, false, nil, prune),
+			stagedsync.StageSnapshotsCfg(mock.DB, mock.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, mock.BlockReader, mock.Notifications, false, false, false, pruneMode, nil),
 			stagedsync.StageHeadersCfg(mock.sentriesClient.Hd, mock.ChainConfig, cfg.Sync, sendHeaderRequest, propagateNewBlockHashes, penalize, false /* noP2PDiscovery */, mock.BlockReader),
 			stagedsync.StageBlockHashesCfg(mock.Dirs.Tmp, blockWriter),
 			stagedsync.StageBodiesCfg(mock.sentriesClient.Bd, sendBodyRequest, penalize, blockPropagator, cfg.Sync.BodyDownloadTimeoutSeconds, mock.ChainConfig, mock.BlockReader, blockWriter),
-			stagedsync.StageSendersCfg(mock.ChainConfig, cfg.Sync, false /* badBlockHalt */, dirs.Tmp, prune, mock.BlockReader, mock.sentriesClient.Hd),
+			stagedsync.StageSendersCfg(mock.ChainConfig, cfg.Sync, false /* badBlockHalt */, dirs.Tmp, pruneMode, mock.BlockReader, mock.sentriesClient.Hd),
 			stagedsync.StageExecuteBlocksCfg(
 				mock.DB,
-				prune,
+				pruneMode,
 				cfg.BatchSize,
 				mock.ChainConfig,
 				mock.Engine,
@@ -588,10 +663,9 @@ func NewWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKe
 				mock.sentriesClient.Hd,
 				gspec,
 				cfg.Sync,
-				nil,
 				false, /*experimentalBAL*/
 			),
-			stagedsync.StageTxLookupCfg(prune, dirs.Tmp, mock.BlockReader),
+			stagedsync.StageTxLookupCfg(pruneMode, dirs.Tmp, mock.BlockReader),
 			stagedsync.StageFinishCfg(forkValidator),
 		),
 		stagedsync.DefaultUnwindOrder,
@@ -609,7 +683,7 @@ func NewWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKe
 	}
 
 	cfg.Genesis = gspec
-	pipelineStages := stageloop.NewPipelineStages(mock.Ctx, db, &cfg, mock.sentriesClient, mock.Notifications, snapDownloader, mock.BlockReader, blockRetire, nil, forkValidator, tracer)
+	pipelineStages := stageloop.NewPipelineStages(mock.Ctx, db, &cfg, mock.sentriesClient, mock.Notifications, snapDownloader, mock.BlockReader, blockRetire, forkValidator, tracer, nil)
 	mock.posStagedSync = stagedsync.New(cfg.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 
 	hook := stageloop.NewHook(mock.Ctx, mock.Notifications, mock.posStagedSync, mock.ChainConfig, logger, nil, nil, nil)
@@ -624,7 +698,7 @@ func NewWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKe
 		mock.posStagedSync,
 		forkValidator,
 		mock.ChainConfig,
-		assembleBlockPOS,
+		blkBuilder.Build,
 		hook,
 		mock.Notifications.Accumulator,
 		mock.Notifications.RecentReceipts,
@@ -636,56 +710,28 @@ func NewWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKe
 		cfg.FcuBackgroundPrune,
 		cfg.FcuBackgroundCommit,
 		onlySnapDownloadOnStart,
+		func() error { return nil },
 	)
 
 	mock.sentriesClient.Hd.StartPoSDownloader(mock.Ctx, sendHeaderRequest, penalize)
 
-	// pow mining
-	// TODO(yperbasis) remove pow mining
-	miner := builderstages.NewBuilderState(&miningConfig)
-	mock.PendingBlocks = miner.PendingResultCh
-	mock.MinedBlocks = miner.BuilderResultCh
-	mock.MiningSync = stagedsync.New(
-		cfg.Sync,
-		builderstages.BuilderStages(
-			mock.Ctx,
-			builderstages.StageBuilderCreateBlockCfg(miner, mock.ChainConfig, mock.Engine, nil, mock.BlockReader),
-			stagedsync.StageExecuteBlocksCfg(
-				mock.DB,
-				prune,
-				cfg.BatchSize,
-				mock.ChainConfig,
-				mock.Engine,
-				&vm.Config{},
-				mock.Notifications,
-				cfg.StateStream,
-				/*badBlockHalt*/ false,
-				dirs,
-				mock.BlockReader,
-				mock.sentriesClient.Hd,
-				gspec,
-				cfg.Sync,
-				nil,
-				/*experimentalBAL*/ false,
-			),
-			stagedsync.StageSendersCfg(mock.ChainConfig, cfg.Sync, false /* badBlockHalt */, dirs.Tmp, prune, mock.BlockReader, mock.sentriesClient.Hd),
-			builderstages.StageBuilderExecCfg(miner, nil, mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, nil, 0, mock.TxPool, mock.BlockReader),
-			builderstages.StageBuilderFinishCfg(mock.ChainConfig, mock.Engine, miner, miningCancel, mock.BlockReader, latestBlockBuiltStore),
-		),
-		builderstages.BuilderUnwindOrder,
-		builderstages.BuilderPruneOrder,
-		logger,
-		stages.ModeBlockProduction,
-	)
-
 	mock.StreamWg.Add(1)
-	go mock.sentriesClient.RecvMessageLoop(mock.Ctx, mock.SentryClient, &mock.ReceiveWg)
+	mock.bgComponentsEg.Go(func() error {
+		mock.sentriesClient.RecvMessageLoop(mock.Ctx, mock.SentryClient, &mock.ReceiveWg)
+		return nil
+	})
 	mock.StreamWg.Wait()
 	mock.StreamWg.Add(1)
-	go mock.sentriesClient.RecvUploadMessageLoop(mock.Ctx, mock.SentryClient, &mock.ReceiveWg)
+	mock.bgComponentsEg.Go(func() error {
+		mock.sentriesClient.RecvUploadMessageLoop(mock.Ctx, mock.SentryClient, &mock.ReceiveWg)
+		return nil
+	})
 	mock.StreamWg.Wait()
 	mock.StreamWg.Add(1)
-	go mock.sentriesClient.RecvUploadHeadersMessageLoop(mock.Ctx, mock.SentryClient, &mock.ReceiveWg)
+	mock.bgComponentsEg.Go(func() error {
+		mock.sentriesClient.RecvUploadHeadersMessageLoop(mock.Ctx, mock.SentryClient, &mock.ReceiveWg)
+		return nil
+	})
 	mock.StreamWg.Wait()
 
 	//app expecting that genesis will always be in db
@@ -710,74 +756,6 @@ func mockDownloader(ctrl *gomock.Controller, snapRoot string) downloader.Client 
 		AnyTimes()
 
 	return downloader.NewRpcClient(snapDownloader, snapRoot)
-}
-
-// New is convenience function to create an ExecModuleTester with some pre-set values
-func New(tb testing.TB) *ExecModuleTester {
-	funds := big.NewInt(1 * common.Ether)
-	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	address := crypto.PubkeyToAddress(key.PublicKey)
-	chainConfig := chain.TestChainConfig
-	gspec := &types.Genesis{
-		Config: chainConfig,
-		Alloc: types.GenesisAlloc{
-			address: {Balance: funds},
-		},
-	}
-	return NewWithGenesis(tb, gspec, key)
-}
-
-func NewWithTxPool(t *testing.T) *ExecModuleTester {
-	funds := big.NewInt(1 * common.Ether)
-	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	address := crypto.PubkeyToAddress(key.PublicKey)
-	chainConfig := chain.TestChainConfig
-	gspec := &types.Genesis{
-		Config: chainConfig,
-		Alloc: types.GenesisAlloc{
-			address: {Balance: funds},
-		},
-	}
-
-	return NewWithEverything(t, gspec, key, prune.MockMode, ethash.NewFaker(), blockBufferSize, true)
-}
-
-func NewWithTxPoolCancun(t *testing.T) *ExecModuleTester {
-	funds := big.NewInt(1 * common.Ether)
-	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	address := crypto.PubkeyToAddress(key.PublicKey)
-
-	var chainConfig chain.Config
-	err := copier.CopyWithOption(&chainConfig, chain.AllProtocolChanges, copier.Option{DeepCopy: true})
-	require.NoError(t, err)
-	// disable post-cancun forks
-	chainConfig.PragueTime = nil
-	chainConfig.OsakaTime = nil
-	chainConfig.AmsterdamTime = nil
-
-	gspec := &types.Genesis{
-		Config: &chainConfig,
-		Alloc: types.GenesisAlloc{
-			address: {Balance: funds},
-		},
-	}
-
-	return NewWithEverything(t, gspec, key, prune.MockMode, ethash.NewFaker(), blockBufferSize, true)
-}
-
-func NewWithTxPoolAllProtocolChanges(t *testing.T) *ExecModuleTester {
-	funds := big.NewInt(1 * common.Ether)
-	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	address := crypto.PubkeyToAddress(key.PublicKey)
-	chainConfig := chain.AllProtocolChanges
-	gspec := &types.Genesis{
-		Config: chainConfig,
-		Alloc: types.GenesisAlloc{
-			address: {Balance: funds},
-		},
-	}
-
-	return NewWithEverything(t, gspec, key, prune.MockMode, ethash.NewFaker(), blockBufferSize, true)
 }
 
 func (emt *ExecModuleTester) EnableLogs() {

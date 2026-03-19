@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"sync/atomic"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -87,8 +88,8 @@ type EVM struct {
 	// optional overridden set of precompiled contracts
 	precompiles PrecompiledContracts
 
-	hasher    keccakState // Keccak256 hasher instance shared across opcodes
-	hasherBuf common.Hash // Keccak256 hasher result array shared across opcodes
+	hasher    keccak.KeccakState // Keccak256 hasher instance shared across opcodes
+	hasherBuf common.Hash        // Keccak256 hasher result array shared across opcodes
 
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
@@ -210,13 +211,17 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		return nil, gas, ErrDepth
 	}
 	if typ == CALL || typ == CALLCODE {
-		// Fail if we're trying to transfer more than the available balance
-		canTransfer, err := evm.Context.CanTransfer(evm.intraBlockState, caller, value)
-		if err != nil {
-			return nil, 0, err
-		}
-		if !value.IsZero() && !canTransfer {
-			if !bailout {
+		// Fail if we're trying to transfer more than the available balance.
+		// Only check when value is non-zero — matching geth's short-circuit
+		// behavior. Calling CanTransfer for zero-value calls (e.g. system
+		// calls) creates spurious balance reads on the caller that pollute
+		// the Block Access List (EIP-7928).
+		if !value.IsZero() {
+			canTransfer, err := evm.Context.CanTransfer(evm.intraBlockState, caller, value)
+			if err != nil {
+				return nil, 0, err
+			}
+			if !canTransfer && !bailout {
 				return nil, gas, ErrInsufficientBalance
 			}
 		}
@@ -421,8 +426,12 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	// BAL: record target address even on failed CREATE/CREATE2 calls
 	evm.intraBlockState.MarkAddressAccess(address, false)
 
-	// Ensure there's no existing contract already at the designated address
-	contractHash, err := evm.intraBlockState.ResolveCodeHash(address)
+	// Ensure there's no existing contract already at the designated address.
+	// Use GetCodeHash (not ResolveCodeHash) so that an EIP-7702 delegation
+	// designator (0xef0100...) is seen as non-empty code, triggering a collision.
+	// This matches geth's behavior: CREATE/CREATE2 must not overwrite a
+	// delegated account even if the delegation target is empty.
+	contractHash, err := evm.intraBlockState.GetCodeHash(address)
 	if err != nil {
 		return nil, accounts.NilAddress, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
@@ -468,14 +477,9 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	ret, gasRemaining, err = evm.Run(contract, gasRemaining, nil, false)
 
 	// EIP-170: Contract code size limit
-	if err == nil && evm.chainRules.IsSpuriousDragon && len(ret) > evm.maxCodeSize() {
-		// Gnosis Chain prior to Shanghai didn't have EIP-170 enabled,
-		// but EIP-3860 (part of Shanghai) requires EIP-170.
-		if !evm.chainRules.IsAura || evm.config.HasEip3860(evm.chainRules) {
-			err = ErrMaxCodeSizeExceeded
-		}
+	if err == nil {
+		err = CheckMaxCodeSize(len(ret), evm.chainRules)
 	}
-
 	// Reject code starting with 0xEF if EIP-3541 is enabled.
 	if err == nil && evm.chainRules.IsLondon && len(ret) >= 1 && ret[0] == 0xEF {
 		err = ErrInvalidCode
@@ -509,13 +513,6 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	}
 
 	return ret, address, gasRemaining, err
-}
-
-func (evm *EVM) maxCodeSize() int {
-	if evm.chainConfig.Bor != nil && evm.chainConfig.Bor.IsAhmedabad(evm.Context.BlockNumber) {
-		return params.MaxCodeSizePostAhmedabad
-	}
-	return params.MaxCodeSize
 }
 
 // Create creates a new contract using code as deployment code.

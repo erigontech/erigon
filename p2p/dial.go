@@ -261,7 +261,7 @@ loop:
 
 		case node := <-nodesCh:
 			if err := d.checkDial(node); err != nil {
-				d.log.Trace("Discarding dial candidate", "id", node.ID(), "ip", node.IP(), "reason", err)
+				d.log.Trace("[p2p] Discarding dial candidate", "id", node.ID(), "ip", node.IP(), "reason", err)
 			} else {
 				d.startDial(newDialTask(node, dynDialedConn))
 			}
@@ -295,7 +295,7 @@ loop:
 		case node := <-d.addStaticCh:
 			id := node.ID()
 			_, exists := d.static[id]
-			d.log.Trace("Adding static node", "id", id, "ip", node.IP(), "added", !exists)
+			d.log.Trace("[p2p] Adding static node", "id", id, "ip", node.IP(), "added", !exists)
 			if exists {
 				continue loop
 			}
@@ -308,7 +308,7 @@ loop:
 		case node := <-d.remStaticCh:
 			id := node.ID()
 			task := d.static[id]
-			d.log.Trace("Removing static node", "id", id, "ok", task != nil)
+			d.log.Trace("[p2p] Removing static node", "id", id, "ok", task != nil)
 			if task != nil {
 				delete(d.static, id)
 				if task.staticPoolIndex >= 0 {
@@ -464,7 +464,7 @@ func (d *dialScheduler) removeFromStaticPool(idx int) {
 // startDial runs the given dial task in a separate goroutine.
 func (d *dialScheduler) startDial(task *dialTask) {
 	node := task.dest()
-	d.log.Trace("Starting p2p dial", "id", node.ID(), "ip", node.IP(), "flag", task.flags)
+	d.log.Trace("[p2p] Starting p2p dial", "id", node.ID(), "ip", node.IP(), "flag", task.flags)
 	hkey := string(node.ID().Bytes())
 	d.history.add(hkey, d.clock.Now().Add(dialHistoryExpiration))
 	d.dialing[node.ID()] = task
@@ -543,13 +543,13 @@ func (t *dialTask) resolve(d *dialScheduler) bool {
 		if t.resolveDelay > maxResolveDelay {
 			t.resolveDelay = maxResolveDelay
 		}
-		d.log.Warn("Resolving node failed", "id", t.dest().ID(), "newdelay", t.resolveDelay)
+		d.log.Warn("[p2p] Resolving node failed", "id", t.dest().ID(), "newdelay", t.resolveDelay)
 		return false
 	}
 	// The node was found.
 	t.resolveDelay = initialResolveDelay
 	t.destPtr.Store(resolved)
-	d.log.Trace("Resolved node", "id", resolved.ID(), "addr", &net.TCPAddr{IP: resolved.IP(), Port: resolved.TCP()})
+	d.log.Trace("[p2p] Resolved node", "id", resolved.ID(), "addr", &net.TCPAddr{IP: resolved.IP(), Port: resolved.TCP()})
 	return true
 }
 
@@ -558,7 +558,7 @@ func (t *dialTask) dial(d *dialScheduler, dest *enode.Node) error {
 	fd, err := d.dialer.Dial(d.ctx, dest)
 	if err != nil {
 		cleanErr := cleanupDialErr(err)
-		d.log.Trace("Dial error", "id", dest.ID(), "addr", nodeAddr(dest), "conn", t.flags, "err", cleanErr)
+		d.log.Trace("[p2p] Dial error", "id", dest.ID(), "addr", nodeAddr(dest), "conn", t.flags, "err", cleanErr)
 
 		d.mutex.Lock()
 		d.errors[cleanErr.Error()] = d.errors[cleanErr.Error()] + 1

@@ -1,20 +1,11 @@
 name: Consensus spec
 on:
-  push:
-    branches:
-      - main
-      - 'release/**'
-  pull_request:
-    branches:
-      - main
-      - 'release/**'
-      - performance
-      - performance-stable
-    types:
-      - opened
-      - reopened
-      - synchronize
-      - ready_for_review
+  workflow_dispatch:
+  workflow_call:
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
   tests:
@@ -25,27 +16,25 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v6
+      - name: Checkout custom actions
+        uses: actions/checkout@v6
         with:
           fetch-depth: 1
 
-      - uses: actions/setup-go@v6
-        with:
-          go-version: '1.25'
-          cache: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') }}
+      - uses: ./.github/actions/setup-erigon
+        id: erigon
 
-      - name: Install dependencies on Linux
-        if: runner.os == 'Linux'
-        run: sudo apt update -y && sudo apt install -y build-essential
+      - name: test-integration-caplin
+        run: |
+          cd cl/spectest
+          if make tests; then
+            make mainnet 2>&1 | ../../tools/filter-test-output | tee run.log
+          else
+            echo "::warning::consensus spec test setup failed; skipping mainnet tests"
+          fi
 
-      - name: Download consensus spec tests
-        id: download-spec-tests
-        continue-on-error: true
-        run: cd cl/spectest && make download-spec
-
-      - name: Run consensus spec tests
-        if: steps.download-spec-tests.outcome == 'success'
-        run: cd cl/spectest && make tests && make mainnet
+      - uses: ./.github/actions/cleanup-erigon
+        if: always()
 
   tests-windows:
     strategy:
@@ -54,18 +43,18 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v6
+      - name: Checkout custom actions
+        uses: actions/checkout@v6
         with:
           fetch-depth: 1
 
-      - uses: actions/setup-go@v6
-        with:
-          go-version: '1.25'
-          cache: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') }}
-
-      - name: Install make
-        run: choco install make -y
+      - uses: ./.github/actions/setup-erigon
+        id: erigon
 
       - name: test-integration-caplin
-        shell: bash
-        run: cd cl/spectest && make tests mainnet
+        run: |
+          cd cl/spectest && make tests
+          make mainnet 2>&1 | ../../tools/filter-test-output | tee run.log
+
+      - uses: ./.github/actions/cleanup-erigon
+        if: always()

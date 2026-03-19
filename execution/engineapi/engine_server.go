@@ -140,7 +140,7 @@ func (e *EngineServer) Start(
 			return nil
 		})
 	}
-	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, httpConfig.WithDatadir, httpConfig.EvmCallTimeout, engineReader, httpConfig.Dirs, nil, httpConfig.RangeLimit)
+	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, httpConfig.WithDatadir, httpConfig.EvmCallTimeout, engineReader, httpConfig.Dirs, nil, httpConfig.BlockRangeLimit, httpConfig.GetLogsMaxResults)
 	ethImpl := jsonrpc.NewEthAPI(base, db, eth, e.txpool, mining, jsonrpc.NewEthApiConfig(httpConfig), e.logger)
 
 	apiList := []rpc.API{
@@ -156,6 +156,16 @@ func (e *EngineServer) Start(
 			Version:   "1.0",
 		}}
 
+	if httpConfig.TestingEnabled {
+		e.logger.Warn("[EngineServer] testing_ RPC namespace is ENABLED — do not use on production networks")
+		apiList = append(apiList, rpc.API{
+			Namespace: "testing",
+			Public:    false,
+			Service:   TestingAPI(NewTestingImpl(e, true)),
+			Version:   "1.0",
+		})
+	}
+
 	eg.Go(func() error {
 		defer e.logger.Debug("[EngineServer] engine rpc server goroutine terminated")
 		err := cli.StartRpcServerWithJwtAuthentication(ctx, httpConfig, apiList, e.logger)
@@ -168,13 +178,20 @@ func (e *EngineServer) Start(
 }
 
 func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals types.Withdrawals) error {
-	if !s.config.IsShanghai(time) && withdrawals != nil {
+	if s.isWithdrawalsPresenceValid(time, withdrawals) {
+		return nil
+	}
+	if !s.config.IsShanghai(time) {
 		return &rpc.InvalidParamsError{Message: "withdrawals before Shanghai"}
 	}
-	if s.config.IsShanghai(time) && withdrawals == nil {
-		return &rpc.InvalidParamsError{Message: "missing withdrawals list"}
+	return &rpc.InvalidParamsError{Message: "missing withdrawals list"}
+}
+
+func (s *EngineServer) isWithdrawalsPresenceValid(time uint64, withdrawals types.Withdrawals) bool {
+	if !s.config.IsShanghai(time) {
+		return withdrawals == nil
 	}
-	return nil
+	return withdrawals != nil
 }
 
 func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, executionRequests []hexutil.Bytes) error {
@@ -593,6 +610,10 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 	}
 
 	data := resp.Data
+	if data.ExecutionPayload == nil {
+		s.logger.Warn("Payload build failed (nil ExecutionPayload)", "payloadId", payloadId)
+		return nil, &engine_helpers.UnknownPayloadErr
+	}
 	var executionRequests []hexutil.Bytes
 	if version >= clparams.ElectraVersion {
 		executionRequests = make([]hexutil.Bytes, 0)
@@ -703,6 +724,9 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	}
 	if s.config.IsCancun(timestamp) && version < clparams.DenebVersion { // Not V3 after cancun
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+	}
+	if version >= clparams.CapellaVersion && !s.isWithdrawalsPresenceValid(timestamp, payloadAttributes.Withdrawals) {
+		return nil, &engine_helpers.InvalidPayloadAttributesErr
 	}
 
 	if !s.proposing {

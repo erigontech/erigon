@@ -190,7 +190,7 @@ func FindOverlaps(in []snaptype.FileInfo) (res []snaptype.FileInfo, overlapped [
 	return res, overlapped
 }
 
-func CanRetire(from, to uint64, snapType snaptype.Enum, chainConfig *chain.Config) (blockFrom, blockTo uint64, can bool) {
+func CanRetire(from, to uint64, snapType snaptype.Enum, snCfg *snapcfg.Cfg) (blockFrom, blockTo uint64, can bool) {
 	if to <= from {
 		return
 	}
@@ -198,14 +198,7 @@ func CanRetire(from, to uint64, snapType snaptype.Enum, chainConfig *chain.Confi
 	roundedTo1K := (to / 1_000) * 1_000
 	var maxJump uint64 = 1_000
 
-	var chainName string
-
-	if chainConfig != nil {
-		chainName = chainConfig.ChainName
-	}
-
-	snapCfg, _ := snapcfg.KnownCfg(chainName)
-	mergeLimit := snapcfg.MergeLimitFromCfg(snapCfg, snapType, blockFrom)
+	mergeLimit := snapcfg.MergeLimitFromCfg(snCfg, snapType, blockFrom)
 
 	if blockFrom%mergeLimit == 0 {
 		maxJump = mergeLimit
@@ -504,6 +497,12 @@ type VisibleSegments []*VisibleSegment
 
 func (s VisibleSegments) BeginRo() *RoTx {
 	for _, seg := range s {
+		if seg.src == nil {
+			continue
+		}
+		if seg.src.frozen {
+			continue
+		}
 		seg.src.refcount.Add(1)
 	}
 	return &RoTx{Segments: s}
@@ -523,6 +522,9 @@ func (s *RoTx) Close() {
 	for i := range VisibleSegments {
 		src := VisibleSegments[i].src
 		if src == nil {
+			continue
+		}
+		if src.frozen {
 			continue
 		}
 
@@ -558,6 +560,7 @@ type RoSnapshots struct {
 	segmentsMinByType map[snaptype.Enum]*atomic.Uint64 // min block number per segment type
 	idxMax            atomic.Uint64                    // all types of .idx files are available - up to this number
 	cfg               ethconfig.BlocksFreezing
+	snCfg             *snapcfg.Cfg
 	logger            log.Logger
 
 	ready     ready
@@ -582,7 +585,8 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	for i, t := range types {
 		enums[i] = t.Enum()
 	}
-	s := &RoSnapshots{dir: snapDir, cfg: cfg, logger: logger,
+	snCfg := snapcfg.KnownCfgOrDevnet(cfg.ChainName)
+	s := &RoSnapshots{dir: snapDir, cfg: cfg, snCfg: snCfg, logger: logger,
 		types: types, enums: enums,
 		dirty:             make([]*btree.BTreeG[*DirtySegment], snaptype.MaxEnum),
 		alignMin:          alignMin,
@@ -1083,11 +1087,9 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 	var segmentsMaxSet bool
 
 	wg := &errgroup.Group{}
-	wg.SetLimit(64)
+	wg.SetLimit(estimate.HalfCPUs())
 	//fmt.Println("RS", s)
 	//defer fmt.Println("Done RS", s)
-
-	snConfig, _ := snapcfg.KnownCfg(s.cfg.ChainName)
 
 	// Read full directory listing once for efficient index file lookups
 	var dirEntries []string
@@ -1136,7 +1138,7 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 		})
 
 		if !exists {
-			sn = &DirtySegment{segType: f.Type, version: f.Version, Range: Range{f.From, f.To}, frozen: snConfig.IsFrozen(f)}
+			sn = &DirtySegment{segType: f.Type, version: f.Version, Range: Range{f.From, f.To}, frozen: s.snCfg.IsFrozen(f)}
 		}
 
 		if open {
@@ -1393,13 +1395,12 @@ func (s *RoSnapshots) delete(fileName string) error {
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
 
-	var err error
 	var delSeg *DirtySegment
 	var dirtySegments *btree.BTreeG[*DirtySegment]
 
 	_, fName := filepath.Split(fileName)
 	for _, t := range s.enums {
-		findDelSeg := false
+		found := false
 		s.dirty[t].Walk(func(segs []*DirtySegment) bool {
 			for _, sn := range segs {
 				if sn.Decompressor == nil {
@@ -1411,17 +1412,22 @@ func (s *RoSnapshots) delete(fileName string) error {
 				sn.canDelete.Store(true)
 				delSeg = sn
 				dirtySegments = s.dirty[t]
-				findDelSeg = false
-				return true
+				found = true
+				return false
 			}
 			return true
 		})
-		if findDelSeg {
+		if found {
 			break
 		}
 	}
+	if delSeg == nil || dirtySegments == nil {
+		// Deletion is intentionally idempotent because a snapshot may already
+		// have been removed from the in-memory set by another pruning path.
+		return nil
+	}
 	dirtySegments.Delete(delSeg)
-	return err
+	return nil
 }
 
 // prune visible segments

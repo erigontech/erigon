@@ -5,6 +5,7 @@ env:
   APPLICATION: "erigon"
   APP_REPO: "erigontech/erigon"
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
+  BUILDER_IMAGE: "golang:1.26-trixie"
   LABEL_DESCRIPTION: "[docker image built on a last commit id from the main branch] Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency frontier. Archive Node by default."
 
 on:
@@ -116,6 +117,7 @@ jobs:
           docker buildx build \
           --file ${{ env.DOCKERFILE_PATH }} \
           --build-arg BINARIES='${{ steps.def_docker_vars.outputs.binaries }}' \
+          --build-arg BUILDER_IMAGE='${{ env.BUILDER_IMAGE }}' \
           --attest type=provenance,mode=max \
           --no-cache \
           --sbom=true \

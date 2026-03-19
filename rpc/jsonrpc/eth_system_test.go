@@ -50,9 +50,12 @@ func TestGasPrice(t *testing.T) {
 		expectedPrice *big.Int
 	}{
 		{
-			description:   "standard settings 60 blocks",
-			chainSize:     60,
-			expectedPrice: big.NewInt(common.GWei * int64(36)),
+			description: "standard settings 60 blocks",
+			chainSize:   60,
+			// New two-phase oracle: phase1 fetches last checkBlocks=20 (blocks 41-60, prices 41-60 GWei),
+			// phase2 extends by sparseCount=20 more (blocks 21-40, prices 21-40 GWei).
+			// Total 40 prices [21-60], percentile 60 → index 23 → 44 GWei.
+			expectedPrice: big.NewInt(common.GWei * int64(44)),
 		},
 		{
 			description:   "standard settings 30 blocks",
@@ -179,7 +182,7 @@ func TestEthConfig(t *testing.T) {
 			var genesis types.Genesis
 			err = json.Unmarshal(genesisBytes, &genesis)
 			require.NoError(t, err)
-			m := execmoduletester.NewWithGenesis(t, &genesis, key)
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&genesis), execmoduletester.WithKey(key))
 			defer m.Close()
 			eth := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 			if test.head != nil {
@@ -218,7 +221,7 @@ func createGasPriceTestKV(t *testing.T, chainSize int) *execmoduletester.ExecMod
 		}
 		signer = types.LatestSigner(gspec.Config)
 	)
-	m := execmoduletester.NewWithGenesis(t, gspec, key)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
 	// Generate testing blocks
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(i int, b *blockgen.BlockGen) {

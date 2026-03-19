@@ -1,0 +1,21 @@
+name: Check large files
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          filter: blob:none
+
+      - name: Check for large files in PR
+        run: make check-large-files BASE=${{ github.event.pull_request.base.sha }}

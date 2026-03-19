@@ -54,14 +54,13 @@ func (ht *HistoryRoTx) iterateKeyTxNumFrozen(fromTxNum, toTxNum int, asc order.B
 		}
 		g := ht.iit.dataReader(item.src.decompressor)
 		g.Reset(0)
-		wrapper := NewSegReaderWrapper(g)
-		if wrapper.HasNext() {
-			key, val, err := wrapper.Next()
-			if err != nil {
-				s.Close()
-				return nil, err
+		if g.HasNext() {
+			key, _ := g.Next(nil)
+			var val []byte
+			if g.HasNext() {
+				val, _ = g.Next(nil)
 			}
-			heap.Push(&s.h, &ReconItem{g: wrapper, key: key, val: val, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum})
+			heap.Push(&s.h, &ReconItem{g: g, key: key, val: val, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum})
 		}
 	}
 	if err := s.advance(); err != nil {
@@ -114,19 +113,17 @@ type HistoryKeyTxNumIterFiles struct {
 	curKey    []byte
 	curIdxVal []byte
 	curSeq    multiencseq.SequenceReader
-	curTxIter stream.U64
+	curTxIter multiencseq.SequenceIterator
+	hasIter   bool
 }
 
 func (hi *HistoryKeyTxNumIterFiles) Close() {
-	if hi.curTxIter != nil {
-		hi.curTxIter.Close()
-		hi.curTxIter = nil
-	}
+	hi.hasIter = false
 }
 
 func (hi *HistoryKeyTxNumIterFiles) advance() error {
 	for {
-		if hi.curTxIter != nil && hi.curTxIter.HasNext() {
+		if hi.hasIter && hi.curTxIter.HasNext() {
 			txNum, err := hi.curTxIter.Next()
 			if err != nil {
 				return err
@@ -137,7 +134,7 @@ func (hi *HistoryKeyTxNumIterFiles) advance() error {
 				return nil
 			}
 			// txNums are ascending — all remaining will also be >= endTxNum
-			hi.curTxIter = nil
+			hi.hasIter = false
 		}
 
 		if hi.h.Len() == 0 {
@@ -145,16 +142,19 @@ func (hi *HistoryKeyTxNumIterFiles) advance() error {
 			return nil
 		}
 
-		top := heap.Pop(&hi.h).(*ReconItem)
+		top := hi.h[0]
 		key, idxVal := top.key, top.val
 
 		if top.g.HasNext() {
-			var err error
-			top.key, top.val, err = top.g.Next()
-			if err != nil {
-				return err
+			top.key, _ = top.g.Next(nil)
+			if top.g.HasNext() {
+				top.val, _ = top.g.Next(nil)
+			} else {
+				top.val = nil
 			}
-			heap.Push(&hi.h, top)
+			heap.Fix(&hi.h, 0)
+		} else {
+			heap.Pop(&hi.h)
 		}
 
 		// Clone: segment reader reuses buffers
@@ -162,7 +162,8 @@ func (hi *HistoryKeyTxNumIterFiles) advance() error {
 		hi.curIdxVal = append(hi.curIdxVal[:0], idxVal...)
 
 		hi.curSeq.Reset(top.startTxNum, hi.curIdxVal)
-		hi.curTxIter = hi.curSeq.Iterator(int(hi.startTxNum))
+		hi.curTxIter.Reset(&hi.curSeq, int(hi.startTxNum))
+		hi.hasIter = true
 	}
 }
 

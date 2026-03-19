@@ -25,9 +25,9 @@ import (
 	"testing"
 	"time"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -242,7 +242,7 @@ func TestAPI(t *testing.T) {
 			}
 			defer d.Close()
 			txNum := uint64(0)
-			if err := d.DomainPut(kv.AccountsDomain, tx, k, v, txNum, nil, 0); err != nil {
+			if err := d.DomainPut(kv.AccountsDomain, tx, k, v, txNum, nil); err != nil {
 				return err
 			}
 			return d.Flush(ctx, tx)
@@ -509,7 +509,7 @@ func TestOnNewBlockCodeHashKey(t *testing.T) {
 
 	require.Len(elems, 1)
 
-	h := sha3.NewLegacyKeccak256()
+	h := keccak.NewFastKeccak()
 	h.Write(code)
 	expectedKey := h.Sum(nil)
 

@@ -102,6 +102,9 @@ var (
 )
 
 func gasSStore(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
+	if evm.readOnly {
+		return 0, ErrWriteProtection
+	}
 	value, x := callContext.Stack.Back(1), callContext.Stack.Back(0)
 	key := accounts.InternKey(x.Bytes32())
 	current, _ := evm.IntraBlockState().GetState(callContext.Address(), key)
@@ -183,6 +186,9 @@ func gasSStore(evm *EVM, callContext *CallContext, availableGas uint64, memorySi
 //     2.2.2.1. If original value is 0, add SSTORE_SET_GAS - SLOAD_GAS to refund counter.
 //     2.2.2.2. Otherwise, add SSTORE_RESET_GAS - SLOAD_GAS gas to refund counter.
 func gasSStoreEIP2200(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
+	if evm.readOnly {
+		return 0, ErrWriteProtection
+	}
 	// If we fail the minimum gas availability invariant, fail (0)
 	if callContext.gas <= params.SstoreSentryGasEIP2200 {
 		return 0, errors.New("not enough gas for reentrancy sentry")
@@ -308,7 +314,7 @@ func gasCreate2(_ *EVM, callContext *CallContext, availableGas uint64, memorySiz
 	return gas, nil
 }
 
-func gasCreateEip3860(_ *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
+func gasCreateEip3860(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
 	gas, err := memoryGasCost(callContext, memorySize)
 	if err != nil {
 		return 0, err
@@ -317,11 +323,11 @@ func gasCreateEip3860(_ *EVM, callContext *CallContext, availableGas uint64, mem
 	if overflow {
 		return 0, ErrGasUintOverflow
 	}
-	if size > params.MaxInitCodeSize {
-		return 0, fmt.Errorf("%w: size %d", ErrMaxInitCodeSizeExceeded, size)
+	if err := CheckMaxInitCodeSize(size, evm.ChainRules().IsShanghai, evm.ChainRules().IsAmsterdam); err != nil {
+		return 0, err
 	}
 	numWords := ToWordSize(size)
-	// Since size <= params.MaxInitCodeSize, this multiplication cannot overflow
+	// Since size <= params.MaxInitCodeSize(Amsterdam), this multiplication cannot overflow
 	wordGas := params.InitCodeWordGas * numWords
 	gas, overflow = math.SafeAdd(gas, wordGas)
 	if overflow {
@@ -330,7 +336,7 @@ func gasCreateEip3860(_ *EVM, callContext *CallContext, availableGas uint64, mem
 	return gas, nil
 }
 
-func gasCreate2Eip3860(_ *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
+func gasCreate2Eip3860(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
 	gas, err := memoryGasCost(callContext, memorySize)
 	if err != nil {
 		return 0, err
@@ -339,11 +345,11 @@ func gasCreate2Eip3860(_ *EVM, callContext *CallContext, availableGas uint64, me
 	if overflow {
 		return 0, ErrGasUintOverflow
 	}
-	if size > params.MaxInitCodeSize {
-		return 0, fmt.Errorf("%w: size %d", ErrMaxInitCodeSizeExceeded, size)
+	if err := CheckMaxInitCodeSize(size, evm.ChainRules().IsShanghai, evm.ChainRules().IsAmsterdam); err != nil {
+		return 0, err
 	}
 	numWords := ToWordSize(size)
-	// Since size <= params.MaxInitCodeSize, this multiplication cannot overflow
+	// Since size <= params.MaxInitCodeSize(Amsterdam), this multiplication cannot overflow
 	wordGas := (params.InitCodeWordGas + params.Keccak256WordGas) * numWords
 	gas, overflow = math.SafeAdd(gas, wordGas)
 	if overflow {
@@ -393,6 +399,10 @@ func statelessGasCall(evm *EVM, callContext *CallContext, availableGas uint64, m
 	memoryGas, err := memoryGasCost(callContext, memorySize)
 	if err != nil {
 		return 0, transfersValue, err
+	}
+
+	if evm.readOnly && transfersValue {
+		return 0, false, ErrWriteProtection
 	}
 
 	var overflow bool
@@ -445,21 +455,20 @@ func statefulGasCall(evm *EVM, callContext *CallContext, gas uint64, availableGa
 		if err != nil {
 			return 0, err
 		}
+		// Empty() reads account state for gas calculation — record for BAL
+		// tracking unconditionally, since the read happens regardless of
+		// whether the CALL proceeds or transfers value.
+		evm.IntraBlockState().MarkAddressAccess(address, false)
 		if transfersValue && empty {
 			accountGas = params.CallNewAccountGas
-			// Record the address access for BAL tracking, but only when the CALL
-			// will actually proceed. In read-only (STATICCALL) context, CALL with
-			// value > 0 will be rejected by ErrWriteProtection before evm.Call()
-			// runs, so the target is never truly accessed.
-			if !evm.readOnly {
-				evm.IntraBlockState().MarkAddressAccess(address, false)
-			}
 		}
 	} else {
 		exists, err := evm.IntraBlockState().Exist(address)
 		if err != nil {
 			return 0, err
 		}
+		// Exist() reads account state for gas calculation — record for BAL.
+		evm.IntraBlockState().MarkAddressAccess(address, false)
 		if !exists {
 			accountGas = params.CallNewAccountGas
 		}
@@ -635,6 +644,10 @@ func statelessGasStaticCall(evm *EVM, callContext *CallContext, availableGas uin
 }
 
 func gasSelfdestruct(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
+	if evm.readOnly {
+		return 0, ErrWriteProtection
+	}
+
 	var gas uint64
 	// TangerineWhistle (EIP150) gas reprice fork:
 	if evm.ChainRules().IsTangerineWhistle {
@@ -647,6 +660,8 @@ func gasSelfdestruct(evm *EVM, callContext *CallContext, availableGas uint64, me
 			if err != nil {
 				return 0, err
 			}
+			// Empty() reads account state for gas calculation — record for BAL.
+			evm.IntraBlockState().MarkAddressAccess(address, false)
 			balance, err := evm.IntraBlockState().GetBalance(callContext.Address())
 			if err != nil {
 				return 0, err
@@ -659,6 +674,8 @@ func gasSelfdestruct(evm *EVM, callContext *CallContext, availableGas uint64, me
 			if err != nil {
 				return 0, err
 			}
+			// Exist() reads account state for gas calculation — record for BAL.
+			evm.IntraBlockState().MarkAddressAccess(address, false)
 			if !exist {
 				gas += params.CreateBySelfdestructGas
 			}

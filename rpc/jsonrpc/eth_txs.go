@@ -232,24 +232,14 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 	if uint64(txIndex) > uint64(len(txs)) {
 		return nil, nil // not error
 	} else if uint64(txIndex) == uint64(len(txs)) {
-		if chainConfig.Bor == nil {
-			return nil, nil // not error
-		}
-		var borTx types.Transaction
-		possibleBorTxnHash := bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash())
-		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, possibleBorTxnHash)
+		borTx, borTxHash, err := api.lookupBorTx(ctx, chainConfig, block.NumberU64(), block.Hash())
 		if err != nil {
 			return nil, err
 		}
-		if ok {
-			borTx = bortypes.NewBorTransaction()
-		}
-
 		if borTx == nil {
 			return nil, nil // not error
 		}
-		derivedBorTxHash := bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash())
-		return ethapi.NewRPCBorTransaction(borTx, derivedBorTxHash, block.Hash(), block.NumberU64(), uint64(txIndex), chainConfig.ChainID), nil
+		return ethapi.NewRPCBorTransaction(borTx, borTxHash, block.Hash(), block.NumberU64(), uint64(txIndex), chainConfig.ChainID), nil
 	}
 
 	return ethapi.NewRPCTransaction(txs[txIndex], block.Hash(), block.Time(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil
@@ -296,6 +286,21 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 		return nil, err
 	}
 
+	if blockNr == rpc.PendingBlockNumber {
+		b, err := api.blockByNumber(ctx, blockNr, tx)
+		if err != nil {
+			return nil, err
+		}
+		if b == nil {
+			return nil, errors.New("pending block is not available")
+		}
+		txs := b.Transactions()
+		if uint64(txIndex) >= uint64(len(txs)) {
+			return nil, nil
+		}
+		return ethapi.NewRPCTransaction(txs[txIndex], common.Hash{}, b.Time(), 0, uint64(txIndex), b.BaseFee()), nil
+	}
+
 	// https://www.quicknode.com/docs/ethereum/eth_getTransactionByBlockNumberAndIndex
 	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader, api.filters)
 	if err != nil {
@@ -322,24 +327,14 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 	if uint64(txIndex) > uint64(len(txs)) {
 		return nil, nil // not error
 	} else if uint64(txIndex) == uint64(len(txs)) {
-		if chainConfig.Bor == nil {
-			return nil, nil // not error
-		}
-		var borTx types.Transaction
-		possibleBorTxnHash := bortypes.ComputeBorTxHash(blockNum, hash)
-		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, possibleBorTxnHash)
+		borTx, borTxHash, err := api.lookupBorTx(ctx, chainConfig, blockNum, hash)
 		if err != nil {
 			return nil, err
 		}
-		if ok {
-			borTx = bortypes.NewBorTransaction()
-		}
-
 		if borTx == nil {
 			return nil, nil
 		}
-		derivedBorTxHash := bortypes.ComputeBorTxHash(blockNum, hash)
-		return ethapi.NewRPCBorTransaction(borTx, derivedBorTxHash, hash, blockNum, uint64(txIndex), chainConfig.ChainID), nil
+		return ethapi.NewRPCBorTransaction(borTx, borTxHash, hash, blockNum, uint64(txIndex), chainConfig.ChainID), nil
 	}
 
 	return ethapi.NewRPCTransaction(txs[txIndex], hash, block.Time(), blockNum, uint64(txIndex), block.BaseFee()), nil
@@ -352,6 +347,17 @@ func (api *APIImpl) GetRawTransactionByBlockNumberAndIndex(ctx context.Context, 
 		return nil, err
 	}
 	defer tx.Rollback()
+
+	if blockNr == rpc.PendingBlockNumber {
+		b, err := api.blockByNumber(ctx, blockNr, tx)
+		if err != nil {
+			return nil, err
+		}
+		if b == nil {
+			return nil, errors.New("pending block is not available")
+		}
+		return newRPCRawTransactionFromBlockIndex(b, uint64(index))
+	}
 
 	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNr.Uint64())
 	if err != nil {

@@ -28,8 +28,8 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
@@ -415,7 +415,7 @@ func (ethash *Ethash) Prepare(chain rules.ChainHeaderReader, header *types.Heade
 
 func (ethash *Ethash) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header,
 	state *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) error {
-	if config.DAOForkBlock != nil && header.Number.CmpBig(config.DAOForkBlock) == 0 {
+	if config.DAOForkBlock != nil && header.Number.Uint64() == *config.DAOForkBlock {
 		if err := misc.ApplyDAOHardFork(state); err != nil {
 			return err
 		}
@@ -452,7 +452,7 @@ func (ethash *Ethash) FinalizeAndAssemble(chainConfig *chain.Config, header *typ
 
 // SealHash returns the hash of a block prior to it being sealed.
 func (ethash *Ethash) SealHash(header *types.Header) (hash common.Hash) {
-	hasher := sha3.NewLegacyKeccak256()
+	hasher := keccak.NewFastKeccak()
 
 	enc := []any{
 		header.ParentHash,

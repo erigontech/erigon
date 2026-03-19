@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -34,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -49,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/rpc/ethapi"
 	ethapi2 "github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/filters"
+	"github.com/erigontech/erigon/rpc/gasprice"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -94,6 +97,7 @@ type EthAPI interface {
 	GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error)
 	GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Uint64, error)
 	GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error)
+	GetStorageValues(ctx context.Context, requests map[common.Address][]common.Hash, blockNrOrHash rpc.BlockNumberOrHash) (map[common.Address][]hexutil.Bytes, error)
 	GetCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error)
 
 	// System related (see ./eth_system.go)
@@ -142,13 +146,14 @@ type BaseAPI struct {
 	bridgeReader bridgeReader
 
 	evmCallTimeout      time.Duration
-	rangeLimit          int
+	blockRangeLimit     int
+	getLogsMaxResults   int
 	dirs                datadir.Dirs
 	receiptsGenerator   *receipts.Generator
 	borReceiptGenerator *receipts.BorGenerator
 }
 
-func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, singleNodeMode bool, evmCallTimeout time.Duration, engine rules.EngineReader, dirs datadir.Dirs, bridgeReader bridgeReader, rangeLimit int) *BaseAPI {
+func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, singleNodeMode bool, evmCallTimeout time.Duration, engine rules.EngineReader, dirs datadir.Dirs, bridgeReader bridgeReader, rangeLimit int, getLogsMaxResults int) *BaseAPI {
 	var (
 		blocksLRUSize = 128 // ~32Mb
 	)
@@ -174,7 +179,8 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 		borReceiptGenerator: receipts.NewBorGenerator(blockReader, engine, stateCache),
 		dirs:                dirs,
 		bridgeReader:        bridgeReader,
-		rangeLimit:          rangeLimit,
+		blockRangeLimit:     rangeLimit,
+		getLogsMaxResults:   getLogsMaxResults,
 	}
 }
 
@@ -208,6 +214,9 @@ func (api *BaseAPI) chainConfigWithGenesis(ctx context.Context, tx kv.Tx) (*chai
 }
 
 func (api *BaseAPI) pendingBlock() *types.Block {
+	if api.filters == nil {
+		return nil
+	}
 	return api.filters.LastPendingBlock()
 }
 func (api *BaseAPI) engine() rules.EngineReader {
@@ -368,11 +377,24 @@ func (api *BaseAPI) checkPruneHistory(ctx context.Context, tx kv.Tx, block uint6
 		}
 		prunedTo := p.History.PruneTo(latest)
 		if block < prunedTo {
-			return state.PrunedError
+			return fmt.Errorf("%w: requested block %d, history is available from block %d", state.PrunedError, block, prunedTo)
 		}
 	}
 
 	return nil
+}
+
+// checkReceiptsAvailable checks if receipts are available for the given block.
+// In case --persist.receipts which makes all historical receipts available even when state history is pruned.
+func (api *BaseAPI) checkReceiptsAvailable(ctx context.Context, tx kv.Tx, block uint64) error {
+	persistReceipts, err := kvcfg.PersistReceipts.Enabled(tx)
+	if err != nil {
+		return err
+	}
+	if persistReceipts {
+		return nil
+	}
+	return api.checkPruneHistory(ctx, tx, block)
 }
 
 func (api *BaseAPI) pruneMode(tx kv.Tx) (*prune.Mode, error) {
@@ -403,6 +425,7 @@ type APIImpl struct {
 	txPool                      txpoolproto.TxpoolClient
 	mining                      txpoolproto.MiningClient
 	gasCache                    *GasPriceCache
+	feeHistoryCache             *gasprice.FeeHistoryCache
 	db                          kv.TemporalRoDB
 	GasCap                      uint64
 	FeeCap                      float64
@@ -441,6 +464,7 @@ func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPo
 		txPool:                      txPool,
 		mining:                      mining,
 		gasCache:                    NewGasPriceCache(),
+		feeHistoryCache:             gasprice.NewFeeHistoryCache(),
 		GasCap:                      gascap,
 		FeeCap:                      cfg.FeeCap,
 		AllowUnprotectedTxs:         cfg.AllowUnprotectedTxs,

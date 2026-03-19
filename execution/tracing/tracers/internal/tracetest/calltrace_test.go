@@ -282,7 +282,6 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 	statedb, _ := testutil.MakePreState(rules, dbTx, test.Genesis.Alloc, uint64(test.Context.Number))
 
 	b.ReportAllocs()
-	b.ResetTimer()
 	for b.Loop() {
 		tracer, err := tracers.New(tracerName, new(tracers.Context), nil)
 		if err != nil {
@@ -313,7 +312,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 	}
 	signer := types.LatestSigner(chainspec.Mainnet.Config)
 	tx, err := types.SignNewTx(privkey, *signer, &types.LegacyTx{
-		GasPrice: uint256.NewInt(0),
+		GasPrice: *uint256.NewInt(0),
 		CommonTx: types.CommonTx{
 			GasLimit: 50000,
 			To:       &to,
