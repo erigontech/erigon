@@ -1,22 +1,8 @@
 name: Benchmarks
 
-# Run benchmarks on pull requests to catch accidental breakage, and on push
-# to main/release to keep a warm build cache. Without a push trigger,
-# test-bench never runs on main and every new PR starts from a cold cache,
-# because GitHub's cache fallback chain only reaches the base branch.
 on:
   workflow_dispatch:
   workflow_call:
-  push:
-    # Cache warming only — benchmarks are not re-run on push to main/release.
-    # GitHub's cache isolation means PR and merge-queue runs can only fall back
-    # to the base-branch cache. Without this trigger, test-bench never runs on
-    # main so every new PR starts cold. The push run compiles test binaries
-    # (warming GOCACHE and GOMODCACHE) but does not execute them; correctness
-    # is already guaranteed by the merge queue before the commit lands here.
-    branches:
-      - main
-      - release/**
 
 defaults:
   run:
