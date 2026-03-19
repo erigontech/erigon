@@ -140,14 +140,14 @@ EEST: $EEST_VERSION | BAL: $BAL_TAG (branch: $BAL_BRANCH) | Strict matching: ena
 5. **Install Dockerfile.local** for local builds:
    Ensure `clients/erigon/Dockerfile.local` exists with the correct content.
    Key requirements:
-   - Base image: `golang:1.25.0-trixie` (Debian, not Alpine)
+   - Base image: `golang:1.25.7-trixie` (Debian, not Alpine)
    - Build command: `make erigon`
    - Runtime: `debian:13-slim` with `bash curl jq libstdc++6 libgcc-s1`
    - P2P protocol: `erigon.sh` must include `--p2p.protocol 68,69`
 
    If `clients/erigon/Dockerfile.local` doesn't already exist, write the correct version:
    ```dockerfile
-   FROM golang:1.25.0-trixie as builder
+   FROM golang:1.25.7-trixie AS builder
    ARG local_path=erigon
    COPY $local_path erigon
    RUN apt-get update && apt-get install -y bash build-essential ca-certificates git \

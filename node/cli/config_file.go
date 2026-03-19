@@ -55,8 +55,14 @@ func SetFlagsFromConfigFile(ctx *cli.Context, filePath string) error {
 	} else {
 		return errors.New("config files only accepted are .yaml and .toml")
 	}
+
+	// Flatten nested maps into dot-separated keys so that TOML nested tables
+	// (e.g. [sentinel] / staticpeers = [...]) and TOML dotted keys
+	// (e.g. sentinel.staticpeers = [...]) map to the correct CLI flag names.
+	flat := flattenConfig(fileConfig, "")
+
 	// sets global flags to value in yaml/toml file
-	for key, value := range fileConfig {
+	for key, value := range flat {
 		if !ctx.IsSet(key) {
 			if reflect.ValueOf(value).Kind() == reflect.Slice {
 				sliceInterface := value.([]any)
@@ -79,4 +85,41 @@ func SetFlagsFromConfigFile(ctx *cli.Context, filePath string) error {
 	}
 
 	return nil
+}
+
+// flattenConfig recursively flattens a nested map[string]any into a flat map
+// using dot-separated keys. This lets TOML nested tables and dotted keys both
+// map naturally to CLI flag names (e.g. sentinel.staticpeers).
+func flattenConfig(m map[string]any, prefix string) map[string]any {
+	result := make(map[string]any)
+	for k, v := range m {
+		key := k
+		if prefix != "" {
+			key = prefix + "." + k
+		}
+		if nested, ok := v.(map[string]any); ok {
+			for fk, fv := range flattenConfig(nested, key) {
+				result[fk] = fv
+			}
+		} else if nested, ok := v.(map[any]any); ok {
+			// gopkg.in/yaml.v2 unmarshals maps as map[interface{}]interface{}
+			converted := convertYAMLMap(nested)
+			for fk, fv := range flattenConfig(converted, key) {
+				result[fk] = fv
+			}
+		} else {
+			result[key] = v
+		}
+	}
+	return result
+}
+
+// convertYAMLMap converts a map[any]any (produced by gopkg.in/yaml.v2) to
+// map[string]any so it can be processed uniformly.
+func convertYAMLMap(m map[any]any) map[string]any {
+	result := make(map[string]any, len(m))
+	for k, v := range m {
+		result[fmt.Sprintf("%v", k)] = v
+	}
+	return result
 }
