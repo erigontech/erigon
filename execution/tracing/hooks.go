@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/execution/vm/evmtypes/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 )
 
 // OpContext provides the context at which the opcode is being

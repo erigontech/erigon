@@ -45,7 +45,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
-	"github.com/erigontech/erigon/execution/vm/evmtypes/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 )
 

@@ -41,7 +41,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
-	"github.com/erigontech/erigon/execution/vm/evmtypes/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 )
 
 // Config is a basic type specifying certain configuration flags for running
