@@ -31,6 +31,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -140,6 +141,10 @@ type Compressor struct {
 
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 	timings Timings
+
+	// CompressProgress tracks the number of words processed during Compress().
+	// Callers can read this atomically to monitor compression progress externally.
+	CompressProgress atomic.Uint64
 
 	version             uint8
 	featureFlagBitmask  FeatureFlagBitmask
@@ -375,7 +380,7 @@ func (c *Compressor) Compress() error {
 			coll.Close()
 		}
 		c.suffixCollectors = nil
-		if err = compressNoWordPatterns(c.logPrefix, cf, c.uncompressedFile, c.lvl, c.logger); err != nil {
+		if err = compressNoWordPatterns(c.logPrefix, cf, c.uncompressedFile, c.lvl, c.logger, &c.CompressProgress); err != nil {
 			return err
 		}
 	} else {
@@ -393,7 +398,7 @@ func (c *Compressor) Compress() error {
 				return err
 			}
 		}
-		if err = compressWithPatternCandidates(c.ctx, c.trace, c.Cfg, c.logPrefix, tmpFileName, cf, c.uncompressedFile, db, c.lvl, c.logger); err != nil {
+		if err = compressWithPatternCandidates(c.ctx, c.trace, c.Cfg, c.logPrefix, tmpFileName, cf, c.uncompressedFile, db, c.lvl, c.logger, &c.CompressProgress); err != nil {
 			return err
 		}
 	}

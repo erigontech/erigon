@@ -236,7 +236,7 @@ func (cq *CompressionQueue) Pop() any {
 	return x
 }
 
-func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, logPrefix, segmentFilePath string, cf *os.File, uncompressedFile *RawWordsFile, dictBuilder *DictionaryBuilder, lvl log.Lvl, logger log.Logger) error {
+func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, logPrefix, segmentFilePath string, cf *os.File, uncompressedFile *RawWordsFile, dictBuilder *DictionaryBuilder, lvl log.Lvl, logger log.Logger, progress *atomic.Uint64) error {
 	logEvery := time.NewTicker(60 * time.Second)
 	defer logEvery.Stop()
 
@@ -313,6 +313,9 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	if err = uncompressedFile.ForEach(func(v []byte, compression bool) error {
 		ii++
 		if ii%1024 == 0 {
+			if progress != nil {
+				progress.Store(outCount)
+			}
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -446,6 +449,9 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 		return err
 	}
 	wg.Wait()
+	if progress != nil {
+		progress.Store(outCount)
+	}
 	if lvl < log.LvlTrace {
 		log.Log(lvl, fmt.Sprintf("[%s] Replacement preprocessing", logPrefix), "took", time.Since(t))
 	}
@@ -679,7 +685,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 // pattern-dictionary pipeline (superstringCount == 0). This happens for history .v files
 // that use CompressNone. Instead of building a dictionary and writing/reading an intermediate
 // file, it makes two sequential passes over the raw words file and writes directly to cf.
-func compressNoWordPatterns(logPrefix string, cf *os.File, uncompressedFile *RawWordsFile, lvl log.Lvl, logger log.Logger) error {
+func compressNoWordPatterns(logPrefix string, cf *os.File, uncompressedFile *RawWordsFile, lvl log.Lvl, logger log.Logger, progress *atomic.Uint64) error {
 	var numBuf [binary.MaxVarintLen64]byte
 
 	// Pass 1: collect word counts and position-length frequencies for the Huffman tree.
@@ -725,7 +731,12 @@ func compressNoWordPatterns(logPrefix string, cf *os.File, uncompressedFile *Raw
 	// Pass 2: Huffman-encode position codes and copy raw word bytes to output.
 	var hc BitWriter
 	hc.w = cw
+	var pass2Count uint64
 	if err := uncompressedFile.ForEach(func(v []byte, _ bool) error {
+		pass2Count++
+		if progress != nil && pass2Count%1024 == 0 {
+			progress.Store(pass2Count)
+		}
 		l := uint64(len(v))
 		if c := pos2code[l+1]; c != nil {
 			if e := hc.encode(c.code, c.codeBits); e != nil {
@@ -747,6 +758,9 @@ func compressNoWordPatterns(logPrefix string, cf *os.File, uncompressedFile *Raw
 		return e
 	}); err != nil {
 		return err
+	}
+	if progress != nil {
+		progress.Store(pass2Count)
 	}
 	return cw.Flush()
 }

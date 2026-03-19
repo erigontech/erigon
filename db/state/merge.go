@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/tidwall/btree"
 
@@ -531,9 +532,36 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		}
 	}
 
+	// Update progress to include the compression phase.
+	// mergeProcessed = items consumed during the merge loop.
+	// kvFile.Count() = words written to the compressor (keys + values after dedup).
+	// Compression will process all those words, so total = mergeProcessed + compressWords.
+	mergeProcessed := i
+	compressWords := uint64(kvFile.Count())
+	p.Total.Store(mergeProcessed + compressWords)
+	p.Processed.Store(mergeProcessed)
+
+	// Poll CompressProgress in a goroutine so the ProgressSet sees updates during compression.
+	compressDone := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				p.Processed.Store(mergeProcessed + kvFile.CompressProgress.Load())
+			case <-compressDone:
+				p.Processed.Store(mergeProcessed + compressWords)
+				return
+			}
+		}
+	}()
+
 	if err = kvWriter.Compress(); err != nil {
+		close(compressDone)
 		return nil, nil, nil, err
 	}
+	close(compressDone)
 	kvWriter.Close()
 	kvWriter = nil
 	ps.Delete(p)
@@ -725,9 +753,33 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 			return nil, err
 		}
 	}
+
+	// Update progress to include the compression phase.
+	iiMergeProcessed := i
+	iiCompressWords := uint64(comp.Count())
+	p.Total.Store(iiMergeProcessed + iiCompressWords)
+	p.Processed.Store(iiMergeProcessed)
+
+	iiCompressDone := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				p.Processed.Store(iiMergeProcessed + comp.CompressProgress.Load())
+			case <-iiCompressDone:
+				p.Processed.Store(iiMergeProcessed + iiCompressWords)
+				return
+			}
+		}
+	}()
+
 	if err = write.Compress(); err != nil {
+		close(iiCompressDone)
 		return nil, err
 	}
+	close(iiCompressDone)
 	comp.Close()
 	comp = nil
 
@@ -892,9 +944,31 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				}
 			}
 		}
+		// Update progress to include the compression phase.
+		histMergeProcessed := p.Processed.Load()
+		histCompressWords := uint64(comp.Count())
+		p.Total.Store(histMergeProcessed + histCompressWords)
+
+		histCompressDone := make(chan struct{})
+		go func() {
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					p.Processed.Store(histMergeProcessed + comp.CompressProgress.Load())
+				case <-histCompressDone:
+					p.Processed.Store(histMergeProcessed + histCompressWords)
+					return
+				}
+			}
+		}()
+
 		if err := pagedWr.Compress(); err != nil {
+			close(histCompressDone)
 			return nil, nil, err
 		}
+		close(histCompressDone)
 		comp.Close()
 		comp = nil
 		if decomp, err = seg.NewDecompressor(datPath); err != nil {
