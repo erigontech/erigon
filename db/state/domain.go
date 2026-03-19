@@ -1221,7 +1221,6 @@ func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, va
 		testHook(rs)
 	}
 
-
 	for {
 		// Reset positions at the start of each iteration to handle collision retries correctly
 		var keyPos, valPos uint64
