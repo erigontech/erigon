@@ -101,8 +101,8 @@ type BlockAssembler struct {
 	*AssembledBlock
 	cfg         AssemblerCfg
 	balIO       *state.VersionedIO
-	stateWriter state.StateWriter  // optional: if set, domain writes go here instead of NoopWriter
-	gasUsed     protocol.GasUsed   // EIP-8037: cumulative per-dimension gas across AddTransactions calls
+	stateWriter state.StateWriter // optional: if set, domain writes go here instead of NoopWriter
+	gasUsed     protocol.GasUsed  // EIP-8037: cumulative per-dimension gas across AddTransactions calls
 }
 
 func NewBlockAssembler(cfg AssemblerCfg, payloadId, parentTime uint64, header *types.Header, uncles []*types.Header, withdrawals []*types.Withdrawal) *BlockAssembler {
