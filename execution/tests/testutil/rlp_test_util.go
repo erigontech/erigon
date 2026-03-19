@@ -127,7 +127,7 @@ func translateJSON(v any) any {
 func checkDecodeFromJSON(s *rlp.Stream, exp any) error {
 	switch exp := exp.(type) {
 	case uint64:
-		i, err := s.Uint()
+		i, err := s.Uint64()
 		if err != nil {
 			return addStack("Uint", exp, err)
 		}

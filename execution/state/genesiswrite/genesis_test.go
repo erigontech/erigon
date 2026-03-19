@@ -207,7 +207,7 @@ func TestSetupGenesis(t *testing.T) {
 	var (
 		customghash = common.HexToHash("0x89c99d90b79719238d2645c7642f2c9295246e80775b38cfd162b696817fbd50")
 		customg     = types.Genesis{
-			Config: &chain.Config{ChainID: big.NewInt(1), HomesteadBlock: big.NewInt(3)},
+			Config: &chain.Config{ChainID: big.NewInt(1), HomesteadBlock: common.NewUint64(3)},
 			Alloc: types.GenesisAlloc{
 				{1}: {Balance: big.NewInt(1), Storage: map[common.Hash]common.Hash{{1}: {1}}},
 			},
@@ -215,7 +215,7 @@ func TestSetupGenesis(t *testing.T) {
 		oldcustomg = customg
 	)
 	logger := log.New()
-	oldcustomg.Config = &chain.Config{ChainID: big.NewInt(1), HomesteadBlock: big.NewInt(2)}
+	oldcustomg.Config = &chain.Config{ChainID: big.NewInt(1), HomesteadBlock: common.NewUint64(2)}
 	tests := []struct {
 		wantErr    error
 		fn         func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error)
@@ -252,6 +252,19 @@ func TestSetupGenesis(t *testing.T) {
 			fn: func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error) {
 				genesiswrite.MustCommitGenesis(&customg, db, datadir.New(tmpdir), logger)
 				return genesiswrite.CommitGenesisBlock(db, nil, "", datadir.New(tmpdir), logger)
+			},
+			wantHash:   customghash,
+			wantConfig: customg.Config,
+		},
+		{
+			// Reproduces the hive EEST consume-rlp scenario:
+			// 1. `erigon init genesis.json` writes a custom genesis + config
+			// 2. `erigon --import` reopens the DB with genesis=nil, chainName="mainnet" (default)
+			// The custom config must be preserved, not overwritten with mainnet's.
+			name: "custom block in DB, genesis == nil, chainName mainnet",
+			fn: func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error) {
+				genesiswrite.MustCommitGenesis(&customg, db, datadir.New(tmpdir), logger)
+				return genesiswrite.CommitGenesisBlock(db, nil, networkname.Mainnet, datadir.New(tmpdir), logger)
 			},
 			wantHash:   customghash,
 			wantConfig: customg.Config,
@@ -300,8 +313,8 @@ func TestSetupGenesis(t *testing.T) {
 			wantConfig: customg.Config,
 			wantErr: &chain.ConfigCompatError{
 				What:         "Homestead fork block",
-				StoredConfig: big.NewInt(2),
-				NewConfig:    big.NewInt(3),
+				StoredConfig: common.NewUint64(2),
+				NewConfig:    common.NewUint64(3),
 				RewindTo:     1,
 			},
 		},

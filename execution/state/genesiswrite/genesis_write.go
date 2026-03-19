@@ -24,7 +24,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"runtime"
 	"slices"
 	"strings"
@@ -94,7 +93,7 @@ func CommitGenesisBlock(db kv.RwDB, genesis *types.Genesis, chainName string, di
 	return CommitGenesisBlockWithOverride(db, genesis, chainName, nil, nil, false, dirs, logger)
 }
 
-func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, chainName string, overrideOsakaTime, overrideAmsterdamTime *big.Int, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
+func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, chainName string, overrideOsakaTime, overrideAmsterdamTime *uint64, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return nil, nil, err
@@ -111,20 +110,20 @@ func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, chainNam
 	return c, b, nil
 }
 
-func configOrDefault(g *types.Genesis, chainName string) *chain.Config {
+func configOrDefault(g *types.Genesis, chainName string, genesisHash common.Hash) *chain.Config {
 	if g != nil {
 		return g.Config
 	}
 	if chainName != "" {
 		spec, err := chainspec.ChainSpecByName(chainName)
-		if err == nil {
+		if err == nil && spec.GenesisHash == genesisHash {
 			return spec.Config
 		}
 	}
 	return chain.AllProtocolChanges
 }
 
-func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, overrideOsakaTime, overrideAmsterdamTime *big.Int, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
+func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, overrideOsakaTime, overrideAmsterdamTime *uint64, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
 	if err := rawdb.WriteGenesisIfNotExist(tx, genesis); err != nil {
 		return nil, nil, err
 	}
@@ -186,7 +185,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 		}
 	}
 	// Get the existing chain configuration.
-	newCfg := configOrDefault(genesis, chainName)
+	newCfg := configOrDefault(genesis, chainName, storedHash)
 	applyOverrides(newCfg)
 	if err := newCfg.CheckConfigForkOrder(); err != nil {
 		return newCfg, nil, err
@@ -208,8 +207,8 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 	// In that case, only apply the overrides.
 	if genesis == nil {
 		if !keepStoredChainConfig {
-			_, err := chainspec.ChainSpecByName(chainName)
-			keepStoredChainConfig = err != nil
+			spec, err := chainspec.ChainSpecByName(chainName)
+			keepStoredChainConfig = err != nil || spec.GenesisHash != storedHash
 		}
 		if keepStoredChainConfig {
 			newCfg = storedCfg

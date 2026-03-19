@@ -38,8 +38,10 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/shards"
 )
 
 // setup2CacheTest creates the minimal mdbx+temporal+domains stack used by the
@@ -99,13 +101,13 @@ func TestCrossBlockTimingRace(t *testing.T) {
 
 	rs := state.NewStateV3Buffered(state.NewStateV3(domains, ethconfig.Sync{}, lgr))
 
-	// Simulate block N's finalize(): BufferedWriter writes to rs.accounts
+	// Simulate block N's finalize(): versionedWriteCollector writes to rs.accounts
 	// synchronously, before the async applyResults channel fires.
 	// Domains are NOT updated yet.
-	bw := state.NewBufferedWriter(rs, nil)
+	collector := state.NewVersionedWriteCollector(rs)
 	blockNAccount := &accounts.Account{Balance: *uint256.NewInt(500), Nonce: 7}
 	original := &accounts.Account{}
-	err := bw.UpdateAccountData(addr, original, blockNAccount)
+	err := collector.UpdateAccountData(addr, original, blockNAccount)
 	require.NoError(t, err)
 
 	// Block N+1 worker reads via NewBufferedReader.
@@ -133,7 +135,7 @@ func TestCrossBlockTimingRace(t *testing.T) {
 	require.Equal(t, uint64(0), rawBal.Uint64(),
 		"plain domain reader must NOT see block N's balance yet (the timing hole)")
 
-	// Simulate ApplyTxState completing (domain apply catches up).
+	// Simulate ApplyStateWrites completing (domain apply catches up).
 	w := state.NewWriter(domains.AsPutDel(tx), nil, 5)
 	ibsApply := state.New(state.NewReaderV3(domains.AsGetter(tx)))
 	ibsApply.SetTxContext(1, 0)
@@ -150,4 +152,69 @@ func TestCrossBlockTimingRace(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(500), rawBalAfter.Uint64(),
 		"after domain apply, plain reader must see block N's balance")
+}
+
+// TestNotifyAccumulatorFromVersionedWrites verifies that NotifyAccumulator
+// correctly drives ChangeAccount, ChangeCode, and ChangeStorage notifications
+// from VersionedWrites — the same data that flows through the apply loop.
+//
+// This is a regression guard: the accumulator must receive state-diff
+// notifications for the txpool regardless of which finalize path produced
+// the writes (legacy IBS path or direct finalizeTx path).
+func TestNotifyAccumulatorFromVersionedWrites(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires mdbx")
+	}
+
+	_, domains := setup2CacheTest(t)
+	lgr := log.New()
+
+	rs := state.NewStateV3Buffered(state.NewStateV3(domains, ethconfig.Sync{}, lgr))
+
+	accumulator := shards.NewAccumulator()
+
+	// StartChange must be called before any ChangeAccount/ChangeCode/ChangeStorage
+	// calls — the accumulator panics if latestChange is nil.
+	var hdr types.Header
+	hdr.Number.SetUint64(42)
+	accumulator.StartChange(&hdr, nil, false)
+
+	// Produce collector-format writes via versionedWriteCollector.
+	collector := state.NewVersionedWriteCollector(rs)
+
+	addr := accounts.InternAddress(common.HexToAddress("0xBEEF"))
+
+	original := &accounts.Account{}
+	account := &accounts.Account{Balance: *uint256.NewInt(1000), Nonce: 3, Incarnation: 1}
+	err := collector.UpdateAccountData(addr, original, account)
+	require.NoError(t, err)
+
+	code := []byte{0x60, 0x00}
+	codeHash := accounts.InternCodeHash(common.BytesToHash(code))
+	err = collector.UpdateAccountCode(addr, 1, codeHash, code)
+	require.NoError(t, err)
+
+	storageKey := accounts.InternKey(common.HexToHash("0x01"))
+	var storageVal uint256.Int
+	storageVal.SetUint64(999)
+	err = collector.WriteAccountStorage(addr, 1, storageKey, uint256.Int{}, storageVal)
+	require.NoError(t, err)
+
+	// No-op write (original==value) must not produce a write.
+	err = collector.WriteAccountStorage(addr, 1, storageKey, storageVal, storageVal)
+	require.NoError(t, err)
+
+	// Now drive the accumulator from the collected writes —
+	// this is what the apply loop does after ApplyStateWrites.
+	writes := collector.Writes()
+	state.NotifyAccumulator(accumulator, writes)
+
+	changes := accumulator.Changes()
+	require.Len(t, changes, 1, "one StateChange batch expected")
+	require.Len(t, changes[0].Changes, 1, "one AccountChange expected (all merged for same address)")
+	require.NotEmpty(t, changes[0].Changes[0].Data, "ChangeAccount must populate Data field")
+	require.Equal(t, code, changes[0].Changes[0].Code, "ChangeCode must populate Code field")
+	require.Len(t, changes[0].Changes[0].StorageChanges, 1, "one StorageChange expected (no-op skipped)")
+	require.Equal(t, storageVal.Bytes(), changes[0].Changes[0].StorageChanges[0].Data,
+		"ChangeStorage must populate StorageChange.Data")
 }
