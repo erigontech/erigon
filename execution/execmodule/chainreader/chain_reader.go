@@ -465,14 +465,22 @@ func (c ChainReaderWriterEth1) AssembleBlock(baseHash common.Hash, attributes *e
 	if attributes.ParentBeaconBlockRoot != nil {
 		request.ParentBeaconBlockRoot = gointerfaces.ConvertHashToH256(*attributes.ParentBeaconBlockRoot)
 	}
-	resp, err := c.executionModule.AssembleBlock(context.Background(), request)
-	if err != nil {
-		return 0, err
+	// Retry briefly on Busy: UpdateForkChoice releases the execution semaphore
+	// via defer, so there is a small window where AssembleBlock (called
+	// immediately after FCU returns) can observe Busy before the release runs.
+	for retries := 0; ; retries++ {
+		resp, err := c.executionModule.AssembleBlock(context.Background(), request)
+		if err != nil {
+			return 0, err
+		}
+		if !resp.Busy {
+			return resp.Id, nil
+		}
+		if retries >= 10 {
+			return 0, errors.New("execution data is still syncing")
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
-	if resp.Busy {
-		return 0, errors.New("execution data is still syncing")
-	}
-	return resp.Id, nil
 }
 
 func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
