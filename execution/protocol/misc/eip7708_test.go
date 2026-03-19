@@ -90,7 +90,7 @@ func testEthTransferLogs(t *testing.T, value uint64) {
 	var config chain.Config
 	require.NoError(t, copier.CopyWithOption(&config, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
 	if config.AmsterdamTime == nil {
-		config.AmsterdamTime = big.NewInt(0)
+		config.AmsterdamTime = common.NewUint64(0)
 	}
 
 	gspec := &types.Genesis{
