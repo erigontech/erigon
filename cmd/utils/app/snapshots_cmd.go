@@ -672,6 +672,7 @@ type DeleteStateSnapshotsArgs struct {
 	PromptUserBeforeDelete bool
 	DryRun                 bool
 	StepRange              string
+	OnlyDomain             bool
 	DomainNames            []string
 }
 
@@ -694,7 +695,12 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 		dirPath  string
 		filePath string
 	}, 0)
-	for _, dirPath := range []string{dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapForkable} {
+
+	scanDirs := []string{dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapForkable}
+	if args.OnlyDomain {
+		scanDirs = []string{dirs.SnapDomain}
+	}
+	for _, dirPath := range scanDirs {
 		filePaths, err := dir2.ListFiles(dirPath)
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
