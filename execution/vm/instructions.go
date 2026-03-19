@@ -382,7 +382,7 @@ func opAddress(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 
 func opBalance(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	slot := scope.Stack.peek()
-	address := accounts.InternAddress(slot.Bytes20())
+	address := scope.takeCallAddr(*slot)
 	// BAL: BALANCE is a real state access per EIP-7928 — mark as non-revertable
 	// so the system address is included when explicitly queried by user txs.
 	evm.IntraBlockState().MarkAddressAccess(address, false)
@@ -543,7 +543,7 @@ func stReturnDataCopy(_ uint64, scope *CallContext) string {
 
 func opExtCodeSize(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	slot := scope.Stack.peek()
-	addr := accounts.InternAddress(slot.Bytes20())
+	addr := scope.takeCallAddr(*slot)
 	// BAL: EXTCODESIZE is a real state access per EIP-7928.
 	evm.IntraBlockState().MarkAddressAccess(addr, false)
 	codeSize, err := evm.IntraBlockState().GetCodeSize(addr)
@@ -584,7 +584,7 @@ func opExtCodeCopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, err
 		codeOffset = stack.pop()
 		length     = stack.pop()
 	)
-	addr := accounts.InternAddress(a.Bytes20())
+	addr := scope.takeCallAddr(a)
 	// BAL: EXTCODECOPY is a real state access per EIP-7928.
 	evm.IntraBlockState().MarkAddressAccess(addr, false)
 	len64 := length.Uint64()
@@ -638,7 +638,7 @@ func opExtCodeCopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, err
 // equal the result of calling extcodehash on the account directly.
 func opExtCodeHash(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	slot := scope.Stack.peek()
-	address := accounts.InternAddress(slot.Bytes20())
+	address := scope.takeCallAddr(*slot)
 
 	// BAL: EXTCODEHASH is a real state access per EIP-7928 — mark as
 	// non-revertable.  Also ensures non-existent accounts appear in the BAL
@@ -1087,8 +1087,8 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	temp := stack.pop()
 	gas := evm.CallGasTemp()
 	// Pop other call parameters.
-	addr, value, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
-	toAddr := accounts.InternAddress(addr.Bytes20())
+	addrVal, value, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
+	toAddr := scope.takeCallAddr(addrVal)
 	// Get the arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
@@ -1141,8 +1141,8 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	temp := stack.pop()
 	gas := evm.CallGasTemp()
 	// Pop other call parameters.
-	addr, value, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
-	toAddr := accounts.InternAddress(addr.Bytes20())
+	addrVal, value, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
+	toAddr := scope.takeCallAddr(addrVal)
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
@@ -1185,8 +1185,8 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	temp := stack.pop()
 	gas := evm.CallGasTemp()
 	// Pop other call parameters.
-	addr, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
-	toAddr := accounts.InternAddress(addr.Bytes20())
+	addrVal, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
+	toAddr := scope.takeCallAddr(addrVal)
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
@@ -1225,8 +1225,8 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	temp := stack.pop()
 	gas := evm.CallGasTemp()
 	// Pop other call parameters.
-	addr, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
-	toAddr := accounts.InternAddress(addr.Bytes20())
+	addrVal, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
+	toAddr := scope.takeCallAddr(addrVal)
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
@@ -1284,7 +1284,7 @@ func opSelfdestruct(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	}
 	beneficiary := scope.Stack.pop()
 	self := scope.Contract.Address()
-	beneficiaryAddr := accounts.InternAddress(beneficiary.Bytes20())
+	beneficiaryAddr := scope.takeCallAddr(beneficiary)
 	ibs := evm.IntraBlockState()
 	balance, err := ibs.GetBalance(self)
 	if err != nil {
@@ -1309,7 +1309,7 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 	}
 	beneficiary := scope.Stack.pop()
 	self := scope.Contract.Address()
-	beneficiaryAddr := accounts.InternAddress(beneficiary.Bytes20())
+	beneficiaryAddr := scope.takeCallAddr(beneficiary)
 	ibs := evm.IntraBlockState()
 	balance, err := ibs.GetBalance(self)
 	if err != nil {

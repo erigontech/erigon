@@ -18,12 +18,15 @@ package etl
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -33,6 +36,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/memdb"
@@ -134,19 +138,18 @@ func TestWriteAndReadBufferEntry(t *testing.T) {
 	}
 
 	bb := buffer.Bytes()
-
-	readBuffer := bytes.NewReader(bb)
+	m := &mmapBytesReader{data: bb, pos: 0}
 
 	for i := range entries {
-		k, v, err := readElementFromDisk(readBuffer, readBuffer, nil, nil)
-		if err != nil {
-			t.Error(err)
-		}
+		k, err := readField(m)
+		require.NoError(t, err)
+		v, err := readField(m)
+		require.NoError(t, err)
 		assert.Equal(t, string(entries[i].key), string(k))
 		assert.Equal(t, string(entries[i].value), string(v))
 	}
 
-	_, _, err := readElementFromDisk(readBuffer, readBuffer, nil, nil)
+	_, err := readField(m)
 	assert.Equal(t, io.EOF, err)
 }
 
@@ -583,6 +586,89 @@ func TestAppend(t *testing.T) {
 	}, TransformArgs{}))
 }
 
+// TestAppendAcrossProviders tests that SortableAppendBuffer correctly concatenates
+// values for the same key when they span multiple providers (file flushes).
+func TestAppendAcrossProviders(t *testing.T) {
+	tmpdir := t.TempDir()
+	// Use buffer size of 1 to force every Collect to flush to a separate file provider.
+	// Same key {1} appears in multiple providers — merge sort must concatenate values.
+	collector := NewCollector(t.Name(), tmpdir, NewAppendBuffer(1), log.New())
+	defer collector.Close()
+	require := require.New(t)
+	require.NoError(collector.Collect([]byte{1}, []byte{10}))
+	require.NoError(collector.Collect([]byte{1}, []byte{20}))
+	require.NoError(collector.Collect([]byte{1}, []byte{30}))
+	require.NoError(collector.Collect([]byte{2}, []byte{40}))
+	require.NoError(collector.Collect([]byte{2}, []byte{50}))
+
+	require.NoError(collector.Load(nil, "", func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error {
+		if k[0] == 1 {
+			require.Equal([]byte{10, 20, 30}, v, "key 1: values should be concatenated across providers")
+		} else if k[0] == 2 {
+			require.Equal([]byte{40, 50}, v, "key 2: values should be concatenated across providers")
+		}
+		return nil
+	}, TransformArgs{}))
+}
+
+// TestAppendAcrossMemProviders tests that value concatenation works correctly
+// when multiple memoryDataProviders have the same key. GetRef returns zero-copy
+// slices into sortableBuffer.data — appending to prevV without copying would
+// corrupt adjacent entries in the buffer.
+func TestAppendAcrossMemProviders(t *testing.T) {
+	tmpdir := t.TempDir()
+
+	// Provider 0 (file): flushed to disk, read back via mmap zero-copy
+	// Provider 1 (memory): kept in RAM via KeepInRAM
+	// Same keys across both — merge sort must concatenate values.
+	//
+	// Provider 0 (file): {1}→{10}, {3}→{30}, {4}→{100,101}
+	// Provider 1 (mem):  {1}→{20}, {2}→{25}, {4}→{102,103}
+	// Expected merge: {1}→{10,20}, {2}→{25}, {3}→{30}, {4}→{100,101,102,103}
+
+	buf0 := NewAppendBuffer(BufferOptimalSize)
+	buf0.Put([]byte{1}, []byte{10})
+	buf0.Put([]byte{3}, []byte{30})
+	buf0.Put([]byte{4}, []byte{100})
+	buf0.Put([]byte{4}, []byte{101})
+	fileProvider, err := FlushToDisk("test", buf0, tmpdir, log.LvlInfo)
+	require.NoError(t, err)
+
+	buf1 := NewAppendBuffer(BufferOptimalSize)
+	buf1.Put([]byte{1}, []byte{20})
+	buf1.Put([]byte{2}, []byte{25})
+	buf1.Put([]byte{4}, []byte{102})
+	buf1.Put([]byte{4}, []byte{103})
+	buf1.Sort()
+
+	providers := []dataProvider{fileProvider, KeepInRAM(buf1)}
+
+	type kv struct{ k, v []byte }
+	var results []kv
+	loadFunc := func(k, v []byte) error {
+		results = append(results, kv{common.Copy(k), common.Copy(v)})
+		return nil
+	}
+
+	err = mergeSortFiles("test", providers, loadFunc,
+		TransformArgs{BufferType: SortableAppendBuffer}, NewAppendBuffer(1))
+	require.NoError(t, err)
+
+	require.Len(t, results, 4)
+	assert.Equal(t, []byte{1}, results[0].k)
+	assert.Equal(t, []byte{10, 20}, results[0].v, "key 1: values must be concatenated")
+	assert.Equal(t, []byte{2}, results[1].k)
+	assert.Equal(t, []byte{25}, results[1].v)
+	assert.Equal(t, []byte{3}, results[2].k)
+	assert.Equal(t, []byte{30}, results[2].v, "key 3: must not be corrupted by append to key 1's value")
+	assert.Equal(t, []byte{4}, results[3].k)
+	assert.Equal(t, []byte{100, 101, 102, 103}, results[3].v, "key 4: must not be corrupted by append to key 1's value")
+
+	for _, p := range providers {
+		p.Dispose()
+	}
+}
+
 func TestOldest(t *testing.T) {
 	collector := NewCollector(t.Name(), "", NewOldestEntryBuffer(1), log.New())
 	defer collector.Close()
@@ -655,7 +741,7 @@ func TestSortableBufferStableSort(t *testing.T) {
 	// Verify: all entries with dupKey must appear in insertion order
 	seq := 0
 	for i := range buf.Len() {
-		k, v := buf.Get(i, nil, nil)
+		k, v := buf.Get(i)
 		if !bytes.Equal(k, dupKey) {
 			continue
 		}
@@ -679,16 +765,323 @@ func TestSortableBufferNilAndEmptyKeys(t *testing.T) {
 
 	// nil and empty keys both sort as zero-length, before non-empty.
 	// Stable sort preserves insertion order among equal keys.
-	_, v0 := buf.Get(0, nil, nil)
-	_, v1 := buf.Get(1, nil, nil)
-	_, v2 := buf.Get(2, nil, nil)
-	_, v3 := buf.Get(3, nil, nil)
-	_, v4 := buf.Get(4, nil, nil)
+	_, v0 := buf.Get(0)
+	_, v1 := buf.Get(1)
+	_, v2 := buf.Get(2)
+	_, v3 := buf.Get(3)
+	_, v4 := buf.Get(4)
 	assert.Equal(t, []byte("nil-key"), v0)
 	assert.Equal(t, []byte("empty-key-1"), v1)
 	assert.Equal(t, []byte("nil-key-2"), v2)
 	assert.Equal(t, []byte("empty-key-2"), v3)
 	assert.Equal(t, []byte("normal"), v4)
+}
+
+// TestMixedProvidersMergeSortFiles tests the merge sort with both memoryDataProvider
+// and fileDataProvider, verifying that zero-copy returns from both don't corrupt data.
+func TestMixedProvidersMergeSortFiles(t *testing.T) {
+	logger := log.New()
+	tmpdir := t.TempDir()
+
+	// Create entries that will be split across providers:
+	// - some go into a memoryDataProvider (kept in RAM)
+	// - some go into fileDataProviders (flushed to disk)
+	//
+	// Use a small buffer so most entries flush to file, but the last batch stays in RAM.
+
+	// We'll manually create providers to control the mix.
+	// Provider 0: fileDataProvider with keys "a01".."a05"
+	// Provider 1: memoryDataProvider with keys "b01".."b05"
+
+	// Build file provider
+	fileBuf := NewSortableBuffer(BufferOptimalSize)
+	for i := 0; i < 5; i++ {
+		k := fmt.Appendf(nil, "a%02d", i)
+		v := fmt.Appendf(nil, "file-val-%02d", i)
+		fileBuf.Put(k, v)
+	}
+	fileProvider, err := FlushToDisk("test", fileBuf, tmpdir, log.LvlInfo)
+	require.NoError(t, err)
+	require.NotNil(t, fileProvider)
+
+	// Build memory provider
+	memBuf := NewSortableBuffer(BufferOptimalSize)
+	for i := 0; i < 5; i++ {
+		k := fmt.Appendf(nil, "b%02d", i)
+		v := fmt.Appendf(nil, "mem-val-%02d", i)
+		memBuf.Put(k, v)
+	}
+	memBuf.Sort()
+	memProvider := KeepInRAM(memBuf)
+
+	providers := []dataProvider{fileProvider, memProvider}
+
+	// Collect results
+	var results []sortableBufferEntry
+	loadFunc := func(k, v []byte) error {
+		// Must copy because providers return zero-copy references
+		results = append(results, sortableBufferEntry{
+			key:   common.Copy(k),
+			value: common.Copy(v),
+		})
+		return nil
+	}
+
+	err = mergeSortFiles("test", providers, loadFunc, TransformArgs{}, NewSortableBuffer(1))
+	require.NoError(t, err)
+
+	// Should have all 10 entries in sorted order
+	require.Len(t, results, 10)
+
+	// Verify sorted order and correct values
+	for i := 0; i < 5; i++ {
+		assert.Equal(t, fmt.Sprintf("a%02d", i), string(results[i].key), "file key %d", i)
+		assert.Equal(t, fmt.Sprintf("file-val-%02d", i), string(results[i].value), "file val %d", i)
+	}
+	for i := 0; i < 5; i++ {
+		assert.Equal(t, fmt.Sprintf("b%02d", i), string(results[5+i].key), "mem key %d", i)
+		assert.Equal(t, fmt.Sprintf("mem-val-%02d", i), string(results[5+i].value), "mem val %d", i)
+	}
+
+	// Cleanup
+	for _, p := range providers {
+		p.Dispose()
+	}
+
+	_ = logger
+}
+
+// TestMixedProvidersInterleavedKeys tests merge sort with interleaved keys
+// from both memory and file providers, ensuring correct ordering.
+func TestMixedProvidersInterleavedKeys(t *testing.T) {
+	tmpdir := t.TempDir()
+
+	// File provider: even keys
+	fileBuf := NewSortableBuffer(BufferOptimalSize)
+	for i := 0; i < 10; i += 2 {
+		k := fmt.Appendf(nil, "key-%04d", i)
+		v := fmt.Appendf(nil, "file-%04d", i)
+		fileBuf.Put(k, v)
+	}
+	fileProvider, err := FlushToDisk("test", fileBuf, tmpdir, log.LvlInfo)
+	require.NoError(t, err)
+
+	// Memory provider: odd keys
+	memBuf := NewSortableBuffer(BufferOptimalSize)
+	for i := 1; i < 10; i += 2 {
+		k := fmt.Appendf(nil, "key-%04d", i)
+		v := fmt.Appendf(nil, "mem-%04d", i)
+		memBuf.Put(k, v)
+	}
+	memBuf.Sort()
+	memProvider := KeepInRAM(memBuf)
+
+	providers := []dataProvider{fileProvider, memProvider}
+
+	var keys, vals []string
+	loadFunc := func(k, v []byte) error {
+		keys = append(keys, string(k))
+		vals = append(vals, string(v))
+		return nil
+	}
+
+	err = mergeSortFiles("test", providers, loadFunc, TransformArgs{}, NewSortableBuffer(1))
+	require.NoError(t, err)
+
+	require.Len(t, keys, 10)
+	// Verify interleaved order
+	for i := 0; i < 10; i++ {
+		assert.Equal(t, fmt.Sprintf("key-%04d", i), keys[i])
+		if i%2 == 0 {
+			assert.Equal(t, fmt.Sprintf("file-%04d", i), vals[i])
+		} else {
+			assert.Equal(t, fmt.Sprintf("mem-%04d", i), vals[i])
+		}
+	}
+
+	for _, p := range providers {
+		p.Dispose()
+	}
+}
+
+// TestMixedProvidersZeroCopyIntegrity verifies that zero-copy slices from
+// memoryDataProvider (GetRef) are not corrupted by subsequent Next() calls.
+func TestMixedProvidersZeroCopyIntegrity(t *testing.T) {
+	tmpdir := t.TempDir()
+
+	// File provider with 1 key
+	fileBuf := NewSortableBuffer(BufferOptimalSize)
+	fileBuf.Put([]byte("aaa"), []byte("file-aaa"))
+	fileProvider, err := FlushToDisk("test", fileBuf, tmpdir, log.LvlInfo)
+	require.NoError(t, err)
+
+	// Memory provider with multiple keys - GetRef returns slices into sortableBuffer.data
+	memBuf := NewSortableBuffer(BufferOptimalSize)
+	memBuf.Put([]byte("bbb"), []byte("mem-bbb"))
+	memBuf.Put([]byte("ccc"), []byte("mem-ccc"))
+	memBuf.Put([]byte("ddd"), []byte("mem-ddd"))
+	memBuf.Sort()
+	memProvider := KeepInRAM(memBuf)
+
+	providers := []dataProvider{fileProvider, memProvider}
+
+	// Capture zero-copy references and verify they remain valid
+	type entry struct {
+		key []byte
+		val []byte
+	}
+	var entries []entry
+
+	loadFunc := func(k, v []byte) error {
+		// Intentionally NOT copying - to test that zero-copy refs stay valid
+		entries = append(entries, entry{key: k, val: v})
+		return nil
+	}
+
+	err = mergeSortFiles("test", providers, loadFunc, TransformArgs{}, NewSortableBuffer(1))
+	require.NoError(t, err)
+
+	require.Len(t, entries, 4)
+	// Verify all entries still have correct data (not corrupted by subsequent reads)
+	assert.Equal(t, "aaa", string(entries[0].key))
+	assert.Equal(t, "file-aaa", string(entries[0].val))
+	assert.Equal(t, "bbb", string(entries[1].key))
+	assert.Equal(t, "mem-bbb", string(entries[1].val))
+	assert.Equal(t, "ccc", string(entries[2].key))
+	assert.Equal(t, "mem-ccc", string(entries[2].val))
+	assert.Equal(t, "ddd", string(entries[3].key))
+	assert.Equal(t, "mem-ddd", string(entries[3].val))
+
+	for _, p := range providers {
+		p.Dispose()
+	}
+}
+
+func BenchmarkFileDataProviderNext(b *testing.B) {
+	const keySize = 32
+	for _, valSize := range []int{32, 128, 1024} {
+		name := fmt.Sprintf("key%d_val%d", keySize, valSize)
+		buf := makeSortedBuffer(keySize, valSize, 10_000)
+
+		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				b.StopTimer()
+				tmpdir, _ := os.MkdirTemp("", "bench-fdp-")
+				provider, err := FlushToDisk("bench", buf, tmpdir, log.LvlInfo)
+				if err != nil {
+					b.Fatal(err)
+				}
+				b.StartTimer()
+
+				for {
+					_, _, err := provider.Next()
+					if err == io.EOF {
+						break
+					}
+					if err != nil {
+						b.Fatal(err)
+					}
+				}
+
+				b.StopTimer()
+				provider.Dispose()
+				dir.RemoveAll(tmpdir)
+				b.StartTimer()
+			}
+		})
+	}
+}
+
+func BenchmarkCollect(b *testing.B) {
+	logger := log.New()
+	const keyLen = 32
+	const valLen = 128
+
+	for _, tc := range []struct {
+		name    string
+		count   int
+		bufSize datasize.ByteSize
+	}{
+		{"10k_smallbuf", 10_000, 64 * datasize.KB},
+		{"10k_largebuf", 10_000, 256 * datasize.MB},
+		{"100k_smallbuf", 100_000, 256 * datasize.KB},
+		{"100k_largebuf", 100_000, 256 * datasize.MB},
+	} {
+		// Pre-generate deterministic keys/values
+		keys := make([][]byte, tc.count)
+		vals := make([][]byte, tc.count)
+		for i := range tc.count {
+			k := make([]byte, keyLen)
+			binary.BigEndian.PutUint64(k, uint64(i)*6364136223846793005)
+			keys[i] = k
+			v := make([]byte, valLen)
+			binary.BigEndian.PutUint64(v, uint64(i))
+			vals[i] = v
+		}
+
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			tmpdir := b.TempDir()
+			for b.Loop() {
+				c := NewCollector("bench", tmpdir, NewSortableBuffer(tc.bufSize), logger)
+				for i := range tc.count {
+					if err := c.Collect(keys[i], vals[i]); err != nil {
+						b.Fatal(err)
+					}
+				}
+				c.Close()
+			}
+		})
+	}
+}
+
+func BenchmarkMergeSortFiles(b *testing.B) {
+	logger := log.New()
+	const keyLen = 32
+	const valLen = 128
+
+	for _, tc := range []struct {
+		name         string
+		count        int
+		bufSize      datasize.ByteSize
+		expectOnDisk bool // true when bufSize is small enough to force file providers
+	}{
+		{"mem_only_10k", 10_000, 256 * datasize.MB, false},
+		{"file_only_10k", 10_000, 64 * datasize.KB, true},
+		{"file_only_100k", 100_000, 256 * datasize.KB, true},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			tmpdir := b.TempDir()
+
+			// Pre-generate deterministic keys/values
+			keys := make([][]byte, tc.count)
+			vals := make([][]byte, tc.count)
+			for i := range tc.count {
+				k := make([]byte, keyLen)
+				binary.BigEndian.PutUint64(k, uint64(i)*6364136223846793005)
+				keys[i] = k
+				v := make([]byte, valLen)
+				binary.BigEndian.PutUint64(v, uint64(i))
+				vals[i] = v
+			}
+
+			for b.Loop() {
+				c := NewCollector("bench", tmpdir, NewSortableBuffer(tc.bufSize), logger)
+				for i := range tc.count {
+					if err := c.Collect(keys[i], vals[i]); err != nil {
+						b.Fatal(err)
+					}
+				}
+				if err := c.Load(nil, "", func(k, v []byte, _ CurrentTableReader, next LoadNextFunc) error {
+					return nil
+				}, TransformArgs{}); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
 }
 
 func BenchmarkSortableBufferSort(b *testing.B) {
@@ -811,12 +1204,9 @@ func BenchmarkSortableBufferPutSortLoad(b *testing.B) {
 				}
 				buf.Sort()
 				// Load phase: iterate sorted buffer like ETL load does
-				var keyBuf, valBuf []byte
 				for i := range buf.Len() {
-					keyBuf, valBuf = buf.Get(i, keyBuf[:0], valBuf[:0])
+					_, _ = buf.Get(i)
 				}
-				_ = keyBuf
-				_ = valBuf
 			}
 		})
 	}
@@ -855,6 +1245,103 @@ func BenchmarkSortableBufferPutOnly(b *testing.B) {
 					binary.BigEndian.PutUint64(val, uint64(i))
 					buf.Put(key, val)
 				}
+			}
+		})
+	}
+}
+
+func BenchmarkSortableBufferInmemLoadOnly(b *testing.B) {
+	const keyLen = 32
+	const valLen = 64
+
+	for _, tc := range []struct {
+		name   string
+		count  int
+		sorted bool
+	}{
+		{"random_100k", 100_000, false},
+		{"random_500k", 500_000, false},
+		{"sorted_100k", 100_000, true},
+		{"sorted_500k", 500_000, true},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			key := make([]byte, keyLen)
+			val := make([]byte, valLen)
+			buf := NewSortableBuffer(256 * 1024 * 1024)
+			buf.Prealloc(tc.count, tc.count*(keyLen+valLen))
+			for i := range tc.count {
+				if tc.sorted {
+					binary.BigEndian.PutUint64(key, uint64(i))
+				} else {
+					x := uint64(i) * 6364136223846793005
+					binary.BigEndian.PutUint64(key, x)
+					binary.BigEndian.PutUint64(key[8:], x^0xdeadbeef)
+				}
+				binary.BigEndian.PutUint64(val, uint64(i))
+				buf.Put(key, val)
+			}
+			buf.Sort()
+			for b.Loop() {
+				for i := range buf.Len() {
+					_, _ = buf.Get(i)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkSortableBufferLoadOnly(b *testing.B) {
+	const keyLen = 32
+	const valLen = 64
+	logger := log.New()
+
+	// bufSize is chosen to produce ~5 disk providers per run:
+	// 100k entries × 96 bytes ≈ 9.6 MB → bufSize = 2 MB → ~5 flushes
+	// 500k entries × 96 bytes ≈ 48 MB → bufSize = 10 MB → ~5 flushes
+	for _, tc := range []struct {
+		name    string
+		count   int
+		sorted  bool
+		bufSize datasize.ByteSize
+	}{
+		{"random_100k", 100_000, false, 2 * datasize.MB},
+		{"random_500k", 500_000, false, 10 * datasize.MB},
+		{"sorted_100k", 100_000, true, 2 * datasize.MB},
+		{"sorted_500k", 500_000, true, 10 * datasize.MB},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			key := make([]byte, keyLen)
+			val := make([]byte, valLen)
+			tmpdir := b.TempDir()
+			for b.Loop() {
+				b.StopTimer()
+				c := NewCollector(b.Name(), tmpdir, NewSortableBuffer(tc.bufSize), logger)
+				for i := range tc.count {
+					if tc.sorted {
+						binary.BigEndian.PutUint64(key, uint64(i))
+					} else {
+						x := uint64(i) * 6364136223846793005
+						binary.BigEndian.PutUint64(key, x)
+						binary.BigEndian.PutUint64(key[8:], x^0xdeadbeef)
+					}
+					binary.BigEndian.PutUint64(val, uint64(i))
+					if err := c.Collect(key, val); err != nil {
+						b.Fatal(err)
+					}
+				}
+				c.buf.Sort()
+				b.StartTimer()
+				if err := c.Load(nil, "", func(k, v []byte, _ CurrentTableReader, next LoadNextFunc) error {
+					return nil
+					//return next(k, k, v)
+				}, TransformArgs{}); err != nil {
+					b.Fatal(err)
+				}
+				b.StopTimer()
+				c.Close()
+				b.StartTimer()
 			}
 		})
 	}
@@ -927,4 +1414,117 @@ func TestBufferSortAfterReset(t *testing.T) {
 			require.True(t, slices.IsSortedFunc(got, bytes.Compare), "keys not sorted after reset: %x", got)
 		})
 	}
+}
+
+func BenchmarkMemoryDataProviderNext(b *testing.B) {
+	for _, keySize := range []int{20, 32, 64} {
+		for _, valSize := range []int{32, 128, 256, 1024} {
+			name := fmt.Sprintf("key%d_val%d", keySize, valSize)
+			buf := makeSortedBuffer(keySize, valSize, 10_000)
+
+			b.Run(name+"/Next", func(b *testing.B) {
+				b.ReportAllocs()
+				for i := 0; i < b.N; i++ {
+					p := &memoryDataProvider{buffer: buf, currentIndex: 0}
+					for {
+						_, _, err := p.Next()
+						if err == io.EOF {
+							break
+						}
+						if err != nil {
+							b.Fatal(err)
+						}
+					}
+				}
+			})
+
+			b.Run(name+"/Get", func(b *testing.B) {
+				b.ReportAllocs()
+				for i := 0; i < b.N; i++ {
+					for idx := 0; idx < buf.Len(); idx++ {
+						_, _ = buf.Get(idx)
+					}
+				}
+			})
+		}
+	}
+}
+
+func makeSortedBuffer(keySize, valSize, n int) *sortableBuffer {
+	buf := NewSortableBuffer(256 * datasize.MB)
+	key := make([]byte, keySize)
+	val := make([]byte, valSize)
+	for i := 0; i < n; i++ {
+		rand.Read(key)
+		rand.Read(val)
+		buf.Put(key, val)
+	}
+	buf.Sort()
+	return buf
+}
+
+func TestVmtouchMmap(t *testing.T) {
+	if _, err := exec.LookPath("vmtouch"); err != nil {
+		t.Skip("vmtouch not installed")
+	}
+
+	tmpdir := t.TempDir()
+	const n = 1_000_000
+	buf := makeSortedBuffer(32, 1024, n) // ~1GB file
+
+	provider, err := FlushToDisk("test", buf, tmpdir, log.LvlInfo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer provider.Dispose()
+
+	files, _ := filepath.Glob(filepath.Join(tmpdir, "*"))
+	if len(files) == 0 {
+		t.Fatal("no temp file found")
+	}
+	fname := files[0]
+
+	vmtouch := func(label string) {
+		fmt.Printf("\n=== %s ===\n", label)
+		cmd := exec.Command("vmtouch", "-v", fname)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Run()
+	}
+
+	vmtouch("BEFORE first Next()")
+
+	// First Next() triggers initMmap + MadviseWillNeed + MadviseSequential
+	_, _, err = provider.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+	vmtouch("AFTER first Next() (initMmap + madvise)")
+
+	// Read 25%
+	for i := 0; i < n/4-1; i++ {
+		provider.Next()
+	}
+	vmtouch("AFTER 25%")
+
+	// Read to 50%
+	for i := 0; i < n/4; i++ {
+		provider.Next()
+	}
+	vmtouch("AFTER 50%")
+
+	// Read to 75%
+	for i := 0; i < n/4; i++ {
+		provider.Next()
+	}
+	vmtouch("AFTER 75%")
+
+	// Read rest
+	for {
+		_, _, err := provider.Next()
+		if err == io.EOF {
+			break
+		}
+	}
+	vmtouch("AFTER full scan")
 }
