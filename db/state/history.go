@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/RoaringBitmap/roaring/v2"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -612,20 +613,21 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 		defer cd.Close()
 	}
 
+	baseTxNum := uint64(step) * h.stepSize
 	var (
 		keyBuf     = make([]byte, 0, 256)
 		numBuf     = make([]byte, 8)
-		bitmap     = bitmapdb.NewBitmap64()
-		txNums     = make([]uint64, 0, 256)
+		// bitmap32: stores (txNum-baseTxNum) offsets; safe because collate covers exactly
+		// one step so offsets are at most stepSize < math.MaxUint32.
+		bitmap     = bitmapdb.NewBitmap32()
 		prevEf     []byte
 		prevKey    []byte
 		seqBuilder multiencseq.SequenceBuilder
 
 		initialized bool
 	)
-	defer bitmapdb.ReturnToPool64(bitmap)
+	defer bitmapdb.ReturnToPool32(bitmap)
 
-	baseTxNum := uint64(step) * h.stepSize
 	cnt := 0
 	var histKeyBuf []byte
 	//log.Warn("[dbg] collate", "name", h.filenameBase, "sampling", h.historyValuesOnCompressedPage)
@@ -638,19 +640,17 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 		}
 
 		if bytes.Equal(prevKey, k) {
-			txNums = append(txNums, txNum)
+			bitmap.Add(uint32(txNum - baseTxNum))
 			prevKey = append(prevKey[:0], k...)
 			return nil
 		}
-
-		bitmap.AddMany(txNums)
-		txNums = txNums[:0]
-		seqBuilder.Reset(baseTxNum, bitmap.GetCardinality(), bitmap.Maximum())
-		it := bitmap.Iterator()
+		seqBuilder.Reset(baseTxNum, bitmap.GetCardinality(), baseTxNum+uint64(bitmap.Maximum()))
+		var it roaring.IntIterator
+		it.Initialize(bitmap)
 
 		for it.HasNext() {
 			cnt++
-			vTxNum := it.Next()
+			vTxNum := baseTxNum + uint64(it.Next())
 			seqBuilder.AddOffset(vTxNum)
 
 			binary.BigEndian.PutUint64(numBuf, vTxNum)
@@ -699,7 +699,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 
 		prevKey = append(prevKey[:0], k...)
 		txNum = binary.BigEndian.Uint64(v)
-		txNums = append(txNums, txNum)
+		bitmap.Add(uint32(txNum - baseTxNum))
 
 		return nil
 	}
@@ -708,7 +708,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 	if err != nil {
 		return HistoryCollation{}, err
 	}
-	if len(txNums) > 0 {
+	if !bitmap.IsEmpty() {
 		if err = loadBitmapsFunc(nil, make([]byte, 8), nil, nil); err != nil {
 			return HistoryCollation{}, err
 		}

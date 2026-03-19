@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/spaolacci/murmur3"
+	"github.com/RoaringBitmap/roaring/v2"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -1002,11 +1003,12 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 		prevEf      []byte
 		prevKey     []byte
 		initialized bool
-		bitmap      = bitmapdb.NewBitmap64()
-		txNums      = make([]uint64, 0, 256)
+		// bitmap32: stores (txNum-baseTxNum) offsets; safe because collate covers exactly
+		// one step so offsets are at most stepSize < math.MaxUint32.
+		bitmap      = bitmapdb.NewBitmap32()
 		ef          multiencseq.SequenceBuilder
 	)
-	defer bitmapdb.ReturnToPool64(bitmap)
+	defer bitmapdb.ReturnToPool32(bitmap)
 
 	loadBitmapsFunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		txNum := binary.BigEndian.Uint64(v)
@@ -1016,21 +1018,20 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 		}
 
 		if bytes.Equal(prevKey, k) {
-			txNums = append(txNums, txNum)
+			bitmap.Add(uint32(txNum - baseTxNum))
 			prevKey = append(prevKey[:0], k...)
 			return nil
 		}
-
-		bitmap.AddMany(txNums)
-		txNums = txNums[:0]
-		if bitmap.Minimum() < txFrom || bitmap.Maximum() >= txTo {
+		absMin, absMax := baseTxNum+uint64(bitmap.Minimum()), baseTxNum+uint64(bitmap.Maximum())
+		if absMin < txFrom || absMax >= txTo {
 			return fmt.Errorf("[inverted_index] collate %s: txNums out of range [%d, %d) for step %d: min=%d, max=%d, key=%x",
-				ii.FilenameBase, txFrom, txTo, step, bitmap.Minimum(), bitmap.Maximum(), prevKey)
+				ii.FilenameBase, txFrom, txTo, step, absMin, absMax, prevKey)
 		}
-		ef.Reset(baseTxNum, bitmap.GetCardinality(), bitmap.Maximum())
-		it := bitmap.Iterator()
+		ef.Reset(baseTxNum, bitmap.GetCardinality(), absMax)
+		var it roaring.IntIterator
+		it.Initialize(bitmap)
 		for it.HasNext() {
-			ef.AddOffset(it.Next())
+			ef.AddOffset(baseTxNum + uint64(it.Next()))
 		}
 		bitmap.Clear()
 		ef.Build()
@@ -1046,7 +1047,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 
 		prevKey = append(prevKey[:0], k...)
 		txNum = binary.BigEndian.Uint64(v)
-		txNums = append(txNums, txNum)
+		bitmap.Add(uint32(txNum - baseTxNum))
 
 		return nil
 	}
@@ -1055,7 +1056,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 	if err != nil {
 		return InvertedIndexCollation{}, err
 	}
-	if len(txNums) > 0 {
+	if !bitmap.IsEmpty() {
 		if err = loadBitmapsFunc(nil, make([]byte, 8), nil, nil); err != nil {
 			return InvertedIndexCollation{}, err
 		}
