@@ -1,0 +1,109 @@
+name: CI Gate
+
+on:
+  pull_request:
+    branches:
+      - main
+      - 'release/**'
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+  push:
+    branches:
+      - main
+      - 'release/**'
+  merge_group:
+  workflow_dispatch:
+
+concurrency:
+  # For PRs: one run per branch; new push cancels the old run.
+  # For push/merge_group/workflow_dispatch: unique per run so runs never cancel each other.
+  group: >-
+    ${{
+      github.event_name == 'pull_request' &&
+      format('{0}-{1}', github.workflow, github.head_ref) ||
+      format('{0}-{1}', github.workflow, github.run_id)
+    }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/lint.yml
+    secrets: inherit
+
+  tests:
+    uses: ./.github/workflows/test-all-erigon.yml
+    secrets: inherit
+
+  race-tests:
+    uses: ./.github/workflows/test-all-erigon-race.yml
+    secrets: inherit
+
+  hive:
+    uses: ./.github/workflows/test-hive.yml
+    secrets: inherit
+
+  caplin:
+    uses: ./.github/workflows/test-integration-caplin.yml
+    secrets: inherit
+
+  # Only meaningful for PRs: needs github.event.pull_request.base.sha.
+  large-files:
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/check-large-files.yml
+    secrets: inherit
+
+  bench:
+    uses: ./.github/workflows/test-bench.yml
+    secrets: inherit
+
+  kurtosis:
+    uses: ./.github/workflows/test-kurtosis-assertoor.yml
+    secrets: inherit
+
+  manifest:
+    uses: ./.github/workflows/manifest.yml
+    secrets: inherit
+
+  repro:
+    uses: ./.github/workflows/reproducible-build.yml
+    secrets: inherit
+
+  qa-rpc-gnosis:
+    uses: ./.github/workflows/qa-rpc-integration-tests-gnosis.yml
+    secrets: inherit
+
+  qa-rpc-remote:
+    uses: ./.github/workflows/qa-rpc-integration-tests-remote.yml
+    secrets: inherit
+
+  ci-gate:
+    if: always()
+    needs:
+      - lint
+      - tests
+      - race-tests
+      - hive
+      - caplin
+      - large-files
+      - bench
+      - kurtosis
+      - manifest
+      - repro
+      - qa-rpc-gnosis
+      - qa-rpc-remote
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check all required jobs
+        run: |
+          echo '${{ toJSON(needs) }}' > needs.json
+          failed=$(jq -r 'to_entries[] | select(.value.result == "failure" or .value.result == "cancelled") | .key' needs.json)
+          if [ -n "$failed" ]; then
+            echo "The following jobs failed or were cancelled:"
+            echo "$failed"
+            exit 1
+          fi
+          echo "All required jobs passed or were skipped."

@@ -948,12 +948,9 @@ func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastB
 }
 
 func (a *Aggregator) BuildFiles(toTxNum uint64) (err error) {
-	finished := a.BuildFilesInBackground(toTxNum)
-	// If fin is already closed, nothing was scheduled — return immediately.
-	select {
-	case <-finished:
+	finished := a.buildFilesInBackground(toTxNum, true)
+	if !(a.buildingFiles.Load() || a.mergingFiles.Load()) {
 		return nil
-	default:
 	}
 
 	logEvery := time.NewTicker(20 * time.Second)
@@ -1791,9 +1788,12 @@ func (a *Aggregator) SetSnapshotBuildSema(semaphore *semaphore.Weighted) {
 func (a *Aggregator) SetProduceMod(produce bool) {
 	a.produce = produce
 }
+func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
+	return a.buildFilesInBackground(txNum, true)
+}
 
 // Returns channel which is closed when aggregation is done
-func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
+func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan struct{} {
 	fin := make(chan struct{})
 
 	if !a.produce {
@@ -1860,7 +1860,9 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 			}
 			a.onFilesChange(nil)
 		}
-
+		if !doMerge {
+			return
+		}
 		go func() {
 			defer close(fin)
 			if err := a.MergeLoop(a.ctx); err != nil {

@@ -142,12 +142,20 @@ const (
 	ForkChoice               StageName = "ForkChoice"
 	CleanupAndPruning        StageName = "CleanupAndPruning"
 	SleepForSlot             StageName = "SleepForSlot"
+	WaitForPeers             StageName = "WaitForPeers"
 	DownloadHistoricalBlocks StageName = "DownloadHistoricalBlocks"
 )
 
 func MetaCatchingUp(args Args) StageName {
 	if !args.hasDownloaded {
 		return DownloadHistoricalBlocks
+	}
+	// If we have no peers, sleep until the next slot rather than entering sync
+	// stages that will fail. This avoids CPU-burning retry loops when peer
+	// discovery has not completed yet (common on Gnosis with 5-second slots).
+	if args.peers == 0 {
+		log.Debug("[Caplin] no peers available, waiting for peer discovery before syncing")
+		return WaitForPeers
 	}
 	if args.seenEpoch < args.targetEpoch {
 		return ForwardSync
@@ -313,6 +321,24 @@ func ConsensusClStages(ctx context.Context,
 					return SleepForSlot
 				},
 				ActionFunc: cleanupAndPruning,
+			},
+			WaitForPeers: {
+				Description: `brief wait for peer discovery when no peers are available`,
+				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
+					if x := MetaCatchingUp(args); x != "" {
+						return x
+					}
+					return ChainTipSync
+				},
+				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
+					// Wait 1 second before re-checking peers. Short enough to react
+					// quickly once peers appear, long enough to avoid busy-looping.
+					select {
+					case <-time.After(1 * time.Second):
+					case <-ctx.Done():
+					}
+					return nil
+				},
 			},
 			SleepForSlot: {
 				Description: `sleep until the next slot`,

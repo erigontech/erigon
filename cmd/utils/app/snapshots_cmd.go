@@ -1305,7 +1305,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 					}
 					scCopy := sc
 					scCopy.SampleRatio /= 100 // it's very slow check
-					if err := integrity.CheckCommitmentHistAtBlkRange(ctx, scCopy, db, blockReader, 1, to+1, logger); err != nil {
+					if err := integrity.CheckCommitmentHistAtBlkRange(ctx, scCopy, db, blockReader, 1, to+1, failFast, logger); err != nil {
 						return err
 					}
 				case integrity.StateVerify:
@@ -1414,7 +1414,7 @@ func doCheckStateRootByHistory(cliCtx *cli.Context, logger log.Logger) error {
 		return err
 	}
 	logger.Info("[check-commitment-hist-at-blk-range] sampling config", "seed", sc.Seed, "sampleRatio", sc.SampleRatio)
-	return integrity.CheckCommitmentHistAtBlkRange(ctx, sc, db, blockReader, from, to, logger)
+	return integrity.CheckCommitmentHistAtBlkRange(ctx, sc, db, blockReader, from, to, true /*failFast*/, logger)
 }
 
 func doVerifyState(cliCtx *cli.Context, logger log.Logger) error {
@@ -2360,6 +2360,7 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 	defer clean()
+	agg.PresetOfflineMerge()
 
 	if err := caplinStateSnaps.BuildMissingIndices(ctx, logger); err != nil {
 		return err

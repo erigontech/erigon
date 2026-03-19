@@ -20,11 +20,12 @@
 package gasprice
 
 import (
-	"container/heap"
 	"context"
-	"sort"
+	"slices"
+	"sync/atomic"
 
 	"github.com/holiman/uint256"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -144,21 +145,68 @@ func (oracle *Oracle) SuggestTipCap(ctx context.Context) (*uint256.Int, error) {
 	}
 
 	number := head.Number.Uint64()
-	txPrices := make([]*uint256.Int, 0, sampleNumber*oracle.checkBlocks)
-	for len(txPrices) < sampleNumber*oracle.checkBlocks && number > 0 {
-		if err := oracle.getBlockPrices(ctx, number, sampleNumber, oracle.ignorePrice, &txPrices); err != nil {
-			return latestPrice, err
-		}
-		number--
+	txPrices := make([]*uint256.Int, 0, 2*sampleNumber*oracle.checkBlocks)
+
+	// Phase 1: fetch checkBlocks blocks in parallel (or sequentially when Fork
+	// is not supported by the backend).
+	count1 := oracle.checkBlocks
+	if uint64(count1) > number {
+		count1 = int(number)
 	}
+	phase1, err := oracle.fetchBlockPricesParallel(ctx, number, count1)
+	if err != nil {
+		return latestPrice, err
+	}
+
+	// Post-process phase 1: apply the empty-block fallback (issue #17617) and
+	// count sparse blocks to decide whether a phase-2 extension is needed.
+	sparseCount := 0
+	for _, prices := range phase1 {
+		added := len(prices)
+		// Empty block (or all transactions from coinbase): fall back to the
+		// last known price so the percentile estimate stays stable.
+		if added == 0 && latestPrice != nil {
+			txPrices = append(txPrices, new(uint256.Int).Set(latestPrice))
+			added = 1
+		} else {
+			txPrices = append(txPrices, prices...)
+		}
+		if added <= 1 {
+			sparseCount++
+		}
+	}
+
+	// Phase 2: extend the window by up to sparseCount extra blocks (capped at
+	// checkBlocks), mirroring geth's adaptive extension up to 2*checkBlocks.
+	if sparseCount > 0 && number > uint64(count1) {
+		count2 := min(sparseCount, oracle.checkBlocks)
+		startBlock2 := number - uint64(count1)
+		if uint64(count2) > startBlock2 {
+			count2 = int(startBlock2)
+		}
+		if count2 > 0 {
+			phase2, err := oracle.fetchBlockPricesParallel(ctx, startBlock2, count2)
+			if err != nil {
+				return latestPrice, err
+			}
+			for _, prices := range phase2 {
+				if len(prices) == 0 && latestPrice != nil {
+					txPrices = append(txPrices, new(uint256.Int).Set(latestPrice))
+				} else {
+					txPrices = append(txPrices, prices...)
+				}
+			}
+		}
+	}
+
 	price := latestPrice
 	if len(txPrices) > 0 {
-		sort.Slice(txPrices, func(i, j int) bool { return txPrices[i].Lt(txPrices[j]) })
+		slices.SortFunc(txPrices, func(a, b *uint256.Int) int { return a.Cmp(b) })
 		index := (len(txPrices) - 1) * oracle.percentile / 100
 		price = txPrices[index]
 	}
 
-	if price.Cmp(oracle.maxPrice) > 0 {
+	if price != nil && price.Cmp(oracle.maxPrice) > 0 {
 		price = new(uint256.Int).Set(oracle.maxPrice)
 	}
 
@@ -167,84 +215,113 @@ func (oracle *Oracle) SuggestTipCap(ctx context.Context) (*uint256.Int, error) {
 	return price, nil
 }
 
-type transactionsByGasPrice struct {
-	txs     []types.Transaction
-	baseFee *uint256.Int
-	log     log.Logger
-}
-
-func newTransactionsByGasPrice(txs []types.Transaction,
-	baseFee *uint256.Int, log log.Logger) transactionsByGasPrice {
-	return transactionsByGasPrice{
-		txs:     txs,
-		baseFee: baseFee,
-		log:     log,
+// fetchBlockPricesParallel fetches prices for count consecutive blocks, starting
+// at head and going backwards. Work is distributed across up to maxBlockFetchers
+// goroutines; each goroutine opens its own read transaction via Fork so MDBX
+// transactions are never shared across goroutines.
+//
+// When Fork is not supported (returns nil backend), a single goroutine falls back
+// to using the main backend sequentially; all other goroutines exit immediately to
+// avoid concurrent access on the shared transaction.
+//
+// The returned slice has length count: entry i corresponds to block head-i.
+func (oracle *Oracle) fetchBlockPricesParallel(ctx context.Context, head uint64, count int) ([][]*uint256.Int, error) {
+	results := make([][]*uint256.Int, count)
+	var (
+		nextIdx uint64
+		seqOnce int32 // CAS flag: 0 = available, 1 = sequential mode claimed
+	)
+	g, fetchCtx := errgroup.WithContext(ctx)
+	for range min(maxBlockFetchers, count) {
+		g.Go(func() error {
+			localBackend, cleanup, forkErr := oracle.backend.Fork(fetchCtx)
+			if forkErr != nil {
+				return forkErr
+			}
+			if localBackend == nil {
+				// Fork not supported: allow exactly one goroutine to proceed
+				// sequentially on the shared backend; the others exit.
+				if !atomic.CompareAndSwapInt32(&seqOnce, 0, 1) {
+					return nil
+				}
+				localBackend = oracle.backend
+			} else if cleanup != nil {
+				defer cleanup()
+			}
+			for {
+				if err := fetchCtx.Err(); err != nil {
+					return err
+				}
+				idx := int(atomic.AddUint64(&nextIdx, 1)) - 1
+				if idx >= count {
+					return nil
+				}
+				blockNum := head - uint64(idx)
+				prices := make([]*uint256.Int, 0, sampleNumber)
+				if err := oracle.getBlockPricesFromBackend(fetchCtx, localBackend, blockNum, sampleNumber, oracle.ignorePrice, &prices); err != nil {
+					return err
+				}
+				results[idx] = prices
+			}
+		})
 	}
+	return results, g.Wait()
 }
 
-func (t transactionsByGasPrice) Len() int      { return len(t.txs) }
-func (t transactionsByGasPrice) Swap(i, j int) { t.txs[i], t.txs[j] = t.txs[j], t.txs[i] }
-func (t transactionsByGasPrice) Less(i, j int) bool {
-	tip1 := t.txs[i].GetEffectiveGasTip(t.baseFee)
-	tip2 := t.txs[j].GetEffectiveGasTip(t.baseFee)
-	return tip1.Lt(tip2)
-}
-
-// Push (part of heap.Interface) places a new link onto the end of queue
-func (t *transactionsByGasPrice) Push(x any) {
-	// Push and Pop use pointer receivers because they modify the slice's length,
-	// not just its contents.
-	l, ok := x.(types.Transaction)
-	if !ok {
-		t.log.Error("Type assertion failure", "err", "cannot get types.Transaction from interface")
-	}
-	t.txs = append(t.txs, l)
-}
-
-// Pop (part of heap.Interface) removes the first link from the queue
-func (t *transactionsByGasPrice) Pop() any {
-	old := t.txs
-	n := len(old)
-	x := old[n-1]
-	old[n-1] = nil // avoid memory leak
-	t.txs = old[0 : n-1]
-	return x
-}
-
-// getBlockPrices calculates the lowest transaction gas price in a given block.
-// the block is empty or all transactions are sent by the miner
-// itself(it doesn't make any sense to include this kind of transaction prices for sampling),
-// nil gasprice is returned.
-func (oracle *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit int,
+// getBlockPricesFromBackend calculates the lowest transaction gas prices in a
+// given block using the supplied backend (which may be a Fork'd per-goroutine
+// backend). Empty blocks or blocks where all transactions come from the coinbase
+// contribute nothing to out; the caller applies its own fallback.
+//
+// Effective tips are pre-computed once per transaction to avoid repeated
+// allocations that occurred when a heap's Less method called GetEffectiveGasTip
+// on every comparison (O(n log n) allocations). Now we allocate exactly once
+// per transaction (O(n)) and sort with slices.SortFunc (pdqsort).
+func (oracle *Oracle) getBlockPricesFromBackend(ctx context.Context, backend OracleBackend, blockNum uint64, limit int,
 	ignoreUnder *uint256.Int, out *[]*uint256.Int) error {
-	block, err := oracle.backend.BlockByNumber(ctx, rpc.BlockNumber(blockNum))
+	block, err := backend.BlockByNumber(ctx, rpc.BlockNumber(blockNum))
 	if err != nil {
 		oracle.log.Error("getBlockPrices", "err", err)
 		return err
 	}
-
 	if block == nil {
 		return nil
 	}
 
-	blockTxs := block.Transactions()
-	plainTxs := make([]types.Transaction, len(blockTxs))
-	copy(plainTxs, blockTxs)
 	baseFee := block.BaseFee()
-	txs := newTransactionsByGasPrice(plainTxs, baseFee, oracle.log)
-	heap.Init(&txs)
+	coinbase := block.Coinbase()
+
+	// Pre-compute effective tip for every transaction exactly once.
+	type txWithTip struct {
+		tx  types.Transaction
+		tip *uint256.Int
+	}
+	items := make([]txWithTip, len(block.Transactions()))
+	for i, tx := range block.Transactions() {
+		items[i] = txWithTip{tx: tx, tip: tx.GetEffectiveGasTip(baseFee)}
+	}
+
+	// Sort ascending by effective tip; slices.SortFunc uses pdqsort (no reflection).
+	slices.SortFunc(items, func(a, b txWithTip) int { return a.tip.Cmp(b.tip) })
+
+	// Since items are sorted ascending, all tips below ignoreUnder form a
+	// contiguous prefix that we can skip with a single pass.
+	start := 0
+	if ignoreUnder != nil {
+		for start < len(items) && items[start].tip.Lt(ignoreUnder) {
+			start++
+		}
+	}
 
 	count := 0
-	for count < limit && txs.Len() > 0 {
-		tx := heap.Pop(&txs).(types.Transaction)
-		tip := tx.GetEffectiveGasTip(baseFee)
-		if ignoreUnder != nil && tip.Lt(ignoreUnder) {
-			continue
+	for _, item := range items[start:] {
+		if count >= limit {
+			break
 		}
-		sender, _ := tx.GetSender()
-		if sender.Value() != block.Coinbase() {
-			*out = append(*out, tip)
-			count = count + 1
+		sender, _ := item.tx.GetSender()
+		if sender.Value() != coinbase {
+			*out = append(*out, item.tip)
+			count++
 		}
 	}
 	return nil
