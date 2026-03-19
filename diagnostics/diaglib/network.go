@@ -17,7 +17,6 @@
 package diaglib
 
 import (
-	"context"
 	"sort"
 	"sync"
 	"time"
@@ -148,7 +147,7 @@ func (p *PeerStats) GetPeers() map[string]PeerStatistics {
 
 func (p *PeerStats) getPeers() map[string]PeerStatistics {
 	stats := make(map[string]PeerStatistics)
-	p.peersInfo.Range(func(key, value interface{}) bool {
+	p.peersInfo.Range(func(key, value any) bool {
 		loadedKey, ok := key.(string)
 		if !ok {
 			log.Debug("Failed to cast key to string", key)
@@ -240,29 +239,4 @@ func (p *PeerStats) removePeersWhichExceedLimit(limit int) {
 			p.removePeer(peer.PeerID)
 		}
 	}
-}
-
-func (d *DiagnosticClient) setupNetworkDiagnostics(rootCtx context.Context) {
-	d.runCollectPeersStatistics(rootCtx)
-}
-
-func (d *DiagnosticClient) runCollectPeersStatistics(rootCtx context.Context) {
-	go func() {
-		ctx, ch, closeChannel := Context[PeerStatisticMsgUpdate](rootCtx, 1)
-		defer closeChannel()
-
-		StartProviders(ctx, TypeOf(PeerStatisticMsgUpdate{}), log.Root())
-		for {
-			select {
-			case <-rootCtx.Done():
-				return
-			case info := <-ch:
-				d.peersStats.AddOrUpdatePeer(info.PeerID, info)
-			}
-		}
-	}()
-}
-
-func (d *DiagnosticClient) Peers() map[string]PeerStatistics {
-	return d.peersStats.GetPeers()
 }

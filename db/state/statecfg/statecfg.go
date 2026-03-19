@@ -20,6 +20,8 @@ type DomainCfg struct {
 	// for commitment domain only
 	ReplaceKeysInValues bool
 
+	BuildAccessorsWorkers int // parallel workers for building .kvi accessors (recsplit)
+
 	FileVersion DomainVersionTypes
 }
 
@@ -57,12 +59,14 @@ type HistCfg struct {
 	SnapshotsDisabled  bool // don't produce .v and .ef files, keep in db table. old data will be pruned anyway.
 	HistoryDisabled    bool // skip all write operations to this History (even in DB)
 
-	HistoryValuesOnCompressedPage int // when collating .v files: concat 16 values and snappy them
+	HistoryValuesOnCompressedPage int // deprecated, it is only for ver.0 snapshots backward compatibility
 
 	Accessors     Accessors
 	CompressorCfg seg.Cfg             // Compression settings for history files
 	Compression   seg.FileCompression // defines type of Compression for history files
 	HistoryIdx    kv.InvertedIdx
+
+	BuildAccessorsWorkers int // parallel workers for building .vi accessors (recsplit)
 
 	FileVersion HistVersionTypes
 }
@@ -87,7 +91,8 @@ type InvIdxCfg struct {
 	Compression   seg.FileCompression // compression type for inverted index keys and values
 	CompressorCfg seg.Cfg             // advanced configuration for compressor encodings
 
-	Accessors Accessors
+	Accessors             Accessors
+	BuildAccessorsWorkers int // parallel workers for building .efi accessors (recsplit)
 }
 
 type BlockDataFilesCfg struct {

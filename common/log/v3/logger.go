@@ -78,7 +78,7 @@ type Record struct {
 	Time     time.Time
 	Lvl      Lvl
 	Msg      string
-	Ctx      []interface{}
+	Ctx      []any
 	KeyNames RecordKeyNames
 }
 
@@ -96,7 +96,7 @@ type RecordKeyNames struct {
 // A Logger writes key/value pairs to a Handler
 type Logger interface {
 	// New returns a new Logger that has this logger's context plus the given context
-	New(ctx ...interface{}) Logger
+	New(ctx ...any) Logger
 
 	// GetHandler gets the handler associated with the logger.
 	GetHandler() Handler
@@ -108,21 +108,21 @@ type Logger interface {
 	Enabled(ctx context.Context, lvl Lvl) bool
 
 	// Log a message at the given level with context key/value pairs
-	Trace(msg string, ctx ...interface{})
-	Debug(msg string, ctx ...interface{})
-	Info(msg string, ctx ...interface{})
-	Warn(msg string, ctx ...interface{})
-	Error(msg string, ctx ...interface{})
-	Crit(msg string, ctx ...interface{})
-	Log(level Lvl, msg string, ctx ...interface{})
+	Trace(msg string, ctx ...any)
+	Debug(msg string, ctx ...any)
+	Info(msg string, ctx ...any)
+	Warn(msg string, ctx ...any)
+	Error(msg string, ctx ...any)
+	Crit(msg string, ctx ...any)
+	Log(level Lvl, msg string, ctx ...any)
 }
 
 type logger struct {
-	ctx []interface{}
+	ctx []any
 	h   *swapHandler
 }
 
-func (l *logger) write(msg string, lvl Lvl, ctx []interface{}) {
+func (l *logger) write(msg string, lvl Lvl, ctx []any) {
 	l.h.Log(&Record{
 		Time: time.Now(),
 		Lvl:  lvl,
@@ -136,46 +136,46 @@ func (l *logger) write(msg string, lvl Lvl, ctx []interface{}) {
 	})
 }
 
-func (l *logger) New(ctx ...interface{}) Logger {
+func (l *logger) New(ctx ...any) Logger {
 	child := &logger{newContext(l.ctx, ctx), new(swapHandler)}
 	child.SetHandler(l.h)
 	return child
 }
 
-func newContext(prefix []interface{}, suffix []interface{}) []interface{} {
+func newContext(prefix []any, suffix []any) []any {
 	normalizedSuffix := normalize(suffix)
-	newCtx := make([]interface{}, len(prefix)+len(normalizedSuffix))
+	newCtx := make([]any, len(prefix)+len(normalizedSuffix))
 	n := copy(newCtx, prefix)
 	copy(newCtx[n:], normalizedSuffix)
 	return newCtx
 }
 
-func (l *logger) Trace(msg string, ctx ...interface{}) {
+func (l *logger) Trace(msg string, ctx ...any) {
 	l.write(msg, LvlTrace, ctx)
 }
 
-func (l *logger) Debug(msg string, ctx ...interface{}) {
+func (l *logger) Debug(msg string, ctx ...any) {
 	l.write(msg, LvlDebug, ctx)
 }
 
-func (l *logger) Info(msg string, ctx ...interface{}) {
+func (l *logger) Info(msg string, ctx ...any) {
 	l.write(msg, LvlInfo, ctx)
 }
 
-func (l *logger) Warn(msg string, ctx ...interface{}) {
+func (l *logger) Warn(msg string, ctx ...any) {
 	l.write(msg, LvlWarn, ctx)
 }
 
-func (l *logger) Error(msg string, ctx ...interface{}) {
+func (l *logger) Error(msg string, ctx ...any) {
 	l.write(msg, LvlError, ctx)
 }
 
-func (l *logger) Crit(msg string, ctx ...interface{}) {
+func (l *logger) Crit(msg string, ctx ...any) {
 	l.write(msg, LvlCrit, ctx)
 }
 
 // Log method to route configurable log level
-func (l *logger) Log(level Lvl, msg string, ctx ...interface{}) {
+func (l *logger) Log(level Lvl, msg string, ctx ...any) {
 	l.write(msg, level, ctx)
 }
 
@@ -191,7 +191,7 @@ func (l *logger) SetHandler(h Handler) {
 	l.h.Swap(h)
 }
 
-func normalize(ctx []interface{}) []interface{} {
+func normalize(ctx []any) []any {
 	// if the caller passed a Ctx object, then expand it
 	if len(ctx) == 1 {
 		if ctxMap, ok := ctx[0].(Ctx); ok {
@@ -221,16 +221,16 @@ func normalize(ctx []interface{}) []interface{} {
 // You may wrap any function which takes no arguments to Lazy. It may return any
 // number of values of any type.
 type Lazy struct {
-	Fn interface{}
+	Fn any
 }
 
 // Ctx is a map of key/value pairs to pass as context to a log function
 // Use this only if you really need greater safety around the arguments you pass
 // to the logging functions.
-type Ctx map[string]interface{}
+type Ctx map[string]any
 
-func (c Ctx) toArray() []interface{} {
-	arr := make([]interface{}, len(c)*2)
+func (c Ctx) toArray() []any {
+	arr := make([]any, len(c)*2)
 
 	i := 0
 	for k, v := range c {

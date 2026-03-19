@@ -207,6 +207,8 @@ func (m *FairMix) Close() {
 // Next returns a node from a random source.
 func (m *FairMix) Next() bool {
 	m.cur = nil
+	var timer *time.Timer
+	// Since Go 1.23, GC will clean up timers and this is likely faster than Stopping them ourselves.
 	for {
 		source := m.pickSource()
 		if source == nil {
@@ -214,9 +216,13 @@ func (m *FairMix) Next() bool {
 		}
 		var timeout <-chan time.Time
 		if source.timeout >= 0 {
-			timer := time.NewTimer(source.timeout)
+			if timer == nil {
+				timer = time.NewTimer(source.timeout)
+			} else {
+				// Since Go 1.23, this will guarantee not to let us receive an old value.
+				timer.Reset(source.timeout)
+			}
 			timeout = timer.C
-			defer timer.Stop()
 		}
 		select {
 		case n, ok := <-source.next:

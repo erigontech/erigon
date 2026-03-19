@@ -24,8 +24,6 @@ import (
 	"math"
 	"math/big"
 	"os"
-	"path/filepath"
-	"time"
 
 	"github.com/holiman/uint256"
 
@@ -48,11 +46,11 @@ import (
 // the EVM.
 type Config struct {
 	ChainConfig *chain.Config
-	Difficulty  *big.Int
+	Difficulty  *uint256.Int
 	Origin      accounts.Address
 	Coinbase    accounts.Address
-	BlockNumber *big.Int
-	Time        *big.Int
+	BlockNumber uint64
+	Time        uint64
 	GasLimit    uint64
 	GasPrice    uint256.Int
 	Value       uint256.Int
@@ -68,23 +66,23 @@ func setDefaults(cfg *Config) {
 	if cfg.ChainConfig == nil {
 		cfg.ChainConfig = &chain.Config{
 			ChainID:               big.NewInt(1),
-			HomesteadBlock:        new(big.Int),
-			TangerineWhistleBlock: new(big.Int),
-			SpuriousDragonBlock:   new(big.Int),
-			ByzantiumBlock:        new(big.Int),
-			ConstantinopleBlock:   new(big.Int),
-			PetersburgBlock:       new(big.Int),
-			IstanbulBlock:         new(big.Int),
-			MuirGlacierBlock:      new(big.Int),
-			BerlinBlock:           new(big.Int),
-			LondonBlock:           new(big.Int),
-			ArrowGlacierBlock:     new(big.Int),
-			GrayGlacierBlock:      new(big.Int),
-			ShanghaiTime:          new(big.Int),
-			CancunTime:            new(big.Int),
-			PragueTime:            new(big.Int),
-			OsakaTime:             new(big.Int),
-			GlamsterdamTime:       new(big.Int),
+			HomesteadBlock:        new(uint64),
+			TangerineWhistleBlock: new(uint64),
+			SpuriousDragonBlock:   new(uint64),
+			ByzantiumBlock:        new(uint64),
+			ConstantinopleBlock:   new(uint64),
+			PetersburgBlock:       new(uint64),
+			IstanbulBlock:         new(uint64),
+			MuirGlacierBlock:      new(uint64),
+			BerlinBlock:           new(uint64),
+			LondonBlock:           new(uint64),
+			ArrowGlacierBlock:     new(uint64),
+			GrayGlacierBlock:      new(uint64),
+			ShanghaiTime:          new(uint64),
+			CancunTime:            new(uint64),
+			PragueTime:            new(uint64),
+			OsakaTime:             new(uint64),
+			AmsterdamTime:         new(uint64),
 		}
 	}
 
@@ -92,16 +90,10 @@ func setDefaults(cfg *Config) {
 		cfg.Origin = accounts.ZeroAddress
 	}
 	if cfg.Difficulty == nil {
-		cfg.Difficulty = new(big.Int)
-	}
-	if cfg.Time == nil {
-		cfg.Time = big.NewInt(time.Now().Unix())
+		cfg.Difficulty = new(uint256.Int)
 	}
 	if cfg.GasLimit == 0 {
 		cfg.GasLimit = math.MaxUint64
-	}
-	if cfg.BlockNumber == nil {
-		cfg.BlockNumber = new(big.Int)
 	}
 	if cfg.GetHashFn == nil {
 		cfg.GetHashFn = func(n uint64) (common.Hash, error) {
@@ -121,8 +113,8 @@ var contractAsAddress = accounts.InternAddress(common.BytesToAddress([]byte("con
 func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.IntraBlockState, error) {
 	if cfg == nil {
 		cfg = new(Config)
-		setDefaults(cfg)
 	}
+	setDefaults(cfg)
 
 	externalState := cfg.State != nil
 	if !externalState {
@@ -181,8 +173,11 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 
 	externalState := cfg.State != nil
 	if !externalState {
-		tmp := filepath.Join(os.TempDir(), "create-vm")
-		defer dir.RemoveAll(tmp) //nolint
+		tmp, err := os.MkdirTemp("", "erigon-create-vm-*")
+		if err != nil {
+			return nil, [20]byte{}, 0, err
+		}
+		defer dir.RemoveAll(tmp)
 
 		dirs := datadir.New(tmp)
 		db := temporaltest.NewTestDB(nil, dirs)

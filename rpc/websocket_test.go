@@ -71,7 +71,7 @@ func TestWebsocketOriginCheck(t *testing.T) {
 		t.Fatal("no error for wrong origin")
 	}
 	wantErr := wsHandshakeError{websocket.ErrBadHandshake, "403 Forbidden"}
-	if err != nil && err.Error() != wantErr.Error() {
+	if err.Error() != wantErr.Error() {
 		t.Fatalf("wrong error for wrong origin: %q", err)
 	}
 

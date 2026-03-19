@@ -1,3 +1,10 @@
+---
+metaLinks:
+  alternates:
+    - >-
+      https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/staking/external-consensus-client-as-validator
+---
+
 # Using an external consensus client as validator
 
 To use an external Consensus Layer (CL) it is necessary to add to Erigon the flag `--externalcl`. Here are a couple of examples on how to configure Lighhouse and Prysm to run along with Erigon:
@@ -11,7 +18,7 @@ Once you have Erigon and a CL client up and running, you can proceed to set up a
 
 To set up a VC, follow the instructions provided in the official documentation, such as:
 
-[https://lighthouse-book.sigmaprime.io/mainnet-validator.html](https://lighthouse-book.sigmaprime.io/mainnet-validator.html).
+[https://lighthouse-book.sigmaprime.io/validator_management.html](https://lighthouse-book.sigmaprime.io/validator_management.html).
 
 This guide will walk you through the process of setting up a VC, including:
 

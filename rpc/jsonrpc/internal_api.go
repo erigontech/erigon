@@ -48,14 +48,14 @@ func (api *InternalAPIImpl) GetTxNumInfo(ctx context.Context, txNum uint64) (*Tx
 	}
 	defer tx.Rollback()
 
-	bn, ok, err := api._txNumReader.FindBlockNum(tx, txNum)
+	bn, ok, err := api._txNumReader.FindBlockNum(ctx, tx, txNum)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
 		return nil, fmt.Errorf("block not found by txnID=%d", txNum)
 	}
-	minTxNum, err := api._txNumReader.Min(tx, bn)
+	minTxNum, err := api._txNumReader.Min(ctx, tx, bn)
 	if err != nil {
 		return nil, err
 	}

@@ -86,7 +86,7 @@ func NewPool(
 		decryptionKeysSource = NewPubSubDecryptionKeysSource(logger, config.P2pConfig, decryptionKeysValidator)
 	}
 
-	decryptionKeysListener := NewDecryptionKeysListener(logger, config, decryptionKeysSource)
+	decryptionKeysListener := NewDecryptionKeysListener(logger, decryptionKeysSource)
 	encryptedTxnsPool := NewEncryptedTxnsPool(logger, config, contractBackend, blockListener)
 	decryptedTxnsPool := NewDecryptedTxnsPool()
 	decryptionKeysProcessor := NewDecryptionKeysProcessor(

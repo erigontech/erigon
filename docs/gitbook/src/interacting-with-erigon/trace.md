@@ -1,5 +1,9 @@
 ---
 description: Inspecting Transaction Execution with Trace, VMTrace, and StateDiff
+metaLinks:
+  alternates:
+    - >-
+      https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/interacting-with-erigon/interacting-with-erigon/trace
 ---
 
 # trace
@@ -29,7 +33,7 @@ The diagnostics are requested by providing a configuration object that specifies
 There are three primary ways to specify the transaction to be traced:
 
 1. Hypothetical Call: Providing the transaction information (like sender, recipient, and data) as if making a call using `eth_call` (see `trace_call`).
-2. Raw Transaction: Providing raw, signed transaction data, as when using `eth_sendRawTransaction` (see `trace_rawTransaction`).
+2. Raw Transaction: Providing raw, signed transaction data, as when using `eth_sendRawTransaction` (see `trace_rawTransaction`). This method is fully functional and provides complete `trace`, `vmTrace`, and `stateDiff` outputs.
 3. Mined Transaction: Providing a transaction hash for a previously mined transaction (see `trace_replayTransaction`).
 
 {% hint style="info" %}
@@ -481,6 +485,8 @@ Returns traces matching given filter
    * `toAddress`: `Address` - (optional) Sent to these addresses.
    * `after`: `Quantity` - (optional) The offset trace number
    * `count`: `Quantity` - (optional) Integer number of traces to display in a batch.
+   * `mode`: `String` - (optional) Default is `"union"`, meaning traces matching either address filter are returned. Set to `"intersection"` to only return traces that satisfy both `fromAddress` and `toAddress` filters simultaneously.
+
 
 ```js
 params: [{

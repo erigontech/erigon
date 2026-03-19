@@ -64,14 +64,15 @@ type EthBackendServer struct {
 	ctx                   context.Context
 	eth                   EthBackend
 	notifications         *shards.Notifications
-	db                    kv.RoDB
+	db                    kv.TemporalRoDB
 	blockReader           services.FullBlockReader
 	bridgeStore           bridge.Store
 	latestBlockBuiltStore *builder.LatestBlockBuiltStore
 
-	logsFilter  *LogsFilterAggregator
-	logger      log.Logger
-	chainConfig *chain.Config
+	logsFilter     *LogsFilterAggregator
+	receiptsFilter *ReceiptsFilterAggregator
+	logger         log.Logger
+	chainConfig    *chain.Config
 }
 
 type EthBackend interface {
@@ -82,9 +83,12 @@ type EthBackend interface {
 	Peers(ctx context.Context) (*remoteproto.PeersReply, error)
 	AddPeer(ctx context.Context, url *remoteproto.AddPeerRequest) (*remoteproto.AddPeerReply, error)
 	RemovePeer(ctx context.Context, url *remoteproto.RemovePeerRequest) (*remoteproto.RemovePeerReply, error)
+	AddTrustedPeer(ctx context.Context, url *remoteproto.AddPeerRequest) (*remoteproto.AddPeerReply, error)
+	RemoveTrustedPeer(ctx context.Context, url *remoteproto.RemovePeerRequest) (*remoteproto.RemovePeerReply, error)
+	SetHead(ctx context.Context, targetBlock uint64) error
 }
 
-func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, notifications *shards.Notifications, blockReader services.FullBlockReader,
+func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.TemporalRwDB, notifications *shards.Notifications, blockReader services.FullBlockReader,
 	bridgeStore bridge.Store, logger log.Logger, latestBlockBuiltStore *builder.LatestBlockBuiltStore, chainConfig *chain.Config,
 ) *EthBackendServer {
 	s := &EthBackendServer{
@@ -95,6 +99,7 @@ func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, notifi
 		blockReader:           blockReader,
 		bridgeStore:           bridgeStore,
 		logsFilter:            NewLogsFilterAggregator(notifications.Events),
+		receiptsFilter:        NewReceiptsFilterAggregator(notifications.Events),
 		logger:                logger,
 		latestBlockBuiltStore: latestBlockBuiltStore,
 		chainConfig:           chainConfig,
@@ -121,6 +126,29 @@ func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, notifi
 			}
 		}
 	}()
+
+	rch, rclean := s.notifications.Events.AddReceiptsSubscription()
+	go func() {
+		var err error
+		defer rclean()
+		defer func() {
+			if err != nil {
+				if !errors.Is(err, context.Canceled) {
+					logger.Warn("[rpc] terminated subscription to `receipts` events", "reason", err)
+				}
+			}
+		}()
+		for {
+			select {
+			case <-s.ctx.Done():
+				err = s.ctx.Err()
+				return
+			case receipts := <-rch:
+				s.receiptsFilter.distributeReceipts(receipts)
+			}
+		}
+	}()
+
 	return s
 }
 
@@ -301,7 +329,23 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remoteproto.BlockRequ
 	}
 	defer tx.Rollback()
 
-	block, senders, err := s.blockReader.BlockWithSenders(ctx, tx, gointerfaces.ConvertH256ToHash(req.BlockHash), req.BlockHeight)
+	var blockHash common.Hash
+	var blockHeight = req.BlockHeight
+	if req.BlockHash != nil {
+		blockHash = gointerfaces.ConvertH256ToHash(req.BlockHash)
+	} else if req.BlockHeight > 0 {
+		// If height is provided but hash is not, get the canonical hash
+		var ok bool
+		blockHash, ok, err = s.blockReader.CanonicalHash(ctx, tx, blockHeight)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return &remoteproto.BlockReply{}, nil
+		}
+	}
+
+	block, senders, err := s.blockReader.BlockWithSenders(ctx, tx, blockHash, blockHeight)
 	if err != nil {
 		return nil, err
 	}
@@ -398,11 +442,33 @@ func (s *EthBackendServer) RemovePeer(ctx context.Context, req *remoteproto.Remo
 	return s.eth.RemovePeer(ctx, req)
 }
 
+func (s *EthBackendServer) AddTrustedPeer(ctx context.Context, req *remoteproto.AddPeerRequest) (*remoteproto.AddPeerReply, error) {
+	return s.eth.AddTrustedPeer(ctx, req)
+}
+
+func (s *EthBackendServer) RemoveTrustedPeer(ctx context.Context, req *remoteproto.RemovePeerRequest) (*remoteproto.RemovePeerReply, error) {
+	return s.eth.RemoveTrustedPeer(ctx, req)
+}
+
+func (s *EthBackendServer) SetHead(ctx context.Context, req *remoteproto.SetHeadRequest) (*remoteproto.SetHeadReply, error) {
+	if err := s.eth.SetHead(ctx, req.BlockNumber); err != nil {
+		return nil, err
+	}
+	return &remoteproto.SetHeadReply{}, nil
+}
+
 func (s *EthBackendServer) SubscribeLogs(server remoteproto.ETHBACKEND_SubscribeLogsServer) (err error) {
 	if s.logsFilter != nil {
 		return s.logsFilter.subscribeLogs(server)
 	}
 	return errors.New("no logs filter available")
+}
+
+func (s *EthBackendServer) SubscribeReceipts(server remoteproto.ETHBACKEND_SubscribeReceiptsServer) (err error) {
+	if s.receiptsFilter != nil {
+		return s.receiptsFilter.subscribeReceipts(server)
+	}
+	return errors.New("no receipts filter available")
 }
 
 func (s *EthBackendServer) BorTxnLookup(ctx context.Context, req *remoteproto.BorTxnLookupRequest) (*remoteproto.BorTxnLookupReply, error) {
@@ -445,7 +511,7 @@ func (s *EthBackendServer) BorEvents(ctx context.Context, req *remoteproto.BorEv
 }
 
 func (s *EthBackendServer) AAValidation(ctx context.Context, req *remoteproto.AAValidationRequest) (*remoteproto.AAValidationReply, error) {
-	tx, err := s.db.BeginRo(ctx)
+	tx, err := s.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -458,17 +524,13 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remoteproto.AA
 	header := currentBlock.HeaderNoCopy()
 
 	aaTxn := types.FromProto(req.Tx)
-	stateReader := state.NewHistoryReaderV3()
-	stateReader.SetTx(tx.(kv.TemporalTx))
-
-	txNumsReader := s.blockReader.TxnumReader(ctx)
-	maxTxNum, err := txNumsReader.Max(tx, header.Number.Uint64())
+	txNumsReader := s.blockReader.TxnumReader()
+	maxTxNum, err := txNumsReader.Max(ctx, tx, header.Number.Uint64())
 	if err != nil {
 		return nil, err
 	}
 
-	stateReader.SetTxNum(maxTxNum)
-	ibs := state.New(stateReader)
+	ibs := state.New(state.NewHistoryReaderV3(tx, maxTxNum))
 
 	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), nil, accounts.ZeroAddress, s.chainConfig)
 

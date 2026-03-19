@@ -63,7 +63,7 @@ func (tr *TRand) RandBloom() types.Bloom {
 	return types.Bloom(tr.RandBytes(types.BloomByteLength))
 }
 
-func check(t *testing.T, f string, want, got interface{}) {
+func check(t *testing.T, f string, want, got any) {
 	if !reflect.DeepEqual(want, got) {
 		t.Errorf("%s mismatch: want %v, got %v", f, want, got)
 	}

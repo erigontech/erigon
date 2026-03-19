@@ -6,13 +6,19 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"sort"
+	"strings"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
 type BlockAccessList []*AccountChanges
@@ -25,6 +31,9 @@ const (
 	maxStorageChangesPerSlot    = math.MaxUint16 + 1
 	maxStorageReadsPerAccount   = 1 << 18
 	maxIndexedChangesPerAccount = math.MaxUint16 + 1
+
+	// EIP-7928: bal_items <= block_gas_limit / BalItemCost
+	BalItemCost = 2000
 )
 
 type AccountChanges struct {
@@ -57,8 +66,8 @@ type NonceChange struct {
 }
 
 type CodeChange struct {
-	Index uint16
-	Data  []byte
+	Index    uint16
+	Bytecode []byte
 }
 
 // indexedChange interface for generic validation of change types with indices
@@ -173,9 +182,41 @@ func (ac *AccountChanges) DecodeRLP(s *rlp.Stream) error {
 	return s.ListEnd()
 }
 
+func (ac *AccountChanges) Normalize() {
+	if len(ac.StorageChanges) > 1 {
+		sort.Slice(ac.StorageChanges, func(i, j int) bool {
+			return ac.StorageChanges[i].Slot.Cmp(ac.StorageChanges[j].Slot) < 0
+		})
+	}
+
+	for _, slotChange := range ac.StorageChanges {
+		if len(slotChange.Changes) > 1 {
+			sortByIndex(slotChange.Changes)
+			slotChange.Changes = dedupByIndex(slotChange.Changes)
+		}
+	}
+
+	if len(ac.StorageReads) > 1 {
+		sortHashes(ac.StorageReads)
+		ac.StorageReads = dedupByEquality(ac.StorageReads)
+	}
+
+	if len(ac.BalanceChanges) > 1 {
+		sortByIndex(ac.BalanceChanges)
+		ac.BalanceChanges = dedupByIndex(ac.BalanceChanges)
+	}
+	if len(ac.NonceChanges) > 1 {
+		sortByIndex(ac.NonceChanges)
+		ac.NonceChanges = dedupByIndex(ac.NonceChanges)
+	}
+	if len(ac.CodeChanges) > 1 {
+		sortByIndex(ac.CodeChanges)
+		ac.CodeChanges = dedupByIndex(ac.CodeChanges)
+	}
+}
+
 func (sc *SlotChanges) EncodingSize() int {
-	slot := sc.Slot.Value()
-	size := rlp.StringLen(slot[:])
+	size := rlp.Uint256Len(hashToUint256(sc.Slot.Value())) // minimal slot key
 	changesLen := EncodingSizeGenericList(sc.Changes)
 	size += rlp.ListPrefixLen(changesLen) + changesLen
 	return size
@@ -193,8 +234,7 @@ func (sc *SlotChanges) EncodeRLP(w io.Writer) error {
 	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
-	slot := sc.Slot.Value()
-	if err := rlp.EncodeString(slot[:], w, b[:]); err != nil {
+	if err := rlp.EncodeUint256(hashToUint256(sc.Slot.Value()), w, b[:]); err != nil {
 		return err
 	}
 
@@ -207,8 +247,8 @@ func (sc *SlotChanges) DecodeRLP(s *rlp.Stream) error {
 	} else if size > maxBlockAccessListBytes {
 		return fmt.Errorf("slot changes payload exceeds maximum size (%d bytes)", size)
 	}
-	var slot common.Hash
-	if err := s.ReadBytes(slot[:]); err != nil {
+	slot, err := decodeMinimalHash(s)
+	if err != nil {
 		return fmt.Errorf("read Slot: %w", err)
 	}
 	sc.Slot = accounts.InternKey(slot)
@@ -226,8 +266,9 @@ func (sc *SlotChanges) DecodeRLP(s *rlp.Stream) error {
 }
 
 func (sc *StorageChange) EncodingSize() int {
-	return 1 + rlp.IntLenExcludingHead(uint64(sc.Index)) +
-		1 + rlp.Uint256LenExcludingHead(sc.Value)
+	size := rlp.U64Len(uint64(sc.Index))
+	size += rlp.Uint256Len(sc.Value) // minimal storage value
+	return size
 }
 
 func (sc *StorageChange) EncodeRLP(w io.Writer) error {
@@ -248,7 +289,7 @@ func (sc *StorageChange) DecodeRLP(s *rlp.Stream) error {
 	if _, err := s.List(); err != nil {
 		return err
 	}
-	idx, err := s.Uint()
+	idx, err := s.Uint64()
 	if err != nil {
 		return fmt.Errorf("read Index: %w", err)
 	}
@@ -256,17 +297,20 @@ func (sc *StorageChange) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("block access index overflow: %d", idx)
 	}
 	sc.Index = uint16(idx)
-	sc.Value, err = s.Uint256()
+	valBytes, err := s.Bytes()
 	if err != nil {
 		return fmt.Errorf("read Value: %w", err)
 	}
+	if len(valBytes) > 32 {
+		return fmt.Errorf("read Value: too large (%d bytes)", len(valBytes))
+	}
+	sc.Value.SetBytes(valBytes)
 	return s.ListEnd()
 }
 
 func (bc *BalanceChange) EncodingSize() int {
-	size := 1 + rlp.IntLenExcludingHead(uint64(bc.Index))
-	size++
-	size += rlp.Uint256LenExcludingHead(bc.Value)
+	size := rlp.U64Len(uint64(bc.Index))
+	size += rlp.Uint256Len(bc.Value) // minimal balance value
 	return size
 }
 
@@ -288,7 +332,7 @@ func (bc *BalanceChange) DecodeRLP(s *rlp.Stream) error {
 	if _, err := s.List(); err != nil {
 		return err
 	}
-	idx, err := s.Uint()
+	idx, err := s.Uint64()
 	if err != nil {
 		return fmt.Errorf("read Index: %w", err)
 	}
@@ -296,17 +340,20 @@ func (bc *BalanceChange) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("block access index overflow: %d", idx)
 	}
 	bc.Index = uint16(idx)
-	bc.Value, err = s.Uint256()
+	valBytes, err := s.Bytes()
 	if err != nil {
 		return fmt.Errorf("read Value: %w", err)
 	}
+	if len(valBytes) > 32 {
+		return fmt.Errorf("read Value: integer too large (%d bytes)", len(valBytes))
+	}
+	bc.Value.SetBytes(valBytes)
 	return s.ListEnd()
 }
 
 func (nc *NonceChange) EncodingSize() int {
-	size := 1 + rlp.IntLenExcludingHead(uint64(nc.Index))
-	size++
-	size += rlp.IntLenExcludingHead(nc.Value)
+	size := rlp.U64Len(uint64(nc.Index))
+	size += rlp.U64Len(nc.Value)
 	return size
 }
 
@@ -328,7 +375,7 @@ func (nc *NonceChange) DecodeRLP(s *rlp.Stream) error {
 	if _, err := s.List(); err != nil {
 		return err
 	}
-	idx, err := s.Uint()
+	idx, err := s.Uint64()
 	if err != nil {
 		return fmt.Errorf("read Index: %w", err)
 	}
@@ -336,7 +383,7 @@ func (nc *NonceChange) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("block access index overflow: %d", idx)
 	}
 	nc.Index = uint16(idx)
-	value, err := s.Uint()
+	value, err := s.Uint64()
 	if err != nil {
 		return fmt.Errorf("read Value: %w", err)
 	}
@@ -345,8 +392,8 @@ func (nc *NonceChange) DecodeRLP(s *rlp.Stream) error {
 }
 
 func (cc *CodeChange) EncodingSize() int {
-	size := 1 + rlp.IntLenExcludingHead(uint64(cc.Index))
-	size += rlp.StringLen(cc.Data)
+	size := rlp.U64Len(uint64(cc.Index))
+	size += rlp.StringLen(cc.Bytecode)
 	return size
 }
 
@@ -361,14 +408,14 @@ func (cc *CodeChange) EncodeRLP(w io.Writer) error {
 	if err := rlp.EncodeInt(uint64(cc.Index), w, b[:]); err != nil {
 		return err
 	}
-	return rlp.EncodeString(cc.Data, w, b[:])
+	return rlp.EncodeString(cc.Bytecode, w, b[:])
 }
 
 func (cc *CodeChange) DecodeRLP(s *rlp.Stream) error {
 	if _, err := s.List(); err != nil {
 		return err
 	}
-	idx, err := s.Uint()
+	idx, err := s.Uint64()
 	if err != nil {
 		return fmt.Errorf("read Index: %w", err)
 	}
@@ -378,10 +425,57 @@ func (cc *CodeChange) DecodeRLP(s *rlp.Stream) error {
 	cc.Index = uint16(idx)
 	data, err := s.Bytes()
 	if err != nil {
-		return fmt.Errorf("read Data: %w", err)
+		return fmt.Errorf("read Bytecode: %w", err)
 	}
-	cc.Data = data
+	cc.Bytecode = data
 	return s.ListEnd()
+}
+
+func dedupByIndex[T interface{ GetIndex() uint16 }](changes []T) []T {
+	if len(changes) == 0 {
+		return changes
+	}
+	out := changes[:1]
+	for i := 1; i < len(changes); i++ {
+		if changes[i].GetIndex() == out[len(out)-1].GetIndex() {
+			out[len(out)-1] = changes[i]
+			continue
+		}
+		out = append(out, changes[i])
+	}
+	return out
+}
+
+func dedupByEquality[T comparable](items []T) []T {
+	if len(items) == 0 {
+		return items
+	}
+	out := items[:1]
+	for i := 1; i < len(items); i++ {
+		if items[i] == out[len(out)-1] {
+			continue
+		}
+		out = append(out, items[i])
+	}
+	return out
+}
+
+func sortByIndex[T interface{ GetIndex() uint16 }](changes []T) {
+	sort.Slice(changes, func(i, j int) bool {
+		return changes[i].GetIndex() < changes[j].GetIndex()
+	})
+}
+
+func sortByBytes[T interface{ GetBytes() []byte }](items []T) {
+	sort.Slice(items, func(i, j int) bool {
+		return bytes.Compare(items[i].GetBytes(), items[j].GetBytes()) < 0
+	})
+}
+
+func sortHashes(hashes []accounts.StorageKey) {
+	sort.Slice(hashes, func(i, j int) bool {
+		return hashes[i].Cmp(hashes[j]) < 0
+	})
 }
 
 func encodeBlockAccessList[T rlpEncodable](items []T, w io.Writer, buf []byte) error {
@@ -403,15 +497,13 @@ func encodeHashList(hashes []accounts.StorageKey, w io.Writer, buf []byte) error
 	}
 	total := 0
 	for i := range hashes {
-		hash := hashes[i].Value()
-		total += rlp.StringLen(hash[:])
+		total += rlp.Uint256Len(hashToUint256(hashes[i].Value()))
 	}
 	if err := rlp.EncodeStructSizePrefix(total, w, buf); err != nil {
 		return err
 	}
 	for i := range hashes {
-		hash := hashes[i].Value()
-		if err := rlp.EncodeString(hash[:], w, buf); err != nil {
+		if err := rlp.EncodeUint256(hashToUint256(hashes[i].Value()), w, buf); err != nil {
 			return err
 		}
 	}
@@ -421,8 +513,7 @@ func encodeHashList(hashes []accounts.StorageKey, w io.Writer, buf []byte) error
 func encodingSizeHashList(hashes []accounts.StorageKey) int {
 	size := 0
 	for i := range hashes {
-		hash := hashes[i].Value()
-		size += rlp.StringLen(hash[:])
+		size += rlp.Uint256Len(hashToUint256(hashes[i].Value()))
 	}
 	return rlp.ListPrefixLen(size) + size
 }
@@ -472,6 +563,33 @@ func decodeBlockAccessList(out *BlockAccessList, s *rlp.Stream) error {
 	}
 	*out = changes
 	return nil
+}
+
+// DecodeBlockAccessListBytes decodes an RLP-encoded block access list and returns it.
+func DecodeBlockAccessListBytes(data []byte) (BlockAccessList, error) {
+	stream := rlp.NewStream(bytes.NewReader(data), 0)
+	var bal BlockAccessList
+	if err := decodeBlockAccessList(&bal, stream); err != nil {
+		return nil, err
+	}
+	return bal, nil
+}
+
+// EncodeBlockAccessListBytes encodes a block access list into RLP bytes.
+func EncodeBlockAccessListBytes(bal BlockAccessList) ([]byte, error) {
+	if len(bal) == 0 {
+		return []byte{0xc0}, nil
+	}
+	if err := bal.Validate(); err != nil {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	encBuf := newEncodingBuf()
+	defer releaseEncodingBuf(encBuf)
+	if err := encodeBlockAccessList(bal, &buf, encBuf[:]); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 func decodeSlotChangesList(s *rlp.Stream) ([]*SlotChanges, error) {
@@ -663,7 +781,8 @@ func decodeStorageKeys(s *rlp.Stream) ([]accounts.StorageKey, error) {
 	var hashes []accounts.StorageKey
 	for {
 		var h common.Hash
-		if err = s.ReadBytes(h[:]); err != nil {
+		h, err = decodeMinimalHash(s)
+		if err != nil {
 			break
 		}
 		hashes = append(hashes, accounts.InternKey(h))
@@ -679,6 +798,30 @@ func decodeStorageKeys(s *rlp.Stream) ([]accounts.StorageKey, error) {
 		return nil, err
 	}
 	return hashes, nil
+}
+
+// hashToUint256 converts a common.Hash to a uint256.Int for minimal RLP encoding.
+// EIP-7928 encodes slot keys, storage values, and balance values using standard
+// RLP integer encoding (minimal big-endian, leading zeros stripped).
+func hashToUint256(h common.Hash) uint256.Int {
+	var v uint256.Int
+	v.SetBytes(h[:])
+	return v
+}
+
+// decodeMinimalHash reads an RLP byte string and right-aligns it into a 32-byte hash.
+// Handles minimal-encoded values (leading zeros stripped).
+func decodeMinimalHash(s *rlp.Stream) (common.Hash, error) {
+	raw, err := s.Bytes()
+	if err != nil {
+		return common.Hash{}, err
+	}
+	if len(raw) > 32 {
+		return common.Hash{}, fmt.Errorf("hash too large: %d bytes", len(raw))
+	}
+	var out common.Hash
+	copy(out[32-len(raw):], raw)
+	return out, nil
 }
 
 func releaseEncodingBuf(buf *encodingBuf) {
@@ -722,6 +865,22 @@ func (bal BlockAccessList) Validate() error {
 	return nil
 }
 
+// ValidateMaxItems checks the EIP-7928 constraint: bal_items <= blockGasLimit / BalItemCost
+// where bal_items = count(addresses) + count(storage keys across all accounts).
+func (bal BlockAccessList) ValidateMaxItems(blockGasLimit uint64) error {
+	maxItems := blockGasLimit / BalItemCost
+	var items uint64
+	for _, ac := range bal {
+		items++ // each address counts as 1 item
+		items += uint64(len(ac.StorageChanges))
+		items += uint64(len(ac.StorageReads))
+	}
+	if items > maxItems {
+		return fmt.Errorf("block access list too large: %d items > %d max (gas limit %d / %d)", items, maxItems, blockGasLimit, BalItemCost)
+	}
+	return nil
+}
+
 func (ac *AccountChanges) validate() error {
 	if ac == nil {
 		return errors.New("nil account changes")
@@ -731,6 +890,18 @@ func (ac *AccountChanges) validate() error {
 	}
 	if err := validateStorageReads(ac.StorageReads); err != nil {
 		return fmt.Errorf("storage_reads: %w", err)
+	}
+	// EIP-7928: a slot must not appear in both storage_changes and storage_reads.
+	if len(ac.StorageChanges) > 0 && len(ac.StorageReads) > 0 {
+		changeSlots := make(map[common.Hash]struct{}, len(ac.StorageChanges))
+		for _, sc := range ac.StorageChanges {
+			changeSlots[sc.Slot.Value()] = struct{}{}
+		}
+		for _, key := range ac.StorageReads {
+			if _, exists := changeSlots[key.Value()]; exists {
+				return fmt.Errorf("storage key %s in both changes and reads", key.Value().Hex())
+			}
+		}
 	}
 	if err := validateBalanceChangeList(ac.BalanceChanges); err != nil {
 		return fmt.Errorf("balance_changes: %w", err)
@@ -848,4 +1019,411 @@ func validateSlotChangeList(slots []*SlotChanges) error {
 		}
 	}
 	return nil
+}
+
+// DebugString renders the block access list into a human-readable multiline string.
+func (bal BlockAccessList) DebugString() string {
+	var sb strings.Builder
+	bal.DebugPrint(&sb)
+	return sb.String()
+}
+
+func (bal BlockAccessList) DebugPrint(w io.Writer) {
+	fmt.Fprintf(w, "accounts=%d", len(bal))
+	for i, account := range bal {
+		if account == nil {
+			fmt.Fprintf(w, "\n[%d] <nil>", i)
+			continue
+		}
+		fmt.Fprintf(w, "\n[%d] addr=%s", i, account.Address.Value().Hex())
+		if len(account.StorageChanges) > 0 {
+			fmt.Fprint(w, "\n  storageChanges:")
+			for _, slotChange := range account.StorageChanges {
+				fmt.Fprint(w, "\n    - slot=")
+				fmt.Fprint(w, slotChange.Slot.Value().Hex())
+				fmt.Fprint(w, " changes=[")
+				for j, change := range slotChange.Changes {
+					if j > 0 {
+						fmt.Fprint(w, " ")
+					}
+					if change == nil {
+						fmt.Fprint(w, "<nil>")
+						continue
+					}
+					fmt.Fprintf(w, "%d:%s", change.Index, change.Value.Hex())
+				}
+				fmt.Fprint(w, "]")
+			}
+		}
+		if len(account.StorageReads) > 0 {
+			fmt.Fprint(w, "\n  storageReads=[")
+			for j, read := range account.StorageReads {
+				if j > 0 {
+					fmt.Fprint(w, " ")
+				}
+				fmt.Fprint(w, read.Value().Hex())
+			}
+			fmt.Fprint(w, "]")
+		}
+		if len(account.BalanceChanges) > 0 {
+			fmt.Fprint(w, "\n  balanceChanges=[")
+			for j, change := range account.BalanceChanges {
+				if j > 0 {
+					fmt.Fprint(w, " ")
+				}
+				if change == nil {
+					fmt.Fprint(w, "<nil>")
+					continue
+				}
+				fmt.Fprintf(w, "%d:%s", change.Index, change.Value.Hex())
+			}
+			fmt.Fprint(w, "]")
+		}
+		if len(account.NonceChanges) > 0 {
+			fmt.Fprint(w, "\n  nonceChanges=[")
+			for j, change := range account.NonceChanges {
+				if j > 0 {
+					fmt.Fprint(w, " ")
+				}
+				if change == nil {
+					fmt.Fprint(w, "<nil>")
+					continue
+				}
+				fmt.Fprintf(w, "%d:%d", change.Index, change.Value)
+			}
+			fmt.Fprint(w, "]")
+		}
+		if len(account.CodeChanges) > 0 {
+			fmt.Fprint(w, "\n  codeChanges=[")
+			for j, change := range account.CodeChanges {
+				if j > 0 {
+					fmt.Fprint(w, " ")
+				}
+				if change == nil {
+					fmt.Fprint(w, "<nil>")
+					continue
+				}
+				fmt.Fprintf(w, "%d:len(%d)", change.Index, len(change.Bytecode))
+			}
+			fmt.Fprint(w, "]")
+		}
+	}
+}
+
+func ConvertBlockAccessListFromTypesProto(protoList []*typesproto.BlockAccessListAccount) hexutil.Bytes {
+	if protoList == nil {
+		return nil
+	}
+	bal := make(BlockAccessList, len(protoList))
+	for i, acc := range protoList {
+		bal[i] = &AccountChanges{
+			Address: accounts.InternAddress(gointerfaces.ConvertH160toAddress(acc.Address)),
+		}
+		if acc.StorageChanges != nil {
+			bal[i].StorageChanges = make([]*SlotChanges, len(acc.StorageChanges))
+			for j, sc := range acc.StorageChanges {
+				bal[i].StorageChanges[j] = &SlotChanges{
+					Slot: accounts.InternKey(gointerfaces.ConvertH256ToHash(sc.Slot)),
+				}
+				if sc.Changes != nil {
+					bal[i].StorageChanges[j].Changes = make([]*StorageChange, len(sc.Changes))
+					for k, c := range sc.Changes {
+						val := gointerfaces.ConvertH256ToUint256Int(c.Value)
+						bal[i].StorageChanges[j].Changes[k] = &StorageChange{
+							Index: uint16(c.Index),
+							Value: *val,
+						}
+					}
+				}
+			}
+		}
+		if acc.StorageReads != nil {
+			bal[i].StorageReads = make([]accounts.StorageKey, len(acc.StorageReads))
+			for j, r := range acc.StorageReads {
+				bal[i].StorageReads[j] = accounts.InternKey(gointerfaces.ConvertH256ToHash(r))
+			}
+		}
+		if acc.BalanceChanges != nil {
+			bal[i].BalanceChanges = make([]*BalanceChange, len(acc.BalanceChanges))
+			for j, bc := range acc.BalanceChanges {
+				val := gointerfaces.ConvertH256ToUint256Int(bc.Value)
+				bal[i].BalanceChanges[j] = &BalanceChange{
+					Index: uint16(bc.Index),
+					Value: *val,
+				}
+			}
+		}
+		if acc.NonceChanges != nil {
+			bal[i].NonceChanges = make([]*NonceChange, len(acc.NonceChanges))
+			for j, nc := range acc.NonceChanges {
+				bal[i].NonceChanges[j] = &NonceChange{
+					Index: uint16(nc.Index),
+					Value: nc.Value,
+				}
+			}
+		}
+		if acc.CodeChanges != nil {
+			bal[i].CodeChanges = make([]*CodeChange, len(acc.CodeChanges))
+			for j, cc := range acc.CodeChanges {
+				bal[i].CodeChanges[j] = &CodeChange{
+					Index:    uint16(cc.Index),
+					Bytecode: cc.Data,
+				}
+			}
+		}
+	}
+	encoded, err := rlp.EncodeToBytes(bal)
+	if err != nil {
+		return nil
+	}
+	return encoded
+}
+
+func ConvertBlockAccessListToTypesProto(bal BlockAccessList) []*typesproto.BlockAccessListAccount {
+	if bal == nil {
+		return nil
+	}
+	out := make([]*typesproto.BlockAccessListAccount, 0, len(bal))
+	for _, account := range bal {
+		if account == nil {
+			continue
+		}
+		balAccount := &typesproto.BlockAccessListAccount{
+			Address: gointerfaces.ConvertAddressToH160(account.Address.Value()),
+		}
+		for _, storageChange := range account.StorageChanges {
+			if storageChange == nil {
+				continue
+			}
+			slotChanges := &typesproto.BlockAccessListSlotChanges{
+				Slot: gointerfaces.ConvertHashToH256(storageChange.Slot.Value()),
+			}
+			for _, change := range storageChange.Changes {
+				if change == nil {
+					continue
+				}
+				slotChanges.Changes = append(slotChanges.Changes, &typesproto.BlockAccessListStorageChange{
+					Index: uint32(change.Index),
+					Value: gointerfaces.ConvertUint256IntToH256(&change.Value),
+				})
+			}
+			balAccount.StorageChanges = append(balAccount.StorageChanges, slotChanges)
+		}
+		for _, read := range account.StorageReads {
+			balAccount.StorageReads = append(balAccount.StorageReads, gointerfaces.ConvertHashToH256(read.Value()))
+		}
+		for _, balanceChange := range account.BalanceChanges {
+			if balanceChange == nil {
+				continue
+			}
+			val := balanceChange.Value
+			balAccount.BalanceChanges = append(balAccount.BalanceChanges, &typesproto.BlockAccessListBalanceChange{
+				Index: uint32(balanceChange.Index),
+				Value: gointerfaces.ConvertUint256IntToH256(&val),
+			})
+		}
+		for _, nonceChange := range account.NonceChanges {
+			if nonceChange == nil {
+				continue
+			}
+			balAccount.NonceChanges = append(balAccount.NonceChanges, &typesproto.BlockAccessListNonceChange{
+				Index: uint32(nonceChange.Index),
+				Value: nonceChange.Value,
+			})
+		}
+		for _, codeChange := range account.CodeChanges {
+			if codeChange == nil {
+				continue
+			}
+			data := make([]byte, len(codeChange.Bytecode))
+			copy(data, codeChange.Bytecode)
+			balAccount.CodeChanges = append(balAccount.CodeChanges, &typesproto.BlockAccessListCodeChange{
+				Index: uint32(codeChange.Index),
+				Data:  data,
+			})
+		}
+		out = append(out, balAccount)
+	}
+	return out
+}
+
+func ConvertBlockAccessListFromExecutionProto(protoList []*executionproto.BlockAccessListAccount) *hexutil.Bytes {
+	if protoList == nil {
+		return nil
+	}
+	bal, err := ConvertExecutionProtoToBlockAccessList(protoList)
+	if err != nil {
+		return nil
+	}
+	encoded, err := rlp.EncodeToBytes(bal)
+	if err != nil {
+		return nil
+	}
+	res := hexutil.Bytes(encoded)
+	return &res
+}
+
+func ConvertBlockAccessListToExecutionProto(bal BlockAccessList) []*executionproto.BlockAccessListAccount {
+	if len(bal) == 0 {
+		return nil
+	}
+	out := make([]*executionproto.BlockAccessListAccount, 0, len(bal))
+	for _, account := range bal {
+		if account == nil {
+			continue
+		}
+		rpcAccount := &executionproto.BlockAccessListAccount{
+			Address: gointerfaces.ConvertAddressToH160(account.Address.Value()),
+		}
+		for _, storageChange := range account.StorageChanges {
+			if storageChange == nil {
+				continue
+			}
+			slotChanges := &executionproto.BlockAccessListSlotChanges{
+				Slot: gointerfaces.ConvertHashToH256(storageChange.Slot.Value()),
+			}
+			for _, change := range storageChange.Changes {
+				if change == nil {
+					continue
+				}
+				slotChanges.Changes = append(slotChanges.Changes, &executionproto.BlockAccessListStorageChange{
+					Index: uint32(change.Index),
+					Value: gointerfaces.ConvertUint256IntToH256(&change.Value),
+				})
+			}
+			rpcAccount.StorageChanges = append(rpcAccount.StorageChanges, slotChanges)
+		}
+		for _, read := range account.StorageReads {
+			rpcAccount.StorageReads = append(rpcAccount.StorageReads, gointerfaces.ConvertHashToH256(read.Value()))
+		}
+		for _, balanceChange := range account.BalanceChanges {
+			if balanceChange == nil {
+				continue
+			}
+			val := balanceChange.Value
+			rpcAccount.BalanceChanges = append(rpcAccount.BalanceChanges, &executionproto.BlockAccessListBalanceChange{
+				Index: uint32(balanceChange.Index),
+				Value: gointerfaces.ConvertUint256IntToH256(&val),
+			})
+		}
+		for _, nonceChange := range account.NonceChanges {
+			if nonceChange == nil {
+				continue
+			}
+			rpcAccount.NonceChanges = append(rpcAccount.NonceChanges, &executionproto.BlockAccessListNonceChange{
+				Index: uint32(nonceChange.Index),
+				Value: nonceChange.Value,
+			})
+		}
+		for _, codeChange := range account.CodeChanges {
+			if codeChange == nil {
+				continue
+			}
+			data := make([]byte, len(codeChange.Bytecode))
+			copy(data, codeChange.Bytecode)
+			rpcAccount.CodeChanges = append(rpcAccount.CodeChanges, &executionproto.BlockAccessListCodeChange{
+				Index: uint32(codeChange.Index),
+				Data:  data,
+			})
+		}
+		out = append(out, rpcAccount)
+	}
+	return out
+}
+
+func ConvertExecutionProtoToBlockAccessList(protoList []*executionproto.BlockAccessListAccount) (BlockAccessList, error) {
+	if len(protoList) == 0 {
+		return nil, nil
+	}
+	out := make(BlockAccessList, 0, len(protoList))
+	for accountIdx, account := range protoList {
+		if account == nil {
+			return nil, fmt.Errorf("blockAccessList account %d is nil", accountIdx)
+		}
+		if account.Address == nil {
+			return nil, fmt.Errorf("blockAccessList account %d missing address", accountIdx)
+		}
+		accountChanges := &AccountChanges{
+			Address: accounts.InternAddress(gointerfaces.ConvertH160toAddress(account.Address)),
+		}
+		for slotIdx, storageChange := range account.StorageChanges {
+			if storageChange == nil {
+				return nil, fmt.Errorf("blockAccessList account %d storageChanges[%d] is nil", accountIdx, slotIdx)
+			}
+			if storageChange.Slot == nil {
+				return nil, fmt.Errorf("blockAccessList account %d storageChanges[%d] missing slot", accountIdx, slotIdx)
+			}
+			slotChanges := &SlotChanges{Slot: accounts.InternKey(gointerfaces.ConvertH256ToHash(storageChange.Slot))}
+			for changeIdx, change := range storageChange.Changes {
+				if change == nil {
+					return nil, fmt.Errorf("blockAccessList account %d storageChanges[%d].changes[%d] is nil", accountIdx, slotIdx, changeIdx)
+				}
+				if change.Index > math.MaxUint16 {
+					return nil, fmt.Errorf("blockAccessList account %d storageChanges[%d].changes[%d] index overflow: %d", accountIdx, slotIdx, changeIdx, change.Index)
+				}
+				if change.Value == nil {
+					return nil, fmt.Errorf("blockAccessList account %d storageChanges[%d].changes[%d] missing value", accountIdx, slotIdx, changeIdx)
+				}
+				val := gointerfaces.ConvertH256ToUint256Int(change.Value)
+				slotChanges.Changes = append(slotChanges.Changes, &StorageChange{
+					Index: uint16(change.Index),
+					Value: *val,
+				})
+			}
+			accountChanges.StorageChanges = append(accountChanges.StorageChanges, slotChanges)
+		}
+		for readIdx, read := range account.StorageReads {
+			if read == nil {
+				return nil, fmt.Errorf("blockAccessList account %d storageReads[%d] is nil", accountIdx, readIdx)
+			}
+			accountChanges.StorageReads = append(accountChanges.StorageReads, accounts.InternKey(gointerfaces.ConvertH256ToHash(read)))
+		}
+		for balanceIdx, balanceChange := range account.BalanceChanges {
+			if balanceChange == nil {
+				return nil, fmt.Errorf("blockAccessList account %d balanceChanges[%d] is nil", accountIdx, balanceIdx)
+			}
+			if balanceChange.Index > math.MaxUint16 {
+				return nil, fmt.Errorf("blockAccessList account %d balanceChanges[%d] index overflow: %d", accountIdx, balanceIdx, balanceChange.Index)
+			}
+			if balanceChange.Value == nil {
+				return nil, fmt.Errorf("blockAccessList account %d balanceChanges[%d] missing value", accountIdx, balanceIdx)
+			}
+			val := gointerfaces.ConvertH256ToUint256Int(balanceChange.Value)
+			accountChanges.BalanceChanges = append(accountChanges.BalanceChanges, &BalanceChange{
+				Index: uint16(balanceChange.Index),
+				Value: *val,
+			})
+		}
+		for nonceIdx, nonceChange := range account.NonceChanges {
+			if nonceChange == nil {
+				return nil, fmt.Errorf("blockAccessList account %d nonceChanges[%d] is nil", accountIdx, nonceIdx)
+			}
+			if nonceChange.Index > math.MaxUint16 {
+				return nil, fmt.Errorf("blockAccessList account %d nonceChanges[%d] index overflow: %d", accountIdx, nonceIdx, nonceChange.Index)
+			}
+			accountChanges.NonceChanges = append(accountChanges.NonceChanges, &NonceChange{
+				Index: uint16(nonceChange.Index),
+				Value: nonceChange.Value,
+			})
+		}
+		for codeIdx, codeChange := range account.CodeChanges {
+			if codeChange == nil {
+				return nil, fmt.Errorf("blockAccessList account %d codeChanges[%d] is nil", accountIdx, codeIdx)
+			}
+			if codeChange.Index > math.MaxUint16 {
+				return nil, fmt.Errorf("blockAccessList account %d codeChanges[%d] index overflow: %d", accountIdx, codeIdx, codeChange.Index)
+			}
+			data := make([]byte, len(codeChange.Data))
+			copy(data, codeChange.Data)
+			accountChanges.CodeChanges = append(accountChanges.CodeChanges, &CodeChange{
+				Index:    uint16(codeChange.Index),
+				Bytecode: data,
+			})
+		}
+		out = append(out, accountChanges)
+	}
+	if err := out.Validate(); err != nil {
+		return nil, fmt.Errorf("blockAccessList validate: %w", err)
+	}
+	return out, nil
 }

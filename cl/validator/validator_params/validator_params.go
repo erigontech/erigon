@@ -44,7 +44,7 @@ func (vp *ValidatorParams) GetFeeRecipient(validatorIndex uint64) (common.Addres
 
 func (vp *ValidatorParams) GetValidators() []uint64 {
 	validators := []uint64{}
-	vp.feeRecipients.Range(func(key, value interface{}) bool {
+	vp.feeRecipients.Range(func(key, value any) bool {
 		validators = append(validators, key.(uint64))
 		return true
 	})

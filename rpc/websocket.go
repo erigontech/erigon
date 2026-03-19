@@ -203,6 +203,9 @@ func DialWebsocketWithDialer(ctx context.Context, endpoint, origin string, diale
 		//nolint
 		conn, resp, err := dialer.DialContext(ctx, endpoint, header)
 		if err != nil {
+			if resp != nil {
+				resp.Body.Close()
+			}
 			hErr := wsHandshakeError{err: err}
 			if resp != nil {
 				hErr.status = resp.Status

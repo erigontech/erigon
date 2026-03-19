@@ -52,7 +52,7 @@ func BenchmarkLogfmtNoCtx(b *testing.B) {
 		Time: time.Now(),
 		Lvl:  LvlInfo,
 		Msg:  "test message",
-		Ctx:  []interface{}{},
+		Ctx:  []any{},
 	}
 
 	logfmt := LogfmtFormat()
@@ -66,7 +66,7 @@ func BenchmarkJsonNoCtx(b *testing.B) {
 		Time: time.Now(),
 		Lvl:  LvlInfo,
 		Msg:  "test message",
-		Ctx:  []interface{}{},
+		Ctx:  []any{},
 	}
 
 	jsonfmt := JsonFormat()

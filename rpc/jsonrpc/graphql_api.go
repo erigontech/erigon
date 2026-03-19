@@ -18,7 +18,6 @@ package jsonrpc
 
 import (
 	"context"
-	"fmt"
 	"math/big"
 
 	"github.com/erigontech/erigon/common"
@@ -32,7 +31,7 @@ import (
 )
 
 type GraphQLAPI interface {
-	GetBlockDetails(ctx context.Context, number rpc.BlockNumber) (map[string]interface{}, error)
+	GetBlockDetails(ctx context.Context, number rpc.BlockNumber) (map[string]any, error)
 	GetChainID(ctx context.Context) (*big.Int, error)
 }
 
@@ -63,7 +62,7 @@ func (api *GraphQLAPIImpl) GetChainID(ctx context.Context) (*big.Int, error) {
 	return response.ChainID, nil
 }
 
-func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.BlockNumber) (map[string]interface{}, error) {
+func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.BlockNumber) (map[string]any, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -90,10 +89,10 @@ func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.
 
 	receipts, err := api.getReceipts(ctx, tx, block)
 	if err != nil {
-		return nil, fmt.Errorf("getReceipts error: %w", err)
+		return nil, err
 	}
 
-	result := make([]map[string]interface{}, 0, len(receipts))
+	result := make([]map[string]any, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
 
@@ -105,14 +104,14 @@ func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.
 		result = append(result, transaction)
 	}
 
-	response := map[string]interface{}{}
+	response := map[string]any{}
 	response["block"] = getBlockRes
 	response["receipts"] = result
 
 	// Withdrawals
-	wresult := make([]map[string]interface{}, 0, len(block.Withdrawals()))
+	wresult := make([]map[string]any, 0, len(block.Withdrawals()))
 	for _, withdrawal := range block.Withdrawals() {
-		wmap := make(map[string]interface{})
+		wmap := make(map[string]any)
 		wmap["index"] = hexutil.Uint64(withdrawal.Index)
 		wmap["validator"] = hexutil.Uint64(withdrawal.Validator)
 		wmap["address"] = withdrawal.Address
@@ -146,8 +145,8 @@ func (api *GraphQLAPIImpl) getBlockWithSenders(ctx context.Context, number rpc.B
 	return block, block.Body().SendersFromTxs(), nil
 }
 
-func (api *GraphQLAPIImpl) delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, inclTx bool) (map[string]interface{}, error) {
-	additionalFields := make(map[string]interface{})
+func (api *GraphQLAPIImpl) delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, inclTx bool) (map[string]any, error) {
+	additionalFields := make(map[string]any)
 	response, err := ethapi.RPCMarshalBlock(b, inclTx, inclTx, additionalFields)
 	if !inclTx {
 		delete(response, "transactions") // workaround for https://github.com/erigontech/erigon/issues/4989#issuecomment-1218415666

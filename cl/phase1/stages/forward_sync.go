@@ -108,44 +108,6 @@ func downloadAndProcessEip4844DA(ctx context.Context, logger log.Logger, cfg *Cf
 	return highestProcessed - 1, err
 }
 
-func downloadBlobs(ctx context.Context, logger log.Logger, cfg *Cfg, highestBlockProcessed uint64, blocks []*cltypes.SignedBeaconBlock) (err error) {
-	fuluBlocks := []*cltypes.SignedBlindedBeaconBlock{}
-	denebBlocks := []*cltypes.SignedBeaconBlock{}
-	for _, block := range blocks {
-		blindedBlock, err := block.Blinded()
-		if err != nil {
-			return err
-		}
-		if blindedBlock.Version() >= clparams.FuluVersion {
-			fuluBlocks = append(fuluBlocks, blindedBlock)
-		} else if block.Version() >= clparams.DenebVersion {
-			denebBlocks = append(denebBlocks, block)
-		}
-	}
-
-	if len(denebBlocks) > 0 && shouldProcessBlobs(denebBlocks, cfg) {
-		_, err = downloadAndProcessEip4844DA(ctx, logger, cfg, highestBlockProcessed, denebBlocks)
-		if err != nil {
-			logger.Trace("[Caplin] Failed to process blobs", "err", err)
-			return err
-		}
-	}
-
-	if len(fuluBlocks) > 0 && canDownloadColumnData(fuluBlocks, cfg) {
-		if cfg.caplinConfig.ArchiveBlobs || cfg.caplinConfig.ImmediateBlobsBackfilling {
-			if err = cfg.peerDas.DownloadColumnsAndRecoverBlobs(ctx, fuluBlocks); err != nil {
-				logger.Warn("[Caplin] Failed to download columns and recover blobs", "err", err)
-			}
-		} else {
-			if err = cfg.peerDas.DownloadOnlyCustodyColumns(ctx, fuluBlocks); err != nil {
-				logger.Warn("[Caplin] Failed to download custody columns", "err", err)
-			}
-		}
-	}
-
-	return nil
-}
-
 func canDownloadColumnData(blocks []*cltypes.SignedBlindedBeaconBlock, cfg *Cfg) bool {
 	return cfg.caplinConfig.ArchiveBlobs || cfg.caplinConfig.ImmediateBlobsBackfilling
 
@@ -194,10 +156,6 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		return blocks[i].Block.Slot < blocks[j].Block.Slot
 	})
 
-	if err = downloadBlobs(ctx, logger, cfg, highestBlockProcessed, blocks); err != nil {
-		return
-	}
-
 	var blockRoot common.Hash
 	newHighestBlockProcessed = highestBlockProcessed
 	// Iterate over each block in the sorted list
@@ -220,9 +178,8 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 			return
 		}
 
-		checkDataAvaiability := cfg.caplinConfig.ArchiveBlobs || cfg.caplinConfig.ImmediateBlobsBackfilling
 		// Process the block
-		if err = processBlock(ctx, cfg, cfg.indiciesDB, block, false, true, checkDataAvaiability); err != nil {
+		if err = processBlock(ctx, cfg, cfg.indiciesDB, block, false, true, false); err != nil {
 			if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
 				// Return an error if EIP-4844 data is not available
 				logger.Trace("[Caplin] forward sync EIP-4844 data not available", "blockSlot", block.Block.Slot)

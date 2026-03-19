@@ -41,7 +41,7 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, buf []byte) (*common
 		return nil, errors.New("failed assertion: auth.nonce < 2**64 - 1")
 	}
 
-	authLen := (1 + rlp.Uint256LenExcludingHead(ath.ChainID))
+	authLen := rlp.Uint256Len(ath.ChainID)
 	authLen += 1 + length.Addr
 	authLen += rlp.U64Len(ath.Nonce)
 
@@ -66,7 +66,8 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, buf []byte) (*common
 }
 
 func RecoverSignerFromRLP(rlp []byte, yParity uint8, r uint256.Int, s uint256.Int) (*common.Address, error) {
-	hashData := []byte{params.SetCodeMagicPrefix}
+	hashData := make([]byte, 0, 1+len(rlp))
+	hashData = append(hashData, params.SetCodeMagicPrefix)
 	hashData = append(hashData, rlp...)
 	hash := crypto.Keccak256Hash(hashData)
 
@@ -99,12 +100,10 @@ func RecoverSignerFromRLP(rlp []byte, yParity uint8, r uint256.Int, s uint256.In
 }
 
 func authorizationSize(auth Authorization) (authLen int) {
-	authLen = (1 + rlp.Uint256LenExcludingHead(auth.ChainID))
+	authLen = rlp.Uint256Len(auth.ChainID)
 	authLen += rlp.U64Len(auth.Nonce)
 	authLen += 1 + length.Addr
-
-	authLen += rlp.U64Len(uint64(auth.YParity)) + (1 + rlp.Uint256LenExcludingHead(auth.R)) + (1 + rlp.Uint256LenExcludingHead(auth.S))
-
+	authLen += rlp.U64Len(uint64(auth.YParity)) + rlp.Uint256Len(auth.R) + rlp.Uint256Len(auth.S)
 	return
 }
 
@@ -122,35 +121,27 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 	if err != nil {
 		return fmt.Errorf("open authorizations: %w", err)
 	}
-	var b []byte
 	i := 0
 	for _, err = s.List(); err == nil; _, err = s.List() {
 		auth := Authorization{}
 
-		var chainId []byte
-		if chainId, err = s.Uint256Bytes(); err != nil {
+		if err = s.ReadUint256(&auth.ChainID); err != nil {
 			return err
 		}
-		auth.ChainID.SetBytes(chainId)
 
 		// address
-		if b, err = s.Bytes(); err != nil {
+		if err = s.ReadBytes(auth.Address[:]); err != nil {
 			return err
 		}
 
-		if len(b) != 20 {
-			return fmt.Errorf("wrong size for Address: %d", len(b))
-		}
-		auth.Address = common.BytesToAddress(b)
-
 		// nonce
-		if auth.Nonce, err = s.Uint(); err != nil {
+		if auth.Nonce, err = s.Uint64(); err != nil {
 			return err
 		}
 
 		// yParity
 		var yParity uint64
-		if yParity, err = s.Uint(); err != nil {
+		if yParity, err = s.Uint64(); err != nil {
 			return err
 		}
 		if yParity >= 1<<8 {
@@ -159,16 +150,14 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 		auth.YParity = uint8(yParity)
 
 		// r
-		if b, err = s.Uint256Bytes(); err != nil {
+		if err = s.ReadUint256(&auth.R); err != nil {
 			return err
 		}
-		auth.R.SetBytes(b)
 
 		// s
-		if b, err = s.Uint256Bytes(); err != nil {
+		if err = s.ReadUint256(&auth.S); err != nil {
 			return err
 		}
-		auth.S.SetBytes(b)
 
 		*auths = append(*auths, auth)
 		// end of authorization

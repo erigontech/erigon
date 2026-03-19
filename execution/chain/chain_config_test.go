@@ -17,7 +17,6 @@
 package chain
 
 import (
-	"math/big"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -84,10 +83,16 @@ func TestConfigValueLookup(t *testing.T) {
 	assert.Equal(t, address2, ConfigValueLookup(burntContract, 41874000+1))
 }
 
+func TestEmptyConfigValueLookup(t *testing.T) {
+	blobSchedule := make(map[uint64]*params.BlobConfig)
+	assert.Nil(t, ConfigValueLookup(blobSchedule, 0))
+	assert.Nil(t, ConfigValueLookup(blobSchedule, 1))
+}
+
 func TestNilBlobSchedule(t *testing.T) {
 	var c Config
-	c.CancunTime = big.NewInt(1)
-	c.PragueTime = big.NewInt(2)
+	c.CancunTime = common.NewUint64(1)
+	c.PragueTime = common.NewUint64(2)
 
 	// Everything should be 0 before Cancun
 	assert.Equal(t, uint64(0), c.GetTargetBlobsPerBlock(0))
@@ -113,10 +118,10 @@ func TestBlobParameterOnlyHardforks(t *testing.T) {
 	bpo2time := uint64(1785952240)
 
 	var c Config
-	c.CancunTime = big.NewInt(int64(cancunTime))
-	c.PragueTime = big.NewInt(int64(pragueTime))
-	c.Bpo1Time = big.NewInt(int64(bpo1time))
-	c.Bpo2Time = big.NewInt(int64(bpo2time))
+	c.CancunTime = common.NewUint64(cancunTime)
+	c.PragueTime = common.NewUint64(pragueTime)
+	c.Bpo1Time = common.NewUint64(bpo1time)
+	c.Bpo2Time = common.NewUint64(bpo2time)
 
 	c.BlobSchedule = map[string]*params.BlobConfig{
 		"cancun": {
@@ -192,8 +197,8 @@ func TestBlobParameterInactiveHardfork(t *testing.T) {
 	pragueTime := uint64(1746612311)
 
 	var c Config
-	c.CancunTime = big.NewInt(int64(cancunTime))
-	c.PragueTime = big.NewInt(int64(pragueTime))
+	c.CancunTime = common.NewUint64(cancunTime)
+	c.PragueTime = common.NewUint64(pragueTime)
 	// Osaka is not activated yet
 
 	c.BlobSchedule = map[string]*params.BlobConfig{
@@ -222,8 +227,8 @@ func TestBlobParameterInactiveHardfork(t *testing.T) {
 
 func TestBlobParameterDencunAndPectraAtGenesis(t *testing.T) {
 	var c Config
-	c.CancunTime = big.NewInt(0)
-	c.PragueTime = big.NewInt(0)
+	c.CancunTime = common.NewUint64(0)
+	c.PragueTime = common.NewUint64(0)
 
 	c.BlobSchedule = map[string]*params.BlobConfig{
 		"cancun": {

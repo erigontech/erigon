@@ -97,8 +97,8 @@ func (b *BlobSidecar) Clone() clonable.Clonable {
 	return NewBlobSidecar(b.Index, blob, b.KzgCommitment, b.KzgProof, b.SignedBlockHeader, b.CommitmentInclusionProof)
 }
 
-func (b *BlobSidecar) getSchema() []interface{} {
-	s := []interface{}{&b.Index, b.Blob[:], b.KzgCommitment[:], b.KzgProof[:]}
+func (b *BlobSidecar) getSchema() []any {
+	s := []any{&b.Index, b.Blob[:], b.KzgCommitment[:], b.KzgProof[:]}
 	if b.SignedBlockHeader != nil {
 		s = append(s, b.SignedBlockHeader)
 	}
@@ -111,13 +111,6 @@ func (b *BlobSidecar) getSchema() []interface{} {
 type BlobIdentifier struct {
 	BlockRoot common.Hash `json:"block_root"`
 	Index     uint64      `json:"index,string"`
-}
-
-func NewBlobIdentifier(blockRoot common.Hash, index uint64) *BlobIdentifier {
-	return &BlobIdentifier{
-		BlockRoot: blockRoot,
-		Index:     index,
-	}
 }
 
 func (b *BlobIdentifier) EncodeSSZ(buf []byte) ([]byte, error) {
@@ -140,8 +133,8 @@ func (*BlobIdentifier) Clone() clonable.Clonable {
 	return &BlobIdentifier{}
 }
 
-func (b *BlobIdentifier) getSchema() []interface{} {
-	return []interface{}{
+func (b *BlobIdentifier) getSchema() []any {
+	return []any{
 		b.BlockRoot[:],
 		&b.Index,
 	}

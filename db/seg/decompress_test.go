@@ -50,7 +50,7 @@ func prepareLoremDict(t *testing.T) *Decompressor {
 	}
 	defer c.Close()
 	for k, w := range loremStrings {
-		if err = c.AddWord([]byte(fmt.Sprintf("%s %d", w, k))); err != nil {
+		if err = c.AddWord(fmt.Appendf(nil, "%s %d", w, k)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -155,7 +155,7 @@ func prepareStupidDict(t *testing.T, size int) *Decompressor {
 	}
 	defer c.Close()
 	for i := 0; i < size; i++ {
-		if err = c.AddWord([]byte(fmt.Sprintf("word-%d", i))); err != nil {
+		if err = c.AddWord(fmt.Appendf(nil, "word-%d", i)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -170,9 +170,7 @@ func prepareStupidDict(t *testing.T, size int) *Decompressor {
 }
 
 func TestDecompressMatchOKCondensed(t *testing.T) {
-	condensePatternTableBitThreshold = 4
 	d := prepareStupidDict(t, 10000)
-	defer func() { condensePatternTableBitThreshold = 9 }()
 	defer d.Close()
 
 	g := d.MakeGetter()
@@ -228,7 +226,7 @@ func TestDecompressMatchPrefix(t *testing.T) {
 	skipCount := 0
 	for g.HasNext() {
 		w := loremStrings[i]
-		expected := []byte(fmt.Sprintf("%s %d", w, i+1))
+		expected := fmt.Appendf(nil, "%s %d", w, i+1)
 		expected = expected[:len(expected)/2]
 		if !g.MatchPrefix(expected) {
 			t.Errorf("expexted match with %s", expected)
@@ -245,7 +243,7 @@ func TestDecompressMatchPrefix(t *testing.T) {
 	i = 0
 	for g.HasNext() {
 		w := loremStrings[i]
-		expected := []byte(fmt.Sprintf("%s %d", w, i+1))
+		expected := fmt.Appendf(nil, "%s %d", w, i+1)
 		expected = expected[:len(expected)/2]
 		if len(expected) > 0 {
 			expected[len(expected)-1]++
@@ -279,7 +277,7 @@ func prepareLoremDictUncompressed(t *testing.T) *Decompressor {
 			require.NoError(t, err)
 			continue
 		}
-		err = c.AddUncompressedWord([]byte(fmt.Sprintf("%s %d", w, k)))
+		err = c.AddUncompressedWord(fmt.Appendf(nil, "%s %d", w, k))
 		require.NoError(t, err)
 	}
 	err = c.Compress()
@@ -300,7 +298,7 @@ func TestUncompressed(t *testing.T) {
 	offsets = append(offsets, 0)
 	for g.HasNext() {
 		w := loremStrings[i]
-		expected := []byte(fmt.Sprintf("%s %d", w, i+1))
+		expected := fmt.Appendf(nil, "%s %d", w, i+1)
 		expected = expected[:len(expected)/2]
 		actual, offset := g.NextUncompressed()
 		if bytes.Equal(expected, actual) {
@@ -366,7 +364,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		require.NoError(t, err)
 		defer c.Close()
 		for k, w := range loremStrings {
-			if err = c.AddUncompressedWord([]byte(fmt.Sprintf("%s %d", w, k))); err != nil {
+			if err = c.AddUncompressedWord(fmt.Appendf(nil, "%s %d", w, k)); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -406,7 +404,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		require.NoError(t, err)
 		defer c.Close()
 		for k, w := range loremStrings {
-			if err = c.AddWord([]byte(fmt.Sprintf("%s %d", w, k))); err != nil {
+			if err = c.AddWord(fmt.Appendf(nil, "%s %d", w, k)); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -537,8 +535,6 @@ func TestDecompressTorrent(t *testing.T) {
 	require.NoError(t, err)
 	fmt.Printf("file: %v, size: %d\n", st.Name(), st.Size())
 
-	condensePatternTableBitThreshold = 9
-	fmt.Printf("bit threshold: %d\n", condensePatternTableBitThreshold)
 	d, err := NewDecompressor(fpath)
 
 	require.NoError(t, err)

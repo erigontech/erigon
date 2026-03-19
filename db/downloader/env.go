@@ -12,11 +12,6 @@ func initIntFromEnv[T constraints.Signed](key string, defaultValue T, bitSize in
 	return strconvFromEnv(key, defaultValue, bitSize, strconv.ParseInt)
 }
 
-//nolint:unused
-func initUIntFromEnv[T constraints.Unsigned](key string, defaultValue T, bitSize int) T {
-	return strconvFromEnv(key, defaultValue, bitSize, strconv.ParseUint)
-}
-
 func strconvFromEnv[T, U constraints.Integer](key string, defaultValue T, bitSize int, conv func(s string, base, bitSize int) (U, error)) T {
 	s := os.Getenv(key)
 	if s == "" {

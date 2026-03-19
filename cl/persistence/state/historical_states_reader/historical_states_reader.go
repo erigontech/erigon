@@ -43,7 +43,7 @@ import (
 )
 
 var buffersPool = sync.Pool{
-	New: func() interface{} { return &bytes.Buffer{} },
+	New: func() any { return &bytes.Buffer{} },
 }
 
 type HistoricalStatesReader struct {

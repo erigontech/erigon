@@ -1,4 +1,4 @@
-// Copyright 2018 The go-ethereum Authors
+// Copyright 2019 The go-ethereum Authors
 // (original work)
 // Copyright 2024 The Erigon Authors
 // (modifications)

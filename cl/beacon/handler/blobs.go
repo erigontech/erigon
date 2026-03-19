@@ -163,6 +163,8 @@ func (a *ApiHandler) GetEthV1DebugBeaconDataColumnSidecars(w http.ResponseWriter
 			return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 		}
 		if sidecar != nil {
+			sidecar.BlockRoot = blockRoot
+			sidecar.Slot = *slot
 			dataColumnSidecars = append(dataColumnSidecars, sidecar)
 		}
 	}

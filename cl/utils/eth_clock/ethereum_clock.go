@@ -178,7 +178,7 @@ func (t *ethereumClockImpl) ForkId() ([]byte, error) {
 
 func (t *ethereumClockImpl) NextForkEpochIncludeBPO() uint64 {
 	// collect all fork epochs
-	forkEpochs := make([]uint64, 0)
+	forkEpochs := make([]uint64, 0, len(t.beaconCfg.ForkVersionSchedule)+len(t.beaconCfg.BlobSchedule))
 	for _, fork := range forkList(t.beaconCfg.ForkVersionSchedule) {
 		forkEpochs = append(forkEpochs, fork.epoch)
 	}

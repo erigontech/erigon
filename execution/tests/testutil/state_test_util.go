@@ -23,7 +23,6 @@ import (
 	"context"
 	context2 "context"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -31,8 +30,9 @@ import (
 	"strings"
 	"testing"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
-	"golang.org/x/crypto/sha3"
+	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -55,7 +55,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
-	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -72,7 +71,7 @@ type StateSubtest struct {
 }
 
 func (t *StateTest) UnmarshalJSON(in []byte) error {
-	return json.Unmarshal(in, &t.Json)
+	return jsoniter.ConfigFastest.Unmarshal(in, &t.Json)
 }
 
 type stJSON struct {
@@ -106,6 +105,7 @@ type stTransaction struct {
 	Data                 []string                  `json:"data"`
 	Value                []string                  `json:"value"`
 	AccessLists          []*types.AccessList       `json:"accessLists,omitempty"`
+	BlobVersionedHashes  []common.Hash             `json:"blobVersionedHashes,omitempty"`
 	BlobGasFeeCap        *math.HexOrDecimal256     `json:"maxFeePerBlobGas,omitempty"`
 	Authorizations       []types.JsonAuthorization `json:"authorizationList,omitempty"`
 }
@@ -114,12 +114,12 @@ type stTransaction struct {
 
 type stEnv struct {
 	Coinbase      common.Address `json:"currentCoinbase"   gencodec:"required"`
-	Difficulty    *big.Int       `json:"currentDifficulty" gencodec:"required"`
-	Random        *big.Int       `json:"currentRandom"     gencodec:"optional"`
+	Difficulty    *uint256.Int   `json:"currentDifficulty" gencodec:"required"`
+	Random        *uint256.Int   `json:"currentRandom"     gencodec:"optional"`
 	GasLimit      uint64         `json:"currentGasLimit"   gencodec:"required"`
 	Number        uint64         `json:"currentNumber"     gencodec:"required"`
 	Timestamp     uint64         `json:"currentTimestamp"  gencodec:"required"`
-	BaseFee       *big.Int       `json:"currentBaseFee"    gencodec:"optional"`
+	BaseFee       *uint256.Int   `json:"currentBaseFee"    gencodec:"optional"`
 	ExcessBlobGas *uint64        `json:"currentExcessBlobGas" gencodec:"optional"`
 }
 
@@ -162,7 +162,11 @@ func GetChainConfig(forkString string) (baseConfig *chain.Config, eips []int, er
 
 // Subtests returns all valid subtests of the test.
 func (t *StateTest) Subtests() []StateSubtest {
-	var sub []StateSubtest
+	totalCount := 0
+	for _, pss := range t.Json.Post {
+		totalCount += len(pss)
+	}
+	sub := make([]StateSubtest, 0, totalCount)
 	for fork, pss := range t.Json.Post {
 		for i := range pss {
 			sub = append(sub, StateSubtest{fork, i})
@@ -196,7 +200,7 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
 	vmconfig.ExtraEips = eips
-	block, _, err := genesiswrite.GenesisToBlock(tb, t.genesis(config), dirs, log.Root())
+	block, _, err := genesiswrite.GenesisToBlock(nil, t.genesis(config), dirs, log.Root())
 	if err != nil {
 		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
@@ -220,29 +224,19 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	w := rpchelper.NewLatestStateWriter(tx, domains, (*freezeblocks.BlockReader)(nil), writeBlockNr)
 	statedb := state.New(r)
 
-	var baseFee *big.Int
+	var baseFee *uint256.Int
 	if config.IsLondon(0) {
 		baseFee = t.Json.Env.BaseFee
 		if baseFee == nil {
 			// Retesteth uses `0x10` for genesis baseFee. Therefore, it defaults to
 			// parent - 2 : 0xa as the basefee for 'this' context.
-			baseFee = big.NewInt(0x0a)
+			baseFee = uint256.NewInt(0x0a)
 		}
 	}
 	post := t.Json.Post[subtest.Fork][subtest.Index]
 	msg, err := toMessage(t.Json.Tx, post, baseFee)
 	if err != nil {
 		return nil, common.Hash{}, 0, err
-	}
-	if len(post.Tx) != 0 {
-		txn, err := types.UnmarshalTransactionFromBinary(post.Tx, false /* blobTxnsAreWrappedWithBlobs */)
-		if err != nil {
-			return nil, common.Hash{}, 0, err
-		}
-		msg, err = txn.AsMessage(*types.MakeSigner(config, 0, 0), baseFee, (&evmtypes.BlockContext{}).Rules(config))
-		if err != nil {
-			return nil, common.Hash{}, 0, err
-		}
 	}
 
 	// Prepare the EVM.
@@ -253,16 +247,15 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	context := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), nil, accounts.InternAddress(t.Json.Env.Coinbase), config)
 	context.GetHash = vmTestBlockHash
 	if baseFee != nil {
-		context.BaseFee = uint256.Int{}
-		context.BaseFee.SetFromBig(baseFee)
+		context.BaseFee.Set(baseFee)
 	}
 	if t.Json.Env.Difficulty != nil {
-		context.Difficulty = new(big.Int).Set(t.Json.Env.Difficulty)
+		context.Difficulty.Set(t.Json.Env.Difficulty)
 	}
 	if config.IsLondon(0) && t.Json.Env.Random != nil {
-		rnd := common.BigToHash(t.Json.Env.Random)
+		rnd := common.Hash(t.Json.Env.Random.Bytes32())
 		context.PrevRanDao = &rnd
-		context.Difficulty = big.NewInt(0)
+		context.Difficulty.Clear()
 	}
 	if config.IsCancun(block.Time()) && t.Json.Env.ExcessBlobGas != nil {
 		context.BlobBaseFee, err = misc.GetBlobGasPrice(config, *t.Json.Env.ExcessBlobGas, header.Time)
@@ -282,7 +275,7 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	res, err := protocol.ApplyMessage(evm, msg, gaspool, true /* refunds */, false /* gasBailout */, nil /* engine */)
 	gasUsed := uint64(0)
 	if res != nil {
-		gasUsed = res.GasUsed
+		gasUsed = res.ReceiptGasUsed
 	}
 	if err != nil {
 		statedb.RevertToSnapshot(snapshot, err)
@@ -302,7 +295,7 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	var root common.Hash
 	rootBytes, err := domains.ComputeCommitment(context2.Background(), tx, true, blockNum, txNum, "", nil)
 	if err != nil {
-		return statedb, root, res.GasUsed, fmt.Errorf("ComputeCommitment: %w", err)
+		return statedb, root, res.ReceiptGasUsed, fmt.Errorf("ComputeCommitment: %w", err)
 	}
 	return statedb, common.BytesToHash(rootBytes), gasUsed, nil
 }
@@ -336,6 +329,10 @@ func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAll
 		return nil, err
 	}
 	defer domains.Close()
+	latestTxNum, latestBlockNum, err := domains.SeekCommitment(context.Background(), tx)
+	if err != nil {
+		return nil, err
+	}
 
 	w := rpchelper.NewLatestStateWriter(tx, domains, (*freezeblocks.BlockReader)(nil), blockNr-1)
 
@@ -347,7 +344,7 @@ func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAll
 		return nil, err
 	}
 
-	_, err = domains.ComputeCommitment(context.Background(), tx, true, domains.BlockNum(), domains.TxNum(), "flush-commitment", nil)
+	_, err = domains.ComputeCommitment(context.Background(), tx, true, latestBlockNum, latestTxNum, "flush-commitment", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -370,8 +367,8 @@ func (t *StateTest) genesis(config *chain.Config) *types.Genesis {
 	}
 }
 
-func rlpHash(x interface{}) (h common.Hash) {
-	hw := sha3.NewLegacyKeccak256()
+func rlpHash(x any) (h common.Hash) {
+	hw := keccak.NewFastKeccak()
 	if err := rlp.Encode(hw, x); err != nil {
 		panic(err)
 	}
@@ -383,7 +380,7 @@ func vmTestBlockHash(n uint64) (common.Hash, error) {
 	return common.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String()))), nil
 }
 
-func toMessage(tx stTransaction, ps stPostState, baseFee *big.Int) (protocol.Message, error) {
+func toMessage(tx stTransaction, ps stPostState, baseFee *uint256.Int) (protocol.Message, error) {
 	// Derive sender from private key if present.
 	var from accounts.Address
 	if len(tx.PrivateKey) > 0 {
@@ -460,7 +457,7 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *big.Int) (protocol.Mes
 		tipCap = big.Int(*tx.MaxPriorityFeePerGas)
 		feeCap = big.Int(*tx.MaxFeePerGas)
 
-		gp := math.BigMin(new(big.Int).Add(&tipCap, baseFee), &feeCap)
+		gp := math.BigMin(new(big.Int).Add(&tipCap, baseFee.ToBig()), &feeCap)
 		gasPrice = math.NewHexOrDecimal256(gp.Int64())
 	}
 	if gasPrice == nil {
@@ -504,6 +501,11 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *big.Int) (protocol.Mes
 			}
 		}
 		msg.SetAuthorizations(authorizations)
+	}
+
+	// Add blob versioned hashes if present.
+	if len(tx.BlobVersionedHashes) > 0 {
+		msg.SetBlobVersionedHashes(tx.BlobVersionedHashes)
 	}
 
 	return msg, nil

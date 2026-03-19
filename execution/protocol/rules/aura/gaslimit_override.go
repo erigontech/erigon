@@ -17,6 +17,8 @@
 package aura
 
 import (
+	"errors"
+
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/holiman/uint256"
 
@@ -73,7 +75,7 @@ func (c *AuRa) GetBlockGasLimitFromContract(_ *chain.Config, syscall rules.Syste
 	return gasLimit.Uint64()
 }
 
-func (c *AuRa) verifyGasLimitOverride(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header, state *state.IntraBlockState, syscallCustom rules.SysCallCustom) {
+func (c *AuRa) verifyGasLimitOverride(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header, state *state.IntraBlockState, syscallCustom rules.SysCallCustom) error {
 	//IsPoSHeader check is necessary as merge.go calls Initialize on AuRa indiscriminately
 	gasLimitOverride := c.HasGasLimitContract() && !misc.IsPoSHeader(header)
 	if gasLimitOverride {
@@ -84,8 +86,9 @@ func (c *AuRa) verifyGasLimitOverride(config *chain.Config, chain rules.ChainHea
 
 		if blockGasLimit > 0 {
 			if header.GasLimit != blockGasLimit {
-				panic("Block gas limit doesn't match BlockGasLimitContract with AuRa")
+				return errors.New("Block gas limit doesn't match BlockGasLimitContract with AuRa")
 			}
 		}
 	}
+	return nil
 }

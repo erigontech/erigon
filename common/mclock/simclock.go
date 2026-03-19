@@ -61,7 +61,7 @@ func (s *Simulated) Run(d time.Duration) {
 	s.mu.Lock()
 	s.init()
 
-	end := s.now + AbsTime(d)
+	end := s.now.Add(d)
 	var do []func()
 	for len(s.scheduled) > 0 && s.scheduled[0].at <= end {
 		ev := heap.Pop(&s.scheduled).(*simTimer)
@@ -137,7 +137,7 @@ func (s *Simulated) AfterFunc(d time.Duration, fn func()) Timer {
 func (s *Simulated) schedule(d time.Duration, fn func()) *simTimer {
 	s.init()
 
-	at := s.now + AbsTime(d)
+	at := s.now.Add(d)
 	ev := &simTimer{do: fn, at: at, s: s}
 	heap.Push(&s.scheduled, ev)
 	s.cond.Broadcast()
@@ -196,13 +196,13 @@ func (h *simTimerHeap) Swap(i, j int) {
 	(*h)[j].index = j
 }
 
-func (h *simTimerHeap) Push(x interface{}) {
+func (h *simTimerHeap) Push(x any) {
 	t := x.(*simTimer)
 	t.index = len(*h)
 	*h = append(*h, t)
 }
 
-func (h *simTimerHeap) Pop() interface{} {
+func (h *simTimerHeap) Pop() any {
 	end := len(*h) - 1
 	t := (*h)[end]
 	t.index = -1

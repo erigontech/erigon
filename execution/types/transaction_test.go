@@ -67,16 +67,16 @@ var (
 	)
 
 	emptyEip2718Tx = &AccessListTx{
-		ChainID: &u256.Num1,
+		ChainID: u256.Num1,
 		LegacyTx: LegacyTx{
 			CommonTx: CommonTx{
 				Nonce:    3,
 				To:       &testAddr,
-				Value:    uint256.NewInt(10),
+				Value:    *uint256.NewInt(10),
 				GasLimit: 25000,
 				Data:     common.FromHex("5544"),
 			},
-			GasPrice: uint256.NewInt(1),
+			GasPrice: *uint256.NewInt(1),
 		},
 	}
 
@@ -89,13 +89,13 @@ var (
 		CommonTx: CommonTx{
 			Nonce:    3,
 			To:       &testAddr,
-			Value:    uint256.NewInt(10),
+			Value:    *uint256.NewInt(10),
 			GasLimit: 25000,
 			Data:     common.FromHex("5544"),
 		},
-		ChainID: &u256.Num1,
-		TipCap:  uint256.NewInt(1),
-		FeeCap:  uint256.NewInt(1),
+		ChainID: u256.Num1,
+		TipCap:  *uint256.NewInt(1),
+		FeeCap:  *uint256.NewInt(1),
 	}
 
 	signedDynFeeTx, _ = dynFeeTx.WithSignature(
@@ -229,8 +229,8 @@ func TestEIP2930Signer(t *testing.T) {
 		signer1 = LatestSignerForChainID(big.NewInt(1))
 		signer2 = LatestSignerForChainID(big.NewInt(2))
 		tx0     = &AccessListTx{LegacyTx: LegacyTx{CommonTx: CommonTx{Nonce: 1}}}
-		tx1     = &AccessListTx{ChainID: &u256.Num1, LegacyTx: LegacyTx{CommonTx: CommonTx{Nonce: 1}}}
-		tx2, _  = SignNewTx(key, *signer2, &AccessListTx{ChainID: &u256.Num2, LegacyTx: LegacyTx{CommonTx: CommonTx{Nonce: 1}}})
+		tx1     = &AccessListTx{ChainID: u256.Num1, LegacyTx: LegacyTx{CommonTx: CommonTx{Nonce: 1}}}
+		tx2, _  = SignNewTx(key, *signer2, &AccessListTx{ChainID: u256.Num2, LegacyTx: LegacyTx{CommonTx: CommonTx{Nonce: 1}}})
 	)
 
 	tests := []struct {
@@ -451,7 +451,7 @@ func TestTransactionCoding(t *testing.T) {
 					GasLimit: 1,
 					Data:     []byte("abcdef"),
 				},
-				GasPrice: &u256.Num2,
+				GasPrice: u256.Num2,
 			}
 		case 1:
 			// Legacy txn contract creation.
@@ -461,12 +461,12 @@ func TestTransactionCoding(t *testing.T) {
 					GasLimit: 1,
 					Data:     []byte("abcdef"),
 				},
-				GasPrice: &u256.Num2,
+				GasPrice: u256.Num2,
 			}
 		case 2:
 			// txn with non-zero access list.
 			txdata = &AccessListTx{
-				ChainID: uint256.NewInt(1),
+				ChainID: *uint256.NewInt(1),
 				LegacyTx: LegacyTx{
 					CommonTx: CommonTx{
 						Nonce:    i,
@@ -474,14 +474,14 @@ func TestTransactionCoding(t *testing.T) {
 						GasLimit: 123457,
 						Data:     []byte("abcdef"),
 					},
-					GasPrice: uint256.NewInt(10),
+					GasPrice: *uint256.NewInt(10),
 				},
 				AccessList: accesses,
 			}
 		case 3:
 			// txn with empty access list.
 			txdata = &AccessListTx{
-				ChainID: uint256.NewInt(1),
+				ChainID: *uint256.NewInt(1),
 				LegacyTx: LegacyTx{
 					CommonTx: CommonTx{
 						Nonce:    i,
@@ -489,19 +489,19 @@ func TestTransactionCoding(t *testing.T) {
 						GasLimit: 123457,
 						Data:     []byte("abcdef"),
 					},
-					GasPrice: uint256.NewInt(10),
+					GasPrice: *uint256.NewInt(10),
 				},
 			}
 		case 4:
 			// Contract creation with access list.
 			txdata = &AccessListTx{
-				ChainID: uint256.NewInt(1),
+				ChainID: *uint256.NewInt(1),
 				LegacyTx: LegacyTx{
 					CommonTx: CommonTx{
 						Nonce:    i,
 						GasLimit: 123457,
 					},
-					GasPrice: uint256.NewInt(10),
+					GasPrice: *uint256.NewInt(10),
 				},
 				AccessList: accesses,
 			}
@@ -663,50 +663,21 @@ func newRandBlobTx() *BlobTx {
 			Nonce:    rand.Uint64(),
 			GasLimit: rand.Uint64(),
 			To:       randAddr(),
-			Value:    uint256.NewInt(rand.Uint64()),
+			Value:    *uint256.NewInt(rand.Uint64()),
 			Data:     randData(),
 			V:        uint256.Int{},
 			R:        *uint256.NewInt(rand.Uint64()),
 			S:        *uint256.NewInt(rand.Uint64()),
 		},
-		ChainID:    uint256.NewInt(rand.Uint64()),
-		TipCap:     uint256.NewInt(rand.Uint64()),
-		FeeCap:     uint256.NewInt(rand.Uint64()),
+		ChainID:    *uint256.NewInt(rand.Uint64()),
+		TipCap:     *uint256.NewInt(rand.Uint64()),
+		FeeCap:     *uint256.NewInt(rand.Uint64()),
 		AccessList: randAccessList(),
 	},
-		MaxFeePerBlobGas:    uint256.NewInt(rand.Uint64()),
+		MaxFeePerBlobGas:    *uint256.NewInt(rand.Uint64()),
 		BlobVersionedHashes: randHashes(randIntInRange(1, 6)),
 	}
 	return stx
-}
-
-func printSTX(stx *BlobTx) {
-	fmt.Println("--BlobTx")
-	fmt.Printf("ChainID: %v\n", stx.ChainID)
-	fmt.Printf("Nonce: %v\n", stx.Nonce)
-	fmt.Printf("MaxPriorityFeePerGas: %v\n", stx.TipCap)
-	fmt.Printf("MaxFeePerGas: %v\n", stx.FeeCap)
-	fmt.Printf("Gas: %v\n", stx.GasLimit)
-	fmt.Printf("To: %v\n", stx.To)
-	fmt.Printf("Value: %v\n", stx.Value)
-	fmt.Printf("Data: %v\n", stx.Data)
-	fmt.Printf("AccessList: %v\n", stx.AccessList)
-	fmt.Printf("MaxFeePerBlobGas: %v\n", stx.MaxFeePerBlobGas)
-	fmt.Printf("BlobVersionedHashes: %v\n", stx.BlobVersionedHashes)
-	fmt.Printf("V: %v\n", stx.V)
-	fmt.Printf("R: %v\n", stx.R)
-	fmt.Printf("S: %v\n", stx.S)
-	fmt.Println("-----")
-	fmt.Println()
-}
-
-func printSTXW(txw *BlobTxWrapper) {
-	fmt.Println("--BlobTxWrapper")
-	printSTX(&txw.Tx)
-	fmt.Printf("Commitments LEN: %v\n", txw.Commitments)
-	fmt.Printf("Proofs LEN: %v\n", txw.Proofs)
-	fmt.Println("-----")
-	fmt.Println()
 }
 
 func randByte() byte {
@@ -753,7 +724,7 @@ func newRandBlobWrapper() *BlobTxWrapper {
 	btxw := newRandBlobTx()
 	l := len(btxw.BlobVersionedHashes)
 	return &BlobTxWrapper{
-		Tx:          *btxw, //nolint
+		Tx:          btxw.copyData(),
 		Commitments: newRandCommitments(l),
 		Blobs:       newRandBlobs(l),
 		Proofs:      newRandProofs(l),
@@ -795,6 +766,9 @@ func TestBlobTxEncodeDecode(t *testing.T) {
 }
 
 func TestShortUnwrap(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	blobTxRlp, _ := MakeBlobTxnRlp()
 	shortRlp, err := UnwrapTxPlayloadRlp(blobTxRlp)
 	if err != nil {
@@ -817,6 +791,9 @@ func TestShortUnwrap(t *testing.T) {
 }
 
 func TestV1BlobTxnUnwrap(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	blobTxRlp, _ := MakeV1WrappedBlobTxnRlp()
 	shortRlp, err := UnwrapTxPlayloadRlp(blobTxRlp)
 	if err != nil {

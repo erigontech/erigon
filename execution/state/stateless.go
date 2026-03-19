@@ -85,6 +85,14 @@ func (s *Stateless) SetTrace(trace bool, _ string) {
 	s.trace = trace
 }
 
+func (s *Stateless) Trace() bool {
+	return s.trace
+}
+
+func (s *Stateless) TracePrefix() string {
+	return ""
+}
+
 // SetBlockNr changes the block number associated with this
 func (s *Stateless) SetBlockNr(blockNr uint64) {
 	s.blockNr = blockNr
@@ -323,16 +331,9 @@ func (s *Stateless) CheckRoot(expected common.Hash) error {
 
 // Finalize the execution of a block and computes the resulting state root
 func (s *Stateless) Finalize() common.Hash {
-	// The following map is to prevent repeated clearouts of the storage
-	alreadyCreated := make(map[common.Hash]struct{})
 	// New contracts are being created at these addresses. Therefore, we need to clear the storage items
 	// that might be remaining in the trie and figure out the next incarnations
 	for addrHash := range s.created {
-		// Prevent repeated storage clearouts
-		if _, ok := alreadyCreated[addrHash]; ok {
-			continue
-		}
-		alreadyCreated[addrHash] = struct{}{}
 		if account, ok := s.accountUpdates[addrHash]; ok && account != nil {
 			account.Root = trie.EmptyRoot
 		}

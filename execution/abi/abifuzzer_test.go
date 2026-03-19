@@ -64,7 +64,7 @@ var (
 		"bytes32", "bytes"}
 )
 
-func unpackPack(abi ABI, method string, input []byte) ([]interface{}, bool) {
+func unpackPack(abi ABI, method string, input []byte) ([]any, bool) {
 	if out, err := abi.Unpack(method, input); err == nil {
 		_, err := abi.Pack(method, out...)
 		if err != nil {
@@ -80,9 +80,9 @@ func unpackPack(abi ABI, method string, input []byte) ([]interface{}, bool) {
 	return nil, false
 }
 
-func packUnpack(abi ABI, method string, input *[]interface{}) bool {
+func packUnpack(abi ABI, method string, input *[]any) bool {
 	if packed, err := abi.Pack(method, input); err == nil {
-		outptr := reflect.New(reflect.TypeFor[*[]interface{}]())
+		outptr := reflect.New(reflect.TypeFor[*[]any]())
 		err := abi.UnpackIntoInterface(outptr.Interface(), method, packed)
 		if err != nil {
 			panic(err)

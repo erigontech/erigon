@@ -25,7 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func EnsureGobable(t *testing.T, src, dst interface{}) {
+func EnsureGobable(t *testing.T, src, dst any) {
 	t.Helper()
 	buff := bytes.Buffer{}
 	err := gob.NewEncoder(&buff).Encode(src)

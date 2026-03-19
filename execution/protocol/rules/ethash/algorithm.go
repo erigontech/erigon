@@ -20,6 +20,7 @@
 package ethash
 
 import (
+	"crypto/subtle"
 	"encoding/binary"
 	"hash"
 	"math/big"
@@ -30,10 +31,10 @@ import (
 	"time"
 	"unsafe"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/bitutil"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
@@ -163,7 +164,7 @@ func seedHashOld(block uint64) []byte {
 	if block < epochLength {
 		return seed
 	}
-	keccak256 := makeHasher(sha3.NewLegacyKeccak256())
+	keccak256 := makeHasher(keccak.NewFastKeccak())
 	for i := 0; i < int(block/epochLength); i++ {
 		keccak256(seed, seed)
 	}
@@ -239,7 +240,7 @@ func generateCache(dest []uint32, epoch uint64, seed []byte) {
 				dstOff = j * hashBytes
 				xorOff = (binary.LittleEndian.Uint32(cache[dstOff:]) % uint32(rows)) * hashBytes
 			)
-			bitutil.XORBytes(temp, cache[srcOff:srcOff+hashBytes], cache[xorOff:xorOff+hashBytes])
+			subtle.XORBytes(temp, cache[srcOff:srcOff+hashBytes], cache[xorOff:xorOff+hashBytes])
 			keccak512(cache[dstOff:], temp)
 
 			atomic.AddUint32(&progress, 1)
@@ -282,13 +283,13 @@ func fnvHash32(mix []uint32, data []uint32) {
 }
 
 var bytes64Pool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		buf := make([]byte, hashBytes)
 		return &buf
 	},
 }
 var bytes40Pool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		buf := make([]byte, 40)
 		return &buf
 	},

@@ -295,7 +295,7 @@ func getFileRow(file diaglib.SegmentDownloadStatistics) table.Row {
 }
 
 func getPeersRows(peers []diaglib.SegmentPeer) []table.Row {
-	rows := make([]table.Row, 0)
+	rows := make([]table.Row, 0, len(peers))
 
 	for _, peer := range peers {
 		row := table.Row{

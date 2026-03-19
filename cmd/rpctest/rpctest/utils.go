@@ -649,7 +649,7 @@ func compareProofs(proof, gethProof *EthGetProof) bool {
 	return equal
 }
 
-func post(client *http.Client, url, request string, response interface{}) error {
+func post(client *http.Client, url, request string, response any) error {
 	//fmt.Printf("Request=%s\n", request)
 	//log.Info("Getting", "url", url, "request", request)
 	//start := time.Now()

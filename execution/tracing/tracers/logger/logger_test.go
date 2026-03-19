@@ -51,19 +51,19 @@ func (d *dummyContractRef) SetNonce(uint64)            {}
 func (d *dummyContractRef) Balance() *big.Int          { return new(big.Int) }
 
 func TestStoreCapture(t *testing.T) {
-	c := vm.NewJumpDestCache(128)
+	//c := vm.NewJumpDestCache(128)
 	ibs := state.New(state.NewNoopReader())
 	ibs.AddRefund(1337)
 
 	var (
 		logger   = NewStructLogger(nil)
 		evm      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.TestChainConfig, vm.Config{Tracer: logger.Hooks()})
-		contract = *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}, c)
+		contract = *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
 	)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x0, byte(vm.SSTORE)}
 	var index common.Hash
 	logger.OnTxStart(evm.GetVMContext(), nil, accounts.ZeroAddress)
-	_, _, err := evm.Interpreter().Run(contract, 100000, []byte{}, false)
+	_, _, err := evm.Run(contract, 100000, []byte{}, false)
 	if err != nil {
 		t.Fatal(err)
 	}

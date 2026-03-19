@@ -23,25 +23,12 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"sync"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/rlp"
 )
-
-type encodingBuf [32]byte
-
-var pooledBuf = sync.Pool{
-	New: func() interface{} { return new(encodingBuf) },
-}
-
-func newEncodingBuf() *encodingBuf {
-	b := pooledBuf.Get().(*encodingBuf)
-	*b = encodingBuf([32]byte{}) // reset, do we need to?
-	return b
-}
 
 //go:generate gencodec -type Withdrawal -field-override withdrawalMarshaling -out gen_withdrawal_json.go
 
@@ -56,12 +43,9 @@ type Withdrawal struct {
 
 func (obj *Withdrawal) EncodingSize() int {
 	encodingSize := 21 /* Address */
-	encodingSize++
-	encodingSize += rlp.IntLenExcludingHead(obj.Index)
-	encodingSize++
-	encodingSize += rlp.IntLenExcludingHead(obj.Validator)
-	encodingSize++
-	encodingSize += rlp.IntLenExcludingHead(obj.Amount)
+	encodingSize += rlp.U64Len(obj.Index)
+	encodingSize += rlp.U64Len(obj.Validator)
+	encodingSize += rlp.U64Len(obj.Amount)
 	return encodingSize
 }
 
@@ -100,16 +84,16 @@ func (obj *Withdrawal) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	if obj.Index, err = s.Uint(); err != nil {
+	if obj.Index, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read Index: %w", err)
 	}
-	if obj.Validator, err = s.Uint(); err != nil {
+	if obj.Validator, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read Validator: %w", err)
 	}
 	if err = s.ReadBytes(obj.Address[:]); err != nil {
 		return fmt.Errorf("read Address: %w", err)
 	}
-	if obj.Amount, err = s.Uint(); err != nil {
+	if obj.Amount, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read Amount: %w", err)
 	}
 

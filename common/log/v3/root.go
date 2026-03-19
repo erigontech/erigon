@@ -23,13 +23,13 @@ func init() {
 		StderrHandler = StreamHandler(colorable.NewColorableStderr(), TerminalFormat())
 	}
 
-	root = &logger{[]interface{}{}, new(swapHandler)}
+	root = &logger{[]any{}, new(swapHandler)}
 	root.SetHandler(LvlFilterHandler(LvlWarn, StdoutHandler))
 }
 
 // New returns a new logger with the given context.
 // New is a convenient alias for Root().New
-func New(ctx ...interface{}) Logger {
+func New(ctx ...any) Logger {
 	return root.New(ctx...)
 }
 
@@ -43,43 +43,43 @@ func Root() Logger {
 // runtime.Caller(2) always refers to the call site in client code.
 
 // Trace is a convenient alias for Root().Trace
-func Trace(msg string, ctx ...interface{}) {
+func Trace(msg string, ctx ...any) {
 	root.write(msg, LvlTrace, ctx)
 }
 
 // Debug is a convenient alias for Root().Debug
-func Debug(msg string, ctx ...interface{}) {
+func Debug(msg string, ctx ...any) {
 	root.write(msg, LvlDebug, ctx)
 }
 
 // Info is a convenient alias for Root().Info
-func Info(msg string, ctx ...interface{}) {
+func Info(msg string, ctx ...any) {
 	root.write(msg, LvlInfo, ctx)
 }
 
 // Warn is a convenient alias for Root().Warn
-func Warn(msg string, ctx ...interface{}) {
+func Warn(msg string, ctx ...any) {
 	root.write(msg, LvlWarn, ctx)
 }
 
 // Error is a convenient alias for Root().Error
-func Error(msg string, ctx ...interface{}) {
+func Error(msg string, ctx ...any) {
 	root.write(msg, LvlError, ctx)
 }
 
 // Crit is a convenient alias for Root().Crit
-func Crit(msg string, ctx ...interface{}) {
+func Crit(msg string, ctx ...any) {
 	root.write(msg, LvlCrit, ctx)
 }
 
 // Log method to route configurable log level
-func Log(level Lvl, msg string, ctx ...interface{}) {
+func Log(level Lvl, msg string, ctx ...any) {
 	root.write(msg, level, ctx)
 }
 
 // SetRootHandler recreates root logger and set h as multihandler along with existed root handler
 func SetRootHandler(h Handler) {
 	oldHandler := root.GetHandler()
-	root = &logger{[]interface{}{}, new(swapHandler)}
+	root = &logger{[]any{}, new(swapHandler)}
 	root.SetHandler(MultiHandler(oldHandler, h))
 }

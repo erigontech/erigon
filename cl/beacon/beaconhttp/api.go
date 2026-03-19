@@ -131,6 +131,11 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 			for key, value := range beaconResponse.Headers() {
 				w.Header().Set(key, value)
 			}
+			// If the JSON body includes "version", also expose it via the standard header.
+			// Many consumers rely on this header for fork-specific types.
+			if beaconResponse.Version != nil && w.Header().Get("Eth-Consensus-Version") == "" {
+				w.Header().Set("Eth-Consensus-Version", beaconResponse.Version.String())
+			}
 		}
 		switch {
 		case contentType == "*/*", contentType == "", strings.Contains(contentType, "text/html"), strings.Contains(contentType, "application/json"):
@@ -170,7 +175,7 @@ func isNil[T any](t T) bool {
 	v := reflect.ValueOf(t)
 	kind := v.Kind()
 	// Must be one of these types to be nillable
-	return (kind == reflect.Ptr ||
+	return (kind == reflect.Pointer ||
 		kind == reflect.Interface ||
 		kind == reflect.Slice ||
 		kind == reflect.Map ||

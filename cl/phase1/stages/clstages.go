@@ -49,7 +49,6 @@ type Cfg struct {
 	beaconCfg               *clparams.BeaconChainConfig
 	executionClient         execution_client.ExecutionEngine
 	state                   *state.CachingBeaconState
-	gossipManager           *network2.GossipManager
 	forkChoice              *forkchoice.ForkChoiceStore
 	indiciesDB              kv.RwDB
 	dirs                    datadir.Dirs
@@ -61,6 +60,7 @@ type Cfg struct {
 	sn                      *freezeblocks.CaplinSnapshots
 	blobStore               blob_storage.BlobStorage
 	peerDas                 das.PeerDas
+	blobDownloader          *network2.BlobHistoryDownloader
 	attestationDataProducer attestation_producer.AttestationDataProducer
 	caplinConfig            clparams.CaplinConfig
 	hasDownloaded           bool
@@ -76,13 +76,13 @@ type Args struct {
 }
 
 func ClStagesCfg(
+	ctx context.Context,
 	rpc *rpc.BeaconRpcP2P,
 	antiquary *antiquary.Antiquary,
 	ethClock eth_clock.EthereumClock,
 	beaconCfg *clparams.BeaconChainConfig,
 	state *state.CachingBeaconState,
 	executionClient execution_client.ExecutionEngine,
-	gossipManager *network2.GossipManager,
 	forkChoice *forkchoice.ForkChoiceStore,
 	indiciesDB kv.RwDB,
 	sn *freezeblocks.CaplinSnapshots,
@@ -96,6 +96,21 @@ func ClStagesCfg(
 	attestationDataProducer attestation_producer.AttestationDataProducer,
 	peerDas das.PeerDas,
 ) *Cfg {
+	blobDownloader := network2.NewBlobHistoryDownloader(
+		ctx,
+		beaconCfg,
+		rpc,
+		indiciesDB,
+		blobStore,
+		blockReader,
+		sn,
+		forkChoice,
+		forkChoice,
+		caplinConfig.ArchiveBlobs,
+		caplinConfig.ImmediateBlobsBackfilling,
+		log.Root(),
+	)
+
 	return &Cfg{
 		rpc:                     rpc,
 		antiquary:               antiquary,
@@ -104,17 +119,17 @@ func ClStagesCfg(
 		beaconCfg:               beaconCfg,
 		state:                   state,
 		executionClient:         executionClient,
-		gossipManager:           gossipManager,
 		forkChoice:              forkChoice,
 		dirs:                    dirs,
 		indiciesDB:              indiciesDB,
 		sn:                      sn,
 		blockReader:             blockReader,
 		peerDas:                 peerDas,
+		blobDownloader:          blobDownloader,
 		syncedData:              syncedData,
 		emitter:                 emitters,
 		blobStore:               blobStore,
-		blockCollector:          block_collector.NewBlockCollector(log.Root(), executionClient, beaconCfg, syncBackLoopLimit, dirs.Tmp),
+		blockCollector:          block_collector.NewPersistentBlockCollector(log.Root(), executionClient, beaconCfg, syncBackLoopLimit, dirs.CaplinHistory),
 		attestationDataProducer: attestationDataProducer,
 	}
 }
@@ -127,12 +142,20 @@ const (
 	ForkChoice               StageName = "ForkChoice"
 	CleanupAndPruning        StageName = "CleanupAndPruning"
 	SleepForSlot             StageName = "SleepForSlot"
+	WaitForPeers             StageName = "WaitForPeers"
 	DownloadHistoricalBlocks StageName = "DownloadHistoricalBlocks"
 )
 
 func MetaCatchingUp(args Args) StageName {
 	if !args.hasDownloaded {
 		return DownloadHistoricalBlocks
+	}
+	// If we have no peers, sleep until the next slot rather than entering sync
+	// stages that will fail. This avoids CPU-burning retry loops when peer
+	// discovery has not completed yet (common on Gnosis with 5-second slots).
+	if args.peers == 0 {
+		log.Debug("[Caplin] no peers available, waiting for peer discovery before syncing")
+		return WaitForPeers
 	}
 	if args.seenEpoch < args.targetEpoch {
 		return ForwardSync
@@ -250,7 +273,7 @@ func ConsensusClStages(ctx context.Context,
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc, cfg.sn, cfg.executionClient, cfg.indiciesDB)
 
-					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.beaconCfg, cfg.caplinConfig, false, startingRoot, startingSlot, cfg.dirs.Tmp, 600*time.Millisecond, cfg.blockCollector, cfg.blockReader, cfg.blobStore, logger, cfg.forkChoice), context.Background(), logger); err != nil {
+					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.beaconCfg, cfg.caplinConfig, false, startingRoot, startingSlot, cfg.dirs.Tmp, 600*time.Millisecond, cfg.blockCollector, cfg.blockReader, cfg.blobStore, logger, cfg.forkChoice, cfg.blobDownloader), context.Background(), logger); err != nil {
 						cfg.hasDownloaded = false
 						return err
 					}
@@ -298,6 +321,24 @@ func ConsensusClStages(ctx context.Context,
 					return SleepForSlot
 				},
 				ActionFunc: cleanupAndPruning,
+			},
+			WaitForPeers: {
+				Description: `brief wait for peer discovery when no peers are available`,
+				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
+					if x := MetaCatchingUp(args); x != "" {
+						return x
+					}
+					return ChainTipSync
+				},
+				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
+					// Wait 1 second before re-checking peers. Short enough to react
+					// quickly once peers appear, long enough to avoid busy-looping.
+					select {
+					case <-time.After(1 * time.Second):
+					case <-ctx.Done():
+					}
+					return nil
+				},
 			},
 			SleepForSlot: {
 				Description: `sleep until the next slot`,

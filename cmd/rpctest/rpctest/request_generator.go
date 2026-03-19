@@ -24,9 +24,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/valyala/fastjson"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/valyala/fastjson"
 )
 
 type CallResult struct {
@@ -302,6 +303,28 @@ func (g *RequestGenerator) ethCall(from common.Address, to *common.Address, gas 
 	return sb.String()
 }
 
+func (g *RequestGenerator) ethEstimateGas(from common.Address, to *common.Address, gas *hexutil.Big, gasPrice *hexutil.Big, value *hexutil.Big, data hexutil.Bytes) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "eth_estimateGas", "params": [{"from":"0x%x"`, from)
+	if to != nil {
+		fmt.Fprintf(&sb, `,"to":"0x%x"`, *to)
+	}
+	if gas != nil {
+		fmt.Fprintf(&sb, `,"gas":"%s"`, gas)
+	}
+	if gasPrice != nil {
+		fmt.Fprintf(&sb, `,"gasPrice":"%s"`, gasPrice)
+	}
+	if len(data) > 0 {
+		fmt.Fprintf(&sb, `,"data":"%s"`, data)
+	}
+	if value != nil {
+		fmt.Fprintf(&sb, `,"value":"%s"`, value)
+	}
+	fmt.Fprintf(&sb, `}], "id":%d}`, g.reqID.Add(1))
+	return sb.String()
+}
+
 func (g *RequestGenerator) ethCreateAccessList(from common.Address, to *common.Address, gas *hexutil.Big, gasPrice *hexutil.Big, value *hexutil.Big, data hexutil.Bytes, bn uint64) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "eth_createAccessList", "params": [{"from":"0x%x"`, from)
@@ -362,7 +385,7 @@ var client = &http.Client{
 	Timeout: 600 * time.Second, // Per-request timeout
 }
 
-func (g *RequestGenerator) call(target string, method, body string, response interface{}) CallResult {
+func (g *RequestGenerator) call(target string, method, body string, response any) CallResult {
 	start := time.Now()
 	err := post(client, routes[target], body, response)
 	return CallResult{
@@ -394,11 +417,11 @@ func (g *RequestGenerator) call2(target string, method, body string) CallResult 
 	}
 }
 
-func (g *RequestGenerator) Geth(method, body string, response interface{}) CallResult {
+func (g *RequestGenerator) Geth(method, body string, response any) CallResult {
 	return g.call(Geth, method, body, response)
 }
 
-func (g *RequestGenerator) Erigon(method, body string, response interface{}) CallResult {
+func (g *RequestGenerator) Erigon(method, body string, response any) CallResult {
 	return g.call(Erigon, method, body, response)
 }
 

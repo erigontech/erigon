@@ -16,6 +16,7 @@ import (
 	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	gossipmgr "github.com/erigontech/erigon/cl/phase1/network/gossip"
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
@@ -55,6 +56,7 @@ type peerdas struct {
 	blobStorage       blob_storage.BlobStorage
 	sentinel          sentinelproto.SentinelClient
 	ethClock          eth_clock.EthereumClock
+	gossipManager     gossipmgr.Gossip
 	recoverBlobsQueue chan recoverBlobsRequest
 
 	recoveringMutex   sync.Mutex
@@ -73,6 +75,7 @@ func NewPeerDas(
 	nodeID enode.ID,
 	ethClock eth_clock.EthereumClock,
 	peerDasState *peerdasstate.PeerDasState,
+	gossipManager gossipmgr.Gossip,
 ) PeerDas {
 	kzg.InitKZGCtx()
 	p := &peerdas{
@@ -85,6 +88,7 @@ func NewPeerDas(
 		blobStorage:       blobStorage,
 		sentinel:          sentinel,
 		ethClock:          ethClock,
+		gossipManager:     gossipManager,
 		recoverBlobsQueue: make(chan recoverBlobsRequest, 128),
 
 		recoveringMutex:   sync.Mutex{},
@@ -158,11 +162,10 @@ func (d *peerdas) resubscribeGossip() {
 	if d.IsArchivedMode() {
 		// subscribe to all subnets
 		for subnet := range d.beaconConfig.DataColumnSidecarSubnetCount {
-			if _, err := d.sentinel.SetSubscribeExpiry(context.Background(), &sentinelproto.RequestSubscribeExpiry{
-				Topic:          gossip.TopicNameDataColumnSidecar(subnet),
-				ExpiryUnixSecs: uint64(time.Unix(0, math.MaxInt64).Unix()),
-			}); err != nil {
-				log.Warn("[peerdas] failed to set subscribe expiry", "err", err, "subnet", subnet)
+			topicName := gossip.TopicNameDataColumnSidecar(subnet)
+			expiry := time.Unix(0, math.MaxInt64)
+			if err := d.gossipManager.SubscribeWithExpiry(topicName, expiry); err != nil {
+				log.Warn("[peerdas] failed to subscribe to column sidecar subnet", "err", err, "subnet", subnet)
 			} else {
 				log.Debug("[peerdas] subscribed to column sidecar subnet", "subnet", subnet)
 			}
@@ -178,11 +181,10 @@ func (d *peerdas) resubscribeGossip() {
 	}
 	for column := range custodyColumns {
 		subnet := ComputeSubnetForDataColumnSidecar(column)
-		if _, err := d.sentinel.SetSubscribeExpiry(context.Background(), &sentinelproto.RequestSubscribeExpiry{
-			Topic:          gossip.TopicNameDataColumnSidecar(subnet),
-			ExpiryUnixSecs: uint64(time.Unix(0, math.MaxInt64).Unix()),
-		}); err != nil {
-			log.Warn("[peerdas] failed to set subscribe expiry", "err", err, "column", column, "subnet", subnet)
+		topicName := gossip.TopicNameDataColumnSidecar(subnet)
+		expiry := time.Unix(0, math.MaxInt64)
+		if err := d.gossipManager.SubscribeWithExpiry(topicName, expiry); err != nil {
+			log.Warn("[peerdas] failed to subscribe to column sidecar", "err", err, "column", column, "subnet", subnet)
 		} else {
 			log.Debug("[peerdas] subscribed to column sidecar", "column", column, "subnet", subnet)
 		}
@@ -526,7 +528,7 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 
 	begin := time.Now()
 	defer func() {
-		slots := []uint64{}
+		slots := make([]uint64, 0, len(blocks))
 		for _, block := range blocks {
 			slots = append(slots, block.Block.Slot)
 		}
@@ -796,7 +798,7 @@ func initializeDownloadRequest(
 func (d *downloadRequest) remainingEntries() []downloadTableEntry {
 	d.tableMutex.RLock()
 	defer d.tableMutex.RUnlock()
-	remaining := []downloadTableEntry{}
+	remaining := make([]downloadTableEntry, 0, len(d.downloadTable))
 	for entry := range d.downloadTable {
 		remaining = append(remaining, entry)
 	}

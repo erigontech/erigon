@@ -48,19 +48,14 @@ func GetMemoryCopyPadded(m []byte, offset, size int64) ([]byte, error) {
 	return cpy, nil
 }
 
-func memoryCopy(m []byte, offset, size int64) (cpy []byte) {
+func memoryCopy(m []byte, offset, size int64) []byte {
 	if size == 0 {
 		return nil
 	}
 
-	if len(m) > int(offset) {
-		cpy = make([]byte, size)
-		copy(cpy, m[offset:offset+size])
-
-		return
-	}
-
-	return
+	cpy := make([]byte, size)
+	copy(cpy, m[offset:offset+size])
+	return cpy
 }
 
 func MemoryPtr(m []byte, offset, size int64) []byte {

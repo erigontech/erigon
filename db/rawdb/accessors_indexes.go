@@ -28,14 +28,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-// TxLookupEntry is a positional metadata to help looking up the data content of
-// a transaction or receipt given only its hash.
-type TxLookupEntry struct {
-	BlockHash  common.Hash
-	BlockIndex uint64
-	Index      uint64
-}
-
 // ReadTxLookupEntry retrieves the positional metadata associated with a transaction
 // hash to allow retrieving the transaction or receipt by hash.
 func ReadTxLookupEntry(db kv.Getter, txnHash common.Hash) (blockNumber *uint64, txNum *uint64, err error) {

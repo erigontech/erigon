@@ -32,7 +32,7 @@ func newPublicKeyFromBytes(b []byte, loadInCache bool) (PublicKey, error) {
 		return nil, fmt.Errorf("bls(public): invalid key length. should be %d", publicKeyLength)
 	}
 
-	cachedAffine := pkCache.getAffineFromCache(b)
+	cachedAffine := getAffineFromCache(b)
 	if cachedAffine != nil {
 		return cachedAffine, nil
 	}
@@ -47,7 +47,7 @@ func newPublicKeyFromBytes(b []byte, loadInCache bool) (PublicKey, error) {
 		return nil, ErrInfinitePublicKey
 	}
 	if loadInCache {
-		pkCache.loadAffineIntoCache(b, p)
+		loadAffineIntoCache(b, p)
 	}
 
 	return p, nil

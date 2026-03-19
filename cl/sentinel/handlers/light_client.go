@@ -36,12 +36,14 @@ func (c *ConsensusHandlers) optimisticLightClientUpdateHandler(s network.Stream)
 		return err
 	}
 
-	prefix := append([]byte{SuccessfulResponsePrefix}, forkDigest[:]...)
+	var prefix [5]byte
+	prefix[0] = SuccessfulResponsePrefix
+	copy(prefix[1:], forkDigest[:])
 	return ssz_snappy.EncodeAndWrite(s, &cltypes.LightClientOptimisticUpdate{
 		AttestedHeader: lc.AttestedHeader,
 		SyncAggregate:  lc.SyncAggregate,
 		SignatureSlot:  lc.SignatureSlot,
-	}, prefix...)
+	}, prefix[:]...)
 }
 
 func (c *ConsensusHandlers) finalityLightClientUpdateHandler(s network.Stream) error {
@@ -54,14 +56,16 @@ func (c *ConsensusHandlers) finalityLightClientUpdateHandler(s network.Stream) e
 	if err != nil {
 		return err
 	}
-	prefix := append([]byte{SuccessfulResponsePrefix}, forkDigest[:]...)
+	var prefix [5]byte
+	prefix[0] = SuccessfulResponsePrefix
+	copy(prefix[1:], forkDigest[:])
 	return ssz_snappy.EncodeAndWrite(s, &cltypes.LightClientFinalityUpdate{
 		AttestedHeader:  lc.AttestedHeader,
 		SyncAggregate:   lc.SyncAggregate,
 		FinalizedHeader: lc.FinalizedHeader,
 		FinalityBranch:  lc.FinalityBranch,
 		SignatureSlot:   lc.SignatureSlot,
-	}, prefix...)
+	}, prefix[:]...)
 }
 
 func (c *ConsensusHandlers) lightClientBootstrapHandler(s network.Stream) error {
@@ -80,8 +84,10 @@ func (c *ConsensusHandlers) lightClientBootstrapHandler(s network.Stream) error 
 		return err
 	}
 
-	prefix := append([]byte{SuccessfulResponsePrefix}, forkDigest[:]...)
-	return ssz_snappy.EncodeAndWrite(s, lc, prefix...)
+	var prefix [5]byte
+	prefix[0] = SuccessfulResponsePrefix
+	copy(prefix[1:], forkDigest[:])
+	return ssz_snappy.EncodeAndWrite(s, lc, prefix[:]...)
 }
 
 func (c *ConsensusHandlers) lightClientUpdatesByRangeHandler(s network.Stream) error {

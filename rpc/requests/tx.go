@@ -22,15 +22,15 @@ import (
 
 type EthTxPool struct {
 	CommonResponse
-	Result interface{} `json:"result"`
+	Result any `json:"result"`
 }
 
 func (reqGen *requestGenerator) TxpoolContent() (int, int, int, error) {
 	var (
 		b       EthTxPool
-		pending map[string]interface{}
-		queued  map[string]interface{}
-		baseFee map[string]interface{}
+		pending map[string]any
+		queued  map[string]any
+		baseFee map[string]any
 	)
 
 	method, body := reqGen.txpoolContent()
@@ -42,7 +42,7 @@ func (reqGen *requestGenerator) TxpoolContent() (int, int, int, error) {
 		return 0, 0, 0, fmt.Errorf("txpool_content rpc failed: %w", b.Error)
 	}
 
-	resp, ok := b.Result.(map[string]interface{})
+	resp, ok := b.Result.(map[string]any)
 
 	if !ok {
 		return 0, 0, 0, fmt.Errorf("unexpected result type: %T", b.Result)
@@ -53,23 +53,23 @@ func (reqGen *requestGenerator) TxpoolContent() (int, int, int, error) {
 	baseFeeLen := 0
 
 	if resp["pending"] != nil {
-		pending = resp["pending"].(map[string]interface{})
+		pending = resp["pending"].(map[string]any)
 		for _, txs := range pending { // iterate over senders
-			pendingLen += len(txs.(map[string]interface{}))
+			pendingLen += len(txs.(map[string]any))
 		}
 	}
 
 	if resp["queue"] != nil {
-		queued = resp["queue"].(map[string]interface{})
+		queued = resp["queue"].(map[string]any)
 		for _, txs := range queued {
-			queuedLen += len(txs.(map[string]interface{}))
+			queuedLen += len(txs.(map[string]any))
 		}
 	}
 
 	if resp["baseFee"] != nil {
-		baseFee = resp["baseFee"].(map[string]interface{})
+		baseFee = resp["baseFee"].(map[string]any)
 		for _, txs := range baseFee {
-			baseFeeLen += len(txs.(map[string]interface{}))
+			baseFeeLen += len(txs.(map[string]any))
 		}
 	}
 

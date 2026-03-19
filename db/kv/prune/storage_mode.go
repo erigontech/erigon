@@ -89,14 +89,15 @@ func (m Mode) String() string {
 		return blockModeStr
 	}
 
-	short := archiveModeStr
+	var short strings.Builder
+	short.WriteString(archiveModeStr)
 	if m.History.toValue() != DefaultMode.History.toValue() {
-		short += fmt.Sprintf(" --prune.distance=%d", m.History.toValue())
+		short.WriteString(fmt.Sprintf(" --prune.distance=%d", m.History.toValue()))
 	}
 	if m.Blocks.toValue() != DefaultMode.Blocks.toValue() {
-		short += fmt.Sprintf(" --prune.distance.blocks=%d", m.Blocks.toValue())
+		short.WriteString(fmt.Sprintf(" --prune.distance.blocks=%d", m.Blocks.toValue()))
 	}
-	return strings.TrimLeft(short, " ")
+	return strings.TrimLeft(short.String(), " ")
 }
 
 func FromCli(pruneMode string, distanceHistory, distanceBlocks uint64) (Mode, error) {

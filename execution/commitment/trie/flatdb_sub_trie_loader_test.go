@@ -38,7 +38,6 @@ func TestCreateLoadingPrefixes(t *testing.T) {
 	acc1 := accounts.NewAccount()
 	acc1.Balance.SetUint64(12345)
 	acc1.Incarnation = 1
-	acc1.Initialised = true
 	tr.UpdateAccount(kAcc1, &acc1)
 	tr.Update(concat(kAcc1, ks1...), []byte{1, 2, 3})
 
@@ -48,7 +47,6 @@ func TestCreateLoadingPrefixes(t *testing.T) {
 	acc2 := accounts.NewAccount()
 	acc2.Balance.SetUint64(6789)
 	acc2.Incarnation = 1
-	acc2.Initialised = true
 	tr.UpdateAccount(kAcc2, &acc2)
 	tr.Update(concat(kAcc2, ks2...), []byte{4, 5, 6})
 	tr.Update(concat(kAcc2, ks22...), []byte{7, 8, 9})

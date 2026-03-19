@@ -90,6 +90,7 @@ func TestMiningBenchmark(t *testing.T) {
 	defer clean()
 
 	logger := testlog.Logger(t, log.LvlDebug)
+	// TODO: Use goroutine leak checker in Go 1.26.
 	goroutineDumpTimer := time.NewTimer(timeout - 5*time.Second)
 	defer goroutineDumpTimer.Stop()
 	go func() {
@@ -140,6 +141,7 @@ func TestMiningBenchmark(t *testing.T) {
 		t.Cleanup(func() {
 			err := stack.Close()
 			require.NoError(t, err)
+			ethBackend.Stop()
 		})
 
 		if err := stack.Start(); err != nil {

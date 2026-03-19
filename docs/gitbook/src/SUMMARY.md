@@ -19,7 +19,8 @@
 
 * [Basic Usage](fundamentals/basic-usage.md)
 * [Sync Modes](fundamentals/sync-modes.md)
-* [CLI Reference](fundamentals/configuring-erigon.md)
+* [CLI Reference](fundamentals/configuring-erigon/README.md)
+  * [NAT](fundamentals/configuring-erigon/nat.md)
 * [Supported Networks](fundamentals/supported-networks.md)
 * [Default ports](fundamentals/default-ports.md)
 * [Layer 2 Networks](fundamentals/layer-2-networks.md)
@@ -36,6 +37,7 @@
   * [TxPool](fundamentals/modules/txpool.md)
   * [Sentry](fundamentals/modules/sentry.md)
   * [Downloader](fundamentals/modules/downloader.md)
+* [MCP Server](fundamentals/mcp.md)
 * [Creating a dashboard](fundamentals/creating-a-dashboard.md)
 * [Docker Compose](fundamentals/docker-compose.md)
 * [Otterscan](fundamentals/otterscan.md)
@@ -43,20 +45,20 @@
 
 ## INTERACTING WITH ERIGON
 
-  * [RPC Service](interacting-with-erigon/README.md)
-    * [eth](interacting-with-erigon/eth.md)
-    * [erigon](interacting-with-erigon/erigon.md)
-    * [engine](interacting-with-erigon/engine.md)
-    * [web3](interacting-with-erigon/web3.md)
-    * [net](interacting-with-erigon/net.md)
-    * [debug](interacting-with-erigon/debug.md)
-    * [trace](interacting-with-erigon/trace.md)
-    * [txpool](interacting-with-erigon/txpool.md)
-    * [admin](interacting-with-erigon/admin.md)
-    * [bor](interacting-with-erigon/bor.md)
-    * [ots](interacting-with-erigon/ots.md)
-    * [internal](interacting-with-erigon/internal.md)
-    * [gRPC](interacting-with-erigon/grpc.md)
+* [RPC Service](interacting-with-erigon/README.md)
+  * [eth](interacting-with-erigon/eth.md)
+  * [erigon](interacting-with-erigon/erigon.md)
+  * [engine](interacting-with-erigon/engine.md)
+  * [web3](interacting-with-erigon/web3.md)
+  * [net](interacting-with-erigon/net.md)
+  * [debug](interacting-with-erigon/debug.md)
+  * [trace](interacting-with-erigon/trace.md)
+  * [txpool](interacting-with-erigon/txpool.md)
+  * [admin](interacting-with-erigon/admin.md)
+  * [bor](interacting-with-erigon/bor.md)
+  * [ots](interacting-with-erigon/ots.md)
+  * [internal](interacting-with-erigon/internal.md)
+  * [gRPC](interacting-with-erigon/grpc.md)
 
 ## STAKING
 

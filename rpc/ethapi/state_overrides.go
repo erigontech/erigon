@@ -32,7 +32,7 @@ import (
 
 type StateOverrides map[accounts.Address]Account
 
-func (so *StateOverrides) Override(ibs *state.IntraBlockState) error {
+func (so *StateOverrides) override(ibs *state.IntraBlockState) error {
 	for addr, account := range *so {
 		// Override account nonce.
 		if account.Nonce != nil {
@@ -84,16 +84,8 @@ func (so *StateOverrides) Override(ibs *state.IntraBlockState) error {
 	return nil
 }
 
-func (so *StateOverrides) OverrideAndCommit(ibs *state.IntraBlockState, rules *chain.Rules) error {
-	err := so.Override(ibs)
-	if err != nil {
-		return err
-	}
-	return ibs.CommitBlock(rules, state.NewNoopWriter())
-}
-
-func (so *StateOverrides) OverrideWithPrecompiles(state *state.IntraBlockState, precompiles vm.PrecompiledContracts) error {
-	err := so.Override(state)
+func (so *StateOverrides) Override(ibs *state.IntraBlockState, precompiles vm.PrecompiledContracts, rules *chain.Rules) error {
+	err := so.override(ibs)
 	if err != nil {
 		return err
 	}
@@ -123,5 +115,6 @@ func (so *StateOverrides) OverrideWithPrecompiles(state *state.IntraBlockState, 
 			delete(precompiles, addr)
 		}
 	}
-	return nil
+
+	return ibs.FinalizeTx(rules, state.NewNoopWriter())
 }

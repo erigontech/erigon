@@ -17,7 +17,6 @@
 package gossip
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 )
@@ -39,6 +38,12 @@ const (
 	TopicNamePrefixSyncCommittee     = "sync_committee_%d"
 	TopicNamePrefixDataColumnSidecar = "data_column_sidecar_%d"
 )
+
+const SSZSnappyCodec = "ssz_snappy"
+
+func IsTopicNameWithSubnet(name string) bool {
+	return IsTopicBeaconAttestation(name) || IsTopicSyncCommittee(name) || IsTopicBlobSidecar(name) || IsTopicDataColumnSidecar(name)
+}
 
 func TopicNameBlobSidecar(d uint64) string {
 	return fmt.Sprintf(TopicNamePrefixBlobSidecar, d)
@@ -69,13 +74,4 @@ func IsTopicSyncCommittee(d string) bool {
 }
 func IsTopicBeaconAttestation(d string) bool {
 	return strings.Contains(d, "beacon_attestation_")
-}
-
-func SubnetIdFromTopicBeaconAttestation(d string) (uint64, error) {
-	if !IsTopicBeaconAttestation(d) {
-		return 0, errors.New("not a beacon attestation topic")
-	}
-	var id uint64
-	_, err := fmt.Sscanf(d, TopicNamePrefixBeaconAttestation, &id)
-	return id, err
 }

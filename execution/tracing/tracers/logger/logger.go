@@ -449,7 +449,7 @@ func (t *mdLogger) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing.
 
 	if !t.cfg.DisableStack {
 		// format stack
-		var a []string
+		a := make([]string, 0, len(stack))
 		for _, elem := range stack {
 			a = append(a, elem.String())
 		}

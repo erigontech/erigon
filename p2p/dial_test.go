@@ -161,6 +161,9 @@ func TestDialSchedNetRestrict(t *testing.T) {
 
 // This test checks that static dials work and obey the limits.
 func TestDialSchedStaticDial(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 
 	config := dialConfig{
@@ -522,7 +525,7 @@ func (it *dialTestIterator) Next() bool {
 		return false
 	}
 	it.cur = it.buf[0]
-	copy(it.buf[:], it.buf[1:])
+	copy(it.buf, it.buf[1:])
 	it.buf = it.buf[:len(it.buf)-1]
 	return true
 }

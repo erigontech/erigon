@@ -372,8 +372,8 @@ func (b *BeaconBody) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(b.getSchema(false)...)
 }
 
-func (b *BeaconBody) getSchema(storage bool) []interface{} {
-	s := []interface{}{b.RandaoReveal[:], b.Eth1Data, b.Graffiti[:], b.ProposerSlashings, b.AttesterSlashings, b.Attestations, b.Deposits, b.VoluntaryExits}
+func (b *BeaconBody) getSchema(storage bool) []any {
+	s := []any{b.RandaoReveal[:], b.Eth1Data, b.Graffiti[:], b.ProposerSlashings, b.AttesterSlashings, b.Attestations, b.Deposits, b.VoluntaryExits}
 	if b.Version >= clparams.AltairVersion {
 		s = append(s, b.SyncAggregate)
 	}

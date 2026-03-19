@@ -18,6 +18,7 @@ package metrics
 
 import (
 	"fmt"
+	"strings"
 )
 
 // NewCounter registers and returns new counter with the given name.
@@ -171,14 +172,16 @@ func buildLabeledName(baseName string, labelNames, labelValues []string) string 
 	if len(labelNames) == 0 {
 		return baseName
 	}
-	baseName += "{"
-	baseName += fmt.Sprintf(`%s="%s"`, labelNames[0], labelValues[0])
+	var result strings.Builder
+	result.WriteString(baseName)
+	result.WriteString("{")
+	result.WriteString(fmt.Sprintf(`%s="%s"`, labelNames[0], labelValues[0]))
 
 	for i := 1; i < len(labelNames); i++ {
-		baseName += fmt.Sprintf(`,%s="%s"`, labelNames[i], labelValues[i])
+		result.WriteString(fmt.Sprintf(`,%s="%s"`, labelNames[i], labelValues[i]))
 	}
-	baseName += "}"
-	return baseName
+	result.WriteString("}")
+	return result.String()
 }
 
 func GetOrCreateSummaryWithLabels(name string, labelNames, labelValues []string) Summary {

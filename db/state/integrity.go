@@ -78,8 +78,9 @@ func (at *AggregatorRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx context.
 }
 
 func (dt *DomainRoTx) IntegrityDomainFilesWithKey(k []byte) (res []string, err error) {
+	hi, lo := dt.ht.iit.hashKey(k)
 	for i := len(dt.files) - 1; i >= 0; i-- {
-		_, ok, _, err := dt.getLatestFromFile(i, k)
+		_, ok, _, err := dt.getLatestFromFile(i, k, hi, lo)
 		if err != nil {
 			return res, err
 		}
@@ -180,6 +181,14 @@ func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx cont
 
 			if s.Count() == 0 {
 				continue
+			}
+			if s.Count() > 1 && s.Max() < s.Min() {
+				err := fmt.Errorf("[integrity] .ef file has unsorted sequence: Max=%d < Min=%d, count=%d, %s, %x", s.Max(), s.Min(), s.Count(), g.FileName(), common.Shorten(k, 8))
+				if failFast {
+					return err
+				} else {
+					log.Warn(err.Error())
+				}
 			}
 			if item.startTxNum > s.Min() {
 				err := fmt.Errorf("[integrity] .ef file has foreign txNum: %d > %d, %s, %x", item.startTxNum, s.Min(), g.FileName(), common.Shorten(k, 8))

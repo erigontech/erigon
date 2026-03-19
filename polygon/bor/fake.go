@@ -37,8 +37,8 @@ func NewFaker() *FakeBor {
 }
 
 func (f *FakeBor) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
+	uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
 	chain rules.ChainReader, syscall rules.SystemCall, skipReceiptsEval bool, logger log.Logger,
 ) (types.FlatRequests, error) {
-	return f.FakeEthash.Finalize(config, header, state, txs, uncles, r, withdrawals, chain, syscall, skipReceiptsEval, logger)
+	return f.FakeEthash.Finalize(config, header, state, uncles, r, withdrawals, chain, syscall, skipReceiptsEval, logger)
 }

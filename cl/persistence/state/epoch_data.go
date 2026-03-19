@@ -99,11 +99,11 @@ func (m *EpochData) ReadFrom(r io.Reader) error {
 	return ssz2.UnmarshalSSZ(buf, 0, m.getSchema()...)
 }
 
-func (m *EpochData) getSchema() []interface{} {
+func (m *EpochData) getSchema() []any {
 	if m.Version < clparams.FuluVersion {
-		return []interface{}{&m.TotalActiveBalance, m.JustificationBits, &m.CurrentJustifiedCheckpoint, &m.PreviousJustifiedCheckpoint, &m.FinalizedCheckpoint, &m.HistoricalSummariesLength, &m.HistoricalRootsLength}
+		return []any{&m.TotalActiveBalance, m.JustificationBits, &m.CurrentJustifiedCheckpoint, &m.PreviousJustifiedCheckpoint, &m.FinalizedCheckpoint, &m.HistoricalSummariesLength, &m.HistoricalRootsLength}
 	}
-	return []interface{}{
+	return []any{
 		&m.TotalActiveBalance,
 		m.JustificationBits,
 		&m.CurrentJustifiedCheckpoint,

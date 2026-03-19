@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 // SignedBLSToExecutionChangeForGossip type represents SignedBLSToExecutionChange with the gossip data where it's coming from.
@@ -66,16 +67,20 @@ func NewBLSToExecutionChangeService(
 	}
 }
 
+func (s *blsToExecutionChangeService) Names() []string {
+	return []string{gossip.TopicNameBlsToExecutionChange}
+}
+
 func (s *blsToExecutionChangeService) IsMyGossipMessage(name string) bool {
 	return name == gossip.TopicNameBlsToExecutionChange
 }
 
-func (s *blsToExecutionChangeService) DecodeGossipMessage(data *sentinelproto.GossipData, version clparams.StateVersion) (*SignedBLSToExecutionChangeForGossip, error) {
+func (s *blsToExecutionChangeService) DecodeGossipMessage(pid peer.ID, data []byte, version clparams.StateVersion) (*SignedBLSToExecutionChangeForGossip, error) {
 	obj := &SignedBLSToExecutionChangeForGossip{
-		Receiver:                   copyOfPeerData(data),
+		Receiver:                   &sentinelproto.Peer{Pid: pid.String()},
 		SignedBLSToExecutionChange: &cltypes.SignedBLSToExecutionChange{},
 	}
-	if err := obj.SignedBLSToExecutionChange.DecodeSSZ(data.Data, int(version)); err != nil {
+	if err := obj.SignedBLSToExecutionChange.DecodeSSZ(data, int(version)); err != nil {
 		return nil, err
 	}
 	return obj, nil
@@ -86,7 +91,7 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 	// [IGNORE] The signed_bls_to_execution_change is the first valid signed bls to execution change received
 	// for the validator with index signed_bls_to_execution_change.message.validator_index.
 	if s.operationsPool.BLSToExecutionChangesPool.Has(msg.SignedBLSToExecutionChange.Signature) {
-		return ErrIgnore
+		return nil
 	}
 	change := msg.SignedBLSToExecutionChange.Message
 
@@ -157,5 +162,5 @@ func (s *blsToExecutionChangeService) ProcessMessage(ctx context.Context, subnet
 	// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves
 	// in BatchSignatureVerifier service. After validating signatures, if they are valid we will publish the
 	// gossip ourselves or ban the peer which sent that particular invalid signature.
-	return ErrIgnore
+	return nil
 }

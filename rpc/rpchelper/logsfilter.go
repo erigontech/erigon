@@ -17,6 +17,7 @@
 package rpchelper
 
 import (
+	"slices"
 	"sync"
 
 	"github.com/erigontech/erigon/common"
@@ -44,12 +45,6 @@ type LogsFilter struct {
 	topics         *concurrent.SyncMap[common.Hash, int]
 	topicsOriginal [][]common.Hash // Original topic filters to be applied before distributing to individual subscribers
 	sender         Sub[*types.Log] // nil for aggregate subscriber, for appropriate stream server otherwise
-}
-
-// Send sends a log to the subscriber represented by the LogsFilter.
-// It forwards the log to the subscriber's sender.
-func (l *LogsFilter) Send(lg *types.Log) {
-	l.sender.Send(lg)
 }
 
 // Close closes the sender associated with the LogsFilter.
@@ -288,14 +283,10 @@ func (a *LogsFilterAggregator) chooseTopics(filter *LogsFilter, logTopics []comm
 		return false
 	}
 	for i, sub := range filter.topicsOriginal {
-		match := len(sub) == 0 // empty rule set == wildcard
-		for _, topic := range sub {
-			if logTopics[i] == topic {
-				match = true
-				break
-			}
+		if len(sub) == 0 { // empty rule set == wildcard
+			continue // Match any topic, so continue to next position
 		}
-		if !match {
+		if !slices.Contains(sub, logTopics[i]) {
 			return false
 		}
 	}

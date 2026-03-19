@@ -38,10 +38,12 @@ func CreateAddress(a common.Address, nonce uint64) common.Address {
 	return common.BytesToAddress(crypto.Keccak256(data)[12:])
 }
 
+var createAddress2Prefix = []byte{0xff}
+
 // CreateAddress2 creates an ethereum address given the address bytes, initial
 // contract code hash and a salt.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func CreateAddress2(b common.Address, salt [32]byte, inithash accounts.CodeHash) common.Address {
 	initHashValue := inithash.Value()
-	return common.BytesToAddress(crypto.Keccak256([]byte{0xff}, b[:], salt[:], initHashValue[:])[12:])
+	return common.BytesToAddress(crypto.Keccak256(createAddress2Prefix, b[:], salt[:], initHashValue[:])[12:])
 }

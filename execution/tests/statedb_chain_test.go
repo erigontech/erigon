@@ -33,10 +33,10 @@ import (
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/contracts"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -50,11 +50,11 @@ func TestSelfDestructReceive(t *testing.T) {
 		gspec   = &types.Genesis{
 			Config: &chain.Config{
 				ChainID:               big.NewInt(1),
-				HomesteadBlock:        new(big.Int),
-				ByzantiumBlock:        new(big.Int),
-				ConstantinopleBlock:   new(big.Int),
-				TangerineWhistleBlock: new(big.Int),
-				SpuriousDragonBlock:   new(big.Int),
+				HomesteadBlock:        new(uint64),
+				ByzantiumBlock:        new(uint64),
+				ConstantinopleBlock:   new(uint64),
+				TangerineWhistleBlock: new(uint64),
+				SpuriousDragonBlock:   new(uint64),
 			},
 			Alloc: types.GenesisAlloc{
 				address.Value(): {Balance: funds},
@@ -64,7 +64,7 @@ func TestSelfDestructReceive(t *testing.T) {
 		signer = types.LatestSignerForChainID(nil)
 	)
 
-	m := mock.MockWithGenesis(t, gspec, key, false)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)

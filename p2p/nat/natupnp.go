@@ -57,25 +57,22 @@ type upnpClient interface {
 func (n *upnp) natEnabled() bool {
 	var ok bool
 	var err error
-	err1 := n.withRateLimit(func() error {
+	err = n.withRateLimit(func() error {
 		_, ok, err = n.client.GetNATRSIPStatus()
 		return err
 	})
-	return err1 == nil && err == nil && ok
+	return err == nil && ok
 }
 
 func (n *upnp) ExternalIP() (addr net.IP, err error) {
 	var ipString string
-	err1 := n.withRateLimit(func() error {
+	err = n.withRateLimit(func() error {
 		ipString, err = n.client.GetExternalIPAddress()
 		return err
 	})
 
 	if err != nil {
 		return nil, err
-	}
-	if err1 != nil {
-		return nil, err1
 	}
 	ip := net.ParseIP(ipString)
 	if ip == nil {

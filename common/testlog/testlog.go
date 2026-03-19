@@ -87,7 +87,7 @@ func Logger(t *testing.T, level log.Lvl) log.Logger {
 	return l
 }
 
-func (l *logger) Trace(msg string, ctx ...interface{}) {
+func (l *logger) Trace(msg string, ctx ...any) {
 	l.t.Helper()
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -95,7 +95,7 @@ func (l *logger) Trace(msg string, ctx ...interface{}) {
 	l.flush()
 }
 
-func (l *logger) Debug(msg string, ctx ...interface{}) {
+func (l *logger) Debug(msg string, ctx ...any) {
 	l.t.Helper()
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -103,7 +103,7 @@ func (l *logger) Debug(msg string, ctx ...interface{}) {
 	l.flush()
 }
 
-func (l *logger) Info(msg string, ctx ...interface{}) {
+func (l *logger) Info(msg string, ctx ...any) {
 	l.t.Helper()
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -111,7 +111,7 @@ func (l *logger) Info(msg string, ctx ...interface{}) {
 	l.flush()
 }
 
-func (l *logger) Warn(msg string, ctx ...interface{}) {
+func (l *logger) Warn(msg string, ctx ...any) {
 	l.t.Helper()
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -119,7 +119,7 @@ func (l *logger) Warn(msg string, ctx ...interface{}) {
 	l.flush()
 }
 
-func (l *logger) Error(msg string, ctx ...interface{}) {
+func (l *logger) Error(msg string, ctx ...any) {
 	l.t.Helper()
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -127,7 +127,7 @@ func (l *logger) Error(msg string, ctx ...interface{}) {
 	l.flush()
 }
 
-func (l *logger) Crit(msg string, ctx ...interface{}) {
+func (l *logger) Crit(msg string, ctx ...any) {
 	l.t.Helper()
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -135,7 +135,7 @@ func (l *logger) Crit(msg string, ctx ...interface{}) {
 	l.flush()
 }
 
-func (l *logger) Log(level log.Lvl, msg string, ctx ...interface{}) {
+func (l *logger) Log(level log.Lvl, msg string, ctx ...any) {
 	l.t.Helper()
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -147,7 +147,7 @@ func (l *logger) Enabled(ctx context.Context, lvl log.Lvl) bool {
 	return l.log.Enabled(ctx, lvl)
 }
 
-func (l *logger) New(ctx ...interface{}) log.Logger {
+func (l *logger) New(ctx ...any) log.Logger {
 	return &logger{l.t, l.log.New(ctx...), l.mu, l.h}
 }
 

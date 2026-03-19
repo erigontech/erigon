@@ -16,7 +16,13 @@
 
 package rlp
 
-import "io"
+import (
+	"encoding/binary"
+	"io"
+	"math/bits"
+
+	"github.com/erigontech/erigon/common"
+)
 
 // RLP-related utilities necessary for computing commitments for state root hash
 
@@ -66,33 +72,14 @@ func multiByteHeaderPrefixOfLen(l int) byte {
 func generateByteArrayLen(buffer []byte, pos int, l int) int {
 	if l < 56 {
 		buffer[pos] = byte(0x80 + l)
-		pos++
-	} else if l < 256 {
-		// len(vn) can be encoded as 1 byte
-		buffer[pos] = multiByteHeaderPrefixOfLen(1)
-		pos++
-		buffer[pos] = byte(l)
-		pos++
-	} else if l < 65536 {
-		// len(vn) is encoded as two bytes
-		buffer[pos] = multiByteHeaderPrefixOfLen(2)
-		pos++
-		buffer[pos] = byte(l >> 8)
-		pos++
-		buffer[pos] = byte(l & 255)
-		pos++
-	} else {
-		// len(vn) is encoded as three bytes
-		buffer[pos] = multiByteHeaderPrefixOfLen(3)
-		pos++
-		buffer[pos] = byte(l >> 16)
-		pos++
-		buffer[pos] = byte((l >> 8) & 255)
-		pos++
-		buffer[pos] = byte(l & 255)
-		pos++
+		return pos + 1
 	}
-	return pos
+	var tmp [8]byte
+	binary.BigEndian.PutUint64(tmp[:], uint64(l))
+	size := common.BitLenToByteLen(bits.Len64(uint64(l)))
+	buffer[pos] = multiByteHeaderPrefixOfLen(size)
+	copy(buffer[pos+1:], tmp[8-size:])
+	return pos + 1 + size
 }
 
 func generateByteArrayLenDouble(buffer []byte, pos int, l int) int {
@@ -190,13 +177,7 @@ func generateRlpPrefixLen(l int) int {
 	if l < 56 {
 		return 1
 	}
-	if l < 256 {
-		return 2
-	}
-	if l < 65536 {
-		return 3
-	}
-	return 4
+	return 1 + common.BitLenToByteLen(bits.Len64(uint64(l)))
 }
 
 // RlpSerializable is a value that can be double-RLP coded.
@@ -264,21 +245,10 @@ func GenerateStructLen(buffer []byte, l int) int {
 		buffer[0] = byte(192 + l)
 		return 1
 	}
-	if l < 256 {
-		// l can be encoded as 1 byte
-		buffer[1] = byte(l)
-		buffer[0] = byte(247 + 1)
-		return 2
-	}
-	if l < 65536 {
-		buffer[2] = byte(l & 255)
-		buffer[1] = byte(l >> 8)
-		buffer[0] = byte(247 + 2)
-		return 3
-	}
-	buffer[3] = byte(l & 255)
-	buffer[2] = byte((l >> 8) & 255)
-	buffer[1] = byte(l >> 16)
-	buffer[0] = byte(247 + 3)
-	return 4
+	var tmp [8]byte
+	binary.BigEndian.PutUint64(tmp[:], uint64(l))
+	size := common.BitLenToByteLen(bits.Len64(uint64(l)))
+	buffer[0] = byte(247 + size)
+	copy(buffer[1:], tmp[8-size:])
+	return 1 + size
 }

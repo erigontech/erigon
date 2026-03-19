@@ -22,7 +22,6 @@ package event
 import (
 	"errors"
 	"reflect"
-	"slices"
 	"sync"
 )
 
@@ -37,10 +36,10 @@ var errBadChannel = errors.New("event: Subscribe argument does not have sendable
 //
 // The zero value is ready to use.
 type Feed struct {
-	once      sync.Once        // ensures that init only runs once
-	sendLock  chan struct{}    // sendLock has a one-element buffer and is empty when held.It protects sendCases.
-	removeSub chan interface{} // interrupts Send
-	sendCases caseList         // the active set of select cases used by Send
+	once      sync.Once     // ensures that init only runs once
+	sendLock  chan struct{} // sendLock has a one-element buffer and is empty when held.It protects sendCases.
+	removeSub chan any      // interrupts Send
+	sendCases caseList      // the active set of select cases used by Send
 
 	// The inbox holds newly subscribed channels until they are added to sendCases.
 	mu    sync.Mutex
@@ -61,8 +60,9 @@ func (e feedTypeError) Error() string {
 	return "event: wrong type in " + e.op + " got " + e.got.String() + ", want " + e.want.String()
 }
 
-func (f *Feed) init() {
-	f.removeSub = make(chan interface{})
+func (f *Feed) init(etype reflect.Type) {
+	f.etype = etype
+	f.removeSub = make(chan any)
 	f.sendLock = make(chan struct{}, 1)
 	f.sendLock <- struct{}{}
 	f.sendCases = caseList{{Chan: reflect.ValueOf(f.removeSub), Dir: reflect.SelectRecv}}
@@ -73,9 +73,7 @@ func (f *Feed) init() {
 //
 // The channel should have ample buffer space to avoid blocking other subscribers.
 // Slow subscribers are not dropped.
-func (f *Feed) Subscribe(channel interface{}) Subscription {
-	f.once.Do(f.init)
-
+func (f *Feed) Subscribe(channel any) Subscription {
 	chanval := reflect.ValueOf(channel)
 	chantyp := chanval.Type()
 	if chantyp.Kind() != reflect.Chan || chantyp.ChanDir()&reflect.SendDir == 0 {
@@ -83,25 +81,18 @@ func (f *Feed) Subscribe(channel interface{}) Subscription {
 	}
 	sub := &feedSub{feed: f, channel: chanval, err: make(chan error, 1)}
 
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if !f.typecheck(chantyp.Elem()) {
+	f.once.Do(func() { f.init(chantyp.Elem()) })
+	if f.etype != chantyp.Elem() {
 		panic(feedTypeError{op: "Subscribe", got: chantyp, want: reflect.ChanOf(reflect.SendDir, f.etype)})
 	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	// Add the select case to the inbox.
 	// The next Send will add it to f.sendCases.
 	cas := reflect.SelectCase{Dir: reflect.SelectSend, Chan: chanval}
 	f.inbox = append(f.inbox, cas)
 	return sub
-}
-
-// note: callers must hold f.mu
-func (f *Feed) typecheck(typ reflect.Type) bool {
-	if f.etype == nil {
-		f.etype = typ
-		return true
-	}
-	return f.etype == typ
 }
 
 func (f *Feed) remove(sub *feedSub) {
@@ -129,22 +120,20 @@ func (f *Feed) remove(sub *feedSub) {
 
 // Send delivers to all subscribed channels simultaneously.
 // It returns the number of subscribers that the value was sent to.
-func (f *Feed) Send(value interface{}) (nsent int) {
+func (f *Feed) Send(value any) (nsent int) {
 	rvalue := reflect.ValueOf(value)
 
-	f.once.Do(f.init)
+	f.once.Do(func() { f.init(rvalue.Type()) })
+	if f.etype != rvalue.Type() {
+		panic(feedTypeError{op: "Send", got: rvalue.Type(), want: f.etype})
+	}
+
 	<-f.sendLock
 
 	// Add new cases from the inbox after taking the send lock.
 	f.mu.Lock()
 	f.sendCases = append(f.sendCases, f.inbox...)
 	f.inbox = nil
-
-	if !f.typecheck(rvalue.Type()) {
-		f.sendLock <- struct{}{}
-		f.mu.Unlock()
-		panic(feedTypeError{op: "Send", got: rvalue.Type(), want: f.etype})
-	}
 	f.mu.Unlock()
 
 	// Set the sent value on all channels.
@@ -214,7 +203,7 @@ func (sub *feedSub) Err() <-chan error {
 type caseList []reflect.SelectCase
 
 // find returns the index of a case containing the given channel.
-func (cs caseList) find(channel interface{}) int {
+func (cs caseList) find(channel any) int {
 	for i, cas := range cs {
 		if cas.Chan.Interface() == channel {
 			return i
@@ -225,7 +214,7 @@ func (cs caseList) find(channel interface{}) int {
 
 // delete removes the given case from cs.
 func (cs caseList) delete(index int) caseList {
-	return slices.Delete(cs, index, index+1)
+	return append(cs[:index], cs[index+1:]...)
 }
 
 // deactivate moves the case at index into the non-accessible portion of the cs slice.

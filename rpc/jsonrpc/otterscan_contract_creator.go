@@ -133,7 +133,8 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 		v, ok, err := tx.HistorySeek(kv.AccountsDomain, addr[:], txnID)
 		if err != nil {
 			log.Error("[rpc] Unexpected error, couldn't find changeset", "txNum", i, "addr", addr)
-			panic(err)
+			searchErr = err
+			return false
 		}
 		if !ok {
 			return false
@@ -160,14 +161,14 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 		return nil, fmt.Errorf("binary search between %d-%d doesn't find anything", nextTxnID, prevTxnID)
 	}
 
-	bn, ok, err := api._txNumReader.FindBlockNum(tx, creationTxnID)
+	bn, ok, err := api._txNumReader.FindBlockNum(ctx, tx, creationTxnID)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
 		return nil, fmt.Errorf("block not found by txnID=%d", creationTxnID)
 	}
-	minTxNum, err := api._txNumReader.Min(tx, bn)
+	minTxNum, err := api._txNumReader.Min(ctx, tx, bn)
 	if err != nil {
 		return nil, err
 	}
@@ -180,6 +181,9 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 	tracer := NewCreateTracer(ctx, accounts.InternAddress(addr))
 	if err := api.genericTracer(tx, ctx, bn, creationTxnID, txIndex, chainConfig, tracer); err != nil {
 		return nil, err
+	}
+	if !tracer.Found() {
+		return nil, fmt.Errorf("contract creator not found for address %s", addr)
 	}
 	return &ContractCreatorData{
 		Tx:      tracer.Tx.Hash(),

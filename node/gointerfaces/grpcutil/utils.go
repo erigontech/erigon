@@ -28,8 +28,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
-	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
+	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/recovery"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/codes"
@@ -70,11 +69,11 @@ func TLS(tlsCACert, tlsCertFile, tlsKeyFile string) (credentials.TransportCreden
 
 func NewServer(rateLimit uint32, creds credentials.TransportCredentials) *grpc.Server {
 	var (
-		streamInterceptors []grpc.StreamServerInterceptor
-		unaryInterceptors  []grpc.UnaryServerInterceptor
+		streamInterceptors = make([]grpc.StreamServerInterceptor, 0, 1)
+		unaryInterceptors  = make([]grpc.UnaryServerInterceptor, 0, 1)
 	)
-	streamInterceptors = append(streamInterceptors, grpc_recovery.StreamServerInterceptor())
-	unaryInterceptors = append(unaryInterceptors, grpc_recovery.UnaryServerInterceptor())
+	streamInterceptors = append(streamInterceptors, recovery.StreamServerInterceptor())
+	unaryInterceptors = append(unaryInterceptors, recovery.UnaryServerInterceptor())
 
 	//if metrics.Enabled {
 	//	streamInterceptors = append(streamInterceptors, grpc_prometheus.StreamServerInterceptor)
@@ -91,8 +90,8 @@ func NewServer(rateLimit uint32, creds credentials.TransportCredentials) *grpc.S
 			MinTime:             10 * time.Second,
 			PermitWithoutStream: true,
 		}),
-		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(streamInterceptors...)),
-		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
+		grpc.ChainStreamInterceptor(streamInterceptors...),
+		grpc.ChainUnaryInterceptor(unaryInterceptors...),
 		grpc.Creds(creds),
 	}
 	grpcServer := grpc.NewServer(opts...)

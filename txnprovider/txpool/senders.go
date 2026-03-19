@@ -101,12 +101,7 @@ func (b *BySenderAndNonce) blobCount(senderID uint64) uint64 {
 }
 
 func (b *BySenderAndNonce) hasTxns(senderID uint64) bool {
-	has := false
-	b.ascend(senderID, func(*metaTxn) bool {
-		has = true
-		return false
-	})
-	return has
+	return b.senderIDTxnCount[senderID] > 0
 }
 
 func (b *BySenderAndNonce) get(senderID, txNonce uint64) *metaTxn {
@@ -138,9 +133,9 @@ func (b *BySenderAndNonce) delete(mt *metaTxn, reason txpoolcfg.DiscardReason, l
 			delete(b.senderIDTxnCount, senderID)
 		}
 
-		if mt.TxnSlot.Type == BlobTxnType && mt.TxnSlot.BlobBundles != nil {
+		if blobHashes := mt.TxnSlot.GetBlobHashes(); len(blobHashes) > 0 {
 			accBlobCount := b.senderIDBlobCount[senderID]
-			txnBlobCount := uint64(len(mt.TxnSlot.BlobBundles))
+			txnBlobCount := uint64(len(blobHashes))
 			if accBlobCount > txnBlobCount {
 				b.senderIDBlobCount[senderID] = accBlobCount - txnBlobCount
 			} else {
@@ -165,8 +160,8 @@ func (b *BySenderAndNonce) replaceOrInsert(mt *metaTxn, logger log.Logger) *meta
 	}
 
 	b.senderIDTxnCount[mt.TxnSlot.SenderID]++
-	if mt.TxnSlot.Type == BlobTxnType && mt.TxnSlot.BlobBundles != nil {
-		b.senderIDBlobCount[mt.TxnSlot.SenderID] += uint64(len(mt.TxnSlot.BlobBundles))
+	if blobHashes := mt.TxnSlot.GetBlobHashes(); len(blobHashes) > 0 {
+		b.senderIDBlobCount[mt.TxnSlot.SenderID] += uint64(len(blobHashes))
 	}
 	return nil
 }
@@ -192,11 +187,6 @@ func newSendersBatch(tracedSenders map[common.Address]struct{}) *sendersBatch {
 func (sc *sendersBatch) getID(addr common.Address) (uint64, bool) {
 	id, ok := sc.senderIDs[addr]
 	return id, ok
-}
-
-func (sc *sendersBatch) getAddr(id uint64) (common.Address, bool) {
-	addr, ok := sc.senderID2Addr[id]
-	return addr, ok
 }
 
 var traceAllSenders = false

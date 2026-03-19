@@ -48,6 +48,13 @@ func DefaultLogFilterOptions() LogFilterOptions {
 	}
 }
 
+// TransactionReceiptsFilter defines criteria for transaction receipts subscription.
+// If TransactionHashes is nil or empty, receipts for all transactions included in new blocks will be delivered.
+// Otherwise, only receipts for the specified transactions will be delivered.
+type ReceiptsFilterCriteria struct {
+	TransactionHashes []common.Hash `json:"transactionHashes"`
+}
+
 /*
 // filter is a helper struct that holds meta information over the filter type
 // and associated subscription in the event system.
@@ -485,8 +492,8 @@ func (args *FilterCriteria) UnmarshalJSON(data []byte) error {
 		BlockHash *common.Hash     `json:"blockHash"`
 		FromBlock *rpc.BlockNumber `json:"fromBlock"`
 		ToBlock   *rpc.BlockNumber `json:"toBlock"`
-		Addresses interface{}      `json:"address"`
-		Topics    []interface{}    `json:"topics"`
+		Addresses any              `json:"address"`
+		Topics    []any            `json:"topics"`
 	}
 
 	var raw input
@@ -515,7 +522,7 @@ func (args *FilterCriteria) UnmarshalJSON(data []byte) error {
 	if raw.Addresses != nil {
 		// raw.Address can contain a single address or an array of addresses
 		switch rawAddr := raw.Addresses.(type) {
-		case []interface{}:
+		case []any:
 			for i, addr := range rawAddr {
 				if strAddr, ok := addr.(string); ok {
 					addr, err := decodeAddress(strAddr)
@@ -555,7 +562,7 @@ func (args *FilterCriteria) UnmarshalJSON(data []byte) error {
 				}
 				args.Topics[i] = []common.Hash{top}
 
-			case []interface{}:
+			case []any:
 				// or case e.g. [null, "topic0", "topic1"]
 				for _, rawTopic := range topic {
 					if rawTopic == nil {

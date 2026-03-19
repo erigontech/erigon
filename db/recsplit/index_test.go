@@ -48,7 +48,7 @@ func TestReWriteIndex(t *testing.T) {
 	}
 	defer rs.Close()
 	for i := 0; i < 100; i++ {
-		if err = rs.AddKey([]byte(fmt.Sprintf("key %d", i)), uint64(i*17)); err != nil {
+		if err = rs.AddKey(fmt.Appendf(nil, "key %d", i), uint64(i*17)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -76,7 +76,7 @@ func TestReWriteIndex(t *testing.T) {
 	defer reidx.Close()
 	for i := 0; i < 100; i++ {
 		reader := NewIndexReader(reidx)
-		offset, _ := reader.Lookup([]byte(fmt.Sprintf("key %d", i)))
+		offset, _ := reader.Lookup(fmt.Appendf(nil, "key %d", i))
 		if offset != uint64(i*3965) {
 			t.Errorf("expected offset: %d, looked up: %d", i*3965, offset)
 		}
