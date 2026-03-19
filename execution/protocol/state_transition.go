@@ -547,8 +547,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		return nil, ErrGasUintOverflow
 	}
 	if st.msg.Gas() < intrinsicGas || st.msg.Gas() < intrinsicGasResult.FloorGasCost {
-		return nil, fmt.Errorf("%w: have %d, want regular %d + state %d = %d, floor %d", ErrIntrinsicGas,
-			st.msg.Gas(), intrinsicGasResult.RegularGas, intrinsicGasResult.StateGas, intrinsicGas, intrinsicGasResult.FloorGasCost)
+		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.msg.Gas(), intrinsicGas)
 	}
 	// EIP-7825: Transaction Gas Limit Cap
 	if st.msg.CheckGas() {
