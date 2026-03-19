@@ -1003,6 +1003,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 		initialized bool
 		// offsets: stores (txNum-baseTxNum) values; ETL delivers txNums sorted per key
 		// so no dedup/sort needed. Safe: collate covers exactly one step so values < stepSize < math.MaxUint32.
+		// Worst case: one key touched every txNum in the step → stepSize entries (default 1_562_500 × 4B = 6.25 MB).
 		offsets []uint32
 		ef      multiencseq.SequenceBuilder
 	)
