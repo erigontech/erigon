@@ -48,7 +48,7 @@ func NewGasUsed(h *types.Header, receiptGas uint64) *GasUsed {
 }
 
 func SetGasUsed(h *types.Header, gu *GasUsed) {
-	h.GasUsed = gu.BlockRegular
+	h.GasUsed = max(gu.BlockRegular, gu.BlockState)
 	if h.BlobGasUsed != nil {
 		h.BlobGasUsed = &gu.Blob
 	}
