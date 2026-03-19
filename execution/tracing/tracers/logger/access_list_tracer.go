@@ -220,7 +220,7 @@ func (a *AccessListTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, sc
 	if op == vm.CREATE {
 		// contract address for CREATE can only be generated with state
 		if a.state != nil {
-			nonce, _ := a.state.GetNonce(scope.Address())
+			nonce, _ := a.state.GetNonce(scope.Address().Value())
 			addr := types.CreateAddress(scope.Address().Value(), nonce)
 			if _, ok := a.excl[addr]; !ok {
 				a.createdContracts[addr] = struct{}{}

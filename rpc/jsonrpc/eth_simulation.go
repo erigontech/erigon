@@ -331,7 +331,7 @@ func (s *simulator) sanitizeCall(
 	globalGasCap uint64,
 ) error {
 	if args.Nonce == nil {
-		nonce, err := intraBlockState.GetNonce(args.FromOrEmpty())
+		nonce, err := intraBlockState.GetNonce(args.FromOrEmpty().Value())
 		if err != nil {
 			return fmt.Errorf("failed to get nonce for %s: %w", args.FromOrEmpty(), err)
 		}

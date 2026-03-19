@@ -785,11 +785,11 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error
 					accountDiff.Code = m
 					allEqual = false
 				}
-				fromNonce, err := initialIbs.GetNonce(addr)
+				fromNonce, err := initialIbs.GetNonce(addr.Value())
 				if err != nil {
 					return err
 				}
-				toNonce, err := ibs.GetNonce(addr)
+				toNonce, err := ibs.GetNonce(addr.Value())
 				if err != nil {
 					return err
 				}
@@ -824,7 +824,7 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error
 					accountDiff.Code = m
 				}
 				{
-					nonce, err := initialIbs.GetNonce(addr)
+					nonce, err := initialIbs.GetNonce(addr.Value())
 					if err != nil {
 						return err
 					}
@@ -853,7 +853,7 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error
 				accountDiff.Code = m
 			}
 			{
-				nonce, err := ibs.GetNonce(addr)
+				nonce, err := ibs.GetNonce(addr.Value())
 				if err != nil {
 					return err
 				}

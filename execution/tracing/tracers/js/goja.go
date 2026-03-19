@@ -732,8 +732,7 @@ func (do *dbObj) GetNonce(addrSlice goja.Value) uint64 {
 		do.vm.Interrupt(err)
 		return 0
 	}
-	addr := accounts.InternAddress(common.BytesToAddress(a))
-	nonce, err := do.ibs.GetNonce(addr)
+	nonce, err := do.ibs.GetNonce(common.BytesToAddress(a))
 	if err != nil {
 		do.vm.Interrupt(err)
 		return 0

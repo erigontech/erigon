@@ -606,7 +606,8 @@ func (sdb *IntraBlockState) getBalance(addr accounts.Address) (uint256.Int, bool
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) GetNonce(addr accounts.Address) (uint64, error) {
+func (sdb *IntraBlockState) GetNonce(rawAddr common.Address) (uint64, error) {
+	addr := sdb.InternAddress(rawAddr)
 	if sdb.versionMap == nil {
 		stateObject, err := sdb.getStateObject(addr, true)
 		if err != nil {

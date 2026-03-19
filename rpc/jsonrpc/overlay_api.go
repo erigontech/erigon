@@ -519,7 +519,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 			if !contractCreation {
 				// bump the nonce of the sender
 				sender := vm.AccountRef(msg.From())
-				nonce, err := statedb.GetNonce(sender.Address())
+				nonce, err := statedb.GetNonce(sender.Address().Value())
 				if err != nil {
 					log.Error(err.Error())
 					return nil, err

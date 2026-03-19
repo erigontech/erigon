@@ -322,11 +322,11 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 			return err
 		}
 		checkeqBigInt("GetBalance", sb.ToBig(), cb.ToBig())
-		sn, err := state.GetNonce(addr)
+		sn, err := state.GetNonce(addr.Value())
 		if err != nil {
 			return err
 		}
-		cn, err := checkstate.GetNonce(addr)
+		cn, err := checkstate.GetNonce(addr.Value())
 		if err != nil {
 			return err
 		}

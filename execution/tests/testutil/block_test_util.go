@@ -501,7 +501,7 @@ func (bt *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 		if err != nil {
 			return err
 		}
-		nonce2, err := statedb.GetNonce(address)
+		nonce2, err := statedb.GetNonce(address.Value())
 		if err != nil {
 			return err
 		}

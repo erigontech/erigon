@@ -187,7 +187,7 @@ func (t *prestateTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scop
 		}
 
 	case op == vm.CREATE:
-		nonce, _ := t.env.IntraBlockState.GetNonce(caller)
+		nonce, _ := t.env.IntraBlockState.GetNonce(caller.Value())
 		addr := accounts.InternAddress(types.CreateAddress(caller.Value(), nonce))
 		t.lookupAccount(addr)
 		t.created[addr] = true
@@ -210,7 +210,7 @@ func (t *prestateTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scop
 func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
 	t.env = env
 
-	nounce, _ := env.IntraBlockState.GetNonce(from)
+	nounce, _ := env.IntraBlockState.GetNonce(from.Value())
 
 	if tx.GetTo() == nil {
 		t.create = true
@@ -276,7 +276,7 @@ func (t *prestateTracer) processDiffState() {
 		modified := false
 		postAccount := &account{Storage: make(map[common.Hash]common.Hash)}
 		newBalance, _ := t.env.IntraBlockState.GetBalance(addr.Value())
-		newNonce, _ := t.env.IntraBlockState.GetNonce(addr)
+		newNonce, _ := t.env.IntraBlockState.GetNonce(addr.Value())
 		newCode, _ := t.env.IntraBlockState.GetCode(addr.Value())
 		newCodeHash := common.Hash{}
 		if len(newCode) > 0 {
@@ -372,7 +372,7 @@ func (t *prestateTracer) lookupAccount(addr accounts.Address) {
 	}
 
 	balance, _ := t.env.IntraBlockState.GetBalance(addr.Value())
-	nonce, _ := t.env.IntraBlockState.GetNonce(addr)
+	nonce, _ := t.env.IntraBlockState.GetNonce(addr.Value())
 	code, _ := t.env.IntraBlockState.GetCode(addr.Value())
 
 	t.pre[addr] = &account{

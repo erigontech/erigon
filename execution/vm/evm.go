@@ -415,7 +415,7 @@ func (evm *EVM) create(rawCaller common.Address, codeAndHash *codeAndHash, gasRe
 		}
 	}
 	if incrementNonce {
-		nonce, err := evm.intraBlockState.GetNonce(caller)
+		nonce, err := evm.intraBlockState.GetNonce(rawCaller)
 		if err != nil {
 			return nil, accounts.NilAddress, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
@@ -442,7 +442,7 @@ func (evm *EVM) create(rawCaller common.Address, codeAndHash *codeAndHash, gasRe
 	if err != nil {
 		return nil, accounts.NilAddress, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
-	nonce, err := evm.intraBlockState.GetNonce(address)
+	nonce, err := evm.intraBlockState.GetNonce(rawAddress)
 	if err != nil {
 		return nil, accounts.NilAddress, 0, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 	}
@@ -537,7 +537,7 @@ func (evm *EVM) maxCodeSize() int {
 // Create creates a new contract using code as deployment code.
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
 func (evm *EVM) Create(rawCaller common.Address, code []byte, gasRemaining uint64, endowment uint256.Int, bailout bool) (ret []byte, contractAddr accounts.Address, leftOverGas uint64, err error) {
-	nonce, err := evm.intraBlockState.GetNonce(evm.intraBlockState.InternAddress(rawCaller))
+	nonce, err := evm.intraBlockState.GetNonce(rawCaller)
 	if err != nil {
 		return nil, accounts.NilAddress, 0, err
 	}

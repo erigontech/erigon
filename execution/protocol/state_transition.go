@@ -281,7 +281,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 
 	// Make sure this transaction's nonce is correct.
 	if st.msg.CheckNonce() {
-		stNonce, err := st.state.GetNonce(from)
+		stNonce, err := st.state.GetNonce(from.Value())
 		if err != nil {
 			return fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 		}
@@ -481,7 +481,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 
 	if !contractCreation {
 		// Increment the nonce for the next transaction
-		nonce, err := st.state.GetNonce(sender)
+		nonce, err := st.state.GetNonce(sender.Value())
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 		}
@@ -701,7 +701,7 @@ func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contra
 			}
 
 			// 5. nonce check
-			authorityNonce, err := st.state.GetNonce(authority)
+			authorityNonce, err := st.state.GetNonce(authority.Value())
 			if err != nil {
 				return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 			}

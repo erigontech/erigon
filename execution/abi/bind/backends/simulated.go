@@ -238,7 +238,7 @@ func (b *SimulatedBackend) NonceAt(ctx context.Context, contract common.Address,
 	defer tx.Rollback()
 
 	stateDB := b.stateByBlockNumber(tx, blockNumber)
-	return stateDB.GetNonce(accounts.InternAddress(contract))
+	return stateDB.GetNonce(contract)
 }
 
 // StorageAt returns the value of key in the storage of an account in the blockchain.
@@ -611,7 +611,7 @@ func (b *SimulatedBackend) PendingNonceAt(ctx context.Context, account common.Ad
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	return b.pendingState.GetNonce(accounts.InternAddress(account))
+	return b.pendingState.GetNonce(account)
 }
 
 // SuggestGasPrice implements ContractTransactor.SuggestGasPrice. Since the simulated
@@ -774,7 +774,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, txn types.Transa
 	if senderErr != nil {
 		return fmt.Errorf("invalid transaction: %w", senderErr)
 	}
-	nonce, err := b.pendingState.GetNonce(sender)
+	nonce, err := b.pendingState.GetNonce(sender.Value())
 	if err != nil {
 		return err
 	}

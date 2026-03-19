@@ -219,7 +219,7 @@ func (b *BlockGen) TxNonce(addr common.Address) uint64 {
 	if !exist {
 		panic("account does not exist")
 	}
-	nonce, err := b.ibs.GetNonce(accounts.InternAddress(addr))
+	nonce, err := b.ibs.GetNonce(addr)
 	if err != nil {
 		panic(fmt.Sprintf("can't get account: %s", err))
 	}
