@@ -748,7 +748,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		logger.Info("Socket Endpoint opened", "url", socketUrl)
 	}
 
-	// RPC admission limit: -1 = unlimited (no admission control), 0 = use DBReadConcurrency, >0 = explicit limit.
+	// RPC admission limit: -1 = unlimited, 0 = use db.read.concurrency, >0 = explicit limit.
 	var rpcConcurrencyLimit int64
 	switch {
 	case cfg.RpcMaxConcurrentRequests == -1:

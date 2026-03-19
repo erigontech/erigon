@@ -35,6 +35,7 @@ import (
 	"github.com/rs/cors"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
@@ -386,7 +387,7 @@ func (h *rpcAdmissionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		}
 		defer h.inflight.Add(-1)
 	}
-	h.next.ServeHTTP(w, r)
+	h.next.ServeHTTP(w, r.WithContext(kv.WithRPCContext(r.Context(), h.limit)))
 }
 
 func newCorsHandler(srv http.Handler, allowedOrigins []string) http.Handler {
