@@ -615,17 +615,8 @@ func (sdc *TrieContext) TxNum() uint64 {
 // readDomain reads data from domain, dereferences key and returns encoded value and step.
 // Step returned only when reading from domain files, otherwise it is always 0.
 // Step is used in Trie for memo stats and file depth access statistics.
-var debugCommitmentReadBlock = uint64(dbg.EnvInt("ERIGON_DEBUG_COMMITMENT_READ_BLOCK", 0))
-
 func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, step kv.Step, err error) {
-	//if sdc.patriciaTrie.Variant() == commitment.VariantConcurrentHexPatricia {
-	//	sdc.mu.Lock()
-	//	defer sdc.mu.Unlock()
-	//}
 	enc, step, err = sdc.stateReader.Read(d, plainKey, sdc.stepSize)
-	if debugCommitmentReadBlock > 0 && sdc.blockNum == debugCommitmentReadBlock && err == nil {
-		log.Info("[dbg_commitment_read]", "block", sdc.blockNum, "domain", d, "key", hex.EncodeToString(plainKey), "val", hex.EncodeToString(enc), "step", step, "txNum", sdc.txNum)
-	}
 	return enc, step, err
 }
 

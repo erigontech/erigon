@@ -2579,16 +2579,6 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 				return fmt.Errorf("fold: %w", err)
 			}
 		}
-
-		// Fold back any non-branch rows left by previous extension splits.
-		// These "virtual" rows (branchBefore=false) don't correspond to real DB
-		// branch nodes and carry stale hashedExtension data that confuses
-		// toWitnessTrie() when it traverses the grid top-down.
-		for hph.activeRows > 0 && !hph.branchBefore[hph.activeRows-1] {
-			if err := hph.fold(); err != nil {
-				return fmt.Errorf("fold non-branch: %w", err)
-			}
-		}
 		// Now unfold until we step on an empty cell
 		for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
 			if err := hph.unfold(hashedKey, unfolding); err != nil {
