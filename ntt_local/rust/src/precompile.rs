@@ -491,6 +491,54 @@ pub fn shake_precompile(input: &[u8]) -> Result<Vec<u8>, PrecompileError> {
     Ok(output)
 }
 
+/// SHAKE256 Hash-to-Point precompile.
+///
+/// Input: `output_len(32 BE) | data(var)`
+///
+/// Returns `output_len` bytes of rejection-sampled coefficients mod Q=12289,
+/// packed as uint16 BE. `output_len` must be even. Produces `output_len/2`
+/// coefficients.
+pub fn shake256_htp_precompile(input: &[u8]) -> Result<Vec<u8>, PrecompileError> {
+    if input.len() < WORD {
+        return Err(PrecompileError::InputTooShort);
+    }
+    let mut offset = 0;
+    let output_len = read_word_usize_raw(input, &mut offset)?;
+    if output_len == 0 || output_len % 2 != 0 || output_len > 1 << 20 {
+        return Err(PrecompileError::InvalidParams(
+            "output_len must be nonzero, even, and <= 1MB",
+        ));
+    }
+    let data = &input[offset..];
+    let n_coeffs = output_len / 2;
+
+    use sha3::{
+        digest::{ExtendableOutput, Update, XofReader},
+        Shake256,
+    };
+    let mut hasher = Shake256::default();
+    hasher.update(data);
+    let mut reader = hasher.finalize_xof();
+
+    const Q: u16 = 12289;
+    const THRESHOLD: u16 = 61445; // 5 * Q - 4
+
+    let mut output = Vec::with_capacity(output_len);
+    let mut count = 0;
+    let mut buf = [0u8; 2];
+    while count < n_coeffs {
+        reader.read(&mut buf);
+        let t = ((buf[0] as u16) << 8) | (buf[1] as u16);
+        if t < THRESHOLD {
+            let c = t % Q;
+            output.push((c >> 8) as u8);
+            output.push((c & 0xff) as u8);
+            count += 1;
+        }
+    }
+    Ok(output)
+}
+
 // ─── Calldata encoders (for building inputs from Rust) ───
 
 /// Encode calldata for NTT_FW / NTT_INV.
@@ -785,5 +833,67 @@ mod tests {
         shake_n(1, b"hello", &mut out_1);
         shake_n(128, b"hello", &mut out_128);
         assert_ne!(out_1, out_128);
+    }
+
+    #[test]
+    fn test_shake256_htp_precompile_basic() {
+        // Request 1024 bytes = 512 coefficients (Falcon-512 size)
+        let mut input = Vec::new();
+        input.extend_from_slice(&encode_word(1024)); // output_len = 1024
+        input.extend_from_slice(b"test input data");
+        let output = shake256_htp_precompile(&input).unwrap();
+        assert_eq!(output.len(), 1024);
+
+        // Deterministic
+        let output2 = shake256_htp_precompile(&input).unwrap();
+        assert_eq!(output, output2);
+
+        // All coefficients should be < Q=12289
+        for chunk in output.chunks_exact(2) {
+            let c = ((chunk[0] as u16) << 8) | (chunk[1] as u16);
+            assert!(c < 12289, "coefficient {} >= Q", c);
+        }
+    }
+
+    #[test]
+    fn test_shake256_htp_precompile_matches_falcon() {
+        // Verify that the precompile produces the same output as
+        // falcon::shake256_htp for the standard Falcon-512 case
+        use crate::falcon;
+
+        let data = b"nonce40bytesxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxmsg";
+        let falcon_out = falcon::shake256_htp(data);
+
+        let mut input = Vec::new();
+        input.extend_from_slice(&encode_word(1024)); // 512 coeffs * 2 bytes
+        input.extend_from_slice(data);
+        let precompile_out = shake256_htp_precompile(&input).unwrap();
+
+        // The falcon::shake256_htp uses a different packing format (compact),
+        // so we compare the raw coefficients instead.
+        let falcon_coeffs = falcon::unpack(&falcon_out).unwrap();
+
+        // Decode precompile output as uint16 BE
+        let precompile_coeffs: Vec<u64> = precompile_out
+            .chunks_exact(2)
+            .map(|c| ((c[0] as u64) << 8) | (c[1] as u64))
+            .collect();
+
+        assert_eq!(falcon_coeffs.len(), precompile_coeffs.len());
+        assert_eq!(falcon_coeffs, precompile_coeffs);
+    }
+
+    #[test]
+    fn test_shake256_htp_precompile_errors() {
+        // Input too short
+        assert!(shake256_htp_precompile(&[0u8; 16]).is_err());
+
+        // output_len = 0
+        let input = encode_word(0);
+        assert!(shake256_htp_precompile(&input).is_err());
+
+        // output_len odd
+        let input = encode_word(3);
+        assert!(shake256_htp_precompile(&input).is_err());
     }
 }

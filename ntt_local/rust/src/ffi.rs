@@ -150,6 +150,21 @@ pub unsafe extern "C" fn eth_ntt_shake(
     }
 }
 
+/// SHAKE256 Hash-to-Point with rejection sampling.
+/// Input: output_len(32 BE) | data(var)
+/// Returns output_len bytes of rejection-sampled coefficients mod Q=12289, packed as uint16 BE.
+#[no_mangle]
+pub unsafe extern "C" fn eth_ntt_shake256_htp(
+    input: *const u8, input_len: usize,
+    output_out: *mut *mut u8, output_len_out: *mut usize,
+) -> i32 {
+    let data = slice::from_raw_parts(input, input_len);
+    match crate::shake256_htp_precompile(data) {
+        Ok(out) => { write_output(out, output_out, output_len_out); 0 }
+        Err(e) => error_code(e),
+    }
+}
+
 /// ML-DSA-44 (Dilithium2) full verification.
 /// Input: pk(1312) | sig(2420) | msg(var)
 /// Output: 32 bytes (0x00..01 valid, 0x00..00 invalid)
