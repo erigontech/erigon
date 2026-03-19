@@ -1,6 +1,15 @@
 name: QA - RPC Integration Tests Remote
 
 on:
+  pull_request:
+    branches:
+      - main
+      - 'release/**'
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
   workflow_dispatch:     # Run manually
   workflow_call:
 
