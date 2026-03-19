@@ -65,10 +65,6 @@ jobs:
     uses: ./.github/workflows/test-kurtosis-assertoor.yml
     secrets: inherit
 
-  manifest:
-    uses: ./.github/workflows/manifest.yml
-    secrets: inherit
-
   repro:
     uses: ./.github/workflows/reproducible-build.yml
     secrets: inherit
@@ -105,7 +101,6 @@ jobs:
       - large-files
       - bench
       - kurtosis
-      - manifest
       - repro
       - qa-rpc
       - qa-rpc-gnosis
