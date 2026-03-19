@@ -203,6 +203,11 @@ func (ba *BlockAssembler) AddTransactions(
 		ibs.ResetVersionedIO()
 	}
 
+	// EIP-8037: track cumulative block gas per dimension. The header stores
+	// max(regular, state), so we cannot recover individual dimensions from it.
+	// Keep running totals here and patch GasUsed before writing to the header.
+	gasUsed := new(protocol.GasUsed)
+
 	var commitTx = func(txn types.Transaction, coinbase accounts.Address, vmConfig *vm.Config, chainConfig *chain.Config, ibs *state.IntraBlockState, current *AssembledBlock) ([]*types.Log, error) {
 		ibs.SetTxContext(current.Header.Number.Uint64(), txnIdx)
 		gasSnap := gasPool.Gas()
@@ -221,26 +226,36 @@ func (ba *BlockAssembler) AddTransactions(
 				return nil, err
 			}
 
-			status, gasUsed, err := aa.ExecuteAATransaction(aaTxn, paymasterContext, validationGasUsed, gasPool, evm, header, ibs)
+			status, aaGasUsed, err := aa.ExecuteAATransaction(aaTxn, paymasterContext, validationGasUsed, gasPool, evm, header, ibs)
 			if err != nil {
 				ibs.RevertToSnapshot(snap, err)
 				gasPool = new(protocol.GasPool).AddGas(gasSnap).AddBlobGas(blobGasSnap)
 				return nil, err
 			}
 
-			header.GasUsed += gasUsed
+			header.GasUsed += aaGasUsed
 			logs := ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), header.Number.Uint64(), header.Hash())
-			receipt := aa.CreateAAReceipt(txn.Hash(), status, gasUsed, header.GasUsed, header.Number.Uint64(), uint64(ibs.TxnIndex()), logs)
+			receipt := aa.CreateAAReceipt(txn.Hash(), status, aaGasUsed, header.GasUsed, header.Number.Uint64(), uint64(ibs.TxnIndex()), logs)
 
 			current.AddTxn(txn)
 			current.Receipts = append(current.Receipts, receipt)
 			return receipt.Logs, nil
 		}
 
-		gasUsed := protocol.NewGasUsed(header, current.Receipts.CumulativeGasUsed())
+		// Snapshot cumulative gas so we can restore on tx failure.
+		gasSnapshotRegular := gasUsed.BlockRegular
+		gasSnapshotState := gasUsed.BlockState
+		gasSnapshotReceipt := gasUsed.Receipt
+		gasSnapshotBlob := gasUsed.Blob
+
 		receipt, err := protocol.ApplyTransaction(chainConfig, protocol.GetHashFn(header, getHeader),
 			ba.cfg.Engine, coinbase, gasPool, ibs, writer, header, txn, gasUsed, *vmConfig)
 		if err != nil {
+			// Restore cumulative gas to pre-tx values.
+			gasUsed.BlockRegular = gasSnapshotRegular
+			gasUsed.BlockState = gasSnapshotState
+			gasUsed.Receipt = gasSnapshotReceipt
+			gasUsed.Blob = gasSnapshotBlob
 			ibs.RevertToSnapshot(snap, err)
 			gasPool = new(protocol.GasPool).AddGas(gasSnap).AddBlobGas(blobGasSnap)
 			return nil, err
