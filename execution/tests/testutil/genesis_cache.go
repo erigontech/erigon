@@ -293,8 +293,7 @@ func (cr *lightChainReader) HasBlock(hash common.Hash, number uint64) bool {
 // it falls back to the full BlockTest.Run path for authoritative results.
 func (bt *BlockTest) RunLightweight(t *testing.T) error {
 	if err := bt.runLightweight(t); err != nil {
-		// Lightweight path failed — fall back to full pipeline.
-		return bt.Run(t)
+		return bt.Run(t) // lightweight path failed — fall back to full pipeline
 	}
 	return nil
 }
@@ -392,6 +391,21 @@ func (bt *BlockTest) runLightweight(t *testing.T) error {
 			}
 			return h, nil
 		})
+
+		// Verify block header before execution (gas limit, timestamp, etc.).
+		if verifyErr := engine.VerifyHeader(cr, header, false); verifyErr != nil {
+			if b.BlockHeader == nil {
+				continue // expected invalid block
+			}
+			return fmt.Errorf("block #%v header verification failed: %w", cb.Number(), verifyErr)
+		}
+		// Check gas used doesn't exceed gas limit (GAS_USED_OVERFLOW).
+		if header.GasUsed > header.GasLimit {
+			if b.BlockHeader == nil {
+				continue
+			}
+			return fmt.Errorf("block #%v gas used %d exceeds gas limit %d", cb.Number(), header.GasUsed, header.GasLimit)
+		}
 
 		// Wrap in panic recovery for blocks with malicious/invalid headers
 		// that cause panics in the EVM or consensus engine.
