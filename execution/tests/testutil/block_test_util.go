@@ -563,6 +563,35 @@ func (bb *btBlock) decode() (*types.Block, error) {
 	return &b, err
 }
 
+// validateBAL validates the block access list from the test JSON against the
+// block header. This is the lightweight equivalent of the BAL processing in
+// the full pipeline (ProcessBAL in exec3_parallel.go).
+func validateBAL(header *types.Header, b btBlock) error {
+	if len(b.BlockAccessList) == 0 {
+		return nil
+	}
+	bal := b.BlockAccessList.toBAL()
+	if err := bal.Validate(); err != nil {
+		return fmt.Errorf("BAL structural validation: %w", err)
+	}
+	if err := bal.ValidateMaxItems(header.GasLimit); err != nil {
+		return fmt.Errorf("BAL max items: %w", err)
+	}
+	if header.BlockAccessListHash != nil {
+		balHash := bal.Hash()
+		if balHash != *header.BlockAccessListHash {
+			return fmt.Errorf("BAL hash mismatch: computed %x, header %x", balHash, *header.BlockAccessListHash)
+		}
+	}
+	return nil
+}
+
+// isExpectedInvalid checks whether a block error is expected (BlockHeader == nil)
+// and returns true if the block should be skipped.
+func isExpectedInvalid(b btBlock) bool {
+	return b.BlockHeader == nil
+}
+
 // RunLightweight tries to execute the block test using a MemoryMutation overlay
 // on a shared, cached genesis DB. If the lightweight path encounters any error,
 // it falls back to the full BlockTest.Run path for authoritative results.
@@ -637,12 +666,13 @@ func (bt *BlockTest) runLightweight(t *testing.T) error {
 
 	lastBlockHash := genesis.Hash()
 
-	// Execute blocks.
+	// Execute blocks — same structure as insertBlocks but using
+	// ExecuteBlockEphemerally instead of InsertChain.
 	for bi, b := range bt.json.Blocks {
 		cb, err := b.decode()
 		if err != nil {
-			if b.BlockHeader == nil {
-				continue // expected invalid block
+			if isExpectedInvalid(b) {
+				continue
 			}
 			return fmt.Errorf("block RLP decoding failed when expected to succeed: %w", err)
 		}
@@ -654,8 +684,40 @@ func (bt *BlockTest) runLightweight(t *testing.T) error {
 			parentTd, _ = rawdb.ReadTd(overlay, parentHash, header.Number.Uint64()-1)
 		}
 
-		// Allocate 2 system txNums (begin/end of block) + 1 per tx.
-		txNum++ // begin-of-block system tx
+		// Verify header (gas limit, timestamp, difficulty, etc.).
+		if verifyErr := engine.VerifyHeader(cr, header, false); verifyErr != nil {
+			if isExpectedInvalid(b) {
+				continue
+			}
+			return fmt.Errorf("block #%v header verification failed: %w", cb.Number(), verifyErr)
+		}
+
+		// Verify uncles.
+		if verifyErr := engine.VerifyUncles(cr, header, cb.Uncles()); verifyErr != nil {
+			if isExpectedInvalid(b) {
+				continue
+			}
+			return fmt.Errorf("block #%v uncle verification failed: %w", cb.Number(), verifyErr)
+		}
+
+		// Validate BAL (block access list) from the test fixture.
+		if balErr := validateBAL(header, b); balErr != nil {
+			if isExpectedInvalid(b) {
+				continue
+			}
+			return fmt.Errorf("block #%v BAL validation failed: %w", cb.Number(), balErr)
+		}
+
+		// Check gas used doesn't exceed gas limit (GAS_USED_OVERFLOW).
+		if header.GasUsed > header.GasLimit {
+			if isExpectedInvalid(b) {
+				continue
+			}
+			return fmt.Errorf("block #%v gas used %d exceeds gas limit %d", cb.Number(), header.GasUsed, header.GasLimit)
+		}
+
+		// Allocate txNums: begin-of-block system tx + per-tx + end-of-block.
+		txNum++
 		stateReader := state.NewReaderV3(overlay)
 		stateWriter := state.NewWriter(overlay, nil, txNum)
 
@@ -667,23 +729,7 @@ func (bt *BlockTest) runLightweight(t *testing.T) error {
 			return h, nil
 		})
 
-		// Verify block header before execution (gas limit, timestamp, etc.).
-		if verifyErr := engine.VerifyHeader(cr, header, false); verifyErr != nil {
-			if b.BlockHeader == nil {
-				continue // expected invalid block
-			}
-			return fmt.Errorf("block #%v header verification failed: %w", cb.Number(), verifyErr)
-		}
-		// Check gas used doesn't exceed gas limit (GAS_USED_OVERFLOW).
-		if header.GasUsed > header.GasLimit {
-			if b.BlockHeader == nil {
-				continue
-			}
-			return fmt.Errorf("block #%v gas used %d exceeds gas limit %d", cb.Number(), header.GasUsed, header.GasLimit)
-		}
-
-		// Wrap in panic recovery for blocks with malicious/invalid headers
-		// that cause panics in the EVM or consensus engine.
+		// Execute block with panic recovery (malicious headers can panic).
 		var execResult *protocol.EphemeralExecResult
 		var execErr error
 		func() {
@@ -702,25 +748,28 @@ func (bt *BlockTest) runLightweight(t *testing.T) error {
 		}()
 
 		if execErr != nil {
-			if b.BlockHeader == nil {
-				continue // expected invalid block
+			if isExpectedInvalid(b) {
+				continue
 			}
-			return fmt.Errorf("block #%v execution failed: %w", cb.Number(), execErr)
+			return fmt.Errorf("block #%v insertion into chain failed: %w", cb.Number(), execErr)
 		}
-
 		_ = execResult
 
-		if b.BlockHeader == nil {
+		if isExpectedInvalid(b) {
 			// Block was expected to be invalid but execution succeeded.
-			// In the lightweight runner we cannot easily check canonicality,
-			// so we just treat it as an expected failure and continue.
-			_ = bi
-			continue
+			// Without canonical chain tracking we cannot detect this reliably,
+			// so we report it as an error to trigger fallback to the full Run.
+			return fmt.Errorf("block (index %d) insertion should have failed due to: %v", bi, b.ExpectException)
+		}
+
+		// Validate RLP-decoded header against the test JSON (same as insertBlocks).
+		if err = validateHeader(b.BlockHeader, cb.HeaderNoCopy()); err != nil {
+			return fmt.Errorf("deserialised block header validation failed: %w", err)
 		}
 
 		// Update txNum for the transactions in this block + end-of-block system tx.
 		txNum += uint64(cb.Transactions().Len())
-		txNum++ // end-of-block system tx
+		txNum++
 
 		// Record the header and TD for subsequent blocks.
 		cr.headers[cb.Hash()] = header
