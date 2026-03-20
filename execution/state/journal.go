@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -162,7 +163,7 @@ type (
 
 	// Changes to other state values.
 	refundChange struct {
-		prev uint64
+		prev mdgas.MdGas
 	}
 	addLogChange struct {
 		txIndex int

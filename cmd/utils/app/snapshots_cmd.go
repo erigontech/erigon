@@ -877,6 +877,33 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 				toRemove[res.Path] = res
 			}
 		}
+
+		// Second pass: remove any file whose step range is a strict subset of a file
+		// already marked for removal, but only within the same domain type.
+		// This handles orphaned sub-range files that were constituents of a merged
+		// file (e.g., accounts.192-208 is a subset of accounts.192-224).
+		// Cross-domain matching is prevented so that, e.g., removing commitment.192-224
+		// does not cascade to accounts.192-208 which may be the only copy of that data.
+		for {
+			added := false
+			for _, res := range files {
+				if _, alreadyMarked := toRemove[res.Path]; alreadyMarked {
+					continue
+				}
+				for _, marked := range toRemove {
+					if res.TypeString == marked.TypeString &&
+						res.From >= marked.From && res.To <= marked.To &&
+						(res.From != marked.From || res.To != marked.To) {
+						toRemove[res.Path] = res
+						added = true
+						break
+					}
+				}
+			}
+			if !added {
+				break
+			}
+		}
 	} else {
 		for _, res := range files {
 			toRemove[res.Path] = res
