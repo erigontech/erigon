@@ -69,6 +69,8 @@ type ForkChoiceStorageMock struct {
 
 	Pool pool.OperationsPool
 
+	Eth1Hashes map[common.Hash]common.Hash
+
 	// Mock for PeerDas
 	MockPeerDas *mock_services.MockPeerDas
 }
@@ -121,6 +123,10 @@ func makeSyncContributionPoolMock(t *testing.T) sync_contribution_pool.SyncContr
 			}
 			return nil
 		}).AnyTimes()
+	pool.EXPECT().
+		GetSyncAggregate(gomock.Any(), gomock.Any()).
+		Return(&cltypes.SyncAggregate{}, nil).
+		AnyTimes()
 	return pool
 }
 
@@ -188,6 +194,7 @@ func NewForkChoiceStorageMock(t *testing.T) *ForkChoiceStorageMock {
 		LCUpdates:                 make(map[uint64]*cltypes.LightClientUpdate),
 		Headers:                   make(map[common.Hash]*cltypes.BeaconBlockHeader),
 		GetBeaconCommitteeMock:    nil,
+		Eth1Hashes:                make(map[common.Hash]common.Hash),
 		SyncContributionPool:      makeSyncContributionPoolMock(t),
 		MockPeerDas:               mockPeerDas,
 	}
@@ -218,7 +225,10 @@ func (f *ForkChoiceStorageMock) FinalizedSlot() uint64 {
 }
 
 func (f *ForkChoiceStorageMock) GetEth1Hash(eth2Root common.Hash) common.Hash {
-	panic("implement me")
+	if f.Eth1Hashes != nil {
+		return f.Eth1Hashes[eth2Root]
+	}
+	return common.Hash{}
 }
 
 func (f *ForkChoiceStorageMock) GetHead(_ *state.CachingBeaconState) (common.Hash, uint64, error) {
