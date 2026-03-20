@@ -2,15 +2,13 @@ import * as core from '@actions/core';
 import * as github from '@actions/github';
 
 const acceptedWorkflows = [
-    '.github/workflows/ci.yml',
-    //'.github/workflows/lint.yml',
-    //'.github/workflows/manifest.yml',
+    '.github/workflows/ci-gate.yml',
     '.github/workflows/qa-clean-exit-block-downloading.yml',
     '.github/workflows/qa-clean-exit-snapshot-downloading.yml',
     '.github/workflows/qa-constrained-tip-tracking.yml',
     '.github/workflows/qa-rpc-integration-tests-gnosis.yml',
     '.github/workflows/qa-rpc-integration-tests-latest.yml',
-    '.github/workflows/qa-rpc-integration-tests-polygon.yml',
+    '.github/workflows/qa-rpc-integration-tests-remote.yml',
     '.github/workflows/qa-rpc-integration-tests.yml',
     '.github/workflows/qa-rpc-performance-tests.yml',
     '.github/workflows/qa-rpc-performance-comparison-tests.yml',
