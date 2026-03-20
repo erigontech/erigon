@@ -661,6 +661,8 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			}), te.cfg.engine, te.cfg.author, te.cfg.chainConfig)
 
 			var txTasks []exec.Task
+			// Per-block committed state cache for parallel workers' GetCommittedState.
+			blockStateCache := state.NewBlockStateCache()
 
 			for txIndex := -1; txIndex <= len(txs); txIndex++ {
 				if inputTxNum > 0 && inputTxNum <= initialTxNum {
@@ -684,6 +686,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 					Trace:            dbg.TraceTx(blockNum, txIndex),
 					Hooks:            te.hooks,
 					Logger:           te.logger,
+					BlockStateCache:  blockStateCache,
 				}
 
 				txTasks = append(txTasks, txTask)

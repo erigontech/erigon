@@ -204,11 +204,12 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						fmt.Println(applyResult.blockNum, "apply", applyResult.txNum, len(applyResult.writes))
 					}
 					blockUpdateCount += len(applyResult.writes)
-					// ApplyStateWrites (including step-boundary commitment) already
-					// ran on the producer side (execLoop) before the result crossed
-					// the channel. Only indexes remain for the apply loop.
-					err := pe.rs.ApplyTxIndexes(applyRoTx, applyResult.txNum, applyResult.receipt, applyResult.blobGasUsed,
-						applyResult.logs, applyResult.traceFroms, applyResult.traceTos)
+					err := pe.rs.ApplyStateWrites(ctx, applyRoTx, applyResult.blockNum, applyResult.txNum, applyResult.writes,
+						nil, applyResult.rules)
+					if err == nil {
+						err = pe.rs.ApplyTxIndexes(applyRoTx, applyResult.txNum, applyResult.receipt, applyResult.blobGasUsed,
+							applyResult.logs, applyResult.traceFroms, applyResult.traceTos)
+					}
 					if err == nil && pe.accumulator != nil {
 						pendingAccumulatorWrites = append(pendingAccumulatorWrites, applyResult.writes)
 					}
@@ -670,7 +671,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						} else {
 							reader = state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx))
 						}
-						ibs := state.New(state.NewBufferedReader(pe.rs, reader))
+						ibs := state.New(reader)
 						ibs.SetVersion(finalVersion.Incarnation)
 						localVersionMap := state.NewVersionMap(nil)
 						ibs.SetVersionMap(localVersionMap)
@@ -1659,23 +1660,28 @@ type blockExecutor struct {
 	result      *blockResult
 	applyCount  int
 	exhausted   *ErrLoopExhausted
+
+	// blockStateCache provides a stable pre-block snapshot of account data
+	// for GetCommittedState reads, unaffected by intra-block ApplyStateWrites.
+	blockStateCache *state.BlockStateCache
 }
 
 func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, accessList types.BlockAccessList, applyResults chan applyResult, profile bool, exhausted *ErrLoopExhausted) *blockExecutor {
 	return &blockExecutor{
-		blockNum:     blockNum,
-		blockHash:    blockHash,
-		begin:        time.Now(),
-		stats:        map[int]ExecutionStat{},
-		skipCheck:    map[int]bool{},
-		estimateDeps: map[int][]int{},
-		preValidated: map[int]bool{},
-		blockIO:      &state.VersionedIO{},
-		versionMap:   state.NewVersionMap(accessList),
-		profile:      profile,
-		applyResults: applyResults,
-		gasPool:      gasPool,
-		exhausted:    exhausted,
+		blockNum:        blockNum,
+		blockHash:       blockHash,
+		begin:           time.Now(),
+		stats:           map[int]ExecutionStat{},
+		skipCheck:       map[int]bool{},
+		estimateDeps:    map[int][]int{},
+		preValidated:    map[int]bool{},
+		blockIO:         &state.VersionedIO{},
+		versionMap:      state.NewVersionMap(accessList),
+		profile:         profile,
+		applyResults:    applyResults,
+		gasPool:         gasPool,
+		blockStateCache: state.NewBlockStateCache(),
+		exhausted:       exhausted,
 	}
 }
 
@@ -1890,9 +1896,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				if stateReader == nil {
 					if txTask.IsHistoric() {
-						stateReader = state.NewBufferedReader(pe.rs, state.NewHistoryReaderV3(applyTx, txTask.Version().TxNum))
+						stateReader = state.NewHistoryReaderV3(applyTx, txTask.Version().TxNum)
 					} else {
-						stateReader = state.NewBufferedReader(pe.rs, state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx)))
+						stateReader = state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx))
 					}
 				}
 
@@ -1985,6 +1991,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			if result.Receipt != nil {
 				applyResult.blockGasUsed = int64(result.ExecutionResult.BlockGasUsed)
 				be.blockGasUsed += result.ExecutionResult.BlockGasUsed
+				if dbg.TraceGas && dbg.TraceBlock(be.blockNum) {
+					fmt.Printf("GAS_ACCUM block=%d tx=%d gasUsed=%d blockTotal=%d\n",
+						be.blockNum, tx, result.ExecutionResult.BlockGasUsed, be.blockGasUsed)
+				}
 				receipt := *result.Receipt
 				applyResult.receipt = &receipt
 				applyResult.receipt.Logs = append([]*types.Log{}, result.Receipt.Logs...)
@@ -2003,16 +2013,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				if len(applyResult.writes) > 0 {
 					be.applyCount += len(applyResult.writes)
 				}
-			}
-
-			// Apply state writes (including step-boundary commitment) on the
-			// producer side (execLoop goroutine) BEFORE sending through the
-			// channel. This ensures the domain-base merge in applyVersionedWrites
-			// reads sd.mem in the same goroutine that owns the versionMap,
-			// avoiding cross-thread races on sd.mem.
-			if err := pe.rs.ApplyStateWrites(ctx, applyTx, applyResult.blockNum, applyResult.txNum, applyResult.writes,
-				nil, applyResult.rules); err != nil {
-				return nil, err
 			}
 
 			select {

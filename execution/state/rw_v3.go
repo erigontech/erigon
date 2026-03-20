@@ -166,21 +166,10 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 			}
 
 			if d.balance != nil || d.nonce != nil || d.incarnation != nil || d.codeHash != nil || d.code != nil {
-				// Read the current account from the domain as the base, then
-				// overlay only the fields present in the writes. LightCollector
-				// only emits fields that actually changed (see UpdateAccountData),
-				// so unchanged fields (e.g., nonce for a balance-only transfer)
-				// are nil and preserved from the domain state.
+				// All account fields are always present in the writes —
+				// LightCollector and versionedWriteCollector both emit all fields.
+				// No GetLatest needed; just build the account from the writes.
 				acc := accounts.NewAccount()
-				enc0, _, err := domains.GetLatest(kv.AccountsDomain, roTx, address[:])
-				if err != nil {
-					return err
-				}
-				if len(enc0) > 0 {
-					if err := accounts.DeserialiseV3(&acc, enc0); err != nil {
-						return err
-					}
-				}
 				if d.balance != nil {
 					acc.Balance = *d.balance
 				}
@@ -590,26 +579,19 @@ func (c *LightCollector) UpdateAccountData(address accounts.Address, original, a
 		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: SelfDestructPath, Val: true})
 	}
 
-	// Only emit fields that actually changed from the original. In the
-	// parallel executor, `original` comes from blockOriginStorage (pre-block
-	// values) via MakeWriteSet(useBlockOrigin=true). If we unconditionally
-	// emit all fields, a balance-only change (e.g., transfer TO the account)
-	// carries the pre-block nonce — overwriting a nonce increment from an
-	// earlier TX in the same block when ApplyStateWrites processes writes
-	// in txNum order. The domain-level DomainPut compares full serialized
-	// blobs, so it can't detect that only balance changed.
+	// Emit ALL fields from the post-execution account state. The `account`
+	// parameter has correct values from the IBS (which reads via versionMap
+	// in the parallel executor). The `original` parameter comes from
+	// blockOriginStorage (pre-block) and may be stale — we don't use it
+	// for field values. With all fields present, applyVersionedWrites
+	// doesn't need to read the domain base via GetLatest, avoiding
+	// cross-thread sd.mem races.
 	c.writes = append(c.writes,
 		&VersionedWrite{Address: address, Path: BalancePath, Val: accountCopy.Balance},
+		&VersionedWrite{Address: address, Path: NoncePath, Val: accountCopy.Nonce},
+		&VersionedWrite{Address: address, Path: IncarnationPath, Val: accountCopy.Incarnation},
+		&VersionedWrite{Address: address, Path: CodeHashPath, Val: accountCopy.CodeHash},
 	)
-	if accountCopy.Nonce != original.Nonce {
-		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: NoncePath, Val: accountCopy.Nonce})
-	}
-	if accountCopy.Incarnation != original.Incarnation {
-		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: IncarnationPath, Val: accountCopy.Incarnation})
-	}
-	if accountCopy.CodeHash != original.CodeHash {
-		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: CodeHashPath, Val: accountCopy.CodeHash})
-	}
 	return nil
 }
 
@@ -624,8 +606,14 @@ func (c *LightCollector) DeleteAccount(address accounts.Address, _ *accounts.Acc
 }
 
 func (c *LightCollector) WriteAccountStorage(address accounts.Address, _ uint64, key accounts.StorageKey, _, value uint256.Int) error {
-	// Always emit — the blockOriginStorage skip is wrong for the revert case.
-	// applyVersionedWrites pre-checks domain state to avoid spurious DomainPut/TouchKey.
+	// Do NOT skip writes when original == value. In the parallel executor,
+	// `original` comes from blockOriginStorage (pre-block value) via
+	// MakeWriteSet(useBlockOrigin=true). But an earlier TX in the same block
+	// may have written a different value to this slot. If the current TX
+	// reverts the slot to the block-start value, skipping the write leaves
+	// the domain with the earlier TX's value — causing incorrect state for
+	// subsequent blocks (wrong SSTORE gas, trie root mismatch).
+	// The domain-level DomainPut handles actual skip logic via GetLatest.
 	c.writes = append(c.writes, &VersionedWrite{Address: address, Path: StoragePath, Key: key, Val: value})
 	return nil
 }
@@ -886,6 +874,82 @@ func (r *ReaderV3) Trace() bool {
 
 func (r *ReaderV3) TracePrefix() string {
 	return r.tracePrefix
+}
+
+// BlockStateCache provides a stable, pre-block snapshot of account data for
+// parallel workers. It caches ReadAccountData results on first access so that
+// intra-block ApplyStateWrites (which update sd.mem) don't change the
+// "committed" view seen by GetCommittedState. This is the embryonic BlockState
+// from the IBS refactor plan (github.com/erigontech/erigon/issues/19623).
+//
+// Thread-safe: multiple worker goroutines share one cache per block.
+type BlockStateCache struct {
+	mu    sync.RWMutex
+	cache map[accounts.Address]*accounts.Account
+}
+
+func NewBlockStateCache() *BlockStateCache {
+	return &BlockStateCache{
+		cache: make(map[accounts.Address]*accounts.Account),
+	}
+}
+
+// Get returns a cached account, or nil if not cached.
+func (c *BlockStateCache) Get(addr accounts.Address) (*accounts.Account, bool) {
+	c.mu.RLock()
+	acc, ok := c.cache[addr]
+	c.mu.RUnlock()
+	return acc, ok
+}
+
+// Put caches an account. Nil means the account doesn't exist.
+func (c *BlockStateCache) Put(addr accounts.Address, acc *accounts.Account) {
+	c.mu.Lock()
+	c.cache[addr] = acc
+	c.mu.Unlock()
+}
+
+// CachedReaderV3 wraps ReaderV3 and caches ReadAccountData results in a
+// BlockStateCache so parallel workers see a stable pre-block committed view.
+type CachedReaderV3 struct {
+	*ReaderV3
+	blockCache *BlockStateCache
+}
+
+func NewCachedReaderV3(getter kv.TemporalGetter, blockCache *BlockStateCache) *CachedReaderV3 {
+	return &CachedReaderV3{
+		ReaderV3:   NewReaderV3(getter),
+		blockCache: blockCache,
+	}
+}
+
+// SetBlockStateCache updates the cache for a new block.
+func (r *CachedReaderV3) SetBlockStateCache(cache *BlockStateCache) {
+	r.blockCache = cache
+}
+
+func (r *CachedReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
+	if r.blockCache != nil {
+		if acc, ok := r.blockCache.Get(address); ok {
+			if acc == nil {
+				return nil, nil
+			}
+			result := *acc
+			return &result, nil
+		}
+	}
+	acc, err := r.ReaderV3.ReadAccountData(address)
+	if err != nil {
+		return nil, err
+	}
+	if r.blockCache != nil {
+		r.blockCache.Put(address, acc)
+	}
+	if acc != nil {
+		result := *acc
+		return &result, nil
+	}
+	return nil, nil
 }
 
 func (r *ReaderV3) HasStorage(address accounts.Address) (bool, error) {
