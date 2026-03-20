@@ -390,7 +390,11 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		return nil
 	}
 
-	if err := ExecV3(ctx, s, u, cfg, doms, rwTx, dbg.Exec3Parallel || cfg.experimentalBAL, to, logger); err != nil {
+	// Fork validation processes one block at a time, so parallelism provides
+	// no benefit and the parallel executor has state-computation bugs during
+	// reorgs (wrong trie roots from the finalizeWithIBS path). Disable it.
+	parallel := (dbg.Exec3Parallel || cfg.experimentalBAL) && s.SyncMode() != stages.ModeForkValidation
+	if err := ExecV3(ctx, s, u, cfg, doms, rwTx, parallel, to, logger); err != nil {
 		return err
 	}
 	return nil
