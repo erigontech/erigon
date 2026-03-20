@@ -906,6 +906,9 @@ func GetBlockByNumber(ctx context.Context, client *rpc.Client, blockNumber *big.
 	if err != nil {
 		return nil, err
 	}
+	if block.Number == nil {
+		return nil, fmt.Errorf("block %d not found (null RPC response)", blockNumber)
+	}
 
 	txs, err := unMarshalTransactions(block.Transactions, verify, isArbitrum, blockMetadata)
 	if err != nil {
