@@ -652,7 +652,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 			return err
 		}
 
-		if blockResult.complete {
+		if blockResult != nil {
 			pe.RLock()
 			blockExecutor, ok := pe.blockExecutors[blockResult.BlockNum]
 			pe.RUnlock()
@@ -808,7 +808,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 
 func (pe *parallelExecutor) processResults(ctx context.Context, applyTx kv.TemporalTx) (blockResult *blockResult, err error) {
 	rwsIt := pe.rws.Iter()
-	for rwsIt.HasNext() && (blockResult == nil || !blockResult.complete) {
+	for rwsIt.HasNext() && blockResult == nil {
 		txResult := rwsIt.PopNext()
 
 		if pe.cfg.syncCfg.ChaosMonkey && pe.enableChaosMonkey {
@@ -2022,10 +2022,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			if finalTask.IsHistoric() {
 				reader = state.NewHistoryReaderV3(applyTx, finalVersion.TxNum)
 			} else {
-				// Use CachedReaderV3 so the finalize IBS reads per-TX writes
-				// from the BlockStateCache (e.g., accumulated coinbase balance)
+				// Use CurrentCachedReaderV3 so the finalize IBS reads per-TX
+				// writes from the BlockStateCache write buffer (e.g.,
+				// accumulated coinbase balance with all tips from this block)
 				// instead of the stale pre-block sd.mem values.
-				reader = state.NewCachedReaderV3(pe.rs.Domains().AsGetter(applyTx), be.blockStateCache)
+				reader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetter(applyTx), be.blockStateCache)
 			}
 			pe.RUnlock()
 
@@ -2126,33 +2127,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		return be.result, nil
 	}
 
-	var lastTxNum uint64
-	if maxValidated >= 0 {
-		lastTxTask := be.tasks[maxValidated].Task
-		lastTxNum = lastTxTask.Version().TxNum
-	}
-
-	txTask := be.tasks[0].Task
-	// Flush partial block state too.
-	if err := be.blockStateCache.Flush(pe.rs.Domains(), applyTx, lastTxNum); err != nil {
-		return nil, err
-	}
-
-	return &blockResult{
-		BlockNum:     be.blockNum,
-		BlockTime:    txTask.BlockTime(),
-		BlockHash:    txTask.BlockHash(),
-		ParentHash:   txTask.ParentHash(),
-		StateRoot:    txTask.BlockRoot(),
-		BlockGasUsed: be.blockGasUsed,
-		BlobGasUsed:  be.blobGasUsed,
-		lastTxNum:    lastTxNum,
-		isPartial:    len(be.tasks) > 0 && be.tasks[0].Version().TxIndex != -1,
-		ApplyCount:   be.applyCount,
-		TxIO:         be.blockIO,
-		Stats:        be.stats,
-		Exhausted:    be.exhausted,
-	}, nil
+	// Block not yet complete — return nil. The caller (processResults)
+	// only acts on complete blockResults (blockResult.complete == true).
+	return nil, nil
 }
 
 func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExecutor) {

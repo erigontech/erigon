@@ -1190,13 +1190,25 @@ func (c *BlockStateCache) Flush(domains *execctx.SharedDomains, roTx kv.Temporal
 // BlockStateCache so parallel workers see a stable pre-block committed view.
 type CachedReaderV3 struct {
 	*ReaderV3
-	blockCache *BlockStateCache
+	blockCache  *BlockStateCache
+	readCurrent bool // when true, read from currentAccounts (post-TX) instead of committedAccounts (pre-block)
 }
 
 func NewCachedReaderV3(getter kv.TemporalGetter, blockCache *BlockStateCache) *CachedReaderV3 {
 	return &CachedReaderV3{
 		ReaderV3:   NewReaderV3(getter),
 		blockCache: blockCache,
+	}
+}
+
+// NewCurrentCachedReaderV3 creates a reader that reads from the write buffer
+// (currentAccounts) first, seeing all per-TX writes accumulated in the block.
+// Used by the block finalize IBS which needs the post-TX coinbase balance.
+func NewCurrentCachedReaderV3(getter kv.TemporalGetter, blockCache *BlockStateCache) *CachedReaderV3 {
+	return &CachedReaderV3{
+		ReaderV3:    NewReaderV3(getter),
+		blockCache:  blockCache,
+		readCurrent: true,
 	}
 }
 
@@ -1207,12 +1219,27 @@ func (r *CachedReaderV3) SetBlockStateCache(cache *BlockStateCache) {
 
 func (r *CachedReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	if r.blockCache != nil {
-		if acc, ok := r.blockCache.GetCommittedAccount(address); ok {
-			if acc == nil {
-				return nil, nil
+		if r.readCurrent {
+			// Read from write buffer — sees accumulated per-TX writes.
+			if enc, ok := r.blockCache.GetCurrentAccount(address); ok {
+				if enc == nil {
+					return nil, nil
+				}
+				var acc accounts.Account
+				if err := accounts.DeserialiseV3(&acc, enc); err != nil {
+					return nil, err
+				}
+				return &acc, nil
 			}
-			result := *acc
-			return &result, nil
+		} else {
+			// Read from committed cache — stable pre-block view.
+			if acc, ok := r.blockCache.GetCommittedAccount(address); ok {
+				if acc == nil {
+					return nil, nil
+				}
+				result := *acc
+				return &result, nil
+			}
 		}
 	}
 	acc, err := r.ReaderV3.ReadAccountData(address)
