@@ -39,6 +39,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.TxPoolGlobalQueueFlag,
 	&utils.TxPoolTraceSendersFlag,
 	&utils.TxPoolCommitEveryFlag,
+	&utils.TxPoolQueuedDormancyFlag,
 	&PruneDistanceFlag,
 	&PruneBlocksDistanceFlag,
 	&PruneModeFlag,
