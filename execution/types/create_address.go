@@ -30,11 +30,10 @@ import (
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func CreateAddress(a common.Address, nonce uint64) common.Address {
 	listLen := 21 + rlp.U64Len(nonce)
-	data := make([]byte, listLen+1)
-	pos := rlp.EncodeListPrefix(listLen, data)
-	av := a
-	pos += rlp.EncodeAddress(av[:], data[pos:])
-	rlp.EncodeU64(nonce, data[pos:])
+	data := make([]byte, 1+listLen)
+	pos := rlp.EncodeListPrefixToBuf(listLen, data)
+	pos += rlp.EncodeStringToBuf(a[:], data[pos:])
+	rlp.EncodeU64ToBuf(nonce, data[pos:])
 	return common.BytesToAddress(crypto.Keccak256(data)[12:])
 }
 

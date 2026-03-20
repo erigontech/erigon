@@ -123,9 +123,15 @@ func (e *ExecModule) UpdateForkChoice(ctx context.Context, req *executionproto.F
 	finalizedHash := gointerfaces.ConvertH256ToHash(req.FinalizedBlockHash)
 
 	outcomeCh := make(chan forkchoiceOutcome, 1)
+	// done is closed when the goroutine fully returns — after all defers
+	// (shared-state cleanup, semaphore release) have run. When we receive
+	// a non-Busy result, we wait on done so the caller can safely acquire
+	// the semaphore for a follow-up operation like AssembleBlock.
+	done := make(chan struct{})
 
 	// So we wait at most the amount specified by req.Timeout before just sending out
 	go func() {
+		defer close(done)
 		if err := e.updateForkChoice(e.bacgroundCtx, blockHash, safeHash, finalizedHash, outcomeCh); err != nil {
 			e.logger.Debug("updateforkchoice failed", "err", err)
 		}
@@ -142,6 +148,7 @@ func (e *ExecModule) UpdateForkChoice(ctx context.Context, req *executionproto.F
 				Status:          executionproto.ExecutionStatus_Busy,
 			}, nil
 		case outcome := <-outcomeCh:
+			<-done
 			return outcome.receipt, outcome.err
 		case <-ctx.Done():
 			e.logger.Debug("forkChoiceUpdate cancelled")
@@ -151,6 +158,7 @@ func (e *ExecModule) UpdateForkChoice(ctx context.Context, req *executionproto.F
 
 	select {
 	case outcome := <-outcomeCh:
+		<-done
 		return outcome.receipt, outcome.err
 	case <-ctx.Done():
 		e.logger.Debug("forkChoiceUpdate cancelled")
