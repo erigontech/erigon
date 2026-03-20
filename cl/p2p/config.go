@@ -78,15 +78,18 @@ func buildOptions(cfg *P2PConfig, privateKey *ecdsa.PrivateKey) ([]libp2p.Option
 
 	options = append(options, libp2p.Security(noise.ID, noise.New), libp2p.DisableRelay())
 
-	if cfg.HostAddress != "" {
+	// Prefer an explicit HostAddress; fall back to NAT-resolved ExternalIP.
+	externalAddr := cfg.HostAddress
+	if externalAddr == "" && cfg.ExternalIP != nil {
+		externalAddr = cfg.ExternalIP.String()
+	}
+	if externalAddr != "" {
 		options = append(options, libp2p.AddrsFactory(func(addrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
-			external, err := multiAddressBuilder(cfg.HostAddress, cfg.TCPPort)
+			external, err := multiAddressBuilder(externalAddr, cfg.TCPPort)
 			if err != nil {
-				return nil
-			} else {
-				addrs = append(addrs, external)
+				return addrs
 			}
-			return addrs
+			return append(addrs, external)
 		}))
 	}
 	if cfg.HostDNS != "" {
