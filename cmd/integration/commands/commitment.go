@@ -274,7 +274,14 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	defer rwTx.Rollback()
 
 	// remove all existing state commitment snapshots
-	if err := app.DeleteStateSnapshots(dirs, false, !yes, false, "0-999999", kv.CommitmentDomain.String()); err != nil {
+	if err := app.DeleteStateSnapshots(app.DeleteStateSnapshotsArgs{
+		Dirs:                   dirs,
+		RemoveLatest:           false,
+		PromptUserBeforeDelete: !yes,
+		DryRun:                 false,
+		StepRange:              "0-999999",
+		DomainNames:            []string{kv.CommitmentDomain.String()},
+	}); err != nil {
 		return err
 	}
 
