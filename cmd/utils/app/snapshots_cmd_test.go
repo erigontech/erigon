@@ -51,13 +51,13 @@ func Test_DeleteLatestStateSnaps(t *testing.T) {
 	confirmExist(t, file)
 
 	// delete 9-10
-	err := DeleteStateSnapshots(dirs, true, false, false, "", "receipt")
+	err := DeleteStateSnapshots(DeleteStateSnapshotsArgs{Dirs: dirs, RemoveLatest: true, DomainNames: []string{"receipt"}})
 	require.NoError(t, err)
 	file, _ = b.domain.DataFile(version.V1_0, 90, 100)
 	confirmDoesntExist(t, file)
 
 	// should delete 8-9
-	err = DeleteStateSnapshots(dirs, true, false, false, "", "receipt")
+	err = DeleteStateSnapshots(DeleteStateSnapshotsArgs{Dirs: dirs, RemoveLatest: true, DomainNames: []string{"receipt"}})
 	require.NoError(t, err)
 	file, _ = b.domain.DataFile(version.V1_0, 80, 90)
 	confirmDoesntExist(t, file)
@@ -77,7 +77,7 @@ func Test_DeleteLatestStateSnaps_DomainWithLargeRange(t *testing.T) {
 	domainFile, _ := b.domain.DataFile(version.V1_0, 0, 100)
 	confirmExist(t, domainFile)
 
-	err := DeleteStateSnapshots(dirs, true, false, false, "", "receipt")
+	err := DeleteStateSnapshots(DeleteStateSnapshotsArgs{Dirs: dirs, RemoveLatest: true, DomainNames: []string{"receipt"}})
 	require.NoError(t, err)
 	confirmDoesntExist(t, domainFile)
 }
@@ -98,7 +98,7 @@ func Test_DeleteLatestStateSnaps_DomainAndHistorySameEnd(t *testing.T) {
 	confirmExist(t, historyFile)
 	confirmExist(t, domainFile)
 
-	err := DeleteStateSnapshots(dirs, true, false, false, "", "receipt")
+	err := DeleteStateSnapshots(DeleteStateSnapshotsArgs{Dirs: dirs, RemoveLatest: true, DomainNames: []string{"receipt"}})
 	require.NoError(t, err)
 	confirmDoesntExist(t, historyFile)
 	confirmDoesntExist(t, domainFile)
@@ -215,7 +215,7 @@ func Test_DeleteStateSnaps_RemovesTmpFiles(t *testing.T) {
 	}
 
 	// Run DeleteStateSnapshots (non-dry-run)
-	err := DeleteStateSnapshots(dirs, true, false, false, "")
+	err := DeleteStateSnapshots(DeleteStateSnapshotsArgs{Dirs: dirs, RemoveLatest: true})
 	require.NoError(t, err)
 
 	// All .tmp files should be removed
@@ -251,7 +251,7 @@ func Test_DeleteStateSnaps_DryRunKeepsTmpFiles(t *testing.T) {
 	}
 
 	// Run DeleteStateSnapshots with dry-run=true
-	err := DeleteStateSnapshots(dirs, true, false, true, "")
+	err := DeleteStateSnapshots(DeleteStateSnapshotsArgs{Dirs: dirs, RemoveLatest: true, DryRun: true})
 	require.NoError(t, err)
 
 	// .tmp files should still exist (dry-run does not delete)

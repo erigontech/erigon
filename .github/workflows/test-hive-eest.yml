@@ -60,18 +60,24 @@ jobs:
           fi
           echo "Pruning docker system..."
           docker system prune -af --volumes
-      - name: Checkout Erigon go.mod
+      - name: Checkout Erigon meta
         uses: actions/checkout@v6
         with:
-          sparse-checkout: go.mod
+          sparse-checkout: |
+            go.mod
+            .github/workflows/hive-versions.json
           sparse-checkout-cone-mode: false
           path: erigon-src
+
+      - name: Read pinned Hive ref
+        id: hive-version
+        run: echo "ref=$(jq -r .hive_ref erigon-src/.github/workflows/hive-versions.json)" >> "$GITHUB_OUTPUT"
 
       - name: Checkout Hive
         uses: actions/checkout@v6
         with:
           repository: ethereum/hive
-          ref: master
+          ref: ${{ steps.hive-version.outputs.ref }}
           path: hive
     
       - name: Conditional Docker Login
