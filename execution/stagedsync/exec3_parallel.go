@@ -192,9 +192,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 		// StartChange (which arrives with the blockResult, after all txResults).
 		var pendingAccumulatorWrites []state.VersionedWrites
 
-		var currentBlockCache *state.BlockStateCache
-		var currentBlockNum uint64
-
 		for {
 			select {
 			case applyResult := <-applyResults:
@@ -207,20 +204,11 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						fmt.Println(applyResult.blockNum, "apply", applyResult.txNum, len(applyResult.writes))
 					}
 					blockUpdateCount += len(applyResult.writes)
-					// Look up the block-level state cache from the blockExecutor.
-					if applyResult.blockNum != currentBlockNum {
-						currentBlockCache = nil
-						if be, ok := pe.blockExecutors[applyResult.blockNum]; ok {
-							currentBlockCache = be.blockStateCache
-						}
-						currentBlockNum = applyResult.blockNum
-					}
-					err := pe.rs.ApplyStateWrites(ctx, applyRoTx, applyResult.blockNum, applyResult.txNum, applyResult.writes,
-						nil, applyResult.rules, currentBlockCache)
-					if err == nil {
-						err = pe.rs.ApplyTxIndexes(applyRoTx, applyResult.txNum, applyResult.receipt, applyResult.blobGasUsed,
-							applyResult.logs, applyResult.traceFroms, applyResult.traceTos)
-					}
+					// All ApplyStateWrites (including finalize) run in the
+					// execLoop, writing to BlockStateCache then flushing to
+					// sd.mem before the blockResult crosses the channel.
+					err := pe.rs.ApplyTxIndexes(applyRoTx, applyResult.txNum, applyResult.receipt, applyResult.blobGasUsed,
+						applyResult.logs, applyResult.traceFroms, applyResult.traceTos)
 					if err == nil && pe.accumulator != nil {
 						pendingAccumulatorWrites = append(pendingAccumulatorWrites, applyResult.writes)
 					}
@@ -247,14 +235,8 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						pendingAccumulatorWrites = pendingAccumulatorWrites[:0]
 					}
 
-					// Flush the block-level state cache to sd.mem before block
-					// finalize runs. The finalize IBS reads from sd.mem, so it
-					// needs to see all TX writes from this block.
-					if applyResult.blockStateCache != nil {
-						if err := applyResult.blockStateCache.Flush(pe.doms, applyRoTx, applyResult.lastTxNum); err != nil {
-							return err
-						}
-					}
+					// Cache flush happens in the execLoop (before blockResult is sent).
+					// sd.mem already has all TX writes when we reach here.
 
 					if applyResult.BlockNum > 0 && !applyResult.isPartial { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 						checkReceipts := !pe.cfg.vmConfig.StatelessExec &&
@@ -745,6 +727,12 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						fmt.Println(blockResult.BlockNum, "apply count", blockResult.ApplyCount)
 					}
 
+					// Apply finalize writes directly to sd.mem (cache already flushed).
+					if err := pe.rs.ApplyStateWrites(ctx, applyTx, blockResult.BlockNum, blockResult.lastTxNum,
+						applyWrites, nil, result.Rules(), nil); err != nil {
+						return err
+					}
+
 					select {
 					case blockExecutor.applyResults <- &txResult{
 						blockNum:              blockResult.BlockNum,
@@ -755,6 +743,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						traceFroms:            result.TraceFroms,
 						traceTos:              result.TraceTos,
 						cumulativeBlobGasUsed: blockExecutor.blobGasUsed,
+						isFinalize:            true,
 					}:
 					case <-ctx.Done():
 						return ctx.Err()
@@ -1037,6 +1026,7 @@ type txResult struct {
 	traceTos              map[accounts.Address]struct{}
 	writes                state.VersionedWrites
 	rules                 *chain.Rules
+	isFinalize            bool // block-end finalize writes — apply to sd.mem directly
 }
 
 type execTask struct {
@@ -2032,6 +2022,13 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 			}
 
+			// Apply state writes to the block cache on the producer side.
+			// This keeps sd.mem unchanged until the block-level flush.
+			if err := pe.rs.ApplyStateWrites(ctx, applyTx, applyResult.blockNum, applyResult.txNum, applyResult.writes,
+				nil, applyResult.rules, be.blockStateCache); err != nil {
+				return nil, err
+			}
+
 			select {
 			case be.applyResults <- &applyResult:
 			case <-ctx.Done():
@@ -2054,8 +2051,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 		txTask := be.tasks[len(be.tasks)-1].Task
 
-		var receipts types.Receipts
+		// Flush block state cache to sd.mem — all per-TX writes are now visible.
+		if err := be.blockStateCache.Flush(pe.rs.Domains(), applyTx, txTask.Version().TxNum); err != nil {
+			return nil, err
+		}
 
+		var receipts types.Receipts
 		for _, txResult := range be.results {
 			if receipt := txResult.Receipt; receipt != nil {
 				receipts = append(receipts, receipt)
@@ -2100,6 +2101,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	}
 
 	txTask := be.tasks[0].Task
+	// Flush partial block state too.
+	if err := be.blockStateCache.Flush(pe.rs.Domains(), applyTx, lastTxNum); err != nil {
+		return nil, err
+	}
 
 	return &blockResult{
 		BlockNum:     be.blockNum,
