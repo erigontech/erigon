@@ -31,7 +31,19 @@ case "$(uname -s)" in
     # Install ImDisk (virtual disk driver) via Chocolatey, then create and
     # format the RAM disk. Use cmd to run format so that the /fs flag is not
     # mangled by MSYS path conversion.
-    choco install imdisk -y --no-progress >&2
+    installed=false
+    for i in 1 2 3; do
+      if choco install imdisk -y --no-progress >&2; then
+        installed=true
+        break
+      fi
+      echo "create-ramdisk: choco install imdisk attempt $i failed, retrying..." >&2
+      sleep 15
+    done
+    if [ "$installed" = false ]; then
+      echo "::warning::create-ramdisk: imdisk install failed after 3 attempts; skipping RAM disk" >&2
+      exit 0
+    fi
     imdisk -a -s "${SIZE_MB}M" -m 'R:' >&2
     cmd //c 'format R: /fs:NTFS /q /y' >&2
     echo 'R:/'

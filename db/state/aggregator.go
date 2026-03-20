@@ -337,7 +337,7 @@ func (a *Aggregator) AddDependencyBtwnDomains(dependency kv.Domain, dependent kv
 	// only corresponding files should be included. e.g. commitment + account -
 	// cannot have merged account visibleFile, and unmerged commitment visibleFile for same step range.
 	if a.checker == nil {
-		a.checker = NewDependencyIntegrityChecker(a.dirs, a.logger)
+		a.checker = NewDependencyIntegrityChecker(a.logger)
 	}
 
 	a.checker.AddDependency(FromDomain(dependency), &DependentInfo{
@@ -357,7 +357,7 @@ func (a *Aggregator) AddDependencyBtwnHistoryII(domain kv.Domain) {
 	}
 
 	if a.checker == nil {
-		a.checker = NewDependencyIntegrityChecker(a.dirs, a.logger)
+		a.checker = NewDependencyIntegrityChecker(a.logger)
 	}
 
 	h := dd.History
@@ -387,6 +387,16 @@ func (a *Aggregator) DisableAllDependencies() {
 		return
 	}
 	a.checker.Disable()
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
+}
+
+func (a *Aggregator) DisableInterDomainDependencies() {
+	if a.checker == nil {
+		return
+	}
+	a.checker.DisableInterDomain()
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
 	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
@@ -938,7 +948,7 @@ func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastB
 }
 
 func (a *Aggregator) BuildFiles(toTxNum uint64) (err error) {
-	finished := a.BuildFilesInBackground(toTxNum)
+	finished := a.buildFilesInBackground(toTxNum, true)
 	if !(a.buildingFiles.Load() || a.mergingFiles.Load()) {
 		return nil
 	}
@@ -966,7 +976,7 @@ Loop:
 }
 
 // [from, to)
-func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step) error {
+func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step, doMerge bool) error {
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
 		return nil
 	}
@@ -991,11 +1001,13 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step) 
 			a.onFilesChange(nil)
 		}
 
-		go func() {
-			if err := a.MergeLoop(ctx); err != nil {
-				panic(err)
-			}
-		}()
+		if doMerge {
+			go func() {
+				if err := a.MergeLoop(ctx); err != nil {
+					panic(err)
+				}
+			}()
+		}
 	}()
 	return nil
 }
@@ -1554,7 +1566,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 			}
 			// commitment waits until storage and account are merged so it may be a bit behind (if merge was interrupted before)
 			if !dr.values.needMerge || cr.values.to < dr.values.from {
-				if mf := at.d[kd].lookupDirtyFileByItsRange(cr.values.from, cr.values.to); mf != nil {
+				if _, err := at.d[kd].lookupVisibleFileByRange(cr.values.from, cr.values.to); err == nil {
 					// file for required range exists, hold this domain from merge but allow to merge comitemnt
 					r.domain[k].values = MergeRange{}
 					at.a.logger.Debug("findMergeRange: commitment range is different but file exists in domain, hold further merge",
@@ -1776,9 +1788,12 @@ func (a *Aggregator) SetSnapshotBuildSema(semaphore *semaphore.Weighted) {
 func (a *Aggregator) SetProduceMod(produce bool) {
 	a.produce = produce
 }
+func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
+	return a.buildFilesInBackground(txNum, true)
+}
 
 // Returns channel which is closed when aggregation is done
-func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
+func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan struct{} {
 	fin := make(chan struct{})
 
 	if !a.produce {
@@ -1846,6 +1861,9 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 			}
 			a.onFilesChange(nil)
 		}
+		if !doMerge {
+			return
+		}
 		go func() {
 			defer close(fin)
 
@@ -1888,6 +1906,10 @@ func (at *AggregatorRoTx) HistorySeek(domain kv.Domain, key []byte, ts uint64, t
 
 func (at *AggregatorRoTx) HistoryRange(domain kv.Domain, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (it stream.KV, err error) {
 	return at.d[domain].ht.HistoryRange(fromTs, toTs, asc, limit, tx)
+}
+
+func (at *AggregatorRoTx) HistoryKeyTxNumRange(domain kv.Domain, fromTs, toTs int, asc order.By, limit int, tx kv.Tx) (stream.KU64, error) {
+	return at.d[domain].ht.HistoryKeyTxNumRange(fromTs, toTs, asc, limit, tx)
 }
 
 func (at *AggregatorRoTx) KeyCountInFiles(d kv.Domain, start, end uint64) (totalKeys uint64) {

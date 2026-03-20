@@ -198,11 +198,11 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 		BlockNumber: 1,
 		ChainConfig: &chain.Config{
 			ChainID:               big.NewInt(1),
-			HomesteadBlock:        new(big.Int),
-			ByzantiumBlock:        new(big.Int),
-			ConstantinopleBlock:   new(big.Int),
-			TangerineWhistleBlock: new(big.Int),
-			SpuriousDragonBlock:   new(big.Int),
+			HomesteadBlock:        common.NewUint64(0),
+			ByzantiumBlock:        common.NewUint64(0),
+			ConstantinopleBlock:   common.NewUint64(0),
+			TangerineWhistleBlock: common.NewUint64(0),
+			SpuriousDragonBlock:   common.NewUint64(0),
 		},
 		EVMConfig: vm.Config{
 			//JumpDestCache: vm.NewJumpDestCache(128),
@@ -390,7 +390,8 @@ func TestBlockhash(t *testing.T) {
 		BlockNumber: header.Number.Uint64(),
 	}
 	setDefaults(cfg)
-	cfg.ChainConfig.PragueTime = big.NewInt(1)
+	pragueTime := uint64(1)
+	cfg.ChainConfig.PragueTime = &pragueTime
 	ret, _, err := Execute(data, input, cfg, t.TempDir())
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
