@@ -455,9 +455,17 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			}
 			// EIP-8037: "Regular gas charge MUST be applied first. If the regular
 			// gas charge triggers an out-of-gas error, the state gas charge is
-			// not applied." Check regular sufficiency before touching state.
+			// not applied." Deduct regular gas before state gas so that any
+			// state-to-regular spill operates on the already-reduced balance.
 			if callContext.gas < dynamicCost.Regular {
 				return nil, callContext.Gas(), ErrOutOfGas
+			}
+			callContext.gas -= dynamicCost.Regular
+			if evm.chainRules.IsAmsterdam {
+				// EIP-8037: Track dynamic regular gas immediately after deduction.
+				// For CALL variants, callGasTemp is the gas forwarded to child (escrow),
+				// so we subtract it to get parent's actual cost.
+				evm.regularGasConsumed += dynamicCost.Regular - evm.CallGasTemp()
 			}
 			if dynamicCost.State > 0 {
 				cost += dynamicCost.State
@@ -465,14 +473,6 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 				if !ok {
 					return nil, callContext.Gas(), ErrOutOfGas
 				}
-			}
-			// for tracing: this gas consumption event is emitted below in the debug section.
-			callContext.gas -= dynamicCost.Regular
-			if evm.chainRules.IsAmsterdam {
-				// EIP-8037: Track dynamic regular gas immediately after deduction.
-				// For CALL variants, callGasTemp is the gas forwarded to child (escrow),
-				// so we subtract it to get parent's actual cost.
-				evm.regularGasConsumed += dynamicCost.Regular - evm.CallGasTemp()
 			}
 		}
 
