@@ -24,10 +24,11 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-
-	dirutil "github.com/erigontech/erigon/common/dir"
 	"sync"
 	"testing"
+	"time"
+
+	dirutil "github.com/erigontech/erigon/common/dir"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -45,18 +46,22 @@ type genesisCacheEntry struct {
 	db      kv.TemporalRwDB
 	genesis *types.Block
 	dirs    []string // temp directories to remove on cleanup
+	refs    int      // number of active users; protected by genesisDBMu
+	lastUse int64    // UnixNano timestamp of last acquire; protected by genesisDBMu
+	ready   chan struct{}
+	err     error // set once, before closing ready
 }
 
 // genesisDBCache caches one MDBX database per unique (fork, genesisSpecHash) pair.
 // The DB contains genesis KV state (headers, TDs, config) plus domain state
 // (account balances, code, storage) written via SharedDomains.
 // The cache is bounded to maxGenesisCacheSize entries to avoid exhausting disk.
+// When full, the least-recently-used entry with no active users is evicted.
 const maxGenesisCacheSize = 128
 
 var (
-	genesisDBCache    sync.Map   // map[string]*genesisCacheEntry
-	genesisDBMu       sync.Mutex // serializes genesis DB creation
-	genesisCacheCount int        // approximate count, protected by genesisDBMu
+	genesisDBMu    sync.Mutex // protects all fields below
+	genesisDBCache = make(map[string]*genesisCacheEntry)
 )
 
 // genesisSpecHash produces a deterministic hash of the genesis spec for cache keying.
@@ -114,48 +119,61 @@ func genesisSpecHash(g *types.Genesis) string {
 	return fmt.Sprintf("%x", h.Sum(nil)[:16])
 }
 
-// getOrCreateGenesisDB returns a cached genesis DB for the given fork+alloc,
-// creating it if necessary. The DB has both KV state (headers, TDs) and domain
-// state (accounts, code, storage) fully committed.
-func getOrCreateGenesisDB(fork string, gspec *types.Genesis) (kv.TemporalRwDB, *types.Block, error) {
-	key := fork + "/" + genesisSpecHash(gspec)
-
-	if entryI, ok := genesisDBCache.Load(key); ok {
-		e := entryI.(*genesisCacheEntry)
-		return e.db, e.genesis, nil
+// evictLRU finds the least-recently-used entry with refs==0, closes it, and
+// removes it from the cache. Returns true if an entry was evicted.
+// Caller must hold genesisDBMu.
+func evictLRU() bool {
+	var victimKey string
+	var victimEntry *genesisCacheEntry
+	for k, e := range genesisDBCache {
+		if e.refs > 0 {
+			continue
+		}
+		if victimEntry == nil || e.lastUse < victimEntry.lastUse {
+			victimKey = k
+			victimEntry = e
+		}
 	}
+	if victimEntry == nil {
+		return false // all entries in use
+	}
+	if victimEntry.db != nil {
+		victimEntry.db.Close()
+	}
+	dirs := victimEntry.dirs
+	delete(genesisDBCache, victimKey)
 
-	// Serialize creation to avoid races where a goroutine opens a RO tx
-	// before the genesis commit is finished.
+	// Remove temp dirs without holding the lock.
+	go func() {
+		for _, d := range dirs {
+			dirutil.RemoveAll(d)
+		}
+	}()
+	return true
+}
+
+// releaseGenesisDB decrements the reference count for a cache entry.
+func releaseGenesisDB(key string) {
 	genesisDBMu.Lock()
 	defer genesisDBMu.Unlock()
-	if entryI, ok := genesisDBCache.Load(key); ok {
-		e := entryI.(*genesisCacheEntry)
-		return e.db, e.genesis, nil
+	if e, ok := genesisDBCache[key]; ok {
+		e.refs--
 	}
-	// Bound the cache to avoid exhausting disk on CI ramdisks.
-	if genesisCacheCount >= maxGenesisCacheSize {
-		return nil, nil, fmt.Errorf("genesis cache full (%d entries)", genesisCacheCount)
-	}
+}
 
+// createGenesisDB creates a new genesis DB on disk. Called without holding genesisDBMu.
+func createGenesisDB(key string, gspec *types.Genesis) (kv.TemporalRwDB, *types.Block, []string, error) {
 	logger := log.New()
 	logger.SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
-	// Use a deterministic path so the same genesis DB can be found if the
-	// process creates it in a previous test package run.  This also keeps
-	// the number of temp dirs bounded by the number of unique genesis specs.
 	dir := filepath.Join(os.TempDir(), "erigon-genesis-"+key)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return nil, nil, fmt.Errorf("genesis cache: temp dir: %w", err)
+		return nil, nil, nil, fmt.Errorf("genesis cache: temp dir: %w", err)
 	}
 	dirs := datadir.New(dir)
-	// Use a sentinel testing.T to get proper DB initialization (tb.Context(),
-	// cleanup registration, etc.). We pass the parent test's t here — the DB
-	// will outlive individual subtests but be cleaned up when the parent finishes.
 	db := temporaltest.NewTestDB(nil, dirs)
 
 	// Step 1: CommitGenesisBlock writes headers, TDs, config to KV tables.
-	// Use separate dirs for GenesisToBlock's temp DB to avoid domain file conflicts.
 	genesisDirs := datadir.New(dir + "-genesis-tmp")
 	_ = os.MkdirAll(genesisDirs.Tmp, 0755)
 	_ = os.MkdirAll(genesisDirs.SnapDomain, 0755)
@@ -170,65 +188,113 @@ func getOrCreateGenesisDB(fork string, gspec *types.Genesis) (kv.TemporalRwDB, *
 		_, genesis, gerr = genesiswrite.CommitGenesisBlock(db, gspec, "", genesisDirs, logger)
 		return
 	}()
-	// Clean up GenesisToBlock's temp DB immediately — it used a 2TB MDBX map
-	// that exhausts CI ramdisks if left around.
 	dirutil.RemoveAll(genesisDirs.DataDir)
 	if err != nil {
 		db.Close()
-		return nil, nil, fmt.Errorf("genesis cache: CommitGenesisBlock: %w", err)
+		return nil, nil, nil, fmt.Errorf("genesis cache: CommitGenesisBlock: %w", err)
 	}
 
 	ctx := context.Background()
 
 	// Step 2: Write domain state via SharedDomains + ComputeGenesisCommitment.
-	// Without this, domain state is invisible through RO tx.
 	rwTx, err := db.BeginTemporalRw(ctx)
 	if err != nil {
 		db.Close()
-		return nil, nil, fmt.Errorf("genesis cache: BeginTemporalRw: %w", err)
+		return nil, nil, nil, fmt.Errorf("genesis cache: BeginTemporalRw: %w", err)
 	}
 	defer rwTx.Rollback() //nolint:gocritic
 
 	sd, err := execctx.NewSharedDomains(ctx, rwTx, logger)
 	if err != nil {
-		rwTx.Rollback()
 		db.Close()
-		return nil, nil, fmt.Errorf("genesis cache: NewSharedDomains: %w", err)
+		return nil, nil, nil, fmt.Errorf("genesis cache: NewSharedDomains: %w", err)
 	}
 
 	_, _, err = genesiswrite.ComputeGenesisCommitment(ctx, gspec, rwTx, sd, genesis.Header())
 	if err != nil {
 		sd.Close()
-		rwTx.Rollback()
 		db.Close()
-		return nil, nil, fmt.Errorf("genesis cache: ComputeGenesisCommitment: %w", err)
+		return nil, nil, nil, fmt.Errorf("genesis cache: ComputeGenesisCommitment: %w", err)
 	}
 
 	err = sd.Flush(ctx, rwTx)
 	sd.Close()
 	if err != nil {
-		rwTx.Rollback()
 		db.Close()
-		return nil, nil, fmt.Errorf("genesis cache: sd.Flush: %w", err)
+		return nil, nil, nil, fmt.Errorf("genesis cache: sd.Flush: %w", err)
 	}
 
 	err = rwTx.Commit()
 	if err != nil {
 		db.Close()
-		return nil, nil, fmt.Errorf("genesis cache: tx.Commit: %w", err)
+		return nil, nil, nil, fmt.Errorf("genesis cache: tx.Commit: %w", err)
 	}
+
 	// Step 3: Deploy Prague system contracts if needed.
 	if gspec.Config.IsPrague(0) {
 		if err := blockgen.InitPraguePreDeploys(db, logger); err != nil {
 			db.Close()
-			return nil, nil, fmt.Errorf("genesis cache: InitPraguePreDeploys: %w", err)
+			return nil, nil, nil, fmt.Errorf("genesis cache: InitPraguePreDeploys: %w", err)
 		}
 	}
 
-	entry := &genesisCacheEntry{db: db, genesis: genesis, dirs: []string{dir}}
-	genesisDBCache.Store(key, entry)
-	genesisCacheCount++
-	return db, genesis, nil
+	return db, genesis, []string{dir}, nil
+}
+
+// getOrCreateGenesisDB returns a cached genesis DB for the given fork+alloc,
+// creating it if necessary. The returned release function must be called when
+// the caller is done with the DB (typically via defer). The DB has both KV
+// state (headers, TDs) and domain state (accounts, code, storage) fully committed.
+func getOrCreateGenesisDB(fork string, gspec *types.Genesis) (kv.TemporalRwDB, *types.Block, func(), error) {
+	key := fork + "/" + genesisSpecHash(gspec)
+	now := time.Now().UnixNano()
+
+	genesisDBMu.Lock()
+
+	// Fast path: already cached and ready.
+	if e, ok := genesisDBCache[key]; ok {
+		e.refs++
+		e.lastUse = now
+		ready := e.ready
+		genesisDBMu.Unlock()
+		<-ready // wait for creation to finish (no-op if already closed)
+		if e.err != nil {
+			releaseGenesisDB(key)
+			return nil, nil, nil, e.err
+		}
+		return e.db, e.genesis, func() { releaseGenesisDB(key) }, nil
+	}
+
+	// Cache full — try to evict.
+	if len(genesisDBCache) >= maxGenesisCacheSize {
+		if !evictLRU() {
+			genesisDBMu.Unlock()
+			return nil, nil, nil, fmt.Errorf("genesis cache full (%d entries, all in use)", len(genesisDBCache))
+		}
+	}
+
+	// Reserve a placeholder so concurrent requests for the same key wait.
+	entry := &genesisCacheEntry{refs: 1, lastUse: now, ready: make(chan struct{})}
+	genesisDBCache[key] = entry
+	genesisDBMu.Unlock()
+
+	// Create the DB without holding the lock — allows other keys to proceed.
+	db, genesis, dirs, err := createGenesisDB(key, gspec)
+
+	genesisDBMu.Lock()
+	if err != nil {
+		entry.err = err
+		delete(genesisDBCache, key)
+		close(entry.ready)
+		genesisDBMu.Unlock()
+		return nil, nil, nil, err
+	}
+	entry.db = db
+	entry.genesis = genesis
+	entry.dirs = dirs
+	close(entry.ready)
+	genesisDBMu.Unlock()
+	return db, genesis, func() { releaseGenesisDB(key) }, nil
 }
 
 var cleanupOnce sync.Once
@@ -237,18 +303,17 @@ var cleanupOnce sync.Once
 func registerGenesisCacheCleanup(t *testing.T) {
 	cleanupOnce.Do(func() {
 		t.Cleanup(func() {
-			genesisDBCache.Range(func(key, value any) bool {
-				if e, ok := value.(*genesisCacheEntry); ok {
-					if e.db != nil {
-						e.db.Close()
-					}
-					for _, d := range e.dirs {
-						dirutil.RemoveAll(d)
-					}
+			genesisDBMu.Lock()
+			defer genesisDBMu.Unlock()
+			for key, e := range genesisDBCache {
+				if e.db != nil {
+					e.db.Close()
 				}
-				genesisDBCache.Delete(key)
-				return true
-			})
+				for _, d := range e.dirs {
+					dirutil.RemoveAll(d)
+				}
+				delete(genesisDBCache, key)
+			}
 		})
 	})
 }

@@ -611,12 +611,13 @@ func (bt *BlockTest) runLightweight(t *testing.T) error {
 	}
 
 	gspec := bt.genesis(config)
-	db, genesis, err := getOrCreateGenesisDB(bt.json.Network, gspec)
+	db, genesis, release, err := getOrCreateGenesisDB(bt.json.Network, gspec)
 	if err != nil {
 		// Fall back to the full Run method if genesis cache creation fails.
 		t.Logf("genesis cache failed, falling back to full Run: %v", err)
 		return bt.Run(t)
 	}
+	defer release()
 
 	// Validate genesis hash and state root — fall back to full Run if they don't match.
 	if genesis.Hash() != bt.json.Genesis.Hash || genesis.Root() != bt.json.Genesis.StateRoot {
