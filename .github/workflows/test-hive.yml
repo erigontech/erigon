@@ -48,19 +48,25 @@ jobs:
             sim-limit: compat
             max-allowed-failures: 56 # 56 missing eth_simulateV1 MaxGasUsed in Hive tests 
     steps:
-      - name: Checkout Erigon go.mod
+      - name: Checkout Erigon meta
         uses: actions/checkout@v6
         with:
-          sparse-checkout: go.mod
+          sparse-checkout: |
+            go.mod
+            .github/workflows/hive-versions.json
           sparse-checkout-cone-mode: false
           path: erigon-src
+
+      - name: Read pinned Hive ref
+        id: hive-version
+        run: echo "ref=$(jq -r .hive_ref erigon-src/.github/workflows/hive-versions.json)" >> "$GITHUB_OUTPUT"
 
       - name: Checkout Hive
         uses: actions/checkout@v6
         with:
           repository: ethereum/hive
           # version hive and update periodically/on-demand to prevent upstream changes in Hive affecting us with red CI
-          ref: 88786d9744dabb08bdaec8d8b53142cde6e6b79a
+          ref: ${{ steps.hive-version.outputs.ref }}
           path: hive
 
       - name: Setup go env and cache
