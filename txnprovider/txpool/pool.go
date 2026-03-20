@@ -46,7 +46,8 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/protocol/fixedgas"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -673,6 +674,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 	var toRemove []*metaTxn
 	count := 0
 	i := 0
+	availableStateGas := availableGas // EIP-8037: state gas is independently capped at block gas limit
 
 	defer func() {
 		p.logger.Debug("[txpool] Processing best request", "last", onTopOf, "txRequested", n, "txAvailable", len(best.ms), "txProcessed", i, "txReturned", count)
@@ -733,17 +735,19 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 		// this stage
 		isAATxn := mt.TxnSlot.TxType() == types.AccountAbstractionTxType
 		authorizationLen := uint64(len(mt.TxnSlot.AuthAndNonces))
-		intrinsicGasResult, _ := fixedgas.CalcIntrinsicGas(fixedgas.IntrinsicGasCalcArgs{
+		intrinsicGasResult, _ := mdgas.CalcIntrinsicGas(mdgas.IntrinsicGasCalcArgs{
 			Data:               make([]byte, mt.TxnSlot.GetDataLen()),
 			DataNonZeroLen:     uint64(mt.TxnSlot.GetDataNonZeroLen()),
 			AuthorizationsLen:  authorizationLen,
 			AccessListLen:      uint64(mt.TxnSlot.GetAccessListAddrCount()),
 			StorageKeysLen:     uint64(mt.TxnSlot.GetAccessListStorCount()),
+			CostPerStateByte:   misc.CostPerStateByte(p.blockGasLimit.Load()),
 			IsContractCreation: mt.TxnSlot.IsCreation(),
 			IsEIP2:             true,
 			IsEIP2028:          true,
 			IsEIP3860:          isEIP3860,
 			IsEIP7623:          isEIP7623,
+			IsEIP8037:          p.isAmsterdam(),
 			IsAATxn:            isAATxn,
 		})
 		intrinsicGas := intrinsicGasResult.RegularGas
@@ -754,7 +758,13 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 			// we might find another txn with a low enough intrinsic gas to include so carry on
 			continue
 		}
+		// EIP-8037: block gas is max(blockRegularGasUsed, blockStateGasUsed),
+		// so state gas is independently capped at the block gas limit.
+		if intrinsicGasResult.StateGas > availableStateGas {
+			continue
+		}
 		availableGas -= intrinsicGas
+		availableStateGas -= intrinsicGasResult.StateGas
 		availableRlpSpace -= len(rlpTxn)
 		txns.Txns[count] = rlpTxn
 		// For blob transactions, slot.Txn is the inner BlobTx without the
@@ -907,22 +917,27 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 	}
 
 	isAATxn := txn.TxType() == types.AccountAbstractionTxType
-	intrinsicGasResult, overflow := fixedgas.CalcIntrinsicGas(fixedgas.IntrinsicGasCalcArgs{
+	intrinsicGasResult, overflow := mdgas.CalcIntrinsicGas(mdgas.IntrinsicGasCalcArgs{
 		Data:               make([]byte, txn.GetDataLen()),
 		DataNonZeroLen:     uint64(txn.GetDataNonZeroLen()),
 		AuthorizationsLen:  uint64(authorizationLen),
 		AccessListLen:      uint64(txn.GetAccessListAddrCount()),
 		StorageKeysLen:     uint64(txn.GetAccessListStorCount()),
+		CostPerStateByte:   misc.CostPerStateByte(p.blockGasLimit.Load()),
 		IsContractCreation: txn.IsCreation(),
 		IsEIP2:             true,
 		IsEIP2028:          true,
 		IsEIP3860:          isEIP3860,
 		IsEIP7623:          isPrague,
+		IsEIP8037:          p.isAmsterdam(),
 		IsAATxn:            isAATxn,
 	})
-	gas := intrinsicGasResult.RegularGas
-	if isPrague && intrinsicGasResult.FloorGasCost > gas {
-		gas = intrinsicGasResult.FloorGasCost
+	gas := mdgas.MdGas{
+		Regular: intrinsicGasResult.RegularGas,
+		State:   intrinsicGasResult.StateGas,
+	}
+	if isPrague && intrinsicGasResult.FloorGasCost > gas.Regular {
+		gas.Regular = intrinsicGasResult.FloorGasCost
 	}
 
 	if txn.Traced {
@@ -934,7 +949,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		}
 		return txpoolcfg.GasUintOverflow
 	}
-	if gas > txn.GetGas() {
+	if gas.Total() > txn.GetGas() {
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas > txn.gas idHash=%x gas=%d, txn.gas=%d", txn.IDHash, gas, txn.GetGas()))
 		}
@@ -946,7 +961,16 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		}
 		return txpoolcfg.GasLimitTooHigh
 	}
-	if txn.GetGas() > params.MaxTxnGasLimit {
+	if p.isAmsterdam() {
+		// EIP-8037: only intrinsic regular gas (including calldata floor) is capped;
+		// state gas lives in a separate dimension and must not be included.
+		if gas.Regular > params.MaxTxnGasLimit {
+			if txn.Traced {
+				p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic regular gas > max gas limit idHash=%x gas=%d", txn.IDHash, gas))
+			}
+			return txpoolcfg.GasLimitTooHigh
+		}
+	} else if txn.GetGas() > params.MaxTxnGasLimit {
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx txn.gas > max gas limit idHash=%x gas=%d", txn.IDHash, txn.GetGas()))
 		}

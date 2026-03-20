@@ -39,16 +39,17 @@ type BlockContext struct {
 	PostApplyMessage PostApplyMessageFunc
 
 	// Block information
-	Coinbase    accounts.Address // Provides information for COINBASE
-	GasLimit    uint64           // Provides information for GASLIMIT
-	MaxGasLimit bool             // Use GasLimit override for 2^256-1 (to be compatible with OpenEthereum's trace_call)
-	BlockNumber uint64           // Provides information for NUMBER
-	Time        uint64           // Provides information for TIME
-	Difficulty  uint256.Int      // Provides information for DIFFICULTY
-	BaseFee     uint256.Int      // Provides information for BASEFEE
-	PrevRanDao  *common.Hash     // Provides information for PREVRANDAO
-	BlobBaseFee uint256.Int      // Provides information for BLOBBASEFEE
-	SlotNumber  uint64           // Provides information for SLOTNUM
+	Coinbase         accounts.Address // Provides information for COINBASE
+	GasLimit         uint64           // Provides information for GASLIMIT
+	MaxGasLimit      bool             // Use GasLimit override for 2^256-1 (to be compatible with OpenEthereum's trace_call)
+	BlockNumber      uint64           // Provides information for NUMBER
+	Time             uint64           // Provides information for TIME
+	Difficulty       uint256.Int      // Provides information for DIFFICULTY
+	BaseFee          uint256.Int      // Provides information for BASEFEE
+	PrevRanDao       *common.Hash     // Provides information for PREVRANDAO
+	BlobBaseFee      uint256.Int      // Provides information for BLOBBASEFEE
+	SlotNumber       uint64           // Provides information for SLOTNUM
+	CostPerStateByte uint64           // Holds the calculated cost per state byte for the given block
 }
 
 // TxContext provides the EVM with information about a transaction.
@@ -66,8 +67,9 @@ type TxContext struct {
 // message no matter the execution itself is successful or not.
 type ExecutionResult struct {
 	ReceiptGasUsed       uint64 // Gas used by the transaction with refunds (what the user pays) - see EIP-7778
-	BlockGasUsed         uint64 // Gas used for block limit accounting - see EIP-7778
-	MaxGasUsed           uint64
+	BlockRegularGasUsed  uint64 // Per-tx regular gas for block-level accounting (pre-Amsterdam: same as block gas)
+	BlockStateGasUsed    uint64 // Per-tx state gas for block-level Bottleneck (EIP-8037)
+	MaxGasUsed           uint64 // Gas used by the transaction before refunds
 	Err                  error  // Any error encountered during the execution(listed in core/vm/errors.go)
 	Reverted             bool   // Whether the execution was aborted by `REVERT`
 	ReturnData           []byte // Returned data from evm(function result or data supplied with revert opcode)

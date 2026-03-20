@@ -379,3 +379,9 @@ func enable7843(jt *JumpTable) {
 		numPush:     1,
 	}
 }
+
+// enable8037 applies EIP-8037 (State Creation Gas Cost Increase)
+func enable8037(jt *JumpTable) {
+	jt[CREATE].constantGas = params.CreateGasEIP8037
+	jt[CREATE2].constantGas = params.Create2GasEIP8037
+}
