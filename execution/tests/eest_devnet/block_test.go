@@ -55,9 +55,7 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip8037_state_creation_gas_cost_increase/test_call_oog_reservoir_inflation_detection.json`)   // block=1, gas used by execution: 82640, in header: 214128
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip8037_state_creation_gas_cost_increase/test_sstore_oog_reservoir_inflation_detection.json`) // block=1, block access list mismatch
 	bt.SkipLoad(`^for_amsterdam/frontier/create/test_create_deposit_oog.json`)                                                          // block=1, enough_gas_False subtests still fail (different bug)
-	bt.SkipLoad(`^for_amsterdam/frontier/opcodes/test_genesis_hash_available.json`)                                                     // block=257, gas used by execution: 62432, in header: 37568
 	bt.SkipLoad(`^for_amsterdam/frontier/opcodes/test_value_transfer_gas_calculation.json`)                                             // block=1, gas used by execution: 37443, in header: 168931
-	bt.SkipLoad(`^for_amsterdam/frontier/scenarios/test_scenarios.json`)                                                                // block=2, gas used by execution: 54514, in header: 349432
 
 	bt.Walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root
