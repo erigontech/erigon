@@ -50,9 +50,13 @@ type genesisCacheEntry struct {
 // genesisDBCache caches one MDBX database per unique (fork, genesisSpecHash) pair.
 // The DB contains genesis KV state (headers, TDs, config) plus domain state
 // (account balances, code, storage) written via SharedDomains.
+// The cache is bounded to maxGenesisCacheSize entries to avoid exhausting disk.
+const maxGenesisCacheSize = 128
+
 var (
-	genesisDBCache sync.Map   // map[string]*genesisCacheEntry
-	genesisDBMu    sync.Mutex // serializes genesis DB creation
+	genesisDBCache     sync.Map   // map[string]*genesisCacheEntry
+	genesisDBMu        sync.Mutex // serializes genesis DB creation
+	genesisCacheCount  int        // approximate count, protected by genesisDBMu
 )
 
 // genesisSpecHash produces a deterministic hash of the genesis spec for cache keying.
@@ -129,6 +133,11 @@ func getOrCreateGenesisDB(fork string, gspec *types.Genesis) (kv.TemporalRwDB, *
 		e := entryI.(*genesisCacheEntry)
 		return e.db, e.genesis, nil
 	}
+	// Bound the cache to avoid exhausting disk on CI ramdisks.
+	if genesisCacheCount >= maxGenesisCacheSize {
+		return nil, nil, fmt.Errorf("genesis cache full (%d entries)", genesisCacheCount)
+	}
+
 	logger := log.New()
 	logger.SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
@@ -218,6 +227,7 @@ func getOrCreateGenesisDB(fork string, gspec *types.Genesis) (kv.TemporalRwDB, *
 
 	entry := &genesisCacheEntry{db: db, genesis: genesis, dirs: []string{dir}}
 	genesisDBCache.Store(key, entry)
+	genesisCacheCount++
 	return db, genesis, nil
 }
 
