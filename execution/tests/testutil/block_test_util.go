@@ -732,6 +732,26 @@ func (bt *BlockTest) runLightweight(t *testing.T) error {
 			}
 		}
 
+		// Pre-check: validate withdrawals root matches actual withdrawals.
+		if header.WithdrawalsHash != nil {
+			computedRoot := types.DeriveSha(types.Withdrawals(cb.Withdrawals()))
+			if computedRoot != *header.WithdrawalsHash {
+				if isExpectedInvalid(b) {
+					continue
+				}
+				return fmt.Errorf("block #%v withdrawals root mismatch: computed %x, header %x", cb.Number(), computedRoot, *header.WithdrawalsHash)
+			}
+		}
+
+		// Pre-check: validate transactions root matches actual transactions.
+		computedTxRoot := types.DeriveSha(cb.Transactions())
+		if computedTxRoot != header.TxHash {
+			if isExpectedInvalid(b) {
+				continue
+			}
+			return fmt.Errorf("block #%v transactions root mismatch: computed %x, header %x", cb.Number(), computedTxRoot, header.TxHash)
+		}
+
 		// Allocate txNums: begin-of-block system tx + per-tx + end-of-block.
 		txNum++
 		stateReader := state.NewReaderV3(overlay)
