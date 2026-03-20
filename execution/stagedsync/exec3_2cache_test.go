@@ -218,3 +218,102 @@ func TestNotifyAccumulatorFromVersionedWrites(t *testing.T) {
 	require.Equal(t, storageVal.Bytes(), changes[0].Changes[0].StorageChanges[0].Data,
 		"ChangeStorage must populate StorageChange.Data")
 }
+
+// TestUpdateBufferedAccountsFromCollectorWrites verifies that
+// UpdateBufferedAccounts correctly populates rs.accounts from VersionedWrites
+// produced by LightCollector. This is the fix for the cross-block timing hole
+// when the direct finalizeTx path bypasses versionedWriteCollector.
+//
+// Without UpdateBufferedAccounts, block N+1 workers reading via bufferedReader
+// would see stale state for accounts modified by block N's regular TXs.
+func TestUpdateBufferedAccountsFromCollectorWrites(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires mdbx")
+	}
+
+	tx, domains := setup2CacheTest(t)
+
+	addr := accounts.InternAddress(common.HexToAddress("0xCAFE"))
+	lgr := log.New()
+
+	rs := state.NewStateV3Buffered(state.NewStateV3(domains, ethconfig.Sync{}, lgr))
+
+	// Simulate the direct finalizeTx path: LightCollector captures writes
+	// but does NOT update rs.accounts.
+	collector := state.NewLightCollector()
+	account := &accounts.Account{Balance: *uint256.NewInt(999), Nonce: 42}
+	original := &accounts.Account{}
+	err := collector.UpdateAccountData(addr, original, account)
+	require.NoError(t, err)
+
+	writes := collector.TakeWrites()
+
+	// Before UpdateBufferedAccounts: bufferedReader should NOT see the account.
+	baseReader := state.NewReaderV3(domains.AsGetter(tx))
+	bufferedRdr := state.NewBufferedReader(rs, baseReader)
+	ibsBefore := state.New(bufferedRdr)
+
+	gotBal, err := ibsBefore.GetBalance(addr)
+	require.NoError(t, err)
+	require.Equal(t, uint64(0), gotBal.Uint64(),
+		"before UpdateBufferedAccounts, bufferedReader must NOT see the account")
+
+	// Call UpdateBufferedAccounts — this is what the fix does.
+	rs.UpdateBufferedAccounts(writes)
+
+	// After UpdateBufferedAccounts: bufferedReader MUST see the account.
+	ibsAfter := state.New(state.NewBufferedReader(rs, baseReader))
+
+	gotBal, err = ibsAfter.GetBalance(addr)
+	require.NoError(t, err)
+	require.Equal(t, uint64(999), gotBal.Uint64(),
+		"after UpdateBufferedAccounts, bufferedReader must see the correct balance")
+
+	gotNonce, err := ibsAfter.GetNonce(addr)
+	require.NoError(t, err)
+	require.Equal(t, uint64(42), gotNonce,
+		"after UpdateBufferedAccounts, bufferedReader must see the correct nonce")
+}
+
+// TestUpdateBufferedAccountsDeletedAccount verifies that
+// UpdateBufferedAccounts correctly handles account deletion (SelfDestructPath
+// without account fields).
+func TestUpdateBufferedAccountsDeletedAccount(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires mdbx")
+	}
+
+	tx, domains := setup2CacheTest(t)
+
+	addr := accounts.InternAddress(common.HexToAddress("0xDEAD"))
+	lgr := log.New()
+
+	rs := state.NewStateV3Buffered(state.NewStateV3(domains, ethconfig.Sync{}, lgr))
+
+	// First, populate rs.accounts with a live account (simulating a previous block).
+	liveCollector := state.NewVersionedWriteCollector(rs)
+	liveAccount := &accounts.Account{Balance: *uint256.NewInt(100), Nonce: 1}
+	err := liveCollector.UpdateAccountData(addr, &accounts.Account{}, liveAccount)
+	require.NoError(t, err)
+
+	// Verify the account is visible.
+	baseReader := state.NewReaderV3(domains.AsGetter(tx))
+	ibsLive := state.New(state.NewBufferedReader(rs, baseReader))
+	gotBal, err := ibsLive.GetBalance(addr)
+	require.NoError(t, err)
+	require.Equal(t, uint64(100), gotBal.Uint64())
+
+	// Now simulate a delete via LightCollector + UpdateBufferedAccounts.
+	delCollector := state.NewLightCollector()
+	err = delCollector.DeleteAccount(addr, liveAccount)
+	require.NoError(t, err)
+
+	rs.UpdateBufferedAccounts(delCollector.TakeWrites())
+
+	// After deletion, bufferedReader must return nil for the account.
+	ibsDeleted := state.New(state.NewBufferedReader(rs, baseReader))
+	gotBal, err = ibsDeleted.GetBalance(addr)
+	require.NoError(t, err)
+	require.Equal(t, uint64(0), gotBal.Uint64(),
+		"after UpdateBufferedAccounts with delete, account must appear deleted")
+}

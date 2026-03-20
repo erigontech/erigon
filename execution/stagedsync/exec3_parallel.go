@@ -1947,6 +1947,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				// collector populated by FinalizeTx in the IBS path.
 				if txResult.CollectorWrites != nil {
 					txResult.writes = txResult.CollectorWrites
+					// The direct finalizeTx path bypasses versionedWriteCollector,
+					// so rs.accounts is not updated. We must update it here to
+					// maintain the cross-block timing hole bridge: block N+1
+					// workers may read block N state via bufferedReader before
+					// the async applyResults goroutine flushes to SharedDomains.
+					pe.rs.UpdateBufferedAccounts(txResult.CollectorWrites)
 				} else {
 					txResult.writes = collector.Writes()
 				}

@@ -586,6 +586,135 @@ func (c *LightCollector) WriteAccountStorage(address accounts.Address, _ uint64,
 
 func (c *LightCollector) CreateContract(_ accounts.Address) error { return nil }
 
+// UpdateBufferedAccounts updates rs.accounts from VersionedWrites to maintain
+// the cross-block timing hole bridge. This must be called during finalize for
+// any path that bypasses versionedWriteCollector (e.g. the direct finalizeTx
+// path which uses LightCollector writes).
+//
+// Without this, block N+1 workers reading via bufferedReader would see stale
+// state for accounts modified by block N's regular TXs, because:
+//   - rs.accounts wouldn't have the latest values (LightCollector doesn't update it)
+//   - SharedDomains may not have been updated yet (async applyResults)
+func (rs *StateV3Buffered) UpdateBufferedAccounts(writes VersionedWrites) {
+	if len(writes) == 0 {
+		return
+	}
+
+	type addrFields struct {
+		balance     *uint256.Int
+		nonce       *uint64
+		incarnation *uint64
+		codeHash    *accounts.CodeHash
+		code        []byte
+		storage     []storageItem
+		deleted     bool
+	}
+
+	perAddr := make(map[accounts.Address]*addrFields, len(writes)/4+1)
+	for _, w := range writes {
+		if w.Val == nil {
+			continue
+		}
+		d := perAddr[w.Address]
+		if d == nil {
+			d = &addrFields{}
+			perAddr[w.Address] = d
+		}
+		switch w.Path {
+		case BalancePath:
+			v := w.Val.(uint256.Int)
+			d.balance = &v
+		case NoncePath:
+			v := w.Val.(uint64)
+			d.nonce = &v
+		case IncarnationPath:
+			v := w.Val.(uint64)
+			d.incarnation = &v
+		case CodeHashPath:
+			v := w.Val.(accounts.CodeHash)
+			d.codeHash = &v
+		case CodePath:
+			d.code = w.Val.([]byte)
+		case SelfDestructPath:
+			// If account fields follow, this is cleanup+recreate.
+			// If no account fields follow, this is a pure delete.
+			d.deleted = true
+		case StoragePath:
+			d.storage = append(d.storage, storageItem{w.Key, w.Val.(uint256.Int)})
+		}
+	}
+
+	rs.accountsMutex.Lock()
+	defer rs.accountsMutex.Unlock()
+
+	for addr, d := range perAddr {
+		// Pure delete: selfDestruct with no account fields.
+		if d.deleted && d.balance == nil && d.nonce == nil && d.incarnation == nil && d.codeHash == nil {
+			obj, ok := rs.accounts[addr]
+			if !ok {
+				obj = &bufferedAccount{data: &deleted}
+				rs.accounts[addr] = obj
+			} else {
+				*obj = bufferedAccount{data: &deleted}
+			}
+			continue
+		}
+
+		// Account update (possibly after selfDestruct cleanup+recreate).
+		if d.balance != nil || d.nonce != nil || d.incarnation != nil || d.codeHash != nil {
+			obj, ok := rs.accounts[addr]
+			if !ok || obj.data == &deleted {
+				obj = &bufferedAccount{}
+				rs.accounts[addr] = obj
+			}
+
+			// Reconstruct account from fields. LightCollector always emits
+			// all 4 fields, so all pointers should be non-nil.
+			acc := accounts.NewAccount()
+			if d.balance != nil {
+				acc.Balance = *d.balance
+			}
+			if d.nonce != nil {
+				acc.Nonce = *d.nonce
+			}
+			if d.incarnation != nil {
+				acc.Incarnation = *d.incarnation
+			}
+			if d.codeHash != nil {
+				acc.CodeHash = *d.codeHash
+			}
+			obj.data = &acc
+		}
+
+		// Code update.
+		if d.code != nil {
+			obj, ok := rs.accounts[addr]
+			if !ok || obj.data == &deleted {
+				obj = &bufferedAccount{}
+				rs.accounts[addr] = obj
+			}
+			obj.code = d.code
+		}
+
+		// Storage updates.
+		if len(d.storage) > 0 {
+			obj, ok := rs.accounts[addr]
+			if !ok || obj.data == &deleted {
+				obj = &bufferedAccount{}
+				rs.accounts[addr] = obj
+			}
+			if obj.storage == nil {
+				obj.storage = btree.NewBTreeGOptions[storageItem](func(a, b storageItem) bool {
+					return a.key.Cmp(b.key) > 0
+				}, btree.Options{NoLocks: true})
+			}
+			for _, item := range d.storage {
+				obj.storage.Set(item)
+			}
+		}
+	}
+}
+
 // NotifyAccumulator drives txpool state-diff notifications from VersionedWrites.
 // It reconstructs account state from the per-field writes and calls
 // ChangeAccount/ChangeCode/ChangeStorage on the accumulator. StartChange must
