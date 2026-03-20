@@ -3079,3 +3079,122 @@ func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log
 	}
 	return agg
 }
+
+// ── du (disk usage) helpers ─────────────────────────────────────────────
+
+// duCategory constants for file classification.
+const (
+	duCatDomains    = "domains"
+	duCatHistory    = "history"
+	duCatInvIdx     = "inverted indices"
+	duCatAccessors  = "accessors"
+	duCatBlocks     = "block segments"
+	duCatCaplin     = "caplin"
+	duCatCommitHist = "commitment hist"
+	duCatRcache     = "rcache"
+	duCatOther      = "other"
+)
+
+// duFileInfo holds metadata for a single snapshot file.
+type duFileInfo struct {
+	Path     string
+	Name     string
+	Size     int64
+	Category string
+	From     uint64
+	To       uint64
+	IsState  bool // true for state files (history/idx/domain/accessor), false for block segments
+}
+
+// duClassifyFile maps a directory base name and file name to a duCategory.
+// dir is the immediate parent directory name (e.g. "domain", "history", "idx", "accessor", "caplin").
+func duClassifyFile(dir, name string) string {
+	lname := strings.ToLower(name)
+	ldir := strings.ToLower(dir)
+
+	// rcache files live in domain/, history/, or idx/
+	if strings.Contains(lname, "rcache") {
+		return duCatRcache
+	}
+
+	// commitment history/idx files
+	if (ldir == "history" || ldir == "idx") && strings.Contains(lname, "commitment") {
+		return duCatCommitHist
+	}
+
+	switch ldir {
+	case "domain":
+		return duCatDomains
+	case "history":
+		return duCatHistory
+	case "idx":
+		return duCatInvIdx
+	case "accessor":
+		return duCatAccessors
+	case "caplin":
+		return duCatCaplin
+	}
+
+	// Files directly under snapshots/ are block segments (.seg, .idx, .torrent, etc.)
+	return duCatBlocks
+}
+
+// duWalkSnapshots walks all snapshot subdirectories and collects file metadata.
+func duWalkSnapshots(dirs datadir.Dirs) ([]duFileInfo, error) {
+	// Directories to scan and whether they contain state files.
+	type scanDir struct {
+		path    string
+		isState bool
+	}
+	scanDirs := []scanDir{
+		{dirs.SnapDomain, true},
+		{dirs.SnapHistory, true},
+		{dirs.SnapIdx, true},
+		{dirs.SnapAccessors, true},
+		{dirs.SnapCaplin, false},
+		{dirs.Snap, false}, // top-level snapshots/ for block segments
+	}
+
+	var files []duFileInfo
+
+	for _, sd := range scanDirs {
+		entries, err := os.ReadDir(sd.path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("reading %s: %w", sd.path, err)
+		}
+
+		dirBase := filepath.Base(sd.path)
+
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			info, err := e.Info()
+			if err != nil {
+				continue
+			}
+
+			fi := duFileInfo{
+				Path:     filepath.Join(sd.path, e.Name()),
+				Name:     e.Name(),
+				Size:     info.Size(),
+				Category: duClassifyFile(dirBase, e.Name()),
+				IsState:  sd.isState,
+			}
+
+			// Parse range from filename.
+			parsed, _, ok := snaptype.ParseFileName(sd.path, e.Name())
+			if ok {
+				fi.From = parsed.From
+				fi.To = parsed.To
+			}
+
+			files = append(files, fi)
+		}
+	}
+
+	return files, nil
+}

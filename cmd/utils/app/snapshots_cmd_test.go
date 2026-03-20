@@ -411,3 +411,144 @@ func Test_DeleteLatestStateSnaps_NoCrossDomainSubsetRemoval(t *testing.T) {
 	file, _ := stoBundle.domain.DataFile(version.V1_0, RootNum(223), RootNum(224))
 	confirmDoesntExist(t, file)
 }
+
+// ── du tests ────────────────────────────────────────────────────────────
+
+func TestDUClassifyFile(t *testing.T) {
+	tests := []struct {
+		dir, name string
+		want      string
+	}{
+		// domains
+		{"domain", "v1.0-accounts.0-16.kv", duCatDomains},
+		{"domain", "v1.0-storage.16-32.kv", duCatDomains},
+
+		// rcache overrides domain
+		{"domain", "v1.0-rcache.0-16.kv", duCatRcache},
+		{"history", "v1.0-rcache.0-16.v", duCatRcache},
+		{"idx", "v1.0-rcache.0-16.ef", duCatRcache},
+
+		// commitment hist overrides history/idx
+		{"history", "v1.0-commitment.0-16.v", duCatCommitHist},
+		{"idx", "v1.0-commitment.0-16.ef", duCatCommitHist},
+
+		// commitment in domain is still domains (not commitment hist)
+		{"domain", "v1.0-commitment.0-16.kv", duCatDomains},
+
+		// plain categories
+		{"history", "v1.0-accounts.0-16.v", duCatHistory},
+		{"idx", "v1.0-accounts.0-16.ef", duCatInvIdx},
+		{"accessor", "v1.0-accounts.0-16.bt", duCatAccessors},
+		{"caplin", "v1.0-beaconblocks.0-100.seg", duCatCaplin},
+
+		// block segments (top-level snapshots dir)
+		{"snapshots", "v1.0-0-500-headers.seg", duCatBlocks},
+		{"snapshots", "v1.0-0-500-bodies.seg", duCatBlocks},
+		{"snapshots", "v1.0-0-500-transactions.idx", duCatBlocks},
+
+		// case insensitivity
+		{"Domain", "v1.0-accounts.0-16.kv", duCatDomains},
+		{"HISTORY", "v1.0-RCACHE.0-16.v", duCatRcache},
+
+		// unknown dir falls to block segments
+		{"something", "random.dat", duCatBlocks},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.dir+"/"+tt.name, func(t *testing.T) {
+			got := duClassifyFile(tt.dir, tt.name)
+			if got != tt.want {
+				t.Errorf("duClassifyFile(%q, %q) = %q, want %q", tt.dir, tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDUWalkSnapshots(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+
+	// Create mock files in various snapshot subdirectories.
+	writeFile := func(dir, name string, size int) {
+		path := filepath.Join(dir, name)
+		require.NoError(t, os.WriteFile(path, make([]byte, size), 0644))
+	}
+
+	// domain files (state file format: type.from-to)
+	writeFile(dirs.SnapDomain, "v1.0-accounts.0-16.kv", 1000)
+	writeFile(dirs.SnapDomain, "v1.0-rcache.0-16.kv", 200)
+
+	// history files
+	writeFile(dirs.SnapHistory, "v1.0-accounts.0-16.v", 500)
+	writeFile(dirs.SnapHistory, "v1.0-commitment.0-16.v", 300)
+
+	// idx files
+	writeFile(dirs.SnapIdx, "v1.0-accounts.0-16.ef", 400)
+
+	// accessor files
+	writeFile(dirs.SnapAccessors, "v1.0-accounts.0-16.bt", 250)
+
+	// caplin files
+	writeFile(dirs.SnapCaplin, "v1.0-beaconblocks.0-100.seg", 600)
+
+	// block segment files (top-level snapshots dir)
+	writeFile(dirs.Snap, "v1.0-0-500-headers.seg", 800)
+
+	files, err := duWalkSnapshots(dirs)
+	require.NoError(t, err)
+
+	// Build category->totalSize map.
+	catSizes := make(map[string]int64)
+	catCounts := make(map[string]int)
+	for _, f := range files {
+		catSizes[f.Category] += f.Size
+		catCounts[f.Category]++
+	}
+
+	require.Equal(t, int64(1000), catSizes[duCatDomains])
+	require.Equal(t, int64(200), catSizes[duCatRcache])
+	require.Equal(t, int64(500), catSizes[duCatHistory])
+	require.Equal(t, int64(300), catSizes[duCatCommitHist])
+	require.Equal(t, int64(400), catSizes[duCatInvIdx])
+	require.Equal(t, int64(250), catSizes[duCatAccessors])
+	require.Equal(t, int64(600), catSizes[duCatCaplin])
+	require.Equal(t, int64(800), catSizes[duCatBlocks])
+
+	// Check range parsing works for a state file.
+	var found bool
+	for _, f := range files {
+		if f.Name == "v1.0-accounts.0-16.kv" {
+			require.Equal(t, uint64(0), f.From)
+			require.Equal(t, uint64(16), f.To)
+			require.True(t, f.IsState)
+			found = true
+			break
+		}
+	}
+	require.True(t, found, "accounts domain file should be in results")
+
+	// Check block segment is not a state file.
+	for _, f := range files {
+		if f.Name == "v1.0-0-500-headers.seg" {
+			require.False(t, f.IsState)
+			// Block file ranges are multiplied by 1000 by ParseFileName
+			require.Equal(t, uint64(0), f.From)
+			require.Equal(t, uint64(500000), f.To)
+			break
+		}
+	}
+}
+
+func TestDUWalkSnapshots_EmptyDir(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	files, err := duWalkSnapshots(dirs)
+	require.NoError(t, err)
+	require.Empty(t, files)
+}
+
+func TestDUWalkSnapshots_MissingDir(t *testing.T) {
+	// Use Open instead of New to avoid creating directories.
+	dirs := datadir.Open(filepath.Join(t.TempDir(), "nonexistent"))
+	files, err := duWalkSnapshots(dirs)
+	require.NoError(t, err)
+	require.Empty(t, files)
+}
