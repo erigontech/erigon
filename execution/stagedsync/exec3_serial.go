@@ -548,7 +548,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 
 		if !txTask.HistoryExecution {
 			if err := se.rs.ApplyStateWrites(ctx, domainRoTx, txTask.BlockNumber(), txTask.TxNum, nil,
-				txTask.BalanceIncreaseSet, txTask.Rules()); err != nil {
+				txTask.BalanceIncreaseSet, txTask.Rules(), nil); err != nil {
 				return false, err
 			}
 			if err := se.rs.ApplyTxIndexes(domainRoTx, txTask.TxNum, applyReceipt, se.blobGasUsed,

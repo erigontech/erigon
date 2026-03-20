@@ -192,6 +192,9 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 		// StartChange (which arrives with the blockResult, after all txResults).
 		var pendingAccumulatorWrites []state.VersionedWrites
 
+		var currentBlockCache *state.BlockStateCache
+		var currentBlockNum uint64
+
 		for {
 			select {
 			case applyResult := <-applyResults:
@@ -204,8 +207,16 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						fmt.Println(applyResult.blockNum, "apply", applyResult.txNum, len(applyResult.writes))
 					}
 					blockUpdateCount += len(applyResult.writes)
+					// Look up the block-level state cache from the blockExecutor.
+					if applyResult.blockNum != currentBlockNum {
+						currentBlockCache = nil
+						if be, ok := pe.blockExecutors[applyResult.blockNum]; ok {
+							currentBlockCache = be.blockStateCache
+						}
+						currentBlockNum = applyResult.blockNum
+					}
 					err := pe.rs.ApplyStateWrites(ctx, applyRoTx, applyResult.blockNum, applyResult.txNum, applyResult.writes,
-						nil, applyResult.rules)
+						nil, applyResult.rules, currentBlockCache)
 					if err == nil {
 						err = pe.rs.ApplyTxIndexes(applyRoTx, applyResult.txNum, applyResult.receipt, applyResult.blobGasUsed,
 							applyResult.logs, applyResult.traceFroms, applyResult.traceTos)
@@ -234,6 +245,15 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							state.NotifyAccumulator(pe.accumulator, writes)
 						}
 						pendingAccumulatorWrites = pendingAccumulatorWrites[:0]
+					}
+
+					// Flush the block-level state cache to sd.mem before block
+					// finalize runs. The finalize IBS reads from sd.mem, so it
+					// needs to see all TX writes from this block.
+					if applyResult.blockStateCache != nil {
+						if err := applyResult.blockStateCache.Flush(pe.doms, applyRoTx, applyResult.lastTxNum); err != nil {
+							return err
+						}
 					}
 
 					if applyResult.BlockNum > 0 && !applyResult.isPartial { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
@@ -282,10 +302,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					blockUpdateCount = 0
 					blockApplyCount = 0
 
-					// Clear the account cache so block N+1's workers read
-					// fresh state from sd.mem (via ReaderV3) instead of stale
-					// entries left by block N's versionedWriteCollector during
-					// engine.Finalize → MakeWriteSet.
 					pe.rs.ClearAccountsCache()
 
 					// Signal that block N is fully applied — all state writes
@@ -986,26 +1002,27 @@ func (pe *parallelExecutor) wait(ctx context.Context) error {
 type applyResult any
 
 type blockResult struct {
-	BlockNum     uint64
-	BlockTime    uint64
-	BlockHash    common.Hash
-	ParentHash   common.Hash
-	StateRoot    common.Hash
-	Err          error
-	BlockGasUsed uint64
-	BlobGasUsed  uint64
-	lastTxNum    uint64
-	complete     bool
-	isPartial    bool
-	ApplyCount   int
-	TxIO         *state.VersionedIO
-	Receipts     types.Receipts
-	Stats        map[int]ExecutionStat
-	Deps         *state.DAG
-	AllDeps      map[int]map[int]bool
-	Exhausted    *ErrLoopExhausted
-	Header       *types.Header      // for accumulator.StartChange in apply loop
-	Txs          types.Transactions // for accumulator.StartChange in apply loop
+	BlockNum        uint64
+	BlockTime       uint64
+	BlockHash       common.Hash
+	ParentHash      common.Hash
+	StateRoot       common.Hash
+	Err             error
+	BlockGasUsed    uint64
+	BlobGasUsed     uint64
+	lastTxNum       uint64
+	complete        bool
+	isPartial       bool
+	ApplyCount      int
+	TxIO            *state.VersionedIO
+	Receipts        types.Receipts
+	Stats           map[int]ExecutionStat
+	Deps            *state.DAG
+	AllDeps         map[int]map[int]bool
+	Exhausted       *ErrLoopExhausted
+	Header          *types.Header      // for accumulator.StartChange in apply loop
+	Txs             types.Transactions // for accumulator.StartChange in apply loop
+	blockStateCache *state.BlockStateCache
 }
 
 type txResult struct {
@@ -2052,25 +2069,26 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			txs = tt.Txs
 		}
 		be.result = &blockResult{
-			BlockNum:     be.blockNum,
-			BlockTime:    txTask.BlockTime(),
-			BlockHash:    txTask.BlockHash(),
-			ParentHash:   txTask.ParentHash(),
-			StateRoot:    txTask.BlockRoot(),
-			BlockGasUsed: be.blockGasUsed,
-			BlobGasUsed:  be.blobGasUsed,
-			lastTxNum:    txTask.Version().TxNum,
-			complete:     true,
-			isPartial:    isPartial,
-			ApplyCount:   be.applyCount,
-			TxIO:         be.blockIO,
-			Receipts:     receipts,
-			Stats:        be.stats,
-			Deps:         &deps,
-			AllDeps:      allDeps,
-			Exhausted:    be.exhausted,
-			Header:       header,
-			Txs:          txs,
+			BlockNum:        be.blockNum,
+			BlockTime:       txTask.BlockTime(),
+			BlockHash:       txTask.BlockHash(),
+			ParentHash:      txTask.ParentHash(),
+			StateRoot:       txTask.BlockRoot(),
+			BlockGasUsed:    be.blockGasUsed,
+			BlobGasUsed:     be.blobGasUsed,
+			lastTxNum:       txTask.Version().TxNum,
+			complete:        true,
+			isPartial:       isPartial,
+			ApplyCount:      be.applyCount,
+			TxIO:            be.blockIO,
+			Receipts:        receipts,
+			Stats:           be.stats,
+			Deps:            &deps,
+			AllDeps:         allDeps,
+			Exhausted:       be.exhausted,
+			Header:          header,
+			Txs:             txs,
+			blockStateCache: be.blockStateCache,
 		}
 		return be.result, nil
 	}
