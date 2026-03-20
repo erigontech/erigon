@@ -754,10 +754,16 @@ func (bt *BlockTest) runLightweight(t *testing.T) error {
 			return fmt.Errorf("block #%v transactions root mismatch: computed %x, header %x", cb.Number(), computedTxRoot, header.TxHash)
 		}
 
-		// Allocate txNums: begin-of-block system tx + per-tx + end-of-block.
+		// Execute block on a nested overlay so we can discard state changes
+		// if the block turns out to be invalid (e.g. wrong gas, bloom, receipts).
 		txNum++
-		stateReader := state.NewReaderV3(overlay)
-		stateWriter := state.NewWriter(overlay, nil, txNum)
+		blockOverlay, blockOverlayErr := membatchwithdb.NewMemoryBatch(overlay, "", logger)
+		if blockOverlayErr != nil {
+			return fmt.Errorf("block #%v NewMemoryBatch: %w", cb.Number(), blockOverlayErr)
+		}
+
+		stateReader := state.NewReaderV3(blockOverlay)
+		stateWriter := state.NewWriter(blockOverlay, nil, txNum)
 
 		blockHashFunc := protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
 			h := cr.GetHeader(hash, number)
@@ -786,6 +792,7 @@ func (bt *BlockTest) runLightweight(t *testing.T) error {
 		}()
 
 		if execErr != nil {
+			blockOverlay.Close() // discard state changes
 			if isExpectedInvalid(b) {
 				continue
 			}
@@ -794,11 +801,20 @@ func (bt *BlockTest) runLightweight(t *testing.T) error {
 		_ = execResult
 
 		if isExpectedInvalid(b) {
-			// Block was expected to be invalid but execution succeeded.
-			// Without canonical chain tracking we cannot detect this reliably,
-			// so we report it as an error to trigger fallback to the full Run.
+			blockOverlay.Close() // discard — block shouldn't have succeeded
 			return fmt.Errorf("block (index %d) insertion should have failed due to: %v", bi, b.ExpectException)
 		}
+
+		// Block is valid — merge the nested overlay into the main overlay.
+		if err := blockOverlay.Flush(ctx, overlay); err != nil {
+			blockOverlay.Close()
+			return fmt.Errorf("block #%v flush KV: %w", cb.Number(), err)
+		}
+		if err := blockOverlay.FlushDomains(overlay); err != nil {
+			blockOverlay.Close()
+			return fmt.Errorf("block #%v flush domains: %w", cb.Number(), err)
+		}
+		blockOverlay.Close()
 
 		// Validate RLP-decoded header against the test JSON (same as insertBlocks).
 		if err = validateHeader(b.BlockHeader, cb.HeaderNoCopy()); err != nil {
