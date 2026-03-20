@@ -21,7 +21,6 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
-	"math/big"
 	"os"
 	"sort"
 	"sync"
@@ -31,19 +30,11 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/membatchwithdb"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/execution/protocol"
-	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/vm"
-	"github.com/erigontech/erigon/node/rulesconfig"
 )
 
 // genesisCacheEntry holds a cached genesis DB and its genesis block.
@@ -225,188 +216,3 @@ func RegisterGenesisCacheCleanup(t *testing.T) {
 }
 
 
-// RunLightweight tries to execute the block test using a MemoryMutation overlay
-// on a shared, cached genesis DB. If the lightweight path encounters any error,
-// it falls back to the full BlockTest.Run path for authoritative results.
-func (bt *BlockTest) RunLightweight(t *testing.T) error {
-	if err := bt.runLightweight(t); err != nil {
-		return bt.Run(t) // lightweight path failed — fall back to full pipeline
-	}
-	return nil
-}
-
-func (bt *BlockTest) runLightweight(t *testing.T) error {
-	config, ok := testforks.Forks[bt.json.Network]
-	if !ok {
-		return testforks.UnsupportedForkError{Name: bt.json.Network}
-	}
-
-	gspec := bt.genesis(config)
-	db, genesis, err := getOrCreateGenesisDB(bt.json.Network, gspec)
-	if err != nil {
-		// Fall back to the full Run method if genesis cache creation fails.
-		t.Logf("genesis cache failed, falling back to full Run: %v", err)
-		return bt.Run(t)
-	}
-
-	// Validate genesis hash and state root — fall back to full Run if they don't match.
-	if genesis.Hash() != bt.json.Genesis.Hash || genesis.Root() != bt.json.Genesis.StateRoot {
-		return bt.Run(t)
-	}
-
-	ctx := context.Background()
-	logger := log.New()
-	logger.SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
-
-	// Open a RO temporal tx on the shared genesis DB.
-	roTx, err := db.BeginTemporalRo(ctx)
-	if err != nil {
-		return fmt.Errorf("BeginTemporalRo: %w", err)
-	}
-	defer roTx.Rollback()
-
-	// Create a MemoryMutation overlay for ephemeral writes.
-	overlay, err := membatchwithdb.NewMemoryBatch(roTx, "", logger)
-	if err != nil {
-		return fmt.Errorf("NewMemoryBatch: %w", err)
-	}
-	defer overlay.Close()
-
-	// Look up the starting txNum from genesis block.
-	txNum, err := rawdbv3.TxNums.Max(ctx, roTx, 0)
-	if err != nil {
-		return fmt.Errorf("TxNums.Max: %w", err)
-	}
-	txNum++ // next available
-
-	engine := rulesconfig.CreateRulesEngineBareBones(ctx, config, logger)
-	defer engine.Close()
-
-	// Build a lightweight chain reader with in-memory header/TD maps.
-	cr := &lightChainReader{
-		config:  config,
-		headers: make(map[common.Hash]*types.Header),
-		tds:     make(map[common.Hash]*big.Int),
-		tx:      overlay,
-	}
-
-	// Seed the chain reader with genesis header and TD.
-	cr.headers[genesis.Hash()] = genesis.Header()
-	genesisTd, _ := rawdb.ReadTd(roTx, genesis.Hash(), 0)
-	if genesisTd != nil {
-		cr.tds[genesis.Hash()] = genesisTd
-	}
-
-	lastBlockHash := genesis.Hash()
-
-	// Execute blocks.
-	for bi, b := range bt.json.Blocks {
-		cb, err := b.decode()
-		if err != nil {
-			if b.BlockHeader == nil {
-				continue // expected invalid block
-			}
-			return fmt.Errorf("block RLP decoding failed when expected to succeed: %w", err)
-		}
-
-		header := cb.Header()
-		parentHash := header.ParentHash
-		parentTd, hasTd := cr.tds[parentHash]
-		if !hasTd {
-			parentTd, _ = rawdb.ReadTd(overlay, parentHash, header.Number.Uint64()-1)
-		}
-
-		// Allocate 2 system txNums (begin/end of block) + 1 per tx.
-		txNum++ // begin-of-block system tx
-		stateReader := state.NewReaderV3(overlay)
-		stateWriter := state.NewWriter(overlay, nil, txNum)
-
-		blockHashFunc := protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
-			h := cr.GetHeader(hash, number)
-			if h == nil {
-				return nil, fmt.Errorf("header not found: %x at %d", hash, number)
-			}
-			return h, nil
-		})
-
-		// Verify block header before execution (gas limit, timestamp, etc.).
-		if verifyErr := engine.VerifyHeader(cr, header, false); verifyErr != nil {
-			if b.BlockHeader == nil {
-				continue // expected invalid block
-			}
-			return fmt.Errorf("block #%v header verification failed: %w", cb.Number(), verifyErr)
-		}
-		// Check gas used doesn't exceed gas limit (GAS_USED_OVERFLOW).
-		if header.GasUsed > header.GasLimit {
-			if b.BlockHeader == nil {
-				continue
-			}
-			return fmt.Errorf("block #%v gas used %d exceeds gas limit %d", cb.Number(), header.GasUsed, header.GasLimit)
-		}
-
-		// Wrap in panic recovery for blocks with malicious/invalid headers
-		// that cause panics in the EVM or consensus engine.
-		var execResult *protocol.EphemeralExecResult
-		var execErr error
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					execErr = fmt.Errorf("panic during block execution: %v", r)
-				}
-			}()
-			execResult, execErr = protocol.ExecuteBlockEphemerally(
-				config, &vm.Config{},
-				blockHashFunc, engine, cb,
-				stateReader, stateWriter,
-				cr, nil,
-				logger,
-			)
-		}()
-
-		if execErr != nil {
-			if b.BlockHeader == nil {
-				continue // expected invalid block
-			}
-			return fmt.Errorf("block #%v execution failed: %w", cb.Number(), execErr)
-		}
-
-		_ = execResult
-
-		if b.BlockHeader == nil {
-			// Block was expected to be invalid but execution succeeded.
-			// In the lightweight runner we cannot easily check canonicality,
-			// so we just treat it as an expected failure and continue.
-			_ = bi
-			continue
-		}
-
-		// Update txNum for the transactions in this block + end-of-block system tx.
-		txNum += uint64(cb.Transactions().Len())
-		txNum++ // end-of-block system tx
-
-		// Record the header and TD for subsequent blocks.
-		cr.headers[cb.Hash()] = header
-		blockTd := new(big.Int)
-		if parentTd != nil {
-			blockTd.Set(parentTd)
-		}
-		blockTd.Add(blockTd, header.Difficulty.ToBig())
-		cr.tds[cb.Hash()] = blockTd
-		lastBlockHash = cb.Hash()
-	}
-
-	// Validate last block hash.
-	if common.Hash(bt.json.BestBlock) != lastBlockHash {
-		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x",
-			bt.json.BestBlock, lastBlockHash)
-	}
-
-	// Validate post-state using the overlay.
-	newDB := state.New(state.NewReaderV3(overlay))
-	defer newDB.Release(false)
-	if err := bt.validatePostState(newDB); err != nil {
-		return fmt.Errorf("post state validation failed: %w", err)
-	}
-
-	return nil
-}
