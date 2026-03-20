@@ -24,12 +24,12 @@ type lightChainReader struct {
 	tx      kv.Tx                         // fallback for genesis reads
 }
 
-func (cr *lightChainReader) Config() *chain.Config                  { return cr.config }
-func (cr *lightChainReader) CurrentHeader() *types.Header           { return nil }
-func (cr *lightChainReader) CurrentFinalizedHeader() *types.Header  { return nil }
-func (cr *lightChainReader) CurrentSafeHeader() *types.Header       { return nil }
-func (cr *lightChainReader) FrozenBlocks() uint64                    { return 0 }
-func (cr *lightChainReader) FrozenBorBlocks(bool) uint64             { return 0 }
+func (cr *lightChainReader) Config() *chain.Config                 { return cr.config }
+func (cr *lightChainReader) CurrentHeader() *types.Header          { return nil }
+func (cr *lightChainReader) CurrentFinalizedHeader() *types.Header { return nil }
+func (cr *lightChainReader) CurrentSafeHeader() *types.Header      { return nil }
+func (cr *lightChainReader) FrozenBlocks() uint64                  { return 0 }
+func (cr *lightChainReader) FrozenBorBlocks(bool) uint64           { return 0 }
 
 func (cr *lightChainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
 	if h, ok := cr.headers[hash]; ok {

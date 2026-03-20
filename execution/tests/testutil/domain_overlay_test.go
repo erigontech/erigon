@@ -52,6 +52,7 @@ func TestDomainVisibilityAfterGenesis(t *testing.T) {
 	{
 		rwTx, err := db.BeginTemporalRw(ctx)
 		require.NoError(t, err)
+		defer rwTx.Rollback() //nolint:gocritic
 
 		sd, err := execctx.NewSharedDomains(ctx, rwTx, logger)
 		require.NoError(t, err)

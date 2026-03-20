@@ -47,7 +47,7 @@ type genesisCacheEntry struct {
 // The DB contains genesis KV state (headers, TDs, config) plus domain state
 // (account balances, code, storage) written via SharedDomains.
 var (
-	genesisDBCache sync.Map  // map[string]*genesisCacheEntry
+	genesisDBCache sync.Map   // map[string]*genesisCacheEntry
 	genesisDBMu    sync.Mutex // serializes genesis DB creation
 )
 
@@ -167,6 +167,7 @@ func getOrCreateGenesisDB(fork string, gspec *types.Genesis) (kv.TemporalRwDB, *
 		db.Close()
 		return nil, nil, fmt.Errorf("genesis cache: BeginTemporalRw: %w", err)
 	}
+	defer rwTx.Rollback() //nolint:gocritic
 
 	sd, err := execctx.NewSharedDomains(ctx, rwTx, logger)
 	if err != nil {
@@ -223,5 +224,3 @@ func RegisterGenesisCacheCleanup(t *testing.T) {
 		})
 	})
 }
-
-
