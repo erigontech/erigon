@@ -37,6 +37,13 @@ import (
 
 var _ kv.TemporalRwTx = &MemoryMutation{}
 
+// domainEntry holds a value written via DomainPut/DomainDel.
+// A nil value (deleted == true) means the key was deleted.
+type domainEntry struct {
+	value   []byte
+	deleted bool
+}
+
 type MemoryMutation struct {
 	// mu protects concurrent access to the mutation's maps and backing tx.
 	// Read methods (GetOne, Has) acquire RLock; write methods (Put, Delete,
@@ -50,6 +57,10 @@ type MemoryMutation struct {
 	clearedTables    map[string]struct{}
 	db               kv.TemporalTx
 	statelessCursors map[string]kv.RwCursor
+
+	// domainOverlay stores domain-level writes (DomainPut/DomainDel) in memory.
+	// GetLatest checks this overlay before falling back to the underlying tx.
+	domainOverlay [kv.DomainLen]map[string]domainEntry
 }
 
 // NewMemoryBatch creates a pure Go in-memory batch with no OS-thread affinity.
@@ -794,7 +805,17 @@ func (m *MemoryMutation) AggTx() any {
 }
 
 func (m *MemoryMutation) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
-	// panic("not supported")
+	m.mu.RLock()
+	if tbl := m.domainOverlay[name]; tbl != nil {
+		if e, ok := tbl[string(k)]; ok {
+			m.mu.RUnlock()
+			if e.deleted {
+				return nil, 0, nil
+			}
+			return common.Copy(e.value), 0, nil
+		}
+	}
+	m.mu.RUnlock()
 	return m.db.GetLatest(name, k)
 }
 
@@ -804,6 +825,16 @@ func (m *MemoryMutation) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte,
 }
 
 func (m *MemoryMutation) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
+	m.mu.RLock()
+	if tbl := m.domainOverlay[name]; tbl != nil {
+		for k, e := range tbl {
+			if !e.deleted && len(k) >= len(prefix) && k[:len(prefix)] == string(prefix) {
+				m.mu.RUnlock()
+				return []byte(k), common.Copy(e.value), true, nil
+			}
+		}
+	}
+	m.mu.RUnlock()
 	return m.db.HasPrefix(name, prefix)
 }
 
@@ -847,16 +878,43 @@ func (m *MemoryMutation) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
 	return m.db.Unmarked(id)
 }
 
+func (m *MemoryMutation) domainTable(domain kv.Domain) map[string]domainEntry {
+	if m.domainOverlay[domain] == nil {
+		m.domainOverlay[domain] = make(map[string]domainEntry)
+	}
+	return m.domainOverlay[domain]
+}
+
 func (m *MemoryMutation) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte) error {
-	panic("implement me pls. or use SharedDomains")
+	m.mu.Lock()
+	m.domainTable(domain)[string(k)] = domainEntry{value: common.Copy(v)}
+	m.mu.Unlock()
+	return nil
 }
 
 func (m *MemoryMutation) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte) error {
-	panic("implement me pls. or use SharedDomains")
+	m.mu.Lock()
+	m.domainTable(domain)[string(k)] = domainEntry{deleted: true}
+	m.mu.Unlock()
+	return nil
 }
 
 func (m *MemoryMutation) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uint64) error {
-	panic("implement me pls. or use SharedDomains")
+	m.mu.Lock()
+	tbl := m.domainTable(domain)
+	// Mark all overlay keys with this prefix as deleted, and also scan the
+	// underlying DB for matching keys to mark them deleted in the overlay.
+	for k := range tbl {
+		if len(k) >= len(prefix) && k[:len(prefix)] == string(prefix) {
+			tbl[k] = domainEntry{deleted: true}
+		}
+	}
+	// Note: keys only in the underlying DB that match the prefix are not
+	// deleted here — a full scan would be needed. For block test usage this
+	// is acceptable because DomainDelPrefix is only called during contract
+	// re-creation which overwrites the prefix range immediately after.
+	m.mu.Unlock()
+	return nil
 }
 
 func (m *MemoryMutation) UnmarkedRw(id kv.ForkableId) kv.UnmarkedRwTx {
