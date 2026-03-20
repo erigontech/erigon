@@ -287,9 +287,9 @@ func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates
 			"wasConcurrent", wasConcurrent,
 		)
 	}()
+	p.root.metrics.Reset()
+	p.root.metrics.updates.Store(updatesCount)
 	if p.root.metrics.collectCommitmentMetrics {
-		p.root.metrics.Reset()
-		p.root.metrics.updates.Store(updatesCount)
 		defer func() {
 			p.root.metrics.TotalProcessingTimeInc(start)
 			p.root.metrics.WriteToCSV()
