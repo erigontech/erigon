@@ -217,6 +217,36 @@ func (ctx *CallContext) Gas() mdgas.MdGas {
 	}
 }
 
+// escrowStateGas hands the entire state gas reservoir to a child frame and
+// returns the parent's saved value.  After the child returns, call
+// settleStateGas to restore or adopt the child's leftover reservoir.
+func (ctx *CallContext) escrowStateGas() (parentStateGas uint64) {
+	parentStateGas = ctx.stateGas
+	ctx.stateGas = 0
+	return
+}
+
+// settleStateGas restores the state gas reservoir after a child frame.
+// On error the parent's original reservoir is restored; on success the
+// parent adopts whatever state gas the child didn't consume.
+func (ctx *CallContext) settleStateGas(childErr error, returnGas mdgas.MdGas, parentStateGas uint64, tracer *tracing.Hooks) {
+	if childErr != nil {
+		ctx.stateGas = parentStateGas
+	} else {
+		ctx.stateGas = returnGas.State
+	}
+	ctx.refundGas(returnGas.Regular, tracer, tracing.GasChangeCallLeftOverRefunded)
+}
+
+// callGas builds the MdGas to pass to a child CALL frame from the
+// pre-computed callGasTemp (63/64 rule) and the current state reservoir.
+func (ctx *CallContext) callGas(evm *EVM) mdgas.MdGas {
+	return mdgas.MdGas{
+		Regular: evm.CallGasTemp(),
+		State:   ctx.stateGas,
+	}
+}
+
 func copyJumpTable(jt *JumpTable) *JumpTable {
 	var copy JumpTable
 	for i, op := range jt {

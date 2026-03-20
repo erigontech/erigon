@@ -374,19 +374,7 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 		}
 	}
 
-	intrinsicGasResult, overflow := mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
-		Data:               st.data,
-		AuthorizationsLen:  uint64(len(auths)),
-		AccessListLen:      uint64(len(accessTuples)),
-		StorageKeysLen:     uint64(accessTuples.StorageKeys()),
-		CostPerStateByte:   st.evm.Context.CostPerStateByte,
-		IsContractCreation: contractCreation,
-		IsEIP2:             rules.IsHomestead,
-		IsEIP2028:          rules.IsIstanbul,
-		IsEIP3860:          isEIP3860,
-		IsEIP7623:          rules.IsPrague,
-		IsEIP8037:          rules.IsAmsterdam,
-	})
+	intrinsicGasResult, overflow := st.calcIntrinsicGas(contractCreation, auths, accessTuples)
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
@@ -523,19 +511,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	auths := msg.Authorizations()
 
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
-	intrinsicGasResult, overflow := mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
-		Data:               st.data,
-		AuthorizationsLen:  uint64(len(auths)),
-		AccessListLen:      uint64(len(accessTuples)),
-		StorageKeysLen:     uint64(accessTuples.StorageKeys()),
-		CostPerStateByte:   st.evm.Context.CostPerStateByte,
-		IsContractCreation: contractCreation,
-		IsEIP2:             rules.IsHomestead,
-		IsEIP2028:          rules.IsIstanbul,
-		IsEIP3860:          isEIP3860,
-		IsEIP7623:          rules.IsPrague,
-		IsEIP8037:          rules.IsAmsterdam,
-	})
+	intrinsicGasResult, overflow := st.calcIntrinsicGas(contractCreation, auths, accessTuples)
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
@@ -842,6 +818,24 @@ func (st *StateTransition) refundGas() {
 		fmt.Printf("%d (%d.%d) Refund %x: remaining: %d, price: %d val: %d\n", st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), st.gasRemaining, st.gasPrice, &remaining)
 	}
 	st.state.AddBalance(st.msg.From(), remaining, tracing.BalanceIncreaseGasReturn)
+}
+
+func (st *StateTransition) calcIntrinsicGas(contractCreation bool, auths []types.Authorization, accessTuples types.AccessList) (mdgas.IntrinsicGasCalcResult, bool) {
+	rules := st.evm.ChainRules()
+	vmConfig := st.evm.Config()
+	return mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
+		Data:               st.data,
+		AuthorizationsLen:  uint64(len(auths)),
+		AccessListLen:      uint64(len(accessTuples)),
+		StorageKeysLen:     uint64(accessTuples.StorageKeys()),
+		CostPerStateByte:   st.evm.Context.CostPerStateByte,
+		IsContractCreation: contractCreation,
+		IsEIP2:             rules.IsHomestead,
+		IsEIP2028:          rules.IsIstanbul,
+		IsEIP3860:          vmConfig.HasEip3860(rules),
+		IsEIP7623:          rules.IsPrague,
+		IsEIP8037:          rules.IsAmsterdam,
+	})
 }
 
 func (st *StateTransition) mdGasUsed() mdgas.MdGas {
