@@ -289,6 +289,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					if applyResult.BlockNum > lastBlockResult.BlockNum {
 						uncommittedBlocks++
 						pe.doms.SetTxNum(applyResult.lastTxNum)
+						pe.executedGas.Add(int64(applyResult.BlockGasUsed))
 						lastBlockResult = *applyResult
 					}
 
@@ -958,7 +959,6 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	}
 
 	pe.execLoopGroup.Go(func() error {
-		defer pe.rws.Close()
 		defer pe.in.Release()
 		pe.resetWorkers(execLoopCtx, pe.rs, nil)
 		return pe.execLoop(execLoopCtx)
@@ -986,6 +986,7 @@ func (pe *parallelExecutor) wait(ctx context.Context) error {
 				return
 			}
 			pe.waitWorkers()
+			pe.rws.Close()
 		}
 		doneCh <- nil
 	}()
@@ -2008,13 +2009,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			if result.Receipt != nil {
 				be.blockRegularGasUsed += result.ExecutionResult.BlockRegularGasUsed
 				be.blockStateGasUsed += result.ExecutionResult.BlockStateGasUsed
-				// For metrics/commit heuristics, use per-tx gas contribution: max(regular, state).
+				// For commit heuristics, use per-tx gas contribution: max(regular, state).
 				applyResult.blockGasUsed = int64(max(result.ExecutionResult.BlockRegularGasUsed, result.ExecutionResult.BlockStateGasUsed))
 				receipt := *result.Receipt
 				applyResult.receipt = &receipt
 				applyResult.receipt.Logs = append([]*types.Log{}, result.Receipt.Logs...)
 				applyResult.logs = applyResult.receipt.Logs
-				pe.executedGas.Add(int64(applyResult.blockGasUsed))
 			}
 
 			maps.Copy(applyResult.traceFroms, result.TraceFroms)

@@ -27,10 +27,10 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/execution/vm/evmtypes/mdgas"
 )
 
 func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
@@ -286,7 +286,7 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 		}
 		if empty && !balance.IsZero() {
 			if evm.chainRules.IsAmsterdam {
-				gas.State = 112 * evm.Context.CostPerStateByte
+				gas.State = params.StateBytesNewAccount * evm.Context.CostPerStateByte
 			} else {
 				gas.Regular += params.CreateBySelfdestructGas
 			}
@@ -348,6 +348,19 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 		if err != nil {
 			return mdgas.MdGas{}, err
 		}
+
+		// EIP-8037: Charge state gas from the gas pool BEFORE regular-gas
+		// sufficiency checks and BEFORE computing the 63/64 rule, so that
+		// any spill from the state reservoir into regular gas is reflected
+		// in availableGas for subsequent checks.
+		if statefulBaseGas.State > 0 {
+			ok := callContext.useMdGas(evm, statefulBaseGas.State, mdgas.StateGas, nil, tracing.GasChangeIgnored)
+			if !ok {
+				return mdgas.MdGas{}, ErrOutOfGas
+			}
+			availableGas = callContext.Gas()
+		}
+
 		var overflow bool
 		if gas.Regular, overflow = math.SafeAdd(gas.Regular, accessGas); overflow {
 			return mdgas.MdGas{}, ErrGasUintOverflow
@@ -383,15 +396,6 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 				return mdgas.MdGas{}, ErrOutOfGas
 			}
 			evm.intraBlockState.AddAddressToAccessList(dd)
-		}
-
-		// EIP-8037: Charge state gas directly from the gas pool BEFORE computing the 63/64 rule.
-		if statefulBaseGas.State > 0 {
-			ok := callContext.useMdGas(evm, statefulBaseGas.State, mdgas.StateGas, nil, tracing.GasChangeIgnored)
-			if !ok {
-				return mdgas.MdGas{}, ErrOutOfGas
-			}
-			availableGas = callContext.Gas()
 		}
 
 		availableGas.Regular -= accessGas + delegationGas

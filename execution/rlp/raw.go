@@ -22,10 +22,7 @@ package rlp
 import (
 	"encoding/binary"
 	"io"
-	"math/bits"
 	"reflect"
-
-	"github.com/erigontech/erigon/common"
 )
 
 // RawValue represents an encoded RLP value and can be used to delay
@@ -34,39 +31,6 @@ import (
 type RawValue []byte
 
 var rawValueType = reflect.TypeFor[RawValue]()
-
-// StringSize returns the encoded size of a string.
-func StringSize(s string) uint64 {
-	switch n := len(s); n {
-	case 0:
-		return 1
-	case 1:
-		if s[0] <= 0x7f {
-			return 1
-		} else {
-			return 2
-		}
-	default:
-		return uint64(headsize(uint64(n)) + n)
-	}
-}
-
-// BytesSize returns the encoded size of a byte slice.
-func BytesSize(b []byte) uint64 {
-	return uint64(StringLen(b))
-}
-
-// ListSize returns the encoded size of an RLP list with the given
-// content size.
-func ListSize(contentSize uint64) uint64 {
-	return uint64(headsize(contentSize)) + contentSize
-}
-
-// IntSize returns the encoded size of the integer x. Note: The return type of this
-// function is 'int' for backwards-compatibility reasons. The result is always positive.
-func IntSize(x uint64) int {
-	return U64Len(x)
-}
 
 // Split returns the content of first RLP value and any
 // bytes after the value as subslices of b.
@@ -153,30 +117,30 @@ func readKind(buf []byte) (k Kind, tagsize, contentsize uint64, err error) {
 	}
 	b := buf[0]
 	switch {
-	case b < 0x80:
+	case b < SingleByteThreshold:
 		k = Byte
 		tagsize = 0
 		contentsize = 1
-	case b < 0xB8:
+	case b < LongStringCode+1:
 		k = String
 		tagsize = 1
-		contentsize = uint64(b - 0x80)
+		contentsize = uint64(b - EmptyStringCode)
 		// Reject strings that should've been single bytes.
-		if contentsize == 1 && len(buf) > 1 && buf[1] < 128 {
+		if contentsize == 1 && len(buf) > 1 && buf[1] < SingleByteThreshold {
 			return 0, 0, 0, ErrCanonSize
 		}
-	case b < 0xC0:
+	case b < EmptyListCode:
 		k = String
-		tagsize = uint64(b-0xB7) + 1
-		contentsize, err = readSize(buf[1:], b-0xB7)
-	case b < 0xF8:
+		tagsize = uint64(b-LongStringCode) + 1
+		contentsize, err = readSize(buf[1:], b-LongStringCode)
+	case b < LongListCode+1:
 		k = List
 		tagsize = 1
-		contentsize = uint64(b - 0xC0)
+		contentsize = uint64(b - EmptyListCode)
 	default:
 		k = List
-		tagsize = uint64(b-0xF7) + 1
-		contentsize, err = readSize(buf[1:], b-0xF7)
+		tagsize = uint64(b-LongListCode) + 1
+		contentsize, err = readSize(buf[1:], b-LongListCode)
 	}
 	if err != nil {
 		return 0, 0, 0, err
@@ -205,14 +169,7 @@ func readSize(b []byte, slen byte) (uint64, error) {
 
 // AppendUint64 appends the RLP encoding of i to b, and returns the resulting slice.
 func AppendUint64(b []byte, i uint64) []byte {
-	if i == 0 {
-		return append(b, 0x80)
-	} else if i < 128 {
-		return append(b, byte(i))
-	}
 	var buf [9]byte
-	binary.BigEndian.PutUint64(buf[1:], i)
-	size := common.BitLenToByteLen(bits.Len64(i))
-	buf[8-size] = 0x80 + byte(size)
-	return append(b, buf[8-size:]...)
+	n := EncodeU64ToBuf(i, buf[:])
+	return append(b, buf[:n]...)
 }

@@ -35,13 +35,12 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
-	"github.com/erigontech/erigon/execution/vm/evmtypes/mdgas"
 )
 
 // Config is a basic type specifying certain configuration flags for running
@@ -155,7 +154,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 		sender,
 		contractAsAddress,
 		input,
-		protocol.SplitIntoMdGas(cfg.GasLimit, mdgas.MdGas{}, rules),
+		mdgas.SplitTxnGasLimit(cfg.GasLimit, mdgas.MdGas{}, rules),
 		cfg.Value,
 		false, /* bailout */
 	)
@@ -208,7 +207,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 	code, address, leftOverGas, err := vmenv.Create(
 		sender,
 		input,
-		protocol.SplitIntoMdGas(cfg.GasLimit, mdgas.MdGas{}, rules),
+		mdgas.SplitTxnGasLimit(cfg.GasLimit, mdgas.MdGas{}, rules),
 		cfg.Value,
 		false,
 	)
@@ -242,7 +241,7 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, mdgas.Md
 		sender.Address(),
 		address,
 		input,
-		protocol.SplitIntoMdGas(cfg.GasLimit, mdgas.MdGas{}, rules),
+		mdgas.SplitTxnGasLimit(cfg.GasLimit, mdgas.MdGas{}, rules),
 		cfg.Value,
 		false, /* bailout */
 	)

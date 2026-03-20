@@ -17,7 +17,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package fixedgas
+package mdgas
 
 import (
 	"github.com/erigontech/erigon/common/math"
@@ -69,14 +69,13 @@ func IntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) {
 func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) {
 	var result IntrinsicGasCalcResult
 	dataLen := uint64(len(args.Data))
-	var stateGas uint64
 	// Set the starting gas for the raw transaction
 	if args.IsEIP8037 && args.IsContractCreation {
 		// EIP-8037: GAS_CREATE = 112*cpsb (state) + 9000 (regular), plus TxGas (21000)
 		result.RegularGas = params.TxGas + params.CreateGasEIP8037
-		stateGas += 112 * args.CostPerStateByte
+		result.StateGas = params.StateBytesNewAccount * args.CostPerStateByte
 	} else if args.IsContractCreation && args.IsEIP2 {
-		stateGas += params.TxGasContractCreation
+		result.RegularGas = params.TxGasContractCreation
 	} else if args.IsAATxn {
 		result.RegularGas = params.TxAAGas
 	} else {
@@ -167,7 +166,7 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
-		authCost, overflow := math.SafeMul(135, args.CostPerStateByte)
+		authCost, overflow := math.SafeMul(params.StateBytesNewAccount+params.StateBytesAuthBase, args.CostPerStateByte)
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
@@ -175,7 +174,7 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
-		result.StateGas, overflow = math.SafeAdd(stateGas, authCost)
+		result.StateGas, overflow = math.SafeAdd(result.StateGas, authCost)
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
@@ -184,11 +183,7 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
-		stateGas, overflow = math.SafeAdd(stateGas, authCost)
-		if overflow {
-			return IntrinsicGasCalcResult{}, true
-		}
-		result.RegularGas, overflow = math.SafeAdd(result.RegularGas, stateGas)
+		result.RegularGas, overflow = math.SafeAdd(result.RegularGas, authCost)
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}

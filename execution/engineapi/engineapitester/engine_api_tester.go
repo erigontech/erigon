@@ -242,9 +242,9 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 	require.NoError(t, err)
 	var mockCl *MockCl
 	if args.MockClState != nil {
-		mockCl = NewMockCl(ctx, logger, engineApiClient, ethBackend.StateDiffClient(), genesisBlock, WithMockClState(args.MockClState))
+		mockCl = NewMockCl(ctx, logger, engineApiClient, ethBackend.StateDiffClient(), genesisBlock, args.Genesis.Config, WithMockClState(args.MockClState))
 	} else {
-		mockCl = NewMockCl(ctx, logger, engineApiClient, ethBackend.StateDiffClient(), genesisBlock)
+		mockCl = NewMockCl(ctx, logger, engineApiClient, ethBackend.StateDiffClient(), genesisBlock, args.Genesis.Config)
 	}
 	if !args.NoEmptyBlock1 {
 		// build 1 empty block before proceeding to properly initialise everything

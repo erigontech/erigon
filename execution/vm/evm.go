@@ -32,13 +32,13 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
-	"github.com/erigontech/erigon/execution/vm/evmtypes/mdgas"
 )
 
 func (evm *EVM) precompile(addr accounts.Address) (PrecompiledContract, bool) {
@@ -174,6 +174,64 @@ func (evm *EVM) ResetGasConsumed() {
 	evm.stateGasConsumed = 0
 	evm.regularGasConsumed = 0
 	evm.revertedSpillGas = 0
+}
+
+// handleFrameRevert handles the full error path for a call or create frame:
+// state revert, regular gas burning on exceptional halt, and EIP-8037 state
+// gas accounting (spill restoration, depth-dependent reservoir preservation).
+func (evm *EVM) handleFrameRevert(gas *mdgas.MdGas, err error, depth int,
+	snapshot int,
+	savedStateGasConsumed, initialChildState uint64) {
+
+	// 1. Revert state changes.
+	evm.intraBlockState.RevertToSnapshot(snapshot, err)
+
+	// 2. On exceptional halt (not REVERT), burn remaining regular gas.
+	if err != ErrExecutionReverted {
+		if evm.chainRules.IsAmsterdam {
+			evm.regularGasConsumed += gas.Regular
+		}
+		if evm.config.Tracer != nil && evm.config.Tracer.OnGasChange != nil {
+			evm.config.Tracer.OnGasChange(gas.Regular, 0, tracing.GasChangeCallFailedExecution)
+		}
+		gas.Regular = 0
+	}
+
+	// 3. EIP-8037: state gas revert accounting.
+	if !evm.chainRules.IsAmsterdam {
+		return
+	}
+	childStateConsumed := evm.stateGasConsumed - savedStateGasConsumed
+
+	// For child frames (depth > 0), restore stateGasConsumed so the parent
+	// frame sees the correct value. At depth 0 there is no parent, and we
+	// keep the full value for block gas accounting.
+	if depth > 0 {
+		evm.stateGasConsumed = savedStateGasConsumed
+	}
+
+	// Restore state gas spill (state gas charged from regular gas) back to
+	// gas.Regular, since the state operations were reverted.
+	reservoirUsed := initialChildState - gas.State
+	if childStateConsumed > reservoirUsed {
+		spill := childStateConsumed - reservoirUsed
+		gas.Regular += spill
+		// At depth 0 (top-level REVERT), track the spill for receipt gas.
+		if depth == 0 && err == ErrExecutionReverted {
+			evm.revertedSpillGas += spill
+		}
+	}
+
+	if err != ErrExecutionReverted {
+		// On exceptional halt at depth 0, zero regular gas but leave the
+		// state reservoir as-is (partially consumed). At depth > 0, restore
+		// the reservoir so the parent sees no consumption from the failed child.
+		if depth == 0 {
+			gas.Regular = 0
+		} else {
+			gas.State = initialChildState
+		}
+	}
 }
 
 // CallGasTemp returns the callGasTemp for the EVM
@@ -331,52 +389,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	// above we revert to the snapshot and consume any gas remaining. Additionally
 	// when we're in Homestead this also counts for code storage gas errors.
 	if err != nil || evm.config.RestoreState {
-		evm.intraBlockState.RevertToSnapshot(snapshot, err)
-
-		if err != ErrExecutionReverted {
-			// EIP-8037: On exceptional halt, count remaining gas as "consumed"
-			// for block-level regular gas accounting before zeroing.
-			if evm.chainRules.IsAmsterdam {
-				evm.regularGasConsumed += gas.Regular
-			}
-			if evm.config.Tracer != nil && evm.config.Tracer.OnGasChange != nil {
-				evm.Config().Tracer.OnGasChange(gas.Regular, 0, tracing.GasChangeCallFailedExecution)
-			}
-			gas.Regular = 0
-		}
-
-		if evm.chainRules.IsAmsterdam {
-			childStateConsumed := evm.stateGasConsumed - savedStateGasConsumed
-
-			// EIP-8037: For child frames (depth > 0), restore stateGasConsumed
-			// so the parent frame sees the correct value. At depth 0 there is no
-			// parent, and we keep the full value for block gas accounting.
-			if depth > 0 {
-				evm.stateGasConsumed = savedStateGasConsumed
-			}
-
-			// EIP-8037: Restore state gas spill (state gas charged from regular
-			// gas) back to gas.Regular, since the state operations were reverted.
-			reservoirUsed := initialChildState - gas.State
-			if childStateConsumed > reservoirUsed {
-				spill := childStateConsumed - reservoirUsed
-				gas.Regular += spill
-				// At depth 0 (top-level REVERT), track the spill for receipt gas.
-				// mdGasUsed.Total() is short by the restored spill; this corrects it.
-				if depth == 0 && err == ErrExecutionReverted {
-					evm.revertedSpillGas += spill
-				}
-			}
-
-			if err != ErrExecutionReverted {
-				// EIP-8037: Preserve state gas reservoir on exceptional halt.
-				if depth == 0 {
-					gas.Regular = 0
-				} else {
-					gas.State = initialChildState
-				}
-			}
-		}
+		evm.handleFrameRevert(&gas, err, depth, snapshot, savedStateGasConsumed, initialChildState)
 	}
 
 	return ret, gas, err
@@ -601,49 +614,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	// above, we revert to the snapshot and consume any gas remaining. Additionally,
 	// when we're in Homestead, this also counts for code storage gas errors.
 	if err != nil && (evm.chainRules.IsHomestead || err != ErrCodeStoreOutOfGas) {
-		evm.intraBlockState.RevertToSnapshot(snapshot, nil)
-
-		if err != ErrExecutionReverted {
-			// EIP-8037: On exceptional halt, count remaining gas as "consumed"
-			// for block-level regular gas accounting before zeroing.
-			if evm.chainRules.IsAmsterdam {
-				evm.regularGasConsumed += gasRemaining.Regular
-			}
-			gasRemaining.Regular, _ = useGas(gasRemaining.Regular, gasRemaining.Regular, evm.Config().Tracer, tracing.GasChangeCallFailedExecution)
-		}
-
-		if evm.chainRules.IsAmsterdam {
-			childStateConsumed := evm.stateGasConsumed - savedStateGasConsumed
-
-			// EIP-8037: For child frames (depth > 0), restore stateGasConsumed
-			// so the parent frame sees the correct value. At depth 0 there is no
-			// parent, and we keep the full value for block gas accounting.
-			if depth > 0 {
-				evm.stateGasConsumed = savedStateGasConsumed
-			}
-
-			// EIP-8037: Restore state gas spill (state gas charged from regular
-			// gas) back to gasRemaining.Regular, since the state operations were reverted.
-			reservoirUsed := initialChildState - gasRemaining.State
-			if childStateConsumed > reservoirUsed {
-				spill := childStateConsumed - reservoirUsed
-				gasRemaining.Regular += spill
-				// At depth 0 (top-level REVERT), track the spill for receipt gas.
-				if depth == 0 && err == ErrExecutionReverted {
-					evm.revertedSpillGas += spill
-				}
-			}
-
-			if err != ErrExecutionReverted {
-				// EIP-8037: Preserve state gas reservoir on exceptional halt.
-				gasRemaining.State = initialChildState
-				if depth == 0 {
-					gasRemaining.Regular = 0
-				} else {
-					gasRemaining.State = initialChildState
-				}
-			}
-		}
+		evm.handleFrameRevert(&gasRemaining, err, depth, snapshot, savedStateGasConsumed, initialChildState)
 	}
 
 	return ret, address, gasRemaining, err

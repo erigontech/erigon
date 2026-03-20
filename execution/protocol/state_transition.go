@@ -30,8 +30,9 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/execution/protocol/fixedgas"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
@@ -40,7 +41,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
-	"github.com/erigontech/erigon/execution/vm/evmtypes/mdgas"
 )
 
 /*
@@ -374,31 +374,27 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 		}
 	}
 
-	intrinsicGasResult, overflow := fixedgas.IntrinsicGas(fixedgas.IntrinsicGasCalcArgs{
-		Data:               st.data,
-		AuthorizationsLen:  uint64(len(auths)),
-		AccessListLen:      uint64(len(accessTuples)),
-		StorageKeysLen:     uint64(accessTuples.StorageKeys()),
-		CostPerStateByte:   st.evm.Context.CostPerStateByte,
-		IsContractCreation: contractCreation,
-		IsEIP2:             rules.IsHomestead,
-		IsEIP2028:          rules.IsIstanbul,
-		IsEIP3860:          isEIP3860,
-		IsEIP7623:          rules.IsPrague,
-		IsEIP8037:          rules.IsAmsterdam,
-	})
+	intrinsicGasResult, overflow := st.calcIntrinsicGas(contractCreation, auths, accessTuples)
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
+	intrinsicGas, overflow := math.SafeAdd(intrinsicGasResult.RegularGas, intrinsicGasResult.StateGas)
+	if overflow {
+		return nil, ErrGasUintOverflow
+	}
+	if st.msg.Gas() < intrinsicGas {
+		return nil, fmt.Errorf("%w: have %d, want regular %d + state %d = %d",
+			ErrIntrinsicGas, st.msg.Gas(), intrinsicGasResult.RegularGas, intrinsicGasResult.StateGas, intrinsicGas)
+	}
 	imdGas := mdgas.MdGas{
 		Regular: intrinsicGasResult.RegularGas,
-		State:   intrinsicGasResult.StateGas - stateIgasRefund,
+		State:   intrinsicGasResult.StateGas,
 	}
-	st.gasRemaining = SplitIntoMdGas(st.msg.Gas(), imdGas, rules)
-	// EIP-8037 × EIP-7702: move the authority-exists refund from regular gas
-	// back into the state reservoir so execution-time state ops draw from it.
+	st.gasRemaining = mdgas.SplitTxnGasLimit(st.msg.Gas(), imdGas, rules)
+	// EIP-8037 × EIP-7702: authority-exists refund moves from intrinsic state
+	// gas into the reservoir so execution-time state ops can draw from it.
 	if stateIgasRefund > 0 && rules.IsAmsterdam {
-		st.gasRemaining.Regular -= stateIgasRefund
+		imdGas.State -= stateIgasRefund
 		st.gasRemaining.State += stateIgasRefund
 	}
 	st.initialGas = st.gasRemaining.Plus(imdGas)
@@ -515,24 +511,18 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	auths := msg.Authorizations()
 
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
-	intrinsicGasResult, overflow := fixedgas.IntrinsicGas(fixedgas.IntrinsicGasCalcArgs{
-		Data:               st.data,
-		AuthorizationsLen:  uint64(len(auths)),
-		AccessListLen:      uint64(len(accessTuples)),
-		StorageKeysLen:     uint64(accessTuples.StorageKeys()),
-		CostPerStateByte:   st.evm.Context.CostPerStateByte,
-		IsContractCreation: contractCreation,
-		IsEIP2:             rules.IsHomestead,
-		IsEIP2028:          rules.IsIstanbul,
-		IsEIP3860:          isEIP3860,
-		IsEIP7623:          rules.IsPrague,
-		IsEIP8037:          rules.IsAmsterdam,
-	})
+	intrinsicGasResult, overflow := st.calcIntrinsicGas(contractCreation, auths, accessTuples)
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
-	if st.msg.Gas() < intrinsicGasResult.RegularGas || st.msg.Gas() < intrinsicGasResult.FloorGasCost || st.msg.Gas() < intrinsicGasResult.StateGas {
-		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.msg.Gas(), max(intrinsicGasResult.RegularGas, intrinsicGasResult.FloorGasCost, intrinsicGasResult.StateGas))
+	// EIP-8037: intrinsic_gas = intrinsic_regular_gas + intrinsic_state_gas.
+	// The tx must cover the sum, not just each component individually.
+	intrinsicGas, overflow := math.SafeAdd(intrinsicGasResult.RegularGas, intrinsicGasResult.StateGas)
+	if overflow {
+		return nil, ErrGasUintOverflow
+	}
+	if st.msg.Gas() < intrinsicGas || st.msg.Gas() < intrinsicGasResult.FloorGasCost {
+		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.msg.Gas(), intrinsicGas)
 	}
 	// EIP-7825: Transaction Gas Limit Cap
 	if st.msg.CheckGas() {
@@ -556,7 +546,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		Regular: intrinsicGasResult.RegularGas,
 		State:   intrinsicGasResult.StateGas,
 	}
-	st.gasRemaining = SplitIntoMdGas(st.msg.Gas(), imdGas, rules)
+	st.gasRemaining = mdgas.SplitTxnGasLimit(st.msg.Gas(), imdGas, rules)
 	if rules.IsAmsterdam && stateIgasRefund > 0 {
 		imdGas.State -= stateIgasRefund
 		st.gasRemaining.State += stateIgasRefund
@@ -634,7 +624,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 			st.blockRegularGasUsed = st.txnGasUsed
 		} else {
 			st.txnGasUsedB4Refunds = mdGasUsed.Regular
-			st.txnGasUsed = st.txnGasUsedB4Refunds
+			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Regular)
+			st.txnGasUsed = st.txnGasUsedB4Refunds - refund
 			st.blockRegularGasUsed = st.txnGasUsed
 		}
 		st.refundGas()
@@ -646,14 +637,12 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		st.blockStateGasUsed = blockState
 		st.txnGasUsedB4Refunds = mdGasUsed.Total() + st.evm.RevertedSpillGas()
 		st.txnGasUsed = max(st.txnGasUsedB4Refunds, intrinsicGasResult.FloorGasCost)
-	} else if rules.IsPrague {
-		st.txnGasUsedB4Refunds = st.mdGasUsed().Regular
-		st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds)
-		st.blockRegularGasUsed = st.txnGasUsed
 	} else {
+		// No-refund path: gasBailout (trace_call) or !refunds.
+		// Don't apply Prague floor or refunds — just record raw gas used.
 		st.txnGasUsedB4Refunds = st.mdGasUsed().Regular
 		st.txnGasUsed = st.txnGasUsedB4Refunds
-		st.blockRegularGasUsed = st.txnGasUsed
+		st.blockRegularGasUsed = st.msg.Gas() // match pre-refactor: consume full gas limit from pool
 	}
 	// Also return remaining gas to the block gas counter so it is
 	// available for the next transaction.
@@ -704,7 +693,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		ReceiptGasUsed:      st.txnGasUsed,
 		BlockRegularGasUsed: st.blockRegularGasUsed,
 		BlockStateGasUsed:   st.blockStateGasUsed,
-		MaxGasUsed:          st.txnGasUsedB4Refunds,
+		MaxGasUsed:          max(st.txnGasUsedB4Refunds, intrinsicGasResult.FloorGasCost),
 		Err:                 vmerr,
 		Reverted:            errors.Is(vmerr, vm.ErrExecutionReverted),
 		ReturnData:          ret,
@@ -727,7 +716,7 @@ func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contra
 	var stateIgasRefund uint64
 	var stateIgasRefundInc uint64
 	if st.evm.ChainRules().IsAmsterdam {
-		stateIgasRefundInc = 112 * st.evm.Context.CostPerStateByte
+		stateIgasRefundInc = params.StateBytesNewAccount * st.evm.Context.CostPerStateByte
 	}
 	verifiedAuthorities := make([]accounts.Address, 0)
 	if len(auths) > 0 {
@@ -829,6 +818,24 @@ func (st *StateTransition) refundGas() {
 		fmt.Printf("%d (%d.%d) Refund %x: remaining: %d, price: %d val: %d\n", st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), st.gasRemaining, st.gasPrice, &remaining)
 	}
 	st.state.AddBalance(st.msg.From(), remaining, tracing.BalanceIncreaseGasReturn)
+}
+
+func (st *StateTransition) calcIntrinsicGas(contractCreation bool, auths []types.Authorization, accessTuples types.AccessList) (mdgas.IntrinsicGasCalcResult, bool) {
+	rules := st.evm.ChainRules()
+	vmConfig := st.evm.Config()
+	return mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
+		Data:               st.data,
+		AuthorizationsLen:  uint64(len(auths)),
+		AccessListLen:      uint64(len(accessTuples)),
+		StorageKeysLen:     uint64(accessTuples.StorageKeys()),
+		CostPerStateByte:   st.evm.Context.CostPerStateByte,
+		IsContractCreation: contractCreation,
+		IsEIP2:             rules.IsHomestead,
+		IsEIP2028:          rules.IsIstanbul,
+		IsEIP3860:          vmConfig.HasEip3860(rules),
+		IsEIP7623:          rules.IsPrague,
+		IsEIP8037:          rules.IsAmsterdam,
+	})
 }
 
 func (st *StateTransition) mdGasUsed() mdgas.MdGas {

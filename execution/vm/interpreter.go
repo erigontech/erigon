@@ -31,9 +31,9 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/execution/vm/evmtypes/mdgas"
 )
 
 // Config are the configuration options for the Interpreter
@@ -213,6 +213,36 @@ func (ctx *CallContext) CodeHash() accounts.CodeHash {
 func (ctx *CallContext) Gas() mdgas.MdGas {
 	return mdgas.MdGas{
 		Regular: ctx.gas,
+		State:   ctx.stateGas,
+	}
+}
+
+// escrowStateGas hands the entire state gas reservoir to a child frame and
+// returns the parent's saved value.  After the child returns, call
+// settleStateGas to restore or adopt the child's leftover reservoir.
+func (ctx *CallContext) escrowStateGas() (parentStateGas uint64) {
+	parentStateGas = ctx.stateGas
+	ctx.stateGas = 0
+	return
+}
+
+// settleStateGas restores the state gas reservoir after a child frame.
+// On error the parent's original reservoir is restored; on success the
+// parent adopts whatever state gas the child didn't consume.
+func (ctx *CallContext) settleStateGas(childErr error, returnGas mdgas.MdGas, parentStateGas uint64, tracer *tracing.Hooks) {
+	if childErr != nil {
+		ctx.stateGas = parentStateGas
+	} else {
+		ctx.stateGas = returnGas.State
+	}
+	ctx.refundGas(returnGas.Regular, tracer, tracing.GasChangeCallLeftOverRefunded)
+}
+
+// callGas builds the MdGas to pass to a child CALL frame from the
+// pre-computed callGasTemp (63/64 rule) and the current state reservoir.
+func (ctx *CallContext) callGas(evm *EVM) mdgas.MdGas {
+	return mdgas.MdGas{
+		Regular: evm.CallGasTemp(),
 		State:   ctx.stateGas,
 	}
 }
@@ -423,25 +453,26 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			if dbg.TraceDynamicGas && dynamicCost.Regular > 0 {
 				fmt.Printf("%d (%d.%d) Dynamic Gas: %d (%s)\n", blockNum, txIndex, txIncarnation, traceGas(op, callGas, cost), op)
 			}
-			if dynamicCost.State > 0 {
-				// EIP-8037: Charge state gas before regular gas
-				cost += dynamicCost.State
-				ok := callContext.useMdGas(evm, dynamicCost.State, mdgas.StateGas, nil, tracing.GasChangeIgnored)
-				if !ok {
-					return nil, callContext.Gas(), ErrOutOfGas
-				}
-			}
-			// for tracing: this gas consumption event is emitted below in the debug section.
+			// EIP-8037: "Regular gas charge MUST be applied first. If the regular
+			// gas charge triggers an out-of-gas error, the state gas charge is
+			// not applied." Deduct regular gas before state gas so that any
+			// state-to-regular spill operates on the already-reduced balance.
 			if callContext.gas < dynamicCost.Regular {
 				return nil, callContext.Gas(), ErrOutOfGas
-			} else {
-				callContext.gas -= dynamicCost.Regular
 			}
+			callContext.gas -= dynamicCost.Regular
 			if evm.chainRules.IsAmsterdam {
 				// EIP-8037: Track dynamic regular gas immediately after deduction.
 				// For CALL variants, callGasTemp is the gas forwarded to child (escrow),
 				// so we subtract it to get parent's actual cost.
 				evm.regularGasConsumed += dynamicCost.Regular - evm.CallGasTemp()
+			}
+			if dynamicCost.State > 0 {
+				cost += dynamicCost.State
+				ok := callContext.useMdGas(evm, dynamicCost.State, mdgas.StateGas, nil, tracing.GasChangeIgnored)
+				if !ok {
+					return nil, callContext.Gas(), ErrOutOfGas
+				}
 			}
 		}
 
