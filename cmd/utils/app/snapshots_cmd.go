@@ -3198,3 +3198,93 @@ func duWalkSnapshots(dirs datadir.Dirs) ([]duFileInfo, error) {
 
 	return files, nil
 }
+
+// duEstimate holds estimated disk usage for a particular node type (archive/full/minimal).
+type duEstimate struct {
+	Mode        string
+	TotalBytes  int64
+	Delta       int64
+	BlocksDesc  string
+	HistoryDesc string
+}
+
+// duComputeEstimates computes estimated sizes for archive/full/minimal modes
+// by summing files that survive each mode's pruning rules.
+// maxBlock is the highest block number across all block segment files.
+// maxStep is the highest step number across all state files.
+func duComputeEstimates(files []duFileInfo, maxBlock, maxStep uint64) []duEstimate {
+	pruneDistance := uint64(config3.DefaultPruneDistance)
+
+	var archiveTotal, fullTotal, minimalTotal int64
+
+	for _, f := range files {
+		archiveTotal += f.Size
+
+		// Full mode: exclude commitment hist, rcache, and old history/idx files.
+		includeInFull := true
+		switch f.Category {
+		case duCatCommitHist, duCatRcache:
+			includeInFull = false
+		case duCatHistory, duCatInvIdx:
+			if f.IsState && f.To > 0 && maxStep > pruneDistance && f.To <= maxStep-pruneDistance {
+				includeInFull = false
+			}
+		}
+
+		if includeInFull {
+			fullTotal += f.Size
+		}
+
+		// Minimal: same as full but also exclude old block segments.
+		includeInMinimal := includeInFull
+		if includeInMinimal && f.Category == duCatBlocks && !f.IsState {
+			if f.To > 0 && maxBlock > pruneDistance && f.To <= maxBlock-pruneDistance {
+				includeInMinimal = false
+			}
+		}
+
+		if includeInMinimal {
+			minimalTotal += f.Size
+		}
+	}
+
+	return []duEstimate{
+		{Mode: "archive", TotalBytes: archiveTotal, Delta: 0, BlocksDesc: "all blocks", HistoryDesc: "all history"},
+		{Mode: "full", TotalBytes: fullTotal, Delta: fullTotal - archiveTotal, BlocksDesc: "all blocks", HistoryDesc: "last 100k"},
+		{Mode: "minimal", TotalBytes: minimalTotal, Delta: minimalTotal - archiveTotal, BlocksDesc: "last 100k", HistoryDesc: "last 100k"},
+	}
+}
+
+// duDetectNodeType infers the current node mode from which files are present.
+// Archive nodes keep commitment history and rcache files.
+// Full nodes keep all block segments but prune old history.
+// Minimal nodes prune both old history and old block segments.
+func duDetectNodeType(files []duFileInfo) string {
+	hasCommitHistOrRcache := false
+	var maxBlock uint64
+
+	for _, f := range files {
+		if f.Category == duCatCommitHist || f.Category == duCatRcache {
+			hasCommitHistOrRcache = true
+		}
+		if f.Category == duCatBlocks && !f.IsState && f.To > maxBlock {
+			maxBlock = f.To
+		}
+	}
+
+	if hasCommitHistOrRcache {
+		return "archive"
+	}
+
+	// Check if old block segments exist (indicating full mode keeps all blocks).
+	pruneDistance := uint64(config3.DefaultPruneDistance)
+	if maxBlock > pruneDistance {
+		for _, f := range files {
+			if f.Category == duCatBlocks && !f.IsState && f.To > 0 && f.To <= maxBlock-pruneDistance {
+				return "full"
+			}
+		}
+	}
+
+	return "minimal"
+}

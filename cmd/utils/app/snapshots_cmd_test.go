@@ -552,3 +552,157 @@ func TestDUWalkSnapshots_MissingDir(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, files)
 }
+
+func TestDUComputeEstimates(t *testing.T) {
+	// Synthetic file list simulating an archive node with:
+	// - domain files (always kept)
+	// - old and new history/idx files
+	// - commitment hist and rcache (archive-only)
+	// - old and new block segments
+	// - caplin (always kept)
+	//
+	// maxStep=200, maxBlock=500000, pruneDistance=100000
+	// State prune cutoff: step <= 200-100000 → negative, so no state pruned (steps are small).
+	// Let's use larger ranges: maxStep=200000, maxBlock=500000.
+	// State prune cutoff: step To <= 200000-100000 = 100000 → old
+	// Block prune cutoff: block To <= 500000-100000 = 400000 → old
+
+	files := []duFileInfo{
+		// Domains — always kept in all modes
+		{Name: "accounts.0-50000.kv", Size: 1000, Category: duCatDomains, IsState: true, From: 0, To: 50000},
+		{Name: "storage.100000-200000.kv", Size: 2000, Category: duCatDomains, IsState: true, From: 100000, To: 200000},
+
+		// Accessors — always kept
+		{Name: "accounts.0-50000.bt", Size: 500, Category: duCatAccessors, IsState: true, From: 0, To: 50000},
+
+		// Old history (To=50000 <= 100000 cutoff) — pruned in full/minimal
+		{Name: "accounts.0-50000.v", Size: 3000, Category: duCatHistory, IsState: true, From: 0, To: 50000},
+
+		// New history (To=200000 > 100000) — kept in full/minimal
+		{Name: "accounts.100000-200000.v", Size: 4000, Category: duCatHistory, IsState: true, From: 100000, To: 200000},
+
+		// Old inverted index (To=50000 <= 100000) — pruned in full/minimal
+		{Name: "accounts.0-50000.ef", Size: 1500, Category: duCatInvIdx, IsState: true, From: 0, To: 50000},
+
+		// New inverted index — kept
+		{Name: "accounts.100000-200000.ef", Size: 2500, Category: duCatInvIdx, IsState: true, From: 100000, To: 200000},
+
+		// Commitment hist — archive only
+		{Name: "commitment.0-50000.v", Size: 800, Category: duCatCommitHist, IsState: true, From: 0, To: 50000},
+
+		// Rcache — archive only
+		{Name: "rcache.0-50000.kv", Size: 600, Category: duCatRcache, IsState: true, From: 0, To: 50000},
+
+		// Old block segment (To=300000 <= 400000) — pruned in minimal only
+		{Name: "0-300-headers.seg", Size: 5000, Category: duCatBlocks, IsState: false, From: 0, To: 300000},
+
+		// New block segment (To=500000 > 400000) — kept in all
+		{Name: "300-500-headers.seg", Size: 6000, Category: duCatBlocks, IsState: false, From: 300000, To: 500000},
+
+		// Caplin — always kept
+		{Name: "beaconblocks.0-100.seg", Size: 700, Category: duCatCaplin, IsState: false, From: 0, To: 100},
+	}
+
+	maxBlock := uint64(500000)
+	maxStep := uint64(200000)
+
+	estimates := duComputeEstimates(files, maxBlock, maxStep)
+	require.Len(t, estimates, 3)
+
+	// Archive: sum everything
+	archiveTotal := int64(1000 + 2000 + 500 + 3000 + 4000 + 1500 + 2500 + 800 + 600 + 5000 + 6000 + 700)
+	require.Equal(t, "archive", estimates[0].Mode)
+	require.Equal(t, archiveTotal, estimates[0].TotalBytes)
+	require.Equal(t, int64(0), estimates[0].Delta)
+
+	// Full: archive minus old history(3000) minus old idx(1500) minus commitHist(800) minus rcache(600)
+	fullTotal := archiveTotal - 3000 - 1500 - 800 - 600
+	require.Equal(t, "full", estimates[1].Mode)
+	require.Equal(t, fullTotal, estimates[1].TotalBytes)
+	require.Equal(t, fullTotal-archiveTotal, estimates[1].Delta)
+
+	// Minimal: full minus old blocks(5000)
+	minimalTotal := fullTotal - 5000
+	require.Equal(t, "minimal", estimates[2].Mode)
+	require.Equal(t, minimalTotal, estimates[2].TotalBytes)
+	require.Equal(t, minimalTotal-archiveTotal, estimates[2].Delta)
+
+	// Invariant: archive >= full >= minimal
+	require.GreaterOrEqual(t, estimates[0].TotalBytes, estimates[1].TotalBytes)
+	require.GreaterOrEqual(t, estimates[1].TotalBytes, estimates[2].TotalBytes)
+}
+
+func TestDUComputeEstimates_NoPruning(t *testing.T) {
+	// When maxStep and maxBlock are small (below pruneDistance),
+	// nothing gets pruned, so all three modes should be equal (except commitment/rcache).
+	files := []duFileInfo{
+		{Name: "d.kv", Size: 100, Category: duCatDomains, IsState: true, From: 0, To: 10},
+		{Name: "h.v", Size: 200, Category: duCatHistory, IsState: true, From: 0, To: 10},
+		{Name: "b.seg", Size: 300, Category: duCatBlocks, IsState: false, From: 0, To: 50000},
+	}
+
+	estimates := duComputeEstimates(files, 50000, 10)
+	// All modes include everything (no old files to prune, no commitment/rcache)
+	require.Equal(t, int64(600), estimates[0].TotalBytes) // archive
+	require.Equal(t, int64(600), estimates[1].TotalBytes) // full
+	require.Equal(t, int64(600), estimates[2].TotalBytes) // minimal
+}
+
+func TestDUComputeEstimates_EmptyFiles(t *testing.T) {
+	estimates := duComputeEstimates(nil, 0, 0)
+	require.Len(t, estimates, 3)
+	for _, e := range estimates {
+		require.Equal(t, int64(0), e.TotalBytes)
+	}
+}
+
+func TestDUDetectNodeType(t *testing.T) {
+	t.Run("archive - has commitment hist", func(t *testing.T) {
+		files := []duFileInfo{
+			{Category: duCatDomains, Size: 100},
+			{Category: duCatCommitHist, Size: 50},
+			{Category: duCatBlocks, IsState: false, To: 500000, Size: 200},
+		}
+		require.Equal(t, "archive", duDetectNodeType(files))
+	})
+
+	t.Run("archive - has rcache", func(t *testing.T) {
+		files := []duFileInfo{
+			{Category: duCatDomains, Size: 100},
+			{Category: duCatRcache, Size: 50},
+		}
+		require.Equal(t, "archive", duDetectNodeType(files))
+	})
+
+	t.Run("full - has old blocks, no commitment/rcache", func(t *testing.T) {
+		// maxBlock=500000, pruneDistance=100000, cutoff=400000
+		// Old block with To=300000 <= 400000 → indicates full mode (keeps all blocks)
+		files := []duFileInfo{
+			{Category: duCatDomains, Size: 100},
+			{Category: duCatBlocks, IsState: false, From: 0, To: 300000, Size: 200},
+			{Category: duCatBlocks, IsState: false, From: 300000, To: 500000, Size: 200},
+		}
+		require.Equal(t, "full", duDetectNodeType(files))
+	})
+
+	t.Run("minimal - only recent blocks", func(t *testing.T) {
+		// Only blocks near the tip, no commitment/rcache
+		files := []duFileInfo{
+			{Category: duCatDomains, Size: 100},
+			{Category: duCatBlocks, IsState: false, From: 450000, To: 500000, Size: 200},
+		}
+		require.Equal(t, "minimal", duDetectNodeType(files))
+	})
+
+	t.Run("minimal - empty files", func(t *testing.T) {
+		require.Equal(t, "minimal", duDetectNodeType(nil))
+	})
+
+	t.Run("minimal - blocks below prune distance threshold", func(t *testing.T) {
+		// maxBlock=50000 < pruneDistance=100000 → can't determine old blocks
+		files := []duFileInfo{
+			{Category: duCatBlocks, IsState: false, From: 0, To: 50000, Size: 200},
+		}
+		require.Equal(t, "minimal", duDetectNodeType(files))
+	})
+}

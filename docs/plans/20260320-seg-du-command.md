@@ -129,15 +129,15 @@ Files are classified by **directory** and **filename content**:
 **Files:**
 - Modify: `cmd/utils/app/snapshots_cmd.go`
 
-- [ ] Define `duEstimate` struct: `{Mode string, TotalBytes int64, Delta int64, BlocksDesc string, HistoryDesc string}`
-- [ ] Implement `duComputeEstimates(files []duFileInfo, maxBlock, maxStep uint64) []duEstimate` — computes estimated sizes for archive/full/minimal by summing files that survive each mode's pruning rules
-- [ ] Archive estimate: sum all files
-- [ ] Full estimate: sum all except old history/idx (step < maxStep - pruneDistance) and commitment hist and rcache
-- [ ] Minimal estimate: full minus old block segments (block < maxBlock - pruneDistance)
-- [ ] Implement `duDetectNodeType(files []duFileInfo) string` — infers current mode from presence of history/commitment/rcache files
-- [ ] Write tests for `duComputeEstimates` with synthetic file lists covering all three modes
-- [ ] Write tests for `duDetectNodeType` for archive/full/minimal detection
-- [ ] Run tests — must pass before task 3
+- [x] Define `duEstimate` struct: `{Mode string, TotalBytes int64, Delta int64, BlocksDesc string, HistoryDesc string}`
+- [x] Implement `duComputeEstimates(files []duFileInfo, maxBlock, maxStep uint64) []duEstimate` — computes estimated sizes for archive/full/minimal by summing files that survive each mode's pruning rules
+- [x] Archive estimate: sum all files
+- [x] Full estimate: sum all except old history/idx (step < maxStep - pruneDistance) and commitment hist and rcache
+- [x] Minimal estimate: full minus old block segments (block < maxBlock - pruneDistance)
+- [x] Implement `duDetectNodeType(files []duFileInfo) string` — infers current mode from presence of history/commitment/rcache files
+- [x] Write tests for `duComputeEstimates` with synthetic file lists covering all three modes
+- [x] Write tests for `duDetectNodeType` for archive/full/minimal detection
+- [x] Run tests — must pass before task 3
 
 ### Task 3: Output formatting (human + JSON)
 
