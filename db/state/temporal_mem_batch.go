@@ -24,6 +24,7 @@ import (
 	"maps"
 	"sort"
 	"sync"
+	"unsafe"
 
 	btree2 "github.com/tidwall/btree"
 
@@ -111,12 +112,12 @@ func (sd *TemporalMemBatch) SetInMemHistoryReads(v bool) { sd.inMemHistoryReads 
 
 func (sd *TemporalMemBatch) DomainPut(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte) error {
 	sd.putLatest(domain, k, v, txNum)
-	return sd.putHistory(domain, common.ToBytesZeroCopy(k), v, txNum, preval)
+	return sd.putHistory(domain, toBytesZeroCopy(k), v, txNum, preval)
 }
 
 func (sd *TemporalMemBatch) DomainDel(domain kv.Domain, k string, txNum uint64, preval []byte) error {
 	sd.putLatest(domain, k, nil, txNum)
-	return sd.putHistory(domain, common.ToBytesZeroCopy(k), nil, txNum, preval)
+	return sd.putHistory(domain, toBytesZeroCopy(k), nil, txNum, preval)
 }
 
 func (sd *TemporalMemBatch) putHistory(domain kv.Domain, k, v []byte, txNum uint64, preval []byte) error {
@@ -162,7 +163,8 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 				putValueSize += len(val)
 			} else {
 				putValueSize += len(val) - len(old[len(old)-1].data)
-				sd.storage.Set(key, []dataWithTxNum{valWithStep})
+				old[0] = valWithStep
+				sd.storage.Set(key, old[:1])
 			}
 		} else {
 			sd.storage.Set(key, []dataWithTxNum{valWithStep})
@@ -180,7 +182,8 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 			putValueSize += len(val)
 		} else {
 			putValueSize += len(val) - len(old[len(old)-1].data)
-			sd.domains[domain][key] = []dataWithTxNum{valWithStep}
+			old[0] = valWithStep
+			sd.domains[domain][key] = old[:1]
 		}
 	} else {
 		sd.domains[domain][key] = []dataWithTxNum{valWithStep}
@@ -220,7 +223,7 @@ func (sd *TemporalMemBatch) getLatest(domain kv.Domain, key []byte) (v []byte, s
 		return nil, 0, false
 	}
 
-	keyS := common.ToStringZeroCopy(key)
+	keyS := toStringZeroCopy(key)
 	var dataWithTxNums []dataWithTxNum
 	if domain == kv.StorageDomain {
 		dataWithTxNums, ok = sd.storage.Get(keyS)
@@ -247,7 +250,7 @@ func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v 
 	sd.latestStateLock.RLock()
 	defer sd.latestStateLock.RUnlock()
 
-	keyS := common.ToStringZeroCopy(key)
+	keyS := toStringZeroCopy(key)
 	var dataWithTxNums []dataWithTxNum
 	if domain == kv.StorageDomain {
 		dataWithTxNums, ok = sd.storage.Get(keyS)
@@ -351,13 +354,13 @@ func (sd *TemporalMemBatch) SavePastChangesetAccumulator(blockHash common.Hash, 
 	key := make([]byte, 40)
 	binary.BigEndian.PutUint64(key[:8], blockNumber)
 	copy(key[8:], blockHash[:])
-	sd.pastChangesAccumulator[common.ToStringZeroCopy(key)] = acc
+	sd.pastChangesAccumulator[toStringZeroCopy(key)] = acc
 }
 
 // GetChangesetByBlockNum returns the changeset for a given block number and its block hash.
 func (sd *TemporalMemBatch) GetChangesetByBlockNum(blockNumber uint64) (common.Hash, *changeset.StateChangeSet) {
 	for key, cs := range sd.pastChangesAccumulator {
-		keyBytes := common.ToBytesZeroCopy(key)
+		keyBytes := toBytesZeroCopy(key)
 		if binary.BigEndian.Uint64(keyBytes[:8]) == blockNumber {
 			blockHash := common.BytesToHash(keyBytes[8:])
 			return blockHash, cs
@@ -370,7 +373,7 @@ func (sd *TemporalMemBatch) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockN
 	var key [40]byte
 	binary.BigEndian.PutUint64(key[:8], blockNumber)
 	copy(key[8:], blockHash[:])
-	if changeset, ok := sd.pastChangesAccumulator[common.ToStringZeroCopy(key[:])]; ok {
+	if changeset, ok := sd.pastChangesAccumulator[toStringZeroCopy(key[:])]; ok {
 		return [kv.DomainLen][]kv.DomainEntryDiff{
 			changeset.Diffs[kv.AccountsDomain].GetDiffSet(),
 			changeset.Diffs[kv.StorageDomain].GetDiffSet(),
@@ -559,8 +562,8 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
 
 func (sd *TemporalMemBatch) flushDiffSet(_ context.Context, tx kv.RwTx) error {
 	for key, changeSet := range sd.pastChangesAccumulator {
-		blockNum := binary.BigEndian.Uint64(common.ToBytesZeroCopy(key[:8]))
-		blockHash := common.BytesToHash(common.ToBytesZeroCopy(key[8:]))
+		blockNum := binary.BigEndian.Uint64(toBytesZeroCopy(key[:8]))
+		blockHash := common.BytesToHash(toBytesZeroCopy(key[8:]))
 		if err := changeset.WriteDiffSet(tx, blockNum, blockHash, changeSet); err != nil {
 			return err
 		}
@@ -641,3 +644,12 @@ func AggTx(tx kv.Tx) *AggregatorRoTx {
 
 	return nil
 }
+
+func toStringZeroCopy(v []byte) string {
+	if len(v) == 0 {
+		return ""
+	}
+	return unsafe.String(&v[0], len(v))
+}
+
+func toBytesZeroCopy(s string) []byte { return unsafe.Slice(unsafe.StringData(s), len(s)) }

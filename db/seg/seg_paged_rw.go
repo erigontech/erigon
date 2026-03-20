@@ -283,7 +283,6 @@ type PagedWriter struct {
 	keys, vals         []byte
 	kLengths, vLengths []uint32
 
-	pageBuf            []byte // reusable buffer for bytesUncompressedTo in sync path
 	compressionBuf     []byte
 	compressionEnabled bool
 
@@ -545,13 +544,17 @@ func pageHeaderTo(buf []byte, kLengths, vLengths []uint32, capacityHint int) []b
 	for i, l := range vLengths {
 		binary.BigEndian.PutUint32(lensBuf[i*4:(i+1)*4], l)
 	}
-
 	return buf
 }
 
 func (c *PagedWriter) bytes() (wholePage []byte, notEmpty bool) {
 	//TODO: alignment,compress+alignment
-	return c.bytesUncompressed()
+	wholePage, notEmpty = c.bytesUncompressed()
+	if !notEmpty {
+		return nil, false
+	}
+	c.compressionBuf, wholePage = compress.EncodeZstdIfNeed(c.compressionBuf[:0], wholePage, c.compressionEnabled)
+	return wholePage, true
 }
 
 func (c *PagedWriter) DisableFsync() {
