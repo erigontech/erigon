@@ -38,7 +38,8 @@ func TestDomainVisibilityAfterGenesis(t *testing.T) {
 		GasLimit:   30_000_000,
 		Difficulty: uint256.NewInt(1),
 		Alloc: types.GenesisAlloc{
-			funded.Value(): {Balance: big.NewInt(1_000_000_000)},
+			funded.Value(): {Balance: big.NewInt(1_000_000_000), Nonce: 42},
+			common.HexToAddress("0x00000961ef480eb55e80d19ad83579a64c007002"): {Balance: big.NewInt(0), Nonce: 1, Code: []byte{0x60, 0x00}},
 		},
 	}
 
@@ -93,4 +94,12 @@ func TestDomainVisibilityAfterGenesis(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, acct2, "account should be visible via overlay ReaderV3")
 	require.Equal(t, acct.Balance, acct2.Balance, "balance should match")
+
+	// Test zero-balance system contract with nonce=1 and code.
+	sysAddr := accounts.InternAddress(common.HexToAddress("0x00000961ef480eb55e80d19ad83579a64c007002"))
+	sysAcct, err := overlayReader.ReadAccountData(sysAddr)
+	require.NoError(t, err)
+	require.NotNil(t, sysAcct, "system contract should be visible")
+	t.Logf("system contract: nonce=%d balance=%s", sysAcct.Nonce, &sysAcct.Balance)
+	require.Equal(t, uint64(1), sysAcct.Nonce, "system contract should have nonce=1")
 }
