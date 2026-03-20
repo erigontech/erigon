@@ -24,7 +24,6 @@ import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
-from itertools import zip_longest
 from pathlib import Path
 
 import matplotlib
@@ -132,14 +131,12 @@ def _runs_in_window(cached_by_id: dict[int, dict], cutoff: datetime) -> list[dic
     return [r for r in cached_by_id.values() if parse_dt(r["created_at"]) >= cutoff]
 
 
-def fetch_jobs_for_run(run_id: int, cache: bool, offline: bool = False) -> list[dict]:
+def fetch_jobs_for_run(run_id: int, cache: bool) -> list[dict]:
     """Fetch jobs for a single run, using cache if available."""
     cache_file = CACHE_DIR / f"jobs_{run_id}.json"
     if cache and cache_file.exists():
         with open(cache_file) as f:
             return json.load(f)
-    if offline:
-        return []
 
     data = gh_api(f"repos/{REPO}/actions/runs/{run_id}/jobs?per_page=100")
     records = []
@@ -166,34 +163,54 @@ def cmd_fetch(args):
     if cache:
         print(f"Cache dir: {CACHE_DIR}")
 
-    # Phase 1: fetch all runs from the single /actions/runs endpoint, page by page.
     PER_PAGE = 100
     wf_cache: dict[int, dict[int, dict]] = {}   # workflow_id -> {run_id -> run}
     wf_names: dict[int, str] = {}
     wf_added: dict[int, int] = defaultdict(int)
 
-    if args.offline:
-        for path in CACHE_DIR.glob("runs_*.json"):
-            wf_id = int(path.stem.split("_")[1])
-            wf_cache[wf_id] = _load_runs_cache(wf_id)
-    else:
-        # Load existing caches upfront.
+    job_futures: dict = {}
+    submitted_run_ids: set = set()
+
+    def _is_fetchable(run: dict) -> bool:
+        return (
+            run["conclusion"] is not None
+            and run["run_started_at"]
+            and run["updated_at"]
+            and parse_dt(run["created_at"]) >= cutoff
+            and (parse_dt(run["updated_at"]) - parse_dt(run["run_started_at"])).total_seconds() > 30
+            and (args.branch is None or run.get("head_branch") == args.branch)
+        )
+
+    with ThreadPoolExecutor(max_workers=args.parallelism) as executor:
+
+        def maybe_submit(run: dict) -> None:
+            if run["id"] not in submitted_run_ids and _is_fetchable(run):
+                submitted_run_ids.add(run["id"])
+                job_futures[executor.submit(fetch_jobs_for_run, run["id"], cache)] = run
+
+        # Load existing caches and immediately submit job fetches for them.
         for path in CACHE_DIR.glob("runs_*.json"):
             wf_id = int(path.stem.split("_")[1])
             wf_cache[wf_id] = _load_runs_cache(wf_id) if cache else {}
+            for run in wf_cache[wf_id].values():
+                maybe_submit(run)
 
         page = 1
-        total_added = 0
         while True:
             runs_page = _fetch_runs_page(page, PER_PAGE)
             if not runs_page:
                 break
 
             stop = False
+            page_added = 0
+            page_dates = []
+            page_dirty_wfs: set[int] = set()
             for run in runs_page:
-                if parse_dt(run["created_at"]) < cutoff:
+                dt = parse_dt(run["created_at"])
+                if dt < cutoff:
                     stop = True
                     break
+                page_dates.append(dt)
                 wf_id = run["workflow_id"]
                 wf_names[wf_id] = run.get("name", str(wf_id))
                 if wf_id not in wf_cache:
@@ -211,63 +228,37 @@ def cmd_fetch(args):
                         "status": run["status"],
                     }
                     wf_added[wf_id] += 1
-                    total_added += 1
+                    page_added += 1
+                    page_dirty_wfs.add(wf_id)
+                maybe_submit(run)
 
-            print(f"page {page} | {total_added} new runs")
+            if page_dates:
+                newest = max(page_dates).strftime("%Y-%m-%d %H:%M")
+                oldest = min(page_dates).strftime("%Y-%m-%d %H:%M")
+                print(f"page {page} | {page_added} new runs | {oldest} – {newest}")
+            else:
+                print(f"page {page} | {page_added} new runs")
+
+            if cache:
+                for wf_id in page_dirty_wfs:
+                    _save_runs_cache(wf_id, wf_cache[wf_id])
 
             if stop or len(runs_page) < PER_PAGE:
                 break
             page += 1
 
-        if cache:
-            for wf_id, added in wf_added.items():
-                if added > 0:
-                    _save_runs_cache(wf_id, wf_cache[wf_id])
-
-    # Collect real runs across all workflows.
-    all_real_runs: dict[int, list[dict]] = {}
-    for wf_id, by_id in wf_cache.items():
-        runs = _runs_in_window(by_id, cutoff)
-        all_real_runs[wf_id] = [
-            r for r in runs
-            if r["conclusion"] is not None
-            and r["run_started_at"]
-            and r["updated_at"]
-            and (parse_dt(r["updated_at"]) - parse_dt(r["run_started_at"])).total_seconds() > 30
-            and (args.branch is None or r.get("head_branch") == args.branch)
-        ]
-
-    # Phase 2: bucket by (workflow, day) and round-robin for even coverage.
-    wf_day_buckets: dict[tuple, list] = defaultdict(list)
-    for wf_id, real_runs in all_real_runs.items():
-        for run in real_runs:
-            day = parse_dt(run["run_started_at"]).date()
-            wf_day_buckets[(wf_id, day)].append(run)
-    ordered_runs = [
-        run
-        for slot in zip_longest(*wf_day_buckets.values())
-        for run in slot
-        if run is not None
-    ]
-    total_runs = len(ordered_runs)
-    print(f"\nFetching jobs for {total_runs} runs across {len(wf_day_buckets)} (workflow, day) buckets"
-          f" (parallelism={args.parallelism})...")
-
-    done = 0
-    with ThreadPoolExecutor(max_workers=args.parallelism) as executor:
-        futures = {
-            executor.submit(fetch_jobs_for_run, run["id"], cache, args.offline): run
-            for run in ordered_runs
-        }
-        for future in as_completed(futures):
-            run = futures[future]
+        total_runs = len(job_futures)
+        print(f"\nFetching jobs for {total_runs} runs (parallelism={args.parallelism})...")
+        done = 0
+        for future in as_completed(job_futures):
+            run = job_futures[future]
             try:
                 future.result()
             except Exception as e:
                 print(f"\n  Warning: failed jobs for run {run['id']}: {e}")
             done += 1
             if done % 10 == 0 or done == total_runs:
-                print(f"\r  Fetched jobs for {done}/{total_runs} runs  ", end="", flush=True)
+                print(f"\r  {done}/{total_runs} jobs fetched  ", end="", flush=True)
     print()
 
 
@@ -398,7 +389,6 @@ def main():
     fetch_parser = subparsers.add_parser("fetch", help="Fetch workflow runs and jobs into the cache")
     fetch_parser.add_argument("--days", type=int, default=MAX_DAYS, help=f"How many days back to fetch (default: {MAX_DAYS})")
     fetch_parser.add_argument("--no-cache", action="store_true", help="Ignore and overwrite cached data")
-    fetch_parser.add_argument("--offline", action="store_true", help="Use only cached data, make no API calls")
     fetch_parser.add_argument("--branch", default=None, help="Filter to runs on a specific branch")
     fetch_parser.add_argument("--parallelism", type=int, default=2, help="Concurrent job-fetch requests (default: 2)")
 
