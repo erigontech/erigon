@@ -72,11 +72,12 @@ type DirtyFilesGetter func() *btree2.BTreeG[*FilesItem]
 // instance should be held by dependency domain
 // (accounts in this example)
 type DependencyIntegrityChecker struct {
-	dependencyMap map[UniversalEntity][]*DependentInfo
-	dirs          datadir.Dirs
-	trace         bool
-	logger        log.Logger
-	disable       bool
+	dependencyMap      map[UniversalEntity][]*DependentInfo
+	dirs               datadir.Dirs
+	trace              bool
+	logger             log.Logger
+	disable            bool
+	disableInterDomain bool
 }
 
 type DependentInfo struct {
@@ -117,6 +118,14 @@ func (d *DependencyIntegrityChecker) Disable() {
 	d.disable = true
 }
 
+func (d *DependencyIntegrityChecker) DisableInterDomain() {
+	d.disableInterDomain = true
+}
+
+func (d *DependencyIntegrityChecker) EnableInterDomain() {
+	d.disableInterDomain = false
+}
+
 // CheckDependentPresent checks if the dependent domain file is present. All/Any are the two quantifiers provided here
 // All: all dependent files are present
 // Any: there exists a dependent file, which is present
@@ -128,7 +137,7 @@ func (d *DependencyIntegrityChecker) Disable() {
 // - Also don't consider it for "consuming" (deleting) the smaller files commitment.0-1, 1-2
 func (d *DependencyIntegrityChecker) CheckDependentPresent(dependency UniversalEntity, allOrAny Quantifier, startTxNum, endTxNum uint64) (IsPresent bool) {
 	arr, ok := d.dependencyMap[dependency]
-	if !ok || d.disable {
+	if !ok || d.disable || (d.disableInterDomain && dependency.category() == domainCategory) {
 		return true
 	}
 
