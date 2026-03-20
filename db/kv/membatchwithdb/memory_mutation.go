@@ -1013,6 +1013,156 @@ func (v *OverlayReadView) makeCursor(bucket string) (kv.CursorDupSort, error) {
 	return c, err
 }
 
+// OverlayTemporalReadView is the temporal-aware counterpart of OverlayReadView.
+// It implements kv.TemporalTx so it can be used by the parallel executor's
+// executor goroutine. Like OverlayReadView, it merges the MemoryMutation's
+// in-memory overlay with its own independent DB transaction, avoiding concurrent
+// cursor access on a shared MdbxTx.
+//
+// Temporal methods (GetLatest, GetAsOf, etc.) delegate to the wrapped temporal tx.
+// KV read methods (GetOne, Cursor, etc.) check the overlay first, then fall back
+// to the wrapped tx.
+type OverlayTemporalReadView struct {
+	kv.TemporalTx // embedded for temporal methods + default kv.Tx methods
+	overlay       *MemoryMutation
+}
+
+var _ kv.TemporalTx = (*OverlayTemporalReadView)(nil)
+
+// NewTemporalReadView creates a temporal read-only view that checks the overlay's
+// mem layer first, then falls back to temporalTx for DB reads. The temporalTx
+// must be a fresh, independently-opened transaction — it is NOT shared with the
+// overlay's internal backing tx.
+func (m *MemoryMutation) NewTemporalReadView(temporalTx kv.TemporalTx) *OverlayTemporalReadView {
+	return &OverlayTemporalReadView{TemporalTx: temporalTx, overlay: m}
+}
+
+func (v *OverlayTemporalReadView) GetOne(table string, key []byte) ([]byte, error) {
+	v.overlay.mu.RLock()
+	if v.overlay.isTableCleared(table) {
+		val, err := v.overlay.memTx.GetOne(table, key)
+		v.overlay.mu.RUnlock()
+		return val, err
+	}
+	if v.overlay.isEntryDeleted(table, key) {
+		val, err := v.overlay.memTx.GetOne(table, key)
+		v.overlay.mu.RUnlock()
+		return val, err
+	}
+	val, err := v.overlay.memTx.GetOne(table, key)
+	v.overlay.mu.RUnlock()
+	if err != nil {
+		return nil, err
+	}
+	if val != nil {
+		return val, nil
+	}
+	return v.TemporalTx.GetOne(table, key)
+}
+
+func (v *OverlayTemporalReadView) Has(table string, key []byte) (bool, error) {
+	v.overlay.mu.RLock()
+	if v.overlay.isTableCleared(table) {
+		has, err := v.overlay.memTx.Has(table, key)
+		v.overlay.mu.RUnlock()
+		return has, err
+	}
+	if v.overlay.isEntryDeleted(table, key) {
+		has, err := v.overlay.memTx.Has(table, key)
+		v.overlay.mu.RUnlock()
+		return has, err
+	}
+	has, err := v.overlay.memTx.Has(table, key)
+	v.overlay.mu.RUnlock()
+	if err != nil || has {
+		return has, err
+	}
+	return v.TemporalTx.Has(table, key)
+}
+
+func (v *OverlayTemporalReadView) Cursor(bucket string) (kv.Cursor, error) {
+	return v.makeCursor(bucket)
+}
+
+func (v *OverlayTemporalReadView) CursorDupSort(bucket string) (kv.CursorDupSort, error) {
+	return v.makeCursor(bucket)
+}
+
+func (v *OverlayTemporalReadView) makeCursor(bucket string) (kv.CursorDupSort, error) {
+	c := &memoryMutationCursor{pureDupSort: isTablePurelyDupsort(bucket)}
+	c.table = bucket
+
+	var err error
+	c.cursor, err = v.TemporalTx.CursorDupSort(bucket) //nolint:gocritic
+	if err != nil {
+		return nil, err
+	}
+	c.memCursor, err = v.overlay.memTx.RwCursorDupSort(bucket) //nolint:gocritic
+	if err != nil {
+		return nil, err
+	}
+	c.mutation = v.overlay
+	return c, err
+}
+
+func (v *OverlayTemporalReadView) ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error {
+	if amount == 0 {
+		return nil
+	}
+	c, err := v.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	for k, val, err := c.Seek(prefix); k != nil && amount > 0; k, val, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		if err := walker(k, val); err != nil {
+			return err
+		}
+		amount--
+	}
+	return nil
+}
+
+func (v *OverlayTemporalReadView) Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
+	s := &rangeIter{orderAscend: bool(asc), limit: int64(limit)}
+	var err error
+	if s.iterDb, err = v.TemporalTx.Range(table, fromPrefix, toPrefix, asc, limit); err != nil {
+		return s, err
+	}
+	if s.iterMem, err = v.overlay.memTx.Range(table, fromPrefix, toPrefix, asc, limit); err != nil {
+		return s, err
+	}
+	return s, nil
+}
+
+func (v *OverlayTemporalReadView) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
+	s := &rangeIter{orderAscend: bool(asc), limit: int64(limit)}
+	var err error
+	if s.iterDb, err = v.TemporalTx.RangeDupSort(table, key, fromPrefix, toPrefix, asc, limit); err != nil {
+		return s, err
+	}
+	if s.iterMem, err = v.overlay.memTx.RangeDupSort(table, key, fromPrefix, toPrefix, asc, limit); err != nil {
+		return s, err
+	}
+	return s, nil
+}
+
+func (v *OverlayTemporalReadView) Prefix(table string, prefix []byte) (stream.KV, error) {
+	nextPrefix, ok := kv.NextSubtree(prefix)
+	if ok {
+		return v.Range(table, prefix, nextPrefix, order.Asc, -1)
+	}
+	return v.Range(table, prefix, nil, order.Asc, -1)
+}
+
+func (v *OverlayTemporalReadView) Apply(_ context.Context, f func(tx kv.Tx) error) error {
+	return f(v)
+}
+
 type temporaldb struct {
 	memoryMutation *MemoryMutation
 }
