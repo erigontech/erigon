@@ -18,6 +18,7 @@ package engineapi_test
 
 import (
 	"context"
+	"encoding/binary"
 	"math/big"
 	"testing"
 
@@ -425,5 +426,32 @@ func TestEngineApiBuiltBlockWithWithdrawalRequest(t *testing.T) {
 
 		// Verify execution requests are present in the payload (Prague includes withdrawal requests).
 		require.NotNil(t, payload.ExecutionRequests)
+
+		// Verify withdrawal request content — the system contract should have
+		// dequeued the request we submitted and included it in the block.
+		var foundWithdrawalRequest bool
+		for _, req := range payload.ExecutionRequests {
+			if len(req) == 0 || req[0] != types.WithdrawalRequestType {
+				continue
+			}
+			requestData := []byte(req[1:])
+			// A withdrawal request is: 20-byte source address + 48-byte pubkey + 8-byte LE amount.
+			require.Equal(t, types.WithdrawalRequestDataLen, len(requestData),
+				"withdrawal request should be exactly %d bytes", types.WithdrawalRequestDataLen)
+
+			sourceAddr := common.BytesToAddress(requestData[:20])
+			gotPubkey := requestData[20:68]
+			gotAmount := binary.LittleEndian.Uint64(requestData[68:76])
+
+			require.Equal(t, sender, sourceAddr,
+				"withdrawal request source address should be the sender")
+			require.Equal(t, pubkey, gotPubkey,
+				"withdrawal request pubkey should match the one we sent")
+			require.Equal(t, uint64(0), gotAmount,
+				"withdrawal request amount should be 0 (full exit)")
+			foundWithdrawalRequest = true
+		}
+		require.True(t, foundWithdrawalRequest,
+			"should find at least one withdrawal request in execution requests")
 	})
 }

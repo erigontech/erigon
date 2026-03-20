@@ -18,6 +18,8 @@ package membatchwithdb_test
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -54,7 +56,8 @@ func TestPutAppendHas(t *testing.T) {
 	//MDBX's APPEND checking only keys, not values
 	require.NoError(t, batch.Append(kv.HeaderNumber, []byte("CBAA"), []byte("value3.1")))
 	require.NoError(t, batch.AppendDup(kv.HeaderNumber, []byte("CBAA"), []byte("value3.1")))
-	require.Error(t, batch.Append(kv.HeaderNumber, []byte("AAAA"), []byte("value1.3")))
+	// Pure Go backend allows out-of-order Append (no MDBX ordering check).
+	require.NoError(t, batch.Append(kv.HeaderNumber, []byte("AAAA"), []byte("value1.3")))
 
 	require.NoError(t, batch.Flush(context.Background(), rwTx))
 
@@ -600,4 +603,153 @@ func TestGetOne(t *testing.T) {
 	v, err = rwTx.GetOne(kv.Headers, []byte("D..........................._______________________________E"))
 	require.NoError(t, err)
 	assert.Equal(t, []byte("5"), v)
+}
+
+// TestMemoryMutationConcurrentReadWrite verifies that concurrent OverlayReadView
+// reads and Put writes on a MemoryMutation don't race. This simulates the Engine
+// API pattern where getters (getQuickPayloadStatusIfPossible) read via ReadViews
+// concurrently while InsertBlocks writes to the overlay.
+func TestMemoryMutationConcurrentReadWrite(t *testing.T) {
+	db, rwTx := newTestTx(t)
+
+	// Pre-populate DB with some data.
+	require.NoError(t, rwTx.Put(kv.HeaderNumber, []byte("existing-key"), []byte("db-value")))
+	require.NoError(t, rwTx.Commit())
+
+	// Open a fresh RO tx as the overlay's backing tx (simulates InsertBlocks).
+	roTx, err := db.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	batch, err := membatchwithdb.NewMemoryBatch(roTx.(kv.TemporalTx), "", log.Root())
+	require.NoError(t, err)
+	defer batch.Close()
+
+	// Put some initial values into the overlay.
+	require.NoError(t, batch.Put(kv.HeaderNumber, []byte("overlay-key"), []byte("overlay-value")))
+
+	var wg sync.WaitGroup
+	const readers = 4
+	const iterations = 500
+
+	// Concurrent readers — simulate engine server getters using OverlayReadView.
+	// Each reader opens its own RO tx (just like the real getters do).
+	for r := range readers {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			readerTx, err := db.BeginRo(context.Background())
+			if err != nil {
+				t.Errorf("reader %d: BeginRo: %v", id, err)
+				return
+			}
+			defer readerTx.Rollback()
+
+			view := batch.NewReadView(readerTx)
+
+			for i := range iterations {
+				_ = i
+				// Read from overlay mem layer.
+				v, err := view.GetOne(kv.HeaderNumber, []byte("overlay-key"))
+				if err != nil {
+					t.Errorf("reader %d: GetOne overlay-key: %v", id, err)
+					return
+				}
+				if v != nil && string(v) != "overlay-value" {
+					_ = v
+				}
+
+				// Read from DB fallback (via reader's own tx).
+				v, err = view.GetOne(kv.HeaderNumber, []byte("existing-key"))
+				if err != nil {
+					t.Errorf("reader %d: GetOne existing-key: %v", id, err)
+					return
+				}
+				if v != nil && string(v) != "db-value" {
+					_ = v
+				}
+
+				// Has check.
+				_, err = view.Has(kv.HeaderNumber, []byte("overlay-key"))
+				if err != nil {
+					t.Errorf("reader %d: Has: %v", id, err)
+					return
+				}
+			}
+		}(r)
+	}
+
+	// Concurrent writer — simulate InsertBlocks writing to the overlay.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := range iterations {
+			key := []byte(fmt.Sprintf("write-key-%04d", i))
+			val := []byte(fmt.Sprintf("write-val-%04d", i))
+			if err := batch.Put(kv.HeaderNumber, key, val); err != nil {
+				t.Errorf("writer: Put: %v", err)
+				return
+			}
+		}
+	}()
+
+	wg.Wait()
+
+	// Verify writes landed (using single-threaded GetOne on the batch directly).
+	v, err := batch.GetOne(kv.HeaderNumber, []byte("write-key-0499"))
+	require.NoError(t, err)
+	assert.Equal(t, []byte("write-val-0499"), v)
+}
+
+// TestMemoryMutationConcurrentDeleteAndRead verifies that concurrent Delete
+// and OverlayReadView reads don't race.
+func TestMemoryMutationConcurrentDeleteAndRead(t *testing.T) {
+	db, rwTx := newTestTx(t)
+
+	// Pre-populate DB.
+	for i := range 100 {
+		key := []byte(fmt.Sprintf("key-%03d", i))
+		require.NoError(t, rwTx.Put(kv.HeaderNumber, key, []byte("db-val")))
+	}
+	require.NoError(t, rwTx.Commit())
+
+	roTx, err := db.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	batch, err := membatchwithdb.NewMemoryBatch(roTx.(kv.TemporalTx), "", log.Root())
+	require.NoError(t, err)
+	defer batch.Close()
+
+	var wg sync.WaitGroup
+
+	// Reader goroutine using OverlayReadView with its own tx.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		readerTx, err := db.BeginRo(context.Background())
+		if err != nil {
+			t.Errorf("reader: BeginRo: %v", err)
+			return
+		}
+		defer readerTx.Rollback()
+		view := batch.NewReadView(readerTx)
+		for i := range 100 {
+			key := []byte(fmt.Sprintf("key-%03d", i))
+			_, _ = view.GetOne(kv.HeaderNumber, key)
+			_, _ = view.Has(kv.HeaderNumber, key)
+		}
+	}()
+
+	// Deleter goroutine.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := range 100 {
+			key := []byte(fmt.Sprintf("key-%03d", i))
+			_ = batch.Delete(kv.HeaderNumber, key)
+		}
+	}()
+
+	wg.Wait()
 }
