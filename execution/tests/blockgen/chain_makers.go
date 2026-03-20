@@ -375,10 +375,12 @@ func InitPraguePreDeploys(db kv.TemporalRwDB, logger log.Logger) error {
 		stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, latestTxNum)
 
 		stateWriter.UpdateAccountData(params.WithdrawalRequestAddress, &accounts.Account{}, &accounts.Account{
+			Nonce:    1,
 			CodeHash: withdrawalRequestCodeHash,
 		})
 		stateWriter.UpdateAccountCode(params.WithdrawalRequestAddress, 0, withdrawalRequestCodeHash, withdrawalRequestCode)
 		stateWriter.UpdateAccountData(params.ConsolidationRequestAddress, &accounts.Account{}, &accounts.Account{
+			Nonce:    1,
 			CodeHash: consolidationRequestCodeHash,
 		})
 		stateWriter.UpdateAccountCode(params.ConsolidationRequestAddress, 0, consolidationRequestCodeHash, consolidationRequestCode)
