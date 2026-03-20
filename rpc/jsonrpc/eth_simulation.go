@@ -850,8 +850,11 @@ func newHistoryCommitmentOnlyReader(roTx kv.TemporalTx, sd *execctx.SharedDomain
 }
 
 func newSimulateStateReader(ttx, tx kv.TemporalTx, tsd, sd *execctx.SharedDomains) commitmentdb.StateReader {
-	// Both commitment and account/storage/code values are read from latest state *but* on different SharedDomains instances
-	return rpchelper.NewCommitmentSplitStateReader(commitmentdb.NewLatestStateReader(ttx, tsd), commitmentdb.NewLatestStateReader(tx, sd), false)
+	// Both commitment and account/storage/code values are read from latest state *but* on different SharedDomains instances.
+	// The commitment reader uses tsd (in-memory simulated state) with tx (outer real DB) as fallback — NOT ttx (empty
+	// temp DB) — so that when the trie reads accounts not modified during simulation it finds real on-chain state
+	// instead of empty data. Using ttx as fallback caused all eth_simulateV1 state-root computations to be wrong.
+	return rpchelper.NewCommitmentSplitStateReader(commitmentdb.NewLatestStateReader(tx, tsd), commitmentdb.NewLatestStateReader(tx, sd), false)
 }
 
 // computeCommitmentFromStateHistory calculates the commitment root for simulated block from state history
