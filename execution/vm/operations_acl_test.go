@@ -42,8 +42,8 @@ func TestGasCallEIP7702StaticValueTransferDoesNotWarmAddresses(t *testing.T) {
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
-	t.Cleanup(db.Close)
 	t.Cleanup(tx.Rollback)
+	t.Cleanup(db.Close)
 
 	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 	require.NoError(t, err)
