@@ -164,7 +164,7 @@ func (h *hasher) hashChildren(original Node, bufOffset int) ([]byte, error) {
 		// Encode key
 		compactKey := hexToCompact(n.Key)
 		h.bw.Setup(buffer, pos)
-		written, err := rlp.EncodeByteArrayAsRlp(compactKey, h.bw, h.prefixBuf[:])
+		written, err := rlp.EncodeStringWithLen(compactKey, h.bw, h.prefixBuf[:])
 		if err != nil {
 			return nil, err
 		}
