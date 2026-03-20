@@ -31,7 +31,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/rlp/internal/rlpstruct"
 	"github.com/holiman/uint256"
 )
@@ -759,15 +758,15 @@ func (s *Stream) Raw() ([]byte, error) {
 	}
 	// The original header has already been read and is no longer
 	// available. Read content and put a new header in front of it.
-	start := headsize(size)
+	start := ListPrefixLen(int(size))
 	buf := make([]byte, uint64(start)+size)
 	if err := s.readFull(buf[start:]); err != nil {
 		return nil, err
 	}
 	if kind == String {
-		puthead(buf, 0x80, 0xB7, size)
+		encodePrefixToBuf(int(size), buf, EmptyStringCode, LongStringCode)
 	} else {
-		puthead(buf, 0xC0, 0xF7, size)
+		encodePrefixToBuf(int(size), buf, EmptyListCode, LongListCode)
 	}
 	return buf, nil
 }
@@ -1139,42 +1138,39 @@ func (s *Stream) readKind() (kind Kind, size uint64, err error) {
 	}
 	s.byteval = 0
 	switch {
-	case b < 0x80:
+	case b < SingleByteThreshold:
 		// For a single byte whose value is in the [0x00, 0x7F] range, that byte
 		// is its own RLP encoding.
 		s.byteval = b
 		return Byte, 0, nil
-	case b < 0xB8:
+	case b < LongStringCode+1:
 		// Otherwise, if a string is 0-55 bytes long, the RLP encoding consists
-		// of a single byte with value 0x80 plus the length of the string
-		// followed by the string. The range of the first byte is thus [0x80, 0xB7].
-		return String, uint64(b - 0x80), nil
-	case b < 0xC0:
+		// of a single byte with value EmptyStringCode plus the length of the string
+		// followed by the string.
+		return String, uint64(b - EmptyStringCode), nil
+	case b < EmptyListCode:
 		// If a string is more than 55 bytes long, the RLP encoding consists of a
-		// single byte with value 0xB7 plus the length of the length of the
+		// single byte with value LongStringCode plus the length of the length of the
 		// string in binary form, followed by the length of the string, followed
-		// by the string. For example, a length-1024 string would be encoded as
-		// 0xB90400 followed by the string. The range of the first byte is thus
-		// [0xB8, 0xBF].
-		size, err = s.readUint(b - 0xB7)
+		// by the string.
+		size, err = s.readUint(b - LongStringCode)
 		if err == nil && size < 56 {
 			err = ErrCanonSize
 		}
 		return String, size, err
-	case b < 0xF8:
+	case b < LongListCode+1:
 		// If the total payload of a list (i.e. the combined length of all its
 		// items) is 0-55 bytes long, the RLP encoding consists of a single byte
-		// with value 0xC0 plus the length of the list followed by the
-		// concatenation of the RLP encodings of the items. The range of the
-		// first byte is thus [0xC0, 0xF7].
-		return List, uint64(b - 0xC0), nil
+		// with value EmptyListCode plus the length of the list followed by the
+		// concatenation of the RLP encodings of the items.
+		return List, uint64(b - EmptyListCode), nil
 	default:
 		// If the total payload of a list is more than 55 bytes long, the RLP
-		// encoding consists of a single byte with value 0xF7 plus the length of
+		// encoding consists of a single byte with value LongListCode plus the length of
 		// the length of the payload in binary form, followed by the length of
 		// the payload, followed by the concatenation of the RLP encodings of
-		// the items. The range of the first byte is thus [0xF8, 0xFF].
-		size, err = s.readUint(b - 0xF7)
+		// the items.
+		size, err = s.readUint(b - LongListCode)
 		if err == nil && size < 56 {
 			err = ErrCanonSize
 		}
@@ -1266,29 +1262,6 @@ func (s *Stream) listLimit() (inList bool, limit uint64) {
 		return false, 0
 	}
 	return true, s.stack[len(s.stack)-1]
-}
-
-// DecodeOptionalAddress reads an RLP-encoded optional address (0 or 20 bytes)
-// directly into dst without intermediate allocation.
-func DecodeOptionalAddress(dst **common.Address, s *Stream) error {
-	kind, size, err := s.Kind()
-	if err != nil {
-		return err
-	}
-	switch {
-	case kind == String && size == 0:
-		*dst = nil
-		return s.ReadBytes(nil)
-	case kind == String && size == 20:
-		*dst = &common.Address{}
-		return s.ReadBytes((*dst)[:])
-	case kind == List:
-		return fmt.Errorf("expected string for address, got list")
-	case kind == Byte:
-		return fmt.Errorf("wrong size for address: 1")
-	default:
-		return fmt.Errorf("wrong size for address: %d", size)
-	}
 }
 
 type sliceReader []byte

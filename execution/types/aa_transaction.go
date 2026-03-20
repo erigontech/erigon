@@ -268,10 +268,10 @@ func (tx *AccountAbstractionTransaction) EncodingSize() int {
 func (tx *AccountAbstractionTransaction) EncodeRLP(w io.Writer) error {
 	payloadSize, accessListLen, authorizationsLen := tx.payloadSize()
 	envelopSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 	// encode envelope size
-	if err := rlp.EncodeStringSizePrefix(envelopSize, w, b[:]); err != nil {
+	if err := rlp.EncodeStringPrefix(envelopSize, w, b[:]); err != nil {
 		return err
 	}
 	// encode TxType
@@ -289,7 +289,7 @@ func (tx *AccountAbstractionTransaction) EncodeRLP(w io.Writer) error {
 
 func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen, authorizationsLen int) error {
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+	if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
 		return err
 	}
 
@@ -301,7 +301,7 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 		return err
 	}
 
-	if err := rlp.EncodeInt(tx.Nonce, w, b); err != nil {
+	if err := rlp.EncodeU64(tx.Nonce, w, b); err != nil {
 		return err
 	}
 
@@ -311,7 +311,7 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 		senderAddress = &senderValue
 
 	}
-	if err := rlp.EncodeOptionalAddress(senderAddress, w, b); err != nil {
+	if err := EncodeOptionalAddress(senderAddress, w, b); err != nil {
 		return err
 	}
 
@@ -319,7 +319,7 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 		return err
 	}
 
-	if err := rlp.EncodeOptionalAddress(tx.Deployer, w, b); err != nil {
+	if err := EncodeOptionalAddress(tx.Deployer, w, b); err != nil {
 		return err
 	}
 
@@ -327,7 +327,7 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 		return err
 	}
 
-	if err := rlp.EncodeOptionalAddress(tx.Paymaster, w, b); err != nil {
+	if err := EncodeOptionalAddress(tx.Paymaster, w, b); err != nil {
 		return err
 	}
 
@@ -351,24 +351,24 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 		return err
 	}
 
-	if err := rlp.EncodeInt(tx.ValidationGasLimit, w, b); err != nil {
+	if err := rlp.EncodeU64(tx.ValidationGasLimit, w, b); err != nil {
 		return err
 	}
 
-	if err := rlp.EncodeInt(tx.PaymasterValidationGasLimit, w, b); err != nil {
+	if err := rlp.EncodeU64(tx.PaymasterValidationGasLimit, w, b); err != nil {
 		return err
 	}
 
-	if err := rlp.EncodeInt(tx.PostOpGasLimit, w, b); err != nil {
+	if err := rlp.EncodeU64(tx.PostOpGasLimit, w, b); err != nil {
 		return err
 	}
 
-	if err := rlp.EncodeInt(tx.GasLimit, w, b); err != nil {
+	if err := rlp.EncodeU64(tx.GasLimit, w, b); err != nil {
 		return err
 	}
 
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(accessListLen, w, b); err != nil {
+	if err := rlp.EncodeListPrefix(accessListLen, w, b); err != nil {
 		return err
 	}
 	// encode AccessList
@@ -377,7 +377,7 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 	}
 
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(authorizationsLen, w, b); err != nil {
+	if err := rlp.EncodeListPrefix(authorizationsLen, w, b); err != nil {
 		return err
 	}
 	// encode Authorizations
@@ -417,7 +417,7 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	if err = rlp.DecodeOptionalAddress(&tx.Deployer, s); err != nil {
+	if err = DecodeOptionalAddress(&tx.Deployer, s); err != nil {
 		return err
 	}
 
@@ -425,7 +425,7 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	if err = rlp.DecodeOptionalAddress(&tx.Paymaster, s); err != nil {
+	if err = DecodeOptionalAddress(&tx.Paymaster, s); err != nil {
 		return err
 	}
 
@@ -485,8 +485,8 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 
 func (tx *AccountAbstractionTransaction) MarshalBinary(w io.Writer) error {
 	payloadSize, accessListLen, authorizationsLen := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 	// encode TxType
 	b[0] = AccountAbstractionTxType
 	if _, err := w.Write(b[:1]); err != nil {

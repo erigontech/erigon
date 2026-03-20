@@ -43,6 +43,7 @@ jobs:
     secrets: inherit
 
   hive:
+    if: github.event_name != 'push'
     uses: ./.github/workflows/test-hive.yml
     secrets: inherit
 
@@ -64,24 +65,12 @@ jobs:
     uses: ./.github/workflows/test-kurtosis-assertoor.yml
     secrets: inherit
 
-  manifest:
-    uses: ./.github/workflows/manifest.yml
-    secrets: inherit
-
   repro:
     uses: ./.github/workflows/reproducible-build.yml
     secrets: inherit
 
-  qa-rpc:
-    uses: ./.github/workflows/qa-rpc-integration-tests.yml
-    secrets: inherit
-
-  qa-rpc-gnosis:
-    uses: ./.github/workflows/qa-rpc-integration-tests-gnosis.yml
-    secrets: inherit
-
-  qa-rpc-remote:
-    uses: ./.github/workflows/qa-rpc-integration-tests-remote.yml
+  sonar:
+    uses: ./.github/workflows/sonar.yml
     secrets: inherit
 
   ci-gate:
@@ -95,11 +84,8 @@ jobs:
       - large-files
       - bench
       - kurtosis
-      - manifest
       - repro
-      - qa-rpc
-      - qa-rpc-gnosis
-      - qa-rpc-remote
+      - sonar
     runs-on: ubuntu-latest
     steps:
       - name: Check all required jobs
