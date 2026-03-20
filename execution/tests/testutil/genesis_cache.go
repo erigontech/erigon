@@ -143,7 +143,16 @@ func getOrCreateGenesisDB(fork string, gspec *types.Genesis) (kv.TemporalRwDB, *
 	genesisDirs := datadir.New(dir + "-genesis-tmp")
 	os.MkdirAll(genesisDirs.Tmp, 0755)
 	os.MkdirAll(genesisDirs.SnapDomain, 0755)
-	_, genesis, err := genesiswrite.CommitGenesisBlock(db, gspec, "", genesisDirs, logger)
+	var genesis *types.Block
+	err = func() (gerr error) {
+		defer func() {
+			if r := recover(); r != nil {
+				gerr = fmt.Errorf("panic: %v", r)
+			}
+		}()
+		_, genesis, gerr = genesiswrite.CommitGenesisBlock(db, gspec, "", genesisDirs, logger)
+		return
+	}()
 	if err != nil {
 		db.Close()
 		return nil, nil, fmt.Errorf("genesis cache: CommitGenesisBlock: %w", err)

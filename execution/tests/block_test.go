@@ -48,7 +48,7 @@ func TestLegacyBlockchain(t *testing.T) {
 
 	bt.Walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root
-		if err := bt.CheckFailure(t, test.Run(t)); err != nil {
+		if err := bt.CheckFailure(t, test.RunLightweight(t)); err != nil {
 			t.Error(err)
 		}
 	})
