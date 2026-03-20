@@ -622,12 +622,18 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 			txs := b.Transactions()
 			header := b.HeaderNoCopy()
 
-			// BLOCKHASH looks back at most 256 blocks — those headers are always
-			// in frozen snapshots. Pass nil tx so blockReader skips MDBX/overlay
-			// and reads directly from snapshots. This is thread-safe without a
-			// mutex and avoids races with fcuOverlay lifecycle.
+			// BLOCKHASH looks back at most 256 blocks. Use a short-lived read
+			// tx (not the apply-tx) to avoid races with fcuOverlay lifecycle.
 			blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
-				return te.cfg.blockReader.Header(ctx, nil, hash, number)
+				var h *types.Header
+				if err := te.cfg.db.View(ctx, func(roTx kv.Tx) error {
+					var err error
+					h, err = te.cfg.blockReader.Header(ctx, roTx, hash, number)
+					return err
+				}); err != nil {
+					return nil, err
+				}
+				return h, nil
 			}), te.cfg.engine, te.cfg.author, te.cfg.chainConfig)
 
 			var txTasks []exec.Task
