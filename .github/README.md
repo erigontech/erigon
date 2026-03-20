@@ -217,6 +217,41 @@ Consider setting tighter defaults in the workflow matrix for jobs that are known
 be memory- or disk-heavy, rather than working around pressure by adjusting unrelated
 constraints like timeouts or GC tuning.
 
+## Checking benchmarks
+
+The purpose of `make test-bench` in CI is to verify that benchmarks compile and
+execute at least one iteration — not to produce meaningful performance numbers.
+
+### Why benchmarks are slow by default
+
+Many benchmarks are sized for profiling or comparison work: a single iteration can
+take minutes. Go's benchmark runner will execute exactly 1 iteration in that case
+(`-benchtime=1x`), so the `ns/op` figure is meaningless and the run just wastes
+time.
+
+The fix is to keep benchmark iteration work small enough to be loopable, and use
+`testing.Short()` to trim parameter sweeps when all we need is a smoke test:
+
+```go
+if testing.Short() {
+    totalSteps = 10        // instead of 200+
+    keyCount = 10_000      // instead of 1_000_000
+}
+```
+
+`make test-bench` passes `-short` so these guards are active in CI.
+
+### Why you cannot parallelize across packages
+
+`go test` forces benchmark packages to run **serially** regardless of the `-p` flag.
+The serialization is enforced at the action-graph level in `cmd/go` when `-bench` is
+set — each package run is added as a dependency of the previous one. Passing
+`-p N` only affects compilation parallelism, not execution order.
+
+The only way to reduce `make test-bench` wall time is to reduce the work done per
+benchmark iteration, which is why right-sizing benchmarks (via `testing.Short()`) is
+the correct approach rather than parallelizing the runner.
+
 ## Local reproducibility
 
 Every CI job should have a local equivalent so developers can pre-check before pushing.
