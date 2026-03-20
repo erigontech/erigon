@@ -154,7 +154,7 @@ func headersArbitrum(s *StageState, ctx context.Context, tx kv.RwTx, cfg Headers
 		return fmt.Errorf("[%s] parsing block number %q: %w", logPrefix, latestRemoteHex, err)
 	}
 
-	if progress >= latestRemote {
+	if progress+1 >= latestRemote {
 		return nil
 	}
 
@@ -185,13 +185,14 @@ func headersArbitrum(s *StageState, ctx context.Context, tx kv.RwTx, cfg Headers
 
 	firstBlock := progress + 1
 	loopBlockLimit := uint64(cfg.syncConfig.LoopBlockLimit)
-	stopBlock := latestRemote + 1 // endBlockNum is exclusive in GetAndCommitBlocks
+	stopBlock := latestRemote // endBlockNum is exclusive
 	if loopBlockLimit > 0 && stopBlock > firstBlock+loopBlockLimit {
 		stopBlock = firstBlock + loopBlockLimit
 	}
 
+	lastBlock := stopBlock - 1
 	logger.Info(fmt.Sprintf("[%s] Fetching Arbitrum blocks from L2 RPC", logPrefix),
-		"from", firstBlock, "to", stopBlock, "latest", latestRemote)
+		"from", firstBlock, "available", lastBlock)
 
 	finaliseState := func(rwTx kv.RwTx, lastBlockNum uint64) error {
 		if err := stages.SaveStageProgress(rwTx, stages.Headers, lastBlockNum); err != nil {
