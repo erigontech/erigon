@@ -116,14 +116,19 @@ func TestDependency_DisableInterDomain(t *testing.T) {
 	logger := log.New()
 
 	// commitment domain files: 0-1, 1-2
+	cf01 := getPopulatedCommitmentFilesItem(t, dirs, 0, 1, false, logger)
+	cf12 := getPopulatedCommitmentFilesItem(t, dirs, 1, 2, false, logger)
 	commitmentFiles := btree.NewBTreeGOptions(filesItemLess, btree.Options{Degree: 128, NoLocks: false})
-	commitmentFiles.Set(getPopulatedCommitmentFilesItem(t, dirs, 0, 1, false, logger))
-	commitmentFiles.Set(getPopulatedCommitmentFilesItem(t, dirs, 1, 2, false, logger))
+	commitmentFiles.Set(cf01)
+	commitmentFiles.Set(cf12)
 
 	// history files: 0-1, 1-2 (simulating no merged 0-2)
+	// Reuse the same FilesItem objects — CheckDependentPresent only inspects
+	// startTxNum/endTxNum ranges, and reusing avoids Windows file-locking
+	// issues when two decompressors open the same path.
 	historyFiles := btree.NewBTreeGOptions(filesItemLess, btree.Options{Degree: 128, NoLocks: false})
-	historyFiles.Set(getPopulatedCommitmentFilesItem(t, dirs, 0, 1, false, logger))
-	historyFiles.Set(getPopulatedCommitmentFilesItem(t, dirs, 1, 2, false, logger))
+	historyFiles.Set(cf01)
+	historyFiles.Set(cf12)
 
 	checker := NewDependencyIntegrityChecker(logger)
 
