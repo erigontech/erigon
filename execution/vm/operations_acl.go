@@ -305,11 +305,22 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 }
 
 var (
-	gasCallEIP7702         = makeCallVariantGasCallEIP7702(statelessGasCall, statefulGasCall)
+	innerGasCallEIP7702    = makeCallVariantGasCallEIP7702(statelessGasCall, statefulGasCall)
 	gasDelegateCallEIP7702 = makeCallVariantGasCallEIP7702(statelessGasDelegateCall, statefulGasDelegateCall)
 	gasStaticCallEIP7702   = makeCallVariantGasCallEIP7702(statelessGasStaticCall, statefulGasStaticCall)
 	gasCallCodeEIP7702     = makeCallVariantGasCallEIP7702(statelessGasCallCode, statefulGasCallCode)
 )
+
+func gasCallEIP7702(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
+	// Return early if this call attempts to transfer value in a static context.
+	// EIP-7702 would otherwise resolve the target's delegation first, which can
+	// incorrectly warm the target and its delegate even though the CALL is
+	// rejected by write protection.
+	if evm.readOnly && !callContext.Stack.Back(2).IsZero() {
+		return 0, ErrWriteProtection
+	}
+	return innerGasCallEIP7702(evm, callContext, availableGas, memorySize)
+}
 
 func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefulCalculator statefulGasFunc) gasFunc {
 	return func(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
