@@ -657,7 +657,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 			return nil, err
 		}
 		currentStep := fromTxNum / stepSize
-		nextStepTxNum := (currentStep + 1) * stepSize // first txNum of next step
+		nextStepTxNum := (currentStep + 2) * stepSize // flush every 2 steps
 
 		// Find the last block that fits within this step.
 		batchEnd, ok, err := txNumsReader.FindBlockNum(ctx, rwTx, nextStepTxNum-1)
