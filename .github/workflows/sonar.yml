@@ -2,22 +2,7 @@ name: SonarCloud
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-      - 'release/**'
-    paths-ignore:
-      - 'dashboards/**'
-      - '**/*.md'
-      - '.github/workflows/**'
-  pull_request:
-    branches:
-      - main
-      - 'release/**'
-    paths-ignore:
-      - 'dashboards/**'
-      - '**/*.md'
-      - '.github/workflows/**'
+  workflow_call:
 
 defaults:
   run:
@@ -25,14 +10,6 @@ defaults:
 
 jobs:
   sonar:
-    concurrency:
-      group: >-
-        ${{
-          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) &&
-          format('{0}-{1}', github.workflow, github.run_id) ||
-          format('{0}-{1}', github.workflow, github.ref)
-        }}
-      cancel-in-progress: true
     runs-on: ubuntu-24.04
 
     steps:
