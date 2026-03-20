@@ -412,10 +412,10 @@ func TestRecoverSignerFromRLP_ValidData(t *testing.T) {
 	authLen := rlp.U64Len(chainID)
 	authLen += 1 + length.Addr
 	authLen += rlp.U64Len(0) // nonce
-	require.NoError(t, rlp.EncodeStructSizePrefix(authLen, data, b[:]))
-	require.NoError(t, rlp.EncodeInt(chainID, data, b[:]))
-	require.NoError(t, rlp.EncodeOptionalAddress(&pubKey, data, b[:]))
-	require.NoError(t, rlp.EncodeInt(0, data, b[:]))
+	require.NoError(t, rlp.EncodeListPrefix(authLen, data, b[:]))
+	require.NoError(t, rlp.EncodeU64(chainID, data, b[:]))
+	require.NoError(t, types.EncodeOptionalAddress(&pubKey, data, b[:]))
+	require.NoError(t, rlp.EncodeU64(0, data, b[:]))
 
 	// Prepare hash data exactly as before
 	hashData := []byte{params.SetCodeMagicPrefix}
@@ -1740,7 +1740,7 @@ func BenchmarkProcessRemoteTxns(b *testing.B) {
 
 	// Run the benchmark: process transactions one by one
 	// This measures the performance of adding and processing remote transactions
-	for i := 0; b.Loop(); i++ {
+	for i := 0; i < b.N; i++ {
 		pool.AddRemoteTxns(ctx, TxnSlots{testTxns.Txns[i : i+1], testTxns.Senders[i : i+1], testTxns.IsLocal[i : i+1]})
 		err := pool.processRemoteTxns(ctx)
 		require.NoError(err)

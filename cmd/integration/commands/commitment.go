@@ -320,7 +320,15 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	if !resume {
 		// remove all existing state commitment snapshots
 		// when not rebuilding with history, only delete domain files (preserve existing history/index)
-		if err := app.DeleteStateSnapshots(dirs, false, true, false, "0-999999", !withHistory, kv.CommitmentDomain.String()); err != nil {
+		if err := app.DeleteStateSnapshots(app.DeleteStateSnapshotsArgs{
+			Dirs:                   dirs,
+			RemoveLatest:           false,
+			PromptUserBeforeDelete: true,
+			DryRun:                 false,
+			StepRange:              "0-999999",
+			OnlyDomain:             !withHistory,
+			DomainNames:            []string{kv.CommitmentDomain.String()},
+		}); err != nil {
 			return err
 		}
 
