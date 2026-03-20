@@ -98,6 +98,22 @@ func TestCreateAccessListContractCreationWithoutFromDoesNotPanic(t *testing.T) {
 	require.NotNil(t, res)
 }
 
+func TestCreateAccessListContractCreationWithoutFromWithOptimizeGasDoesNotPanic(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+	optimizeGas := true
+
+	var (
+		res *accessListResult
+		err error
+	)
+	require.NotPanics(t, func() {
+		res, err = api.CreateAccessList(context.Background(), ethapi.CallArgs{}, nil, nil, &optimizeGas)
+	})
+	require.NoError(t, err)
+	require.NotNil(t, res)
+}
+
 func TestEthCallNonCanonical(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)

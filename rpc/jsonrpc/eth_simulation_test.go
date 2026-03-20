@@ -6,8 +6,12 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
 
@@ -99,6 +103,62 @@ func TestSimulateSanitizeBlockOrder(t *testing.T) {
 				t.Errorf("testcase %d: block number mismatch. Want %d, have %d", i, tc.expected[bi].number, have)
 			}
 		}
+	}
+}
+
+func TestSimulateSanitizeCallDefaultGas(t *testing.T) {
+	nonce := hexutil.Uint64(0)
+	remainingGas := params.MaxTxnGasLimit + 100
+
+	for _, tc := range []struct {
+		name       string
+		validation bool
+		osakaTime  *uint64
+		wantGas    uint64
+	}{
+		{
+			name:       "caps default gas at Osaka limit in validation mode",
+			validation: true,
+			osakaTime:  common.NewUint64(0),
+			wantGas:    params.MaxTxnGasLimit,
+		},
+		{
+			name:       "keeps block remaining gas without validation",
+			validation: false,
+			osakaTime:  common.NewUint64(0),
+			wantGas:    remainingGas,
+		},
+		{
+			name:       "keeps block remaining gas before Osaka",
+			validation: true,
+			osakaTime:  common.NewUint64(remainingGas + 1),
+			wantGas:    remainingGas,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := &ethapi.CallArgs{Nonce: &nonce}
+			sim := &simulator{
+				validation: tc.validation,
+				chainConfig: &chain.Config{
+					ChainID:   big.NewInt(1),
+					OsakaTime: tc.osakaTime,
+				},
+			}
+			blockCtx := &evmtypes.BlockContext{
+				GasLimit: remainingGas,
+				Time:     remainingGas,
+			}
+
+			if err := sim.sanitizeCall(args, nil, blockCtx, nil, 0, 0); err != nil {
+				t.Fatalf("sanitizeCall returned error: %v", err)
+			}
+			if args.Gas == nil {
+				t.Fatal("gas was not set")
+			}
+			if have := uint64(*args.Gas); have != tc.wantGas {
+				t.Fatalf("unexpected gas: have %d want %d", have, tc.wantGas)
+			}
+		})
 	}
 }
 

@@ -838,10 +838,8 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	// If the gas amount is not set, extract this as it will depend on access
 	// lists and we'll need to reestimate every time
 	nogas := args.Gas == nil
-
-	if args.From == nil {
-		args.From = &common.Address{}
-	}
+	sender := args.FromOrEmpty()
+	senderAddr := sender.Value()
 
 	var to common.Address
 	if args.To != nil {
@@ -851,7 +849,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		if args.Nonce == nil {
 			var nonce uint64
 			reply, err := api.txPool.Nonce(ctx, &txpoolproto.NonceRequest{
-				Address: gointerfaces.ConvertAddressToH160(*args.From),
+				Address: gointerfaces.ConvertAddressToH160(senderAddr),
 			}, &grpc.EmptyCallOption{})
 			if err != nil {
 				return nil, err
@@ -859,19 +857,19 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 			if reply.Found {
 				nonce = reply.Nonce + 1
 			} else {
-				a, err := stateReader.ReadAccountData(accounts.InternAddress(*args.From))
+				a, err := stateReader.ReadAccountData(sender)
 				if err != nil {
 					return nil, err
 				}
 				if a == nil {
-					return nil, errors.New("Account: " + args.From.Hex() + " not found")
+					return nil, errors.New("Account: " + senderAddr.Hex() + " not found")
 				}
 				nonce = a.Nonce + 1
 			}
 
 			args.Nonce = (*hexutil.Uint64)(&nonce)
 		}
-		to = types.CreateAddress(*args.From, uint64(*args.Nonce))
+		to = types.CreateAddress(senderAddr, uint64(*args.Nonce))
 	}
 
 	// Retrieve the precompiles since they don't need to be added to the access list
@@ -879,7 +877,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	precompiles := vm.ActivePrecompiles(blockCtx.Rules(chainConfig))
 	excl := make(map[common.Address]struct{})
 	// Add 'from', 'to', precompiles to the exclusion list
-	excl[*args.From] = struct{}{}
+	excl[senderAddr] = struct{}{}
 	excl[to] = struct{}{}
 	for _, pc := range precompiles {
 		excl[pc.Value()] = struct{}{}
@@ -965,7 +963,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 			}
 			accessList := &accessListResult{Accesslist: &accessList, Error: errString, GasUsed: hexutil.Uint64(res.ReceiptGasUsed)}
 			if optimizeGas != nil && *optimizeGas {
-				optimizeWarmAddrInAccessList(accessList, *args.From)
+				optimizeWarmAddrInAccessList(accessList, senderAddr)
 				optimizeWarmAddrInAccessList(accessList, to)
 				optimizeWarmAddrInAccessList(accessList, header.Coinbase)
 				for addr := range tracer.CreatedContracts() {

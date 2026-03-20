@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/misc"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	protocolrules "github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -342,6 +343,9 @@ func (s *simulator) sanitizeCall(
 	// Let the call run wild unless explicitly specified.
 	if args.Gas == nil {
 		remaining := blockContext.GasLimit - gasUsed
+		if s.validation && s.chainConfig.IsOsaka(blockContext.Time) && remaining > params.MaxTxnGasLimit {
+			remaining = params.MaxTxnGasLimit
+		}
 		args.Gas = (*hexutil.Uint64)(&remaining)
 	}
 	if gasUsed+uint64(*args.Gas) > blockContext.GasLimit {
