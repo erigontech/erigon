@@ -20,8 +20,6 @@ import (
 	"math"
 	"math/bits"
 
-	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 )
 
@@ -43,29 +41,4 @@ func CostPerStateByte(gasLimit uint64) uint64 {
 		return 1
 	}
 	return rounded - params.CpsbOffset
-}
-
-// SplitIntoMdGas splits a transaction's gas limit into regular and state dimensions.
-// EIP-8037: when tx.gas > TX_MAX_GAS_LIMIT, excess gas beyond the regular budget
-// becomes the state gas reservoir, which state-creation opcodes (SSTORE, CREATE,
-// code deposit) draw from before spilling to regular gas.
-// Pre-Amsterdam: all gas is regular (state reservoir is 0).
-// See process_transaction in EIP-8037.
-func SplitIntoMdGas(txnGasLimit uint64, igas mdgas.MdGas, rules *chain.Rules) mdgas.MdGas {
-	if rules.IsAmsterdam {
-		//intrinsic_gas = intrinsic_regular_gas + intrinsic_state_gas
-		//execution_gas = tx.gas - intrinsic_gas
-		//regular_gas_budget = TX_MAX_GAS_LIMIT - intrinsic_regular_gas
-		//gas_left = min(regular_gas_budget, execution_gas)
-		//state_gas_reservoir = execution_gas - gas_left
-		intrinsicGas := igas.Regular + igas.State
-		executionGas := txnGasLimit - intrinsicGas
-		regularGasBudget := params.MaxTxnGasLimit - igas.Regular
-		gasLeft := min(regularGasBudget, executionGas)
-		stateGasReservoir := executionGas - gasLeft
-		return mdgas.MdGas{Regular: gasLeft, State: stateGasReservoir}
-	}
-	gas := mdgas.MdGas{Regular: txnGasLimit}
-	gas.Regular -= igas.Regular
-	return gas
 }

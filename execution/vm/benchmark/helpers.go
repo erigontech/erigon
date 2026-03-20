@@ -13,7 +13,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
-	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -108,5 +107,5 @@ func prepareAndCall(cfg *runtime.Config, addr accounts.Address, input []byte) ([
 	vmenv := runtime.NewEnv(cfg)
 	rules := vmenv.ChainRules()
 	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, addr, vm.ActivePrecompiles(rules), nil, nil)
-	return vmenv.Call(cfg.Origin, addr, input, misc.SplitIntoMdGas(cfg.GasLimit, mdgas.MdGas{}, rules), cfg.Value, false)
+	return vmenv.Call(cfg.Origin, addr, input, mdgas.SplitTxnGasLimit(cfg.GasLimit, mdgas.MdGas{}, rules), cfg.Value, false)
 }
