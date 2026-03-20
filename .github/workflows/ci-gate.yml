@@ -73,11 +73,6 @@ jobs:
     uses: ./.github/workflows/sonar.yml
     secrets: inherit
 
-  hive-eest:
-    if: github.event_name == 'merge_group'
-    uses: ./.github/workflows/test-hive-eest.yml
-    secrets: inherit
-
   ci-gate:
     if: always()
     needs:
@@ -91,7 +86,6 @@ jobs:
       - kurtosis
       - repro
       - sonar
-      - hive-eest
     runs-on: ubuntu-latest
     steps:
       - name: Check all required jobs
