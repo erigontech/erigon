@@ -102,10 +102,10 @@ func (ac *AccountChanges) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	encodingSize := ac.EncodingSize()
-	b := newEncodingBuf()
-	defer releaseEncodingBuf(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 
-	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
 
@@ -227,11 +227,11 @@ func (sc *SlotChanges) EncodeRLP(w io.Writer) error {
 		return err
 	}
 
-	b := newEncodingBuf()
-	defer releaseEncodingBuf(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 
 	encodingSize := sc.EncodingSize()
-	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
 	if err := rlp.EncodeUint256(hashToUint256(sc.Slot.Value()), w, b[:]); err != nil {
@@ -272,14 +272,14 @@ func (sc *StorageChange) EncodingSize() int {
 }
 
 func (sc *StorageChange) EncodeRLP(w io.Writer) error {
-	b := newEncodingBuf()
-	defer releaseEncodingBuf(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 
 	encodingSize := sc.EncodingSize()
-	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(uint64(sc.Index), w, b[:]); err != nil {
+	if err := rlp.EncodeU64(uint64(sc.Index), w, b[:]); err != nil {
 		return err
 	}
 	return rlp.EncodeUint256(sc.Value, w, b[:])
@@ -315,14 +315,14 @@ func (bc *BalanceChange) EncodingSize() int {
 }
 
 func (bc *BalanceChange) EncodeRLP(w io.Writer) error {
-	b := newEncodingBuf()
-	defer releaseEncodingBuf(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 
 	encodingSize := bc.EncodingSize()
-	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(uint64(bc.Index), w, b[:]); err != nil {
+	if err := rlp.EncodeU64(uint64(bc.Index), w, b[:]); err != nil {
 		return err
 	}
 	return rlp.EncodeUint256(bc.Value, w, b[:])
@@ -358,17 +358,17 @@ func (nc *NonceChange) EncodingSize() int {
 }
 
 func (nc *NonceChange) EncodeRLP(w io.Writer) error {
-	b := newEncodingBuf()
-	defer releaseEncodingBuf(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 
 	encodingSize := nc.EncodingSize()
-	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(uint64(nc.Index), w, b[:]); err != nil {
+	if err := rlp.EncodeU64(uint64(nc.Index), w, b[:]); err != nil {
 		return err
 	}
-	return rlp.EncodeInt(nc.Value, w, b[:])
+	return rlp.EncodeU64(nc.Value, w, b[:])
 }
 
 func (nc *NonceChange) DecodeRLP(s *rlp.Stream) error {
@@ -398,14 +398,14 @@ func (cc *CodeChange) EncodingSize() int {
 }
 
 func (cc *CodeChange) EncodeRLP(w io.Writer) error {
-	b := newEncodingBuf()
-	defer releaseEncodingBuf(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 
 	encodingSize := cc.EncodingSize()
-	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(uint64(cc.Index), w, b[:]); err != nil {
+	if err := rlp.EncodeU64(uint64(cc.Index), w, b[:]); err != nil {
 		return err
 	}
 	return rlp.EncodeString(cc.Bytecode, w, b[:])
@@ -480,7 +480,7 @@ func sortHashes(hashes []accounts.StorageKey) {
 
 func encodeBlockAccessList[T rlpEncodable](items []T, w io.Writer, buf []byte) error {
 	total := EncodingSizeGenericList(items)
-	if err := rlp.EncodeStructSizePrefix(total, w, buf); err != nil {
+	if err := rlp.EncodeListPrefix(total, w, buf); err != nil {
 		return err
 	}
 	for _, item := range items {
@@ -499,7 +499,7 @@ func encodeHashList(hashes []accounts.StorageKey, w io.Writer, buf []byte) error
 	for i := range hashes {
 		total += rlp.Uint256Len(hashToUint256(hashes[i].Value()))
 	}
-	if err := rlp.EncodeStructSizePrefix(total, w, buf); err != nil {
+	if err := rlp.EncodeListPrefix(total, w, buf); err != nil {
 		return err
 	}
 	for i := range hashes {
@@ -584,8 +584,8 @@ func EncodeBlockAccessListBytes(bal BlockAccessList) ([]byte, error) {
 		return nil, err
 	}
 	var buf bytes.Buffer
-	encBuf := newEncodingBuf()
-	defer releaseEncodingBuf(encBuf)
+	encBuf := rlp.NewEncodingBuf()
+	defer encBuf.Release()
 	if err := encodeBlockAccessList(bal, &buf, encBuf[:]); err != nil {
 		return nil, err
 	}
@@ -822,14 +822,6 @@ func decodeMinimalHash(s *rlp.Stream) (common.Hash, error) {
 	var out common.Hash
 	copy(out[32-len(raw):], raw)
 	return out, nil
-}
-
-func releaseEncodingBuf(buf *encodingBuf) {
-	if buf == nil {
-		return
-	}
-	*buf = encodingBuf{}
-	pooledBuf.Put(buf)
 }
 
 func (bal BlockAccessList) Hash() common.Hash {

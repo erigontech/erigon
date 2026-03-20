@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -163,8 +164,11 @@ func ExecuteBlockEphemerally(
 		return nil, fmt.Errorf("mismatched receipt headers for block %d (%s != %s)", block.NumberU64(), receiptSha.Hex(), block.ReceiptHash().Hex())
 	}
 
-	if !vmConfig.StatelessExec && gasUsed.Block != header.GasUsed {
-		return nil, fmt.Errorf("gas used by execution: %d, in header: %d", gasUsed.Block, header.GasUsed)
+	// EIP-8037: compute block-level Bottleneck for Amsterdam.
+	// Pre-Amsterdam: blockStateGasUsed is 0, so this is a no-op.
+	blockGasUsed := gasUsed.BlockGasUsed()
+	if !vmConfig.StatelessExec && blockGasUsed != header.GasUsed {
+		return nil, fmt.Errorf("gas used by execution: %d, in header: %d", blockGasUsed, header.GasUsed)
 	}
 
 	if header.BlobGasUsed != nil && gasUsed.Blob != *header.BlobGasUsed {
@@ -197,7 +201,7 @@ func ExecuteBlockEphemerally(
 		LogsHash:    rlpHash(blockLogs),
 		Receipts:    receipts,
 		Difficulty:  &header.Difficulty,
-		GasUsed:     math.HexOrDecimal64(gasUsed.Block),
+		GasUsed:     math.HexOrDecimal64(blockGasUsed),
 		Rejected:    rejectedTxs,
 	}
 
@@ -273,12 +277,15 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 		txContext = NewEVMTxContext(msg)
 	}
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
-
+	mdGas := mdgas.MdGas{
+		Regular: msg.Gas(),
+		State:   0, // state gas reservoir will consume from regular gas for sys calls
+	}
 	ret, _, err := evm.Call(
 		msg.From(),
 		msg.To(),
 		msg.Data(),
-		msg.Gas(),
+		mdGas,
 		*msg.Value(),
 		false,
 	)
@@ -311,11 +318,14 @@ func SysCreate(contract accounts.Address, data []byte, chainConfig *chain.Config
 	txContext := NewEVMTxContext(msg)
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), nil, author, chainConfig)
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
-
+	mdGas := mdgas.MdGas{
+		Regular: msg.Gas(),
+		State:   0, // state gas reservoir will consume from regular gas for sys calls
+	}
 	ret, _, err := evm.SysCreate(
 		msg.From(),
 		msg.Data(),
-		msg.Gas(),
+		mdGas,
 		*msg.Value(),
 		contract,
 	)
