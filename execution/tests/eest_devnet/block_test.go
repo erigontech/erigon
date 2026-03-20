@@ -52,7 +52,6 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	bt.SkipLoad(`^for_amsterdam/static/state_tests/`)
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7928_block_level_access_lists/test_bal_sstore_and_oog.json`)                               // block=1, gas used by execution: 37568, in header: 63573
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7954_increase_max_contract_size/test_max_code_size_deposit_gas.json`)                      // block=1, gas used by execution: 38601120, in header: 16777216
-	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7954_increase_max_contract_size/test_max_initcode_size_via_create.json`)                   // block=1, gas used by execution: 16777216, in header: 16645728
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip8037_state_creation_gas_cost_increase/test_call_oog_reservoir_inflation_detection.json`)   // block=1, gas used by execution: 82640, in header: 214128
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip8037_state_creation_gas_cost_increase/test_sstore_oog_reservoir_inflation_detection.json`) // block=1, block access list mismatch
 	bt.SkipLoad(`^for_amsterdam/constantinople/eip1052_extcodehash/test_extcodehash_subcall_create2_oog.json`)                          // block=1, receiptHash mismatch: 39c2dfd7f2067a536d977a40ae2f2b3f3614bbef0a4eb26f49b8114d29e9805f != 8e4253c0afb1566ce113e97f42df12955f2712695f33de2b2c6ab30f654f8897, headerNum=1, 4da65b36435c944e6f68e86aa3d5ad3b796d54b0f73f5e096b31e05ae4c8d32d
