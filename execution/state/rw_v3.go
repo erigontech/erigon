@@ -606,14 +606,11 @@ func (c *LightCollector) DeleteAccount(address accounts.Address, _ *accounts.Acc
 }
 
 func (c *LightCollector) WriteAccountStorage(address accounts.Address, _ uint64, key accounts.StorageKey, _, value uint256.Int) error {
-	// Do NOT skip writes when original == value. In the parallel executor,
-	// `original` comes from blockOriginStorage (pre-block value) via
-	// MakeWriteSet(useBlockOrigin=true). But an earlier TX in the same block
-	// may have written a different value to this slot. If the current TX
-	// reverts the slot to the block-start value, skipping the write leaves
-	// the domain with the earlier TX's value — causing incorrect state for
-	// subsequent blocks (wrong SSTORE gas, trie root mismatch).
-	// The domain-level DomainPut handles actual skip logic via GetLatest.
+	// Emit all dirty storage — let DomainPut handle the skip via its
+	// internal GetLatest comparison. We can't skip here because
+	// originStorage in the parallel path has the pre-block committed
+	// value, not the current domain value (which may have been changed
+	// by a prior TX's ApplyStateWrites within the same block).
 	c.writes = append(c.writes, &VersionedWrite{Address: address, Path: StoragePath, Key: key, Val: value})
 	return nil
 }
@@ -876,28 +873,31 @@ func (r *ReaderV3) TracePrefix() string {
 	return r.tracePrefix
 }
 
-// BlockStateCache provides a stable, pre-block snapshot of account data for
-// parallel workers. It caches ReadAccountData results on first access so that
-// intra-block ApplyStateWrites (which update sd.mem) don't change the
-// "committed" view seen by GetCommittedState. This is the embryonic BlockState
-// from the IBS refactor plan (github.com/erigontech/erigon/issues/19623).
+// BlockStateCache provides a stable, pre-block snapshot of account and storage
+// data for parallel workers. It caches ReadAccountData and ReadAccountStorage
+// results on first access so that intra-block ApplyStateWrites (which update
+// sd.mem) don't change the "committed" view seen by GetCommittedState. This is
+// the embryonic BlockState from the IBS refactor plan
+// (github.com/erigontech/erigon/issues/19623).
 //
 // Thread-safe: multiple worker goroutines share one cache per block.
 type BlockStateCache struct {
-	mu    sync.RWMutex
-	cache map[accounts.Address]*accounts.Account
+	mu       sync.RWMutex
+	accounts map[accounts.Address]*accounts.Account
+	storage  map[accounts.Address]map[accounts.StorageKey][]byte // nil value = key cached as empty
 }
 
 func NewBlockStateCache() *BlockStateCache {
 	return &BlockStateCache{
-		cache: make(map[accounts.Address]*accounts.Account),
+		accounts: make(map[accounts.Address]*accounts.Account),
+		storage:  make(map[accounts.Address]map[accounts.StorageKey][]byte),
 	}
 }
 
 // Get returns a cached account, or nil if not cached.
 func (c *BlockStateCache) Get(addr accounts.Address) (*accounts.Account, bool) {
 	c.mu.RLock()
-	acc, ok := c.cache[addr]
+	acc, ok := c.accounts[addr]
 	c.mu.RUnlock()
 	return acc, ok
 }
@@ -905,7 +905,38 @@ func (c *BlockStateCache) Get(addr accounts.Address) (*accounts.Account, bool) {
 // Put caches an account. Nil means the account doesn't exist.
 func (c *BlockStateCache) Put(addr accounts.Address, acc *accounts.Account) {
 	c.mu.Lock()
-	c.cache[addr] = acc
+	c.accounts[addr] = acc
+	c.mu.Unlock()
+}
+
+// storageKey combines address and key for the storage cache.
+type storageCacheEntry struct {
+	val []byte
+	ok  bool // true = cached (val may be nil for empty slots)
+}
+
+// GetStorage returns cached storage value. Second return is true if cached.
+func (c *BlockStateCache) GetStorage(addr accounts.Address, key accounts.StorageKey) ([]byte, bool) {
+	c.mu.RLock()
+	slots, addrOk := c.storage[addr]
+	if !addrOk {
+		c.mu.RUnlock()
+		return nil, false
+	}
+	val, ok := slots[key]
+	c.mu.RUnlock()
+	return val, ok
+}
+
+// PutStorage caches a storage value. nil means the slot is empty.
+func (c *BlockStateCache) PutStorage(addr accounts.Address, key accounts.StorageKey, val []byte) {
+	c.mu.Lock()
+	slots, ok := c.storage[addr]
+	if !ok {
+		slots = make(map[accounts.StorageKey][]byte)
+		c.storage[addr] = slots
+	}
+	slots[key] = val
 	c.mu.Unlock()
 }
 
@@ -950,6 +981,30 @@ func (r *CachedReaderV3) ReadAccountData(address accounts.Address) (*accounts.Ac
 		return &result, nil
 	}
 	return nil, nil
+}
+
+func (r *CachedReaderV3) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
+	if r.blockCache != nil {
+		if val, ok := r.blockCache.GetStorage(address, key); ok {
+			var v uint256.Int
+			if len(val) > 0 {
+				v.SetBytes(val)
+			}
+			return v, len(val) > 0, nil
+		}
+	}
+	v, ok, err := r.ReaderV3.ReadAccountStorage(address, key)
+	if err != nil {
+		return v, ok, err
+	}
+	if r.blockCache != nil {
+		if ok {
+			r.blockCache.PutStorage(address, key, v.Bytes())
+		} else {
+			r.blockCache.PutStorage(address, key, nil)
+		}
+	}
+	return v, ok, nil
 }
 
 func (r *ReaderV3) HasStorage(address accounts.Address) (bool, error) {
