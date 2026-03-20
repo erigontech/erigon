@@ -161,6 +161,9 @@ func getOrCreateGenesisDB(fork string, gspec *types.Genesis) (kv.TemporalRwDB, *
 		_, genesis, gerr = genesiswrite.CommitGenesisBlock(db, gspec, "", genesisDirs, logger)
 		return
 	}()
+	// Clean up GenesisToBlock's temp DB immediately — it used a 2TB MDBX map
+	// that exhausts CI ramdisks if left around.
+	dirutil.RemoveAll(genesisDirs.DataDir)
 	if err != nil {
 		db.Close()
 		return nil, nil, fmt.Errorf("genesis cache: CommitGenesisBlock: %w", err)
@@ -213,7 +216,7 @@ func getOrCreateGenesisDB(fork string, gspec *types.Genesis) (kv.TemporalRwDB, *
 		}
 	}
 
-	entry := &genesisCacheEntry{db: db, genesis: genesis, dirs: []string{dir, dir + "-genesis-tmp"}}
+	entry := &genesisCacheEntry{db: db, genesis: genesis, dirs: []string{dir}}
 	genesisDBCache.Store(key, entry)
 	return db, genesis, nil
 }
