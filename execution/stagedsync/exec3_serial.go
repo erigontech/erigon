@@ -134,6 +134,18 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
+
+		// DEBUG: log WETH balance in sd.mem at block start for comparison with parallel.
+		if blockNum >= 24363950 && blockNum <= 24363974 {
+			wethKey := [20]byte{0xc0, 0x2a, 0xaa, 0x39, 0xb2, 0x23, 0xfe, 0x8d, 0x0a, 0x0e, 0x5c, 0x4f, 0x27, 0xea, 0xd9, 0x08, 0x3c, 0x75, 0x6c, 0xc2}
+			enc, _, err := se.doms.GetLatest(kv.AccountsDomain, execDomainRoTx, wethKey[:])
+			if err == nil && len(enc) > 0 {
+				var acc accounts.Account
+				if err := accounts.DeserialiseV3(&acc, enc); err == nil {
+					fmt.Printf("WETH_SD_MEM block=%d balance=%s\n", blockNum, acc.Balance.String())
+				}
+			}
+		}
 		getHashFnMutex := sync.Mutex{}
 
 		if se.cfg.chainConfig.AmsterdamTime != nil && *se.cfg.chainConfig.AmsterdamTime > 0 && se.cfg.chainConfig.IsAmsterdam(header.Time) {

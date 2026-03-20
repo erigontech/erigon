@@ -1023,10 +1023,21 @@ func (c *BlockStateCache) PutCommittedStorage(addr accounts.Address, key account
 // --- Current (write buffer) methods ---
 
 // WriteAccount stores a serialized account blob in the write buffer.
+// Only marks the account dirty if the value differs from the committed
+// (pre-block) state — prevents the Flush from overwriting sd.mem with
+// stale read-only values when a TX loads but doesn't modify an account.
 func (c *BlockStateCache) WriteAccount(addr accounts.Address, enc []byte) {
 	c.mu.Lock()
 	c.currentAccounts[addr] = enc
-	c.dirtyAccounts[addr] = true
+	if committed, ok := c.committedAccounts[addr]; ok {
+		committedEnc := accounts.SerialiseV3(committed)
+		if !bytes.Equal(committedEnc, enc) {
+			c.dirtyAccounts[addr] = true
+		}
+	} else {
+		// Not in committed cache — new account or first write, always dirty.
+		c.dirtyAccounts[addr] = true
+	}
 	c.mu.Unlock()
 }
 
@@ -1121,7 +1132,8 @@ func (c *BlockStateCache) Flush(domains *execctx.SharedDomains, roTx kv.Temporal
 		}
 	}
 
-	// Flush dirty accounts.
+	// Flush dirty accounts to sd.mem unconditionally.
+	// DomainPut internally skips when prevVal == enc (no-op writes).
 	for addr := range c.dirtyAccounts {
 		addrVal := addr.Value()
 		enc := c.currentAccounts[addr]

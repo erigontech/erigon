@@ -79,6 +79,24 @@ rwloop does:
 When rwLoop has nothing to do - it does Prune, or flush of WAL to RwTx (agg.rotate+agg.Flush)
 */
 
+// DEBUG: serial reference gas totals per block for assertion.
+// Generated from serial execution trace of blocks 24363950-24364100.
+var serialBlockGasRef = map[uint64]uint64{
+	24363950: 21274334, 24363951: 44022492, 24363952: 35717958, 24363953: 29089742,
+	24363954: 19977679, 24363955: 17418766, 24363956: 32717695, 24363957: 30743903,
+	24363958: 21843562, 24363959: 16326188, 24363960: 46683424, 24363961: 32110651,
+	24363962: 32274894, 24363963: 40534720, 24363964: 35700964, 24363965: 29486770,
+	24363966: 30405391, 24363967: 28313820, 24363968: 16867027, 24363969: 46339872,
+	24363970: 36618725, 24363971: 33270569, 24363972: 20784343, 24363973: 17021575,
+	24363974: 51563966, 24363975: 25335229, 24363976: 30815031, 24363977: 21538983,
+	24363978: 17214497, 24363979: 48389686, 24363980: 18085301, 24363981: 36282892,
+	24363982: 37136177, 24363983: 7693478, 24363984: 22861125, 24363985: 22159231,
+	24363986: 52291237, 24363987: 32459650, 24363988: 37955717, 24363989: 27394700,
+	24363990: 47163825, 24363991: 31422171, 24363992: 28819592, 24363993: 28353627,
+	24363994: 24203677, 24363995: 21264132, 24363996: 23521617, 24363997: 29239126,
+	24363998: 25292718, 24363999: 24089380, 24364000: 11788812,
+}
+
 type parallelExecutor struct {
 	txExecutor
 	execWorkers    []*exec.Worker
@@ -647,108 +665,8 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				pe.readCount.Add(blockExecutor.blockIO.ReadCount())
 				pe.writeCount.Add(blockExecutor.blockIO.WriteCount())
 
-				blockReceipts := make([]*types.Receipt, 0, len(blockExecutor.results))
-				for _, result := range blockExecutor.results {
-					if result.Receipt != nil {
-						blockReceipts = append(blockReceipts, result.Receipt)
-					}
-				}
-
-				if blockResult.BlockNum > 0 {
-					result := blockExecutor.results[len(blockExecutor.results)-1]
-
-					finalTask := blockExecutor.tasks[len(blockExecutor.tasks)-1].Task
-					finalVersion := finalTask.Version()
-					applyWrites, err := func() (state.VersionedWrites, error) {
-						pe.RLock()
-						defer pe.RUnlock()
-
-						var reader state.StateReader
-						if finalTask.IsHistoric() {
-							reader = state.NewHistoryReaderV3(applyTx, finalVersion.TxNum)
-						} else {
-							reader = state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx))
-						}
-						ibs := state.New(reader)
-						ibs.SetVersion(finalVersion.Incarnation)
-						localVersionMap := state.NewVersionMap(nil)
-						ibs.SetVersionMap(localVersionMap)
-						ibs.SetTxContext(finalVersion.BlockNum, finalVersion.TxIndex)
-
-						txTask, ok := result.Task.(*taskVersion).Task.(*exec.TxTask)
-
-						if !ok {
-							return nil, nil
-						}
-
-						syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-							ret, err := protocol.SysCallContract(contract, data, pe.cfg.chainConfig, ibs, txTask.Header, pe.cfg.engine, false, *pe.cfg.vmConfig)
-							if err != nil {
-								return nil, err
-							}
-							result.Logs = append(result.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
-							return ret, err
-						}
-
-						chainReader := consensuschain.NewReader(pe.cfg.chainConfig, applyTx, pe.cfg.blockReader, pe.logger)
-
-						_, err =
-							pe.cfg.engine.Finalize(
-								pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles, blockReceipts,
-								txTask.Withdrawals, chainReader, syscall, false, pe.logger)
-
-						if err != nil {
-							return nil, fmt.Errorf("can't finalize block %d: %w", blockResult.BlockNum, err)
-						}
-
-						blockExecutor.blockIO.RecordReads(finalVersion, ibs.VersionedReads())
-						blockExecutor.blockIO.RecordAccesses(finalVersion, ibs.AccessedAddresses())
-
-						finalWrites := ibs.VersionedWrites(true)
-						if len(finalWrites) > 0 {
-							blockExecutor.blockIO.RecordWrites(finalVersion, finalWrites)
-							blockExecutor.versionMap.FlushVersionedWrites(finalWrites, true, "")
-						}
-
-						collector := state.NewVersionedWriteCollector(pe.rs)
-						if err = ibs.MakeWriteSet(txTask.EvmBlockContext.Rules(txTask.Config), collector); err != nil {
-							return nil, err
-						}
-
-						return collector.Writes(), nil
-					}()
-
-					if err != nil {
-						return err
-					}
-
-					blockResult.ApplyCount += len(applyWrites)
-					if dbg.TraceApply && dbg.TraceBlock(blockResult.BlockNum) {
-						fmt.Println(blockResult.BlockNum, "apply count", blockResult.ApplyCount)
-					}
-
-					// Apply finalize writes directly to sd.mem (cache already flushed).
-					if err := pe.rs.ApplyStateWrites(ctx, applyTx, blockResult.BlockNum, blockResult.lastTxNum,
-						applyWrites, nil, result.Rules(), nil); err != nil {
-						return err
-					}
-
-					select {
-					case blockExecutor.applyResults <- &txResult{
-						blockNum:              blockResult.BlockNum,
-						txNum:                 blockResult.lastTxNum,
-						rules:                 result.Rules(),
-						writes:                applyWrites,
-						logs:                  result.Logs,
-						traceFroms:            result.TraceFroms,
-						traceTos:              result.TraceTos,
-						cumulativeBlobGasUsed: blockExecutor.blobGasUsed,
-						isFinalize:            true,
-					}:
-					case <-ctx.Done():
-						return ctx.Err()
-					}
-				}
+				// Block finalize already ran in the execLoop (producer side).
+				// Finalize txResult was sent through the channel before the blockResult.
 
 				if !blockExecutor.execStarted.IsZero() {
 					pe.blockExecMetrics.Duration.Add(time.Since(blockExecutor.execStarted))
@@ -1998,6 +1916,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			if result.Receipt != nil {
 				applyResult.blockGasUsed = int64(result.ExecutionResult.BlockGasUsed)
 				be.blockGasUsed += result.ExecutionResult.BlockGasUsed
+
 				if dbg.TraceGas && dbg.TraceBlock(be.blockNum) {
 					fmt.Printf("GAS_ACCUM block=%d tx=%d gasUsed=%d blockTotal=%d\n",
 						be.blockNum, tx, result.ExecutionResult.BlockGasUsed, be.blockGasUsed)
@@ -2051,9 +1970,29 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 		txTask := be.tasks[len(be.tasks)-1].Task
 
-		// Flush block state cache to sd.mem — all per-TX writes are now visible.
-		if err := be.blockStateCache.Flush(pe.rs.Domains(), applyTx, txTask.Version().TxNum); err != nil {
-			return nil, err
+		// DEBUG: block-level gas assertion against serial reference.
+		if expected, ok := serialBlockGasRef[be.blockNum]; ok {
+			if be.blockGasUsed != expected {
+				// Check sd.mem for 0x6be457 balance
+				addrKey := [20]byte{0x6b, 0xe4, 0x57, 0xe0, 0x40, 0x92, 0xb2, 0x88, 0x65, 0xe0, 0xcb, 0xa8, 0x4e, 0x3b, 0x2c, 0xfa, 0x0f, 0x87, 0x1e, 0x67}
+				enc, _, _ := pe.rs.Domains().GetLatest(kv.AccountsDomain, applyTx, addrKey[:])
+				var checkAcc accounts.Account
+				if len(enc) > 0 {
+					accounts.DeserialiseV3(&checkAcc, enc)
+				}
+				// Also check BlockStateCache
+				var cacheBalance string
+				if cacheEnc, ok := be.blockStateCache.GetCurrentAccount(accounts.InternAddress(addrKey)); ok {
+					var ca accounts.Account
+					accounts.DeserialiseV3(&ca, cacheEnc)
+					cacheBalance = ca.Balance.String()
+				} else {
+					cacheBalance = "NOT_IN_CACHE"
+				}
+				pe.logger.Error(fmt.Sprintf("[%s] BLOCK GAS MISMATCH block=%d expected=%d actual=%d diff=%d sd.mem_6be457=%s cache_6be457=%s",
+					pe.logPrefix, be.blockNum, expected, be.blockGasUsed, int64(be.blockGasUsed)-int64(expected),
+					checkAcc.Balance.String(), cacheBalance))
+			}
 		}
 
 		var receipts types.Receipts
@@ -2068,6 +2007,99 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		if tt, ok := txTask.(*exec.TxTask); ok {
 			header = tt.Header
 			txs = tt.Txs
+		}
+
+		// Block finalize: run engine.Finalize + MakeWriteSet on the producer
+		// side so finalize writes go to the BlockStateCache before the Flush.
+		var finalizeWrites state.VersionedWrites
+		if be.blockNum > 0 {
+			lastResult := be.results[len(be.results)-1]
+			finalTask := be.tasks[len(be.tasks)-1].Task
+			finalVersion := finalTask.Version()
+
+			pe.RLock()
+			var reader state.StateReader
+			if finalTask.IsHistoric() {
+				reader = state.NewHistoryReaderV3(applyTx, finalVersion.TxNum)
+			} else {
+				// Use CachedReaderV3 so the finalize IBS reads per-TX writes
+				// from the BlockStateCache (e.g., accumulated coinbase balance)
+				// instead of the stale pre-block sd.mem values.
+				reader = state.NewCachedReaderV3(pe.rs.Domains().AsGetter(applyTx), be.blockStateCache)
+			}
+			pe.RUnlock()
+
+			ibs := state.New(reader)
+			ibs.SetVersion(finalVersion.Incarnation)
+			localVersionMap := state.NewVersionMap(nil)
+			ibs.SetVersionMap(localVersionMap)
+			ibs.SetTxContext(finalVersion.BlockNum, finalVersion.TxIndex)
+
+			if tt, ok := lastResult.Task.(*taskVersion).Task.(*exec.TxTask); ok {
+				syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
+					ret, err := protocol.SysCallContract(contract, data, pe.cfg.chainConfig, ibs, tt.Header, pe.cfg.engine, false, *pe.cfg.vmConfig)
+					if err != nil {
+						return nil, err
+					}
+					lastResult.Logs = append(lastResult.Logs, ibs.GetRawLogs(tt.TxIndex)...)
+					return ret, err
+				}
+
+				chainReader := consensuschain.NewReader(pe.cfg.chainConfig, applyTx, pe.cfg.blockReader, pe.logger)
+				if _, err := pe.cfg.engine.Finalize(
+					pe.cfg.chainConfig, types.CopyHeader(tt.Header), ibs, tt.Uncles, receipts,
+					tt.Withdrawals, chainReader, syscall, false, pe.logger); err != nil {
+					return nil, fmt.Errorf("can't finalize block %d: %w", be.blockNum, err)
+				}
+
+				be.blockIO.RecordReads(finalVersion, ibs.VersionedReads())
+				be.blockIO.RecordAccesses(finalVersion, ibs.AccessedAddresses())
+
+				ivw := ibs.VersionedWrites(true)
+				if len(ivw) > 0 {
+					be.blockIO.RecordWrites(finalVersion, ivw)
+					be.versionMap.FlushVersionedWrites(ivw, true, "")
+				}
+
+				collector := state.NewVersionedWriteCollector(pe.rs)
+				if err := ibs.MakeWriteSet(tt.EvmBlockContext.Rules(tt.Config), collector); err != nil {
+					return nil, err
+				}
+				finalizeWrites = collector.Writes()
+				be.applyCount += len(finalizeWrites)
+
+				// Apply finalize writes to the BlockStateCache.
+				if err := pe.rs.ApplyStateWrites(ctx, applyTx, be.blockNum, finalVersion.TxNum,
+					finalizeWrites, nil, lastResult.Rules(), be.blockStateCache); err != nil {
+					return nil, err
+				}
+			}
+		}
+
+		// Send finalize txResult through the channel for index writes.
+		// State writes are already in the BlockStateCache.
+		if len(finalizeWrites) > 0 {
+			lastResult := be.results[len(be.results)-1]
+			select {
+			case be.applyResults <- &txResult{
+				blockNum:              be.blockNum,
+				txNum:                 txTask.Version().TxNum,
+				rules:                 lastResult.Rules(),
+				writes:                finalizeWrites,
+				logs:                  lastResult.Logs,
+				traceFroms:            lastResult.TraceFroms,
+				traceTos:              lastResult.TraceTos,
+				cumulativeBlobGasUsed: be.blobGasUsed,
+				isFinalize:            true,
+			}:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+
+		// Flush block state cache to sd.mem — all writes (per-TX + finalize) are now visible.
+		if err := be.blockStateCache.Flush(pe.rs.Domains(), applyTx, txTask.Version().TxNum); err != nil {
+			return nil, err
 		}
 		be.result = &blockResult{
 			BlockNum:        be.blockNum,
