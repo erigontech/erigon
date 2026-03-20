@@ -194,7 +194,11 @@ func (m *MemoryMutation) ForAmount(bucket string, prefix []byte, amount uint32, 
 	}
 	defer c.Close()
 
-	for k, v, err := c.Seek(prefix); k != nil && amount > 0; k, v, err = c.Next() {
+	k, v, err := c.Seek(prefix)
+	if err != nil {
+		return err
+	}
+	for ; k != nil && amount > 0; k, v, err = c.Next() {
 		if err != nil {
 			return err
 		}
@@ -301,7 +305,11 @@ func (m *MemoryMutation) ForEach(bucket string, fromPrefix []byte, walker func(k
 	}
 	defer c.Close()
 
-	for k, v, err := c.Seek(fromPrefix); k != nil; k, v, err = c.Next() {
+	k, v, err := c.Seek(fromPrefix)
+	if err != nil {
+		return err
+	}
+	for ; k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
 		}
@@ -1013,6 +1021,28 @@ func (v *OverlayReadView) makeCursor(bucket string) (kv.CursorDupSort, error) {
 	return c, err
 }
 
+func (v *OverlayReadView) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
+	c, err := v.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	k, val, err := c.Seek(fromPrefix)
+	if err != nil {
+		return err
+	}
+	for ; k != nil; k, val, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		if err := walker(k, val); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (v *OverlayReadView) ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, val []byte) error) error {
 	if amount == 0 {
 		return nil
@@ -1023,7 +1053,11 @@ func (v *OverlayReadView) ForAmount(bucket string, prefix []byte, amount uint32,
 	}
 	defer c.Close()
 
-	for k, val, err := c.Seek(prefix); k != nil && amount > 0; k, val, err = c.Next() {
+	k, val, err := c.Seek(prefix)
+	if err != nil {
+		return err
+	}
+	for ; k != nil && amount > 0; k, val, err = c.Next() {
 		if err != nil {
 			return err
 		}
