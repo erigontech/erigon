@@ -2,6 +2,7 @@ name: QA - RPC Integration Tests (Polygon)
 
 on:
   workflow_dispatch:     # Run manually
+  workflow_call:
   push:
     branches:
       - main
