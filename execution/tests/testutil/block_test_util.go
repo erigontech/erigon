@@ -603,6 +603,8 @@ func (bt *BlockTest) RunLightweight(t *testing.T) error {
 }
 
 func (bt *BlockTest) runLightweight(t *testing.T) error {
+	registerGenesisCacheCleanup(t)
+
 	config, ok := testforks.Forks[bt.json.Network]
 	if !ok {
 		return testforks.UnsupportedForkError{Name: bt.json.Network}

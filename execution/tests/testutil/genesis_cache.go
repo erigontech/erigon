@@ -41,6 +41,7 @@ import (
 type genesisCacheEntry struct {
 	db      kv.TemporalRwDB
 	genesis *types.Block
+	dirs    []string // temp directories to remove on cleanup
 }
 
 // genesisDBCache caches one MDBX database per unique (fork, genesisSpecHash) pair.
@@ -205,22 +206,29 @@ func getOrCreateGenesisDB(fork string, gspec *types.Genesis) (kv.TemporalRwDB, *
 		}
 	}
 
-	entry := &genesisCacheEntry{db: db, genesis: genesis}
+	entry := &genesisCacheEntry{db: db, genesis: genesis, dirs: []string{dir, dir + "-genesis-tmp"}}
 	genesisDBCache.Store(key, entry)
 	return db, genesis, nil
 }
 
-// RegisterGenesisCacheCleanup registers a test cleanup function that closes
-// and removes all cached genesis DBs. Call this once from TestMain or
-// a top-level test.
-func RegisterGenesisCacheCleanup(t *testing.T) {
-	t.Cleanup(func() {
-		genesisDBCache.Range(func(key, value any) bool {
-			if e, ok := value.(*genesisCacheEntry); ok && e.db != nil {
-				e.db.Close()
-			}
-			genesisDBCache.Delete(key)
-			return true
+var cleanupOnce sync.Once
+
+// registerGenesisCacheCleanup ensures cleanup is registered exactly once.
+func registerGenesisCacheCleanup(t *testing.T) {
+	cleanupOnce.Do(func() {
+		t.Cleanup(func() {
+			genesisDBCache.Range(func(key, value any) bool {
+				if e, ok := value.(*genesisCacheEntry); ok {
+					if e.db != nil {
+						e.db.Close()
+					}
+					for _, d := range e.dirs {
+						os.RemoveAll(d)
+					}
+				}
+				genesisDBCache.Delete(key)
+				return true
+			})
 		})
 	})
 }
