@@ -42,7 +42,9 @@ import (
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
@@ -59,6 +61,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -81,6 +84,8 @@ type EngineServer struct {
 	txpool           txpoolproto.TxpoolClient // needed for getBlobs
 
 	chainRW chainreader.ChainReaderWriterEth1
+	filters *rpchelper.Filters
+	events  *shards.Events
 	lock    sync.Mutex
 	logger  log.Logger
 
@@ -134,7 +139,11 @@ func (e *EngineServer) Start(
 	engineReader rules.EngineReader,
 	eth rpchelper.ApiBackend,
 	mining txpoolproto.MiningClient,
+	events *shards.Events,
 ) error {
+	e.filters = filters
+	e.events = events
+
 	var eg errgroup.Group
 	if !e.internalCL {
 		eg.Go(func() error {
@@ -693,8 +702,23 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
+	// Subscribe to overlay notifications BEFORE executing the fork choice so
+	// the subscription is in place when PublishOverlay sends through Events.
+	var overlayCh chan *execctx.SharedDomains
+	var unsubOverlay func()
+	if s.events != nil {
+		overlayCh, unsubOverlay = s.events.AddOverlaySubscription()
+		defer unsubOverlay()
+	}
+
+	// Track whether the head hash changed — only new-block FCUs produce an overlay.
+	headChanged := false
 	if status == nil {
-		s.logger.Debug("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkchoiceState.HeadHash)
+		// Read the current head before HandleForkChoice to detect head changes.
+		currentHead, _, _, _ := s.chainRW.GetForkChoice(ctx)
+		headChanged = forkchoiceState.HeadHash != currentHead
+
+		s.logger.Debug("[ForkChoiceUpdated] calling HandleForkChoice", "head", forkchoiceState.HeadHash, "currentHead", currentHead, "headChanged", headChanged)
 
 		status, err = s.HandleForkChoice(ctx, "ForkChoiceUpdated", forkchoiceState)
 		if err != nil {
@@ -708,13 +732,20 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 			}
 			return nil, err
 		}
-		s.logger.Debug("[ForkChoiceUpdated] got reply", "payloadStatus", status)
+		s.logger.Debug("[ForkChoiceUpdated] HandleForkChoice done", "status", status.Status)
 
 		if status.CriticalError != nil {
 			return nil, status.CriticalError
 		}
 	} else {
-		s.logger.Debug("[ForkChoiceUpdated] got quick payload status", "payloadStatus", status)
+		s.logger.Debug("[ForkChoiceUpdated] got quick payload status", "status", status.Status)
+	}
+
+	// Wait for the overlay to be published before returning Valid.
+	// Only wait when the head hash actually changed — safe/finalized-only
+	// FCUs don't execute new blocks and won't produce an overlay.
+	if headChanged && status.Status == engine_types.ValidStatus && overlayCh != nil {
+		s.waitForOverlayPublish(ctx, overlayCh)
 	}
 
 	// No need for payload building
@@ -748,6 +779,16 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	}
 
 	headHeader := s.chainRW.GetHeaderByHash(ctx, forkchoiceState.HeadHash)
+	if headHeader == nil && s.filters != nil {
+		if sd := s.filters.LatestSD(); sd != nil {
+			if overlay := sd.BlockOverlay(); overlay != nil {
+				headHeader, _ = rawdb.ReadHeaderByHash(overlay, forkchoiceState.HeadHash)
+			}
+		}
+	}
+	if headHeader == nil {
+		return nil, fmt.Errorf("head header not found for hash %x", forkchoiceState.HeadHash)
+	}
 
 	if headHeader.Time >= timestamp {
 		s.logger.Debug("[ForkChoiceUpdated] payload time lte head time", "head", headHeader.Time, "payload", timestamp)
@@ -1066,6 +1107,24 @@ func (e *EngineServer) HandleForkChoice(
 		payloadStatus.ValidationError = engine_types.NewStringifiedErrorFromString(*validationErr)
 	}
 	return payloadStatus, nil
+}
+
+// waitForOverlayPublish waits for the SharedDomains to be published via
+// Events.PublishOverlay, or the context to be cancelled. The SD is
+// published synchronously during HandleForkChoice → dispatchNotificationsFromOverlay,
+// so this resolves immediately after HandleForkChoice returns.
+func (e *EngineServer) waitForOverlayPublish(ctx context.Context, ch chan *execctx.SharedDomains) {
+	e.logger.Debug("[engine] waitForOverlayPublish: waiting", "chanLen", len(ch))
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		e.logger.Warn("[engine] waitForOverlayPublish: context cancelled")
+	case sd := <-ch:
+		e.logger.Debug("[engine] waitForOverlayPublish: received SD", "nil", sd == nil)
+	case <-timer.C:
+		e.logger.Warn("[engine] waitForOverlayPublish: timed out after 5s")
+	}
 }
 
 func (e *EngineServer) SetConsuming(consuming bool) {

@@ -39,7 +39,7 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, req *executionproto.Inser
 		}, nil
 	}
 	defer e.semaphore.Release(1)
-	e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
+	e.forkValidator.ClearWithUnwind()
 	frozenBlocks := e.blockReader.FrozenBlocks()
 
 	// Open a read-only tx for the base data; writes accumulate in the

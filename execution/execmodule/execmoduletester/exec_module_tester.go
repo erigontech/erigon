@@ -323,17 +323,31 @@ func WithChainConfig(cfg *chain.Config) Option {
 	}
 }
 
+func WithFcuBackgroundCommit() Option {
+	return func(opts *options) {
+		opts.fcuBackgroundCommit = true
+	}
+}
+
+func WithFcuBackgroundPrune() Option {
+	return func(opts *options) {
+		opts.fcuBackgroundPrune = true
+	}
+}
+
 type options struct {
-	stepSize        *uint64
-	experimentalBAL bool
-	genesis         *types.Genesis
-	chainConfig     *chain.Config
-	key             *ecdsa.PrivateKey
-	engine          rules.Engine
-	pruneMode       *prune.Mode
-	blockBufferSize int
-	withTxPool      bool
-	enableDomains   []kv.Domain
+	stepSize            *uint64
+	experimentalBAL     bool
+	genesis             *types.Genesis
+	chainConfig         *chain.Config
+	key                 *ecdsa.PrivateKey
+	engine              rules.Engine
+	pruneMode           *prune.Mode
+	blockBufferSize     int
+	withTxPool          bool
+	enableDomains       []kv.Domain
+	fcuBackgroundCommit bool
+	fcuBackgroundPrune  bool
 }
 
 func applyOptions(opts []Option) options {
@@ -412,8 +426,8 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	cfg.Genesis = gspec
 	cfg.Prune = pruneMode
 	cfg.ExperimentalBAL = opt.experimentalBAL
-	cfg.FcuBackgroundPrune = false
-	cfg.FcuBackgroundCommit = false
+	cfg.FcuBackgroundPrune = opt.fcuBackgroundPrune
+	cfg.FcuBackgroundCommit = opt.fcuBackgroundCommit
 
 	logLvl := log.LvlError
 	if lvl, ok := os.LookupEnv("MOCK_SENTRY_LOG_LEVEL"); ok {
@@ -624,6 +638,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		mock.TxPool,
 		miningCancel,
 		latestBlockBuiltStore,
+		nil, /*sdProvider*/
 		logger,
 	)
 
@@ -679,13 +694,18 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	validationNotifications := shards.NewNotifications(nil)
 	validationSync := stageloop.NewInMemoryExecution(mock.Ctx, mock.DB, &cfg, mock.sentriesClient,
 		validationNotifications, mock.BlockReader, blockWriter, logger)
-	pipelineExecutor := execmodule.NewPipelineExecutor(mock.posStagedSync, mock.DB, mock.BlockReader, mock.ChainConfig, mock.Engine, validationSync, validationNotifications, logger)
+	dispatcher := execmodule.NewDispatcher(mock.ChainConfig, mock.Notifications.Events, mock.Notifications.StateChangesConsumer, logger)
+	pipelineExecutor := execmodule.NewPipelineExecutor(mock.posStagedSync, mock.DB, mock.BlockReader, mock.ChainConfig, mock.Engine, validationSync, validationNotifications, dispatcher, logger)
 
-	hook := stageloop.NewHook(mock.Ctx, mock.Notifications, mock.posStagedSync, mock.ChainConfig, logger, nil, nil, nil)
+	hook := stageloop.NewHook(mock.Ctx, mock.Notifications, mock.posStagedSync, mock.ChainConfig, logger, dispatcher, nil, nil, nil)
 
 	mock.StateCache = &execmodule.Cache{}
 	onlySnapDownloadOnStart := cfg.Genesis.Config.Bor != nil
 
+	accum := &execmodule.Accumulation{
+		Accumulator:    mock.Notifications.Accumulator,
+		RecentReceipts: mock.Notifications.RecentReceipts,
+	}
 	mock.ExecModule = execmodule.NewExecModule(
 		ctx,
 		mock.BlockReader,
@@ -695,10 +715,8 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		mock.ChainConfig,
 		blkBuilder.Build,
 		hook,
-		mock.Notifications.Accumulator,
-		mock.Notifications.RecentReceipts,
+		accum,
 		mock.StateCache,
-		mock.Notifications.StateChangesConsumer,
 		logger,
 		engine,
 		cfg.Sync,

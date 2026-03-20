@@ -110,11 +110,6 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		}
 		go warmTxsHashes(b)
 
-		stateCache := se.doms.GetStateCache()
-		if stateCache != nil {
-			stateCache.ValidateAndPrepare(b.ParentHash(), b.Hash())
-		}
-
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
 		getHashFnMutex := sync.Mutex{}
@@ -175,10 +170,6 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		if err != nil {
 			return nil, rwTx, err
 		}
-		if stateCache != nil {
-			stateCache.PrintStatsAndReset()
-		}
-
 		if !continueLoop {
 			return b.HeaderNoCopy(), rwTx, nil
 		}

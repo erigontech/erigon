@@ -141,16 +141,17 @@ func (e *ExecModule) UpdateForkChoice(ctx context.Context, req *executionproto.F
 
 		select {
 		case <-fcuTimer.C:
-			e.logger.Debug("treating forkChoiceUpdated as asynchronous as it is taking too long")
+			e.logger.Debug("[UpdateForkChoice] timeout fired, returning Busy", "timeout", req.Timeout, "head", blockHash)
 			return &executionproto.ForkChoiceReceipt{
 				LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
 				Status:          executionproto.ExecutionStatus_Busy,
 			}, nil
 		case outcome := <-outcomeCh:
 			<-done
+			e.logger.Debug("[UpdateForkChoice] received outcome", "status", outcome.receipt.Status, "head", blockHash)
 			return outcome.receipt, outcome.err
 		case <-ctx.Done():
-			e.logger.Debug("forkChoiceUpdate cancelled")
+			e.logger.Debug("[UpdateForkChoice] context cancelled", "head", blockHash)
 			return nil, ctx.Err()
 		}
 	}
@@ -158,9 +159,10 @@ func (e *ExecModule) UpdateForkChoice(ctx context.Context, req *executionproto.F
 	select {
 	case outcome := <-outcomeCh:
 		<-done
+		e.logger.Debug("[UpdateForkChoice] received outcome (no timeout)", "status", outcome.receipt.Status, "head", blockHash)
 		return outcome.receipt, outcome.err
 	case <-ctx.Done():
-		e.logger.Debug("forkChoiceUpdate cancelled")
+		e.logger.Debug("[UpdateForkChoice] context cancelled (no timeout)", "head", blockHash)
 		return nil, ctx.Err()
 	}
 }
@@ -193,7 +195,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	}()
 
 	defer UpdateForkChoiceDuration(time.Now())
-	defer e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
+	defer e.forkValidator.ClearWithUnwind()
 	defer func() {
 		if e.currentContext != nil {
 			e.currentContext.ResetPendingUpdates()
@@ -242,6 +244,12 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 
 	defer func() {
 		if closeOnReturn && currentContext != nil {
+			// Clear the published overlay before closing the SD, so concurrent
+			// readers (e.g. a second FCU calling GetHeaderByHash) don't access
+			// a closed SharedDomains via Events.LatestSD().
+			if dispatcher := e.pipelineExecutor.Dispatcher(); dispatcher != nil {
+				dispatcher.PublishOverlay(nil)
+			}
 			currentContext.Close()
 		}
 	}()
@@ -480,7 +488,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}, false)
 			e.logHeadUpdated(blockHash, fcuHeader, 0, "head validated", false)
 		}
-		if err := e.forkValidator.MergeExtendingFork(ctx, tx, currentContext, e.accumulator, e.recentReceipts); err != nil {
+		if err := e.forkValidator.MergeExtendingFork(ctx, tx, currentContext, e.accum); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
 		rawdb.WriteHeadBlockHash(tx, blockHash)
@@ -490,12 +498,10 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	firstCycle := false
 
 	tx, err = e.pipelineExecutor.RunLoop(ctx, currentContext, tx, RunLoopConfig{
-		InitialCycle: initialCycle,
-		FirstCycle:   firstCycle,
-		PruneTimeout: 500 * time.Millisecond,
-		BeforeIteration: func(sd *execctx.SharedDomains) {
-			sd.SetStateCache(e.stateCache)
-		},
+		InitialCycle:    initialCycle,
+		FirstCycle:      firstCycle,
+		PruneTimeout:    500 * time.Millisecond,
+		BeforeIteration: nil,
 		CommitCycle: func(ctx context.Context, sd *execctx.SharedDomains) (kv.TemporalRwTx, error) {
 			// Flush SD + overlay to a brief RwTx to relieve memory pressure.
 			commitRwTx, err := e.db.BeginTemporalRw(ctx) //nolint:gocritic
@@ -616,59 +622,73 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			e.lock.Unlock()
 		}
 
-		if e.fcuBackgroundCommit {
-			// Background commit: open a brief RwTx, flush SD (overlay + domain mem), commit.
-			commitRwTx, err := e.db.BeginTemporalRw(ctx)
-			if err != nil {
-				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("fcu bg commit: begin rw: %w", err), stateFlushingInParallel)
-			}
-			defer commitRwTx.Rollback()
-			if err := currentContext.Flush(ctx, commitRwTx); err != nil {
-				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("fcu bg commit: flush sd: %w", err), stateFlushingInParallel)
-			}
-			if err = commitRwTx.Commit(); err != nil {
-				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
-			}
-			e.lock.Lock()
-			e.currentContext = currentContext
-			e.lock.Unlock()
-			closeOnReturn = false
-		} else {
-			timings, err := e.runForkchoiceCommitOverlay(currentContext, finishProgressBefore, isSynced)
-			if err != nil {
-				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
-			}
-			if len(timings) > 0 {
-				var m runtime.MemStats
-				dbg.ReadMemStats(&m)
-				timings = append(timings, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-				e.logger.Info("Timings: Forkchoice Commit", timings...)
-			}
+		// Dispatch notifications from the SD overlay (before flush/commit).
+		// After this, all consumers have the data — the semaphore can be
+		// released and flush/commit/prune can proceed without blocking the
+		// next FCU.
+		e.logger.Debug("[updateForkChoice] dispatching notifications", "head", blockHash, "bgCommit", e.fcuBackgroundCommit)
+		if err := e.dispatchNotificationsFromOverlay(currentContext, finishProgressBefore); err != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("fcu: dispatch notifications: %w", err), stateFlushingInParallel)
 		}
-	}
 
-	if !e.fcuBackgroundPrune {
-		timings, err := e.runForkchoicePrune(initialCycle)
-		if err != nil {
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+		// Flush + commit: foreground by default, background only if
+		// fcuBackgroundCommit is explicitly enabled.
+		var commitTimings []any
+		if e.fcuBackgroundCommit {
+			shouldReleaseSema = false
+			closeOnReturn = false
+			dispatcher := e.pipelineExecutor.Dispatcher()
+			go func() {
+				defer e.semaphore.Release(1)
+				err := e.runPostForkchoice(currentContext, finishProgressBefore, isSynced, initialCycle)
+				if err != nil && !errors.Is(err, context.Canceled) {
+					e.logger.Error("Error running background post forkchoice", "err", err)
+				}
+				// Signal that the DB commit is done — RPC consumers can
+				// drop their SD reference and read from committed DB.
+				if dispatcher != nil {
+					dispatcher.PublishOverlay(nil)
+				}
+			}()
+		} else {
+			ct, err := e.runForkchoiceFlushCommit(currentContext, finishProgressBefore, isSynced)
+			if err != nil {
+				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+			}
+			commitTimings = ct
 		}
-		if len(timings) > 0 {
+
+		// Prune: background by default (fcuBackgroundPrune=true).
+		// Only runs in foreground when both background flags are off.
+		if !e.fcuBackgroundCommit {
+			if e.fcuBackgroundPrune {
+				go func() {
+					pruneTimings, err := e.runForkchoicePrune(initialCycle)
+					if err != nil && !errors.Is(err, context.Canceled) {
+						e.logger.Error("Error running background prune", "err", err)
+					}
+					if len(pruneTimings) > 0 {
+						var m runtime.MemStats
+						dbg.ReadMemStats(&m)
+						pruneTimings = append(pruneTimings, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+						e.logger.Info("Timings: Background Prune", pruneTimings...)
+					}
+				}()
+			} else {
+				pruneTimings, err := e.runForkchoicePrune(initialCycle)
+				if err != nil {
+					return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+				}
+				commitTimings = append(commitTimings, pruneTimings...)
+			}
+		}
+
+		if len(commitTimings) > 0 {
 			var m runtime.MemStats
 			dbg.ReadMemStats(&m)
-			timings = append(timings, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-			e.logger.Info("Timings: Forkchoice Prune", timings...)
+			commitTimings = append(commitTimings, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+			e.logger.Info("Timings: Forkchoice", commitTimings...)
 		}
-	}
-	backgroundPostForkChoice := e.fcuBackgroundCommit || e.fcuBackgroundPrune
-	if backgroundPostForkChoice {
-		shouldReleaseSema = false // pass on the semaphore to background goroutine
-		go func() {
-			defer e.semaphore.Release(1)
-			err := e.runPostForkchoice(currentContext, finishProgressBefore, isSynced, initialCycle)
-			if err != nil && !errors.Is(err, context.Canceled) {
-				e.logger.Error("Error running background post forkchoice", "err", err)
-			}
-		}()
 	}
 
 	return sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{
@@ -678,20 +698,16 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	}, stateFlushingInParallel)
 }
 
+// runPostForkchoice runs flush+commit+UpdateHead+prune in a background goroutine.
+// Notifications have already been dispatched inline from the overlay.
 func (e *ExecModule) runPostForkchoice(sd *execctx.SharedDomains, finishProgressBefore uint64, isSynced bool, initialCycle bool) error {
 	var timings []any
 	if e.fcuBackgroundCommit && sd != nil {
-		err := e.db.UpdateTemporal(e.bacgroundCtx, func(tx kv.TemporalRwTx) error {
-			commitTimings, err := e.runForkchoiceCommit(sd, tx, finishProgressBefore, isSynced)
-			if err != nil {
-				return err
-			}
-			timings = append(timings, commitTimings...)
-			return nil
-		})
+		commitTimings, err := e.runForkchoiceFlushCommit(sd, finishProgressBefore, isSynced)
 		if err != nil {
 			return err
 		}
+		timings = append(timings, commitTimings...)
 	}
 	if e.fcuBackgroundPrune {
 		pruneTimings, err := e.runForkchoicePrune(initialCycle)
@@ -709,13 +725,71 @@ func (e *ExecModule) runPostForkchoice(sd *execctx.SharedDomains, finishProgress
 	return nil
 }
 
-// runForkchoiceCommitOverlay opens a brief RwTx, flushes the SharedDomains
-// (block overlay + domain mem) into it, and commits atomically.
-func (e *ExecModule) runForkchoiceCommitOverlay(sd *execctx.SharedDomains, finishProgressBefore uint64, isSynced bool) ([]any, error) {
+// dispatchNotificationsFromOverlay sends notifications reading from the SD's
+// blockOverlay (MemoryMutation). All required data — headers, canonical hashes,
+// state version, forkchoice markers — exists in the overlay before flush/commit.
+// Called inline (under semaphore) so consumers have the data before the next
+// FCU can start.
+func (e *ExecModule) dispatchNotificationsFromOverlay(sd *execctx.SharedDomains, finishProgressBefore uint64) error {
+	dispatcher := e.pipelineExecutor.Dispatcher()
+	if dispatcher == nil || e.accum == nil {
+		e.logger.Debug("[dispatchNotifications] skipped: dispatcher or accum nil", "dispatcherNil", dispatcher == nil, "accumNil", e.accum == nil)
+		return nil
+	}
+	overlay := sd.BlockOverlay()
+	if overlay == nil {
+		e.logger.Debug("[dispatchNotifications] skipped: overlay nil")
+		return nil
+	}
+	finishProgressAfter, err := stages.GetStageProgress(overlay, stages.Finish)
+	if err != nil {
+		return err
+	}
+	e.logger.Debug("[dispatchNotifications] dispatching", "finishBefore", finishProgressBefore, "finishAfter", finishProgressAfter)
+	if err := dispatcher.Dispatch(
+		e.bacgroundCtx,
+		overlay,
+		e.accum.Accumulator,
+		e.accum.RecentReceipts,
+		finishProgressBefore,
+		finishProgressAfter,
+		e.pipelineExecutor.Sync().PrevUnwindPoint(),
+	); err != nil {
+		return err
+	}
+
+	// Publish the SharedDomains for in-process consumers (RPC, builder).
+	// The SD holds both block overlay (table data) and domain state.
+	// The background commit goroutine owns the SD lifecycle — it will
+	// close it after flush+commit completes.
+	e.logger.Debug("[dispatchNotifications] publishing SD")
+	dispatcher.PublishOverlay(sd)
+	return nil
+}
+
+// runForkchoiceCommitAndPrune does flush → commit → UpdateHead → prune
+// synchronously. No notifications — those are dispatched before this is called.
+func (e *ExecModule) runForkchoiceCommitAndPrune(sd *execctx.SharedDomains, finishProgressBefore uint64, isSynced bool, initialCycle bool) ([]any, error) {
+	timings, err := e.runForkchoiceFlushCommit(sd, finishProgressBefore, isSynced)
+	if err != nil {
+		return nil, err
+	}
+	pruneTimings, err := e.runForkchoicePrune(initialCycle)
+	if err != nil {
+		return nil, err
+	}
+	timings = append(timings, pruneTimings...)
+	return timings, nil
+}
+
+// runForkchoiceFlushCommit opens a brief RwTx, flushes the SharedDomains
+// (block overlay + domain mem), commits, then updates the sentry head.
+func (e *ExecModule) runForkchoiceFlushCommit(sd *execctx.SharedDomains, finishProgressBefore uint64, isSynced bool) ([]any, error) {
 	var timings []any
+
 	rwTx, err := e.db.BeginTemporalRw(e.bacgroundCtx)
 	if err != nil {
-		return nil, fmt.Errorf("runForkchoiceCommitOverlay: begin rw: %w", err)
+		return nil, fmt.Errorf("fcu flush+commit: begin rw: %w", err)
 	}
 	defer rwTx.Rollback()
 	flushStart := time.Now()
@@ -728,42 +802,16 @@ func (e *ExecModule) runForkchoiceCommitOverlay(sd *execctx.SharedDomains, finis
 		return nil, err
 	}
 	timings = append(timings, "commit", common.Round(time.Since(commitStart), 0))
-	if e.hook != nil {
-		if err := e.db.View(e.bacgroundCtx, func(tx kv.Tx) error {
-			return e.hook.AfterRun(tx, finishProgressBefore, isSynced)
-		}); err != nil {
-			return nil, err
-		}
-	}
-	// force fsync after notifications are sent
-	if err := e.db.Update(e.bacgroundCtx, func(tx kv.RwTx) error {
-		return kv.IncrementKey(tx, kv.DatabaseInfo, []byte("chaindata_force"))
-	}); err != nil {
-		return nil, err
-	}
-	return timings, nil
-}
 
-func (e *ExecModule) runForkchoiceCommit(sd *execctx.SharedDomains, tx kv.TemporalRwTx, finishProgressBefore uint64, isSynced bool) ([]any, error) {
-	var timings []any
-	flushStart := time.Now()
-	if err := sd.Flush(e.bacgroundCtx, tx); err != nil {
-		return nil, err
-	}
-	timings = append(timings, "flush", common.Round(time.Since(flushStart), 0))
-	commitStart := time.Now()
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	timings = append(timings, "commit", common.Round(time.Since(commitStart), 0))
+	// Update head and announce block range (notifications already dispatched).
 	if e.hook != nil {
 		if err := e.db.View(e.bacgroundCtx, func(tx kv.Tx) error {
-			return e.hook.AfterRun(tx, finishProgressBefore, isSynced)
+			return e.hook.UpdateHead(tx, finishProgressBefore, isSynced)
 		}); err != nil {
 			return nil, err
 		}
 	}
-	// force fsync after notifications are sent
+	// Force fsync so data is durable before the next slot.
 	if err := e.db.Update(e.bacgroundCtx, func(tx kv.RwTx) error {
 		return kv.IncrementKey(tx, kv.DatabaseInfo, []byte("chaindata_force"))
 	}); err != nil {

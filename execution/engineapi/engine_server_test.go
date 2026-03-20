@@ -126,7 +126,7 @@ func TestGetBlobsV1(t *testing.T) {
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mockSentry)
 	txPool := direct.NewTxPoolClient(mockSentry.TxPoolGrpcServer)
 
-	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, mockSentry.Log)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, mockSentry.Log, nil)
 	api := newEthApiForTest(newBaseApiForTest(mockSentry), mockSentry.DB, txPool)
 
 	executionRpc := direct.NewExecutionClientDirect(mockSentry.ExecModule)
@@ -142,7 +142,7 @@ func TestGetBlobsV1(t *testing.T) {
 	})
 	t.Cleanup(cancel)
 	eg.Go(func() error {
-		return engineServer.Start(ctx, &httpcfg.HttpCfg{}, mockSentry.DB, mockSentry.BlockReader, ff, nil, mockSentry.Engine, eth, nil)
+		return engineServer.Start(ctx, &httpcfg.HttpCfg{}, mockSentry.DB, mockSentry.BlockReader, ff, nil, mockSentry.Engine, eth, nil, nil)
 	})
 
 	err = wrappedTxn.MarshalBinaryWrapped(buf)
@@ -181,7 +181,7 @@ func TestGetBlobsV2(t *testing.T) {
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mockSentry)
 	txPool := direct.NewTxPoolClient(mockSentry.TxPoolGrpcServer)
 
-	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, mockSentry.Log)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, mockSentry.Log, nil)
 	api := newEthApiForTest(newBaseApiForTest(mockSentry), mockSentry.DB, txPool)
 
 	executionRpc := direct.NewExecutionClientDirect(mockSentry.ExecModule)
@@ -197,7 +197,7 @@ func TestGetBlobsV2(t *testing.T) {
 	})
 	t.Cleanup(cancel)
 	eg.Go(func() error {
-		return engineServer.Start(ctx, &httpcfg.HttpCfg{}, mockSentry.DB, mockSentry.BlockReader, ff, nil, mockSentry.Engine, eth, nil)
+		return engineServer.Start(ctx, &httpcfg.HttpCfg{}, mockSentry.DB, mockSentry.BlockReader, ff, nil, mockSentry.Engine, eth, nil, nil)
 	})
 
 	err = wrappedTxn.MarshalBinaryWrapped(buf)
@@ -245,7 +245,7 @@ func TestGetBlobsV3(t *testing.T) {
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mockSentry)
 	txPool := direct.NewTxPoolClient(mockSentry.TxPoolGrpcServer)
 
-	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, mockSentry.Log)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, mockSentry.Log, nil)
 	api := newEthApiForTest(newBaseApiForTest(mockSentry), mockSentry.DB, txPool)
 
 	executionRpc := direct.NewExecutionClientDirect(mockSentry.ExecModule)
@@ -261,7 +261,7 @@ func TestGetBlobsV3(t *testing.T) {
 	})
 	t.Cleanup(cancel)
 	eg.Go(func() error {
-		return engineServer.Start(ctx, &httpcfg.HttpCfg{}, mockSentry.DB, mockSentry.BlockReader, ff, nil, mockSentry.Engine, eth, nil)
+		return engineServer.Start(ctx, &httpcfg.HttpCfg{}, mockSentry.DB, mockSentry.BlockReader, ff, nil, mockSentry.Engine, eth, nil, nil)
 	})
 
 	err = wrappedTxn.MarshalBinaryWrapped(buf)

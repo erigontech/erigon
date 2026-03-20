@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder"
-	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/exec"
@@ -52,7 +51,6 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon/node/shards"
 )
 
 var ErrMissingChainSegment = errors.New("missing chain segment")
@@ -95,7 +93,14 @@ func GetBlockHashFromMissingSegmentError(err error) (common.Hash, bool) {
 }
 
 type Cache struct {
-	execModule *ExecModule
+	execModule  *ExecModule
+	publishedSD func() *execctx.SharedDomains // returns the latest published SD from Events (for background commit)
+}
+
+// SetPublishedSD wires the Cache to fall back to the published SD from Events
+// when the exec module's currentContext is nil (e.g. during background commit).
+func (c *Cache) SetPublishedSD(provider func() *execctx.SharedDomains) {
+	c.publishedSD = provider
 }
 
 var _ kvcache.Cache = (*Cache)(nil)         // compile-time interface check
@@ -105,8 +110,13 @@ func (c *Cache) View(_ context.Context, tx kv.TemporalTx) (kvcache.CacheView, er
 	var context *execctx.SharedDomains
 	if c.execModule != nil {
 		c.execModule.lock.RLock()
-		defer c.execModule.lock.RUnlock()
 		context = c.execModule.currentContext
+		c.execModule.lock.RUnlock()
+	}
+	// Fall back to the published SD from Events during background commits
+	// (currentContext is nil but the SD is still valid in memory).
+	if context == nil && c.publishedSD != nil {
+		context = c.publishedSD()
 	}
 
 	return &CacheView{context: context, tx: tx}, nil
@@ -182,10 +192,8 @@ type ExecModule struct {
 	builders       map[uint64]*builder.BlockBuilder
 
 	// Changes accumulator
-	hook                *stageloop.Hook
-	accumulator         *shards.Accumulator
-	recentReceipts      *shards.RecentReceipts
-	stateChangeConsumer shards.StateChangeConsumer
+	hook  *stageloop.Hook
+	accum *Accumulation
 
 	// configuration
 	config  *chain.Config
@@ -201,9 +209,7 @@ type ExecModule struct {
 
 	lock           sync.RWMutex
 	currentContext *execctx.SharedDomains
-
-	// stateCache is a cache for state data (accounts, storage, code)
-	stateCache *cache.StateCache
+	publishedSD    func() *execctx.SharedDomains // fallback for background commit
 
 	stopNode func() error
 
@@ -219,10 +225,8 @@ func NewExecModule(
 	config *chain.Config,
 	builderFunc builder.BlockBuilderFunc,
 	hook *stageloop.Hook,
-	accumulator *shards.Accumulator,
-	recentReceipts *shards.RecentReceipts,
+	accum *Accumulation,
 	stateCache *Cache,
-	stateChangeConsumer shards.StateChangeConsumer,
 	logger log.Logger,
 	engine rules.Engine,
 	syncCfg ethconfig.Sync,
@@ -231,7 +235,6 @@ func NewExecModule(
 	onlySnapDownloadOnStart bool,
 	stopNode func() error,
 ) *ExecModule {
-	domainCache := cache.NewDefaultStateCache()
 	forkValidator := newForkValidator(ctx, currentBlockNumber, pipelineExecutor, blockReader, syncCfg.MaxReorgDepth)
 
 	em := &ExecModule{
@@ -245,16 +248,13 @@ func NewExecModule(
 		config:                  config,
 		semaphore:               semaphore.NewWeighted(1),
 		hook:                    hook,
-		accumulator:             accumulator,
-		recentReceipts:          recentReceipts,
-		stateChangeConsumer:     stateChangeConsumer,
+		accum:                   accum,
 		engine:                  engine,
 		syncCfg:                 syncCfg,
 		bacgroundCtx:            ctx,
 		fcuBackgroundPrune:      fcuBackgroundPrune,
 		fcuBackgroundCommit:     fcuBackgroundCommit,
 		onlySnapDownloadOnStart: onlySnapDownloadOnStart,
-		stateCache:              domainCache,
 		stopNode:                stopNode,
 	}
 
@@ -275,6 +275,12 @@ func (e *ExecModule) WaitIdle(ctx context.Context) {
 
 // ForkValidator returns the fork validator owned by this module.
 func (e *ExecModule) ForkValidator() *ForkValidator { return e.forkValidator }
+
+// SetPublishedSD wires the ExecModule to fall back to the published SD from Events
+// when currentContext is nil (e.g. during background commit).
+func (e *ExecModule) SetPublishedSD(provider func() *execctx.SharedDomains) {
+	e.publishedSD = provider
+}
 
 func (e *ExecModule) getHeader(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*types.Header, error) {
 	if e.blockReader == nil {
@@ -368,7 +374,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, req *executionproto.Vali
 
 	e.hook.LastNewBlockSeen(req.Number) // used by eth_syncing
 	e.currentContext.ResetPendingUpdates()
-	e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
+	e.forkValidator.ClearWithUnwind()
 	blockHash := gointerfaces.ConvertH256ToHash(req.Hash)
 	e.logger.Debug("[execmodule] validating chain", "number", req.Number, "hash", common.Hash(blockHash))
 	var (
@@ -452,10 +458,6 @@ func (e *ExecModule) ValidateChain(ctx context.Context, req *executionproto.Vali
 	}
 	doms.SetInMemHistoryReads(inMemHistoryReads)
 
-	// Set state cache in SharedDomains for use during state reading
-	if e.stateCache != nil && dbg.UseStateCache {
-		doms.SetStateCache(e.stateCache)
-	}
 	if err = e.unwindToCommonCanonical(doms, tx, header); err != nil {
 		doms.Close()
 		return nil, err
@@ -464,12 +466,6 @@ func (e *ExecModule) ValidateChain(ctx context.Context, req *executionproto.Vali
 	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, doms, tx, header, body.RawBody(), e.logger)
 	if criticalError != nil {
 		return nil, criticalError
-	}
-
-	// Clear state cache on invalid block
-	isInvalid := status == engine_types.InvalidStatus || status == engine_types.InvalidBlockHashStatus || validationError != nil
-	if e.stateCache != nil && isInvalid {
-		e.stateCache.ClearWithHash(header.ParentHash)
 	}
 
 	// Throw away the tx and start a new one (do not persist changes to the canonical chain)

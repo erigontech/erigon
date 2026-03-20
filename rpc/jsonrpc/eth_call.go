@@ -102,7 +102,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		return nil, err
 	}
 
-	err = rpchelper.CheckBlockExecuted(tx, header.Number.Uint64())
+	err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), header.Number.Uint64())
 	if err != nil {
 		return nil, err
 	}
@@ -181,12 +181,13 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		return 0, err
 	}
 
-	err = rpchelper.CheckBlockExecuted(dbtx, header.Number.Uint64())
+	stateTx := api.filters.WithTemporalOverlay(dbtx)
+	err = rpchelper.CheckBlockExecuted(stateTx, header.Number.Uint64())
 	if err != nil {
 		return 0, err
 	}
 
-	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, dbtx, blockNum.Uint64(), isLatest, 0, api.stateCache, api._txNumReader)
+	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, stateTx, blockNum.Uint64(), isLatest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return 0, err
 	}
@@ -841,7 +842,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 			return nil, err
 		}
 
-		err = rpchelper.CheckBlockExecuted(tx, header.Number.Uint64())
+		err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), header.Number.Uint64())
 		if err != nil {
 			return nil, err
 		}

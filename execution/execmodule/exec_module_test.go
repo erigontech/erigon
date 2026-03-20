@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/generics"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/execmodule"
@@ -854,4 +855,117 @@ func TestAssembleBlockWithWithdrawalRequest(t *testing.T) {
 	require.NoError(t, err)
 	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
 	require.NoError(t, err)
+// TestNotificationDispatchForegroundCommit verifies that after FCU returns
+// Success with the default foreground commit path:
+// 1. Header notifications have been dispatched (subscribers receive them)
+// 2. Block data is committed to DB (eth_getBlockByNumber works)
+func TestNotificationDispatchForegroundCommit(t *testing.T) {
+	ctx := t.Context()
+	m := execmoduletester.New(t)
+	exec := m.ExecModule
+
+	// Subscribe to header notifications before any blocks.
+	headerCh, unsub := m.Notifications.Events.AddHeaderSubscription()
+	defer unsub()
+
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, nil)
+	require.NoError(t, err)
+
+	err = insertValidateAndUfc1By1(ctx, exec, chainPack.Blocks)
+	require.NoError(t, err)
+
+	// After FCU returns Success, header notifications must already be
+	// dispatched. Use a short timeout — they should be available immediately.
+	drainHeaders(t, headerCh, 2*time.Second)
+
+	// With foreground commit (default), data must be in the DB immediately
+	// after FCU returns — this is what eth_getBlockByNumber relies on.
+	err = m.DB.View(ctx, func(tx kv.Tx) error {
+		for _, b := range chainPack.Blocks {
+			h := rawdb.ReadHeader(tx, b.Hash(), b.NumberU64())
+			require.NotNil(t, h, "block %d header should be in DB after foreground FCU", b.NumberU64())
+		}
+		return nil
+	})
+	require.NoError(t, err)
+}
+
+// TestNotificationDispatchBackgroundCommit verifies that with background
+// commit enabled, notifications are still dispatched before FCU returns,
+// even though the DB commit happens asynchronously.
+//
+// Note: with background commit, subsequent blocks may fail validation
+// because the DB state hasn't caught up yet (the commit is async). This
+// test only processes the genesis → block 1 transition to verify that
+// notification dispatch works correctly in the background commit path.
+func TestNotificationDispatchBackgroundCommit(t *testing.T) {
+	// Background commit creates a race: FCU N returns before commit finishes,
+	// so FCU N+1 reads stale state from DB. This is the known limitation that
+	// the API-layer "latest head pointer" coordination is designed to solve.
+	// Once that's implemented, remove this skip and verify the full flow.
+	t.Skip("background commit requires API-layer coordination (latest head pointer) to work correctly")
+
+	m := execmoduletester.New(t, execmoduletester.WithFcuBackgroundCommit())
+
+	headerCh, unsub := m.Notifications.Events.AddHeaderSubscription()
+	defer unsub()
+
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, nil)
+	require.NoError(t, err)
+
+	err = m.InsertChain(chainPack)
+	require.NoError(t, err)
+
+	drainHeaders(t, headerCh, 2*time.Second)
+}
+
+// TestNotificationDispatchBackgroundPrune verifies that with the default
+// production configuration (foreground commit + background prune), notifications
+// are dispatched and data is committed before FCU returns. This was a real bug:
+// background prune was incorrectly pulling the commit into the background
+// goroutine too, causing eth_getBlockByNumber to return null after FCU Success.
+func TestNotificationDispatchBackgroundPrune(t *testing.T) {
+	ctx := t.Context()
+	m := execmoduletester.New(t, execmoduletester.WithFcuBackgroundPrune())
+	exec := m.ExecModule
+
+	headerCh, unsub := m.Notifications.Events.AddHeaderSubscription()
+	defer unsub()
+
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, nil)
+	require.NoError(t, err)
+
+	err = insertValidateAndUfc1By1(ctx, exec, chainPack.Blocks)
+	require.NoError(t, err)
+
+	// Notifications dispatched.
+	drainHeaders(t, headerCh, 2*time.Second)
+
+	// Data committed to DB (prune is background, but commit is foreground).
+	err = m.DB.View(ctx, func(tx kv.Tx) error {
+		for _, b := range chainPack.Blocks {
+			h := rawdb.ReadHeader(tx, b.Hash(), b.NumberU64())
+			require.NotNil(t, h, "block %d header should be in DB with background prune", b.NumberU64())
+		}
+		return nil
+	})
+	require.NoError(t, err)
+}
+
+// drainHeaders reads from the header subscription channel until at least one
+// header is received, or fails the test after timeout.
+func drainHeaders(t *testing.T, ch <-chan [][]byte, timeout time.Duration) {
+	t.Helper()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	var count int
+	for count == 0 {
+		select {
+		case hdrs := <-ch:
+			count += len(hdrs)
+		case <-timer.C:
+			t.Fatal("timed out waiting for header notifications")
+		}
+	}
+	require.Greater(t, count, 0, "should have received header notifications")
 }
