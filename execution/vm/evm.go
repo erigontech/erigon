@@ -176,11 +176,28 @@ func (evm *EVM) ResetGasConsumed() {
 	evm.revertedSpillGas = 0
 }
 
-// handleStateGasRevert adjusts EIP-8037 state gas accounting after a
-// revert or exceptional halt in a call/create frame. It restores spilled
-// state gas back to regular gas (since state changes were reverted) and
-// handles the depth-dependent reservoir preservation.
-func (evm *EVM) handleStateGasRevert(gas *mdgas.MdGas, err error, depth int, savedStateGasConsumed, initialChildState uint64) {
+// handleFrameRevert handles the full error path for a call or create frame:
+// state revert, regular gas burning on exceptional halt, and EIP-8037 state
+// gas accounting (spill restoration, depth-dependent reservoir preservation).
+func (evm *EVM) handleFrameRevert(gas *mdgas.MdGas, err error, depth int,
+	snapshot int,
+	savedStateGasConsumed, initialChildState uint64) {
+
+	// 1. Revert state changes.
+	evm.intraBlockState.RevertToSnapshot(snapshot, err)
+
+	// 2. On exceptional halt (not REVERT), burn remaining regular gas.
+	if err != ErrExecutionReverted {
+		if evm.chainRules.IsAmsterdam {
+			evm.regularGasConsumed += gas.Regular
+		}
+		if evm.config.Tracer != nil && evm.config.Tracer.OnGasChange != nil {
+			evm.config.Tracer.OnGasChange(gas.Regular, 0, tracing.GasChangeCallFailedExecution)
+		}
+		gas.Regular = 0
+	}
+
+	// 3. EIP-8037: state gas revert accounting.
 	if !evm.chainRules.IsAmsterdam {
 		return
 	}
@@ -372,21 +389,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	// above we revert to the snapshot and consume any gas remaining. Additionally
 	// when we're in Homestead this also counts for code storage gas errors.
 	if err != nil || evm.config.RestoreState {
-		evm.intraBlockState.RevertToSnapshot(snapshot, err)
-
-		if err != ErrExecutionReverted {
-			// EIP-8037: On exceptional halt, count remaining gas as "consumed"
-			// for block-level regular gas accounting before zeroing.
-			if evm.chainRules.IsAmsterdam {
-				evm.regularGasConsumed += gas.Regular
-			}
-			if evm.config.Tracer != nil && evm.config.Tracer.OnGasChange != nil {
-				evm.Config().Tracer.OnGasChange(gas.Regular, 0, tracing.GasChangeCallFailedExecution)
-			}
-			gas.Regular = 0
-		}
-
-		evm.handleStateGasRevert(&gas, err, depth, savedStateGasConsumed, initialChildState)
+		evm.handleFrameRevert(&gas, err, depth, snapshot, savedStateGasConsumed, initialChildState)
 	}
 
 	return ret, gas, err
@@ -611,18 +614,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	// above, we revert to the snapshot and consume any gas remaining. Additionally,
 	// when we're in Homestead, this also counts for code storage gas errors.
 	if err != nil && (evm.chainRules.IsHomestead || err != ErrCodeStoreOutOfGas) {
-		evm.intraBlockState.RevertToSnapshot(snapshot, nil)
-
-		if err != ErrExecutionReverted {
-			// EIP-8037: On exceptional halt, count remaining gas as "consumed"
-			// for block-level regular gas accounting before zeroing.
-			if evm.chainRules.IsAmsterdam {
-				evm.regularGasConsumed += gasRemaining.Regular
-			}
-			gasRemaining.Regular, _ = useGas(gasRemaining.Regular, gasRemaining.Regular, evm.Config().Tracer, tracing.GasChangeCallFailedExecution)
-		}
-
-		evm.handleStateGasRevert(&gasRemaining, err, depth, savedStateGasConsumed, initialChildState)
+		evm.handleFrameRevert(&gasRemaining, err, depth, snapshot, savedStateGasConsumed, initialChildState)
 	}
 
 	return ret, address, gasRemaining, err
