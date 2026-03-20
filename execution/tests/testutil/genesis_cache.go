@@ -23,6 +23,8 @@ import (
 	"fmt"
 	"os"
 	"sort"
+
+	dirutil "github.com/erigontech/erigon/common/dir"
 	"sync"
 	"testing"
 
@@ -223,7 +225,7 @@ func registerGenesisCacheCleanup(t *testing.T) {
 						e.db.Close()
 					}
 					for _, d := range e.dirs {
-						os.RemoveAll(d)
+						dirutil.RemoveAll(d)
 					}
 				}
 				genesisDBCache.Delete(key)
