@@ -664,6 +664,15 @@ jobs:
         fi
 
 
+  sync-gitbook:
+    name: Sync Gitbook docs branch and create variant if needed
+    needs: [publish-release]
+    if: ${{ inputs.perform_release }}
+    uses: ./.github/workflows/gitbook-release.yml
+    with:
+      release_version: ${{ inputs.release_version }}
+    secrets: inherit
+
   In-case-of-failure:
     name: "In case of failure: remove remote git tag pointing to the new version."
     needs: [ publish-release, build-release, test-release, build-debian-pkg, publish-docker-image ]
