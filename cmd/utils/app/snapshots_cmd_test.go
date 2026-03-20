@@ -260,7 +260,7 @@ func Test_DeleteLatestStateSnaps_SubsetRemoval(t *testing.T) {
 	}
 
 	// First call: should remove only the tip file 224-225
-	err := DeleteStateSnapshots(dirs, true, false, false, "", "receipt")
+	err := DeleteStateSnapshots(DeleteStateSnapshotsArgs{Dirs: dirs, RemoveLatest: true, DomainNames: []string{"receipt"}})
 	require.NoError(t, err)
 
 	// 224-225 should be gone
@@ -275,7 +275,7 @@ func Test_DeleteLatestStateSnaps_SubsetRemoval(t *testing.T) {
 
 	// Second call: should remove 223-224 (From >= _maxFrom=223),
 	// 192-224 (To == _maxTo=224), AND all sub-ranges of 192-224
-	err = DeleteStateSnapshots(dirs, true, false, false, "", "receipt")
+	err = DeleteStateSnapshots(DeleteStateSnapshotsArgs{Dirs: dirs, RemoveLatest: true, DomainNames: []string{"receipt"}})
 	require.NoError(t, err)
 
 	// All of these should be gone (the merged file and all its sub-ranges)
@@ -312,7 +312,7 @@ func Test_DeleteStateSnaps_StepRange_SubsetRemoval(t *testing.T) {
 	}
 
 	// Use --step 192-224 to remove the merged file and its subsets
-	err := DeleteStateSnapshots(dirs, false, false, false, "192-224", "receipt")
+	err := DeleteStateSnapshots(DeleteStateSnapshotsArgs{Dirs: dirs, StepRange: "192-224", DomainNames: []string{"receipt"}})
 	require.NoError(t, err)
 
 	// 192-224 and all sub-ranges should be gone
@@ -347,7 +347,7 @@ func Test_DeleteLatestStateSnaps_NoFalseSubsetRemoval(t *testing.T) {
 	}
 
 	// Remove latest: should only remove 192-193
-	err := DeleteStateSnapshots(dirs, true, false, false, "", "receipt")
+	err := DeleteStateSnapshots(DeleteStateSnapshotsArgs{Dirs: dirs, RemoveLatest: true, DomainNames: []string{"receipt"}})
 	require.NoError(t, err)
 
 	file, _ := b.domain.DataFile(version.V1_0, RootNum(192), RootNum(193))
@@ -386,12 +386,12 @@ func Test_DeleteLatestStateSnaps_NoCrossDomainSubsetRemoval(t *testing.T) {
 	}
 
 	// First --latest: remove tip 224-225 from both domains
-	err := DeleteStateSnapshots(dirs, true, false, false, "")
+	err := DeleteStateSnapshots(DeleteStateSnapshotsArgs{Dirs: dirs, RemoveLatest: true})
 	require.NoError(t, err)
 
 	// Second --latest: should remove accounts.192-224 + its sub-ranges,
 	// but storage sub-ranges must SURVIVE (no merged storage.192-224 to cascade from)
-	err = DeleteStateSnapshots(dirs, true, false, false, "")
+	err = DeleteStateSnapshots(DeleteStateSnapshotsArgs{Dirs: dirs, RemoveLatest: true})
 	require.NoError(t, err)
 
 	// accounts.192-224 and its sub-ranges should be gone
