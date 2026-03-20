@@ -357,7 +357,9 @@ func stageLoopIteration(ctx context.Context, sd *execctx.SharedDomains, tx kv.Te
 		}
 	}
 	logCtx = append(logCtx, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-	logger.Info("Timings", logCtx...)
+	if len(logCtx) > 4 { // skip if only alloc+sys
+		logger.Info("Timings", logCtx...)
+	}
 	// -- send notifications END
 	// -- Prune+commit(sync)
 	err = sync.RunPrune(ctx, tx, initialCycle, 0)
