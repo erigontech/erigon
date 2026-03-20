@@ -54,9 +54,9 @@ type genesisCacheEntry struct {
 const maxGenesisCacheSize = 128
 
 var (
-	genesisDBCache     sync.Map   // map[string]*genesisCacheEntry
-	genesisDBMu        sync.Mutex // serializes genesis DB creation
-	genesisCacheCount  int        // approximate count, protected by genesisDBMu
+	genesisDBCache    sync.Map   // map[string]*genesisCacheEntry
+	genesisDBMu       sync.Mutex // serializes genesis DB creation
+	genesisCacheCount int        // approximate count, protected by genesisDBMu
 )
 
 // genesisSpecHash produces a deterministic hash of the genesis spec for cache keying.
