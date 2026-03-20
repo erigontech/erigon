@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 
 	dirutil "github.com/erigontech/erigon/common/dir"
@@ -131,8 +132,11 @@ func getOrCreateGenesisDB(fork string, gspec *types.Genesis) (kv.TemporalRwDB, *
 	logger := log.New()
 	logger.SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
-	dir, err := os.MkdirTemp("", "erigon-genesis-"+fork+"-")
-	if err != nil {
+	// Use a deterministic path so the same genesis DB can be found if the
+	// process creates it in a previous test package run.  This also keeps
+	// the number of temp dirs bounded by the number of unique genesis specs.
+	dir := filepath.Join(os.TempDir(), "erigon-genesis-"+key)
+	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, nil, fmt.Errorf("genesis cache: temp dir: %w", err)
 	}
 	dirs := datadir.New(dir)
@@ -144,9 +148,10 @@ func getOrCreateGenesisDB(fork string, gspec *types.Genesis) (kv.TemporalRwDB, *
 	// Step 1: CommitGenesisBlock writes headers, TDs, config to KV tables.
 	// Use separate dirs for GenesisToBlock's temp DB to avoid domain file conflicts.
 	genesisDirs := datadir.New(dir + "-genesis-tmp")
-	os.MkdirAll(genesisDirs.Tmp, 0755)
-	os.MkdirAll(genesisDirs.SnapDomain, 0755)
+	_ = os.MkdirAll(genesisDirs.Tmp, 0755)
+	_ = os.MkdirAll(genesisDirs.SnapDomain, 0755)
 	var genesis *types.Block
+	var err error
 	err = func() (gerr error) {
 		defer func() {
 			if r := recover(); r != nil {
