@@ -597,7 +597,7 @@ func isExpectedInvalid(b btBlock) bool {
 // it falls back to the full BlockTest.Run path for authoritative results.
 func (bt *BlockTest) RunLightweight(t *testing.T) error {
 	if err := bt.runLightweight(t); err != nil {
-		return bt.Run(t) // lightweight path failed — fall back to full pipeline
+		return bt.Run(t) // fall back to full pipeline
 	}
 	return nil
 }
@@ -714,6 +714,22 @@ func (bt *BlockTest) runLightweight(t *testing.T) error {
 				continue
 			}
 			return fmt.Errorf("block #%v gas used %d exceeds gas limit %d", cb.Number(), header.GasUsed, header.GasLimit)
+		}
+
+		// Pre-check: blob gas used must match actual blob count.
+		// ExecuteBlockEphemerally checks this post-execution, but by then state
+		// changes are already written to the overlay and can't be rolled back.
+		if header.BlobGasUsed != nil {
+			var expectedBlobGas uint64
+			for _, txn := range cb.Transactions() {
+				expectedBlobGas += txn.GetBlobGas()
+			}
+			if expectedBlobGas != *header.BlobGasUsed {
+				if isExpectedInvalid(b) {
+					continue
+				}
+				return fmt.Errorf("block #%v blob gas mismatch: txns=%d, header=%d", cb.Number(), expectedBlobGas, *header.BlobGasUsed)
+			}
 		}
 
 		// Allocate txNums: begin-of-block system tx + per-tx + end-of-block.
