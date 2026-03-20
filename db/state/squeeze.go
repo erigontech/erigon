@@ -605,7 +605,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	// finalizeBlock computes and verifies the commitment root for a single block.
 	finalizeBlock := func(blockNum, toTxNum uint64) error {
 		domains.SetTxNum(toTxNum)
-		domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewCommitmentReplayStateReader(rwTx, rwTx, domains, toTxNum+1))
+		domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewRebuildStateReader(rwTx, domains, toTxNum+1))
 
 		var err error
 		rh, err = domains.ComputeCommitment(ctx, rwTx, true, blockNum, toTxNum, "[rebuild_commitment_history]", nil)
@@ -701,7 +701,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 				// Set correct state reader and clear stale warmup cache before TouchKey calls begin.
 				toTxNum := batch.TxNum(blockNum)
 				domains.SetTxNum(toTxNum)
-				domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewCommitmentReplayStateReader(rwTx, rwTx, domains, toTxNum+1))
+				domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewRebuildStateReader(rwTx, domains, toTxNum+1))
 				domains.ClearWarmupCache()
 				curBlock = blockNum
 			}
