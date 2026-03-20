@@ -40,6 +40,30 @@ Without `ready_for_review`, converting a draft PR to ready-for-review fires an e
 the workflow doesn't subscribe to, so the job never runs — the PR appears to have
 skipped CI until the next push.
 
+### CI gate and workflow_call
+
+All PR and merge-queue checks run through `.github/workflows/ci-gate.yml`. It calls
+each sub-workflow via `uses:` (reusable workflow call) rather than inlining the job
+definitions. This avoids duplicating job definitions that also appear in standalone
+`push`/`schedule` runs.
+
+Use `workflow_call:` on a workflow (and call it from ci-gate) when the workflow has
+other triggers besides PRs — `push` to `main`, `schedule`, etc. — so there is one
+source of truth for the job definition.
+
+Only inline job definitions directly into ci-gate if the workflow is exclusively
+PR-gated with no other triggers, since there is then no duplication concern.
+
+Workflows called by ci-gate must not have `pull_request:` triggers — ci-gate owns
+PR coverage and a `pull_request:` trigger would cause every job to run twice.
+
+ci-gate has a workflow-level `concurrency:` group that cancels the entire previous
+run (all sub-workflow jobs) when a new PR push or merge_group event arrives. Sub-
+workflows called via `workflow_call` must **not** define their own job-level
+`concurrency:` for this purpose — `github.workflow` and `github.job` resolve to
+the caller's values (or empty) in a `workflow_call` context, which causes collisions
+that cancel sibling jobs within the same run.
+
 ### Required checks and path filters
 
 Required checks must always report a status or they block the PR indefinitely.
@@ -192,6 +216,41 @@ make test-all GO_FLAGS="-p 2 -parallel 4"
 Consider setting tighter defaults in the workflow matrix for jobs that are known to
 be memory- or disk-heavy, rather than working around pressure by adjusting unrelated
 constraints like timeouts or GC tuning.
+
+## Checking benchmarks
+
+The purpose of `make test-bench` in CI is to verify that benchmarks compile and
+execute at least one iteration — not to produce meaningful performance numbers.
+
+### Why benchmarks are slow by default
+
+Many benchmarks are sized for profiling or comparison work: a single iteration can
+take minutes. Go's benchmark runner will execute exactly 1 iteration in that case
+(`-benchtime=1x`), so the `ns/op` figure is meaningless and the run just wastes
+time.
+
+The fix is to keep benchmark iteration work small enough to be loopable, and use
+`testing.Short()` to trim parameter sweeps when all we need is a smoke test:
+
+```go
+if testing.Short() {
+    totalSteps = 10        // instead of 200+
+    keyCount = 10_000      // instead of 1_000_000
+}
+```
+
+`make test-bench` passes `-short` so these guards are active in CI.
+
+### Why you cannot parallelize across packages
+
+`go test` forces benchmark packages to run **serially** regardless of the `-p` flag.
+The serialization is enforced at the action-graph level in `cmd/go` when `-bench` is
+set — each package run is added as a dependency of the previous one. Passing
+`-p N` only affects compilation parallelism, not execution order.
+
+The only way to reduce `make test-bench` wall time is to reduce the work done per
+benchmark iteration, which is why right-sizing benchmarks (via `testing.Short()`) is
+the correct approach rather than parallelizing the runner.
 
 ## Local reproducibility
 

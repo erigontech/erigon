@@ -51,53 +51,39 @@ func Prefix(payload []byte, pos int) (dataPos int, dataLen int, isList bool, err
 		return 0, 0, false, fmt.Errorf("%w: unexpected end of payload", ErrParse)
 	}
 	switch first := payload[pos]; {
-	case first < 128:
+	case first < SingleByteThreshold:
 		dataPos = pos
 		dataLen = 1
 		isList = false
-	case first < 184:
-		// Otherwise, if a string is 0-55 bytes long,
-		// the RLP encoding consists of a single byte with value 0x80 plus the
-		// length of the string followed by the string. The range of the first
-		// byte is thus [0x80, 0xB7].
+	case first < LongStringCode+1:
+		// String of 0-55 bytes: single byte with value EmptyStringCode + length,
+		// followed by the string.
 		dataPos = pos + 1
-		dataLen = int(first) - 128
+		dataLen = int(first) - EmptyStringCode
 		isList = false
-		if dataLen == 1 && dataPos < len(payload) && payload[dataPos] < 128 {
+		if dataLen == 1 && dataPos < len(payload) && payload[dataPos] < SingleByteThreshold {
 			err = fmt.Errorf("%w: non-canonical size information", ErrParse)
 		}
-	case first < 192:
-		// If a string is more than 55 bytes long, the
-		// RLP encoding consists of a single byte with value 0xB7 plus the length
-		// of the length of the string in binary form, followed by the length of
-		// the string, followed by the string. For example, a length-1024 string
-		// would be encoded as 0xB90400 followed by the string. The range of
-		// the first byte is thus [0xB8, 0xBF].
-		beLen := int(first) - 183
+	case first < EmptyListCode:
+		// String longer than 55 bytes: single byte with value LongStringCode + length-of-length,
+		// followed by the length, followed by the string.
+		beLen := int(first) - LongStringCode
 		dataPos = pos + 1 + beLen
 		dataLen, err = beInt(payload, pos+1, beLen)
 		isList = false
 		if dataLen < 56 {
 			err = fmt.Errorf("%w: non-canonical size information", ErrParse)
 		}
-	case first < 248:
-		// isList of len < 56
-		// If the total payload of a list
-		// (i.e. the combined length of all its items) is 0-55 bytes long, the
-		// RLP encoding consists of a single byte with value 0xC0 plus the length
-		// of the list followed by the concatenation of the RLP encodings of the
-		// items. The range of the first byte is thus [0xC0, 0xF7].
+	case first < LongListCode+1:
+		// List of total payload 0-55 bytes: single byte with value EmptyListCode + length,
+		// followed by the concatenation of the RLP encodings of the items.
 		dataPos = pos + 1
-		dataLen = int(first) - 192
+		dataLen = int(first) - EmptyListCode
 		isList = true
 	default:
-		// If the total payload of a list is more than 55 bytes long,
-		// the RLP encoding consists of a single byte with value 0xF7
-		// plus the length of the length of the payload in binary
-		// form, followed by the length of the payload, followed by
-		// the concatenation of the RLP encodings of the items. The
-		// range of the first byte is thus [0xF8, 0xFF].
-		beLen := int(first) - 247
+		// List of total payload longer than 55 bytes: single byte with value LongListCode +
+		// length-of-length, followed by the length, followed by the items.
+		beLen := int(first) - LongListCode
 		dataPos = pos + 1 + beLen
 		dataLen, err = beInt(payload, pos+1, beLen)
 		isList = true
@@ -189,63 +175,4 @@ func ParseU32(payload []byte, pos int) (int, uint32, error) {
 		r = (r << 8) | uint32(b)
 	}
 	return dataPos + dataLen, r, nil
-}
-
-func ParseHash(payload []byte, pos int, hashbuf []byte) (int, error) {
-	pos, err := StringOfLen(payload, pos, 32)
-	if err != nil {
-		return 0, fmt.Errorf("%s: hash len: %w", ParseHashErrorPrefix, err)
-	}
-	copy(hashbuf, payload[pos:pos+32])
-	return pos + 32, nil
-}
-
-const ParseHashErrorPrefix = "parse hash payload"
-
-const parseAnnouncementsErrorPrefix = "parse announcement payload"
-
-func ParseAnnouncements(payload []byte, pos int) ([]byte, []uint32, []byte, int, error) {
-	pos, totalLen, err := ParseList(payload, pos)
-	if err != nil {
-		return nil, nil, nil, pos, err
-	}
-	if pos+totalLen > len(payload) {
-		return nil, nil, nil, pos, fmt.Errorf("%s: totalLen %d is beyond the end of payload", parseAnnouncementsErrorPrefix, totalLen)
-	}
-	pos, typesLen, err := ParseString(payload, pos)
-	if err != nil {
-		return nil, nil, nil, pos, err
-	}
-	if pos+typesLen > len(payload) {
-		return nil, nil, nil, pos, fmt.Errorf("%s: typesLen %d is beyond the end of payload", parseAnnouncementsErrorPrefix, typesLen)
-	}
-	types := payload[pos : pos+typesLen]
-	pos += typesLen
-	pos, sizesLen, err := ParseList(payload, pos)
-	if err != nil {
-		return nil, nil, nil, pos, err
-	}
-	if pos+sizesLen > len(payload) {
-		return nil, nil, nil, pos, fmt.Errorf("%s: sizesLen %d is beyond the end of payload", parseAnnouncementsErrorPrefix, sizesLen)
-	}
-	sizes := make([]uint32, typesLen)
-	for i := 0; i < len(sizes); i++ {
-		if pos, sizes[i], err = ParseU32(payload, pos); err != nil {
-			return nil, nil, nil, pos, err
-		}
-	}
-	pos, hashesLen, err := ParseList(payload, pos)
-	if err != nil {
-		return nil, nil, nil, pos, err
-	}
-	if pos+hashesLen > len(payload) {
-		return nil, nil, nil, pos, fmt.Errorf("%s: hashesLen %d is beyond the end of payload", parseAnnouncementsErrorPrefix, hashesLen)
-	}
-	hashes := make([]byte, 32*(hashesLen/33))
-	for i := 0; i < len(hashes); i += 32 {
-		if pos, err = ParseHash(payload, pos, hashes[i:]); err != nil {
-			return nil, nil, nil, pos, err
-		}
-	}
-	return types, sizes, hashes, pos, nil
 }
