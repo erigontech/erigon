@@ -334,20 +334,12 @@ func (st *StateTransition) preCheck(gasBailout bool, intrinsicGasResult mdgas.In
 	}
 
 	// EIP-7825: Transaction Gas Limit Cap.
-	// Intrinsic gas is computed before preCheck() in TransitionDb so that both
-	// the Amsterdam variant (cap = max(intrinsicRegular, floorGas)) and the
-	// simpler non-Amsterdam Osaka variant (cap = msg.Gas()) can be validated
-	// here, before buyGas(), so pool gas is never consumed for rejected txs.
-	// To add a new fork variant: add an else-if rules.IsForkNNN branch here;
-	// no pool-gas restoration elsewhere is needed.
+	// Intrinsic gas is computed before preCheck() in TransitionDb so that the
+	// fork-dependent cap (see IntrinsicGasCalcResult.RegularGasCap) can be
+	// validated here, before buyGas(), so pool gas is never consumed for
+	// rejected txs.
 	if st.msg.CheckGas() && rules.IsOsaka {
-		var capGas uint64
-		if rules.IsAmsterdam {
-			capGas = max(intrinsicGasResult.RegularGas, intrinsicGasResult.FloorGasCost)
-		} else {
-			capGas = st.msg.Gas()
-		}
-		if capGas > params.MaxTxnGasLimit {
+		if capGas := intrinsicGasResult.RegularGasCap(st.msg.Gas(), rules.IsAmsterdam); capGas > params.MaxTxnGasLimit {
 			return fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, from, capGas)
 		}
 	}
