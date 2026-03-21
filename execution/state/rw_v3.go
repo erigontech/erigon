@@ -325,11 +325,17 @@ func (rs *StateV3) ApplyStateWrites(ctx context.Context,
 		return fmt.Errorf("StateV3.ApplyStateWrites: %w", err)
 	}
 	// Compute commitment at step boundaries — must follow state writes.
-	if (txNum+1)%rs.domains.StepSize() == 0 && !dbg.DiscardCommitment() {
-		_, err := rs.domains.ComputeCommitment(ctx, roTx, true, blockNum, txNum,
-			fmt.Sprintf("applying step %d", txNum/rs.domains.StepSize()), nil)
-		if err != nil {
-			return fmt.Errorf("StateV3.ApplyStateWrites: step boundary: %w", err)
+	// Skip if the step is already frozen (nothing to commit).
+	stepSize := rs.domains.StepSize()
+	if (txNum+1)%stepSize == 0 && !dbg.DiscardCommitment() {
+		step := txNum / stepSize
+		lastFrozenStep := uint64(roTx.StepsInFiles(kv.CommitmentDomain))
+		if step >= lastFrozenStep {
+			_, err := rs.domains.ComputeCommitment(ctx, roTx, true, blockNum, txNum,
+				fmt.Sprintf("applying step %d", step), nil)
+			if err != nil {
+				return fmt.Errorf("StateV3.ApplyStateWrites: step boundary: %w", err)
+			}
 		}
 	}
 	return nil
