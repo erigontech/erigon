@@ -196,6 +196,11 @@ func (r *TxResult) CreateReceipt(txIndex int, cumulativeGasUsed uint64, firstLog
 		receipt.ContractAddress = types.CreateAddress(txSender.Value(), r.Tx().GetNonce())
 	}
 
+	if blockNum == 2451957 {
+		fmt.Printf("[DEBUG-RECEIPT-2451957] txIdx=%d status=%d gasUsed=%d cumulativeGasUsed=%d logCount=%d\n",
+			txIndex, receipt.Status, receipt.GasUsed, receipt.CumulativeGasUsed, len(receipt.Logs))
+	}
+
 	return receipt, nil
 }
 
