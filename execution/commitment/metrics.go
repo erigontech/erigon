@@ -34,6 +34,9 @@ type Metrics struct {
 	cacheBranch     atomic.Uint64
 	cacheAccount    atomic.Uint64
 	cacheStorage    atomic.Uint64
+	missBranch      atomic.Uint64
+	missAccount     atomic.Uint64
+	missStorage     atomic.Uint64
 	updateBranch    atomic.Uint64
 	loadDepths      [10]uint64
 	unfolds         atomic.Uint64
@@ -59,6 +62,9 @@ type MetricValues struct {
 	CacheBranch     uint64
 	CacheAccount    uint64
 	CacheStorage    uint64
+	MissBranch      uint64
+	MissAccount     uint64
+	MissStorage     uint64
 	UpdateBranch    uint64
 	LoadDepths      [10]uint64
 	Unfolds         uint64
@@ -114,6 +120,9 @@ func (m *Metrics) AsValues() MetricValues {
 		CacheBranch:     m.cacheBranch.Load(),
 		CacheAccount:    m.cacheAccount.Load(),
 		CacheStorage:    m.cacheStorage.Load(),
+		MissBranch:      m.missBranch.Load(),
+		MissAccount:     m.missAccount.Load(),
+		MissStorage:     m.missStorage.Load(),
 		UpdateBranch:    m.updateBranch.Load(),
 		LoadDepths:      m.loadDepths,
 		Unfolds:         m.unfolds.Load(),
@@ -145,6 +154,8 @@ func (m *Metrics) logMetrics() []any {
 		"rds", common.PrettyCounter(m.loadStorage.Load()), "wrb", common.PrettyCounter(m.updateBranch.Load()),
 		"cb", common.PrettyCounter(m.cacheBranch.Load()), "ca", common.PrettyCounter(m.cacheAccount.Load()),
 		"cs", common.PrettyCounter(m.cacheStorage.Load()),
+		"mb", common.PrettyCounter(m.missBranch.Load()), "ma", common.PrettyCounter(m.missAccount.Load()),
+		"ms", common.PrettyCounter(m.missStorage.Load()),
 		"fld", common.PrettyCounter(m.unfolds.Load()), "pdur", common.Round(m.spentProcessing, 0).String(),
 		"fdur", common.Round(m.spentFolding, 0).String(), "ufdur", common.Round(m.spentUnfolding, 0),
 	}
@@ -261,12 +272,6 @@ func UnmarshallMetricsCsv(filePath string) ([]*Metrics, error) {
 }
 
 func (m *Metrics) Reset() {
-	if !m.collectCommitmentMetrics {
-		return
-	}
-
-	m.Accounts.Reset()
-	m.Branches.Reset()
 	m.updates.Store(0)
 	m.addressKeys.Store(0)
 	m.storageKeys.Store(0)
@@ -274,7 +279,17 @@ func (m *Metrics) Reset() {
 	m.loadAccount.Store(0)
 	m.loadStorage.Store(0)
 	m.updateBranch.Store(0)
+	m.missBranch.Store(0)
+	m.missAccount.Store(0)
+	m.missStorage.Store(0)
 	m.unfolds.Store(0)
+
+	if !m.collectCommitmentMetrics {
+		return
+	}
+
+	m.Accounts.Reset()
+	m.Branches.Reset()
 	m.spentUnfolding = 0
 	m.spentFolding = 0
 	m.spentProcessing = 0
@@ -299,23 +314,22 @@ func (m *Metrics) CollectFileDepthStats(endTxNumStats map[uint64]skipStat) {
 }
 
 func (m *Metrics) Updates(plainKey []byte) {
-	if !m.collectCommitmentMetrics {
-		return
-	}
 	if len(plainKey) == length.Addr {
 		m.addressKeys.Add(1)
 	} else {
 		m.storageKeys.Add(1)
 
-		m.Accounts.collect(plainKey, func(mx *AccountStats) {
-			mx.StorageUpates++
-		})
+		if m.collectCommitmentMetrics {
+			m.Accounts.collect(plainKey, func(mx *AccountStats) {
+				mx.StorageUpates++
+			})
+		}
 	}
 }
 
 func (m *Metrics) AccountLoad(plainKey []byte) {
+	m.loadAccount.Add(1)
 	if m.collectCommitmentMetrics {
-		m.loadAccount.Add(1)
 		m.Accounts.collect(plainKey, func(mx *AccountStats) {
 			mx.LoadAccount++
 		})
@@ -323,8 +337,8 @@ func (m *Metrics) AccountLoad(plainKey []byte) {
 }
 
 func (m *Metrics) StorageLoad(plainKey []byte) {
+	m.loadStorage.Add(1)
 	if m.collectCommitmentMetrics {
-		m.loadStorage.Add(1)
 		m.Accounts.collect(plainKey, func(mx *AccountStats) {
 			mx.LoadStorage++
 		})
@@ -332,8 +346,8 @@ func (m *Metrics) StorageLoad(plainKey []byte) {
 }
 
 func (m *Metrics) BranchLoad(plainKey []byte) {
+	m.loadBranch.Add(1)
 	if m.collectCommitmentMetrics {
-		m.loadBranch.Add(1)
 		m.Branches.collect(plainKey, func(mx *BranchStats) {
 			mx.LoadBranch++
 		})
@@ -341,9 +355,9 @@ func (m *Metrics) BranchLoad(plainKey []byte) {
 }
 
 func (m *Metrics) StartUnfolding(plainKey []byte) func() {
+	m.unfolds.Add(1)
 	if m.collectCommitmentMetrics {
 		start := time.Now()
-		m.unfolds.Add(1)
 		return func() {
 			d := time.Since(start)
 			m.spentUnfolding += d
