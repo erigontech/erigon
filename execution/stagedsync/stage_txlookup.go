@@ -264,6 +264,9 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	switch c := valsRwCursor.(type) {
 	case *mdbx2.MdbxCursor:
 		valsCursor = &mdbx2.MdbxCursorPseudoDupSort{MdbxCursor: c}
+	case kv.PseudoDupSortRwCursor:
+		// e.g. *membatchwithdb.memoryMutationCursor when tx is a MemoryMutation overlay
+		valsCursor = c
 	default:
 		return fmt.Errorf("unexpected cursor type %T for table %s", valsRwCursor, kv.TxLookup)
 	}

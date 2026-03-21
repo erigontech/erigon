@@ -430,7 +430,13 @@ func (m *memoryMutationCursor) Close() {
 }
 
 func (m *memoryMutationCursor) FirstDup() ([]byte, error) {
-	panic("Not implemented")
+	if m.pureDupSort {
+		panic("Not implemented")
+	}
+	// For non-DupSort tables each key has exactly one value, so "first dup"
+	// is just the current value — mirrors MdbxCursorPseudoDupSort behaviour.
+	_, v, err := m.Current()
+	return v, err
 }
 
 func (m *memoryMutationCursor) NextNoDup() ([]byte, []byte, error) {
@@ -455,11 +461,21 @@ func (m *memoryMutationCursor) NextNoDup() ([]byte, []byte, error) {
 }
 
 func (m *memoryMutationCursor) LastDup() ([]byte, error) {
-	panic("Not implemented")
+	if m.pureDupSort {
+		panic("Not implemented")
+	}
+	// For non-DupSort tables each key has exactly one value, so "last dup"
+	// is just the current value — mirrors MdbxCursorPseudoDupSort behaviour.
+	_, v, err := m.Current()
+	return v, err
 }
 
 func (m *memoryMutationCursor) CountDuplicates() (uint64, error) {
-	panic("Not implemented")
+	if m.pureDupSort {
+		panic("Not implemented")
+	}
+	// For non-DupSort tables each key has exactly one value.
+	return 1, nil
 }
 
 func (m *memoryMutationCursor) SeekBothExact(key, value []byte) ([]byte, []byte, error) {
