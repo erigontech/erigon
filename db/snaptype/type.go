@@ -167,9 +167,8 @@ func (i Index) HasFile(info FileInfo, dirEntries []string, logger log.Logger) bo
 
 	// defer segment.Close()
 
-	// Let's actually
-	if _, err := os.Stat(info.Path); err != nil {
-		logger.Debug("[ind] HasFile: seg file didn't found", "path", info.Path, "dir", dir, "err", err)
+	if !slices.Contains(dirEntries, filepath.Base(info.Path)) {
+		logger.Debug("[ind] HasFile: seg file didn't found", "path", info.Path, "dir", dir)
 		return false
 	}
 
