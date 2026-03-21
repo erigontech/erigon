@@ -46,21 +46,16 @@ import (
 /*
 The State Transitioning Model
 
-A state transition is a change made when a transaction is applied to the current world state
-The state transitioning model does all the necessary work to work out a valid new state root.
+A state transition is a change made when a transaction is applied to the current world state.
+The state transitioning model does all the necessary work to apply a single transaction.
 
-1) Nonce handling
-2) Pre pay gas
-3) Create a new state object if the recipient is \0*32
-4) Value transfer
-== If contract creation ==
-
-	4a) Attempt to run transaction data
-	4b) If valid, use result as code for the new state object
-
-== end ==
-5) Run Script section
-6) Derive new state root
+ 1. Validate transaction (nonce, gas cap, intrinsic gas, balance)
+ 2. Buy gas (debit sender, reserve from block gas pool)
+ 3. Increment sender nonce
+ 4. Execute: if contract creation, run initcode and store result as code;
+    otherwise, call the recipient
+ 5. Compute refunds and return unused gas to pool
+ 6. Pay tips to coinbase, burn base fee
 */
 
 var ErrStateTransitionFailed = errors.New("state transition failed")
@@ -269,8 +264,9 @@ func CheckEip1559TxGasFeeCap(from accounts.Address, feeCap, tipCap, baseFee *uin
 	return nil
 }
 
+// preCheck validates consensus rules (nonce, fees, EIP-7825 gas cap) and buys gas.
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
-func (st *StateTransition) preCheck(gasBailout bool) error {
+func (st *StateTransition) preCheck(gasBailout bool, intrinsicGasResult mdgas.IntrinsicGasCalcResult) error {
 	rules := st.evm.ChainRules()
 	from := st.msg.From()
 	if rules.IsOsaka && len(st.msg.BlobHashes()) > params.MaxBlobsPerTxn {
@@ -334,6 +330,17 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 		if !st.evm.Config().NoBaseFee && blobGasPrice.Cmp(maxFeePerBlobGas) > 0 {
 			return fmt.Errorf("%w: address %v, maxFeePerBlobGas: %v < blobGasPrice: %v",
 				ErrMaxFeePerBlobGas, from, st.msg.MaxFeePerBlobGas(), blobGasPrice)
+		}
+	}
+
+	// EIP-7825: Transaction Gas Limit Cap.
+	// Intrinsic gas is computed before preCheck() in TransitionDb so that the
+	// fork-dependent cap (see IntrinsicGasCalcResult.RegularGasCap) can be
+	// validated here, before buyGas(), so pool gas is never consumed for
+	// rejected txs.
+	if st.msg.CheckGas() && rules.IsOsaka {
+		if capGas := intrinsicGasResult.RegularGasCap(st.msg.Gas(), rules.IsAmsterdam); capGas > params.MaxTxnGasLimit {
+			return fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, from, capGas)
 		}
 	}
 
@@ -406,7 +413,7 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 
 	var (
 		ret   []byte
-		vmerr error // vm errors do not effect consensus and are therefore not assigned to err
+		vmerr error // vm errors do not affect consensus and are therefore not assigned to err
 	)
 
 	ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, false)
@@ -478,25 +485,35 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	// First check this message satisfies all consensus rules before
 	// applying the message. The rules include these clauses
 	//
-	// 1. the nonce of the message caller is correct
-	// 2. caller has enough balance to cover transaction fee(gaslimit * gasprice)
-	// 3. the amount of gas required is available in the block
-	// 4. the purchased gas is enough to cover intrinsic usage
-	// 5. there is no overflow when calculating intrinsic gas
+	// 1. there is no overflow when calculating intrinsic gas
+	// 2. the transaction gas limit does not exceed the EIP-7825 cap (Osaka+)
+	// 3. the nonce of the message caller is correct
+	// 4. caller has enough balance to cover transaction fee(gaslimit * gasprice)
+	// 5. the amount of gas required is available in the block
 	// 6. caller has enough balance to cover asset transfer for **topmost** call
-
-	// Check clauses 1-3 and 6, buy gas if everything is correct
-	if err := st.preCheck(gasBailout); err != nil {
-		return nil, err
-	}
+	// 7. the purchased gas is enough to cover intrinsic usage
 
 	msg := st.msg
 	sender := msg.From()
 	contractCreation := msg.To().IsNil()
+	accessTuples := slices.Clone[types.AccessList](msg.AccessList())
+	auths := msg.Authorizations()
+
+	// Check clause 1: compute intrinsic gas before preCheck so the EIP-7825
+	// cap can be checked there (before buyGas) for all fork variants.
+	intrinsicGasResult, overflow := st.calcIntrinsicGas(contractCreation, auths, accessTuples)
+	if overflow {
+		return nil, ErrGasUintOverflow
+	}
+
+	// Check clauses 2-6, buy gas if everything is correct
+	if err := st.preCheck(gasBailout, intrinsicGasResult); err != nil {
+		return nil, err
+	}
+
 	rules := st.evm.ChainRules()
 	vmConfig := st.evm.Config()
 	isEIP3860 := vmConfig.HasEip3860(rules)
-	accessTuples := slices.Clone[types.AccessList](msg.AccessList())
 
 	if !contractCreation {
 		// Increment the nonce for the next transaction
@@ -507,14 +524,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		st.state.SetNonce(msg.From(), nonce+1)
 	}
 
-	// set code tx
-	auths := msg.Authorizations()
-
-	// Check clauses 4-5, subtract intrinsic gas if everything is correct
-	intrinsicGasResult, overflow := st.calcIntrinsicGas(contractCreation, auths, accessTuples)
-	if overflow {
-		return nil, ErrGasUintOverflow
-	}
+	// Check clause 7, subtract intrinsic gas if everything is correct
 	// EIP-8037: intrinsic_gas = intrinsic_regular_gas + intrinsic_state_gas.
 	// The tx must cover the sum, not just each component individually.
 	intrinsicGas, overflow := math.SafeAdd(intrinsicGasResult.RegularGas, intrinsicGasResult.StateGas)
@@ -523,18 +533,6 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	}
 	if st.msg.Gas() < intrinsicGas || st.msg.Gas() < intrinsicGasResult.FloorGasCost {
 		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.msg.Gas(), intrinsicGas)
-	}
-	// EIP-7825: Transaction Gas Limit Cap
-	if st.msg.CheckGas() {
-		var gas uint64
-		if rules.IsAmsterdam { // EIP-8037
-			gas = max(intrinsicGasResult.RegularGas, intrinsicGasResult.FloorGasCost)
-		} else if rules.IsOsaka { // EIP-7825
-			gas = st.msg.Gas()
-		}
-		if gas > params.MaxTxnGasLimit {
-			return nil, fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, sender, gas)
-		}
 	}
 
 	verifiedAuthorities, stateIgasRefund, err := st.verifyAuthorities(auths, contractCreation, rules.ChainID.String())
@@ -584,7 +582,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	}
 	var (
 		ret   []byte
-		vmerr error // vm errors do not effect consensus and are therefore not assigned to err
+		vmerr error // vm errors do not affect consensus and are therefore not assigned to err
 	)
 
 	st.evm.ResetGasConsumed()
