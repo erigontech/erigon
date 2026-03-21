@@ -453,8 +453,12 @@ func TestDUClassifyFile(t *testing.T) {
 		{"Domain", "v1.0-accounts.0-16.kv", duCatDomains},
 		{"HISTORY", "v1.0-RCACHE.0-16.v", duCatRcache},
 
-		// unknown dir falls to block segments
+		// unknown dir with segment extension → block segments
 		{"something", "random.dat", duCatBlocks},
+
+		// non-segment files → other
+		{"snapshots", "salt.txt", duCatOther},
+		{"snapshots", "v1.0-0-500-headers.torrent", duCatOther},
 	}
 
 	for _, tt := range tests {
@@ -565,8 +569,8 @@ func TestDUComputeEstimates(t *testing.T) {
 	// - caplin (always kept)
 	//
 	// maxStep=200000, maxBlock=500000
-	// stepPruneDistance = DefaultPruneDistance/DefaultStepSize = 100000/1562500 → 1 (clamped)
-	// State prune cutoff: step To <= 200000-1 = 199999 → files with To < maxStep are pruned
+	// stepPruneDistance = DefaultPruneDistance = 100000
+	// State prune cutoff: step To <= 200000-100000 = 100000 → old history/idx pruned
 	// Block prune cutoff: block To <= 500000-100000 = 400000 → old
 
 	files := []duFileInfo{

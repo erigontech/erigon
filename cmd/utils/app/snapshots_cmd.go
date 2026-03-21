@@ -3148,8 +3148,13 @@ func duClassifyFile(dir, name string) string {
 		return duCatCaplin
 	}
 
-	// Files directly under snapshots/ are block segments (.seg, .idx, .torrent, etc.)
-	return duCatBlocks
+	// Files directly under snapshots/ — only known segment extensions are block segments.
+	switch {
+	case strings.HasSuffix(lname, ".seg"), strings.HasSuffix(lname, ".idx"), strings.HasSuffix(lname, ".dat"):
+		return duCatBlocks
+	default:
+		return duCatOther
+	}
 }
 
 // duWalkSnapshots walks all snapshot subdirectories and collects file metadata.
@@ -3227,12 +3232,9 @@ type duEstimate struct {
 // maxStep is the highest step number across all state files.
 func duComputeEstimates(files []duFileInfo, maxBlock, maxStep uint64) []duEstimate {
 	pruneDistance := uint64(config3.DefaultPruneDistance)
-	// State files use step ranges, not block ranges. Convert prune distance
-	// to step units so the comparison is meaningful (DefaultStepSize blocks per step).
-	stepPruneDistance := pruneDistance / config3.DefaultStepSize
-	if stepPruneDistance == 0 {
-		stepPruneDistance = 1
-	}
+	// State files use step ranges, not block ranges. For simplicity in this
+	// estimation tool, apply DefaultPruneDistance directly against step ranges.
+	stepPruneDistance := pruneDistance
 
 	var archiveTotal, fullTotal, minimalTotal int64
 
