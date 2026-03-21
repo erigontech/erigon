@@ -878,3 +878,120 @@ func TestDUFormatNumber(t *testing.T) {
 		require.Equal(t, tt.expected, duFormatNumber(tt.input), "for input %d", tt.input)
 	}
 }
+
+// TestDUAcceptanceCriteria is an end-to-end acceptance test that verifies:
+// 1. All three output sections render correctly (header, breakdown, estimates)
+// 2. --json flag produces valid parseable JSON
+// 3. Estimates are consistent (archive >= full >= minimal)
+// 4. Category sizes sum to total
+func TestDUAcceptanceCriteria(t *testing.T) {
+	// Build a realistic file set that exercises all categories and pruning paths.
+	files := []duFileInfo{
+		{Name: "accounts.0-50000.kv", Size: 10000, Category: duCatDomains, IsState: true, From: 0, To: 50000},
+		{Name: "storage.150000-200000.kv", Size: 20000, Category: duCatDomains, IsState: true, From: 150000, To: 200000},
+		{Name: "accounts.0-50000.v", Size: 8000, Category: duCatHistory, IsState: true, From: 0, To: 50000},
+		{Name: "accounts.150000-200000.v", Size: 12000, Category: duCatHistory, IsState: true, From: 150000, To: 200000},
+		{Name: "accounts.0-50000.ef", Size: 5000, Category: duCatInvIdx, IsState: true, From: 0, To: 50000},
+		{Name: "accounts.150000-200000.ef", Size: 7000, Category: duCatInvIdx, IsState: true, From: 150000, To: 200000},
+		{Name: "accounts.0-50000.bt", Size: 3000, Category: duCatAccessors, IsState: true, From: 0, To: 50000},
+		{Name: "commitment.0-50000.v", Size: 2000, Category: duCatCommitHist, IsState: true, From: 0, To: 50000},
+		{Name: "rcache.0-50000.kv", Size: 1500, Category: duCatRcache, IsState: true, From: 0, To: 50000},
+		{Name: "0-300-headers.seg", Size: 15000, Category: duCatBlocks, IsState: false, From: 0, To: 300000},
+		{Name: "300-500-bodies.seg", Size: 18000, Category: duCatBlocks, IsState: false, From: 300000, To: 500000},
+		{Name: "beaconblocks.0-100.seg", Size: 4000, Category: duCatCaplin, IsState: false, From: 0, To: 100},
+	}
+
+	maxBlock := uint64(500000)
+	maxStep := uint64(200000)
+
+	// Aggregate categories.
+	cats := duAggregateCategories(files)
+
+	// Verify category sizes sum to total.
+	var catSum int64
+	var catFiles int
+	for _, c := range cats {
+		catSum += c.Bytes
+		catFiles += c.Files
+	}
+	var expectedTotal int64
+	for _, f := range files {
+		expectedTotal += f.Size
+	}
+	require.Equal(t, expectedTotal, catSum, "category bytes must sum to total")
+	require.Equal(t, len(files), catFiles, "category file count must sum to total files")
+
+	// Compute estimates.
+	estimates := duComputeEstimates(files, maxBlock, maxStep)
+	require.Len(t, estimates, 3)
+
+	// Verify archive >= full >= minimal (acceptance criterion 3).
+	require.GreaterOrEqual(t, estimates[0].TotalBytes, estimates[1].TotalBytes, "archive >= full")
+	require.GreaterOrEqual(t, estimates[1].TotalBytes, estimates[2].TotalBytes, "full >= minimal")
+
+	// Archive delta must be 0.
+	require.Equal(t, int64(0), estimates[0].Delta)
+	// Full and minimal deltas must be negative or zero.
+	require.LessOrEqual(t, estimates[1].Delta, int64(0))
+	require.LessOrEqual(t, estimates[2].Delta, int64(0))
+
+	// Build result struct.
+	result := duResult{
+		Chain:        "mainnet",
+		DetectedMode: "archive",
+		BlockRange:   [2]uint64{0, maxBlock},
+		StepRange:    [2]uint64{0, maxStep},
+		TotalBytes:   expectedTotal,
+		TotalFiles:   len(files),
+		Categories:   cats,
+		Estimates:    estimates,
+	}
+
+	// Acceptance criterion 1: human output has all three sections.
+	var humanBuf bytes.Buffer
+	duFormatHuman(&humanBuf, result)
+	human := humanBuf.String()
+
+	// Header section.
+	require.Contains(t, human, "mainnet")
+	require.Contains(t, human, "archive")
+	require.Contains(t, human, "500,000")
+	require.Contains(t, human, "200,000")
+
+	// Breakdown section.
+	require.Contains(t, human, "Breakdown")
+	require.Contains(t, human, "domains")
+	require.Contains(t, human, "history")
+	require.Contains(t, human, "block segments")
+	require.Contains(t, human, "caplin")
+	require.Contains(t, human, "total")
+
+	// Estimates section.
+	require.Contains(t, human, "Estimated Size by Node Type")
+	require.Contains(t, human, "archive")
+	require.Contains(t, human, "full")
+	require.Contains(t, human, "minimal")
+
+	// Acceptance criterion 2: JSON output is valid and parseable.
+	var jsonBuf bytes.Buffer
+	err := duFormatJSON(&jsonBuf, result)
+	require.NoError(t, err)
+
+	var decoded duResult
+	err = json.Unmarshal(jsonBuf.Bytes(), &decoded)
+	require.NoError(t, err, "JSON must be valid and unmarshalable")
+
+	// Verify round-trip fidelity.
+	require.Equal(t, result.Chain, decoded.Chain)
+	require.Equal(t, result.DetectedMode, decoded.DetectedMode)
+	require.Equal(t, result.BlockRange, decoded.BlockRange)
+	require.Equal(t, result.StepRange, decoded.StepRange)
+	require.Equal(t, result.TotalBytes, decoded.TotalBytes)
+	require.Equal(t, result.TotalFiles, decoded.TotalFiles)
+	require.Len(t, decoded.Categories, len(result.Categories))
+	require.Len(t, decoded.Estimates, 3)
+
+	// Verify JSON estimates also maintain archive >= full >= minimal.
+	require.GreaterOrEqual(t, decoded.Estimates[0].TotalBytes, decoded.Estimates[1].TotalBytes)
+	require.GreaterOrEqual(t, decoded.Estimates[1].TotalBytes, decoded.Estimates[2].TotalBytes)
+}

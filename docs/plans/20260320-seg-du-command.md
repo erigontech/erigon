@@ -167,12 +167,12 @@ Files are classified by **directory** and **filename content**:
 
 ### Task 5: Verify acceptance criteria
 
-- [ ] Verify all three output sections render correctly (header, breakdown, estimates)
-- [ ] Verify `--json` flag produces valid parseable JSON
-- [ ] Verify estimates are consistent (archive >= full >= minimal)
-- [ ] Verify category sizes sum to total
-- [ ] Run `make lint` (multiple times, non-deterministic)
-- [ ] Run `go test ./cmd/utils/app/... -short`
+- [x] Verify all three output sections render correctly (header, breakdown, estimates)
+- [x] Verify `--json` flag produces valid parseable JSON
+- [x] Verify estimates are consistent (archive >= full >= minimal)
+- [x] Verify category sizes sum to total
+- [x] Run `make lint` (multiple times, non-deterministic)
+- [x] Run `go test ./cmd/utils/app/... -short`
 
 ### Task 6: [Final] Cleanup
 
