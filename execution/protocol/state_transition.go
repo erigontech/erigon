@@ -47,7 +47,7 @@ import (
 The State Transitioning Model
 
 A state transition is a change made when a transaction is applied to the current world state.
-The state transitioning model does all the necessary work to work out a valid new state root.
+The state transitioning model does all the necessary work to apply a single transaction.
 
  1. Validate transaction (nonce, gas cap, intrinsic gas, balance)
  2. Buy gas (debit sender, reserve from block gas pool)
