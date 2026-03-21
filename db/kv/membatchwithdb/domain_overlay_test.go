@@ -1,4 +1,4 @@
-package testutil
+package membatchwithdb_test
 
 import (
 	"context"
