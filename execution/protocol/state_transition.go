@@ -498,8 +498,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	// 3. the nonce of the message caller is correct
 	// 4. caller has enough balance to cover transaction fee(gaslimit * gasprice)
 	// 5. the amount of gas required is available in the block
-	// 6. the purchased gas is enough to cover intrinsic usage
-	// 7. caller has enough balance to cover asset transfer for **topmost** call
+	// 6. caller has enough balance to cover asset transfer for **topmost** call
+	// 7. the purchased gas is enough to cover intrinsic usage
 
 	msg := st.msg
 	sender := msg.From()
@@ -514,7 +514,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		return nil, ErrGasUintOverflow
 	}
 
-	// Check clauses 2-5 and 7, buy gas if everything is correct
+	// Check clauses 2-6, buy gas if everything is correct
 	if err := st.preCheck(gasBailout, intrinsicGasResult); err != nil {
 		return nil, err
 	}
@@ -532,7 +532,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		st.state.SetNonce(msg.From(), nonce+1)
 	}
 
-	// Check clause 6, subtract intrinsic gas if everything is correct
+	// Check clause 7, subtract intrinsic gas if everything is correct
 	// EIP-8037: intrinsic_gas = intrinsic_regular_gas + intrinsic_state_gas.
 	// The tx must cover the sum, not just each component individually.
 	intrinsicGas, overflow := math.SafeAdd(intrinsicGasResult.RegularGas, intrinsicGasResult.StateGas)
