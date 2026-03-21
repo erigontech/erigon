@@ -485,6 +485,12 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 				return nil, err
 			}
 
+			domains.EnableParaTrieDB(rwDb)
+			domains.EnableTrieWarmup(true)
+			if statecfg.ExperimentalConcurrentCommitment {
+				logger.Debug("[commitment_rebuild] concurrent commitment enabled")
+			}
+
 			domains.SetTxNum(lastTxnumInShard - 1)
 			currentTxNum := lastTxnumInShard - 1
 			domains.GetCommitmentCtx().SetLimitedHistoryStateReader(rwTx, lastTxnumInShard) // this helps to read state from correct file during commitment
@@ -606,6 +612,7 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 	}
 
 	collectionSpent := time.Since(sf)
+	logger.Debug(cfg.LogPrefix+" computing commitment", "keys", common.PrettyCounter(processed), "concurrent", statecfg.ExperimentalConcurrentCommitment)
 	rh, err := sd.GetCommitmentCtx().ComputeCommitment(ctx, tx, true, cfg.BlockNumber, cfg.TxnNumber, fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), nil)
 	if err != nil {
 		return nil, err
