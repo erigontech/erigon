@@ -143,7 +143,6 @@ function mapConclusionToIconWithTracking(conclusion: string | null, status: stri
 function mapChain(chain: string | null): string {
     if (!chain) return '';
     let chainLowerCaseString = chain.toLowerCase();
-    if (chainLowerCaseString.includes('bor-mainnet')) return '🟣 polygon';
     if (chainLowerCaseString.includes('polygon')) return '🟣 polygon';
     if (chainLowerCaseString.includes('lighthouse, mainnet')) return '⬢ ethereum / lighthouse';
     if (chainLowerCaseString.includes('prysm, mainnet')) return '⬢ ethereum / prysm';
@@ -151,7 +150,6 @@ function mapChain(chain: string | null): string {
     if (chainLowerCaseString.includes('ethereum')) return '⬢ ethereum';
     if (chainLowerCaseString.includes('sepolia')) return '🔹 sepolia';
     if (chainLowerCaseString.includes('hoodi')) return '🔸 hoodi';
-    if (chainLowerCaseString.includes('amoy')) return '🟣 amoy';
     if (chainLowerCaseString.includes('chiado')) return '🟢 chiado';
     if (chainLowerCaseString.includes('lighthouse, gnosis')) return '🟢 gnosis / lighthouse';
     if (chainLowerCaseString.includes('gnosis')) return '🟢 gnosis';
