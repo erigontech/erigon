@@ -19,6 +19,7 @@ package bitmapdb
 import (
 	"sync"
 
+	"github.com/RoaringBitmap/roaring/v2"
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
 )
 
@@ -38,4 +39,25 @@ func ReturnToPool64(a *roaring64.Bitmap) {
 		return
 	}
 	roaring64Pool.Put(a)
+}
+
+var roaring32Pool = sync.Pool{
+	New: func() any {
+		return roaring.New()
+	},
+}
+
+// NewBitmap32 returns a pooled 32-bit roaring bitmap.
+// Use when values fit in uint32 (e.g. txNum offsets within a collate step).
+func NewBitmap32() *roaring.Bitmap {
+	a := roaring32Pool.Get().(*roaring.Bitmap)
+	a.Clear()
+	return a
+}
+
+func ReturnToPool32(a *roaring.Bitmap) {
+	if a == nil {
+		return
+	}
+	roaring32Pool.Put(a)
 }

@@ -446,15 +446,6 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 		}
 	}
 
-	// Build any missed E3 state accessors in the background.
-	// This is the counterpart to RetireBlocksInBackground → BuildMissedIndicesIfNeed for E2.
-	// On restart, buildOrDeferE3Accessors skips synchronous accessor building;
-	// this call ensures missing accessors are rebuilt in the background on every sync cycle.
-	if freezingCfg.ProduceE3 {
-		agg := cfg.db.(state.HasAgg).Agg().(*state.Aggregator)
-		agg.BuildMissedAccessorsInBackground(estimate.IndexSnapshot.Workers())
-	}
-
 	pruneLimit := 10
 	pruneTimeout := 125 * time.Millisecond
 	if s.CurrentSyncCycle.IsInitialCycle {
