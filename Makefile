@@ -91,7 +91,7 @@ default_test_timeout      := 20m
 default_test_race_timeout := 60m
 
 GOTEST_PACKAGES = ./...
-GOTEST = $(GO_BUILD_ENV) GODEBUG=$(GODEBUG) GOTRACEBACK=1 $(GO) test $(GO_FLAGS) $(GOTEST_PACKAGES)
+GOTEST = $(GO_BUILD_ENV) GODEBUG=$(GODEBUG) GOTRACEBACK=1 gotestsum --raw-command --no-color=false --format-hide-empty-pkg --hide-summary=skipped -- $(GO) test -json $(GO_FLAGS) $(GOTEST_PACKAGES)
 
 GOINSTALL = go install -trimpath
 
@@ -217,7 +217,7 @@ else
 endif
 
 test-filtered:
-	(set -o pipefail && $(GOTEST) | ./tools/filter-test-output | tee run.log)
+	(set -o pipefail && $(GOTEST) | tee run.log)
 
 test-short: override GO_FLAGS += -short -failfast
 test-short: test-filtered

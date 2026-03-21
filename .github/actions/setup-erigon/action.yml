@@ -241,6 +241,10 @@ runs:
         # We have our own caching because we smrt.
         cache: false
 
+    - name: Install gotestsum
+      shell: bash
+      run: go install gotest.tools/gotestsum@latest
+
     # TODO: Make this optional, it's possibly not needed for lints and a few other quick things.
     - name: Install dependencies on Linux
       if: ${{ runner.os == 'Linux' }}
