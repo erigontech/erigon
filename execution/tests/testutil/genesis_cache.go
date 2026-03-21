@@ -35,10 +35,27 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 )
+
+// allocHasSystemContracts checks if the genesis alloc already includes
+// code for Prague system contracts (EIP-7002 withdrawal requests,
+// EIP-7251 consolidation requests). If so, InitPraguePreDeploys should
+// be skipped to avoid overwriting test-fixture-provided bytecode.
+func allocHasSystemContracts(g *types.Genesis) bool {
+	for _, addr := range []common.Address{
+		params.WithdrawalRequestAddress.Value(),
+		params.ConsolidationRequestAddress.Value(),
+	} {
+		if acct, ok := g.Alloc[addr]; ok && len(acct.Code) > 0 {
+			return true
+		}
+	}
+	return false
+}
 
 // genesisCacheEntry holds a cached genesis DB and its genesis block.
 type genesisCacheEntry struct {
@@ -223,8 +240,9 @@ func createGenesisDB(key string, gspec *types.Genesis) (kv.TemporalRwDB, *types.
 		return nil, nil, nil, fmt.Errorf("genesis cache: tx.Commit: %w", err)
 	}
 
-	// Step 3: Deploy Prague system contracts if needed.
-	if gspec.Config.IsPrague(0) {
+	// Step 3: Deploy Prague system contracts only if the genesis alloc
+	// doesn't already include them (test fixtures provide their own bytecode).
+	if gspec.Config.IsPrague(0) && !allocHasSystemContracts(gspec) {
 		if err := blockgen.InitPraguePreDeploys(db, logger); err != nil {
 			db.Close()
 			return nil, nil, nil, fmt.Errorf("genesis cache: InitPraguePreDeploys: %w", err)

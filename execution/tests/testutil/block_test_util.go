@@ -683,6 +683,7 @@ func (bt *BlockTest) runLightweight(t *testing.T) error {
 
 		header := cb.Header()
 		parentHash := header.ParentHash
+
 		parentTd, hasTd := cr.tds[parentHash]
 		if !hasTd {
 			parentTd, _ = rawdb.ReadTd(overlay, parentHash, header.Number.Uint64()-1)
