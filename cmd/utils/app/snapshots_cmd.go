@@ -3585,7 +3585,7 @@ func doDU(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
-					log.Debug("could not detect chain name from chaindata", "err", r)
+					log.Warn("could not detect chain name from chaindata", "err", r)
 				}
 			}()
 			chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
