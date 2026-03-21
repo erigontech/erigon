@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"sync"
 	"testing"
@@ -140,15 +139,10 @@ func evictLRU() bool {
 	if victimEntry.db != nil {
 		victimEntry.db.Close()
 	}
-	dirs := victimEntry.dirs
+	for _, d := range victimEntry.dirs {
+		dirutil.RemoveAll(d)
+	}
 	delete(genesisDBCache, victimKey)
-
-	// Remove temp dirs without holding the lock.
-	go func() {
-		for _, d := range dirs {
-			dirutil.RemoveAll(d)
-		}
-	}()
 	return true
 }
 
@@ -166,8 +160,8 @@ func createGenesisDB(key string, gspec *types.Genesis) (kv.TemporalRwDB, *types.
 	logger := log.New()
 	logger.SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
-	dir := filepath.Join(os.TempDir(), "erigon-genesis-"+key)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	dir, err := os.MkdirTemp("", "erigon-genesis-")
+	if err != nil {
 		return nil, nil, nil, fmt.Errorf("genesis cache: temp dir: %w", err)
 	}
 	dirs := datadir.New(dir)
@@ -178,7 +172,6 @@ func createGenesisDB(key string, gspec *types.Genesis) (kv.TemporalRwDB, *types.
 	_ = os.MkdirAll(genesisDirs.Tmp, 0755)
 	_ = os.MkdirAll(genesisDirs.SnapDomain, 0755)
 	var genesis *types.Block
-	var err error
 	err = func() (gerr error) {
 		defer func() {
 			if r := recover(); r != nil {

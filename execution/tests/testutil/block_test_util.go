@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
@@ -774,23 +775,40 @@ func (bt *BlockTest) runLightweight(t *testing.T) error {
 			return h, nil
 		})
 
-		// Execute block with panic recovery (malicious headers can panic).
+		// For expected-invalid blocks with a BAL hash, use VersionedIO tracking
+		// to detect BAL mismatches. For valid blocks, use the fast path.
 		var execResult *protocol.EphemeralExecResult
 		var execErr error
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					execErr = fmt.Errorf("panic during block execution: %v", r)
-				}
-			}()
-			execResult, execErr = protocol.ExecuteBlockEphemerally(
-				config, &vm.Config{},
-				blockHashFunc, engine, cb,
-				stateReader, stateWriter,
-				cr, nil,
-				logger,
+		if isExpectedInvalid(b) && header.BlockAccessListHash != nil {
+			var vio *state.VersionedIO
+			execResult, vio, execErr = executeBlockWithIO(
+				config, blockHashFunc, engine, cb,
+				stateReader, stateWriter, cr, logger,
 			)
-		}()
+			if execErr == nil && vio != nil {
+				computedBAL := vio.AsBlockAccessList()
+				computedHash := computedBAL.Hash()
+				if computedHash != *header.BlockAccessListHash {
+					blockOverlay.Close()
+					continue // correctly rejected as invalid
+				}
+			}
+		} else {
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						execErr = fmt.Errorf("panic during block execution: %v", r)
+					}
+				}()
+				execResult, execErr = protocol.ExecuteBlockEphemerally(
+					config, &vm.Config{},
+					blockHashFunc, engine, cb,
+					stateReader, stateWriter,
+					cr, nil,
+					logger,
+				)
+			}()
+		}
 
 		if execErr != nil {
 			blockOverlay.Close() // discard state changes
@@ -851,4 +869,113 @@ func (bt *BlockTest) runLightweight(t *testing.T) error {
 	}
 
 	return nil
+}
+
+// executeBlockWithIO executes a block while tracking state I/O in a VersionedIO,
+// enabling post-execution BAL validation. This replaces ExecuteBlockEphemerally
+// with a per-transaction loop that records reads, writes, and address accesses.
+func executeBlockWithIO(
+	chainConfig *chain.Config,
+	blockHashFunc func(n uint64) (common.Hash, error),
+	engine rules.Engine, block *types.Block,
+	stateReader state.StateReader, stateWriter state.StateWriter,
+	chainReader rules.ChainReader, logger log.Logger,
+) (res *protocol.EphemeralExecResult, vio *state.VersionedIO, retErr error) {
+	defer func() {
+		if r := recover(); r != nil {
+			retErr = fmt.Errorf("panic during block execution: %v", r)
+		}
+	}()
+
+	header := block.Header()
+	blockNum := block.NumberU64()
+	numTx := block.Transactions().Len()
+
+	// Set up VersionedIO and VersionMap for I/O tracking.
+	vio = state.NewVersionedIO(numTx + 1) // user txs + system tx
+	vmap := state.NewVersionMap(nil)
+
+	ibs := state.New(stateReader)
+	defer ibs.Release(false)
+	ibs.SetVersionMap(vmap)
+
+	vmConfig := vm.Config{}
+	gasUsed := new(protocol.GasUsed)
+	gp := new(protocol.GasPool)
+	gp.AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(block.Time()))
+
+	if err := protocol.InitializeBlockExecution(engine, chainReader, header, chainConfig, ibs, stateWriter, logger, nil); err != nil {
+		return nil, nil, err
+	}
+
+	receipts := make(types.Receipts, 0, numTx)
+
+	for i, txn := range block.Transactions() {
+		ibs.SetTxContext(blockNum, i)
+		ibs.ResetVersionedIO()
+
+		receipt, err := protocol.ApplyTransaction(chainConfig, blockHashFunc, engine, accounts.NilAddress, gp, ibs, stateWriter, header, txn, gasUsed, vmConfig)
+		if err != nil {
+			return nil, nil, fmt.Errorf("could not apply txn %d from block %d [%v]: %w", i, blockNum, txn.Hash().Hex(), err)
+		}
+		receipts = append(receipts, receipt)
+
+		// Record per-tx I/O into VersionedIO.
+		ver := state.Version{BlockNum: blockNum, TxIndex: i}
+		vio.RecordReads(ver, ibs.VersionedReads())
+		vio.RecordWrites(ver, ibs.VersionedWrites(false))
+		vio.RecordAccesses(ver, ibs.AccessedAddresses())
+	}
+
+	// Validate receipts.
+	receiptSha := types.DeriveSha(receipts)
+	if chainConfig.IsByzantium(blockNum) && receiptSha != block.ReceiptHash() {
+		return nil, nil, fmt.Errorf("mismatched receipt headers for block %d (%s != %s)", blockNum, receiptSha.Hex(), block.ReceiptHash().Hex())
+	}
+
+	// Validate gas.
+	blockGasUsed := gasUsed.BlockGasUsed()
+	if blockGasUsed != header.GasUsed {
+		return nil, nil, fmt.Errorf("gas used by execution: %d, in header: %d", blockGasUsed, header.GasUsed)
+	}
+	if header.BlobGasUsed != nil && gasUsed.Blob != *header.BlobGasUsed {
+		return nil, nil, fmt.Errorf("blob gas used by execution: %d, in header: %d", gasUsed.Blob, *header.BlobGasUsed)
+	}
+
+	// Validate bloom.
+	bloom := types.CreateBloom(receipts)
+	if bloom != header.Bloom {
+		return nil, nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
+	}
+
+	// Finalize (system transactions: withdrawals, requests).
+	ibs.ResetVersionedIO()
+	txs := block.Transactions()
+	newBlock, requests, err := protocol.FinalizeBlockExecution(engine, stateReader, header, txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, true, logger, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Record system tx I/O.
+	sysVer := state.Version{BlockNum: blockNum, TxIndex: numTx}
+	vio.RecordReads(sysVer, ibs.VersionedReads())
+	vio.RecordWrites(sysVer, ibs.VersionedWrites(false))
+	vio.RecordAccesses(sysVer, ibs.AccessedAddresses())
+
+	// Validate requests hash.
+	if header.RequestsHash != nil {
+		computedHash := requests.Hash()
+		if *computedHash != *header.RequestsHash {
+			return nil, nil, fmt.Errorf("invalid requests hash: computed %x, header %x", *computedHash, *header.RequestsHash)
+		}
+	}
+
+	return &protocol.EphemeralExecResult{
+		StateRoot:   newBlock.Root(),
+		TxRoot:      types.DeriveSha(txs),
+		ReceiptRoot: receiptSha,
+		Bloom:       bloom,
+		Receipts:    receipts,
+		Difficulty:  &header.Difficulty,
+	}, vio, nil
 }
