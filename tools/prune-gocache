@@ -123,6 +123,8 @@ def main() -> int:
     deleted = 0
     deleted_size = 0
     errors = 0
+    retained_tuples = []
+    deleted_tuples = []
     for skip, atime, mtime, size, path in files:
         if skip:
             decision = "skip"
@@ -132,6 +134,7 @@ def main() -> int:
             if keep:
                 total += size
                 kept += 1
+                retained_tuples.append((atime, mtime, size))
             delete = not keep
             decision = "retain" if keep else "delete"
 
@@ -142,6 +145,7 @@ def main() -> int:
         if delete:
             deleted += 1
             deleted_size += size
+            deleted_tuples.append((atime, mtime, size))
             if not args.dry_run:
                 try:
                     os.remove(path)
@@ -149,9 +153,27 @@ def main() -> int:
                     print("failed to remove {}: {}".format(path, e), file=sys.stderr)
                     errors += 1
 
-    action = "would delete" if args.dry_run else "deleted"
-    print("GoCache pruned: kept {} files ({:.2f} GB), {} {} files ({:.2f} GB)".format(
-        kept, total / 1024**3, action, deleted, deleted_size / 1024**3))
+    def fmt_tuple(t):
+        return "({}, {}, {})".format(format_ago(t[0]), format_ago(t[1]), format_size(t[2]))
+
+    action_retain = "would retain" if args.dry_run else "retained"
+    action_delete = "would delete" if args.dry_run else "deleted"
+
+    if retained_tuples:
+        newest = max(retained_tuples)
+        oldest = min(retained_tuples)
+        print("{} {} files ({:.2f} GB) [{}, {}]".format(
+            action_retain, kept, total / 1024**3, fmt_tuple(newest), fmt_tuple(oldest)))
+    else:
+        print("{} {} files ({:.2f} GB)".format(action_retain, kept, total / 1024**3))
+
+    if deleted_tuples:
+        newest = max(deleted_tuples)
+        oldest = min(deleted_tuples)
+        print("{} {} files ({:.2f} GB) [{}, {}]".format(
+            action_delete, deleted, deleted_size / 1024**3, fmt_tuple(newest), fmt_tuple(oldest)))
+    elif deleted:
+        print("{} {} files ({:.2f} GB)".format(action_delete, deleted, deleted_size / 1024**3))
     if errors:
         print("errors: {}".format(errors), file=sys.stderr)
         return 1
