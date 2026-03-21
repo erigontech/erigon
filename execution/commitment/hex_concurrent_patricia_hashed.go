@@ -197,6 +197,21 @@ func (p *ConcurrentPatriciaHashed) SetParticularTrace(b bool, n int) {
 	}
 }
 
+// serialPatriciaCtx wraps a PatriciaContext and serializes PutBranch calls via a shared
+// mutex, allowing parallel goroutines to share a single write context safely.
+// Read-side calls (Branch, Account, Storage, TxNum) go to the per-goroutine inner context.
+type serialPatriciaCtx struct {
+	PatriciaContext // per-goroutine read context
+	writeCtx        PatriciaContext
+	mu              *sync.Mutex
+}
+
+func (s *serialPatriciaCtx) PutBranch(prefix, data, prevData []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.writeCtx.PutBranch(prefix, data, prevData)
+}
+
 func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaHashed, trieCtxFactory TrieContextFactory) ([]byte, error) {
 	if t.mode != ModeDirect {
 		return nil, errors.New("parallel hashsort for indirect mode is not supported")
@@ -211,6 +226,11 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 
 	clear(t.keys)
 
+	// Single write context shared by all goroutines; serialPatriciaCtx guards it with a mutex.
+	writeCtx, writeCtxClose := trieCtxFactory()
+	defer writeCtxClose()
+	var writeMu sync.Mutex
+
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(16)
 
@@ -222,7 +242,9 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 		g.Go(func() error {
 			trieCtx, trieCtxClose := trieCtxFactory()
 			defer trieCtxClose()
-			phnib.ResetContext(trieCtx)
+			// Reads (Branch/Account/Storage) use the per-goroutine trieCtx.
+			// PutBranch is serialized through the shared writeCtx via the mutex.
+			phnib.ResetContext(&serialPatriciaCtx{PatriciaContext: trieCtx, writeCtx: writeCtx, mu: &writeMu})
 			cnt := 0
 			err := nib.Load(nil, "", func(hashedKey, plainKey []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 				cnt++
