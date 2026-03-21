@@ -595,3 +595,162 @@ func extractBalanceReads(reads state.ReadSet) map[accounts.Address]string {
 	})
 	return m
 }
+
+// --- finalizeTxSimple tests ---
+// These test the split fee logic: worker debits sender only,
+// finalize credits coinbase/burnt. No StripBalanceWrite or delta computation.
+
+// runFinalizeTxSimple sets up the versionMap with prior TX's finalize writes
+// and runs finalizeTxSimple, verifying the fee credit logic.
+func (s *testFinalizeScenario) runFinalizeTxSimple(t *testing.T, priorCoinbaseBalance *uint256.Int) state.VersionedWrites {
+	t.Helper()
+	result := s.buildExecResult()
+	result.TxIn = copyReadSet(s.txIn)
+	result.TxOut = copyWrites(s.txOut)
+	if s.collectorWrites != nil {
+		result.CollectorWrites = copyWrites(s.collectorWrites)
+	}
+
+	vm := state.NewVersionMap(nil)
+	reader := s.makeReader()
+
+	// Simulate prior TX's finalize writing coinbase BalancePath to the versionMap.
+	if priorCoinbaseBalance != nil {
+		vm.Write(s.coinbase, state.BalancePath, accounts.NilKey,
+			state.Version{TxIndex: 0, Incarnation: 0}, *priorCoinbaseBalance, true)
+	}
+
+	// Flush the worker's TxOut to the versionMap (simulates line 1928).
+	vm.FlushVersionedWrites(result.TxOut, true, "")
+
+	task := result.Task.(*taskVersion)
+	txTask := task.Task.(*exec.TxTask)
+
+	_, _, writes, err := result.finalizeTxSimple(
+		task, txTask, nil, nil, vm, reader,
+		s.rules, false, false, "",
+	)
+	require.NoError(t, err)
+	return writes
+}
+
+// TestFinalizeTxSimple_BasicFeeCredit verifies that finalizeTxSimple adds
+// FeeTipped to the coinbase balance from the versionMap.
+func TestFinalizeTxSimple_BasicFeeCredit(t *testing.T) {
+	t.Parallel()
+	s := simpleTransferScenario()
+
+	// Coinbase starts with 1 ETH (from prior TX's finalize).
+	priorBalance := uint256.NewInt(1_000_000_000_000_000_000)
+	writes := s.runFinalizeTxSimple(t, priorBalance)
+
+	coinbaseWrite := findWrite(writes, s.coinbase, state.BalancePath)
+	require.NotNil(t, coinbaseWrite, "finalize should produce coinbase BalancePath write")
+
+	coinbaseBalance := coinbaseWrite.Val.(uint256.Int)
+	expected := new(uint256.Int).Add(priorBalance, &s.feeTipped)
+	assert.Equal(t, *expected, coinbaseBalance,
+		"coinbase should be priorBalance + FeeTipped (no delta, no double-count)")
+}
+
+// TestFinalizeTxSimple_VersionOnWrites verifies that all finalize writes
+// have the correct Version (task.Version()), not zero Version.
+func TestFinalizeTxSimple_VersionOnWrites(t *testing.T) {
+	t.Parallel()
+	s := simpleTransferScenario()
+	priorBalance := uint256.NewInt(1_000_000_000_000_000_000)
+	writes := s.runFinalizeTxSimple(t, priorBalance)
+
+	for _, w := range writes {
+		if w.Address == s.coinbase && w.Path == state.BalancePath {
+			// The task has TxIndex=0 (first TX). Verify the Version
+			// matches and is not the zero-value struct.
+			assert.Equal(t, 0, w.Version.TxIndex,
+				"coinbase write should have Version from task (txIndex=0)")
+			assert.Equal(t, uint64(1), w.Version.BlockNum,
+				"coinbase write should have correct BlockNum")
+			return
+		}
+	}
+	t.Fatal("no coinbase BalancePath write found")
+}
+
+// TestFinalizeTxSimple_LondonBurntFees verifies that FeeBurnt is added to
+// the burnt contract balance.
+func TestFinalizeTxSimple_LondonBurntFees(t *testing.T) {
+	t.Parallel()
+	s := londonTransferScenario()
+	priorBalance := uint256.NewInt(1_000_000_000_000_000_000)
+	writes := s.runFinalizeTxSimple(t, priorBalance)
+
+	burntWrite := findWrite(writes, s.burntAddr, state.BalancePath)
+	require.NotNil(t, burntWrite, "finalize should produce burnt contract BalancePath write")
+
+	burntBalance := burntWrite.Val.(uint256.Int)
+	// Burnt contract gets existing balance (500000) + FeeBurnt
+	expected := new(uint256.Int).Add(uint256.NewInt(500_000), &s.feeBurnt)
+	assert.Equal(t, *expected, burntBalance,
+		"burnt contract should be existing balance + FeeBurnt")
+}
+
+// TestFinalizeTxSimple_NoCoinbaseInVersionMap verifies that when there's no
+// prior coinbase entry in the versionMap, the finalize reads from the
+// stateReader and adds FeeTipped.
+func TestFinalizeTxSimple_NoCoinbaseInVersionMap(t *testing.T) {
+	t.Parallel()
+	s := simpleTransferScenario()
+
+	// No prior coinbase balance — reads from stateReader (balance 0).
+	writes := s.runFinalizeTxSimple(t, nil)
+
+	coinbaseWrite := findWrite(writes, s.coinbase, state.BalancePath)
+	require.NotNil(t, coinbaseWrite, "finalize should produce coinbase BalancePath write")
+
+	coinbaseBalance := coinbaseWrite.Val.(uint256.Int)
+	assert.Equal(t, s.feeTipped, coinbaseBalance,
+		"coinbase should be 0 + FeeTipped when no prior balance in versionMap")
+}
+
+// TestFinalizeTxSimple_AccumulatedFees verifies that successive finalizeTxSimple
+// calls correctly accumulate fees across TXs (the core requirement).
+func TestFinalizeTxSimple_AccumulatedFees(t *testing.T) {
+	t.Parallel()
+	s := simpleTransferScenario()
+
+	vm := state.NewVersionMap(nil)
+	reader := s.makeReader()
+
+	tipPerTx := uint256.NewInt(21_000)
+
+	for txIdx := 1; txIdx <= 3; txIdx++ {
+		result := s.buildExecResult()
+		result.TxIn = copyReadSet(s.txIn)
+		result.TxOut = copyWrites(s.txOut)
+		result.CollectorWrites = copyWrites(s.collectorWrites)
+		result.ExecutionResult.FeeTipped = *tipPerTx
+
+		task := result.Task.(*taskVersion)
+		task.version.TxIndex = txIdx
+
+		// Flush TxOut to versionMap (simulates line 1928).
+		vm.FlushVersionedWrites(result.TxOut, true, "")
+
+		txTask := task.Task.(*exec.TxTask)
+		_, _, writes, err := result.finalizeTxSimple(
+			task, txTask, nil, nil, vm, reader,
+			s.rules, false, false, "",
+		)
+		require.NoError(t, err)
+
+		// Flush finalize writes to versionMap for next TX.
+		vm.FlushVersionedWrites(writes, true, "")
+
+		// Verify accumulated balance.
+		coinbaseWrite := findWrite(writes, s.coinbase, state.BalancePath)
+		require.NotNil(t, coinbaseWrite, "TX %d: should have coinbase write", txIdx)
+		bal := coinbaseWrite.Val.(uint256.Int)
+		expectedBal := new(uint256.Int).Mul(tipPerTx, uint256.NewInt(uint64(txIdx)))
+		assert.Equal(t, *expectedBal, bal,
+			"TX %d: coinbase should have accumulated %d tips", txIdx, txIdx)
+	}
+}

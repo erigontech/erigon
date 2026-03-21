@@ -91,11 +91,11 @@ func TestLightCollectorNoncePreservation(t *testing.T) {
 	writes2 := lc2.TakeWrites()
 
 	// Apply TX 100 writes first (nonce increment)
-	err = rs.ApplyStateWrites(context.Background(), tx, 1, 100, writes1, nil, &chain.Rules{})
+	err = rs.ApplyStateWrites(context.Background(), tx, 1, 100, writes1, nil, &chain.Rules{}, nil)
 	require.NoError(t, err)
 
 	// Apply TX 200 writes second (balance-only)
-	err = rs.ApplyStateWrites(context.Background(), tx, 1, 200, writes2, nil, &chain.Rules{})
+	err = rs.ApplyStateWrites(context.Background(), tx, 1, 200, writes2, nil, &chain.Rules{}, nil)
 	require.NoError(t, err)
 
 	// Read the final account state from the domain.
@@ -147,7 +147,7 @@ func TestLightCollectorNoncePreservationCrossBlock(t *testing.T) {
 	err = lc1.UpdateAccountData(addr, blockOrigin,
 		&accounts.Account{Nonce: 11, Balance: *uint256.NewInt(4800)})
 	require.NoError(t, err)
-	err = rs.ApplyStateWrites(context.Background(), tx, 1, 10, lc1.TakeWrites(), nil, &chain.Rules{})
+	err = rs.ApplyStateWrites(context.Background(), tx, 1, 10, lc1.TakeWrites(), nil, &chain.Rules{}, nil)
 	require.NoError(t, err)
 
 	// TX 2-5: A receives transfers (balance-only, nonce unchanged from block origin=10)
@@ -156,7 +156,7 @@ func TestLightCollectorNoncePreservationCrossBlock(t *testing.T) {
 		err = lc.UpdateAccountData(addr, blockOrigin,
 			&accounts.Account{Nonce: 10, Balance: *uint256.NewInt(uint64(4800 + (i+1)*100))})
 		require.NoError(t, err)
-		err = rs.ApplyStateWrites(context.Background(), tx, 1, uint64(11+i), lc.TakeWrites(), nil, &chain.Rules{})
+		err = rs.ApplyStateWrites(context.Background(), tx, 1, uint64(11+i), lc.TakeWrites(), nil, &chain.Rules{}, nil)
 		require.NoError(t, err)
 	}
 
@@ -208,7 +208,7 @@ func TestLightCollectorNewAccountCodeHash(t *testing.T) {
 	err := lc.UpdateAccountData(addr, original, account)
 	require.NoError(t, err)
 
-	err = rs.ApplyStateWrites(context.Background(), tx, 1, 1, lc.TakeWrites(), nil, &chain.Rules{})
+	err = rs.ApplyStateWrites(context.Background(), tx, 1, 1, lc.TakeWrites(), nil, &chain.Rules{}, nil)
 	require.NoError(t, err)
 
 	// Read back and verify CodeHash is EmptyCodeHash, not zero.
@@ -279,7 +279,7 @@ func TestLightCollectorStorageReentrancyGuard(t *testing.T) {
 	lc1 := state.NewLightCollector()
 	err = lc1.WriteAccountStorage(contract, 1, slotKey, *uint256.NewInt(1), *uint256.NewInt(2))
 	require.NoError(t, err)
-	err = rs.ApplyStateWrites(context.Background(), tx, 1, 10, lc1.TakeWrites(), nil, &chain.Rules{})
+	err = rs.ApplyStateWrites(context.Background(), tx, 1, 10, lc1.TakeWrites(), nil, &chain.Rules{}, nil)
 	require.NoError(t, err)
 
 	// Verify domain has 2
@@ -298,7 +298,7 @@ func TestLightCollectorStorageReentrancyGuard(t *testing.T) {
 	// With the skip, writes2 is empty (original == value).
 	// Without the skip, writes2 has one entry.
 	// Either way, ApplyStateWrites should handle it correctly.
-	err = rs.ApplyStateWrites(context.Background(), tx, 1, 11, writes2, nil, &chain.Rules{})
+	err = rs.ApplyStateWrites(context.Background(), tx, 1, 11, writes2, nil, &chain.Rules{}, nil)
 	require.NoError(t, err)
 
 	// TX B explicitly SSTORed 1. If the write was emitted, DomainPut reads
@@ -355,7 +355,7 @@ func TestLightCollectorStorageUnchangedSlot(t *testing.T) {
 	require.NoError(t, err)
 	writes := lc.TakeWrites()
 
-	err = rs.ApplyStateWrites(context.Background(), tx, 1, 10, writes, nil, &chain.Rules{})
+	err = rs.ApplyStateWrites(context.Background(), tx, 1, 10, writes, nil, &chain.Rules{}, nil)
 	require.NoError(t, err)
 
 	// Domain should still have 1 — the write was a no-op (DomainPut skip).
@@ -379,7 +379,7 @@ func TestLightCollectorStorageUnchangedSlot(t *testing.T) {
 	err = lc2.WriteAccountStorage(contract, 1, slotKey2, *uint256.NewInt(37), *uint256.NewInt(42)) // actual change
 	require.NoError(t, err)
 
-	err = rs.ApplyStateWrites(context.Background(), tx, 1, 11, lc2.TakeWrites(), nil, &chain.Rules{})
+	err = rs.ApplyStateWrites(context.Background(), tx, 1, 11, lc2.TakeWrites(), nil, &chain.Rules{}, nil)
 	require.NoError(t, err)
 
 	v, _, err = domains.GetLatest(kv.StorageDomain, tx, composite)
