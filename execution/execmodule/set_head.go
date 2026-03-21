@@ -104,7 +104,7 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	defer sd.Close()
 
 	// Set the unwind point and run the unwind
-	if err := e.executionPipeline.UnwindTo(targetBlock, stagedsync.StagedUnwind, tx); err != nil {
+	if err := e.pipelineExecutor.UnwindTo(targetBlock, stagedsync.StagedUnwind, tx); err != nil {
 		return fmt.Errorf("failed to set unwind point: %w", err)
 	}
 
@@ -112,7 +112,7 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 		return fmt.Errorf("hook BeforeRun failed: %w", err)
 	}
 
-	if err := e.executionPipeline.RunUnwind(sd, tx); err != nil {
+	if err := e.pipelineExecutor.RunUnwind(sd, tx); err != nil {
 		return fmt.Errorf("failed to run unwind: %w", err)
 	}
 
