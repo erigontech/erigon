@@ -149,17 +149,6 @@ func (s *L1SyncService) Start(ctx context.Context) {
 		if err == nil {
 			s.delayedMessagesRead = dmr
 		}
-		// Restore last block header for block chaining continuity
-		if e := s.db.View(ctx, func(tx kv.Tx) error {
-			header, e := loadLastBlockHeader(tx)
-			if e != nil {
-				return e
-			}
-			s.lastBlockHeader = header
-			return nil
-		}); e != nil {
-			s.logger.Warn("failed to load last block header", "err", e)
-		}
 		// Load recent batches into memory for finality lookups
 		s.loadRecentBatches(ctx, lastBatch)
 	}
