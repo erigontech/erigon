@@ -311,7 +311,11 @@ func getOrCreateGenesisDB(fork string, gspec *types.Genesis) (kv.TemporalRwDB, *
 var cleanupOnce sync.Once
 
 // registerGenesisCacheCleanup ensures cleanup is registered exactly once.
+// When t is nil (CLI usage), cleanup is skipped — the process exits anyway.
 func registerGenesisCacheCleanup(t *testing.T) {
+	if t == nil {
+		return
+	}
 	cleanupOnce.Do(func() {
 		t.Cleanup(func() {
 			genesisDBMu.Lock()
