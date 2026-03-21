@@ -3269,8 +3269,8 @@ func duComputeEstimates(files []duFileInfo, maxBlock, maxStep uint64) []duEstima
 
 	return []duEstimate{
 		{Mode: "archive", TotalBytes: archiveTotal, Delta: 0, BlocksDesc: "all blocks", HistoryDesc: "all history"},
-		{Mode: "full", TotalBytes: fullTotal, Delta: fullTotal - archiveTotal, BlocksDesc: "all blocks", HistoryDesc: "last 100k"},
-		{Mode: "minimal", TotalBytes: minimalTotal, Delta: minimalTotal - archiveTotal, BlocksDesc: "last 100k", HistoryDesc: "last 100k"},
+		{Mode: "full", TotalBytes: fullTotal, Delta: fullTotal - archiveTotal, BlocksDesc: "all blocks", HistoryDesc: fmt.Sprintf("last %s", duFormatNumber(pruneDistance))},
+		{Mode: "minimal", TotalBytes: minimalTotal, Delta: minimalTotal - archiveTotal, BlocksDesc: fmt.Sprintf("last %s", duFormatNumber(pruneDistance)), HistoryDesc: fmt.Sprintf("last %s", duFormatNumber(pruneDistance))},
 	}
 }
 
@@ -3404,7 +3404,10 @@ func duFormatHuman(w io.Writer, result duResult) {
 		entries = append(entries, catEntry{cat, stat})
 	}
 	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].stat.Bytes > entries[j].stat.Bytes
+		if entries[i].stat.Bytes != entries[j].stat.Bytes {
+			return entries[i].stat.Bytes > entries[j].stat.Bytes
+		}
+		return entries[i].name < entries[j].name
 	})
 
 	fmt.Fprintln(w, "── Breakdown ──────────────────────────────────────────────────")
@@ -3449,7 +3452,11 @@ func doDU(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	chainName := "unknown"
 	if _, err := os.Stat(dirs.Chaindata); err == nil {
 		func() {
-			defer func() { recover() }() //nolint:errcheck
+			defer func() {
+				if r := recover(); r != nil {
+					log.Debug("could not detect chain name from chaindata", "err", r)
+				}
+			}()
 			chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 			defer chainDB.Close()
 			cc := fromdb.ChainConfig(chainDB)

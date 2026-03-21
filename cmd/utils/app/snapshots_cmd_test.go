@@ -744,7 +744,7 @@ func TestDUFormatHuman(t *testing.T) {
 		},
 		Estimates: []duEstimate{
 			{Mode: "archive", TotalBytes: 100 * 1024 * 1024 * 1024, Delta: 0, BlocksDesc: "all blocks", HistoryDesc: "all history"},
-			{Mode: "full", TotalBytes: 80 * 1024 * 1024 * 1024, Delta: -20 * 1024 * 1024 * 1024, BlocksDesc: "all blocks", HistoryDesc: "last 100k"},
+			{Mode: "full", TotalBytes: 80 * 1024 * 1024 * 1024, Delta: -20 * 1024 * 1024 * 1024, BlocksDesc: "all blocks", HistoryDesc: "last 100,000"},
 		},
 	}
 
@@ -768,7 +768,7 @@ func TestDUFormatHuman(t *testing.T) {
 	// Check estimates section.
 	require.True(t, strings.Contains(out, "Estimated Size by Node Type"), "should have estimates header")
 	require.True(t, strings.Contains(out, "all blocks"), "should show blocks description")
-	require.True(t, strings.Contains(out, "last 100k"), "should show history description")
+	require.True(t, strings.Contains(out, "last 100,000"), "should show history description")
 }
 
 func TestDUFormatHuman_EmptyResult(t *testing.T) {
