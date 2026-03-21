@@ -464,8 +464,10 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 
 	if pendingEnvelope != nil {
 		log.Debug("OnBlock: processing pending envelope", "blockRoot", common.Hash(blockRoot))
-		// Use same flags as OnBlock for consistency
-		if err := f.OnExecutionPayload(ctx, pendingEnvelope, checkDataAvaiability, newPayload); err != nil {
+		// Always validate payload with EL for pending envelopes, regardless of the caller's newPayload flag.
+		// During forward sync newPayload is false, but the envelope still needs to reach the EL;
+		// otherwise the EL never learns about this block and the chain stalls.
+		if err := f.OnExecutionPayload(ctx, pendingEnvelope, checkDataAvaiability, true); err != nil {
 			log.Warn("OnBlock: failed to process pending envelope", "blockRoot", common.Hash(blockRoot), "err", err)
 		}
 	}
