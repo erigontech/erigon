@@ -167,10 +167,23 @@ type ForkChoiceStore struct {
 	// Later, when OnBlock processes the block, it checks this cache and processes any pending envelope.
 	pendingEnvelopes *lru.Cache[common.Hash, *cltypes.SignedExecutionPayloadEnvelope]
 
+	// [New in Gloas:EIP7732] Execution blocks whose CL state transition succeeded but
+	// whose EL newPayload failed (e.g. because EL hasn't caught up after forward sync).
+	// The stages layer drains these into blockCollector before each Flush() so EL
+	// eventually receives the blocks.
+	pendingELPayloadsMu sync.Mutex
+	pendingELPayloads   []PendingELPayload
+
 	// db is used to persist execution payload indices (block number/hash) when an envelope
 	// is accepted in OnExecutionPayload. May be nil (e.g. in tests), in which case the
 	// index writes are skipped.
 	db kv.RwDB
+}
+
+// PendingELPayload holds a block+envelope pair that needs to be fed to the EL.
+type PendingELPayload struct {
+	Block    *cltypes.SignedBeaconBlock
+	Envelope *cltypes.SignedExecutionPayloadEnvelope
 }
 
 type childrens struct {
@@ -873,4 +886,25 @@ func (f *ForkChoiceStore) GetPendingPartialWithdrawals(blockRoot common.Hash) (*
 func (f *ForkChoiceStore) GetProposerLookahead(slot uint64) (solid.Uint64VectorSSZ, bool) {
 	epoch := slot / f.beaconCfg.SlotsPerEpoch
 	return f.proposerLookahead.Get(epoch)
+}
+
+// addPendingELPayload queues an execution block whose CL transition succeeded
+// but whose EL newPayload failed (EL behind).  Thread-safe.
+func (f *ForkChoiceStore) addPendingELPayload(block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) {
+	f.pendingELPayloadsMu.Lock()
+	defer f.pendingELPayloadsMu.Unlock()
+	f.pendingELPayloads = append(f.pendingELPayloads, PendingELPayload{
+		Block:    block,
+		Envelope: envelope,
+	})
+}
+
+// DrainPendingELPayloads returns and clears all queued EL payloads.
+// The stages layer calls this before Flush() to add them to blockCollector.
+func (f *ForkChoiceStore) DrainPendingELPayloads() []PendingELPayload {
+	f.pendingELPayloadsMu.Lock()
+	defer f.pendingELPayloadsMu.Unlock()
+	payloads := f.pendingELPayloads
+	f.pendingELPayloads = nil
+	return payloads
 }
