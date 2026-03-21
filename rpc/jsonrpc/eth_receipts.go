@@ -380,16 +380,8 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				borLogs = borLogs.Filter(addrMap, crit.Topics, 0)
 				for _, filteredLog := range borLogs {
 					logs = append(logs, &types.ErigonLog{
-						Address:     filteredLog.Address,
-						Topics:      filteredLog.Topics,
-						Data:        filteredLog.Data,
-						BlockNumber: filteredLog.BlockNumber,
-						TxHash:      filteredLog.TxHash,
-						TxIndex:     filteredLog.TxIndex,
-						BlockHash:   filteredLog.BlockHash,
-						Index:       filteredLog.Index,
-						Removed:     filteredLog.Removed,
-						Timestamp:   header.Time,
+						Log:       *filteredLog,
+						Timestamp: header.Time,
 					})
 				}
 			}
@@ -417,16 +409,8 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 
 		for _, filteredLog := range filtered {
 			logs = append(logs, &types.ErigonLog{
-				Address:     filteredLog.Address,
-				Topics:      filteredLog.Topics,
-				Data:        filteredLog.Data,
-				BlockNumber: filteredLog.BlockNumber,
-				TxHash:      filteredLog.TxHash,
-				TxIndex:     filteredLog.TxIndex,
-				BlockHash:   filteredLog.BlockHash,
-				Index:       filteredLog.Index,
-				Removed:     filteredLog.Removed,
-				Timestamp:   header.Time,
+				Log:       *filteredLog,
+				Timestamp: header.Time,
 			})
 		}
 	}
