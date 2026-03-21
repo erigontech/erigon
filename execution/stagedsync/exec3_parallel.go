@@ -1250,6 +1250,18 @@ func (result *execResult) finalizeTx(
 		}
 	}
 
+	// DEBUG ASSERTION: check coinbase balance against serial reference
+	if blockNum == 24363950 {
+		fmt.Printf("FINALIZE_CHECK txIdx=%d hasCoinbaseDelta=%v coinbaseDelta=%s FeeTipped=%s oldBal=%s newBal=%s vsReaderBal=%s\n",
+			txIndex, hasCoinbaseDelta, coinbaseDelta.String(), result.ExecutionResult.FeeTipped.String(),
+			oldCoinbaseBalance.String(), newCoinbaseBalance.String(), func() string {
+				if coinbaseAcc != nil {
+					return coinbaseAcc.Balance.String()
+				}
+				return "nil"
+			}())
+	}
+
 	// Build versionMap writes: the stripped TxOut (IBS-format, no stale
 	// coinbase/burnt balances) plus the adjusted balance writes.
 	allWrites := make(state.VersionedWrites, len(result.TxOut), len(result.TxOut)+2)
@@ -1259,6 +1271,7 @@ func (result *execResult) finalizeTx(
 			Address: result.Coinbase,
 			Path:    state.BalancePath,
 			Val:     newCoinbaseBalance,
+			Version: task.Version(),
 			Reason:  tracing.BalanceIncreaseRewardTransactionFee,
 		})
 	}
@@ -1272,6 +1285,7 @@ func (result *execResult) finalizeTx(
 				Address: burntAddr,
 				Path:    state.BalancePath,
 				Val:     newBurntBalance,
+				Version: task.Version(),
 				Reason:  tracing.BalanceDecreaseGasBuy,
 			})
 		}
