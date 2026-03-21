@@ -483,7 +483,7 @@ func ApplyDeferredBranchUpdates(
 		err error
 	}
 	// Size channels to actual batch length, not the 50K max.
-	resultCh := make(chan result, len(deferred)*4)
+	resultCh := make(chan result, len(deferred))
 	workCh := make(chan *DeferredBranchUpdate, len(deferred))
 
 	// Start workers with pooled encoders/mergers.
