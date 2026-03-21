@@ -60,7 +60,7 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	bt.Walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root
 		test.ExperimentalBAL = true // TODO eventually remove this from BlockTest and run normally
-		if err := bt.CheckFailure(t, test.RunLightweight(t)); err != nil {
+		if err := bt.CheckFailure(t, test.Run(t)); err != nil {
 			t.Error(err)
 		}
 	})

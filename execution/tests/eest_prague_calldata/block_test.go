@@ -21,7 +21,7 @@ func TestExecutionSpecBlockchainPragueCalldata(t *testing.T) {
 	dir := filepath.Join("..", "execution-spec-tests", "blockchain_tests")
 	bt.Whitelist(`^prague/eip7623_increase_calldata_cost/test_transaction_validity_type_1_type_2\.json`)
 	bt.Walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
-		if err := bt.CheckFailure(t, test.RunLightweight(t)); err != nil {
+		if err := bt.CheckFailure(t, test.Run(t)); err != nil {
 			t.Error(err)
 		}
 	})

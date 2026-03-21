@@ -21,7 +21,7 @@ func TestExecutionSpecBlockchainCancunBlobs(t *testing.T) {
 	dir := filepath.Join("..", "execution-spec-tests", "blockchain_tests")
 	bt.Whitelist(`^cancun/eip4844_blobs/test_invalid_negative_excess_blob_gas\.json`)
 	bt.Walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
-		if err := bt.CheckFailure(t, test.RunLightweight(t)); err != nil {
+		if err := bt.CheckFailure(t, test.Run(t)); err != nil {
 			t.Error(err)
 		}
 	})
