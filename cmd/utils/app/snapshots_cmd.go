@@ -3232,9 +3232,15 @@ type duEstimate struct {
 // maxStep is the highest step number across all state files.
 func duComputeEstimates(files []duFileInfo, maxBlock, maxStep uint64) []duEstimate {
 	pruneDistance := uint64(config3.DefaultPruneDistance)
-	// State files use step ranges, not block ranges. For simplicity in this
-	// estimation tool, apply DefaultPruneDistance directly against step ranges.
-	stepPruneDistance := pruneDistance
+	// State files use step ranges, not block ranges. Convert the block-based
+	// prune distance to step units using the observed blocks-per-step ratio.
+	var stepPruneDistance uint64
+	if maxStep > 0 && maxBlock > 0 {
+		blocksPerStep := maxBlock / maxStep
+		if blocksPerStep > 0 {
+			stepPruneDistance = pruneDistance / blocksPerStep
+		}
+	}
 
 	var archiveTotal, fullTotal, minimalTotal int64
 

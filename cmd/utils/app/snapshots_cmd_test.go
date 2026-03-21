@@ -561,56 +561,57 @@ func TestDUWalkSnapshots_MissingDir(t *testing.T) {
 }
 
 func TestDUComputeEstimates(t *testing.T) {
-	// Synthetic file list simulating an archive node with:
+	// Synthetic file list simulating an archive node with realistic mainnet-like values:
 	// - domain files (always kept)
 	// - old and new history/idx files
 	// - commitment hist and rcache (archive-only)
 	// - old and new block segments
 	// - caplin (always kept)
 	//
-	// maxStep=200000, maxBlock=500000
-	// stepPruneDistance = DefaultPruneDistance = 100000
-	// State prune cutoff: step To <= 200000-100000 = 100000 → old history/idx pruned
-	// Block prune cutoff: block To <= 500000-100000 = 400000 → old
+	// maxStep=2000, maxBlock=20_000_000
+	// blocksPerStep = 20_000_000 / 2000 = 10_000
+	// stepPruneDistance = DefaultPruneDistance(100_000) / 10_000 = 10
+	// State prune cutoff: step To <= 2000-10 = 1990 → old history/idx pruned
+	// Block prune cutoff: block To <= 20_000_000-100_000 = 19_900_000 → old
 
 	files := []duFileInfo{
 		// Domains — always kept in all modes
-		{Name: "accounts.0-50000.kv", Size: 1000, Category: duCatDomains, IsState: true, From: 0, To: 50000},
-		{Name: "storage.100000-200000.kv", Size: 2000, Category: duCatDomains, IsState: true, From: 100000, To: 200000},
+		{Name: "accounts.0-500.kv", Size: 1000, Category: duCatDomains, IsState: true, From: 0, To: 500},
+		{Name: "storage.1500-2000.kv", Size: 2000, Category: duCatDomains, IsState: true, From: 1500, To: 2000},
 
 		// Accessors — always kept
-		{Name: "accounts.0-50000.bt", Size: 500, Category: duCatAccessors, IsState: true, From: 0, To: 50000},
+		{Name: "accounts.0-500.bt", Size: 500, Category: duCatAccessors, IsState: true, From: 0, To: 500},
 
-		// Old history (To=50000 <= 100000 cutoff) — pruned in full/minimal
-		{Name: "accounts.0-50000.v", Size: 3000, Category: duCatHistory, IsState: true, From: 0, To: 50000},
+		// Old history (To=500 <= 1990 cutoff) — pruned in full/minimal
+		{Name: "accounts.0-500.v", Size: 3000, Category: duCatHistory, IsState: true, From: 0, To: 500},
 
-		// New history (To=200000 > 100000) — kept in full/minimal
-		{Name: "accounts.100000-200000.v", Size: 4000, Category: duCatHistory, IsState: true, From: 100000, To: 200000},
+		// New history (To=2000 > 1990) — kept in full/minimal
+		{Name: "accounts.1500-2000.v", Size: 4000, Category: duCatHistory, IsState: true, From: 1500, To: 2000},
 
-		// Old inverted index (To=50000 <= 100000) — pruned in full/minimal
-		{Name: "accounts.0-50000.ef", Size: 1500, Category: duCatInvIdx, IsState: true, From: 0, To: 50000},
+		// Old inverted index (To=500 <= 1990) — pruned in full/minimal
+		{Name: "accounts.0-500.ef", Size: 1500, Category: duCatInvIdx, IsState: true, From: 0, To: 500},
 
 		// New inverted index — kept
-		{Name: "accounts.100000-200000.ef", Size: 2500, Category: duCatInvIdx, IsState: true, From: 100000, To: 200000},
+		{Name: "accounts.1500-2000.ef", Size: 2500, Category: duCatInvIdx, IsState: true, From: 1500, To: 2000},
 
 		// Commitment hist — archive only
-		{Name: "commitment.0-50000.v", Size: 800, Category: duCatCommitHist, IsState: true, From: 0, To: 50000},
+		{Name: "commitment.0-500.v", Size: 800, Category: duCatCommitHist, IsState: true, From: 0, To: 500},
 
 		// Rcache — archive only
-		{Name: "rcache.0-50000.kv", Size: 600, Category: duCatRcache, IsState: true, From: 0, To: 50000},
+		{Name: "rcache.0-500.kv", Size: 600, Category: duCatRcache, IsState: true, From: 0, To: 500},
 
-		// Old block segment (To=300000 <= 400000) — pruned in minimal only
-		{Name: "0-300-headers.seg", Size: 5000, Category: duCatBlocks, IsState: false, From: 0, To: 300000},
+		// Old block segment (To=15_000_000 <= 19_900_000) — pruned in minimal only
+		{Name: "0-15000-headers.seg", Size: 5000, Category: duCatBlocks, IsState: false, From: 0, To: 15_000_000},
 
-		// New block segment (To=500000 > 400000) — kept in all
-		{Name: "300-500-headers.seg", Size: 6000, Category: duCatBlocks, IsState: false, From: 300000, To: 500000},
+		// New block segment (To=20_000_000 > 19_900_000) — kept in all
+		{Name: "15000-20000-headers.seg", Size: 6000, Category: duCatBlocks, IsState: false, From: 15_000_000, To: 20_000_000},
 
 		// Caplin — always kept
 		{Name: "beaconblocks.0-100.seg", Size: 700, Category: duCatCaplin, IsState: false, From: 0, To: 100},
 	}
 
-	maxBlock := uint64(500000)
-	maxStep := uint64(200000)
+	maxBlock := uint64(20_000_000)
+	maxStep := uint64(2000)
 
 	estimates := duComputeEstimates(files, maxBlock, maxStep)
 	require.Len(t, estimates, 3)
