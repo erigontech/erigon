@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -3287,4 +3288,151 @@ func duDetectNodeType(files []duFileInfo) string {
 	}
 
 	return "minimal"
+}
+
+// duCategoryStat holds aggregated size and file count for one category.
+type duCategoryStat struct {
+	Bytes int64 `json:"bytes"`
+	Files int   `json:"files"`
+}
+
+// duResult aggregates all output data for the du command.
+type duResult struct {
+	Chain        string                    `json:"chain"`
+	DetectedMode string                    `json:"detected_mode"`
+	BlockRange   [2]uint64                 `json:"block_range"`
+	StepRange    [2]uint64                 `json:"step_range"`
+	TotalBytes   int64                     `json:"total_bytes"`
+	TotalFiles   int                       `json:"total_files"`
+	Categories   map[string]duCategoryStat `json:"categories"`
+	Estimates    []duEstimate              `json:"estimates"`
+}
+
+// duAggregateCategories computes per-category byte totals and file counts.
+func duAggregateCategories(files []duFileInfo) map[string]duCategoryStat {
+	cats := make(map[string]duCategoryStat)
+	for _, f := range files {
+		s := cats[f.Category]
+		s.Bytes += f.Size
+		s.Files++
+		cats[f.Category] = s
+	}
+	return cats
+}
+
+// duCategoryOrder defines the display order for categories (largest-first is typical,
+// but we sort by size at render time).
+var duCategoryOrder = []string{
+	duCatDomains,
+	duCatHistory,
+	duCatBlocks,
+	duCatAccessors,
+	duCatInvIdx,
+	duCatCommitHist,
+	duCatCaplin,
+	duCatRcache,
+	duCatOther,
+}
+
+// duFormatSize formats bytes into a human-readable string (e.g., "420.3 GB").
+func duFormatSize(b int64) string {
+	const (
+		_KB = 1024
+		_MB = 1024 * _KB
+		_GB = 1024 * _MB
+		_TB = 1024 * _GB
+	)
+	abs := b
+	sign := ""
+	if b < 0 {
+		abs = -b
+		sign = "-"
+	}
+	switch {
+	case abs >= _TB:
+		return fmt.Sprintf("%s%.2f TB", sign, float64(abs)/float64(_TB))
+	case abs >= _GB:
+		return fmt.Sprintf("%s%.1f GB", sign, float64(abs)/float64(_GB))
+	case abs >= _MB:
+		return fmt.Sprintf("%s%.1f MB", sign, float64(abs)/float64(_MB))
+	case abs >= _KB:
+		return fmt.Sprintf("%s%.1f KB", sign, float64(abs)/float64(_KB))
+	default:
+		return fmt.Sprintf("%s%d B", sign, abs)
+	}
+}
+
+// duFormatNumber formats an integer with comma separators (e.g., 21500000 → "21,500,000").
+func duFormatNumber(n uint64) string {
+	s := strconv.FormatUint(n, 10)
+	if len(s) <= 3 {
+		return s
+	}
+	var buf strings.Builder
+	rem := len(s) % 3
+	if rem > 0 {
+		buf.WriteString(s[:rem])
+	}
+	for i := rem; i < len(s); i += 3 {
+		if buf.Len() > 0 {
+			buf.WriteByte(',')
+		}
+		buf.WriteString(s[i : i+3])
+	}
+	return buf.String()
+}
+
+// duFormatHuman writes the human-readable du output to w.
+func duFormatHuman(w io.Writer, result duResult) {
+	// Header line.
+	fmt.Fprintf(w, "%s | %s | blocks 0–%s | steps 0–%s\n\n",
+		result.Chain, result.DetectedMode,
+		duFormatNumber(result.BlockRange[1]),
+		duFormatNumber(result.StepRange[1]))
+
+	// Breakdown table sorted by size descending.
+	type catEntry struct {
+		name string
+		stat duCategoryStat
+	}
+	entries := make([]catEntry, 0, len(result.Categories))
+	for cat, stat := range result.Categories {
+		entries = append(entries, catEntry{cat, stat})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].stat.Bytes > entries[j].stat.Bytes
+	})
+
+	fmt.Fprintln(w, "── Breakdown ──────────────────────────────────────────────────")
+	for _, e := range entries {
+		pct := float64(0)
+		if result.TotalBytes > 0 {
+			pct = float64(e.stat.Bytes) / float64(result.TotalBytes) * 100
+		}
+		fmt.Fprintf(w, "  %-20s %10s %9.1f%%  %5d files\n",
+			e.name, duFormatSize(e.stat.Bytes), pct, e.stat.Files)
+	}
+	fmt.Fprintln(w, "  ─────────────────────────────────────────────────────────────")
+	fmt.Fprintf(w, "  %-20s %10s %15d files\n",
+		"total", duFormatSize(result.TotalBytes), result.TotalFiles)
+
+	// Estimates table.
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "── Estimated Size by Node Type ────────────────────────────────")
+	for _, est := range result.Estimates {
+		deltaStr := "—"
+		if est.Delta != 0 {
+			deltaStr = duFormatSize(est.Delta)
+		}
+		fmt.Fprintf(w, "  %-13s %10s %10s    %-15s %s\n",
+			est.Mode, duFormatSize(est.TotalBytes), deltaStr,
+			est.BlocksDesc, est.HistoryDesc)
+	}
+}
+
+// duFormatJSON writes the du result as JSON to w.
+func duFormatJSON(w io.Writer, result duResult) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(result)
 }

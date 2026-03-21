@@ -17,8 +17,11 @@
 package app
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/erigontech/erigon/db/datadir"
@@ -705,4 +708,173 @@ func TestDUDetectNodeType(t *testing.T) {
 		}
 		require.Equal(t, "minimal", duDetectNodeType(files))
 	})
+}
+
+func TestDUAggregateCategories(t *testing.T) {
+	files := []duFileInfo{
+		{Category: duCatDomains, Size: 100},
+		{Category: duCatDomains, Size: 200},
+		{Category: duCatHistory, Size: 300},
+		{Category: duCatBlocks, Size: 50},
+	}
+
+	cats := duAggregateCategories(files)
+	require.Equal(t, duCategoryStat{Bytes: 300, Files: 2}, cats[duCatDomains])
+	require.Equal(t, duCategoryStat{Bytes: 300, Files: 1}, cats[duCatHistory])
+	require.Equal(t, duCategoryStat{Bytes: 50, Files: 1}, cats[duCatBlocks])
+	require.Len(t, cats, 3)
+}
+
+func TestDUAggregateCategories_Empty(t *testing.T) {
+	cats := duAggregateCategories(nil)
+	require.Empty(t, cats)
+}
+
+func TestDUFormatHuman(t *testing.T) {
+	result := duResult{
+		Chain:        "mainnet",
+		DetectedMode: "archive",
+		BlockRange:   [2]uint64{0, 21500000},
+		StepRange:    [2]uint64{0, 2048},
+		TotalBytes:   1024 * 1024 * 1024 * 100, // 100 GB
+		TotalFiles:   500,
+		Categories: map[string]duCategoryStat{
+			duCatDomains: {Bytes: 50 * 1024 * 1024 * 1024, Files: 200},
+			duCatHistory: {Bytes: 30 * 1024 * 1024 * 1024, Files: 150},
+			duCatBlocks:  {Bytes: 20 * 1024 * 1024 * 1024, Files: 150},
+		},
+		Estimates: []duEstimate{
+			{Mode: "archive", TotalBytes: 100 * 1024 * 1024 * 1024, Delta: 0, BlocksDesc: "all blocks", HistoryDesc: "all history"},
+			{Mode: "full", TotalBytes: 80 * 1024 * 1024 * 1024, Delta: -20 * 1024 * 1024 * 1024, BlocksDesc: "all blocks", HistoryDesc: "last 100k"},
+		},
+	}
+
+	var buf bytes.Buffer
+	duFormatHuman(&buf, result)
+	out := buf.String()
+
+	// Check header line.
+	require.True(t, strings.Contains(out, "mainnet"), "should contain chain name")
+	require.True(t, strings.Contains(out, "archive"), "should contain detected mode")
+	require.True(t, strings.Contains(out, "21,500,000"), "should contain formatted block range")
+	require.True(t, strings.Contains(out, "2,048"), "should contain formatted step range")
+
+	// Check breakdown section.
+	require.True(t, strings.Contains(out, "Breakdown"), "should have breakdown header")
+	require.True(t, strings.Contains(out, "domains"), "should list domains category")
+	require.True(t, strings.Contains(out, "history"), "should list history category")
+	require.True(t, strings.Contains(out, "block segments"), "should list block segments category")
+	require.True(t, strings.Contains(out, "total"), "should have total line")
+
+	// Check estimates section.
+	require.True(t, strings.Contains(out, "Estimated Size by Node Type"), "should have estimates header")
+	require.True(t, strings.Contains(out, "all blocks"), "should show blocks description")
+	require.True(t, strings.Contains(out, "last 100k"), "should show history description")
+}
+
+func TestDUFormatHuman_EmptyResult(t *testing.T) {
+	result := duResult{
+		Chain:        "unknown",
+		DetectedMode: "minimal",
+		Categories:   map[string]duCategoryStat{},
+	}
+
+	var buf bytes.Buffer
+	duFormatHuman(&buf, result)
+	out := buf.String()
+
+	require.True(t, strings.Contains(out, "unknown"), "should contain chain name")
+	require.True(t, strings.Contains(out, "total"), "should have total line")
+}
+
+func TestDUFormatJSON(t *testing.T) {
+	result := duResult{
+		Chain:        "mainnet",
+		DetectedMode: "archive",
+		BlockRange:   [2]uint64{0, 21500000},
+		StepRange:    [2]uint64{0, 2048},
+		TotalBytes:   107374182400,
+		TotalFiles:   500,
+		Categories: map[string]duCategoryStat{
+			duCatDomains: {Bytes: 53687091200, Files: 200},
+			duCatHistory: {Bytes: 32212254720, Files: 150},
+		},
+		Estimates: []duEstimate{
+			{Mode: "archive", TotalBytes: 107374182400, Delta: 0, BlocksDesc: "all blocks", HistoryDesc: "all history"},
+		},
+	}
+
+	var buf bytes.Buffer
+	err := duFormatJSON(&buf, result)
+	require.NoError(t, err)
+
+	// Verify valid JSON by unmarshaling.
+	var decoded duResult
+	err = json.Unmarshal(buf.Bytes(), &decoded)
+	require.NoError(t, err)
+
+	require.Equal(t, "mainnet", decoded.Chain)
+	require.Equal(t, "archive", decoded.DetectedMode)
+	require.Equal(t, [2]uint64{0, 21500000}, decoded.BlockRange)
+	require.Equal(t, [2]uint64{0, 2048}, decoded.StepRange)
+	require.Equal(t, int64(107374182400), decoded.TotalBytes)
+	require.Equal(t, 500, decoded.TotalFiles)
+	require.Len(t, decoded.Categories, 2)
+	require.Equal(t, int64(53687091200), decoded.Categories[duCatDomains].Bytes)
+	require.Equal(t, 200, decoded.Categories[duCatDomains].Files)
+	require.Len(t, decoded.Estimates, 1)
+	require.Equal(t, "archive", decoded.Estimates[0].Mode)
+}
+
+func TestDUFormatJSON_EmptyResult(t *testing.T) {
+	result := duResult{
+		Chain:      "unknown",
+		Categories: map[string]duCategoryStat{},
+	}
+
+	var buf bytes.Buffer
+	err := duFormatJSON(&buf, result)
+	require.NoError(t, err)
+
+	var decoded map[string]interface{}
+	err = json.Unmarshal(buf.Bytes(), &decoded)
+	require.NoError(t, err)
+	require.Equal(t, "unknown", decoded["chain"])
+}
+
+func TestDUFormatSize(t *testing.T) {
+	tests := []struct {
+		input    int64
+		expected string
+	}{
+		{0, "0 B"},
+		{512, "512 B"},
+		{1024, "1.0 KB"},
+		{1536, "1.5 KB"},
+		{1048576, "1.0 MB"},
+		{1073741824, "1.0 GB"},
+		{1099511627776, "1.00 TB"},
+		{-1073741824, "-1.0 GB"},
+	}
+
+	for _, tt := range tests {
+		require.Equal(t, tt.expected, duFormatSize(tt.input), "for input %d", tt.input)
+	}
+}
+
+func TestDUFormatNumber(t *testing.T) {
+	tests := []struct {
+		input    uint64
+		expected string
+	}{
+		{0, "0"},
+		{999, "999"},
+		{1000, "1,000"},
+		{21500000, "21,500,000"},
+		{1000000000, "1,000,000,000"},
+	}
+
+	for _, tt := range tests {
+		require.Equal(t, tt.expected, duFormatNumber(tt.input), "for input %d", tt.input)
+	}
 }

@@ -144,13 +144,13 @@ Files are classified by **directory** and **filename content**:
 **Files:**
 - Modify: `cmd/utils/app/snapshots_cmd.go`
 
-- [ ] Define `duResult` struct aggregating all output data: chain, mode, ranges, categories map, estimates slice, totals
-- [ ] Implement `duFormatHuman(w io.Writer, result duResult)` — prints the formatted human-readable output (header line, breakdown table sorted by size, estimates table)
-- [ ] Implement `duFormatJSON(w io.Writer, result duResult) error` — marshals to JSON
-- [ ] Implement `duAggregateCategories(files []duFileInfo) map[string]duCategoryStat` with `{Bytes int64, Files int}` per category
-- [ ] Write tests for human output format (check key lines present)
-- [ ] Write tests for JSON output (unmarshal and verify fields)
-- [ ] Run tests — must pass before task 4
+- [x] Define `duResult` struct aggregating all output data: chain, mode, ranges, categories map, estimates slice, totals
+- [x] Implement `duFormatHuman(w io.Writer, result duResult)` — prints the formatted human-readable output (header line, breakdown table sorted by size, estimates table)
+- [x] Implement `duFormatJSON(w io.Writer, result duResult) error` — marshals to JSON
+- [x] Implement `duAggregateCategories(files []duFileInfo) map[string]duCategoryStat` with `{Bytes int64, Files int}` per category
+- [x] Write tests for human output format (check key lines present)
+- [x] Write tests for JSON output (unmarshal and verify fields)
+- [x] Run tests — must pass before task 4
 
 ### Task 4: Wire up CLI subcommand
 
