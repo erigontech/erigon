@@ -357,6 +357,24 @@ func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path Acco
 		} else {
 			valid = checkVersion(version, rr.Version())
 		}
+
+		// Cross-check: an AddressPath read (record-level) must also be
+		// validated against field-level writes (BalancePath, NoncePath).
+		// A prior TX's finalize may have written BalancePath (e.g. fee
+		// adjustment) at a newer version than the AddressPath entry this
+		// read came from. Without this check, the stale balance in the
+		// AddressPath record passes validation.
+		if valid == VersionValid && path == AddressPath {
+			for _, fieldPath := range []AccountPath{BalancePath, NoncePath} {
+				fieldRR := vm.Read(addr, fieldPath, accounts.NilKey, txIndex)
+				if fieldRR.Status() == MVReadResultDone {
+					if fv := checkVersion(version, fieldRR.Version()); fv != VersionValid {
+						valid = fv
+						break
+					}
+				}
+			}
+		}
 	case MVReadResultDependency:
 		valid = VersionInvalid
 	case MVReadResultNone:
@@ -381,14 +399,15 @@ func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path Acco
 					valid = vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
 						version, checkVersion, traceInvalid, tracePrefix)
 
-					// If a prior tx created this account, BalancePath will
-					// have an entry at a lower txIndex (from BAL pre-population
-					// or worker flush). A nil AddressPath read from storage
-					// is then stale and must be invalidated.
+					// If a prior tx wrote BalancePath or NoncePath for this
+					// account, an AddressPath read from storage is stale.
 					if valid == VersionValid {
-						balRR := vm.Read(addr, BalancePath, accounts.NilKey, txIndex)
-						if balRR.Status() == MVReadResultDone {
-							valid = VersionInvalid
+						for _, fp := range []AccountPath{BalancePath, NoncePath} {
+							fpRR := vm.Read(addr, fp, accounts.NilKey, txIndex)
+							if fpRR.Status() == MVReadResultDone {
+								valid = VersionInvalid
+								break
+							}
 						}
 					}
 				}

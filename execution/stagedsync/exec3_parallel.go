@@ -79,24 +79,6 @@ rwloop does:
 When rwLoop has nothing to do - it does Prune, or flush of WAL to RwTx (agg.rotate+agg.Flush)
 */
 
-// DEBUG: serial reference gas totals per block for assertion.
-// Generated from serial execution trace of blocks 24363950-24364100.
-var serialBlockGasRef = map[uint64]uint64{
-	24363950: 21274334, 24363951: 44022492, 24363952: 35717958, 24363953: 29089742,
-	24363954: 19977679, 24363955: 17418766, 24363956: 32717695, 24363957: 30743903,
-	24363958: 21843562, 24363959: 16326188, 24363960: 46683424, 24363961: 32110651,
-	24363962: 32274894, 24363963: 40534720, 24363964: 35700964, 24363965: 29486770,
-	24363966: 30405391, 24363967: 28313820, 24363968: 16867027, 24363969: 46339872,
-	24363970: 36618725, 24363971: 33270569, 24363972: 20784343, 24363973: 17021575,
-	24363974: 51563966, 24363975: 25335229, 24363976: 30815031, 24363977: 21538983,
-	24363978: 17214497, 24363979: 48389686, 24363980: 18085301, 24363981: 36282892,
-	24363982: 37136177, 24363983: 7693478, 24363984: 22861125, 24363985: 22159231,
-	24363986: 52291237, 24363987: 32459650, 24363988: 37955717, 24363989: 27394700,
-	24363990: 47163825, 24363991: 31422171, 24363992: 28819592, 24363993: 28353627,
-	24363994: 24203677, 24363995: 21264132, 24363996: 23521617, 24363997: 29239126,
-	24363998: 25292718, 24363999: 24089380, 24364000: 11788812,
-}
-
 type parallelExecutor struct {
 	txExecutor
 	execWorkers    []*exec.Worker
@@ -1853,6 +1835,18 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					// + fees) when reading via the version map fallback
 					// chain.
 					be.versionMap.FlushVersionedWrites(merged, true, "")
+
+					// Update CollectorWrites with fee-adjusted coinbase balance
+					// so the BlockStateCache sees the correct accumulated fees.
+					if txResult.CollectorWrites != nil {
+						for _, w := range addWrites {
+							if w.Path == state.BalancePath {
+								if bal, ok := w.Val.(uint256.Int); ok {
+									txResult.CollectorWrites = txResult.CollectorWrites.SetBalance(w.Address, bal, w.Reason)
+								}
+							}
+						}
+					}
 				}
 
 				// Use pre-computed collector writes from finalizeDirect
@@ -1969,31 +1963,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		isPartial := len(be.tasks) > 0 && be.tasks[0].Version().TxIndex != -1
 
 		txTask := be.tasks[len(be.tasks)-1].Task
-
-		// DEBUG: block-level gas assertion against serial reference.
-		if expected, ok := serialBlockGasRef[be.blockNum]; ok {
-			if be.blockGasUsed != expected {
-				// Check sd.mem for 0x6be457 balance
-				addrKey := [20]byte{0x6b, 0xe4, 0x57, 0xe0, 0x40, 0x92, 0xb2, 0x88, 0x65, 0xe0, 0xcb, 0xa8, 0x4e, 0x3b, 0x2c, 0xfa, 0x0f, 0x87, 0x1e, 0x67}
-				enc, _, _ := pe.rs.Domains().GetLatest(kv.AccountsDomain, applyTx, addrKey[:])
-				var checkAcc accounts.Account
-				if len(enc) > 0 {
-					accounts.DeserialiseV3(&checkAcc, enc)
-				}
-				// Also check BlockStateCache
-				var cacheBalance string
-				if cacheEnc, ok := be.blockStateCache.GetCurrentAccount(accounts.InternAddress(addrKey)); ok {
-					var ca accounts.Account
-					accounts.DeserialiseV3(&ca, cacheEnc)
-					cacheBalance = ca.Balance.String()
-				} else {
-					cacheBalance = "NOT_IN_CACHE"
-				}
-				pe.logger.Error(fmt.Sprintf("[%s] BLOCK GAS MISMATCH block=%d expected=%d actual=%d diff=%d sd.mem_6be457=%s cache_6be457=%s",
-					pe.logPrefix, be.blockNum, expected, be.blockGasUsed, int64(be.blockGasUsed)-int64(expected),
-					checkAcc.Balance.String(), cacheBalance))
-			}
-		}
 
 		var receipts types.Receipts
 		for _, txResult := range be.results {
