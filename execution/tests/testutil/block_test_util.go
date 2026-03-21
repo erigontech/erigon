@@ -770,50 +770,56 @@ func (bt *BlockTest) runLightweight(t *testing.T) error {
 		var execErr error
 
 		if isExpectedInvalid(b) {
-			// Execute on a nested overlay so we can discard state changes
-			// if the block turns out to be invalid.
+			// Execute on a nested overlay so we can discard state changes.
 			blockOverlay, blockOverlayErr := membatchwithdb.NewMemoryBatch(overlay, "", logger)
 			if blockOverlayErr != nil {
 				return fmt.Errorf("block #%v NewMemoryBatch: %w", cb.Number(), blockOverlayErr)
 			}
 			stateReader := state.NewReaderV3(blockOverlay)
 			stateWriter := state.NewWriter(blockOverlay, nil, txNum)
-			stateWriter.ForceWrites = true
 
-			if header.BlockAccessListHash != nil {
-				// Use VersionedIO tracking to detect BAL mismatches.
-				var vio *state.VersionedIO
-				execResult, vio, execErr = executeBlockWithIO(
-					config, blockHashFunc, engine, cb,
-					stateReader, stateWriter, cr, logger,
+			// First try: execute without VersionMap (preserves correct behavior).
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						execErr = fmt.Errorf("panic during block execution: %v", r)
+					}
+				}()
+				execResult, execErr = protocol.ExecuteBlockEphemerally(
+					config, &vm.Config{},
+					blockHashFunc, engine, cb,
+					stateReader, stateWriter,
+					cr, nil,
+					logger,
 				)
-				if execErr == nil && vio != nil {
+			}()
+			if execErr != nil {
+				blockOverlay.Close()
+				continue // expected-invalid block correctly rejected
+			}
+
+			// Execution succeeded — check BAL hash if present.
+			if header.BlockAccessListHash != nil {
+				// Re-execute with VersionedIO on a fresh overlay to compute BAL.
+				blockOverlay.Close()
+				balOverlay, balErr := membatchwithdb.NewMemoryBatch(overlay, "", logger)
+				if balErr != nil {
+					return fmt.Errorf("block #%v BAL overlay: %w", cb.Number(), balErr)
+				}
+				balReader := state.NewReaderV3(balOverlay)
+				balWriter := state.NewWriter(balOverlay, nil, txNum)
+				balWriter.ForceWrites = true
+				_, vio, balExecErr := executeBlockWithIO(
+					config, blockHashFunc, engine, cb,
+					balReader, balWriter, cr, logger,
+				)
+				balOverlay.Close()
+				if balExecErr == nil && vio != nil {
 					computedBAL := vio.AsBlockAccessList()
-					computedHash := computedBAL.Hash()
-					if computedHash != *header.BlockAccessListHash {
-						blockOverlay.Close()
-						continue // correctly rejected as invalid
+					if computedBAL.Hash() != *header.BlockAccessListHash {
+						continue // correctly rejected: BAL mismatch
 					}
 				}
-			} else {
-				func() {
-					defer func() {
-						if r := recover(); r != nil {
-							execErr = fmt.Errorf("panic during block execution: %v", r)
-						}
-					}()
-					execResult, execErr = protocol.ExecuteBlockEphemerally(
-						config, &vm.Config{},
-						blockHashFunc, engine, cb,
-						stateReader, stateWriter,
-						cr, nil,
-						logger,
-					)
-				}()
-			}
-			blockOverlay.Close() // always discard — block was expected invalid
-			if execErr != nil {
-				continue // expected-invalid block failed execution — correct
 			}
 			// Block succeeded but should have failed.
 			return fmt.Errorf("block (index %d) insertion should have failed due to: %v", bi, b.ExpectException)
