@@ -689,6 +689,10 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		fmt.Printf("%d (%d.%d) Fees %x: tipped: %d, burnt: %d, price: %d, gas: %d\n", st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), &tipAmount, &burnAmount, st.gasPrice, st.txnGasUsed)
 	}
 
+	if st.state.BlockNumber() == 2451957 {
+		fmt.Printf("[DEBUG-2451957] txIdx=%d from=%x gasLimit=%d txnGasUsed=%d txnGasUsedB4Refunds=%d floorGasCost=%d imdGasRegular=%d vmerr=%v\n",
+			st.state.TxIndex(), st.msg.From(), st.msg.Gas(), st.txnGasUsed, st.txnGasUsedB4Refunds, intrinsicGasResult.FloorGasCost, imdGas.Regular, vmerr)
+	}
 	result = &evmtypes.ExecutionResult{
 		ReceiptGasUsed:      st.txnGasUsed,
 		BlockRegularGasUsed: st.blockRegularGasUsed,
