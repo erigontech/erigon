@@ -46,7 +46,7 @@ require (
 	github.com/erigontech/fastkeccak v0.1.1-0.20260222164035-95925bf94241
 	github.com/ethereum/go-bigmodexpfix v0.0.0-20250911101455-f9e208c548ab
 	github.com/felixge/fgprof v0.9.5
-	github.com/go-chi/chi/v5 v5.2.3
+	github.com/go-chi/chi/v5 v5.2.5
 	github.com/go-chi/cors v1.2.2
 	github.com/go-echarts/go-echarts/v2 v2.6.7
 	github.com/go-quicktest/qt v1.101.0
