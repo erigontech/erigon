@@ -3214,11 +3214,11 @@ func duWalkSnapshots(dirs datadir.Dirs) ([]duFileInfo, error) {
 
 // duEstimate holds estimated disk usage for a particular node type (archive/full/minimal).
 type duEstimate struct {
-	Mode        string
-	TotalBytes  int64
-	Delta       int64
-	BlocksDesc  string
-	HistoryDesc string
+	Mode        string `json:"mode"`
+	TotalBytes  int64  `json:"total_bytes"`
+	Delta       int64  `json:"delta"`
+	BlocksDesc  string `json:"blocks_desc"`
+	HistoryDesc string `json:"history_desc"`
 }
 
 // duComputeEstimates computes estimated sizes for archive/full/minimal modes
@@ -3227,6 +3227,12 @@ type duEstimate struct {
 // maxStep is the highest step number across all state files.
 func duComputeEstimates(files []duFileInfo, maxBlock, maxStep uint64) []duEstimate {
 	pruneDistance := uint64(config3.DefaultPruneDistance)
+	// State files use step ranges, not block ranges. Convert prune distance
+	// to step units so the comparison is meaningful (DefaultStepSize blocks per step).
+	stepPruneDistance := pruneDistance / config3.DefaultStepSize
+	if stepPruneDistance == 0 {
+		stepPruneDistance = 1
+	}
 
 	var archiveTotal, fullTotal, minimalTotal int64
 
@@ -3239,7 +3245,7 @@ func duComputeEstimates(files []duFileInfo, maxBlock, maxStep uint64) []duEstima
 		case duCatCommitHist, duCatRcache:
 			includeInFull = false
 		case duCatHistory, duCatInvIdx:
-			if f.IsState && f.To > 0 && maxStep > pruneDistance && f.To <= maxStep-pruneDistance {
+			if f.IsState && f.To > 0 && maxStep > stepPruneDistance && f.To <= maxStep-stepPruneDistance {
 				includeInFull = false
 			}
 		}
@@ -3330,20 +3336,6 @@ func duAggregateCategories(files []duFileInfo) map[string]duCategoryStat {
 		cats[f.Category] = s
 	}
 	return cats
-}
-
-// duCategoryOrder defines the display order for categories (largest-first is typical,
-// but we sort by size at render time).
-var duCategoryOrder = []string{
-	duCatDomains,
-	duCatHistory,
-	duCatBlocks,
-	duCatAccessors,
-	duCatInvIdx,
-	duCatCommitHist,
-	duCatCaplin,
-	duCatRcache,
-	duCatOther,
 }
 
 // duFormatSize formats bytes into a human-readable string (e.g., "420.3 GB").
@@ -3452,14 +3444,19 @@ func duFormatJSON(w io.Writer, result duResult) error {
 // doDU implements the "erigon seg du" subcommand.
 func doDU(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	// Resolve chain name from chaindata (best-effort, fall back to "unknown").
+	// Use recover because both MustOpen and fromdb.ChainConfig can panic
+	// (e.g., DB locked by running node, corrupted/empty chaindata).
 	chainName := "unknown"
 	if _, err := os.Stat(dirs.Chaindata); err == nil {
-		chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
-		defer chainDB.Close()
-		cc := fromdb.ChainConfig(chainDB)
-		if cc != nil && cc.ChainName != "" {
-			chainName = cc.ChainName
-		}
+		func() {
+			defer func() { recover() }() //nolint:errcheck
+			chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+			defer chainDB.Close()
+			cc := fromdb.ChainConfig(chainDB)
+			if cc != nil && cc.ChainName != "" {
+				chainName = cc.ChainName
+			}
+		}()
 	}
 
 	// Walk snapshot files.

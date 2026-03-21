@@ -564,10 +564,9 @@ func TestDUComputeEstimates(t *testing.T) {
 	// - old and new block segments
 	// - caplin (always kept)
 	//
-	// maxStep=200, maxBlock=500000, pruneDistance=100000
-	// State prune cutoff: step <= 200-100000 → negative, so no state pruned (steps are small).
-	// Let's use larger ranges: maxStep=200000, maxBlock=500000.
-	// State prune cutoff: step To <= 200000-100000 = 100000 → old
+	// maxStep=200000, maxBlock=500000
+	// stepPruneDistance = DefaultPruneDistance/DefaultStepSize = 100000/1562500 → 1 (clamped)
+	// State prune cutoff: step To <= 200000-1 = 199999 → files with To < maxStep are pruned
 	// Block prune cutoff: block To <= 500000-100000 = 400000 → old
 
 	files := []duFileInfo{
