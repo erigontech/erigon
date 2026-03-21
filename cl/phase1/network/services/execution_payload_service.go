@@ -139,7 +139,12 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 		s.queuePendingEnvelope(beaconBlockRoot, signedEnvelope)
 		// Also store in forkchoice's pendingEnvelopes so OnBlock can process it immediately
 		// when the block arrives, instead of waiting for the 100ms polling loop.
-		s.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, false, false)
+		// validatePayload must be true: if the block arrives (via OnBlock) before this call
+		// acquires f.mu, the envelope will be applied with validatePayload — ensuring
+		// NewPayload is sent to the EL. With false, a mutex-contention race silently
+		// marks the envelope as processed without ever notifying the EL, permanently
+		// breaking the chain.
+		s.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, false, true)
 		log.Debug("Queued execution payload envelope for later processing",
 			"beaconBlockRoot", beaconBlockRoot,
 			"builderIndex", builderIndex)

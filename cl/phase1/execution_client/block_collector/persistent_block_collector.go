@@ -194,7 +194,12 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 				continue
 			}
 			if prevBlockNum > 0 && block.NumberU64() != prevBlockNum+1 {
-				panic(fmt.Sprintf("assert: BlockCollector inserting gap: %d -> %d. To fix try: `rm datadir/caplin/history datadir/chaindata`", prevBlockNum, block.NumberU64()))
+				// Gap detected — flush what we have so far and stop.
+				// This can happen when pending EL payloads arrive out of order
+				// (e.g. EL was behind and blocks were queued non-sequentially).
+				p.logger.Warn("[BlockCollector] gap detected in collector, flushing partial batch",
+					"prevBlock", prevBlockNum, "nextBlock", block.NumberU64())
+				break
 			}
 			prevBlockNum = block.NumberU64()
 			blocksBatch = append(blocksBatch, block)

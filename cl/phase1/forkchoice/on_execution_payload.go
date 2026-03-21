@@ -40,6 +40,12 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 )
 
+// errELBehind is returned by validatePayloadWithEL when the EL cannot process
+// the payload because it hasn't caught up yet (e.g. parent block not available).
+// applyEnvelope treats this as non-fatal: it proceeds with CL state transition
+// and queues the execution block for later EL insertion.
+var errELBehind = errors.New("EL behind: payload not processable yet")
+
 // validateEnvelopeAgainstBlock validates the envelope against the block and state.
 // This includes:
 //   - bid matching (slot, builder_index, block_hash)
@@ -243,6 +249,17 @@ func (f *ForkChoiceStore) validatePayloadWithEL(
 	f.executionPayloadStatus.Add(executionBlockHash, payloadStatus)
 
 	switch payloadStatus {
+	case execution_client.PayloadStatusNone:
+		// EL could not process the block (e.g. parent not yet available because
+		// EL is still catching up after forward sync).  Return errELBehind so that
+		// applyEnvelope can proceed with CL state transition and save the envelope,
+		// while queuing the execution block for later insertion into EL.
+		log.Warn("validatePayloadWithEL: EL could not process payload (EL behind)",
+			"beaconBlockRoot", beaconBlockRoot, "blockHash", executionBlockHash, "err", err)
+		if optErr := f.optimisticStore.AddOptimisticCandidate(block.Block); optErr != nil {
+			return fmt.Errorf("failed to add block to optimistic store: %v", optErr)
+		}
+		return errELBehind
 	case execution_client.PayloadStatusNotValidated:
 		log.Debug("validatePayloadWithEL: payload is not validated yet", "beaconBlockRoot", beaconBlockRoot)
 		// optimistic block candidate
@@ -324,9 +341,18 @@ func (f *ForkChoiceStore) applyEnvelope(ctx context.Context, signedEnvelope *clt
 	}
 
 	// Validate payload with EL
+	var elBehind bool
 	if validatePayload {
 		if err := f.validatePayloadWithEL(ctx, envelope, block, common.Hash(beaconBlockRoot)); err != nil {
-			return false, err
+			if errors.Is(err, errELBehind) {
+				// EL is behind (e.g. parent block not yet available after forward sync).
+				// Proceed with CL state transition and persist the envelope so that
+				// getState() replay won't hit missing segments.  The execution block
+				// will be fed to EL via blockCollector on the next Flush().
+				elBehind = true
+			} else {
+				return false, err
+			}
 		}
 	}
 
@@ -343,6 +369,11 @@ func (f *ForkChoiceStore) applyEnvelope(ctx context.Context, signedEnvelope *clt
 	// Persist envelope to disk
 	if err := f.forkGraph.DumpEnvelopeOnDisk(beaconBlockRoot, signedEnvelope); err != nil {
 		return false, fmt.Errorf("OnExecutionPayload: failed to dump envelope: %w", err)
+	}
+
+	// If EL was behind, queue the block+envelope for later EL insertion.
+	if elBehind {
+		f.addPendingELPayload(block, signedEnvelope)
 	}
 
 	return true, nil
