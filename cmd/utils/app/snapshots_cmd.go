@@ -143,6 +143,18 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
+			Name:  "du",
+			Usage: "Report snapshot disk usage by category with estimated sizes per node type",
+			Action: func(c *cli.Context) error {
+				dirs := datadir.New(c.String(utils.DataDirFlag.Name))
+				return doDU(c, dirs)
+			},
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.BoolFlag{Name: "json", Usage: "Output in JSON format"},
+			}),
+		},
+		{
 			Name:    "accessor",
 			Aliases: []string{"index"},
 			Action: func(c *cli.Context) error {
@@ -3435,4 +3447,67 @@ func duFormatJSON(w io.Writer, result duResult) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(result)
+}
+
+// doDU implements the "erigon seg du" subcommand.
+func doDU(cliCtx *cli.Context, dirs datadir.Dirs) error {
+	// Resolve chain name from chaindata (best-effort, fall back to "unknown").
+	chainName := "unknown"
+	if _, err := os.Stat(dirs.Chaindata); err == nil {
+		chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+		defer chainDB.Close()
+		cc := fromdb.ChainConfig(chainDB)
+		if cc != nil && cc.ChainName != "" {
+			chainName = cc.ChainName
+		}
+	}
+
+	// Walk snapshot files.
+	files, err := duWalkSnapshots(dirs)
+	if err != nil {
+		return fmt.Errorf("walking snapshots: %w", err)
+	}
+
+	// Compute ranges.
+	var maxBlock, maxStep uint64
+	for _, f := range files {
+		if f.IsState {
+			if f.To > maxStep {
+				maxStep = f.To
+			}
+		} else if f.Category == duCatBlocks {
+			if f.To > maxBlock {
+				maxBlock = f.To
+			}
+		}
+	}
+
+	// Build result.
+	cats := duAggregateCategories(files)
+	estimates := duComputeEstimates(files, maxBlock, maxStep)
+
+	var totalBytes int64
+	var totalFiles int
+	for _, s := range cats {
+		totalBytes += s.Bytes
+		totalFiles += s.Files
+	}
+
+	result := duResult{
+		Chain:        chainName,
+		DetectedMode: duDetectNodeType(files),
+		BlockRange:   [2]uint64{0, maxBlock},
+		StepRange:    [2]uint64{0, maxStep},
+		TotalBytes:   totalBytes,
+		TotalFiles:   totalFiles,
+		Categories:   cats,
+		Estimates:    estimates,
+	}
+
+	// Output.
+	if cliCtx.Bool("json") {
+		return duFormatJSON(os.Stdout, result)
+	}
+	duFormatHuman(os.Stdout, result)
+	return nil
 }

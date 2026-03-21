@@ -157,13 +157,13 @@ Files are classified by **directory** and **filename content**:
 **Files:**
 - Modify: `cmd/utils/app/snapshots_cmd.go`
 
-- [ ] Register `du` subcommand in `snapshotCommand.Subcommands` with `--datadir` and `--json` flags (follow `ls` pattern, no file locking)
-- [ ] Implement `doDU(cliCtx *cli.Context) error` — orchestrates: open chaindata for chain name, walk snapshots, compute estimates, format output
-- [ ] Handle missing/empty datadir gracefully (clear error message)
-- [ ] Handle datadir with no snapshots (print zeros)
-- [ ] Run `make lint` — fix issues
-- [ ] Run `go test ./cmd/utils/app/... -run DU` — must pass
-- [ ] Run `make erigon` — must compile
+- [x] Register `du` subcommand in `snapshotCommand.Subcommands` with `--datadir` and `--json` flags (follow `ls` pattern, no file locking)
+- [x] Implement `doDU(cliCtx *cli.Context) error` — orchestrates: open chaindata for chain name, walk snapshots, compute estimates, format output
+- [x] Handle missing/empty datadir gracefully (clear error message)
+- [x] Handle datadir with no snapshots (print zeros)
+- [x] Run `make lint` — fix issues
+- [x] Run `go test ./cmd/utils/app/... -run DU` — must pass
+- [x] Run `make erigon` — must compile
 
 ### Task 5: Verify acceptance criteria
 
