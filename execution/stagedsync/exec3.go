@@ -359,7 +359,7 @@ func ExecV3(ctx context.Context,
 	lastCommitedStep := kv.Step((lastCommittedTxNum) / doms.StepSize())
 	lastFrozenStep := applyTx.StepsInFiles(kv.CommitmentDomain)
 
-	if lastCommitedStep > 0 && lastCommitedStep <= lastFrozenStep && !dbg.DiscardCommitment() {
+	if lastCommitedStep > 0 && lastCommitedStep < lastFrozenStep && !dbg.DiscardCommitment() {
 		logger.Warn("["+execStage.LogPrefix()+"] can't persist comittement: txn step frozen",
 			"block", lastCommittedBlockNum, "txNum", lastCommittedTxNum, "step", lastCommitedStep,
 			"lastFrozenStep", lastFrozenStep, "lastFrozenTxNum", ((lastFrozenStep+1)*kv.Step(doms.StepSize()))-1)
