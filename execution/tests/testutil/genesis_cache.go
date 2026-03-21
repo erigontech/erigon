@@ -57,6 +57,10 @@ func allocHasSystemContracts(g *types.Genesis) bool {
 	return false
 }
 
+// originalTmpDir captures the system temp dir before RunTestMain overrides
+// it with a ramdisk. Genesis cache DBs use this to avoid consuming ramdisk.
+var originalTmpDir = os.TempDir()
+
 // genesisCacheEntry holds a cached genesis DB and its genesis block.
 type genesisCacheEntry struct {
 	db      kv.TemporalRwDB
@@ -177,7 +181,7 @@ func createGenesisDB(key string, gspec *types.Genesis) (kv.TemporalRwDB, *types.
 	logger := log.New()
 	logger.SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
-	dir, err := os.MkdirTemp("", "erigon-genesis-")
+	dir, err := os.MkdirTemp(originalTmpDir, "erigon-genesis-")
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("genesis cache: temp dir: %w", err)
 	}
@@ -308,27 +312,8 @@ func getOrCreateGenesisDB(fork string, gspec *types.Genesis) (kv.TemporalRwDB, *
 	return db, genesis, func() { releaseGenesisDB(key) }, nil
 }
 
-var cleanupOnce sync.Once
-
-// registerGenesisCacheCleanup ensures cleanup is registered exactly once.
-// When t is nil (CLI usage), cleanup is skipped — the process exits anyway.
-func registerGenesisCacheCleanup(t *testing.T) {
-	if t == nil {
-		return
-	}
-	cleanupOnce.Do(func() {
-		t.Cleanup(func() {
-			genesisDBMu.Lock()
-			defer genesisDBMu.Unlock()
-			for key, e := range genesisDBCache {
-				if e.db != nil {
-					e.db.Close()
-				}
-				for _, d := range e.dirs {
-					dirutil.RemoveAll(d)
-				}
-				delete(genesisDBCache, key)
-			}
-		})
-	})
-}
+// registerGenesisCacheCleanup is a no-op. Genesis cache DBs are cleaned up
+// by LRU eviction during the test run and by process exit at the end.
+// Previous versions registered t.Cleanup on a subtest, which raced with
+// sibling subtests running in parallel ("db closed" errors).
+func registerGenesisCacheCleanup(_ *testing.T) {}
