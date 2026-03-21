@@ -3105,6 +3105,7 @@ const (
 	duCatCaplin     = "caplin"
 	duCatCommitHist = "commitment hist"
 	duCatRcache     = "rcache"
+	duCatForkable   = "forkable"
 	duCatOther      = "other"
 )
 
@@ -3146,6 +3147,8 @@ func duClassifyFile(dir, name string) string {
 		return duCatAccessors
 	case "caplin":
 		return duCatCaplin
+	case "forkable":
+		return duCatForkable
 	}
 
 	// Files directly under snapshots/ — only known segment extensions are block segments.
@@ -3170,6 +3173,7 @@ func duWalkSnapshots(dirs datadir.Dirs) ([]duFileInfo, error) {
 		{dirs.SnapIdx, true},
 		{dirs.SnapAccessors, true},
 		{dirs.SnapCaplin, false},
+		{dirs.SnapForkable, false},
 		{dirs.Snap, false}, // top-level snapshots/ for block segments
 	}
 
