@@ -335,9 +335,6 @@ func gasCreateEip3860(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 	if overflow {
 		return mdgas.MdGas{}, ErrGasUintOverflow
 	}
-	if evm.chainRules.IsAmsterdam {
-		gas.State += params.StateBytesNewAccount * evm.Context.CostPerStateByte
-	}
 	return gas, nil
 }
 
@@ -360,9 +357,48 @@ func gasCreate2Eip3860(evm *EVM, callContext *CallContext, availableGas mdgas.Md
 	if overflow {
 		return mdgas.MdGas{}, ErrGasUintOverflow
 	}
-	if evm.chainRules.IsAmsterdam {
-		gas.State += params.StateBytesNewAccount * evm.Context.CostPerStateByte
+	return gas, nil
+}
+
+// gasCreateEip8037 is the dynamic gas function for CREATE under EIP-8037.
+// GAS_CREATE is a pre-state cost that must always be charged, so the initcode
+// size is capped (not rejected) here; the actual check happens in opCreate.
+func gasCreateEip8037(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (gas mdgas.MdGas, err error) {
+	gas.Regular, err = memoryGasCost(callContext, memorySize)
+	if err != nil {
+		return mdgas.MdGas{}, err
 	}
+	size, overflow := callContext.Stack.Back(2).Uint64WithOverflow()
+	if overflow {
+		return mdgas.MdGas{}, ErrGasUintOverflow
+	}
+	wordSize := min(size, params.MaxInitCodeSizeAmsterdam)
+	wordGas := params.InitCodeWordGas * ToWordSize(wordSize)
+	gas.Regular, overflow = math.SafeAdd(gas.Regular, wordGas)
+	if overflow {
+		return mdgas.MdGas{}, ErrGasUintOverflow
+	}
+	gas.State = params.StateBytesNewAccount * evm.Context.CostPerStateByte
+	return gas, nil
+}
+
+// gasCreate2Eip8037 is the dynamic gas function for CREATE2 under EIP-8037.
+func gasCreate2Eip8037(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (gas mdgas.MdGas, err error) {
+	gas.Regular, err = memoryGasCost(callContext, memorySize)
+	if err != nil {
+		return mdgas.MdGas{}, err
+	}
+	size, overflow := callContext.Stack.Back(2).Uint64WithOverflow()
+	if overflow {
+		return mdgas.MdGas{}, ErrGasUintOverflow
+	}
+	wordSize := min(size, params.MaxInitCodeSizeAmsterdam)
+	wordGas := (params.InitCodeWordGas + params.Keccak256WordGas) * ToWordSize(wordSize)
+	gas.Regular, overflow = math.SafeAdd(gas.Regular, wordGas)
+	if overflow {
+		return mdgas.MdGas{}, ErrGasUintOverflow
+	}
+	gas.State = params.StateBytesNewAccount * evm.Context.CostPerStateByte
 	return gas, nil
 }
 
