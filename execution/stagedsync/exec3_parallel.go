@@ -862,7 +862,6 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	}
 
 	pe.execLoopGroup.Go(func() error {
-		defer pe.rws.Close()
 		defer pe.in.Close()
 		pe.resetWorkers(execLoopCtx, pe.rs, nil)
 		return pe.execLoop(execLoopCtx)
@@ -890,6 +889,7 @@ func (pe *parallelExecutor) wait(ctx context.Context) error {
 				return
 			}
 			pe.waitWorkers()
+			pe.rws.Close()
 		}
 		doneCh <- nil
 	}()
