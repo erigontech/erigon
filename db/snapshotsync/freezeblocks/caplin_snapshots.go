@@ -638,6 +638,17 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 	if err != nil {
 		return err
 	}
+
+	//TODO: to walk over dirtyFiles and to use `.IsIndexed()` method - like in Block-Snapshots
+	des, err := os.ReadDir(s.dir)
+	if err != nil {
+		return err
+	}
+	dirEntries := make([]string, len(des))
+	for i, de := range des {
+		dirEntries[i] = de.Name()
+	}
+
 	noneDone := true
 	for index := range segments {
 		segment := segments[index]
@@ -645,7 +656,7 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 		if segment.Type.Enum() != snaptype.CaplinEnums.BeaconBlocks && segment.Type.Enum() != snaptype.CaplinEnums.BlobSidecars {
 			continue
 		}
-		if segment.Type.HasIndexFiles(segment, logger) {
+		if segment.Type.HasIndexFiles(segment, dirEntries, logger) {
 			continue
 		}
 		p := &background.Progress{}
