@@ -1416,17 +1416,46 @@ func (result *execResult) finalizeTxSimple(
 	blockNum := task.Version().BlockNum
 	txIndex := task.Version().TxIndex
 
-	// Read correct coinbase base from the versionMap.
-	vsReader := state.NewVersionedStateReader(txIndex, nil, vm, stateReader)
+	// Read coinbase/burnt base from the versionMap AFTER the worker's TxOut
+	// has been flushed. Use txIndex+1 so versionMap.Read(floor(txIndex))
+	// sees the current TX's execution effects (e.g. ETH transfers to/from
+	// the coinbase during EVM execution).
+	vsReader := state.NewVersionedStateReader(txIndex+1, nil, vm, stateReader)
 
-	// --- Coinbase: base + FeeTipped ---
+	// --- Coinbase: base (including execution effects) + FeeTipped ---
 	coinbaseAcc, err := vsReader.ReadAccountData(result.Coinbase)
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	// Start from the versionMap base (correct accumulated balance from
+	// prior finalizes). If the worker's execution also sent ETH to the
+	// coinbase (via CALL with value), CollectorWrites has the execution-
+	// adjusted balance. We must account for both the execution delta
+	// and the fee tip.
 	var newCoinbaseBalance uint256.Int
 	if coinbaseAcc != nil {
 		newCoinbaseBalance = coinbaseAcc.Balance
+	}
+	// Check if the worker's execution modified the coinbase (e.g., a TX
+	// that sends ETH to the block producer). The execution delta =
+	// CollectorWrites balance - versionMap base.
+	if result.CollectorWrites != nil {
+		for _, w := range result.CollectorWrites {
+			if w.Address == result.Coinbase && w.Path == state.BalancePath {
+				if execBal, ok := w.Val.(uint256.Int); ok {
+					// The worker's execution balance = staleBase + executionDelta
+					// We want: correctBase + executionDelta + tip
+					// executionDelta = execBal - staleBase
+					// But we don't have staleBase. However, since shouldDelayFeeCalc=true,
+					// the worker's base was whatever it read from the versionMap at
+					// execution time. If the TX was validated (reads matched), the
+					// worker's base IS the correct base. So execBal = correctBase + executionDelta.
+					// We just need to add FeeTipped.
+					newCoinbaseBalance = execBal
+				}
+				break
+			}
+		}
 	}
 	newCoinbaseBalance.Add(&newCoinbaseBalance, &result.ExecutionResult.FeeTipped)
 
@@ -1442,6 +1471,17 @@ func (result *execResult) finalizeTxSimple(
 		}
 		if burntAcc != nil {
 			newBurntBalance = burntAcc.Balance
+		}
+		// Check if worker's execution modified the burnt contract
+		if result.CollectorWrites != nil {
+			for _, w := range result.CollectorWrites {
+				if w.Address == burntAddr && w.Path == state.BalancePath {
+					if execBal, ok := w.Val.(uint256.Int); ok {
+						newBurntBalance = execBal
+					}
+					break
+				}
+			}
 		}
 		if txTask.Config.IsLondon(blockNum) {
 			newBurntBalance.Add(&newBurntBalance, &result.ExecutionResult.FeeBurnt)
