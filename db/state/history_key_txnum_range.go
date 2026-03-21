@@ -113,19 +113,17 @@ type HistoryKeyTxNumIterFiles struct {
 	curKey    []byte
 	curIdxVal []byte
 	curSeq    multiencseq.SequenceReader
-	curTxIter stream.U64
+	curTxIter multiencseq.SequenceIterator
+	hasIter   bool
 }
 
 func (hi *HistoryKeyTxNumIterFiles) Close() {
-	if hi.curTxIter != nil {
-		hi.curTxIter.Close()
-		hi.curTxIter = nil
-	}
+	hi.hasIter = false
 }
 
 func (hi *HistoryKeyTxNumIterFiles) advance() error {
 	for {
-		if hi.curTxIter != nil && hi.curTxIter.HasNext() {
+		if hi.hasIter && hi.curTxIter.HasNext() {
 			txNum, err := hi.curTxIter.Next()
 			if err != nil {
 				return err
@@ -136,7 +134,7 @@ func (hi *HistoryKeyTxNumIterFiles) advance() error {
 				return nil
 			}
 			// txNums are ascending — all remaining will also be >= endTxNum
-			hi.curTxIter = nil
+			hi.hasIter = false
 		}
 
 		if hi.h.Len() == 0 {
@@ -164,7 +162,8 @@ func (hi *HistoryKeyTxNumIterFiles) advance() error {
 		hi.curIdxVal = append(hi.curIdxVal[:0], idxVal...)
 
 		hi.curSeq.Reset(top.startTxNum, hi.curIdxVal)
-		hi.curTxIter = hi.curSeq.Iterator(int(hi.startTxNum))
+		hi.curTxIter.Reset(&hi.curSeq, int(hi.startTxNum))
+		hi.hasIter = true
 	}
 }
 

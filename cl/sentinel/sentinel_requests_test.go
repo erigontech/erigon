@@ -138,10 +138,12 @@ func newTestSentinel(t *testing.T, ethClock eth_clock.EthereumClock, reader free
 	networkConfig, beaconConfig := clparams.GetConfigsByNetwork(chainspec.MainnetChainID)
 	pm := newTestP2PManager(t, ethClock)
 	sent, err := New(t.Context(), &SentinelConfig{
-		NetworkConfig: networkConfig,
-		BeaconConfig:  beaconConfig,
-		EnableBlocks:  true,
-		MaxPeerCount:  100,
+		P2PConfig: p2p.P2PConfig{
+			NetworkConfig: networkConfig,
+			BeaconConfig:  beaconConfig,
+			MaxPeerCount:  100,
+		},
+		EnableBlocks: true,
 	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{}, nil, mockPeerDasStateReader, pm)
 	noErr(err)
 	t.Cleanup(func() { sent.Stop() })
