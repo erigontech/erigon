@@ -1213,6 +1213,7 @@ func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, va
 		}
 		g.Reset(0)
 		rs.SetProgress(p)
+
 		for g.HasNext() {
 			word, valPos = g.Next(word[:0])
 			if values {

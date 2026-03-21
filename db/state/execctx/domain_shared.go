@@ -650,6 +650,10 @@ func (sd *SharedDomains) EnableWarmupCache(enable bool) {
 	sd.sdCtx.EnableWarmupCache(enable)
 }
 
+func (sd *SharedDomains) ClearWarmupCache() {
+	sd.sdCtx.ClearWarmupCache()
+}
+
 // SetDeferCommitmentUpdates enables or disables deferred commitment updates.
 // When enabled, commitment branch updates are stored in the commitment context
 // instead of being applied inline, and must be flushed later via FlushPendingUpdates.
