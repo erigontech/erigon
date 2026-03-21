@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -115,10 +116,19 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 		temporalTx := applyTx.AsyncClone(mdbx.NewAsyncRwTx(applyTx.RwTx, 1000))
 		asyncTxChan = temporalTx.ApplyChan()
 		asyncTx = temporalTx
-	case kv.TemporalTx:
-		// MemoryMutation overlay — pure Go, no thread affinity.
-		// No asyncTx needed; exec goroutine reads directly from the overlay.
-		asyncTx = applyTx
+	case *membatchwithdb.MemoryMutation:
+		// MemoryMutation overlay — pure Go, no thread affinity for the in-memory
+		// layer. However, cursor operations on the underlying MdbxTx are NOT
+		// thread-safe. Create an OverlayTemporalReadView with its own independent
+		// RO tx for the executor goroutine, so it doesn't share MDBX cursors
+		// with the apply goroutine. The overlay's in-memory data is still shared
+		// (protected by MemoryMutation's RWMutex).
+		execRoTx, err := pe.cfg.db.BeginTemporalRo(ctx)
+		if err != nil {
+			return nil, rwTx, fmt.Errorf("open RO tx for executor overlay: %w", err)
+		}
+		defer execRoTx.Rollback()
+		asyncTx = applyTx.NewTemporalReadView(execRoTx)
 	default:
 		return nil, rwTx, fmt.Errorf("expected *temporal.RwTx: got %T", rwTx)
 	}

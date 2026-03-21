@@ -988,6 +988,16 @@ func opCreate(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	if evm.ChainRules().IsTangerineWhistle {
 		gas.Regular -= gas.Regular / 64
 	}
+
+	// EIP-7954: check initcode size after gas is charged (by the dynamic gas
+	// function) but before execution. This ensures GAS_CREATE state gas is
+	// always consumed while oversized initcode aborts the caller's frame.
+	if evm.ChainRules().IsAmsterdam {
+		if err := CheckMaxInitCodeSize(uint64(len(input)), evm.ChainRules().IsShanghai, evm.ChainRules().IsAmsterdam); err != nil {
+			return pc, nil, err
+		}
+	}
+
 	// reuse size int for stackvalue
 	stackvalue := size
 
@@ -1045,6 +1055,16 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 
 	// Apply EIP150
 	gas.Regular -= gas.Regular / 64
+
+	// EIP-7954: check initcode size after gas is charged (by the dynamic gas
+	// function) but before execution. This ensures GAS_CREATE state gas is
+	// always consumed while oversized initcode aborts the caller's frame.
+	if evm.ChainRules().IsAmsterdam {
+		if err := CheckMaxInitCodeSize(uint64(len(input)), evm.ChainRules().IsShanghai, evm.ChainRules().IsAmsterdam); err != nil {
+			return pc, nil, err
+		}
+	}
+
 	scope.useGas(gas.Regular, evm.Config().Tracer, tracing.GasChangeCallContractCreation2)
 	// reuse size int for stackvalue
 	stackValue := size
