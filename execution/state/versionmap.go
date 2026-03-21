@@ -360,10 +360,11 @@ func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path Acco
 
 		// Cross-check: an AddressPath read (record-level) must also be
 		// validated against field-level writes (BalancePath, NoncePath).
-		// A prior TX's finalize may have written BalancePath (e.g. fee
-		// adjustment) at a newer version than the AddressPath entry this
-		// read came from. Without this check, the stale balance in the
-		// AddressPath record passes validation.
+		// With split fee logic, the finalize writes coinbase BalancePath
+		// sequentially. Workers with shouldDelayFeeCalc=true don't read
+		// coinbase for fee purposes, so any coinbase AddressPath read in
+		// the ReadSet is a genuine EVM read (BALANCE opcode) that must
+		// be validated against the finalize's BalancePath write.
 		if valid == VersionValid && path == AddressPath {
 			for _, fieldPath := range []AccountPath{BalancePath, NoncePath} {
 				fieldRR := vm.Read(addr, fieldPath, accounts.NilKey, txIndex)
@@ -399,8 +400,8 @@ func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path Acco
 					valid = vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
 						version, checkVersion, traceInvalid, tracePrefix)
 
-					// If a prior tx wrote BalancePath or NoncePath for this
-					// account, an AddressPath read from storage is stale.
+					// Cross-check: if a prior TX's finalize wrote BalancePath
+					// or NoncePath, an AddressPath StorageRead is stale.
 					if valid == VersionValid {
 						for _, fp := range []AccountPath{BalancePath, NoncePath} {
 							fpRR := vm.Read(addr, fp, accounts.NilKey, txIndex)
