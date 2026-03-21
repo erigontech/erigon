@@ -3236,10 +3236,9 @@ func duComputeEstimates(files []duFileInfo, maxBlock, maxStep uint64) []duEstima
 	// prune distance to step units using the observed blocks-per-step ratio.
 	var stepPruneDistance uint64
 	if maxStep > 0 && maxBlock > 0 {
-		blocksPerStep := maxBlock / maxStep
-		if blocksPerStep > 0 {
-			stepPruneDistance = pruneDistance / blocksPerStep
-		}
+		// Use a single division to avoid compounding integer truncation:
+		// pruneDistance * maxStep / maxBlock instead of pruneDistance / (maxBlock / maxStep).
+		stepPruneDistance = pruneDistance * maxStep / maxBlock
 	}
 
 	var archiveTotal, fullTotal, minimalTotal int64
@@ -3253,7 +3252,7 @@ func duComputeEstimates(files []duFileInfo, maxBlock, maxStep uint64) []duEstima
 		case duCatCommitHist, duCatRcache:
 			includeInFull = false
 		case duCatHistory, duCatInvIdx:
-			if f.IsState && f.To > 0 && maxStep > stepPruneDistance && f.To <= maxStep-stepPruneDistance {
+			if f.IsState && stepPruneDistance > 0 && f.To > 0 && maxStep > stepPruneDistance && f.To <= maxStep-stepPruneDistance {
 				includeInFull = false
 			}
 		}

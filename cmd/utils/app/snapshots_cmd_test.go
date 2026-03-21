@@ -569,8 +569,7 @@ func TestDUComputeEstimates(t *testing.T) {
 	// - caplin (always kept)
 	//
 	// maxStep=2000, maxBlock=20_000_000
-	// blocksPerStep = 20_000_000 / 2000 = 10_000
-	// stepPruneDistance = DefaultPruneDistance(100_000) / 10_000 = 10
+	// stepPruneDistance = DefaultPruneDistance(100_000) * 2000 / 20_000_000 = 10
 	// State prune cutoff: step To <= 2000-10 = 1990 → old history/idx pruned
 	// Block prune cutoff: block To <= 20_000_000-100_000 = 19_900_000 → old
 
