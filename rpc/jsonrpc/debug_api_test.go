@@ -467,14 +467,9 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, result, 3)
 
-		// latest block is 11, should work both ways: [11,12) and [11,nil)
-		n2 = rpc.BlockNumber(12)
-		_, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.BlockNumber(11), &n2)
-		require.NoError(t, err)
-		require.Len(t, result, 3)
+		// latest block is 11, nil means single-block query
 		_, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.BlockNumber(11), nil)
 		require.NoError(t, err)
-		require.Len(t, result, 3)
 	})
 	t.Run("invalid input", func(t *testing.T) {
 		n := rpc.BlockNumber(1_000_000)
@@ -483,6 +478,11 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 
 		n = rpc.BlockNumber(11)
 		_, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &n)
+		require.Error(t, err)
+
+		// end block beyond latest is an error (Geth semantics)
+		n2 := rpc.BlockNumber(12)
+		_, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.BlockNumber(11), &n2)
 		require.Error(t, err)
 	})
 }
