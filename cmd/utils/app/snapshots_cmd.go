@@ -146,7 +146,10 @@ var snapshotCommand = cli.Command{
 			Name:  "du",
 			Usage: "Report snapshot disk usage by category with estimated sizes per node type",
 			Action: func(c *cli.Context) error {
-				dirs := datadir.New(c.String(utils.DataDirFlag.Name))
+				dirs := datadir.Open(c.String(utils.DataDirFlag.Name))
+				if _, err := os.Stat(dirs.DataDir); os.IsNotExist(err) {
+					return fmt.Errorf("datadir does not exist: %s", dirs.DataDir)
+				}
 				return doDU(c, dirs)
 			},
 			Flags: joinFlags([]cli.Flag{
@@ -3138,6 +3141,8 @@ func duClassifyFile(dir, name string) string {
 
 	switch ldir {
 	case "domain":
+		// All domain/ files (including accessors like .kvi, .kvei, .bt) are classified
+		// as domains because domain files are never pruned by the snapshot pruning logic.
 		return duCatDomains
 	case "history":
 		return duCatHistory
@@ -3230,11 +3235,27 @@ type duEstimate struct {
 	HistoryDesc string `json:"history_desc"`
 }
 
+// duIsReceiptRelated returns true for files whose pruning follows receipt
+// rules rather than general history rules: rcache, logaddrs, logtopics.
+func duIsReceiptRelated(f duFileInfo) bool {
+	lname := strings.ToLower(f.Name)
+	return f.Category == duCatRcache ||
+		strings.Contains(lname, "logaddrs") || strings.Contains(lname, "logtopics")
+}
+
+// duIsRcacheDomainFile returns true for rcache files in the domain/ directory.
+// Domain files are never pruned by the snapshot pruning logic.
+func duIsRcacheDomainFile(f duFileInfo) bool {
+	return f.Category == duCatRcache && strings.Contains(f.Path, string(filepath.Separator)+"domain"+string(filepath.Separator))
+}
+
 // duComputeEstimates computes estimated sizes for archive/full/minimal modes
 // by summing files that survive each mode's pruning rules.
 // maxBlock is the highest block number across all block segment files.
 // maxStep is the highest step number across all state files.
-func duComputeEstimates(files []duFileInfo, maxBlock, maxStep uint64) []duEstimate {
+// mergeBlock is the chain's merge height (0 if unknown or pre-merge chain);
+// full mode prunes pre-merge transaction segments when mergeBlock > 0.
+func duComputeEstimates(files []duFileInfo, maxBlock, maxStep, mergeBlock uint64) []duEstimate {
 	pruneDistance := uint64(config3.DefaultPruneDistance)
 	// State files use step ranges, not block ranges. Convert the block-based
 	// prune distance to step units using the observed blocks-per-step ratio.
@@ -3245,18 +3266,62 @@ func duComputeEstimates(files []duFileInfo, maxBlock, maxStep uint64) []duEstima
 		stepPruneDistance = pruneDistance * maxStep / maxBlock
 	}
 
-	var archiveTotal, fullTotal, minimalTotal int64
+	// Convert merge block to step units for receipt-related file pruning.
+	var mergeStep uint64
+	if mergeBlock > 0 && maxStep > 0 && maxBlock > 0 {
+		mergeStep = mergeBlock * maxStep / maxBlock
+	}
+
+	var archiveTotal, blocksTotal, fullTotal, minimalTotal int64
 
 	for _, f := range files {
 		archiveTotal += f.Size
 
-		// Full mode: exclude commitment hist, rcache, and old history/idx files.
-		includeInFull := true
+		// Blocks mode: prunes old history/idx/accessor and commitment hist,
+		// but keeps ALL block segments (KeepAllBlocksPruneMode).
+		// Receipt-related files (rcache, logaddrs, logtopics) are kept because
+		// --persist.receipts is enabled by default for non-archive modes and
+		// blocks mode uses KeepAllBlocksPruneMode which doesn't prune receipts.
+		includeInBlocks := true
 		switch f.Category {
-		case duCatCommitHist, duCatRcache:
-			includeInFull = false
-		case duCatHistory, duCatInvIdx:
+		case duCatCommitHist:
+			includeInBlocks = false
+		case duCatRcache:
+			// rcache domain files are never pruned; rcache history/idx
+			// files are kept in blocks mode (KeepAllBlocksPruneMode).
+			// All rcache files survive blocks mode.
+		case duCatHistory, duCatInvIdx, duCatAccessors:
 			if f.IsState && stepPruneDistance > 0 && f.To > 0 && maxStep > stepPruneDistance && f.To <= maxStep-stepPruneDistance {
+				// Receipt-related inv idx files (logaddrs, logtopics) are
+				// unblacklisted when receipts are persisted, and blocks mode
+				// keeps all receipts, so they survive.
+				if duIsReceiptRelated(f) {
+					// Keep in blocks mode.
+				} else {
+					includeInBlocks = false
+				}
+			}
+		}
+
+		if includeInBlocks {
+			blocksTotal += f.Size
+		}
+
+		// Full mode: same as blocks but also prunes pre-merge transaction
+		// block segments (EIP-4444 / history expiry) and receipt-related
+		// files below merge height.
+		includeInFull := includeInBlocks
+		if includeInFull && f.Category == duCatBlocks && !f.IsState && mergeBlock > 0 && strings.Contains(strings.ToLower(f.Name), "transactions") {
+			// Match runtime behavior: IsPreMerge(s.From) checks From < mergeHeight.
+			if f.From < mergeBlock {
+				includeInFull = false
+			}
+		}
+		// Receipt-related state files (rcache hist/idx, logaddrs, logtopics)
+		// are pruned below merge step in full mode (DefaultBlocksPruneMode).
+		// Domain files are never pruned.
+		if includeInFull && duIsReceiptRelated(f) && !duIsRcacheDomainFile(f) && f.IsState {
+			if mergeStep > 0 && f.From < mergeStep {
 				includeInFull = false
 			}
 		}
@@ -3265,10 +3330,18 @@ func duComputeEstimates(files []duFileInfo, maxBlock, maxStep uint64) []duEstima
 			fullTotal += f.Size
 		}
 
-		// Minimal: same as full but also exclude old block segments.
+		// Minimal: same as full but also exclude old transaction block segments.
+		// Only transaction-related block segments are prunable (headers/bodies are kept).
 		includeInMinimal := includeInFull
-		if includeInMinimal && f.Category == duCatBlocks && !f.IsState {
+		if includeInMinimal && f.Category == duCatBlocks && !f.IsState && strings.Contains(strings.ToLower(f.Name), "transactions") {
 			if f.To > 0 && maxBlock > pruneDistance && f.To <= maxBlock-pruneDistance {
+				includeInMinimal = false
+			}
+		}
+		// In minimal mode, receipt-related state files use block distance
+		// pruning (Distance(100k)), which maps to the same stepPruneDistance.
+		if includeInMinimal && duIsReceiptRelated(f) && !duIsRcacheDomainFile(f) && f.IsState {
+			if stepPruneDistance > 0 && f.To > 0 && maxStep > stepPruneDistance && f.To <= maxStep-stepPruneDistance {
 				includeInMinimal = false
 			}
 		}
@@ -3278,42 +3351,88 @@ func duComputeEstimates(files []duFileInfo, maxBlock, maxStep uint64) []duEstima
 		}
 	}
 
+	// Describe what full mode keeps for blocks.
+	fullBlocksDesc := "all blocks"
+	if mergeBlock > 0 {
+		fullBlocksDesc = "post-merge blocks"
+	}
+
+	historyDesc := fmt.Sprintf("last %s", duFormatNumber(pruneDistance))
 	return []duEstimate{
 		{Mode: "archive", TotalBytes: archiveTotal, Delta: 0, BlocksDesc: "all blocks", HistoryDesc: "all history"},
-		{Mode: "full", TotalBytes: fullTotal, Delta: fullTotal - archiveTotal, BlocksDesc: "all blocks", HistoryDesc: fmt.Sprintf("last %s", duFormatNumber(pruneDistance))},
-		{Mode: "minimal", TotalBytes: minimalTotal, Delta: minimalTotal - archiveTotal, BlocksDesc: fmt.Sprintf("last %s", duFormatNumber(pruneDistance)), HistoryDesc: fmt.Sprintf("last %s", duFormatNumber(pruneDistance))},
+		{Mode: "blocks", TotalBytes: blocksTotal, Delta: blocksTotal - archiveTotal, BlocksDesc: "all blocks", HistoryDesc: historyDesc},
+		{Mode: "full", TotalBytes: fullTotal, Delta: fullTotal - archiveTotal, BlocksDesc: fullBlocksDesc, HistoryDesc: historyDesc},
+		{Mode: "minimal", TotalBytes: minimalTotal, Delta: minimalTotal - archiveTotal, BlocksDesc: fmt.Sprintf("last %s", duFormatNumber(pruneDistance)), HistoryDesc: historyDesc},
 	}
 }
 
 // duDetectNodeType infers the current node mode from which files are present.
-// Archive nodes keep commitment history and rcache files.
-// Full nodes keep all block segments but prune old history.
-// Minimal nodes prune both old history and old block segments.
+// Archive nodes retain all state history from step 0 (History=MaxUint64).
+// Non-archive modes prune old state history, so files near step 0 are absent.
+// Among non-archive modes:
+//   - Blocks: keeps ALL block segments but prunes old history.
+//   - Full: prunes pre-merge transaction segments and old history.
+//   - Minimal: prunes both old history and old transaction block segments.
 func duDetectNodeType(files []duFileInfo) string {
-	hasCommitHistOrRcache := false
-	var maxBlock uint64
+	hasOldStateHistory := false
+	hasOldTxSegments := false
+	var maxBlock, maxStep uint64
+	var minTxFrom uint64 = math.MaxUint64
+
+	pruneDistance := uint64(config3.DefaultPruneDistance)
 
 	for _, f := range files {
-		if f.Category == duCatCommitHist || f.Category == duCatRcache {
-			hasCommitHistOrRcache = true
+		// Track max ranges for pruning cutoff calculations.
+		if f.IsState && f.To > maxStep {
+			maxStep = f.To
 		}
-		if f.Category == duCatBlocks && !f.IsState && f.To > maxBlock {
-			maxBlock = f.To
+		if f.Category == duCatBlocks && !f.IsState {
+			if f.To > maxBlock {
+				maxBlock = f.To
+			}
+			if strings.Contains(strings.ToLower(f.Name), "transactions") && f.From < minTxFrom {
+				minTxFrom = f.From
+			}
+		}
+		// Regular state history files (not commitment hist, not rcache) starting
+		// at step 0 indicate archive mode — only archive keeps all history.
+		if f.Category == duCatHistory && f.From == 0 && f.To > 0 {
+			hasOldStateHistory = true
 		}
 	}
 
-	if hasCommitHistOrRcache {
+	// Compute step prune distance to check if chain is old enough for pruning.
+	var stepPruneDistance uint64
+	if maxStep > 0 && maxBlock > 0 {
+		stepPruneDistance = pruneDistance * maxStep / maxBlock
+	}
+
+	// Archive: keeps all state history from step 0.
+	// Only consider this if the chain is mature enough that non-archive modes
+	// would have pruned old history (maxStep > stepPruneDistance).
+	if hasOldStateHistory && (stepPruneDistance == 0 || maxStep > stepPruneDistance) {
 		return "archive"
 	}
 
-	// Check if old block segments exist (indicating full mode keeps all blocks).
-	pruneDistance := uint64(config3.DefaultPruneDistance)
+	// Check for old transaction block segments to distinguish modes.
 	if maxBlock > pruneDistance {
 		for _, f := range files {
-			if f.Category == duCatBlocks && !f.IsState && f.To > 0 && f.To <= maxBlock-pruneDistance {
-				return "full"
+			if f.Category == duCatBlocks && !f.IsState && strings.Contains(strings.ToLower(f.Name), "transactions") &&
+				f.To > 0 && f.To <= maxBlock-pruneDistance {
+				hasOldTxSegments = true
+				break
 			}
 		}
+	}
+
+	if hasOldTxSegments {
+		// Distinguish blocks from full: blocks mode keeps ALL transactions
+		// from block 0 onward. Full mode prunes pre-merge transactions,
+		// so the earliest transaction segment starts well above 0.
+		if minTxFrom == 0 {
+			return "blocks"
+		}
+		return "full"
 	}
 
 	return "minimal"
@@ -3461,6 +3580,7 @@ func doDU(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	// Use recover because both MustOpen and fromdb.ChainConfig can panic
 	// (e.g., DB locked by running node, corrupted/empty chaindata).
 	chainName := "unknown"
+	var mergeBlock uint64
 	if _, err := os.Stat(dirs.Chaindata); err == nil {
 		func() {
 			defer func() {
@@ -3473,6 +3593,9 @@ func doDU(cliCtx *cli.Context, dirs datadir.Dirs) error {
 			cc := fromdb.ChainConfig(chainDB)
 			if cc != nil && cc.ChainName != "" {
 				chainName = cc.ChainName
+			}
+			if cc != nil && cc.MergeHeight != nil {
+				mergeBlock = *cc.MergeHeight
 			}
 		}()
 	}
@@ -3499,7 +3622,7 @@ func doDU(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	// Build result.
 	cats := duAggregateCategories(files)
-	estimates := duComputeEstimates(files, maxBlock, maxStep)
+	estimates := duComputeEstimates(files, maxBlock, maxStep, mergeBlock)
 
 	var totalBytes int64
 	var totalFiles int

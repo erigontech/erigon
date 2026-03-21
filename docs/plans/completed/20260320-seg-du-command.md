@@ -29,10 +29,14 @@ Replaces the draft implementation in PR #18807 with a corrected design that prop
 | Mode | History | Blocks | Effect |
 |------|---------|--------|--------|
 | Archive | MaxUint64 (keep all) | KeepAll (MaxUint64-1) | Everything |
-| Full | Distance(100k) | DefaultBlocksPruneMode (MaxUint64) | Prunes old history/idx, **keeps all block segments** |
+| Blocks | Distance(100k) | KeepAll (MaxUint64-1) | Prunes old history/idx, **keeps all block segments** |
+| Full | Distance(100k) | DefaultBlocksPruneMode (MaxUint64) | Prunes old history/idx, **prunes pre-merge transaction segments** |
 | Minimal | Distance(100k) | Distance(100k) | Prunes old history/idx AND old block segments |
 
-Key insight: Full and Archive keep ALL block segments. Only Minimal prunes them.
+Key insights:
+- Full mode prunes pre-merge transaction segments (EIP-4444 history expiry) using `IsPreMerge(s.From)`.
+- Blocks mode keeps ALL block segments but prunes history like Full.
+- Domain files (including .kvi/.kvei/.bt accessors in domain/) are never pruned.
 
 ## Output Format
 
@@ -95,11 +99,11 @@ Files are classified by **directory** and **filename content**:
 
 | Category | Directory/Pattern | Included in Archive | Included in Full | Included in Minimal |
 |----------|-------------------|---------------------|------------------|---------------------|
-| domains | `domain/` | yes | yes | yes |
-| accessors | `accessor/` | yes | yes | yes |
+| domains | `domain/` (all files including .kvi, .kvei, .bt) | yes | yes | yes |
+| accessors | `accessor/` | all | recent only (last 100k steps) | recent only |
 | history | `history/` | all | recent only (last 100k steps) | recent only |
 | inverted indices | `idx/` | all | recent only | recent only |
-| block segments | `snapshots/*.seg` + `snapshots/*.idx` | all | all | recent only (last 100k blocks) |
+| block segments | `snapshots/*.seg` + `snapshots/*.idx` | all | all | transactions: recent only (last 100k blocks); headers/bodies: all |
 | caplin | `caplin/` | yes | yes | yes |
 | commitment hist | `history/*commitment*` or `idx/*commitment*` | yes | no | no |
 | rcache | `domain/*rcache*` or `history/*rcache*` or `idx/*rcache*` | yes | no | no |

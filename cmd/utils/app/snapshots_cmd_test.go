@@ -422,9 +422,14 @@ func TestDUClassifyFile(t *testing.T) {
 		dir, name string
 		want      string
 	}{
-		// domains
+		// domains (data files)
 		{"domain", "v1.0-accounts.0-16.kv", duCatDomains},
 		{"domain", "v1.0-storage.16-32.kv", duCatDomains},
+
+		// domain accessors (.kvi, .kvei, .bt) live in domain/ and are never pruned
+		{"domain", "v1.0-accounts.0-16.kvi", duCatDomains},
+		{"domain", "v1.0-accounts.0-16.kvei", duCatDomains},
+		{"domain", "v1.0-accounts.0-16.bt", duCatDomains},
 
 		// rcache overrides domain
 		{"domain", "v1.0-rcache.0-16.kv", duCatRcache},
@@ -564,12 +569,15 @@ func TestDUComputeEstimates(t *testing.T) {
 	// Synthetic file list simulating an archive node with realistic mainnet-like values:
 	// - domain files (always kept)
 	// - old and new history/idx files
-	// - commitment hist and rcache (archive-only)
+	// - commitment hist (archive-only)
+	// - rcache domain and history files (kept in non-archive modes with receipt pruning)
+	// - logaddrs inv idx (receipt-related, kept in blocks mode)
 	// - old and new block segments
 	// - caplin (always kept)
 	//
-	// maxStep=2000, maxBlock=20_000_000
+	// maxStep=2000, maxBlock=20_000_000, mergeBlock=15_537_394
 	// stepPruneDistance = DefaultPruneDistance(100_000) * 2000 / 20_000_000 = 10
+	// mergeStep = 15_537_394 * 2000 / 20_000_000 = 1553
 	// State prune cutoff: step To <= 2000-10 = 1990 → old history/idx pruned
 	// Block prune cutoff: block To <= 20_000_000-100_000 = 19_900_000 → old
 
@@ -578,29 +586,44 @@ func TestDUComputeEstimates(t *testing.T) {
 		{Name: "accounts.0-500.kv", Size: 1000, Category: duCatDomains, IsState: true, From: 0, To: 500},
 		{Name: "storage.1500-2000.kv", Size: 2000, Category: duCatDomains, IsState: true, From: 1500, To: 2000},
 
-		// Accessors — always kept
+		// Old accessor (To=500 <= 1990 cutoff) — pruned in blocks/full/minimal
 		{Name: "accounts.0-500.bt", Size: 500, Category: duCatAccessors, IsState: true, From: 0, To: 500},
 
-		// Old history (To=500 <= 1990 cutoff) — pruned in full/minimal
+		// Old history (To=500 <= 1990 cutoff) — pruned in blocks/full/minimal
 		{Name: "accounts.0-500.v", Size: 3000, Category: duCatHistory, IsState: true, From: 0, To: 500},
 
-		// New history (To=2000 > 1990) — kept in full/minimal
+		// New history (To=2000 > 1990) — kept in all
 		{Name: "accounts.1500-2000.v", Size: 4000, Category: duCatHistory, IsState: true, From: 1500, To: 2000},
 
-		// Old inverted index (To=500 <= 1990) — pruned in full/minimal
+		// Old inverted index (To=500 <= 1990) — pruned in blocks/full/minimal
 		{Name: "accounts.0-500.ef", Size: 1500, Category: duCatInvIdx, IsState: true, From: 0, To: 500},
 
 		// New inverted index — kept
 		{Name: "accounts.1500-2000.ef", Size: 2500, Category: duCatInvIdx, IsState: true, From: 1500, To: 2000},
 
-		// Commitment hist — archive only
+		// Commitment hist — archive only (excluded from all non-archive modes)
 		{Name: "commitment.0-500.v", Size: 800, Category: duCatCommitHist, IsState: true, From: 0, To: 500},
 
-		// Rcache — archive only
-		{Name: "rcache.0-500.kv", Size: 600, Category: duCatRcache, IsState: true, From: 0, To: 500},
+		// Rcache domain file (in domain/) — never pruned, kept in all modes
+		{Path: "/data/snapshots/domain/rcache.0-500.kv", Name: "rcache.0-500.kv", Size: 400, Category: duCatRcache, IsState: true, From: 0, To: 500},
 
-		// Old block segment (To=15_000_000 <= 19_900_000) — pruned in minimal only
-		{Name: "0-15000-headers.seg", Size: 5000, Category: duCatBlocks, IsState: false, From: 0, To: 15_000_000},
+		// Rcache history file (in history/) — receipt-pruned:
+		//   blocks: kept (KeepAllBlocksPruneMode)
+		//   full: pruned (From=0 < mergeStep=1553)
+		//   minimal: pruned (same, already pruned in full)
+		{Path: "/data/snapshots/history/rcache.0-500.v", Name: "rcache.0-500.v", Size: 200, Category: duCatRcache, IsState: true, From: 0, To: 500},
+
+		// Old logaddrs inv idx (receipt-related, To=500 <= 1990) —
+		//   normally pruned as inv idx, but receipt-related so kept in blocks mode.
+		//   full: pruned (From=0 < mergeStep=1553)
+		//   minimal: pruned (same)
+		{Name: "logaddrs.0-500.ef", Size: 350, Category: duCatInvIdx, IsState: true, From: 0, To: 500},
+
+		// Old transaction block segment (To=15_000_000 <= 19_900_000) — pruned in full/minimal
+		{Name: "0-15000-transactions.seg", Size: 5000, Category: duCatBlocks, IsState: false, From: 0, To: 15_000_000},
+
+		// Old headers block segment — NOT prunable (headers/bodies always kept)
+		{Name: "0-15000-headers.seg", Size: 3000, Category: duCatBlocks, IsState: false, From: 0, To: 15_000_000},
 
 		// New block segment (To=20_000_000 > 19_900_000) — kept in all
 		{Name: "15000-20000-headers.seg", Size: 6000, Category: duCatBlocks, IsState: false, From: 15_000_000, To: 20_000_000},
@@ -612,89 +635,121 @@ func TestDUComputeEstimates(t *testing.T) {
 	maxBlock := uint64(20_000_000)
 	maxStep := uint64(2000)
 
-	estimates := duComputeEstimates(files, maxBlock, maxStep)
-	require.Len(t, estimates, 3)
+	mergeBlock := uint64(15_537_394)
+	estimates := duComputeEstimates(files, maxBlock, maxStep, mergeBlock)
+	require.Len(t, estimates, 4)
 
 	// Archive: sum everything
-	archiveTotal := int64(1000 + 2000 + 500 + 3000 + 4000 + 1500 + 2500 + 800 + 600 + 5000 + 6000 + 700)
+	archiveTotal := int64(1000 + 2000 + 500 + 3000 + 4000 + 1500 + 2500 + 800 + 400 + 200 + 350 + 5000 + 3000 + 6000 + 700)
 	require.Equal(t, "archive", estimates[0].Mode)
 	require.Equal(t, archiveTotal, estimates[0].TotalBytes)
 	require.Equal(t, int64(0), estimates[0].Delta)
 
-	// Full: archive minus old history(3000) minus old idx(1500) minus commitHist(800) minus rcache(600)
-	fullTotal := archiveTotal - 3000 - 1500 - 800 - 600
-	require.Equal(t, "full", estimates[1].Mode)
-	require.Equal(t, fullTotal, estimates[1].TotalBytes)
-	require.Equal(t, fullTotal-archiveTotal, estimates[1].Delta)
+	// Blocks: archive minus old history(3000) minus old idx(1500) minus old accessor(500)
+	// minus commitHist(800) — rcache domain(400) kept, rcache hist(200) kept,
+	// logaddrs(350) kept (receipt-related, blocks mode keeps all receipts)
+	blocksTotal := archiveTotal - 3000 - 1500 - 500 - 800
+	require.Equal(t, "blocks", estimates[1].Mode)
+	require.Equal(t, blocksTotal, estimates[1].TotalBytes)
+	require.Equal(t, blocksTotal-archiveTotal, estimates[1].Delta)
+	require.Equal(t, "all blocks", estimates[1].BlocksDesc)
 
-	// Minimal: full minus old blocks(5000)
-	minimalTotal := fullTotal - 5000
-	require.Equal(t, "minimal", estimates[2].Mode)
-	require.Equal(t, minimalTotal, estimates[2].TotalBytes)
-	require.Equal(t, minimalTotal-archiveTotal, estimates[2].Delta)
+	// Full: blocks minus pre-merge tx(5000) minus rcache hist(200, From=0 < mergeStep=1553)
+	// minus logaddrs(350, From=0 < mergeStep=1553) — rcache domain(400) kept
+	fullTotal := blocksTotal - 5000 - 200 - 350
+	require.Equal(t, "full", estimates[2].Mode)
+	require.Equal(t, fullTotal, estimates[2].TotalBytes)
+	require.Equal(t, fullTotal-archiveTotal, estimates[2].Delta)
+	require.Equal(t, "post-merge blocks", estimates[2].BlocksDesc)
 
-	// Invariant: archive >= full >= minimal
+	// Minimal: full minus nothing extra (old tx already pruned by full, remaining blocks are recent,
+	// rcache hist and logaddrs already pruned by full's merge-based receipt pruning)
+	minimalTotal := fullTotal
+	require.Equal(t, "minimal", estimates[3].Mode)
+	require.Equal(t, minimalTotal, estimates[3].TotalBytes)
+	require.Equal(t, minimalTotal-archiveTotal, estimates[3].Delta)
+
+	// Invariant: archive >= blocks >= full >= minimal
 	require.GreaterOrEqual(t, estimates[0].TotalBytes, estimates[1].TotalBytes)
 	require.GreaterOrEqual(t, estimates[1].TotalBytes, estimates[2].TotalBytes)
+	require.GreaterOrEqual(t, estimates[2].TotalBytes, estimates[3].TotalBytes)
 }
 
 func TestDUComputeEstimates_NoPruning(t *testing.T) {
 	// When maxStep and maxBlock are small (below pruneDistance),
-	// nothing gets pruned, so all three modes should be equal (except commitment/rcache).
+	// nothing gets pruned, so all modes should be equal (except commitment hist).
 	files := []duFileInfo{
 		{Name: "d.kv", Size: 100, Category: duCatDomains, IsState: true, From: 0, To: 10},
 		{Name: "h.v", Size: 200, Category: duCatHistory, IsState: true, From: 0, To: 10},
 		{Name: "b.seg", Size: 300, Category: duCatBlocks, IsState: false, From: 0, To: 50000},
 	}
 
-	estimates := duComputeEstimates(files, 50000, 10)
-	// All modes include everything (no old files to prune, no commitment/rcache)
+	estimates := duComputeEstimates(files, 50000, 10, 0)
+	// All modes include everything (no old files to prune, no commitment/rcache, no merge block)
 	require.Equal(t, int64(600), estimates[0].TotalBytes) // archive
-	require.Equal(t, int64(600), estimates[1].TotalBytes) // full
-	require.Equal(t, int64(600), estimates[2].TotalBytes) // minimal
+	require.Equal(t, int64(600), estimates[1].TotalBytes) // blocks
+	require.Equal(t, int64(600), estimates[2].TotalBytes) // full
+	require.Equal(t, int64(600), estimates[3].TotalBytes) // minimal
 }
 
 func TestDUComputeEstimates_EmptyFiles(t *testing.T) {
-	estimates := duComputeEstimates(nil, 0, 0)
-	require.Len(t, estimates, 3)
+	estimates := duComputeEstimates(nil, 0, 0, 0)
+	require.Len(t, estimates, 4)
 	for _, e := range estimates {
 		require.Equal(t, int64(0), e.TotalBytes)
 	}
 }
 
 func TestDUDetectNodeType(t *testing.T) {
-	t.Run("archive - has commitment hist", func(t *testing.T) {
+	t.Run("archive - has old state history from step 0", func(t *testing.T) {
+		// Archive mode keeps all history — old history files from step 0 are present.
 		files := []duFileInfo{
-			{Category: duCatDomains, Size: 100},
-			{Category: duCatCommitHist, Size: 50},
+			{Category: duCatDomains, Size: 100, IsState: true, To: 2000},
+			{Category: duCatHistory, Size: 500, IsState: true, From: 0, To: 500},
+			{Category: duCatHistory, Size: 500, IsState: true, From: 500, To: 2000},
+			{Category: duCatBlocks, IsState: false, From: 0, To: 500000, Size: 200},
+		}
+		require.Equal(t, "archive", duDetectNodeType(files))
+	})
+
+	t.Run("archive - with commitment hist and rcache (still archive by history)", func(t *testing.T) {
+		files := []duFileInfo{
+			{Category: duCatDomains, Size: 100, IsState: true, To: 2000},
+			{Category: duCatHistory, Size: 500, IsState: true, From: 0, To: 500},
+			{Category: duCatCommitHist, Size: 50, IsState: true, From: 0, To: 500},
+			{Category: duCatRcache, Size: 50, IsState: true, From: 0, To: 500},
 			{Category: duCatBlocks, IsState: false, To: 500000, Size: 200},
 		}
 		require.Equal(t, "archive", duDetectNodeType(files))
 	})
 
-	t.Run("archive - has rcache", func(t *testing.T) {
+	t.Run("blocks - has rcache but no old state history, all tx blocks from 0", func(t *testing.T) {
+		// Non-archive modes persist receipts (rcache present) but prune old history.
+		// maxBlock=500000, pruneDistance=100000, cutoff=400000
 		files := []duFileInfo{
-			{Category: duCatDomains, Size: 100},
-			{Category: duCatRcache, Size: 50},
+			{Category: duCatDomains, Size: 100, IsState: true, To: 50},
+			{Category: duCatHistory, Size: 500, IsState: true, From: 40, To: 50},
+			{Category: duCatRcache, Size: 50, IsState: true, From: 0, To: 50},
+			{Name: "0-300-transactions.seg", Category: duCatBlocks, IsState: false, From: 0, To: 300000, Size: 200},
+			{Name: "300-500-headers.seg", Category: duCatBlocks, IsState: false, From: 300000, To: 500000, Size: 200},
 		}
-		require.Equal(t, "archive", duDetectNodeType(files))
+		require.Equal(t, "blocks", duDetectNodeType(files))
 	})
 
-	t.Run("full - has old blocks, no commitment/rcache", func(t *testing.T) {
-		// maxBlock=500000, pruneDistance=100000, cutoff=400000
-		// Old block with To=300000 <= 400000 → indicates full mode (keeps all blocks)
+	t.Run("full - has old transaction blocks but not from 0, no old state history", func(t *testing.T) {
+		// Transactions start at 200000 (not 0) → pre-merge segments were pruned → full mode
 		files := []duFileInfo{
-			{Category: duCatDomains, Size: 100},
-			{Category: duCatBlocks, IsState: false, From: 0, To: 300000, Size: 200},
-			{Category: duCatBlocks, IsState: false, From: 300000, To: 500000, Size: 200},
+			{Category: duCatDomains, Size: 100, IsState: true, To: 50},
+			{Category: duCatHistory, Size: 500, IsState: true, From: 40, To: 50},
+			{Name: "200-300-transactions.seg", Category: duCatBlocks, IsState: false, From: 200000, To: 300000, Size: 200},
+			{Name: "300-500-transactions.seg", Category: duCatBlocks, IsState: false, From: 300000, To: 500000, Size: 200},
 		}
 		require.Equal(t, "full", duDetectNodeType(files))
 	})
 
 	t.Run("minimal - only recent blocks", func(t *testing.T) {
-		// Only blocks near the tip, no commitment/rcache
 		files := []duFileInfo{
-			{Category: duCatDomains, Size: 100},
+			{Category: duCatDomains, Size: 100, IsState: true, To: 50},
 			{Category: duCatBlocks, IsState: false, From: 450000, To: 500000, Size: 200},
 		}
 		require.Equal(t, "minimal", duDetectNodeType(files))
@@ -709,6 +764,21 @@ func TestDUDetectNodeType(t *testing.T) {
 		files := []duFileInfo{
 			{Category: duCatBlocks, IsState: false, From: 0, To: 50000, Size: 200},
 		}
+		require.Equal(t, "minimal", duDetectNodeType(files))
+	})
+
+	t.Run("young chain with history from 0 not detected as archive", func(t *testing.T) {
+		// Chain too young for pruning to matter (maxStep < stepPruneDistance).
+		// Even non-archive modes keep all history when young.
+		// stepPruneDistance = 100000 * 5 / 50000 = 10, maxStep=5 < 10
+		files := []duFileInfo{
+			{Category: duCatDomains, Size: 100, IsState: true, To: 5},
+			{Category: duCatHistory, Size: 500, IsState: true, From: 0, To: 5},
+			{Category: duCatBlocks, IsState: false, From: 0, To: 50000, Size: 200},
+		}
+		// maxStep=5, maxBlock=50000, stepPruneDistance=10, maxStep(5) <= stepPruneDistance(10)
+		// → too young to distinguish, falls through to block-based detection → minimal
+		// (no old tx segments since maxBlock < pruneDistance)
 		require.Equal(t, "minimal", duDetectNodeType(files))
 	})
 }
@@ -900,6 +970,7 @@ func TestDUAcceptanceCriteria(t *testing.T) {
 		{Name: "commitment.0-50000.v", Size: 2000, Category: duCatCommitHist, IsState: true, From: 0, To: 50000},
 		{Name: "rcache.0-50000.kv", Size: 1500, Category: duCatRcache, IsState: true, From: 0, To: 50000},
 		{Name: "0-300-headers.seg", Size: 15000, Category: duCatBlocks, IsState: false, From: 0, To: 300000},
+		{Name: "0-300-transactions.seg", Size: 10000, Category: duCatBlocks, IsState: false, From: 0, To: 300000},
 		{Name: "300-500-bodies.seg", Size: 18000, Category: duCatBlocks, IsState: false, From: 300000, To: 500000},
 		{Name: "beaconblocks.0-100.seg", Size: 4000, Category: duCatCaplin, IsState: false, From: 0, To: 100},
 	}
@@ -925,18 +996,20 @@ func TestDUAcceptanceCriteria(t *testing.T) {
 	require.Equal(t, len(files), catFiles, "category file count must sum to total files")
 
 	// Compute estimates.
-	estimates := duComputeEstimates(files, maxBlock, maxStep)
-	require.Len(t, estimates, 3)
+	estimates := duComputeEstimates(files, maxBlock, maxStep, 0)
+	require.Len(t, estimates, 4)
 
-	// Verify archive >= full >= minimal (acceptance criterion 3).
-	require.GreaterOrEqual(t, estimates[0].TotalBytes, estimates[1].TotalBytes, "archive >= full")
-	require.GreaterOrEqual(t, estimates[1].TotalBytes, estimates[2].TotalBytes, "full >= minimal")
+	// Verify archive >= blocks >= full >= minimal (acceptance criterion 3).
+	require.GreaterOrEqual(t, estimates[0].TotalBytes, estimates[1].TotalBytes, "archive >= blocks")
+	require.GreaterOrEqual(t, estimates[1].TotalBytes, estimates[2].TotalBytes, "blocks >= full")
+	require.GreaterOrEqual(t, estimates[2].TotalBytes, estimates[3].TotalBytes, "full >= minimal")
 
 	// Archive delta must be 0.
 	require.Equal(t, int64(0), estimates[0].Delta)
-	// Full and minimal deltas must be negative or zero.
+	// Non-archive deltas must be negative or zero.
 	require.LessOrEqual(t, estimates[1].Delta, int64(0))
 	require.LessOrEqual(t, estimates[2].Delta, int64(0))
+	require.LessOrEqual(t, estimates[3].Delta, int64(0))
 
 	// Build result struct.
 	result := duResult{
@@ -972,6 +1045,7 @@ func TestDUAcceptanceCriteria(t *testing.T) {
 	// Estimates section.
 	require.Contains(t, human, "Estimated Size by Node Type")
 	require.Contains(t, human, "archive")
+	require.Contains(t, human, "blocks")
 	require.Contains(t, human, "full")
 	require.Contains(t, human, "minimal")
 
@@ -992,9 +1066,10 @@ func TestDUAcceptanceCriteria(t *testing.T) {
 	require.Equal(t, result.TotalBytes, decoded.TotalBytes)
 	require.Equal(t, result.TotalFiles, decoded.TotalFiles)
 	require.Len(t, decoded.Categories, len(result.Categories))
-	require.Len(t, decoded.Estimates, 3)
+	require.Len(t, decoded.Estimates, 4)
 
-	// Verify JSON estimates also maintain archive >= full >= minimal.
+	// Verify JSON estimates also maintain archive >= blocks >= full >= minimal.
 	require.GreaterOrEqual(t, decoded.Estimates[0].TotalBytes, decoded.Estimates[1].TotalBytes)
 	require.GreaterOrEqual(t, decoded.Estimates[1].TotalBytes, decoded.Estimates[2].TotalBytes)
+	require.GreaterOrEqual(t, decoded.Estimates[2].TotalBytes, decoded.Estimates[3].TotalBytes)
 }
