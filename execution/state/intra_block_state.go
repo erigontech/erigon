@@ -1460,6 +1460,17 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 			if refreshed != &so.data {
 				so.data = *refreshed
 			}
+			// Check if code changed (e.g. EIP-7702 authorization set/cleared
+			// the delegation prefix). Clear the cached code so the next
+			// Code() call reads fresh from the stateReader.
+			codeHash, _, chVersion, err := versionedRead(sdb, addr, CodeHashPath, accounts.NilKey, false, so.data.CodeHash, nil, nil)
+			if err != nil {
+				return nil, err
+			}
+			if chVersion.TxIndex > UnknownVersion.TxIndex && codeHash != so.data.CodeHash {
+				so.data.CodeHash = codeHash
+				so.code = nil // force re-read
+			}
 		}
 		return so, nil
 	}
