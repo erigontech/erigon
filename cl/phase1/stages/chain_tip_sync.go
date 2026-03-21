@@ -271,8 +271,10 @@ func fetchAndApplyEnvelopes(ctx context.Context, cfg *Cfg, roots [][32]byte) {
 		return
 	}
 	for _, env := range envelopes {
-		if err := cfg.forkChoice.OnExecutionPayload(ctx, env, false, false); err != nil {
-			log.Debug("[chainTipSync] failed to apply GLOAS envelope", "beaconBlockRoot", env.Message.BeaconBlockRoot, "err", err)
+		// validatePayload=true so recovered envelopes are sent to EL via NewPayload.
+		// If EL is behind, errELBehind will queue them as pending EL payloads.
+		if err := cfg.forkChoice.OnExecutionPayload(ctx, env, true, true); err != nil {
+			log.Debug("[chainTipSync] failed to apply recovered GLOAS envelope", "beaconBlockRoot", env.Message.BeaconBlockRoot, "err", err)
 		}
 	}
 }
@@ -420,8 +422,8 @@ func recoverMissingEnvelopes(ctx context.Context, cfg *Cfg) {
 	}
 
 	if len(missingRoots) > 0 {
-		log.Debug("[chainTipSync] envelope recovery: fetching missing envelopes", "count", len(missingRoots))
-		go fetchAndApplyEnvelopes(ctx, cfg, missingRoots)
+		log.Info("[chainTipSync] envelope recovery: fetching missing envelopes", "count", len(missingRoots))
+		fetchAndApplyEnvelopes(ctx, cfg, missingRoots)
 	}
 }
 
@@ -456,8 +458,26 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 	// the EL needs the execution payloads that ForwardSync collected via
 	// blockCollector.AddGloasBlock / AddBlock (with newPayload=false).
 	if cfg.executionClient != nil && cfg.executionClient.SupportInsertion() {
+		// [GLOAS] Recover any execution payload envelopes that were missed by gossip.
+		// This runs every cycle (not just when caught-up) because seenSlot < targetSlot
+		// is almost always true — by the time ChainTipSync finishes a slot, the next one
+		// has arrived.  Recovered envelopes are sent to EL via newPayload; if EL is behind,
+		// errELBehind queues them as pending, which DrainPendingELPayloads picks up below.
+		recoverMissingEnvelopes(ctx, cfg)
+
+		// [New in Gloas:EIP7732] Drain execution blocks whose CL transition succeeded
+		// but whose EL newPayload failed (EL was behind).  Adding them to the collector
+		// before Flush ensures they are inserted into EL in block-number order, filling
+		// the gap that would otherwise permanently break the EL chain.
+		for _, p := range cfg.forkChoice.DrainPendingELPayloads() {
+			if p.Envelope != nil && p.Envelope.Message != nil && p.Envelope.Message.Payload != nil {
+				if addErr := cfg.blockCollector.AddGloasBlock(p.Block.Block, p.Envelope); addErr != nil {
+					log.Warn("[chainTipSync] failed to add pending EL payload to collector", "err", addErr)
+				}
+			}
+		}
 		if err := cfg.blockCollector.Flush(context.Background()); err != nil {
-			return err
+			log.Warn("[chainTipSync] blockCollector.Flush failed (EL may still be catching up)", "err", err)
 		}
 	}
 
@@ -471,6 +491,9 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 			if headRoot != (common.Hash{}) && !cfg.forkChoice.HasEnvelope(headRoot) {
 				pollForEnvelope(ctx, cfg, headRoot, 2*time.Second)
 			}
+			// NOTE: recoverMissingEnvelopes is called in the common path above
+			// (before DrainPendingELPayloads), so it runs every cycle regardless
+			// of whether we are caught up or not.
 		}
 		return nil
 	}
