@@ -756,16 +756,7 @@ func (bt *BlockTest) runLightweight(t *testing.T) error {
 			return fmt.Errorf("block #%v transactions root mismatch: computed %x, header %x", cb.Number(), computedTxRoot, header.TxHash)
 		}
 
-		// Execute block on a nested overlay so we can discard state changes
-		// if the block turns out to be invalid (e.g. wrong gas, bloom, receipts).
 		txNum++
-		blockOverlay, blockOverlayErr := membatchwithdb.NewMemoryBatch(overlay, "", logger)
-		if blockOverlayErr != nil {
-			return fmt.Errorf("block #%v NewMemoryBatch: %w", cb.Number(), blockOverlayErr)
-		}
-
-		stateReader := state.NewReaderV3(blockOverlay)
-		stateWriter := state.NewWriter(blockOverlay, nil, txNum)
 
 		blockHashFunc := protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
 			h := cr.GetHeader(hash, number)
@@ -775,65 +766,82 @@ func (bt *BlockTest) runLightweight(t *testing.T) error {
 			return h, nil
 		})
 
-		// For expected-invalid blocks with a BAL hash, use VersionedIO tracking
-		// to detect BAL mismatches. For valid blocks, use the fast path.
 		var execResult *protocol.EphemeralExecResult
 		var execErr error
-		if isExpectedInvalid(b) && header.BlockAccessListHash != nil {
-			var vio *state.VersionedIO
-			execResult, vio, execErr = executeBlockWithIO(
-				config, blockHashFunc, engine, cb,
-				stateReader, stateWriter, cr, logger,
-			)
-			if execErr == nil && vio != nil {
-				computedBAL := vio.AsBlockAccessList()
-				computedHash := computedBAL.Hash()
-				if computedHash != *header.BlockAccessListHash {
-					blockOverlay.Close()
-					continue // correctly rejected as invalid
-				}
-			}
-		} else {
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						execErr = fmt.Errorf("panic during block execution: %v", r)
-					}
-				}()
-				execResult, execErr = protocol.ExecuteBlockEphemerally(
-					config, &vm.Config{},
-					blockHashFunc, engine, cb,
-					stateReader, stateWriter,
-					cr, nil,
-					logger,
-				)
-			}()
-		}
-
-		if execErr != nil {
-			blockOverlay.Close() // discard state changes
-			if isExpectedInvalid(b) {
-				continue
-			}
-			return fmt.Errorf("block #%v insertion into chain failed: %w", cb.Number(), execErr)
-		}
-		_ = execResult
 
 		if isExpectedInvalid(b) {
-			blockOverlay.Close() // discard — block shouldn't have succeeded
+			// Execute on a nested overlay so we can discard state changes
+			// if the block turns out to be invalid.
+			blockOverlay, blockOverlayErr := membatchwithdb.NewMemoryBatch(overlay, "", logger)
+			if blockOverlayErr != nil {
+				return fmt.Errorf("block #%v NewMemoryBatch: %w", cb.Number(), blockOverlayErr)
+			}
+			stateReader := state.NewReaderV3(blockOverlay)
+			stateWriter := state.NewWriter(blockOverlay, nil, txNum)
+			stateWriter.ForceWrites = true
+
+			if header.BlockAccessListHash != nil {
+				// Use VersionedIO tracking to detect BAL mismatches.
+				var vio *state.VersionedIO
+				execResult, vio, execErr = executeBlockWithIO(
+					config, blockHashFunc, engine, cb,
+					stateReader, stateWriter, cr, logger,
+				)
+				if execErr == nil && vio != nil {
+					computedBAL := vio.AsBlockAccessList()
+					computedHash := computedBAL.Hash()
+					if computedHash != *header.BlockAccessListHash {
+						blockOverlay.Close()
+						continue // correctly rejected as invalid
+					}
+				}
+			} else {
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							execErr = fmt.Errorf("panic during block execution: %v", r)
+						}
+					}()
+					execResult, execErr = protocol.ExecuteBlockEphemerally(
+						config, &vm.Config{},
+						blockHashFunc, engine, cb,
+						stateReader, stateWriter,
+						cr, nil,
+						logger,
+					)
+				}()
+			}
+			blockOverlay.Close() // always discard — block was expected invalid
+			if execErr != nil {
+				continue // expected-invalid block failed execution — correct
+			}
+			// Block succeeded but should have failed.
 			return fmt.Errorf("block (index %d) insertion should have failed due to: %v", bi, b.ExpectException)
 		}
 
-		// Block is valid — merge the nested overlay into the main overlay.
-		if err := blockOverlay.Flush(ctx, overlay); err != nil {
-			blockOverlay.Close()
-			return fmt.Errorf("block #%v flush KV: %w", cb.Number(), err)
+		// Valid block: execute directly on the main overlay.
+		stateReader := state.NewReaderV3(overlay)
+		stateWriter := state.NewWriter(overlay, nil, txNum)
+		stateWriter.ForceWrites = true // overlay-based execution: must write even if original==value
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					execErr = fmt.Errorf("panic during block execution: %v", r)
+				}
+			}()
+			execResult, execErr = protocol.ExecuteBlockEphemerally(
+				config, &vm.Config{},
+				blockHashFunc, engine, cb,
+				stateReader, stateWriter,
+				cr, nil,
+				logger,
+			)
+		}()
+
+		if execErr != nil {
+			return fmt.Errorf("block #%v insertion into chain failed: %w", cb.Number(), execErr)
 		}
-		if err := blockOverlay.FlushDomains(overlay); err != nil {
-			blockOverlay.Close()
-			return fmt.Errorf("block #%v flush domains: %w", cb.Number(), err)
-		}
-		blockOverlay.Close()
+		_ = execResult
 
 		// Validate RLP-decoded header against the test JSON (same as insertBlocks).
 		if err = validateHeader(b.BlockHeader, cb.HeaderNoCopy()); err != nil {
