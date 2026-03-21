@@ -670,6 +670,31 @@ func (bt *BlockTest) runLightweight(t *testing.T) error {
 
 	lastBlockHash := genesis.Hash()
 
+	// Pre-decode blocks to identify the main chain. Tests with uncle/side-chain
+	// blocks have interleaved blocks from different forks. We trace the main
+	// chain backwards from BestBlock to only execute main-chain blocks.
+	mainChainBlocks := make(map[common.Hash]bool)
+	{
+		decoded := make(map[common.Hash]*types.Block)
+		for _, b := range bt.json.Blocks {
+			cb, err := b.decode()
+			if err != nil {
+				continue
+			}
+			decoded[cb.Hash()] = cb
+		}
+		// Trace back from BestBlock to genesis.
+		h := common.Hash(bt.json.BestBlock)
+		for h != genesis.Hash() {
+			mainChainBlocks[h] = true
+			cb, ok := decoded[h]
+			if !ok {
+				break
+			}
+			h = cb.ParentHash()
+		}
+	}
+
 	// Execute blocks — same structure as insertBlocks but using
 	// ExecuteBlockEphemerally instead of InsertChain.
 	for bi, b := range bt.json.Blocks {
@@ -682,6 +707,23 @@ func (bt *BlockTest) runLightweight(t *testing.T) error {
 		}
 
 		header := cb.Header()
+
+		// Skip side-chain blocks — only execute blocks on the main chain.
+		// Record their headers for uncle validation.
+		if !mainChainBlocks[cb.Hash()] && !isExpectedInvalid(b) {
+			cr.headers[cb.Hash()] = header
+			continue
+		}
+
+		// Post-Shanghai blocks must have a withdrawals field in the RLP.
+		// Go's RLP decoder is lenient and sets it to nil if absent.
+		if config.IsShanghai(header.Time) && cb.Withdrawals() == nil {
+			if isExpectedInvalid(b) {
+				continue
+			}
+			return fmt.Errorf("block #%v missing withdrawals field (post-Shanghai)", cb.Number())
+		}
+
 		parentHash := header.ParentHash
 
 		parentTd, hasTd := cr.tds[parentHash]
