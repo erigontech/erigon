@@ -258,7 +258,7 @@ func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.Blo
 		return state.IteratorDump{}, err
 	}
 	if header != nil {
-		res.Root = header.Root.String()
+		res.Root = fmt.Sprintf("%x", header.Root)
 	}
 
 	return res, nil
