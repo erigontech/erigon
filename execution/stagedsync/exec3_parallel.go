@@ -1946,9 +1946,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	cntInvalid := 0
 	var stateReader state.StateReader
 
-	// DEBUG: trace validation pass for block 24365006 when TX 198 is in the batch
-	traceValidationPass := be.blockNum == 24365006 && len(toValidate) > 0 && toValidate[0] <= 198
-
 	for i := 0; i < len(toValidate); i++ {
 
 		be.cntTotalValidations++
@@ -1984,11 +1981,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 		valid := be.skipCheck[tx] || validity == state.VersionValid
 
-		if traceValidationPass {
-			fmt.Printf("VPASS: tx=%d txIdx=%d valid=%v cntInvalid=%d validity=%d\n",
-				tx, txVersion.TxIndex, valid, cntInvalid, validity)
-		}
-
 		be.versionMap.SetTrace(trace)
 		be.versionMap.FlushVersionedWrites(be.blockIO.WriteSet(txVersion.TxIndex), cntInvalid == 0, tracePrefix)
 		be.versionMap.SetTrace(false)
@@ -2021,7 +2013,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					if txTask.IsHistoric() {
 						stateReader = state.NewHistoryReaderV3(applyTx, txTask.Version().TxNum)
 					} else {
-						stateReader = state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx))
+						// Use CachedReaderV3 with readCurrent=true so the
+						// finalize (including system TXs) reads from the
+						// BlockStateCache write buffer. This ensures the
+						// system TX sees all accumulated state from prior
+						// TXs in the block, not stale sd.mem values.
+						stateReader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsGetter(applyTx), be.blockStateCache)
 					}
 				}
 
