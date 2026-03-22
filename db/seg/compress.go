@@ -193,7 +193,7 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cf
 		lvl:              lvl,
 		wg:               wg,
 		logger:           logger,
-		version:          FileCompressionFormatV2,
+		version:          FileCompressionFormatV1,
 	}
 
 	if cfg.ValuesOnCompressedPage > 0 {
