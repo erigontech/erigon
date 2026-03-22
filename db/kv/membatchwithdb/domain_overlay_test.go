@@ -17,110 +17,82 @@
 package membatchwithdb_test
 
 import (
-	"context"
-	"math/big"
-	"runtime"
 	"testing"
 
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/state"
-	"github.com/erigontech/erigon/execution/state/genesiswrite"
-	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// TestDomainVisibilityAfterGenesis verifies that genesis domain state
-// can be read through a MemoryMutation overlay on a RO temporal tx.
-func TestDomainVisibilityAfterGenesis(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("MDBX page file pressure on Windows CI")
-	}
+// TestDomainOverlay verifies that DomainPut writes are visible through
+// GetLatest on a MemoryMutation, and that nested overlays (child on
+// parent) properly chain domain reads.
+func TestDomainOverlay(t *testing.T) {
+	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	logger := log.New()
 	logger.SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
 	db := temporaltest.NewTestDB(t, dirs)
-	ctx := context.Background()
 
-	funded := accounts.InternAddress(common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678"))
-	gspec := &types.Genesis{
-		Config:     chain.TestChainConfig,
-		GasLimit:   30_000_000,
-		Difficulty: uint256.NewInt(1),
-		Alloc: types.GenesisAlloc{
-			funded.Value(): {Balance: big.NewInt(1_000_000_000), Nonce: 42},
-			common.HexToAddress("0x00000961ef480eb55e80d19ad83579a64c007002"): {Balance: big.NewInt(0), Nonce: 1, Code: []byte{0x60, 0x00}},
-		},
-	}
-
-	// Step 1: CommitGenesisBlock (writes headers/TDs/config to KV, but NOT domain state).
-	_, genesis, err := genesiswrite.CommitGenesisBlock(db, gspec, "", dirs, logger)
-	require.NoError(t, err)
-	require.NotNil(t, genesis)
-
-	// Step 2: Write genesis alloc to domains via SharedDomains + Flush.
-	{
-		rwTx, err := db.BeginTemporalRw(ctx)
-		require.NoError(t, err)
-		defer rwTx.Rollback() //nolint:gocritic
-
-		sd, err := execctx.NewSharedDomains(ctx, rwTx, logger)
-		require.NoError(t, err)
-
-		_, _, err = genesiswrite.ComputeGenesisCommitment(ctx, gspec, rwTx, sd, genesis.Header())
-		require.NoError(t, err)
-
-		err = sd.Flush(ctx, rwTx)
-		require.NoError(t, err)
-		sd.Close()
-
-		err = rwTx.Commit()
-		require.NoError(t, err)
-	}
-
-	// Step 3: Read back via RO temporal tx.
-	roTx, err := db.BeginTemporalRo(ctx)
+	roTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	addr := funded.Value()
-	v, _, err := roTx.GetLatest(kv.AccountsDomain, addr[:])
-	t.Logf("RO tx GetLatest: len=%d err=%v", len(v), err)
-	require.NotEmpty(t, v, "account should be visible via direct GetLatest after SD flush")
-
-	reader := state.NewReaderV3(roTx)
-	acct, err := reader.ReadAccountData(funded)
+	// Create parent overlay and write a domain entry.
+	parent, err := membatchwithdb.NewMemoryBatch(roTx, "", logger)
 	require.NoError(t, err)
-	require.NotNil(t, acct, "account should be visible via ReaderV3")
-	t.Logf("ReaderV3: balance=%s nonce=%d", &acct.Balance, acct.Nonce)
-	require.False(t, acct.Balance.IsZero(), "should have non-zero balance")
+	defer parent.Close()
 
-	// Step 4: Read through MemoryMutation overlay.
-	overlay, err := membatchwithdb.NewMemoryBatch(roTx, "", logger)
-	require.NoError(t, err)
-	defer overlay.Close()
+	key := []byte("test-account-key-00000000000000000000")
+	val := []byte{0x42, 0x43}
+	require.NoError(t, parent.DomainPut(kv.AccountsDomain, key, val, 0, nil))
 
-	overlayReader := state.NewReaderV3(overlay)
-	acct2, err := overlayReader.ReadAccountData(funded)
+	// Read back from parent overlay.
+	got, _, err := parent.GetLatest(kv.AccountsDomain, key)
 	require.NoError(t, err)
-	require.NotNil(t, acct2, "account should be visible via overlay ReaderV3")
-	require.Equal(t, acct.Balance, acct2.Balance, "balance should match")
+	require.Equal(t, val, got, "parent overlay should return the written value")
 
-	// Test zero-balance system contract with nonce=1 and code.
-	sysAddr := accounts.InternAddress(common.HexToAddress("0x00000961ef480eb55e80d19ad83579a64c007002"))
-	sysAcct, err := overlayReader.ReadAccountData(sysAddr)
+	// Create child overlay on top of parent — reads should chain through.
+	child, err := membatchwithdb.NewMemoryBatch(parent, "", logger)
 	require.NoError(t, err)
-	require.NotNil(t, sysAcct, "system contract should be visible")
-	t.Logf("system contract: nonce=%d balance=%s", sysAcct.Nonce, &sysAcct.Balance)
-	require.Equal(t, uint64(1), sysAcct.Nonce, "system contract should have nonce=1")
+	defer child.Close()
+
+	got2, _, err := child.GetLatest(kv.AccountsDomain, key)
+	require.NoError(t, err)
+	require.Equal(t, val, got2, "child overlay should see parent's domain write")
+
+	// Write to child, verify it shadows the parent.
+	val2 := []byte{0x99}
+	require.NoError(t, child.DomainPut(kv.AccountsDomain, key, val2, 0, nil))
+
+	got3, _, err := child.GetLatest(kv.AccountsDomain, key)
+	require.NoError(t, err)
+	require.Equal(t, val2, got3, "child should return its own write")
+
+	// Parent should still have the original value.
+	got4, _, err := parent.GetLatest(kv.AccountsDomain, key)
+	require.NoError(t, err)
+	require.Equal(t, val, got4, "parent should be unaffected by child write")
+
+	// DomainDel in child — verify deletion is visible.
+	require.NoError(t, child.DomainDel(kv.AccountsDomain, key, 0, nil))
+	got5, _, err := child.GetLatest(kv.AccountsDomain, key)
+	require.NoError(t, err)
+	require.Nil(t, got5, "child should return nil after DomainDel")
+
+	// Parent still has the original value.
+	got6, _, err := parent.GetLatest(kv.AccountsDomain, key)
+	require.NoError(t, err)
+	require.Equal(t, val, got6, "parent should still have value after child DomainDel")
+
+	// FlushDomains — merge child into parent.
+	require.NoError(t, child.FlushDomains(parent))
+	got7, _, err := parent.GetLatest(kv.AccountsDomain, key)
+	require.NoError(t, err)
+	require.Nil(t, got7, "after FlushDomains, parent should see child's delete")
 }
