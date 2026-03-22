@@ -1,0 +1,67 @@
+# epbs-devnet-0: EIP-7732 ePBS / GLOAS devnet
+name: epbs-devnet-0
+description: EIP-7732 ePBS (enshrined Proposer-Builder Separation) / GLOAS
+branch: feature/caplin_gloas
+
+# Network
+chain_id: 7055777152
+genesis_timestamp: 1772634659  # 2026-Mar-04 14:30:59 UTC
+
+# CL architecture
+embedded_cl: true   # Caplin (single process, no external CL)
+cl_type: caplin
+
+# Working directory
+workdir: /root/epbs-devnet-0
+
+# URLs
+explorer: https://explorer.epbs-devnet-0.ethpandaops.io
+faucet: https://faucet.epbs-devnet-0.ethpandaops.io
+rpc: https://rpc.epbs-devnet-0.ethpandaops.io
+checkpoint_sync: https://checkpoint-sync.epbs-devnet-0.ethpandaops.io
+config_base: https://raw.githubusercontent.com/ethpandaops/epbs-devnets/master/network-configs/devnet-0/metadata
+inventory_api: https://config.epbs-devnet-0.ethpandaops.io/api/v1/nodes/inventory
+
+# Config file URLs (for first-run download)
+genesis_json_url: ${config_base}/genesis.json
+config_yaml_url: ${config_base}/config.yaml
+genesis_ssz_url: ${config_base}/genesis.ssz
+enodes_url: ${config_base}/enodes.txt
+bootnodes_url: ${config_base}/bootstrap_nodes.txt
+
+# Port assignments (offset +200)
+port_offset: 200
+el_http: 8745
+el_authrpc: 8751
+el_ws: 8746
+el_p2p: 30503
+el_grpc: 9290
+el_torrent: 42269
+el_pprof: 6260
+el_metrics: 6261
+cl_discovery_udp: 4200
+cl_discovery_tcp: 4201
+cl_beacon_api: 5755
+
+# Env vars
+env:
+  ERIGON_EXEC3_PARALLEL: "true"
+  ERIGON_ASSERT: "true"
+  ERIGON_EXEC3_WORKERS: "12"
+  LOG_HASH_MISMATCH_REASON: "true"
+
+# Erigon extra flags (Caplin-specific)
+extra_el_flags: ""
+extra_cl_flags: >-
+  --caplin.custom-config=${workdir}/config.yaml
+  --caplin.custom-genesis=${workdir}/genesis.ssz
+  --caplin.checkpoint-sync-url=${checkpoint_sync}
+  --caplin.discovery.addr=0.0.0.0
+  --caplin.discovery.port=${cl_discovery_udp}
+  --caplin.discovery.tcpport=${cl_discovery_tcp}
+  --beacon.api=beacon,builder,config,debug,events,node,validator,lighthouse
+  --beacon.api.addr=0.0.0.0
+  --beacon.api.port=${cl_beacon_api}
+
+# Process management
+stop_command: pkill -f "datadir.*epbs-devnet-0/erigon-data"
