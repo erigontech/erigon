@@ -34,10 +34,10 @@ var _ rulesif.ChainReader = (*LightChainReader)(nil)
 // for headers and total difficulties, falling back to rawdb reads on
 // the provided tx for genesis data.
 type LightChainReader struct {
-	Config_  *chain.Config
-	Headers  map[common.Hash]*types.Header // hash -> header
-	TDs      map[common.Hash]*big.Int      // hash -> td
-	Tx       kv.Tx                         // fallback for genesis reads
+	Config_ *chain.Config
+	Headers map[common.Hash]*types.Header // hash -> header
+	TDs     map[common.Hash]*big.Int      // hash -> td
+	Tx      kv.Tx                         // fallback for genesis reads
 }
 
 // NewLightChainReader creates a LightChainReader with empty header/TD maps.

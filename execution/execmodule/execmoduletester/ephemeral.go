@@ -307,4 +307,3 @@ func (emt *ExecModuleTester) EphemeralOverlay() *membatchwithdb.MemoryMutation {
 func (emt *ExecModuleTester) EphemeralLastBlockHash() common.Hash {
 	return emt.ephemeralLastHash
 }
-
