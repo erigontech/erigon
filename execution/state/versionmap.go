@@ -368,7 +368,9 @@ func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path Acco
 		if valid == VersionValid && path == AddressPath {
 			for _, fieldPath := range []AccountPath{BalancePath, NoncePath} {
 				fieldRR := vm.Read(addr, fieldPath, accounts.NilKey, txIndex)
-				if fieldRR.Status() == MVReadResultDone {
+				// Skip entries from the current TX's own finalize —
+				// applyVersionedUpdates already incorporated them.
+				if fieldRR.Status() == MVReadResultDone && fieldRR.DepIdx() != txIndex {
 					if fv := checkVersion(version, fieldRR.Version()); fv != VersionValid {
 						valid = fv
 						break
@@ -400,17 +402,14 @@ func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path Acco
 					valid = vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
 						version, checkVersion, traceInvalid, tracePrefix)
 
-					// Cross-check: if a prior TX's finalize wrote BalancePath
-					// or NoncePath, an AddressPath StorageRead is stale.
-					if valid == VersionValid {
-						for _, fp := range []AccountPath{BalancePath, NoncePath} {
-							fpRR := vm.Read(addr, fp, accounts.NilKey, txIndex)
-							if fpRR.Status() == MVReadResultDone {
-								valid = VersionInvalid
-								break
-							}
-						}
-					}
+					// Note: no BalancePath/NoncePath cross-check for AddressPath
+					// StorageRead. The VersionedStateReader's applyVersionedUpdates
+					// automatically applies field-level updates from the versionMap
+					// when constructing the account. This means the balance/nonce
+					// in the returned account IS correct even when AddressPath
+					// itself is read from storage. Cross-checking would cause
+					// infinite re-execution since the ReadSet always records
+					// AddressPath as StorageRead (no AddressPath entry in versionMap).
 				}
 			}
 		}
