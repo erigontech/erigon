@@ -356,13 +356,14 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 		//
 		// The regular base gas is deducted here (not by the interpreter)
 		// so that step 2 sees the correct gas_left.
+		tracer := evm.Config().Tracer
 		regularBase := accessGas + statefulBaseGas.Regular
-		if !callContext.useMdGas(evm, regularBase, mdgas.RegularGas, nil, tracing.GasChangeIgnored) {
+		if !callContext.useMdGas(evm, regularBase, mdgas.RegularGas, tracer, tracing.GasChangeCallOpCode) {
 			return mdgas.MdGas{}, ErrOutOfGas
 		}
 
 		if statefulBaseGas.State > 0 {
-			ok := callContext.useMdGas(evm, statefulBaseGas.State, mdgas.StateGas, nil, tracing.GasChangeIgnored)
+			ok := callContext.useMdGas(evm, statefulBaseGas.State, mdgas.StateGas, tracer, tracing.GasChangeCallOpCode)
 			if !ok {
 				return mdgas.MdGas{}, ErrOutOfGas
 			}
@@ -386,7 +387,7 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 			if err != nil {
 				return mdgas.MdGas{}, err
 			}
-			if !callContext.useMdGas(evm, delegationGas, mdgas.RegularGas, nil, tracing.GasChangeIgnored) {
+			if !callContext.useMdGas(evm, delegationGas, mdgas.RegularGas, tracer, tracing.GasChangeCallOpCode) {
 				return mdgas.MdGas{}, ErrOutOfGas
 			}
 			availableGas = callContext.Gas()
