@@ -1540,6 +1540,18 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 		}
 	}
 
+	// Prioritize domain merges: if any domain has pending merges, skip II merges this round.
+	domainMergePending := false
+	for _, dr := range &r.domain {
+		if dr.any() {
+			domainMergePending = true
+			break
+		}
+	}
+	if !domainMergePending {
+		return r
+	}
+
 	for id, ii := range at.iis {
 		if ii.ii.Disable {
 			continue
