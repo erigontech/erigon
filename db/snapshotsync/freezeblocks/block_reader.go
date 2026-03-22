@@ -929,6 +929,30 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 			// Transactions snapshot missing for this block range (e.g. incomplete snapshot
 			// set where only headers/bodies were generated). Try reading transactions from DB.
 			if tx != nil {
+				// Prefer the DB body's baseTxnId over the snapshot body's baseTxnId.
+				// BodiesForward downloads P2P blocks and writes them via WriteRawBody
+				// which allocates a fresh sequence position in EthTx (different from
+				// the snapshot body's original baseTxnId). The DB body records that
+				// new position, so it has the correct up-to-date transactions.
+				dbBody, dbErr := rawdb.ReadBodyForStorageByKey(tx, dbutils.BlockBodyKey(blockHeight, hash))
+				if dbErr != nil {
+					return nil, nil, dbErr
+				}
+				if dbBody != nil {
+					var dbTxCount uint32
+					if dbBody.TxCount >= 2 {
+						dbTxCount = dbBody.TxCount - 2
+					}
+					dbTxs, err := rawdb.CanonicalTransactions(tx, dbBody.BaseTxnID.First(), dbTxCount)
+					if err != nil {
+						return nil, nil, err
+					}
+					if uint32(len(dbTxs)) == txCount {
+						block = types.NewBlockFromStorage(hash, h, dbTxs, b.Uncles, b.Withdrawals)
+						return block, nil, nil
+					}
+				}
+				// DB body missing or transactions incomplete; fall back to snapshot baseTxnId.
 				dbTxs, err := rawdb.CanonicalTransactions(tx, baseTxnId, txCount)
 				if err != nil {
 					return nil, nil, err

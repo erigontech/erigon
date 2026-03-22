@@ -96,6 +96,13 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, br services.FullBlockReader, bw *blocki
 		return err
 	}
 
+	// Clear EthTx entirely so stale or data-race-corrupted entries don't survive.
+	// FillDBFromSnapshots will reset the sequence counter to the correct value.
+	// BodiesForward will re-populate EthTx for the leading gap range from P2P.
+	if err := tx.ClearTable(kv.EthTx); err != nil {
+		return err
+	}
+
 	if br.FrozenBlocks() > 0 {
 		logger.Info("filling db from snapshots", "blocks", br.FrozenBlocks())
 		if err := FillDBFromSnapshots("filling_db_from_snapshots", context.Background(), tx, dirs, br, logger); err != nil {
