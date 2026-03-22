@@ -81,7 +81,7 @@ type preverifiedAppendListsSizes struct {
 }
 
 type ForkChoiceStore struct {
-	time        atomic.Uint64
+	time            atomic.Uint64
 	highestSeen     atomic.Uint64
 	highestSeenRoot atomic.Value // common.Hash
 	// all of *solid.Checkpoint type

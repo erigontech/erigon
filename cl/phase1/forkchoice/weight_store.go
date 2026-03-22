@@ -41,12 +41,17 @@ type WeightStore interface {
 
 // weightStore implements WeightStore interface.
 type weightStore struct {
-	f *ForkChoiceStore
+	f               *ForkChoiceStore
+	checkpointState *checkpointState // cached per getHeadGloas invocation
 }
 
 // NewWeightStore creates a new WeightStore for the given ForkChoiceStore.
+// It pre-fetches the checkpoint state once so that repeated calls to
+// GetAttestationScore / GetProposerScore avoid redundant disk reads.
 func NewWeightStore(f *ForkChoiceStore) WeightStore {
-	return &weightStore{f: f}
+	justifiedCheckpoint := f.JustifiedCheckpoint()
+	cs, _ := f.getCheckpointState(justifiedCheckpoint)
+	return &weightStore{f: f, checkpointState: cs}
 }
 
 // GetWeight returns the weight for a ForkChoiceNode.
@@ -112,9 +117,8 @@ func (w *weightStore) GetWeight(node ForkChoiceNode) uint64 {
 // [New in Gloas:EIP7732]
 // Uses is_supporting_vote to check if a validator's vote supports the node.
 func (w *weightStore) GetAttestationScore(node ForkChoiceNode) uint64 {
-	justifiedCheckpoint := w.f.JustifiedCheckpoint()
-	checkpointState, err := w.f.getCheckpointState(justifiedCheckpoint)
-	if err != nil {
+	checkpointState := w.checkpointState
+	if checkpointState == nil {
 		return 0
 	}
 
@@ -150,9 +154,8 @@ func (w *weightStore) GetAttestationScore(node ForkChoiceNode) uint64 {
 // proposer_score = (committee_weight * PROPOSER_SCORE_BOOST) / 100
 // where committee_weight = total_active_balance / SLOTS_PER_EPOCH
 func (w *weightStore) GetProposerScore() uint64 {
-	justifiedCheckpoint := w.f.JustifiedCheckpoint()
-	checkpointState, err := w.f.getCheckpointState(justifiedCheckpoint)
-	if err != nil {
+	checkpointState := w.checkpointState
+	if checkpointState == nil {
 		return 0
 	}
 
