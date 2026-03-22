@@ -183,12 +183,21 @@ func ExecuteBlockEphemerally(
 		}
 	}
 	var newBlock *types.Block
+	var requests types.FlatRequests
 	var err error
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
-		newBlock, _, err = FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, true, logger, vmConfig.Tracer)
+		newBlock, requests, err = FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, true, logger, vmConfig.Tracer)
 		if err != nil {
 			return nil, err
+		}
+	}
+
+	// Validate requests hash (EIP-6110/7002/7251/7685).
+	if !vmConfig.StatelessExec && header.RequestsHash != nil {
+		computedHash := requests.Hash()
+		if *computedHash != *header.RequestsHash {
+			return nil, fmt.Errorf("invalid requests hash: computed %x, header %x", *computedHash, *header.RequestsHash)
 		}
 	}
 	blockLogs := ibs.Logs()
