@@ -883,8 +883,15 @@ func clientLimitExceededError(message string) error {
 }
 
 func newHistoryCommitmentOnlyReader(roTx kv.TemporalTx, sd *execctx.SharedDomains, limitReadAsOfTxNum uint64) commitmentdb.StateReader {
-	// Commitment values are read from history, whereas account/storage/code values are read from latest state
-	return commitmentdb.NewCommitmentSplitStateReader(commitmentdb.NewHistoryStateReader(roTx, limitReadAsOfTxNum), commitmentdb.NewLatestStateReader(roTx, sd), true)
+	// Commitment domain: read trie branches from history (SeekCommitment snapshot at parent block).
+	// Account/storage/code: use SimulationPlainStateReader which reads from sd.mem for dirty
+	// (simulation-modified) accounts and from GetAsOf at limitReadAsOfTxNum for clean sibling
+	// accounts. This makes the commitment hash deterministic regardless of the node's sync state.
+	return commitmentdb.NewCommitmentSplitStateReader(
+		commitmentdb.NewHistoryStateReader(roTx, limitReadAsOfTxNum),
+		commitmentdb.NewSimulationPlainStateReader(roTx, sd, limitReadAsOfTxNum),
+		true,
+	)
 }
 
 func newSimulateStateReader(ttx, tx kv.TemporalTx, tsd, sd *execctx.SharedDomains) commitmentdb.StateReader {

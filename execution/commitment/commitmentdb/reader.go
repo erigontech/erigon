@@ -241,6 +241,50 @@ func (r *RebuildStateReader) Clone(tx kv.TemporalTx) StateReader {
 	return NewRebuildStateReader(tx, r.sd, r.plainStateAsOf)
 }
 
+// SimulationPlainStateReader is the plain-state half of the reader used by eth_simulateV1 when
+// computing the commitment hash for a simulated block on top of a frozen (historical) parent block.
+//
+// Reads are routed as follows:
+//   - If the key is in the shared-domains mem batch (dirty — modified by the simulation):
+//     returns the post-simulation value directly from the mem batch.
+//   - Otherwise (clean — unmodified sibling accounts):
+//     returns the historical value via GetAsOf at limitReadAsOfTxNum, so the trie
+//     reflects the canonical state at the parent block rather than the node's current
+//     latest DB state (which varies with sync progress and causes non-determinism).
+type SimulationPlainStateReader struct {
+	sd                 sd
+	histReader         *HistoryStateReader
+	limitReadAsOfTxNum uint64
+}
+
+func NewSimulationPlainStateReader(roTx kv.TemporalTx, sd sd, limitReadAsOfTxNum uint64) *SimulationPlainStateReader {
+	return &SimulationPlainStateReader{
+		sd:                 sd,
+		histReader:         NewHistoryStateReader(roTx, limitReadAsOfTxNum),
+		limitReadAsOfTxNum: limitReadAsOfTxNum,
+	}
+}
+
+func (r *SimulationPlainStateReader) WithHistory() bool { return true }
+
+func (r *SimulationPlainStateReader) CheckDataAvailable(kv.Domain, kv.Step) error { return nil }
+
+func (r *SimulationPlainStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
+	// Check the mem batch first: if the account is dirty (modified by simulation), use
+	// the post-simulation value so leaf hashes are computed with the correct new state.
+	if v, s, ok := r.sd.MemGetLatest(d, plainKey); ok {
+		return v, s, nil
+	}
+	// Clean account (not touched by simulation): use the historical value so sibling
+	// branch hashes are computed from the canonical parent-block state, not from the
+	// node's current latest DB (which differs across nodes and causes non-determinism).
+	return r.histReader.Read(d, plainKey, stepSize)
+}
+
+func (r *SimulationPlainStateReader) Clone(tx kv.TemporalTx) StateReader {
+	return NewSimulationPlainStateReader(tx, r.sd, r.limitReadAsOfTxNum)
+}
+
 // A history reader that reads:
 //   - commitment data as-of  commitmentAsOf txnum
 //   - account/storage/code data as-of plainsStateAsOf txnum
