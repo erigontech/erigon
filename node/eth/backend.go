@@ -52,7 +52,6 @@ import (
 	"github.com/erigontech/erigon/common/disk"
 	"github.com/erigontech/erigon/common/event"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
@@ -71,7 +70,6 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/diagnostics/mem"
@@ -80,7 +78,6 @@ import (
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/engineapi"
 	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
-	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	execp2p "github.com/erigontech/erigon/execution/p2p"
@@ -203,7 +200,6 @@ type Ethereum struct {
 	txPoolRpcClient           txpoolproto.TxpoolClient
 	shutterPool               *shutter.Pool
 	blockBuilderNotifyNewTxns chan struct{}
-	forkValidator             *engine_helpers.ForkValidator
 	downloader                *downloader.Downloader
 
 	blockSnapshots *freezeblocks.RoSnapshots
@@ -608,31 +604,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	backend.engine = rulesconfig.CreateRulesEngine(ctx, stack.Config(), chainConfig, rulesConfig, false /* noVerify */, config.WithoutHeimdall, blockReader, false /* readonly */, logger, polygonBridge, heimdallService)
 
-	inMemoryExecution := func(sd *execctx.SharedDomains, tx kv.TemporalRwTx, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
-		notifications *shards.Notifications) error {
-		terseLogger := log.New()
-		terseLogger.SetHandler(log.LvlFilterHandler(log.Lvl(dbg.ExecTerseLoggerLevel), log.StderrHandler))
-		// Needs its own notifications to not update RPC daemon and txpool about pending blocks
-		stateSync := stageloop.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentriesClient,
-			dirs, notifications, blockReader, blockWriter, terseLogger)
-		chainReader := consensuschain.NewReader(chainConfig, tx, blockReader, logger)
-		// We start the mining step
-		if err := stageloop.StateStep(ctx, chainReader, backend.engine, sd, tx, stateSync, unwindPoint, headersChain, bodiesChain); err != nil {
-			logger.Warn("Could not validate block", "err", err)
-			return err
-		}
-		var progress uint64
-		progress, err = stages.GetStageProgress(tx, stages.Execution)
-		if err != nil {
-			return err
-		}
-		lastNum := headersChain[len(headersChain)-1].Number.Uint64()
-		if progress < lastNum {
-			return fmt.Errorf("unsuccessful execution, progress %d < expected %d", progress, lastNum)
-		}
-		return nil
-	}
-	backend.forkValidator = engine_helpers.NewForkValidator(ctx, currentBlockNumber, inMemoryExecution, tmpdir, backend.blockReader, config.MaxReorgDepth)
+	// ForkValidator is created later, after pipelineStagedSync and PipelineExecutor are ready.
 
 	statusDataProvider := sentry.NewStatusDataProvider(
 		backend.chainDB,
@@ -967,7 +939,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	backend.syncStages = stageloop.NewDefaultStages(backend.sentryCtx, backend.chainDB, p2pConfig, config, backend.sentriesClient, backend.notifications, backend.downloaderClient,
-		blockReader, blockRetire, backend.forkValidator, tracer, afterSnapshotDownload)
+		blockReader, blockRetire, tracer, afterSnapshotDownload)
 	backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
 	backend.syncPruneOrder = stagedsync.DefaultPruneOrder
 
@@ -975,16 +947,22 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	hook := stageloop.NewHook(backend.sentryCtx, backend.notifications, backend.stagedSync, backend.chainConfig, backend.logger, backend.sentriesClient.SetStatus, statusDataProvider, executionPublisher)
 
-	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, backend.forkValidator, tracer, afterSnapshotDownload)
+	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, tracer, afterSnapshotDownload)
 	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
+
+	validationNotifications := shards.NewNotifications(nil)
+	validationSync := stageloop.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentriesClient,
+		validationNotifications, blockReader, blockWriter, logger)
+	pipelineExecutor := execmodule.NewPipelineExecutor(backend.pipelineStagedSync, backend.chainDB, blockReader, chainConfig, backend.engine, validationSync, validationNotifications, logger)
+
 	// for polygon, we only need to download snapshots on start so that all driver components are correctly initialised before any block execution begins
 	onlySnapDownloadOnStart := chainConfig.Bor != nil
 	backend.execModule = execmodule.NewExecModule(
 		ctx,
 		blockReader,
 		backend.chainDB,
-		backend.pipelineStagedSync,
-		backend.forkValidator,
+		pipelineExecutor,
+		currentBlockNumber,
 		chainConfig,
 		blkBuilder.Build,
 		hook,

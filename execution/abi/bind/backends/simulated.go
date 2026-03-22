@@ -83,7 +83,8 @@ type SimulatedBackend struct {
 	pendingReceipts types.Receipts
 	pendingHeader   *types.Header
 	gasPool         *protocol.GasPool
-	pendingBlock    *types.Block // Currently pending block that will be imported on request
+	pendingGasUsed  *protocol.GasUsed // EIP-8037: cumulative per-dimension gas
+	pendingBlock    *types.Block      // Currently pending block that will be imported on request
 	pendingReader   state.StateReader
 	pendingReaderTx kv.TemporalTx
 	pendingState    *state.IntraBlockState // Currently pending state that will be the active on request
@@ -180,6 +181,7 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 	b.pendingReceipts = blockChain.Receipts[0]
 	b.pendingHeader = blockChain.Headers[0]
 	b.gasPool = new(protocol.GasPool).AddGas(b.pendingHeader.GasLimit).AddBlobGas(b.m.ChainConfig.GetMaxBlobGasPerBlock(b.pendingHeader.Time))
+	b.pendingGasUsed = new(protocol.GasUsed)
 	if b.pendingReaderTx != nil {
 		b.pendingReaderTx.Rollback()
 	}
@@ -784,17 +786,16 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, txn types.Transa
 
 	b.pendingState.SetTxContext(b.pendingBlock.NumberU64(), len(b.pendingBlock.Transactions()))
 	//fmt.Printf("==== Start producing block %d, header: %d\n", b.pendingBlock.NumberU64(), b.pendingHeader.Number.Uint64())
-	gasUsed := protocol.NewGasUsed(b.pendingHeader, 0)
 	if _, err := protocol.ApplyTransaction(
 		b.m.ChainConfig, protocol.GetHashFn(b.pendingHeader, b.getHeader), b.m.Engine,
 		accounts.InternAddress(b.pendingHeader.Coinbase), b.gasPool,
 		b.pendingState, state.NewNoopWriter(),
 		b.pendingHeader, txn,
-		gasUsed,
+		b.pendingGasUsed,
 		vm.Config{}); err != nil {
 		return err
 	}
-	protocol.SetGasUsed(b.pendingHeader, gasUsed)
+	protocol.SetGasUsed(b.pendingHeader, b.pendingGasUsed)
 	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))
 	chain, err := blockgen.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(number int, block *blockgen.BlockGen) {
 		for _, txn := range b.pendingBlock.Transactions() {

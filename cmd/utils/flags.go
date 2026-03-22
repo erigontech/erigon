@@ -223,6 +223,11 @@ var (
 		Usage: "How often transactions should be committed to the storage",
 		Value: txpoolcfg.DefaultConfig.CommitEvery,
 	}
+	TxPoolQueuedDormancyFlag = cli.DurationFlag{
+		Name:  "txpool.queued.dormancy",
+		Usage: "Evict queued transactions from senders with no on-chain state changes for this duration (e.g. 3h, 2h30m; 0 to disable)",
+		Value: txpoolcfg.DefaultConfig.QueuedDormancyDuration,
+	}
 
 	// Block builder/proposer settings
 	ProposingDisableFlag = cli.BoolFlag{
@@ -862,6 +867,20 @@ var (
 		Name:  "caplin.enable-upnp",
 		Usage: "Enable NAT porting for Caplin",
 		Value: false,
+	}
+	CaplinNATFlag = cli.StringFlag{
+		Name: "caplin.nat",
+		Usage: `NAT port mapping for Caplin P2P. Sets the external IP advertised in the discv5 ENR and libp2p
+		multiaddrs while the socket still binds to --caplin.discovery.addr (typically 0.0.0.0).
+		Required when running inside Docker or behind NAT to allow incoming peer connections.
+		         ""               Default — no NAT, use bind address as-is
+		         "extip:1.2.3.4"  Explicit public IP (recommended for VPS/Docker with static IP)
+		         "stun"           Detect public IP via STUN (default server: stun.l.google.com:19302)
+		         "stun:<host>"    Detect public IP via STUN using a custom server
+		         "upnp"           Use UPnP to discover external IP and map ports (home routers)
+		         "pmp"            Use NAT-PMP with auto-detected gateway
+		         "pmp:192.168.0.1" Use NAT-PMP with explicit gateway`,
+		Value: "",
 	}
 	CaplinMaxInboundTrafficPerPeerFlag = cli.StringFlag{
 		Name:  "caplin.max-inbound-traffic-per-peer",
@@ -1548,6 +1567,9 @@ func setTxPool(ctx *cli.Context, dbDir string, fullCfg *ethconfig.Config) {
 	cfg.AllowAA = ctx.Bool(AAFlag.Name)
 	cfg.LogEvery = 3 * time.Minute
 	cfg.CommitEvery = common.RandomizeDuration(ctx.Duration(TxPoolCommitEveryFlag.Name))
+	if ctx.IsSet(TxPoolQueuedDormancyFlag.Name) {
+		cfg.QueuedDormancyDuration = ctx.Duration(TxPoolQueuedDormancyFlag.Name)
+	}
 	cfg.DBDir = dbDir
 	fullCfg.TxPool = cfg
 }
@@ -1820,6 +1842,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		cfg.AlwaysGenerateChangesets = ctx.Bool(AlwaysGenerateChangesetsFlag.Name)
 	}
 	cfg.CaplinConfig.EnableUPnP = ctx.Bool(CaplinEnableUPNPlag.Name)
+	cfg.CaplinConfig.CaplinNAT = ctx.String(CaplinNATFlag.Name)
 	var err error
 	cfg.CaplinConfig.MaxInboundTrafficPerPeer, err = datasize.ParseString(ctx.String(CaplinMaxInboundTrafficPerPeerFlag.Name))
 	if err != nil {

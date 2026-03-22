@@ -2641,9 +2641,9 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 	//hph.trace = true
 
+	hph.metrics.Reset()
+	hph.metrics.updates.Store(updatesCount)
 	if hph.metrics.collectCommitmentMetrics {
-		hph.metrics.Reset()
-		hph.metrics.updates.Store(updatesCount)
 		defer func() {
 			hph.metrics.TotalProcessingTimeInc(start)
 			hph.metrics.WriteToCSV()
@@ -2874,6 +2874,11 @@ func (hph *HexPatriciaHashed) ResetContext(ctx PatriciaContext) {
 	hph.ctx = ctx
 }
 
+// Cache returns the active warmup cache, or nil if none is set.
+func (hph *HexPatriciaHashed) Cache() *WarmupCache {
+	return hph.cache
+}
+
 // branchFromCacheOrDB reads branch data from cache if available, otherwise from DB.
 func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 	if hph.cache != nil {
@@ -2882,6 +2887,9 @@ func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 				hph.metrics.cacheBranch.Add(1)
 			}
 			return data, nil
+		}
+		if hph.metrics != nil {
+			hph.metrics.missBranch.Add(1)
 		}
 	}
 	data, _, err := hph.ctx.Branch(key)
@@ -2897,6 +2905,9 @@ func (hph *HexPatriciaHashed) accountFromCacheOrDB(plainKey []byte) (*Update, er
 			}
 			return update, nil
 		}
+		if hph.metrics != nil {
+			hph.metrics.missAccount.Add(1)
+		}
 	}
 	return hph.ctx.Account(plainKey)
 }
@@ -2909,6 +2920,9 @@ func (hph *HexPatriciaHashed) storageFromCacheOrDB(plainKey []byte) (*Update, er
 				hph.metrics.cacheStorage.Add(1)
 			}
 			return update, nil
+		}
+		if hph.metrics != nil {
+			hph.metrics.missStorage.Add(1)
 		}
 	}
 	return hph.ctx.Storage(plainKey)

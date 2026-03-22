@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
-	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/metrics"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
@@ -123,9 +122,15 @@ func (e *ExecModule) UpdateForkChoice(ctx context.Context, req *executionproto.F
 	finalizedHash := gointerfaces.ConvertH256ToHash(req.FinalizedBlockHash)
 
 	outcomeCh := make(chan forkchoiceOutcome, 1)
+	// done is closed when the goroutine fully returns — after all defers
+	// (shared-state cleanup, semaphore release) have run. When we receive
+	// a non-Busy result, we wait on done so the caller can safely acquire
+	// the semaphore for a follow-up operation like AssembleBlock.
+	done := make(chan struct{})
 
 	// So we wait at most the amount specified by req.Timeout before just sending out
 	go func() {
+		defer close(done)
 		if err := e.updateForkChoice(e.bacgroundCtx, blockHash, safeHash, finalizedHash, outcomeCh); err != nil {
 			e.logger.Debug("updateforkchoice failed", "err", err)
 		}
@@ -142,6 +147,7 @@ func (e *ExecModule) UpdateForkChoice(ctx context.Context, req *executionproto.F
 				Status:          executionproto.ExecutionStatus_Busy,
 			}, nil
 		case outcome := <-outcomeCh:
+			<-done
 			return outcome.receipt, outcome.err
 		case <-ctx.Done():
 			e.logger.Debug("forkChoiceUpdate cancelled")
@@ -151,6 +157,7 @@ func (e *ExecModule) UpdateForkChoice(ctx context.Context, req *executionproto.F
 
 	select {
 	case outcome := <-outcomeCh:
+		<-done
 		return outcome.receipt, outcome.err
 	case <-ctx.Done():
 		e.logger.Debug("forkChoiceUpdate cancelled")
@@ -369,14 +376,14 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			unwindTarget = minUnwindableBlock
 		}
 
-		if err := e.executionPipeline.UnwindTo(unwindTarget, stagedsync.ForkChoice, tx); err != nil {
+		if err := e.pipelineExecutor.UnwindTo(unwindTarget, stagedsync.ForkChoice, tx); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
 		if err = e.hook.BeforeRun(tx, isSynced); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
 		// Run the unwind
-		if err := e.executionPipeline.RunUnwind(currentContext, tx); err != nil {
+		if err := e.pipelineExecutor.RunUnwind(currentContext, tx); err != nil {
 			err = fmt.Errorf("updateForkChoice: %w", err)
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
@@ -479,64 +486,59 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	initialCycle := limitedBigJump
 	firstCycle := false
 
-	sendError := func(msg string, err error) error {
-		err = fmt.Errorf("%s: %w", msg, err)
-		e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
-		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
-	}
-
-	for hasMore := true; hasMore; {
-		currentContext.SetStateCache(e.stateCache)
-		hasMore, err = e.executionPipeline.Run(currentContext, tx, initialCycle, firstCycle)
-		if err != nil {
-			err = fmt.Errorf("updateForkChoice: %w", err)
-			e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
-			if errors.Is(err, rules.ErrInvalidBlock) {
-				return sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{
-					Status:          executionproto.ExecutionStatus_BadBlock,
-					ValidationError: err.Error(),
-					LatestValidHash: gointerfaces.ConvertHashToH256(rawdb.ReadHeadBlockHash(tx)),
-				}, stateFlushingInParallel)
-			}
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
-		}
-		if hasMore {
-			err = e.executionPipeline.RunPrune(ctx, tx, initialCycle, 500*time.Millisecond)
-			if err != nil {
-				return sendError("updateForkChoice: RunPrune after hasMore", err)
-			}
-			// Flush SD (block overlay + domain mem) to a brief RwTx to relieve memory pressure.
+	tx, err = e.pipelineExecutor.RunLoop(ctx, currentContext, tx, RunLoopConfig{
+		InitialCycle: initialCycle,
+		FirstCycle:   firstCycle,
+		PruneTimeout: 500 * time.Millisecond,
+		BeforeIteration: func(sd *execctx.SharedDomains) {
+			sd.SetStateCache(e.stateCache)
+		},
+		CommitCycle: func(ctx context.Context, sd *execctx.SharedDomains) (kv.TemporalRwTx, error) {
+			// Flush SD + overlay to a brief RwTx to relieve memory pressure.
 			commitRwTx, err := e.db.BeginTemporalRw(ctx) //nolint:gocritic
 			if err != nil {
-				return sendError("updateForkChoice: begin rw after hasMore", err)
+				return nil, fmt.Errorf("updateForkChoice: begin rw after hasMore: %w", err)
 			}
-			if err := currentContext.Flush(ctx, commitRwTx); err != nil {
+			if err := sd.Flush(ctx, commitRwTx); err != nil {
 				commitRwTx.Rollback()
-				return sendError("updateForkChoice: flush sd after hasMore", err)
+				return nil, fmt.Errorf("updateForkChoice: flush sd after hasMore: %w", err)
 			}
-			currentContext.ClearRam(true)
+			sd.ClearRam(true)
 			if err = commitRwTx.Commit(); err != nil {
-				return sendError("updateForkChoice: tx commit after hasMore", err)
+				return nil, fmt.Errorf("updateForkChoice: tx commit after hasMore: %w", err)
 			}
 			// Recreate RO tx + block overlay on the fresh committed state.
 			roTx.Rollback()
 			roTx, err = e.db.BeginTemporalRo(ctx) //nolint:gocritic
 			if err != nil {
-				return sendError("updateForkChoice: begin ro after hasMore", err)
+				return nil, fmt.Errorf("updateForkChoice: begin ro after hasMore: %w", err)
 			}
-			if err := currentContext.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
+			if err := sd.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
 				roTx.Rollback()
-				return sendError("updateForkChoice: init overlay after hasMore", err)
+				return nil, fmt.Errorf("updateForkChoice: init overlay after hasMore: %w", err)
 			}
-			tx = currentContext.BlockOverlay()
+			newTx := sd.BlockOverlay()
 			// Re-flush InsertBlocks data into the fresh overlay.
 			if hasOverlay {
 				e.currentContext.BlockOverlay().UpdateTxn(roTx)
-				if err := e.currentContext.BlockOverlay().Flush(ctx, tx); err != nil {
-					return sendError("updateForkChoice: re-flush overlay after hasMore", err)
+				if err := e.currentContext.BlockOverlay().Flush(ctx, newTx); err != nil {
+					return nil, fmt.Errorf("updateForkChoice: re-flush overlay after hasMore: %w", err)
 				}
 			}
+			return newTx, nil
+		},
+	})
+	if err != nil {
+		err = fmt.Errorf("updateForkChoice: %w", err)
+		e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
+		if errors.Is(err, rules.ErrInvalidBlock) {
+			return sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{
+				Status:          executionproto.ExecutionStatus_BadBlock,
+				ValidationError: err.Error(),
+				LatestValidHash: gointerfaces.ConvertHashToH256(rawdb.ReadHeadBlockHash(tx)),
+			}, stateFlushingInParallel)
 		}
+		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 	}
 
 	// if head hash was set then success otherwise no
@@ -544,6 +546,9 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	headNumber, err := e.blockReader.HeaderNumber(ctx, tx, headHash)
 	if err != nil {
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+	}
+	if headNumber != nil {
+		e.forkValidator.NotifyCurrentHeight(*headNumber)
 	}
 
 	var status executionproto.ExecutionStatus
@@ -782,7 +787,7 @@ func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
 		}
 
 		pruneTimeout := time.Duration(e.config.SecondsPerSlot()*1000/3) * time.Millisecond / 2
-		if err := e.executionPipeline.RunPrune(e.bacgroundCtx, tx, initialCycle, pruneTimeout); err != nil {
+		if err := e.pipelineExecutor.RunPrune(e.bacgroundCtx, tx, initialCycle, pruneTimeout); err != nil {
 			return err
 		}
 		return nil
@@ -810,12 +815,12 @@ func (e *ExecModule) logHeadUpdated(blockHash common.Hash, fcuHeader *types.Head
 		logArgs = append(logArgs, "txnum", txnum)
 	}
 	logArgs = append(logArgs, "age", common.PrettyAge(time.Unix(int64(fcuHeader.Time), 0)),
-		"execution", common.Round(blockTimings[engine_helpers.BlockTimingsValidationIndex], 0))
+		"execution", common.Round(blockTimings[BlockTimingsValidationIndex], 0))
 
 	if !debug {
-		totalTime := blockTimings[engine_helpers.BlockTimingsValidationIndex]
+		totalTime := blockTimings[BlockTimingsValidationIndex]
 		if !e.syncCfg.ParallelStateFlushing {
-			totalTime += blockTimings[engine_helpers.BlockTimingsFlushExtendingFork]
+			totalTime += blockTimings[BlockTimingsFlushExtendingFork]
 		}
 		gasUsedMgas := float64(fcuHeader.GasUsed) / 1e6
 		mgasPerSec := gasUsedMgas / totalTime.Seconds()

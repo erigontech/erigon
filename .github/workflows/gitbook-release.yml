@@ -1,0 +1,159 @@
+name: Gitbook Docs Release
+
+on:
+  workflow_call:
+    inputs:
+      release_version:
+        required: true
+        type: string
+        description: 'Release version (e.g. v3.3.9)'
+    secrets:
+      GITBOOK_TOKEN:
+        required: true
+      GITBOOK_SPACE_ID:
+        required: true
+
+  workflow_dispatch:
+    inputs:
+      release_version:
+        required: true
+        type: string
+        description: 'Release version (e.g. v3.3.9 or v3.4.0)'
+
+jobs:
+
+  update-docs-branch:
+    name: Create/update docs/v{major}.{minor} branch
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      skip: ${{ steps.parse.outputs.skip }}
+      major: ${{ steps.parse.outputs.major }}
+      minor: ${{ steps.parse.outputs.minor }}
+      patch: ${{ steps.parse.outputs.patch }}
+      docs_branch: ${{ steps.parse.outputs.docs_branch }}
+      release_name: ${{ steps.parse.outputs.release_name }}
+
+    steps:
+      - name: Parse version and detect pre-releases
+        id: parse
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
+        run: |
+          VERSION="${RELEASE_VERSION#v}"
+
+          # Skip pre-releases (anything containing a hyphen, e.g. -alpha1, -beta2, -rc1)
+          if echo "${VERSION}" | grep -qE '-'; then
+            echo "Pre-release detected (${RELEASE_VERSION}) — skipping Gitbook docs sync."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          MAJOR=$(echo "${VERSION}" | cut -d. -f1)
+          MINOR=$(echo "${VERSION}" | cut -d. -f2)
+          PATCH=$(echo "${VERSION}" | cut -d. -f3)
+          DOCS_BRANCH="docs/v${MAJOR}.${MINOR}"
+
+          # Release names indexed by minor version (v3.0 = index 0 = Otterly Odyssey, v3.1 = Pebble Paws, ...)
+          RELEASE_NAMES=(
+            "Otterly Odyssey"     # v?.0
+            "Pebble Paws"         # v?.1
+            "Quirky Quests"       # v?.2
+            "Rocky Romp"          # v?.3
+            "Splashing Saga"      # v?.4
+            "Tidal Tails"         # v?.5
+            "Upstream Underbelly" # v?.6
+            "Velvet Vibrissae"    # v?.7
+            "Watery Whiskers"     # v?.8
+            "Xenial Xyloid"       # v?.9
+            "Yawning Yard"        # v?.10
+            "Zippy Zebrawood"     # v?.11
+            "Alder Abode"         # v?.12
+            "Brook Bank"          # v?.13
+            "Coastal Cove"        # v?.14
+            "Dewy Driftwood"      # v?.15
+            "Eddying Estuary"     # v?.16
+            "Fluffy Fur"          # v?.17
+          )
+          RELEASE_NAME="${RELEASE_NAMES[$MINOR]:-}"
+
+          echo "major=${MAJOR}"             >> "$GITHUB_OUTPUT"
+          echo "minor=${MINOR}"             >> "$GITHUB_OUTPUT"
+          echo "patch=${PATCH}"             >> "$GITHUB_OUTPUT"
+          echo "docs_branch=${DOCS_BRANCH}" >> "$GITHUB_OUTPUT"
+          echo "release_name=${RELEASE_NAME}" >> "$GITHUB_OUTPUT"
+          echo "skip=false"                 >> "$GITHUB_OUTPUT"
+
+          if [ -n "${RELEASE_NAME}" ]; then
+            echo "Parsed: ${MAJOR}.${MINOR}.${PATCH}  →  branch: ${DOCS_BRANCH}  →  \"${RELEASE_NAME}\""
+          else
+            echo "Parsed: ${MAJOR}.${MINOR}.${PATCH}  →  branch: ${DOCS_BRANCH}  (no release name for minor=${MINOR})"
+          fi
+
+      - name: Checkout repository at ${{ inputs.release_version }}
+        if: ${{ steps.parse.outputs.skip == 'false' }}
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.release_version }}
+
+      - name: Create or reset ${{ steps.parse.outputs.docs_branch }} to ${{ inputs.release_version }}
+        if: ${{ steps.parse.outputs.skip == 'false' }}
+        env:
+          DOCS_BRANCH: ${{ steps.parse.outputs.docs_branch }}
+          RELEASE_VERSION: ${{ inputs.release_version }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -B "${DOCS_BRANCH}"
+          git push --force origin "${DOCS_BRANCH}"
+          echo "Branch '${DOCS_BRANCH}' updated to ${RELEASE_VERSION}."
+
+  create-gitbook-variant:
+    name: Create Gitbook variant for new minor series
+    needs: [update-docs-branch]
+    runs-on: ubuntu-latest
+    # Only run when patch == 0 (first release of a new minor series, e.g. v3.4.0)
+    if: >-
+      needs.update-docs-branch.outputs.skip == 'false' &&
+      needs.update-docs-branch.outputs.patch == '0'
+
+    steps:
+      - name: Create Gitbook variant v${{ needs.update-docs-branch.outputs.major }}.${{ needs.update-docs-branch.outputs.minor }}
+        env:
+          GITBOOK_TOKEN: ${{ secrets.GITBOOK_TOKEN }}
+          GITBOOK_SPACE_ID: ${{ secrets.GITBOOK_SPACE_ID }}
+          MAJOR: ${{ needs.update-docs-branch.outputs.major }}
+          MINOR: ${{ needs.update-docs-branch.outputs.minor }}
+          DOCS_BRANCH: ${{ needs.update-docs-branch.outputs.docs_branch }}
+          RELEASE_NAME: ${{ needs.update-docs-branch.outputs.release_name }}
+        run: |
+          if [ -n "${RELEASE_NAME}" ]; then
+            VARIANT_TITLE="v${MAJOR}.${MINOR} – ${RELEASE_NAME}"
+          else
+            VARIANT_TITLE="v${MAJOR}.${MINOR}"
+          fi
+
+          echo "Creating Gitbook variant '${VARIANT_TITLE}' linked to branch '${DOCS_BRANCH}' ..."
+
+          HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -X POST \
+            -H "Authorization: Bearer ${GITBOOK_TOKEN}" \
+            -H "Content-Type: application/json" \
+            "https://api.gitbook.com/v1/spaces/${GITBOOK_SPACE_ID}/variants" \
+            -d "{\"title\": \"${VARIANT_TITLE}\", \"gitRef\": \"${DOCS_BRANCH}\"}")
+
+          HTTP_BODY=$(echo "${HTTP_RESPONSE}" | head -n -1)
+          HTTP_CODE=$(echo "${HTTP_RESPONSE}" | tail -n 1)
+
+          echo "HTTP status : ${HTTP_CODE}"
+          echo "Response    : ${HTTP_BODY}"
+
+          if [ "${HTTP_CODE}" -ne 201 ]; then
+            echo "ERROR: Failed to create Gitbook variant (HTTP ${HTTP_CODE})."
+            echo "Verify that GITBOOK_TOKEN and GITBOOK_SPACE_ID secrets are correct."
+            exit 1
+          fi
+
+          echo "Gitbook variant '${VARIANT_TITLE}' created successfully."
