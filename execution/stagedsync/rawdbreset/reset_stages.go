@@ -96,18 +96,22 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, br services.FullBlockReader, bw *blocki
 		return err
 	}
 
-	// Clear EthTx and BlockBody entirely so stale or data-race-corrupted entries
-	// don't survive. The body downloader caches whatever blockWithSenders returns,
-	// so if EthTx at the snapshot's original baseTxnId contains corrupt data, that
-	// corrupt body gets written into BlockBody and EthTx at a new position, making
-	// the contamination persist across resets. Wiping both tables breaks the cycle:
-	// BodiesForward will re-fetch all leading-gap blocks from P2P and write clean
-	// entries. FillDBFromSnapshots resets the EthTx sequence counter.
-	if err := tx.ClearTable(kv.EthTx); err != nil {
-		return err
-	}
-	if err := tx.ClearTable(kv.BlockBody); err != nil {
-		return err
+	// Clear EthTx and BlockBody for the leading-gap range so stale or
+	// data-race-corrupted entries don't survive. The body downloader caches
+	// whatever blockWithSenders returns for these blocks; if EthTx at the
+	// snapshot's original baseTxnId has corrupt data, that corrupt body gets
+	// written into BlockBody and EthTx at a new position, making contamination
+	// persist across resets. Wiping both breaks the cycle so BodiesForward will
+	// re-fetch clean data from P2P.
+	//
+	// Block 0 (genesis) is excluded: it must stay in BlockBody/EthTx for startup
+	// (WriteGenesisBlock reads the genesis block from the DB via ReadBlockWithSenders).
+	// FillDBFromSnapshots resets the EthTx sequence counter after this.
+	txsFirst := br.TxSnapshotsFirstBlock()
+	if txsFirst > 1 {
+		if err := clearLeadingGapBodies(tx, txsFirst); err != nil {
+			return fmt.Errorf("clearing leading-gap BlockBody/EthTx: %w", err)
+		}
 	}
 
 	if br.FrozenBlocks() > 0 {
@@ -403,4 +407,54 @@ func GetPruneMarkerSafeThreshold(blockReader services.FullBlockReader) uint64 {
 		return 0
 	}
 	return snapProgress - pruneMarkerSafeThreshold
+}
+
+// clearLeadingGapBodies deletes BlockBody and EthTx entries for blocks 1..toBlock-1
+// (the leading-gap range: frozen blocks without a corresponding transactions.seg file).
+// Block 0 (genesis) is intentionally excluded — WriteGenesisBlock reads the genesis
+// block from the DB via ReadBlockWithSenders, which requires BlockBody and EthTx.
+func clearLeadingGapBodies(tx kv.RwTx, toBlock uint64) error {
+	startKey := make([]byte, 8)
+	binary.BigEndian.PutUint64(startKey, 1) // start at block 1, skip genesis
+
+	// Collect keys first (cursor must be closed before deleting).
+	var keys [][]byte
+	cursor, err := tx.RwCursor(kv.BlockBody)
+	if err != nil {
+		return err
+	}
+	defer cursor.Close()
+	for k, _, err := cursor.Seek(startKey); k != nil; k, _, err = cursor.Next() {
+		if err != nil {
+			return err
+		}
+		if len(k) >= 8 && binary.BigEndian.Uint64(k[:8]) >= toBlock {
+			break
+		}
+		keys = append(keys, common.Copy(k))
+	}
+	cursor.Close()
+
+	// Delete BlockBody entries and their corresponding EthTx slots.
+	txIDBytes := make([]byte, 8)
+	for _, k := range keys {
+		body, err := rawdb.ReadBodyForStorageByKey(tx, k)
+		if err != nil {
+			return err
+		}
+		if err := tx.Delete(kv.BlockBody, k); err != nil {
+			return err
+		}
+		if body == nil {
+			continue
+		}
+		// Delete all EthTx entries for this body (baseTxnID .. baseTxnID+txCount-1).
+		for txID := body.BaseTxnID.U64(); txID < body.BaseTxnID.U64()+uint64(body.TxCount); txID++ {
+			binary.BigEndian.PutUint64(txIDBytes, txID)
+			if err := tx.Delete(kv.EthTx, txIDBytes); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
