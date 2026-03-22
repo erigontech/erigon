@@ -241,8 +241,9 @@ var segCompressionAtV2 = map[string]seg.FileCompression{
 	"tracesto.ef":   seg.CompressNone,
 }
 
-// smokeTestSegFiles opens every upgraded V2 file to confirm the patched header
-// can be parsed by the decompressor without error.
+// smokeTestSegFiles walks every word in each upgraded V2 file using g.Skip(),
+// which works for both compressed and uncompressed words.  A corrupted bitmask
+// causes the bit-stream reader to compute wrong word boundaries and panic.
 func smokeTestSegFiles(dir string, logger log.Logger) error {
 	return filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -255,7 +256,12 @@ func smokeTestSegFiles(dir string, logger log.Logger) error {
 		if err != nil {
 			return err
 		}
-		dec.Close()
+		defer dec.Close()
+		seg.NewReader()
+		g := dec.MakeGetter()
+		for g.HasNext() {
+			g.Skip()
+		}
 		logger.Trace("[seg_header_v2] smoke-test ok", "file", filepath.Base(path))
 		return nil
 	})
