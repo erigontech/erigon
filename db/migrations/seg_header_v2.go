@@ -33,8 +33,9 @@ import (
 // featureFlagBitmask byte now reliably encodes WordLevelKeyCompressionEnabled /
 // WordLevelValCompressionEnabled in addition to PageLevelCompressionEnabled.
 //
-// The correct compression flags are looked up from statecfg.Schema so that
-// no heuristic detection (DetectCompressType) is needed.
+// The correct compression flags are read from segCompressionAtV2, a frozen table
+// captured at migration time, so future schema changes cannot alter what flags
+// are written into existing files.
 var SegHeaderV2 = Migration{
 	Name: "seg_header_v2",
 	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback, logger log.Logger) error {
@@ -53,15 +54,7 @@ var SegHeaderV2 = Migration{
 			dirs.SnapCaplin,
 		}
 		for _, dir := range snapDirs {
-			if err := upgradeSegFilesInDir(dir, logger); err != nil {
-				return err
-			}
-		}
-
-		// Smoke-test: open every upgraded file with a Reader and iterate all words
-		// to catch any header corruption or compression-mismatch panics.
-		for _, dir := range snapDirs {
-			if err := smokeTestSegFiles(dir, logger); err != nil {
+			if err := upgradeAndSmokeTestSegFilesInDir(dir, logger); err != nil {
 				return err
 			}
 		}
@@ -77,7 +70,9 @@ var SegHeaderV2 = Migration{
 // carry the version/featureFlag header.
 var segDataExts = map[string]bool{".kv": true, ".v": true, ".ef": true}
 
-func upgradeSegFilesInDir(dir string, logger log.Logger) error {
+// upgradeAndSmokeTestSegFilesInDir upgrades each eligible file in dir and
+// immediately smoke-tests it in a single directory walk.
+func upgradeAndSmokeTestSegFilesInDir(dir string, logger log.Logger) error {
 	return filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
@@ -86,7 +81,10 @@ func upgradeSegFilesInDir(dir string, logger log.Logger) error {
 		if !segDataExts[ext] {
 			return nil
 		}
-		return upgradeSegHeaderV1toV2(path, ext, logger)
+		if err := upgradeSegHeaderV1toV2(path, ext, logger); err != nil {
+			return err
+		}
+		return smokeTestSegFile(path, logger)
 	})
 }
 
@@ -241,42 +239,34 @@ var segCompressionAtV2 = map[string]seg.FileCompression{
 	"tracesto.ef":   seg.CompressNone,
 }
 
-// smokeTestSegFiles iterates every word in each V2 file via NewReader, which
+// smokeTestSegFile iterates every word in a single V2 file via NewReader, which
 // routes each word to Next() (huffman) or NextUncompressed() based on the
 // bitmask we just patched.  A wrong bitmask causes a word-boundary mismatch
 // and a panic, catching header corruption early.
-func smokeTestSegFiles(dir string, logger log.Logger) error {
-	return filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
-		}
-		if !segDataExts[filepath.Ext(path)] {
-			return nil
-		}
-		dec, err := seg.NewDecompressor(path)
-		if err != nil {
-			// File may be absent or unreadable (e.g. commitment snapshots disabled).
-			logger.Warn("[seg_header_v2] smoke-test skip", "file", filepath.Base(path), "err", err)
-			return nil
-		}
-		defer dec.Close()
-
-		if dec.CompressionFormatVersion() < seg.FileCompressionFormatV2 {
-			return nil // not upgraded, skip
-		}
-
-		logger.Debug("[seg_header_v2] smoke-test", "file", filepath.Base(path))
-		g := dec.MakeGetter()
-		r := seg.NewReader(g, seg.CompressNone) // NewReader reads WordLevelCompression from header
-		r.Reset(0)
-		var kbuf, vbuf []byte
-		for r.HasNext() {
-			kbuf, _ = r.Next(kbuf[:0])
-			if r.HasNext() {
-				vbuf, _ = r.Next(vbuf[:0])
-			}
-		}
-		logger.Trace("[seg_header_v2] smoke-test ok", "file", filepath.Base(path))
+func smokeTestSegFile(path string, logger log.Logger) error {
+	dec, err := seg.NewDecompressor(path)
+	if err != nil {
+		// File may be absent or unreadable (e.g. commitment snapshots disabled).
+		logger.Warn("[seg_header_v2] smoke-test skip", "file", filepath.Base(path), "err", err)
 		return nil
-	})
+	}
+	defer dec.Close()
+
+	if dec.CompressionFormatVersion() < seg.FileCompressionFormatV2 {
+		return nil // not upgraded (V0), skip
+	}
+
+	logger.Debug("[seg_header_v2] smoke-test", "file", filepath.Base(path))
+	g := dec.MakeGetter()
+	r := seg.NewReader(g, seg.CompressNone) // NewReader reads WordLevelCompression from header
+	r.Reset(0)
+	var kbuf, vbuf []byte
+	for r.HasNext() {
+		kbuf, _ = r.Next(kbuf[:0])
+		if r.HasNext() {
+			vbuf, _ = r.Next(vbuf[:0])
+		}
+	}
+	logger.Trace("[seg_header_v2] smoke-test ok", "file", filepath.Base(path))
+	return nil
 }
