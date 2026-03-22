@@ -2762,6 +2762,7 @@ func doUnmerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
 
 	blockFrom, blockTo := info.From, info.To
 	var compressor *seg.Compressor
+	var unmergeWriter *seg.Writer
 	compresCfg := seg.DefaultCfg
 	workers := estimate.CompressSnapshot.Workers()
 	compresCfg.Workers = workers
@@ -2782,10 +2783,11 @@ func doUnmerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
 				if err != nil {
 					return err
 				}
+				unmergeWriter = seg.NewWriter(compressor, seg.CompressNone)
 			}
 
 			word, _ = g.Next(word[:0])
-			if err := compressor.AddUncompressedWord(word); err != nil {
+			if _, err := unmergeWriter.Write(word); err != nil {
 				return err
 			}
 			blockFrom++
@@ -2819,10 +2821,11 @@ func doUnmerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
 			if err != nil {
 				return err
 			}
+			unmergeWriter = seg.NewWriter(compressor, seg.CompressNone)
 
 			for g.HasNext() && expectedCount > 0 {
 				word, _ = g.Next(word[:0])
-				if err := compressor.AddUncompressedWord(word); err != nil {
+				if _, err := unmergeWriter.Write(word); err != nil {
 					return err
 				}
 				expectedCount--
