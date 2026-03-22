@@ -528,7 +528,6 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, met
 			logger: logger,
 		},
 		workerCount:  runtime.NumCPU() - 1,
-		blockApplied: make(chan struct{}, 1),
 	}
 
 	executorContext, executorCancel, err := pe.run(context.Background())
@@ -652,7 +651,6 @@ func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propert
 			logger: logger,
 		},
 		workerCount:  runtime.NumCPU() - 1,
-		blockApplied: make(chan struct{}, 1),
 	}
 
 	executorContext, executorCancel, err := pe.run(context.Background())

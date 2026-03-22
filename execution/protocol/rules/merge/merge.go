@@ -238,6 +238,16 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		if consolidations != nil {
 			rs = append(rs, *consolidations)
 		}
+		// Always dump request components for block 24368669
+		if header.Number.Uint64() == 24368669 {
+			for i, r := range rs {
+				fmt.Printf("REQUESTS: block=%d idx=%d type=%d len=%d data_prefix=%x\n",
+					header.Number.Uint64(), i, r.Type, len(r.RequestData),
+					func() []byte { if len(r.RequestData) > 32 { return r.RequestData[:32] }; return r.RequestData }())
+			}
+			fmt.Printf("REQUESTS: block=%d total=%d hash=%x\n",
+				header.Number.Uint64(), len(rs), rs.Hash())
+		}
 		if header.RequestsHash != nil {
 			rh := rs.Hash()
 			if *header.RequestsHash != *rh {

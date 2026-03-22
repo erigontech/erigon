@@ -414,6 +414,10 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					if err != nil {
 						return nil, err
 					}
+					if txTask.BlockNumber() == 24368669 {
+						fmt.Printf("SYSCALL_SER: block=%d contract=%x retlen=%d ret=%x\n",
+							txTask.BlockNumber(), contract.Value(), len(ret), ret)
+					}
 					result.Logs = append(result.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
 					return ret, err
 				}

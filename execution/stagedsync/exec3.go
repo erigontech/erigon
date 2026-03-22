@@ -242,7 +242,6 @@ func ExecV3(ctx context.Context,
 				postValidator:     postValidator,
 			},
 			workerCount:  cfg.syncCfg.ExecWorkerCount,
-			blockApplied: make(chan struct{}, 1),
 		}
 		pe.lastCommittedTxNum.Store(inputTxNum)
 		// blockNum is the next block to execute (from doms.BlockNum()), so the last

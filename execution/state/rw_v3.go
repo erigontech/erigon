@@ -1263,15 +1263,19 @@ func (r *CachedReaderV3) ReadAccountData(address accounts.Address) (*accounts.Ac
 }
 
 func (r *CachedReaderV3) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
+	// DEBUG: trace withdrawal contract slot 4
+	isWdSlot4 := address.Value() == [20]byte{0x00, 0x00, 0x09, 0x61, 0xef, 0x48, 0x0e, 0xb5, 0x5e, 0x80, 0xd1, 0x9a, 0xd8, 0x35, 0x79, 0xa6, 0x4c, 0x00, 0x70, 0x02} &&
+		key.Value() == [32]byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04}
+
 	if r.blockCache != nil {
 		if r.readCurrent {
-			// Read from write buffer — sees storage modifications from
-			// this block's TXs (e.g. system contract state for Prague
-			// EIP-7685 deposit/withdrawal requests).
 			if val, ok := r.blockCache.GetCurrentStorage(address, key); ok {
 				var v uint256.Int
 				if len(val) > 0 {
 					v.SetBytes(val)
+				}
+				if isWdSlot4 {
+					fmt.Printf("WD_SLOT4: source=currentStorage val=%x readCurrent=%v\n", val, r.readCurrent)
 				}
 				return v, len(val) > 0, nil
 			}
@@ -1281,12 +1285,18 @@ func (r *CachedReaderV3) ReadAccountStorage(address accounts.Address, key accoun
 			if len(val) > 0 {
 				v.SetBytes(val)
 			}
+			if isWdSlot4 {
+				fmt.Printf("WD_SLOT4: source=committedStorage val=%x readCurrent=%v\n", val, r.readCurrent)
+			}
 			return v, len(val) > 0, nil
 		}
 	}
 	v, ok, err := r.ReaderV3.ReadAccountStorage(address, key)
 	if err != nil {
 		return v, ok, err
+	}
+	if isWdSlot4 {
+		fmt.Printf("WD_SLOT4: source=ReaderV3/sd.mem val=%x ok=%v\n", v.Bytes(), ok)
 	}
 	if r.blockCache != nil {
 		if ok {
@@ -1368,6 +1378,12 @@ func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.Sto
 	var res uint256.Int
 	if ok {
 		(&res).SetBytes(enc)
+	}
+
+	// DEBUG: trace withdrawal contract slot 4
+	if addressValue == [20]byte{0x00, 0x00, 0x09, 0x61, 0xef, 0x48, 0x0e, 0xb5, 0x5e, 0x80, 0xd1, 0x9a, 0xd8, 0x35, 0x79, 0xa6, 0x4c, 0x00, 0x70, 0x02} &&
+		keyValue == [32]byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04} {
+		fmt.Printf("WD_SLOT4_RV3: source=GetLatest val=%x ok=%v\n", enc, ok)
 	}
 
 	if r.trace {

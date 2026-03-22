@@ -91,13 +91,6 @@ type parallelExecutor struct {
 	// accumulator for txpool state-diff notifications; set before execLoop
 	// starts so that AuRa system-call nonce changes are emitted per block.
 	accumulator *shards.Accumulator
-	// blockApplied synchronises the execLoop and apply goroutines at block
-	// boundaries. The apply goroutine sends on this channel after it has
-	// finished processing a blockResult (i.e. all of block N's state writes
-	// are visible in pe.rs). The execLoop waits on this channel before
-	// scheduling execution of block N+1, preventing workers from reading
-	// stale state.
-	blockApplied chan struct{}
 }
 
 func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
@@ -284,12 +277,10 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					blockUpdateCount = 0
 					blockApplyCount = 0
 
-					pe.rs.ClearAccountsCache()
-
-					// Signal that block N is fully applied — all state writes
-					// are now visible in pe.rs. The execLoop can schedule
-					// block N+1's workers while commitment runs in parallel.
-					pe.blockApplied <- struct{}{}
+					// ClearAccountsCache moved to execLoop (producer side).
+					// blockApplied removed — state writes and Flush happen in
+					// the execLoop before the blockResult crosses the channel.
+					// The apply loop only does indexes.
 
 					if !dbg.DiscardCommitment() {
 						if !dbg.BatchCommitments || shouldGenerateChangesets || lastBlockResult.BlockNum == maxBlockNum ||
@@ -664,16 +655,9 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				pe.Unlock()
 			}
 
-			// Wait for the apply goroutine to finish processing block N's
-			// results before scheduling block N+1. Without this, workers
-			// for block N+1 can read stale state from pe.rs because block
-			// N's writes haven't been applied yet.
-			select {
-			case <-pe.blockApplied:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-
+			// State writes and Flush happen in the execLoop (before the
+			// blockResult is sent). sd.mem is already up to date.
+			// No need to wait for the apply loop — it only does indexes.
 			pe.RLock()
 			blockExecutor, ok = pe.blockExecutors[blockResult.BlockNum+1]
 			pe.RUnlock()
@@ -2218,11 +2202,25 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			ibs.SetVersionMap(localVersionMap)
 			ibs.SetTxContext(finalVersion.BlockNum, finalVersion.TxIndex)
 
+			// DEBUG: trace withdrawal contract state at engine.Finalize time
+			if be.blockNum >= 24368663 && be.blockNum <= 24368670 {
+				wdAddr := accounts.InternAddress([20]byte{0x00, 0x00, 0x09, 0x61, 0xef, 0x48, 0x0e, 0xb5, 0x5e, 0x80, 0xd1, 0x9a, 0xd8, 0x35, 0x79, 0xa6, 0x4c, 0x00, 0x70, 0x02})
+				slot3 := accounts.InternKey([32]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3})
+				slot4 := accounts.InternKey([32]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4})
+				v3, _, _ := reader.ReadAccountStorage(wdAddr, slot3)
+				v4, _, _ := reader.ReadAccountStorage(wdAddr, slot4)
+				fmt.Printf("FINALIZE_WD: block=%d slot3=%x slot4=%x\n", be.blockNum, v3.Bytes(), v4.Bytes())
+			}
+
 			if tt, ok := lastResult.Task.(*taskVersion).Task.(*exec.TxTask); ok {
 				syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 					ret, err := protocol.SysCallContract(contract, data, pe.cfg.chainConfig, ibs, tt.Header, pe.cfg.engine, false, *pe.cfg.vmConfig)
 					if err != nil {
 						return nil, err
+					}
+					if be.blockNum == 24368669 {
+						fmt.Printf("SYSCALL_PAR: block=%d contract=%x retlen=%d ret=%x\n",
+							be.blockNum, contract.Value(), len(ret), ret)
 					}
 					lastResult.Logs = append(lastResult.Logs, ibs.GetRawLogs(tt.TxIndex)...)
 					return ret, err
