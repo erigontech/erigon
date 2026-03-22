@@ -19,6 +19,7 @@ package membatchwithdb_test
 import (
 	"context"
 	"math/big"
+	"runtime"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -41,6 +42,9 @@ import (
 // TestDomainVisibilityAfterGenesis verifies that genesis domain state
 // can be read through a MemoryMutation overlay on a RO temporal tx.
 func TestDomainVisibilityAfterGenesis(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("MDBX page file pressure on Windows CI")
+	}
 	dirs := datadir.New(t.TempDir())
 	logger := log.New()
 	logger.SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
