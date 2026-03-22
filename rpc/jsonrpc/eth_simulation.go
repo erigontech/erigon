@@ -610,10 +610,13 @@ func (s *simulator) simulateBlock(
 				return nil, nil, err
 			}
 			s.logger.Warn("eth_simulateV1 SeekCommitment", "blockNumber", blockNumber, "parentBlockNumber", parent.Number.Uint64(), "minTxNum", minTxNum, "commitTxNum", commitTxNum, "match", commitTxNum == minTxNum)
+			trieRootAfterSeek, trieRootErr := sharedDomains.GetCommitmentContext().Trie().RootHash()
+			s.logger.Warn("eth_simulateV1 trieRootAfterSeek", "blockNumber", blockNumber, "parentBlockNumber", parent.Number.Uint64(), "parentStateRoot", parent.Root, "trieRootAfterSeek", common.BytesToHash(trieRootAfterSeek), "trieRootErr", trieRootErr, "trieMatchesParent", trieRootErr == nil && parent.Root == common.BytesToHash(trieRootAfterSeek))
 			// Change the state reader to a commitment-only history reader that reads non-commitment domains from the latest state.
 			txNum := minTxNum + 1 + uint64(len(bsc.Calls))
 			sharedDomains.GetCommitmentContext().SetStateReader(newHistoryCommitmentOnlyReader(tx, sharedDomains, txNum+1))
 		}
+		s.logger.Warn("eth_simulateV1 touchedKeys", "blockNumber", blockNumber, "parentBlockNumber", parent.Number.Uint64(), "numTouchedAccounts", len(stateWriter.touchedKeys))
 		stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, false, blockNumber, commitTxNum, "eth_simulateV1", nil)
 		if err != nil {
 			return nil, nil, err
