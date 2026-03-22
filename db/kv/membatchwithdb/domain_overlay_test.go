@@ -14,38 +14,42 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package membatchwithdb_test
+package membatchwithdb
 
 import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/membatchwithdb"
-	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 )
+
+// newTestOverlay creates a minimal MemoryMutation for domain overlay testing.
+// No temporal DB or aggregator — just the in-memory overlay layer.
+func newTestOverlay(parent *MemoryMutation) *MemoryMutation {
+	mem := newMemStore()
+	memDB := &memStoreDB{store: mem}
+	m := &MemoryMutation{
+		memDb:          memDB,
+		memTx:          mem,
+		deletedEntries: make(map[string]map[string]struct{}),
+		deletedDups:    map[string]map[string]map[string]struct{}{},
+		clearedTables:  make(map[string]struct{}),
+	}
+	if parent != nil {
+		m.db = parent
+	}
+	return m
+}
 
 // TestDomainOverlay verifies that DomainPut writes are visible through
 // GetLatest on a MemoryMutation, and that nested overlays (child on
 // parent) properly chain domain reads.
 func TestDomainOverlay(t *testing.T) {
 	t.Parallel()
-	dirs := datadir.New(t.TempDir())
-	logger := log.New()
-	logger.SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
-
-	db := temporaltest.NewTestDB(t, dirs)
-
-	roTx, err := db.BeginTemporalRo(t.Context())
-	require.NoError(t, err)
-	defer roTx.Rollback()
 
 	// Create parent overlay and write a domain entry.
-	parent, err := membatchwithdb.NewMemoryBatch(roTx, "", logger)
-	require.NoError(t, err)
+	parent := newTestOverlay(nil)
 	defer parent.Close()
 
 	key := []byte("test-account-key-00000000000000000000")
@@ -58,8 +62,7 @@ func TestDomainOverlay(t *testing.T) {
 	require.Equal(t, val, got, "parent overlay should return the written value")
 
 	// Create child overlay on top of parent — reads should chain through.
-	child, err := membatchwithdb.NewMemoryBatch(parent, "", logger)
-	require.NoError(t, err)
+	child := newTestOverlay(parent)
 	defer child.Close()
 
 	got2, _, err := child.GetLatest(kv.AccountsDomain, key)
