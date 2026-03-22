@@ -609,6 +609,7 @@ func (s *simulator) simulateBlock(
 			if err != nil {
 				return nil, nil, err
 			}
+			s.logger.Warn("eth_simulateV1 SeekCommitment", "blockNumber", blockNumber, "parentBlockNumber", parent.Number.Uint64(), "minTxNum", minTxNum, "commitTxNum", commitTxNum, "match", commitTxNum == minTxNum)
 			// Change the state reader to a commitment-only history reader that reads non-commitment domains from the latest state.
 			txNum := minTxNum + 1 + uint64(len(bsc.Calls))
 			sharedDomains.GetCommitmentContext().SetStateReader(newHistoryCommitmentOnlyReader(tx, sharedDomains, txNum+1))
@@ -617,6 +618,7 @@ func (s *simulator) simulateBlock(
 		if err != nil {
 			return nil, nil, err
 		}
+		s.logger.Warn("eth_simulateV1 stateRoot", "blockNumber", blockNumber, "parentBlockNumber", parent.Number.Uint64(), "stateRoot", common.BytesToHash(stateRoot), "commitmentHistory", s.commitmentHistory, "latest", latest, "frozenBlocks", s.blockReader.FrozenBlocks())
 		block.HeaderNoCopy().Root = common.BytesToHash(stateRoot)
 	} else {
 		// We can efficiently compute the root from state history if it's not frozen, otherwise we just use the zero hash (default value).
