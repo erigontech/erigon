@@ -922,8 +922,12 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 	if txCount != 0 {
 		txnSeg, ok, release := r.sn.ViewSingleFile(snaptype2.Transactions, blockHeight)
 		if !ok {
-			err = fmt.Errorf("no transactions snapshot file for blockNum=%d, BlocksAvailable=%d", blockHeight, r.sn.BlocksAvailable())
-			return nil, nil, err
+			// Transactions snapshot missing for this block range (e.g. incomplete snapshot
+			// set where only headers/bodies were generated). Fall back to the DB.
+			if tx != nil {
+				return rawdb.ReadBlockWithSenders(tx, hash, blockHeight)
+			}
+			return nil, nil, fmt.Errorf("no transactions snapshot file for blockNum=%d, BlocksAvailable=%d", blockHeight, r.sn.BlocksAvailable())
 		}
 		defer release()
 		txs, senders, err = r.txsFromSnapshot(baseTxnId, txCount, txnSeg, buf)
