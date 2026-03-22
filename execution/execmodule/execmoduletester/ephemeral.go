@@ -152,16 +152,14 @@ func (emt *ExecModuleTester) insertChainEphemeral(cp *blockgen.ChainPack) error 
 			}
 		}
 
-		// Execute on a nested overlay to protect the main overlay from partial state.
-		nested, err := membatchwithdb.NewMemoryBatch(emt.ephemeralOverlay, "", emt.Log)
-		if err != nil {
-			return fmt.Errorf("block #%v NewMemoryBatch: %w", block.Number(), err)
-		}
-
+		// Execute directly on the main overlay. Valid blocks (the only ones
+		// routed here by insertBlocks) are expected to succeed. DomainDelPrefix
+		// must see all keys from previous blocks, which requires operating on
+		// the main overlay rather than a nested one.
 		emt.ephemeralTxNum++
 
-		stateReader := state.NewReaderV3(nested)
-		stateWriter := state.NewWriter(nested, nil, emt.ephemeralTxNum)
+		stateReader := state.NewReaderV3(emt.ephemeralOverlay)
+		stateWriter := state.NewWriter(emt.ephemeralOverlay, nil, emt.ephemeralTxNum)
 		stateWriter.ForceWrites = true // overlay execution: must write even if original==value
 
 		blockHashFunc := protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
@@ -187,16 +185,8 @@ func (emt *ExecModuleTester) insertChainEphemeral(cp *blockgen.ChainPack) error 
 			)
 		}()
 		if execErr != nil {
-			nested.Close()
 			return execErr
 		}
-
-		// Execution succeeded — merge nested overlay into the main overlay.
-		if err := nested.FlushDomains(emt.ephemeralOverlay); err != nil {
-			nested.Close()
-			return fmt.Errorf("block #%v FlushDomains: %w", block.Number(), err)
-		}
-		nested.Close()
 
 		// Update txNum for the transactions in this block + end-of-block system tx.
 		emt.ephemeralTxNum += uint64(block.Transactions().Len())
