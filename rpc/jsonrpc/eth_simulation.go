@@ -609,43 +609,14 @@ func (s *simulator) simulateBlock(
 			if err != nil {
 				return nil, nil, err
 			}
-			s.logger.Warn("eth_simulateV1 SeekCommitment", "blockNumber", blockNumber, "parentBlockNumber", parent.Number.Uint64(), "minTxNum", minTxNum, "commitTxNum", commitTxNum, "match", commitTxNum == minTxNum)
-			trieRootAfterSeek, trieRootErr := sharedDomains.GetCommitmentContext().Trie().RootHash()
-			s.logger.Warn("eth_simulateV1 trieRootAfterSeek", "blockNumber", blockNumber, "parentBlockNumber", parent.Number.Uint64(), "parentStateRoot", parent.Root, "trieRootAfterSeek", common.BytesToHash(trieRootAfterSeek), "trieRootErr", trieRootErr, "trieMatchesParent", trieRootErr == nil && parent.Root == common.BytesToHash(trieRootAfterSeek))
 			// Change the state reader to a commitment-only history reader that reads non-commitment domains from the latest state.
 			txNum := minTxNum + 1 + uint64(len(bsc.Calls))
 			sharedDomains.GetCommitmentContext().SetStateReader(newHistoryCommitmentOnlyReader(tx, sharedDomains, txNum+1))
-		}
-		s.logger.Warn("eth_simulateV1 touchedKeys", "blockNumber", blockNumber, "parentBlockNumber", parent.Number.Uint64(), "numTouchedAccounts", len(stateWriter.touchedKeys))
-		if !latest {
-			histReader := state.NewHistoryReaderV3(tx, minTxNum)
-			latestReader := state.NewReaderV3(sharedDomains.AsGetter(tx))
-			for addr := range stateWriter.touchedKeys {
-				histAcc, histErr := histReader.ReadAccountData(addr)
-				latestAcc, latestErr := latestReader.ReadAccountData(addr)
-				histBal, histNonce := uint256.NewInt(0), uint64(0)
-				latestBal, latestNonce := uint256.NewInt(0), uint64(0)
-				if histErr == nil && histAcc != nil {
-					histBal, histNonce = &histAcc.Balance, histAcc.Nonce
-				}
-				if latestErr == nil && latestAcc != nil {
-					latestBal, latestNonce = &latestAcc.Balance, latestAcc.Nonce
-				}
-				s.logger.Warn("eth_simulateV1 accountDiff",
-					"blockNumber", blockNumber,
-					"parentBlockNumber", parent.Number.Uint64(),
-					"address", addr.Value().Hex(),
-					"histBalance", histBal, "histNonce", histNonce,
-					"latestBalance", latestBal, "latestNonce", latestNonce,
-					"differs", histBal.Cmp(latestBal) != 0 || histNonce != latestNonce,
-				)
-			}
 		}
 		stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, false, blockNumber, commitTxNum, "eth_simulateV1", nil)
 		if err != nil {
 			return nil, nil, err
 		}
-		s.logger.Warn("eth_simulateV1 stateRoot", "blockNumber", blockNumber, "parentBlockNumber", parent.Number.Uint64(), "stateRoot", common.BytesToHash(stateRoot), "commitmentHistory", s.commitmentHistory, "latest", latest, "frozenBlocks", s.blockReader.FrozenBlocks())
 		block.HeaderNoCopy().Root = common.BytesToHash(stateRoot)
 	} else {
 		// We can efficiently compute the root from state history if it's not frozen, otherwise we just use the zero hash (default value).
