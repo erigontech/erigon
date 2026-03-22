@@ -428,7 +428,7 @@ func (r *BlockReader) AllTypes() []snaptype.Type {
 	return types
 }
 
-func (r *BlockReader) FrozenBlocks() uint64 { return r.sn.BlocksAvailable() }
+func (r *BlockReader) FrozenBlocks() uint64 { return r.sn.MinContinuouslyAvailable() }
 
 func (r *BlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint64, error) {
 	if r.FrozenBlocks() > 0 {

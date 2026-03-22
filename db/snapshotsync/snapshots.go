@@ -924,6 +924,51 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 	return maxIdx
 }
 
+// MinContinuouslyAvailable returns the highest block N such that every snapshot
+// type that has any segments covers [0, N] continuously. If any type with segments
+// has a gap at block 0, returns 0. This is stricter than BlocksAvailable(), which
+// only checks the first enum (headers). Used by FrozenBlocks() so the Bodies stage
+// re-downloads ranges where the transactions snapshot is missing even though
+// headers/bodies exist.
+func (s *RoSnapshots) MinContinuouslyAvailable() uint64 {
+	s.visibleLock.RLock()
+	defer s.visibleLock.RUnlock()
+
+	if len(s.enums) == 0 {
+		return 0
+	}
+
+	result := uint64(math.MaxUint64)
+	found := false
+	for _, enum := range s.enums {
+		segs := s.visible[enum]
+		if len(segs) == 0 {
+			continue // network-specific or missing type — skip
+		}
+		found = true
+		if segs[0].from != 0 {
+			return 0 // gap at block 0 for this type
+		}
+		typeMax := uint64(0)
+		for _, seg := range segs {
+			if seg.from != typeMax {
+				break // gap — stop here
+			}
+			typeMax = seg.to
+		}
+		if typeMax == 0 {
+			return 0
+		}
+		if typeMax-1 < result {
+			result = typeMax - 1
+		}
+	}
+	if !found || result == math.MaxUint64 {
+		return 0
+	}
+	return result
+}
+
 func (s *RoSnapshots) dirtyIdxAvailability(segtype snaptype.Enum) uint64 {
 	s.dirtyLock.RLock()
 	defer s.dirtyLock.RUnlock()
