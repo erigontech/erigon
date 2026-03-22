@@ -58,6 +58,14 @@ var SegHeaderV2 = Migration{
 			}
 		}
 
+		// Smoke-test: open every upgraded file with a Reader and iterate all words
+		// to catch any header corruption or compression-mismatch panics.
+		for _, dir := range snapDirs {
+			if err := smokeTestSegFiles(dir, logger); err != nil {
+				return err
+			}
+		}
+
 		if err := BeforeCommit(tx, nil, true); err != nil {
 			return err
 		}
@@ -189,4 +197,33 @@ var segCompressionAtV2 = map[string]seg.FileCompression{
 	"logtopics.ef":  seg.CompressNone,
 	"tracesfrom.ef": seg.CompressNone,
 	"tracesto.ef":   seg.CompressNone,
+}
+
+// smokeTestSegFiles opens every upgraded file with a NewReader and iterates all
+// words to confirm the header compression flags are consistent with the data.
+// A panic from the decompressor means the flags are wrong.
+func smokeTestSegFiles(dir string, logger log.Logger) error {
+	return filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		if !segDataExts[filepath.Ext(path)] {
+			return nil
+		}
+		dec, err := seg.NewDecompressor(path)
+		if err != nil {
+			return err
+		}
+		defer dec.Close()
+
+		g := dec.MakeGetter()
+		r := seg.NewReader(g, seg.CompressNone) // NewReader will override from header for V2+
+		r.Reset(0)
+		var buf []byte
+		for r.HasNext() {
+			buf, _ = r.Next(buf[:0])
+		}
+		logger.Trace("[seg_header_v2] smoke-test ok", "file", filepath.Base(path))
+		return nil
+	})
 }
