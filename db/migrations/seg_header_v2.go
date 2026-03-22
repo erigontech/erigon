@@ -221,8 +221,14 @@ func smokeTestSegFiles(dir string, logger log.Logger) error {
 		}
 		defer dec.Close()
 
+		// Only test files we upgraded; V0/V1 files are not our responsibility here
+		// and their compression is not reliably recoverable without the full schema.
+		if dec.CompressionFormatVersion() != seg.FileCompressionFormatV2 {
+			return nil
+		}
+
 		g := dec.MakeGetter()
-		r := seg.NewReader(g, seg.CompressNone) // NewReader will override from header for V2+
+		r := seg.NewReader(g, seg.CompressNone) // NewReader overrides from V2 header
 		r.Reset(0)
 		var buf []byte
 		for r.HasNext() {
