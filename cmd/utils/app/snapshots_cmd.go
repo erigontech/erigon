@@ -666,7 +666,24 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, err err
 	return false, false, nil
 }
 
-func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelete, dryRun bool, stepRange string, domainNames ...string) error {
+type DeleteStateSnapshotsArgs struct {
+	Dirs                   datadir.Dirs
+	RemoveLatest           bool
+	PromptUserBeforeDelete bool
+	DryRun                 bool
+	StepRange              string
+	OnlyDomain             bool
+	DomainNames            []string
+}
+
+func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
+	dirs := args.Dirs
+	removeLatest := args.RemoveLatest
+	promptUserBeforeDelete := args.PromptUserBeforeDelete
+	dryRun := args.DryRun
+	stepRange := args.StepRange
+	domainNames := args.DomainNames
+
 	_maxFrom := uint64(0)
 	_maxTo := uint64(0)
 	files := make([]snaptype.FileInfo, 0)
@@ -678,7 +695,12 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 		dirPath  string
 		filePath string
 	}, 0)
-	for _, dirPath := range []string{dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapForkable} {
+
+	scanDirs := []string{dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors, dirs.SnapForkable}
+	if args.OnlyDomain {
+		scanDirs = []string{dirs.SnapDomain}
+	}
+	for _, dirPath := range scanDirs {
 		filePaths, err := dir2.ListFiles(dirPath)
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
@@ -855,6 +877,33 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 				toRemove[res.Path] = res
 			}
 		}
+
+		// Second pass: remove any file whose step range is a strict subset of a file
+		// already marked for removal, but only within the same domain type.
+		// This handles orphaned sub-range files that were constituents of a merged
+		// file (e.g., accounts.192-208 is a subset of accounts.192-224).
+		// Cross-domain matching is prevented so that, e.g., removing commitment.192-224
+		// does not cascade to accounts.192-208 which may be the only copy of that data.
+		for {
+			added := false
+			for _, res := range files {
+				if _, alreadyMarked := toRemove[res.Path]; alreadyMarked {
+					continue
+				}
+				for _, marked := range toRemove {
+					if res.TypeString == marked.TypeString &&
+						res.From >= marked.From && res.To <= marked.To &&
+						(res.From != marked.From || res.To != marked.To) {
+						toRemove[res.Path] = res
+						added = true
+						break
+					}
+				}
+			}
+			if !added {
+				break
+			}
+		}
 	} else {
 		for _, res := range files {
 			toRemove[res.Path] = res
@@ -916,7 +965,14 @@ func doRmStateSnapshots(cliCtx *cli.Context) error {
 	domainNames := cliCtx.StringSlice("domain")
 	dryRun := cliCtx.Bool("dry-run")
 	promptUser := true // CLI should always prompt the user
-	return DeleteStateSnapshots(dirs, removeLatest, promptUser, dryRun, stepRange, domainNames...)
+	return DeleteStateSnapshots(DeleteStateSnapshotsArgs{
+		Dirs:                   dirs,
+		RemoveLatest:           removeLatest,
+		PromptUserBeforeDelete: promptUser,
+		DryRun:                 dryRun,
+		StepRange:              stepRange,
+		DomainNames:            domainNames,
+	})
 }
 
 func doRollbackSnapshotsToBlock(ctx context.Context, blockNum uint64, prompt bool, dataDir string, logger log.Logger) error {
@@ -1269,10 +1325,6 @@ func doIntegrity(cliCtx *cli.Context) error {
 					if err := integrity.CheckRCacheNoDups(ctx, sc, db, blockReader, failFast); err != nil {
 						return err
 					}
-				case integrity.StateProgress:
-					if err := integrity.CheckStateProgress(ctx, db, blockReader, failFast); err != nil {
-						return err
-					}
 				case integrity.Publishable:
 					if err := doPublishable(cliCtx, chainDB); err != nil {
 						return err
@@ -1304,7 +1356,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 					}
 					scCopy := sc
 					scCopy.SampleRatio /= 100 // it's very slow check
-					if err := integrity.CheckCommitmentHistAtBlkRange(ctx, scCopy, db, blockReader, 1, to+1, logger); err != nil {
+					if err := integrity.CheckCommitmentHistAtBlkRange(ctx, scCopy, db, blockReader, 1, to+1, failFast, logger); err != nil {
 						return err
 					}
 				case integrity.StateVerify:
@@ -1413,7 +1465,7 @@ func doCheckStateRootByHistory(cliCtx *cli.Context, logger log.Logger) error {
 		return err
 	}
 	logger.Info("[check-commitment-hist-at-blk-range] sampling config", "seed", sc.Seed, "sampleRatio", sc.SampleRatio)
-	return integrity.CheckCommitmentHistAtBlkRange(ctx, sc, db, blockReader, from, to, logger)
+	return integrity.CheckCommitmentHistAtBlkRange(ctx, sc, db, blockReader, from, to, true /*failFast*/, logger)
 }
 
 func doVerifyState(cliCtx *cli.Context, logger log.Logger) error {
@@ -2359,6 +2411,7 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 	defer clean()
+	agg.PresetOfflineMerge()
 
 	if err := caplinStateSnaps.BuildMissingIndices(ctx, logger); err != nil {
 		return err

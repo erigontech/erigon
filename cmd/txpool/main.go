@@ -73,7 +73,8 @@ var (
 
 	mdbxWriteMap bool
 
-	commitEvery time.Duration
+	commitEvery         time.Duration
+	queuedDormancyEvery time.Duration
 )
 
 func init() {
@@ -99,6 +100,7 @@ func init() {
 	rootCmd.PersistentFlags().Uint64Var(&priceBump, "txpool.pricebump", txpoolcfg.DefaultConfig.PriceBump, "Price bump percentage to replace an already existing transaction")
 	rootCmd.PersistentFlags().Uint64Var(&blobPriceBump, "txpool.blobpricebump", txpoolcfg.DefaultConfig.BlobPriceBump, "Price bump percentage to replace an existing blob (type-3) transaction")
 	rootCmd.PersistentFlags().DurationVar(&commitEvery, utils.TxPoolCommitEveryFlag.Name, utils.TxPoolCommitEveryFlag.Value, utils.TxPoolCommitEveryFlag.Usage)
+	rootCmd.PersistentFlags().DurationVar(&queuedDormancyEvery, utils.TxPoolQueuedDormancyFlag.Name, utils.TxPoolQueuedDormancyFlag.Value, utils.TxPoolQueuedDormancyFlag.Usage)
 	rootCmd.PersistentFlags().BoolVar(&noTxGossip, utils.TxPoolGossipDisableFlag.Name, utils.TxPoolGossipDisableFlag.Value, utils.TxPoolGossipDisableFlag.Usage)
 	rootCmd.PersistentFlags().BoolVar(&mdbxWriteMap, utils.DbWriteMapFlag.Name, utils.DbWriteMapFlag.Value, utils.DbWriteMapFlag.Usage)
 	rootCmd.Flags().StringSliceVar(&traceSenders, utils.TxPoolTraceSendersFlag.Name, []string{}, utils.TxPoolTraceSendersFlag.Usage)
@@ -171,6 +173,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 	cfg.BlobPriceBump = blobPriceBump
 	cfg.NoGossip = noTxGossip
 	cfg.MdbxWriteMap = mdbxWriteMap
+	cfg.QueuedDormancyDuration = queuedDormancyEvery
 
 	cacheConfig := kvcache.DefaultCoherentConfig
 	cacheConfig.MetricsLabel = "txpool"

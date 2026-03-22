@@ -203,8 +203,9 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		// Retrieve the block to act as the gas ceiling
 		hi = header.GasLimit
 	}
-	if hi > params.MaxTxnGasLimit && chainConfig.IsOsaka(header.Time) {
-		// Cap the maximum gas allowance according to EIP-7825 if Osaka
+	if hi > params.MaxTxnGasLimit && chainConfig.IsOsaka(header.Time) && !chainConfig.IsAmsterdam(header.Time) {
+		// Cap the maximum gas allowance according to EIP-7825 if Osaka (but not Amsterdam).
+		// In Amsterdam (EIP-8037), transactions can provide state gas via a total gas limit > MaxTxnGasLimit.
 		hi = params.MaxTxnGasLimit
 	}
 
@@ -839,6 +840,10 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	// lists and we'll need to reestimate every time
 	nogas := args.Gas == nil
 
+	if args.From == nil {
+		args.From = &common.Address{}
+	}
+
 	var to common.Address
 	if args.To != nil {
 		to = *args.To
@@ -868,10 +873,6 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 			args.Nonce = (*hexutil.Uint64)(&nonce)
 		}
 		to = types.CreateAddress(*args.From, uint64(*args.Nonce))
-	}
-
-	if args.From == nil {
-		args.From = &common.Address{}
 	}
 
 	// Retrieve the precompiles since they don't need to be added to the access list

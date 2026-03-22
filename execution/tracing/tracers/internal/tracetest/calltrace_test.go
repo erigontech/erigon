@@ -162,6 +162,9 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 				context.BaseFee = *baseFee
 			}
 			rules := context.Rules(test.Genesis.Config)
+			if rules.IsAmsterdam {
+				context.CostPerStateByte = misc.CostPerStateByte(uint64(test.Context.GasLimit))
+			}
 
 			m := execmoduletester.New(t)
 			dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
@@ -265,6 +268,9 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 		GasLimit:    uint64(test.Context.GasLimit),
 	}
 	rules := context.Rules(test.Genesis.Config)
+	if rules.IsAmsterdam {
+		context.CostPerStateByte = misc.CostPerStateByte(uint64(test.Context.GasLimit))
+	}
 	msg, err := tx.AsMessage(*signer, nil, rules)
 	if err != nil {
 		b.Fatalf("failed to prepare transaction for tracing: %v", err)
@@ -312,7 +318,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 	}
 	signer := types.LatestSigner(chainspec.Mainnet.Config)
 	tx, err := types.SignNewTx(privkey, *signer, &types.LegacyTx{
-		GasPrice: uint256.NewInt(0),
+		GasPrice: *uint256.NewInt(0),
 		CommonTx: types.CommonTx{
 			GasLimit: 50000,
 			To:       &to,

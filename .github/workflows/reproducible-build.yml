@@ -1,16 +1,8 @@
 name: Reproducible build
 
 on:
-  pull_request:
-    branches:
-      - main
-      - 'release/**'
-    types:
-      - opened
-      - reopened
-      - synchronize
-      - ready_for_review
   workflow_dispatch:
+  workflow_call:
 
 defaults:
   run:
@@ -25,9 +17,6 @@ jobs:
           - macos-15
           - windows-2025
     runs-on: ${{ matrix.os }}
-    concurrency:
-      group: ${{ github.workflow }}-${{ matrix.os }}-${{ github.ref }}
-      cancel-in-progress: true
 
     steps:
       - uses: actions/checkout@v6

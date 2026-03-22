@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
-	"github.com/erigontech/erigon/execution/protocol/fixedgas"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
@@ -357,7 +357,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	// For legacy txns, GetChainID() derives chain ID from V (returns zero for pre-EIP-155
 	// unprotected txns, which is valid — chainIDRequired only applies to typed txns).
 	chainID := txn.GetChainID()
-	if chainID == nil || chainID.IsZero() {
+	if chainID.IsZero() {
 		if !legacy && ctx.chainIDRequired {
 			return 0, fmt.Errorf("%w: chainID is required", ErrParseTxn)
 		}
@@ -471,22 +471,13 @@ func (tx *TxnSlot) GetGas() uint64               { return tx.Txn.GetGasLimit() }
 func (tx *TxnSlot) IsCreation() bool             { return tx.Txn.IsContractDeploy() }
 func (tx *TxnSlot) GetBlobHashes() []common.Hash { return tx.Txn.GetBlobHashes() }
 
-// uint256 accessors return a zero value when the underlying field is nil,
-// since types.Transaction stores these as *uint256.Int pointers.
-func orZero(v *uint256.Int) *uint256.Int {
-	if v != nil {
-		return v
-	}
-	return new(uint256.Int)
-}
-
-func (tx *TxnSlot) GetTipCap() *uint256.Int { return orZero(tx.Txn.GetTipCap()) }
-func (tx *TxnSlot) GetFeeCap() *uint256.Int { return orZero(tx.Txn.GetFeeCap()) }
-func (tx *TxnSlot) GetValue() *uint256.Int  { return orZero(tx.Txn.GetValue()) }
+func (tx *TxnSlot) GetTipCap() *uint256.Int { return tx.Txn.GetTipCap() }
+func (tx *TxnSlot) GetFeeCap() *uint256.Int { return tx.Txn.GetFeeCap() }
+func (tx *TxnSlot) GetValue() *uint256.Int  { return tx.Txn.GetValue() }
 
 func (tx *TxnSlot) GetBlobFeeCap() *uint256.Int {
 	if bt, ok := tx.Txn.(*types.BlobTx); ok {
-		return orZero(bt.MaxFeePerBlobGas)
+		return &bt.MaxFeePerBlobGas
 	}
 	return new(uint256.Int)
 }
@@ -500,9 +491,9 @@ func (tx *TxnSlot) GetDataLen() int {
 
 func (tx *TxnSlot) GetDataNonZeroLen() int {
 	if aaTx, ok := tx.Txn.(*types.AccountAbstractionTransaction); ok {
-		return fixedgas.CountNonZeroBytes(aaTx.DeployerData) + fixedgas.CountNonZeroBytes(aaTx.PaymasterData) + fixedgas.CountNonZeroBytes(aaTx.ExecutionData)
+		return mdgas.CountNonZeroBytes(aaTx.DeployerData) + mdgas.CountNonZeroBytes(aaTx.PaymasterData) + mdgas.CountNonZeroBytes(aaTx.ExecutionData)
 	}
-	return fixedgas.CountNonZeroBytes(tx.Txn.GetData())
+	return mdgas.CountNonZeroBytes(tx.Txn.GetData())
 }
 
 func (tx *TxnSlot) GetAccessListAddrCount() int { return len(tx.Txn.GetAccessList()) }

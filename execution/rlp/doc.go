@@ -32,7 +32,11 @@ stream and defines the size and kind of the bytes that follow.
 
 # Encoding Rules
 
-Package rlp uses reflection and encodes RLP based on the Go type of the value.
+Package rlp can use reflection to encode RLP based on the Go type of the value.
+In practice, most core Ethereum types (blocks, headers, transactions, receipts)
+implement the Encoder/Decoder interfaces with hand-written serialization.
+Reflection-based field walking is used mainly for simpler struct types such as
+P2P protocol packets.
 
 If the type implements the Encoder interface, Encode calls EncodeRLP. It does not
 call EncodeRLP on nil pointer values.
@@ -51,8 +55,8 @@ as an RLP string.
 A Go string is encoded as an RLP string.
 
 An unsigned integer value is encoded as an RLP string. Zero always encodes as an empty RLP
-string. big.Int values are treated as integers. Signed integers (int, int8, int16, ...)
-are not supported and will return an error when encoding.
+string. big.Int and uint256.Int values are treated as integers. Signed integers (int,
+int8, int16, ...) are not supported and will return an error when encoding.
 
 Boolean values are encoded as the unsigned integers zero (false) and one (true).
 
@@ -87,7 +91,7 @@ as-is and will not necessarily be valid UTF-8.
 To decode into an unsigned integer type, the input must also be an RLP string. The bytes
 are interpreted as a big endian representation of the integer. If the RLP string is larger
 than the bit size of the type, decoding will return an error. Decode also supports
-*big.Int. There is no size limit for big integers.
+*big.Int and *uint256.Int. There is no size limit for big integers.
 
 To decode into a boolean, the input must contain an unsigned integer of value zero (false)
 or one (true).

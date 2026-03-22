@@ -21,7 +21,6 @@ package ethash
 
 import (
 	"encoding/json"
-	"math/big"
 	"os"
 	"path/filepath"
 	"testing"
@@ -75,7 +74,8 @@ func TestCalcDifficulty(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	config := &chain.Config{HomesteadBlock: big.NewInt(1150000)}
+	homestead := uint64(1150000)
+	config := &chain.Config{HomesteadBlock: &homestead}
 
 	for name, test := range tests {
 		number := test.CurrentBlocknumber.Uint64() - 1
