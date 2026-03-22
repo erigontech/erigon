@@ -609,9 +609,9 @@ func (s *simulator) simulateBlock(
 			if err != nil {
 				return nil, nil, err
 			}
-			// Change the state reader to a commitment-only history reader that reads non-commitment domains from historical state.
+			// Change the state reader to a commitment-only history reader that reads non-commitment domains from the latest state.
 			txNum := minTxNum + 1 + uint64(len(bsc.Calls))
-			sharedDomains.GetCommitmentContext().SetStateReader(newHistoryCommitmentOnlyReader(tx, minTxNum, txNum+1))
+			sharedDomains.GetCommitmentContext().SetStateReader(newHistoryCommitmentOnlyReader(tx, sharedDomains, txNum+1))
 		}
 		stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, false, blockNumber, commitTxNum, "eth_simulateV1", nil)
 		if err != nil {
@@ -853,12 +853,9 @@ func clientLimitExceededError(message string) error {
 	return &rpc.CustomError{Message: message, Code: rpc.ErrCodeClientLimitExceeded}
 }
 
-func newHistoryCommitmentOnlyReader(roTx kv.TemporalTx, plainStateAsOfTxNum uint64, limitReadAsOfTxNum uint64) commitmentdb.StateReader {
-	// Both commitment branches and account/storage/code values are read from history:
-	// - commitment branches: at limitReadAsOfTxNum (post-simulation trie position)
-	// - account/storage: at plainStateAsOfTxNum (= minTxNum of the simulated block = end-of-parent-block state)
-	// Reading plain state from history (not latest) makes the stateRoot deterministic regardless of node advancement.
-	return commitmentdb.NewCommitmentSplitStateReader(commitmentdb.NewHistoryStateReader(roTx, limitReadAsOfTxNum), commitmentdb.NewHistoryStateReader(roTx, plainStateAsOfTxNum), true)
+func newHistoryCommitmentOnlyReader(roTx kv.TemporalTx, sd *execctx.SharedDomains, limitReadAsOfTxNum uint64) commitmentdb.StateReader {
+	// Commitment values are read from history, whereas account/storage/code values are read from latest state
+	return commitmentdb.NewCommitmentSplitStateReader(commitmentdb.NewHistoryStateReader(roTx, limitReadAsOfTxNum), commitmentdb.NewLatestStateReader(roTx, sd), true)
 }
 
 func newSimulateStateReader(ttx, tx kv.TemporalTx, tsd, sd *execctx.SharedDomains) commitmentdb.StateReader {
