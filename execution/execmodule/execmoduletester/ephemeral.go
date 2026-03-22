@@ -21,15 +21,13 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
-	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
+	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 )
@@ -95,11 +93,11 @@ func (emt *ExecModuleTester) closeEphemeral() {
 // Each block is executed on a nested overlay so that failed executions
 // (expected-invalid blocks) don't leave partial state on the main overlay.
 func (emt *ExecModuleTester) insertChainEphemeral(cp *blockgen.ChainPack) error {
-	cr := &ephemeralChainReader{
-		config:  emt.ChainConfig,
-		headers: emt.ephemeralHeaders,
-		tds:     emt.ephemeralTDs,
-		tx:      emt.ephemeralOverlay,
+	cr := &testutil.LightChainReader{
+		Config_: emt.ChainConfig,
+		Headers: emt.ephemeralHeaders,
+		TDs:     emt.ephemeralTDs,
+		Tx:      emt.ephemeralOverlay,
 	}
 
 	for i := 0; i < cp.Length(); i++ {
@@ -213,11 +211,11 @@ func (emt *ExecModuleTester) insertChainEphemeral(cp *blockgen.ChainPack) error 
 // Returns nil if the block executes successfully, or the execution error.
 // Used for expected-invalid blocks to avoid leaking state into the main overlay.
 func (emt *ExecModuleTester) DryRunBlock(block *types.Block) error {
-	cr := &ephemeralChainReader{
-		config:  emt.ChainConfig,
-		headers: emt.ephemeralHeaders,
-		tds:     emt.ephemeralTDs,
-		tx:      emt.ephemeralOverlay,
+	cr := &testutil.LightChainReader{
+		Config_: emt.ChainConfig,
+		Headers: emt.ephemeralHeaders,
+		TDs:     emt.ephemeralTDs,
+		Tx:      emt.ephemeralOverlay,
 	}
 
 	header := block.Header()
@@ -310,65 +308,3 @@ func (emt *ExecModuleTester) EphemeralLastBlockHash() common.Hash {
 	return emt.ephemeralLastHash
 }
 
-// ephemeralChainReader implements rules.ChainReader with in-memory header/TD
-// maps and rawdb fallback for genesis data.
-type ephemeralChainReader struct {
-	config  *chain.Config
-	headers map[common.Hash]*types.Header
-	tds     map[common.Hash]*big.Int
-	tx      kv.Tx
-}
-
-var _ rules.ChainReader = (*ephemeralChainReader)(nil)
-
-func (cr *ephemeralChainReader) Config() *chain.Config                 { return cr.config }
-func (cr *ephemeralChainReader) CurrentHeader() *types.Header          { return nil }
-func (cr *ephemeralChainReader) CurrentFinalizedHeader() *types.Header { return nil }
-func (cr *ephemeralChainReader) CurrentSafeHeader() *types.Header      { return nil }
-func (cr *ephemeralChainReader) FrozenBlocks() uint64                  { return 0 }
-func (cr *ephemeralChainReader) FrozenBorBlocks(bool) uint64           { return 0 }
-
-func (cr *ephemeralChainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
-	if h, ok := cr.headers[hash]; ok {
-		return h
-	}
-	return rawdb.ReadHeader(cr.tx, hash, number)
-}
-
-func (cr *ephemeralChainReader) GetHeaderByNumber(number uint64) *types.Header {
-	hash, err := rawdb.ReadCanonicalHash(cr.tx, number)
-	if err != nil || hash == (common.Hash{}) {
-		return nil
-	}
-	return cr.GetHeader(hash, number)
-}
-
-func (cr *ephemeralChainReader) GetHeaderByHash(hash common.Hash) *types.Header {
-	if h, ok := cr.headers[hash]; ok {
-		return h
-	}
-	num := rawdb.ReadHeaderNumber(cr.tx, hash)
-	if num == nil {
-		return nil
-	}
-	return rawdb.ReadHeader(cr.tx, hash, *num)
-}
-
-func (cr *ephemeralChainReader) GetTd(hash common.Hash, number uint64) *big.Int {
-	if td, ok := cr.tds[hash]; ok {
-		return td
-	}
-	td, _ := rawdb.ReadTd(cr.tx, hash, number)
-	return td
-}
-
-func (cr *ephemeralChainReader) GetBlock(hash common.Hash, number uint64) *types.Block {
-	return rawdb.ReadBlock(cr.tx, hash, number)
-}
-
-func (cr *ephemeralChainReader) HasBlock(hash common.Hash, number uint64) bool {
-	if _, ok := cr.headers[hash]; ok {
-		return true
-	}
-	return rawdb.ReadHeader(cr.tx, hash, number) != nil
-}

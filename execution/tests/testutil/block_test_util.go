@@ -460,18 +460,13 @@ func (bt *BlockTest) run(t *testing.T) error {
 	defer engine.Close()
 
 	// Build a lightweight chain reader with in-memory header/TD maps.
-	cr := &lightChainReader{
-		config:  config,
-		headers: make(map[common.Hash]*types.Header),
-		tds:     make(map[common.Hash]*big.Int),
-		tx:      overlay,
-	}
+	cr := NewLightChainReader(config, overlay)
 
 	// Seed the chain reader with genesis header and TD.
-	cr.headers[genesis.Hash()] = genesis.Header()
+	cr.Headers[genesis.Hash()] = genesis.Header()
 	genesisTd, _ := rawdb.ReadTd(roTx, genesis.Hash(), 0)
 	if genesisTd != nil {
-		cr.tds[genesis.Hash()] = genesisTd
+		cr.TDs[genesis.Hash()] = genesisTd
 	}
 
 	lastBlockHash := genesis.Hash()
@@ -517,7 +512,7 @@ func (bt *BlockTest) run(t *testing.T) error {
 		// Skip side-chain blocks — only execute blocks on the main chain.
 		// Record their headers for uncle validation.
 		if !mainChainBlocks[cb.Hash()] && !isExpectedInvalid(b) {
-			cr.headers[cb.Hash()] = header
+			cr.Headers[cb.Hash()] = header
 			continue
 		}
 
@@ -532,7 +527,7 @@ func (bt *BlockTest) run(t *testing.T) error {
 
 		parentHash := header.ParentHash
 
-		parentTd, hasTd := cr.tds[parentHash]
+		parentTd, hasTd := cr.TDs[parentHash]
 		if !hasTd {
 			parentTd, _ = rawdb.ReadTd(overlay, parentHash, header.Number.Uint64()-1)
 		}
@@ -710,13 +705,13 @@ func (bt *BlockTest) run(t *testing.T) error {
 		txNum++
 
 		// Record the header and TD for subsequent blocks.
-		cr.headers[cb.Hash()] = header
+		cr.Headers[cb.Hash()] = header
 		blockTd := new(big.Int)
 		if parentTd != nil {
 			blockTd.Set(parentTd)
 		}
 		blockTd.Add(blockTd, header.Difficulty.ToBig())
-		cr.tds[cb.Hash()] = blockTd
+		cr.TDs[cb.Hash()] = blockTd
 		lastBlockHash = cb.Hash()
 	}
 
