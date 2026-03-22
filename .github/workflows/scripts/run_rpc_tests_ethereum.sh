@@ -30,7 +30,6 @@ DISABLED_TEST_LIST=(
   eth_mining/test_01.json
   eth_protocolVersion/test_1.json
   eth_simulateV1/test_23.json
-  eth_simulateV1/test_24.json
   eth_simulateV1/test_26.json
   eth_submitHashrate/test_1.json
   eth_submitWork/test_1.json
@@ -44,4 +43,4 @@ DISABLED_TEST_LIST=(
 DISABLED_TESTS=$(IFS=,; echo "${DISABLED_TEST_LIST[*]}")
 
 # Call the main test runner script with the required and optional parameters
-"$(dirname "$0")/run_rpc_tests.sh" mainnet v1.123.0 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR"
+"$(dirname "$0")/run_rpc_tests.sh" mainnet lupin012/eth_simulateV1_stateRoot_msismatch "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR"
