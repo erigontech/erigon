@@ -105,6 +105,12 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			}
 		}
 		if b == nil {
+			if blockNum <= se.cfg.blockReader.FrozenBlocks() {
+				// Frozen block's transactions not yet available (Bodies stage hasn't
+				// populated EthTx for this range yet). Stop cleanly so
+				// ProcessFrozenBlocks can retry after Bodies makes more progress.
+				break
+			}
 			// TODO: panic here and see that overall process deadlock
 			return nil, rwTx, fmt.Errorf("nil block %d", blockNum)
 		}

@@ -939,7 +939,10 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 					return block, nil, nil
 				}
 			}
-			return nil, nil, fmt.Errorf("no transactions snapshot file for blockNum=%d, BlocksAvailable=%d", blockHeight, r.sn.BlocksAvailable())
+			// Transactions snapshot missing and EthTx not yet populated (Bodies stage
+			// hasn't downloaded this range from P2P yet). Return nil block without error
+			// so the execution stage can stop cleanly and retry once Bodies catches up.
+			return nil, nil, nil
 		}
 		defer release()
 		txs, senders, err = r.txsFromSnapshot(baseTxnId, txCount, txnSeg, buf)
