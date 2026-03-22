@@ -87,9 +87,10 @@ func upgradeAndSmokeTestDotSegFilesInDir(d string, isCaplinDir bool, logger log.
 //     MergeSteps[last] (10 000) and always uses CompressKeys|CompressVals;
 //     dumpRange produces 1 000-block files and uses CompressNone.
 func upgradeSegHeaderV1toV2Seg(path string, isCaplinDir bool, logger log.Logger) error {
+	base := filepath.Base(path)
 	d, err := seg.NewDecompressor(path)
 	if err != nil {
-		logger.Warn("[seg_header_v2_seg] skip", "file", filepath.Base(path), "err", err)
+		logger.Warn("[seg_header_v2_seg] skip", "file", base, "err", err)
 		return nil
 	}
 	version := d.CompressionFormatVersion()
@@ -105,9 +106,9 @@ func upgradeSegHeaderV1toV2Seg(path string, isCaplinDir bool, logger log.Logger)
 	} else {
 		// Block files: merger-produced files (range >= MergeSteps[last]) are compressed;
 		// initial dumpRange files (range < MergeSteps[last]) are not.
-		info, _, ok := snaptype.ParseFileName(filepath.Dir(path), filepath.Base(path))
+		info, _, ok := snaptype.ParseFileName(filepath.Dir(path), base)
 		if !ok {
-			logger.Warn("[seg_header_v2_seg] skip (unparseable filename)", "file", filepath.Base(path))
+			logger.Warn("[seg_header_v2_seg] skip (unparseable filename)", "file", base)
 			return nil
 		}
 		mergeStep := snaptype.MergeSteps[len(snaptype.MergeSteps)-1]
@@ -116,7 +117,6 @@ func upgradeSegHeaderV1toV2Seg(path string, isCaplinDir bool, logger log.Logger)
 		}
 	}
 
-	base := filepath.Base(path)
 	var bitmask seg.FeatureFlagBitmask
 	if fc.Has(seg.CompressKeys) {
 		bitmask.Set(seg.WordLevelKeyCompressionEnabled)
