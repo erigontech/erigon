@@ -12,7 +12,6 @@ on:
       - ready_for_review
   push:
     branches:
-      - main
       - 'release/**'
   merge_group:
   workflow_dispatch:
@@ -43,8 +42,11 @@ jobs:
     secrets: inherit
 
   hive:
-    if: github.event_name != 'push'
     uses: ./.github/workflows/test-hive.yml
+    secrets: inherit
+
+  hive-eest:
+    uses: ./.github/workflows/test-hive-eest.yml
     secrets: inherit
 
   caplin:
@@ -80,6 +82,7 @@ jobs:
       - tests
       - race-tests
       - hive
+      - hive-eest
       - caplin
       - large-files
       - bench
