@@ -184,10 +184,18 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 			return genesis.Config, nil, err
 		}
 		// Recovery: if genesis body was wiped (e.g. by a bad reset), re-write it.
-		if storedBlock == nil && genesis != nil {
-			storedBlock, _, err = write(tx, genesis, dirs, logger)
-			if err != nil {
-				return genesis.Config, nil, fmt.Errorf("re-writing missing genesis block: %w", err)
+		if storedBlock == nil {
+			recoveryGenesis := genesis
+			if recoveryGenesis == nil && chainName != "" {
+				if spec, specErr := chainspec.ChainSpecByName(chainName); specErr == nil && spec.GenesisHash == storedHash {
+					recoveryGenesis = spec.Genesis
+				}
+			}
+			if recoveryGenesis != nil {
+				storedBlock, _, err = write(tx, recoveryGenesis, dirs, logger)
+				if err != nil {
+					return nil, nil, fmt.Errorf("re-writing missing genesis block: %w", err)
+				}
 			}
 		}
 	}
