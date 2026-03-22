@@ -546,7 +546,7 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 	}
 }
 
-func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, inputTxNum uint64, readAhead chan uint64, initialCycle bool, applyResults chan applyResult) error {
+func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, inputTxNum uint64, readAhead chan uint64, initialCycle bool, applyResults chan applyResult, commitResults ...chan applyResult) error {
 	if te.execLoopGroup == nil {
 		return errors.New("no exec group")
 	}
@@ -702,10 +702,14 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 					exhausted = &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
 				}
 			}
+			var commitCh chan applyResult
+			if len(commitResults) > 0 {
+				commitCh = commitResults[0]
+			}
 			select {
 			case te.execRequests <- &execRequest{b.NumberU64(), b.Hash(),
 				protocol.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time())),
-				dbBAL, txTasks, applyResults, false, exhausted}:
+				dbBAL, txTasks, applyResults, commitCh, false, exhausted}:
 			case <-ctx.Done():
 				break
 			}

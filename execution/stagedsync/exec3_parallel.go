@@ -99,8 +99,13 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	stepsInDb float64, accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
 
 	// applyResults receives completed block/tx results from execLoop for the apply goroutine.
-	// Keep bounded to avoid accumulating large result objects ahead of the apply loop.
+	// commitResults receives the same stream for the commitment calculator.
+	// Both are fed by the fan-out in the execLoop's blockExecutor.
 	applyResults := make(chan applyResult, 2_048)
+	commitResults := make(chan applyResult, 2_048)
+
+	// rootResults receives per-block commitment roots from the calculator.
+	rootResults := make(chan commitmentResult, 64)
 
 	if blockLimit > 0 && min(startBlockNum+blockLimit, maxBlockNum) > startBlockNum+16 || maxBlockNum > startBlockNum+16 {
 		log.Info(fmt.Sprintf("[%s] parallel starting", execStage.LogPrefix()),
@@ -130,7 +135,12 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 		return nil, rwTx, err
 	}
 
-	if err := pe.executeBlocks(executorContext, startBlockNum, maxBlockNum, blockLimit, initialTxNum, restoredTxNum, readAhead, initialCycle, applyResults); err != nil {
+	// Start commitment calculator — receives the same result stream as apply loop.
+	commitCalc := newCommitmentCalculator(pe.doms, pe.cfg.db, pe.logPrefix, commitResults, rootResults)
+	commitCalc.Start(ctx)
+	defer commitCalc.Stop()
+
+	if err := pe.executeBlocks(executorContext, startBlockNum, maxBlockNum, blockLimit, initialTxNum, restoredTxNum, readAhead, initialCycle, applyResults, commitResults); err != nil {
 		return nil, rwTx, err
 	}
 
@@ -645,10 +655,8 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					pe.blockExecMetrics.Duration.Add(time.Since(blockExecutor.execStarted))
 					pe.blockExecMetrics.BlockCount.Add(1)
 				}
-				select {
-				case blockExecutor.applyResults <- blockResult:
-				case <-ctx.Done():
-					return ctx.Err()
+				if err := blockExecutor.sendResult(ctx, blockResult); err != nil {
+					return err
 				}
 				pe.Lock()
 				delete(pe.blockExecutors, blockResult.BlockNum)
@@ -702,7 +710,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			executor, ok = pe.blockExecutors[blockNum]
 
 			if !ok {
-				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.accessList, execRequest.applyResults, execRequest.profile, execRequest.exhausted)
+				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.accessList, execRequest.applyResults, execRequest.commitResults, execRequest.profile, execRequest.exhausted)
 			}
 		}
 
@@ -1660,14 +1668,15 @@ func (d *blockDuration) Add(i time.Duration) {
 }
 
 type execRequest struct {
-	blockNum     uint64
-	blockHash    common.Hash
-	gasPool      *protocol.GasPool
-	accessList   types.BlockAccessList
-	tasks        []exec.Task
-	applyResults chan applyResult
-	profile      bool
-	exhausted    *ErrLoopExhausted
+	blockNum      uint64
+	blockHash     common.Hash
+	gasPool       *protocol.GasPool
+	accessList    types.BlockAccessList
+	tasks         []exec.Task
+	applyResults  chan applyResult
+	commitResults chan applyResult
+	profile       bool
+	exhausted     *ErrLoopExhausted
 }
 
 type blockExecutor struct {
@@ -1726,7 +1735,8 @@ type blockExecutor struct {
 	// Stores the execution statistics for the last incarnation of each task
 	stats map[int]ExecutionStat
 
-	applyResults chan applyResult
+	applyResults  chan applyResult
+	commitResults chan applyResult // fan-out: same stream goes to commitment calculator
 
 	execStarted time.Time
 	result      *blockResult
@@ -1738,7 +1748,25 @@ type blockExecutor struct {
 	blockStateCache *state.BlockStateCache
 }
 
-func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, accessList types.BlockAccessList, applyResults chan applyResult, profile bool, exhausted *ErrLoopExhausted) *blockExecutor {
+// sendResult fans out an applyResult to both the apply loop and
+// the commitment calculator. Blocks if either channel is full.
+func (be *blockExecutor) sendResult(ctx context.Context, r applyResult) error {
+	select {
+	case be.applyResults <- r:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	if be.commitResults != nil {
+		select {
+		case be.commitResults <- r:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
+}
+
+func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, accessList types.BlockAccessList, applyResults chan applyResult, commitResults chan applyResult, profile bool, exhausted *ErrLoopExhausted) *blockExecutor {
 	return &blockExecutor{
 		blockNum:        blockNum,
 		blockHash:       blockHash,
@@ -1751,6 +1779,7 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 		versionMap:      state.NewVersionMap(accessList),
 		profile:         profile,
 		applyResults:    applyResults,
+		commitResults:   commitResults,
 		gasPool:         gasPool,
 		blockStateCache: state.NewBlockStateCache(),
 		exhausted:       exhausted,
@@ -2139,10 +2168,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				return nil, err
 			}
 
-			select {
-			case be.applyResults <- &applyResult:
-			case <-ctx.Done():
-				return nil, ctx.Err()
+			if err := be.sendResult(ctx, &applyResult); err != nil {
+				return nil, err
 			}
 		}
 	}
@@ -2261,8 +2288,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		// State writes are already in the BlockStateCache.
 		if len(finalizeWrites) > 0 {
 			lastResult := be.results[len(be.results)-1]
-			select {
-			case be.applyResults <- &txResult{
+			if err := be.sendResult(ctx, &txResult{
 				blockNum:              be.blockNum,
 				txNum:                 txTask.Version().TxNum,
 				rules:                 lastResult.Rules(),
@@ -2272,9 +2298,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				traceTos:              lastResult.TraceTos,
 				cumulativeBlobGasUsed: be.blobGasUsed,
 				isFinalize:            true,
-			}:
-			case <-ctx.Done():
-				return nil, ctx.Err()
+			}); err != nil {
+				return nil, err
 			}
 		}
 
