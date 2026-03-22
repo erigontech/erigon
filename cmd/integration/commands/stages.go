@@ -310,6 +310,7 @@ func init() {
 	rootCmd.AddCommand(cmdStageHeaders)
 
 	withStageBase(cmdStageBodies)
+	withReset(cmdStageBodies)
 	rootCmd.AddCommand(cmdStageBodies)
 
 	withStageBase(cmdStageSenders)
