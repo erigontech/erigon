@@ -515,9 +515,9 @@ func (d *Decompressor) DictLens() int                   { return d.dictLens }
 func (d *Decompressor) CompressedPageValuesCount() int  { return int(d.compPageValuesCount) }
 func (d *Decompressor) CompressionFormatVersion() uint8 { return d.version }
 
-// FileCompression returns the key/value compression flags stored in the file header.
+// WordLevelCompression returns the word-level key/val compression flags from the file header.
 // ok=false means the file predates V2 and the header does not carry this information.
-func (d *Decompressor) FileCompression() (c FileCompression, ok bool) {
+func (d *Decompressor) WordLevelCompression() (c FileCompression, ok bool) {
 	if d.version < FileCompressionFormatV2 {
 		return CompressNone, false
 	}
@@ -773,10 +773,10 @@ func (g *Getter) Trace(t bool)      { g.trace = t }
 func (g *Getter) Count() int        { return g.d.Count() }
 func (g *Getter) FileName() string  { return g.fName }
 
-// FileCompression returns the key/value compression flags from the file header.
+// WordLevelCompression returns the word-level key/val compression flags from the file header.
 // ok=false for pre-V2 files where the header does not carry this information.
-func (g *Getter) FileCompression() (FileCompression, bool) { return g.d.FileCompression() }
-func (g *Getter) GetMetadata() []byte                      { return g.d.GetMetadata() }
+func (g *Getter) WordLevelCompression() (FileCompression, bool) { return g.d.WordLevelCompression() }
+func (g *Getter) GetMetadata() []byte                           { return g.d.GetMetadata() }
 
 // nextPosClean aligns to the next byte boundary then reads the next position.
 func (g *Getter) nextPosClean() uint64 {

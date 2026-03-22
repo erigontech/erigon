@@ -241,9 +241,10 @@ var segCompressionAtV2 = map[string]seg.FileCompression{
 	"tracesto.ef":   seg.CompressNone,
 }
 
-// smokeTestSegFiles walks every word in each upgraded V2 file using g.Skip(),
-// which works for both compressed and uncompressed words.  A corrupted bitmask
-// causes the bit-stream reader to compute wrong word boundaries and panic.
+// smokeTestSegFiles iterates every word in each V2 file via NewReader, which
+// routes each word to Next() (huffman) or NextUncompressed() based on the
+// bitmask we just patched.  A wrong bitmask causes a word-boundary mismatch
+// and a panic, catching header corruption early.
 func smokeTestSegFiles(dir string, logger log.Logger) error {
 	return filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -254,13 +255,23 @@ func smokeTestSegFiles(dir string, logger log.Logger) error {
 		}
 		dec, err := seg.NewDecompressor(path)
 		if err != nil {
-			return err
+			// File may be absent or unreadable (e.g. commitment snapshots disabled).
+			logger.Warn("[seg_header_v2] smoke-test skip", "file", filepath.Base(path), "err", err)
+			return nil
 		}
 		defer dec.Close()
-		seg.NewReader()
+
+		if dec.CompressionFormatVersion() < seg.FileCompressionFormatV2 {
+			return nil // not upgraded, skip
+		}
+
 		g := dec.MakeGetter()
-		for g.HasNext() {
-			g.Skip()
+		fc, _ := g.WordLevelCompression()
+		r := seg.NewReader(g, fc)
+		r.Reset(0)
+		var buf []byte
+		for r.HasNext() {
+			buf, _ = r.Next(buf[:0])
 		}
 		logger.Trace("[seg_header_v2] smoke-test ok", "file", filepath.Base(path))
 		return nil

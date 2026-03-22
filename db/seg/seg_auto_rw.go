@@ -44,7 +44,7 @@ type Reader struct {
 // For V2+ files the compression flags are read from the file header (ground truth);
 // for older files the caller-supplied c is used as a fallback.
 func NewReader(g *Getter, c FileCompression) *Reader {
-	if fc, ok := g.FileCompression(); ok {
+	if fc, ok := g.WordLevelCompression(); ok {
 		c = fc
 	}
 	return &Reader{Getter: g, c: c}
