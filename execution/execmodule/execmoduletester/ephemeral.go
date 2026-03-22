@@ -37,14 +37,20 @@ import (
 // initEphemeral sets up the MemoryMutation overlay on top of the MDBX database.
 // Called after genesis has been committed via the full pipeline.
 func (emt *ExecModuleTester) initEphemeral() error {
-	roTx, err := emt.DB.BeginTemporalRo(emt.Ctx)
+	roTx, err := emt.DB.BeginTemporalRo(emt.Ctx) //nolint:gocritic
 	if err != nil {
 		return fmt.Errorf("ephemeral: BeginTemporalRo: %w", err)
 	}
+	emt.ephemeralRoTx = roTx // owned by closeEphemeral; not deferred here
+	defer func() {
+		if emt.ephemeralOverlay == nil { // setup failed — clean up
+			emt.ephemeralRoTx = nil
+			roTx.Rollback()
+		}
+	}()
 
 	overlay, err := membatchwithdb.NewMemoryBatch(roTx, "", emt.Log)
 	if err != nil {
-		roTx.Rollback()
 		return fmt.Errorf("ephemeral: NewMemoryBatch: %w", err)
 	}
 

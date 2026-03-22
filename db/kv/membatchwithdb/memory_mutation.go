@@ -935,17 +935,42 @@ func (m *MemoryMutation) DomainDel(domain kv.Domain, k []byte, txNum uint64, pre
 func (m *MemoryMutation) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uint64) error {
 	m.mu.Lock()
 	tbl := m.domainTable(domain)
-	// Mark all overlay keys with this prefix as deleted, and also scan the
-	// underlying DB for matching keys to mark them deleted in the overlay.
+	// Mark all overlay keys with this prefix as deleted.
 	for k := range tbl {
 		if len(k) >= len(prefix) && k[:len(prefix)] == string(prefix) {
 			tbl[k] = domainEntry{deleted: true}
 		}
 	}
-	// Note: keys only in the underlying DB that match the prefix are not
-	// deleted here — a full scan would be needed. For block test usage this
-	// is acceptable because DomainDelPrefix is only called during contract
-	// re-creation which overwrites the prefix range immediately after.
+	m.mu.Unlock()
+
+	// Scan the underlying DB for keys with this prefix and mark them deleted
+	// in the overlay. This is needed for contract re-creation (CREATE2) where
+	// old storage must be fully cleared.
+	// Compute an exclusive upper bound for the prefix range.
+	to := common.Copy(prefix)
+	for i := len(to) - 1; i >= 0; i-- {
+		if to[i] < 0xff {
+			to[i]++
+			to = to[:i+1]
+			break
+		}
+	}
+	it, err := m.db.Debug().RangeLatest(domain, prefix, to, -1)
+	if err != nil {
+		return nil // best effort — underlying DB may not support RangeLatest
+	}
+	defer it.Close()
+	m.mu.Lock()
+	for it.HasNext() {
+		k, _, err := it.Next()
+		if err != nil {
+			break
+		}
+		sk := string(k)
+		if _, already := tbl[sk]; !already {
+			tbl[sk] = domainEntry{deleted: true}
+		}
+	}
 	m.mu.Unlock()
 	return nil
 }
