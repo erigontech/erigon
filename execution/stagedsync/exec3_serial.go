@@ -364,13 +364,6 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			se.blockGasUsed += result.ExecutionResult.BlockRegularGasUsed
 			se.blockStateGasUsed += result.ExecutionResult.BlockStateGasUsed
 			mxExecTransactions.Add(1)
-			// DEBUG: Hoodi gas mismatch investigation
-			if txTask.BlockNumber() == 2455094 && txTask.TxIndex >= 0 {
-				fmt.Printf("[gas-debug] block=%d txIdx=%d txHash=%x receipt=%d blockRegular=%d blockGasSoFar=%d\n",
-					txTask.BlockNumber(), txTask.TxIndex, txTask.TxHash(),
-					result.ExecutionResult.ReceiptGasUsed,
-					result.ExecutionResult.BlockRegularGasUsed, se.blockGasUsed)
-			}
 			if txTask.Tx() != nil {
 				se.blobGasUsed += txTask.Tx().GetBlobGas()
 			}
