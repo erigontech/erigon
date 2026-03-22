@@ -617,6 +617,30 @@ func (s *simulator) simulateBlock(
 			sharedDomains.GetCommitmentContext().SetStateReader(newHistoryCommitmentOnlyReader(tx, sharedDomains, txNum+1))
 		}
 		s.logger.Warn("eth_simulateV1 touchedKeys", "blockNumber", blockNumber, "parentBlockNumber", parent.Number.Uint64(), "numTouchedAccounts", len(stateWriter.touchedKeys))
+		if !latest {
+			histReader := state.NewHistoryReaderV3(tx, minTxNum)
+			latestReader := state.NewReaderV3(sharedDomains.AsGetter(tx))
+			for addr := range stateWriter.touchedKeys {
+				histAcc, histErr := histReader.ReadAccountData(addr)
+				latestAcc, latestErr := latestReader.ReadAccountData(addr)
+				histBal, histNonce := uint256.NewInt(0), uint64(0)
+				latestBal, latestNonce := uint256.NewInt(0), uint64(0)
+				if histErr == nil && histAcc != nil {
+					histBal, histNonce = &histAcc.Balance, histAcc.Nonce
+				}
+				if latestErr == nil && latestAcc != nil {
+					latestBal, latestNonce = &latestAcc.Balance, latestAcc.Nonce
+				}
+				s.logger.Warn("eth_simulateV1 accountDiff",
+					"blockNumber", blockNumber,
+					"parentBlockNumber", parent.Number.Uint64(),
+					"address", addr.Value().Hex(),
+					"histBalance", histBal, "histNonce", histNonce,
+					"latestBalance", latestBal, "latestNonce", latestNonce,
+					"differs", histBal.Cmp(latestBal) != 0 || histNonce != latestNonce,
+				)
+			}
+		}
 		stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, false, blockNumber, commitTxNum, "eth_simulateV1", nil)
 		if err != nil {
 			return nil, nil, err
