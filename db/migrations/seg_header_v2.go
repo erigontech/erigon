@@ -122,17 +122,28 @@ func upgradeSegHeaderV1toV2(path, ext string, logger log.Logger) error {
 		bitmask.Set(seg.WordLevelValCompressionEnabled)
 	}
 
-	f, err := os.OpenFile(path, os.O_RDWR, 0)
+	info, err := os.Stat(path)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-
-	if _, err := f.WriteAt([]byte{seg.FileCompressionFormatV2, byte(bitmask)}, 0); err != nil {
+	origMode := info.Mode()
+	if err := os.Chmod(path, origMode|0200); err != nil {
 		return err
 	}
-	if err := f.Sync(); err != nil {
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		_ = os.Chmod(path, origMode)
 		return err
+	}
+	_, writeErr := f.WriteAt([]byte{seg.FileCompressionFormatV2, byte(bitmask)}, 0)
+	syncErr := f.Sync()
+	f.Close()
+	_ = os.Chmod(path, origMode)
+	if writeErr != nil {
+		return writeErr
+	}
+	if syncErr != nil {
+		return syncErr
 	}
 
 	// The header patch changes the file content, so any existing .torrent (which
