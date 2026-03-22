@@ -18,7 +18,6 @@ package migrations
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -266,25 +265,16 @@ func smokeTestSegFiles(dir string, logger log.Logger) error {
 			return nil // not upgraded, skip
 		}
 
+		logger.Debug("[seg_header_v2] smoke-test", "file", filepath.Base(path))
 		g := dec.MakeGetter()
 		r := seg.NewReader(g, seg.CompressNone) // NewReader reads WordLevelCompression from header
 		r.Reset(0)
-		var (
-			buf     []byte
-			iterErr error
-		)
-		func() {
-			defer func() {
-				if rec := recover(); rec != nil {
-					iterErr = fmt.Errorf("panic iterating %s: %v", path, rec)
-				}
-			}()
-			for r.HasNext() {
-				buf, _ = r.Next(buf[:0])
+		var kbuf, vbuf []byte
+		for r.HasNext() {
+			kbuf, _ = r.Next(kbuf[:0])
+			if r.HasNext() {
+				vbuf, _ = r.Next(vbuf[:0])
 			}
-		}()
-		if iterErr != nil {
-			return iterErr
 		}
 		logger.Trace("[seg_header_v2] smoke-test ok", "file", filepath.Base(path))
 		return nil
