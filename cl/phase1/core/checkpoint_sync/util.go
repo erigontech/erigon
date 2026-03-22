@@ -20,7 +20,10 @@ import (
 // If remote checkpoint sync fails, it falls back to the local head state on disk.
 // If no local head state is available, it returns an error.
 func ReadOrFetchLatestBeaconState(ctx context.Context, dirs datadir.Dirs, beaconCfg *clparams.BeaconChainConfig, caplinConfig clparams.CaplinConfig, genesisDB genesisdb.GenesisDB) (*state.CachingBeaconState, error) {
-	remoteSync := !caplinConfig.DisabledCheckpointSync && !caplinConfig.IsDevnet()
+	var syncer CheckpointSyncer
+	// Allow remote checkpoint sync for devnets when the user explicitly provides a checkpoint sync URL.
+	hasCustomCheckpointURL := len(clparams.ConfigurableCheckpointsURLs) > 0
+	remoteSync := !caplinConfig.DisabledCheckpointSync && (!caplinConfig.IsDevnet() || hasCustomCheckpointURL)
 
 	if remoteSync {
 		syncer := NewRemoteCheckpointSync(beaconCfg, caplinConfig.NetworkId)
@@ -49,7 +52,7 @@ func ReadOrFetchLatestBeaconState(ctx context.Context, dirs datadir.Dirs, beacon
 	if err != nil {
 		return nil, fmt.Errorf("could not read genesis state: %w", err)
 	}
-	syncer := NewLocalCheckpointSyncer(genesisState, afero.NewBasePathFs(aferoFs, dirs.CaplinLatest))
+	syncer = NewLocalCheckpointSyncer(genesisState, afero.NewBasePathFs(aferoFs, dirs.CaplinLatest))
 	return syncer.GetLatestBeaconState(ctx)
 }
 

@@ -122,6 +122,9 @@ type forkGraphDisk struct {
 	// the lightclientUpdates leaks memory, but it's not a big deal since new data is added every 27 hours.
 	lightClientUpdates sync.Map // period -> lightclientupdate
 
+	// in-memory cache of block roots that have envelopes on disk [Optimization for Gloas:EIP7732]
+	envelopeExists sync.Map // common.Hash -> struct{}
+
 	// reusable buffers
 	sszBuffer       []byte
 	sszSnappyWriter *snappy.Writer
@@ -142,9 +145,31 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_d
 		panic(err)
 	}
 	anchorHeader := anchorState.LatestBlockHeader()
-	if anchorHeader.Root, err = anchorState.HashSSZ(); err != nil {
+	stateHash, err := anchorState.HashSSZ()
+	if err != nil {
 		panic(err)
 	}
+	anchorHeader.Root = stateHash
+	// Fix GLOAS checkpoint sync: persist the filled-in Root back to the actual state
+	// so that transitionSlot won't re-compute HashSSZ() (which may return a different
+	// value after DumpBeaconStateOnDisk mutates the internal merkle cache).
+	// Only do this when the original header Root was zero (PENDING state or genesis-like).
+	// For FULL states (post-envelope), Root is already correctly set to the pre-envelope
+	// state hash — overwriting it with post-envelope HashSSZ() would be wrong.
+	if anchorState.LatestBlockHeader().Root == [32]byte{} && anchorState.Slot() > 0 {
+		anchorState.SetLatestBlockHeader(&anchorHeader)
+	}
+
+	log.Info("[DEBUG] NewForkGraphDisk anchor state",
+		"slot", anchorState.Slot(),
+		"anchorRoot", common.Hash(anchorRoot),
+		"headerSlot", anchorHeader.Slot,
+		"headerProposer", anchorHeader.ProposerIndex,
+		"headerParentRoot", anchorHeader.ParentRoot,
+		"headerBodyRoot", anchorHeader.BodyRoot,
+		"headerRoot(stateHash)", stateHash,
+		"latestBlockHeaderRoot", anchorState.LatestBlockHeader().Root,
+	)
 
 	farthestExtendingPath[anchorRoot] = true
 
@@ -215,21 +240,38 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	}
 
 	// [GLOAS] Patch latestBlockHash if an override is provided (checkpoint sync fallback).
+	// Only apply when existing latestBlockHash is zero — FULL states already have the
+	// correct value set by ProcessExecutionPayloadEnvelope and must not be overwritten.
 	if newState != nil && latestBlockHashOverride != (common.Hash{}) {
-		newState.SetLatestBlockHash(latestBlockHashOverride)
+		existing := newState.GetLatestBlockHash()
+		if existing == (common.Hash{}) {
+			log.Info("[DEBUG] AddChainSegment: applying latestBlockHash override (was zero)",
+				"slot", block.Slot,
+				"override", latestBlockHashOverride,
+			)
+			newState.SetLatestBlockHash(latestBlockHashOverride)
+		} else {
+			log.Debug("[DEBUG] AddChainSegment: skipping latestBlockHash override (already set)",
+				"slot", block.Slot,
+				"existing", existing,
+				"override", latestBlockHashOverride,
+			)
+		}
 	}
 
 	if newState == nil {
 		var currentStateRoot common.Hash
+		var currentStateSlot uint64
 		if f.currentState != nil {
 			currentStateRoot, _ = f.currentState.BlockRoot()
+			currentStateSlot = f.currentState.Slot()
 		}
 		log.Warn("AddChainSegment: missing segment",
 			"slot", block.Slot,
 			"blockRoot", common.Hash(blockRoot),
 			"parentRoot", block.ParentRoot,
 			"currentStateRoot", currentStateRoot,
-			"currentStateSlot", f.currentState.Slot(),
+			"currentStateSlot", currentStateSlot,
 			"lowestAvail", f.lowestAvailableBlock.Load(),
 			"isCurrentState", isBlockRootTheCurrentState,
 			"parentFullState!=nil", parentFullState != nil,
@@ -286,6 +328,20 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	blockRewardsCollector := &eth2.BlockRewardsCollector{}
 
 	if !isBlockRootTheCurrentState {
+		// Debug: log pre-transition state details
+		{
+			preHeader := newState.LatestBlockHeader()
+			preHash, _ := newState.HashSSZ()
+			log.Info("[DEBUG] AddChainSegment: pre-TransitionState",
+				"blockSlot", block.Slot,
+				"stateSlot", newState.Slot(),
+				"latestBlockHash", newState.GetLatestBlockHash(),
+				"headerRoot", preHeader.Root,
+				"headerSlot", preHeader.Slot,
+				"stateHashSSZ", common.Hash(preHash),
+				"previousStateRoot", newState.PreviousStateRoot(),
+			)
+		}
 		// Execute the state
 		if invalidBlockErr := transition.TransitionState(newState, signedBlock, blockRewardsCollector, fullValidation); invalidBlockErr != nil {
 			// Add block to list of invalid blocks
@@ -628,6 +684,7 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		f.blockRewards.Delete(root)
 		f.fs.Remove(getBeaconStateFilename(root))
 		// [New in Gloas:EIP7732] Also remove envelope files
+		f.envelopeExists.Delete(root)
 		f.fs.Remove(getEnvelopeFilename(root))
 	}
 	log.Debug("Pruned old blocks", "pruneSlot", pruneSlot)
