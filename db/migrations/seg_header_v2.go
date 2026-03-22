@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -127,7 +128,7 @@ func upgradeSegHeaderV1toV2(path, ext string, logger log.Logger) error {
 	// The header patch changes the file content, so any existing .torrent (which
 	// is a hash of the file bytes) is now stale.  Remove it so the downloader
 	// regenerates a correct one.
-	_ = os.Remove(path + ".torrent")
+	_ = dir.RemoveFile(path + ".torrent")
 
 	logger.Debug("[seg_header_v2] upgraded", "file", base)
 	return nil
