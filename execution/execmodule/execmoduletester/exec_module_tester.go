@@ -52,6 +52,7 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule"
@@ -335,6 +336,12 @@ func WithEphemeral() Option {
 	}
 }
 
+func WithEnableDomain(domains ...kv.Domain) Option {
+	return func(opts *options) {
+		opts.enableDomains = append(opts.enableDomains, domains...)
+	}
+}
+
 type options struct {
 	stepSize        *uint64
 	experimentalBAL bool
@@ -346,6 +353,7 @@ type options struct {
 	blockBufferSize int
 	withTxPool      bool
 	ephemeral       bool
+	enableDomains   []kv.Domain
 }
 
 func applyOptions(opts []Option) options {
@@ -713,6 +721,14 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	mock.ForkValidator = mock.ExecModule.ForkValidator()
 
 	mock.sentriesClient.Hd.StartPoSDownloader(mock.Ctx, sendHeaderRequest, penalize)
+
+	// Enable optional domains before starting background goroutines to avoid data races.
+	if len(opt.enableDomains) > 0 {
+		agg := mock.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+		for _, domain := range opt.enableDomains {
+			agg.EnableDomain(domain)
+		}
+	}
 
 	mock.StreamWg.Add(1)
 	mock.bgComponentsEg.Go(func() error {
