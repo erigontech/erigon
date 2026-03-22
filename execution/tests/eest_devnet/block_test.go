@@ -50,12 +50,9 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	bt.Whitelist(`.*for_amsterdam/.*`)
 	// static — tested in state test format by TestState
 	bt.SkipLoad(`^for_amsterdam/static/state_tests/`)
-	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7928_block_level_access_lists/test_bal_sstore_and_oog.json`)                               // block=1, gas used by execution: 37568, in header: 63573
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7954_increase_max_contract_size/test_max_code_size_deposit_gas.json`)                      // block=1, gas used by execution: 38601120, in header: 16777216
-	bt.SkipLoad(`^for_amsterdam/amsterdam/eip8037_state_creation_gas_cost_increase/test_call_oog_reservoir_inflation_detection.json`)   // block=1, gas used by execution: 82640, in header: 214128
-	bt.SkipLoad(`^for_amsterdam/amsterdam/eip8037_state_creation_gas_cost_increase/test_sstore_oog_reservoir_inflation_detection.json`) // block=1, block access list mismatch
+	bt.SkipLoad(`^for_amsterdam/amsterdam/eip8037_state_creation_gas_cost_increase/test_sstore_oog_reservoir_inflation_detection.json`) // block=1, block access list mismatch (EIP-7928 issue, not gas)
 	bt.SkipLoad(`^for_amsterdam/frontier/create/test_create_deposit_oog.json`)                                                          // block=1, enough_gas_False subtests still fail (different bug)
-	bt.SkipLoad(`^for_amsterdam/frontier/opcodes/test_value_transfer_gas_calculation.json`)                                             // block=1, gas used by execution: 37443, in header: 168931
 
 	bt.Walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root

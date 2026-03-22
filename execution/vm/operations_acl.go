@@ -349,28 +349,25 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 			return mdgas.MdGas{}, err
 		}
 
-		// EIP-8037: Charge state gas from the gas pool BEFORE regular-gas
-		// sufficiency checks and BEFORE computing the 63/64 rule, so that
-		// any spill from the state reservoir into regular gas is reflected
-		// in availableGas for subsequent checks.
+		// EIP-8037: Match the reference execution spec charge order:
+		// 1. Deduct regular base gas (access + value transfer)
+		// 2. Charge state gas (may spill into the now-reduced gas_left)
+		// 3. Compute the 63/64 rule with the remaining gas
+		//
+		// The regular base gas is deducted here (not by the interpreter)
+		// so that step 2 sees the correct gas_left.
+		regularBase := accessGas + statefulBaseGas.Regular
+		if !callContext.useMdGas(evm, regularBase, mdgas.RegularGas, nil, tracing.GasChangeIgnored) {
+			return mdgas.MdGas{}, ErrOutOfGas
+		}
+
 		if statefulBaseGas.State > 0 {
 			ok := callContext.useMdGas(evm, statefulBaseGas.State, mdgas.StateGas, nil, tracing.GasChangeIgnored)
 			if !ok {
 				return mdgas.MdGas{}, ErrOutOfGas
 			}
-			availableGas = callContext.Gas()
 		}
-
-		var overflow bool
-		if gas.Regular, overflow = math.SafeAdd(gas.Regular, accessGas); overflow {
-			return mdgas.MdGas{}, ErrGasUintOverflow
-		}
-		if gas.Regular, overflow = math.SafeAdd(gas.Regular, statefulBaseGas.Regular); overflow {
-			return mdgas.MdGas{}, ErrGasUintOverflow
-		}
-		if availableGas.Regular < gas.Regular {
-			return mdgas.MdGas{}, ErrOutOfGas
-		}
+		availableGas = callContext.Gas()
 
 		// Check if code is a delegation and if so, charge for resolution.
 		dd, ok, err := evm.intraBlockState.GetDelegatedDesignation(addr)
@@ -389,22 +386,16 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 			if err != nil {
 				return mdgas.MdGas{}, err
 			}
-			if gas.Regular, overflow = math.SafeAdd(gas.Regular, delegationGas); overflow {
-				return mdgas.MdGas{}, ErrGasUintOverflow
-			}
-			if availableGas.Regular < gas.Regular {
+			if !callContext.useMdGas(evm, delegationGas, mdgas.RegularGas, nil, tracing.GasChangeIgnored) {
 				return mdgas.MdGas{}, ErrOutOfGas
 			}
+			availableGas = callContext.Gas()
 			evm.intraBlockState.AddAddressToAccessList(dd)
 		}
 
-		availableGas.Regular -= accessGas + delegationGas
-		if availableGas.Regular < statefulBaseGas.Regular {
-			return mdgas.MdGas{}, ErrOutOfGas
-		}
-		// Call the old calculator, which takes into account
-		// - 63/64ths rule
-		callGas, err := calcCallGas(evm, callContext, availableGas.Regular, statefulBaseGas.Regular)
+		// 63/64ths rule: base gas is 0 because access, transfer, and
+		// delegation costs were already deducted above.
+		callGas, err := calcCallGas(evm, callContext, availableGas.Regular, 0)
 		if err != nil {
 			return mdgas.MdGas{}, err
 		}
@@ -414,10 +405,9 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 				evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(),
 				statefulBaseGas, accessGas, delegationGas, callGas)
 		}
-		if gas.Regular, overflow = math.SafeAdd(gas.Regular, callGas); overflow {
-			return mdgas.MdGas{}, ErrGasUintOverflow
-		}
-
+		// Return only the forwarded call gas as dynamic cost — the base
+		// costs and state gas were already charged from callContext above.
+		gas.Regular = callGas
 		return gas, nil
 	}
 }
