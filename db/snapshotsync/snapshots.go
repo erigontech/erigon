@@ -969,6 +969,19 @@ func (s *RoSnapshots) MinContinuouslyAvailable() uint64 {
 	return result
 }
 
+// FirstBlock returns the `from` field of the first visible segment for the given
+// enum, or math.MaxUint64 if no segments of that type exist. Callers can use this
+// to detect a leading gap (e.g. transactions.seg starting at 100 000 rather than 0).
+func (s *RoSnapshots) FirstBlock(enum snaptype.Enum) uint64 {
+	s.visibleLock.RLock()
+	defer s.visibleLock.RUnlock()
+	segs := s.visible[enum]
+	if len(segs) == 0 {
+		return math.MaxUint64
+	}
+	return segs[0].from
+}
+
 func (s *RoSnapshots) dirtyIdxAvailability(segtype snaptype.Enum) uint64 {
 	s.dirtyLock.RLock()
 	defer s.dirtyLock.RUnlock()

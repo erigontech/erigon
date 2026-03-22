@@ -70,10 +70,20 @@ func BodiesForward(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, c
 
 	startTime := time.Now()
 
-	if s.BlockNumber < cfg.blockReader.FrozenBlocks() {
-		s.BlockNumber = cfg.blockReader.FrozenBlocks()
-		doUpdate = true
+	frozenBlocks := cfg.blockReader.FrozenBlocks()
+	txsFirstBlock := cfg.blockReader.TxSnapshotsFirstBlock()
+	if txsFirstBlock == 0 || s.BlockNumber >= txsFirstBlock {
+		// Transactions snapshots cover from block 0 (normal case), or we have already
+		// passed the leading gap — safe to jump directly to the frozen boundary.
+		if s.BlockNumber < frozenBlocks {
+			s.BlockNumber = frozenBlocks
+			doUpdate = true
+		}
 	}
+	// else: transactions snapshot has a leading gap (txsFirstBlock > 0) and we are
+	// still inside it. Do not skip ahead; the stage must download this range from P2P
+	// to populate EthTx. Once s.BlockNumber reaches txsFirstBlock the branch above
+	// will fire and skip the rest of the frozen range in one step.
 
 	var d1, d2, d3, d4, d5, d6 time.Duration
 	var err error

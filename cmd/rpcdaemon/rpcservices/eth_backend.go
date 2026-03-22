@@ -120,6 +120,9 @@ func (back *RemoteBackend) Ready(ctx context.Context) <-chan error {
 
 func (back *RemoteBackend) AllTypes() []snaptype.Type { panic("not implemented") }
 func (back *RemoteBackend) FrozenBlocks() uint64      { return back.blockReader.FrozenBlocks() }
+func (back *RemoteBackend) TxSnapshotsFirstBlock() uint64 {
+	return back.blockReader.TxSnapshotsFirstBlock()
+}
 func (back *RemoteBackend) FrozenBorBlocks(align bool) uint64 {
 	return back.blockReader.FrozenBorBlocks(align)
 }

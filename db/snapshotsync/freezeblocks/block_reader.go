@@ -141,6 +141,7 @@ func (r *RemoteBlockReader) Snapshots() services.BlockSnapshots    { panic("not 
 func (r *RemoteBlockReader) BorSnapshots() services.BlockSnapshots { panic("not implemented") }
 func (r *RemoteBlockReader) AllTypes() []snaptype.Type             { panic("not implemented") }
 func (r *RemoteBlockReader) FrozenBlocks() uint64                  { panic("not supported") }
+func (r *RemoteBlockReader) TxSnapshotsFirstBlock() uint64         { panic("not supported") }
 func (r *RemoteBlockReader) FrozenBorBlocks(align bool) uint64     { panic("not supported") }
 func (r *RemoteBlockReader) FrozenFiles() (list []string)          { panic("not supported") }
 func (r *RemoteBlockReader) FreezingCfg() ethconfig.BlocksFreezing { panic("not supported") }
@@ -428,7 +429,10 @@ func (r *BlockReader) AllTypes() []snaptype.Type {
 	return types
 }
 
-func (r *BlockReader) FrozenBlocks() uint64 { return r.sn.MinContinuouslyAvailable() }
+func (r *BlockReader) FrozenBlocks() uint64 { return r.sn.BlocksAvailable() }
+func (r *BlockReader) TxSnapshotsFirstBlock() uint64 {
+	return r.sn.FirstBlock(snaptype2.Enums.Transactions)
+}
 
 func (r *BlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint64, error) {
 	if r.FrozenBlocks() > 0 {

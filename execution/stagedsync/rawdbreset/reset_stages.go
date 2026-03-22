@@ -103,7 +103,14 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, br services.FullBlockReader, bw *blocki
 		}
 		_ = stages.SaveStageProgress(tx, stages.Snapshots, br.FrozenBlocks())
 		_ = stages.SaveStageProgress(tx, stages.Headers, br.FrozenBlocks())
-		_ = stages.SaveStageProgress(tx, stages.Bodies, br.FrozenBlocks())
+		// If transactions snapshots have a leading gap (e.g. only 100k+ covered),
+		// reset Bodies to 0 so BodiesForward downloads the gap range from P2P and
+		// populates EthTx. Otherwise set it to the normal frozen boundary.
+		bodiesProgress := br.FrozenBlocks()
+		if txsFirst := br.TxSnapshotsFirstBlock(); txsFirst > 0 {
+			bodiesProgress = 0
+		}
+		_ = stages.SaveStageProgress(tx, stages.Bodies, bodiesProgress)
 		_ = stages.SaveStageProgress(tx, stages.Senders, br.FrozenBlocks())
 	}
 

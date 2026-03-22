@@ -98,6 +98,10 @@ type FullBlockReader interface {
 	CanonicalReader
 
 	FrozenBlocks() uint64
+	// TxSnapshotsFirstBlock returns the first block covered by the transactions
+	// snapshot, or math.MaxUint64 if no transactions snapshot exists. A non-zero
+	// value indicates a leading gap where transactions must be read from EthTx.
+	TxSnapshotsFirstBlock() uint64
 	FrozenBorBlocks(align bool) uint64
 	FrozenFiles() (list []string)
 	FreezingCfg() ethconfig.BlocksFreezing
