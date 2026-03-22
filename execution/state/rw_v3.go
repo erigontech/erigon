@@ -1264,6 +1264,18 @@ func (r *CachedReaderV3) ReadAccountData(address accounts.Address) (*accounts.Ac
 
 func (r *CachedReaderV3) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	if r.blockCache != nil {
+		if r.readCurrent {
+			// Read from write buffer — sees storage modifications from
+			// this block's TXs (e.g. system contract state for Prague
+			// EIP-7685 deposit/withdrawal requests).
+			if val, ok := r.blockCache.GetCurrentStorage(address, key); ok {
+				var v uint256.Int
+				if len(val) > 0 {
+					v.SetBytes(val)
+				}
+				return v, len(val) > 0, nil
+			}
+		}
 		if val, ok := r.blockCache.GetCommittedStorage(address, key); ok {
 			var v uint256.Int
 			if len(val) > 0 {
