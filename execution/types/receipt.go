@@ -232,7 +232,7 @@ func (r *Receipt) decodePayload(s *rlp.Stream) error {
 		return fmt.Errorf("read PostStateOrStatus: %w", err)
 	}
 	r.setStatus(b)
-	if r.CumulativeGasUsed, err = s.Uint(); err != nil {
+	if r.CumulativeGasUsed, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read CumulativeGasUsed: %w", err)
 	}
 	if err = s.ReadBytes(r.Bloom[:]); err != nil {

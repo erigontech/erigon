@@ -58,3 +58,12 @@ func RebuildPatriciaTrieBasedOnFiles(ctx context.Context, cfg TrieCfg, squeeze b
 	}
 	return common.BytesToHash(rh), err
 }
+
+func RebuildPatriciaTrieWithHistory(ctx context.Context, cfg TrieCfg, squeeze bool) (common.Hash, error) {
+	rh, err := state.RebuildCommitmentFilesWithHistory(ctx, cfg.db, cfg.blockReader, log.New(), squeeze)
+	if err != nil {
+		return trie.EmptyRoot, err
+	}
+
+	return common.BytesToHash(rh), err
+}

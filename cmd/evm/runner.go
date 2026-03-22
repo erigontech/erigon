@@ -309,7 +309,7 @@ func runCmd(ctx *cli.Context) error {
 		input = append(code, input...)
 		execFunc = func() ([]byte, uint64, error) {
 			output, _, gasLeft, err := runtime.Create(input, &runtimeConfig, 0)
-			return output, gasLeft, err
+			return output, gasLeft.Total(), err
 		}
 	} else {
 		if len(code) > 0 {
@@ -317,7 +317,7 @@ func runCmd(ctx *cli.Context) error {
 		}
 		execFunc = func() ([]byte, uint64, error) {
 			output, gasLeft, err := runtime.Call(receiver, input, &runtimeConfig)
-			return output, initialGas - gasLeft, err
+			return output, initialGas - gasLeft.Total(), err
 		}
 	}
 

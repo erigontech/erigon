@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/testutil"
@@ -198,11 +199,11 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 		BlockNumber: 1,
 		ChainConfig: &chain.Config{
 			ChainID:               big.NewInt(1),
-			HomesteadBlock:        new(big.Int),
-			ByzantiumBlock:        new(big.Int),
-			ConstantinopleBlock:   new(big.Int),
-			TangerineWhistleBlock: new(big.Int),
-			SpuriousDragonBlock:   new(big.Int),
+			HomesteadBlock:        common.NewUint64(0),
+			ByzantiumBlock:        common.NewUint64(0),
+			ConstantinopleBlock:   common.NewUint64(0),
+			TangerineWhistleBlock: common.NewUint64(0),
+			SpuriousDragonBlock:   common.NewUint64(0),
 		},
 		EVMConfig: vm.Config{
 			//JumpDestCache: vm.NewJumpDestCache(128),
@@ -390,7 +391,8 @@ func TestBlockhash(t *testing.T) {
 		BlockNumber: header.Number.Uint64(),
 	}
 	setDefaults(cfg)
-	cfg.ChainConfig.PragueTime = big.NewInt(1)
+	pragueTime := uint64(1)
+	cfg.ChainConfig.PragueTime = &pragueTime
 	ret, _, err := Execute(data, input, cfg, t.TempDir())
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -418,7 +420,7 @@ func TestBlockhash(t *testing.T) {
 
 // benchmarkNonModifyingCode benchmarks code, but if the code modifies the
 // state, this should not be used, since it does not reset the state between runs.
-func benchmarkNonModifyingCode(gas uint64, code []byte, name string, tracerCode string, b *testing.B) { //nolint:unparam
+func benchmarkNonModifyingCode(gas mdgas.MdGas, code []byte, name string, tracerCode string, b *testing.B) { //nolint:unparam
 	b.Helper()
 	cfg := new(Config)
 	setDefaults(cfg)
@@ -429,7 +431,10 @@ func benchmarkNonModifyingCode(gas uint64, code []byte, name string, tracerCode 
 	require.NoError(b, err)
 
 	cfg.State = state.New(state.NewReaderV3(domains.AsGetter(tx)))
-	cfg.GasLimit = gas
+	cfg.GasLimit = gas.Regular
+	//
+	// TODO revise
+	//
 	cfg.Origin = accounts.ZeroAddress
 	//if len(tracerCode) > 0 {
 	//	tracer, err := tracers.DefaultDirectory.New(tracerCode, new(tracers.Context), nil, cfg.ChainConfig)
@@ -541,14 +546,14 @@ func BenchmarkSimpleLoop(b *testing.B) {
 	//		Tracer: tracer,
 	//	}})
 	// 100M gas
-	benchmarkNonModifyingCode(100_000_000, staticCallIdentity, "staticcall-identity-100M", "", b)
-	benchmarkNonModifyingCode(100_000_000, callIdentity, "call-identity-100M", "", b)
-	benchmarkNonModifyingCode(100_000_000, loopingCode, "loop-100M", "", b)
-	benchmarkNonModifyingCode(100_000_000, loopingCode2, "loop2-100M", "", b)
-	benchmarkNonModifyingCode(100_000_000, loopingCode3, "loop3-100M", "", b)
-	benchmarkNonModifyingCode(100_000_000, callInexistant, "call-nonexist-100M", "", b)
-	benchmarkNonModifyingCode(100_000_000, callEOA, "call-EOA-100M", "", b)
-	benchmarkNonModifyingCode(100_000_000, callRevertingContractWithInput, "call-reverting-100M", "", b)
+	benchmarkNonModifyingCode(mdgas.MdGas{Regular: 100_000_000}, staticCallIdentity, "staticcall-identity-100M", "", b)
+	benchmarkNonModifyingCode(mdgas.MdGas{Regular: 100_000_000}, callIdentity, "call-identity-100M", "", b)
+	benchmarkNonModifyingCode(mdgas.MdGas{Regular: 100_000_000}, loopingCode, "loop-100M", "", b)
+	benchmarkNonModifyingCode(mdgas.MdGas{Regular: 100_000_000}, loopingCode2, "loop2-100M", "", b)
+	benchmarkNonModifyingCode(mdgas.MdGas{Regular: 100_000_000}, loopingCode3, "loop3-100M", "", b)
+	benchmarkNonModifyingCode(mdgas.MdGas{Regular: 100_000_000}, callInexistant, "call-nonexist-100M", "", b)
+	benchmarkNonModifyingCode(mdgas.MdGas{Regular: 100_000_000}, callEOA, "call-EOA-100M", "", b)
+	benchmarkNonModifyingCode(mdgas.MdGas{Regular: 100_000_000}, callRevertingContractWithInput, "call-reverting-100M", "", b)
 
 	//benchmarkNonModifyingCode(10000000, staticCallIdentity, "staticcall-identity-10M", b)
 	//benchmarkNonModifyingCode(10000000, loopingCode, "loop-10M", b)

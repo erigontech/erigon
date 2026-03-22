@@ -762,7 +762,7 @@ func (hph *HexPatriciaHashed) completeLeafHash(buf []byte, compactLen int, key [
 
 	totalLen := kp + kl + val.DoubleRLPLen()
 	var lenPrefix [4]byte
-	pl := rlp.GenerateStructLen(lenPrefix[:], totalLen)
+	pl := rlp.EncodeListPrefixToBuf(totalLen, lenPrefix[:])
 	canEmbed := !singleton && totalLen+pl < length.Hash
 	var writer io.Writer
 	if canEmbed {
@@ -879,7 +879,7 @@ func (hph *HexPatriciaHashed) extensionHash(key []byte, hash []byte) (common.Has
 	}
 	totalLen := kp + kl + 33
 	var lenPrefix [4]byte
-	pt := rlp.GenerateStructLen(lenPrefix[:], totalLen)
+	pt := rlp.EncodeListPrefixToBuf(totalLen, lenPrefix[:])
 	hph.keccak.Reset()
 	if _, err := hph.keccak.Write(lenPrefix[:pt]); err != nil {
 		return hashBuf, err
@@ -931,7 +931,7 @@ func (hph *HexPatriciaHashed) computeCellHashLen(cell *cell, depth int16) int16 
 		val := rlp.RlpSerializableBytes(cell.Storage[:cell.StorageLen])
 		totalLen := kp + kl + val.DoubleRLPLen()
 		var lenPrefix [4]byte
-		pt := rlp.GenerateStructLen(lenPrefix[:], totalLen)
+		pt := rlp.EncodeListPrefixToBuf(totalLen, lenPrefix[:])
 		if totalLen+pt < length.Hash {
 			return int16(totalLen + pt)
 		}
@@ -2206,7 +2206,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		}
 
 		hph.keccak2.Reset()
-		pt := rlp.GenerateStructLen(hph.hashAuxBuffer[:], int(totalBranchLen))
+		pt := rlp.EncodeListPrefixToBuf(int(totalBranchLen), hph.hashAuxBuffer[:])
 		if _, err := hph.keccak2.Write(hph.hashAuxBuffer[:pt]); err != nil {
 			return err
 		}
@@ -2641,9 +2641,9 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 	//hph.trace = true
 
+	hph.metrics.Reset()
+	hph.metrics.updates.Store(updatesCount)
 	if hph.metrics.collectCommitmentMetrics {
-		hph.metrics.Reset()
-		hph.metrics.updates.Store(updatesCount)
 		defer func() {
 			hph.metrics.TotalProcessingTimeInc(start)
 			hph.metrics.WriteToCSV()
@@ -2874,6 +2874,11 @@ func (hph *HexPatriciaHashed) ResetContext(ctx PatriciaContext) {
 	hph.ctx = ctx
 }
 
+// Cache returns the active warmup cache, or nil if none is set.
+func (hph *HexPatriciaHashed) Cache() *WarmupCache {
+	return hph.cache
+}
+
 // branchFromCacheOrDB reads branch data from cache if available, otherwise from DB.
 func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 	if hph.cache != nil {
@@ -2882,6 +2887,9 @@ func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 				hph.metrics.cacheBranch.Add(1)
 			}
 			return data, nil
+		}
+		if hph.metrics != nil {
+			hph.metrics.missBranch.Add(1)
 		}
 	}
 	data, _, err := hph.ctx.Branch(key)
@@ -2897,6 +2905,9 @@ func (hph *HexPatriciaHashed) accountFromCacheOrDB(plainKey []byte) (*Update, er
 			}
 			return update, nil
 		}
+		if hph.metrics != nil {
+			hph.metrics.missAccount.Add(1)
+		}
 	}
 	return hph.ctx.Account(plainKey)
 }
@@ -2909,6 +2920,9 @@ func (hph *HexPatriciaHashed) storageFromCacheOrDB(plainKey []byte) (*Update, er
 				hph.metrics.cacheStorage.Add(1)
 			}
 			return update, nil
+		}
+		if hph.metrics != nil {
+			hph.metrics.missStorage.Add(1)
 		}
 	}
 	return hph.ctx.Storage(plainKey)

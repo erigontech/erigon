@@ -259,11 +259,7 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) 
 		if !sg.accessList {
 			return accounts.NilAddress, fmt.Errorf("accessList txn is not supported by signer %s", sg)
 		}
-		if t.ChainID == nil {
-			if !sg.chainID.IsZero() {
-				return accounts.NilAddress, ErrInvalidChainId
-			}
-		} else if !t.ChainID.Eq(&sg.chainID) {
+		if !t.ChainID.Eq(&sg.chainID) {
 			return accounts.NilAddress, ErrInvalidChainId
 		}
 		// ACL txs are defined to use 0 and 1 as their recovery id, add
@@ -274,11 +270,7 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) 
 		if !sg.dynamicFee {
 			return accounts.NilAddress, fmt.Errorf("dynamicFee txn is not supported by signer %s", sg)
 		}
-		if t.ChainID == nil {
-			if !sg.chainID.IsZero() {
-				return accounts.NilAddress, ErrInvalidChainId
-			}
-		} else if !t.ChainID.Eq(&sg.chainID) {
+		if !t.ChainID.Eq(&sg.chainID) {
 			return accounts.NilAddress, ErrInvalidChainId
 		}
 		// ACL and DynamicFee txs are defined to use 0 and 1 as their recovery
@@ -289,11 +281,7 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) 
 		if !sg.blob {
 			return accounts.NilAddress, fmt.Errorf("blob txn is not supported by signer %s", sg)
 		}
-		if t.ChainID == nil {
-			if !sg.chainID.IsZero() {
-				return accounts.NilAddress, ErrInvalidChainId
-			}
-		} else if !t.ChainID.Eq(&sg.chainID) {
+		if !t.ChainID.Eq(&sg.chainID) {
 			return accounts.NilAddress, ErrInvalidChainId
 		}
 		// ACL, DynamicFee, and blob txs are defined to use 0 and 1 as their recovery
@@ -304,11 +292,7 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) 
 		if !sg.setCode {
 			return accounts.NilAddress, fmt.Errorf("setCode tx is not supported by signer %s", sg)
 		}
-		if t.ChainID == nil {
-			if !sg.chainID.IsZero() {
-				return accounts.NilAddress, ErrInvalidChainId
-			}
-		} else if !t.ChainID.Eq(&sg.chainID) {
+		if !t.ChainID.Eq(&sg.chainID) {
 			return accounts.NilAddress, ErrInvalidChainId
 		}
 		// ACL, DynamicFee, blob, and setCode txs are defined to use 0 and 1 as their recovery
@@ -342,7 +326,7 @@ func (sg Signer) SignatureValues(txn Transaction, sig []byte) (R, S, V *uint256.
 		// Check that chain ID of tx matches the signer. We also accept ID zero here,
 		// because it indicates that the chain ID was not specified in the tx.
 		chainId := t.GetChainID()
-		if chainId != nil && !chainId.IsZero() && !chainId.Eq(&sg.chainID) {
+		if !chainId.IsZero() && !chainId.Eq(&sg.chainID) {
 			return nil, nil, nil, ErrInvalidChainId
 		}
 		R, S, V, err = decodeSignature(sig)

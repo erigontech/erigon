@@ -1,12 +1,7 @@
 name: Lint
 on:
   workflow_dispatch:
-  pull_request:
-    branches:
-      - main
-      - 'release/**'
-      - performance
-      - performance-stable
+  workflow_call:
 
 defaults:
   run:
@@ -15,9 +10,6 @@ defaults:
 jobs:
   lint:
     runs-on: ubuntu-latest
-    concurrency:
-      group: ${{ format('{0}-{1}', github.workflow, github.ref) }}
-      cancel-in-progress: true
 
     steps:
       - name: Checkout custom actions

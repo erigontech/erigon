@@ -57,7 +57,7 @@ func TestSenders(t *testing.T) {
 	}
 
 	// prepare txn so it works with our test
-	signer1 := types.MakeSigner(chain.TestChainConfig, chain.TestChainConfig.BerlinBlock.Uint64(), 0)
+	signer1 := types.MakeSigner(chain.TestChainConfig, *chain.TestChainConfig.BerlinBlock, 0)
 	header := &types.Header{Number: *common.Num1}
 	hash := header.Hash()
 	require.NoError(rawdb.WriteHeader(tx, header))
@@ -68,10 +68,10 @@ func TestSenders(t *testing.T) {
 					CommonTx: types.CommonTx{
 						Nonce:    1,
 						To:       &testAddr,
-						Value:    &u256.Num1,
+						Value:    u256.Num1,
 						GasLimit: 1,
 					},
-					GasPrice: &u256.Num1,
+					GasPrice: u256.Num1,
 				},
 			}, *signer1),
 			mustSign(&types.AccessListTx{
@@ -79,17 +79,17 @@ func TestSenders(t *testing.T) {
 					CommonTx: types.CommonTx{
 						Nonce:    2,
 						To:       &testAddr,
-						Value:    &u256.Num1,
+						Value:    u256.Num1,
 						GasLimit: 2,
 					},
-					GasPrice: &u256.Num1,
+					GasPrice: u256.Num1,
 				},
 			}, *signer1),
 		},
 	}))
 	require.NoError(rawdb.WriteCanonicalHash(tx, hash, 1))
 
-	signer2 := types.MakeSigner(chain.TestChainConfig, chain.TestChainConfig.BerlinBlock.Uint64(), 0)
+	signer2 := types.MakeSigner(chain.TestChainConfig, *chain.TestChainConfig.BerlinBlock, 0)
 	header.Number = *common.Num2
 	hash = header.Hash()
 	require.NoError(rawdb.WriteHeader(tx, header))
@@ -100,10 +100,10 @@ func TestSenders(t *testing.T) {
 					CommonTx: types.CommonTx{
 						Nonce:    3,
 						To:       &testAddr,
-						Value:    &u256.Num1,
+						Value:    u256.Num1,
 						GasLimit: 3,
 					},
-					GasPrice: &u256.Num1,
+					GasPrice: u256.Num1,
 				},
 			}, *signer2),
 			mustSign(&types.AccessListTx{
@@ -111,10 +111,10 @@ func TestSenders(t *testing.T) {
 					CommonTx: types.CommonTx{
 						Nonce:    4,
 						To:       &testAddr,
-						Value:    &u256.Num1,
+						Value:    u256.Num1,
 						GasLimit: 4,
 					},
-					GasPrice: &u256.Num1,
+					GasPrice: u256.Num1,
 				},
 			}, *signer2),
 			mustSign(&types.AccessListTx{
@@ -122,10 +122,10 @@ func TestSenders(t *testing.T) {
 					CommonTx: types.CommonTx{
 						Nonce:    5,
 						To:       &testAddr,
-						Value:    &u256.Num1,
+						Value:    u256.Num1,
 						GasLimit: 5,
 					},
-					GasPrice: &u256.Num1,
+					GasPrice: u256.Num1,
 				},
 			}, *signer2),
 		},
