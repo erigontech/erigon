@@ -923,9 +923,17 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		txnSeg, ok, release := r.sn.ViewSingleFile(snaptype2.Transactions, blockHeight)
 		if !ok {
 			// Transactions snapshot missing for this block range (e.g. incomplete snapshot
-			// set where only headers/bodies were generated). Fall back to the DB.
+			// set where only headers/bodies were generated). Try reading transactions from DB.
 			if tx != nil {
-				return rawdb.ReadBlockWithSenders(tx, hash, blockHeight)
+				dbTxs, err := rawdb.CanonicalTransactions(tx, baseTxnId, txCount)
+				if err != nil {
+					return nil, nil, err
+				}
+				if uint32(len(dbTxs)) == txCount {
+					// Build block from snapshot header+body + DB transactions (no senders — recovered on the fly).
+					block = types.NewBlockFromStorage(hash, h, dbTxs, b.Uncles, b.Withdrawals)
+					return block, nil, nil
+				}
 			}
 			return nil, nil, fmt.Errorf("no transactions snapshot file for blockNum=%d, BlocksAvailable=%d", blockHeight, r.sn.BlocksAvailable())
 		}
