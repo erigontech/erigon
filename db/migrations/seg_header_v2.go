@@ -105,8 +105,6 @@ func upgradeSegHeaderV1toV2(path, ext string, logger log.Logger) error {
 	pageCnt := d.CompressedPageValuesCount()
 	d.Close() // release mmap before writing
 
-	// Determine key/val compression from the schema lookup (tag = last dash-separated
-	// component of the base name, e.g. "accounts" from "v1-000000-000100-accounts.seg").
 	base := filepath.Base(path)
 	tag := segTag(base, ext)
 	fc := segCompressionAtV2[tag+ext] // zero value (CompressNone) if unknown
@@ -122,28 +120,8 @@ func upgradeSegHeaderV1toV2(path, ext string, logger log.Logger) error {
 		bitmask.Set(seg.WordLevelValCompressionEnabled)
 	}
 
-	info, err := os.Stat(path)
-	if err != nil {
+	if err := setV2Header(path, bitmask); err != nil {
 		return err
-	}
-	origMode := info.Mode()
-	if err := os.Chmod(path, origMode|0200); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(path, os.O_RDWR, 0)
-	if err != nil {
-		_ = os.Chmod(path, origMode)
-		return err
-	}
-	_, writeErr := f.WriteAt([]byte{seg.FileCompressionFormatV2, byte(bitmask)}, 0)
-	syncErr := f.Sync()
-	f.Close()
-	_ = os.Chmod(path, origMode)
-	if writeErr != nil {
-		return writeErr
-	}
-	if syncErr != nil {
-		return syncErr
 	}
 
 	// The header patch changes the file content, so any existing .torrent (which
@@ -155,15 +133,61 @@ func upgradeSegHeaderV1toV2(path, ext string, logger log.Logger) error {
 	return nil
 }
 
-// segTag extracts the file-type tag from a snapshot base name.
-// Format: "{version}-{from}-{to}-{tag}.{ext}"  (first 3 fields are separated by "-").
+// setV2Header writes the V2 version byte and bitmask at offset 0.
+// Snapshot files are read-only (0444), so it temporarily adds the owner-write
+// bit and restores the original permissions afterwards.
+func setV2Header(path string, bitmask seg.FeatureFlagBitmask) error {
+	return withWritePerm(path, func(f *os.File) error {
+		_, err := f.WriteAt([]byte{seg.FileCompressionFormatV2, byte(bitmask)}, 0)
+		return err
+	})
+}
+
+// withWritePerm temporarily grants owner-write permission on path, opens it
+// O_RDWR, calls fn, syncs, closes, and restores the original file mode.
+func withWritePerm(path string, fn func(*os.File) error) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	origMode := info.Mode()
+	if err := os.Chmod(path, origMode|0200); err != nil { // 0200 = owner-write bit
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		_ = os.Chmod(path, origMode)
+		return err
+	}
+	fnErr := fn(f)
+	syncErr := f.Sync()
+	f.Close()
+	_ = os.Chmod(path, origMode)
+	if fnErr != nil {
+		return fnErr
+	}
+	return syncErr
+}
+
+// segTag extracts the FilenameBase from an E3 snapshot file name.
+// E3 format: "{version}-{name}.{from}-{to}.{ext}"
+// e.g. "v2.0-accounts.0-128.kv" → "accounts"
+//
+//	"v3.0-logaddrs.0-128.ef"  → "logaddrs"
 func segTag(base, ext string) string {
 	withoutExt := base[:len(base)-len(ext)]
-	parts := strings.SplitN(withoutExt, "-", 4)
-	if len(parts) == 4 {
-		return parts[3]
+	// Split off the version prefix (everything before the first "-").
+	dashIdx := strings.Index(withoutExt, "-")
+	if dashIdx < 0 {
+		return ""
 	}
-	return ""
+	nameAndRange := withoutExt[dashIdx+1:] // "accounts.0-128"
+	// The name ends at the first ".".
+	dotIdx := strings.Index(nameAndRange, ".")
+	if dotIdx < 0 {
+		return nameAndRange
+	}
+	return nameAndRange[:dotIdx] // "accounts"
 }
 
 // segCompressionAtV2 is a frozen snapshot of the compression settings that were in
