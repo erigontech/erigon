@@ -15,7 +15,9 @@ import (
 // ReadOrFetchLatestBeaconState reads the latest beacon state from disk or fetches it from the network.
 func ReadOrFetchLatestBeaconState(ctx context.Context, dirs datadir.Dirs, beaconCfg *clparams.BeaconChainConfig, caplinConfig clparams.CaplinConfig, genesisDB genesisdb.GenesisDB) (*state.CachingBeaconState, error) {
 	var syncer CheckpointSyncer
-	remoteSync := !caplinConfig.DisabledCheckpointSync && !caplinConfig.IsDevnet()
+	// Allow remote checkpoint sync for devnets when the user explicitly provides a checkpoint sync URL.
+	hasCustomCheckpointURL := len(clparams.ConfigurableCheckpointsURLs) > 0
+	remoteSync := !caplinConfig.DisabledCheckpointSync && (!caplinConfig.IsDevnet() || hasCustomCheckpointURL)
 
 	if remoteSync {
 		syncer = NewRemoteCheckpointSync(beaconCfg, caplinConfig.NetworkId)
