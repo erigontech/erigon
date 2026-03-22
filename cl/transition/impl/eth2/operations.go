@@ -1380,10 +1380,18 @@ func (I *impl) ProcessBlockHeader(s abstract.BeaconState, slot, proposerIndex ui
 		return fmt.Errorf("unable to hash tree root of latest block header: %v", err)
 	}
 	if parentRoot != latestRoot {
+		stateRoot, _ := s.HashSSZ()
 		return fmt.Errorf(
-			"block parent root: %x, does not match latest block root: %x",
+			"block parent root: %x, does not match latest block root: %x (header: slot=%d proposer=%d parentRoot=%x bodyRoot=%x stateRoot=%x headerRoot=%x stateHashSSZ=%x)",
 			parentRoot,
 			latestRoot,
+			blockHeader.Slot,
+			blockHeader.ProposerIndex,
+			blockHeader.ParentRoot,
+			blockHeader.BodyRoot,
+			blockHeader.Root,
+			latestRoot,
+			stateRoot,
 		)
 	}
 

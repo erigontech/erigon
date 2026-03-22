@@ -111,7 +111,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	var initialEth1Progress atomic.Int64
 
 	destinationSlotForEL := uint64(math.MaxUint64)
-	if cfg.engine != nil && cfg.engine.SupportInsertion() && cfg.beaconCfg.DenebForkEpoch != math.MaxUint64 {
+	if cfg.engine != nil && cfg.engine.SupportInsertion() && cfg.beaconCfg.DenebForkEpoch != math.MaxUint64 && clparams.SupportBackfilling(cfg.beaconCfg.DepositNetworkID) {
 		destinationSlotForEL = cfg.beaconCfg.BellatrixForkEpoch * cfg.beaconCfg.SlotsPerEpoch
 	}
 	// Set up onNewBlock callback

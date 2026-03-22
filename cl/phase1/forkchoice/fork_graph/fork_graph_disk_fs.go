@@ -145,11 +145,21 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot common.Hash, bs *state.C
 	return
 }
 
-// HasEnvelope checks if an envelope exists on disk for the given block root.
+// HasEnvelope checks if an envelope exists for the given block root.
+// Uses an in-memory cache populated by DumpEnvelopeOnDisk to avoid repeated disk stats.
 // [New in Gloas:EIP7732]
 func (f *forkGraphDisk) HasEnvelope(blockRoot common.Hash) bool {
+	// Fast path: check in-memory cache
+	if _, ok := f.envelopeExists.Load(blockRoot); ok {
+		return true
+	}
+	// Slow path: fall back to disk and populate cache on hit
 	exists, err := afero.Exists(f.fs, getEnvelopeFilename(blockRoot))
-	return err == nil && exists
+	if err == nil && exists {
+		f.envelopeExists.Store(blockRoot, struct{}{})
+		return true
+	}
+	return false
 }
 
 // ReadEnvelopeFromDisk reads an execution payload envelope from disk.
@@ -204,6 +214,13 @@ func (f *forkGraphDisk) ReadEnvelopeFromDisk(blockRoot common.Hash) (envelope *c
 func (f *forkGraphDisk) DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) (err error) {
 	f.stateDumpLock.Lock()
 	defer f.stateDumpLock.Unlock()
+
+	// Populate in-memory cache on successful write
+	defer func() {
+		if err == nil {
+			f.envelopeExists.Store(blockRoot, struct{}{})
+		}
+	}()
 
 	// Encode the envelope
 	f.sszBuffer, err = envelope.EncodeSSZ(f.sszBuffer[:0])
