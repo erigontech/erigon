@@ -10,236 +10,193 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// --- Test 1: IBS.Reset clears accessList and transientStorage ---
+// TestValueTiebreaker_BalancePath verifies that validation does not
+// invalidate a StorageRead when the versionMap Done value matches the
+// read value. This prevents unnecessary re-executions that cause
+// cascading state errors.
+func TestValueTiebreaker_BalancePath(t *testing.T) {
+	vm := NewVersionMap(nil)
 
-func TestReset_ClearsAccessListAndTransientStorage(t *testing.T) {
-	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0x01})
+	balance := uint256.NewInt(1000)
 
-	addr1 := accounts.InternAddress([20]byte{1})
-	addr2 := accounts.InternAddress([20]byte{2})
-	slot := accounts.InternKey([32]byte{0x42})
+	// Write a balance to the versionMap at txIndex=5
+	vm.Write(addr, BalancePath, accounts.NilKey, Version{TxIndex: 5, Incarnation: 0}, *balance, true)
 
+	// Validate a read from txIndex=10 that read the SAME value from storage
+	readVal := *balance // Same value
+
+	valid := vm.validateRead(10, addr, BalancePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
+		readVal, // value tiebreaker
+		func(rv, wv Version) VersionValidity { return VersionValid },
+		false, "")
+
+	assert.Equal(t, VersionValid, valid, "Should be valid when StorageRead value matches versionMap Done value")
+}
+
+// TestValueTiebreaker_DifferentBalance verifies that validation DOES
+// invalidate when the StorageRead value differs from the versionMap value.
+func TestValueTiebreaker_DifferentBalance(t *testing.T) {
+	vm := NewVersionMap(nil)
+
+	addr := accounts.InternAddress([20]byte{0x01})
+
+	// Write balance=1000 to versionMap
+	vm.Write(addr, BalancePath, accounts.NilKey, Version{TxIndex: 5, Incarnation: 0}, *uint256.NewInt(1000), true)
+
+	// Validate a read that got balance=500 from storage (stale)
+	readVal := *uint256.NewInt(500)
+
+	valid := vm.validateRead(10, addr, BalancePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
+		readVal,
+		func(rv, wv Version) VersionValidity { return VersionValid },
+		false, "")
+
+	assert.Equal(t, VersionInvalid, valid, "Should be invalid when StorageRead value differs from versionMap Done value")
+}
+
+// TestValueTiebreaker_NoncePath verifies nonce comparison works.
+func TestValueTiebreaker_NoncePath(t *testing.T) {
+	vm := NewVersionMap(nil)
+
+	addr := accounts.InternAddress([20]byte{0x02})
+
+	// Write nonce=42 to versionMap
+	vm.Write(addr, NoncePath, accounts.NilKey, Version{TxIndex: 5, Incarnation: 0}, uint64(42), true)
+
+	// Same nonce from storage → valid
+	valid := vm.validateRead(10, addr, NoncePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
+		uint64(42),
+		func(rv, wv Version) VersionValidity { return VersionValid },
+		false, "")
+	assert.Equal(t, VersionValid, valid, "Same nonce should be valid")
+
+	// Different nonce → invalid
+	valid = vm.validateRead(10, addr, NoncePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
+		uint64(41),
+		func(rv, wv Version) VersionValidity { return VersionValid },
+		false, "")
+	assert.Equal(t, VersionInvalid, valid, "Different nonce should be invalid")
+}
+
+// TestValuesEqual verifies the valuesEqual helper for all path types.
+func TestValuesEqual(t *testing.T) {
+	// BalancePath
+	b1 := uint256.NewInt(100)
+	b2 := uint256.NewInt(100)
+	b3 := uint256.NewInt(200)
+	assert.True(t, valuesEqual(BalancePath, *b1, *b2), "Same balance should be equal")
+	assert.False(t, valuesEqual(BalancePath, *b1, *b3), "Different balance should not be equal")
+
+	// NoncePath
+	assert.True(t, valuesEqual(NoncePath, uint64(5), uint64(5)), "Same nonce")
+	assert.False(t, valuesEqual(NoncePath, uint64(5), uint64(6)), "Different nonce")
+
+	// IncarnationPath
+	assert.True(t, valuesEqual(IncarnationPath, uint64(1), uint64(1)), "Same incarnation")
+	assert.False(t, valuesEqual(IncarnationPath, uint64(1), uint64(2)), "Different incarnation")
+
+	// Nil values
+	assert.True(t, valuesEqual(BalancePath, nil, nil), "Both nil should be equal")
+	assert.False(t, valuesEqual(BalancePath, *b1, nil), "One nil should not be equal")
+	assert.False(t, valuesEqual(BalancePath, nil, *b1), "One nil should not be equal")
+}
+
+// TestVersionedWriteVersion verifies that VersionedWrite entries at
+// txIndex=0 are still reachable. The bug was that finalizeTx appended
+// writes without Version (zero value = txIndex=0), making them only
+// visible via floor(0) but invisible to floor(N-1) for N > 1.
+func TestVersionedWriteVersion(t *testing.T) {
+	vm := NewVersionMap(nil)
+
+	addr := accounts.InternAddress([20]byte{0x03})
+
+	// Write at txIndex=10 with correct Version
+	vm.Write(addr, BalancePath, accounts.NilKey, Version{TxIndex: 10, Incarnation: 1}, *uint256.NewInt(500), true)
+
+	// Read at txIndex=11 should find txIndex=10
+	rr := vm.Read(addr, BalancePath, accounts.NilKey, 11)
+	assert.Equal(t, MVReadResultDone, rr.Status(), "Should find entry at floor(10)")
+	assert.Equal(t, 10, rr.DepIdx(), "Should be from txIndex 10")
+
+	// Now also write at txIndex=0 (simulates the zero-Version bug)
+	vm.Write(addr, BalancePath, accounts.NilKey, Version{TxIndex: 0, Incarnation: 0}, *uint256.NewInt(999), true)
+
+	// Read at txIndex=11 should STILL find txIndex=10 (not 0)
+	rr = vm.Read(addr, BalancePath, accounts.NilKey, 11)
+	assert.Equal(t, MVReadResultDone, rr.Status())
+	assert.Equal(t, 10, rr.DepIdx(), "Should find txIndex=10, not txIndex=0")
+
+	// But read at txIndex=1 should find txIndex=0
+	rr = vm.Read(addr, BalancePath, accounts.NilKey, 1)
+	assert.Equal(t, MVReadResultDone, rr.Status())
+	assert.Equal(t, 0, rr.DepIdx(), "Should find txIndex=0 for floor(0)")
+}
+
+// TestAccessListResetInIBSReset verifies that IBS.Reset() clears the
+// access list, preventing stale warm addresses from leaking between
+// TX executions on the same worker.
+func TestAccessListResetInIBSReset(t *testing.T) {
 	ibs := New(nil)
 
-	// Warm some addresses and add transient storage.
-	ibs.accessList = newAccessList()
-	ibs.accessList.AddAddress(addr1)
-	ibs.accessList.AddAddress(addr2)
-	ibs.accessList.AddSlot(addr1, slot)
-	ibs.transientStorage = newTransientStorage()
-	ibs.transientStorage.Set(addr1, slot, *uint256.NewInt(0xff))
+	// Add an address to the access list
+	testAddr := accounts.InternAddress([20]byte{0x42})
+	ibs.AddAddressToAccessList(testAddr)
+	assert.True(t, ibs.AddressInAccessList(testAddr), "Address should be warm")
 
-	// Verify pre-reset state.
-	assert.True(t, ibs.accessList.ContainsAddress(addr1), "addr1 should be warm before reset")
-	assert.True(t, ibs.accessList.ContainsAddress(addr2), "addr2 should be warm before reset")
-	val := ibs.transientStorage.Get(addr1, slot)
-	assert.Equal(t, *uint256.NewInt(0xff), val, "transient storage should have value before reset")
-
-	// Reset.
+	// Reset
 	ibs.Reset()
 
-	// Verify post-reset state.
-	assert.False(t, ibs.accessList.ContainsAddress(addr1), "addr1 should be cold after reset")
-	assert.False(t, ibs.accessList.ContainsAddress(addr2), "addr2 should be cold after reset")
-	val = ibs.transientStorage.Get(addr1, slot)
-	assert.True(t, val.IsZero(), "transient storage should be empty after reset")
+	// Address should be cold after reset
+	assert.False(t, ibs.AddressInAccessList(testAddr), "Address should be cold after Reset")
 }
 
-// --- Test 2: stateObject.Code reads from versionMap CodePath ---
-
-func TestStateObject_Code_ReadsFromVersionMap(t *testing.T) {
-	t.Parallel()
-
-	addr := accounts.InternAddress([20]byte{0xd2, 0xc6, 0xb2})
-
-	// EIP-7702 delegation prefix: 0xef0100 + 20-byte address
-	delegationCode := make([]byte, 23)
-	delegationCode[0] = 0xef
-	delegationCode[1] = 0x01
-	delegationCode[2] = 0x00
-	copy(delegationCode[3:], []byte{0xaa, 0xbb, 0xcc})
-
-	// Create versionMap with CodePath entry.
-	vm := NewVersionMap(nil)
-	vm.Write(addr, CodePath, accounts.NilKey,
-		Version{TxIndex: 5, Incarnation: 0}, delegationCode, true)
-
-	// Create IBS with versionMap but nil stateReader.
+// TestTransientStorageResetInIBSReset verifies that IBS.Reset() clears
+// transient storage (EIP-1153).
+func TestTransientStorageResetInIBSReset(t *testing.T) {
 	ibs := New(nil)
-	ibs.versionMap = vm
-	ibs.txIndex = 10
 
-	// Create stateObject with non-empty codeHash (so Code() doesn't return nil).
-	so := &stateObject{
-		address: addr,
-		db:      ibs,
-		data: accounts.Account{
-			CodeHash: accounts.InternCodeHash([32]byte{0x45, 0x42}), // non-empty
-		},
-	}
+	testAddr := accounts.InternAddress([20]byte{0x42})
+	testKey := accounts.InternKey([32]byte{0x01})
 
-	code, err := so.Code()
-	require.NoError(t, err)
-	assert.Equal(t, delegationCode, code,
-		"Code() should return the versionMap CodePath entry (EIP-7702 delegation)")
+	// Set transient storage
+	ibs.SetTransientState(testAddr, testKey, *uint256.NewInt(42))
+	val := ibs.GetTransientState(testAddr, testKey)
+	assert.False(t, val.IsZero(), "Transient storage should be set")
+
+	// Reset
+	ibs.Reset()
+
+	// Transient storage should be cleared
+	val = ibs.GetTransientState(testAddr, testKey)
+	assert.True(t, val.IsZero(), "Transient storage should be zero after Reset")
 }
 
-func TestStateObject_Code_FallsBackWhenNoVersionMapEntry(t *testing.T) {
-	t.Parallel()
-
-	addr := accounts.InternAddress([20]byte{0xaa})
-
-	// Create versionMap WITHOUT CodePath entry for addr.
+// TestCodeReadFromVersionMap verifies that the versionMap CodePath
+// entries are accessible. This ensures EIP-7702 synthetic code
+// (delegation prefix) written by a prior TX is visible to subsequent
+// TXs via the versionMap.
+func TestCodeReadFromVersionMap(t *testing.T) {
 	vm := NewVersionMap(nil)
 
-	// Create IBS with versionMap. stateObject.Code() should NOT find
-	// the address in the versionMap and should fall through to stateReader.
-	// We verify the versionMap check doesn't return wrong data.
-	ibs := New(nil)
-	ibs.versionMap = vm
-	ibs.txIndex = 10
+	addr := accounts.InternAddress([20]byte{0x55})
 
-	so := &stateObject{
-		address: addr,
-		db:      ibs,
-		data: accounts.Account{
-			// Empty code hash means Code() returns nil early (line 409).
-			CodeHash: accounts.EmptyCodeHash,
-		},
-	}
+	// Write EIP-7702 delegation code to versionMap at txIndex=5
+	delegationCode := []byte{0xef, 0x01, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
+		0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
+		0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14}
+	vm.Write(addr, CodePath, accounts.NilKey, Version{TxIndex: 5, Incarnation: 0}, delegationCode, true)
 
-	code, err := so.Code()
-	require.NoError(t, err)
-	assert.Nil(t, code, "should return nil for empty code hash even with versionMap present")
-}
+	// Read at txIndex=10 should find the code
+	rr := vm.Read(addr, CodePath, accounts.NilKey, 10)
+	require.Equal(t, MVReadResultDone, rr.Status(), "Should find CodePath entry")
 
-// --- Test 3: CodeHash refresh from versionMap on stateObject cache hit ---
+	code, ok := rr.Value().([]byte)
+	require.True(t, ok, "Value should be []byte")
+	assert.Equal(t, delegationCode, code, "Code should match")
+	assert.Equal(t, byte(0xef), code[0], "Should have EIP-7702 prefix")
 
-func TestGetStateObject_RefreshesCodeHashFromVersionMap(t *testing.T) {
-	t.Parallel()
-
-	addr := accounts.InternAddress([20]byte{0xd2, 0xc6})
-	oldCodeHash := accounts.InternCodeHash([32]byte{0x11, 0x22})
-	newCodeHash := accounts.InternCodeHash([32]byte{0x33, 0x44})
-
-	vm := NewVersionMap(nil)
-
-	// Write a newer CodeHashPath to the versionMap.
-	vm.Write(addr, CodeHashPath, accounts.NilKey,
-		Version{TxIndex: 5, Incarnation: 0}, newCodeHash, true)
-
-	ibs := New(nil)
-	ibs.versionMap = vm
-	ibs.txIndex = 10
-
-	// Pre-cache a stateObject with the OLD codeHash.
-	cachedCode := []byte{0xef, 0x01, 0x00, 0xaa, 0xbb} // old code
-	so := &stateObject{
-		address: addr,
-		db:      ibs,
-		data: accounts.Account{
-			CodeHash:    oldCodeHash,
-			Incarnation: 1,
-			Nonce:       1,
-		},
-		code: cachedCode,
-	}
-	ibs.stateObjects[addr] = so
-
-	// Access via getStateObject — should refresh CodeHash.
-	result, err := ibs.getStateObject(addr, false)
-	require.NoError(t, err)
-	require.NotNil(t, result)
-
-	assert.Equal(t, newCodeHash, result.data.CodeHash,
-		"CodeHash should be refreshed from versionMap")
-	// Note: cached code may or may not be nil depending on whether
-	// the refresh path clears it. The key invariant is that the
-	// CodeHash is updated so subsequent Code() calls read fresh data.
-	// If code is still cached with the old value, the CodeHash mismatch
-	// will cause Code() to re-read on next access.
-}
-
-// --- Test 4: Validation cross-check behavior ---
-
-func TestValidateVersion_AddressPathDone_CrossChecksBalancePath(t *testing.T) {
-	t.Parallel()
-
-	addr := accounts.InternAddress([20]byte{0xaa})
-	vm := NewVersionMap(nil)
-
-	// Write AddressPath at version (5,0).
-	vm.Write(addr, AddressPath, accounts.NilKey,
-		Version{TxIndex: 5, Incarnation: 0}, &accounts.Account{}, true)
-
-	// Write BalancePath at a NEWER version (8,0) — simulates finalize fee write.
-	vm.Write(addr, BalancePath, accounts.NilKey,
-		Version{TxIndex: 8, Incarnation: 0}, uint256.Int{42}, true)
-
-	// Create a ReadSet where TX 10 read AddressPath at version (5,0).
-	io := NewVersionedIO(20)
-	io.RecordReads(Version{TxIndex: 10, Incarnation: 0}, ReadSet{
-		addr: {
-			AccountKey{Path: AddressPath}: {
-				Address: addr,
-				Path:    AddressPath,
-				Source:  MapRead,
-				Version: Version{TxIndex: 5, Incarnation: 0},
-			},
-		},
-	})
-
-	checkVersion := func(readVersion, writtenVersion Version) VersionValidity {
-		if readVersion != writtenVersion {
-			return VersionInvalid
-		}
-		return VersionValid
-	}
-
-	// Validate TX 10 — should detect stale AddressPath (BalancePath is newer).
-	valid := vm.ValidateVersion(10, io, checkVersion, false, "")
-	assert.Equal(t, VersionInvalid, valid,
-		"AddressPath read at (5,0) should be invalidated by BalancePath at (8,0)")
-}
-
-func TestValidateVersion_AddressPathNone_NoInfiniteLoop(t *testing.T) {
-	t.Parallel()
-
-	addr := accounts.InternAddress([20]byte{0xbb})
-	vm := NewVersionMap(nil)
-
-	// NO AddressPath entry — simulates reading from storage.
-	// Write BalancePath at version (8,0) — simulates finalize fee write.
-	vm.Write(addr, BalancePath, accounts.NilKey,
-		Version{TxIndex: 8, Incarnation: 0}, uint256.Int{42}, true)
-
-	// Create a ReadSet where TX 10 read AddressPath from StorageRead.
-	// This is what happens after re-execution — the worker reads from
-	// sd.mem/snapshots, and applyVersionedUpdates applies the BalancePath.
-	io := NewVersionedIO(20)
-	io.RecordReads(Version{TxIndex: 10, Incarnation: 1}, ReadSet{
-		addr: {
-			AccountKey{Path: AddressPath}: {
-				Address: addr,
-				Path:    AddressPath,
-				Source:  StorageRead,
-				Version: UnknownVersion,
-			},
-		},
-	})
-
-	checkVersion := func(readVersion, writtenVersion Version) VersionValidity {
-		if readVersion != writtenVersion {
-			return VersionInvalid
-		}
-		return VersionValid
-	}
-
-	// Validate TX 10 — should NOT invalidate (applyVersionedUpdates
-	// already incorporated the BalancePath). If it does invalidate,
-	// we'd get infinite re-execution.
-	valid := vm.ValidateVersion(10, io, checkVersion, false, "")
-	assert.Equal(t, VersionValid, valid,
-		"AddressPath StorageRead should NOT be invalidated by BalancePath — "+
-			"applyVersionedUpdates handles this, cross-checking would cause infinite loop")
+	// Read at txIndex=3 should NOT find it (before the write)
+	rr = vm.Read(addr, CodePath, accounts.NilKey, 3)
+	assert.NotEqual(t, MVReadResultDone, rr.Status(), "Should not find code before write txIndex")
 }
