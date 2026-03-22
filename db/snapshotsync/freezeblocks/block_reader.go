@@ -928,12 +928,13 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		if !ok {
 			// Transactions snapshot missing for this block range (e.g. incomplete snapshot
 			// set where only headers/bodies were generated). Try reading transactions from DB.
+			//
+			// IMPORTANT: we only read from the DB body's baseTxnId — never from the
+			// snapshot body's original baseTxnId. The snapshot's EthTx position may
+			// contain stale or data-race-corrupted data from the original sync. The DB
+			// body is written by BodiesForward after a validated P2P download, so its
+			// EthTx position has fresh, trustworthy transactions.
 			if tx != nil {
-				// Prefer the DB body's baseTxnId over the snapshot body's baseTxnId.
-				// BodiesForward downloads P2P blocks and writes them via WriteRawBody
-				// which allocates a fresh sequence position in EthTx (different from
-				// the snapshot body's original baseTxnId). The DB body records that
-				// new position, so it has the correct up-to-date transactions.
 				dbBody, dbErr := rawdb.ReadBodyForStorageByKey(tx, dbutils.BlockBodyKey(blockHeight, hash))
 				if dbErr != nil {
 					return nil, nil, dbErr
@@ -952,20 +953,9 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 						return block, nil, nil
 					}
 				}
-				// DB body missing or transactions incomplete; fall back to snapshot baseTxnId.
-				dbTxs, err := rawdb.CanonicalTransactions(tx, baseTxnId, txCount)
-				if err != nil {
-					return nil, nil, err
-				}
-				if uint32(len(dbTxs)) == txCount {
-					// Build block from snapshot header+body + DB transactions (no senders — recovered on the fly).
-					block = types.NewBlockFromStorage(hash, h, dbTxs, b.Uncles, b.Withdrawals)
-					return block, nil, nil
-				}
 			}
-			// Transactions snapshot missing and EthTx not yet populated (Bodies stage
-			// hasn't downloaded this range from P2P yet). Return nil block without error
-			// so the execution stage can stop cleanly and retry once Bodies catches up.
+			// DB body missing or transactions incomplete: return nil so the execution
+			// stage stops cleanly and Bodies can re-download this block from P2P.
 			return nil, nil, nil
 		}
 		defer release()

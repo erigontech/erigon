@@ -96,10 +96,17 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, br services.FullBlockReader, bw *blocki
 		return err
 	}
 
-	// Clear EthTx entirely so stale or data-race-corrupted entries don't survive.
-	// FillDBFromSnapshots will reset the sequence counter to the correct value.
-	// BodiesForward will re-populate EthTx for the leading gap range from P2P.
+	// Clear EthTx and BlockBody entirely so stale or data-race-corrupted entries
+	// don't survive. The body downloader caches whatever blockWithSenders returns,
+	// so if EthTx at the snapshot's original baseTxnId contains corrupt data, that
+	// corrupt body gets written into BlockBody and EthTx at a new position, making
+	// the contamination persist across resets. Wiping both tables breaks the cycle:
+	// BodiesForward will re-fetch all leading-gap blocks from P2P and write clean
+	// entries. FillDBFromSnapshots resets the EthTx sequence counter.
 	if err := tx.ClearTable(kv.EthTx); err != nil {
+		return err
+	}
+	if err := tx.ClearTable(kv.BlockBody); err != nil {
 		return err
 	}
 
