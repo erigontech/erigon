@@ -223,7 +223,8 @@ func smokeTestSegFiles(dir string, logger log.Logger) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
-		if !segDataExts[filepath.Ext(path)] {
+		ext := filepath.Ext(path)
+		if !segDataExts[ext] {
 			return nil
 		}
 		dec, err := seg.NewDecompressor(path)
@@ -232,18 +233,31 @@ func smokeTestSegFiles(dir string, logger log.Logger) error {
 		}
 		defer dec.Close()
 
-		// Only test files we upgraded; V0/V1 files are not our responsibility here
-		// and their compression is not reliably recoverable without the full schema.
+		// Only test files we upgraded; V0/V1 files are not our responsibility here.
 		if dec.CompressionFormatVersion() != seg.FileCompressionFormatV2 {
 			return nil
 		}
 
+		// Walk every word via the decompressor to verify the file structure is
+		// intact after the in-place header patch.  We use Next() (huffman path)
+		// for words that should be compressed and NextUncompressed() for the rest,
+		// mirroring the Reader logic — but only for .kv files whose words really
+		// are key/val pairs.  For .v and .ef files we use NextUncompressed() for
+		// all words: their internal layout is not key/val at the word level.
 		g := dec.MakeGetter()
-		r := seg.NewReader(g, seg.CompressNone) // NewReader overrides from V2 header
-		r.Reset(0)
+		fc, _ := g.FileCompression()
 		var buf []byte
-		for r.HasNext() {
-			buf, _ = r.Next(buf[:0])
+		if ext == ".kv" {
+			r := seg.NewReader(g, fc)
+			r.Reset(0)
+			for r.HasNext() {
+				buf, _ = r.Next(buf[:0])
+			}
+		} else {
+			g.Reset(0)
+			for g.HasNext() {
+				buf, _ = g.NextUncompressed()
+			}
 		}
 		logger.Trace("[seg_header_v2] smoke-test ok", "file", filepath.Base(path))
 		return nil
