@@ -2664,7 +2664,7 @@ func doCompress(cliCtx *cli.Context) error {
 	var concatBuf []byte
 	concatI := 0
 	var wordI int
-	logEvery := time.NewTicker(20 * time.Second)
+	logEvery := time.NewTicker(5 * time.Second)
 	defer logEvery.Stop()
 
 	if err := seg.Bufio2compressor(ctx, src, w, func(word []byte) ([]byte, error) {
@@ -2672,7 +2672,7 @@ func doCompress(cliCtx *cli.Context) error {
 			wordI++
 			select {
 			case <-logEvery.C:
-				logger.Info("[compress] progress", "file", srcF, "words", fmt.Sprintf("%d/%d", wordI, totalWords), "progress", fmt.Sprintf("%.1f%%", 100*float64(wordI)/float64(totalWords)))
+				logger.Info("[compress] reading", "file", filepath.Base(srcF), "words", fmt.Sprintf("%d/%d", wordI, totalWords), "progress", fmt.Sprintf("%.1f%%", 100*float64(wordI)/float64(totalWords)))
 			default:
 			}
 		}
@@ -2701,6 +2701,9 @@ func doCompress(cliCtx *cli.Context) error {
 		return word, nil
 	}); err != nil {
 		return err
+	}
+	if totalWords > 0 {
+		logger.Info("[compress] building dictionary", "file", filepath.Base(srcF), "words", wordI)
 	}
 	if err := c.Compress(); err != nil {
 		return err
