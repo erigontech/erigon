@@ -1792,6 +1792,33 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 
 			if res.Version().Incarnation > len(be.tasks) {
+				// Dump full state for diagnosis
+				depTxIndex := execErr.DependencyTxIndex
+				fmt.Printf("DEADLOCK: block=%d tx=%d inc=%d dep=%d origErr=%v\n",
+					be.blockNum, res.Version().TxIndex, res.Version().Incarnation,
+					depTxIndex, execErr.OriginError)
+				// Check dep path in versionedRead — the dep might be from a
+				// version conflict (line 712), not an estimate. Log what the
+				// worker's first read for the dep address looks like.
+				fmt.Printf("  depTxIndex=%d (this is the conflicting version, not necessarily an estimate)\n", depTxIndex)
+				fmt.Printf("  execTasks: maxComplete=%d\n", be.execTasks.maxComplete())
+				fmt.Printf("  validateTasks: minPending=%d maxComplete=%d\n",
+					be.validateTasks.minPending(), be.validateTasks.maxComplete())
+				fmt.Printf("  publishTasks: minPending=%d countComplete=%d\n",
+					be.publishTasks.minPending(), be.publishTasks.countComplete())
+				// Check what TX 198 looks like
+				depTx := execErr.DependencyTxIndex
+				if depTx >= 0 && depTx < len(be.tasks) {
+					depVersion := be.tasks[depTx].Task.Version()
+					fmt.Printf("  depTx %d: version=(%d.%d) blocked=%v\n",
+						depTx, depVersion.TxIndex, depVersion.Incarnation,
+						be.execTasks.isBlocked(depTx))
+				}
+				// Show which TXs around 297 are pending/blocked
+				for i := max(0, tx-3); i <= min(tx+3, len(be.tasks)-1); i++ {
+					v := be.tasks[i].Task.Version()
+					fmt.Printf("  tx[%d]: inc=%d blocked=%v\n", i, v.Incarnation, be.execTasks.isBlocked(i))
+				}
 				if execErr.OriginError != nil {
 					return nil, fmt.Errorf("could not apply tx %d:%d [%v]: %w: too many incarnations: %d, expected: %d", be.blockNum, res.Version().TxIndex, task.TxHash(), execErr.OriginError, res.Version().Incarnation, len(be.tasks))
 				} else {
@@ -1919,6 +1946,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	cntInvalid := 0
 	var stateReader state.StateReader
 
+	// DEBUG: trace validation pass for block 24365006 when TX 198 is in the batch
+	traceValidationPass := be.blockNum == 24365006 && len(toValidate) > 0 && toValidate[0] <= 198
+
 	for i := 0; i < len(toValidate); i++ {
 
 		be.cntTotalValidations++
@@ -1953,6 +1983,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		}
 
 		valid := be.skipCheck[tx] || validity == state.VersionValid
+
+		if traceValidationPass {
+			fmt.Printf("VPASS: tx=%d txIdx=%d valid=%v cntInvalid=%d validity=%d\n",
+				tx, txVersion.TxIndex, valid, cntInvalid, validity)
+		}
 
 		be.versionMap.SetTrace(trace)
 		be.versionMap.FlushVersionedWrites(be.blockIO.WriteSet(txVersion.TxIndex), cntInvalid == 0, tracePrefix)
