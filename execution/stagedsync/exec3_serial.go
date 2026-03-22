@@ -61,6 +61,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 	blockNum := startBlockNum
 
 	var b *types.Block
+	var lastHeader *types.Header // header of the last successfully executed block
 
 	lastFrozenStep := se.applyTx.StepsInFiles(kv.CommitmentDomain)
 
@@ -123,6 +124,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
+		lastHeader = header
 		getHashFnMutex := sync.Mutex{}
 
 		if se.cfg.chainConfig.AmsterdamTime != nil && *se.cfg.chainConfig.AmsterdamTime > 0 && se.cfg.chainConfig.IsAmsterdam(header.Time) {
@@ -276,7 +278,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		}
 	}
 
-	return b.HeaderNoCopy(), rwTx, nil
+	return lastHeader, rwTx, nil
 }
 
 func (se *serialExecutor) LogExecution() {
