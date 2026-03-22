@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/remotedbserver"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
@@ -141,9 +142,21 @@ type ExecModuleTester struct {
 	ReceiptsReader *receipts.Generator
 	posStagedSync  *stagedsync.Sync
 	bgComponentsEg errgroup.Group
+
+	// Ephemeral mode: overlay-based block execution.
+	// When enabled, blocks after genesis are executed via ExecuteBlockEphemerally
+	// on a MemoryMutation overlay instead of the full staged-sync pipeline.
+	ephemeral         bool
+	ephemeralOverlay  *membatchwithdb.MemoryMutation
+	ephemeralRoTx     kv.TemporalTx
+	ephemeralTxNum    uint64
+	ephemeralHeaders  map[common.Hash]*types.Header
+	ephemeralTDs      map[common.Hash]*big.Int
+	ephemeralLastHash common.Hash
 }
 
 func (emt *ExecModuleTester) Close() {
+	emt.closeEphemeral()
 	emt.cancel()
 	if err := emt.bgComponentsEg.Wait(); err != nil {
 		require.Equal(emt.tb, context.Canceled, err) // upon waiting for clean exit we should get ctx cancelled
@@ -316,6 +329,12 @@ func WithChainConfig(cfg *chain.Config) Option {
 	}
 }
 
+func WithEphemeral() Option {
+	return func(opts *options) {
+		opts.ephemeral = true
+	}
+}
+
 type options struct {
 	stepSize        *uint64
 	experimentalBAL bool
@@ -326,6 +345,7 @@ type options struct {
 	pruneMode       *prune.Mode
 	blockBufferSize int
 	withTxPool      bool
+	ephemeral       bool
 }
 
 func applyOptions(opts []Option) options {
@@ -723,6 +743,18 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		tb.Fatal(err)
 	}
 
+	// Switch to ephemeral mode after genesis is committed to MDBX.
+	if opt.ephemeral {
+		mock.ephemeral = true
+		if err := mock.initEphemeral(); err != nil {
+			if tb != nil {
+				tb.Fatal(err)
+			} else {
+				panic(err)
+			}
+		}
+	}
+
 	return mock
 }
 
@@ -823,6 +855,9 @@ func (emt *ExecModuleTester) insertPoSBlocks(chain *blockgen.ChainPack) error {
 }
 
 func (emt *ExecModuleTester) InsertChain(chain *blockgen.ChainPack) error {
+	if emt.ephemeral {
+		return emt.insertChainEphemeral(chain)
+	}
 	if err := emt.insertPoSBlocks(chain); err != nil {
 		return err
 	}

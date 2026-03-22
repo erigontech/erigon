@@ -220,6 +220,7 @@ func (bt *BlockTest) Run(t *testing.T) error {
 	mOpts := []execmoduletester.Option{
 		execmoduletester.WithGenesisSpec(bt.genesis(config)),
 		execmoduletester.WithEngine(engine),
+		execmoduletester.WithEphemeral(),
 	}
 	if bt.ExperimentalBAL {
 		mOpts = append(mOpts, execmoduletester.WithExperimentalBAL())
@@ -238,6 +239,17 @@ func (bt *BlockTest) Run(t *testing.T) error {
 	validBlocks, err := bt.insertBlocks(m)
 	if err != nil {
 		return err
+	}
+
+	if m.IsEphemeral() {
+		if common.Hash(bt.json.BestBlock) != m.EphemeralLastBlockHash() {
+			return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", bt.json.BestBlock, m.EphemeralLastBlockHash())
+		}
+		newDB := state.New(m.NewStateReader(m.EphemeralOverlay()))
+		if err := bt.validatePostState(newDB); err != nil {
+			return fmt.Errorf("post state validation failed: %w", err)
+		}
+		return nil
 	}
 
 	tx, err := m.DB.BeginTemporalRo(m.Ctx)
@@ -265,7 +277,11 @@ func (bt *BlockTest) RunCLI() error {
 		return testforks.UnsupportedForkError{Name: bt.json.Network}
 	}
 	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
-	m := execmoduletester.New(nil, execmoduletester.WithGenesisSpec(bt.genesis(config)), execmoduletester.WithEngine(engine))
+	m := execmoduletester.New(nil,
+		execmoduletester.WithGenesisSpec(bt.genesis(config)),
+		execmoduletester.WithEngine(engine),
+		execmoduletester.WithEphemeral(),
+	)
 	defer m.DB.Close()
 
 	bt.br = m.BlockReader
@@ -280,6 +296,17 @@ func (bt *BlockTest) RunCLI() error {
 	validBlocks, err := bt.insertBlocks(m)
 	if err != nil {
 		return err
+	}
+
+	if m.IsEphemeral() {
+		if common.Hash(bt.json.BestBlock) != m.EphemeralLastBlockHash() {
+			return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", bt.json.BestBlock, m.EphemeralLastBlockHash())
+		}
+		newDB := state.New(m.NewStateReader(m.EphemeralOverlay()))
+		if err := bt.validatePostState(newDB); err != nil {
+			return fmt.Errorf("post state validation failed: %w", err)
+		}
+		return nil
 	}
 
 	tx, err := m.DB.BeginTemporalRo(m.Ctx)
@@ -337,6 +364,30 @@ See https://github.com/ethereum/tests/wiki/Blockchain-Tests-II
 	post state.
 */
 func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) ([]btBlock, error) {
+	// In ephemeral mode, pre-trace the main chain from BestBlock back to genesis.
+	// Tests with uncle/side-chain blocks have interleaved blocks from different
+	// forks; only main-chain blocks should be executed on the overlay.
+	var mainChainBlocks map[common.Hash]bool
+	if m.IsEphemeral() {
+		mainChainBlocks = make(map[common.Hash]bool)
+		decoded := make(map[common.Hash]*types.Block)
+		for _, b := range bt.json.Blocks {
+			cb, err := b.decode()
+			if err != nil {
+				continue
+			}
+			decoded[cb.Hash()] = cb
+		}
+		for h := common.Hash(bt.json.BestBlock); h != m.Genesis.Hash(); {
+			mainChainBlocks[h] = true
+			cb, ok := decoded[h]
+			if !ok {
+				break
+			}
+			h = cb.ParentHash()
+		}
+	}
+
 	validBlocks := make([]btBlock, 0)
 	// insert the test blocks, which will execute all transaction
 	for bi, b := range bt.json.Blocks {
@@ -348,6 +399,20 @@ func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) ([]btBlo
 				return nil, fmt.Errorf("block RLP decoding failed when expected to succeed: %w", err)
 			}
 		}
+
+		if m.IsEphemeral() {
+			// Expected-invalid blocks: dry-run on a throwaway overlay.
+			if b.BlockHeader == nil {
+				_ = m.DryRunBlock(cb)
+				continue
+			}
+			// Side-chain blocks: record header for uncle verification, skip execution.
+			if !mainChainBlocks[cb.Hash()] {
+				m.RecordEphemeralHeader(cb.Header())
+				continue
+			}
+		}
+
 		var balBytes []byte
 		if len(b.BlockAccessList) > 0 {
 			bal := b.BlockAccessList.toBAL()
