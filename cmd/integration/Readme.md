@@ -174,3 +174,13 @@ erigon snapshots integrity --datadir /erigon-data/ --check=BorCheckpoints
     }
   ' | grep -v '0.0'
 ```
+
+## To decompress all commitment.kv
+```sh
+for f in ~/data/chiado34_regen/snapshots/domain/*commitment*.kv; do
+    echo "==> $f"
+    NoCompress=true /Users/alex/projects/erigon_a4/build/bin/erigon \
+      --datadir ~/data/chiado34_regen \
+      seg compress --from "$f" "${f}.new" && mv -f "${f}.new" "$f"
+done
+```
