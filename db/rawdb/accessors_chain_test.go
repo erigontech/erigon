@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -737,8 +736,7 @@ func TestHeadStorage(t *testing.T) {
 		t.Skip("slow test")
 	}
 	t.Parallel()
-	m := execmoduletester.New(t)
-	m.DB.(state.HasAgg).Agg().(*state.Aggregator).EnableDomain(kv.RCacheDomain)
+	m := execmoduletester.New(t, execmoduletester.WithEnableDomain(kv.RCacheDomain))
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -765,8 +763,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 		t.Skip("slow test")
 	}
 	t.Parallel()
-	m := execmoduletester.New(t)
-	m.DB.(state.HasAgg).Agg().(*state.Aggregator).EnableDomain(kv.RCacheDomain)
+	m := execmoduletester.New(t, execmoduletester.WithEnableDomain(kv.RCacheDomain))
 	tx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
