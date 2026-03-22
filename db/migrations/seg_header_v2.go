@@ -26,13 +26,12 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
-	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
-// SegHeaderV2 upgrades all V1 .seg/.v/.ef snapshot files to V2 by patching
+// SegHeaderV2 upgrades all V1 .kv/.v/.ef snapshot files to V2 by patching
 // the two-byte file header in-place.  V2 is identical to V1 except that the
-// featureFlagBitmask byte now reliably encodes KeyCompressionEnabled /
-// ValCompressionEnabled in addition to PageLevelCompressionEnabled.
+// featureFlagBitmask byte now reliably encodes WordLevelKeyCompressionEnabled /
+// WordLevelValCompressionEnabled in addition to PageLevelCompressionEnabled.
 //
 // The correct compression flags are looked up from statecfg.Schema so that
 // no heuristic detection (DetectCompressType) is needed.
@@ -45,8 +44,6 @@ var SegHeaderV2 = Migration{
 		}
 		defer tx.Rollback()
 
-		lookup := buildSegCompressionLookup()
-
 		snapDirs := []string{
 			dirs.Snap,
 			dirs.SnapDomain,
@@ -56,7 +53,7 @@ var SegHeaderV2 = Migration{
 			dirs.SnapCaplin,
 		}
 		for _, dir := range snapDirs {
-			if err := upgradeSegFilesInDir(dir, lookup, logger); err != nil {
+			if err := upgradeSegFilesInDir(dir, logger); err != nil {
 				return err
 			}
 		}
@@ -70,9 +67,9 @@ var SegHeaderV2 = Migration{
 
 // segDataExts are the file extensions written by the seg Compressor that
 // carry the version/featureFlag header.
-var segDataExts = map[string]bool{".seg": true, ".v": true, ".ef": true}
+var segDataExts = map[string]bool{".kv": true, ".v": true, ".ef": true}
 
-func upgradeSegFilesInDir(dir string, lookup map[string]seg.FileCompression, logger log.Logger) error {
+func upgradeSegFilesInDir(dir string, logger log.Logger) error {
 	return filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
@@ -81,13 +78,13 @@ func upgradeSegFilesInDir(dir string, lookup map[string]seg.FileCompression, log
 		if !segDataExts[ext] {
 			return nil
 		}
-		return upgradeSegHeaderV1toV2(path, ext, lookup, logger)
+		return upgradeSegHeaderV1toV2(path, ext, logger)
 	})
 }
 
 // upgradeSegHeaderV1toV2 patches a single seg-format file from V1 to V2.
 // It is a no-op for V0 files and files that are already V2+.
-func upgradeSegHeaderV1toV2(path, ext string, lookup map[string]seg.FileCompression, logger log.Logger) error {
+func upgradeSegHeaderV1toV2(path, ext string, logger log.Logger) error {
 	d, err := seg.NewDecompressor(path)
 	if err != nil {
 		return err
@@ -104,17 +101,17 @@ func upgradeSegHeaderV1toV2(path, ext string, lookup map[string]seg.FileCompress
 	// component of the base name, e.g. "accounts" from "v1-000000-000100-accounts.seg").
 	base := filepath.Base(path)
 	tag := segTag(base, ext)
-	fc := lookup[tag+ext] // zero value (no compression) if unknown
+	fc := segCompressionAtV2[tag+ext] // zero value (CompressNone) if unknown
 
 	var bitmask seg.FeatureFlagBitmask
 	if pageCnt > 0 {
 		bitmask.Set(seg.PageLevelCompressionEnabled)
 	}
 	if fc.Has(seg.CompressKeys) {
-		bitmask.Set(seg.KeyCompressionEnabled)
+		bitmask.Set(seg.WordLevelKeyCompressionEnabled)
 	}
 	if fc.Has(seg.CompressVals) {
-		bitmask.Set(seg.ValCompressionEnabled)
+		bitmask.Set(seg.WordLevelValCompressionEnabled)
 	}
 
 	f, err := os.OpenFile(path, os.O_RDWR, 0)
@@ -145,37 +142,51 @@ func segTag(base, ext string) string {
 	return ""
 }
 
-// buildSegCompressionLookup returns a map from "{tag}{ext}" to the FileCompression
-// used when writing that file type, derived from the global statecfg.Schema.
-func buildSegCompressionLookup() map[string]seg.FileCompression {
-	s := statecfg.Schema
-	m := make(map[string]seg.FileCompression)
-
-	domains := []statecfg.DomainCfg{
-		s.AccountsDomain,
-		s.StorageDomain,
-		s.CodeDomain,
-		s.CommitmentDomain,
-		s.ReceiptDomain,
-		s.RCacheDomain,
-	}
-	for _, d := range domains {
-		name := d.Name.String()
-		m[name+".seg"] = d.Compression
-		m[name+".v"] = d.Hist.Compression
-		// Each domain's inverted-index uses the domain name as its FilenameBase.
-		m[d.Hist.IiCfg.FilenameBase+".ef"] = d.Hist.IiCfg.Compression
-	}
-
-	// Standalone inverted indexes (log/trace).
-	for _, ii := range []statecfg.InvIdxCfg{
-		s.LogAddrIdx,
-		s.LogTopicIdx,
-		s.TracesFromIdx,
-		s.TracesToIdx,
-	} {
-		m[ii.FilenameBase+".ef"] = ii.Compression
-	}
-
-	return m
+// segCompressionAtV2 is a frozen snapshot of the compression settings that were in
+// effect when the seg_header_v2 migration was written.  It intentionally does NOT
+// read from statecfg.Schema so that future schema changes cannot alter what flags
+// are patched into existing files.
+//
+// Layout: map["{filenameBase}{ext}"] = FileCompression
+//
+// Domains   (.kv = domain data, .v = history values, .ef = inverted-index keys)
+// accounts  : kv=none,  v=none,      ef=none
+// storage   : kv=keys,  v=none,      ef=none
+// code      : kv=vals,  v=keys|vals, ef=none
+// commitment: kv=keys,  v=none,      ef=none   (compression may be removed in the future)
+// receipt   : kv=none,  v=none,      ef=none
+// rcache    : kv=none,  v=none,      ef=none   (rcache disabled; included for completeness)
+//
+// Standalone inverted indexes
+// logaddrs / logtopics / tracesfrom / tracesto : ef=none
+var segCompressionAtV2 = map[string]seg.FileCompression{
+	// --- accounts ---
+	"accounts.kv": seg.CompressNone,
+	"accounts.v":  seg.CompressNone,
+	"accounts.ef": seg.CompressNone,
+	// --- storage ---
+	"storage.kv": seg.CompressKeys,
+	"storage.v":  seg.CompressNone,
+	"storage.ef": seg.CompressNone,
+	// --- code ---
+	"code.kv": seg.CompressVals,
+	"code.v":  seg.CompressKeys | seg.CompressVals,
+	"code.ef": seg.CompressNone,
+	// --- commitment ---
+	"commitment.kv": seg.CompressKeys,
+	"commitment.v":  seg.CompressNone,
+	"commitment.ef": seg.CompressNone,
+	// --- receipt ---
+	"receipt.kv": seg.CompressNone,
+	"receipt.v":  seg.CompressNone,
+	"receipt.ef": seg.CompressNone,
+	// --- rcache ---
+	"rcache.kv": seg.CompressNone,
+	"rcache.v":  seg.CompressNone,
+	"rcache.ef": seg.CompressNone,
+	// --- standalone inverted indexes ---
+	"logaddrs.ef":   seg.CompressNone,
+	"logtopics.ef":  seg.CompressNone,
+	"tracesfrom.ef": seg.CompressNone,
+	"tracesto.ef":   seg.CompressNone,
 }

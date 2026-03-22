@@ -28,7 +28,7 @@ const (
 	FileCompressionFormatV0 = uint8(0)
 	FileCompressionFormatV1 = uint8(1)
 	// FileCompressionFormatV2 is like V1 but the featureFlagBitmask is fully
-	// populated, including KeyCompressionEnabled / ValCompressionEnabled bits.
+	// populated, including WordLevelKeyCompressionEnabled / WordLevelValCompressionEnabled bits.
 	// Files at V1 may have those bits unset even when keys/vals are compressed.
 	FileCompressionFormatV2 = uint8(2)
 )
@@ -36,10 +36,9 @@ const (
 type FeatureFlag uint8
 
 const (
-	PageLevelCompressionEnabled FeatureFlag = 1 << iota // 0b0001
-	KeyCompressionEnabled                               // 0b0010
-	ValCompressionEnabled                               // 0b0100
-	PairsCountEnabled                                   // 0b1000 — total key-value pair count follows compPageValuesCount in the header (V2+ only)
+	PageLevelCompressionEnabled    FeatureFlag = 1 << iota // 0b0001
+	WordLevelKeyCompressionEnabled                         // 0b0010
+	WordLevelValCompressionEnabled                         // 0b0100
 )
 
 type FeatureFlagBitmask uint8

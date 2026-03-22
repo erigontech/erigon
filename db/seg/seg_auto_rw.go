@@ -40,7 +40,13 @@ type Reader struct {
 	Buf []byte // reusable buffer for callers (e.g. BpsTree binary search)
 }
 
+// NewReader creates a Reader for the given Getter.
+// For V2+ files the compression flags are read from the file header (ground truth);
+// for older files the caller-supplied c is used as a fallback.
 func NewReader(g *Getter, c FileCompression) *Reader {
+	if fc, ok := g.FileCompression(); ok {
+		c = fc
+	}
 	return &Reader{Getter: g, c: c}
 }
 
@@ -107,10 +113,10 @@ type Writer struct {
 
 func NewWriter(kv *Compressor, compress FileCompression) *Writer {
 	if compress.Has(CompressKeys) {
-		kv.featureFlagBitmask.Set(KeyCompressionEnabled)
+		kv.featureFlagBitmask.Set(WordLevelKeyCompressionEnabled)
 	}
 	if compress.Has(CompressVals) {
-		kv.featureFlagBitmask.Set(ValCompressionEnabled)
+		kv.featureFlagBitmask.Set(WordLevelValCompressionEnabled)
 	}
 	return &Writer{kv, false, compress}
 }
@@ -140,8 +146,6 @@ func (c *Writer) ReadFrom(r *Reader) error {
 	}
 	return nil
 }
-
-func (c *Writer) SetPairsCount(n uint64) { c.Compressor.SetPairsCount(n) }
 
 func (c *Writer) Close() {
 	if c.Compressor != nil {

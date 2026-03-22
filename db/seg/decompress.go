@@ -188,7 +188,6 @@ type Decompressor struct {
 	version             uint8
 	featureFlagBitmask  FeatureFlagBitmask
 	compPageValuesCount uint8
-	totalPairsCount     uint64
 
 	serializedDictSize uint64
 	lenDictSize        uint64 // huffman encoded lengths
@@ -263,7 +262,7 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 		// 1st byte: version,
 		// 2nd byte: defines how exactly the file is compressed
 		// 3rd byte (optional): exists if PageLevelCompressionEnabled flag is enabled, and defines number of values on compressed page
-		// Note: KeyCompressionEnabled / ValCompressionEnabled bits in the bitmask are only
+		// Note: WordLevelKeyCompressionEnabled / WordLevelValCompressionEnabled bits in the bitmask are only
 		// reliable for V2+; V1 files may have those bits unset even when keys/vals are compressed.
 		d.featureFlagBitmask = FeatureFlagBitmask(d.data[1])
 		d.data = d.data[2:]
@@ -273,11 +272,6 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 		d.compPageValuesCount = d.data[0]
 		d.data = d.data[1:]
 	}
-	if d.featureFlagBitmask.Has(PairsCountEnabled) {
-		d.totalPairsCount = binary.BigEndian.Uint64(d.data[:8])
-		d.data = d.data[8:]
-	}
-
 	if hasMetadata {
 		metadataLen := binary.BigEndian.Uint32(d.data[:4])
 		d.metadata = d.data[4 : 4+metadataLen]
@@ -521,25 +515,19 @@ func (d *Decompressor) DictLens() int                   { return d.dictLens }
 func (d *Decompressor) CompressedPageValuesCount() int  { return int(d.compPageValuesCount) }
 func (d *Decompressor) CompressionFormatVersion() uint8 { return d.version }
 
-// TotalPairsCount returns the number of key-value pairs stored in a page-compressed
-// file. Returns 0 for files that do not have PairsCountEnabled in their header (V1
-// files and V2 files written without page compression).
-func (d *Decompressor) TotalPairsCount() uint64 { return d.totalPairsCount }
-
 // FileCompression returns the key/value compression flags stored in the file header.
-// Only reliable for V2+ files; returns CompressNone for V0 and V1.
-func (d *Decompressor) FileCompression() FileCompression {
+// ok=false means the file predates V2 and the header does not carry this information.
+func (d *Decompressor) FileCompression() (c FileCompression, ok bool) {
 	if d.version < FileCompressionFormatV2 {
-		return CompressNone
+		return CompressNone, false
 	}
-	c := CompressNone
-	if d.featureFlagBitmask.Has(KeyCompressionEnabled) {
+	if d.featureFlagBitmask.Has(WordLevelKeyCompressionEnabled) {
 		c |= CompressKeys
 	}
-	if d.featureFlagBitmask.Has(ValCompressionEnabled) {
+	if d.featureFlagBitmask.Has(WordLevelValCompressionEnabled) {
 		c |= CompressVals
 	}
-	return c
+	return c, true
 }
 
 func (d *Decompressor) Size() int64 {
@@ -780,11 +768,15 @@ func (g *Getter) MadvNormal() MadvDisabler {
 	g.d.MadvNormal()
 	return g
 }
-func (g *Getter) DisableReadAhead()   { g.d.DisableReadAhead() }
-func (g *Getter) Trace(t bool)        { g.trace = t }
-func (g *Getter) Count() int          { return g.d.Count() }
-func (g *Getter) FileName() string    { return g.fName }
-func (g *Getter) GetMetadata() []byte { return g.d.GetMetadata() }
+func (g *Getter) DisableReadAhead() { g.d.DisableReadAhead() }
+func (g *Getter) Trace(t bool)      { g.trace = t }
+func (g *Getter) Count() int        { return g.d.Count() }
+func (g *Getter) FileName() string  { return g.fName }
+
+// FileCompression returns the key/value compression flags from the file header.
+// ok=false for pre-V2 files where the header does not carry this information.
+func (g *Getter) FileCompression() (FileCompression, bool) { return g.d.FileCompression() }
+func (g *Getter) GetMetadata() []byte                      { return g.d.GetMetadata() }
 
 // nextPosClean aligns to the next byte boundary then reads the next position.
 func (g *Getter) nextPosClean() uint64 {
