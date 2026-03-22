@@ -266,8 +266,7 @@ func smokeTestSegFiles(dir string, logger log.Logger) error {
 		}
 
 		g := dec.MakeGetter()
-		fc, _ := g.WordLevelCompression()
-		r := seg.NewReader(g, fc)
+		r := seg.NewReader(g, seg.CompressNone) // NewReader reads WordLevelCompression from header
 		r.Reset(0)
 		var buf []byte
 		for r.HasNext() {
