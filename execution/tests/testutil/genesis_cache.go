@@ -81,6 +81,7 @@ const maxGenesisCacheSize = 4
 
 var (
 	genesisDBMu    sync.Mutex // protects all fields below
+	genesisDBCond  = sync.NewCond(&genesisDBMu)
 	genesisDBCache = make(map[string]*genesisCacheEntry)
 )
 
@@ -167,12 +168,14 @@ func evictLRU() bool {
 	return true
 }
 
-// releaseGenesisDB decrements the reference count for a cache entry.
+// releaseGenesisDB decrements the reference count for a cache entry
+// and wakes any goroutines waiting for a free slot.
 func releaseGenesisDB(key string) {
 	genesisDBMu.Lock()
 	defer genesisDBMu.Unlock()
 	if e, ok := genesisDBCache[key]; ok {
 		e.refs--
+		genesisDBCond.Signal()
 	}
 }
 
@@ -265,27 +268,28 @@ func getOrCreateGenesisDB(fork string, gspec *types.Genesis) (kv.TemporalRwDB, *
 	now := time.Now().UnixNano()
 
 	genesisDBMu.Lock()
-
-	// Fast path: already cached and ready.
-	if e, ok := genesisDBCache[key]; ok {
-		e.refs++
-		e.lastUse = now
-		ready := e.ready
-		genesisDBMu.Unlock()
-		<-ready // wait for creation to finish (no-op if already closed)
-		if e.err != nil {
-			releaseGenesisDB(key)
-			return nil, nil, nil, e.err
-		}
-		return e.db, e.genesis, func() { releaseGenesisDB(key) }, nil
-	}
-
-	// Cache full — try to evict.
-	if len(genesisDBCache) >= maxGenesisCacheSize {
-		if !evictLRU() {
+	for {
+		// Already cached — reuse.
+		if e, ok := genesisDBCache[key]; ok {
+			e.refs++
+			e.lastUse = now
+			ready := e.ready
 			genesisDBMu.Unlock()
-			return nil, nil, nil, fmt.Errorf("genesis cache full (%d entries, all in use)", len(genesisDBCache))
+			<-ready // wait for creation to finish (no-op if already closed)
+			if e.err != nil {
+				releaseGenesisDB(key)
+				return nil, nil, nil, e.err
+			}
+			return e.db, e.genesis, func() { releaseGenesisDB(key) }, nil
 		}
+
+		// Cache has room or we can evict — proceed to create.
+		if len(genesisDBCache) < maxGenesisCacheSize || evictLRU() {
+			break
+		}
+
+		// Cache full, all in use — wait for a release.
+		genesisDBCond.Wait()
 	}
 
 	// Reserve a placeholder so concurrent requests for the same key wait.
