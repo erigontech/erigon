@@ -499,6 +499,13 @@ func stageBodies(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) err
 	_, engine, _, sync := newSync(ctx, db, nil /* miningConfig */, logger)
 	defer engine.Close()
 	br, bw := blocksIO(db, logger)
+	dirs := datadir.New(datadirCli)
+
+	if reset {
+		return db.Update(ctx, func(tx kv.RwTx) error {
+			return rawdbreset.ResetBlocks(tx, db, br, bw, dirs, logger)
+		})
+	}
 
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		s := stage(sync, tx, stages.Bodies)
@@ -521,7 +528,7 @@ func stageBodies(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) err
 			logger.Info("Progress", "bodies", progress)
 			return nil
 		}
-		logger.Info("This command only works with --unwind option")
+		logger.Info("This command only works with --unwind or --reset option")
 		return nil
 	}); err != nil {
 		return err
