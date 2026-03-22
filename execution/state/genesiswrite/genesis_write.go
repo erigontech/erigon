@@ -183,19 +183,13 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 		if err != nil {
 			return genesis.Config, nil, err
 		}
-		// Recovery: if genesis body was wiped (e.g. by a bad reset), re-write it.
+		// Recovery: if genesis body was wiped (e.g. by a bad reset), reconstruct
+		// the block from the stored header so callers get a non-nil block with the
+		// correct hash. The full body lives in snapshots and will be read from there
+		// during normal execution — we do not need to re-populate kv.BlockBody here.
 		if storedBlock == nil {
-			recoveryGenesis := genesis
-			if recoveryGenesis == nil && chainName != "" {
-				if spec, specErr := chainspec.ChainSpecByName(chainName); specErr == nil && spec.GenesisHash == storedHash {
-					recoveryGenesis = spec.Genesis
-				}
-			}
-			if recoveryGenesis != nil {
-				storedBlock, _, err = write(tx, recoveryGenesis, dirs, logger)
-				if err != nil {
-					return nil, nil, fmt.Errorf("re-writing missing genesis block: %w", err)
-				}
+			if h := rawdb.ReadHeader(tx, storedHash, *number); h != nil {
+				storedBlock = types.NewBlockFromStorage(storedHash, h, nil, nil, nil)
 			}
 		}
 	}
