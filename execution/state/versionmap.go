@@ -399,18 +399,6 @@ func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path Acco
 				} else if path == AddressPath {
 					valid = vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
 						version, checkVersion, traceInvalid, tracePrefix)
-
-					// Cross-check: if a prior TX's finalize wrote BalancePath
-					// or NoncePath, an AddressPath StorageRead is stale.
-					if valid == VersionValid {
-						for _, fp := range []AccountPath{BalancePath, NoncePath} {
-							fpRR := vm.Read(addr, fp, accounts.NilKey, txIndex)
-							if fpRR.Status() == MVReadResultDone {
-								valid = VersionInvalid
-								break
-							}
-						}
-					}
 				}
 			}
 		}
