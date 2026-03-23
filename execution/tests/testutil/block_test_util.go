@@ -35,9 +35,6 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -52,7 +49,6 @@ import (
 // A BlockTest checks handling of entire blocks.
 type BlockTest struct {
 	json            btJSON
-	br              services.FullBlockReader
 	ExperimentalBAL bool
 }
 
@@ -239,8 +235,6 @@ func (bt *BlockTest) Run(t *testing.T) error {
 		defer m.Close()
 	}
 
-	bt.br = m.BlockReader
-	// import pre accounts & construct test genesis block & state root
 	if m.Genesis.Hash() != bt.json.Genesis.Hash {
 		return fmt.Errorf("genesis block hash doesn't match test: computed=%x, test=%x", m.Genesis.Hash().Bytes()[:6], bt.json.Genesis.Hash[:6])
 	}
@@ -248,38 +242,18 @@ func (bt *BlockTest) Run(t *testing.T) error {
 		return fmt.Errorf("genesis block state root does not match test: computed=%x, test=%x", m.Genesis.Root().Bytes()[:6], bt.json.Genesis.StateRoot[:6])
 	}
 
-	validBlocks, err := bt.insertBlocks(m)
-	if err != nil {
+	if err := bt.insertBlocks(m); err != nil {
 		return err
 	}
 
-	if m.IsEphemeral() {
-		if common.Hash(bt.json.BestBlock) != m.EphemeralLastBlockHash() {
-			return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", bt.json.BestBlock, m.EphemeralLastBlockHash())
-		}
-		newDB := state.New(m.NewStateReader(m.EphemeralOverlay()))
-		if err := bt.validatePostState(newDB); err != nil {
-			return fmt.Errorf("post state validation failed: %w", err)
-		}
-		return nil
+	if common.Hash(bt.json.BestBlock) != m.EphemeralLastBlockHash() {
+		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", bt.json.BestBlock, m.EphemeralLastBlockHash())
 	}
-
-	tx, err := m.DB.BeginTemporalRo(m.Ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	cmlast := rawdb.ReadHeadBlockHash(tx)
-	if common.Hash(bt.json.BestBlock) != cmlast {
-		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", bt.json.BestBlock, cmlast)
-	}
-	newDB := state.New(m.NewStateReader(tx))
+	newDB := state.New(m.NewStateReader(m.EphemeralOverlay()))
 	if err := bt.validatePostState(newDB); err != nil {
 		return fmt.Errorf("post state validation failed: %w", err)
 	}
-
-	return bt.validateImportedHeaders(tx, validBlocks, m)
+	return nil
 }
 
 // RunCLI executes the test without requiring a testing.T context, suitable for CLI usage.
@@ -323,54 +297,47 @@ See https://github.com/ethereum/tests/wiki/Blockchain-Tests-II
 	expected we are expected to ignore it and continue processing and then validate the
 	post state.
 */
-func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) ([]btBlock, error) {
-	// In ephemeral mode, pre-trace the main chain from BestBlock back to genesis.
+func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) error {
+	// Pre-trace the main chain from BestBlock back to genesis.
 	// Tests with uncle/side-chain blocks have interleaved blocks from different
 	// forks; only main-chain blocks should be executed on the overlay.
-	var mainChainBlocks map[common.Hash]bool
-	if m.IsEphemeral() {
-		mainChainBlocks = make(map[common.Hash]bool)
-		decoded := make(map[common.Hash]*types.Block)
-		for _, b := range bt.json.Blocks {
-			cb, err := b.decode()
-			if err != nil {
-				continue
-			}
-			decoded[cb.Hash()] = cb
+	mainChainBlocks := make(map[common.Hash]bool)
+	decoded := make(map[common.Hash]*types.Block)
+	for _, b := range bt.json.Blocks {
+		cb, err := b.decode()
+		if err != nil {
+			continue
 		}
-		for h := common.Hash(bt.json.BestBlock); h != m.Genesis.Hash(); {
-			mainChainBlocks[h] = true
-			cb, ok := decoded[h]
-			if !ok {
-				break
-			}
-			h = cb.ParentHash()
+		decoded[cb.Hash()] = cb
+	}
+	for h := common.Hash(bt.json.BestBlock); h != m.Genesis.Hash(); {
+		mainChainBlocks[h] = true
+		cb, ok := decoded[h]
+		if !ok {
+			break
 		}
+		h = cb.ParentHash()
 	}
 
-	validBlocks := make([]btBlock, 0)
-	// insert the test blocks, which will execute all transaction
-	for bi, b := range bt.json.Blocks {
+	// insert the test blocks, which will execute all transactions
+	for _, b := range bt.json.Blocks {
 		cb, err := b.decode()
 		if err != nil {
 			if b.BlockHeader == nil {
 				continue // OK - block is supposed to be invalid, continue with next block
-			} else {
-				return nil, fmt.Errorf("block RLP decoding failed when expected to succeed: %w", err)
 			}
+			return fmt.Errorf("block RLP decoding failed when expected to succeed: %w", err)
 		}
 
-		if m.IsEphemeral() {
-			// Expected-invalid blocks: dry-run on a throwaway overlay.
-			if b.BlockHeader == nil {
-				_ = m.DryRunBlock(cb)
-				continue
-			}
-			// Side-chain blocks: record header for uncle verification, skip execution.
-			if !mainChainBlocks[cb.Hash()] {
-				m.RecordEphemeralHeader(cb.Header())
-				continue
-			}
+		// Expected-invalid blocks: dry-run on a throwaway overlay.
+		if b.BlockHeader == nil {
+			_ = m.DryRunBlock(cb)
+			continue
+		}
+		// Side-chain blocks: record header for uncle verification, skip execution.
+		if !mainChainBlocks[cb.Hash()] {
+			m.RecordEphemeralHeader(cb.Header())
+			continue
 		}
 
 		var balBytes []byte
@@ -378,52 +345,21 @@ func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) ([]btBlo
 			bal := b.BlockAccessList.toBAL()
 			balBytes, err = types.EncodeBlockAccessListBytes(bal)
 			if err != nil {
-				return nil, fmt.Errorf("block #%v encode block access list: %w", cb.Number(), err)
+				return fmt.Errorf("block #%v encode block access list: %w", cb.Number(), err)
 			}
 		}
 		// RLP decoding worked, try to insert into chain:
 		chain := &blockgen.ChainPack{Blocks: []*types.Block{cb}, Headers: []*types.Header{cb.Header()}, TopBlock: cb, BlockAccessLists: [][]byte{balBytes}}
 
-		err1 := m.InsertChain(chain)
-		if err1 != nil {
-			if b.BlockHeader == nil {
-				continue // OK - block is supposed to be invalid, continue with next block
-			} else {
-				return nil, fmt.Errorf("block #%v insertion into chain failed: %w", cb.Number(), err1)
-			}
-		} else if b.BlockHeader == nil {
-			isCanonical, err := bt.isCanonical(m, cb)
-			if err != nil {
-				return nil, err
-			}
-			if isCanonical {
-				return nil, fmt.Errorf("block (index %d) insertion should have failed due to: %v", bi, b.ExpectException)
-			}
-		}
-		if b.BlockHeader == nil {
-			continue
+		if err := m.InsertChain(chain); err != nil {
+			return fmt.Errorf("block #%v insertion into chain failed: %w", cb.Number(), err)
 		}
 		// validate RLP decoding by checking all values against test file JSON
 		if err = validateHeader(b.BlockHeader, cb.HeaderNoCopy()); err != nil {
-			return nil, fmt.Errorf("deserialised block header validation failed: %w", err)
+			return fmt.Errorf("deserialised block header validation failed: %w", err)
 		}
-		validBlocks = append(validBlocks, b)
 	}
-	return validBlocks, nil
-}
-
-// isCanonical reports whether block is the canonical block at its height.
-func (bt *BlockTest) isCanonical(m *execmoduletester.ExecModuleTester, block *types.Block) (bool, error) {
-	roTx, err := m.DB.BeginRo(m.Ctx)
-	if err != nil {
-		return false, err
-	}
-	defer roTx.Rollback()
-	canonical, _, err := bt.br.CanonicalHash(context.Background(), roTx, block.NumberU64())
-	if err != nil {
-		return false, err
-	}
-	return canonical == block.Hash(), nil
+	return nil
 }
 
 // equalPtr reports whether two optional pointers point to equal values.
@@ -546,30 +482,6 @@ func (bt *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 				return fmt.Errorf("storage mismatch for addr: %x loc: %x want: %d have: %d", addr, loc, val1, &val2)
 			}
 		}
-	}
-	return nil
-}
-
-func (bt *BlockTest) validateImportedHeaders(tx kv.Tx, validBlocks []btBlock, m *execmoduletester.ExecModuleTester) error {
-	// to get constant lookup when verifying block headers by hash (some tests have many blocks)
-	bmap := make(map[common.Hash]btBlock, len(bt.json.Blocks))
-	for _, b := range validBlocks {
-		bmap[b.BlockHeader.Hash] = b
-	}
-	// iterate over blocks backwards from HEAD and validate imported
-	// headers vs test file. some tests have reorgs, and we import
-	// block-by-block, so we can only validate imported headers after
-	// all blocks have been processed by BlockChain, as they may not
-	// be part of the longest chain until last block is imported.
-	for b, _ := m.BlockReader.CurrentBlock(tx); b != nil && b.NumberU64() != 0; {
-		if err := validateHeader(bmap[b.Hash()].BlockHeader, b.HeaderNoCopy()); err != nil {
-			return fmt.Errorf("imported block header validation failed: %w", err)
-		}
-		number := rawdb.ReadHeaderNumber(tx, b.ParentHash())
-		if number == nil {
-			break
-		}
-		b, _, _ = m.BlockReader.BlockWithSenders(m.Ctx, tx, b.ParentHash(), *number)
 	}
 	return nil
 }

@@ -87,136 +87,19 @@ func (emt *ExecModuleTester) closeEphemeral() {
 	}
 }
 
-// insertChainEphemeral executes blocks on the MemoryMutation overlay using
-// ExecuteBlockEphemerally instead of the full staged-sync pipeline.
-// Each block is executed on a nested overlay so that failed executions
-// (expected-invalid blocks) don't leave partial state on the main overlay.
-func (emt *ExecModuleTester) insertChainEphemeral(cp *blockgen.ChainPack) error {
-	cr := &LightChainReader{
+func (emt *ExecModuleTester) ephemeralChainReader() *LightChainReader {
+	return &LightChainReader{
 		Config_: emt.ChainConfig,
 		Headers: emt.ephemeralHeaders,
 		TDs:     emt.ephemeralTDs,
 		Tx:      emt.ephemeralOverlay,
 	}
-
-	for i := 0; i < cp.Length(); i++ {
-		block := cp.Blocks[i]
-		header := block.Header()
-
-		// Verify header (gas limit, timestamp, difficulty, etc.).
-		if err := emt.Engine.VerifyHeader(cr, header, false); err != nil {
-			return err
-		}
-
-		// Verify uncles.
-		if err := emt.Engine.VerifyUncles(cr, header, block.Uncles()); err != nil {
-			return err
-		}
-
-		// Post-Shanghai blocks must have a withdrawals field in the RLP.
-		// Go's RLP decoder is lenient and sets it to nil if absent.
-		if emt.ChainConfig.IsShanghai(header.Time) && block.Withdrawals() == nil {
-			return fmt.Errorf("block #%v missing withdrawals field (post-Shanghai)", block.Number())
-		}
-
-		// Validate withdrawals root matches actual withdrawals.
-		if header.WithdrawalsHash != nil {
-			computedRoot := types.DeriveSha(types.Withdrawals(block.Withdrawals()))
-			if computedRoot != *header.WithdrawalsHash {
-				return fmt.Errorf("block #%v withdrawals root mismatch: computed %x, header %x", block.Number(), computedRoot, *header.WithdrawalsHash)
-			}
-		}
-
-		// Validate transactions root matches actual transactions.
-		computedTxRoot := types.DeriveSha(block.Transactions())
-		if computedTxRoot != header.TxHash {
-			return fmt.Errorf("block #%v transactions root mismatch: computed %x, header %x", block.Number(), computedTxRoot, header.TxHash)
-		}
-
-		// Check gas used doesn't exceed gas limit.
-		if header.GasUsed > header.GasLimit {
-			return fmt.Errorf("block #%v gas used %d exceeds gas limit %d", block.Number(), header.GasUsed, header.GasLimit)
-		}
-
-		// Validate blob gas used matches actual blob count.
-		if header.BlobGasUsed != nil {
-			var expectedBlobGas uint64
-			for _, txn := range block.Transactions() {
-				expectedBlobGas += txn.GetBlobGas()
-			}
-			if expectedBlobGas != *header.BlobGasUsed {
-				return fmt.Errorf("block #%v blob gas mismatch: txns=%d, header=%d", block.Number(), expectedBlobGas, *header.BlobGasUsed)
-			}
-		}
-
-		// Execute directly on the main overlay. Valid blocks (the only ones
-		// routed here by insertBlocks) are expected to succeed. DomainDelPrefix
-		// must see all keys from previous blocks, which requires operating on
-		// the main overlay rather than a nested one.
-		emt.ephemeralTxNum++
-
-		stateReader := state.NewReaderV3(emt.ephemeralOverlay)
-		stateWriter := state.NewWriter(emt.ephemeralOverlay, nil, emt.ephemeralTxNum)
-		stateWriter.ForceWrites = true // overlay execution: must write even if original==value
-
-		blockHashFunc := protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
-			h := cr.GetHeader(hash, number)
-			if h == nil {
-				return nil, fmt.Errorf("header not found: %x at %d", hash, number)
-			}
-			return h, nil
-		})
-
-		var execErr error
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					execErr = fmt.Errorf("panic during block execution: %v", r)
-				}
-			}()
-			_, execErr = protocol.ExecuteBlockEphemerally(
-				emt.ChainConfig, &vm.Config{},
-				blockHashFunc, emt.Engine, block,
-				stateReader, stateWriter,
-				cr, nil, emt.Log,
-			)
-		}()
-		if execErr != nil {
-			return execErr
-		}
-
-		// Update txNum for the transactions in this block + end-of-block system tx.
-		emt.ephemeralTxNum += uint64(block.Transactions().Len())
-		emt.ephemeralTxNum++
-
-		// Record header and total difficulty.
-		emt.ephemeralHeaders[block.Hash()] = header
-		parentTd := emt.ephemeralTDs[header.ParentHash]
-		if parentTd == nil {
-			parentTd, _ = rawdb.ReadTd(emt.ephemeralRoTx, header.ParentHash, header.Number.Uint64()-1)
-		}
-		blockTd := new(big.Int)
-		if parentTd != nil {
-			blockTd.Set(parentTd)
-		}
-		blockTd.Add(blockTd, header.Difficulty.ToBig())
-		emt.ephemeralTDs[block.Hash()] = blockTd
-		emt.ephemeralLastHash = block.Hash()
-	}
-	return nil
 }
 
-// DryRunBlock executes a block on a throwaway overlay without merging state.
-// Returns nil if the block executes successfully, or the execution error.
-// Used for expected-invalid blocks to avoid leaking state into the main overlay.
-func (emt *ExecModuleTester) DryRunBlock(block *types.Block) error {
-	cr := &LightChainReader{
-		Config_: emt.ChainConfig,
-		Headers: emt.ephemeralHeaders,
-		TDs:     emt.ephemeralTDs,
-		Tx:      emt.ephemeralOverlay,
-	}
-
+// verifyBlock performs pre-execution validation: header, uncles, withdrawals,
+// transactions root, gas limit, and blob gas. Shared by insertChainEphemeral
+// and DryRunBlock.
+func (emt *ExecModuleTester) verifyBlock(cr *LightChainReader, block *types.Block) error {
 	header := block.Header()
 
 	if err := emt.Engine.VerifyHeader(cr, header, false); err != nil {
@@ -229,17 +112,15 @@ func (emt *ExecModuleTester) DryRunBlock(block *types.Block) error {
 		return fmt.Errorf("block #%v missing withdrawals field (post-Shanghai)", block.Number())
 	}
 	if header.WithdrawalsHash != nil {
-		computedRoot := types.DeriveSha(types.Withdrawals(block.Withdrawals()))
-		if computedRoot != *header.WithdrawalsHash {
-			return fmt.Errorf("block #%v withdrawals root mismatch", block.Number())
+		if computedRoot := types.DeriveSha(types.Withdrawals(block.Withdrawals())); computedRoot != *header.WithdrawalsHash {
+			return fmt.Errorf("block #%v withdrawals root mismatch: computed %x, header %x", block.Number(), computedRoot, *header.WithdrawalsHash)
 		}
 	}
-	computedTxRoot := types.DeriveSha(block.Transactions())
-	if computedTxRoot != header.TxHash {
-		return fmt.Errorf("block #%v transactions root mismatch", block.Number())
+	if computedTxRoot := types.DeriveSha(block.Transactions()); computedTxRoot != header.TxHash {
+		return fmt.Errorf("block #%v transactions root mismatch: computed %x, header %x", block.Number(), computedTxRoot, header.TxHash)
 	}
 	if header.GasUsed > header.GasLimit {
-		return fmt.Errorf("block #%v gas used exceeds gas limit", block.Number())
+		return fmt.Errorf("block #%v gas used %d exceeds gas limit %d", block.Number(), header.GasUsed, header.GasLimit)
 	}
 	if header.BlobGasUsed != nil {
 		var expectedBlobGas uint64
@@ -247,20 +128,18 @@ func (emt *ExecModuleTester) DryRunBlock(block *types.Block) error {
 			expectedBlobGas += txn.GetBlobGas()
 		}
 		if expectedBlobGas != *header.BlobGasUsed {
-			return fmt.Errorf("block #%v blob gas mismatch", block.Number())
+			return fmt.Errorf("block #%v blob gas mismatch: txns=%d, header=%d", block.Number(), expectedBlobGas, *header.BlobGasUsed)
 		}
 	}
+	return nil
+}
 
-	throwaway, err := membatchwithdb.NewMemoryBatch(emt.ephemeralOverlay, "", emt.Log)
-	if err != nil {
-		return err
-	}
-	defer throwaway.Close()
-
-	txNum := emt.ephemeralTxNum + 1
-	stateReader := state.NewReaderV3(throwaway)
-	stateWriter := state.NewWriter(throwaway, nil, txNum)
-	stateWriter.ForceWrites = true
+// executeBlock runs ExecuteBlockEphemerally on the given overlay with panic recovery.
+func (emt *ExecModuleTester) executeBlock(cr *LightChainReader, block *types.Block, overlay *membatchwithdb.MemoryMutation, txNum uint64) error {
+	header := block.Header()
+	stateReader := state.NewReaderV3(overlay)
+	stateWriter := state.NewWriter(overlay, nil, txNum)
+	stateWriter.ForceWrites = true // required: overlay needs explicit writes for multi-block system contract state
 
 	blockHashFunc := protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
 		h := cr.GetHeader(hash, number)
@@ -284,7 +163,64 @@ func (emt *ExecModuleTester) DryRunBlock(block *types.Block) error {
 			cr, nil, emt.Log,
 		)
 	}()
-	return execErr // nil means "block executed successfully" — throwaway overlay is discarded
+	return execErr
+}
+
+// insertChainEphemeral executes valid blocks on the main MemoryMutation overlay.
+func (emt *ExecModuleTester) insertChainEphemeral(cp *blockgen.ChainPack) error {
+	cr := emt.ephemeralChainReader()
+
+	for i := 0; i < cp.Length(); i++ {
+		block := cp.Blocks[i]
+
+		if err := emt.verifyBlock(cr, block); err != nil {
+			return err
+		}
+
+		emt.ephemeralTxNum++
+		if err := emt.executeBlock(cr, block, emt.ephemeralOverlay, emt.ephemeralTxNum); err != nil {
+			return err
+		}
+
+		// Update txNum for the transactions in this block + end-of-block system tx.
+		emt.ephemeralTxNum += uint64(block.Transactions().Len())
+		emt.ephemeralTxNum++
+
+		// Record header and total difficulty.
+		header := block.Header()
+		emt.ephemeralHeaders[block.Hash()] = header
+		parentTd := emt.ephemeralTDs[header.ParentHash]
+		if parentTd == nil {
+			parentTd, _ = rawdb.ReadTd(emt.ephemeralRoTx, header.ParentHash, header.Number.Uint64()-1)
+		}
+		blockTd := new(big.Int)
+		if parentTd != nil {
+			blockTd.Set(parentTd)
+		}
+		blockTd.Add(blockTd, header.Difficulty.ToBig())
+		emt.ephemeralTDs[block.Hash()] = blockTd
+		emt.ephemeralLastHash = block.Hash()
+	}
+	return nil
+}
+
+// DryRunBlock executes a block on a throwaway overlay without merging state.
+// Returns nil if the block executes successfully, or the execution error.
+// Used for expected-invalid blocks to avoid leaking state into the main overlay.
+func (emt *ExecModuleTester) DryRunBlock(block *types.Block) error {
+	cr := emt.ephemeralChainReader()
+
+	if err := emt.verifyBlock(cr, block); err != nil {
+		return err
+	}
+
+	throwaway, err := membatchwithdb.NewMemoryBatch(emt.ephemeralOverlay, "", emt.Log)
+	if err != nil {
+		return err
+	}
+	defer throwaway.Close()
+
+	return emt.executeBlock(cr, block, throwaway, emt.ephemeralTxNum+1)
 }
 
 // RecordEphemeralHeader records a block header in the ephemeral chain reader's
