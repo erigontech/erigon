@@ -3410,17 +3410,17 @@ type duCategoryStat struct {
 
 // duResult aggregates all output data for the du command.
 type duResult struct {
-	Chain           string                                       `json:"chain"`
-	ConfiguredMode  string                                       `json:"configured_mode,omitempty"` // from DB; empty when DB unavailable
-	DetectedMode    string                                       `json:"detected_mode"`
-	BlockRange      [2]uint64                                    `json:"block_range"`
-	StepRange       [2]uint64                                    `json:"step_range"`
-	TotalBytes      int64                                        `json:"total_bytes"`
-	TotalFiles      int                                          `json:"total_files"`
-	Categories      map[string]duCategoryStat                    `json:"categories"`
-	Subcategories   map[string]map[string]duCategoryStat         `json:"subcategories,omitempty"` // category → subcategory → stat
-	OtherExtensions []string                                     `json:"other_extensions,omitempty"`
-	Estimates       []duEstimate                                 `json:"estimates"`
+	Chain           string                               `json:"chain"`
+	ConfiguredMode  string                               `json:"configured_mode,omitempty"` // from DB; empty when DB unavailable
+	DetectedMode    string                               `json:"detected_mode"`
+	BlockRange      [2]uint64                            `json:"block_range"`
+	StepRange       [2]uint64                            `json:"step_range"`
+	TotalBytes      int64                                `json:"total_bytes"`
+	TotalFiles      int                                  `json:"total_files"`
+	Categories      map[string]duCategoryStat            `json:"categories"`
+	Subcategories   map[string]map[string]duCategoryStat `json:"subcategories,omitempty"` // category → subcategory → stat
+	OtherExtensions []string                             `json:"other_extensions,omitempty"`
+	Estimates       []duEstimate                         `json:"estimates"`
 }
 
 // duAggregateCategories computes per-category byte totals and file counts.
