@@ -685,11 +685,16 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 			require.NoError(t, err)
 			defer seg.Close()
 			seg.DisableFsync()
-			if err = seg.AddWord([]byte("word")); err != nil {
-				t.Fatal(err)
-			}
-			if err = seg.AddWord([]byte("val")); err != nil { // key-value pair: mergers expect even number of words
-				t.Fatal(err)
+			if !strings.HasSuffix(filename, ".ef") {
+				// .ef files hold EF-encoded sequences; arbitrary bytes panic in MergeSorted.
+				// For .kv/.v a plain key/value pair suffices; for .ef an empty file
+				// (0 words) is safe: the merger's HasNext() guard skips empty files cleanly.
+				if err = seg.AddWord([]byte("word")); err != nil {
+					t.Fatal(err)
+				}
+				if err = seg.AddWord([]byte("val")); err != nil {
+					t.Fatal(err)
+				}
 			}
 			require.NoError(t, seg.Compress())
 
