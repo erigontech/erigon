@@ -203,6 +203,12 @@ func (sdc *SharedDomainsCommitmentContext) KeysCount() uint64 {
 	return sdc.updates.Size()
 }
 
+// GetUpdates returns the underlying Updates buffer for direct manipulation
+// by the commitment calculator (via TouchPlainKeyDirect).
+func (sdc *SharedDomainsCommitmentContext) GetUpdates() *commitment.Updates {
+	return sdc.updates
+}
+
 func (sdc *SharedDomainsCommitmentContext) Trie() commitment.Trie {
 	return sdc.patriciaTrie
 }

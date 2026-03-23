@@ -11,6 +11,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/state"
 )
 
 // commitmentResult is the outcome of a single per-block commitment computation.
@@ -22,9 +23,18 @@ type commitmentResult struct {
 }
 
 // commitmentCalculator receives the same txResult/blockResult stream as the
-// apply loop (via a fan-out channel). For each txResult it accumulates the
-// TouchKey updates. At each blockResult boundary it computes the trie root
-// from sd.mem and publishes the result.
+// apply loop (via a fan-out channel). For each txResult it accumulates key
+// touches from the writes. At each blockResult boundary it computes the trie
+// root and publishes the result.
+//
+// The calculator owns its own commitment.Updates buffer. Writes from the
+// execLoop flow through VersionedWrites.TouchUpdates() which calls
+// TouchPlainKeyDirect() — no serialization round-trip.
+//
+// It reads values from sd.mem (shared with the execLoop) via GetLatest.
+// The execLoop's Flush writes to sd.mem before sending the blockResult,
+// so by the time the calculator receives the blockResult, sd.mem has the
+// correct block-boundary state.
 type commitmentCalculator struct {
 	doms      *execctx.SharedDomains
 	db        kv.TemporalRoDB
@@ -75,21 +85,22 @@ func (cc *commitmentCalculator) loop(ctx context.Context) {
 			if !ok {
 				return
 			}
-			switch result := result.(type) {
+			switch r := result.(type) {
 			case *txResult:
-				// Per-TX: the TouchKey calls happen inside DomainPut
-				// (called by ApplyStateWrites in the execLoop).
-				// The commitment context accumulates them automatically.
-				// Nothing to do here — the touches are already recorded
-				// in the SharedDomains commitment context.
-				_ = result
+				// Accumulate key touches from the TX's writes.
+				// TouchUpdates calls TouchPlainKeyDirect for each write,
+				// feeding the unserialized values directly to the Updates buffer.
+				if r.writes != nil {
+					state.VersionedWrites(r.writes).TouchUpdates(
+						cc.doms.GetCommitmentContext().GetUpdates())
+				}
 
 			case *blockResult:
 				// Block boundary: compute commitment from accumulated touches.
 				if dbg.DiscardCommitment() {
 					continue
 				}
-				cc.computeAndPublish(ctx, result)
+				cc.computeAndPublish(ctx, r)
 			}
 
 		case <-ctx.Done():
@@ -128,7 +139,7 @@ func (cc *commitmentCalculator) computeAndPublish(ctx context.Context, br *block
 		rootHash: rh,
 	}
 
-	// Check against expected root
+	// Check against expected root from the block header.
 	if !bytes.Equal(rh, br.StateRoot.Bytes()) {
 		r.err = fmt.Errorf("%w: block %d root %x expected %x", ErrWrongTrieRoot, br.BlockNum, rh, br.StateRoot)
 	}
@@ -155,6 +166,6 @@ func collectCommitmentResult(ctx context.Context, out chan commitmentResult) *co
 	}
 }
 
-// Helper for progress logging during commitment.
-var _ = commitment.CommitProgress{} // keep import
-var _ = common.Hash{}               // keep import
+// Keep imports used.
+var _ = commitment.CommitProgress{}
+var _ = common.Hash{}
