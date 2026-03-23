@@ -55,6 +55,10 @@ func (f *ForkChoiceStore) validateEnvelopeAgainstBlock(
 	block *cltypes.SignedBeaconBlock,
 	blockState abstract.BeaconState,
 ) error {
+	if signedEnvelope.Message == nil {
+		log.Warn("[validateEnvelopeAgainstBlock] received signed envelope with nil message")
+		return errors.New("signed envelope has nil message")
+	}
 	envelope := signedEnvelope.Message
 
 	// Get the bid from the block
@@ -295,6 +299,10 @@ func (f *ForkChoiceStore) validatePayloadWithEL(
 // (false, nil) if it was skipped (already processed or block not yet known),
 // or (false, err) on failure.
 func (f *ForkChoiceStore) applyEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) (bool, error) {
+	if signedEnvelope.Message == nil {
+		log.Warn("[applyEnvelope] received signed envelope with nil message")
+		return false, errors.New("signed envelope has nil message")
+	}
 	envelope := signedEnvelope.Message
 	beaconBlockRoot := envelope.BeaconBlockRoot
 

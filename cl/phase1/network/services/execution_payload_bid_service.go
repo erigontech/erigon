@@ -250,8 +250,8 @@ func (s *executionPayloadBidService) validateAndStoreBid(
 			ErrIgnore, bid.ParentBlockRoot)
 	}
 
-	// [IGNORE] Highest bid check: only accept if this is the highest value bid for (slot, parentBlockHash)
-	bidKey := pool.HighestBidKey{Slot: slot, ParentBlockHash: bid.ParentBlockHash}
+	// [IGNORE] Highest bid check: only accept if this is the highest value bid for (slot, parentBlockHash, parentBlockRoot)
+	bidKey := pool.HighestBidKey{Slot: slot, ParentBlockHash: bid.ParentBlockHash, ParentBlockRoot: bid.ParentBlockRoot}
 	if existing, found := s.epbsPool.HighestBids.Get(bidKey); found {
 		if bid.Value <= existing.Message.Value {
 			return fmt.Errorf("%w: bid value %d is not higher than existing %d for slot %d",

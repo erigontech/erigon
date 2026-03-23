@@ -34,9 +34,17 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 		return errors.New("request count exceeds MAX_REQUEST_BLOCKS_DENEB")
 	}
 
+	// Compute minimum serve slot: max(GLOAS_FORK_EPOCH, current_epoch - MIN_EPOCHS_FOR_BLOCK_REQUESTS) * SLOTS_PER_EPOCH
+	minServeEpoch := c.beaconConfig.GloasForkEpoch
+	if curEpoch > c.beaconConfig.MinEpochsForBlockRequests() {
+		if lowerBound := curEpoch - c.beaconConfig.MinEpochsForBlockRequests(); lowerBound > minServeEpoch {
+			minServeEpoch = lowerBound
+		}
+	}
+
 	var (
 		endSlot   = req.StartSlot + req.Count
-		startSlot = max(req.StartSlot, c.beaconConfig.GloasForkEpoch*c.beaconConfig.SlotsPerEpoch)
+		startSlot = max(req.StartSlot, minServeEpoch*c.beaconConfig.SlotsPerEpoch)
 	)
 
 	curSlot := c.ethClock.GetCurrentSlot()
@@ -129,6 +137,15 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 	}
 	defer tx.Rollback()
 
+	// Compute serve range: [max(GLOAS_FORK_EPOCH, current_epoch - MIN_EPOCHS_FOR_BLOCK_REQUESTS), current_epoch]
+	// Spec: consensus-specs PR #4950
+	minServeEpoch := c.beaconConfig.GloasForkEpoch
+	if curEpoch > c.beaconConfig.MinEpochsForBlockRequests() {
+		if lowerBound := curEpoch - c.beaconConfig.MinEpochsForBlockRequests(); lowerBound > minServeEpoch {
+			minServeEpoch = lowerBound
+		}
+	}
+
 	count := 0
 	req.Range(func(_ int, blockRoot common.Hash, _ int) bool {
 		if count >= int(c.beaconConfig.MaxRequestBlocksDeneb) {
@@ -144,8 +161,11 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRootHandler(s network.Str
 			return true
 		}
 
-		// Only serve envelopes from GLOAS fork onwards
+		// Only serve envelopes within the serve range
 		epoch := *slot / c.beaconConfig.SlotsPerEpoch
+		if epoch < minServeEpoch || epoch > curEpoch {
+			return true
+		}
 		if c.beaconConfig.GetCurrentStateVersion(epoch) < clparams.GloasVersion {
 			return true
 		}
