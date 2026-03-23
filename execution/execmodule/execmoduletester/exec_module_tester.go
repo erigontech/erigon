@@ -413,8 +413,8 @@ type options struct {
 	withTxPool      bool
 	ephemeral       bool
 	enableDomains   []kv.Domain
-	cachedDB        kv.TemporalRwDB  // pre-existing DB from genesis cache
-	cachedGenesis   *types.Block      // genesis block from genesis cache
+	cachedDB        kv.TemporalRwDB // pre-existing DB from genesis cache
+	cachedGenesis   *types.Block    // genesis block from genesis cache
 }
 
 func applyOptions(opts []Option) options {
