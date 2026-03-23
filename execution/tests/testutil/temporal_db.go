@@ -18,6 +18,8 @@ package testutil
 
 import (
 	"context"
+	"os"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -29,11 +31,25 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 )
 
+func SkipOnWindows(t testing.TB) {
+	t.Helper()
+	if runtime.GOOS == "windows" && os.Getenv("ERIGON_NO_SKIP_EXECUTION_TESTS") == "" {
+		t.Skip("skipped on Windows; set ERIGON_NO_SKIP_EXECUTION_TESTS=1 to run")
+	}
+}
+
 func TemporalDB(t testing.TB) kv.TemporalRwDB {
 	return TemporalDBWithDirs(t, datadir.New(t.TempDir()))
 }
 
 func TemporalDBWithDirs(t testing.TB, dirs datadir.Dirs) kv.TemporalRwDB {
+	// Skip on Windows: MDBX correctness is thoroughly exercised by the unit and
+	// integration tests in the main repo (execution/state, execution/stagedsync,
+	// db/kv/mdbx, db/state, etc.) which run on all platforms. The spec-test
+	// suites here (ethereum/execution-spec-tests, legacy blockchain tests) verify
+	// EVM and consensus correctness, which is platform-independent; running them
+	// on Linux is sufficient. Set ERIGON_NO_SKIP_EXECUTION_TESTS=1 to force on Windows.
+	SkipOnWindows(t)
 	return temporaltest.NewTestDB(t, dirs)
 }
 
