@@ -380,13 +380,15 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	if !r.any() {
 		return
 	}
-	defer func() {
-		// Merge is background operation. It must not crush application.
-		// Convert panic to error.
-		if rec := recover(); rec != nil {
-			err = fmt.Errorf("[snapshots] background mergeFiles: domain=%s, %s, %s, %s", dt.name, r.String(), rec, dbg.Stack())
-		}
-	}()
+	if !dbg.AssertEnabled {
+		defer func() {
+			// Merge is background operation. It must not crush application.
+			// Convert panic to error.
+			if rec := recover(); rec != nil {
+				err = fmt.Errorf("[snapshots] background mergeFiles: domain=%s, %s, %s, %s", dt.name, r.String(), rec, dbg.Stack())
+			}
+		}()
+	}
 
 	closeFiles := true
 	var kvWriter *seg.Writer
