@@ -644,7 +644,7 @@ type Stream struct {
 	limited   bool     // true if input limit is in effect
 
 	r  ByteReader
-	sr sliceReader // embedded to avoid allocation in NewStreamFromPool
+	sr sliceReader // typed `r` to avoid allocation in NewStreamFromPool
 }
 
 // Remaining returns number of bytes remaining to be read.
