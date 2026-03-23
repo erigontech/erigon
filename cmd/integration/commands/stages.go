@@ -495,9 +495,6 @@ func stageHeaders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 }
 
 func stageBodies(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
-	chainConfig := fromdb.ChainConfig(db)
-	_, engine, _, sync := newSync(ctx, db, nil /* miningConfig */, logger)
-	defer engine.Close()
 	br, bw := blocksIO(db, logger)
 	dirs := datadir.New(datadirCli)
 
@@ -506,6 +503,10 @@ func stageBodies(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) err
 			return rawdbreset.ResetBlocks(tx, db, br, bw, dirs, logger)
 		})
 	}
+
+	chainConfig := fromdb.ChainConfig(db)
+	_, engine, _, sync := newSync(ctx, db, nil /* miningConfig */, logger)
+	defer engine.Close()
 
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		s := stage(sync, tx, stages.Bodies)
