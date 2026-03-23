@@ -697,7 +697,7 @@ func NewListStream(r io.Reader, len uint64) *Stream {
 // escape to the heap, making this call allocation-free.
 func NewStreamFromPool(b []byte, inputLimit uint64) (stream *Stream) {
 	stream = streamPool.Get().(*Stream)
-	stream.sr = b // non-pointer typed field: to avoid heap-escaping of reader interface
+	stream.sr = b // typed field: to avoid heap-escaping of reader interface
 	stream.Reset(&stream.sr, inputLimit)
 	return stream
 }
