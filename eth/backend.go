@@ -140,6 +140,9 @@ import (
 	"github.com/erigontech/erigon/txnprovider/txpool"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 
+	"github.com/erigontech/erigon/arb/l1sync"
+	"github.com/erigontech/nitro-erigon/execution/erigon/ethclient"
+
 	_ "github.com/erigontech/erigon/arb/chain"     // Register Arbitrum chains
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
@@ -231,6 +234,7 @@ type Ethereum struct {
 	heimdallService     *heimdall.Service
 	stopNode            func() error
 	bgComponentsEg      errgroup.Group
+	l1syncSvc           *l1sync.L1SyncService
 }
 
 func splitAddrIntoHostAndPort(addr string) (host string, port int, err error) {
@@ -1732,7 +1736,12 @@ func (s *Ethereum) Start() error {
 		})
 	} else {
 		diaglib.Send(diaglib.SyncStageList{StagesList: diaglib.InitStagesFromList(s.stagedSync.StagesIdsList())})
-		go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockReader, hook)
+		// TODO: temporary — skip staged sync when l1sync handles execution
+		if s.config.L1Sync.L1RPC == "" {
+			go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockReader, hook)
+		} else {
+			s.logger.Info("[l1sync] staged sync loop disabled — l1sync handles execution")
+		}
 	}
 
 	if s.silkwormRPCDaemonService != nil {
@@ -1772,12 +1781,39 @@ func (s *Ethereum) Start() error {
 		})
 	}
 
+	// Start L1 sync service for Arbitrum chains (if --l1sync.rpc is set)
+	if s.config.L1Sync.L1RPC != "" {
+		l1syncCfg := l1sync.ConfigForChain(s.chainConfig.ChainName)
+		if l1syncCfg != nil {
+			l1Client, err := ethclient.DialContext(s.sentryCtx, s.config.L1Sync.L1RPC)
+			if err != nil {
+				return fmt.Errorf("[l1sync] failed to connect to L1 RPC: %w", err)
+			}
+			l1syncSvc, err := l1sync.New(s.sentryCtx, l1syncCfg, l1Client, s.config.L1Sync.BeaconURL, nil, s.chainDB, s.chainConfig, s.logger)
+			if err != nil {
+				return fmt.Errorf("[l1sync] failed to create service: %w", err)
+			}
+			l1syncSvc.Start(s.sentryCtx)
+			s.l1syncSvc = l1syncSvc
+			s.logger.Info("[l1sync] service started", "l1-rpc", s.config.L1Sync.L1RPC)
+		} else {
+			s.logger.Warn(
+				"[l1sync] configuration not found for chain; ignoring --l1sync.rpc",
+				"chain", s.chainConfig.ChainName,
+				"l1-rpc", s.config.L1Sync.L1RPC,
+			)
+		}
+	}
+
 	return nil
 }
 
 // Stop implements node.Service, terminating all internal goroutines used by the
 // Ethereum protocol.
 func (s *Ethereum) Stop() error {
+	if s.l1syncSvc != nil {
+		s.l1syncSvc.StopAndWait()
+	}
 	// Stop all the peer-related stuff first.
 	s.sentryCancel()
 	if s.unsubscribeEthstat != nil {

@@ -9,12 +9,26 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/nitro-erigon/arbnode"
 	"github.com/erigontech/nitro-erigon/arbstate/daprovider"
 	"github.com/erigontech/nitro-erigon/execution"
 	"github.com/erigontech/nitro-erigon/execution/erigon/ethclient"
 	"github.com/erigontech/nitro-erigon/util/headerreader"
 )
+
+// batchInfo holds metadata about a processed batch for in-memory finality lookups.
+type batchInfo struct {
+	seqNum             uint64
+	l1Block            uint64
+	cumulativeMsgCount uint64
+}
+
+// maxRecentBatches is the number of recent batches kept in memory for finality lookups.
+// L1 finality is ~64 blocks (~13min), batches are posted every few minutes,
+// so 128 batches is more than enough.
+const maxRecentBatches = 128
 
 type L1SyncService struct {
 	config         *Config
@@ -24,10 +38,18 @@ type L1SyncService struct {
 	dapReaders     []daprovider.Reader
 	exec           execution.ExecutionSequencer
 	db             kv.RwDB
-	logger         log.Logger
+	temporalDB     kv.TemporalRwDB  // nil when standalone
+	chainConfig    *chain.Config     // nil when standalone
+	lastBlockHeader *types.Header            // tracks parent for block chaining
+	headerCache     map[uint64]*types.Header // recent headers for BLOCKHASH lookups
+	logger          log.Logger
 
 	delayedMessagesRead uint64
+	cumulativeMsgCount  uint64
 	chunkSize           uint64
+
+	// recentBatches holds recent batch metadata for finality lookups (sorted by seqNum ascending)
+	recentBatches []batchInfo
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -41,6 +63,7 @@ func New(
 	beaconUrl string,
 	exec execution.ExecutionSequencer,
 	db kv.RwDB,
+	chainConfig *chain.Config,
 	logger log.Logger,
 ) (*L1SyncService, error) {
 	seqInbox, err := arbnode.NewSequencerInbox(l1Client, config.SequencerInboxAddr, int64(config.StartL1Block))
@@ -59,6 +82,11 @@ func New(
 		return nil, fmt.Errorf("error initializing blob reader: %w", err)
 	}
 
+	var temporalDB kv.TemporalRwDB
+	if tdb, ok := db.(kv.TemporalRwDB); ok {
+		temporalDB = tdb
+	}
+
 	return &L1SyncService{
 		config:         config,
 		sequencerInbox: seqInbox,
@@ -67,6 +95,9 @@ func New(
 		dapReaders:     []daprovider.Reader{daprovider.NewReaderForBlobReader(blobClient)},
 		exec:           exec,
 		db:             db,
+		temporalDB:     temporalDB,
+		chainConfig:    chainConfig,
+		headerCache:    make(map[uint64]*types.Header, 256),
 		logger:         logger,
 		chunkSize:      config.L1BlocksPerRequest,
 	}, nil
@@ -111,13 +142,15 @@ func (s *L1SyncService) fetchDelayedMessagesInRange(ctx context.Context, fromL1B
 func (s *L1SyncService) Start(ctx context.Context) {
 	s.ctx, s.cancel = context.WithCancel(ctx)
 
-	// Load delayedMessagesRead from DB (from the last message of the last processed batch)
+	// Load state from DB
 	lastBatch, _, err := s.GetProgress(ctx)
 	if err == nil && lastBatch > 0 {
 		dmr, err := s.getLastDelayedMessagesRead(ctx, lastBatch)
 		if err == nil {
 			s.delayedMessagesRead = dmr
 		}
+		// Load recent batches into memory for finality lookups
+		s.loadRecentBatches(ctx, lastBatch)
 	}
 
 	s.wg.Add(1)
@@ -134,6 +167,15 @@ func (s *L1SyncService) StopAndWait() {
 	s.wg.Wait()
 }
 
+// cacheHeader stores a header for BLOCKHASH lookups, evicting entries older than 256 blocks.
+func (s *L1SyncService) cacheHeader(header *types.Header) {
+	blockNum := header.Number.Uint64()
+	s.headerCache[blockNum] = header
+	if blockNum > 256 {
+		delete(s.headerCache, blockNum-256)
+	}
+}
+
 func (s *L1SyncService) pollLoop() {
 	s.logger.Info("L1 sync service started")
 	for {
@@ -145,6 +187,11 @@ func (s *L1SyncService) pollLoop() {
 		pollMore, err := s.pollOnce(s.ctx)
 		if err != nil {
 			s.logger.Warn("L1 sync poll error", "err", err)
+		}
+
+		// Update finalized/safe block tags after each poll (best-effort)
+		if err := s.updateFinality(s.ctx); err != nil {
+			s.logger.Warn("failed to update finality", "err", err)
 		}
 
 		if pollMore {
@@ -256,7 +303,7 @@ func (s *L1SyncService) pollOnce(ctx context.Context) (pollMore bool, err error)
 
 		fromL1Block = toL1Block + 1
 
-		// Log progress every 10 seconds
+		// Log progress and update finality every 10 seconds
 		if time.Since(lastLogTime) > 10*time.Second {
 			elapsed := time.Since(pollStart)
 			l1Blocks := fromL1Block - startL1Block
@@ -271,8 +318,14 @@ func (s *L1SyncService) pollOnce(ctx context.Context) (pollMore bool, err error)
 				"chunkSize", s.chunkSize,
 			)
 			lastLogTime = time.Now()
+
+			// Update finalized/safe block tags (best-effort)
+			if err := s.updateFinality(ctx); err != nil {
+				s.logger.Warn("failed to update finality", "err", err)
+			}
 		}
 	}
+
 	return false, nil
 }
 

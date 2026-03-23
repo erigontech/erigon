@@ -280,7 +280,13 @@ type Config struct {
 
 	ElBlockDownloaderV2 bool
 
-	L2RPC L2RPCConfig
+	L2RPC  L2RPCConfig
+	L1Sync L1SyncConfig
+}
+
+type L1SyncConfig struct {
+	L1RPC     string // L1 RPC URL for fetching sequencer batches and delayed messages
+	BeaconURL string // Beacon chain URL for blob resolution
 }
 
 type L2RPCConfig struct {

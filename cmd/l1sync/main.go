@@ -76,8 +76,6 @@ func run(cliCtx *cli.Context) error {
 	default:
 		cfg = l1sync.DefaultConfig
 	}
-	cfg.Enable = true
-
 	logger.Info("l1sync starting",
 		"chain", cliCtx.String(chainFlag.Name),
 		"sequencerInbox", cfg.SequencerInboxAddr,
@@ -111,6 +109,7 @@ func run(cliCtx *cli.Context) error {
 		cliCtx.String(beaconUrlFlag.Name),
 		nil, // no execution sequencer for now
 		db,
+		nil, // no chainConfig in standalone mode — execution disabled
 		logger,
 	)
 	if err != nil {
