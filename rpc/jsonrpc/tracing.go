@@ -348,22 +348,6 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 		}
 	}
 
-	var precompiles vm.PrecompiledContracts
-	if config != nil {
-		if config.BlockOverrides != nil {
-			if err := config.BlockOverrides.Override(&blockCtx); err != nil {
-				return err
-			}
-		}
-		if config.StateOverrides != nil {
-			rules = blockCtx.Rules(chainConfig)
-			precompiles = vm.ActivePrecompiledContracts(rules)
-			if err := config.StateOverrides.Override(ibs, precompiles, rules); err != nil {
-				return err
-			}
-		}
-	}
-
 	if isBorStateSyncTxn {
 		stateSyncEvents, err := api.bridgeReader.Events(ctx, block.Hash(), blockNum)
 		if err != nil {
