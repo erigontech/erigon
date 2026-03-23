@@ -300,13 +300,16 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		// In production the trie has been restored via seekCommitment/SetState;
 		// without this snapshot, replay starts from empty state and diverges.
 		var trieState []byte
-		if hph, ok := sdc.patriciaTrie.(*commitment.HexPatriciaHashed); ok {
-			trieState, err = hph.EncodeCurrentState(nil)
-			if err != nil {
-				log.Warn("[commitment] failed to encode trie state for trace", "err", err)
-				trieState = nil // non-fatal, continue without state
-				err = nil
-			}
+		switch trie := sdc.patriciaTrie.(type) {
+		case *commitment.HexPatriciaHashed:
+			trieState, err = trie.EncodeCurrentState(nil)
+		case *commitment.ConcurrentPatriciaHashed:
+			trieState, err = trie.RootTrie().EncodeCurrentState(nil)
+		}
+		if err != nil {
+			log.Warn("[commitment] failed to encode trie state for trace", "err", err)
+			trieState = nil // non-fatal, continue without state
+			err = nil
 		}
 
 		defer func() {
