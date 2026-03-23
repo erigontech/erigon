@@ -19,7 +19,7 @@ package chaos_monkey
 import (
 	"fmt"
 
-	"math/rand"
+	"math/rand/v2"
 
 	"github.com/erigontech/erigon/execution/protocol/rules"
 )
