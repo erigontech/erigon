@@ -253,10 +253,11 @@ func determineFullGloasRoots(blocks []*cltypes.SignedBeaconBlock, extraBlock *cl
 	return fullRoots
 }
 
-// trimAtMissingEnvelope trims the block list at the first definitively FULL GLOAS block
-// whose envelope was not obtained. A block is definitively FULL when the next block's
-// bid.ParentBlockHash matches this block's bid.BlockHash (confirmed by lookahead).
-// Blocks without a lookahead (last block, no extraBlock) are treated optimistically.
+// trimAtMissingEnvelope trims the block list at the first FULL GLOAS block whose envelope
+// was not obtained. A block is definitively FULL when the next block's bid.ParentBlockHash
+// matches this block's bid.BlockHash (confirmed by lookahead). Blocks without a lookahead
+// (last block in batch, no extraBlock) are conservatively trimmed if their envelope is
+// missing, since OnBlock would fail with ErrParentEnvelopePending for the next block anyway.
 func trimAtMissingEnvelope(blocks []*cltypes.SignedBeaconBlock, extraBlock *cltypes.SignedBeaconBlock, envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) []*cltypes.SignedBeaconBlock {
 	for i, block := range blocks {
 		if block.Version() < clparams.GloasVersion {
@@ -266,29 +267,36 @@ func trimAtMissingEnvelope(blocks []*cltypes.SignedBeaconBlock, extraBlock *clty
 		if bid == nil || bid.Message == nil {
 			continue
 		}
+
+		root, err := block.Block.HashSSZ()
+		if err != nil {
+			continue
+		}
+		_, hasEnvelope := envelopes[common.Hash(root)]
+
+		// Determine if this block is FULL via lookahead
 		var nextBlock *cltypes.SignedBeaconBlock
 		if i+1 < len(blocks) {
 			nextBlock = blocks[i+1]
 		} else {
 			nextBlock = extraBlock
 		}
-		if nextBlock == nil {
-			continue
-		}
-		nextBid := nextBlock.Block.Body.GetSignedExecutionPayloadBid()
-		if nextBid == nil || nextBid.Message == nil {
-			continue
-		}
-		if nextBid.Message.ParentBlockHash != bid.Message.BlockHash {
-			continue
-		}
-		// Definitively FULL — envelope is required
-		root, err := block.Block.HashSSZ()
-		if err != nil {
-			continue
-		}
-		if _, ok := envelopes[common.Hash(root)]; !ok {
-			log.Debug("[ForwardBeaconDownloader] FULL block envelope missing, trimming batch",
+
+		if nextBlock != nil {
+			nextBid := nextBlock.Block.Body.GetSignedExecutionPayloadBid()
+			if nextBid != nil && nextBid.Message != nil && nextBid.Message.ParentBlockHash == bid.Message.BlockHash {
+				// Definitively FULL — envelope is required
+				if !hasEnvelope {
+					log.Debug("[ForwardBeaconDownloader] FULL block envelope missing, trimming batch",
+						"slot", block.Block.Slot, "blocksBeforeTrim", len(blocks), "trimmedAt", i)
+					return blocks[:i]
+				}
+			}
+		} else if !hasEnvelope {
+			// No lookahead: conservatively trim if envelope is missing.
+			// If this block turns out to be FULL, the next batch would fail
+			// in OnBlock. If EMPTY, trimming is harmless — it will be re-fetched.
+			log.Debug("[ForwardBeaconDownloader] last block envelope missing (no lookahead), trimming batch",
 				"slot", block.Block.Slot, "blocksBeforeTrim", len(blocks), "trimmedAt", i)
 			return blocks[:i]
 		}
