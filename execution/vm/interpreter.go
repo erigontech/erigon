@@ -217,13 +217,6 @@ func (ctx *CallContext) Gas() mdgas.MdGas {
 	}
 }
 
-// escrowStateGas hands the entire state gas reservoir to a child frame and
-// returns the parent's saved value.  After the child returns, call
-// settleStateGas to restore or adopt the child's leftover reservoir.
-func (ctx *CallContext) escrowStateGas() {
-	ctx.stateGas = 0
-}
-
 // settleStateGas restores the state gas reservoir after a child frame.
 // On success the parent adopts the child's remaining reservoir.
 // On error handleFrameRevert sets returnGas.State = initialChildState + spill

@@ -1002,7 +1002,7 @@ func opCreate(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	stackvalue := size
 
 	scope.useGas(gas.Regular, evm.Config().Tracer, tracing.GasChangeCallContractCreation)
-	scope.escrowStateGas()
+	scope.stateGas = 0 // escrow: hand reservoir to child via callGas
 
 	res, addr, returnGas, suberr := evm.Create(scope.Contract.Address(), input, gas, value, false)
 
@@ -1068,7 +1068,7 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 	scope.useGas(gas.Regular, evm.Config().Tracer, tracing.GasChangeCallContractCreation2)
 	// reuse size int for stackvalue
 	stackValue := size
-	scope.escrowStateGas()
+	scope.stateGas = 0 // escrow: hand reservoir to child via callGas
 
 	res, addr, returnGas, suberr := evm.Create2(scope.Contract.Address(), input, gas, endowment, &salt, false)
 
@@ -1134,7 +1134,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		}
 	}
 
-	scope.escrowStateGas()
+	scope.stateGas = 0 // escrow: hand reservoir to child via callGas
 
 	ret, returnGas, err := evm.Call(scope.Contract.Address(), toAddr, args, gas, value, false /* bailout */)
 
@@ -1185,7 +1185,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 		}
 	}
 
-	scope.escrowStateGas()
+	scope.stateGas = 0 // escrow: hand reservoir to child via callGas
 
 	ret, returnGas, err := evm.CallCode(scope.Contract.Address(), toAddr, args, gas, value)
 	if err != nil {
@@ -1227,7 +1227,7 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
-	scope.escrowStateGas()
+	scope.stateGas = 0 // escrow: hand reservoir to child via callGas
 
 	ret, returnGas, err := evm.DelegateCall(scope.Contract.addr, scope.Contract.caller, toAddr, args, scope.Contract.value, gas)
 	if err != nil {
@@ -1269,7 +1269,7 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
-	scope.escrowStateGas()
+	scope.stateGas = 0 // escrow: hand reservoir to child via callGas
 
 	ret, returnGas, err := evm.StaticCall(scope.Contract.Address(), toAddr, args, gas)
 	if err != nil {
