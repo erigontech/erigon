@@ -605,18 +605,18 @@ func (s *simulator) simulateBlock(
 		if !latest {
 			// Restore the commitment state at the start of the simulated block using historical state reader.
 			sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
-			// In a multi-block simulation the trie may already be at parent.Root (built by the
-			// previous simulation step).  SeekCommitment would overwrite that correct trie state
-			// with the canonical chain's trie state for the same block number, producing a wrong
-			// stateRoot for the 2nd and subsequent simulated blocks.  Skip it when the trie is
-			// already correct.
-			currentTrieRoot, trieErr := sharedDomains.GetCommitmentContext().Trie().RootHash()
-			if trieErr != nil || parent.Root != common.BytesToHash(currentTrieRoot) {
+			// In a multi-block simulation (len(ancestors) > 0) the trie is already at parent.Root
+			// because the previous simulation step left it there.  Calling SeekCommitment would
+			// overwrite that correct trie state with the canonical chain's trie state for the same
+			// block number, producing a wrong stateRoot for the 2nd and subsequent simulated blocks.
+			if len(ancestors) == 0 {
+				// First simulated block: load the trie state from commitment history.
 				commitTxNum, _, err = sharedDomains.SeekCommitment(context.Background(), tx)
 				if err != nil {
 					return nil, nil, err
 				}
 			} else {
+				// Subsequent simulated blocks: trie is already correct from the previous step.
 				// SeekCommitment always returns commitTxNum = minTxNum - 1 (off-by-1, expected).
 				commitTxNum = minTxNum - 1
 			}
