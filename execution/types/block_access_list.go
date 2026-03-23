@@ -858,14 +858,22 @@ func (bal BlockAccessList) Validate() error {
 }
 
 // ValidateMaxItems checks the EIP-7928 constraint: bal_items <= blockGasLimit / BalItemCost
-// where bal_items = count(addresses) + count(storage keys across all accounts).
+// where bal_items = count(addresses) + count(unique storage keys across all accounts).
+// A slot that appears in both StorageChanges and StorageReads is counted once.
 func (bal BlockAccessList) ValidateMaxItems(blockGasLimit uint64) error {
 	maxItems := blockGasLimit / BalItemCost
 	var items uint64
 	for _, ac := range bal {
 		items++ // each address counts as 1 item
-		items += uint64(len(ac.StorageChanges))
-		items += uint64(len(ac.StorageReads))
+		// Collect unique storage keys across changes and reads.
+		uniqueSlots := make(map[accounts.StorageKey]struct{})
+		for _, sc := range ac.StorageChanges {
+			uniqueSlots[sc.Slot] = struct{}{}
+		}
+		for _, key := range ac.StorageReads {
+			uniqueSlots[key] = struct{}{}
+		}
+		items += uint64(len(uniqueSlots))
 	}
 	if items > maxItems {
 		return fmt.Errorf("block access list too large: %d items > %d max (gas limit %d / %d)", items, maxItems, blockGasLimit, BalItemCost)
