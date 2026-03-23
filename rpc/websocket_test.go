@@ -265,6 +265,21 @@ func wsPingTestHandler(t *testing.T, conn *websocket.Conn, shutdown, sendPing <-
 		return
 	}
 
+	// coder/websocket requires a concurrent conn.Read() for conn.Ping() to work:
+	// pong frames are only processed (and the waiting Ping() unblocked) when the
+	// read pump is actively reading. Run a background goroutine for this purpose.
+	readCtx, readCancel := context.WithCancel(context.Background())
+	defer readCancel()
+	go func() {
+		for {
+			typ, msg, err := conn.Read(readCtx)
+			if err != nil {
+				return
+			}
+			t.Logf("server got message (%s): %q", typ, msg)
+		}
+	}()
+
 	// Write messages.
 	var timer = time.NewTimer(0)
 	defer timer.Stop()
