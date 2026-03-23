@@ -1118,7 +1118,12 @@ func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request
 			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 		}
 		// check commitments
+		// [Modified in Gloas:EIP7732] BlobKzgCommitments is nil in GLOAS blocks (commitments are in the bid).
+		// Blinded block flow is not used in GLOAS, but guard defensively.
 		blockCommitments := signedBlindedBlock.Block.Body.BlobKzgCommitments
+		if blockCommitments == nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("blinded block missing blob_kzg_commitments (not supported for GLOAS blocks)"))
+		}
 		if len(blobsBundle.Commitments) != blockCommitments.Len() {
 			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("commitments length mismatch"))
 		}
