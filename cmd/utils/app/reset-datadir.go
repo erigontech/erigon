@@ -90,7 +90,7 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 	}
 	defer unlock()
 
-	err = snapcfg.LoadPreverified(cliCtx.Context, PreverifiedFlag.Get(cliCtx), &dirs)
+	err = snapcfg.LoadPreverified(cliCtx.Context, PreverifiedFlag.Get(cliCtx), &dirs, chainName)
 	if err != nil {
 		return
 	}

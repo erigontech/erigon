@@ -91,3 +91,30 @@ All log messages follow a consistent structured format with key-value pairs for 
 The sync engine uses a sophisticated prefix system to identify stage context.
 
 The prefix format includes stage position and total count (e.g., "1/10 Headers") for easy identification of sync progress.
+
+## Log Directory Permissions
+
+Erigon applies secure default permissions to the log directory and log files to protect potentially sensitive operational data.
+
+**Default permissions:**
+
+* The `logs/` directory is created with permissions `0700` (owner read/write/execute only).
+* Individual log files are created with permissions `0640` (owner read/write, group read-only).
+
+**Existing directories with broader permissions:**
+
+If the `logs/` directory already exists with permissions that grant access to group or world (e.g., `0755` or `0775`), Erigon will emit a warning at startup but will continue to operate normally. The warning looks like:
+
+```
+WARN log directory has broader permissions than recommended  path=<datadir>/logs
+```
+
+**Enabling group access (e.g., for log aggregation):**
+
+If you need a log aggregation agent such as Loki, Filebeat, or Promtail to read Erigon logs, grant read and execute permissions to the group:
+
+```bash
+chmod 750 <datadir>/logs
+```
+
+Make sure the aggregation agent's user is a member of the same group that owns the directory.

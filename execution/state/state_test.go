@@ -46,6 +46,73 @@ func toAddr(a []byte) accounts.Address {
 	return accounts.InternAddress(common.BytesToAddress(a))
 }
 
+// recordingWriter wraps NoopWriter and captures WriteAccountStorage calls.
+type recordingWriter struct {
+	NoopWriter
+	storageWrites []struct{ orig, val uint256.Int }
+}
+
+func (rw *recordingWriter) WriteAccountStorage(_ accounts.Address, _ uint64, _ accounts.StorageKey, orig, val uint256.Int) error {
+	rw.storageWrites = append(rw.storageWrites, struct{ orig, val uint256.Int }{orig, val})
+	return nil
+}
+
+// TestFinalizeTxDoesNotSkipStorageRevertToBlockOrigin is a regression test for a bug
+// where FinalizeTx used blockOriginStorage (block-start value) instead of originStorage
+// (last-written value) to decide whether a storage write could be skipped.
+//
+// Scenario: slot starts at A. Tx1 writes A→B (FinalizeTx stores B in MDBX, sets
+// originStorage=B). Tx2 writes B→A (reverts to block-start). Old code compared
+// value(A) == blockOriginStorage(A) and skipped the write, leaving MDBX with B.
+// Fixed code compares value(A) != originStorage(B) and correctly writes A.
+func TestFinalizeTxDoesNotSkipStorageRevertToBlockOrigin(t *testing.T) {
+	t.Parallel()
+
+	_, tx, domains := NewTestRwTx(t)
+
+	addr := toAddr([]byte("acct"))
+	key := accounts.ZeroKey
+	valA := *uint256.NewInt(1) // block-start value
+	valB := *uint256.NewInt(2)
+
+	// Write block-start state: account exists with slot=A.
+	txNum := uint64(1)
+	err := rawdbv3.TxNums.Append(tx, 1, 1)
+	require.NoError(t, err)
+	domains.SetTxNum(txNum)
+	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
+	setup := New(NewReaderV3(domains.AsGetter(tx)))
+	setup.CreateAccount(addr, true)
+	setup.SetState(addr, key, valA)
+	err = setup.FinalizeTx(&chain.Rules{}, w)
+	require.NoError(t, err)
+	err = setup.CommitBlock(&chain.Rules{}, w)
+	require.NoError(t, err)
+
+	// IBS for the next block — reads block-start state (slot=A) from domains.
+	ibs := New(NewReaderV3(domains.AsGetter(tx)))
+
+	// Tx1: A → B.
+	ibs.SetState(addr, key, valB)
+	rw1 := &recordingWriter{}
+	err = ibs.FinalizeTx(&chain.Rules{}, rw1)
+	require.NoError(t, err)
+	require.Len(t, rw1.storageWrites, 1, "tx1 must emit a storage write")
+	require.Equal(t, valB, rw1.storageWrites[0].val, "tx1 must write B")
+
+	// Tx2: B → A (reverts to the block-start value).
+	ibs.SetState(addr, key, valA)
+	rw2 := &recordingWriter{}
+	err = ibs.FinalizeTx(&chain.Rules{}, rw2)
+	require.NoError(t, err)
+
+	// Regression: old code used blockOriginStorage[key]==A as origin, saw
+	// value==A, and silently skipped the write, leaving MDBX with B.
+	require.Len(t, rw2.storageWrites, 1, "tx2 must emit a storage write (A→B→A must not be skipped)")
+	require.Equal(t, valA, rw2.storageWrites[0].val, "tx2 must write A")
+	require.Equal(t, valB, rw2.storageWrites[0].orig, "tx2 origin must be B (last written value)")
+}
+
 func TestNull(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)

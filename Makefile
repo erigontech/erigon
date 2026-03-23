@@ -65,16 +65,11 @@ ifeq ($(CGO_CXXFLAGS),)
 	CGO_CXXFLAGS += -g
 	CGO_CXXFLAGS += -O2
 endif
+export CGO_CXXFLAGS
 
 BUILD_TAGS =
 
-ifneq ($(shell $(CURDIR)/node/silkworm/silkworm_compat_check.sh),)
-	BUILD_TAGS := $(BUILD_TAGS),nosilkworm
-endif
-
 override BUILD_TAGS := $(BUILD_TAGS),$(EXTRA_BUILD_TAGS)
-
-GOPRIVATE = github.com/erigontech/silkworm-go
 
 PACKAGE = github.com/erigontech/erigon
 
@@ -88,9 +83,17 @@ GO_BUILD_ENV = GOARCH=${GOARCH} ${CPU_ARCH} CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLA
 GOBUILD = $(GO_BUILD_ENV) $(GO) build $(GO_RELEASE_FLAGS) $(GO_FLAGS) -tags $(BUILD_TAGS)
 DLV_GO_FLAGS := -gcflags='all="-N -l" -trimpath=false'
 GO_BUILD_DEBUG = $(GO_BUILD_ENV) CGO_CFLAGS="$(CGO_CFLAGS) -DMDBX_DEBUG=1" $(GO) build $(DLV_GO_FLAGS) $(GO_FLAGS) -tags $(BUILD_TAGS),debug
-GOTEST = $(GO_BUILD_ENV) CGO_CXXFLAGS="$(CGO_CXXFLAGS)" GODEBUG=cgocheck=0 GOTRACEBACK=1 $(GO) test $(GO_FLAGS) ./...
+GODEBUG ?= cgocheck=0
 
-GOINSTALL = CGO_CXXFLAGS="$(CGO_CXXFLAGS)" go install -trimpath
+# Defaults suitable for local use on a reasonable machine; adjust as conditions
+# change. CI can override via GO_FLAGS.
+default_test_timeout      := 20m
+default_test_race_timeout := 60m
+
+GOTEST_PACKAGES = ./...
+GOTEST = $(GO_BUILD_ENV) GODEBUG=$(GODEBUG) GOTRACEBACK=1 $(GO) test $(GO_FLAGS) $(GOTEST_PACKAGES)
+
+GOINSTALL = go install -trimpath
 
 OS = $(shell uname -s)
 ARCH = $(shell uname -m)
@@ -214,23 +217,72 @@ else
 endif
 
 test-filtered:
-	(set -o pipefail && $(GOTEST) | tee run.log | (grep -v -e '^=== CONT ' -e '^=== RUN ' -e '^=== PAUSE ' -e '^PASS' -e '--- PASS:' || true))
+	@_rd=""; \
+	_cleanup() { [ -n "$$_rd" ] && hdiutil detach -force "$$_rd" >/dev/null 2>&1 || true; }; \
+	trap _cleanup EXIT; \
+	if [ -z "$${ERIGON_EXECUTION_TESTS_TMPDIR:-}" ] && [ "$$(uname -s)" = "Darwin" ]; then \
+		_rd=$$(bash tools/create-ramdisk) || true; \
+		if [ -n "$$_rd" ]; then \
+			export ERIGON_EXECUTION_TESTS_TMPDIR="$$_rd"; \
+			echo "ramdisk: $$_rd"; \
+		fi; \
+	fi; \
+	(set -o pipefail && $(GOTEST) | ./tools/filter-test-output | tee run.log)
 
-# Rather than add more special cases here, I'd suggest using GO_FLAGS and calling `make test-filtered GO_FLAGS='-cool flag' or `make test GO_FLAGS='-cool flag'`.
 test-short: override GO_FLAGS += -short -failfast
 test-short: test-filtered
 
-test-all: override GO_FLAGS += --timeout 60m -coverprofile=coverage-test-all.out
+test-all: override GO_FLAGS := -timeout $(default_test_timeout) $(GO_FLAGS)
 test-all: test-filtered
 
-test-all-race: override GO_FLAGS += --timeout 60m -race
+## test-bench:                         check the benchmarks compile and run
+test-bench: override GO_FLAGS += -run=^$$ -bench=. -benchtime=1x -short -timeout=5m
+test-bench:
+	$(GOTEST)
+
+test-all-race: override GO_FLAGS := -timeout $(default_test_race_timeout) $(GO_FLAGS) -race
 test-all-race: test-filtered
+
+## check-generated:                     verify go.mod/go.sum are tidy
+check-generated:
+	@go mod tidy
+	@if ! git diff --exit-code -- go.mod go.sum; then \
+		echo "ERROR: go.mod or go.sum is out of date. Run 'go mod tidy' and commit."; exit 1; fi
+
+## check-large-files BASE=<ref>:        check for files >1MB added vs BASE (default: main)
+check-large-files:
+	@base="${BASE:-main}"; \
+	found=0; \
+	while IFS= read -r file; do \
+		size=$$(git cat-file -s "HEAD:$$file" 2>/dev/null) || continue; \
+		if [ "$$size" -gt 1048576 ]; then \
+			echo "$$(awk "BEGIN{printf \"%.1f\", $$size/1048576}") MB: $$file"; \
+			found=1; \
+		fi; \
+	done < <(git diff --diff-filter=ACMR --name-only "$$base"...HEAD); \
+	if [ "$$found" -eq 1 ]; then \
+		echo "ERROR: Files exceeding 1 MB found."; \
+		exit 1; \
+	fi
+
+## test-group TEST_GROUP=<name>			run a named CI test group
+test-group: override GOTEST_PACKAGES = $(shell go list ./... | ./tools/test-groups packages $(TEST_GROUP))
+test-group: test-filtered
+
+test-sonar-coverage: override GO_FLAGS += -timeout $(default_test_race_timeout) -coverprofile=coverage-test-all.out
+test-sonar-coverage: test-filtered
+
+## test-rpc DATADIR=<path> [CHAIN=mainnet]		run QA RPC integration tests locally against a synced datadir
+test-rpc: rpcdaemon integration
+	.github/workflows/scripts/run_rpc_tests_local.sh \
+		$(if $(DATADIR),--datadir $(DATADIR)) \
+		$(if $(CHAIN),--chain $(CHAIN))
 
 ## test-hive						run the hive tests locally off nektos/act workflows simulator
 test-hive:
 	@if ! command -v act >/dev/null 2>&1; then \
 		echo "act command not found in PATH, please source it in PATH. If nektosact is not installed, install it by visiting https://nektosact.com/installation/index.html"; \
-	elif [ -z "$(GITHUB_TOKEN)"]; then \
+	elif [ -z "$(GITHUB_TOKEN)" ]; then \
 		echo "Please export GITHUB_TOKEN var in the environment" ; \
 	elif [ "$(SUITE)" = "eest" ]; then \
 		act -j test-hive-eest -s GITHUB_TOKEN=$(GITHUB_TOKEN) ; \
@@ -244,12 +296,8 @@ eest-bal:
 	rm -rf "temp/eest-hive-$(SHORT_COMMIT)" && mkdir "temp/eest-hive-$(SHORT_COMMIT)"
 	cd "temp/eest-hive-$(SHORT_COMMIT)" && git clone https://github.com/ethereum/hive
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && \
-	$(if $(filter Darwin,$(UNAME)), \
-		sed -i '' "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
-		sed -i '' "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile, \
-		sed -i "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
-		sed -i "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile \
-	)
+		sed -i'' -e "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
+		sed -i'' -e "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-engine,".*amsterdam.*",--sim.buildarg branch=hive --sim.buildarg branch=tests-bal@v5.1.0 --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/bal%40v5.1.0/fixtures_bal.tar.gz)
@@ -284,12 +332,8 @@ hive-local:
 	cd "temp/hive-local-$(SHORT_COMMIT)" && git clone https://github.com/ethereum/hive
 
 	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && \
-	$(if $(filter Darwin,$(UNAME)), \
-		sed -i '' "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
-		sed -i '' "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile, \
-		sed -i "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
-		sed -i "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile \
-	)
+		sed -i'' -e "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
+		sed -i'' -e "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile
 	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log 
 	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
 	cd "temp/hive-local-$(SHORT_COMMIT)/hive" && $(call run_suite,engine,exchange-capabilities)
@@ -307,13 +351,9 @@ eest-hive:
 	rm -rf "temp/eest-hive-$(SHORT_COMMIT)" && mkdir "temp/eest-hive-$(SHORT_COMMIT)"
 	cd "temp/eest-hive-$(SHORT_COMMIT)" && git clone https://github.com/ethereum/hive
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && \
-	$(if $(filter Darwin,$(UNAME)), \
-		sed -i '' "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
-		sed -i '' "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile, \
-		sed -i "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
-		sed -i "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile \
-	)
-	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log 
+		sed -i'' -e "s/^ARG baseimage=erigontech\/erigon$$/ARG baseimage=test\/erigon/" clients/erigon/Dockerfile && \
+		sed -i'' -e "s/^ARG tag=main-latest$$/ARG tag=$(SHORT_COMMIT)/" clients/erigon/Dockerfile
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-engine,"",--sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/${EEST_VERSION}/fixtures_develop.tar.gz)
 
@@ -346,14 +386,16 @@ kurtosis-cleanup:
 	@echo "-----------------------------------\n"
 	kurtosis enclave rm -f makefile-kurtosis-testnet
 
-## lintci:                            run golangci-lint linters
+## lintci:                            run golangci-lint linters (full run, used in CI; skips fast-only and mod tidy)
 lintci:
-	@CGO_CXXFLAGS="$(CGO_CXXFLAGS)" ./tools/golangci_lint.sh
+	@go tool golangci-lint run --config ./.golangci.yml
+	@$(MAKE) check-generated
 
-## lint:                              run all linters
-lint: 
-	@./tools/golangci_lint.sh
-	@./tools/mod_tidy_check.sh
+## lint:                              run all linters (fast-only first for quick feedback, then full)
+lint:
+	@go tool golangci-lint run --config ./.golangci.yml --fast-only
+	@go tool golangci-lint run --config ./.golangci.yml
+	@$(MAKE) check-generated
 
 ## tidy:                              `go mod tidy`
 tidy:
@@ -500,7 +542,6 @@ DIST ?= $(CURDIR)/build/dist
 .PHONY: install
 install:
 	mkdir -p "$(DIST)"
-	cp -f "$$($(CURDIR)/node/silkworm/silkworm_lib_path.sh)" "$(DIST)"
 	cp -f "$(GOBIN)/"* "$(DIST)"
 	@echo "Copied files to $(DIST):"
 	@ls -al "$(DIST)"

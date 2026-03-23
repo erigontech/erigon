@@ -29,6 +29,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/prysmaticlabs/go-bitfield"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
@@ -79,6 +80,10 @@ type Sentinel struct {
 	peerDasStateReader peerdasstate.PeerDasStateReader
 
 	metadataLock sync.Mutex
+	// connectSem serializes concurrent Host.Connect() and Peerstore().RemovePeer()
+	// calls to work around a data race in libp2p v0.37.2's memoryAddrBook between
+	// addAddrsUnlocked() and the background gc() goroutine (see #19603).
+	connectSem *semaphore.Weighted
 }
 
 func (s *Sentinel) SetStatus(status *cltypes.Status) {
@@ -112,6 +117,7 @@ func New(
 		dataColumnStorage:  dataColumnStorage,
 		peerDasStateReader: peerDasStateReader,
 		p2p:                p2p,
+		connectSem:         semaphore.NewWeighted(int64(goRoutinesOpeningPeerConnections)),
 	}
 
 	// Setup discovery

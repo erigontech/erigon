@@ -36,15 +36,6 @@ import (
 
 var incompleteNodeURL = regexp.MustCompile("(?i)^(?:enode://)?([0-9a-f]+)$")
 
-// MustParseV4 parses a node URL. It panics if the URL is not valid.
-func MustParseV4(rawurl string) *Node {
-	n, err := ParseV4(rawurl)
-	if err != nil {
-		panic("invalid node URL: " + err.Error())
-	}
-	return n
-}
-
 // ParseV4 parses a node URL.
 //
 // There are two basic forms of node URLs:

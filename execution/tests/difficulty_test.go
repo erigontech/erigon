@@ -30,10 +30,10 @@ import (
 )
 
 func TestDifficulty(t *testing.T) {
-	dt := new(testMatcher)
+	dt := new(testutil.TestMatcher)
 	dir := filepath.Join(legacyDir, "DifficultyTests")
 
-	dt.walk(t, dir, func(t *testing.T, name string, superTest map[string]json.RawMessage) {
+	dt.Walk(t, dir, func(t *testing.T, name string, superTest map[string]json.RawMessage) {
 		for fork, rawTests := range superTest {
 			if fork == "_info" {
 				continue
@@ -53,7 +53,7 @@ func TestDifficulty(t *testing.T) {
 			for subname, subtest := range tests {
 				key := fmt.Sprintf("%s/%s", fork, subname)
 				t.Run(key, func(t *testing.T) {
-					if err := dt.checkFailure(t, subtest.Run(cfg)); err != nil {
+					if err := dt.CheckFailure(t, subtest.Run(cfg)); err != nil {
 						t.Error(err)
 					}
 				})

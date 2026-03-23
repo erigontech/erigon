@@ -24,7 +24,9 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -50,6 +52,7 @@ type stubExecutionServer struct {
 	getHeaderFunc         func(ctx context.Context, in *executionproto.GetSegmentRequest) (*executionproto.GetHeaderResponse, error)
 	assembleBlockFunc     func(ctx context.Context, in *executionproto.AssembleBlockRequest) (*executionproto.AssembleBlockResponse, error)
 	getAssembledBlockFunc func(ctx context.Context, in *executionproto.GetAssembledBlockRequest) (*executionproto.GetAssembledBlockResponse, error)
+	getForkChoiceFunc     func(ctx context.Context, in *emptypb.Empty) (*executionproto.ForkChoice, error)
 }
 
 func (s *stubExecutionServer) GetHeader(ctx context.Context, in *executionproto.GetSegmentRequest) (*executionproto.GetHeaderResponse, error) {
@@ -73,6 +76,13 @@ func (s *stubExecutionServer) GetAssembledBlock(ctx context.Context, in *executi
 	return &executionproto.GetAssembledBlockResponse{}, nil
 }
 
+func (s *stubExecutionServer) GetForkChoice(ctx context.Context, in *emptypb.Empty) (*executionproto.ForkChoice, error) {
+	if s.getForkChoiceFunc != nil {
+		return s.getForkChoiceFunc(ctx, in)
+	}
+	return &executionproto.ForkChoice{}, nil
+}
+
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
@@ -82,25 +92,25 @@ func (s *stubExecutionServer) GetAssembledBlock(ctx context.Context, in *executi
 func allForksChainConfig() *chain.Config {
 	return &chain.Config{
 		ChainID:                       big.NewInt(1337),
-		HomesteadBlock:                big.NewInt(0),
-		TangerineWhistleBlock:         big.NewInt(0),
-		SpuriousDragonBlock:           big.NewInt(0),
-		ByzantiumBlock:                big.NewInt(0),
-		ConstantinopleBlock:           big.NewInt(0),
-		PetersburgBlock:               big.NewInt(0),
-		IstanbulBlock:                 big.NewInt(0),
-		MuirGlacierBlock:              big.NewInt(0),
-		BerlinBlock:                   big.NewInt(0),
-		LondonBlock:                   big.NewInt(0),
-		ArrowGlacierBlock:             big.NewInt(0),
-		GrayGlacierBlock:              big.NewInt(0),
+		HomesteadBlock:                common.NewUint64(0),
+		TangerineWhistleBlock:         common.NewUint64(0),
+		SpuriousDragonBlock:           common.NewUint64(0),
+		ByzantiumBlock:                common.NewUint64(0),
+		ConstantinopleBlock:           common.NewUint64(0),
+		PetersburgBlock:               common.NewUint64(0),
+		IstanbulBlock:                 common.NewUint64(0),
+		MuirGlacierBlock:              common.NewUint64(0),
+		BerlinBlock:                   common.NewUint64(0),
+		LondonBlock:                   common.NewUint64(0),
+		ArrowGlacierBlock:             common.NewUint64(0),
+		GrayGlacierBlock:              common.NewUint64(0),
 		TerminalTotalDifficulty:       big.NewInt(0),
 		TerminalTotalDifficultyPassed: true,
-		ShanghaiTime:                  big.NewInt(0),
-		CancunTime:                    big.NewInt(0),
-		PragueTime:                    big.NewInt(0),
-		OsakaTime:                     big.NewInt(0),
-		AmsterdamTime:                 big.NewInt(0),
+		ShanghaiTime:                  common.NewUint64(0),
+		CancunTime:                    common.NewUint64(0),
+		PragueTime:                    common.NewUint64(0),
+		OsakaTime:                     common.NewUint64(0),
+		AmsterdamTime:                 common.NewUint64(0),
 		Ethash:                        new(chain.EthashConfig),
 	}
 }
@@ -592,6 +602,86 @@ func TestBuildBlockV1(t *testing.T) {
 		var rpcErr *rpc.InvalidParamsError
 		require.ErrorAs(t, err, &rpcErr)
 		assert.Contains(t, rpcErr.Message, "withdrawals before Shanghai")
+	})
+}
+
+func TestForkchoiceUpdatedV2PayloadAttributesWithdrawalsValidation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("missing withdrawals for Shanghai returns invalid payload attributes", func(t *testing.T) {
+		forkchoiceState := &engine_types.ForkChoiceState{
+			HeadHash:           common.Hash{0x1},
+			SafeBlockHash:      common.Hash{0x2},
+			FinalizedBlockHash: common.Hash{0x3},
+		}
+		srv := NewEngineServer(
+			log.New(),
+			preCancunChainConfig(),
+			direct.NewExecutionClientDirect(&stubExecutionServer{
+				getForkChoiceFunc: func(context.Context, *emptypb.Empty) (*executionproto.ForkChoice, error) {
+					return &executionproto.ForkChoice{
+						HeadBlockHash:      gointerfaces.ConvertHashToH256(forkchoiceState.HeadHash),
+						SafeBlockHash:      gointerfaces.ConvertHashToH256(forkchoiceState.SafeBlockHash),
+						FinalizedBlockHash: gointerfaces.ConvertHashToH256(forkchoiceState.FinalizedBlockHash),
+					}, nil
+				},
+			}),
+			nil,
+			false,
+			true,
+			true,
+			nil,
+			0,
+			0,
+		)
+
+		resp, err := srv.forkchoiceUpdated(context.Background(), forkchoiceState, &engine_types.PayloadAttributes{
+			Timestamp:             hexutil.Uint64(1001),
+			PrevRandao:            common.Hash{0xaa},
+			SuggestedFeeRecipient: common.HexToAddress("0x1111111111111111111111111111111111111111"),
+			Withdrawals:           nil,
+		}, clparams.CapellaVersion)
+		require.Nil(t, resp)
+		require.Error(t, err)
+		require.Equal(t, -38003, err.(rpc.Error).ErrorCode())
+	})
+
+	t.Run("withdrawals before Shanghai returns invalid payload attributes", func(t *testing.T) {
+		forkchoiceState := &engine_types.ForkChoiceState{
+			HeadHash:           common.Hash{0x4},
+			SafeBlockHash:      common.Hash{0x5},
+			FinalizedBlockHash: common.Hash{0x6},
+		}
+		srv := NewEngineServer(
+			log.New(),
+			preShanghaiChainConfig(),
+			direct.NewExecutionClientDirect(&stubExecutionServer{
+				getForkChoiceFunc: func(context.Context, *emptypb.Empty) (*executionproto.ForkChoice, error) {
+					return &executionproto.ForkChoice{
+						HeadBlockHash:      gointerfaces.ConvertHashToH256(forkchoiceState.HeadHash),
+						SafeBlockHash:      gointerfaces.ConvertHashToH256(forkchoiceState.SafeBlockHash),
+						FinalizedBlockHash: gointerfaces.ConvertHashToH256(forkchoiceState.FinalizedBlockHash),
+					}, nil
+				},
+			}),
+			nil,
+			false,
+			true,
+			true,
+			nil,
+			0,
+			0,
+		)
+
+		resp, err := srv.forkchoiceUpdated(context.Background(), forkchoiceState, &engine_types.PayloadAttributes{
+			Timestamp:             hexutil.Uint64(1001),
+			PrevRandao:            common.Hash{0xaa},
+			SuggestedFeeRecipient: common.HexToAddress("0x1111111111111111111111111111111111111111"),
+			Withdrawals:           make([]*types.Withdrawal, 0),
+		}, clparams.CapellaVersion)
+		require.Nil(t, resp)
+		require.Error(t, err)
+		require.Equal(t, -38003, err.(rpc.Error).ErrorCode())
 	})
 }
 
