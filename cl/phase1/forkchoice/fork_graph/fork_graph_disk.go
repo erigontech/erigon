@@ -208,7 +208,7 @@ func (f *forkGraphDisk) isBlockRootTheCurrentState(blockRoot common.Hash) bool {
 // Add a new node and edge to the graph
 // parentFullState: if non-nil, use this as the starting state instead of looking up from block_states.
 // [Modified in Gloas:EIP7732] Allows passing execution_payload_states when parent is FULL.
-func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool, parentFullState *state.CachingBeaconState, latestBlockHashOverride common.Hash) (*state.CachingBeaconState, ChainSegmentInsertionResult, error) {
+func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool, parentFullState *state.CachingBeaconState) (*state.CachingBeaconState, ChainSegmentInsertionResult, error) {
 	block := signedBlock.Block
 	blockRoot, err := block.HashSSZ()
 	if err != nil {
@@ -236,20 +236,6 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		newState, err = f.getState(block.ParentRoot, false, true)
 		if err != nil {
 			return nil, LogisticError, fmt.Errorf("AddChainSegment: %w, parentRoot: %x", err, block.ParentRoot)
-		}
-	}
-
-	// [GLOAS] Patch latestBlockHash for checkpoint sync fallback.
-	// Only apply when existing latestBlockHash is zero — FULL states already have the
-	// correct value set by ProcessExecutionPayloadEnvelope and must not be overwritten.
-	if newState != nil && latestBlockHashOverride != (common.Hash{}) {
-		existing := newState.GetLatestBlockHash()
-		if existing == (common.Hash{}) {
-			log.Debug("AddChainSegment: applying latestBlockHash override for checkpoint sync",
-				"slot", block.Slot,
-				"override", latestBlockHashOverride,
-			)
-			newState.SetLatestBlockHash(latestBlockHashOverride)
 		}
 	}
 
