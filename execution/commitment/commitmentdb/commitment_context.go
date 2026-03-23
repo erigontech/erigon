@@ -343,6 +343,13 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		}()
 	}
 
+	if recorder != nil {
+		// Disable warmup cache during recording — cache hits bypass the
+		// RecordingContext, producing incomplete traces for replay.
+		sdc.patriciaTrie.EnableWarmupCache(false)
+		defer sdc.patriciaTrie.EnableWarmupCache(true)
+	}
+
 	var warmupConfig commitment.WarmupConfig
 	if sdc.paraTrieDB != nil {
 		warmupConfig = commitment.WarmupConfig{
