@@ -1299,10 +1299,6 @@ func (s *Stream) listLimit() (inList bool, limit uint64) {
 
 type sliceReader []byte
 
-func NewSliceReader(data []byte) *sliceReader {
-	return (*sliceReader)(&data)
-}
-
 func (sr *sliceReader) Read(b []byte) (int, error) {
 	if len(*sr) == 0 {
 		return 0, io.EOF
