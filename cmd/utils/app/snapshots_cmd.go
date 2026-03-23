@@ -155,6 +155,7 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&cli.BoolFlag{Name: "json", Usage: "Output in JSON format"},
+				&cli.BoolFlag{Name: "v", Aliases: []string{"verbose"}, Usage: "Show per-domain/per-type subcategory breakdown"},
 			}),
 		},
 		{
@@ -3114,13 +3115,14 @@ const (
 
 // duFileInfo holds metadata for a single snapshot file.
 type duFileInfo struct {
-	Path     string
-	Name     string
-	Size     int64
-	Category string
-	From     uint64
-	To       uint64
-	IsState  bool // true for state files (history/idx/domain/accessor), false for block segments
+	Path        string
+	Name        string
+	Size        int64
+	Category    string
+	Subcategory string // e.g. "accounts", "storage", "headers", "transactions"
+	From        uint64
+	To          uint64
+	IsState     bool // true for state files (history/idx/domain/accessor), false for block segments
 }
 
 // duClassifyFile maps a directory base name and file name to a duCategory.
@@ -3212,11 +3214,12 @@ func duWalkSnapshots(dirs datadir.Dirs) ([]duFileInfo, error) {
 				IsState:  sd.isState,
 			}
 
-			// Parse range from filename.
+			// Parse range and type from filename using the versioned parser.
 			parsed, _, ok := snaptype.ParseFileName(sd.path, e.Name())
 			if ok {
 				fi.From = parsed.From
 				fi.To = parsed.To
+				fi.Subcategory = parsed.TypeString
 			}
 
 			files = append(files, fi)
@@ -3272,47 +3275,26 @@ func duComputeEstimates(files []duFileInfo, maxBlock, maxStep, mergeBlock uint64
 		mergeStep = mergeBlock * maxStep / maxBlock
 	}
 
-	var archiveTotal, blocksTotal, fullTotal, minimalTotal int64
+	var archiveTotal, fullTotal, minimalTotal int64
 
 	for _, f := range files {
 		archiveTotal += f.Size
 
-		// Blocks mode: prunes old history/idx/accessor and commitment hist,
-		// but keeps ALL block segments (KeepAllBlocksPruneMode).
-		// Receipt-related files (rcache, logaddrs, logtopics) are kept because
-		// --persist.receipts is enabled by default for non-archive modes and
-		// blocks mode uses KeepAllBlocksPruneMode which doesn't prune receipts.
-		includeInBlocks := true
+		// Full mode: prunes old history/idx/accessor, commitment hist,
+		// pre-merge transaction block segments (EIP-4444), and receipt-related
+		// files below merge height.
+		includeInFull := true
 		switch f.Category {
 		case duCatCommitHist:
-			includeInBlocks = false
-		case duCatRcache:
-			// rcache domain files are never pruned; rcache history/idx
-			// files are kept in blocks mode (KeepAllBlocksPruneMode).
-			// All rcache files survive blocks mode.
+			includeInFull = false
 		case duCatHistory, duCatInvIdx, duCatAccessors:
 			if f.IsState && stepPruneDistance > 0 && f.To > 0 && maxStep > stepPruneDistance && f.To <= maxStep-stepPruneDistance {
-				// Receipt-related inv idx files (logaddrs, logtopics) are
-				// unblacklisted when receipts are persisted, and blocks mode
-				// keeps all receipts, so they survive.
-				if duIsReceiptRelated(f) {
-					// Keep in blocks mode.
-				} else {
-					includeInBlocks = false
+				if !duIsReceiptRelated(f) {
+					includeInFull = false
 				}
 			}
 		}
-
-		if includeInBlocks {
-			blocksTotal += f.Size
-		}
-
-		// Full mode: same as blocks but also prunes pre-merge transaction
-		// block segments (EIP-4444 / history expiry) and receipt-related
-		// files below merge height.
-		includeInFull := includeInBlocks
 		if includeInFull && f.Category == duCatBlocks && !f.IsState && mergeBlock > 0 && strings.Contains(strings.ToLower(f.Name), "transactions") {
-			// Match runtime behavior: IsPreMerge(s.From) checks From < mergeHeight.
 			if f.From < mergeBlock {
 				includeInFull = false
 			}
@@ -3360,7 +3342,6 @@ func duComputeEstimates(files []duFileInfo, maxBlock, maxStep, mergeBlock uint64
 	historyDesc := fmt.Sprintf("last %s", duFormatNumber(pruneDistance))
 	return []duEstimate{
 		{Mode: "archive", TotalBytes: archiveTotal, Delta: 0, BlocksDesc: "all blocks", HistoryDesc: "all history"},
-		{Mode: "blocks", TotalBytes: blocksTotal, Delta: blocksTotal - archiveTotal, BlocksDesc: "all blocks", HistoryDesc: historyDesc},
 		{Mode: "full", TotalBytes: fullTotal, Delta: fullTotal - archiveTotal, BlocksDesc: fullBlocksDesc, HistoryDesc: historyDesc},
 		{Mode: "minimal", TotalBytes: minimalTotal, Delta: minimalTotal - archiveTotal, BlocksDesc: fmt.Sprintf("last %s", duFormatNumber(pruneDistance)), HistoryDesc: historyDesc},
 	}
@@ -3369,15 +3350,11 @@ func duComputeEstimates(files []duFileInfo, maxBlock, maxStep, mergeBlock uint64
 // duDetectNodeType infers the current node mode from which files are present.
 // Archive nodes retain all state history from step 0 (History=MaxUint64).
 // Non-archive modes prune old state history, so files near step 0 are absent.
-// Among non-archive modes:
-//   - Blocks: keeps ALL block segments but prunes old history.
-//   - Full: prunes pre-merge transaction segments and old history.
+//   - Full: prunes old history and possibly pre-merge transaction segments.
 //   - Minimal: prunes both old history and old transaction block segments.
 func duDetectNodeType(files []duFileInfo) string {
 	hasOldStateHistory := false
-	hasOldTxSegments := false
 	var maxBlock, maxStep uint64
-	var minTxFrom uint64 = math.MaxUint64
 
 	pruneDistance := uint64(config3.DefaultPruneDistance)
 
@@ -3389,9 +3366,6 @@ func duDetectNodeType(files []duFileInfo) string {
 		if f.Category == duCatBlocks && !f.IsState {
 			if f.To > maxBlock {
 				maxBlock = f.To
-			}
-			if strings.Contains(strings.ToLower(f.Name), "transactions") && f.From < minTxFrom {
-				minTxFrom = f.From
 			}
 		}
 		// Regular state history files (not commitment hist, not rcache) starting
@@ -3414,25 +3388,15 @@ func duDetectNodeType(files []duFileInfo) string {
 		return "archive"
 	}
 
-	// Check for old transaction block segments to distinguish modes.
+	// Check for old transaction block segments — if present, this is full mode
+	// (old history pruned but block segments retained).
 	if maxBlock > pruneDistance {
 		for _, f := range files {
 			if f.Category == duCatBlocks && !f.IsState && strings.Contains(strings.ToLower(f.Name), "transactions") &&
 				f.To > 0 && f.To <= maxBlock-pruneDistance {
-				hasOldTxSegments = true
-				break
+				return "full"
 			}
 		}
-	}
-
-	if hasOldTxSegments {
-		// Distinguish blocks from full: blocks mode keeps ALL transactions
-		// from block 0 onward. Full mode prunes pre-merge transactions,
-		// so the earliest transaction segment starts well above 0.
-		if minTxFrom == 0 {
-			return "blocks"
-		}
-		return "full"
 	}
 
 	return "minimal"
@@ -3446,14 +3410,17 @@ type duCategoryStat struct {
 
 // duResult aggregates all output data for the du command.
 type duResult struct {
-	Chain        string                    `json:"chain"`
-	DetectedMode string                    `json:"detected_mode"`
-	BlockRange   [2]uint64                 `json:"block_range"`
-	StepRange    [2]uint64                 `json:"step_range"`
-	TotalBytes   int64                     `json:"total_bytes"`
-	TotalFiles   int                       `json:"total_files"`
-	Categories   map[string]duCategoryStat `json:"categories"`
-	Estimates    []duEstimate              `json:"estimates"`
+	Chain           string                                       `json:"chain"`
+	ConfiguredMode  string                                       `json:"configured_mode,omitempty"` // from DB; empty when DB unavailable
+	DetectedMode    string                                       `json:"detected_mode"`
+	BlockRange      [2]uint64                                    `json:"block_range"`
+	StepRange       [2]uint64                                    `json:"step_range"`
+	TotalBytes      int64                                        `json:"total_bytes"`
+	TotalFiles      int                                          `json:"total_files"`
+	Categories      map[string]duCategoryStat                    `json:"categories"`
+	Subcategories   map[string]map[string]duCategoryStat         `json:"subcategories,omitempty"` // category → subcategory → stat
+	OtherExtensions []string                                     `json:"other_extensions,omitempty"`
+	Estimates       []duEstimate                                 `json:"estimates"`
 }
 
 // duAggregateCategories computes per-category byte totals and file counts.
@@ -3466,6 +3433,47 @@ func duAggregateCategories(files []duFileInfo) map[string]duCategoryStat {
 		cats[f.Category] = s
 	}
 	return cats
+}
+
+// duAggregateSubcategories computes per-subcategory stats within each category.
+func duAggregateSubcategories(files []duFileInfo) map[string]map[string]duCategoryStat {
+	result := make(map[string]map[string]duCategoryStat)
+	for _, f := range files {
+		if f.Subcategory == "" {
+			continue
+		}
+		subs, ok := result[f.Category]
+		if !ok {
+			subs = make(map[string]duCategoryStat)
+			result[f.Category] = subs
+		}
+		s := subs[f.Subcategory]
+		s.Bytes += f.Size
+		s.Files++
+		subs[f.Subcategory] = s
+	}
+	return result
+}
+
+// duOtherExtensions returns a sorted list of unique file extensions in the "other" category.
+func duOtherExtensions(files []duFileInfo) []string {
+	exts := make(map[string]struct{})
+	for _, f := range files {
+		if f.Category != duCatOther {
+			continue
+		}
+		ext := filepath.Ext(f.Name)
+		if ext == "" {
+			ext = f.Name // no extension — use full name
+		}
+		exts[ext] = struct{}{}
+	}
+	result := make([]string, 0, len(exts))
+	for ext := range exts {
+		result = append(result, ext)
+	}
+	sort.Strings(result)
+	return result
 }
 
 // duFormatSize formats bytes into a human-readable string (e.g., "420.3 GB").
@@ -3517,12 +3525,20 @@ func duFormatNumber(n uint64) string {
 }
 
 // duFormatHuman writes the human-readable du output to w.
-func duFormatHuman(w io.Writer, result duResult) {
-	// Header line.
-	fmt.Fprintf(w, "%s | %s | blocks 0–%s | steps 0–%s\n\n",
-		result.Chain, result.DetectedMode,
+func duFormatHuman(w io.Writer, result duResult, verbose bool) {
+	// Header line: show configured mode from DB when available, always show detected.
+	modeStr := result.DetectedMode + " (detected)"
+	if result.ConfiguredMode != "" {
+		modeStr = result.ConfiguredMode
+		if result.ConfiguredMode != result.DetectedMode {
+			modeStr += fmt.Sprintf(" (files look like %s)", result.DetectedMode)
+		}
+	}
+	fmt.Fprintf(w, "\n%s | %s | blocks 0–%s | steps 0–%s\n",
+		result.Chain, modeStr,
 		duFormatNumber(result.BlockRange[1]),
 		duFormatNumber(result.StepRange[1]))
+	fmt.Fprintf(w, "total: %s (%d files)\n\n", duFormatSize(result.TotalBytes), result.TotalFiles)
 
 	// Breakdown table sorted by size descending.
 	type catEntry struct {
@@ -3541,17 +3557,46 @@ func duFormatHuman(w io.Writer, result duResult) {
 	})
 
 	fmt.Fprintln(w, "── Breakdown ──────────────────────────────────────────────────")
-	for _, e := range entries {
+	for i, e := range entries {
 		pct := float64(0)
 		if result.TotalBytes > 0 {
 			pct = float64(e.stat.Bytes) / float64(result.TotalBytes) * 100
 		}
 		fmt.Fprintf(w, "  %-20s %10s %9.1f%%  %5d files\n",
 			e.name, duFormatSize(e.stat.Bytes), pct, e.stat.Files)
+
+		// Show "other" extensions on next line.
+		if e.name == duCatOther && len(result.OtherExtensions) > 0 {
+			fmt.Fprintf(w, "    extensions: %s\n", strings.Join(result.OtherExtensions, ", "))
+		}
+
+		// Verbose: show subcategory breakdown within each category.
+		if verbose {
+			if subs, ok := result.Subcategories[e.name]; ok && len(subs) > 1 {
+				subEntries := make([]catEntry, 0, len(subs))
+				for sub, stat := range subs {
+					subEntries = append(subEntries, catEntry{sub, stat})
+				}
+				sort.Slice(subEntries, func(i, j int) bool {
+					if subEntries[i].stat.Bytes != subEntries[j].stat.Bytes {
+						return subEntries[i].stat.Bytes > subEntries[j].stat.Bytes
+					}
+					return subEntries[i].name < subEntries[j].name
+				})
+				for _, sub := range subEntries {
+					subPct := float64(0)
+					if e.stat.Bytes > 0 {
+						subPct = float64(sub.stat.Bytes) / float64(e.stat.Bytes) * 100
+					}
+					fmt.Fprintf(w, "    %-18s %10s %9.1f%%  %5d files\n",
+						sub.name, duFormatSize(sub.stat.Bytes), subPct, sub.stat.Files)
+				}
+			}
+			if i < len(entries)-1 {
+				fmt.Fprintln(w, "  ─────────────────────────────────────────────────────────────")
+			}
+		}
 	}
-	fmt.Fprintln(w, "  ─────────────────────────────────────────────────────────────")
-	fmt.Fprintf(w, "  %-20s %10s %15d files\n",
-		"total", duFormatSize(result.TotalBytes), result.TotalFiles)
 
 	// Estimates table.
 	fmt.Fprintln(w)
@@ -3576,16 +3621,17 @@ func duFormatJSON(w io.Writer, result duResult) error {
 
 // doDU implements the "erigon seg du" subcommand.
 func doDU(cliCtx *cli.Context, dirs datadir.Dirs) error {
-	// Resolve chain name from chaindata (best-effort, fall back to "unknown").
+	// Resolve chain name and configured prune mode from chaindata (best-effort).
 	// Use recover because both MustOpen and fromdb.ChainConfig can panic
 	// (e.g., DB locked by running node, corrupted/empty chaindata).
 	chainName := "unknown"
 	var mergeBlock uint64
+	var configuredMode string // empty when DB is unavailable
 	if _, err := os.Stat(dirs.Chaindata); err == nil {
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
-					log.Warn("could not detect chain name from chaindata", "err", r)
+					log.Warn("could not read chaindata", "err", r)
 				}
 			}()
 			chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
@@ -3597,6 +3643,8 @@ func doDU(cliCtx *cli.Context, dirs datadir.Dirs) error {
 			if cc != nil && cc.MergeHeight != nil {
 				mergeBlock = *cc.MergeHeight
 			}
+			pm := fromdb.PruneMode(chainDB)
+			configuredMode = pm.String()
 		}()
 	}
 
@@ -3632,20 +3680,25 @@ func doDU(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 
 	result := duResult{
-		Chain:        chainName,
-		DetectedMode: duDetectNodeType(files),
-		BlockRange:   [2]uint64{0, maxBlock},
-		StepRange:    [2]uint64{0, maxStep},
-		TotalBytes:   totalBytes,
-		TotalFiles:   totalFiles,
-		Categories:   cats,
-		Estimates:    estimates,
+		Chain:           chainName,
+		ConfiguredMode:  configuredMode,
+		DetectedMode:    duDetectNodeType(files),
+		BlockRange:      [2]uint64{0, maxBlock},
+		StepRange:       [2]uint64{0, maxStep},
+		TotalBytes:      totalBytes,
+		TotalFiles:      totalFiles,
+		Categories:      cats,
+		Subcategories:   duAggregateSubcategories(files),
+		OtherExtensions: duOtherExtensions(files),
+		Estimates:       estimates,
 	}
+
+	verbose := cliCtx.Bool("v")
 
 	// Output.
 	if cliCtx.Bool("json") {
 		return duFormatJSON(os.Stdout, result)
 	}
-	duFormatHuman(os.Stdout, result)
+	duFormatHuman(os.Stdout, result, verbose)
 	return nil
 }

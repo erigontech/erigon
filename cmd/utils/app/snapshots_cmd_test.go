@@ -637,7 +637,7 @@ func TestDUComputeEstimates(t *testing.T) {
 
 	mergeBlock := uint64(15_537_394)
 	estimates := duComputeEstimates(files, maxBlock, maxStep, mergeBlock)
-	require.Len(t, estimates, 4)
+	require.Len(t, estimates, 3)
 
 	// Archive: sum everything
 	archiveTotal := int64(1000 + 2000 + 500 + 3000 + 4000 + 1500 + 2500 + 800 + 400 + 200 + 350 + 5000 + 3000 + 6000 + 700)
@@ -645,34 +645,26 @@ func TestDUComputeEstimates(t *testing.T) {
 	require.Equal(t, archiveTotal, estimates[0].TotalBytes)
 	require.Equal(t, int64(0), estimates[0].Delta)
 
-	// Blocks: archive minus old history(3000) minus old idx(1500) minus old accessor(500)
-	// minus commitHist(800) — rcache domain(400) kept, rcache hist(200) kept,
-	// logaddrs(350) kept (receipt-related, blocks mode keeps all receipts)
-	blocksTotal := archiveTotal - 3000 - 1500 - 500 - 800
-	require.Equal(t, "blocks", estimates[1].Mode)
-	require.Equal(t, blocksTotal, estimates[1].TotalBytes)
-	require.Equal(t, blocksTotal-archiveTotal, estimates[1].Delta)
-	require.Equal(t, "all blocks", estimates[1].BlocksDesc)
-
-	// Full: blocks minus pre-merge tx(5000) minus rcache hist(200, From=0 < mergeStep=1553)
+	// Full: archive minus old history(3000) minus old idx(1500) minus old accessor(500)
+	// minus commitHist(800) minus pre-merge tx(5000)
+	// minus rcache hist(200, From=0 < mergeStep=1553)
 	// minus logaddrs(350, From=0 < mergeStep=1553) — rcache domain(400) kept
-	fullTotal := blocksTotal - 5000 - 200 - 350
-	require.Equal(t, "full", estimates[2].Mode)
-	require.Equal(t, fullTotal, estimates[2].TotalBytes)
-	require.Equal(t, fullTotal-archiveTotal, estimates[2].Delta)
-	require.Equal(t, "post-merge blocks", estimates[2].BlocksDesc)
+	fullTotal := archiveTotal - 3000 - 1500 - 500 - 800 - 5000 - 200 - 350
+	require.Equal(t, "full", estimates[1].Mode)
+	require.Equal(t, fullTotal, estimates[1].TotalBytes)
+	require.Equal(t, fullTotal-archiveTotal, estimates[1].Delta)
+	require.Equal(t, "post-merge blocks", estimates[1].BlocksDesc)
 
 	// Minimal: full minus nothing extra (old tx already pruned by full, remaining blocks are recent,
 	// rcache hist and logaddrs already pruned by full's merge-based receipt pruning)
 	minimalTotal := fullTotal
-	require.Equal(t, "minimal", estimates[3].Mode)
-	require.Equal(t, minimalTotal, estimates[3].TotalBytes)
-	require.Equal(t, minimalTotal-archiveTotal, estimates[3].Delta)
+	require.Equal(t, "minimal", estimates[2].Mode)
+	require.Equal(t, minimalTotal, estimates[2].TotalBytes)
+	require.Equal(t, minimalTotal-archiveTotal, estimates[2].Delta)
 
-	// Invariant: archive >= blocks >= full >= minimal
+	// Invariant: archive >= full >= minimal
 	require.GreaterOrEqual(t, estimates[0].TotalBytes, estimates[1].TotalBytes)
 	require.GreaterOrEqual(t, estimates[1].TotalBytes, estimates[2].TotalBytes)
-	require.GreaterOrEqual(t, estimates[2].TotalBytes, estimates[3].TotalBytes)
 }
 
 func TestDUComputeEstimates_NoPruning(t *testing.T) {
@@ -687,14 +679,13 @@ func TestDUComputeEstimates_NoPruning(t *testing.T) {
 	estimates := duComputeEstimates(files, 50000, 10, 0)
 	// All modes include everything (no old files to prune, no commitment/rcache, no merge block)
 	require.Equal(t, int64(600), estimates[0].TotalBytes) // archive
-	require.Equal(t, int64(600), estimates[1].TotalBytes) // blocks
-	require.Equal(t, int64(600), estimates[2].TotalBytes) // full
-	require.Equal(t, int64(600), estimates[3].TotalBytes) // minimal
+	require.Equal(t, int64(600), estimates[1].TotalBytes) // full
+	require.Equal(t, int64(600), estimates[2].TotalBytes) // minimal
 }
 
 func TestDUComputeEstimates_EmptyFiles(t *testing.T) {
 	estimates := duComputeEstimates(nil, 0, 0, 0)
-	require.Len(t, estimates, 4)
+	require.Len(t, estimates, 3)
 	for _, e := range estimates {
 		require.Equal(t, int64(0), e.TotalBytes)
 	}
@@ -723,7 +714,7 @@ func TestDUDetectNodeType(t *testing.T) {
 		require.Equal(t, "archive", duDetectNodeType(files))
 	})
 
-	t.Run("blocks - has rcache but no old state history, all tx blocks from 0", func(t *testing.T) {
+	t.Run("full - has old tx blocks from 0, no old state history", func(t *testing.T) {
 		// Non-archive modes persist receipts (rcache present) but prune old history.
 		// maxBlock=500000, pruneDistance=100000, cutoff=400000
 		files := []duFileInfo{
@@ -733,10 +724,10 @@ func TestDUDetectNodeType(t *testing.T) {
 			{Name: "0-300-transactions.seg", Category: duCatBlocks, IsState: false, From: 0, To: 300000, Size: 200},
 			{Name: "300-500-headers.seg", Category: duCatBlocks, IsState: false, From: 300000, To: 500000, Size: 200},
 		}
-		require.Equal(t, "blocks", duDetectNodeType(files))
+		require.Equal(t, "full", duDetectNodeType(files))
 	})
 
-	t.Run("full - has old transaction blocks but not from 0, no old state history", func(t *testing.T) {
+	t.Run("full - has old transaction blocks not from 0, no old state history", func(t *testing.T) {
 		// Transactions start at 200000 (not 0) → pre-merge segments were pruned → full mode
 		files := []duFileInfo{
 			{Category: duCatDomains, Size: 100, IsState: true, To: 50},
@@ -823,12 +814,12 @@ func TestDUFormatHuman(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	duFormatHuman(&buf, result)
+	duFormatHuman(&buf, result, false)
 	out := buf.String()
 
-	// Check header line.
+	// Check header line — no ConfiguredMode set, so shows "archive (detected)".
 	require.True(t, strings.Contains(out, "mainnet"), "should contain chain name")
-	require.True(t, strings.Contains(out, "archive"), "should contain detected mode")
+	require.True(t, strings.Contains(out, "archive (detected)"), "should show detected mode with qualifier when DB unavailable")
 	require.True(t, strings.Contains(out, "21,500,000"), "should contain formatted block range")
 	require.True(t, strings.Contains(out, "2,048"), "should contain formatted step range")
 
@@ -845,6 +836,49 @@ func TestDUFormatHuman(t *testing.T) {
 	require.True(t, strings.Contains(out, "last 100,000"), "should show history description")
 }
 
+func TestDUFormatHuman_ConfiguredMode(t *testing.T) {
+	t.Run("configured matches detected", func(t *testing.T) {
+		result := duResult{
+			Chain:          "mainnet",
+			ConfiguredMode: "full",
+			DetectedMode:   "full",
+			Categories:     map[string]duCategoryStat{},
+		}
+		var buf bytes.Buffer
+		duFormatHuman(&buf, result, false)
+		out := buf.String()
+		require.Contains(t, out, "full")
+		require.NotContains(t, out, "(detected)")
+		require.NotContains(t, out, "files look like")
+	})
+
+	t.Run("configured differs from detected", func(t *testing.T) {
+		result := duResult{
+			Chain:          "mainnet",
+			ConfiguredMode: "full",
+			DetectedMode:   "archive",
+			Categories:     map[string]duCategoryStat{},
+		}
+		var buf bytes.Buffer
+		duFormatHuman(&buf, result, false)
+		out := buf.String()
+		require.Contains(t, out, "full")
+		require.Contains(t, out, "files look like archive")
+	})
+
+	t.Run("no DB - shows detected with qualifier", func(t *testing.T) {
+		result := duResult{
+			Chain:        "unknown",
+			DetectedMode: "minimal",
+			Categories:   map[string]duCategoryStat{},
+		}
+		var buf bytes.Buffer
+		duFormatHuman(&buf, result, false)
+		out := buf.String()
+		require.Contains(t, out, "minimal (detected)")
+	})
+}
+
 func TestDUFormatHuman_EmptyResult(t *testing.T) {
 	result := duResult{
 		Chain:        "unknown",
@@ -853,7 +887,7 @@ func TestDUFormatHuman_EmptyResult(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	duFormatHuman(&buf, result)
+	duFormatHuman(&buf, result, false)
 	out := buf.String()
 
 	require.True(t, strings.Contains(out, "unknown"), "should contain chain name")
@@ -997,19 +1031,17 @@ func TestDUAcceptanceCriteria(t *testing.T) {
 
 	// Compute estimates.
 	estimates := duComputeEstimates(files, maxBlock, maxStep, 0)
-	require.Len(t, estimates, 4)
+	require.Len(t, estimates, 3)
 
-	// Verify archive >= blocks >= full >= minimal (acceptance criterion 3).
-	require.GreaterOrEqual(t, estimates[0].TotalBytes, estimates[1].TotalBytes, "archive >= blocks")
-	require.GreaterOrEqual(t, estimates[1].TotalBytes, estimates[2].TotalBytes, "blocks >= full")
-	require.GreaterOrEqual(t, estimates[2].TotalBytes, estimates[3].TotalBytes, "full >= minimal")
+	// Verify archive >= full >= minimal (acceptance criterion 3).
+	require.GreaterOrEqual(t, estimates[0].TotalBytes, estimates[1].TotalBytes, "archive >= full")
+	require.GreaterOrEqual(t, estimates[1].TotalBytes, estimates[2].TotalBytes, "full >= minimal")
 
 	// Archive delta must be 0.
 	require.Equal(t, int64(0), estimates[0].Delta)
 	// Non-archive deltas must be negative or zero.
 	require.LessOrEqual(t, estimates[1].Delta, int64(0))
 	require.LessOrEqual(t, estimates[2].Delta, int64(0))
-	require.LessOrEqual(t, estimates[3].Delta, int64(0))
 
 	// Build result struct.
 	result := duResult{
@@ -1025,7 +1057,7 @@ func TestDUAcceptanceCriteria(t *testing.T) {
 
 	// Acceptance criterion 1: human output has all three sections.
 	var humanBuf bytes.Buffer
-	duFormatHuman(&humanBuf, result)
+	duFormatHuman(&humanBuf, result, false)
 	human := humanBuf.String()
 
 	// Header section.
@@ -1045,7 +1077,6 @@ func TestDUAcceptanceCriteria(t *testing.T) {
 	// Estimates section.
 	require.Contains(t, human, "Estimated Size by Node Type")
 	require.Contains(t, human, "archive")
-	require.Contains(t, human, "blocks")
 	require.Contains(t, human, "full")
 	require.Contains(t, human, "minimal")
 
@@ -1066,10 +1097,9 @@ func TestDUAcceptanceCriteria(t *testing.T) {
 	require.Equal(t, result.TotalBytes, decoded.TotalBytes)
 	require.Equal(t, result.TotalFiles, decoded.TotalFiles)
 	require.Len(t, decoded.Categories, len(result.Categories))
-	require.Len(t, decoded.Estimates, 4)
+	require.Len(t, decoded.Estimates, 3)
 
-	// Verify JSON estimates also maintain archive >= blocks >= full >= minimal.
+	// Verify JSON estimates also maintain archive >= full >= minimal.
 	require.GreaterOrEqual(t, decoded.Estimates[0].TotalBytes, decoded.Estimates[1].TotalBytes)
 	require.GreaterOrEqual(t, decoded.Estimates[1].TotalBytes, decoded.Estimates[2].TotalBytes)
-	require.GreaterOrEqual(t, decoded.Estimates[2].TotalBytes, decoded.Estimates[3].TotalBytes)
 }
