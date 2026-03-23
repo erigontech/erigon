@@ -17,6 +17,7 @@
   "shanghaiTime": 1690889660,
   "cancunTime": 1710181820,
   "pragueTime": 1746021820,
+  "osakaTime": 1776168380,
   "minBlobGasPrice": 1000000000,
   "blobSchedule": {
     "cancun": {
@@ -25,6 +26,11 @@
       "baseFeeUpdateFraction": 1112826
     },
     "prague": {
+      "target": 1,
+      "max": 2,
+      "baseFeeUpdateFraction": 1112826
+    },
+    "osaka": {
       "target": 1,
       "max": 2,
       "baseFeeUpdateFraction": 1112826
