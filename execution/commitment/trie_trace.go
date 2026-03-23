@@ -82,7 +82,12 @@ func BuildTrieTrace(rc *RecordingContext, inputKeys map[string]struct{}, trieSta
 	}
 	for k, v := range rc.accounts {
 		hexKey := hex.EncodeToString([]byte(k))
-		tt.Accounts[hexKey] = hex.EncodeToString(v)
+		isDelete := len(v) > 0 && UpdateFlags(v[0])&DeleteUpdate != 0
+		// Delete entries go into Updates only — MockState returns DeleteUpdate
+		// for missing keys automatically, so they must not appear in the state map.
+		if !isDelete {
+			tt.Accounts[hexKey] = hex.EncodeToString(v)
+		}
 		if inputKeys == nil || containsKey(inputKeys, k) {
 			tt.Updates = append(tt.Updates, TraceKeyUpdate{
 				PlainKey: hexKey,
@@ -92,7 +97,10 @@ func BuildTrieTrace(rc *RecordingContext, inputKeys map[string]struct{}, trieSta
 	}
 	for k, v := range rc.storages {
 		hexKey := hex.EncodeToString([]byte(k))
-		tt.Storages[hexKey] = hex.EncodeToString(v)
+		isDelete := len(v) > 0 && UpdateFlags(v[0])&DeleteUpdate != 0
+		if !isDelete {
+			tt.Storages[hexKey] = hex.EncodeToString(v)
+		}
 		if inputKeys == nil || containsKey(inputKeys, k) {
 			tt.Updates = append(tt.Updates, TraceKeyUpdate{
 				PlainKey: hexKey,

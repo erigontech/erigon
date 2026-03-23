@@ -17,6 +17,7 @@
 package commitment
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -730,4 +731,86 @@ func TestTrieTraceNonEmptyStateRoundTrip(t *testing.T) {
 	upds3.Close()
 
 	require.Equal(t, rootHash1, rootHash2, "replay with restored state should match original root hash")
+}
+
+func TestTrieTraceDeleteRoundTrip(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	// Phase 1: Create accounts
+	plainKeys1, updates1 := NewUpdateBuilder().
+		Balance("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", 4).
+		Balance("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40", 900234).
+		Balance("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", 1233).
+		Build()
+
+	state1 := NewMockState(t)
+	err := state1.applyPlainUpdates(plainKeys1, updates1)
+	require.NoError(t, err)
+
+	trie1 := NewHexPatriciaHashed(length.Addr, state1)
+	trie1.ResetContext(state1)
+
+	upds1 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys1, updates1)
+	_, err = trie1.Process(ctx, upds1, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	upds1.Close()
+
+	// Phase 2: Delete one account and record the trace
+	plainKeys2, updates2 := NewUpdateBuilder().
+		Delete("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40").
+		Build()
+
+	err = state1.applyPlainUpdates(plainKeys2, updates2)
+	require.NoError(t, err)
+
+	recorder := NewRecordingContext(state1)
+	trie1.ResetContext(recorder)
+
+	upds2 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys2, updates2)
+	rootHash1, err := trie1.Process(ctx, upds2, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	upds2.Close()
+
+	// Build trace — the delete should appear in Updates
+	trace, err := BuildTrieTrace(recorder, nil, nil)
+	require.NoError(t, err)
+
+	// The deleted account should be in Updates but NOT in the Accounts state map
+	require.NotEmpty(t, trace.Updates, "trace must include delete update")
+	foundDelete := false
+	for _, u := range trace.Updates {
+		key, decErr := hex.DecodeString(u.PlainKey)
+		require.NoError(t, decErr)
+		if bytes.Equal(key, plainKeys2[0]) {
+			foundDelete = true
+			buf, decErr := hex.DecodeString(u.Update)
+			require.NoError(t, decErr)
+			var upd Update
+			_, decErr = upd.Decode(buf, 0)
+			require.NoError(t, decErr)
+			require.True(t, upd.Deleted(), "update for deleted key must have DeleteUpdate flag")
+		}
+	}
+	require.True(t, foundDelete, "deleted key must appear in trace Updates")
+	// Deleted key must not appear in the Accounts state map
+	deletedHexKey := hex.EncodeToString(plainKeys2[0])
+	_, inAccountsMap := trace.Accounts[deletedHexKey]
+	require.False(t, inAccountsMap, "deleted key must not appear in trace Accounts map")
+
+	// Phase 3: Save and replay
+	tracePath := filepath.Join(t.TempDir(), "delete_trace.toml")
+	err = trace.Save(tracePath)
+	require.NoError(t, err)
+
+	state2, replayKeys, replayUpdates, _ := LoadTrieTraceIntoMockState(t, tracePath)
+
+	trie2 := NewHexPatriciaHashed(length.Addr, state2)
+
+	upds3 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, replayKeys, replayUpdates)
+	rootHash2, err := trie2.Process(ctx, upds3, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	upds3.Close()
+
+	require.Equal(t, rootHash1, rootHash2, "replay with delete should match original root hash")
 }

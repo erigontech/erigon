@@ -67,7 +67,7 @@ func (rc *RecordingContext) Account(plainKey []byte) (*Update, error) {
 	if err != nil {
 		return u, err
 	}
-	if u != nil && u.Flags&DeleteUpdate == 0 {
+	if u != nil {
 		var numBuf [10]byte
 		encoded := u.Encode(nil, numBuf[:])
 		rc.accounts[string(common.Copy(plainKey))] = encoded
@@ -80,7 +80,7 @@ func (rc *RecordingContext) Storage(plainKey []byte) (*Update, error) {
 	if err != nil {
 		return u, err
 	}
-	if u != nil && u.Flags&DeleteUpdate == 0 {
+	if u != nil {
 		var numBuf [10]byte
 		encoded := u.Encode(nil, numBuf[:])
 		rc.storages[string(common.Copy(plainKey))] = encoded
