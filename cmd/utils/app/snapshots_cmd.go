@@ -3476,32 +3476,13 @@ func duOtherExtensions(files []duFileInfo) []string {
 	return result
 }
 
-// duFormatSize formats bytes into a human-readable string (e.g., "420.3 GB").
+// duFormatSize formats bytes into a human-readable string (e.g., "420.3GB").
+// Wraps common.ByteCount with support for negative values (deltas).
 func duFormatSize(b int64) string {
-	const (
-		_KB = 1024
-		_MB = 1024 * _KB
-		_GB = 1024 * _MB
-		_TB = 1024 * _GB
-	)
-	abs := b
-	sign := ""
 	if b < 0 {
-		abs = -b
-		sign = "-"
+		return "-" + common.ByteCount(uint64(-b))
 	}
-	switch {
-	case abs >= _TB:
-		return fmt.Sprintf("%s%.2f TB", sign, float64(abs)/float64(_TB))
-	case abs >= _GB:
-		return fmt.Sprintf("%s%.1f GB", sign, float64(abs)/float64(_GB))
-	case abs >= _MB:
-		return fmt.Sprintf("%s%.1f MB", sign, float64(abs)/float64(_MB))
-	case abs >= _KB:
-		return fmt.Sprintf("%s%.1f KB", sign, float64(abs)/float64(_KB))
-	default:
-		return fmt.Sprintf("%s%d B", sign, abs)
-	}
+	return common.ByteCount(uint64(b))
 }
 
 // duFormatNumber formats an integer with comma separators (e.g., 21500000 → "21,500,000").
@@ -3517,7 +3498,7 @@ func duFormatNumber(n uint64) string {
 	}
 	for i := rem; i < len(s); i += 3 {
 		if buf.Len() > 0 {
-			buf.WriteByte(',')
+			buf.WriteByte('.')
 		}
 		buf.WriteString(s[i : i+3])
 	}

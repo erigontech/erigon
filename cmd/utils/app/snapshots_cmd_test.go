@@ -809,7 +809,7 @@ func TestDUFormatHuman(t *testing.T) {
 		},
 		Estimates: []duEstimate{
 			{Mode: "archive", TotalBytes: 100 * 1024 * 1024 * 1024, Delta: 0, BlocksDesc: "all blocks", HistoryDesc: "all history"},
-			{Mode: "full", TotalBytes: 80 * 1024 * 1024 * 1024, Delta: -20 * 1024 * 1024 * 1024, BlocksDesc: "all blocks", HistoryDesc: "last 100,000"},
+			{Mode: "full", TotalBytes: 80 * 1024 * 1024 * 1024, Delta: -20 * 1024 * 1024 * 1024, BlocksDesc: "all blocks", HistoryDesc: "last 100.000"},
 		},
 	}
 
@@ -820,8 +820,8 @@ func TestDUFormatHuman(t *testing.T) {
 	// Check header line — no ConfiguredMode set, so shows "archive (detected)".
 	require.True(t, strings.Contains(out, "mainnet"), "should contain chain name")
 	require.True(t, strings.Contains(out, "archive (detected)"), "should show detected mode with qualifier when DB unavailable")
-	require.True(t, strings.Contains(out, "21,500,000"), "should contain formatted block range")
-	require.True(t, strings.Contains(out, "2,048"), "should contain formatted step range")
+	require.True(t, strings.Contains(out, "21.500.000"), "should contain formatted block range")
+	require.True(t, strings.Contains(out, "2.048"), "should contain formatted step range")
 
 	// Check breakdown section.
 	require.True(t, strings.Contains(out, "Breakdown"), "should have breakdown header")
@@ -833,7 +833,7 @@ func TestDUFormatHuman(t *testing.T) {
 	// Check estimates section.
 	require.True(t, strings.Contains(out, "Estimated Size by Node Type"), "should have estimates header")
 	require.True(t, strings.Contains(out, "all blocks"), "should show blocks description")
-	require.True(t, strings.Contains(out, "last 100,000"), "should show history description")
+	require.True(t, strings.Contains(out, "last 100.000"), "should show history description")
 }
 
 func TestDUFormatHuman_ConfiguredMode(t *testing.T) {
@@ -954,14 +954,14 @@ func TestDUFormatSize(t *testing.T) {
 		input    int64
 		expected string
 	}{
-		{0, "0 B"},
-		{512, "512 B"},
-		{1024, "1.0 KB"},
-		{1536, "1.5 KB"},
-		{1048576, "1.0 MB"},
-		{1073741824, "1.0 GB"},
-		{1099511627776, "1.00 TB"},
-		{-1073741824, "-1.0 GB"},
+		{0, "0B"},
+		{512, "512B"},
+		{1024, "1.0KB"},
+		{1536, "1.5KB"},
+		{1048576, "1.0MB"},
+		{1073741824, "1.0GB"},
+		{1099511627776, "1.0TB"},
+		{-1073741824, "-1.0GB"},
 	}
 
 	for _, tt := range tests {
@@ -976,9 +976,9 @@ func TestDUFormatNumber(t *testing.T) {
 	}{
 		{0, "0"},
 		{999, "999"},
-		{1000, "1,000"},
-		{21500000, "21,500,000"},
-		{1000000000, "1,000,000,000"},
+		{1000, "1.000"},
+		{21500000, "21.500.000"},
+		{1000000000, "1.000.000.000"},
 	}
 
 	for _, tt := range tests {
@@ -1063,8 +1063,8 @@ func TestDUAcceptanceCriteria(t *testing.T) {
 	// Header section.
 	require.Contains(t, human, "mainnet")
 	require.Contains(t, human, "archive")
-	require.Contains(t, human, "500,000")
-	require.Contains(t, human, "200,000")
+	require.Contains(t, human, "500.000")
+	require.Contains(t, human, "200.000")
 
 	// Breakdown section.
 	require.Contains(t, human, "Breakdown")
