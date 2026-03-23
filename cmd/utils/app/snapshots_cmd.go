@@ -3557,7 +3557,7 @@ func duFormatHuman(w io.Writer, result duResult, verbose bool) {
 	})
 
 	fmt.Fprintln(w, "── Breakdown ──────────────────────────────────────────────────")
-	for i, e := range entries {
+	for _, e := range entries {
 		pct := float64(0)
 		if result.TotalBytes > 0 {
 			pct = float64(e.stat.Bytes) / float64(result.TotalBytes) * 100
@@ -3583,17 +3583,19 @@ func duFormatHuman(w io.Writer, result duResult, verbose bool) {
 					}
 					return subEntries[i].name < subEntries[j].name
 				})
-				for _, sub := range subEntries {
+				for j, sub := range subEntries {
 					subPct := float64(0)
 					if e.stat.Bytes > 0 {
 						subPct = float64(sub.stat.Bytes) / float64(e.stat.Bytes) * 100
 					}
-					fmt.Fprintf(w, "    %-18s %10s %9.1f%%  %5d files\n",
-						sub.name, duFormatSize(sub.stat.Bytes), subPct, sub.stat.Files)
+					prefix := "  ├─"
+					if j == len(subEntries)-1 {
+						prefix = "  └─"
+					}
+					fmt.Fprintf(w, "%s %-16s %10s %9.1f%%  %5d files\n",
+						prefix, sub.name, duFormatSize(sub.stat.Bytes), subPct, sub.stat.Files)
 				}
-			}
-			if i < len(entries)-1 {
-				fmt.Fprintln(w, "  ─────────────────────────────────────────────────────────────")
+				fmt.Fprintln(w)
 			}
 		}
 	}
