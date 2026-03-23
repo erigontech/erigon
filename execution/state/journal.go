@@ -417,6 +417,7 @@ func (ch codeChange) revert(s *IntraBlockState) error {
 			}
 			s.versionedWrites.Delete(ch.account, AccountKey{Path: CodeHashPath})
 			s.versionedWrites.Delete(ch.account, AccountKey{Path: CodePath})
+			s.versionedWrites.Delete(ch.account, AccountKey{Path: CodeSizePath})
 		} else {
 			if v, ok := s.versionedWrites[ch.account][AccountKey{Path: CodePath}]; ok {
 				if trace {
@@ -431,6 +432,9 @@ func (ch codeChange) revert(s *IntraBlockState) error {
 					fmt.Printf("%s WRT Revert %x: %x -> %x\n", tracePrefix, ch.account, v.Val, ch.prevhash)
 				}
 				s.versionedWrites.UpdateVal(ch.account, AccountKey{Path: CodeHashPath}, ch.prevhash)
+			}
+			if _, ok := s.versionedWrites[ch.account][AccountKey{Path: CodeSizePath}]; ok {
+				s.versionedWrites.UpdateVal(ch.account, AccountKey{Path: CodeSizePath}, len(ch.prevcode))
 			}
 		}
 	}
