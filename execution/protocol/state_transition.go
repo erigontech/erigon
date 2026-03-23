@@ -339,7 +339,14 @@ func (st *StateTransition) preCheck(gasBailout bool, intrinsicGasResult mdgas.In
 	// validated here, before buyGas(), so pool gas is never consumed for
 	// rejected txs.
 	if st.msg.CheckGas() && rules.IsOsaka {
-		if capGas := intrinsicGasResult.RegularGasCap(st.msg.Gas(), rules.IsAmsterdam); capGas > params.MaxTxnGasLimit {
+		capGas := intrinsicGasResult.RegularGasCap(st.msg.Gas(), rules.IsAmsterdam)
+		if capGas > params.MaxTxnGasLimit {
+			if rules.IsAmsterdam && capGas != st.msg.Gas() {
+				// Amsterdam: intrinsic regular gas (or calldata floor) exceeds
+				// the cap — the transaction cannot execute.
+				return fmt.Errorf("%w: regular gas cap %d exceeds TX_MAX_GAS_LIMIT %d",
+					ErrIntrinsicGas, capGas, params.MaxTxnGasLimit)
+			}
 			return fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, from, capGas)
 		}
 	}
