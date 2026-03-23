@@ -235,6 +235,9 @@ func (bt *BlockTest) Run(t *testing.T) error {
 		mOpts = append(mOpts, execmoduletester.WithExperimentalBAL())
 	}
 	m := execmoduletester.New(t, mOpts...)
+	if t == nil {
+		defer m.Close()
+	}
 
 	bt.br = m.BlockReader
 	// import pre accounts & construct test genesis block & state root
@@ -281,68 +284,7 @@ func (bt *BlockTest) Run(t *testing.T) error {
 
 // RunCLI executes the test without requiring a testing.T context, suitable for CLI usage.
 func (bt *BlockTest) RunCLI() error {
-	config, ok := testforks.Forks[bt.json.Network]
-	if !ok {
-		return testforks.UnsupportedForkError{Name: bt.json.Network}
-	}
-
-	gspec := bt.genesis(config)
-	db, genesis, release, err := getOrCreateGenesisDB(bt.json.Network, gspec)
-	if err != nil {
-		return fmt.Errorf("genesis cache: %w", err)
-	}
-	defer release()
-
-	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
-	m := execmoduletester.New(nil,
-		execmoduletester.WithCachedDB(db, genesis),
-		execmoduletester.WithGenesisSpec(gspec),
-		execmoduletester.WithEngine(engine),
-		execmoduletester.WithEphemeral(),
-	)
-	defer m.Close()
-
-	bt.br = m.BlockReader
-	// import pre accounts & construct test genesis block & state root
-	if m.Genesis.Hash() != bt.json.Genesis.Hash {
-		return fmt.Errorf("genesis block hash doesn't match test: computed=%x, test=%x", m.Genesis.Hash().Bytes()[:6], bt.json.Genesis.Hash[:6])
-	}
-	if m.Genesis.Root() != bt.json.Genesis.StateRoot {
-		return fmt.Errorf("genesis block state root does not match test: computed=%x, test=%x", m.Genesis.Root().Bytes()[:6], bt.json.Genesis.StateRoot[:6])
-	}
-
-	validBlocks, err := bt.insertBlocks(m)
-	if err != nil {
-		return err
-	}
-
-	if m.IsEphemeral() {
-		if common.Hash(bt.json.BestBlock) != m.EphemeralLastBlockHash() {
-			return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", bt.json.BestBlock, m.EphemeralLastBlockHash())
-		}
-		newDB := state.New(m.NewStateReader(m.EphemeralOverlay()))
-		if err := bt.validatePostState(newDB); err != nil {
-			return fmt.Errorf("post state validation failed: %w", err)
-		}
-		return nil
-	}
-
-	tx, err := m.DB.BeginTemporalRo(m.Ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	cmlast := rawdb.ReadHeadBlockHash(tx)
-	if common.Hash(bt.json.BestBlock) != cmlast {
-		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", bt.json.BestBlock, cmlast)
-	}
-	newDB := state.New(m.NewStateReader(tx))
-	if err := bt.validatePostState(newDB); err != nil {
-		return fmt.Errorf("post state validation failed: %w", err)
-	}
-
-	return bt.validateImportedHeaders(tx, validBlocks, m)
+	return bt.Run(nil)
 }
 
 func (bt *BlockTest) genesis(config *chain.Config) *types.Genesis {
