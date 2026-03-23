@@ -1,93 +1,125 @@
-# Erigon Agent Guidelines
+# Agent Task
 
-This file provides guidance for AI agents working with this codebase.
+This folder is being worked on by an automated agent.
 
-**Requirements**: Go 1.25+, GCC 10+ or Clang, 32GB+ RAM, SSD/NVMe storage
+## Specification
 
-## Build & Test
+# Spec: Move commitment-prefix to snapshots subcommand
 
-```bash
-make erigon              # Build main binary (./build/bin/erigon)
-make integration         # Build integration test binary
-make lint                # Run golangci-lint + mod tidy check
-make test-short          # Quick unit tests (-short -failfast)
-make test-all            # Full test suite with coverage
-make gen                 # Generate all auto-generated code (mocks, grpc, etc.)
+GitHub issue: https://github.com/erigontech/erigon/issues/14616
+
+## Context
+There's a standalone binary `cmd/commitment-prefix/main.go` (479 lines) that analyzes commitment domain .kv files — produces charts of branch data distribution by prefix depth. It was deleted from main but the issue asks to resurrect it as a subcommand under `erigon snapshots commitment-analysis`.
+
+The original code is preserved at `cmd/commitment-prefix-original.go` in the working directory for reference.
+
+## What To Do
+
+### 1. Create the subcommand
+
+Add `commitment-analysis` as a subcommand of `erigon snapshots` in `cmd/utils/app/snapshots_cmd.go`:
+
+```go
+{
+    Name:  "commitment-analysis",
+    Usage: "Analyze commitment domain branch data distribution by prefix depth",
+    Action: func(c *cli.Context) error { ... },
+    Flags: []cli.Flag{...},
+}
 ```
 
-Before committing, always verify changes with: `make lint && make erigon integration`
+### 2. Rewrite to use standard database/aggregator patterns
 
-Run specific tests:
+The original code opens .kv files directly via `seg.NewDecompressor`. Rewrite to:
+- Use `--datadir` flag (standard pattern from other subcommands)
+- Open database/aggregator in the same manner as other snapshots subcommands (look at `doLS`, `doRetire`, etc. for patterns)
+- Find commitment domain .kv files through the aggregator, not manual filepath walking
+
+### 3. Keep the analysis logic
+
+The core analysis logic (prefix counting, depth analysis, chart generation) should be preserved from the original. Key functions to port:
+- `proceedFiles` — concurrent file processing
+- `analyzeBranches` — branch data parsing and prefix analysis  
+- Chart generation via go-echarts (bar charts, heatmaps)
+- State printing (`--state` flag)
+
+### 4. CLI flags mapping
+
+Original flags → new CLI flags:
+- `-output` → `--output` (output directory for charts)
+- `-j` → `--concurrency` (worker count)
+- `-trie` → `--trie` (hex/bin variant)
+- `-compression` → `--compression` (none/k/v/kv)
+- `-state` → `--state` (print file state)
+- `-depth` → `--depth` (prefix depth)
+- Positional args (file paths) → either `--datadir` auto-discovery or positional
+
+### 5. Delete old binary
+
+Remove `cmd/commitment-prefix/` directory if it still exists (it was already deleted but ensure no references remain).
+
+## Approach
+
+- Read `cmd/commitment-prefix-original.go` for the full original implementation
+- Read `cmd/utils/app/snapshots_cmd.go` for patterns of how other subcommands are structured
+- Read how `doLS` or similar opens the database/aggregator
+- Port the code, adapting to cli.Command patterns
+- Go binary: `/usr/local/go/bin/go`
+- Build: `go build ./cmd/erigon/...`
+- Test: `go build ./cmd/...`
+
+## What NOT To Do
+- Don't change the analysis algorithm
+- Don't remove go-echarts dependency
+- Don't modify other subcommands
+- Don't add new dependencies beyond what's already in go.mod
+
+
+## Success Criteria (Objective)
+
+# Objective: commitment-analysis subcommand
+
+## Success Criteria
+
+### Must Pass
+1. `go build ./cmd/erigon/...` — compiles clean
+2. `go build ./cmd/...` — all binaries compile
+3. New subcommand visible: `erigon snapshots commitment-analysis --help` shows usage
+4. All original functionality preserved (charts, state printing, depth analysis)
+5. Uses --datadir pattern consistent with other snapshots subcommands
+6. `cmd/commitment-prefix/` directory does not exist
+
+### Quality Checks
+- Follows existing code patterns in snapshots_cmd.go
+- Database/aggregator opened same way as other subcommands
+- CLI flags documented with usage strings
+- No hardcoded paths
+- Error handling consistent with codebase
+
+### Code Quality
+- No magic strings — use constants where appropriate
+- Error handling: wrap errors with context
+- Comments on non-obvious decisions
+- Consistent naming with codebase conventions
+- gofmt clean
+
+### Verification Commands
 ```bash
-go test ./execution/stagedsync/...
-go test -run TestName ./path/to/package/...
+/usr/local/go/bin/go build ./cmd/erigon/...
+/usr/local/go/bin/go build ./cmd/...
 ```
 
-## Architecture Overview
+### Red Flags (auto-fail)
+- Changing existing subcommands
+- Adding new dependencies not in go.mod
+- Leaving cmd/commitment-prefix/ directory
+- Breaking compilation of any existing binary
 
-Erigon is a high-performance Ethereum execution client with embedded consensus layer. Key design principles:
-- **Flat KV storage** instead of tries (reduces write amplification)
-- **Staged synchronization** (ordered pipeline, independent unwind)
-- **Modular services** (sentry, txpool, downloader can run separately)
 
-## Directory Structure
+## Important Notes
 
-| Directory | Purpose | Component Docs |
-|-----------|---------|----------------|
-| `cmd/` | Entry points: erigon, rpcdaemon, caplin, sentry, downloader | - |
-| `execution/stagedsync/` | Staged sync pipeline | [agents.md](execution/stagedsync/agents.md) |
-| `db/` | Storage: MDBX, snapshots, ETL | [agents.md](db/agents.md) |
-| `cl/` | Consensus layer (Caplin) | [agents.md](cl/agents.md) |
-| `p2p/` | P2P networking (DevP2P) | [agents.md](p2p/agents.md) |
-| `rpc/jsonrpc/` | JSON-RPC API | - |
-
-## Running
-
-```bash
-./build/bin/erigon --datadir=./data --chain=mainnet
-./build/bin/erigon --datadir=dev --chain=dev --mine  # Development
-```
-
-## Conventions
-
-Commit messages: prefix with package(s) modified, e.g., `eth, rpc: make trace configs optional`
-
-Cherry-pick PRs: when opening a PR that cherry-picks a commit to a `release/X.Y` branch, prepend the PR title with `[rX.Y]`, e.g., a cherry-pick to `release/3.4` → `[r3.4] eth, rpc: make trace configs optional`
-
-**Important**: Always run `make lint` after making code changes and before committing. Fix any linter errors before proceeding. PRs must pass `make lint` before being opened or updated.
-
-## Pull Requests & Workflows
-
-When manually dispatching a workflow that is not part of the PR's automatic check list, add a comment on the PR explaining which workflow was dispatched, why it was chosen, and include a direct link to the workflow run.
-
-## Pre-push
-
-Before running `git push`, always run `make lint` first and fix all issues. Run lint multiple times if needed — it is non-deterministic.
-
-## Lint Notes
-
-The linter (`make lint`) is non-deterministic in which files it scans — new issues may appear on subsequent runs. Run lint repeatedly until clean.
-
-Common lint categories and fixes:
-- **ruleguard (defer tx.Rollback/cursor.Close):** The error check must come *before* `defer tx.Rollback()`. Never remove an explicit `.Close()` or `.Rollback()` — add `defer` as a safety net alongside it, since the timing of the explicit call may matter.
-- **prealloc:** Pre-allocate slices when the length is known from a range.
-- **unslice:** Remove redundant `[:]` on variables that are already slices.
-- **newDeref:** Replace `*new(T)` with `T{}`.
-- **appendCombine:** Combine consecutive `append` calls into one.
-- **rangeExprCopy:** Use `&x` in `range` to avoid copying large arrays.
-- **dupArg:** For intentional `x.Equal(x)` self-equality tests, suppress with `//nolint:gocritic`.
-- **Loop ruleguard in benchmarks:** For `BeginRw`/`BeginRo` inside loops where `defer` doesn't apply, suppress with `//nolint:gocritic`.
-
-## Workflows
-
-Make sure all scripts and shell code used from GitHub workflows is cross platform, for macOS, Windows and Linux.
-
-Read [`.github/README.md`](.github/README.md) for guidelines before making changes to workflows.
-
-## Go Test Caching
-
-Go's test result cache keys on the mtime+size of every file read (via Go stdlib) during a test run. CI normalizes mtimes via `git restore-mtime` in `.github/actions/setup-erigon/action.yml` so that unchanged files get stable mtimes across runs.
-
-**When a test reads a data file at runtime** (via `os.Open`, `os.ReadFile`, `os.Stat`, etc.) that lives outside a `testdata/` directory, it must be added to the `git restore-mtime` pattern list in `setup-erigon/action.yml`. Otherwise that package's test results will never be cached in CI.
-
-Covered patterns already include `**/testdata/**`, `execution/tests/test-corners/**`, `cl/spectest/**/data_*/**`, `cl/transition/**/test_data/**`, `cl/utils/eth2shuffle/spec/**`, and `execution/state/genesiswrite/*.json`.
+- A **strict verifier agent** will independently check your work when you are done.
+- The verifier has no access to your session — it only reads the actual files.
+- Claims you make that are not backed by real file changes will be caught.
+- Do not leave TODOs, stubs, or placeholder code. Every criterion must be fully met.
+- Run tests / build commands to confirm your work is correct before finishing.

@@ -547,6 +547,22 @@ var snapshotCommand = cli.Command{
 			},
 		},
 		{
+			Name:  "commitment-analysis",
+			Usage: "Analyze commitment domain branch data distribution by prefix depth",
+			Action: func(cliCtx *cli.Context) error {
+				return doCommitmentAnalysis(cliCtx)
+			},
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.StringFlag{Name: "output", Usage: "output directory for charts (default: same as commitment files)"},
+				&cli.IntFlag{Name: "concurrency", Value: 4, Usage: "number of concurrently processed files"},
+				&cli.StringFlag{Name: "trie", Value: "hex", Usage: "commitment trie variant (hex or bin)"},
+				&cli.StringFlag{Name: "compression", Value: "none", Usage: "compression type (none, k, v, kv)"},
+				&cli.BoolFlag{Name: "state", Usage: "print state of file"},
+				&cli.IntFlag{Name: "depth", Value: 0, Usage: "depth of the prefixes to analyze"},
+			}),
+		},
+		{
 			Name: "preverified",
 			Action: func(cliCtx *cli.Context) (err error) {
 				var dataDir string
