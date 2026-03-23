@@ -642,9 +642,6 @@ type ByteReader interface {
 //
 // Stream is not safe for concurrent use.
 type Stream struct {
-	r  ByteReader
-	sr sliceReader // embedded to avoid allocation in NewStreamFromPool
-
 	remaining uint64   // number of bytes remaining to be read from r
 	size      uint64   // size of value ahead
 	kinderr   error    // error from last readKind
@@ -653,6 +650,9 @@ type Stream struct {
 	kind      Kind     // kind of value ahead
 	byteval   byte     // value of single byte in type tag
 	limited   bool     // true if input limit is in effect
+
+	r  ByteReader
+	sr sliceReader // embedded to avoid allocation in NewStreamFromPool
 }
 
 // Remaining returns number of bytes remaining to be read.
@@ -705,7 +705,7 @@ func NewListStream(r io.Reader, len uint64) *Stream {
 // escape to the heap, making this call allocation-free.
 func NewStreamFromPool(b []byte, inputLimit uint64) (stream *Stream) {
 	stream = streamPool.Get().(*Stream)
-	stream.sr = b
+	stream.sr = b // non-pointer typed field: to avoid heap-escaping of reader interface
 	stream.Reset(&stream.sr, inputLimit)
 	return stream
 }
@@ -1298,6 +1298,10 @@ func (s *Stream) listLimit() (inList bool, limit uint64) {
 }
 
 type sliceReader []byte
+
+func NewSliceReader(data []byte) *sliceReader {
+	return (*sliceReader)(&data)
+}
 
 func (sr *sliceReader) Read(b []byte) (int, error) {
 	if len(*sr) == 0 {
