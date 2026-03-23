@@ -197,7 +197,7 @@ func ExecuteBlockEphemerally(
 	// Note: when vmConfig.ReadOnly is true, requests is nil (FinalizeBlockExecution
 	// is skipped above), so this would compare an empty hash. Currently safe because
 	// ReadOnly is never used with requests-bearing blocks.
-	if !vmConfig.StatelessExec && header.RequestsHash != nil {
+	if !vmConfig.StatelessExec && !vmConfig.ReadOnly && header.RequestsHash != nil {
 		computedHash := requests.Hash()
 		if *computedHash != *header.RequestsHash {
 			return nil, fmt.Errorf("invalid requests hash: computed %x, header %x", *computedHash, *header.RequestsHash)

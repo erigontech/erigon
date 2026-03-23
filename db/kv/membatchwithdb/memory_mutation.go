@@ -963,10 +963,12 @@ func (m *MemoryMutation) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum 
 		return fmt.Errorf("DomainDelPrefix: RangeLatest: %w", err)
 	}
 	defer it.Close()
+	var iterErr error
 	m.mu.Lock()
 	for it.HasNext() {
 		k, _, err := it.Next()
 		if err != nil {
+			iterErr = err
 			break
 		}
 		sk := string(k)
@@ -975,6 +977,9 @@ func (m *MemoryMutation) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum 
 		}
 	}
 	m.mu.Unlock()
+	if iterErr != nil {
+		return fmt.Errorf("DomainDelPrefix: iterator: %w", iterErr)
+	}
 	return nil
 }
 

@@ -317,6 +317,7 @@ func getOrCreateGenesisDB(fork string, gspec *types.Genesis) (kv.TemporalRwDB, *
 		entry.err = err
 		delete(genesisDBCache, key)
 		close(entry.ready)
+		genesisDBCond.Broadcast() // wake goroutines waiting for a free slot
 		genesisDBMu.Unlock()
 		return nil, nil, nil, err
 	}
