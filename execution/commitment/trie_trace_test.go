@@ -33,7 +33,7 @@ import (
 // LoadTrieTraceIntoMockState loads a TOML trace file, populates a MockState
 // with the branches/accounts/storages, and returns the plainKeys and Updates
 // decoded from the trace's update list.
-func LoadTrieTraceIntoMockState(t testing.TB, path string) (*MockState, [][]byte, []Update) {
+func LoadTrieTraceIntoMockState(t testing.TB, path string) (*MockState, [][]byte, []Update, []byte) {
 	t.Helper()
 
 	tt, err := LoadTrieTrace(path)
@@ -83,7 +83,10 @@ func LoadTrieTraceIntoMockState(t testing.TB, path string) (*MockState, [][]byte
 		require.Equal(t, len(buf), pos, "leftover bytes decoding update for key %s", tu.PlainKey)
 	}
 
-	return ms, plainKeys, updates
+	trieState, err := tt.DecodeTrieState()
+	require.NoError(t, err)
+
+	return ms, plainKeys, updates, trieState
 }
 
 func TestTrieTraceRoundTrip(t *testing.T) {
@@ -115,7 +118,7 @@ func TestTrieTraceRoundTrip(t *testing.T) {
 	upds1.Close()
 
 	// Build trace and save to temp file
-	trace, err := BuildTrieTrace(recorder, nil)
+	trace, err := BuildTrieTrace(recorder, nil, nil)
 	require.NoError(t, err)
 
 	tracePath := filepath.Join(t.TempDir(), "trace.toml")
@@ -123,7 +126,7 @@ func TestTrieTraceRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 
 	// Phase 2: Load trace into fresh MockState and replay
-	state2, replayKeys, replayUpdates := LoadTrieTraceIntoMockState(t, tracePath)
+	state2, replayKeys, replayUpdates, _ := LoadTrieTraceIntoMockState(t, tracePath)
 
 	trie2 := NewHexPatriciaHashed(length.Addr, state2)
 
@@ -143,7 +146,7 @@ func TestTrieTraceEmptyUpdates(t *testing.T) {
 	ms := NewMockState(t)
 	rc := NewRecordingContext(ms)
 
-	trace, err := BuildTrieTrace(rc, nil)
+	trace, err := BuildTrieTrace(rc, nil, nil)
 	require.NoError(t, err)
 	require.Empty(t, trace.Branches)
 	require.Empty(t, trace.Accounts)
@@ -183,7 +186,7 @@ func TestTrieTraceAccountOnlyRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	upds1.Close()
 
-	trace, err := BuildTrieTrace(recorder, nil)
+	trace, err := BuildTrieTrace(recorder, nil, nil)
 	require.NoError(t, err)
 	require.Empty(t, trace.Storages, "account-only trace should have no storages")
 	require.NotEmpty(t, trace.Accounts, "account-only trace should have accounts")
@@ -193,7 +196,7 @@ func TestTrieTraceAccountOnlyRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 
 	// Replay
-	state2, replayKeys, replayUpdates := LoadTrieTraceIntoMockState(t, tracePath)
+	state2, replayKeys, replayUpdates, _ := LoadTrieTraceIntoMockState(t, tracePath)
 	trie2 := NewHexPatriciaHashed(length.Addr, state2)
 	upds2 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, replayKeys, replayUpdates)
 	rootHash2, err := trie2.Process(ctx, upds2, "", nil, WarmupConfig{})
@@ -230,7 +233,7 @@ func TestTrieTraceStorageOnlyRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	upds1.Close()
 
-	trace, err := BuildTrieTrace(recorder, nil)
+	trace, err := BuildTrieTrace(recorder, nil, nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, trace.Storages, "storage trace should have storages")
 
@@ -239,7 +242,7 @@ func TestTrieTraceStorageOnlyRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 
 	// Replay
-	state2, replayKeys, replayUpdates := LoadTrieTraceIntoMockState(t, tracePath)
+	state2, replayKeys, replayUpdates, _ := LoadTrieTraceIntoMockState(t, tracePath)
 	trie2 := NewHexPatriciaHashed(length.Addr, state2)
 	upds2 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, replayKeys, replayUpdates)
 	rootHash2, err := trie2.Process(ctx, upds2, "", nil, WarmupConfig{})
@@ -349,7 +352,7 @@ func TestTrieTraceErrorRoundTrip(t *testing.T) {
 
 	// Build trace — should succeed even though Process failed.
 	// Partial data (whatever was read before the error) is included.
-	trace, err := BuildTrieTrace(recorder, nil)
+	trace, err := BuildTrieTrace(recorder, nil, nil)
 	require.NoError(t, err)
 
 	// Set the error in the trace (mimicking what the defer block does)
@@ -377,32 +380,9 @@ func TestTrieTraceErrorRoundTrip(t *testing.T) {
 	require.Equal(t, uint64(42), loaded.BlockNum)
 	require.Equal(t, uint64(100), loaded.TxNum)
 
-	// Replay — load trace state into fresh MockState, inject same error
-	// condition, and re-apply the original updates (known from the block
-	// being debugged). The trace provides the state context; the caller
-	// provides the input updates that triggered the failure.
-	state2 := NewMockState(t)
-	for hexKey, hexVal := range loaded.Branches {
-		key, err := hex.DecodeString(hexKey)
-		require.NoError(t, err)
-		val, err := hex.DecodeString(hexVal)
-		require.NoError(t, err)
-		state2.cm[string(key)] = BranchData(val)
-	}
-	for hexKey, hexVal := range loaded.Accounts {
-		key, err := hex.DecodeString(hexKey)
-		require.NoError(t, err)
-		val, err := hex.DecodeString(hexVal)
-		require.NoError(t, err)
-		state2.sm[string(key)] = val
-	}
-	for hexKey, hexVal := range loaded.Storages {
-		key, err := hex.DecodeString(hexKey)
-		require.NoError(t, err)
-		val, err := hex.DecodeString(hexVal)
-		require.NoError(t, err)
-		state2.sm[string(key)] = val
-	}
+	// Replay — load trace state into fresh MockState via helper, inject
+	// same error condition, and re-apply the original updates.
+	state2, _, _, _ := LoadTrieTraceIntoMockState(t, errorPath)
 
 	// Re-apply the same updates to the state (as the original process had them)
 	err = state2.applyPlainUpdates(plainKeys, updates)
@@ -414,9 +394,6 @@ func TestTrieTraceErrorRoundTrip(t *testing.T) {
 		errToReturn:     accountErr,
 	}
 
-	// Use the original input keys/updates for the replay — this is what
-	// the debugging workflow does: you know the block's updates, the trace
-	// gives you the state context.
 	trie2 := NewHexPatriciaHashed(length.Addr, state2)
 	trie2.ResetContext(errState2)
 	upds2 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
@@ -433,21 +410,32 @@ func TestTrieTracePartialRoundTrip(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
-	// Build some account updates
+	// Build some account updates — use 3 accounts so the trie reads some
+	// data before hitting the corrupt key during fold.
 	plainKeys, updates := NewUpdateBuilder().
 		Balance("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", 4).
 		Balance("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40", 900234).
 		Balance("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", 1233).
 		Build()
 
-	// Set up state with an Account call that will fail for one key.
+	// Set up state with valid data, then wrap with an error on one key.
 	// The trie will process some keys before hitting the error, giving
 	// us a partial trace.
 	state := NewMockState(t)
 	err := state.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	recorder := NewRecordingContext(state)
+	// Pick the last plainKey to trigger the error — the trie processes keys
+	// in hash order, so some reads will succeed before the error.
+	corruptKey := string(plainKeys[len(plainKeys)-1])
+	accountErr := errors.New("corrupt account: partial trace test")
+	errState := &errorAccountState{
+		PatriciaContext: state,
+		errorKey:        corruptKey,
+		errToReturn:     accountErr,
+	}
+
+	recorder := NewRecordingContext(errState)
 
 	trie := NewHexPatriciaHashed(length.Addr, state)
 	trie.ResetContext(recorder)
@@ -456,15 +444,15 @@ func TestTrieTracePartialRoundTrip(t *testing.T) {
 	_, processErr := trie.Process(ctx, upds, "", nil, WarmupConfig{})
 	upds.Close()
 
-	// Build trace — whether Process succeeded or not, partial data should be present
-	trace, err := BuildTrieTrace(recorder, nil)
+	require.Error(t, processErr, "Process should fail due to corrupt account")
+
+	// Build trace — Process failed but partial data should be present
+	trace, err := BuildTrieTrace(recorder, nil, nil)
 	require.NoError(t, err)
 
-	if processErr != nil {
-		trace.Error = processErr.Error()
-	}
+	trace.Error = processErr.Error()
 
-	// The trace should have at least some recorded data (accounts were read)
+	// The trace should have at least some recorded data (accounts read before error)
 	totalRecords := len(trace.Accounts) + len(trace.Storages) + len(trace.Branches)
 	require.Greater(t, totalRecords, 0, "partial trace should contain some recorded data")
 
@@ -476,12 +464,12 @@ func TestTrieTracePartialRoundTrip(t *testing.T) {
 	loaded, err := LoadTrieTrace(tracePath)
 	require.NoError(t, err)
 
-	// Verify all partial data round-trips
+	// Verify partial data round-trips and error is preserved
 	require.Equal(t, len(trace.Branches), len(loaded.Branches))
 	require.Equal(t, len(trace.Accounts), len(loaded.Accounts))
 	require.Equal(t, len(trace.Storages), len(loaded.Storages))
 	require.Equal(t, len(trace.Updates), len(loaded.Updates))
-	require.Equal(t, trace.Error, loaded.Error)
+	require.Contains(t, loaded.Error, "corrupt account")
 }
 
 // TestTrieTracePutBranchRecording verifies that PutBranch writes are
@@ -512,7 +500,7 @@ func TestTrieTracePutBranchRecording(t *testing.T) {
 	require.NotEmpty(t, recorder.putBranches, "PutBranch calls should have been recorded")
 
 	// Build trace and verify PutBranches are included
-	trace, err := BuildTrieTrace(recorder, nil)
+	trace, err := BuildTrieTrace(recorder, nil, nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, trace.PutBranches, "trace should contain PutBranches")
 
@@ -544,9 +532,10 @@ func TestTrieTraceNewFieldsRoundTrip(t *testing.T) {
 	t.Parallel()
 
 	tt := &TrieTrace{
-		BlockNum: 12345,
-		TxNum:    67890,
-		Error:    "test error: something went wrong",
+		BlockNum:  12345,
+		TxNum:     67890,
+		Error:     "test error: something went wrong",
+		TrieState: "deadbeefcafebabe",
 		Branches: map[string]string{
 			"0a0b": "deadbeef",
 		},
@@ -578,6 +567,7 @@ func TestTrieTraceNewFieldsRoundTrip(t *testing.T) {
 	require.Equal(t, tt.BlockNum, loaded.BlockNum)
 	require.Equal(t, tt.TxNum, loaded.TxNum)
 	require.Equal(t, tt.Error, loaded.Error)
+	require.Equal(t, tt.TrieState, loaded.TrieState)
 	require.Equal(t, tt.Branches, loaded.Branches)
 	require.Equal(t, tt.Accounts, loaded.Accounts)
 	require.Equal(t, len(tt.PutBranches), len(loaded.PutBranches))
@@ -613,6 +603,7 @@ update = "050100000000000004"
 	require.Equal(t, uint64(0), loaded.BlockNum)
 	require.Equal(t, uint64(0), loaded.TxNum)
 	require.Empty(t, loaded.Error)
+	require.Empty(t, loaded.TrieState)
 	require.Empty(t, loaded.PutBranches)
 
 	// Original fields should be intact
@@ -646,10 +637,14 @@ func TestTrieTraceReplayFromFile(t *testing.T) {
 	const tracePath = "testdata/trie-trace-block-NNNNNN.toml" // ← your trace file
 
 	ctx := context.Background()
-	state, plainKeys, replayUpdates := LoadTrieTraceIntoMockState(t, tracePath)
+	state, plainKeys, replayUpdates, trieState := LoadTrieTraceIntoMockState(t, tracePath)
 
 	trie := NewHexPatriciaHashed(length.Addr, state)
 	trie.ResetContext(state)
+	if len(trieState) > 0 {
+		err := trie.SetState(trieState)
+		require.NoError(t, err)
+	}
 
 	// WrapKeyUpdates hashes plainKeys and sorts them — required before Process.
 	upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, replayUpdates)
@@ -667,4 +662,72 @@ func TestTrieTraceReplayFromFile(t *testing.T) {
 		return
 	}
 	t.Logf("Root hash: %x", rootHash)
+}
+
+func TestTrieTraceNonEmptyStateRoundTrip(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	// Phase 1: Build up trie state with initial accounts
+	plainKeys1, updates1 := NewUpdateBuilder().
+		Balance("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", 4).
+		Balance("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40", 900234).
+		Build()
+
+	state1 := NewMockState(t)
+	err := state1.applyPlainUpdates(plainKeys1, updates1)
+	require.NoError(t, err)
+
+	trie1 := NewHexPatriciaHashed(length.Addr, state1)
+	upds1 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys1, updates1)
+	_, err = trie1.Process(ctx, upds1, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	upds1.Close()
+
+	// Snapshot the non-empty trie state
+	trieState, err := trie1.EncodeCurrentState(nil)
+	require.NoError(t, err)
+	require.NotEmpty(t, trieState, "trie state should be non-empty after Process")
+
+	// Phase 2: Apply more updates with recording, starting from non-empty state
+	plainKeys2, updates2 := NewUpdateBuilder().
+		Balance("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", 1233).
+		Nonce("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40", 42).
+		Build()
+
+	err = state1.applyPlainUpdates(plainKeys2, updates2)
+	require.NoError(t, err)
+
+	recorder := NewRecordingContext(state1)
+	trie1.ResetContext(recorder)
+
+	upds2 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys2, updates2)
+	rootHash1, err := trie1.Process(ctx, upds2, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	upds2.Close()
+
+	// Build trace with trie state
+	trace, err := BuildTrieTrace(recorder, nil, trieState)
+	require.NoError(t, err)
+	require.NotEmpty(t, trace.TrieState, "trace should contain trie state")
+
+	tracePath := filepath.Join(t.TempDir(), "stateful_trace.toml")
+	err = trace.Save(tracePath)
+	require.NoError(t, err)
+
+	// Phase 3: Replay from trace with state restoration
+	state2, replayKeys, replayUpdates, loadedState := LoadTrieTraceIntoMockState(t, tracePath)
+	require.NotEmpty(t, loadedState, "loaded trie state should be non-empty")
+
+	trie2 := NewHexPatriciaHashed(length.Addr, state2)
+	trie2.ResetContext(state2)
+	err = trie2.SetState(loadedState)
+	require.NoError(t, err)
+
+	upds3 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, replayKeys, replayUpdates)
+	rootHash2, err := trie2.Process(ctx, upds3, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	upds3.Close()
+
+	require.Equal(t, rootHash1, rootHash2, "replay with restored state should match original root hash")
 }

@@ -7,6 +7,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
 	"sync/atomic"
 	"time"
@@ -280,25 +282,38 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	// Block-targeted: when TrieTraceBlock is set, only record that specific block.
 	var recorder *commitment.RecordingContext
 	traceFile := dbg.TrieTraceFile
-	if dbg.TrieTraceBlock != 0 && blockNum != dbg.TrieTraceBlock {
+	if traceFile == "" && dbg.TrieTraceBlock != 0 && blockNum == dbg.TrieTraceBlock {
+		// Auto-generate filename when only TRIE_TRACE_BLOCK is set without TRIE_TRACE_FILE.
+		traceFile = fmt.Sprintf("/tmp/trie-trace-block-%d.toml", blockNum)
+	} else if dbg.TrieTraceBlock != 0 && blockNum != dbg.TrieTraceBlock {
 		traceFile = "" // skip recording — not the target block
 	}
-	if traceFile != "" || (dbg.TrieTraceBlock != 0 && blockNum == dbg.TrieTraceBlock) {
-		// Auto-generate filename when only TRIE_TRACE_BLOCK is set without TRIE_TRACE_FILE.
-		if traceFile == "" {
-			traceFile = fmt.Sprintf("/tmp/trie-trace-block-%d.toml", blockNum)
-		}
+	if traceFile != "" {
 		recorder = commitment.NewRecordingContext(trieContext)
 		sdc.patriciaTrie.ResetContext(recorder)
 		// Capture input keys before Process consumes them — fold operations may
 		// read Account/Storage for neighboring cells, and we must not include
 		// those reads as input updates in the trace.
 		inputKeys := sdc.updates.PlainKeys()
+
+		// Capture internal trie state before Process — required for replay.
+		// In production the trie has been restored via seekCommitment/SetState;
+		// without this snapshot, replay starts from empty state and diverges.
+		var trieState []byte
+		if hph, ok := sdc.patriciaTrie.(*commitment.HexPatriciaHashed); ok {
+			trieState, err = hph.EncodeCurrentState(nil)
+			if err != nil {
+				log.Warn("[commitment] failed to encode trie state for trace", "err", err)
+				trieState = nil // non-fatal, continue without state
+				err = nil
+			}
+		}
+
 		defer func() {
 			if recorder == nil {
 				return
 			}
-			trace, traceErr := commitment.BuildTrieTrace(recorder, inputKeys)
+			trace, traceErr := commitment.BuildTrieTrace(recorder, inputKeys, trieState)
 			if traceErr != nil {
 				log.Warn("[commitment] failed to build trie trace", "err", traceErr)
 				return

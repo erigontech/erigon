@@ -37,6 +37,7 @@ type TrieTrace struct {
 	BlockNum    uint64                      `toml:"block_num,omitempty"`
 	TxNum       uint64                      `toml:"tx_num,omitempty"`
 	Error       string                      `toml:"error,omitempty"`
+	TrieState   string                      `toml:"trie_state,omitempty"`
 	Branches    map[string]string           `toml:"branches"`
 	Accounts    map[string]string           `toml:"accounts"`
 	Storages    map[string]string           `toml:"storages"`
@@ -64,12 +65,16 @@ type TraceKeyUpdate struct {
 // (for neighboring cells) from being treated as input updates during replay.
 // When inputKeys is nil, all recorded accounts and storages are included as
 // updates (useful in tests where the trie starts empty).
-func BuildTrieTrace(rc *RecordingContext, inputKeys map[string]struct{}) (*TrieTrace, error) {
+func BuildTrieTrace(rc *RecordingContext, inputKeys map[string]struct{}, trieState []byte) (*TrieTrace, error) {
 	tt := &TrieTrace{
 		Branches: make(map[string]string, len(rc.branches)),
 		Accounts: make(map[string]string, len(rc.accounts)),
 		Storages: make(map[string]string, len(rc.storages)),
 		Updates:  make([]TraceKeyUpdate, 0, len(rc.accounts)+len(rc.storages)),
+	}
+
+	if len(trieState) > 0 {
+		tt.TrieState = hex.EncodeToString(trieState)
 	}
 
 	for k, v := range rc.branches {
@@ -155,4 +160,13 @@ func LoadTrieTrace(path string) (*TrieTrace, error) {
 		return nil, fmt.Errorf("unmarshal trie trace: %w", err)
 	}
 	return &tt, nil
+}
+
+// DecodeTrieState returns the decoded trie state bytes, or nil if no state
+// was captured (empty trie or old trace format).
+func (tt *TrieTrace) DecodeTrieState() ([]byte, error) {
+	if tt.TrieState == "" {
+		return nil, nil
+	}
+	return hex.DecodeString(tt.TrieState)
 }
