@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	"github.com/erigontech/erigon/cmd/caplin/caplincli"
@@ -117,5 +118,5 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		MaxPeerCount:              cfg.MaxPeerCount,
 		MaxInboundTrafficPerPeer:  datasize.MB,
 		MaxOutboundTrafficPerPeer: datasize.MB,
-	}, cfg.Dirs, nil, nil, nil, blockSnapBuildSema)
+	}, cfg.Dirs, getters.NewExecutionEngineReader(ctx, executionEngine), nil, nil, blockSnapBuildSema)
 }
