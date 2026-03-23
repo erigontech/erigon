@@ -165,19 +165,21 @@ func (p *ConcurrentPatriciaHashed) EnableWarmupCache(b bool) {
 	}
 }
 func (p *ConcurrentPatriciaHashed) GetCapture(truncate bool) []string {
-	capture := p.root.GetCapture(truncate)
+	capture := p.root.GetCapture(false)
 	if truncate {
-		for i := range p.mounts {
-			p.mounts[i].SetCapture(nil)
-		}
+		p.SetCapture(nil)
 	}
 	return capture
 }
 
 func (p *ConcurrentPatriciaHashed) SetCapture(capture []string) {
-	p.root.SetCapture(capture)
+	var recorder *trieDebugRecorder
+	if capture != nil {
+		recorder = newTrieDebugRecorder(capture)
+	}
+	p.root.setCaptureRecorder(recorder)
 	for i := range p.mounts {
-		p.mounts[i].SetCapture(capture)
+		p.mounts[i].setCaptureRecorder(recorder)
 	}
 }
 
@@ -226,10 +228,23 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 			cnt := 0
 			err := nib.Load(nil, "", func(hashedKey, plainKey []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 				cnt++
+				var stateUpdate *Update
 				if phnib.trace {
 					fmt.Printf("\n%x) %d plainKey [%x] hashedKey [%x] currentKey [%x]\n", ni, cnt, plainKey, hashedKey, phnib.currentKey[:phnib.currentKeyLen])
 				}
-				if err := phnib.followAndUpdate(hashedKey, plainKey, nil); err != nil {
+				if phnib.traceDomain || phnib.capture != nil {
+					var trace string
+					var err error
+					stateUpdate, trace, err = phnib.debugUpdateTrace(fmt.Sprintf("(%x/%d)", ni, cnt), plainKey, hashedKey, nil)
+					if err != nil {
+						return fmt.Errorf("debugUpdateTrace[%x]: %w", ni, err)
+					}
+					if phnib.traceDomain {
+						fmt.Println(trace)
+					}
+					phnib.appendCapture(trace)
+				}
+				if err := phnib.followAndUpdate(hashedKey, plainKey, stateUpdate); err != nil {
 					return fmt.Errorf("followAndUpdate[%x]: %w", ni, err)
 				}
 				return nil

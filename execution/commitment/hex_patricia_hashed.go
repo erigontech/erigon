@@ -54,6 +54,40 @@ type DomainPutter = stateifs.DomainPutter
 // CommitmentWrite represents a commitment domain write that needs to be added to changesets.
 type CommitmentWrite = stateifs.CommitmentWrite
 
+type trieDebugRecorder struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func newTrieDebugRecorder(capture []string) *trieDebugRecorder {
+	recorder := &trieDebugRecorder{}
+	if capture != nil {
+		recorder.lines = make([]string, len(capture))
+		copy(recorder.lines, capture)
+		if len(capture) == 0 {
+			recorder.lines = make([]string, 0)
+		}
+	}
+	return recorder
+}
+
+func (r *trieDebugRecorder) Append(line string) {
+	r.mu.Lock()
+	r.lines = append(r.lines, line)
+	r.mu.Unlock()
+}
+
+func (r *trieDebugRecorder) Snapshot() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.lines == nil {
+		return nil
+	}
+	capture := make([]string, len(r.lines))
+	copy(capture, r.lines)
+	return capture
+}
+
 // HexPatriciaHashed implements commitment based on patricia merkle tree with radix 16,
 // with keys pre-hashed by keccak256
 type HexPatriciaHashed struct {
@@ -80,7 +114,7 @@ type HexPatriciaHashed struct {
 	rootPresent   bool
 	trace         bool
 	traceDomain   bool
-	capture       []string
+	capture       *trieDebugRecorder
 	ctx           PatriciaContext
 	hashAuxBuffer [128]byte     // buffer to compute cell hash or write hash-related things
 	cellHashBuf   common.Hash   // shared scratch buffer for hashKey calls (avoids per-cell allocation)
@@ -2692,31 +2726,16 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		}
 
 		if hph.trace || hph.traceDomain || hph.capture != nil {
-			update := stateUpdate
-
-			if update == nil {
-				if int16(len(plainKey)) == hph.accountKeyLen {
-					update, err = hph.accountFromCacheOrDB(plainKey)
-					if err != nil {
-						return fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
-					}
-				} else {
-					update, err = hph.storageFromCacheOrDB(plainKey)
-					if err != nil {
-						return fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
-					}
-				}
+			_, trace, err := hph.debugUpdateTrace(fmt.Sprintf("(%d/%d)", ki+1, updatesCount), plainKey, hashedKey, stateUpdate)
+			if err != nil {
+				return err
 			}
-
-			trace := fmt.Sprintf("(%d/%d) plainKey [%x] %s hashedKey [%x] currentKey [%x]", ki+1, updatesCount, plainKey, update, hashedKey, hph.currentKey[:hph.currentKeyLen])
 
 			if hph.trace || hph.traceDomain {
 				fmt.Println(trace)
 			}
 
-			if hph.capture != nil {
-				hph.capture = append(hph.capture, trace)
-			}
+			hph.appendCapture(trace)
 		}
 
 		if err := hph.followAndUpdate(hashedKey, plainKey, stateUpdate); err != nil {
@@ -2809,14 +2828,23 @@ func (hph *HexPatriciaHashed) SetTraceDomain(trace bool)     { hph.traceDomain =
 func (hph *HexPatriciaHashed) EnableWarmupCache(enable bool) { hph.enableWarmupCache = enable }
 
 func (hph *HexPatriciaHashed) GetCapture(truncate bool) []string {
-	capture := hph.capture
+	if hph.capture == nil {
+		return nil
+	}
+	capture := hph.capture.Snapshot()
 	if truncate {
 		hph.capture = nil
 	}
 	return capture
 }
 
-func (hph *HexPatriciaHashed) SetCapture(capture []string) { hph.capture = capture }
+func (hph *HexPatriciaHashed) SetCapture(capture []string) {
+	if capture == nil {
+		hph.capture = nil
+		return
+	}
+	hph.capture = newTrieDebugRecorder(capture)
+}
 
 func (hph *HexPatriciaHashed) EnableCsvMetrics(filePathPrefix string) {
 	hph.metrics.EnableCsvMetrics(filePathPrefix)
@@ -2926,6 +2954,37 @@ func (hph *HexPatriciaHashed) storageFromCacheOrDB(plainKey []byte) (*Update, er
 		}
 	}
 	return hph.ctx.Storage(plainKey)
+}
+
+func (hph *HexPatriciaHashed) debugUpdateTrace(prefix string, plainKey, hashedKey []byte, stateUpdate *Update) (*Update, string, error) {
+	update := stateUpdate
+	var err error
+	if update == nil {
+		if int16(len(plainKey)) == hph.accountKeyLen {
+			update, err = hph.accountFromCacheOrDB(plainKey)
+			if err != nil {
+				return nil, "", fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
+			}
+		} else {
+			update, err = hph.storageFromCacheOrDB(plainKey)
+			if err != nil {
+				return nil, "", fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
+			}
+		}
+	}
+
+	trace := fmt.Sprintf("%s plainKey [%x] %s hashedKey [%x] currentKey [%x]", prefix, plainKey, update, hashedKey, hph.currentKey[:hph.currentKeyLen])
+	return update, trace, nil
+}
+
+func (hph *HexPatriciaHashed) appendCapture(trace string) {
+	if hph.capture != nil {
+		hph.capture.Append(trace)
+	}
+}
+
+func (hph *HexPatriciaHashed) setCaptureRecorder(recorder *trieDebugRecorder) {
+	hph.capture = recorder
 }
 
 type stateRootFlag int8
