@@ -158,3 +158,124 @@ func TestCalculatorCodeDomain(t *testing.T) {
 	_, ok := updates.keys[string(addr)]
 	assert.True(t, ok, "Key should be the address")
 }
+
+// TestTouchPlainKeyDirect_MatchesSerialized verifies that TouchPlainKeyDirect
+// produces the same tree entries as TouchPlainKey with serialized bytes.
+// This ensures the commitment calculator (using Direct) produces identical
+// results to the inline path (using serialized TouchPlainKey).
+func TestTouchPlainKeyDirect_MatchesSerialized(t *testing.T) {
+	t.Parallel()
+
+	// Build an account
+	acc := accounts.NewAccount()
+	acc.Balance = *uint256.NewInt(12345)
+	acc.Nonce = 42
+	acc.Incarnation = 1
+
+	key := string(common.FromHex("c17fa85f22306d37cec90b0ec74c5623dbbac68f"))
+	enc := accounts.SerialiseV3(&acc)
+
+	// Path 1: serialized (inline path)
+	utSerialized := NewUpdates(ModeUpdate, t.TempDir(), keyHasherNoop)
+	utSerialized.TouchPlainKey(key, enc, utSerialized.TouchAccount)
+
+	// Path 2: direct (calculator path)
+	utDirect := NewUpdates(ModeUpdate, t.TempDir(), keyHasherNoop)
+	update := &Update{
+		Flags:   BalanceUpdate | NonceUpdate,
+		Balance: acc.Balance,
+		Nonce:   acc.Nonce,
+	}
+	utDirect.TouchPlainKeyDirect(key, update)
+
+	// Both should have 1 entry
+	assert.Equal(t, utSerialized.Size(), utDirect.Size(), "Same number of entries")
+
+	// Compare the Update contents in the tree
+	var serializedUpdate, directUpdate *Update
+	utSerialized.tree.Descend(func(item *KeyUpdate) bool {
+		if item.plainKey == key {
+			serializedUpdate = item.update
+		}
+		return true
+	})
+	utDirect.tree.Descend(func(item *KeyUpdate) bool {
+		if item.plainKey == key {
+			directUpdate = item.update
+		}
+		return true
+	})
+
+	require.NotNil(t, serializedUpdate, "Serialized should have entry")
+	require.NotNil(t, directUpdate, "Direct should have entry")
+	assert.True(t, serializedUpdate.Balance.Eq(&directUpdate.Balance), "Balance should match")
+	assert.Equal(t, serializedUpdate.Nonce, directUpdate.Nonce, "Nonce should match")
+	assert.Equal(t, serializedUpdate.Flags&BalanceUpdate != 0, directUpdate.Flags&BalanceUpdate != 0, "BalanceUpdate flag")
+	assert.Equal(t, serializedUpdate.Flags&NonceUpdate != 0, directUpdate.Flags&NonceUpdate != 0, "NonceUpdate flag")
+}
+
+// TestTouchPlainKeyDirect_Storage verifies direct storage touches.
+func TestTouchPlainKeyDirect_Storage(t *testing.T) {
+	t.Parallel()
+
+	key := string(common.FromHex("553bba1d92398a69fbc9f01593bbc51b58862366" +
+		"0000000000000000000000000000000000000000000000000000000000000004"))
+	val := common.FromHex("7c1fed52ef2b45443e674ae782f51586aa29c384")
+
+	// Serialized path
+	utSerialized := NewUpdates(ModeUpdate, t.TempDir(), keyHasherNoop)
+	utSerialized.TouchPlainKey(key, val, utSerialized.TouchStorage)
+
+	// Direct path
+	utDirect := NewUpdates(ModeUpdate, t.TempDir(), keyHasherNoop)
+	update := &Update{
+		Flags:      StorageUpdate,
+		StorageLen: int8(len(val)),
+	}
+	copy(update.Storage[:], val)
+	utDirect.TouchPlainKeyDirect(key, update)
+
+	assert.Equal(t, utSerialized.Size(), utDirect.Size())
+
+	var su, du *Update
+	utSerialized.tree.Descend(func(item *KeyUpdate) bool {
+		if item.plainKey == key {
+			su = item.update
+		}
+		return true
+	})
+	utDirect.tree.Descend(func(item *KeyUpdate) bool {
+		if item.plainKey == key {
+			du = item.update
+		}
+		return true
+	})
+
+	require.NotNil(t, su)
+	require.NotNil(t, du)
+	assert.Equal(t, su.Storage, du.Storage, "Storage value should match")
+	assert.Equal(t, su.StorageLen, du.StorageLen, "StorageLen should match")
+	assert.Equal(t, su.Flags, du.Flags, "Flags should match")
+}
+
+// TestTouchPlainKeyDirect_Delete verifies delete handling.
+func TestTouchPlainKeyDirect_Delete(t *testing.T) {
+	t.Parallel()
+
+	key := string(common.FromHex("c17fa85f22306d37cec90b0ec74c5623dbbac68f"))
+
+	ut := NewUpdates(ModeUpdate, t.TempDir(), keyHasherNoop)
+	ut.TouchPlainKeyDirect(key, &Update{Flags: DeleteUpdate})
+
+	assert.Equal(t, uint64(1), ut.Size())
+
+	var u *Update
+	ut.tree.Descend(func(item *KeyUpdate) bool {
+		if item.plainKey == key {
+			u = item.update
+		}
+		return true
+	})
+	require.NotNil(t, u)
+	assert.Equal(t, DeleteUpdate, u.Flags&DeleteUpdate, "Should have DeleteUpdate flag")
+}

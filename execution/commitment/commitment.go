@@ -1678,6 +1678,68 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 	}
 }
 
+// TouchPlainKeyDirect applies a pre-built Update to the key without
+// serialization/deserialization. Used by the commitment calculator which
+// receives aggregated state changes via channel instead of serialized bytes
+// from DomainPut.
+func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
+	switch t.mode {
+	case ModeUpdate:
+		pivot, updated := &KeyUpdate{plainKey: key, update: new(Update)}, false
+
+		t.tree.DescendLessOrEqual(pivot, func(item *KeyUpdate) bool {
+			if item.plainKey == pivot.plainKey {
+				// Merge: apply the new update's flags and values
+				if update.Flags&DeleteUpdate != 0 {
+					item.update.Flags = DeleteUpdate
+				} else {
+					if update.Flags&BalanceUpdate != 0 {
+						item.update.Balance.Set(&update.Balance)
+						item.update.Flags |= BalanceUpdate
+					}
+					if update.Flags&NonceUpdate != 0 {
+						item.update.Nonce = update.Nonce
+						item.update.Flags |= NonceUpdate
+					}
+					if update.Flags&CodeUpdate != 0 {
+						item.update.CodeHash = update.CodeHash
+						item.update.Flags |= CodeUpdate
+					}
+					if update.Flags&StorageUpdate != 0 {
+						item.update.Storage = update.Storage
+						item.update.StorageLen = update.StorageLen
+						item.update.Flags |= StorageUpdate
+					}
+				}
+				updated = true
+			}
+			return false
+		})
+		if !updated {
+			pivot.hashedKey = t.hasher(common.ToBytesZeroCopy(pivot.plainKey))
+			*pivot.update = *update
+			t.tree.ReplaceOrInsert(pivot)
+		}
+	case ModeDirect:
+		if _, ok := t.keys[key]; !ok {
+			keyBytes := common.ToBytesZeroCopy(key)
+			hashedKey := t.hasher(keyBytes)
+
+			var err error
+			if !t.sortPerNibble {
+				err = t.etl.Collect(hashedKey, keyBytes)
+			} else {
+				err = t.nibbles[hashedKey[0]].Collect(hashedKey, keyBytes)
+			}
+			if err != nil {
+				log.Warn("failed to collect updated key", "key", key, "err", err)
+			}
+			t.keys[key] = struct{}{}
+		}
+	default:
+	}
+}
+
 func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
 	if len(val) == 0 {
 		c.update.Flags = DeleteUpdate
