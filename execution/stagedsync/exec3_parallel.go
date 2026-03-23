@@ -2219,7 +2219,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				if _, err := pe.cfg.engine.Finalize(
 					pe.cfg.chainConfig, types.CopyHeader(tt.Header), ibs, tt.Uncles, receipts,
 					tt.Withdrawals, chainReader, syscall, false, pe.logger); err != nil {
-					return nil, fmt.Errorf("can't finalize block %d: %w", be.blockNum, err)
+					return nil, fmt.Errorf("%w: can't finalize block %d: %v", rules.ErrInvalidBlock, be.blockNum, err)
 				}
 
 				be.blockIO.RecordReads(finalVersion, ibs.VersionedReads())
