@@ -597,8 +597,8 @@ func (api *DebugAPIImpl) GetBadBlocks(ctx context.Context) ([]map[string]any, er
 		}
 		results = append(results, map[string]any{
 			"hash":  block.Hash(),
-			"block": blockRlp,
-			"rlp":   blockJson,
+			"block": blockJson,
+			"rlp":   blockRlp,
 		})
 	}
 

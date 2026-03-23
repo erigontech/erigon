@@ -1836,7 +1836,6 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		a.logger.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB)
 
 		// check if db has enough data (maybe we didn't commit them yet or all keys are unique so history is empty)
-		//lastInDB := lastIdInDB(a.db, a.d[kv.AccountsDomain])
 		hasData := lastInDB > step // `step` must be fully-written - means `step+1` records must be visible
 		if !hasData {
 			close(fin)
@@ -1866,7 +1865,6 @@ func (a *Aggregator) buildFilesInBackground(txNum uint64, doMerge bool) chan str
 		}
 		go func() {
 			defer close(fin)
-
 			if err := a.MergeLoop(a.ctx); err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
 					return
