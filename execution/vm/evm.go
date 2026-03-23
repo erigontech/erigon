@@ -542,7 +542,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 		if evm.config.Tracer != nil && evm.config.Tracer.OnGasChange != nil {
 			evm.Config().Tracer.OnGasChange(gasRemaining.Regular, 0, tracing.GasChangeCallFailedExecution)
 		}
-		return nil, accounts.NilAddress, mdgas.MdGas{}, err
+		return nil, accounts.NilAddress, mdgas.MdGas{State: gasRemaining.State}, err
 	}
 	// Create a new account on the state
 	snapshot := evm.intraBlockState.PushSnapshot()

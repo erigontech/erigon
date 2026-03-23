@@ -220,24 +220,18 @@ func (ctx *CallContext) Gas() mdgas.MdGas {
 // escrowStateGas hands the entire state gas reservoir to a child frame and
 // returns the parent's saved value.  After the child returns, call
 // settleStateGas to restore or adopt the child's leftover reservoir.
-func (ctx *CallContext) escrowStateGas() (parentStateGas uint64) {
-	parentStateGas = ctx.stateGas
+func (ctx *CallContext) escrowStateGas() {
 	ctx.stateGas = 0
-	return
 }
 
 // settleStateGas restores the state gas reservoir after a child frame.
 // On success the parent adopts the child's remaining reservoir.
 // On error handleFrameRevert sets returnGas.State = initialChildState + spill
-// (per EIP-8037). Early-exit errors (collision, depth, insufficient balance)
-// return zeroed gas without reaching handleFrameRevert, so we fall back to
-// the parent's original reservoir via max.
-func (ctx *CallContext) settleStateGas(childErr error, returnGas mdgas.MdGas, parentStateGas uint64, tracer *tracing.Hooks) {
-	if childErr != nil {
-		ctx.stateGas = max(returnGas.State, parentStateGas)
-	} else {
-		ctx.stateGas = returnGas.State
-	}
+// per EIP-8037: "all state gas consumed by the child… is restored to the
+// parent's reservoir." Early-exit errors (collision, depth, insufficient
+// balance) preserve gasRemaining.State so the reservoir is returned intact.
+func (ctx *CallContext) settleStateGas(returnGas mdgas.MdGas, tracer *tracing.Hooks) {
+	ctx.stateGas = returnGas.State
 	ctx.refundGas(returnGas.Regular, tracer, tracing.GasChangeCallLeftOverRefunded)
 }
 
