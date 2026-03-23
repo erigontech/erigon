@@ -207,7 +207,7 @@ func TestExecutionPayloadBidServiceNoPreferences(t *testing.T) {
 	require.NoError(t, err)
 
 	// Bid should NOT be in highest bids (pending, not validated)
-	bidKey := pool.HighestBidKey{Slot: 100, ParentBlockHash: common.HexToHash("0xaaaa")}
+	bidKey := pool.HighestBidKey{Slot: 100, ParentBlockHash: common.HexToHash("0xaaaa"), ParentBlockRoot: common.HexToHash("0xbbbb")}
 	_, found := epbsPool.HighestBids.Get(bidKey)
 	require.False(t, found)
 }
@@ -372,7 +372,7 @@ func TestExecutionPayloadBidServiceHighestBid(t *testing.T) {
 	require.NoError(t, err)
 
 	// Check highest bid
-	bidKey := pool.HighestBidKey{Slot: 100, ParentBlockHash: common.HexToHash("0xaaaa")}
+	bidKey := pool.HighestBidKey{Slot: 100, ParentBlockHash: common.HexToHash("0xaaaa"), ParentBlockRoot: common.HexToHash("0xbbbb")}
 	stored, found := epbsPool.HighestBids.Get(bidKey)
 	require.True(t, found)
 	require.Equal(t, uint64(1000), stored.Message.Value)
@@ -448,8 +448,8 @@ func TestExecutionPayloadBidServiceDifferentParentHashes(t *testing.T) {
 	require.NoError(t, err)
 
 	// Both should have their own highest bid
-	bidKey1 := pool.HighestBidKey{Slot: 100, ParentBlockHash: parentHash1}
-	bidKey2 := pool.HighestBidKey{Slot: 100, ParentBlockHash: parentHash2}
+	bidKey1 := pool.HighestBidKey{Slot: 100, ParentBlockHash: parentHash1, ParentBlockRoot: parentRoot}
+	bidKey2 := pool.HighestBidKey{Slot: 100, ParentBlockHash: parentHash2, ParentBlockRoot: parentRoot}
 	stored1, found1 := epbsPool.HighestBids.Get(bidKey1)
 	stored2, found2 := epbsPool.HighestBids.Get(bidKey2)
 	require.True(t, found1)
@@ -483,7 +483,7 @@ func TestExecutionPayloadBidServiceSuccess(t *testing.T) {
 	require.True(t, service.seenCache.Contains(seenKey))
 
 	// Verify stored in pool
-	bidKey := pool.HighestBidKey{Slot: 100, ParentBlockHash: common.HexToHash("0xaaaa")}
+	bidKey := pool.HighestBidKey{Slot: 100, ParentBlockHash: common.HexToHash("0xaaaa"), ParentBlockRoot: common.HexToHash("0xbbbb")}
 	stored, found := epbsPool.HighestBids.Get(bidKey)
 	require.True(t, found)
 	require.Equal(t, msg, stored)
@@ -543,7 +543,7 @@ func TestExecutionPayloadBidServiceFailedValidationNotStored(t *testing.T) {
 	require.False(t, service.seenCache.Contains(seenKey))
 
 	// Should NOT be in pool
-	bidKey := pool.HighestBidKey{Slot: 100, ParentBlockHash: common.HexToHash("0xaaaa")}
+	bidKey := pool.HighestBidKey{Slot: 100, ParentBlockHash: common.HexToHash("0xaaaa"), ParentBlockRoot: common.HexToHash("0xbbbb")}
 	_, found := epbsPool.HighestBids.Get(bidKey)
 	require.False(t, found)
 }
