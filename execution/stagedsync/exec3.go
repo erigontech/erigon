@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -257,6 +258,16 @@ func ExecV3(ctx context.Context,
 
 		lastHeader, applyTx, execErr = pe.exec(ctx, execStage, u, startBlockNum, offsetFromBlockBeginning, maxBlockNum, blockLimit,
 			initialTxNum, inputTxNum, initialCycle, applyTx, stepsInDb, accumulator, readAhead, logEvery)
+
+		if execErr != nil && errors.Is(execErr, rules.ErrInvalidBlock) {
+			if lastHeader != nil && cfg.hd != nil && cfg.hd.POSSync() {
+				cfg.hd.ReportBadHeaderPoS(lastHeader.Hash(), lastHeader.ParentHash)
+			}
+			if cfg.badBlockHalt && dbg.BadBlockHalt {
+				logger.Error(fmt.Sprintf("[%s] BAD_BLOCK_HALT: halting on invalid block (debug mode, no commit)", execStage.LogPrefix()), "err", execErr)
+				os.Exit(1)
+			}
+		}
 
 		lastCommittedBlockNum = pe.lastCommittedBlockNum.Load()
 		lastCommittedTxNum = pe.lastCommittedTxNum.Load()
