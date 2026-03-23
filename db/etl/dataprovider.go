@@ -194,7 +194,17 @@ func (m *mmapBytesReader) readAt(length int) ([]byte, error) {
 	}
 	result := m.data[m.pos : m.pos+length]
 	m.pos += length
+	_ = touch(result)
 	return result, nil
+}
+
+// touch sums the first and last bytes of b to trigger page faults at both ends.
+// The return value prevents the compiler from eliding the reads.
+func touch(b []byte) byte {
+	if len(b) == 0 {
+		return 0
+	}
+	return b[0] | b[len(b)-1]
 }
 
 // readField reads a varint-prefixed byte slice from mmap data (zero-copy).
