@@ -372,6 +372,12 @@ func WithTxPool() Option {
 	}
 }
 
+func WithEnableDomain(domain kv.Domain) Option {
+	return func(opts *options) {
+		opts.enableDomains = append(opts.enableDomains, domain)
+	}
+}
+
 func WithChainConfig(cfg *chain.Config) Option {
 	return func(opts *options) {
 		opts.chainConfig = cfg
@@ -381,12 +387,6 @@ func WithChainConfig(cfg *chain.Config) Option {
 func WithEphemeral() Option {
 	return func(opts *options) {
 		opts.ephemeral = true
-	}
-}
-
-func WithEnableDomain(domains ...kv.Domain) Option {
-	return func(opts *options) {
-		opts.enableDomains = append(opts.enableDomains, domains...)
 	}
 }
 
@@ -518,6 +518,15 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		db = temporaltest.NewTestDBWithStepSize(tb, dirs, *opt.stepSize)
 	} else {
 		db = temporaltest.NewTestDB(tb, dirs)
+	}
+
+	// Enable domains before any background goroutines start (e.g. InsertChain
+	// spawns a pipeline that calls agg.OpenFolder concurrently).
+	if len(opt.enableDomains) > 0 {
+		agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+		for _, domain := range opt.enableDomains {
+			agg.EnableDomain(domain)
+		}
 	}
 
 	if _, err := snaptype.LoadSalt(dirs.Snap, true, logger); err != nil {
