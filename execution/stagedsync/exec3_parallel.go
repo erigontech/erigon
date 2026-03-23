@@ -1201,7 +1201,7 @@ func (result *execResult) finalizeWithIBS(
 			}
 		}
 	}
-	if !result.ExecutionResult.BurntContractAddress.IsNil() && txTask.Config.IsLondon(blockNum) {
+	if !hasBurntDelta && !result.ExecutionResult.BurntContractAddress.IsNil() && txTask.Config.IsLondon(blockNum) {
 		if err := ibs.AddBalance(result.ExecutionResult.BurntContractAddress, result.ExecutionResult.FeeBurnt, tracing.BalanceDecreaseGasBuy); err != nil {
 			return nil, nil, nil, err
 		}
@@ -1219,8 +1219,10 @@ func (result *execResult) finalizeWithIBS(
 			}
 		}
 	}
-	if err := ibs.AddBalance(result.Coinbase, result.ExecutionResult.FeeTipped, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
-		return nil, nil, nil, err
+	if !hasCoinbaseDelta {
+		if err := ibs.AddBalance(result.Coinbase, result.ExecutionResult.FeeTipped, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
+			return nil, nil, nil, err
+		}
 	}
 
 	if engine != nil {
@@ -1317,7 +1319,13 @@ func (result *execResult) finalizeTx(
 			newCoinbaseBalance.Sub(&newCoinbaseBalance, &coinbaseDelta)
 		}
 	}
-	newCoinbaseBalance.Add(&newCoinbaseBalance, &result.ExecutionResult.FeeTipped)
+	// Only add FeeTipped when the worker didn't interact with the coinbase.
+	// When hasCoinbaseDelta is true, the delta from StripBalanceWrite already
+	// includes the tip (from state_transition.go:609 AddBalance(coinbase, tip)
+	// during worker execution). Adding FeeTipped again would double-count.
+	if !hasCoinbaseDelta {
+		newCoinbaseBalance.Add(&newCoinbaseBalance, &result.ExecutionResult.FeeTipped)
+	}
 
 	// --- Burnt contract balance ---
 	var newBurntBalance uint256.Int
@@ -1340,7 +1348,7 @@ func (result *execResult) finalizeTx(
 				newBurntBalance.Sub(&newBurntBalance, &burntDelta)
 			}
 		}
-		if txTask.Config.IsLondon(blockNum) {
+		if !hasBurntDelta && txTask.Config.IsLondon(blockNum) {
 			newBurntBalance.Add(&newBurntBalance, &result.ExecutionResult.FeeBurnt)
 		}
 	}
@@ -1371,6 +1379,18 @@ func (result *execResult) finalizeTx(
 		}
 	}
 
+	// DEBUG ASSERTION: check coinbase balance against serial reference
+	if blockNum == 24363950 {
+		fmt.Printf("FINALIZE_CHECK txIdx=%d hasCoinbaseDelta=%v coinbaseDelta=%s FeeTipped=%s oldBal=%s newBal=%s vsReaderBal=%s\n",
+			txIndex, hasCoinbaseDelta, coinbaseDelta.String(), result.ExecutionResult.FeeTipped.String(),
+			oldCoinbaseBalance.String(), newCoinbaseBalance.String(), func() string {
+				if coinbaseAcc != nil {
+					return coinbaseAcc.Balance.String()
+				}
+				return "nil"
+			}())
+	}
+
 	// Build versionMap writes: the stripped TxOut (IBS-format, no stale
 	// coinbase/burnt balances) plus the adjusted balance writes.
 	allWrites := make(state.VersionedWrites, len(result.TxOut), len(result.TxOut)+2)
@@ -1380,6 +1400,7 @@ func (result *execResult) finalizeTx(
 			Address: result.Coinbase,
 			Path:    state.BalancePath,
 			Val:     newCoinbaseBalance,
+			Version: task.Version(),
 			Reason:  tracing.BalanceIncreaseRewardTransactionFee,
 		})
 	}
@@ -1393,6 +1414,7 @@ func (result *execResult) finalizeTx(
 				Address: burntAddr,
 				Path:    state.BalancePath,
 				Val:     newBurntBalance,
+				Version: task.Version(),
 				Reason:  tracing.BalanceDecreaseGasBuy,
 			})
 		}
