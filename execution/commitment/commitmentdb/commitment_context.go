@@ -284,7 +284,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	traceFile := dbg.TrieTraceFile
 	if traceFile == "" && dbg.TrieTraceBlock != 0 && blockNum == dbg.TrieTraceBlock {
 		// Auto-generate filename when only TRIE_TRACE_BLOCK is set without TRIE_TRACE_FILE.
-		traceFile = fmt.Sprintf("/tmp/trie-trace-block-%d.toml", blockNum)
+		traceFile = filepath.Join(os.TempDir(), fmt.Sprintf("trie-trace-block-%d.toml", blockNum))
 	} else if dbg.TrieTraceBlock != 0 && blockNum != dbg.TrieTraceBlock {
 		traceFile = "" // skip recording — not the target block
 	}
