@@ -93,17 +93,17 @@ import (
 // Set debugVerbosity=true to force log verbosity to "debug" before SetupCobra.
 func makeStageCmd(use string, stageFn func(kv.TemporalRwDB, context.Context, log.Logger) error, applyMigrations, timeit, debugVerbosity bool) *cobra.Command {
 	return &cobra.Command{
-		Use:   use,
-		Short: "",
-		Run: func(cmd *cobra.Command, args []string) {
+		Use:          use,
+		Short:        "",
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
 			if debugVerbosity {
 				cmd.Flags().Set(logging.LogConsoleVerbosityFlag.Name, "debug")
 			}
 			logger := debug.SetupCobra(cmd, "integration")
 			db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), applyMigrations, chain, logger)
 			if err != nil {
-				logger.Error("Opening DB", "error", err)
-				return
+				return fmt.Errorf("opening DB: %w", err)
 			}
 			defer db.Close()
 			if timeit {
@@ -112,10 +112,12 @@ func makeStageCmd(use string, stageFn func(kv.TemporalRwDB, context.Context, log
 			ctx, cancel := context.WithCancel(cmd.Context())
 			defer cancel()
 			if err := stageFn(db, ctx, logger); err != nil {
-				if !errors.Is(err, context.Canceled) {
-					logger.Error(err.Error())
+				if errors.Is(err, context.Canceled) {
+					return nil // graceful shutdown
 				}
+				return err
 			}
+			return nil
 		},
 	}
 }
