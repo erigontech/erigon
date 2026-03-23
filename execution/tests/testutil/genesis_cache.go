@@ -77,7 +77,7 @@ type genesisCacheEntry struct {
 // (account balances, code, storage) written via SharedDomains.
 // The cache is bounded to maxGenesisCacheSize entries to avoid exhausting disk.
 // When full, the least-recently-used entry with no active users is evicted.
-const maxGenesisCacheSize = 256
+const maxGenesisCacheSize = 128
 
 var (
 	genesisDBMu    sync.Mutex // protects all fields below
