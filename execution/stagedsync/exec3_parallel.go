@@ -1,12 +1,10 @@
 package stagedsync
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"maps"
-	"math"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -292,95 +290,42 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					// the execLoop before the blockResult crosses the channel.
 					// The apply loop only does indexes.
 
-					if !dbg.DiscardCommitment() {
-						if !dbg.BatchCommitments || shouldGenerateChangesets || lastBlockResult.BlockNum == maxBlockNum ||
-							applyResult.Exhausted != nil ||
-							pe.cfg.syncCfg.KeepExecutionProofs ||
-							(flushPending && lastBlockResult.BlockNum > pe.lastCommittedBlockNum.Load()) {
+					// Commitment is computed by the commitmentCalculator goroutine.
+					// Post-execution validation (receipts, BAL) runs here.
+					err = pe.getPostValidator().Wait()
+					if err != nil {
+						return err
+					}
 
-							resetExecGauges(ctx)
-
-							if dbg.TraceApply && dbg.TraceBlock(applyResult.BlockNum) {
-								fmt.Println(applyResult.BlockNum, "applied count", blockApplyCount, "last tx", applyResult.lastTxNum)
-							}
-
-							trace := dbg.TraceDomainIO && !dbg.BatchCommitments
-							if dbg.TraceBlock(applyResult.BlockNum) {
-								fmt.Println(applyResult.BlockNum, "Commitment")
-								trace = true
-							}
-							pe.doms.SetTrace(trace, !dbg.BatchCommitments)
-
-							commitStart = time.Now()
-
-							onProgress := func(p *commitment.CommitProgress) {
-								lastProgress = *p
-								if p.KeyIndex > 0 && p.KeyIndex < p.UpdateCount {
-									progress := float64(p.KeyIndex) / float64(p.UpdateCount)
-									commitedBlocks := uint64(math.Round(float64(uncommittedBlocks) * progress))
-
-									if commitedBlocks > 0 {
-										hasLoggedCommittments.Store(true)
-										committedGas := uint64(math.Round(float64(uncommittedGas) * progress))
-										committedTransactions := uint64(math.Round(float64(uncommittedTransactions) * progress))
-										pe.LogCommitments(commitStart,
-											commitedBlocks, committedTransactions,
-											committedGas, stepsInDb, *p)
-									}
-
-								}
-
-								if pe.agg.HasBackgroundFilesBuild() {
-									pe.logger.Info(fmt.Sprintf("[%s] Background files build", pe.logPrefix), "progress", pe.agg.BackgroundProgress())
-								}
-							}
-
-							if time.Since(lastExecutedLog) > logInterval/50 {
-								hasLoggedExecution = true
-								pe.LogExecution()
-								lastExecutedLog = time.Now()
-							}
-
-							// Warmup is enabled via EnableTrieWarmup at executor init
-							rh, err := pe.doms.ComputeCommitment(ctx, applyRoTx, true, applyResult.BlockNum, applyResult.lastTxNum, pe.logPrefix, onProgress)
-							pe.doms.SetTrace(false, false)
-							if err != nil {
-								return err
-							}
-							resetCommitmentGauges(ctx)
-
-							// on chain tip we run receipt root verification in parallel alongside commitment computation
-							// make sure to wait for it to finish and check for an error
-							err = pe.getPostValidator().Wait()
-							if err != nil {
-								return err
-							}
-
-							if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) || pe.cfg.experimentalBAL {
-								err = ProcessBAL(rwTx, lastHeader, applyResult.TxIO, pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime), pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir)
-								if err != nil {
-									return err
-								}
-							}
-
-							if shouldGenerateChangesets {
-								pe.domains().SavePastChangesetAccumulator(applyResult.BlockHash, applyResult.BlockNum, changeSet)
-							}
-							pe.domains().SetChangesetAccumulator(nil)
-
-							if !bytes.Equal(rh, applyResult.StateRoot.Bytes()) {
-								pe.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x",
-									pe.logPrefix, applyResult.BlockNum, rh, applyResult.StateRoot.Bytes(), applyResult.BlockHash))
-								return handleIncorrectRootHashError(applyResult.BlockNum, applyResult.BlockHash, applyResult.ParentHash, rwTx, pe.cfg, execStage, pe.logger, u)
-							}
-							pe.txExecutor.lastCommittedBlockNum.Store(applyResult.BlockNum)
-							pe.txExecutor.lastCommittedTxNum.Store(applyResult.lastTxNum)
+					if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) || pe.cfg.experimentalBAL {
+						err = ProcessBAL(rwTx, lastHeader, applyResult.TxIO, pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime), pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir)
+						if err != nil {
+							return err
 						}
 					}
 
-					// drainBeforeExit is a no-op with synchronous commitment —
-					// commitment already ran inline above.
+					if shouldGenerateChangesets {
+						pe.domains().SavePastChangesetAccumulator(applyResult.BlockHash, applyResult.BlockNum, changeSet)
+					}
+					pe.domains().SetChangesetAccumulator(nil)
+
+					// drainBeforeExit collects the pending commitment result
+					// from the calculator before exiting the apply loop.
 					drainBeforeExit := func() error {
+						if dbg.DiscardCommitment() {
+							return nil
+						}
+						cr := collectCommitmentResult(ctx, rootResults)
+						if cr == nil {
+							return ctx.Err()
+						}
+						if cr.err != nil {
+							pe.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x",
+								pe.logPrefix, cr.blockNum, cr.rootHash))
+							return handleIncorrectRootHashError(cr.blockNum, applyResult.BlockHash, applyResult.ParentHash, rwTx, pe.cfg, execStage, pe.logger, u)
+						}
+						pe.txExecutor.lastCommittedBlockNum.Store(cr.blockNum)
+						pe.txExecutor.lastCommittedTxNum.Store(cr.txNum)
 						return nil
 					}
 
