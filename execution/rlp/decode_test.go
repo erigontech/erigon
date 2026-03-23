@@ -1144,7 +1144,7 @@ func unhex(str string) []byte {
 func TestNewStreamFromPoolAllocs(t *testing.T) {
 	data := []byte{0xc1, 0x80} // minimal RLP list
 	allocs := testing.AllocsPerRun(100, func() {
-		s := NewStreamFromPool(data, uint64(len(data)))
+		s := NewStreamFromPool(data)
 		s.Release()
 	})
 	if allocs != 0 {

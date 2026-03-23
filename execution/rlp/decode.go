@@ -119,7 +119,7 @@ func Decode(r io.Reader, val interface{}) error {
 // DecodeBytes parses RLP data from b into val. Please see package-level documentation for
 // the decoding rules. The input must contain exactly one value and no trailing data.
 func DecodeBytes(b []byte, val interface{}) error {
-	stream := NewStreamFromPool(b, uint64(len(b)))
+	stream := NewStreamFromPool(b)
 	defer stream.Release()
 	if err := stream.Decode(val); err != nil {
 		return err
@@ -183,7 +183,7 @@ func addErrorContext(err error, ctx string) error {
 // DecodeBytesPartial parses RLP data from b into val.
 // Unlike DecodeBytes, it does not require that all bytes are consumed.
 func DecodeBytesPartial(b []byte, val any) error {
-	stream := NewStreamFromPool(b, uint64(len(b)))
+	stream := NewStreamFromPool(b)
 	defer stream.Release()
 	return stream.Decode(val)
 }
@@ -695,10 +695,10 @@ func NewListStream(r io.Reader, len uint64) *Stream {
 // NewStreamFromPool returns a Stream from the pool. Call Release() when done.
 // sr is stored as a field on Stream (not a local var) so &stream.sr does not
 // escape to the heap, making this call allocation-free.
-func NewStreamFromPool(b []byte, inputLimit uint64) (stream *Stream) {
+func NewStreamFromPool(b []byte) (stream *Stream) {
 	stream = streamPool.Get().(*Stream)
 	stream.sr = b // typed field: to avoid heap-escaping of reader interface
-	stream.Reset(&stream.sr, inputLimit)
+	stream.Reset(&stream.sr, uint64(len(b)))
 	return stream
 }
 
