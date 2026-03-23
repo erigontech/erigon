@@ -276,9 +276,18 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 
 	trieContext := sdc.trieContext(tx, blockNum, txNum)
 
-	// If trie trace file is configured, wrap the context with a recorder
+	// If trie trace is configured, wrap the context with a recorder.
+	// Block-targeted: when TrieTraceBlock is set, only record that specific block.
 	var recorder *commitment.RecordingContext
-	if dbg.TrieTraceFile != "" {
+	traceFile := dbg.TrieTraceFile
+	if dbg.TrieTraceBlock != 0 && blockNum != dbg.TrieTraceBlock {
+		traceFile = "" // skip recording — not the target block
+	}
+	if traceFile != "" || (dbg.TrieTraceBlock != 0 && blockNum == dbg.TrieTraceBlock) {
+		// Auto-generate filename when only TRIE_TRACE_BLOCK is set without TRIE_TRACE_FILE.
+		if traceFile == "" {
+			traceFile = fmt.Sprintf("/tmp/trie-trace-block-%d.toml", blockNum)
+		}
 		recorder = commitment.NewRecordingContext(trieContext)
 		sdc.patriciaTrie.ResetContext(recorder)
 		// Capture input keys before Process consumes them — fold operations may
@@ -286,15 +295,32 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		// those reads as input updates in the trace.
 		inputKeys := sdc.updates.PlainKeys()
 		defer func() {
-			if recorder == nil || err != nil {
+			if recorder == nil {
 				return
 			}
-			if trace, traceErr := commitment.BuildTrieTrace(recorder, inputKeys); traceErr != nil {
+			trace, traceErr := commitment.BuildTrieTrace(recorder, inputKeys)
+			if traceErr != nil {
 				log.Warn("[commitment] failed to build trie trace", "err", traceErr)
-			} else if traceErr = trace.Save(dbg.TrieTraceFile); traceErr != nil {
-				log.Warn("[commitment] failed to save trie trace", "path", dbg.TrieTraceFile, "err", traceErr)
+				return
+			}
+			trace.BlockNum = blockNum
+			trace.TxNum = txNum
+
+			savePath := traceFile
+			// Save trace on error too — this is the primary debugging use case.
+			// Partial data (whatever was read before the error) is still valuable.
+			if err != nil {
+				trace.Error = err.Error()
+				savePath = commitment.ErrorTracePath(traceFile)
+			}
+			if traceErr = trace.Save(savePath); traceErr != nil {
+				log.Warn("[commitment] failed to save trie trace", "path", savePath, "err", traceErr)
+				return
+			}
+			if err != nil {
+				log.Info("[commitment] trie trace saved (Process error captured)", "path", savePath, "error", trace.Error, "branches", len(trace.Branches), "accounts", len(trace.Accounts), "storages", len(trace.Storages))
 			} else {
-				log.Info("[commitment] trie trace saved", "path", dbg.TrieTraceFile, "branches", len(trace.Branches), "accounts", len(trace.Accounts), "storages", len(trace.Storages), "updates", len(trace.Updates))
+				log.Info("[commitment] trie trace saved", "path", savePath, "branches", len(trace.Branches), "accounts", len(trace.Accounts), "storages", len(trace.Storages), "updates", len(trace.Updates))
 			}
 		}()
 	}

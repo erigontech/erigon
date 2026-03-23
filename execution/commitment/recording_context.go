@@ -21,25 +21,33 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 )
 
+// BranchWrite stores the previous and new data for a single PutBranch call.
+type BranchWrite struct {
+	PrevData []byte
+	NewData  []byte
+}
+
 // RecordingContext wraps a PatriciaContext and records all data read during
-// trie processing (branches, accounts, storages). The recorded data can be
-// used to build a TrieTrace for replay in tests.
+// trie processing (branches, accounts, storages) and all branch writes.
+// The recorded data can be used to build a TrieTrace for replay in tests.
 // Not safe for concurrent use — Process runs single-threaded.
 type RecordingContext struct {
 	inner PatriciaContext
 
-	branches map[string][]byte
-	accounts map[string][]byte
-	storages map[string][]byte
+	branches    map[string][]byte
+	accounts    map[string][]byte
+	storages    map[string][]byte
+	putBranches map[string]BranchWrite
 }
 
 // NewRecordingContext creates a RecordingContext wrapping the given PatriciaContext.
 func NewRecordingContext(inner PatriciaContext) *RecordingContext {
 	return &RecordingContext{
-		inner:    inner,
-		branches: make(map[string][]byte),
-		accounts: make(map[string][]byte),
-		storages: make(map[string][]byte),
+		inner:       inner,
+		branches:    make(map[string][]byte),
+		accounts:    make(map[string][]byte),
+		storages:    make(map[string][]byte),
+		putBranches: make(map[string]BranchWrite),
 	}
 }
 
@@ -81,6 +89,10 @@ func (rc *RecordingContext) Storage(plainKey []byte) (*Update, error) {
 }
 
 func (rc *RecordingContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {
+	rc.putBranches[string(common.Copy(prefix))] = BranchWrite{
+		PrevData: common.Copy(prevData),
+		NewData:  common.Copy(data),
+	}
 	return rc.inner.PutBranch(prefix, data, prevData)
 }
 

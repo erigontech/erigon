@@ -128,6 +128,7 @@ func EnvDuration(envVarName string, defaultVal time.Duration) time.Duration {
 }
 
 var TrieTraceFile = EnvString("TRIE_TRACE_FILE", "")
+var TrieTraceBlock = EnvUint("TRIE_TRACE_BLOCK", 0)
 
 func MustParseInt(strNum string) int64 {
 	cleanNum := strings.ReplaceAll(strNum, "_", "")

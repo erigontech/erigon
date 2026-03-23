@@ -21,17 +21,33 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 
 	toml "github.com/pelletier/go-toml/v2"
+)
+
+const (
+	// ErrorTraceSuffix is appended to the trace filename when Process returns an error.
+	ErrorTraceSuffix = ".error"
 )
 
 // TrieTrace holds a self-contained snapshot of trie state captured during
 // Process. All keys and values are hex-encoded strings for TOML readability.
 type TrieTrace struct {
-	Branches map[string]string `toml:"branches"`
-	Accounts map[string]string `toml:"accounts"`
-	Storages map[string]string `toml:"storages"`
-	Updates  []TraceKeyUpdate  `toml:"updates"`
+	BlockNum    uint64                       `toml:"block_num,omitempty"`
+	TxNum       uint64                       `toml:"tx_num,omitempty"`
+	Error       string                       `toml:"error,omitempty"`
+	Branches    map[string]string            `toml:"branches"`
+	Accounts    map[string]string            `toml:"accounts"`
+	Storages    map[string]string            `toml:"storages"`
+	Updates     []TraceKeyUpdate             `toml:"updates"`
+	PutBranches map[string]TraceBranchWrite  `toml:"put_branches,omitempty"`
+}
+
+// TraceBranchWrite stores a single PutBranch write with both prev and new data hex-encoded.
+type TraceBranchWrite struct {
+	PrevData string `toml:"prev_data"`
+	NewData  string `toml:"new_data"`
 }
 
 // TraceKeyUpdate stores a single input update that was processed.
@@ -85,6 +101,17 @@ func BuildTrieTrace(rc *RecordingContext, inputKeys map[string]struct{}) (*TrieT
 		return tt.Updates[i].PlainKey < tt.Updates[j].PlainKey
 	})
 
+	// Include PutBranch writes if any were recorded.
+	if len(rc.putBranches) > 0 {
+		tt.PutBranches = make(map[string]TraceBranchWrite, len(rc.putBranches))
+		for k, bw := range rc.putBranches {
+			tt.PutBranches[hex.EncodeToString([]byte(k))] = TraceBranchWrite{
+				PrevData: hex.EncodeToString(bw.PrevData),
+				NewData:  hex.EncodeToString(bw.NewData),
+			}
+		}
+	}
+
 	return tt, nil
 }
 
@@ -95,6 +122,8 @@ func containsKey(keys map[string]struct{}, k string) bool {
 }
 
 // Save marshals the TrieTrace to TOML and writes it to the given path.
+// When the trace contains an error, the caller should use ErrorTracePath
+// to compute the appropriate filename with the .error suffix.
 func (tt *TrieTrace) Save(path string) error {
 	data, err := toml.Marshal(tt)
 	if err != nil {
@@ -104,6 +133,15 @@ func (tt *TrieTrace) Save(path string) error {
 		return fmt.Errorf("write trie trace to %s: %w", path, err)
 	}
 	return nil
+}
+
+// ErrorTracePath inserts the ".error" suffix before the file extension.
+// For example, "trace.toml" becomes "trace.error.toml".
+func ErrorTracePath(path string) string {
+	if strings.HasSuffix(path, ".toml") {
+		return strings.TrimSuffix(path, ".toml") + ErrorTraceSuffix + ".toml"
+	}
+	return path + ErrorTraceSuffix
 }
 
 // LoadTrieTrace reads a TOML file and unmarshals it into a TrieTrace.
