@@ -354,7 +354,8 @@ func (cs *MultiClient) blockHeaders66(ctx context.Context, in *sentryproto.Inbou
 	}
 
 	// Prepare to extract raw headers from the block
-	rlpStream := rlp.NewStream(bytes.NewReader(in.Data), uint64(len(in.Data)))
+	rlpStream := rlp.NewStreamFromPool(in.Data, uint64(len(in.Data)))
+	defer rlpStream.Release()
 	if _, err := rlpStream.List(); err != nil { // Now stream is at the beginning of 66 object
 		return fmt.Errorf("decode 1 BlockHeadersPacket66: %w", err)
 	}
