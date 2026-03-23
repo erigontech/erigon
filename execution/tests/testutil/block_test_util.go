@@ -232,7 +232,7 @@ func (bt *BlockTest) Run(t *testing.T) error {
 	}
 	m := execmoduletester.New(t, mOpts...)
 	if t == nil {
-		defer m.Close()
+		defer m.Close() // when t != nil, New registers t.Cleanup(m.Close)
 	}
 
 	if m.Genesis.Hash() != bt.json.Genesis.Hash {
