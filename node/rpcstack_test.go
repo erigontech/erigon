@@ -21,6 +21,7 @@ package node
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -32,7 +33,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gorilla/websocket"
+	"github.com/coder/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -289,11 +290,15 @@ func wsRequest(t *testing.T, url, browserOrigin string) error {
 		headers.Set("Origin", browserOrigin)
 	}
 	//nolint
-	conn, _, err := websocket.DefaultDialer.Dial(url, headers)
-	if conn != nil {
-		conn.Close()
+	conn, resp, err := websocket.Dial(context.Background(), url, &websocket.DialOptions{HTTPHeader: headers})
+	if err != nil {
+		if resp != nil {
+			resp.Body.Close()
+		}
+		return err
 	}
-	return err
+	conn.CloseNow()
+	return nil
 }
 
 func TestAllowList(t *testing.T) {

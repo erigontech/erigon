@@ -22,6 +22,7 @@ package rpc
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -30,45 +31,50 @@ import (
 	"sync"
 	"time"
 
+	"github.com/coder/websocket"
 	mapset "github.com/deckarep/golang-set/v2"
-	"github.com/gorilla/websocket"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 )
 
 const (
-	wsReadBuffer       = 1024
-	wsWriteBuffer      = 1024
 	wsPingInterval     = 60 * time.Second
 	wsPingWriteTimeout = 5 * time.Second
 	wsMessageSizeLimit = 32 * 1024 * 1024
 )
-
-var wsBufferPool = new(sync.Pool)
 
 // WebsocketHandler returns a handler that serves JSON-RPC to WebSocket connections.
 //
 // allowedOrigins should be a comma-separated list of allowed origin URLs.
 // To allow connections with any origin, pass "*".
 func (s *Server) WebsocketHandler(allowedOrigins []string, jwtSecret []byte, compression bool, logger log.Logger) http.Handler {
-	upgrader := websocket.Upgrader{
-		EnableCompression: compression,
-		ReadBufferSize:    wsReadBuffer,
-		WriteBufferSize:   wsWriteBuffer,
-		WriteBufferPool:   wsBufferPool,
-		CheckOrigin:       wsHandshakeValidator(allowedOrigins, logger),
+	validateOrigin := wsHandshakeValidator(allowedOrigins, logger)
+
+	compressionMode := websocket.CompressionDisabled
+	if compression {
+		compressionMode = websocket.CompressionContextTakeover
 	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if jwtSecret != nil && !CheckJwtSecret(w, r, jwtSecret) {
 			return
 		}
-		conn, err := upgrader.Upgrade(w, r, nil)
+		// Validate origin before upgrading. Rejecting here avoids the cost of
+		// the WebSocket handshake for disallowed origins.
+		if !validateOrigin(r) {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
+		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+			InsecureSkipVerify: true, // origin already validated above
+			CompressionMode:    compressionMode,
+		})
 		if err != nil {
 			logger.Warn("WebSocket upgrade failed", "err", err)
 			return
 		}
-		codec := NewWebsocketCodec(conn, r.Host, r.Header)
+		codec := NewWebsocketCodec(conn, r.Host, r.Header, r.RemoteAddr)
 		// Tag the connection context so BeginRo fails fast (ErrReadTxLimitExceeded)
 		// instead of blocking indefinitely when the DB semaphore is full.
 		// r.Context() remains valid for the lifetime of the WebSocket session because
@@ -199,42 +205,29 @@ func parseOriginURL(origin string) (string, string, string, error) {
 	return scheme, hostname, port, nil
 }
 
-// DialWebsocketWithDialer creates a new RPC client that communicates with a JSON-RPC server
-// that is listening on the given endpoint using the provided dialer.
-func DialWebsocketWithDialer(ctx context.Context, endpoint, origin string, dialer websocket.Dialer, logger log.Logger) (*Client, error) {
-	endpoint, header, err := wsClientHeaders(endpoint, origin)
-	if err != nil {
-		return nil, err
-	}
-	return newClient(ctx, func(ctx context.Context) (ServerCodec, error) {
-		//nolint
-		conn, resp, err := dialer.DialContext(ctx, endpoint, header)
-		if err != nil {
-			if resp != nil {
-				resp.Body.Close()
-			}
-			hErr := wsHandshakeError{err: err}
-			if resp != nil {
-				hErr.status = resp.Status
-			}
-			return nil, hErr
-		}
-		return NewWebsocketCodec(conn, endpoint, header), nil
-	}, logger)
-}
-
 // DialWebsocket creates a new RPC client that communicates with a JSON-RPC server
 // that is listening on the given endpoint.
 //
 // The context is used for the initial connection establishment. It does not
 // affect subsequent interactions with the client.
 func DialWebsocket(ctx context.Context, endpoint, origin string, logger log.Logger) (*Client, error) {
-	dialer := websocket.Dialer{
-		ReadBufferSize:  wsReadBuffer,
-		WriteBufferSize: wsWriteBuffer,
-		WriteBufferPool: wsBufferPool,
+	endpoint, header, err := wsClientHeaders(endpoint, origin)
+	if err != nil {
+		return nil, err
 	}
-	return DialWebsocketWithDialer(ctx, endpoint, origin, dialer, logger)
+	return newClient(ctx, func(ctx context.Context) (ServerCodec, error) {
+		conn, resp, err := websocket.Dial(ctx, endpoint, &websocket.DialOptions{HTTPHeader: header})
+		if err != nil {
+			// Only close resp.Body on error; on success the connection owns it.
+			hErr := wsHandshakeError{err: err}
+			if resp != nil {
+				hErr.status = resp.Status
+				resp.Body.Close()
+			}
+			return nil, hErr
+		}
+		return NewWebsocketCodec(conn, endpoint, header, endpoint), nil
+	}, logger)
 }
 
 func wsClientHeaders(endpoint, origin string) (string, http.Header, error) {
@@ -254,6 +247,53 @@ func wsClientHeaders(endpoint, origin string) (string, http.Header, error) {
 	return endpointURL.String(), header, nil
 }
 
+// wsConnAdapter adapts coder/websocket.Conn to satisfy the deadlineCloser interface
+// used by jsonCodec. Write deadlines set by jsonCodec are stored and applied as
+// context deadlines on the underlying coder write calls.
+type wsConnAdapter struct {
+	conn     *websocket.Conn
+	mu       sync.Mutex
+	deadline time.Time
+}
+
+func (a *wsConnAdapter) Close() error {
+	return a.conn.CloseNow()
+}
+
+func (a *wsConnAdapter) SetWriteDeadline(t time.Time) error {
+	a.mu.Lock()
+	a.deadline = t
+	a.mu.Unlock()
+	return nil
+}
+
+func (a *wsConnAdapter) encode(v any) error {
+	a.mu.Lock()
+	dl := a.deadline
+	a.mu.Unlock()
+
+	ctx := context.Background()
+	if !dl.IsZero() {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, dl)
+		defer cancel()
+	}
+	data, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	return a.conn.Write(ctx, websocket.MessageText, data)
+}
+
+func (a *wsConnAdapter) decode(v any) error {
+	// Uses context.Background() — dead connections are detected via the ping loop.
+	_, data, err := a.conn.Read(context.Background())
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(data, v)
+}
+
 type websocketCodec struct {
 	*jsonCodec
 	conn *websocket.Conn
@@ -263,15 +303,18 @@ type websocketCodec struct {
 	pingReset chan struct{}
 }
 
-func NewWebsocketCodec(conn *websocket.Conn, host string, req http.Header) ServerCodec {
+// NewWebsocketCodec wraps a coder websocket connection as a ServerCodec.
+// remoteAddr should be r.RemoteAddr on the server side, or the endpoint URL on the client side.
+func NewWebsocketCodec(conn *websocket.Conn, host string, req http.Header, remoteAddr string) ServerCodec {
 	conn.SetReadLimit(wsMessageSizeLimit)
+	adapter := &wsConnAdapter{conn: conn}
 	wc := &websocketCodec{
-		jsonCodec: NewFuncCodec(conn, conn.WriteJSON, conn.ReadJSON).(*jsonCodec),
+		jsonCodec: NewFuncCodec(adapter, adapter.encode, adapter.decode).(*jsonCodec),
 		conn:      conn,
 		pingReset: make(chan struct{}, 1),
 		info: PeerInfo{
 			Transport:  "ws",
-			RemoteAddr: conn.RemoteAddr().String(),
+			RemoteAddr: remoteAddr,
 		},
 	}
 	// Fill in connection details.
@@ -323,10 +366,9 @@ func (wc *websocketCodec) pingLoop() {
 			}
 			timer.Reset(wsPingInterval)
 		case <-timer.C:
-			wc.jsonCodec.encMu.Lock()
-			wc.conn.SetWriteDeadline(time.Now().Add(wsPingWriteTimeout)) //nolint:errcheck
-			wc.conn.WriteMessage(websocket.PingMessage, nil)             //nolint:errcheck
-			wc.jsonCodec.encMu.Unlock()
+			pingCtx, cancel := context.WithTimeout(context.Background(), wsPingWriteTimeout)
+			wc.conn.Ping(pingCtx) //nolint:errcheck
+			cancel()
 			timer.Reset(wsPingInterval)
 		}
 	}
