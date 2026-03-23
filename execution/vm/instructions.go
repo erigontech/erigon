@@ -1019,7 +1019,7 @@ func opCreate(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		stackvalue.SetBytes(addrVal[:])
 	}
 
-	scope.settleStateGas(returnGas, evm.config.Tracer)
+	scope.restoreChildGas(returnGas, evm.config.Tracer)
 
 	if suberr == ErrExecutionReverted {
 		evm.returnData = res // set REVERT data to return data buffer
@@ -1081,7 +1081,7 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 	}
 
 	scope.Stack.push(stackValue)
-	scope.settleStateGas(returnGas, evm.config.Tracer)
+	scope.restoreChildGas(returnGas, evm.config.Tracer)
 
 	if suberr == ErrExecutionReverted {
 		evm.returnData = res // set REVERT data to return data buffer
@@ -1149,7 +1149,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
-	scope.settleStateGas(returnGas, evm.config.Tracer)
+	scope.restoreChildGas(returnGas, evm.config.Tracer)
 
 	evm.returnData = ret
 	return pc, ret, nil
@@ -1199,7 +1199,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
-	scope.settleStateGas(returnGas, evm.config.Tracer)
+	scope.restoreChildGas(returnGas, evm.config.Tracer)
 
 	evm.returnData = ret
 	return pc, ret, nil
@@ -1241,7 +1241,7 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
-	scope.settleStateGas(returnGas, evm.config.Tracer)
+	scope.restoreChildGas(returnGas, evm.config.Tracer)
 
 	evm.returnData = ret
 	return pc, ret, nil
@@ -1282,7 +1282,7 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
-	scope.settleStateGas(returnGas, evm.config.Tracer)
+	scope.restoreChildGas(returnGas, evm.config.Tracer)
 
 	evm.returnData = ret
 	return pc, ret, nil
