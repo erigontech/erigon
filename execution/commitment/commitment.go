@@ -1574,6 +1574,12 @@ type keyHasher func(key []byte) []byte
 
 func keyHasherNoop(key []byte) []byte { return key }
 
+// NewEmpty creates a fresh Updates with the same mode, tmpdir, and hasher
+// as the receiver. Used by SwapUpdates to replace the buffer atomically.
+func (t *Updates) NewEmpty() *Updates {
+	return NewUpdates(t.mode, t.tmpdir, t.hasher)
+}
+
 func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 	t := &Updates{
 		hasher: hasher,

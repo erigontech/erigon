@@ -209,6 +209,21 @@ func (sdc *SharedDomainsCommitmentContext) GetUpdates() *commitment.Updates {
 	return sdc.updates
 }
 
+// SwapUpdates atomically replaces the updates buffer with a fresh one,
+// returning the old buffer. The caller (commitment calculator) processes
+// the returned buffer while the new empty buffer accumulates new touches.
+func (sdc *SharedDomainsCommitmentContext) SwapUpdates() *commitment.Updates {
+	old := sdc.updates
+	sdc.updates = old.NewEmpty()
+	return old
+}
+
+// SetUpdates replaces the updates buffer. Used by the commitment calculator
+// to install its accumulated touches before calling ComputeCommitment.
+func (sdc *SharedDomainsCommitmentContext) SetUpdates(updates *commitment.Updates) {
+	sdc.updates = updates
+}
+
 func (sdc *SharedDomainsCommitmentContext) Trie() commitment.Trie {
 	return sdc.patriciaTrie
 }

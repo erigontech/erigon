@@ -40,6 +40,10 @@ type commitmentCalculator struct {
 	db        kv.TemporalRoDB
 	logPrefix string
 
+	// updates is the calculator's OWN buffer — never shared with the
+	// execLoop or apply loop. Only this goroutine reads/writes it.
+	updates *commitment.Updates
+
 	// in receives the same applyResult stream as the apply loop.
 	in chan applyResult
 	// out publishes per-block commitment roots.
@@ -56,10 +60,15 @@ func newCommitmentCalculator(
 	in chan applyResult,
 	out chan commitmentResult,
 ) *commitmentCalculator {
+	// Create the calculator's own Updates buffer matching the sdCtx's mode.
+	sdCtxUpdates := doms.GetCommitmentContext().GetUpdates()
+	calcUpdates := sdCtxUpdates.NewEmpty()
+
 	return &commitmentCalculator{
 		doms:      doms,
 		db:        db,
 		logPrefix: logPrefix,
+		updates:   calcUpdates,
 		in:        in,
 		out:       out,
 		done:      make(chan struct{}),
@@ -80,6 +89,13 @@ func (cc *commitmentCalculator) loop(ctx context.Context) {
 	defer cc.wg.Done()
 
 	for {
+		// Check done FIRST — prioritize shutdown over processing.
+		select {
+		case <-cc.done:
+			return
+		default:
+		}
+
 		select {
 		case result, ok := <-cc.in:
 			if !ok {
@@ -87,12 +103,10 @@ func (cc *commitmentCalculator) loop(ctx context.Context) {
 			}
 			switch r := result.(type) {
 			case *txResult:
-				// Accumulate key touches from the TX's writes.
-				// TouchUpdates calls TouchPlainKeyDirect for each write,
-				// feeding the unserialized values directly to the Updates buffer.
-				if r.writes != nil {
-					state.VersionedWrites(r.writes).TouchUpdates(
-						cc.doms.GetCommitmentContext().GetUpdates())
+				// Accumulate key touches in the calculator's OWN buffer.
+				// This buffer is never accessed by the execLoop or apply loop.
+				if len(r.writes) > 0 {
+					state.VersionedWrites(r.writes).TouchUpdates(cc.updates)
 				}
 
 			case *blockResult:
@@ -122,6 +136,14 @@ func (cc *commitmentCalculator) computeAndPublish(ctx context.Context, br *block
 		return
 	}
 	defer roTx.Rollback()
+
+	// Install the calculator's accumulated touches into sdCtx for
+	// ComputeCommitment to process. After processing, install a fresh
+	// empty buffer. This is safe because inline TouchKey is disabled —
+	// no other goroutine accesses sdCtx.updates.
+	sdCtx := cc.doms.GetCommitmentContext()
+	sdCtx.SetUpdates(cc.updates)
+	cc.updates = cc.updates.NewEmpty()
 
 	rh, err := cc.doms.ComputeCommitment(ctx, roTx, true, br.BlockNum, br.lastTxNum, cc.logPrefix, nil)
 	if err != nil {

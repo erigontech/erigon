@@ -335,7 +335,9 @@ func (sd *SharedDomains) GetStateCache() *cache.StateCache {
 }
 
 func (sd *SharedDomains) ClearRam(resetCommitment bool) {
-	if resetCommitment && sd.sdCtx != nil {
+	// When the commitment calculator goroutine owns the Updates buffer,
+	// skip ClearRam on the commitment context to avoid concurrent btree access.
+	if resetCommitment && sd.sdCtx != nil && !sd.disableInlineTouchKey {
 		sd.sdCtx.ClearRam()
 	}
 	sd.mem.ClearRam()
