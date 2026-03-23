@@ -437,6 +437,15 @@ func writeGenesisBeaconBlock(ctx context.Context, cfg *Cfg) error {
 		body.ExecutionPayload = execBlock
 	}
 
+	// Verify body root matches state's LatestBlockHeader — catches non-standard genesis issues.
+	bodyRoot, err := body.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("genesis body HashSSZ failed: %w", err)
+	}
+	if bodyRoot != header.BodyRoot {
+		return fmt.Errorf("genesis body root mismatch: computed %x, expected %x", bodyRoot, header.BodyRoot)
+	}
+
 	return cfg.indiciesDB.Update(ctx, func(tx kv.RwTx) error {
 		return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, genesisBlock, true)
 	})

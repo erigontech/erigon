@@ -169,6 +169,7 @@ func (cc *ExecutionClientEngine) ForkChoiceUpdate(
 	ctx context.Context,
 	finalized, safe, head common.Hash,
 	attributes *engine_types.PayloadAttributes,
+	version clparams.StateVersion,
 ) ([]byte, error) {
 	forkChoiceState := &engine_types.ForkChoiceState{
 		HeadHash:           head,
@@ -176,8 +177,21 @@ func (cc *ExecutionClientEngine) ForkChoiceUpdate(
 		FinalizedBlockHash: finalized,
 	}
 
-	log.Debug("[ExecutionClientEngine] Calling ForkchoiceUpdated")
-	resp, err := cc.engine.ForkchoiceUpdatedV3(ctx, forkChoiceState, attributes)
+	log.Debug("[ExecutionClientEngine] Calling ForkchoiceUpdated", "version", version)
+	var (
+		resp *engine_types.ForkChoiceUpdatedResponse
+		err  error
+	)
+	switch version {
+	case clparams.BellatrixVersion:
+		resp, err = cc.engine.ForkchoiceUpdatedV1(ctx, forkChoiceState, attributes)
+	case clparams.CapellaVersion:
+		resp, err = cc.engine.ForkchoiceUpdatedV2(ctx, forkChoiceState, attributes)
+	case clparams.DenebVersion:
+		resp, err = cc.engine.ForkchoiceUpdatedV3(ctx, forkChoiceState, attributes)
+	default: // Electra, Fulu, Gloas+
+		resp, err = cc.engine.ForkchoiceUpdatedV4(ctx, forkChoiceState, attributes)
+	}
 	if err != nil {
 		if err.Error() == errContextExceeded {
 			return nil, nil
@@ -231,7 +245,16 @@ func (cc *ExecutionClientEngine) IsCanonicalHash(ctx context.Context, hash commo
 	if err := cc.rpcClient.CallContext(ctx, &header, "eth_getBlockByHash", hash, false); err != nil {
 		return false, fmt.Errorf("eth_getBlockByHash failed: %w", err)
 	}
-	return header != nil, nil
+	if header == nil {
+		return false, nil
+	}
+	// eth_getBlockByHash returns non-canonical blocks too — verify canonicality
+	// by fetching the canonical block at this height and comparing hashes.
+	var canonical *types.Header
+	if err := cc.rpcClient.CallContext(ctx, &canonical, "eth_getBlockByNumber", hexutil.EncodeBig(header.Number.ToBig()), false); err != nil {
+		return false, fmt.Errorf("eth_getBlockByNumber failed: %w", err)
+	}
+	return canonical != nil && canonical.Hash() == hash, nil
 }
 
 func (cc *ExecutionClientEngine) Ready(ctx context.Context) (bool, error) {
@@ -336,13 +359,10 @@ func (cc *ExecutionClientEngine) getAssembledBlockV3(ctx context.Context, id []b
 	return block, resp.BlobsBundle, nil, blockValue, nil
 }
 
-func (cc *ExecutionClientEngine) getAssembledBlockV4(ctx context.Context, id []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
-	resp, err := cc.engine.GetPayloadV4(ctx, hexutil.Bytes(id))
-	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("engine GetPayloadV4 failed: %w", err)
-	}
+// getAssembledBlockFromResponse converts a GetPayloadResponse into the block production tuple.
+func getAssembledBlockFromResponse(resp *engine_types.GetPayloadResponse) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	if resp.ExecutionPayload == nil {
-		return nil, nil, nil, nil, errors.New("GetPayloadV4 returned nil execution payload")
+		return nil, nil, nil, nil, errors.New("GetPayload returned nil execution payload")
 	}
 
 	block, err := executionPayloadToEth1Block(resp.ExecutionPayload)
@@ -368,36 +388,20 @@ func (cc *ExecutionClientEngine) getAssembledBlockV4(ctx context.Context, id []b
 	return block, resp.BlobsBundle, requestsBundle, blockValue, nil
 }
 
+func (cc *ExecutionClientEngine) getAssembledBlockV4(ctx context.Context, id []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+	resp, err := cc.engine.GetPayloadV4(ctx, hexutil.Bytes(id))
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("engine GetPayloadV4 failed: %w", err)
+	}
+	return getAssembledBlockFromResponse(resp)
+}
+
 func (cc *ExecutionClientEngine) getAssembledBlockV5(ctx context.Context, id []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	resp, err := cc.engine.GetPayloadV5(ctx, hexutil.Bytes(id))
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("engine GetPayloadV5 failed: %w", err)
 	}
-	if resp.ExecutionPayload == nil {
-		return nil, nil, nil, nil, errors.New("GetPayloadV5 returned nil execution payload")
-	}
-
-	block, err := executionPayloadToEth1Block(resp.ExecutionPayload)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-
-	var blockValue *big.Int
-	if resp.BlockValue != nil {
-		blockValue = resp.BlockValue.ToInt()
-	}
-
-	var requestsBundle *typesproto.RequestsBundle
-	if len(resp.ExecutionRequests) > 0 {
-		requestsBundle = &typesproto.RequestsBundle{
-			Requests: make([][]byte, len(resp.ExecutionRequests)),
-		}
-		for i, req := range resp.ExecutionRequests {
-			requestsBundle.Requests[i] = req
-		}
-	}
-
-	return block, resp.BlobsBundle, requestsBundle, blockValue, nil
+	return getAssembledBlockFromResponse(resp)
 }
 
 func executionPayloadToEth1Block(ep *engine_types.ExecutionPayload) (*cltypes.Eth1Block, error) {

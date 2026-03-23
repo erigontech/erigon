@@ -40,12 +40,12 @@ func NewEngineAPIRPCClient(jwtSecret []byte, addr string, port int) (*EngineAPIR
 	roundTripper := jwt.NewHttpRoundTripper(http.DefaultTransport, jwtSecret)
 	httpClient := &http.Client{Timeout: DefaultRPCHTTPTimeout, Transport: roundTripper}
 
-	isHTTPpecified := strings.HasPrefix(addr, "http")
-	isHTTPSpecified := strings.HasPrefix(addr, "https")
+	hasScheme := strings.HasPrefix(addr, "http")
+	isHTTPS := strings.HasPrefix(addr, "https")
 	protocol := ""
-	if isHTTPSpecified {
+	if isHTTPS {
 		protocol = "https://"
-	} else if !isHTTPpecified {
+	} else if !hasScheme {
 		protocol = "http://"
 	}
 	rpcClient, err := rpc.DialHTTPWithClient(fmt.Sprintf("%s%s:%d", protocol, addr, port), httpClient, nil)
@@ -107,6 +107,14 @@ func (c *EngineAPIRPCClient) ForkchoiceUpdatedV2(ctx context.Context, forkChoice
 func (c *EngineAPIRPCClient) ForkchoiceUpdatedV3(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
 	result := &engine_types.ForkChoiceUpdatedResponse{}
 	if err := c.client.CallContext(ctx, result, rpc_helper.ForkChoiceUpdatedV3, forkChoiceState, payloadAttributes); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (c *EngineAPIRPCClient) ForkchoiceUpdatedV4(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
+	result := &engine_types.ForkChoiceUpdatedResponse{}
+	if err := c.client.CallContext(ctx, result, rpc_helper.ForkChoiceUpdatedV4, forkChoiceState, payloadAttributes); err != nil {
 		return nil, err
 	}
 	return result, nil

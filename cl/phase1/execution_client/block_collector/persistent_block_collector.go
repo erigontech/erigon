@@ -274,7 +274,9 @@ func (p *PersistentBlockCollector) insertBatch(ctx context.Context, blocksBatch 
 	isForkchoiceNeeded := currentHeader == nil || blocksBatch[len(blocksBatch)-1].NumberU64() > currentHeader.Number.Uint64()
 	if *inserted >= p.syncBackLoop {
 		if isForkchoiceNeeded {
-			if _, err := p.engine.ForkChoiceUpdate(ctx, lastBlockHash, lastBlockHash, lastBlockHash, nil); err != nil {
+			// Use DenebVersion as default — the block collector only runs during Caplin engine sync
+			// which targets Deneb+ networks. Pre-Deneb blocks won't reach this path.
+			if _, err := p.engine.ForkChoiceUpdate(ctx, lastBlockHash, lastBlockHash, lastBlockHash, nil, clparams.DenebVersion); err != nil {
 				p.logger.Warn("[BlockCollector] Failed to update fork choice", "err", err)
 			}
 		}

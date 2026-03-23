@@ -52,12 +52,12 @@ func NewExecutionClientRPC(jwtSecret []byte, addr string, port int) (*ExecutionC
 	roundTripper := jwt.NewHttpRoundTripper(http.DefaultTransport, jwtSecret)
 	client := &http.Client{Timeout: DefaultRPCHTTPTimeout, Transport: roundTripper}
 
-	isHTTPpecified := strings.HasPrefix(addr, "http")
-	isHTTPSpecified := strings.HasPrefix(addr, "https")
+	hasScheme := strings.HasPrefix(addr, "http")
+	isHTTPS := strings.HasPrefix(addr, "https")
 	protocol := ""
-	if isHTTPSpecified {
+	if isHTTPS {
 		protocol = "https://"
-	} else if !isHTTPpecified {
+	} else if !hasScheme {
 		protocol = "http://"
 	}
 	rpcClient, err := rpc.DialHTTPWithClient(fmt.Sprintf("%s%s:%d", protocol, addr, port), client, nil)
@@ -155,20 +155,31 @@ func (cc *ExecutionClientRpc) NewPayload(
 	return newPayloadStatusByEngineStatus(payloadStatus.Status), checkPayloadStatus(payloadStatus)
 }
 
-func (cc *ExecutionClientRpc) ForkChoiceUpdate(ctx context.Context, finalized, safe, head common.Hash, attributes *engine_types.PayloadAttributes) ([]byte, error) {
+func (cc *ExecutionClientRpc) ForkChoiceUpdate(ctx context.Context, finalized, safe, head common.Hash, attributes *engine_types.PayloadAttributes, version clparams.StateVersion) ([]byte, error) {
 	forkChoiceRequest := engine_types.ForkChoiceState{
 		HeadHash:           head,
 		SafeBlockHash:      safe,
 		FinalizedBlockHash: finalized,
 	}
 	forkChoiceResp := &engine_types.ForkChoiceUpdatedResponse{}
-	log.Debug("[ExecutionClientRpc] Calling EL", "method", rpc_helper.ForkChoiceUpdatedV1)
+
+	method := rpc_helper.ForkChoiceUpdatedV1
+	switch version {
+	case clparams.CapellaVersion:
+		method = rpc_helper.ForkChoiceUpdatedV2
+	case clparams.DenebVersion:
+		method = rpc_helper.ForkChoiceUpdatedV3
+	case clparams.ElectraVersion, clparams.FuluVersion:
+		method = rpc_helper.ForkChoiceUpdatedV4
+	}
+
+	log.Debug("[ExecutionClientRpc] Calling EL", "method", method)
 	args := []any{forkChoiceRequest}
 	if attributes != nil {
 		args = append(args, attributes)
 	}
 
-	err := cc.client.CallContext(ctx, forkChoiceResp, rpc_helper.ForkChoiceUpdatedV1, args...)
+	err := cc.client.CallContext(ctx, forkChoiceResp, method, args...)
 	if err != nil {
 		if err.Error() == errContextExceeded {
 			// ignore timeouts

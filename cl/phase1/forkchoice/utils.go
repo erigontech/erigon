@@ -69,13 +69,33 @@ func (f *ForkChoiceStore) onNewFinalized(newFinalized solid.Checkpoint) {
 	})
 
 	// get rid of children
+	finalizedSlot := newFinalized.Epoch * f.beaconCfg.SlotsPerEpoch
 	f.childrens.Range(func(k, v any) bool {
-		if v.(childrens).parentSlot <= newFinalized.Epoch*f.beaconCfg.SlotsPerEpoch {
+		if v.(childrens).parentSlot <= finalizedSlot {
 			f.childrens.Delete(k)
 			delete(f.headSet, k.(common.Hash))
 		}
 		return true
 	})
+
+	// Clean up per-block unrealized justifications/finalizations for finalized blocks
+	f.unrealizedJustifications.Range(func(k, v any) bool {
+		blockRoot := k.(common.Hash)
+		header, has := f.forkGraph.GetHeader(blockRoot)
+		if has && header.Slot <= finalizedSlot {
+			f.unrealizedJustifications.Delete(k)
+		}
+		return true
+	})
+	f.unrealizedFinalizations.Range(func(k, v any) bool {
+		blockRoot := k.(common.Hash)
+		header, has := f.forkGraph.GetHeader(blockRoot)
+		if has && header.Slot <= finalizedSlot {
+			f.unrealizedFinalizations.Delete(k)
+		}
+		return true
+	})
+
 	slotToPrune := ((newFinalized.Epoch - 3) * f.beaconCfg.SlotsPerEpoch) - 1
 	f.forkGraph.Prune(slotToPrune)
 }

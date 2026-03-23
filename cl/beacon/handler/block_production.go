@@ -632,6 +632,7 @@ func (a *ApiHandler) produceBeaconBody(
 				Withdrawals:           withdrawals,
 				ParentBeaconBlockRoot: (*common.Hash)(&blockRoot),
 			},
+			stateVersion,
 		)
 		if err != nil {
 			log.Error("BlockProduction: Failed to get payload id", "err", err)
@@ -1344,7 +1345,7 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	}
 	finalizedHash := a.forkchoiceStore.GetEth1Hash(a.forkchoiceStore.FinalizedCheckpoint().Root)
 	safeHash := a.forkchoiceStore.GetEth1Hash(a.forkchoiceStore.JustifiedCheckpoint().Root)
-	if _, err := a.engine.ForkChoiceUpdate(ctx, finalizedHash, safeHash, a.forkchoiceStore.GetEth1Hash(blockRoot), nil); err != nil {
+	if _, err := a.engine.ForkChoiceUpdate(ctx, finalizedHash, safeHash, a.forkchoiceStore.GetEth1Hash(blockRoot), nil, block.Version()); err != nil {
 		return err
 	}
 	headState, err := a.forkchoiceStore.GetStateAtBlockRoot(blockRoot, false)

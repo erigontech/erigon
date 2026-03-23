@@ -215,8 +215,6 @@ func (f *ForkChoiceStore) getFilterBlockTree(blockRoot common.Hash, blocks map[c
 	}
 	// Use per-block unrealized justifications (spec: store.unrealized_justifications[block_root])
 	// Fall back to realized checkpoints if unrealized not available
-	// Use per-block unrealized justifications (spec: store.unrealized_justifications[block_root])
-	// Fall back to realized checkpoints if unrealized not available
 	currentJustifiedCheckpoint, has := f.getUnrealizedJustification(blockRoot)
 	if !has {
 		currentJustifiedCheckpoint, has = f.forkGraph.GetCurrentJustifiedCheckpoint(blockRoot)
