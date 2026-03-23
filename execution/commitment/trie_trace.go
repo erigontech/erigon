@@ -34,14 +34,14 @@ const (
 // TrieTrace holds a self-contained snapshot of trie state captured during
 // Process. All keys and values are hex-encoded strings for TOML readability.
 type TrieTrace struct {
-	BlockNum    uint64                       `toml:"block_num,omitempty"`
-	TxNum       uint64                       `toml:"tx_num,omitempty"`
-	Error       string                       `toml:"error,omitempty"`
-	Branches    map[string]string            `toml:"branches"`
-	Accounts    map[string]string            `toml:"accounts"`
-	Storages    map[string]string            `toml:"storages"`
-	Updates     []TraceKeyUpdate             `toml:"updates"`
-	PutBranches map[string]TraceBranchWrite  `toml:"put_branches,omitempty"`
+	BlockNum    uint64                      `toml:"block_num,omitempty"`
+	TxNum       uint64                      `toml:"tx_num,omitempty"`
+	Error       string                      `toml:"error,omitempty"`
+	Branches    map[string]string           `toml:"branches"`
+	Accounts    map[string]string           `toml:"accounts"`
+	Storages    map[string]string           `toml:"storages"`
+	Updates     []TraceKeyUpdate            `toml:"updates"`
+	PutBranches map[string]TraceBranchWrite `toml:"put_branches,omitempty"`
 }
 
 // TraceBranchWrite stores a single PutBranch write with both prev and new data hex-encoded.
