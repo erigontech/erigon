@@ -1796,6 +1796,12 @@ func (s *Ethereum) Start() error {
 			l1syncSvc.Start(s.sentryCtx)
 			s.l1syncSvc = l1syncSvc
 			s.logger.Info("[l1sync] service started", "l1-rpc", s.config.L1Sync.L1RPC)
+		} else {
+			s.logger.Warn(
+				"[l1sync] configuration not found for chain; ignoring --l1sync.rpc",
+				"chain", s.chainConfig.ChainName,
+				"l1-rpc", s.config.L1Sync.L1RPC,
+			)
 		}
 	}
 
