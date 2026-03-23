@@ -598,7 +598,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 		if stateGasOk {
 			var regularGas uint64
 			if evm.chainRules.IsAmsterdam {
-				regularGas = 6 * ((uint64(len(ret)) + 31) / 32) // hash cost
+				regularGas = params.Keccak256WordGas * ToWordSize(uint64(len(ret))) // hash cost
 			} else {
 				regularGas = uint64(len(ret)) * params.CreateDataGas
 			}
