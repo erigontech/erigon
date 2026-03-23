@@ -598,7 +598,9 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 		if stateGasOk {
 			var regularGas uint64
 			if evm.chainRules.IsAmsterdam {
-				regularGas = params.Keccak256WordGas * ToWordSize(uint64(len(ret))) // hash cost
+				// EIP-8037 "Contract deployment cost calculation", success path:
+				// HASH_COST(L) = 6*ceil(L/32); the state component (cpsb*L) is charged above.
+				regularGas = params.Keccak256WordGas * ToWordSize(uint64(len(ret)))
 			} else {
 				regularGas = uint64(len(ret)) * params.CreateDataGas
 			}
