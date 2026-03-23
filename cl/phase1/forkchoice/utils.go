@@ -150,16 +150,25 @@ func (f *ForkChoiceStore) computeSlotsSinceEpochStart(slot uint64) uint64 {
 
 // Ancestor returns the ancestor to the given root.
 // [Modified in Gloas:EIP7732] Returns ForkChoiceNode with payload status.
+// Spec: if block.slot <= slot (block is at or before the target), return PENDING.
+// Otherwise traverse up and return get_parent_payload_status for the found ancestor.
 func (f *ForkChoiceStore) Ancestor(root common.Hash, slot uint64) ForkChoiceNode {
-	// Use GetHeader for traversal (same as original implementation)
-	// This ensures we can traverse even when blocks are pruned
 	header, has := f.forkGraph.GetHeader(root)
 	if !has {
 		return ForkChoiceNode{Root: common.Hash{}, PayloadStatus: cltypes.PayloadStatusPending}
 	}
 
-	// Traverse up the chain using headers (same logic as original)
+	// Spec: if block.slot <= slot, return (root, PENDING)
+	if header.Slot <= slot {
+		return ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending}
+	}
+
+	// Traverse up: find the ancestor block whose parent is at or before the target slot.
+	// This mirrors the spec's "while parent.slot > slot" loop, tracking the child (block)
+	// so we can call get_parent_payload_status(block) at the end.
+	childRoot := root
 	for header.Slot > slot {
+		childRoot = root
 		root = header.ParentRoot
 		header, has = f.forkGraph.GetHeader(header.ParentRoot)
 		if !has {
@@ -167,10 +176,11 @@ func (f *ForkChoiceStore) Ancestor(root common.Hash, slot uint64) ForkChoiceNode
 		}
 	}
 
-	// For Gloas, determine payload status from the block if available
-	// For pre-Gloas, PayloadStatus is not used by callers (they only check Root)
+	// root is now the ancestor at or before the target slot.
+	// childRoot is the block whose parent_root == root (i.e. "block" in the spec).
+	// Spec: return ForkChoiceNode(root=block.parent_root, payload_status=get_parent_payload_status(store, block))
 	payloadStatus := cltypes.PayloadStatusPending
-	if block, hasBlock := f.forkGraph.GetBlock(root); hasBlock && block != nil {
+	if block, hasBlock := f.forkGraph.GetBlock(childRoot); hasBlock && block != nil {
 		payloadStatus = f.getParentPayloadStatus(block.Block)
 	}
 
