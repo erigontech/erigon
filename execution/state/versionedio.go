@@ -15,6 +15,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -448,6 +449,121 @@ func (vr versionedStateReader) ReadAccountIncarnation(address accounts.Address) 
 }
 
 type VersionedWrites []*VersionedWrite
+
+// TouchKeyEntry is a single (domain, compositeKey, serializedValue) tuple
+// ready for commitment TouchKey processing.
+type TouchKeyEntry struct {
+	Domain kv.Domain
+	Key    []byte
+	Val    []byte
+}
+
+// ToTouchKeys converts VersionedWrites to commitment TouchKey entries.
+// Account fields are grouped by address and serialized into a single
+// AccountsDomain entry. Storage and code writes produce individual entries.
+// This is used by the commitment calculator to process writes received
+// via channel, producing the same touches as the inline DomainPut path.
+func (writes VersionedWrites) ToTouchKeys() []TouchKeyEntry {
+	type addrFields struct {
+		balance     *uint256.Int
+		nonce       *uint64
+		incarnation *uint64
+		codeHash    *accounts.CodeHash
+		code        []byte
+		storage     []struct {
+			key accounts.StorageKey
+			val uint256.Int
+		}
+		selfDestruct bool
+	}
+
+	perAddr := make(map[accounts.Address]*addrFields, len(writes)/4+1)
+	for _, w := range writes {
+		if w.Val == nil {
+			continue
+		}
+		d := perAddr[w.Address]
+		if d == nil {
+			d = &addrFields{}
+			perAddr[w.Address] = d
+		}
+		switch w.Path {
+		case BalancePath:
+			v := w.Val.(uint256.Int)
+			d.balance = &v
+		case NoncePath:
+			v := w.Val.(uint64)
+			d.nonce = &v
+		case IncarnationPath:
+			v := w.Val.(uint64)
+			d.incarnation = &v
+		case CodeHashPath:
+			v := w.Val.(accounts.CodeHash)
+			d.codeHash = &v
+		case CodePath:
+			d.code = w.Val.([]byte)
+		case SelfDestructPath:
+			d.selfDestruct = w.Val.(bool)
+		case StoragePath:
+			d.storage = append(d.storage, struct {
+				key accounts.StorageKey
+				val uint256.Int
+			}{w.Key, w.Val.(uint256.Int)})
+		}
+	}
+
+	var entries []TouchKeyEntry
+	for addr, d := range perAddr {
+		address := addr.Value()
+
+		if d.selfDestruct {
+			entries = append(entries,
+				TouchKeyEntry{kv.CodeDomain, address[:], nil},
+				TouchKeyEntry{kv.StorageDomain, address[:], nil}, // prefix delete marker
+			)
+			if d.balance == nil && d.nonce == nil && d.incarnation == nil && d.codeHash == nil {
+				entries = append(entries, TouchKeyEntry{kv.AccountsDomain, address[:], nil})
+				continue
+			}
+		}
+
+		if d.balance != nil || d.nonce != nil || d.incarnation != nil || d.codeHash != nil || d.code != nil {
+			acc := accounts.NewAccount()
+			if d.balance != nil {
+				acc.Balance = *d.balance
+			}
+			if d.nonce != nil {
+				acc.Nonce = *d.nonce
+			}
+			if d.incarnation != nil {
+				acc.Incarnation = *d.incarnation
+			}
+			if d.codeHash != nil {
+				acc.CodeHash = *d.codeHash
+			}
+			enc := accounts.SerialiseV3(&acc)
+			entries = append(entries, TouchKeyEntry{kv.AccountsDomain, address[:], enc})
+		}
+
+		if d.code != nil {
+			entries = append(entries, TouchKeyEntry{kv.CodeDomain, address[:], d.code})
+		}
+
+		for _, item := range d.storage {
+			key := item.key.Value()
+			composite := make([]byte, 20+32)
+			copy(composite, address[:])
+			copy(composite[20:], key[:])
+			v := item.val.Bytes()
+			if len(v) == 0 {
+				entries = append(entries, TouchKeyEntry{kv.StorageDomain, composite, nil})
+			} else {
+				entries = append(entries, TouchKeyEntry{kv.StorageDomain, composite, v})
+			}
+		}
+	}
+	return entries
+}
 
 // sortVersionedWrites sorts a VersionedWrites slice by (Address, Path, Key)
 // to ensure deterministic processing order. VersionedWrites originate from
