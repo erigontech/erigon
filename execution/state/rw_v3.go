@@ -190,7 +190,9 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 				enc := accounts.SerialiseV3(&acc)
 				if blockCache != nil {
 					blockCache.WriteAccount(addr, enc)
-					domains.GetCommitmentContext().TouchKey(kv.AccountsDomain, string(address[:]), enc)
+					if !domains.InlineTouchKeyDisabled() {
+						domains.GetCommitmentContext().TouchKey(kv.AccountsDomain, string(address[:]), enc)
+					}
 				} else {
 					if err := domains.DomainPut(kv.AccountsDomain, roTx, address[:], enc, txNum, nil); err != nil {
 						return err
@@ -208,7 +210,9 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 				}
 				if blockCache != nil {
 					blockCache.WriteCode(addr, d.code)
+					if !domains.InlineTouchKeyDisabled() {
 					domains.GetCommitmentContext().TouchKey(kv.CodeDomain, string(address[:]), d.code)
+					}
 				} else {
 					if err := domains.DomainPut(kv.CodeDomain, roTx, address[:], d.code, txNum, nil); err != nil {
 						return err
@@ -226,7 +230,9 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 					}
 					if blockCache != nil {
 						blockCache.WriteStorage(addr, item.key, nil)
+						if !domains.InlineTouchKeyDisabled() {
 						domains.GetCommitmentContext().TouchKey(kv.StorageDomain, string(composite), nil)
+						}
 					} else {
 						if err := domains.DomainDel(kv.StorageDomain, roTx, composite, txNum, nil); err != nil {
 							return err
@@ -238,7 +244,9 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 					}
 					if blockCache != nil {
 						blockCache.WriteStorage(addr, item.key, v)
+						if !domains.InlineTouchKeyDisabled() {
 						domains.GetCommitmentContext().TouchKey(kv.StorageDomain, string(composite), v)
+						}
 					} else {
 						if err := domains.DomainPut(kv.StorageDomain, roTx, composite, v, txNum, nil); err != nil {
 							return err
@@ -283,7 +291,9 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 		if emptyRemoval && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() {
 			if blockCache != nil {
 				blockCache.DeleteAccount(addr)
+				if !domains.InlineTouchKeyDisabled() {
 				domains.GetCommitmentContext().TouchKey(kv.AccountsDomain, string(addrValue[:]), nil)
+				}
 			} else {
 				if err := domains.DomainDel(kv.AccountsDomain, roTx, addrValue[:], txNum, enc0); err != nil {
 					return err
@@ -293,7 +303,9 @@ func (rs *StateV3) applyVersionedWrites(roTx kv.TemporalTx, blockNum, txNum uint
 			enc1 := accounts.SerialiseV3(&acc)
 			if blockCache != nil {
 				blockCache.WriteAccount(addr, enc1)
+				if !domains.InlineTouchKeyDisabled() {
 				domains.GetCommitmentContext().TouchKey(kv.AccountsDomain, string(addrValue[:]), enc1)
+				}
 			} else {
 				if err := domains.DomainPut(kv.AccountsDomain, roTx, addrValue[:], enc1, txNum, enc0); err != nil {
 					return err
