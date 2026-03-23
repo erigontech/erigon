@@ -1096,3 +1096,12 @@ func (r Ranges) any() bool {
 	}
 	return false
 }
+
+func (r Ranges) anyDomain() bool {
+	for _, d := range &r.domain {
+		if d.any() {
+			return true
+		}
+	}
+	return false
+}
