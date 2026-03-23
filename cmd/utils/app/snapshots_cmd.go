@@ -3249,7 +3249,9 @@ func duIsReceiptRelated(f duFileInfo) bool {
 // duIsRcacheDomainFile returns true for rcache files in the domain/ directory.
 // Domain files are never pruned by the snapshot pruning logic.
 func duIsRcacheDomainFile(f duFileInfo) bool {
-	return f.Category == duCatRcache && strings.Contains(f.Path, string(filepath.Separator)+"domain"+string(filepath.Separator))
+	// Normalize path separators to handle both Unix and Windows paths in tests and production.
+	normalized := filepath.ToSlash(f.Path)
+	return f.Category == duCatRcache && strings.Contains(normalized, "/domain/")
 }
 
 // duComputeEstimates computes estimated sizes for archive/full/minimal modes
