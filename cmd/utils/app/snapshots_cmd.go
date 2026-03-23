@@ -3592,8 +3592,12 @@ func duFormatHuman(w io.Writer, result duResult, verbose bool) {
 					if j == len(subEntries)-1 {
 						prefix = "  └─"
 					}
+					displayName := sub.name
+					if displayName == "transactions-to-block" {
+						displayName = "txn2block"
+					}
 					fmt.Fprintf(w, "%s %-16s %10s %9.1f%%  %5d files\n",
-						prefix, sub.name, duFormatSize(sub.stat.Bytes), subPct, sub.stat.Files)
+						prefix, displayName, duFormatSize(sub.stat.Bytes), subPct, sub.stat.Files)
 				}
 				fmt.Fprintln(w)
 			}
