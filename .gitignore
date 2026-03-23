@@ -123,4 +123,7 @@ mdbx.lck
 
 # Prevent accidental commit of locally-built binaries
 /erigon
+
+# place to store task-specific agent .md files that we do not want to commit to main repo
+agentspecs/
 .claude/worktrees/

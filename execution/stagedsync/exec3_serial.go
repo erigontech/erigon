@@ -30,11 +30,12 @@ import (
 type serialExecutor struct {
 	txExecutor
 	// outputs
-	txCount         uint64
-	blockGasUsed    uint64
-	blobGasUsed     uint64
-	lastBlockResult *blockResult
-	worker          *exec.Worker
+	txCount           uint64
+	blockGasUsed      uint64 // accumulated regular gas (pre-Amsterdam: same as block gas)
+	blockStateGasUsed uint64 // EIP-8037: accumulated state gas
+	blobGasUsed       uint64
+	lastBlockResult   *blockResult
+	worker            *exec.Worker
 
 	// accumulator for the current block; set at StartChange and used by the
 	// block-end stateWriter so that AuRa system-call nonce changes are
@@ -360,7 +361,8 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			}
 
 			se.txCount++
-			se.blockGasUsed += result.ExecutionResult.BlockGasUsed
+			se.blockGasUsed += result.ExecutionResult.BlockRegularGasUsed
+			se.blockStateGasUsed += result.ExecutionResult.BlockStateGasUsed
 			mxExecTransactions.Add(1)
 			if txTask.Tx() != nil {
 				se.blobGasUsed += txTask.Tx().GetBlobGas()
@@ -397,7 +399,9 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 
 				if txTask.BlockNumber() > 0 && startTxIndex == 0 {
 					//Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-					if err := se.getPostValidator().Process(se.blockGasUsed, se.blobGasUsed, checkReceipts, blockReceipts, txTask.Header, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
+					// Block gas = max(regular, state). Pre-Amsterdam: blockStateGasUsed is 0.
+					blockGasUsed := max(se.blockGasUsed, se.blockStateGasUsed)
+					if err := se.getPostValidator().Process(blockGasUsed, se.blobGasUsed, checkReceipts, blockReceipts, txTask.Header, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
 						return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 					}
 				}
@@ -543,8 +547,9 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 		se.lastExecutedBlockNum.Store(int64(txTask.BlockNumber()))
 
 		if task.IsBlockEnd() {
-			se.executedGas.Add(int64(se.blockGasUsed))
+			se.executedGas.Add(int64(max(se.blockGasUsed, se.blockStateGasUsed)))
 			se.blockGasUsed = 0
+			se.blockStateGasUsed = 0
 			se.blobGasUsed = 0
 			gasPool = nil
 		}

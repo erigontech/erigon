@@ -291,6 +291,15 @@ func NewRecentReceipts(limit uint64) *RecentReceipts {
 	}
 }
 
+// Clear removes all stored receipts, transactions, and headers.
+func (r *RecentReceipts) Clear() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	clear(r.receipts)
+	clear(r.txs)
+	clear(r.headers)
+}
+
 // Notify sends log notifications (for logs subscription)
 // [from,to)
 func (r *RecentReceipts) NotifyLogs(n *Events, from, to uint64, isUnwind bool) {

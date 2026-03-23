@@ -78,6 +78,7 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/node/ethconfig"
+	p2pnat "github.com/erigontech/erigon/p2p/nat"
 )
 
 func OpenCaplinDatabase(ctx context.Context,
@@ -294,11 +295,24 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		return err
 	}
 	activeIndicies := state.GetActiveValidatorsIndices(state.Slot() / beaconConfig.SlotsPerEpoch)
+
+	// Parse --caplin.nat into a NAT interface so both P2P managers advertise the correct
+	// external IP in discv5 ENR and libp2p multiaddrs (needed for Docker/NAT deployments).
+	var caplinNAT p2pnat.Interface
+	if config.CaplinNAT != "" {
+		var natErr error
+		caplinNAT, natErr = p2pnat.Parse(config.CaplinNAT)
+		if natErr != nil {
+			return fmt.Errorf("invalid --caplin.nat option %q: %w", config.CaplinNAT, natErr)
+		}
+	}
+
 	p2p, err := clp2p.NewP2Pmanager(ctx, &clp2p.P2PConfig{
 		IpAddr:     config.CaplinDiscoveryAddr,
 		Port:       int(config.CaplinDiscoveryPort),
 		TCPPort:    uint(config.CaplinDiscoveryTCPPort),
 		EnableUPnP: config.EnableUPnP,
+		NAT:        caplinNAT,
 		//MaxInboundTrafficPerPeer:     config.MaxInboundTrafficPerPeer,
 		//MaxOutboundTrafficPerPeer:    config.MaxOutboundTrafficPerPeer,
 		//AdaptableTrafficRequirements: config.AdptableTrafficRequirements,
@@ -320,6 +334,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			Port:          int(config.CaplinDiscoveryPort),
 			TCPPort:       uint(config.CaplinDiscoveryTCPPort),
 			EnableUPnP:    config.EnableUPnP,
+			NAT:           caplinNAT,
 			NetworkConfig: networkConfig,
 			BeaconConfig:  beaconConfig,
 			TmpDir:        dirs.Tmp,

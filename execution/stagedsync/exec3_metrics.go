@@ -766,6 +766,12 @@ func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, commitStart ti
 	storageReadCount := lastProgress.Metrics.LoadStorage
 	branchReadCount := lastProgress.Metrics.LoadBranch
 	branchWriteCount := lastProgress.Metrics.UpdateBranch
+	cacheBranchHits := lastProgress.Metrics.CacheBranch
+	cacheAccountHits := lastProgress.Metrics.CacheAccount
+	cacheStorageHits := lastProgress.Metrics.CacheStorage
+	missBranchCount := lastProgress.Metrics.MissBranch
+	missAccountCount := lastProgress.Metrics.MissAccount
+	missStorageCount := lastProgress.Metrics.MissStorage
 	lastProgress.Metrics.RUnlock()
 
 	curKeyCount := int64(keyCount - p.prevCommitmentKeyCount)
@@ -795,11 +801,15 @@ func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, commitStart ti
 	mxCommitmentMGasSec.Set(float64(committedGasSec / 1e6))
 	mxCommitmentBlockDuration.Set(float64(commitedBlockDur))
 
+	totalCacheHits := cacheBranchHits + cacheAccountHits + cacheStorageHits
+	totalCacheMisses := missBranchCount + missAccountCount + missStorageCount
+
 	rs.Domains().Metrics().RLock()
 	commitVals := []any{
 		"bdur", common.Round(commitedBlockDur, 0),
 		"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(lastProgress.KeyIndex), common.PrettyCounter(lastProgress.UpdateCount)),
 		"buf", common.ByteCount(uint64(rs.Domains().Metrics().CachePutSize + rs.Domains().Metrics().CacheGetSize)),
+		"chit", common.PrettyCounter(totalCacheHits), "cmiss", common.PrettyCounter(totalCacheMisses),
 	}
 	rs.Domains().Metrics().RUnlock()
 
