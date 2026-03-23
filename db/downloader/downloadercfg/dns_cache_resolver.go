@@ -23,15 +23,17 @@ import (
 	"time"
 
 	"github.com/miekg/dns"
+
+	"github.com/erigontech/erigon/common/dnsutil"
 )
 
 // TTLDNSDialer is a DialContext-compatible resolver that caches A/AAAA record
 // lookups for the duration of their actual DNS TTL.  Entries are refreshed
 // lazily on demand — no background goroutine is needed.
 type TTLDNSDialer struct {
-	mu      sync.RWMutex
-	cache   map[string]ttlEntry
-	servers []string // "host:port" nameserver addresses
+	mu    sync.RWMutex
+	ns    *dnsutil.NameserverConfig
+	cache map[string]ttlEntry
 }
 
 type ttlEntry struct {
@@ -39,12 +41,12 @@ type ttlEntry struct {
 	expiry time.Time
 }
 
-// NewTTLDNSDialer creates a dialer that uses the system nameservers from
-// /etc/resolv.conf, falling back to well-known public resolvers.
+// NewTTLDNSDialer creates a dialer that uses the system nameservers, refreshing
+// them lazily when the underlying OS configuration changes.
 func NewTTLDNSDialer() *TTLDNSDialer {
 	return &TTLDNSDialer{
-		cache:   make(map[string]ttlEntry),
-		servers: ttlDialSystemNameservers(),
+		ns:    dnsutil.NewNameserverConfig(),
+		cache: make(map[string]ttlEntry),
 	}
 }
 
@@ -133,7 +135,7 @@ func (d *TTLDNSDialer) queryRR(ctx context.Context, host string, qtype uint16) (
 		resp *dns.Msg
 		err  error
 	)
-	for _, ns := range d.servers {
+	for _, ns := range d.ns.Get() {
 		resp, _, err = client.ExchangeContext(ctx, msg, ns)
 		if err == nil {
 			break
@@ -155,7 +157,7 @@ func (d *TTLDNSDialer) queryRR(ctx context.Context, host string, qtype uint16) (
 	// TCP fallback when the UDP response was truncated.
 	if resp.Truncated {
 		tcpClient := &dns.Client{Net: "tcp", Timeout: timeout}
-		for _, ns := range d.servers {
+		for _, ns := range d.ns.Get() {
 			resp, _, err = tcpClient.ExchangeContext(ctx, msg, ns)
 			if err == nil {
 				break
@@ -189,18 +191,4 @@ func (d *TTLDNSDialer) queryRR(ctx context.Context, host string, qtype uint16) (
 		minTTL = 5 * time.Minute // safety fallback if no TTL was present
 	}
 	return addrs, minTTL, nil
-}
-
-// ttlDialSystemNameservers returns nameservers from /etc/resolv.conf, falling
-// back to well-known public resolvers when the file is unavailable.
-func ttlDialSystemNameservers() []string {
-	cfg, err := dns.ClientConfigFromFile("/etc/resolv.conf")
-	if err == nil && len(cfg.Servers) > 0 {
-		servers := make([]string, 0, len(cfg.Servers))
-		for _, s := range cfg.Servers {
-			servers = append(servers, net.JoinHostPort(s, cfg.Port))
-		}
-		return servers
-	}
-	return []string{"8.8.8.8:53", "1.1.1.1:53", "9.9.9.9:53"}
 }

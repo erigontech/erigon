@@ -23,32 +23,19 @@ import (
 	"time"
 
 	"github.com/miekg/dns"
+
+	"github.com/erigontech/erigon/common/dnsutil"
 )
 
 // systemTTLResolver performs DNS TXT lookups via the system nameservers using
 // raw DNS messages so that the actual record TTL can be extracted and honored
 // by the caller's cache.
 type systemTTLResolver struct {
-	nameservers []string // "host:port"
+	ns *dnsutil.NameserverConfig
 }
 
 func newSystemTTLResolver() *systemTTLResolver {
-	return &systemTTLResolver{nameservers: systemNameservers()}
-}
-
-// systemNameservers returns the system nameserver addresses from
-// /etc/resolv.conf, falling back to well-known public resolvers when the file
-// is unavailable (e.g. on Windows) or empty.
-func systemNameservers() []string {
-	cfg, err := dns.ClientConfigFromFile("/etc/resolv.conf")
-	if err == nil && len(cfg.Servers) > 0 {
-		servers := make([]string, 0, len(cfg.Servers))
-		for _, s := range cfg.Servers {
-			servers = append(servers, net.JoinHostPort(s, cfg.Port))
-		}
-		return servers
-	}
-	return []string{"8.8.8.8:53", "1.1.1.1:53", "9.9.9.9:53"}
+	return &systemTTLResolver{ns: dnsutil.NewNameserverConfig()}
 }
 
 // LookupTXT queries TXT records for the given domain and returns the records
@@ -70,7 +57,7 @@ func (r *systemTTLResolver) LookupTXT(ctx context.Context, domain string) ([]str
 		resp *dns.Msg
 		err  error
 	)
-	for _, ns := range r.nameservers {
+	for _, ns := range r.ns.Get() {
 		resp, _, err = udp.ExchangeContext(ctx, msg, ns)
 		if err == nil {
 			break
@@ -99,7 +86,7 @@ func (r *systemTTLResolver) LookupTXT(ctx context.Context, domain string) ([]str
 	// TCP fallback when the UDP response was truncated.
 	if resp.Truncated {
 		tcp := &dns.Client{Net: "tcp", Timeout: resolveTimeout(ctx)}
-		for _, ns := range r.nameservers {
+		for _, ns := range r.ns.Get() {
 			resp, _, err = tcp.ExchangeContext(ctx, msg, ns)
 			if err == nil {
 				break
