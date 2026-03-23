@@ -7,7 +7,6 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -110,11 +109,12 @@ func (cc *commitmentCalculator) loop(ctx context.Context) {
 				}
 
 			case *blockResult:
-				// Block boundary: compute commitment from accumulated touches.
-				if dbg.DiscardCommitment() {
-					continue
-				}
-				cc.computeAndPublish(ctx, r)
+				// Block boundary: just accumulate — don't compute per-block.
+				// The apply loop will request computation at batch boundaries
+				// via drainBeforeExit. Per-block commitment would fill
+				// the rootResults channel and deadlock the pipeline.
+				// TODO: add explicit compute-and-drain coordination.
+				_ = r
 			}
 
 		case <-ctx.Done():
