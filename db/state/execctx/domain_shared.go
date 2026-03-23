@@ -94,6 +94,10 @@ type SharedDomains struct {
 	currentStep       kv.Step
 	trace             bool //nolint
 	commitmentCapture bool
+	// disableInlineTouchKey when true, DomainPut skips the TouchKey call.
+	// Used when the commitment calculator goroutine owns the Updates buffer
+	// and feeds touches via TouchPlainKeyDirect from the fan-out channel.
+	disableInlineTouchKey bool
 	mem               kv.TemporalMemBatch
 	metrics           changeset.DomainMetrics
 
@@ -358,6 +362,13 @@ func (sd *SharedDomains) SetTxNum(txNum uint64) {
 
 func (sd *SharedDomains) TxNum() uint64 { return sd.txNum }
 
+// SetDisableInlineTouchKey disables the TouchKey call inside DomainPut/DomainDel.
+// When the commitment calculator goroutine owns the Updates buffer, the inline
+// TouchKey must be disabled to avoid concurrent writes.
+func (sd *SharedDomains) SetDisableInlineTouchKey(disable bool) {
+	sd.disableInlineTouchKey = disable
+}
+
 func (sd *SharedDomains) SetTrace(b, capture bool) []string {
 	sd.trace = b
 	sd.commitmentCapture = capture
@@ -542,7 +553,9 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 		return fmt.Errorf("DomainPut: %s, trying to put nil value. not allowed", domain)
 	}
 	ks := string(k)
-	sd.sdCtx.TouchKey(domain, ks, v)
+	if !sd.disableInlineTouchKey {
+		sd.sdCtx.TouchKey(domain, ks, v)
+	}
 
 	if prevVal == nil {
 		var err error
@@ -579,7 +592,9 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 //   - if `val == nil` it will call DomainDel
 func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte, txNum uint64, prevVal []byte) error {
 	ks := string(k)
-	sd.sdCtx.TouchKey(domain, ks, nil)
+	if !sd.disableInlineTouchKey {
+		sd.sdCtx.TouchKey(domain, ks, nil)
+	}
 
 	if prevVal == nil {
 		var err error
@@ -741,7 +756,9 @@ func (sd *SharedDomains) touchChangedKeys(tx kv.TemporalTx, d kv.Domain, fromTxN
 		if err != nil {
 			return changes, err
 		}
-		sd.GetCommitmentContext().TouchKey(d, string(k), nil)
+		if !sd.disableInlineTouchKey {
+			sd.GetCommitmentContext().TouchKey(d, string(k), nil)
+		}
 		changes++
 	}
 	return changes, nil

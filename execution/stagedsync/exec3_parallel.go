@@ -134,6 +134,9 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	}
 
 	// Start commitment calculator — receives the same result stream as apply loop.
+	// Disable inline TouchKey in DomainPut — the calculator owns the Updates buffer.
+	pe.doms.SetDisableInlineTouchKey(true)
+	defer pe.doms.SetDisableInlineTouchKey(false)
 	commitCalc := newCommitmentCalculator(pe.doms, pe.cfg.db, pe.logPrefix, commitResults, rootResults)
 	commitCalc.Start(ctx)
 	defer commitCalc.Stop()
