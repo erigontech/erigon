@@ -9,6 +9,8 @@ import (
 
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/nitro-erigon/arbnode"
 	"github.com/erigontech/nitro-erigon/arbstate/daprovider"
 	"github.com/erigontech/nitro-erigon/execution"
@@ -36,7 +38,11 @@ type L1SyncService struct {
 	dapReaders     []daprovider.Reader
 	exec           execution.ExecutionSequencer
 	db             kv.RwDB
-	logger         log.Logger
+	temporalDB     kv.TemporalRwDB  // nil when standalone
+	chainConfig    *chain.Config     // nil when standalone
+	lastBlockHeader *types.Header            // tracks parent for block chaining
+	headerCache     map[uint64]*types.Header // recent headers for BLOCKHASH lookups
+	logger          log.Logger
 
 	delayedMessagesRead uint64
 	cumulativeMsgCount  uint64
@@ -57,6 +63,7 @@ func New(
 	beaconUrl string,
 	exec execution.ExecutionSequencer,
 	db kv.RwDB,
+	chainConfig *chain.Config,
 	logger log.Logger,
 ) (*L1SyncService, error) {
 	seqInbox, err := arbnode.NewSequencerInbox(l1Client, config.SequencerInboxAddr, int64(config.StartL1Block))
@@ -75,6 +82,11 @@ func New(
 		return nil, fmt.Errorf("error initializing blob reader: %w", err)
 	}
 
+	var temporalDB kv.TemporalRwDB
+	if tdb, ok := db.(kv.TemporalRwDB); ok {
+		temporalDB = tdb
+	}
+
 	return &L1SyncService{
 		config:         config,
 		sequencerInbox: seqInbox,
@@ -83,6 +95,9 @@ func New(
 		dapReaders:     []daprovider.Reader{daprovider.NewReaderForBlobReader(blobClient)},
 		exec:           exec,
 		db:             db,
+		temporalDB:     temporalDB,
+		chainConfig:    chainConfig,
+		headerCache:    make(map[uint64]*types.Header, 256),
 		logger:         logger,
 		chunkSize:      config.L1BlocksPerRequest,
 	}, nil
@@ -150,6 +165,15 @@ func (s *L1SyncService) StopAndWait() {
 		s.cancel()
 	}
 	s.wg.Wait()
+}
+
+// cacheHeader stores a header for BLOCKHASH lookups, evicting entries older than 256 blocks.
+func (s *L1SyncService) cacheHeader(header *types.Header) {
+	blockNum := header.Number.Uint64()
+	s.headerCache[blockNum] = header
+	if blockNum > 256 {
+		delete(s.headerCache, blockNum-256)
+	}
 }
 
 func (s *L1SyncService) pollLoop() {

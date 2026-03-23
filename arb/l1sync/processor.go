@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -95,7 +96,9 @@ func UnpackBatch(ctx context.Context, seqNum uint64, data []byte, blockHash comm
 	return messages, nil
 }
 
-// ProcessBatch unpacks a batch into messages, stores everything in DB, and executes L2 blocks via DigestMessage
+// ProcessBatch unpacks a batch into messages, stores everything in DB, and executes L2 blocks.
+// When execution is enabled, a single TemporalRwTx is used for both metadata storage and
+// EVM execution, avoiding MDBX deadlock (only one write tx allowed at a time).
 func (s *L1SyncService) ProcessBatch(ctx context.Context, seqNum uint64, data []byte, blockHash common.Hash, l1BlockNumber uint64) error {
 	messages, err := UnpackBatch(ctx, seqNum, data, blockHash, s.dapReaders, s.db, s.delayedMessagesRead)
 	if err != nil {
@@ -104,9 +107,22 @@ func (s *L1SyncService) ProcessBatch(ctx context.Context, seqNum uint64, data []
 
 	s.logger.Info("unpacked batch", "batchSeqNum", seqNum, "messageCount", len(messages), "l1Block", l1BlockNumber)
 
-	tx, err := s.db.BeginRw(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to begin DB transaction: %w", err)
+	// Open a single write transaction for the entire batch.
+	// When execution is enabled, use TemporalRwTx (which embeds RwTx) for both
+	// metadata storage and EVM execution on the same MDBX write tx.
+	var tx kv.RwTx
+	var temporalTx kv.TemporalRwTx
+	if s.canExecute() {
+		temporalTx, err = s.temporalDB.BeginTemporalRw(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to begin temporal rw tx: %w", err)
+		}
+		tx = temporalTx
+	} else {
+		tx, err = s.db.BeginRw(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to begin DB transaction: %w", err)
+		}
 	}
 	defer tx.Rollback()
 
@@ -117,7 +133,7 @@ func (s *L1SyncService) ProcessBatch(ctx context.Context, seqNum uint64, data []
 		return fmt.Errorf("failed to store batch %d: %w", seqNum, err)
 	}
 
-	// Store decoded messages
+	// Store decoded messages and execute blocks
 	for i, msg := range messages {
 		msgBytes, err := json.Marshal(msg)
 		if err != nil {
@@ -126,19 +142,26 @@ func (s *L1SyncService) ProcessBatch(ctx context.Context, seqNum uint64, data []
 		if err := tx.Put(kv.ArbL1SyncMsg, msgKey(seqNum, uint64(i)), msgBytes); err != nil {
 			return fmt.Errorf("failed to store message %d/%d: %w", seqNum, i, err)
 		}
-		block, err := createBlockFromMessage(msg, nil, s.config.ChainID)
+		block, err := createBlockFromMessage(msg, s.lastBlockHeader, s.config.ChainID)
 		if err != nil {
-			fmt.Println("err", err)
-		} else if block.Number() != nil && block.NumberU64()%1000 == 0 {
-			// fmt.Println("lol")
+			return fmt.Errorf("failed to create block from message %d/%d: %w", seqNum, i, err)
 		}
-		// // Execute L2 block
-		// result, err := s.exec.DigestMessage(msgNum, msg, nil)
-		// if err != nil {
-		// 	return fmt.Errorf("failed to digest message %d (batch %d, msg %d): %w", msgNum, seqNum, i, err)
-		// }
+		if block != nil {
+			if temporalTx != nil {
+				if err := s.executeBlock(block, temporalTx, msg.DelayedMessagesRead); err != nil {
+					return fmt.Errorf("failed to execute block %d (batch %d, msg %d): %w", block.NumberU64(), seqNum, i, err)
+				}
+			}
+			s.lastBlockHeader = block.Header()
+			s.cacheHeader(s.lastBlockHeader)
+		}
+	}
 
-		// s.logger.Debug("processed message", "batchSeqNum", seqNum, "msgIdx", i, "msgNum", msgNum, "blockHash", result)
+	// Store last block header for restart recovery
+	if s.lastBlockHeader != nil {
+		if err := storeLastBlockHeader(tx, s.lastBlockHeader); err != nil {
+			return fmt.Errorf("failed to store last block header: %w", err)
+		}
 	}
 
 	// Update progress via SyncStageProgress
@@ -253,14 +276,12 @@ func createBlockFromMessage(msg *arbostypes.MessageWithMetadata, lastBlockHeader
 	}
 	arbTxes, err := arbos.ParseL2Transactions(msg.Message, chainID)
 	if err != nil {
-		// log.Warn("error parsing incoming message", "err", err)
 		arbTxes = arbTxes[:0]
 	}
 	txes := make([]types.Transaction, len(arbTxes))
 	for i := 0; i < len(arbTxes); i++ {
 		txes[i] = arbTxes[i].GetInner()
 	}
-	// txes := types.WrapArbTransactions(arbTxes)
 
 	l1Header := msg.Message.Header
 	poster := l1Header.Poster
@@ -277,9 +298,7 @@ func createBlockFromMessage(msg *arbostypes.MessageWithMetadata, lastBlockHeader
 
 	// Prepend a tx before all others to touch up the osState (update the L1 block num, pricing pools, etc)
 	startTx := arbos.InternalTxStartBlock(chainID, l1Header.L1BaseFee, l1BlockNum, header, lastBlockHeader)
-	txes = append(types.Transactions{startTx}, txes...)
-	// startTx := arbos.InternalTxStartBlock(e.chainConfig.ChainID, l1Header.L1BaseFee, l1BlockNum, header, header)
-	// txes = append(types.Transactions{types.NewArbTx(startTx)}, txes...)
+	txes = append(types.Transactions{types.NewArbTx(startTx)}, txes...)
 
 	block := types.NewBlock(header, txes, nil, nil, nil)
 
@@ -395,4 +414,32 @@ func msgKey(batchSeqNum uint64, msgIdx uint64) []byte {
 	binary.BigEndian.PutUint64(b[:8], batchSeqNum)
 	binary.BigEndian.PutUint64(b[8:], msgIdx)
 	return b
+}
+
+// --- last block header persistence ---
+// Uses max uint64 key in ArbL1SyncBatch table to avoid collision with real batch seqNums.
+
+var lastBlockHeaderDBKey = uint64Key(math.MaxUint64)
+
+func storeLastBlockHeader(tx kv.RwTx, header *types.Header) error {
+	data, err := json.Marshal(header)
+	if err != nil {
+		return fmt.Errorf("failed to marshal last block header: %w", err)
+	}
+	return tx.Put(kv.ArbL1SyncBatch, lastBlockHeaderDBKey, data)
+}
+
+func loadLastBlockHeader(tx kv.Tx) (*types.Header, error) {
+	data, err := tx.GetOne(kv.ArbL1SyncBatch, lastBlockHeaderDBKey)
+	if err != nil {
+		return nil, err
+	}
+	if data == nil {
+		return nil, nil
+	}
+	var header types.Header
+	if err := json.Unmarshal(data, &header); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal last block header: %w", err)
+	}
+	return &header, nil
 }
