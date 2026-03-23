@@ -688,6 +688,9 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 			if err = seg.AddWord([]byte("word")); err != nil {
 				t.Fatal(err)
 			}
+			if err = seg.AddWord([]byte("val")); err != nil { // key-value pair: mergers expect even number of words
+				t.Fatal(err)
+			}
 			require.NoError(t, seg.Compress())
 
 			if strings.Contains(filename, name) && containsSubstring(t, filename, extensions) && strings.Contains(filename, dataFolder) {
