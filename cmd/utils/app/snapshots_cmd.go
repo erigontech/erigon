@@ -2372,7 +2372,7 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
-	err = temporalDb.BuildMissedAccessors(ctx, 4)
+	err = temporalDb.BuildMissedAccessors(ctx, 2)
 	if err != nil {
 		return err
 	}
