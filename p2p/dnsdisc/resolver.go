@@ -19,6 +19,7 @@ package dnsdisc
 import (
 	"context"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/miekg/dns"
@@ -118,7 +119,10 @@ func (r *systemTTLResolver) LookupTXT(ctx context.Context, domain string) ([]str
 		if !ok {
 			continue
 		}
-		txts = append(txts, txt.Txt...)
+		// A single TXT RR can contain multiple character-strings (each ≤255 B).
+		// Join them the same way net.Resolver.LookupTXT does, otherwise long
+		// ENR entries get split and the Keccak hash check fails.
+		txts = append(txts, strings.Join(txt.Txt, ""))
 		if ttl := time.Duration(rr.Header().Ttl) * time.Second; ttl < minTTL {
 			minTTL = ttl
 		}
