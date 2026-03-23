@@ -362,6 +362,8 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.refund = mdgas.MdGas{}
 	sdb.txIndex = 0
 	sdb.logSize = 0
+	sdb.accessList = newAccessList()
+	sdb.transientStorage = newTransientStorage()
 	sdb.versionMap = nil
 	// Do not clear the maps in place — result.TxIn / result.TxOut may still
 	// reference them from a prior execution (used by finalize in another
@@ -1458,6 +1460,33 @@ func (sdb *IntraBlockState) stateObjectForAccount(addr accounts.Address, account
 
 func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead bool) (*stateObject, error) {
 	if so, ok := sdb.stateObjects[addr]; ok {
+		if sdb.versionMap != nil {
+			// Refresh cached stateObject fields from the versionMap.
+			// The stateObject caches the full account (record-level) but the
+			// versionMap tracks individual fields (BalancePath, NoncePath, etc.).
+			// A prior TX's re-execution may have updated field-level entries
+			// since this stateObject was loaded.
+			// Use UnknownVersion so any versionMap entry is considered newer
+			// than the cached stateObject.
+			refreshed, _, _, err := sdb.refreshVersionedAccount(addr, &so.data, StorageRead, UnknownVersion)
+			if err != nil {
+				return nil, err
+			}
+			if refreshed != &so.data {
+				so.data = *refreshed
+			}
+			// Check if code changed (e.g. EIP-7702 authorization set/cleared
+			// the delegation prefix). Clear the cached code so the next
+			// Code() call reads fresh from the stateReader.
+			codeHash, _, chVersion, err := versionedRead(sdb, addr, CodeHashPath, accounts.NilKey, false, so.data.CodeHash, nil, nil)
+			if err != nil {
+				return nil, err
+			}
+			if chVersion.TxIndex > UnknownVersion.TxIndex && codeHash != so.data.CodeHash {
+				so.data.CodeHash = codeHash
+				so.code = nil // force re-read
+			}
+		}
 		return so, nil
 	}
 
