@@ -318,17 +318,31 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						if dbg.DiscardCommitment() {
 							return nil
 						}
-						cr := collectCommitmentResult(ctx, rootResults)
-						if cr == nil {
+						// Non-blocking check — if the calculator hasn't produced
+						// a result yet (e.g. batching), don't block the apply loop.
+						select {
+						case cr := <-rootResults:
+							if cr.err != nil {
+								pe.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x",
+									pe.logPrefix, cr.blockNum, cr.rootHash))
+								if initialCycle {
+									// Fatal during initial sync — no unwind, no retry.
+									// The parallel executor cannot unwind and retrying
+									// produces different (wrong) results because sd.mem
+									// state is lost between attempts.
+									return fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, cr.blockNum)
+								}
+								// At chain tip: allow retry (forks are legitimate).
+								return handleIncorrectRootHashError(cr.blockNum, applyResult.BlockHash, applyResult.ParentHash, rwTx, pe.cfg, execStage, pe.logger, u)
+							}
+							pe.txExecutor.lastCommittedBlockNum.Store(cr.blockNum)
+							pe.txExecutor.lastCommittedTxNum.Store(cr.txNum)
+						case <-ctx.Done():
 							return ctx.Err()
+						default:
+							// No result available — calculator hasn't computed yet.
+							// This is normal during batching.
 						}
-						if cr.err != nil {
-							pe.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x",
-								pe.logPrefix, cr.blockNum, cr.rootHash))
-							return handleIncorrectRootHashError(cr.blockNum, applyResult.BlockHash, applyResult.ParentHash, rwTx, pe.cfg, execStage, pe.logger, u)
-						}
-						pe.txExecutor.lastCommittedBlockNum.Store(cr.blockNum)
-						pe.txExecutor.lastCommittedTxNum.Store(cr.txNum)
 						return nil
 					}
 
