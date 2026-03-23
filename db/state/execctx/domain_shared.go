@@ -369,6 +369,11 @@ func (sd *SharedDomains) SetDisableInlineTouchKey(disable bool) {
 	sd.disableInlineTouchKey = disable
 }
 
+// InlineTouchKeyDisabled returns true when inline TouchKey is disabled.
+func (sd *SharedDomains) InlineTouchKeyDisabled() bool {
+	return sd.disableInlineTouchKey
+}
+
 func (sd *SharedDomains) SetTrace(b, capture bool) []string {
 	sd.trace = b
 	sd.commitmentCapture = capture
