@@ -110,6 +110,7 @@ func init() {
 	withIntegrityChecks(cmdCommitmentRebuild)
 	withHeimdall(cmdCommitmentRebuild)
 	withChaosMonkey(cmdCommitmentRebuild)
+	withYes(cmdCommitmentRebuild)
 	commitmentCmd.AddCommand(cmdCommitmentRebuild)
 
 	// commitment print
@@ -273,7 +274,7 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	defer rwTx.Rollback()
 
 	// remove all existing state commitment snapshots
-	if err := app.DeleteStateSnapshots(dirs, false, true, false, "0-999999", kv.CommitmentDomain.String()); err != nil {
+	if err := app.DeleteStateSnapshots(dirs, false, !yes, false, "0-999999", kv.CommitmentDomain.String()); err != nil {
 		return err
 	}
 
