@@ -1094,6 +1094,21 @@ func (m *MemoryMutation) NewTemporalReadView(temporalTx kv.TemporalTx) *OverlayT
 	}
 }
 
+// GetOne explicitly delegates to OverlayReadView.GetOne so that reads check
+// the in-memory overlay first. Without this, Go's method promotion creates an
+// ambiguity: both *OverlayReadView and the embedded temporalTx (kv.TemporalTx
+// → kv.Tx) promote GetOne. In practice the temporalTx promotion can win,
+// causing reads to bypass the overlay and hit the stale DB snapshot — which
+// breaks reorgs where canonical hashes were rewritten in the overlay.
+func (v *OverlayTemporalReadView) GetOne(table string, key []byte) ([]byte, error) {
+	return v.OverlayReadView.GetOne(table, key)
+}
+
+// Has explicitly delegates to OverlayReadView.Has for the same reason as GetOne.
+func (v *OverlayTemporalReadView) Has(table string, key []byte) (bool, error) {
+	return v.OverlayReadView.Has(table, key)
+}
+
 func (v *OverlayTemporalReadView) Apply(_ context.Context, f func(tx kv.Tx) error) error {
 	return f(v)
 }
