@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -202,40 +202,24 @@ func TestCodeReadFromVersionMap(t *testing.T) {
 	assert.NotEqual(t, MVReadResultDone, rr.Status(), "Should not find code before write txIndex")
 }
 
-// TestToTouchKeys_AccountSerialization verifies that ToTouchKeys produces
-// correctly serialized account entries from individual field writes.
-func TestToTouchKeys_AccountSerialization(t *testing.T) {
+// TestTouchUpdates_Account verifies that TouchUpdates feeds account field
+// writes directly to commitment.Updates via TouchPlainKeyDirect, producing
+// merged Updates with correct key count.
+func TestTouchUpdates_Account(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x42})
-	balance := uint256.NewInt(1000)
-	nonce := uint64(5)
-	incarnation := uint64(1)
-	codeHash := accounts.InternCodeHash([32]byte{0xaa, 0xbb})
 
 	writes := VersionedWrites{
-		{Address: addr, Path: BalancePath, Val: *balance},
-		{Address: addr, Path: NoncePath, Val: nonce},
-		{Address: addr, Path: IncarnationPath, Val: incarnation},
-		{Address: addr, Path: CodeHashPath, Val: codeHash},
+		{Address: addr, Path: BalancePath, Val: *uint256.NewInt(1000)},
+		{Address: addr, Path: NoncePath, Val: uint64(5)},
+		{Address: addr, Path: IncarnationPath, Val: uint64(1)},
+		{Address: addr, Path: CodeHashPath, Val: accounts.InternCodeHash([32]byte{0xaa, 0xbb})},
 	}
 
-	entries := writes.ToTouchKeys()
+	updates := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), func(k []byte) []byte { return k })
+	writes.TouchUpdates(updates)
 
-	// Should produce exactly 1 AccountsDomain entry
-	var accountEntries []TouchKeyEntry
-	for _, e := range entries {
-		if e.Domain == kv.AccountsDomain {
-			accountEntries = append(accountEntries, e)
-		}
-	}
-	require.Equal(t, 1, len(accountEntries), "Should have 1 account entry")
-
-	// Deserialize and verify
-	var acc accounts.Account
-	err := accounts.DeserialiseV3(&acc, accountEntries[0].Val)
-	require.NoError(t, err)
-	assert.Equal(t, *balance, acc.Balance)
-	assert.Equal(t, nonce, acc.Nonce)
-	assert.Equal(t, incarnation, acc.Incarnation)
+	// All 4 fields merge into 1 key (same address)
+	assert.Equal(t, uint64(1), updates.Size(), "Should have 1 merged key for same address")
 }
 
 // TestToTouchKeys_Storage verifies storage entries use correct composite keys.
@@ -251,35 +235,15 @@ func TestToTouchKeys_Storage(t *testing.T) {
 		{Address: addr, Path: StoragePath, Key: slot2, Val: val2},
 	}
 
-	entries := writes.ToTouchKeys()
+	updates := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), func(k []byte) []byte { return k })
+	writes.TouchUpdates(updates)
 
-	var storageEntries []TouchKeyEntry
-	for _, e := range entries {
-		if e.Domain == kv.StorageDomain {
-			storageEntries = append(storageEntries, e)
-		}
-	}
-	require.Equal(t, 2, len(storageEntries), "Should have 2 storage entries")
-
-	// First entry: non-zero value
-	assert.Equal(t, 52, len(storageEntries[0].Key), "Composite key = 20 addr + 32 slot")
-
-	// One should have val, one should be nil (delete)
-	hasVal := false
-	hasNil := false
-	for _, e := range storageEntries {
-		if e.Val == nil {
-			hasNil = true
-		} else {
-			hasVal = true
-		}
-	}
-	assert.True(t, hasVal, "Should have non-nil storage value")
-	assert.True(t, hasNil, "Should have nil storage value (delete)")
+	// Should have 2 unique keys (different slots)
+	assert.Equal(t, uint64(2), updates.Size(), "Should have 2 storage keys")
 }
 
-// TestToTouchKeys_Code verifies code writes produce CodeDomain entries.
-func TestToTouchKeys_Code(t *testing.T) {
+// TestTouchUpdates_Code verifies code writes feed through TouchUpdates.
+func TestTouchUpdates_Code(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xd2})
 	code := []byte{0xef, 0x01, 0x00, 0x01, 0x02, 0x03}
 
@@ -287,54 +251,35 @@ func TestToTouchKeys_Code(t *testing.T) {
 		{Address: addr, Path: CodePath, Val: code},
 	}
 
-	entries := writes.ToTouchKeys()
+	updates := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), func(k []byte) []byte { return k })
+	writes.TouchUpdates(updates)
 
-	var codeEntries []TouchKeyEntry
-	for _, e := range entries {
-		if e.Domain == kv.CodeDomain {
-			codeEntries = append(codeEntries, e)
-		}
-	}
-	require.Equal(t, 1, len(codeEntries))
-	assert.Equal(t, code, codeEntries[0].Val)
+	assert.Equal(t, uint64(1), updates.Size(), "Should have 1 code key")
 }
 
-// TestToTouchKeys_MixedWritesBatch verifies that a mixed batch of writes
-// (accounts + storage + code) produces correct entries for all domains.
-func TestToTouchKeys_MixedWritesBatch(t *testing.T) {
+// TestTouchUpdates_MixedBatch verifies that a mixed batch of writes
+// (accounts + storage + code) feeds correctly through TouchUpdates.
+func TestTouchUpdates_MixedBatch(t *testing.T) {
 	addr1 := accounts.InternAddress([20]byte{0x01})
 	addr2 := accounts.InternAddress([20]byte{0x02})
 	slot := accounts.InternKey([32]byte{0x04})
 
 	writes := VersionedWrites{
-		// Account 1: balance + nonce
+		// Account 1: balance + nonce + code
 		{Address: addr1, Path: BalancePath, Val: *uint256.NewInt(100)},
 		{Address: addr1, Path: NoncePath, Val: uint64(1)},
 		{Address: addr1, Path: IncarnationPath, Val: uint64(0)},
 		{Address: addr1, Path: CodeHashPath, Val: accounts.InternCodeHash([32]byte{})},
+		{Address: addr1, Path: CodePath, Val: []byte{0x60, 0x00}},
 		// Account 2: storage write
 		{Address: addr2, Path: StoragePath, Key: slot, Val: *uint256.NewInt(999)},
-		// Account 1: code write
-		{Address: addr1, Path: CodePath, Val: []byte{0x60, 0x00}},
 	}
 
-	entries := writes.ToTouchKeys()
+	updates := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), func(k []byte) []byte { return k })
+	writes.TouchUpdates(updates)
 
-	accountCount := 0
-	storageCount := 0
-	codeCount := 0
-	for _, e := range entries {
-		switch e.Domain {
-		case kv.AccountsDomain:
-			accountCount++
-		case kv.StorageDomain:
-			storageCount++
-		case kv.CodeDomain:
-			codeCount++
-		}
-	}
-
-	assert.Equal(t, 1, accountCount, "1 account entry (addr1 fields grouped)")
-	assert.Equal(t, 1, storageCount, "1 storage entry (addr2 slot)")
-	assert.Equal(t, 1, codeCount, "1 code entry (addr1 code)")
+	// addr1: account fields + code all merge into 1 key
+	// addr2+slot: 1 storage key
+	// Total: 2 unique keys
+	assert.Equal(t, uint64(2), updates.Size(), "2 unique keys (addr1 merged, addr2 storage)")
 }
