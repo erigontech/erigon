@@ -629,3 +629,42 @@ func TestErrorTracePath(t *testing.T) {
 	require.Equal(t, "/tmp/trie-trace-block-42.error.toml", ErrorTracePath("/tmp/trie-trace-block-42.toml"))
 	require.Equal(t, "some-file.error", ErrorTracePath("some-file"))
 }
+
+// TestTrieTraceReplayFromFile is a convenience test for debugging production
+// trie issues. To use:
+//  1. Set ERIGON_TRIE_TRACE_BLOCK=<N> and run erigon against your datadir
+//  2. Copy the resulting .toml file to testdata/ (or any path)
+//  3. Update the path below and remove t.Skip()
+//  4. Run: go test ./execution/commitment/ -run TestTrieTraceReplayFromFile -v
+//
+// The test loads the trace into MockState, rebuilds plainKeys with hashing
+// and sorting via WrapKeyUpdates, then runs Process to reproduce the exact
+// computation (or error) from production.
+func TestTrieTraceReplayFromFile(t *testing.T) {
+	t.Skip("Manual debugging test — set trace path and remove Skip to use")
+
+	const tracePath = "testdata/trie-trace-block-NNNNNN.toml" // ← your trace file
+
+	ctx := context.Background()
+	state, plainKeys, replayUpdates := LoadTrieTraceIntoMockState(t, tracePath)
+
+	trie := NewHexPatriciaHashed(length.Addr, state)
+	trie.ResetContext(state)
+
+	// WrapKeyUpdates hashes plainKeys and sorts them — required before Process.
+	upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, replayUpdates)
+	defer upds.Close()
+
+	rootHash, err := trie.Process(ctx, upds, "", nil, WarmupConfig{})
+	if err != nil {
+		t.Logf("Process returned error (expected if replaying .error.toml): %v", err)
+		// Load the trace again to check if error matches
+		tt, loadErr := LoadTrieTrace(tracePath)
+		require.NoError(t, loadErr)
+		if tt.Error != "" {
+			t.Logf("Original error from trace: %s", tt.Error)
+		}
+		return
+	}
+	t.Logf("Root hash: %x", rootHash)
+}
