@@ -20,7 +20,10 @@ func (f *forkableDirtyFilesRoTx) Close() {
 	f.p = nil
 	for _, item := range f.files {
 		if !item.frozen {
-			item.refcount.Add(-1)
+			refCnt := item.refcount.Add(-1)
+			if refCnt == 0 && item.canDelete.Load() {
+				item.closeFilesAndRemove()
+			}
 		}
 	}
 	f.files = nil
