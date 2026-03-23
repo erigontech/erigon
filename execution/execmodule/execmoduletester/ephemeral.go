@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 )
@@ -93,7 +92,7 @@ func (emt *ExecModuleTester) closeEphemeral() {
 // Each block is executed on a nested overlay so that failed executions
 // (expected-invalid blocks) don't leave partial state on the main overlay.
 func (emt *ExecModuleTester) insertChainEphemeral(cp *blockgen.ChainPack) error {
-	cr := &testutil.LightChainReader{
+	cr := &LightChainReader{
 		Config_: emt.ChainConfig,
 		Headers: emt.ephemeralHeaders,
 		TDs:     emt.ephemeralTDs,
@@ -211,7 +210,7 @@ func (emt *ExecModuleTester) insertChainEphemeral(cp *blockgen.ChainPack) error 
 // Returns nil if the block executes successfully, or the execution error.
 // Used for expected-invalid blocks to avoid leaking state into the main overlay.
 func (emt *ExecModuleTester) DryRunBlock(block *types.Block) error {
-	cr := &testutil.LightChainReader{
+	cr := &LightChainReader{
 		Config_: emt.ChainConfig,
 		Headers: emt.ephemeralHeaders,
 		TDs:     emt.ephemeralTDs,

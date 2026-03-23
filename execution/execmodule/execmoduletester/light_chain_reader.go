@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package testutil
+package execmoduletester
 
 import (
 	"math/big"
@@ -38,16 +38,6 @@ type LightChainReader struct {
 	Headers map[common.Hash]*types.Header // hash -> header
 	TDs     map[common.Hash]*big.Int      // hash -> td
 	Tx      kv.Tx                         // fallback for genesis reads
-}
-
-// NewLightChainReader creates a LightChainReader with empty header/TD maps.
-func NewLightChainReader(config *chain.Config, tx kv.Tx) *LightChainReader {
-	return &LightChainReader{
-		Config_: config,
-		Headers: make(map[common.Hash]*types.Header),
-		TDs:     make(map[common.Hash]*big.Int),
-		Tx:      tx,
-	}
 }
 
 func (cr *LightChainReader) Config() *chain.Config                 { return cr.Config_ }

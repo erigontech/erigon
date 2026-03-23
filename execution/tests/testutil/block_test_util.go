@@ -35,24 +35,24 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
-	"github.com/erigontech/erigon/db/kv/membatchwithdb"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/protocol"
-	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/rulesconfig"
 )
 
 // A BlockTest checks handling of entire blocks.
 type BlockTest struct {
 	json            btJSON
+	br              services.FullBlockReader
 	ExperimentalBAL bool
 }
 
@@ -211,16 +211,138 @@ type btHeaderMarshaling struct {
 	SlotNumber    *math.HexOrDecimal64
 }
 
-// Run executes the block test using a MemoryMutation overlay on a shared,
-// cached genesis DB. This is the primary test execution path.
 func (bt *BlockTest) Run(t *testing.T) error {
-	return bt.run(t)
+	config, ok := testforks.Forks[bt.json.Network]
+	if !ok {
+		return testforks.UnsupportedForkError{Name: bt.json.Network}
+	}
+
+	gspec := bt.genesis(config)
+	db, genesis, release, err := getOrCreateGenesisDB(bt.json.Network, gspec)
+	if err != nil {
+		return fmt.Errorf("genesis cache: %w", err)
+	}
+	defer release()
+
+	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
+	mOpts := []execmoduletester.Option{
+		execmoduletester.WithCachedDB(db, genesis),
+		execmoduletester.WithGenesisSpec(gspec),
+		execmoduletester.WithEngine(engine),
+		execmoduletester.WithEphemeral(),
+	}
+	if bt.ExperimentalBAL {
+		mOpts = append(mOpts, execmoduletester.WithExperimentalBAL())
+	}
+	m := execmoduletester.New(t, mOpts...)
+
+	bt.br = m.BlockReader
+	// import pre accounts & construct test genesis block & state root
+	if m.Genesis.Hash() != bt.json.Genesis.Hash {
+		return fmt.Errorf("genesis block hash doesn't match test: computed=%x, test=%x", m.Genesis.Hash().Bytes()[:6], bt.json.Genesis.Hash[:6])
+	}
+	if m.Genesis.Root() != bt.json.Genesis.StateRoot {
+		return fmt.Errorf("genesis block state root does not match test: computed=%x, test=%x", m.Genesis.Root().Bytes()[:6], bt.json.Genesis.StateRoot[:6])
+	}
+
+	validBlocks, err := bt.insertBlocks(m)
+	if err != nil {
+		return err
+	}
+
+	if m.IsEphemeral() {
+		if common.Hash(bt.json.BestBlock) != m.EphemeralLastBlockHash() {
+			return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", bt.json.BestBlock, m.EphemeralLastBlockHash())
+		}
+		newDB := state.New(m.NewStateReader(m.EphemeralOverlay()))
+		if err := bt.validatePostState(newDB); err != nil {
+			return fmt.Errorf("post state validation failed: %w", err)
+		}
+		return nil
+	}
+
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	cmlast := rawdb.ReadHeadBlockHash(tx)
+	if common.Hash(bt.json.BestBlock) != cmlast {
+		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", bt.json.BestBlock, cmlast)
+	}
+	newDB := state.New(m.NewStateReader(tx))
+	if err := bt.validatePostState(newDB); err != nil {
+		return fmt.Errorf("post state validation failed: %w", err)
+	}
+
+	return bt.validateImportedHeaders(tx, validBlocks, m)
 }
 
 // RunCLI executes the test without requiring a testing.T context, suitable for CLI usage.
-// RunCLI executes the test without requiring a testing.T context, suitable for CLI usage.
 func (bt *BlockTest) RunCLI() error {
-	return bt.run(nil)
+	config, ok := testforks.Forks[bt.json.Network]
+	if !ok {
+		return testforks.UnsupportedForkError{Name: bt.json.Network}
+	}
+
+	gspec := bt.genesis(config)
+	db, genesis, release, err := getOrCreateGenesisDB(bt.json.Network, gspec)
+	if err != nil {
+		return fmt.Errorf("genesis cache: %w", err)
+	}
+	defer release()
+
+	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
+	m := execmoduletester.New(nil,
+		execmoduletester.WithCachedDB(db, genesis),
+		execmoduletester.WithGenesisSpec(gspec),
+		execmoduletester.WithEngine(engine),
+		execmoduletester.WithEphemeral(),
+	)
+	defer m.Close()
+
+	bt.br = m.BlockReader
+	// import pre accounts & construct test genesis block & state root
+	if m.Genesis.Hash() != bt.json.Genesis.Hash {
+		return fmt.Errorf("genesis block hash doesn't match test: computed=%x, test=%x", m.Genesis.Hash().Bytes()[:6], bt.json.Genesis.Hash[:6])
+	}
+	if m.Genesis.Root() != bt.json.Genesis.StateRoot {
+		return fmt.Errorf("genesis block state root does not match test: computed=%x, test=%x", m.Genesis.Root().Bytes()[:6], bt.json.Genesis.StateRoot[:6])
+	}
+
+	validBlocks, err := bt.insertBlocks(m)
+	if err != nil {
+		return err
+	}
+
+	if m.IsEphemeral() {
+		if common.Hash(bt.json.BestBlock) != m.EphemeralLastBlockHash() {
+			return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", bt.json.BestBlock, m.EphemeralLastBlockHash())
+		}
+		newDB := state.New(m.NewStateReader(m.EphemeralOverlay()))
+		if err := bt.validatePostState(newDB); err != nil {
+			return fmt.Errorf("post state validation failed: %w", err)
+		}
+		return nil
+	}
+
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	cmlast := rawdb.ReadHeadBlockHash(tx)
+	if common.Hash(bt.json.BestBlock) != cmlast {
+		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", bt.json.BestBlock, cmlast)
+	}
+	newDB := state.New(m.NewStateReader(tx))
+	if err := bt.validatePostState(newDB); err != nil {
+		return fmt.Errorf("post state validation failed: %w", err)
+	}
+
+	return bt.validateImportedHeaders(tx, validBlocks, m)
 }
 
 func (bt *BlockTest) genesis(config *chain.Config) *types.Genesis {
@@ -244,6 +366,122 @@ func (bt *BlockTest) genesis(config *chain.Config) *types.Genesis {
 		BlockAccessListHash:   bt.json.Genesis.BlockAccessListHash,
 		SlotNumber:            bt.json.Genesis.SlotNumber,
 	}
+}
+
+/*
+See https://github.com/ethereum/tests/wiki/Blockchain-Tests-II
+
+	Whether a block is valid or not is a bit subtle, it's defined by presence of
+	blockHeader, transactions and uncleHeaders fields. If they are missing, the block is
+	invalid and we must verify that we do not accept it.
+
+	Since some tests mix valid and invalid blocks we need to check this for every block.
+
+	If a block is invalid it does not necessarily fail the test, if it's invalidness is
+	expected we are expected to ignore it and continue processing and then validate the
+	post state.
+*/
+func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) ([]btBlock, error) {
+	// In ephemeral mode, pre-trace the main chain from BestBlock back to genesis.
+	// Tests with uncle/side-chain blocks have interleaved blocks from different
+	// forks; only main-chain blocks should be executed on the overlay.
+	var mainChainBlocks map[common.Hash]bool
+	if m.IsEphemeral() {
+		mainChainBlocks = make(map[common.Hash]bool)
+		decoded := make(map[common.Hash]*types.Block)
+		for _, b := range bt.json.Blocks {
+			cb, err := b.decode()
+			if err != nil {
+				continue
+			}
+			decoded[cb.Hash()] = cb
+		}
+		for h := common.Hash(bt.json.BestBlock); h != m.Genesis.Hash(); {
+			mainChainBlocks[h] = true
+			cb, ok := decoded[h]
+			if !ok {
+				break
+			}
+			h = cb.ParentHash()
+		}
+	}
+
+	validBlocks := make([]btBlock, 0)
+	// insert the test blocks, which will execute all transaction
+	for bi, b := range bt.json.Blocks {
+		cb, err := b.decode()
+		if err != nil {
+			if b.BlockHeader == nil {
+				continue // OK - block is supposed to be invalid, continue with next block
+			} else {
+				return nil, fmt.Errorf("block RLP decoding failed when expected to succeed: %w", err)
+			}
+		}
+
+		if m.IsEphemeral() {
+			// Expected-invalid blocks: dry-run on a throwaway overlay.
+			if b.BlockHeader == nil {
+				_ = m.DryRunBlock(cb)
+				continue
+			}
+			// Side-chain blocks: record header for uncle verification, skip execution.
+			if !mainChainBlocks[cb.Hash()] {
+				m.RecordEphemeralHeader(cb.Header())
+				continue
+			}
+		}
+
+		var balBytes []byte
+		if len(b.BlockAccessList) > 0 {
+			bal := b.BlockAccessList.toBAL()
+			balBytes, err = types.EncodeBlockAccessListBytes(bal)
+			if err != nil {
+				return nil, fmt.Errorf("block #%v encode block access list: %w", cb.Number(), err)
+			}
+		}
+		// RLP decoding worked, try to insert into chain:
+		chain := &blockgen.ChainPack{Blocks: []*types.Block{cb}, Headers: []*types.Header{cb.Header()}, TopBlock: cb, BlockAccessLists: [][]byte{balBytes}}
+
+		err1 := m.InsertChain(chain)
+		if err1 != nil {
+			if b.BlockHeader == nil {
+				continue // OK - block is supposed to be invalid, continue with next block
+			} else {
+				return nil, fmt.Errorf("block #%v insertion into chain failed: %w", cb.Number(), err1)
+			}
+		} else if b.BlockHeader == nil {
+			isCanonical, err := bt.isCanonical(m, cb)
+			if err != nil {
+				return nil, err
+			}
+			if isCanonical {
+				return nil, fmt.Errorf("block (index %d) insertion should have failed due to: %v", bi, b.ExpectException)
+			}
+		}
+		if b.BlockHeader == nil {
+			continue
+		}
+		// validate RLP decoding by checking all values against test file JSON
+		if err = validateHeader(b.BlockHeader, cb.HeaderNoCopy()); err != nil {
+			return nil, fmt.Errorf("deserialised block header validation failed: %w", err)
+		}
+		validBlocks = append(validBlocks, b)
+	}
+	return validBlocks, nil
+}
+
+// isCanonical reports whether block is the canonical block at its height.
+func (bt *BlockTest) isCanonical(m *execmoduletester.ExecModuleTester, block *types.Block) (bool, error) {
+	roTx, err := m.DB.BeginRo(m.Ctx)
+	if err != nil {
+		return false, err
+	}
+	defer roTx.Rollback()
+	canonical, _, err := bt.br.CanonicalHash(context.Background(), roTx, block.NumberU64())
+	if err != nil {
+		return false, err
+	}
+	return canonical == block.Hash(), nil
 }
 
 // equalPtr reports whether two optional pointers point to equal values.
@@ -370,6 +608,30 @@ func (bt *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 	return nil
 }
 
+func (bt *BlockTest) validateImportedHeaders(tx kv.Tx, validBlocks []btBlock, m *execmoduletester.ExecModuleTester) error {
+	// to get constant lookup when verifying block headers by hash (some tests have many blocks)
+	bmap := make(map[common.Hash]btBlock, len(bt.json.Blocks))
+	for _, b := range validBlocks {
+		bmap[b.BlockHeader.Hash] = b
+	}
+	// iterate over blocks backwards from HEAD and validate imported
+	// headers vs test file. some tests have reorgs, and we import
+	// block-by-block, so we can only validate imported headers after
+	// all blocks have been processed by BlockChain, as they may not
+	// be part of the longest chain until last block is imported.
+	for b, _ := m.BlockReader.CurrentBlock(tx); b != nil && b.NumberU64() != 0; {
+		if err := validateHeader(bmap[b.Hash()].BlockHeader, b.HeaderNoCopy()); err != nil {
+			return fmt.Errorf("imported block header validation failed: %w", err)
+		}
+		number := rawdb.ReadHeaderNumber(tx, b.ParentHash())
+		if number == nil {
+			break
+		}
+		b, _, _ = m.BlockReader.BlockWithSenders(m.Ctx, tx, b.ParentHash(), *number)
+	}
+	return nil
+}
+
 func (bb *btBlock) decode() (*types.Block, error) {
 	data, err := hexutil.Decode(bb.Rlp)
 	if err != nil {
@@ -378,464 +640,4 @@ func (bb *btBlock) decode() (*types.Block, error) {
 	var b types.Block
 	err = rlp.DecodeBytes(data, &b)
 	return &b, err
-}
-
-// validateBAL validates the block access list from the test JSON against the
-// block header. This is the lightweight equivalent of the BAL processing in
-// the full pipeline (ProcessBAL in exec3_parallel.go).
-func validateBAL(header *types.Header, b btBlock) error {
-	if len(b.BlockAccessList) == 0 {
-		return nil
-	}
-	bal := b.BlockAccessList.toBAL()
-	if err := bal.Validate(); err != nil {
-		return fmt.Errorf("BAL structural validation: %w", err)
-	}
-	if err := bal.ValidateMaxItems(header.GasLimit); err != nil {
-		return fmt.Errorf("BAL max items: %w", err)
-	}
-	if header.BlockAccessListHash != nil {
-		balHash := bal.Hash()
-		if balHash != *header.BlockAccessListHash {
-			return fmt.Errorf("BAL hash mismatch: computed %x, header %x", balHash, *header.BlockAccessListHash)
-		}
-	}
-	return nil
-}
-
-// isExpectedInvalid checks whether a block error is expected (BlockHeader == nil)
-// and returns true if the block should be skipped.
-func isExpectedInvalid(b btBlock) bool {
-	return b.BlockHeader == nil
-}
-
-func (bt *BlockTest) run(t *testing.T) error {
-	registerGenesisCacheCleanup(t)
-
-	config, ok := testforks.Forks[bt.json.Network]
-	if !ok {
-		return testforks.UnsupportedForkError{Name: bt.json.Network}
-	}
-
-	gspec := bt.genesis(config)
-	db, genesis, release, err := getOrCreateGenesisDB(bt.json.Network, gspec)
-	if err != nil {
-		return fmt.Errorf("genesis cache: %w", err)
-	}
-	defer release()
-
-	if genesis.Hash() != bt.json.Genesis.Hash {
-		return fmt.Errorf("genesis block hash mismatch: computed=%x, test=%x", genesis.Hash().Bytes()[:6], bt.json.Genesis.Hash[:6])
-	}
-	if genesis.Root() != bt.json.Genesis.StateRoot {
-		return fmt.Errorf("genesis block state root mismatch: computed=%x, test=%x", genesis.Root().Bytes()[:6], bt.json.Genesis.StateRoot[:6])
-	}
-
-	ctx := context.Background()
-	logger := log.New()
-	logger.SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
-
-	// Open a RO temporal tx on the shared genesis DB.
-	roTx, err := db.BeginTemporalRo(ctx)
-	if err != nil {
-		return fmt.Errorf("BeginTemporalRo: %w", err)
-	}
-	defer roTx.Rollback()
-
-	// Create a MemoryMutation overlay for ephemeral writes.
-	overlay, err := membatchwithdb.NewMemoryBatch(roTx, "", logger)
-	if err != nil {
-		return fmt.Errorf("NewMemoryBatch: %w", err)
-	}
-	defer overlay.Close()
-
-	// Look up the starting txNum from genesis block.
-	txNum, err := rawdbv3.TxNums.Max(ctx, roTx, 0)
-	if err != nil {
-		return fmt.Errorf("TxNums.Max: %w", err)
-	}
-	txNum++ // next available
-
-	engine := rulesconfig.CreateRulesEngineBareBones(ctx, config, logger)
-	defer engine.Close()
-
-	// Build a lightweight chain reader with in-memory header/TD maps.
-	cr := NewLightChainReader(config, overlay)
-
-	// Seed the chain reader with genesis header and TD.
-	cr.Headers[genesis.Hash()] = genesis.Header()
-	genesisTd, _ := rawdb.ReadTd(roTx, genesis.Hash(), 0)
-	if genesisTd != nil {
-		cr.TDs[genesis.Hash()] = genesisTd
-	}
-
-	lastBlockHash := genesis.Hash()
-
-	// Pre-decode blocks to identify the main chain. Tests with uncle/side-chain
-	// blocks have interleaved blocks from different forks. We trace the main
-	// chain backwards from BestBlock to only execute main-chain blocks.
-	mainChainBlocks := make(map[common.Hash]bool)
-	{
-		decoded := make(map[common.Hash]*types.Block)
-		for _, b := range bt.json.Blocks {
-			cb, err := b.decode()
-			if err != nil {
-				continue
-			}
-			decoded[cb.Hash()] = cb
-		}
-		// Trace back from BestBlock to genesis.
-		h := common.Hash(bt.json.BestBlock)
-		for h != genesis.Hash() {
-			mainChainBlocks[h] = true
-			cb, ok := decoded[h]
-			if !ok {
-				break
-			}
-			h = cb.ParentHash()
-		}
-	}
-
-	// Execute blocks — same structure as insertBlocks but using
-	// ExecuteBlockEphemerally instead of InsertChain.
-	for _, b := range bt.json.Blocks {
-		cb, err := b.decode()
-		if err != nil {
-			if isExpectedInvalid(b) {
-				continue
-			}
-			return fmt.Errorf("block RLP decoding failed when expected to succeed: %w", err)
-		}
-
-		header := cb.Header()
-
-		// Skip side-chain blocks — only execute blocks on the main chain.
-		// Record their headers for uncle validation.
-		if !mainChainBlocks[cb.Hash()] && !isExpectedInvalid(b) {
-			cr.Headers[cb.Hash()] = header
-			continue
-		}
-
-		// Post-Shanghai blocks must have a withdrawals field in the RLP.
-		// Go's RLP decoder is lenient and sets it to nil if absent.
-		if config.IsShanghai(header.Time) && cb.Withdrawals() == nil {
-			if isExpectedInvalid(b) {
-				continue
-			}
-			return fmt.Errorf("block #%v missing withdrawals field (post-Shanghai)", cb.Number())
-		}
-
-		parentHash := header.ParentHash
-
-		parentTd, hasTd := cr.TDs[parentHash]
-		if !hasTd {
-			parentTd, _ = rawdb.ReadTd(overlay, parentHash, header.Number.Uint64()-1)
-		}
-
-		// Verify header (gas limit, timestamp, difficulty, etc.).
-		if verifyErr := engine.VerifyHeader(cr, header, false); verifyErr != nil {
-			if isExpectedInvalid(b) {
-				continue
-			}
-			return fmt.Errorf("block #%v header verification failed: %w", cb.Number(), verifyErr)
-		}
-
-		// Verify uncles.
-		if verifyErr := engine.VerifyUncles(cr, header, cb.Uncles()); verifyErr != nil {
-			if isExpectedInvalid(b) {
-				continue
-			}
-			return fmt.Errorf("block #%v uncle verification failed: %w", cb.Number(), verifyErr)
-		}
-
-		// Validate BAL (block access list) from the test fixture.
-		if balErr := validateBAL(header, b); balErr != nil {
-			if isExpectedInvalid(b) {
-				continue
-			}
-			return fmt.Errorf("block #%v BAL validation failed: %w", cb.Number(), balErr)
-		}
-
-		// Check gas used doesn't exceed gas limit (GAS_USED_OVERFLOW).
-		if header.GasUsed > header.GasLimit {
-			if isExpectedInvalid(b) {
-				continue
-			}
-			return fmt.Errorf("block #%v gas used %d exceeds gas limit %d", cb.Number(), header.GasUsed, header.GasLimit)
-		}
-
-		// Pre-check: blob gas used must match actual blob count.
-		// ExecuteBlockEphemerally checks this post-execution, but by then state
-		// changes are already written to the overlay and can't be rolled back.
-		if header.BlobGasUsed != nil {
-			var expectedBlobGas uint64
-			for _, txn := range cb.Transactions() {
-				expectedBlobGas += txn.GetBlobGas()
-			}
-			if expectedBlobGas != *header.BlobGasUsed {
-				if isExpectedInvalid(b) {
-					continue
-				}
-				return fmt.Errorf("block #%v blob gas mismatch: txns=%d, header=%d", cb.Number(), expectedBlobGas, *header.BlobGasUsed)
-			}
-		}
-
-		// Pre-check: validate withdrawals root matches actual withdrawals.
-		if header.WithdrawalsHash != nil {
-			computedRoot := types.DeriveSha(types.Withdrawals(cb.Withdrawals()))
-			if computedRoot != *header.WithdrawalsHash {
-				if isExpectedInvalid(b) {
-					continue
-				}
-				return fmt.Errorf("block #%v withdrawals root mismatch: computed %x, header %x", cb.Number(), computedRoot, *header.WithdrawalsHash)
-			}
-		}
-
-		// Pre-check: validate transactions root matches actual transactions.
-		computedTxRoot := types.DeriveSha(cb.Transactions())
-		if computedTxRoot != header.TxHash {
-			if isExpectedInvalid(b) {
-				continue
-			}
-			return fmt.Errorf("block #%v transactions root mismatch: computed %x, header %x", cb.Number(), computedTxRoot, header.TxHash)
-		}
-
-		txNum++
-
-		blockHashFunc := protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
-			h := cr.GetHeader(hash, number)
-			if h == nil {
-				return nil, fmt.Errorf("header not found: %x at %d", hash, number)
-			}
-			return h, nil
-		})
-
-		var execResult *protocol.EphemeralExecResult
-		var execErr error
-
-		if isExpectedInvalid(b) {
-			// Execute on a nested overlay so we can discard state changes.
-			blockOverlay, blockOverlayErr := membatchwithdb.NewMemoryBatch(overlay, "", logger)
-			if blockOverlayErr != nil {
-				return fmt.Errorf("block #%v NewMemoryBatch: %w", cb.Number(), blockOverlayErr)
-			}
-			stateReader := state.NewReaderV3(blockOverlay)
-			stateWriter := state.NewWriter(blockOverlay, nil, txNum)
-
-			// First try: execute without VersionMap (preserves correct behavior).
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						execErr = fmt.Errorf("panic during block execution: %v", r)
-					}
-				}()
-				execResult, execErr = protocol.ExecuteBlockEphemerally(
-					config, &vm.Config{},
-					blockHashFunc, engine, cb,
-					stateReader, stateWriter,
-					cr, nil,
-					logger,
-				)
-			}()
-			if execErr != nil {
-				blockOverlay.Close()
-				continue // expected-invalid block correctly rejected
-			}
-
-			// Execution succeeded — check BAL hash if present.
-			if header.BlockAccessListHash != nil {
-				// Re-execute with VersionedIO on a fresh overlay to compute BAL.
-				blockOverlay.Close()
-				balOverlay, balErr := membatchwithdb.NewMemoryBatch(overlay, "", logger)
-				if balErr != nil {
-					return fmt.Errorf("block #%v BAL overlay: %w", cb.Number(), balErr)
-				}
-				balReader := state.NewReaderV3(balOverlay)
-				balWriter := state.NewWriter(balOverlay, nil, txNum)
-				balWriter.ForceWrites = true
-				_, vio, balExecErr := executeBlockWithIO(
-					config, blockHashFunc, engine, cb,
-					balReader, balWriter, cr, logger,
-				)
-				balOverlay.Close()
-				if balExecErr == nil && vio != nil {
-					computedBAL := vio.AsBlockAccessList()
-					if computedBAL.Hash() != *header.BlockAccessListHash {
-						continue // correctly rejected: BAL mismatch
-					}
-				}
-			}
-			// Block passed all our checks but is expected-invalid. The remaining
-			// invalidity must be in something we can't check (e.g., state root).
-			// Trust the fixture: skip the block without merging its state.
-			continue
-		}
-
-		// Valid block: execute directly on the main overlay.
-		stateReader := state.NewReaderV3(overlay)
-		stateWriter := state.NewWriter(overlay, nil, txNum)
-		stateWriter.ForceWrites = true // overlay-based execution: must write even if original==value
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					execErr = fmt.Errorf("panic during block execution: %v", r)
-				}
-			}()
-			execResult, execErr = protocol.ExecuteBlockEphemerally(
-				config, &vm.Config{},
-				blockHashFunc, engine, cb,
-				stateReader, stateWriter,
-				cr, nil,
-				logger,
-			)
-		}()
-
-		if execErr != nil {
-			return fmt.Errorf("block #%v insertion into chain failed: %w", cb.Number(), execErr)
-		}
-		_ = execResult
-
-		// Validate RLP-decoded header against the test JSON (same as insertBlocks).
-		if err = validateHeader(b.BlockHeader, cb.HeaderNoCopy()); err != nil {
-			return fmt.Errorf("deserialised block header validation failed: %w", err)
-		}
-
-		// Update txNum for the transactions in this block + end-of-block system tx.
-		txNum += uint64(cb.Transactions().Len())
-		txNum++
-
-		// Record the header and TD for subsequent blocks.
-		cr.Headers[cb.Hash()] = header
-		blockTd := new(big.Int)
-		if parentTd != nil {
-			blockTd.Set(parentTd)
-		}
-		blockTd.Add(blockTd, header.Difficulty.ToBig())
-		cr.TDs[cb.Hash()] = blockTd
-		lastBlockHash = cb.Hash()
-	}
-
-	// Validate last block hash.
-	if common.Hash(bt.json.BestBlock) != lastBlockHash {
-		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x",
-			bt.json.BestBlock, lastBlockHash)
-	}
-
-	// Validate post-state using the overlay.
-	newDB := state.New(state.NewReaderV3(overlay))
-	defer newDB.Release(false)
-	if err := bt.validatePostState(newDB); err != nil {
-		return fmt.Errorf("post state validation failed: %w", err)
-	}
-
-	return nil
-}
-
-// executeBlockWithIO executes a block while tracking state I/O in a VersionedIO,
-// enabling post-execution BAL validation. This replaces ExecuteBlockEphemerally
-// with a per-transaction loop that records reads, writes, and address accesses.
-func executeBlockWithIO(
-	chainConfig *chain.Config,
-	blockHashFunc func(n uint64) (common.Hash, error),
-	engine rules.Engine, block *types.Block,
-	stateReader state.StateReader, stateWriter state.StateWriter,
-	chainReader rules.ChainReader, logger log.Logger,
-) (res *protocol.EphemeralExecResult, vio *state.VersionedIO, retErr error) {
-	defer func() {
-		if r := recover(); r != nil {
-			retErr = fmt.Errorf("panic during block execution: %v", r)
-		}
-	}()
-
-	header := block.Header()
-	blockNum := block.NumberU64()
-	numTx := block.Transactions().Len()
-
-	// Set up VersionedIO and VersionMap for I/O tracking.
-	vio = state.NewVersionedIO(numTx + 1) // user txs + system tx
-	vmap := state.NewVersionMap(nil)
-
-	ibs := state.New(stateReader)
-	defer ibs.Release(false)
-	ibs.SetVersionMap(vmap)
-
-	vmConfig := vm.Config{}
-	gasUsed := new(protocol.GasUsed)
-	gp := new(protocol.GasPool)
-	gp.AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(block.Time()))
-
-	if err := protocol.InitializeBlockExecution(engine, chainReader, header, chainConfig, ibs, stateWriter, logger, nil); err != nil {
-		return nil, nil, err
-	}
-
-	receipts := make(types.Receipts, 0, numTx)
-
-	for i, txn := range block.Transactions() {
-		ibs.SetTxContext(blockNum, i)
-		ibs.ResetVersionedIO()
-
-		receipt, err := protocol.ApplyTransaction(chainConfig, blockHashFunc, engine, accounts.NilAddress, gp, ibs, stateWriter, header, txn, gasUsed, vmConfig)
-		if err != nil {
-			return nil, nil, fmt.Errorf("could not apply txn %d from block %d [%v]: %w", i, blockNum, txn.Hash().Hex(), err)
-		}
-		receipts = append(receipts, receipt)
-
-		// Record per-tx I/O into VersionedIO.
-		ver := state.Version{BlockNum: blockNum, TxIndex: i}
-		vio.RecordReads(ver, ibs.VersionedReads())
-		vio.RecordWrites(ver, ibs.VersionedWrites(false))
-		vio.RecordAccesses(ver, ibs.AccessedAddresses())
-	}
-
-	// Validate receipts.
-	receiptSha := types.DeriveSha(receipts)
-	if chainConfig.IsByzantium(blockNum) && receiptSha != block.ReceiptHash() {
-		return nil, nil, fmt.Errorf("mismatched receipt headers for block %d (%s != %s)", blockNum, receiptSha.Hex(), block.ReceiptHash().Hex())
-	}
-
-	// Validate gas.
-	blockGasUsed := gasUsed.BlockGasUsed()
-	if blockGasUsed != header.GasUsed {
-		return nil, nil, fmt.Errorf("gas used by execution: %d, in header: %d", blockGasUsed, header.GasUsed)
-	}
-	if header.BlobGasUsed != nil && gasUsed.Blob != *header.BlobGasUsed {
-		return nil, nil, fmt.Errorf("blob gas used by execution: %d, in header: %d", gasUsed.Blob, *header.BlobGasUsed)
-	}
-
-	// Validate bloom.
-	bloom := types.CreateBloom(receipts)
-	if bloom != header.Bloom {
-		return nil, nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
-	}
-
-	// Finalize (system transactions: withdrawals, requests).
-	ibs.ResetVersionedIO()
-	txs := block.Transactions()
-	newBlock, requests, err := protocol.FinalizeBlockExecution(engine, stateReader, header, txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, true, logger, nil)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// Record system tx I/O.
-	sysVer := state.Version{BlockNum: blockNum, TxIndex: numTx}
-	vio.RecordReads(sysVer, ibs.VersionedReads())
-	vio.RecordWrites(sysVer, ibs.VersionedWrites(false))
-	vio.RecordAccesses(sysVer, ibs.AccessedAddresses())
-
-	// Validate requests hash.
-	if header.RequestsHash != nil {
-		computedHash := requests.Hash()
-		if *computedHash != *header.RequestsHash {
-			return nil, nil, fmt.Errorf("invalid requests hash: computed %x, header %x", *computedHash, *header.RequestsHash)
-		}
-	}
-
-	return &protocol.EphemeralExecResult{
-		StateRoot:   newBlock.Root(),
-		TxRoot:      types.DeriveSha(txs),
-		ReceiptRoot: receiptSha,
-		Bloom:       bloom,
-		Receipts:    receipts,
-		Difficulty:  &header.Difficulty,
-	}, vio, nil
 }

@@ -144,6 +144,8 @@ type ExecModuleTester struct {
 	posStagedSync  *stagedsync.Sync
 	bgComponentsEg errgroup.Group
 
+	ownsDB bool // true when DB was created by New(); false when shared from genesis cache
+
 	// Ephemeral mode: overlay-based block execution.
 	// When enabled, blocks after genesis are executed via ExecuteBlockEphemerally
 	// on a MemoryMutation overlay instead of the full staged-sync pipeline.
@@ -159,8 +161,10 @@ type ExecModuleTester struct {
 func (emt *ExecModuleTester) Close() {
 	emt.closeEphemeral()
 	emt.cancel()
-	if err := emt.bgComponentsEg.Wait(); err != nil {
-		require.Equal(emt.tb, context.Canceled, err) // upon waiting for clean exit we should get ctx cancelled
+	if emt.ownsDB {
+		if err := emt.bgComponentsEg.Wait(); err != nil {
+			require.Equal(emt.tb, context.Canceled, err) // upon waiting for clean exit we should get ctx cancelled
+		}
 	}
 	if emt.Engine != nil {
 		emt.Engine.Close()
@@ -168,9 +172,53 @@ func (emt *ExecModuleTester) Close() {
 	if emt.BlockSnapshots != nil {
 		emt.BlockSnapshots.Close()
 	}
-	if emt.DB != nil {
+	if emt.DB != nil && emt.ownsDB {
 		emt.DB.Close()
 	}
+}
+
+// newCachedEphemeral creates an ExecModuleTester that reuses a pre-existing
+// genesis DB from a cache. It skips all expensive setup (DB creation, genesis
+// commit, staged-sync pipeline, sentry) and goes straight to ephemeral overlay
+// initialization. The caller retains ownership of the DB.
+func newCachedEphemeral(tb testing.TB, opt options) *ExecModuleTester {
+	logLvl := log.LvlError
+	if lvl, ok := os.LookupEnv("MOCK_SENTRY_LOG_LEVEL"); ok {
+		logLvl, _ = log.LvlFromString(lvl)
+	}
+	logger := log.Root()
+	logger.SetHandler(log.LvlFilterHandler(logLvl, log.StderrHandler))
+
+	ctx, ctxCancel := context.WithCancel(context.Background())
+
+	mock := &ExecModuleTester{
+		Ctx:         ctx,
+		cancel:      ctxCancel,
+		tb:          tb,
+		Log:         logger,
+		DB:          opt.cachedDB,
+		Engine:      opt.engine,
+		ChainConfig: opt.genesis.Config,
+		Genesis:     opt.cachedGenesis,
+		Key:         opt.key,
+		Address:     crypto.PubkeyToAddress(opt.key.PublicKey),
+		ephemeral:   true,
+		// ownsDB is false (zero value) — DB is shared from genesis cache
+	}
+
+	if tb != nil {
+		tb.Cleanup(mock.Close)
+	}
+
+	if err := mock.initEphemeral(); err != nil {
+		if tb != nil {
+			tb.Fatal(err)
+		} else {
+			panic(err)
+		}
+	}
+
+	return mock
 }
 
 // Stream returns stream, waiting if necessary
@@ -342,6 +390,17 @@ func WithEnableDomain(domains ...kv.Domain) Option {
 	}
 }
 
+// WithCachedDB provides a pre-existing genesis database from an external cache.
+// When combined with WithEphemeral(), New() skips all expensive setup (DB creation,
+// genesis commit, staged-sync pipeline, sentry) and goes straight to overlay init.
+// The caller retains ownership of the DB and must not close it.
+func WithCachedDB(db kv.TemporalRwDB, genesis *types.Block) Option {
+	return func(opts *options) {
+		opts.cachedDB = db
+		opts.cachedGenesis = genesis
+	}
+}
+
 type options struct {
 	stepSize        *uint64
 	experimentalBAL bool
@@ -354,6 +413,8 @@ type options struct {
 	withTxPool      bool
 	ephemeral       bool
 	enableDomains   []kv.Domain
+	cachedDB        kv.TemporalRwDB  // pre-existing DB from genesis cache
+	cachedGenesis   *types.Block      // genesis block from genesis cache
 }
 
 func applyOptions(opts []Option) options {
@@ -398,6 +459,11 @@ func applyOptions(opts []Option) options {
 // Use With* options to customise.
 func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	opt := applyOptions(opts)
+
+	// Fast path: cached genesis DB + ephemeral mode — skip all expensive setup.
+	if opt.cachedDB != nil && opt.ephemeral {
+		return newCachedEphemeral(tb, opt)
+	}
 
 	gspec := opt.genesis
 	key := opt.key
@@ -465,7 +531,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	br := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
 
 	mock := &ExecModuleTester{
-		Ctx: ctx, cancel: ctxCancel, DB: db,
+		Ctx: ctx, cancel: ctxCancel, DB: db, ownsDB: true,
 		tb:                 tb,
 		Log:                logger,
 		Dirs:               dirs,
