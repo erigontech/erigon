@@ -642,7 +642,8 @@ type ByteReader interface {
 //
 // Stream is not safe for concurrent use.
 type Stream struct {
-	r ByteReader
+	r  ByteReader
+	sr sliceReader // embedded to avoid allocation in NewStreamFromPool
 
 	remaining uint64   // number of bytes remaining to be read from r
 	size      uint64   // size of value ahead
@@ -681,7 +682,13 @@ func NewStream(r io.Reader, inputLimit uint64) *Stream {
 	s.Reset(r, inputLimit)
 	return s
 }
-func (s *Stream) Release() { streamPool.Put(s) }
+
+// Release returns the Stream to the pool. Must be called after NewStreamFromPool.
+func (s *Stream) Release() {
+	s.sr = nil // clear reference to input slice to avoid pinning it in the pool
+	s.r = nil
+	streamPool.Put(s)
+}
 
 // NewListStream creates a new stream that pretends to be positioned
 // at an encoded list of the given length.
@@ -693,10 +700,13 @@ func NewListStream(r io.Reader, len uint64) *Stream {
 	return s
 }
 
-// NewStreamFromPool returns a Stream from the pool.
-func NewStreamFromPool(r io.Reader, inputLimit uint64) (stream *Stream) {
+// NewStreamFromPool returns a Stream from the pool. Call Release() when done.
+// sr is stored as a field on Stream (not a local var) so &stream.sr does not
+// escape to the heap, making this call allocation-free.
+func NewStreamFromPool(b []byte, inputLimit uint64) (stream *Stream) {
 	stream = streamPool.Get().(*Stream)
-	stream.Reset(r, inputLimit)
+	stream.sr = b
+	stream.Reset(&stream.sr, inputLimit)
 	return stream
 }
 

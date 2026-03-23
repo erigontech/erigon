@@ -1140,3 +1140,13 @@ func unhex(str string) []byte {
 	}
 	return b
 }
+
+func BenchmarkNewStreamFromPool(b *testing.B) {
+	data := unhex("f86d8085012a05f200825208944592d8f8d7b001e72cb26a73e4fa1806a51ac79d880de0b6b3a7640000801ba0f3ae52f3a530ece0e1b978c8e84a18d4b7939bf254b1fd6eab8bf4cae3de8b91a0594d9d8f6543a8c6e71d959e21b63cf7d342db5503a78c9c4bdbc0cc9e71fe5f")
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		s := NewStreamFromPool(data, uint64(len(data)))
+		s.Release()
+	}
+}
