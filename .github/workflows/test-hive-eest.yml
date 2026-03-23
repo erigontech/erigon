@@ -1,10 +1,7 @@
 name: Hive EEST tests
 
 on:
-  push:
-    branches:
-        - 'release/**'
-        - main
+  workflow_call:
   workflow_dispatch:
 
 env:
@@ -104,14 +101,17 @@ jobs:
       # Targetting the clients/erigon/Dockerfile.git in the Hive director - 
       # this builds the container from github and uses it for tests
       - name: Get dependencies and build hive
+        env:
+          SOURCE_REPO: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
         run: |
           cd hive
           git status
           go get . >> buildlogs.log
           rm clients/erigon/Dockerfile
           mv clients/erigon/Dockerfile.git clients/erigon/Dockerfile
-          branch_name=$(echo ${GITHUB_REF#refs/heads/}  | sed 's/[&/\]/\\&/g')
-          echo Building Hive with Erigon branch - $branch_name
+          branch_name=$(echo ${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}} | sed 's/[&/\]/\\&/g')
+          echo Building Hive with Erigon repo - ${SOURCE_REPO}, branch - $branch_name
+          sed -i "s|^ARG github=erigontech/erigon$|ARG github=${SOURCE_REPO}|" clients/erigon/Dockerfile
           sed -i "s/^ARG tag=main$/ARG tag=${branch_name}/" clients/erigon/Dockerfile
           go_version=$(go mod edit -json ../erigon-src/go.mod | jq -r .Go)
           echo "Patching builder Go version to ${go_version}"
