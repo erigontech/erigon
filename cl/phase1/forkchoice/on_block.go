@@ -48,6 +48,7 @@ var (
 	ErrEIP7594ColumnDataNotAvailable = errors.New("EIP-7594 column data is not available")
 	ErrNewPayloadNoStatus            = errors.New("newPayload returned no status")
 	ErrMissingSegment                = errors.New("missing segment: parent state not available")
+	ErrParentEnvelopePending         = errors.New("parent execution payload envelope not yet available")
 )
 
 func verifyKzgCommitmentsAgainstTransactions(cfg *clparams.BeaconChainConfig, block *cltypes.BeaconBlock) error {
@@ -273,18 +274,9 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 					parentFullState = nil
 				}
 			} else if parentInForkChoice {
-				// Fallback: envelope missing but parent was FULL and in fork choice.
-				// Patch latestBlockHash from the parent bid's BlockHash.
-				parentBlock, _ := f.forkGraph.GetBlock(block.Block.ParentRoot)
-				if parentBlock != nil {
-					parentBid := parentBlock.Block.Body.GetSignedExecutionPayloadBid()
-					if parentBid != nil && parentBid.Message != nil {
-						log.Warn("OnBlock: FULL parent envelope missing, using latestBlockHash override",
-							"slot", block.Block.Slot, "parentRoot", block.Block.ParentRoot,
-							"bidBlockHash", parentBid.Message.BlockHash)
-						latestBlockHashOverride = parentBid.Message.BlockHash
-					}
-				}
+				// Parent is FULL but envelope hasn't arrived yet. Defer processing
+				// so the block can be retried once the envelope is available.
+				return ErrParentEnvelopePending
 			}
 		}
 		// Checkpoint sync fallback: parent block not in fork choice (e.g. synced from checkpoint
