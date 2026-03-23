@@ -262,7 +262,6 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	//     (post-beacon-block state, no execution payload was applied)
 	// This ensures the new block builds on the correct canonical state.
 	var parentFullState *state.CachingBeaconState
-	var latestBlockHashOverride common.Hash
 	if blockVersion >= clparams.GloasVersion {
 		isParentFull := f.isParentNodeFull(block.Block)
 		hasEnvelope := f.forkGraph.HasEnvelope(block.Block.ParentRoot)
@@ -282,20 +281,9 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 				return ErrParentEnvelopePending
 			}
 		}
-		// Checkpoint sync fallback: parent block not in fork choice (e.g. synced from checkpoint
-		// at a GLOAS slot where envelope was already processed). The state's latestBlockHash
-		// may be stale. Patch it from the bid's ParentBlockHash since we trust the chain.
-		if !parentInForkChoice && parentFullState == nil {
-			bid := block.Block.Body.GetSignedExecutionPayloadBid()
-			if bid != nil && bid.Message != nil {
-				log.Debug("OnBlock: parent not in fork choice, using latestBlockHash override from bid",
-					"slot", block.Block.Slot, "bidParentBlockHash", bid.Message.ParentBlockHash)
-				latestBlockHashOverride = bid.Message.ParentBlockHash
-			}
-		}
 	}
 
-	lastProcessedState, status, err := f.forkGraph.AddChainSegment(block, fullValidation, parentFullState, latestBlockHashOverride)
+	lastProcessedState, status, err := f.forkGraph.AddChainSegment(block, fullValidation, parentFullState)
 	if err != nil {
 		return err
 	}
