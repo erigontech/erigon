@@ -159,6 +159,13 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, ams
 	// in VersionMap.validateRead ensures deterministic parallel execution even
 	// without a stored BAL body (HasBAL=false), so the computed BAL is accurate.
 	if headerBALHash != bal.Hash() {
+		// Log BAL debug strings so CI output captures the field-by-field diff
+		log.Warn("BAL mismatch: computed BAL", "block", blockNum, "hash", bal.Hash(), "debug", bal.DebugString())
+		if dbBALBytes != nil {
+			if dbBAL2, err := types.DecodeBlockAccessListBytes(dbBALBytes); err == nil && dbBAL2 != nil {
+				log.Warn("BAL mismatch: stored BAL", "block", blockNum, "hash", dbBAL2.Hash(), "debug", dbBAL2.DebugString())
+			}
+		}
 		if dataDir != "" {
 			balDir := filepath.Join(dataDir, "bal")
 			if err := os.MkdirAll(balDir, 0o755); err != nil {
