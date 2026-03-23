@@ -455,11 +455,6 @@ func NewProgress(initialBlockNum, initialTxNum, commitThreshold uint64, updateMe
 }
 
 type Progress struct {
-	// mu protects all prev* fields accessed concurrently from the commit-logger
-	// goroutine (func1.2 inside parallelExecutor.exec) and the outer exec()
-	// function after pe.wait() returns. The commit-logger goroutine may still
-	// be running when the outer exec calls LogCommitments for the final summary.
-	mu                             sync.Mutex
 	initialTime                    time.Time
 	initialTxNum                   uint64
 	initialBlockNum                uint64
@@ -730,9 +725,6 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 }
 
 func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, commitStart time.Time, stepsInDb float64, lastProgress commitment.CommitProgress) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
 	var te *txExecutor
 	var suffix string
 
@@ -774,6 +766,12 @@ func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, commitStart ti
 	storageReadCount := lastProgress.Metrics.LoadStorage
 	branchReadCount := lastProgress.Metrics.LoadBranch
 	branchWriteCount := lastProgress.Metrics.UpdateBranch
+	cacheBranchHits := lastProgress.Metrics.CacheBranch
+	cacheAccountHits := lastProgress.Metrics.CacheAccount
+	cacheStorageHits := lastProgress.Metrics.CacheStorage
+	missBranchCount := lastProgress.Metrics.MissBranch
+	missAccountCount := lastProgress.Metrics.MissAccount
+	missStorageCount := lastProgress.Metrics.MissStorage
 	lastProgress.Metrics.RUnlock()
 
 	curKeyCount := int64(keyCount - p.prevCommitmentKeyCount)
@@ -803,11 +801,15 @@ func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, commitStart ti
 	mxCommitmentMGasSec.Set(float64(committedGasSec / 1e6))
 	mxCommitmentBlockDuration.Set(float64(commitedBlockDur))
 
+	totalCacheHits := cacheBranchHits + cacheAccountHits + cacheStorageHits
+	totalCacheMisses := missBranchCount + missAccountCount + missStorageCount
+
 	rs.Domains().Metrics().RLock()
 	commitVals := []any{
 		"bdur", common.Round(commitedBlockDur, 0),
 		"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(lastProgress.KeyIndex), common.PrettyCounter(lastProgress.UpdateCount)),
 		"buf", common.ByteCount(uint64(rs.Domains().Metrics().CachePutSize + rs.Domains().Metrics().CacheGetSize)),
+		"chit", common.PrettyCounter(totalCacheHits), "cmiss", common.PrettyCounter(totalCacheMisses),
 	}
 	rs.Domains().Metrics().RUnlock()
 
@@ -918,7 +920,6 @@ func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.Sta
 		"alloc", common.ByteCount(m.Alloc),
 		"sys", common.ByteCount(m.Sys),
 		"isForkValidation", te.isForkValidation,
-		"isBlockProduction", te.isBlockProduction,
 		"isApplyingBlocks", te.isApplyingBlocks,
 	}...)
 

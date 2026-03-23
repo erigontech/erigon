@@ -80,9 +80,9 @@ func (t Transactor) CreateSimpleTransfer(
 			Nonce:    nonce,
 			GasLimit: 21_000,
 			To:       &to,
-			Value:    amountU256,
+			Value:    *amountU256,
 		},
-		GasPrice: gasPriceU256,
+		GasPrice: *gasPriceU256,
 	}
 
 	signer := types.LatestSignerForChainID(t.chainId)

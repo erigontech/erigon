@@ -247,25 +247,11 @@ type Config struct {
 	// Consensus layer
 	InternalCL bool
 
-	OverrideOsakaTime     *big.Int `toml:",omitempty"`
-	OverrideAmsterdamTime *big.Int `toml:",omitempty"`
+	OverrideOsakaTime     *uint64 `toml:",omitempty"`
+	OverrideAmsterdamTime *uint64 `toml:",omitempty"`
 
 	// Whether to avoid overriding chain config already stored in the DB
 	KeepStoredChainConfig bool
-
-	// Embedded Silkworm support
-	SilkwormExecution            bool
-	SilkwormRpcDaemon            bool
-	SilkwormSentry               bool
-	SilkwormVerbosity            string
-	SilkwormNumContexts          uint32
-	SilkwormRpcLogEnabled        bool
-	SilkwormRpcLogDirPath        string
-	SilkwormRpcLogMaxFileSize    uint16
-	SilkwormRpcLogMaxFiles       uint16
-	SilkwormRpcLogDumpResponse   bool
-	SilkwormRpcNumWorkers        uint32
-	SilkwormRpcJsonCompatibility bool
 
 	// PoS Single Slot finality
 	PolygonPosSingleSlotFinality        bool

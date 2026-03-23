@@ -101,6 +101,7 @@ var (
 	TraceUnwinds          = EnvBool("TRACE_UNWINDS", false)
 	traceDomains          = EnvStrings("TRACE_DOMAINS", ",", nil)
 	StopAfterBlock        = EnvUint("STOP_AFTER_BLOCK", 0)
+	IgnoreBAL             = EnvBool("IGNORE_BAL", false)
 	BatchCommitments      = EnvBool("BATCH_COMMITMENTS", true)
 	CaplinEfficientReorg  = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 	UseTxDependencies     = EnvBool("USE_TX_DEPENDENCIES", false)

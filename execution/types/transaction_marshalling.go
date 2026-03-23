@@ -274,11 +274,11 @@ func (tx *LegacyTx) UnmarshalJSON(input []byte) error {
 	if dec.GasPrice == nil {
 		return errors.New("missing required field 'gasPrice' in transaction")
 	}
-	var overflow bool
-	tx.GasPrice, overflow = uint256.FromBig(dec.GasPrice.ToInt())
+	gasPrice, overflow := uint256.FromBig(dec.GasPrice.ToInt())
 	if overflow {
 		return errors.New("'gasPrice' in transaction does not fit in 256 bits")
 	}
+	tx.GasPrice = *gasPrice
 	if dec.Gas == nil {
 		return errors.New("missing required field 'gas' in transaction")
 	}
@@ -286,10 +286,11 @@ func (tx *LegacyTx) UnmarshalJSON(input []byte) error {
 	if dec.Value == nil {
 		return errors.New("missing required field 'value' in transaction")
 	}
-	tx.Value, overflow = uint256.FromBig(dec.Value.ToInt())
+	val, overflow := uint256.FromBig(dec.Value.ToInt())
 	if overflow {
 		return errors.New("'value' in transaction does not fit in 256 bits")
 	}
+	tx.Value = *val
 	if dec.Data == nil {
 		return errors.New("missing required field 'input' in transaction")
 	}
@@ -339,11 +340,11 @@ func (tx *AccessListTx) UnmarshalJSON(input []byte) error {
 	if dec.ChainID == nil {
 		return errors.New("missing required field 'chainId' in transaction")
 	}
-	var overflow bool
-	tx.ChainID, overflow = uint256.FromBig(dec.ChainID.ToInt())
+	chainID, overflow := uint256.FromBig(dec.ChainID.ToInt())
 	if overflow {
 		return errors.New("'chainId' in transaction does not fit in 256 bits")
 	}
+	tx.ChainID = *chainID
 	if dec.To != nil {
 		tx.To = dec.To
 	}
@@ -354,10 +355,11 @@ func (tx *AccessListTx) UnmarshalJSON(input []byte) error {
 	if dec.GasPrice == nil {
 		return errors.New("missing required field 'gasPrice' in transaction")
 	}
-	tx.GasPrice, overflow = uint256.FromBig(dec.GasPrice.ToInt())
+	gasPrice, overflow := uint256.FromBig(dec.GasPrice.ToInt())
 	if overflow {
 		return errors.New("'gasPrice' in transaction does not fit in 256 bits")
 	}
+	tx.GasPrice = *gasPrice
 	if dec.Gas == nil {
 		return errors.New("missing required field 'gas' in transaction")
 	}
@@ -365,10 +367,11 @@ func (tx *AccessListTx) UnmarshalJSON(input []byte) error {
 	if dec.Value == nil {
 		return errors.New("missing required field 'value' in transaction")
 	}
-	tx.Value, overflow = uint256.FromBig(dec.Value.ToInt())
+	val, overflow := uint256.FromBig(dec.Value.ToInt())
 	if overflow {
 		return errors.New("'value' in transaction does not fit in 256 bits")
 	}
+	tx.Value = *val
 	if dec.Data == nil {
 		return errors.New("missing required field 'input' in transaction")
 	}
@@ -411,11 +414,11 @@ func (tx *DynamicFeeTransaction) unmarshalJson(dec txJSON) error {
 	if dec.ChainID == nil {
 		return errors.New("missing required field 'chainId' in transaction")
 	}
-	var overflow bool
-	tx.ChainID, overflow = uint256.FromBig(dec.ChainID.ToInt())
+	chainID, overflow := uint256.FromBig(dec.ChainID.ToInt())
 	if overflow {
 		return errors.New("'chainId' in transaction does not fit in 256 bits")
 	}
+	tx.ChainID = *chainID
 	if dec.To != nil {
 		tx.To = dec.To
 	}
@@ -426,14 +429,16 @@ func (tx *DynamicFeeTransaction) unmarshalJson(dec txJSON) error {
 	if dec.GasPrice == nil {
 		return errors.New("missing required field 'gasPrice' in transaction")
 	}
-	tx.TipCap, overflow = uint256.FromBig(dec.MaxPriorityFeePerGas.ToInt())
+	tipCap, overflow := uint256.FromBig(dec.MaxPriorityFeePerGas.ToInt())
 	if overflow {
 		return errors.New("'tip' in transaction does not fit in 256 bits")
 	}
-	tx.FeeCap, overflow = uint256.FromBig(dec.MaxFeePerGas.ToInt())
+	tx.TipCap = *tipCap
+	feeCap, overflow := uint256.FromBig(dec.MaxFeePerGas.ToInt())
 	if overflow {
 		return errors.New("'feeCap' in transaction does not fit in 256 bits")
 	}
+	tx.FeeCap = *feeCap
 	if dec.Gas == nil {
 		return errors.New("missing required field 'gas' in transaction")
 	}
@@ -441,10 +446,11 @@ func (tx *DynamicFeeTransaction) unmarshalJson(dec txJSON) error {
 	if dec.Value == nil {
 		return errors.New("missing required field 'value' in transaction")
 	}
-	tx.Value, overflow = uint256.FromBig(dec.Value.ToInt())
+	val, overflow := uint256.FromBig(dec.Value.ToInt())
 	if overflow {
 		return errors.New("'value' in transaction does not fit in 256 bits")
 	}
+	tx.Value = *val
 	if dec.Data == nil {
 		return errors.New("missing required field 'input' in transaction")
 	}
@@ -529,7 +535,7 @@ func UnmarshalBlobTxJSON(input []byte) (Transaction, error) {
 	if overflow {
 		return nil, errors.New("'chainId' in transaction does not fit in 256 bits")
 	}
-	tx.ChainID = chainID
+	tx.ChainID = *chainID
 	if dec.To != nil {
 		tx.To = dec.To
 	}
@@ -537,14 +543,16 @@ func UnmarshalBlobTxJSON(input []byte) (Transaction, error) {
 		return nil, errors.New("missing required field 'nonce' in transaction")
 	}
 	tx.Nonce = uint64(*dec.Nonce)
-	tx.TipCap, overflow = uint256.FromBig(dec.MaxPriorityFeePerGas.ToInt())
+	tipCap, overflow := uint256.FromBig(dec.MaxPriorityFeePerGas.ToInt())
 	if overflow {
 		return nil, errors.New("'tip' in transaction does not fit in 256 bits")
 	}
-	tx.FeeCap, overflow = uint256.FromBig(dec.MaxFeePerGas.ToInt())
+	tx.TipCap = *tipCap
+	feeCap, overflow := uint256.FromBig(dec.MaxFeePerGas.ToInt())
 	if overflow {
 		return nil, errors.New("'feeCap' in transaction does not fit in 256 bits")
 	}
+	tx.FeeCap = *feeCap
 	if dec.Gas == nil {
 		return nil, errors.New("missing required field 'gas' in transaction")
 	}
@@ -552,10 +560,11 @@ func UnmarshalBlobTxJSON(input []byte) (Transaction, error) {
 	if dec.Value == nil {
 		return nil, errors.New("missing required field 'value' in transaction")
 	}
-	tx.Value, overflow = uint256.FromBig(dec.Value.ToInt())
+	val, overflow := uint256.FromBig(dec.Value.ToInt())
 	if overflow {
 		return nil, errors.New("'value' in transaction does not fit in 256 bits")
 	}
+	tx.Value = *val
 	if dec.Data == nil {
 		return nil, errors.New("missing required field 'input' in transaction")
 	}
@@ -569,7 +578,7 @@ func UnmarshalBlobTxJSON(input []byte) (Transaction, error) {
 	if overflow {
 		return nil, errors.New("'maxFeePerBlobGas' in transaction does not fit in 256 bits")
 	}
-	tx.MaxFeePerBlobGas = maxFeePerBlobGas
+	tx.MaxFeePerBlobGas = *maxFeePerBlobGas
 
 	if dec.BlobVersionedHashes != nil {
 		tx.BlobVersionedHashes = dec.BlobVersionedHashes

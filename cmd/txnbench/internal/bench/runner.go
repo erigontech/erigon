@@ -2,7 +2,6 @@ package bench
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"github.com/erigontech/erigon/cmd/txnbench/internal/rpcclient"
 	"math"
@@ -102,8 +101,4 @@ func meanStd(xs []float64) (mean, std float64) {
 		std = math.Sqrt(s2 / float64(len(xs)-1))
 	}
 	return
-}
-
-func isNonNullJSON(raw json.RawMessage) bool {
-	return len(raw) > 0 && string(raw) != "null"
 }

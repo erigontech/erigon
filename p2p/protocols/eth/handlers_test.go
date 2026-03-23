@@ -1,0 +1,443 @@
+package eth
+
+import (
+	"context"
+	"testing"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types"
+
+	"github.com/erigontech/erigon/db/kv"
+)
+
+// mockReceiptsGetter implements ReceiptsGetter for tests using only the cache path.
+type mockReceiptsGetter struct {
+	cached map[common.Hash]types.Receipts
+}
+
+func (m *mockReceiptsGetter) GetCachedReceipts(_ context.Context, hash common.Hash) (types.Receipts, bool) {
+	r, ok := m.cached[hash]
+	return r, ok
+}
+
+func (m *mockReceiptsGetter) GetReceipts(_ context.Context, _ *chain.Config, _ kv.TemporalTx, _ *types.Block) (types.Receipts, error) {
+	panic("not expected in cache-only tests")
+}
+
+// makeReceipt creates a minimal receipt with the given cumulative gas and log data size.
+func makeReceipt(cumulativeGas uint64, logDataSize int) *types.Receipt {
+	r := &types.Receipt{
+		Type:              types.LegacyTxType,
+		Status:            types.ReceiptStatusSuccessful,
+		CumulativeGasUsed: cumulativeGas,
+	}
+	if logDataSize > 0 {
+		r.Logs = []*types.Log{{
+			Address: common.BytesToAddress([]byte{0x01}),
+			Topics:  []common.Hash{common.HexToHash("aa")},
+			Data:    make([]byte, logDataSize),
+		}}
+	}
+	return r
+}
+
+// eth70Opts returns ReceiptQueryOpts for eth/70 with the given firstBlockReceiptIndex.
+func eth70Opts(firstBlockReceiptIndex uint64) ReceiptQueryOpts {
+	return ReceiptQueryOpts{
+		EthVersion:             70,
+		FirstBlockReceiptIndex: firstBlockReceiptIndex,
+		SizeLimit:              Eth70ResponseSizeLimit,
+	}
+}
+
+// receiptEncodedSize returns the eth/69 encoded size of a single receipt
+// wrapped in an RLP list (i.e. the full encoded block-receipts list for one receipt).
+func receiptEncodedSize(r *types.Receipt) int {
+	encoded, _, _, _ := encodeBlockReceipts69WithLimit(types.Receipts{r}, 0, 1<<30)
+	return len(encoded)
+}
+
+func TestEncodeBlockReceipts69WithLimit_EmptyReceipts(t *testing.T) {
+	encoded, size, complete, err := encodeBlockReceipts69WithLimit(nil, 0, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !complete {
+		t.Fatal("expected complete for nil receipts")
+	}
+	// Should encode as an empty RLP list: 0xc0
+	if size != len(encoded) {
+		t.Fatalf("size mismatch: reported %d, actual %d", size, len(encoded))
+	}
+	// Verify it decodes as an empty list
+	var decoded []rlp.RawValue
+	if err := rlp.DecodeBytes(encoded, &decoded); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if len(decoded) != 0 {
+		t.Fatalf("expected empty list, got %d items", len(decoded))
+	}
+}
+
+func TestEncodeBlockReceipts69WithLimit_AllFit(t *testing.T) {
+	receipts := types.Receipts{
+		makeReceipt(100, 10),
+		makeReceipt(200, 10),
+		makeReceipt(300, 10),
+	}
+	encoded, size, complete, err := encodeBlockReceipts69WithLimit(receipts, 0, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !complete {
+		t.Fatal("expected complete when all receipts fit")
+	}
+	if size != len(encoded) {
+		t.Fatalf("size mismatch: reported %d, actual %d", size, len(encoded))
+	}
+	// Verify the correct number of receipts
+	var decoded []rlp.RawValue
+	if err := rlp.DecodeBytes(encoded, &decoded); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if len(decoded) != 3 {
+		t.Fatalf("expected 3 receipts, got %d", len(decoded))
+	}
+}
+
+func TestEncodeBlockReceipts69WithLimit_Truncated(t *testing.T) {
+	receipts := types.Receipts{
+		makeReceipt(100, 10),
+		makeReceipt(200, 10),
+		makeReceipt(300, 10),
+	}
+	// Find the size of one receipt's encoded block, then set limit to fit ~2
+	oneSize := receiptEncodedSize(makeReceipt(100, 10))
+	// sizeLimit that allows 2 receipts but not 3
+	// totalBytes starts at 0, so the limit should be just above 2 receipts' list encoding
+	limit := oneSize*2 + 20 // generous for 2, tight for 3
+
+	encoded, size, complete, err := encodeBlockReceipts69WithLimit(receipts, 0, limit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if complete {
+		t.Fatal("expected incomplete when limit is tight")
+	}
+	if size != len(encoded) {
+		t.Fatalf("size mismatch: reported %d, actual %d", size, len(encoded))
+	}
+	var decoded []rlp.RawValue
+	if err := rlp.DecodeBytes(encoded, &decoded); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if len(decoded) != 2 {
+		t.Fatalf("expected 2 receipts, got %d", len(decoded))
+	}
+}
+
+func TestEncodeBlockReceipts69WithLimit_FirstReceiptAlwaysIncluded(t *testing.T) {
+	// Even if a single receipt exceeds the limit, it should still be included
+	// (the check is `len(perReceipt) > 0` before breaking)
+	receipt := makeReceipt(100, 1000)
+	encoded, size, complete, err := encodeBlockReceipts69WithLimit(types.Receipts{receipt}, 0, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !complete {
+		t.Fatal("single receipt should always be included even if over limit")
+	}
+	if size != len(encoded) {
+		t.Fatalf("size mismatch: reported %d, actual %d", size, len(encoded))
+	}
+	var decoded []rlp.RawValue
+	if err := rlp.DecodeBytes(encoded, &decoded); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if len(decoded) != 1 {
+		t.Fatalf("expected 1 receipt, got %d", len(decoded))
+	}
+}
+
+func TestEncodeBlockReceipts69WithLimit_TotalBytesOffset(t *testing.T) {
+	// When totalBytes is already high, even small receipts trigger truncation
+	receipts := types.Receipts{
+		makeReceipt(100, 10),
+		makeReceipt(200, 10),
+	}
+	limit := 500
+	// Pretend we already have limit-1 bytes; only the first receipt should fit
+	encoded, _, complete, err := encodeBlockReceipts69WithLimit(receipts, limit-1, limit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// First receipt is always included since perReceipt is empty
+	if complete {
+		t.Fatal("expected incomplete with high totalBytes offset")
+	}
+	var decoded []rlp.RawValue
+	if err := rlp.DecodeBytes(encoded, &decoded); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if len(decoded) != 1 {
+		t.Fatalf("expected 1 receipt, got %d", len(decoded))
+	}
+}
+
+func TestAnswerGetReceiptsQueryCacheOnly70_Basic(t *testing.T) {
+	hash1 := common.HexToHash("0x01")
+	hash2 := common.HexToHash("0x02")
+	getter := &mockReceiptsGetter{
+		cached: map[common.Hash]types.Receipts{
+			hash1: {makeReceipt(100, 10), makeReceipt(200, 10)},
+			hash2: {makeReceipt(300, 10)},
+		},
+	}
+	query := GetReceiptsPacket{hash1, hash2}
+	result, needMore, err := AnswerGetReceiptsQueryCacheOnly(context.Background(), getter, query, eth70Opts(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if needMore {
+		t.Fatal("should not need more when all blocks are cached")
+	}
+	if result.LastBlockIncomplete {
+		t.Fatal("should not be incomplete")
+	}
+	if len(result.EncodedReceipts) != 2 {
+		t.Fatalf("expected 2 block receipt lists, got %d", len(result.EncodedReceipts))
+	}
+	// First block should have 2 receipts
+	var decoded []rlp.RawValue
+	if err := rlp.DecodeBytes(result.EncodedReceipts[0], &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded) != 2 {
+		t.Fatalf("first block: expected 2 receipts, got %d", len(decoded))
+	}
+}
+
+func TestAnswerGetReceiptsQueryCacheOnly70_FirstBlockReceiptIndex(t *testing.T) {
+	hash1 := common.HexToHash("0x01")
+	getter := &mockReceiptsGetter{
+		cached: map[common.Hash]types.Receipts{
+			hash1: {makeReceipt(100, 10), makeReceipt(200, 10), makeReceipt(300, 10)},
+		},
+	}
+	query := GetReceiptsPacket{hash1}
+
+	// Skip first 2 receipts
+	result, _, err := AnswerGetReceiptsQueryCacheOnly(context.Background(), getter, query, eth70Opts(2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.LastBlockIncomplete {
+		t.Fatal("should not be incomplete")
+	}
+	if len(result.EncodedReceipts) != 1 {
+		t.Fatalf("expected 1 block receipt list, got %d", len(result.EncodedReceipts))
+	}
+	var decoded []rlp.RawValue
+	if err := rlp.DecodeBytes(result.EncodedReceipts[0], &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded) != 1 {
+		t.Fatalf("expected 1 receipt after skipping 2, got %d", len(decoded))
+	}
+}
+
+func TestAnswerGetReceiptsQueryCacheOnly70_FirstBlockReceiptIndexBeyondEnd(t *testing.T) {
+	hash1 := common.HexToHash("0x01")
+	getter := &mockReceiptsGetter{
+		cached: map[common.Hash]types.Receipts{
+			hash1: {makeReceipt(100, 10)},
+		},
+	}
+	query := GetReceiptsPacket{hash1}
+
+	// Index beyond all receipts
+	result, _, err := AnswerGetReceiptsQueryCacheOnly(context.Background(), getter, query, eth70Opts(999))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.EncodedReceipts) != 1 {
+		t.Fatalf("expected 1 block receipt list, got %d", len(result.EncodedReceipts))
+	}
+	// Should be an empty receipt list
+	var decoded []rlp.RawValue
+	if err := rlp.DecodeBytes(result.EncodedReceipts[0], &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded) != 0 {
+		t.Fatalf("expected 0 receipts when index beyond end, got %d", len(decoded))
+	}
+}
+
+func TestAnswerGetReceiptsQueryCacheOnly70_FirstBlockReceiptIndexOnlyAppliesToFirstBlock(t *testing.T) {
+	hash1 := common.HexToHash("0x01")
+	hash2 := common.HexToHash("0x02")
+	getter := &mockReceiptsGetter{
+		cached: map[common.Hash]types.Receipts{
+			hash1: {makeReceipt(100, 10), makeReceipt(200, 10)},
+			hash2: {makeReceipt(300, 10), makeReceipt(400, 10)},
+		},
+	}
+	query := GetReceiptsPacket{hash1, hash2}
+
+	// Skip 1 receipt from first block only
+	result, _, err := AnswerGetReceiptsQueryCacheOnly(context.Background(), getter, query, eth70Opts(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.EncodedReceipts) != 2 {
+		t.Fatalf("expected 2 block receipt lists, got %d", len(result.EncodedReceipts))
+	}
+	// First block: 1 receipt (skipped 1)
+	var d1 []rlp.RawValue
+	if err := rlp.DecodeBytes(result.EncodedReceipts[0], &d1); err != nil {
+		t.Fatal(err)
+	}
+	if len(d1) != 1 {
+		t.Fatalf("first block: expected 1 receipt, got %d", len(d1))
+	}
+	// Second block: 2 receipts (no skip)
+	var d2 []rlp.RawValue
+	if err := rlp.DecodeBytes(result.EncodedReceipts[1], &d2); err != nil {
+		t.Fatal(err)
+	}
+	if len(d2) != 2 {
+		t.Fatalf("second block: expected 2 receipts, got %d", len(d2))
+	}
+}
+
+func TestAnswerGetReceiptsQueryCacheOnly70_LastBlockIncomplete(t *testing.T) {
+	hash1 := common.HexToHash("0x01")
+	// Create receipts with large log data to force truncation
+	var bigReceipts types.Receipts
+	for i := 0; i < 20; i++ {
+		bigReceipts = append(bigReceipts, makeReceipt(uint64(i+1)*100, 1024*1024)) // 1MB log data each
+	}
+	getter := &mockReceiptsGetter{
+		cached: map[common.Hash]types.Receipts{
+			hash1: bigReceipts,
+		},
+	}
+	query := GetReceiptsPacket{hash1}
+
+	result, needMore, err := AnswerGetReceiptsQueryCacheOnly(context.Background(), getter, query, eth70Opts(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if needMore {
+		t.Fatal("should not need more when truncated mid-block")
+	}
+	if !result.LastBlockIncomplete {
+		t.Fatal("expected LastBlockIncomplete when receipts exceed size limit")
+	}
+	if len(result.EncodedReceipts) != 1 {
+		t.Fatalf("expected 1 block receipt list, got %d", len(result.EncodedReceipts))
+	}
+	// Should have fewer than all 20 receipts
+	var decoded []rlp.RawValue
+	if err := rlp.DecodeBytes(result.EncodedReceipts[0], &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded) >= 20 {
+		t.Fatalf("expected fewer than 20 receipts, got %d", len(decoded))
+	}
+	if len(decoded) == 0 {
+		t.Fatal("expected at least 1 receipt")
+	}
+}
+
+func TestAnswerGetReceiptsQueryCacheOnly70_MultipleBlocksTruncatesLast(t *testing.T) {
+	hash1 := common.HexToHash("0x01")
+	hash2 := common.HexToHash("0x02")
+	// First block: small receipts that fit easily
+	// Second block: very large receipts that force truncation
+	var bigReceipts types.Receipts
+	for i := 0; i < 20; i++ {
+		bigReceipts = append(bigReceipts, makeReceipt(uint64(i+1)*100, 1024*1024))
+	}
+	getter := &mockReceiptsGetter{
+		cached: map[common.Hash]types.Receipts{
+			hash1: {makeReceipt(100, 10)},
+			hash2: bigReceipts,
+		},
+	}
+	query := GetReceiptsPacket{hash1, hash2}
+
+	result, needMore, err := AnswerGetReceiptsQueryCacheOnly(context.Background(), getter, query, eth70Opts(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if needMore {
+		t.Fatal("should not need more when truncated mid-block")
+	}
+	if !result.LastBlockIncomplete {
+		t.Fatal("expected LastBlockIncomplete")
+	}
+	if len(result.EncodedReceipts) != 2 {
+		t.Fatalf("expected 2 block receipt lists, got %d", len(result.EncodedReceipts))
+	}
+	// First block should be complete (1 receipt)
+	var d1 []rlp.RawValue
+	if err := rlp.DecodeBytes(result.EncodedReceipts[0], &d1); err != nil {
+		t.Fatal(err)
+	}
+	if len(d1) != 1 {
+		t.Fatalf("first block: expected 1 receipt, got %d", len(d1))
+	}
+	// Second block should be truncated
+	var d2 []rlp.RawValue
+	if err := rlp.DecodeBytes(result.EncodedReceipts[1], &d2); err != nil {
+		t.Fatal(err)
+	}
+	if len(d2) >= 20 {
+		t.Fatalf("second block: expected fewer than 20 receipts, got %d", len(d2))
+	}
+}
+
+func TestAnswerGetReceiptsQueryCacheOnly70_CacheMiss(t *testing.T) {
+	hash1 := common.HexToHash("0x01")
+	hash2 := common.HexToHash("0x02")
+	getter := &mockReceiptsGetter{
+		cached: map[common.Hash]types.Receipts{
+			hash1: {makeReceipt(100, 10)},
+			// hash2 not cached
+		},
+	}
+	query := GetReceiptsPacket{hash1, hash2}
+
+	result, needMore, err := AnswerGetReceiptsQueryCacheOnly(context.Background(), getter, query, eth70Opts(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !needMore {
+		t.Fatal("should need more when cache misses exist")
+	}
+	if len(result.EncodedReceipts) != 1 {
+		t.Fatalf("expected 1 block receipt list from cache, got %d", len(result.EncodedReceipts))
+	}
+	if result.PendingIndex != 1 {
+		t.Fatalf("expected PendingIndex=1, got %d", result.PendingIndex)
+	}
+}
+
+func TestAnswerGetReceiptsQueryCacheOnly70_EmptyQuery(t *testing.T) {
+	getter := &mockReceiptsGetter{cached: map[common.Hash]types.Receipts{}}
+	query := GetReceiptsPacket{}
+
+	result, needMore, err := AnswerGetReceiptsQueryCacheOnly(context.Background(), getter, query, eth70Opts(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if needMore {
+		t.Fatal("should not need more for empty query")
+	}
+	if len(result.EncodedReceipts) != 0 {
+		t.Fatalf("expected 0 block receipt lists, got %d", len(result.EncodedReceipts))
+	}
+}
