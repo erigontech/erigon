@@ -685,7 +685,7 @@ func NotifyAccumulator(accumulator *shards.Accumulator, writes VersionedWrites) 
 type Writer struct {
 	tx          kv.TemporalPutDel
 	trace       bool
-	ForceWrites bool // skip original==value optimization (for overlay-based test execution)
+	forceWrites bool // skip original==value optimization (for overlay-based test execution)
 	accumulator *shards.Accumulator
 	txNum       uint64
 }
@@ -701,6 +701,7 @@ func NewWriter(tx kv.TemporalPutDel, accumulator *shards.Accumulator, txNum uint
 
 func (w *Writer) SetTxNum(v uint64)              { w.txNum = v }
 func (w *Writer) SetPutDel(tx kv.TemporalPutDel) { w.tx = tx }
+func (w *Writer) SetForceWrites(v bool)          { w.forceWrites = v }
 
 func (w *Writer) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
 	return nil, nil, nil, nil
@@ -767,7 +768,7 @@ func (w *Writer) DeleteAccount(address accounts.Address, original *accounts.Acco
 }
 
 func (w *Writer) WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
-	if !w.ForceWrites && original == value {
+	if !w.forceWrites && original == value {
 		return nil
 	}
 	var addressValue common.Address

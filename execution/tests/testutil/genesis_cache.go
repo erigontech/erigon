@@ -17,6 +17,7 @@
 package testutil
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
@@ -24,7 +25,6 @@ import (
 	"os"
 	"sort"
 	"sync"
-	"testing"
 	"time"
 
 	dirutil "github.com/erigontech/erigon/common/dir"
@@ -106,8 +106,20 @@ func genesisSpecHash(g *types.Genesis) string {
 			h.Write(acct.Balance.Bytes())
 		}
 		h.Write(acct.Code)
-		binary.LittleEndian.PutUint64(buf[:], uint64(len(acct.Storage)))
-		h.Write(buf[:])
+		// Hash storage keys and values (sorted by key for determinism).
+		if len(acct.Storage) > 0 {
+			storageKeys := make([]common.Hash, 0, len(acct.Storage))
+			for k := range acct.Storage {
+				storageKeys = append(storageKeys, k)
+			}
+			sort.Slice(storageKeys, func(i, j int) bool {
+				return bytes.Compare(storageKeys[i][:], storageKeys[j][:]) < 0
+			})
+			for _, k := range storageKeys {
+				h.Write(k[:])
+				h.Write(acct.Storage[k].Bytes())
+			}
+		}
 	}
 
 	// Hash header fields that affect the genesis block hash.
@@ -180,7 +192,7 @@ func releaseGenesisDB(key string) {
 }
 
 // createGenesisDB creates a new genesis DB on disk. Called without holding genesisDBMu.
-func createGenesisDB(key string, gspec *types.Genesis) (kv.TemporalRwDB, *types.Block, []string, error) {
+func createGenesisDB(gspec *types.Genesis) (kv.TemporalRwDB, *types.Block, []string, error) {
 	logger := log.New()
 	logger.SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
@@ -298,7 +310,7 @@ func getOrCreateGenesisDB(fork string, gspec *types.Genesis) (kv.TemporalRwDB, *
 	genesisDBMu.Unlock()
 
 	// Create the DB without holding the lock — allows other keys to proceed.
-	db, genesis, dirs, err := createGenesisDB(key, gspec)
+	db, genesis, dirs, err := createGenesisDB(gspec)
 
 	genesisDBMu.Lock()
 	if err != nil {
@@ -315,9 +327,3 @@ func getOrCreateGenesisDB(fork string, gspec *types.Genesis) (kv.TemporalRwDB, *
 	genesisDBMu.Unlock()
 	return db, genesis, func() { releaseGenesisDB(key) }, nil
 }
-
-// registerGenesisCacheCleanup is a no-op. Genesis cache DBs are cleaned up
-// by LRU eviction during the test run and by process exit at the end.
-// Previous versions registered t.Cleanup on a subtest, which raced with
-// sibling subtests running in parallel ("db closed" errors).
-func registerGenesisCacheCleanup(_ *testing.T) {}

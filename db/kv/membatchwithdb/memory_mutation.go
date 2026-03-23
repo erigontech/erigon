@@ -838,6 +838,8 @@ func (m *MemoryMutation) AggTx() any {
 }
 
 func (m *MemoryMutation) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
+	// Manual RLock/RUnlock (not deferred) to avoid holding the lock during
+	// the fallback m.db.GetLatest call. Both return paths unlock explicitly.
 	m.mu.RLock()
 	if tbl := m.domainOverlay[name]; tbl != nil {
 		if e, ok := tbl[string(k)]; ok {
@@ -947,17 +949,18 @@ func (m *MemoryMutation) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum 
 	// in the overlay. This is needed for contract re-creation (CREATE2) where
 	// old storage must be fully cleared.
 	// Compute an exclusive upper bound for the prefix range.
-	to := common.Copy(prefix)
-	for i := len(to) - 1; i >= 0; i-- {
-		if to[i] < 0xff {
+	// nil means unbounded (scan to end of domain).
+	var to []byte
+	for i := len(prefix) - 1; i >= 0; i-- {
+		if prefix[i] < 0xff {
+			to = common.Copy(prefix[:i+1])
 			to[i]++
-			to = to[:i+1]
 			break
 		}
 	}
 	it, err := m.db.Debug().RangeLatest(domain, prefix, to, -1)
 	if err != nil {
-		return nil // best effort — underlying DB may not support RangeLatest
+		return fmt.Errorf("DomainDelPrefix: RangeLatest: %w", err)
 	}
 	defer it.Close()
 	m.mu.Lock()

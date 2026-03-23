@@ -139,7 +139,7 @@ func (emt *ExecModuleTester) executeBlock(cr *LightChainReader, block *types.Blo
 	header := block.Header()
 	stateReader := state.NewReaderV3(overlay)
 	stateWriter := state.NewWriter(overlay, nil, txNum)
-	stateWriter.ForceWrites = true // required: overlay needs explicit writes for multi-block system contract state
+	stateWriter.SetForceWrites(true) // required: overlay needs explicit writes for multi-block system contract state
 
 	blockHashFunc := protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
 		h := cr.GetHeader(hash, number)
