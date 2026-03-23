@@ -239,23 +239,17 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		}
 	}
 
-	// [GLOAS] Patch latestBlockHash if an override is provided (checkpoint sync fallback).
+	// [GLOAS] Patch latestBlockHash for checkpoint sync fallback.
 	// Only apply when existing latestBlockHash is zero — FULL states already have the
 	// correct value set by ProcessExecutionPayloadEnvelope and must not be overwritten.
 	if newState != nil && latestBlockHashOverride != (common.Hash{}) {
 		existing := newState.GetLatestBlockHash()
 		if existing == (common.Hash{}) {
-			log.Info("[DEBUG] AddChainSegment: applying latestBlockHash override (was zero)",
+			log.Debug("AddChainSegment: applying latestBlockHash override for checkpoint sync",
 				"slot", block.Slot,
 				"override", latestBlockHashOverride,
 			)
 			newState.SetLatestBlockHash(latestBlockHashOverride)
-		} else {
-			log.Debug("[DEBUG] AddChainSegment: skipping latestBlockHash override (already set)",
-				"slot", block.Slot,
-				"existing", existing,
-				"override", latestBlockHashOverride,
-			)
 		}
 	}
 
