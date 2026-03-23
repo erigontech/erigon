@@ -472,7 +472,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		return nil, err
 	}
 	if !bytes.Equal(calculatedAccountProofRoot, header.Root[:]) {
-		return nil, fmt.Errorf("root hash mismatch in account proof trie calculatedAccountProofRoot(%x)!=expectedRoot(%x)", calculatedAccountProofRoot, header.Root[:])
+		return nil, fmt.Errorf("root hash mismatch in account proof trie block=%d calculatedAccountProofRoot(%x)!=expectedRoot(%x)", header.Number.Uint64(), calculatedAccountProofRoot, header.Root[:])
 	}
 
 	// set initial response fields
