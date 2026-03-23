@@ -37,9 +37,7 @@ import (
 type ForkGraph interface {
 	// AddChainSegment processes a new block and returns the post-state.
 	// parentFullState: if non-nil, use this as the starting state (for GLOAS when parent is FULL).
-	// latestBlockHashOverride: if non-zero, patch latestBlockHash on the selected state before transition
-	// (used for checkpoint sync where envelope processing updated latestBlockHash but our state is stale).
-	AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool, parentFullState *state.CachingBeaconState, latestBlockHashOverride common.Hash) (*state.CachingBeaconState, ChainSegmentInsertionResult, error)
+	AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool, parentFullState *state.CachingBeaconState) (*state.CachingBeaconState, ChainSegmentInsertionResult, error)
 	GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHeader, bool)
 	GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool)
 	GetState(blockRoot common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error)
