@@ -234,7 +234,7 @@ func (evm *EVM) handleFrameRevert(gas *mdgas.MdGas, err error, depth int,
 		// Child frame (depth > 0): restore all consumed state gas
 		// (reservoir-sourced + spill) to the reservoir.
 		gas.State = initialChildState + spill
-		// Regular gas: REVERT preserves it (step 2 is a no-op);
+		// Regular gas: REVERT preserves it (step 2 doesn't apply);
 		// exceptional halt burns it (step 2 zeroed gas.Regular).
 	}
 }
@@ -542,6 +542,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 		if evm.config.Tracer != nil && evm.config.Tracer.OnGasChange != nil {
 			evm.Config().Tracer.OnGasChange(gasRemaining.Regular, 0, tracing.GasChangeCallFailedExecution)
 		}
+		// Preserve State so the parent's reservoir is restored by restoreChildGas.
 		return nil, accounts.NilAddress, mdgas.MdGas{State: gasRemaining.State}, err
 	}
 	// Create a new account on the state
