@@ -31,8 +31,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/erigontech/erigon/execution/rlp/internal/rlpstruct"
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/execution/rlp/internal/rlpstruct"
 )
 
 //lint:ignore ST1012 EOL is not an error.
@@ -680,6 +681,7 @@ func NewStream(r io.Reader, inputLimit uint64) *Stream {
 	s.Reset(r, inputLimit)
 	return s
 }
+func (s *Stream) Release() { streamPool.Put(s) }
 
 // NewListStream creates a new stream that pretends to be positioned
 // at an encoded list of the given length.
@@ -692,12 +694,10 @@ func NewListStream(r io.Reader, len uint64) *Stream {
 }
 
 // NewStreamFromPool returns a Stream from the pool.
-func NewStreamFromPool(r io.Reader, inputLimit uint64) (stream *Stream, done func()) {
+func NewStreamFromPool(r io.Reader, inputLimit uint64) (stream *Stream) {
 	stream = streamPool.Get().(*Stream)
 	stream.Reset(r, inputLimit)
-	return stream, func() {
-		streamPool.Put(stream)
-	}
+	return stream
 }
 
 // Bytes reads an RLP string and returns its contents as a byte slice.
