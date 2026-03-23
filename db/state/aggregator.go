@@ -31,7 +31,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	rand2 "golang.org/x/exp/rand"
+	"math/rand"
 
 	"github.com/erigontech/erigon/db/kv/prune"
 
@@ -165,7 +165,7 @@ func GetStateIndicesSalt(dirs datadir.Dirs, genNew bool, logger log.Logger) (sal
 		}
 		logger.Info("generating new salt file")
 
-		saltV := rand2.Uint32()
+		saltV := rand.Uint32()
 		salt = &saltV
 		saltBytes := make([]byte, 4)
 		binary.BigEndian.PutUint32(saltBytes, *salt)
