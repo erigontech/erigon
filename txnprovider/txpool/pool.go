@@ -700,6 +700,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 
 	txns.Resize(uint(min(n, len(best.ms))))
 	var toRemove []*metaTxn
+	var toDiscard []*metaTxn
 	count := 0
 	i := 0
 	availableStateGas := availableGas // EIP-8037: state gas is independently capped at block gas limit
@@ -748,7 +749,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 			if p.isOsaka() {
 				proofs := mt.TxnSlot.Proofs()
 				if len(proofs) != int(blobCount)*int(params.CellsPerExtBlob) { // cell_proofs contains exactly CELLS_PER_EXT_BLOB * len(blobs) cell proofs
-					toRemove = append(toRemove, mt)
+					toDiscard = append(toDiscard, mt)
 					continue
 				}
 			}
@@ -814,6 +815,12 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 	if len(toRemove) > 0 {
 		for _, mt := range toRemove {
 			p.pending.Remove(mt, "best", p.logger)
+		}
+	}
+	if len(toDiscard) > 0 {
+		for _, mt := range toDiscard {
+			p.pending.Remove(mt, "best", p.logger)
+			p.discardLocked(mt, txpoolcfg.UnmatchedBlobTxExt)
 		}
 	}
 
@@ -989,18 +996,10 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		}
 		return txpoolcfg.GasLimitTooHigh
 	}
-	if p.isAmsterdam() {
-		// EIP-8037: only intrinsic regular gas (including calldata floor) is capped;
-		// state gas lives in a separate dimension and must not be included.
-		if gas.Regular > params.MaxTxnGasLimit {
-			if txn.Traced {
-				p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic regular gas > max gas limit idHash=%x gas=%d", txn.IDHash, gas))
-			}
-			return txpoolcfg.GasLimitTooHigh
-		}
-	} else if txn.GetGas() > params.MaxTxnGasLimit {
+	// EIP-7825: Transaction Gas Limit Cap (fork-dependent, see RegularGasCap).
+	if capGas := intrinsicGasResult.RegularGasCap(txn.GetGas(), p.isAmsterdam()); capGas > params.MaxTxnGasLimit {
 		if txn.Traced {
-			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx txn.gas > max gas limit idHash=%x gas=%d", txn.IDHash, txn.GetGas()))
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx gas cap exceeded idHash=%x capGas=%d, max=%d", txn.IDHash, capGas, params.MaxTxnGasLimit))
 		}
 		return txpoolcfg.GasLimitTooHigh
 	}

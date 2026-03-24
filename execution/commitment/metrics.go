@@ -34,6 +34,9 @@ type Metrics struct {
 	cacheBranch     atomic.Uint64
 	cacheAccount    atomic.Uint64
 	cacheStorage    atomic.Uint64
+	missBranch      atomic.Uint64
+	missAccount     atomic.Uint64
+	missStorage     atomic.Uint64
 	updateBranch    atomic.Uint64
 	loadDepths      [10]uint64
 	unfolds         atomic.Uint64
@@ -59,6 +62,9 @@ type MetricValues struct {
 	CacheBranch     uint64
 	CacheAccount    uint64
 	CacheStorage    uint64
+	MissBranch      uint64
+	MissAccount     uint64
+	MissStorage     uint64
 	UpdateBranch    uint64
 	LoadDepths      [10]uint64
 	Unfolds         uint64
@@ -114,6 +120,9 @@ func (m *Metrics) AsValues() MetricValues {
 		CacheBranch:     m.cacheBranch.Load(),
 		CacheAccount:    m.cacheAccount.Load(),
 		CacheStorage:    m.cacheStorage.Load(),
+		MissBranch:      m.missBranch.Load(),
+		MissAccount:     m.missAccount.Load(),
+		MissStorage:     m.missStorage.Load(),
 		UpdateBranch:    m.updateBranch.Load(),
 		LoadDepths:      m.loadDepths,
 		Unfolds:         m.unfolds.Load(),
@@ -145,6 +154,8 @@ func (m *Metrics) logMetrics() []any {
 		"rds", common.PrettyCounter(m.loadStorage.Load()), "wrb", common.PrettyCounter(m.updateBranch.Load()),
 		"cb", common.PrettyCounter(m.cacheBranch.Load()), "ca", common.PrettyCounter(m.cacheAccount.Load()),
 		"cs", common.PrettyCounter(m.cacheStorage.Load()),
+		"mb", common.PrettyCounter(m.missBranch.Load()), "ma", common.PrettyCounter(m.missAccount.Load()),
+		"ms", common.PrettyCounter(m.missStorage.Load()),
 		"fld", common.PrettyCounter(m.unfolds.Load()), "pdur", common.Round(m.spentProcessing, 0).String(),
 		"fdur", common.Round(m.spentFolding, 0).String(), "ufdur", common.Round(m.spentUnfolding, 0),
 	}
@@ -268,6 +279,9 @@ func (m *Metrics) Reset() {
 	m.loadAccount.Store(0)
 	m.loadStorage.Store(0)
 	m.updateBranch.Store(0)
+	m.missBranch.Store(0)
+	m.missAccount.Store(0)
+	m.missStorage.Store(0)
 	m.unfolds.Store(0)
 
 	if !m.collectCommitmentMetrics {

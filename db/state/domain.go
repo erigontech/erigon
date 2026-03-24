@@ -1230,6 +1230,7 @@ func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, va
 		}
 		g.Reset(0)
 		rs.SetProgress(p)
+
 		for g.HasNext() {
 			word, valPos = g.Next(word[:0])
 			if values {
@@ -1942,7 +1943,7 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 		case *mdbx2.MdbxDupSortCursor:
 			valsCursor = valsRwCursor.(*mdbx2.MdbxDupSortCursor)
 		default:
-			return stat, fmt.Errorf("unexpected cursor type %T for table %s", valsRwCursor, dt.d.ValuesTable)
+			valsCursor = &kv.RwCursorPseudoDupSort{RwCursor: c}
 		}
 		defer valsCursor.Close()
 	} else {
