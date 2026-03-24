@@ -1906,10 +1906,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				txResult := be.results[tx]
 
-				// EIP-8037: The gas pool tracks only regular gas. State gas is validated
-				// at block end via max(blockRegularGasUsed, blockStateGasUsed).
-				// Per-tx max would give sum(max(r_i, s_i)) ≥ max(sum(r_i), sum(s_i)),
-				// rejecting valid blocks. Pre-Amsterdam: blockStateGasUsed is 0, no change.
+				// EIP-8037: The net per-tx pool deduction must be BlockRegularGasUsed,
+				// not max(regular, state). Per-tx max gives Σ max(r_i, s_i) ≥
+				// max(Σ r_i, Σ s_i), rejecting valid blocks. State gas is validated
+				// at block end via max(Σ regular, Σ state). Pre-Amsterdam: no change.
 				if err := be.gasPool.SubGas(txResult.ExecutionResult.BlockRegularGasUsed); err != nil {
 					return nil, fmt.Errorf("%w, block=%d: block gas used overflow", rules.ErrInvalidBlock, be.blockNum)
 				}
