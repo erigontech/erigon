@@ -35,7 +35,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
 	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -482,21 +481,26 @@ func (db *DictionaryBuilder) Pop() any {
 	return x
 }
 
-func (db *DictionaryBuilder) processWord(chars []byte, score uint64) {
+// processWord adds chars+score to the heap. When the heap is not yet full,
+// ownership of chars is transferred to the new Pattern (no copy). Returns true
+// if ownership was taken; the caller must not reuse chars in that case.
+// When the heap is full, chars is copied into the evicted element's buffer.
+func (db *DictionaryBuilder) processWord(chars []byte, score uint64) (ownershipTaken bool) {
 	if db.Len()+1 <= db.softLimit {
-		heap.Push(db, &Pattern{word: common.Copy(chars), score: score})
-		return
+		heap.Push(db, &Pattern{word: chars, score: score})
+		return true
 	}
 
 	// RemoveFile the element with smallest score
 	elem := heap.Pop(db).(*Pattern)
 	if elem == nil {
-		heap.Push(db, &Pattern{word: common.Copy(chars), score: score})
-		return
+		heap.Push(db, &Pattern{word: chars, score: score})
+		return true
 	}
 	elem.word = append(elem.word[:0], chars...)
 	elem.score = score
 	heap.Push(db, elem)
+	return false
 }
 
 func (db *DictionaryBuilder) loadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
@@ -505,9 +509,11 @@ func (db *DictionaryBuilder) loadFunc(k, v []byte, table etl.CurrentTableReader,
 		db.lastWordScore += score
 	} else {
 		if db.lastWord != nil {
-			db.processWord(db.lastWord, db.lastWordScore)
+			if db.processWord(db.lastWord, db.lastWordScore) {
+				db.lastWord = nil // Pattern owns the slice; allocate fresh below
+			}
 		}
-		db.lastWord = append(db.lastWord[:0], k...)
+		db.lastWord = append(db.lastWord, k...)
 		db.lastWordScore = score
 	}
 	return nil
