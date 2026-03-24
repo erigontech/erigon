@@ -1477,6 +1477,110 @@ func TestBlobSlots(t *testing.T) {
 	}
 }
 
+// TestOsakaProofShapeMismatchDiscardsCompletely verifies that when Osaka activates,
+// pre-Osaka-shape blob transactions are fully discarded by best() — not just removed
+// from the Pending sub-pool. This ensures totalBlobsInPool and byHash are cleaned up,
+// so new Osaka-shaped blob transactions can be admitted.
+func TestOsakaProofShapeMismatchDiscardsCompletely(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	require := require.New(t)
+
+	ch := make(chan Announcements, 5)
+	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db := memdb.NewTestPoolDB(t)
+	cfg := txpoolcfg.DefaultConfig
+	cfg.TotalBlobPoolLimit = 2 // tight limit: one 2-blob txn fills it
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testforks.Forks["Cancun"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	require.NoError(err)
+
+	// Fund one account
+	var addr [20]byte
+	addr[0] = 1
+	h1 := gointerfaces.ConvertHashToH256([32]byte{})
+	change := &remoteproto.StateChangeBatch{
+		StateVersionId:       0,
+		PendingBlockBaseFee:  200_000,
+		BlockGasLimit:        math.MaxUint64,
+		PendingBlobFeePerGas: 100_000,
+		ChangeBatch: []*remoteproto.StateChange{
+			{BlockHeight: 0, BlockHash: h1},
+		},
+	}
+	acc := accounts3.Account{
+		Nonce:       0,
+		Balance:     *uint256.NewInt(1 * common.Ether),
+		CodeHash:    accounts.EmptyCodeHash,
+		Incarnation: 1,
+	}
+	v := accounts3.SerialiseV3(&acc)
+	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
+		Action:  remoteproto.Action_UPSERT,
+		Address: gointerfaces.ConvertAddressToH160(addr),
+		Data:    v,
+	})
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
+	require.NoError(err)
+
+	// Step 1: Add a pre-Osaka-shape blob txn (2 blobs, 2 proofs — one per blob).
+	blobTxn := makeBlobTxn()
+	blobTxn.IDHash[0] = 33
+	blobTxn.Nonce = 0
+	{
+		var txnSlots TxnSlots
+		txnSlots.Append(&blobTxn, addr[:], true)
+		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
+		require.NoError(err)
+		require.Equal(txpoolcfg.Success, reasons[0], reasons[0].String())
+	}
+
+	// Sanity: pool has 2 blobs and 1 pending txn.
+	require.Equal(uint64(2), pool.totalBlobsInPool.Load())
+	require.Equal(1, pool.pending.Len())
+
+	// Step 2: Simulate Osaka activation.
+	pool.isPostOsaka.Store(true)
+
+	// Step 3: Trigger best() via PeekBest — it will detect the proof-shape mismatch
+	// and should fully discard the pre-Osaka txn.
+	var txnsRlp TxnsRlp
+	_, err = pool.PeekBest(ctx, 10, &txnsRlp, 0, math.MaxUint64, math.MaxUint64, math.MaxInt)
+	require.NoError(err)
+
+	// Step 4: Verify the pre-Osaka txn was fully discarded.
+	require.Equal(0, pool.pending.Len(), "txn must be removed from pending")
+	require.Equal(uint64(0), pool.totalBlobsInPool.Load(), "blob counter must be decremented to 0")
+	_, inByHash := pool.byHash[string(blobTxn.IDHash[:])]
+	require.False(inByHash, "txn must be removed from byHash")
+
+	// Step 5: A valid Osaka-shaped blob txn must now be admittable (not rejected
+	// with BlobPoolOverflow), proving the counters were properly cleaned up.
+	chainID := uint256.MustFromBig(testforks.Forks["Cancun"].ChainID)
+	osakaRlp := makeWrappedBlobTxnRlpWithCellProofs(t, chainID, 2)
+	parseCtx := NewTxnParseContext(*chainID)
+	parseCtx.WithSender(false)
+	var osakaSlot TxnSlot
+	_, err = parseCtx.ParseTransaction(osakaRlp, 0, &osakaSlot, nil, false, true, nil)
+	require.NoError(err)
+	osakaSlot.IDHash[0] = 34
+	{
+		var txnSlots TxnSlots
+		txnSlots.Append(&osakaSlot, addr[:], true)
+		reasons, err := pool.AddLocalTxns(ctx, txnSlots)
+		require.NoError(err)
+		require.Equal(txpoolcfg.Success, reasons[0], reasons[0].String())
+	}
+}
+
 func TestWrappedSixBlobTxnExceedsRlpLimit(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")

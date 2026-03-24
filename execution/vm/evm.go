@@ -581,27 +581,44 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	// be stored due to not enough gas, set an error when we're in Homestead and let it be handled
 	// by the error checking condition below.
 	if err == nil {
-		var stateGasOk bool
-		var createDataGas uint64
+		// EIP-8037: GAS_CODE_DEPOSIT = cpsb/byte (state) + 6*ceil(len/32) (regular)
+		// Pre-Amsterdam: GAS_CODE_DEPOSIT = 200/byte (regular only)
+		preDepositGas := gasRemaining
+		preDepositStateGasConsumed := evm.stateGasConsumed
+
+		// Charge state gas (Amsterdam only).
+		stateGasOk := true
 		if evm.chainRules.IsAmsterdam {
-			// EIP-8037: GAS_CODE_DEPOSIT = cpsb/byte (state) + 6*ceil(len/32) (regular)
-			// GAS_CREATE (112*cpsb) is already charged in stateGasCreate, no wasEmpty here
-			createDataGas = uint64(len(ret)) * evm.Context.CostPerStateByte // state gas cost
-			gasRemaining, stateGasOk = useMdGas(evm, gasRemaining, createDataGas, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage)
-			if stateGasOk {
-				createDataGas = 6 * ((uint64(len(ret)) + 31) / 32) // regular gas cost for hashing
-			}
-		} else {
-			createDataGas = uint64(len(ret)) * params.CreateDataGas
-			stateGasOk = true
+			stateGas := uint64(len(ret)) * evm.Context.CostPerStateByte
+			gasRemaining, stateGasOk = useMdGas(evm, gasRemaining, stateGas, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage)
 		}
+
+		// Charge regular gas.
 		var regularGasOk bool
 		if stateGasOk {
-			gasRemaining, regularGasOk = useMdGas(evm, gasRemaining, createDataGas, mdgas.RegularGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage)
+			var regularGas uint64
+			if evm.chainRules.IsAmsterdam {
+				// EIP-8037 "Contract deployment cost calculation", success path:
+				// HASH_COST(L) = 6*ceil(L/32); the state component (cpsb*L) is charged above.
+				regularGas = params.Keccak256WordGas * ToWordSize(uint64(len(ret)))
+			} else {
+				regularGas = uint64(len(ret)) * params.CreateDataGas
+			}
+			gasRemaining, regularGasOk = useMdGas(evm, gasRemaining, regularGas, mdgas.RegularGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage)
 		}
+
 		if stateGasOk && regularGasOk {
 			evm.intraBlockState.SetCode(address, ret)
 		} else {
+			if evm.chainRules.IsAmsterdam {
+				// Code deposit failed: per EIP-8037 the failure cost is
+				// GAS_CREATE + initcode_execution_cost only; code deposit
+				// gas (both state and regular) is excluded. Undo the
+				// charges so that handleFrameRevert and block-level gas
+				// accounting see the correct values.
+				gasRemaining = preDepositGas
+				evm.stateGasConsumed = preDepositStateGasConsumed
+			}
 			// If we run out of gas, we do not store the code: the returned code must be empty.
 			ret = []byte{}
 			if evm.chainRules.IsHomestead {
