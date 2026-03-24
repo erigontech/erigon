@@ -311,7 +311,8 @@ func TestEngineApiMultipleSendersInBlock(t *testing.T) {
 
 func TestEngineApiHighGasContractsFillBlock(t *testing.T) {
 	genesis, coinbaseKey := engineapitester.DefaultEngineApiTesterGenesis(t)
-	genesis.GasLimit = 200_000 // tight budget for contracts + transfers
+	genesis.Config.AmsterdamTime = nil // EIP-8037 state gas changes intrinsic costs; test pre-Amsterdam
+	genesis.GasLimit = 200_000         // tight budget for contracts + transfers
 	eat := engineapitester.InitialiseEngineApiTester(t, engineapitester.EngineApiTesterInitArgs{
 		Logger:      testlog.Logger(t, log.LvlDebug),
 		DataDir:     t.TempDir(),

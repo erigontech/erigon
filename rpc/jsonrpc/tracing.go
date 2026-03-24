@@ -257,7 +257,7 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 	}
 	// Retrieve the transaction and assemble its EVM context
 	var isBorStateSyncTxn bool
-	blockNum, _, ok, err := api.txnLookup(ctx, tx, hash)
+	blockNum, txNum, ok, err := api.txnLookup(ctx, tx, hash)
 	if err != nil {
 		return err
 	}
@@ -305,21 +305,22 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 		stream.WriteNil()
 		return nil
 	}
+
 	var txnIndex int
-	var txn types.Transaction
-	for i := 0; i < block.Transactions().Len() && !isBorStateSyncTxn; i++ {
-		transaction := block.Transactions()[i]
-		if transaction.Hash() == hash {
-			txnIndex = i
-			txn = transaction
-			break
+	if isBorStateSyncTxn {
+		// bor state sync txn is appended at the end of the block
+		txnIndex = block.Transactions().Len()
+	} else {
+		txNumMin, err := api._txNumReader.Min(ctx, tx, blockNum)
+		if err != nil {
+			return err
 		}
-	}
-	if txn == nil {
-		if isBorStateSyncTxn {
-			// bor state sync txn is appended at the end of the block
-			txnIndex = block.Transactions().Len()
-		} else {
+		if txNumMin+1 > txNum {
+			stream.WriteNil()
+			return fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
+		}
+		txnIndex = int(txNum - txNumMin - 1)
+		if txnIndex >= block.Transactions().Len() {
 			stream.WriteNil()
 			return fmt.Errorf("transaction %#x not found", hash)
 		}
@@ -374,10 +375,10 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 	if err != nil {
 		return err
 	}
-	txCtx.TxHash = txn.Hash()
+	txCtx.TxHash = hash
 
 	// Trace the transaction and return
-	_, err = transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.Header().Number, block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout, precompiles)
+	_, err = transactions.TraceTx(ctx, engine, block.Transactions()[txnIndex], msg, blockCtx, txCtx, &block.Header().Number, block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout, precompiles)
 	return err
 }
 

@@ -59,6 +59,7 @@ type BlockGen struct {
 	versionMap  *state.VersionMap
 	blockIO     *state.VersionedIO
 	gasPool     *protocol.GasPool
+	gasUsed     *protocol.GasUsed // EIP-8037: cumulative per-dimension gas across txns
 	txs         []types.Transaction
 	receipts    types.Receipts
 	uncles      []*types.Header
@@ -138,9 +139,11 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 	}
 	txVersion := state.Version{BlockNum: b.header.Number.Uint64(), TxIndex: len(b.txs)}
 	b.ibs.SetTxContext(txVersion.BlockNum, txVersion.TxIndex)
-	gasUsed := protocol.NewGasUsed(b.header, b.receipts.CumulativeGasUsed())
-	receipt, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, accounts.InternAddress(b.header.Coinbase), b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, gasUsed, vm.Config{})
-	protocol.SetGasUsed(b.header, gasUsed)
+	if b.gasUsed == nil {
+		b.gasUsed = new(protocol.GasUsed)
+	}
+	receipt, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, accounts.InternAddress(b.header.Coinbase), b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, b.gasUsed, vm.Config{})
+	protocol.SetGasUsed(b.header, b.gasUsed)
 	if err != nil {
 		panic(err)
 	}
@@ -168,9 +171,11 @@ func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number 
 		b.SetCoinbase(common.Address{})
 	}
 	b.ibs.SetTxContext(b.header.Number.Uint64(), len(b.txs))
-	gasUsed := protocol.NewGasUsed(b.header, b.receipts.CumulativeGasUsed())
-	receipt, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, accounts.InternAddress(b.header.Coinbase), b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, gasUsed, vm.Config{})
-	protocol.SetGasUsed(b.header, gasUsed)
+	if b.gasUsed == nil {
+		b.gasUsed = new(protocol.GasUsed)
+	}
+	receipt, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, accounts.InternAddress(b.header.Coinbase), b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, b.gasUsed, vm.Config{})
+	protocol.SetGasUsed(b.header, b.gasUsed)
 	_ = err // accept failed transactions
 	b.txs = append(b.txs, txn)
 	b.receipts = append(b.receipts, receipt)

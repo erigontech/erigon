@@ -11,7 +11,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/protocol/fixedgas"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -505,7 +505,7 @@ func (tx *AccountAbstractionTransaction) PreTransactionGasCost(rules *chain.Rule
 	data = append(data, tx.DeployerData...)
 	data = append(data, tx.ExecutionData...)
 	data = append(data, tx.PaymasterData...)
-	intrinsicGasResult, overflow := fixedgas.IntrinsicGas(fixedgas.IntrinsicGasCalcArgs{
+	intrinsicGasResult, overflow := mdgas.IntrinsicGas(mdgas.IntrinsicGasCalcArgs{
 		Data:              data,
 		AuthorizationsLen: uint64(len(tx.Authorizations)),
 		AccessListLen:     uint64(len(tx.AccessList)),
@@ -514,6 +514,7 @@ func (tx *AccountAbstractionTransaction) PreTransactionGasCost(rules *chain.Rule
 		IsEIP2028:         rules.IsIstanbul,
 		IsEIP3860:         hasEIP3860,
 		IsEIP7623:         rules.IsPrague,
+		IsEIP8037:         rules.IsAmsterdam,
 		IsAATxn:           true,
 	})
 

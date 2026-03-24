@@ -119,21 +119,6 @@ type Config struct {
 }
 
 var (
-	TestChainConfig = &Config{
-		ChainID:               big.NewInt(1337),
-		Rules:                 EtHashRules,
-		HomesteadBlock:        common.NewUint64(0),
-		TangerineWhistleBlock: common.NewUint64(0),
-		SpuriousDragonBlock:   common.NewUint64(0),
-		ByzantiumBlock:        common.NewUint64(0),
-		ConstantinopleBlock:   common.NewUint64(0),
-		PetersburgBlock:       common.NewUint64(0),
-		IstanbulBlock:         common.NewUint64(0),
-		MuirGlacierBlock:      common.NewUint64(0),
-		BerlinBlock:           common.NewUint64(0),
-		Ethash:                new(EthashConfig),
-	}
-
 	TestChainAuraConfig = &Config{
 		ChainID:               big.NewInt(1),
 		Rules:                 AuRaRules,
@@ -148,6 +133,49 @@ var (
 		BerlinBlock:           common.NewUint64(0),
 		LondonBlock:           common.NewUint64(0),
 		Aura:                  &AuRaConfig{},
+	}
+
+	TestChainBerlinConfig = &Config{
+		ChainID:               big.NewInt(1337),
+		Rules:                 EtHashRules,
+		HomesteadBlock:        common.NewUint64(0),
+		TangerineWhistleBlock: common.NewUint64(0),
+		SpuriousDragonBlock:   common.NewUint64(0),
+		ByzantiumBlock:        common.NewUint64(0),
+		ConstantinopleBlock:   common.NewUint64(0),
+		PetersburgBlock:       common.NewUint64(0),
+		IstanbulBlock:         common.NewUint64(0),
+		MuirGlacierBlock:      common.NewUint64(0),
+		BerlinBlock:           common.NewUint64(0),
+		Ethash:                new(EthashConfig),
+	}
+
+	// TestChainConfig is an alias for TestChainBerlinConfig for backward compatibility.
+	TestChainConfig = TestChainBerlinConfig
+
+	TestChainOsakaConfig = &Config{
+		ChainID:                       big.NewInt(1337),
+		Rules:                         EtHashRules,
+		HomesteadBlock:                common.NewUint64(0),
+		TangerineWhistleBlock:         common.NewUint64(0),
+		SpuriousDragonBlock:           common.NewUint64(0),
+		ByzantiumBlock:                common.NewUint64(0),
+		ConstantinopleBlock:           common.NewUint64(0),
+		PetersburgBlock:               common.NewUint64(0),
+		IstanbulBlock:                 common.NewUint64(0),
+		MuirGlacierBlock:              common.NewUint64(0),
+		BerlinBlock:                   common.NewUint64(0),
+		LondonBlock:                   common.NewUint64(0),
+		ArrowGlacierBlock:             common.NewUint64(0),
+		GrayGlacierBlock:              common.NewUint64(0),
+		TerminalTotalDifficulty:       big.NewInt(0),
+		TerminalTotalDifficultyPassed: true,
+		ShanghaiTime:                  common.NewUint64(0),
+		CancunTime:                    common.NewUint64(0),
+		PragueTime:                    common.NewUint64(0),
+		OsakaTime:                     common.NewUint64(0),
+		DepositContract:               common.HexToAddress("0x00000000219ab540356cBB839Cbe05303d7705Fa"),
+		Ethash:                        new(EthashConfig),
 	}
 
 	// AllProtocolChanges contains every protocol change (EIPs) introduced
