@@ -332,3 +332,12 @@ func TestPythonIntegration(t *testing.T) {
 	t.Logf("msg: %x, privkey: %s sig: %x\n", msg0, kh, sig0)
 	t.Logf("msg: %x, privkey: %s sig: %x\n", msg1, kh, sig1)
 }
+
+var benchPayload = make([]byte, 500)
+
+func BenchmarkHashBytes(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		HashBytes(benchPayload)
+	}
+}
