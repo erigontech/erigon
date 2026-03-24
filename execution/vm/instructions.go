@@ -1002,7 +1002,7 @@ func opCreate(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	stackvalue := size
 
 	scope.useGas(gas.Regular, evm.Config().Tracer, tracing.GasChangeCallContractCreation)
-	parentStateGas := scope.escrowStateGas()
+	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
 
 	res, addr, returnGas, suberr := evm.Create(scope.Contract.Address(), input, gas, value, false)
 
@@ -1019,7 +1019,7 @@ func opCreate(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		stackvalue.SetBytes(addrVal[:])
 	}
 
-	scope.settleStateGas(suberr, returnGas, parentStateGas, evm.config.Tracer)
+	scope.restoreChildGas(returnGas, evm.config.Tracer)
 
 	if suberr == ErrExecutionReverted {
 		evm.returnData = res // set REVERT data to return data buffer
@@ -1068,7 +1068,7 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 	scope.useGas(gas.Regular, evm.Config().Tracer, tracing.GasChangeCallContractCreation2)
 	// reuse size int for stackvalue
 	stackValue := size
-	parentStateGas := scope.escrowStateGas()
+	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
 
 	res, addr, returnGas, suberr := evm.Create2(scope.Contract.Address(), input, gas, endowment, &salt, false)
 
@@ -1081,7 +1081,7 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 	}
 
 	scope.Stack.push(stackValue)
-	scope.settleStateGas(suberr, returnGas, parentStateGas, evm.config.Tracer)
+	scope.restoreChildGas(returnGas, evm.config.Tracer)
 
 	if suberr == ErrExecutionReverted {
 		evm.returnData = res // set REVERT data to return data buffer
@@ -1134,7 +1134,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		}
 	}
 
-	parentStateGas := scope.escrowStateGas()
+	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
 
 	ret, returnGas, err := evm.Call(scope.Contract.Address(), toAddr, args, gas, value, false /* bailout */)
 
@@ -1149,7 +1149,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
-	scope.settleStateGas(err, returnGas, parentStateGas, evm.config.Tracer)
+	scope.restoreChildGas(returnGas, evm.config.Tracer)
 
 	evm.returnData = ret
 	return pc, ret, nil
@@ -1185,7 +1185,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 		}
 	}
 
-	parentStateGas := scope.escrowStateGas()
+	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
 
 	ret, returnGas, err := evm.CallCode(scope.Contract.Address(), toAddr, args, gas, value)
 	if err != nil {
@@ -1199,7 +1199,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
-	scope.settleStateGas(err, returnGas, parentStateGas, evm.config.Tracer)
+	scope.restoreChildGas(returnGas, evm.config.Tracer)
 
 	evm.returnData = ret
 	return pc, ret, nil
@@ -1227,7 +1227,7 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
-	parentStateGas := scope.escrowStateGas()
+	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
 
 	ret, returnGas, err := evm.DelegateCall(scope.Contract.addr, scope.Contract.caller, toAddr, args, scope.Contract.value, gas)
 	if err != nil {
@@ -1241,7 +1241,7 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
-	scope.settleStateGas(err, returnGas, parentStateGas, evm.config.Tracer)
+	scope.restoreChildGas(returnGas, evm.config.Tracer)
 
 	evm.returnData = ret
 	return pc, ret, nil
@@ -1269,7 +1269,7 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
-	parentStateGas := scope.escrowStateGas()
+	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
 
 	ret, returnGas, err := evm.StaticCall(scope.Contract.Address(), toAddr, args, gas)
 	if err != nil {
@@ -1282,7 +1282,7 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
-	scope.settleStateGas(err, returnGas, parentStateGas, evm.config.Tracer)
+	scope.restoreChildGas(returnGas, evm.config.Tracer)
 
 	evm.returnData = ret
 	return pc, ret, nil
