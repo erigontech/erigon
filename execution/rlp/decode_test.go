@@ -1140,3 +1140,14 @@ func unhex(str string) []byte {
 	}
 	return b
 }
+
+func TestNewStreamFromPoolAllocs(t *testing.T) {
+	data := []byte{0xc1, 0x80} // minimal RLP list
+	allocs := testing.AllocsPerRun(100, func() {
+		s := NewStreamFromPool(data)
+		s.Release()
+	})
+	if allocs != 0 {
+		t.Fatalf("expected 0 allocs, got %v", allocs)
+	}
+}

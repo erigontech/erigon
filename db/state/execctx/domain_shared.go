@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/assert"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -592,7 +591,7 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.TemporalTx, p
 		}
 	}
 
-	if assert.Enable {
+	if dbg.AssertEnabled {
 		forgotten := 0
 		if err := sd.IteratePrefix(kv.StorageDomain, prefix, roTx, func(k, v []byte, step kv.Step) (bool, error) {
 			forgotten++

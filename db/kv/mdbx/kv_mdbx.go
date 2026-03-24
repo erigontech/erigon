@@ -819,7 +819,7 @@ func NewAsyncTx(tx kv.Tx, queueSize int) *asyncTx {
 }
 
 func (a *asyncTx) Apply(ctx context.Context, f func(kv.Tx) error) error {
-	rc := make(chan error)
+	rc := make(chan error, 1)
 	a.requests <- &applyTx{rc, a.Tx, f}
 	select {
 	case err := <-rc:
@@ -843,7 +843,7 @@ func NewAsyncRwTx(tx kv.RwTx, queueSize int) *asyncRwTx {
 }
 
 func (a *asyncRwTx) Apply(ctx context.Context, f func(kv.Tx) error) error {
-	rc := make(chan error)
+	rc := make(chan error, 1)
 	a.requests <- &applyTx{rc, a.RwTx, f}
 	select {
 	case err := <-rc:
@@ -854,7 +854,7 @@ func (a *asyncRwTx) Apply(ctx context.Context, f func(kv.Tx) error) error {
 }
 
 func (a *asyncRwTx) ApplyRw(ctx context.Context, f func(kv.RwTx) error) error {
-	rc := make(chan error)
+	rc := make(chan error, 1)
 	a.requests <- &applyRwTx{rc, a.RwTx, f}
 	select {
 	case err := <-rc:
