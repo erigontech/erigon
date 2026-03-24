@@ -1,7 +1,18 @@
 name: QA - Stage Exec Smoke Test
 
 on:
-  workflow_dispatch:     # Run manually
+  workflow_dispatch:
+    inputs:
+      chaintip:
+        description: 'Enable chaintip mode (--sync.mode.chaintip)'
+        required: false
+        type: boolean
+        default: false
+      rm_state_all:
+        description: 'Remove ALL state files instead of just latest'
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -11,7 +22,6 @@ jobs:
   stage-exec-test:
     runs-on: [self-hosted, qa, Ethereum, tip-tracking]
     env:
-      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TIMEOUT_SECONDS: 600
@@ -20,6 +30,23 @@ jobs:
     steps:
     - name: Check out repository
       uses: actions/checkout@v6
+
+    - name: Set reference data dir based on branch
+      run: |
+        BRANCH="${{ github.base_ref }}"
+        if [ -z "$BRANCH" ]; then
+          BRANCH="${{ github.ref }}"
+          BRANCH="${BRANCH#refs/heads/}"
+        fi
+        if [[ "$BRANCH" == release/* ]]; then
+          VERSION="${BRANCH#release/}"
+          MAJOR="${VERSION%.*}"
+          MINOR="${VERSION##*.}"
+          PREV_VERSION="${MAJOR}.$((MINOR - 1))"
+          echo "ERIGON_REFERENCE_DATA_DIR=/opt/erigon-versions/reference-version-${PREV_VERSION}/datadir" >> $GITHUB_ENV
+        else
+          echo "ERIGON_REFERENCE_DATA_DIR=/opt/erigon-versions/reference-version/datadir" >> $GITHUB_ENV
+        fi
 
     - name: Clean Erigon Build Directory
       run: |
@@ -44,8 +71,18 @@ jobs:
       run: |
         set +e
 
+        # Build optional flags
+        EXTRA_FLAGS=""
+        if [ "${{ github.event.inputs.chaintip }}" == "true" ]; then
+          EXTRA_FLAGS="$EXTRA_FLAGS --chaintip"
+        fi
+        if [ "${{ github.event.inputs.rm_state_all }}" == "true" ]; then
+          EXTRA_FLAGS="$EXTRA_FLAGS --rm-state-all"
+        fi
+
         python3 $ERIGON_QA_PATH/test_system/qa-tests/stage-exec/run_and_check_stage_exec.py \
-          ${{ github.workspace }}/build/bin $ERIGON_TESTBED_DATA_DIR $TIMEOUT_SECONDS $CHAIN
+          ${{ github.workspace }}/build/bin $ERIGON_TESTBED_DATA_DIR $TIMEOUT_SECONDS $CHAIN \
+          $EXTRA_FLAGS
 
         test_exit_status=$?
 
@@ -59,15 +96,36 @@ jobs:
           echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
         fi
 
+    - name: Save test results
+      if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
+      env:
+        TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
+      run: |
+        db_version=$(python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/prod_info.py $ERIGON_REFERENCE_DATA_DIR/../production.ini production erigon_repo_commit)
+        if [ -z "$db_version" ]; then
+          db_version="no-version"
+        fi
+
+        python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
+          --repo erigon \
+          --commit $(git rev-parse HEAD) \
+          --branch ${{ github.ref_name }} \
+          --test_name stage-exec \
+          --chain $CHAIN \
+          --runner ${{ runner.name }} \
+          --db_version $db_version \
+          --outcome $TEST_RESULT \
+          --result_file ${{ github.workspace }}/result-$CHAIN.json
+
     - name: Upload test results
-      if: steps.test_step.outputs.test_executed == 'true'
+      if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
       uses: actions/upload-artifact@v6
       with:
         name: test-results
-        path: ${{ github.workspace }}/result.json
+        path: ${{ github.workspace }}/result-${{ env.CHAIN }}.json
 
     - name: Upload erigon logs
-      if: steps.test_step.outputs.test_executed == 'true'
+      if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
       uses: actions/upload-artifact@v6
       with:
         name: erigon-logs
@@ -76,7 +134,9 @@ jobs:
     - name: Delete Erigon Testbed Data Directory
       if: always()
       run: |
-        rm -rf $ERIGON_TESTBED_DATA_DIR
+        if [ -d "$ERIGON_TESTBED_DATA_DIR" ]; then
+          rm -rf $ERIGON_TESTBED_DATA_DIR
+        fi
 
     - name: Resume the Erigon instance dedicated to db maintenance
       if: always()
