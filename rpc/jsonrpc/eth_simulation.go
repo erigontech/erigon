@@ -622,9 +622,23 @@ func (s *simulator) simulateBlock(
 				commitTxNum = minTxNum - 1
 				s.logger.Warn("[eth_simulateV1] blockN skip SeekCommitment", "blockNum", blockNumber, "parentRoot", parent.Root, "numAncestors", len(ancestors), "commitTxNum", commitTxNum, "minTxNum", minTxNum)
 			}
-			// Change the state reader to a commitment-only history reader that reads non-commitment domains from the latest state.
+			// Change the state reader to a commitment-only history reader.
+			//
+			// commitmentAsOfTxNum: always within the FIRST simulated block's txNum range so that
+			// trie branches not in memory are read from the canonical base-parent commitment.
+			// For block 1 this is txNum+1 itself; for block 2+ we look up the first ancestor's
+			// block number to get its minTxNum and add 1 (still within the first block's range).
 			txNum := minTxNum + 1 + uint64(len(bsc.Calls))
-			sharedDomains.GetCommitmentContext().SetStateReader(newHistoryCommitmentOnlyReader(tx, sharedDomains, txNum+1))
+			commitmentAsOfTxNum := txNum + 1
+			if len(ancestors) > 0 {
+				firstMinTxNum, err := s.txNumReader.Min(ctx, tx, ancestors[0].Number.Uint64())
+				if err != nil {
+					return nil, nil, err
+				}
+				commitmentAsOfTxNum = firstMinTxNum + 1
+			}
+			s.logger.Warn("[eth_simulateV1] reader setup", "blockNum", blockNumber, "numAncestors", len(ancestors), "commitmentAsOfTxNum", commitmentAsOfTxNum, "plainStateAsOfTxNum", txNum+1)
+			sharedDomains.GetCommitmentContext().SetStateReader(newHistoryCommitmentOnlyReader(tx, sharedDomains, commitmentAsOfTxNum, txNum+1))
 		}
 		stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, false, blockNumber, commitTxNum, "eth_simulateV1", nil)
 		if err != nil {
@@ -867,14 +881,20 @@ func clientLimitExceededError(message string) error {
 	return &rpc.CustomError{Message: message, Code: rpc.ErrCodeClientLimitExceeded}
 }
 
-func newHistoryCommitmentOnlyReader(roTx kv.TemporalTx, sd *execctx.SharedDomains, limitReadAsOfTxNum uint64) commitmentdb.StateReader {
-	// Commitment domain: read trie branches from history (SeekCommitment snapshot at parent block).
+func newHistoryCommitmentOnlyReader(roTx kv.TemporalTx, sd *execctx.SharedDomains, commitmentAsOfTxNum uint64, plainStateAsOfTxNum uint64) commitmentdb.StateReader {
+	// Commitment domain: read trie branches from history at commitmentAsOfTxNum.
+	// For a single-block simulation or the first simulated block, commitmentAsOfTxNum is within
+	// the simulated block's range, so GetAsOf returns the base parent's canonical commitment.
+	// For the 2nd+ block, commitmentAsOfTxNum is forced to stay within the FIRST simulated
+	// block's range so that branches not in the in-memory trie are read from the same canonical
+	// base parent commitment (not from a later canonical block that doesn't include our simulation).
+	//
 	// Account/storage/code: use SimulationPlainStateReader which reads from sd.mem for dirty
-	// (simulation-modified) accounts and from GetAsOf at limitReadAsOfTxNum for clean sibling
+	// (simulation-modified) accounts and from GetAsOf at plainStateAsOfTxNum for clean sibling
 	// accounts. This makes the commitment hash deterministic regardless of the node's sync state.
 	return commitmentdb.NewCommitmentSplitStateReader(
-		commitmentdb.NewHistoryStateReader(roTx, limitReadAsOfTxNum),
-		commitmentdb.NewSimulationPlainStateReader(roTx, sd, limitReadAsOfTxNum),
+		commitmentdb.NewHistoryStateReader(roTx, commitmentAsOfTxNum),
+		commitmentdb.NewSimulationPlainStateReader(roTx, sd, plainStateAsOfTxNum),
 		true,
 	)
 }
