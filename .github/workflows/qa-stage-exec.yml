@@ -27,15 +27,23 @@ jobs:
           BRANCH="${{ github.ref }}"
           BRANCH="${BRANCH#refs/heads/}"
         fi
+        REF_DIR="/opt/erigon-versions/reference-version/datadir"
         if [[ "$BRANCH" == release/* ]]; then
           VERSION="${BRANCH#release/}"
-          MAJOR="${VERSION%.*}"
-          MINOR="${VERSION##*.}"
-          PREV_VERSION="${MAJOR}.$((MINOR - 1))"
-          echo "ERIGON_REFERENCE_DATA_DIR=/opt/erigon-versions/reference-version-${PREV_VERSION}/datadir" >> $GITHUB_ENV
-        else
-          echo "ERIGON_REFERENCE_DATA_DIR=/opt/erigon-versions/reference-version/datadir" >> $GITHUB_ENV
+          if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+$ ]]; then
+            MAJOR="${VERSION%.*}"
+            MINOR="${VERSION##*.}"
+            if [ "$MINOR" -gt 0 ] 2>/dev/null; then
+              PREV_VERSION="${MAJOR}.$((MINOR - 1))"
+              REF_DIR="/opt/erigon-versions/reference-version-${PREV_VERSION}/datadir"
+            else
+              echo "Warning: Release branch '$BRANCH' has minor version 0; using default reference data dir."
+            fi
+          else
+            echo "Warning: Release branch '$BRANCH' does not match expected 'MAJOR.MINOR' format; using default reference data dir."
+          fi
         fi
+        echo "ERIGON_REFERENCE_DATA_DIR=$REF_DIR" >> $GITHUB_ENV
 
     - name: Clean Erigon Build Directory
       run: |
