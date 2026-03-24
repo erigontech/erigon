@@ -624,21 +624,23 @@ func (s *simulator) simulateBlock(
 			}
 			// Change the state reader to a commitment-only history reader.
 			//
-			// commitmentAsOfTxNum: always within the FIRST simulated block's txNum range so that
-			// trie branches not in memory are read from the canonical base-parent commitment.
-			// For block 1 this is txNum+1 itself; for block 2+ we look up the first ancestor's
-			// block number to get its minTxNum and add 1 (still within the first block's range).
-			txNum := minTxNum + 1 + uint64(len(bsc.Calls))
-			commitmentAsOfTxNum := txNum + 1
+			// firstMinTxNum: minTxNum of the FIRST simulated block. This is the txNum boundary
+			// at which canonical chain state equals the base-parent state that Geth uses.
+			// - commitmentAsOfTxNum = firstMinTxNum+1: reads trie branches from canonical
+			//   base-parent commitment (not a later canonical block that omits simulation changes).
+			// - plainStateAsOfTxNum = firstMinTxNum: reads clean sibling accounts from canonical
+			//   base-parent state (GetAsOf at exactly the start of block 1 = end of base parent).
+			firstMinTxNum := minTxNum
 			if len(ancestors) > 0 {
-				firstMinTxNum, err := s.txNumReader.Min(ctx, tx, ancestors[0].Number.Uint64())
+				firstMinTxNum, err = s.txNumReader.Min(ctx, tx, ancestors[0].Number.Uint64())
 				if err != nil {
 					return nil, nil, err
 				}
-				commitmentAsOfTxNum = firstMinTxNum + 1
 			}
-			s.logger.Warn("[eth_simulateV1] reader setup", "blockNum", blockNumber, "numAncestors", len(ancestors), "commitmentAsOfTxNum", commitmentAsOfTxNum, "plainStateAsOfTxNum", txNum+1)
-			sharedDomains.GetCommitmentContext().SetStateReader(newHistoryCommitmentOnlyReader(tx, sharedDomains, commitmentAsOfTxNum, txNum+1))
+			commitmentAsOfTxNum := firstMinTxNum + 1
+			plainStateAsOfTxNum := firstMinTxNum
+			s.logger.Warn("[eth_simulateV1] reader setup", "blockNum", blockNumber, "numAncestors", len(ancestors), "firstMinTxNum", firstMinTxNum, "commitmentAsOfTxNum", commitmentAsOfTxNum, "plainStateAsOfTxNum", plainStateAsOfTxNum)
+			sharedDomains.GetCommitmentContext().SetStateReader(newHistoryCommitmentOnlyReader(tx, sharedDomains, commitmentAsOfTxNum, plainStateAsOfTxNum))
 		}
 		stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, false, blockNumber, commitTxNum, "eth_simulateV1", nil)
 		if err != nil {
