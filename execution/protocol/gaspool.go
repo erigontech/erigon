@@ -32,18 +32,18 @@ import (
 // end via GasUsed.BlockGasUsed() = max(Σ regular, Σ state).
 type GasPool struct {
 	mu           sync.RWMutex
-	regularGas, blobGas uint64
+	gas, blobGas uint64
 }
 
-func NewGasPool(regularGas, blobGas uint64) *GasPool {
-	return &GasPool{regularGas: regularGas, blobGas: blobGas}
+func NewGasPool(gas, blobGas uint64) *GasPool {
+	return &GasPool{gas: gas, blobGas: blobGas}
 }
 
-func (gp *GasPool) Reset(regularGas, blobGas uint64) {
+func (gp *GasPool) Reset(amount, blobGas uint64) {
 	if gp != nil {
 		gp.mu.Lock()
 		defer gp.mu.Unlock()
-		gp.regularGas = regularGas
+		gp.gas = amount
 		gp.blobGas = blobGas
 	}
 }
@@ -53,10 +53,10 @@ func (gp *GasPool) AddRegularGas(amount uint64) *GasPool {
 	if gp != nil {
 		gp.mu.Lock()
 		defer gp.mu.Unlock()
-		if gp.regularGas > math.MaxUint64-amount {
+		if gp.gas > math.MaxUint64-amount {
 			panic("gas pool pushed above uint64")
 		}
-		gp.regularGas += amount
+		gp.gas += amount
 	}
 	return gp
 }
@@ -67,10 +67,10 @@ func (gp *GasPool) SubRegularGas(amount uint64) error {
 	if gp != nil {
 		gp.mu.Lock()
 		defer gp.mu.Unlock()
-		if gp.regularGas < amount {
+		if gp.gas < amount {
 			return ErrGasLimitReached
 		}
-		gp.regularGas -= amount
+		gp.gas -= amount
 	}
 	return nil
 }
@@ -82,7 +82,7 @@ func (gp *GasPool) RegularGas() uint64 {
 	}
 	gp.mu.RLock()
 	defer gp.mu.RUnlock()
-	return gp.regularGas
+	return gp.gas
 }
 
 // AddBlobGas makes blob gas available for execution.
@@ -128,5 +128,5 @@ func (gp *GasPool) String() string {
 	}
 	gp.mu.RLock()
 	defer gp.mu.RUnlock()
-	return fmt.Sprintf("regular_gas: %d, blob_gas: %d", gp.regularGas, gp.blobGas)
+	return fmt.Sprintf("regular_gas: %d, blob_gas: %d", gp.gas, gp.blobGas)
 }
