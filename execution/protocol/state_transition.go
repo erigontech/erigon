@@ -239,11 +239,11 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 		st.state.SubBalance(st.msg.From(), blobGasVal, tracing.BalanceDecreaseGasBuy)
 	}
 
-	if err := st.gp.SubGas(st.msg.Gas()); err != nil {
+	if err := st.gp.SubRegularGas(st.msg.Gas()); err != nil {
 		return err
 	}
 	// Correct blockRegularGasUsed will be set later in TransitionDb; set it for the moment to the txn's gas limit
-	// so that st.gp.AddGas(st.blockRegularGasUsed) in the recover block works correctly even if a panic occurs beforehand.
+	// so that st.gp.AddRegularGas(st.blockRegularGasUsed) in the recover block works correctly even if a panic occurs beforehand.
 	st.blockRegularGasUsed = st.msg.Gas()
 
 	if st.evm.Config().Tracer != nil && st.evm.Config().Tracer.OnGasChange != nil {
@@ -457,7 +457,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 				if r != state.ErrDependency {
 					log.Debug("Recovered from transition exec failure.", "Error:", r, "stack", dbg.Stack())
 				}
-				st.gp.AddGas(st.blockRegularGasUsed)
+				st.gp.AddRegularGas(st.blockRegularGasUsed)
 				depTxIndex := st.evm.IntraBlockState().DepTxIndex()
 				if depTxIndex < 0 {
 					err = fmt.Errorf("transition exec failure: %s at: %s", r, dbg.Stack())
@@ -649,7 +649,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	// Using regular here gives: pool -= blockRegularGasUsed per tx, so the
 	// pool enforces Σ regular_i ≤ gasLimit. The full two-dimensional check
 	// (max of sums, not sum of maxes) happens in the block post-validation.
-	st.gp.AddGas(st.initialGas.Total() - st.blockRegularGasUsed)
+	st.gp.AddRegularGas(st.initialGas.Total() - st.blockRegularGasUsed)
 
 	effectiveTip := *st.gasPrice
 	if rules.IsLondon {

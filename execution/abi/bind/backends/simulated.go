@@ -180,7 +180,7 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 	b.pendingBlock = blockChain.Blocks[0]
 	b.pendingReceipts = blockChain.Receipts[0]
 	b.pendingHeader = blockChain.Headers[0]
-	b.gasPool = new(protocol.GasPool).AddGas(b.pendingHeader.GasLimit).AddBlobGas(b.m.ChainConfig.GetMaxBlobGasPerBlock(b.pendingHeader.Time))
+	b.gasPool = new(protocol.GasPool).AddRegularGas(b.pendingHeader.GasLimit).AddBlobGas(b.m.ChainConfig.GetMaxBlobGasPerBlock(b.pendingHeader.Time))
 	b.pendingGasUsed = new(protocol.GasUsed)
 	if b.pendingReaderTx != nil {
 		b.pendingReaderTx.Rollback()
@@ -759,7 +759,7 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 	// Create a new environment which holds all relevant information
 	// about the transaction and calling mechanisms.
 	vmEnv := vm.NewEVM(evmContext, txContext, statedb, b.m.ChainConfig, vm.Config{})
-	gasPool := new(protocol.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
+	gasPool := new(protocol.GasPool).AddRegularGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
 
 	return protocol.NewStateTransition(vmEnv, msg, gasPool).TransitionDb(true /* refunds */, false /* gasBailout */)
 }

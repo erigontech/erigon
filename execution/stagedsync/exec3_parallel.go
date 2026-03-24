@@ -1910,7 +1910,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				// at block end via max(blockRegularGasUsed, blockStateGasUsed).
 				// Per-tx max would give sum(max(r_i, s_i)) ≥ max(sum(r_i), sum(s_i)),
 				// rejecting valid blocks. Pre-Amsterdam: blockStateGasUsed is 0, no change.
-				if err := be.gasPool.SubGas(txResult.ExecutionResult.BlockRegularGasUsed); err != nil {
+				if err := be.gasPool.SubRegularGas(txResult.ExecutionResult.BlockRegularGasUsed); err != nil {
 					return nil, fmt.Errorf("%w, block=%d: block gas used overflow", rules.ErrInvalidBlock, be.blockNum)
 				}
 

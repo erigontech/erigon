@@ -121,7 +121,7 @@ func traceBorStateSyncTxn(
 		default:
 		}
 
-		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
+		gp := new(protocol.GasPool).AddRegularGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 		_, err := protocol.ApplyMessage(evm, msg, gp, refunds, false /* gasBailout */, nil /* engine */)
 		if err != nil {
 			return nil, err

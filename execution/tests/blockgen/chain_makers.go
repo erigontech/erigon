@@ -81,7 +81,7 @@ func (b *BlockGen) SetCoinbase(addr common.Address) {
 		panic("coinbase can only be set once")
 	}
 	b.header.Coinbase = addr
-	b.gasPool = new(protocol.GasPool).AddGas(b.header.GasLimit)
+	b.gasPool = new(protocol.GasPool).AddRegularGas(b.header.GasLimit)
 }
 
 // SetExtra sets the extra data field of the generated block.

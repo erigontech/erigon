@@ -43,7 +43,7 @@ func chargeGas(
 		return err
 	}
 
-	if err := gasPool.SubGas(totalGasLimit); err != nil {
+	if err := gasPool.SubRegularGas(totalGasLimit); err != nil {
 		return newValidationPhaseError(err, nil, "block gas limit", false)
 	}
 

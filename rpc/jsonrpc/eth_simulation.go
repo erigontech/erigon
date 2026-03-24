@@ -216,7 +216,7 @@ func newSimulator(
 		txNumReader:       txNumReader,
 		blockReader:       blockReader,
 		logger:            logger,
-		gasPool:           new(protocol.GasPool).AddGas(gasCap),
+		gasPool:           new(protocol.GasPool).AddRegularGas(gasCap),
 		returnDataLimit:   returnDataLimit,
 		evmCallTimeout:    evmCallTimeout,
 		commitmentHistory: commitmentHistory,
@@ -665,20 +665,20 @@ func (s *simulator) simulateCall(
 	}
 	defer cancel()
 
-	err := s.sanitizeCall(call, intraBlockState, &blockCtx, header.BaseFee, *cumulativeGasUsed, s.gasPool.Gas())
+	err := s.sanitizeCall(call, intraBlockState, &blockCtx, header.BaseFee, *cumulativeGasUsed, s.gasPool.RegularGas())
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
 	// Prepare the transaction message
-	msg, err := call.ToMessage(s.gasPool.Gas(), &blockCtx.BaseFee)
+	msg, err := call.ToMessage(s.gasPool.RegularGas(), &blockCtx.BaseFee)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	msg.SetCheckGas(s.validation)
 	msg.SetCheckNonce(s.validation)
 	txCtx := protocol.NewEVMTxContext(msg)
-	txn, err := call.ToTransaction(s.gasPool.Gas(), &blockCtx.BaseFee)
+	txn, err := call.ToTransaction(s.gasPool.RegularGas(), &blockCtx.BaseFee)
 	if err != nil {
 		return nil, nil, nil, err
 	}

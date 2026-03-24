@@ -79,13 +79,13 @@ func TestEIP7825_GasPoolPreservedOnReject(t *testing.T) {
 		ibs := state.New(state.NewNoopReader())
 		evm := newTestEVM(ibs, cfg, blockGasLimit)
 		msg := newSimpleTransferMsg(sender, recipient, params.MaxTxnGasLimit+1, true)
-		gp := new(GasPool).AddGas(blockGasLimit)
+		gp := new(GasPool).AddRegularGas(blockGasLimit)
 
 		st := NewStateTransition(evm, msg, gp)
 		_, err := st.TransitionDb(true, false)
 
 		require.ErrorIs(t, err, ErrGasLimitTooHigh)
-		require.Equal(t, uint64(blockGasLimit), gp.Gas(),
+		require.Equal(t, uint64(blockGasLimit), gp.RegularGas(),
 			"gas pool must be unchanged after EIP-7825 rejection")
 	})
 
@@ -93,14 +93,14 @@ func TestEIP7825_GasPoolPreservedOnReject(t *testing.T) {
 		ibs := state.New(state.NewNoopReader())
 		evm := newTestEVM(ibs, cfg, blockGasLimit)
 		msg := newSimpleTransferMsg(sender, recipient, params.MaxTxnGasLimit, true)
-		gp := new(GasPool).AddGas(blockGasLimit)
+		gp := new(GasPool).AddRegularGas(blockGasLimit)
 
 		st := NewStateTransition(evm, msg, gp)
 		result, err := st.TransitionDb(true, false)
 
 		require.NoError(t, err)
 		require.NotNil(t, result)
-		require.Less(t, gp.Gas(), uint64(blockGasLimit),
+		require.Less(t, gp.RegularGas(), uint64(blockGasLimit),
 			"gas pool must be debited for a valid transaction")
 	})
 
@@ -108,7 +108,7 @@ func TestEIP7825_GasPoolPreservedOnReject(t *testing.T) {
 		// Simulate the original bug scenario: a rejected tx should not prevent
 		// a subsequent valid tx from succeeding due to pool exhaustion.
 		ibs := state.New(state.NewNoopReader())
-		gp := new(GasPool).AddGas(blockGasLimit)
+		gp := new(GasPool).AddRegularGas(blockGasLimit)
 
 		// First: a tx that exceeds the cap — must be rejected without touching pool.
 		evm1 := newTestEVM(ibs, cfg, blockGasLimit)
@@ -117,7 +117,7 @@ func TestEIP7825_GasPoolPreservedOnReject(t *testing.T) {
 		_, err := st1.TransitionDb(true, false)
 		require.ErrorIs(t, err, ErrGasLimitTooHigh)
 
-		poolAfterReject := gp.Gas()
+		poolAfterReject := gp.RegularGas()
 		require.Equal(t, uint64(blockGasLimit), poolAfterReject,
 			"gas pool must be unchanged after rejected tx")
 
@@ -129,7 +129,7 @@ func TestEIP7825_GasPoolPreservedOnReject(t *testing.T) {
 
 		require.NoError(t, err)
 		require.NotNil(t, result)
-		require.Less(t, gp.Gas(), poolAfterReject,
+		require.Less(t, gp.RegularGas(), poolAfterReject,
 			"second tx must succeed and debit the gas pool")
 	})
 }

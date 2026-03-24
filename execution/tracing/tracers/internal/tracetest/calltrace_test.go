@@ -184,7 +184,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 			txContext := protocol.NewEVMTxContext(msg)
 			evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Tracer: tracer.Hooks})
 			tracer.OnTxStart(evm.GetVMContext(), tx, msg.From())
-			vmRet, err := protocol.ApplyMessage(evm, msg, new(protocol.GasPool).AddGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()), true /* refunds */, false /* gasBailout */, nil /* engine */)
+			vmRet, err := protocol.ApplyMessage(evm, msg, new(protocol.GasPool).AddRegularGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()), true /* refunds */, false /* gasBailout */, nil /* engine */)
 			if err != nil {
 				t.Fatalf("failed to execute transaction: %v", err)
 			}
@@ -295,7 +295,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 		}
 		evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Tracer: tracer.Hooks})
 		snap := statedb.PushSnapshot()
-		st := protocol.NewStateTransition(evm, msg, new(protocol.GasPool).AddGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()))
+		st := protocol.NewStateTransition(evm, msg, new(protocol.GasPool).AddRegularGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()))
 		if _, err = st.TransitionDb(true /* refunds */, false /* gasBailout */); err != nil {
 			b.Fatalf("failed to execute transaction: %v", err)
 		}
@@ -375,7 +375,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 		t.Fatalf("failed to prepare transaction for tracing: %v", err)
 	}
 	tracer.OnTxStart(evm.GetVMContext(), tx, msg.From())
-	st := protocol.NewStateTransition(evm, msg, new(protocol.GasPool).AddGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()))
+	st := protocol.NewStateTransition(evm, msg, new(protocol.GasPool).AddRegularGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()))
 	vmRet, err := st.TransitionDb(true /* refunds */, false /* gasBailout */)
 	if err != nil {
 		t.Fatalf("failed to execute transaction: %v", err)

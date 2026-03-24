@@ -186,7 +186,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.
-	gp := new(protocol.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
+	gp := new(protocol.GasPool).AddRegularGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
 
 	bundleHash := crypto.NewKeccakState()
 	defer crypto.ReturnToPool(bundleHash)
