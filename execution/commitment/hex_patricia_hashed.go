@@ -1574,7 +1574,7 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 				if len(cellHash) == length.Hash+1 { // +1 for the a0 prefix
 					cellHash = cellHash[1:] // strip the a0 prefix
 				}
-				fullNode.Children[col] = trie.NewHashNode(common.Copy(cellHash)) // because cellHash has 33 bytes and we want 32
+				fullNode.Children[col] = trie.NewHashNode(common.Copy(cellHash))
 
 				if hph.trace {
 					fmt.Printf("[witness, pos %d] FullNodeChild Hash (%d, %0x, depth=%d) %s proof %+v\n", keyPos, row, col, hph.depths[row], currentCell.FullString(), fullNode.Children[col])
