@@ -80,7 +80,8 @@ func (t *RLPTest) Run() error {
 		return fmt.Errorf("encode produced %x, want %x", b, outb)
 	}
 	// Test stream decoding.
-	s := rlp.NewStream(bytes.NewReader(outb), 0)
+	s := rlp.NewStreamFromPool(outb)
+	defer s.Release()
 	return checkDecodeFromJSON(s, in)
 }
 

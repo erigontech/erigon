@@ -31,8 +31,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/erigontech/erigon/execution/rlp/internal/rlpstruct"
 	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/execution/rlp/internal/rlpstruct"
 )
 
 //lint:ignore ST1012 EOL is not an error.
@@ -118,16 +119,12 @@ func Decode(r io.Reader, val interface{}) error {
 // DecodeBytes parses RLP data from b into val. Please see package-level documentation for
 // the decoding rules. The input must contain exactly one value and no trailing data.
 func DecodeBytes(b []byte, val interface{}) error {
-	r := (*sliceReader)(&b)
-
-	stream := streamPool.Get().(*Stream)
-	defer streamPool.Put(stream)
-
-	stream.Reset(r, uint64(len(b)))
+	stream := NewStreamFromPool(b)
+	defer stream.Release()
 	if err := stream.Decode(val); err != nil {
 		return err
 	}
-	if len(b) > 0 {
+	if stream.Remaining() > 0 {
 		return ErrMoreThanOneValue
 	}
 	return nil
@@ -186,12 +183,8 @@ func addErrorContext(err error, ctx string) error {
 // DecodeBytesPartial parses RLP data from b into val.
 // Unlike DecodeBytes, it does not require that all bytes are consumed.
 func DecodeBytesPartial(b []byte, val any) error {
-	r := (*sliceReader)(&b)
-
-	stream := streamPool.Get().(*Stream)
-	defer streamPool.Put(stream)
-
-	stream.Reset(r, uint64(len(b)))
+	stream := NewStreamFromPool(b)
+	defer stream.Release()
 	return stream.Decode(val)
 }
 
@@ -641,8 +634,6 @@ type ByteReader interface {
 //
 // Stream is not safe for concurrent use.
 type Stream struct {
-	r ByteReader
-
 	remaining uint64   // number of bytes remaining to be read from r
 	size      uint64   // size of value ahead
 	kinderr   error    // error from last readKind
@@ -651,6 +642,9 @@ type Stream struct {
 	kind      Kind     // kind of value ahead
 	byteval   byte     // value of single byte in type tag
 	limited   bool     // true if input limit is in effect
+
+	r  ByteReader
+	sr sliceReader // typed `r` to avoid allocation in NewStreamFromPool
 }
 
 // Remaining returns number of bytes remaining to be read.
@@ -681,6 +675,13 @@ func NewStream(r io.Reader, inputLimit uint64) *Stream {
 	return s
 }
 
+// Release returns the Stream to the pool. Must be called after NewStreamFromPool.
+func (s *Stream) Release() {
+	s.sr = nil // clear reference to input slice to avoid pinning it in the pool
+	s.r = nil
+	streamPool.Put(s)
+}
+
 // NewListStream creates a new stream that pretends to be positioned
 // at an encoded list of the given length.
 func NewListStream(r io.Reader, len uint64) *Stream {
@@ -691,13 +692,14 @@ func NewListStream(r io.Reader, len uint64) *Stream {
 	return s
 }
 
-// NewStreamFromPool returns a Stream from the pool.
-func NewStreamFromPool(r io.Reader, inputLimit uint64) (stream *Stream, done func()) {
+// NewStreamFromPool returns a Stream from the pool. Call Release() when done.
+// sr is stored as a field on Stream (not a local var) so &stream.sr does not
+// escape to the heap, making this call allocation-free.
+func NewStreamFromPool(b []byte) (stream *Stream) {
 	stream = streamPool.Get().(*Stream)
-	stream.Reset(r, inputLimit)
-	return stream, func() {
-		streamPool.Put(stream)
-	}
+	stream.sr = b // typed field: to avoid heap-escaping of reader interface
+	stream.Reset(&stream.sr, uint64(len(b)))
+	return stream
 }
 
 // Bytes reads an RLP string and returns its contents as a byte slice.
