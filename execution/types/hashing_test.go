@@ -111,6 +111,21 @@ func legacyDeriveSha(list DerivableList) common.Hash {
 var (
 	smallTxList = genTransactions(100)
 	largeTxList = genTransactions(100000)
+
+	benchHeader = &Header{
+		ParentHash:  common.Hash{1, 2, 3},
+		UncleHash:   common.Hash{4, 5, 6},
+		Root:        common.Hash{10, 11, 12},
+		TxHash:      common.Hash{13, 14, 15},
+		ReceiptHash: common.Hash{16, 17, 18},
+		Difficulty:  *uint256.NewInt(1_000_000),
+		Number:      *uint256.NewInt(20_000_000),
+		GasLimit:    30_000_000,
+		GasUsed:     15_000_000,
+		Time:        1_700_000_000,
+		Extra:       make([]byte, 32),
+		BaseFee:     uint256.NewInt(7),
+	}
 )
 
 func BenchmarkLegacySmallList(b *testing.B) {
@@ -134,5 +149,11 @@ func BenchmarkLegacyLargeList(b *testing.B) {
 func BenchmarkCurrentLargeList(b *testing.B) {
 	for b.Loop() {
 		DeriveSha(largeTxList)
+	}
+}
+
+func BenchmarkRlpHashHeader(b *testing.B) {
+	for b.Loop() {
+		rlpHash(benchHeader)
 	}
 }
