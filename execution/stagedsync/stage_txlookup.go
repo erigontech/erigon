@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -253,6 +254,14 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	}
 	if prevStat == nil {
 		prevStat = &prune.Stat{}
+	}
+
+	// TxLookup pruning requires direct MDBX cursor access. Skip when running
+	// inside a MemoryMutation overlay (e.g. forkchoice pipeline): the overlay
+	// holds no historical TxLookup data to prune, and the next regular sync
+	// cycle will prune against a real MDBX transaction.
+	if _, ok := tx.(*membatchwithdb.MemoryMutation); ok {
+		return nil
 	}
 
 	valsRwCursor, err := tx.RwCursor(kv.TxLookup)
