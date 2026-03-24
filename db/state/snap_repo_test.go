@@ -692,7 +692,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 				if err = seg.AddWord([]byte("word")); err != nil {
 					t.Fatal(err)
 				}
-				if err = seg.AddWord([]byte("val")); err != nil {
+				if err = seg.AddWord([]byte("val")); err != nil { // key-value pair: mergers expect even number of words
 					t.Fatal(err)
 				}
 			}
