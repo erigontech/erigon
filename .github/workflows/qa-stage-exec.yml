@@ -1,18 +1,7 @@
 name: QA - Stage Exec Smoke Test
 
 on:
-  workflow_dispatch:
-    inputs:
-      chaintip:
-        description: 'Enable chaintip mode (--sync.mode.chaintip)'
-        required: false
-        type: boolean
-        default: false
-      rm_state_all:
-        description: 'Remove ALL state files instead of just latest'
-        required: false
-        type: boolean
-        default: false
+  workflow_dispatch:     # Run manually
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -71,18 +60,8 @@ jobs:
       run: |
         set +e
 
-        # Build optional flags
-        EXTRA_FLAGS=""
-        if [ "${{ github.event.inputs.chaintip }}" == "true" ]; then
-          EXTRA_FLAGS="$EXTRA_FLAGS --chaintip"
-        fi
-        if [ "${{ github.event.inputs.rm_state_all }}" == "true" ]; then
-          EXTRA_FLAGS="$EXTRA_FLAGS --rm-state-all"
-        fi
-
         python3 $ERIGON_QA_PATH/test_system/qa-tests/stage-exec/run_and_check_stage_exec.py \
-          ${{ github.workspace }}/build/bin $ERIGON_TESTBED_DATA_DIR $TIMEOUT_SECONDS $CHAIN \
-          $EXTRA_FLAGS
+          ${{ github.workspace }}/build/bin $ERIGON_TESTBED_DATA_DIR $TIMEOUT_SECONDS $CHAIN
 
         test_exit_status=$?
 
@@ -110,7 +89,7 @@ jobs:
           --repo erigon \
           --commit $(git rev-parse HEAD) \
           --branch ${{ github.ref_name }} \
-          --test_name stage-exec \
+          --test_name "stage_exec resume nonchaintip" \
           --chain $CHAIN \
           --runner ${{ runner.name }} \
           --db_version $db_version \
