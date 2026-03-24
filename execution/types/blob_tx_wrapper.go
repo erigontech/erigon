@@ -451,6 +451,43 @@ func (txw *BlobTxWrapper) MarshalBinaryWrapped(w io.Writer) error {
 	}
 	return nil
 }
+
+// ConvertToV1 converts a legacy (wrapper_version=0) blob sidecar into
+// wrapper_version=1 by computing EIP-7594 cell proofs from the blobs.
+// Returns the re-encoded wrapped transaction bytes.
+// TODO: remove once ecosystem tooling fully supports wrapper_version=1.
+func (txw *BlobTxWrapper) ConvertToV1() ([]byte, error) {
+	kzgCtx := libkzg.Ctx()
+
+	cellProofs := make(KZGProofs, 0, len(txw.Blobs)*int(goethkzg.CellsPerExtBlob))
+	for i := range txw.Blobs {
+		_, proofs, err := kzgCtx.ComputeCellsAndKZGProofs((*goethkzg.Blob)(&txw.Blobs[i]), 4)
+		if err != nil {
+			return nil, fmt.Errorf("compute cell proofs for blob %d: %w", i, err)
+		}
+		for _, p := range &proofs {
+			cellProofs = append(cellProofs, KZGProof(p))
+		}
+	}
+
+	// Mutate in-place for marshalling, then restore.
+	origVersion := txw.WrapperVersion
+	origProofs := txw.Proofs
+	txw.WrapperVersion = 1
+	txw.Proofs = cellProofs
+
+	var buf bytes.Buffer
+	err := txw.MarshalBinaryWrapped(&buf)
+
+	txw.WrapperVersion = origVersion
+	txw.Proofs = origProofs
+
+	if err != nil {
+		return nil, fmt.Errorf("marshal converted wrapper: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
 func (txw *BlobTxWrapper) MarshalBinary(w io.Writer) error {
 	return txw.Tx.MarshalBinary(w)
 }
