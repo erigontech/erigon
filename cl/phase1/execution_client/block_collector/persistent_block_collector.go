@@ -163,7 +163,10 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 			}
 
 			if prevBlockNum > 0 && block.NumberU64() != prevBlockNum+1 {
-				panic(fmt.Sprintf("assert: BlockCollector inserting gap: %d -> %d. To fix try: `rm datadir/caplin/history datadir/chaindata`", prevBlockNum, block.NumberU64()))
+				p.logger.Warn("[BlockCollector] Gap detected in collected blocks, will re-download missing range",
+					"lastBlock", prevBlockNum, "nextBlock", block.NumberU64(),
+					"gap", block.NumberU64()-prevBlockNum-1)
+				break
 			}
 			prevBlockNum = block.NumberU64()
 			blocksBatch = append(blocksBatch, block)
