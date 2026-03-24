@@ -381,9 +381,10 @@ type storageItem struct {
 var deleted accounts.Account
 
 type bufferedAccount struct {
-	data    *accounts.Account
-	code    []byte
-	storage *btree.BTreeG[storageItem]
+	data       *accounts.Account
+	code       []byte
+	storage    *btree.BTreeG[storageItem]
+	wasDeleted bool // set when DeleteAccount was called; survives UpdateAccountCode overwrite
 }
 
 type StateV3Buffered struct {
@@ -446,7 +447,20 @@ func (c *versionedWriteCollector) UpdateAccountData(address accounts.Address, or
 	// the new account state is written. applyVersionedWrites detects the presence
 	// of account fields after SelfDestructPath to distinguish cleanup+recreate
 	// from a pure account deletion.
-	if original.Incarnation > accountCopy.Incarnation {
+	needsCleanup := original.Incarnation > accountCopy.Incarnation
+	// Cross-block reincarnation: in the parallel executor, versionedRead
+	// returns a nil account (Incarnation=0) for addresses self-destructed
+	// in a prior block, so the check above misses the cleanup. Blocks are
+	// processed sequentially, so rs.accounts already has the deleted marker
+	// from the prior block's DeleteAccount by the time this runs.
+	if !needsCleanup && accountCopy.Incarnation > 0 {
+		c.rs.accountsMutex.RLock()
+		if obj, ok := c.rs.accounts[address]; ok && obj.wasDeleted {
+			needsCleanup = true
+		}
+		c.rs.accountsMutex.RUnlock()
+	}
+	if needsCleanup {
 		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: SelfDestructPath, Val: true})
 	}
 
@@ -463,7 +477,8 @@ func (c *versionedWriteCollector) UpdateAccountData(address accounts.Address, or
 	c.rs.accountsMutex.Lock()
 	obj, ok := c.rs.accounts[address]
 	if !ok || obj.data == &deleted {
-		obj = &bufferedAccount{}
+		wasDel := ok && (obj.data == &deleted || obj.wasDeleted)
+		obj = &bufferedAccount{wasDeleted: wasDel}
 	}
 	obj.data = &accountCopy
 	c.rs.accounts[address] = obj
@@ -478,7 +493,8 @@ func (c *versionedWriteCollector) UpdateAccountCode(address accounts.Address, in
 	c.rs.accountsMutex.Lock()
 	obj, ok := c.rs.accounts[address]
 	if !ok || obj.data == &deleted {
-		obj = &bufferedAccount{}
+		wasDel := ok && obj.data == &deleted
+		obj = &bufferedAccount{wasDeleted: wasDel}
 		c.rs.accounts[address] = obj
 	}
 	obj.code = code
@@ -493,10 +509,10 @@ func (c *versionedWriteCollector) DeleteAccount(address accounts.Address, origin
 	c.rs.accountsMutex.Lock()
 	obj, ok := c.rs.accounts[address]
 	if !ok {
-		obj = &bufferedAccount{data: &deleted}
+		obj = &bufferedAccount{data: &deleted, wasDeleted: true}
 		c.rs.accounts[address] = obj
 	}
-	*obj = bufferedAccount{data: &deleted}
+	*obj = bufferedAccount{data: &deleted, wasDeleted: true}
 	c.rs.accountsMutex.Unlock()
 
 	return nil
