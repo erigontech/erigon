@@ -58,7 +58,7 @@ var (
 	noPrune              = EnvBool("NO_PRUNE", false)
 	noMerge              = EnvBool("NO_MERGE", false)              // don't merge Domain/Hist/II
 	noMergeHistory       = EnvBool("NO_MERGE_HISTORY", false)      // don't merge Hist/II but still merge Domain
-	noDeepMergeHistory   = EnvBool("NO_DEEP_MERGE_HISTORY", false) // merge Hist/II only up to 2 steps (small+fast), skip larger merges
+	noDeepMergeHistory   = EnvBool("NO_DEEP_MERGE_HISTORY", false) // merge Hist/II only up to 2 steps (small+fast), skip larger merges. also skip standalone II merges.
 	discardCommitment    = EnvBool("DISCARD_COMMITMENT", false)
 	pruneTotalDifficulty = EnvBool("PRUNE_TOTAL_DIFFICULTY", true)
 

@@ -1545,11 +1545,13 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 		return r
 	}
 
-	for id, ii := range at.iis {
-		if ii.ii.Disable {
-			continue
+	if !dbg.NoDeepMergeHistory() {
+		for id, ii := range at.iis {
+			if ii.ii.Disable {
+				continue
+			}
+			r.invertedIndex[id] = ii.findMergeRange(maxEndTxNum, maxSpan)
 		}
-		r.invertedIndex[id] = ii.findMergeRange(maxEndTxNum, maxSpan)
 	}
 
 	//log.Info(fmt.Sprintf("findMergeRange(%d, %d)=%s\n", maxEndTxNum/at.a.stepSize, maxSpan/at.a.stepSize, r))
