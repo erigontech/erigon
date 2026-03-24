@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -49,8 +49,9 @@ type ExecutionEngineReader struct {
 	engine    ExecutionEngineBodyFetcher
 	beaconCfg *clparams.BeaconChainConfig
 
-	mu    sync.RWMutex
-	cache map[uint64]*cachedBody // block number -> body
+	mu            sync.RWMutex
+	cache         map[uint64]*cachedBody // block number -> body
+	highestCached uint64
 }
 
 func NewExecutionEngineReader(ctx context.Context, engine ExecutionEngineBodyFetcher) *ExecutionEngineReader {
@@ -71,10 +72,14 @@ func (r *ExecutionEngineReader) CacheBody(number uint64, transactions [][]byte, 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.cache[number] = &cachedBody{transactions: transactions, withdrawals: withdrawals}
+	if number > r.highestCached {
+		r.highestCached = number
+	}
 	// Evict old entries (keep last 64 blocks)
 	if len(r.cache) > 64 {
+		threshold := r.highestCached - 64
 		for k := range r.cache {
-			if k < number-64 {
+			if k < threshold {
 				delete(r.cache, k)
 			}
 		}
@@ -92,6 +97,9 @@ func (r *ExecutionEngineReader) Transactions(number uint64, hash common.Hash) (*
 	if cached := r.getCached(number); cached != nil {
 		return solid.NewTransactionsSSZFromTransactions(cached.transactions), nil
 	}
+	if r.engine == nil {
+		return solid.NewTransactionsSSZFromTransactions(nil), nil
+	}
 	bodies, err := r.engine.GetBodiesByRange(r.ctx, number, 1)
 	if err != nil {
 		return nil, fmt.Errorf("GetBodiesByRange(%d): %w", number, err)
@@ -107,7 +115,7 @@ func (r *ExecutionEngineReader) Withdrawals(number uint64, hash common.Hash) (*s
 	if r.beaconCfg != nil {
 		maxWithdrawals = int(r.beaconCfg.MaxWithdrawalsPerPayload)
 	}
-	// Check cache first.
+	// Check cache first (handles race between beacon write and EL commit).
 	if cached := r.getCached(number); cached != nil {
 		ret := solid.NewStaticListSSZ[*cltypes.Withdrawal](maxWithdrawals, 44)
 		for _, w := range cached.withdrawals {
@@ -122,6 +130,9 @@ func (r *ExecutionEngineReader) Withdrawals(number uint64, hash common.Hash) (*s
 			})
 		}
 		return ret, nil
+	}
+	if r.engine == nil {
+		return solid.NewStaticListSSZ[*cltypes.Withdrawal](maxWithdrawals, 44), nil
 	}
 	bodies, err := r.engine.GetBodiesByRange(r.ctx, number, 1)
 	if err != nil {

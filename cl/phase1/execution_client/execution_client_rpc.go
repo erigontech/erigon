@@ -216,19 +216,19 @@ func (cc *ExecutionClientRpc) SupportInsertion() bool {
 }
 
 func (cc *ExecutionClientRpc) InsertBlocks(ctx context.Context, blocks []*types.Block, wait bool) error {
-	panic("unimplemented")
+	return ErrNotSupported
 }
 
 func (cc *ExecutionClientRpc) InsertBlock(ctx context.Context, block *types.Block) error {
-	panic("unimplemented")
+	return ErrNotSupported
 }
 
 func (cc *ExecutionClientRpc) CurrentHeader(ctx context.Context) (*types.Header, error) {
-	panic("unimplemented")
+	return nil, ErrNotSupported
 }
 
 func (cc *ExecutionClientRpc) IsCanonicalHash(ctx context.Context, hash common.Hash) (bool, error) {
-	panic("unimplemented")
+	return false, ErrNotSupported
 }
 
 func (cc *ExecutionClientRpc) Ready(ctx context.Context) (bool, error) {
@@ -276,22 +276,22 @@ func (cc *ExecutionClientRpc) GetBodiesByHashes(ctx context.Context, hashes []co
 }
 
 func (cc *ExecutionClientRpc) FrozenBlocks(ctx context.Context) uint64 {
-	panic("unimplemented")
+	return 0
 }
 
 // HasBlock checks if block with given hash is present
 func (cc *ExecutionClientRpc) HasBlock(ctx context.Context, hash common.Hash) (bool, error) {
-	panic("unimplemented")
+	return false, ErrNotSupported
 }
 
 // Block production
 
 func (cc *ExecutionClientRpc) GetAssembledBlock(ctx context.Context, id []byte, _ clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
-	panic("unimplemented")
+	return nil, nil, nil, nil, ErrNotSupported
 }
 
 func (cc *ExecutionClientRpc) HasGapInSnapshots(ctx context.Context) bool {
-	panic("unimplemented")
+	return false
 }
 
 func (cc *ExecutionClientRpc) GetBlobs(ctx context.Context, versionedHashes []common.Hash) (blobs [][]byte, proofs [][][]byte) {

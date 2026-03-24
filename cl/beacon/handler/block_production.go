@@ -790,14 +790,7 @@ func (a *ApiHandler) produceBeaconBody(
 				executionPayload.Transactions = payload.Transactions
 				// Cache the block body so the beacon API can return transactions
 				// immediately, before the EL commits to its database.
-				if payload.Transactions != nil {
-					var rawTxs [][]byte
-					payload.Transactions.ForEach(func(tx []byte, idx, total int) bool {
-						rawTxs = append(rawTxs, tx)
-						return true
-					})
-					a.blockReader.CacheBlockBody(payload.BlockNumber, rawTxs, nil)
-				}
+				a.cacheExecutionBody(payload)
 				return
 			}
 		}
@@ -1342,15 +1335,8 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	}
 
 	// Cache the execution payload body before writing to DB so the beacon API
-	// can return transactions immediately (before the EL commits).
-	if ep := block.Block.Body.ExecutionPayload; ep != nil && ep.Transactions != nil {
-		var rawTxs [][]byte
-		ep.Transactions.ForEach(func(tx []byte, idx, total int) bool {
-			rawTxs = append(rawTxs, tx)
-			return true
-		})
-		a.blockReader.CacheBlockBody(ep.BlockNumber, rawTxs, nil)
-	}
+	// can return transactions/withdrawals immediately (before the EL commits).
+	a.cacheExecutionBody(block.Block.Body.ExecutionPayload)
 
 	if err := a.indiciesDB.Update(ctx, func(tx kv.RwTx) error {
 		if err := beacon_indicies.WriteHighestFinalized(tx, a.forkchoiceStore.FinalizedSlot()); err != nil {
@@ -1769,4 +1755,32 @@ func computeAttestationReward(
 	proposerRewardDenominator := (beaconConfig.WeightDenominator - beaconConfig.ProposerWeight) * beaconConfig.WeightDenominator / beaconConfig.ProposerWeight
 	reward := proposerRewardNumerator / proposerRewardDenominator
 	return reward, nil
+}
+
+// cacheExecutionBody caches the execution payload body so the beacon API
+// can return transactions/withdrawals before the EL commits to its database.
+func (a *ApiHandler) cacheExecutionBody(payload *cltypes.Eth1Block) {
+	if payload == nil {
+		return
+	}
+	var rawTxs [][]byte
+	if payload.Transactions != nil {
+		payload.Transactions.ForEach(func(tx []byte, idx, total int) bool {
+			rawTxs = append(rawTxs, tx)
+			return true
+		})
+	}
+	var ws []*types.Withdrawal
+	if payload.Withdrawals != nil {
+		payload.Withdrawals.Range(func(idx int, w *cltypes.Withdrawal, total int) bool {
+			ws = append(ws, &types.Withdrawal{
+				Index:     w.Index,
+				Validator: w.Validator,
+				Address:   w.Address,
+				Amount:    w.Amount,
+			})
+			return true
+		})
+	}
+	a.blockReader.CacheBlockBody(payload.BlockNumber, rawTxs, ws)
 }
