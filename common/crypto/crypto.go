@@ -329,7 +329,7 @@ func ReturnToPool(h keccak.KeccakState) { hasherPool.Put(h) }
 // Uses (*keccak.Hasher).Sum256() on the concrete type (returns [32]byte by value).
 func FinalizeHash(sha keccak.KeccakState) common.Hash {
 	if h, ok := sha.(*keccak.Hasher); ok {
-		return common.Hash(h.Sum256())
+		return h.Sum256()
 	}
 	var out common.Hash
 	sha.Read(out[:]) //nolint:errcheck
