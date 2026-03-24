@@ -208,9 +208,16 @@ func ExecV3(ctx context.Context,
 	// Enable deferred commitment updates for fork validation and parallel initial sync.
 	// Deferred updates batch commitment calculations to block boundaries rather than
 	// per-transaction, significantly reducing re-org validation overhead.
-	// For the parallel path during initial sync, Flush() now includes pending updates,
-	// so they are no longer silently discarded between StageLoopIteration cycles.
-	if isForkValidation || (parallel && isApplyingBlocks) {
+	//
+	// Note: deferred mode is NOT enabled for ModeApplyingBlocks because after an
+	// unwind the pending deferred branch writes from block N are not yet in
+	// sd.mem.domains when block N+1's ComputeCommitment.Process reads them.
+	// The reads fall through to the unwind changeset which returns empty data,
+	// causing "empty branch data during unfold" errors.
+	// TODO: enable deferred mode for applying blocks once the unwind path
+	// properly resolves pending deferred updates (flush those before the unwind
+	// point, discard those after).
+	if isForkValidation {
 		doms.SetDeferCommitmentUpdates(true)
 	}
 	defer doms.SetDeferCommitmentUpdates(false)
