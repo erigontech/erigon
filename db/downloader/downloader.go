@@ -1323,18 +1323,14 @@ func newTorrentClient(
 		}
 	}()
 
-	dnsResolver := &downloadercfg.DnsCacheResolver{RefreshTimeout: 24 * time.Hour}
-	cfg.TrackerDialContext = dnsResolver.DialContext
+	dnsDialer := downloadercfg.NewTTLDNSDialer()
+	cfg.TrackerDialContext = dnsDialer.DialContext
 
 	torrentClient, err = torrent.NewClient(cfg)
 	if err != nil {
 		err = fmt.Errorf("creating torrent client: %w", err)
 		return
 	}
-
-	go func() {
-		dnsResolver.Run(ctx)
-	}()
 
 	return
 }
