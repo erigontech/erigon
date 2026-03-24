@@ -234,7 +234,23 @@ var (
 	}
 )
 
+// BuildEthConfig applies all CLI flags to the ethconfig.Config. This is the single
+// entry point for flag-to-config mapping — it calls utils.SetEthConfig internally
+// and then applies the remaining flags defined in this package.
+//
+// After this function returns, the config is fully populated from CLI flags.
+func BuildEthConfig(ctx *cli.Context, nodeCfg *nodecfg.Config, cfg *ethconfig.Config, logger log.Logger) {
+	utils.SetEthConfig(ctx, nodeCfg, cfg, logger)
+	applyRemainingEthFlags(ctx, cfg, logger)
+}
+
+// ApplyFlagsForEthConfig is kept for backward compatibility. New code should use BuildEthConfig.
+// Deprecated: use BuildEthConfig instead.
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.Logger) {
+	applyRemainingEthFlags(ctx, cfg, logger)
+}
+
+func applyRemainingEthFlags(ctx *cli.Context, cfg *ethconfig.Config, logger log.Logger) {
 	chainId := cfg.NetworkID
 	if cfg.Genesis != nil {
 		chainId = cfg.Genesis.Config.ChainID.Uint64()
