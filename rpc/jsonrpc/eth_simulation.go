@@ -500,41 +500,9 @@ func (s *simulator) simulateBlock(
 	cumulativeGasUsed := uint64(0)
 	cumulativeBlobGasUsed := uint64(0)
 
-	minTxNum, err := s.txNumReader.Min(ctx, tx, blockNumber)
+	stateReader, minTxNum, firstMinTxNum, err := s.newStateReaderForBlock(ctx, tx, sharedDomains, blockNumber, ancestors, latest)
 	if err != nil {
 		return nil, nil, err
-	}
-
-	// firstMinTxNum: minTxNum of the first simulated block (or this block if it's the first).
-	// Used both for the intraBlockState reader (to read simulated state from previous blocks)
-	// and for the commitment reader (to anchor trie branch reads at the canonical base-parent).
-	firstMinTxNum := minTxNum
-	if len(ancestors) > 0 {
-		firstMinTxNum, err = s.txNumReader.Min(ctx, tx, ancestors[0].Number.Uint64())
-		if err != nil {
-			return nil, nil, err
-		}
-	}
-
-	var stateReader state.StateReader
-	if latest {
-		stateReader = state.NewReaderV3(sharedDomains.AsGetter(tx))
-	} else {
-		if minTxNum < state.StateHistoryStartTxNum(tx) {
-			return nil, nil, fmt.Errorf("%w: min tx: %d", state.PrunedError, minTxNum)
-		}
-		if len(ancestors) > 0 {
-			// Multi-block simulation: use an overlay reader that sees state changes from previous
-			// simulated blocks (accumulated in sharedDomains.mem) on top of the canonical base state.
-			stateReader = newSimulationIntraBlockStateReader(tx, sharedDomains, firstMinTxNum)
-		} else {
-			stateReader = state.NewHistoryReaderV3(tx, minTxNum)
-		}
-
-		commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
-		if s.commitmentHistory && minTxNum < commitmentStartingTxNum {
-			return nil, nil, fmt.Errorf("%w: min commitment: %d, min tx: %d", state.PrunedError, commitmentStartingTxNum, minTxNum)
-		}
 	}
 	intraBlockState := state.New(stateReader)
 
@@ -617,54 +585,8 @@ func (s *simulator) simulateBlock(
 		return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
 	}
 
-	// Compute the state root for execution on the latest state and also on the historical state if commitment history is present.
-	if latest || s.commitmentHistory {
-		commitTxNum := minTxNum
-		if !latest {
-			// Restore the commitment state at the start of the simulated block using historical state reader.
-			sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
-			// In a multi-block simulation (len(ancestors) > 0) the trie is already at parent.Root
-			// because the previous simulation step left it there.  Calling SeekCommitment would
-			// overwrite that correct trie state with the canonical chain's trie state for the same
-			// block number, producing a wrong stateRoot for the 2nd and subsequent simulated blocks.
-			if len(ancestors) == 0 {
-				// First simulated block: load the trie state from commitment history.
-				commitTxNum, _, err = sharedDomains.SeekCommitment(context.Background(), tx)
-				if err != nil {
-					return nil, nil, err
-				}
-			} else {
-				// Subsequent simulated blocks: trie is already correct from the previous step.
-				// SeekCommitment always returns commitTxNum = minTxNum - 1 (off-by-1, expected).
-				commitTxNum = minTxNum - 1
-			}
-			// Change the state reader to a commitment-only history reader.
-			//
-			// firstMinTxNum: minTxNum of the FIRST simulated block (computed above).
-			// - commitmentAsOfTxNum = firstMinTxNum+1: reads trie branches from canonical
-			//   base-parent commitment (not a later canonical block that omits simulation changes).
-			// - plainStateAsOfTxNum = firstMinTxNum: reads clean sibling accounts from canonical
-			//   base-parent state (GetAsOf at exactly the start of block 1 = end of base parent).
-			commitmentAsOfTxNum := firstMinTxNum + 1
-			plainStateAsOfTxNum := firstMinTxNum
-			sharedDomains.GetCommitmentContext().SetStateReader(newHistoryCommitmentOnlyReader(tx, sharedDomains, commitmentAsOfTxNum, plainStateAsOfTxNum))
-		}
-		stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, false, blockNumber, commitTxNum, "eth_simulateV1", nil)
-		if err != nil {
-			return nil, nil, err
-		}
-		block.HeaderNoCopy().Root = common.BytesToHash(stateRoot)
-	} else {
-		// We can efficiently compute the root from state history if it's not frozen, otherwise we just use the zero hash (default value).
-		if s.blockReader.FrozenBlocks() == 0 {
-			txNum := minTxNum + 1 + uint64(len(bsc.Calls))
-			stateRoot, err := s.computeCommitmentFromStateHistory(ctx, tx, sharedDomains, stateWriter.touchedKeys, parent.Number.Uint64(), txNum)
-			if err != nil {
-				return nil, nil, err
-			}
-			s.logger.Debug("stateRoot", "root", common.Bytes2Hex(stateRoot))
-			block.HeaderNoCopy().Root = common.BytesToHash(stateRoot)
-		}
+	if err := s.computeSimulatedStateRoot(ctx, tx, sharedDomains, bsc, block, parent, minTxNum, firstMinTxNum, stateWriter.touchedKeys, ancestors, latest); err != nil {
+		return nil, nil, err
 	}
 
 	// Marshal the block in RPC format including the call results in a custom field.
@@ -676,6 +598,116 @@ func (s *simulator) simulateBlock(
 	repairLogs(callResults, block.Hash())
 	blockResult["calls"] = callResults
 	return blockResult, block, nil
+}
+
+// newStateReaderForBlock returns the appropriate StateReader for a simulated block, along with
+// minTxNum (txNum of the current block) and firstMinTxNum (txNum of the first simulated block).
+//
+// For the first simulated block (len(ancestors)==0): uses HistoryReaderV3 anchored at minTxNum.
+// For subsequent blocks (len(ancestors)>0): uses simulationIntraBlockStateReader which overlays
+// sharedDomains.mem (state changes from previous simulation blocks) on top of the canonical base state.
+func (s *simulator) newStateReaderForBlock(
+	ctx context.Context,
+	tx kv.TemporalTx,
+	sharedDomains *execctx.SharedDomains,
+	blockNumber uint64,
+	ancestors []*types.Header,
+	latest bool,
+) (state.StateReader, uint64, uint64, error) {
+	minTxNum, err := s.txNumReader.Min(ctx, tx, blockNumber)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+
+	// firstMinTxNum: minTxNum of the first simulated block (or this block if it's the first).
+	// Used both here and for the commitment reader to anchor reads at the canonical base-parent.
+	firstMinTxNum := minTxNum
+	if len(ancestors) > 0 {
+		firstMinTxNum, err = s.txNumReader.Min(ctx, tx, ancestors[0].Number.Uint64())
+		if err != nil {
+			return nil, 0, 0, err
+		}
+	}
+
+	if latest {
+		return state.NewReaderV3(sharedDomains.AsGetter(tx)), minTxNum, firstMinTxNum, nil
+	}
+
+	if minTxNum < state.StateHistoryStartTxNum(tx) {
+		return nil, 0, 0, fmt.Errorf("%w: min tx: %d", state.PrunedError, minTxNum)
+	}
+	commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+	if s.commitmentHistory && minTxNum < commitmentStartingTxNum {
+		return nil, 0, 0, fmt.Errorf("%w: min commitment: %d, min tx: %d", state.PrunedError, commitmentStartingTxNum, minTxNum)
+	}
+
+	if len(ancestors) > 0 {
+		// Multi-block simulation: overlay sharedDomains.mem (previous blocks' simulation changes)
+		// on top of the canonical base state so the EVM sees the correct simulated balances.
+		return newSimulationIntraBlockStateReader(tx, sharedDomains, firstMinTxNum), minTxNum, firstMinTxNum, nil
+	}
+	return state.NewHistoryReaderV3(tx, minTxNum), minTxNum, firstMinTxNum, nil
+}
+
+// computeSimulatedStateRoot computes the stateRoot for the simulated block and sets it on the block header.
+func (s *simulator) computeSimulatedStateRoot(
+	ctx context.Context,
+	tx kv.TemporalTx,
+	sharedDomains *execctx.SharedDomains,
+	bsc *SimulatedBlock,
+	block *types.Block,
+	parent *types.Header,
+	minTxNum, firstMinTxNum uint64,
+	touchedKeys keysByAccount,
+	ancestors []*types.Header,
+	latest bool,
+) error {
+	if latest || s.commitmentHistory {
+		commitTxNum := minTxNum
+		if !latest {
+			// Restore the commitment state at the start of the simulated block using historical state reader.
+			sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
+			// In a multi-block simulation (len(ancestors) > 0) the trie is already at parent.Root
+			// because the previous simulation step left it there.  Calling SeekCommitment would
+			// overwrite that correct trie state with the canonical chain's state, producing a wrong stateRoot.
+			if len(ancestors) == 0 {
+				// First simulated block: load the trie state from commitment history.
+				var err error
+				commitTxNum, _, err = sharedDomains.SeekCommitment(context.Background(), tx)
+				if err != nil {
+					return err
+				}
+			} else {
+				// Subsequent simulated blocks: trie is already correct from the previous step.
+				// SeekCommitment always returns commitTxNum = minTxNum - 1 (off-by-1, expected).
+				commitTxNum = minTxNum - 1
+			}
+			// firstMinTxNum anchors both readers at the canonical base-parent state:
+			// - commitmentAsOfTxNum = firstMinTxNum+1: trie branches from the base-parent commitment.
+			// - plainStateAsOfTxNum = firstMinTxNum: clean sibling accounts from the base-parent state.
+			sharedDomains.GetCommitmentContext().SetStateReader(
+				newHistoryCommitmentOnlyReader(tx, sharedDomains, firstMinTxNum+1, firstMinTxNum),
+			)
+		}
+		stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, false, block.NumberU64(), commitTxNum, "eth_simulateV1", nil)
+		if err != nil {
+			return err
+		}
+		block.HeaderNoCopy().Root = common.BytesToHash(stateRoot)
+		return nil
+	}
+
+	// No commitment history: compute from state history if blocks are not frozen, otherwise leave root as zero.
+	if s.blockReader.FrozenBlocks() == 0 {
+		txNum := minTxNum + 1 + uint64(len(bsc.Calls))
+		stateRoot, err := s.computeCommitmentFromStateHistory(ctx, tx, sharedDomains, touchedKeys, parent.Number.Uint64(), txNum)
+		if err != nil {
+			return err
+		}
+		s.logger.Debug("stateRoot", "root", common.Bytes2Hex(stateRoot))
+		block.HeaderNoCopy().Root = common.BytesToHash(stateRoot)
+	}
+	return nil
 }
 
 // simulateCall simulates a single call in the EVM using the given intra-block state and possibly tracing transfers.
