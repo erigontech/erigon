@@ -67,17 +67,10 @@ type EllipticCurve interface {
 	Unmarshal(data []byte) (x, y *big.Int)
 }
 
-// HashData hashes the provided data using the KeccakState and returns a 32 byte hash
-func HashData(kh keccak.KeccakState, data []byte) common.Hash {
-	kh.Reset()
-	kh.Write(data) //nolint:errcheck
-	return FinalizeHash(kh)
-}
-
+// HashBytes hashes the provided data using the KeccakState and returns a 32 byte hash
 func HashBytes(data []byte) common.Hash {
 	sha := NewKeccakState()
 	defer ReturnToPool(sha)
-	sha.Reset()
 	sha.Write(data) //nolint:errcheck
 	return FinalizeHash(sha)
 }
