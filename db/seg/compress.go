@@ -481,26 +481,27 @@ func (db *DictionaryBuilder) Pop() any {
 	return x
 }
 
-// processWord adds chars+score to the heap. When the heap is not yet full,
-// ownership of chars is transferred to the new Pattern (no copy). Returns true
-// if ownership was taken; the caller must not reuse chars in that case.
-// When the heap is full, chars is copied into the evicted element's buffer.
-func (db *DictionaryBuilder) processWord(chars []byte, score uint64) (ownershipTaken bool) {
+// flushLastWord pushes db.lastWord/db.lastWordScore onto the heap.
+// Under the soft limit the slice is transferred directly (no copy); db.lastWord is then nil.
+// Over the soft limit the slice is copied into the evicted element's buffer; db.lastWord is reused.
+func (db *DictionaryBuilder) flushLastWord() {
 	if db.Len()+1 <= db.softLimit {
-		heap.Push(db, &Pattern{word: chars, score: score})
-		return true
+		heap.Push(db, &Pattern{word: db.lastWord, score: db.lastWordScore})
+		db.lastWord = nil // Pattern owns it; caller must allocate fresh
+		return
 	}
 
 	// RemoveFile the element with smallest score
 	elem := heap.Pop(db).(*Pattern)
 	if elem == nil {
-		heap.Push(db, &Pattern{word: chars, score: score})
-		return true
+		heap.Push(db, &Pattern{word: db.lastWord, score: db.lastWordScore})
+		db.lastWord = nil
+		return
 	}
-	elem.word = append(elem.word[:0], chars...)
-	elem.score = score
+	elem.word = append(elem.word[:0], db.lastWord...)
+	elem.score = db.lastWordScore
 	heap.Push(db, elem)
-	return false
+	// db.lastWord buffer retained for reuse
 }
 
 func (db *DictionaryBuilder) loadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
@@ -509,9 +510,7 @@ func (db *DictionaryBuilder) loadFunc(k, v []byte, table etl.CurrentTableReader,
 		db.lastWordScore += score
 	} else {
 		if db.lastWord != nil {
-			if db.processWord(db.lastWord, db.lastWordScore) {
-				db.lastWord = nil // Pattern owns the slice; allocate fresh below
-			}
+			db.flushLastWord()
 		}
 		db.lastWord = append(db.lastWord[:0], k...)
 		db.lastWordScore = score
@@ -521,9 +520,7 @@ func (db *DictionaryBuilder) loadFunc(k, v []byte, table etl.CurrentTableReader,
 
 func (db *DictionaryBuilder) finish(hardLimit int) {
 	if db.lastWord != nil {
-		if db.processWord(db.lastWord, db.lastWordScore) {
-			db.lastWord = nil
-		}
+		db.flushLastWord()
 	}
 
 	for db.Len() > hardLimit {
