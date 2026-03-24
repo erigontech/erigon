@@ -151,10 +151,10 @@ A `buildTrieMultiRoundAndWitness` helper for tests that need multiple `Process()
 - [x] Tests pass and lint clean
 
 ### Task 2: Category 2 (Deletions)
-- [ ] Implement subtest `DeletedAccount_NonExistentProof` (2.1)
-- [ ] Implement subtest `MultiRound_DeleteAccount_ThenWitness` (2.2)
-- [ ] Implement subtest `MultiRound_DeleteStorage_ThenWitness` (2.3)
-- [ ] Tests pass and lint clean
+- [x] Implement subtest `DeletedAccount_NonExistentProof` (2.1)
+- [x] Implement subtest `MultiRound_DeleteAccount_ThenWitness` (2.2)
+- [x] Implement subtest `MultiRound_DeleteStorage_ThenWitness` (2.3)
+- [x] Tests pass and lint clean
 
 ### Task 3: Category 3 (Accounts With Code)
 - [ ] Implement subtest `AccountWithCodeHash` (3.1)
