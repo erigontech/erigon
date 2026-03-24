@@ -633,12 +633,10 @@ func (s *simulator) simulateBlock(
 				if err != nil {
 					return nil, nil, err
 				}
-				s.logger.Warn("[eth_simulateV1] block1 SeekCommitment", "blockNum", blockNumber, "parentRoot", parent.Root, "commitTxNum", commitTxNum, "minTxNum", minTxNum)
 			} else {
 				// Subsequent simulated blocks: trie is already correct from the previous step.
 				// SeekCommitment always returns commitTxNum = minTxNum - 1 (off-by-1, expected).
 				commitTxNum = minTxNum - 1
-				s.logger.Warn("[eth_simulateV1] blockN skip SeekCommitment", "blockNum", blockNumber, "parentRoot", parent.Root, "numAncestors", len(ancestors), "commitTxNum", commitTxNum, "minTxNum", minTxNum)
 			}
 			// Change the state reader to a commitment-only history reader.
 			//
@@ -649,14 +647,12 @@ func (s *simulator) simulateBlock(
 			//   base-parent state (GetAsOf at exactly the start of block 1 = end of base parent).
 			commitmentAsOfTxNum := firstMinTxNum + 1
 			plainStateAsOfTxNum := firstMinTxNum
-			s.logger.Warn("[eth_simulateV1] reader setup", "blockNum", blockNumber, "numAncestors", len(ancestors), "firstMinTxNum", firstMinTxNum, "commitmentAsOfTxNum", commitmentAsOfTxNum, "plainStateAsOfTxNum", plainStateAsOfTxNum)
 			sharedDomains.GetCommitmentContext().SetStateReader(newHistoryCommitmentOnlyReader(tx, sharedDomains, commitmentAsOfTxNum, plainStateAsOfTxNum))
 		}
 		stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, false, blockNumber, commitTxNum, "eth_simulateV1", nil)
 		if err != nil {
 			return nil, nil, err
 		}
-		s.logger.Warn("[eth_simulateV1] stateRoot", "blockNum", blockNumber, "parentRoot", parent.Root, "stateRoot", common.BytesToHash(stateRoot), "latest", latest, "numAncestors", len(ancestors))
 		block.HeaderNoCopy().Root = common.BytesToHash(stateRoot)
 	} else {
 		// We can efficiently compute the root from state history if it's not frozen, otherwise we just use the zero hash (default value).
