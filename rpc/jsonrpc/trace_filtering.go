@@ -20,7 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync/atomic"
+	"time"
 
 	jsoniter "github.com/json-iterator/go"
 
@@ -637,8 +637,8 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		ibs := state.New(cachedReader)
 
 		blockCtx := transactions.NewEVMBlockContext(engine, lastHeader, true /* requireCanonical */, dbtx, api._blockReader, chainConfig)
-		txCtx := protocol.NewEVMTxContext(msg)
-		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
+		evmTxCtx := protocol.NewEVMTxContext(msg)
+		evm := vm.NewEVM(blockCtx, evmTxCtx, ibs, chainConfig, vmConfig)
 
 		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 		ibs.SetTxContext(blockNum, txIndex)
@@ -649,26 +649,16 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		}
 
 		var execResult *evmtypes.ExecutionResult
-		var timedOut atomic.Bool
+		var timedOut bool
 		if api.evmCallTimeout > 0 {
-			txCtx, txCancel := context.WithTimeout(ctx, api.evmCallTimeout)
-			done := make(chan struct{})
-			go func() {
-				select {
-				case <-txCtx.Done():
-					timedOut.Store(true)
-					evm.Cancel()
-				case <-done:
-				}
-			}()
+			timer := time.AfterFunc(api.evmCallTimeout, evm.Cancel)
 			execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailOut, engine)
-			close(done)
-			txCancel()
+			timedOut = !timer.Stop()
 		} else {
 			execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailOut, engine)
 		}
 
-		if timedOut.Load() {
+		if timedOut {
 			timeoutErr := fmt.Errorf("execution aborted (timeout = %v)", api.evmCallTimeout)
 			if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
 				ot.Tracer().OnTxEnd(nil, timeoutErr)
@@ -681,6 +671,9 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			stream.WriteObjectStart()
 			rpc.HandleError(timeoutErr, stream)
 			stream.WriteObjectEnd()
+			// Safe to skip FinalizeTx/CommitBlock: each iteration creates a fresh
+			// stateCache, cachedReader and ibs from the next txNum, and writes go
+			// to a noop writer, so no partial state escapes this scope.
 			continue
 		}
 		if err != nil {
