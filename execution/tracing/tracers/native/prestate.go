@@ -280,7 +280,7 @@ func (t *prestateTracer) processDiffState() {
 		newCode, _ := t.env.IntraBlockState.GetCode(addr)
 		newCodeHash := common.Hash{}
 		if len(newCode) > 0 {
-			newCodeHash = crypto.Keccak256Hash(newCode)
+			newCodeHash = crypto.HashData(newCode)
 		}
 
 		if newBalance.ToBig().Cmp(t.pre[addr].Balance) != 0 {
@@ -380,7 +380,7 @@ func (t *prestateTracer) lookupAccount(addr accounts.Address) {
 		Nonce:   nonce,
 	}
 	if len(code) > 0 {
-		codeHash := crypto.Keccak256Hash(code)
+		codeHash := crypto.HashData(code)
 		t.pre[addr].CodeHash = &codeHash
 	} else {
 		t.pre[addr].CodeHash = nil
