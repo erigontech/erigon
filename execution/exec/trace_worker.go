@@ -118,7 +118,7 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, 
 	}
 	e.evm.ResetBetweenBlocks(*e.blockCtx, txContext, e.ibs, *e.vmConfig, e.rules)
 
-	gp := new(protocol.GasPool).AddRegularGas(txn.GetGasLimit()).AddBlobGas(txn.GetBlobGas())
+	gp := new(protocol.GasPool).AddGas(txn.GetGasLimit()).AddBlobGas(txn.GetBlobGas())
 
 	if txn.Type() == types.AccountAbstractionTxType {
 		aaTxn := txn.(*types.AccountAbstractionTransaction)

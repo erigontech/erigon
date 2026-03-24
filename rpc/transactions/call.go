@@ -116,7 +116,7 @@ func DoCall(
 		evm.SetPrecompiles(precompiles)
 	}
 
-	gp := new(protocol.GasPool).AddRegularGas(msg.Gas()).AddBlobGas(msg.BlobGas())
+	gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 	result, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 	if err != nil {
 		return nil, err
@@ -230,7 +230,7 @@ func (r *ReusableCaller) DoCallWithNewGas(
 		}
 	}()
 
-	gp := new(protocol.GasPool).AddRegularGas(r.message.Gas()).AddBlobGas(r.message.BlobGas())
+	gp := new(protocol.GasPool).AddGas(r.message.Gas()).AddBlobGas(r.message.BlobGas())
 
 	result, err := protocol.ApplyMessage(r.evm, r.message, gp, true /* refunds */, false /* gasBailout */, engine)
 	if err != nil {

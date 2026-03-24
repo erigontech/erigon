@@ -27,9 +27,6 @@ import (
 
 // GasPool tracks the amount of gas available during execution of the transactions
 // in a block. The zero value is a pool with zero gas available.
-//
-// EIP-8037: The pool tracks regular gas only. State gas is validated at block
-// end via GasUsed.BlockGasUsed() = max(Σ regular, Σ state).
 type GasPool struct {
 	mu           sync.RWMutex
 	gas, blobGas uint64
@@ -48,8 +45,8 @@ func (gp *GasPool) Reset(amount, blobGas uint64) {
 	}
 }
 
-// AddRegularGas makes regular gas available for execution.
-func (gp *GasPool) AddRegularGas(amount uint64) *GasPool {
+// AddGas makes gas available for execution.
+func (gp *GasPool) AddGas(amount uint64) *GasPool {
 	if gp != nil {
 		gp.mu.Lock()
 		defer gp.mu.Unlock()
@@ -61,9 +58,9 @@ func (gp *GasPool) AddRegularGas(amount uint64) *GasPool {
 	return gp
 }
 
-// SubRegularGas deducts the given amount from the pool if enough regular gas is
+// SubGas deducts the given amount from the pool if enough gas is
 // available and returns an error otherwise.
-func (gp *GasPool) SubRegularGas(amount uint64) error {
+func (gp *GasPool) SubGas(amount uint64) error {
 	if gp != nil {
 		gp.mu.Lock()
 		defer gp.mu.Unlock()
@@ -75,8 +72,8 @@ func (gp *GasPool) SubRegularGas(amount uint64) error {
 	return nil
 }
 
-// RegularGas returns the amount of regular gas remaining in the pool.
-func (gp *GasPool) RegularGas() uint64 {
+// Gas returns the amount of gas remaining in the pool.
+func (gp *GasPool) Gas() uint64 {
 	if gp == nil {
 		return 0
 	}
@@ -124,9 +121,9 @@ func (gp *GasPool) BlobGas() uint64 {
 
 func (gp *GasPool) String() string {
 	if gp == nil {
-		return "regular_gas: 0, blob_gas: 0"
+		return "gas: %0, blob_gas: 0"
 	}
 	gp.mu.RLock()
 	defer gp.mu.RUnlock()
-	return fmt.Sprintf("regular_gas: %d, blob_gas: %d", gp.gas, gp.blobGas)
+	return fmt.Sprintf("gas: %d, blob_gas: %d", gp.gas, gp.blobGas)
 }

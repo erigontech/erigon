@@ -1192,7 +1192,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		}
 	}()
 
-	gp := new(protocol.GasPool).AddRegularGas(msg.Gas()).AddBlobGas(msg.BlobGas())
+	gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 	var execResult *evmtypes.ExecutionResult
 	ibs.SetTxContext(blockCtx.BlockNumber, 0)
 	ibs.SetHooks(ot.Tracer().Hooks)
@@ -1504,7 +1504,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			}
 			txCtx := protocol.NewEVMTxContext(msg)
 			evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
-			gp := new(protocol.GasPool).AddRegularGas(msg.Gas()).AddBlobGas(msg.BlobGas())
+			gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 
 			if tracer != nil && tracer.Hooks.OnTxStart != nil {
 				tracer.Hooks.OnTxStart(evm.GetVMContext(), txns[txIndex], msg.From())
@@ -1715,7 +1715,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 		ibs.SetTxContext(blockCtx.BlockNumber, txIndex)
 		txCtx := protocol.NewEVMTxContext(msg)
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
-		gp := new(protocol.GasPool).AddRegularGas(msg.Gas()).AddBlobGas(msg.BlobGas())
+		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 
 		execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /*gasBailout*/, engine)
 	}
@@ -1880,7 +1880,7 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 		}
 	}()
 
-	gp := new(protocol.GasPool).AddRegularGas(msg.Gas()).AddBlobGas(msg.BlobGas())
+	gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 	var execResult *evmtypes.ExecutionResult
 	ibs.SetTxContext(blockCtx.BlockNumber, 0)
 	ibs.SetHooks(ot.Tracer().Hooks)

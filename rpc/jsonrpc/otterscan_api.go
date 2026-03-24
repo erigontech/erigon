@@ -171,7 +171,7 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.TemporalTx, ha
 	if tracer != nil && tracer.Hooks.OnTxStart != nil {
 		tracer.Hooks.OnTxStart(vmenv.GetVMContext(), txn, msg.From())
 	}
-	result, err := protocol.ApplyMessage(vmenv, msg, new(protocol.GasPool).AddRegularGas(msg.Gas()).AddBlobGas(msg.BlobGas()), true, false /* gasBailout */, engine)
+	result, err := protocol.ApplyMessage(vmenv, msg, new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas()), true, false /* gasBailout */, engine)
 	if err != nil {
 		if tracer != nil && tracer.Hooks.OnTxEnd != nil {
 			tracer.Hooks.OnTxEnd(nil, err)

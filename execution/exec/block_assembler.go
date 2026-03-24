@@ -178,7 +178,7 @@ func (ba *BlockAssembler) AddTransactions(
 
 	txnIdx := ibs.TxnIndex() + 1
 	header := ba.AssembledBlock.Header
-	gasPool := new(protocol.GasPool).AddRegularGas(header.GasLimit - header.GasUsed)
+	gasPool := new(protocol.GasPool).AddGas(header.GasLimit - header.GasUsed)
 	if header.BlobGasUsed != nil {
 		gasPool.AddBlobGas(ba.cfg.ChainConfig.GetMaxBlobGasPerBlock(header.Time) - *header.BlobGasUsed)
 	}
@@ -208,7 +208,7 @@ func (ba *BlockAssembler) AddTransactions(
 
 	var commitTx = func(txn types.Transaction, coinbase accounts.Address, vmConfig *vm.Config, chainConfig *chain.Config, ibs *state.IntraBlockState, current *AssembledBlock) ([]*types.Log, error) {
 		ibs.SetTxContext(current.Header.Number.Uint64(), txnIdx)
-		gasSnap := gasPool.RegularGas()
+		gasSnap := gasPool.Gas()
 		blobGasSnap := gasPool.BlobGas()
 		snap := ibs.PushSnapshot()
 		defer ibs.PopSnapshot(snap)
@@ -220,14 +220,14 @@ func (ba *BlockAssembler) AddTransactions(
 			paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, ibs, gasPool, header, evm, chainConfig)
 			if err != nil {
 				ibs.RevertToSnapshot(snap, err)
-				gasPool = new(protocol.GasPool).AddRegularGas(gasSnap).AddBlobGas(blobGasSnap)
+				gasPool = new(protocol.GasPool).AddGas(gasSnap).AddBlobGas(blobGasSnap)
 				return nil, err
 			}
 
 			status, aaGasUsed, err := aa.ExecuteAATransaction(aaTxn, paymasterContext, validationGasUsed, gasPool, evm, header, ibs)
 			if err != nil {
 				ibs.RevertToSnapshot(snap, err)
-				gasPool = new(protocol.GasPool).AddRegularGas(gasSnap).AddBlobGas(blobGasSnap)
+				gasPool = new(protocol.GasPool).AddGas(gasSnap).AddBlobGas(blobGasSnap)
 				return nil, err
 			}
 
@@ -249,7 +249,7 @@ func (ba *BlockAssembler) AddTransactions(
 			// Restore cumulative gas to pre-tx values.
 			*gasUsed = gasSnapshot
 			ibs.RevertToSnapshot(snap, err)
-			gasPool = new(protocol.GasPool).AddRegularGas(gasSnap).AddBlobGas(blobGasSnap)
+			gasPool = new(protocol.GasPool).AddGas(gasSnap).AddBlobGas(blobGasSnap)
 			return nil, err
 		}
 		protocol.SetGasUsed(header, gasUsed)
@@ -290,7 +290,7 @@ LOOP:
 			stopped = time.NewTicker(500 * time.Millisecond)
 		}
 		// If we don't have enough gas for any further transactions then we're done
-		if gasPool.RegularGas() < params.TxGas {
+		if gasPool.Gas() < params.TxGas {
 			logger.Debug(fmt.Sprintf("[%s] Not enough gas for further transactions", logPrefix), "have", gasPool, "want", params.TxGas)
 			done = true
 			break

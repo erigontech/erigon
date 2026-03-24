@@ -73,7 +73,7 @@ func (g *BorGenerator) GenerateBorReceipt(ctx context.Context, tx kv.TemporalTx,
 		return nil, err
 	}
 
-	gp := new(protocol.GasPool).AddRegularGas(msgs[0].Gas() * uint64(len(msgs))).AddBlobGas(msgs[0].BlobGas() * uint64(len(msgs)))
+	gp := new(protocol.GasPool).AddGas(msgs[0].Gas() * uint64(len(msgs))).AddBlobGas(msgs[0].BlobGas() * uint64(len(msgs)))
 	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, chainConfig, vm.Config{})
 
 	receipt, err := applyBorTransaction(msgs, evm, gp, ibs, block, cumGasUsedInLastBlock, uint(logIdxAfterTx), rawtemporaldb.ReceiptStoresFirstLogIdx(tx))
@@ -96,7 +96,7 @@ func (g *BorGenerator) GenerateBorLogs(ctx context.Context, msgs []*types.Messag
 		return nil, err
 	}
 
-	gp := new(protocol.GasPool).AddRegularGas(msgs[0].Gas() * uint64(len(msgs))).AddBlobGas(msgs[0].BlobGas() * uint64(len(msgs)))
+	gp := new(protocol.GasPool).AddGas(msgs[0].Gas() * uint64(len(msgs))).AddBlobGas(msgs[0].BlobGas() * uint64(len(msgs)))
 	evm := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, chainConfig, vm.Config{})
 	return getBorLogs(msgs, evm, gp, ibs, header.Number.Uint64(), header.Hash(), uint(txIndex), uint(logIdxAfterTx), rawtemporaldb.ReceiptStoresFirstLogIdx(tx))
 }

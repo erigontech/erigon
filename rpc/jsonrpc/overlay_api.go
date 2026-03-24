@@ -191,7 +191,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.
-	gp := new(protocol.GasPool).AddRegularGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
+	gp := new(protocol.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
 	for idx, txn := range replayTransactions {
 		statedb.SetTxContext(blockNum, idx)
 		msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
@@ -506,7 +506,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.
-	gp := new(protocol.GasPool).AddRegularGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
+	gp := new(protocol.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
 	vmConfig := vm.Config{}
 	evm = vm.NewEVM(blockCtx, evmtypes.TxContext{}, statedb, chainConfig, vmConfig)
 	receipts, err := api.getReceipts(ctx, tx, block)

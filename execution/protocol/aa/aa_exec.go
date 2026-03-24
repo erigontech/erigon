@@ -317,7 +317,7 @@ func ExecuteAATransaction(
 		return 0, 0, err
 	}
 
-	gasPool.AddRegularGas(params.TxAAGas + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit - gasUsed)
+	gasPool.AddGas(params.TxAAGas + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit - gasUsed)
 
 	return executionStatus, gasUsed, nil
 }

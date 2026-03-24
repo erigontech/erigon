@@ -130,7 +130,7 @@ func TraceTx(
 	defer cancel()
 
 	execCb := func(evm *vm.EVM, refunds bool) (*evmtypes.ExecutionResult, error) {
-		gp := new(protocol.GasPool).AddRegularGas(message.Gas()).AddBlobGas(message.BlobGas())
+		gp := new(protocol.GasPool).AddGas(message.Gas()).AddBlobGas(message.BlobGas())
 		if tracer != nil && tracer.OnTxStart != nil {
 			tracer.OnTxStart(evm.GetVMContext(), tx, message.From())
 		}
