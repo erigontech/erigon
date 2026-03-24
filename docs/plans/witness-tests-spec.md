@@ -111,7 +111,7 @@ A `buildTrieMultiRoundAndWitness` helper for tests that need multiple `Process()
 - **Why**: Zero balance is a valid state (e.g., contract with no ETH). Ensures the account node encodes correctly when balance is zero.
 
 #### 6.2 `AccountsWithLongCommonPrefix`
-- Generate 5 accounts whose hashed keys share a 6-nibble common prefix.
+- Generate 5 accounts whose hashed keys share a 4-nibble common prefix (reduced from 6 for brute-force key generation performance).
 - **Witness**: 1 account → `keyExists: true`.
 - **Why**: Long shared prefixes create deep extension nodes. Tests the extension-splitting logic in `toWitnessTrie()`.
 

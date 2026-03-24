@@ -2046,8 +2046,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		require.Equal(t, root, rootWitness, "root witness should have the same root hash as trie")
 
 		for i, plainKeyToWitness := range plainKeysToWitness {
-			keyExists := keyExists[i]
-			if keyExists { // to be checked only if key should exist
+			if keyExists[i] { // only check keys that should exist; non-existing keys have proof nodes in the witness trie
 				hashedKeyWitnessed, err := CompactKey(KeyToHexNibbleHash(plainKeyToWitness))
 				require.NoError(t, err)
 				var gotValue bool
@@ -2103,7 +2102,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		require.Equal(t, root, rootWitness, "root witness should have the same root hash as trie")
 
 		for i, plainKeyToWitness := range plainKeysToWitness {
-			if keyExists[i] {
+			if keyExists[i] { // only check keys that should exist; non-existing keys have proof nodes in the witness trie
 				hashedKeyWitnessed, err := CompactKey(KeyToHexNibbleHash(plainKeyToWitness))
 				require.NoError(t, err)
 				var gotValue bool
