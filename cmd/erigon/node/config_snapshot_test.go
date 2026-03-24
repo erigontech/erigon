@@ -27,12 +27,11 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/nodecfg"
 
-	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
 // buildEthConfig creates an ethconfig.Config by running the full flag parsing
-// pipeline (SetEthConfig + ApplyFlagsForEthConfig) with the given CLI args.
+// pipeline (BuildEthConfig) with the given CLI args.
 func buildEthConfig(t *testing.T, args []string) *ethconfig.Config {
 	t.Helper()
 
@@ -44,8 +43,7 @@ func buildEthConfig(t *testing.T, args []string) *ethconfig.Config {
 		nodeCfg := &nodecfg.Config{}
 		nodeCfg.Dirs.DataDir = t.TempDir()
 		ethCfg := ethconfig.Defaults
-		utils.SetEthConfig(ctx, nodeCfg, &ethCfg, logger)
-		erigoncli.ApplyFlagsForEthConfig(ctx, &ethCfg, logger)
+		erigoncli.BuildEthConfig(ctx, nodeCfg, &ethCfg, logger)
 		result = &ethCfg
 		return nil
 	}
