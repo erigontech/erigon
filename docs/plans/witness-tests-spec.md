@@ -167,9 +167,9 @@ A `buildTrieMultiRoundAndWitness` helper for tests that need multiple `Process()
 - [x] Tests pass and lint clean
 
 ### Task 5: Category 5 (Deep/Large Tries)
-- [ ] Implement subtest `DeepStorageTrie_ManySlots` (5.1)
-- [ ] Implement subtest `LargeAccountTrie_100Accounts` (5.2)
-- [ ] Tests pass and lint clean
+- [x] Implement subtest `DeepStorageTrie_ManySlots` (5.1)
+- [x] Implement subtest `LargeAccountTrie_100Accounts` (5.2)
+- [x] Tests pass and lint clean
 
 ### Task 6: Category 6 (Edge Cases)
 - [ ] Implement subtest `AccountWithZeroBalanceNonZeroNonce` (6.1)
