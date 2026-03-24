@@ -79,6 +79,40 @@ func NewCommitmentReplayStateReader(ttx, tx kv.TemporalTx, tsd *execctx.SharedDo
 	return NewCommitmentSplitStateReader(commitmentdb.NewLatestStateReader(ttx, tsd), commitmentdb.NewHistoryStateReader(tx, plainStateAsOf), false)
 }
 
+// simulateStateReader is a StateReader for eth_simulateV1 whose Clone() method mirrors
+// commitmentdb.CommitmentReplayStateReader from main: the commitment reader (temp DB) is
+// re-cloned with the new tx so warmup goroutines get their own fresh read-only transaction,
+// while the plain state reader (outer DB) is kept unchanged so non-modified accounts are
+// always read from real on-chain state, not the empty temp DB.
+type simulateStateReader struct {
+	commitmentReader commitmentdb.StateReader
+	plainStateReader commitmentdb.StateReader
+}
+
+func NewSimulateStateReader(commitmentReader, plainStateReader commitmentdb.StateReader) commitmentdb.StateReader {
+	return simulateStateReader{commitmentReader: commitmentReader, plainStateReader: plainStateReader}
+}
+
+func (r simulateStateReader) WithHistory() bool { return false }
+
+func (r simulateStateReader) CheckDataAvailable(_ kv.Domain, _ kv.Step) error { return nil }
+
+func (r simulateStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]byte, kv.Step, error) {
+	if d == kv.CommitmentDomain {
+		return r.commitmentReader.Read(d, plainKey, stepSize)
+	}
+	return r.plainStateReader.Read(d, plainKey, stepSize)
+}
+
+func (r simulateStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
+	// Propagate new tx only to the commitment reader (temp DB) for warmup goroutines;
+	// keep the plain state reader on the original outer-DB tx.
+	return simulateStateReader{
+		commitmentReader: r.commitmentReader.Clone(tx),
+		plainStateReader: r.plainStateReader,
+	}
+}
+
 type CommitmentReplay struct {
 	dirs        datadir.Dirs
 	txNumReader rawdbv3.TxNumsReader
