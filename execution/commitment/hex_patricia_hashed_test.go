@@ -2046,9 +2046,9 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		require.Equal(t, root, rootWitness, "root witness should have the same root hash as trie")
 
 		for i, plainKeyToWitness := range plainKeysToWitness {
-			if keyExists[i] { // only check keys that should exist; non-existing keys have proof nodes in the witness trie
-				hashedKeyWitnessed, err := CompactKey(KeyToHexNibbleHash(plainKeyToWitness))
-				require.NoError(t, err)
+			hashedKeyWitnessed, err := CompactKey(KeyToHexNibbleHash(plainKeyToWitness))
+			require.NoError(t, err)
+			if keyExists[i] {
 				var gotValue bool
 				if len(plainKeyToWitness) == length.Addr {
 					_, gotValue = witnessTrie.GetAccount(hashedKeyWitnessed)
@@ -2056,6 +2056,18 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 					_, gotValue = witnessTrie.Get(hashedKeyWitnessed)
 				}
 				require.True(t, gotValue, "value not found in witness trie for key %x", plainKeyToWitness)
+			} else {
+				// Verify non-existing keys: the witness trie should have proof nodes
+				// (gotValue==true) but no actual value, proving absence without hitting a HashNode.
+				if len(plainKeyToWitness) == length.Addr {
+					acc, gotValue := witnessTrie.GetAccount(hashedKeyWitnessed)
+					require.True(t, gotValue, "witness trie missing proof for non-existing key %x", plainKeyToWitness)
+					require.Nil(t, acc, "non-existing key %x should not have account in witness trie", plainKeyToWitness)
+				} else {
+					val, gotValue := witnessTrie.Get(hashedKeyWitnessed)
+					require.True(t, gotValue, "witness trie missing proof for non-existing key %x", plainKeyToWitness)
+					require.Nil(t, val, "non-existing key %x should not have value in witness trie", plainKeyToWitness)
+				}
 			}
 		}
 	}
@@ -2102,9 +2114,9 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		require.Equal(t, root, rootWitness, "root witness should have the same root hash as trie")
 
 		for i, plainKeyToWitness := range plainKeysToWitness {
-			if keyExists[i] { // only check keys that should exist; non-existing keys have proof nodes in the witness trie
-				hashedKeyWitnessed, err := CompactKey(KeyToHexNibbleHash(plainKeyToWitness))
-				require.NoError(t, err)
+			hashedKeyWitnessed, err := CompactKey(KeyToHexNibbleHash(plainKeyToWitness))
+			require.NoError(t, err)
+			if keyExists[i] {
 				var gotValue bool
 				if len(plainKeyToWitness) == length.Addr {
 					_, gotValue = witnessTrie.GetAccount(hashedKeyWitnessed)
@@ -2112,6 +2124,16 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 					_, gotValue = witnessTrie.Get(hashedKeyWitnessed)
 				}
 				require.True(t, gotValue, "value not found in witness trie for key %x", plainKeyToWitness)
+			} else {
+				if len(plainKeyToWitness) == length.Addr {
+					acc, gotValue := witnessTrie.GetAccount(hashedKeyWitnessed)
+					require.True(t, gotValue, "witness trie missing proof for non-existing key %x", plainKeyToWitness)
+					require.Nil(t, acc, "non-existing key %x should not have account in witness trie", plainKeyToWitness)
+				} else {
+					val, gotValue := witnessTrie.Get(hashedKeyWitnessed)
+					require.True(t, gotValue, "witness trie missing proof for non-existing key %x", plainKeyToWitness)
+					require.Nil(t, val, "non-existing key %x should not have value in witness trie", plainKeyToWitness)
+				}
 			}
 		}
 	}
@@ -2493,7 +2515,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 			fmt.Printf("storage %x -> %x\n", storageKeysList[sl], storageKeysList[sl])
 		}
 
-		buildTrieAndWitness(t, builder, [][]byte{addrToProve}, []bool{false} /* keyExists */)
+		buildTrieAndWitness(t, builder, [][]byte{fullStorageKeyToProve}, []bool{false} /* keyExists */)
 	})
 
 	t.Run("MultiKeyWitness_AccountWithSingletonStorage", func(t *testing.T) {
@@ -2675,6 +2697,11 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 	// ===== Category 2: Deletions =====
 
 	t.Run("DeletedAccount_NonExistentProof", func(t *testing.T) {
+		// Note: UpdateBuilder.Delete() removes the balance from its internal maps,
+		// so Build() emits only a DeleteUpdate for this key (never a create+delete).
+		// The trie sees a delete for a key it never had, making this effectively a
+		// non-existence proof test. MultiRound_DeleteAccount_ThenWitness (test 2.2)
+		// covers the true create-then-delete scenario via separate Process rounds.
 		accounts, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 5)
 
 		builder := NewUpdateBuilder()
