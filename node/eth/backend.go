@@ -1019,6 +1019,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				engineBackendRPC,
 				chainreader.NewChainReaderEth1(chainConfig, executionRpc, config.FcuTimeout),
 				txPoolRpcClient,
+				nil, // beaconCfg: local mode uses chainRW which returns properly versioned blocks
 			)
 			if err != nil {
 				logger.Error("failed to create execution client", "err", err)

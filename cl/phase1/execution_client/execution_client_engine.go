@@ -52,6 +52,7 @@ type ExecutionClientEngine struct {
 	chainRW   *chainreader.ChainReaderWriterEth1 // non-nil for local mode
 	rpcClient *rpc.Client                        // non-nil for remote mode (eth_* calls)
 	txpool    txpoolproto.TxpoolClient           // non-nil for local mode
+	beaconCfg *clparams.BeaconChainConfig
 }
 
 // NewExecutionClientEngineLocal creates an in-process engine client that calls
@@ -60,17 +61,19 @@ func NewExecutionClientEngineLocal(
 	engine engineapi.EngineAPI,
 	chainRW chainreader.ChainReaderWriterEth1,
 	txpool txpoolproto.TxpoolClient,
+	beaconCfg *clparams.BeaconChainConfig,
 ) (*ExecutionClientEngine, error) {
 	return &ExecutionClientEngine{
-		engine:  engine,
-		chainRW: &chainRW,
-		txpool:  txpool,
+		engine:    engine,
+		chainRW:   &chainRW,
+		txpool:    txpool,
+		beaconCfg: beaconCfg,
 	}, nil
 }
 
 // NewExecutionClientEngineRPC creates a remote engine client that communicates
 // over HTTP JSON-RPC with JWT authentication.
-func NewExecutionClientEngineRPC(jwtSecret []byte, addr string, port int) (*ExecutionClientEngine, error) {
+func NewExecutionClientEngineRPC(jwtSecret []byte, addr string, port int, beaconCfg *clparams.BeaconChainConfig) (*ExecutionClientEngine, error) {
 	engineRPC, rpcClient, err := NewEngineAPIRPCClient(jwtSecret, addr, port)
 	if err != nil {
 		return nil, err
@@ -78,11 +81,16 @@ func NewExecutionClientEngineRPC(jwtSecret []byte, addr string, port int) (*Exec
 	return &ExecutionClientEngine{
 		engine:    engineRPC,
 		rpcClient: rpcClient,
+		beaconCfg: beaconCfg,
 	}, nil
 }
 
 func (cc *ExecutionClientEngine) isLocal() bool {
 	return cc.chainRW != nil
+}
+
+func (cc *ExecutionClientEngine) SetBeaconChainConfig(beaconCfg *clparams.BeaconChainConfig) {
+	cc.beaconCfg = beaconCfg
 }
 
 // buildExecutionPayload converts a CL Eth1Block into an Engine API ExecutionPayload.
@@ -158,6 +166,9 @@ func (cc *ExecutionClientEngine) NewPayload(
 	if err != nil {
 		return PayloadStatusNone, fmt.Errorf("engine NewPayload failed: %w", err)
 	}
+	if payloadStatus == nil {
+		return PayloadStatusNone, errors.New("engine NewPayload returned nil status")
+	}
 
 	if payloadStatus.Status == engine_types.AcceptedStatus {
 		log.Info("[ExecutionClientEngine] New block accepted")
@@ -187,9 +198,10 @@ func (cc *ExecutionClientEngine) ForkChoiceUpdate(
 		resp, err = cc.engine.ForkchoiceUpdatedV1(ctx, forkChoiceState, attributes)
 	case clparams.CapellaVersion:
 		resp, err = cc.engine.ForkchoiceUpdatedV2(ctx, forkChoiceState, attributes)
-	case clparams.DenebVersion:
+	case clparams.DenebVersion, clparams.ElectraVersion, clparams.FuluVersion:
+		// V3 is valid for Cancun (Deneb) and Prague (Electra/Fulu)
 		resp, err = cc.engine.ForkchoiceUpdatedV3(ctx, forkChoiceState, attributes)
-	default: // Electra, Fulu, Gloas+
+	default: // Gloas+ (Amsterdam)
 		resp, err = cc.engine.ForkchoiceUpdatedV4(ctx, forkChoiceState, attributes)
 	}
 	if err != nil {
@@ -329,15 +341,15 @@ func (cc *ExecutionClientEngine) GetAssembledBlock(ctx context.Context, id []byt
 	// Select Engine API version based on CL state version.
 	switch {
 	case version >= clparams.FuluVersion:
-		return cc.getAssembledBlockV5(ctx, id)
+		return cc.getAssembledBlockV5(ctx, id, version)
 	case version >= clparams.ElectraVersion:
-		return cc.getAssembledBlockV4(ctx, id)
+		return cc.getAssembledBlockV4(ctx, id, version)
 	default:
-		return cc.getAssembledBlockV3(ctx, id)
+		return cc.getAssembledBlockV3(ctx, id, version)
 	}
 }
 
-func (cc *ExecutionClientEngine) getAssembledBlockV3(ctx context.Context, id []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+func (cc *ExecutionClientEngine) getAssembledBlockV3(ctx context.Context, id []byte, version clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	resp, err := cc.engine.GetPayloadV3(ctx, hexutil.Bytes(id))
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("engine GetPayloadV3 failed: %w", err)
@@ -346,7 +358,7 @@ func (cc *ExecutionClientEngine) getAssembledBlockV3(ctx context.Context, id []b
 		return nil, nil, nil, nil, errors.New("GetPayloadV3 returned nil execution payload")
 	}
 
-	block, err := executionPayloadToEth1Block(resp.ExecutionPayload)
+	block, err := executionPayloadToEth1Block(resp.ExecutionPayload, version, cc.beaconCfg)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -360,12 +372,12 @@ func (cc *ExecutionClientEngine) getAssembledBlockV3(ctx context.Context, id []b
 }
 
 // getAssembledBlockFromResponse converts a GetPayloadResponse into the block production tuple.
-func getAssembledBlockFromResponse(resp *engine_types.GetPayloadResponse) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+func (cc *ExecutionClientEngine) getAssembledBlockFromResponse(resp *engine_types.GetPayloadResponse, version clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	if resp.ExecutionPayload == nil {
 		return nil, nil, nil, nil, errors.New("GetPayload returned nil execution payload")
 	}
 
-	block, err := executionPayloadToEth1Block(resp.ExecutionPayload)
+	block, err := executionPayloadToEth1Block(resp.ExecutionPayload, version, cc.beaconCfg)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -388,35 +400,34 @@ func getAssembledBlockFromResponse(resp *engine_types.GetPayloadResponse) (*clty
 	return block, resp.BlobsBundle, requestsBundle, blockValue, nil
 }
 
-func (cc *ExecutionClientEngine) getAssembledBlockV4(ctx context.Context, id []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+func (cc *ExecutionClientEngine) getAssembledBlockV4(ctx context.Context, id []byte, version clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	resp, err := cc.engine.GetPayloadV4(ctx, hexutil.Bytes(id))
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("engine GetPayloadV4 failed: %w", err)
 	}
-	return getAssembledBlockFromResponse(resp)
+	return cc.getAssembledBlockFromResponse(resp, version)
 }
 
-func (cc *ExecutionClientEngine) getAssembledBlockV5(ctx context.Context, id []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+func (cc *ExecutionClientEngine) getAssembledBlockV5(ctx context.Context, id []byte, version clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	resp, err := cc.engine.GetPayloadV5(ctx, hexutil.Bytes(id))
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("engine GetPayloadV5 failed: %w", err)
 	}
-	return getAssembledBlockFromResponse(resp)
+	return cc.getAssembledBlockFromResponse(resp, version)
 }
 
-func executionPayloadToEth1Block(ep *engine_types.ExecutionPayload) (*cltypes.Eth1Block, error) {
-	block := &cltypes.Eth1Block{
-		ParentHash:   ep.ParentHash,
-		FeeRecipient: ep.FeeRecipient,
-		StateRoot:    ep.StateRoot,
-		ReceiptsRoot: ep.ReceiptsRoot,
-		PrevRandao:   ep.PrevRandao,
-		BlockNumber:  uint64(ep.BlockNumber),
-		GasLimit:     uint64(ep.GasLimit),
-		GasUsed:      uint64(ep.GasUsed),
-		Time:         uint64(ep.Timestamp),
-		BlockHash:    ep.BlockHash,
-	}
+func executionPayloadToEth1Block(ep *engine_types.ExecutionPayload, version clparams.StateVersion, beaconCfg *clparams.BeaconChainConfig) (*cltypes.Eth1Block, error) {
+	block := cltypes.NewEth1Block(version, beaconCfg)
+	block.ParentHash = ep.ParentHash
+	block.FeeRecipient = ep.FeeRecipient
+	block.StateRoot = ep.StateRoot
+	block.ReceiptsRoot = ep.ReceiptsRoot
+	block.PrevRandao = ep.PrevRandao
+	block.BlockNumber = uint64(ep.BlockNumber)
+	block.GasLimit = uint64(ep.GasLimit)
+	block.GasUsed = uint64(ep.GasUsed)
+	block.Time = uint64(ep.Timestamp)
+	block.BlockHash = ep.BlockHash
 
 	if len(ep.LogsBloom) == 256 {
 		copy(block.LogsBloom[:], ep.LogsBloom)
@@ -453,7 +464,11 @@ func executionPayloadToEth1Block(ep *engine_types.ExecutionPayload) (*cltypes.Et
 
 	// Withdrawals
 	if ep.Withdrawals != nil {
-		block.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](16, 44)
+		maxWithdrawals := 16
+		if beaconCfg != nil {
+			maxWithdrawals = int(beaconCfg.MaxWithdrawalsPerPayload)
+		}
+		block.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](maxWithdrawals, 44)
 		for _, w := range ep.Withdrawals {
 			block.Withdrawals.Append(&cltypes.Withdrawal{
 				Index:     w.Index,

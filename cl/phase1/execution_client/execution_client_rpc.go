@@ -167,10 +167,8 @@ func (cc *ExecutionClientRpc) ForkChoiceUpdate(ctx context.Context, finalized, s
 	switch version {
 	case clparams.CapellaVersion:
 		method = rpc_helper.ForkChoiceUpdatedV2
-	case clparams.DenebVersion:
+	case clparams.DenebVersion, clparams.ElectraVersion, clparams.FuluVersion:
 		method = rpc_helper.ForkChoiceUpdatedV3
-	case clparams.ElectraVersion, clparams.FuluVersion:
-		method = rpc_helper.ForkChoiceUpdatedV4
 	}
 
 	log.Debug("[ExecutionClientRpc] Calling EL", "method", method)

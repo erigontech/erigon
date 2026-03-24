@@ -78,11 +78,13 @@ func (f *ForkChoiceStore) onNewFinalized(newFinalized solid.Checkpoint) {
 		return true
 	})
 
-	// Clean up per-block unrealized justifications/finalizations for finalized blocks
+	// Clean up per-block unrealized justifications/finalizations for finalized blocks.
+	// Also delete entries whose headers have already been pruned from the fork graph
+	// to prevent orphaned entries from accumulating.
 	f.unrealizedJustifications.Range(func(k, v any) bool {
 		blockRoot := k.(common.Hash)
 		header, has := f.forkGraph.GetHeader(blockRoot)
-		if has && header.Slot <= finalizedSlot {
+		if !has || header.Slot <= finalizedSlot {
 			f.unrealizedJustifications.Delete(k)
 		}
 		return true
@@ -90,7 +92,7 @@ func (f *ForkChoiceStore) onNewFinalized(newFinalized solid.Checkpoint) {
 	f.unrealizedFinalizations.Range(func(k, v any) bool {
 		blockRoot := k.(common.Hash)
 		header, has := f.forkGraph.GetHeader(blockRoot)
-		if has && header.Slot <= finalizedSlot {
+		if !has || header.Slot <= finalizedSlot {
 			f.unrealizedFinalizations.Delete(k)
 		}
 		return true
