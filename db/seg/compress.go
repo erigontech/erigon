@@ -491,7 +491,7 @@ func (db *DictionaryBuilder) flushLastWord() {
 		return
 	}
 
-	// RemoveFile the element with smallest score
+	// Remove the element with smallest score
 	elem := heap.Pop(db).(*Pattern)
 	if elem == nil {
 		heap.Push(db, &Pattern{word: db.lastWord, score: db.lastWordScore})
