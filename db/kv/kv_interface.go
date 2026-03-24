@@ -698,22 +698,18 @@ var (
 // ErrServerOverloaded is returned by BeginRo when the DB semaphore is full and the caller is an RPC handler.
 var ErrServerOverloaded = errors.New("server overloaded, retry later")
 
-type rpcContextKey struct{}
+type nonBlockingAcquireKey struct{}
 
-// WithRPCContext tags ctx as an RPC caller and stores the concurrency limit.
-// limit > 0: BeginRo uses TryAcquire and returns ErrServerOverloaded if the semaphore is full.
-// limit <= 0: BeginRo falls back to blocking Acquire (--rpc.max.concurrency=-1, unlimited).
-func WithRPCContext(ctx context.Context, limit int64) context.Context {
-	return context.WithValue(ctx, rpcContextKey{}, limit)
+// WithNonBlockingAcquire tags ctx to request fail-fast semaphore acquisition in BeginRo.
+// When set, BeginRo uses TryAcquire and returns ErrServerOverloaded immediately if the
+// read-tx semaphore is full, instead of blocking until a slot is available.
+func WithNonBlockingAcquire(ctx context.Context) context.Context {
+	return context.WithValue(ctx, nonBlockingAcquireKey{}, struct{}{})
 }
 
-// IsRPCContext reports whether ctx was tagged by WithRPCContext and returns the concurrency limit.
-func IsRPCContext(ctx context.Context) (isRPC bool, limit int64) {
-	v := ctx.Value(rpcContextKey{})
-	if v == nil {
-		return false, 0
-	}
-	return true, v.(int64)
+// IsNonBlockingAcquire reports whether ctx was tagged by WithNonBlockingAcquire.
+func IsNonBlockingAcquire(ctx context.Context) bool {
+	return ctx.Value(nonBlockingAcquireKey{}) != nil
 }
 
 type Closer interface {

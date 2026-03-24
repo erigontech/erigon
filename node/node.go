@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -319,7 +318,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 
 	logger.Info("Opening Database", "label", name, "path", dbPath)
 	openFunc := func(exclusive bool) (kv.RwDB, error) {
-		roTxLimit := int64(max(10, runtime.GOMAXPROCS(-1)*4))
+		roTxLimit := int64(32)
 		if config.Http.DBReadConcurrency > 0 {
 			roTxLimit = int64(config.Http.DBReadConcurrency)
 		}

@@ -46,7 +46,10 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
+
+var dbRoTxOverloaded = metrics.GetOrCreateCounter(`db_rotx_overloaded_total`)
 
 func init() {
 	mdbx.MapFullErrorMessage += " You can try remove the database files (e.g., by running rm -rf /path/to/db)"
@@ -582,9 +585,10 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		return nil, errors.New("db closed")
 	}
 
-	if isRPC, limit := kv.IsRPCContext(ctx); isRPC && limit > 0 {
+	if kv.IsNonBlockingAcquire(ctx) {
 		if !db.roTxsLimiter.TryAcquire(1) {
 			db.trackTxEnd()
+			dbRoTxOverloaded.Inc()
 			return nil, kv.ErrServerOverloaded
 		}
 	} else if semErr := db.roTxsLimiter.Acquire(ctx, 1); semErr != nil {
