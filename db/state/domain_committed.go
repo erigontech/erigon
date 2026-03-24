@@ -74,6 +74,18 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 	}
 	storageGetter := sto.dataReader(storageItem.decompressor)
 	accountGetter := acc.dataReader(accountItem.decompressor)
+
+	// Look up base files for references with the base-file flag (LSB=1).
+	baseStorageItem := sto.lookupBaseFile()
+	baseAccountItem := acc.lookupBaseFile()
+	var baseStorageGetter, baseAccountGetter *seg.Reader
+	if baseStorageItem != nil && baseStorageItem != storageItem {
+		baseStorageGetter = sto.dataReader(baseStorageItem.decompressor)
+	}
+	if baseAccountItem != nil && baseAccountItem != accountItem {
+		baseAccountGetter = acc.dataReader(baseAccountItem.decompressor)
+	}
+
 	metricI := 0
 	for i, f := range aggTx.d[kv.CommitmentDomain].files {
 		if i > 5 {
@@ -93,12 +105,24 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 			if dbg.KVReadLevelledMetrics {
 				defer branchKeyDerefSpent[metricI].ObserveDuration(time.Now())
 			}
-			// Optimised key referencing a state file record (file number and offset within the file)
-			storagePlainKey, found := sto.lookupByShortenedKey(key, storageGetter)
+			// Decode the flag to determine which file the offset points to
+			offset, isBaseFile := DecodeReferenceKeyWithFlag(key)
+			var getter *seg.Reader
+			if isBaseFile && baseStorageGetter != nil {
+				getter = baseStorageGetter
+			} else {
+				getter = storageGetter
+				offset = DecodeReferenceKey(key) // legacy path: no flag encoding
+				if isBaseFile {
+					// base file flag set but no base file available — fall back to same-range
+					offset, _ = DecodeReferenceKeyWithFlag(key)
+				}
+			}
+			storagePlainKey, found := sto.lookupByShortenedKeyAtOffset(offset, getter)
 			if !found {
 				s0, s1 := fStartTxNum/at.StepSize(), fEndTxNum/at.StepSize()
 				logger.Crit("replace back lost storage full key", "shortened", hex.EncodeToString(key),
-					"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, DecodeReferenceKey(key)))
+					"decoded", fmt.Sprintf("step %d-%d; offt %d; base=%t", s0, s1, offset, isBaseFile))
 				return nil, fmt.Errorf("replace back lost storage full key: %x", key)
 			}
 			return storagePlainKey, nil
@@ -111,11 +135,23 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 		if dbg.KVReadLevelledMetrics {
 			defer branchKeyDerefSpent[metricI].ObserveDuration(time.Now())
 		}
-		apkBuf, found := acc.lookupByShortenedKey(key, accountGetter)
+		// Decode the flag to determine which file the offset points to
+		offset, isBaseFile := DecodeReferenceKeyWithFlag(key)
+		var getter *seg.Reader
+		if isBaseFile && baseAccountGetter != nil {
+			getter = baseAccountGetter
+		} else {
+			getter = accountGetter
+			offset = DecodeReferenceKey(key) // legacy path: no flag encoding
+			if isBaseFile {
+				offset, _ = DecodeReferenceKeyWithFlag(key)
+			}
+		}
+		apkBuf, found := acc.lookupByShortenedKeyAtOffset(offset, getter)
 		if !found {
 			s0, s1 := fStartTxNum/at.StepSize(), fEndTxNum/at.StepSize()
 			logger.Crit("replace back lost account full key", "shortened", hex.EncodeToString(key),
-				"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, DecodeReferenceKey(key)))
+				"decoded", fmt.Sprintf("step %d-%d; offt %d; base=%t", s0, s1, offset, isBaseFile))
 			return nil, fmt.Errorf("replace back lost account full key: %x", key)
 		}
 		return apkBuf, nil
@@ -137,11 +173,32 @@ func DecodeReferenceKey(from []byte) uint64 {
 	return of
 }
 
+// DecodeReferenceKeyWithFlag decodes a reference key that uses the new encoding where
+// the LSB indicates the file source: 0=same-range file, 1=base file.
+func DecodeReferenceKeyWithFlag(from []byte) (offset uint64, isBaseFile bool) {
+	raw, n := binary.Uvarint(from)
+	if n == 0 {
+		panic(fmt.Sprintf("reference key %x decode failed", from))
+	}
+	if n < 0 {
+		panic(fmt.Sprintf("reference key %x overflow", from))
+	}
+	return raw >> 1, raw&1 == 1
+}
+
 func EncodeReferenceKey(buf []byte, offset uint64) []byte {
 	if cap(buf) == 0 {
 		buf = make([]byte, 0, 8)
 	}
-	return binary.AppendUvarint(buf[:0], offset)
+	return binary.AppendUvarint(buf[:0], offset<<1) // LSB=0 → same-range file
+}
+
+// EncodeBaseFileReferenceKey encodes a reference key that points into the base file (startTxNum=0).
+func EncodeBaseFileReferenceKey(buf []byte, offset uint64) []byte {
+	if cap(buf) == 0 {
+		buf = make([]byte, 0, 8)
+	}
+	return binary.AppendUvarint(buf[:0], offset<<1|1) // LSB=1 → base file
 }
 
 // Finds shorter replacement for full key in given file item. filesItem -- result of merging of multiple files.
@@ -205,6 +262,21 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 		return offset, true
 	}
 	return 0, false
+}
+
+// lookupBaseFile returns the visible file with startTxNum=0 and the largest endTxNum.
+// This is the "base" file that contains all keys ever written (minus deletions).
+// Returns nil if no base file exists.
+func (dt *DomainRoTx) lookupBaseFile() *FilesItem {
+	var best *FilesItem
+	for _, f := range dt.files {
+		if f.startTxNum == 0 && f.src != nil {
+			if best == nil || f.endTxNum > best.endTxNum {
+				best = f.src
+			}
+		}
+	}
+	return best
 }
 
 // lookupVisibleFileByRange searches only among visible files (those in the RoTx snapshot).
@@ -275,21 +347,25 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter *seg.Reader) 
 		return nil, false
 	}
 	offset := DecodeReferenceKey(shortKey)
+	return dt.lookupByShortenedKeyAtOffset(offset, getter)
+}
+
+// lookupByShortenedKeyAtOffset looks up a full key at the given pre-decoded offset in the file.
+func (dt *DomainRoTx) lookupByShortenedKeyAtOffset(offset uint64, getter *seg.Reader) (fullKey []byte, found bool) {
 	defer func() {
 		if r := recover(); r != nil {
-			dt.d.logger.Crit("lookupByShortenedKey panics",
+			dt.d.logger.Crit("lookupByShortenedKeyAtOffset panics",
 				"err", r,
-				"offset", offset, "short", hex.EncodeToString(shortKey),
+				"offset", offset,
 				"cleanFilesCount", len(dt.files), "dirtyFilesCount", dt.d.dirtyFiles.Len(),
 				"file", getter.FileName())
 		}
 	}()
 
-	//getter := NewArchiveGetter(item.decompressor.MakeGetter(), dt.d.Compression)
 	getter.Reset(offset)
 	n := getter.HasNext()
 	if !n || uint64(getter.Size()) <= offset {
-		dt.d.logger.Warn("lookupByShortenedKey failed", "file", getter.FileName(), "short", hex.EncodeToString(shortKey), "offset", offset, "hasNext", n, "size", getter.Size(), "offsetBigger", uint64(getter.Size()) <= offset)
+		dt.d.logger.Warn("lookupByShortenedKeyAtOffset failed", "file", getter.FileName(), "offset", offset, "hasNext", n, "size", getter.Size(), "offsetBigger", uint64(getter.Size()) <= offset)
 		return nil, false
 	}
 
@@ -345,7 +421,25 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 
 	ms := storage.dataReader(mergedStorage.decompressor)
 	ma := accounts.dataReader(mergedAccount.decompressor)
-	dt.d.logger.Debug("prepare commitmentValTransformDomain", "merge", rng.String("range", dt.d.stepSize), "Mstorage", hadToLookupStorage, "Maccount", hadToLookupAccount)
+
+	// Look up base files (startTxNum=0) for fallback key referencing.
+	// Keys referenced in commitment branches may have been written in earlier steps
+	// and thus not present in the same-range merged file. The base file contains all
+	// keys ever written (minus deletions) and serves as a fallback.
+	baseStorageItem := storage.lookupBaseFile()
+	baseAccountItem := accounts.lookupBaseFile()
+	var baseMs *seg.Reader
+	var baseMa *seg.Reader
+	if baseStorageItem != nil && baseStorageItem != mergedStorage {
+		baseMs = storage.dataReader(baseStorageItem.decompressor)
+	}
+	if baseAccountItem != nil && baseAccountItem != mergedAccount {
+		baseMa = accounts.dataReader(baseAccountItem.decompressor)
+	}
+
+	dt.d.logger.Debug("prepare commitmentValTransformDomain", "merge", rng.String("range", dt.d.stepSize),
+		"Mstorage", hadToLookupStorage, "Maccount", hadToLookupAccount,
+		"hasBaseStorage", baseMs != nil, "hasBaseAccount", baseMa != nil)
 
 	vt := func(valBuf []byte, keyFromTxNum, keyEndTxNum uint64) (transValBuf []byte, err error) {
 		if !dt.d.ReplaceKeysInValues || len(valBuf) == 0 || !ValuesPlainKeyReferencingThresholdReached(dt.d.stepSize, rng.from, rng.to) {
@@ -397,20 +491,27 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 					}
 				}
 
+				// Try same-range merged file first
 				shortenedKeyOffset, found := storage.findShortenedKey(auxBuf, ms, mergedStorage)
-				if !found {
-					if len(auxBuf) == length.Addr+length.Hash {
-						return auxBuf, nil // if plain key is lost, we can save original fullkey
-					}
-					// if shortened key lost, we can't continue
-					dt.d.logger.Crit("valTransform: replacement for full storage key was not found",
-						"step", fmt.Sprintf("%d-%d", keyFromTxNum/dt.d.stepSize, keyEndTxNum/dt.d.stepSize),
-						"shortened", hex.EncodeToString(shortened), "toReplace", hex.EncodeToString(auxBuf))
-
-					return nil, fmt.Errorf("replacement not found for storage %x", auxBuf)
+				if found {
+					shortened = EncodeReferenceKey(shortened[:0], shortenedKeyOffset)
+					return shortened, nil
 				}
-				shortened = EncodeReferenceKey(shortened[:0], shortenedKeyOffset)
-				return shortened, nil
+				// Fallback: try base file (startTxNum=0)
+				if baseMs != nil {
+					shortenedKeyOffset, found = storage.findShortenedKey(auxBuf, baseMs, baseStorageItem)
+					if found {
+						shortened = EncodeBaseFileReferenceKey(shortened[:0], shortenedKeyOffset)
+						return shortened, nil
+					}
+				}
+				if len(auxBuf) == length.Addr+length.Hash {
+					return auxBuf, nil // if plain key is lost in both files, save original fullkey
+				}
+				dt.d.logger.Crit("valTransform: replacement for full storage key was not found",
+					"step", fmt.Sprintf("%d-%d", keyFromTxNum/dt.d.stepSize, keyEndTxNum/dt.d.stepSize),
+					"shortened", hex.EncodeToString(shortened), "toReplace", hex.EncodeToString(auxBuf))
+				return nil, fmt.Errorf("replacement not found for storage %x", auxBuf)
 			}
 
 			if len(key) == length.Addr {
@@ -428,18 +529,27 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 				}
 			}
 
+			// Try same-range merged file first
 			shortenedKeyOffset, found := accounts.findShortenedKey(auxBuf, ma, mergedAccount)
-			if !found {
-				if len(auxBuf) == length.Addr {
-					return auxBuf, nil // if plain key is lost, we can save original fullkey
-				}
-				dt.d.logger.Crit("valTransform: replacement for full account key was not found",
-					"step", fmt.Sprintf("%d-%d", keyFromTxNum/dt.d.stepSize, keyEndTxNum/dt.d.stepSize),
-					"shortened", hex.EncodeToString(shortened), "toReplace", hex.EncodeToString(auxBuf))
-				return nil, fmt.Errorf("replacement not found for account  %x", auxBuf)
+			if found {
+				shortened = EncodeReferenceKey(shortened[:0], shortenedKeyOffset)
+				return shortened, nil
 			}
-			shortened = EncodeReferenceKey(shortened[:0], shortenedKeyOffset)
-			return shortened, nil
+			// Fallback: try base file (startTxNum=0)
+			if baseMa != nil {
+				shortenedKeyOffset, found = accounts.findShortenedKey(auxBuf, baseMa, baseAccountItem)
+				if found {
+					shortened = EncodeBaseFileReferenceKey(shortened[:0], shortenedKeyOffset)
+					return shortened, nil
+				}
+			}
+			if len(auxBuf) == length.Addr {
+				return auxBuf, nil // if plain key is lost in both files, save original fullkey
+			}
+			dt.d.logger.Crit("valTransform: replacement for full account key was not found",
+				"step", fmt.Sprintf("%d-%d", keyFromTxNum/dt.d.stepSize, keyEndTxNum/dt.d.stepSize),
+				"shortened", hex.EncodeToString(shortened), "toReplace", hex.EncodeToString(auxBuf))
+			return nil, fmt.Errorf("replacement not found for account  %x", auxBuf)
 		}
 
 		branchData, err := commitment.BranchData(valBuf).ReplacePlainKeys(nil, replacer)

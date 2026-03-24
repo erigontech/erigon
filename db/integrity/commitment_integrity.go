@@ -331,7 +331,7 @@ func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, cache *Inte
 	for _, w := range works {
 		w := w
 		eg.Go(func() error {
-			counts, err := checkCommitmentKvDeref(ctx, w.file, stepSize, failFast, logger)
+			counts, err := checkCommitmentKvDeref(ctx, w.file, files, stepSize, failFast, logger)
 			if err == nil {
 				branchKeys.Add(counts.branchKeys)
 				referencedAccounts.Add(counts.referencedAccounts)
@@ -379,13 +379,44 @@ type derefCounts struct {
 	plainStorages      uint64
 }
 
+// decodeRefOffset decodes a reference key offset, handling both old-format (raw offset)
+// and new-format (offset<<1 | baseFlag) encodings. It tries the new format first;
+// if the decoded offset is out of bounds, falls back to legacy decoding.
+func decodeRefOffset(key []byte, readerSize int) uint64 {
+	flagOffset, _ := state.DecodeReferenceKeyWithFlag(key)
+	if flagOffset < uint64(readerSize) {
+		return flagOffset
+	}
+	return state.DecodeReferenceKey(key)
+}
+
+// derefOffset resolves a reference key to an offset and the appropriate reader.
+// It handles both old-format keys (raw offset) and new-format keys (offset<<1 | baseFlag).
+// For new-format base-file references (LSB=1), it uses baseReader if available.
+func derefOffset(key []byte, sameRangeReader, baseReader *seg.Reader) (offset uint64, reader *seg.Reader) {
+	flagOffset, isBaseFile := state.DecodeReferenceKeyWithFlag(key)
+	if isBaseFile && baseReader != nil {
+		return flagOffset, baseReader
+	}
+	// Try flag-decoded offset first (new format: offset<<1)
+	if flagOffset < uint64(sameRangeReader.Size()) {
+		return flagOffset, sameRangeReader
+	}
+	// Fall back to legacy decode (raw offset) — works for old-format files
+	legacyOffset := state.DecodeReferenceKey(key)
+	return legacyOffset, sameRangeReader
+}
+
 // checkDerefBranch resolves all reference keys in a single commitment branch to plain
 // keys via accReader/storageReader, then validates the resulting branch data.
+// baseAccReader/baseStorageReader are optional readers for the base file (startTxNum=0)
+// used to resolve base-file references (new encoding with LSB=1).
 // All issues are non-fatal: logged as warnings and accumulated into retErr (ErrIntegrity-wrapped).
 func checkDerefBranch(
 	branchKey, branchValue []byte,
 	newBranchValueBuf, plainKeyBuf []byte,
 	accReader, storageReader *seg.Reader,
+	baseAccReader, baseStorageReader *seg.Reader,
 	fileName string,
 	trace bool,
 	logger log.Logger,
@@ -418,14 +449,14 @@ func checkDerefBranch(
 				return key, nil // not a referenced key, nothing to check
 			}
 			dc.referencedStorages++
-			offset := state.DecodeReferenceKey(key)
-			if offset >= uint64(storageReader.Size()) {
-				err := fmt.Errorf("storage reference key %x out of bounds for branch %x in %s: %d vs %d", key, branchKey, fileName, offset, storageReader.Size())
+			offset, reader := derefOffset(key, storageReader, baseStorageReader)
+			if offset >= uint64(reader.Size()) {
+				err := fmt.Errorf("storage reference key %x out of bounds for branch %x in %s: %d vs %d", key, branchKey, fileName, offset, reader.Size())
 				logger.Warn(err.Error())
 				return key, nil
 			}
-			storageReader.Reset(offset)
-			plainKey, _ := storageReader.Next(plainKeyBuf[:0])
+			reader.Reset(offset)
+			plainKey, _ := reader.Next(plainKeyBuf[:0])
 			if len(plainKey) != length.Addr+length.Hash {
 				err := fmt.Errorf("storage reference key %x has invalid plainKey for branch %x in %s", key, branchKey, fileName)
 				logger.Warn(err.Error())
@@ -458,14 +489,14 @@ func checkDerefBranch(
 			return key, nil // not a referenced key, nothing to check
 		}
 		dc.referencedAccounts++
-		offset := state.DecodeReferenceKey(key)
-		if offset >= uint64(accReader.Size()) {
-			err := fmt.Errorf("account reference key %x out of bounds for branch %x in %s: %d vs %d", key, branchKey, fileName, offset, accReader.Size())
+		offset, reader := derefOffset(key, accReader, baseAccReader)
+		if offset >= uint64(reader.Size()) {
+			err := fmt.Errorf("account reference key %x out of bounds for branch %x in %s: %d vs %d", key, branchKey, fileName, offset, reader.Size())
 			logger.Warn(err.Error())
 			return key, nil
 		}
-		accReader.Reset(offset)
-		plainKey, _ := accReader.Next(plainKeyBuf[:0])
+		reader.Reset(offset)
+		plainKey, _ := reader.Next(plainKeyBuf[:0])
 		if len(plainKey) != length.Addr {
 			err := fmt.Errorf("account reference key %x has invalid plainKey for branch %x in %s", key, branchKey, fileName)
 			logger.Warn(err.Error())
@@ -492,7 +523,7 @@ func checkDerefBranch(
 	return dc, newBranchData, integrityErr
 }
 
-func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSize uint64, failFast bool, logger log.Logger) (derefCounts, error) {
+func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, allFiles []state.VisibleFile, stepSize uint64, failFast bool, logger log.Logger) (derefCounts, error) {
 	start := time.Now()
 	fileName := filepath.Base(file.Fullpath())
 	startTxNum := file.StartRootNum()
@@ -526,6 +557,36 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 		return derefCounts{}, err
 	}
 	defer storageDecompClose()
+
+	// Open base file readers for base-file references (new encoding with LSB=1).
+	// The base file is the commitment file with startTxNum=0 and the largest endTxNum.
+	var baseAccReader, baseStorageReader *seg.Reader
+	var baseAccClose, baseStorageClose func()
+	if startTxNum > 0 { // only non-base files can have base-file references
+		var baseFile state.VisibleFile
+		for _, f := range allFiles {
+			if f.StartRootNum() == 0 && strings.HasSuffix(f.Fullpath(), ".kv") {
+				if baseFile == nil || f.EndRootNum() > baseFile.EndRootNum() {
+					baseFile = f
+				}
+			}
+		}
+		if baseFile != nil {
+			baseAccReader, baseAccClose, err = deriveReaderForOtherDomain(baseFile.Fullpath(), kv.CommitmentDomain, kv.AccountsDomain)
+			if err != nil {
+				logger.Warn("[integrity] CommitmentKvDeref could not open base account file", "err", err)
+			} else {
+				defer baseAccClose()
+			}
+			baseStorageReader, baseStorageClose, err = deriveReaderForOtherDomain(baseFile.Fullpath(), kv.CommitmentDomain, kv.StorageDomain)
+			if err != nil {
+				logger.Warn("[integrity] CommitmentKvDeref could not open base storage file", "err", err)
+			} else {
+				defer baseStorageClose()
+			}
+		}
+	}
+
 	totalKeys := uint64(commDecomp.Count()) / 2
 	logTicker := time.NewTicker(30 * time.Second)
 	defer logTicker.Stop()
@@ -552,7 +613,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 			continue
 		}
 		counts.branchKeys++
-		dc, _, err := checkDerefBranch(branchKey, branchValue, newBranchValueBuf, plainKeyBuf, accReader, storageReader, fileName, trace, logger)
+		dc, _, err := checkDerefBranch(branchKey, branchValue, newBranchValueBuf, plainKeyBuf, accReader, storageReader, baseAccReader, baseStorageReader, fileName, trace, logger)
 		counts.referencedAccounts += dc.referencedAccounts
 		counts.plainAccounts += dc.plainAccounts
 		counts.referencedStorages += dc.referencedStorages
@@ -1166,7 +1227,7 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 			if !isReferencing {
 				return fmt.Errorf("%w: unexpected %s key len=%d for branch %x in %s", ErrIntegrity, kind, len(key), branchKey, fileName)
 			}
-			offset := state.DecodeReferenceKey(key)
+			offset := decodeRefOffset(key, reader.Size())
 			if offset >= uint64(reader.Size()) {
 				return fmt.Errorf("%w: %s reference key %x out of bounds for branch %x in %s: %d vs %d", ErrIntegrity, kind, key, branchKey, fileName, offset, reader.Size())
 			}
@@ -1364,7 +1425,7 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 				plainKey := key
 				if len(key) != length.Addr+length.Hash {
 					// Try to decode as file offset reference
-					offset := state.DecodeReferenceKey(key)
+					offset := decodeRefOffset(key, storageReader.Size())
 					if offset < uint64(storageReader.Size()) {
 						storageReader.Reset(offset)
 						plainKey, _ = storageReader.Next(plainKeyBuf[:0])
@@ -1385,7 +1446,7 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 			plainKey := key
 			if len(key) != length.Addr {
 				// Try to decode as file offset reference
-				offset := state.DecodeReferenceKey(key)
+				offset := decodeRefOffset(key, accReader.Size())
 				if offset < uint64(accReader.Size()) {
 					accReader.Reset(offset)
 					plainKey, _ = accReader.Next(plainKeyBuf[:0])
@@ -1725,7 +1786,7 @@ func extractCommitmentRefsToCollectors(ctx context.Context, file state.VisibleFi
 			if isStorage {
 				plainKey := key
 				if len(key) != length.Addr+length.Hash {
-					offset := state.DecodeReferenceKey(key)
+					offset := decodeRefOffset(key, nextStoReader.Size())
 					if offset >= uint64(nextStoReader.Size()) {
 						return key, nil
 					}
@@ -1741,7 +1802,7 @@ func extractCommitmentRefsToCollectors(ctx context.Context, file state.VisibleFi
 			}
 			plainKey := key
 			if len(key) != length.Addr {
-				offset := state.DecodeReferenceKey(key)
+				offset := decodeRefOffset(key, nextAccReader.Size())
 				if offset >= uint64(nextAccReader.Size()) {
 					return key, nil
 				}
@@ -1868,7 +1929,7 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 							if !isReferencing {
 								return key, nil
 							}
-							offset := state.DecodeReferenceKey(key)
+							offset := decodeRefOffset(key, stoReader.Size())
 							if offset >= uint64(stoReader.Size()) {
 								return key, nil
 							}
@@ -1895,7 +1956,7 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 						if !isReferencing {
 							return key, nil
 						}
-						offset := state.DecodeReferenceKey(key)
+						offset := decodeRefOffset(key, accReader.Size())
 						if offset >= uint64(accReader.Size()) {
 							return key, nil
 						}
