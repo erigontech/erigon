@@ -162,9 +162,9 @@ A `buildTrieMultiRoundAndWitness` helper for tests that need multiple `Process()
 - [x] Tests pass and lint clean
 
 ### Task 4: Category 4 (Mixed Existing + Non-Existing Keys)
-- [ ] Implement subtest `MixedAccountProof_ExistingAndNonExisting` (4.1)
-- [ ] Implement subtest `MixedStorageProof_ExistingAndNonExisting` (4.2)
-- [ ] Tests pass and lint clean
+- [x] Implement subtest `MixedAccountProof_ExistingAndNonExisting` (4.1)
+- [x] Implement subtest `MixedStorageProof_ExistingAndNonExisting` (4.2)
+- [x] Tests pass and lint clean
 
 ### Task 5: Category 5 (Deep/Large Tries)
 - [ ] Implement subtest `DeepStorageTrie_ManySlots` (5.1)
