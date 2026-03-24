@@ -255,16 +255,17 @@ func (api *DebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startN
 	endNum := startNum + 1 // allows for single param calls
 	if endNumber != nil {
 		// forces negative numbers to fail (too large) but allows zero
-		endNum = uint64(endNumber.Int64()) // [startNum,endNum) from user
+		// endNumber is inclusive: [startNum, endNumber] → convert to exclusive end
+		endNum = uint64(endNumber.Int64()) + 1
 	}
 
 	// is endNum too big?
-	if endNum > latestBlock+1 { // [startNum,endNum)
-		return nil, fmt.Errorf("end block (%d) is later than the latest block (%d)", endNum, latestBlock)
+	if endNum > latestBlock+1 {
+		return nil, fmt.Errorf("end block (%d) is later than the latest block (%d)", endNum-1, latestBlock)
 	}
 
 	if startNum >= endNum {
-		return nil, fmt.Errorf("start block (%d) must be less than end block (%d)", startNum, endNum)
+		return nil, fmt.Errorf("start block (%d) must be less than end block (%d)", startNum, endNum-1)
 	}
 
 	err = api.BaseAPI.checkPruneHistory(ctx, tx, startNum)
@@ -272,7 +273,9 @@ func (api *DebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startN
 		return nil, err
 	}
 
-	//[from, to)
+	// HistoryRange uses [fromTs, toTs) exclusive semantics.
+	// Min(blockNum) returns the first txNum of blockNum = Max(blockNum-1)+1.
+	// So [Min(startNum), Min(endNum)) covers all txNums in blocks [startNum, endNum-1].
 	startTxNum, err := api._txNumReader.Min(ctx, tx, startNum)
 	if err != nil {
 		return nil, err
@@ -281,7 +284,7 @@ func (api *DebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startN
 	if err != nil {
 		return nil, err
 	}
-	return getModifiedAccounts(tx, startTxNum, endTxNum-1)
+	return getModifiedAccounts(tx, startTxNum, endTxNum)
 }
 
 // getModifiedAccounts returns a list of addresses that were modified in the block range
@@ -325,14 +328,15 @@ func (api *DebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHas
 
 	if endHash != nil {
 		var err error
-		endNum, err = api.headerNumberByHash(ctx, tx, *endHash) // [startNum,endNum) from user
+		n, err := api.headerNumberByHash(ctx, tx, *endHash) // endHash is inclusive
 		if err != nil {
 			return nil, fmt.Errorf("end block %x not found", *endHash)
 		}
+		endNum = n + 1 // convert to exclusive end
 	}
 
 	if startNum >= endNum {
-		return nil, fmt.Errorf("start block (%d) must be less than end block (%d)", startNum, endNum)
+		return nil, fmt.Errorf("start block (%d) must be less than end block (%d)", startNum, endNum-1)
 	}
 
 	err = api.BaseAPI.checkPruneHistory(ctx, tx, startNum)
@@ -340,7 +344,6 @@ func (api *DebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHas
 		return nil, err
 	}
 
-	//[from, to)
 	startTxNum, err := api._txNumReader.Min(ctx, tx, startNum)
 	if err != nil {
 		return nil, err
@@ -349,7 +352,7 @@ func (api *DebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHas
 	if err != nil {
 		return nil, err
 	}
-	return getModifiedAccounts(tx, startTxNum, endTxNum-1)
+	return getModifiedAccounts(tx, startTxNum, endTxNum)
 }
 
 func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, txIndex uint64, address common.Address) (*AccountResult, error) {
