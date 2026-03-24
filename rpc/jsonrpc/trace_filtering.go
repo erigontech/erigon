@@ -648,15 +648,16 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			ot.Tracer().OnTxStart(evm.GetVMContext(), txn, msg.From())
 		}
 
-		var execResult *evmtypes.ExecutionResult
-		var timedOut bool
+		var timer *time.Timer
 		if api.evmCallTimeout > 0 {
-			timer := time.AfterFunc(api.evmCallTimeout, evm.Cancel)
-			execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailOut, engine)
-			timedOut = !timer.Stop()
-		} else {
-			execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailOut, engine)
+			timer = time.AfterFunc(api.evmCallTimeout, evm.Cancel)
 		}
+		var execResult *evmtypes.ExecutionResult
+		execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailOut, engine)
+		if timer != nil {
+			timer.Stop()
+		}
+		timedOut := timer != nil && evm.Cancelled()
 
 		if timedOut {
 			timeoutErr := fmt.Errorf("execution aborted (timeout = %v)", api.evmCallTimeout)
