@@ -2877,8 +2877,10 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 	})
 
 	t.Run("AccountsWithLongCommonPrefix", func(t *testing.T) {
-		// Generate 5 accounts whose hashed keys share a 6-nibble common prefix
-		accounts, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0xa, 0xb, 0xc, 0xd, 0xe, 0xf}, length.Addr, 6, 5)
+		// Generate 5 accounts whose hashed keys share a 4-nibble common prefix.
+		// 4 nibbles is enough to create deep extension nodes while keeping
+		// brute-force key generation fast (~65K attempts vs ~16M for 6 nibbles).
+		accounts, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0xa, 0xb, 0xc, 0xd}, length.Addr, 4, 5)
 
 		builder := NewUpdateBuilder()
 		for i, addr := range accounts {
