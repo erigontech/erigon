@@ -20,13 +20,14 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"maps"
 	"math/rand"
 	"os"
+	"slices"
 	"sort"
 	"sync"
 	"time"
 
-	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
@@ -221,7 +222,7 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 				sawAddr[l.Address] = struct{}{}
 			}
 
-			res = reqGen.Erigon("eth_getLogs", reqGen.getLogsForAddresses(bn, bn, maps.Keys(sawAddr)), &resp)
+			res = reqGen.Erigon("eth_getLogs", reqGen.getLogsForAddresses(bn, bn, slices.Collect(maps.Keys(sawAddr))), &resp)
 			if res.Err != nil {
 				if failFast {
 					return fmt.Errorf("could not get modified accounts (Erigon): %v", res.Err)
