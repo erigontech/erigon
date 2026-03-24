@@ -268,12 +268,6 @@ func (sd *SharedDomains) AsGetter(tx kv.TemporalTx) kv.TemporalGetter {
 	return &temporalGetter{sd, tx}
 }
 
-// MemGetLatest returns the latest value for domain/key from the in-memory batch only, without DB fallback.
-// ok=true means the key is dirty (modified in the current block/simulation).
-func (sd *SharedDomains) MemGetLatest(d kv.Domain, k []byte) (v []byte, step kv.Step, ok bool) {
-	return sd.mem.GetLatest(d, k)
-}
-
 func (sd *SharedDomains) SetChangesetAccumulator(acc *changeset.StateChangeSet) {
 	sd.mem.(accHolder).SetChangesetAccumulator(acc)
 }

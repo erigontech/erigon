@@ -883,22 +883,51 @@ func clientLimitExceededError(message string) error {
 	return &rpc.CustomError{Message: message, Code: rpc.ErrCodeClientLimitExceeded}
 }
 
+// simulationStateReader implements commitmentdb.StateReader for eth_simulateV1.
+//
+// WithHistory()=false enables PutBranch to write modified trie branches to sd.mem.
+// This is critical for multi-block simulations: after block N's ComputeCommitment,
+// trie branches are folded back (stored as hashes). When block N+1 needs to re-read
+// a branch that block N modified, this reader finds it in sd.mem (written by PutBranch)
+// rather than falling back to the canonical parent's version (which would not include
+// block N's simulation changes, causing a wrong stateRoot).
+//
+// Read routing:
+//   - sd.GetMemBatch() hit (any domain): post-simulation value from previous or current block.
+//   - CommitmentDomain miss: GetAsOf at commitmentAsOfTxNum = base-parent commitment.
+//   - Other domains miss: GetAsOf at plainStateAsOfTxNum = base-parent account state.
+type simulationStateReader struct {
+	sd                  *execctx.SharedDomains
+	roTx                kv.TemporalTx
+	commitmentAsOfTxNum uint64
+	plainStateAsOfTxNum uint64
+}
+
+func (r *simulationStateReader) WithHistory() bool { return false }
+
+func (r *simulationStateReader) CheckDataAvailable(kv.Domain, kv.Step) error { return nil }
+
+func (r *simulationStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
+	if v, s, ok := r.sd.GetMemBatch().GetLatest(d, plainKey); ok {
+		return v, s, nil
+	}
+	asOf := r.plainStateAsOfTxNum
+	if d == kv.CommitmentDomain {
+		asOf = r.commitmentAsOfTxNum
+	}
+	enc, _, err = r.roTx.GetAsOf(d, plainKey, asOf)
+	if err != nil {
+		return nil, 0, fmt.Errorf("simulationStateReader(GetAsOf) %q: %w", d, err)
+	}
+	return enc, kv.Step(asOf / stepSize), nil
+}
+
+func (r *simulationStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
+	return &simulationStateReader{sd: r.sd, roTx: tx, commitmentAsOfTxNum: r.commitmentAsOfTxNum, plainStateAsOfTxNum: r.plainStateAsOfTxNum}
+}
+
 func newHistoryCommitmentOnlyReader(roTx kv.TemporalTx, sd *execctx.SharedDomains, commitmentAsOfTxNum uint64, plainStateAsOfTxNum uint64) commitmentdb.StateReader {
-	// SimulationStateReader is a unified reader for ALL domains (CommitmentDomain,
-	// AccountsDomain, StorageDomain, CodeDomain).
-	//
-	// WithHistory()=false enables PutBranch to write modified trie branches to sd.mem.
-	// This is critical for multi-block simulations: after block N's ComputeCommitment,
-	// trie branches are folded back (stored as hashes). When block N+1 needs to re-read
-	// a branch that block N modified, SimulationStateReader finds it in sd.mem (written by
-	// PutBranch) rather than falling back to the canonical parent's version (which would
-	// not include block N's simulation changes, causing a wrong stateRoot).
-	//
-	// Read routing:
-	//   - sd.mem hit (any domain): post-simulation value from previous or current block.
-	//   - CommitmentDomain miss: GetAsOf at commitmentAsOfTxNum = base-parent commitment.
-	//   - Other domains miss: GetAsOf at plainStateAsOfTxNum = base-parent account state.
-	return commitmentdb.NewSimulationStateReader(roTx, sd, commitmentAsOfTxNum, plainStateAsOfTxNum)
+	return &simulationStateReader{sd: sd, roTx: roTx, commitmentAsOfTxNum: commitmentAsOfTxNum, plainStateAsOfTxNum: plainStateAsOfTxNum}
 }
 
 func newSimulateStateReader(ttx, tx kv.TemporalTx, tsd, sd *execctx.SharedDomains) commitmentdb.StateReader {

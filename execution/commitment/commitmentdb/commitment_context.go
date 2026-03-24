@@ -40,10 +40,6 @@ type sd interface {
 
 	Trace() bool
 	CommitmentCapture() bool
-
-	// MemGetLatest returns the latest value for domain/key from the in-memory batch only (no DB fallback).
-	// ok=true means the key is dirty (modified in the current simulation), ok=false means it is a clean account.
-	MemGetLatest(d kv.Domain, k []byte) (v []byte, step kv.Step, ok bool)
 }
 
 type SharedDomainsCommitmentContext struct {
