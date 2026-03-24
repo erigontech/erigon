@@ -788,6 +788,16 @@ func (a *ApiHandler) produceBeaconBody(
 					},
 				)
 				executionPayload.Transactions = payload.Transactions
+				// Cache the block body so the beacon API can return transactions
+				// immediately, before the EL commits to its database.
+				if payload.Transactions != nil {
+					var rawTxs [][]byte
+					payload.Transactions.ForEach(func(tx []byte, idx, total int) bool {
+						rawTxs = append(rawTxs, tx)
+						return true
+					})
+					a.blockReader.CacheBlockBody(payload.BlockNumber, rawTxs, nil)
+				}
 				return
 			}
 		}
@@ -1329,6 +1339,17 @@ func (a *ApiHandler) storeBlockAndBlobs(
 		if err := a.blobStoage.WriteBlobSidecars(ctx, blockRoot, sidecars); err != nil {
 			return err
 		}
+	}
+
+	// Cache the execution payload body before writing to DB so the beacon API
+	// can return transactions immediately (before the EL commits).
+	if ep := block.Block.Body.ExecutionPayload; ep != nil && ep.Transactions != nil {
+		var rawTxs [][]byte
+		ep.Transactions.ForEach(func(tx []byte, idx, total int) bool {
+			rawTxs = append(rawTxs, tx)
+			return true
+		})
+		a.blockReader.CacheBlockBody(ep.BlockNumber, rawTxs, nil)
 	}
 
 	if err := a.indiciesDB.Update(ctx, func(tx kv.RwTx) error {

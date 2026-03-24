@@ -28,9 +28,11 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
+	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 var buffersPool = sync.Pool{
@@ -56,6 +58,9 @@ type BeaconSnapshotReader interface {
 	ReadBlindedBlockBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBlindedBeaconBlock, error)
 
 	FrozenSlots() uint64
+	// CacheBlockBody caches a recently produced block's execution body so it can
+	// be returned immediately before the EL commits to its database.
+	CacheBlockBody(blockNumber uint64, transactions [][]byte, withdrawals []*types.Withdrawal)
 }
 
 type beaconSnapshotReader struct {
@@ -71,6 +76,12 @@ func NewBeaconSnapshotReader(snapshots *CaplinSnapshots, eth1Getter snapshot_for
 
 func (r *beaconSnapshotReader) FrozenSlots() uint64 {
 	return r.sn.BlocksAvailable()
+}
+
+func (r *beaconSnapshotReader) CacheBlockBody(blockNumber uint64, transactions [][]byte, withdrawals []*types.Withdrawal) {
+	if c, ok := r.eth1Getter.(*getters.ExecutionEngineReader); ok {
+		c.CacheBody(blockNumber, transactions, withdrawals)
+	}
 }
 
 func (r *beaconSnapshotReader) ReadBlockBySlot(ctx context.Context, tx kv.Tx, slot uint64) (*cltypes.SignedBeaconBlock, error) {
