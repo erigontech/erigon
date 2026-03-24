@@ -644,8 +644,12 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	}
 	// Also return remaining gas to the block gas counter so it is
 	// available for the next transaction.
-	// Pre-Amsterdam: blockStateGasUsed is 0, so max(regular, state) == regular == old blockGasUsed.
-	st.gp.AddGas(st.initialGas.Total() - max(st.blockRegularGasUsed, st.blockStateGasUsed))
+	// EIP-8037: The gas pool tracks only regular gas. State gas is validated
+	// at block end via GasUsed.BlockGasUsed() = max(Σ regular, Σ state).
+	// Using regular here gives: pool -= blockRegularGasUsed per tx, so the
+	// pool enforces Σ regular_i ≤ gasLimit. The full two-dimensional check
+	// (max of sums, not sum of maxes) happens in the block post-validation.
+	st.gp.AddGas(st.initialGas.Total() - st.blockRegularGasUsed)
 
 	effectiveTip := *st.gasPrice
 	if rules.IsLondon {
