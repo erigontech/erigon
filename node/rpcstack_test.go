@@ -247,6 +247,11 @@ func Test_checkPath(t *testing.T) {
 func createAndStartServer(t *testing.T, conf *httpConfig, ws bool, wsConf *wsConfig) *httpServer {
 	t.Helper()
 
+	// Ensure RpcConcurrencyLimit is always set so admission control wiring is exercised.
+	// A high value avoids interfering with existing tests while still activating the path.
+	if conf.RpcConcurrencyLimit == 0 {
+		conf.RpcConcurrencyLimit = 1000
+	}
 	srv := newHTTPServer(testlog.Logger(t, log.LvlError), rpccfg.DefaultHTTPTimeouts)
 	require.NoError(t, srv.enableRPC(nil, *conf, nil))
 	if ws {
