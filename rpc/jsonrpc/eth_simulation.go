@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
@@ -504,6 +505,17 @@ func (s *simulator) simulateBlock(
 		return nil, nil, err
 	}
 
+	// firstMinTxNum: minTxNum of the first simulated block (or this block if it's the first).
+	// Used both for the intraBlockState reader (to read simulated state from previous blocks)
+	// and for the commitment reader (to anchor trie branch reads at the canonical base-parent).
+	firstMinTxNum := minTxNum
+	if len(ancestors) > 0 {
+		firstMinTxNum, err = s.txNumReader.Min(ctx, tx, ancestors[0].Number.Uint64())
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
 	var stateReader state.StateReader
 	if latest {
 		stateReader = state.NewReaderV3(sharedDomains.AsGetter(tx))
@@ -511,7 +523,13 @@ func (s *simulator) simulateBlock(
 		if minTxNum < state.StateHistoryStartTxNum(tx) {
 			return nil, nil, fmt.Errorf("%w: min tx: %d", state.PrunedError, minTxNum)
 		}
-		stateReader = state.NewHistoryReaderV3(tx, minTxNum)
+		if len(ancestors) > 0 {
+			// Multi-block simulation: use an overlay reader that sees state changes from previous
+			// simulated blocks (accumulated in sharedDomains.mem) on top of the canonical base state.
+			stateReader = newSimulationIntraBlockStateReader(tx, sharedDomains, firstMinTxNum)
+		} else {
+			stateReader = state.NewHistoryReaderV3(tx, minTxNum)
+		}
 
 		commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
 		if s.commitmentHistory && minTxNum < commitmentStartingTxNum {
@@ -624,19 +642,11 @@ func (s *simulator) simulateBlock(
 			}
 			// Change the state reader to a commitment-only history reader.
 			//
-			// firstMinTxNum: minTxNum of the FIRST simulated block. This is the txNum boundary
-			// at which canonical chain state equals the base-parent state that Geth uses.
+			// firstMinTxNum: minTxNum of the FIRST simulated block (computed above).
 			// - commitmentAsOfTxNum = firstMinTxNum+1: reads trie branches from canonical
 			//   base-parent commitment (not a later canonical block that omits simulation changes).
 			// - plainStateAsOfTxNum = firstMinTxNum: reads clean sibling accounts from canonical
 			//   base-parent state (GetAsOf at exactly the start of block 1 = end of base parent).
-			firstMinTxNum := minTxNum
-			if len(ancestors) > 0 {
-				firstMinTxNum, err = s.txNumReader.Min(ctx, tx, ancestors[0].Number.Uint64())
-				if err != nil {
-					return nil, nil, err
-				}
-			}
 			commitmentAsOfTxNum := firstMinTxNum + 1
 			plainStateAsOfTxNum := firstMinTxNum
 			s.logger.Warn("[eth_simulateV1] reader setup", "blockNum", blockNumber, "numAncestors", len(ancestors), "firstMinTxNum", firstMinTxNum, "commitmentAsOfTxNum", commitmentAsOfTxNum, "plainStateAsOfTxNum", plainStateAsOfTxNum)
@@ -929,6 +939,137 @@ func (r *simulationStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader
 func newHistoryCommitmentOnlyReader(roTx kv.TemporalTx, sd *execctx.SharedDomains, commitmentAsOfTxNum uint64, plainStateAsOfTxNum uint64) commitmentdb.StateReader {
 	return &simulationStateReader{sd: sd, roTx: roTx, commitmentAsOfTxNum: commitmentAsOfTxNum, plainStateAsOfTxNum: plainStateAsOfTxNum}
 }
+
+// simulationIntraBlockStateReader is a state.StateReader for the 2nd+ block of an eth_simulateV1
+// multi-block simulation.
+//
+// A plain HistoryReaderV3 reads from the canonical DB via GetAsOf and misses state changes written
+// by previous simulation blocks (which live in sharedDomains.mem). This reader overlays those
+// in-memory changes on top of the canonical base-parent state so that block N+1's EVM execution
+// sees the correct simulated state from block N.
+//
+// Read routing:
+//   - sharedDomains.GetMemBatch().GetLatest(domain, key) hit: return the simulated value.
+//   - miss: GetAsOf at firstMinTxNum (canonical state at the start of the first simulated block).
+type simulationIntraBlockStateReader struct {
+	sd            *execctx.SharedDomains
+	roTx          kv.TemporalTx
+	firstMinTxNum uint64
+	composite     []byte // reusable buffer for storage composite key
+}
+
+var _ state.StateReader = (*simulationIntraBlockStateReader)(nil)
+
+func newSimulationIntraBlockStateReader(roTx kv.TemporalTx, sd *execctx.SharedDomains, firstMinTxNum uint64) *simulationIntraBlockStateReader {
+	return &simulationIntraBlockStateReader{
+		sd:            sd,
+		roTx:          roTx,
+		firstMinTxNum: firstMinTxNum,
+		composite:     make([]byte, 20+32),
+	}
+}
+
+func (r *simulationIntraBlockStateReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
+	addressValue := address.Value()
+	enc, _, ok := r.sd.GetMemBatch().GetLatest(kv.AccountsDomain, addressValue[:])
+	if !ok {
+		var err error
+		enc, ok, err = r.roTx.GetAsOf(kv.AccountsDomain, addressValue[:], r.firstMinTxNum)
+		if err != nil || !ok || len(enc) == 0 {
+			return nil, err
+		}
+	}
+	if len(enc) == 0 {
+		return nil, nil
+	}
+	var a accounts.Account
+	if err := accounts.DeserialiseV3(&a, enc); err != nil {
+		return nil, fmt.Errorf("simulationIntraBlockStateReader ReadAccountData(%x): %w", address, err)
+	}
+	return &a, nil
+}
+
+func (r *simulationIntraBlockStateReader) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(address)
+}
+
+func (r *simulationIntraBlockStateReader) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
+	addressValue := address.Value()
+	keyValue := key.Value()
+	r.composite = append(append(r.composite[:0], addressValue[:]...), keyValue[:]...)
+	enc, _, ok := r.sd.GetMemBatch().GetLatest(kv.StorageDomain, r.composite)
+	if !ok {
+		var err error
+		enc, ok, err = r.roTx.GetAsOf(kv.StorageDomain, r.composite, r.firstMinTxNum)
+		if err != nil {
+			return uint256.Int{}, false, err
+		}
+	}
+	var res uint256.Int
+	if len(enc) > 0 {
+		(&res).SetBytes(enc)
+	}
+	return res, ok, nil
+}
+
+func (r *simulationIntraBlockStateReader) HasStorage(address accounts.Address) (bool, error) {
+	// The mem batch doesn't support prefix scans, so we check the canonical base-parent state.
+	// This is correct for all cases except when a prior simulated block added brand-new storage
+	// to a previously storage-less account — a scenario that does not affect balance-transfer tests.
+	addressValue := address.Value()
+	to, ok := kv.NextSubtree(addressValue[:])
+	if !ok {
+		to = nil
+	}
+	it, err := r.roTx.RangeAsOf(kv.StorageDomain, addressValue[:], to, r.firstMinTxNum, order.Asc, kv.Unlim)
+	if err != nil {
+		return false, err
+	}
+	defer it.Close()
+	for it.HasNext() {
+		_, v, err := it.Next()
+		if err != nil {
+			return false, err
+		}
+		if len(v) != 0 {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (r *simulationIntraBlockStateReader) ReadAccountCode(address accounts.Address) ([]byte, error) {
+	addressValue := address.Value()
+	enc, _, ok := r.sd.GetMemBatch().GetLatest(kv.CodeDomain, addressValue[:])
+	if !ok {
+		var err error
+		enc, _, err = r.roTx.GetAsOf(kv.CodeDomain, addressValue[:], r.firstMinTxNum)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return enc, nil
+}
+
+func (r *simulationIntraBlockStateReader) ReadAccountCodeSize(address accounts.Address) (int, error) {
+	code, err := r.ReadAccountCode(address)
+	return len(code), err
+}
+
+func (r *simulationIntraBlockStateReader) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
+	acc, err := r.ReadAccountData(address)
+	if err != nil || acc == nil {
+		return 0, err
+	}
+	if acc.Incarnation == 0 {
+		return 0, nil
+	}
+	return acc.Incarnation - 1, nil
+}
+
+func (r *simulationIntraBlockStateReader) SetTrace(_ bool, _ string) {}
+func (r *simulationIntraBlockStateReader) Trace() bool               { return false }
+func (r *simulationIntraBlockStateReader) TracePrefix() string       { return "" }
 
 func newSimulateStateReader(ttx, tx kv.TemporalTx, tsd, sd *execctx.SharedDomains) commitmentdb.StateReader {
 	// Both commitment and account/storage/code values are read from latest state *but* on different SharedDomains instances.
