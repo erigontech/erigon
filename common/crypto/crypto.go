@@ -324,9 +324,8 @@ func NewKeccakState() keccak.KeccakState {
 }
 func ReturnToPool(h keccak.KeccakState) { hasherPool.Put(h) }
 
-// FinalizeHash finalizes sha and returns the Keccak-256 digest as a value type,
+// FinalizeHash finalizes sha and returns a Keccak-256 digest as a value type,
 // avoiding the heap escape that occurs when passing h[:] to an interface Read method.
-// Uses (*keccak.Hasher).Sum256() on the concrete type (returns [32]byte by value).
 func FinalizeHash(sha keccak.KeccakState) common.Hash {
 	if h, ok := sha.(*keccak.Hasher); ok {
 		return h.Sum256()
