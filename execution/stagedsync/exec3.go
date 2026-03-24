@@ -205,21 +205,11 @@ func ExecV3(ctx context.Context,
 	if !isApplyingBlocks {
 		postValidator = newParallelBlockPostExecutionValidator()
 	}
-	// Enable deferred commitment updates for fork validation and parallel initial sync.
-	// Deferred updates batch commitment calculations to block boundaries rather than
-	// per-transaction, significantly reducing re-org validation overhead.
-	//
-	// Note: deferred mode is NOT enabled for ModeApplyingBlocks because after an
-	// unwind the pending deferred branch writes from block N are not yet in
-	// sd.mem.domains when block N+1's ComputeCommitment.Process reads them.
-	// The reads fall through to the unwind changeset which returns empty data,
-	// causing "empty branch data during unfold" errors.
-	// TODO: enable deferred mode for applying blocks once the unwind path
-	// properly resolves pending deferred updates (flush those before the unwind
-	// point, discard those after).
-	if isForkValidation {
-		doms.SetDeferCommitmentUpdates(true)
-	}
+	// Enable deferred commitment updates. Deferred updates batch commitment
+	// branch writes to a queue during fold(), avoiding per-write map insertion
+	// overhead. The queue is flushed into the correct block's changeset by
+	// SharedDomains.ComputeCommitment before the next block's commitment runs.
+	doms.SetDeferCommitmentUpdates(true)
 	defer doms.SetDeferCommitmentUpdates(false)
 	// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
 	// can't use OS-level ReadAhead - because Data >> RAM
