@@ -252,37 +252,37 @@ func (api *DebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startN
 		return nil, fmt.Errorf("start block (%d) is later than the latest block (%d)", startNum, latestBlock)
 	}
 
-	endNum := startNum + 1 // allows for single param calls
-	if endNumber != nil {
-		// forces negative numbers to fail (too large) but allows zero
-		// endNumber is inclusive: [startNum, endNumber] → convert to exclusive end
-		endNum = uint64(endNumber.Int64()) + 1
+	// Geth semantics: single param N → changes in block N (compare parent vs N).
+	// Two params (A, B) → changes in blocks (A, B] exclusive-start, matching Geth's
+	// stateRoot(A) vs stateRoot(B) trie diff.
+	var historyStartNum, historyEndNum uint64
+	if endNumber == nil {
+		// Single param: return changes in startNum only → [Min(startNum), Min(startNum+1))
+		historyStartNum = startNum
+		historyEndNum = startNum + 1
+	} else {
+		endNum := uint64(endNumber.Int64())
+		if endNum > latestBlock {
+			return nil, fmt.Errorf("end block (%d) is later than the latest block (%d)", endNum, latestBlock)
+		}
+		if startNum >= endNum {
+			return nil, fmt.Errorf("start block (%d) must be less than end block (%d)", startNum, endNum)
+		}
+		// Two params: (startNum, endNum] → [Min(startNum+1), Min(endNum+1))
+		historyStartNum = startNum + 1
+		historyEndNum = endNum + 1
 	}
 
-	// is endNum too big?
-	if endNum > latestBlock+1 {
-		return nil, fmt.Errorf("end block (%d) is later than the latest block (%d)", endNum-1, latestBlock)
-	}
-
-	if startNum >= endNum {
-		return nil, fmt.Errorf("start block (%d) must be less than end block (%d)", startNum, endNum-1)
-	}
-
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, startNum)
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, historyStartNum)
 	if err != nil {
 		return nil, err
 	}
 
-	// HistoryRange uses [fromTs, toTs) exclusive semantics.
-	// Geth compares stateRoot(startNum) vs stateRoot(endNum), so changes IN startNum are
-	// already baked into startHeader.Root — startNum is exclusive, endNum is inclusive.
-	// Min(blockNum) = first txNum of blockNum. So [Min(startNum+1), Min(endNum+1)) covers
-	// all txNums in blocks (startNum, endNum] — matching Geth semantics.
-	startTxNum, err := api._txNumReader.Min(ctx, tx, startNum+1)
+	startTxNum, err := api._txNumReader.Min(ctx, tx, historyStartNum)
 	if err != nil {
 		return nil, err
 	}
-	endTxNum, err := api._txNumReader.Min(ctx, tx, endNum)
+	endTxNum, err := api._txNumReader.Min(ctx, tx, historyEndNum)
 	if err != nil {
 		return nil, err
 	}
@@ -326,32 +326,33 @@ func (api *DebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHas
 	if err != nil {
 		return nil, fmt.Errorf("start block %x not found", startHash)
 	}
-	endNum := startNum + 1 // allows for single parameter calls
-
-	if endHash != nil {
-		var err error
-		n, err := api.headerNumberByHash(ctx, tx, *endHash) // endHash is inclusive
+	// Geth semantics: single param → changes in startNum only; two params (A, B) → (A, B].
+	var historyStartNum, historyEndNum uint64
+	if endHash == nil {
+		historyStartNum = startNum
+		historyEndNum = startNum + 1
+	} else {
+		n, err := api.headerNumberByHash(ctx, tx, *endHash)
 		if err != nil {
 			return nil, fmt.Errorf("end block %x not found", *endHash)
 		}
-		endNum = n + 1 // convert to exclusive end
+		if startNum >= n {
+			return nil, fmt.Errorf("start block (%d) must be less than end block (%d)", startNum, n)
+		}
+		historyStartNum = startNum + 1
+		historyEndNum = n + 1
 	}
 
-	if startNum >= endNum {
-		return nil, fmt.Errorf("start block (%d) must be less than end block (%d)", startNum, endNum-1)
-	}
-
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, startNum)
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, historyStartNum)
 	if err != nil {
 		return nil, err
 	}
 
-	// Same Geth-compatible semantics: startNum exclusive, endNum inclusive.
-	startTxNum, err := api._txNumReader.Min(ctx, tx, startNum+1)
+	startTxNum, err := api._txNumReader.Min(ctx, tx, historyStartNum)
 	if err != nil {
 		return nil, err
 	}
-	endTxNum, err := api._txNumReader.Min(ctx, tx, endNum)
+	endTxNum, err := api._txNumReader.Min(ctx, tx, historyEndNum)
 	if err != nil {
 		return nil, err
 	}
