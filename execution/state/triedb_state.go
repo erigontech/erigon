@@ -761,7 +761,7 @@ func (tds *TrieDbState) ReadAccountCodeSize(address accounts.Address) (codeSize 
 			return 0, err
 		}
 
-		codeHash := crypto.Keccak256Hash(code)
+		codeHash := crypto.HashData(code)
 
 		addrHash, err1 := common.HashData(addressValue[:])
 		if err1 != nil {
