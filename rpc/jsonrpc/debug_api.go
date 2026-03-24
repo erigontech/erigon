@@ -274,9 +274,11 @@ func (api *DebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startN
 	}
 
 	// HistoryRange uses [fromTs, toTs) exclusive semantics.
-	// Min(blockNum) returns the first txNum of blockNum = Max(blockNum-1)+1.
-	// So [Min(startNum), Min(endNum)) covers all txNums in blocks [startNum, endNum-1].
-	startTxNum, err := api._txNumReader.Min(ctx, tx, startNum)
+	// Geth compares stateRoot(startNum) vs stateRoot(endNum), so changes IN startNum are
+	// already baked into startHeader.Root — startNum is exclusive, endNum is inclusive.
+	// Min(blockNum) = first txNum of blockNum. So [Min(startNum+1), Min(endNum+1)) covers
+	// all txNums in blocks (startNum, endNum] — matching Geth semantics.
+	startTxNum, err := api._txNumReader.Min(ctx, tx, startNum+1)
 	if err != nil {
 		return nil, err
 	}
@@ -344,7 +346,8 @@ func (api *DebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHas
 		return nil, err
 	}
 
-	startTxNum, err := api._txNumReader.Min(ctx, tx, startNum)
+	// Same Geth-compatible semantics: startNum exclusive, endNum inclusive.
+	startTxNum, err := api._txNumReader.Min(ctx, tx, startNum+1)
 	if err != nil {
 		return nil, err
 	}
