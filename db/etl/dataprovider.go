@@ -26,6 +26,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common/dir"
@@ -100,7 +101,7 @@ func FlushToDisk(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl) (dataPr
 	return provider, nil
 }
 
-var bufioWriterPool = sync.Pool{New: func() any { return bufio.NewWriterSize(nil, BufIOSize) }}
+var bufioWriterPool = sync.Pool{New: func() any { return bufio.NewWriterSize(nil, int(512*datasize.KB)) }}
 
 func getBufioWriter(w io.Writer) *bufio.Writer {
 	bw := bufioWriterPool.Get().(*bufio.Writer)
