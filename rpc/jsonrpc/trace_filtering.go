@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"sync/atomic"
-	"time"
 
 	jsoniter "github.com/json-iterator/go"
 
@@ -430,11 +429,6 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	noop := state.NewNoopWriter()
 	isPos := false
 
-	txTimeout := api.evmCallTimeout
-	if txTimeout <= 0 {
-		txTimeout = 5 * time.Second
-	}
-
 	for it.HasNext() {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -654,24 +648,39 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			ot.Tracer().OnTxStart(evm.GetVMContext(), txn, msg.From())
 		}
 
-		txCtxWithTimeout, txCancel := context.WithTimeout(ctx, txTimeout)
-		done := make(chan struct{})
-		var timedOut atomic.Bool
-		go func() {
-			select {
-			case <-txCtxWithTimeout.Done():
-				timedOut.Store(true)
-				evm.Cancel()
-			case <-done:
-			}
-		}()
-
 		var execResult *evmtypes.ExecutionResult
-		execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailOut, engine)
-		close(done)
-		txCancel()
+		var timedOut atomic.Bool
+		if api.evmCallTimeout > 0 {
+			txCtx, txCancel := context.WithTimeout(ctx, api.evmCallTimeout)
+			done := make(chan struct{})
+			go func() {
+				select {
+				case <-txCtx.Done():
+					timedOut.Store(true)
+					evm.Cancel()
+				case <-done:
+				}
+			}()
+			execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailOut, engine)
+			close(done)
+			txCancel()
+		} else {
+			execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailOut, engine)
+		}
 
 		if timedOut.Load() {
+			timeoutErr := fmt.Errorf("execution aborted (timeout = %v)", api.evmCallTimeout)
+			if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
+				ot.Tracer().OnTxEnd(nil, timeoutErr)
+			}
+			if first {
+				first = false
+			} else {
+				stream.WriteMore()
+			}
+			stream.WriteObjectStart()
+			rpc.HandleError(timeoutErr, stream)
+			stream.WriteObjectEnd()
 			continue
 		}
 		if err != nil {
