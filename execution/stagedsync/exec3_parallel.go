@@ -2021,7 +2021,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				be.blockStateGasUsed += result.ExecutionResult.BlockStateGasUsed
 				// EIP-8037: per-tx max(regular, state) overestimates vs the true block gas
 				// (max of sums, not sum of maxes), but is a safe upper bound for commit heuristics.
-				applyResult.blockGasUsed = int64(result.ExecutionResult.BlockGasUsed())
+				applyResult.blockGasUsed = int64(max(result.ExecutionResult.BlockRegularGasUsed, result.ExecutionResult.BlockStateGasUsed))
 				receipt := *result.Receipt
 				applyResult.receipt = &receipt
 				applyResult.receipt.Logs = append([]*types.Log{}, result.Receipt.Logs...)

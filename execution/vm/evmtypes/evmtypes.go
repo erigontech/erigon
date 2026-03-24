@@ -91,12 +91,6 @@ func (result *ExecutionResult) Unwrap() error {
 	return result.Err
 }
 
-// BlockGasUsed returns the per-tx EIP-8037 bottleneck gas: max(regular, state).
-// Pre-Amsterdam BlockStateGasUsed is 0, so this equals BlockRegularGasUsed.
-func (result *ExecutionResult) BlockGasUsed() uint64 {
-	return max(result.BlockRegularGasUsed, result.BlockStateGasUsed)
-}
-
 // Failed returns the indicator whether the execution is successful or not
 func (result *ExecutionResult) Failed() bool { return result.Err != nil }
 

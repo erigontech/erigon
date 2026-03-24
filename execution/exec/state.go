@@ -350,7 +350,7 @@ func (rw *Worker) RunTxTask(txTask Task) (result *TxResult) {
 			if result != nil {
 				// EIP-8037: per-tx max(regular, state) overestimates vs the true block gas
 				// (max of sums, not sum of maxes), but is a safe upper bound for metrics.
-				rw.metrics.GasUsed.Add(int64(result.ExecutionResult.BlockGasUsed()))
+				rw.metrics.GasUsed.Add(int64(max(result.ExecutionResult.BlockRegularGasUsed, result.ExecutionResult.BlockStateGasUsed)))
 			}
 			rw.metrics.Active.Add(-1)
 		}()
