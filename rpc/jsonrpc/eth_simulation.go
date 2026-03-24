@@ -673,7 +673,7 @@ func (s *simulator) computeSimulatedStateRoot(
 			if len(ancestors) == 0 {
 				// First simulated block: load the trie state from commitment history.
 				var err error
-				commitTxNum, _, err = sharedDomains.SeekCommitment(context.Background(), tx)
+				commitTxNum, _, err = sharedDomains.SeekCommitment(ctx, tx)
 				if err != nil {
 					return err
 				}
@@ -961,7 +961,7 @@ func (r *simulationStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint
 }
 
 func (r *simulationStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
-	return &simulationStateReader{sd: r.sd, roTx: tx, commitmentAsOfTxNum: r.commitmentAsOfTxNum, plainStateAsOfTxNum: r.plainStateAsOfTxNum}
+	return newHistoryCommitmentOnlyReader(tx, r.sd, r.commitmentAsOfTxNum, r.plainStateAsOfTxNum)
 }
 
 func newHistoryCommitmentOnlyReader(roTx kv.TemporalTx, sd *execctx.SharedDomains, commitmentAsOfTxNum uint64, plainStateAsOfTxNum uint64) commitmentdb.StateReader {
@@ -997,18 +997,21 @@ func newSimulationIntraBlockStateReader(roTx kv.TemporalTx, sd *execctx.SharedDo
 	}
 }
 
+// getEncoded returns the encoded value for a domain key: checks mem batch first, then falls back to GetAsOf.
+func (r *simulationIntraBlockStateReader) getEncoded(domain kv.Domain, key []byte) ([]byte, error) {
+	enc, _, ok := r.sd.GetMemBatch().GetLatest(domain, key)
+	if ok {
+		return enc, nil
+	}
+	enc, _, err := r.roTx.GetAsOf(domain, key, r.firstMinTxNum)
+	return enc, err
+}
+
 func (r *simulationIntraBlockStateReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	addressValue := address.Value()
-	enc, _, ok := r.sd.GetMemBatch().GetLatest(kv.AccountsDomain, addressValue[:])
-	if !ok {
-		var err error
-		enc, ok, err = r.roTx.GetAsOf(kv.AccountsDomain, addressValue[:], r.firstMinTxNum)
-		if err != nil || !ok || len(enc) == 0 {
-			return nil, err
-		}
-	}
-	if len(enc) == 0 {
-		return nil, nil
+	enc, err := r.getEncoded(kv.AccountsDomain, addressValue[:])
+	if err != nil || len(enc) == 0 {
+		return nil, err
 	}
 	var a accounts.Account
 	if err := accounts.DeserialiseV3(&a, enc); err != nil {
@@ -1025,19 +1028,15 @@ func (r *simulationIntraBlockStateReader) ReadAccountStorage(address accounts.Ad
 	addressValue := address.Value()
 	keyValue := key.Value()
 	r.composite = append(append(r.composite[:0], addressValue[:]...), keyValue[:]...)
-	enc, _, ok := r.sd.GetMemBatch().GetLatest(kv.StorageDomain, r.composite)
-	if !ok {
-		var err error
-		enc, ok, err = r.roTx.GetAsOf(kv.StorageDomain, r.composite, r.firstMinTxNum)
-		if err != nil {
-			return uint256.Int{}, false, err
-		}
+	enc, err := r.getEncoded(kv.StorageDomain, r.composite)
+	if err != nil {
+		return uint256.Int{}, false, err
 	}
 	var res uint256.Int
 	if len(enc) > 0 {
 		(&res).SetBytes(enc)
 	}
-	return res, ok, nil
+	return res, len(enc) > 0, nil
 }
 
 func (r *simulationIntraBlockStateReader) HasStorage(address accounts.Address) (bool, error) {
@@ -1068,15 +1067,7 @@ func (r *simulationIntraBlockStateReader) HasStorage(address accounts.Address) (
 
 func (r *simulationIntraBlockStateReader) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	addressValue := address.Value()
-	enc, _, ok := r.sd.GetMemBatch().GetLatest(kv.CodeDomain, addressValue[:])
-	if !ok {
-		var err error
-		enc, _, err = r.roTx.GetAsOf(kv.CodeDomain, addressValue[:], r.firstMinTxNum)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return enc, nil
+	return r.getEncoded(kv.CodeDomain, addressValue[:])
 }
 
 func (r *simulationIntraBlockStateReader) ReadAccountCodeSize(address accounts.Address) (int, error) {
