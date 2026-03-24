@@ -172,7 +172,7 @@ A `buildTrieMultiRoundAndWitness` helper for tests that need multiple `Process()
 - [x] Tests pass and lint clean
 
 ### Task 6: Category 6 (Edge Cases)
-- [ ] Implement subtest `AccountWithZeroBalanceNonZeroNonce` (6.1)
-- [ ] Implement subtest `AccountsWithLongCommonPrefix` (6.2)
-- [ ] Implement subtest `MultipleAccountsWithStorage_WitnessStorageAcrossAccounts` (6.3)
-- [ ] Tests pass and lint clean
+- [x] Implement subtest `AccountWithZeroBalanceNonZeroNonce` (6.1)
+- [x] Implement subtest `AccountsWithLongCommonPrefix` (6.2)
+- [x] Implement subtest `MultipleAccountsWithStorage_WitnessStorageAcrossAccounts` (6.3)
+- [x] Tests pass and lint clean
