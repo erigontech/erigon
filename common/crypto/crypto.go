@@ -70,9 +70,10 @@ type EllipticCurve interface {
 // HashBytes hashes the provided data using the KeccakState and returns a 32 byte hash
 func HashBytes(data []byte) common.Hash {
 	sha := NewKeccakState()
-	defer ReturnToPool(sha)
 	sha.Write(data) //nolint:errcheck
-	return FinalizeHash(sha)
+	h := FinalizeHash(sha)
+	ReturnToPool(sha)
+	return h
 }
 
 // Keccak256 calculates and returns the Keccak256 hash of the input data.

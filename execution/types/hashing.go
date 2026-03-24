@@ -172,9 +172,10 @@ func RawRlpHash(rawRlpData rlp.RawValue) common.Hash {
 
 func rlpHash(x any) common.Hash {
 	sha := crypto.NewKeccakState()
-	defer crypto.ReturnToPool(sha)
 	rlp.Encode(sha, x) //nolint:errcheck
-	return crypto.FinalizeHash(sha)
+	h := crypto.FinalizeHash(sha)
+	crypto.ReturnToPool(sha)
+	return h
 }
 
 // prefixSlices contains one-byte slices for all possible prefix values (0–255).
@@ -193,10 +194,11 @@ func init() {
 // given interface. It's used for typed transactions.
 func prefixedRlpHash(prefix byte, x any) common.Hash {
 	sha := crypto.NewKeccakState()
-	defer crypto.ReturnToPool(sha)
 	sha.Write(prefixSlices[prefix]) //nolint:errcheck
 	if err := rlp.Encode(sha, x); err != nil {
 		panic(err)
 	}
-	return crypto.FinalizeHash(sha)
+	h := crypto.FinalizeHash(sha)
+	crypto.ReturnToPool(sha)
+	return h
 }
