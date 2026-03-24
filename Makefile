@@ -346,9 +346,9 @@ kurtosis-cleanup:
 	@echo "-----------------------------------\n"
 	kurtosis enclave rm -f makefile-kurtosis-testnet
 
-## lintci:                            run golangci-lint linters (full scan, no --new-from-rev)
+## lintci:                            run golangci-lint linters
 lintci:
-	@CGO_CXXFLAGS="$(CGO_CXXFLAGS)" go tool golangci-lint run --config ./.golangci.yml
+	@CGO_CXXFLAGS="$(CGO_CXXFLAGS)" ./tools/golangci_lint.sh
 
 ## lint:                              run all linters
 lint: 
