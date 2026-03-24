@@ -237,19 +237,18 @@ func assertMatchesEqual(t *testing.T, expected, got []Match) {
 
 // Benchmarks
 
-// buildLargeTestTree creates a large patricia tree (~2000 patterns) to simulate
-// real compression dictionary sizes where cache effects are significant.
+// buildLargeTestTree creates a large patricia tree (~64K patterns, matching real
+// MaxDictPatterns=64*1024) to simulate real compression dictionary sizes.
 func buildLargeTestTree() (*PatriciaTree, []byte) {
+	const numPatterns = 64 * 1024
 	var pt PatriciaTree
-	// Use deterministic PRNG for reproducibility
 	seed := [32]byte{0x42}
-	patterns := make([][]byte, 0, 2000)
+	patterns := make([][]byte, 0, numPatterns)
 
 	// Generate patterns of varying lengths (5-64 bytes), mimicking Ethereum data patterns
-	for i := 0; i < 2000; i++ {
+	for i := 0; i < numPatterns; i++ {
 		pLen := 5 + (i % 60)
 		pattern := make([]byte, pLen)
-		// Simple deterministic fill based on index
 		for j := range pattern {
 			seed[j%32] ^= byte(i*7 + j*13)
 			pattern[j] = seed[j%32]
@@ -258,10 +257,9 @@ func buildLargeTestTree() (*PatriciaTree, []byte) {
 		patterns = append(patterns, pattern)
 	}
 
-	// Build test data: concatenate subsets of patterns with random-ish filler
+	// Build test data (~32KB): concatenate subsets of patterns with filler
 	data := make([]byte, 0, 32*1024)
-	for i := 0; i < 500; i++ {
-		// Add a pattern (or part of one)
+	for i := 0; len(data) < 32*1024; i++ {
 		p := patterns[i%len(patterns)]
 		if i%3 == 0 {
 			data = append(data, p...)
@@ -269,7 +267,6 @@ func buildLargeTestTree() (*PatriciaTree, []byte) {
 			half := len(p) / 2
 			data = append(data, p[:half]...)
 		}
-		// Add some filler bytes
 		for j := 0; j < 8; j++ {
 			data = append(data, byte(i*3+j))
 		}
