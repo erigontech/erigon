@@ -50,9 +50,7 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	bt.Whitelist(`.*for_amsterdam/.*`)
 	// static — tested in state test format by TestState
 	bt.SkipLoad(`^for_amsterdam/static/state_tests/`)
-	bt.SkipLoad(`^for_amsterdam/amsterdam/eip7954_increase_max_contract_size/test_max_code_size_deposit_gas.json`)                      // block=1, gas used by execution: 38601120, in header: 16777216
 	bt.SkipLoad(`^for_amsterdam/amsterdam/eip8037_state_creation_gas_cost_increase/test_sstore_oog_reservoir_inflation_detection.json`) // block=1, block access list mismatch (EIP-7928 issue, not gas)
-	bt.SkipLoad(`^for_amsterdam/frontier/create/test_create_deposit_oog.json`)                                                          // block=1, enough_gas_False subtests still fail (different bug)
 
 	bt.Walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root
