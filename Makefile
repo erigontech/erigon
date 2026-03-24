@@ -349,10 +349,11 @@ kurtosis-cleanup:
 ## lintci:                            run golangci-lint linters
 lintci:
 	@CGO_CXXFLAGS="$(CGO_CXXFLAGS)" ./tools/golangci_lint.sh
+	@./tools/mod_tidy_check.sh
 
 ## lint:                              run all linters
-lint: 
-	@./tools/golangci_lint.sh
+lint:
+	@CGO_CXXFLAGS="$(CGO_CXXFLAGS)" ./tools/golangci_lint.sh
 	@./tools/mod_tidy_check.sh
 
 ## tidy:                              `go mod tidy`
