@@ -198,8 +198,7 @@ func (m *mmapBytesReader) readAt(length int) ([]byte, error) {
 	return result, nil
 }
 
-// touch sums the first and last bytes of b to trigger page faults at both ends.
-// The return value prevents the compiler from eliding the reads.
+// touch forcing mmap-read - to highlight it on `pprof`
 func touch(b []byte) byte {
 	if len(b) == 0 {
 		return 0
