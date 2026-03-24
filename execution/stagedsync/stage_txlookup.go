@@ -265,7 +265,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	case *mdbx2.MdbxCursor:
 		valsCursor = &mdbx2.MdbxCursorPseudoDupSort{MdbxCursor: c}
 	default:
-		return fmt.Errorf("unexpected cursor type %T for table %s", valsRwCursor, kv.TxLookup)
+		valsCursor = &kv.RwCursorPseudoDupSort{RwCursor: c}
 	}
 
 	logEvery := time.NewTicker(logInterval)
