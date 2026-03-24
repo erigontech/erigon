@@ -64,14 +64,15 @@ type configSnapshot struct {
 	RPCTxFeeCap float64 `json:"rpc_tx_fee_cap"`
 
 	// Sync config
-	LoopThrottle   string `json:"loop_throttle"`
+	LoopThrottle    string `json:"loop_throttle"`
 	BreakAfterStage string `json:"break_after_stage"`
-	LoopBlockLimit uint   `json:"loop_block_limit"`
-	ExecWorkerCount int   `json:"exec_worker_count"`
+	LoopBlockLimit  uint   `json:"loop_block_limit"`
+	ExecWorkerCount int    `json:"exec_worker_count"`
 
 	// Feature flags
-	ExperimentalBAL    bool `json:"experimental_bal"`
-	KeepExecutionProofs bool `json:"keep_execution_proofs"`
+	ExperimentalBAL                  bool `json:"experimental_bal"`
+	KeepExecutionProofs              bool `json:"keep_execution_proofs"`
+	ExperimentalConcurrentCommitment bool `json:"experimental_concurrent_commitment"`
 
 	// Snapshot config
 	SnapKeepBlocks bool `json:"snap_keep_blocks"`
@@ -82,28 +83,28 @@ type configSnapshot struct {
 	// Consensus
 	HeimdallURL     string `json:"heimdall_url"`
 	WithoutHeimdall bool   `json:"without_heimdall"`
-
 }
 
 func snapshotConfig(cfg *ethconfig.Config) configSnapshot {
 	return configSnapshot{
-		NetworkID:           cfg.NetworkID,
-		StateStream:         cfg.StateStream,
-		InternalCL:          cfg.InternalCL,
-		RPCGasCap:           cfg.RPCGasCap,
-		RPCTxFeeCap:         cfg.RPCTxFeeCap,
-		LoopThrottle:        cfg.Sync.LoopThrottle.String(),
-		BreakAfterStage:     cfg.Sync.BreakAfterStage,
-		LoopBlockLimit:      cfg.Sync.LoopBlockLimit,
-		ExecWorkerCount:     cfg.Sync.ExecWorkerCount,
-		ExperimentalBAL:     cfg.ExperimentalBAL,
-		KeepExecutionProofs: cfg.Sync.KeepExecutionProofs,
-		SnapKeepBlocks:      cfg.Snapshot.KeepBlocks,
-		SnapProduceE2:       cfg.Snapshot.ProduceE2,
-		SnapProduceE3:       cfg.Snapshot.ProduceE3,
-		NoDownloader:        cfg.Snapshot.NoDownloader,
-		HeimdallURL:         cfg.HeimdallURL,
-		WithoutHeimdall:     cfg.WithoutHeimdall,
+		NetworkID:                        cfg.NetworkID,
+		StateStream:                      cfg.StateStream,
+		InternalCL:                       cfg.InternalCL,
+		RPCGasCap:                        cfg.RPCGasCap,
+		RPCTxFeeCap:                      cfg.RPCTxFeeCap,
+		LoopThrottle:                     cfg.Sync.LoopThrottle.String(),
+		BreakAfterStage:                  cfg.Sync.BreakAfterStage,
+		LoopBlockLimit:                   cfg.Sync.LoopBlockLimit,
+		ExecWorkerCount:                  cfg.Sync.ExecWorkerCount,
+		ExperimentalBAL:                  cfg.ExperimentalBAL,
+		KeepExecutionProofs:              cfg.Sync.KeepExecutionProofs,
+		ExperimentalConcurrentCommitment: cfg.Sync.ExperimentalConcurrentCommitment,
+		SnapKeepBlocks:                   cfg.Snapshot.KeepBlocks,
+		SnapProduceE2:                    cfg.Snapshot.ProduceE2,
+		SnapProduceE3:                    cfg.Snapshot.ProduceE3,
+		NoDownloader:                     cfg.Snapshot.NoDownloader,
+		HeimdallURL:                      cfg.HeimdallURL,
+		WithoutHeimdall:                  cfg.WithoutHeimdall,
 	}
 }
 
@@ -132,9 +133,9 @@ func TestConfigDefaults(t *testing.T) {
 // pattern that must remain stable during refactoring.
 func TestConfigWithFlags(t *testing.T) {
 	tests := []struct {
-		name   string
-		args   []string
-		check  func(t *testing.T, snap configSnapshot)
+		name  string
+		args  []string
+		check func(t *testing.T, snap configSnapshot)
 	}{
 		{
 			name: "disable state stream",
