@@ -884,21 +884,21 @@ func clientLimitExceededError(message string) error {
 }
 
 func newHistoryCommitmentOnlyReader(roTx kv.TemporalTx, sd *execctx.SharedDomains, commitmentAsOfTxNum uint64, plainStateAsOfTxNum uint64) commitmentdb.StateReader {
-	// Commitment domain: read trie branches from history at commitmentAsOfTxNum.
-	// For a single-block simulation or the first simulated block, commitmentAsOfTxNum is within
-	// the simulated block's range, so GetAsOf returns the base parent's canonical commitment.
-	// For the 2nd+ block, commitmentAsOfTxNum is forced to stay within the FIRST simulated
-	// block's range so that branches not in the in-memory trie are read from the same canonical
-	// base parent commitment (not from a later canonical block that doesn't include our simulation).
+	// SimulationStateReader is a unified reader for ALL domains (CommitmentDomain,
+	// AccountsDomain, StorageDomain, CodeDomain).
 	//
-	// Account/storage/code: use SimulationPlainStateReader which reads from sd.mem for dirty
-	// (simulation-modified) accounts and from GetAsOf at plainStateAsOfTxNum for clean sibling
-	// accounts. This makes the commitment hash deterministic regardless of the node's sync state.
-	return commitmentdb.NewCommitmentSplitStateReader(
-		commitmentdb.NewHistoryStateReader(roTx, commitmentAsOfTxNum),
-		commitmentdb.NewSimulationPlainStateReader(roTx, sd, plainStateAsOfTxNum),
-		true,
-	)
+	// WithHistory()=false enables PutBranch to write modified trie branches to sd.mem.
+	// This is critical for multi-block simulations: after block N's ComputeCommitment,
+	// trie branches are folded back (stored as hashes). When block N+1 needs to re-read
+	// a branch that block N modified, SimulationStateReader finds it in sd.mem (written by
+	// PutBranch) rather than falling back to the canonical parent's version (which would
+	// not include block N's simulation changes, causing a wrong stateRoot).
+	//
+	// Read routing:
+	//   - sd.mem hit (any domain): post-simulation value from previous or current block.
+	//   - CommitmentDomain miss: GetAsOf at commitmentAsOfTxNum = base-parent commitment.
+	//   - Other domains miss: GetAsOf at plainStateAsOfTxNum = base-parent account state.
+	return commitmentdb.NewSimulationStateReader(roTx, sd, commitmentAsOfTxNum, plainStateAsOfTxNum)
 }
 
 func newSimulateStateReader(ttx, tx kv.TemporalTx, tsd, sd *execctx.SharedDomains) commitmentdb.StateReader {

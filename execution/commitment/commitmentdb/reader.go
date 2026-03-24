@@ -285,6 +285,65 @@ func (r *SimulationPlainStateReader) Clone(tx kv.TemporalTx) StateReader {
 	return NewSimulationPlainStateReader(tx, r.sd, r.limitReadAsOfTxNum)
 }
 
+// SimulationStateReader is the unified state reader used by eth_simulateV1 for ALL domains
+// (CommitmentDomain, AccountsDomain, StorageDomain, CodeDomain) when computing the
+// commitment hash for simulated blocks on top of a frozen (historical) parent block.
+//
+// WithHistory returns false so that PutBranch writes modified trie branches to sd.mem.
+// This is essential for multi-block simulations: block N's branch modifications are
+// persisted to sd.mem and can be read back by block N+1, so the trie is consistent
+// across simulated blocks without writing to the canonical DB.
+//
+// Read routing:
+//   - Key is in sd.mem (dirty — modified by any prior simulated block or the current one):
+//     returns the post-simulation value from the in-memory batch.
+//   - CommitmentDomain (clean — trie branch not in sd.mem):
+//     GetAsOf at commitmentAsOfTxNum (= canonical base-parent commitment).
+//   - Other domains (clean — account/storage/code not touched by any simulation):
+//     GetAsOf at plainStateAsOfTxNum (= canonical base-parent account state).
+type SimulationStateReader struct {
+	sd                   sd
+	commitmentReader     *HistoryStateReader
+	plainStateReader     *HistoryStateReader
+	commitmentAsOfTxNum  uint64
+	plainStateAsOfTxNum  uint64
+}
+
+func NewSimulationStateReader(roTx kv.TemporalTx, sd sd, commitmentAsOfTxNum, plainStateAsOfTxNum uint64) *SimulationStateReader {
+	return &SimulationStateReader{
+		sd:                  sd,
+		commitmentReader:    NewHistoryStateReader(roTx, commitmentAsOfTxNum),
+		plainStateReader:    NewHistoryStateReader(roTx, plainStateAsOfTxNum),
+		commitmentAsOfTxNum: commitmentAsOfTxNum,
+		plainStateAsOfTxNum: plainStateAsOfTxNum,
+	}
+}
+
+// WithHistory returns false so that PutBranch writes modified trie branches to sd.mem,
+// making them available for subsequent simulated blocks.
+func (r *SimulationStateReader) WithHistory() bool { return false }
+
+func (r *SimulationStateReader) CheckDataAvailable(kv.Domain, kv.Step) error { return nil }
+
+func (r *SimulationStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
+	// Check sd.mem first: if the key was modified by any prior simulated block or by
+	// the current simulation, use that value (accounts, storage, or trie branches).
+	if v, s, ok := r.sd.MemGetLatest(d, plainKey); ok {
+		return v, s, nil
+	}
+	// Not in sd.mem (clean). For CommitmentDomain branches, read from the canonical
+	// base-parent commitment; for other domains, read from the canonical base-parent
+	// account/storage state.
+	if d == kv.CommitmentDomain {
+		return r.commitmentReader.Read(d, plainKey, stepSize)
+	}
+	return r.plainStateReader.Read(d, plainKey, stepSize)
+}
+
+func (r *SimulationStateReader) Clone(tx kv.TemporalTx) StateReader {
+	return NewSimulationStateReader(tx, r.sd, r.commitmentAsOfTxNum, r.plainStateAsOfTxNum)
+}
+
 // A history reader that reads:
 //   - commitment data as-of  commitmentAsOf txnum
 //   - account/storage/code data as-of plainsStateAsOf txnum
