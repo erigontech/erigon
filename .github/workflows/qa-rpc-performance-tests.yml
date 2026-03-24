@@ -365,7 +365,7 @@ jobs:
 
       - name: Upload RpcDaemon logs
         if: matrix.client == 'erigon' && steps.test_step.outputs.test_executed == 'true'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: rpcdaemon-logs
           path: $ERIGON_REFERENCE_DATA_DIR/logs/rpcdaemon.log
@@ -401,7 +401,7 @@ jobs:
 
       - name: Upload test results
         if: (matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true') && steps.test_step.outputs.test_executed == 'true'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: test-results-${{ env.CHAIN }}-${{ matrix.client }}
           path: ${{ env.past_test_dir }}
