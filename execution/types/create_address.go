@@ -35,7 +35,8 @@ func CreateAddress(a common.Address, nonce uint64) common.Address {
 	av := a
 	pos += rlp.EncodeAddress(av[:], data[pos:])
 	rlp.EncodeU64(nonce, data[pos:])
-	return common.BytesToAddress(crypto.Keccak256(data)[12:])
+	h := crypto.HashData(data)
+	return common.Address(h[12:])
 }
 
 var createAddress2Prefix = []byte{0xff}
@@ -45,5 +46,6 @@ var createAddress2Prefix = []byte{0xff}
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func CreateAddress2(b common.Address, salt [32]byte, inithash accounts.CodeHash) common.Address {
 	initHashValue := inithash.Value()
-	return common.BytesToAddress(crypto.Keccak256(createAddress2Prefix, b[:], salt[:], initHashValue[:])[12:])
+	h := crypto.Keccak256Hash(createAddress2Prefix, b[:], salt[:], initHashValue[:])
+	return common.Address(h[12:])
 }
