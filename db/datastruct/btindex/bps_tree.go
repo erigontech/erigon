@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"time"
 	"unsafe"
 
@@ -33,6 +34,93 @@ import (
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
 	"github.com/erigontech/erigon/db/seg"
 )
+
+const minKeysForPrefixIndex = 60_000
+
+// prefixIndex maps first 2 bytes of keys to minimum di where that prefix starts.
+// Level 1: byte[0] → minDi (256 entries)
+// Level 2: byte[0][byte[1]] → minDi (256×256 = 65,536 entries)
+type prefixIndex struct {
+	l1 [256]uint64
+	l2 [256][256]uint64
+}
+
+func newPrefixIndex() *prefixIndex {
+	p := new(prefixIndex)
+	for i := range p.l1 {
+		p.l1[i] = math.MaxUint64
+	}
+	for i := range p.l2 {
+		for j := range p.l2[i] {
+			p.l2[i][j] = math.MaxUint64
+		}
+	}
+	return p
+}
+
+func (p *prefixIndex) record(key []byte, di uint64) {
+	if len(key) >= 1 && di < p.l1[key[0]] {
+		p.l1[key[0]] = di
+	}
+	if len(key) >= 2 && di < p.l2[key[0]][key[1]] {
+		p.l2[key[0]][key[1]] = di
+	}
+}
+
+// lookup returns the narrowed [l, r) range for the given key based on prefix boundaries.
+// If the prefix has no keys, returns (0, 0) to signal "not found".
+func (p *prefixIndex) lookup(key []byte, totalCount uint64) (l, r uint64) {
+	if len(key) < 1 {
+		return 0, totalCount
+	}
+
+	b0 := key[0]
+	l = p.l1[b0]
+	if l == math.MaxUint64 {
+		return 0, 0 // no keys with this first byte
+	}
+
+	// Find right bound from L1: next occupied entry after b0
+	r = math.MaxUint64
+	for i := int(b0) + 1; i < 256; i++ {
+		if p.l1[i] != math.MaxUint64 {
+			r = p.l1[i]
+			break
+		}
+	}
+
+	if len(key) >= 2 {
+		b1 := key[1]
+		if p.l2[b0][b1] != math.MaxUint64 {
+			l = p.l2[b0][b1] // tighter left bound
+
+			// Find right bound from L2: scan for next occupied entry
+			r = math.MaxUint64
+			// First scan remaining entries in same b0 bucket
+			for j := int(b1) + 1; j < 256; j++ {
+				if p.l2[b0][j] != math.MaxUint64 {
+					r = p.l2[b0][j]
+					break
+				}
+			}
+			// If not found, scan subsequent b0 buckets
+			if r == math.MaxUint64 {
+				for i := int(b0) + 1; i < 256; i++ {
+					if p.l1[i] != math.MaxUint64 {
+						r = p.l1[i]
+						break
+					}
+				}
+			}
+		}
+		// If l2[b0][b1] is MaxUint64, keep L1 bounds (no keys with this 2-byte prefix)
+	}
+
+	if r == math.MaxUint64 || r > totalCount {
+		r = totalCount
+	}
+	return l, r
+}
 
 // nolint
 type indexSeeker interface {
@@ -84,14 +172,16 @@ func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, 
 		nodes[i].off = offt.Get(nodes[i].di)
 	}
 
+	bt.BuildPrefixIndex(kv)
 	return bt
 }
 
 type BpsTree struct {
-	offt  *eliasfano32.EliasFano // ef with offsets to key/vals
-	mx    []Node
-	M     uint64 // limit on amount of 'children' for node
-	trace bool
+	offt   *eliasfano32.EliasFano // ef with offsets to key/vals
+	mx     []Node
+	prefix *prefixIndex // 2-level prefix index for O(1) range narrowing; nil when N < minKeysForPrefixIndex
+	M      uint64       // limit on amount of 'children' for node
+	trace  bool
 
 	dataLookupFunc dataLookupFunc
 	keyCmpFunc     keyCmpFunc
@@ -206,25 +296,71 @@ func (b *BpsTree) WarmUp(kv *seg.Reader) (err error) {
 		step = 1
 	}
 
-	// extremely stupid picking of needed nodes:
+	if N >= minKeysForPrefixIndex {
+		b.prefix = newPrefixIndex()
+	}
+
 	cachedBytes := uint64(0)
 	nsz := uint64(unsafe.Sizeof(Node{}))
 	var key []byte
-	for i := step; i < N; i += step {
-		di := i - 1
-		_, key, err = b.keyCmpFunc(nil, di, kv, key[:0])
-		if err != nil {
-			return err
+
+	if b.prefix != nil {
+		// Sequential scan: read every key for prefix index, cache every step-th key as Node
+		kv.Reset(0)
+		nextCache := step - 1
+		for di := uint64(0); di < N; di++ {
+			key, _ = kv.Next(key[:0])
+			kv.Skip()
+
+			b.prefix.record(key, di)
+
+			if di == nextCache {
+				b.mx = append(b.mx, Node{off: b.offt.Get(di), key: common.Copy(key), di: di})
+				cachedBytes += nsz + uint64(len(key))
+				nextCache += step
+			}
 		}
-		b.mx = append(b.mx, Node{off: b.offt.Get(di), key: common.Copy(key), di: di})
-		cachedBytes += nsz + uint64(len(key))
+	} else {
+		// Original path: read only every step-th key via random access
+		for i := step; i < N; i += step {
+			di := i - 1
+			_, key, err = b.keyCmpFunc(nil, di, kv, key[:0])
+			if err != nil {
+				return err
+			}
+			b.mx = append(b.mx, Node{off: b.offt.Get(di), key: common.Copy(key), di: di})
+			cachedBytes += nsz + uint64(len(key))
+		}
 	}
 
-	log.Root().Debug("WarmUp finished", "file", kv.FileName(), "M", b.M, "N", common.PrettyCounter(N),
+	args := []interface{}{
+		"file", kv.FileName(), "M", b.M, "N", common.PrettyCounter(N),
 		"cached", fmt.Sprintf("%d %.2f%%", len(b.mx), 100*(float64(len(b.mx))/float64(N))),
 		"cacheSize", datasize.ByteSize(cachedBytes).HR(), "fileSize", datasize.ByteSize(kv.Size()).HR(),
-		"took", time.Since(t))
+		"took", time.Since(t),
+	}
+	if b.prefix != nil {
+		args = append(args, "prefixIdx", true)
+	}
+	log.Root().Debug("WarmUp finished", args...)
 	return nil
+}
+
+// BuildPrefixIndex scans all keys to build the prefix index.
+// Used by NewBpsTreeWithNodes where WarmUp is skipped.
+func (b *BpsTree) BuildPrefixIndex(kv *seg.Reader) {
+	N := b.offt.Count()
+	if N < minKeysForPrefixIndex {
+		return
+	}
+	b.prefix = newPrefixIndex()
+	kv.Reset(0)
+	var key []byte
+	for di := uint64(0); di < N; di++ {
+		key, _ = kv.Next(key[:0])
+		kv.Skip()
+		b.prefix.record(key, di)
+	}
 }
 
 // bs performs pre-seach over warmed-up list of nodes to figure out left and right bounds on di for key
@@ -278,10 +414,21 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 		return cur, nil
 	}
 
-	// if b.trace {
-	// 	fmt.Printf("pivot di:%d di(LR): [%d %d] k: %x found: %t\n", n.di, l, r, n.key, l == r)
-	// 	defer func() { fmt.Printf("found=%t %x [%d %d]\n", bytes.Equal(key, seekKey), seekKey, l, r) }()
-	// }
+	// Narrow range with prefix index if available
+	if b.prefix != nil {
+		pl, pr := b.prefix.lookup(seekKey, b.offt.Count())
+		if pl == 0 && pr == 0 {
+			// No keys with this prefix — fall through to find next key via cached nodes
+		} else {
+			if pl > l {
+				l = pl
+			}
+			if pr < r {
+				r = pr
+			}
+		}
+	}
+
 	var m uint64
 	var cmp int
 
@@ -353,6 +500,20 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 	if b.trace {
 		fmt.Printf("pivot di: %d di(LR): [%d %d] k: %x found: %t\n", n.di, l, r, n.key, l == r)
 		defer func() { fmt.Printf("found %x [%d %d]\n", key, l, r) }()
+	}
+
+	// Narrow range with prefix index if available
+	if l != r && b.prefix != nil {
+		pl, pr := b.prefix.lookup(key, b.offt.Count())
+		if pl == 0 && pr == 0 {
+			return nil, false, 0, nil // no keys with this prefix
+		}
+		if pl > l {
+			l = pl
+		}
+		if pr < r {
+			r = pr
+		}
 	}
 
 	var cmp int

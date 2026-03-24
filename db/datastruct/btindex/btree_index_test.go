@@ -427,6 +427,64 @@ func TestNewBtIndex(t *testing.T) {
 	}
 }
 
+func TestPrefixIndexLookup(t *testing.T) {
+	t.Parallel()
+
+	p := newPrefixIndex()
+	// Record keys with known prefixes and di values
+	// Prefix 0x01xx starts at di=100
+	p.record([]byte{0x01, 0x00, 0xaa}, 100)
+	p.record([]byte{0x01, 0x10, 0xbb}, 200)
+	p.record([]byte{0x01, 0x20, 0xcc}, 300)
+	// Prefix 0x02xx starts at di=500
+	p.record([]byte{0x02, 0xab, 0xdd}, 500)
+	p.record([]byte{0x02, 0xac, 0xee}, 600)
+	// Prefix 0x05xx starts at di=1000
+	p.record([]byte{0x05, 0xff, 0x11}, 1000)
+
+	totalCount := uint64(2000)
+
+	// Test L2 lookup: key 0x02ab should narrow to [500, 600)
+	l, r := p.lookup([]byte{0x02, 0xab, 0x00}, totalCount)
+	require.Equal(t, uint64(500), l, "L2 left bound")
+	require.Equal(t, uint64(600), r, "L2 right bound")
+
+	// Test L2 lookup: key 0x02ac should narrow to [600, 1000) — next L1 entry is 0x05 at 1000
+	l, r = p.lookup([]byte{0x02, 0xac, 0x00}, totalCount)
+	require.Equal(t, uint64(600), l, "L2 left bound for 0x02ac")
+	require.Equal(t, uint64(1000), r, "L2 right bound for 0x02ac")
+
+	// Test L1 lookup: key with only 1 byte 0x02 should use L1 bounds [500, 1000)
+	l, r = p.lookup([]byte{0x02}, totalCount)
+	require.Equal(t, uint64(500), l, "L1 left bound")
+	require.Equal(t, uint64(1000), r, "L1 right bound")
+
+	// Test L1 lookup: last prefix 0x05 should clamp right to totalCount
+	l, r = p.lookup([]byte{0x05, 0xff}, totalCount)
+	require.Equal(t, uint64(1000), l, "last prefix left bound")
+	require.Equal(t, totalCount, r, "last prefix right bound clamped to totalCount")
+
+	// Test non-existent prefix: 0x03 has no keys
+	l, r = p.lookup([]byte{0x03, 0x00}, totalCount)
+	require.Equal(t, uint64(0), l, "non-existent prefix should return 0")
+	require.Equal(t, uint64(0), r, "non-existent prefix should return 0")
+
+	// Test empty key: no narrowing
+	l, r = p.lookup([]byte{}, totalCount)
+	require.Equal(t, uint64(0), l)
+	require.Equal(t, totalCount, r)
+
+	// Test L2 with non-existent second byte: 0x01,0x05 doesn't exist, should fall back to L1 bounds
+	l, r = p.lookup([]byte{0x01, 0x05}, totalCount)
+	require.Equal(t, uint64(100), l, "should use L1 left when L2 entry missing")
+	require.Equal(t, uint64(500), r, "should use L1 right when L2 entry missing")
+
+	// Test record with duplicate lower di: should keep minimum
+	p.record([]byte{0x02, 0xab, 0x00}, 450)
+	l, _ = p.lookup([]byte{0x02, 0xab, 0x00}, totalCount)
+	require.Equal(t, uint64(450), l, "record should keep minimum di")
+}
+
 func BenchmarkBtIndex_Get(b *testing.B) {
 	keyCount := 1_000_000
 	if testing.Short() {
