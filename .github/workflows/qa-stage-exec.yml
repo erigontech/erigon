@@ -97,7 +97,7 @@ jobs:
           --repo erigon \
           --commit $(git rev-parse HEAD) \
           --branch ${{ github.ref_name }} \
-          --test_name "stage_exec resume nonchaintip" \
+          --test_name stage_exec_resume_nonchaintip \
           --chain $CHAIN \
           --runner ${{ runner.name }} \
           --db_version $db_version \
