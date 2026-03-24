@@ -39,13 +39,17 @@ func CreateAddress(a common.Address, nonce uint64) common.Address {
 	return common.Address(h[12:])
 }
 
-var createAddress2Prefix = []byte{0xff}
-
 // CreateAddress2 creates an ethereum address given the address bytes, initial
 // contract code hash and a salt.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func CreateAddress2(b common.Address, salt [32]byte, inithash accounts.CodeHash) common.Address {
+	// 0xff | address (20) | salt (32) | inithash (32) = 85 bytes, fixed size → stack array
+	var buf [85]byte
+	buf[0] = 0xff
+	copy(buf[1:], b[:])
+	copy(buf[21:], salt[:])
 	initHashValue := inithash.Value()
-	h := crypto.Keccak256Hash(createAddress2Prefix, b[:], salt[:], initHashValue[:])
+	copy(buf[53:], initHashValue[:])
+	h := crypto.HashData(buf[:])
 	return common.Address(h[12:])
 }
