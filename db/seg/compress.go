@@ -513,7 +513,7 @@ func (db *DictionaryBuilder) loadFunc(k, v []byte, table etl.CurrentTableReader,
 				db.lastWord = nil // Pattern owns the slice; allocate fresh below
 			}
 		}
-		db.lastWord = append(db.lastWord, k...)
+		db.lastWord = append(db.lastWord[:0], k...)
 		db.lastWordScore = score
 	}
 	return nil
@@ -521,7 +521,9 @@ func (db *DictionaryBuilder) loadFunc(k, v []byte, table etl.CurrentTableReader,
 
 func (db *DictionaryBuilder) finish(hardLimit int) {
 	if db.lastWord != nil {
-		db.processWord(db.lastWord, db.lastWordScore)
+		if db.processWord(db.lastWord, db.lastWordScore) {
+			db.lastWord = nil
+		}
 	}
 
 	for db.Len() > hardLimit {
