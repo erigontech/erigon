@@ -124,7 +124,7 @@ func ProcessBAL(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, ams
 		return fmt.Errorf("block %d: invalid computed block access list: %w", blockNum, err)
 	}
 	if err := bal.ValidateMaxItems(h.GasLimit); err != nil {
-		return fmt.Errorf("block %d: %w", blockNum, err)
+		return fmt.Errorf("%w, block %d: %w", rules.ErrInvalidBlock, blockNum, err)
 	}
 	log.Debug("bal", "blockNum", blockNum, "hash", bal.Hash())
 	if !amsterdam {
