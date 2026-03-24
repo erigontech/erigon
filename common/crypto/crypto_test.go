@@ -53,7 +53,7 @@ func TestKeccak256Hash(t *testing.T) {
 func TestKeccak256Hasher(t *testing.T) {
 	msg := []byte("abc")
 	exp, _ := hex.DecodeString("4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45")
-	checkhash(t, "Sha3-256-array", func(in []byte) []byte { h := HashBytes(in); return h[:] }, msg, exp)
+	checkhash(t, "Sha3-256-array", func(in []byte) []byte { h := HashData(in); return h[:] }, msg, exp)
 }
 
 func TestKeccak256HasherNew(t *testing.T) {
@@ -334,10 +334,32 @@ func TestPythonIntegration(t *testing.T) {
 }
 
 var benchPayload = make([]byte, 500)
+var benchPayload1 = make([]byte, 1)
 
 func BenchmarkHashBytes(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
-		HashBytes(benchPayload)
+		HashData(benchPayload)
+	}
+}
+
+func BenchmarkKeccak256Hash(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		Keccak256Hash(benchPayload)
+	}
+}
+
+func BenchmarkHashBytes1(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		HashData(benchPayload1)
+	}
+}
+
+func BenchmarkKeccak256Hash1(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		Keccak256Hash(benchPayload1)
 	}
 }

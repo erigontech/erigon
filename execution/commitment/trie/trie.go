@@ -542,9 +542,8 @@ func (t *Trie) UpdateAccountCode(key []byte, code CodeNode) error {
 		return fmt.Errorf("account not found with key: %x", key)
 	}
 
-	actualCodeHash := crypto.Keccak256(code)
-	codeHashValue := accNode.CodeHash.Value()
-	if !bytes.Equal(codeHashValue[:], actualCodeHash) {
+	actualCodeHash := crypto.HashData(code)
+	if accNode.CodeHash.Value() != actualCodeHash {
 		return fmt.Errorf("inserted code mismatch account hash (acc.CodeHash=%x codeHash=%x)", accNode.CodeHash, actualCodeHash)
 	}
 

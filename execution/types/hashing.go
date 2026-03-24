@@ -167,7 +167,7 @@ func intsize(i uint) (size int) {
 }
 
 func RawRlpHash(rawRlpData rlp.RawValue) common.Hash {
-	return crypto.HashBytes(rawRlpData)
+	return crypto.HashData(rawRlpData)
 }
 
 func rlpHash(x any) common.Hash {
