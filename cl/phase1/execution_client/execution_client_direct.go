@@ -198,7 +198,7 @@ func (cc *ExecutionClientDirect) HasGapInSnapshots(ctx context.Context) bool {
 	return hasGap
 }
 
-func (cc *ExecutionClientDirect) GetBlobs(ctx context.Context, versionedHashes []common.Hash) (blobs [][]byte, proofs [][][]byte) {
+func (cc *ExecutionClientDirect) GetBlobs(ctx context.Context, versionedHashes []common.Hash, _ clparams.StateVersion) (blobs [][]byte, proofs [][][]byte) {
 	if cc.txpool == nil {
 		return nil, nil
 	}

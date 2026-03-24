@@ -123,7 +123,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 
 	elHasBlobs := false
 	if f.engine != nil && checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 && !f.peerDas.IsArchivedMode() {
-		blobsWithProof, proofs := f.engine.GetBlobs(ctx, versionedHashes)
+		blobsWithProof, proofs := f.engine.GetBlobs(ctx, versionedHashes, block.Version())
 		elHasBlobs = len(blobsWithProof) == len(versionedHashes) && len(proofs) == len(versionedHashes)
 		log.Debug("OnBlock: EL blob data availability", "blockRoot", common.Hash(blockRoot), "elHasBlobs", elHasBlobs)
 	}

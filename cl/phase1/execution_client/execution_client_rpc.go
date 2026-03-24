@@ -292,6 +292,6 @@ func (cc *ExecutionClientRpc) HasGapInSnapshots(ctx context.Context) bool {
 	return false
 }
 
-func (cc *ExecutionClientRpc) GetBlobs(ctx context.Context, versionedHashes []common.Hash) (blobs [][]byte, proofs [][][]byte) {
+func (cc *ExecutionClientRpc) GetBlobs(ctx context.Context, versionedHashes []common.Hash, _ clparams.StateVersion) (blobs [][]byte, proofs [][][]byte) {
 	return nil, nil
 }

@@ -295,6 +295,10 @@ func NewForkChoiceStore(
 	f.finalizedCheckpoint.Store(anchorCheckpoint)
 	f.unrealizedFinalizedCheckpoint.Store(anchorCheckpoint)
 	f.unrealizedJustifiedCheckpoint.Store(anchorCheckpoint)
+	// Store anchor root in per-block unrealized maps so filter_block_tree
+	// lookups succeed for the anchor block without falling through to the fork graph.
+	f.unrealizedJustifications.Store(common.Hash(anchorRoot), anchorCheckpoint)
+	f.unrealizedFinalizations.Store(common.Hash(anchorRoot), anchorCheckpoint)
 	f.proposerBoostRoot.Store(common.Hash{})
 
 	f.highestSeen.Store(anchorState.Slot())

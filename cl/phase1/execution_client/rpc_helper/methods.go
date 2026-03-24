@@ -26,8 +26,6 @@ const ForkChoiceUpdatedV2 = "engine_forkchoiceUpdatedV2"
 const ForkChoiceUpdatedV3 = "engine_forkchoiceUpdatedV3"
 const ForkChoiceUpdatedV4 = "engine_forkchoiceUpdatedV4"
 
-const EngineNewPayloadV5 = "engine_newPayloadV5"
-
 const EngineGetPayloadV1 = "engine_getPayloadV1"
 const EngineGetPayloadV2 = "engine_getPayloadV2"
 const EngineGetPayloadV3 = "engine_getPayloadV3"

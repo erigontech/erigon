@@ -93,6 +93,13 @@ func (cc *ExecutionClientEngine) SetBeaconChainConfig(beaconCfg *clparams.Beacon
 	cc.beaconCfg = beaconCfg
 }
 
+// Close releases resources held by the engine client (HTTP connections, goroutines).
+func (cc *ExecutionClientEngine) Close() {
+	if cc.rpcClient != nil {
+		cc.rpcClient.Close()
+	}
+}
+
 // buildExecutionPayload converts a CL Eth1Block into an Engine API ExecutionPayload.
 func buildExecutionPayload(payload *cltypes.Eth1Block) *engine_types.ExecutionPayload {
 	reversedBaseFeePerGas := common.Copy(payload.BaseFeePerGas[:])
@@ -490,7 +497,7 @@ func (cc *ExecutionClientEngine) HasGapInSnapshots(ctx context.Context) bool {
 	return false
 }
 
-func (cc *ExecutionClientEngine) GetBlobs(ctx context.Context, versionedHashes []common.Hash) (blobs [][]byte, proofs [][][]byte) {
+func (cc *ExecutionClientEngine) GetBlobs(ctx context.Context, versionedHashes []common.Hash, version clparams.StateVersion) (blobs [][]byte, proofs [][][]byte) {
 	if cc.isLocal() && cc.txpool != nil {
 		req := &txpoolproto.GetBlobsRequest{BlobHashes: make([]*typesproto.H256, len(versionedHashes))}
 		for i, h := range versionedHashes {
@@ -510,7 +517,29 @@ func (cc *ExecutionClientEngine) GetBlobs(ctx context.Context, versionedHashes [
 		return blobs, proofs
 	}
 
-	// Remote mode: try engine_getBlobsV1
+	// Remote mode: select GetBlobs version based on fork.
+	// V1 returns single proof per blob (Deneb/Electra).
+	// V2/V3 return cell proofs (Fulu+).
+	if version >= clparams.FuluVersion {
+		result, err := cc.engine.GetBlobsV2(ctx, versionedHashes)
+		if err != nil {
+			return nil, nil
+		}
+		blobs = make([][]byte, len(result))
+		proofs = make([][][]byte, len(result))
+		for i, bap := range result {
+			if bap == nil {
+				continue
+			}
+			blobs[i] = bap.Blob
+			proofs[i] = make([][]byte, len(bap.CellProofs))
+			for j, cp := range bap.CellProofs {
+				proofs[i][j] = cp
+			}
+		}
+		return blobs, proofs
+	}
+
 	result, err := cc.engine.GetBlobsV1(ctx, versionedHashes)
 	if err != nil {
 		return nil, nil

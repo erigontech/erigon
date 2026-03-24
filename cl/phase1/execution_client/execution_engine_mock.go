@@ -207,18 +207,18 @@ func (c *MockExecutionEngineGetAssembledBlockCall) DoAndReturn(f func(context.Co
 }
 
 // GetBlobs mocks base method.
-func (m *MockExecutionEngine) GetBlobs(ctx context.Context, versionedHashes []common.Hash) ([][]byte, [][][]byte) {
+func (m *MockExecutionEngine) GetBlobs(ctx context.Context, versionedHashes []common.Hash, version clparams.StateVersion) ([][]byte, [][][]byte) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetBlobs", ctx, versionedHashes)
+	ret := m.ctrl.Call(m, "GetBlobs", ctx, versionedHashes, version)
 	ret0, _ := ret[0].([][]byte)
 	ret1, _ := ret[1].([][][]byte)
 	return ret0, ret1
 }
 
 // GetBlobs indicates an expected call of GetBlobs.
-func (mr *MockExecutionEngineMockRecorder) GetBlobs(ctx, versionedHashes any) *MockExecutionEngineGetBlobsCall {
+func (mr *MockExecutionEngineMockRecorder) GetBlobs(ctx, versionedHashes, version any) *MockExecutionEngineGetBlobsCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetBlobs", reflect.TypeOf((*MockExecutionEngine)(nil).GetBlobs), ctx, versionedHashes)
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetBlobs", reflect.TypeOf((*MockExecutionEngine)(nil).GetBlobs), ctx, versionedHashes, version)
 	return &MockExecutionEngineGetBlobsCall{Call: call}
 }
 
@@ -234,13 +234,13 @@ func (c *MockExecutionEngineGetBlobsCall) Return(blobs [][]byte, proofs [][][]by
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockExecutionEngineGetBlobsCall) Do(f func(context.Context, []common.Hash) ([][]byte, [][][]byte)) *MockExecutionEngineGetBlobsCall {
+func (c *MockExecutionEngineGetBlobsCall) Do(f func(context.Context, []common.Hash, clparams.StateVersion) ([][]byte, [][][]byte)) *MockExecutionEngineGetBlobsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockExecutionEngineGetBlobsCall) DoAndReturn(f func(context.Context, []common.Hash) ([][]byte, [][][]byte)) *MockExecutionEngineGetBlobsCall {
+func (c *MockExecutionEngineGetBlobsCall) DoAndReturn(f func(context.Context, []common.Hash, clparams.StateVersion) ([][]byte, [][][]byte)) *MockExecutionEngineGetBlobsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
