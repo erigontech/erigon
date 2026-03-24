@@ -157,9 +157,9 @@ A `buildTrieMultiRoundAndWitness` helper for tests that need multiple `Process()
 - [x] Tests pass and lint clean
 
 ### Task 3: Category 3 (Accounts With Code)
-- [ ] Implement subtest `AccountWithCodeHash` (3.1)
-- [ ] Implement subtest `AccountWithCodeHash_AndStorage` (3.2)
-- [ ] Tests pass and lint clean
+- [x] Implement subtest `AccountWithCodeHash` (3.1)
+- [x] Implement subtest `AccountWithCodeHash_AndStorage` (3.2)
+- [x] Tests pass and lint clean
 
 ### Task 4: Category 4 (Mixed Existing + Non-Existing Keys)
 - [ ] Implement subtest `MixedAccountProof_ExistingAndNonExisting` (4.1)
