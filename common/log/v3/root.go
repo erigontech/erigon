@@ -7,20 +7,26 @@ import (
 	"github.com/mattn/go-isatty"
 )
 
-// Predefined handlers
+// Predefined handlers.
+//
+// StdoutHandler and StderrHandler use AsyncStreamHandler so that goroutines
+// writing log records are never blocked by a mutex.  Under high concurrency
+// (e.g. thousands of Caplin validator goroutines) the synchronous SyncHandler
+// inside the plain StreamHandler caused complete process freezes because every
+// goroutine serialised on the same mutex for every log write.
 var (
 	root          *logger
-	StdoutHandler = StreamHandler(os.Stdout, TerminalFormatNoColor()) //LogfmtFormat())
-	StderrHandler = StreamHandler(os.Stderr, TerminalFormatNoColor()) //LogfmtFormat())
+	StdoutHandler = AsyncStreamHandler(os.Stdout, TerminalFormatNoColor())
+	StderrHandler = AsyncStreamHandler(os.Stderr, TerminalFormatNoColor())
 )
 
 func init() {
 	if isatty.IsTerminal(os.Stdout.Fd()) {
-		StdoutHandler = StreamHandler(colorable.NewColorableStdout(), TerminalFormat())
+		StdoutHandler = AsyncStreamHandler(colorable.NewColorableStdout(), TerminalFormat())
 	}
 
 	if isatty.IsTerminal(os.Stderr.Fd()) {
-		StderrHandler = StreamHandler(colorable.NewColorableStderr(), TerminalFormat())
+		StderrHandler = AsyncStreamHandler(colorable.NewColorableStderr(), TerminalFormat())
 	}
 
 	root = &logger{[]any{}, new(swapHandler)}

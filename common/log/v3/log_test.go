@@ -225,6 +225,62 @@ func TestBufferedHandler(t *testing.T) {
 	}
 }
 
+func TestAsyncHandler(t *testing.T) {
+	t.Parallel()
+
+	ch := make(chan Record, 1)
+	l := New()
+	l.SetHandler(AsyncHandler(0, &waitHandler{ch}))
+
+	l.Debug("async")
+	if r := <-ch; r.Msg != "async" {
+		t.Fatalf("wrong value for r.Msg: got %q want %q", r.Msg, "async")
+	}
+}
+
+// TestAsyncHandlerNeverBlocks verifies that goroutines are not blocked even
+// when the async queue is full (i.e. the underlying handler is slow).
+func TestAsyncHandlerNeverBlocks(t *testing.T) {
+	t.Parallel()
+
+	// Underlying handler that blocks until released.
+	release := make(chan struct{})
+	blocked := &blockingHandler{release: release}
+
+	const bufSize = 4
+	l := New()
+	l.SetHandler(AsyncHandler(bufSize, blocked))
+
+	// Fill the queue and then overflow it — none of these calls should block.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := range bufSize*2 + 1 {
+			l.Info("flood", "i", i)
+		}
+	}()
+
+	select {
+	case <-done:
+		// good — no goroutine was blocked
+	case <-time.After(2 * time.Second):
+		t.Fatal("AsyncHandler blocked callers when the queue was full")
+	}
+
+	close(release) // unblock the drain goroutine so the test can exit cleanly
+}
+
+type blockingHandler struct {
+	release chan struct{}
+}
+
+func (h *blockingHandler) Log(_ *Record) error {
+	<-h.release
+	return nil
+}
+
+func (h *blockingHandler) Enabled(_ context.Context, _ Lvl) bool { return true }
+
 func TestLogContext(t *testing.T) {
 	t.Parallel()
 

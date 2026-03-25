@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/go-stack/stack"
 )
@@ -437,6 +438,84 @@ func (h bufferedHandler) Log(r *Record) error {
 
 func (h bufferedHandler) Enabled(ctx context.Context, lvl Lvl) bool {
 	return h.baseHandler.Enabled(ctx, lvl)
+}
+
+// asyncDefaultBufSize is the default channel capacity for AsyncHandler.
+// At ~60 records/s this provides roughly 60 seconds of headroom before
+// any records are dropped under sustained overload.
+const asyncDefaultBufSize = 4096
+
+// AsyncHandler is a non-blocking variant of BufferedHandler.
+//
+// Callers enqueue records into a buffered channel and return immediately;
+// a single drain goroutine processes entries sequentially, so the wrapped
+// handler never faces concurrent calls and needs no mutex of its own.
+// When the channel is full the record is silently dropped and a drop
+// counter is incremented; the drain goroutine emits a Warn-level entry
+// reporting the count after each batch so drops are always visible.
+//
+// Use AsyncStreamHandler to get a ready-to-use terminal handler with the
+// correct lazy-evaluation order (see below).
+func AsyncHandler(bufSize int, h Handler) Handler {
+	if bufSize <= 0 {
+		bufSize = asyncDefaultBufSize
+	}
+	recs := make(chan *Record, bufSize)
+	dropped := new(atomic.Int64)
+	go func() {
+		for m := range recs {
+			_ = h.Log(m)
+			if n := dropped.Swap(0); n > 0 {
+				_ = h.Log(&Record{
+					Time: time.Now(),
+					Lvl:  LvlWarn,
+					Msg:  "log records dropped due to slow writer",
+					Ctx:  []any{"count", n},
+					KeyNames: RecordKeyNames{
+						Time: timeKey,
+						Msg:  msgKey,
+						Lvl:  lvlKey,
+					},
+				})
+			}
+		}
+	}()
+	return &asyncHandler{baseHandler: h, recs: recs, dropped: dropped}
+}
+
+type asyncHandler struct {
+	baseHandler Handler
+	recs        chan *Record
+	dropped     *atomic.Int64
+}
+
+func (h *asyncHandler) Log(r *Record) error {
+	select {
+	case h.recs <- r:
+	default:
+		h.dropped.Add(1)
+	}
+	return nil
+}
+
+func (h *asyncHandler) Enabled(ctx context.Context, lvl Lvl) bool {
+	return h.baseHandler.Enabled(ctx, lvl)
+}
+
+// AsyncStreamHandler is the high-concurrency alternative to StreamHandler.
+//
+// The handler chain is:
+//
+//	caller → LazyHandler (evaluates Lazy values in the caller's goroutine)
+//	       → AsyncHandler (non-blocking enqueue; never blocks the caller)
+//	       → streamHandler (sequential writes by a single drain goroutine)
+//
+// Because only the drain goroutine ever calls streamHandler.Log, no mutex
+// is needed around the writer.  Under the default INFO level at ~60 log
+// lines/s the 4096-entry buffer provides roughly 60 seconds of headroom
+// before any records are dropped.
+func AsyncStreamHandler(wr io.Writer, fmtr Format) Handler {
+	return LazyHandler(AsyncHandler(asyncDefaultBufSize, streamHandler{wr: wr, fmtr: fmtr}))
 }
 
 // LazyHandler writes all values to the wrapped handler after evaluating
