@@ -267,6 +267,9 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	if noHistory && resume {
 		return errors.New("--no-history and --resume are mutually exclusive")
 	}
+	if noHistory && clearCommitment {
+		return errors.New("--no-history and --clear-commitment are mutually exclusive")
+	}
 
 	dirs := datadir.New(datadirCli)
 	if reset {
