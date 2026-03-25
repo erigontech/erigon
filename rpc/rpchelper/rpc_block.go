@@ -31,6 +31,13 @@ var UnknownBlockError = &rpc.CustomError{
 	Message: "Unknown block",
 }
 
+func unknownBlockErr(requested string, latestBlock uint64) *rpc.CustomError {
+	return &rpc.CustomError{
+		Code:    -39001,
+		Message: fmt.Sprintf("block %q not available (head block: %d)", requested, latestBlock),
+	}
+}
+
 func GetLatestBlockNumber(tx kv.Tx) (uint64, error) {
 	forkchoiceHeadHash := rawdb.ReadForkchoiceHead(tx)
 	if forkchoiceHeadHash != (common.Hash{}) {
@@ -57,7 +64,8 @@ func GetFinalizedBlockNumber(tx kv.Tx) (uint64, error) {
 		}
 	}
 
-	return 0, UnknownBlockError
+	latest, _ := GetLatestBlockNumber(tx)
+	return 0, unknownBlockErr("finalized", latest)
 }
 
 func GetSafeBlockNumber(tx kv.Tx) (uint64, error) {
@@ -68,7 +76,9 @@ func GetSafeBlockNumber(tx kv.Tx) (uint64, error) {
 			return *forkchoiceSafeNum, nil
 		}
 	}
-	return 0, UnknownBlockError
+
+	latest, _ := GetLatestBlockNumber(tx)
+	return 0, unknownBlockErr("safe", latest)
 }
 
 func GetLatestExecutedBlockNumber(tx kv.Tx) (uint64, error) {
