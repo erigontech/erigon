@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"sync/atomic"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -82,6 +83,7 @@ type CallResult struct {
 	ReturnData string          `json:"returnData"`
 	Logs       []*types.RPCLog `json:"logs"`
 	GasUsed    hexutil.Uint64  `json:"gasUsed"`
+	MaxUsedGas hexutil.Uint64  `json:"maxUsedGas"`
 	Status     hexutil.Uint64  `json:"status"`
 	Error      any             `json:"error,omitempty"`
 }
@@ -699,10 +701,17 @@ func (s *simulator) simulateCall(
 	// It is possible to override precompiles with EVM bytecode or move them to another address.
 	evm.SetPrecompiles(precompiles)
 
-	// Wait for the context to be done and cancel the EVM. Even if the EVM has finished, cancelling may be done (repeatedly)
+	done := make(chan struct{})
+	defer close(done)
+
+	var timedOut atomic.Bool
 	go func() {
-		<-ctx.Done()
-		evm.Cancel()
+		select {
+		case <-ctx.Done():
+			timedOut.Store(true)
+			evm.Cancel()
+		case <-done:
+		}
 	}()
 
 	s.gasPool.AddBlobGas(msg.BlobGas())
@@ -712,7 +721,7 @@ func (s *simulator) simulateCall(
 	}
 
 	// If the timer caused an abort, return an appropriate error message
-	if evm.Cancelled() {
+	if timedOut.Load() {
 		return nil, nil, nil, fmt.Errorf("execution aborted (timeout = %v)", s.evmCallTimeout)
 	}
 	*cumulativeGasUsed += result.ReceiptGasUsed
@@ -726,7 +735,7 @@ func (s *simulator) simulateCall(
 		logs = receipt.Logs
 	}
 
-	callResult := CallResult{GasUsed: hexutil.Uint64(result.ReceiptGasUsed)}
+	callResult := CallResult{GasUsed: hexutil.Uint64(result.ReceiptGasUsed), MaxUsedGas: hexutil.Uint64(result.MaxGasUsed)}
 	callResult.Logs = make([]*types.RPCLog, 0, len(logs))
 	for _, l := range logs {
 		rpcLog := &types.RPCLog{
@@ -856,12 +865,22 @@ func clientLimitExceededError(message string) error {
 
 func newHistoryCommitmentOnlyReader(roTx kv.TemporalTx, sd *execctx.SharedDomains, limitReadAsOfTxNum uint64) commitmentdb.StateReader {
 	// Commitment values are read from history, whereas account/storage/code values are read from latest state
-	return rpchelper.NewCommitmentSplitStateReader(commitmentdb.NewHistoryStateReader(roTx, limitReadAsOfTxNum), commitmentdb.NewLatestStateReader(roTx, sd), true)
+	return commitmentdb.NewCommitmentSplitStateReader(commitmentdb.NewHistoryStateReader(roTx, limitReadAsOfTxNum), commitmentdb.NewLatestStateReader(roTx, sd), true)
 }
 
 func newSimulateStateReader(ttx, tx kv.TemporalTx, tsd, sd *execctx.SharedDomains) commitmentdb.StateReader {
-	// Both commitment and account/storage/code values are read from latest state *but* on different SharedDomains instances
-	return rpchelper.NewCommitmentSplitStateReader(commitmentdb.NewLatestStateReader(ttx, tsd), commitmentdb.NewLatestStateReader(tx, sd), false)
+	// Both commitment and account/storage/code values are read from latest state *but* on different SharedDomains instances.
+	// We use CommitmentReplayStateReader (not a plain SplitStateReader) so that Clone() only propagates the new tx to
+	// the commitment (temp DB) reader, keeping the plain state (main DB) reader pointing at the original outer-DB tx.
+	// This is critical: accounts whose data didn't change during simulation are not written to sd.mem, so when the trie
+	// reads them it must fall back to the real DB (via the original tx), not to the empty temp DB (via ttx).
+	return &commitmentdb.CommitmentReplayStateReader{
+		SplitStateReader: commitmentdb.NewCommitmentSplitStateReader(
+			commitmentdb.NewLatestStateReader(ttx, tsd),
+			commitmentdb.NewLatestStateReader(tx, sd),
+			false,
+		),
+	}
 }
 
 // computeCommitmentFromStateHistory calculates the commitment root for simulated block from state history

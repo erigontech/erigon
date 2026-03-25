@@ -210,19 +210,9 @@ func (i *FilesItem) closeFilesAndRemove() {
 	if i == nil {
 		return
 	}
-	if i.decompressor != nil {
-		i.decompressor.Close()
-		// paranoic-mode on: don't delete frozen files
-		if !i.frozen {
-			if err := dir.RemoveFile(i.decompressor.FilePath()); err != nil {
-				log.Trace("remove after close", "err", err, "file", i.decompressor.FileName())
-			}
-			if err := dir.RemoveFile(i.decompressor.FilePath() + ".torrent"); err != nil {
-				log.Trace("remove after close", "err", err, "file", i.decompressor.FileName()+".torrent")
-			}
-		}
-		i.decompressor = nil
-	}
+	// Delete accessors before the data file. If the process is killed between
+	// deleting the data file and accessors, the accessor files become
+	// permanently orphaned.
 	if i.index != nil {
 		i.index.Close()
 		// paranoic-mode on: don't delete frozen files
@@ -256,10 +246,31 @@ func (i *FilesItem) closeFilesAndRemove() {
 		}
 		i.existence = nil
 	}
+	if i.decompressor != nil {
+		i.decompressor.Close()
+		// paranoic-mode on: don't delete frozen files
+		if !i.frozen {
+			if err := dir.RemoveFile(i.decompressor.FilePath()); err != nil {
+				log.Trace("remove after close", "err", err, "file", i.decompressor.FileName())
+			}
+			if err := dir.RemoveFile(i.decompressor.FilePath() + ".torrent"); err != nil {
+				log.Trace("remove after close", "err", err, "file", i.decompressor.FileName()+".torrent")
+			}
+		}
+		i.decompressor = nil
+	}
 }
 
+var filterDirtyFilesReCache sync.Map // pattern string → *regexp.Regexp
+
 func filterDirtyFiles(fileNames []string, stepSize, stepsInFrozenFile uint64, filenameBase, ext string, logger log.Logger) (res []*FilesItem) {
-	re := regexp.MustCompile(`^v(\d+(?:\.\d+)?)-` + filenameBase + `\.(\d+)-(\d+)\.` + ext + `$`)
+	pattern := `^v(\d+(?:\.\d+)?)-` + filenameBase + `\.(\d+)-(\d+)\.` + ext + `$`
+	reVal, ok := filterDirtyFilesReCache.Load(pattern)
+	if !ok {
+		re := regexp.MustCompile(pattern)
+		reVal, _ = filterDirtyFilesReCache.LoadOrStore(pattern, re)
+	}
+	re := reVal.(*regexp.Regexp)
 	var err error
 
 	for _, name := range fileNames {

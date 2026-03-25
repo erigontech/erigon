@@ -120,7 +120,13 @@ mdbx.lck
 
 .claude/settings.local.json
 .claude/projects/
-.claude/skills/**/skill.md
 
 # Prevent accidental commit of locally-built binaries
 /erigon
+
+# place to store task-specific agent .md files that we do not want to commit to main repo
+agentspecs/
+.claude/worktrees/
+
+# ralphex progress logs
+.ralphex/progress/

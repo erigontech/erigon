@@ -61,7 +61,7 @@ const (
 	ReadSetRead
 )
 
-type ReadSet map[accounts.Address]map[AccountKey]*VersionedRead
+type ReadSet map[accounts.Address]map[AccountKey]VersionedRead
 
 func (a ReadSet) Merge(b ReadSet) ReadSet {
 	if a == nil && b == nil {
@@ -87,22 +87,18 @@ func (rs ReadSet) Set(v VersionedRead) {
 	reads, ok := rs[v.Address]
 
 	if !ok {
-		rs[v.Address] = map[AccountKey]*VersionedRead{
-			{v.Path, v.Key}: &v,
+		rs[v.Address] = map[AccountKey]VersionedRead{
+			{v.Path, v.Key}: v,
 		}
 	} else {
-		if read, ok := reads[AccountKey{v.Path, v.Key}]; ok {
-			*read = v
-		} else {
-			reads[AccountKey{v.Path, v.Key}] = &v
-		}
+		reads[AccountKey{v.Path, v.Key}] = v
 	}
 }
 
 func (s ReadSet) Scan(yield func(input *VersionedRead) bool) {
 	for _, reads := range s {
 		for _, v := range reads {
-			if !yield(v) {
+			if !yield(&v) {
 				return
 			}
 		}
@@ -126,22 +122,30 @@ func (s ReadSet) Delete(addr accounts.Address, key AccountKey) {
 	}
 }
 
-type WriteSet map[accounts.Address]map[AccountKey]*VersionedWrite
+type WriteSet map[accounts.Address]map[AccountKey]VersionedWrite
 
 func (s WriteSet) Set(v VersionedWrite) {
 	writes, ok := s[v.Address]
 
 	if !ok {
-		s[v.Address] = map[AccountKey]*VersionedWrite{
-			{v.Path, v.Key}: &v,
+		s[v.Address] = map[AccountKey]VersionedWrite{
+			{v.Path, v.Key}: v,
 		}
 	} else {
-		if write, ok := writes[AccountKey{v.Path, v.Key}]; ok {
-			*write = v
-		} else {
-			writes[AccountKey{v.Path, v.Key}] = &v
+		writes[AccountKey{v.Path, v.Key}] = v
+	}
+}
+
+// UpdateVal updates the Val field of an existing entry. Returns true if the entry was found.
+func (s WriteSet) UpdateVal(addr accounts.Address, key AccountKey, val any) bool {
+	if writes, ok := s[addr]; ok {
+		if v, ok := writes[key]; ok {
+			v.Val = val
+			writes[key] = v
+			return true
 		}
 	}
+	return false
 }
 
 func (s WriteSet) Delete(addr accounts.Address, key AccountKey) {
@@ -164,7 +168,7 @@ func (s WriteSet) Len() int {
 func (s WriteSet) Scan(yield func(input *VersionedWrite) bool) {
 	for _, writes := range s {
 		for _, v := range writes {
-			if !yield(v) {
+			if !yield(&v) {
 				return
 			}
 		}
@@ -575,6 +579,64 @@ func (writes VersionedWrites) StripBalanceWrite(addr accounts.Address, readSet R
 	}
 
 	return
+}
+
+// SetBalance replaces the BalancePath write for addr in the write set with
+// the given value. If no existing BalancePath write is found, a new entry is
+// appended. This is used in the direct finalize path to adjust fee-calc
+// balances in pre-computed collector writes without IBS reconstruction.
+func (writes VersionedWrites) SetBalance(addr accounts.Address, val uint256.Int, reason tracing.BalanceChangeReason) VersionedWrites {
+	for _, w := range writes {
+		if w.Address == addr && w.Path == BalancePath {
+			w.Val = val
+			w.Reason = reason
+			return writes
+		}
+	}
+	return append(writes, &VersionedWrite{Address: addr, Path: BalancePath, Val: val, Reason: reason})
+}
+
+// SetAccountBalanceOrDelete replaces the BalancePath write for addr. If the
+// address has no existing writes in the set, all four account fields (balance,
+// nonce, incarnation, codeHash) are emitted so that applyVersionedWrites can
+// reconstruct a complete account. Without the full set, it would create an
+// account with nonce=0, incarnation=0, empty codeHash — wiping the real values.
+//
+// When emptyRemoval is true (EIP-161 SpuriousDragon), if the final account
+// would be empty (balance=0, nonce=0, empty code), the existing writes for
+// this address are stripped and a SelfDestructPath entry is emitted instead.
+func (writes VersionedWrites) SetAccountBalanceOrDelete(addr accounts.Address, acc *accounts.Account, val uint256.Int, reason tracing.BalanceChangeReason, emptyRemoval bool) VersionedWrites {
+	if acc == nil {
+		a := accounts.NewAccount()
+		acc = &a
+	}
+
+	// EIP-161: if the final account is empty, delete it.
+	if emptyRemoval && val.IsZero() && acc.Nonce == 0 && acc.IsEmptyCodeHash() {
+		// Strip any existing writes for this address and emit a delete.
+		filtered := make(VersionedWrites, 0, len(writes)+1)
+		for _, w := range writes {
+			if w.Address != addr {
+				filtered = append(filtered, w)
+			}
+		}
+		return append(filtered, &VersionedWrite{Address: addr, Path: SelfDestructPath, Val: true})
+	}
+
+	for _, w := range writes {
+		if w.Address == addr && w.Path == BalancePath {
+			w.Val = val
+			w.Reason = reason
+			return writes
+		}
+	}
+	// Account not in writes — emit complete account fields.
+	return append(writes,
+		&VersionedWrite{Address: addr, Path: BalancePath, Val: val, Reason: reason},
+		&VersionedWrite{Address: addr, Path: NoncePath, Val: acc.Nonce},
+		&VersionedWrite{Address: addr, Path: IncarnationPath, Val: acc.Incarnation},
+		&VersionedWrite{Address: addr, Path: CodeHashPath, Val: acc.CodeHash},
+	)
 }
 
 func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path AccountPath, key accounts.StorageKey, commited bool, defaultV T, copyV func(T) T, readStorage func(sdb *stateObject) (T, error)) (T, ReadSource, Version, error) {
@@ -1122,12 +1184,21 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 	return bal
 }
 
+// hasAccountChanges returns true if the account has any state changes
+// (storage, balance, nonce, or code) that belong in the BAL.
+func hasAccountChanges(ac *types.AccountChanges) bool {
+	return len(ac.StorageChanges) > 0 || len(ac.StorageReads) > 0 ||
+		len(ac.BalanceChanges) > 0 || len(ac.NonceChanges) > 0 ||
+		len(ac.CodeChanges) > 0
+}
+
 type accountState struct {
 	changes                 *types.AccountChanges
 	balance                 *fieldTracker[uint256.Int]
 	nonce                   *fieldTracker[uint64]
 	code                    *fieldTracker[[]byte]
 	balanceValue            *uint256.Int                        // tracks latest seen balance
+	initialBalanceValue     *uint256.Int                        // tracks pre-block balance for net-zero detection
 	selfDestructed          bool                                //
 	selfDestructedAt        uint16                              // access index of the selfdestruct
 	storageReadValues       map[accounts.StorageKey]uint256.Int // original read values for net-zero detection
@@ -1136,7 +1207,7 @@ type accountState struct {
 
 // check pre- and post-values, add to BAL if different
 func (a *accountState) finalize() {
-	applyToBalance(a.balance, a.changes)
+	applyToBalance(a.balance, a.changes, a.initialBalanceValue)
 	applyToNonce(a.nonce, a.changes)
 	applyToCode(a.code, a.changes)
 }
@@ -1153,8 +1224,20 @@ func newBalanceTracker() *fieldTracker[uint256.Int] {
 	return &fieldTracker[uint256.Int]{}
 }
 
-func applyToBalance(bt *fieldTracker[uint256.Int], ac *types.AccountChanges) {
+func applyToBalance(bt *fieldTracker[uint256.Int], ac *types.AccountChanges, initialBalance *uint256.Int) {
+	// Get the sorted indices to identify the first (lowest-index) entry.
+	// If the first entry equals the pre-block balance, it's a net-zero
+	// change from a reverted tx (e.g. CALL with value then revert) and
+	// must be excluded. Geth's scope-based BAL builder handles this via
+	// ExitScope which converts reverted writes to reads.
+	firstFiltered := false
 	bt.changes.apply(func(idx uint16, value uint256.Int) {
+		if !firstFiltered {
+			firstFiltered = true
+			if initialBalance != nil && value.Eq(initialBalance) {
+				return
+			}
+		}
 		ac.BalanceChanges = append(ac.BalanceChanges, &types.BalanceChange{
 			Index: idx,
 			Value: value,
@@ -1267,11 +1350,24 @@ func (account *accountState) updateWrite(vw *VersionedWrite, accessIndex uint16)
 		}
 		// If we haven't seen a balance and the first write is zero, treat it as a touch only.
 		if account.balanceValue == nil && val.IsZero() {
+			if account.initialBalanceValue == nil {
+				v := val
+				account.initialBalanceValue = &v
+			}
 			account.setBalanceValue(val)
 			return
 		}
 		// Skip no-op writes.
 		if account.balanceValue != nil && val.Eq(account.balanceValue) {
+			account.setBalanceValue(val)
+			return
+		}
+		// Skip balance writes that match the pre-block (initial) balance,
+		// but ONLY when no intermediate balance changes have been recorded.
+		// If intermediate changes exist (e.g. tx58 sets balance=0xa141,
+		// tx78 restores initial 0x16ffd), the restoring write MUST be
+		// recorded so parallel executors see the correct value at tx78.
+		if account.initialBalanceValue != nil && val.Eq(account.initialBalanceValue) && len(account.balance.changes.entries) == 0 {
 			account.setBalanceValue(val)
 			return
 		}
@@ -1318,7 +1414,19 @@ func (account *accountState) updateRead(vr *VersionedRead) {
 			account.changes.StorageReads = append(account.changes.StorageReads, vr.Key)
 		case BalancePath:
 			if val, ok := vr.Val.(uint256.Int); ok {
-				account.setBalanceValue(val)
+				// Record the initial (pre-block) balance for net-zero detection.
+				// Only the first read is the original pre-block value.
+				if account.initialBalanceValue == nil {
+					v := val
+					account.initialBalanceValue = &v
+				}
+				// Only update balanceValue from reads when no writes have been
+				// recorded yet. After a write, balanceValue tracks the written
+				// state; a stale read from the DB must not override it, or the
+				// no-op check in updateWrite will incorrectly skip a real write.
+				if len(account.balance.changes.entries) == 0 {
+					account.setBalanceValue(val)
+				}
 			}
 		default:
 			// Only track storage reads for BAL. Balance/nonce/code changes are tracked via writes, others are ignored
@@ -1375,11 +1483,6 @@ func removeStorageRead(ac *types.AccountChanges, slot accounts.StorageKey) {
 	} else {
 		ac.StorageReads = out
 	}
-}
-
-func hasAccountChanges(ac *types.AccountChanges) bool {
-	return len(ac.BalanceChanges) > 0 || len(ac.NonceChanges) > 0 ||
-		len(ac.CodeChanges) > 0 || len(ac.StorageChanges) > 0
 }
 
 type versionedReadSet struct {

@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -160,7 +161,7 @@ type IntraBlockState struct {
 	nilAccounts map[accounts.Address]struct{} // Remember non-existent account to avoid reading them again
 
 	// The refund counter, also used by state transitioning.
-	refund uint64
+	refund mdgas.MdGas
 
 	txIndex  int
 	blockNum uint64
@@ -168,7 +169,7 @@ type IntraBlockState struct {
 	logSize  uint
 
 	// Per-transaction access list
-	accessList *accessList
+	accessList accessList
 
 	// Transient storage
 	transientStorage transientStorage
@@ -208,7 +209,7 @@ func New(stateReader StateReader) *IntraBlockState {
 		nilAccounts:       map[accounts.Address]struct{}{},
 		logs:              []types.Logs{},
 		journal:           newJournal(),
-		accessList:        newAccessList(),
+		accessList:        accessList{addresses: make(map[accounts.Address]int)},
 		transientStorage:  newTransientStorage(),
 		balanceInc:        map[accounts.Address]*BalanceIncrease{},
 		addressAccess:     nil,
@@ -358,10 +359,14 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.balanceInc = map[accounts.Address]*BalanceIncrease{}
 	sdb.journal.Reset()
 	sdb.revisions = sdb.revisions.put()
-	sdb.refund = 0
+	sdb.refund = mdgas.MdGas{}
 	sdb.txIndex = 0
 	sdb.logSize = 0
 	sdb.versionMap = nil
+	// Do not clear the maps in place — result.TxIn / result.TxOut may still
+	// reference them from a prior execution (used by finalize in another
+	// goroutine). Setting to nil lets the GC collect the old maps once all
+	// references are dropped, while the next execution lazily allocates fresh ones.
 	sdb.versionedReads = nil
 	sdb.versionedWrites = nil
 	sdb.accountReadDuration = 0
@@ -455,17 +460,31 @@ func (sdb *IntraBlockState) Logs() types.Logs {
 // AddRefund adds gas to the refund counter
 func (sdb *IntraBlockState) AddRefund(gas uint64) {
 	sdb.journal.append(refundChange{prev: sdb.refund})
-	sdb.refund += gas
+	sdb.refund.Regular += gas
 }
 
 // SubRefund removes gas from the refund counter.
 // This method will panic if the refund counter goes below zero
 func (sdb *IntraBlockState) SubRefund(gas uint64) error {
 	sdb.journal.append(refundChange{prev: sdb.refund})
-	if gas > sdb.refund {
+	if gas > sdb.refund.Regular {
 		return errors.New("refund counter below zero")
 	}
-	sdb.refund -= gas
+	sdb.refund.Regular -= gas
+	return nil
+}
+
+func (sdb *IntraBlockState) AddStateRefund(gas uint64) {
+	sdb.journal.append(refundChange{prev: sdb.refund})
+	sdb.refund.State += gas
+}
+
+func (sdb *IntraBlockState) SubStateRefund(gas uint64) error {
+	sdb.journal.append(refundChange{prev: sdb.refund})
+	if gas > sdb.refund.State {
+		return errors.New("state refund counter below zero")
+	}
+	sdb.refund.State -= gas
 	return nil
 }
 
@@ -1823,11 +1842,11 @@ func (sdb *IntraBlockState) RevertToSnapshot(revid int, err error) {
 }
 
 // GetRefund returns the current value of the refund counter.
-func (sdb *IntraBlockState) GetRefund() uint64 {
+func (sdb *IntraBlockState) GetRefund() mdgas.MdGas {
 	return sdb.refund
 }
 
-func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, addr accounts.Address, stateObject *stateObject, isDirty bool, trace bool, tracingHooks *tracing.Hooks) error {
+func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, addr accounts.Address, stateObject *stateObject, isDirty bool, trace bool, tracingHooks *tracing.Hooks, useBlockOrigin bool) error {
 	emptyRemoval := EIP161Enabled && stateObject.data.Empty() && (!isAura || addr != params.SystemAddress)
 	if stateObject.selfdestructed || (isDirty && emptyRemoval) {
 		balance := stateObject.Balance()
@@ -1857,7 +1876,7 @@ func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, add
 				return err
 			}
 		}
-		if err := stateObject.updateStorage(stateWriter); err != nil {
+		if err := stateObject.updateStorage(stateWriter, useBlockOrigin); err != nil {
 			return err
 		}
 		if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (trace || dbg.TraceAccount(addr.Handle()))) {
@@ -1910,7 +1929,7 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 			continue
 		}
 
-		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, so, true, sdb.trace, sdb.tracingHooks); err != nil {
+		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, so, true, sdb.trace, sdb.tracingHooks, false); err != nil {
 			return err
 		}
 
@@ -2009,7 +2028,7 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 		if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 			fmt.Printf("%d (%d.%d) Update Account %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
 		}
-		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, stateObject, isDirty, sdb.trace, sdb.tracingHooks); err != nil {
+		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, stateObject, isDirty, sdb.trace, sdb.tracingHooks, true); err != nil {
 			return err
 		}
 	}
@@ -2072,7 +2091,7 @@ func (sdb *IntraBlockState) SetTxContext(bn uint64, ti int) {
 func (sdb *IntraBlockState) clearJournalAndRefund() {
 	sdb.journal.Reset()
 	sdb.revisions = sdb.revisions.put()
-	sdb.refund = 0
+	sdb.refund = mdgas.MdGas{}
 }
 
 // Prepare handles the preparatory steps for executing a state transition.
@@ -2100,10 +2119,8 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 	}
 	if rules.IsBerlin {
 		// Clear out any leftover from previous executions
-		al := newAccessList()
-		sdb.accessList = al
-		//sdb.accessList.Reset()
-		//al := sdb.accessList
+		sdb.accessList.Reset()
+		al := &sdb.accessList
 
 		al.AddAddress(sender)
 		if !dst.IsNil() {
@@ -2277,19 +2294,19 @@ func versionRead[T any](sdb *IntraBlockState, addr accounts.Address, path Accoun
 	}
 }
 
-func (sdb *IntraBlockState) versionedWrite(addr accounts.Address, path AccountPath, key accounts.StorageKey) (*VersionedWrite, bool) {
+func (sdb *IntraBlockState) versionedWrite(addr accounts.Address, path AccountPath, key accounts.StorageKey) (VersionedWrite, bool) {
 	if sdb.versionMap == nil || sdb.versionedWrites == nil {
-		return nil, false
+		return VersionedWrite{}, false
 	}
 
 	v, ok := sdb.versionedWrites[addr][AccountKey{Path: path, Key: key}]
 
 	if !ok {
-		return nil, ok
+		return VersionedWrite{}, false
 	}
 
 	if _, isDirty := sdb.journal.dirties[addr]; !isDirty {
-		return nil, false
+		return VersionedWrite{}, false
 	}
 
 	return v, ok
@@ -2347,38 +2364,32 @@ func (sdb *IntraBlockState) VersionedWrites(checkDirty bool) VersionedWrites {
 				}
 			}
 
-			// If an account was selfdestructed, strip all writes except
-			// SelfDestructPath itself (and any zero-balance BalancePath writes).
-			// Non-zero BalancePath writes after selfdestruct represent residual ETH
-			// (EIP-7708 case 2); these are carried via
-			// ExecutionResult.SelfDestructedWithBalance captured before SoftFinalise
-			// clears the journal, and must NOT appear here to avoid polluting the
-			// EIP-7928 block access list.
+			// If an account was selfdestructed, strip writes that don't affect
+			// state: keep SelfDestructPath, BalancePath (all values — the BAL
+			// needs to see residual balance from EIP-7708 case 2), and
+			// IncarnationPath (so resurrection txs find the prior incarnation).
+			// Other paths (NoncePath, CodePath) are dropped because selfdestruct
+			// resets them.
 			var appends = make(VersionedWrites, 0, len(vwrites))
 			var selfDestructed bool
 			for _, v := range vwrites {
+				v := v // local copy for pointer
 				if v.Path == SelfDestructPath && v.Val.(bool) {
 					selfDestructed = true
 					prevs := appends
-					appends = VersionedWrites{v}
+					appends = VersionedWrites{&v}
 					for _, prev := range prevs {
-						if prev.Path == BalancePath && prev.Val.(uint256.Int) == (uint256.Int{}) {
-							appends = append(appends, prev)
-						} else if prev.Path == IncarnationPath {
-							// Preserve incarnation so resurrection txs can find the prior incarnation
+						if prev.Path == BalancePath || prev.Path == IncarnationPath {
 							appends = append(appends, prev)
 						}
 					}
 				} else {
 					if selfDestructed {
-						if v.Path == BalancePath && v.Val.(uint256.Int) == (uint256.Int{}) {
-							appends = append(appends, v)
-						} else if v.Path == IncarnationPath {
-							// Preserve incarnation so resurrection txs can find the prior incarnation
-							appends = append(appends, v)
+						if v.Path == BalancePath || v.Path == IncarnationPath {
+							appends = append(appends, &v)
 						}
 					} else {
-						appends = append(appends, v)
+						appends = append(appends, &v)
 					}
 				}
 			}

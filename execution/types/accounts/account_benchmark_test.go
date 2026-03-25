@@ -69,9 +69,7 @@ func BenchmarkEncodingLengthForStorage(b *testing.B) {
 		b.Run(fmt.Sprint(test.name), func(b *testing.B) {
 			var length uint
 			for b.Loop() {
-				b.StartTimer()
 				length = test.acc.EncodingLengthForStorage()
-				b.StopTimer()
 			}
 			fmt.Fprint(io.Discard, length)
 		})
@@ -119,9 +117,7 @@ func BenchmarkEncodingLengthForHashing(b *testing.B) {
 		b.Run(fmt.Sprint(test.name), func(bn *testing.B) {
 			var length uint
 			for bn.Loop() {
-				bn.StartTimer()
 				length = test.acc.EncodingLengthForHashing()
-				bn.StopTimer()
 			}
 			fmt.Fprint(io.Discard, length)
 		})
@@ -223,7 +219,7 @@ func BenchmarkEncodingAccountForHashing(b *testing.B) {
 
 	b.ResetTimer()
 	for _, test := range accountCases {
-		buf := make([]byte, test.acc.EncodingLengthForStorage())
+		buf := make([]byte, test.acc.EncodingLengthForHashing())
 		b.Run(fmt.Sprint(test.name), func(b *testing.B) {
 			for b.Loop() {
 				test.acc.EncodeForHashing(buf)

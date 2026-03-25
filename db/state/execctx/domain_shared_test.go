@@ -17,6 +17,7 @@
 package execctx_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -25,12 +26,11 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon/common/empty"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -708,6 +709,170 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
 		require.Equal(t, []byte{3}, firstVal)
 		roTtx4.Rollback()
+	}
+}
+
+// TestDomainPut_HistoryCorrectness is a property test that verifies history invariants
+// after random sequences of DomainPut calls:
+//  1. GetAsOf returns the correct value at every txNum (history is complete and accurate)
+//  2. No history entries are created when value doesn't change (no duplicates)
+//
+// This catches: duplicate entries, missing entries, wrong previous values, off-by-one errors.
+func TestDomainPut_HistoryCorrectness(t *testing.T) {
+	t.Parallel()
+
+	type domainCase struct {
+		domain          kv.Domain
+		makeKey         func() []byte
+		makeVal         func(i int) []byte
+		historyKeyTable string
+	}
+
+	addr := make([]byte, length.Addr)
+	addr[0] = 0xAA
+	storageKey := composite(addr, make([]byte, length.Hash))
+
+	domainCases := []domainCase{
+		{
+			domain:  kv.AccountsDomain,
+			makeKey: func() []byte { return common.Copy(addr) },
+			makeVal: func(i int) []byte {
+				acc := accounts3.Account{
+					Nonce:    uint64(i),
+					Balance:  *uint256.NewInt(uint64(i) * 100),
+					CodeHash: accounts.EmptyCodeHash,
+				}
+				return accounts3.SerialiseV3(&acc)
+			},
+			historyKeyTable: kv.TblAccountHistoryKeys,
+		},
+		{
+			domain:          kv.StorageDomain,
+			makeKey:         func() []byte { return common.Copy(storageKey) },
+			makeVal:         func(i int) []byte { return binary.BigEndian.AppendUint64(nil, uint64(i)) },
+			historyKeyTable: kv.TblStorageHistoryKeys,
+		},
+		{
+			domain:          kv.CodeDomain,
+			makeKey:         func() []byte { return common.Copy(addr) },
+			makeVal:         func(i int) []byte { return binary.BigEndian.AppendUint64(nil, uint64(i)) },
+			historyKeyTable: kv.TblCodeHistoryKeys,
+		},
+	}
+
+	for _, dc := range domainCases {
+		t.Run(dc.domain.String(), func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			stepSize := uint64(1000)
+			db := newTestDb(t, stepSize)
+
+			rwTx, err := db.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer rwTx.Rollback()
+
+			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+			require.NoError(t, err)
+			defer domains.Close()
+
+			key := dc.makeKey()
+
+			// Generate a random write sequence with deliberate repeated values.
+			// valPalette has fewer entries than totalTxs so repeats are guaranteed.
+			valPalette := make([][]byte, 5)
+			for i := range valPalette {
+				valPalette[i] = dc.makeVal(i)
+			}
+
+			rng := rand.New(rand.NewPCG(42, 0))
+			totalTxs := uint64(30)
+
+			// writes[txNum] = index into valPalette that was written at txNum
+			writes := make([]int, totalTxs)
+			for i := range writes {
+				writes[i] = -1 // -1 means "no write at this txNum"
+			}
+
+			// Pick random txNums to write at (not every txNum gets a write)
+			numWrites := 15 + rng.IntN(int(totalTxs)-15) // at least 15 writes
+			writeTxNums := make([]int, totalTxs)
+			for i := range writeTxNums {
+				writeTxNums[i] = i
+			}
+			rng.Shuffle(len(writeTxNums), func(i, j int) {
+				writeTxNums[i], writeTxNums[j] = writeTxNums[j], writeTxNums[i]
+			})
+			writeTxNums = writeTxNums[:numWrites]
+			for _, txn := range writeTxNums {
+				writes[txn] = rng.IntN(len(valPalette))
+			}
+
+			// Execute writes in txNum order
+			for txNum := uint64(0); txNum < totalTxs; txNum++ {
+				if writes[txNum] < 0 {
+					continue
+				}
+				v := valPalette[writes[txNum]]
+				err := domains.DomainPut(dc.domain, rwTx, key, v, txNum, nil)
+				require.NoError(t, err)
+			}
+
+			// Flush to DB
+			err = domains.Flush(ctx, rwTx)
+			require.NoError(t, err)
+
+			// Property 1: GetAsOf returns the correct value at every txNum.
+			// Build expected state: the value visible at query time ts is the last write with txNum < ts.
+			expectedAtTx := make([][]byte, totalTxs+1) // expectedAtTx[ts] = value visible at GetAsOf(ts)
+			var currentVal []byte
+			for txNum := uint64(0); txNum <= totalTxs; txNum++ {
+				expectedAtTx[txNum] = currentVal
+				if txNum < totalTxs && writes[txNum] >= 0 {
+					currentVal = valPalette[writes[txNum]]
+				}
+			}
+
+			for ts := uint64(1); ts <= totalTxs; ts++ {
+				got, ok, err := rwTx.GetAsOf(dc.domain, key, ts)
+				require.NoError(t, err, "ts=%d", ts)
+				want := expectedAtTx[ts]
+				if want == nil {
+					if ok {
+						require.Empty(t, got, "ts=%d: expected nil/empty, got %x", ts, got)
+					}
+				} else {
+					require.True(t, ok, "ts=%d: expected value %x but got not-found", ts, want)
+					require.Equal(t, want, got, "ts=%d", ts)
+				}
+			}
+
+			// Property 2: Number of history entries equals number of actual value changes
+			// (i.e. no duplicate history entries for consecutive identical values).
+			expectedChanges := 0
+			var prevWrittenVal []byte
+			for txNum := uint64(0); txNum < totalTxs; txNum++ {
+				if writes[txNum] < 0 {
+					continue
+				}
+				v := valPalette[writes[txNum]]
+				if !bytes.Equal(prevWrittenVal, v) {
+					expectedChanges++
+					prevWrittenVal = v
+				}
+			}
+
+			c, err := rwTx.CursorDupSort(dc.historyKeyTable)
+			require.NoError(t, err)
+			defer c.Close()
+
+			actualEntries := 0
+			for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+				require.NoError(t, err)
+				actualEntries++
+			}
+			require.Equal(t, expectedChanges, actualEntries,
+				"history entries (%d) should equal actual value changes (%d)", actualEntries, expectedChanges)
+		})
 	}
 }
 

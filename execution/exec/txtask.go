@@ -111,6 +111,12 @@ type TxResult struct {
 	TraceFroms        map[accounts.Address]struct{}
 	TraceTos          map[accounts.Address]struct{}
 	AccessedAddresses state.AccessSet
+
+	// CollectorWrites holds collector-format writes (all 4 account fields per
+	// address) produced by MakeWriteSet during worker execution. Used by the
+	// parallel finalize path to skip full IBS reconstruction: fee-calc balance
+	// adjustments are applied directly to these writes.
+	CollectorWrites state.VersionedWrites
 }
 
 func (r *TxResult) compare(other *TxResult) int {
@@ -646,7 +652,7 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 	}
 
 	result.ExecutionResult.ReceiptGasUsed = gasUsed
-	result.ExecutionResult.BlockGasUsed = gasUsed
+	result.ExecutionResult.BlockRegularGasUsed = gasUsed
 	// Update the state with pending changes
 	ibs.SoftFinalise()
 	result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
@@ -696,13 +702,29 @@ func (h *Queue[T]) Pop() any {
 type QueueWithRetry struct {
 	closed   bool
 	newTasks chan Task
+	parked   chan Task
 	retires  Queue[Task]
 	lock     sync.Mutex
 	capacity int
 }
 
+var queuePool sync.Pool
+
 func NewQueueWithRetry(capacity int) *QueueWithRetry {
 	return &QueueWithRetry{newTasks: make(chan Task, capacity), capacity: capacity}
+}
+
+func GetQueueWithRetryFromPool(capacity int) *QueueWithRetry {
+	if v := queuePool.Get(); v != nil {
+		q := v.(*QueueWithRetry)
+		if q.capacity == capacity && q.parked != nil {
+			q.closed = false
+			q.newTasks = q.parked
+			q.parked = nil
+			return q
+		}
+	}
+	return NewQueueWithRetry(capacity)
 }
 
 func (q *QueueWithRetry) NewTasksLen() int {
@@ -727,7 +749,7 @@ func (q *QueueWithRetry) RetryTxNumsList() (out []uint64) {
 }
 func (q *QueueWithRetry) Len() (l int) { return q.RetriesLen() + q.NewTasksLen() }
 
-// Add "new task" (which was never executed yet). May block internal channel is full.
+// Add "new task" (which was never executed yet). May block if internal channel is full.
 // Expecting already-ordered tasks.
 func (q *QueueWithRetry) Add(ctx context.Context, t Task) {
 	q.lock.Lock()
@@ -741,6 +763,26 @@ func (q *QueueWithRetry) Add(ctx context.Context, t Task) {
 			return
 		case newTasks <- t:
 		}
+	}
+}
+
+// TryAdd attempts to add a task without blocking. Returns true if the task was
+// enqueued, false if the channel is full or the queue is closed.
+func (q *QueueWithRetry) TryAdd(t Task) bool {
+	q.lock.Lock()
+	closed := q.closed
+	newTasks := q.newTasks
+	q.lock.Unlock()
+
+	if closed {
+		return false
+	}
+
+	select {
+	case newTasks <- t:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -780,38 +822,18 @@ func (q *QueueWithRetry) popWait(ctx context.Context) (task Task, ok bool) {
 		return q.popNoWait()
 	}
 
-	var checkEmpty = func() bool {
-		q.lock.Lock()
-		defer q.lock.Unlock()
-		if q.closed && q.newTasks != nil && len(q.newTasks) == 0 {
-			newTasks := q.newTasks
-			q.newTasks = nil
-			close(newTasks)
-		}
-
-		return q.newTasks == nil
-	}
-
-	if checkEmpty() {
-		return nil, false
-	}
-
-	defer checkEmpty()
-
 	for {
 		q.lock.Lock()
 		newTasks := q.newTasks
 		q.lock.Unlock()
+		if newTasks == nil {
+			return q.popNoWait()
+		}
 
 		select {
 		case inTask, ok := <-newTasks:
 			if !ok {
-				q.lock.Lock()
-				if q.retires.Len() > 0 {
-					task = heap.Pop(&q.retires).(Task)
-				}
-				q.lock.Unlock()
-				return task, task != nil
+				return q.popNoWait()
 			}
 
 			q.lock.Lock()
@@ -826,7 +848,7 @@ func (q *QueueWithRetry) popWait(ctx context.Context) (task Task, ok bool) {
 				return task, true
 			}
 		case <-ctx.Done():
-			return nil, false
+			return q.popNoWait()
 		}
 	}
 }
@@ -866,11 +888,30 @@ func (q *QueueWithRetry) Close() {
 		return
 	}
 	q.closed = true
-	if q.newTasks != nil && len(q.newTasks) == 0 {
+	if q.newTasks != nil {
 		newTasks := q.newTasks
-		q.newTasks = nil
 		close(newTasks)
 	}
+}
+
+// Release puts the queue back into the pool
+func (q *QueueWithRetry) Release() {
+	q.lock.Lock()
+	if q.newTasks == nil || q.closed {
+		q.lock.Unlock()
+		return
+	}
+	q.closed = true
+	// Drain channel.
+	for len(q.newTasks) > 0 {
+		<-q.newTasks
+	}
+	// Clear retry heap, keep backing array.
+	q.retires = q.retires[:0]
+	q.parked = q.newTasks
+	q.newTasks = nil
+	q.lock.Unlock()
+	queuePool.Put(q)
 }
 
 // ResultsQueue thread-safe priority-queue of execution results
@@ -992,7 +1033,8 @@ func (q *PriorityQueue[T]) Drain(ctx context.Context, item T) (bool, error) {
 	if q.resultCh == nil {
 		return q.results.Len() == 0, nil
 	} else if q.closed && len(q.resultCh) == 0 {
-		close(q.resultCh)
+		// Don't close(resultCh) — Add() may be sending on it outside the lock.
+		// Nil the reference so consumers know we're done; the channel is GC'd.
 		q.resultCh = nil
 		return q.results.Len() == 0, nil
 	}
@@ -1007,7 +1049,6 @@ func (q *PriorityQueue[T]) Drain(ctx context.Context, item T) (bool, error) {
 			}
 			if next.isNil() {
 				if q.closed && len(q.resultCh) == 0 {
-					close(q.resultCh)
 					q.resultCh = nil
 					return q.results.Len() == 0, nil
 				}
@@ -1015,7 +1056,6 @@ func (q *PriorityQueue[T]) Drain(ctx context.Context, item T) (bool, error) {
 			}
 			heap.Push(q.results, next)
 			if q.closed && len(q.resultCh) == 0 {
-				close(q.resultCh)
 				q.resultCh = nil
 				return false, nil
 			}
@@ -1061,11 +1101,9 @@ func (q *PriorityQueue[T]) Close() {
 		return
 	}
 	q.closed = true
-
-	if len(q.resultCh) == 0 {
-		close(q.resultCh)
-		q.resultCh = nil
-	}
+	// Don't close resultCh here — Add() may be concurrently sending on it
+	// outside the lock.  Drain() will nil the reference when it detects
+	// closed && empty, and the channel will be GC'd.
 }
 
 func (q *PriorityQueue[T]) Len() (l int) {

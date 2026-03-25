@@ -86,7 +86,6 @@ func New(datadir string) Dirs {
 		dirs.CaplinColumnData,
 		dirs.CaplinHistory,
 		dirs.Migrations,
-		filepath.Join(datadir, "logs"),
 	)
 
 	return dirs
@@ -131,6 +130,7 @@ func Open(datadir string) Dirs {
 		CaplinGenesis:    filepath.Join(datadir, "caplin", "genesis-state"),
 		CaplinHistory:    filepath.Join(datadir, "caplin", "history"),
 		Migrations:       filepath.Join(datadir, "migrations"),
+		Log:              filepath.Join(datadir, "logs"),
 	}
 	return dirs
 }

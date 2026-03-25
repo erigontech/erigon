@@ -142,19 +142,9 @@ type AggStats struct {
 	HashRate, FlushRate       uint64
 }
 
-func (me *AggStats) AllTorrentsComplete() bool {
-	return me.TorrentsCompleted == me.NumTorrents
-}
-
 type requestHandler struct {
 	// Separated this rather than embedded it to ensure our wrapper RoundTrip is called.
 	rt http.RoundTripper
-}
-
-type roundTripperFunc func(req *http.Request) (*http.Response, error)
-
-func (me roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
-	return me(req)
 }
 
 // TODO(anacrolix): Upstream any logic that works reliably.
@@ -1333,18 +1323,14 @@ func newTorrentClient(
 		}
 	}()
 
-	dnsResolver := &downloadercfg.DnsCacheResolver{RefreshTimeout: 24 * time.Hour}
-	cfg.TrackerDialContext = dnsResolver.DialContext
+	dnsDialer := downloadercfg.NewTTLDNSDialer()
+	cfg.TrackerDialContext = dnsDialer.DialContext
 
 	torrentClient, err = torrent.NewClient(cfg)
 	if err != nil {
 		err = fmt.Errorf("creating torrent client: %w", err)
 		return
 	}
-
-	go func() {
-		dnsResolver.Run(ctx)
-	}()
 
 	return
 }

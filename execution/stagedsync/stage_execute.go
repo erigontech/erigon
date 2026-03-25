@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"math"
 	"time"
-	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 
@@ -51,7 +50,6 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/shards"
-	"github.com/erigontech/erigon/node/silkworm"
 )
 
 const (
@@ -86,7 +84,6 @@ type ExecuteBlockCfg struct {
 	syncCfg   ethconfig.Sync
 	genesis   *types.Genesis
 
-	silkworm        *silkworm.Silkworm
 	experimentalBAL bool
 }
 
@@ -106,7 +103,6 @@ func StageExecuteBlocksCfg(
 	hd headerDownloader,
 	genesis *types.Genesis,
 	syncCfg ethconfig.Sync,
-	silkworm *silkworm.Silkworm,
 	experimentalBAL bool,
 ) ExecuteBlockCfg {
 	if dirs.SnapDomain == "" {
@@ -129,7 +125,6 @@ func StageExecuteBlocksCfg(
 		genesis:         genesis,
 		historyV3:       true,
 		syncCfg:         syncCfg,
-		silkworm:        silkworm,
 		experimentalBAL: experimentalBAL,
 	}
 }
@@ -317,13 +312,13 @@ func unwindExec3State(ctx context.Context,
 					fmt.Printf("unwind (Block:%d,Tx:%d): del acc: %x, step: %d\n", blockUnwindTo, txUnwindTo, address, keyStep)
 				}
 			}
-			if err := stateChanges.Collect(toBytesZeroCopy(entry.Key)[:length.Addr], entry.Value); err != nil {
+			if err := stateChanges.Collect(common.ToBytesZeroCopy(entry.Key)[:length.Addr], entry.Value); err != nil {
 				return err
 			}
 		}
 		storageDiffs := changeset[kv.StorageDomain]
 		for _, kv := range storageDiffs {
-			if err := stateChanges.Collect(toBytesZeroCopy(kv.Key), kv.Value); err != nil {
+			if err := stateChanges.Collect(common.ToBytesZeroCopy(kv.Key), kv.Value); err != nil {
 				return err
 			}
 		}
@@ -354,8 +349,6 @@ func unwindExec3State(ctx context.Context,
 	sd.SetTxNum(txUnwindTo)
 	return nil
 }
-
-func toBytesZeroCopy(s string) []byte { return unsafe.Slice(unsafe.StringData(s), len(s)) }
 
 func stageProgress(tx kv.Tx, db kv.RoDB, stage stages.SyncStage) (prevStageProgress uint64, err error) {
 	if tx != nil {
@@ -410,6 +403,11 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 	}
 
 	logger.Info(fmt.Sprintf("[%s] Unwind Execution", u.LogPrefix()), "from", s.BlockNumber, "to", u.UnwindPoint, "stack", dbg.Stack())
+
+	// Discard any pending deferred commitment updates from the previous
+	// (failed) execution. If left in place, the next ComputeCommitment
+	// would flush stale branch data that doesn't match the unwound state.
+	doms.ResetPendingUpdates()
 
 	unwindToLimit, ok, err := rawtemporaldb.CanUnwindBeforeBlockNum(u.UnwindPoint, rwTx)
 	if err != nil {
