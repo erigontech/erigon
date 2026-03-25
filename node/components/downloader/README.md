@@ -105,9 +105,24 @@ domain.Register(dlProvider)
 
 ## TODO
 
-- [ ] Define event types in `node/components/downloader/events.go`
+- [x] Define event types in `node/components/downloader/events.go`
 - [ ] Replace `downloader.Client` gRPC dependency with native Go request types
 - [ ] Move `OnFilesChange` callback to event subscription
 - [ ] Wire into `backend.go` using Provider
 - [ ] Add gRPC server/client wrappers as optional mode
 - [ ] Integration tests with real torrent client
+
+## Event Bus TODOs (node/app/event)
+
+These are framework-level improvements needed before event-driven components
+can be debugged in production:
+
+- [ ] **Event tracing**: Add structured trace logging for ALL event dispatches
+  (not just async). Should log: event type, publisher, matched subscribers,
+  delivery status. Current: only async handlers log at trace level.
+- [ ] **Dead letter queue**: When `Publish()` returns 0 (no subscribers matched),
+  log the undelivered event to a dead letter sink. Current: silently dropped.
+  Options: log at warn level, write to a ring buffer queryable via debug API,
+  or publish to a dedicated dead-letter topic.
+- [ ] **Event flow visualization**: debug endpoint or log mode that shows the
+  full event routing graph (which components subscribe to which event types).
