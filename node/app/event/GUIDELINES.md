@@ -4,6 +4,41 @@
 
 The event bus provides typed, reflection-based pub/sub for inter-component communication. Events are dispatched by argument type — subscribers register handler functions whose parameter types determine which events they receive.
 
+## Domain Architecture
+
+**Events are scoped per-domain.** Components in different domains CANNOT communicate via events. This is the single most important architectural decision when designing the component hierarchy.
+
+**Default: use the root domain for all components.** Unless you have a specific reason to isolate a subsystem, all components should share one domain so events flow freely between them.
+
+```
+CORRECT — all components share the root domain:
+
+  root domain
+  ├── Storage          ──publishes──▶ SnapshotFilesCreated
+  ├── Downloader       ◀─receives────
+  ├── Sync
+  ├── Execution
+  ├── TxPool
+  ├── RPC
+  └── plugins/snapshot-manager
+
+WRONG — components in separate domains can't communicate:
+
+  domain-a                    domain-b
+  ├── Storage ──publishes──▶ │ ✗ Downloader never receives
+  └── Sync                   └── TxPool
+```
+
+**When to create a separate domain:**
+- Never, unless you are building a truly isolated subsystem with NO event dependencies on other components
+- A separate domain means a separate worker pool, separate service bus, and complete event isolation
+- If you think you need a separate domain, you probably don't — use the root domain and use event type routing for isolation instead
+
+**When separate domains ARE appropriate:**
+- Test harnesses that need isolation from production components
+- Completely independent subsystems (e.g., a standalone monitoring agent)
+- Load isolation: a subsystem that would flood the shared worker pool (use `WithExecPoolSize` to create a domain with its own pool, but note events still won't cross domain boundaries)
+
 ## Event Ordering
 
 | Handler Type | Ordering | Use When |
@@ -11,7 +46,7 @@ The event bus provides typed, reflection-based pub/sub for inter-component commu
 | `Subscribe(fn)` | **Totally ordered** within a single `Publish` call. Handlers execute synchronously under the bus lock in registration order. | You need deterministic ordering and can guarantee the handler is fast. |
 | `SubscribeAsync(fn)` | **No ordering guarantee.** Handlers are dispatched to the worker pool and may execute in any order. | Default. The handler may be slow or do I/O. |
 
-**Events are scoped per-domain.** Each `ComponentDomain` has its own `ServiceBus`. Events published on one domain's bus do NOT propagate to parent or child domains.
+**Events are scoped per-domain.** See "Domain Architecture" above.
 
 ## Rules for Event Handlers
 
