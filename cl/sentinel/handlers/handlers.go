@@ -166,8 +166,9 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 		}
 		defer c.rateLimiter.releaseConcurrency(peerID)
 
-		// Enforce per-peer, per-protocol rate limit.
-		if !c.rateLimiter.allowRequest(peerID, name) {
+		// Enforce per-peer, per-protocol rate limit (1 token for admission;
+		// batch handlers consume additional tokens after decoding the request).
+		if !c.rateLimiter.allowRequest(peerID, name, 1) {
 			log.Debug("[pubsubhandler] rate limit exceeded", "protocol", name, "peer", peerID)
 			_ = ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
 			_ = s.Reset()
@@ -210,4 +211,22 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 			}
 		}
 	}
+}
+
+// consumeRateLimit consumes additional rate-limit tokens for a batch request.
+// Batch handlers call this after decoding the request to charge for the actual
+// number of response items (beyond the 1 token already consumed by the wrapper).
+// Returns true if allowed. On rejection, writes an SSZ error response to s.
+func (c *ConsensusHandlers) consumeRateLimit(s network.Stream, cost int) bool {
+	if cost <= 0 {
+		return true
+	}
+	peerID := s.Conn().RemotePeer().String()
+	protocol := string(s.Protocol())
+	if !c.rateLimiter.consumeTokens(peerID, protocol, cost) {
+		log.Debug("[pubsubhandler] rate limit exceeded (batch)", "protocol", protocol, "peer", peerID, "cost", cost)
+		_ = ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
+		return false
+	}
+	return true
 }

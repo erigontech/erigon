@@ -42,6 +42,13 @@ func (c *ConsensusHandlers) blobsSidecarsByRangeHandler(s network.Stream, versio
 		return err
 	}
 
+	// Consume additional rate-limit tokens. Estimate blob count as slots × max blobs per block,
+	// capped at the per-request throughput limit (72).
+	maxBlobs := max(int(c.beaconConfig.MaxBlobsPerBlock), int(c.beaconConfig.MaxBlobsPerBlockElectra))
+	if cost := min(int(req.Count)*maxBlobs, maxBlobsThroughoutputPerRequest) - 1; !c.consumeRateLimit(s, cost) {
+		return nil
+	}
+
 	tx, err := c.indiciesDB.BeginRo(c.ctx)
 	if err != nil {
 		return err
@@ -105,6 +112,11 @@ func (c *ConsensusHandlers) blobsSidecarsByIdsHandler(s network.Stream, version 
 	req := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](40269, 40)
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, version); err != nil {
 		return err
+	}
+
+	// Consume additional rate-limit tokens: one per blob identifier.
+	if cost := min(req.Len(), maxBlobsThroughoutputPerRequest) - 1; !c.consumeRateLimit(s, cost) {
+		return nil
 	}
 
 	tx, err := c.indiciesDB.BeginRo(c.ctx)
