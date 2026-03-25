@@ -153,13 +153,20 @@ func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Ha
 	return storageRangeAt(tx, contractAddress, keyStart, fromTxNum, maxResult, api.gethCompatibility)
 }
 
-// AccountRange implements debug_accountRange. Returns a range of accounts involved in the given block rangeb
+// AccountRange implements debug_accountRange. Returns a paginated list of all accounts present in the state at the given block.
 // To ensure compatibility, we've temporarily added support for the start parameter in two formats:
 // - string (e.g., "0x..."), which is used by Geth and other APIs (i.e debug_storageRangeAt).
 // - []byte, which was used in Erigon.
 // Deprecation of []byte format: The []byte format is now deprecated and will be removed in a future release.
 //
 // New optional parameter incompletes: This parameter has been added for compatibility with Geth. It is currently not supported when set to true(as its functionality is specific to the Geth protocol).
+//
+// Note: Geth returns all accounts at the given block starting from `start`, where `start` is a
+// keccak256(address) hash. Geth can seek directly to that position in the Merkle Patricia Trie
+// since the trie is natively indexed by keccak256. In Erigon, accounts are stored by raw address
+// (flat storage), so to match Geth's behaviour we would need to compute keccak256 for every account
+// in order to find the one matching `start` — which is too expensive for production use.
+// As a result, Erigon treats `start` as a raw address and iteration order differs from Geth.
 func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, start any, maxResults int, excludeCode, excludeStorage bool, optional_incompletes *bool) (state.IteratorDump, error) {
 	var startBytes []byte
 
@@ -258,7 +265,7 @@ func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.Blo
 		return state.IteratorDump{}, err
 	}
 	if header != nil {
-		res.Root = header.Root.String()
+		res.Root = fmt.Sprintf("%x", header.Root)
 	}
 
 	return res, nil
