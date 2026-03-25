@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -151,7 +151,10 @@ func (rl *peerRateLimiter) allowRequest(peerID string, protocol string) bool {
 	// Check per-protocol token bucket.
 	cfg, hasCfg := rl.protocolLimits[protocol]
 	if hasCfg {
-		bucketI, _ := rl.buckets.LoadOrStore(key, newTokenBucket(cfg.maxTokens, cfg.refillRate))
+		bucketI, ok := rl.buckets.Load(key)
+		if !ok {
+			bucketI, _ = rl.buckets.LoadOrStore(key, newTokenBucket(cfg.maxTokens, cfg.refillRate))
+		}
 		bucket := bucketI.(*tokenBucket)
 		if !bucket.tryConsume() {
 			// Rate limit exceeded — punish the peer for this protocol.

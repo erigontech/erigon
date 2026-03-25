@@ -143,16 +143,8 @@ func (c *ConsensusHandlers) Start() {
 	}
 }
 
-var (
-	ErrRateLimited     = errors.New("rate limit exceeded")
-	ErrTooManyRequests = errors.New("too many concurrent requests")
-	RateLimitedPrefix  = byte(0x01) // InvalidRequestPrefix — no rate-limit-specific code in the spec
-)
-
 func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Stream) error) func(s network.Stream) {
 	return func(s network.Stream) {
-		peerID := s.Conn().RemotePeer().String()
-
 		defer func() {
 			if r := recover(); r != nil {
 				log.Error("[pubsubhandler] panic in stream handler", "err", r, "name", name)
@@ -160,6 +152,8 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 				_ = s.Close()
 			}
 		}()
+
+		peerID := s.Conn().RemotePeer().String()
 
 		// Enforce per-peer concurrent stream cap.
 		if !c.rateLimiter.acquireConcurrency(peerID) {
@@ -173,7 +167,7 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 		// Enforce per-peer, per-protocol rate limit.
 		if !c.rateLimiter.allowRequest(peerID, name) {
 			log.Debug("[pubsubhandler] rate limit exceeded", "protocol", name, "peer", peerID)
-			_, _ = s.Write([]byte{RateLimitedPrefix})
+			_, _ = s.Write([]byte{InvalidRequestPrefix})
 			_ = s.Reset()
 			_ = s.Close()
 			return
