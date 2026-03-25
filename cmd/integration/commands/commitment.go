@@ -113,6 +113,7 @@ func init() {
 	withChaosMonkey(cmdCommitmentRebuild)
 	withClearCommitment(cmdCommitmentRebuild)
 	withResume(cmdCommitmentRebuild)
+	withNoHistory(cmdCommitmentRebuild)
 	commitmentCmd.AddCommand(cmdCommitmentRebuild)
 
 	// commitment print
@@ -263,6 +264,12 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	if clearCommitment && resume {
 		return errors.New("--clear-commitment and --resume are mutually exclusive")
 	}
+	if noHistory && resume {
+		return errors.New("--no-history and --resume are mutually exclusive")
+	}
+	if noHistory && clearCommitment {
+		return errors.New("--no-history and --clear-commitment are mutually exclusive")
+	}
 
 	dirs := datadir.New(datadirCli)
 	if reset {
@@ -299,7 +306,10 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	}
 
 	withHistory := false
-	if commitmentHistoryEnabled {
+	if noHistory {
+		// --no-history explicitly requested: skip history regeneration entirely
+		withHistory = false
+	} else if commitmentHistoryEnabled {
 		if clearCommitment || resume {
 			withHistory = true
 		} else {
