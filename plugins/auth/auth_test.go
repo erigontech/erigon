@@ -178,8 +178,10 @@ func TestTokenCID(t *testing.T) {
 // mockSigner always validates signatures.
 type mockSigner struct{}
 
-func (m *mockSigner) CanVerify(did string) bool                                                       { return true }
-func (m *mockSigner) Verify(_ context.Context, _ []byte, _ []byte, _ string) (bool, error) { return true, nil }
+func (m *mockSigner) CanVerify(did string) bool { return true }
+func (m *mockSigner) Verify(_ context.Context, _ []byte, _ []byte, _ string) (bool, error) {
+	return true, nil
+}
 
 func TestVerifyRootToken(t *testing.T) {
 	nonce := make([]byte, 16)
