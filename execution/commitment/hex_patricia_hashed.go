@@ -2159,6 +2159,13 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 				// Deletion is propagated upwards
 				hph.touchMap[row-1] |= uint16(1) << nibble
 				hph.afterMap[row-1] &^= uint16(1) << nibble
+
+				// Cascading collapse: the parent row just lost a child.
+				// If it now has exactly 1 child, the branch will collapse
+				// to a shortNode and we need the surviving sibling in the witness.
+				if hph.collapseTracer != nil && bits.OnesCount16(hph.afterMap[row-1]) == 1 {
+					hph.detectCascadingCollapseAtRow(row - 1)
+				}
 			}
 		}
 
@@ -2480,6 +2487,29 @@ func (hph *HexPatriciaHashed) detectCollapseBeforeDelete(hashedKey []byte) {
 	hph.collapseTracer(siblingPath)
 }
 
+// detectCascadingCollapseAtRow detects a branch→shortNode collapse caused by
+// a child deletion propagated upward from fold(). Called when afterMap[row]
+// has exactly 1 remaining child after a nibble was cleared.
+func (hph *HexPatriciaHashed) detectCascadingCollapseAtRow(row int) {
+	depth := hph.depths[row] - 1
+	survivingNibble := bits.TrailingZeros16(hph.afterMap[row])
+	survivingCell := &hph.grid[row][survivingNibble]
+
+	// Build the surviving child's full hashed key path
+	siblingPath := make([]byte, int(depth)+1+int(survivingCell.hashedExtLen))
+	copy(siblingPath, hph.currentKey[:depth])
+	siblingPath[depth] = byte(survivingNibble)
+	if survivingCell.hashedExtLen > 0 {
+		copy(siblingPath[int(depth)+1:], survivingCell.hashedExtension[:survivingCell.hashedExtLen])
+	}
+
+	compactSibling := NibblesToString(siblingPath)
+	fmt.Printf("[cascade-collapse] FOUND at row=%d depth=%d: survivingNibble=%x, siblingPath=%s (len=%d), hashLen=%d, extLen=%d\n",
+		row, depth, survivingNibble, compactSibling, len(siblingPath), survivingCell.hashLen, survivingCell.hashedExtLen)
+
+	hph.collapseTracer(siblingPath)
+}
+
 // fetches cell by key and set touch/after maps. Requires that prefix to be already unfolded
 func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) (cell *cell) {
 	hph.metrics.Updates(plainKey)
@@ -2713,21 +2743,48 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 				return fmt.Errorf("fold: %w", err)
 			}
 		}
-		// Now unfold until we step on an empty cell
-		for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
+		// Fold back any non-branch rows left by previous extension splits.
+		// These "virtual" rows (branchBefore=false) don't correspond to real DB
+		// branch nodes and carry stale hashedExtension data that confuses
+		// toWitnessTrie() when it traverses the grid top-down.
+		for hph.activeRows > 0 && !hph.branchBefore[hph.activeRows-1] {
+			if err := hph.fold(); err != nil {
+				return fmt.Errorf("fold non-branch: %w", err)
+			}
+		}
+
+		for hph.currentKeyLen < int16(len(hashedKey)) {
+			unfolding := hph.needUnfolding(hashedKey)
+			if unfolding <= 0 {
+				break
+			}
 			if err := hph.unfold(hashedKey, unfolding); err != nil {
 				return fmt.Errorf("unfold: %w", err)
 			}
 		}
+		// If the unfold split an extension (cpl=0) and created a virtual row
+		// where the hashedKey's cell is empty, fold it back. The virtual row
+		// carries stale account/storage data from fillFromUpperCell that
+		// confuses toWitnessTrie (account data at a non-leaf depth).
+		if hph.activeRows > 0 && !hph.branchBefore[hph.activeRows-1] &&
+			hph.currentKeyLen < int16(len(hashedKey)) {
+			divergeNibble := hashedKey[hph.currentKeyLen]
+			if hph.grid[hph.activeRows-1][divergeNibble].IsEmpty() {
+				if err := hph.fold(); err != nil {
+					return fmt.Errorf("fold empty diverging row: %w", err)
+				}
+			}
+		}
 
 		// unfold one more level if necessary
-		lastNibble := int(hashedKey[hph.currentKeyLen])
-		lastCell := &hph.grid[hph.activeRows-1][lastNibble]
-		// if last cell is a branch node, we need to unfold one more level
-		if int16(len(hashedKey)) == hph.depths[hph.activeRows-1] && len(hashedKey) != 64 && len(hashedKey) != 128 && lastCell.hashLen > 0 {
-
-			if err := hph.unfold(hashedKey, 1); err != nil {
-				return fmt.Errorf("extra unfold: %w", err)
+		if hph.currentKeyLen < int16(len(hashedKey)) {
+			lastNibble := int(hashedKey[hph.currentKeyLen])
+			lastCell := &hph.grid[hph.activeRows-1][lastNibble]
+			// if last cell is a branch node, we need to unfold one more level
+			if int16(len(hashedKey)) == hph.depths[hph.activeRows-1] && len(hashedKey) != 64 && len(hashedKey) != 128 && lastCell.hashLen > 0 {
+				if err := hph.unfold(hashedKey, 1); err != nil {
+					return fmt.Errorf("extra unfold: %w", err)
+				}
 			}
 		}
 

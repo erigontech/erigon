@@ -1401,7 +1401,14 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return protocol.SysCallContract(contract, data, chainConfig, ibs, header, fullEngine, false /* constCall */, vm.Config{})
 	}
 
-	if _, err = fullEngine.Finalize(chainConfig, types.CopyHeader(header), ibs, block.Uncles(), nil /* receipts */, block.Withdrawals(), chainReader, syscall, true /* skipReceiptsEval */, log.Root()); err != nil {
+	// Collect logs accumulated during transaction execution into a synthetic receipt
+	// so that Finalize can parse EIP-6110 deposit requests from them.
+	//   Finalize only uses receipt.Logs from each receipt — it doesn't read Status, GasUsed, CumulativeGasUsed, or any other field. It just concatenates all logs
+	// into a flat slice and passes them to ParseDepositLogs.
+	allLogs := ibs.Logs()
+	receipts := types.Receipts{&types.Receipt{Logs: allLogs}}
+
+	if _, err = fullEngine.Finalize(chainConfig, types.CopyHeader(header), ibs, block.Uncles(), receipts, block.Withdrawals(), chainReader, syscall, false /* skipReceiptsEval */, log.Root()); err != nil {
 		return nil, fmt.Errorf("failed to finalize block: %w", err)
 	}
 
@@ -2606,8 +2613,7 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 		for key := range m {
 			keyHash, _ := common.HashData(key[:])
 			cKey := dbutils.GenerateCompositeTrieKey(addrHash, keyHash)
-			// hashedKeyPath := trie.KeybytesToHex(cKey)
-			// fmt.Printf("DELETING Storage Key at path %x\n", hashedKeyPath)
+			fmt.Printf("DELETING Storage Key at path %x\n", cKey)
 			s.t.Delete(cKey)
 		}
 	}
@@ -2739,10 +2745,15 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 		return protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, false /* constCall */, vm.Config{})
 	}
+	// Collect logs accumulated during transaction execution into a synthetic receipt
+	// so that Finalize can parse EIP-6110 deposit requests from them.
+	allLogs := ibs.Logs()
+	statelessReceipts := types.Receipts{&types.Receipt{Logs: allLogs}}
+
 	// only Bor and AuRa engine use ChainReader. And the ChainReader is only used to read headers. This means their
 	// witness may need to be augmented with headers accessed during their engine.Finalize(). This is something that
 	// can be implemented later. For now use ChainReader = nil, as this is sufficient for Ethereum.
-	_, err = engine.Finalize(chainConfig, types.CopyHeader(header), ibs, block.Uncles() /*receipts */, nil, block.Withdrawals() /*chainReader */, nil, syscall /*skipReceiptsEval*/, true, log.Root())
+	_, err = engine.Finalize(chainConfig, types.CopyHeader(header), ibs, block.Uncles(), statelessReceipts, block.Withdrawals(), nil /* chainReader */, syscall, false /*skipReceiptsEval*/, log.Root())
 	if err != nil {
 		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] engine.Finalize failed: %w", err)
 	}
