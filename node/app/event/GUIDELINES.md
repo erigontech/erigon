@@ -39,7 +39,36 @@ WRONG — components in separate domains can't communicate:
 - Completely independent subsystems (e.g., a standalone monitoring agent)
 - Load isolation: a subsystem that would flood the shared worker pool (use `WithExecPoolSize` to create a domain with its own pool, but note events still won't cross domain boundaries)
 
-**Future: hierarchical event propagation.** If a use case arises where child domains need to receive parent events (or vice versa), cross-domain event bridging or hierarchical propagation would need to be added to the framework. This is not implemented today and should not be designed until there is a concrete use case driving the requirements.
+**Future: hierarchical event propagation (needed for L1/L2 combined mode).**
+
+The combined L1/L2 node ([proposal](https://github.com/erigontech/erigon-documents/tree/master/cocoon/pocs-and-proposals/l1-l2-node)) requires three domain levels:
+
+```
+root domain (shared base)
+├── Storage, Downloader, P2P, RPC (chain-ID router)
+│
+├── L1 domain
+│   ├── L1 Sync, L1 Execution, L1 TxPool, Caplin
+│   └── (L1 internal events stay here)
+│
+└── L2 domain
+    ├── L2 Sync, L2 Execution, L2 TxPool, RollupDriver
+    └── (L2 internal events stay here)
+```
+
+L1 and L2 need isolation from each other (separate state machines, separate block
+processing) but both need events from the shared base (e.g. `SnapshotDownloadComplete`),
+and L2 needs to subscribe to specific L1 events (e.g. `L1BlockFinalized` → triggers
+L2 derivation).
+
+This requires three capabilities not present today:
+1. **Child → parent subscription**: child domains can subscribe to parent domain events
+2. **Cross-domain directed events**: L1 publishes `L1BlockFinalized`, L2 subscribes via root
+3. **No upward propagation by default**: child domain internal events don't leak to parent
+
+This is NOT implemented today. It is needed before Phase 3 of the L1/L2 combined
+mode work (componentization Wave 5, PR 21 — `L2 NodeBuilder mode`). For L1-only
+operation (the current default), the single root domain is sufficient.
 
 ## Event Ordering
 
