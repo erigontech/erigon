@@ -240,6 +240,7 @@ type component struct {
 	componentDomain *componentDomain
 	options         []app.Option
 	context         context.Context
+	contextCancel   context.CancelFunc
 	id              app.Id
 	name            string
 	state           State
@@ -364,12 +365,14 @@ func WithProviderFactory[P any](p ProviderFactory[P]) app.Option {
 		})
 }
 
-func NewComponent[P any](context context.Context, options ...app.Option) (Component[P], error) {
+func NewComponent[P any](parentCtx context.Context, options ...app.Option) (Component[P], error) {
+	ctx, cancel := context.WithCancel(parentCtx)
 	c := &component{
-		RWMutex: sync.RWMutex{},
-		context: context,
-		state:   Instantiated,
-		log:     log,
+		RWMutex:       sync.RWMutex{},
+		context:       ctx,
+		contextCancel: cancel,
+		state:         Instantiated,
+		log:           log,
 	}
 
 	opts := componentOptions{
@@ -410,7 +413,7 @@ func NewComponent[P any](context context.Context, options ...app.Option) (Compon
 			if len(opts.id) == 0 {
 				opts.id = "root"
 			}
-			c.id, _ = rootComponentDomain.NewId(context, opts.id)
+			c.id, _ = rootComponentDomain.NewId(parentCtx, opts.id)
 		} else {
 			if err := c.setDomain(rootComponentDomain, false); err != nil {
 				return nil, err
@@ -422,7 +425,7 @@ func NewComponent[P any](context context.Context, options ...app.Option) (Compon
 		if len(opts.id) == 0 {
 			opts.id = strings.ToLower(filepath.Ext(reflect.TypeOf(c.provider).String())[1:])
 		}
-		c.id, _ = c.componentDomain.NewId(context, opts.id)
+		c.id, _ = c.componentDomain.NewId(parentCtx, opts.id)
 	}
 
 	if err := c.registerSubscriptions(); err != nil {
@@ -945,8 +948,12 @@ func awaitDeactivationChannels() {
 	deactivatoinWaiters.Lock()
 	defer deactivatoinWaiters.Unlock()
 
+	// Cancel the previous watcher goroutine's ChannelGroup.
+	// The goroutine captures its own reference and exits when cancelled.
 	if deactivatoinWaiters.ChannelGroup != nil {
 		deactivatoinWaiters.cancel()
+		deactivatoinWaiters.ChannelGroup = nil
+		deactivatoinWaiters.cancel = nil
 	}
 
 	if len(deactivatoinWaiters.cmap) == 0 {
@@ -954,41 +961,32 @@ func awaitDeactivationChannels() {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	deactivatoinWaiters.ChannelGroup = util.NewChannelGroup(ctx)
+	channels := util.NewChannelGroup(ctx)
+	deactivatoinWaiters.ChannelGroup = channels
 	deactivatoinWaiters.cancel = cancel
 
 	for dc := range deactivatoinWaiters.cmap {
-		deactivatoinWaiters.Add(dc)
+		channels.Add(dc)
 	}
 
+	// Each goroutine captures its own ChannelGroup reference.
+	// When awaitDeactivationChannels is called again, the old ctx is cancelled
+	// and the goroutine exits — it never touches the new ChannelGroup.
+	myChannels := channels
 	waiters := &deactivatoinWaiters
 	go func() {
-		for wait := true; wait; {
-			waiters.Lock()
-			channels := waiters.ChannelGroup
-			waiters.Unlock()
+		myChannels.Wait(
+			func(ch interface{}, _ interface{}, _ bool) (bool, bool) {
+				waiters.Lock()
+				c, ok := waiters.cmap[ch]
+				delete(waiters.cmap, ch)
+				waiters.Unlock()
 
-			if channels == nil {
-				break
-			}
-
-			wait = channels.Wait(
-				func(ch interface{}, _ interface{}, _ bool) (bool, bool) {
-					waiters.Lock()
-					c, ok := waiters.cmap[ch]
-					delete(waiters.cmap, ch)
-					waiters.Unlock()
-
-					if ok {
-						c.deactivate(context.Background(), noopHanlder)
-					}
-					return false, false
-				}, nil)
-		}
-		waiters.Lock()
-		defer waiters.Unlock()
-		waiters.ChannelGroup = nil
-		waiters.cancel = nil
+				if ok {
+					c.deactivate(context.Background(), noopHanlder)
+				}
+				return false, false
+			}, nil)
 	}()
 }
 
@@ -1016,6 +1014,12 @@ DEPENDENCIES:
 		dependency := asComponent(dependency)
 		for _, dependent := range dependency.dependents {
 			dependent := asComponent(dependent)
+			// Skip domain components — they manage membership, not
+			// explicit dependencies. A domain shouldn't block its
+			// children from deactivating their dependencies.
+			if _, isDomain := dependent.provider.(*componentDomain); isDomain {
+				continue
+			}
 			if !dependent.state.IsDeactivated() {
 				continue DEPENDENCIES
 			}
@@ -1048,6 +1052,16 @@ DEPENDENCIES:
 					return nil
 				}
 
+				// Cancel the dependency's context and restart the global
+				// deactivation watcher so it doesn't block on stale channels.
+				if dependency.contextCancel != nil {
+					dependency.contextCancel()
+				}
+				deactivatoinWaiters.Lock()
+				delete(deactivatoinWaiters.cmap, dependency.context.Done())
+				deactivatoinWaiters.Unlock()
+				awaitDeactivationChannels()
+
 				cerr := make(chan error, 1)
 				dependency.deactivate(deactivationCtx, func(ctx context.Context, _ *component, err error) {
 					if errors.Is(err, context.Canceled) {
@@ -1064,8 +1078,8 @@ DEPENDENCIES:
 		if err != nil {
 			onActivity(ctx, c, fmt.Errorf("deactivate dependencys failed: %w", err))
 		} else {
-			_, err := c.AwaitState(ctx, Deactivated)
-			onActivity(ctx, c, err)
+			c.onDependenciesDeactivated(ctx)
+			onActivity(ctx, c, nil)
 		}
 	}
 }
@@ -1090,10 +1104,17 @@ func (c *component) deactivateProvider(ctx context.Context, onActivity onActivit
 				return err
 			}
 
+			// Cancel the component's context so the global deactivation
+			// watcher sees it and doesn't block on this component's
+			// Done channel. Don't restart the watcher — the dependency
+			// cascade (deactivateDependencies) handles explicit deactivation.
+			if c.contextCancel != nil {
+				c.contextCancel()
+			}
+
 			deactivatoinWaiters.Lock()
 			delete(deactivatoinWaiters.cmap, c.context.Done())
 			deactivatoinWaiters.Unlock()
-			awaitDeactivationChannels()
 		}
 	}
 	return nil
