@@ -243,12 +243,9 @@ func (rl *peerRateLimiter) cleanup() {
 		return true
 	})
 
-	// Remove zero-count concurrency entries.
-	rl.concurrency.Range(func(key, value any) bool {
-		counter := value.(*atomic.Int32)
-		if counter.Load() == 0 {
-			rl.concurrency.Delete(key)
-		}
-		return true
-	})
+	// Concurrency entries are not cleaned up. Each is a single *atomic.Int32
+	// per peer (~40 bytes), so even over the lifetime of a long-running node
+	// the memory is negligible. Cleaning them up would require synchronization
+	// with acquireConcurrency/releaseConcurrency that adds complexity for no
+	// practical benefit.
 }

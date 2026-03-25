@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
+	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/sentinel/handshake"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -159,7 +160,7 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 		// Enforce per-peer concurrent stream cap.
 		if !c.rateLimiter.acquireConcurrency(peerID) {
 			log.Debug("[pubsubhandler] too many concurrent requests", "protocol", name, "peer", peerID)
-			_, _ = s.Write([]byte{InvalidRequestPrefix})
+			_ = ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
 			_ = s.Reset()
 			return
 		}
@@ -168,7 +169,7 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 		// Enforce per-peer, per-protocol rate limit.
 		if !c.rateLimiter.allowRequest(peerID, name) {
 			log.Debug("[pubsubhandler] rate limit exceeded", "protocol", name, "peer", peerID)
-			_, _ = s.Write([]byte{InvalidRequestPrefix})
+			_ = ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
 			_ = s.Reset()
 			return
 		}

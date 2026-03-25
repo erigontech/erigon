@@ -125,7 +125,7 @@ func TestRateLimiter_Cleanup(t *testing.T) {
 	_, hasPunishment = rl.punished.Load(key)
 	require.True(t, hasPunishment, "unexpired punishment should survive cleanup")
 
-	// Zero-count concurrency entries should be cleaned up.
+	// Concurrency entries are intentionally not cleaned up (negligible memory).
 	_, hasConcurrency = rl.concurrency.Load(peer)
-	require.False(t, hasConcurrency, "zero-count concurrency entry should be cleaned up")
+	require.True(t, hasConcurrency, "concurrency entries should persist")
 }
