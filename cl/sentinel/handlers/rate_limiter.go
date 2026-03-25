@@ -17,6 +17,7 @@
 package handlers
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -81,8 +82,19 @@ const maxConcurrentRequestsPerPeer = 5
 // punishmentDuration is how long a peer is blocked after exceeding the rate limit.
 const punishmentDuration = 30 * time.Second
 
+// cleanupInterval is how often the background goroutine sweeps stale entries.
+const cleanupInterval = 5 * time.Minute
+
+// bucketIdleExpiry is how long a token bucket must be unused before it is evicted.
+const bucketIdleExpiry = 10 * time.Minute
+
 // peerRateLimiter enforces per-peer, per-protocol rate limits and per-peer
 // concurrent stream caps on incoming ReqResp handlers.
+//
+// Note: rate limits are counted per request, not per block/blob returned.
+// A single BeaconBlocksByRange request consuming many blocks counts as 1 token.
+// Lighthouse's GCRA limiter counts per response item. The concurrent stream cap
+// bounds the practical impact of this difference.
 type peerRateLimiter struct {
 	// protocolLimits maps protocol name -> rate config
 	protocolLimits map[string]protocolRateConfig
@@ -188,4 +200,55 @@ func (rl *peerRateLimiter) releaseConcurrency(peerID string) {
 		counter := counterI.(*atomic.Int32)
 		counter.Add(-1)
 	}
+}
+
+// startCleanup runs a background goroutine that periodically evicts stale
+// entries from the sync.Maps to prevent unbounded memory growth as peers
+// connect and disconnect over time.
+func (rl *peerRateLimiter) startCleanup(ctx context.Context) {
+	go func() {
+		ticker := time.NewTicker(cleanupInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				rl.cleanup()
+			}
+		}
+	}()
+}
+
+func (rl *peerRateLimiter) cleanup() {
+	now := time.Now()
+
+	// Remove expired punishments.
+	rl.punished.Range(func(key, value any) bool {
+		if now.After(value.(time.Time)) {
+			rl.punished.Delete(key)
+		}
+		return true
+	})
+
+	// Remove idle token buckets (not accessed within bucketIdleExpiry).
+	rl.buckets.Range(func(key, value any) bool {
+		bucket := value.(*tokenBucket)
+		bucket.mu.Lock()
+		idle := now.Sub(bucket.lastRefill) > bucketIdleExpiry
+		bucket.mu.Unlock()
+		if idle {
+			rl.buckets.Delete(key)
+		}
+		return true
+	})
+
+	// Remove zero-count concurrency entries.
+	rl.concurrency.Range(func(key, value any) bool {
+		counter := value.(*atomic.Int32)
+		if counter.Load() == 0 {
+			rl.concurrency.Delete(key)
+		}
+		return true
+	})
 }

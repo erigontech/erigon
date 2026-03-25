@@ -138,6 +138,7 @@ func NewConsensusHandlers(
 }
 
 func (c *ConsensusHandlers) Start() {
+	c.rateLimiter.startCleanup(c.ctx)
 	for id, handler := range c.handlers {
 		c.host.SetStreamHandler(id, handler)
 	}
@@ -158,8 +159,8 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 		// Enforce per-peer concurrent stream cap.
 		if !c.rateLimiter.acquireConcurrency(peerID) {
 			log.Debug("[pubsubhandler] too many concurrent requests", "protocol", name, "peer", peerID)
+			_, _ = s.Write([]byte{InvalidRequestPrefix})
 			_ = s.Reset()
-			_ = s.Close()
 			return
 		}
 		defer c.rateLimiter.releaseConcurrency(peerID)
@@ -169,7 +170,6 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 			log.Debug("[pubsubhandler] rate limit exceeded", "protocol", name, "peer", peerID)
 			_, _ = s.Write([]byte{InvalidRequestPrefix})
 			_ = s.Reset()
-			_ = s.Close()
 			return
 		}
 

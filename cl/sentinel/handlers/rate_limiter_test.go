@@ -92,3 +92,40 @@ func TestRateLimiter_UnknownProtocolAllowed(t *testing.T) {
 		require.True(t, rl.allowRequest("peer1", "/unknown/protocol/v1"))
 	}
 }
+
+func TestRateLimiter_Cleanup(t *testing.T) {
+	rl := newPeerRateLimiter()
+	peer := "16Uiu2peer1"
+	proto := communication.PingProtocolV1
+
+	// Exhaust tokens to create bucket + punishment entries.
+	rl.allowRequest(peer, proto)
+	rl.allowRequest(peer, proto)
+	rl.allowRequest(peer, proto) // triggers punishment
+
+	// Also create a concurrency entry and release it.
+	rl.acquireConcurrency(peer)
+	rl.releaseConcurrency(peer)
+
+	key := peerProtocolKey{peerID: peer, protocol: proto}
+
+	// Verify entries exist.
+	_, hasBucket := rl.buckets.Load(key)
+	require.True(t, hasBucket)
+	_, hasPunishment := rl.punished.Load(key)
+	require.True(t, hasPunishment)
+	_, hasConcurrency := rl.concurrency.Load(peer)
+	require.True(t, hasConcurrency)
+
+	// Run cleanup — bucket and punishment should survive (recently used / not expired).
+	rl.cleanup()
+
+	_, hasBucket = rl.buckets.Load(key)
+	require.True(t, hasBucket, "recent bucket should survive cleanup")
+	_, hasPunishment = rl.punished.Load(key)
+	require.True(t, hasPunishment, "unexpired punishment should survive cleanup")
+
+	// Zero-count concurrency entries should be cleaned up.
+	_, hasConcurrency = rl.concurrency.Load(peer)
+	require.False(t, hasConcurrency, "zero-count concurrency entry should be cleaned up")
+}
