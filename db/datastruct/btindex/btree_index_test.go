@@ -444,25 +444,25 @@ func TestPrefixIndexLookup(t *testing.T) {
 
 	totalCount := uint64(2000)
 
-	// Test L2 lookup: key 0x02ab should narrow to [500, 600)
+	// Test L2 lookup: key 0x02ab has only di=500, so range is [500, 501)
 	l, r := p.lookup([]byte{0x02, 0xab, 0x00}, totalCount)
 	require.Equal(t, uint64(500), l, "L2 left bound")
-	require.Equal(t, uint64(600), r, "L2 right bound")
+	require.Equal(t, uint64(501), r, "L2 right bound (maxDi+1)")
 
-	// Test L2 lookup: key 0x02ac should narrow to [600, 1000) — next L1 entry is 0x05 at 1000
+	// Test L2 lookup: key 0x02ac has only di=600, so range is [600, 601)
 	l, r = p.lookup([]byte{0x02, 0xac, 0x00}, totalCount)
 	require.Equal(t, uint64(600), l, "L2 left bound for 0x02ac")
-	require.Equal(t, uint64(1000), r, "L2 right bound for 0x02ac")
+	require.Equal(t, uint64(601), r, "L2 right bound for 0x02ac (maxDi+1)")
 
-	// Test L1 lookup: key with only 1 byte 0x02 should use L1 bounds [500, 1000)
+	// Test L1 lookup: key with only 1 byte 0x02 should use L1 bounds [500, 601)
 	l, r = p.lookup([]byte{0x02}, totalCount)
 	require.Equal(t, uint64(500), l, "L1 left bound")
-	require.Equal(t, uint64(1000), r, "L1 right bound")
+	require.Equal(t, uint64(601), r, "L1 right bound (maxDi+1)")
 
-	// Test L1 lookup: last prefix 0x05 should clamp right to totalCount
+	// Test L1 lookup: last prefix 0x05 has only di=1000, range is [1000, 1001)
 	l, r = p.lookup([]byte{0x05, 0xff}, totalCount)
 	require.Equal(t, uint64(1000), l, "last prefix left bound")
-	require.Equal(t, totalCount, r, "last prefix right bound clamped to totalCount")
+	require.Equal(t, uint64(1001), r, "last prefix right bound (maxDi+1)")
 
 	// Test non-existent prefix: 0x03 has no keys
 	l, r = p.lookup([]byte{0x03, 0x00}, totalCount)
@@ -477,7 +477,7 @@ func TestPrefixIndexLookup(t *testing.T) {
 	// Test L2 with non-existent second byte: 0x01,0x05 doesn't exist, should fall back to L1 bounds
 	l, r = p.lookup([]byte{0x01, 0x05}, totalCount)
 	require.Equal(t, uint64(100), l, "should use L1 left when L2 entry missing")
-	require.Equal(t, uint64(500), r, "should use L1 right when L2 entry missing")
+	require.Equal(t, uint64(301), r, "should use L1 right when L2 entry missing (maxDi+1)")
 
 	// Test record with duplicate lower di: should keep minimum
 	p.record([]byte{0x02, 0xab, 0x00}, 450)

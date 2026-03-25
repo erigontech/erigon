@@ -37,33 +37,48 @@ import (
 
 const minKeysForPrefixIndex = 60_000
 
-// prefixIndex maps first 2 bytes of keys to minimum di where that prefix starts.
-// Level 1: byte[0] → minDi (256 entries)
-// Level 2: byte[0][byte[1]] → minDi (256×256 = 65,536 entries)
+// prefixIndex maps first 2 bytes of keys to exact [minDi, maxDi] ranges.
+// Flat array indexed by (byte0<<8)|byte1 for O(1) lookup with no scanning.
+// L1 arrays provide fallback for 1-byte keys.
 type prefixIndex struct {
-	l1 [256]uint64
-	l2 [256][256]uint64
+	// L2: flat 2-byte prefix → [minDi, maxDi] (65536 entries each)
+	l2Min [65536]uint64
+	l2Max [65536]uint64
+	// L1: 1-byte prefix → [minDi, maxDi] (256 entries each)
+	l1Min [256]uint64
+	l1Max [256]uint64
 }
 
 func newPrefixIndex() *prefixIndex {
 	p := new(prefixIndex)
-	for i := range p.l1 {
-		p.l1[i] = math.MaxUint64
+	for i := range p.l1Min {
+		p.l1Min[i] = math.MaxUint64
 	}
-	for i := range p.l2 {
-		for j := range p.l2[i] {
-			p.l2[i][j] = math.MaxUint64
-		}
+	for i := range p.l2Min {
+		p.l2Min[i] = math.MaxUint64
 	}
+	// l1Max and l2Max are zero-initialized, which is correct (we use max-tracking)
 	return p
 }
 
 func (p *prefixIndex) record(key []byte, di uint64) {
-	if len(key) >= 1 && di < p.l1[key[0]] {
-		p.l1[key[0]] = di
+	if len(key) >= 1 {
+		b0 := key[0]
+		if di < p.l1Min[b0] {
+			p.l1Min[b0] = di
+		}
+		if di > p.l1Max[b0] {
+			p.l1Max[b0] = di
+		}
 	}
-	if len(key) >= 2 && di < p.l2[key[0]][key[1]] {
-		p.l2[key[0]][key[1]] = di
+	if len(key) >= 2 {
+		idx := uint16(key[0])<<8 | uint16(key[1])
+		if di < p.l2Min[idx] {
+			p.l2Min[idx] = di
+		}
+		if di > p.l2Max[idx] {
+			p.l2Max[idx] = di
+		}
 	}
 }
 
@@ -75,51 +90,21 @@ func (p *prefixIndex) lookup(key []byte, totalCount uint64) (l, r uint64) {
 	}
 
 	b0 := key[0]
-	l = p.l1[b0]
-	if l == math.MaxUint64 {
+	if p.l1Min[b0] == math.MaxUint64 {
 		return 0, 0 // no keys with this first byte
 	}
 
-	// Find right bound from L1: next occupied entry after b0
-	r = math.MaxUint64
-	for i := int(b0) + 1; i < 256; i++ {
-		if p.l1[i] != math.MaxUint64 {
-			r = p.l1[i]
-			break
-		}
-	}
-
 	if len(key) >= 2 {
-		b1 := key[1]
-		if p.l2[b0][b1] != math.MaxUint64 {
-			l = p.l2[b0][b1] // tighter left bound
-
-			// Find right bound from L2: scan for next occupied entry
-			r = math.MaxUint64
-			// First scan remaining entries in same b0 bucket
-			for j := int(b1) + 1; j < 256; j++ {
-				if p.l2[b0][j] != math.MaxUint64 {
-					r = p.l2[b0][j]
-					break
-				}
-			}
-			// If not found, scan subsequent b0 buckets
-			if r == math.MaxUint64 {
-				for i := int(b0) + 1; i < 256; i++ {
-					if p.l1[i] != math.MaxUint64 {
-						r = p.l1[i]
-						break
-					}
-				}
-			}
+		idx := uint16(b0)<<8 | uint16(key[1])
+		if p.l2Min[idx] != math.MaxUint64 {
+			// Tight bounds from 2-byte prefix: [minDi, maxDi+1)
+			return p.l2Min[idx], p.l2Max[idx] + 1
 		}
-		// If l2[b0][b1] is MaxUint64, keep L1 bounds (no keys with this 2-byte prefix)
+		// No keys with this 2-byte prefix — fall back to L1
 	}
 
-	if r == math.MaxUint64 || r > totalCount {
-		r = totalCount
-	}
-	return l, r
+	// L1 bounds: [minDi, maxDi+1)
+	return p.l1Min[b0], p.l1Max[b0] + 1
 }
 
 // nolint
@@ -407,25 +392,28 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 		return cur, nil
 	}
 
-	// check cached nodes and narrow roi
-	n, l, r := b.bs(seekKey) // l===r when key is found
-	if l == r {
-		cur.Reset(n.di, g)
-		return cur, nil
-	}
+	// Start with full range; narrow with prefix index then optionally with bs()
+	l, r := uint64(0), b.offt.Count()
 
-	// Narrow range with prefix index if available
 	if b.prefix != nil {
 		pl, pr := b.prefix.lookup(seekKey, b.offt.Count())
-		if pl == 0 && pr == 0 {
-			// No keys with this prefix — fall through to find next key via cached nodes
-		} else {
-			if pl > l {
-				l = pl
-			}
-			if pr < r {
-				r = pr
-			}
+		if pl != 0 || pr != 0 {
+			l, r = pl, pr
+		}
+	}
+
+	// Skip expensive cached-node binary search when prefix already gave a tight range
+	if r-l > b.M {
+		n, bl, br := b.bs(seekKey)
+		if bl == br {
+			cur.Reset(n.di, g)
+			return cur, nil
+		}
+		if bl > l {
+			l = bl
+		}
+		if br < r {
+			r = br
 		}
 	}
 
@@ -496,23 +484,29 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 		return v0, true, 0, nil
 	}
 
-	n, l, r := b.bs(key) // l===r when key is found
-	if b.trace {
-		fmt.Printf("pivot di: %d di(LR): [%d %d] k: %x found: %t\n", n.di, l, r, n.key, l == r)
-		defer func() { fmt.Printf("found %x [%d %d]\n", key, l, r) }()
-	}
+	// Start with full range; narrow with prefix index then optionally with bs()
+	l, r := uint64(0), b.offt.Count()
 
-	// Narrow range with prefix index if available
-	if l != r && b.prefix != nil {
+	if b.prefix != nil {
 		pl, pr := b.prefix.lookup(key, b.offt.Count())
 		if pl == 0 && pr == 0 {
 			return nil, false, 0, nil // no keys with this prefix
 		}
-		if pl > l {
-			l = pl
+		l, r = pl, pr
+	}
+
+	// Skip expensive cached-node binary search when prefix already gave a tight range
+	if r-l > b.M {
+		n, bl, br := b.bs(key)
+		if b.trace {
+			fmt.Printf("pivot di: %d di(LR): [%d %d] k: %x found: %t\n", n.di, bl, br, n.key, bl == br)
+			defer func() { fmt.Printf("found %x [%d %d]\n", key, l, r) }()
 		}
-		if pr < r {
-			r = pr
+		if bl > l {
+			l = bl
+		}
+		if br < r {
+			r = br
 		}
 	}
 
