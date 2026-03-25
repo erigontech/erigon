@@ -55,3 +55,19 @@ func TestTracer_AccessList_Order(t *testing.T) {
 	require.Equal(t, ordered, al.accessListSorted())
 	require.True(t, al.Equal(al)) //nolint:gocritic
 }
+
+// TestTracer_AccessList_EmptyStorageKeys verifies that addresses with no storage
+// accesses produce nil storageKeys (serializes as JSON null), matching Geth behaviour.
+// See: https://github.com/ethereum/go-ethereum/issues/23233
+func TestTracer_AccessList_EmptyStorageKeys(t *testing.T) {
+	al := newAccessList()
+	al.addAddress(addr)
+
+	acl := al.accessList()
+	require.Len(t, acl, 1)
+	require.Nil(t, acl[0].StorageKeys)
+
+	aclSorted := al.accessListSorted()
+	require.Len(t, aclSorted, 1)
+	require.Nil(t, aclSorted[0].StorageKeys)
+}

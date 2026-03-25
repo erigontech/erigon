@@ -114,11 +114,14 @@ func (al accessList) Equal(other accessList) bool {
 func (al accessList) accessList() types.AccessList {
 	acl := make(types.AccessList, len(al))
 	for addr, storage := range al {
-		tuple := types.AccessTuple{Address: addr, StorageKeys: make([]common.Hash, len(storage.slots))}
-		for slot, pos := range storage.slots {
-			tuple.StorageKeys[pos] = slot
+		var storageKeys []common.Hash
+		if len(storage.slots) > 0 {
+			storageKeys = make([]common.Hash, len(storage.slots))
+			for slot, pos := range storage.slots {
+				storageKeys[pos] = slot
+			}
 		}
-		acl[storage.order] = tuple
+		acl[storage.order] = types.AccessTuple{Address: addr, StorageKeys: storageKeys}
 	}
 	return acl
 }
@@ -127,13 +130,16 @@ func (al accessList) accessList() types.AccessList {
 func (al accessList) accessListSorted() types.AccessList {
 	acl := make(types.AccessList, 0, len(al))
 	for addr, storage := range al {
-		storageKeys := make([]common.Hash, len(storage.slots))
-		for slot, pos := range storage.slots {
-			storageKeys[pos] = slot
+		var storageKeys []common.Hash
+		if len(storage.slots) > 0 {
+			storageKeys = make([]common.Hash, len(storage.slots))
+			for slot, pos := range storage.slots {
+				storageKeys[pos] = slot
+			}
+			slices.SortFunc(storageKeys, func(a, b common.Hash) int {
+				return a.Cmp(b)
+			})
 		}
-		slices.SortFunc(storageKeys, func(a, b common.Hash) int {
-			return a.Cmp(b)
-		})
 		acl = append(acl, types.AccessTuple{
 			Address:     addr,
 			StorageKeys: storageKeys,
