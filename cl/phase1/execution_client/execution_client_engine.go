@@ -371,6 +371,9 @@ func (cc *ExecutionClientEngine) GetAssembledBlock(ctx context.Context, id []byt
 }
 
 func (cc *ExecutionClientEngine) getAssembledBlockV3(ctx context.Context, id []byte, version clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+	if cc.beaconCfg == nil {
+		return nil, nil, nil, nil, errors.New("beaconCfg not set — call SetBeaconChainConfig before GetAssembledBlock")
+	}
 	resp, err := cc.engine.GetPayloadV3(ctx, hexutil.Bytes(id))
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("engine GetPayloadV3 failed: %w", err)
@@ -396,6 +399,9 @@ func (cc *ExecutionClientEngine) getAssembledBlockV3(ctx context.Context, id []b
 func (cc *ExecutionClientEngine) getAssembledBlockFromResponse(resp *engine_types.GetPayloadResponse, version clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	if resp.ExecutionPayload == nil {
 		return nil, nil, nil, nil, errors.New("GetPayload returned nil execution payload")
+	}
+	if cc.beaconCfg == nil {
+		return nil, nil, nil, nil, errors.New("beaconCfg not set — call SetBeaconChainConfig before GetAssembledBlock")
 	}
 
 	block, err := executionPayloadToEth1Block(resp.ExecutionPayload, version, cc.beaconCfg)

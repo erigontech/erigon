@@ -94,6 +94,7 @@ func runCaplinNode(cliCtx *cli.Context) error {
 			log.Error("could not start engine api", "err", err)
 		} else {
 			log.Info("Started Engine API RPC Client", "addr", cfg.EngineAPIAddr)
+			defer cc.Close()
 			executionEngine = cc
 		}
 	}
