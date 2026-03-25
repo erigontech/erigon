@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 
 	"github.com/holiman/uint256"
@@ -59,6 +60,9 @@ The state transitioning model does all the necessary work to apply a single tran
 */
 
 var ErrStateTransitionFailed = errors.New("state transition failed")
+
+// gasDebug enables per-transaction gas breakdown logging (set GAS_DEBUG=1 env var).
+var gasDebug = os.Getenv("GAS_DEBUG") != ""
 
 type ErrExecAbortError struct {
 	DependencyTxIndex int
@@ -620,6 +624,19 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Regular)
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
 			st.blockRegularGasUsed = st.txnGasUsed
+			if gasDebug {
+				log.Warn("GAS_DEBUG prague tx",
+					"block", st.state.BlockNumber(),
+					"txIdx", st.state.TxIndex(),
+					"gasLimit", st.msg.Gas(),
+					"intrinsicGas", intrinsicGasResult.RegularGas,
+					"floorGas", intrinsicGasResult.FloorGasCost,
+					"nAuths", len(st.msg.Authorizations()),
+					"rawRefund", st.state.GetRefund().Regular,
+					"gasUsedB4Refund", st.txnGasUsedB4Refunds,
+					"appliedRefund", refund,
+					"txnGasUsed", st.txnGasUsed)
+			}
 		} else {
 			st.txnGasUsedB4Refunds = mdGasUsed.Regular
 			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund().Regular)

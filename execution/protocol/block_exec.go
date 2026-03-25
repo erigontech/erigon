@@ -385,7 +385,9 @@ var alwaysSkipReceiptCheck = dbg.EnvBool("EXEC_SKIP_RECEIPT_CHECK", false)
 
 func BlockPostValidation(blockGasUsed, blobGasUsed uint64, checkReceipts bool, receipts types.Receipts, h *types.Header, txns types.Transactions, chainConfig *chain.Config, logger log.Logger) error {
 	if blockGasUsed != h.GasUsed {
-		logger.Warn("gas used mismatch", "block", h.Number.Uint64(), "header", h.GasUsed, "execution", blockGasUsed,
+		logger.Warn("gas used mismatch",
+			"block", h.Number.Uint64(), "blockHash", h.Hash(), "parentHash", h.ParentHash,
+			"header", h.GasUsed, "execution", blockGasUsed,
 			"diff", int64(blockGasUsed)-int64(h.GasUsed), "txCount", len(txns), "receiptCount", len(receipts))
 		// Dump per-tx gas for debugging
 		var cumGas uint64
@@ -394,7 +396,7 @@ func BlockPostValidation(blockGasUsed, blobGasUsed uint64, checkReceipts bool, r
 			cumGas += txGas
 			var txHash string
 			if i < len(txns) {
-				txHash = txns[i].Hash().Hex()[:18]
+				txHash = txns[i].Hash().Hex()
 			}
 			logger.Warn("  tx gas detail", "block", h.Number.Uint64(), "txIdx", i, "txHash", txHash,
 				"gasUsed", txGas, "cumGasUsed", r.CumulativeGasUsed, "computedCumGas", cumGas, "status", r.Status)
