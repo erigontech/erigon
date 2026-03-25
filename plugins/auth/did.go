@@ -31,9 +31,9 @@ import (
 // DID represents a Decentralized Identifier.
 // Supported methods: did:pkh (blockchain addresses), did:key (standalone keys).
 type DID struct {
-	Method  string // "pkh" or "key"
-	Raw     string // full DID string
-	chainID uint64 // for did:pkh only
+	Method  string         // "pkh" or "key"
+	Raw     string         // full DID string
+	chainID uint64         // for did:pkh only
 	address common.Address // for did:pkh only
 }
 
