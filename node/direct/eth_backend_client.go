@@ -335,6 +335,18 @@ func (s *EthBackendClientDirect) RemovePeer(ctx context.Context, in *remoteproto
 	return s.server.RemovePeer(ctx, in)
 }
 
+func (s *EthBackendClientDirect) AddTrustedPeer(ctx context.Context, in *remoteproto.AddPeerRequest, opts ...grpc.CallOption) (*remoteproto.AddPeerReply, error) {
+	return s.server.AddTrustedPeer(ctx, in)
+}
+
+func (s *EthBackendClientDirect) RemoveTrustedPeer(ctx context.Context, in *remoteproto.RemovePeerRequest, opts ...grpc.CallOption) (*remoteproto.RemovePeerReply, error) {
+	return s.server.RemoveTrustedPeer(ctx, in)
+}
+
+func (s *EthBackendClientDirect) SetHead(ctx context.Context, in *remoteproto.SetHeadRequest, opts ...grpc.CallOption) (*remoteproto.SetHeadReply, error) {
+	return s.server.SetHead(ctx, in)
+}
+
 func (s *EthBackendClientDirect) PendingBlock(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remoteproto.PendingBlockReply, error) {
 	return s.server.PendingBlock(ctx, in)
 }

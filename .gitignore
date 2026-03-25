@@ -78,6 +78,9 @@ docker-compose.*.yml
 .env
 coverage-test.out
 coverage-test-all.out
+cpu_*.out
+mem_*.out
+bench_*.txt
 
 dist
 __debug_bin
@@ -116,3 +119,14 @@ mdbx.lck
 *.prof
 
 .claude/settings.local.json
+.claude/projects/
+
+# Prevent accidental commit of locally-built binaries
+/erigon
+
+# place to store task-specific agent .md files that we do not want to commit to main repo
+agentspecs/
+.claude/worktrees/
+
+# ralphex progress logs
+.ralphex/progress/

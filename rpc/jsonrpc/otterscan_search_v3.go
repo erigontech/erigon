@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"context"
+	"fmt"
 	"slices"
 
 	"github.com/erigontech/erigon/common"
@@ -82,6 +83,9 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 			if err != nil {
 				return nil, nil, false, err
 			}
+			if block == nil {
+				return nil, nil, false, fmt.Errorf("block not found: %d", blockNum)
+			}
 			mustReadBlock = false
 		}
 
@@ -93,7 +97,7 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 			log.Warn("[rpc] txn not found", "blockNum", blockNum, "txIndex", txIndex)
 			continue
 		}
-		rpcTx := ethapi.NewRPCTransaction(txn, block.Hash(), blockNum, uint64(txIndex), block.BaseFee())
+		rpcTx := ethapi.NewRPCTransaction(txn, block.Hash(), block.Time(), blockNum, uint64(txIndex), block.BaseFee())
 		txs = append(txs, rpcTx)
 
 		receipt, err := api.receiptsGenerator.GetReceipt(ctx, chainConfig, tx, block.HeaderNoCopy(), txn, txIndex, txNum, nil)

@@ -20,9 +20,11 @@
 package vm
 
 import (
-	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -53,7 +55,8 @@ type Contract struct {
 	value uint256.Int
 }
 
-var jumpDestCache, _ = lru.New[accounts.CodeHash, bitvec](256)
+// around 64MB cache in the worst case.
+var jumpDestCache = cache.NewGenericCache[bitvec](64*datasize.MB, func(v bitvec) int { return len(v) })
 
 // NewContract returns a new contract environment for the execution of EVM.
 func NewContract(caller accounts.Address, callerAddress accounts.Address, addr accounts.Address, value uint256.Int) *Contract {
@@ -86,9 +89,14 @@ func (c *Contract) isCode(udest uint64) bool {
 	if c.analysis != nil {
 		return c.analysis.codeSegment(udest)
 	}
+	var codeHash common.Hash
+	isCodeHashZero := c.CodeHash.IsZero()
+	if !isCodeHashZero {
+		codeHash = c.CodeHash.Value()
+	}
 
-	if !c.CodeHash.IsZero() {
-		if analysis, ok := jumpDestCache.Get(c.CodeHash); ok {
+	if !isCodeHashZero {
+		if analysis, ok := jumpDestCache.Get(codeHash[:]); ok {
 			c.analysis = analysis
 			return c.analysis.codeSegment(udest)
 		}
@@ -96,8 +104,8 @@ func (c *Contract) isCode(udest uint64) bool {
 
 	c.analysis = codeBitmap(c.Code)
 
-	if !c.CodeHash.IsZero() {
-		jumpDestCache.Add(c.CodeHash, c.analysis)
+	if !isCodeHashZero {
+		jumpDestCache.Put(codeHash[:], c.analysis)
 	}
 
 	return c.analysis.codeSegment(udest)

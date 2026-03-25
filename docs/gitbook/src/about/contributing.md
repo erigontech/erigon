@@ -1,10 +1,13 @@
 ---
 description: Contributing to the Erigon 3 Documentation
+metaLinks:
+  alternates:
+    - https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/about/contributing
 ---
 
 # Contributing
 
-This documentation is powered by Gitbook but can be edited locally by using [MdBook](https://rust-lang.github.io/mdBook).
+This documentation source can be found in our main repository [erigontech/erigon](https://github.com/erigontech/erigon) and can be edited locally by using [MdBook](https://rust-lang.github.io/mdBook).
 
 To contribute to the Erigon Docs, you can either:
 

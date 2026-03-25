@@ -19,18 +19,22 @@ package engineapi
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/rpc"
 )
 
 var ourCapabilities = []string{
 	"engine_forkchoiceUpdatedV1",
 	"engine_forkchoiceUpdatedV2",
 	"engine_forkchoiceUpdatedV3",
+	"engine_forkchoiceUpdatedV4",
 	"engine_newPayloadV1",
 	"engine_newPayloadV2",
 	"engine_newPayloadV3",
@@ -43,7 +47,9 @@ var ourCapabilities = []string{
 	"engine_getPayloadV5",
 	"engine_getPayloadV6",
 	"engine_getPayloadBodiesByHashV1",
+	"engine_getPayloadBodiesByHashV2",
 	"engine_getPayloadBodiesByRangeV1",
+	"engine_getPayloadBodiesByRangeV2",
 	"engine_getClientVersionV1",
 	"engine_getBlobsV1",
 	"engine_getBlobsV2",
@@ -102,7 +108,7 @@ func (e *EngineServer) GetPayloadV5(ctx context.Context, payloadID hexutil.Bytes
 	return e.getPayload(ctx, decodedPayloadId, clparams.FuluVersion)
 }
 
-// Same as [GetPayloadV5], but returning ExecutionPayloadV4
+// Same as [GetPayloadV5], but returning ExecutionPayloadV6
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_getpayloadv6
 func (e *EngineServer) GetPayloadV6(ctx context.Context, payloadID hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
 	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
@@ -128,6 +134,12 @@ func (e *EngineServer) ForkchoiceUpdatedV2(ctx context.Context, forkChoiceState 
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_forkchoiceupdatedv3
 func (e *EngineServer) ForkchoiceUpdatedV3(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
 	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.DenebVersion)
+}
+
+// Successor of [ForkchoiceUpdatedV3] post Amsterdam, with stricter check on params
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_forkchoiceupdatedv4
+func (e *EngineServer) ForkchoiceUpdatedV4(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
+	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.GloasVersion)
 }
 
 // NewPayloadV1 processes new payloads (blocks) from the beacon chain without withdrawals.
@@ -171,10 +183,34 @@ func (e *EngineServer) GetPayloadBodiesByHashV1(ctx context.Context, hashes []co
 	return e.getPayloadBodiesByHash(ctx, hashes)
 }
 
+// Returns an array of execution payload bodies referenced by their block hashes,
+// including blockAccessList sidecars from DB.
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_getpayloadbodiesbyhashv2
+func (e *EngineServer) GetPayloadBodiesByHashV2(ctx context.Context, hashes []common.Hash) ([]*engine_types.ExecutionPayloadBodyV2, error) {
+	if len(hashes) > 1024 {
+		return nil, &engine_helpers.TooLargeRequestErr
+	}
+	e.engineLogSpamer.RecordRequest()
+	return e.chainRW.GetPayloadBodiesByHash(ctx, hashes)
+}
+
 // Returns an ordered (as per canonical chain) array of execution payload bodies, with corresponding execution block numbers from "start", up to "count"
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_getpayloadbodiesbyrangev1
 func (e *EngineServer) GetPayloadBodiesByRangeV1(ctx context.Context, start, count hexutil.Uint64) ([]*engine_types.ExecutionPayloadBody, error) {
 	return e.getPayloadBodiesByRange(ctx, uint64(start), uint64(count))
+}
+
+// Returns an ordered (as per canonical chain) array of execution payload bodies, with corresponding execution block numbers from "start", up to "count",
+// including blockAccessList sidecars from DB.
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_getpayloadbodiesbyrangev2
+func (e *EngineServer) GetPayloadBodiesByRangeV2(ctx context.Context, start, count hexutil.Uint64) ([]*engine_types.ExecutionPayloadBodyV2, error) {
+	if uint64(start) == 0 || uint64(count) == 0 {
+		return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid start or count, start: %v count: %v", start, count)}
+	}
+	if uint64(count) > 1024 {
+		return nil, &engine_helpers.TooLargeRequestErr
+	}
+	return e.chainRW.GetPayloadBodiesByRange(ctx, uint64(start), uint64(count))
 }
 
 // Returns the node's code and commit details in a slice

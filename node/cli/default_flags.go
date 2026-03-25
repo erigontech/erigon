@@ -39,11 +39,14 @@ var DefaultFlags = []cli.Flag{
 	&utils.TxPoolGlobalQueueFlag,
 	&utils.TxPoolTraceSendersFlag,
 	&utils.TxPoolCommitEveryFlag,
+	&utils.TxPoolQueuedDormancyFlag,
 	&PruneDistanceFlag,
 	&PruneBlocksDistanceFlag,
 	&PruneModeFlag,
 	&utils.KeepExecutionProofsFlag,
-
+	&utils.FcuTimeoutFlag,
+	&utils.FcuBackgroundPruneFlag,
+	&utils.FcuBackgroundCommitFlag,
 	&BatchSizeFlag,
 	&BodyCacheLimitFlag,
 	&DatabaseVerbosityFlag,
@@ -83,7 +86,9 @@ var DefaultFlags = []cli.Flag{
 	&utils.DBReadConcurrencyFlag,
 	&utils.RpcAccessListFlag,
 	&utils.RpcTraceCompatFlag,
+	&utils.RpcGethCompatFlag,
 	&utils.RpcGasCapFlag,
+	&utils.RpcBlockRangeLimit,
 	&utils.RpcBatchLimit,
 	&utils.RpcReturnDataLimit,
 	&utils.AllowUnprotectedTxs,
@@ -187,6 +192,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.CaplinSubscribeAllTopicsFlag,
 	&utils.CaplinMaxPeerCount,
 	&utils.CaplinEnableUPNPlag,
+	&utils.CaplinNATFlag,
 	&utils.CaplinMaxInboundTrafficPerPeerFlag,
 	&utils.CaplinMaxOutboundTrafficPerPeerFlag,
 	&utils.CaplinAdaptableTrafficRequirementsFlag,
@@ -196,18 +202,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.SentinelStaticPeers,
 
 	&utils.OtsSearchMaxCapFlag,
-
-	&utils.SilkwormExecutionFlag,
-	&utils.SilkwormRpcDaemonFlag,
-	&utils.SilkwormSentryFlag,
-	&utils.SilkwormVerbosityFlag,
-	&utils.SilkwormNumContextsFlag,
-	&utils.SilkwormRpcLogEnabledFlag,
-	&utils.SilkwormRpcLogMaxFileSizeFlag,
-	&utils.SilkwormRpcLogMaxFilesFlag,
-	&utils.SilkwormRpcLogDumpResponseFlag,
-	&utils.SilkwormRpcNumWorkersFlag,
-	&utils.SilkwormRpcJsonCompatibilityFlag,
 
 	&utils.BeaconAPIFlag,
 	&utils.BeaconApiAddrFlag,
@@ -236,6 +230,8 @@ var DefaultFlags = []cli.Flag{
 
 	&utils.TrustedSetupFile,
 	&utils.RPCSlowFlag,
+	&utils.RpcTxSyncDefaultTimeoutFlag,
+	&utils.RpcTxSyncMaxTimeoutFlag,
 
 	&utils.TxPoolGossipDisableFlag,
 	&SyncLoopBlockLimitFlag,
@@ -255,4 +251,8 @@ var DefaultFlags = []cli.Flag{
 	&utils.GDBMeFlag,
 
 	&utils.ExperimentalConcurrentCommitmentFlag,
+
+	&utils.MCPDisableFlag,
+	&utils.MCPAddrFlag,
+	&utils.MCPPortFlag,
 }

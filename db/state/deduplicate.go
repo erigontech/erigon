@@ -41,6 +41,10 @@ func (ht *HistoryRoTx) deduplicateFiles(ctx context.Context, indexFiles, history
 		return nil
 	}
 
+	if len(indexFiles) > 1 || len(historyFiles) > 1 {
+		return fmt.Errorf("wrong deduplication interval from %d to %d", r.history.from, r.history.to)
+	}
+
 	var decomp *seg.Decompressor
 
 	fromStep, toStep := kv.Step(r.history.from/ht.stepSize), kv.Step(r.history.to/ht.stepSize)
@@ -52,7 +56,7 @@ func (ht *HistoryRoTx) deduplicateFiles(ctx context.Context, indexFiles, history
 		return fmt.Errorf("deduo %s history compressor: %w", ht.h.FilenameBase, err)
 	}
 
-	pagedWr := ht.datarWriter(comp)
+	pagedWr := ht.dataWriter(ctx, comp)
 
 	var cp CursorHeap
 	heap.Init(&cp)
@@ -128,7 +132,17 @@ func (ht *HistoryRoTx) deduplicateFiles(ctx context.Context, indexFiles, history
 
 				v, _ := ci1.hist.Next(valBuf[:0])
 
-				if dedupVal != nil && bytes.Equal(*dedupVal, v) {
+				// if dedupVal == nil -> we can not insert to the page because next val can be duplicate --> remember the value and decide next iter
+				if dedupVal == nil {
+					dd := bytes.Clone(v) // i am not sure if there is a way to avoid extra copy here
+					dedupVal = &dd
+					prevTxNum = txNum
+
+					continue
+				}
+
+				// if dedupVal is the same as current --> can not insert to the page bacause next val can be duplicate as well --> mark prev tx as duplicate
+				if bytes.Equal(*dedupVal, v) {
 					if dedupKeyEFs[string(ci1.key)] == nil {
 						dedupKeyEFs[string(ci1.key)] = make(map[uint64]struct{})
 					}
@@ -139,13 +153,21 @@ func (ht *HistoryRoTx) deduplicateFiles(ctx context.Context, indexFiles, history
 					continue
 				}
 
+				histKeyBuf = historyKey(prevTxNum, ci1.key, histKeyBuf)
+
+				if err = pagedWr.Add(histKeyBuf, *dedupVal); err != nil {
+					return err
+				}
+
 				dd := bytes.Clone(v) // i am not sure if there is a way to avoid extra copy here
 				dedupVal = &dd
 				prevTxNum = txNum
+			}
 
-				histKeyBuf = historyKey(txNum, ci1.key, histKeyBuf)
+			if dedupVal != nil {
+				histKeyBuf = historyKey(prevTxNum, ci1.key, histKeyBuf)
 
-				if err = pagedWr.Add(histKeyBuf, v); err != nil {
+				if err = pagedWr.Add(histKeyBuf, *dedupVal); err != nil {
 					return err
 				}
 			}
@@ -230,7 +252,12 @@ func (iit *InvertedIndexRoTx) deduplicateFiles(ctx context.Context, files []*Fil
 	}
 
 	write := iit.dataWriter(comp, false)
-	p := ps.AddNew(path.Base(datPath), 1)
+
+	cnt := 0
+	for _, item := range files {
+		cnt += item.decompressor.Count()
+	}
+	p := ps.AddNew(path.Base(datPath), uint64(cnt/2))
 	defer ps.Delete(p)
 
 	var cp CursorHeap
@@ -262,6 +289,7 @@ func (iit *InvertedIndexRoTx) deduplicateFiles(ctx context.Context, files []*Fil
 	// (when CursorHeap cp is empty), there is a need to process the last pair `keyBuf=>valBuf`, because it was one step behind
 	var keyBuf, valBuf []byte
 	var lastKey, lastVal []byte
+	i := uint64(0)
 	for cp.Len() > 0 {
 		lastKey = append(lastKey[:0], cp[0].key...)
 		lastVal = append(lastVal[:0], cp[0].val...)
@@ -315,9 +343,13 @@ func (iit *InvertedIndexRoTx) deduplicateFiles(ctx context.Context, files []*Fil
 			if ci1.kvReader.HasNext() {
 				ci1.key, _ = ci1.kvReader.Next(ci1.key[:0])
 				ci1.val, _ = ci1.kvReader.Next(ci1.val[:0])
+				i += 2
 				// fmt.Printf("heap next push %s [%d] %x\n", ii.KeysTable, ci1.endTxNum, ci1.key)
 				heap.Push(&cp, ci1)
 			}
+		}
+		if i%1024 == 0 {
+			p.Processed.Store(i)
 		}
 		if keyBuf != nil {
 			// fmt.Printf("pput %x->%x\n", keyBuf, valBuf)

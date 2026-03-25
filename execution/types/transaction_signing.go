@@ -259,11 +259,7 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) 
 		if !sg.accessList {
 			return accounts.NilAddress, fmt.Errorf("accessList txn is not supported by signer %s", sg)
 		}
-		if t.ChainID == nil {
-			if !sg.chainID.IsZero() {
-				return accounts.NilAddress, ErrInvalidChainId
-			}
-		} else if !t.ChainID.Eq(&sg.chainID) {
+		if !t.ChainID.Eq(&sg.chainID) {
 			return accounts.NilAddress, ErrInvalidChainId
 		}
 		// ACL txs are defined to use 0 and 1 as their recovery id, add
@@ -274,11 +270,7 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) 
 		if !sg.dynamicFee {
 			return accounts.NilAddress, fmt.Errorf("dynamicFee txn is not supported by signer %s", sg)
 		}
-		if t.ChainID == nil {
-			if !sg.chainID.IsZero() {
-				return accounts.NilAddress, ErrInvalidChainId
-			}
-		} else if !t.ChainID.Eq(&sg.chainID) {
+		if !t.ChainID.Eq(&sg.chainID) {
 			return accounts.NilAddress, ErrInvalidChainId
 		}
 		// ACL and DynamicFee txs are defined to use 0 and 1 as their recovery
@@ -289,11 +281,7 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) 
 		if !sg.blob {
 			return accounts.NilAddress, fmt.Errorf("blob txn is not supported by signer %s", sg)
 		}
-		if t.ChainID == nil {
-			if !sg.chainID.IsZero() {
-				return accounts.NilAddress, ErrInvalidChainId
-			}
-		} else if !t.ChainID.Eq(&sg.chainID) {
+		if !t.ChainID.Eq(&sg.chainID) {
 			return accounts.NilAddress, ErrInvalidChainId
 		}
 		// ACL, DynamicFee, and blob txs are defined to use 0 and 1 as their recovery
@@ -304,11 +292,7 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) 
 		if !sg.setCode {
 			return accounts.NilAddress, fmt.Errorf("setCode tx is not supported by signer %s", sg)
 		}
-		if t.ChainID == nil {
-			if !sg.chainID.IsZero() {
-				return accounts.NilAddress, ErrInvalidChainId
-			}
-		} else if !t.ChainID.Eq(&sg.chainID) {
+		if !t.ChainID.Eq(&sg.chainID) {
 			return accounts.NilAddress, ErrInvalidChainId
 		}
 		// ACL, DynamicFee, blob, and setCode txs are defined to use 0 and 1 as their recovery
@@ -328,7 +312,10 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, txn Transaction) 
 func (sg Signer) SignatureValues(txn Transaction, sig []byte) (R, S, V *uint256.Int, err error) {
 	switch t := txn.(type) {
 	case *LegacyTx:
-		R, S, V = decodeSignature(sig)
+		R, S, V, err = decodeSignature(sig)
+		if err != nil {
+			return nil, nil, nil, err
+		}
 		if sg.chainID.IsZero() {
 			V.Add(V, &u256.Num27)
 		} else {
@@ -339,10 +326,13 @@ func (sg Signer) SignatureValues(txn Transaction, sig []byte) (R, S, V *uint256.
 		// Check that chain ID of tx matches the signer. We also accept ID zero here,
 		// because it indicates that the chain ID was not specified in the tx.
 		chainId := t.GetChainID()
-		if chainId != nil && !chainId.IsZero() && !chainId.Eq(&sg.chainID) {
+		if !chainId.IsZero() && !chainId.Eq(&sg.chainID) {
 			return nil, nil, nil, ErrInvalidChainId
 		}
-		R, S, V = decodeSignature(sig)
+		R, S, V, err = decodeSignature(sig)
+		if err != nil {
+			return nil, nil, nil, err
+		}
 	default:
 		return nil, nil, nil, ErrTxTypeNotSupported
 	}
@@ -352,6 +342,10 @@ func (sg Signer) SignatureValues(txn Transaction, sig []byte) (R, S, V *uint256.
 func (sg Signer) ChainID() *uint256.Int {
 	return &sg.chainID
 }
+
+// SetMalleable sets whether the signer accepts malleable (pre-EIP-2) signatures
+// where S > secp256k1n/2. Only relevant for legacy transactions.
+func (sg *Signer) SetMalleable(v bool) { sg.malleable = v }
 
 // Equal returns true if the given signer is the same as the receiver.
 func (sg Signer) Equal(other Signer) bool {
@@ -365,14 +359,14 @@ func (sg Signer) Equal(other Signer) bool {
 		sg.setCode == other.setCode
 }
 
-func decodeSignature(sig []byte) (r, s, v *uint256.Int) {
+func decodeSignature(sig []byte) (r, s, v *uint256.Int, err error) {
 	if len(sig) != crypto.SignatureLength {
-		panic(fmt.Sprintf("wrong size for signature: got %d, want %d", len(sig), crypto.SignatureLength))
+		return nil, nil, nil, fmt.Errorf("wrong size for signature: got %d, want %d", len(sig), crypto.SignatureLength)
 	}
 	r = new(uint256.Int).SetBytes(sig[:32])
 	s = new(uint256.Int).SetBytes(sig[32:64])
 	v = new(uint256.Int).SetBytes(sig[64:65])
-	return r, s, v
+	return r, s, v, nil
 }
 
 func recoverPlain(context *secp256k1.Context, sighash common.Hash, R, S, Vb *uint256.Int, homestead bool) (accounts.Address, error) {

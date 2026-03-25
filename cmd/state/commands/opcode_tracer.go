@@ -436,7 +436,11 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 	rawChainDb := mdbx.MustOpen(dirs.Chaindata)
 	defer rawChainDb.Close()
 
-	agg, err := dbstate.New(dirs).Logger(logger).Open(context.Background(), rawChainDb)
+	erigonDBSettings, err := dbstate.ResolveErigonDBSettings(dirs, logger, false)
+	if err != nil {
+		return err
+	}
+	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings).Open(context.Background(), rawChainDb)
 	if err != nil {
 		return err
 	}
@@ -733,8 +737,7 @@ func runBlock(engine rules.Engine, ibs *state.IntraBlockState, txnWriter state.S
 	header := block.Header()
 	vmConfig.TraceJumpDest = true
 	gp := new(protocol.GasPool).AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time))
-	gasUsed := new(uint64)
-	usedBlobGas := new(uint64)
+	gasUsed := new(protocol.GasUsed)
 	var receipts types.Receipts
 	protocol.InitializeBlockExecution(engine, nil, header, chainConfig, ibs, nil, logger, nil)
 	blockNum := block.NumberU64()
@@ -742,7 +745,7 @@ func runBlock(engine rules.Engine, ibs *state.IntraBlockState, txnWriter state.S
 	rules := blockContext.Rules(chainConfig)
 	for i, txn := range block.Transactions() {
 		ibs.SetTxContext(blockNum, i)
-		receipt, err := protocol.ApplyTransaction(chainConfig, protocol.GetHashFn(header, getHeader), engine, accounts.NilAddress, gp, ibs, txnWriter, header, txn, gasUsed, usedBlobGas, vmConfig)
+		receipt, err := protocol.ApplyTransaction(chainConfig, protocol.GetHashFn(header, getHeader), engine, accounts.NilAddress, gp, ibs, txnWriter, header, txn, gasUsed, vmConfig)
 		if err != nil {
 			return nil, fmt.Errorf("could not apply txn %d [%x] failed: %w", i, txn.Hash(), err)
 		}

@@ -13,8 +13,8 @@ import (
 
 // BlockPostExecutionValidator validates block state after execution (gas used, receipts, etc.)
 type BlockPostExecutionValidator interface {
-	Process(gasUsed, blobGasUsed uint64, checkReceipts bool, receipts types.Receipts,
-		header *types.Header, isMining bool, txns types.Transactions,
+	Process(blockGasUsed, blobGasUsed uint64, checkReceipts bool, receipts types.Receipts,
+		header *types.Header, txns types.Transactions,
 		chainConfig *chain.Config, logger log.Logger) error
 	Wait() error
 }
@@ -26,10 +26,10 @@ func newBlockPostExecutionValidator() BlockPostExecutionValidator {
 	return &blockPostExecutionValidator{}
 }
 
-func (v *blockPostExecutionValidator) Process(gasUsed, blobGasUsed uint64, checkReceipts bool, receipts types.Receipts,
-	header *types.Header, isMining bool, txns types.Transactions,
+func (v *blockPostExecutionValidator) Process(blockGasUsed, blobGasUsed uint64, checkReceipts bool, receipts types.Receipts,
+	header *types.Header, txns types.Transactions,
 	chainConfig *chain.Config, logger log.Logger) error {
-	return protocol.BlockPostValidation(gasUsed, blobGasUsed, checkReceipts, receipts, header, isMining, txns, chainConfig, logger)
+	return protocol.BlockPostValidation(blockGasUsed, blobGasUsed, checkReceipts, receipts, header, txns, chainConfig, logger)
 }
 
 func (v *blockPostExecutionValidator) Wait() error {
@@ -48,8 +48,8 @@ func newParallelBlockPostExecutionValidator() BlockPostExecutionValidator {
 	return &parallelBlockPostExecutionValidator{}
 }
 
-func (v *parallelBlockPostExecutionValidator) Process(gasUsed, blobGasUsed uint64, checkReceipts bool, receipts types.Receipts,
-	header *types.Header, isMining bool, txns types.Transactions,
+func (v *parallelBlockPostExecutionValidator) Process(blockGasUsed, blobGasUsed uint64, checkReceipts bool, receipts types.Receipts,
+	header *types.Header, txns types.Transactions,
 	chainConfig *chain.Config, logger log.Logger) error {
 	v.wg.Add(1)
 	v.mu.Lock()
@@ -60,7 +60,7 @@ func (v *parallelBlockPostExecutionValidator) Process(gasUsed, blobGasUsed uint6
 	v.mu.Unlock()
 	go func() {
 		defer v.wg.Done()
-		if err := protocol.BlockPostValidation(gasUsed, blobGasUsed, checkReceipts, receipts, header, isMining, txns, chainConfig, logger); err != nil {
+		if err := protocol.BlockPostValidation(blockGasUsed, blobGasUsed, checkReceipts, receipts, header, txns, chainConfig, logger); err != nil {
 			v.mu.Lock()
 			if v.err == nil {
 				v.err = err

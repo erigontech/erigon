@@ -298,6 +298,49 @@ type RwCursorDupSort interface {
 	AppendDup(key, value []byte) error    // AppendDup - same as Append, but for sorted dup data
 }
 
+type PseudoDupSortRwCursor interface { // For both DupSort and usual cursors (usual imitates functionality of ds)
+	RwCursor
+	DeleteCurrentDuplicates() error     // DeleteCurrentDuplicates - deletes all values of the current key
+	DeleteExact(k1, k2 []byte) error    // DeleteExact - delete 1 value from given key
+	FirstDup() ([]byte, error)          // FirstDup - position at first data item of current key
+	NextDup() ([]byte, []byte, error)   // NextDup - position at next data item of current key
+	NextNoDup() ([]byte, []byte, error) // NextNoDup - position at first data item of next key
+	LastDup() ([]byte, error)           // LastDup - position at last data item of current key
+
+	CountDuplicates() (uint64, error) // CountDuplicates - number of duplicates for the current key
+}
+
+// RwCursorPseudoDupSort wraps any RwCursor to satisfy PseudoDupSortRwCursor
+// for non-DupSort tables. Each key has exactly one value, so dup operations
+// are trivial: CountDuplicates returns 1, NextDup returns nil, etc.
+type RwCursorPseudoDupSort struct {
+	RwCursor
+}
+
+func (c *RwCursorPseudoDupSort) DeleteExact(k1, k2 []byte) error {
+	return c.Delete(k1)
+}
+func (c *RwCursorPseudoDupSort) NextNoDup() ([]byte, []byte, error) {
+	return c.Next()
+}
+func (c *RwCursorPseudoDupSort) NextDup() ([]byte, []byte, error) {
+	return nil, nil, nil
+}
+func (c *RwCursorPseudoDupSort) FirstDup() ([]byte, error) {
+	_, v, err := c.Current()
+	return v, err
+}
+func (c *RwCursorPseudoDupSort) LastDup() ([]byte, error) {
+	_, v, err := c.Current()
+	return v, err
+}
+func (c *RwCursorPseudoDupSort) DeleteCurrentDuplicates() error {
+	return c.DeleteCurrent()
+}
+func (c *RwCursorPseudoDupSort) CountDuplicates() (uint64, error) {
+	return 1, nil
+}
+
 const Unlim int = -1 // const Unbounded/EOF/EndOfTable []byte = nil
 
 type StatelessRwTx interface {
@@ -437,6 +480,9 @@ type TemporalDebugTx interface {
 	// TraceKey returns stream of <txNum->value_after_txnum_change> for a given key
 	TraceKey(domain Domain, k []byte, fromTxNum, toTxNum uint64) (stream.U64V, error)
 
+	// HistoryKeyTxNumRange returns (key, txNum) pairs for every txNum at which a key changed in [fromTs, toTs)
+	HistoryKeyTxNumRange(name Domain, fromTs, toTs int, asc order.By, limit int) (it stream.KU64, err error)
+
 	DomainFiles(domain ...Domain) VisibleFiles
 	CurrentDomainVersion(domain Domain) version.Version
 	TxNumsInFiles(domains ...Domain) (minTxNum uint64)
@@ -467,14 +513,15 @@ type TemporalDebugDB interface {
 }
 
 type TemporalMemBatch interface {
-	DomainPut(domain Domain, k string, v []byte, txNum uint64, preval []byte, prevStep Step) error
-	DomainDel(domain Domain, k string, txNum uint64, preval []byte, prevStep Step) error
+	DomainPut(domain Domain, k string, v []byte, txNum uint64, preval []byte) error
+	DomainDel(domain Domain, k string, txNum uint64, preval []byte) error
 	GetLatest(domain Domain, key []byte) (v []byte, step Step, ok bool)
 	GetDiffset(tx RwTx, blockHash common.Hash, blockNumber uint64) ([DomainLen][]DomainEntryDiff, bool, error)
 	Merge(other TemporalMemBatch) error
 	ClearRam()
 	IndexAdd(table InvertedIdx, key []byte, txNum uint64) (err error)
 	IteratePrefix(domain Domain, prefix []byte, roTx Tx, it func(k []byte, v []byte, step Step) (cont bool, err error)) error
+	HasPrefix(domain Domain, prefix []byte, roTx Tx) ([]byte, []byte, bool, error)
 	SizeEstimate() uint64
 	Flush(ctx context.Context, tx RwTx) error
 	Close()
@@ -482,6 +529,7 @@ type TemporalMemBatch interface {
 	DiscardWrites(domain Domain)
 	Unwind(txNumUnwindTo uint64, changeset *[DomainLen][]DomainEntryDiff)
 	GetAsOf(domain Domain, key []byte, ts uint64) (v []byte, ok bool, err error)
+	SetInMemHistoryReads(v bool)
 }
 
 type WithFreezeInfo interface {
@@ -500,7 +548,6 @@ type TemporalRwTx interface {
 
 	UnmarkedRw(ForkableId) UnmarkedRwTx
 
-	GreedyPruneHistory(ctx context.Context, domain Domain) error
 	PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error)
 	Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[DomainLen][]DomainEntryDiff) error
 }
@@ -510,7 +557,7 @@ type TemporalPutDel interface {
 	// Optimizations:
 	//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
 	//   - user can append k2 into k1, then underlying methods will not perform append
-	DomainPut(domain Domain, k, v []byte, txNum uint64, prevVal []byte, prevStep Step) error
+	DomainPut(domain Domain, k, v []byte, txNum uint64, prevVal []byte) error
 	//DomainPut2(domain Domain, k1 []byte, val []byte, ts uint64) error
 
 	// DomainDel
@@ -518,7 +565,7 @@ type TemporalPutDel interface {
 	//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
 	//   - user can append k2 into k1, then underlying methods will not perform append
 	//   - if `val == nil` it will call DomainDel
-	DomainDel(domain Domain, k []byte, txNum uint64, prevVal []byte, prevStep Step) error
+	DomainDel(domain Domain, k []byte, txNum uint64, prevVal []byte) error
 	DomainDelPrefix(domain Domain, prefix []byte, txNum uint64) error
 }
 

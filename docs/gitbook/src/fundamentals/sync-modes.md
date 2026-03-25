@@ -1,5 +1,8 @@
 ---
 description: 'Configuring Erigon: Understanding Pruning Modes'
+metaLinks:
+  alternates:
+    - https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/fundamentals/sync-modes
 ---
 
 # Sync Modes
@@ -8,10 +11,10 @@ Erigon 3 introduces a flexible approach to node configuration, offering three di
 
 | **Prune Mode**                                                        | **Flag**               | **Data Retained**                                                                                   | **Primary Use Case**                                                                     |
 | --------------------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| <p>* <a href="sync-modes.md#full-node">Full Node</a><br>(Default)</p> | `--prune.mode=full`       | Retains latest state, necessary blocks, and prunes ancient blocks and state (EIP-4444 enabled) | General users, DApp interaction, fastest sync.                                           |
-| \* [Minimal Node](sync-modes.md#minimal-node)                         | `--prune.mode=minimal` | Only recent blocks and latest state                                                                    | Solo staking, users with constrained hardware, maximum privacy for sending transactions. |
+| <p>* <a href="sync-modes.md#full-node">Full Node</a><br>(Default)</p> | `--prune.mode=full`    | Retains latest state, necessary blocks, and prunes ancient blocks and state (EIP-4444 enabled)      | General users, DApp interaction, fastest sync.                                           |
+| \* [Minimal Node](sync-modes.md#minimal-node)                         | `--prune.mode=minimal` | Only recent blocks and latest state                                                                 | Solo staking, users with constrained hardware, maximum privacy for sending transactions. |
 | Historical Blocks                                                     | `--prune.mode=blocks`  | Retains the full block/transaction history, but still prunes the historical state before the merge. | Users needing historical block data for research or indexing.                            |
-| [Archive Node](sync-modes.md#archive-node)                            | `--prune.mode=archive` | All historical state and all blocks                                                             | Developers, researchers, and RPC providers requiring full historical state access.       |
+| [Archive Node](sync-modes.md#archive-node)                            | `--prune.mode=archive` | All historical state and all blocks                                                                 | Developers, researchers, and RPC providers requiring full historical state access.       |
 
 By **default**, Erigon run as a [full node](sync-modes.md#full-node), to change its behavior use the flag `--prune.mode <value>`.
 

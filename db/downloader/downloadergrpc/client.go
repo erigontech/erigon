@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/anacrolix/torrent/metainfo"
 	"github.com/c2h5oh/datasize"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
@@ -52,34 +51,9 @@ func NewClient(ctx context.Context, downloaderAddr string) (downloaderproto.Down
 	return downloaderproto.NewDownloaderClient(conn), nil
 }
 
-func InfoHashes2Proto(in []metainfo.Hash) []*typesproto.H160 {
-	infoHashes := make([]*typesproto.H160, len(in))
-	i := 0
-	for _, h := range in {
-		infoHashes[i] = gointerfaces.ConvertAddressToH160(h)
-		i++
-	}
-	return infoHashes
-}
-
-func Strings2Proto(in []string) []*typesproto.H160 {
-	infoHashes := make([]*typesproto.H160, len(in))
-	i := 0
-	for _, h := range in {
-		infoHashes[i] = String2Proto(h)
-		i++
-	}
-	return infoHashes
-}
-
 func String2Proto(in string) *typesproto.H160 {
 	var infoHash [20]byte
 	inHex, _ := hex.DecodeString(in)
 	copy(infoHash[:], inHex)
 	return gointerfaces.ConvertAddressToH160(infoHash)
-}
-
-func Proto2String(in *typesproto.H160) string {
-	addr := gointerfaces.ConvertH160toAddress(in)
-	return hex.EncodeToString(addr[:])
 }

@@ -158,6 +158,12 @@ func (p *ConcurrentPatriciaHashed) SetTraceDomain(b bool) {
 		p.mounts[i].SetTraceDomain(b)
 	}
 }
+func (p *ConcurrentPatriciaHashed) EnableWarmupCache(b bool) {
+	p.root.EnableWarmupCache(b)
+	for i := range p.mounts {
+		p.mounts[i].EnableWarmupCache(b)
+	}
+}
 func (p *ConcurrentPatriciaHashed) GetCapture(truncate bool) []string {
 	capture := p.root.GetCapture(truncate)
 	if truncate {
@@ -269,7 +275,7 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 }
 
 // Computing commitment root hash. If possible, use parallel commitment and after evaluation decides, if it can be used next time
-func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress, warmup WarmupConfig) (rootHash []byte, err error) {
+func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string, onProgress func(*CommitProgress), warmup WarmupConfig) (rootHash []byte, err error) {
 	start := time.Now()
 	wasConcurrent := updates.IsConcurrentCommitment()
 	updatesCount := updates.Size()
@@ -281,9 +287,9 @@ func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates
 			"wasConcurrent", wasConcurrent,
 		)
 	}()
+	p.root.metrics.Reset()
+	p.root.metrics.updates.Store(updatesCount)
 	if p.root.metrics.collectCommitmentMetrics {
-		p.root.metrics.Reset()
-		p.root.metrics.updates.Store(updatesCount)
 		defer func() {
 			p.root.metrics.TotalProcessingTimeInc(start)
 			p.root.metrics.WriteToCSV()
@@ -292,11 +298,14 @@ func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates
 	switch updates.IsConcurrentCommitment() {
 	case true:
 		rootHash, err = updates.ParallelHashSort(ctx, p, warmup.CtxFactory)
+		if err != nil {
+			return nil, err
+		}
 	default:
-		rootHash, err = p.root.Process(ctx, updates, logPrefix, progress, warmup)
-	}
-	if err != nil {
-		return nil, err
+		rootHash, err = p.root.Process(ctx, updates, logPrefix, onProgress, warmup)
+		if err != nil {
+			return nil, err
+		}
 	}
 	nextConcurrent, err := p.CanDoConcurrentNext()
 	if err != nil {
@@ -334,6 +343,10 @@ func (p *ConcurrentPatriciaHashed) Reset() {
 	for i := 0; i < len(p.mounts); i++ {
 		p.mounts[i].Reset()
 	}
+}
+
+func (p *ConcurrentPatriciaHashed) Release() {
+	p.root.Release()
 }
 
 // Set context for state IO

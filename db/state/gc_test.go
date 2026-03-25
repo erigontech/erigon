@@ -30,9 +30,8 @@ import (
 
 func TestGCReadAfterRemoveFile(t *testing.T) {
 	if testing.Short() {
-		t.Skip()
+		t.Skip("slow test")
 	}
-
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -136,7 +135,11 @@ func TestDomainGCReadAfterRemoveFile(t *testing.T) {
 	test := func(t *testing.T, h *Domain, db kv.RwDB, txs uint64) {
 		t.Helper()
 		require := require.New(t)
-		collateAndMerge(t, db, nil, h, txs)
+		err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
+			collateAndMerge(t, tx, h, txs)
+			return nil
+		})
+		require.NoError(err)
 
 		t.Run("read after: remove when have reader", func(t *testing.T) {
 			tx, err := db.BeginRo(ctx)

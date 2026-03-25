@@ -40,10 +40,11 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tests/mock"
+	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -57,7 +58,7 @@ func TestGenesisBlockHashes(t *testing.T) {
 
 	t.Parallel()
 	logger := log.New()
-	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db := testutil.TemporalDB(t)
 	check := func(network string) {
 		spec, err := chainspec.ChainSpecByName(network)
 		require.NoError(t, err)
@@ -65,7 +66,7 @@ func TestGenesisBlockHashes(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		_, block, err := genesiswrite.WriteGenesisBlock(tx, spec.Genesis, nil, nil, false, datadir.New(t.TempDir()), logger)
+		_, block, err := genesiswrite.WriteGenesisBlock(tx, spec.Genesis, network, nil, nil, false, datadir.New(t.TempDir()), logger)
 		require.NoError(t, err)
 
 		expect, err := chainspec.ChainSpecByName(network)
@@ -79,6 +80,9 @@ func TestGenesisBlockHashes(t *testing.T) {
 }
 
 func TestGenesisBlockRoots(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	require := require.New(t)
 
@@ -110,21 +114,24 @@ func TestGenesisBlockRoots(t *testing.T) {
 }
 
 func TestCommitGenesisIdempotency(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	logger := log.New()
-	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db := testutil.TemporalDB(t)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
 	spec := chainspec.Mainnet
-	_, _, err = genesiswrite.WriteGenesisBlock(tx, spec.Genesis, nil, nil, false, datadir.New(t.TempDir()), logger)
+	_, _, err = genesiswrite.WriteGenesisBlock(tx, spec.Genesis, networkname.Mainnet, nil, nil, false, datadir.New(t.TempDir()), logger)
 	require.NoError(t, err)
 	seq, err := tx.ReadSequence(kv.EthTx)
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), seq)
 
-	_, _, err = genesiswrite.WriteGenesisBlock(tx, spec.Genesis, nil, nil, false, datadir.New(t.TempDir()), logger)
+	_, _, err = genesiswrite.WriteGenesisBlock(tx, spec.Genesis, networkname.Mainnet, nil, nil, false, datadir.New(t.TempDir()), logger)
 	require.NoError(t, err)
 	seq, err = tx.ReadSequence(kv.EthTx)
 	require.NoError(t, err)
@@ -132,6 +139,9 @@ func TestCommitGenesisIdempotency(t *testing.T) {
 }
 
 func TestAllocConstructor(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	require := require.New(t)
 	assert := assert.New(t)
@@ -150,7 +160,7 @@ func TestAllocConstructor(t *testing.T) {
 	}
 
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	m := mock.MockWithGenesis(t, genSpec, key, false)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genSpec), execmoduletester.WithKey(key))
 
 	ctx := context.Background()
 	tx, err := m.DB.BeginTemporalRo(ctx)
@@ -190,11 +200,14 @@ func TestDecodeBalance0(t *testing.T) {
 }
 
 func TestSetupGenesis(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	var (
 		customghash = common.HexToHash("0x89c99d90b79719238d2645c7642f2c9295246e80775b38cfd162b696817fbd50")
 		customg     = types.Genesis{
-			Config: &chain.Config{ChainID: big.NewInt(1), HomesteadBlock: big.NewInt(3)},
+			Config: &chain.Config{ChainID: big.NewInt(1), HomesteadBlock: common.NewUint64(3)},
 			Alloc: types.GenesisAlloc{
 				{1}: {Balance: big.NewInt(1), Storage: map[common.Hash]common.Hash{{1}: {1}}},
 			},
@@ -202,7 +215,7 @@ func TestSetupGenesis(t *testing.T) {
 		oldcustomg = customg
 	)
 	logger := log.New()
-	oldcustomg.Config = &chain.Config{ChainID: big.NewInt(1), HomesteadBlock: big.NewInt(2)}
+	oldcustomg.Config = &chain.Config{ChainID: big.NewInt(1), HomesteadBlock: common.NewUint64(2)}
 	tests := []struct {
 		wantErr    error
 		fn         func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error)
@@ -213,7 +226,7 @@ func TestSetupGenesis(t *testing.T) {
 		{
 			name: "genesis without ChainConfig",
 			fn: func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error) {
-				return genesiswrite.CommitGenesisBlock(db, new(types.Genesis), datadir.New(tmpdir), logger)
+				return genesiswrite.CommitGenesisBlock(db, new(types.Genesis), "", datadir.New(tmpdir), logger)
 			},
 			wantErr:    types.ErrGenesisNoConfig,
 			wantConfig: chain.AllProtocolChanges,
@@ -221,7 +234,7 @@ func TestSetupGenesis(t *testing.T) {
 		{
 			name: "no block in DB, genesis == nil",
 			fn: func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error) {
-				return genesiswrite.CommitGenesisBlock(db, nil, datadir.New(tmpdir), logger)
+				return genesiswrite.CommitGenesisBlock(db, nil, networkname.Mainnet, datadir.New(tmpdir), logger)
 			},
 			wantHash:   chainspec.Mainnet.GenesisHash,
 			wantConfig: chainspec.Mainnet.Config,
@@ -229,7 +242,7 @@ func TestSetupGenesis(t *testing.T) {
 		{
 			name: "mainnet block in DB, genesis == nil",
 			fn: func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error) {
-				return genesiswrite.CommitGenesisBlock(db, nil, datadir.New(tmpdir), logger)
+				return genesiswrite.CommitGenesisBlock(db, nil, networkname.Mainnet, datadir.New(tmpdir), logger)
 			},
 			wantHash:   chainspec.Mainnet.GenesisHash,
 			wantConfig: chainspec.Mainnet.Config,
@@ -238,7 +251,20 @@ func TestSetupGenesis(t *testing.T) {
 			name: "custom block in DB, genesis == nil",
 			fn: func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error) {
 				genesiswrite.MustCommitGenesis(&customg, db, datadir.New(tmpdir), logger)
-				return genesiswrite.CommitGenesisBlock(db, nil, datadir.New(tmpdir), logger)
+				return genesiswrite.CommitGenesisBlock(db, nil, "", datadir.New(tmpdir), logger)
+			},
+			wantHash:   customghash,
+			wantConfig: customg.Config,
+		},
+		{
+			// Reproduces the hive EEST consume-rlp scenario:
+			// 1. `erigon init genesis.json` writes a custom genesis + config
+			// 2. `erigon --import` reopens the DB with genesis=nil, chainName="mainnet" (default)
+			// The custom config must be preserved, not overwritten with mainnet's.
+			name: "custom block in DB, genesis == nil, chainName mainnet",
+			fn: func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error) {
+				genesiswrite.MustCommitGenesis(&customg, db, datadir.New(tmpdir), logger)
+				return genesiswrite.CommitGenesisBlock(db, nil, networkname.Mainnet, datadir.New(tmpdir), logger)
 			},
 			wantHash:   customghash,
 			wantConfig: customg.Config,
@@ -247,7 +273,7 @@ func TestSetupGenesis(t *testing.T) {
 			name: "custom block in DB, genesis == sepolia",
 			fn: func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error) {
 				genesiswrite.MustCommitGenesis(&customg, db, datadir.New(tmpdir), logger)
-				return genesiswrite.CommitGenesisBlock(db, chainspec.SepoliaGenesisBlock(), datadir.New(tmpdir), logger)
+				return genesiswrite.CommitGenesisBlock(db, chainspec.SepoliaGenesisBlock(), networkname.Sepolia, datadir.New(tmpdir), logger)
 			},
 			wantErr:    &genesiswrite.GenesisMismatchError{Stored: customghash, New: chainspec.Sepolia.GenesisHash},
 			wantHash:   chainspec.Sepolia.GenesisHash,
@@ -257,7 +283,7 @@ func TestSetupGenesis(t *testing.T) {
 			name: "compatible config in DB",
 			fn: func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error) {
 				genesiswrite.MustCommitGenesis(&oldcustomg, db, datadir.New(tmpdir), logger)
-				return genesiswrite.CommitGenesisBlock(db, &customg, datadir.New(tmpdir), logger)
+				return genesiswrite.CommitGenesisBlock(db, &customg, "", datadir.New(tmpdir), logger)
 			},
 			wantHash:   customghash,
 			wantConfig: customg.Config,
@@ -271,7 +297,7 @@ func TestSetupGenesis(t *testing.T) {
 				// Commit the 'old' genesis block with Homestead transition at #2.
 				// Advance to block #4, past the homestead transition block of customg.
 				key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-				m := mock.MockWithGenesis(t, &oldcustomg, key, false)
+				m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&oldcustomg), execmoduletester.WithKey(key))
 
 				chainBlocks, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, nil)
 				if err != nil {
@@ -281,14 +307,14 @@ func TestSetupGenesis(t *testing.T) {
 					return nil, nil, err
 				}
 				// This should return a compatibility error.
-				return genesiswrite.CommitGenesisBlock(m.DB, &customg, datadir.New(tmpdir), logger)
+				return genesiswrite.CommitGenesisBlock(m.DB, &customg, "", datadir.New(tmpdir), logger)
 			},
 			wantHash:   customghash,
 			wantConfig: customg.Config,
 			wantErr: &chain.ConfigCompatError{
 				What:         "Homestead fork block",
-				StoredConfig: big.NewInt(2),
-				NewConfig:    big.NewInt(3),
+				StoredConfig: common.NewUint64(2),
+				NewConfig:    common.NewUint64(3),
 				RewindTo:     1,
 			},
 		},

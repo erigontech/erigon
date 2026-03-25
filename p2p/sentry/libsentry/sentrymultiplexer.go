@@ -490,7 +490,7 @@ func (c *SentryStreamC[T]) Recv() (T, error) {
 
 func (c *SentryStreamC[T]) Context() context.Context { return c.Ctx }
 
-func (c *SentryStreamC[T]) RecvMsg(anyMessage interface{}) error {
+func (c *SentryStreamC[T]) RecvMsg(anyMessage any) error {
 	m, err := c.Recv()
 	if err != nil {
 		return err
@@ -774,6 +774,78 @@ func (m *sentryMultiplexer) RemovePeer(ctx context.Context, in *sentryproto.Remo
 
 		g.Go(func() error {
 			result, err := client.RemovePeer(gctx, in, opts...)
+
+			if err != nil {
+				return err
+			}
+
+			successMutex.Lock()
+			defer successMutex.Unlock()
+
+			// if any client returns success return success
+			if !success && result.GetSuccess() {
+				success = true
+			}
+
+			return nil
+		})
+	}
+
+	err := g.Wait()
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &sentryproto.RemovePeerReply{Success: success}, nil
+}
+
+func (m *sentryMultiplexer) AddTrustedPeer(ctx context.Context, in *sentryproto.AddPeerRequest, opts ...grpc.CallOption) (*sentryproto.AddPeerReply, error) {
+	g, gctx := errgroup.WithContext(ctx)
+
+	var success bool
+	var successMutex sync.RWMutex
+
+	for _, client := range m.clients {
+
+		g.Go(func() error {
+			result, err := client.AddTrustedPeer(gctx, in, opts...)
+
+			if err != nil {
+				return err
+			}
+
+			successMutex.Lock()
+			defer successMutex.Unlock()
+
+			// if any client returns success return success
+			if !success && result.GetSuccess() {
+				success = true
+			}
+
+			return nil
+		})
+	}
+
+	err := g.Wait()
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &sentryproto.AddPeerReply{Success: success}, nil
+}
+
+func (m *sentryMultiplexer) RemoveTrustedPeer(ctx context.Context, in *sentryproto.RemovePeerRequest, opts ...grpc.CallOption) (*sentryproto.RemovePeerReply, error) {
+	g, gctx := errgroup.WithContext(ctx)
+
+	var success bool
+	var successMutex sync.RWMutex
+
+	for _, client := range m.clients {
+
+		g.Go(func() error {
+			result, err := client.RemoveTrustedPeer(gctx, in, opts...)
 
 			if err != nil {
 				return err

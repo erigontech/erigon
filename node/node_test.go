@@ -401,12 +401,3 @@ func TestLifecycleTerminationGuarantee(t *testing.T) {
 		delete(stopped, id)
 	}
 }
-
-func containsProtocol(stackProtocols []p2p.Protocol, protocol p2p.Protocol) bool {
-	for _, a := range stackProtocols {
-		if reflect.DeepEqual(a, protocol) {
-			return true
-		}
-	}
-	return false
-}

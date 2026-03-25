@@ -66,7 +66,7 @@ func (e testEncoderValueMethod) EncodeRLP(w io.Writer) error {
 type byteEncoder byte
 
 func (e byteEncoder) EncodeRLP(w io.Writer) error {
-	_, err := w.Write(EmptyList)
+	_, err := w.Write([]byte{EmptyListCode})
 	return err
 }
 
@@ -288,7 +288,7 @@ var encTests = []encTest{
 	{val: simplestruct{A: 3, B: "foo"}, output: "C50383666F6F"},
 	{val: &recstruct{5, nil}, output: "C205C0"},
 	{val: &recstruct{5, &recstruct{4, &recstruct{3, nil}}}, output: "C605C404C203C0"},
-	{val: &intField{X: -3}, error: "rlp: type reflect.Value -ve values are not RLP-serializable"},
+	{val: &intField{X: -3}, error: "rlp: type int -ve values are not RLP-serializable"},
 	{val: &intField{X: 3}, output: "C103"},
 
 	// struct tag "-"
@@ -483,12 +483,6 @@ func TestEncodeToReaderReturnToPool(t *testing.T) {
 
 var sink any
 
-func BenchmarkIntsize(b *testing.B) {
-	for b.Loop() {
-		sink = intsize(0x12345678)
-	}
-}
-
 func BenchmarkPutint(b *testing.B) {
 	buf := make([]byte, 8)
 	for b.Loop() {
@@ -522,7 +516,7 @@ func TestStringLen56(t *testing.T) {
 	assert.Equal(t, 56+2, strLen)
 
 	encoded := make([]byte, strLen)
-	EncodeString2(str, encoded)
+	EncodeStringToBuf(str, encoded)
 
 	dataPos, dataLen, err := ParseString(encoded, 0)
 	require.NoError(t, err)

@@ -421,9 +421,20 @@ func handleOp(c kv.Cursor, stream remoteproto.KV_TxServer, in *remoteproto.Curso
 	return nil
 }
 
+// SubscriptionReadyNotifier is an optional interface that KV_StateChangesServer
+// implementations can satisfy to be notified when their pub/sub subscription
+// is fully registered. This eliminates the timing hole between starting the
+// server goroutine and the subscription becoming active.
+type SubscriptionReadyNotifier interface {
+	NotifySubscribed()
+}
+
 func (s *KvServer) StateChanges(_ *remoteproto.StateChangeRequest, server remoteproto.KV_StateChangesServer) error {
 	ch, remove := s.stateChangeStreams.Sub()
 	defer remove()
+	if n, ok := server.(SubscriptionReadyNotifier); ok {
+		n.NotifySubscribed()
+	}
 	for {
 		select {
 		case reply := <-ch:

@@ -1,8 +1,11 @@
 ---
 description: How to configure your web3 wallet to use your Erigon node RPC
+metaLinks:
+  alternates:
+    - https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/fundamentals/web3-wallet
 ---
 
-# Web3 Wallet
+# web3 Wallet
 
 Whatever network you are running, it's easy to connect your Erigon node to your local web3 wallet.
 

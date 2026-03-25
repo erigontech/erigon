@@ -136,6 +136,8 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 	blocksBatch := []*types.Block{}
 	inserted := uint64(0)
 
+	minInsertableBlockNumber := p.engine.FrozenBlocks(ctx)
+	var prevBlockNum uint64
 	if err := p.db.View(ctx, func(tx kv.Tx) error {
 		cursor, err := tx.Cursor(kv.Headers)
 		if err != nil {
@@ -156,7 +158,17 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 			if block == nil {
 				continue
 			}
+			if block.NumberU64() < minInsertableBlockNumber {
+				continue
+			}
 
+			if prevBlockNum > 0 && block.NumberU64() != prevBlockNum+1 {
+				p.logger.Warn("[BlockCollector] Gap detected in collected blocks, will re-download missing range",
+					"lastBlock", prevBlockNum, "nextBlock", block.NumberU64(),
+					"gap", block.NumberU64()-prevBlockNum-1)
+				break
+			}
+			prevBlockNum = block.NumberU64()
 			blocksBatch = append(blocksBatch, block)
 
 			if len(blocksBatch) >= batchSize {
@@ -240,7 +252,7 @@ func (p *PersistentBlockCollector) decodeBlock(v []byte) (*types.Block, error) {
 		return nil, err
 	}
 
-	return types.NewBlockFromStorage(executionPayload.BlockHash, header, txs, nil, body.Withdrawals, nil), nil
+	return types.NewBlockFromStorage(executionPayload.BlockHash, header, txs, nil, body.Withdrawals), nil
 }
 
 func (p *PersistentBlockCollector) insertBatch(ctx context.Context, blocksBatch []*types.Block, inserted *uint64) error {

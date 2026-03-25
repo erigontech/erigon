@@ -36,7 +36,6 @@ func preverifiedItemCompare(a, b Item) int {
 }
 
 func (me SortedItems) Get(name string) (item Item, found bool) {
-	me.assertSorted()
 	i, found := me.searchName(name)
 	if found {
 		item = me[i]

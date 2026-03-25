@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
 type Opt func(bt *Backtester)
@@ -206,18 +207,21 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 	if bt.paraTrie {
 		sd.EnableParaTrieDB(bt.db)
 	}
-	sd.GetCommitmentCtx().SetStateReader(newBacktestStateReader(tx, fromTxNum, toTxNum))
+	// A history reader that reads:
+	//   - commitment data as-of the beginning of the block
+	//   - account/storage/code data as-of the end of the block
+	sd.GetCommitmentCtx().SetStateReader(commitmentdb.NewSplitHistoryReader(tx, fromTxNum, toTxNum /* withHistory */, false))
 	sd.GetCommitmentCtx().SetTrace(bt.logger.Enabled(ctx, log.LvlTrace))
 	sd.GetCommitmentCtx().EnableCsvMetrics(deriveBlockMetricsFilePrefix(blockOutputDir))
-	err = sd.SeekCommitment(ctx, tx)
+	latestTxNum, latestBlockNum, err := sd.SeekCommitment(ctx, tx)
 	if err != nil {
 		return err
 	}
-	if expected := block - 1; sd.BlockNum() != expected {
-		return fmt.Errorf("unexpected sd block number: %d != %d", sd.BlockNum(), expected)
+	if expected := block - 1; latestBlockNum != expected {
+		return fmt.Errorf("unexpected sd block number: %d != %d", latestBlockNum, expected)
 	}
-	if expected := fromTxNum - 1; sd.TxNum() != expected {
-		return fmt.Errorf("unexpected sd tx number: %d != %d", sd.TxNum(), maxTxNum)
+	if expected := fromTxNum - 1; latestTxNum != expected {
+		return fmt.Errorf("unexpected sd tx number: %d != %d", latestTxNum, maxTxNum)
 	}
 	err = bt.replayChanges(tx, kv.AccountsDomain, sd, fromTxNum, toTxNum)
 	if err != nil {

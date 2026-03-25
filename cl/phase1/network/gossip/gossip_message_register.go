@@ -1,13 +1,13 @@
 package gossip
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	serviceintf "github.com/erigontech/erigon/cl/phase1/network/services/service_interface"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"golang.org/x/net/context"
 )
 
 func RegisterGossipService[T any](gm *GossipManager, service serviceintf.Service[T], conditions ...ConditionFunc) {

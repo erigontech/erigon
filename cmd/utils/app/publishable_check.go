@@ -33,11 +33,9 @@ func CheckFilesForSchema(schema state.SnapNameSchema, params CheckFilesParams) (
 	// - each data file has corresponding index/bt etc.1
 	// - versions: between min supported version and max
 	// - lastFileTo check
-	// - sum = maxTo check (probably redundant if no gaps/overlaps)
 
 	// collect all data files
 	dataFiles := make([]state.SnapInfo, 0)
-	sumRange := uint64(0)
 	if err := filepath.WalkDir(schema.DataDirectory(), func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
 			if os.IsNotExist(err) { //it's ok if some file get removed during walk
@@ -61,7 +59,6 @@ func CheckFilesForSchema(schema state.SnapNameSchema, params CheckFilesParams) (
 			return nil
 		}
 
-		sumRange += res.To - res.From
 		dataFiles = append(dataFiles, *res)
 
 		return nil
@@ -87,10 +84,6 @@ func CheckFilesForSchema(schema state.SnapNameSchema, params CheckFilesParams) (
 
 	if params.checkLastFileTo >= 0 && int64(dataFiles[len(dataFiles)-1].To) != params.checkLastFileTo {
 		return 0, false, fmt.Errorf("last %s snapshot file must end at %d, found at %d (file: %s)", schema.DataTag(), params.checkLastFileTo, dataFiles[len(dataFiles)-1].To, dataFiles[len(dataFiles)-1].Name)
-	}
-
-	if sumRange != dataFiles[len(dataFiles)-1].To-dataFiles[0].From {
-		return 0, false, fmt.Errorf("sum of ranges of %s snapshot files (%d) does not match last 'to' value (%d)", schema.DataTag(), sumRange, dataFiles[len(dataFiles)-1].To)
 	}
 
 	prevFrom, prevTo := dataFiles[0].From, dataFiles[0].To
