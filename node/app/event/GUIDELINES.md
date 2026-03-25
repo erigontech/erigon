@@ -39,6 +39,8 @@ WRONG — components in separate domains can't communicate:
 - Completely independent subsystems (e.g., a standalone monitoring agent)
 - Load isolation: a subsystem that would flood the shared worker pool (use `WithExecPoolSize` to create a domain with its own pool, but note events still won't cross domain boundaries)
 
+**Future: hierarchical event propagation.** If a use case arises where child domains need to receive parent events (or vice versa), cross-domain event bridging or hierarchical propagation would need to be added to the framework. This is not implemented today and should not be designed until there is a concrete use case driving the requirements.
+
 ## Event Ordering
 
 | Handler Type | Ordering | Use When |
