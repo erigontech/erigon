@@ -32,16 +32,16 @@ import (
 // audience, optionally referencing proof tokens that form a delegation chain
 // back to the root authority (subject).
 type Token struct {
-	Issuer    string     `json:"iss"`           // DID of the signer
-	Audience  string     `json:"aud"`           // DID of the recipient
-	Subject   string     `json:"sub,omitempty"` // DID of the root authority
-	Command   string     `json:"cmd"`           // capability command path
-	Policy    []Policy   `json:"pol,omitempty"` // capability constraints
-	Nonce     []byte     `json:"nonce"`         // replay protection
-	Exp       uint64     `json:"exp,omitempty"` // expiry (unix timestamp, 0 = no expiry)
-	Nbf       uint64     `json:"nbf,omitempty"` // not-before (unix timestamp, 0 = immediate)
-	Proofs    []CID      `json:"prf,omitempty"` // CIDs of proof tokens (delegation chain)
-	Signature []byte     `json:"sig"`           // signature by issuer
+	Issuer    string   `json:"iss"`           // DID of the signer
+	Audience  string   `json:"aud"`           // DID of the recipient
+	Subject   string   `json:"sub,omitempty"` // DID of the root authority
+	Command   string   `json:"cmd"`           // capability command path
+	Policy    []Policy `json:"pol,omitempty"` // capability constraints
+	Nonce     []byte   `json:"nonce"`         // replay protection
+	Exp       uint64   `json:"exp,omitempty"` // expiry (unix timestamp, 0 = no expiry)
+	Nbf       uint64   `json:"nbf,omitempty"` // not-before (unix timestamp, 0 = immediate)
+	Proofs    []CID    `json:"prf,omitempty"` // CIDs of proof tokens (delegation chain)
+	Signature []byte   `json:"sig"`           // signature by issuer
 }
 
 // CID is a content identifier for a UCAN token (SHA-256 of the encoded payload).
