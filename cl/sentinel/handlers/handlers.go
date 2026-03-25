@@ -52,8 +52,8 @@ type ConsensusHandlers struct {
 	ctx          context.Context
 	beaconDB     freezeblocks.BeaconSnapshotReader
 
-	indiciesDB  kv.RoDB
-	rateLimiter *peerRateLimiter
+	indiciesDB         kv.RoDB
+	rateLimiter        *peerRateLimiter
 	forkChoiceReader   forkchoice.ForkChoiceStorageReader
 	host               host.Host
 	me                 *enode.LocalNode
@@ -95,7 +95,7 @@ func NewConsensusHandlers(
 		ethClock:           ethClock,
 		beaconConfig:       beaconConfig,
 		ctx:                ctx,
-		rateLimiter: newPeerRateLimiter(),
+		rateLimiter:        newPeerRateLimiter(),
 		enableBlocks:       enabledBlocks,
 		forkChoiceReader:   forkChoiceReader,
 		me:                 me,
@@ -144,9 +144,9 @@ func (c *ConsensusHandlers) Start() {
 }
 
 var (
-	ErrRateLimited      = errors.New("rate limit exceeded")
-	ErrTooManyRequests   = errors.New("too many concurrent requests")
-	RateLimitedPrefix    = byte(0x01) // InvalidRequestPrefix — no rate-limit-specific code in the spec
+	ErrRateLimited     = errors.New("rate limit exceeded")
+	ErrTooManyRequests = errors.New("too many concurrent requests")
+	RateLimitedPrefix  = byte(0x01) // InvalidRequestPrefix — no rate-limit-specific code in the spec
 )
 
 func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Stream) error) func(s network.Stream) {
