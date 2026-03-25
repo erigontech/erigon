@@ -157,6 +157,7 @@ type changesetSwitcher interface {
 	// GetChangesetByBlockNum returns the changeset for a given block number and
 	// the block hash it is keyed under.
 	GetChangesetByBlockNum(blockNumber uint64) (common.Hash, *changeset.StateChangeSet)
+	GetChangesetAccumulator() *changeset.StateChangeSet
 	SetChangesetAccumulator(acc *changeset.StateChangeSet)
 	SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet)
 }
@@ -217,21 +218,25 @@ func (sd *SharedDomains) FlushPendingUpdates(ctx context.Context, tx kv.Temporal
 
 	blockHash, cs := switcher.GetChangesetByBlockNum(upd.BlockNum)
 	if cs != nil {
+		// Save current accumulator, switch to the pending update's block
+		// changeset, apply deferred branch writes, save it back, then
+		// restore the original accumulator.
+		prev := switcher.GetChangesetAccumulator()
 		switcher.SetChangesetAccumulator(cs)
-	}
 
-	if _, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch); err != nil {
-		if cs != nil {
-			switcher.SetChangesetAccumulator(nil)
+		if _, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch); err != nil {
+			switcher.SetChangesetAccumulator(prev)
+			return err
 		}
-		return err
+
+		switcher.SavePastChangesetAccumulator(blockHash, upd.BlockNum, cs)
+		switcher.SetChangesetAccumulator(prev)
+		return nil
 	}
 
-	if cs != nil {
-		switcher.SavePastChangesetAccumulator(blockHash, upd.BlockNum, cs)
-		switcher.SetChangesetAccumulator(nil)
-	}
-	return nil
+	// No past changeset found — write into whatever is current
+	_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch)
+	return err
 }
 
 type temporalGetter struct {
@@ -687,6 +692,13 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (
 // ComputeCommitment evaluates commitment for gathered updates.
 // If trieWarmup toggle was enabled via EnableTrieWarmup, pre-warms MDBX page cache by reading Branch data in parallel before processing.
 func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveStateAfter bool, blockNum, txNum uint64, logPrefix string, onProgress func(*commitment.CommitProgress)) (rootHash []byte, err error) {
+	// Flush any pending deferred commitment updates from the previous block
+	// into the CORRECT block's changeset (via FlushPendingUpdates which uses
+	// GetChangesetByBlockNum). This ensures the branch writes are recorded in
+	// the original block's diffset so they can be properly reverted on unwind.
+	if err := sd.FlushPendingUpdates(ctx, tx); err != nil {
+		return nil, err
+	}
 	return sd.sdCtx.ComputeCommitment(ctx, tx, saveStateAfter, blockNum, txNum, logPrefix, onProgress)
 }
 
