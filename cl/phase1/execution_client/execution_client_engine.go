@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"time"
 
 	"github.com/holiman/uint256"
 
@@ -42,6 +43,19 @@ import (
 )
 
 var ErrNotSupported = errors.New("operation not supported in engine API mode")
+
+const DefaultRPCHTTPTimeout = 30 * time.Second
+
+func checkPayloadStatus(payloadStatus *engine_types.PayloadStatus) error {
+	if payloadStatus == nil {
+		return nil
+	}
+	validationErr := payloadStatus.ValidationError
+	if validationErr != nil {
+		return fmt.Errorf("engine payload status error: %s", validationErr.Error())
+	}
+	return nil
+}
 
 // ExecutionClientEngine implements ExecutionEngine using the EngineAPI interface.
 // It works in two modes:

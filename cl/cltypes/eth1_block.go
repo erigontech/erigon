@@ -66,6 +66,38 @@ func NewEth1Block(version clparams.StateVersion, beaconCfg *clparams.BeaconChain
 	}
 }
 
+// NewEth1BlockFromExecutionHeader creates a genesis-style Eth1Block from an
+// Eth1Header. This keeps the field mapping in sync across forks — any new field
+// added to Eth1Header is automatically picked up here.
+func NewEth1BlockFromExecutionHeader(header *Eth1Header, version clparams.StateVersion, beaconCfg *clparams.BeaconChainConfig) *Eth1Block {
+	block := NewEth1Block(version, beaconCfg)
+	block.ParentHash = header.ParentHash
+	block.FeeRecipient = header.FeeRecipient
+	block.StateRoot = header.StateRoot
+	block.ReceiptsRoot = header.ReceiptsRoot
+	block.LogsBloom = header.LogsBloom
+	block.PrevRandao = header.PrevRandao
+	block.BlockNumber = header.BlockNumber
+	block.GasLimit = header.GasLimit
+	block.GasUsed = header.GasUsed
+	block.Time = header.Time
+	block.BaseFeePerGas = header.BaseFeePerGas
+	block.BlockHash = header.BlockHash
+	if header.Extra != nil {
+		block.Extra = solid.NewExtraData()
+		block.Extra.SetBytes(header.Extra.Bytes())
+	}
+	block.Transactions = &solid.TransactionsSSZ{}
+	if version >= clparams.CapellaVersion {
+		block.Withdrawals = solid.NewStaticListSSZ[*Withdrawal](int(beaconCfg.MaxWithdrawalsPerPayload), 44)
+	}
+	if version >= clparams.DenebVersion {
+		block.BlobGasUsed = header.BlobGasUsed
+		block.ExcessBlobGas = header.ExcessBlobGas
+	}
+	return block
+}
+
 // NewEth1BlockFromHeaderAndBody with given header/body.
 func NewEth1BlockFromHeaderAndBody(header *types.Header, body *types.RawBody, beaconCfg *clparams.BeaconChainConfig) *Eth1Block {
 	baseFeeBytes := header.BaseFee.Bytes()

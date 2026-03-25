@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clstages"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
@@ -409,32 +408,7 @@ func writeGenesisBeaconBlock(ctx context.Context, cfg *Cfg) error {
 	}
 	if version >= clparams.BellatrixVersion {
 		execHeader := cfg.state.LatestExecutionPayloadHeader()
-		execBlock := cltypes.NewEth1Block(version, cfg.beaconCfg)
-		execBlock.ParentHash = execHeader.ParentHash
-		execBlock.FeeRecipient = execHeader.FeeRecipient
-		execBlock.StateRoot = execHeader.StateRoot
-		execBlock.ReceiptsRoot = execHeader.ReceiptsRoot
-		execBlock.LogsBloom = execHeader.LogsBloom
-		execBlock.PrevRandao = execHeader.PrevRandao
-		execBlock.BlockNumber = execHeader.BlockNumber
-		execBlock.GasLimit = execHeader.GasLimit
-		execBlock.GasUsed = execHeader.GasUsed
-		execBlock.Time = execHeader.Time
-		execBlock.BaseFeePerGas = execHeader.BaseFeePerGas
-		execBlock.BlockHash = execHeader.BlockHash
-		if execHeader.Extra != nil {
-			execBlock.Extra = solid.NewExtraData()
-			execBlock.Extra.SetBytes(execHeader.Extra.Bytes())
-		}
-		execBlock.Transactions = &solid.TransactionsSSZ{}
-		if version >= clparams.CapellaVersion {
-			execBlock.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.beaconCfg.MaxWithdrawalsPerPayload), 44)
-		}
-		if version >= clparams.DenebVersion {
-			execBlock.BlobGasUsed = execHeader.BlobGasUsed
-			execBlock.ExcessBlobGas = execHeader.ExcessBlobGas
-		}
-		body.ExecutionPayload = execBlock
+		body.ExecutionPayload = cltypes.NewEth1BlockFromExecutionHeader(execHeader, version, cfg.beaconCfg)
 	}
 
 	// Verify body root matches state's LatestBlockHeader — catches non-standard genesis issues.

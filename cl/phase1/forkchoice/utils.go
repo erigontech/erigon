@@ -98,8 +98,11 @@ func (f *ForkChoiceStore) onNewFinalized(newFinalized solid.Checkpoint) {
 		return true
 	})
 
-	slotToPrune := ((newFinalized.Epoch - 3) * f.beaconCfg.SlotsPerEpoch) - 1
-	f.forkGraph.Prune(slotToPrune)
+	// Guard against uint64 underflow during the first 3 epochs after genesis.
+	if newFinalized.Epoch > 3 {
+		slotToPrune := ((newFinalized.Epoch - 3) * f.beaconCfg.SlotsPerEpoch) - 1
+		f.forkGraph.Prune(slotToPrune)
+	}
 }
 
 // updateCheckpoints updates the justified and finalized checkpoints if new checkpoints have higher epochs.

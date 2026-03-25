@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
-	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
@@ -79,8 +78,8 @@ func (r *beaconSnapshotReader) FrozenSlots() uint64 {
 }
 
 func (r *beaconSnapshotReader) CacheBlockBody(blockNumber uint64, transactions [][]byte, withdrawals []*types.Withdrawal) {
-	if c, ok := r.eth1Getter.(*getters.ExecutionEngineReader); ok {
-		c.CacheBody(blockNumber, transactions, withdrawals)
+	if r.eth1Getter != nil {
+		r.eth1Getter.CacheBody(blockNumber, transactions, withdrawals)
 	}
 }
 
