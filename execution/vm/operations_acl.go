@@ -305,14 +305,19 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 }
 
 var (
-	gasCallEIP7702         = makeCallVariantGasCallEIP7702(statelessGasCall, statefulGasCall)
-	gasDelegateCallEIP7702 = makeCallVariantGasCallEIP7702(statelessGasDelegateCall, statefulGasDelegateCall)
-	gasStaticCallEIP7702   = makeCallVariantGasCallEIP7702(statelessGasStaticCall, statefulGasStaticCall)
-	gasCallCodeEIP7702     = makeCallVariantGasCallEIP7702(statelessGasCallCode, statefulGasCallCode)
+	gasCallEIP7702         = makeCallVariantGasCallEIP7702(statelessGasCall, statefulGasCall, true)
+	gasDelegateCallEIP7702 = makeCallVariantGasCallEIP7702(statelessGasDelegateCall, statefulGasDelegateCall, false)
+	gasStaticCallEIP7702   = makeCallVariantGasCallEIP7702(statelessGasStaticCall, statefulGasStaticCall, false)
+	gasCallCodeEIP7702     = makeCallVariantGasCallEIP7702(statelessGasCallCode, statefulGasCallCode, false)
 )
 
-func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefulCalculator statefulGasFunc) gasFunc {
+func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefulCalculator statefulGasFunc, rejectStaticValueTransfer bool) gasFunc {
 	return func(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
+		// In static mode, CALL with value must fail before EIP-7702 can warm
+		// the target or delegated address.
+		if rejectStaticValueTransfer && evm.readOnly && !callContext.Stack.Back(2).IsZero() {
+			return mdgas.MdGas{}, ErrWriteProtection
+		}
 		addr := accounts.InternAddress(callContext.Stack.Back(1).Bytes20())
 		// Check slot presence in the access list
 		var gas mdgas.MdGas
