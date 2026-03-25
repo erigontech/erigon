@@ -56,11 +56,16 @@ func (tb *tokenBucket) tryConsume(n int) bool {
 
 	now := time.Now()
 	elapsed := now.Sub(tb.lastRefill).Seconds()
-	tb.tokens += elapsed * tb.refillRate
-	if tb.tokens > tb.maxTokens {
-		tb.tokens = tb.maxTokens
+	if elapsed > 0 {
+		tb.tokens += elapsed * tb.refillRate
+		if tb.tokens > tb.maxTokens {
+			tb.tokens = tb.maxTokens
+		}
+		tb.lastRefill = now
 	}
-	tb.lastRefill = now
+	// If elapsed <= 0, lastRefill is in the future (set by punishment). No
+	// tokens are refilled and lastRefill stays advanced until real time
+	// catches up, preventing burst regeneration during punishment.
 
 	cost := float64(n)
 	if tb.tokens >= cost {
@@ -184,6 +189,17 @@ func (rl *peerRateLimiter) consumeTokens(peerID string, protocol string, cost in
 	}
 	bucket := bucketI.(*tokenBucket)
 	if !bucket.tryConsume(cost) {
+		// Drain the bucket and suppress refill during punishment. Advance
+		// lastRefill so only tokens accumulated *after* the punishment
+		// expires are available. We leave a small grace window (enough for
+		// 1 token) so the peer's first admission check can succeed rather
+		// than triggering an infinite punishment loop.
+		grace := time.Duration(float64(time.Second) / cfg.refillRate)
+		bucket.mu.Lock()
+		bucket.tokens = 0
+		bucket.lastRefill = time.Now().Add(punishmentDuration - grace)
+		bucket.mu.Unlock()
+
 		rl.punished.Store(key, time.Now().Add(punishmentDuration))
 		return false
 	}

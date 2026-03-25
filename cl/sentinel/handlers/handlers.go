@@ -161,7 +161,7 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 		if !c.rateLimiter.acquireConcurrency(peerID) {
 			log.Debug("[pubsubhandler] too many concurrent requests", "protocol", name, "peer", peerID)
 			_ = ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
-			_ = s.Reset()
+			_ = s.Close() // graceful close so the peer reads the error response
 			return
 		}
 		defer c.rateLimiter.releaseConcurrency(peerID)
@@ -171,7 +171,7 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 		if !c.rateLimiter.allowRequest(peerID, name, 1) {
 			log.Debug("[pubsubhandler] rate limit exceeded", "protocol", name, "peer", peerID)
 			_ = ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
-			_ = s.Reset()
+			_ = s.Close() // graceful close so the peer reads the error response
 			return
 		}
 

@@ -18,6 +18,7 @@ package handlers
 
 import (
 	"testing"
+	"time"
 
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/stretchr/testify/require"
@@ -116,6 +117,41 @@ func TestRateLimiter_ConsumeTokensZeroCost(t *testing.T) {
 	// Zero and negative costs should always succeed.
 	require.True(t, rl.consumeTokens("peer1", communication.PingProtocolV1, 0))
 	require.True(t, rl.consumeTokens("peer1", communication.PingProtocolV1, -5))
+}
+
+func TestRateLimiter_PunishmentDrainsBucket(t *testing.T) {
+	rl := newPeerRateLimiter()
+	peer := "16Uiu2peer1"
+	proto := communication.BeaconBlocksByRangeProtocolV2 // burst = 128, refill = 12.8/s
+
+	// Exhaust tokens to trigger punishment.
+	require.True(t, rl.allowRequest(peer, proto, 128))
+	require.False(t, rl.allowRequest(peer, proto, 1)) // triggers punishment + drain
+
+	// Verify the bucket was drained and lastRefill was advanced.
+	key := peerProtocolKey{peerID: peer, protocol: proto}
+	bucketI, ok := rl.buckets.Load(key)
+	require.True(t, ok)
+	bucket := bucketI.(*tokenBucket)
+	bucket.mu.Lock()
+	require.Equal(t, float64(0), bucket.tokens, "bucket should be drained to 0")
+	require.True(t, bucket.lastRefill.After(time.Now().Add(punishmentDuration-2*time.Second)),
+		"lastRefill should be advanced near the punishment expiry")
+	bucket.mu.Unlock()
+
+	// Simulate the punishment period elapsing: move lastRefill to just before
+	// now (by the grace window), then clear the punishment entry.
+	grace := time.Duration(float64(time.Second) / 12.8) // 1/refillRate
+	bucket.mu.Lock()
+	bucket.lastRefill = time.Now().Add(-grace)
+	bucket.mu.Unlock()
+	rl.punished.Delete(key)
+
+	// After punishment, only ~1 token from the grace window is available.
+	// A single admission succeeds but a large batch does not — the peer
+	// cannot burst 128 items immediately like it could without the drain.
+	require.True(t, rl.allowRequest(peer, proto, 1))    // ~1 token available
+	require.False(t, rl.consumeTokens(peer, proto, 95)) // not enough for a full batch
 }
 
 func TestRateLimiter_Cleanup(t *testing.T) {
