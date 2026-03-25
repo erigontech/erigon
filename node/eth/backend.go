@@ -982,11 +982,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		config.FcuBackgroundCommit,
 		onlySnapDownloadOnStart,
 	)
-	executionRpc := direct.NewExecutionClientDirect(backend.execModule)
-
 	var executionEngine executionclient.ExecutionEngine
 
-	executionEngine, err = executionclient.NewExecutionClientDirect(chainreader.NewChainReaderEth1(chainConfig, executionRpc, config.FcuTimeout), txPoolRpcClient)
+	executionEngine, err = executionclient.NewExecutionClientDirect(chainreader.NewChainReaderEth1(chainConfig, backend.execModule, config.FcuTimeout), txPoolRpcClient)
 	if err != nil {
 		return nil, err
 	}
@@ -994,11 +992,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	engineBackendRPC := engineapi.NewEngineServer(
 		logger,
 		chainConfig,
-		executionRpc,
+		backend.execModule,
 		engine_block_downloader.NewEngineBlockDownloader(
 			ctx,
 			logger,
-			executionRpc,
+			backend.execModule,
 			blockReader,
 			backend.chainDB,
 			chainConfig,
@@ -1047,7 +1045,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			sentryMux(sentries),
 			p2pConfig.MaxPeers,
 			statusDataProvider,
-			executionRpc,
+			backend.execModule,
 			config.LoopBlockLimit,
 			polygonBridge,
 			heimdallService,

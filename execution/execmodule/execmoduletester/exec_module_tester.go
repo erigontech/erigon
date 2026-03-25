@@ -79,7 +79,6 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
-	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -813,7 +812,7 @@ func (emt *ExecModuleTester) EnableLogs() {
 func (emt *ExecModuleTester) Cfg() ethconfig.Config { return emt.cfg }
 
 func (emt *ExecModuleTester) insertPoSBlocks(chain *blockgen.ChainPack) error {
-	wr := chainreader.NewChainReaderEth1(emt.ChainConfig, direct.NewExecutionClientDirect(emt.ExecModule), time.Hour)
+	wr := chainreader.NewChainReaderEth1(emt.ChainConfig, emt.ExecModule, time.Hour)
 
 	streamCtx, cancel := context.WithCancel(emt.Ctx)
 	defer cancel()
@@ -831,18 +830,14 @@ func (emt *ExecModuleTester) insertPoSBlocks(chain *blockgen.ChainPack) error {
 		insertedBlocks[chain.Blocks[i].NumberU64()] = struct{}{}
 	}
 
-	var balEntries []*executionproto.BlockAccessListEntry
+	balMap := make(map[common.Hash][]byte)
 	for i, bal := range chain.BlockAccessLists {
 		if len(bal) > 0 {
 			block := chain.Blocks[i]
-			balEntries = append(balEntries, &executionproto.BlockAccessListEntry{
-				BlockHash:       gointerfaces.ConvertHashToH256(block.Hash()),
-				BlockNumber:     block.NumberU64(),
-				BlockAccessList: bal,
-			})
+			balMap[block.Hash()] = bal
 		}
 	}
-	if err := wr.InsertBlocksAndWaitWithAccessLists(emt.Ctx, chain.Blocks, balEntries); err != nil {
+	if err := wr.InsertBlocksAndWaitWithAccessLists(emt.Ctx, chain.Blocks, balMap); err != nil {
 		return err
 	}
 
@@ -853,7 +848,7 @@ func (emt *ExecModuleTester) insertPoSBlocks(chain *blockgen.ChainPack) error {
 		return err
 	}
 
-	if status != executionproto.ExecutionStatus_Success {
+	if status != execmodule.ExecutionStatusSuccess {
 		if verr != nil {
 			return fmt.Errorf("insertion failed for block %d, code: %s err: %s", chain.Blocks[chain.Length()-1].NumberU64(), status.String(), *verr)
 		}

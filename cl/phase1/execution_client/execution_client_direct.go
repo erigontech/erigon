@@ -30,10 +30,10 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
-	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
@@ -110,11 +110,11 @@ func (cc *ExecutionClientDirect) NewPayload(
 	monitor.ObserveExecutionClientValidateChain(startValidateChain)
 	// check status
 	switch status {
-	case executionproto.ExecutionStatus_BadBlock, executionproto.ExecutionStatus_InvalidForkchoice:
+	case execmodule.ExecutionStatusBadBlock, execmodule.ExecutionStatusInvalidForkchoice:
 		return PayloadStatusInvalidated, errors.New("bad block")
-	case executionproto.ExecutionStatus_Busy, executionproto.ExecutionStatus_MissingSegment, executionproto.ExecutionStatus_TooFarAway:
+	case execmodule.ExecutionStatusBusy, execmodule.ExecutionStatusMissingSegment, execmodule.ExecutionStatusTooFarAway:
 		return PayloadStatusNotValidated, nil
-	case executionproto.ExecutionStatus_Success:
+	case execmodule.ExecutionStatusSuccess:
 		return PayloadStatusValidated, nil
 	}
 	return PayloadStatusNone, errors.New("unexpected status")
@@ -125,10 +125,10 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 	if err != nil {
 		return nil, fmt.Errorf("execution Client RPC failed to retrieve ForkChoiceUpdate response, err: %w", err)
 	}
-	if status == executionproto.ExecutionStatus_InvalidForkchoice {
+	if status == execmodule.ExecutionStatusInvalidForkchoice {
 		return nil, errors.New("forkchoice was invalid")
 	}
-	if status == executionproto.ExecutionStatus_BadBlock {
+	if status == execmodule.ExecutionStatusBadBlock {
 		return nil, errors.New("bad block as forkchoice")
 	}
 	if attr == nil {
