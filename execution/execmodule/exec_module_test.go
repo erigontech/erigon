@@ -37,21 +37,17 @@ import (
 	"github.com/erigontech/erigon/common/generics"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
-	eth1utils "github.com/erigontech/erigon/execution/execmodule/moduleutil"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/direct"
-	"github.com/erigontech/erigon/node/gointerfaces"
-	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
-	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
 func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
@@ -88,10 +84,10 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 	exec := m.ExecModule
 	insertRes, err := insertBlocks(ctx, exec, chainPack.Blocks)
 	require.NoError(t, err)
-	require.Equal(t, executionproto.ExecutionStatus_Success, insertRes.Result)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
 	validationReceipt, err := validateChain(ctx, exec, chainPack.Blocks[0].Header())
 	require.NoError(t, err)
-	require.Equal(t, executionproto.ExecutionStatus_Success, validationReceipt.ValidationStatus)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validationReceipt.ValidationStatus)
 	require.Equal(t, "", validationReceipt.ValidationError)
 	extendingHash, extendingNum, extendingSd := m.ForkValidator.ExtendingFork()
 	require.Equal(t, chainPack.Blocks[0].Hash(), extendingHash)
@@ -227,13 +223,13 @@ func TestAssembleBlock(t *testing.T) {
 	var parentBeaconBlockRoot common.Hash
 	_, err = rand.Read(parentBeaconBlockRoot[:])
 	require.NoError(t, err)
-	payloadId, err := assembleBlock(ctx, exec, &executionproto.AssembleBlockRequest{
-		ParentHash:            gointerfaces.ConvertHashToH256(chainPack.TopBlock.Hash()),
+	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
+		ParentHash:            chainPack.TopBlock.Hash(),
 		Timestamp:             chainPack.TopBlock.Header().Time + 1,
-		PrevRandao:            gointerfaces.ConvertHashToH256(chainPack.TopBlock.Header().MixDigest),
-		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(common.Address{1}),
-		Withdrawals:           make([]*typesproto.Withdrawal, 0),
-		ParentBeaconBlockRoot: gointerfaces.ConvertHashToH256(parentBeaconBlockRoot),
+		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
+		SuggestedFeeRecipient: common.Address{1},
+		Withdrawals:           make([]*types.Withdrawal, 0),
+		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
 	})
 	require.NoError(t, err)
 	block, err := getAssembledBlock(ctx, exec, payloadId)
@@ -269,13 +265,13 @@ func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
 	var parentBeaconBlockRoot common.Hash
 	_, err = rand.Read(parentBeaconBlockRoot[:])
 	require.NoError(t, err)
-	payloadId, err := assembleBlock(ctx, exec, &executionproto.AssembleBlockRequest{
-		ParentHash:            gointerfaces.ConvertHashToH256(chainPack.TopBlock.Hash()),
+	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
+		ParentHash:            chainPack.TopBlock.Hash(),
 		Timestamp:             chainPack.TopBlock.Header().Time + 1,
-		PrevRandao:            gointerfaces.ConvertHashToH256(chainPack.TopBlock.Header().MixDigest),
-		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(common.Address{1}),
-		Withdrawals:           make([]*typesproto.Withdrawal, 0),
-		ParentBeaconBlockRoot: gointerfaces.ConvertHashToH256(parentBeaconBlockRoot),
+		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
+		SuggestedFeeRecipient: common.Address{1},
+		Withdrawals:           make([]*types.Withdrawal, 0),
+		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
 	})
 	require.NoError(t, err)
 
@@ -293,46 +289,37 @@ func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func insertBlocks(ctx context.Context, exec *execmodule.ExecModule, blocks []*types.Block) (*executionproto.InsertionResult, error) {
-	rpcBlocks := make([]*executionproto.Block, len(blocks))
+func insertBlocks(ctx context.Context, exec *execmodule.ExecModule, blocks []*types.Block) (execmodule.ExecutionStatus, error) {
+	rawBlocks := make([]*types.RawBlock, len(blocks))
 	for i, b := range blocks {
-		rpcBlocks[i] = eth1utils.ConvertBlockToRPC(b)
+		rawBlocks[i] = &types.RawBlock{Header: b.HeaderNoCopy(), Body: b.RawBody()}
 	}
-	return retryBusy(ctx, func() (*executionproto.InsertionResult, bool, error) {
-		r, err := exec.InsertBlocks(ctx, &executionproto.InsertBlocksRequest{
-			Blocks: rpcBlocks,
-		})
+	return retryBusy(ctx, func() (execmodule.ExecutionStatus, bool, error) {
+		status, err := exec.InsertBlocks(ctx, rawBlocks)
 		if err != nil {
-			return nil, false, err
+			return execmodule.ExecutionStatusBusy, false, err
 		}
-		return r, r.Result == executionproto.ExecutionStatus_Busy, nil
+		return status, status == execmodule.ExecutionStatusBusy, nil
 	})
 }
 
-func validateChain(ctx context.Context, exec *execmodule.ExecModule, h *types.Header) (*executionproto.ValidationReceipt, error) {
-	return retryBusy(ctx, func() (*executionproto.ValidationReceipt, bool, error) {
-		r, err := exec.ValidateChain(ctx, &executionproto.ValidationRequest{
-			Hash:   gointerfaces.ConvertHashToH256(h.Hash()),
-			Number: h.Number.Uint64(),
-		})
+func validateChain(ctx context.Context, exec *execmodule.ExecModule, h *types.Header) (execmodule.ValidationResult, error) {
+	return retryBusy(ctx, func() (execmodule.ValidationResult, bool, error) {
+		r, err := exec.ValidateChain(ctx, h.Hash(), h.Number.Uint64())
 		if err != nil {
-			return nil, false, err
+			return execmodule.ValidationResult{}, false, err
 		}
-		return r, r.ValidationStatus == executionproto.ExecutionStatus_Busy, nil
+		return r, r.ValidationStatus == execmodule.ExecutionStatusBusy, nil
 	})
 }
 
-func updateForkChoice(ctx context.Context, exec *execmodule.ExecModule, h *types.Header) (*executionproto.ForkChoiceReceipt, error) {
-	return retryBusy(ctx, func() (*executionproto.ForkChoiceReceipt, bool, error) {
-		r, err := exec.UpdateForkChoice(ctx, &executionproto.ForkChoice{
-			HeadBlockHash:      gointerfaces.ConvertHashToH256(h.Hash()),
-			SafeBlockHash:      gointerfaces.ConvertHashToH256(common.Hash{}),
-			FinalizedBlockHash: gointerfaces.ConvertHashToH256(common.Hash{}),
-		})
+func updateForkChoice(ctx context.Context, exec *execmodule.ExecModule, h *types.Header) (execmodule.ForkChoiceResult, error) {
+	return retryBusy(ctx, func() (execmodule.ForkChoiceResult, bool, error) {
+		r, err := exec.UpdateForkChoice(ctx, h.Hash(), common.Hash{}, common.Hash{})
 		if err != nil {
-			return nil, false, err
+			return execmodule.ForkChoiceResult{}, false, err
 		}
-		return r, r.Status == executionproto.ExecutionStatus_Busy, nil
+		return r, r.Status == execmodule.ExecutionStatusBusy, nil
 	})
 }
 
@@ -341,8 +328,8 @@ func insertValidateAndUfc1By1(ctx context.Context, exec *execmodule.ExecModule, 
 	if err != nil {
 		return err
 	}
-	if ir.Result != executionproto.ExecutionStatus_Success {
-		return fmt.Errorf("unexpected insertBlocks status: %s", ir.Result)
+	if ir != execmodule.ExecutionStatusSuccess {
+		return fmt.Errorf("unexpected insertBlocks status: %s", ir)
 	}
 	for _, b := range blocks {
 		h := b.Header()
@@ -350,37 +337,40 @@ func insertValidateAndUfc1By1(ctx context.Context, exec *execmodule.ExecModule, 
 		if err != nil {
 			return err
 		}
-		if vr.ValidationStatus != executionproto.ExecutionStatus_Success {
+		if vr.ValidationStatus != execmodule.ExecutionStatusSuccess {
 			return fmt.Errorf("unexpected validateChain status: %s", vr.ValidationStatus)
 		}
 		ur, err := updateForkChoice(ctx, exec, h)
 		if err != nil {
 			return err
 		}
-		if ur.Status != executionproto.ExecutionStatus_Success {
+		if ur.Status != execmodule.ExecutionStatusSuccess {
 			return fmt.Errorf("unexpected updateForkChoice status: %s", ur.Status)
 		}
 	}
 	return nil
 }
 
-func assembleBlock(ctx context.Context, exec *execmodule.ExecModule, req *executionproto.AssembleBlockRequest) (uint64, error) {
+func assembleBlock(ctx context.Context, exec *execmodule.ExecModule, params *builder.Parameters) (uint64, error) {
 	return retryBusy(ctx, func() (uint64, bool, error) {
-		r, err := exec.AssembleBlock(ctx, req)
+		r, err := exec.AssembleBlock(ctx, params)
 		if err != nil {
 			return 0, false, err
 		}
-		return r.Id, r.Busy, nil
+		return r.PayloadID, r.Busy, nil
 	})
 }
 
 func getAssembledBlock(ctx context.Context, exe *execmodule.ExecModule, payloadId uint64) (*types.Block, error) {
 	return retryBusy(ctx, func() (*types.Block, bool, error) {
-		br, busy, err := exe.GetAssembledBlockWithReceipts(payloadId)
+		r, err := exe.GetAssembledBlock(ctx, payloadId)
 		if err != nil {
 			return nil, false, err
 		}
-		return br.Block, busy, nil
+		if r.Block == nil {
+			return nil, r.Busy, nil
+		}
+		return r.Block.Block, r.Busy, nil
 	})
 }
 
@@ -428,13 +418,13 @@ func TestAssembleEmptyBlock(t *testing.T) {
 	require.NoError(t, err)
 
 	// Don't add any txns to pool — assemble empty block.
-	payloadId, err := assembleBlock(ctx, exec, &executionproto.AssembleBlockRequest{
-		ParentHash:            gointerfaces.ConvertHashToH256(chainPack.TopBlock.Hash()),
+	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
+		ParentHash:            chainPack.TopBlock.Hash(),
 		Timestamp:             chainPack.TopBlock.Header().Time + 1,
-		PrevRandao:            gointerfaces.ConvertHashToH256(chainPack.TopBlock.Header().MixDigest),
-		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(common.Address{1}),
-		Withdrawals:           make([]*typesproto.Withdrawal, 0),
-		ParentBeaconBlockRoot: gointerfaces.ConvertHashToH256(randomHash()),
+		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
+		SuggestedFeeRecipient: common.Address{1},
+		Withdrawals:           make([]*types.Withdrawal, 0),
+		ParentBeaconBlockRoot: func() *common.Hash { h := randomHash(); return &h }(),
 	})
 	require.NoError(t, err)
 
@@ -468,13 +458,13 @@ func TestAssembleBlockWithStateVerification(t *testing.T) {
 	baseFee := chainPack.TopBlock.BaseFee().Uint64()
 	addTwoTxnsToPool(ctx, 1, t, m, txpool, baseFee)
 
-	payloadId, err := assembleBlock(ctx, exec, &executionproto.AssembleBlockRequest{
-		ParentHash:            gointerfaces.ConvertHashToH256(chainPack.TopBlock.Hash()),
+	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
+		ParentHash:            chainPack.TopBlock.Hash(),
 		Timestamp:             chainPack.TopBlock.Header().Time + 1,
-		PrevRandao:            gointerfaces.ConvertHashToH256(chainPack.TopBlock.Header().MixDigest),
-		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(common.Address{1}),
-		Withdrawals:           make([]*typesproto.Withdrawal, 0),
-		ParentBeaconBlockRoot: gointerfaces.ConvertHashToH256(randomHash()),
+		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
+		SuggestedFeeRecipient: common.Address{1},
+		Withdrawals:           make([]*types.Withdrawal, 0),
+		ParentBeaconBlockRoot: func() *common.Hash { h := randomHash(); return &h }(),
 	})
 	require.NoError(t, err)
 
@@ -491,13 +481,13 @@ func TestAssembleBlockWithStateVerification(t *testing.T) {
 
 	// Build a second block (block 3) with 2 more txns to verify multi-block assembly.
 	addTwoTxnsToPool(ctx, 3, t, m, txpool, baseFee)
-	payloadId2, err := assembleBlock(ctx, exec, &executionproto.AssembleBlockRequest{
-		ParentHash:            gointerfaces.ConvertHashToH256(block.Hash()),
+	payloadId2, err := assembleBlock(ctx, exec, &builder.Parameters{
+		ParentHash:            block.Hash(),
 		Timestamp:             block.Header().Time + 1,
-		PrevRandao:            gointerfaces.ConvertHashToH256(block.Header().MixDigest),
-		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(common.Address{1}),
-		Withdrawals:           make([]*typesproto.Withdrawal, 0),
-		ParentBeaconBlockRoot: gointerfaces.ConvertHashToH256(randomHash()),
+		PrevRandao:            block.Header().MixDigest,
+		SuggestedFeeRecipient: common.Address{1},
+		Withdrawals:           make([]*types.Withdrawal, 0),
+		ParentBeaconBlockRoot: func() *common.Hash { h := randomHash(); return &h }(),
 	})
 	require.NoError(t, err)
 
@@ -547,13 +537,13 @@ func TestAssembleBlockWithContractCreation(t *testing.T) {
 	require.Equal(t, "success", r.Errors[0])
 
 	// Assemble block.
-	payloadId, err := assembleBlock(ctx, exec, &executionproto.AssembleBlockRequest{
-		ParentHash:            gointerfaces.ConvertHashToH256(chainPack.TopBlock.Hash()),
+	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
+		ParentHash:            chainPack.TopBlock.Hash(),
 		Timestamp:             chainPack.TopBlock.Header().Time + 1,
-		PrevRandao:            gointerfaces.ConvertHashToH256(chainPack.TopBlock.Header().MixDigest),
-		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(common.Address{1}),
-		Withdrawals:           make([]*typesproto.Withdrawal, 0),
-		ParentBeaconBlockRoot: gointerfaces.ConvertHashToH256(randomHash()),
+		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
+		SuggestedFeeRecipient: common.Address{1},
+		Withdrawals:           make([]*types.Withdrawal, 0),
+		ParentBeaconBlockRoot: func() *common.Hash { h := randomHash(); return &h }(),
 	})
 	require.NoError(t, err)
 
@@ -618,13 +608,13 @@ func TestAssembleBlockGasOverflow(t *testing.T) {
 	}
 
 	// Assemble block 2 — should be gas-limited.
-	payloadId, err := assembleBlock(ctx, exec, &executionproto.AssembleBlockRequest{
-		ParentHash:            gointerfaces.ConvertHashToH256(chainPack.TopBlock.Hash()),
+	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
+		ParentHash:            chainPack.TopBlock.Hash(),
 		Timestamp:             chainPack.TopBlock.Header().Time + 1,
-		PrevRandao:            gointerfaces.ConvertHashToH256(chainPack.TopBlock.Header().MixDigest),
-		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(common.Address{1}),
-		Withdrawals:           make([]*typesproto.Withdrawal, 0),
-		ParentBeaconBlockRoot: gointerfaces.ConvertHashToH256(randomHash()),
+		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
+		SuggestedFeeRecipient: common.Address{1},
+		Withdrawals:           make([]*types.Withdrawal, 0),
+		ParentBeaconBlockRoot: func() *common.Hash { h := randomHash(); return &h }(),
 	})
 	require.NoError(t, err)
 	block, err := getAssembledBlock(ctx, exec, payloadId)
@@ -637,13 +627,13 @@ func TestAssembleBlockGasOverflow(t *testing.T) {
 	require.NoError(t, err)
 
 	// Assemble block 3 — remaining txns spill over.
-	payloadId2, err := assembleBlock(ctx, exec, &executionproto.AssembleBlockRequest{
-		ParentHash:            gointerfaces.ConvertHashToH256(block.Hash()),
+	payloadId2, err := assembleBlock(ctx, exec, &builder.Parameters{
+		ParentHash:            block.Hash(),
 		Timestamp:             block.Header().Time + 1,
-		PrevRandao:            gointerfaces.ConvertHashToH256(block.Header().MixDigest),
-		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(common.Address{1}),
-		Withdrawals:           make([]*typesproto.Withdrawal, 0),
-		ParentBeaconBlockRoot: gointerfaces.ConvertHashToH256(randomHash()),
+		PrevRandao:            block.Header().MixDigest,
+		SuggestedFeeRecipient: common.Address{1},
+		Withdrawals:           make([]*types.Withdrawal, 0),
+		ParentBeaconBlockRoot: func() *common.Hash { h := randomHash(); return &h }(),
 	})
 	require.NoError(t, err)
 	block2, err := getAssembledBlock(ctx, exec, payloadId2)
@@ -712,13 +702,13 @@ func TestAssembleBlockMixedTxTypes(t *testing.T) {
 	}
 
 	// Assemble block.
-	payloadId, err := assembleBlock(ctx, exec, &executionproto.AssembleBlockRequest{
-		ParentHash:            gointerfaces.ConvertHashToH256(chainPack.TopBlock.Hash()),
+	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
+		ParentHash:            chainPack.TopBlock.Hash(),
 		Timestamp:             chainPack.TopBlock.Header().Time + 1,
-		PrevRandao:            gointerfaces.ConvertHashToH256(chainPack.TopBlock.Header().MixDigest),
-		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(common.Address{1}),
-		Withdrawals:           make([]*typesproto.Withdrawal, 0),
-		ParentBeaconBlockRoot: gointerfaces.ConvertHashToH256(randomHash()),
+		PrevRandao:            chainPack.TopBlock.Header().MixDigest,
+		SuggestedFeeRecipient: common.Address{1},
+		Withdrawals:           make([]*types.Withdrawal, 0),
+		ParentBeaconBlockRoot: func() *common.Hash { h := randomHash(); return &h }(),
 	})
 	require.NoError(t, err)
 	block, err := getAssembledBlock(ctx, exec, payloadId)
@@ -803,20 +793,21 @@ func TestAssembleBlockWithWithdrawalRequest(t *testing.T) {
 	require.Equal(t, "success", addResp.Errors[0])
 
 	// Assemble block.
-	payloadId, err := assembleBlock(ctx, exec, &executionproto.AssembleBlockRequest{
-		ParentHash:            gointerfaces.ConvertHashToH256(chainPack.TopBlock.Hash()),
+	beaconRoot := randomHash()
+	payloadId, err := assembleBlock(ctx, exec, &builder.Parameters{
+		ParentHash:            chainPack.TopBlock.Hash(),
 		Timestamp:             chainPack.TopBlock.Header().Time + 1,
-		PrevRandao:            gointerfaces.ConvertHashToH256(randomHash()),
-		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(common.Address{1}),
-		Withdrawals:           make([]*typesproto.Withdrawal, 0),
-		ParentBeaconBlockRoot: gointerfaces.ConvertHashToH256(randomHash()),
+		PrevRandao:            randomHash(),
+		SuggestedFeeRecipient: common.Address{1},
+		Withdrawals:           make([]*types.Withdrawal, 0),
+		ParentBeaconBlockRoot: &beaconRoot,
 	})
 	require.NoError(t, err)
 
 	// Get the assembled block via ChainReaderWriterEth1 — Caplin's production interface.
 	chainRW := chainreader.NewChainReaderEth1(
 		m.ChainConfig,
-		direct.NewExecutionClientDirect(exec),
+		exec,
 		time.Hour,
 	)
 

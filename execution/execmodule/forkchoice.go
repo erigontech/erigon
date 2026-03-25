@@ -40,24 +40,21 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/gointerfaces"
-	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 )
 
 type forkchoiceOutcome struct {
-	receipt *executionproto.ForkChoiceReceipt
-	err     error
+	result ForkChoiceResult
+	err    error
 }
 
-func sendForkchoiceReceiptWithoutWaiting(ch chan forkchoiceOutcome, receipt *executionproto.ForkChoiceReceipt, alreadySent bool) error {
+func sendForkchoiceResultWithoutWaiting(ch chan forkchoiceOutcome, result ForkChoiceResult, alreadySent bool) error {
 	if alreadySent {
 		return nil
 	}
 	select {
-	case ch <- forkchoiceOutcome{receipt: receipt}:
+	case ch <- forkchoiceOutcome{result: result}:
 	default:
 	}
-
 	return nil
 }
 
@@ -66,12 +63,10 @@ func sendForkchoiceErrorWithoutWaiting(logger log.Logger, ch chan forkchoiceOutc
 		logger.Warn("forkchoice: error received after result was sent", "error", err)
 		return fmt.Errorf("duplicate fcu error: %w", err)
 	}
-
 	select {
 	case ch <- forkchoiceOutcome{err: err}:
 	default:
 	}
-
 	return err
 }
 
@@ -116,11 +111,7 @@ func (e *ExecModule) verifyForkchoiceHashes(ctx context.Context, tx kv.Tx, block
 	return true, nil
 }
 
-func (e *ExecModule) UpdateForkChoice(ctx context.Context, req *executionproto.ForkChoice) (*executionproto.ForkChoiceReceipt, error) {
-	blockHash := gointerfaces.ConvertH256ToHash(req.HeadBlockHash)
-	safeHash := gointerfaces.ConvertH256ToHash(req.SafeBlockHash)
-	finalizedHash := gointerfaces.ConvertH256ToHash(req.FinalizedBlockHash)
-
+func (e *ExecModule) UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (ForkChoiceResult, error) {
 	outcomeCh := make(chan forkchoiceOutcome, 1)
 	// done is closed when the goroutine fully returns — after all defers
 	// (shared-state cleanup, semaphore release) have run. When we receive
@@ -128,42 +119,26 @@ func (e *ExecModule) UpdateForkChoice(ctx context.Context, req *executionproto.F
 	// the semaphore for a follow-up operation like AssembleBlock.
 	done := make(chan struct{})
 
-	// So we wait at most the amount specified by req.Timeout before just sending out
+	// Spawn the actual forkchoice work using the module's background context so
+	// it is not cancelled when the caller's context times out.
 	go func() {
 		defer close(done)
-		if err := e.updateForkChoice(e.bacgroundCtx, blockHash, safeHash, finalizedHash, outcomeCh); err != nil {
+		if err := e.updateForkChoice(e.bacgroundCtx, headHash, safeHash, finalizedHash, outcomeCh); err != nil {
 			e.logger.Debug("updateforkchoice failed", "err", err)
 		}
 	}()
 
-	if req.Timeout > 0 {
-		fcuTimer := time.NewTimer(time.Duration(req.Timeout) * time.Millisecond)
-
-		select {
-		case <-fcuTimer.C:
-			e.logger.Debug("[UpdateForkChoice] timeout fired, returning Busy", "timeout", req.Timeout, "head", blockHash)
-			return &executionproto.ForkChoiceReceipt{
-				LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
-				Status:          executionproto.ExecutionStatus_Busy,
-			}, nil
-		case outcome := <-outcomeCh:
-			<-done
-			e.logger.Debug("[UpdateForkChoice] received outcome", "status", outcome.receipt.Status, "head", blockHash)
-			return outcome.receipt, outcome.err
-		case <-ctx.Done():
-			e.logger.Debug("[UpdateForkChoice] context cancelled", "head", blockHash)
-			return nil, ctx.Err()
-		}
-	}
-
 	select {
 	case outcome := <-outcomeCh:
 		<-done
-		e.logger.Debug("[UpdateForkChoice] received outcome (no timeout)", "status", outcome.receipt.Status, "head", blockHash)
-		return outcome.receipt, outcome.err
+		return outcome.result, outcome.err
 	case <-ctx.Done():
-		e.logger.Debug("[UpdateForkChoice] context cancelled (no timeout)", "head", blockHash)
-		return nil, ctx.Err()
+		if ctx.Err() == context.DeadlineExceeded {
+			e.logger.Debug("treating forkChoiceUpdated as asynchronous as it is taking too long")
+			return ForkChoiceResult{Status: ExecutionStatusBusy}, nil
+		}
+		e.logger.Debug("forkChoiceUpdate cancelled")
+		return ForkChoiceResult{}, ctx.Err()
 	}
 }
 
@@ -181,9 +156,9 @@ func writeForkChoiceHashes(tx kv.RwTx, blockHash, safeHash, finalizedHash common
 func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, safeHash, finalizedHash common.Hash, outcomeCh chan forkchoiceOutcome) (err error) {
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.updateForkChoice: ExecutionStatus_Busy")
-		sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{
-			LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
-			Status:          executionproto.ExecutionStatus_Busy,
+		sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+			LatestValidHash: common.Hash{},
+			Status:          ExecutionStatusBusy,
 		}, false)
 		return fmt.Errorf("semaphore timeout")
 	}
@@ -326,14 +301,14 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			}
 			if !valid {
-				return sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{
-					LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
-					Status:          executionproto.ExecutionStatus_InvalidForkchoice,
+				return sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+					LatestValidHash: common.Hash{},
+					Status:          ExecutionStatusInvalidForkchoice,
 				}, false)
 			}
-			sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{
-				LatestValidHash: gointerfaces.ConvertHashToH256(blockHash),
-				Status:          executionproto.ExecutionStatus_Success,
+			sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+				LatestValidHash: blockHash,
+				Status:          ExecutionStatusSuccess,
 			}, false)
 			return err
 		}
@@ -361,9 +336,9 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			}
 			if currentHeader == nil {
-				return sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{
-					LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
-					Status:          executionproto.ExecutionStatus_MissingSegment,
+				return sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+					LatestValidHash: common.Hash{},
+					Status:          ExecutionStatusMissingSegment,
 				}, false)
 			}
 			currentParentHash = currentHeader.ParentHash
@@ -454,9 +429,9 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		if err := commitRwTx.Commit(); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
-		return sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{
-			LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
-			Status:          executionproto.ExecutionStatus_TooFarAway,
+		return sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+			LatestValidHash: common.Hash{},
+			Status:          ExecutionStatusTooFarAway,
 			ValidationError: "domain ahead of blocks",
 		}, false)
 	}
@@ -481,9 +456,9 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		e.logger.Debug("[updateForkchoice] Fork choice update: flushing in-memory state (built by previous newPayload)")
 		if stateFlushingInParallel {
 			// Send forkchoice early (We already know the fork is valid)
-			sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{
-				LatestValidHash: gointerfaces.ConvertHashToH256(blockHash),
-				Status:          executionproto.ExecutionStatus_Success,
+			sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+				LatestValidHash: blockHash,
+				Status:          ExecutionStatusSuccess,
 				ValidationError: validationError,
 			}, false)
 			e.logHeadUpdated(blockHash, fcuHeader, 0, "head validated", false)
@@ -541,10 +516,10 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		err = fmt.Errorf("updateForkChoice: %w", err)
 		e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
 		if errors.Is(err, rules.ErrInvalidBlock) {
-			return sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{
-				Status:          executionproto.ExecutionStatus_BadBlock,
+			return sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+				Status:          ExecutionStatusBadBlock,
 				ValidationError: err.Error(),
-				LatestValidHash: gointerfaces.ConvertHashToH256(rawdb.ReadHeadBlockHash(tx)),
+				LatestValidHash: rawdb.ReadHeadBlockHash(tx),
 			}, stateFlushingInParallel)
 		}
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
@@ -560,10 +535,10 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		e.forkValidator.NotifyCurrentHeight(*headNumber)
 	}
 
-	var status executionproto.ExecutionStatus
+	var status ExecutionStatus
 
 	if headHash != blockHash {
-		status = executionproto.ExecutionStatus_BadBlock
+		status = ExecutionStatusBadBlock
 		blockHashBlockNum, _ := e.blockReader.HeaderNumber(ctx, tx, blockHash)
 
 		validationError = "headHash and blockHash mismatch"
@@ -583,7 +558,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			e.lock.Unlock()
 		}
 	} else {
-		status = executionproto.ExecutionStatus_Success
+		status = ExecutionStatusSuccess
 		// Update forks...
 		writeForkChoiceHashes(tx, blockHash, safeHash, finalizedHash)
 
@@ -592,9 +567,9 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
 		if !valid {
-			return sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{
-				Status:          executionproto.ExecutionStatus_InvalidForkchoice,
-				LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
+			return sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+				Status:          ExecutionStatusInvalidForkchoice,
+				LatestValidHash: common.Hash{},
 			}, stateFlushingInParallel)
 		}
 		if err := rawdb.TruncateCanonicalChain(ctx, tx, *headNumber+1); err != nil {
@@ -691,8 +666,8 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		}
 	}
 
-	return sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{
-		LatestValidHash: gointerfaces.ConvertHashToH256(headHash),
+	return sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+		LatestValidHash: headHash,
 		Status:          status,
 		ValidationError: validationError,
 	}, stateFlushingInParallel)

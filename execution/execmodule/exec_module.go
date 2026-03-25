@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"golang.org/x/sync/semaphore"
-	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -48,8 +47,6 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
-	"github.com/erigontech/erigon/node/gointerfaces"
-	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
@@ -225,9 +222,9 @@ type ExecModule struct {
 	publishedSD    func() *execctx.SharedDomains // fallback for background commit
 
 	stopNode func() error
-
-	executionproto.UnimplementedExecutionServer
 }
+
+var _ ExecutionModule = (*ExecModule)(nil) // compile-time interface check
 
 func NewExecModule(
 	ctx context.Context,
@@ -375,21 +372,19 @@ func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.Te
 	return nil
 }
 
-func (e *ExecModule) ValidateChain(ctx context.Context, req *executionproto.ValidationRequest) (*executionproto.ValidationReceipt, error) {
+func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, blockNumber uint64) (ValidationResult, error) {
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.ValidateChain: ExecutionStatus_Busy")
-		return &executionproto.ValidationReceipt{
-			LatestValidHash:  gointerfaces.ConvertHashToH256(common.Hash{}),
-			ValidationStatus: executionproto.ExecutionStatus_Busy,
+		return ValidationResult{
+			ValidationStatus: ExecutionStatusBusy,
 		}, nil
 	}
 	defer e.semaphore.Release(1)
 
-	e.hook.LastNewBlockSeen(req.Number) // used by eth_syncing
+	e.hook.LastNewBlockSeen(blockNumber) // used by eth_syncing
 	e.currentContext.ResetPendingUpdates()
 	e.forkValidator.ClearWithUnwind()
-	blockHash := gointerfaces.ConvertH256ToHash(req.Hash)
-	e.logger.Debug("[execmodule] validating chain", "number", req.Number, "hash", common.Hash(blockHash))
+	e.logger.Debug("[execmodule] validating chain", "number", blockNumber, "hash", blockHash)
 	var (
 		header             *types.Header
 		body               *types.Body
@@ -403,28 +398,28 @@ func (e *ExecModule) ValidateChain(ctx context.Context, req *executionproto.Vali
 		overlay := e.currentContext.BlockOverlay()
 		roTx, err := e.db.BeginTemporalRo(ctx)
 		if err != nil {
-			return nil, err
+			return ValidationResult{}, err
 		}
 		defer roTx.Rollback()
 		overlay.UpdateTxn(roTx)
-		header, err = e.blockReader.Header(ctx, overlay, blockHash, req.Number)
+		header, err = e.blockReader.Header(ctx, overlay, blockHash, blockNumber)
 		if err != nil {
-			return nil, err
+			return ValidationResult{}, err
 		}
-		body, err = e.blockReader.BodyWithTransactions(ctx, overlay, blockHash, req.Number)
+		body, err = e.blockReader.BodyWithTransactions(ctx, overlay, blockHash, blockNumber)
 		if err != nil {
-			return nil, err
+			return ValidationResult{}, err
 		}
 		exec.AddHeaderAndBodyToGlobalReadAheader(ctx, e.db, header, body)
 		currentBlockNumber = rawdb.ReadCurrentBlockNumber(overlay)
 	} else {
 		if err := e.db.View(ctx, func(tx kv.Tx) error {
-			header, err = e.blockReader.Header(ctx, tx, blockHash, req.Number)
+			header, err = e.blockReader.Header(ctx, tx, blockHash, blockNumber)
 			if err != nil {
 				return err
 			}
 
-			body, err = e.blockReader.BodyWithTransactions(ctx, tx, blockHash, req.Number)
+			body, err = e.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber)
 			if err != nil {
 				return err
 			}
@@ -432,26 +427,26 @@ func (e *ExecModule) ValidateChain(ctx context.Context, req *executionproto.Vali
 			currentBlockNumber = rawdb.ReadCurrentBlockNumber(tx)
 			return nil
 		}); err != nil {
-			return nil, err
+			return ValidationResult{}, err
 		}
 	}
 	if header == nil || body == nil {
-		return &executionproto.ValidationReceipt{
-			LatestValidHash:  gointerfaces.ConvertHashToH256(common.Hash{}),
-			ValidationStatus: executionproto.ExecutionStatus_MissingSegment,
+		return ValidationResult{
+			LatestValidHash:  common.Hash{},
+			ValidationStatus: ExecutionStatusMissingSegment,
 		}, nil
 	}
 
-	if math.AbsoluteDifference(*currentBlockNumber, req.Number) >= e.syncCfg.MaxReorgDepth {
-		return &executionproto.ValidationReceipt{
-			ValidationStatus: executionproto.ExecutionStatus_TooFarAway,
-			LatestValidHash:  gointerfaces.ConvertHashToH256(common.Hash{}),
+	if math.AbsoluteDifference(*currentBlockNumber, blockNumber) >= e.syncCfg.MaxReorgDepth {
+		return ValidationResult{
+			ValidationStatus: ExecutionStatusTooFarAway,
+			LatestValidHash:  common.Hash{},
 		}, nil
 	}
 
 	tx, err := e.db.BeginTemporalRwNosync(ctx)
 	if err != nil {
-		return nil, err
+		return ValidationResult{}, err
 	}
 	defer tx.Rollback()
 
@@ -461,61 +456,61 @@ func (e *ExecModule) ValidateChain(ctx context.Context, req *executionproto.Vali
 	// back, so the flush is temporary — the overlay retains all data.
 	if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
 		if err := e.currentContext.BlockOverlay().Flush(ctx, tx); err != nil {
-			return nil, fmt.Errorf("ValidateChain: flush overlay to validation tx: %w", err)
+			return ValidationResult{}, fmt.Errorf("ValidateChain: flush overlay to validation tx: %w", err)
 		}
 	}
 
 	doms, err := execctx.NewSharedDomains(ctx, tx, e.logger)
 	if err != nil {
-		return nil, err
+		return ValidationResult{}, err
 	}
 	doms.SetInMemHistoryReads(inMemHistoryReads)
 
 	if err = e.unwindToCommonCanonical(doms, tx, header); err != nil {
 		doms.Close()
-		return nil, err
+		return ValidationResult{}, err
 	}
 
 	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, doms, tx, header, body.RawBody(), e.logger)
 	if criticalError != nil {
-		return nil, criticalError
+		return ValidationResult{}, criticalError
 	}
 
 	// Throw away the tx and start a new one (do not persist changes to the canonical chain)
 	tx.Rollback()
 	tx, err = e.db.BeginTemporalRwNosync(ctx)
 	if err != nil {
-		return nil, err
+		return ValidationResult{}, err
 	}
 	defer tx.Rollback()
 
 	// if the block is deemed invalid then we delete it. perhaps we want to keep bad blocks and just keep an index of bad ones.
-	validationStatus := executionproto.ExecutionStatus_Success
+	validationStatus := ExecutionStatusSuccess
 	if status == engine_types.AcceptedStatus {
-		validationStatus = executionproto.ExecutionStatus_MissingSegment
+		validationStatus = ExecutionStatusMissingSegment
 	}
 	isInvalidChain := status == engine_types.InvalidStatus || status == engine_types.InvalidBlockHashStatus || validationError != nil
 	if isInvalidChain && (lvh != common.Hash{}) && lvh != blockHash {
 		if err := e.purgeBadChain(ctx, tx, lvh, blockHash); err != nil {
-			return nil, err
+			return ValidationResult{}, err
 		}
 	}
 	if isInvalidChain {
-		e.logger.Warn("ethereumExecutionModule.ValidateChain: chain is invalid", "hash", common.Hash(blockHash))
-		validationStatus = executionproto.ExecutionStatus_BadBlock
+		e.logger.Warn("ethereumExecutionModule.ValidateChain: chain is invalid", "hash", blockHash)
+		validationStatus = ExecutionStatusBadBlock
 		// Discard the block overlay — it may contain the bad block's data.
 		if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
 			e.currentContext.BlockOverlay().Close()
 		}
 	}
-	validationReceipt := &executionproto.ValidationReceipt{
+	result := ValidationResult{
 		ValidationStatus: validationStatus,
-		LatestValidHash:  gointerfaces.ConvertHashToH256(lvh),
+		LatestValidHash:  lvh,
 	}
 	if validationError != nil {
-		validationReceipt.ValidationError = validationError.Error()
+		result.ValidationError = validationError.Error()
 	}
-	return validationReceipt, tx.Commit()
+	return result, tx.Commit()
 }
 
 func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidHash, headHash common.Hash) error {
@@ -591,8 +586,7 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 	}
 }
 
-func (e *ExecModule) Ready(ctx context.Context, _ *emptypb.Empty) (*executionproto.ReadyResponse, error) {
-
+func (e *ExecModule) Ready(ctx context.Context) (bool, error) {
 	// setup a timeout for the context to avoid waiting indefinitely
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
@@ -600,47 +594,46 @@ func (e *ExecModule) Ready(ctx context.Context, _ *emptypb.Empty) (*executionpro
 	if err := <-e.blockReader.Ready(ctxWithTimeout); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			e.logger.Trace("ethereumExecutionModule.Ready: context deadline exceeded")
-			return &executionproto.ReadyResponse{Ready: false}, nil
+			return false, nil
 		}
-		return &executionproto.ReadyResponse{Ready: false}, err
+		return false, err
 	}
 
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.Ready: ExecutionStatus_Busy")
-		return &executionproto.ReadyResponse{Ready: false}, nil
+		return false, nil
 	}
 	defer e.semaphore.Release(1)
-	return &executionproto.ReadyResponse{Ready: true}, nil
+	return true, nil
 }
 
-func (e *ExecModule) HasBlock(ctx context.Context, in *executionproto.GetSegmentRequest) (*executionproto.HasBlockResponse, error) {
+func (e *ExecModule) HasBlock(ctx context.Context, blockHash *common.Hash, _ *uint64) (bool, error) {
+	if blockHash == nil {
+		return false, errors.New("block hash is nil, HasBlock supports lookup by hash only")
+	}
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
-		return nil, err
+		return false, err
 	}
 	defer tx.Rollback()
-	if in.BlockHash == nil {
-		return nil, errors.New("block hash is nil, hasBlock support only by hash")
-	}
-	blockHash := gointerfaces.ConvertH256ToHash(in.BlockHash)
 
-	num, _ := e.blockReader.HeaderNumber(ctx, tx, blockHash)
+	num, _ := e.blockReader.HeaderNumber(ctx, tx, *blockHash)
 	if num == nil {
-		return &executionproto.HasBlockResponse{HasBlock: false}, nil
+		return false, nil
 	}
 	if *num <= e.blockReader.FrozenBlocks() {
-		return &executionproto.HasBlockResponse{HasBlock: true}, nil
+		return true, nil
 	}
-	has, err := tx.Has(kv.Headers, dbutils.HeaderKey(*num, blockHash))
+	has, err := tx.Has(kv.Headers, dbutils.HeaderKey(*num, *blockHash))
 	if err != nil {
-		return nil, err
+		return false, err
 	}
 	if !has {
-		return &executionproto.HasBlockResponse{HasBlock: false}, nil
+		return false, nil
 	}
-	has, err = tx.Has(kv.BlockBody, dbutils.HeaderKey(*num, blockHash))
+	has, err = tx.Has(kv.BlockBody, dbutils.HeaderKey(*num, *blockHash))
 	if err != nil {
-		return nil, err
+		return false, err
 	}
-	return &executionproto.HasBlockResponse{HasBlock: has}, nil
+	return has, nil
 }
