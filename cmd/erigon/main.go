@@ -41,9 +41,11 @@ func main() {
 	common.WithProfilersMain(func() {
 		app := erigonapp.MakeApp("erigon", runErigon, erigoncli.DefaultFlags)
 		err = app.Run(os.Args)
-		_, printErr := fmt.Fprintln(os.Stderr, err)
-		if printErr != nil {
-			log.Warn("Fprintln error", "err", printErr)
+		if err != nil {
+			_, printErr := fmt.Fprintln(os.Stderr, err)
+			if printErr != nil {
+				log.Warn("Fprintln error", "err", printErr)
+			}
 		}
 	})
 	if err != nil {

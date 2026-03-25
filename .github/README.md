@@ -40,6 +40,30 @@ Without `ready_for_review`, converting a draft PR to ready-for-review fires an e
 the workflow doesn't subscribe to, so the job never runs — the PR appears to have
 skipped CI until the next push.
 
+### CI gate and workflow_call
+
+All PR and merge-queue checks run through `.github/workflows/ci-gate.yml`. It calls
+each sub-workflow via `uses:` (reusable workflow call) rather than inlining the job
+definitions. This avoids duplicating job definitions that also appear in standalone
+`push`/`schedule` runs.
+
+Use `workflow_call:` on a workflow (and call it from ci-gate) when the workflow has
+other triggers besides PRs — `push` to `main`, `schedule`, etc. — so there is one
+source of truth for the job definition.
+
+Only inline job definitions directly into ci-gate if the workflow is exclusively
+PR-gated with no other triggers, since there is then no duplication concern.
+
+Workflows called by ci-gate must not have `pull_request:` triggers — ci-gate owns
+PR coverage and a `pull_request:` trigger would cause every job to run twice.
+
+ci-gate has a workflow-level `concurrency:` group that cancels the entire previous
+run (all sub-workflow jobs) when a new PR push or merge_group event arrives. Sub-
+workflows called via `workflow_call` must **not** define their own job-level
+`concurrency:` for this purpose — `github.workflow` and `github.job` resolve to
+the caller's values (or empty) in a `workflow_call` context, which causes collisions
+that cancel sibling jobs within the same run.
+
 ### Required checks and path filters
 
 Required checks must always report a status or they block the PR indefinitely.
@@ -94,6 +118,58 @@ unnecessary re-runs.
 This is also why the `execution/tests/` package is broken into focused sub-packages
 rather than one monolithic package.
 
+### Cache warming and GitHub's cache isolation rules
+
+GitHub Actions caches are scoped by branch. A workflow run can restore caches from:
+
+1. **Its own branch** — caches saved by earlier runs on the same branch.
+2. **The base branch** (`main`) — caches saved by any workflow run on `main`.
+
+It cannot access caches from other PRs or other branches.
+
+**The cold-start problem** — If a workflow only triggers on `pull_request`, it never
+runs on `main` and therefore never populates the base-branch cache. Every new PR
+opens to a cold cache, even if the codebase hasn't changed at all. Subsequent pushes
+to the *same* PR do find each other's caches, but only until the GitHub-hosted cache
+is evicted (repos share a 10 GB limit; busy repos evict older entries within hours).
+
+**The fix** — add `push: {branches: [main, release/**]}` as a trigger. After each
+merge, a run warms the build and module caches on `main`. All future PR first-pushes
+restore from that warm base-branch cache instead of starting cold.
+
+**Cache warming without test validation** — For workflows where correctness is already
+enforced by the merge queue, the push-to-main run exists purely for cache warming. To
+prevent benchmark or test flakiness from showing as failures on main commits, use
+compile-only steps on non-PR events:
+
+```yaml
+- name: Run benchmarks
+  if: github.event_name == 'pull_request'
+  run: make test-bench
+
+- name: Build test binaries (cache warming)
+  if: github.event_name != 'pull_request'
+  run: go test -run=^$ ./...
+```
+
+`go test -run=^$` compiles every test binary (identical GOCACHE entries to a full
+run) but executes nothing. The job always succeeds, and the commit on `main` shows
+green. If a benchmark were broken post-merge it would have been caught by the PR or
+merge queue run before landing.
+
+**Merge queues** — `merge_group` runs use a temporary synthetic branch
+(`refs/heads/gh-readonly-queue/main/pr-N-SHA`). They can read from the base-branch
+(`main`) cache, so they benefit from the warm cache created by the `push` trigger.
+However, caches *saved* during a merge-group run are stored under that temporary
+branch and become inaccessible once the merge group completes — they do not
+contribute to the `main` cache. Only the `push`-triggered run after the merge creates
+a durable base-branch cache.
+
+**Implication for workflow design**: any workflow that should benefit from caching
+across PRs and merge queue runs needs a `push` trigger on `main` (or a nightly
+schedule on `main`). Without it, each PR and each merge-queue batch is always a cold
+start.
+
 ## Required checks
 
 Required checks exist to block *regressions*, not to enforce perfection.
@@ -140,6 +216,41 @@ make test-all GO_FLAGS="-p 2 -parallel 4"
 Consider setting tighter defaults in the workflow matrix for jobs that are known to
 be memory- or disk-heavy, rather than working around pressure by adjusting unrelated
 constraints like timeouts or GC tuning.
+
+## Checking benchmarks
+
+The purpose of `make test-bench` in CI is to verify that benchmarks compile and
+execute at least one iteration — not to produce meaningful performance numbers.
+
+### Why benchmarks are slow by default
+
+Many benchmarks are sized for profiling or comparison work: a single iteration can
+take minutes. Go's benchmark runner will execute exactly 1 iteration in that case
+(`-benchtime=1x`), so the `ns/op` figure is meaningless and the run just wastes
+time.
+
+The fix is to keep benchmark iteration work small enough to be loopable, and use
+`testing.Short()` to trim parameter sweeps when all we need is a smoke test:
+
+```go
+if testing.Short() {
+    totalSteps = 10        // instead of 200+
+    keyCount = 10_000      // instead of 1_000_000
+}
+```
+
+`make test-bench` passes `-short` so these guards are active in CI.
+
+### Why you cannot parallelize across packages
+
+`go test` forces benchmark packages to run **serially** regardless of the `-p` flag.
+The serialization is enforced at the action-graph level in `cmd/go` when `-bench` is
+set — each package run is added as a dependency of the previous one. Passing
+`-p N` only affects compilation parallelism, not execution order.
+
+The only way to reduce `make test-bench` wall time is to reduce the work done per
+benchmark iteration, which is why right-sizing benchmarks (via `testing.Short()`) is
+the correct approach rather than parallelizing the runner.
 
 ## Local reproducibility
 

@@ -837,8 +837,8 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	if err != nil {
 		return err
 	}
-	if blockNum > 0 && latestBlockNum > blockNum-1 { // commitment domain reads branches at end of blockNum-1
-		return fmt.Errorf("commitment state blockNum is ahead of blockNum-1: %d > %d", latestBlockNum, blockNum-1)
+	if latestBlockNum > blockNum {
+		return fmt.Errorf("commitment state blockNum is ahead of blockNum: %d > %d", latestBlockNum, blockNum)
 	}
 	if latestBlockNum < blockNum {
 		// Commitment state is from an earlier block. This is expected when intermediate blocks
@@ -927,7 +927,7 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	return nil
 }
 
-func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, br services.FullBlockReader, from, to uint64, logger log.Logger) error {
+func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, br services.FullBlockReader, from, to uint64, failFast bool, logger log.Logger) error {
 	if from >= to {
 		return fmt.Errorf("invalid blk range: %d >= %d", from, to)
 	}
@@ -954,6 +954,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 		}
 	}()
 
+	var integrityErr error
 	var blks uint64
 	for blockNum := range sampler.BlockNums(from, to) {
 		blks++
@@ -963,7 +964,13 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 				return ctx.Err()
 			}
 			if err := CheckCommitmentHistAtBlk(ctx, db, br, blockNum, log.LvlDebug, logger); err != nil {
-				return fmt.Errorf("checkCommitmentHistAtBlk: %d, %w", blockNum, err)
+				err = fmt.Errorf("checkCommitmentHistAtBlk: %d, %w", blockNum, err)
+				if failFast {
+					return err
+				}
+				logger.Warn(err.Error())
+				integrityErr = err
+				return nil
 			}
 			checked.Add(1)
 			lastBlockNum.Store(blockNum)
@@ -976,7 +983,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 	dur := time.Since(start)
 	rate := float64(blks) / dur.Seconds()
 	logger.Info("checked commitment hist at blk range", "dur", dur, "blks", blks, "blks/s", rate, "from", from, "to", to, "seed", sampler.Seed, "sampleRatio", sampler.SampleRatio)
-	return nil
+	return integrityErr
 }
 
 func CheckStateVerify(ctx context.Context, db kv.TemporalRoDB, failFast bool, fromStep uint64, logger log.Logger) error {

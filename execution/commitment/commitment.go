@@ -111,7 +111,8 @@ type Trie interface {
 	ResetContext(ctx PatriciaContext)
 
 	// Process updates. If warmup.Enabled is true, pre-warms MDBX page cache in parallel.
-	Process(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress, warmup WarmupConfig) (rootHash []byte, err error)
+	// onProgress (optional) is called periodically with commitment progress info.
+	Process(ctx context.Context, updates *Updates, logPrefix string, onProgress func(*CommitProgress), warmup WarmupConfig) (rootHash []byte, err error)
 
 	// Release returns the trie to a pool for reuse. After calling Release,
 	// the caller must not use the trie.
@@ -563,6 +564,9 @@ func (be *BranchEncoder) CollectUpdate(
 
 	if be.cache != nil {
 		prev, foundInCache = be.cache.GetAndEvictBranch(prefix)
+		if foundInCache && be.metrics != nil {
+			be.metrics.cacheBranch.Add(1)
+		}
 	}
 	if !foundInCache {
 		prev, _, err = ctx.Branch(prefix)
@@ -641,6 +645,9 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 
 	if be.cache != nil {
 		prev, foundInCache = be.cache.GetAndEvictBranch(prefix)
+		if foundInCache && be.metrics != nil {
+			be.metrics.cacheBranch.Add(1)
+		}
 	}
 	if !foundInCache {
 		prev, _, err = ctx.Branch(prefix)
@@ -1620,6 +1627,19 @@ func (t *Updates) initCollector() {
 }
 
 func (t *Updates) Mode() Mode { return t.mode }
+
+// PlainKeys returns a copy of the set of plain keys that have been touched.
+// Only meaningful in ModeDirect; returns nil otherwise.
+func (t *Updates) PlainKeys() map[string]struct{} {
+	if t.mode != ModeDirect || t.keys == nil {
+		return nil
+	}
+	cp := make(map[string]struct{}, len(t.keys))
+	for k := range t.keys {
+		cp[k] = struct{}{}
+	}
+	return cp
+}
 
 func (t *Updates) Size() (updates uint64) {
 	switch t.mode {

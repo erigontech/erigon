@@ -282,9 +282,9 @@ func (rw *Worker) resetTx(chainTx kv.TemporalTx) error {
 		case withTx:
 			typedWriter.SetTx(rw.chainTx)
 		default:
-			if rw.stateWriter != nil {
-				return fmt.Errorf("can't set tx for writer: %T", rw.stateWriter)
-			}
+			// Writers that don't implement withPutter or withTx (e.g.
+			// NoopWriter, LightCollector) don't need a DB transaction —
+			// they accumulate writes in memory only. This is not an error.
 		}
 
 		rw.chain = consensuschain.NewReader(rw.chainConfig, rw.chainTx, rw.blockReader, rw.logger)
@@ -348,7 +348,9 @@ func (rw *Worker) RunTxTask(txTask Task) (result *TxResult) {
 				rw.metrics.CodeReadCount.Add(rw.ibs.CodeReadCount())
 			}
 			if result != nil {
-				rw.metrics.GasUsed.Add(int64(result.ExecutionResult.BlockGasUsed))
+				// EIP-8037: per-tx max(regular, state) overestimates vs the true block gas
+				// (max of sums, not sum of maxes), but is a safe upper bound for metrics.
+				rw.metrics.GasUsed.Add(int64(max(result.ExecutionResult.BlockRegularGasUsed, result.ExecutionResult.BlockStateGasUsed)))
 			}
 			rw.metrics.Active.Add(-1)
 		}()
@@ -440,6 +442,13 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 	if callTracer != nil {
 		result.TraceFroms = callTracer.Froms()
 		result.TraceTos = callTracer.Tos()
+	}
+
+	// Capture collector-format writes from LightCollector (parallel workers).
+	// MakeWriteSet already wrote to rw.stateWriter; extract the accumulated
+	// writes so finalize can use them directly without IBS reconstruction.
+	if lc, ok := rw.stateWriter.(*state.LightCollector); ok {
+		result.CollectorWrites = lc.TakeWrites()
 	}
 
 	return result

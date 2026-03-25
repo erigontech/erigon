@@ -56,6 +56,10 @@ Cherry-pick PRs: when opening a PR that cherry-picks a commit to a `release/X.Y`
 
 **Important**: Always run `make lint` after making code changes and before committing. Fix any linter errors before proceeding. PRs must pass `make lint` before being opened or updated.
 
+## Pull Requests & Workflows
+
+When manually dispatching a workflow that is not part of the PR's automatic check list, add a comment on the PR explaining which workflow was dispatched, why it was chosen, and include a direct link to the workflow run.
+
 ## Pre-push
 
 Before running `git push`, always run `make lint` first and fix all issues. Run lint multiple times if needed — it is non-deterministic.

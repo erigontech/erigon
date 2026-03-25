@@ -29,7 +29,7 @@ COMPARE_ERROR_MESSAGE="$8"
 DUMP_RESPONSE="$9"
 
 OPTIONAL_FLAGS=""
-NUM_OF_RETRIES=1
+NUM_OF_RETRIES=2
 
 # Check if REFERENCE_HOST is not empty (-n)
 if [ -n "$REFERENCE_HOST" ]; then
@@ -61,25 +61,37 @@ fi
 
 echo "Setup the test execution environment..."
 
-# Clone rpc-tests repository at specific tag/branch
-rm -rf "$WORKSPACE/rpc-tests" >/dev/null 2>&1
-git -c advice.detachedHead=false clone --depth 1 --branch "$RPC_VERSION" https://github.com/erigontech/rpc-tests "$WORKSPACE/rpc-tests" >/dev/null 2>&1
+# Clone rpc-tests repository at specific tag/branch, reusing existing clone if already at the right version
+if [ -d "$WORKSPACE/rpc-tests/.git" ] && [ "$(git -C "$WORKSPACE/rpc-tests" describe --tags --exact-match 2>/dev/null)" = "$RPC_VERSION" ]; then
+  echo "Using cached rpc-tests at $RPC_VERSION"
+else
+  rm -rf "$WORKSPACE/rpc-tests" >/dev/null 2>&1
+  git -c advice.detachedHead=false clone --depth 1 --branch "$RPC_VERSION" https://github.com/erigontech/rpc-tests "$WORKSPACE/rpc-tests" >/dev/null 2>&1
+fi
 cd "$WORKSPACE/rpc-tests"
 
-# Try to create and activate a Python virtual environment or install packages globally if it fails
-if python3 -m venv .venv >/dev/null 2>&1; then :
-elif python3 -m virtualenv .venv >/dev/null 2>&1; then :
-elif virtualenv .venv >/dev/null 2>&1; then :
-else
-  echo "Failed to create a virtual environment, installing packages globally."
-  pip3 install -r requirements.txt 1>/dev/null
-fi
-
-# Activate virtual environment if it was created
-if [ -f ".venv/bin/activate" ]; then
+# Create and activate Python virtual environment, reusing existing one if already set up for this version
+VENV_MARKER=".venv/.installed-${RPC_VERSION}"
+if [ -f ".venv/bin/activate" ] && [ -f "$VENV_MARKER" ]; then
+  echo "Using cached Python virtual environment"
   source .venv/bin/activate
-  pip3 install --upgrade pip 1>/dev/null
-  pip3 install -r requirements.txt 1>/dev/null
+else
+  # Try to create a Python virtual environment or install packages globally if it fails
+  if python3 -m venv .venv >/dev/null 2>&1; then :
+  elif python3 -m virtualenv .venv >/dev/null 2>&1; then :
+  elif virtualenv .venv >/dev/null 2>&1; then :
+  else
+    echo "Failed to create a virtual environment, installing packages globally."
+    pip3 install -r requirements.txt 1>/dev/null
+  fi
+
+  # Activate virtual environment if it was created
+  if [ -f ".venv/bin/activate" ]; then
+    source .venv/bin/activate
+    pip3 install --upgrade pip 1>/dev/null
+    pip3 install -r requirements.txt 1>/dev/null
+    touch "$VENV_MARKER"
+  fi
 fi
 
 # Remove the local results directory if any

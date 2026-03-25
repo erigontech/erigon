@@ -410,12 +410,12 @@ func (s *Merge) Initialize(config *chain.Config, chain rules.ChainHeaderReader, 
 	}
 
 	// See https://hackmd.io/@filoozom/rycoQITlWl
-	if config.BalancerTime != nil && header.Time >= config.BalancerTime.Uint64() {
+	if config.BalancerTime != nil && header.Time >= *config.BalancerTime {
 		parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
 		if parent == nil {
 			return rules.ErrUnknownAncestor
 		}
-		if parent.Time < config.BalancerTime.Uint64() { // first Balancer HF block
+		if parent.Time < *config.BalancerTime { // first Balancer HF block
 			for address, rewrittenCode := range config.BalancerRewriteBytecode {
 				state.SetCode(accounts.InternAddress(address), rewrittenCode)
 			}

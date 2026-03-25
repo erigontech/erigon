@@ -381,9 +381,10 @@ type storageItem struct {
 var deleted accounts.Account
 
 type bufferedAccount struct {
-	data    *accounts.Account
-	code    []byte
-	storage *btree.BTreeG[storageItem]
+	data       *accounts.Account
+	code       []byte
+	storage    *btree.BTreeG[storageItem]
+	wasDeleted bool // set when DeleteAccount was called; survives UpdateAccountCode overwrite
 }
 
 type StateV3Buffered struct {
@@ -446,7 +447,20 @@ func (c *versionedWriteCollector) UpdateAccountData(address accounts.Address, or
 	// the new account state is written. applyVersionedWrites detects the presence
 	// of account fields after SelfDestructPath to distinguish cleanup+recreate
 	// from a pure account deletion.
-	if original.Incarnation > accountCopy.Incarnation {
+	needsCleanup := original.Incarnation > accountCopy.Incarnation
+	// Cross-block reincarnation: in the parallel executor, versionedRead
+	// returns a nil account (Incarnation=0) for addresses self-destructed
+	// in a prior block, so the check above misses the cleanup. Blocks are
+	// processed sequentially, so rs.accounts already has the deleted marker
+	// from the prior block's DeleteAccount by the time this runs.
+	if !needsCleanup && accountCopy.Incarnation > 0 {
+		c.rs.accountsMutex.RLock()
+		if obj, ok := c.rs.accounts[address]; ok && obj.wasDeleted {
+			needsCleanup = true
+		}
+		c.rs.accountsMutex.RUnlock()
+	}
+	if needsCleanup {
 		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: SelfDestructPath, Val: true})
 	}
 
@@ -463,7 +477,8 @@ func (c *versionedWriteCollector) UpdateAccountData(address accounts.Address, or
 	c.rs.accountsMutex.Lock()
 	obj, ok := c.rs.accounts[address]
 	if !ok || obj.data == &deleted {
-		obj = &bufferedAccount{}
+		wasDel := ok && (obj.data == &deleted || obj.wasDeleted)
+		obj = &bufferedAccount{wasDeleted: wasDel}
 	}
 	obj.data = &accountCopy
 	c.rs.accounts[address] = obj
@@ -478,7 +493,8 @@ func (c *versionedWriteCollector) UpdateAccountCode(address accounts.Address, in
 	c.rs.accountsMutex.Lock()
 	obj, ok := c.rs.accounts[address]
 	if !ok || obj.data == &deleted {
-		obj = &bufferedAccount{}
+		wasDel := ok && obj.data == &deleted
+		obj = &bufferedAccount{wasDeleted: wasDel}
 		c.rs.accounts[address] = obj
 	}
 	obj.code = code
@@ -493,10 +509,10 @@ func (c *versionedWriteCollector) DeleteAccount(address accounts.Address, origin
 	c.rs.accountsMutex.Lock()
 	obj, ok := c.rs.accounts[address]
 	if !ok {
-		obj = &bufferedAccount{data: &deleted}
+		obj = &bufferedAccount{data: &deleted, wasDeleted: true}
 		c.rs.accounts[address] = obj
 	}
-	*obj = bufferedAccount{data: &deleted}
+	*obj = bufferedAccount{data: &deleted, wasDeleted: true}
 	c.rs.accountsMutex.Unlock()
 
 	return nil
@@ -527,6 +543,64 @@ func (c *versionedWriteCollector) WriteAccountStorage(address accounts.Address, 
 }
 
 func (c *versionedWriteCollector) CreateContract(_ accounts.Address) error { return nil }
+
+// LightCollector is a lightweight StateWriter that accumulates VersionedWrites
+// without the rs.accounts locking of versionedWriteCollector. It is used by
+// parallel workers to capture MakeWriteSet output (collector-format writes with
+// all 4 account fields per address) alongside the normal IBS VersionedWrites.
+// The captured writes are later used in finalize to skip full IBS reconstruction.
+type LightCollector struct {
+	writes VersionedWrites
+}
+
+func NewLightCollector() *LightCollector {
+	return &LightCollector{}
+}
+
+// TakeWrites returns the accumulated writes and resets the collector.
+func (c *LightCollector) TakeWrites() VersionedWrites {
+	writes := c.writes
+	c.writes = nil
+	return writes
+}
+
+func (c *LightCollector) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
+	var accountCopy accounts.Account
+	accountCopy.Copy(account)
+	accountCopy.PrevIncarnation = account.PrevIncarnation
+
+	if original.Incarnation > accountCopy.Incarnation {
+		c.writes = append(c.writes, &VersionedWrite{Address: address, Path: SelfDestructPath, Val: true})
+	}
+
+	c.writes = append(c.writes,
+		&VersionedWrite{Address: address, Path: BalancePath, Val: accountCopy.Balance},
+		&VersionedWrite{Address: address, Path: NoncePath, Val: accountCopy.Nonce},
+		&VersionedWrite{Address: address, Path: IncarnationPath, Val: accountCopy.Incarnation},
+		&VersionedWrite{Address: address, Path: CodeHashPath, Val: accountCopy.CodeHash},
+	)
+	return nil
+}
+
+func (c *LightCollector) UpdateAccountCode(address accounts.Address, _ uint64, _ accounts.CodeHash, code []byte) error {
+	c.writes = append(c.writes, &VersionedWrite{Address: address, Path: CodePath, Val: code})
+	return nil
+}
+
+func (c *LightCollector) DeleteAccount(address accounts.Address, _ *accounts.Account) error {
+	c.writes = append(c.writes, &VersionedWrite{Address: address, Path: SelfDestructPath, Val: true})
+	return nil
+}
+
+func (c *LightCollector) WriteAccountStorage(address accounts.Address, _ uint64, key accounts.StorageKey, original, value uint256.Int) error {
+	if original == value {
+		return nil
+	}
+	c.writes = append(c.writes, &VersionedWrite{Address: address, Path: StoragePath, Key: key, Val: value})
+	return nil
+}
+
+func (c *LightCollector) CreateContract(_ accounts.Address) error { return nil }
 
 // NotifyAccumulator drives txpool state-diff notifications from VersionedWrites.
 // It reconstructs account state from the per-field writes and calls

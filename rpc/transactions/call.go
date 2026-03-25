@@ -91,11 +91,19 @@ func DoCall(
 	}
 	txCtx := protocol.NewEVMTxContext(msg)
 	evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, vm.Config{NoBaseFee: true})
-	// Wait for the context to be done and cancel the evm. Even if the
-	// EVM has finished, cancelling may be done (repeatedly)
+	// done is closed on return to stop the watcher goroutine before it can
+	// cancel the EVM for a subsequent call.
+	done := make(chan struct{})
+	defer close(done) // runs before cancel() (LIFO), so goroutine exits cleanly on success
+
+	var timedOut atomic.Bool
 	go func() {
-		<-ctx.Done()
-		evm.Cancel()
+		select {
+		case <-ctx.Done():
+			timedOut.Store(true)
+			evm.Cancel()
+		case <-done:
+		}
 	}()
 
 	// Override the fields of specified contracts before execution.
@@ -115,7 +123,7 @@ func DoCall(
 	}
 
 	// If the timer caused an abort, return an appropriate error message
-	if evm.Cancelled() {
+	if timedOut.Load() {
 		return nil, fmt.Errorf("execution aborted (timeout = %v)", callTimeout)
 	}
 	return result, nil

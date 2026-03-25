@@ -549,7 +549,7 @@ jobs:
     - name: Generate GitHub App token for release publishing
       id: generate_token
       if: ${{ inputs.perform_release }}
-      uses: actions/create-github-app-token@v2
+      uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf  ## v2.2.1
       with:
         app-id: ${{ vars.RELEASE_BOT_APP_ID }}
         private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
@@ -663,6 +663,15 @@ jobs:
           gh release view "${RELEASE_VERSION}" --repo ${{ env.APP_REPO }}
         fi
 
+
+  sync-gitbook:
+    name: Sync Gitbook docs branch and create variant if needed
+    needs: [publish-release]
+    if: ${{ inputs.perform_release }}
+    uses: ./.github/workflows/gitbook-release.yml
+    with:
+      release_version: ${{ inputs.release_version }}
+    secrets: inherit
 
   In-case-of-failure:
     name: "In case of failure: remove remote git tag pointing to the new version."
