@@ -511,7 +511,7 @@ func (cc *ExecutionClientEngine) HasGapInSnapshots(ctx context.Context) bool {
 	return false
 }
 
-func (cc *ExecutionClientEngine) GetBlobs(ctx context.Context, versionedHashes []common.Hash, version clparams.StateVersion) (blobs [][]byte, proofs [][][]byte) {
+func (cc *ExecutionClientEngine) GetBlobs(ctx context.Context, versionedHashes []common.Hash, version clparams.StateVersion) (blobs [][]byte, proofs [][][]byte, err error) {
 	if cc.isLocal() && cc.txpool != nil {
 		req := &txpoolproto.GetBlobsRequest{BlobHashes: make([]*typesproto.H256, len(versionedHashes))}
 		for i, h := range versionedHashes {
@@ -519,7 +519,7 @@ func (cc *ExecutionClientEngine) GetBlobs(ctx context.Context, versionedHashes [
 		}
 		resp, err := cc.txpool.GetBlobs(ctx, req)
 		if err != nil {
-			return nil, nil
+			return nil, nil, fmt.Errorf("txpool GetBlobs: %w", err)
 		}
 		blobsWithProof := resp.BlobsWithProofs
 		blobs = make([][]byte, len(blobsWithProof))
@@ -528,7 +528,7 @@ func (cc *ExecutionClientEngine) GetBlobs(ctx context.Context, versionedHashes [
 			blobs[i] = bwp.Blob
 			proofs[i] = bwp.Proofs
 		}
-		return blobs, proofs
+		return blobs, proofs, nil
 	}
 
 	// Remote mode: select GetBlobs version based on fork.
@@ -537,7 +537,7 @@ func (cc *ExecutionClientEngine) GetBlobs(ctx context.Context, versionedHashes [
 	if version >= clparams.FuluVersion {
 		result, err := cc.engine.GetBlobsV2(ctx, versionedHashes)
 		if err != nil {
-			return nil, nil
+			return nil, nil, fmt.Errorf("engine GetBlobsV2: %w", err)
 		}
 		blobs = make([][]byte, len(result))
 		proofs = make([][][]byte, len(result))
@@ -551,12 +551,12 @@ func (cc *ExecutionClientEngine) GetBlobs(ctx context.Context, versionedHashes [
 				proofs[i][j] = cp
 			}
 		}
-		return blobs, proofs
+		return blobs, proofs, nil
 	}
 
 	result, err := cc.engine.GetBlobsV1(ctx, versionedHashes)
 	if err != nil {
-		return nil, nil
+		return nil, nil, fmt.Errorf("engine GetBlobsV1: %w", err)
 	}
 	blobs = make([][]byte, len(result))
 	proofs = make([][][]byte, len(result))
@@ -567,5 +567,5 @@ func (cc *ExecutionClientEngine) GetBlobs(ctx context.Context, versionedHashes [
 		blobs[i] = bap.Blob
 		proofs[i] = [][]byte{bap.Proof}
 	}
-	return blobs, proofs
+	return blobs, proofs, nil
 }

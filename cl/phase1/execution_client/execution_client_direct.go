@@ -198,9 +198,9 @@ func (cc *ExecutionClientDirect) HasGapInSnapshots(ctx context.Context) bool {
 	return hasGap
 }
 
-func (cc *ExecutionClientDirect) GetBlobs(ctx context.Context, versionedHashes []common.Hash, _ clparams.StateVersion) (blobs [][]byte, proofs [][][]byte) {
+func (cc *ExecutionClientDirect) GetBlobs(ctx context.Context, versionedHashes []common.Hash, _ clparams.StateVersion) (blobs [][]byte, proofs [][][]byte, err error) {
 	if cc.txpool == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	req := &txpoolproto.GetBlobsRequest{BlobHashes: make([]*typesproto.H256, len(versionedHashes))}
@@ -209,7 +209,7 @@ func (cc *ExecutionClientDirect) GetBlobs(ctx context.Context, versionedHashes [
 	}
 	resp, err := cc.txpool.GetBlobs(ctx, req)
 	if err != nil {
-		return nil, nil
+		return nil, nil, fmt.Errorf("txpool GetBlobs: %w", err)
 	}
 	blobsWithProof := resp.BlobsWithProofs
 	blobs = make([][]byte, len(blobsWithProof))
@@ -218,5 +218,5 @@ func (cc *ExecutionClientDirect) GetBlobs(ctx context.Context, versionedHashes [
 		blobs[i] = bwp.Blob
 		proofs[i] = bwp.Proofs
 	}
-	return blobs, proofs
+	return blobs, proofs, nil
 }

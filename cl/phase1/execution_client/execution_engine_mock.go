@@ -207,12 +207,13 @@ func (c *MockExecutionEngineGetAssembledBlockCall) DoAndReturn(f func(context.Co
 }
 
 // GetBlobs mocks base method.
-func (m *MockExecutionEngine) GetBlobs(ctx context.Context, versionedHashes []common.Hash, version clparams.StateVersion) ([][]byte, [][][]byte) {
+func (m *MockExecutionEngine) GetBlobs(ctx context.Context, versionedHashes []common.Hash, version clparams.StateVersion) ([][]byte, [][][]byte, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetBlobs", ctx, versionedHashes, version)
 	ret0, _ := ret[0].([][]byte)
 	ret1, _ := ret[1].([][][]byte)
-	return ret0, ret1
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
 }
 
 // GetBlobs indicates an expected call of GetBlobs.
@@ -228,19 +229,19 @@ type MockExecutionEngineGetBlobsCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockExecutionEngineGetBlobsCall) Return(blobs [][]byte, proofs [][][]byte) *MockExecutionEngineGetBlobsCall {
-	c.Call = c.Call.Return(blobs, proofs)
+func (c *MockExecutionEngineGetBlobsCall) Return(blobs [][]byte, proofs [][][]byte, err error) *MockExecutionEngineGetBlobsCall {
+	c.Call = c.Call.Return(blobs, proofs, err)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockExecutionEngineGetBlobsCall) Do(f func(context.Context, []common.Hash, clparams.StateVersion) ([][]byte, [][][]byte)) *MockExecutionEngineGetBlobsCall {
+func (c *MockExecutionEngineGetBlobsCall) Do(f func(context.Context, []common.Hash, clparams.StateVersion) ([][]byte, [][][]byte, error)) *MockExecutionEngineGetBlobsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockExecutionEngineGetBlobsCall) DoAndReturn(f func(context.Context, []common.Hash, clparams.StateVersion) ([][]byte, [][][]byte)) *MockExecutionEngineGetBlobsCall {
+func (c *MockExecutionEngineGetBlobsCall) DoAndReturn(f func(context.Context, []common.Hash, clparams.StateVersion) ([][]byte, [][][]byte, error)) *MockExecutionEngineGetBlobsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
