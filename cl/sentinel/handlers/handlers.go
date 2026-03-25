@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/host"
@@ -34,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/handshake"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -46,18 +44,6 @@ var (
 	ErrResourceUnavailable = errors.New("resource unavailable")
 )
 
-type RateLimits struct {
-	pingLimit                int
-	goodbyeLimit             int
-	metadataV1Limit          int
-	metadataV2Limit          int
-	statusLimit              int
-	beaconBlocksByRangeLimit int
-	beaconBlocksByRootLimit  int
-	lightClientLimit         int
-	blobSidecarsLimit        int
-}
-
 type ConsensusHandlers struct {
 	handlers     map[protocol.ID]network.StreamHandler
 	hs           *handshake.HandShaker
@@ -66,8 +52,8 @@ type ConsensusHandlers struct {
 	ctx          context.Context
 	beaconDB     freezeblocks.BeaconSnapshotReader
 
-	indiciesDB         kv.RoDB
-	punishmentEndTimes sync.Map
+	indiciesDB  kv.RoDB
+	rateLimiter *peerRateLimiter
 	forkChoiceReader   forkchoice.ForkChoiceStorageReader
 	host               host.Host
 	me                 *enode.LocalNode
@@ -109,7 +95,7 @@ func NewConsensusHandlers(
 		ethClock:           ethClock,
 		beaconConfig:       beaconConfig,
 		ctx:                ctx,
-		punishmentEndTimes: sync.Map{},
+		rateLimiter: newPeerRateLimiter(),
 		enableBlocks:       enabledBlocks,
 		forkChoiceReader:   forkChoiceReader,
 		me:                 me,
@@ -151,27 +137,22 @@ func NewConsensusHandlers(
 	return c
 }
 
-func (c *ConsensusHandlers) checkRateLimit(peerId string, method string, limit, n int) error {
-	keyHash := utils.Sha256([]byte(peerId), []byte(method))
-
-	if punishmentEndTime, ok := c.punishmentEndTimes.Load(keyHash); ok {
-		if time.Now().Before(punishmentEndTime.(time.Time)) {
-			return errors.New("rate limit exceeded, punishment period in effect")
-		}
-		c.punishmentEndTimes.Delete(keyHash)
-	}
-
-	return nil
-}
-
 func (c *ConsensusHandlers) Start() {
 	for id, handler := range c.handlers {
 		c.host.SetStreamHandler(id, handler)
 	}
 }
 
+var (
+	ErrRateLimited      = errors.New("rate limit exceeded")
+	ErrTooManyRequests   = errors.New("too many concurrent requests")
+	RateLimitedPrefix    = byte(0x01) // InvalidRequestPrefix — no rate-limit-specific code in the spec
+)
+
 func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Stream) error) func(s network.Stream) {
 	return func(s network.Stream) {
+		peerID := s.Conn().RemotePeer().String()
+
 		defer func() {
 			if r := recover(); r != nil {
 				log.Error("[pubsubhandler] panic in stream handler", "err", r, "name", name)
@@ -179,6 +160,25 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 				_ = s.Close()
 			}
 		}()
+
+		// Enforce per-peer concurrent stream cap.
+		if !c.rateLimiter.acquireConcurrency(peerID) {
+			log.Debug("[pubsubhandler] too many concurrent requests", "protocol", name, "peer", peerID)
+			_ = s.Reset()
+			_ = s.Close()
+			return
+		}
+		defer c.rateLimiter.releaseConcurrency(peerID)
+
+		// Enforce per-peer, per-protocol rate limit.
+		if !c.rateLimiter.allowRequest(peerID, name) {
+			log.Debug("[pubsubhandler] rate limit exceeded", "protocol", name, "peer", peerID)
+			_, _ = s.Write([]byte{RateLimitedPrefix})
+			_ = s.Reset()
+			_ = s.Close()
+			return
+		}
+
 		l := log.Ctx{
 			"name": name,
 		}
