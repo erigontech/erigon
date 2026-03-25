@@ -2222,7 +2222,7 @@ func (hph *HexPatriciaHashed) foldPropagate(row int, nibble, upDepth, depth int1
 	// propagate cell into parent row
 	upCell.fillFromLowerCell(cell, depth, hph.currentKey[upDepth:hph.currentKeyLen], childNibble)
 
-	if err := hph.collectDeleteUpdate(updateKey, row, false); err != nil {
+	if err := hph.collectDeleteUpdate(updateKey, row, true); err != nil {
 		return err
 	}
 	if hph.trace {
@@ -2271,7 +2271,7 @@ func (hph *HexPatriciaHashed) collectDeleteUpdate(updateKey []byte, row int, evi
 // The purpose of fold is to reduce hph.currentKey[:hph.currentKeyLen]. It should be invoked
 // until that current key becomes a prefix of hashedKey that we will process next
 // (in other words until the needFolding function returns 0)
-func (hph *HexPatriciaHashed) fold() (err error) {
+func (hph *HexPatriciaHashed) fold() error {
 	updateKeyLen := hph.currentKeyLen
 	if hph.activeRows == 0 {
 		return errors.New("cannot fold - no active rows")
@@ -2309,22 +2309,19 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 	}
 
 	updateKind, _ := afterMapUpdateKind(hph.afterMap[row])
+	var err error
 	switch updateKind {
 	case updateKindDelete: // Everything deleted
-		if err := hph.foldDelete(row, nibble, upDepth, upCell, updateKey); err != nil {
-			return err
-		}
+		err = hph.foldDelete(row, nibble, upDepth, upCell, updateKey)
 	case updateKindPropagate: // Leaf or extension node
-		if err := hph.foldPropagate(row, nibble, upDepth, depth, upCell, updateKey); err != nil {
-			return err
-		}
+		err = hph.foldPropagate(row, nibble, upDepth, depth, upCell, updateKey)
 	case updateKindBranch:
-		if err := hph.foldBranch(row, nibble, upDepth, depth, upCell, updateKey); err != nil {
-			return err
-		}
+		err = hph.foldBranch(row, nibble, upDepth, depth, upCell, updateKey)
+	}
+	if err != nil {
+		return err
 	}
 
-	// Common epilogue
 	hph.activeRows--
 	hph.currentKeyLen = max(upDepth-1, 0)
 	return nil
