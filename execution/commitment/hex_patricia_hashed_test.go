@@ -2541,4 +2541,82 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		keyExists := []bool{true, true, false}
 		buildTrieAndWitness(t, builder, keysToProve, keyExists)
 	})
+
+	t.Run("NonExistentStorageProofFullNodeRootDivergingFirstNibble", func(t *testing.T) {
+		t.Logf("NonExistentStorageProofFullNodeRootDivergingFirstNibble")
+		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)
+
+		addrToProve := common.Copy(plainKeysList[0])
+
+		// Build a storage trie whose root is a FullNode (branch node).
+		// We need storage keys whose hashed paths start with different first nibbles.
+		// Keys with prefix 0x3, 0x5, 0x7 will create children at nibbles 3, 5, 7 in
+		// the root branch node.
+		storageKeys3, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x3}, length.Hash, 1, 3)
+		storageKeys5, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x5}, length.Hash, 1, 3)
+		storageKeys7, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x7}, length.Hash, 1, 3)
+
+		storagePlainKeysList := append([][]byte(nil), storageKeys3...)
+		storagePlainKeysList = append(storagePlainKeysList, storageKeys5...)
+		storagePlainKeysList = append(storagePlainKeysList, storageKeys7...)
+
+		// Generate a non-existent storage key whose hashed path starts with nibble 0xa.
+		// Since the root FullNode only has children at nibbles 3, 5, 7, the path diverges
+		// at the very first nibble, so cellToExpand will be an empty cell immediately.
+		storageSlotToProve, _ := generateKeyWithHashedPrefix([]byte{0xa}, length.Hash)
+		fullStorageKeyToProve := common.Copy(addrToProve)
+		fullStorageKeyToProve = append(fullStorageKeyToProve, storageSlotToProve...)
+		require.Equal(t, len(fullStorageKeyToProve), length.Addr+length.Hash)
+
+		builder := NewUpdateBuilder()
+		for i := 0; i < len(plainKeysList); i++ {
+			builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
+			fmt.Printf("addr %x\n", plainKeysList[i])
+		}
+
+		for sl := 0; sl < len(storagePlainKeysList); sl++ {
+			builder.Storage(common.Bytes2Hex(addrToProve), common.Bytes2Hex(storagePlainKeysList[sl]), common.Bytes2Hex(storagePlainKeysList[sl]))
+			fmt.Printf("storage %x -> %x\n", storagePlainKeysList[sl], storagePlainKeysList[sl])
+		}
+		buildTrieAndWitness(t, builder, [][]byte{fullStorageKeyToProve}, []bool{false})
+	})
+
+	t.Run("StorageLeafRLPShorterThan32Bytes", func(t *testing.T) {
+		// Reproduces a bug where storage leaf nodes whose RLP encoding is < 32 bytes
+		// should be embedded inline in the parent branch node per MPT spec, but the
+		// witness builder incorrectly treated them as 32-byte hash references.
+		//
+		// The two storage keys below were precomputed to share 9 common nibbles in
+		// their keccak256 hashes (both hash to 35557922a...):
+		//   key1 hash: 35557922aa8f35ae04c5ae94a030a746...
+		//   key2 hash: 35557922a8443b7853fb2c5131223cf4...
+		// They diverge at nibble 10, leaving 54 remaining nibbles in each leaf.
+		// Compact encoding of 54 nibbles (even) = 28 bytes. With 1-byte value:
+		//   RLP = list_prefix(1) + key_prefix(1) + key(28) + value(1) = 31 bytes < 32
+		// This triggers the embedded node case where the leaf is inlined in the parent
+		// branch rather than referenced by its hash.
+		t.Logf("StorageLeafRLPShorterThan32Bytes")
+		plainKeysList, _ := generatePlainKeysWithSameHashPrefix(t, nil, length.Addr, 0, 2)
+
+		addrToProve := common.Copy(plainKeysList[0])
+
+		storageKey1 := decodeHex("046c24c7d866b0b0d5006628ab3d12ffb72aeef3af4c779c78e8c107b126d1f9")
+		storageKey2 := decodeHex("6099e0415032aade138f20f8adb3b61a9a7ffc73053d7751ff88a2a5c45df18e")
+		storageSlotToProve := common.Copy(storageKey1)
+
+		fullStorageKeyToProve := common.Copy(addrToProve)
+		fullStorageKeyToProve = append(fullStorageKeyToProve, storageSlotToProve...)
+		require.Equal(t, len(fullStorageKeyToProve), length.Addr+length.Hash)
+
+		builder := NewUpdateBuilder()
+		for i := 0; i < len(plainKeysList); i++ {
+			builder.Balance(common.Bytes2Hex(plainKeysList[i]), uint64(i))
+		}
+
+		// Small 1-byte storage values ensure leaf RLP stays < 32 bytes
+		builder.Storage(common.Bytes2Hex(addrToProve), common.Bytes2Hex(storageKey1), "01")
+		builder.Storage(common.Bytes2Hex(addrToProve), common.Bytes2Hex(storageKey2), "02")
+
+		buildTrieAndWitness(t, builder, [][]byte{fullStorageKeyToProve}, []bool{true})
+	})
 }

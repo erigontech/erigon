@@ -1581,8 +1581,11 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 				}
 			}
 			hashedExtKey := cellToExpand.hashedExtension[:extKeyLength]
-			// the corresponding path in the hashed key
-			hashedKeySubstring := hashedKey[keyPos+1 : keyPos+extKeyLength+1]
+			// the corresponding path in the hashed key (clamped to available length,
+			// since hashedKey may be shorter than the extension when witnessing
+			// intermediate/collapse-sibling keys)
+			endPos := min(keyPos+extKeyLength+1, int16(len(hashedKey)))
+			hashedKeySubstring := hashedKey[keyPos+1 : endPos]
 			fullPathLength := int(keyPos+1) + len(hashedExtKey)
 			// the diverging extension node points to a branch node in this case
 			if !bytes.Equal(hashedExtKey, hashedKeySubstring) && fullPathLength != 64 && fullPathLength != 128 {
@@ -1616,16 +1619,21 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 			} else {
 				keyPos += extKeyLength // jump ahead
 
-				if keyPos+1 == int16(len(hashedKey)) || keyPos+1 == 64 {
+				// Terminal position: end of hashedKey, account boundary (64), or storage boundary (128).
+				// The keyPos+1==128 check handles short hashedKeys from collapse-sibling touches
+				// where the extension jumps past len(hashedKey) to the storage leaf position.
+				terminal := keyPos+1 == int16(len(hashedKey)) || keyPos+1 == 64 || keyPos+1 == 128
+
+				if terminal {
 					extKeyLength++ //  +1 for the terminator 0x10 ([16])  byte when on a terminal extension node
 				}
 				extensionKey := make([]byte, extKeyLength)
 				copy(extensionKey, hashedExtKey)
-				if keyPos+1 == int16(len(hashedKey)) || keyPos+1 == 64 {
+				if terminal {
 					extensionKey[len(extensionKey)-1] = terminatorHexByte // append terminator byte
 				}
 				nextNode = &trie.ShortNode{Key: extensionKey} // Value will be in the next iteration
-				if keyPos+1 == int16(len(hashedKey)) || keyPos+1 == 64 {
+				if terminal {
 					if cellToExpand.storageAddrLen > 0 && !depthAdjusted {
 						storageUpdate, err := hph.storageFromCacheOrDB(cellToExpand.storageAddr[:cellToExpand.storageAddrLen])
 						if err != nil {
@@ -1649,8 +1657,15 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 						// // DEBUG patch with cell hash which we know to be correct
 						//fmt.Printf("witness cell (%d, %0x, depth=%d) %s\n", row, currentNibble, hph.depths[row], cellToExpand.FullString())
 						//nextNode = trie.NewHashNode(cellToExpand.stateHash[:])
+					} else if cellToExpand.hashLen > 0 && len(hashedKey) != 64 && len(hashedKey) != 128 {
+						// Intermediate key (not account or full storage) landing on extension → branch:
+						// extension key should NOT have a terminator, Val is the branch hash.
+						nextNode = &trie.ShortNode{
+							Key: common.Copy(hashedExtKey),
+							Val: trie.NewHashNode(common.Copy(cellToExpand.hash[:cellToExpand.hashLen])),
+						}
 					}
-					if keyPos+1 == int16(len(hashedKey)) {
+					if keyPos+1 == int16(len(hashedKey)) || keyPos+1 == 128 {
 						keyPos++
 					}
 				}
@@ -1711,7 +1726,10 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 				if err != nil {
 					return nil, err
 				}
-				fullNode.Children[col] = trie.NewHashNode(common.Copy(cellHash[1:])) // because cellHash has 33 bytes and we want 32
+				if len(cellHash) == length.Hash+1 { // +1 for the a0 prefix
+					cellHash = cellHash[1:] // strip the a0 prefix
+				}
+				fullNode.Children[col] = trie.NewHashNode(common.Copy(cellHash))
 
 				if hph.trace {
 					fmt.Printf("[witness, pos %d] FullNodeChild Hash (%d, %0x, depth=%d) %s proof %+v\n", keyPos, row, col, hph.depths[row], currentCell.FullString(), fullNode.Children[col])
@@ -1735,6 +1753,22 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 			}
 
 			// there is storage so we need to expand further
+			if pathDivergenceFound {
+				// Same handling as FullNode divergence: set the ShortNode's Val to the
+				// cell's hash so the proof is complete even when the extension diverges.
+				if shortNode, ok := nextNode.(*trie.ShortNode); ok && shortNode.Val == nil {
+					terminalCell := &hph.grid[row][currentNibble]
+					if terminalCell.hashLen > 0 {
+						shortNode.Val = trie.NewHashNode(common.Copy(terminalCell.hash[:terminalCell.hashLen]))
+					} else {
+						cellHash, _, _, _ := hph.witnessComputeCellHashWithStorage(terminalCell, hph.depths[row], nil)
+						if len(cellHash) == length.Hash+1 { // +1 for the a0 prefix
+							cellHash = cellHash[1:] // strip the a0 prefix
+						}
+						shortNode.Val = trie.NewHashNode(common.Copy(cellHash))
+					}
+				}
+			}
 			accNode.Storage = nextNode
 			if hph.trace {
 				fmt.Printf("[witness] AccountNode (+storage) (%d, %0x, depth=%d) %s proof %+v\n", row, currentNibble, hph.depths[row], cellToExpand.FullString(), accNode)
@@ -1780,7 +1814,10 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 			if err != nil {
 				return nil, err
 			}
-			fullNode.Children[col] = trie.NewHashNode(common.Copy(cellHash[1:])) // because cellHash has 33 bytes and we want 32
+			if len(cellHash) == length.Hash+1 { // +1 for the a0 prefix
+				cellHash = cellHash[1:] // strip the a0 prefix
+			}
+			fullNode.Children[col] = trie.NewHashNode(common.Copy(cellHash))
 		}
 	}
 
