@@ -4,6 +4,26 @@
 
 The event bus provides typed, reflection-based pub/sub for inter-component communication. Events are dispatched by argument type — subscribers register handler functions whose parameter types determine which events they receive.
 
+## Migration Strategy: Single Domain First, Hierarchical Later
+
+**All componentization work targets a single shared domain for L1.** This is a deliberate architectural decision that guides all other choices.
+
+**Phase 1 (now → L1 working):** All components share the root domain. Events flow freely between Storage, Downloader, Sync, Execution, TxPool, RPC, and plugins. This is simple, testable, and sufficient for a fully event-driven L1 node.
+
+**Phase 2 (L1/L2 combined mode):** When the combined node arrives, we add hierarchical domains — L1 components move into a child L1 domain, L2 into a child L2 domain, shared base stays in root. This requires cross-domain event propagation (see "Future" section below).
+
+**Why this order matters:**
+- Component code doesn't change between phases — components publish/subscribe events without knowing which domain they're in
+- The single domain validates the event-driven architecture with a working L1 before adding domain hierarchy complexity
+- The adaptation is isolated to event bus wiring and NodeBuilder, not component internals
+- We get a working system sooner
+
+**What this means for developers right now:**
+- Design components as if there's one domain (because there is)
+- Don't pass domain references into component logic — let the framework handle it
+- Define event types as plain structs in a shared package — they'll work across domain boundaries when hierarchical domains arrive
+- Don't build domain-aware routing into components — that's the framework's job
+
 ## Domain Architecture
 
 **Events are scoped per-domain.** Components in different domains CANNOT communicate via events. This is the single most important architectural decision when designing the component hierarchy.
