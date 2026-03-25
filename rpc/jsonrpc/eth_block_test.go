@@ -117,7 +117,7 @@ func TestGetBlockByNumber_WithFinalizedTag_NoFinalizedBlockInDb(t *testing.T) {
 	if err != nil {
 		var customErr *rpc.CustomError
 		if assert.ErrorAs(t, err, &customErr) {
-			assert.Equal(t, rpchelper.UnknownBlockError.Code, customErr.Code)
+			assert.Equal(t, rpchelper.UnknownBlockCode, customErr.Code)
 			assert.Contains(t, customErr.Message, "finalized")
 		}
 	}
@@ -161,7 +161,7 @@ func TestGetBlockByNumber_WithSafeTag_NoSafeBlockInDb(t *testing.T) {
 	if err != nil {
 		var customErr *rpc.CustomError
 		if assert.ErrorAs(t, err, &customErr) {
-			assert.Equal(t, rpchelper.UnknownBlockError.Code, customErr.Code)
+			assert.Equal(t, rpchelper.UnknownBlockCode, customErr.Code)
 			assert.Contains(t, customErr.Message, "safe")
 		}
 	}

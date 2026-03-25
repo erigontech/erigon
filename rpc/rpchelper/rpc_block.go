@@ -26,14 +26,11 @@ import (
 	"github.com/erigontech/erigon/rpc"
 )
 
-var UnknownBlockError = &rpc.CustomError{
-	Code:    -39001,
-	Message: "Unknown block",
-}
+const UnknownBlockCode = -39001
 
 func unknownBlockErr(requested string, latestBlock uint64) *rpc.CustomError {
 	return &rpc.CustomError{
-		Code:    -39001,
+		Code:    UnknownBlockCode,
 		Message: fmt.Sprintf("block %q not available (head block: %d)", requested, latestBlock),
 	}
 }
