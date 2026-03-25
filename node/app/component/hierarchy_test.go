@@ -188,7 +188,6 @@ func TestDependencyActivationOrder(t *testing.T) {
 // may see stale state because deactivation is async (goroutine at line 1001).
 // This test is skipped until the framework bug is fixed.
 func TestDependencyDeactivationOrder(t *testing.T) {
-	t.Skip("KNOWN BUG: deactivation cascade deadlocks — see component.go:1001,1015")
 	ctx, cancel := context.WithCancel(context.Background())
 	domain, err := component.NewComponentDomain(ctx, "deactivation-test")
 	require.NoError(t, err)
@@ -292,8 +291,28 @@ func TestThreeLevelHierarchy(t *testing.T) {
 	require.True(t, sAct < dAct && dAct < smAct,
 		"activation order wrong: storage=%d, downloader=%d, snap-mgr=%d", sAct, dAct, smAct)
 
-	// NOTE: Deactivation cascade via cancel() is skipped due to known framework bug
-	// (see TestDependencyDeactivationOrder). Cleanup happens via GC.
+	// Deactivate from the leaf — should cascade through the full tree
+	err = snapMgr.Deactivate(context.Background())
+	require.NoError(t, err)
+
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer waitCancel()
+
+	_, err = snapMgr.AwaitState(waitCtx, component.Deactivated)
+	require.NoError(t, err)
+	_, err = downloader.AwaitState(waitCtx, component.Deactivated)
+	require.NoError(t, err)
+	_, err = storage.AwaitState(waitCtx, component.Deactivated)
+	require.NoError(t, err)
+
+	// Verify deactivation order: snap-mgr → downloader → storage
+	events = tracker.get()
+	smDeact := indexOf(events, "snap-mgr:deactivate")
+	dDeact := indexOf(events, "downloader:deactivate")
+	sDeact := indexOf(events, "storage:deactivate")
+	require.True(t, smDeact < dDeact && dDeact < sDeact,
+		"deactivation order wrong: snap-mgr=%d, downloader=%d, storage=%d", smDeact, dDeact, sDeact)
+
 	cancel()
 }
 
