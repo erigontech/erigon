@@ -12,7 +12,6 @@ import (
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
-	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -449,209 +448,6 @@ type ExecutionWitnessResult struct {
 	Headers []hexutil.Bytes `json:"headers,omitempty"`
 }
 
-// debugCompareRecordedVsGroundTruth compares account and storage writes recorded
-// by the RecordingState against the ground truth from HistoryRange (which only
-// contains writes). Prints any discrepancies.
-func debugCompareRecordedVsGroundTruth(
-	tx kv.TemporalTx,
-	recordingState *RecordingState,
-	firstTxNumInBlock, lastTxNumInBlock uint64,
-) error {
-	// Collect ground truth account writes from history
-	gtAccounts := make(map[common.Address]struct{})
-	accStream, err := tx.HistoryRange(kv.AccountsDomain, int(firstTxNumInBlock), int(lastTxNumInBlock+1), order.Asc, -1)
-	if err != nil {
-		return fmt.Errorf("ground truth account stream: %w", err)
-	}
-	for accStream.HasNext() {
-		k, _, err := accStream.Next()
-		if err != nil {
-			accStream.Close()
-			return err
-		}
-		var addr common.Address
-		copy(addr[:], k)
-		gtAccounts[addr] = struct{}{}
-	}
-	accStream.Close()
-
-	// Collect ground truth storage writes from history
-	gtStorage := make(map[common.Address]map[common.Hash]struct{})
-	storStream, err := tx.HistoryRange(kv.StorageDomain, int(firstTxNumInBlock), int(lastTxNumInBlock+1), order.Asc, -1)
-	if err != nil {
-		return fmt.Errorf("ground truth storage stream: %w", err)
-	}
-	for storStream.HasNext() {
-		k, _, err := storStream.Next()
-		if err != nil {
-			storStream.Close()
-			return err
-		}
-		addr := common.BytesToAddress(k[:20])
-		var key common.Hash
-		copy(key[:], k[20:])
-		if gtStorage[addr] == nil {
-			gtStorage[addr] = make(map[common.Hash]struct{})
-		}
-		gtStorage[addr][key] = struct{}{}
-	}
-	storStream.Close()
-
-	// Build our write sets from the RecordingState
-	// Account writes = ModifiedAccounts + DeletedAccounts
-	ourAccounts := make(map[common.Address]struct{})
-	for addr := range recordingState.ModifiedAccounts {
-		ourAccounts[addr] = struct{}{}
-	}
-	for addr := range recordingState.DeletedAccounts {
-		ourAccounts[addr] = struct{}{}
-	}
-
-	// Storage writes = ModifiedStorage
-	ourStorage := recordingState.ModifiedStorage
-
-	// Count totals
-	gtStorageTotal := 0
-	for _, keys := range gtStorage {
-		gtStorageTotal += len(keys)
-	}
-	ourStorageTotal := 0
-	for _, keys := range ourStorage {
-		ourStorageTotal += len(keys)
-	}
-
-	fmt.Printf("[debug] Ground truth writes: %d accounts, %d storage | Recorded writes: %d accounts, %d storage\n",
-		len(gtAccounts), gtStorageTotal, len(ourAccounts), ourStorageTotal)
-
-	// Find accounts in ground truth but missing from our writes
-	missingAccounts := 0
-	for addr := range gtAccounts {
-		if _, ok := ourAccounts[addr]; !ok {
-			missingAccounts++
-			fmt.Printf("[debug] MISSING ACCOUNT WRITE: %s (in ground truth but not in recorded writes)\n", addr.Hex())
-		}
-	}
-
-	// Find accounts in our writes but not in ground truth
-	extraAccounts := 0
-	for addr := range ourAccounts {
-		if _, ok := gtAccounts[addr]; !ok {
-			extraAccounts++
-			fmt.Printf("[debug] EXTRA ACCOUNT WRITE: %s (in recorded writes but not in ground truth)\n", addr.Hex())
-		}
-	}
-
-	// Find storage keys in ground truth but missing from our writes
-	missingStorage := 0
-	for addr, gtKeys := range gtStorage {
-		ourKeys := ourStorage[addr]
-		for key := range gtKeys {
-			if ourKeys == nil {
-				missingStorage++
-				fmt.Printf("[debug] MISSING STORAGE WRITE: account=%s key=%s (account has no recorded storage writes)\n", addr.Hex(), key.Hex())
-			} else if _, ok := ourKeys[key]; !ok {
-				missingStorage++
-				fmt.Printf("[debug] MISSING STORAGE WRITE: account=%s key=%s\n", addr.Hex(), key.Hex())
-			}
-		}
-	}
-
-	// Find storage keys in our writes but not in ground truth
-	extraStorage := 0
-	for addr, ourKeys := range ourStorage {
-		gtKeys := gtStorage[addr]
-		for key := range ourKeys {
-			if gtKeys == nil {
-				extraStorage++
-				fmt.Printf("[debug] EXTRA STORAGE WRITE: account=%s key=%s (account has no ground truth storage writes)\n", addr.Hex(), key.Hex())
-			} else if _, ok := gtKeys[key]; !ok {
-				extraStorage++
-				fmt.Printf("[debug] EXTRA STORAGE WRITE: account=%s key=%s\n", addr.Hex(), key.Hex())
-			}
-		}
-	}
-
-	fmt.Printf("[debug] Account writes: %d missing, %d extra | Storage writes: %d missing, %d extra\n",
-		missingAccounts, extraAccounts, missingStorage, extraStorage)
-
-	// For missing accounts, check if they were accessed (read) but not written
-	for addr := range gtAccounts {
-		if _, ok := ourAccounts[addr]; !ok {
-			if _, accessed := recordingState.AccessedAccounts[addr]; accessed {
-				fmt.Printf("[debug]   -> MISSING ACCOUNT WRITE %s was READ but not written\n", addr.Hex())
-			} else {
-				fmt.Printf("[debug]   -> MISSING ACCOUNT WRITE %s was NEVER TOUCHED\n", addr.Hex())
-			}
-		}
-	}
-
-	// For missing storage keys, check if the account was deleted or if the key was read
-	for addr, gtKeys := range gtStorage {
-		ourKeys := ourStorage[addr]
-		for key := range gtKeys {
-			isMissing := ourKeys == nil
-			if !isMissing {
-				_, found := ourKeys[key]
-				isMissing = !found
-			}
-			if isMissing {
-				if _, deleted := recordingState.DeletedAccounts[addr]; deleted {
-					fmt.Printf("[debug]   -> MISSING STORAGE WRITE %s/%s belongs to DELETED account\n", addr.Hex(), key.Hex())
-				} else if accessedKeys, ok := recordingState.AccessedStorage[addr]; ok {
-					if _, accessed := accessedKeys[key]; accessed {
-						fmt.Printf("[debug]   -> MISSING STORAGE WRITE %s/%s was READ but not written\n", addr.Hex(), key.Hex())
-					} else {
-						fmt.Printf("[debug]   -> MISSING STORAGE WRITE %s/%s was NEVER TOUCHED\n", addr.Hex(), key.Hex())
-					}
-				} else {
-					fmt.Printf("[debug]   -> MISSING STORAGE WRITE %s/%s account NEVER TOUCHED\n", addr.Hex(), key.Hex())
-				}
-			}
-		}
-	}
-
-	return nil
-}
-
-func touchHistoricalKeys(sd *execctx.SharedDomains, tx kv.TemporalTx, d kv.Domain, fromTxNum uint64, toTxNum uint64, visitor func(k []byte)) (uint64, error) {
-	// toTxNum is exclusive per kv.TemporalTx.HistoryRange contract [from,to)
-	stream, err := tx.HistoryRange(d, int(fromTxNum), int(toTxNum), order.Asc, -1)
-	if err != nil {
-		return 0, err
-	}
-	defer stream.Close()
-	var touches uint64
-	for stream.HasNext() {
-		k, _, err := stream.Next()
-		if err != nil {
-			return 0, err
-		}
-		if visitor != nil {
-			visitor(k)
-		}
-		sd.GetCommitmentCtx().TouchKey(d, string(k), nil)
-		touches++
-	}
-	return touches, nil
-}
-
-func touchGroundTruthHistoricalKeys(domains *execctx.SharedDomains, tx kv.TemporalTx, fromTxNum, toTxNum uint64) error {
-	accTouches, err := touchHistoricalKeys(domains, tx, kv.AccountsDomain, fromTxNum, toTxNum, nil)
-	if err != nil {
-		return err
-	}
-	storageTouches, err := touchHistoricalKeys(domains, tx, kv.StorageDomain, fromTxNum, toTxNum, nil)
-	if err != nil {
-		return err
-	}
-	codeTouches, err := touchHistoricalKeys(domains, tx, kv.CodeDomain, fromTxNum, toTxNum, nil)
-	if err != nil {
-		return err
-	}
-	log.Info("commitment touched keys", "accTouches", accTouches, "storageTouches", storageTouches, "codeTouches", codeTouches)
-	return nil
-}
-
 // ExecutionWitness implements debug_executionWitness.
 // It executes a block using a historical state reader, records all state accesses
 // (accounts, storage, code), and builds merkle proofs for the accessed keys.
@@ -916,10 +712,6 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, fmt.Errorf("commitment history pruned: start %d, last tx: %d", commitmentStartingTxNum, firstTxNumInBlock)
 	}
 
-	// if err := debugCompareRecordedVsGroundTruth(tx, recordingState, firstTxNumInBlock, lastTxNumInBlock); err != nil {
-	// 	return nil, err
-	// }
-
 	// allCodeAddrs: union of addresses with pre-state or modified code.
 	// The commitment needs to know about both existing code (pre-state reads)
 	// and newly created/modified code (e.g. contract deployments, EIP-7702 delegations).
@@ -976,11 +768,6 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	}
 
 	touchAllKeys()
-	//  for debugging purposes the historical keys can be used to compute commitment, but the query is extremely slow
-	// err = touchGroundTruthHistoricalKeys(firstTxNumInBlock, lastTxNumInBlock+1)
-	if err != nil {
-		return nil, err
-	}
 
 	sdCtx.SetCollapseTracer(func(hashedKeyPath []byte) {
 		fmt.Printf("[debug_executionWitness] node collapse detected at path %s (len=%d)\n", commitment.NibblesToString(hashedKeyPath), len(hashedKeyPath))
