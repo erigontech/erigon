@@ -95,18 +95,20 @@ func LogSelfDestructedAccounts(ibs evmtypes.IntraBlockState, sender accounts.Add
 	// Emit burn logs for selfdestructed accounts that hold a positive balance at
 	// finalization time (EIP-7708 case 2: funded after selfdestruct).
 	//
-	// Two sources of residual balance are unioned:
+	// Two sources of residual balance must be combined:
 	//
 	//  1. result.SelfDestructedWithBalance — execution-time residuals captured
-	//     before SoftFinalise cleared the journal. Needed because the parallel
-	//     executor's finalization IBS may not see these accounts when their
-	//     balance writes are stripped from VersionedWrites.
+	//     before SoftFinalise cleared the journal.  In the parallel executor the
+	//     IBS passed here is a fresh IBS reconstructed from VersionedWrites; its
+	//     journal cannot see these because non-zero balance writes are stripped from
+	//     VersionedWrites (to avoid polluting the EIP-7928 block access list).
 	//
-	//  2. ibs.GetRemovedAccountsWithBalance() — the finalized balance of
-	//     selfdestructed accounts in the current IBS. This is the most up-to-date
-	//     value: it includes the execution-time residual plus any funds added
-	//     during finalization (e.g. priority fee credited to a coinbase that
-	//     selfdestructed). When present, it supersedes source 1.
+	//  2. ibs.GetRemovedAccountsWithBalance() — balances added to selfdestructed
+	//     accounts during finalization (e.g. priority fee credited to a coinbase
+	//     that selfdestructed within its own transaction).
+	//
+	// Union the two sets and sum amounts per address so that a single burn log
+	// covers the total residual (execution residual + finalization additions).
 	combined := make(map[common.Address]uint256.Int)
 	if result != nil {
 		for _, ab := range result.SelfDestructedWithBalance {
@@ -115,9 +117,11 @@ func LogSelfDestructedAccounts(ibs evmtypes.IntraBlockState, sender accounts.Add
 	}
 	finalizeList := ibs.GetRemovedAccountsWithBalance()
 	for _, ab := range finalizeList {
-		// Always prefer the finalized balance — it already encompasses the
-		// execution-time residual and any additions during finalization.
-		combined[ab.Address] = ab.Balance
+		if existing, ok := combined[ab.Address]; ok {
+			combined[ab.Address] = *new(uint256.Int).Add(&existing, &ab.Balance)
+		} else {
+			combined[ab.Address] = ab.Balance
+		}
 	}
 	if len(combined) == 0 {
 		return
