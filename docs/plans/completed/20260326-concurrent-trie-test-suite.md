@@ -126,8 +126,8 @@ These tests DO NOT reset tries between batches — state carries forward. This t
 - [x] Run with race detector: `go test -race -run TestCompareRoots ./execution/commitment/...`
 
 ### Task 7: [Final] Update documentation
-- [ ] Update `CLAUDE.md` if new testing patterns discovered
-- [ ] Move this plan to `docs/plans/completed/`
+- [x] Update `CLAUDE.md` if new testing patterns discovered (reviewed — no update needed; patterns are in-code and self-documenting)
+- [x] Move this plan to `docs/plans/completed/`
 
 ## Technical Details
 
