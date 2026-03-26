@@ -21,7 +21,7 @@ inputs:
   cleanup-space:
     description: "Remove large pre-installed packages to free disk space (Linux only)"
     required: false
-    default: 'false'
+    default: 'true'
   build-cache-extra-key:
     description: "Extra segment appended to build cache key (e.g. matrix.test-group)"
     required: false
