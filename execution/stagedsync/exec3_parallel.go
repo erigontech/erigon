@@ -1934,7 +1934,13 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				collector := state.NewVersionedWriteCollector(pe.rs)
 
-				balActive := pe.cfg.experimentalBAL || pe.cfg.chainConfig.IsAmsterdam(txTask.BlockTime())
+				// Use finalizeWithIBS only for actual Amsterdam blocks where BAL
+				// is consensus-critical. The experimentalBAL flag generates BAL
+				// data at the block level (ProcessBAL) but must not change the
+				// TX finalization path — finalizeWithIBS has state-computation
+				// bugs during reorgs (wrong trie roots from arithmetic
+				// reconstruction of fee-adjusted balances).
+				balActive := pe.cfg.chainConfig.IsAmsterdam(txTask.BlockTime())
 				_, addReads, addWrites, err := txResult.finalize(prevReceipt, pe.cfg.engine, be.versionMap, stateReader, collector, balActive)
 
 				if err != nil {
