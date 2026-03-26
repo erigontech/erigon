@@ -230,7 +230,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						nil, applyResult.rules)
 					if err == nil {
 						err = pe.rs.ApplyTxIndexes(rwTx, applyResult.txNum, applyResult.receipt, applyResult.blobGasUsed,
-							applyResult.logs, applyResult.traceFroms, applyResult.traceTos)
+							applyResult.logs, applyResult.traceFroms, applyResult.traceTos, applyResult.blockFinalize)
 					}
 					if err == nil {
 						err = pe.rs.CommitStepBoundary(ctx, rwTx, applyResult.blockNum, applyResult.txNum)
@@ -767,6 +767,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						traceFroms:            result.TraceFroms,
 						traceTos:              result.TraceTos,
 						cumulativeBlobGasUsed: blockExecutor.blobGasUsed,
+						blockFinalize:         true,
 					}:
 					case <-ctx.Done():
 						return ctx.Err()
@@ -1048,6 +1049,7 @@ type txResult struct {
 	traceTos              map[accounts.Address]struct{}
 	writes                state.VersionedWrites
 	rules                 *chain.Rules
+	blockFinalize         bool // block-finalize txResult shares the system-tx-end txNum; skip receipt cache to avoid double-write
 }
 
 type execTask struct {
