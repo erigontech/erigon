@@ -665,13 +665,12 @@ func (s *simulator) computeSimulatedStateRoot(
 	if latest || s.commitmentHistory {
 		commitTxNum := minTxNum
 		if !latest {
-			// Restore the commitment state at the start of the simulated block using historical state reader.
-			sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
 			// In a multi-block simulation (len(ancestors) > 0) the trie is already at parent.Root
 			// because the previous simulation step left it there.  Calling SeekCommitment would
 			// overwrite that correct trie state with the canonical chain's state, producing a wrong stateRoot.
 			if len(ancestors) == 0 {
-				// First simulated block: load the trie state from commitment history.
+				// First simulated block: restore the commitment state from history and seek to it.
+				sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
 				var err error
 				commitTxNum, _, err = sharedDomains.SeekCommitment(ctx, tx)
 				if err != nil {
@@ -1041,8 +1040,11 @@ func (r *simulationIntraBlockStateReader) ReadAccountStorage(address accounts.Ad
 
 func (r *simulationIntraBlockStateReader) HasStorage(address accounts.Address) (bool, error) {
 	// The mem batch doesn't support prefix scans, so we check the canonical base-parent state.
-	// This is correct for all cases except when a prior simulated block added brand-new storage
-	// to a previously storage-less account — a scenario that does not affect balance-transfer tests.
+	// TODO: this gives a wrong answer when a prior simulated block deployed a brand-new contract
+	// (i.e. added storage to a previously storage-less account): the mem batch contains that
+	// storage but we never scan it, so HasStorage returns false for the new contract in
+	// subsequent simulation blocks. Fix: iterate r.sd.GetMemBatch() storage keys for the
+	// address as a prefix-scan fallback before (or instead of) the RangeAsOf call.
 	addressValue := address.Value()
 	to, ok := kv.NextSubtree(addressValue[:])
 	if !ok {
