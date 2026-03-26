@@ -44,11 +44,11 @@ type RecordingState struct {
 	// Read tracking (all accessed keys, including reads that hit the overlay)
 	AccessedAccounts map[common.Address]struct{}
 	AccessedStorage  map[common.Address]map[common.Hash]struct{}
-	AccessedCode     map[common.Address][]byte // all code seen during execution (overlay + inner)
+	AccessedCode     map[common.Address][]byte // all code seen during execution
 	PreStateCode     map[common.Address][]byte // code read from the inner reader (pre-block state only)
 
 	// In-memory state overlay (writes)
-	accountOverlay map[common.Address]*accounts.Account // non-nil = updated, entry present with nil value = deleted
+	accountOverlay map[common.Address]*accounts.Account // non-nil = updated, entry present with nil value=deleted
 	storageOverlay map[common.Address]map[common.Hash]uint256.Int
 	codeOverlay    map[common.Address][]byte
 
@@ -59,7 +59,7 @@ type RecordingState struct {
 	DeletedAccounts  map[common.Address]struct{}
 	CreatedContracts map[common.Address]struct{}
 
-	// Debug: addresses to trace operations on
+	// for debugging: addresses to trace operations on
 	accountsToTrace map[common.Address]struct{}
 }
 
@@ -417,7 +417,7 @@ func (s *RecordingState) GetAccessedCode() map[common.Address][]byte {
 }
 
 // GetPreStateCode returns code read from the inner reader only (pre-block state).
-// This is the code that existed at the START of the block, before any
+// This is the code that existed at the start of the block, before any
 // transactions modified it. Used for witness trie generation where the
 // CodeHash must match the parent-state commitment.
 func (s *RecordingState) GetPreStateCode() map[common.Address][]byte {
@@ -438,7 +438,6 @@ func (s *RecordingState) GetModifiedCode() map[common.Address][]byte {
 }
 
 // ExecutionWitnessResult is the response format for debug_executionWitness
-// Compatible with Geth/Reth format
 type ExecutionWitnessResult struct {
 	// State contains the list of RLP-encoded trie nodes in the witness trie
 	State []hexutil.Bytes `json:"state"`
@@ -755,7 +754,6 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 
 	// Execute all transactions in the block
 	for txIndex, txn := range block.Transactions() {
-		fmt.Printf("Executing txIndex=%d , txHash=%x of blockNum=%d\n", txIndex, txn.Hash(), block.NumberU64())
 		msg, err := txn.AsMessage(*signer, header.BaseFee, blockRules)
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert tx %d to message: %w", txIndex, err)
@@ -1083,7 +1081,6 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	if err != nil {
 		return nil, fmt.Errorf("[debug_executionWitness] stateless block execution failed: %w", err)
 	}
-	_ = stateless
 
 	// Query the expected state for all modified accounts from the actual state DB
 	expectedState, expectedStorage, err := api.buildExpectedPostState(ctx, tx, blockNum, block,
@@ -1512,11 +1509,6 @@ func newWitnessStateless(result *ExecutionWitnessResult) (*witnessStateless, err
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode witness trie: %w", err)
 	}
-
-	targetAddress := common.HexToAddress("0x881D40237659C251811CEC9c364ef91dC08D300C")
-	addrHash, _ := common.HashData(targetAddress[:])
-	acc, ok := witnessTrie.GetAccount(addrHash[:])
-	_, _ = acc, ok
 
 	// Build code map from codes list
 	codeMap := make(map[common.Hash][]byte)
