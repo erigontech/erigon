@@ -381,6 +381,15 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 	if err != nil {
 		return err
 	}
+	// OtterSync (snapshot-based) nodes embed sender addresses in snapshot files and
+	// never advance the Senders stage.  Fall back to the Snapshots stage progress so
+	// that SpawnExecuteBlocksStage can make forward progress on such nodes.
+	if prevStageProgress == 0 {
+		prevStageProgress, err = stageProgress(rwTx, cfg.db, stages.Snapshots)
+		if err != nil {
+			return err
+		}
+	}
 
 	var to = prevStageProgress
 	if toBlock > 0 {
