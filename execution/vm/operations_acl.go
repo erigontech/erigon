@@ -406,10 +406,11 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 		// interpreter deducts (and traces) the full dynamic cost.
 		callContext.gas += regularBase + delegationGas
 
-		if dbg.TraceDynamicGas && evm.intraBlockState.Trace() {
-			fmt.Printf("%d (%d.%d) Variant Gas: base %d, access: %d, delegation: %d, call: %d\n",
+		if dbg.TraceDynamicGas && evm.intraBlockState.Trace() ||
+			dbg.TraceTx(evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex()) {
+			fmt.Printf("%d (%d.%d) Variant Gas: base %d, access: %d (cold=%v), delegation: %d (cold=%v), call: %d\n",
 				evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(),
-				statefulBaseGas, accessGas, delegationGas, callGas)
+				statefulBaseGas, accessGas, accessGas > 0, delegationGas, delegationGas == params.ColdAccountAccessCostEIP2929, callGas)
 		}
 		var overflow bool
 		if gas.Regular, overflow = math.SafeAdd(gas.Regular, accessGas+delegationGas); overflow {

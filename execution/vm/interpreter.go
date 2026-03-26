@@ -331,6 +331,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		tracer                 = evm.config.Tracer
 		debug                  = tracer != nil && (tracer.OnOpcode != nil || tracer.OnGasChange != nil || tracer.OnFault != nil)
 		trace                  = dbg.TraceInstructions && evm.intraBlockState.Trace()
+		traceTx                = dbg.TraceTx(evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex())
 		blockNum               uint64
 		txIndex, txIncarnation int
 	)
@@ -381,7 +382,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		if steps%50_000 == 0 && evm.Cancelled() {
 			break
 		}
-		if dbg.TraceDynamicGas || debug || trace {
+		if dbg.TraceDynamicGas || traceTx || debug || trace {
 			// Capture pre-execution values for tracing.
 			logged, pcCopy, gasCopy = false, pc, callContext.gas
 			blockNum, txIndex, txIncarnation = evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation()
@@ -443,6 +444,12 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			if dbg.TraceDynamicGas && dynamicCost.Regular > 0 {
 				fmt.Printf("%d (%d.%d) Dynamic Gas: %d (%s)\n", blockNum, txIndex, txIncarnation, traceGas(op, callGas, cost), op)
 			}
+			if traceTx {
+				fmt.Printf("%d (%d.%d) gas %s: before=%d static=%d dynamic=%d callGasTemp=%d after=%d\n",
+					blockNum, txIndex, txIncarnation, op, gasCopy,
+					operation.constantGas, dynamicCost.Regular, evm.CallGasTemp(),
+					gasCopy-operation.constantGas-dynamicCost.Regular)
+			}
 			// EIP-8037: "Regular gas charge MUST be applied first. If the regular
 			// gas charge triggers an out-of-gas error, the state gas charge is
 			// not applied." Deduct regular gas before state gas so that any
@@ -464,6 +471,9 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 					return nil, callContext.Gas(), ErrOutOfGas
 				}
 			}
+		} else if traceTx && operation.constantGas > 0 {
+			fmt.Printf("%d (%d.%d) gas %s: before=%d static=%d after=%d\n",
+				blockNum, txIndex, txIncarnation, op, gasCopy, operation.constantGas, callContext.gas)
 		}
 
 		// Do gas tracing before memory expansion
