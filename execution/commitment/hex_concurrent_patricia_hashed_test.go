@@ -13,11 +13,15 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-// nibbleAddressCache caches brute-forced addresses for each nibble to avoid
-// repeated keccak work across tests.
+// nibbleSeedKey is the composite cache key for findAddressForNibble.
+type nibbleSeedKey struct{ nibble, seed int }
+
+// nibbleAddressCache caches brute-forced addresses keyed by (nibble, seed) to
+// avoid repeated keccak work across tests and ensure each seed always returns
+// the same deterministic address regardless of call order.
 var (
 	nibbleAddressCacheMu sync.Mutex
-	nibbleAddressCache   = make(map[int][][]byte) // nibble -> list of addresses found so far
+	nibbleAddressCache   = make(map[nibbleSeedKey][]byte)
 )
 
 // findAddressForNibble brute-force searches for a 20-byte address whose
@@ -25,12 +29,12 @@ var (
 // seed controls the starting point for the search; each unique seed produces
 // a different address. Results are cached globally.
 func findAddressForNibble(targetNibble int, seed int) []byte {
+	key := nibbleSeedKey{targetNibble, seed}
+
 	nibbleAddressCacheMu.Lock()
-	cached := nibbleAddressCache[targetNibble]
-	if seed < len(cached) {
-		addr := cached[seed]
+	if cached, ok := nibbleAddressCache[key]; ok {
 		nibbleAddressCacheMu.Unlock()
-		return addr
+		return cached
 	}
 	nibbleAddressCacheMu.Unlock()
 
@@ -47,7 +51,7 @@ func findAddressForNibble(targetNibble int, seed int) []byte {
 			copy(result, addr[:])
 
 			nibbleAddressCacheMu.Lock()
-			nibbleAddressCache[targetNibble] = append(nibbleAddressCache[targetNibble], result)
+			nibbleAddressCache[key] = result
 			nibbleAddressCacheMu.Unlock()
 			return result
 		}
