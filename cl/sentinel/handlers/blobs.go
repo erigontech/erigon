@@ -43,8 +43,12 @@ func (c *ConsensusHandlers) blobsSidecarsByRangeHandler(s network.Stream, versio
 	}
 
 	// Consume additional rate-limit tokens. Estimate blob count as slots × max blobs per block,
-	// capped at the per-request throughput limit (72).
-	maxBlobs := max(int(c.beaconConfig.MaxBlobsPerBlock), int(c.beaconConfig.MaxBlobsPerBlockElectra))
+	// capped at the per-request throughput limit (72). Use BlobSchedule-aware lookup so Deneb
+	// requests (max 6 blobs) are not overcharged at the Electra rate (max 9 blobs).
+	// Note: blob sidecars are deprecated at Fulu (replaced by data columns), so the effective
+	// max here is always ≤ Electra's MaxBlobsPerBlock.
+	startEpoch := req.StartSlot / c.beaconConfig.SlotsPerEpoch
+	maxBlobs := int(c.beaconConfig.GetBlobParameters(startEpoch).MaxBlobsPerBlock)
 	if cost := min(int(req.Count)*maxBlobs, maxBlobsThroughoutputPerRequest) - 1; !c.consumeRateLimit(s, cost) {
 		return nil
 	}
