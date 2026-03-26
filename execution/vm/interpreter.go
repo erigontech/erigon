@@ -36,6 +36,10 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
+// cancelCheckInterval is how many opcodes to execute between checking
+// whether the EVM context has been cancelled.
+const cancelCheckInterval = 50_000
+
 // Config are the configuration options for the Interpreter
 type Config struct {
 	Tracer        *tracing.Hooks
@@ -378,12 +382,12 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 	anyTrace := dbg.TraceDynamicGas || debug || trace
 
 	// Countdown is cheaper than modulo per iteration.
-	stepsToCancel := 50_000
+	stepsToCancel := cancelCheckInterval
 
 	for {
 		stepsToCancel--
 		if stepsToCancel == 0 {
-			stepsToCancel = 50_000
+			stepsToCancel = cancelCheckInterval
 			if evm.Cancelled() {
 				break
 			}
