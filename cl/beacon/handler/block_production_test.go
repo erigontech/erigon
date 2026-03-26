@@ -137,9 +137,11 @@ func TestCaplinBlockProductionWithWithdrawalRequest(t *testing.T) {
 
 	baseBlock := blocks[len(blocks)-1].Block
 	targetSlot := baseBlock.Slot + 1
+	baseBlockRoot, err := baseBlock.HashSSZ()
+	require.NoError(t, err)
 
 	beaconBody, execValue, err := h.produceBeaconBody(
-		ctx, 3, baseBlock, postState, targetSlot,
+		ctx, 3, baseBlock.Slot, baseBlockRoot, postState, targetSlot,
 		common.Bytes96{0xc0}, // infinity BLS signature (skip RANDAO verification)
 		common.Hash{},
 	)
