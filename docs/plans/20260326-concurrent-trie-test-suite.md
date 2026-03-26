@@ -85,12 +85,12 @@ Each subtest creates a specific nibble distribution using addresses pre-computed
 
 Use a spread-across-all-nibbles distribution for each, varying the update types.
 
-- [ ] `TestCompareRoots_AccountsOnly` — balance + nonce + codeHash updates across nibbles
-- [ ] `TestCompareRoots_StorageOnly` — storage slot updates for accounts across nibbles
-- [ ] `TestCompareRoots_MixedAccountStorage` — same address has both account updates and storage slots
-- [ ] `TestCompareRoots_Deletes` — create accounts, then delete some, compare roots after each step
-- [ ] `TestCompareRoots_FullAccountUpdate` — balance + nonce + codeHash + storage all at once per account
-- [ ] Run `go test -run TestCompareRoots_ ./execution/commitment/...` — all must pass
+- [x] `TestCompareRoots_AccountsOnly` — balance + nonce + codeHash updates across nibbles
+- [x] `TestCompareRoots_StorageOnly` — storage slot updates for accounts across nibbles
+- [x] `TestCompareRoots_MixedAccountStorage` — same address has both account updates and storage slots
+- [x] `TestCompareRoots_Deletes` — create accounts, then delete some, compare roots after each step
+- [x] `TestCompareRoots_FullAccountUpdate` — balance + nonce + codeHash + storage all at once per account
+- [x] Run `go test -run TestCompareRoots_ ./execution/commitment/...` — all must pass
 
 ### Task 4: Layer C — Multi-batch sequencing (regression path)
 

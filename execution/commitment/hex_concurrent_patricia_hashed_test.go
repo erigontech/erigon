@@ -273,3 +273,155 @@ func TestCompareRoots_HeavySkew(t *testing.T) {
 		heavyCount, heavyNibble, spreadCount, root)
 }
 
+// --- Layer B: Update type combination tests ---
+
+// makeStorageLoc returns a deterministic 32-byte storage location as a hex
+// string, derived from the given index.
+func makeStorageLoc(index int) string {
+	var loc [32]byte
+	binary.BigEndian.PutUint64(loc[24:], uint64(index))
+	return hex.EncodeToString(loc[:])
+}
+
+// makeCodeHash returns a deterministic 32-byte code hash as a hex string,
+// derived from the given index (non-zero to avoid empty code hash).
+func makeCodeHash(index int) string {
+	var h [32]byte
+	binary.BigEndian.PutUint64(h[:8], uint64(index+1))
+	h[31] = 0xcc // marker byte
+	return hex.EncodeToString(h[:])
+}
+
+func TestCompareRoots_AccountsOnly(t *testing.T) {
+	t.Parallel()
+	seqMs, parMs, seqTrie, parTrie := setupTriePair(t)
+
+	ub := NewUpdateBuilder()
+	// Spread across all 16 nibbles with balance + nonce + codeHash updates
+	for nibble := 0; nibble < 16; nibble++ {
+		for seed := 0; seed < 2; seed++ {
+			addr := findAddressForNibble(nibble, seed)
+			ah := addrHex(addr)
+			ub.Balance(ah, uint64(1000*nibble+seed+1))
+			ub.Nonce(ah, uint64(nibble*10+seed+1))
+			ub.CodeHash(ah, makeCodeHash(nibble*2+seed))
+		}
+	}
+	plainKeys, updates := ub.Build()
+
+	root := compareRoots(t, seqMs, parMs, seqTrie, parTrie, plainKeys, updates)
+	require.NotEmpty(t, root)
+	t.Logf("AccountsOnly root (32 accounts with balance+nonce+codeHash): %x", root)
+}
+
+func TestCompareRoots_StorageOnly(t *testing.T) {
+	t.Parallel()
+	seqMs, parMs, seqTrie, parTrie := setupTriePair(t)
+
+	ub := NewUpdateBuilder()
+	// First create accounts with balances (storage needs an account to exist)
+	for nibble := 0; nibble < 16; nibble++ {
+		addr := findAddressForNibble(nibble, 0)
+		ah := addrHex(addr)
+		ub.Balance(ah, uint64(nibble+1))
+		// Add 3 storage slots per account
+		for slot := 0; slot < 3; slot++ {
+			loc := makeStorageLoc(nibble*100 + slot)
+			val := makeStorageLoc(nibble*100 + slot + 1) // non-zero value
+			ub.Storage(ah, loc, val)
+		}
+	}
+	plainKeys, updates := ub.Build()
+
+	root := compareRoots(t, seqMs, parMs, seqTrie, parTrie, plainKeys, updates)
+	require.NotEmpty(t, root)
+	t.Logf("StorageOnly root (16 accounts x 3 storage slots): %x", root)
+}
+
+func TestCompareRoots_MixedAccountStorage(t *testing.T) {
+	t.Parallel()
+	seqMs, parMs, seqTrie, parTrie := setupTriePair(t)
+
+	ub := NewUpdateBuilder()
+	// Each address gets both account updates AND storage slots
+	for nibble := 0; nibble < 16; nibble++ {
+		addr := findAddressForNibble(nibble, 0)
+		ah := addrHex(addr)
+		// Account update: balance + nonce
+		ub.Balance(ah, uint64(5000+nibble))
+		ub.Nonce(ah, uint64(nibble+1))
+		// Storage slots on the same address
+		for slot := 0; slot < 2; slot++ {
+			loc := makeStorageLoc(nibble*10 + slot)
+			val := makeStorageLoc(nibble*10 + slot + 500)
+			ub.Storage(ah, loc, val)
+		}
+	}
+	plainKeys, updates := ub.Build()
+
+	root := compareRoots(t, seqMs, parMs, seqTrie, parTrie, plainKeys, updates)
+	require.NotEmpty(t, root)
+	t.Logf("MixedAccountStorage root (16 accounts with balance+nonce+storage): %x", root)
+}
+
+func TestCompareRoots_Deletes(t *testing.T) {
+	t.Parallel()
+	seqMs, parMs, seqTrie, parTrie := setupTriePair(t)
+
+	// Step 1: Create 32 accounts across nibbles
+	ub1 := NewUpdateBuilder()
+	addrs := make([][]byte, 0, 32)
+	for nibble := 0; nibble < 16; nibble++ {
+		for seed := 0; seed < 2; seed++ {
+			addr := findAddressForNibble(nibble, seed)
+			addrs = append(addrs, addr)
+			ub1.Balance(addrHex(addr), uint64(1000+nibble*2+seed))
+		}
+	}
+	plainKeys1, updates1 := ub1.Build()
+	root1 := compareRoots(t, seqMs, parMs, seqTrie, parTrie, plainKeys1, updates1)
+	require.NotEmpty(t, root1)
+	t.Logf("Deletes step 1 root (create 32): %x", root1)
+
+	// Step 2: Delete half the accounts (every other one)
+	ub2 := NewUpdateBuilder()
+	deleted := 0
+	for i := 0; i < len(addrs); i += 2 {
+		ub2.Delete(addrHex(addrs[i]))
+		deleted++
+	}
+	plainKeys2, updates2 := ub2.Build()
+	root2 := compareRoots(t, seqMs, parMs, seqTrie, parTrie, plainKeys2, updates2)
+	require.NotEmpty(t, root2)
+	require.NotEqual(t, root1, root2, "root should change after deletes")
+	t.Logf("Deletes step 2 root (deleted %d): %x", deleted, root2)
+}
+
+func TestCompareRoots_FullAccountUpdate(t *testing.T) {
+	t.Parallel()
+	seqMs, parMs, seqTrie, parTrie := setupTriePair(t)
+
+	ub := NewUpdateBuilder()
+	// Every account gets balance + nonce + codeHash + storage — the full set
+	for nibble := 0; nibble < 16; nibble++ {
+		for seed := 0; seed < 2; seed++ {
+			addr := findAddressForNibble(nibble, seed)
+			ah := addrHex(addr)
+			ub.Balance(ah, uint64(9999+nibble*2+seed))
+			ub.Nonce(ah, uint64(100+nibble*2+seed))
+			ub.CodeHash(ah, makeCodeHash(nibble*2+seed+100))
+			// 2 storage slots per account
+			for slot := 0; slot < 2; slot++ {
+				loc := makeStorageLoc(nibble*1000 + seed*100 + slot)
+				val := makeStorageLoc(nibble*1000 + seed*100 + slot + 1)
+				ub.Storage(ah, loc, val)
+			}
+		}
+	}
+	plainKeys, updates := ub.Build()
+
+	root := compareRoots(t, seqMs, parMs, seqTrie, parTrie, plainKeys, updates)
+	require.NotEmpty(t, root)
+	t.Logf("FullAccountUpdate root (32 accounts with balance+nonce+codeHash+storage): %x", root)
+}
+
