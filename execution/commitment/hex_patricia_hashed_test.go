@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"math/rand"
 	"sort"
-	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,8 +34,8 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-var randSrc = rand.New(rand.NewSource(42)) // fixed seed
-var randMu sync.Mutex
+// randSrc and randMu removed — generateKeyWithHashedPrefix now uses per-call
+// rand.New with atomic counter seed, eliminating parallel test interference.
 
 func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 	t.Parallel()
@@ -1936,12 +1936,13 @@ func Test_HexPatriciaHashed_ProcessWithDozensOfStorageKeys(t *testing.T) {
 	require.Equal(t, rBatch, rSeq, "sequential and batch root should match")
 }
 
+var keyGenCounter atomic.Int64
+
 func generateKeyWithHashedPrefix(constHashedPrefixNibbles []byte, keyLen int) (plainKey []byte, hashedKey []byte) {
 	plainKey = make([]byte, keyLen)
+	rnd := rand.New(rand.NewSource(keyGenCounter.Add(1)))
 	for {
-		randMu.Lock()
-		randSrc.Read(plainKey[:keyLen]) // read random key
-		randMu.Unlock()
+		rnd.Read(plainKey[:keyLen])
 		hashedKey := KeyToNibblizedHash(plainKey)
 		if bytes.HasPrefix(hashedKey, constHashedPrefixNibbles) {
 			// found key with desired hashed prefix, return result
