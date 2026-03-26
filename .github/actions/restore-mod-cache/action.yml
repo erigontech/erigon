@@ -19,27 +19,19 @@ outputs:
     value: ${{ steps.restore.outputs.cache-matched-key }}
   primary-key:
     description: "The primary cache key (for use by save-mod-cache)"
-    value: ${{ steps.compute-key.outputs.primary-key }}
+    value: ${{ steps.restore.outputs.cache-primary-key }}
 
 runs:
   using: composite
   steps:
-    - id: compute-key
-      shell: bash
-      run: |
-        gosum_hash=$(sha256sum go.sum | cut -d' ' -f1)
-        primary_key="gomodcache|${{ inputs.workflow-id }}|${{ github.job }}|${{ inputs.matrix-key }}|${{ runner.os }}|${gosum_hash}|${{ github.run_id }}|${{ github.run_attempt }}"
-        echo "primary-key=${primary_key}" >> "$GITHUB_OUTPUT"
-        echo "gosum-hash=${gosum_hash}" >> "$GITHUB_OUTPUT"
-
     - id: restore
       uses: actions/cache/restore@v4
       with:
         path: ${{ inputs.modcache-path }}/cache/download
-        key: ${{ steps.compute-key.outputs.primary-key }}
+        key: gomodcache|${{ inputs.workflow-id }}|${{ github.job }}|${{ inputs.matrix-key }}|${{ runner.os }}|${{ hashFiles('go.sum') }}|${{ github.run_id }}|${{ github.run_attempt }}
         restore-keys: |
-          gomodcache|${{ inputs.workflow-id }}|${{ github.job }}|${{ inputs.matrix-key }}|${{ runner.os }}|${{ steps.compute-key.outputs.gosum-hash }}|${{ github.run_id }}|
-          gomodcache|${{ inputs.workflow-id }}|${{ github.job }}|${{ inputs.matrix-key }}|${{ runner.os }}|${{ steps.compute-key.outputs.gosum-hash }}|
+          gomodcache|${{ inputs.workflow-id }}|${{ github.job }}|${{ inputs.matrix-key }}|${{ runner.os }}|${{ hashFiles('go.sum') }}|${{ github.run_id }}|
+          gomodcache|${{ inputs.workflow-id }}|${{ github.job }}|${{ inputs.matrix-key }}|${{ runner.os }}|${{ hashFiles('go.sum') }}|
 
     - name: Warn on module cache miss
       if: ${{ steps.restore.outputs.cache-matched-key == '' }}
