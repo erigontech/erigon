@@ -560,6 +560,20 @@ type RPCTransaction struct {
 	YParity              *hexutil.Big               `json:"yParity,omitempty"`
 	R                    *hexutil.Big               `json:"r"`
 	S                    *hexutil.Big               `json:"s"`
+
+	// Arbitrum fields:
+	RequestId           *common.Hash    `json:"requestId,omitempty"`           // Contract SubmitRetryable Deposit
+	TicketId            *common.Hash    `json:"ticketId,omitempty"`            // Retry
+	MaxRefund           *hexutil.Big    `json:"maxRefund,omitempty"`           // Retry
+	SubmissionFeeRefund *hexutil.Big    `json:"submissionFeeRefund,omitempty"` // Retry
+	RefundTo            *common.Address `json:"refundTo,omitempty"`            // SubmitRetryable Retry
+	L1BaseFee           *hexutil.Big    `json:"l1BaseFee,omitempty"`           // SubmitRetryable
+	DepositValue        *hexutil.Big    `json:"depositValue,omitempty"`        // SubmitRetryable
+	RetryTo             *common.Address `json:"retryTo,omitempty"`             // SubmitRetryable
+	RetryValue          *hexutil.Big    `json:"retryValue,omitempty"`          // SubmitRetryable
+	RetryData           *hexutil.Bytes  `json:"retryData,omitempty"`           // SubmitRetryable
+	Beneficiary         *common.Address `json:"beneficiary,omitempty"`         // SubmitRetryable
+	MaxSubmissionFee    *hexutil.Big    `json:"maxSubmissionFee,omitempty"`    // SubmitRetryable
 }
 
 // NewRPCTransaction returns a transaction that will serialize to the RPC
@@ -626,8 +640,42 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime u
 		}
 	}
 
-	signer := types.LatestSignerForChainID(chainId.ToBig())
-	from, err := txn.Sender(*signer)
+	// Arbitrum transaction types
+	switch tx := txn.(type) {
+	case *types.ArbitrumInternalTx:
+		result.GasPrice = (*hexutil.Big)(tx.GetPrice().ToBig())
+	case *types.ArbitrumDepositTx:
+		result.GasPrice = (*hexutil.Big)(tx.GetPrice().ToBig())
+		result.RequestId = &tx.L1RequestId
+	case *types.ArbitrumContractTx:
+		result.GasPrice = (*hexutil.Big)(tx.GasFeeCap)
+		result.RequestId = &tx.RequestId
+		result.MaxFeePerGas = (*hexutil.Big)(tx.GasFeeCap)
+	case *types.ArbitrumRetryTx:
+		result.GasPrice = (*hexutil.Big)(tx.GasFeeCap)
+		result.TicketId = &tx.TicketId
+		result.RefundTo = &tx.RefundTo
+		result.MaxFeePerGas = (*hexutil.Big)(tx.GasFeeCap)
+		result.MaxRefund = (*hexutil.Big)(tx.MaxRefund)
+		result.SubmissionFeeRefund = (*hexutil.Big)(tx.SubmissionFeeRefund)
+	case *types.ArbitrumSubmitRetryableTx:
+		result.GasPrice = (*hexutil.Big)(tx.GasFeeCap)
+		result.RequestId = &tx.RequestId
+		result.L1BaseFee = (*hexutil.Big)(tx.L1BaseFee)
+		result.DepositValue = (*hexutil.Big)(tx.DepositValue)
+		result.RetryTo = tx.RetryTo
+		result.RetryValue = (*hexutil.Big)(tx.RetryValue)
+		result.RetryData = (*hexutil.Bytes)(&tx.RetryData)
+		result.Beneficiary = &tx.Beneficiary
+		result.RefundTo = &tx.FeeRefundAddr
+		result.MaxSubmissionFee = (*hexutil.Big)(tx.MaxSubmissionFee)
+		result.MaxFeePerGas = (*hexutil.Big)(tx.GasFeeCap)
+	case *types.ArbitrumUnsignedTx:
+		result.GasPrice = (*hexutil.Big)(tx.GasFeeCap)
+	}
+
+	arbSigner := types.NewArbitrumSigner(*types.LatestSignerForChainID(chainId.ToBig()))
+	from, err := arbSigner.Sender(txn)
 	if err != nil {
 		log.Warn("sender recovery", "err", err)
 	} else {

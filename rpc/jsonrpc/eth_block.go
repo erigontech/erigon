@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -256,7 +257,17 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 		}
 	}
 
+	if chainConfig.IsArbitrumNitro(b.Number()) {
+		info := types.DeserializeHeaderExtraInformation(b.Header())
+		additionalFields["l1BlockNumber"] = hexutil.Uint64(info.L1BlockNumber)
+		additionalFields["sendRoot"] = info.SendRoot
+		additionalFields["sendCount"] = hexutil.Uint64(info.SendCount)
+	}
+
 	response, err := ethapi.RPCMarshalBlockEx(b, true, fullTx, borTx, borTxHash, additionalFields)
+	if err == nil {
+		api.checkAndFillArbClassicL1BlockNumber(ctx, b, response, chainConfig, tx)
+	}
 	if err == nil && number == rpc.PendingBlockNumber {
 		// Pending blocks need to nil out a few fields
 		for _, field := range []string{"hash", "nonce", "miner"} {
@@ -325,7 +336,17 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 		}
 	}
 
+	if chainConfig.IsArbitrumNitro(block.Number()) {
+		info := types.DeserializeHeaderExtraInformation(block.Header())
+		additionalFields["l1BlockNumber"] = hexutil.Uint64(info.L1BlockNumber)
+		additionalFields["sendRoot"] = info.SendRoot
+		additionalFields["sendCount"] = hexutil.Uint64(info.SendCount)
+	}
+
 	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, borTx, borTxHash, additionalFields)
+	if err == nil {
+		api.checkAndFillArbClassicL1BlockNumber(ctx, block, response, chainConfig, tx)
+	}
 	if err == nil && int64(number) == rpc.PendingBlockNumber.Int64() {
 		// Pending blocks need to nil out a few fields
 		for _, field := range []string{"hash", "nonce", "miner"} {
@@ -473,4 +494,44 @@ func (api *APIImpl) blockByNumber(ctx context.Context, blockNumber rpc.BlockNumb
 	}
 
 	return api.blockByNumberWithSenders(ctx, tx, blockNumber.Uint64())
+}
+
+func (api *APIImpl) checkAndFillArbClassicL1BlockNumber(ctx context.Context, block *types.Block, response map[string]any, chainConfig *chain.Config, tx kv.Tx) {
+	if chainConfig.IsArbitrum() && !chainConfig.IsArbitrumNitro(block.Number()) {
+		l1BlockNumber, err := api.fillArbClassicL1BlockNumber(ctx, block, tx)
+		if err != nil {
+			log.Error("error trying to fill legacy l1BlockNumber", "err", err)
+		} else {
+			response["l1BlockNumber"] = l1BlockNumber
+		}
+	}
+}
+
+func (api *APIImpl) fillArbClassicL1BlockNumber(ctx context.Context, block *types.Block, tx kv.Tx) (hexutil.Uint64, error) {
+	startBlockNum := block.Number().Int64()
+	blockNum := startBlockNum
+	i := int64(0)
+	for {
+		transactions := block.Transactions()
+		if len(transactions) > 0 {
+			legacyTx, ok := transactions[0].(*types.ArbitrumLegacyTxData)
+			if !ok {
+				return 0, fmt.Errorf("couldn't read legacy transaction from block %d", blockNum)
+			}
+			return hexutil.Uint64(legacyTx.L1BlockNumber), nil
+		}
+		if blockNum == 0 {
+			return 0, nil
+		}
+		i++
+		blockNum = startBlockNum - i
+		if i > 50 {
+			return 0, fmt.Errorf("couldn't find block with transactions. Reached %d", blockNum)
+		}
+		var err error
+		block, err = api.blockByNumber(ctx, rpc.BlockNumber(blockNum), tx)
+		if err != nil {
+			return 0, err
+		}
+	}
 }
