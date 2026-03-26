@@ -283,3 +283,49 @@ Raw logs include per-line timestamps useful for profiling slow steps:
 ```bash
 gh run view <run-id> --log
 ```
+
+## Proposals
+
+Rough notes and proposals for future CI improvements:
+
+- **Use merge queues:**
+  - Fixes the issue of rerunning tests after a PR is merged
+  - Runs tests as though they were on the merge target, and become the new commit
+  - Batch multiple PRs together, reducing throughput from ~1 commit/1-2 hours to N commits/30 mins
+  - Reduces need to block PRs completely in a separate step
+  - Correct place to put and block on any tests that devs can reproduce locally
+  - Only, and can effectively, run most comprehensive tests here (like race)
+
+- **Change workflow use:**
+  - Group jobs by purpose: all commits, merge queue, QA
+  - Ensure dispatchability, but use dispatch variables (QA has this done well in a few places)
+
+- **Better caching:**
+  - Smarter go mod caching, reuse across jobs
+  - Constrain build caches to use case (test, coverage, specific tests)
+  - Set mtimes to allow test caching
+  - Caching for fixtures is per-package, so breaking up big packages for different fixtures fixes this
+
+- **Timeouts:**
+  - Aim for individual job limits of 30 minutes (cold); real target is 10 mins average
+  - Goal is not to catch overuse of runners, but to ensure tests evolve to be parallelizable (PRs that make them bigger should improve the workflow to accommodate if required)
+  - On merge queue, set timeouts higher (60 mins)
+
+- **Regressions:**
+  - No workflows should invalidate past success — e.g. lint should not run on main, it should block on PR (probably not in the merge queue either)
+  - Regressions should be detected asynchronously on schedules (QA does this)
+
+- **Local reproducibility:**
+  - All jobs should have a way to locally reproduce for testing and dev pre-checks
+  - Tests that can be reproduced locally should preferably only occur in merge group checks
+  - All workflows should have local invocation equivalents
+
+- **Flaky tests:**
+  - Aggressively trim flaky tests; unrelated failures in PRs should be reported and skipped rather than waited on
+  - Scheduled race and non-race workflows for discovering flaky tests by repeating tests
+  - Ideal place for bots to discover and fix
+
+- **Next steps:**
+  - 3-5x runner counts
+  - Enable merge queue, perhaps on a test branch (`merge-queue-experiment/main`)
+  - Look for flaky tests in scheduled runs that repeat tests constantly
