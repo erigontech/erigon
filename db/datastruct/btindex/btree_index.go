@@ -510,9 +510,10 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 	if len(idx.data[pos:]) == 0 {
 		idx.bplus = NewBpsTree(kvGetter, idx.ef, M, idx.dataLookup, idx.keyCmp)
 		idx.bplus.cursorGetter = idx.newCursor
-		// Build PrefixIndex from scratch (two-pass scan, even distribution)
-		idx.search = NewPrefixIndex(kvGetter, idx.ef, idx.dataLookup, idx.keyCmp)
-		idx.search.cursorGetter = idx.newCursor
+		if dbg.UsePrefixIndex {
+			idx.search = NewPrefixIndex(kvGetter, idx.ef, idx.dataLookup, idx.keyCmp)
+			idx.search.cursorGetter = idx.newCursor
+		}
 	} else {
 		nodes, err := decodeListNodes(idx.data[pos:])
 		if err != nil {
@@ -520,9 +521,10 @@ func OpenBtreeIndexWithDecompressor(indexPath string, M uint64, kvGetter *seg.Re
 		}
 		idx.bplus = NewBpsTreeWithNodes(kvGetter, idx.ef, M, idx.dataLookup, idx.keyCmp, nodes)
 		idx.bplus.cursorGetter = idx.newCursor
-		// Build PrefixIndex with pre-built nodes from .bt file
-		idx.search = NewPrefixIndexWithNodes(kvGetter, idx.ef, idx.dataLookup, idx.keyCmp, nodes)
-		idx.search.cursorGetter = idx.newCursor
+		if dbg.UsePrefixIndex {
+			idx.search = NewPrefixIndexWithNodes(kvGetter, idx.ef, idx.dataLookup, idx.keyCmp, nodes)
+			idx.search.cursorGetter = idx.newCursor
+		}
 	}
 
 	validationPassed = true
