@@ -505,7 +505,13 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 
 		// Fast-path: inline the hottest opcodes to avoid the indirect call
 		// through operation.execute, which forces a full register spill/reload.
+		// Only opcodes without dynamic gas or memory expansion are eligible.
 		switch op {
+		case PUSH0:
+			callContext.Stack.data[callContext.Stack.top] = uint256.Int{}
+			callContext.Stack.top++
+			pc++
+			continue
 		case PUSH1:
 			var val uint256.Int
 			if pc+1 < uint64(len(contract.Code)) {
@@ -531,24 +537,18 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			callContext.Stack.top--
 			pc++
 			continue
-		case DUP1:
-			callContext.Stack.data[callContext.Stack.top] = callContext.Stack.data[callContext.Stack.top-1]
+		case DUP1, DUP2, DUP3, DUP4, DUP5, DUP6, DUP7, DUP8,
+			DUP9, DUP10, DUP11, DUP12, DUP13, DUP14, DUP15, DUP16:
+			n := int(op-DUP1) + 1
+			callContext.Stack.data[callContext.Stack.top] = callContext.Stack.data[callContext.Stack.top-n]
 			callContext.Stack.top++
 			pc++
 			continue
-		case DUP2:
-			callContext.Stack.data[callContext.Stack.top] = callContext.Stack.data[callContext.Stack.top-2]
-			callContext.Stack.top++
-			pc++
-			continue
-		case SWAP1:
+		case SWAP1, SWAP2, SWAP3, SWAP4, SWAP5, SWAP6, SWAP7, SWAP8,
+			SWAP9, SWAP10, SWAP11, SWAP12, SWAP13, SWAP14, SWAP15, SWAP16:
+			n := int(op-SWAP1) + 2
 			top := callContext.Stack.top
-			callContext.Stack.data[top-1], callContext.Stack.data[top-2] = callContext.Stack.data[top-2], callContext.Stack.data[top-1]
-			pc++
-			continue
-		case SWAP2:
-			top := callContext.Stack.top
-			callContext.Stack.data[top-1], callContext.Stack.data[top-3] = callContext.Stack.data[top-3], callContext.Stack.data[top-1]
+			callContext.Stack.data[top-1], callContext.Stack.data[top-n] = callContext.Stack.data[top-n], callContext.Stack.data[top-1]
 			pc++
 			continue
 		case ADD:
@@ -563,13 +563,114 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			callContext.Stack.top--
 			pc++
 			continue
-		case ISZERO:
+		case MUL:
 			top := callContext.Stack.top
-			if callContext.Stack.data[top-1].IsZero() {
-				callContext.Stack.data[top-1].SetOne()
+			callContext.Stack.data[top-2].Mul(&callContext.Stack.data[top-1], &callContext.Stack.data[top-2])
+			callContext.Stack.top--
+			pc++
+			continue
+		case AND:
+			top := callContext.Stack.top
+			callContext.Stack.data[top-2].And(&callContext.Stack.data[top-1], &callContext.Stack.data[top-2])
+			callContext.Stack.top--
+			pc++
+			continue
+		case OR:
+			top := callContext.Stack.top
+			callContext.Stack.data[top-2].Or(&callContext.Stack.data[top-1], &callContext.Stack.data[top-2])
+			callContext.Stack.top--
+			pc++
+			continue
+		case XOR:
+			top := callContext.Stack.top
+			callContext.Stack.data[top-2].Xor(&callContext.Stack.data[top-1], &callContext.Stack.data[top-2])
+			callContext.Stack.top--
+			pc++
+			continue
+		case NOT:
+			v := &callContext.Stack.data[callContext.Stack.top-1]
+			v.Not(v)
+			pc++
+			continue
+		case BYTE:
+			top := callContext.Stack.top
+			callContext.Stack.data[top-2].Byte(&callContext.Stack.data[top-1])
+			callContext.Stack.top--
+			pc++
+			continue
+		case SHL:
+			top := callContext.Stack.top
+			shift, value := &callContext.Stack.data[top-1], &callContext.Stack.data[top-2]
+			if shift.LtUint64(256) {
+				value.Lsh(value, uint(shift.Uint64()))
 			} else {
-				callContext.Stack.data[top-1].Clear()
+				value.Clear()
 			}
+			callContext.Stack.top--
+			pc++
+			continue
+		case SHR:
+			top := callContext.Stack.top
+			shift, value := &callContext.Stack.data[top-1], &callContext.Stack.data[top-2]
+			if shift.LtUint64(256) {
+				value.Rsh(value, uint(shift.Uint64()))
+			} else {
+				value.Clear()
+			}
+			callContext.Stack.top--
+			pc++
+			continue
+		case LT:
+			top := callContext.Stack.top
+			if callContext.Stack.data[top-1].Lt(&callContext.Stack.data[top-2]) {
+				callContext.Stack.data[top-2].SetOne()
+			} else {
+				callContext.Stack.data[top-2].Clear()
+			}
+			callContext.Stack.top--
+			pc++
+			continue
+		case GT:
+			top := callContext.Stack.top
+			if callContext.Stack.data[top-1].Gt(&callContext.Stack.data[top-2]) {
+				callContext.Stack.data[top-2].SetOne()
+			} else {
+				callContext.Stack.data[top-2].Clear()
+			}
+			callContext.Stack.top--
+			pc++
+			continue
+		case EQ:
+			top := callContext.Stack.top
+			if callContext.Stack.data[top-1].Eq(&callContext.Stack.data[top-2]) {
+				callContext.Stack.data[top-2].SetOne()
+			} else {
+				callContext.Stack.data[top-2].Clear()
+			}
+			callContext.Stack.top--
+			pc++
+			continue
+		case ISZERO:
+			if callContext.Stack.data[callContext.Stack.top-1].IsZero() {
+				callContext.Stack.data[callContext.Stack.top-1].SetOne()
+			} else {
+				callContext.Stack.data[callContext.Stack.top-1].Clear()
+			}
+			pc++
+			continue
+		case GAS:
+			callContext.Stack.data[callContext.Stack.top].SetUint64(callContext.gas)
+			callContext.Stack.top++
+			pc++
+			continue
+		case CALLDATASIZE:
+			callContext.Stack.data[callContext.Stack.top].SetUint64(uint64(len(callContext.input)))
+			callContext.Stack.top++
+			pc++
+			continue
+		case RETURNDATASIZE:
+			callContext.Stack.data[callContext.Stack.top].SetUint64(uint64(len(evm.returnData)))
+			callContext.Stack.top++
 			pc++
 			continue
 		case JUMPDEST:
