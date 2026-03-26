@@ -163,11 +163,16 @@ runs:
     - name: Install git-restore-mtime
       shell: bash
       run: |
-        curl -sL https://raw.githubusercontent.com/MestreLion/git-tools/main/git-restore-mtime -o "$RUNNER_TEMP/git-restore-mtime"
-        chmod +x "$RUNNER_TEMP/git-restore-mtime"
+        if ! curl -sfL https://raw.githubusercontent.com/MestreLion/git-tools/main/git-restore-mtime -o "$RUNNER_TEMP/git-restore-mtime"; then
+          echo "::warning::Failed to download git-restore-mtime (rate-limited?), skipping mtime restore"
+          echo "SKIP_MTIME=true" >> "$GITHUB_ENV"
+        else
+          chmod +x "$RUNNER_TEMP/git-restore-mtime"
+        fi
         echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
 
     - name: Restore fixture mtimes for Go test caching
+      if: ${{ env.SKIP_MTIME != 'true' }}
       shell: bash
       run: |
         # Go's test cache keys include stat metadata (mtime+size) for every
