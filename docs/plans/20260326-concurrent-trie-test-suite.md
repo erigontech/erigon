@@ -118,12 +118,12 @@ These tests DO NOT reset tries between batches — state carries forward. This t
 - [x] Run `go test -run TestCompareRoots_ ./execution/commitment/...` — all must pass
 
 ### Task 6: Verify acceptance criteria
-- [ ] Verify all key distribution patterns from Layer A are covered
-- [ ] Verify all update type combinations from Layer B are covered
-- [ ] Verify multi-batch regression path (Layer C) is covered
-- [ ] Verify edge cases are handled
-- [ ] Run full test suite: `go test ./execution/commitment/...`
-- [ ] Run with race detector: `go test -race -run TestCompareRoots ./execution/commitment/...`
+- [x] Verify all key distribution patterns from Layer A are covered
+- [x] Verify all update type combinations from Layer B are covered
+- [x] Verify multi-batch regression path (Layer C) is covered
+- [x] Verify edge cases are handled
+- [x] Run full test suite: `go test ./execution/commitment/...`
+- [x] Run with race detector: `go test -race -run TestCompareRoots ./execution/commitment/...`
 
 ### Task 7: [Final] Update documentation
 - [ ] Update `CLAUDE.md` if new testing patterns discovered
