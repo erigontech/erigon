@@ -435,7 +435,7 @@ func generateSharedDomainsUpdatesForBench(b *testing.B, domains *execctx.SharedD
 
 			prevKeys[string(sk)] = struct{}{}
 
-			err = domains.DomainPut(kv.StorageDomain, tx, sk, common.Append(prev, []byte("v")), txNum, prev)
+			err = domains.DomainPut(kv.StorageDomain, tx, sk, append(common.Copy(prev), []byte("v")...), txNum, prev)
 			require.NoError(b, err)
 		}
 	}
