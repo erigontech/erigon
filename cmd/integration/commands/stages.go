@@ -59,6 +59,7 @@ import (
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	chain2 "github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
@@ -92,27 +93,31 @@ import (
 // Set debugVerbosity=true to force log verbosity to "debug" before SetupCobra.
 func makeStageCmd(use string, stageFn func(kv.TemporalRwDB, context.Context, log.Logger) error, applyMigrations, timeit, debugVerbosity bool) *cobra.Command {
 	return &cobra.Command{
-		Use:   use,
-		Short: "",
-		Run: func(cmd *cobra.Command, args []string) {
+		Use:          use,
+		Short:        "",
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
 			if debugVerbosity {
 				cmd.Flags().Set(logging.LogConsoleVerbosityFlag.Name, "debug")
 			}
 			logger := debug.SetupCobra(cmd, "integration")
 			db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), applyMigrations, chain, logger)
 			if err != nil {
-				logger.Error("Opening DB", "error", err)
-				return
+				return fmt.Errorf("opening DB: %w", err)
 			}
 			defer db.Close()
 			if timeit {
 				defer func(t time.Time) { logger.Info("total", "took", time.Since(t)) }(time.Now())
 			}
-			if err := stageFn(db, cmd.Context(), logger); err != nil {
-				if !errors.Is(err, context.Canceled) {
-					logger.Error(err.Error())
+			ctx, cancel := context.WithCancel(cmd.Context())
+			defer cancel()
+			if err := stageFn(db, ctx, logger); err != nil {
+				if errors.Is(err, context.Canceled) {
+					return nil // graceful shutdown
 				}
+				return err
 			}
+			return nil
 		},
 	}
 }
@@ -123,6 +128,7 @@ var (
 	cmdStageBodies      = makeStageCmd("stage_bodies", stageBodies, true, false, false)
 	cmdStageSenders     = makeStageCmd("stage_senders", stageSenders, true, false, false)
 	cmdStageExec        = makeStageCmd("stage_exec", stageExec, true, true, false)
+	cmdStageExecReplay  = makeStageCmd("stage_exec_replay", stageExecReplay, true, true, false)
 	cmdStageCustomTrace = makeStageCmd("stage_custom_trace", stageCustomTrace, true, true, false)
 	cmdStageTxLookup    = makeStageCmd("stage_tx_lookup", stageTxLookup, true, false, false)
 	cmdPrintStages      = makeStageCmd("print_stages", printAllStages, false, false, true)
@@ -322,6 +328,10 @@ func init() {
 	withChainTipMode(cmdStageExec)
 	rootCmd.AddCommand(cmdStageExec)
 
+	withStageBase(cmdStageExecReplay)
+	withBlock(cmdStageExecReplay)
+	rootCmd.AddCommand(cmdStageExecReplay)
+
 	withStageBase(cmdStageCustomTrace)
 	withReset(cmdStageCustomTrace)
 	withBlock(cmdStageCustomTrace)
@@ -487,7 +497,8 @@ func stageHeaders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 
 func stageBodies(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	chainConfig := fromdb.ChainConfig(db)
-	_, _, _, sync := newSync(ctx, db, nil /* miningConfig */, logger)
+	_, engine, _, sync := newSync(ctx, db, nil /* miningConfig */, logger)
+	defer engine.Close()
 	br, bw := blocksIO(db, logger)
 
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
@@ -522,7 +533,8 @@ func stageBodies(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) err
 func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	tmpdir := datadir.New(datadirCli).Tmp
 	chainConfig := fromdb.ChainConfig(db)
-	_, _, _, sync := newSync(ctx, db, nil /* miningConfig */, logger)
+	_, engine, _, sync := newSync(ctx, db, nil /* miningConfig */, logger)
+	defer engine.Close()
 
 	must(sync.SetCurrentStage(stages.Senders))
 
@@ -604,6 +616,7 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 }
 
 func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
+	dbg.Exec3Parallel = true
 	if chainTipMode && noCommit {
 		return errors.New("--sync.mode.chaintip cannot work with --no-commit to be false")
 	}
@@ -613,6 +626,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	}
 
 	_, engine, vmConfig, sync := newSync(ctx, db, nil /* miningConfig */, logger)
+	defer engine.Close()
 	must(sync.SetCurrentStage(stages.Execution))
 	if reset {
 		if err := rawdbreset.ResetExec(ctx, db); err != nil {
@@ -676,7 +690,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		return err
 	}
 
-	defer tx.Rollback()
+	defer func() { tx.Rollback() }()
 
 	if pruneTo > 0 {
 		p, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, true)
@@ -766,9 +780,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	agg := (db.(dbstate.HasAgg).Agg()).(*dbstate.Aggregator)
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
-	agg.SetCollateAndBuildWorkers(min(4, estimate.StateV3Collate.Workers()))
-	agg.SetMergeWorkers(min(4, estimate.StateV3Collate.Workers()))
-	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+	agg.PresetOfflineExecution()
 	agg.PeriodicalyPrintProcessSet(ctx)
 	agg.LockWorkersEditing()
 
@@ -812,6 +824,81 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	return nil
 }
 
+// stageExecReplay re-executes historic blocks using conflict-free parallel workers.
+// Each worker reads independently from committed history (HistoryReaderV3) with no
+// shared state and no conflicts. Unlike stage_exec, this does not advance state —
+// it only replays execution for measurement, testing, or side-effect generation.
+func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
+	dirs := datadir.New(datadirCli)
+	if err := datadir.ApplyMigrations(dirs); err != nil {
+		return err
+	}
+
+	_, engine, _, sync := newSync(ctx, db, nil /* miningConfig */, logger)
+	must(sync.SetCurrentStage(stages.Execution))
+
+	chainConfig := fromdb.ChainConfig(db)
+	genesis := readGenesis(chain)
+	blockReader, _ := blocksIO(db, logger)
+
+	var execProgress uint64
+	if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		var err error
+		execProgress, err = stages.GetStageProgress(tx, stages.Execution)
+		return err
+	}); err != nil {
+		return err
+	}
+
+	toBlock := execProgress
+	if block > 0 && block < toBlock {
+		toBlock = block
+	}
+
+	execArgs := &exec.ExecArgs{
+		ChainDB:     db,
+		BlockReader: blockReader,
+		ChainConfig: chainConfig,
+		Dirs:        dirs,
+		Engine:      engine,
+		Genesis:     genesis,
+		Workers:     syncCfg.ExecWorkerCount,
+	}
+
+	logger.Info("[stage_exec_replay] starting conflict-free parallel replay",
+		"from", 0, "to", toBlock, "workers", execArgs.Workers)
+
+	startTime := time.Now()
+	var lastBlockNum uint64
+
+	consumer := exec.TraceConsumerFunc(
+		func(br *exec.BlockResult, result *exec.TxResult, tx kv.TemporalTx) error {
+			if result.Err != nil {
+				return result.Err
+			}
+			txTask := result.Task.(*exec.TxTask)
+			lastBlockNum = txTask.BlockNumber()
+			return nil
+		})
+
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if err := exec.CustomTraceMapReduce(ctx, 0, toBlock, consumer, tx, execArgs, logger); err != nil {
+		return err
+	}
+
+	elapsed := time.Since(startTime)
+	blkPerSec := float64(lastBlockNum) / elapsed.Seconds()
+	logger.Info("[stage_exec_replay] finished",
+		"blocks", lastBlockNum, "elapsed", elapsed, "blk/s", fmt.Sprintf("%.1f", blkPerSec))
+
+	return nil
+}
+
 func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
 	if err := datadir.ApplyMigrations(dirs); err != nil {
@@ -819,6 +906,7 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	}
 
 	br, engine, vmConfig, sync := newSync(ctx, db, nil /* miningConfig */, logger)
+	defer engine.Close()
 	must(sync.SetCurrentStage(stages.Execution))
 
 	chainConfig := fromdb.ChainConfig(db)
@@ -850,9 +938,7 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
-	agg.SetCollateAndBuildWorkers(min(4, estimate.StateV3Collate.Workers()))
-	agg.SetMergeWorkers(min(4, estimate.StateV3Collate.Workers()))
-	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+	agg.PresetOfflineExecution()
 	agg.PeriodicalyPrintProcessSet(ctx)
 
 	err := stagedsync.SpawnCustomTrace(cfg, ctx, logger)
@@ -865,7 +951,9 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 
 func stageTxLookup(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
-	_, _, _, sync := newSync(ctx, db, nil /* miningConfig */, logger)
+	_, engine, _, sync := newSync(ctx, db, nil /* miningConfig */, logger)
+	defer engine.Close()
+
 	must(sync.SetCurrentStage(stages.TxLookup))
 	if reset {
 		return db.Update(ctx, rawdbreset.ResetTxLookup)
@@ -1058,7 +1146,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.
 	vmConfig := &vm.Config{}
 
 	genesis := readGenesis(chain)
-	chainConfig, genesisBlock, genesisErr := genesiswrite.CommitGenesisBlock(db, genesis, dirs, logger)
+	chainConfig, genesisBlock, genesisErr := genesiswrite.CommitGenesisBlock(db, genesis, chain, dirs, logger)
 	if _, ok := genesisErr.(*chain2.ConfigCompatError); genesisErr != nil && !ok {
 		panic(genesisErr)
 	}

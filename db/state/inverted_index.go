@@ -897,11 +897,22 @@ func (iit *InvertedIndexRoTx) tableScanningPrune(ctx context.Context, rwTx kv.Rw
 	if err != nil {
 		return nil, err
 	}
-	if prs != nil && prs.TxFrom == txFrom && prs.TxTo == txTo && prs.ValueProgress == prune.Done && prs.KeyProgress == prune.Done {
+	if prs != nil && prs.TxTo >= txTo && prs.ValueProgress == prune.Done && prs.KeyProgress == prune.Done {
 		stat = &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}
 		stat.Progress = prune.Done
 		return stat, nil
 	}
+	// Rolling scan: preserve B-tree key cursor across txTo advances.
+	// Keys cursor seeks by txNum directly (no scan penalty on reset),
+	// but values cursor has no txNum ordering — preserve its position.
+	if prs.ValueProgress == prune.Done {
+		prs.ValueProgress = prune.First
+		prs.LastPrunedValue = nil
+		prs.KeyProgress = prune.First
+		prs.LastPrunedKey = nil
+	}
+	prs.TxFrom = txFrom
+	prs.TxTo = txTo
 
 	pruneStat, err := prune.TableScanningPrune(ctx, name, iit.ii.FilenameBase, txFrom, txTo, limit, iit.stepSize,
 		logEvery, iit.ii.logger, keysCursor, valDelCursor, asserts, prs, mode)
@@ -1008,6 +1019,10 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 		}
 
 		baseTxNum := uint64(step) * ii.stepSize
+		if bitmap.Minimum() < txFrom || bitmap.Maximum() >= txTo {
+			return fmt.Errorf("[inverted_index] collate %s: txNums out of range [%d, %d) for step %d: min=%d, max=%d, key=%x",
+				ii.FilenameBase, txFrom, txTo, step, bitmap.Minimum(), bitmap.Maximum(), prevKey)
+		}
 		ef := multiencseq.NewBuilder(baseTxNum, bitmap.GetCardinality(), bitmap.Maximum())
 		it := bitmap.Iterator()
 		for it.HasNext() {
@@ -1141,6 +1156,7 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 		IndexFile:  idxPath,
 		Salt:       ii.salt.Load(),
 		NoFsync:    ii.noFsync,
+		Workers:    ii.BuildAccessorsWorkers,
 
 		Version:            versionOfRs,
 		Enums:              true,
@@ -1174,7 +1190,7 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 	// each such non-existing key read `MPH` transforms to random
 	// key read. `LessFalsePositives=true` feature filtering-out such cases (with `1/256=0.3%` false-positives).
 
-	if err := buildHashMapAccessor(ctx, data, idxPath, false, cfg, ps, ii.logger); err != nil {
+	if err := buildHashMapAccessor(ctx, data, idxPath, false, cfg, ps, ii.logger, nil); err != nil {
 		return err
 	}
 	return nil

@@ -20,8 +20,16 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 )
 
+// ethProtocolsByVersion lists ETH protocols in ascending version order.
+// Used by MinProtocol to find the lowest version supporting a message.
+var ethProtocolsByVersion = []sentryproto.Protocol{
+	sentryproto.Protocol_ETH68,
+	sentryproto.Protocol_ETH69,
+	sentryproto.Protocol_ETH70,
+}
+
 func MinProtocol(m sentryproto.MessageId) sentryproto.Protocol {
-	for p := sentryproto.Protocol_ETH68; p <= sentryproto.Protocol_ETH69; p++ {
+	for _, p := range ethProtocolsByVersion {
 		if ids, ok := ProtoIds[p]; ok {
 			if _, ok := ids[m]; ok {
 				return p
@@ -60,6 +68,21 @@ var ProtoIds = map[sentryproto.Protocol]map[sentryproto.MessageId]struct{}{
 		sentryproto.MessageId_BLOCK_BODIES_66:                  struct{}{},
 		sentryproto.MessageId_GET_RECEIPTS_69:                  struct{}{},
 		sentryproto.MessageId_RECEIPTS_66:                      struct{}{},
+		sentryproto.MessageId_NEW_BLOCK_HASHES_66:              struct{}{},
+		sentryproto.MessageId_NEW_BLOCK_66:                     struct{}{},
+		sentryproto.MessageId_TRANSACTIONS_66:                  struct{}{},
+		sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68: struct{}{},
+		sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66:       struct{}{},
+		sentryproto.MessageId_POOLED_TRANSACTIONS_66:           struct{}{},
+		sentryproto.MessageId_BLOCK_RANGE_UPDATE_69:            struct{}{},
+	},
+	sentryproto.Protocol_ETH70: {
+		sentryproto.MessageId_GET_BLOCK_HEADERS_66:             struct{}{},
+		sentryproto.MessageId_BLOCK_HEADERS_66:                 struct{}{},
+		sentryproto.MessageId_GET_BLOCK_BODIES_66:              struct{}{},
+		sentryproto.MessageId_BLOCK_BODIES_66:                  struct{}{},
+		sentryproto.MessageId_GET_RECEIPTS_70:                  struct{}{},
+		sentryproto.MessageId_RECEIPTS_70:                      struct{}{},
 		sentryproto.MessageId_NEW_BLOCK_HASHES_66:              struct{}{},
 		sentryproto.MessageId_NEW_BLOCK_66:                     struct{}{},
 		sentryproto.MessageId_TRANSACTIONS_66:                  struct{}{},

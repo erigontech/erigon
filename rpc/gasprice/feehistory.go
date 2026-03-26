@@ -348,26 +348,31 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 
 	// Launch up to maxBlockFetchers goroutines. Each goroutine opens its own
 	// TemporalTx via Fork so MDBX transactions are never shared across goroutines.
-	// If Fork returns nil (not supported), we fall back to using the main backend
-	// sequentially (only one goroutine will do real work in that case because they
-	// all share the same backend, but correctness is preserved).
+	// When Fork is not supported (returns nil backend), a single goroutine falls back
+	// to using the main backend sequentially; the others exit immediately to
+	// avoid concurrent access on the shared transaction.
 	g, fetchCtx := errgroup.WithContext(ctx)
+	var seqOnce int32 // CAS flag: 0 = available, 1 = sequential mode claimed
 	for range maxBlockFetchers {
 		g.Go(func() error {
 			localBackend, cleanup, forkErr := oracle.backend.Fork(fetchCtx)
 			if forkErr != nil {
 				return forkErr
 			}
-			if cleanup != nil {
-				defer cleanup()
-			}
 			if localBackend == nil {
+				// Fork not supported: allow exactly one goroutine to proceed
+				// sequentially on the shared backend; the others exit.
+				if !atomic.CompareAndSwapInt32(&seqOnce, 0, 1) {
+					return nil
+				}
 				localBackend = oracle.backend
+			} else if cleanup != nil {
+				defer cleanup()
 			}
 
 			for {
-				if fetchCtx.Err() != nil {
-					return nil
+				if err := fetchCtx.Err(); err != nil {
+					return err
 				}
 				blockNumber := atomic.AddUint64(&next, 1) - 1
 				if blockNumber > lastBlock {

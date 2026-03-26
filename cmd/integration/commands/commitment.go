@@ -17,6 +17,7 @@
 package commands
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/hex"
@@ -45,12 +46,12 @@ import (
 
 	"github.com/erigontech/erigon/cmd/utils/app"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/seg"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -93,7 +94,6 @@ var (
 )
 
 func init() {
-
 	// commitment branch
 	withChain(commitmentBranchCmd)
 	withDataDir(commitmentBranchCmd)
@@ -115,6 +115,9 @@ func init() {
 	withIntegrityChecks(cmdCommitmentRebuild)
 	withHeimdall(cmdCommitmentRebuild)
 	withChaosMonkey(cmdCommitmentRebuild)
+	withClearCommitment(cmdCommitmentRebuild)
+	withResume(cmdCommitmentRebuild)
+	withNoHistory(cmdCommitmentRebuild)
 	commitmentCmd.AddCommand(cmdCommitmentRebuild)
 
 	// commitment print
@@ -151,7 +154,6 @@ func init() {
 	commitmentCmd.AddCommand(cmdCommitmentBenchHistoryLookup)
 
 	rootCmd.AddCommand(commitmentCmd)
-
 }
 
 var commitmentCmd = &cobra.Command{
@@ -274,6 +276,16 @@ var cmdCommitmentRebuild = &cobra.Command{
 }
 
 func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
+	if clearCommitment && resume {
+		return errors.New("--clear-commitment and --resume are mutually exclusive")
+	}
+	if noHistory && resume {
+		return errors.New("--no-history and --resume are mutually exclusive")
+	}
+	if noHistory && clearCommitment {
+		return errors.New("--no-history and --clear-commitment are mutually exclusive")
+	}
+
 	dirs := datadir.New(datadirCli)
 	if reset {
 		return rawdbreset.Reset(ctx, db, stages.Execution)
@@ -282,27 +294,87 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	br, _ := blocksIO(db, logger)
 	cfg := stagedsync.StageTrieCfg(db, true, true, dirs.Tmp, br)
 
-	rwTx, err := db.BeginRw(ctx)
+	rwTx, err := db.BeginTemporalRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer rwTx.Rollback()
 
-	// remove all existing state commitment snapshots
-	if err := app.DeleteStateSnapshots(dirs, false, true, false, "0-999999", kv.CommitmentDomain.String()); err != nil {
+	if !clearCommitment {
+		domainProgress := rwTx.Debug().DomainProgress(kv.CommitmentDomain)
+		ok, err := br.TxnumReader().IsMaxTxNumPopulated(ctx, rwTx, domainProgress)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return errors.New("max tx num is not populated; run: integration stage_headers --reset --datadir=<dir> --chain=<chain>")
+		}
+	}
+
+	commitmentHistoryEnabled, _, err := rawdb.ReadDBCommitmentHistoryEnabled(rwTx)
+	if err != nil {
 		return err
 	}
 
-	log.Info("Clearing commitment-related DB tables to rebuild on clean data...")
-	sconf := statecfg.Schema.CommitmentDomain
-	for _, tn := range sconf.Tables() {
-		log.Info("Clearing", "table", tn)
-		if err := rwTx.ClearTable(tn); err != nil {
-			return fmt.Errorf("failed to clear table %s: %w", tn, err)
+	if resume && !commitmentHistoryEnabled {
+		return errors.New("--resume requires commitment history to be enabled")
+	}
+
+	withHistory := false
+	if noHistory {
+		// --no-history explicitly requested: skip history regeneration entirely
+		withHistory = false
+	} else if commitmentHistoryEnabled {
+		if clearCommitment || resume {
+			withHistory = true
+		} else {
+			fmt.Print("commitment history is enabled. Rebuild with history? (yes/no): ")
+			scanner := bufio.NewScanner(os.Stdin)
+			scanner.Scan()
+			resp := strings.ToLower(strings.TrimSpace(scanner.Text()))
+			switch resp {
+			case "y", "yes":
+				withHistory = true
+			case "n", "no":
+			default:
+				return fmt.Errorf("invalid response %q: expected yes or no", resp)
+			}
 		}
 	}
-	if err := rwTx.Commit(); err != nil {
-		return err
+
+	if !resume {
+		// remove all existing state commitment snapshots
+		// when not rebuilding with history, only delete domain files (preserve existing history/index)
+		if err := app.DeleteStateSnapshots(app.DeleteStateSnapshotsArgs{
+			Dirs:                   dirs,
+			RemoveLatest:           false,
+			PromptUserBeforeDelete: true,
+			DryRun:                 false,
+			StepRange:              "0-999999",
+			OnlyDomain:             !withHistory,
+			DomainNames:            []string{kv.CommitmentDomain.String()},
+		}); err != nil {
+			return err
+		}
+
+		log.Info("Clearing commitment-related DB tables to rebuild on clean data...")
+		sconf := statecfg.Schema.CommitmentDomain
+		for _, tn := range sconf.Tables() {
+			log.Info("Clearing", "table", tn)
+			if err := rwTx.ClearTable(tn); err != nil {
+				return fmt.Errorf("failed to clear table %s: %w", tn, err)
+			}
+		}
+		if err := rwTx.Commit(); err != nil {
+			return err
+		}
+	} else {
+		rwTx.Rollback()
+	}
+
+	if clearCommitment {
+		log.Info("Commitment data removed from DB and state files deleted")
+		return nil
 	}
 
 	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
@@ -313,13 +385,17 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
-	agg.SetCollateAndBuildWorkers(min(4, estimate.StateV3Collate.Workers()))
-	agg.SetMergeWorkers(min(4, estimate.StateV3Collate.Workers()))
-	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+	agg.PresetOfflineMerge()
 	agg.PeriodicalyPrintProcessSet(ctx)
 
-	if _, err := stagedsync.RebuildPatriciaTrieBasedOnFiles(ctx, cfg, squeeze); err != nil {
-		return err
+	if withHistory {
+		if _, err := stagedsync.RebuildPatriciaTrieWithHistory(ctx, cfg, squeeze); err != nil {
+			return err
+		}
+	} else {
+		if _, err := stagedsync.RebuildPatriciaTrieBasedOnFiles(ctx, cfg, squeeze); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -350,9 +426,6 @@ func printCommitment(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
-	agg.SetCollateAndBuildWorkers(min(4, estimate.StateV3Collate.Workers()))
-	agg.SetMergeWorkers(min(4, estimate.StateV3Collate.Workers()))
-	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 	agg.PeriodicalyPrintProcessSet(ctx)
 
 	// disable hard alignment; allowing commitment and storage/account to have
@@ -675,7 +748,7 @@ func benchHistoryLookup(ctx context.Context, logger log.Logger) error {
 	if err != nil {
 		logger.Warn("Failed to benchmark MDBX history lookups", "error", err)
 	}
-	var allStats = allFileStats
+	allStats := allFileStats
 	if mdbxStats != nil {
 		allStats = append(allStats, *mdbxStats)
 	}
@@ -1298,7 +1371,7 @@ func prefixLenCountChart(fname string, data *visualizeOverallStat) *charts.Pie {
 }
 
 func fileContentsMapChart(fileName string, data *visualizeOverallStat) *charts.TreeMap {
-	var TreeMap = []opts.TreeMapNode{
+	TreeMap := []opts.TreeMapNode{
 		{Name: "prefixes"},
 		{Name: "values"},
 	}
@@ -1357,14 +1430,16 @@ func fileContentsMapChart(fileName string, data *visualizeOverallStat) *charts.T
 							ItemStyle: &opts.ItemStyle{
 								BorderColor: "#777",
 								BorderWidth: 1,
-								GapWidth:    1},
+								GapWidth:    1,
+							},
 							UpperLabel: &opts.UpperLabel{Show: opts.Bool(true)},
 						},
 						{ // Level
 							ItemStyle: &opts.ItemStyle{
 								BorderColor: "#666",
 								BorderWidth: 1,
-								GapWidth:    1},
+								GapWidth:    1,
+							},
 							Emphasis: &opts.Emphasis{
 								ItemStyle: &opts.ItemStyle{BorderColor: "#555"},
 							},
@@ -1410,7 +1485,7 @@ function (info) {
     for (var i = 1; i < treePathInfo.length; i++) {
         treePath.push(treePathInfo[i].name);
     }
-    
+
     return [
         '<div class="tooltip-title" style="color: white;">' + formatUtil.encodeHTML(treePath.join('/')) + '</div>',
 				'<span style="color: white;">Disk Usage: ' + result + '</span>',

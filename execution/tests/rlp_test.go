@@ -26,9 +26,9 @@ import (
 )
 
 func TestRLP(t *testing.T) {
-	tm := new(testMatcher)
-	tm.walk(t, rlpTestDir, func(t *testing.T, name string, test *testutil.RLPTest) {
-		if err := tm.checkFailure(t, test.Run()); err != nil {
+	tm := new(testutil.TestMatcher)
+	tm.Walk(t, rlpTestDir, func(t *testing.T, name string, test *testutil.RLPTest) {
+		if err := tm.CheckFailure(t, test.Run()); err != nil {
 			t.Error(err)
 		}
 	})

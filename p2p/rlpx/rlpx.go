@@ -235,7 +235,7 @@ func (h *sessionState) writeFrame(conn io.Writer, code uint64, data []byte) erro
 	h.wbuf.reset()
 
 	// Write header.
-	fsize := rlp.IntSize(code) + len(data)
+	fsize := rlp.U64Len(code) + len(data)
 	if fsize > maxUint24 {
 		return errPlainMessageTooLarge
 	}

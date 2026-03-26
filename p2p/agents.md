@@ -58,8 +58,8 @@ gRPC-based P2P bridge:
 
 | Port | Protocol | Purpose |
 |------|----------|---------|
-| 30303 | TCP/UDP | eth/68 peering |
-| 30304 | TCP/UDP | eth/69 peering |
+| 30303 | TCP/UDP | eth/69 peering |
+| 30304 | TCP/UDP | eth/70 peering |
 | 9091 | TCP | Sentry gRPC (internal) |
 
 ## Running Separate Sentry

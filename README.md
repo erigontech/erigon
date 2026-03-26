@@ -455,8 +455,8 @@ go mod tidy
 | engine    | 9090  | TCP       | gRPC Server                 | Private       |
 | engine    | 42069 | TCP & UDP | Snap sync (Bittorrent)      | Public        |
 | engine    | 8551  | TCP       | Engine API (JWT auth)       | Private       |
-| sentry    | 30303 | TCP & UDP | eth/68 peering              | Public        |
-| sentry    | 30304 | TCP & UDP | eth/69 peering              | Public        |
+| sentry    | 30303 | TCP & UDP | eth/69 peering              | Public        |
+| sentry    | 30304 | TCP & UDP | eth/70 peering              | Public        |
 | sentry    | 9091  | TCP       | incoming gRPC Connections   | Private       |
 | rpcdaemon | 8545  | TCP       | HTTP & WebSockets & GraphQL | Private       |
 | mcp       | 8553  | TCP       | MCP server (AI assistants)  | Private       |

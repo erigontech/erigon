@@ -136,14 +136,13 @@ const (
 	ElasticityMultiplier               = 2          // Bounds the maximum gas limit an EIP-1559 block may have.
 	InitialBaseFee                     = 1000000000 // Initial base fee for EIP-1559 blocks.
 
-	MaxCodeSize              = 24576           // Maximum bytecode to permit for a contract
-	MaxCodeSizePostAhmedabad = 32768           // Maximum bytecode to permit for a contract post Ahmedabad hard fork (bor / polygon pos) (32KB)
-	MaxInitCodeSize          = 2 * MaxCodeSize // Maximum initcode to permit in a creation transaction and create instructions
+	MaxCodeSize              = 24 * 1024                // Maximum bytecode to permit for a contract
+	MaxCodeSizeAhmedabad     = 32 * 1024                // Maximum bytecode to permit for a contract post Ahmedabad hard fork (bor / polygon pos) (32KB)
+	MaxInitCodeSize          = 2 * MaxCodeSize          // Maximum initcode to permit in a creation transaction and create instructions
+	MaxCodeSizeAmsterdam     = 32 * 1024                // EIP-7954: Increase Maximum Contract Size
+	MaxInitCodeSizeAmsterdam = 2 * MaxCodeSizeAmsterdam // EIP-7954: Increase Maximum Contract Size
 
 	// Precompiled contract gas prices
-
-	TendermintHeaderValidateGas uint64 = 3000 // Gas for validate tendermiint consensus state
-	IAVLMerkleProofValidateGas  uint64 = 3000 // Gas for validate merkle proof
 
 	EcrecoverGas        uint64 = 3000 // Elliptic curve sender recovery gas price
 	Sha256BaseGas       uint64 = 60   // Base price for a SHA256 operation
@@ -208,6 +207,17 @@ const (
 	MaxBlockSize             = 10_485_760 // 10 MiB
 	MaxBlockSizeSafetyMargin = 2_097_152  // 2 MiB
 	MaxRlpBlockSize          = MaxBlockSize - MaxBlockSizeSafetyMargin
+
+	// EIP-8037: State Creation Gas Cost Increase
+	TargetStateGrowthPerYear uint64 = 107_374_182_400 // 100 × 1024^3 bytes
+	CpsbOffset                      = 9_578           // cost_per_state_byte_offset (for quantization)
+	CpsbSignificantBits             = 5               // cost_per_state_byte_significant_bits (for quantization)
+	CreateGasEIP8037                = CallValueTransferGas
+	Create2GasEIP8037               = CallValueTransferGas
+	SstoreSetGasEIP8037             = 2_900 // SstoreResetGasEIP2200 - ColdSloadCostEIP2929
+	PerAuthBaseCostEIP8037          = 7_500
+	StateBytesNewAccount            = 112 // bytes per new account creation
+	StateBytesAuthBase              = 23  // bytes per authorization base cost
 )
 
 // EIP-7702: Set EOA account code

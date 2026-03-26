@@ -31,6 +31,9 @@ const (
 	maxStorageChangesPerSlot    = math.MaxUint16 + 1
 	maxStorageReadsPerAccount   = 1 << 18
 	maxIndexedChangesPerAccount = math.MaxUint16 + 1
+
+	// EIP-7928: bal_items <= block_gas_limit / BalItemCost
+	BalItemCost = 2000
 )
 
 type AccountChanges struct {
@@ -99,10 +102,10 @@ func (ac *AccountChanges) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	encodingSize := ac.EncodingSize()
-	b := newEncodingBuf()
-	defer releaseEncodingBuf(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 
-	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
 
@@ -224,11 +227,11 @@ func (sc *SlotChanges) EncodeRLP(w io.Writer) error {
 		return err
 	}
 
-	b := newEncodingBuf()
-	defer releaseEncodingBuf(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 
 	encodingSize := sc.EncodingSize()
-	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
 	if err := rlp.EncodeUint256(hashToUint256(sc.Slot.Value()), w, b[:]); err != nil {
@@ -269,14 +272,14 @@ func (sc *StorageChange) EncodingSize() int {
 }
 
 func (sc *StorageChange) EncodeRLP(w io.Writer) error {
-	b := newEncodingBuf()
-	defer releaseEncodingBuf(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 
 	encodingSize := sc.EncodingSize()
-	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(uint64(sc.Index), w, b[:]); err != nil {
+	if err := rlp.EncodeU64(uint64(sc.Index), w, b[:]); err != nil {
 		return err
 	}
 	return rlp.EncodeUint256(sc.Value, w, b[:])
@@ -286,7 +289,7 @@ func (sc *StorageChange) DecodeRLP(s *rlp.Stream) error {
 	if _, err := s.List(); err != nil {
 		return err
 	}
-	idx, err := s.Uint()
+	idx, err := s.Uint64()
 	if err != nil {
 		return fmt.Errorf("read Index: %w", err)
 	}
@@ -312,14 +315,14 @@ func (bc *BalanceChange) EncodingSize() int {
 }
 
 func (bc *BalanceChange) EncodeRLP(w io.Writer) error {
-	b := newEncodingBuf()
-	defer releaseEncodingBuf(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 
 	encodingSize := bc.EncodingSize()
-	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(uint64(bc.Index), w, b[:]); err != nil {
+	if err := rlp.EncodeU64(uint64(bc.Index), w, b[:]); err != nil {
 		return err
 	}
 	return rlp.EncodeUint256(bc.Value, w, b[:])
@@ -329,7 +332,7 @@ func (bc *BalanceChange) DecodeRLP(s *rlp.Stream) error {
 	if _, err := s.List(); err != nil {
 		return err
 	}
-	idx, err := s.Uint()
+	idx, err := s.Uint64()
 	if err != nil {
 		return fmt.Errorf("read Index: %w", err)
 	}
@@ -355,24 +358,24 @@ func (nc *NonceChange) EncodingSize() int {
 }
 
 func (nc *NonceChange) EncodeRLP(w io.Writer) error {
-	b := newEncodingBuf()
-	defer releaseEncodingBuf(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 
 	encodingSize := nc.EncodingSize()
-	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(uint64(nc.Index), w, b[:]); err != nil {
+	if err := rlp.EncodeU64(uint64(nc.Index), w, b[:]); err != nil {
 		return err
 	}
-	return rlp.EncodeInt(nc.Value, w, b[:])
+	return rlp.EncodeU64(nc.Value, w, b[:])
 }
 
 func (nc *NonceChange) DecodeRLP(s *rlp.Stream) error {
 	if _, err := s.List(); err != nil {
 		return err
 	}
-	idx, err := s.Uint()
+	idx, err := s.Uint64()
 	if err != nil {
 		return fmt.Errorf("read Index: %w", err)
 	}
@@ -380,7 +383,7 @@ func (nc *NonceChange) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("block access index overflow: %d", idx)
 	}
 	nc.Index = uint16(idx)
-	value, err := s.Uint()
+	value, err := s.Uint64()
 	if err != nil {
 		return fmt.Errorf("read Value: %w", err)
 	}
@@ -395,14 +398,14 @@ func (cc *CodeChange) EncodingSize() int {
 }
 
 func (cc *CodeChange) EncodeRLP(w io.Writer) error {
-	b := newEncodingBuf()
-	defer releaseEncodingBuf(b)
+	b := rlp.NewEncodingBuf()
+	defer b.Release()
 
 	encodingSize := cc.EncodingSize()
-	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(uint64(cc.Index), w, b[:]); err != nil {
+	if err := rlp.EncodeU64(uint64(cc.Index), w, b[:]); err != nil {
 		return err
 	}
 	return rlp.EncodeString(cc.Bytecode, w, b[:])
@@ -412,7 +415,7 @@ func (cc *CodeChange) DecodeRLP(s *rlp.Stream) error {
 	if _, err := s.List(); err != nil {
 		return err
 	}
-	idx, err := s.Uint()
+	idx, err := s.Uint64()
 	if err != nil {
 		return fmt.Errorf("read Index: %w", err)
 	}
@@ -477,7 +480,7 @@ func sortHashes(hashes []accounts.StorageKey) {
 
 func encodeBlockAccessList[T rlpEncodable](items []T, w io.Writer, buf []byte) error {
 	total := EncodingSizeGenericList(items)
-	if err := rlp.EncodeStructSizePrefix(total, w, buf); err != nil {
+	if err := rlp.EncodeListPrefix(total, w, buf); err != nil {
 		return err
 	}
 	for _, item := range items {
@@ -496,7 +499,7 @@ func encodeHashList(hashes []accounts.StorageKey, w io.Writer, buf []byte) error
 	for i := range hashes {
 		total += rlp.Uint256Len(hashToUint256(hashes[i].Value()))
 	}
-	if err := rlp.EncodeStructSizePrefix(total, w, buf); err != nil {
+	if err := rlp.EncodeListPrefix(total, w, buf); err != nil {
 		return err
 	}
 	for i := range hashes {
@@ -581,8 +584,8 @@ func EncodeBlockAccessListBytes(bal BlockAccessList) ([]byte, error) {
 		return nil, err
 	}
 	var buf bytes.Buffer
-	encBuf := newEncodingBuf()
-	defer releaseEncodingBuf(encBuf)
+	encBuf := rlp.NewEncodingBuf()
+	defer encBuf.Release()
 	if err := encodeBlockAccessList(bal, &buf, encBuf[:]); err != nil {
 		return nil, err
 	}
@@ -821,14 +824,6 @@ func decodeMinimalHash(s *rlp.Stream) (common.Hash, error) {
 	return out, nil
 }
 
-func releaseEncodingBuf(buf *encodingBuf) {
-	if buf == nil {
-		return
-	}
-	*buf = encodingBuf{}
-	pooledBuf.Put(buf)
-}
-
 func (bal BlockAccessList) Hash() common.Hash {
 	if len(bal) == 0 {
 		return empty.BlockAccessListHash
@@ -862,6 +857,22 @@ func (bal BlockAccessList) Validate() error {
 	return nil
 }
 
+// ValidateMaxItems checks the EIP-7928 constraint: bal_items <= blockGasLimit / BalItemCost
+// where bal_items = count(addresses) + count(storage keys across all accounts).
+func (bal BlockAccessList) ValidateMaxItems(blockGasLimit uint64) error {
+	maxItems := blockGasLimit / BalItemCost
+	var items uint64
+	for _, ac := range bal {
+		items++ // each address counts as 1 item
+		items += uint64(len(ac.StorageChanges))
+		items += uint64(len(ac.StorageReads))
+	}
+	if items > maxItems {
+		return fmt.Errorf("block access list too large: %d items > %d max (gas limit %d / %d)", items, maxItems, blockGasLimit, BalItemCost)
+	}
+	return nil
+}
+
 func (ac *AccountChanges) validate() error {
 	if ac == nil {
 		return errors.New("nil account changes")
@@ -871,6 +882,18 @@ func (ac *AccountChanges) validate() error {
 	}
 	if err := validateStorageReads(ac.StorageReads); err != nil {
 		return fmt.Errorf("storage_reads: %w", err)
+	}
+	// EIP-7928: a slot must not appear in both storage_changes and storage_reads.
+	if len(ac.StorageChanges) > 0 && len(ac.StorageReads) > 0 {
+		changeSlots := make(map[common.Hash]struct{}, len(ac.StorageChanges))
+		for _, sc := range ac.StorageChanges {
+			changeSlots[sc.Slot.Value()] = struct{}{}
+		}
+		for _, key := range ac.StorageReads {
+			if _, exists := changeSlots[key.Value()]; exists {
+				return fmt.Errorf("storage key %s in both changes and reads", key.Value().Hex())
+			}
+		}
 	}
 	if err := validateBalanceChangeList(ac.BalanceChanges); err != nil {
 		return fmt.Errorf("balance_changes: %w", err)

@@ -1395,13 +1395,12 @@ func (s *RoSnapshots) delete(fileName string) error {
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
 
-	var err error
 	var delSeg *DirtySegment
 	var dirtySegments *btree.BTreeG[*DirtySegment]
 
 	_, fName := filepath.Split(fileName)
 	for _, t := range s.enums {
-		findDelSeg := false
+		found := false
 		s.dirty[t].Walk(func(segs []*DirtySegment) bool {
 			for _, sn := range segs {
 				if sn.Decompressor == nil {
@@ -1413,17 +1412,22 @@ func (s *RoSnapshots) delete(fileName string) error {
 				sn.canDelete.Store(true)
 				delSeg = sn
 				dirtySegments = s.dirty[t]
-				findDelSeg = false
-				return true
+				found = true
+				return false
 			}
 			return true
 		})
-		if findDelSeg {
+		if found {
 			break
 		}
 	}
+	if delSeg == nil || dirtySegments == nil {
+		// Deletion is intentionally idempotent because a snapshot may already
+		// have been removed from the in-memory set by another pruning path.
+		return nil
+	}
 	dirtySegments.Delete(delSeg)
-	return err
+	return nil
 }
 
 // prune visible segments

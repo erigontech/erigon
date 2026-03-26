@@ -180,7 +180,7 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.TemporalTx, ha
 	}
 
 	if tracer != nil && tracer.Hooks.OnTxEnd != nil {
-		tracer.OnTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, nil)
+		tracer.Hooks.OnTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, nil)
 	}
 	return result, nil
 }
@@ -315,16 +315,14 @@ func delegateBlockFees(ctx context.Context, tx kv.Tx, block *types.Block, sender
 	totalFees := big.NewInt(0)
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
-		var effectiveGasPrice uint64
 		if !chainConfig.IsLondon(block.NumberU64()) {
-			effectiveGasPrice = txn.GetTipCap().Uint64()
+			fee.Set(txn.GetTipCap().ToBig())
 		} else {
 			baseFee := block.BaseFee()
 			gasPrice := new(uint256.Int).Add(baseFee, txn.GetEffectiveGasTip(baseFee))
-			effectiveGasPrice = gasPrice.Uint64()
+			fee.Set(gasPrice.ToBig())
 		}
 
-		fee.SetUint64(effectiveGasPrice)
 		gasUsed.SetUint64(receipt.GasUsed)
 		fee.Mul(fee, gasUsed)
 
@@ -402,12 +400,6 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 		result = append(result, marshalledRcpt)
 	}
 
-	// Pruned block attrs
-	prunedBlock := map[string]any{}
-	for _, k := range []string{"timestamp", "miner", "baseFeePerGas"} {
-		prunedBlock[k] = getBlockRes[k]
-	}
-
 	// Crop txn input to 4bytes
 	var txs = getBlockRes["transactions"].([]any)
 	for _, rawTx := range txs {
@@ -427,6 +419,9 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 		pageStart = 0
 	}
 
+	if pageEnd > len(result) {
+		return nil, fmt.Errorf("receipts count mismatch: got %d, need %d", len(result), pageEnd)
+	}
 	response := map[string]any{}
 	getBlockRes["transactions"] = getBlockRes["transactions"].([]any)[pageStart:pageEnd]
 	response["fullblock"] = getBlockRes
