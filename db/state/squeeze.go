@@ -931,6 +931,11 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		}
 		roTx.Rollback()
 
+		concurrent := dbg.EnvBool("ERIGON_REBUILD_CONCURRENT_COMMITMENT", false)
+		prevConcurrent := statecfg.ExperimentalConcurrentCommitment
+		statecfg.ExperimentalConcurrentCommitment = concurrent
+		defer func() { statecfg.ExperimentalConcurrentCommitment = prevConcurrent }()
+
 		for shardFrom < lastShard { // recreate this file range 1+ steps
 			nextKey := func() (ok bool, k []byte) {
 				if !keyIter.HasNext() {
@@ -953,11 +958,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 				return nil, err
 			}
 			defer rwTx.Rollback()
-
-			concurrent := dbg.EnvBool("ERIGON_REBUILD_CONCURRENT_COMMITMENT", false)
-			prevConcurrent := statecfg.ExperimentalConcurrentCommitment
-			statecfg.ExperimentalConcurrentCommitment = concurrent
-			defer func() { statecfg.ExperimentalConcurrentCommitment = prevConcurrent }()
 
 			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 			if err != nil {

@@ -528,6 +528,7 @@ Erigon supports configuration through environment variables, primarily for exper
 
 * `EXEC3_PARALLEL` - Enables parallel execution in version 3
 * `EXEC3_WORKERS` - Sets number of execution workers
+* `ERIGON_REBUILD_CONCURRENT_COMMITMENT` - Enables concurrent trie processing during commitment rebuild (default: `false`)
 * `STAGES_ONLY_BLOCKS` - Limits stages to blocks only
 
 ### Memory and Debugging Variables

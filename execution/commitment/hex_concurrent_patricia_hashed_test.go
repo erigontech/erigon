@@ -129,11 +129,11 @@ func compareRoots(
 // respecting ConcurrentPatriciaHashed.CanDoConcurrentNext() — matching
 // production behavior where the trie decides the next batch's mode.
 type multiBatchComparer struct {
-	t              *testing.T
-	seqMs, parMs   *MockState
-	seqTrie        *HexPatriciaHashed
-	parTrie        *ConcurrentPatriciaHashed
-	useConcurrent  bool // whether parTrie should use concurrent mode for the next batch
+	t             *testing.T
+	seqMs, parMs  *MockState
+	seqTrie       *HexPatriciaHashed
+	parTrie       *ConcurrentPatriciaHashed
+	useConcurrent bool // whether parTrie should use concurrent mode for the next batch
 }
 
 func newMultiBatchComparer(t *testing.T) *multiBatchComparer {
@@ -313,8 +313,8 @@ func TestCompareRoots_HeavySkew(t *testing.T) {
 	seqMs, parMs, seqTrie, parTrie := setupTriePair(t)
 
 	const heavyNibble = 0x5
-	const heavyCount = 45  // ~90%
-	const spreadCount = 5  // ~10% spread across other nibbles
+	const heavyCount = 45 // ~90%
+	const spreadCount = 5 // ~10% spread across other nibbles
 
 	ub := NewUpdateBuilder()
 	// Heavy nibble: 45 addresses
@@ -380,7 +380,7 @@ func TestCompareRoots_AccountsOnly(t *testing.T) {
 	t.Logf("AccountsOnly root (32 accounts with balance+nonce+codeHash): %x", root)
 }
 
-func TestCompareRoots_StorageOnly(t *testing.T) {
+func TestCompareRoots_AccountsWithStorage(t *testing.T) {
 	t.Parallel()
 	seqMs, parMs, seqTrie, parTrie := setupTriePair(t)
 
@@ -598,6 +598,7 @@ func TestCompareRoots_MultiBatch_CreateThenDeleteAll(t *testing.T) {
 	}
 	plainKeys2, updates2 := ub2.Build()
 	root2 := c.compareBatch(plainKeys2, updates2)
+	require.NotEqual(t, root1, root2, "root should change after deleting all accounts")
 	t.Logf("CreateThenDeleteAll batch 2 root (delete all): %x", root2)
 }
 
@@ -863,4 +864,3 @@ func TestCompareRoots_LargeScale(t *testing.T) {
 	require.NotEmpty(t, root)
 	t.Logf("LargeScale root (%d accounts spread across 16 nibbles): %x", numAccounts, root)
 }
-
