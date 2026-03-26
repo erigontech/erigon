@@ -505,13 +505,10 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 
 		// Fast-path: inline the hottest opcodes to avoid the indirect call
 		// through operation.execute, which forces a full register spill/reload.
-		// Only opcodes without dynamic gas or memory expansion are eligible.
+		// Only opcodes defined since Frontier and without dynamic gas are eligible;
+		// fork-dependent opcodes (PUSH0, SHL, SHR, SAR, RETURNDATASIZE) must use
+		// the jump table so that undefined-opcode handling works on older forks.
 		switch op {
-		case PUSH0:
-			callContext.Stack.data[callContext.Stack.top] = uint256.Int{}
-			callContext.Stack.top++
-			pc++
-			continue
 		case PUSH1:
 			var val uint256.Int
 			if pc+1 < uint64(len(contract.Code)) {
@@ -598,28 +595,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			callContext.Stack.top--
 			pc++
 			continue
-		case SHL:
-			top := callContext.Stack.top
-			shift, value := &callContext.Stack.data[top-1], &callContext.Stack.data[top-2]
-			if shift.LtUint64(256) {
-				value.Lsh(value, uint(shift.Uint64()))
-			} else {
-				value.Clear()
-			}
-			callContext.Stack.top--
-			pc++
-			continue
-		case SHR:
-			top := callContext.Stack.top
-			shift, value := &callContext.Stack.data[top-1], &callContext.Stack.data[top-2]
-			if shift.LtUint64(256) {
-				value.Rsh(value, uint(shift.Uint64()))
-			} else {
-				value.Clear()
-			}
-			callContext.Stack.top--
-			pc++
-			continue
+		// SHL, SHR, SAR: Constantinople+ only — must go through jump table.
 		case LT:
 			top := callContext.Stack.top
 			if callContext.Stack.data[top-1].Lt(&callContext.Stack.data[top-2]) {
@@ -668,11 +644,8 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			callContext.Stack.top++
 			pc++
 			continue
-		case RETURNDATASIZE:
-			callContext.Stack.data[callContext.Stack.top].SetUint64(uint64(len(evm.returnData)))
-			callContext.Stack.top++
-			pc++
-			continue
+		// RETURNDATASIZE: Byzantium+ only — must go through jump table.
+		// PUSH0: Shanghai+ only — must go through jump table.
 		case JUMPDEST:
 			pc++
 			continue
