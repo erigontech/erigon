@@ -865,8 +865,14 @@ func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 		Workers:     syncCfg.ExecWorkerCount,
 	}
 
+	fromBlock := uint64(0)
+	if block > 0 {
+		fromBlock = block
+		toBlock = block + 1 // replay exactly [block, block+1) = just block
+	}
+
 	logger.Info("[stage_exec_replay] starting conflict-free parallel replay",
-		"from", 0, "to", toBlock, "workers", execArgs.Workers)
+		"from", fromBlock, "to", toBlock, "workers", execArgs.Workers)
 
 	startTime := time.Now()
 	var lastBlockNum uint64
@@ -887,7 +893,7 @@ func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 	}
 	defer tx.Rollback()
 
-	if err := exec.CustomTraceMapReduce(ctx, 0, toBlock, consumer, tx, execArgs, logger); err != nil {
+	if err := exec.CustomTraceMapReduce(ctx, fromBlock, toBlock, consumer, tx, execArgs, logger); err != nil {
 		return err
 	}
 
