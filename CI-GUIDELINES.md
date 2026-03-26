@@ -105,17 +105,21 @@ re-queued.
 ### Push to main/release (cache warming)
 
 After a PR is merged through the merge queue, a `push` event fires on `main` (or the
-release branch). Correctness has already been established by the merge queue. The sole
-purpose of running workflows on this trigger is to **warm caches** for future PR and
-merge queue runs.
+release branch). Correctness has already been established by the PR and merge queue
+gates. The sole purpose of running CI gating workflows on this trigger is to **warm
+caches** for future PR and merge queue runs on that branch. There is no value in
+re-running the gate itself — it already passed.
+
+Only workflows that already run as PR or merge queue checks should add a push-to-main
+trigger, and only for cache warming. Workflows that do not gate PRs or the merge queue
+have no reason to run on push to main at all.
 
 **Never run tests on this trigger.** If a test fails on `main`, there is no PR to fix it
 in, no author to notify, and no way to correct the commit. Failures here are noise that
 misleads outside observers into thinking `main` is broken, when in fact the code passed
 all required checks before landing.
 
-For jobs that run tests on `pull_request` or `merge_group` but need a push-to-main run
-for cache warming, use conditional steps:
+For CI gating jobs that need a push-to-main run for cache warming, use conditional steps:
 
 ```yaml
 - name: Run tests
