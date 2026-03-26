@@ -29,7 +29,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 )
 
-const maxBlobsThroughoutputPerRequest = 72
+const maxBlobsThroughputPerRequest = 72
 
 func (c *ConsensusHandlers) blobsSidecarsByRangeHandlerDeneb(s network.Stream) error {
 	return c.blobsSidecarsByRangeHandler(s, clparams.DenebVersion)
@@ -49,7 +49,7 @@ func (c *ConsensusHandlers) blobsSidecarsByRangeHandler(s network.Stream, versio
 	// max here is always ≤ Electra's MaxBlobsPerBlock.
 	startEpoch := req.StartSlot / c.beaconConfig.SlotsPerEpoch
 	maxBlobs := int(c.beaconConfig.GetBlobParameters(startEpoch).MaxBlobsPerBlock)
-	if cost := min(int(req.Count)*maxBlobs, maxBlobsThroughoutputPerRequest) - 1; !c.consumeRateLimit(s, cost) {
+	if cost := min(int(req.Count)*maxBlobs, maxBlobsThroughputPerRequest) - 1; !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 
@@ -86,7 +86,7 @@ func (c *ConsensusHandlers) blobsSidecarsByRangeHandler(s network.Stream, versio
 			return err
 		}
 
-		for i := 0; i < int(blobCount) && written < maxBlobsThroughoutputPerRequest; i++ {
+		for i := 0; i < int(blobCount) && written < maxBlobsThroughputPerRequest; i++ {
 			// Read the fork digest
 			forkDigest, err := c.ethClock.ComputeForkDigest(slot / c.beaconConfig.SlotsPerEpoch)
 			if err != nil {
@@ -119,7 +119,7 @@ func (c *ConsensusHandlers) blobsSidecarsByIdsHandler(s network.Stream, version 
 	}
 
 	// Consume additional rate-limit tokens: one per blob identifier.
-	if cost := min(req.Len(), maxBlobsThroughoutputPerRequest) - 1; !c.consumeRateLimit(s, cost) {
+	if cost := min(req.Len(), maxBlobsThroughputPerRequest) - 1; !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 
@@ -130,7 +130,7 @@ func (c *ConsensusHandlers) blobsSidecarsByIdsHandler(s network.Stream, version 
 	defer tx.Rollback()
 
 	written := 0
-	for i := 0; i < req.Len() && written < maxBlobsThroughoutputPerRequest; i++ {
+	for i := 0; i < req.Len() && written < maxBlobsThroughputPerRequest; i++ {
 
 		id := req.Get(i)
 		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, id.BlockRoot)
