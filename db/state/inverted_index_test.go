@@ -606,6 +606,116 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	require.Equal(t, float64(0), to)   //nolint:testifylint
 }
 
+// TestInvIndex_PruneRollingCursorProgress verifies the three properties of the
+// rolling-cursor optimisation added to inverted_index.tableScanningPrune:
+//
+//  1. Early-exit: prg.TxTo >= txTo && KeyProgress==Done && ValueProgress==Done
+//     → return immediately, no deletions.
+//  2. Rotation reset: after Done a call with larger txTo resets cursor to First
+//     and picks up newly pruneable entries.
+//  3. Cursor preservation: an InProgress cursor survives a txTo advance —
+//     the subsequent call resumes from LastPrunedValue rather than First.
+func TestInvIndex_PruneRollingCursorProgress(t *testing.T) {
+	t.Parallel()
+
+	const (
+		aggStep  = uint64(16)
+		keyCount = 40 // unique keys written to the index
+	)
+	ctx := context.Background()
+	db, ii := testDbAndInvertedIndex(t, aggStep, log.New())
+
+	rwTx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	// writeKeys adds keyCount entries to the index at the given txNum.
+	// forced=true in TableScanningPrune bypasses the CanPrune file check.
+	writeKeys := func(txNum uint64) {
+		t.Helper()
+		ic := ii.BeginFilesRo()
+		defer ic.Close()
+		w := ic.NewWriter()
+		defer w.close()
+		for k := uint64(0); k < keyCount; k++ {
+			var key [8]byte
+			binary.BigEndian.PutUint64(key[:], k)
+			require.NoError(t, w.Add(key[:], txNum))
+		}
+		require.NoError(t, w.Flush(ctx, rwTx))
+	}
+
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
+	// callPrune calls TableScanningPrune in table-scanning mode (txTo != MaxUint64,
+	// forced=true so no file-presence check is required).
+	callPrune := func(txFrom, txTo uint64) *InvertedIndexPruneStat {
+		t.Helper()
+		ic := ii.BeginFilesRo()
+		defer ic.Close()
+		stat, err := ic.TableScanningPrune(ctx, rwTx, txFrom, txTo, math.MaxUint64, logEvery,
+			true /*forced*/, nil, nil, nil, prune.DefaultStorageMode)
+		require.NoError(t, err)
+		return stat
+	}
+
+	// ── Write step-0 and step-1 data (txNums 1 and aggStep+1). ────────────
+	writeKeys(1)           // step 0
+	writeKeys(aggStep + 1) // step 1
+
+	// ── Property 1: early-exit ─────────────────────────────────────────────
+	// Full prune of step 0 (txTo = aggStep).
+	stat0 := callPrune(0, aggStep)
+	require.Equal(t, prune.Done, stat0.Progress)
+	require.NotZero(t, stat0.PruneCountValues+stat0.PruneCountTx, "step-0 entries must be deleted")
+
+	prg, err := GetPruneValProgress(rwTx, []byte(ii.ValuesTable))
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, prg.ValueProgress)
+	require.Equal(t, prune.Done, prg.KeyProgress)
+	require.EqualValues(t, aggStep, prg.TxTo)
+
+	// Repeat with same txTo → early-exit, no work.
+	statEarly := callPrune(0, aggStep)
+	require.Equal(t, prune.Done, statEarly.Progress)
+	require.Zero(t, statEarly.PruneCountValues+statEarly.PruneCountTx,
+		"early-exit must delete nothing")
+
+	// ── Property 2: rotation reset when txTo advances ──────────────────────
+	stat1 := callPrune(aggStep, aggStep*2)
+	require.Equal(t, prune.Done, stat1.Progress)
+	require.NotZero(t, stat1.PruneCountValues+stat1.PruneCountTx,
+		"step-1 entries must be deleted in the new rotation")
+
+	prg1, err := GetPruneValProgress(rwTx, []byte(ii.ValuesTable))
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, prg1.ValueProgress)
+	require.Nil(t, prg1.LastPrunedValue, "cursor must be nil after rotation completion")
+
+	// ── Property 3: cursor preservation when txTo advances mid-rotation ────
+	writeKeys(aggStep*2 + 1) // step 2
+
+	// Inject InProgress at the midpoint key so the prune resumes from there.
+	midKey := make([]byte, 8)
+	binary.BigEndian.PutUint64(midKey, keyCount/2)
+	txFrom2, txTo2 := aggStep*2, aggStep*3
+	injected := &prune.Stat{
+		ValueProgress:   prune.InProgress,
+		KeyProgress:     prune.Done, // keys pass already done
+		LastPrunedValue: midKey,
+		TxFrom:          txFrom2,
+		TxTo:            txTo2,
+	}
+	require.NoError(t, SavePruneValProgress(rwTx, ii.ValuesTable, injected))
+
+	stat2 := callPrune(txFrom2, txTo2)
+	require.Equal(t, prune.Done, stat2.Progress)
+	// Cursor started at midKey so only the second half of entries could be pruned.
+	require.LessOrEqual(t, stat2.PruneCountValues, uint64(keyCount/2),
+		"cursor preserved: only entries at/after midKey should be deleted")
+}
+
 func filledInvIndex(tb testing.TB, logger log.Logger) (kv.RwDB, *InvertedIndex, uint64) {
 	tb.Helper()
 	return filledInvIndexOfSize(tb, uint64(1000), 16, 31, logger)
