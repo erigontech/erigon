@@ -145,17 +145,46 @@ func ExecV3(ctx context.Context,
 	}
 
 	// OtterSync nodes bypass the Bodies stage and never write TxNums entries for
-	// hot-DB blocks (blocks received over the network but not yet snapshotted).
-	// Extend the TxNums index now so that restoreTxNum can compute the tx range.
+	// blocks that have been snapshotted but whose kv.MaxTxNum entries are missing.
+	// Extend the TxNums index using the snapshot-aware block reader so that
+	// restoreTxNum can compute the tx range for the requested blocks.
 	{
 		txNumsReader := cfg.blockReader.TxnumReader()
 		lastTxNumBlock, _, err := txNumsReader.Last(applyTx)
 		if err != nil {
 			return err
 		}
+		fmt.Printf("EXEC_DIAG: AppendTxNums: lastTxNumBlock=%d blockNum=%d maxBlockNum=%d\n", lastTxNumBlock, blockNum, maxBlockNum)
 		if lastTxNumBlock <= blockNum {
-			if appendErr := rawdb.AppendCanonicalTxNums(applyTx, blockNum+1); appendErr != nil {
-				return fmt.Errorf("AppendCanonicalTxNums from block %d: %w", blockNum+1, appendErr)
+			// Snapshot-aware: use block reader (covers both MDBX hot DB and snapshot files).
+			nextBaseTxNum, err := txNumsReader.Max(ctx, applyTx, blockNum)
+			if err != nil {
+				return fmt.Errorf("TxNums.Max(%d): %w", blockNum, err)
+			}
+			nextBaseTxNum++ // first txNum of blockNum+1
+			for bn := blockNum + 1; bn <= maxBlockNum; bn++ {
+				hash, ok, err := cfg.blockReader.CanonicalHash(ctx, applyTx, bn)
+				if err != nil {
+					return fmt.Errorf("CanonicalHash(%d): %w", bn, err)
+				}
+				if !ok || hash == (common.Hash{}) {
+					fmt.Printf("EXEC_DIAG: AppendTxNums: no canonical hash at block %d, stopping\n", bn)
+					break
+				}
+				_, txCount, err := cfg.blockReader.Body(ctx, applyTx, hash, bn)
+				if err != nil {
+					return fmt.Errorf("Body(%d): %w", bn, err)
+				}
+				if txCount == 0 {
+					fmt.Printf("EXEC_DIAG: AppendTxNums: txCount=0 at block %d, stopping\n", bn)
+					break
+				}
+				maxTxNumForBlock := nextBaseTxNum + uint64(txCount) - 1
+				if appendErr := txNumsReader.Append(applyTx, bn, maxTxNumForBlock); appendErr != nil {
+					return fmt.Errorf("TxNums.Append(%d, %d): %w", bn, maxTxNumForBlock, appendErr)
+				}
+				fmt.Printf("EXEC_DIAG: AppendTxNums: appended block=%d txCount=%d maxTxNum=%d\n", bn, txCount, maxTxNumForBlock)
+				nextBaseTxNum += uint64(txCount)
 			}
 		}
 	}
