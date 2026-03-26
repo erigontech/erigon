@@ -70,13 +70,13 @@ The core helper runs the same updates through both sequential and concurrent tri
 
 Each subtest creates a specific nibble distribution using addresses pre-computed by `findAddressForNibble`.
 
-- [ ] `TestCompareRoots_AllKeysSingleNibble` — generate 50+ addresses all hashing to nibble 0x0, set balances, compare roots. This is the most likely scenario to trigger the foldNibble bug.
-- [ ] `TestCompareRoots_AllNibblesPopulated` — at least 2 addresses per nibble (32+ total), balance updates, compare roots
-- [ ] `TestCompareRoots_TwoNibblesOnly` — addresses in nibbles 0x0 and 0xF only, compare roots
-- [ ] `TestCompareRoots_FifteenNibbles` — all nibbles except one populated, compare roots
-- [ ] `TestCompareRoots_SingleKey` — exactly one account, compare roots
-- [ ] `TestCompareRoots_HeavySkew` — 90% of addresses in one nibble, 10% spread across others, compare roots
-- [ ] Run `go test -run TestCompareRoots_ ./execution/commitment/...` — all must pass
+- [x] `TestCompareRoots_AllKeysSingleNibble` — generate 50+ addresses all hashing to nibble 0x0, set balances, compare roots. This is the most likely scenario to trigger the foldNibble bug.
+- [x] `TestCompareRoots_AllNibblesPopulated` — at least 2 addresses per nibble (32+ total), balance updates, compare roots
+- [x] `TestCompareRoots_TwoNibblesOnly` — addresses in nibbles 0x0 and 0xF only, compare roots
+- [x] `TestCompareRoots_FifteenNibbles` — all nibbles except one populated, compare roots
+- [x] `TestCompareRoots_SingleKey` — exactly one account, compare roots
+- [x] `TestCompareRoots_HeavySkew` — 90% of addresses in one nibble, 10% spread across others, compare roots
+- [x] Run `go test -run TestCompareRoots_ ./execution/commitment/...` — all must pass
 
 ### Task 3: Layer B — Update type combination tests
 

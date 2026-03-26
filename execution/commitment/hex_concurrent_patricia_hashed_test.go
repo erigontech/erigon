@@ -3,6 +3,7 @@ package commitment
 import (
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"sync"
 	"testing"
 
@@ -137,3 +138,138 @@ func TestCompareRoots_Smoke(t *testing.T) {
 	require.NotEmpty(t, root, "root hash should not be empty after an update")
 	t.Logf("smoke test root: %x", root)
 }
+
+// addrHex returns the hex-encoded string of a 20-byte address (no 0x prefix),
+// suitable for passing to UpdateBuilder methods.
+func addrHex(addr []byte) string {
+	return hex.EncodeToString(addr)
+}
+
+// --- Layer A: Key distribution pattern tests ---
+
+func TestCompareRoots_AllKeysSingleNibble(t *testing.T) {
+	t.Parallel()
+	seqMs, parMs, seqTrie, parTrie := setupTriePair(t)
+
+	const targetNibble = 0x0
+	const numAddrs = 55
+
+	ub := NewUpdateBuilder()
+	for i := 0; i < numAddrs; i++ {
+		addr := findAddressForNibble(targetNibble, i)
+		ub.Balance(addrHex(addr), uint64(100+i))
+	}
+	plainKeys, updates := ub.Build()
+
+	root := compareRoots(t, seqMs, parMs, seqTrie, parTrie, plainKeys, updates)
+	require.NotEmpty(t, root)
+	t.Logf("AllKeysSingleNibble root (%d keys in nibble %x): %x", numAddrs, targetNibble, root)
+}
+
+func TestCompareRoots_AllNibblesPopulated(t *testing.T) {
+	t.Parallel()
+	seqMs, parMs, seqTrie, parTrie := setupTriePair(t)
+
+	ub := NewUpdateBuilder()
+	total := 0
+	for nibble := 0; nibble < 16; nibble++ {
+		for seed := 0; seed < 3; seed++ {
+			addr := findAddressForNibble(nibble, seed)
+			ub.Balance(addrHex(addr), uint64(1000*nibble+seed))
+			total++
+		}
+	}
+	plainKeys, updates := ub.Build()
+
+	root := compareRoots(t, seqMs, parMs, seqTrie, parTrie, plainKeys, updates)
+	require.NotEmpty(t, root)
+	t.Logf("AllNibblesPopulated root (%d keys across 16 nibbles): %x", total, root)
+}
+
+func TestCompareRoots_TwoNibblesOnly(t *testing.T) {
+	t.Parallel()
+	seqMs, parMs, seqTrie, parTrie := setupTriePair(t)
+
+	ub := NewUpdateBuilder()
+	for _, nibble := range []int{0x0, 0xF} {
+		for seed := 0; seed < 10; seed++ {
+			addr := findAddressForNibble(nibble, seed)
+			ub.Balance(addrHex(addr), uint64(500+seed))
+		}
+	}
+	plainKeys, updates := ub.Build()
+
+	root := compareRoots(t, seqMs, parMs, seqTrie, parTrie, plainKeys, updates)
+	require.NotEmpty(t, root)
+	t.Logf("TwoNibblesOnly root (nibbles 0x0 and 0xF): %x", root)
+}
+
+func TestCompareRoots_FifteenNibbles(t *testing.T) {
+	t.Parallel()
+	seqMs, parMs, seqTrie, parTrie := setupTriePair(t)
+
+	const skippedNibble = 0x7
+	ub := NewUpdateBuilder()
+	total := 0
+	for nibble := 0; nibble < 16; nibble++ {
+		if nibble == skippedNibble {
+			continue
+		}
+		for seed := 0; seed < 3; seed++ {
+			addr := findAddressForNibble(nibble, seed)
+			ub.Balance(addrHex(addr), uint64(200*nibble+seed+1))
+			total++
+		}
+	}
+	plainKeys, updates := ub.Build()
+
+	root := compareRoots(t, seqMs, parMs, seqTrie, parTrie, plainKeys, updates)
+	require.NotEmpty(t, root)
+	t.Logf("FifteenNibbles root (%d keys, skipped nibble %x): %x", total, skippedNibble, root)
+}
+
+func TestCompareRoots_SingleKey(t *testing.T) {
+	t.Parallel()
+	seqMs, parMs, seqTrie, parTrie := setupTriePair(t)
+
+	addr := findAddressForNibble(0xA, 0)
+	plainKeys, updates := NewUpdateBuilder().
+		Balance(addrHex(addr), 999).
+		Build()
+
+	root := compareRoots(t, seqMs, parMs, seqTrie, parTrie, plainKeys, updates)
+	require.NotEmpty(t, root)
+	t.Logf("SingleKey root: %x", root)
+}
+
+func TestCompareRoots_HeavySkew(t *testing.T) {
+	t.Parallel()
+	seqMs, parMs, seqTrie, parTrie := setupTriePair(t)
+
+	const heavyNibble = 0x5
+	const heavyCount = 45  // ~90%
+	const spreadCount = 5  // ~10% spread across other nibbles
+
+	ub := NewUpdateBuilder()
+	// Heavy nibble: 45 addresses
+	for i := 0; i < heavyCount; i++ {
+		addr := findAddressForNibble(heavyNibble, i)
+		ub.Balance(addrHex(addr), uint64(i+1))
+	}
+	// Spread: 5 addresses in different nibbles (skip heavyNibble)
+	spreadNibbles := []int{0x0, 0x3, 0x8, 0xC, 0xF}
+	for i, nibble := range spreadNibbles {
+		if i >= spreadCount {
+			break
+		}
+		addr := findAddressForNibble(nibble, 0)
+		ub.Balance(addrHex(addr), uint64(1000+i))
+	}
+	plainKeys, updates := ub.Build()
+
+	root := compareRoots(t, seqMs, parMs, seqTrie, parTrie, plainKeys, updates)
+	require.NotEmpty(t, root)
+	t.Logf("HeavySkew root (%d in nibble %x, %d spread): %x",
+		heavyCount, heavyNibble, spreadCount, root)
+}
+
