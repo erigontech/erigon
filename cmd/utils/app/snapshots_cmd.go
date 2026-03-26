@@ -901,24 +901,22 @@ func DeleteStateSnapshots(args DeleteStateSnapshotsArgs) error {
 		// file (e.g., accounts.192-208 is a subset of accounts.192-224).
 		// Cross-domain matching is prevented so that, e.g., removing commitment.192-224
 		// does not cascade to accounts.192-208 which may be the only copy of that data.
-		for {
-			added := false
-			for _, res := range files {
-				if _, alreadyMarked := toRemove[res.Path]; alreadyMarked {
-					continue
-				}
-				for _, marked := range toRemove {
-					if res.TypeString == marked.TypeString &&
-						res.From >= marked.From && res.To <= marked.To &&
-						(res.From != marked.From || res.To != marked.To) {
-						toRemove[res.Path] = res
-						added = true
-						break
-					}
-				}
+		//
+		// A single pass suffices because interval subset containment is transitive:
+		// if C ⊂ B and B ⊂ A, then C ⊂ A. Since A (the originally-marked file) is
+		// already in toRemove, C will match against A directly without needing B as
+		// an intermediate step.
+		for _, res := range files {
+			if _, alreadyMarked := toRemove[res.Path]; alreadyMarked {
+				continue
 			}
-			if !added {
-				break
+			for _, marked := range toRemove {
+				if res.TypeString == marked.TypeString &&
+					res.From >= marked.From && res.To <= marked.To &&
+					(res.From != marked.From || res.To != marked.To) {
+					toRemove[res.Path] = res
+					break
+				}
 			}
 		}
 	} else {

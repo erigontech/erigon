@@ -51,6 +51,7 @@ var (
 	chainTipMode    bool
 	clearCommitment bool
 	resume          bool
+	noHistory       bool
 	syncCfg         = ethconfig.Defaults.Sync
 )
 
@@ -121,6 +122,10 @@ func withClearCommitment(cmd *cobra.Command) {
 
 func withResume(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&resume, "resume", false, "resume a previously interrupted commitment rebuild")
+}
+
+func withNoHistory(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&noHistory, "no-history", false, "skip history regeneration and only rebuild commitment KV files")
 }
 
 func withBucket(cmd *cobra.Command) {

@@ -1002,6 +1002,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			bbd,
 		),
 		config.InternalCL && !config.CaplinConfig.EnableEngineAPI, // If the chain supports the engine API, then we should not make the server fail.
+		config.InternalCL, // Suppress "no CL" warning when any embedded CL is active.
 		config.Builder.EnabledPOS,
 		!config.PolygonPosSingleSlotFinality,
 		backend.txPoolRpcClient,
@@ -1014,13 +1015,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		config.CaplinConfig.NetworkId = clparams.NetworkType(config.NetworkID)
 		config.CaplinConfig.LoopBlockLimit = uint64(config.LoopBlockLimit)
 		if config.CaplinConfig.EnableEngineAPI {
-			jwtSecretHex, err := os.ReadFile(httpRpcCfg.JWTSecretPath)
-			if err != nil {
-				logger.Error("failed to read jwt secret", "err", err, "path", httpRpcCfg.JWTSecretPath)
-				return nil, err
-			}
-			jwtSecret := common.FromHex(strings.TrimSpace(string(jwtSecretHex)))
-			executionEngine, err = executionclient.NewExecutionClientRPC(jwtSecret, httpRpcCfg.AuthRpcHTTPListenAddress, httpRpcCfg.AuthRpcPort)
+			executionEngine, err = executionclient.NewExecutionClientEngineLocal(
+				engineBackendRPC,
+				chainreader.NewChainReaderEth1(chainConfig, executionRpc, config.FcuTimeout),
+				txPoolRpcClient,
+				nil, // beaconCfg: local mode uses chainRW which returns properly versioned blocks
+			)
 			if err != nil {
 				logger.Error("failed to create execution client", "err", err)
 				return nil, err
