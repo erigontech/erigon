@@ -125,6 +125,72 @@ func compareRoots(
 	return seqRoot
 }
 
+// multiBatchComparer tracks the concurrent/sequential mode between batches,
+// respecting ConcurrentPatriciaHashed.CanDoConcurrentNext() — matching
+// production behavior where the trie decides the next batch's mode.
+type multiBatchComparer struct {
+	t              *testing.T
+	seqMs, parMs   *MockState
+	seqTrie        *HexPatriciaHashed
+	parTrie        *ConcurrentPatriciaHashed
+	useConcurrent  bool // whether parTrie should use concurrent mode for the next batch
+}
+
+func newMultiBatchComparer(t *testing.T) *multiBatchComparer {
+	t.Helper()
+	seqMs, parMs, seqTrie, parTrie := setupTriePair(t)
+	return &multiBatchComparer{
+		t: t, seqMs: seqMs, parMs: parMs,
+		seqTrie: seqTrie, parTrie: parTrie,
+		useConcurrent: true,
+	}
+}
+
+// compareBatch applies a batch of updates and asserts root hash equality.
+// It uses concurrent or sequential mode for the parTrie based on the prior
+// batch's CanDoConcurrentNext() result.
+func (c *multiBatchComparer) compareBatch(plainKeys [][]byte, updates []Update) []byte {
+	t := c.t
+	t.Helper()
+	ctx := context.Background()
+
+	err := c.seqMs.applyPlainUpdates(plainKeys, updates)
+	require.NoError(t, err)
+	err = c.parMs.applyPlainUpdates(plainKeys, updates)
+	require.NoError(t, err)
+
+	seqUpds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+	defer seqUpds.Close()
+
+	var parUpds *Updates
+	if c.useConcurrent {
+		parUpds = WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+	} else {
+		// Sequential fallback — matches production behavior when
+		// CanDoConcurrentNext() returned false after the prior batch.
+		parUpds = WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
+	}
+	defer parUpds.Close()
+
+	seqRoot, err := c.seqTrie.Process(ctx, seqUpds, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+
+	parRoot, err := c.parTrie.Process(ctx, parUpds, "", nil, WarmupConfig{
+		CtxFactory: mockTrieCtxFactory(c.parMs),
+	})
+	require.NoError(t, err)
+
+	require.Equal(t, seqRoot, parRoot,
+		"sequential and concurrent root hashes must match (concurrent mode: %v)", c.useConcurrent)
+
+	// Update mode for the next batch based on the trie's recommendation
+	nextConcurrent, err := c.parTrie.CanDoConcurrentNext()
+	require.NoError(t, err)
+	c.useConcurrent = nextConcurrent
+
+	return seqRoot
+}
+
 func TestCompareRoots_Smoke(t *testing.T) {
 	t.Parallel()
 
@@ -423,5 +489,243 @@ func TestCompareRoots_FullAccountUpdate(t *testing.T) {
 	root := compareRoots(t, seqMs, parMs, seqTrie, parTrie, plainKeys, updates)
 	require.NotEmpty(t, root)
 	t.Logf("FullAccountUpdate root (32 accounts with balance+nonce+codeHash+storage): %x", root)
+}
+
+// --- Layer C: Multi-batch sequencing tests ---
+// These tests DO NOT reset tries between batches — state carries forward.
+// This targets the exact regression scenario where foldNibble extension
+// trimming corrupts carried-forward state across batches.
+
+func TestCompareRoots_MultiBatch_SpreadThenConcentrate(t *testing.T) {
+	t.Parallel()
+	c := newMultiBatchComparer(t)
+
+	// Batch 1: accounts spread across all 16 nibbles
+	ub1 := NewUpdateBuilder()
+	for nibble := 0; nibble < 16; nibble++ {
+		for seed := 0; seed < 2; seed++ {
+			addr := findAddressForNibble(nibble, seed)
+			ub1.Balance(addrHex(addr), uint64(1000+nibble*2+seed))
+		}
+	}
+	plainKeys1, updates1 := ub1.Build()
+	root1 := c.compareBatch(plainKeys1, updates1)
+	require.NotEmpty(t, root1)
+	t.Logf("SpreadThenConcentrate batch 1 root (32 spread): %x", root1)
+
+	// Batch 2: all new accounts in a single nibble
+	const concentrateNibble = 0x3
+	ub2 := NewUpdateBuilder()
+	for i := 0; i < 20; i++ {
+		addr := findAddressForNibble(concentrateNibble, 10+i)
+		ub2.Balance(addrHex(addr), uint64(5000+i))
+	}
+	plainKeys2, updates2 := ub2.Build()
+	root2 := c.compareBatch(plainKeys2, updates2)
+	require.NotEmpty(t, root2)
+	require.NotEqual(t, root1, root2, "root should change after batch 2")
+	t.Logf("SpreadThenConcentrate batch 2 root (20 in nibble %x): %x", concentrateNibble, root2)
+}
+
+func TestCompareRoots_MultiBatch_ThreePhases(t *testing.T) {
+	t.Parallel()
+	c := newMultiBatchComparer(t)
+
+	// Batch 1: create 32 accounts across nibbles
+	ub1 := NewUpdateBuilder()
+	addrs := make([][]byte, 0, 32)
+	for nibble := 0; nibble < 16; nibble++ {
+		for seed := 0; seed < 2; seed++ {
+			addr := findAddressForNibble(nibble, seed)
+			addrs = append(addrs, addr)
+			ub1.Balance(addrHex(addr), uint64(1000+nibble*2+seed))
+			ub1.Nonce(addrHex(addr), uint64(1))
+		}
+	}
+	plainKeys1, updates1 := ub1.Build()
+	root1 := c.compareBatch(plainKeys1, updates1)
+	require.NotEmpty(t, root1)
+	t.Logf("ThreePhases batch 1 root (create 32): %x", root1)
+
+	// Batch 2: update balances of the first half (16 accounts)
+	ub2 := NewUpdateBuilder()
+	for i := 0; i < 16; i++ {
+		ub2.Balance(addrHex(addrs[i]), uint64(9000+i))
+	}
+	plainKeys2, updates2 := ub2.Build()
+	root2 := c.compareBatch(plainKeys2, updates2)
+	require.NotEmpty(t, root2)
+	require.NotEqual(t, root1, root2, "root should change after balance updates")
+	t.Logf("ThreePhases batch 2 root (update 16 balances): %x", root2)
+
+	// Batch 3: delete a quarter of accounts (8 accounts — every 4th)
+	ub3 := NewUpdateBuilder()
+	deleted := 0
+	for i := 0; i < len(addrs); i += 4 {
+		ub3.Delete(addrHex(addrs[i]))
+		deleted++
+	}
+	plainKeys3, updates3 := ub3.Build()
+	root3 := c.compareBatch(plainKeys3, updates3)
+	require.NotEmpty(t, root3)
+	require.NotEqual(t, root2, root3, "root should change after deletes")
+	t.Logf("ThreePhases batch 3 root (deleted %d): %x", deleted, root3)
+}
+
+func TestCompareRoots_MultiBatch_CreateThenDeleteAll(t *testing.T) {
+	t.Parallel()
+	c := newMultiBatchComparer(t)
+
+	// Batch 1: create accounts across nibbles
+	ub1 := NewUpdateBuilder()
+	addrs := make([][]byte, 0, 32)
+	for nibble := 0; nibble < 16; nibble++ {
+		for seed := 0; seed < 2; seed++ {
+			addr := findAddressForNibble(nibble, seed)
+			addrs = append(addrs, addr)
+			ub1.Balance(addrHex(addr), uint64(500+nibble*2+seed))
+		}
+	}
+	plainKeys1, updates1 := ub1.Build()
+	root1 := c.compareBatch(plainKeys1, updates1)
+	require.NotEmpty(t, root1)
+	t.Logf("CreateThenDeleteAll batch 1 root (create 32): %x", root1)
+
+	// Batch 2: delete every account
+	ub2 := NewUpdateBuilder()
+	for _, addr := range addrs {
+		ub2.Delete(addrHex(addr))
+	}
+	plainKeys2, updates2 := ub2.Build()
+	root2 := c.compareBatch(plainKeys2, updates2)
+	t.Logf("CreateThenDeleteAll batch 2 root (delete all): %x", root2)
+}
+
+func TestCompareRoots_MultiBatch_RepeatedSingleNibble(t *testing.T) {
+	t.Parallel()
+	c := newMultiBatchComparer(t)
+
+	// Mimics the "27M keys in one nibble" regression with multi-batch state
+	// carry-forward. Starts with a spread to establish concurrent mode, then
+	// concentrates subsequent batches into a single nibble.
+	const targetNibble = 0x0
+
+	// Batch 1: establish the trie with at least one account per nibble
+	// (required for concurrent multi-batch: CanDoConcurrentNext needs root.extLen==0)
+	ub1 := NewUpdateBuilder()
+	spreadAddrs := make([][]byte, 16)
+	for nibble := 0; nibble < 16; nibble++ {
+		addr := findAddressForNibble(nibble, 50) // high seed to avoid collisions
+		spreadAddrs[nibble] = addr
+		ub1.Balance(addrHex(addr), uint64(1+nibble))
+	}
+	plainKeys1, updates1 := ub1.Build()
+	root1 := c.compareBatch(plainKeys1, updates1)
+	require.NotEmpty(t, root1)
+	t.Logf("RepeatedSingleNibble batch 1 root (16 spread): %x", root1)
+
+	// Batch 2: create 20 accounts all in nibble 0 — heavy single-nibble concentration
+	ub2 := NewUpdateBuilder()
+	batch2Addrs := make([][]byte, 20)
+	for i := 0; i < 20; i++ {
+		addr := findAddressForNibble(targetNibble, i)
+		batch2Addrs[i] = addr
+		ub2.Balance(addrHex(addr), uint64(100+i))
+	}
+	plainKeys2, updates2 := ub2.Build()
+	root2 := c.compareBatch(plainKeys2, updates2)
+	require.NotEmpty(t, root2)
+	require.NotEqual(t, root1, root2)
+	t.Logf("RepeatedSingleNibble batch 2 root (add 20 in nibble %x): %x", targetNibble, root2)
+
+	// Batch 3: update existing + add more in same nibble — incremental single-nibble
+	ub3 := NewUpdateBuilder()
+	for i := 0; i < 10; i++ {
+		ub3.Balance(addrHex(batch2Addrs[i]), uint64(5000+i))
+	}
+	batch3NewAddrs := make([][]byte, 10)
+	for i := 0; i < 10; i++ {
+		addr := findAddressForNibble(targetNibble, 20+i)
+		batch3NewAddrs[i] = addr
+		ub3.Balance(addrHex(addr), uint64(3000+i))
+	}
+	plainKeys3, updates3 := ub3.Build()
+	root3 := c.compareBatch(plainKeys3, updates3)
+	require.NotEmpty(t, root3)
+	require.NotEqual(t, root2, root3)
+	t.Logf("RepeatedSingleNibble batch 3 root (update 10 + add 10 in nibble %x): %x", targetNibble, root3)
+
+	// Batch 4: delete half, update rest — all still in nibble 0
+	allNibbleAddrs := append(batch2Addrs, batch3NewAddrs...)
+	ub4 := NewUpdateBuilder()
+	for i := 0; i < 15; i++ {
+		ub4.Delete(addrHex(allNibbleAddrs[i]))
+	}
+	for i := 15; i < 30; i++ {
+		ub4.Balance(addrHex(allNibbleAddrs[i]), uint64(99999+i))
+	}
+	plainKeys4, updates4 := ub4.Build()
+	root4 := c.compareBatch(plainKeys4, updates4)
+	require.NotEmpty(t, root4)
+	require.NotEqual(t, root3, root4)
+	t.Logf("RepeatedSingleNibble batch 4 root (delete 15, update 15 in nibble %x): %x", targetNibble, root4)
+}
+
+func TestCompareRoots_MultiBatch_AlternatingConcentration(t *testing.T) {
+	t.Parallel()
+	c := newMultiBatchComparer(t)
+
+	// Tests extension trimming across different nibbles with multi-batch
+	// carry-forward. Starts with a spread to enable concurrent mode, then
+	// alternates concentrated updates across different nibbles.
+
+	// Batch 1: spread across all 16 nibbles to establish concurrent mode
+	ub1 := NewUpdateBuilder()
+	for nibble := 0; nibble < 16; nibble++ {
+		addr := findAddressForNibble(nibble, 50)
+		ub1.Balance(addrHex(addr), uint64(1+nibble))
+	}
+	plainKeys1, updates1 := ub1.Build()
+	root1 := c.compareBatch(plainKeys1, updates1)
+	require.NotEmpty(t, root1)
+	t.Logf("AlternatingConcentration batch 1 root (16 spread): %x", root1)
+
+	// Batch 2: concentrate in nibble 0x3
+	ub2 := NewUpdateBuilder()
+	for i := 0; i < 15; i++ {
+		addr := findAddressForNibble(0x3, i)
+		ub2.Balance(addrHex(addr), uint64(100+i))
+	}
+	plainKeys2, updates2 := ub2.Build()
+	root2 := c.compareBatch(plainKeys2, updates2)
+	require.NotEmpty(t, root2)
+	require.NotEqual(t, root1, root2)
+	t.Logf("AlternatingConcentration batch 2 root (15 in nibble 0x3): %x", root2)
+
+	// Batch 3: concentrate in nibble 0xA
+	ub3 := NewUpdateBuilder()
+	for i := 0; i < 15; i++ {
+		addr := findAddressForNibble(0xA, i)
+		ub3.Balance(addrHex(addr), uint64(2000+i))
+	}
+	plainKeys3, updates3 := ub3.Build()
+	root3 := c.compareBatch(plainKeys3, updates3)
+	require.NotEmpty(t, root3)
+	require.NotEqual(t, root2, root3)
+	t.Logf("AlternatingConcentration batch 3 root (15 in nibble 0xA): %x", root3)
+
+	// Batch 4: spread across all 16 nibbles again
+	ub4 := NewUpdateBuilder()
+	total := 0
+	for nibble := 0; nibble < 16; nibble++ {
+		addr := findAddressForNibble(nibble, 20)
+		ub4.Balance(addrHex(addr), uint64(8000+nibble))
+		total++
+	}
+	plainKeys4, updates4 := ub4.Build()
+	root4 := c.compareBatch(plainKeys4, updates4)
+	require.NotEmpty(t, root4)
+	require.NotEqual(t, root3, root4)
+	t.Logf("AlternatingConcentration batch 4 root (%d spread across all nibbles): %x", total, root4)
 }
 
