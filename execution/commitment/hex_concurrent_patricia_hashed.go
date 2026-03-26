@@ -213,6 +213,7 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(16)
+	fmt.Printf("ConcurrentTrie: 16 subtries\n")
 
 	for n := 0; n < len(t.nibbles); n++ {
 		nib := t.nibbles[n]
@@ -223,6 +224,7 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 			trieCtx, trieCtxClose := trieCtxFactory()
 			defer trieCtxClose()
 			phnib.ResetContext(trieCtx)
+
 			cnt := 0
 			err := nib.Load(nil, "", func(hashedKey, plainKey []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 				cnt++
@@ -240,9 +242,9 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 			if cnt == 0 {
 				return nil
 			}
-			if pph.mounts[ni].trace {
-				fmt.Printf("NOW FOLDING nib [%x] #%d d=%d\n", ni, cnt, phnib.depths[0])
-			}
+			//if pph.mounts[ni].trace {
+			fmt.Printf("ConcurrentTrie: folding [%2x] keys %d maxDepth %d\n", ni, cnt, phnib.depths[0])
+			//}
 			return pph.foldNibble(ni)
 		})
 	}

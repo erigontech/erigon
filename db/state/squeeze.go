@@ -954,6 +954,9 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			}
 			defer rwTx.Rollback()
 
+			concurrent := dbg.EnvBool("ERIGON_REBUILD_CONCURRENT_COMMITMENT", false)
+			statecfg.ExperimentalConcurrentCommitment = concurrent
+
 			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 			if err != nil {
 				return nil, err
@@ -962,7 +965,9 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			domains.SetTxNum(lastTxnumInShard - 1)
 			currentTxNum := lastTxnumInShard - 1
 			domains.GetCommitmentCtx().SetLimitedHistoryStateReader(rwTx, lastTxnumInShard) // this helps to read state from correct file during commitment
-			domains.EnableParaTrieDB(rwDb)
+			if concurrent {
+				domains.EnableParaTrieDB(rwDb)
+			}
 
 			rebuiltCommit, err = rebuildCommitmentShard(ctx, domains, rwTx, nextKey, &rebuiltCommitment{
 				StepFrom: shardFrom,
